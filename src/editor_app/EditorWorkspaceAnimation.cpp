@@ -1,6 +1,47 @@
 ﻿#include "EditorWorkspaceState.hpp"
 
 namespace Tina::EditorApp::WorkspaceInternal {
+namespace {
+
+[[nodiscard]] u32 hashAnimationEventTag(std::string_view name) noexcept
+{
+    constexpr u32 OffsetBasis = 2166136261U;
+    constexpr u32 Prime = 16777619U;
+    u32 hash = OffsetBasis;
+    for (const char character : name)
+    {
+        hash ^= static_cast<u32>(static_cast<unsigned char>(character));
+        hash *= Prime;
+    }
+    return hash == 0U ? 1U : hash;
+}
+
+[[nodiscard]] bool isAnimationEventIdentifier(std::string_view text) noexcept
+{
+    if (text.empty() || text.size() > 64U ||
+        (text.front() >= '0' && text.front() <= '9'))
+    {
+        return false;
+    }
+    return std::all_of(text.begin(), text.end(), [](char character) noexcept {
+        return (character >= 'a' && character <= 'z') ||
+               (character >= 'A' && character <= 'Z') ||
+               (character >= '0' && character <= '9') || character == '_';
+    });
+}
+
+[[nodiscard]] std::string animationEventTagText(u32 tag)
+{
+    constexpr char Digits[] = "0123456789ABCDEF";
+    std::string text{"0x00000000"};
+    for (u32 digit = 0; digit < 8U; ++digit)
+    {
+        text[9U - digit] = Digits[(tag >> (digit * 4U)) & 0xFU];
+    }
+    return text;
+}
+
+} // namespace
 
 auto EditorWorkspaceState::animationModeLabel(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcept -> std::string_view{
     switch (mode) {
@@ -20,6 +61,7 @@ auto EditorWorkspaceState::applyAnimationPreviewFrame(u32 frameIndex) -> Tina::C
         return Tina::Core::failure(Tina::Editor::EditorErrorCode::FrameNotFound,
                                    "Animation timeline frame does not exist");
     }
+    animationSelectedEventIndex_ = 0U;
     animationPreview_.setSelectedFrameIndex(frameIndex);
     counters_.animationPreviewFrameIndex = frameIndex;
     const Tina::Asset::AssetHandle sprite = loadedAsset(
@@ -69,6 +111,97 @@ auto EditorWorkspaceState::rebuildAnimationAnimator() -> Tina::Core::Status{
         return Tina::Core::success();
     }
     return applyAnimationPreviewFrame(animationPreview_.selectedFrameIndex());
+}
+
+auto EditorWorkspaceState::readAnimationEventInput(
+    Tina::PrimaryWindowUITreeUpdater& tree) const
+    -> Tina::Core::Result<Tina::AssetFormat::SpriteAnimationEventDesc>
+{
+    auto tagText = tree.text(animationEventTag_);
+    if (!tagText)
+    {
+        return Tina::Core::failure(std::move(tagText.error()));
+    }
+    auto offsetText = tree.text(animationEventOffset_);
+    if (!offsetText)
+    {
+        return Tina::Core::failure(std::move(offsetText.error()));
+    }
+
+    u32 eventTag = 0;
+    if (tagText->starts_with("0x") || tagText->starts_with("0X"))
+    {
+        const std::string_view digits = tagText->substr(2U);
+        if (digits.empty() || digits.size() > 8U)
+        {
+            return Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                "Animation notify tag must be 0x plus 1 to 8 hexadecimal digits");
+        }
+        const auto [end, error] = std::from_chars(
+            digits.data(), digits.data() + digits.size(), eventTag, 16);
+        if (error != std::errc{} || end != digits.data() + digits.size())
+        {
+            return Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                "Animation notify tag contains invalid hexadecimal digits");
+        }
+    }
+    else if (isAnimationEventIdentifier(*tagText))
+    {
+        eventTag = hashAnimationEventTag(*tagText);
+    }
+    else
+    {
+        return Tina::Core::failure(
+            Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+            "Animation notify tag must be hexadecimal or an ASCII identifier");
+    }
+    if (eventTag == 0U)
+    {
+        return Tina::Core::failure(
+            Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+            "Animation notify tag must be non-zero");
+    }
+
+    bool percentage = false;
+    std::string_view numericText = *offsetText;
+    if (!numericText.empty() && numericText.back() == '%')
+    {
+        percentage = true;
+        numericText.remove_suffix(1U);
+    }
+    if (numericText.empty())
+    {
+        return Tina::Core::failure(
+            Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+            "Animation notify offset must be a decimal or percentage");
+    }
+    std::string numericBuffer{numericText};
+    errno = 0;
+    char* end = nullptr;
+    float normalizedOffset = std::strtof(numericBuffer.c_str(), &end);
+    if (errno != 0 || end == numericBuffer.c_str() || *end != '\0')
+    {
+        return Tina::Core::failure(
+            Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+            "Animation notify offset must be a decimal or percentage");
+    }
+    if (percentage)
+    {
+        normalizedOffset /= 100.0F;
+    }
+    if (!std::isfinite(normalizedOffset) || normalizedOffset < 0.0F ||
+        normalizedOffset > 1.0F)
+    {
+        return Tina::Core::failure(
+            Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+            "Animation notify offset must be finite and within [0, 1]");
+    }
+    return Tina::AssetFormat::SpriteAnimationEventDesc{
+        .eventTag = eventTag,
+        .normalizedOffset = normalizedOffset,
+    };
 }
 
 auto EditorWorkspaceState::processPendingAnimationFrameSelection(
@@ -152,6 +285,8 @@ auto EditorWorkspaceState::refreshAnimationTimelineUi(
     selectionText += std::to_string(
         static_cast<u32>(std::lround(selectedFrame->durationSeconds * 1000.0F)));
     selectionText += " ms";
+    selectionText += " | Events ";
+    selectionText += std::to_string(selectedFrame->events.size());
     if (auto status = tree.setText(animationSelection_, selectionText); !status) {
         return status;
     }
@@ -175,6 +310,11 @@ auto EditorWorkspaceState::refreshAnimationTimelineUi(
             label += std::to_string(
                 static_cast<u32>(std::lround(frame->durationSeconds * 1000.0F)));
             label += "ms";
+            if (!frame->events.empty()) {
+                label += " [";
+                label += std::to_string(frame->events.size());
+                label += "]";
+            }
         }
         if (auto status = tree.setText(animationFrameButtons_[slot], label); !status) {
             return status;
@@ -183,6 +323,66 @@ auto EditorWorkspaceState::refreshAnimationTimelineUi(
             !status) {
             return status;
         }
+    }
+
+    const u32 eventCount = static_cast<u32>(selectedFrame->events.size());
+    animationSelectedEventIndex_ = eventCount == 0U
+                                       ? 0U
+                                       : (std::min)(animationSelectedEventIndex_, eventCount - 1U);
+    counters_.animationEventCount = eventCount;
+    counters_.animationSelectedEventIndex = animationSelectedEventIndex_;
+    if (eventCount != 0U)
+    {
+        const auto& selectedEvent = selectedFrame->events[animationSelectedEventIndex_];
+        if (auto status = tree.setText(animationEventTag_,
+                                       animationEventTagText(selectedEvent.eventTag));
+            !status)
+        {
+            return status;
+        }
+        std::string offset = std::to_string(selectedEvent.normalizedOffset);
+        if (auto status = tree.setText(animationEventOffset_, offset); !status)
+        {
+            return status;
+        }
+    }
+    if (auto status = tree.setEnabled(animationEventTag_, editable); !status)
+    {
+        return status;
+    }
+    if (auto status = tree.setEnabled(animationEventOffset_, editable); !status)
+    {
+        return status;
+    }
+    if (auto status = tree.setEnabled(animationEventPreviousButton_,
+                                      editable && animationSelectedEventIndex_ > 0U);
+        !status)
+    {
+        return status;
+    }
+    if (auto status = tree.setEnabled(animationEventNextButton_,
+                                      editable && animationSelectedEventIndex_ + 1U < eventCount);
+        !status)
+    {
+        return status;
+    }
+    if (auto status = tree.setEnabled(
+            animationEventAddButton_,
+            editable && eventCount <
+                            Tina::AssetFormat::SpriteAnimationClipWire::MaxEventsPerFrame);
+        !status)
+    {
+        return status;
+    }
+    if (auto status = tree.setEnabled(animationEventApplyButton_, editable && eventCount != 0U);
+        !status)
+    {
+        return status;
+    }
+    if (auto status = tree.setEnabled(animationEventRemoveButton_, editable && eventCount != 0U);
+        !status)
+    {
+        return status;
     }
 
     if (auto status = tree.setEnabled(animationPlayButton_, editable && animationPreview_.previewAvailable());

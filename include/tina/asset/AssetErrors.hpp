@@ -38,5 +38,8 @@ inline constexpr Core::ErrorCode SourceImportCaptureCapacityExceeded{Core::Error
 inline constexpr Core::ErrorCode SourceImportCancelled{Core::ErrorDomain::Asset, 42};
 inline constexpr Core::ErrorCode SourceImportTargetPlatformMismatch{Core::ErrorDomain::Asset, 43};
 inline constexpr Core::ErrorCode TileMapPhysicsCapacityExceeded{Core::ErrorDomain::Asset, 44};
+inline constexpr Core::ErrorCode PhysicsNavigationCapacityExceeded{Core::ErrorDomain::Asset, 45};
+inline constexpr Core::ErrorCode PhysicsNavigationContractMismatch{Core::ErrorDomain::Asset, 46};
+inline constexpr Core::ErrorCode PhysicsNavigationRegistrationNotFound{Core::ErrorDomain::Asset, 47};
 
 } // namespace Tina::Asset::AssetErrorCode

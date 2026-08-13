@@ -2,6 +2,179 @@
 
 namespace Tina::EditorApp::WorkspaceInternal {
 
+auto EditorWorkspaceState::bakeAndPublishNavigation2D() -> Tina::Core::Status{
+    if (!tileMapEditingContext() || !previewTileMap_.has_value()) {
+        return Tina::Core::failure(
+            Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+            "Navigation bake requires a resident 2D TileMap preview");
+    }
+    if (!assetResources_.system.has_value() ||
+        assetResources_.system->catalog() == nullptr) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::Internal,
+            "Navigation bake requires an open Editor Catalog");
+    }
+
+    if (auto status = navigationDocument_.bakeFromTileMap(
+            *previewTileMap_,
+            Tina::Asset::TileMapNavigation2DDataBuildConfig{
+                .solidTileLayerId = InitialTileMapLayerId,
+                .blockerObjectLayerId = InitialGameplayObjectLayerId,
+                .blockerPropertyKey = "navigation",
+                .blockerPropertyValue = "blocked",
+            },
+            editorAssetId(NavigationPreviewAssetMarker),
+            tileMapDocument_.revision(), editorTargetPlatform());
+        !status) {
+        return status;
+    }
+
+    auto stageParent = activeProjectWorkspace_.has_value()
+        ? createAuthoringStageRoot(*activeProjectWorkspace_)
+        : createUniqueEditorTempDirectory();
+    if (!stageParent) {
+        return Tina::Core::failure(std::move(stageParent.error()));
+    }
+    auto cleanupStage = Tina::Core::makeScopeExit([&stageParent]() noexcept {
+        std::error_code cleanupError;
+        std::filesystem::remove_all(*stageParent, cleanupError);
+    });
+    const std::filesystem::path catalogPath = *stageParent / "catalog";
+    const std::string catalogRootUtf8 = pathToUtf8(catalogPath);
+    Tina::Asset::CatalogPackageStageConfig stageConfig =
+        createEditorImportStageConfig(&sourceImportMemory_);
+    auto staged = navigationDocument_.stageCatalog(
+        catalogRootUtf8, assetResources_.catalogRootUtf8,
+        *assetResources_.system->catalog(), stageConfig);
+    if (!staged) {
+        return Tina::Core::failure(std::move(staged.error()));
+    }
+
+    const auto previousFilter = projectAssets_.filter();
+    std::optional<Tina::Core::AssetId> previousSelection{};
+    if (const auto* selected = projectAssets_.selectedItem(); selected != nullptr) {
+        previousSelection = selected->assetId;
+    }
+    auto browser = prepareProjectBrowserForSnapshot(
+        *staged, previousFilter, previousSelection);
+    if (!browser) {
+        return Tina::Core::failure(std::move(browser.error()));
+    }
+
+    Tina::Asset::Sprite2DBindingRegistry* spriteParticipant =
+        spriteBindings_.has_value() ? &*spriteBindings_ : nullptr;
+    Tina::Asset::Mesh3DBindingRegistry* meshParticipant =
+        mesh3DBindings_.has_value() ? &*mesh3DBindings_ : nullptr;
+    Tina::Asset::CatalogReloadConfig reloadConfig{};
+    reloadConfig.package.manifest.catalog.maxEntries = 4096;
+    reloadConfig.package.manifest.catalog.maxDependencies = 16384;
+    reloadConfig.package.manifest.catalog.maxDependenciesPerAsset = 4096;
+    reloadConfig.package.validation.verifyTypedPayload = true;
+    if (spriteParticipant != nullptr) {
+        reloadConfig.bindings.sprite2D =
+            std::span<Tina::Asset::Sprite2DBindingRegistry*>{&spriteParticipant, 1U};
+    }
+    if (meshParticipant != nullptr) {
+        reloadConfig.bindings.mesh3D =
+            std::span<Tina::Asset::Mesh3DBindingRegistry*>{&meshParticipant, 1U};
+    }
+    const bool persistentProjectStage = activeProjectWorkspace_.has_value();
+    bool temporaryOwnerRegistered = false;
+    if (!persistentProjectStage) {
+        try {
+            assetResources_.ownedCatalogStageRoots.reserve(
+                assetResources_.ownedCatalogStageRoots.size() + 1U);
+            assetResources_.ownedCatalogStageRoots.push_back(*stageParent);
+            temporaryOwnerRegistered = true;
+        } catch (const std::bad_alloc&) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::OutOfMemory,
+                "Navigation Catalog stage ownership allocation failed before reload");
+        }
+    }
+
+    std::filesystem::path authoringPointerPath;
+    std::string previousPointerBytes;
+    bool pointerExisted = false;
+    if (activeProjectWorkspace_.has_value()) {
+        const auto cache = authoringCachePaths(*activeProjectWorkspace_);
+        authoringPointerPath = cache.activeCatalogPointer;
+        std::error_code pointerError;
+        const auto pointerStatus = std::filesystem::symlink_status(authoringPointerPath, pointerError);
+        if (!pointerError && std::filesystem::is_regular_file(pointerStatus)) {
+            auto bytes = Tina::Core::readFile(pathToUtf8(authoringPointerPath),
+                                              {.maxBytes = 4096, .memoryResource = &sourceImportMemory_});
+            if (!bytes) {
+                if (temporaryOwnerRegistered) {
+                    assetResources_.ownedCatalogStageRoots.pop_back();
+                }
+                return Tina::Core::failure(std::move(bytes.error()));
+            }
+            previousPointerBytes.assign(reinterpret_cast<const char*>(bytes->data()), bytes->size());
+            pointerExisted = true;
+        } else if (pointerError && pointerError != std::errc::no_such_file_or_directory) {
+            if (temporaryOwnerRegistered) {
+                assetResources_.ownedCatalogStageRoots.pop_back();
+            }
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Io,
+                                       "Navigation authoring Catalog pointer inspection failed");
+        }
+        const std::string stageRootText = catalogRootUtf8;
+        const auto pointerText = std::as_bytes(
+            std::span{stageRootText.data(), stageRootText.size()});
+        if (auto status = Tina::Core::writeFile(pathToUtf8(authoringPointerPath), pointerText); !status) {
+            if (temporaryOwnerRegistered) {
+                assetResources_.ownedCatalogStageRoots.pop_back();
+            }
+            return status;
+        }
+    }
+
+    auto reload = assetResources_.system->reloadCatalog(catalogRootUtf8, reloadConfig);
+    if (!reload) {
+        if (activeProjectWorkspace_.has_value()) {
+            if (pointerExisted) {
+                const auto bytes = std::as_bytes(std::span{previousPointerBytes.data(), previousPointerBytes.size()});
+                (void)Tina::Core::writeFile(pathToUtf8(authoringPointerPath), bytes);
+            } else {
+                std::error_code pointerError;
+                std::filesystem::remove(authoringPointerPath, pointerError);
+            }
+        }
+        if (temporaryOwnerRegistered) {
+            assetResources_.ownedCatalogStageRoots.pop_back();
+        }
+        return reportAuthoringFailure(
+            "Navigation bake staged; previous Catalog preserved: ", reload.error());
+    }
+
+    std::string nextCatalogRoot = catalogRootUtf8;
+    std::string supersededAuthoringCatalogRoot;
+    if (persistentProjectStage) {
+        supersededAuthoringCatalogRoot = assetResources_.authoringCatalogRootUtf8;
+    }
+    cleanupStage.release();
+    assetResources_.catalogRootUtf8.swap(nextCatalogRoot);
+    if (persistentProjectStage) {
+        assetResources_.authoringCatalogRootUtf8 = assetResources_.catalogRootUtf8;
+        cleanupOwnedAuthoringStage(supersededAuthoringCatalogRoot);
+    }
+    assetResources_.catalogEntryCount = static_cast<u32>(browser->itemCount());
+    counters_.catalogEntryCount = assetResources_.catalogEntryCount;
+    projectAssets_ = std::move(*browser);
+    navigationDocument_.markCatalogPublished();
+    ++counters_.navigationCatalogPublishes;
+    observedProjectAssetSelectionIndex_.reset();
+    projectBrowserUiRefreshPending_ = true;
+    // This command runs during UIUpdate, after RenderExtract has borrowed the
+    // current bindings into the frame packet. Rebuild them next frame before
+    // the next extraction, once those borrows have been released.
+    previewAssetBindingsRefreshPending_ = true;
+    authoringFeedback_ =
+        "Navigation2D baked and published; preview rebuild scheduled";
+    return Tina::Core::success();
+}
+
 auto EditorWorkspaceState::queueViewportTileBrush(UI::UILogicalPoint position) noexcept -> bool{
     if (!authoringEnabled() || !tileMapEditingContext() ||
         (viewportToolMode_ != ViewportToolMode::TilePaint &&

@@ -55,6 +55,8 @@ enum class AssetKind : Core::u16 {
     SpriteAnimationClip = 11,
     TileMapChunk = 12,
     EnvironmentMap = 13,
+    NavigationGrid2D = 14,
+    Fx2D = 15,
 };
 
 enum class TargetPlatform : Core::u16 {

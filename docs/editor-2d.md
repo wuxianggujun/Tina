@@ -3,13 +3,15 @@
 ## 产品场景
 
 Editor 的当前闭环同时覆盖 schema-v2 World2D snapshot、schema-v2 Prefab、TileMap schema-v3 root +
-TileMapChunk schema-v1 payload family，以及 SpriteAnimationClip schema-v1。Hierarchy/Inspector/Timeline 把一次
+TileMapChunk schema-v1 payload family，以及 SpriteAnimationClip schema-v2（含 per-frame notify events 和
+Timeline event marker authoring）。Hierarchy/Inspector/Timeline 把一次
 用户意图提交为一个 authoring revision，Undo/Redo 切换已经验证的 revision，Preview 直接把当前 canonical bytes
 交给对应 Runtime parser 与 Scene instantiate。工具不能绕过 `AssetFormat` 写半合法数据，也不维护 editor-only 或旧
 schema 兼容格式。
 
 独立 `Tina::Editor` target 提供 `World2DAuthoringDocument/File`、`World3DAuthoringDocument/File`、
-`TileMapAuthoringDocument/File`、`SpriteAnimationAuthoringDocument/File`，以及项目根模型与空项目目录创建 API；独立
+`TileMapAuthoringDocument/File`、`SpriteAnimationAuthoringDocument/File`、`Navigation2DAuthoringDocument`、
+`Fx2DAuthoringDocument`，以及项目根模型与空项目目录创建 API；独立
 `Tina::EditorApp` 负责桌面组合，正式产品 target `tina_editor_desktop` 输出 `TinaEditor.exe`，其 `main()` 只负责
 调用应用模块。2D Inspector 编辑 Position X/Y、Rotation Z（度）与 Scale X/Y；3D Inspector 编辑完整
 Position/Rotation/Scale XYZ。viewport 多选时各字段独立显示 `Mixed`，显式 Apply 只解析用户给出具体数值的字段，
@@ -105,10 +107,18 @@ Editor 快捷键使用 frame action mapping：`Ctrl+S` Save、`Ctrl+Shift+S` Sav
 不绑定裸 `Q/W/E/R`，避免 Inspector TextEdit 输入期间误触 viewport tool。
 
 2D workspace 激活 TileMap document tab 后开放 viewport `Tile Paint` / `Tile Erase` 和 Inspector 的 Paint、Erase、Toggle Layer、
-Add Tile Layer、Add Object Layer、Cook Preview、Generate Gameplay。Pointer 坐标通过 committed viewport rect 和 Camera2D 投影换算到
+Add Tile Layer、Add Object Layer、Cook Preview、Generate Gameplay 与 Bake Navigation。Pointer 坐标通过 committed viewport rect 和 Camera2D 投影换算到
 真实 cell；每次点击只发布一个完整 root/chunk revision，空 chunk 自动删除。TileMap Undo/Redo 与 World2D document
 history 相互独立；切到 3D 或离开 TileMap document 会关闭 tile tools。新增 Tile layer 会立即成为 active brush layer，
-preview 按 root authoring order 提取全部可见 Tile layer，而不是只渲染第一层。
+preview 按 root authoring order 提取全部可见 Tile layer，而不是只渲染第一层。Bake Navigation 从当前 resident TileMap
+派生 `NavigationGrid2D` v1 canonical payload 和 Cooked artifact；TileMap revision 变化会把 bake 标为 dirty，成功发布通过
+fresh authoring overlay 更新项目 active Catalog pointer，不会覆写 Source Import baseline。
+
+SpriteAnimationClip Timeline 在选中帧内显示 event marker，并提供 Prev/Next、Add/Apply/Remove。tag 接受 `0x`
+十六进制或标识符，offset 接受 `[0,1]` 小数或百分比；提交统一调用 `setFrameEvents()`，按 offset 稳定排序并作为
+一次 canonical revision 参与 Undo/Redo/Cook Preview。tag=0、非有限/越界 offset、每帧64上限或 stale selection
+均 fail closed。`Fx2DAuthoringDocument` 同样只持有已验证的 canonical v1 payload，提供 bounded replace/Undo/Redo；
+当前 EditorApp 尚未提供独立 FX effect graph 或可见专用面板，不能把公共 document API 写成已经存在的图形化 FX 编辑器。
 
 `--catalog-root=<UTF-8 path>` 配置项目 Cooked Catalog；Editor 启动时通过真实 `AssetSystem` 完整打开并校验 package。
 未配置时只为新建文档创建并明确标记临时 built-in preview Catalog，不把它伪装为项目内容。Editor 从 canonical
@@ -179,7 +189,7 @@ Workspace
     Project Assets (All/2D/3D/Media/virtual ListView/new/open/import/refresh)
   Active 2D/3D viewport (mode/tools/zoom/preview canvas/footer)
   Inspector dock (scrollable identity/transform/components/TileMap authoring/document/36px dependency list)
-SpriteAnimationClip Timeline (frames/playback/mode/duration/reorder/undo/redo/cook)
+SpriteAnimationClip Timeline (frames/playback/mode/duration/reorder/event markers/undo/redo/cook)
 Status bar (schema/entities/revision/preview/selection)
 Dirty-close modal (save/save-as/discard/cancel)
 ```
@@ -198,8 +208,9 @@ stable ID，并要求最终 key 与该 stable ID 一致、logical index 位于�
 Catalog 接线由 `catalogReady`、`projectCatalogConfigured` / `builtInPreviewCatalog`、entry/load/GPU/binding/unresolved
 计数以及 `catalogResolved2DSprites` / `catalogResolved3DMeshes` 取证。TileMap 另报告 document revision、layer/chunk/
 non-empty cell、root+chunk cook artifact/bytes、emitted sprite、edit/undo/redo，以及
-`tileMapGameplayGenerations/SpawnRecords/Bytes/SourceRevision`；Animation 另报告
-document revision、frame/cook bytes、preview frame、edit/undo/redo 与 playback transition。Project Browser/tabs 另报告
+`tileMapGameplayGenerations/SpawnRecords/Bytes/SourceRevision`，Navigation bake 另报告 bake/source revision、payload bytes、
+ready/dirty/published 与 Catalog reload；Animation 另报告 document revision、frame/cook bytes、preview frame、
+edit/undo/redo、event marker 增删改与 playback transition。Project Browser/tabs 另报告
 `projectAssetBrowserReady`、`projectAssetVisibleItems`、`projectAssetOpenCount`、`documentTabsReady`、`documentTabCount` 与
 `documentTabSwitches`；自动 smoke 从 4 个 pinned tab 打开一个额外 current-schema Animation asset，再恢复 pinned
 Animation 与初始 workspace，最终 tab/open/load/swap/binding-refresh 固定为 `5/1/1/2/2`。门禁不绑定内部 command/action

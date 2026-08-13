@@ -12,6 +12,7 @@
 #include <tina/asset/TileMapNavigation2D.hpp>
 #include <tina/asset/TileMapStream.hpp>
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
+#include <tina/asset/PhysicsNavigationSync2D.hpp>
 #include <tina/asset/TileMapPhysicsSync.hpp>
 #include <tina/physics2d/PhysicsWorld2D.hpp>
 #endif
@@ -43,6 +44,7 @@
 #include <tina/scene/Camera2D.hpp>
 #include <tina/scene/CameraFollow2D.hpp>
 #include <tina/scene/ExtractRenderScene.hpp>
+#include <tina/scene/Fx2DFactory.hpp>
 #include <tina/scene/ParticleSystem2D.hpp>
 #include <tina/scene/PointLight2D.hpp>
 #include <tina/scene/ShadowOccluder2D.hpp>
@@ -119,22 +121,22 @@ inline constexpr u32 ExpectedTileMapStreamChunks = 2;
 inline constexpr u32 ExpectedAudioClipFrames = 480;
 inline constexpr u32 ExpectedCatalogRecipeAssets =
     5 + ExpectedCharacterAnimationClips + ExpectedCharacterAnimationSprites + ExpectedSceneCrateSprites +
-    ExpectedTileMapStreamChunks + 1; // independent character normal atlas
+    ExpectedTileMapStreamChunks + 3; // independent normal atlas + NavigationGrid2D + Fx2D
 inline constexpr u32 ExpectedUploadedTextures = 3;
 inline constexpr u32 ExpectedNonEmptyTiles = 11; // 8 floor + 3 wall
 inline constexpr u32 ExpectedNavigationSolidTileCells = 11;
-inline constexpr u32 ExpectedNavigationBlockerRectangles = 1;
-inline constexpr u32 ExpectedNavigationBlockedCells = 13;
+inline constexpr u32 ExpectedNavigationBlockerRectangles = 0;
+inline constexpr u32 ExpectedNavigationBlockedCells = 11;
 inline constexpr u32 ExpectedNavigationWeightedCells = 1;
 inline constexpr u32 ExpectedNavigationMaximumTraversalCost = 5;
-inline constexpr u32 ExpectedNavigationBasePathCells = 9;
-inline constexpr u32 ExpectedNavigationBasePathCost = 80;
-inline constexpr u32 ExpectedNavigationDynamicPathCells = 7;
-inline constexpr u32 ExpectedNavigationDynamicPathCost = 100;
-inline constexpr u32 ExpectedNavigationStrictDiagonalPathCells = 6;
-inline constexpr u32 ExpectedNavigationStrictDiagonalPathCost = 62;
+inline constexpr u32 ExpectedNavigationBasePathCells = 5;
+inline constexpr u32 ExpectedNavigationBasePathCost = 40;
+inline constexpr u32 ExpectedNavigationDynamicPathCells = 5;
+inline constexpr u32 ExpectedNavigationDynamicPathCost = 40;
+inline constexpr u32 ExpectedNavigationStrictDiagonalPathCells = 5;
+inline constexpr u32 ExpectedNavigationStrictDiagonalPathCost = 40;
 inline constexpr u32 ExpectedNavigationCornerCutPathCells = 5;
-inline constexpr u32 ExpectedNavigationCornerCutPathCost = 56;
+inline constexpr u32 ExpectedNavigationCornerCutPathCost = 40;
 inline constexpr u32 ExpectedNavigationWeightedPathCells = 7;
 inline constexpr u32 ExpectedNavigationWeightedPathCost = 60;
 inline constexpr Tina::Navigation2D::NavigationCell2D ProductNavigationStart{1, 3};
@@ -152,8 +154,8 @@ inline constexpr std::array<Tina::Asset::TileMapNavigation2DMaterialCostRule, 1>
     }};
 inline constexpr u32 ProductParticleCapacity = 12;
 inline constexpr u32 ProductParticleEmitted = 10;
-inline constexpr u32 ProductParticleExpiredAt300Frames = 4;
-inline constexpr u32 ProductParticleActiveAt300Frames = 6;
+inline constexpr u32 ProductParticleExpiredAt300Frames = 0;
+inline constexpr u32 ProductParticleActiveAt300Frames = 10;
 inline constexpr u64 ProductParticleRandomSeed = 0x54494E41ULL;
 inline constexpr u64 ProductParticleStableKeyBase = 0x100000000ULL;
 inline constexpr u32 ProductTrailCapacity = 8;
@@ -166,7 +168,7 @@ inline constexpr u32 ProductCulledPointLight2DCount =
 inline constexpr u32 ProductShadowOccluder2DCount = 2;
 inline constexpr u32 ProductSoftShadowPointLight2DCount = 2;
 inline constexpr float ProductAmbientLight2DScale = 0.28F;
-inline constexpr u32 ProductEvidenceSchema = 27;
+inline constexpr u32 ProductEvidenceSchema = 29;
 inline constexpr std::string_view PauseKeyboardMouseHint = "ESC / ENTER / P TO RESUME";
 inline constexpr std::string_view PauseGamepadHint = "B / A / START TO RESUME";
 inline constexpr float ProductWarmLightSourceRadiusMeters = 0.45F;
@@ -177,6 +179,20 @@ inline constexpr Tina::InputActionId SelectTileAction{3};
 inline constexpr float DemoWalkSpeedMetersPerSecond = 4.0f;
 inline constexpr std::string_view InitialProfileNameText = "玩家名：星河";
 inline constexpr u32 InitialProfileNameCodepointCount = 6;
+
+[[nodiscard]] constexpr u32 animationEventTag(std::string_view identifier) noexcept
+{
+    u32 hash = 2166136261U;
+    for (const char character : identifier)
+    {
+        hash ^= static_cast<u8>(character);
+        hash *= 16777619U;
+    }
+    return hash == 0U ? 1U : hash;
+}
+
+inline constexpr u32 FootstepAnimationEventTag = animationEventTag("footstep");
+inline constexpr u32 HitAnimationEventTag = animationEventTag("hit");
 
 // M11-D0: frame-count-independent product evidence fingerprint (screenshot precursor).
 // Only stable structural counters/flags are hashed —not per-frame animation values.
@@ -309,6 +325,10 @@ struct LifecycleCounters final {
     u64 characterAnimationLastFrame = 0;
     bool characterAnimationFromCatalog = false;
     bool characterAnimationHitCompleted = false;
+    u64 animEventFootsteps = 0;
+    u64 animEventHits = 0;
+    u64 animEventOverflow = 0;
+    u64 animEventUnknownTags = 0;
     float maxControllerX = 0.0f;
     u64 uiRootsCreated = 0;
     u64 uiPanelsCreated = 0;
@@ -418,9 +438,18 @@ struct LifecycleCounters final {
     u64 navigationIncrementalExpandedNodes = 0;
     u64 navigationGridRevision = 0;
     u64 navigationDynamicBlockerMutations = 0;
+    u64 navigationPhysicsSynchronizations = 0;
+    u64 navigationPhysicsBlockerAdds = 0;
+    u64 navigationPhysicsBlockerUpdates = 0;
+    u64 navigationPhysicsBlockerRemoves = 0;
+    u64 navigationPhysicsPublishedBlockers = 0;
+    u64 navigationPhysicsRegisteredBodies = 0;
+    bool navigationPhysicsReady = false;
     bool navigationWeightedPathAvoidedCostCell = false;
     bool navigationCancelled = false;
     bool navigationReady = false;
+    bool navigationFromCookedAsset = false;
+    bool navigationCookedBitExact = false;
     // 2D-FX: deterministic fixed-capacity particle/trail product evidence.
     u64 particleEmitted = 0;
     u64 particleExpired = 0;
@@ -512,6 +541,8 @@ struct LifecycleCounters final {
     u64 physicsSteps = 0;
     // Chunk collider bodies published by TileMapPhysicsSync2D, not per-cell bodies.
     u64 physicsStaticBodies = 0;
+    u64 physicsStaticSolidCells = 0;
+    u64 physicsStaticBoxShapes = 0;
     // Set when onExit retired every chunk collider while the world was still open.
     bool physicsColliderRetirementOk = false;
     u64 physicsDynamicContacts = 0;
@@ -523,6 +554,7 @@ struct LifecycleCounters final {
     bool physicsJointReady = false;
     bool physicsRevoluteJointReady = false;
     bool physicsPrismaticJointReady = false;
+    bool physicsChainReady = false;
 #endif
     // RUNTIME-001 product evidence: pause overlay push/pop + policy blocks below.
     u64 pauseOverlayPushes = 0;
@@ -578,6 +610,7 @@ inline constexpr Tina::Scene::CameraFollowPoint2D ProductInitialCameraCenter{4.0
 // one static body. Its 11 solid cells (8-wide floor run + 3-tall wall column)
 // deterministically merge into 2 box shapes.
 inline constexpr u32 ExpectedPhysicsColliderBodies = 1;
+inline constexpr u32 ExpectedPhysicsColliderSolidCells = 11;
 inline constexpr u32 ExpectedPhysicsColliderShapes = 2;
 inline constexpr u32 ExpectedSpritesWithPhysics = ExpectedNonEmptyTiles + 2; // tiles + character + crate
 #else
@@ -786,7 +819,7 @@ enum class CharacterAnimationState : u8 {
 
 struct ResolvedCharacterAnimationClip final {
     explicit ResolvedCharacterAnimationClip(std::pmr::memory_resource& resource)
-        : frames(&resource)
+        : frames(&resource), events(&resource)
     {
     }
 
@@ -799,6 +832,7 @@ struct ResolvedCharacterAnimationClip final {
     }
 
     std::pmr::vector<Tina::Scene::SpriteAnimationFrame2D> frames;
+    std::pmr::vector<Tina::Scene::SpriteAnimationEvent2D> events;
     Tina::Scene::SpriteAnimationPlaybackMode playbackMode = Tina::Scene::SpriteAnimationPlaybackMode::Loop;
 };
 
@@ -809,6 +843,7 @@ struct TileMapResources final {
     Tina::Asset::AssetHandle characterTextureHandle{};
     Tina::Asset::AssetHandle characterNormalTextureHandle{};
     Tina::Asset::AssetHandle crateSpriteHandle{};
+    Tina::Asset::AssetHandle fxHandle{};
     Tina::Asset::AssetHandle tilesetHandle{};
     Tina::Asset::AssetHandle tileMapHandle{};
     Tina::Asset::AssetHandle audioClipHandle{};
@@ -861,9 +896,12 @@ struct TileMapResources final {
     Tina::Physics2D::PhysicsBodyId prismaticFollowerBody{};
     Tina::Physics2D::PhysicsShapeId prismaticFollowerShape{};
     Tina::Physics2D::PhysicsJointId demoPrismaticJoint{};
+    Tina::Physics2D::PhysicsBodyId chainBody{};
+    Tina::Physics2D::PhysicsShapeId chainShape{};
     // Owns one static chunk collider per resident collision chunk and keeps it
     // consistent with stream residency / tile edits every fixed tick.
     std::optional<Tina::Asset::TileMapPhysicsSync2D> physicsSync{};
+    std::optional<Tina::Asset::PhysicsNavigationSync2D> physicsNavigationSync{};
     float dynamicHalfExtent = 0.25f;
     float lastDynamicX = 3.0f;
     float lastDynamicY = 3.5f;
@@ -967,75 +1005,23 @@ struct TileMapResources final {
     LifecycleCounters& counters,
     Tina::Asset::AssetHandle characterSprite)
 {
-    auto particles = Tina::Scene::ParticleSystem2D::Create(
-        Tina::Scene::ParticleSystem2DConfig{
-            .capacity = ProductParticleCapacity,
-            .randomSeed = ProductParticleRandomSeed,
-            .firstStableParticleKey = ProductParticleStableKeyBase,
-        },
-        resources.memory);
-    if (!particles)
-    {
-        return Tina::Core::failure(std::move(particles.error()));
+    if (resources.system == nullptr || !resources.fxHandle) {
+        return Tina::Core::failure(Tina::Asset::AssetErrorCode::InvalidHandle,
+                                   "Fx2D Catalog asset is not loaded");
     }
-
-    const Tina::Scene::ParticleBurst2D shortBurst{
-        .count = 4,
-        .sprite = characterSprite,
-        .origin = {4.0F, 2.1F},
-        .positionOffset = {.minimum = {-0.45F, -0.2F}, .maximum = {0.45F, 0.2F}},
-        .velocity = {.minimum = {-0.25F, 0.25F}, .maximum = {0.25F, 0.55F}},
-        .lifetime = {.minimum = Tina::Core::Duration{0.5}, .maximum = Tina::Core::Duration{0.5}},
-        .startSizeMeters = {0.28F, 0.28F},
-        .endSizeMeters = {0.1F, 0.1F},
-        .startColor = {.red = 255, .green = 215, .blue = 96, .alpha = 255},
-        .endColor = {.red = 255, .green = 105, .blue = 64, .alpha = 32},
-        .rotationRadians = 0.0F,
-        .sortingLayer = 2,
-        .orderInLayer = 10,
-    };
-    if (const auto status = particles->emitBurst(shortBurst); !status)
-    {
-        return status;
+    const auto* fxFile = resources.system->tryGet(resources.fxHandle);
+    if (fxFile == nullptr) {
+        return Tina::Core::failure(Tina::Asset::AssetErrorCode::AssetNotReady,
+                                   "Fx2D Catalog asset is not resident");
     }
-
-    const Tina::Scene::ParticleBurst2D persistentBurst{
-        .count = 6,
-        .sprite = characterSprite,
-        .origin = {4.0F, 2.0F},
-        .positionOffset = {.minimum = {-0.55F, -0.35F}, .maximum = {0.55F, 0.35F}},
-        .velocity = {.minimum = {-0.02F, -0.01F}, .maximum = {0.02F, 0.02F}},
-        .lifetime = {.minimum = Tina::Core::Duration{10.0}, .maximum = Tina::Core::Duration{10.0}},
-        .startSizeMeters = {0.2F, 0.2F},
-        .endSizeMeters = {0.12F, 0.12F},
-        .startColor = {.red = 90, .green = 220, .blue = 255, .alpha = 230},
-        .endColor = {.red = 80, .green = 140, .blue = 255, .alpha = 120},
-        .rotationRadians = 0.0F,
-        .sortingLayer = 2,
-        .orderInLayer = 11,
-    };
-    if (const auto status = particles->emitBurst(persistentBurst); !status)
-    {
-        return status;
-    }
-
-    auto trail = Tina::Scene::Trail2D::Create(
-        Tina::Scene::Trail2DConfig{
-            .segmentCapacity = ProductTrailCapacity,
-            .segmentLifetime = Tina::Core::Duration{10.0},
-            .startWidthMeters = 0.18F,
-            .endWidthMeters = 0.04F,
-            .sprite = characterSprite,
-            .stableEntityKeyBase = ProductTrailStableKeyBase,
-            .color = {.red = 70, .green = 230, .blue = 180, .alpha = 210},
-            .sortingLayer = 1,
-            .orderInLayer = 8,
-        },
-        resources.memory);
-    if (!trail)
-    {
-        return Tina::Core::failure(std::move(trail.error()));
-    }
+    auto fxAsset = Tina::Asset::parseFx2DFromCooked(*fxFile);
+    if (!fxAsset) return Tina::Core::failure(std::move(fxAsset.error()));
+    auto fx = Tina::Scene::createFx2DFromAsset(*fxAsset, characterSprite, resources.memory);
+    if (!fx) return Tina::Core::failure(std::move(fx.error()));
+    auto particles = std::move(fx->particles);
+    auto trail = std::move(fx->trail);
+    Tina::Scene::ParticleBurst2D persistentBurst = fx->initialBurst;
+    if (const auto status = particles.emitBurst(persistentBurst); !status) return status;
 
     constexpr std::array firstTrailPoints{
         Tina::Scene::Vec2{3.2F, 1.4F},
@@ -1044,12 +1030,12 @@ struct TileMapResources final {
     };
     for (const Tina::Scene::Vec2 point : firstTrailPoints)
     {
-        if (const auto status = trail->appendPoint(point); !status)
+        if (const auto status = trail.appendPoint(point); !status)
         {
             return status;
         }
     }
-    trail->breakTrail();
+    trail.breakTrail();
     ++counters.trailBreaks;
     constexpr std::array secondTrailPoints{
         Tina::Scene::Vec2{4.35F, 2.25F},
@@ -1057,31 +1043,25 @@ struct TileMapResources final {
     };
     for (const Tina::Scene::Vec2 point : secondTrailPoints)
     {
-        if (const auto status = trail->appendPoint(point); !status)
+        if (const auto status = trail.appendPoint(point); !status)
         {
             return status;
         }
     }
 
-    if (resources.system == nullptr)
-    {
-        return Tina::Core::failure(
-            Tina::Core::CoreErrorCode::Internal,
-            "asset system is required while preparing 2D effects");
-    }
-    auto fxFingerprint = makeInitialFxFingerprint(resources.system->store(), *particles, *trail);
+    auto fxFingerprint = makeInitialFxFingerprint(resources.system->store(), particles, trail);
     if (!fxFingerprint)
     {
         return Tina::Core::failure(std::move(fxFingerprint.error()));
     }
 
-    counters.particleEmitted = particles->liveCount();
-    counters.particleActive = particles->liveCount();
-    counters.trailSegmentsCreated = trail->segmentCount();
-    counters.trailActive = trail->segmentCount();
+    counters.particleEmitted = particles.liveCount();
+    counters.particleActive = particles.liveCount();
+    counters.trailSegmentsCreated = trail.segmentCount();
+    counters.trailActive = trail.segmentCount();
     counters.fxInitialFingerprint = std::move(*fxFingerprint);
-    resources.particles.emplace(std::move(*particles));
-    resources.trail.emplace(std::move(*trail));
+    resources.particles.emplace(std::move(particles));
+    resources.trail.emplace(std::move(trail));
     return Tina::Core::success();
 }
 
@@ -1170,7 +1150,10 @@ struct TileMapResources final {
     return Tina::Core::success();
 }
 
-[[nodiscard]] Tina::Core::Status prepareNavigation2D(TileMapResources& resources, LifecycleCounters& counters)
+[[nodiscard]] Tina::Core::Status prepareNavigation2D(
+    TileMapResources& resources,
+    LifecycleCounters& counters,
+    Tina::Core::AssetId navigationAssetId)
 {
     if (!resources.tileMapStream)
     {
@@ -1182,9 +1165,11 @@ struct TileMapResources final {
         resources.tileMapStream->map(),
         Tina::Asset::TileMapNavigation2DDataBuildConfig{
             .solidTileLayerId = CollisionTileLayerId,
-            .blockerObjectLayerId = GameplayObjectLayerId,
-            .blockerPropertyKey = "role",
-            .blockerPropertyValue = "crate",
+            // Gameplay bodies are projected at runtime by the Physics2D ->
+            // Navigation2D bridge; cooked data contains static tiles only.
+            .blockerObjectLayerId = 0,
+            .blockerPropertyKey = "navigation",
+            .blockerPropertyValue = "blocked",
             .materialCostRules = ProductNavigationMaterialCostRules,
         },
         resources.memory);
@@ -1195,8 +1180,45 @@ struct TileMapResources final {
     }
 
     const Tina::Asset::TileMapNavigation2DDataBuildStats buildStats = built->stats;
+    if (resources.system == nullptr)
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                   "AssetSystem is required for cooked navigation setup");
+    }
+    const auto navigationHandle = resources.system->find(navigationAssetId);
+    const auto* navigationFile = navigationHandle ? resources.system->tryGet(*navigationHandle) : nullptr;
+    if (navigationFile == nullptr)
+    {
+        return Tina::Core::failure(Tina::Asset::AssetErrorCode::AssetNotReady,
+                                   "cooked NavigationGrid2D asset is not loaded");
+    }
+    auto cookedView = Tina::Asset::parseNavigationGrid2DFromCooked(*navigationFile);
+    if (!cookedView)
+    {
+        return Tina::Core::failure(std::move(cookedView.error()));
+    }
+    const auto& derivedData = built->data;
+    const bool cookedBitExact =
+        cookedView->widthCells == derivedData.widthCells() &&
+        cookedView->heightCells == derivedData.heightCells() &&
+        cookedView->originXMeters == derivedData.originXMeters() &&
+        cookedView->originYMeters == derivedData.originYMeters() &&
+        cookedView->cellSizeMeters == derivedData.cellSizeMeters() &&
+        std::ranges::equal(cookedView->cellFlags, derivedData.cellFlags()) &&
+        std::ranges::equal(cookedView->traversalCosts, derivedData.traversalCosts());
+    if (!cookedBitExact)
+    {
+        return Tina::Core::failure(Tina::Asset::AssetErrorCode::CatalogEntryMismatch,
+                                   "cooked NavigationGrid2D does not match the current TileMap bake");
+    }
+    auto cookedData = Tina::Asset::loadNavigationGrid2DDataFromCooked(
+        *navigationFile, resources.memory);
+    if (!cookedData)
+    {
+        return Tina::Core::failure(std::move(cookedData.error()));
+    }
     auto grid = Tina::Navigation2D::NavigationGrid2D::Create(
-        std::move(built->data),
+        std::move(*cookedData),
         Tina::Navigation2D::NavigationGrid2DConfig{.dynamicBlockerCapacity = 4},
         resources.memory);
     if (!grid)
@@ -1357,6 +1379,8 @@ struct TileMapResources final {
     counters.navigationWeightedPathAvoidedCostCell = weightedPathAvoidedCostCell;
     counters.navigationCancelled = true;
     counters.navigationReady = true;
+    counters.navigationFromCookedAsset = true;
+    counters.navigationCookedBitExact = cookedBitExact;
 
     // The stored pathfinder starts idle and therefore does not retain a borrowed pointer
     // to the local grid object that is about to move into its final owner.
@@ -1470,9 +1494,18 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
 
     std::pmr::vector<Tina::Scene::SpriteAnimationFrame2D> resolvedFrames{
         output.frames.get_allocator().resource()};
+    std::pmr::vector<Tina::Scene::SpriteAnimationEvent2D> resolvedEvents{
+        output.events.get_allocator().resource()};
+    struct EventRange final {
+        Tina::Core::usize begin = 0;
+        Tina::Core::usize count = 0;
+    };
+    std::pmr::vector<EventRange> eventRanges{output.frames.get_allocator().resource()};
     try
     {
         resolvedFrames.reserve(clip->frameCount);
+        resolvedEvents.reserve(clip->totalEventCount);
+        eventRanges.reserve(clip->frameCount);
         for (u32 frameIndex = 0; frameIndex < clip->frameCount; ++frameIndex)
         {
             const auto frame = clip->frame(frameIndex);
@@ -1513,6 +1546,26 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
                 return Tina::Core::failure(std::move(sprite.error()));
             }
 
+            const Tina::Core::usize eventBegin = resolvedEvents.size();
+            for (u32 localEventIndex = 0; localEventIndex < frame->eventCount; ++localEventIndex)
+            {
+                const auto event = clip->event(frame->eventStartIndex + localEventIndex);
+                if (!event)
+                {
+                    return Tina::Core::failure(
+                        Tina::Asset::AssetErrorCode::CatalogEntryMismatch,
+                        "character animation notify event could not be decoded");
+                }
+                resolvedEvents.push_back(Tina::Scene::SpriteAnimationEvent2D{
+                    .tag = event->eventTag,
+                    .normalizedOffset = event->normalizedOffset,
+                });
+            }
+            eventRanges.push_back(EventRange{
+                .begin = eventBegin,
+                .count = resolvedEvents.size() - eventBegin,
+            });
+
             resolvedFrames.push_back(Tina::Scene::SpriteAnimationFrame2D{
                 .sprite = Tina::Scene::SpriteRenderer2D{
                     .sprite = *spriteHandle,
@@ -1542,7 +1595,16 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
                                    "character animation frame resolution ran out of memory");
     }
 
+    output.events.swap(resolvedEvents);
     output.frames.swap(resolvedFrames);
+    for (Tina::Core::usize frameIndex = 0; frameIndex < output.frames.size(); ++frameIndex)
+    {
+        const EventRange range = eventRanges[frameIndex];
+        output.frames[frameIndex].events = std::span<const Tina::Scene::SpriteAnimationEvent2D>{
+            output.events.data() + range.begin,
+            range.count,
+        };
+    }
     output.playbackMode = *playbackMode;
     return Tina::Core::success();
 }
@@ -1664,6 +1726,29 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     if (update->currentFrameChanged)
     {
         ++counters.characterAnimationFrameChanges;
+    }
+    if (update->crossedEventOverflow)
+    {
+        ++counters.animEventOverflow;
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::CapacityExceeded,
+                                   "character animation notify event output overflowed");
+    }
+    for (const auto& event : update->crossedEvents)
+    {
+        if (event.tag == FootstepAnimationEventTag)
+        {
+            ++counters.animEventFootsteps;
+        }
+        else if (event.tag == HitAnimationEventTag)
+        {
+            ++counters.animEventHits;
+        }
+        else
+        {
+            ++counters.animEventUnknownTags;
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                       "character animation crossed an unknown notify event tag");
+        }
     }
     counters.characterAnimationLastFrame = update->currentFrameIndex;
     if (resources.characterAnimationState == CharacterAnimationState::HitWall &&
@@ -1884,6 +1969,8 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     const auto walkClipId = *Tina::Core::AssetId::fromBytes(idBytes(10U));
     const auto hitWallClipId = *Tina::Core::AssetId::fromBytes(idBytes(11U));
     const auto crateSpriteId = *Tina::Core::AssetId::fromBytes(idBytes(12U));
+    const auto navigationAssetId = *Tina::Core::AssetId::fromBytes(idBytes(14U));
+    const auto fxAssetId = *Tina::Core::AssetId::fromBytes(idBytes(15U));
 
 #if !defined(TINA_SAMPLE_2D_RECIPE_PATH)
 #error "TINA_SAMPLE_2D_RECIPE_PATH must be defined for tina_sample_2d catalog recipe load"
@@ -1924,7 +2011,7 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     }
 
     auto system = Tina::Asset::AssetSystem::Create(Tina::Asset::AssetSystemConfig{
-        .storeCapacity = 16,
+        .storeCapacity = 32,
         .memoryResource = &resources.memory,
         .batch =
             Tina::Asset::CookedAssetBatchLoadConfig{
@@ -1943,7 +2030,7 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     }
     auto loaded = system->load(
         std::array{tileMapId, audioClipId, idleClipId, walkClipId, hitWallClipId, crateSpriteId,
-                   characterNormalTextureId});
+                   characterNormalTextureId, navigationAssetId, fxAssetId});
     if (!loaded)
     {
         return Tina::Core::failure(std::move(loaded.error()));
@@ -1955,8 +2042,9 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     auto characterTextureHandle = system->find(characterTextureId);
     auto characterNormalTextureHandle = system->find(characterNormalTextureId);
     auto crateSpriteHandle = system->find(crateSpriteId);
+    auto fxHandle = system->find(fxAssetId);
     if (!tileMapHandle || !tilesetHandle || !tileTextureHandle || !characterTextureHandle ||
-        !characterNormalTextureHandle || !crateSpriteHandle)
+        !characterNormalTextureHandle || !crateSpriteHandle || !fxHandle)
     {
         return Tina::Core::failure(Tina::Asset::AssetErrorCode::InvalidHandle,
                                    "tilemap/tileset/base/normal texture/sprite dependencies are not loaded");
@@ -1967,6 +2055,7 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     resources.characterTextureHandle = *characterTextureHandle;
     resources.characterNormalTextureHandle = *characterNormalTextureHandle;
     resources.crateSpriteHandle = *crateSpriteHandle;
+    resources.fxHandle = *fxHandle;
 
     // Resolve AudioClip by id (load() return order is plan order, not request order).
     auto audioHandle = system->find(audioClipId);
@@ -2035,7 +2124,7 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     {
         return status;
     }
-    if (const auto status = prepareNavigation2D(resources, counters); !status)
+    if (const auto status = prepareNavigation2D(resources, counters, navigationAssetId); !status)
     {
         return status;
     }
@@ -2147,6 +2236,40 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     const auto dynamicShapeState = resources.physicsWorld->shapeState(*dynamicShape);
     counters.physicsConvexPolygonReady =
         dynamicShapeState && dynamicShapeState->kind == Tina::Physics2D::PhysicsShapeKind2D::ConvexPolygon;
+
+    auto physicsNavigationSync = Tina::Asset::PhysicsNavigationSync2D::Create(
+        Tina::Asset::PhysicsNavigationSync2DConfig{
+            .registrationCapacity = 4,
+            .memoryResource = &resources.memory});
+    if (!physicsNavigationSync)
+    {
+        return Tina::Core::failure(std::move(physicsNavigationSync.error()));
+    }
+    resources.physicsNavigationSync.emplace(std::move(*physicsNavigationSync));
+    if (const auto status = resources.physicsNavigationSync->registerBody(
+            *resources.physicsWorld,
+            Tina::Asset::PhysicsNavigationBody2DDesc{
+                .body = resources.dynamicBody,
+                .localBoundsMeters = {
+                    .lowerMeters = {-resources.dynamicHalfExtent, -resources.dynamicHalfExtent},
+                    .upperMeters = {resources.dynamicHalfExtent, resources.dynamicHalfExtent}}});
+        !status)
+    {
+        return status;
+    }
+    auto initialNavigationSync = resources.physicsNavigationSync->synchronize(
+        *resources.physicsWorld, *resources.navigationGrid);
+    if (!initialNavigationSync)
+    {
+        return Tina::Core::failure(std::move(initialNavigationSync.error()));
+    }
+    counters.navigationPhysicsSynchronizations = initialNavigationSync->synchronizeCount;
+    counters.navigationPhysicsBlockerAdds = initialNavigationSync->totalAddedBlockerCount;
+    counters.navigationPhysicsBlockerUpdates = initialNavigationSync->totalUpdatedBlockerCount;
+    counters.navigationPhysicsBlockerRemoves = initialNavigationSync->totalRemovedBlockerCount;
+    counters.navigationPhysicsPublishedBlockers = initialNavigationSync->publishedBlockerCount;
+    counters.navigationPhysicsRegisteredBodies = initialNavigationSync->registeredBodyCount;
+    counters.navigationPhysicsReady = true;
 
     Tina::Physics2D::PhysicsBody2DDesc sensorBodyDesc;
     sensorBodyDesc.type = Tina::Physics2D::PhysicsBodyType2D::Static;
@@ -2330,6 +2453,37 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
         prismaticJointState && prismaticJointState->kind == Tina::Physics2D::PhysicsJointKind2D::Prismatic &&
         prismaticJointState->springEnabled && prismaticJointState->limitEnabled &&
         prismaticJointState->motorEnabled;
+
+    Tina::Physics2D::PhysicsBody2DDesc chainBodyDesc;
+    chainBodyDesc.type = Tina::Physics2D::PhysicsBodyType2D::Static;
+    chainBodyDesc.positionMeters = {100.0F, 100.0F};
+    auto chainBody = resources.physicsWorld->createBody(chainBodyDesc);
+    if (!chainBody)
+    {
+        return Tina::Core::failure(std::move(chainBody.error()));
+    }
+    Tina::Physics2D::PhysicsShape2DDesc chainShapeDesc;
+    chainShapeDesc.kind = Tina::Physics2D::PhysicsShapeKind2D::Chain;
+    chainShapeDesc.chainVertices = {
+        Tina::Physics2D::PhysicsVec2{-2.0F, 0.0F},
+        Tina::Physics2D::PhysicsVec2{-1.0F, 0.5F},
+        Tina::Physics2D::PhysicsVec2{0.0F, 0.0F},
+        Tina::Physics2D::PhysicsVec2{1.0F, -0.5F},
+        Tina::Physics2D::PhysicsVec2{2.0F, 0.0F},
+    };
+    chainShapeDesc.chainVertexCount = 5;
+    chainShapeDesc.chainLoop = false;
+    auto chainShape = resources.physicsWorld->createShape(*chainBody, chainShapeDesc);
+    if (!chainShape)
+    {
+        return Tina::Core::failure(std::move(chainShape.error()));
+    }
+    resources.chainBody = *chainBody;
+    resources.chainShape = *chainShape;
+    const auto chainShapeState = resources.physicsWorld->shapeState(*chainShape);
+    counters.physicsChainReady =
+        chainShapeState && chainShapeState->kind == Tina::Physics2D::PhysicsShapeKind2D::Chain &&
+        chainShapeState->body == *chainBody && !chainShapeState->isSensor;
 #endif
 
     const auto* audioFile = resources.audioClipLease.get();
@@ -2795,7 +2949,10 @@ class TileMapBgfxState final : public Tina::IGameState {
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
         if (resources_->physicsWorld && resources_->physicsSync)
         {
-            counters_->physicsStaticBodies = resources_->physicsSync->stats().colliderBodyCount;
+            const auto physicsStats = resources_->physicsSync->stats();
+            counters_->physicsStaticBodies = physicsStats.colliderBodyCount;
+            counters_->physicsStaticSolidCells = physicsStats.colliderSolidCellCount;
+            counters_->physicsStaticBoxShapes = physicsStats.colliderShapeCount;
             counters_->physicsReady = true;
         }
 #endif
@@ -3518,6 +3675,19 @@ class TileMapBgfxState final : public Tina::IGameState {
         accessibilityTree_ = Tina::UI::UIAccessibilityTree{};
         releaseSpriteBindings();
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
+        if (resources_->physicsNavigationSync && resources_->navigationGrid)
+        {
+            if (const auto status = resources_->physicsNavigationSync->shutdown(*resources_->navigationGrid);
+                !status)
+            {
+                counters_->navigationPhysicsReady = false;
+            }
+            else
+            {
+                counters_->navigationGridRevision = resources_->navigationGrid->revision();
+            }
+        }
+        resources_->physicsNavigationSync.reset();
         // Retire chunk colliders while the world is still open, then drop the
         // borrower before the TileMapInstance it reads goes away.
         if (resources_->physicsSync && resources_->physicsWorld)
@@ -4150,6 +4320,22 @@ class TileMapBgfxState final : public Tina::IGameState {
                 resources_->lastDynamicX = state->positionMeters.x;
                 resources_->lastDynamicY = state->positionMeters.y;
                 counters_->lastDynamicY = state->positionMeters.y;
+            }
+            if (resources_->physicsNavigationSync && resources_->navigationGrid)
+            {
+                auto navigationSync = resources_->physicsNavigationSync->synchronize(
+                    *resources_->physicsWorld, *resources_->navigationGrid);
+                if (!navigationSync)
+                {
+                    return Tina::Core::failure(std::move(navigationSync.error()));
+                }
+                counters_->navigationPhysicsSynchronizations = navigationSync->synchronizeCount;
+                counters_->navigationPhysicsBlockerAdds = navigationSync->totalAddedBlockerCount;
+                counters_->navigationPhysicsBlockerUpdates = navigationSync->totalUpdatedBlockerCount;
+                counters_->navigationPhysicsBlockerRemoves = navigationSync->totalRemovedBlockerCount;
+                counters_->navigationPhysicsPublishedBlockers = navigationSync->publishedBlockerCount;
+                counters_->navigationPhysicsRegisteredBodies = navigationSync->registeredBodyCount;
+                counters_->navigationGridRevision = resources_->navigationGrid->revision();
             }
         }
 #endif
@@ -5388,7 +5574,8 @@ int main(int argc, char** argv)
         counters.tileMapStreamPeakResident >= ExpectedTileMapStreamChunks;
     const bool navigationValid =
         resources.navigationGrid.has_value() && resources.navigationPathfinder.has_value() &&
-        counters.navigationReady &&
+        counters.navigationReady && counters.navigationFromCookedAsset &&
+        counters.navigationCookedBitExact &&
         counters.navigationSolidTileCells == ExpectedNavigationSolidTileCells &&
         counters.navigationBlockerRectangles == ExpectedNavigationBlockerRectangles &&
         counters.navigationBlockedCells == ExpectedNavigationBlockedCells &&
@@ -5406,10 +5593,14 @@ int main(int argc, char** argv)
         counters.navigationWeightedPathCost == ExpectedNavigationWeightedPathCost &&
         counters.navigationWeightedPathAvoidedCostCell &&
         counters.navigationIncrementalExpandedNodes == 1U &&
-        counters.navigationGridRevision == 3U && counters.navigationDynamicBlockerMutations == 2U &&
+        counters.navigationGridRevision == 10U && counters.navigationDynamicBlockerMutations == 2U &&
         counters.navigationCancelled && resources.navigationGrid->dynamicBlockerCount() == 0U &&
         resources.navigationGrid->revision() == counters.navigationGridRevision &&
-        resources.navigationPathfinder->cellCapacity() == resources.navigationGrid->cellCount();
+        resources.navigationPathfinder->cellCapacity() == resources.navigationGrid->cellCount() &&
+        counters.navigationPhysicsReady && counters.navigationPhysicsRegisteredBodies == 1U &&
+        counters.navigationPhysicsPublishedBlockers == 1U &&
+        counters.navigationPhysicsSynchronizations >= 2U &&
+        resources.navigationGrid->dynamicBlockerCount() == 0U;
     const bool product300EffectsValid =
         options->targetFrameCount != 300U ||
         (counters.particleExpired == ProductParticleExpiredAt300Frames &&
@@ -5469,7 +5660,9 @@ int main(int argc, char** argv)
         counters.characterAnimationIdleEntries >= 1 &&
         counters.characterAnimationWalkEntries >= 1 &&
         counters.characterAnimationHitWallEntries >= 1 &&
-        counters.characterAnimationHitCompleted;
+        counters.characterAnimationHitCompleted &&
+        counters.animEventFootsteps > 0 && counters.animEventHits > 0 &&
+        counters.animEventOverflow == 0 && counters.animEventUnknownTags == 0;
     const bool spriteBindingsValid =
         counters.spriteBindingTextures == ExpectedUploadedTextures &&
         counters.spriteTextureLeasesAcquired == ExpectedUploadedTextures &&
@@ -5555,11 +5748,13 @@ int main(int argc, char** argv)
               *run == Tina::RunExitReason::GameRequestedExitAfterCurrentFrame;
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
     ok = ok && counters.physicsReady && counters.physicsStaticBodies == ExpectedPhysicsColliderBodies &&
+         counters.physicsStaticSolidCells == ExpectedPhysicsColliderSolidCells &&
+         counters.physicsStaticBoxShapes == ExpectedPhysicsColliderShapes &&
          counters.physicsColliderRetirementOk &&
          counters.physicsSteps == counters.frameUpdates && counters.physicsDynamicContacts > 0 &&
          counters.physicsSensorEnters > 0 && counters.physicsSensorExits > 0 &&
          counters.physicsConvexPolygonReady && counters.physicsJointReady && counters.physicsRevoluteJointReady &&
-         counters.physicsPrismaticJointReady &&
+         counters.physicsPrismaticJointReady && counters.physicsChainReady &&
          counters.lastDynamicY < 3.5f && counters.lastDynamicY > 0.5f;
 #endif
     // M11-D1: require a successful primary-frame RGBA8 capture when the device supports it.
@@ -5650,12 +5845,25 @@ int main(int argc, char** argv)
     appendLeU64(evidenceBytes, counters.navigationIncrementalExpandedNodes);
     appendLeU64(evidenceBytes, counters.navigationGridRevision);
     appendLeU64(evidenceBytes, counters.navigationDynamicBlockerMutations);
+    appendLeU64(evidenceBytes, counters.navigationPhysicsSynchronizations);
+    appendLeU64(evidenceBytes, counters.navigationPhysicsBlockerAdds);
+    appendLeU64(evidenceBytes, counters.navigationPhysicsBlockerUpdates);
+    appendLeU64(evidenceBytes, counters.navigationPhysicsBlockerRemoves);
+    appendLeU64(evidenceBytes, counters.navigationPhysicsPublishedBlockers);
+    appendLeU64(evidenceBytes, counters.navigationPhysicsRegisteredBodies);
+    appendLeU32(evidenceBytes, counters.navigationPhysicsReady ? 1U : 0U);
     appendLeU32(evidenceBytes, counters.navigationCancelled ? 1U : 0U);
     appendLeU32(evidenceBytes, counters.navigationReady ? 1U : 0U);
+    appendLeU32(evidenceBytes, counters.navigationFromCookedAsset ? 1U : 0U);
+    appendLeU32(evidenceBytes, counters.navigationCookedBitExact ? 1U : 0U);
     appendLeU32(evidenceBytes, ExpectedCharacterAnimationClips);
     appendLeU32(evidenceBytes, ExpectedCharacterAnimationSprites);
     appendLeU64(evidenceBytes, counters.characterAnimationResolvedFrames);
     appendLeU32(evidenceBytes, counters.characterAnimationFromCatalog ? 1U : 0U);
+    appendLeU64(evidenceBytes, counters.animEventFootsteps);
+    appendLeU64(evidenceBytes, counters.animEventHits);
+    appendLeU64(evidenceBytes, counters.animEventOverflow);
+    appendLeU64(evidenceBytes, counters.animEventUnknownTags);
     appendLeU64(evidenceBytes, ExpectedNonEmptyTiles);
     appendLeU64(evidenceBytes, ExpectedSpritesWithPhysics);
     appendLeU32(evidenceBytes, options->seedTileSelection ? 1U : 0U);
@@ -5757,17 +5965,23 @@ int main(int argc, char** argv)
     appendF32Bits(evidenceBytes, counters.lastCameraWorldHeight);
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
     appendLeU64(evidenceBytes, counters.physicsStaticBodies);
+    appendLeU64(evidenceBytes, counters.physicsStaticSolidCells);
+    appendLeU64(evidenceBytes, counters.physicsStaticBoxShapes);
     appendLeU64(evidenceBytes, counters.physicsSensorEnters);
     appendLeU64(evidenceBytes, counters.physicsSensorExits);
     appendLeU32(evidenceBytes, counters.physicsConvexPolygonReady ? 1U : 0U);
     appendLeU32(evidenceBytes, counters.physicsJointReady ? 1U : 0U);
     appendLeU32(evidenceBytes, counters.physicsRevoluteJointReady ? 1U : 0U);
     appendLeU32(evidenceBytes, counters.physicsPrismaticJointReady ? 1U : 0U);
+    appendLeU32(evidenceBytes, counters.physicsChainReady ? 1U : 0U);
     appendLeU32(evidenceBytes, 1U);
 #else
     appendLeU64(evidenceBytes, 0U);
     appendLeU64(evidenceBytes, 0U);
     appendLeU64(evidenceBytes, 0U);
+    appendLeU64(evidenceBytes, 0U);
+    appendLeU64(evidenceBytes, 0U);
+    appendLeU32(evidenceBytes, 0U);
     appendLeU32(evidenceBytes, 0U);
     appendLeU32(evidenceBytes, 0U);
     appendLeU32(evidenceBytes, 0U);
@@ -5856,6 +6070,10 @@ int main(int argc, char** argv)
                   << ",\"animationHitWallEntries\":" << counters.characterAnimationHitWallEntries
                   << ",\"animationHitCompleted\":"
                   << (counters.characterAnimationHitCompleted ? "true" : "false")
+                  << ",\"animEventFootsteps\":" << counters.animEventFootsteps
+                  << ",\"animEventHits\":" << counters.animEventHits
+                  << ",\"animEventOverflow\":" << counters.animEventOverflow
+                  << ",\"animEventUnknownTags\":" << counters.animEventUnknownTags
                   << ",\"maxX\":" << counters.maxControllerX << ",\"uiRoots\":" << counters.uiRootsCreated
                   << ",\"uiPanels\":" << counters.uiPanelsCreated << ",\"uiLabels\":" << counters.uiTextLabelsCreated
                   << ",\"uiTextEdits\":" << counters.uiTextEditsCreated
@@ -5942,6 +6160,10 @@ int main(int argc, char** argv)
                   << ",\"tileMapStreamResident\":" << counters.tileMapStreamResident
                   << ",\"tileMapStreamPeakResident\":" << counters.tileMapStreamPeakResident
                   << ",\"navigationReady\":" << (counters.navigationReady ? "true" : "false")
+                  << ",\"navigationFromCookedAsset\":"
+                  << (counters.navigationFromCookedAsset ? "true" : "false")
+                  << ",\"navigationCookedBitExact\":"
+                  << (counters.navigationCookedBitExact ? "true" : "false")
                   << ",\"navigationSolidTileCells\":" << counters.navigationSolidTileCells
                   << ",\"navigationBlockerRectangles\":" << counters.navigationBlockerRectangles
                   << ",\"navigationBlockedCells\":" << counters.navigationBlockedCells
@@ -5967,6 +6189,20 @@ int main(int argc, char** argv)
                   << ",\"navigationGridRevision\":" << counters.navigationGridRevision
                   << ",\"navigationDynamicBlockerMutations\":"
                   << counters.navigationDynamicBlockerMutations
+                  << ",\"navigationPhysicsSynchronizations\":"
+                  << counters.navigationPhysicsSynchronizations
+                  << ",\"navigationPhysicsBlockerAdds\":"
+                  << counters.navigationPhysicsBlockerAdds
+                  << ",\"navigationPhysicsBlockerUpdates\":"
+                  << counters.navigationPhysicsBlockerUpdates
+                  << ",\"navigationPhysicsBlockerRemoves\":"
+                  << counters.navigationPhysicsBlockerRemoves
+                  << ",\"navigationPhysicsPublishedBlockers\":"
+                  << counters.navigationPhysicsPublishedBlockers
+                  << ",\"navigationPhysicsRegisteredBodies\":"
+                  << counters.navigationPhysicsRegisteredBodies
+                  << ",\"navigationPhysicsReady\":"
+                  << (counters.navigationPhysicsReady ? "true" : "false")
                   << ",\"navigationCancelled\":" << (counters.navigationCancelled ? "true" : "false")
                   << ",\"cameraProjectionResolves\":" << counters.cameraProjectionResolves
                    << ",\"renderExtractions\":" << counters.renderExtractions
@@ -6015,6 +6251,8 @@ int main(int argc, char** argv)
                   << ",\"physicsEnabled\":true"
                   << ",\"physicsSteps\":" << counters.physicsSteps
                   << ",\"physicsStaticBodies\":" << counters.physicsStaticBodies
+                  << ",\"physicsStaticSolidCells\":" << counters.physicsStaticSolidCells
+                  << ",\"physicsStaticBoxShapes\":" << counters.physicsStaticBoxShapes
                   << ",\"physicsDynamicContacts\":" << counters.physicsDynamicContacts
                   << ",\"physicsSensorEnters\":" << counters.physicsSensorEnters
                   << ",\"physicsSensorExits\":" << counters.physicsSensorExits
@@ -6025,6 +6263,7 @@ int main(int argc, char** argv)
                   << (counters.physicsRevoluteJointReady ? "true" : "false")
                   << ",\"physicsPrismaticJointReady\":"
                   << (counters.physicsPrismaticJointReady ? "true" : "false")
+                  << ",\"physicsChainReady\":" << (counters.physicsChainReady ? "true" : "false")
                   << ",\"lastDynamicY\":" << counters.lastDynamicY
 #else
                   << ",\"physicsEnabled\":false"
@@ -6060,6 +6299,10 @@ int main(int argc, char** argv)
               << ",\"tileMapStreamResident\":" << counters.tileMapStreamResident
               << ",\"tileMapStreamPeakResident\":" << counters.tileMapStreamPeakResident
               << ",\"navigationReady\":" << (counters.navigationReady ? "true" : "false")
+              << ",\"navigationFromCookedAsset\":"
+              << (counters.navigationFromCookedAsset ? "true" : "false")
+              << ",\"navigationCookedBitExact\":"
+              << (counters.navigationCookedBitExact ? "true" : "false")
               << ",\"navigationSolidTileCells\":" << counters.navigationSolidTileCells
               << ",\"navigationBlockerRectangles\":" << counters.navigationBlockerRectangles
               << ",\"navigationBlockedCells\":" << counters.navigationBlockedCells
@@ -6084,6 +6327,14 @@ int main(int argc, char** argv)
               << counters.navigationIncrementalExpandedNodes
               << ",\"navigationGridRevision\":" << counters.navigationGridRevision
               << ",\"navigationDynamicBlockerMutations\":" << counters.navigationDynamicBlockerMutations
+              << ",\"navigationPhysicsSynchronizations\":" << counters.navigationPhysicsSynchronizations
+              << ",\"navigationPhysicsBlockerAdds\":" << counters.navigationPhysicsBlockerAdds
+              << ",\"navigationPhysicsBlockerUpdates\":" << counters.navigationPhysicsBlockerUpdates
+              << ",\"navigationPhysicsBlockerRemoves\":" << counters.navigationPhysicsBlockerRemoves
+              << ",\"navigationPhysicsPublishedBlockers\":" << counters.navigationPhysicsPublishedBlockers
+              << ",\"navigationPhysicsRegisteredBodies\":" << counters.navigationPhysicsRegisteredBodies
+              << ",\"navigationPhysicsReady\":"
+              << (counters.navigationPhysicsReady ? "true" : "false")
               << ",\"navigationCancelled\":" << (counters.navigationCancelled ? "true" : "false")
               << ",\"texturesUploaded\":" << counters.texturesUploaded
               << ",\"spriteBindingTextures\":" << counters.spriteBindingTextures
@@ -6142,6 +6393,10 @@ int main(int argc, char** argv)
               << ",\"characterAnimationLastFrame\":" << counters.characterAnimationLastFrame
               << ",\"characterAnimationHitCompleted\":"
               << (counters.characterAnimationHitCompleted ? "true" : "false")
+              << ",\"animEventFootsteps\":" << counters.animEventFootsteps
+              << ",\"animEventHits\":" << counters.animEventHits
+              << ",\"animEventOverflow\":" << counters.animEventOverflow
+              << ",\"animEventUnknownTags\":" << counters.animEventUnknownTags
               << ",\"maxControllerX\":" << counters.maxControllerX
               << ",\"uiRootsCreated\":" << counters.uiRootsCreated
               << ",\"uiPanelsCreated\":" << counters.uiPanelsCreated
@@ -6319,6 +6574,8 @@ int main(int argc, char** argv)
               << ",\"physicsEnabled\":true"
               << ",\"physicsSteps\":" << counters.physicsSteps
               << ",\"physicsStaticBodies\":" << counters.physicsStaticBodies
+              << ",\"physicsStaticSolidCells\":" << counters.physicsStaticSolidCells
+              << ",\"physicsStaticBoxShapes\":" << counters.physicsStaticBoxShapes
               << ",\"physicsDynamicContacts\":" << counters.physicsDynamicContacts
               << ",\"physicsSensorEnters\":" << counters.physicsSensorEnters
               << ",\"physicsSensorExits\":" << counters.physicsSensorExits
@@ -6329,6 +6586,7 @@ int main(int argc, char** argv)
               << (counters.physicsRevoluteJointReady ? "true" : "false")
               << ",\"physicsPrismaticJointReady\":"
               << (counters.physicsPrismaticJointReady ? "true" : "false")
+              << ",\"physicsChainReady\":" << (counters.physicsChainReady ? "true" : "false")
               << ",\"lastDynamicY\":" << counters.lastDynamicY
 #else
               << ",\"physicsEnabled\":false"

@@ -1,5 +1,6 @@
 set(TINA_SCENE_TEST_SOURCES
     CameraFollow2DTests.cpp
+    Fx2DFactoryTests.cpp
     SceneWorldTests.cpp
     SceneComponentExtractTests.cpp
     ParticleSystem2DTests.cpp
@@ -11,6 +12,7 @@ set(TINA_SCENE_TEST_SOURCES
     header_isolation/DirectionalLight3DHeader.cpp
     header_isolation/EntityHeader.cpp
     header_isolation/ExtractRenderSceneHeader.cpp
+    header_isolation/Fx2DFactoryHeader.cpp
     header_isolation/MeshRenderer3DHeader.cpp
     header_isolation/ParticleSystem2DHeader.cpp
     header_isolation/PerspectiveCamera3DHeader.cpp

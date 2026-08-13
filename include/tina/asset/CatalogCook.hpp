@@ -85,6 +85,14 @@ cookAndStageIncrementalCatalogPackage(std::string_view stagingRootUtf8,
 //                               // offset: [0,1] decimal (0.5) or percentage (50%)
 //     // e.g. spriteanim <clipId> Loop <spriteA>:0.10#FOOTSTEP@50%#0xDEADBEEF@0.75 <spriteB>:0.15
 //     // Events are sorted by ascending offset per frame; authoring order breaks ties.
+//   navigation2d <32hexId> <width> <height> <originX> <originY> <cellSize> <flags:cost>...
+//   fx2d <id> <spriteId> <particleCapacity> <burstCount> <seed> <firstParticleKey>
+//        <originX> <originY> <offsetMinX> <offsetMinY> <offsetMaxX> <offsetMaxY>
+//        <velocityMinX> <velocityMinY> <velocityMaxX> <velocityMaxY>
+//        <lifetimeMin> <lifetimeMax> <startWidth> <startHeight> <endWidth> <endHeight>
+//        <startRgba> <endRgba> <rotation> <particleLayer> <particleOrder>
+//        <trailCapacity> <trailLifetime> <trailStartWidth> <trailEndWidth> <firstTrailKey>
+//        <u0> <v0> <u1> <v1> <trailRgba> <trailLayer> <trailOrder>
 //   audioclip <32hexId> <sampleRate> <channels> <frameCount> <f0...>
 //   audioclip <32hexId> <sampleRate> <channels> <frameCount> sine <freqHz>
 //   audioclip <32hexId> file <relativeOrAbsolute.wav>  // PCM16 WAV only (M11-A20)

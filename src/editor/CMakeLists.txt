@@ -10,6 +10,8 @@ add_library(tina_editor STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/editor/EditorTransformGizmo.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/editor/EditorViewportGrid.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/editor/EditorViewportNavigation.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/editor/Fx2DAuthoringDocument.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/editor/Navigation2DAuthoringDocument.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/editor/ProjectAssetBrowser.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/editor/SpriteAnimationAuthoringDocument.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/editor/SpriteAnimationAuthoringFile.hpp
@@ -31,6 +33,8 @@ add_library(tina_editor STATIC
     EditorTransformGizmo.cpp
     EditorViewportGrid.cpp
     EditorViewportNavigation.cpp
+    Fx2DAuthoringDocument.cpp
+    Navigation2DAuthoringDocument.cpp
     ProjectAssetBrowser.cpp
     SpriteAnimationAuthoringDocument.cpp
     SpriteAnimationAuthoringFile.cpp
@@ -46,7 +50,7 @@ add_library(Tina::Editor ALIAS tina_editor)
 target_compile_features(tina_editor PUBLIC cxx_std_23)
 target_include_directories(tina_editor PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(tina_editor
-    PUBLIC Tina::Core Tina::AssetFormat
+    PUBLIC Tina::Core Tina::AssetFormat Tina::Asset
     PRIVATE "$<BUILD_INTERFACE:Tina::ProjectOptions>"
 )
 set_target_properties(tina_editor PROPERTIES CXX_EXTENSIONS OFF)

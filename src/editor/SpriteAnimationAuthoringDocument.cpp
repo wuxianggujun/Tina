@@ -388,6 +388,35 @@ Core::Status SpriteAnimationAuthoringDocument::setFrameDuration(
     return setFrame(index, updated);
 }
 
+Core::Status SpriteAnimationAuthoringDocument::setFrameEvents(
+    Core::usize index,
+    std::span<const AssetFormat::SpriteAnimationEventDesc> events)
+{
+    auto desc = snapshot();
+    if (!desc)
+    {
+        return Core::failure(std::move(desc.error()));
+    }
+    if (index >= desc->frames.size())
+    {
+        return frameNotFound();
+    }
+    try
+    {
+        if (!desc->setFrameEvents(
+                index,
+                std::vector<AssetFormat::SpriteAnimationEventDesc>{events.begin(), events.end()}))
+        {
+            return frameNotFound();
+        }
+    }
+    catch (const std::bad_alloc&)
+    {
+        return allocationFailure();
+    }
+    return replace(*desc);
+}
+
 Core::Status SpriteAnimationAuthoringDocument::duplicateFrame(Core::usize index)
 {
     const auto frame = frameAt(index);

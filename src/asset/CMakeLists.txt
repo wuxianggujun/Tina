@@ -105,8 +105,11 @@ target_link_libraries(tina_asset_types INTERFACE Tina::Core Tina::Render)
 
 if (TINA_BUILD_PHYSICS2D)
     list(APPEND TINA_ASSET_PUBLIC_HEADERS
+        ${PROJECT_SOURCE_DIR}/include/tina/asset/PhysicsNavigationSync2D.hpp
         ${PROJECT_SOURCE_DIR}/include/tina/asset/TileMapPhysicsSync.hpp)
-    list(APPEND TINA_ASSET_SOURCES TileMapPhysicsSync.cpp)
+    list(APPEND TINA_ASSET_SOURCES
+        PhysicsNavigationSync2D.cpp
+        TileMapPhysicsSync.cpp)
 endif ()
 
 add_library(tina_asset STATIC

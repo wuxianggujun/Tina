@@ -25,10 +25,12 @@ struct PhysicsWorld2D::Impl final {
         b2BodyId backend = b2_nullBodyId;
         PhysicsBodyId id{};
         PhysicsShapeId firstShape{};
+        PhysicsBodyType2D type = PhysicsBodyType2D::Static;
     };
 
     struct ShapeRecord final {
         b2ShapeId backend = b2_nullShapeId;
+        b2ChainId backendChain = b2_nullChainId;
         PhysicsShapeId id{};
         PhysicsBodyId body{};
         PhysicsShapeKind2D kind = PhysicsShapeKind2D::Box;
@@ -36,6 +38,8 @@ struct PhysicsWorld2D::Impl final {
         PhysicsCollisionFilter2D filter{};
         PhysicsShapeId previousOnBody{};
         PhysicsShapeId nextOnBody{};
+        Core::u64 queryEpoch = 0;
+        Core::usize queryOutputIndex = 0;
     };
 
     struct JointRecord final {
@@ -48,7 +52,8 @@ struct PhysicsWorld2D::Impl final {
     };
 
     struct ShapeTombstone final {
-        b2ShapeId backend = b2_nullShapeId;
+        std::array<b2ShapeId, MaximumChainVertices2D> backends{};
+        Core::u32 backendCount = 0;
         PhysicsShapeId shape{};
         PhysicsBodyId body{};
         bool live = false;
@@ -149,32 +154,43 @@ struct PhysicsWorld2D::Impl final {
 
     void rememberDestroyedShape(const ShapeRecord& shapeRecord) noexcept
     {
-        if (shapeTombstones == nullptr || config.shapeCapacity == 0 || B2_IS_NULL(shapeRecord.backend)) {
+        if (shapeTombstones == nullptr || config.shapeCapacity == 0) {
             return;
         }
-        for (Core::usize index = 0; index < config.shapeCapacity; ++index) {
-            ShapeTombstone& tombstone = shapeTombstones[index];
-            if (tombstone.live && B2_ID_EQUALS(tombstone.backend, shapeRecord.backend)) {
-                tombstone.shape = shapeRecord.id;
-                tombstone.body = shapeRecord.body;
-                return;
+        std::array<b2ShapeId, MaximumChainVertices2D> destroyedBackends{};
+        Core::u32 destroyedBackendCount = 0;
+        if (B2_IS_NON_NULL(shapeRecord.backendChain) &&
+            b2Chain_IsValid(shapeRecord.backendChain)) {
+            const int segmentCount = b2Chain_GetSegments(
+                shapeRecord.backendChain, destroyedBackends.data(),
+                static_cast<int>(destroyedBackends.size()));
+            if (segmentCount > 0) {
+                destroyedBackendCount = static_cast<Core::u32>(segmentCount);
             }
+        } else if (B2_IS_NON_NULL(shapeRecord.backend)) {
+            destroyedBackends[0] = shapeRecord.backend;
+            destroyedBackendCount = 1U;
         }
+        if (destroyedBackendCount == 0U) {
+            return;
+        }
+
+        const auto populate = [&](ShapeTombstone& tombstone) noexcept {
+            tombstone.backends = destroyedBackends;
+            tombstone.backendCount = destroyedBackendCount;
+            tombstone.shape = shapeRecord.id;
+            tombstone.body = shapeRecord.body;
+            tombstone.live = true;
+        };
         for (Core::usize index = 0; index < config.shapeCapacity; ++index) {
             ShapeTombstone& tombstone = shapeTombstones[index];
             if (!tombstone.live) {
-                tombstone.backend = shapeRecord.backend;
-                tombstone.shape = shapeRecord.id;
-                tombstone.body = shapeRecord.body;
-                tombstone.live = true;
+                populate(tombstone);
                 return;
             }
         }
         ShapeTombstone& overwrite = shapeTombstones[tombstoneWriteIndex % config.shapeCapacity];
-        overwrite.backend = shapeRecord.backend;
-        overwrite.shape = shapeRecord.id;
-        overwrite.body = shapeRecord.body;
-        overwrite.live = true;
+        populate(overwrite);
         ++tombstoneWriteIndex;
     }
 
@@ -292,12 +308,18 @@ struct PhysicsWorld2D::Impl final {
         if (shapeTombstones != nullptr) {
             for (Core::usize index = 0; index < config.shapeCapacity; ++index) {
                 const ShapeTombstone& tombstone = shapeTombstones[index];
-                if (tombstone.live && B2_ID_EQUALS(tombstone.backend, backendShape)) {
-                    endpoints.shape = tombstone.shape;
-                    endpoints.body = tombstone.body;
-                    endpoints.resolved = true;
-                    endpoints.destroyed = true;
-                    return endpoints;
+                if (!tombstone.live) {
+                    continue;
+                }
+                for (Core::u32 backendIndex = 0;
+                     backendIndex < tombstone.backendCount; ++backendIndex) {
+                    if (B2_ID_EQUALS(tombstone.backends[backendIndex], backendShape)) {
+                        endpoints.shape = tombstone.shape;
+                        endpoints.body = tombstone.body;
+                        endpoints.resolved = true;
+                        endpoints.destroyed = true;
+                        return endpoints;
+                    }
                 }
             }
         }
@@ -424,6 +446,7 @@ struct PhysicsWorld2D::Impl final {
         Core::usize capacity = 0;
         Core::usize written = 0;
         Core::usize totalFound = 0;
+        Core::u64 queryEpoch = 0;
     };
 
     struct CastCollectContext final {
@@ -432,6 +455,7 @@ struct PhysicsWorld2D::Impl final {
         Core::usize capacity = 0;
         Core::usize written = 0;
         Core::usize totalFound = 0;
+        Core::u64 queryEpoch = 0;
     };
 
     static bool collectOverlapHit(b2ShapeId shapeId, void* userContext)
@@ -455,8 +479,14 @@ struct PhysicsWorld2D::Impl final {
             return true;
         }
 
+        if (shapeRecord->queryEpoch == context->queryEpoch) {
+            return true;
+        }
+        shapeRecord->queryEpoch = context->queryEpoch;
+        shapeRecord->queryOutputIndex = (std::numeric_limits<Core::usize>::max)();
         ++context->totalFound;
         if (context->written < context->capacity && context->out != nullptr) {
+            shapeRecord->queryOutputIndex = context->written;
             context->out[context->written++] = PhysicsOverlapHit2D{
                 shapeRecord->body,
                 shapeRecord->id};
@@ -490,8 +520,24 @@ struct PhysicsWorld2D::Impl final {
             return -1.0F;
         }
 
+        if (shapeRecord->queryEpoch == context->queryEpoch) {
+            if (context->out != nullptr &&
+                shapeRecord->queryOutputIndex < context->written &&
+                fraction < context->out[shapeRecord->queryOutputIndex].fraction) {
+                context->out[shapeRecord->queryOutputIndex] = PhysicsCastHit2D{
+                    shapeRecord->body,
+                    shapeRecord->id,
+                    {point.x, point.y},
+                    {normal.x, normal.y},
+                    fraction};
+            }
+            return 1.0F;
+        }
+        shapeRecord->queryEpoch = context->queryEpoch;
+        shapeRecord->queryOutputIndex = (std::numeric_limits<Core::usize>::max)();
         ++context->totalFound;
         if (context->written < context->capacity && context->out != nullptr) {
+            shapeRecord->queryOutputIndex = context->written;
             context->out[context->written++] = PhysicsCastHit2D{
                 shapeRecord->body,
                 shapeRecord->id,
@@ -626,6 +672,7 @@ struct PhysicsWorld2D::Impl final {
     Core::u64 completedStepCount = 0;
     bool open = true;
     bool inStep = false;
+    Core::u64 nextQueryEpoch = 1;
 };
 
 namespace {
@@ -655,6 +702,7 @@ static_assert(MaximumConvexPolygonVertices2D == B2_MAX_POLYGON_VERTICES);
     case PhysicsShapeKind2D::Circle:
     case PhysicsShapeKind2D::Capsule:
     case PhysicsShapeKind2D::ConvexPolygon:
+    case PhysicsShapeKind2D::Chain:
         return true;
     }
     return false;
@@ -993,6 +1041,37 @@ Core::Status validatePhysicsShape2DDesc(const PhysicsShape2DDesc& desc) noexcept
         }
         break;
     }
+    case PhysicsShapeKind2D::Chain:
+        if (desc.chainVertexCount < MinimumChainVertices2D ||
+            desc.chainVertexCount > MaximumChainVertices2D || desc.isSensor) {
+            return Core::failure(
+                Physics2DErrorCode::InvalidShapeDescription,
+                "Physics2D chain requires 4..64 vertices and cannot be a sensor");
+        }
+        for (Core::u32 left = 0; left < desc.chainVertexCount; ++left) {
+            if (!isFinite(desc.chainVertices[left])) {
+                return Core::failure(
+                    Physics2DErrorCode::InvalidShapeDescription,
+                    "Physics2D chain vertices must be finite");
+            }
+            for (Core::u32 right = left + 1U; right < desc.chainVertexCount; ++right) {
+                const double deltaX = static_cast<double>(desc.chainVertices[right].x) -
+                                      desc.chainVertices[left].x;
+                const double deltaY = static_cast<double>(desc.chainVertices[right].y) -
+                                      desc.chainVertices[left].y;
+                const double separationSquared = deltaX * deltaX + deltaY * deltaY;
+                constexpr double MinimumSeparationSquared =
+                    static_cast<double>(MinimumChainVertexSeparationMeters2D) *
+                    MinimumChainVertexSeparationMeters2D;
+                if (!std::isfinite(separationSquared) ||
+                    separationSquared <= MinimumSeparationSquared) {
+                    return Core::failure(
+                        Physics2DErrorCode::InvalidShapeDescription,
+                        "Physics2D chain vertices must be distinct and separated by more than 0.005 m");
+                }
+            }
+        }
+        break;
     }
     return Core::success();
 }
@@ -1607,6 +1686,7 @@ Core::Result<PhysicsBodyId> PhysicsWorld2D::createBody(const PhysicsBody2DDesc& 
             "Physics2D could not resolve a newly reserved body slot");
     }
     bodyRecord->id = bodyId;
+    bodyRecord->type = bodyDescription.type;
 
     b2BodyDef bodyDefinition = b2DefaultBodyDef();
     bodyDefinition.type = toBackendBodyType(bodyDescription.type);
@@ -1667,6 +1747,12 @@ Core::Result<PhysicsShapeId> PhysicsWorld2D::createShape(
         return Core::failure(
             Physics2DErrorCode::BackendFailure,
             "Physics2D body registry lost its Box2D body");
+    }
+    if (shapeDescription.kind == PhysicsShapeKind2D::Chain &&
+        bodyRecord->type != PhysicsBodyType2D::Static) {
+        return Core::failure(
+            Physics2DErrorCode::InvalidShapeDescription,
+            "Physics2D chain shapes require a static body");
     }
 
     auto shapeIdResult = m_impl->shapes.tryEmplace();
@@ -1734,18 +1820,74 @@ Core::Result<PhysicsShapeId> PhysicsWorld2D::createShape(
         shapeRecord->backend =
             b2CreatePolygonShape(bodyRecord->backend, &shapeDefinition, &backendConvexPolygon);
         break;
+    case PhysicsShapeKind2D::Chain: {
+        std::array<b2Vec2, MaximumChainVertices2D> points{};
+        for (Core::u32 index = 0; index < shapeDescription.chainVertexCount; ++index) {
+            points[index] = {
+                shapeDescription.chainVertices[index].x,
+                shapeDescription.chainVertices[index].y};
+        }
+        b2SurfaceMaterial material = b2DefaultSurfaceMaterial();
+        material.friction = shapeDescription.friction;
+        material.restitution = shapeDescription.restitution;
+        b2ChainDef chainDefinition = b2DefaultChainDef();
+        chainDefinition.userData = shapeRecord;
+        chainDefinition.points = points.data();
+        chainDefinition.count = static_cast<int>(shapeDescription.chainVertexCount);
+        chainDefinition.materials = &material;
+        chainDefinition.materialCount = 1;
+        chainDefinition.filter.categoryBits = shapeDescription.filter.categoryBits;
+        chainDefinition.filter.maskBits = shapeDescription.filter.maskBits;
+        chainDefinition.filter.groupIndex = shapeDescription.filter.groupIndex;
+        chainDefinition.isLoop = shapeDescription.chainLoop;
+        chainDefinition.enableSensorEvents = shapeDescription.enableSensorEvents;
+        shapeRecord->backendChain = b2CreateChain(bodyRecord->backend, &chainDefinition);
+        if (B2_IS_NON_NULL(shapeRecord->backendChain) &&
+            b2Chain_IsValid(shapeRecord->backendChain)) {
+            std::array<b2ShapeId, MaximumChainVertices2D> segments{};
+            const int segmentCount = b2Chain_GetSegments(
+                shapeRecord->backendChain, segments.data(),
+                static_cast<int>(segments.size()));
+            if (segmentCount > 0) {
+                shapeRecord->backend = segments[0];
+                for (int index = 0; index < segmentCount; ++index) {
+                    b2Shape_EnableSensorEvents(
+                        segments[index], shapeDescription.enableSensorEvents);
+                    b2Shape_EnableContactEvents(
+                        segments[index], shapeDescription.enableContactEvents);
+                    b2Shape_EnableHitEvents(
+                        segments[index], shapeDescription.enableHitEvents);
+                }
+            }
+        }
+        break;
+    }
     }
 
-    if (B2_IS_NULL(shapeRecord->backend) || !b2Shape_IsValid(shapeRecord->backend)) {
+    const bool backendShapeValid = shapeDescription.kind == PhysicsShapeKind2D::Chain
+        ? B2_IS_NON_NULL(shapeRecord->backendChain) && b2Chain_IsValid(shapeRecord->backendChain) &&
+              B2_IS_NON_NULL(shapeRecord->backend) && b2Shape_IsValid(shapeRecord->backend)
+        : B2_IS_NON_NULL(shapeRecord->backend) && b2Shape_IsValid(shapeRecord->backend);
+    if (!backendShapeValid) {
+        if (B2_IS_NON_NULL(shapeRecord->backendChain) &&
+            b2Chain_IsValid(shapeRecord->backendChain)) {
+            b2DestroyChain(shapeRecord->backendChain);
+        }
         shapeRecord->backend = b2_nullShapeId;
+        shapeRecord->backendChain = b2_nullChainId;
         (void)m_impl->shapes.erase(shapeId);
         return Core::failure(
             Physics2DErrorCode::BackendFailure,
             "Box2D failed to create a shape");
     }
     if (!m_impl->linkShapeToBody(*bodyRecord, *shapeRecord)) {
-        b2DestroyShape(shapeRecord->backend, true);
+        if (B2_IS_NON_NULL(shapeRecord->backendChain)) {
+            b2DestroyChain(shapeRecord->backendChain);
+        } else {
+            b2DestroyShape(shapeRecord->backend, true);
+        }
         shapeRecord->backend = b2_nullShapeId;
+        shapeRecord->backendChain = b2_nullChainId;
         (void)m_impl->shapes.erase(shapeId);
         return Core::failure(
             Physics2DErrorCode::BackendFailure,
@@ -1764,7 +1906,12 @@ Core::Status PhysicsWorld2D::destroyShape(PhysicsShapeId shape) noexcept
     }
 
     Impl::ShapeRecord* shapeRecord = m_impl->shapes.tryGet(shape);
-    if (shapeRecord == nullptr || !b2Shape_IsValid(shapeRecord->backend)) {
+    const bool backendShapeValid = shapeRecord != nullptr &&
+        ((B2_IS_NON_NULL(shapeRecord->backendChain) &&
+          b2Chain_IsValid(shapeRecord->backendChain)) ||
+         (B2_IS_NULL(shapeRecord->backendChain) &&
+          B2_IS_NON_NULL(shapeRecord->backend) && b2Shape_IsValid(shapeRecord->backend)));
+    if (!backendShapeValid) {
         return Core::failure(
             Physics2DErrorCode::BackendFailure,
             "Physics2D shape registry lost its Box2D shape");
@@ -1776,8 +1923,13 @@ Core::Status PhysicsWorld2D::destroyShape(PhysicsShapeId shape) noexcept
     }
 
     m_impl->rememberDestroyedShape(*shapeRecord);
-    b2DestroyShape(shapeRecord->backend, true);
+    if (B2_IS_NON_NULL(shapeRecord->backendChain)) {
+        b2DestroyChain(shapeRecord->backendChain);
+    } else {
+        b2DestroyShape(shapeRecord->backend, true);
+    }
     shapeRecord->backend = b2_nullShapeId;
+    shapeRecord->backendChain = b2_nullChainId;
     const Core::GenerationEraseResult shapeEraseResult = m_impl->shapes.erase(shape);
     if (shapeEraseResult != Core::GenerationEraseResult::Erased) {
         return Core::failure(
@@ -2229,6 +2381,11 @@ Core::Result<PhysicsQueryWriteResult2D> PhysicsWorld2D::overlapAabb(
             Physics2DErrorCode::BackendFailure,
             "Physics2D backend world is invalid");
     }
+    if (m_impl->nextQueryEpoch == 0) {
+        return Core::failure(
+            Physics2DErrorCode::InvalidQuery,
+            "Physics2D query epoch space is exhausted");
+    }
 
     // Precise overlap uses a shape proxy matching the AABB extents, not broadphase-only.
     const float halfX = 0.5F * (aabb.upperMeters.x - aabb.lowerMeters.x);
@@ -2253,7 +2410,8 @@ Core::Result<PhysicsQueryWriteResult2D> PhysicsWorld2D::overlapAabb(
         out.data(),
         out.size(),
         0,
-        0};
+        0,
+        m_impl->nextQueryEpoch++};
     (void)b2World_OverlapShape(
         m_impl->world,
         &proxy,
@@ -2290,13 +2448,19 @@ Core::Result<PhysicsQueryWriteResult2D> PhysicsWorld2D::castRay(
             Physics2DErrorCode::BackendFailure,
             "Physics2D backend world is invalid");
     }
+    if (m_impl->nextQueryEpoch == 0) {
+        return Core::failure(
+            Physics2DErrorCode::InvalidQuery,
+            "Physics2D query epoch space is exhausted");
+    }
 
     Impl::CastCollectContext context{
         m_impl,
         out.data(),
         out.size(),
         0,
-        0};
+        0,
+        m_impl->nextQueryEpoch++};
     (void)b2World_CastRay(
         m_impl->world,
         {ray.originMeters.x, ray.originMeters.y},
@@ -2404,7 +2568,12 @@ Core::Result<PhysicsBodyId> PhysicsWorld2D::shapeBody(
         return Core::failure(status.error());
     }
     const Impl::ShapeRecord* shapeRecord = m_impl->shapes.tryGet(shape);
-    if (shapeRecord == nullptr || !b2Shape_IsValid(shapeRecord->backend)) {
+    const bool backendShapeValid = shapeRecord != nullptr &&
+        ((B2_IS_NON_NULL(shapeRecord->backendChain) &&
+          b2Chain_IsValid(shapeRecord->backendChain)) ||
+         (B2_IS_NULL(shapeRecord->backendChain) &&
+          B2_IS_NON_NULL(shapeRecord->backend) && b2Shape_IsValid(shapeRecord->backend)));
+    if (!backendShapeValid) {
         return Core::failure(
             Physics2DErrorCode::BackendFailure,
             "Physics2D shape registry lost its Box2D shape");
@@ -2422,7 +2591,12 @@ Core::Result<PhysicsShapeState2D> PhysicsWorld2D::shapeState(
         return Core::failure(status.error());
     }
     const Impl::ShapeRecord* shapeRecord = m_impl->shapes.tryGet(shape);
-    if (shapeRecord == nullptr || !b2Shape_IsValid(shapeRecord->backend)) {
+    const bool backendShapeValid = shapeRecord != nullptr &&
+        ((B2_IS_NON_NULL(shapeRecord->backendChain) &&
+          b2Chain_IsValid(shapeRecord->backendChain)) ||
+         (B2_IS_NULL(shapeRecord->backendChain) &&
+          B2_IS_NON_NULL(shapeRecord->backend) && b2Shape_IsValid(shapeRecord->backend)));
+    if (!backendShapeValid) {
         return Core::failure(
             Physics2DErrorCode::BackendFailure,
             "Physics2D shape registry lost its Box2D shape");

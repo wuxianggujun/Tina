@@ -66,16 +66,16 @@ Vorbis/Opus 的安装图还分别解析 `Vorbis`、`Opus`、`OpusFile`。未请�
 | `Tina::RenderBgfx` | optional installed bgfx Render adapter；需 `COMPONENTS RenderBgfx` |
 | `Tina::Runtime` | EngineHost、Game Application/State、phase context、Action/Event facade |
 | `Tina::DesktopBootstrap` | optional installed Windows/Linux Desktop 组合入口；需 `COMPONENTS DesktopBootstrap` |
-| `Tina::Scene` | World/Entity/Transform、2D/3D components/extraction/Prefab、World2D snapshot、standalone Particle/Trail、`CameraFollow2D` |
+| `Tina::Scene` | World/Entity/Transform、2D/3D components/extraction/Prefab、World2D snapshot、standalone Particle/Trail、`Fx2D` factory、`CameraFollow2D` |
 | `Tina::Navigation2D` | immutable weighted grid、generation dynamic blocker、确定性四向/对角同步与分步 A* |
 | `Tina::AssetFormat` | versioned Cooked payload/manifest types |
-| `Tina::Editor` | 工具侧 validated World2D/World3D/TileMap/SpriteAnimationClip authoring document、Project Asset index、project workspace/空目录创建、document-tab navigation、bounded revision history、文件加载/原子保存与 runtime/cook preview；不由 `Tina::GameSDK` 聚合链接 |
+| `Tina::Editor` | 工具侧 validated World2D/World3D/TileMap/SpriteAnimationClip/Navigation2D/Fx2D authoring document、Project Asset index、project workspace/空目录创建、document-tab navigation、bounded revision history、文件加载/原子保存与 runtime/cook preview；不由 `Tina::GameSDK` 聚合链接 |
 | `Tina::Asset` | Catalog、AssetSystem、Handle/Lease、Cooker helpers、typed parse/upload、Sprite2D/Mesh3D binding registry |
 | `Tina::UI` | retained Element tree、layout/input/paint、text、semantics |
 | `Tina::UIFreetype` | optional installed FreeType text rasterizer adapter；需 `COMPONENTS UIFreetype` |
 | `Tina::Audio` | backend-neutral AudioEngine/PCM、voice gain/pitch/pan/fade |
 | `Tina::AudioMiniaudio` | optional installed miniaudio device/decode adapter；需 `COMPONENTS AudioMiniaudio` |
-| `Tina::Physics2D` | optional Box2D-backed Box/Circle/Capsule/ConvexPolygon 与 Distance/Revolute/Prismatic API |
+| `Tina::Physics2D` | optional Box2D-backed Box/Circle/Capsule/ConvexPolygon/Chain 与 Distance/Revolute/Prismatic API |
 
 Adapter targets `Tina::PlatformGlfw`、`Tina::RenderBgfx`、`Tina::UIFreetype`、
 `Tina::AudioMiniaudio` 主要用于 bootstrap/高级组合，不把第三方 header 传播给调用方；安装 package 按构建图
@@ -470,8 +470,8 @@ sprite 不解析任一 handle。Scene 不保存 resolver、sink、ref 或任何 
 packet-local ref。任一 resolver/handle/binding 无效返回 `UnresolvedMesh`；mesh 解析失败时不调用 material
 resolver，hidden mesh 不解析。`PrefabMeshBinding` 只完成 AssetId→Handle，不保存或分配 Render key。
 
-`captureWorld2DSnapshotBytes()` 将 owner-thread World 的 LocalTransform 与四类2D组件写入唯一现行
-schema-v1 snapshot；调用方 callback 提供稳定 entity ID，并把 Sprite/normal Texture weak handle 映射为
+`captureWorld2DSnapshotBytes()` 将 owner-thread World 的 LocalTransform 与五类2D组件（含 SpriteAnimation
+绑定）写入唯一现行 schema-v2 snapshot；调用方 callback 提供稳定 entity ID，并把 Sprite/normal Texture weak handle 映射为
 稳定 `AssetId`。capture 按 hierarchy depth、stable ID 确定性排序，拒绝重复/零 ID、损坏层级和任何3D组件，
 不会静默丢字段。`instantiateWorld2DSnapshot()` 在修改目标 World 前预检容量、全部组件与 AssetId→weak handle
 解析；失败销毁本次创建的完整集合并保留既有实体。Runtime `EntityId`/generation、AssetHandle、Lease、Render
@@ -538,6 +538,10 @@ segment 各自从创建时计算 lifetime/age，width 按 normalized age 在 sta
 非法 geometry、容量或 key exhaustion 不修改 anchor/segments/next key；update 对所有 age 先 preflight，
 成功后才推进和移除过期段。稳定 segment key 单调且不复用。
 
+`createFx2DFromAsset(desc, resolvedSprite, resource)` 先校验完整 `Fx2DPayloadDesc` 与非空 weak Sprite handle，
+再在同一 PMR 上创建 `ParticleSystem2D`、初始 `ParticleBurst2D` 与 `Trail2D`。任一 owner 创建失败都不返回
+半份 instance；factory 不取得 AssetLease，也不自动发射 burst，调用方决定何时调用 `emitBurst()`。
+
 `CameraFollow2D::Create()` 创建 allocation-free owner-thread controller。`fixedUpdate()` 先完整验证 target、
 positive viewport half extents、可选 world bounds 与 positive fixed delta，再按 dead zone 和可选最大速度计算
 next center，最后按 viewport clamp world；viewport 大于 world 时按轴居中。失败不改变 previous/current center，
@@ -568,9 +572,19 @@ endpoint 或 open set 耗尽返回 `Unreachable`；Pending 期间 Grid 地址或
 `Asset::buildTileMapNavigation2DData()` 是 TileMap 转换桥：solid tile layer 中 `MaterialSolid` cell 进入 base
 blocked flags；可选 exact full-material-flags rule 写入 traversal multiplier；可选 object layer 只栅格化
 property 精确匹配的 visible Rectangle。引用的 TileMapChunk 必须
-已驻留，任何 layer/chunk/object/schema 错误都不返回半份数据。结果当前不是 Catalog `AssetKind`；产品 State
-持有 Grid/Pathfinder，Scene、Runtime、Render 和 Physics2D 不隐式取得所有权。详见
+已驻留，任何 layer/chunk/object/schema 错误都不返回半份数据。
+
+独立 `AssetKind::NavigationGrid2D` 当前 schema v1 使用32-byte little-endian header，随后保存精确 row-major
+cell flags 与 traversal costs，且没有 Cooked dependency。`Asset::parseNavigationGrid2DFromCooked()` 同时校验
+kind/version/dependency contract；`loadNavigationGrid2DDataFromCooked()` 再把 borrowed payload 深拷贝为调用方 PMR
+上的 immutable data。产品 State 持有 Grid/Pathfinder，Scene、Runtime、Render 和 Physics2D 不隐式取得所有权。详见
 [2D 导航](navigation2d.md)。
+
+`AssetKind::Fx2D` 当前 schema v1 是固定184-byte little-endian payload，并要求恰好一个
+`Required Sprite` dependency。payload 保存 ParticleSystem capacity/seed/stable-key、initial burst 全部范围与
+颜色/排序，以及 Trail capacity/lifetime/width/stable-key/UV/颜色/排序；reserved 字段必须为零。
+`Asset::parseFx2DFromCooked()` 对账 payload Sprite AssetId 与 dependency，`Scene::createFx2DFromAsset()` 消费
+已解析 desc 与调用方提供的 weak Sprite handle。
 
 ## Editor
 
@@ -590,6 +604,15 @@ session 与 canonical saved baseline，同 key 重新打开只激活既有状态
 dirty-close modal 提供 Save/Save As、Discard、Cancel；Catalog Refresh 在下一帧 packet 前复用
 `AssetSystem::reloadCatalog()` 的 Sprite/Mesh participant transaction。以上编排留在 `Tina::EditorApp` 私有层，
 不扩大 document 公共 ABI。
+
+`SpriteAnimationAuthoringDocument::setFrameEvents()` 以一次 revision 替换一帧的 marker 集，沿用 payload 的每帧64/
+单 clip 16384上限与稳定 offset 排序。EditorApp Timeline 显示选中帧 marker，并以 Prev/Next、Add/Apply/Remove
+把十六进制或标识符 tag、decimal/percent offset 转成该 API；失败保持 document/history/selection 不变。
+
+`Navigation2DAuthoringDocument::bakeFromTileMap()` 从 resident TileMap 构建 canonical payload/Cooked bytes，并记录
+source TileMap revision；`stageCatalog()` 只在已有成功 bake 时返回包含全部 baseline object 与新 Navigation asset
+的 fresh stage。`Fx2DAuthoringDocument` 提供 canonical payload `replace()` 与 bounded Undo/Redo；它是公共 document
+API，当前 EditorApp 没有独立可见 FX effect graph/专用编辑面板。
 
 EditorApp 私有 `EditorFileDialog` 在 Windows 用 `IFileSaveDialog`，在 Linux 用 `zenity` 并在 helper 缺失时回退
 `kdialog`；两者都为 World2D `.tworld`、World3D `.tprefab` 与 SpriteAnimation `.tasset` 选择文件，并为 TileMap/Project

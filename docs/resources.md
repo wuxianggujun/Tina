@@ -47,11 +47,11 @@ Catalog package
 | Registry | generation `AssetHandle`、move-only `AssetLease`；fixed-capacity owner-thread Sprite2D/Mesh3D registry 校验 live Handle/dependency，唯一拥有 resident Lease/GPU/binding，并把 packet-local ref 借给 extraction |
 | 异步加载 | 有界 request queue；IO Task 读取；owner-thread Main completion 解析并发布 |
 | GPU 生命周期 | Null `UploadTicket` 状态机；Texture/Mesh/EnvironmentMap backend retirement marker；AssetLease pin 与 retirement ledger |
-| 产品路径 | Texture2D/Sprite/SpriteAnimationClip/TileMap root/TileMapChunk streaming 2D、StaticMesh/Material/Prefab/EnvironmentMap 3D、AudioClip 均有 Cooked 产品 consumer |
+| 产品路径 | Texture2D/Sprite/SpriteAnimationClip/TileMap root/TileMapChunk/NavigationGrid2D/Fx2D 2D、StaticMesh/Material/Prefab/EnvironmentMap 3D、AudioClip 均有 Cooked 产品 consumer |
 | Editor viewport | `TinaEditor.exe --catalog-root=<UTF-8 path>` 通过真实 AssetSystem + Sprite/Tileset/Mesh registry 解析同一 World2D/TileMap/Prefab/SpriteAnimationClip 文档中的 AssetId；未配置时仅使用明确标记的临时 built-in preview Catalog |
 | Editor Project Browser | 拥有 Catalog metadata、canonical cooked 相对路径与完整 dependency records 的 AssetId 排序索引，All/2D/3D/Media 过滤并按 current schema 打开 Prefab/TileMap/SpriteAnimationClip；其他 kind 进入资源 Inspector |
 | Editor source import | `--project-root` + 可重复混合 `--import-recipe`/`--import-gltf` 保留完整 intended unit 集；后台共享 pipeline 生成 fully validated fresh stage + sibling state，主线程安全帧 reload 后只提交 active pointer，reopen 验证并恢复 Catalog 与 unit 集 |
-| TileMap 导航派生 | `buildTileMapNavigation2DData()` 从 resident solid tile layer、exact material-cost rule 与 property-tagged visible Rectangle 原子生成 immutable `NavigationGrid2DData`；当前不是新 AssetKind |
+| TileMap 导航派生 | `buildTileMapNavigation2DData()` 从 resident solid tile layer、exact material-cost rule 与 property-tagged visible Rectangle 原子生成 immutable `NavigationGrid2DData`；`NavigationGrid2D` v1 可作为独立 Cooked AssetKind 保存同一 flags/cost 数据 |
 
 `AssetHandle.hpp` 被拆为窄 `Tina::AssetTypes` 公共面。2D World 的 `SpriteRenderer2D`、standalone
 `ParticleSystem2D`/`Trail2D` 与 3D `MeshRenderer3D` 复制 weak handle，并在 extraction 时显式借用产品 resolver；A2
@@ -316,7 +316,7 @@ RenderDevice 必须覆盖有 live GPU pin 的 AssetSystem 生命周期。`AssetS
 
 | 领域 | 已有 schema/parser/writer |
 | --- | --- |
-| 2D | `Texture2D`、`Sprite`、`SpriteAnimationClip`、`Tileset`、`TileMap` v3 root、`TileMapChunk` v1 |
+| 2D | `Texture2D`、`Sprite`、`SpriteAnimationClip`、`Tileset`、`TileMap` v3 root、`TileMapChunk` v1、`NavigationGrid2D` v1、`Fx2D` v1 |
 | 3D | `StaticMesh`、`Material`、`Prefab`、`EnvironmentMap` |
 | Audio | `AudioClip` float32 PCM |
 
@@ -382,8 +382,18 @@ resident 数据误当成 cache hit。
 multiplier；可选 object layer 只匹配 visible Rectangle 的精确
 property key/value，并按实际相交 cell 栅格化。引用 chunk 未驻留、layer kind/rule 错误、标记对象不是合法
 Rectangle 或分配失败时不返回半份结果。该转换不修改 TileMapInstance，也不把
-Navigation 数据写回 Catalog；产品 State 决定 Grid/Pathfinder 容量与重建时机。详见
+Navigation 数据写回 TileMap。独立 `NavigationGrid2D` v1 使用32-byte header + row-major flags/cost tables；
+recipe `navigation2d`、typed parser 与 package validation 已接入，产品可用
+`loadNavigationGrid2DDataFromCooked()` 直接建立 immutable data。Editor `Navigation2DAuthoringDocument` 从当前
+TileMap revision bake bit-exact payload，以 fresh authoring overlay 发布 Catalog；Source Import baseline 保持独立，
+TileMap 后续修改会显式把 bake 标为 dirty。产品 State 决定 Grid/Pathfinder 容量与重建时机。详见
 [2D 导航](navigation2d.md)。
+
+`Fx2D` v1 固定184 bytes并要求恰好一个 required Sprite dependency。recipe `fx2d` 的39个 authored values
+完整描述 Particle capacity/count/seed/stable-key、位置/速度/寿命/尺寸/颜色/旋转/排序，以及 Trail
+capacity/lifetime/width/stable-key/UV/颜色/排序；parser 校验 finite range、capacity、reserved 字段与 dependency
+对账。`Fx2DAuthoringDocument` 保存 canonical payload并提供 bounded replace/Undo/Redo；Scene factory 将解析结果
+创建为固定容量 ParticleSystem、initial burst 与 Trail，不取得 Sprite Lease。
 
 `AssetKind` 还包含 Shader 与 Font 枚举值，但当前没有对应的公开 typed payload header、完整 Cooker 与
 产品消费闭环，不能把它们列为已完成资源类型。FreeType 字体仍通过显式 `TINA_UI_FONT_PATH`/fixture
@@ -450,8 +460,9 @@ little-endian header，diffuse/specular 为 RGBA16F cubemap、specular 要求完
   live Catalog/project switch，以及 Editor source-import fresh-stage/reload/单一 pointer commit/reopen 产品流程均已完成；
   Windows 使用系统 dialog，Linux 私有 adapter 使用 `zenity` 并在缺失时回退 `kdialog`。Linux 定向编译与真实 helper
   产品门禁完成前，项目产品流程仍为 InProgress；
-- Navigation2D 的 runtime-derived immutable weighted grid、动态 blocker 和确定性四向/对角 A* 已闭环；独立 Cooked
-  Navigation AssetKind、editor bake 与自动 Physics 同步仍未提供；
+- Navigation2D 的 runtime-derived/Cooked immutable weighted grid、动态 blocker、确定性四向/对角 A*、Editor bake
+  与 fresh authoring overlay 已闭环；`Asset::PhysicsNavigationSync2D` 提供显式 Physics2D→Navigation2D 动态 blocker
+  同步，Cooked 数据只包含静态 Tile solid，Navigation 不反向生成 Physics collider；
 - shader/font typed Cooked schema、密码学包签名和通用跨平台 Cooker 仍需独立设计与验收；
 - Linux 当前 tip GCC13/Clang22（含 sanitizer）复验已由 `TEST-001` 关闭；可选 Wayland/真显示器是独立扩展。
 

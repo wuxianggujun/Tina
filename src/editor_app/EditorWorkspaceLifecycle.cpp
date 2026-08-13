@@ -81,14 +81,11 @@ auto EditorWorkspaceState::updateFrame(Tina::FrameUpdateContext& context) -> Tin
         projectBrowserUiRefreshPending_ = true;
     }
     if (previewAssetBindingsRefreshPending_) {
-        releasePreviewAssetBindings();
-        if (auto status = preparePreviewAssetBindings(); !status) {
+        if (auto status = rebuildLiveCatalogPreview(
+                "Catalog preview bindings refreshed at the frame boundary");
+            !status) {
             return status;
         }
-        if (auto status = validateRuntimePreview(); !status) {
-            return status;
-        }
-        ++counters_.previewAssetBindingRefreshes;
         previewAssetBindingsRefreshPending_ = false;
     }
     if (options_.autoDemo &&
@@ -375,38 +372,61 @@ auto EditorWorkspaceState::updateFrame(Tina::FrameUpdateContext& context) -> Tin
                 }
                 break;
             case 34:
-                if (workspaceMode_ == WorkspaceMode::World2D) {
-                    ++autoAuthoringStage_;
+                if (workspaceMode_ == WorkspaceMode::World2D && tileMapEditingContext()) {
+                    (void)queueAutoCommand(EditorCommand::BakeNavigation2D);
+                } else if (workspaceMode_ == WorkspaceMode::World2D &&
+                           !pendingDocumentTabActivation_.has_value()) {
+                    pendingDocumentTabActivation_ = 2U;
                 } else {
                     (void)queueAutoCommand(EditorCommand::SwitchToWorld2D);
                 }
                 break;
             case 35:
-                (void)queueAutoCommand(EditorCommand::AnimationNextFrame);
+                if (workspaceMode_ == WorkspaceMode::World2D && tileMapEditingContext() &&
+                    !pendingDocumentTabActivation_.has_value()) {
+                    pendingDocumentTabActivation_ = 3U;
+                } else {
+                    (void)queueAutoCommand(EditorCommand::AnimationNextFrame);
+                }
                 break;
             case 36:
-                (void)queueAutoCommand(EditorCommand::AnimationCycleMode);
+                (void)queueAutoCommand(EditorCommand::AnimationAddEvent);
                 break;
             case 37:
-                (void)queueAutoCommand(EditorCommand::AnimationUndo);
+                (void)queueAutoCommand(EditorCommand::AnimationRemoveEvent);
                 break;
             case 38:
-                (void)queueAutoCommand(EditorCommand::AnimationRedo);
+                (void)queueAutoCommand(EditorCommand::AnimationUndo);
                 break;
             case 39:
-                (void)queueAutoCommand(EditorCommand::AnimationCookPreview);
+                (void)queueAutoCommand(EditorCommand::AnimationRedo);
                 break;
             case 40:
+                (void)queueAutoCommand(EditorCommand::AnimationAddEvent);
+                break;
+            case 41:
+                (void)queueAutoCommand(EditorCommand::AnimationCycleMode);
+                break;
+            case 42:
+                (void)queueAutoCommand(EditorCommand::AnimationUndo);
+                break;
+            case 43:
+                (void)queueAutoCommand(EditorCommand::AnimationRedo);
+                break;
+            case 44:
+                (void)queueAutoCommand(EditorCommand::AnimationCookPreview);
+                break;
+            case 45:
                 if (options_.initialWorkspace == WorkspaceMode::World2D) {
                     ++autoAuthoringStage_;
                 } else {
                     (void)queueAutoCommand(EditorCommand::SwitchToWorld3D);
                 }
                 break;
-            case 41:
+            case 46:
                 (void)queueAutoCommand(EditorCommand::OpenSelectedProjectAsset);
                 break;
-            case 42:
+            case 47:
                 if (counters_.tabOwnedDocumentLoads != 0U) {
                     const auto* activeTab = documentTabs_.activeTab();
                     if (activeTab == nullptr) {
@@ -430,12 +450,12 @@ auto EditorWorkspaceState::updateFrame(Tina::FrameUpdateContext& context) -> Tin
                 }
                 ++autoAuthoringStage_;
                 break;
-            case 43:
+            case 48:
                 (void)queueAutoCommand(options_.initialWorkspace == WorkspaceMode::World2D
                                            ? EditorCommand::SwitchToWorld2D
                                            : EditorCommand::SwitchToWorld3D);
                 break;
-            case 44:
+            case 49:
                 if (workspaceMode_ == options_.initialWorkspace &&
                     !pendingEditorCommand_.has_value()) {
                     const auto stableId = automaticHierarchyStableId(true);
@@ -446,7 +466,7 @@ auto EditorWorkspaceState::updateFrame(Tina::FrameUpdateContext& context) -> Tin
                     }
                 }
                 break;
-            case 45:
+            case 50:
                 // Allow the final workspace/selection mutations to publish
                 // through one complete retained-UI frame before shutdown.
                 ++autoAuthoringStage_;

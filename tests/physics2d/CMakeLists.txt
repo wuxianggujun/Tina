@@ -22,6 +22,7 @@ add_executable(tina_physics2d_tests
     PhysicsWorld2DTests.cpp
     PhysicsGridBodiesTests.cpp
     TileMapPhysicsSyncTests.cpp
+    PhysicsNavigationSync2DTests.cpp
     CharacterControllerPhysicsCoexistenceTests.cpp
     $<TARGET_OBJECTS:tina_physics2d_header_isolation>
 )

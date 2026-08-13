@@ -1051,6 +1051,15 @@ auto EditorWorkspaceState::publishWorkspaceSessionCounters() noexcept -> void{
                               !counters_.documentDirty;
     counters_.savedSnapshotBytes =
         active != nullptr ? active->savedBaseline.byteCount() : 0U;
+    counters_.navigationBakeRevision = navigationDocument_.revision();
+    counters_.navigationSourceTileMapRevision =
+        navigationDocument_.sourceTileMapRevision();
+    counters_.navigationPayloadBytes = navigationDocument_.hasBake()
+        ? navigationDocument_.preview().payloadBytes.size()
+        : 0U;
+    counters_.navigationBakeReady = navigationDocument_.hasBake();
+    counters_.navigationBakeDirty =
+        navigationDocument_.isDirtyFor(tileMapDocument_.revision());
 }
 
 auto EditorWorkspaceState::activeDocumentBytes() const noexcept -> std::span<const std::byte>{

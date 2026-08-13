@@ -130,6 +130,9 @@ public:
     [[nodiscard]] Core::Status setFrame(
         Core::usize index, const AssetFormat::SpriteAnimationFrameDesc& frame);
     [[nodiscard]] Core::Status setFrameDuration(Core::usize index, float durationSeconds);
+    [[nodiscard]] Core::Status setFrameEvents(
+        Core::usize index,
+        std::span<const AssetFormat::SpriteAnimationEventDesc> events);
     [[nodiscard]] Core::Status duplicateFrame(Core::usize index);
     [[nodiscard]] Core::Status eraseFrame(Core::usize index);
     // destinationIndex is the frame's final index after the move.

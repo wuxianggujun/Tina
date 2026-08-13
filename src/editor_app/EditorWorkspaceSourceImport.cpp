@@ -38,7 +38,7 @@ auto EditorWorkspaceState::startSourceImport(
     Tina::EditorApp::Detail::EditorSourceImportRequest request{};
     try {
         request.sourceRootUtf8.assign(activeProjectWorkspace_->sourceRootUtf8());
-        request.baselineCatalogRootUtf8 = assetResources_.catalogRootUtf8;
+        request.baselineCatalogRootUtf8 = assetResources_.sourceImportCatalogRootUtf8;
         request.baselineStatePathUtf8 = assetResources_.sourceImportStatePathUtf8;
         request.freshStageRootUtf8 = stagePaths->catalogRootUtf8;
         request.freshStageStatePathUtf8 = stagePaths->statePathUtf8;
@@ -146,6 +146,41 @@ auto EditorWorkspaceState::cleanupOwnedSourceImportStage(std::string_view catalo
     }
 }
 
+auto EditorWorkspaceState::cleanupOwnedAuthoringStage(std::string_view catalogRootUtf8) noexcept -> void{
+    if (catalogRootUtf8.empty() || !activeProjectWorkspace_.has_value()) {
+        return;
+    }
+    try {
+        const auto cache = authoringCachePaths(*activeProjectWorkspace_);
+        const auto catalogRoot = std::filesystem::u8path(
+            catalogRootUtf8.begin(), catalogRootUtf8.end());
+        const auto stageRoot = catalogRoot.parent_path().lexically_normal();
+        if (stageRoot.empty() ||
+            !validatePhysicalProjectDirectory(cache.stages, "authoringStages") ||
+            !validatePhysicalProjectDirectory(stageRoot, "authoringStage")) {
+            return;
+        }
+        std::error_code canonicalError;
+        const auto projectRoot = std::filesystem::u8path(
+            activeProjectWorkspace_->projectRootUtf8().begin(),
+            activeProjectWorkspace_->projectRootUtf8().end());
+        const auto physicalProject =
+            std::filesystem::weakly_canonical(projectRoot, canonicalError);
+        const auto physicalStages =
+            std::filesystem::weakly_canonical(cache.stages, canonicalError);
+        const auto physicalStage =
+            std::filesystem::weakly_canonical(stageRoot, canonicalError);
+        if (canonicalError ||
+            !pathIsSameOrDescendant(physicalStages, physicalProject) ||
+            !pathsReferToSameLocation(physicalStage.parent_path(), physicalStages)) {
+            return;
+        }
+        std::error_code cleanupError;
+        (void)std::filesystem::remove_all(stageRoot, cleanupError);
+    } catch (...) {
+    }
+}
+
 auto EditorWorkspaceState::cleanupFailedSourceImportStage() noexcept -> void{
     cleanupOwnedSourceImportStage(sourceImportPendingStageRootUtf8_);
     sourceImportPendingStageRootUtf8_.clear();
@@ -155,6 +190,19 @@ auto EditorWorkspaceState::publishCommittedSourceImportState(
     const Tina::EditorApp::Detail::EditorSourceImportReadyStage& ready) -> Tina::Core::Status{
     if (!ready.stageCreated) {
         return Tina::Core::success();
+    }
+    if (activeProjectWorkspace_.has_value()) {
+        const auto authoringPointer =
+            authoringCachePaths(*activeProjectWorkspace_).activeCatalogPointer;
+        std::error_code pointerError;
+        (void)std::filesystem::remove(authoringPointer, pointerError);
+        if (pointerError && pointerError != std::errc::no_such_file_or_directory) {
+            Tina::Core::Error error{
+                Tina::Core::CoreErrorCode::Io,
+                "Editor could not retire the active authoring Catalog pointer"};
+            error.setNativeCode(pointerError.value());
+            return Tina::Core::failure(std::move(error));
+        }
     }
     try {
         std::error_code stateError;
@@ -182,6 +230,8 @@ auto EditorWorkspaceState::publishCommittedSourceImportState(
     }
     cleanupOwnedSourceImportStage(sourceImportSupersededCatalogRootUtf8_);
     sourceImportSupersededCatalogRootUtf8_.clear();
+    cleanupOwnedAuthoringStage(sourceImportSupersededAuthoringCatalogRootUtf8_);
+    sourceImportSupersededAuthoringCatalogRootUtf8_.clear();
     return Tina::Core::success();
 }
 
@@ -207,12 +257,16 @@ auto EditorWorkspaceState::commitSourceImportCatalog(
         previousSelection = selected->assetId;
     }
     std::string nextCatalogRoot;
+    std::string nextSourceImportCatalogRoot;
     std::string nextStatePath;
-    std::string previousCatalogRoot;
+    std::string previousSourceImportCatalogRoot;
+    std::string previousAuthoringCatalogRoot;
     try {
         nextCatalogRoot = ready.stageRootUtf8;
+        nextSourceImportCatalogRoot = ready.stageRootUtf8;
         nextStatePath = ready.statePathUtf8;
-        previousCatalogRoot = assetResources_.catalogRootUtf8;
+        previousSourceImportCatalogRoot = assetResources_.sourceImportCatalogRootUtf8;
+        previousAuthoringCatalogRoot = assetResources_.authoringCatalogRootUtf8;
     } catch (const std::bad_alloc&) {
         return Tina::Core::failure(
             Tina::Core::CoreErrorCode::OutOfMemory,
@@ -293,8 +347,14 @@ auto EditorWorkspaceState::commitSourceImportCatalog(
         return status;
     }
     assetResources_.catalogRootUtf8.swap(nextCatalogRoot);
+    assetResources_.sourceImportCatalogRootUtf8.swap(nextSourceImportCatalogRoot);
     assetResources_.sourceImportStatePathUtf8.swap(nextStatePath);
-    sourceImportSupersededCatalogRootUtf8_ = std::move(previousCatalogRoot);
+    assetResources_.authoringCatalogRootUtf8.clear();
+    navigationDocument_.markCatalogDirty();
+    sourceImportSupersededCatalogRootUtf8_ =
+        std::move(previousSourceImportCatalogRoot);
+    sourceImportSupersededAuthoringCatalogRootUtf8_ =
+        std::move(previousAuthoringCatalogRoot);
     assetResources_.catalogEntryCount = static_cast<u32>(browser->itemCount());
     counters_.catalogEntryCount = assetResources_.catalogEntryCount;
     if (auto status = rebuildLiveCatalogPreview(

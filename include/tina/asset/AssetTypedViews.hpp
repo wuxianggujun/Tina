@@ -3,7 +3,9 @@
 #include <tina/asset/CookedAssetFile.hpp>
 #include <tina/asset_format/AudioClipPayload.hpp>
 #include <tina/asset_format/EnvironmentMapPayload.hpp>
+#include <tina/asset_format/Fx2DPayload.hpp>
 #include <tina/asset_format/MaterialPayload.hpp>
+#include <tina/asset_format/NavigationGrid2DPayload.hpp>
 #include <tina/asset_format/PrefabPayload.hpp>
 #include <tina/asset_format/SpriteAnimationClipPayload.hpp>
 #include <tina/asset_format/SpritePayload.hpp>
@@ -12,6 +14,7 @@
 #include <tina/asset_format/TileMapPayload.hpp>
 #include <tina/asset_format/TilesetPayload.hpp>
 #include <tina/core/error/Result.hpp>
+#include <tina/navigation2d/NavigationGrid2D.hpp>
 
 #include <vector>
 
@@ -53,6 +56,17 @@ parseStaticMeshFromCooked(const CookedAssetFile& file);
 // Material cooked payload accessor (UnlitBaseColor + cooked PBR factors/texture flags).
 [[nodiscard]] Core::Result<AssetFormat::MaterialPayloadView>
 parseMaterialFromCooked(const CookedAssetFile& file);
+
+[[nodiscard]] Core::Result<AssetFormat::NavigationGrid2DPayloadView>
+parseNavigationGrid2DFromCooked(const CookedAssetFile& file);
+
+[[nodiscard]] Core::Result<AssetFormat::Fx2DPayloadDesc>
+parseFx2DFromCooked(const CookedAssetFile& file);
+
+[[nodiscard]] Core::Result<Navigation2D::NavigationGrid2DData>
+loadNavigationGrid2DDataFromCooked(
+    const CookedAssetFile& file,
+    std::pmr::memory_resource& resource = *std::pmr::get_default_resource());
 
 // M11-E6b: Prefab cooked payload. Node storage is owned by the returned object;
 // the PrefabPayloadView.nodes span aliases into `nodes`.

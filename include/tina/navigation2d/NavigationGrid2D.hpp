@@ -7,6 +7,7 @@
 
 #include <compare>
 #include <memory_resource>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -43,6 +44,8 @@ struct NavigationCellRect2D final {
 struct NavigationGrid2DDataDesc final {
     Core::u32 widthCells = 0;
     Core::u32 heightCells = 0;
+    float originXMeters = 0.0F;
+    float originYMeters = 0.0F;
     float cellSizeMeters = 1.0F;
     // Row-major cell flags. Only NavigationGrid2DContract::CellBlocked is valid.
     std::span<const Core::u8> cellFlags{};
@@ -68,6 +71,8 @@ public:
     [[nodiscard]] Core::u32 widthCells() const noexcept { return m_widthCells; }
     [[nodiscard]] Core::u32 heightCells() const noexcept { return m_heightCells; }
     [[nodiscard]] Core::usize cellCount() const noexcept { return m_cellFlags.size(); }
+    [[nodiscard]] float originXMeters() const noexcept { return m_originXMeters; }
+    [[nodiscard]] float originYMeters() const noexcept { return m_originYMeters; }
     [[nodiscard]] float cellSizeMeters() const noexcept { return m_cellSizeMeters; }
     [[nodiscard]] std::span<const Core::u8> cellFlags() const noexcept { return m_cellFlags; }
     [[nodiscard]] std::span<const Core::u8> traversalCosts() const noexcept { return m_traversalCosts; }
@@ -78,13 +83,16 @@ public:
     [[nodiscard]] Core::u8 traversalCostAt(NavigationCell2D cell) const noexcept;
 
 private:
-    NavigationGrid2DData(Core::u32 widthCells, Core::u32 heightCells, float cellSizeMeters,
+    NavigationGrid2DData(Core::u32 widthCells, Core::u32 heightCells,
+                         float originXMeters, float originYMeters, float cellSizeMeters,
                          std::pmr::vector<Core::u8> cellFlags,
                          std::pmr::vector<Core::u8> traversalCosts,
                          Core::u8 minimumTraversalCost) noexcept;
 
     Core::u32 m_widthCells = 0;
     Core::u32 m_heightCells = 0;
+    float m_originXMeters = 0.0F;
+    float m_originYMeters = 0.0F;
     float m_cellSizeMeters = 0.0F;
     std::pmr::vector<Core::u8> m_cellFlags;
     std::pmr::vector<Core::u8> m_traversalCosts;
@@ -122,6 +130,8 @@ public:
     [[nodiscard]] Core::u32 widthCells() const noexcept { return m_data.widthCells(); }
     [[nodiscard]] Core::u32 heightCells() const noexcept { return m_data.heightCells(); }
     [[nodiscard]] Core::usize cellCount() const noexcept { return m_data.cellCount(); }
+    [[nodiscard]] float originXMeters() const noexcept { return m_data.originXMeters(); }
+    [[nodiscard]] float originYMeters() const noexcept { return m_data.originYMeters(); }
     [[nodiscard]] float cellSizeMeters() const noexcept { return m_data.cellSizeMeters(); }
     [[nodiscard]] bool inBounds(NavigationCell2D cell) const noexcept { return m_data.inBounds(cell); }
     [[nodiscard]] bool isBaseBlocked(NavigationCell2D cell) const noexcept { return m_data.blockedAt(cell); }
@@ -142,6 +152,8 @@ public:
     [[nodiscard]] Core::Result<NavigationBlockerId> addBlocker(NavigationCellRect2D rect);
     [[nodiscard]] Core::Status updateBlocker(NavigationBlockerId blocker, NavigationCellRect2D rect);
     [[nodiscard]] Core::Status removeBlocker(NavigationBlockerId blocker);
+    [[nodiscard]] std::optional<NavigationCellRect2D> blockerRect(
+        NavigationBlockerId blocker) const noexcept;
     [[nodiscard]] bool containsBlocker(NavigationBlockerId blocker) const noexcept
     {
         return m_blockers.contains(blocker);

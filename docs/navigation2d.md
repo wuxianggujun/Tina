@@ -115,25 +115,37 @@ query 置为吸收态 `Cancelled`。
 `path()` 是借用 span，只到下一次 `begin()`、`reset()` 或 Pathfinder 析构有效。Pending query 借用开始时的
 **同一个 Grid 对象地址**与 revision；不得在 Pending 期间移动或修改 Grid。
 
+## Physics2D 动态 blocker 同步
+
+`Tina::Asset::PhysicsNavigationSync2D` 是当前唯一的 Physics2D -> Navigation2D 桥。PhysicsWorld 与 NavigationGrid
+仍由 gameplay owner 显式持有，桥只接受注册的 `PhysicsBodyId` 和 body-local `PhysicsAabb2D`，不扫描 PhysicsWorld
+也不读取 Box2D geometry。每次 owner-thread Physics step 后调用 `synchronize(world, grid)`，桥读取 body transform，
+将旋转后的保守 world AABB 栅格化为一个 fixed-capacity generation blocker。disabled 或完全出界 body 临时移除 blocker，
+重新入界后恢复；stale body 自动摘除 registration。所有 registration、planner 与 blocker capacity 在 `Create()` 预分配，
+稳态同步不使用 PMR/system heap。容量不足、wrong owner/grid、外部 blocker mutation 均 fail closed 并保留上一份发布状态。
+
+产品 2D 的 Cooked Navigation 只包含 TileMap solid cells；crate 等动态 gameplay body 不再由 Navigation bake 重复写入，
+而由该桥运行时发布。teardown 必须先 `shutdown(grid)`，再销毁 Physics/Navigation owner。
+
 ## 产品 2D 接入
 
-`tina_sample_2d` 使用 collision layer `20` 和 gameplay object layer `30`，以 `role=crate` 选择 visible
-Rectangle blocker。当前8×4产品地图生成：
+`tina_sample_2d` 使用 collision layer `20` 生成静态 Cooked/live Navigation；gameplay object layer `30` 的
+`role=crate` 不再 bake 进静态 grid，而由 `PhysicsNavigationSync2D` 在每次 Physics step 后发布为动态 blocker。
+当前8×4产品地图的静态 grid 生成：
 
 - solid tile cells：11；
-- blocker rectangles：1；
-- 去重 blocked cells：13；
+- bake 期 blocker rectangles：0；
+- 去重 blocked cells：11；
 - weighted cells：1，maximum traversal cost：5；
-- `(1,3) -> (5,3)` 基础路径：7 cells；
+- 独立 `NavigationGrid2D` v1 Cooked asset 与 live derive bit-exact；
+- 基础/动态/严格/切角 path cells/cost 均为 `5/40`（crate 由 bridge 发布后路径已绕行）；
 - `(1,2) -> (5,2)` 加权路径绕过 cost 5 cell：7 cells、cost 60；
-- 同一起终点的严格防切角路径：6 cells、cost 54；
-- 同一起终点的允许切角路径：5 cells、cost 48；
-- 添加动态 blocker `{4,2,1,1}` 后路径：9 cells；
 - 分步查询展开1个 node 后取消：`Cancelled`；
-- add/remove 后最终 Grid revision：3，live dynamic blocker：0。
+- Physics bridge：synchronizations/adds/updates/removes 与 registered/published=`1/1`；
+- 产品 mutation 后 Grid revision：10，dynamic blocker mutations：2。
 
-这些字段进入 product evidence schema 27 与 sample JSON；它们证明 TileMap 转换、material cost、两种对角
-策略、确定性改道和取消的产品垂直接线，不替代模块的容量、不可达、stale ID、失效与零稳态分配测试。
+这些字段进入 product evidence schema 29 与 sample JSON；它们证明 Cooked Navigation、material cost、对角
+策略、Physics 动态 blocker 与取消的产品垂直接线，不替代模块的容量、不可达、stale ID、失效与零稳态分配测试。
 
 ## 最小验证
 
@@ -154,6 +166,7 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
 ## 当前限制
 
 - 仅矩形 grid 与每格整数 traversal multiplier；没有 navmesh 或 hierarchical pathfinding；
-- 没有内建异步 worker、query queue、crowd/avoidance 或 Physics2D 自动同步；
-- 没有独立 cooked Navigation asset、editor bake/preview 或 gameplay serialization；
+- 没有内建异步 worker、query queue 或 crowd/avoidance；
+- Physics2D 动态 blocker 仅经显式注册的 `PhysicsNavigationSync2D` 桥同步，不扫描 World、不反向生成 collider；
+- 独立 Cooked NavigationGrid2D v1 与 Editor bake/overlay 已落地；不提供 gameplay 侧 navigation snapshot 序列化；
 - Grid/Pathfinder 是单 owner-thread 可变对象，不提供并发 mutation/query。

@@ -80,9 +80,13 @@ enum class PhysicsShapeKind2D : Core::u8 {
     Circle,
     Capsule,
     ConvexPolygon,
+    Chain,
 };
 
 inline constexpr Core::usize MaximumConvexPolygonVertices2D = 8;
+inline constexpr Core::usize MinimumChainVertices2D = 4;
+inline constexpr Core::usize MaximumChainVertices2D = 64;
+inline constexpr float MinimumChainVertexSeparationMeters2D = 0.005F;
 
 struct PhysicsShape2DDesc final {
     PhysicsShapeKind2D kind = PhysicsShapeKind2D::Box;
@@ -102,6 +106,13 @@ struct PhysicsShape2DDesc final {
     // is applied before backend upload.
     std::array<PhysicsVec2, MaximumConvexPolygonVertices2D> polygonVertices{};
     Core::u32 polygonVertexCount = 0;
+    // Chain: 4..64 finite body-local points separated by more than 0.005 m.
+    // Box2D creates one-sided segments whose collision face is on the right of
+    // each directed edge, and requires a static owner body. A loop closes the
+    // last point to the first, so do not repeat the first point last.
+    std::array<PhysicsVec2, MaximumChainVertices2D> chainVertices{};
+    Core::u32 chainVertexCount = 0;
+    bool chainLoop = false;
     float density = 1.0F;
     float friction = 0.6F;
     float restitution = 0.0F;

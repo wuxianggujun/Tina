@@ -338,11 +338,15 @@ auto EditorWorkspaceState::switchLiveProjectCatalog(
             resolvedCatalog.error());
     }
     std::string nextCatalogRoot;
+    std::string nextSourceImportCatalogRoot;
     std::string nextSourceImportStatePath;
+    std::string nextAuthoringCatalogRoot;
     std::string successFeedback;
     try {
         nextCatalogRoot = resolvedCatalog->catalogRootUtf8;
+        nextSourceImportCatalogRoot = resolvedCatalog->sourceImportCatalogRootUtf8;
         nextSourceImportStatePath = resolvedCatalog->sourceImportStatePathUtf8;
+        nextAuthoringCatalogRoot = resolvedCatalog->authoringCatalogRootUtf8;
         successFeedback = "Project switched: ";
         successFeedback += workspace.projectRootUtf8();
     } catch (const std::bad_alloc&) {
@@ -402,7 +406,9 @@ auto EditorWorkspaceState::switchLiveProjectCatalog(
     }
 
     assetResources_.catalogRootUtf8.swap(nextCatalogRoot);
+    assetResources_.sourceImportCatalogRootUtf8.swap(nextSourceImportCatalogRoot);
     assetResources_.sourceImportStatePathUtf8.swap(nextSourceImportStatePath);
+    assetResources_.authoringCatalogRootUtf8.swap(nextAuthoringCatalogRoot);
     assetResources_.catalogEntryCount =
         static_cast<u32>(candidateBrowser->itemCount());
     assetResources_.projectCatalogConfigured = true;
@@ -424,6 +430,7 @@ auto EditorWorkspaceState::switchLiveProjectCatalog(
     sourceImportPointerPathUtf8_.clear();
     sourceImportPendingStageRootUtf8_.clear();
     sourceImportSupersededCatalogRootUtf8_.clear();
+    sourceImportSupersededAuthoringCatalogRootUtf8_.clear();
     sourceImportCatalogCommitted_ = false;
     ++counters_.projectSwitches;
     observedProjectAssetSelectionIndex_.reset();

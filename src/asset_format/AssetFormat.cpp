@@ -96,7 +96,7 @@ template <typename Bytes> [[nodiscard]] Bytes readFixedBytes(std::span<const std
 
 [[nodiscard]] constexpr bool isKnownAssetKind(AssetKind kind) noexcept
 {
-    return kind >= AssetKind::Texture2D && kind <= AssetKind::EnvironmentMap;
+    return kind >= AssetKind::Texture2D && kind <= AssetKind::Fx2D;
 }
 
 [[nodiscard]] constexpr bool isKnownTargetPlatform(TargetPlatform platform) noexcept

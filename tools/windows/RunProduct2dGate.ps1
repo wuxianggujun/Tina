@@ -61,6 +61,7 @@ $targets = @(
     'tina_physics2d_tests',
     'tina_audio_tests',
     'tina_audio_miniaudio_tests',
+    'tina_asset_format_tests',
     'tina_asset_tests'
 )
 $testExes = @(
@@ -76,6 +77,7 @@ $testExes = @(
     'tina_physics2d_tests.exe',
     'tina_audio_tests.exe',
     'tina_audio_miniaudio_tests.exe',
+    'tina_asset_format_tests.exe',
     'tina_asset_tests.exe'
 )
 
@@ -143,31 +145,48 @@ if ($sampleOut -notmatch $gatePattern) {
     Add-Step -Name 'productGate' -ExitCode 1 -Detail "expected $expectedGate; output=$($sampleOut.Trim())"
 }
 $requiredProductEvidence = @(
-    'evidenceSchema\":27',
+    'evidenceSchema\":29',
+    'catalogRecipeAssets\":17',
+    'animEventFootsteps\":[1-9][0-9]*',
+    'animEventHits\":[1-9][0-9]*',
+    'animEventOverflow\":0',
+    'animEventUnknownTags\":0',
     'navigationReady\":true',
+    'navigationFromCookedAsset\":true',
+    'navigationCookedBitExact\":true',
     'navigationSolidTileCells\":11',
-    'navigationBlockerRectangles\":1',
-    'navigationBlockedCells\":13',
+    'navigationBlockerRectangles\":0',
+    'navigationBlockedCells\":11',
     'navigationWeightedCells\":1',
     'navigationMaximumTraversalCost\":5',
-    'navigationBasePathCells\":9',
-    'navigationBasePathCost\":80',
-    'navigationDynamicPathCells\":7',
-    'navigationDynamicPathCost\":100',
-    'navigationStrictDiagonalPathCells\":6',
-    'navigationStrictDiagonalPathCost\":62',
+    'navigationBasePathCells\":5',
+    'navigationBasePathCost\":40',
+    'navigationDynamicPathCells\":5',
+    'navigationDynamicPathCost\":40',
+    'navigationStrictDiagonalPathCells\":5',
+    'navigationStrictDiagonalPathCost\":40',
     'navigationCornerCutPathCells\":5',
-    'navigationCornerCutPathCost\":56',
+    'navigationCornerCutPathCost\":40',
     'navigationWeightedPathCells\":7',
     'navigationWeightedPathCost\":60',
     'navigationWeightedPathAvoidedCostCell\":true',
     'navigationIncrementalExpandedNodes\":1',
-    'navigationGridRevision\":3',
+    'navigationGridRevision\":10',
     'navigationDynamicBlockerMutations\":2',
+    'navigationPhysicsSynchronizations\":[2-9][0-9]*',
+    'navigationPhysicsBlockerAdds\":[1-9][0-9]*',
+    'navigationPhysicsBlockerUpdates\":[1-9][0-9]*',
+    'navigationPhysicsPublishedBlockers\":1',
+    'navigationPhysicsRegisteredBodies\":1',
+    'navigationPhysicsReady\":true',
     'navigationCancelled\":true',
     'physicsConvexPolygonReady\":true',
     'physicsRevoluteJointReady\":true',
     'physicsPrismaticJointReady\":true',
+    'physicsChainReady\":true',
+    'physicsStaticBodies\":1',
+    'physicsStaticSolidCells\":11',
+    'physicsStaticBoxShapes\":2',
     'sprite2DLightingConfigured\":true',
     'authoredPointLight2DCount\":3',
     'pointLight2DCount\":2',
@@ -251,9 +270,9 @@ $requiredProductEvidence = @(
 )
 if ($SampleFrames -eq 300) {
     $requiredProductEvidence += @(
-        'particleExpired\":4',
-        'particleActive\":6',
-        'particleExtracted\":6',
+        'particleExpired\":0',
+        'particleActive\":10',
+        'particleExtracted\":10',
         'trailActive\":3',
         'trailExtracted\":3'
     )

@@ -1490,8 +1490,14 @@ auto EditorWorkspaceState::buildInspectorUi(UiBuildContext& ui, UI::UINodeId par
         return status;
     }
     if (auto status = storeNode(ui.createButton(tileMapGameplayRow, "Generate Gameplay",
-                                             fixedSize(214.0F, 30.0F)),
+                                             fixedSize(104.0F, 30.0F)),
                                 generateTileMapGameplayButton_);
+        !status) {
+        return status;
+    }
+    if (auto status = storeNode(ui.createButton(tileMapGameplayRow, "Bake Navigation",
+                                             fixedSize(104.0F, 30.0F)),
+                                bakeNavigationButton_);
         !status) {
         return status;
     }
@@ -1523,7 +1529,7 @@ auto EditorWorkspaceState::buildInspectorUi(UiBuildContext& ui, UI::UINodeId par
 auto EditorWorkspaceState::buildTimelineUi(UiBuildContext& ui, UI::UINodeId parent) -> Tina::Core::Status
 {
     UI::UINodeId animationTimeline{};
-    UI::UILayoutStyle animationTimelineStyle = fillWidth(140.0F);
+    UI::UILayoutStyle animationTimelineStyle = fillWidth(174.0F);
     animationTimelineStyle.flexItem.shrink = 0.0F;
     animationTimelineStyle.flexContainer.direction = UI::UIFlexDirection::Column;
     animationTimelineStyle.flexContainer.gap.row = 5.0F;
@@ -1697,6 +1703,68 @@ auto EditorWorkspaceState::buildTimelineUi(UiBuildContext& ui, UI::UINodeId pare
                                              fixedSize(54.0F, 28.0F), true,
                                              UI::UIStyleRoleId::ButtonText),
                                 animationRedoButton_);
+        !status) {
+        return status;
+    }
+
+    UI::UINodeId animationEventRow{};
+    UI::UILayoutStyle animationEventStyle = fillWidth(30.0F);
+    animationEventStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+    animationEventStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+    animationEventStyle.flexContainer.gap.column = 6.0F;
+    if (auto status = storeNode(ui.createPanel(animationTimeline, animationEventStyle,
+                                            UI::UIStyleRoleId::None),
+                                animationEventRow);
+        !status) {
+        return status;
+    }
+    UI::UINodeId animationEventLabel{};
+    if (auto status = storeNode(ui.createLabel(animationEventRow, "Notify",
+                                            fixedSize(44.0F, 22.0F), ui.secondaryText),
+                                animationEventLabel);
+        !status) {
+        return status;
+    }
+    if (auto status = storeNode(ui.createButton(animationEventRow, "Prev Event",
+                                             fixedSize(78.0F, 28.0F)),
+                                animationEventPreviousButton_);
+        !status) {
+        return status;
+    }
+    if (auto status = storeNode(ui.createButton(animationEventRow, "Next Event",
+                                             fixedSize(78.0F, 28.0F)),
+                                animationEventNextButton_);
+        !status) {
+        return status;
+    }
+    if (auto status = storeNode(ui.createTextEdit(animationEventRow, "footstep",
+                                               fixedSize(116.0F, 28.0F), true),
+                                animationEventTag_);
+        !status) {
+        return status;
+    }
+    if (auto status = storeNode(ui.createTextEdit(animationEventRow, "50%",
+                                               fixedSize(72.0F, 28.0F), true),
+                                animationEventOffset_);
+        !status) {
+        return status;
+    }
+    if (auto status = storeNode(ui.createButton(animationEventRow, "Add Event",
+                                             fixedSize(74.0F, 28.0F)),
+                                animationEventAddButton_);
+        !status) {
+        return status;
+    }
+    if (auto status = storeNode(ui.createButton(animationEventRow, "Apply",
+                                             fixedSize(58.0F, 28.0F), false),
+                                animationEventApplyButton_);
+        !status) {
+        return status;
+    }
+    if (auto status = storeNode(ui.createButton(animationEventRow, "Remove",
+                                             fixedSize(66.0F, 28.0F), false,
+                                             UI::UIStyleRoleId::ButtonDanger),
+                                animationEventRemoveButton_);
         !status) {
         return status;
     }
@@ -2000,6 +2068,11 @@ auto EditorWorkspaceState::registerUiCallbacks(UiBuildContext& ui) -> Tina::Core
     if (auto status = bindEditorCommand(cookTileMapButton_, EditorCommand::CookTileMapPreview); !status) {
         return status;
     }
+    if (auto status = bindEditorCommand(bakeNavigationButton_,
+                                        EditorCommand::BakeNavigation2D);
+        !status) {
+        return status;
+    }
     if (auto status = bindEditorCommand(generateTileMapGameplayButton_,
                                         EditorCommand::GenerateTileMapGameplay);
         !status) {
@@ -2017,6 +2090,11 @@ auto EditorWorkspaceState::registerUiCallbacks(UiBuildContext& ui) -> Tina::Core
         std::pair{animationCycleSpriteButton_, EditorCommand::AnimationCycleSprite},
         std::pair{animationDurationDecreaseButton_, EditorCommand::AnimationDecreaseDuration},
         std::pair{animationDurationIncreaseButton_, EditorCommand::AnimationIncreaseDuration},
+        std::pair{animationEventPreviousButton_, EditorCommand::AnimationPreviousEvent},
+        std::pair{animationEventNextButton_, EditorCommand::AnimationNextEvent},
+        std::pair{animationEventAddButton_, EditorCommand::AnimationAddEvent},
+        std::pair{animationEventApplyButton_, EditorCommand::AnimationApplyEvent},
+        std::pair{animationEventRemoveButton_, EditorCommand::AnimationRemoveEvent},
         std::pair{animationModeButton_, EditorCommand::AnimationCycleMode},
         std::pair{animationCookButton_, EditorCommand::AnimationCookPreview},
         std::pair{animationUndoButton_, EditorCommand::AnimationUndo},

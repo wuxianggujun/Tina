@@ -265,4 +265,68 @@ Core::Result<OwnedPrefabPayload> parsePrefabFromCooked(const CookedAssetFile& fi
     }
 }
 
+Core::Result<AssetFormat::NavigationGrid2DPayloadView>
+parseNavigationGrid2DFromCooked(const CookedAssetFile& file)
+{
+    if (!file)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "cooked asset is empty");
+    }
+    if (file.header().assetKind != AssetFormat::AssetKind::NavigationGrid2D ||
+        file.header().assetTypeVersion != AssetFormat::NavigationGrid2DWire::SchemaVersion ||
+        file.header().dependencyCount != 0U)
+    {
+        return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                             "cooked asset is not an independent NavigationGrid2D v1 asset");
+    }
+    return AssetFormat::parseNavigationGrid2DPayload(file.payload());
+}
+
+Core::Result<AssetFormat::Fx2DPayloadDesc>
+parseFx2DFromCooked(const CookedAssetFile& file)
+{
+    if (!file) {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "cooked asset is empty");
+    }
+    if (file.header().assetKind != AssetFormat::AssetKind::Fx2D ||
+        file.header().assetTypeVersion != AssetFormat::Fx2DWire::SchemaVersion ||
+        file.header().dependencyCount != 1U) {
+        return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                             "cooked asset is not an Fx2D v1 asset with one Sprite dependency");
+    }
+    const auto dependency = file.dependency(0U);
+    if (!dependency || dependency->expectedKind != AssetFormat::AssetKind::Sprite ||
+        dependency->flags != AssetFormat::DependencyFlags::Required) {
+        return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                             "Fx2D requires exactly one required Sprite dependency");
+    }
+    auto payload = AssetFormat::parseFx2DPayloadBytes(file.payload());
+    if (!payload) return Core::failure(std::move(payload.error()));
+    if (payload->spriteAssetId != dependency->assetId) {
+        return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                             "Fx2D payload Sprite AssetId does not match dependency");
+    }
+    return payload;
+}
+
+Core::Result<Navigation2D::NavigationGrid2DData>
+loadNavigationGrid2DDataFromCooked(const CookedAssetFile& file,
+                                   std::pmr::memory_resource& resource)
+{
+    auto payload = parseNavigationGrid2DFromCooked(file);
+    if (!payload)
+    {
+        return Core::failure(std::move(payload.error()));
+    }
+    return Navigation2D::NavigationGrid2DData::Create({
+        .widthCells = payload->widthCells,
+        .heightCells = payload->heightCells,
+        .originXMeters = payload->originXMeters,
+        .originYMeters = payload->originYMeters,
+        .cellSizeMeters = payload->cellSizeMeters,
+        .cellFlags = payload->cellFlags,
+        .traversalCosts = payload->traversalCosts,
+    }, resource);
+}
+
 } // namespace Tina::Asset

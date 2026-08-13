@@ -26,6 +26,7 @@ set(TINA_ASSET_TEST_SOURCES
     AssetGpuTextureTests.cpp
     AssetGpuEnvironmentMapTests.cpp
     Mesh3DBindingRegistryTests.cpp
+    NavigationFxTypedViewTests.cpp
     Sprite2DBindingRegistryTests.cpp
     AssetGpuMeshTests.cpp
     AudioClipCookedPlaybackTests.cpp
@@ -61,6 +62,7 @@ set(TINA_ASSET_TEST_SOURCES
     header_isolation/AssetGpuTextureHeader.cpp
     header_isolation/AssetGpuEnvironmentMapHeader.cpp
     header_isolation/Mesh3DBindingRegistryHeader.cpp
+    header_isolation/PhysicsNavigationSync2DHeader.cpp
     header_isolation/Sprite2DBindingRegistryHeader.cpp
     header_isolation/AssetGpuMeshHeader.cpp
     header_isolation/TileMapInstanceHeader.cpp

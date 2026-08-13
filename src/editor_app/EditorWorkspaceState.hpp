@@ -43,6 +43,7 @@
 #include <tina/editor/EditorTransformGizmo.hpp>
 #include <tina/editor/EditorViewportGrid.hpp>
 #include <tina/editor/EditorViewportNavigation.hpp>
+#include <tina/editor/Navigation2DAuthoringDocument.hpp>
 #include <tina/editor/ProjectAssetBrowser.hpp>
 #include <tina/editor/SpriteAnimationAuthoringDocument.hpp>
 #include <tina/editor/SpriteAnimationAuthoringFile.hpp>
@@ -132,7 +133,7 @@ inline constexpr u32 AuthoringEntityCapacity = 16;
 inline constexpr u32 InitialAuthoringEntityCount = 5;
 inline constexpr u32 AnimationVisibleFrameSlots = 6;
 inline constexpr u32 DocumentTabSlots = 6;
-inline constexpr u32 AutomaticAuthoringStageCount = 46;
+inline constexpr u32 AutomaticAuthoringStageCount = 51;
 inline constexpr u64 AutomaticAuthoringFrameReserve = 8;
 inline constexpr u64 AutomaticAuthoringMinimumFrameCount =
     static_cast<u64>(AutomaticAuthoringStageCount) +
@@ -150,6 +151,7 @@ inline constexpr u32 EditorViewportSpriteCapacity =
                                  TileMapAuthoringLayerCapacity;
 inline constexpr Tina::AssetFormat::TileMapLayerId InitialTileMapLayerId = 1;
 inline constexpr Tina::AssetFormat::TileMapLayerId InitialGameplayObjectLayerId = 2;
+inline constexpr Tina::Core::u8 NavigationPreviewAssetMarker = 0x52U;
 inline constexpr u32 EditorGameplaySpawnSchema = 0x5453504EU;
 inline constexpr u32 EditorGameplaySpawnVersion = 1;
 inline constexpr u32 EditorPlayerArchetypeId = 1;
@@ -527,9 +529,16 @@ struct EditorSourceImportStagePaths final {
     std::string catalogRootUtf8{};
     std::string statePathUtf8{};
 };
+struct EditorAuthoringCachePaths final {
+    std::filesystem::path root{};
+    std::filesystem::path stages{};
+    std::filesystem::path activeCatalogPointer{};
+};
 struct ResolvedEditorProjectCatalog final {
     std::string catalogRootUtf8{};
+    std::string sourceImportCatalogRootUtf8{};
     std::string sourceImportStatePathUtf8{};
+    std::string authoringCatalogRootUtf8{};
     std::vector<Tina::EditorApp::Detail::EditorSourceImportUnit> sourceImportUnits{};
 };
 [[nodiscard]] inline EditorSourceImportCachePaths sourceImportCachePaths(
@@ -542,6 +551,18 @@ struct ResolvedEditorProjectCatalog final {
         .root = root,
         .stages = root / "stages",
         .baselineState = root / "baseline-state.tmeta",
+        .activeCatalogPointer = root / "active-catalog.path",
+    };
+}
+[[nodiscard]] inline EditorAuthoringCachePaths authoringCachePaths(
+    const Tina::Editor::EditorProjectWorkspace& workspace)
+{
+    const auto projectRoot = std::filesystem::u8path(
+        workspace.projectRootUtf8().begin(), workspace.projectRootUtf8().end());
+    const auto root = projectRoot / ".tina" / "cache" / "authoring";
+    return {
+        .root = root,
+        .stages = root / "stages",
         .activeCatalogPointer = root / "active-catalog.path",
     };
 }
@@ -677,6 +698,71 @@ createSourceImportStagePaths(const Tina::Editor::EditorProjectWorkspace& workspa
     return Tina::Core::failure(Tina::Core::CoreErrorCode::AlreadyExists,
                                "Editor exhausted source-import stage path attempts");
 }
+[[nodiscard]] inline Tina::Core::Result<std::filesystem::path>
+createAuthoringStageRoot(const Tina::Editor::EditorProjectWorkspace& workspace)
+{
+    try {
+        const auto paths = authoringCachePaths(workspace);
+        const auto projectRoot = std::filesystem::u8path(
+            workspace.projectRootUtf8().begin(), workspace.projectRootUtf8().end());
+        std::error_code canonicalError;
+        const auto physicalProject = std::filesystem::weakly_canonical(projectRoot, canonicalError);
+        if (canonicalError) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Io,
+                                       "Editor could not resolve the authoring project root");
+        }
+        const std::array directories{
+            projectRoot / ".tina", projectRoot / ".tina" / "cache", paths.root, paths.stages,
+        };
+        constexpr std::array<std::string_view, directories.size()> labels{
+            "toolRoot", "cacheRoot", "authoringRoot", "authoringStages",
+        };
+        for (u32 index = 0; index < directories.size(); ++index) {
+            if (auto status = ensurePhysicalDirectory(directories[index], physicalProject, labels[index]);
+                !status) {
+                return Tina::Core::failure(std::move(status.error()));
+            }
+        }
+
+        const auto seed = std::chrono::steady_clock::now().time_since_epoch().count();
+        constexpr u32 MaximumAttempts = 256;
+        for (u32 attempt = 0; attempt < MaximumAttempts; ++attempt) {
+            const auto candidate = paths.stages /
+                                   ("stage_" + std::to_string(seed) + "_" +
+                                    std::to_string(attempt));
+            std::error_code createError;
+            if (!std::filesystem::create_directory(candidate, createError)) {
+                if (!createError) {
+                    continue;
+                }
+                Tina::Core::Error error{Tina::Core::CoreErrorCode::Io,
+                                        "Editor could not reserve an authoring stage path"};
+                error.setNativeCode(createError.value());
+                return Tina::Core::failure(std::move(error));
+            }
+            std::error_code physicalError;
+            const auto physicalStages = std::filesystem::weakly_canonical(paths.stages, physicalError);
+            const auto physicalCandidate = std::filesystem::weakly_canonical(candidate, physicalError);
+            if (physicalError || physicalCandidate.parent_path() != physicalStages) {
+                std::error_code cleanupError;
+                std::filesystem::remove(candidate, cleanupError);
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::PermissionDenied,
+                                           "Editor authoring stage escaped its project cache");
+            }
+            return candidate;
+        }
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::AlreadyExists,
+                                   "Editor exhausted authoring stage path attempts");
+    } catch (const std::bad_alloc&) {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
+                                   "Editor authoring stage path allocation failed");
+    } catch (const std::filesystem::filesystem_error& exception) {
+        Tina::Core::Error error{Tina::Core::CoreErrorCode::Io,
+                                "Editor authoring stage filesystem operation failed"};
+        error.setNativeCode(exception.code().value());
+        return Tina::Core::failure(std::move(error));
+    }
+}
 [[nodiscard]] inline Tina::Core::Result<std::vector<Tina::EditorApp::Detail::EditorSourceImportUnit>>
 restoreSourceImportUnits(
     const Tina::Editor::EditorProjectWorkspace& workspace,
@@ -760,7 +846,7 @@ restoreSourceImportUnits(
     }
     return units;
 }
-[[nodiscard]] inline Tina::Core::Result<ResolvedEditorProjectCatalog> resolveProjectCatalog(
+[[nodiscard]] inline Tina::Core::Result<ResolvedEditorProjectCatalog> resolveSourceImportCatalog(
     const Tina::Editor::EditorProjectWorkspace& workspace)
 {
     try {
@@ -772,6 +858,7 @@ restoreSourceImportUnits(
             existsError.clear();
             return ResolvedEditorProjectCatalog{
                 .catalogRootUtf8 = std::string{workspace.cookedCatalogRootUtf8()},
+                .sourceImportCatalogRootUtf8 = std::string{workspace.cookedCatalogRootUtf8()},
                 .sourceImportStatePathUtf8 = pathToUtf8(cache.baselineState),
             };
         }
@@ -783,6 +870,7 @@ restoreSourceImportUnits(
         if (!std::filesystem::exists(pointerStatus)) {
             return ResolvedEditorProjectCatalog{
                 .catalogRootUtf8 = std::string{workspace.cookedCatalogRootUtf8()},
+                .sourceImportCatalogRootUtf8 = std::string{workspace.cookedCatalogRootUtf8()},
                 .sourceImportStatePathUtf8 = pathToUtf8(cache.baselineState),
             };
         }
@@ -935,6 +1023,7 @@ restoreSourceImportUnits(
         }
         return ResolvedEditorProjectCatalog{
             .catalogRootUtf8 = pathToUtf8(catalogRoot.lexically_normal()),
+            .sourceImportCatalogRootUtf8 = pathToUtf8(catalogRoot.lexically_normal()),
             .sourceImportStatePathUtf8 = pathToUtf8(statePath.lexically_normal()),
             .sourceImportUnits = std::move(*units),
         };
@@ -944,6 +1033,82 @@ restoreSourceImportUnits(
     } catch (const std::filesystem::filesystem_error& exception) {
         Tina::Core::Error error{Tina::Core::CoreErrorCode::Io,
                                 "Editor active import Catalog resolution failed"};
+        error.setNativeCode(exception.code().value());
+        return Tina::Core::failure(std::move(error));
+    }
+}
+[[nodiscard]] inline Tina::Core::Result<ResolvedEditorProjectCatalog> resolveProjectCatalog(
+    const Tina::Editor::EditorProjectWorkspace& workspace)
+{
+    auto resolved = resolveSourceImportCatalog(workspace);
+    if (!resolved) {
+        return Tina::Core::failure(std::move(resolved.error()));
+    }
+    try {
+        const auto cache = authoringCachePaths(workspace);
+        std::error_code pointerError;
+        const auto pointerStatus = std::filesystem::symlink_status(
+            cache.activeCatalogPointer, pointerError);
+        if (pointerError == std::errc::no_such_file_or_directory ||
+            (!pointerError && !std::filesystem::exists(pointerStatus))) {
+            return resolved;
+        }
+        if (pointerError || !std::filesystem::is_regular_file(pointerStatus)) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                       "Editor active authoring Catalog pointer is invalid");
+        }
+        std::pmr::unsynchronized_pool_resource validationMemory;
+        auto pointerBytes = Tina::Core::readFile(
+            pathToUtf8(cache.activeCatalogPointer),
+            {.maxBytes = 4096, .memoryResource = &validationMemory});
+        if (!pointerBytes) {
+            return Tina::Core::failure(std::move(pointerBytes.error()));
+        }
+        const std::string_view pointerText{
+            reinterpret_cast<const char*>(pointerBytes->data()), pointerBytes->size()};
+        if (pointerText.empty() || !Tina::Core::isStrictUtf8WithoutNul(pointerText)) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                       "Editor active authoring Catalog pointer is not strict UTF-8");
+        }
+        const auto catalogRoot = std::filesystem::u8path(pointerText.begin(), pointerText.end());
+        const auto stageRoot = catalogRoot.parent_path().lexically_normal();
+        if (!catalogRoot.is_absolute() || stageRoot.empty()) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                       "Editor active authoring Catalog pointer must be absolute");
+        }
+        const auto projectRoot = std::filesystem::u8path(
+            workspace.projectRootUtf8().begin(), workspace.projectRootUtf8().end());
+        std::error_code canonicalError;
+        const auto physicalProject = std::filesystem::weakly_canonical(projectRoot, canonicalError);
+        const auto physicalStages = std::filesystem::weakly_canonical(cache.stages, canonicalError);
+        const auto physicalStage = std::filesystem::weakly_canonical(stageRoot, canonicalError);
+        const auto physicalCatalog = std::filesystem::weakly_canonical(catalogRoot, canonicalError);
+        if (canonicalError || !pathIsSameOrDescendant(physicalStages, physicalProject) ||
+            physicalStage.parent_path() != physicalStages ||
+            !pathIsSameOrDescendant(physicalCatalog, physicalStage)) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::PermissionDenied,
+                                       "Editor active authoring Catalog escaped its project cache");
+        }
+        Tina::Asset::CatalogPackageOpenConfig openConfig{};
+        openConfig.manifest.catalog.maxEntries = 4096;
+        openConfig.manifest.catalog.maxDependencies = 16384;
+        openConfig.manifest.catalog.maxDependenciesPerAsset = 4096;
+        openConfig.manifest.catalog.memoryResource = &validationMemory;
+        openConfig.validation.file.memoryResource = &validationMemory;
+        openConfig.validation.verifyTypedPayload = true;
+        if (auto catalog = Tina::Asset::openCatalogPackage(pathToUtf8(catalogRoot), openConfig);
+            !catalog) {
+            return Tina::Core::failure(std::move(catalog.error()));
+        }
+        resolved->catalogRootUtf8 = pathToUtf8(catalogRoot.lexically_normal());
+        resolved->authoringCatalogRootUtf8 = resolved->catalogRootUtf8;
+        return resolved;
+    } catch (const std::bad_alloc&) {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
+                                   "Editor authoring Catalog resolution allocation failed");
+    } catch (const std::filesystem::filesystem_error& exception) {
+        Tina::Core::Error error{Tina::Core::CoreErrorCode::Io,
+                                "Editor authoring Catalog resolution failed"};
         error.setNativeCode(exception.code().value());
         return Tina::Core::failure(std::move(error));
     }
@@ -1051,8 +1216,11 @@ struct EditorAssetResources final {
     std::pmr::unsynchronized_pool_resource memory{};
     std::optional<Tina::Asset::AssetSystem> system{};
     std::filesystem::path ownedWorkRoot{};
+    std::vector<std::filesystem::path> ownedCatalogStageRoots{};
     std::string catalogRootUtf8{};
+    std::string sourceImportCatalogRootUtf8{};
     std::string sourceImportStatePathUtf8{};
+    std::string authoringCatalogRootUtf8{};
     std::vector<Tina::EditorApp::Detail::EditorSourceImportUnit> initialSourceImportUnits{};
     std::optional<Tina::Editor::EditorProjectWorkspace> initialProjectWorkspace{};
     u32 catalogEntryCount = 0;
@@ -1066,6 +1234,10 @@ struct EditorAssetResources final {
     ~EditorAssetResources() noexcept
     {
         system.reset();
+        for (const auto& stageRoot : ownedCatalogStageRoots) {
+            std::error_code cleanupError;
+            std::filesystem::remove_all(stageRoot, cleanupError);
+        }
         if (!ownedWorkRoot.empty()) {
             std::error_code cleanupError;
             std::filesystem::remove_all(ownedWorkRoot, cleanupError);
@@ -1089,13 +1261,18 @@ struct EditorAssetResources final {
             return Tina::Core::failure(std::move(resolvedCatalog.error()));
         }
         resources.catalogRootUtf8 = std::move(resolvedCatalog->catalogRootUtf8);
+        resources.sourceImportCatalogRootUtf8 =
+            std::move(resolvedCatalog->sourceImportCatalogRootUtf8);
         resources.sourceImportStatePathUtf8 =
             std::move(resolvedCatalog->sourceImportStatePathUtf8);
+        resources.authoringCatalogRootUtf8 =
+            std::move(resolvedCatalog->authoringCatalogRootUtf8);
         resources.initialSourceImportUnits =
             std::move(resolvedCatalog->sourceImportUnits);
         resources.initialProjectWorkspace.emplace(std::move(*workspace));
     } else if (resources.projectCatalogConfigured) {
         resources.catalogRootUtf8 = options.catalogRootUtf8;
+        resources.sourceImportCatalogRootUtf8 = options.catalogRootUtf8;
     } else {
         auto workRoot = createUniqueEditorTempDirectory();
         if (!workRoot) {
@@ -1181,10 +1358,18 @@ struct LifecycleCounters final {
     u64 tileMapGameplaySpawnRecords = 0;
     u64 tileMapGameplayBytes = 0;
     u64 tileMapGameplaySourceRevision = 0;
+    u64 navigationBakeRevision = 0;
+    u64 navigationSourceTileMapRevision = 0;
+    u64 navigationPayloadBytes = 0;
+    u64 navigationCatalogPublishes = 0;
     u64 animationDocumentRevision = 0;
     u64 animationFrameCount = 0;
     u64 animationCookPreviewBytes = 0;
     u64 animationPreviewFrameIndex = 0;
+    u64 animationEventCount = 0;
+    u64 animationSelectedEventIndex = 0;
+    u64 animationEventEdits = 0;
+    u64 animationEventRejectedEdits = 0;
     u64 animationEdits = 0;
     u64 animationUndos = 0;
     u64 animationRedos = 0;
@@ -1328,6 +1513,8 @@ struct LifecycleCounters final {
     bool sourceImportRunning = false;
     bool sourceImportReady = false;
     bool sourceImportStateCommitted = false;
+    bool navigationBakeReady = false;
+    bool navigationBakeDirty = true;
 };
 enum class EditorCommand : u32 {
     SwitchToWorld2D,
@@ -1378,6 +1565,7 @@ enum class EditorCommand : u32 {
     AddTileLayer,
     AddObjectLayer,
     CookTileMapPreview,
+    BakeNavigation2D,
     GenerateTileMapGameplay,
     AnimationTogglePlayback,
     AnimationPreviousFrame,
@@ -1390,6 +1578,11 @@ enum class EditorCommand : u32 {
     AnimationCycleSprite,
     AnimationDecreaseDuration,
     AnimationIncreaseDuration,
+    AnimationPreviousEvent,
+    AnimationNextEvent,
+    AnimationAddEvent,
+    AnimationApplyEvent,
+    AnimationRemoveEvent,
     AnimationCycleMode,
     AnimationCookPreview,
     AnimationUndo,
@@ -2675,6 +2868,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
     animationModeLabel(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcept;
     [[nodiscard]] Tina::Core::Status applyAnimationPreviewFrame(u32 frameIndex);
     [[nodiscard]] Tina::Core::Status rebuildAnimationAnimator();
+    [[nodiscard]] Tina::Core::Result<Tina::AssetFormat::SpriteAnimationEventDesc>
+    readAnimationEventInput(Tina::PrimaryWindowUITreeUpdater& tree) const;
     [[nodiscard]] Tina::Core::Status processPendingAnimationFrameSelection(
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status refreshAnimationTimelineUi(
@@ -2852,6 +3047,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] Tina::Core::Status importSourceFromDialog();
     [[nodiscard]] Tina::Core::Status removeSelectedSourceImport();
     void cleanupOwnedSourceImportStage(std::string_view catalogRootUtf8) noexcept;
+    void cleanupOwnedAuthoringStage(std::string_view catalogRootUtf8) noexcept;
     void cleanupFailedSourceImportStage() noexcept;
     [[nodiscard]] Tina::Core::Status publishCommittedSourceImportState(
         const Tina::EditorApp::Detail::EditorSourceImportReadyStage& ready);
@@ -2859,6 +3055,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
         const Tina::EditorApp::Detail::EditorSourceImportReadyStage& ready);
     [[nodiscard]] Tina::Core::Status updateSourceImport();
     [[nodiscard]] Tina::Core::Status refreshProjectCatalog();
+    [[nodiscard]] Tina::Core::Status bakeAndPublishNavigation2D();
     [[nodiscard]] Tina::Core::Status refreshDocumentTabsUi(
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status applyProjectAssetFilter(
@@ -3040,6 +3237,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     Tina::Editor::World2DAuthoringDocument document_;
     Tina::Editor::World3DAuthoringDocument document3D_;
     Tina::Editor::TileMapAuthoringDocument tileMapDocument_;
+    Tina::Editor::Navigation2DAuthoringDocument navigationDocument_{};
     Tina::Editor::SpriteAnimationAuthoringDocument spriteAnimationDocument_;
     std::optional<Tina::Editor::EditorPlaySession> playSession_{};
     Tina::Editor::EditorDocumentKey world3DDocumentOwnerKey_{
@@ -3067,6 +3265,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     std::string sourceImportPointerPathUtf8_{};
     std::string sourceImportPendingStageRootUtf8_{};
     std::string sourceImportSupersededCatalogRootUtf8_{};
+    std::string sourceImportSupersededAuthoringCatalogRootUtf8_{};
     bool sourceImportStartPending_ = false;
     bool sourceImportCatalogCommitted_ = false;
     Tina::EditorApp::Detail::EditorFileDialog fileDialog_{};
@@ -3187,6 +3386,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId addTileLayerButton_{};
     UI::UINodeId addObjectLayerButton_{};
     UI::UINodeId cookTileMapButton_{};
+    UI::UINodeId bakeNavigationButton_{};
     UI::UINodeId generateTileMapGameplayButton_{};
     UI::UINodeId animationModeButton_{};
     UI::UINodeId animationPlayButton_{};
@@ -3201,6 +3401,13 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId animationCycleSpriteButton_{};
     UI::UINodeId animationDurationDecreaseButton_{};
     UI::UINodeId animationDurationIncreaseButton_{};
+    UI::UINodeId animationEventPreviousButton_{};
+    UI::UINodeId animationEventNextButton_{};
+    UI::UINodeId animationEventTag_{};
+    UI::UINodeId animationEventOffset_{};
+    UI::UINodeId animationEventAddButton_{};
+    UI::UINodeId animationEventApplyButton_{};
+    UI::UINodeId animationEventRemoveButton_{};
     UI::UINodeId animationUndoButton_{};
     UI::UINodeId animationRedoButton_{};
     std::array<UI::UINodeId, AnimationVisibleFrameSlots> animationFrameButtons_{};
@@ -3260,6 +3467,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     u64 previewResolvedMeshCount_ = 0;
     u64 previewRevision_ = 0;
     Tina::EditorApp::Detail::EditorAnimationPreview animationPreview_{};
+    u32 animationSelectedEventIndex_ = 0;
     bool previewAssetBindingsRefreshPending_ = false;
     bool catalogRefreshPending_ = false;
     bool projectBrowserUiRefreshPending_ = false;

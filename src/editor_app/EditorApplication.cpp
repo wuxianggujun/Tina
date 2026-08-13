@@ -290,7 +290,8 @@ class EditorApplication final : public Tina::IGameApplication {
          (counters.tabOwnedDocumentLoads != 1U ||
           counters.tabOwnedDocumentSwaps != 2U ||
           counters.previewAssetBindingRefreshes !=
-              2U + counters.sourceImportCatalogReloads)) ||
+              2U + counters.sourceImportCatalogReloads +
+                  counters.navigationCatalogPublishes)) ||
         counters.documentPathConfigured != documentPathConfigured ||
         counters.documentLoaded != activeDocumentLoaded ||
         counters.documentDirty != activeDocumentDirty ||
@@ -347,7 +348,8 @@ class EditorApplication final : public Tina::IGameApplication {
             "Tina Editor startup source import did not complete and commit state");
     }
     if (!projectCatalogConfigured && counters.projectSwitches == 0U &&
-        (counters.catalogEntryCount != 9 || counters.catalogAssetsLoaded != 7 ||
+        (counters.catalogEntryCount != 9U + counters.navigationCatalogPublishes ||
+         counters.catalogAssetsLoaded != 7 ||
          counters.catalogGpuTextures != 1 || counters.catalogGpuMeshes != 1 ||
          counters.catalogSpriteBindings != 1 || counters.catalogMeshBindings != 1 ||
          counters.catalogMaterialBindings != 1 || counters.catalogUnresolvedReferences != 0 ||
@@ -475,6 +477,10 @@ class EditorApplication final : public Tina::IGameApplication {
             counters.authoringUndos != counters.authoringRedos ||
             counters.animationEdits == 0U || counters.animationUndos == 0U ||
             counters.animationUndos != counters.animationRedos ||
+            counters.animationEventEdits < 3U ||
+            counters.animationEventRejectedEdits != 0U ||
+            counters.animationEventCount == 0U ||
+            counters.animationSelectedEventIndex >= counters.animationEventCount ||
             counters.animationDocumentRevision == 0U ||
             counters.animationFrameCount == 0U ||
             counters.animationPreviewFrameIndex >= counters.animationFrameCount ||
@@ -796,10 +802,24 @@ class EditorApplication final : public Tina::IGameApplication {
               << ",\"tileMapGameplayBytes\":" << counters.tileMapGameplayBytes
               << ",\"tileMapGameplaySourceRevision\":"
               << counters.tileMapGameplaySourceRevision
+              << ",\"navigationBakeRevision\":" << counters.navigationBakeRevision
+              << ",\"navigationSourceTileMapRevision\":"
+              << counters.navigationSourceTileMapRevision
+              << ",\"navigationPayloadBytes\":" << counters.navigationPayloadBytes
+              << ",\"navigationCatalogPublishes\":"
+              << counters.navigationCatalogPublishes
+              << ",\"navigationBakeReady\":"
+              << (counters.navigationBakeReady ? "true" : "false")
+              << ",\"navigationBakeDirty\":"
+              << (counters.navigationBakeDirty ? "true" : "false")
               << ",\"animationDocumentRevision\":" << counters.animationDocumentRevision
               << ",\"animationFrameCount\":" << counters.animationFrameCount
               << ",\"animationCookPreviewBytes\":" << counters.animationCookPreviewBytes
               << ",\"animationPreviewFrameIndex\":" << counters.animationPreviewFrameIndex
+              << ",\"animationEventCount\":" << counters.animationEventCount
+              << ",\"animationSelectedEventIndex\":" << counters.animationSelectedEventIndex
+              << ",\"animationEventEdits\":" << counters.animationEventEdits
+              << ",\"animationEventRejectedEdits\":" << counters.animationEventRejectedEdits
               << ",\"animationEdits\":" << counters.animationEdits
               << ",\"animationUndos\":" << counters.animationUndos
               << ",\"animationRedos\":" << counters.animationRedos

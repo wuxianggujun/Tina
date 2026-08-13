@@ -123,9 +123,12 @@ premultiplied-alpha 合成保持不变。Scene extraction 在 descriptor 之前�
 texture，以 batch-local uniform 控制分支；fragment shader 用 world-position/UV derivatives 构造 TBN，因此
 rotation、signed scale、atlas UV 与 flip 无需额外矩阵。normal 只调制 point-light contribution，ambient、shadow
 visibility、attenuation 与 premultiplied alpha 保持原契约；无 normal 走原有分支，RGBA8 `(128,128,255)` 的
-flat normal 相对 Lambert factor 精确为1。当前仍无 HDR/tone mapping。product-2d schema 27 继承 schema 19，并以
+flat normal 相对 Lambert factor 精确为1。当前仍无 HDR/tone mapping。product-2d schema 29 继承 schema 19，并以
 `authoredPointLight2DCount=3`、`pointLight2DCount=2`、`culledPointLight2DCount=1` 提供集成证据，继承双
 ShadowOccluder2D 与 soft/hard 差分，并以 `normalMappedSpriteCount=1/0` 的 normal on/off 可重复像素差分关闭 N5。
+Cooked `Fx2D` 不扩展 Render wire contract：Scene factory 最终仍通过 ParticleSystem/Trail 生成 Sprite2D item，
+并在 extraction 时把 weak Sprite handle 解析成 packet-local `FrameResourceRef`。当前没有 GPU FX simulation、
+effect graph render pass 或 mesh-ribbon trail。
 
 ## RenderScene
 
@@ -216,7 +219,7 @@ shader mode/program，并在采样后 premultiply。DisplayList/frame resource �
 | `setMesh3DMaterialTextureBinding` | 校验/记录 binding | material key → base-color texture；Opaque3D MR submit **采样** `s_texColor`（默认 1×1 白） |
 | `setMesh3DMaterialMetallicRoughnessTextureBinding` | 校验/记录 binding | material key → optional MR texture；未 bind 用默认 metallic=0/roughness=1 |
 | `setMesh3DLighting` | 同步校验/复制低层 fallback | 未提供 frame-scoped Scene lighting 时使用；0..4 directional + 0..8 point + 0..8 spot lights + ambient |
-| `capturePrimaryFrameRgba8` | Unsupported | present 后异步截图路径 |
+| `capturePrimaryFrameRgba8` | Unsupported | present 后异步截图路径；owner thread 有界推进最多120个 bgfx frame，并在轮询间给 render callback 1ms 调度窗口，超限返回 `FrameCaptureFailed` |
 
 `createTexture2DBinding()` 分配的 key 单调且解绑后不复用；backend bind 失败不消费候选 key。
 caller-chosen `setTexture2DBinding()` key 与 allocator-managed key 共用 device namespace，registry

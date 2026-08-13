@@ -4,6 +4,7 @@ set(TINA_SCENE_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/scene/DirectionalLight3D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/Entity.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/ExtractRenderScene.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/scene/Fx2DFactory.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/MeshRenderer3D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/ParticleSystem2D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/PerspectiveCamera3D.hpp
@@ -26,6 +27,7 @@ add_library(tina_scene STATIC
     ${TINA_SCENE_PUBLIC_HEADERS}
     CameraFollow2D.cpp
     ExtractRenderScene.cpp
+    Fx2DFactory.cpp
     ParticleSystem2D.cpp
     PrefabInstantiate.cpp
     SpriteAnimator2D.cpp

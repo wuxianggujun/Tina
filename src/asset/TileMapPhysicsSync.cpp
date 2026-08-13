@@ -339,6 +339,7 @@ Core::Result<TileMapPhysicsSync2DStats> TileMapPhysicsSync2D::synchronize(
     Core::usize removedChunkCount = 0;
     Core::usize unchangedChunkCount = 0;
     Core::usize bakedRectangleCount = 0;
+    Core::usize bakedSolidCellCount = 0;
 
     const auto rollback = [&](Core::Error error)
         -> Core::Result<TileMapPhysicsSync2DStats> {
@@ -385,6 +386,13 @@ Core::Result<TileMapPhysicsSync2DStats> TileMapPhysicsSync2D::synchronize(
                 return rollback(std::move(baked.error()));
             }
             bakedRectangleCount += *baked;
+            Core::usize chunkSolidCellCount = 0;
+            for (Core::usize rectangleIndex = 0; rectangleIndex < *baked; ++rectangleIndex) {
+                const auto& rectangle = m_rectangles[rectangleIndex];
+                chunkSolidCellCount += static_cast<Core::usize>(rectangle.widthCells) *
+                                       static_cast<Core::usize>(rectangle.heightCells);
+            }
+            bakedSolidCellCount += chunkSolidCellCount;
             auto created = Physics2D::createStaticBodyForSolidRectangles(
                 world,
                 std::span<const Physics2D::PhysicsGridSolidRect2D>{m_rectangles.data(), *baked},
@@ -406,6 +414,7 @@ Core::Result<TileMapPhysicsSync2DStats> TileMapPhysicsSync2D::synchronize(
                 .contentRevision = state->contentRevision,
                 .body = created->body,
                 .shapeCount = created->shapeCount,
+                .solidCellCount = chunkSolidCellCount,
                 .occupied = true};
             if (oldIndex == InvalidIndex) {
                 ++addedChunkCount;
@@ -445,20 +454,24 @@ Core::Result<TileMapPhysicsSync2DStats> TileMapPhysicsSync2D::synchronize(
     nextStats.residentChunkCount = nextRecordCount;
     nextStats.colliderBodyCount = 0;
     nextStats.colliderShapeCount = 0;
+    nextStats.colliderSolidCellCount = 0;
     for (Core::usize index = 0; index < nextRecordCount; ++index) {
         nextStats.colliderBodyCount += m_records[index].body.hasValue() ? 1U : 0U;
         nextStats.colliderShapeCount += m_records[index].shapeCount;
+        nextStats.colliderSolidCellCount += m_records[index].solidCellCount;
     }
     nextStats.lastAddedChunkCount = addedChunkCount;
     nextStats.lastRebuiltChunkCount = rebuiltChunkCount;
     nextStats.lastRemovedChunkCount = removedChunkCount;
     nextStats.lastUnchangedChunkCount = unchangedChunkCount;
     nextStats.lastBakedRectangleCount = bakedRectangleCount;
+    nextStats.lastBakedSolidCellCount = bakedSolidCellCount;
     ++nextStats.synchronizeCount;
     nextStats.totalAddedChunkCount += addedChunkCount;
     nextStats.totalRebuiltChunkCount += rebuiltChunkCount;
     nextStats.totalRemovedChunkCount += removedChunkCount;
     nextStats.totalBakedRectangleCount += bakedRectangleCount;
+    nextStats.totalBakedSolidCellCount += bakedSolidCellCount;
     m_stats = nextStats;
     clearScratch();
     return m_stats;
@@ -499,11 +512,13 @@ Core::Status TileMapPhysicsSync2D::shutdown(
     m_stats.residentChunkCount = 0;
     m_stats.colliderBodyCount = 0;
     m_stats.colliderShapeCount = 0;
+    m_stats.colliderSolidCellCount = 0;
     m_stats.lastAddedChunkCount = 0;
     m_stats.lastRebuiltChunkCount = 0;
     m_stats.lastRemovedChunkCount = removedChunkCount;
     m_stats.lastUnchangedChunkCount = 0;
     m_stats.lastBakedRectangleCount = 0;
+    m_stats.lastBakedSolidCellCount = 0;
     m_stats.totalRemovedChunkCount += removedChunkCount;
     clearScratch();
     return Core::success();

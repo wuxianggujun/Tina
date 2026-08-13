@@ -10,7 +10,9 @@
 #include <tina/asset/SourceImportProbe.hpp>
 #include <tina/asset_format/AudioClipPayload.hpp>
 #include <tina/asset_format/EnvironmentMapPayload.hpp>
+#include <tina/asset_format/Fx2DPayload.hpp>
 #include <tina/asset_format/MaterialPayload.hpp>
+#include <tina/asset_format/NavigationGrid2DPayload.hpp>
 #include <tina/asset_format/PrefabPayload.hpp>
 #include <tina/asset_format/SpriteAnimationClipPayload.hpp>
 #include <tina/asset_format/SpritePayload.hpp>
@@ -33,6 +35,7 @@
 #include <cwctype>
 #include <deque>
 #include <filesystem>
+#include <limits>
 #include <memory_resource>
 #include <new>
 #include <optional>
@@ -243,6 +246,16 @@ struct RecipeSourceCaptureContext final {
         out = AssetFormat::AssetKind::EnvironmentMap;
         return true;
     }
+    if (name == "NavigationGrid2D")
+    {
+        out = AssetFormat::AssetKind::NavigationGrid2D;
+        return true;
+    }
+    if (name == "Fx2D")
+    {
+        out = AssetFormat::AssetKind::Fx2D;
+        return true;
+    }
     return false;
 }
 
@@ -272,6 +285,10 @@ struct RecipeSourceCaptureContext final {
         return AssetFormat::AudioClipWire::SchemaVersion;
     case AssetFormat::AssetKind::EnvironmentMap:
         return AssetFormat::EnvironmentMapWire::SchemaVersion;
+    case AssetFormat::AssetKind::NavigationGrid2D:
+        return AssetFormat::NavigationGrid2DWire::SchemaVersion;
+    case AssetFormat::AssetKind::Fx2D:
+        return AssetFormat::Fx2DWire::SchemaVersion;
     default:
         return 1U;
     }
@@ -352,6 +369,18 @@ struct RecipeSourceCaptureContext final {
 {
     const auto [end, err] = std::from_chars(text.data(), text.data() + text.size(), out);
     return err == std::errc{} && end == text.data() + text.size();
+}
+
+[[nodiscard]] bool parseU64Token(std::string_view text, Core::u64& out) noexcept
+{
+    const auto result = std::from_chars(text.data(), text.data() + text.size(), out);
+    return result.ec == std::errc{} && result.ptr == text.data() + text.size();
+}
+
+[[nodiscard]] bool parseI32Token(std::string_view text, Core::i32& out) noexcept
+{
+    const auto result = std::from_chars(text.data(), text.data() + text.size(), out);
+    return result.ec == std::errc{} && result.ptr == text.data() + text.size();
 }
 
 [[nodiscard]] bool parseFloatToken(std::string_view text, float& out) noexcept
@@ -2358,6 +2387,150 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
                 return Core::failure(std::move(asset.error()));
             }
             request.assets.push_back(std::move(*asset));
+            continue;
+        }
+        if (tokens[0] == "navigation2d")
+        {
+            if (tokens.size() < 8U)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "navigation2d needs id dimensions origin cell size and cell flags:cost values");
+            }
+            const auto assetId = Core::AssetId::parseCanonical(tokens[1]);
+            Core::u32 width = 0;
+            Core::u32 height = 0;
+            float originX = 0.0F;
+            float originY = 0.0F;
+            float cellSize = 0.0F;
+            if (!assetId || !parseU32Token(tokens[2], width) || !parseU32Token(tokens[3], height) ||
+                !parseFloatToken(tokens[4], originX) || !parseFloatToken(tokens[5], originY) ||
+                !parseFloatToken(tokens[6], cellSize) || width == 0U || height == 0U ||
+                static_cast<Core::u64>(width) * height != tokens.size() - 7U)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "navigation2d header or cell count is invalid");
+            }
+            std::vector<Core::u8> flags;
+            std::vector<Core::u8> costs;
+            flags.reserve(tokens.size() - 7U);
+            costs.reserve(tokens.size() - 7U);
+            for (Core::usize index = 7U; index < tokens.size(); ++index)
+            {
+                const auto separator = tokens[index].find(':');
+                Core::u32 cellFlags = 0;
+                Core::u32 traversalCost = 0;
+                if (separator == std::string::npos ||
+                    !parseU32Token(std::string_view{tokens[index]}.substr(0U, separator), cellFlags) ||
+                    !parseU32Token(std::string_view{tokens[index]}.substr(separator + 1U), traversalCost) ||
+                    cellFlags > (std::numeric_limits<Core::u8>::max)() ||
+                    traversalCost > (std::numeric_limits<Core::u8>::max)())
+                {
+                    return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                         "navigation2d cell must be flags:cost with byte values");
+                }
+                flags.push_back(static_cast<Core::u8>(cellFlags));
+                costs.push_back(static_cast<Core::u8>(traversalCost));
+            }
+            auto payload = AssetFormat::writeNavigationGrid2DPayloadBytes({
+                .widthCells = width,
+                .heightCells = height,
+                .originXMeters = originX,
+                .originYMeters = originY,
+                .cellSizeMeters = cellSize,
+                .cellFlags = flags,
+                .traversalCosts = costs,
+            });
+            if (!payload)
+            {
+                return Core::failure(std::move(payload.error()));
+            }
+            request.assets.push_back(CatalogCookAssetSpec{
+                .assetKind = AssetFormat::AssetKind::NavigationGrid2D,
+                .assetId = *assetId,
+                .assetTypeVersion = AssetFormat::NavigationGrid2DWire::SchemaVersion,
+                .payload = std::move(*payload),
+            });
+            continue;
+        }
+        if (tokens[0] == "fx2d")
+        {
+            // Every authored emitter, particle, and trail field is explicit. Dependency
+            // indices remain wire-owned because v1 requires exactly one Sprite dependency.
+            if (tokens.size() != 40U)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "fx2d requires exactly 39 authored values");
+            }
+            auto fxId = Core::AssetId::parseCanonical(tokens[1]);
+            auto spriteId = Core::AssetId::parseCanonical(tokens[2]);
+            AssetFormat::Fx2DPayloadDesc desc{};
+            Core::i32 particleSortingLayer = 0;
+            Core::i32 trailSortingLayer = 0;
+            if (!fxId || !spriteId ||
+                !parseU32Token(tokens[3], desc.particle.capacity) ||
+                !parseU32Token(tokens[4], desc.particle.count) ||
+                !parseU64Token(tokens[5], desc.particle.randomSeed) ||
+                !parseU64Token(tokens[6], desc.particle.firstStableParticleKey) ||
+                !parseFloatToken(tokens[7], desc.particle.originX) ||
+                !parseFloatToken(tokens[8], desc.particle.originY) ||
+                !parseFloatToken(tokens[9], desc.particle.positionOffsetMinX) ||
+                !parseFloatToken(tokens[10], desc.particle.positionOffsetMinY) ||
+                !parseFloatToken(tokens[11], desc.particle.positionOffsetMaxX) ||
+                !parseFloatToken(tokens[12], desc.particle.positionOffsetMaxY) ||
+                !parseFloatToken(tokens[13], desc.particle.velocityMinX) ||
+                !parseFloatToken(tokens[14], desc.particle.velocityMinY) ||
+                !parseFloatToken(tokens[15], desc.particle.velocityMaxX) ||
+                !parseFloatToken(tokens[16], desc.particle.velocityMaxY) ||
+                !parseFloatToken(tokens[17], desc.particle.lifetimeMinSeconds) ||
+                !parseFloatToken(tokens[18], desc.particle.lifetimeMaxSeconds) ||
+                !parseFloatToken(tokens[19], desc.particle.startWidthMeters) ||
+                !parseFloatToken(tokens[20], desc.particle.startHeightMeters) ||
+                !parseFloatToken(tokens[21], desc.particle.endWidthMeters) ||
+                !parseFloatToken(tokens[22], desc.particle.endHeightMeters) ||
+                !parseU32Token(tokens[23], desc.particle.startColorRgba) ||
+                !parseU32Token(tokens[24], desc.particle.endColorRgba) ||
+                !parseFloatToken(tokens[25], desc.particle.rotationRadians) ||
+                !parseI32Token(tokens[26], particleSortingLayer) ||
+                !parseI32Token(tokens[27], desc.particle.orderInLayer) ||
+                !parseU32Token(tokens[28], desc.trail.segmentCapacity) ||
+                !parseFloatToken(tokens[29], desc.trail.segmentLifetimeSeconds) ||
+                !parseFloatToken(tokens[30], desc.trail.startWidthMeters) ||
+                !parseFloatToken(tokens[31], desc.trail.endWidthMeters) ||
+                !parseU64Token(tokens[32], desc.trail.stableEntityKeyBase) ||
+                !parseFloatToken(tokens[33], desc.trail.u0) ||
+                !parseFloatToken(tokens[34], desc.trail.v0) ||
+                !parseFloatToken(tokens[35], desc.trail.u1) ||
+                !parseFloatToken(tokens[36], desc.trail.v1) ||
+                !parseU32Token(tokens[37], desc.trail.colorRgba) ||
+                !parseI32Token(tokens[38], trailSortingLayer) ||
+                !parseI32Token(tokens[39], desc.trail.orderInLayer) ||
+                particleSortingLayer < (std::numeric_limits<Core::i16>::min)() ||
+                particleSortingLayer > (std::numeric_limits<Core::i16>::max)() ||
+                trailSortingLayer < (std::numeric_limits<Core::i16>::min)() ||
+                trailSortingLayer > (std::numeric_limits<Core::i16>::max)()) {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "fx2d contains an invalid authored value");
+            }
+            desc.spriteAssetId = *spriteId;
+            desc.particle.sortingLayer = static_cast<Core::i16>(particleSortingLayer);
+            desc.trail.sortingLayer = static_cast<Core::i16>(trailSortingLayer);
+            auto payload = AssetFormat::writeFx2DPayloadBytes(desc);
+            if (!payload)
+            {
+                return Core::failure(std::move(payload.error()));
+            }
+            CatalogCookAssetSpec asset{
+                .assetKind = AssetFormat::AssetKind::Fx2D,
+                .assetId = *fxId,
+                .assetTypeVersion = AssetFormat::Fx2DWire::SchemaVersion,
+                .payload = std::move(*payload),
+            };
+            asset.dependencies.push_back({
+                .assetId = *spriteId,
+                .expectedKind = AssetFormat::AssetKind::Sprite,
+                .flags = AssetFormat::DependencyFlags::Required,
+            });
+            request.assets.push_back(std::move(asset));
             continue;
         }
         if (tokens[0] == "audioclip")

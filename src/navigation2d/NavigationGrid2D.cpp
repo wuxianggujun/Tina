@@ -11,11 +11,14 @@
 namespace Tina::Navigation2D {
 
 NavigationGrid2DData::NavigationGrid2DData(Core::u32 widthCells, Core::u32 heightCells,
+                                           float originXMeters, float originYMeters,
                                            float cellSizeMeters,
                                            std::pmr::vector<Core::u8> cellFlags,
                                            std::pmr::vector<Core::u8> traversalCosts,
                                            Core::u8 minimumTraversalCost) noexcept
-    : m_widthCells(widthCells), m_heightCells(heightCells), m_cellSizeMeters(cellSizeMeters),
+    : m_widthCells(widthCells), m_heightCells(heightCells),
+      m_originXMeters(originXMeters), m_originYMeters(originYMeters),
+      m_cellSizeMeters(cellSizeMeters),
       m_cellFlags(std::move(cellFlags)),
       m_traversalCosts(std::move(traversalCosts)), m_minimumTraversalCost(minimumTraversalCost)
 {
@@ -24,6 +27,8 @@ NavigationGrid2DData::NavigationGrid2DData(Core::u32 widthCells, Core::u32 heigh
 NavigationGrid2DData::NavigationGrid2DData(NavigationGrid2DData&& other) noexcept
     : m_widthCells(std::exchange(other.m_widthCells, 0)),
       m_heightCells(std::exchange(other.m_heightCells, 0)),
+      m_originXMeters(std::exchange(other.m_originXMeters, 0.0F)),
+      m_originYMeters(std::exchange(other.m_originYMeters, 0.0F)),
       m_cellSizeMeters(std::exchange(other.m_cellSizeMeters, 0.0F)),
       m_cellFlags(std::move(other.m_cellFlags)),
       m_traversalCosts(std::move(other.m_traversalCosts)),
@@ -41,10 +46,11 @@ Core::Result<NavigationGrid2DData> NavigationGrid2DData::Create(
         return Core::failure(NavigationErrorCode::InvalidData,
                              "navigation grid dimensions are outside the supported range");
     }
-    if (!std::isfinite(desc.cellSizeMeters) || !(desc.cellSizeMeters > 0.0F))
+    if (!std::isfinite(desc.originXMeters) || !std::isfinite(desc.originYMeters) ||
+        !std::isfinite(desc.cellSizeMeters) || !(desc.cellSizeMeters > 0.0F))
     {
         return Core::failure(NavigationErrorCode::InvalidData,
-                             "navigation grid cell size must be finite and greater than zero");
+                             "navigation grid origin and cell size must be finite");
     }
 
     const Core::usize width = desc.widthCells;
@@ -87,7 +93,8 @@ Core::Result<NavigationGrid2DData> NavigationGrid2DData::Create(
         cellFlags.assign(desc.cellFlags.begin(), desc.cellFlags.end());
         std::pmr::vector<Core::u8> traversalCosts{&resource};
         traversalCosts.assign(desc.traversalCosts.begin(), desc.traversalCosts.end());
-        return NavigationGrid2DData(desc.widthCells, desc.heightCells, desc.cellSizeMeters,
+        return NavigationGrid2DData(desc.widthCells, desc.heightCells,
+                                    desc.originXMeters, desc.originYMeters, desc.cellSizeMeters,
                                     std::move(cellFlags),
                                     std::move(traversalCosts), minimumTraversalCost);
     }
@@ -262,6 +269,17 @@ Core::Result<NavigationBlockerId> NavigationGrid2D::addBlocker(NavigationCellRec
     addRectCounts(rect);
     advanceRevision();
     return *blocker;
+}
+
+std::optional<NavigationCellRect2D> NavigationGrid2D::blockerRect(
+    NavigationBlockerId blocker) const noexcept
+{
+    const DynamicBlocker* entry = m_blockers.tryGet(blocker);
+    if (entry == nullptr)
+    {
+        return std::nullopt;
+    }
+    return entry->rect;
 }
 
 Core::Status NavigationGrid2D::updateBlocker(NavigationBlockerId blocker, NavigationCellRect2D rect)

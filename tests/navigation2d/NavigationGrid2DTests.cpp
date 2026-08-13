@@ -114,6 +114,8 @@ TEST(NavigationGrid2DTests, DynamicBlockersAreGenerationSafeReferenceCountedAndR
 
     auto first = grid.addBlocker({.x = 1, .y = 0, .width = 2, .height = 2});
     ASSERT_TRUE(first.has_value());
+    EXPECT_EQ(grid.blockerRect(*first),
+              (NavigationCellRect2D{.x = 1, .y = 0, .width = 2, .height = 2}));
     EXPECT_EQ(grid.revision(), 2U);
     EXPECT_EQ(grid.dynamicBlockerCountAt({1, 0}), 1U);
     EXPECT_EQ(grid.dynamicBlockerCountAt({2, 1}), 1U);
@@ -128,12 +130,15 @@ TEST(NavigationGrid2DTests, DynamicBlockersAreGenerationSafeReferenceCountedAndR
     EXPECT_EQ(grid.revision(), beforeNoOp);
 
     ASSERT_TRUE(grid.updateBlocker(*first, {.x = 0, .y = 2, .width = 2, .height = 1}).has_value());
+    EXPECT_EQ(grid.blockerRect(*first),
+              (NavigationCellRect2D{.x = 0, .y = 2, .width = 2, .height = 1}));
     EXPECT_EQ(grid.dynamicBlockerCountAt({1, 0}), 0U);
     EXPECT_EQ(grid.dynamicBlockerCountAt({2, 1}), 1U);
     EXPECT_EQ(grid.dynamicBlockerCountAt({0, 2}), 1U);
 
     ASSERT_TRUE(grid.removeBlocker(*second).has_value());
     EXPECT_FALSE(grid.containsBlocker(*second));
+    EXPECT_FALSE(grid.blockerRect(*second).has_value());
     EXPECT_EQ(grid.dynamicBlockerCountAt({2, 1}), 0U);
     auto stale = grid.removeBlocker(*second);
     ASSERT_FALSE(stale.has_value());

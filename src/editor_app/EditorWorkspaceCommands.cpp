@@ -683,6 +683,9 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         authoringFeedback_ = "TileMap root and chunk cook preview rebuilt";
         break;
     }
+    case EditorCommand::BakeNavigation2D:
+        status = bakeAndPublishNavigation2D();
+        break;
     case EditorCommand::GenerateTileMapGameplay: {
         if (!tileMapEditingContext()) {
             status = Tina::Core::failure(
@@ -874,6 +877,118 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
             ++counters_.animationEdits;
             ++counters_.authoringEdits;
             authoringFeedback_ = "Animation frame duration changed";
+        }
+        break;
+    }
+    case EditorCommand::AnimationPreviousEvent:
+        if (animationSelectedEventIndex_ > 0U) {
+            --animationSelectedEventIndex_;
+            authoringFeedback_ = "Animation notify selection moved backward";
+        }
+        break;
+    case EditorCommand::AnimationNextEvent: {
+        const auto selected = spriteAnimationDocument_.frameAt(
+            animationPreview_.selectedFrameIndex());
+        if (!selected) {
+            status = Tina::Core::failure(Tina::Editor::EditorErrorCode::FrameNotFound,
+                                         "Animation selected frame does not exist");
+            break;
+        }
+        if (animationSelectedEventIndex_ + 1U < selected->events.size()) {
+            ++animationSelectedEventIndex_;
+            authoringFeedback_ = "Animation notify selection moved forward";
+        }
+        break;
+    }
+    case EditorCommand::AnimationAddEvent:
+    case EditorCommand::AnimationApplyEvent: {
+        const auto selected = spriteAnimationDocument_.frameAt(
+            animationPreview_.selectedFrameIndex());
+        if (!selected) {
+            status = Tina::Core::failure(Tina::Editor::EditorErrorCode::FrameNotFound,
+                                         "Animation selected frame does not exist");
+            break;
+        }
+        auto input = readAnimationEventInput(tree);
+        if (!input) {
+            ++counters_.animationEventRejectedEdits;
+            return reportAuthoringFailure("Animation notify rejected: ", input.error());
+        }
+        if (command == EditorCommand::AnimationAddEvent &&
+            selected->events.size() >=
+                Tina::AssetFormat::SpriteAnimationClipWire::MaxEventsPerFrame) {
+            ++counters_.animationEventRejectedEdits;
+            return reportAuthoringFailure(
+                "Animation notify rejected: ",
+                Tina::Core::Error{
+                    Tina::Editor::EditorErrorCode::DocumentCapacityExceeded,
+                    "selected frame already contains 64 notify events"});
+        }
+        if (command == EditorCommand::AnimationApplyEvent &&
+            animationSelectedEventIndex_ >= selected->events.size()) {
+            ++counters_.animationEventRejectedEdits;
+            return reportAuthoringFailure(
+                "Animation notify rejected: ",
+                Tina::Core::Error{
+                    Tina::Editor::EditorErrorCode::FrameNotFound,
+                    "selected notify event does not exist"});
+        }
+        std::vector<Tina::AssetFormat::SpriteAnimationEventDesc> events{
+            selected->events.begin(), selected->events.end()};
+        if (command == EditorCommand::AnimationAddEvent) {
+            events.push_back(*input);
+        } else {
+            events[animationSelectedEventIndex_] = *input;
+        }
+        std::stable_sort(
+            events.begin(), events.end(),
+            [](const auto& left, const auto& right) noexcept {
+                return left.normalizedOffset < right.normalizedOffset;
+            });
+        const auto selectedEvent = std::find_if(
+            events.begin(), events.end(), [&input](const auto& event) noexcept {
+                return event.eventTag == input->eventTag &&
+                       event.normalizedOffset == input->normalizedOffset;
+            });
+        status = spriteAnimationDocument_.setFrameEvents(
+            animationPreview_.selectedFrameIndex(), events);
+        if (status) {
+            animationSelectedEventIndex_ = static_cast<u32>(
+                std::distance(events.begin(), selectedEvent));
+            animationDocumentChanged = true;
+            ++counters_.animationEdits;
+            ++counters_.animationEventEdits;
+            ++counters_.authoringEdits;
+            authoringFeedback_ = command == EditorCommand::AnimationAddEvent
+                                     ? "Animation notify added as one clip revision"
+                                     : "Animation notify edited as one clip revision";
+        }
+        break;
+    }
+    case EditorCommand::AnimationRemoveEvent: {
+        const auto selected = spriteAnimationDocument_.frameAt(
+            animationPreview_.selectedFrameIndex());
+        if (!selected || animationSelectedEventIndex_ >= selected->events.size()) {
+            status = Tina::Core::failure(Tina::Editor::EditorErrorCode::FrameNotFound,
+                                         "Animation selected notify event does not exist");
+            break;
+        }
+        std::vector<Tina::AssetFormat::SpriteAnimationEventDesc> events{
+            selected->events.begin(), selected->events.end()};
+        events.erase(events.begin() +
+                     static_cast<std::ptrdiff_t>(animationSelectedEventIndex_));
+        status = spriteAnimationDocument_.setFrameEvents(
+            animationPreview_.selectedFrameIndex(), events);
+        if (status) {
+            animationSelectedEventIndex_ = events.empty()
+                                               ? 0U
+                                               : (std::min)(animationSelectedEventIndex_,
+                                                            static_cast<u32>(events.size() - 1U));
+            animationDocumentChanged = true;
+            ++counters_.animationEdits;
+            ++counters_.animationEventEdits;
+            ++counters_.authoringEdits;
+            authoringFeedback_ = "Animation notify removed as one clip revision";
         }
         break;
     }

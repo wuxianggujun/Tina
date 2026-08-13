@@ -139,6 +139,19 @@ template <typename Id>
     return desc;
 }
 
+[[nodiscard]] PhysicsShape2DDesc openChain() noexcept
+{
+    PhysicsShape2DDesc desc;
+    desc.kind = PhysicsShapeKind2D::Chain;
+    desc.chainVertices[0] = {-2.0F, 0.0F};
+    desc.chainVertices[1] = {-1.0F, 0.5F};
+    desc.chainVertices[2] = {0.0F, 0.0F};
+    desc.chainVertices[3] = {1.0F, -0.5F};
+    desc.chainVertices[4] = {2.0F, 0.0F};
+    desc.chainVertexCount = 5;
+    return desc;
+}
+
 struct CreatedBodyShape final {
     PhysicsBodyId body{};
     PhysicsShapeId shape{};
@@ -316,6 +329,128 @@ TEST(PhysicsWorld2DTest, ValidatesStrictConvexPolygonBoundaryAndFiniteTransform)
     expectFailureCode(
         validatePhysicsShape2DDesc(polygon),
         Physics2DErrorCode::InvalidShapeDescription);
+}
+
+TEST(PhysicsWorld2DTest, ValidatesBoundedNonSensorChainVertices)
+{
+    EXPECT_TRUE(validatePhysicsShape2DDesc(openChain()));
+
+    PhysicsShape2DDesc chain = openChain();
+    chain.chainVertexCount = static_cast<Core::u32>(MinimumChainVertices2D - 1U);
+    expectFailureCode(
+        validatePhysicsShape2DDesc(chain),
+        Physics2DErrorCode::InvalidShapeDescription);
+
+    chain = openChain();
+    chain.chainVertexCount = static_cast<Core::u32>(MaximumChainVertices2D + 1U);
+    expectFailureCode(
+        validatePhysicsShape2DDesc(chain),
+        Physics2DErrorCode::InvalidShapeDescription);
+
+    chain = openChain();
+    chain.isSensor = true;
+    expectFailureCode(
+        validatePhysicsShape2DDesc(chain),
+        Physics2DErrorCode::InvalidShapeDescription);
+
+    chain = openChain();
+    chain.chainVertices[2].x = std::numeric_limits<float>::quiet_NaN();
+    expectFailureCode(
+        validatePhysicsShape2DDesc(chain),
+        Physics2DErrorCode::InvalidShapeDescription);
+
+    chain = openChain();
+    chain.chainVertices[3] = chain.chainVertices[1];
+    expectFailureCode(
+        validatePhysicsShape2DDesc(chain),
+        Physics2DErrorCode::InvalidShapeDescription);
+
+    chain = openChain();
+    chain.chainVertices[2] = {
+        chain.chainVertices[1].x + MinimumChainVertexSeparationMeters2D,
+        chain.chainVertices[1].y};
+    expectFailureCode(
+        validatePhysicsShape2DDesc(chain),
+        Physics2DErrorCode::InvalidShapeDescription);
+}
+
+TEST(PhysicsWorld2DTest, ChainIsStaticOnlyAndQueriesDeduplicateBackendSegments)
+{
+    PhysicsWorld2DConfig config = smallConfig(2, 2);
+    config.gravityMetersPerSecondSquared = {0.0F, 0.0F};
+    auto worldResult = PhysicsWorld2D::Create(config);
+    ASSERT_TRUE(worldResult) << worldResult.error().message;
+    PhysicsWorld2D world = std::move(*worldResult);
+
+    auto dynamic = world.createBody(dynamicBody());
+    ASSERT_TRUE(dynamic) << dynamic.error().message;
+    expectFailureCode(
+        world.createShape(*dynamic, openChain()),
+        Physics2DErrorCode::InvalidShapeDescription);
+    EXPECT_EQ(world.stats().shapeCount, 0U);
+
+    PhysicsBody2DDesc staticDesc;
+    staticDesc.type = PhysicsBodyType2D::Static;
+    auto body = world.createBody(staticDesc);
+    ASSERT_TRUE(body) << body.error().message;
+    auto shape = world.createShape(*body, openChain());
+    ASSERT_TRUE(shape) << shape.error().message;
+
+    auto state = world.shapeState(*shape);
+    ASSERT_TRUE(state) << state.error().message;
+    EXPECT_EQ(state->body, *body);
+    EXPECT_EQ(state->kind, PhysicsShapeKind2D::Chain);
+    EXPECT_FALSE(state->isSensor);
+    auto owner = world.shapeBody(*shape);
+    ASSERT_TRUE(owner) << owner.error().message;
+    EXPECT_EQ(*owner, *body);
+
+    PhysicsOverlapHit2D overlapHits[4]{};
+    auto overlap = world.overlapAabb({{-3.0F, -1.0F}, {3.0F, 1.0F}}, {}, overlapHits);
+    ASSERT_TRUE(overlap) << overlap.error().message;
+    EXPECT_EQ(overlap->totalFound, 1U);
+    ASSERT_EQ(overlap->written, 1U);
+    EXPECT_EQ(overlapHits[0].shape, *shape);
+
+    PhysicsCastHit2D castHits[4]{};
+    auto cast = world.castRay({{0.0F, -2.0F}, {0.0F, 4.0F}}, {}, castHits);
+    ASSERT_TRUE(cast) << cast.error().message;
+    EXPECT_EQ(cast->totalFound, 1U);
+    ASSERT_EQ(cast->written, 1U);
+    EXPECT_EQ(castHits[0].shape, *shape);
+
+    ASSERT_TRUE(world.destroyShape(*shape));
+    EXPECT_FALSE(world.contains(*shape));
+    expectFailureCode(world.shapeState(*shape), Physics2DErrorCode::StaleShape);
+    EXPECT_EQ(world.stats().shapeCount, 0U);
+}
+
+TEST(PhysicsWorld2DTest, LoopChainRetiresWithOwningBody)
+{
+    auto worldResult = PhysicsWorld2D::Create(smallConfig(1, 1));
+    ASSERT_TRUE(worldResult) << worldResult.error().message;
+    PhysicsWorld2D world = std::move(*worldResult);
+
+    PhysicsBody2DDesc staticDesc;
+    staticDesc.type = PhysicsBodyType2D::Static;
+    auto body = world.createBody(staticDesc);
+    ASSERT_TRUE(body) << body.error().message;
+
+    PhysicsShape2DDesc loop = openChain();
+    loop.chainVertexCount = 4;
+    loop.chainVertices[0] = {-1.0F, -1.0F};
+    loop.chainVertices[1] = {1.0F, -1.0F};
+    loop.chainVertices[2] = {1.0F, 1.0F};
+    loop.chainVertices[3] = {-1.0F, 1.0F};
+    loop.chainLoop = true;
+    auto shape = world.createShape(*body, loop);
+    ASSERT_TRUE(shape) << shape.error().message;
+
+    ASSERT_TRUE(world.destroyBody(*body));
+    EXPECT_FALSE(world.contains(*body));
+    EXPECT_FALSE(world.contains(*shape));
+    EXPECT_EQ(world.stats().bodyCount, 0U);
+    EXPECT_EQ(world.stats().shapeCount, 0U);
 }
 
 TEST(PhysicsWorld2DTest, ConvexPolygonFailureIsTransactionalAndLocalTransformIsApplied)

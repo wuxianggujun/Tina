@@ -218,6 +218,10 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
     tileMapStatus += std::to_string(tileMapDocument_.nonEmptyCellCount());
     tileMapStatus += " | Rev ";
     tileMapStatus += std::to_string(tileMapDocument_.revision());
+    tileMapStatus += " | Nav ";
+    tileMapStatus += navigationDocument_.isDirtyFor(tileMapDocument_.revision())
+                         ? "Dirty"
+                         : "Current";
     if (auto status = tree.setText(tileMapStatus_, tileMapStatus); !status) {
         return status;
     }
@@ -311,6 +315,9 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
     if (auto status = tree.setEnabled(cookTileMapButton_, tileMapControlsEnabled); !status) {
         return status;
     }
+    if (auto status = tree.setEnabled(bakeNavigationButton_, tileMapControlsEnabled); !status) {
+        return status;
+    }
     if (auto status = tree.setEnabled(generateTileMapGameplayButton_, tileMapControlsEnabled);
         !status) {
         return status;
@@ -391,11 +398,15 @@ auto EditorWorkspaceState::refreshPlaySessionUi(
         orientationButton_, snapButton_, tilePaintToolButton_, tileEraseToolButton_,
         paintTileButton_, eraseTileButton_, toggleTileLayerButton_, addTileLayerButton_,
         addObjectLayerButton_, cookTileMapButton_, generateTileMapGameplayButton_,
+        bakeNavigationButton_,
         animationModeButton_, animationPlayButton_, animationCookButton_,
         animationPreviousButton_, animationNextButton_, animationAddButton_,
         animationDuplicateButton_, animationDeleteButton_, animationMoveLeftButton_,
         animationMoveRightButton_, animationCycleSpriteButton_,
         animationDurationDecreaseButton_, animationDurationIncreaseButton_,
+        animationEventPreviousButton_, animationEventNextButton_,
+        animationEventAddButton_, animationEventApplyButton_,
+        animationEventRemoveButton_,
         animationUndoButton_, animationRedoButton_, openProjectAssetButton_,
         refreshProjectCatalogButton_, createProjectButton_, openProjectButton_,
         importSourceButton_, removeSourceImportButton_, closeDocumentButton_,
@@ -419,6 +430,12 @@ auto EditorWorkspaceState::refreshPlaySessionUi(
         if (auto status = tree.setEnabled(button, false); !status) {
             return status;
         }
+    }
+    if (auto status = tree.setEnabled(animationEventTag_, false); !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(animationEventOffset_, false); !status) {
+        return status;
     }
     for (const ComponentSectionUi& section : componentSections_) {
         const std::array sectionControls{

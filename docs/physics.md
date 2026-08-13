@@ -18,9 +18,10 @@ move-only 的固定容量 World，使用相互独立的 generation `PhysicsBodyI
 
 当前 API 已覆盖：
 
-- body 与 shape 分离创建；一个 body 可挂多个 Box/Circle/Capsule/ConvexPolygon shape，并可独立查询/销毁
+- body 与 shape 分离创建；一个 body 可挂多个 Box/Circle/Capsule/ConvexPolygon/Chain shape，并可独立查询/销毁
   shape；ConvexPolygon 接受 3..8 个按顺/逆时针严格凸边界排列、且满足当前 backend hull 容差的顶点，可附加
-  local center/angle transform；
+  local center/angle transform；Chain 接受4..64个 finite body-local 点，支持 open/loop，并且只能挂到 static
+  body、不能作为 sensor；
 - sensor enter/exit 复用有界 contact event view，并用 `isSensor` 明确区分；
 - Distance/Revolute/Prismatic joint 的创建、查询、销毁、spring/limit/motor 状态、容量、generation reuse 与
   关联 body 级联 retirement；
@@ -55,13 +56,20 @@ TileMap recipe -> v3 root + deferred TileMapChunk
 （经 `TileMapGridCollision`），并由 point object `101` 初始化位置。这两种运动模型共享 layer `20`
 的 Tile solid 数据，但不强行放入同一 controller。
 
-产品还创建一个 circle sensor，以及远离 crate/角色主场景的 spring Distance、Revolute 和 Prismatic
-joint。当前 Windows
+`Asset::PhysicsNavigationSync2D` 负责另一条显式桥：gameplay 注册动态 body 及 body-local AABB，Physics transform
+是唯一真相，桥将旋转后的保守 world AABB 发布为 NavigationGrid2D dynamic blocker。它不扫描 PhysicsWorld、不暴露
+Box2D geometry，也不把导航规则反向变成 collider。disabled/出界 body 暂时无 blocker，stale body 在下一次同步中自动
+retirement；固定容量 planner 与 registration 在 Create 时预留，稳态同步零分配。Product 2D 的 Cooked Navigation
+只含静态 Tile solid，crate blocker 由该桥发布，teardown 时先 shutdown bridge 再关闭两个 owner。
+
+产品还创建一个 circle sensor、远离 crate/角色主场景的 spring Distance/Revolute/Prismatic joint，以及
+一个5点 open Chain。当前 Windows
 product-2d 300 帧结构化报告记录 `physicsEnabled=true`、`physicsSteps=300`、`physicsStaticBodies=1`
 （recipe 地图 8×4、cooker chunk size 16，collision layer 只有一个 resident chunk，其11个 solid cell
 合并成2个 box shape）、非零 `physicsDynamicContacts`、`physicsSensorEnters=1`、`physicsSensorExits=1` 与
 `physicsJointReady=true`、`physicsConvexPolygonReady=true`、`physicsRevoluteJointReady=true` 与
-`physicsPrismaticJointReady=true`。这已经是产品接入证据，不代表 3D physics、全部 shape/joint 类型或跨平台门禁
+`physicsPrismaticJointReady=true` 与 `physicsChainReady=true`。这已经是产品接入证据，不代表 3D physics、
+全部 shape/joint 类型或跨平台门禁
 已完成。
 
 ## 生命周期与容量
@@ -72,6 +80,9 @@ product-2d 300 帧结构化报告记录 `physicsEnabled=true`、`physicsSteps=30
   ratio 支持大于1的 overdamped 配置；Revolute/Prismatic 状态共用 `limitEnabled`/`motorEnabled`，数值按
   kind 分别读取 angle/translation 字段；
 - body、shape、joint 分别验证 owner/generation；销毁 body 会同步退休其全部 shape 与关联 joint；
+- Chain 的全部 backend segment 只映射为一个公开 `PhysicsShapeId`；销毁/级联 retirement 记录全部 segment
+  tombstone，contact endpoint 可恢复已销毁公开 ID。AABB/ray query 按公开 ShapeId 去重，ray 穿过多个 segment
+  时只保留最近 fraction；
 - `step()` 只接受配置的 fixed delta，Runtime accumulator 决定每帧调用0..4次；
 - contact view 从成功 `step()` 到下一次 `step()`、move、shutdown 或销毁有效；
 - query 不扩容、不在回调中重入 step/mutation；
@@ -81,6 +92,11 @@ product-2d 300 帧结构化报告记录 `physicsEnabled=true`、`physicsSteps=30
 
 Physics 不在 solver callback 中直接修改 Scene；contact 应在 step 返回后转成带 generation ID 的 gameplay
 事件，再由 State 在安全阶段写 World。
+
+Chain 采用 Box2D one-sided 边界语义，按输入点序的每条有向边右侧为碰撞面；open chain 的首尾 ghost edge
+不形成额外碰撞面，loop 输入不重复首点。
+任意两点间距必须严格大于 `0.005 m`，避免 backend 退化边；当前 Tina 不检测 self-intersection，authoring
+侧必须提供简单边界。Chain 不开放 sensor、dynamic/kinematic body 或 per-segment public handle。
 
 ## Chunk collider bridge
 
@@ -125,7 +141,8 @@ out\build\windows-msvc-vnext-physics2d\bin\Debug\tina_physics2d_bench.exe --bodi
 ```
 
 `tina_physics2d_tests` 定向覆盖独立 body/shape/joint generation、多 shape/body、
-Box/Circle/Capsule/ConvexPolygon、polygon 凸性/有限 transform/事务失败、sensor enter/exit、
+Box/Circle/Capsule/ConvexPolygon/Chain、polygon 凸性/有限 transform/事务失败、Chain count/finite/separation/
+static-only/non-sensor/open-loop lifecycle 与 multi-segment query 去重、sensor enter/exit、
 Distance/Revolute/Prismatic joint 状态与 body cascade、容量回滚、contact、query、deferred command 和
 CharacterController coexistence。chunk collider 桥另有专项覆盖：rectangle 合并后的跨 span 碰撞、
 非法矩形/material/cell size 拒绝、shape 容量耗尽的整体回滚，以及 `TileMapPhysicsSync2D` 的
@@ -142,5 +159,5 @@ chunk、residency detach/attach 的 remove/add、失败后旧 collider 仍然发
 | `PERF-001` | **Done**：统一 `tina_bench` schema v1、`null_runtime_frames` workload/fingerprint 与 p50/p95/p99 |
 | `PERF-002` | 固定机受审 baseline、hard gate 与多进程 median/MAD 协议 |
 
-Chain 等更多 2D shape/joint，跨平台 bitwise determinism、CCD/vehicle 等高级
+更多 2D shape/joint，跨平台 bitwise determinism、CCD/vehicle 等高级
 语义只有在真实产品场景和固定线程策略冻结后才能承诺。

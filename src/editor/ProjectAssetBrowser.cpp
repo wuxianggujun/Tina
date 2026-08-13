@@ -56,6 +56,10 @@ std::string_view projectAssetKindLabel(AssetFormat::AssetKind kind) noexcept
         return "TileChunk";
     case AssetFormat::AssetKind::EnvironmentMap:
         return "Environment";
+    case AssetFormat::AssetKind::NavigationGrid2D:
+        return "Navigation2D";
+    case AssetFormat::AssetKind::Fx2D:
+        return "FX2D";
     case AssetFormat::AssetKind::Invalid:
     default:
         return "Invalid";
@@ -90,7 +94,9 @@ bool projectAssetMatchesFilter(AssetFormat::AssetKind kind,
                kind == AssetFormat::AssetKind::Tileset ||
                kind == AssetFormat::AssetKind::TileMap ||
                kind == AssetFormat::AssetKind::SpriteAnimationClip ||
-               kind == AssetFormat::AssetKind::TileMapChunk;
+               kind == AssetFormat::AssetKind::TileMapChunk ||
+               kind == AssetFormat::AssetKind::NavigationGrid2D ||
+               kind == AssetFormat::AssetKind::Fx2D;
     }
     if (filter == ProjectAssetFilter::ThreeD)
     {

@@ -96,7 +96,7 @@ bgfx 对每个 fragment 计算线性径向衰减。`sourceRadiusMeters=0` 时 fr
 积分或重叠区间 union。
 ambient、上述透明排序、连续 texture batch 与 premultiplied alpha 不变。没有 PointLight2D 组件时维持
 原 unlit 输出，inactive-only 可显式发布 ambient-only。产品 sample 固定创建暖/冷两盏相机内灯、1盏
-永久离屏 active light 与两条遮挡线并逐帧发布；当前 schema 27 继承 schema 19 并断言 `authoredPointLight2DCount=3`、
+永久离屏 active light 与两条遮挡线并逐帧发布；当前 schema 29 继承 schema 19 并断言 `authoredPointLight2DCount=3`、
 `pointLight2DCount=2`、`culledPointLight2DCount=1` 与默认 `softShadowPointLight2DCount=2`，同时继承
 schema 16 的双灯双遮挡 evidence。`RunProduct2dShadowVisualGate.ps1` 对 soft/hard 各重复两次并证明两种
 RGBA8 fingerprint 稳定且不同。角色 Sprite 另带独立3×1 normal atlas；`RunProduct2dNormalMapVisualGate.ps1`
@@ -121,22 +121,30 @@ Tile 与角色因此可以在同一 RenderScene 中保持排序语义并使用�
 
 ## Sprite 动画
 
-`SpriteAnimationClip` 是 Cooked asset kind 与 typed payload v1。payload 保存 `Once`、`Loop`、`PingPong`
-模式、按 authoring 顺序排列的帧、每帧正有限时长，以及指向去重后 required Sprite dependency stream
-的索引。writer/parser 限制最多4096帧并严格检查 schema、flags、大小、依赖索引和 duration；Asset typed
+`SpriteAnimationClip` 是 Cooked asset kind，唯一现行 typed payload 为 schema v2：32-byte header、12-byte
+帧记录（sprite dependency index、正有限 duration、event 区间）与 8-byte notify event（非零 u32 tag、u16
+定点**帧内** normalized offset，改帧长会带着事件一起移动）。payload 保存 `Once`、`Loop`、`PingPong` 模式、
+按 authoring 顺序排列的帧，以及指向去重后 required Sprite dependency stream 的索引。writer/parser 限制
+最多4096帧、每帧64个/单 clip 16384个 event，并严格检查 schema、flags、大小、依赖索引、duration 与 event
+offset；v1 payload 以 `UnsupportedSchema` 拒绝，不做双读或迁移。Asset typed
 view 继续校验 Cooked kind/version、依赖数量、required Sprite kind，以及每个 dependency 都实际被帧引用。
 
 Catalog recipe 支持：
 
 ```text
-spriteanim <clip-id> <Once|Loop|PingPong> <sprite-id:duration-seconds>...
+spriteanim <clip-id> <Once|Loop|PingPong> <frame>...
+frame := <sprite-id>:<duration-seconds>[#<tag>@<offset>...]
 ```
+
+tag 可写 `0x` 十六进制或标识符（FNV-1a 32 哈希成非零 u32），offset 可写小数（`0.75`）或百分比（`25%`）；
+同帧事件按 offset 升序稳定存储，等值保留 authoring 顺序，cook 结果确定。
 
 `SpriteAnimator2D` 接收已在 Asset/Scene 边界解析为 `SpriteRenderer2D` 的帧；每帧复制 weak Sprite handle
 与 optional weak normal Texture2D handle，
 但不持有 AssetLease 或 backend texture。它支持 Once 停在末帧、Loop、PingPong 反向经过内部帧、pause/play/stop/restart、
 正倍速和跨多帧的大 delta；无效 clip、非正倍速及负数/非有限 delta 会显式失败。clip 帧在设置时复制，
-`update()` 不分配。
+`update()` 不分配，并以 `crossedEvents` 按时间顺序上报本次推进穿越的 notify events（半开区间判定、Once
+终点闭合、PingPong 镜像反向、overflow 截断置位）；完整穿越语义见 [Scene](scene-ecs.md)。
 
 产品 sample 从 Catalog 解析 Idle、Walk、HitWall 三个 clip（共5个 resolved frame），由角色 fixed-step
 状态驱动 `Idle -> Walk -> HitWall`。HitWall 使用 Once clip，并把完成状态写入结构化门禁；角色当前帧
@@ -238,21 +246,23 @@ current simulation center，旧的散落 previous/current float 与手写 map cl
 `Tina::Navigation2D` 是独立于 `Scene::World` 的 backend-neutral 固定容量模块。产品在 visual/collision
 chunk 已驻留、gameplay object layer 已验证后调用 `Asset::buildTileMapNavigation2DData()`：
 
-1. hidden collision tile layer `20` 中带 Tileset `MaterialSolid` 的11个 cell 成为 base blocker；
-2. gameplay object layer `30` 中唯一 visible Rectangle 且 `role=crate` 的 object 栅格化为2个 cell；
+1. hidden collision tile layer `20` 中带 Tileset `MaterialSolid` 的11个 cell 成为静态 base blocker；
+2. gameplay object layer `30` 的 `role=crate` 不再 bake 进静态 grid，而在 Physics 创建后由
+   `PhysicsNavigationSync2D` 注册 body-local AABB 并每次 step 后发布为动态 blocker；
 3. `MaterialOneWay` 的1个 cell 通过精确 material-flags rule 得到 traversal multiplier 5，仍不成为
-   Physics solid；去重后的 immutable grid 数据含13个 blocked cell；引用 chunk 未驻留或 layer/object/rule 非法时原子失败；
-4. State-owned `NavigationGrid2D` 预留4个 generation dynamic blocker；
+   Physics solid；静态 immutable grid 数据含11个 blocked cell、0 个 bake 期 rectangle；引用 chunk 未驻留或
+   layer/object/rule 非法时原子失败；
+4. State-owned `NavigationGrid2D` 预留固定 generation dynamic blocker 容量；
 5. `NavigationPathfinder2D` 按完整32-cell map 容量一次性预分配 records/open-set/path storage。
 
 默认四方向 A* 使用 `f -> heuristic -> row-major index` 决胜；启用对角时使用 octile heuristic，
 直行/对角进入成本为 `10/14 × destination traversal multiplier`，heuristic 乘 grid 最小 multiplier。
-产品从 `(1,3)` 到 `(5,3)` 得到9-cell基础路径（cost 80）、严格防切角路径得到6-cell路径（cost 62），
-允许切角路径得到5-cell路径（cost 56）；添加 `{3,1,1,1}` dynamic blocker 后四方向得到7-cell改道路径
-（cost 100），随后移除 blocker。独立 `(1,2)->(5,2)` 查询得到7-cell/cost 60，并证明路径未经过
-高代价 `(3,2)` cell。另一个
-`begin()` query 只 `advance(1)` 后调用 `cancel()`，终态必须为 `Cancelled`；add/remove 使 Grid revision 从1
-推进到3，最终 live dynamic blocker 为0。以上字段进入 schema 27 evidence。
+产品在 bridge 发布 crate blocker 后，基础/动态/严格/切角 path 均为5-cell/cost 40；独立
+`(1,2)->(5,2)` 查询得到7-cell/cost 60，并证明路径未经过高代价 `(3,2)` cell。另一个
+`begin()` query 只 `advance(1)` 后调用 `cancel()`，终态必须为 `Cancelled`；产品 mutation 使
+Grid revision 推进到10、dynamic blocker mutations=2。产品还从独立 `NavigationGrid2D` v1 Cooked asset
+构建同一份 immutable data，并与 live TileMap 派生的 flags/cost payload 做 bit-exact 对账；以上字段进入
+schema 29 evidence。
 
 `begin()/advance()` 是 cooperative query，不创建 worker/thread；Pending 期间必须继续传入同一 Grid 地址与
 revision，否则终态为 `Invalidated`。blocked endpoint/open-set 耗尽是 `Unreachable`，不是 API error。
@@ -272,13 +282,16 @@ revision，否则终态为 `Invalidated`。blocked endpoint/open-set 耗尽是 `
    全部 staged 成功才退休旧 body；失败保留上一次发布的 collider 且不推进 stats；
 5. 产品 State 从 `role=crate` 的 Rectangle record 创建一个 dynamic crate，并显式挂接 ConvexPolygon shape；
 6. 同一 World 创建 circle sensor 和远离主场景的 spring Distance、Revolute 与 Prismatic joint；
-7. 每个 fixed tick 调用 `PhysicsWorld2D::step()`，读取 contact/sensor event、body state 与 joint state；
-8. Scene sprite 使用 crate state 输出可见结果；
-9. State 退出时先 `shutdown(world)` 退休全部 chunk collider，再释放 sync 与 stream。
+7. 远离玩法区再创建一个5点 open Chain；该 Chain 挂在 static body、不是 sensor，并通过 `shapeState()` 回读为
+   一个公开 `PhysicsShapeId`；
+8. 每个 fixed tick 调用 `PhysicsWorld2D::step()`，读取 contact/sensor event、body state 与 joint state；
+9. Scene sprite 使用 crate state 输出可见结果；
+10. State 退出时先 `shutdown(world)` 退休全部 chunk collider，再释放 sync 与 stream。
 
 当前 product-2d 证据为 `physicsStaticBodies=1`（唯一 resident collision chunk 的 collider；11个 solid cell
 合并成2个 box shape）、dynamic contact 非0、300次 physics step、sensor enter/exit 各1次，以及
-`physicsJointReady`/`physicsConvexPolygonReady`/`physicsRevoluteJointReady`/`physicsPrismaticJointReady`
+`physicsJointReady`/`physicsConvexPolygonReady`/`physicsRevoluteJointReady`/`physicsPrismaticJointReady`/
+`physicsChainReady`
 均为 true。逐 cell 的 static body 同步已删除，不保留兼容路径。完整细节见 [物理](physics.md)。
 
 ## UI 与 Audio
@@ -314,8 +327,8 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
 当前 sample 的结构化产品门禁要求：
 
 - exit 0，`sample=tina_sample_2d`，`productGate=bgfx-physics-freetype-audio`；
-- `catalogFromRecipeFile=true`、`catalogRecipeAssets=15`（含2个 cooked chunk 与独立 normal atlas）、`texturesUploaded=3`；
-- `evidenceSchema=27`，新增 Navigation2D immutable grid 权重统计与绕行证据，并继承 schema 25 的对角策略/path cost、schema 23 的 Menu、schema 22 的 Confirm、schema 21 的输入设备提示、schema 20 的 UI Flow 与 schema 19 的 normal-map 证据；仍要求 `sprite2DLightingConfigured=true`、`authoredPointLight2DCount=3`、
+- `catalogFromRecipeFile=true`、`catalogRecipeAssets=17`（含2个 cooked chunk、独立 normal atlas、NavigationGrid2D 与 Fx2D）、`texturesUploaded=3`；
+- `evidenceSchema=29`，新增 Physics2D→Navigation2D 动态 blocker 同步证据（registered/published body、sync/update/remove 计数），并继承 schema 28 的动画 notify、Cooked Navigation/Fx2D 与 Physics Chain 证据以及之前版本的 lighting/UI/normal-map 字段；Cooked Navigation 的静态 blocked cells 为 `11`，crate 运行时由 bridge 发布一个 blocker。
   `pointLight2DCount=2`、`culledPointLight2DCount=1`，并继承 schema 16 的双灯双遮挡证据；
   `shadowOccluder2DCount=2`、`softShadowPointLight2DCount=2`、
   `normalMappedSpriteCount=1`、`sceneLightingFrames=submittedRenderFrames`，并要求
@@ -341,21 +354,25 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
 - `tileMapStreamRequests=2`、`tileMapStreamCommitted=2`、`tileMapStreamResident=2`，且每个 frame 都推进
   demand/pump/commit；
 - `objectLayerConsumed=true`、`objectLayerObjects=2`，唯一 player/crate role 与 Point/Rectangle kind 已被产品逻辑消费；
-- `navigationReady=true`、solid/rectangle/blocked=`11/1/13`、
-  weighted/max-cost=`1/5`；基础/动态路径 cell/cost=`9/80`、`7/100`，严格/切角=`6/62`、`5/56`，
-  独立 weighted path=`7/60` 且避开高代价 cell；`navigationIncrementalExpandedNodes=1`、
-  revision/mutation=`3/2` 且 `navigationCancelled=true`；
+- `navigationReady=true`、`navigationFromCookedAsset=true`、`navigationCookedBitExact=true`，静态 Cooked grid
+  的 solid/rectangle/blocked=`11/0/11`、weighted/max-cost=`1/5`；Physics bridge 的
+  synchronizations/adds/updates/removes=`301/1/5/0`、registered/published=`1/1`；基础/动态/严格/切角路径
+  cell/cost 均为 `5/40`，独立 weighted path=`7/60` 且避开高代价 cell；
+  `navigationIncrementalExpandedNodes=1`、revision/mutation=`10/2` 且 `navigationCancelled=true`；
 - 300次 extraction/physics step，角色 grounded/walk/hit-right；
 - Tile/角色 base/角色 normal 三纹理 upload/binding、连续 sprite batch、Camera follow/interpolation、chunk cache；
-- 三个动画 clip 来自 Catalog，共解析5帧；Idle/Walk/HitWall 均进入，HitWall Once clip 完成；
-- 固定粒子容量12、seed `1414090305`、初始发射10，300帧时 expired=4、
-  active/extracted=6；Trail 容量8、创建/active/extracted segment=3、break=1；
+- 三个动画 clip 来自 Catalog，共解析5帧；Idle/Walk/HitWall 均进入，HitWall Once clip 完成；Walk/HitWall
+  notify 分别被产品消费为非零 `animEventFootsteps`/`animEventHits`，且 `animEventOverflow=0`、
+  `animEventUnknownTags=0`；
+- `Fx2D` v1 来自 Catalog 并经 Scene factory 创建固定容量 Particle/Trail；粒子容量12、seed `1414090305`、
+  初始发射10，300帧时 expired/active/extracted=`0/10/10`；Trail 容量8、创建/active/extracted segment=3、break=1；
   `fxInitialFingerprint` 是32字符小写 hex；其内部 schema 2 用 Store 解析出的稳定 Sprite `AssetId`，不把
   瞬时 generation handle bits 或 render key 写入指纹，并覆盖确定性的初始粒子/Trail 状态；
 - UI/TextEdit/ProgressBar/RadioButton、Audio Catalog lease、Advanced Audio owner-thread deterministic mix、
   Physics contact；
 - `physicsSensorEnters>0`、`physicsSensorExits>0`、`physicsJointReady=true`，并要求
-  `physicsConvexPolygonReady=true`、`physicsRevoluteJointReady=true`、`physicsPrismaticJointReady=true`；
+  `physicsConvexPolygonReady=true`、`physicsRevoluteJointReady=true`、`physicsPrismaticJointReady=true`、
+  `physicsChainReady=true`；
 - `stateExits=1`、`applicationShutdowns=1`、`uiRootsReleased=1`；
 - `pixelCaptureOk=true`。
 
@@ -397,14 +414,14 @@ Escape/Gamepad East 的 Back 路由给该 active Screen；Enter/Keypad Enter/Gam
 - 当前 streaming 是固定容量 Camera/layer priority demand owner，已有稳定的新请求排序与 retain-window
   demand-recency LRU；通用 Scene 编辑器与网络 rollback 仍未提供；
 - Navigation2D 仅提供唯一当前矩形 weighted grid、property-tagged Rectangle blocker 与 cooperative
-  A* query；没有 navmesh、内部 worker、crowd avoidance、独立 Cooked Navigation
-  AssetKind、Physics 自动同步或 editor bake；
+    A* query；独立 Cooked `NavigationGrid2D`、Editor bake/publish、Physics2D 动态 blocker 与产品 live-vs-cooked bit-exact 对账已提供；
+  当前没有 navmesh、内部 worker 或 crowd avoidance；Physics2D→Navigation2D 仅通过显式 `PhysicsNavigationSync2D` 注册桥同步，Navigation 不反向生成 collider；
 - Cooked SpriteAsset 的完整 atlas/PPU metadata resolve 仍可扩展，当前产品使用 Texture2D + 显式 UV/key；
 - GPU chunk mesh cache、复杂透明材质与多 camera/letterbox policy 尚未产品化；
-- 当前 2D-FX 是 CPU fixed-capacity Sprite2D extraction，不包含 Cooked FX asset schema、effect graph/editor、
-  GPU particle simulation 或 mesh-ribbon trail；
-- Physics2D 当前 shape 为 Box/Circle/Capsule/ConvexPolygon，joint 为 Distance/Revolute/Prismatic；Chain 与
-  更多高级约束未产品化；
+- 当前 2D-FX 是 Cooked `Fx2D` v1 驱动的 CPU fixed-capacity Sprite2D extraction，并提供公共 authoring document；
+  当前没有可见 effect graph/专用 EditorApp 面板、GPU particle simulation 或 mesh-ribbon trail；
+- Physics2D 当前 shape 为 Box/Circle/Capsule/ConvexPolygon/Chain，joint 为 Distance/Revolute/Prismatic；
+  Chain 是 static-only、non-sensor 的 one-sided open/loop 边界，更多高级约束未产品化；
 - TileMap→Physics 当前是 per-chunk static collider + 确定性 greedy rectangle 合并 + residency/revision
   增量同步；它只覆盖 tile solid 几何，不生成 one-way/platform 语义、不做 object layer collider、
   也不提供 editor bake 或跨 chunk 的全局矩形合并；

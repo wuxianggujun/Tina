@@ -87,7 +87,7 @@ template <typename Bytes> [[nodiscard]] Bytes readFixed(std::span<const std::byt
 
 [[nodiscard]] constexpr bool isKnownAssetKind(AssetKind kind) noexcept
 {
-    return kind >= AssetKind::Texture2D && kind <= AssetKind::EnvironmentMap;
+    return kind >= AssetKind::Texture2D && kind <= AssetKind::Fx2D;
 }
 
 [[nodiscard]] constexpr bool isKnownInputFlags(SourceImportInputFlags flags) noexcept

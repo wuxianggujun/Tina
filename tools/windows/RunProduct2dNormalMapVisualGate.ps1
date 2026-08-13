@@ -81,8 +81,8 @@ function Invoke-NormalMapProbeRun {
     if ([int64]$evidence.frames -ne [int64]$SampleFrames) {
         [void]$errors.Add("frames expected=$SampleFrames actual=$($evidence.frames)")
     }
-    if ([int]$evidence.evidenceSchema -ne 27) {
-        [void]$errors.Add("evidenceSchema expected=27 actual=$($evidence.evidenceSchema)")
+    if ([int]$evidence.evidenceSchema -ne 29) {
+        [void]$errors.Add("evidenceSchema expected=29 actual=$($evidence.evidenceSchema)")
     }
     if ([int]$evidence.normalMappedSpriteCount -ne $expectedNormalMappedSpriteCount) {
         [void]$errors.Add(

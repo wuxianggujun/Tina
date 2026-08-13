@@ -24,7 +24,8 @@ namespace Tina::Physics2D {
 
 // Single-owner, fixed-step 2D physics world. Bodies, shapes, and joints have
 // independent generation handles. Shapes are backend-neutral Box/Circle/Capsule/
-// ConvexPolygon descriptors and may be sensors; every body may own multiple shapes.
+// ConvexPolygon/Chain descriptors; every body may own multiple shapes. Chain is a
+// static-body-only, non-sensor shape whose backend segments share one public handle.
 // Joints are backend-neutral Distance/Revolute/Prismatic descriptors.
 class PhysicsWorld2D final {
 public:

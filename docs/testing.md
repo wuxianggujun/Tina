@@ -496,7 +496,7 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
   missing/multiple dependency、unbound/stale texture 都返回0；
 - Registry 是 Sprite2D Lease/GPU/binding 唯一 owner；产品 State 不再保存裸 GPU owner，退出只通过
   `retireAllTextureBindings()` handoff；
-- N16.3 当时的 product evidence schema 14 已由当前 schema 27 继承（lighting 的 schema 16..19 字段继续保留）：`spriteBindingTextures=3`、
+- N16.3 当时的 product evidence schema 14 已由当前 schema 29 继承（lighting 的 schema 16..19 字段继续保留）：`spriteBindingTextures=3`、
   `spriteTextureLeasesAcquired=3`、
   `spriteTextureRetirementsAccepted=3`、`spriteBindingRegistryReleased=true`、
   `spriteTextureHandlesInvalidated=3`、`spriteTextureRetirementRecords=3`、
@@ -1090,7 +1090,7 @@ Core 的目录替换失败回归保留在 `WriteFileTests.FailedAtomicReplacePre
 - bgfx 将 source radius 编码进既有 light color uniform `.w`，不增加 uniform 数组；GLSL 120、SPIR-V、
   DXBC SM5 三个 shader profile 均以 `--Werror` 构建；
 - `RunProduct2dShadowVisualGate.ps1` 保持四次300帧 probe：soft A/B 与 forced-hard A/B 各自像素和结构证据
-  可重复，soft/hard RGBA8 fingerprint 必须不同。当前 schema 27 继承 N4 的 committed snapshot 并观测
+  可重复，soft/hard RGBA8 fingerprint 必须不同。当前 schema 29 继承 N4 的 committed snapshot 并观测
   `softShadowPointLight2DCount=2/0`，并继续断言 authored/committed/culled=`3/2/1`、双 occluder 与逐帧 lighting。
 
 开发阶段直接运行 `ScenePointLight2DTest.*`、两个 RenderScene lighting tests 与
@@ -1114,7 +1114,7 @@ area-light interval union 或跨 GPU exact golden 证据。
   相对 Lambert factor 精确为1；
 - `RunProduct2dNormalMapVisualGate.ps1` 对 normal on A/B 与 off A/B 各跑一次完整 sample。两种模式均 cook、
   load、upload、register、retire 独立 normal atlas并断言3份 Texture lifecycle；只清空组件 normal handle。
-  当前 schema 27 继承 schema 19 的 `normalMappedSpriteCount=1/0`，同模式像素/结构证据可重复，跨模式 fingerprint 必须不同。
+  当前 schema 29 继承 schema 19 的 `normalMappedSpriteCount=1/0`，同模式像素/结构证据可重复，跨模式 fingerprint 必须不同。
 
 开发阶段直接运行 Scene normal resolver、RenderScene normal propagation、Null/bgfx normal resource/batch 的
 定向 filter；闭环后再跑产品四次视觉差分与完整 product gate。该证据不声明跨 GPU exact golden。
@@ -1127,11 +1127,11 @@ area-light interval union 或跨 GPU exact golden 证据。
 | `tina_sample_platform` | GLFW window/input/WindowSurface + NullRender | bgfx 绘制 |
 | `tina_sample_desktop` | Desktop bootstrap、真实 bgfx surface、UI pass | 2D/3D 产品内容 |
 | `tina_sample_ui_showcase` | 20 控件 + Image/NineSlice + Dark/Light + Tree/List；startup stylesheet + header accent ColorToken 换肤；JSON `stylesheetInstalled`/`styleTokenUpdates` | 正式编辑器 / authoring 写入；完整 CSS |
-| `TinaEditor.exe` (`tina_editor_desktop`) | `Tina::EditorApp` 驱动 World2D/Prefab v2 World3D/TileMap v3+v1/SpriteAnimationClip v2 完整产品；Project Browser/分类过滤/资源 Inspector/current-schema Catalog open/refresh、fixed 32 px asset list、active-tab AssetId Inspector 与 fixed 36 px dependency list、固定容量且独立拥有 document/history/session 的 tabs；Inspector 完整 TRS transaction、routed-pointer viewport Move、Tile tools、SpriteAnimation Timeline frame CRUD/播放/模式/时长/重排/Undo/Redo/Cook、Windows native 与 Linux `zenity`/`kdialog` open/save/folder dialog、Project `New` 创建 Source/Catalog 并 manifest-last 发布/reopen 空 current-schema package、Project `Open` 与下一安全帧 live Catalog switch、canonical dirty baseline 与 dirty-close Modal；`--project-root` + mixed recipe/glTF intended set + `--import-on-start` 证明后台 validated fresh stage + sibling state、主线程 Catalog reload/busy retry、dirty commit gate、单一 active pointer commit 与 reopen 恢复；`--catalog-root` + AssetSystem + Sprite/Tileset/Mesh registry 解析真实 AssetId、GPU owner 与 packet-local refs，committed UI rect 驱动 Camera2D/Sprite/多 Tile layer 或 PerspectiveCamera/Mesh viewport；JSON 报告 layout、browser/tabs、gizmo、TileMap、Animation、session、source import、Catalog/GPU resolve、document revision 与 preview 状态 | Linux Editor target 定向编译与 `zenity`/`kdialog` 真实 open/save/folder/cancel 产品门禁 |
+| `TinaEditor.exe` (`tina_editor_desktop`) | `Tina::EditorApp` 驱动 World2D/Prefab v2 World3D/TileMap v3+v1/SpriteAnimationClip v2 完整产品；Project Browser/分类过滤/资源 Inspector/current-schema Catalog open/refresh、fixed 32 px asset list、active-tab AssetId Inspector 与 fixed 36 px dependency list、固定容量且独立拥有 document/history/session 的 tabs；Inspector 完整 TRS transaction、routed-pointer viewport Move、Tile tools、Navigation bake/publish、SpriteAnimation Timeline frame CRUD/播放/模式/时长/重排/event marker/Undo/Redo/Cook、Windows native 与 Linux `zenity`/`kdialog` open/save/folder dialog、Project `New` 创建 Source/Catalog 并 manifest-last 发布/reopen 空 current-schema package、Project `Open` 与下一安全帧 live Catalog switch、canonical dirty baseline 与 dirty-close Modal；`--project-root` + mixed recipe/glTF intended set + `--import-on-start` 证明后台 validated fresh stage + sibling state、主线程 Catalog reload/busy retry、dirty commit gate、单一 active pointer commit 与 reopen 恢复；`--catalog-root` + AssetSystem + Sprite/Tileset/Mesh registry 解析真实 AssetId、GPU owner 与 packet-local refs，committed UI rect 驱动 Camera2D/Sprite/多 Tile layer 或 PerspectiveCamera/Mesh viewport；JSON 报告 layout、browser/tabs、gizmo、TileMap、Navigation bake、Animation marker、session、source import、Catalog/GPU resolve、document revision 与 preview 状态 | Linux Editor target 定向编译与 `zenity`/`kdialog` 真实 open/save/folder/cancel 产品门禁；Fx2D 当前只有公共 authoring document，没有专用 EditorApp 面板 |
 | `tina_sample_asset` | Catalog→Task→AssetSystem→ReadyGpu/Lease | 可见纹理/mesh |
 | `tina_sample_2d_infrastructure` | CPU/Null Camera2D/Sprite extraction | Catalog/产品 UI/GPU |
 | `tina_sample_2d_infrastructure_bgfx` | fixture Sprite2D + UI overlay | 正式 Catalog TileMap 产品 |
-| `tina_sample_2d` | Catalog TileMap v3 root + deferred TileMapChunk；每帧 visual=10/collision=20 demand→pump→commit 与 resident 证据；gameplay objects=30，按唯一 role=player/crate 与 Point/Rectangle kind 消费，不依赖固定 object ID；CameraFollow2D fixed-step current center + presentation interpolation；Navigation2D 从 solid tile/exact material-cost/property Rectangle 派生 immutable weighted grid，并验证四向/对角、严格/允许切角、dynamic blocker、path cost、weighted 绕行、分步取消与 revision；SpriteAnimationClip/Animator、fixed-capacity Particle/Trail、Gameplay、成熟 Theme UI 与 Scene Explorer TreeView、Audio；Physics 含 Box/Circle/Capsule/ConvexPolygon、sensor enter/exit 与 Distance/Revolute/Prismatic joint；Sprite2D base/optional-normal extraction 使用 packet-local `FrameResourceRef`；schema 27 继承 schema 25 的对角/path cost、schema 19 的双灯双遮挡、逐帧 lighting、authored/committed/culled=`3/2/1`、soft/hard 与 normal-map 四跑差分，并保留 UI Flow base/pause Screen push/pop、Back/Confirm/Menu、Dark→Light→Dark、Tree stable-key selection/scroll/semantics、三份 Registry Lease/GPU/binding owner handoff/retirement、weak texture handle 失效、ledger Released、World/TileMap/Particle/Trail resolver hits 与 FX fingerprint schema 2，final-present RGBA8 capture 与单机 exact golden；feature 图含 Physics/FreeType/miniaudio | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、Particle/Trail 事务性和 PMR 压力以及 CameraFollow2D 失败事务（由 `tina_scene_tests` 证明）、TileMap retain-capacity LRU 压力（由 `tina_asset_tests` 证明）、跨 GPU lighting golden、通用 Scene 编辑器、独立 Cooked Navigation/editor bake/Physics 自动同步、Chain/高级约束、Linux |
+| `tina_sample_2d` | Catalog TileMap v3 root + deferred TileMapChunk、NavigationGrid2D v1 与 Fx2D v1；每帧 visual=10/collision=20 demand→pump→commit；Navigation live derive 与 Cooked data bit-exact，并验证 weighted A*、dynamic blocker、分步取消与 revision；PhysicsNavigationSync2D 将显式注册 crate body 的 transform/AABB 同步为 dynamic blocker；SpriteAnimation notify 被产品消费；Fx2D factory 驱动 fixed-capacity Particle/Trail；Physics 含 Box/Circle/Capsule/ConvexPolygon/Chain、sensor enter/exit 与 Distance/Revolute/Prismatic joint；Sprite2D 使用 packet-local `FrameResourceRef`；schema 29 保留既有证据并新增 navigation physics sync counters | Registry transaction/PMR/owner-thread 压力、跨 GPU lighting golden、可见 FX effect graph/GPU simulation、更多高级约束、Linux |
 | `tina_sample_3d_extraction` | CPU/Null Perspective/Mesh extraction | 可见 GPU 3D |
 | `tina_sample_3d_infrastructure` | procedural fixture Cube/depth/instance | Cooked product mesh |
 | `tina_sample_3d` | 双 mesh glTF→MikkTSpace tangent→Cooked P3N3T4UV2→AssetSystem→Prefab/Scene weak Handle→engine-provided、State-owned Mesh3D registry→packet-local geometry/material ref→bgfx tangent TBN；evidence schema 14、`tangentMeshesUploaded=2`、Cook-Torrance GGX + cooked EnvironmentMap split-sum IBL、固定4级联 CSM config authored/submitted=`1`、固定 SpotLight/PointLight shadow authored/submitted=`1/1`、startup-only shadow extent、point-shadow on/off ROI 像素差分、实时 framebuffer aspect、响应式 right rail/footer、Mesh/Material/3共享 Texture owner handoff 与 retirement ledger、原子 baseColor/MR/normal/factors binding、3个 World DirectionalLight3D，以及 PointLight3D/SpotLight3D 各自 authored/committed/culled=`3/2/1` 的逐帧 snapshot、成熟 retained controls、Asset ListView/Scene TreeView、Dark→Light→Dark、final-present RGBA8 capture 与单机 exact golden | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、跨 GPU golden |
@@ -1250,11 +1250,17 @@ capacity 失败保留旧结果，以及 Create 后成功 query/blocker mutation 
 solid tile + exact full-material-flags cost rule + property-tagged visible Rectangle、重复/零 flags/越界 cost、
 wrong layer kind、tagged Point 拒绝和 non-resident chunk 原子失败。
 
-产品 smoke 还要求 schema 27 的 `navigationReady=true`、
-solid/rectangle/blocked=`11/1/13`、weighted/max-cost=`1/5`、base/dynamic path cells/cost=`9/80`、`7/100`、
-strict/corner-cut cells/cost=`6/62`、`5/56`、独立 weighted path=`7/60` 且未经过高代价 `(3,2)` cell、
-incremental expanded nodes=`1`、revision/mutations=`3/2` 与 `navigationCancelled=true`。sample exit 0 是
-结构化产品接线证据；当前导航没有独立视觉结论。
+payload/typed gate 还覆盖 `NavigationGrid2DPayloadTests.*` 与 `NavigationFxTypedViewTests.*`：32-byte header、
+row-major flags/cost round-trip、reserved/layout/range 拒绝、零 dependency contract、ContentHash，以及从 Cooked
+file 深拷贝 immutable data。Editor 统一 smoke 要求 bake/source revision、payload bytes、ready/published 为真且
+dirty 为假；Source Import reload 后 authoring overlay 仍独立保留。
+
+产品 smoke 还要求 schema 29 的 `navigationReady=true`、`navigationFromCookedAsset=true`、
+`navigationCookedBitExact=true`、静态 Cooked grid 的 solid/rectangle/blocked=`11/0/11`、weighted/max-cost=`1/5`，
+以及 Physics bridge 的 synchronizations/adds/updates/removes=`301/1/5/0`、registered/published=`1/1`。
+base/dynamic/strict/corner-cut path cells/cost 均为 `5/40`，独立 weighted path=`7/60` 且未经过高代价
+`(3,2)` cell；incremental expanded nodes=`1`、revision/mutations=`10/2` 与 `navigationCancelled=true`。
+sample exit 0 是结构化产品接线证据；当前导航没有独立视觉结论。
 
 ## CameraFollow2D
 
@@ -1265,7 +1271,10 @@ interpolation。产品 smoke 还要求 `cameraFollowUpdates>0`、已 primed 的 
 
 ## 2D-FX
 
-`tina_scene_tests` 是 `ParticleSystem2D` / `Trail2D` 的模块门禁：覆盖 Create 固定 PMR allocation 与失败
+`tina_asset_format_tests`、`tina_asset_tests` 与 `tina_scene_tests` 分别覆盖 `Fx2DPayloadTests.*`、
+`NavigationFxTypedViewTests.*` 和 `Fx2DFactoryTests.*`：固定184-byte payload、reserved/range/capacity 拒绝、
+恰好一个 required Sprite dependency 与 payload AssetId 对账，以及 factory 创建 Particle/initial burst/Trail 和
+空 Sprite fail closed。`tina_scene_tests` 还覆盖 `ParticleSystem2D` / `Trail2D` 的 Create 固定 PMR allocation 与失败
 回收、300帧无 storage growth、固定 seed 可复现、burst validation/capacity/stable-key failure 原子性、
 stable key 过期后不复用、update preflight 零发布，以及向 `RenderSceneWriter` 的 lifetime/size/color/width
 extraction 和 writer capacity failure。A3 进一步覆盖 weak Sprite Handle 保留、空 handle 发布前拒绝、
@@ -1277,7 +1286,7 @@ cmake --build --preset windows-vnext-debug --target tina_scene_tests --parallel 
 out\build\windows-msvc-vnext\bin\Debug\tina_scene_tests.exe --gtest_color=yes
 ```
 
-product-2d gate 还必须构建并直接运行 `tina_scene_tests`，再验证 sample 的 `evidenceSchema=27`。通用结构化
+product-2d gate 还必须构建并直接运行上述三个 executable，再验证 sample 的 `evidenceSchema=29`。通用结构化
 字段包括 `texturesUploaded=3`、`spriteBindingTextures=3`、`spriteTextureLeasesAcquired=3`、
 `spriteTextureRetirementsAccepted=3`、`spriteBindingRegistryReleased=true`、
 `spriteTextureHandlesInvalidated=3`、`spriteTextureRetirementRecords=3`、
@@ -1300,8 +1309,8 @@ Flow base/pause Screen push/pop=`2/1`、Back/Confirm/Menu action register/clear=
 未被 focused control 消费的 Enter/Keypad Enter/Gamepad South Confirm，以及未被 TextEdit 优先消费的
 P/Gamepad Start Menu 会调用对应 callback；匹配 Up 在 Screen pop 后仍被消费，无 callback 时 gameplay
 transition 保留。300帧 gate 还要求
-`particleExpired=4`、`particleActive=6`、
-`particleExtracted=6`、`trailActive=3`、`trailExtracted=3`。这些字段证明固定配置下的 simulation/extract
+`particleExpired=0`、`particleActive=10`、
+`particleExtracted=10`、`trailActive=3`、`trailExtracted=3`。这些字段证明固定配置下的 simulation/extract
 数量与初始状态指纹；`pixelCaptureOk` 和单机 golden/非空窗口证据仍单独证明可见输出。
 
 ## UI 与视觉
@@ -1337,6 +1346,8 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --fra
 `pixelGoldenChecked=true` 与 `pixelGoldenMatched=true`。该 exact hash 是 machine-local gate，不得跨 GPU、
 driver 或 backend 复制为通用金标。需要可人工查看的 PNG 与 blank/black 分析时，再使用
 `tools/windows/CaptureSampleWindow.ps1 -RequireNonBlank`；内置 hash 不替代该窗口证据。
+bgfx 截图回调是异步的；backend 在最终 present 后使用有界120-frame/1ms poll wait 等待 render thread
+交付。超限必须保留 `FrameCaptureFailed`，gate 不得通过 PowerShell 盲重试把首次失败掩盖为成功。
 
 ## Physics2D 与 Audio
 
@@ -1378,22 +1389,33 @@ wrong-owner/bounded shutdown、active callback reader quiescence、terminal abso
 
 `MiniaudioDeviceTest.NullBackendConsumesBoundedStreamEofAndCancel` 验证 adapter 作为 realtime consumer 的
 EOF/Cancel 路径。产品 300帧还要求 `audioStreamQueued/submitted/eof/mixed/drained/stopped/retired=true`、
-submitted/consumed frame 数一致且 `audioStreamUnderrunFrames=0`；当前 product evidence schema 为27。
+submitted/consumed frame 数一致且 `audioStreamUnderrunFrames=0`；当前 product evidence schema 为29。
 
 Physics2D 模块门禁覆盖：`createBody/createShape/createJoint` 独立 generation、多
-Box/Circle/Capsule/ConvexPolygon shape/body、polygon 3..8 顶点严格凸性/非共线/非自交与 local
+Box/Circle/Capsule/ConvexPolygon/Chain shape/body、polygon 3..8 顶点严格凸性/非共线/非自交与 local
 center/angle transform、shape 单独销毁、sensor enter/exit、Distance/Revolute/Prismatic joint 的
 create/query/destroy、spring/limit/motor state、body 级联退休 shape/joint、wrong-world/stale/capacity/PMR
-rollback，以及 TileMap bridge/CharacterController coexistence。产品 300 帧还要求
+rollback，以及 Chain 4..64 finite/separation/static-only/non-sensor/open-loop lifecycle、multi-segment AABB/ray
+query 去重与 TileMap bridge/CharacterController coexistence。产品 300 帧还要求
 `physicsSensorEnters>0`、`physicsSensorExits>0`、`physicsJointReady=true`、
-`physicsConvexPolygonReady=true`、`physicsRevoluteJointReady=true`、`physicsPrismaticJointReady=true`。
+`physicsConvexPolygonReady=true`、`physicsRevoluteJointReady=true`、`physicsPrismaticJointReady=true`、
+`physicsChainReady=true`。
 
 Windows 同轮 product-2d 拓扑由 `tools/windows/RunProduct2dGate.ps1` 固化：包含
 `tina_navigation2d_tests`、`tina_scene_tests` 的上述测试 executable 全部 exit 0 后，再跑 sample 300 帧并校验
-`productGate=bgfx-physics-freetype-audio` 与 schema 27 Theme、TreeView、UI Flow、Sprite owner/retirement、
+`productGate=bgfx-physics-freetype-audio` 与 schema 29 Theme、TreeView、UI Flow、Sprite owner/retirement、
 TileMap/Particle/Trail Handle resolver，并校验 `authoredPointLight2DCount=3`、`pointLight2DCount=2`、
 `culledPointLight2DCount=1`、两条 `ShadowOccluder2D` 和逐次 submitted lighting snapshot 字段；schema 16 的
 双灯双遮挡历史字段继续保留，同轮 `tina_scene_tests` 还覆盖 N3 camera-space culling 的容量与失败语义；
+
+2026-08-13 六项 2D 收口证据：`tina_asset_format_tests` 96/96、`tina_asset_tests` 298/298、
+`tina_navigation2d_tests` 16/16、`tina_scene_tests` 156/156、`tina_physics2d_tests`（含 Chain 与
+PhysicsNavigationSync bridge）、`tina_editor_tests` 114/114、`tina_editor_app_tests` 13/13。
+`tina_sample_2d` 300帧 exit 0 且 `evidenceSchema=29`；Editor 2D/3D 60帧 auto-demo 均 exit 0。完整
+product-2d gate 在已通过全部 test executable 与产品 sample 后，发现 Shadow/NormalMap 子脚本仍期望旧
+evidence schema；同步为29后，仅重跑失败或直接受影响项：
+`RunProduct2dShadowVisualGate.ps1` 与 `RunProduct2dNormalMapVisualGate.ps1` 均 exit 0，且各模式 A/B 可重复、
+on/off 或 soft/hard 像素与结构 fingerprint 均存在差异。
 N4 另以 committed soft count=2 和 soft/hard 四跑差分覆盖连续 penumbra；N5 再断言默认
 `normalMappedSpriteCount=1`、3份 Texture lifecycle，并调用 normal on/off 四跑差分脚本。
 

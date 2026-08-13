@@ -259,6 +259,18 @@ Core::Status validateCatalogPackageOnDisk(std::string_view catalogRootUtf8, cons
                     {
                         return Core::failure(withEntryContext(std::move(typed.error()), *entry, "typedPrefab"));
                     }
+                } else if (entry->assetKind == AssetFormat::AssetKind::NavigationGrid2D)
+                {
+                    auto typed = parseNavigationGrid2DFromCooked(*asset);
+                    if (!typed) {
+                        return Core::failure(withEntryContext(std::move(typed.error()), *entry, "typedNavigationGrid2D"));
+                    }
+                } else if (entry->assetKind == AssetFormat::AssetKind::Fx2D)
+                {
+                    auto typed = parseFx2DFromCooked(*asset);
+                    if (!typed) {
+                        return Core::failure(withEntryContext(std::move(typed.error()), *entry, "typedFx2D"));
+                    }
                 }
             }
         }

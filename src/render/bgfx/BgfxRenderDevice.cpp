@@ -32,6 +32,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdarg>
 #include <cmath>
 #include <cstddef>
@@ -55,6 +56,9 @@
 
 namespace Tina::Render::Bgfx {
 namespace {
+
+inline constexpr int PrimaryFrameCaptureDeliveryFrameBudget = 120;
+inline constexpr auto PrimaryFrameCapturePollDelay = std::chrono::milliseconds{1};
 
 // M11-D1: bgfx CallbackI for requestScreenShot. screenShot may run on render thread.
 class BgfxCaptureCallback final : public bgfx::CallbackI {
@@ -3985,18 +3989,26 @@ class BgfxRenderDevice final : public IRenderDevice {
         captureInFlight_ = true;
         captureCallback_.beginCapture();
         bgfx::requestScreenShot(BGFX_INVALID_HANDLE, "tina-primary-frame");
-        constexpr int kMaxFrames = 8;
-        for (int i = 0; i < kMaxFrames && !captureCallback_.isReady(); ++i)
+        for (int frameIndex = 0;
+             frameIndex < PrimaryFrameCaptureDeliveryFrameBudget && !captureCallback_.isReady();
+             ++frameIndex)
         {
             submitRetirementMarkerIfNeeded();
             const u32 currentFrame = bgfx::frame();
             completeRetirementsThrough(currentFrame);
+            if (!captureCallback_.isReady())
+            {
+                // requestScreenShot completes on bgfx's render thread. A short bounded pause
+                // prevents a fast owner-thread loop from exhausting the frame budget before
+                // a busy Windows compositor/GPU can publish the callback.
+                std::this_thread::sleep_for(PrimaryFrameCapturePollDelay);
+            }
         }
         captureInFlight_ = false;
         if (!captureCallback_.isReady())
         {
             return Core::failure(RenderErrorCode::FrameCaptureFailed,
-                                 "bgfx did not deliver a screenshot within the capture budget");
+                                 "bgfx did not deliver a screenshot within the bounded 120-frame capture wait");
         }
         return captureCallback_.take();
     }

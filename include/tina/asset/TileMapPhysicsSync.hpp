@@ -25,16 +25,19 @@ struct TileMapPhysicsSync2DStats final {
     Core::usize residentChunkCount = 0;
     Core::usize colliderBodyCount = 0;
     Core::usize colliderShapeCount = 0;
+    Core::usize colliderSolidCellCount = 0;
     Core::usize lastAddedChunkCount = 0;
     Core::usize lastRebuiltChunkCount = 0;
     Core::usize lastRemovedChunkCount = 0;
     Core::usize lastUnchangedChunkCount = 0;
     Core::usize lastBakedRectangleCount = 0;
+    Core::usize lastBakedSolidCellCount = 0;
     Core::u64 synchronizeCount = 0;
     Core::u64 totalAddedChunkCount = 0;
     Core::u64 totalRebuiltChunkCount = 0;
     Core::u64 totalRemovedChunkCount = 0;
     Core::u64 totalBakedRectangleCount = 0;
+    Core::u64 totalBakedSolidCellCount = 0;
 };
 
 // Owner-thread bridge between one TileMap layer and one PhysicsWorld2D. The
@@ -82,6 +85,7 @@ class TileMapPhysicsSync2D final {
         Core::u32 contentRevision = 0;
         Physics2D::PhysicsBodyId body{};
         Core::usize shapeCount = 0;
+        Core::usize solidCellCount = 0;
         bool occupied = false;
     };
 
