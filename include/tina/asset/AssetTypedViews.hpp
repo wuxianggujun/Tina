@@ -2,6 +2,7 @@
 
 #include <tina/asset/CookedAssetFile.hpp>
 #include <tina/asset_format/AudioClipPayload.hpp>
+#include <tina/asset_format/AnimationClip3DPayload.hpp>
 #include <tina/asset_format/EnvironmentMapPayload.hpp>
 #include <tina/asset_format/Fx2DPayload.hpp>
 #include <tina/asset_format/MaterialPayload.hpp>
@@ -10,6 +11,7 @@
 #include <tina/asset_format/SpriteAnimationClipPayload.hpp>
 #include <tina/asset_format/SpritePayload.hpp>
 #include <tina/asset_format/StaticMeshPayload.hpp>
+#include <tina/asset_format/SkinnedMeshPayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
 #include <tina/asset_format/TileMapPayload.hpp>
 #include <tina/asset_format/TilesetPayload.hpp>
@@ -52,6 +54,12 @@ parseAudioClipFromCooked(const CookedAssetFile& file);
 // Caller keeps CookedAssetFile / lease alive for borrowed vertex/index spans.
 [[nodiscard]] Core::Result<AssetFormat::StaticMeshPayloadView>
 parseStaticMeshFromCooked(const CookedAssetFile& file);
+
+[[nodiscard]] Core::Result<AssetFormat::SkinnedMeshPayloadView>
+parseSkinnedMeshFromCooked(const CookedAssetFile& file);
+
+[[nodiscard]] Core::Result<AssetFormat::AnimationClip3DPayloadView>
+parseAnimationClip3DFromCooked(const CookedAssetFile& file);
 
 // Material cooked payload accessor (UnlitBaseColor + cooked PBR factors/texture flags).
 [[nodiscard]] Core::Result<AssetFormat::MaterialPayloadView>

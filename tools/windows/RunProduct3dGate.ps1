@@ -7,9 +7,11 @@
   Asset, Render, and retained UI GoogleTest executables directly, then run the
   tina_sample_3d 300-frame product smoke with automated Dark -> Light -> Dark
   switching plus ListView/TreeView collection interaction. The final JSON is
-  validated as evidence schema 14. Short IBL on/on and off/off runs additionally
-  prove machine-local pixel stability within each mode and a visible A/B change;
-  one point-shadow-off run reuses the IBL-on baseline for a bounded shadow A/B.
+  validated as evidence schema 16, including Animator3D, GPU skinning, and transparency. Short
+  IBL on/on and off/off runs additionally prove machine-local pixel stability
+  within each mode and a visible A/B change. One transparency-off run, one
+  paused-skin run, and one point-shadow-off run reuse the IBL-on baseline for
+  bounded transparency, animation, and shadow pixel A/B evidence.
 
   Does not use CTest. Does not clean-first wipe. Exits non-zero on first failure.
 
@@ -99,6 +101,7 @@ $report = [ordered]@{
     binDir          = $BinDir
     sampleFrames    = $SampleFrames
     iblComparisonFrames = $IblComparisonFrames
+    transparencyComparisonFrames = $IblComparisonFrames
     head            = (git rev-parse HEAD 2>$null)
     steps           = @()
     ok              = $false
@@ -152,6 +155,8 @@ function Invoke-ProductSampleEvidence {
         [Parameter(Mandatory = $true)][ValidateSet('on', 'off')][string]$IblMode,
         [Parameter(Mandatory = $true)][ValidateSet('on', 'off')][string]$PointShadowMode,
         [Parameter(Mandatory = $true)][int]$Frames,
+        [ValidateSet('on', 'off')][string]$SkinAnimationMode = 'on',
+        [ValidateSet('on', 'off')][string]$TransparencyMode = 'on',
         [switch]$ThemeDemo,
         [switch]$CaptureSceneRgb
     )
@@ -161,7 +166,9 @@ function Invoke-ProductSampleEvidence {
         '--frame-delay-ms=0',
         '--ui-theme=dark',
         "--ibl=$IblMode",
-        "--point-shadow=$PointShadowMode"
+        "--point-shadow=$PointShadowMode",
+        "--skin-animation=$SkinAnimationMode",
+        "--transparency=$TransparencyMode"
     )
     if ($ThemeDemo) {
         $arguments += '--ui-theme-demo'
@@ -208,19 +215,171 @@ function Invoke-ProductSampleEvidence {
     }
 }
 
+$expectedLogicalPixelWidth = [long]1280
+$expectedLogicalPixelHeight = [long]720
+
+function Test-PixelCaptureContract {
+    param(
+        [Parameter(Mandatory = $true)][psobject]$Evidence,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()]
+        [System.Collections.Generic.List[string]]$Errors,
+        [Parameter(Mandatory = $true)][string]$Label,
+        [long]$ExpectedFramebufferWidth = 0,
+        [long]$ExpectedFramebufferHeight = 0,
+        [long]$ExpectedSceneRgbPixelCount = 0
+    )
+
+    $requiredFields = @(
+        'logicalPixelWidth',
+        'logicalPixelHeight',
+        'framebufferPixelWidth',
+        'framebufferPixelHeight',
+        'pixelCaptureWidth',
+        'pixelCaptureHeight',
+        'pixelCaptureBytes',
+        'sceneRgbPixelCount'
+    )
+    $missingField = $false
+    foreach ($name in $requiredFields) {
+        if ($null -eq $Evidence.PSObject.Properties[$name]) {
+            $Errors.Add("$Label missing $name")
+            $missingField = $true
+        }
+    }
+    if ($missingField) {
+        return $null
+    }
+
+    $logicalWidth = [long]$Evidence.logicalPixelWidth
+    $logicalHeight = [long]$Evidence.logicalPixelHeight
+    $framebufferWidth = [long]$Evidence.framebufferPixelWidth
+    $framebufferHeight = [long]$Evidence.framebufferPixelHeight
+    $captureWidth = [long]$Evidence.pixelCaptureWidth
+    $captureHeight = [long]$Evidence.pixelCaptureHeight
+    $captureBytes = [long]$Evidence.pixelCaptureBytes
+    $sceneRgbPixelCount = [long]$Evidence.sceneRgbPixelCount
+
+    if ($logicalWidth -ne $script:expectedLogicalPixelWidth -or
+        $logicalHeight -ne $script:expectedLogicalPixelHeight) {
+        $Errors.Add(
+            "$Label logical extent expected=$($script:expectedLogicalPixelWidth)x$($script:expectedLogicalPixelHeight) actual=${logicalWidth}x${logicalHeight}")
+    }
+    if ($framebufferWidth -lt 1 -or $framebufferHeight -lt 1) {
+        $Errors.Add("$Label framebuffer extent must be positive: ${framebufferWidth}x${framebufferHeight}")
+        return $null
+    }
+    if ($captureWidth -ne $framebufferWidth -or $captureHeight -ne $framebufferHeight) {
+        $Errors.Add(
+            "$Label capture extent must match framebuffer: framebuffer=${framebufferWidth}x${framebufferHeight} capture=${captureWidth}x${captureHeight}")
+    }
+
+    $expectedCaptureBytes = [long]$captureWidth * [long]$captureHeight * [long]4
+    if ($captureBytes -ne $expectedCaptureBytes) {
+        $Errors.Add("$Label capture byte count expected=$expectedCaptureBytes actual=$captureBytes")
+    }
+
+    $sceneLeft = [long][Math]::Floor([double]$captureWidth / 4.0)
+    $sceneRight = [long][Math]::Floor(([double]$captureWidth * 2.0) / 3.0)
+    $sceneTop = [long][Math]::Floor([double]$captureHeight / 4.0)
+    $sceneBottom = [long][Math]::Floor(([double]$captureHeight * 3.0) / 4.0)
+    $calculatedSceneRgbPixelCount =
+        [long]($sceneRight - $sceneLeft) * [long]($sceneBottom - $sceneTop)
+    if ($sceneRgbPixelCount -ne $calculatedSceneRgbPixelCount) {
+        $Errors.Add(
+            "$Label scene RGB ROI expected=$calculatedSceneRgbPixelCount actual=$sceneRgbPixelCount")
+    }
+    if ($ExpectedFramebufferWidth -gt 0 -and $framebufferWidth -ne $ExpectedFramebufferWidth) {
+        $Errors.Add(
+            "$Label framebuffer width expected=$ExpectedFramebufferWidth actual=$framebufferWidth")
+    }
+    if ($ExpectedFramebufferHeight -gt 0 -and $framebufferHeight -ne $ExpectedFramebufferHeight) {
+        $Errors.Add(
+            "$Label framebuffer height expected=$ExpectedFramebufferHeight actual=$framebufferHeight")
+    }
+    if ($ExpectedSceneRgbPixelCount -gt 0 -and
+        $sceneRgbPixelCount -ne $ExpectedSceneRgbPixelCount) {
+        $Errors.Add(
+            "$Label scene RGB ROI expected=$ExpectedSceneRgbPixelCount actual=$sceneRgbPixelCount")
+    }
+
+    return [pscustomobject]@{
+        FramebufferWidth      = $framebufferWidth
+        FramebufferHeight     = $framebufferHeight
+        SceneRgbPixelCount    = $sceneRgbPixelCount
+        ExpectedSceneRgbBytes = [long]$sceneRgbPixelCount * [long]3
+    }
+}
+
+function Test-TransparencyEvidenceContract {
+    param(
+        [Parameter(Mandatory = $true)][psobject]$Evidence,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()]
+        [System.Collections.Generic.List[string]]$Errors,
+        [Parameter(Mandatory = $true)][string]$Label,
+        [Parameter(Mandatory = $true)][ValidateSet('on', 'off')]
+        [string]$ExpectedMode,
+        [Parameter(Mandatory = $true)][long]$ExpectedFrames
+    )
+
+    $enabled = $ExpectedMode -eq 'on'
+    $expectedWitnessCount = if ($enabled) { 2 } else { 0 }
+    $expectedSubmittedFrames = if ($enabled) { $ExpectedFrames } else { 0 }
+    $expectedFields = [ordered]@{
+        transparencyMode                          = $ExpectedMode
+        blendMaterialCount                        = 1
+        authoredTransparentStaticWitnessCount     = $expectedWitnessCount
+        transparentWitnessMaterialBound           = $true
+        submittedTransparent3DFrames               = $expectedSubmittedFrames
+        submittedTransparentStaticMesh3DCount      = $expectedWitnessCount
+        submittedTransparentSkinnedMesh3DCount     = 0
+        submittedTransparent3DDrawCount            = $expectedWitnessCount
+        transparent3DSortOrderStable               = $true
+    }
+    foreach ($name in $expectedFields.Keys) {
+        $property = $Evidence.PSObject.Properties[$name]
+        if ($null -eq $property) {
+            $Errors.Add("$Label missing $name")
+            continue
+        }
+        $expected = $expectedFields[$name]
+        if ($property.Value -ne $expected) {
+            $Errors.Add("$Label $name expected=$expected actual=$($property.Value)")
+        }
+    }
+
+    $checksumProperty = $Evidence.PSObject.Properties['submittedTransparent3DSortOrderChecksum']
+    if ($null -eq $checksumProperty) {
+        $Errors.Add("$Label missing submittedTransparent3DSortOrderChecksum")
+    } else {
+        $checksum = [decimal]$checksumProperty.Value
+        if ($enabled -and $checksum -eq 0) {
+            $Errors.Add("$Label submittedTransparent3DSortOrderChecksum must be non-zero")
+        }
+        if (-not $enabled -and $checksum -ne 0) {
+            $Errors.Add(
+                "$Label submittedTransparent3DSortOrderChecksum expected=0 actual=$($checksumProperty.Value)")
+        }
+    }
+}
+
 $sampleRun = Invoke-ProductSampleEvidence -StepName 'tina_sample_3d' -IblMode 'on' `
-    -PointShadowMode 'on' -Frames $SampleFrames -ThemeDemo
+    -PointShadowMode 'on' -SkinAnimationMode 'on' -Frames $SampleFrames -ThemeDemo
 $evidence = $sampleRun.Evidence
 $sampleOut = $sampleRun.Stdout
 
-$expectedResolverHits = [long]$SampleFrames * 2
+$expectedStaticMeshResolverHits = [long]$SampleFrames * 4
+$expectedSkinnedMeshResolverHits = [long]$SampleFrames
+$expectedMaterialResolverHits = [long]$SampleFrames * 5
+$expectedSkinnedPoseFingerprintChanges = [long]$SampleFrames - 1
 $expectedFields = [ordered]@{
     status                              = 'ok'
     sample                              = 'tina_sample_3d'
-    evidenceSchema                      = 14
+    evidenceSchema                      = 16
     frames                              = $SampleFrames
     gltfCooked                          = $true
     cookedStaticMesh                    = $true
+    cookedSkinnedMesh                   = $true
+    cookedAnimationClip3D               = $true
     cookedMaterial                      = $true
     cookedPrefab                        = $true
     prefabInstantiated                  = $true
@@ -228,12 +387,23 @@ $expectedFields = [ordered]@{
     multiMesh                           = $true
     materialTextureBound                = $true
     texturesUploaded                    = 3
-    meshesUploaded                      = 2
+    meshesUploaded                      = 3
     tangentMeshesUploaded               = 2
+    skinnedMeshesUploaded               = 1
+    uploadedSkinnedJointCount           = 2
+    animatorJointCount                  = 2
+    animatorUpdates                     = $SampleFrames
+    animatorPoseChanges                 = $SampleFrames
+    submittedSkinnedMesh3DFrames        = $SampleFrames
+    submittedSkinnedMesh3DCount         = 1
+    visibleSkinnedMesh3DCount           = 1
+    submittedSkinnedPaletteJointCount   = 2
+    submittedSkinnedPoseFingerprintChanges = $expectedSkinnedPoseFingerprintChanges
     cookedEnvironmentMap                = $true
     environmentMapsUploaded             = 1
     imageBasedLightingMode              = 'on'
     pointLightShadowMode                = 'on'
+    skinAnimationMode                   = 'on'
     imageBasedLightingConfigured        = $true
     imageBasedLightingBindings          = 1
     imageBasedLightingClears            = 1
@@ -243,30 +413,39 @@ $expectedFields = [ordered]@{
     environmentMapSpecularMipCount      = 3
     environmentMapBrdfWidth             = 4
     environmentMapBrdfHeight            = 4
-    materialsLoaded                     = 2
+    materialsLoaded                     = 4
     prefabNodes                         = 2
-    meshAssetHandlesPublished           = 2
-    materialAssetHandlesPublished       = 2
-    meshBindingsRegistered              = 2
-    materialBindingsRegistered          = 2
-    meshBindingsReleased                = 2
-    materialBindingsReleased            = 2
-    meshRetirementsAccepted             = 2
+    meshAssetHandlesPublished           = 3
+    materialAssetHandlesPublished       = 4
+    meshBindingsRegistered              = 3
+    materialBindingsRegistered          = 4
+    meshBindingsReleased                = 3
+    materialBindingsReleased            = 4
+    meshRetirementsAccepted             = 3
     textureRetirementsAccepted          = 3
-    meshRetirementRecords               = 2
+    meshRetirementRecords               = 3
     textureRetirementRecords            = 3
-    meshRetirementReleased              = 2
+    meshRetirementReleased              = 3
     textureRetirementReleased           = 3
     retirementRecordsLive               = 0
-    meshAssetHandlesInvalidated          = 2
-    materialAssetHandlesInvalidated      = 2
+    meshAssetHandlesInvalidated          = 3
+    materialAssetHandlesInvalidated      = 4
     textureAssetHandlesInvalidated       = 3
-    meshFrameResourceResolverHits       = $expectedResolverHits
-    materialFrameResourceResolverHits   = $expectedResolverHits
+    animationClipAssetHandlesPublished  = 1
+    animationClipAssetHandlesInvalidated = 1
+    skinnedPrefabAssetHandlesPublished  = 1
+    skinnedPrefabAssetHandlesInvalidated = 1
+    meshFrameResourceResolverHits       = $expectedStaticMeshResolverHits
+    skinnedMeshFrameResourceResolverHits = $expectedSkinnedMeshResolverHits
+    skinnedPoseProviderHits             = $expectedSkinnedMeshResolverHits
+    materialFrameResourceResolverHits   = $expectedMaterialResolverHits
     assetStoreActiveCount               = 1
     prefabAssetResident                 = $true
     prefabInstances                     = 2
-    meshSlotCount                       = 2
+    skinnedPrefabInstances              = 3
+    meshSlotCount                       = 3
+    staticMeshSlotCount                 = 2
+    skinnedMeshSlotCount                = 1
     externalGltf                        = $false
     completePbrFixture                  = $true
     materialFactorsBound                = $true
@@ -292,10 +471,6 @@ $expectedFields = [ordered]@{
     submittedLightingFrames             = $SampleFrames
     submittedDirectionalLightCount      = 3
     lightingCountsStable                = $true
-    logicalPixelWidth                   = 1280
-    logicalPixelHeight                  = 720
-    framebufferPixelWidth               = 1280
-    framebufferPixelHeight              = 720
     cameraAspectChanges                 = 0
     cameraAspectMatchesSurface          = $true
     bindingRegistryReleased             = $true
@@ -335,10 +510,6 @@ $expectedFields = [ordered]@{
     renderResourceLedgerBalanced        = $true
     pixelCaptureAttempted               = $true
     pixelCaptureOk                      = $true
-    pixelCaptureWidth                   = 1280
-    pixelCaptureHeight                  = 720
-    pixelCaptureBytes                   = 3686400
-    sceneRgbPixelCount                  = 191880
     sceneRgbOutputRequested             = $false
     sceneRgbOutputWritten               = $false
     pixelGoldenChecked                  = $false
@@ -357,6 +528,10 @@ foreach ($name in $expectedFields.Keys) {
         $evidenceErrors.Add("$name expected=$expected actual=$($property.Value)")
     }
 }
+$mainCaptureContract = Test-PixelCaptureContract -Evidence $evidence -Errors $evidenceErrors `
+    -Label 'tina_sample_3d'
+Test-TransparencyEvidenceContract -Evidence $evidence -Errors $evidenceErrors `
+    -Label 'tina_sample_3d' -ExpectedMode 'on' -ExpectedFrames $SampleFrames
 if ($null -eq $evidence.PSObject.Properties['uiProgressUpdates'] -or
     [long]$evidence.uiProgressUpdates -lt $SampleFrames) {
     $evidenceErrors.Add("uiProgressUpdates expected>=$SampleFrames actual=$($evidence.uiProgressUpdates)")
@@ -365,7 +540,7 @@ if ($null -eq $evidence.PSObject.Properties['windowMetricsEvents'] -or
     [long]$evidence.windowMetricsEvents -lt 1) {
     $evidenceErrors.Add("windowMetricsEvents expected>=1 actual=$($evidence.windowMetricsEvents)")
 }
-$expectedCameraAspect = 1280.0 / 720.0
+$expectedCameraAspect = [double]$expectedLogicalPixelWidth / [double]$expectedLogicalPixelHeight
 if ($null -eq $evidence.PSObject.Properties['submittedCameraAspectRatio'] -or
     [Math]::Abs([double]$evidence.submittedCameraAspectRatio - $expectedCameraAspect) -gt 0.0001) {
     $evidenceErrors.Add("submittedCameraAspectRatio expected=$expectedCameraAspect actual=$($evidence.submittedCameraAspectRatio)")
@@ -382,11 +557,17 @@ if ($null -eq $evidence.PSObject.Properties['sceneRgbChannelSums'] -or
     @($evidence.sceneRgbChannelSums).Count -ne 3) {
     $evidenceErrors.Add("sceneRgbChannelSums must contain exactly three values")
 }
+foreach ($name in @('firstSubmittedSkinnedPoseFingerprint', 'submittedSkinnedPoseFingerprint')) {
+    $property = $evidence.PSObject.Properties[$name]
+    if ($null -eq $property -or [decimal]$property.Value -eq 0) {
+        $evidenceErrors.Add("$name must be non-zero")
+    }
+}
 if ($evidenceErrors.Count -ne 0) {
     Add-Step -Name 'productEvidence' -ExitCode 1 -Detail (($evidenceErrors -join '; ') + "; output=$sampleOut")
 }
 
-Add-Step -Name 'productEvidence' -ExitCode 0 -Detail "schema=14 frames=$SampleFrames mesh-layout=p3n3t4uv2 ibl=cooked-rgba16f-rg16f resize=surface-aspect-responsive-ui lights=directional-point-spot-culled csm=4-cascades spot-shadow=1 point-shadow=1 theme=dark-light-dark collections=list-tree"
+Add-Step -Name 'productEvidence' -ExitCode 0 -Detail "schema=16 frames=$SampleFrames mesh-layout=static-p3n3t4uv2+skinned-j4w4 animator=cpu-pose gpu-skinning=palette transparency=sorted-alpha-blend ibl=cooked-rgba16f-rg16f resize=surface-aspect-responsive-ui lights=directional-point-spot-culled csm=4-cascades spot-shadow=1 point-shadow=1 theme=dark-light-dark collections=list-tree"
 Add-Step -Name 'tina_sample_3d' -ExitCode 0 -Detail "frames=$SampleFrames pixelFingerprint=$($evidence.pixelFingerprint)"
 
 $iblComparisonEvidence = [ordered]@{
@@ -401,7 +582,8 @@ foreach ($mode in @('on', 'off')) {
     for ($iteration = 1; $iteration -le 2; ++$iteration) {
         $stepName = "ibl-$mode-$iteration"
         $run = Invoke-ProductSampleEvidence -StepName $stepName -IblMode $mode `
-            -PointShadowMode 'on' -Frames $IblComparisonFrames -CaptureSceneRgb
+            -PointShadowMode 'on' -SkinAnimationMode 'on' `
+            -Frames $IblComparisonFrames -CaptureSceneRgb
         $modeEvidence = $run.Evidence
         $expectedConfigured = $mode -eq 'on'
         $expectedTransitions = if ($expectedConfigured) { 1 } else { 0 }
@@ -409,16 +591,28 @@ foreach ($mode in @('on', 'off')) {
         $modeExpectedFields = [ordered]@{
             status                            = 'ok'
             sample                            = 'tina_sample_3d'
-            evidenceSchema                    = 14
+            evidenceSchema                    = 16
             frames                            = $IblComparisonFrames
             cookedEnvironmentMap              = $true
             environmentMapsUploaded           = 1
             imageBasedLightingMode            = $mode
             pointLightShadowMode              = 'on'
+            skinAnimationMode                 = 'on'
             imageBasedLightingConfigured      = $expectedConfigured
             imageBasedLightingBindings        = $expectedTransitions
             imageBasedLightingClears          = $expectedTransitions
             environmentMapRetirementsAccepted = 1
+            meshesUploaded                    = 3
+            tangentMeshesUploaded             = 2
+            skinnedMeshesUploaded             = 1
+            animatorJointCount                = 2
+            animatorUpdates                   = $IblComparisonFrames
+            animatorPoseChanges               = $IblComparisonFrames
+            submittedSkinnedMesh3DFrames      = $IblComparisonFrames
+            submittedSkinnedMesh3DCount       = 1
+            visibleSkinnedMesh3DCount         = 1
+            submittedSkinnedPaletteJointCount = 2
+            submittedSkinnedPoseFingerprintChanges = ([long]$IblComparisonFrames - 1)
             cascadedDirectionalShadowCount      = 1
             submittedCascadedDirectionalShadowCount = 1
             cascadedDirectionalShadowCascadeCount = 4
@@ -428,7 +622,6 @@ foreach ($mode in @('on', 'off')) {
             authoredPointLightShadowCount     = 1
             submittedPointLightShadowCount    = 1
             pixelCaptureOk                    = $true
-            sceneRgbPixelCount                = 191880
             sceneRgbOutputRequested           = $true
             sceneRgbOutputWritten             = $true
             renderResourceLedgerBalanced      = $true
@@ -444,6 +637,24 @@ foreach ($mode in @('on', 'off')) {
                 $modeErrors.Add("$name expected=$expected actual=$($property.Value)")
             }
         }
+        $modeCaptureContract = Test-PixelCaptureContract -Evidence $modeEvidence `
+            -Errors $modeErrors -Label $stepName `
+            -ExpectedFramebufferWidth $mainCaptureContract.FramebufferWidth `
+            -ExpectedFramebufferHeight $mainCaptureContract.FramebufferHeight `
+            -ExpectedSceneRgbPixelCount $mainCaptureContract.SceneRgbPixelCount
+        if ($null -ne $modeCaptureContract -and
+            ($null -eq $run.SceneRgbBytes -or
+             $run.SceneRgbBytes.LongLength -ne $modeCaptureContract.ExpectedSceneRgbBytes)) {
+            $actualSceneRgbBytes = if ($null -eq $run.SceneRgbBytes) {
+                0
+            } else {
+                $run.SceneRgbBytes.LongLength
+            }
+            $modeErrors.Add(
+                "$stepName scene RGB file byte count expected=$($modeCaptureContract.ExpectedSceneRgbBytes) actual=$actualSceneRgbBytes")
+        }
+        Test-TransparencyEvidenceContract -Evidence $modeEvidence -Errors $modeErrors `
+            -Label $stepName -ExpectedMode 'on' -ExpectedFrames $IblComparisonFrames
         if ($null -eq $modeEvidence.PSObject.Properties['pixelFingerprint'] -or
             [string]$modeEvidence.pixelFingerprint -notmatch '^[0-9a-f]{32}$') {
             $modeErrors.Add('pixelFingerprint must be 32 lowercase hexadecimal characters')
@@ -522,24 +733,231 @@ if ($iblPixelErrors.Count -ne 0) {
 Add-Step -Name 'iblPixelComparison' -ExitCode 0 `
     -Detail "frames=$IblComparisonFrames sceneOn=$($iblOnSceneFingerprints[0]) sceneOff=$($iblOffSceneFingerprints[0]) rgbL1Delta=$iblRgbL1Delta minimum=$minimumIblRgbL1Delta stable=true different=true"
 
+$transparencyOffRun = Invoke-ProductSampleEvidence -StepName 'transparency-off' `
+    -IblMode 'on' -PointShadowMode 'on' -SkinAnimationMode 'on' -TransparencyMode 'off' `
+    -Frames $IblComparisonFrames -CaptureSceneRgb
+$transparencyOffEvidence = $transparencyOffRun.Evidence
+$transparencyErrors = [System.Collections.Generic.List[string]]::new()
+$transparencyOffExpectedFields = [ordered]@{
+    status                                  = 'ok'
+    sample                                  = 'tina_sample_3d'
+    evidenceSchema                          = 16
+    frames                                  = $IblComparisonFrames
+    imageBasedLightingMode                  = 'on'
+    pointLightShadowMode                    = 'on'
+    skinAnimationMode                       = 'on'
+    imageBasedLightingConfigured            = $true
+    meshesUploaded                          = 3
+    tangentMeshesUploaded                   = 2
+    skinnedMeshesUploaded                   = 1
+    materialsLoaded                         = 4
+    materialAssetHandlesPublished           = 4
+    materialBindingsRegistered              = 4
+    materialBindingsReleased                = 4
+    materialAssetHandlesInvalidated         = 4
+    animatorJointCount                      = 2
+    animatorUpdates                         = $IblComparisonFrames
+    animatorPoseChanges                     = $IblComparisonFrames
+    submittedSkinnedMesh3DFrames            = $IblComparisonFrames
+    submittedSkinnedMesh3DCount             = 1
+    visibleSkinnedMesh3DCount               = 1
+    submittedSkinnedPaletteJointCount       = 2
+    submittedSkinnedPoseFingerprintChanges  = ([long]$IblComparisonFrames - 1)
+    meshFrameResourceResolverHits           = ([long]$IblComparisonFrames * 2)
+    skinnedMeshFrameResourceResolverHits    = [long]$IblComparisonFrames
+    skinnedPoseProviderHits                 = [long]$IblComparisonFrames
+    materialFrameResourceResolverHits       = ([long]$IblComparisonFrames * 3)
+    pixelCaptureOk                          = $true
+    sceneRgbOutputRequested                 = $true
+    sceneRgbOutputWritten                   = $true
+    renderResourceLedgerBalanced            = $true
+}
+foreach ($name in $transparencyOffExpectedFields.Keys) {
+    $property = $transparencyOffEvidence.PSObject.Properties[$name]
+    if ($null -eq $property) {
+        $transparencyErrors.Add("transparency-off missing $name")
+        continue
+    }
+    $expected = $transparencyOffExpectedFields[$name]
+    if ($property.Value -ne $expected) {
+        $transparencyErrors.Add(
+            "transparency-off $name expected=$expected actual=$($property.Value)")
+    }
+}
+$transparencyOffCaptureContract = Test-PixelCaptureContract -Evidence $transparencyOffEvidence `
+    -Errors $transparencyErrors -Label 'transparency-off' `
+    -ExpectedFramebufferWidth $mainCaptureContract.FramebufferWidth `
+    -ExpectedFramebufferHeight $mainCaptureContract.FramebufferHeight `
+    -ExpectedSceneRgbPixelCount $mainCaptureContract.SceneRgbPixelCount
+Test-TransparencyEvidenceContract -Evidence $transparencyOffEvidence -Errors $transparencyErrors `
+    -Label 'transparency-off' -ExpectedMode 'off' -ExpectedFrames $IblComparisonFrames
+if ($null -ne $transparencyOffCaptureContract -and
+    ($null -eq $transparencyOffRun.SceneRgbBytes -or
+     $transparencyOffRun.SceneRgbBytes.LongLength -ne
+        $transparencyOffCaptureContract.ExpectedSceneRgbBytes)) {
+    $actualSceneRgbBytes = if ($null -eq $transparencyOffRun.SceneRgbBytes) {
+        0
+    } else {
+        $transparencyOffRun.SceneRgbBytes.LongLength
+    }
+    $transparencyErrors.Add(
+        "transparency-off scene RGB file byte count expected=$($transparencyOffCaptureContract.ExpectedSceneRgbBytes) actual=$actualSceneRgbBytes")
+}
+
+$transparencyOnEvidence = $iblComparisonEvidence.on[0]
+$transparencyOnRgb = [byte[]]$iblComparisonSceneRgb.on[0]
+$transparencyOffRgb = [byte[]]$transparencyOffRun.SceneRgbBytes
+$transparencyOnFingerprint = [string]$transparencyOnEvidence.sceneRgbFingerprint
+$transparencyOffFingerprint = [string]$transparencyOffEvidence.sceneRgbFingerprint
+if ($transparencyOnFingerprint -eq $transparencyOffFingerprint) {
+    $transparencyErrors.Add(
+        "Transparency on/off scene RGB fingerprints must differ: $transparencyOnFingerprint")
+}
+$expectedTransparencyRgbBytes = [long]$transparencyOnEvidence.sceneRgbPixelCount * 3
+if ($transparencyOnRgb.LongLength -ne $expectedTransparencyRgbBytes -or
+    $transparencyOffRgb.LongLength -ne $expectedTransparencyRgbBytes) {
+    $transparencyErrors.Add(
+        "Transparency scene RGB byte count mismatch: expected=$expectedTransparencyRgbBytes on=$($transparencyOnRgb.LongLength) off=$($transparencyOffRgb.LongLength)")
+}
+$transparencyRgbL1Delta = [long]0
+if ($transparencyErrors.Count -eq 0) {
+    for ($index = 0; $index -lt $transparencyOnRgb.Length; ++$index) {
+        $transparencyRgbL1Delta +=
+            [Math]::Abs([int]$transparencyOnRgb[$index] - [int]$transparencyOffRgb[$index])
+    }
+}
+$minimumTransparencyRgbL1Delta = [long]$transparencyOnEvidence.sceneRgbPixelCount
+if ($transparencyRgbL1Delta -lt $minimumTransparencyRgbL1Delta) {
+    $transparencyErrors.Add(
+        "Transparency scene RGB L1 delta too small: expected>=$minimumTransparencyRgbL1Delta actual=$transparencyRgbL1Delta")
+}
+if ($transparencyErrors.Count -ne 0) {
+    Add-Step -Name 'transparencyPixelComparison' -ExitCode 1 `
+        -Detail (($transparencyErrors -join '; ') + "; output=$($transparencyOffRun.Stdout)")
+}
+Add-Step -Name 'transparencyPixelComparison' -ExitCode 0 `
+    -Detail "frames=$IblComparisonFrames sceneOn=$transparencyOnFingerprint sceneOff=$transparencyOffFingerprint rgbL1Delta=$transparencyRgbL1Delta minimum=$minimumTransparencyRgbL1Delta different=true"
+
+$skinAnimationOffRun = Invoke-ProductSampleEvidence -StepName 'skin-animation-off' `
+    -IblMode 'on' -PointShadowMode 'on' -SkinAnimationMode 'off' `
+    -Frames $IblComparisonFrames -CaptureSceneRgb
+$skinAnimationOffEvidence = $skinAnimationOffRun.Evidence
+$skinAnimationErrors = [System.Collections.Generic.List[string]]::new()
+$skinAnimationOffExpectedFields = [ordered]@{
+    status                                  = 'ok'
+    sample                                  = 'tina_sample_3d'
+    evidenceSchema                          = 16
+    frames                                  = $IblComparisonFrames
+    imageBasedLightingMode                  = 'on'
+    pointLightShadowMode                    = 'on'
+    skinAnimationMode                       = 'off'
+    imageBasedLightingConfigured            = $true
+    meshesUploaded                          = 3
+    tangentMeshesUploaded                   = 2
+    skinnedMeshesUploaded                   = 1
+    animatorJointCount                      = 2
+    animatorUpdates                         = $IblComparisonFrames
+    animatorPoseChanges                     = 0
+    submittedSkinnedMesh3DFrames            = $IblComparisonFrames
+    submittedSkinnedMesh3DCount             = 1
+    visibleSkinnedMesh3DCount               = 1
+    submittedSkinnedPaletteJointCount       = 2
+    submittedSkinnedPoseFingerprintChanges  = 0
+    pixelCaptureOk                          = $true
+    sceneRgbOutputRequested                 = $true
+    sceneRgbOutputWritten                   = $true
+    renderResourceLedgerBalanced            = $true
+}
+foreach ($name in $skinAnimationOffExpectedFields.Keys) {
+    $property = $skinAnimationOffEvidence.PSObject.Properties[$name]
+    if ($null -eq $property) {
+        $skinAnimationErrors.Add("skin-animation-off missing $name")
+        continue
+    }
+    $expected = $skinAnimationOffExpectedFields[$name]
+    if ($property.Value -ne $expected) {
+        $skinAnimationErrors.Add("skin-animation-off $name expected=$expected actual=$($property.Value)")
+    }
+}
+$null = Test-PixelCaptureContract -Evidence $skinAnimationOffEvidence `
+    -Errors $skinAnimationErrors -Label 'skin-animation-off' `
+    -ExpectedFramebufferWidth $mainCaptureContract.FramebufferWidth `
+    -ExpectedFramebufferHeight $mainCaptureContract.FramebufferHeight `
+    -ExpectedSceneRgbPixelCount $mainCaptureContract.SceneRgbPixelCount
+Test-TransparencyEvidenceContract -Evidence $skinAnimationOffEvidence `
+    -Errors $skinAnimationErrors -Label 'skin-animation-off' `
+    -ExpectedMode 'on' -ExpectedFrames $IblComparisonFrames
+foreach ($name in @('firstSubmittedSkinnedPoseFingerprint', 'submittedSkinnedPoseFingerprint')) {
+    $property = $skinAnimationOffEvidence.PSObject.Properties[$name]
+    if ($null -eq $property -or [decimal]$property.Value -eq 0) {
+        $skinAnimationErrors.Add("skin-animation-off $name must be non-zero")
+    }
+}
+
+$skinAnimationOnEvidence = $iblComparisonEvidence.on[0]
+$skinAnimationOnRgb = [byte[]]$iblComparisonSceneRgb.on[0]
+$skinAnimationOffRgb = [byte[]]$skinAnimationOffRun.SceneRgbBytes
+$skinAnimationOnFingerprint = [string]$skinAnimationOnEvidence.sceneRgbFingerprint
+$skinAnimationOffFingerprint = [string]$skinAnimationOffEvidence.sceneRgbFingerprint
+if ($skinAnimationOnFingerprint -eq $skinAnimationOffFingerprint) {
+    $skinAnimationErrors.Add(
+        "Skin animation on/off scene RGB fingerprints must differ: $skinAnimationOnFingerprint")
+}
+$expectedSkinAnimationRgbBytes = [long]$skinAnimationOnEvidence.sceneRgbPixelCount * 3
+if ($skinAnimationOnRgb.LongLength -ne $expectedSkinAnimationRgbBytes -or
+    $skinAnimationOffRgb.LongLength -ne $expectedSkinAnimationRgbBytes) {
+    $skinAnimationErrors.Add(
+        "Skin animation scene RGB byte count mismatch: expected=$expectedSkinAnimationRgbBytes on=$($skinAnimationOnRgb.LongLength) off=$($skinAnimationOffRgb.LongLength)")
+}
+$skinAnimationRgbL1Delta = [long]0
+if ($skinAnimationErrors.Count -eq 0) {
+    for ($index = 0; $index -lt $skinAnimationOnRgb.Length; ++$index) {
+        $skinAnimationRgbL1Delta +=
+            [Math]::Abs([int]$skinAnimationOnRgb[$index] - [int]$skinAnimationOffRgb[$index])
+    }
+}
+$minimumSkinAnimationRgbL1Delta = [long]$skinAnimationOnEvidence.sceneRgbPixelCount
+if ($skinAnimationRgbL1Delta -lt $minimumSkinAnimationRgbL1Delta) {
+    $skinAnimationErrors.Add(
+        "Skin animation scene RGB L1 delta too small: expected>=$minimumSkinAnimationRgbL1Delta actual=$skinAnimationRgbL1Delta")
+}
+if ($skinAnimationErrors.Count -ne 0) {
+    Add-Step -Name 'skinAnimationPixelComparison' -ExitCode 1 `
+        -Detail (($skinAnimationErrors -join '; ') + "; output=$($skinAnimationOffRun.Stdout)")
+}
+Add-Step -Name 'skinAnimationPixelComparison' -ExitCode 0 `
+    -Detail "frames=$IblComparisonFrames sceneOn=$skinAnimationOnFingerprint sceneOff=$skinAnimationOffFingerprint rgbL1Delta=$skinAnimationRgbL1Delta minimum=$minimumSkinAnimationRgbL1Delta different=true"
+
 $pointShadowOffRun = Invoke-ProductSampleEvidence -StepName 'point-shadow-off' `
-    -IblMode 'on' -PointShadowMode 'off' -Frames $IblComparisonFrames -CaptureSceneRgb
+    -IblMode 'on' -PointShadowMode 'off' -SkinAnimationMode 'on' `
+    -Frames $IblComparisonFrames -CaptureSceneRgb
 $pointShadowOffEvidence = $pointShadowOffRun.Evidence
 $pointShadowErrors = [System.Collections.Generic.List[string]]::new()
 $pointShadowOffExpectedFields = [ordered]@{
     status                          = 'ok'
     sample                          = 'tina_sample_3d'
-    evidenceSchema                  = 14
+    evidenceSchema                  = 16
     frames                          = $IblComparisonFrames
     imageBasedLightingMode          = 'on'
     imageBasedLightingConfigured    = $true
     pointLightShadowMode            = 'off'
+    skinAnimationMode               = 'on'
     authoredPointLightShadowCount   = 0
     submittedPointLightShadowCount  = 0
     authoredPointLight3DCount       = 3
     pointLight3DCount               = 2
+    meshesUploaded                  = 3
+    tangentMeshesUploaded           = 2
+    skinnedMeshesUploaded           = 1
+    animatorJointCount              = 2
+    animatorUpdates                 = $IblComparisonFrames
+    animatorPoseChanges             = $IblComparisonFrames
+    submittedSkinnedMesh3DFrames    = $IblComparisonFrames
+    submittedSkinnedMesh3DCount     = 1
+    visibleSkinnedMesh3DCount       = 1
+    submittedSkinnedPaletteJointCount = 2
+    submittedSkinnedPoseFingerprintChanges = ([long]$IblComparisonFrames - 1)
     pixelCaptureOk                  = $true
-    sceneRgbPixelCount              = 191880
     sceneRgbOutputRequested         = $true
     sceneRgbOutputWritten           = $true
     renderResourceLedgerBalanced    = $true
@@ -555,6 +973,14 @@ foreach ($name in $pointShadowOffExpectedFields.Keys) {
         $pointShadowErrors.Add("point-shadow-off $name expected=$expected actual=$($property.Value)")
     }
 }
+$null = Test-PixelCaptureContract -Evidence $pointShadowOffEvidence `
+    -Errors $pointShadowErrors -Label 'point-shadow-off' `
+    -ExpectedFramebufferWidth $mainCaptureContract.FramebufferWidth `
+    -ExpectedFramebufferHeight $mainCaptureContract.FramebufferHeight `
+    -ExpectedSceneRgbPixelCount $mainCaptureContract.SceneRgbPixelCount
+Test-TransparencyEvidenceContract -Evidence $pointShadowOffEvidence `
+    -Errors $pointShadowErrors -Label 'point-shadow-off' `
+    -ExpectedMode 'on' -ExpectedFrames $IblComparisonFrames
 
 $pointShadowOnEvidence = $iblComparisonEvidence.on[0]
 $pointShadowOnRgb = [byte[]]$iblComparisonSceneRgb.on[0]
@@ -602,6 +1028,16 @@ $report.iblPixelComparison = [ordered]@{
     onEvidence      = $iblComparisonEvidence.on
     offEvidence     = $iblComparisonEvidence.off
 }
+$report.transparencyPixelComparison = [ordered]@{
+    frames                = $IblComparisonFrames
+    onSceneRgbFingerprint = $transparencyOnFingerprint
+    offSceneRgbFingerprint = $transparencyOffFingerprint
+    rgbL1Delta            = $transparencyRgbL1Delta
+    minimumRgbL1Delta     = $minimumTransparencyRgbL1Delta
+    different             = $true
+    onEvidence            = $transparencyOnEvidence
+    offEvidence           = $transparencyOffEvidence
+}
 $report.pointShadowPixelComparison = [ordered]@{
     frames              = $IblComparisonFrames
     onSceneRgbFingerprint = $pointShadowOnFingerprint
@@ -610,6 +1046,16 @@ $report.pointShadowPixelComparison = [ordered]@{
     different           = $true
     onEvidence          = $pointShadowOnEvidence
     offEvidence         = $pointShadowOffEvidence
+}
+$report.skinAnimationPixelComparison = [ordered]@{
+    frames                = $IblComparisonFrames
+    onSceneRgbFingerprint = $skinAnimationOnFingerprint
+    offSceneRgbFingerprint = $skinAnimationOffFingerprint
+    rgbL1Delta            = $skinAnimationRgbL1Delta
+    minimumRgbL1Delta     = $minimumSkinAnimationRgbL1Delta
+    different             = $true
+    onEvidence            = $skinAnimationOnEvidence
+    offEvidence           = $skinAnimationOffEvidence
 }
 $report.ok = $true
 
@@ -622,5 +1068,5 @@ if ($OutJson) {
     Write-Output "wrote $OutJson"
 }
 
-Write-Output "product-3d gate ok schema=14 frames=$SampleFrames mesh-layout=p3n3t4uv2 ibl=on-off-pixel-differential csm=4-cascades spot-shadow=1 point-shadow=on-off-pixel-differential theme=dark-light-dark collections=list-tree"
+Write-Output "product-3d gate ok schema=16 frames=$SampleFrames mesh-layout=static-p3n3t4uv2+skinned-j4w4 animator=cpu-pose gpu-skinning=palette transparency=on-off-pixel-differential skin-animation=on-off-pixel-differential ibl=on-off-pixel-differential csm=4-cascades spot-shadow=1 point-shadow=on-off-pixel-differential theme=dark-light-dark collections=list-tree"
 exit 0

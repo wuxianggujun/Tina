@@ -6,8 +6,10 @@
 #include <tina/asset/AssetSystem.hpp>
 #include <tina/asset/AssetTypedViews.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
+#include <tina/asset_format/SkinnedMeshPayload.hpp>
 #include <tina/render/FramePin.hpp>
 #include <tina/render/RenderErrors.hpp>
+#include <tina/render/RenderScene.hpp>
 
 #include <algorithm>
 #include <exception>
@@ -17,6 +19,12 @@
 
 namespace Tina::Asset {
 namespace {
+
+// Render restates the frozen SkinnedMesh v1 joint bound because it cannot see
+// AssetFormat; this is where both sides meet, so drift fails the build here.
+static_assert(Render::MaxSkinnedMesh3DPaletteJointCount == AssetFormat::SkinnedMeshWire::MaxJointCount);
+static_assert(Render::SkinnedMesh3DPaletteFloatsPerJoint ==
+              AssetFormat::SkinnedMeshWire::FloatsPerInverseBindMatrix);
 
 [[nodiscard]] bool hasRenderableCpuPayload(const AssetStore& store, AssetHandle handle) noexcept
 {
@@ -276,7 +284,9 @@ Core::Status Mesh3DBindingRegistry::prepareCatalogReload(
         }
         else if (migration->kind != CatalogResidentMigrationKind::Replaced || !migration->current ||
                  migration->current == entry.asset ||
-                 m_store->assetKind(migration->current) != AssetFormat::AssetKind::StaticMesh ||
+                 m_store->assetKind(migration->current) !=
+                     (entry.skinned ? AssetFormat::AssetKind::SkinnedMesh
+                                    : AssetFormat::AssetKind::StaticMesh) ||
                  m_store->assetId(migration->current) != entry.assetId ||
                  !hasRenderableCpuPayload(*m_store, migration->current) ||
                  m_store->tryGet(migration->current) == nullptr)
@@ -389,7 +399,9 @@ Core::Status Mesh3DBindingRegistry::prepareCatalogReload(
             m_preparedMeshes[m_preparedMeshCount++] = PreparedMeshEntry{
                 .entryIndex = index,
                 .replacement = migration->kind == CatalogResidentMigrationKind::Replaced
-                                   ? MeshEntry{.asset = migration->current, .assetId = entry.assetId}
+                                   ? MeshEntry{.asset = migration->current,
+                                               .assetId = entry.assetId,
+                                               .skinned = entry.skinned}
                                    : MeshEntry{},
                 .remove = migration->kind == CatalogResidentMigrationKind::Removed,
             };
@@ -656,7 +668,9 @@ Core::Status Mesh3DBindingRegistry::prepareCatalogReload(
             }
             const auto* file = m_store->tryGet(prepared.replacement.asset);
             if (!prepared.replacement.asset || file == nullptr ||
-                m_store->assetKind(prepared.replacement.asset) != AssetFormat::AssetKind::StaticMesh ||
+                m_store->assetKind(prepared.replacement.asset) !=
+                    (prepared.replacement.skinned ? AssetFormat::AssetKind::SkinnedMesh
+                                                  : AssetFormat::AssetKind::StaticMesh) ||
                 !hasRenderableCpuPayload(*m_store, prepared.replacement.asset))
             {
                 resetPrepared();
@@ -670,7 +684,8 @@ Core::Status Mesh3DBindingRegistry::prepareCatalogReload(
                 return Core::failure(std::move(lease.error()).withContext(
                     "Mesh3DBindingRegistry::prepareCatalogReload", "meshLease"));
             }
-            auto gpu = uploadStaticMeshFromCooked(*m_device, *file);
+            auto gpu = prepared.replacement.skinned ? uploadSkinnedMeshFromCooked(*m_device, *file)
+                                                    : uploadStaticMeshFromCooked(*m_device, *file);
             if (!gpu)
             {
                 resetPrepared();
@@ -980,15 +995,31 @@ Core::Status Mesh3DBindingRegistry::drainPendingRetirements() noexcept
 Core::Result<Core::u32> Mesh3DBindingRegistry::registerMeshBinding(
     AssetHandle meshAsset, Render::GpuMeshId& gpuMesh) noexcept
 {
+    return registerMeshBindingImpl(meshAsset, gpuMesh, false);
+}
+
+Core::Result<Core::u32> Mesh3DBindingRegistry::registerSkinnedMeshBinding(
+    AssetHandle meshAsset, Render::GpuMeshId& gpuMesh) noexcept
+{
+    return registerMeshBindingImpl(meshAsset, gpuMesh, true);
+}
+
+Core::Result<Core::u32> Mesh3DBindingRegistry::registerMeshBindingImpl(
+    AssetHandle meshAsset, Render::GpuMeshId& gpuMesh, bool skinned) noexcept
+{
+    const AssetFormat::AssetKind expectedKind =
+        skinned ? AssetFormat::AssetKind::SkinnedMesh : AssetFormat::AssetKind::StaticMesh;
     if (!isOwnerThread())
     {
         return Core::failure(Render::RenderErrorCode::WrongOwnerThread,
                              "Mesh3DBindingRegistry mesh register must run on its owner thread");
     }
-    if (!meshAsset || m_store->assetKind(meshAsset) != AssetFormat::AssetKind::StaticMesh)
+    if (!meshAsset || m_store->assetKind(meshAsset) != expectedKind)
     {
         return Core::failure(AssetErrorCode::InvalidHandle,
-                             "Mesh3DBindingRegistry requires a StaticMesh handle from its AssetSystem");
+                             skinned
+                                 ? "Mesh3DBindingRegistry requires a SkinnedMesh handle from its AssetSystem"
+                                 : "Mesh3DBindingRegistry requires a StaticMesh handle from its AssetSystem");
     }
     if (!hasRenderableCpuPayload(*m_store, meshAsset) || m_store->tryGet(meshAsset) == nullptr)
     {
@@ -1053,6 +1084,7 @@ Core::Result<Core::u32> Mesh3DBindingRegistry::registerMeshBinding(
         .lease = std::move(*lease),
         .gpuMesh = gpuMesh,
         .bindingKey = candidateKey,
+        .skinned = skinned,
     };
     gpuMesh = {};
     ++m_meshBindingCount;
@@ -1391,13 +1423,25 @@ Core::Status Mesh3DBindingRegistry::retireAllBindings() noexcept
 Core::Result<Render::FrameResourceRef> Mesh3DBindingRegistry::internMeshFrameResource(
     AssetHandle meshAsset, Render::FrameResourceSink& sink) noexcept
 {
+    return internMeshFrameResourceImpl(meshAsset, sink, false);
+}
+
+Core::Result<Render::FrameResourceRef> Mesh3DBindingRegistry::internSkinnedMeshFrameResource(
+    AssetHandle meshAsset, Render::FrameResourceSink& sink) noexcept
+{
+    return internMeshFrameResourceImpl(meshAsset, sink, true);
+}
+
+Core::Result<Render::FrameResourceRef> Mesh3DBindingRegistry::internMeshFrameResourceImpl(
+    AssetHandle meshAsset, Render::FrameResourceSink& sink, bool skinned) noexcept
+{
     if (!isOwnerThread())
     {
         return Core::failure(Render::RenderErrorCode::WrongOwnerThread,
                              "Mesh3DBindingRegistry mesh intern must run on its owner thread");
     }
     MeshEntry* entry = findMeshExact(meshAsset);
-    if (entry == nullptr || !isLiveMeshEntry(*entry))
+    if (entry == nullptr || entry->skinned != skinned || !isLiveMeshEntry(*entry))
     {
         return Render::FrameResourceRef{};
     }
@@ -1411,7 +1455,8 @@ Core::Result<Render::FrameResourceRef> Mesh3DBindingRegistry::internMeshFrameRes
                          &Mesh3DBindingRegistry::releaseMeshFrameBorrow};
     auto resource = sink.intern(
         Render::FrameResourceDescriptor{
-            .kind = Render::FrameResourceKind::Mesh3DGeometry,
+            .kind = skinned ? Render::FrameResourceKind::SkinnedMesh3DGeometry
+                            : Render::FrameResourceKind::Mesh3DGeometry,
             .deviceBindingKey = entry->bindingKey,
         },
         std::move(pin));
@@ -1485,8 +1530,10 @@ bool Mesh3DBindingRegistry::isOwnerThread() const noexcept
 
 bool Mesh3DBindingRegistry::isLiveMeshEntry(const MeshEntry& entry) const noexcept
 {
+    const AssetFormat::AssetKind expectedKind =
+        entry.skinned ? AssetFormat::AssetKind::SkinnedMesh : AssetFormat::AssetKind::StaticMesh;
     return entry.bindingKey != 0 && entry.lease && entry.gpuMesh &&
-           m_store->assetKind(entry.asset) == AssetFormat::AssetKind::StaticMesh &&
+           m_store->assetKind(entry.asset) == expectedKind &&
            hasRenderableCpuPayload(*m_store, entry.asset) && m_store->tryGet(entry.asset) != nullptr &&
            m_store->assetId(entry.asset) == entry.assetId;
 }
@@ -1823,6 +1870,9 @@ Mesh3DBindingRegistry::validateMaterialBindingImpl(AssetHandle materialAsset,
         .renderBinding = Render::Mesh3DMaterialBindingDesc{
             .metallicFactor = material->metallicFactor,
             .roughnessFactor = material->roughnessFactor,
+            .alphaMode = material->alphaMode == AssetFormat::MaterialAlphaMode::Blend
+                             ? Render::Mesh3DAlphaMode::Blend
+                             : Render::Mesh3DAlphaMode::Opaque,
         },
     };
     Core::u32 dependencyIndex = 0;

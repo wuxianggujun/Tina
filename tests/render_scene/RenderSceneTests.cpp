@@ -10,6 +10,7 @@
 #include <memory_resource>
 #include <new>
 #include <numbers>
+#include <span>
 
 namespace Tina::Render {
 namespace {
@@ -77,6 +78,11 @@ class FrameResourceScope final {
     [[nodiscard]] FrameResourceRef mesh(u64 deviceBindingKey)
     {
         return resource(FrameResourceKind::Mesh3DGeometry, deviceBindingKey);
+    }
+
+    [[nodiscard]] FrameResourceRef skinnedMesh(u64 deviceBindingKey)
+    {
+        return resource(FrameResourceKind::SkinnedMesh3DGeometry, deviceBindingKey);
     }
 
     [[nodiscard]] FrameResourceRef material(u64 deviceBindingKey)
@@ -167,6 +173,32 @@ class FrameResourceScope final {
     };
 }
 
+[[nodiscard]] RenderSkinnedMesh3DInput skinnedMesh3D(
+    FrameResourceScope& resources,
+    u32 meshKey,
+    u32 materialKey,
+    u64 stableEntityKey,
+    float x,
+    float y,
+    float z,
+    std::span<const float> palette)
+{
+    return RenderSkinnedMesh3DInput{
+        .mesh = resources.skinnedMesh(meshKey),
+        .material = resources.material(materialKey),
+        .stableEntityKey = stableEntityKey,
+        .worldTransform = RenderTransform3DInput{
+            .pose = RenderPose3DInput{
+                .positionX = x,
+                .positionY = y,
+                .positionZ = z,
+            },
+        },
+        .localBounds = RenderBoundingSphereInput{.radius = 0.5F},
+        .paletteColumnMajorJointMatrices = palette,
+    };
+}
+
 TEST(RenderSceneBuilderTest, RejectsInvalidCapacityBeforeAllocating)
 {
     CountingResource resource;
@@ -187,22 +219,18 @@ TEST(RenderSceneBuilderTest, MapsFixedStorageAllocationFailure)
 
 TEST(RenderSceneBuilderTest, ReleasesPartialFixedStorageWhenLaterAllocationFails)
 {
-    CountingResource resource;
-    resource.successfulAllocationLimit = 1;
-    auto secondAllocationFailure = RenderSceneBuilder::Create(RenderSceneCapacity{}, resource);
-    ASSERT_FALSE(secondAllocationFailure);
-    EXPECT_EQ(secondAllocationFailure.error().code, RenderErrorCode::RenderSceneStorageAllocationFailed);
-    EXPECT_EQ(resource.allocations, 1U);
-    EXPECT_EQ(resource.deallocations, 1U);
-
-    resource.allocations = 0;
-    resource.deallocations = 0;
-    resource.successfulAllocationLimit = 2;
-    auto thirdAllocationFailure = RenderSceneBuilder::Create(RenderSceneCapacity{}, resource);
-    ASSERT_FALSE(thirdAllocationFailure);
-    EXPECT_EQ(thirdAllocationFailure.error().code, RenderErrorCode::RenderSceneStorageAllocationFailed);
-    EXPECT_EQ(resource.allocations, 2U);
-    EXPECT_EQ(resource.deallocations, 2U);
+    for (usize successfulAllocationCount = 1; successfulAllocationCount < 5;
+         ++successfulAllocationCount)
+    {
+        CountingResource resource;
+        resource.successfulAllocationLimit = successfulAllocationCount;
+        auto allocationFailure = RenderSceneBuilder::Create(RenderSceneCapacity{}, resource);
+        ASSERT_FALSE(allocationFailure);
+        EXPECT_EQ(allocationFailure.error().code,
+                  RenderErrorCode::RenderSceneStorageAllocationFailed);
+        EXPECT_EQ(resource.allocations, successfulAllocationCount);
+        EXPECT_EQ(resource.deallocations, successfulAllocationCount);
+    }
 }
 
 TEST(RenderSceneBuilderTest, RejectsInvalidMeshAndBatchCapacitiesBeforeAllocating)
@@ -1124,6 +1152,110 @@ TEST(RenderSceneBuilderTest, MeshItemCapacityFailureIsStickyAndTransactional)
     ASSERT_FALSE(commit);
     EXPECT_EQ(commit.error().code, RenderErrorCode::RenderSceneCapacityExceeded);
     EXPECT_TRUE(builder.publishedView().empty());
+}
+
+TEST(RenderSceneBuilderTest, SkinnedMeshesDeepCopySortCullAndReportPaletteOwnership)
+{
+    FrameResourceScope resources;
+    RenderSceneBuilder builder = makeBuilder();
+    ASSERT_TRUE(builder.beginFrame(perspectiveFrame(1.0F)));
+    auto cameraInput = perspectiveCamera(0.0F);
+    cameraInput.verticalFovDegrees = 90.0F;
+    cameraInput.nearPlaneMeters = 1.0F;
+    cameraInput.farPlaneMeters = 10.0F;
+    ASSERT_TRUE(builder.writer().setPerspectiveCamera(cameraInput));
+
+    std::array<float, SkinnedMesh3DPaletteFloatsPerJoint> firstPalette{
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        2, 3, 4, 1,
+    };
+    std::array<float, SkinnedMesh3DPaletteFloatsPerJoint> secondPalette = firstPalette;
+    secondPalette[12] = 5.0F;
+    ASSERT_TRUE(builder.writer().addSkinnedMesh3D(
+        skinnedMesh3D(resources, 2, 1, 30, 0.0F, 0.0F, -4.0F, firstPalette)));
+    ASSERT_TRUE(builder.writer().addSkinnedMesh3D(
+        skinnedMesh3D(resources, 2, 1, 20, 0.0F, 0.0F, -2.0F, secondPalette)));
+    ASSERT_TRUE(builder.writer().addSkinnedMesh3D(
+        skinnedMesh3D(resources, 9, 9, 40, 100.0F, 0.0F, -2.0F, firstPalette)));
+    auto invisible = skinnedMesh3D(resources, 3, 3, 50, 0.0F, 0.0F, -2.0F, firstPalette);
+    invisible.visible = false;
+    ASSERT_TRUE(builder.writer().addSkinnedMesh3D(invisible));
+    firstPalette[12] = 99.0F;
+    secondPalette[12] = 98.0F;
+
+    auto committed = builder.commit();
+    ASSERT_TRUE(committed.has_value()) << (committed ? "" : committed.error().message);
+    ASSERT_EQ(committed->skinnedMeshes3D().size(), 2U);
+    EXPECT_EQ(committed->skinnedMeshes3D()[0].stableEntityKey, 20U);
+    EXPECT_EQ(committed->skinnedMeshes3D()[1].stableEntityKey, 30U);
+    EXPECT_EQ(committed->skinnedMeshes3D()[0].paletteJointOffset, 1U);
+    EXPECT_EQ(committed->skinnedMeshes3D()[1].paletteJointOffset, 0U);
+    ASSERT_EQ(committed->skinnedMesh3DPalette().size(), 3U * SkinnedMesh3DPaletteFloatsPerJoint);
+    EXPECT_FLOAT_EQ(committed->skinnedMesh3DPalette()[12], 2.0F);
+    EXPECT_FLOAT_EQ(
+        committed->skinnedMesh3DPalette()[SkinnedMesh3DPaletteFloatsPerJoint + 12U],
+        5.0F);
+
+    const RenderSceneStatistics statistics = committed->statistics();
+    EXPECT_EQ(statistics.submittedSkinnedMesh3DCount, 4U);
+    EXPECT_EQ(statistics.visibleSkinnedMesh3DCount, 2U);
+    EXPECT_EQ(statistics.culledSkinnedMesh3DCount, 1U);
+    EXPECT_EQ(statistics.prunedInvisibleSkinnedMesh3DCount, 1U);
+    EXPECT_EQ(statistics.skinnedMesh3DPaletteJointCount, 3U);
+    EXPECT_NE(statistics.skinnedMesh3DSortOrderChecksum, 0U);
+}
+
+TEST(RenderSceneBuilderTest, SkinnedMeshValidationAndCapacitiesAreStickyAndTransactional)
+{
+    FrameResourceScope resources;
+    RenderSceneCapacity capacity{};
+    capacity.skinnedMesh3DItemCapacity = 1;
+    capacity.skinnedMesh3DPaletteJointCapacity = MaxSkinnedMesh3DPaletteJointCount;
+    auto builderResult = RenderSceneBuilder::Create(capacity);
+    ASSERT_TRUE(builderResult.has_value());
+    RenderSceneBuilder builder = std::move(*builderResult);
+    std::array<float, SkinnedMesh3DPaletteFloatsPerJoint> palette{};
+
+    ASSERT_TRUE(builder.beginFrame(perspectiveFrame()));
+    ASSERT_TRUE(builder.writer().setPerspectiveCamera(perspectiveCamera()));
+    auto invalid = skinnedMesh3D(resources, 1, 1, 1, 0.0F, 0.0F, 0.0F, palette);
+    invalid.paletteColumnMajorJointMatrices =
+        std::span<const float>{palette}.first(palette.size() - 1U);
+    const Core::Status malformed = builder.writer().addSkinnedMesh3D(invalid);
+    ASSERT_FALSE(malformed);
+    EXPECT_EQ(malformed.error().code, RenderErrorCode::InvalidRenderSceneInput);
+    EXPECT_FALSE(builder.commit().has_value());
+
+    ASSERT_TRUE(builder.beginFrame(perspectiveFrame()));
+    ASSERT_TRUE(builder.writer().setPerspectiveCamera(perspectiveCamera()));
+    ASSERT_TRUE(builder.writer().addSkinnedMesh3D(
+        skinnedMesh3D(resources, 1, 1, 1, 0.0F, 0.0F, 0.0F, palette)));
+    auto overflow = builder.writer().addSkinnedMesh3D(
+        skinnedMesh3D(resources, 1, 1, 2, 1.0F, 0.0F, 0.0F, palette));
+    ASSERT_FALSE(overflow);
+    EXPECT_EQ(overflow.error().code, RenderErrorCode::RenderSceneCapacityExceeded);
+    EXPECT_FALSE(builder.commit().has_value());
+    EXPECT_TRUE(builder.publishedView().empty());
+
+    capacity.skinnedMesh3DItemCapacity = 2;
+    auto paletteBuilderResult = RenderSceneBuilder::Create(capacity);
+    ASSERT_TRUE(paletteBuilderResult.has_value());
+    RenderSceneBuilder paletteBuilder = std::move(*paletteBuilderResult);
+    std::array<float,
+               MaxSkinnedMesh3DPaletteJointCount * SkinnedMesh3DPaletteFloatsPerJoint>
+        fullPalette{};
+    ASSERT_TRUE(paletteBuilder.beginFrame(perspectiveFrame()));
+    ASSERT_TRUE(paletteBuilder.writer().setPerspectiveCamera(perspectiveCamera()));
+    ASSERT_TRUE(paletteBuilder.writer().addSkinnedMesh3D(
+        skinnedMesh3D(resources, 1, 1, 1, 0.0F, 0.0F, 0.0F, fullPalette)));
+    auto paletteOverflow = paletteBuilder.writer().addSkinnedMesh3D(
+        skinnedMesh3D(resources, 1, 1, 2, 1.0F, 0.0F, 0.0F, palette));
+    ASSERT_FALSE(paletteOverflow);
+    EXPECT_EQ(paletteOverflow.error().code, RenderErrorCode::RenderSceneCapacityExceeded);
+    EXPECT_FALSE(paletteBuilder.commit().has_value());
+    EXPECT_TRUE(paletteBuilder.publishedView().empty());
 }
 
 TEST(RenderSceneBuilderTest, TwoDimensionalAndPerspectiveCamerasCanShareOneWorldScene)

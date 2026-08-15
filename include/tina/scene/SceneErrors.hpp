@@ -30,6 +30,7 @@ inline constexpr Core::ErrorCode TooManyActiveSpotLights3D{Core::ErrorDomain::Sc
 inline constexpr Core::ErrorCode TooManyActiveCascadedDirectionalShadows{Core::ErrorDomain::Scene, 22};
 inline constexpr Core::ErrorCode TooManyActiveSpotLightShadows{Core::ErrorDomain::Scene, 23};
 inline constexpr Core::ErrorCode TooManyActivePointLightShadows{Core::ErrorDomain::Scene, 24};
+inline constexpr Core::ErrorCode UnresolvedSkinnedPose{Core::ErrorDomain::Scene, 25};
 
 } // namespace SceneErrorCode
 

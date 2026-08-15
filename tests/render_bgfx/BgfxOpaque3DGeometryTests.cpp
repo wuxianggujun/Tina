@@ -156,6 +156,39 @@ committedSingleMeshScene(RenderSceneBuilder& builder,
     return builder.commit();
 }
 
+[[nodiscard]] Core::Result<RenderSceneView>
+committedSingleSkinnedMeshScene(RenderSceneBuilder& builder,
+                               FrameResourceRef meshResource,
+                               FrameResourceRef materialResource)
+{
+    constexpr std::array<float, SkinnedMesh3DPaletteFloatsPerJoint> IdentityPalette{
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1,
+    };
+    if (auto status = builder.beginFrame({.primarySurfaceAspectRatio = 16.0F / 9.0F}); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto writer = builder.writer();
+    if (auto status = writer.setPerspectiveCamera(camera()); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    if (auto status = writer.addSkinnedMesh3D(RenderSkinnedMesh3DInput{
+            .mesh = meshResource,
+            .material = materialResource,
+            .stableEntityKey = 1,
+            .localBounds = {.radius = 1.0F},
+            .paletteColumnMajorJointMatrices = IdentityPalette,
+        }); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    return builder.commit();
+}
+
 TEST(BgfxOpaque3DGeometryTest, CanonicalCubeUsesP3N3T4UV2AndOutwardWinding)
 {
     EXPECT_TRUE(std::is_standard_layout_v<BgfxOpaque3DVertex>);
@@ -293,6 +326,41 @@ TEST(BgfxOpaque3DGeometryTest, RejectsWrongKindMeshResources)
     auto requirements = checkedOpaque3DFrame(*scene, resources.view());
     ASSERT_FALSE(requirements.has_value());
     EXPECT_EQ(requirements.error().code, RenderErrorCode::InvalidFrameResource);
+}
+
+TEST(BgfxOpaque3DGeometryTest, SkinnedFrameAcceptsOnlySkinnedGeometryAndMaterialKinds)
+{
+    TestFrameResources resources;
+    RenderSceneBuilder builder = makeBuilder();
+    auto scene = committedSingleSkinnedMeshScene(
+        builder,
+        resources.intern(FrameResourceKind::SkinnedMesh3DGeometry, 11),
+        resources.intern(FrameResourceKind::Mesh3DMaterial, 22));
+    ASSERT_TRUE(scene.has_value()) << (scene ? "" : scene.error().message);
+    EXPECT_TRUE(validateSkinnedOpaque3DFrame(*scene, resources.view()).has_value());
+
+    TestFrameResources wrongMeshResources;
+    RenderSceneBuilder wrongMeshBuilder = makeBuilder();
+    auto wrongMesh = committedSingleSkinnedMeshScene(
+        wrongMeshBuilder,
+        wrongMeshResources.intern(FrameResourceKind::Mesh3DGeometry, 11),
+        wrongMeshResources.intern(FrameResourceKind::Mesh3DMaterial, 22));
+    ASSERT_TRUE(wrongMesh.has_value());
+    auto wrongMeshStatus = validateSkinnedOpaque3DFrame(*wrongMesh, wrongMeshResources.view());
+    ASSERT_FALSE(wrongMeshStatus);
+    EXPECT_EQ(wrongMeshStatus.error().code, RenderErrorCode::InvalidFrameResource);
+
+    TestFrameResources wrongMaterialResources;
+    RenderSceneBuilder wrongMaterialBuilder = makeBuilder();
+    auto wrongMaterial = committedSingleSkinnedMeshScene(
+        wrongMaterialBuilder,
+        wrongMaterialResources.intern(FrameResourceKind::SkinnedMesh3DGeometry, 11),
+        wrongMaterialResources.intern(FrameResourceKind::Texture2D, 22));
+    ASSERT_TRUE(wrongMaterial.has_value());
+    auto wrongMaterialStatus =
+        validateSkinnedOpaque3DFrame(*wrongMaterial, wrongMaterialResources.view());
+    ASSERT_FALSE(wrongMaterialStatus);
+    EXPECT_EQ(wrongMaterialStatus.error().code, RenderErrorCode::InvalidFrameResource);
 }
 
 TEST(BgfxOpaque3DGeometryTest, RejectsStaleMeshResources)

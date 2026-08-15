@@ -65,6 +65,182 @@ namespace {
     return Core::success();
 }
 
+[[nodiscard]] Core::Status validateSkinnedMesh3DItemShape(const RenderFrame& frame) noexcept
+{
+    const std::span<const float> palette = frame.primaryWorldScene.skinnedMesh3DPalette();
+    const u64 paletteJointCount =
+        static_cast<u64>(palette.size() / SkinnedMesh3DPaletteFloatsPerJoint);
+    for (const RenderSkinnedMesh3DItem& mesh : frame.primaryWorldScene.skinnedMeshes3D())
+    {
+        const FrameResourceDescriptor* geometry =
+            frame.resources.resolve(mesh.mesh, FrameResourceKind::SkinnedMesh3DGeometry);
+        const FrameResourceDescriptor* material =
+            frame.resources.resolve(mesh.material, FrameResourceKind::Mesh3DMaterial);
+        if (geometry == nullptr || material == nullptr ||
+            geometry->deviceBindingKey > static_cast<u64>((std::numeric_limits<u32>::max)()) ||
+            material->deviceBindingKey > static_cast<u64>((std::numeric_limits<u32>::max)()))
+        {
+            return Core::failure(
+                RenderErrorCode::InvalidFrameResource,
+                "NullRender SkinnedMesh3D refs are stale, cross-packet, wrong-kind, or out of binding range");
+        }
+        if (mesh.paletteJointCount == 0 ||
+            mesh.paletteJointCount > MaxSkinnedMesh3DPaletteJointCount ||
+            static_cast<u64>(mesh.paletteJointOffset) + mesh.paletteJointCount > paletteJointCount)
+        {
+            return Core::failure(
+                RenderErrorCode::InvalidFrameResource,
+                "NullRender SkinnedMesh3D palette range escapes the committed frame pool");
+        }
+    }
+    return Core::success();
+}
+
+[[nodiscard]] double cameraDistanceSquared(const RenderPerspectiveCamera& camera,
+                                           float x, float y, float z) noexcept
+{
+    const double deltaX = static_cast<double>(x) - camera.positionX;
+    const double deltaY = static_cast<double>(y) - camera.positionY;
+    const double deltaZ = static_cast<double>(z) - camera.positionZ;
+    return deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ;
+}
+
+[[nodiscard]] bool transparentDrawLess(const RenderTransparent3DDraw& left,
+                                       const RenderTransparent3DDraw& right) noexcept
+{
+    if (left.cameraDistanceSquared != right.cameraDistanceSquared)
+    {
+        return left.cameraDistanceSquared > right.cameraDistanceSquared;
+    }
+    if (left.stableEntityKey != right.stableEntityKey)
+    {
+        return left.stableEntityKey < right.stableEntityKey;
+    }
+    if (left.kind != right.kind)
+    {
+        return left.kind < right.kind;
+    }
+    return left.itemIndex < right.itemIndex;
+}
+
+[[nodiscard]] Core::Status validateTransparent3DOrder(const RenderFrame& frame) noexcept
+{
+    const RenderSceneView scene = frame.primaryWorldScene;
+    const std::span<const RenderMesh3DItem> staticItems = scene.meshes3D();
+    const std::span<const RenderMesh3DItem> opaqueStaticItems = scene.opaqueMeshes3D();
+    const std::span<const RenderSkinnedMesh3DItem> skinnedItems = scene.skinnedMeshes3D();
+    const std::span<const RenderSkinnedMesh3DItem> opaqueSkinnedItems =
+        scene.opaqueSkinnedMeshes3D();
+    if ((!staticItems.empty() || !skinnedItems.empty()) &&
+        !scene.perspectiveCamera().has_value())
+    {
+        return Core::failure(RenderErrorCode::InvalidRenderSceneInput,
+                             "NullRender Mesh3D items require a perspective camera");
+    }
+    for (usize index = 0; index < staticItems.size(); ++index)
+    {
+        const Mesh3DAlphaMode expected = index < opaqueStaticItems.size()
+                                             ? Mesh3DAlphaMode::Opaque
+                                             : Mesh3DAlphaMode::Blend;
+        if (staticItems[index].alphaMode != expected)
+        {
+            return Core::failure(RenderErrorCode::InvalidRenderSceneInput,
+                                 "NullRender static Mesh3D alpha partition is invalid");
+        }
+    }
+    for (usize index = 0; index < skinnedItems.size(); ++index)
+    {
+        const Mesh3DAlphaMode expected = index < opaqueSkinnedItems.size()
+                                             ? Mesh3DAlphaMode::Opaque
+                                             : Mesh3DAlphaMode::Blend;
+        if (skinnedItems[index].alphaMode != expected)
+        {
+            return Core::failure(RenderErrorCode::InvalidRenderSceneInput,
+                                 "NullRender skinned Mesh3D alpha partition is invalid");
+        }
+    }
+
+    const std::span<const RenderTransparent3DDraw> draws = scene.transparent3DDraws();
+    const usize expectedDrawCount =
+        staticItems.size() - opaqueStaticItems.size() +
+        skinnedItems.size() - opaqueSkinnedItems.size();
+    if (draws.size() != expectedDrawCount)
+    {
+        return Core::failure(
+            RenderErrorCode::InvalidRenderSceneInput,
+            "NullRender Transparent3D draws do not completely cover transparent items");
+    }
+
+    const RenderPerspectiveCamera* camera = scene.perspectiveCamera().has_value()
+                                                ? &*scene.perspectiveCamera()
+                                                : nullptr;
+    for (usize drawIndex = 0; drawIndex < draws.size(); ++drawIndex)
+    {
+        const RenderTransparent3DDraw& draw = draws[drawIndex];
+        if (camera == nullptr || !std::isfinite(draw.cameraDistanceSquared) ||
+            (drawIndex != 0 && transparentDrawLess(draw, draws[drawIndex - 1U])))
+        {
+            return Core::failure(
+                RenderErrorCode::InvalidRenderSceneInput,
+                "NullRender Transparent3D draws are not in deterministic back-to-front order");
+        }
+
+        u64 stableEntityKey = 0;
+        double distanceSquared = 0.0;
+        switch (draw.kind)
+        {
+        case RenderTransparent3DDrawKind::StaticMesh:
+            if (draw.itemIndex < opaqueStaticItems.size() ||
+                draw.itemIndex >= staticItems.size())
+            {
+                return Core::failure(
+                    RenderErrorCode::InvalidRenderSceneInput,
+                    "NullRender Transparent3D static draw index is invalid");
+            }
+            stableEntityKey = staticItems[draw.itemIndex].stableEntityKey;
+            distanceSquared = cameraDistanceSquared(
+                *camera, staticItems[draw.itemIndex].worldBoundsCenterX,
+                staticItems[draw.itemIndex].worldBoundsCenterY,
+                staticItems[draw.itemIndex].worldBoundsCenterZ);
+            break;
+        case RenderTransparent3DDrawKind::SkinnedMesh:
+            if (draw.itemIndex < opaqueSkinnedItems.size() ||
+                draw.itemIndex >= skinnedItems.size())
+            {
+                return Core::failure(
+                    RenderErrorCode::InvalidRenderSceneInput,
+                    "NullRender Transparent3D skinned draw index is invalid");
+            }
+            stableEntityKey = skinnedItems[draw.itemIndex].stableEntityKey;
+            distanceSquared = cameraDistanceSquared(
+                *camera, skinnedItems[draw.itemIndex].worldBoundsCenterX,
+                skinnedItems[draw.itemIndex].worldBoundsCenterY,
+                skinnedItems[draw.itemIndex].worldBoundsCenterZ);
+            break;
+        default:
+            return Core::failure(RenderErrorCode::InvalidRenderSceneInput,
+                                 "NullRender Transparent3D draw kind is invalid");
+        }
+        if (draw.stableEntityKey != stableEntityKey ||
+            draw.cameraDistanceSquared != distanceSquared)
+        {
+            return Core::failure(
+                RenderErrorCode::InvalidRenderSceneInput,
+                "NullRender Transparent3D draw identity or camera distance is invalid");
+        }
+        if (drawIndex != 0)
+        {
+            const RenderTransparent3DDraw& previous = draws[drawIndex - 1U];
+            if (draw.kind == previous.kind && draw.itemIndex == previous.itemIndex)
+            {
+                return Core::failure(RenderErrorCode::InvalidRenderSceneInput,
+                                     "NullRender Transparent3D draws contain a duplicate item");
+            }
+        }
+    }
+    return Core::success();
+}
+
 class NullRenderDevice final : public IRenderDevice {
   public:
     explicit NullRenderDevice(Detail::RenderSurfaceStateTracker surfaceStateTracker) noexcept
@@ -93,6 +269,22 @@ class NullRenderDevice final : public IRenderDevice {
             return Core::failure(std::move(status.error()));
         }
         if (auto status = validateMesh3DResources(frame); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        if (auto status = validateSkinnedMesh3DItemShape(frame); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        if (auto status = validateTransparent3DOrder(frame); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        if (auto status = validateMesh3DMaterialAlphaBindings(frame); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        if (auto status = validateSkinnedMesh3DBindings(frame); !status)
         {
             return Core::failure(std::move(status.error()));
         }
@@ -349,6 +541,62 @@ class NullRenderDevice final : public IRenderDevice {
         return createStaticMeshRecord(desc);
     }
 
+    [[nodiscard]] Core::Result<GpuMeshId> createSkinnedMesh(const SkinnedMeshUploadDesc& desc) override
+    {
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The null render device is stopped");
+        }
+        constexpr u16 MaxJointCount = static_cast<u16>(MaxSkinnedMesh3DPaletteJointCount);
+        constexpr u32 InfluencesPerVertex = 4;
+        if (desc.jointCount == 0 || desc.jointCount > MaxJointCount ||
+            desc.vertexCount > (std::numeric_limits<u32>::max)() / InfluencesPerVertex ||
+            desc.jointIndices.size() !=
+                static_cast<std::size_t>(desc.vertexCount) * InfluencesPerVertex ||
+            desc.jointWeights.size() !=
+                static_cast<std::size_t>(desc.vertexCount) * InfluencesPerVertex)
+        {
+            return Core::failure(RenderErrorCode::InvalidMeshUpload,
+                                 "invalid SkinnedMesh upload skin stream shape");
+        }
+        for (const u16 jointIndex : desc.jointIndices)
+        {
+            if (jointIndex >= desc.jointCount)
+            {
+                return Core::failure(RenderErrorCode::InvalidMeshUpload,
+                                     "SkinnedMesh joint index out of range");
+            }
+        }
+        for (std::size_t vertexIndex = 0; vertexIndex < desc.vertexCount; ++vertexIndex)
+        {
+            u32 weightSum = 0;
+            for (std::size_t influence = 0; influence < InfluencesPerVertex; ++influence)
+            {
+                weightSum += desc.jointWeights[vertexIndex * InfluencesPerVertex + influence];
+            }
+            if (weightSum != 0xFFFFU)
+            {
+                return Core::failure(RenderErrorCode::InvalidMeshUpload,
+                                     "SkinnedMesh vertex weights must sum to 0xFFFF");
+            }
+        }
+
+        auto meshId = createStaticMeshRecord(StaticMeshUploadDesc{
+            .vertexCount = desc.vertexCount,
+            .indexCount = desc.indexCount,
+            .vertices = desc.vertices,
+            .indices = desc.indices,
+        });
+        if (!meshId)
+        {
+            return meshId;
+        }
+        MeshSlot& slot = meshes_[meshId->index];
+        slot.skinned = true;
+        slot.jointCount = desc.jointCount;
+        return meshId;
+    }
+
     [[nodiscard]] Core::Status destroyStaticMesh(GpuMeshId mesh) noexcept override
     {
         if (stopped_)
@@ -420,10 +668,11 @@ class NullRenderDevice final : public IRenderDevice {
         }
         if (!(desc.metallicFactor >= 0.0F && desc.metallicFactor <= 1.0F) ||
             !(desc.roughnessFactor >= 0.0F && desc.roughnessFactor <= 1.0F) ||
-            !std::isfinite(desc.metallicFactor) || !std::isfinite(desc.roughnessFactor))
+            !std::isfinite(desc.metallicFactor) || !std::isfinite(desc.roughnessFactor) ||
+            !isSupportedMesh3DAlphaMode(desc.alphaMode))
         {
             return Core::failure(RenderErrorCode::InvalidTextureUpload,
-                                 "metallic and roughness must be finite values in [0,1]");
+                                 "Mesh3D material factors or alpha mode are invalid");
         }
 
         if (!isLiveTexture(desc.baseColorTexture) || !isLiveTexture(desc.metallicRoughnessTexture) ||
@@ -689,6 +938,25 @@ class NullRenderDevice final : public IRenderDevice {
     }
 
   private:
+    struct TextureSlot final {
+        u32 generation = 1;
+        u16 width = 0;
+        u16 height = 0;
+        bool live = false;
+    };
+    struct MeshSlot final {
+        u32 generation = 1;
+        u32 vertexCount = 0;
+        u32 indexCount = 0;
+        u16 jointCount = 0;
+        bool skinned = false;
+        bool live = false;
+    };
+    struct EnvironmentMapSlot final {
+        u32 generation = 1;
+        bool live = false;
+    };
+
     [[nodiscard]] Core::Result<GpuMeshId> createStaticMeshRecord(const StaticMeshUploadDesc& desc)
     {
         if (stopped_)
@@ -767,6 +1035,111 @@ class NullRenderDevice final : public IRenderDevice {
         return GpuMeshId{resourceOwnerId(), slotIndex, 1};
     }
 
+    [[nodiscard]] Core::Status validateMesh3DMaterialAlphaBindings(
+        const RenderFrame& frame) const noexcept
+    {
+        const auto validateItems = [this, &frame](const auto items) noexcept -> Core::Status {
+            for (const auto& item : items)
+            {
+                const FrameResourceDescriptor* material = frame.resources.resolve(
+                    item.material, FrameResourceKind::Mesh3DMaterial);
+                if (material == nullptr ||
+                    material->deviceBindingKey >
+                        static_cast<u64>((std::numeric_limits<u32>::max)()))
+                {
+                    return Core::failure(
+                        RenderErrorCode::InvalidFrameResource,
+                        "NullRender Mesh3D item references an invalid material resource");
+                }
+                const u32 materialKey = static_cast<u32>(material->deviceBindingKey);
+                const auto binding = materialBindings_.find(materialKey);
+                const Mesh3DAlphaMode resolvedAlphaMode =
+                    binding == materialBindings_.end() ? Mesh3DAlphaMode::Opaque
+                                                       : binding->second.alphaMode;
+                if (resolvedAlphaMode != item.alphaMode)
+                {
+                    return Core::failure(
+                        RenderErrorCode::InvalidFrameResource,
+                        "NullRender Mesh3D item alpha mode does not match its material binding");
+                }
+            }
+            return Core::success();
+        };
+
+        if (auto status = validateItems(frame.primaryWorldScene.meshes3D()); !status)
+        {
+            return status;
+        }
+        return validateItems(frame.primaryWorldScene.skinnedMeshes3D());
+    }
+
+    // Binding-level preflight: a bound static key must map to a non-skinned
+    // slot, a bound skinned key must map to a skinned slot whose joint count
+    // matches the item palette. Unbound keys stay tolerated like the static
+    // path (bindings may arrive later; bgfx substitutes its fixture).
+    [[nodiscard]] Core::Status validateSkinnedMesh3DBindings(const RenderFrame& frame) const noexcept
+    {
+        for (const RenderMesh3DItem& mesh : frame.primaryWorldScene.meshes3D())
+        {
+            const FrameResourceDescriptor* geometry =
+                frame.resources.resolve(mesh.mesh, FrameResourceKind::Mesh3DGeometry);
+            if (geometry == nullptr)
+            {
+                continue;
+            }
+            const MeshSlot* slot = boundMeshSlot(static_cast<u32>(geometry->deviceBindingKey));
+            if (slot != nullptr && slot->skinned)
+            {
+                return Core::failure(
+                    RenderErrorCode::InvalidFrameResource,
+                    "NullRender static Mesh3D item resolves a skinned mesh binding");
+            }
+        }
+        for (const RenderSkinnedMesh3DItem& mesh : frame.primaryWorldScene.skinnedMeshes3D())
+        {
+            const FrameResourceDescriptor* geometry =
+                frame.resources.resolve(mesh.mesh, FrameResourceKind::SkinnedMesh3DGeometry);
+            if (geometry == nullptr)
+            {
+                continue;
+            }
+            const MeshSlot* slot = boundMeshSlot(static_cast<u32>(geometry->deviceBindingKey));
+            if (slot == nullptr)
+            {
+                continue;
+            }
+            if (!slot->skinned)
+            {
+                return Core::failure(
+                    RenderErrorCode::InvalidFrameResource,
+                    "NullRender SkinnedMesh3D item resolves a non-skinned mesh binding");
+            }
+            if (slot->jointCount != mesh.paletteJointCount)
+            {
+                return Core::failure(
+                    RenderErrorCode::InvalidFrameResource,
+                    "NullRender SkinnedMesh3D palette joint count does not match the bound skeleton");
+            }
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] const MeshSlot* boundMeshSlot(u32 meshKey) const noexcept
+    {
+        const auto binding = meshBindings_.find(meshKey);
+        if (binding == meshBindings_.end())
+        {
+            return nullptr;
+        }
+        const GpuMeshId id = binding->second;
+        if (id.index >= meshes_.size() || !meshes_[id.index].live ||
+            meshes_[id.index].generation != id.generation)
+        {
+            return nullptr;
+        }
+        return &meshes_[id.index];
+    }
+
     [[nodiscard]] Core::Status validateUIResources(const RenderFrame& frame) const noexcept
     {
         for (const UIDrawCommand& command : frame.primaryWindowUIDisplayList.commands())
@@ -832,23 +1205,6 @@ class NullRenderDevice final : public IRenderDevice {
             return Core::failure(Core::CoreErrorCode::CapacityExceeded);
         }
     }
-
-    struct TextureSlot final {
-        u32 generation = 1;
-        u16 width = 0;
-        u16 height = 0;
-        bool live = false;
-    };
-    struct MeshSlot final {
-        u32 generation = 1;
-        u32 vertexCount = 0;
-        u32 indexCount = 0;
-        bool live = false;
-    };
-    struct EnvironmentMapSlot final {
-        u32 generation = 1;
-        bool live = false;
-    };
 
     Detail::RenderSurfaceStateTracker surfaceStateTracker_;
     RenderStatistics statistics_{};

@@ -1013,10 +1013,105 @@ Core::Status extractRenderSceneFromWorld(
                 },
             .localBounds = mesh->localBounds,
             .baseColorFactor = mesh->baseColorFactor,
+            .alphaMode = mesh->alphaMode,
             .doubleSided = mesh->doubleSided,
             .visible = true,
         };
         if (const Core::Status status = writer.addMesh3D(input); !status) {
+            return status;
+        }
+    }
+
+    for (const EntityId entity : world.liveEntities()) {
+        const SkinnedMeshRenderer3D* mesh = world.skinnedMeshRenderer3D(entity);
+        if (mesh == nullptr) {
+            continue;
+        }
+        if (!mesh->visible) {
+            continue;
+        }
+        if (!isValid(*mesh)) {
+            return Core::failure(
+                SceneErrorCode::UnresolvedMesh,
+                "Scene SkinnedMeshRenderer3D has invalid render properties");
+        }
+        if (!mesh->mesh || !mesh->material || !params.skinnedMesh3DBindingResolver
+            || !params.material3DBindingResolver) {
+            return Core::failure(
+                SceneErrorCode::UnresolvedMesh,
+                "Scene SkinnedMeshRenderer3D has no resolvable mesh and material assets");
+        }
+        if (!params.skinnedPose3DProvider) {
+            return Core::failure(
+                SceneErrorCode::UnresolvedSkinnedPose,
+                "Scene SkinnedMeshRenderer3D extraction requires a skinned pose provider");
+        }
+        auto meshResource = params.skinnedMesh3DBindingResolver(mesh->mesh, frameResources);
+        if (!meshResource) {
+            return Core::failure(std::move(meshResource.error()));
+        }
+        if (!meshResource->hasValue()) {
+            return Core::failure(
+                SceneErrorCode::UnresolvedMesh,
+                "Scene SkinnedMeshRenderer3D mesh asset has no skinned render binding");
+        }
+        auto materialResource = params.material3DBindingResolver(mesh->material, frameResources);
+        if (!materialResource) {
+            return Core::failure(std::move(materialResource.error()));
+        }
+        if (!materialResource->hasValue()) {
+            return Core::failure(
+                SceneErrorCode::UnresolvedMesh,
+                "Scene SkinnedMeshRenderer3D material asset has no render binding");
+        }
+        const std::span<const float> palette = params.skinnedPose3DProvider(entity);
+        if (palette.empty()
+            || (palette.size() % Render::SkinnedMesh3DPaletteFloatsPerJoint) != 0
+            || palette.size() / Render::SkinnedMesh3DPaletteFloatsPerJoint
+                   > Render::MaxSkinnedMesh3DPaletteJointCount
+            || !std::ranges::all_of(palette, [](float value) noexcept {
+                   return std::isfinite(value);
+               })) {
+            return Core::failure(
+                SceneErrorCode::UnresolvedSkinnedPose,
+                "Scene SkinnedMeshRenderer3D pose provider returned no usable joint palette");
+        }
+        const WorldTransform* transform = world.worldTransform(entity);
+        if (transform == nullptr || !isValid(*transform)) {
+            return Core::failure(
+                SceneErrorCode::InvalidTransform,
+                "Scene SkinnedMeshRenderer3D WorldTransform is unavailable or invalid");
+        }
+
+        const Render::RenderSkinnedMesh3DInput input{
+            .mesh = *meshResource,
+            .material = *materialResource,
+            .submeshIndex = mesh->submeshIndex,
+            .stableEntityKey = stableEntityKey(entity),
+            .worldTransform =
+                Render::RenderTransform3DInput{
+                    .pose =
+                        Render::RenderPose3DInput{
+                            .positionX = transform->position.x,
+                            .positionY = transform->position.y,
+                            .positionZ = transform->position.z,
+                            .rotationX = transform->rotation.x,
+                            .rotationY = transform->rotation.y,
+                            .rotationZ = transform->rotation.z,
+                            .rotationW = transform->rotation.w,
+                        },
+                    .scaleX = transform->scale.x,
+                    .scaleY = transform->scale.y,
+                    .scaleZ = transform->scale.z,
+                },
+            .localBounds = mesh->localBounds,
+            .baseColorFactor = mesh->baseColorFactor,
+            .paletteColumnMajorJointMatrices = palette,
+            .alphaMode = mesh->alphaMode,
+            .doubleSided = mesh->doubleSided,
+            .visible = true,
+        };
+        if (const Core::Status status = writer.addSkinnedMesh3D(input); !status) {
             return status;
         }
     }

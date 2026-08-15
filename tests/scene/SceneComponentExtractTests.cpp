@@ -946,6 +946,18 @@ TEST(SceneExtractTest, InactiveCameraIsIgnored)
     };
 }
 
+[[nodiscard]] SkinnedMeshRenderer3D fixtureSkinnedMesh(
+    Asset::AssetHandle mesh,
+    Asset::AssetHandle material)
+{
+    return SkinnedMeshRenderer3D{
+        .mesh = mesh,
+        .material = material,
+        .localBounds = Render::RenderBoundingSphereInput{.radius = 0.5F},
+        .visible = true,
+    };
+}
+
 struct TestMeshBindings final {
     struct Binding final {
         Asset::AssetHandle asset{};
@@ -960,6 +972,11 @@ struct TestMeshBindings final {
     [[nodiscard]] Asset::AssetFrameResourceResolver materialResolver() noexcept
     {
         return Asset::AssetFrameResourceResolver{.userData = this, .resolve = &resolveMaterial};
+    }
+
+    [[nodiscard]] Asset::AssetFrameResourceResolver skinnedMeshResolver() noexcept
+    {
+        return Asset::AssetFrameResourceResolver{.userData = this, .resolve = &resolveSkinnedMesh};
     }
 
     void bind(Asset::AssetHandle asset, u32 key) noexcept
@@ -991,6 +1008,18 @@ struct TestMeshBindings final {
             Render::FrameResourceKind::Mesh3DMaterial, sink);
     }
 
+    [[nodiscard]] static Core::Result<Render::FrameResourceRef> resolveSkinnedMesh(
+        void* userData,
+        Asset::AssetHandle asset,
+        Render::FrameResourceSink& sink) noexcept
+    {
+        auto& self = *static_cast<TestMeshBindings*>(userData);
+        ++self.skinnedMeshResolveCalls;
+        return self.resolveExpected(
+            asset, AssetFormat::AssetKind::SkinnedMesh,
+            Render::FrameResourceKind::SkinnedMesh3DGeometry, sink);
+    }
+
     [[nodiscard]] Core::Result<Render::FrameResourceRef> resolveExpected(
         Asset::AssetHandle asset,
         AssetFormat::AssetKind expectedKind,
@@ -1014,14 +1043,34 @@ struct TestMeshBindings final {
     std::array<Binding, 8> bindings{};
     usize bindingCount = 0;
     u32 meshResolveCalls = 0;
+    u32 skinnedMeshResolveCalls = 0;
     u32 materialResolveCalls = 0;
+};
+
+struct TestSkinnedPoseProvider final {
+    [[nodiscard]] SkinnedPose3DProvider provider() noexcept
+    {
+        return SkinnedPose3DProvider{.userData = this, .resolve = &resolve};
+    }
+
+    [[nodiscard]] static std::span<const float> resolve(void* userData, EntityId entity) noexcept
+    {
+        auto& self = *static_cast<TestSkinnedPoseProvider*>(userData);
+        ++self.resolveCalls;
+        self.lastEntity = entity;
+        return self.palette;
+    }
+
+    std::span<const float> palette{};
+    EntityId lastEntity{};
+    u32 resolveCalls = 0;
 };
 
 class SceneMeshAssetTest : public testing::Test {
   protected:
     void SetUp() override
     {
-        auto store = Asset::AssetStore::Create({.capacity = 6, .memoryResource = &memory_});
+        auto store = Asset::AssetStore::Create({.capacity = 7, .memoryResource = &memory_});
         ASSERT_TRUE(store.has_value()) << (store ? "" : store.error().message);
         store_.emplace(std::move(*store));
 
@@ -1030,16 +1079,19 @@ class SceneMeshAssetTest : public testing::Test {
         auto materialA = store_->beginQueued(fixtureAssetId(3), AssetFormat::AssetKind::Material);
         auto materialB = store_->beginQueued(fixtureAssetId(4), AssetFormat::AssetKind::Material);
         auto wrongKind = store_->beginQueued(fixtureAssetId(5), AssetFormat::AssetKind::Texture2D);
+        auto skinnedMesh = store_->beginQueued(fixtureAssetId(6), AssetFormat::AssetKind::SkinnedMesh);
         ASSERT_TRUE(meshA.has_value());
         ASSERT_TRUE(meshB.has_value());
         ASSERT_TRUE(materialA.has_value());
         ASSERT_TRUE(materialB.has_value());
         ASSERT_TRUE(wrongKind.has_value());
+        ASSERT_TRUE(skinnedMesh.has_value());
         meshA_ = *meshA;
         meshB_ = *meshB;
         materialA_ = *materialA;
         materialB_ = *materialB;
         wrongKind_ = *wrongKind;
+        skinnedMesh_ = *skinnedMesh;
     }
 
     [[nodiscard]] Asset::AssetStore& store() noexcept { return *store_; }
@@ -1051,6 +1103,7 @@ class SceneMeshAssetTest : public testing::Test {
     Asset::AssetHandle materialA_{};
     Asset::AssetHandle materialB_{};
     Asset::AssetHandle wrongKind_{};
+    Asset::AssetHandle skinnedMesh_{};
 };
 
 TEST_F(SceneMeshAssetTest, SetsClearsAndQueriesPerspectiveCameraAndMesh)
@@ -2804,6 +2857,140 @@ TEST_F(SceneMeshAssetTest, CrossStoreMeshHandleIsUnresolved)
     EXPECT_EQ(bindings.materialResolveCalls, 0U);
 }
 
+TEST_F(SceneMeshAssetTest, ExtractsSkinnedMeshAndCopiesTheProvidedPose)
+{
+    World world = makeWorld();
+    const EntityId camera = world.createEntity(translated(0.0F, 0.0F, 6.0F)).value();
+    ASSERT_TRUE(world.setPerspectiveCamera3D(camera, fixturePerspectiveCamera()));
+    const EntityId entity = world.createEntity().value();
+    ASSERT_TRUE(world.setSkinnedMeshRenderer3D(
+        entity, fixtureSkinnedMesh(skinnedMesh_, materialA_)));
+
+    const EntityId hidden = world.createEntity().value();
+    SkinnedMeshRenderer3D hiddenMesh = fixtureSkinnedMesh({}, {});
+    hiddenMesh.visible = false;
+    ASSERT_TRUE(world.setSkinnedMeshRenderer3D(hidden, hiddenMesh));
+
+    std::array<float, Render::SkinnedMesh3DPaletteFloatsPerJoint> palette{
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        2, 3, 4, 1,
+    };
+    TestSkinnedPoseProvider poses{.palette = palette};
+    TestMeshBindings bindings{.store = &store()};
+    bindings.bind(skinnedMesh_, 7);
+    bindings.bind(materialA_, 11);
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame(Render::RenderSceneFrameParameters{
+        .primarySurfaceAspectRatio = 16.0F / 9.0F,
+    }));
+    Render::RenderSceneWriter writer = builder->writer();
+    ASSERT_TRUE(extractRenderSceneFromWorld(
+        world,
+        writer,
+        ExtractRenderSceneParams{
+            .surfaceViewport = {.pixelWidth = 1280, .pixelHeight = 720},
+            .material3DBindingResolver = bindings.materialResolver(),
+            .skinnedMesh3DBindingResolver = bindings.skinnedMeshResolver(),
+            .skinnedPose3DProvider = poses.provider(),
+        }));
+    palette[12] = 99.0F;
+
+    auto view = builder->commit();
+    ASSERT_TRUE(view.has_value()) << (view ? "" : view.error().message);
+    ASSERT_EQ(view->skinnedMeshes3D().size(), 1U);
+    ASSERT_EQ(view->skinnedMesh3DPalette().size(), palette.size());
+    EXPECT_EQ(frameResourceBindingKey(
+                  view->skinnedMeshes3D()[0].mesh,
+                  Render::FrameResourceKind::SkinnedMesh3DGeometry),
+              7U);
+    EXPECT_EQ(frameResourceBindingKey(
+                  view->skinnedMeshes3D()[0].material,
+                  Render::FrameResourceKind::Mesh3DMaterial),
+              11U);
+    EXPECT_FLOAT_EQ(view->skinnedMesh3DPalette()[12], 2.0F);
+    EXPECT_EQ(poses.lastEntity, entity);
+    EXPECT_EQ(poses.resolveCalls, 1U);
+    EXPECT_EQ(bindings.skinnedMeshResolveCalls, 1U);
+    EXPECT_EQ(bindings.materialResolveCalls, 1U);
+}
+
+TEST_F(SceneMeshAssetTest, SkinnedMeshExtractionFailsClosedForMissingOrMalformedPose)
+{
+    World world = makeWorld();
+    const EntityId entity = world.createEntity().value();
+    ASSERT_TRUE(world.setSkinnedMeshRenderer3D(
+        entity, fixtureSkinnedMesh(skinnedMesh_, materialA_)));
+    TestMeshBindings bindings{.store = &store()};
+    bindings.bind(skinnedMesh_, 7);
+    bindings.bind(materialA_, 11);
+
+    const auto extractWith = [&](SkinnedPose3DProvider provider) -> Core::Status {
+        auto builder = Render::RenderSceneBuilder::Create();
+        EXPECT_TRUE(builder.has_value());
+        if (!builder) {
+            return Core::failure(std::move(builder.error()));
+        }
+        EXPECT_TRUE(builder->beginFrame());
+        Render::RenderSceneWriter writer = builder->writer();
+        return extractRenderSceneFromWorld(
+            world,
+            writer,
+            ExtractRenderSceneParams{
+                .material3DBindingResolver = bindings.materialResolver(),
+                .skinnedMesh3DBindingResolver = bindings.skinnedMeshResolver(),
+                .skinnedPose3DProvider = provider,
+            });
+    };
+
+    const Core::Status missing = extractWith({});
+    ASSERT_FALSE(missing);
+    EXPECT_EQ(missing.error().code, SceneErrorCode::UnresolvedSkinnedPose);
+
+    std::array<float, Render::SkinnedMesh3DPaletteFloatsPerJoint - 1U> shortPalette{};
+    TestSkinnedPoseProvider shortPose{.palette = shortPalette};
+    const Core::Status malformed = extractWith(shortPose.provider());
+    ASSERT_FALSE(malformed);
+    EXPECT_EQ(malformed.error().code, SceneErrorCode::UnresolvedSkinnedPose);
+
+    std::array<float, Render::SkinnedMesh3DPaletteFloatsPerJoint> nonFinitePalette{};
+    nonFinitePalette[0] = std::numeric_limits<float>::quiet_NaN();
+    TestSkinnedPoseProvider nonFinitePose{.palette = nonFinitePalette};
+    const Core::Status nonFinite = extractWith(nonFinitePose.provider());
+    ASSERT_FALSE(nonFinite);
+    EXPECT_EQ(nonFinite.error().code, SceneErrorCode::UnresolvedSkinnedPose);
+}
+
+TEST_F(SceneMeshAssetTest, HiddenSkinnedMeshSkipsAllBindingAndPoseResolution)
+{
+    World world = makeWorld();
+    const EntityId entity = world.createEntity().value();
+    SkinnedMeshRenderer3D hidden = fixtureSkinnedMesh({}, {});
+    hidden.visible = false;
+    ASSERT_TRUE(world.setSkinnedMeshRenderer3D(entity, hidden));
+    TestMeshBindings bindings{.store = &store()};
+    TestSkinnedPoseProvider poses{};
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    ASSERT_TRUE(extractRenderSceneFromWorld(
+        world,
+        writer,
+        ExtractRenderSceneParams{
+            .material3DBindingResolver = bindings.materialResolver(),
+            .skinnedMesh3DBindingResolver = bindings.skinnedMeshResolver(),
+            .skinnedPose3DProvider = poses.provider(),
+        }));
+    EXPECT_EQ(bindings.skinnedMeshResolveCalls, 0U);
+    EXPECT_EQ(bindings.materialResolveCalls, 0U);
+    EXPECT_EQ(poses.resolveCalls, 0U);
+}
+
 TEST(SceneExtractTest, RejectsMultipleActivePerspectiveCameras)
 {
     World world = makeWorld();
@@ -3004,6 +3191,100 @@ TEST_F(SceneMeshAssetTest, ResolvesPerNodeMeshHandlesFromAssetIds)
     EXPECT_EQ(a->material, materialA_);
     EXPECT_EQ(b->mesh, meshB_);
     EXPECT_EQ(b->material, materialB_);
+}
+
+TEST_F(SceneMeshAssetTest, InstantiatesKindSpecificStaticAndSkinnedRenderers)
+{
+    World world = makeWorld();
+    const Core::AssetId staticId = fixtureAssetId(1);
+    const Core::AssetId skinnedId = fixtureAssetId(6);
+    const Core::AssetId materialId = fixtureAssetId(3);
+    const std::array nodes{
+        AssetFormat::PrefabNodeView{
+            .stableNodeId = 1,
+            .parentIndex = -1,
+            .hasMesh = true,
+            .hasMaterial = true,
+            .visible = true,
+            .meshId = staticId,
+            .materialId = materialId,
+        },
+        AssetFormat::PrefabNodeView{
+            .stableNodeId = 2,
+            .parentIndex = -1,
+            .hasMesh = true,
+            .hasMaterial = true,
+            .visible = true,
+            .meshId = skinnedId,
+            .materialId = materialId,
+        },
+    };
+    const AssetFormat::PrefabPayloadView prefab{
+        .schemaVersion = AssetFormat::PrefabWire::SchemaVersion,
+        .nodes = nodes,
+    };
+    auto created = instantiatePrefab(
+        world,
+        prefab,
+        PrefabMeshBinding{
+            .material = materialA_,
+            .resolveMesh = [=, staticMesh = meshA_, skinnedMesh = skinnedMesh_](Core::AssetId id) {
+                return id == staticId ? staticMesh : (id == skinnedId ? skinnedMesh : Asset::AssetHandle{});
+            },
+            .resolveMeshKind = [=](Core::AssetId id) {
+                return id == skinnedId ? AssetFormat::AssetKind::SkinnedMesh
+                                       : AssetFormat::AssetKind::StaticMesh;
+            },
+        });
+    ASSERT_TRUE(created.has_value()) << (created ? "" : created.error().message);
+    ASSERT_EQ(created->size(), 2U);
+    EXPECT_NE(world.meshRenderer3D((*created)[0]), nullptr);
+    EXPECT_EQ(world.skinnedMeshRenderer3D((*created)[0]), nullptr);
+    EXPECT_EQ(world.meshRenderer3D((*created)[1]), nullptr);
+    EXPECT_NE(world.skinnedMeshRenderer3D((*created)[1]), nullptr);
+}
+
+TEST_F(SceneMeshAssetTest, PrefabUnknownMeshKindRollsBackTheWholeHierarchy)
+{
+    World world = makeWorld();
+    const std::array nodes{
+        AssetFormat::PrefabNodeView{
+            .stableNodeId = 1,
+            .parentIndex = -1,
+            .hasMesh = true,
+            .hasMaterial = true,
+            .visible = true,
+            .meshId = fixtureAssetId(1),
+            .materialId = fixtureAssetId(3),
+        },
+        AssetFormat::PrefabNodeView{
+            .stableNodeId = 2,
+            .parentIndex = 0,
+            .hasMesh = true,
+            .hasMaterial = true,
+            .visible = true,
+            .meshId = fixtureAssetId(6),
+            .materialId = fixtureAssetId(3),
+        },
+    };
+    const AssetFormat::PrefabPayloadView prefab{
+        .schemaVersion = AssetFormat::PrefabWire::SchemaVersion,
+        .nodes = nodes,
+    };
+    auto created = instantiatePrefab(
+        world,
+        prefab,
+        PrefabMeshBinding{
+            .mesh = meshA_,
+            .material = materialA_,
+            .resolveMeshKind = [firstId = fixtureAssetId(1)](Core::AssetId id) {
+                return id == firstId ? AssetFormat::AssetKind::StaticMesh
+                                     : AssetFormat::AssetKind::Texture2D;
+            },
+        });
+    ASSERT_FALSE(created.has_value());
+    EXPECT_EQ(created.error().code, SceneErrorCode::InvalidComponent);
+    EXPECT_EQ(world.entityCount(), 0U);
 }
 
 TEST_F(SceneMeshAssetTest, RollsBackWhenAssetIdResolverReturnsEmptyHandle)

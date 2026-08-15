@@ -151,6 +151,63 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
 测试数量随功能增长，不作为永久契约；本轮必须直接运行对应 GoogleTest executable，并以最终 gate
 JSON 与退出码记录结果。
 
+## 3D-SKIN-001 A1-A4 定向门禁（已通过）
+
+当前代码与集中产品门禁均已闭环；`3D-SKIN-001` 已转 Done。
+
+- **A1 wire/cook/typed**：`SkinnedMeshPayloadTests.*`、`AnimationClip3DPayloadTests.*` 覆盖 writer/parser
+  round-trip、截断、保留字段、排序、时长、固定4 influence 权重和 joint 上限；`GltfCookTests.*` 覆盖
+  skin/inverse bind、child-before-parent remap、JOINTS/WEIGHTS、LINEAR/STEP sampler、CUBICSPLINE 拒绝、
+  skin 外 animation target 拒绝与 malformed fail-closed。
+- **A2 Scene/CPU pose**：`Animator3DTests.*` 覆盖层级 pose、LINEAR/STEP、Once/Loop/PingPong、暂停/停止/
+  speed、无分配 update 与失败原子性；`SceneMeshAssetTest` 的 skinned extraction 用例覆盖
+  `SkinnedMeshRenderer3D`、`SkinnedPose3DProvider`、palette 深拷贝、隐藏跳过和 missing/malformed pose
+  fail-closed；World setter 验证 static/skinned renderer 互斥且非法替换不破坏原组件。
+- **A3 Render/GPU**：`RenderSceneBuilderTest` 覆盖 packet-local palette capacity、排序/cull/deep-copy；
+  `NullRenderDeviceMeshTest`/`NullRenderDeviceTest` 覆盖 skinned upload、joint/weight 校验、kind 与 skeleton
+  对账；`BgfxOpaque3DGeometryTest` 和 shader embedded assets 覆盖 skinned frame preflight 与 GPU palette
+  vertex path。公开头由 `Animator3DHeader.cpp`、`SkinnedMeshRenderer3DHeader.cpp` 与对应 payload
+  header-isolation TU 覆盖。
+- **A4 product evidence**：`tina_sample_3d` 的 built-in witness 固定 total mesh/material=`3`、static=`2`、
+  skinned=`1`、joints=`2`、skinned Prefab instances=`3`；`--skin-animation=on|off` 都逐帧 update、extract、
+  submit，on 要求 pose fingerprint 变化，off 要求 pose fingerprint 不变且 RGB ROI 仍产生 draw。脚本
+  `RunProduct3dGate.ps1` 以 evidence schema 15 检查计数、fingerprint 稳定性、on/off 逐字节 RGB L1 与临时
+  raw capture 回收。
+
+2026-08-14 在常驻 `windows-msvc-vnext-bgfx-ui-freetype` build tree 执行
+`RunProduct3dGate.ps1 -SkipConfigure -SkipBuild`：11个 GoogleTest executable 全部 exit 0；300帧 schema 15
+主 sample exit 0，Animator pose changes=`300`、packet pose fingerprint changes=`299`，3组 mesh/material/texture
+ owner 全部 retirement Released。30帧 skin on/off scene fingerprint 各自稳定且跨模式不同，RGB L1 达到
+门槛；同轮 IBL 与 PointLight shadow 的 on/off fingerprint 也各自稳定、跨模式不同且 L1 达标。比较用 raw
+RGB 均已删除。测试数量随代码增长，不从截断日志推测未保留的 GoogleTest 汇总数量。
+
+## RENDER-002-TRANSPARENT 定向门禁（2026-08-15 已完成）
+
+常驻 `windows-msvc-vnext-bgfx-ui-freetype` build tree 已执行
+`RunProduct3dGate.ps1 -SkipConfigure`。增量 build、11个 GoogleTest executable、300帧主 sample 与全部30帧
+A/B 视觉运行均 exit 0，`RENDER-002-TRANSPARENT` 转为 Done。随后修复 cgltf 未知 `alphaMode` 静默回退
+Opaque 的边界并增量复验 `tina_asset_tests` 311/311。
+
+- **Cook/公开契约**：Material v2 与 glTF Cooker 只接受显式 `Opaque`/`Blend`，`MASK` 与未知 alpha mode
+  fail closed；Scene
+  static/skinned renderer、Prefab resolver、packet item 与 device material binding 必须携带一致 alpha intent，
+  不从 baseColor alpha 或纹理内容猜测 pass。
+- **RenderScene**：Opaque static 保持相邻实例 batch；Blend static/skinned 进入统一 back-to-front 全序，
+  等距按 stable Entity identity、kind、item index 决定。透明 draw 容量独立、固定且事务提交，超限不得发布
+  半帧；统计暴露 draw count 与 sort checksum。
+- **Backend**：Null/bgfx preflight 校验 opaque/transparent 分区、统一顺序、完整覆盖和 material alpha binding；
+  pass 固定为 CSM×4→Spot×1→Point×6→Opaque3D→Transparent3D→Sprite2D→UI。Transparent3D 使用
+  straight-alpha blend、depth test less、不写 depth；透明 draw 不投 shadow但继续接收 lighting/shadow/PBR/IBL。
+- **产品证据**：内建 schema 16 已固定 total/static/skinned mesh=`3/2/1`、Material=`4`。默认 on 以独立
+  Blend Material + 两个复用 static mesh 的交叠 witness 验证 transparent frames/static/skinned/draw=
+  `N/2/0/2`、checksum 非零且跨帧稳定；off 只省略 witness，Material 仍完成 load/bind/retire，透明字段为
+  `0/0/0/0`、checksum=`0`、stable=true。300帧 on 的 static/skinned/pose/material resolver 预期为
+  `1200/300/300/1500`，off 为 `600/300/300/900`。
+- **集中验证**：产品 gate 复用 IBL-on baseline 增加一次 `--transparency=off`，中央 RGB ROI fingerprint
+  不同、raw byte 数精确且逐字节 L1 达到 ROI pixel count 门槛；临时 raw capture 已在 `finally` 回收。
+  glTF alpha mode 边界另由 `GltfCookTests.MapsBlendAlphaModeAndRejectsUnsupportedModes` 覆盖。Docker/Linux
+  不属于本轮范围。
+
 ## Tracy Profile 定向门禁
 
 Trace backend 只在专用 Profile tree 验证，不改写常驻 Null tree，也不在功能 worktree 重建依赖：
@@ -715,7 +772,7 @@ product-3d：
   ledger 与 backend failure 保留 Lease/GPU/Entry，可重试；active Mesh/Material frame borrow 阻止 retirement；
 - Material 引用计数允许跨 Material 共享 Texture owner，并阻止 live dependency 被退休；`retireAllBindings()`
   按 Material→Texture→Mesh 关闭，析构要求全空；
-- product-3d schema 4 要求2 Mesh、2 Material、3共享 Texture 上传与 retirement，weak handle 失效数为
+- N16.4 历史 product-3d schema 4 要求2 Mesh、2 Material、3共享 Texture 上传与 retirement，weak handle 失效数为
   2/2/3，retirement records 全部 Released 且 live=0，两类 frame-resource resolver hits 为600/600，registry
   释放、GPU ledger 平衡、pixel capture 成功。
 
@@ -746,7 +803,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3d
 - 超过固定4灯上限显式 `TooManyActiveDirectionalLights`；inactive-only 发布 ambient-only snapshot；
 - `RenderSceneWriter::setMesh3DLighting()` 深拷贝调用方 span，重复/非法描述使 build 原子失败；
 - Null/bgfx submit preflight；bgfx frame snapshot 临时覆盖 device fallback，且每帧只编码一次 uniform arrays；
-- product-3d 当前 schema 14 继承 `directionalLightCount=3`、`sceneLightingFrames=300`。
+- product-3d schema 16 继续证明 `directionalLightCount=3`、`sceneLightingFrames=300`，继承同一 lighting 契约。
 
 直接验证入口为 `tina_scene_tests`、`tina_render_scene_tests`、`tina_render_bgfx_tests` 与
 `tina_sample_3d --frames=300 --frame-delay-ms=0 --ui-theme=dark --ui-theme-demo`。公开新头还由
@@ -761,7 +818,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3d
 - 有效 PerspectiveCamera3D 下的 sphere-frustum center/tangent/outside、相机 world rotation 与容量前 culling；
 - 第9个 camera-affecting light 显式 `TooManyActivePointLights3D`，无相机/0x0 surface 保留未裁剪容量；
 - RenderScene snapshot 深拷贝与统计、Null/bgfx preflight、bgfx 8槽 position/radius + color uniform 与线性径向衰减；
-- product-3d 当前 schema 14 继承 `authoredPointLight3DCount=3`、`pointLight3DCount=2`、
+- product-3d schema 16 继续证明 `authoredPointLight3DCount=3`、`pointLight3DCount=2`、
   `culledPointLight3DCount=1`、`submittedLightingFrames=300` 与 `lightingCountsStable=true`。
 
 开发阶段先定向运行 `ScenePointLight3DTest.*`、RenderScene Mesh3D lighting 与 Null/bgfx lighting filters，
@@ -778,7 +835,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3d
 - 第9个 camera-affecting light 显式 `TooManyActiveSpotLights3D`，无相机/0x0 surface 保留未裁剪容量；
 - RenderScene snapshot 深拷贝与统计、Null/bgfx preflight、bgfx 8槽 position/radius、direction/inner、
   color/outer uniform，以及 shader 的线性径向×平滑角度衰减；
-- product-3d 当前 schema 14 继承 schema 8 固化的 `authoredSpotLight3DCount=3`、`spotLight3DCount=2`、
+- product-3d schema 16 继续继承 schema 8 固化的 `authoredSpotLight3DCount=3`、`spotLight3DCount=2`、
   `culledSpotLight3DCount=1` 与 `lightingCountsStable=true`。
 
 开发阶段先定向运行 `SceneSpotLight3DTest.*`、RenderScene Mesh3D lighting 与 Null/bgfx lighting filters，
@@ -794,7 +851,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3d
 - 缺 NORMAL/UV primitive 显式 cook 失败，不发布不完整 StaticMesh；
 - Asset upload 只有 `createStaticMesh(StaticMeshUploadDesc)`，Null/bgfx 对唯一 stride、index range、generation/retirement 使用同一契约；
 - Opaque3D vertex tangent TBN 与 signed model scale handedness 由 shader/backend test 覆盖，不存在 derivative fallback；
-- product-3d schema 14 要求 complete-PBR fixture `tangentMeshesUploaded=2`。
+- product-3d schema 16 继续要求 complete-PBR fixture `tangentMeshesUploaded=2`。
 
 统一验证阶段先定向运行 StaticMesh payload、`GltfCookTests.*Tangent*`、GPU mesh upload/bgfx shader filters，
 再构建 `tina_sample_3d` 做30帧 smoke；完整 TEST-003 gate 最后执行。
@@ -805,7 +862,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3d
 - Scene extraction 在稳定 directional-light 排序后深拷贝 `directionalLightIndex`；scheduler 固定生成4个 `CascadedDirectionalShadowDepth` pass（`cascadeIndex=0..3`），并证明 atlas clear 不消费 primary-surface clear；
 - bgfx projection math 覆盖四个 camera slice、backend homogeneous depth/origin；resource contract 以非默认 cascade tile 覆盖2×2 sampled D16 atlas、失败回滚与销毁；view rect 与 PCF texel size 由同一 immutable device config 驱动；
 - shader contract 覆盖独立 depth program、receiver normal/depth bias、shadowed directional slot 与 3×3 PCF；
-- product-3d schema 14 继承 `cascadedDirectionalShadowCount=1`、`submittedCascadedDirectionalShadowCount=1` 及 authored/submitted cascade constant=`4`；GPU 四级联实绘由 bgfx contract 与最终产品视觉 gate 证明。
+- product-3d schema 16 继续要求 `cascadedDirectionalShadowCount=1`、`submittedCascadedDirectionalShadowCount=1` 及 authored/submitted cascade constant=`4`；GPU 四级联实绘由 bgfx contract 与最终产品视觉 gate 证明。
 
 ## SpotLight3D shadow
 
@@ -819,7 +876,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3d
   不消费 primary-surface clear；
 - bgfx projection/resource contract 覆盖完整公开 cone 合法域、非默认配置尺寸的 sampled D16 map、失败回滚
   与销毁；view rect 与 PCF texel size 由同一 immutable device config 驱动，shader contract 覆盖独立 depth pass、匹配 spot slot、normal/depth bias 与3×3 PCF；
-- product-3d schema 14 要求 `authoredSpotLightShadowCount=1`、`submittedSpotLightShadowCount=1`，并由
+- product-3d schema 16 继续要求 `authoredSpotLightShadowCount=1`、`submittedSpotLightShadowCount=1`，并由
   `DeviceCapture` 比较 committed descriptor，证明整个提交区间保持稳定。
 
 开发阶段只跑 Scene/RenderScene/scheduler/Null/bgfx shadow filters 与30帧 product smoke；完整 TEST-003
@@ -837,7 +894,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3d
   `+X/-X/+Y/-Y/+Z/-Z`，独立 shadow-map clear 不消费 primary-surface clear；
 - bgfx projection/resource contract 以非默认配置覆盖六张同尺寸的 sampled D16 map、失败原子回滚与销毁；
   view rect 与 PCF texel size 由同一 immutable device config 驱动，shader contract 覆盖 dominant-axis 面选择、匹配 point slot、normal/depth bias 与3×3 PCF；
-- product-3d schema 14 默认要求 `authoredPointLightShadowCount=1`、
+- product-3d schema 16 默认要求 `authoredPointLightShadowCount=1`、
   `submittedPointLightShadowCount=1`；`--point-shadow=off` 要求两者为0。Windows gate 复用 IBL-on
   baseline，要求 on/off 中央 3D RGB ROI fingerprint 不同且逐像素 L1 大于0。
 
@@ -864,7 +921,7 @@ resource contract 使用非默认尺寸证明 D16 resource 接线，view rect �
   retirement marker 与 shutdown ledger；
 - shader contract 固化 Cook-Torrance GGX direct light、diffuse irradiance、roughness specular LOD、BRDF LUT
   split-sum、intensity 与 world-Y rotation，同时保留 directional 3×3 PCF；
-- product-3d schema 14 的 `--ibl=on` 要求 `cookedEnvironmentMap=true`、上传/IBL bind/clear/retire=
+- product-3d schema 16 的 `--ibl=on` 继续要求 `cookedEnvironmentMap=true`、上传/IBL bind/clear/retire=
   `1/1/1/1`；`--ibl=off` 仍要求上传/retire=`1/1`，但 bind/clear=`0/0`，两种模式都固定
   diffuse/specular/mips/BRDF=`2/4/3/4×4`；
 - Windows product gate 另以30帧执行 on×2 + off×2，同模式 RGBA8 fingerprint 必须稳定，on/off fingerprint
@@ -1134,7 +1191,7 @@ area-light interval union 或跨 GPU exact golden 证据。
 | `tina_sample_2d` | Catalog TileMap v3 root + deferred TileMapChunk、NavigationGrid2D v1 与 Fx2D v1；每帧 visual=10/collision=20 demand→pump→commit；Navigation live derive 与 Cooked data bit-exact，并验证 weighted A*、dynamic blocker、分步取消与 revision；PhysicsNavigationSync2D 将显式注册 crate body 的 transform/AABB 同步为 dynamic blocker；SpriteAnimation notify 被产品消费；Fx2D factory 驱动 fixed-capacity Particle/Trail；Physics 含 Box/Circle/Capsule/ConvexPolygon/Chain、sensor enter/exit 与 Distance/Revolute/Prismatic joint；Sprite2D 使用 packet-local `FrameResourceRef`；schema 29 保留既有证据并新增 navigation physics sync counters | Registry transaction/PMR/owner-thread 压力、跨 GPU lighting golden、可见 FX effect graph/GPU simulation、更多高级约束、Linux |
 | `tina_sample_3d_extraction` | CPU/Null Perspective/Mesh extraction | 可见 GPU 3D |
 | `tina_sample_3d_infrastructure` | procedural fixture Cube/depth/instance | Cooked product mesh |
-| `tina_sample_3d` | 双 mesh glTF→MikkTSpace tangent→Cooked P3N3T4UV2→AssetSystem→Prefab/Scene weak Handle→engine-provided、State-owned Mesh3D registry→packet-local geometry/material ref→bgfx tangent TBN；evidence schema 14、`tangentMeshesUploaded=2`、Cook-Torrance GGX + cooked EnvironmentMap split-sum IBL、固定4级联 CSM config authored/submitted=`1`、固定 SpotLight/PointLight shadow authored/submitted=`1/1`、startup-only shadow extent、point-shadow on/off ROI 像素差分、实时 framebuffer aspect、响应式 right rail/footer、Mesh/Material/3共享 Texture owner handoff 与 retirement ledger、原子 baseColor/MR/normal/factors binding、3个 World DirectionalLight3D，以及 PointLight3D/SpotLight3D 各自 authored/committed/culled=`3/2/1` 的逐帧 snapshot、成熟 retained controls、Asset ListView/Scene TreeView、Dark→Light→Dark、final-present RGBA8 capture 与单机 exact golden | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、跨 GPU golden |
+| `tina_sample_3d` | 双静态 mesh glTF→MikkTSpace tangent→Cooked P3N3T4UV2，以及独立 SkinnedMesh/AnimationClip3D witness→`Animator3D` CPU pose→packet palette→bgfx GPU skinning；AssetSystem→Prefab/Scene weak Handle→engine-provided、State-owned Mesh3D registry→packet-local geometry/material ref；evidence schema 16 固定 total/static/skinned mesh=`3/2/1`、Material=`4`、joints=`2`、skinned Prefab instances=`3`、`tangentMeshesUploaded=2`，并以独立 Blend Material、双 static transparent witness、统一 back-to-front sort checksum 与 transparency on/off RGB 差分证明 Transparent3D；同时继承 skin-animation、IBL、CSM/Spot/Point shadow、实时 framebuffer aspect、响应式 UI、资源 retirement、逐帧 lighting snapshot、Dark→Light→Dark 与 final-present capture | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、跨 GPU golden |
 
 `tina_sample_2d` 是唯一产品 2D target；中间迁移名 `tina_sample_2d_tilemap_bgfx` 已删除。
 
@@ -1419,13 +1476,16 @@ on/off 或 soft/hard 像素与结构 fingerprint 均存在差异。
 N4 另以 committed soft count=2 和 soft/hard 四跑差分覆盖连续 penumbra；N5 再断言默认
 `normalMappedSpriteCount=1`、3份 Texture lifecycle，并调用 normal on/off 四跑差分脚本。
 
-Windows 同轮 product-3d 拓扑由 `tools/windows/RunProduct3dGate.ps1` 固化（TEST-003）：默认使用
+2026-08-14 已通过的 Windows 同轮 product-3d 拓扑由 `tools/windows/RunProduct3dGate.ps1` 固化
+（TEST-003）：当时默认使用
 `windows-msvc-vnext-bgfx-ui-freetype`，直接构建并运行 Core、Scene、AssetFormat、Asset、bgfx Render、
 UI、Runtime UI、UI Render bridge 与 FreeType 测试，再执行300帧
-`--ui-theme=dark --ui-theme-demo --ibl=on --point-shadow=on`。
-schema 14 同时断言双 mesh、`tangentMeshesUploaded=2`、固定4级联 CSM config authored/submitted=`1` 且
+`--ui-theme=dark --ui-theme-demo --ibl=on --point-shadow=on --skin-animation=on`。
+schema 15 同时断言 total/static/skinned mesh=`3/2/1`、material=`3`、`tangentMeshesUploaded=2`、
+uploaded/palette joint count=`2/2`、skinned Prefab instances=`3`、300帧 Animator update/pose change 与
+skinned draw；还断言固定4级联 CSM config authored/submitted=`1` 且
 cascade constant=`4`；这些字段只证明配置与固定级联数，GPU 四级联实绘由 bgfx contract 与最终产品视觉 gate 证明；另断言
-一份 cooked EnvironmentMap 的上传/IBL bind/clear/retire 与2/4/3/4×4尺寸、3个跨 Material 共享 PBR Texture、packet-local resolver 600/600、Mesh/Texture
+一份 cooked EnvironmentMap 的上传/IBL bind/clear/retire 与2/4/3/4×4尺寸、3个跨 Material 共享 PBR Texture、packet-local static/skinned/pose/material resolver=`600/300/300/900`、Mesh/Texture
 retirement records Released、3个 directional light、PointLight3D/SpotLight3D 各自
 authored/committed/culled=`3/2/1`、固定 SpotLight/PointLight shadow authored/submitted=`1/1` 且 committed descriptor 跨帧稳定、
 `sceneLightingFrames=300`/`submittedLightingFrames=300`/registry 生命周期、7 Panel/13 Label、Button/Checkbox/Slider/ProgressBar/
@@ -1442,11 +1502,18 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --fra
 自校验 EnvironmentMap upload/retire 与条件 bind/clear。脚本要求同模式全帧及中央 3D RGB ROI fingerprint/
 通道总量稳定、on/off ROI fingerprint 不同，并通过自动回收的临时 raw RGB capture 计算逐像素 L1；L1 至少
 达到 ROI 每像素 1 个 code value。alpha、顶部标题、右侧 inspector 与底部状态栏不参与 IBL 可见性结论。
-随后 gate 复用一份 `--ibl=on --point-shadow=on` baseline，再执行一次 `--point-shadow=off`；off run 的
+随后 gate 复用一份 `--ibl=on --point-shadow=on --skin-animation=on` baseline，执行一次
+`--skin-animation=off`：off 仍需 Animator update/skinned draw=`30/30`、palette joints=`2`，但 pose changes=`0`；
+on/off ROI fingerprint 必须不同，raw RGB 长度必须精确等于 pixel count×3，逐字节 L1 至少为 ROI pixel count。
+再执行一次 `--point-shadow=off`；off run 的
 point shadow authored/submitted 必须为 `0/0`，两次中央 3D RGB ROI fingerprint 必须不同且逐像素 L1 大于0。
-两类比较的临时 raw RGB capture 都在脚本退出前回收。
+三类比较的临时 raw RGB capture 都在脚本 `finally` 退出前回收。
 
-本次实际两轮验收命令（两轮均为脚本默认 `windows-msvc-vnext-bgfx-ui-freetype` topology）：
+2026-08-15 已通过 schema 16：所有既有运行默认增加 `--transparency=on` 并校验统一透明提交统计；另增加
+一次 `--transparency=off`，复用 IBL-on baseline 完成 RGB fingerprint 与逐字节 L1 差分。透明 comparison
+与既有 IBL、skin-animation、point-shadow capture 均由同一个 `finally` 路径回收。
+
+历史 N16.4 的两轮验收命令（两轮均为脚本默认 `windows-msvc-vnext-bgfx-ui-freetype` topology）：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3dGate.ps1 `

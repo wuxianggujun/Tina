@@ -97,7 +97,8 @@ cookAndStageIncrementalCatalogPackage(std::string_view stagingRootUtf8,
 //   audioclip <32hexId> <sampleRate> <channels> <frameCount> sine <freqHz>
 //   audioclip <32hexId> file <relativeOrAbsolute.wav>  // PCM16 WAV only (M11-A20)
 //   staticmesh <32hexId> cube                          // canonical unit cube (M11-E1)
-//   material <32hexId> unlit <r> <g> <b> [a] [texId]   // optional Texture2D dep (M11-E4/E5)
+//   material <32hexId> unlit [opaque|blend] <r> <g> <b> [a] [texId]
+//     // omitted alpha mode defaults to opaque; optional Texture2D dep (M11-E4/E5)
 //   prefab <32hexId> root [mesh32hex] [material32hex]  // single-root Prefab (M11-E6b)
 //   tileset <32hexId> <texture32hexId> <tilePxW> <tilePxH>
 //   tile <localId> <materialFlags> <u0> <v0> <u1> <v1>   // after tileset; ends at next non-tile

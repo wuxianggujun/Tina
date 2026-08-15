@@ -1,6 +1,6 @@
 #include <tina/render/RenderPassScheduler.hpp>
 
-static_assert(Tina::Render::RenderPassSchedule::MaximumPassCount == 15U);
+static_assert(Tina::Render::RenderPassSchedule::MaximumPassCount == 16U);
 static_assert(Tina::Render::RenderPassKind::SpotLightShadowDepth !=
               Tina::Render::RenderPassKind::Opaque3D);
 static_assert(Tina::Render::RenderPassResource::SpotLightShadowMap !=

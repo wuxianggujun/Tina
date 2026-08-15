@@ -9,6 +9,7 @@
 
 #include <array>
 #include <limits>
+#include <span>
 
 namespace Tina::Tests {
 namespace {
@@ -170,6 +171,39 @@ void releaseTestPin(void* userData) noexcept
             .material = material,
             .stableEntityKey = 1,
             .localBounds = {.radius = 1.0F},
+        }); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    return builder.commit();
+}
+
+[[nodiscard]] Core::Result<Render::RenderSceneView> oneSkinnedMeshScene(
+    Render::RenderSceneBuilder& builder,
+    Render::FrameResourceRef mesh,
+    Render::FrameResourceRef material,
+    std::span<const float> palette)
+{
+    if (auto status = builder.beginFrame({.primarySurfaceAspectRatio = 1.0F}); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    Render::RenderSceneWriter writer = builder.writer();
+    if (auto status = writer.setPerspectiveCamera(Render::RenderPerspectiveCameraInput{
+            .stableCameraKey = 1,
+            .verticalFovDegrees = 60.0F,
+            .nearPlaneMeters = 0.1F,
+            .farPlaneMeters = 100.0F,
+        }); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    if (auto status = writer.addSkinnedMesh3D(Render::RenderSkinnedMesh3DInput{
+            .mesh = mesh,
+            .material = material,
+            .stableEntityKey = 1,
+            .localBounds = {.radius = 1.0F},
+            .paletteColumnMajorJointMatrices = palette,
         }); !status)
     {
         return Core::failure(std::move(status.error()));
@@ -699,6 +733,108 @@ TEST(NullRenderDeviceTest, RejectsOutOfRangeMeshResourcesOnSuspendedFrameBeforeS
     });
     ASSERT_TRUE(skipped.has_value());
     EXPECT_EQ(skipped->kind, Render::RenderFrameSubmissionKind::SkippedSuspendedSurface);
+}
+
+TEST(NullRenderDeviceTest, SkinnedSubmissionRequiresMatchingBoundSkeletonAndResourceKind)
+{
+    auto device = createDevice();
+    ASSERT_NE(device, nullptr);
+    std::array<float, 36> vertices{
+        0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0,
+        1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0,
+        0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1,
+    };
+    std::array<u16, 12> jointIndices{};
+    const std::array<u16, 12> jointWeights{
+        65535, 0, 0, 0,
+        65535, 0, 0, 0,
+        65535, 0, 0, 0,
+    };
+    const std::array<u16, 3> indices{0, 1, 2};
+    auto skinnedGpu = device->createSkinnedMesh(Render::SkinnedMeshUploadDesc{
+        .vertexCount = 3,
+        .indexCount = 3,
+        .jointCount = 1,
+        .vertices = vertices,
+        .jointIndices = jointIndices,
+        .jointWeights = jointWeights,
+        .indices = indices,
+    });
+    ASSERT_TRUE(skinnedGpu.has_value()) << (skinnedGpu ? "" : skinnedGpu.error().message);
+    auto staticGpu = device->createStaticMesh(Render::StaticMeshUploadDesc{
+        .vertexCount = 3,
+        .indexCount = 3,
+        .vertices = vertices,
+        .indices = indices,
+    });
+    ASSERT_TRUE(staticGpu.has_value()) << (staticGpu ? "" : staticGpu.error().message);
+    ASSERT_TRUE(device->setMesh3DBinding(7U, *skinnedGpu));
+    ASSERT_TRUE(device->setMesh3DBinding(8U, *staticGpu));
+
+    constexpr std::array<float, Render::SkinnedMesh3DPaletteFloatsPerJoint> IdentityPalette{
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1,
+    };
+    const auto submitWith = [&](Render::FrameResourceKind meshKind,
+                                u32 meshKey,
+                                std::span<const float> palette,
+                                u64 frameIndex)
+        -> Core::Result<Render::RenderFrameSubmission> {
+        u32 releaseCount = 0;
+        Render::RenderFramePacket packet;
+        EXPECT_TRUE(packet.beginFrame(frameIndex));
+        const Render::FrameResourceRef mesh =
+            internResource(packet, meshKind, meshKey, releaseCount);
+        const Render::FrameResourceRef material = internResource(
+            packet, Render::FrameResourceKind::Mesh3DMaterial, 22, releaseCount);
+        auto builderResult = Render::RenderSceneBuilder::Create(Render::RenderSceneCapacity{
+            .mesh3DItemCapacity = 1,
+            .mesh3DBatchCapacity = 1,
+            .skinnedMesh3DItemCapacity = 1,
+        });
+        EXPECT_TRUE(builderResult.has_value());
+        if (!builderResult)
+        {
+            return Core::failure(std::move(builderResult.error()));
+        }
+        Render::RenderSceneBuilder builder = std::move(*builderResult);
+        auto scene = oneSkinnedMeshScene(builder, mesh, material, palette);
+        EXPECT_TRUE(scene.has_value());
+        if (!scene)
+        {
+            return Core::failure(std::move(scene.error()));
+        }
+        return device->submitFrame(Render::RenderFrame{
+            .frameIndex = frameIndex,
+            .resources = packet.resourceTableView(),
+            .primaryWorldScene = *scene,
+        });
+    };
+
+    auto wrongKind = submitWith(
+        Render::FrameResourceKind::Mesh3DGeometry, 7U, IdentityPalette, 0U);
+    ASSERT_FALSE(wrongKind.has_value());
+    EXPECT_EQ(wrongKind.error().code, Render::RenderErrorCode::InvalidFrameResource);
+
+    auto staticBinding = submitWith(
+        Render::FrameResourceKind::SkinnedMesh3DGeometry, 8U, IdentityPalette, 0U);
+    ASSERT_FALSE(staticBinding.has_value());
+    EXPECT_EQ(staticBinding.error().code, Render::RenderErrorCode::InvalidFrameResource);
+
+    std::array<float, 2U * Render::SkinnedMesh3DPaletteFloatsPerJoint> twoJointPalette{};
+    auto mismatchedPalette = submitWith(
+        Render::FrameResourceKind::SkinnedMesh3DGeometry, 7U, twoJointPalette, 0U);
+    ASSERT_FALSE(mismatchedPalette.has_value());
+    EXPECT_EQ(mismatchedPalette.error().code, Render::RenderErrorCode::InvalidFrameResource);
+
+    auto accepted = submitWith(
+        Render::FrameResourceKind::SkinnedMesh3DGeometry, 7U, IdentityPalette, 0U);
+    ASSERT_TRUE(accepted.has_value()) << (accepted ? "" : accepted.error().message);
+    ASSERT_TRUE(device->present());
+    ASSERT_TRUE(device->destroyStaticMesh(*skinnedGpu));
+    ASSERT_TRUE(device->destroyStaticMesh(*staticGpu));
 }
 
 TEST(NullRenderDeviceTest, RunsThreeHundredFramesWithoutGpuResources)

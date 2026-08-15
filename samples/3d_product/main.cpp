@@ -29,11 +29,13 @@
 #include <tina/runtime/PrimaryWindowUI.hpp>
 #include <tina/runtime/RunExitReason.hpp>
 #include <tina/scene/ExtractRenderScene.hpp>
+#include <tina/scene/Animator3D.hpp>
 #include <tina/scene/DirectionalLight3D.hpp>
 #include <tina/scene/MeshRenderer3D.hpp>
 #include <tina/scene/PerspectiveCamera3D.hpp>
 #include <tina/scene/PointLight3D.hpp>
 #include <tina/scene/PrefabInstantiate.hpp>
+#include <tina/scene/SkinnedMeshRenderer3D.hpp>
 #include <tina/scene/SpotLight3D.hpp>
 #include <tina/scene/World.hpp>
 
@@ -48,6 +50,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -73,6 +76,7 @@ inline constexpr u64 DefaultFrameCount = 300;
 inline constexpr u32 DefaultFrameDelayMilliseconds = 0;
 inline constexpr u32 DefaultWindowLogicalWidth = 1280;
 inline constexpr u32 DefaultWindowLogicalHeight = 720;
+inline constexpr u32 TransparentWitnessCount = 2;
 // Khronos MetalRoughSpheres* is a mesh-per-sphere MR grid (often 50–100+ meshes).
 inline constexpr u32 MaxProductMeshSlots = 128;
 
@@ -132,6 +136,26 @@ enum class PointLightShadowMode {
     return mode == PointLightShadowMode::On ? "on" : "off";
 }
 
+enum class SkinAnimationMode {
+    On,
+    Off,
+};
+
+[[nodiscard]] constexpr std::string_view skinAnimationModeName(SkinAnimationMode mode) noexcept
+{
+    return mode == SkinAnimationMode::On ? "on" : "off";
+}
+
+enum class TransparencyMode {
+    On,
+    Off,
+};
+
+[[nodiscard]] constexpr std::string_view transparencyModeName(TransparencyMode mode) noexcept
+{
+    return mode == TransparencyMode::On ? "on" : "off";
+}
+
 struct SampleOptions final {
     u64 targetFrameCount = DefaultFrameCount;
     u32 frameDelayMilliseconds = DefaultFrameDelayMilliseconds;
@@ -146,6 +170,8 @@ struct SampleOptions final {
     Tina::Sample3D::Product3DUITheme initialUiTheme = Tina::Sample3D::Product3DUITheme::Dark;
     ImageBasedLightingMode imageBasedLightingMode = ImageBasedLightingMode::On;
     PointLightShadowMode pointLightShadowMode = PointLightShadowMode::On;
+    SkinAnimationMode skinAnimationMode = SkinAnimationMode::On;
+    TransparencyMode transparencyMode = TransparencyMode::On;
     bool uiThemeDemo = false;
     bool help = false;
 };
@@ -167,6 +193,8 @@ struct LifecycleCounters final {
     u64 meshAssetHandlesPublished = 0;
     u64 materialAssetHandlesPublished = 0;
     u64 meshFrameResourceResolverHits = 0;
+    u64 skinnedMeshFrameResourceResolverHits = 0;
+    u64 skinnedPoseProviderHits = 0;
     u64 materialFrameResourceResolverHits = 0;
     u64 meshBindingsRegistered = 0;
     u64 materialBindingsRegistered = 0;
@@ -182,6 +210,16 @@ struct LifecycleCounters final {
     u64 meshAssetHandlesInvalidated = 0;
     u64 materialAssetHandlesInvalidated = 0;
     u64 textureAssetHandlesInvalidated = 0;
+    u64 animationClipAssetHandlesPublished = 0;
+    u64 animationClipAssetHandlesInvalidated = 0;
+    u64 skinnedPrefabAssetHandlesPublished = 0;
+    u64 skinnedPrefabAssetHandlesInvalidated = 0;
+    u64 animatorUpdates = 0;
+    u64 animatorPoseChanges = 0;
+    u32 animatorJointCount = 0;
+    u32 skinnedPrefabInstances = 0;
+    u32 authoredTransparentStaticWitnessCount = 0;
+    bool transparentWitnessMaterialBound = false;
     bool cookedEnvironmentMap = false;
     bool imageBasedLightingConfigured = false;
     bool meshBound = false;
@@ -306,6 +344,7 @@ struct ProductMeshSlot final {
     Tina::Asset::AssetHandle metallicRoughnessTextureAsset{};
     Tina::Asset::AssetHandle normalTextureAsset{};
     Tina::Render::RenderLinearColor materialColor{.red = 0.2F, .green = 0.6F, .blue = 0.9F, .alpha = 1.0F};
+    Tina::Render::Mesh3DAlphaMode alphaMode = Tina::Render::Mesh3DAlphaMode::Opaque;
     float metallicFactor = 0.0F;
     float roughnessFactor = 1.0F;
     float meshBoundsRadius = 1.75F;
@@ -314,6 +353,7 @@ struct ProductMeshSlot final {
     Tina::Core::AssetId textureId{};
     Tina::Core::AssetId metallicRoughnessTextureId{};
     Tina::Core::AssetId normalTextureId{};
+    Tina::AssetFormat::AssetKind meshKind = Tina::AssetFormat::AssetKind::Invalid;
 };
 
 struct ProductTextureAsset final {
@@ -328,12 +368,23 @@ struct Product3DResources final {
     std::filesystem::path catalogRoot{};
     Tina::Asset::AssetHandle prefabAsset{};
     Tina::Core::AssetId prefabId{};
+    Tina::Asset::AssetHandle skinnedPrefabAsset{};
+    Tina::Core::AssetId skinnedPrefabId{};
+    Tina::Asset::AssetHandle animationClipAsset{};
+    Tina::Core::AssetId animationClipId{};
+    Tina::Asset::AssetHandle transparentMaterialAsset{};
+    Tina::Core::AssetId transparentMaterialId{};
     std::optional<Tina::Asset::CookedAssetFile> environmentMapAsset{};
     Tina::Core::AssetId environmentMapId{};
     std::array<ProductMeshSlot, MaxProductMeshSlots> meshes{};
     std::array<ProductTextureAsset, MaxProductMeshSlots * 3U> textures{};
     u32 meshSlotCount = 0;
+    u32 staticMeshSlotCount = 0;
+    u32 skinnedMeshSlotCount = 0;
+    u32 witnessSkinnedMeshSlot = MaxProductMeshSlots;
     u32 textureAssetCount = 0;
+    u32 blendMaterialCount = 0;
+    bool hasDedicatedSkinnedPrefab = false;
     bool externalGltf = false;
     bool completePbrFixture = false;
     std::string gltfSourcePath{};
@@ -347,6 +398,33 @@ struct Product3DResources final {
     bytes[0] = static_cast<std::byte>(0x3DU);
     bytes[14] = static_cast<std::byte>(0xFFU);
     bytes[15] = static_cast<std::byte>(0xFEU);
+    return bytes;
+}
+
+[[nodiscard]] Tina::Core::AssetId::Bytes skinnedPrefabIdBytes() noexcept
+{
+    Tina::Core::AssetId::Bytes bytes{};
+    bytes[0] = static_cast<std::byte>(0x3DU);
+    bytes[14] = static_cast<std::byte>(0xFFU);
+    bytes[15] = static_cast<std::byte>(0xFDU);
+    return bytes;
+}
+
+[[nodiscard]] Tina::Core::AssetId::Bytes animationClipIdBytes() noexcept
+{
+    Tina::Core::AssetId::Bytes bytes{};
+    bytes[0] = static_cast<std::byte>(0x3DU);
+    bytes[14] = static_cast<std::byte>(0xFFU);
+    bytes[15] = static_cast<std::byte>(0xFCU);
+    return bytes;
+}
+
+[[nodiscard]] Tina::Core::AssetId::Bytes transparentMaterialIdBytes() noexcept
+{
+    Tina::Core::AssetId::Bytes bytes{};
+    bytes[0] = static_cast<std::byte>(0x3DU);
+    bytes[14] = static_cast<std::byte>(0xFFU);
+    bytes[15] = static_cast<std::byte>(0xFBU);
     return bytes;
 }
 
@@ -413,6 +491,131 @@ struct Product3DResources final {
     "uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AACAPwAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AACAPwAAAAAAAIA/AAAAAAEAAAACAAAAAAAAAAEAAAACAAAA"
   }]
 })json";
+}
+
+[[nodiscard]] std::string_view productSkinnedGltfJson() noexcept
+{
+    return R"json({
+  "asset":{"version":"2.0"},
+  "scene":0,
+  "scenes":[{"nodes":[0]}],
+  "nodes":[
+    {"children":[1]},
+    {"children":[2]},
+    {"mesh":0,"skin":0,"translation":[-2.5,0.0,0.0],"scale":[2.5,2.5,2.5]}
+  ],
+  "skins":[{"joints":[1,0],"inverseBindMatrices":7}],
+  "meshes":[{"primitives":[{
+    "attributes":{"POSITION":0,"NORMAL":1,"TEXCOORD_0":2,"TANGENT":3,"JOINTS_0":4,"WEIGHTS_0":5},
+    "indices":6,"mode":4,"material":0
+  }]}],
+  "materials":[{"doubleSided":true,"pbrMetallicRoughness":{
+    "baseColorFactor":[0.12,0.78,0.55,1.0],"metallicFactor":0.15,"roughnessFactor":0.48
+  }}],
+  "animations":[{"samplers":[{"input":8,"output":9,"interpolation":"LINEAR"}],
+    "channels":[{"sampler":0,"target":{"node":1,"path":"translation"}}]}],
+  "accessors":[
+    {"bufferView":0,"componentType":5126,"count":3,"type":"VEC3"},
+    {"bufferView":1,"componentType":5126,"count":3,"type":"VEC3"},
+    {"bufferView":2,"componentType":5126,"count":3,"type":"VEC2"},
+    {"bufferView":3,"componentType":5126,"count":3,"type":"VEC4"},
+    {"bufferView":4,"componentType":5123,"count":3,"type":"VEC4"},
+    {"bufferView":5,"componentType":5126,"count":3,"type":"VEC4"},
+    {"bufferView":6,"componentType":5123,"count":3,"type":"SCALAR"},
+    {"bufferView":7,"componentType":5126,"count":2,"type":"MAT4"},
+    {"bufferView":8,"componentType":5126,"count":2,"type":"SCALAR"},
+    {"bufferView":9,"componentType":5126,"count":2,"type":"VEC3"}
+  ],
+  "bufferViews":[
+    {"buffer":0,"byteOffset":0,"byteLength":36},
+    {"buffer":0,"byteOffset":36,"byteLength":36},
+    {"buffer":0,"byteOffset":72,"byteLength":24},
+    {"buffer":0,"byteOffset":96,"byteLength":48},
+    {"buffer":0,"byteOffset":144,"byteLength":24},
+    {"buffer":0,"byteOffset":168,"byteLength":48},
+    {"buffer":0,"byteOffset":216,"byteLength":6},
+    {"buffer":0,"byteOffset":224,"byteLength":128},
+    {"buffer":0,"byteOffset":352,"byteLength":8},
+    {"buffer":0,"byteOffset":360,"byteLength":24}
+  ],
+  "buffers":[{"byteLength":384,"uri":"geometry.bin"}]
+})json";
+}
+
+[[nodiscard]] std::vector<unsigned char> productSkinnedBufferBytes()
+{
+    std::vector<unsigned char> bytes(384U, 0U);
+    const std::array<float, 9> positions{0, 0, 0, 1, 0, 0, 0, 1, 0};
+    const std::array<float, 9> normals{0, 0, 1, 0, 0, 1, 0, 0, 1};
+    const std::array<float, 6> uv{0, 0, 1, 0, 0, 1};
+    const std::array<float, 12> tangents{1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1};
+    // skin.joints is [child, root]; cooker remaps these source indices to [root, child].
+    const std::array<Tina::Core::u16, 12> joints{1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    const std::array<float, 12> weights{1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0};
+    const std::array<Tina::Core::u16, 3> indices{0, 1, 2};
+    std::array<float, 32> inverseBind{};
+    inverseBind[0] = 1.0F;
+    inverseBind[5] = 1.0F;
+    inverseBind[10] = 1.0F;
+    inverseBind[15] = 1.0F;
+    inverseBind[16] = 1.0F;
+    inverseBind[21] = 1.0F;
+    inverseBind[26] = 1.0F;
+    inverseBind[31] = 1.0F;
+    const std::array<float, 2> times{0, 1};
+    const std::array<float, 6> translations{0, 0, 0, 0, 0.75F, 0};
+    std::memcpy(bytes.data() + 0, positions.data(), sizeof(positions));
+    std::memcpy(bytes.data() + 36, normals.data(), sizeof(normals));
+    std::memcpy(bytes.data() + 72, uv.data(), sizeof(uv));
+    std::memcpy(bytes.data() + 96, tangents.data(), sizeof(tangents));
+    std::memcpy(bytes.data() + 144, joints.data(), sizeof(joints));
+    std::memcpy(bytes.data() + 168, weights.data(), sizeof(weights));
+    std::memcpy(bytes.data() + 216, indices.data(), sizeof(indices));
+    std::memcpy(bytes.data() + 224, inverseBind.data(), sizeof(inverseBind));
+    std::memcpy(bytes.data() + 352, times.data(), sizeof(times));
+    std::memcpy(bytes.data() + 360, translations.data(), sizeof(translations));
+    return bytes;
+}
+
+[[nodiscard]] Tina::Core::Status writeSkinnedGltfFixture(
+    const std::filesystem::path& workRoot,
+    std::filesystem::path& outGltfPath)
+{
+    const std::filesystem::path skinRoot = workRoot / "skinned";
+    std::error_code error;
+    if (!std::filesystem::create_directories(skinRoot, error) || error)
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Io,
+                                   "failed to create temporary skinned glTF fixture directory");
+    }
+    const auto geometry = productSkinnedBufferBytes();
+    std::ofstream binary(skinRoot / "geometry.bin", std::ios::binary);
+    if (!binary.good())
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Io,
+                                   "failed to write temporary skinned glTF geometry");
+    }
+    binary.write(reinterpret_cast<const char*>(geometry.data()),
+                 static_cast<std::streamsize>(geometry.size()));
+    if (!binary.good())
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Io,
+                                   "failed to finish temporary skinned glTF geometry");
+    }
+    outGltfPath = skinRoot / "product_skinned.gltf";
+    std::ofstream document(outGltfPath, std::ios::binary);
+    if (!document.good())
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Io,
+                                   "failed to write temporary skinned glTF document");
+    }
+    document << productSkinnedGltfJson();
+    if (!document.good())
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Io,
+                                   "failed to finish temporary skinned glTF document");
+    }
+    return Tina::Core::success();
 }
 
 #if defined(TINA_COMPLETE_PBR_GLTF_FIXTURE)
@@ -487,19 +690,21 @@ void printUsage()
         << "  --frame-delay-ms=N      sleep N ms per frame (default 0)\n"
         << "  --width=N               initial logical window width (default 1280)\n"
         << "  --height=N              initial logical window height (default 720)\n"
-        << "  --gltf=<path>           cook external .gltf/.glb from disk (omit = built-in two-mesh fixture)\n"
+        << "  --gltf=<path>           cook an external static .gltf/.glb scene (omit = built-in PBR fixture)\n"
         << "  --gltf <path>           same as --gltf=<path>\n"
         << "  --ui-theme=dark|light   select the initial retained UI theme (default dark)\n"
         << "  --ui-theme-demo         exercise initial -> alternate -> initial theme in UI phase\n"
         << "  --ibl=on|off            bind or leave unbound the uploaded EnvironmentMap (default on)\n"
         << "  --point-shadow=on|off   author the fixed PointLight shadow (default on)\n"
+        << "  --skin-animation=on|off advance or pause the skin witness Animator3D (default on)\n"
+        << "  --transparency=on|off   submit or omit the overlapping Blend witness (default on)\n"
         << "  --expect-pixel-fingerprint=<32 lowercase hex chars>\n"
         << "                           require an exact machine-local RGBA8 frame match\n"
         << "  --scene-rgb-output=<path> write the captured central RGB ROI as raw bytes\n"
         << "  --help, -h              print this help\n"
         << "\n"
         << "External path is opt-in. Runtime never parses glTF; only the cooker (cgltf) does.\n"
-        << "Unsupported glTF features (multi-primitive mesh, Draco, skin, morph, ...) fail with\n"
+        << "Unsupported glTF features (multi-primitive mesh, Draco, morph, ...) fail with\n"
         << "structured JSON on stderr (status=error, code, message, optional context).\n";
 }
 
@@ -519,6 +724,8 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
     constexpr std::string_view UiThemePrefix = "--ui-theme=";
     constexpr std::string_view ImageBasedLightingPrefix = "--ibl=";
     constexpr std::string_view PointLightShadowPrefix = "--point-shadow=";
+    constexpr std::string_view SkinAnimationPrefix = "--skin-animation=";
+    constexpr std::string_view TransparencyPrefix = "--transparency=";
     constexpr std::string_view PixelFingerprintPrefix = "--expect-pixel-fingerprint=";
     constexpr std::string_view SceneRgbOutputPrefix = "--scene-rgb-output=";
     SampleOptions options;
@@ -530,6 +737,8 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
     bool hasUiTheme = false;
     bool hasImageBasedLightingMode = false;
     bool hasPointLightShadowMode = false;
+    bool hasSkinAnimationMode = false;
+    bool hasTransparencyMode = false;
     bool hasPixelFingerprint = false;
     bool hasSceneRgbOutput = false;
 
@@ -631,6 +840,32 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
             options.pointLightShadowMode =
                 mode == "on" ? PointLightShadowMode::On : PointLightShadowMode::Off;
             hasPointLightShadowMode = true;
+        }
+        else if (argument.starts_with(SkinAnimationPrefix))
+        {
+            const std::string_view mode = argument.substr(SkinAnimationPrefix.size());
+            if (hasSkinAnimationMode || (mode != "on" && mode != "off"))
+            {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::InvalidArgument,
+                    "--skin-animation must appear once with on or off");
+            }
+            options.skinAnimationMode =
+                mode == "on" ? SkinAnimationMode::On : SkinAnimationMode::Off;
+            hasSkinAnimationMode = true;
+        }
+        else if (argument.starts_with(TransparencyPrefix))
+        {
+            const std::string_view mode = argument.substr(TransparencyPrefix.size());
+            if (hasTransparencyMode || (mode != "on" && mode != "off"))
+            {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::InvalidArgument,
+                    "--transparency must appear once with on or off");
+            }
+            options.transparencyMode =
+                mode == "on" ? TransparencyMode::On : TransparencyMode::Off;
+            hasTransparencyMode = true;
         }
         else if (argument.starts_with(PixelFingerprintPrefix))
         {
@@ -817,23 +1052,92 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
     }
     counters.gltfCooked = true;
 
-    std::array<Tina::Core::AssetId, MaxProductMeshSlots> cookedMeshIds{};
-    std::array<Tina::Core::AssetId, MaxProductMeshSlots> cookedMaterialIds{};
-    u32 meshIdCount = 0;
-    u32 materialIdCount = 0;
     Tina::Core::AssetId cookedPrefabId{};
     for (const auto& asset : request->assets)
     {
-        if (asset.assetKind == Tina::AssetFormat::AssetKind::StaticMesh)
+        if (asset.assetKind == Tina::AssetFormat::AssetKind::Prefab)
+        {
+            cookedPrefabId = asset.assetId;
+            break;
+        }
+    }
+    if (!cookedPrefabId)
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                   "primary glTF cook did not yield a Prefab");
+    }
+    if (std::ranges::any_of(request->assets, [](const Tina::Asset::CatalogCookAssetSpec& asset) {
+            return asset.assetKind == Tina::AssetFormat::AssetKind::SkinnedMesh;
+        }))
+    {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::InvalidArgument,
+            "the product --gltf scene must be static while the dedicated skin witness owns the Animator3D mapping");
+    }
+
+    std::filesystem::path skinnedGltfPath;
+    if (auto status = writeSkinnedGltfFixture(resources.workRoot, skinnedGltfPath); !status)
+    {
+        return status;
+    }
+    auto skinnedRequest = Tina::Asset::cookGltfFileToCatalogRequest(
+        toUtf8(skinnedGltfPath), Tina::AssetFormat::TargetPlatform::WindowsX64,
+        Tina::Asset::GltfCookIds{});
+    if (!skinnedRequest)
+    {
+        Tina::Core::Error error = std::move(skinnedRequest.error());
+        error.addContext("cookProductSkinnedFixture", toUtf8(skinnedGltfPath));
+        return Tina::Core::failure(std::move(error));
+    }
+    Tina::Core::AssetId cookedSkinnedPrefabId{};
+    Tina::Core::AssetId cookedAnimationClipId{};
+    Tina::Core::AssetId cookedWitnessSkinnedMeshId{};
+    u32 witnessSkinnedMeshCount = 0;
+    for (const auto& asset : skinnedRequest->assets)
+    {
+        if (asset.assetKind == Tina::AssetFormat::AssetKind::SkinnedMesh)
+        {
+            ++witnessSkinnedMeshCount;
+            cookedWitnessSkinnedMeshId = asset.assetId;
+        }
+        else if (asset.assetKind == Tina::AssetFormat::AssetKind::AnimationClip3D)
+        {
+            cookedAnimationClipId = asset.assetId;
+        }
+        else if (asset.assetKind == Tina::AssetFormat::AssetKind::Prefab)
+        {
+            cookedSkinnedPrefabId = asset.assetId;
+        }
+    }
+    if (witnessSkinnedMeshCount != 1U || !cookedAnimationClipId || !cookedSkinnedPrefabId)
+    {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::Internal,
+            "product skin fixture must cook one SkinnedMesh, one AnimationClip3D, and one Prefab");
+    }
+    request->assets.insert(request->assets.end(),
+                           std::make_move_iterator(skinnedRequest->assets.begin()),
+                           std::make_move_iterator(skinnedRequest->assets.end()));
+
+    std::array<Tina::Core::AssetId, MaxProductMeshSlots> cookedMeshIds{};
+    std::array<Tina::AssetFormat::AssetKind, MaxProductMeshSlots> cookedMeshKinds{};
+    std::array<Tina::Core::AssetId, MaxProductMeshSlots> cookedMaterialIds{};
+    u32 meshIdCount = 0;
+    u32 materialIdCount = 0;
+    for (const auto& asset : request->assets)
+    {
+        if (asset.assetKind == Tina::AssetFormat::AssetKind::StaticMesh ||
+            asset.assetKind == Tina::AssetFormat::AssetKind::SkinnedMesh)
         {
             if (meshIdCount >= MaxProductMeshSlots)
             {
                 Tina::Core::Error error{Tina::Core::CoreErrorCode::CapacityExceeded,
-                                        "glTF cook produced more StaticMesh assets than product slot cap"};
+                                        "glTF cook produced more mesh assets than product slot cap"};
                 error.addContext("maxProductMeshSlots", std::to_string(MaxProductMeshSlots));
                 return Tina::Core::failure(std::move(error));
             }
-            cookedMeshIds[meshIdCount++] = asset.assetId;
+            cookedMeshIds[meshIdCount] = asset.assetId;
+            cookedMeshKinds[meshIdCount++] = asset.assetKind;
         }
         else if (asset.assetKind == Tina::AssetFormat::AssetKind::Material)
         {
@@ -845,10 +1149,6 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
                 return Tina::Core::failure(std::move(error));
             }
             cookedMaterialIds[materialIdCount++] = asset.assetId;
-        }
-        else if (asset.assetKind == Tina::AssetFormat::AssetKind::Prefab)
-        {
-            cookedPrefabId = asset.assetId;
         }
     }
     if (meshIdCount == 0 || materialIdCount == 0 || !cookedPrefabId)
@@ -864,16 +1164,16 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
         error.addContext("materialCount", std::to_string(materialIdCount));
         return Tina::Core::failure(std::move(error));
     }
-    // Built-in fixture is the multi-mesh product gate (exactly two meshes).
-    if (!resources.externalGltf && meshIdCount != 2U)
+    // Built-in product gate keeps its existing static/PBR mesh set and adds one skin witness.
+    if (!resources.externalGltf && meshIdCount < 3U)
     {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                   "built-in fixture must cook exactly two meshes");
+                                   "built-in product fixture must cook static meshes plus a skin witness");
     }
 
     const u32 slotCount = meshIdCount;
     auto assetSystem = Tina::Asset::AssetSystem::Create({
-        .storeCapacity = static_cast<Tina::usize>(slotCount) * 5U + 1U,
+        .storeCapacity = static_cast<Tina::usize>(slotCount) * 5U + 4U,
         .memoryResource = &resources.memory,
     });
     if (!assetSystem)
@@ -889,6 +1189,21 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
         productMaterialIds[slot] = productMaterialIdForSlot(slot);
     }
     resources.prefabId = *Tina::Core::AssetId::fromBytes(prefabIdBytes());
+    resources.skinnedPrefabId = *Tina::Core::AssetId::fromBytes(skinnedPrefabIdBytes());
+    resources.animationClipId = *Tina::Core::AssetId::fromBytes(animationClipIdBytes());
+    for (u32 slot = 0; slot < slotCount; ++slot)
+    {
+        if (cookedMeshIds[slot] == cookedWitnessSkinnedMeshId)
+        {
+            resources.witnessSkinnedMeshSlot = slot;
+            break;
+        }
+    }
+    if (resources.witnessSkinnedMeshSlot >= slotCount)
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                   "product skin witness mesh slot could not be resolved");
+    }
 
     const auto rewriteId = [&](Tina::Core::AssetId id) -> Tina::Core::AssetId {
         for (u32 slot = 0; slot < slotCount; ++slot)
@@ -905,6 +1220,14 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
         if (id == cookedPrefabId)
         {
             return resources.prefabId;
+        }
+        if (id == cookedSkinnedPrefabId)
+        {
+            return resources.skinnedPrefabId;
+        }
+        if (id == cookedAnimationClipId)
+        {
+            return resources.animationClipId;
         }
         return id;
     };
@@ -976,6 +1299,40 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
                                              }),
                                  asset.dependencies.end());
     }
+
+    resources.transparentMaterialId =
+        *Tina::Core::AssetId::fromBytes(transparentMaterialIdBytes());
+    const bool transparentMaterialIdCollision =
+        std::ranges::any_of(request->assets, [&resources](const Tina::Asset::CatalogCookAssetSpec& asset) {
+            return asset.assetId == resources.transparentMaterialId;
+        });
+    if (transparentMaterialIdCollision)
+    {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::AlreadyExists,
+            "product transparent Material AssetId collides with cooked glTF output");
+    }
+    auto transparentMaterialPayload = Tina::AssetFormat::writeMaterialPayloadBytes(
+        Tina::AssetFormat::MaterialPayloadDesc{
+            .baseColorR = 1.0F,
+            .baseColorG = 1.0F,
+            .baseColorB = 1.0F,
+            .baseColorA = 0.58F,
+            .metallicFactor = 0.05F,
+            .roughnessFactor = 0.28F,
+            .doubleSided = true,
+            .alphaMode = Tina::AssetFormat::MaterialAlphaMode::Blend,
+        });
+    if (!transparentMaterialPayload)
+    {
+        return Tina::Core::failure(std::move(transparentMaterialPayload.error()));
+    }
+    request->assets.push_back(Tina::Asset::CatalogCookAssetSpec{
+        .assetKind = Tina::AssetFormat::AssetKind::Material,
+        .assetId = resources.transparentMaterialId,
+        .assetTypeVersion = Tina::AssetFormat::MaterialWire::SchemaVersion,
+        .payload = std::move(*transparentMaterialPayload),
+    });
 
     resources.environmentMapId = Tina::Sample3D::productEnvironmentMapAssetId();
     const bool environmentIdCollision =
@@ -1066,6 +1423,7 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
         ProductMeshSlot& productMesh = resources.meshes[slot];
         productMesh.meshId = productMeshIds[slot];
         productMesh.materialId = productMaterialIds[slot];
+        productMesh.meshKind = cookedMeshKinds[slot];
 
         auto meshAsset = Tina::Asset::loadCookedAssetFromCatalog(
             toUtf8(resources.catalogRoot), *catalog, productMesh.meshId,
@@ -1074,16 +1432,41 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
         {
             return Tina::Core::failure(std::move(meshAsset.error()));
         }
-        auto meshView = Tina::Asset::parseStaticMeshFromCooked(*meshAsset);
-        if (!meshView)
+        if (productMesh.meshKind == Tina::AssetFormat::AssetKind::StaticMesh)
         {
-            return Tina::Core::failure(std::move(meshView.error()));
+            auto meshView = Tina::Asset::parseStaticMeshFromCooked(*meshAsset);
+            if (!meshView)
+            {
+                return Tina::Core::failure(std::move(meshView.error()));
+            }
+            if (meshView->vertexCount == 0 || meshView->indexCount == 0)
+            {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                           "cooked glTF StaticMesh is empty");
+            }
+            productMesh.meshBoundsRadius = meshView->boundsRadius > 0.0F ? meshView->boundsRadius : 1.75F;
+            ++resources.staticMeshSlotCount;
         }
-        if (meshView->vertexCount == 0 || meshView->indexCount == 0)
+        else if (productMesh.meshKind == Tina::AssetFormat::AssetKind::SkinnedMesh)
         {
-            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal, "cooked glTF StaticMesh is empty");
+            auto meshView = Tina::Asset::parseSkinnedMeshFromCooked(*meshAsset);
+            if (!meshView)
+            {
+                return Tina::Core::failure(std::move(meshView.error()));
+            }
+            if (meshView->empty())
+            {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                           "cooked glTF SkinnedMesh is empty");
+            }
+            productMesh.meshBoundsRadius = meshView->boundsRadius > 0.0F ? meshView->boundsRadius : 1.75F;
+            ++resources.skinnedMeshSlotCount;
         }
-        productMesh.meshBoundsRadius = meshView->boundsRadius > 0.0F ? meshView->boundsRadius : 1.75F;
+        else
+        {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "product mesh slot has an unsupported AssetKind");
+        }
         auto publishedMesh = resources.assetSystem->store().publish(std::move(*meshAsset));
         if (!publishedMesh)
         {
@@ -1110,6 +1493,13 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
             .blue = material->baseColorB,
             .alpha = material->baseColorA,
         };
+        productMesh.alphaMode = material->alphaMode == Tina::AssetFormat::MaterialAlphaMode::Blend
+            ? Tina::Render::Mesh3DAlphaMode::Blend
+            : Tina::Render::Mesh3DAlphaMode::Opaque;
+        if (productMesh.alphaMode == Tina::Render::Mesh3DAlphaMode::Blend)
+        {
+            ++resources.blendMaterialCount;
+        }
         productMesh.metallicFactor = material->metallicFactor;
         productMesh.roughnessFactor = material->roughnessFactor;
         // Cooked Material v2 deps are ordered: baseColor, metallicRoughness, normal (flag order).
@@ -1171,7 +1561,9 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
         {
             return status;
         }
-        if (!resources.externalGltf && !material->hasBaseColorTexture)
+        if (!resources.externalGltf &&
+            productMesh.meshKind == Tina::AssetFormat::AssetKind::StaticMesh &&
+            !material->hasBaseColorTexture)
         {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                        "product material missing baseColorTexture dependency");
@@ -1201,6 +1593,55 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
     }
     resources.meshSlotCount = slotCount;
 
+    auto transparentMaterialAsset = Tina::Asset::loadCookedAssetFromCatalog(
+        toUtf8(resources.catalogRoot), *catalog, resources.transparentMaterialId,
+        Tina::Asset::CookedAssetFileLoadConfig{.memoryResource = &resources.memory});
+    if (!transparentMaterialAsset)
+    {
+        return Tina::Core::failure(std::move(transparentMaterialAsset.error()));
+    }
+    auto transparentMaterial = Tina::Asset::parseMaterialFromCooked(*transparentMaterialAsset);
+    if (!transparentMaterial)
+    {
+        return Tina::Core::failure(std::move(transparentMaterial.error()));
+    }
+    if (transparentMaterial->alphaMode != Tina::AssetFormat::MaterialAlphaMode::Blend)
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                   "product transparent Material did not retain Blend alphaMode");
+    }
+    auto publishedTransparentMaterial =
+        resources.assetSystem->store().publish(std::move(*transparentMaterialAsset));
+    if (!publishedTransparentMaterial)
+    {
+        return Tina::Core::failure(std::move(publishedTransparentMaterial.error()));
+    }
+    resources.transparentMaterialAsset = *publishedTransparentMaterial;
+    ++resources.blendMaterialCount;
+    ++counters.materialAssetHandlesPublished;
+    ++counters.materialsLoaded;
+
+    auto animationClipAsset = Tina::Asset::loadCookedAssetFromCatalog(
+        toUtf8(resources.catalogRoot), *catalog, resources.animationClipId,
+        Tina::Asset::CookedAssetFileLoadConfig{.memoryResource = &resources.memory});
+    if (!animationClipAsset)
+    {
+        return Tina::Core::failure(std::move(animationClipAsset.error()));
+    }
+    auto animationClip = Tina::Asset::parseAnimationClip3DFromCooked(*animationClipAsset);
+    if (!animationClip)
+    {
+        return Tina::Core::failure(std::move(animationClip.error()));
+    }
+    auto publishedAnimationClip =
+        resources.assetSystem->store().publish(std::move(*animationClipAsset));
+    if (!publishedAnimationClip)
+    {
+        return Tina::Core::failure(std::move(publishedAnimationClip.error()));
+    }
+    resources.animationClipAsset = *publishedAnimationClip;
+    ++counters.animationClipAssetHandlesPublished;
+
     auto prefabAsset = Tina::Asset::loadCookedAssetFromCatalog(
         toUtf8(resources.catalogRoot), *catalog, resources.prefabId,
         Tina::Asset::CookedAssetFileLoadConfig{.memoryResource = &resources.memory});
@@ -1229,6 +1670,28 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
         return Tina::Core::failure(std::move(publishedPrefab.error()));
     }
     resources.prefabAsset = *publishedPrefab;
+
+    auto skinnedPrefabAsset = Tina::Asset::loadCookedAssetFromCatalog(
+        toUtf8(resources.catalogRoot), *catalog, resources.skinnedPrefabId,
+        Tina::Asset::CookedAssetFileLoadConfig{.memoryResource = &resources.memory});
+    if (!skinnedPrefabAsset)
+    {
+        return Tina::Core::failure(std::move(skinnedPrefabAsset.error()));
+    }
+    auto skinnedPrefab = Tina::Asset::parsePrefabFromCooked(*skinnedPrefabAsset);
+    if (!skinnedPrefab)
+    {
+        return Tina::Core::failure(std::move(skinnedPrefab.error()));
+    }
+    auto publishedSkinnedPrefab =
+        resources.assetSystem->store().publish(std::move(*skinnedPrefabAsset));
+    if (!publishedSkinnedPrefab)
+    {
+        return Tina::Core::failure(std::move(publishedSkinnedPrefab.error()));
+    }
+    resources.skinnedPrefabAsset = *publishedSkinnedPrefab;
+    resources.hasDedicatedSkinnedPrefab = true;
+    ++counters.skinnedPrefabAssetHandlesPublished;
     workRootCleanup.release();
     return Tina::Core::success();
 }
@@ -1243,8 +1706,13 @@ class Product3DState final : public Tina::IGameState {
 
     ~Product3DState() override
     {
+        skinnedAnimator_.reset();
+        skinnedMeshEntity_ = {};
+        skinnedPrefabEntities_.clear();
+        transparentWitnessEntities_.clear();
         world_.reset();
         prefabEntities_.clear();
+        releaseRuntimeOnlyAssets();
         releaseProductGpuResources();
     }
 
@@ -1301,7 +1769,7 @@ class Product3DState final : public Tina::IGameState {
             *device,
             Tina::Asset::Mesh3DBindingRegistryConfig{
                 .meshCapacity = resources_->meshSlotCount,
-                .materialCapacity = resources_->meshSlotCount,
+                .materialCapacity = resources_->meshSlotCount + 1U,
                 .textureCapacity = (std::max)(1U, resources_->textureAssetCount),
                 .memoryResource = &resources_->memory,
             });
@@ -1313,10 +1781,55 @@ class Product3DState final : public Tina::IGameState {
         // EngineHost discards a failed onEnter candidate without calling onExit.
         // Keep GPU resource ownership transactional until the state is fully entered.
         auto gpuRollback = Tina::Core::makeScopeExit([this]() noexcept {
+            skinnedAnimator_.reset();
+            skinnedMeshEntity_ = {};
+            skinnedPrefabEntities_.clear();
+            transparentWitnessEntities_.clear();
             world_.reset();
             prefabEntities_.clear();
             releaseProductGpuResources();
         });
+
+        if (resources_->witnessSkinnedMeshSlot >= resources_->meshSlotCount ||
+            !resources_->animationClipAsset)
+        {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "product skin witness assets are missing");
+        }
+        const ProductMeshSlot& witnessMesh =
+            resources_->meshes[resources_->witnessSkinnedMeshSlot];
+        const Tina::Asset::CookedAssetFile* witnessMeshFile =
+            resources_->assetSystem->tryGet(witnessMesh.meshAsset);
+        const Tina::Asset::CookedAssetFile* animationClipFile =
+            resources_->assetSystem->tryGet(resources_->animationClipAsset);
+        if (witnessMesh.meshKind != Tina::AssetFormat::AssetKind::SkinnedMesh ||
+            witnessMeshFile == nullptr || animationClipFile == nullptr)
+        {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "product skin witness payloads are unavailable");
+        }
+        auto witnessMeshView = Tina::Asset::parseSkinnedMeshFromCooked(*witnessMeshFile);
+        if (!witnessMeshView)
+        {
+            return Tina::Core::failure(std::move(witnessMeshView.error()));
+        }
+        auto animationClipView = Tina::Asset::parseAnimationClip3DFromCooked(*animationClipFile);
+        if (!animationClipView)
+        {
+            return Tina::Core::failure(std::move(animationClipView.error()));
+        }
+        auto animator = Tina::Scene::Animator3D::Create(
+            *witnessMeshView, *animationClipView, resources_->memory);
+        if (!animator)
+        {
+            return Tina::Core::failure(std::move(animator.error()));
+        }
+        skinnedAnimator_.emplace(std::move(*animator));
+        if (options_.skinAnimationMode == SkinAnimationMode::Off)
+        {
+            skinnedAnimator_->pause();
+        }
+        counters_->animatorJointCount = skinnedAnimator_->jointCount();
 
         if (!resources_->environmentMapAsset.has_value())
         {
@@ -1353,9 +1866,13 @@ class Product3DState final : public Tina::IGameState {
                 resources_->assetSystem->tryGet(productMesh.meshAsset);
             if (meshFile == nullptr)
             {
-                return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal, "cooked StaticMesh missing for product slot");
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                           "cooked mesh missing for product slot");
             }
-            auto mesh = Tina::Asset::uploadStaticMeshFromCooked(*device, *meshFile);
+            Tina::Core::Result<Tina::Render::GpuMeshId> mesh =
+                productMesh.meshKind == Tina::AssetFormat::AssetKind::SkinnedMesh
+                    ? Tina::Asset::uploadSkinnedMeshFromCooked(*device, *meshFile)
+                    : Tina::Asset::uploadStaticMeshFromCooked(*device, *meshFile);
             if (!mesh)
             {
                 return Tina::Core::failure(std::move(mesh.error()));
@@ -1367,7 +1884,9 @@ class Product3DState final : public Tina::IGameState {
                     (void)device->destroyStaticMesh(gpuMesh);
                 }
             });
-            auto meshBinding = mesh3DBindings_->registerMeshBinding(productMesh.meshAsset, gpuMesh);
+            auto meshBinding = productMesh.meshKind == Tina::AssetFormat::AssetKind::SkinnedMesh
+                ? mesh3DBindings_->registerSkinnedMeshBinding(productMesh.meshAsset, gpuMesh)
+                : mesh3DBindings_->registerMeshBinding(productMesh.meshAsset, gpuMesh);
             if (!meshBinding)
             {
                 return Tina::Core::failure(std::move(meshBinding.error()));
@@ -1445,12 +1964,24 @@ class Product3DState final : public Tina::IGameState {
             ++counters_->materialBindingsRegistered;
             counters_->materialFactorsBound = true;
         }
+        auto transparentMaterialBinding =
+            mesh3DBindings_->registerMaterialBinding(resources_->transparentMaterialAsset);
+        if (!transparentMaterialBinding)
+        {
+            return Tina::Core::failure(std::move(transparentMaterialBinding.error()));
+        }
+        ++counters_->materialBindingsRegistered;
+        counters_->transparentWitnessMaterialBound = true;
         counters_->meshBound = true;
         bool everyBaseTextureBound = true;
         bool everyCompletePbrTextureBound = true;
         for (u32 slot = 0; slot < resources_->meshSlotCount; ++slot)
         {
             const ProductMeshSlot& productMesh = resources_->meshes[slot];
+            if (productMesh.meshKind != Tina::AssetFormat::AssetKind::StaticMesh)
+            {
+                continue;
+            }
             everyBaseTextureBound = everyBaseTextureBound && productMesh.textureAsset;
             everyCompletePbrTextureBound =
                 everyCompletePbrTextureBound && productMesh.textureAsset &&
@@ -1556,14 +2087,12 @@ class Product3DState final : public Tina::IGameState {
         // Per-node stable AssetId resolves to weak mesh/material handles. Backend
         // binding keys are resolved only during Scene extraction.
         Product3DResources* productResources = resources_;
-        auto instances = Tina::Scene::instantiatePrefab(
-            *world_,
-            prefab->view,
-            Tina::Scene::PrefabMeshBinding{
+        Tina::Scene::PrefabMeshBinding productBinding{
                 .mesh = resources_->meshes[0].meshAsset,
                 .material = resources_->meshes[0].materialAsset,
                 .localBounds = {.radius = resources_->meshes[0].meshBoundsRadius},
                 .baseColorFactor = resources_->meshes[0].materialColor,
+                .alphaMode = resources_->meshes[0].alphaMode,
                 .resolveMesh =
                     [productResources](Tina::Core::AssetId id) -> Tina::Asset::AssetHandle {
                         for (u32 slot = 0; slot < productResources->meshSlotCount; ++slot)
@@ -1585,6 +2114,17 @@ class Product3DState final : public Tina::IGameState {
                             }
                         }
                         return {};
+                    },
+                .resolveMeshKind =
+                    [productResources](Tina::Core::AssetId id) -> Tina::AssetFormat::AssetKind {
+                        for (u32 slot = 0; slot < productResources->meshSlotCount; ++slot)
+                        {
+                            if (productResources->meshes[slot].meshId == id)
+                            {
+                                return productResources->meshes[slot].meshKind;
+                            }
+                        }
+                        return Tina::AssetFormat::AssetKind::Invalid;
                     },
                 .resolveLocalBounds =
                     [productResources](Tina::Core::AssetId id) -> Tina::Render::RenderBoundingSphereInput {
@@ -1608,7 +2148,19 @@ class Product3DState final : public Tina::IGameState {
                         }
                         return {};
                     },
-            });
+                .resolveAlphaMode =
+                    [productResources](Tina::Core::AssetId id) -> Tina::Render::Mesh3DAlphaMode {
+                        for (u32 slot = 0; slot < productResources->meshSlotCount; ++slot)
+                        {
+                            if (productResources->meshes[slot].materialId == id)
+                            {
+                                return productResources->meshes[slot].alphaMode;
+                            }
+                        }
+                        return Tina::Render::Mesh3DAlphaMode::Opaque;
+                    },
+            };
+        auto instances = Tina::Scene::instantiatePrefab(*world_, prefab->view, productBinding);
         if (!instances)
         {
             return Tina::Core::failure(std::move(instances.error()));
@@ -1626,6 +2178,47 @@ class Product3DState final : public Tina::IGameState {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                        "prefab instantiate produced fewer than two product instances");
         }
+
+        const Tina::Asset::CookedAssetFile* skinnedPrefabFile =
+            resources_->assetSystem->tryGet(resources_->skinnedPrefabAsset);
+        if (!resources_->hasDedicatedSkinnedPrefab || skinnedPrefabFile == nullptr)
+        {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "cooked skinned Prefab missing from product AssetSystem");
+        }
+        auto skinnedPrefab = Tina::Asset::parsePrefabFromCooked(*skinnedPrefabFile);
+        if (!skinnedPrefab)
+        {
+            return Tina::Core::failure(std::move(skinnedPrefab.error()));
+        }
+        auto skinnedInstances = Tina::Scene::instantiatePrefab(
+            *world_, skinnedPrefab->view, productBinding);
+        if (!skinnedInstances)
+        {
+            return Tina::Core::failure(std::move(skinnedInstances.error()));
+        }
+        skinnedPrefabEntities_ = std::move(*skinnedInstances);
+        for (const Tina::Scene::EntityId entity : skinnedPrefabEntities_)
+        {
+            if (world_->skinnedMeshRenderer3D(entity) == nullptr)
+            {
+                continue;
+            }
+            if (skinnedMeshEntity_)
+            {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::Internal,
+                    "product skin witness Prefab produced more than one skinned renderer");
+            }
+            skinnedMeshEntity_ = entity;
+        }
+        if (!skinnedMeshEntity_)
+        {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "product skin witness Prefab produced no skinned renderer");
+        }
+        counters_->skinnedPrefabInstances =
+            static_cast<u32>(skinnedPrefabEntities_.size());
 
         const bool hasBuiltInPointShadowWitness = !resources_->externalGltf;
         if (hasBuiltInPointShadowWitness)
@@ -1678,15 +2271,20 @@ class Product3DState final : public Tina::IGameState {
         float maxY = 0.0F;
         float maxZ = 0.0F;
         bool haveBounds = false;
-        for (const auto entity : prefabEntities_)
+        for (const Tina::Scene::EntityId entity : world_->liveEntities())
         {
-            const auto* mesh = world_->meshRenderer3D(entity);
+            const Tina::Scene::MeshRenderer3D* staticMesh = world_->meshRenderer3D(entity);
+            const Tina::Scene::SkinnedMeshRenderer3D* skinnedMesh =
+                world_->skinnedMeshRenderer3D(entity);
             const auto* worldXf = world_->worldTransform(entity);
-            if (mesh == nullptr || worldXf == nullptr)
+            if ((staticMesh == nullptr && skinnedMesh == nullptr) || worldXf == nullptr)
             {
                 continue;
             }
-            const float r = mesh->localBounds.radius > 0.0F ? mesh->localBounds.radius : 1.0F;
+            const float localRadius = staticMesh != nullptr
+                ? staticMesh->localBounds.radius
+                : skinnedMesh->localBounds.radius;
+            const float r = localRadius > 0.0F ? localRadius : 1.0F;
             const float sx = (std::max)(std::abs(worldXf->scale.x), 1.0e-3F);
             const float sy = (std::max)(std::abs(worldXf->scale.y), 1.0e-3F);
             const float sz = (std::max)(std::abs(worldXf->scale.z), 1.0e-3F);
@@ -1744,6 +2342,67 @@ class Product3DState final : public Tina::IGameState {
             !status)
         {
             return status;
+        }
+
+        if (options_.transparencyMode == TransparencyMode::On)
+        {
+            const ProductMeshSlot* witnessMesh = nullptr;
+            for (u32 slot = 0; slot < resources_->meshSlotCount; ++slot)
+            {
+                if (resources_->meshes[slot].meshKind == Tina::AssetFormat::AssetKind::StaticMesh)
+                {
+                    witnessMesh = &resources_->meshes[slot];
+                    break;
+                }
+            }
+            if (witnessMesh == nullptr || !resources_->transparentMaterialAsset)
+            {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::Internal,
+                    "transparent witness requires a static mesh and its Blend Material");
+            }
+
+            const float witnessScale =
+                (std::max)(radius * 0.48F / witnessMesh->meshBoundsRadius, 0.15F);
+            const std::array witnessPositions{
+                Tina::Scene::Vec3{centerX - radius * 0.08F, centerY, centerZ + radius * 0.62F},
+                Tina::Scene::Vec3{centerX + radius * 0.08F, centerY, centerZ + radius * 0.84F},
+            };
+            constexpr std::array witnessColors{
+                Tina::Render::RenderLinearColor{
+                    .red = 1.0F, .green = 0.16F, .blue = 0.05F, .alpha = 0.62F},
+                Tina::Render::RenderLinearColor{
+                    .red = 0.04F, .green = 0.62F, .blue = 1.0F, .alpha = 0.54F},
+            };
+            transparentWitnessEntities_.reserve(TransparentWitnessCount);
+            for (u32 index = 0; index < TransparentWitnessCount; ++index)
+            {
+                auto entity = world_->createEntity(Tina::Scene::LocalTransform{
+                    .position = witnessPositions[index],
+                    .scale = {witnessScale, witnessScale, witnessScale},
+                });
+                if (!entity)
+                {
+                    return Tina::Core::failure(std::move(entity.error()));
+                }
+                if (auto status = world_->setMeshRenderer3D(
+                        *entity,
+                        Tina::Scene::MeshRenderer3D{
+                            .mesh = witnessMesh->meshAsset,
+                            .material = resources_->transparentMaterialAsset,
+                            .localBounds = {.radius = witnessMesh->meshBoundsRadius},
+                            .baseColorFactor = witnessColors[index],
+                            .alphaMode = Tina::Render::Mesh3DAlphaMode::Blend,
+                            .doubleSided = true,
+                        });
+                    !status)
+                {
+                    return status;
+                }
+                transparentWitnessEntities_.push_back(*entity);
+            }
+            counters_->authoredTransparentStaticWitnessCount =
+                static_cast<u32>(transparentWitnessEntities_.size());
         }
 
         struct ProductPointLight final {
@@ -1899,8 +2558,13 @@ class Product3DState final : public Tina::IGameState {
     void onExit(Tina::GameStateExitContext&) noexcept override
     {
         platformEvents_.reset();
+        skinnedAnimator_.reset();
+        skinnedMeshEntity_ = {};
+        skinnedPrefabEntities_.clear();
+        transparentWitnessEntities_.clear();
         world_.reset();
         prefabEntities_.clear();
+        releaseRuntimeOnlyAssets();
         releaseProductGpuResources();
         ui_.release();
         ++counters_->stateExits;
@@ -1911,6 +2575,21 @@ class Product3DState final : public Tina::IGameState {
     Tina::Core::Status updateFrame(Tina::FrameUpdateContext& context) override
     {
         ++counters_->frameUpdates;
+        if (!skinnedAnimator_.has_value())
+        {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "3D product Animator3D was not initialized");
+        }
+        auto animationUpdate = skinnedAnimator_->update(Tina::Core::Duration{1.0 / 60.0});
+        if (!animationUpdate)
+        {
+            return Tina::Core::failure(std::move(animationUpdate.error()));
+        }
+        ++counters_->animatorUpdates;
+        if (animationUpdate->poseChanged)
+        {
+            ++counters_->animatorPoseChanges;
+        }
         // Animation advances once per game frame even if the scene is extracted more than once.
         if (ui_.autoRotate())
         {
@@ -1981,6 +2660,14 @@ class Product3DState final : public Tina::IGameState {
                         .userData = const_cast<Product3DState*>(this),
                         .resolve = &resolveProductMaterialBinding,
                     },
+                    .skinnedMesh3DBindingResolver = Tina::Asset::AssetFrameResourceResolver{
+                        .userData = const_cast<Product3DState*>(this),
+                        .resolve = &resolveProductSkinnedMeshBinding,
+                    },
+                    .skinnedPose3DProvider = Tina::Scene::SkinnedPose3DProvider{
+                        .userData = const_cast<Product3DState*>(this),
+                        .resolve = &resolveProductSkinnedPose,
+                    },
                     .ambientLightScale = 0.16F,
                 });
             !status)
@@ -2037,6 +2724,73 @@ class Product3DState final : public Tina::IGameState {
         return resource;
     }
 
+    [[nodiscard]] static Tina::Core::Result<Tina::Render::FrameResourceRef>
+    resolveProductSkinnedMeshBinding(
+        void* userData,
+        Tina::Asset::AssetHandle asset,
+        Tina::Render::FrameResourceSink& sink) noexcept
+    {
+        auto& self = *static_cast<Product3DState*>(userData);
+        if (!self.mesh3DBindings_.has_value())
+        {
+            return Tina::Render::FrameResourceRef{};
+        }
+        auto resource = self.mesh3DBindings_->internSkinnedMeshFrameResource(asset, sink);
+        if (!resource)
+        {
+            return Tina::Core::failure(std::move(resource.error()));
+        }
+        if (resource->hasValue())
+        {
+            ++self.counters_->skinnedMeshFrameResourceResolverHits;
+        }
+        return resource;
+    }
+
+    [[nodiscard]] static std::span<const float> resolveProductSkinnedPose(
+        void* userData, Tina::Scene::EntityId entity) noexcept
+    {
+        auto& self = *static_cast<Product3DState*>(userData);
+        if (!self.skinnedAnimator_.has_value() || entity != self.skinnedMeshEntity_)
+        {
+            return {};
+        }
+        ++self.counters_->skinnedPoseProviderHits;
+        return self.skinnedAnimator_->skinningMatrices();
+    }
+
+    void releaseRuntimeOnlyAssets() noexcept
+    {
+        if (!resources_->assetSystem.has_value())
+        {
+            return;
+        }
+        if (!animationClipReleased_ && resources_->animationClipAsset)
+        {
+            if (resources_->assetSystem->tryGet(resources_->animationClipAsset) != nullptr)
+            {
+                if (auto status = resources_->assetSystem->unload(resources_->animationClipAsset);
+                    !status)
+                {
+                    std::terminate();
+                }
+            }
+            animationClipReleased_ = true;
+        }
+        if (!skinnedPrefabReleased_ && resources_->skinnedPrefabAsset)
+        {
+            if (resources_->assetSystem->tryGet(resources_->skinnedPrefabAsset) != nullptr)
+            {
+                if (auto status = resources_->assetSystem->unload(resources_->skinnedPrefabAsset);
+                    !status)
+                {
+                    std::terminate();
+                }
+            }
+            skinnedPrefabReleased_ = true;
+        }
+    }
+
     void releaseProductGpuResources() noexcept
     {
         Tina::Render::IRenderDevice* device = capture_ != nullptr ? capture_->get() : nullptr;
@@ -2091,6 +2845,7 @@ class Product3DState final : public Tina::IGameState {
     Tina::Sample3D::Product3DUI ui_;
     std::optional<Tina::PlatformEventSubscription> platformEvents_{};
     std::optional<Tina::Asset::Mesh3DBindingRegistry> mesh3DBindings_{};
+    std::optional<Tina::Scene::Animator3D> skinnedAnimator_{};
     Tina::Render::GpuEnvironmentMapId environmentMap_{};
     bool imageBasedLightingBound_ = false;
     mutable std::optional<Tina::Scene::World> world_{};
@@ -2098,7 +2853,12 @@ class Product3DState final : public Tina::IGameState {
     Tina::Platform::FramebufferExtent framebufferExtent_{DefaultWindowLogicalWidth, DefaultWindowLogicalHeight};
     float rotationHalfAngle_ = 0.0F;
     Tina::Scene::EntityId cameraEntity_{};
+    Tina::Scene::EntityId skinnedMeshEntity_{};
     std::vector<Tina::Scene::EntityId> prefabEntities_{};
+    std::vector<Tina::Scene::EntityId> skinnedPrefabEntities_{};
+    std::vector<Tina::Scene::EntityId> transparentWitnessEntities_{};
+    bool animationClipReleased_ = false;
+    bool skinnedPrefabReleased_ = false;
 };
 
 class Product3DApplication final : public Tina::IGameApplication {
@@ -2132,8 +2892,14 @@ class Product3DApplication final : public Tina::IGameApplication {
     config.primaryWindow.initialLogicalExtent = {options.windowLogicalWidth, options.windowLogicalHeight};
     config.primaryWindow.initiallyVisible = true;
     // MetalRoughSpheres-scale external models: one item/batch per mesh instance.
-    config.renderSceneCapacities.mesh3DItemCapacity = MaxProductMeshSlots;
+    config.renderSceneCapacities.mesh3DItemCapacity =
+        MaxProductMeshSlots + TransparentWitnessCount;
     config.renderSceneCapacities.mesh3DBatchCapacity = MaxProductMeshSlots;
+    config.renderSceneCapacities.skinnedMesh3DItemCapacity = 1U;
+    config.renderSceneCapacities.transparent3DDrawCapacity =
+        MaxProductMeshSlots + TransparentWitnessCount;
+    config.renderSceneCapacities.skinnedMesh3DPaletteJointCapacity =
+        Tina::Render::MaxSkinnedMesh3DPaletteJointCount;
     return config;
 }
 
@@ -2233,7 +2999,28 @@ class Product3DApplication final : public Tina::IGameApplication {
         return 1;
     }
     const u32 expectedMeshes = resources.meshSlotCount;
+    const u32 expectedStaticMeshes = resources.staticMeshSlotCount;
+    const u32 expectedSkinnedMeshes = resources.skinnedMeshSlotCount;
     const u64 tangentMeshesUploaded = capture.tangentMeshesUploaded();
+    const u64 skinnedMeshesUploaded = capture.skinnedMeshesUploaded();
+    const u64 submittedSkinnedMesh3DFrames = capture.submittedSkinnedMesh3DFrames();
+    const u32 submittedSkinnedMesh3DCount = capture.submittedSkinnedMesh3DCount();
+    const u32 visibleSkinnedMesh3DCount = capture.visibleSkinnedMesh3DCount();
+    const u32 submittedSkinnedPaletteJointCount = capture.submittedSkinnedPaletteJointCount();
+    const u64 firstSubmittedSkinnedPoseFingerprint =
+        capture.firstSubmittedSkinnedPoseFingerprint();
+    const u64 submittedSkinnedPoseFingerprint = capture.submittedSkinnedPoseFingerprint();
+    const u64 submittedSkinnedPoseFingerprintChanges =
+        capture.submittedSkinnedPoseFingerprintChanges();
+    const u64 submittedTransparent3DFrames = capture.submittedTransparent3DFrames();
+    const u32 submittedTransparentStaticMesh3DCount =
+        capture.submittedTransparentStaticMesh3DCount();
+    const u32 submittedTransparentSkinnedMesh3DCount =
+        capture.submittedTransparentSkinnedMesh3DCount();
+    const u32 submittedTransparent3DDrawCount = capture.submittedTransparent3DDrawCount();
+    const u64 submittedTransparent3DSortOrderChecksum =
+        capture.submittedTransparent3DSortOrderChecksum();
+    const bool transparent3DSortOrderStable = capture.transparent3DSortOrderStable();
     const u64 environmentMapsUploaded = capture.environmentMapsUploaded();
     const u64 imageBasedLightingBindings = capture.imageBasedLightingBindings();
     const u64 imageBasedLightingClears = capture.imageBasedLightingClears();
@@ -2274,6 +3061,12 @@ class Product3DApplication final : public Tina::IGameApplication {
             ++counters.materialAssetHandlesInvalidated;
         }
     }
+    if (assetSystem.state(resources.transparentMaterialAsset) ==
+            Tina::Asset::AssetLogicalState::Unloaded &&
+        assetSystem.tryGet(resources.transparentMaterialAsset) == nullptr)
+    {
+        ++counters.materialAssetHandlesInvalidated;
+    }
     for (u32 index = 0; index < resources.textureAssetCount; ++index)
     {
         const Tina::Asset::AssetHandle texture = resources.textures[index].handle;
@@ -2283,10 +3076,20 @@ class Product3DApplication final : public Tina::IGameApplication {
             ++counters.textureAssetHandlesInvalidated;
         }
     }
+    if (assetSystem.state(resources.animationClipAsset) == Tina::Asset::AssetLogicalState::Unloaded &&
+        assetSystem.tryGet(resources.animationClipAsset) == nullptr)
+    {
+        ++counters.animationClipAssetHandlesInvalidated;
+    }
+    if (assetSystem.state(resources.skinnedPrefabAsset) == Tina::Asset::AssetLogicalState::Unloaded &&
+        assetSystem.tryGet(resources.skinnedPrefabAsset) == nullptr)
+    {
+        ++counters.skinnedPrefabAssetHandlesInvalidated;
+    }
     const Tina::usize assetStoreActiveCount =
         assetSystem.store().activeCount();
     const bool prefabAssetResident = assetSystem.tryGet(resources.prefabAsset) != nullptr;
-    const bool multiMesh = expectedMeshes >= 2U;
+    const bool multiMesh = expectedStaticMeshes >= 2U;
     const bool texturesOk = resources.externalGltf
                                 ? true
                                 : (resources.completePbrFixture
@@ -2294,15 +3097,36 @@ class Product3DApplication final : public Tina::IGameApplication {
                                           resources.textureAssetCount >= 3U &&
                                           counters.materialMrTextureBound && counters.materialNormalTextureBound &&
                                           counters.materialFactorsBound)
-                                       : (counters.texturesUploaded >= expectedMeshes));
+                                       : (counters.texturesUploaded == resources.textureAssetCount &&
+                                          resources.textureAssetCount >= 1U));
     const bool pixelGoldenChecked = !options.expectPixelFingerprint.empty();
     const bool pixelGoldenMatched =
         !pixelGoldenChecked || counters.pixelFingerprint == options.expectPixelFingerprint;
     const bool sceneRgbOutputRequested = !options.sceneRgbOutputPath.empty();
-    const bool imageBasedLightingEnabled =
-        options.imageBasedLightingMode == ImageBasedLightingMode::On;
-    const bool pointLightShadowEnabled =
-        options.pointLightShadowMode == PointLightShadowMode::On;
+    const bool imageBasedLightingEnabled = options.imageBasedLightingMode == ImageBasedLightingMode::On;
+    const bool pointLightShadowEnabled = options.pointLightShadowMode == PointLightShadowMode::On;
+    const bool transparencyEnabled = options.transparencyMode == TransparencyMode::On;
+    const u32 expectedTransparentStaticWitnessCount = transparencyEnabled ? TransparentWitnessCount : 0U;
+    const u64 expectedTransparent3DFrames = transparencyEnabled ? options.targetFrameCount : 0U;
+    const bool observedExternalTransparentDraw = submittedTransparent3DDrawCount != 0U;
+    const bool externalTransparentActivityValid =
+        observedExternalTransparentDraw
+            ? (submittedTransparent3DFrames != 0U && submittedTransparent3DFrames <= options.targetFrameCount &&
+               submittedTransparent3DSortOrderChecksum != 0U)
+            : (submittedTransparent3DFrames == 0U && submittedTransparent3DSortOrderChecksum == 0U);
+    const bool transparentCaptureValid =
+        resources.externalGltf
+            ? (submittedTransparent3DDrawCount ==
+                   submittedTransparentStaticMesh3DCount + submittedTransparentSkinnedMesh3DCount &&
+               externalTransparentActivityValid &&
+               (!transparencyEnabled || (submittedTransparent3DFrames == options.targetFrameCount &&
+                                         submittedTransparentStaticMesh3DCount >= TransparentWitnessCount)))
+            : (submittedTransparent3DFrames == expectedTransparent3DFrames &&
+               submittedTransparentStaticMesh3DCount == expectedTransparentStaticWitnessCount &&
+               submittedTransparentSkinnedMesh3DCount == 0U &&
+               submittedTransparent3DDrawCount == expectedTransparentStaticWitnessCount &&
+               (submittedTransparent3DSortOrderChecksum != 0U) == transparencyEnabled && transparent3DSortOrderStable);
+    const u32 expectedMaterials = expectedMeshes + 1U;
     const u32 expectedPointLightShadowCount = pointLightShadowEnabled ? 1U : 0U;
     const u64 expectedImageBasedLightingTransitions = imageBasedLightingEnabled ? 1U : 0U;
     const auto& ui = counters.ui;
@@ -2330,19 +3154,48 @@ class Product3DApplication final : public Tina::IGameApplication {
         collectionDemoValid && ui.inheritedChromeVerified && ui.controlsInitialStateVerified &&
         ui.responsiveLayoutVerified && ui.progressUpdates >= options.targetFrameCount &&
         ui.finalProgress >= 99.9F;
+    const u64 expectedStaticMeshResolverHits =
+        static_cast<u64>(options.targetFrameCount) *
+        (expectedStaticMeshes + expectedTransparentStaticWitnessCount);
+    const u64 expectedSkinnedMeshResolverHits =
+        static_cast<u64>(options.targetFrameCount) * expectedSkinnedMeshes;
+    const u64 expectedMaterialResolverHits =
+        static_cast<u64>(options.targetFrameCount) *
+        (expectedMeshes + expectedTransparentStaticWitnessCount);
+    const bool skinAnimationEnabled = options.skinAnimationMode == SkinAnimationMode::On;
+    const u64 expectedAnimatorPoseChanges =
+        skinAnimationEnabled ? options.targetFrameCount : 0U;
+    const u64 expectedSkinnedPoseFingerprintChanges =
+        skinAnimationEnabled && options.targetFrameCount > 0U
+            ? static_cast<u64>(options.targetFrameCount - 1U)
+            : 0U;
     if (*runResult != Tina::RunExitReason::GameRequestedExitAfterCurrentFrame ||
         counters.frameUpdates != options.targetFrameCount ||
         counters.renderExtractions != options.targetFrameCount ||
         counters.sceneLightingFrames != options.targetFrameCount || counters.stateEnters != 1 ||
         counters.stateExits != 1 || counters.applicationShutdowns != 1 || !uiValid ||
-        counters.meshesUploaded != expectedMeshes || counters.materialsLoaded != expectedMeshes || !texturesOk ||
-        (resources.completePbrFixture && tangentMeshesUploaded != expectedMeshes) ||
+        counters.meshesUploaded != expectedMeshes || counters.materialsLoaded != expectedMaterials || !texturesOk ||
+        tangentMeshesUploaded != expectedStaticMeshes ||
+        skinnedMeshesUploaded != expectedSkinnedMeshes || expectedSkinnedMeshes != 1U ||
+        capture.uploadedSkinnedJointCount() != counters.animatorJointCount ||
+        counters.animationClipAssetHandlesPublished != 1U ||
+        counters.animationClipAssetHandlesInvalidated != 1U ||
+        counters.skinnedPrefabAssetHandlesPublished != 1U ||
+        counters.skinnedPrefabAssetHandlesInvalidated != 1U ||
+        counters.animatorUpdates != options.targetFrameCount ||
+        counters.animatorPoseChanges != expectedAnimatorPoseChanges ||
+        counters.animatorJointCount != 2U || counters.skinnedPrefabInstances != 3U ||
+        submittedSkinnedMesh3DFrames != options.targetFrameCount ||
+        submittedSkinnedMesh3DCount != 1U || visibleSkinnedMesh3DCount != 1U ||
+        submittedSkinnedPaletteJointCount != counters.animatorJointCount ||
+        firstSubmittedSkinnedPoseFingerprint == 0 || submittedSkinnedPoseFingerprint == 0 ||
+        submittedSkinnedPoseFingerprintChanges != expectedSkinnedPoseFingerprintChanges ||
         counters.meshAssetHandlesPublished != expectedMeshes
-        || counters.materialAssetHandlesPublished != expectedMeshes
+        || counters.materialAssetHandlesPublished != expectedMaterials
         || counters.meshBindingsRegistered != expectedMeshes
-        || counters.materialBindingsRegistered != expectedMeshes
+        || counters.materialBindingsRegistered != expectedMaterials
         || counters.meshBindingsReleased != expectedMeshes
-        || counters.materialBindingsReleased != expectedMeshes
+        || counters.materialBindingsReleased != expectedMaterials
         || counters.meshRetirementsAccepted != counters.meshesUploaded
         || counters.textureRetirementsAccepted != counters.texturesUploaded
         || counters.meshRetirementRecords != counters.meshesUploaded
@@ -2351,7 +3204,7 @@ class Product3DApplication final : public Tina::IGameApplication {
         || counters.textureRetirementReleased != counters.texturesUploaded
         || counters.retirementRecordsLive != 0
         || counters.meshAssetHandlesInvalidated != expectedMeshes
-        || counters.materialAssetHandlesInvalidated != expectedMeshes
+        || counters.materialAssetHandlesInvalidated != expectedMaterials
         || counters.textureAssetHandlesInvalidated != counters.texturesUploaded
         || !counters.cookedEnvironmentMap
         || counters.imageBasedLightingConfigured != imageBasedLightingEnabled
@@ -2364,8 +3217,14 @@ class Product3DApplication final : public Tina::IGameApplication {
         || capture.environmentSpecularMipCount() != Tina::Sample3D::ProductEnvironmentSpecularMipCount
         || capture.environmentBrdfWidth() != Tina::Sample3D::ProductEnvironmentBrdfSize
         || capture.environmentBrdfHeight() != Tina::Sample3D::ProductEnvironmentBrdfSize
-        || counters.meshFrameResourceResolverHits == 0
-        || counters.materialFrameResourceResolverHits == 0
+        || counters.meshFrameResourceResolverHits != expectedStaticMeshResolverHits
+        || counters.skinnedMeshFrameResourceResolverHits != expectedSkinnedMeshResolverHits
+        || counters.skinnedPoseProviderHits != expectedSkinnedMeshResolverHits
+        || counters.materialFrameResourceResolverHits != expectedMaterialResolverHits
+        || resources.blendMaterialCount == 0U
+        || !counters.transparentWitnessMaterialBound
+        || counters.authoredTransparentStaticWitnessCount != expectedTransparentStaticWitnessCount
+        || !transparentCaptureValid
         || assetStoreActiveCount != 1U || !prefabAssetResident ||
         !counters.meshBound || !counters.materialTextureBound || counters.catalogCooked != 1 || !counters.gltfCooked ||
         !counters.prefabInstantiated || counters.prefabNodes == 0 || counters.prefabInstances == 0 ||
@@ -2397,11 +3256,27 @@ class Product3DApplication final : public Tina::IGameApplication {
         (sceneRgbOutputRequested && !counters.sceneRgbOutputWritten) ||
         !pixelGoldenMatched)
     {
-        std::cerr << "{\"status\":\"error\",\"sample\":\"tina_sample_3d\","
+        std::cerr << "{\"status\":\"error\",\"sample\":\"tina_sample_3d\",\"evidenceSchema\":16,"
                      "\"message\":\"lifecycle counters did not match\","
                      "\"frames\":"
                   << counters.frameUpdates << ",\"meshesUploaded\":" << counters.meshesUploaded
                   << ",\"tangentMeshesUploaded\":" << tangentMeshesUploaded
+                  << ",\"skinnedMeshesUploaded\":" << skinnedMeshesUploaded
+                  << ",\"uploadedSkinnedJointCount\":" << capture.uploadedSkinnedJointCount()
+                  << ",\"animatorJointCount\":" << counters.animatorJointCount
+                  << ",\"animatorUpdates\":" << counters.animatorUpdates
+                  << ",\"animatorPoseChanges\":" << counters.animatorPoseChanges
+                  << ",\"submittedSkinnedMesh3DFrames\":" << submittedSkinnedMesh3DFrames
+                  << ",\"submittedSkinnedMesh3DCount\":" << submittedSkinnedMesh3DCount
+                  << ",\"visibleSkinnedMesh3DCount\":" << visibleSkinnedMesh3DCount
+                  << ",\"submittedSkinnedPaletteJointCount\":"
+                  << submittedSkinnedPaletteJointCount
+                  << ",\"firstSubmittedSkinnedPoseFingerprint\":"
+                  << firstSubmittedSkinnedPoseFingerprint
+                  << ",\"submittedSkinnedPoseFingerprint\":"
+                  << submittedSkinnedPoseFingerprint
+                  << ",\"submittedSkinnedPoseFingerprintChanges\":"
+                  << submittedSkinnedPoseFingerprintChanges
                   << ",\"materialsLoaded\":" << counters.materialsLoaded
                   << ",\"meshAssetHandlesPublished\":" << counters.meshAssetHandlesPublished
                   << ",\"materialAssetHandlesPublished\":" << counters.materialAssetHandlesPublished
@@ -2419,7 +3294,18 @@ class Product3DApplication final : public Tina::IGameApplication {
                   << ",\"meshAssetHandlesInvalidated\":" << counters.meshAssetHandlesInvalidated
                   << ",\"materialAssetHandlesInvalidated\":" << counters.materialAssetHandlesInvalidated
                   << ",\"textureAssetHandlesInvalidated\":" << counters.textureAssetHandlesInvalidated
+                  << ",\"animationClipAssetHandlesPublished\":"
+                  << counters.animationClipAssetHandlesPublished
+                  << ",\"animationClipAssetHandlesInvalidated\":"
+                  << counters.animationClipAssetHandlesInvalidated
+                  << ",\"skinnedPrefabAssetHandlesPublished\":"
+                  << counters.skinnedPrefabAssetHandlesPublished
+                  << ",\"skinnedPrefabAssetHandlesInvalidated\":"
+                  << counters.skinnedPrefabAssetHandlesInvalidated
                   << ",\"meshFrameResourceResolverHits\":" << counters.meshFrameResourceResolverHits
+                  << ",\"skinnedMeshFrameResourceResolverHits\":"
+                  << counters.skinnedMeshFrameResourceResolverHits
+                  << ",\"skinnedPoseProviderHits\":" << counters.skinnedPoseProviderHits
                   << ",\"materialFrameResourceResolverHits\":" << counters.materialFrameResourceResolverHits
                   << ",\"assetStoreActiveCount\":" << assetStoreActiveCount
                   << ",\"prefabAssetResident\":" << (prefabAssetResident ? "true" : "false")
@@ -2431,6 +3317,26 @@ class Product3DApplication final : public Tina::IGameApplication {
                   << imageBasedLightingModeName(options.imageBasedLightingMode) << "\""
                   << ",\"pointLightShadowMode\":\""
                   << pointLightShadowModeName(options.pointLightShadowMode) << "\""
+                  << ",\"skinAnimationMode\":\""
+                  << skinAnimationModeName(options.skinAnimationMode) << "\""
+                  << ",\"transparencyMode\":\""
+                  << transparencyModeName(options.transparencyMode) << "\""
+                  << ",\"blendMaterialCount\":" << resources.blendMaterialCount
+                  << ",\"authoredTransparentStaticWitnessCount\":"
+                  << counters.authoredTransparentStaticWitnessCount
+                  << ",\"transparentWitnessMaterialBound\":"
+                  << (counters.transparentWitnessMaterialBound ? "true" : "false")
+                  << ",\"submittedTransparent3DFrames\":" << submittedTransparent3DFrames
+                  << ",\"submittedTransparentStaticMesh3DCount\":"
+                  << submittedTransparentStaticMesh3DCount
+                  << ",\"submittedTransparentSkinnedMesh3DCount\":"
+                  << submittedTransparentSkinnedMesh3DCount
+                  << ",\"submittedTransparent3DDrawCount\":"
+                  << submittedTransparent3DDrawCount
+                  << ",\"submittedTransparent3DSortOrderChecksum\":"
+                  << submittedTransparent3DSortOrderChecksum
+                  << ",\"transparent3DSortOrderStable\":"
+                  << (transparent3DSortOrderStable ? "true" : "false")
                   << ",\"imageBasedLightingConfigured\":"
                   << (counters.imageBasedLightingConfigured ? "true" : "false")
                   << ",\"imageBasedLightingBindings\":" << imageBasedLightingBindings
@@ -2486,8 +3392,11 @@ class Product3DApplication final : public Tina::IGameApplication {
                   << ",\"prefabInstantiated\":" << (counters.prefabInstantiated ? "true" : "false")
                   << ",\"prefabNodes\":" << counters.prefabNodes
                   << ",\"prefabInstances\":" << counters.prefabInstances
+                  << ",\"skinnedPrefabInstances\":" << counters.skinnedPrefabInstances
                   << ",\"catalogCooked\":" << counters.catalogCooked
                   << ",\"meshSlotCount\":" << expectedMeshes
+                  << ",\"staticMeshSlotCount\":" << expectedStaticMeshes
+                  << ",\"skinnedMeshSlotCount\":" << expectedSkinnedMeshes
                   << ",\"externalGltf\":" << (resources.externalGltf ? "true" : "false")
                   << ",\"uiRootsCreated\":" << ui.rootsCreated
                   << ",\"uiRootsReleased\":" << ui.rootsReleased
@@ -2534,20 +3443,55 @@ class Product3DApplication final : public Tina::IGameApplication {
         return 1;
     }
 
-    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_3d\",\"evidenceSchema\":14,\"frames\":"
+    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_3d\",\"evidenceSchema\":16,\"frames\":"
               << counters.frameUpdates
-              << ",\"gltfCooked\":true,\"cookedStaticMesh\":true,\"cookedMaterial\":true,\"cookedPrefab\":true,"
+              << ",\"gltfCooked\":true,\"cookedStaticMesh\":true,\"cookedSkinnedMesh\":true,"
+                 "\"cookedAnimationClip3D\":true,\"cookedMaterial\":true,\"cookedPrefab\":true,"
                  "\"cookedEnvironmentMap\":true,"
                  "\"prefabInstantiated\":true,\"sceneExtract\":true,\"multiMesh\":"
               << (multiMesh ? "true" : "false") << ",\"materialTextureBound\":"
               << (counters.materialTextureBound ? "true" : "false") << ",\"texturesUploaded\":"
               << counters.texturesUploaded << ",\"meshesUploaded\":" << counters.meshesUploaded
               << ",\"tangentMeshesUploaded\":" << tangentMeshesUploaded
+              << ",\"skinnedMeshesUploaded\":" << skinnedMeshesUploaded
+              << ",\"uploadedSkinnedJointCount\":" << capture.uploadedSkinnedJointCount()
+              << ",\"animatorJointCount\":" << counters.animatorJointCount
+              << ",\"animatorUpdates\":" << counters.animatorUpdates
+              << ",\"animatorPoseChanges\":" << counters.animatorPoseChanges
+              << ",\"submittedSkinnedMesh3DFrames\":" << submittedSkinnedMesh3DFrames
+              << ",\"submittedSkinnedMesh3DCount\":" << submittedSkinnedMesh3DCount
+              << ",\"visibleSkinnedMesh3DCount\":" << visibleSkinnedMesh3DCount
+              << ",\"submittedSkinnedPaletteJointCount\":" << submittedSkinnedPaletteJointCount
+              << ",\"firstSubmittedSkinnedPoseFingerprint\":"
+              << firstSubmittedSkinnedPoseFingerprint
+              << ",\"submittedSkinnedPoseFingerprint\":" << submittedSkinnedPoseFingerprint
+              << ",\"submittedSkinnedPoseFingerprintChanges\":"
+              << submittedSkinnedPoseFingerprintChanges
               << ",\"environmentMapsUploaded\":" << environmentMapsUploaded
               << ",\"imageBasedLightingMode\":\""
               << imageBasedLightingModeName(options.imageBasedLightingMode) << "\""
               << ",\"pointLightShadowMode\":\""
               << pointLightShadowModeName(options.pointLightShadowMode) << "\""
+              << ",\"skinAnimationMode\":\""
+              << skinAnimationModeName(options.skinAnimationMode) << "\""
+              << ",\"transparencyMode\":\""
+              << transparencyModeName(options.transparencyMode) << "\""
+              << ",\"blendMaterialCount\":" << resources.blendMaterialCount
+              << ",\"authoredTransparentStaticWitnessCount\":"
+              << counters.authoredTransparentStaticWitnessCount
+              << ",\"transparentWitnessMaterialBound\":"
+              << (counters.transparentWitnessMaterialBound ? "true" : "false")
+              << ",\"submittedTransparent3DFrames\":" << submittedTransparent3DFrames
+              << ",\"submittedTransparentStaticMesh3DCount\":"
+              << submittedTransparentStaticMesh3DCount
+              << ",\"submittedTransparentSkinnedMesh3DCount\":"
+              << submittedTransparentSkinnedMesh3DCount
+              << ",\"submittedTransparent3DDrawCount\":"
+              << submittedTransparent3DDrawCount
+              << ",\"submittedTransparent3DSortOrderChecksum\":"
+              << submittedTransparent3DSortOrderChecksum
+              << ",\"transparent3DSortOrderStable\":"
+              << (transparent3DSortOrderStable ? "true" : "false")
               << ",\"imageBasedLightingConfigured\":"
               << (counters.imageBasedLightingConfigured ? "true" : "false")
               << ",\"imageBasedLightingBindings\":" << imageBasedLightingBindings
@@ -2575,11 +3519,26 @@ class Product3DApplication final : public Tina::IGameApplication {
               << ",\"meshAssetHandlesInvalidated\":" << counters.meshAssetHandlesInvalidated
               << ",\"materialAssetHandlesInvalidated\":" << counters.materialAssetHandlesInvalidated
               << ",\"textureAssetHandlesInvalidated\":" << counters.textureAssetHandlesInvalidated
+              << ",\"animationClipAssetHandlesPublished\":"
+              << counters.animationClipAssetHandlesPublished
+              << ",\"animationClipAssetHandlesInvalidated\":"
+              << counters.animationClipAssetHandlesInvalidated
+              << ",\"skinnedPrefabAssetHandlesPublished\":"
+              << counters.skinnedPrefabAssetHandlesPublished
+              << ",\"skinnedPrefabAssetHandlesInvalidated\":"
+              << counters.skinnedPrefabAssetHandlesInvalidated
               << ",\"meshFrameResourceResolverHits\":" << counters.meshFrameResourceResolverHits
+              << ",\"skinnedMeshFrameResourceResolverHits\":"
+              << counters.skinnedMeshFrameResourceResolverHits
+              << ",\"skinnedPoseProviderHits\":" << counters.skinnedPoseProviderHits
               << ",\"materialFrameResourceResolverHits\":" << counters.materialFrameResourceResolverHits
               << ",\"assetStoreActiveCount\":" << assetStoreActiveCount
               << ",\"prefabAssetResident\":" << (prefabAssetResident ? "true" : "false")
-              << ",\"prefabInstances\":" << counters.prefabInstances << ",\"meshSlotCount\":" << expectedMeshes
+              << ",\"prefabInstances\":" << counters.prefabInstances
+              << ",\"skinnedPrefabInstances\":" << counters.skinnedPrefabInstances
+              << ",\"meshSlotCount\":" << expectedMeshes
+              << ",\"staticMeshSlotCount\":" << expectedStaticMeshes
+              << ",\"skinnedMeshSlotCount\":" << expectedSkinnedMeshes
               << ",\"externalGltf\":" << (resources.externalGltf ? "true" : "false")
               << ",\"completePbrFixture\":" << (resources.completePbrFixture ? "true" : "false")
               << ",\"materialFactorsBound\":" << (counters.materialFactorsBound ? "true" : "false")
@@ -2627,7 +3586,8 @@ class Product3DApplication final : public Tina::IGameApplication {
         std::cout << ",\"gltfPath\":";
         writeJsonString(std::cout, resources.gltfSourcePath);
     }
-    std::cout << ",\"instanceBatchesPerFrame\":" << expectedMeshes << ",\"catalogCooked\":" << counters.catalogCooked
+    std::cout << ",\"instanceBatchesPerFrame\":" << expectedStaticMeshes
+              << ",\"catalogCooked\":" << counters.catalogCooked
               << ",\"stateExits\":" << counters.stateExits
               << ",\"uiRootsCreated\":" << ui.rootsCreated
               << ",\"uiRootsReleased\":" << ui.rootsReleased

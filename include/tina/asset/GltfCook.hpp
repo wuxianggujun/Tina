@@ -20,11 +20,12 @@ namespace Tina::Asset {
 //   (fits Prefab 1 mesh/1 material per node and preserves per-prim materials)
 // - pbrMetallicRoughness: baseColorFactor, metallicFactor, roughnessFactor,
 //   baseColorTexture / metallicRoughnessTexture (PNG/JPEG → Texture2D deps)
+// - material alphaMode OPAQUE or BLEND; MASK and unknown values fail explicitly
 // - optional normalTexture → Texture2D dependency (cooked data; GPU PBR separate)
 // - scene nodes store mesh/material AssetIds in Prefab payload nodes; Catalog deps are canonical refs
 // Output is a CatalogCookRequest ready for cookCatalogPackage / publish.
 //
-// Not supported (structured failure): Draco, morph, skin, multi-submesh merge,
+// Not supported (structured failure): Draco, morph, multi-submesh merge,
 // data-URI images without bufferView, non-triangle primitives, sparse accessors.
 
 struct GltfCookIds final {

@@ -245,6 +245,21 @@ Core::Status validateCatalogPackageOnDisk(std::string_view catalogRootUtf8, cons
                     {
                         return Core::failure(withEntryContext(std::move(typed.error()), *entry, "typedStaticMesh"));
                     }
+                } else if (entry->assetKind == AssetFormat::AssetKind::SkinnedMesh)
+                {
+                    auto typed = parseSkinnedMeshFromCooked(*asset);
+                    if (!typed)
+                    {
+                        return Core::failure(withEntryContext(std::move(typed.error()), *entry, "typedSkinnedMesh"));
+                    }
+                } else if (entry->assetKind == AssetFormat::AssetKind::AnimationClip3D)
+                {
+                    auto typed = parseAnimationClip3DFromCooked(*asset);
+                    if (!typed)
+                    {
+                        return Core::failure(withEntryContext(std::move(typed.error()), *entry,
+                                                              "typedAnimationClip3D"));
+                    }
                 } else if (entry->assetKind == AssetFormat::AssetKind::Material)
                 {
                     auto typed = parseMaterialFromCooked(*asset);

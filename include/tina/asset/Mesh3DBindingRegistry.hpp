@@ -66,6 +66,11 @@ class Mesh3DBindingRegistry final {
     // Success clears the caller's GPU owner. Every failure preserves it.
     [[nodiscard]] Core::Result<Core::u32> registerMeshBinding(
         AssetHandle meshAsset, Render::GpuMeshId& gpuMesh) noexcept;
+    // Same ownership contract for a SkinnedMesh asset whose GPU owner came from
+    // IRenderDevice::createSkinnedMesh(). The entry shares the mesh slot pool
+    // and binding-key namespace but only interns as SkinnedMesh3DGeometry.
+    [[nodiscard]] Core::Result<Core::u32> registerSkinnedMeshBinding(
+        AssetHandle meshAsset, Render::GpuMeshId& gpuMesh) noexcept;
     [[nodiscard]] Core::Status registerMaterialTexture(
         AssetHandle textureAsset, Render::GpuTextureId& gpuTexture) noexcept;
 
@@ -86,6 +91,10 @@ class Mesh3DBindingRegistry final {
 
     [[nodiscard]] Core::Result<Render::FrameResourceRef>
     internMeshFrameResource(AssetHandle meshAsset, Render::FrameResourceSink& sink) noexcept;
+    // Empty ref when the handle owns no live skinned entry; a static entry
+    // never interns as skinned (and vice versa), so extraction fails closed.
+    [[nodiscard]] Core::Result<Render::FrameResourceRef>
+    internSkinnedMeshFrameResource(AssetHandle meshAsset, Render::FrameResourceSink& sink) noexcept;
     [[nodiscard]] Core::Result<Render::FrameResourceRef>
     internMaterialFrameResource(AssetHandle materialAsset, Render::FrameResourceSink& sink) noexcept;
 
@@ -102,6 +111,7 @@ class Mesh3DBindingRegistry final {
         Render::GpuMeshId gpuMesh{};
         Core::u32 bindingKey = 0;
         Core::u32 frameBorrowCount = 0;
+        bool skinned = false;
     };
 
     struct TextureEntry final {
@@ -192,6 +202,10 @@ class Mesh3DBindingRegistry final {
     void commitPreparedCatalogReload() noexcept;
     void abortPreparedCatalogReload() noexcept;
 
+    [[nodiscard]] Core::Result<Core::u32> registerMeshBindingImpl(
+        AssetHandle meshAsset, Render::GpuMeshId& gpuMesh, bool skinned) noexcept;
+    [[nodiscard]] Core::Result<Render::FrameResourceRef> internMeshFrameResourceImpl(
+        AssetHandle meshAsset, Render::FrameResourceSink& sink, bool skinned) noexcept;
     [[nodiscard]] bool isOwnerThread() const noexcept;
     [[nodiscard]] bool isLiveMeshEntry(const MeshEntry& entry) const noexcept;
     [[nodiscard]] bool isLiveMaterialEntry(const MaterialEntry& entry) const noexcept;

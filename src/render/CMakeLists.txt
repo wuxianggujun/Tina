@@ -122,6 +122,12 @@ if(TINA_BUILD_RENDER_BGFX)
         "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/fs_tina_opaque3d_mr.sc"
         "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_opaque3d_mr.def.sc"
     )
+    tina_add_bgfx_embedded_vertex_shader(
+        tina_render_bgfx
+        tina_opaque3d_skinned
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/vs_tina_opaque3d_skinned.sc"
+        "${CMAKE_CURRENT_SOURCE_DIR}/bgfx/shaders/tina_opaque3d_skinned.def.sc"
+    )
     tina_add_bgfx_embedded_shader(
         tina_render_bgfx
         tina_opaque3d_csm_depth

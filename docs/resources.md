@@ -43,11 +43,11 @@ Catalog package
 | 身份与摘要 | 128-bit `AssetId` 与 `ContentHash` 强类型分离；XXH3-128 v1 校验 payload；非密码学签名 |
 | Catalog | owning immutable `CatalogSnapshot`、AssetId binary search、依赖解析、完整 DAG cycle 校验；old/new snapshot 确定性 change plan |
 | Package | 确定性 object path、manifest revision polling、metadata/full 校验、load plan、依赖序批量加载、失败不发布部分批 |
-| Cooker | recipe、writer、fresh staging root cook + 强制完整验证；TileMap v3 root + `TileMapChunk` v1 会校验 Tileset、deferred chunk dependency、parent/layer/coord/extent/localId；glTF Cooker 支持 multi-mesh、relative-file/bufferView baseColor/metallicRoughness/normal 贴图 cook，以及 Material v2 factors |
-| Registry | generation `AssetHandle`、move-only `AssetLease`；fixed-capacity owner-thread Sprite2D/Mesh3D registry 校验 live Handle/dependency，唯一拥有 resident Lease/GPU/binding，并把 packet-local ref 借给 extraction |
+| Cooker | recipe、writer、fresh staging root cook + 强制完整验证；TileMap v3 root + `TileMapChunk` v1 会校验 Tileset、deferred chunk dependency、parent/layer/coord/extent/localId；glTF Cooker 支持 multi-mesh、relative-file/bufferView baseColor/metallicRoughness/normal 贴图 cook、Material v2 factors 与显式 OPAQUE/BLEND（MASK 与未知 alpha mode fail closed），以及 A1 skin（JOINTS_0/WEIGHTS_0/inverseBindMatrices）和 LINEAR/STEP animation sampler；CUBICSPLINE、非法 target/权重/形状与超限均 fail closed。 |
+| Registry | generation `AssetHandle`、move-only `AssetLease`；fixed-capacity owner-thread Sprite2D/Mesh3D registry 校验 live Handle/dependency，唯一拥有 resident Lease/GPU/binding，把 Material alpha intent 原子写入 binding，并把 packet-local ref 借给 extraction |
 | 异步加载 | 有界 request queue；IO Task 读取；owner-thread Main completion 解析并发布 |
 | GPU 生命周期 | Null `UploadTicket` 状态机；Texture/Mesh/EnvironmentMap backend retirement marker；AssetLease pin 与 retirement ledger |
-| 产品路径 | Texture2D/Sprite/SpriteAnimationClip/TileMap root/TileMapChunk/NavigationGrid2D/Fx2D 2D、StaticMesh/Material/Prefab/EnvironmentMap 3D、AudioClip 均有 Cooked 产品 consumer |
+| 产品路径 | Texture2D/Sprite/SpriteAnimationClip/TileMap root/TileMapChunk/NavigationGrid2D/Fx2D 2D、StaticMesh/SkinnedMesh/AnimationClip3D/Material/Prefab/EnvironmentMap 3D、AudioClip 均有 Cooked typed validation；`SkinnedMeshRenderer3D`/`Animator3D` CPU pose、packet-local palette 与 bgfx GPU skinning 已于2026-08-14通过 schema 15 集中产品 gate；独立 Blend Material + 双 static witness 的 Transparent3D 已于2026-08-15通过 schema 16 集中 gate，并证明第4个 Material 在透明 on/off 下均完成 load/bind/retire |
 | Editor viewport | `TinaEditor.exe --catalog-root=<UTF-8 path>` 通过真实 AssetSystem + Sprite/Tileset/Mesh registry 解析同一 World2D/TileMap/Prefab/SpriteAnimationClip 文档中的 AssetId；未配置时仅使用明确标记的临时 built-in preview Catalog |
 | Editor Project Browser | 拥有 Catalog metadata、canonical cooked 相对路径与完整 dependency records 的 AssetId 排序索引，All/2D/3D/Media 过滤并按 current schema 打开 Prefab/TileMap/SpriteAnimationClip；其他 kind 进入资源 Inspector |
 | Editor source import | `--project-root` + 可重复混合 `--import-recipe`/`--import-gltf` 保留完整 intended unit 集；后台共享 pipeline 生成 fully validated fresh stage + sibling state，主线程安全帧 reload 后只提交 active pointer，reopen 验证并恢复 Catalog 与 unit 集 |
@@ -60,10 +60,13 @@ Catalog package
 与 live binding intern 当前 packet ref。Scene 不因此依赖完整 AssetSystem，也不取得 Lease/payload/GPU owner。
 Particle/Trail 不缓存解析结果或 resolver：空 FX 不解析，Trail 每次非空 extract 解析一次，Particle 按 live
 item 解析。TileMap emit 保存 weak Tileset Handle，不缓存 key/resolver；hidden/off-camera/empty 跳过解析，
-非空可见集合每次调用只解析一次，失败清空输出。3D Prefab 先把 AssetId 解析为 weak StaticMesh/Material
-handle；Scene extraction 再通过两个 kind-specific `AssetFrameResourceResolver` 取得 packet-local ref。产品
+非空可见集合每次调用只解析一次，失败清空输出。3D Prefab 先把 AssetId 解析为 weak StaticMesh/SkinnedMesh/Material
+handle；Scene extraction 再通过 kind-specific `AssetFrameResourceResolver` 与 `SkinnedPose3DProvider` 取得
+packet-local geometry/material ref 和 palette。产品
 `AssetStore` 覆盖 World/extraction 生命周期；`Mesh3DBindingRegistry` 原子注册 mesh/material GPU bundle，
-并 fail closed 地 intern 当前 binding。N16.1 建立 `FrameResourceRef`/资源表，N16.2 迁移全部 Sprite item，
+其中 Material bundle 保存与 Cooked payload 对账后的显式 `Opaque`/`Blend`；Scene item 同样携带 alpha intent，
+两者不一致时 backend 在提交副作用前 fail closed。Runtime 不读取 baseColor alpha 或纹理内容来猜测 pass。
+Registry fail closed 地 intern 当前 binding。N16.1 建立 `FrameResourceRef`/资源表，N16.2 迁移全部 Sprite item，
 N16.3 统一 Sprite owner，N16.4 已让 Mesh/Material item 同样只携带 frame ref，并让 3D registry 唯一拥有
 Mesh Lease/GPU/binding、Material Lease/binding 与按 AssetId 去重的共享 Texture Lease/GPU owner。
 
@@ -209,7 +212,8 @@ kind/type 与 Catalog entry 对齐检查；它不替代包签名或信任策略�
 - `Mesh3DBindingRegistry` 是 fixed-capacity owner-thread owner；借用 AssetSystem/device/可选 PMR。Mesh entry
   唯一拥有 StaticMesh `AssetLease`/`GpuMeshId`/binding，Material entry 拥有 Material `AssetLease`/binding，
   Texture entry 按 AssetId 去重拥有共享 Texture2D `AssetLease`/`GpuTextureId`；Material v2 writer 要求同一
-  Material 内的 required Texture2D dependency 按 baseColor/MR/normal role 顺序严格递增且唯一；
+  Material 内的 required Texture2D dependency 按 baseColor/MR/normal role 顺序严格递增且唯一，并要求
+  alpha mode 明确为 `Opaque` 或 `Blend`；
 - `GpuEnvironmentMapId` 是 RenderDevice-owned 聚合 GPU owner；一次拥有 diffuse/specular cubemap 与 BRDF LUT，
   三张 native texture 事务创建并以同一 generation validate/clear/retire。产品3D Resources 持有 Catalog 加载后的
   owning `CookedAssetFile`，State 上传并绑定唯一 GPU owner，失败回滚和 `onExit` 都显式 retirement；
@@ -317,7 +321,7 @@ RenderDevice 必须覆盖有 live GPU pin 的 AssetSystem 生命周期。`AssetS
 | 领域 | 已有 schema/parser/writer |
 | --- | --- |
 | 2D | `Texture2D`、`Sprite`、`SpriteAnimationClip`、`Tileset`、`TileMap` v3 root、`TileMapChunk` v1、`NavigationGrid2D` v1、`Fx2D` v1 |
-| 3D | `StaticMesh`、`Material`、`Prefab`、`EnvironmentMap` |
+| 3D | `StaticMesh`、`SkinnedMesh`、`AnimationClip3D`、`Material`、`Prefab`、`EnvironmentMap` |
 | Audio | `AudioClip` float32 PCM |
 
 SpriteAnimationClip 唯一当前格式为 schema v2：32-byte header、12-byte frame（sprite dependency index、
@@ -399,19 +403,24 @@ capacity/lifetime/width/stable-key/UV/颜色/排序；parser 校验 finite range
 产品消费闭环，不能把它们列为已完成资源类型。FreeType 字体仍通过显式 `TINA_UI_FONT_PATH`/fixture
 接入，详见 [UI](ui.md)。
 
-StaticMesh v1 固定为 P3N3T4UV2 + UInt16 index，不携带运行时 layout 分支；glTF authored `TANGENT`
+StaticMesh v1 固定为 P3N3T4UV2 + UInt16 index，不携带运行时 layout 分支；SkinnedMesh v1 复用该顶点/索引
+布局并额外携带最多256 joints、inverse bind 与每顶点固定4个 U16 influences；AnimationClip3D v1 只接受
+joint target 的 LINEAR/STEP track。glTF authored `TANGENT`
 优先，具备 NORMAL+UV 但缺 tangent 时由 PRIVATE MikkTSpace 生成，缺 NORMAL/UV 的 primitive 显式失败。
-Material v2（40B）为 Opaque `UnlitBaseColor`，携带
-`baseColor` RGBA、`metallicFactor`/`roughnessFactor`，以及可选 Texture2D dependency 标志
+Material v2（40B）为 `UnlitBaseColor`，携带 `baseColor` RGBA、`metallicFactor`/`roughnessFactor`、
+`doubleSided` 与显式 `Opaque`/`Blend` alpha mode，以及可选 Texture2D dependency 标志
 （baseColor / metallicRoughness / normal，AssetId 在 Cooked deps 中按 flag 顺序）；Prefab v2 在每个 node
 payload 中直接保存 Mesh/Material `AssetId`，Cooked dependency 只保存按 `AssetId` 排序去重的完整引用集合，
-不再通过 dependency 位置推断 node identity。当前 Opaque3D 已采样 baseColor/MR/normal、
+不再通过 dependency 位置推断 node identity。alpha mode 是唯一 pass intent；baseColor alpha 与纹理 alpha
+只参与着色/混合，不切换 pass。当前 Opaque3D/Transparent3D 已采样 baseColor/MR/normal、
 应用 material factors，并从 World DirectionalLight3D/PointLight3D/SpotLight3D 发布逐帧有界
 4+8+8灯 snapshot；point/spot influence sphere 在容量检查前按 PerspectiveCamera3D frustum cull；
-Opaque3D 只使用 vertex tangent TBN，并以 Cook-Torrance GGX 计算 direct light。EnvironmentMap v1 使用32B
+static/skinned transparent draw 与 opaque draw 都使用 vertex tangent TBN 和 Cook-Torrance GGX；transparent
+不进入 shadow caster，但继续作为 receiver 消费 direct light、shadow 与 IBL。EnvironmentMap v1 使用32B
 little-endian header，diffuse/specular 为 RGBA16F cubemap、specular 要求完整 mip 链，BRDF LUT 为 RG16F；Runtime
 不做 convolution，只上传 cooked bytes 并以 intensity/world-Y rotation 绑定 split-sum IBL。固定4级联 directional CSM、
-单 SpotLight/PointLight shadow、startup-only shadow extent 与确定性 pass scheduler 已完成。glTF importer 的实际限制见
+单 SpotLight/PointLight shadow、startup-only shadow extent，以及
+Opaque3D→Transparent3D→Sprite2D→UI 的确定性 pass scheduler 已完成。glTF importer 的实际限制见
 [3D 产品架构](game-3d.md)。
 
 ## 文件与安全边界

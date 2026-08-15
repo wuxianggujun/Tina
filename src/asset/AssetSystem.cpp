@@ -1773,16 +1773,18 @@ Core::Status AssetSystem::retireStaticMesh(Render::IRenderDevice& device, AssetL
         return Core::failure(AssetErrorCode::InvalidHandle,
                              "GPU mesh retirement lease does not belong to this AssetSystem");
     }
-    if (m_store.assetKind(handle) != AssetFormat::AssetKind::StaticMesh ||
-        lease.assetKind() != AssetFormat::AssetKind::StaticMesh)
+    const AssetFormat::AssetKind meshKind = m_store.assetKind(handle);
+    if ((meshKind != AssetFormat::AssetKind::StaticMesh &&
+         meshKind != AssetFormat::AssetKind::SkinnedMesh) ||
+        lease.assetKind() != meshKind)
     {
         return Core::failure(AssetErrorCode::InvalidHandle,
-                             "GPU mesh retirement requires a StaticMesh lease");
+                             "GPU mesh retirement requires a StaticMesh or SkinnedMesh lease");
     }
     if (!isGpuRetirementState(m_store.state(handle)))
     {
         return Core::failure(AssetErrorCode::AssetNotReady,
-                             "GPU mesh retirement requires a resident StaticMesh lease");
+                             "GPU mesh retirement requires a resident mesh lease");
     }
     const bool hasLiveRetirement = std::ranges::any_of(
         m_retirement.records(),

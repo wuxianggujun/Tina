@@ -7,7 +7,8 @@ metallic-roughness Cook-Torrance GGX：Scene extraction 每帧提交0..4个 dire
 spot lights + ambient 的自包含 `RenderScene` snapshot；可选 `Mesh3DImageBasedLightingDesc` 再绑定一份 cooked
 diffuse irradiance cubemap、prefiltered specular cubemap 与 BRDF LUT。`setMesh3DLighting()` 仍是低层 device
 fallback/direct SPI。当前已有 PointLight3D 与 SpotLight3D、PerspectiveCamera3D influence-sphere culling，以及
-固定4级联 directional CSM、单 SpotLight shadow、单 PointLight 全向 shadow、startup-only shadow extent 配置和确定性 pass scheduler；仍无通用 GPU submission fence；
+固定4级联 directional CSM、单 SpotLight shadow、单 PointLight 全向 shadow、startup-only shadow extent 配置、
+显式 alpha-blended Transparent3D 与确定性 pass scheduler；仍无通用 GPU submission fence；
 Texture2D/StaticMesh/EnvironmentMap 已有独立、backend-proven 的 GPU resource retirement completion。
 
 ## Target 边界
@@ -15,7 +16,7 @@ Texture2D/StaticMesh/EnvironmentMap 已有独立、backend-proven 的 GPU resour
 | Target | 当前职责 |
 | --- | --- |
 | `tina_render` | `IRenderDevice`、RenderSurface、RenderFrame、RenderScene、UI DisplayList、GPU generation IDs、Null backend |
-| `tina_render_bgfx` | WindowSurface/bgfx 生命周期、Sprite2D、Opaque3D PBR/IBL、UI solid/glyph pass、GPU texture/mesh/environment storage |
+| `tina_render_bgfx` | WindowSurface/bgfx 生命周期、Sprite2D、Opaque3D/Transparent3D PBR/IBL、UI solid/glyph pass、GPU texture/mesh/environment storage |
 | `tina_ui_render_integration` | committed UI paint → Render `UIDisplayList` |
 | `tina_window_surface_integration` | Platform native surface → Render 的 move-only handoff |
 
@@ -90,8 +91,24 @@ receiver 仅对匹配的 spot slot 应用3×3 PCF。最多一个 camera-affectin
 `PointLightShadow3D`；它使用同样有界的 near/depth/normal bias，并在 point lights culling 与稳定排序后映射
 `pointLightIndex`。bgfx 拥有六张相同尺寸的 sampled D16 map（默认512×512），按 `+X/-X/+Y/-Y/+Z/-Z` 提交六个
 depth pass；receiver 以 dominant axis 选择面，只对匹配的 point slot 应用3×3 PCF。固定顺序为
-CSM×4 → Spot×1 → Point×6 → Opaque3D，所有 shadow pass 都不消费 primary-surface clear。第二个可见
+CSM×4 → Spot×1 → Point×6 → Opaque3D → Transparent3D → Sprite2D → UI，所有 shadow pass 都不消费 primary-surface clear。第二个可见
 point shadow 或非法 near/depth/normal bias 在 Scene publish 前 fail closed。
+
+`Mesh3DAlphaMode` 只有 `Opaque` 与 `Blend`，由 Cooked Material/authoring 显式声明；Runtime 不从
+base-color alpha 或纹理内容推断 pass。Scene extraction 把 material intent 复制到 static/skinned item，
+RenderScene commit 将两类 item 各自分成 Opaque 前缀与 Blend 后缀，Opaque batch 只覆盖 static Opaque
+前缀。所有 Blend static/skinned item 再进入一个统一 `RenderTransparent3DDraw` 排序域：按相机到
+world-space bounds center 的平方距离降序，等距时按 stable entity key、draw kind 与 item index 建立全序。
+`transparent3DDrawCapacity` 默认等于 static/skinned 默认容量之和，最大值同样由两类最大容量求和；
+容量不足整次 build 失败，不发布部分 scene。
+
+bgfx Transparent3D 使用 straight-alpha `SRC_ALPHA/INV_SRC_ALPHA` blend，写 RGB/A、保留
+`DEPTH_TEST_LESS`，但不写 depth。透明 item 不进入 directional/spot/point shadow caster batch，因此不投
+shadow；receiver 仍使用与 Opaque3D 相同的 direct lighting、CSM/Spot/Point shadow、PBR material 与 IBL。
+static transparent draw 从共享 instance buffer 按单 item range 提交，skinned transparent draw 逐项提交
+palette。Null/bgfx 在任何 submit 副作用前验证 alpha 前后缀、统一 back-to-front 全序、完整无重复覆盖、
+material binding alpha 一致性与 resource/palette 范围；未注册 material binding 只解析为 Opaque。
+当前没有 `Mask`/alpha-test、order-independent transparency 或 transparent shadow caster。
 
 `EngineConfig::shadowMapExtents` 是 device-lifetime 不可变启动配置，并原样传播到
 `RenderDeviceCreateParams`。`directionalCascadeTileExtent`、`spotLightMapExtent` 与
@@ -137,7 +154,7 @@ effect graph render pass 或 mesh-ribbon trail。
 ```text
 beginFrame(surface facts)
   -> phase-local writer
-  -> add Camera2D/PerspectiveCamera3D/Sprite2D/Mesh3D
+  -> add Camera2D/PerspectiveCamera3D/Sprite2D/Mesh3D/SkinnedMesh3D
   -> optional setSprite2DLighting (deep-copy fixed frame snapshot)
   -> optional setMesh3DLighting (deep-copy fixed frame snapshot)
   -> validate, cull, stable sort and batch
@@ -149,7 +166,7 @@ beginFrame(surface facts)
 - Camera2D projection、viewport、pixel snap 与 world picking；
 - Sprite2D 视锥裁剪、layer/order/ordinal 稳定排序、相邻 `(baseTexture, normalTexture)` batch；
 - optional self-contained Sprite2D lighting snapshot、最多8个 committed point light、32个 shadow segment 与 ambient；
-- PerspectiveCamera3D、frustum culling、Opaque3D depth/state 与 stable batch；
+- PerspectiveCamera3D、frustum culling、Opaque3D stable batch，以及 static/skinned 统一 Transparent3D back-to-front draw 序列；
 - optional self-contained Mesh3D lighting snapshot、可选 CSM/SpotLight shadow 描述、重复设置/非法描述的事务失败与统计；
 - framebuffer 0x0 suspended 路径；
 - 容量/非法数值/非法 resource ref 失败时不发布半份 scene。
@@ -215,7 +232,7 @@ shader mode/program，并在采样后 premultiply。DisplayList/frame resource �
 | `createMesh3DBinding` | device-instance mesh allocator；成功才消费 key | device-instance mesh allocator；成功才消费 key |
 | `setMesh3DBinding` | 校验/记录 binding | mesh key → GPU mesh |
 | `createMesh3DMaterialBinding` | device-instance material allocator；成功才消费 key | device-instance material allocator；成功才消费 key |
-| `set/clearMesh3DMaterialBinding` | 原子替换/整组清除三张纹理与 factors | 原子替换/整组清除三张纹理与 factors |
+| `set/clearMesh3DMaterialBinding` | 原子替换/整组清除三张纹理、factors 与显式 alpha mode | 原子替换/整组清除三张纹理、factors 与显式 alpha mode |
 | `setMesh3DMaterialTextureBinding` | 校验/记录 binding | material key → base-color texture；Opaque3D MR submit **采样** `s_texColor`（默认 1×1 白） |
 | `setMesh3DMaterialMetallicRoughnessTextureBinding` | 校验/记录 binding | material key → optional MR texture；未 bind 用默认 metallic=0/roughness=1 |
 | `setMesh3DLighting` | 同步校验/复制低层 fallback | 未提供 frame-scoped Scene lighting 时使用；0..4 directional + 0..8 point + 0..8 spot lights + ambient |
@@ -263,8 +280,8 @@ pin，才以 `bgfx::shutdown()` 返回作为 hard completion fallback。
 - native WindowSurface 初始化、resize/suspend、submit/present/shutdown；
 - transient frame budget 与容量失败；
 - Sprite2D textured quad pass + frame-scoped 0..8 point lights；
-- Opaque3D metallic-roughness Cook-Torrance GGX mesh/depth pass（优先消费 frame-scoped 0..4 directional + 0..8 point + 0..8 spot lights；可选 split-sum IBL；每帧只编码一次 uniform arrays）；
-- 确定性 `Clear -> CascadedDirectionalShadowDepth[0..3] -> SpotLightShadowDepth -> PointLightShadowDepth[0..5] -> Opaque3D -> Sprite2D -> UI` scheduler；三类 shadow resource 使用 startup-only 配置 extent，且都不取得 primary-surface clear ownership；
+- Opaque3D/Transparent3D metallic-roughness Cook-Torrance GGX mesh pass 与 opaque-only shadow depth pass（优先消费 frame-scoped 0..4 directional + 0..8 point + 0..8 spot lights；可选 split-sum IBL；每帧只编码一次 uniform arrays）；
+- 确定性 `Clear -> CascadedDirectionalShadowDepth[0..3] -> SpotLightShadowDepth -> PointLightShadowDepth[0..5] -> Opaque3D -> Transparent3D -> Sprite2D -> UI` scheduler；三类 shadow resource 使用 startup-only 配置 extent，且都不取得 primary-surface clear ownership；
 - UI solid/glyph pass；
 - Texture2D/StaticMesh/EnvironmentMap generation storage、唯一 P3N3T4UV2 layout 与 key binding；
 - Texture2D/StaticMesh/EnvironmentMap backend-proven retirement marker、suspend flush 与 shutdown hard drain；

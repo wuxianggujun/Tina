@@ -1,6 +1,7 @@
 set(TINA_ASSET_FORMAT_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/AssetFormat.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/AssetFormatErrors.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/asset_format/AnimationClip3DPayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/AudioClipPayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/EnvironmentMapPayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/Fx2DPayload.hpp
@@ -10,6 +11,7 @@ set(TINA_ASSET_FORMAT_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/SpriteAnimationClipPayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/SpritePayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/SourceImportMetadataFormat.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/asset_format/SkinnedMeshPayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/StaticMeshPayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/Texture2DPayload.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset_format/TilesetPayload.hpp
@@ -21,6 +23,7 @@ set(TINA_ASSET_FORMAT_PUBLIC_HEADERS
 add_library(tina_asset_format STATIC
     ${TINA_ASSET_FORMAT_PUBLIC_HEADERS}
     AssetFormat.cpp
+    AnimationClip3DPayload.cpp
     AudioClipPayload.cpp
     EnvironmentMapPayload.cpp
     Fx2DPayload.cpp
@@ -30,6 +33,7 @@ add_library(tina_asset_format STATIC
     SpriteAnimationClipPayload.cpp
     SpritePayload.cpp
     SourceImportMetadataFormat.cpp
+    SkinnedMeshPayload.cpp
     StaticMeshPayload.cpp
     Texture2DPayload.cpp
     TilesetPayload.cpp

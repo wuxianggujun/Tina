@@ -44,6 +44,10 @@ std::string_view projectAssetKindLabel(AssetFormat::AssetKind kind) noexcept
         return "TileMap";
     case AssetFormat::AssetKind::StaticMesh:
         return "StaticMesh";
+    case AssetFormat::AssetKind::SkinnedMesh:
+        return "SkinnedMesh";
+    case AssetFormat::AssetKind::AnimationClip3D:
+        return "Animation3D";
     case AssetFormat::AssetKind::Material:
         return "Material";
     case AssetFormat::AssetKind::Prefab:
@@ -101,6 +105,8 @@ bool projectAssetMatchesFilter(AssetFormat::AssetKind kind,
     if (filter == ProjectAssetFilter::ThreeD)
     {
         return kind == AssetFormat::AssetKind::StaticMesh ||
+               kind == AssetFormat::AssetKind::SkinnedMesh ||
+               kind == AssetFormat::AssetKind::AnimationClip3D ||
                kind == AssetFormat::AssetKind::Material ||
                kind == AssetFormat::AssetKind::Prefab ||
                kind == AssetFormat::AssetKind::EnvironmentMap;

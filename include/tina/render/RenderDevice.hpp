@@ -167,12 +167,28 @@ struct StaticMeshUploadDesc final {
     std::span<const u16> indices{};    // size == indexCount, multiple of 3
 };
 
+// SkinnedMesh v1 GPU upload: the StaticMesh P3N3T4UV2 stream
+// plus a parallel skin stream of four joint influences per vertex. Weights are
+// the cooked fixed-point values and must sum to exactly 0xFFFF per vertex;
+// joint indices must stay below jointCount (at most 256). Backends convert the
+// skin stream to their native attribute formats during upload.
+struct SkinnedMeshUploadDesc final {
+    u32 vertexCount = 0;
+    u32 indexCount = 0;
+    u16 jointCount = 0;
+    std::span<const float> vertices{};   // size == vertexCount * 12
+    std::span<const u16> jointIndices{}; // size == vertexCount * 4, each < jointCount
+    std::span<const u16> jointWeights{}; // size == vertexCount * 4, per-vertex sum == 0xFFFF
+    std::span<const u16> indices{};      // size == indexCount, multiple of 3
+};
+
 struct Mesh3DMaterialBindingDesc final {
     GpuTextureId baseColorTexture{};
     GpuTextureId metallicRoughnessTexture{};
     GpuTextureId normalTexture{};
     float metallicFactor = 0.0F;
     float roughnessFactor = 1.0F;
+    Mesh3DAlphaMode alphaMode = Mesh3DAlphaMode::Opaque;
 
     [[nodiscard]] friend constexpr bool operator==(const Mesh3DMaterialBindingDesc&,
                                                    const Mesh3DMaterialBindingDesc&) = default;
@@ -352,6 +368,17 @@ class IRenderDevice {
         static_cast<void>(desc);
         return Core::failure(RenderErrorCode::MeshUploadUnsupported,
                              "This render device does not support StaticMesh upload");
+    }
+    // Optional SkinnedMesh GPU path. Returned ids share the
+    // static mesh slot/binding-key namespace and retire through
+    // destroyStaticMesh()/retireStaticMesh(), but the slot remembers its skin
+    // stream and joint count: only skinned draw items may consume it, and
+    // static batches referencing a skinned binding fail closed.
+    [[nodiscard]] virtual Core::Result<GpuMeshId> createSkinnedMesh(const SkinnedMeshUploadDesc& desc)
+    {
+        static_cast<void>(desc);
+        return Core::failure(RenderErrorCode::MeshUploadUnsupported,
+                             "This render device does not support SkinnedMesh upload");
     }
     [[nodiscard]] virtual Core::Status destroyStaticMesh(GpuMeshId mesh) noexcept
     {

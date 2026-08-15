@@ -10,6 +10,7 @@
 #include <tina/scene/PointLight2D.hpp>
 #include <tina/scene/PointLight3D.hpp>
 #include <tina/scene/SceneErrors.hpp>
+#include <tina/scene/SkinnedMeshRenderer3D.hpp>
 #include <tina/scene/ShadowOccluder2D.hpp>
 #include <tina/scene/SpotLight3D.hpp>
 #include <tina/scene/SpriteAnimationBinding2D.hpp>
@@ -94,8 +95,14 @@ public:
         EntityId entity,
         PerspectiveCamera3D camera) noexcept;
     [[nodiscard]] Core::Status clearPerspectiveCamera3D(EntityId entity) noexcept;
+    // Static and skinned mesh renderers are mutually exclusive. Setting either
+    // renderer replaces and clears the other renderer on the same entity.
     [[nodiscard]] Core::Status setMeshRenderer3D(EntityId entity, MeshRenderer3D mesh) noexcept;
     [[nodiscard]] Core::Status clearMeshRenderer3D(EntityId entity) noexcept;
+    [[nodiscard]] Core::Status setSkinnedMeshRenderer3D(
+        EntityId entity,
+        SkinnedMeshRenderer3D mesh) noexcept;
+    [[nodiscard]] Core::Status clearSkinnedMeshRenderer3D(EntityId entity) noexcept;
     [[nodiscard]] Core::Status setDirectionalLight3D(
         EntityId entity,
         DirectionalLight3D light) noexcept;
@@ -118,6 +125,7 @@ public:
     [[nodiscard]] const SpriteAnimationBinding2D* spriteAnimationBinding2D(EntityId entity) const noexcept;
     [[nodiscard]] const PerspectiveCamera3D* perspectiveCamera3D(EntityId entity) const noexcept;
     [[nodiscard]] const MeshRenderer3D* meshRenderer3D(EntityId entity) const noexcept;
+    [[nodiscard]] const SkinnedMeshRenderer3D* skinnedMeshRenderer3D(EntityId entity) const noexcept;
     [[nodiscard]] const DirectionalLight3D* directionalLight3D(EntityId entity) const noexcept;
     [[nodiscard]] const PointLight3D* pointLight3D(EntityId entity) const noexcept;
     [[nodiscard]] const SpotLight3D* spotLight3D(EntityId entity) const noexcept;

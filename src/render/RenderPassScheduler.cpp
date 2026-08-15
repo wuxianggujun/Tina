@@ -52,23 +52,31 @@ Core::Result<RenderPassSchedule> buildRenderPassSchedule(const RenderFrame& fram
         return true;
     };
 
-    const bool hasOpaqueContent = frame.primaryWorldScene.perspectiveCamera().has_value() &&
-                                  !frame.primaryWorldScene.meshes3D().empty();
+    // Skinned meshes draw in the Opaque3D pass but never cast shadows in the
+    // 3D-SKIN-001 A3 contract: shadow depth passes require static casters.
+    const bool hasPerspectiveCamera = frame.primaryWorldScene.perspectiveCamera().has_value();
+    const bool hasStaticOpaqueCasters = hasPerspectiveCamera &&
+                                        !frame.primaryWorldScene.opaqueMeshes3D().empty();
+    const bool hasOpaqueContent = hasPerspectiveCamera &&
+                                  (!frame.primaryWorldScene.opaqueMeshes3D().empty() ||
+                                   !frame.primaryWorldScene.opaqueSkinnedMeshes3D().empty());
+    const bool hasTransparentContent = hasPerspectiveCamera &&
+                                       !frame.primaryWorldScene.transparent3DDraws().empty();
     const bool hasSpriteContent = frame.primaryWorldScene.camera2D().has_value() &&
                                   !frame.primaryWorldScene.sprites2D().empty();
     const bool hasCascadedDirectionalShadow =
-        hasOpaqueContent && frame.primaryWorldScene.mesh3DLighting().has_value() &&
+        hasStaticOpaqueCasters && frame.primaryWorldScene.mesh3DLighting().has_value() &&
         frame.primaryWorldScene.mesh3DLighting()->cascadedDirectionalShadow().has_value();
     const bool hasSpotLightShadow =
-        hasOpaqueContent && frame.primaryWorldScene.mesh3DLighting().has_value() &&
+        hasStaticOpaqueCasters && frame.primaryWorldScene.mesh3DLighting().has_value() &&
         frame.primaryWorldScene.mesh3DLighting()->spotLightShadow().has_value();
     const bool hasPointLightShadow =
-        hasOpaqueContent && frame.primaryWorldScene.mesh3DLighting().has_value() &&
+        hasStaticOpaqueCasters && frame.primaryWorldScene.mesh3DLighting().has_value() &&
         frame.primaryWorldScene.mesh3DLighting()->pointLightShadow().has_value();
     const bool firstSurfaceContentNeedsFullSurfaceClear =
-        (hasOpaqueContent &&
+        ((hasOpaqueContent || hasTransparentContent) &&
          !coversWholeSurface(frame.primaryWorldScene.perspectiveCamera()->normalizedViewport)) ||
-        (!hasOpaqueContent && hasSpriteContent &&
+        (!hasOpaqueContent && !hasTransparentContent && hasSpriteContent &&
          !coversWholeSurface(frame.primaryWorldScene.camera2D()->normalizedViewport));
 
     bool ownsClear = !firstSurfaceContentNeedsFullSurfaceClear;
@@ -120,6 +128,11 @@ Core::Result<RenderPassSchedule> buildRenderPassSchedule(const RenderFrame& fram
         }
     }
     if (hasOpaqueContent && !appendContent(RenderPassKind::Opaque3D))
+    {
+        return Core::failure(RenderErrorCode::RenderSceneCapacityExceeded,
+                             "Render pass schedule exceeded its fixed pass capacity");
+    }
+    if (hasTransparentContent && !appendContent(RenderPassKind::Transparent3D))
     {
         return Core::failure(RenderErrorCode::RenderSceneCapacityExceeded,
                              "Render pass schedule exceeded its fixed pass capacity");

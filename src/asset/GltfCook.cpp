@@ -17,6 +17,8 @@
 #include <tina/asset_format/MaterialPayload.hpp>
 #include <tina/asset_format/PrefabPayload.hpp>
 #include <tina/asset_format/StaticMeshPayload.hpp>
+#include <tina/asset_format/SkinnedMeshPayload.hpp>
+#include <tina/asset_format/AnimationClip3DPayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
 #include <tina/core/text/Utf8.hpp>
 
@@ -115,8 +117,56 @@ enum class GltfTextureChannel : Core::u8 {
     return nullptr;
 }
 
+[[nodiscard]] Core::Status validateGltfSkinAttributeContract(const cgltf_primitive& prim,
+                                                             bool hasSkinBinding)
+{
+    bool hasJoints0 = false;
+    bool hasWeights0 = false;
+    for (cgltf_size attributeIndex = 0; attributeIndex < prim.attributes_count; ++attributeIndex)
+    {
+        const cgltf_attribute& attribute = prim.attributes[attributeIndex];
+        if (attribute.type != cgltf_attribute_type_joints &&
+            attribute.type != cgltf_attribute_type_weights)
+        {
+            continue;
+        }
+        if (attribute.index != 0)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "only JOINTS_0/WEIGHTS_0 skin attributes are supported");
+        }
+
+        bool& present = attribute.type == cgltf_attribute_type_joints ? hasJoints0 : hasWeights0;
+        if (present || attribute.data == nullptr)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "JOINTS_0/WEIGHTS_0 skin attributes must be unique and valid");
+        }
+        present = true;
+    }
+
+    if (hasJoints0 != hasWeights0)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "JOINTS_0 and WEIGHTS_0 skin attributes must be provided together");
+    }
+    if (hasSkinBinding && !hasJoints0)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "a primitive bound to node.skin requires JOINTS_0 and WEIGHTS_0");
+    }
+    if (!hasSkinBinding && hasJoints0)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "a primitive with JOINTS_0/WEIGHTS_0 must be bound to node.skin");
+    }
+    return Core::success();
+}
+
 struct CookedMeshPieces final {
     std::vector<float> vertices{};
+    // Maps each cooked vertex back to its source POSITION/skin accessor vertex.
+    std::vector<Core::u16> sourceVertexIndices{};
     std::vector<Core::u16> indices{};
     AssetFormat::StaticMeshSubmeshDesc submesh{};
     float boundsCenterX = 0.0F;
@@ -129,8 +179,33 @@ struct CookedMeshPieces final {
     float baseA = 1.0F;
     float metallicFactor = 1.0F;
     float roughnessFactor = 1.0F;
+    AssetFormat::MaterialAlphaMode alphaMode = AssetFormat::MaterialAlphaMode::Opaque;
     bool doubleSided = false;
 };
+
+struct CookedAnimationEntry final {
+    Core::AssetId assetId{};
+    std::vector<std::byte> payload{};
+};
+
+struct GltfSkinCookInfo final {
+    const cgltf_skin* skin = nullptr;
+    std::vector<AssetFormat::SkinnedMeshJointDesc> joints{};
+    std::vector<float> inverseBindMatrices{};
+    std::vector<Core::u16> sourceJointToCookedJoint{};
+    std::unordered_map<const cgltf_node*, Core::u16> jointIndexByNode{};
+};
+
+[[nodiscard]] Core::Result<GltfSkinCookInfo> cookGltfSkin(const cgltf_skin& skin);
+[[nodiscard]] Core::Result<std::pair<std::vector<Core::u16>, std::vector<Core::u16>>>
+readGltfSkinInfluences(const cgltf_primitive& prim, const GltfSkinCookInfo& skin,
+                       std::span<const Core::u16> sourceVertexIndices);
+[[nodiscard]] Core::Result<AssetFormat::AnimationClip3DPayloadDesc>
+makeGltfAnimationDesc(const cgltf_animation& animation,
+                      const std::vector<GltfSkinCookInfo>& skins,
+                      std::vector<AssetFormat::AnimationTrackDesc>& trackStorage,
+                      std::vector<std::vector<float>>& timeStorage,
+                      std::vector<std::vector<float>>& valueStorage);
 
 struct TangentGenerationData final {
     std::span<const float> vertices{};
@@ -253,6 +328,7 @@ void setGeneratedTangent(const SMikkTSpaceContext* context, const float tangent[
 
 struct TangentMeshPieces final {
     std::vector<float> vertices{};
+    std::vector<Core::u16> sourceVertexIndices{};
     std::vector<Core::u16> indices{};
 };
 
@@ -328,6 +404,7 @@ struct TangentVertexKeyHash final {
     constexpr std::size_t maxProductVertices = (std::numeric_limits<Core::u16>::max)();
     TangentMeshPieces output{};
     output.vertices.reserve((std::min)(indices.size(), maxProductVertices) * tangentStride);
+    output.sourceVertexIndices.reserve((std::min)(indices.size(), maxProductVertices));
     output.indices.resize(indices.size());
     std::unordered_map<TangentVertexKey, Core::u16, TangentVertexKeyHash> rebuiltVertexByKey;
     rebuiltVertexByKey.reserve((std::min)(indices.size(), maxProductVertices));
@@ -358,6 +435,7 @@ struct TangentVertexKeyHash final {
         rebuiltVertexByKey.emplace(key, rebuiltVertex);
         output.indices[corner] = rebuiltVertex;
         const std::size_t source = static_cast<std::size_t>(sourceVertex) * sourceStride;
+        output.sourceVertexIndices.push_back(sourceVertex);
         output.vertices.insert(output.vertices.end(), vertices.data() + source, vertices.data() + source + 6U);
         output.vertices.insert(output.vertices.end(), tangent, tangent + 4U);
         output.vertices.insert(output.vertices.end(), vertices.data() + source + 6U,
@@ -424,8 +502,10 @@ struct TangentVertexKeyHash final {
     CookedMeshPieces out{};
     out.vertices.resize(static_cast<std::size_t>(positions->count) *
                         MikkInputFloatsPerVertex);
+    out.sourceVertexIndices.resize(static_cast<std::size_t>(positions->count));
     for (cgltf_size i = 0; i < positions->count; ++i)
     {
+        out.sourceVertexIndices[static_cast<std::size_t>(i)] = static_cast<Core::u16>(i);
         float p[3]{};
         float n[3]{};
         float uv[2]{};
@@ -523,6 +603,7 @@ struct TangentVertexKeyHash final {
             return Core::failure(std::move(generated.error()));
         }
         out.vertices = std::move(generated->vertices);
+        out.sourceVertexIndices = std::move(generated->sourceVertexIndices);
         out.indices = std::move(generated->indices);
     }
 
@@ -562,6 +643,21 @@ struct TangentVertexKeyHash final {
     if (prim.material != nullptr)
     {
         out.doubleSided = prim.material->double_sided != 0;
+        switch (prim.material->alpha_mode)
+        {
+        case cgltf_alpha_mode_opaque:
+            out.alphaMode = AssetFormat::MaterialAlphaMode::Opaque;
+            break;
+        case cgltf_alpha_mode_blend:
+            out.alphaMode = AssetFormat::MaterialAlphaMode::Blend;
+            break;
+        case cgltf_alpha_mode_mask:
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "glTF MASK materials are not supported; use OPAQUE or BLEND");
+        default:
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "glTF material has an unsupported alphaMode");
+        }
         if (prim.material->has_pbr_metallic_roughness)
         {
             const cgltf_pbr_metallic_roughness& pbr = prim.material->pbr_metallic_roughness;
@@ -1314,6 +1410,7 @@ namespace {
         Core::AssetId normalTextureId{};
         std::vector<std::byte> meshPayload{};
         std::vector<std::byte> materialPayload{};
+        AssetFormat::AssetKind meshKind = AssetFormat::AssetKind::StaticMesh;
     };
     // One glTF mesh may expand to N StaticMesh/Material pairs (one per TRIANGLES prim).
     struct MeshPrimRange final {
@@ -1329,6 +1426,33 @@ namespace {
     std::vector<TextureEntry> textures;
     // pointer equality for cgltf_mesh* → contiguous MeshEntry range
     std::unordered_map<const cgltf_mesh*, MeshPrimRange> meshRangeByPtr;
+    std::unordered_map<const cgltf_mesh*, const cgltf_skin*> skinByMesh;
+    for (cgltf_size nodeIndex = 0; nodeIndex < data->nodes_count; ++nodeIndex)
+    {
+        const cgltf_node& node = data->nodes[nodeIndex];
+        if (node.mesh == nullptr)
+        {
+            continue;
+        }
+        const auto found = skinByMesh.find(node.mesh);
+        if (found != skinByMesh.end() && found->second != node.skin)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "one glTF mesh cannot mix skin bindings in A1");
+        }
+        skinByMesh.emplace(node.mesh, node.skin);
+    }
+    std::vector<GltfSkinCookInfo> cookedSkins;
+    cookedSkins.reserve(data->skins_count);
+    for (cgltf_size skinIndex = 0; skinIndex < data->skins_count; ++skinIndex)
+    {
+        auto cookedSkin = cookGltfSkin(data->skins[skinIndex]);
+        if (!cookedSkin)
+        {
+            return Core::failure(std::move(cookedSkin.error()));
+        }
+        cookedSkins.push_back(std::move(*cookedSkin));
+    }
     // Per-channel sequence so first baseColor is always < first MR < first normal (CatalogCook).
     Core::u32 nextTextureSeqBase = 0;
     Core::u32 nextTextureSeqMr = 0;
@@ -1441,11 +1565,17 @@ namespace {
             return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                                  "glTF mesh primitive count exceeds product limit");
         }
+        const auto meshSkin = skinByMesh.find(&mesh);
+        const bool hasSkinBinding = meshSkin != skinByMesh.end() && meshSkin->second != nullptr;
 
         const std::size_t rangeFirst = meshes.size();
         for (cgltf_size primIndex = 0; primIndex < mesh.primitives_count; ++primIndex)
         {
             const cgltf_primitive& prim = mesh.primitives[primIndex];
+            if (auto status = validateGltfSkinAttributeContract(prim, hasSkinBinding); !status)
+            {
+                return Core::failure(std::move(status.error()));
+            }
             auto pieces = extractTriangleMesh(prim);
             if (!pieces)
             {
@@ -1508,16 +1638,61 @@ namespace {
                 .metallicFactor = pieces->metallicFactor,
                 .roughnessFactor = pieces->roughnessFactor,
                 .doubleSided = pieces->doubleSided,
-                .alphaMode = AssetFormat::MaterialAlphaMode::Opaque,
+                .alphaMode = pieces->alphaMode,
                 .baseColorTextureId = *baseColorTextureId,
                 .metallicRoughnessTextureId = *metallicRoughnessTextureId,
                 .normalTextureId = *normalTextureId,
             };
 
-            auto meshPayload = AssetFormat::writeStaticMeshPayloadBytes(meshDesc);
-            if (!meshPayload)
+            std::vector<std::byte> cookedMeshPayload;
+            AssetFormat::AssetKind meshKind = AssetFormat::AssetKind::StaticMesh;
+            if (hasSkinBinding)
             {
-                return Core::failure(std::move(meshPayload.error()));
+                const auto skinIt = std::find_if(cookedSkins.begin(), cookedSkins.end(),
+                                                 [&](const GltfSkinCookInfo& candidate) {
+                                                     return candidate.skin == meshSkin->second;
+                                                 });
+                if (skinIt == cookedSkins.end())
+                {
+                    return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                         "glTF mesh skin binding lookup failed");
+                }
+                auto influences = readGltfSkinInfluences(
+                    prim, *skinIt, pieces->sourceVertexIndices);
+                if (!influences)
+                {
+                    return Core::failure(std::move(influences.error()));
+                }
+                auto skinnedPayload = AssetFormat::writeSkinnedMeshPayloadBytes(
+                    AssetFormat::SkinnedMeshPayloadDesc{
+                        .indexType = AssetFormat::StaticMeshIndexType::U16,
+                        .boundsCenterX = pieces->boundsCenterX,
+                        .boundsCenterY = pieces->boundsCenterY,
+                        .boundsCenterZ = pieces->boundsCenterZ,
+                        .boundsRadius = pieces->boundsRadius,
+                        .joints = skinIt->joints,
+                        .inverseBindMatrices = skinIt->inverseBindMatrices,
+                        .submeshes = std::span<const AssetFormat::StaticMeshSubmeshDesc>(&pieces->submesh, 1),
+                        .vertices = pieces->vertices,
+                        .jointIndices = influences->first,
+                        .jointWeights = influences->second,
+                        .indices = pieces->indices,
+                    });
+                if (!skinnedPayload)
+                {
+                    return Core::failure(std::move(skinnedPayload.error()));
+                }
+                cookedMeshPayload = std::move(*skinnedPayload);
+                meshKind = AssetFormat::AssetKind::SkinnedMesh;
+            }
+            else
+            {
+                auto staticPayload = AssetFormat::writeStaticMeshPayloadBytes(meshDesc);
+                if (!staticPayload)
+                {
+                    return Core::failure(std::move(staticPayload.error()));
+                }
+                cookedMeshPayload = std::move(*staticPayload);
             }
             auto materialPayload = AssetFormat::writeMaterialPayloadBytes(materialDesc);
             if (!materialPayload)
@@ -1531,8 +1706,9 @@ namespace {
                 .baseColorTextureId = *baseColorTextureId,
                 .metallicRoughnessTextureId = *metallicRoughnessTextureId,
                 .normalTextureId = *normalTextureId,
-                .meshPayload = std::move(*meshPayload),
+                .meshPayload = std::move(cookedMeshPayload),
                 .materialPayload = std::move(*materialPayload),
+                .meshKind = meshKind,
             });
         }
 
@@ -1674,6 +1850,30 @@ namespace {
         return Core::failure(std::move(prefabPayload.error()));
     }
 
+    std::vector<CookedAnimationEntry> animations;
+    animations.reserve(data->animations_count);
+    for (cgltf_size animationIndex = 0; animationIndex < data->animations_count; ++animationIndex)
+    {
+        std::vector<AssetFormat::AnimationTrackDesc> trackStorage;
+        std::vector<std::vector<float>> timeStorage;
+        std::vector<std::vector<float>> valueStorage;
+        auto animationDesc = makeGltfAnimationDesc(data->animations[animationIndex], cookedSkins,
+                                                   trackStorage, timeStorage, valueStorage);
+        if (!animationDesc)
+        {
+            return Core::failure(std::move(animationDesc.error()));
+        }
+        auto animationPayload = AssetFormat::writeAnimationClip3DPayloadBytes(*animationDesc);
+        if (!animationPayload)
+        {
+            return Core::failure(std::move(animationPayload.error()));
+        }
+        animations.push_back(CookedAnimationEntry{
+            .assetId = deriveIndexedId(gltfUtf8Path, 0x76, static_cast<Core::u32>(animationIndex)),
+            .payload = std::move(*animationPayload),
+        });
+    }
+
     CatalogCookRequest& request = result.request;
     request.targetPlatform = targetPlatform;
     // Dependencies-first: textures before materials that reference them.
@@ -1689,9 +1889,11 @@ namespace {
     for (auto& entry : meshes)
     {
         request.assets.push_back(CatalogCookAssetSpec{
-            .assetKind = AssetFormat::AssetKind::StaticMesh,
+            .assetKind = entry.meshKind,
             .assetId = entry.meshId,
-            .assetTypeVersion = AssetFormat::StaticMeshWire::SchemaVersion,
+            .assetTypeVersion = entry.meshKind == AssetFormat::AssetKind::SkinnedMesh
+                                    ? AssetFormat::SkinnedMeshWire::SchemaVersion
+                                    : AssetFormat::StaticMeshWire::SchemaVersion,
             .payload = std::move(entry.meshPayload),
         });
         CatalogCookAssetSpec materialSpec{
@@ -1717,6 +1919,15 @@ namespace {
         }
         request.assets.push_back(std::move(materialSpec));
     }
+    for (auto& animation : animations)
+    {
+        request.assets.push_back(CatalogCookAssetSpec{
+            .assetKind = AssetFormat::AssetKind::AnimationClip3D,
+            .assetId = animation.assetId,
+            .assetTypeVersion = AssetFormat::AnimationClip3DWire::SchemaVersion,
+            .payload = std::move(animation.payload),
+        });
+    }
     CatalogCookAssetSpec prefabSpec{
         .assetKind = AssetFormat::AssetKind::Prefab,
         .assetId = ids.prefabId,
@@ -1727,11 +1938,17 @@ namespace {
     {
         if (static_cast<bool>(node.meshId))
         {
-            prefabSpec.dependencies.push_back(AssetFormat::CookedAssetWriteDependency{
-                .assetId = node.meshId,
-                .expectedKind = AssetFormat::AssetKind::StaticMesh,
-                .flags = AssetFormat::DependencyFlags::Required,
-            });
+                prefabSpec.dependencies.push_back(AssetFormat::CookedAssetWriteDependency{
+                    .assetId = node.meshId,
+                    .expectedKind = [&]() {
+                        const auto mesh = std::find_if(meshes.begin(), meshes.end(),
+                                                       [&](const MeshEntry& candidate) {
+                                                           return candidate.meshId == node.meshId;
+                                                       });
+                        return mesh == meshes.end() ? AssetFormat::AssetKind::Invalid : mesh->meshKind;
+                    }(),
+                    .flags = AssetFormat::DependencyFlags::Required,
+                });
             prefabSpec.dependencies.push_back(AssetFormat::CookedAssetWriteDependency{
                 .assetId = node.materialId,
                 .expectedKind = AssetFormat::AssetKind::Material,
@@ -1824,5 +2041,484 @@ Core::Result<CatalogCookSourceResult> cookGltfFileToCatalogSourceResult(
     return cookGltfFileToCatalogSourceResultBoundary(gltfUtf8Path, targetPlatform,
                                                      &captureConfig, ids);
 }
+
+namespace {
+
+[[nodiscard]] Core::Result<GltfSkinCookInfo> cookGltfSkin(const cgltf_skin& skin)
+{
+    if (skin.joints_count == 0U || skin.joints_count > AssetFormat::SkinnedMeshWire::MaxJointCount ||
+        skin.joints == nullptr)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "glTF skin joint count exceeds SkinnedMesh v1 limit");
+    }
+    GltfSkinCookInfo out{.skin = &skin};
+    out.joints.resize(skin.joints_count);
+    out.inverseBindMatrices.resize(skin.joints_count * AssetFormat::SkinnedMeshWire::FloatsPerInverseBindMatrix,
+                                   0.0F);
+    out.sourceJointToCookedJoint.resize(skin.joints_count);
+    std::unordered_map<const cgltf_node*, Core::u16> sourceJointIndexByNode;
+    sourceJointIndexByNode.reserve(skin.joints_count);
+    for (cgltf_size i = 0; i < skin.joints_count; ++i)
+    {
+        const cgltf_node* node = skin.joints[i];
+        if (node == nullptr || sourceJointIndexByNode.contains(node))
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "glTF skin joints must be unique and non-null");
+        }
+        sourceJointIndexByNode.emplace(node, static_cast<Core::u16>(i));
+    }
+
+    std::vector<Core::u16> sourceParents(skin.joints_count,
+                                         AssetFormat::SkinnedMeshWire::JointIndexNone);
+    for (cgltf_size sourceIndex = 0; sourceIndex < skin.joints_count; ++sourceIndex)
+    {
+        const cgltf_node* node = skin.joints[sourceIndex];
+        if (node->has_matrix)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "glTF skin joints with matrix transforms are not supported in v1");
+        }
+        if (node->parent != nullptr)
+        {
+            const auto parent = sourceJointIndexByNode.find(node->parent);
+            if (parent == sourceJointIndexByNode.end())
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "glTF skin joint parent outside the skin is unsupported in v1");
+            }
+            sourceParents[sourceIndex] = parent->second;
+        }
+    }
+
+    std::vector<Core::u16> hierarchyDepths(skin.joints_count, 0U);
+    std::vector<Core::u16> cookedSourceOrder(skin.joints_count, 0U);
+    for (cgltf_size sourceIndex = 0; sourceIndex < skin.joints_count; ++sourceIndex)
+    {
+        cookedSourceOrder[sourceIndex] = static_cast<Core::u16>(sourceIndex);
+        Core::u16 cursor = static_cast<Core::u16>(sourceIndex);
+        Core::u32 depth = 0;
+        while (sourceParents[cursor] != AssetFormat::SkinnedMeshWire::JointIndexNone)
+        {
+            cursor = sourceParents[cursor];
+            ++depth;
+            if (depth >= skin.joints_count)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "glTF skin joint hierarchy contains a cycle");
+            }
+        }
+        hierarchyDepths[sourceIndex] = static_cast<Core::u16>(depth);
+    }
+    std::sort(cookedSourceOrder.begin(), cookedSourceOrder.end(),
+              [&](Core::u16 left, Core::u16 right) {
+                  if (hierarchyDepths[left] != hierarchyDepths[right])
+                  {
+                      return hierarchyDepths[left] < hierarchyDepths[right];
+                  }
+                  return left < right;
+              });
+    out.jointIndexByNode.reserve(skin.joints_count);
+    for (cgltf_size cookedIndex = 0; cookedIndex < skin.joints_count; ++cookedIndex)
+    {
+        const Core::u16 sourceIndex = cookedSourceOrder[cookedIndex];
+        out.sourceJointToCookedJoint[sourceIndex] = static_cast<Core::u16>(cookedIndex);
+        out.jointIndexByNode.emplace(skin.joints[sourceIndex],
+                                     static_cast<Core::u16>(cookedIndex));
+    }
+
+    for (cgltf_size cookedIndex = 0; cookedIndex < skin.joints_count; ++cookedIndex)
+    {
+        const Core::u16 sourceIndex = cookedSourceOrder[cookedIndex];
+        const cgltf_node* node = skin.joints[sourceIndex];
+        auto& joint = out.joints[cookedIndex];
+        if (sourceParents[sourceIndex] != AssetFormat::SkinnedMeshWire::JointIndexNone)
+        {
+            joint.parentJoint = out.sourceJointToCookedJoint[sourceParents[sourceIndex]];
+            if (joint.parentJoint >= cookedIndex)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "glTF skin topology remap did not place parent before child");
+            }
+        }
+        if (node->has_translation)
+        {
+            std::copy_n(node->translation, 3U, joint.bindTranslation);
+        }
+        if (node->has_rotation)
+        {
+            std::copy_n(node->rotation, 4U, joint.bindRotation);
+        }
+        if (node->has_scale)
+        {
+            std::copy_n(node->scale, 3U, joint.bindScale);
+        }
+    }
+
+    if (skin.inverse_bind_matrices == nullptr)
+    {
+        for (cgltf_size i = 0; i < skin.joints_count; ++i)
+        {
+            float* matrix = out.inverseBindMatrices.data() + i * 16U;
+            matrix[0] = 1.0F;
+            matrix[5] = 1.0F;
+            matrix[10] = 1.0F;
+            matrix[15] = 1.0F;
+        }
+    }
+    else
+    {
+        const cgltf_accessor* accessor = skin.inverse_bind_matrices;
+        if (accessor->type != cgltf_type_mat4 || accessor->component_type != cgltf_component_type_r_32f ||
+            accessor->count != skin.joints_count)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "glTF inverseBindMatrices must be a FLOAT MAT4 per joint");
+        }
+        for (cgltf_size sourceIndex = 0; sourceIndex < accessor->count; ++sourceIndex)
+        {
+            const Core::u16 cookedIndex = out.sourceJointToCookedJoint[sourceIndex];
+            if (!cgltf_accessor_read_float(
+                    accessor, sourceIndex,
+                    out.inverseBindMatrices.data() + static_cast<std::size_t>(cookedIndex) * 16U,
+                    16U))
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "failed to read glTF inverseBindMatrices");
+            }
+        }
+    }
+    for (const float value : out.inverseBindMatrices)
+    {
+        if (!std::isfinite(value))
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "glTF inverseBindMatrices must be finite");
+        }
+    }
+    return out;
+}
+
+[[nodiscard]] Core::Result<std::pair<std::vector<Core::u16>, std::vector<Core::u16>>>
+readGltfSkinInfluences(const cgltf_primitive& prim, const GltfSkinCookInfo& skin,
+                       std::span<const Core::u16> sourceVertexIndices)
+{
+    const cgltf_accessor* positions = findAttribute(prim, cgltf_attribute_type_position);
+    const cgltf_accessor* joints = findAttribute(prim, cgltf_attribute_type_joints);
+    const cgltf_accessor* weights = findAttribute(prim, cgltf_attribute_type_weights);
+    const bool supportedWeights =
+        weights != nullptr &&
+        (weights->component_type == cgltf_component_type_r_32f ||
+         (weights->normalized &&
+          (weights->component_type == cgltf_component_type_r_8u ||
+           weights->component_type == cgltf_component_type_r_16u)));
+    if (positions == nullptr || joints == nullptr || weights == nullptr ||
+        joints->type != cgltf_type_vec4 ||
+        weights->type != cgltf_type_vec4 || joints->count != weights->count ||
+        joints->count != positions->count || sourceVertexIndices.empty() ||
+        joints->normalized ||
+        (joints->component_type != cgltf_component_type_r_8u &&
+         joints->component_type != cgltf_component_type_r_16u) ||
+        !supportedWeights)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "skinned primitive requires matching JOINTS_0/WEIGHTS_0 VEC4 accessors");
+    }
+    std::vector<Core::u16> indices(sourceVertexIndices.size() *
+                                   AssetFormat::SkinnedMeshWire::InfluencesPerVertex);
+    std::vector<Core::u16> quantized(indices.size());
+    for (std::size_t vertex = 0; vertex < sourceVertexIndices.size(); ++vertex)
+    {
+        const cgltf_size sourceVertex = sourceVertexIndices[vertex];
+        if (sourceVertex >= joints->count)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "skinned primitive source vertex mapping is out of range");
+        }
+        cgltf_uint jointValues[4]{};
+        float weightValues[4]{};
+        if (!cgltf_accessor_read_uint(joints, sourceVertex, jointValues, 4U) ||
+            !cgltf_accessor_read_float(weights, sourceVertex, weightValues, 4U))
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "failed to read skinned primitive influences");
+        }
+        struct Influence final {
+            Core::u16 joint = 0;
+            double weight = 0.0;
+        } values[4]{};
+        std::size_t valueCount = 0;
+        double total = 0.0;
+        for (int slot = 0; slot < 4; ++slot)
+        {
+            if (jointValues[slot] >= skin.sourceJointToCookedJoint.size() ||
+                !std::isfinite(weightValues[slot]) ||
+                weightValues[slot] < 0.0F)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "glTF skin influence joint or weight is invalid");
+            }
+            const Core::u16 cookedJoint =
+                skin.sourceJointToCookedJoint[jointValues[slot]];
+            const double weight = static_cast<double>(weightValues[slot]);
+            total += weight;
+            if (weight == 0.0)
+            {
+                continue;
+            }
+            const auto existing = std::find_if(
+                values, values + valueCount,
+                [cookedJoint](const Influence& influence) { return influence.joint == cookedJoint; });
+            if (existing != values + valueCount)
+            {
+                existing->weight += weight;
+            }
+            else
+            {
+                values[valueCount++] = Influence{.joint = cookedJoint, .weight = weight};
+            }
+        }
+        if (!std::isfinite(total) || !(total > 1.0e-12))
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "glTF skin influence weights must have a positive sum");
+        }
+        std::sort(values, values + valueCount,
+                  [](const Influence& left, const Influence& right) {
+                      return left.joint < right.joint;
+                  });
+        const std::size_t base = static_cast<std::size_t>(vertex) * 4U;
+        Core::u32 assigned = 0;
+        Core::u32 encodedWeights[4]{};
+        double fractions[4]{};
+        std::size_t remainderOrder[4]{0U, 1U, 2U, 3U};
+        for (std::size_t slot = 0; slot < valueCount; ++slot)
+        {
+            const double exact = values[slot].weight / total *
+                                 static_cast<double>(AssetFormat::SkinnedMeshWire::WeightScale);
+            const auto floorValue = static_cast<Core::u32>(std::floor(exact));
+            encodedWeights[slot] = floorValue;
+            assigned += floorValue;
+            fractions[slot] = exact - std::floor(exact);
+        }
+        if (assigned > AssetFormat::SkinnedMeshWire::WeightScale)
+        {
+            std::sort(remainderOrder, remainderOrder + valueCount,
+                      [&](std::size_t left, std::size_t right) {
+                          if (fractions[left] != fractions[right])
+                          {
+                              return fractions[left] < fractions[right];
+                          }
+                          return values[left].joint > values[right].joint;
+                      });
+            Core::u32 excess = assigned - AssetFormat::SkinnedMeshWire::WeightScale;
+            for (std::size_t cursor = 0; excess != 0U; ++cursor)
+            {
+                const std::size_t slot = remainderOrder[cursor % valueCount];
+                if (encodedWeights[slot] != 0U)
+                {
+                    --encodedWeights[slot];
+                    --excess;
+                }
+            }
+        }
+        else if (assigned < AssetFormat::SkinnedMeshWire::WeightScale)
+        {
+            std::sort(remainderOrder, remainderOrder + valueCount,
+                      [&](std::size_t left, std::size_t right) {
+                          if (fractions[left] != fractions[right])
+                          {
+                              return fractions[left] > fractions[right];
+                          }
+                          return values[left].joint < values[right].joint;
+                      });
+            Core::u32 remainder = AssetFormat::SkinnedMeshWire::WeightScale - assigned;
+            for (std::size_t cursor = 0; remainder != 0U; ++cursor)
+            {
+                const std::size_t slot = remainderOrder[cursor % valueCount];
+                if (encodedWeights[slot] < AssetFormat::SkinnedMeshWire::WeightScale)
+                {
+                    ++encodedWeights[slot];
+                    --remainder;
+                }
+            }
+        }
+        struct QuantizedInfluence final {
+            Core::u16 joint = 0;
+            Core::u16 weight = 0;
+        } encoded[4]{};
+        for (std::size_t slot = 0; slot < valueCount; ++slot)
+        {
+            encoded[slot] = QuantizedInfluence{
+                .joint = encodedWeights[slot] == 0U ? 0U : values[slot].joint,
+                .weight = static_cast<Core::u16>(encodedWeights[slot]),
+            };
+        }
+        std::sort(std::begin(encoded), std::end(encoded),
+                  [](const QuantizedInfluence& left, const QuantizedInfluence& right) {
+                      if (left.weight != right.weight)
+                      {
+                          return left.weight > right.weight;
+                      }
+                      return left.joint < right.joint;
+                  });
+        for (int slot = 0; slot < 4; ++slot)
+        {
+            indices[base + slot] = encoded[slot].joint;
+            quantized[base + slot] = encoded[slot].weight;
+        }
+    }
+    return std::pair{std::move(indices), std::move(quantized)};
+}
+
+[[nodiscard]] Core::Result<AssetFormat::AnimationClip3DPayloadDesc>
+makeGltfAnimationDesc(const cgltf_animation& animation,
+                      const std::vector<GltfSkinCookInfo>& skins,
+                      std::vector<AssetFormat::AnimationTrackDesc>& trackStorage,
+                      std::vector<std::vector<float>>& timeStorage,
+                      std::vector<std::vector<float>>& valueStorage)
+{
+    if (animation.channels_count == 0U || animation.channels_count > AssetFormat::AnimationClip3DWire::MaxTracks)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "glTF animation channel count exceeds AnimationClip3D v1 limit");
+    }
+    const GltfSkinCookInfo* selectedSkin = nullptr;
+    trackStorage.clear();
+    timeStorage.clear();
+    valueStorage.clear();
+    trackStorage.reserve(animation.channels_count);
+    timeStorage.reserve(animation.channels_count);
+    valueStorage.reserve(animation.channels_count);
+    Core::u32 totalKeyframes = 0;
+    Core::u32 totalValueFloats = 0;
+    for (cgltf_size channelIndex = 0; channelIndex < animation.channels_count; ++channelIndex)
+    {
+        const cgltf_animation_channel& channel = animation.channels[channelIndex];
+        if (channel.sampler == nullptr || channel.target_node == nullptr ||
+            (channel.target_path != cgltf_animation_path_type_translation &&
+             channel.target_path != cgltf_animation_path_type_rotation &&
+             channel.target_path != cgltf_animation_path_type_scale) ||
+            (channel.sampler->interpolation != cgltf_interpolation_type_linear &&
+             channel.sampler->interpolation != cgltf_interpolation_type_step))
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "glTF animation channel target or interpolation is unsupported");
+        }
+        const GltfSkinCookInfo* channelSkin = nullptr;
+        Core::u16 jointIndex = 0;
+        for (const auto& skin : skins)
+        {
+            const auto found = skin.jointIndexByNode.find(channel.target_node);
+            if (found != skin.jointIndexByNode.end())
+            {
+                if (channelSkin != nullptr)
+                {
+                    return Core::failure(
+                        AssetErrorCode::InvalidCatalogConfig,
+                        "glTF animation target joint belongs to multiple skins");
+                }
+                channelSkin = &skin;
+                jointIndex = found->second;
+            }
+        }
+        if (channelSkin == nullptr || (selectedSkin != nullptr && selectedSkin != channelSkin))
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "glTF animation must target joints of one skin");
+        }
+        selectedSkin = channelSkin;
+        const cgltf_accessor* input = channel.sampler->input;
+        const cgltf_accessor* output = channel.sampler->output;
+        const auto path = channel.target_path;
+        const auto tinaChannel = path == cgltf_animation_path_type_translation
+                                     ? AssetFormat::AnimationChannel::Translation
+                                     : path == cgltf_animation_path_type_rotation
+                                           ? AssetFormat::AnimationChannel::Rotation
+                                           : AssetFormat::AnimationChannel::Scale;
+        const Core::u16 components = AssetFormat::animationChannelComponentCount(tinaChannel);
+        if (input == nullptr || output == nullptr || input->type != cgltf_type_scalar ||
+            input->component_type != cgltf_component_type_r_32f || output->component_type != cgltf_component_type_r_32f ||
+            output->type != (components == 4U ? cgltf_type_vec4 : cgltf_type_vec3) ||
+            input->count == 0U || input->count > AssetFormat::AnimationClip3DWire::MaxKeyframesPerTrack ||
+            output->count != input->count)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "glTF animation sampler accessor shape is invalid");
+        }
+        if (input->count > AssetFormat::AnimationClip3DWire::MaxTotalKeyframes - totalKeyframes ||
+            input->count * components >
+                AssetFormat::AnimationClip3DWire::MaxTotalValueFloats - totalValueFloats)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "glTF animation aggregate key budget exceeded");
+        }
+        totalKeyframes += static_cast<Core::u32>(input->count);
+        totalValueFloats += static_cast<Core::u32>(input->count * components);
+        timeStorage.emplace_back(input->count);
+        valueStorage.emplace_back(input->count * components);
+        for (cgltf_size key = 0; key < input->count; ++key)
+        {
+            float time = 0.0F;
+            if (!cgltf_accessor_read_float(input, key, &time, 1U) || !std::isfinite(time) || time < 0.0F ||
+                time > AssetFormat::AnimationClip3DWire::MaxDurationSeconds)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "glTF animation key time is invalid");
+            }
+            timeStorage.back()[key] = time;
+            if (!cgltf_accessor_read_float(output, key, valueStorage.back().data() + key * components, components))
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "failed to read glTF animation sampler output");
+            }
+        }
+        trackStorage.push_back(AssetFormat::AnimationTrackDesc{
+            .jointIndex = jointIndex,
+            .channel = tinaChannel,
+            .interpolation = channel.sampler->interpolation == cgltf_interpolation_type_step
+                                 ? AssetFormat::AnimationInterpolation::Step
+                                 : AssetFormat::AnimationInterpolation::Linear,
+            .times = timeStorage.back(),
+            .values = valueStorage.back(),
+        });
+    }
+    if (selectedSkin == nullptr)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "glTF animation has no skin joint targets");
+    }
+    float duration = 0.0F;
+    for (const auto& times : timeStorage) duration = (std::max)(duration, times.back());
+    std::sort(trackStorage.begin(), trackStorage.end(),
+              [](const AssetFormat::AnimationTrackDesc& left,
+                 const AssetFormat::AnimationTrackDesc& right) {
+                  if (left.jointIndex != right.jointIndex)
+                  {
+                      return left.jointIndex < right.jointIndex;
+                  }
+                  return left.channel < right.channel;
+              });
+    const auto duplicate = std::adjacent_find(
+        trackStorage.begin(), trackStorage.end(),
+        [](const AssetFormat::AnimationTrackDesc& left,
+           const AssetFormat::AnimationTrackDesc& right) {
+            return left.jointIndex == right.jointIndex && left.channel == right.channel;
+        });
+    if (duplicate != trackStorage.end())
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "glTF animation contains duplicate joint/channel tracks");
+    }
+    return AssetFormat::AnimationClip3DPayloadDesc{
+        .playbackMode = AssetFormat::AnimationClip3DPlaybackMode::Loop,
+        .jointCount = static_cast<Core::u16>(selectedSkin->joints.size()),
+        .durationSeconds = duration,
+        .tracks = trackStorage,
+    };
+}
+
+} // namespace
 
 } // namespace Tina::Asset

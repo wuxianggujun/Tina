@@ -1,5 +1,7 @@
 ﻿#include "EditorWorkspaceState.hpp"
 
+#include <tina/asset/AssetTypedViews.hpp>
+
 namespace Tina::EditorApp::WorkspaceInternal {
 
 auto EditorWorkspaceState::findPreviewEntity(u32 stableEntityId) const noexcept -> Tina::Scene::EntityId{
@@ -769,8 +771,16 @@ auto EditorWorkspaceState::validateWorld3DRuntimePreview() -> Tina::Core::Status
     if (!prefab) {
         return Tina::Core::failure(std::move(prefab.error()));
     }
+    std::vector<Tina::Render::Mesh3DAlphaMode> nodeAlphaModes;
+    try {
+        nodeAlphaModes.resize(nodeStorage.size(), Tina::Render::Mesh3DAlphaMode::Opaque);
+    } catch (const std::bad_alloc&) {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
+                                   "editor World3D preview alpha mode allocation failed");
+    }
     u64 resolvedMeshCount = 0;
-    for (auto& node : nodeStorage) {
+    for (std::size_t index = 0; index < nodeStorage.size(); ++index) {
+        auto& node = nodeStorage[index];
         if (!node.hasMesh) {
             continue;
         }
@@ -786,6 +796,20 @@ auto EditorWorkspaceState::validateWorld3DRuntimePreview() -> Tina::Core::Status
             node.materialId = {};
             continue;
         }
+        const Tina::Asset::CookedAssetFile* materialFile =
+            assetResources_.system->tryGet(material);
+        if (materialFile == nullptr) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "editor World3D preview Material is not resident");
+        }
+        auto materialView = Tina::Asset::parseMaterialFromCooked(*materialFile);
+        if (!materialView) {
+            return Tina::Core::failure(std::move(materialView.error()));
+        }
+        nodeAlphaModes[index] =
+            materialView->alphaMode == Tina::AssetFormat::MaterialAlphaMode::Blend
+                ? Tina::Render::Mesh3DAlphaMode::Blend
+                : Tina::Render::Mesh3DAlphaMode::Opaque;
         ++resolvedMeshCount;
     }
     auto world = Tina::Scene::World::Create({.entityCapacity = AuthoringEntityCapacity + 1U});
@@ -803,6 +827,15 @@ auto EditorWorkspaceState::validateWorld3DRuntimePreview() -> Tina::Core::Status
             },
             .resolveMaterial = [this](Tina::Core::AssetId assetId) {
                 return loadedAsset(assetId, Tina::AssetFormat::AssetKind::Material);
+            },
+            .resolveAlphaMode = [&nodeStorage, &nodeAlphaModes](Tina::Core::AssetId assetId) {
+                for (std::size_t index = 0; index < nodeStorage.size(); ++index) {
+                    if (nodeStorage[index].hasMaterial &&
+                        nodeStorage[index].materialId == assetId) {
+                        return nodeAlphaModes[index];
+                    }
+                }
+                return Tina::Render::Mesh3DAlphaMode::Opaque;
             },
         });
     if (!entities) {
@@ -845,6 +878,7 @@ auto EditorWorkspaceState::validateWorld3DRuntimePreview() -> Tina::Core::Status
                                                 Tina::AssetFormat::AssetKind::Material),
                         .localBounds = {.radius = 1.75F},
                         .baseColorFactor = color,
+                        .alphaMode = nodeAlphaModes[index],
                         .visible = node.visible,
                     });
                 !status) {

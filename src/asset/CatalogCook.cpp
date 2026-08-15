@@ -17,6 +17,8 @@
 #include <tina/asset_format/SpriteAnimationClipPayload.hpp>
 #include <tina/asset_format/SpritePayload.hpp>
 #include <tina/asset_format/StaticMeshPayload.hpp>
+#include <tina/asset_format/SkinnedMeshPayload.hpp>
+#include <tina/asset_format/AnimationClip3DPayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
 #include <tina/asset_format/TileMapChunkPayload.hpp>
 #include <tina/asset_format/TileMapPayload.hpp>
@@ -256,6 +258,16 @@ struct RecipeSourceCaptureContext final {
         out = AssetFormat::AssetKind::Fx2D;
         return true;
     }
+    if (name == "SkinnedMesh")
+    {
+        out = AssetFormat::AssetKind::SkinnedMesh;
+        return true;
+    }
+    if (name == "AnimationClip3D")
+    {
+        out = AssetFormat::AssetKind::AnimationClip3D;
+        return true;
+    }
     return false;
 }
 
@@ -289,6 +301,10 @@ struct RecipeSourceCaptureContext final {
         return AssetFormat::NavigationGrid2DWire::SchemaVersion;
     case AssetFormat::AssetKind::Fx2D:
         return AssetFormat::Fx2DWire::SchemaVersion;
+    case AssetFormat::AssetKind::SkinnedMesh:
+        return AssetFormat::SkinnedMeshWire::SchemaVersion;
+    case AssetFormat::AssetKind::AnimationClip3D:
+        return AssetFormat::AnimationClip3DWire::SchemaVersion;
     default:
         return 1U;
     }
@@ -2580,17 +2596,32 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
         }
         if (tokens[0] == "material")
         {
-            // material <id> unlit <r> <g> <b> [a] [tex32hex]
-            // Optional trailing Texture2D id (M11-E5); solid factor always required.
-            if (tokens.size() < 6 || tokens.size() > 8)
+            // material <id> unlit [opaque|blend] <r> <g> <b> [a] [tex32hex]
+            // The legacy form without a mode remains an explicit opaque recipe.
+            if (tokens.size() < 3U)
             {
                 return Core::failure(
                     AssetErrorCode::InvalidCatalogConfig,
-                    "material currently supports: material <id> unlit <r> <g> <b> [a] [textureId]");
+                    "material supports: material <id> unlit [opaque|blend] <r> <g> <b> [a] [textureId]");
             }
             if (tokens[2] != "unlit")
             {
                 return Core::failure(AssetErrorCode::InvalidCatalogConfig, "material model must be unlit");
+            }
+            AssetFormat::MaterialAlphaMode alphaMode = AssetFormat::MaterialAlphaMode::Opaque;
+            std::size_t colorOffset = 3;
+            if (tokens.size() > colorOffset && (tokens[colorOffset] == "opaque" || tokens[colorOffset] == "blend"))
+            {
+                alphaMode = tokens[colorOffset] == "blend"
+                                ? AssetFormat::MaterialAlphaMode::Blend
+                                : AssetFormat::MaterialAlphaMode::Opaque;
+                ++colorOffset;
+            }
+            if (tokens.size() < colorOffset + 3U || tokens.size() > colorOffset + 5U)
+            {
+                return Core::failure(
+                    AssetErrorCode::InvalidCatalogConfig,
+                    "material supports: material <id> unlit [opaque|blend] <r> <g> <b> [a] [textureId]");
             }
             auto materialId = Core::AssetId::parseCanonical(tokens[1]);
             if (!materialId)
@@ -2601,42 +2632,45 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
             float g = 0.0F;
             float b = 0.0F;
             float a = 1.0F;
-            if (!parseFloatToken(tokens[3], r) || !parseFloatToken(tokens[4], g) || !parseFloatToken(tokens[5], b))
+            if (!parseFloatToken(tokens[colorOffset], r) ||
+                !parseFloatToken(tokens[colorOffset + 1U], g) ||
+                !parseFloatToken(tokens[colorOffset + 2U], b))
             {
                 return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid material baseColor RGB");
             }
             Core::AssetId textureId{};
-            if (tokens.size() >= 7)
+            const std::size_t optionalOffset = colorOffset + 3U;
+            if (tokens.size() > optionalOffset)
             {
-                // tokens[6] may be alpha float OR texture id (32 hex). Prefer float parse first.
-                float alphaCandidate = 0.0F;
-                if (parseFloatToken(tokens[6], alphaCandidate))
+                // A canonical AssetId can contain only decimal digits and still
+                // parse as a float, so recognize the structurally exact id first.
+                auto textureCandidate = Core::AssetId::parseCanonical(tokens[optionalOffset]);
+                if (textureCandidate)
                 {
-                    a = alphaCandidate;
-                    if (tokens.size() == 8)
+                    textureId = *textureCandidate;
+                    if (tokens.size() == optionalOffset + 2U)
                     {
-                        auto tex = Core::AssetId::parseCanonical(tokens[7]);
+                        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                             "material cannot contain another token after a texture id");
+                    }
+                } else
+                {
+                    float alphaCandidate = 0.0F;
+                    if (!parseFloatToken(tokens[optionalOffset], alphaCandidate))
+                    {
+                        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                             "invalid material alpha or texture id");
+                    }
+                    a = alphaCandidate;
+                    if (tokens.size() == optionalOffset + 2U)
+                    {
+                        auto tex = Core::AssetId::parseCanonical(tokens[optionalOffset + 1U]);
                         if (!tex)
                         {
                             return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                                                  "invalid material baseColor texture id");
                         }
                         textureId = *tex;
-                    }
-                }
-                else
-                {
-                    auto tex = Core::AssetId::parseCanonical(tokens[6]);
-                    if (!tex)
-                    {
-                        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                                             "invalid material alpha or texture id");
-                    }
-                    textureId = *tex;
-                    if (tokens.size() == 8)
-                    {
-                        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                                             "material: when token6 is texture id, do not pass 8 tokens");
                     }
                 }
             }
@@ -2647,7 +2681,7 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
                 .baseColorB = b,
                 .baseColorA = a,
                 .doubleSided = false,
-                .alphaMode = AssetFormat::MaterialAlphaMode::Opaque,
+                .alphaMode = alphaMode,
                 .baseColorTextureId = textureId,
             };
             auto payload = AssetFormat::writeMaterialPayloadBytes(desc);

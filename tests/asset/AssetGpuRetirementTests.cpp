@@ -1,6 +1,7 @@
 #include <tina/asset/AssetSystem.hpp>
 #include <tina/asset/CookedAssetFile.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
+#include <tina/asset_format/SkinnedMeshPayload.hpp>
 #include <tina/render/RenderDevice.hpp>
 #include <tina/render/null/NullRenderDeviceFactory.hpp>
 
@@ -39,6 +40,64 @@ using TestSupport::writeTextureMaterialPackage;
         .assetId = assetId(seed),
         .payload = payload,
     });
+    if (!bytes)
+    {
+        return Core::failure(std::move(bytes.error()));
+    }
+    std::pmr::vector<std::byte> owned{&memory};
+    owned.assign(bytes->begin(), bytes->end());
+    auto file = makeCookedAssetFileFromBytes(
+        std::move(owned), CookedAssetFileLoadConfig{.memoryResource = &memory});
+    if (!file)
+    {
+        return Core::failure(std::move(file.error()));
+    }
+    return system.store().publish(std::move(*file));
+}
+
+[[nodiscard]] Core::Result<AssetHandle> publishSkinnedMesh(
+    AssetSystem& system,
+    std::pmr::memory_resource& memory,
+    Core::u8 seed)
+{
+    const std::array<AssetFormat::SkinnedMeshJointDesc, 1> joints{
+        AssetFormat::SkinnedMeshJointDesc{
+            .parentJoint = AssetFormat::SkinnedMeshWire::JointIndexNone,
+        },
+    };
+    const std::array<float, 16> inverseBind{
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1,
+    };
+    const std::array<AssetFormat::StaticMeshSubmeshDesc, 1> submeshes{
+        AssetFormat::StaticMeshSubmeshDesc{.indexCount = 3},
+    };
+    const std::array<float, 3 * AssetFormat::SkinnedMeshWire::FloatsPerVertex> vertices{
+        0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0,
+        1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0,
+        0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1,
+    };
+    const std::array<Core::u16, 12> jointIndices{};
+    const std::array<Core::u16, 12> jointWeights{
+        65535, 0, 0, 0,
+        65535, 0, 0, 0,
+        65535, 0, 0, 0,
+    };
+    const std::array<Core::u16, 3> indices{0, 1, 2};
+    auto bytes = AssetFormat::writeCookedSkinnedMeshAsset(
+        assetId(seed),
+        AssetFormat::SkinnedMeshPayloadDesc{
+            .boundsRadius = 1.0F,
+            .joints = joints,
+            .inverseBindMatrices = inverseBind,
+            .submeshes = submeshes,
+            .vertices = vertices,
+            .jointIndices = jointIndices,
+            .jointWeights = jointWeights,
+            .indices = indices,
+        });
     if (!bytes)
     {
         return Core::failure(std::move(bytes.error()));
@@ -608,6 +667,34 @@ TEST_F(AssetGpuRetirementTests, ExistingStaticMeshLeaseAndGpuOwnerTransferUntilD
     ASSERT_TRUE(system->drainGpuRetirements().has_value());
     EXPECT_FALSE(device.hasPendingMesh());
     EXPECT_EQ(device.drainCalls(), 1U);
+    EXPECT_EQ(system->state(*loaded), AssetLogicalState::Unloaded);
+    EXPECT_EQ(system->retirementStats().released, 1U);
+    EXPECT_EQ(system->retirementStats().live, 0U);
+}
+
+TEST_F(AssetGpuRetirementTests, SkinnedMeshLeaseUsesTheSharedGpuMeshRetirementContract)
+{
+    auto system = createSystem();
+    ASSERT_TRUE(system.has_value()) << system.error().message;
+    auto loaded = publishSkinnedMesh(*system, m_memory, 0xE5U);
+    ASSERT_TRUE(loaded.has_value()) << (loaded ? "" : loaded.error().message);
+    auto lease = system->acquire(*loaded);
+    ASSERT_TRUE(lease.has_value()) << (lease ? "" : lease.error().message);
+
+    DelayedRetirementRenderDevice device;
+    constexpr Render::GpuMeshId ExpectedMesh{14U, 8U};
+    Render::GpuMeshId mesh = ExpectedMesh;
+    ASSERT_TRUE(system->retireStaticMesh(device, *lease, mesh));
+    EXPECT_FALSE(static_cast<bool>(*lease));
+    EXPECT_FALSE(static_cast<bool>(mesh));
+    EXPECT_EQ(system->state(*loaded), AssetLogicalState::UnloadPending);
+    EXPECT_EQ(system->store().leaseCount(*loaded), 1U);
+    ASSERT_TRUE(device.hasPendingMesh());
+    ASSERT_EQ(system->retirement().records().size(), 1U);
+    EXPECT_EQ(system->retirement().records()[0].kind, AssetRetirementKind::GpuStaticMesh);
+    EXPECT_EQ(system->retirement().records()[0].mesh, ExpectedMesh);
+
+    ASSERT_TRUE(system->drainGpuRetirements());
     EXPECT_EQ(system->state(*loaded), AssetLogicalState::Unloaded);
     EXPECT_EQ(system->retirementStats().released, 1U);
     EXPECT_EQ(system->retirementStats().live, 0U);

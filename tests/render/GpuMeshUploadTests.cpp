@@ -30,6 +30,30 @@ namespace {
     };
 }
 
+[[nodiscard]] Render::SkinnedMeshUploadDesc makeUnitSkinnedTriangleDesc(
+    std::array<float, 36>& vertices,
+    std::array<std::uint16_t, 12>& jointIndices,
+    std::array<std::uint16_t, 12>& jointWeights,
+    std::array<std::uint16_t, 3>& indices) noexcept
+{
+    (void)makeUnitTriangleDesc(vertices, indices);
+    jointIndices.fill(0);
+    jointWeights = {
+        65535, 0, 0, 0,
+        65535, 0, 0, 0,
+        65535, 0, 0, 0,
+    };
+    return Render::SkinnedMeshUploadDesc{
+        .vertexCount = 3,
+        .indexCount = 3,
+        .jointCount = 1,
+        .vertices = vertices,
+        .jointIndices = jointIndices,
+        .jointWeights = jointWeights,
+        .indices = indices,
+    };
+}
+
 void countPinRelease(void* userData) noexcept
 {
     ++*static_cast<Core::u32*>(userData);
@@ -191,6 +215,41 @@ TEST(NullRenderDeviceMeshTest, RejectsZeroMeshKeyBinding)
     EXPECT_EQ(bad.error().code, Render::RenderErrorCode::InvalidMeshUpload);
 
     ASSERT_TRUE((*device)->destroyStaticMesh(*mesh).has_value());
+}
+
+TEST(NullRenderDeviceMeshTest, SkinnedUploadValidatesInfluencesAndSharesRetirementLifecycle)
+{
+    auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
+    ASSERT_TRUE(device.has_value());
+    std::array<float, 36> vertices{};
+    std::array<std::uint16_t, 12> jointIndices{};
+    std::array<std::uint16_t, 12> jointWeights{};
+    std::array<std::uint16_t, 3> indices{};
+    auto desc = makeUnitSkinnedTriangleDesc(vertices, jointIndices, jointWeights, indices);
+
+    jointIndices[0] = 1;
+    auto badJoint = (*device)->createSkinnedMesh(desc);
+    ASSERT_FALSE(badJoint.has_value());
+    EXPECT_EQ(badJoint.error().code, Render::RenderErrorCode::InvalidMeshUpload);
+    jointIndices[0] = 0;
+
+    jointWeights[0] = 65534;
+    auto badWeights = (*device)->createSkinnedMesh(desc);
+    ASSERT_FALSE(badWeights.has_value());
+    EXPECT_EQ(badWeights.error().code, Render::RenderErrorCode::InvalidMeshUpload);
+    jointWeights[0] = 65535;
+
+    auto mesh = (*device)->createSkinnedMesh(desc);
+    ASSERT_TRUE(mesh.has_value()) << (mesh ? "" : mesh.error().message);
+    ASSERT_TRUE((*device)->setMesh3DBinding(2U, *mesh));
+    ASSERT_TRUE((*device)->setMesh3DBinding(2U, {}));
+    Core::u32 releases = 0;
+    Render::FramePin completionPin{
+        Render::FramePinKind::AssetLease, 20, &releases, &countPinRelease};
+    ASSERT_TRUE((*device)->retireStaticMesh(*mesh, completionPin));
+    EXPECT_FALSE(completionPin.hasValue());
+    EXPECT_EQ(releases, 1U);
+    EXPECT_EQ((*device)->statistics().liveResources, 0U);
 }
 
 TEST(NullRenderDeviceMeshTest, AllocatedBindingKeysStartAtTwoAndAreNeverConsumedOrReusedOnFailure)

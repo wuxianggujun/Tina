@@ -225,15 +225,24 @@ template <typename Handle, usize Count>
     return handles;
 }
 constexpr bgfx::ViewId kOpaque3DView = 12;
-constexpr bgfx::ViewId kSprite2DView = 13;
-constexpr bgfx::ViewId kUIView = 14;
+constexpr bgfx::ViewId kTransparent3DView = 13;
+constexpr bgfx::ViewId kSprite2DView = 14;
+constexpr bgfx::ViewId kUIView = 15;
 // Must remain after every view that can reference a retireable resource.
-constexpr bgfx::ViewId kRetirementMarkerView = 15;
+constexpr bgfx::ViewId kRetirementMarkerView = 16;
 constexpr u32 kDefaultResetFlags = BGFX_RESET_VSYNC;
 constexpr u32 kClearRgba = 0x102a43ff;
 constexpr usize kIndicesPerSolidQuad = 6;
+// bgfx shader binary v11 reflects uniform array length as u8. The final joint
+// uses a separate mat4 uniform so the public 256-joint contract stays intact.
+constexpr u16 kOpaque3DSkinPaletteArrayJointCount = 255;
+static_assert(MaxSkinnedMesh3DPaletteJointCount ==
+              static_cast<u32>(kOpaque3DSkinPaletteArrayJointCount) + 1U);
 constexpr u64 kOpaque3DState =
     BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_WRITE_Z | BGFX_STATE_DEPTH_TEST_LESS;
+constexpr u64 kTransparent3DState =
+    BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_DEPTH_TEST_LESS |
+    BGFX_STATE_BLEND_ALPHA;
 constexpr u64 kOpaque3DShadowDepthState =
     BGFX_STATE_WRITE_Z | BGFX_STATE_DEPTH_TEST_LESS;
 constexpr u64 kSprite2DPremultipliedAlphaState =
@@ -684,6 +693,11 @@ preflightOpaque3D(RenderSceneView scene, FrameResourceTableView resources)
     {
         return Core::failure(std::move(requirements.error()));
     }
+    if (auto status = validateSkinnedOpaque3DFrame(scene, resources); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    // Static items, including transparent ones, share the instance buffer.
     if (requirements->instanceCount == 0)
     {
         return PreparedOpaque3D{.requirements = *requirements};
@@ -696,6 +710,12 @@ preflightOpaque3D(RenderSceneView scene, FrameResourceTableView resources)
                              "The active bgfx renderer does not support Opaque3D instancing");
     }
     PreparedOpaque3D prepared{.requirements = *requirements};
+    // Only opaque static batches cast shadows. Transparent-only static scenes
+    // still require instancing but must not prepare shadow projections.
+    if (requirements->batchCount == 0)
+    {
+        return prepared;
+    }
     if (!scene.perspectiveCamera().has_value() ||
         !scene.mesh3DLighting().has_value())
     {
@@ -1013,6 +1033,18 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             return Core::failure(RenderErrorCode::DeviceInitializationFailed,
                                  "bgfx created an unexpected Opaque3D vertex stride");
+        }
+        // Skinned stream 1: four u8 joint indices (0..255 covers the frozen 256
+        // joint bound) + four float32 weights converted from the cooked u16
+        // fixed-point values during upload.
+        opaque3DSkinVertexLayout_.begin()
+            .add(bgfx::Attrib::Indices, 4, bgfx::AttribType::Uint8)
+            .add(bgfx::Attrib::Weight, 4, bgfx::AttribType::Float)
+            .end();
+        if (opaque3DSkinVertexLayout_.getStride() != sizeof(BgfxOpaque3DSkinVertex))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx created an unexpected Opaque3D skin vertex stride");
         }
 
         auto uiProgram = ShaderDetail::createUITexturedQuadProgram();
@@ -1430,6 +1462,43 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         ++statistics_.liveResources;
 
+        // 3D-SKIN-001 A3: skinned vertex program shares fs_tina_opaque3d_mr.
+        auto opaque3DSkinnedProgram = ShaderDetail::createOpaque3DSkinnedMrProgram();
+        if (!opaque3DSkinnedProgram)
+        {
+            return Core::failure(std::move(opaque3DSkinnedProgram.error()));
+        }
+        opaque3DSkinnedProgram_ = *opaque3DSkinnedProgram;
+        ++statistics_.liveResources;
+
+        opaque3DSkinPaletteUniform_ = bgfx::createUniform(
+            "u_tinaSkinPalette", bgfx::UniformType::Mat4,
+            kOpaque3DSkinPaletteArrayJointCount);
+        if (!bgfx::isValid(opaque3DSkinPaletteUniform_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Opaque3D skin palette uniform");
+        }
+        ++statistics_.liveResources;
+
+        opaque3DSkinPaletteLastUniform_ =
+            bgfx::createUniform("u_tinaSkinPaletteLast", bgfx::UniformType::Mat4);
+        if (!bgfx::isValid(opaque3DSkinPaletteLastUniform_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the final Opaque3D skin palette uniform");
+        }
+        ++statistics_.liveResources;
+
+        opaque3DSkinColorUniform_ =
+            bgfx::createUniform("u_tinaSkinColor", bgfx::UniformType::Vec4);
+        if (!bgfx::isValid(opaque3DSkinColorUniform_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Opaque3D skin color uniform");
+        }
+        ++statistics_.liveResources;
+
         constexpr u64 IblSamplerFlags = BGFX_TEXTURE_NONE | BGFX_SAMPLER_U_CLAMP |
                                         BGFX_SAMPLER_V_CLAMP | BGFX_SAMPLER_W_CLAMP;
         opaque3DDefaultIblCube_ = bgfx::createTextureCube(
@@ -1560,6 +1629,12 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             return Core::failure(std::move(status.error()));
         }
+        if (auto status = validateMesh3DMaterialAlphaBindings(
+                frame.primaryWorldScene, frame.resources);
+            !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
         if (frame.primaryWorldScene.mesh3DLighting().has_value())
         {
             if (auto status = validateMesh3DLightingDesc(
@@ -1594,6 +1669,12 @@ class BgfxRenderDevice final : public IRenderDevice {
                 return Core::failure(std::move(opaque3DPreflight.error()));
             }
             preparedOpaque3D = *opaque3DPreflight;
+
+            if (auto status = validateSkinnedMesh3DBindings(frame.primaryWorldScene, frame.resources);
+                !status)
+            {
+                return Core::failure(std::move(status.error()));
+            }
 
             auto sprite2DPreflight = preflightSprite2D(frame.primaryWorldScene, frame.resources);
             if (!sprite2DPreflight)
@@ -1775,6 +1856,12 @@ class BgfxRenderDevice final : public IRenderDevice {
                         slot.vertexBuffer = BGFX_INVALID_HANDLE;
                         --statistics_.liveResources;
                     }
+                    if (bgfx::isValid(slot.skinVertexBuffer))
+                    {
+                        bgfx::destroy(slot.skinVertexBuffer);
+                        slot.skinVertexBuffer = BGFX_INVALID_HANDLE;
+                        --statistics_.liveResources;
+                    }
                     if (bgfx::isValid(slot.indexBuffer))
                     {
                         bgfx::destroy(slot.indexBuffer);
@@ -1921,6 +2008,30 @@ class BgfxRenderDevice final : public IRenderDevice {
             {
                 bgfx::destroy(opaque3DProgram_);
                 opaque3DProgram_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(opaque3DSkinnedProgram_))
+            {
+                bgfx::destroy(opaque3DSkinnedProgram_);
+                opaque3DSkinnedProgram_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(opaque3DSkinPaletteUniform_))
+            {
+                bgfx::destroy(opaque3DSkinPaletteUniform_);
+                opaque3DSkinPaletteUniform_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(opaque3DSkinPaletteLastUniform_))
+            {
+                bgfx::destroy(opaque3DSkinPaletteLastUniform_);
+                opaque3DSkinPaletteLastUniform_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(opaque3DSkinColorUniform_))
+            {
+                bgfx::destroy(opaque3DSkinColorUniform_);
+                opaque3DSkinColorUniform_ = BGFX_INVALID_HANDLE;
                 --statistics_.liveResources;
             }
             if (bgfx::isValid(opaque3DSampler_))
@@ -2350,6 +2461,12 @@ class BgfxRenderDevice final : public IRenderDevice {
                 slot.vertexBuffer = BGFX_INVALID_HANDLE;
                 --statistics_.liveResources;
             }
+            if (bgfx::isValid(slot.skinVertexBuffer))
+            {
+                bgfx::destroy(slot.skinVertexBuffer);
+                slot.skinVertexBuffer = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
             if (bgfx::isValid(slot.indexBuffer))
             {
                 bgfx::destroy(slot.indexBuffer);
@@ -2358,6 +2475,8 @@ class BgfxRenderDevice final : public IRenderDevice {
             }
             slot.vertexCount = 0;
             slot.indexCount = 0;
+            slot.jointCount = 0;
+            slot.skinned = false;
             slot.retirementPhase = RetirementPhase::None;
             slot.completionPin.release();
             ++completed;
@@ -2485,19 +2604,20 @@ class BgfxRenderDevice final : public IRenderDevice {
         bgfx::touch(view);
     }
 
-    void configureOpaque3DView(const RenderSurfaceState& surface, const RenderPerspectiveCamera& camera,
-                               bool clearColor, bool clearDepth) noexcept
+    void configureMesh3DView(bgfx::ViewId viewId, const RenderSurfaceState& surface,
+                             const RenderPerspectiveCamera& camera,
+                             bool clearColor, bool clearDepth) noexcept
     {
         const BgfxViewRect rect = viewportRect(surface, camera.normalizedViewport);
         if (rect.width == 0 || rect.height == 0)
         {
             std::terminate();
         }
-        bgfx::setViewRect(kOpaque3DView, rect.x, rect.y, rect.width, rect.height);
+        bgfx::setViewRect(viewId, rect.x, rect.y, rect.width, rect.height);
         const u16 clearFlags = static_cast<u16>((clearColor ? BGFX_CLEAR_COLOR : 0U) |
                                                 (clearDepth ? BGFX_CLEAR_DEPTH : 0U));
-        bgfx::setViewClear(kOpaque3DView, clearFlags, kClearRgba, 1.0F, 0);
-        bgfx::setViewMode(kOpaque3DView, bgfx::ViewMode::Sequential);
+        bgfx::setViewClear(viewId, clearFlags, kClearRgba, 1.0F, 0);
+        bgfx::setViewMode(viewId, bgfx::ViewMode::Sequential);
 
         const bx::Vec3 eye{camera.positionX, camera.positionY, camera.positionZ};
         const bx::Vec3 target{
@@ -2506,15 +2626,15 @@ class BgfxRenderDevice final : public IRenderDevice {
             camera.positionZ + camera.forwardZ,
         };
         const bx::Vec3 up{camera.upX, camera.upY, camera.upZ};
-        float view[16]{};
-        bx::mtxLookAt(view, eye, target, up, bx::Handedness::Right);
+        float viewMatrix[16]{};
+        bx::mtxLookAt(viewMatrix, eye, target, up, bx::Handedness::Right);
 
         float projection[16]{};
         const bgfx::Caps* const caps = bgfx::getCaps();
         bx::mtxProj(projection, camera.verticalFovDegrees, camera.aspectRatio, camera.nearPlaneMeters,
                     camera.farPlaneMeters, caps != nullptr && caps->homogeneousDepth, bx::Handedness::Right);
-        bgfx::setViewTransform(kOpaque3DView, view, projection);
-        bgfx::touch(kOpaque3DView);
+        bgfx::setViewTransform(viewId, viewMatrix, projection);
+        bgfx::touch(viewId);
     }
 
     void configureSprite2DView(const RenderSurfaceState& surface, const RenderCamera2D& camera,
@@ -2612,6 +2732,143 @@ class BgfxRenderDevice final : public IRenderDevice {
         return geometry;
     }
 
+    struct ResolvedSkinnedOpaque3DGeometry final {
+        bgfx::VertexBufferHandle vertexBuffer = BGFX_INVALID_HANDLE;
+        bgfx::VertexBufferHandle skinVertexBuffer = BGFX_INVALID_HANDLE;
+        bgfx::IndexBufferHandle indexBuffer = BGFX_INVALID_HANDLE;
+        u16 jointCount = 0;
+    };
+
+    // No built-in skinned fixture exists: only an explicitly bound live skinned
+    // slot resolves. Static slots and stale bindings return nullopt.
+    [[nodiscard]] std::optional<ResolvedSkinnedOpaque3DGeometry>
+    resolveSkinnedOpaque3DGeometry(u32 meshKey) const noexcept
+    {
+        const auto binding = mesh3DBindings_.find(meshKey);
+        if (binding == mesh3DBindings_.end())
+        {
+            return std::nullopt;
+        }
+        const GpuMeshId id = binding->second;
+        if (id.index >= meshes_.size())
+        {
+            return std::nullopt;
+        }
+        const MeshSlot& slot = meshes_[id.index];
+        if (!slot.live || slot.identity.value() != id.generation || !slot.skinned ||
+            !bgfx::isValid(slot.vertexBuffer) || !bgfx::isValid(slot.skinVertexBuffer) ||
+            !bgfx::isValid(slot.indexBuffer))
+        {
+            return std::nullopt;
+        }
+        return ResolvedSkinnedOpaque3DGeometry{
+            .vertexBuffer = slot.vertexBuffer,
+            .skinVertexBuffer = slot.skinVertexBuffer,
+            .indexBuffer = slot.indexBuffer,
+            .jointCount = slot.jointCount,
+        };
+    }
+
+    [[nodiscard]] Core::Status validateMesh3DMaterialAlphaBindings(
+        RenderSceneView scene, FrameResourceTableView resources) const noexcept
+    {
+        const auto validateItems = [this, resources](const auto items) noexcept -> Core::Status {
+            for (const auto& item : items)
+            {
+                const FrameResourceDescriptor* material =
+                    resources.resolve(item.material, FrameResourceKind::Mesh3DMaterial);
+                if (material == nullptr ||
+                    material->deviceBindingKey >
+                        static_cast<u64>((std::numeric_limits<u32>::max)()))
+                {
+                    return Core::failure(
+                        RenderErrorCode::InvalidFrameResource,
+                        "A Mesh3D item references an invalid material frame resource");
+                }
+                const u32 materialKey = static_cast<u32>(material->deviceBindingKey);
+                const auto binding = mesh3DMaterialBindings_.find(materialKey);
+                const Mesh3DAlphaMode resolvedAlphaMode =
+                    binding == mesh3DMaterialBindings_.end()
+                        ? Mesh3DAlphaMode::Opaque
+                        : binding->second.alphaMode;
+                if (resolvedAlphaMode != item.alphaMode)
+                {
+                    return Core::failure(
+                        RenderErrorCode::InvalidFrameResource,
+                        "A Mesh3D item alpha mode does not match its device material binding");
+                }
+            }
+            return Core::success();
+        };
+
+        if (auto status = validateItems(scene.meshes3D()); !status)
+        {
+            return status;
+        }
+        return validateItems(scene.skinnedMeshes3D());
+    }
+
+    // Mirrors the Null device binding preflight: a bound static key must map to
+    // a non-skinned slot, a bound skinned key to a skinned slot whose joint
+    // count matches the item palette. Unbound keys stay tolerated (draw skips).
+    [[nodiscard]] Core::Status validateSkinnedMesh3DBindings(
+        RenderSceneView scene, FrameResourceTableView resources) const noexcept
+    {
+        for (const RenderMesh3DItem& item : scene.meshes3D())
+        {
+            const FrameResourceDescriptor* geometry =
+                resources.resolve(item.mesh, FrameResourceKind::Mesh3DGeometry);
+            if (geometry == nullptr)
+            {
+                continue;
+            }
+            const auto binding = mesh3DBindings_.find(static_cast<u32>(geometry->deviceBindingKey));
+            if (binding == mesh3DBindings_.end() || binding->second.index >= meshes_.size())
+            {
+                continue;
+            }
+            const MeshSlot& slot = meshes_[binding->second.index];
+            if (slot.live && slot.identity.value() == binding->second.generation && slot.skinned)
+            {
+                return Core::failure(
+                    RenderErrorCode::InvalidFrameResource,
+                    "A static Opaque3D item resolves a skinned mesh binding");
+            }
+        }
+        for (const RenderSkinnedMesh3DItem& item : scene.skinnedMeshes3D())
+        {
+            const FrameResourceDescriptor* geometry =
+                resources.resolve(item.mesh, FrameResourceKind::SkinnedMesh3DGeometry);
+            if (geometry == nullptr)
+            {
+                continue;
+            }
+            const auto binding = mesh3DBindings_.find(static_cast<u32>(geometry->deviceBindingKey));
+            if (binding == mesh3DBindings_.end() || binding->second.index >= meshes_.size())
+            {
+                continue;
+            }
+            const MeshSlot& slot = meshes_[binding->second.index];
+            if (!slot.live || slot.identity.value() != binding->second.generation)
+            {
+                continue;
+            }
+            if (!slot.skinned)
+            {
+                return Core::failure(
+                    RenderErrorCode::InvalidFrameResource,
+                    "A skinned Opaque3D item resolves a non-skinned mesh binding");
+            }
+            if (slot.jointCount != item.paletteJointCount)
+            {
+                return Core::failure(
+                    RenderErrorCode::InvalidFrameResource,
+                    "A skinned Opaque3D palette joint count does not match the bound skeleton");
+            }
+        }
+        return Core::success();
+    }
+
     void prepareOpaque3DInstanceBuffer(RenderSceneView scene,
                                        FrameResourceTableView resources,
                                        const PreparedOpaque3D& prepared,
@@ -2643,7 +2900,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         bgfx::InstanceDataBuffer& instanceBuffer,
         bgfx::ViewId view) noexcept
     {
-        if (prepared.requirements.instanceCount == 0)
+        if (prepared.requirements.batchCount == 0)
         {
             std::terminate();
         }
@@ -2723,11 +2980,16 @@ class BgfxRenderDevice final : public IRenderDevice {
                                   kPointLightShadowViews[faceIndex]);
     }
 
-    void submitOpaque3D(RenderSceneView scene, FrameResourceTableView resources,
-                        const PreparedOpaque3D& prepared,
-                        bgfx::InstanceDataBuffer& instanceBuffer) noexcept
+    void submitMesh3D(RenderSceneView scene, FrameResourceTableView resources,
+                      const PreparedOpaque3D& prepared,
+                      bgfx::InstanceDataBuffer& instanceBuffer,
+                      bool transparentPass) noexcept
     {
-        if (prepared.requirements.instanceCount == 0)
+        const bool passEmpty = transparentPass
+                                   ? scene.transparent3DDraws().empty()
+                                   : (scene.opaqueMeshes3D().empty() &&
+                                      scene.opaqueSkinnedMeshes3D().empty());
+        if (passEmpty)
         {
             return;
         }
@@ -2857,32 +3119,10 @@ class BgfxRenderDevice final : public IRenderDevice {
             };
         }
 
-        bgfx::setScissor();
-        for (const RenderMesh3DBatch& batch : scene.mesh3DBatches())
-        {
-            const FrameResourceDescriptor* meshResource =
-                resources.resolve(batch.mesh, FrameResourceKind::Mesh3DGeometry);
-            const FrameResourceDescriptor* materialResource =
-                resources.resolve(batch.material, FrameResourceKind::Mesh3DMaterial);
-            if (meshResource == nullptr || materialResource == nullptr ||
-                meshResource->deviceBindingKey > static_cast<u64>((std::numeric_limits<u32>::max)()) ||
-                materialResource->deviceBindingKey > static_cast<u64>((std::numeric_limits<u32>::max)()))
-            {
-                // submitFrame preflight validated the same immutable packet view.
-                std::terminate();
-            }
-            const u32 meshKey = static_cast<u32>(meshResource->deviceBindingKey);
-            const u32 materialKey = static_cast<u32>(materialResource->deviceBindingKey);
-            const u64 renderState = kOpaque3DState | (batch.doubleSided ? 0 : BGFX_STATE_CULL_CW);
-            bgfx::setState(renderState);
-
-            const auto geometry = resolveOpaque3DGeometry(meshKey);
-            if (!geometry.has_value())
-            {
-                // Unbound non-fixture meshKey: skip submit rather than draw wrong geometry.
-                continue;
-            }
-
+        // bgfx::submit() discards draw state, so every draw publishes complete
+        // material, texture, and frame uniform state. Shared by opaque batches
+        // and transparent static/skinned per-item draws below.
+        const auto bindMaterialAndFrameUniforms = [&](u32 materialKey) noexcept {
             const auto materialBinding = mesh3DMaterialBindings_.find(materialKey);
             const Mesh3DMaterialBindingDesc binding = materialBinding == mesh3DMaterialBindings_.end()
                                                           ? Mesh3DMaterialBindingDesc{}
@@ -2940,9 +3180,6 @@ class BgfxRenderDevice final : public IRenderDevice {
             // x = normal map bound; yzw unused.
             const std::array<float, 4> normalParams{normalMapBound, 0.0F, 0.0F, 0.0F};
 
-            bgfx::setVertexBuffer(0, geometry->vertexBuffer);
-            bgfx::setIndexBuffer(geometry->indexBuffer);
-            bgfx::setInstanceDataBuffer(&instanceBuffer, batch.firstItem, batch.itemCount);
             bgfx::setTexture(0, opaque3DSampler_, materialTexture);
             bgfx::setTexture(1, opaque3DMrSampler_, mrTexture);
             bgfx::setTexture(2, opaque3DNormalSampler_, normalTexture);
@@ -2987,7 +3224,171 @@ class BgfxRenderDevice final : public IRenderDevice {
                              static_cast<u16>(pointShadowMatrices.size()));
             bgfx::setUniform(opaque3DPointShadowParamsUniform_, pointShadowParams.data());
             bgfx::setUniform(opaque3DIblParamsUniform_, iblParams.data());
-            bgfx::submit(kOpaque3DView, opaque3DProgram_);
+        };
+
+        bgfx::setScissor();
+        if (!transparentPass && prepared.requirements.batchCount != 0)
+        {
+            for (const RenderMesh3DBatch& batch : scene.mesh3DBatches())
+            {
+                const FrameResourceDescriptor* meshResource =
+                    resources.resolve(batch.mesh, FrameResourceKind::Mesh3DGeometry);
+                const FrameResourceDescriptor* materialResource =
+                    resources.resolve(batch.material, FrameResourceKind::Mesh3DMaterial);
+                if (meshResource == nullptr || materialResource == nullptr ||
+                    meshResource->deviceBindingKey > static_cast<u64>((std::numeric_limits<u32>::max)()) ||
+                    materialResource->deviceBindingKey > static_cast<u64>((std::numeric_limits<u32>::max)()))
+                {
+                    // submitFrame preflight validated the same immutable packet view.
+                    std::terminate();
+                }
+                const u32 meshKey = static_cast<u32>(meshResource->deviceBindingKey);
+                const u32 materialKey = static_cast<u32>(materialResource->deviceBindingKey);
+                const u64 renderState = kOpaque3DState | (batch.doubleSided ? 0 : BGFX_STATE_CULL_CW);
+                bgfx::setState(renderState);
+
+                const auto geometry = resolveOpaque3DGeometry(meshKey);
+                if (!geometry.has_value())
+                {
+                    // Unbound non-fixture meshKey: skip submit rather than draw wrong geometry.
+                    continue;
+                }
+
+                bgfx::setVertexBuffer(0, geometry->vertexBuffer);
+                bgfx::setIndexBuffer(geometry->indexBuffer);
+                bgfx::setInstanceDataBuffer(&instanceBuffer, batch.firstItem, batch.itemCount);
+                bindMaterialAndFrameUniforms(materialKey);
+                bgfx::submit(kOpaque3DView, opaque3DProgram_);
+            }
+        }
+
+        const std::span<const float> palette = scene.skinnedMesh3DPalette();
+        const auto submitSkinnedItem = [&](const RenderSkinnedMesh3DItem& item,
+                                           bgfx::ViewId viewId,
+                                           u64 passState) noexcept {
+            const FrameResourceDescriptor* meshResource =
+                resources.resolve(item.mesh, FrameResourceKind::SkinnedMesh3DGeometry);
+            const FrameResourceDescriptor* materialResource =
+                resources.resolve(item.material, FrameResourceKind::Mesh3DMaterial);
+            if (meshResource == nullptr || materialResource == nullptr ||
+                meshResource->deviceBindingKey > static_cast<u64>((std::numeric_limits<u32>::max)()) ||
+                materialResource->deviceBindingKey > static_cast<u64>((std::numeric_limits<u32>::max)()))
+            {
+                // submitFrame preflight validated the same immutable packet view.
+                std::terminate();
+            }
+            const auto geometry =
+                resolveSkinnedOpaque3DGeometry(static_cast<u32>(meshResource->deviceBindingKey));
+            if (!geometry.has_value())
+            {
+                // Unbound skinned meshKey: there is no skinned fixture, skip.
+                return;
+            }
+            if (geometry->jointCount != item.paletteJointCount ||
+                static_cast<u64>(item.paletteJointOffset) + item.paletteJointCount >
+                    palette.size() / SkinnedMesh3DPaletteFloatsPerJoint)
+            {
+                // submitFrame preflight validated palette shape against this binding.
+                std::terminate();
+            }
+
+            const u64 renderState = passState | (item.doubleSided ? 0 : BGFX_STATE_CULL_CW);
+            bgfx::setState(renderState);
+            bgfx::setTransform(item.columnMajorWorldTransform.data());
+            bgfx::setVertexBuffer(0, geometry->vertexBuffer);
+            bgfx::setVertexBuffer(1, geometry->skinVertexBuffer);
+            bgfx::setIndexBuffer(geometry->indexBuffer);
+            const float* itemPalette =
+                palette.data() + static_cast<usize>(item.paletteJointOffset) *
+                                     SkinnedMesh3DPaletteFloatsPerJoint;
+            const u16 paletteArrayJointCount = static_cast<u16>((std::min)(
+                item.paletteJointCount,
+                static_cast<u32>(kOpaque3DSkinPaletteArrayJointCount)));
+            bgfx::setUniform(opaque3DSkinPaletteUniform_,
+                             itemPalette,
+                             paletteArrayJointCount);
+            if (item.paletteJointCount > kOpaque3DSkinPaletteArrayJointCount)
+            {
+                bgfx::setUniform(
+                    opaque3DSkinPaletteLastUniform_,
+                    itemPalette + static_cast<usize>(kOpaque3DSkinPaletteArrayJointCount) *
+                                      SkinnedMesh3DPaletteFloatsPerJoint);
+            }
+            const std::array<float, 4> skinColor{
+                item.baseColorFactor.red,
+                item.baseColorFactor.green,
+                item.baseColorFactor.blue,
+                item.baseColorFactor.alpha,
+            };
+            bgfx::setUniform(opaque3DSkinColorUniform_, skinColor.data());
+            bindMaterialAndFrameUniforms(static_cast<u32>(materialResource->deviceBindingKey));
+            bgfx::submit(viewId, opaque3DSkinnedProgram_);
+        };
+
+        if (!transparentPass)
+        {
+            for (const RenderSkinnedMesh3DItem& item : scene.opaqueSkinnedMeshes3D())
+            {
+                submitSkinnedItem(item, kOpaque3DView, kOpaque3DState);
+            }
+            return;
+        }
+
+        const std::span<const RenderMesh3DItem> staticItems = scene.meshes3D();
+        const std::span<const RenderSkinnedMesh3DItem> skinnedItems =
+            scene.skinnedMeshes3D();
+        for (const RenderTransparent3DDraw& draw : scene.transparent3DDraws())
+        {
+            switch (draw.kind)
+            {
+            case RenderTransparent3DDrawKind::StaticMesh:
+            {
+                if (draw.itemIndex >= staticItems.size())
+                {
+                    std::terminate();
+                }
+                const RenderMesh3DItem& item = staticItems[draw.itemIndex];
+                const FrameResourceDescriptor* meshResource =
+                    resources.resolve(item.mesh, FrameResourceKind::Mesh3DGeometry);
+                const FrameResourceDescriptor* materialResource =
+                    resources.resolve(item.material, FrameResourceKind::Mesh3DMaterial);
+                if (meshResource == nullptr || materialResource == nullptr ||
+                    meshResource->deviceBindingKey >
+                        static_cast<u64>((std::numeric_limits<u32>::max)()) ||
+                    materialResource->deviceBindingKey >
+                        static_cast<u64>((std::numeric_limits<u32>::max)()))
+                {
+                    std::terminate();
+                }
+                const auto geometry = resolveOpaque3DGeometry(
+                    static_cast<u32>(meshResource->deviceBindingKey));
+                if (!geometry.has_value())
+                {
+                    continue;
+                }
+
+                const u64 renderState =
+                    kTransparent3DState | (item.doubleSided ? 0 : BGFX_STATE_CULL_CW);
+                bgfx::setState(renderState);
+                bgfx::setVertexBuffer(0, geometry->vertexBuffer);
+                bgfx::setIndexBuffer(geometry->indexBuffer);
+                bgfx::setInstanceDataBuffer(&instanceBuffer, draw.itemIndex, 1);
+                bindMaterialAndFrameUniforms(
+                    static_cast<u32>(materialResource->deviceBindingKey));
+                bgfx::submit(kTransparent3DView, opaque3DProgram_);
+                break;
+            }
+            case RenderTransparent3DDrawKind::SkinnedMesh:
+                if (draw.itemIndex >= skinnedItems.size())
+                {
+                    std::terminate();
+                }
+                submitSkinnedItem(skinnedItems[draw.itemIndex], kTransparent3DView,
+                                  kTransparent3DState);
+                break;
+            default:
+                std::terminate();
+            }
         }
     }
 
@@ -3552,13 +3953,101 @@ class BgfxRenderDevice final : public IRenderDevice {
         MeshSlot& slot = meshes_[slotIndex];
         slot.vertexBuffer = vb;
         slot.indexBuffer = ib;
+        slot.skinVertexBuffer = BGFX_INVALID_HANDLE;
         slot.vertexCount = desc.vertexCount;
         slot.indexCount = desc.indexCount;
+        slot.jointCount = 0;
+        slot.skinned = false;
         slot.live = true;
         slot.retirementPhase = RetirementPhase::None;
         ++statistics_.liveResources;
         ++statistics_.liveResources;
         return GpuMeshId{resourceOwnerId(), slotIndex, slot.identity.value()};
+    }
+
+    [[nodiscard]] Core::Result<GpuMeshId> createSkinnedMesh(const SkinnedMeshUploadDesc& desc) override
+    {
+        if (auto status = validateApiThread("BgfxRenderDevice::createSkinnedMesh"); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        if (stopped_ || !bgfxInitialized_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        constexpr u16 MaxJointCount = static_cast<u16>(MaxSkinnedMesh3DPaletteJointCount);
+        constexpr u32 InfluencesPerVertex = 4;
+        if (desc.jointCount == 0 || desc.jointCount > MaxJointCount ||
+            desc.vertexCount > (std::numeric_limits<u32>::max)() / InfluencesPerVertex ||
+            desc.jointIndices.size() != static_cast<usize>(desc.vertexCount) * InfluencesPerVertex ||
+            desc.jointWeights.size() != static_cast<usize>(desc.vertexCount) * InfluencesPerVertex)
+        {
+            return Core::failure(RenderErrorCode::InvalidMeshUpload,
+                                 "invalid SkinnedMesh upload skin stream shape");
+        }
+        for (const u16 jointIndex : desc.jointIndices)
+        {
+            if (jointIndex >= desc.jointCount)
+            {
+                return Core::failure(RenderErrorCode::InvalidMeshUpload,
+                                     "SkinnedMesh joint index out of range");
+            }
+        }
+        for (usize vertexIndex = 0; vertexIndex < desc.vertexCount; ++vertexIndex)
+        {
+            u32 weightSum = 0;
+            for (usize influence = 0; influence < InfluencesPerVertex; ++influence)
+            {
+                weightSum += desc.jointWeights[vertexIndex * InfluencesPerVertex + influence];
+            }
+            if (weightSum != 0xFFFFU)
+            {
+                return Core::failure(RenderErrorCode::InvalidMeshUpload,
+                                     "SkinnedMesh vertex weights must sum to 0xFFFF");
+            }
+        }
+
+        auto meshId = createStaticMesh(StaticMeshUploadDesc{
+            .vertexCount = desc.vertexCount,
+            .indexCount = desc.indexCount,
+            .vertices = desc.vertices,
+            .indices = desc.indices,
+        });
+        if (!meshId)
+        {
+            return meshId;
+        }
+
+        const bgfx::Memory* skinMemory = bgfx::alloc(
+            static_cast<u32>(static_cast<usize>(desc.vertexCount) * sizeof(BgfxOpaque3DSkinVertex)));
+        auto* skinVertices = reinterpret_cast<BgfxOpaque3DSkinVertex*>(skinMemory->data);
+        constexpr float WeightScale = 1.0F / 65535.0F;
+        for (usize vertexIndex = 0; vertexIndex < desc.vertexCount; ++vertexIndex)
+        {
+            BgfxOpaque3DSkinVertex& vertex = skinVertices[vertexIndex];
+            for (usize influence = 0; influence < InfluencesPerVertex; ++influence)
+            {
+                const usize source = vertexIndex * InfluencesPerVertex + influence;
+                vertex.jointIndices[influence] = static_cast<u8>(desc.jointIndices[source]);
+                vertex.jointWeights[influence] =
+                    static_cast<float>(desc.jointWeights[source]) * WeightScale;
+            }
+        }
+        const bgfx::VertexBufferHandle skinBuffer =
+            bgfx::createVertexBuffer(skinMemory, opaque3DSkinVertexLayout_);
+        if (!bgfx::isValid(skinBuffer))
+        {
+            (void)destroyStaticMesh(*meshId);
+            return Core::failure(RenderErrorCode::InvalidMeshUpload,
+                                 "bgfx rejected the SkinnedMesh skin vertex buffer");
+        }
+
+        MeshSlot& slot = meshes_[meshId->index];
+        slot.skinVertexBuffer = skinBuffer;
+        slot.jointCount = desc.jointCount;
+        slot.skinned = true;
+        ++statistics_.liveResources;
+        return meshId;
     }
 
     [[nodiscard]] Core::Status destroyStaticMesh(GpuMeshId mesh) noexcept override
@@ -3615,6 +4104,12 @@ class BgfxRenderDevice final : public IRenderDevice {
                 slot.vertexBuffer = BGFX_INVALID_HANDLE;
                 --statistics_.liveResources;
             }
+            if (bgfx::isValid(slot.skinVertexBuffer))
+            {
+                bgfx::destroy(slot.skinVertexBuffer);
+                slot.skinVertexBuffer = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
             if (bgfx::isValid(slot.indexBuffer))
             {
                 bgfx::destroy(slot.indexBuffer);
@@ -3623,6 +4118,8 @@ class BgfxRenderDevice final : public IRenderDevice {
             }
             slot.vertexCount = 0;
             slot.indexCount = 0;
+            slot.jointCount = 0;
+            slot.skinned = false;
             slot.retirementPhase = RetirementPhase::None;
             ++statistics_.completedGpuRetirements;
             return Core::success();
@@ -3734,10 +4231,11 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         if (!(desc.metallicFactor >= 0.0F && desc.metallicFactor <= 1.0F) ||
             !(desc.roughnessFactor >= 0.0F && desc.roughnessFactor <= 1.0F) ||
-            !std::isfinite(desc.metallicFactor) || !std::isfinite(desc.roughnessFactor))
+            !std::isfinite(desc.metallicFactor) || !std::isfinite(desc.roughnessFactor) ||
+            !isSupportedMesh3DAlphaMode(desc.alphaMode))
         {
             return Core::failure(RenderErrorCode::InvalidTextureUpload,
-                                 "metallic and roughness must be finite values in [0,1]");
+                                 "Mesh3D material factors or alpha mode are invalid");
         }
 
         if (!isLiveTexture(desc.baseColorTexture) || !isLiveTexture(desc.metallicRoughnessTexture) ||
@@ -4268,9 +4766,18 @@ class BgfxRenderDevice final : public IRenderDevice {
             }
             case RenderPassKind::Opaque3D:
                 requireResource(RenderPassResource::PrimarySurface);
-                configureOpaque3DView(surface, *scene.perspectiveCamera(), pass.clearColor, pass.clearDepth);
-                submitOpaque3D(scene, resources, preparedOpaque3D,
-                               opaque3DInstanceBuffer);
+                configureMesh3DView(kOpaque3DView, surface, *scene.perspectiveCamera(),
+                                    pass.clearColor, pass.clearDepth);
+                submitMesh3D(scene, resources, preparedOpaque3D,
+                             opaque3DInstanceBuffer, false);
+                break;
+            case RenderPassKind::Transparent3D:
+                requireResource(RenderPassResource::PrimarySurface);
+                configureMesh3DView(kTransparent3DView, surface,
+                                    *scene.perspectiveCamera(), pass.clearColor,
+                                    pass.clearDepth);
+                submitMesh3D(scene, resources, preparedOpaque3D,
+                             opaque3DInstanceBuffer, true);
                 break;
             case RenderPassKind::Sprite2D:
                 requireResource(RenderPassResource::PrimarySurface);
@@ -4298,9 +4805,14 @@ class BgfxRenderDevice final : public IRenderDevice {
     u64 nextSubmissionIndex_ = 0;
     bgfx::VertexLayout transientByteLayout_{};
     bgfx::VertexLayout opaque3DVertexLayout_{};
+    bgfx::VertexLayout opaque3DSkinVertexLayout_{};
     bgfx::VertexLayout sprite2DVertexLayout_{};
     bgfx::VertexLayout uiVertexLayout_{};
     bgfx::ProgramHandle opaque3DProgram_ = BGFX_INVALID_HANDLE;
+    bgfx::ProgramHandle opaque3DSkinnedProgram_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle opaque3DSkinPaletteUniform_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle opaque3DSkinPaletteLastUniform_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle opaque3DSkinColorUniform_ = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle opaque3DCsmDepthProgram_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DCsmAtlasSampler_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DCsmMatricesUniform_ = BGFX_INVALID_HANDLE;
@@ -4390,9 +4902,13 @@ class BgfxRenderDevice final : public IRenderDevice {
     struct MeshSlot final {
         bgfx::VertexBufferHandle vertexBuffer = BGFX_INVALID_HANDLE;
         bgfx::IndexBufferHandle indexBuffer = BGFX_INVALID_HANDLE;
+        // Valid only for skinned slots; retires together with the other buffers.
+        bgfx::VertexBufferHandle skinVertexBuffer = BGFX_INVALID_HANDLE;
         BgfxMeshResourceSlotGeneration identity{};
         u32 vertexCount = 0;
         u32 indexCount = 0;
+        u16 jointCount = 0;
+        bool skinned = false;
         bool live = false;
         RetirementPhase retirementPhase = RetirementPhase::None;
         FramePin completionPin{};

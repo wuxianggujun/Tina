@@ -1,8 +1,10 @@
 #include <tina/asset/CatalogCook.hpp>
 #include <tina/asset/CatalogPackage.hpp>
 #include <tina/asset/GltfCook.hpp>
+#include <tina/asset_format/AnimationClip3DPayload.hpp>
 #include <tina/asset_format/MaterialPayload.hpp>
 #include <tina/asset_format/PrefabPayload.hpp>
+#include <tina/asset_format/SkinnedMeshPayload.hpp>
 #include <tina/asset_format/StaticMeshPayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
 #include <tina/core/hash/ContentHashDigest.hpp>
@@ -23,6 +25,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #if defined(_WIN32)
@@ -49,6 +52,9 @@ struct MountPointReparseData final {
 
 namespace Tina::Asset {
 namespace {
+
+[[nodiscard]] std::string skinnedTriangleGltfJson(std::string_view interpolation = "LINEAR");
+[[nodiscard]] std::vector<unsigned char> skinnedTriangleBufferBytes(bool invalidWeight = false);
 
 // Minimal glTF 2.0 triangle with required POSITION/NORMAL/TEXCOORD_0 + indices.
 // Unit right triangle in XY.
@@ -134,7 +140,8 @@ namespace {
     }
   }],
   "textures": [{"source": 0}],
-  "images": [{"uri": ")json"} + std::string{imageUri} + R"json("}],
+  "images": [{"uri": ")json"} +
+           std::string{imageUri} + R"json("}],
   "accessors": [
     {
       "bufferView": 0,
@@ -195,7 +202,8 @@ namespace {
     {"buffer": 0, "byteOffset": 72, "byteLength": 24},
     {"buffer": 0, "byteOffset": 96, "byteLength": 6}
   ],
-  "buffers": [{"byteLength": 104, "uri": ")json"} + std::string{uri} + R"json("}]
+  "buffers": [{"byteLength": 104, "uri": ")json"} +
+           std::string{uri} + R"json("}]
 })json";
 }
 
@@ -292,25 +300,13 @@ namespace {
 {
     std::vector<unsigned char> bytes(172U, 0U);
     const std::array<float, 15> positions{
-        0, 0, 0,
-        1, 0, 0,
-        0, 1, 0,
-        -1, 0, 0,
-        0, 1, 0,
+        0, 0, 0, 1, 0, 0, 0, 1, 0, -1, 0, 0, 0, 1, 0,
     };
     const std::array<float, 15> normals{
-        0, 0, 1,
-        0, 0, 1,
-        0, 0, 1,
-        0, 0, 1,
-        0, 0, 1,
+        0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1,
     };
     const std::array<float, 10> texcoords{
-        0, 0,
-        1, 0,
-        0, 1,
-        1, 0,
-        0, 1,
+        0, 0, 1, 0, 0, 1, 1, 0, 0, 1,
     };
     const std::array<Core::u16, 6> indices{0, 1, 2, 0, 4, 3};
     std::memcpy(bytes.data() + 0U, positions.data(), sizeof(positions));
@@ -355,18 +351,15 @@ void writeTextFile(const std::filesystem::path& path, std::string_view text)
     ASSERT_TRUE(output.good());
 }
 
-template <typename Container>
-void writeBinaryFile(const std::filesystem::path& path, const Container& bytes)
+template <typename Container> void writeBinaryFile(const std::filesystem::path& path, const Container& bytes)
 {
     std::ofstream output(path, std::ios::binary);
     ASSERT_TRUE(output.good());
-    output.write(reinterpret_cast<const char*>(bytes.data()),
-                 static_cast<std::streamsize>(bytes.size()));
+    output.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
     ASSERT_TRUE(output.good());
 }
 
-[[nodiscard]] bool createDirectoryLink(const std::filesystem::path& target,
-                                       const std::filesystem::path& link,
+[[nodiscard]] bool createDirectoryLink(const std::filesystem::path& target, const std::filesystem::path& link,
                                        std::error_code& error)
 {
 #if defined(_WIN32)
@@ -388,8 +381,7 @@ void writeBinaryFile(const std::filesystem::path& path, const Container& bytes)
     constexpr std::size_t pathBufferOffset = offsetof(MountPointReparseData, pathBuffer);
     const std::size_t pathBufferBytes = substituteBytes + sizeof(wchar_t) + printBytes + sizeof(wchar_t);
     if (pathBufferOffset + pathBufferBytes > MAXIMUM_REPARSE_DATA_BUFFER_SIZE ||
-        pathBufferOffset - reparseHeaderBytes + pathBufferBytes >
-            (std::numeric_limits<USHORT>::max)())
+        pathBufferOffset - reparseHeaderBytes + pathBufferBytes > (std::numeric_limits<USHORT>::max)())
     {
         error = std::make_error_code(std::errc::filename_too_long);
         return false;
@@ -398,29 +390,26 @@ void writeBinaryFile(const std::filesystem::path& path, const Container& bytes)
     std::vector<unsigned char> storage(pathBufferOffset + pathBufferBytes, 0);
     auto* reparse = reinterpret_cast<MountPointReparseData*>(storage.data());
     reparse->reparseTag = IO_REPARSE_TAG_MOUNT_POINT;
-    reparse->reparseDataLength = static_cast<USHORT>(
-        pathBufferOffset - reparseHeaderBytes + pathBufferBytes);
+    reparse->reparseDataLength = static_cast<USHORT>(pathBufferOffset - reparseHeaderBytes + pathBufferBytes);
     reparse->substituteNameOffset = 0;
     reparse->substituteNameLength = static_cast<USHORT>(substituteBytes);
     reparse->printNameOffset = static_cast<USHORT>(substituteBytes + sizeof(wchar_t));
     reparse->printNameLength = static_cast<USHORT>(printBytes);
     std::memcpy(reparse->pathBuffer, substituteName.data(), substituteBytes);
-    std::memcpy(reinterpret_cast<unsigned char*>(reparse->pathBuffer) + reparse->printNameOffset,
-                printName.data(), printBytes);
+    std::memcpy(reinterpret_cast<unsigned char*>(reparse->pathBuffer) + reparse->printNameOffset, printName.data(),
+                printBytes);
 
-    const HANDLE directory = CreateFileW(
-        link.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
-        FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    const HANDLE directory = CreateFileW(link.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+                                         FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr);
     if (directory == INVALID_HANDLE_VALUE)
     {
         error = std::error_code(static_cast<int>(GetLastError()), std::system_category());
         return false;
     }
     DWORD returned = 0;
-    const BOOL result = DeviceIoControl(
-        directory, FSCTL_SET_REPARSE_POINT, reparse,
-        static_cast<DWORD>(reparseHeaderBytes + reparse->reparseDataLength),
-        nullptr, 0, &returned, nullptr);
+    const BOOL result = DeviceIoControl(directory, FSCTL_SET_REPARSE_POINT, reparse,
+                                        static_cast<DWORD>(reparseHeaderBytes + reparse->reparseDataLength), nullptr, 0,
+                                        &returned, nullptr);
     const DWORD nativeError = result ? ERROR_SUCCESS : GetLastError();
     CloseHandle(directory);
     if (!result)
@@ -436,8 +425,7 @@ void writeBinaryFile(const std::filesystem::path& path, const Container& bytes)
 #endif
 }
 
-void writeBigEndianU32(std::vector<unsigned char>& bytes, std::size_t offset,
-                       std::uint32_t value)
+void writeBigEndianU32(std::vector<unsigned char>& bytes, std::size_t offset, std::uint32_t value)
 {
     ASSERT_LE(offset + 4U, bytes.size());
     bytes[offset + 0U] = static_cast<unsigned char>((value >> 24U) & 0xFFU);
@@ -459,8 +447,7 @@ TEST(GltfCookTests, CooksMinimalTriangleToMeshMaterialPrefab)
         out << minimalTriangleGltfJson();
     }
 
-    auto request = cookGltfFileToCatalogRequest(
-        gltfPath.string(), AssetFormat::TargetPlatform::LinuxX64);
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::LinuxX64);
     ASSERT_TRUE(request.has_value()) << (request ? "" : request.error().message);
     EXPECT_EQ(request->targetPlatform, AssetFormat::TargetPlatform::LinuxX64);
     ASSERT_EQ(request->assets.size(), 3U);
@@ -478,12 +465,13 @@ TEST(GltfCookTests, CooksMinimalTriangleToMeshMaterialPrefab)
             EXPECT_EQ(view->vertexCount, 3U);
             EXPECT_EQ(view->indexCount, 3U);
             EXPECT_EQ(view->vertices.size(), 3U * AssetFormat::StaticMeshWire::FloatsPerVertex);
-        }
-        else if (asset.assetKind == AssetFormat::AssetKind::Material)
+        } else if (asset.assetKind == AssetFormat::AssetKind::Material)
         {
             sawMaterial = true;
-        }
-        else if (asset.assetKind == AssetFormat::AssetKind::Prefab)
+            auto view = AssetFormat::parseMaterialPayload(asset.payload);
+            ASSERT_TRUE(view.has_value()) << (view ? "" : view.error().message);
+            EXPECT_EQ(view->alphaMode, AssetFormat::MaterialAlphaMode::Opaque);
+        } else if (asset.assetKind == AssetFormat::AssetKind::Prefab)
         {
             sawPrefab = true;
             std::vector<AssetFormat::PrefabNodeView> nodes;
@@ -498,6 +486,573 @@ TEST(GltfCookTests, CooksMinimalTriangleToMeshMaterialPrefab)
 
     const auto catalogRoot = dir / "catalog";
     ASSERT_TRUE(cookAndPublishCatalogPackage(catalogRoot.string(), *request).has_value());
+}
+
+TEST(GltfCookTests, MapsBlendAlphaModeAndRejectsUnsupportedModes)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_alpha_mode";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto gltfPath = dir / "triangle.gltf";
+
+    const auto writeWithAlphaMode = [&](std::string_view alphaMode) {
+        std::string json = minimalTriangleGltfJson();
+        constexpr std::string_view materialMember = "\"pbrMetallicRoughness\"";
+        const std::size_t offset = json.find(materialMember);
+        if (offset == std::string::npos)
+        {
+            return false;
+        }
+        json.insert(offset, "\"alphaMode\": \"" + std::string{alphaMode} + "\",\n    ");
+        writeTextFile(gltfPath, json);
+        return true;
+    };
+
+    ASSERT_TRUE(writeWithAlphaMode("BLEND"));
+    auto blendRequest = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+    ASSERT_TRUE(blendRequest.has_value()) << (blendRequest ? "" : blendRequest.error().message);
+    const auto material =
+        std::find_if(blendRequest->assets.begin(), blendRequest->assets.end(), [](const CatalogCookAssetSpec& asset) {
+            return asset.assetKind == AssetFormat::AssetKind::Material;
+        });
+    ASSERT_NE(material, blendRequest->assets.end());
+    auto materialView = AssetFormat::parseMaterialPayload(material->payload);
+    ASSERT_TRUE(materialView.has_value()) << (materialView ? "" : materialView.error().message);
+    EXPECT_EQ(materialView->alphaMode, AssetFormat::MaterialAlphaMode::Blend);
+
+    for (const std::string_view unsupported : {std::string_view{"MASK"}, std::string_view{"UNKNOWN"}})
+    {
+        SCOPED_TRACE(unsupported);
+        ASSERT_TRUE(writeWithAlphaMode(unsupported));
+        auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+        ASSERT_FALSE(request.has_value());
+        if (unsupported == "MASK")
+        {
+            EXPECT_NE(request.error().message.find("MASK"), std::string::npos) << request.error().message;
+        } else
+        {
+            EXPECT_NE(request.error().message.find("alphaMode"), std::string::npos) << request.error().message;
+        }
+    }
+
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST(GltfCookTests, CooksSkinAndAnimationClip3D)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_skin_animation";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto gltfPath = dir / "skinned.gltf";
+    writeTextFile(gltfPath, skinnedTriangleGltfJson());
+    writeBinaryFile(dir / "geometry.bin", skinnedTriangleBufferBytes());
+
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::LinuxX64);
+    ASSERT_TRUE(request.has_value()) << (request ? "" : request.error().message);
+    bool sawSkinned = false;
+    bool sawAnimation = false;
+    for (const auto& asset : request->assets)
+    {
+        if (asset.assetKind == AssetFormat::AssetKind::SkinnedMesh)
+        {
+            sawSkinned = true;
+            auto view = AssetFormat::parseSkinnedMeshPayload(asset.payload);
+            ASSERT_TRUE(view.has_value()) << view.error().message;
+            EXPECT_EQ(view->jointCount, 1U);
+            EXPECT_EQ(view->jointWeights[0], AssetFormat::SkinnedMeshWire::WeightScale);
+        }
+        if (asset.assetKind == AssetFormat::AssetKind::AnimationClip3D)
+        {
+            sawAnimation = true;
+            auto view = AssetFormat::parseAnimationClip3DPayload(asset.payload);
+            ASSERT_TRUE(view.has_value()) << view.error().message;
+            EXPECT_EQ(view->jointCount, 1U);
+            EXPECT_FLOAT_EQ(view->durationSeconds, 1.0F);
+        }
+    }
+    EXPECT_TRUE(sawSkinned);
+    EXPECT_TRUE(sawAnimation);
+    const auto catalogRoot = dir / "catalog";
+    ASSERT_TRUE(cookAndPublishCatalogPackage(catalogRoot.string(), *request).has_value());
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST(GltfCookTests, CanonicalizesSkinInfluencesAfterWeightQuantization)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_skin_quantized_order";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto gltfPath = dir / "skinned.gltf";
+
+    std::string json = skinnedTriangleGltfJson();
+    const std::string authoredNodes = "\"nodes\":[{\"children\":[1]},{\"mesh\":0,\"skin\":0}]";
+    const std::string authoredSkin = "\"skins\":[{\"joints\":[0],\"inverseBindMatrices\":7}]";
+    ASSERT_NE(json.find(authoredNodes), std::string::npos);
+    ASSERT_NE(json.find(authoredSkin), std::string::npos);
+    json.replace(json.find(authoredNodes), authoredNodes.size(),
+                 "\"nodes\":[{\"children\":[1,2,3,4]},{},{},{},{\"mesh\":0,\"skin\":0}]");
+    json.replace(json.find(authoredSkin), authoredSkin.size(), "\"skins\":[{\"joints\":[0,1,2,3]}]");
+    writeTextFile(gltfPath, json);
+
+    auto bytes = skinnedTriangleBufferBytes();
+    const std::array<Core::u16, 12> joints{3, 2, 1, 0, 3, 2, 1, 0, 3, 2, 1, 0};
+    const std::array<float, 12> weights{
+        32767.1F, 32766.9F, 0.5F, 0.5F, 32767.1F, 32766.9F, 0.5F, 0.5F, 32767.1F, 32766.9F, 0.5F, 0.5F,
+    };
+    std::memcpy(bytes.data() + 144, joints.data(), sizeof(joints));
+    std::memcpy(bytes.data() + 168, weights.data(), sizeof(weights));
+    writeBinaryFile(dir / "geometry.bin", bytes);
+
+    const auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::LinuxX64);
+    ASSERT_TRUE(request.has_value()) << (request ? "" : request.error().message);
+    for (const auto& asset : request->assets)
+    {
+        if (asset.assetKind != AssetFormat::AssetKind::SkinnedMesh)
+        {
+            continue;
+        }
+        const auto view = AssetFormat::parseSkinnedMeshPayload(asset.payload);
+        ASSERT_TRUE(view.has_value()) << (view ? "" : view.error().message);
+        ASSERT_GE(view->jointIndices.size(), 4U);
+        ASSERT_GE(view->jointWeights.size(), 4U);
+        EXPECT_EQ(view->jointIndices[0], 2U);
+        EXPECT_EQ(view->jointWeights[0], 32767U);
+        EXPECT_EQ(view->jointIndices[1], 3U);
+        EXPECT_EQ(view->jointWeights[1], 32767U);
+        EXPECT_EQ(view->jointIndices[2], 0U);
+        EXPECT_EQ(view->jointWeights[2], 1U);
+        EXPECT_EQ(view->jointIndices[3], 0U);
+        EXPECT_EQ(view->jointWeights[3], 0U);
+        std::filesystem::remove_all(dir, ec);
+        return;
+    }
+    FAIL() << "cooked request did not contain a SkinnedMesh";
+}
+
+TEST(GltfCookTests, MergesDuplicateSkinInfluencesBeforeQuantization)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_skin_duplicate_influences";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto gltfPath = dir / "skinned.gltf";
+
+    std::string json = skinnedTriangleGltfJson();
+    const std::string authoredNodes = "\"nodes\":[{\"children\":[1]},{\"mesh\":0,\"skin\":0}]";
+    const std::string authoredSkin = "\"skins\":[{\"joints\":[0],\"inverseBindMatrices\":7}]";
+    ASSERT_NE(json.find(authoredNodes), std::string::npos);
+    ASSERT_NE(json.find(authoredSkin), std::string::npos);
+    json.replace(json.find(authoredNodes), authoredNodes.size(),
+                 "\"nodes\":[{\"children\":[1,2]},{},{\"mesh\":0,\"skin\":0}]");
+    json.replace(json.find(authoredSkin), authoredSkin.size(), "\"skins\":[{\"joints\":[0,1,2]}]");
+    writeTextFile(gltfPath, json);
+
+    auto bytes = skinnedTriangleBufferBytes();
+    const std::array<Core::u16, 12> joints{
+        1, 1, 2, 0, 1, 1, 2, 0, 1, 1, 2, 0,
+    };
+    const std::array<float, 12> weights{
+        0.25F, 0.25F, 0.25F, 0.25F, 0.25F, 0.25F, 0.25F, 0.25F, 0.25F, 0.25F, 0.25F, 0.25F,
+    };
+    std::memcpy(bytes.data() + 144, joints.data(), sizeof(joints));
+    std::memcpy(bytes.data() + 168, weights.data(), sizeof(weights));
+    writeBinaryFile(dir / "geometry.bin", bytes);
+
+    const auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::LinuxX64);
+    ASSERT_TRUE(request.has_value()) << (request ? "" : request.error().message);
+    for (const auto& asset : request->assets)
+    {
+        if (asset.assetKind != AssetFormat::AssetKind::SkinnedMesh)
+        {
+            continue;
+        }
+        const auto view = AssetFormat::parseSkinnedMeshPayload(asset.payload);
+        ASSERT_TRUE(view.has_value()) << (view ? "" : view.error().message);
+        ASSERT_GE(view->jointIndices.size(), 4U);
+        EXPECT_EQ(view->jointIndices[0], 1U);
+        EXPECT_EQ(view->jointWeights[0], 32767U);
+        EXPECT_EQ(view->jointIndices[1], 0U);
+        EXPECT_EQ(view->jointWeights[1], 16384U);
+        EXPECT_EQ(view->jointIndices[2], 2U);
+        EXPECT_EQ(view->jointWeights[2], 16384U);
+        EXPECT_EQ(view->jointIndices[3], 0U);
+        EXPECT_EQ(view->jointWeights[3], 0U);
+        std::filesystem::remove_all(dir, ec);
+        return;
+    }
+    FAIL() << "cooked request did not contain a SkinnedMesh";
+}
+
+TEST(GltfCookTests, RejectsMalformedSkinWeightAndCubicAnimation)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_skin_malformed";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto gltfPath = dir / "skinned.gltf";
+    writeTextFile(gltfPath, skinnedTriangleGltfJson());
+    writeBinaryFile(dir / "geometry.bin", skinnedTriangleBufferBytes(true));
+    auto badWeight = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::LinuxX64);
+    ASSERT_FALSE(badWeight.has_value());
+
+    writeTextFile(gltfPath, skinnedTriangleGltfJson("CUBICSPLINE"));
+    writeBinaryFile(dir / "geometry.bin", skinnedTriangleBufferBytes());
+    auto cubic = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::LinuxX64);
+    ASSERT_FALSE(cubic.has_value());
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST(GltfCookTests, RejectsUnsupportedOrUnboundSkinAttributeSets)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_skin_attribute_contract";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto gltfPath = dir / "skinned.gltf";
+    writeBinaryFile(dir / "geometry.bin", skinnedTriangleBufferBytes());
+
+    const auto rejectMutation = [&](std::string_view from, std::string_view to, std::string_view expectedError) {
+        std::string json = skinnedTriangleGltfJson();
+        const std::size_t offset = json.find(from);
+        ASSERT_NE(offset, std::string::npos);
+        json.replace(offset, from.size(), to);
+        writeTextFile(gltfPath, json);
+
+        const auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::LinuxX64);
+        ASSERT_FALSE(request.has_value());
+        EXPECT_NE(request.error().message.find(expectedError), std::string::npos) << request.error().message;
+    };
+
+    rejectMutation("\"JOINTS_0\":4,\"WEIGHTS_0\":5", "\"JOINTS_1\":4,\"WEIGHTS_1\":5", "only JOINTS_0/WEIGHTS_0");
+    rejectMutation("\"JOINTS_0\":4,\"WEIGHTS_0\":5", "\"JOINTS_0\":4", "must be provided together");
+    rejectMutation("{\"mesh\":0,\"skin\":0}", "{\"mesh\":0}", "must be bound to node.skin");
+    rejectMutation(",\"JOINTS_0\":4,\"WEIGHTS_0\":5", "", "bound to node.skin requires");
+
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST(GltfCookTests, RejectsAnimationTargetOutsideSkin)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_animation_target_outside_skin";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto gltfPath = dir / "skinned.gltf";
+    std::string json = skinnedTriangleGltfJson();
+    const std::string target = "\"target\":{\"node\":0";
+    const std::size_t targetOffset = json.find(target);
+    ASSERT_NE(targetOffset, std::string::npos);
+    json.replace(targetOffset, target.size(), "\"target\":{\"node\":1");
+    writeTextFile(gltfPath, json);
+    writeBinaryFile(dir / "geometry.bin", skinnedTriangleBufferBytes());
+    const auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::LinuxX64);
+    EXPECT_FALSE(request.has_value());
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST(GltfCookTests, RejectsAnimationTargetSharedByMultipleSkins)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_animation_ambiguous_skin";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto gltfPath = dir / "skinned.gltf";
+    std::string json = skinnedTriangleGltfJson();
+    const std::string authoredSkin = "\"skins\":[{\"joints\":[0],\"inverseBindMatrices\":7}]";
+    const std::size_t authoredSkinOffset = json.find(authoredSkin);
+    ASSERT_NE(authoredSkinOffset, std::string::npos);
+    json.replace(authoredSkinOffset, authoredSkin.size(),
+                 "\"skins\":[{\"joints\":[0],\"inverseBindMatrices\":7},{\"joints\":[0]}]");
+    writeTextFile(gltfPath, json);
+    writeBinaryFile(dir / "geometry.bin", skinnedTriangleBufferBytes());
+
+    const auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::LinuxX64);
+    EXPECT_FALSE(request.has_value());
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST(GltfCookTests, DefaultsMissingInverseBindMatricesToIdentity)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_default_inverse_bind";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto gltfPath = dir / "skinned.gltf";
+    std::string json = skinnedTriangleGltfJson();
+    const std::string authored = ",\"inverseBindMatrices\":7";
+    const std::size_t authoredOffset = json.find(authored);
+    ASSERT_NE(authoredOffset, std::string::npos);
+    json.erase(authoredOffset, authored.size());
+    writeTextFile(gltfPath, json);
+    writeBinaryFile(dir / "geometry.bin", skinnedTriangleBufferBytes());
+
+    const auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::LinuxX64);
+    ASSERT_TRUE(request.has_value()) << (request ? "" : request.error().message);
+    for (const auto& asset : request->assets)
+    {
+        if (asset.assetKind != AssetFormat::AssetKind::SkinnedMesh)
+        {
+            continue;
+        }
+        const auto view = AssetFormat::parseSkinnedMeshPayload(asset.payload);
+        ASSERT_TRUE(view.has_value()) << (view ? "" : view.error().message);
+        const auto matrix = view->inverseBindMatrix(0);
+        ASSERT_EQ(matrix.size(), 16U);
+        EXPECT_FLOAT_EQ(matrix[0], 1.0F);
+        EXPECT_FLOAT_EQ(matrix[5], 1.0F);
+        EXPECT_FLOAT_EQ(matrix[10], 1.0F);
+        EXPECT_FLOAT_EQ(matrix[15], 1.0F);
+        std::filesystem::remove_all(dir, ec);
+        return;
+    }
+    FAIL() << "cooked request did not contain a SkinnedMesh";
+}
+
+TEST(GltfCookTests, RejectsFrozenSkinAndAnimationCapacityLimits)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_skin_animation_limits";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto gltfPath = dir / "skinned.gltf";
+
+    {
+        std::string json = skinnedTriangleGltfJson();
+        std::string nodes = "\"nodes\":[";
+        std::string joints = "\"skins\":[{\"joints\":[";
+        for (Core::u32 index = 0; index <= AssetFormat::SkinnedMeshWire::MaxJointCount; ++index)
+        {
+            if (index != 0U)
+            {
+                nodes += ',';
+                joints += ',';
+            }
+            nodes += "{}";
+            joints += std::to_string(index);
+        }
+        nodes += ",{\"mesh\":0,\"skin\":0}]";
+        joints += "]}]";
+        const std::string oldNodes = "\"nodes\":[{\"children\":[1]},{\"mesh\":0,\"skin\":0}]";
+        const std::string oldSkin = "\"skins\":[{\"joints\":[0],\"inverseBindMatrices\":7}]";
+        ASSERT_NE(json.find(oldNodes), std::string::npos);
+        ASSERT_NE(json.find(oldSkin), std::string::npos);
+        json.replace(json.find(oldNodes), oldNodes.size(), nodes);
+        json.replace(json.find(oldSkin), oldSkin.size(), joints);
+        writeTextFile(gltfPath, json);
+        writeBinaryFile(dir / "geometry.bin", skinnedTriangleBufferBytes());
+        EXPECT_FALSE(
+            cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::LinuxX64).has_value());
+    }
+
+    {
+        std::string json = skinnedTriangleGltfJson();
+        std::string channels = "\"channels\":[";
+        for (Core::u32 index = 0; index <= AssetFormat::AnimationClip3DWire::MaxTracks; ++index)
+        {
+            if (index != 0U)
+            {
+                channels += ',';
+            }
+            channels += "{\"sampler\":0,\"target\":{\"node\":0,\"path\":\"translation\"}}";
+        }
+        channels += ']';
+        const std::string oldChannels =
+            "\"channels\":[{\"sampler\":0,\"target\":{\"node\":0,\"path\":\"translation\"}}]";
+        ASSERT_NE(json.find(oldChannels), std::string::npos);
+        json.replace(json.find(oldChannels), oldChannels.size(), channels);
+        writeTextFile(gltfPath, json);
+        writeBinaryFile(dir / "geometry.bin", skinnedTriangleBufferBytes());
+        EXPECT_FALSE(
+            cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::LinuxX64).has_value());
+    }
+
+    {
+        constexpr std::size_t KeyCount = AssetFormat::AnimationClip3DWire::MaxKeyframesPerTrack + 1U;
+        constexpr std::size_t TimeOffset = 288U;
+        constexpr std::size_t ValueOffset = TimeOffset + KeyCount * sizeof(float);
+        std::string json = skinnedTriangleGltfJson();
+        const std::array replacements{
+            std::pair{std::string{"{\"bufferView\":8,\"componentType\":5126,\"count\":2,\"type\":\"SCALAR\"}"},
+                      std::string{"{\"bufferView\":8,\"componentType\":5126,\"count\":"} + std::to_string(KeyCount) +
+                          ",\"type\":\"SCALAR\"}"},
+            std::pair{std::string{"{\"bufferView\":9,\"componentType\":5126,\"count\":2,\"type\":\"VEC3\"}"},
+                      std::string{"{\"bufferView\":9,\"componentType\":5126,\"count\":"} + std::to_string(KeyCount) +
+                          ",\"type\":\"VEC3\"}"},
+            std::pair{std::string{"{\"buffer\":0,\"byteOffset\":288,\"byteLength\":8}"},
+                      std::string{"{\"buffer\":0,\"byteOffset\":288,\"byteLength\":"} +
+                          std::to_string(KeyCount * sizeof(float)) + '}'},
+            std::pair{std::string{"{\"buffer\":0,\"byteOffset\":296,\"byteLength\":24}"},
+                      std::string{"{\"buffer\":0,\"byteOffset\":"} + std::to_string(ValueOffset) +
+                          ",\"byteLength\":" + std::to_string(KeyCount * 3U * sizeof(float)) + '}'},
+            std::pair{std::string{"\"buffers\":[{\"byteLength\":320"},
+                      std::string{"\"buffers\":[{\"byteLength\":"} +
+                          std::to_string(ValueOffset + KeyCount * 3U * sizeof(float))},
+        };
+        for (const auto& [from, to] : replacements)
+        {
+            ASSERT_NE(json.find(from), std::string::npos);
+            json.replace(json.find(from), from.size(), to);
+        }
+        std::vector<unsigned char> bytes(ValueOffset + KeyCount * 3U * sizeof(float), 0U);
+        const auto baseBytes = skinnedTriangleBufferBytes();
+        std::copy_n(baseBytes.begin(), TimeOffset, bytes.begin());
+        for (std::size_t index = 0; index < KeyCount; ++index)
+        {
+            const float time = static_cast<float>(index) * 0.25F;
+            std::memcpy(bytes.data() + TimeOffset + index * sizeof(float), &time, sizeof(time));
+        }
+        writeTextFile(gltfPath, json);
+        writeBinaryFile(dir / "geometry.bin", bytes);
+        EXPECT_FALSE(
+            cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::LinuxX64).has_value());
+    }
+
+    std::filesystem::remove_all(dir, ec);
+}
+
+[[nodiscard]] std::string skinnedTriangleGltfJson(std::string_view interpolation)
+{
+    return std::string{R"json({
+  "asset":{"version":"2.0"},
+  "scene":0,
+  "scenes":[{"nodes":[0]}],
+  "nodes":[{"children":[1]},{"mesh":0,"skin":0}],
+  "skins":[{"joints":[0],"inverseBindMatrices":7}],
+  "meshes":[{"primitives":[{"attributes":{"POSITION":0,"NORMAL":1,"TEXCOORD_0":2,"TANGENT":3,"JOINTS_0":4,"WEIGHTS_0":5},"indices":6,"mode":4}]}],
+  "animations":[{"samplers":[{"input":8,"output":9,"interpolation":")json"} +
+           std::string{interpolation} +
+           R"json("}],"channels":[{"sampler":0,"target":{"node":0,"path":"translation"}}]}],
+  "accessors":[
+    {"bufferView":0,"componentType":5126,"count":3,"type":"VEC3"},
+    {"bufferView":1,"componentType":5126,"count":3,"type":"VEC3"},
+    {"bufferView":2,"componentType":5126,"count":3,"type":"VEC2"},
+    {"bufferView":3,"componentType":5126,"count":3,"type":"VEC4"},
+    {"bufferView":4,"componentType":5123,"count":3,"type":"VEC4"},
+    {"bufferView":5,"componentType":5126,"count":3,"type":"VEC4"},
+    {"bufferView":6,"componentType":5123,"count":3,"type":"SCALAR"},
+    {"bufferView":7,"componentType":5126,"count":1,"type":"MAT4"},
+    {"bufferView":8,"componentType":5126,"count":2,"type":"SCALAR"},
+    {"bufferView":9,"componentType":5126,"count":2,"type":"VEC3"}
+  ],
+  "bufferViews":[
+    {"buffer":0,"byteOffset":0,"byteLength":36},
+    {"buffer":0,"byteOffset":36,"byteLength":36},
+    {"buffer":0,"byteOffset":72,"byteLength":24},
+    {"buffer":0,"byteOffset":96,"byteLength":48},
+    {"buffer":0,"byteOffset":144,"byteLength":24},
+    {"buffer":0,"byteOffset":168,"byteLength":48},
+    {"buffer":0,"byteOffset":216,"byteLength":6},
+    {"buffer":0,"byteOffset":224,"byteLength":64},
+    {"buffer":0,"byteOffset":288,"byteLength":8},
+    {"buffer":0,"byteOffset":296,"byteLength":24}
+  ],
+  "buffers":[{"byteLength":320,"uri":"geometry.bin"}]
+})json";
+}
+
+[[nodiscard]] std::vector<unsigned char> skinnedTriangleBufferBytes(bool invalidWeight)
+{
+    std::vector<unsigned char> bytes(320U, 0U);
+    const std::array<float, 9> positions{0, 0, 0, 1, 0, 0, 0, 1, 0};
+    const std::array<float, 9> normals{0, 0, 1, 0, 0, 1, 0, 0, 1};
+    const std::array<float, 6> uv{0, 0, 1, 0, 0, 1};
+    const std::array<float, 12> tangents{1, 0, 0, 1, 1, 0, 0, 1, 1, 0, 0, 1};
+    const std::array<Core::u16, 12> joints{};
+    const std::array<float, 12> weights{1, 0, 0, 0, 1, 0, 0, 0, invalidWeight ? 0.0F : 1.0F, 0, 0, 0};
+    const std::array<Core::u16, 3> indices{0, 1, 2};
+    const std::array<float, 16> inverseBind{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+    const std::array<float, 2> times{0, 1};
+    const std::array<float, 6> translations{0, 0, 0, 1, 0, 0};
+    std::memcpy(bytes.data() + 0, positions.data(), sizeof(positions));
+    std::memcpy(bytes.data() + 36, normals.data(), sizeof(normals));
+    std::memcpy(bytes.data() + 72, uv.data(), sizeof(uv));
+    std::memcpy(bytes.data() + 96, tangents.data(), sizeof(tangents));
+    std::memcpy(bytes.data() + 144, joints.data(), sizeof(joints));
+    std::memcpy(bytes.data() + 168, weights.data(), sizeof(weights));
+    std::memcpy(bytes.data() + 216, indices.data(), sizeof(indices));
+    std::memcpy(bytes.data() + 224, inverseBind.data(), sizeof(inverseBind));
+    std::memcpy(bytes.data() + 288, times.data(), sizeof(times));
+    std::memcpy(bytes.data() + 296, translations.data(), sizeof(translations));
+    return bytes;
+}
+
+[[nodiscard]] std::string tangentDiscontinuitySkinnedGltfJson()
+{
+    return R"json({
+  "asset": {"version": "2.0"},
+  "scenes": [{"nodes": [0]}],
+  "nodes": [{"children": [1]}, {"children": [2]}, {"mesh": 0, "skin": 0}],
+  "skins": [{"joints": [1, 0], "inverseBindMatrices": 6}],
+  "meshes": [{"primitives": [{
+    "attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2,
+                    "JOINTS_0": 4, "WEIGHTS_0": 5},
+    "indices": 3, "mode": 4
+  }]}],
+  "animations": [{
+    "samplers": [{"input": 7, "output": 8, "interpolation": "LINEAR"}],
+    "channels": [{"sampler": 0, "target": {"node": 1, "path": "translation"}}]
+  }],
+  "accessors": [
+    {"bufferView": 0, "componentType": 5126, "count": 5, "type": "VEC3",
+     "max": [1, 1, 0], "min": [-1, 0, 0]},
+    {"bufferView": 1, "componentType": 5126, "count": 5, "type": "VEC3"},
+    {"bufferView": 2, "componentType": 5126, "count": 5, "type": "VEC2"},
+    {"bufferView": 3, "componentType": 5123, "count": 6, "type": "SCALAR"},
+    {"bufferView": 4, "componentType": 5123, "count": 5, "type": "VEC4"},
+    {"bufferView": 5, "componentType": 5126, "count": 5, "type": "VEC4"},
+    {"bufferView": 6, "componentType": 5126, "count": 2, "type": "MAT4"},
+    {"bufferView": 7, "componentType": 5126, "count": 2, "type": "SCALAR"},
+    {"bufferView": 8, "componentType": 5126, "count": 2, "type": "VEC3"}
+  ],
+  "bufferViews": [
+    {"buffer": 0, "byteOffset": 0, "byteLength": 60},
+    {"buffer": 0, "byteOffset": 60, "byteLength": 60},
+    {"buffer": 0, "byteOffset": 120, "byteLength": 40},
+    {"buffer": 0, "byteOffset": 160, "byteLength": 12},
+    {"buffer": 0, "byteOffset": 172, "byteLength": 40},
+    {"buffer": 0, "byteOffset": 212, "byteLength": 80},
+    {"buffer": 0, "byteOffset": 292, "byteLength": 128},
+    {"buffer": 0, "byteOffset": 420, "byteLength": 8},
+    {"buffer": 0, "byteOffset": 428, "byteLength": 24}
+  ],
+  "buffers": [{"byteLength": 452, "uri": "geometry.bin"}]
+})json";
+}
+
+[[nodiscard]] std::vector<unsigned char> tangentDiscontinuitySkinnedBufferBytes()
+{
+    auto bytes = tangentDiscontinuityBufferBytes();
+    bytes.resize(452U, 0U);
+    std::array<Core::u16, 20> joints{};
+    std::array<float, 20> weights{};
+    for (std::size_t vertex = 0; vertex < 5U; ++vertex)
+    {
+        // skin.joints is [child, root]; the shared split vertex follows the child.
+        joints[vertex * 4U] = vertex == 0U ? 0U : 1U;
+        weights[vertex * 4U] = 1.0F;
+    }
+    std::array<float, 32> inverseBind{};
+    inverseBind[0] = 1.0F;
+    inverseBind[5] = 1.0F;
+    inverseBind[10] = 1.0F;
+    inverseBind[15] = 1.0F;
+    inverseBind[16 + 0] = 1.0F;
+    inverseBind[16 + 5] = 1.0F;
+    inverseBind[16 + 10] = 1.0F;
+    inverseBind[16 + 15] = 1.0F;
+    inverseBind[12] = 5.0F;
+    inverseBind[16 + 12] = 7.0F;
+    const std::array<float, 2> times{0.0F, 1.0F};
+    const std::array<float, 6> translations{0.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F};
+    std::memcpy(bytes.data() + 172U, joints.data(), sizeof(joints));
+    std::memcpy(bytes.data() + 212U, weights.data(), sizeof(weights));
+    std::memcpy(bytes.data() + 292U, inverseBind.data(), sizeof(inverseBind));
+    std::memcpy(bytes.data() + 420U, times.data(), sizeof(times));
+    std::memcpy(bytes.data() + 428U, translations.data(), sizeof(translations));
+    return bytes;
 }
 
 TEST(GltfCookTests, AcceptsFixedMeshIdAfterMaterialId)
@@ -519,15 +1074,14 @@ TEST(GltfCookTests, AcceptsFixedMeshIdAfterMaterialId)
     materialBytes[0] = std::byte{0x10};
     const auto meshId = *Core::AssetId::fromBytes(meshBytes);
     const auto materialId = *Core::AssetId::fromBytes(materialBytes);
-    auto request = cookGltfFileToCatalogRequest(
-        gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64,
-        GltfCookIds{.meshId = meshId, .materialId = materialId});
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64,
+                                                GltfCookIds{.meshId = meshId, .materialId = materialId});
     ASSERT_TRUE(request.has_value()) << (request ? "" : request.error().message);
 
-    const auto prefab = std::find_if(request->assets.begin(), request->assets.end(),
-                                     [](const CatalogCookAssetSpec& asset) {
-                                         return asset.assetKind == AssetFormat::AssetKind::Prefab;
-                                     });
+    const auto prefab =
+        std::find_if(request->assets.begin(), request->assets.end(), [](const CatalogCookAssetSpec& asset) {
+            return asset.assetKind == AssetFormat::AssetKind::Prefab;
+        });
     ASSERT_NE(prefab, request->assets.end());
     ASSERT_EQ(prefab->dependencies.size(), 2U);
     EXPECT_EQ(prefab->dependencies[0].assetId, materialId);
@@ -552,8 +1106,7 @@ TEST(GltfCookTests, PreservesAuthoredTangents)
     writeTextFile(gltfPath, tangentTriangleGltfJson(true));
     writeBinaryFile(dir / "geometry.bin", tangentTriangleBufferBytes(true));
 
-    auto request = cookGltfFileToCatalogRequest(
-        gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
     ASSERT_TRUE(request.has_value()) << (request ? "" : request.error().message);
     for (const auto& asset : request->assets)
     {
@@ -588,11 +1141,9 @@ TEST(GltfCookTests, RejectsInvalidAuthoredTangentHandedness)
     std::memcpy(bytes.data() + 96U + 3U * sizeof(float), &invalidHandedness, sizeof(float));
     writeBinaryFile(dir / "geometry.bin", bytes);
 
-    auto request = cookGltfFileToCatalogRequest(
-        gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
     ASSERT_FALSE(request.has_value());
-    EXPECT_NE(request.error().message.find("TANGENT w"), std::string::npos)
-        << request.error().message;
+    EXPECT_NE(request.error().message.find("TANGENT w"), std::string::npos) << request.error().message;
 }
 
 TEST(GltfCookTests, RejectsOverflowingAuthoredTangentLength)
@@ -608,11 +1159,9 @@ TEST(GltfCookTests, RejectsOverflowingAuthoredTangentLength)
     std::memcpy(bytes.data() + 96U, &overflowingComponent, sizeof(float));
     writeBinaryFile(dir / "geometry.bin", bytes);
 
-    auto request = cookGltfFileToCatalogRequest(
-        gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
     ASSERT_FALSE(request.has_value());
-    EXPECT_NE(request.error().message.find("TANGENT xyz"), std::string::npos)
-        << request.error().message;
+    EXPECT_NE(request.error().message.find("TANGENT xyz"), std::string::npos) << request.error().message;
 }
 
 TEST(GltfCookTests, GeneratesMissingTangentsWithMikkTSpace)
@@ -625,8 +1174,7 @@ TEST(GltfCookTests, GeneratesMissingTangentsWithMikkTSpace)
     writeTextFile(gltfPath, tangentTriangleGltfJson(false));
     writeBinaryFile(dir / "geometry.bin", tangentTriangleBufferBytes(false));
 
-    auto request = cookGltfFileToCatalogRequest(
-        gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
     ASSERT_TRUE(request.has_value()) << (request ? "" : request.error().message);
     for (const auto& asset : request->assets)
     {
@@ -665,8 +1213,8 @@ TEST(GltfCookTests, RejectsPrimitiveWithoutRequiredNormal)
     writeTextFile(dir / "triangle.gltf", json);
     writeBinaryFile(dir / "geometry.bin", tangentTriangleBufferBytes(false));
 
-    auto request = cookGltfFileToCatalogRequest(
-        (dir / "triangle.gltf").string(), AssetFormat::TargetPlatform::WindowsX64);
+    auto request =
+        cookGltfFileToCatalogRequest((dir / "triangle.gltf").string(), AssetFormat::TargetPlatform::WindowsX64);
     ASSERT_FALSE(request.has_value());
     EXPECT_NE(request.error().message.find("NORMAL"), std::string::npos) << request.error().message;
 }
@@ -685,8 +1233,8 @@ TEST(GltfCookTests, RejectsPrimitiveWithoutRequiredTexcoord)
     writeTextFile(dir / "triangle.gltf", json);
     writeBinaryFile(dir / "geometry.bin", tangentTriangleBufferBytes(false));
 
-    auto request = cookGltfFileToCatalogRequest(
-        (dir / "triangle.gltf").string(), AssetFormat::TargetPlatform::WindowsX64);
+    auto request =
+        cookGltfFileToCatalogRequest((dir / "triangle.gltf").string(), AssetFormat::TargetPlatform::WindowsX64);
     ASSERT_FALSE(request.has_value());
     EXPECT_NE(request.error().message.find("TEXCOORD_0"), std::string::npos) << request.error().message;
 }
@@ -701,8 +1249,7 @@ TEST(GltfCookTests, SplitsSharedVertexAcrossMikkTangentHandednessDiscontinuity)
     writeTextFile(gltfPath, tangentDiscontinuityGltfJson());
     writeBinaryFile(dir / "geometry.bin", tangentDiscontinuityBufferBytes());
 
-    auto request = cookGltfFileToCatalogRequest(
-        gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
     ASSERT_TRUE(request.has_value()) << (request ? "" : request.error().message);
     for (const auto& asset : request->assets)
     {
@@ -715,14 +1262,74 @@ TEST(GltfCookTests, SplitsSharedVertexAcrossMikkTangentHandednessDiscontinuity)
         ASSERT_EQ(view->indexCount, 6U);
         ASSERT_GT(view->vertexCount, 5U);
         ASSERT_NE(view->indices[0], view->indices[3]);
-        const std::size_t first = static_cast<std::size_t>(view->indices[0]) *
-                                  AssetFormat::StaticMeshWire::FloatsPerVertex;
-        const std::size_t mirrored = static_cast<std::size_t>(view->indices[3]) *
-                                     AssetFormat::StaticMeshWire::FloatsPerVertex;
+        const std::size_t first =
+            static_cast<std::size_t>(view->indices[0]) * AssetFormat::StaticMeshWire::FloatsPerVertex;
+        const std::size_t mirrored =
+            static_cast<std::size_t>(view->indices[3]) * AssetFormat::StaticMeshWire::FloatsPerVertex;
         EXPECT_FLOAT_EQ(view->vertices[first + 9U], -view->vertices[mirrored + 9U]);
         return;
     }
     FAIL() << "cooked request did not contain a StaticMesh";
+}
+
+TEST(GltfCookTests, TopologicallySortsChildFirstSkinAcrossMikkVertexSplits)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_skinned_tangent_discontinuity";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto gltfPath = dir / "mirrored_uv_skinned.gltf";
+    writeTextFile(gltfPath, tangentDiscontinuitySkinnedGltfJson());
+    writeBinaryFile(dir / "geometry.bin", tangentDiscontinuitySkinnedBufferBytes());
+
+    const auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+    ASSERT_TRUE(request.has_value()) << (request ? "" : request.error().message);
+    bool sawSkinnedMesh = false;
+    bool sawAnimation = false;
+    for (const auto& asset : request->assets)
+    {
+        if (asset.assetKind == AssetFormat::AssetKind::AnimationClip3D)
+        {
+            const auto view = AssetFormat::parseAnimationClip3DPayload(asset.payload);
+            ASSERT_TRUE(view.has_value()) << (view ? "" : view.error().message);
+            ASSERT_EQ(view->jointCount, 2U);
+            ASSERT_EQ(view->trackCount, 1U);
+            const auto track = view->track(0U);
+            ASSERT_TRUE(track.has_value());
+            EXPECT_EQ(track->jointIndex, 1U);
+            sawAnimation = true;
+            continue;
+        }
+        if (asset.assetKind != AssetFormat::AssetKind::SkinnedMesh)
+        {
+            continue;
+        }
+        const auto view = AssetFormat::parseSkinnedMeshPayload(asset.payload);
+        ASSERT_TRUE(view.has_value()) << (view ? "" : view.error().message);
+        ASSERT_EQ(view->jointCount, 2U);
+        const auto root = view->joint(0U);
+        const auto child = view->joint(1U);
+        ASSERT_TRUE(root.has_value());
+        ASSERT_TRUE(child.has_value());
+        EXPECT_EQ(root->parentJoint, AssetFormat::SkinnedMeshWire::JointIndexNone);
+        EXPECT_EQ(child->parentJoint, 0U);
+        EXPECT_FLOAT_EQ(view->inverseBindMatrix(0U)[12], 7.0F);
+        EXPECT_FLOAT_EQ(view->inverseBindMatrix(1U)[12], 5.0F);
+        ASSERT_GT(view->vertexCount, 5U);
+        ASSERT_NE(view->indices[0], view->indices[3]);
+        for (const Core::u16 index : {view->indices[0], view->indices[3]})
+        {
+            const std::size_t base =
+                static_cast<std::size_t>(index) * AssetFormat::SkinnedMeshWire::InfluencesPerVertex;
+            ASSERT_LT(base, view->jointIndices.size());
+            EXPECT_EQ(view->jointIndices[base], 1U);
+            EXPECT_EQ(view->jointWeights[base], AssetFormat::SkinnedMeshWire::WeightScale);
+        }
+        sawSkinnedMesh = true;
+    }
+    EXPECT_TRUE(sawSkinnedMesh);
+    EXPECT_TRUE(sawAnimation);
+    std::filesystem::remove_all(dir, ec);
 }
 
 // Two TRIANGLES meshes, two scene roots referencing each mesh.
@@ -782,8 +1389,7 @@ TEST(GltfCookTests, CooksMultipleMeshesToDistinctAssets)
         out << twoMeshGltfJson();
     }
 
-    auto request = cookGltfFileToCatalogRequest(
-        gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
     ASSERT_TRUE(request.has_value()) << (request ? "" : request.error().message);
     // 2 mesh + 2 material + 1 prefab
     ASSERT_EQ(request->assets.size(), 5U);
@@ -796,12 +1402,10 @@ TEST(GltfCookTests, CooksMultipleMeshesToDistinctAssets)
         if (asset.assetKind == AssetFormat::AssetKind::StaticMesh)
         {
             ++meshCount;
-        }
-        else if (asset.assetKind == AssetFormat::AssetKind::Material)
+        } else if (asset.assetKind == AssetFormat::AssetKind::Material)
         {
             ++materialCount;
-        }
-        else if (asset.assetKind == AssetFormat::AssetKind::Prefab)
+        } else if (asset.assetKind == AssetFormat::AssetKind::Prefab)
         {
             prefabDeps = asset.dependencies.size();
             std::vector<AssetFormat::PrefabNodeView> nodes;
@@ -820,20 +1424,21 @@ TEST(GltfCookTests, CooksMultipleMeshesToDistinctAssets)
     const auto catalogRoot = dir / "catalog";
     ASSERT_TRUE(cookAndPublishCatalogPackage(catalogRoot.string(), *request).has_value());
     std::pmr::monotonic_buffer_resource memory;
-    auto catalog = openCatalogPackage(
-        catalogRoot.string(),
-        CatalogPackageOpenConfig{
-            .manifest = CatalogFileLoadConfig{.catalog = CatalogConfig{.maxEntries = 16,
-                                                                        .maxDependencies = 32,
-                                                                        .maxDependenciesPerAsset = 16,
-                                                                        .memoryResource = &memory}},
-            .validateOnOpen = true,
-            .validation = CatalogPackageValidationConfig{
-                .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
-                .verifyContent = true,
-                .verifyTypedPayload = true,
-            },
-        });
+    auto catalog =
+        openCatalogPackage(catalogRoot.string(),
+                           CatalogPackageOpenConfig{
+                               .manifest = CatalogFileLoadConfig{.catalog = CatalogConfig{.maxEntries = 16,
+                                                                                          .maxDependencies = 32,
+                                                                                          .maxDependenciesPerAsset = 16,
+                                                                                          .memoryResource = &memory}},
+                               .validateOnOpen = true,
+                               .validation =
+                                   CatalogPackageValidationConfig{
+                                       .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
+                                       .verifyContent = true,
+                                       .verifyTypedPayload = true,
+                                   },
+                           });
     ASSERT_TRUE(catalog.has_value()) << (catalog ? "" : catalog.error().message);
     std::filesystem::remove_all(dir, ec);
 }
@@ -843,11 +1448,10 @@ TEST(GltfCookTests, CooksMultipleMeshesToDistinctAssets)
 {
     // iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==
     static constexpr unsigned char kPng[] = {
-        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
-        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
-        0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0xFC, 0xCF, 0xC0, 0x50,
-        0x0F, 0x00, 0x04, 0x85, 0x01, 0x80, 0x84, 0xA9, 0x8C, 0x21, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45,
-        0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82};
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, 0x00, 0x00,
+        0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00,
+        0x0D, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0xFC, 0xCF, 0xC0, 0x50, 0x0F, 0x00, 0x04, 0x85, 0x01, 0x80,
+        0x84, 0xA9, 0x8C, 0x21, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82};
     return std::vector<unsigned char>(std::begin(kPng), std::end(kPng));
 }
 
@@ -959,10 +1563,11 @@ void appendLittleEndianU32(std::vector<unsigned char>& bytes, std::uint32_t valu
     {"buffer": 0, "byteOffset": 36, "byteLength": 36},
     {"buffer": 0, "byteOffset": 72, "byteLength": 24},
     {"buffer": 0, "byteOffset": 96, "byteLength": 6},
-    {"buffer": 0, "byteOffset": )json"} + std::to_string(imageOffset) +
-                       ", \"byteLength\": " + std::to_string(png.size()) + R"json(}
+    {"buffer": 0, "byteOffset": )json"} +
+                       std::to_string(imageOffset) + ", \"byteLength\": " + std::to_string(png.size()) + R"json(}
   ],
-  "buffers": [{"byteLength": )json" + std::to_string(binChunk.size()) + R"json(}]
+  "buffers": [{"byteLength": )json" +
+                       std::to_string(binChunk.size()) + R"json(}]
 })json";
 
     while ((json.size() & 3U) != 0U)
@@ -978,8 +1583,7 @@ void appendLittleEndianU32(std::vector<unsigned char>& bytes, std::uint32_t valu
     glb.reserve(12U + 8U + json.size() + 8U + binChunk.size());
     appendLittleEndianU32(glb, 0x46546C67U);
     appendLittleEndianU32(glb, 2U);
-    appendLittleEndianU32(glb, static_cast<std::uint32_t>(
-                                   12U + 8U + json.size() + 8U + binChunk.size()));
+    appendLittleEndianU32(glb, static_cast<std::uint32_t>(12U + 8U + json.size() + 8U + binChunk.size()));
     appendLittleEndianU32(glb, static_cast<std::uint32_t>(json.size()));
     appendLittleEndianU32(glb, 0x4E4F534AU);
     glb.insert(glb.end(), json.begin(), json.end());
@@ -1009,22 +1613,20 @@ TEST(GltfCookTests, CapturesPrimaryExternalBufferPrefixAndExternalImage)
     writeBinaryFile(dir / "tex.png", png);
 
     const std::string sourceRoot = dir.string();
-    auto cooked = cookGltfFileToCatalogSourceResult(
-        gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64,
-        SourceImportCaptureConfig{.sourceRootUtf8 = sourceRoot});
+    auto cooked = cookGltfFileToCatalogSourceResult(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64,
+                                                    SourceImportCaptureConfig{.sourceRootUtf8 = sourceRoot});
     ASSERT_TRUE(cooked.has_value()) << (cooked ? "" : cooked.error().message);
     ASSERT_EQ(cooked->sourceImports.sources.size(), 3U);
     ASSERT_EQ(cooked->sourceImports.units.size(), 1U);
 
     const auto findSource = [&](std::string_view path) -> const SourceImportCapturedSource* {
-        const auto found = std::find_if(
-            cooked->sourceImports.sources.begin(), cooked->sourceImports.sources.end(),
-            [path](const SourceImportCapturedSource& source) { return source.path == path; });
+        const auto found =
+            std::find_if(cooked->sourceImports.sources.begin(), cooked->sourceImports.sources.end(),
+                         [path](const SourceImportCapturedSource& source) { return source.path == path; });
         return found != cooked->sourceImports.sources.end() ? &*found : nullptr;
     };
     const auto digest = [](const auto& bytes) {
-        return Core::digestContentHashV1(
-            std::as_bytes(std::span(bytes.data(), bytes.size())));
+        return Core::digestContentHashV1(std::as_bytes(std::span(bytes.data(), bytes.size())));
     };
 
     const auto* primary = findSource("scene.gltf");
@@ -1057,8 +1659,7 @@ TEST(GltfCookTests, CapturesPrimaryExternalBufferPrefixAndExternalImage)
     for (const auto& input : unit.inputs)
     {
         ASSERT_LT(input.sourceIndex, cooked->sourceImports.sources.size());
-        if (AssetFormat::hasSourceImportInputFlag(
-                input.flags, AssetFormat::SourceImportInputFlags::Primary))
+        if (AssetFormat::hasSourceImportInputFlag(input.flags, AssetFormat::SourceImportInputFlags::Primary))
         {
             ++primaryInputCount;
             EXPECT_EQ(cooked->sourceImports.sources[input.sourceIndex].path, "scene.gltf");
@@ -1068,8 +1669,8 @@ TEST(GltfCookTests, CapturesPrimaryExternalBufferPrefixAndExternalImage)
     ASSERT_EQ(unit.outputs.size(), cooked->request.assets.size());
     for (const auto& asset : cooked->request.assets)
     {
-        const auto output = std::find_if(
-            unit.outputs.begin(), unit.outputs.end(), [&](const SourceImportCapturedOutput& captured) {
+        const auto output =
+            std::find_if(unit.outputs.begin(), unit.outputs.end(), [&](const SourceImportCapturedOutput& captured) {
                 return captured.assetId == asset.assetId && captured.assetKind == asset.assetKind;
             });
         EXPECT_NE(output, unit.outputs.end());
@@ -1088,20 +1689,17 @@ TEST(GltfCookTests, EmbeddedGlbBufferAndBufferViewImageRemainPrimarySource)
     const auto gltfPath = dir / "scene.glb";
     writeBinaryFile(gltfPath, glb);
     const std::string sourceRoot = dir.string();
-    auto cooked = cookGltfFileToCatalogSourceResult(
-        gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64,
-        SourceImportCaptureConfig{.sourceRootUtf8 = sourceRoot});
+    auto cooked = cookGltfFileToCatalogSourceResult(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64,
+                                                    SourceImportCaptureConfig{.sourceRootUtf8 = sourceRoot});
     ASSERT_TRUE(cooked.has_value()) << (cooked ? "" : cooked.error().message);
     ASSERT_EQ(cooked->sourceImports.sources.size(), 1U);
     EXPECT_EQ(cooked->sourceImports.sources[0].path, "scene.glb");
     EXPECT_EQ(cooked->sourceImports.sources[0].fileBytes, glb.size());
-    EXPECT_EQ(cooked->sourceImports.sources[0].readExtent,
-              AssetFormat::SourceImportReadExtent::WholeFile);
+    EXPECT_EQ(cooked->sourceImports.sources[0].readExtent, AssetFormat::SourceImportReadExtent::WholeFile);
     ASSERT_EQ(cooked->sourceImports.units.size(), 1U);
     ASSERT_EQ(cooked->sourceImports.units[0].inputs.size(), 1U);
-    EXPECT_TRUE(AssetFormat::hasSourceImportInputFlag(
-        cooked->sourceImports.units[0].inputs[0].flags,
-        AssetFormat::SourceImportInputFlags::Primary));
+    EXPECT_TRUE(AssetFormat::hasSourceImportInputFlag(cooked->sourceImports.units[0].inputs[0].flags,
+                                                      AssetFormat::SourceImportInputFlags::Primary));
     EXPECT_EQ(cooked->sourceImports.units[0].outputs.size(), cooked->request.assets.size());
     EXPECT_EQ(cooked->request.assets.size(), 4U);
 }
@@ -1125,8 +1723,7 @@ TEST(GltfCookTests, CooksBaseColorTextureToTexture2DDependency)
         out << texturedTriangleGltfJson();
     }
 
-    auto request = cookGltfFileToCatalogRequest(
-        gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
     ASSERT_TRUE(request.has_value()) << (request ? "" : request.error().message);
 
     bool sawTexture = false;
@@ -1141,8 +1738,7 @@ TEST(GltfCookTests, CooksBaseColorTextureToTexture2DDependency)
             EXPECT_EQ(view->width, 1U);
             EXPECT_EQ(view->height, 1U);
             EXPECT_EQ(view->pixelFormat, AssetFormat::Texture2DPixelFormat::Rgba8Unorm);
-        }
-        else if (asset.assetKind == AssetFormat::AssetKind::Material)
+        } else if (asset.assetKind == AssetFormat::AssetKind::Material)
         {
             auto mat = AssetFormat::parseMaterialPayload(asset.payload);
             ASSERT_TRUE(mat.has_value()) << (mat ? "" : mat.error().message);
@@ -1234,8 +1830,7 @@ TEST(GltfCookTests, CooksMetallicRoughnessAndNormalTextureDeps)
 })json";
     }
 
-    auto request = cookGltfFileToCatalogRequest(
-        gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
     ASSERT_TRUE(request.has_value()) << (request ? "" : request.error().message);
 
     std::size_t textureCount = 0;
@@ -1245,8 +1840,7 @@ TEST(GltfCookTests, CooksMetallicRoughnessAndNormalTextureDeps)
         if (asset.assetKind == AssetFormat::AssetKind::Texture2D)
         {
             ++textureCount;
-        }
-        else if (asset.assetKind == AssetFormat::AssetKind::Material)
+        } else if (asset.assetKind == AssetFormat::AssetKind::Material)
         {
             sawMaterial = true;
             auto mat = AssetFormat::parseMaterialPayload(asset.payload);
@@ -1285,11 +1879,9 @@ TEST(GltfCookTests, RejectsExternalImagePathTraversal)
         out << externalImageTriangleGltfJson("../secret.png");
     }
 
-    auto request = cookGltfFileToCatalogRequest(
-        gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
     ASSERT_FALSE(request.has_value());
-    EXPECT_NE(request.error().message.find("traversal"), std::string::npos)
-        << request.error().message;
+    EXPECT_NE(request.error().message.find("traversal"), std::string::npos) << request.error().message;
 }
 
 TEST(GltfCookTests, RejectsAbsoluteExternalImageUri)
@@ -1305,8 +1897,7 @@ TEST(GltfCookTests, RejectsAbsoluteExternalImageUri)
         out << externalImageTriangleGltfJson("file:///C:/Windows/System32/drivers/etc/hosts");
     }
 
-    auto request = cookGltfFileToCatalogRequest(
-        gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
     ASSERT_FALSE(request.has_value());
     EXPECT_FALSE(request.error().message.empty());
 }
@@ -1330,8 +1921,7 @@ TEST(GltfCookTests, AllowsExternalBufferThroughContainedSymlinkOrJunction)
 
     const auto gltfPath = root / "scene.gltf";
     writeTextFile(gltfPath, externalBufferTriangleGltfJson("linked/mesh.bin"));
-    auto request = cookGltfFileToCatalogRequest(
-        gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
     ASSERT_TRUE(request.has_value()) << (request ? "" : request.error().message);
     EXPECT_EQ(request->assets.size(), 3U);
 
@@ -1350,11 +1940,9 @@ TEST(GltfCookTests, AllowsPercentEncodedUtf8ExternalBufferPath)
     const std::u8string utf8Name = u8"\u8D44\u6E90.bin";
     writeBinaryFile(dir / std::filesystem::path{utf8Name}, externalTriangleBufferBytes());
     const auto gltfPath = dir / "scene.gltf";
-    writeTextFile(gltfPath,
-                  externalBufferTriangleGltfJson("%E8%B5%84%E6%BA%90.bin"));
+    writeTextFile(gltfPath, externalBufferTriangleGltfJson("%E8%B5%84%E6%BA%90.bin"));
 
-    auto request = cookGltfFileToCatalogRequest(
-        gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
     ASSERT_TRUE(request.has_value()) << (request ? "" : request.error().message);
     EXPECT_EQ(request->assets.size(), 3U);
 }
@@ -1369,11 +1957,9 @@ TEST(GltfCookTests, RejectsPercentEncodedExternalBufferTraversal)
     const auto gltfPath = dir / "scene.gltf";
     writeTextFile(gltfPath, externalBufferTriangleGltfJson("%2e%2e/secret.bin"));
 
-    auto request = cookGltfFileToCatalogRequest(
-        gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
     ASSERT_FALSE(request.has_value());
-    EXPECT_NE(request.error().message.find("traversal"), std::string::npos)
-        << request.error().message;
+    EXPECT_NE(request.error().message.find("traversal"), std::string::npos) << request.error().message;
 }
 
 TEST(GltfCookTests, RejectsPrimaryPathWithEmbeddedNul)
@@ -1384,8 +1970,7 @@ TEST(GltfCookTests, RejectsPrimaryPathWithEmbeddedNul)
 
     auto request = cookGltfFileToCatalogRequest(path, AssetFormat::TargetPlatform::WindowsX64);
     ASSERT_FALSE(request.has_value());
-    EXPECT_NE(request.error().message.find("strict UTF-8"), std::string::npos)
-        << request.error().message;
+    EXPECT_NE(request.error().message.find("strict UTF-8"), std::string::npos) << request.error().message;
 }
 
 TEST(GltfCookTests, RejectsExternalBufferThroughEscapingSymlinkOrJunction)
@@ -1409,11 +1994,9 @@ TEST(GltfCookTests, RejectsExternalBufferThroughEscapingSymlinkOrJunction)
 
     const auto gltfPath = root / "scene.gltf";
     writeTextFile(gltfPath, externalBufferTriangleGltfJson("linked/mesh.bin"));
-    auto request = cookGltfFileToCatalogRequest(
-        gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
     ASSERT_FALSE(request.has_value());
-    EXPECT_NE(request.error().message.find("escapes"), std::string::npos)
-        << request.error().message;
+    EXPECT_NE(request.error().message.find("escapes"), std::string::npos) << request.error().message;
 
     std::filesystem::remove(link, ec);
     std::filesystem::remove_all(base, ec);
@@ -1445,11 +2028,9 @@ TEST(GltfCookTests, RejectsExternalImageThroughEscapingSymlinkOrJunction)
     const auto gltfPath = root / "scene.gltf";
     writeTextFile(gltfPath, json);
 
-    auto request = cookGltfFileToCatalogRequest(
-        gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
     ASSERT_FALSE(request.has_value());
-    EXPECT_NE(request.error().message.find("escapes"), std::string::npos)
-        << request.error().message;
+    EXPECT_NE(request.error().message.find("escapes"), std::string::npos) << request.error().message;
 
     std::filesystem::remove(link, ec);
     std::filesystem::remove_all(base, ec);
@@ -1467,11 +2048,9 @@ TEST(GltfCookTests, RejectsExternalBufferShorterThanDeclaredSnapshot)
     const auto gltfPath = dir / "scene.gltf";
     writeTextFile(gltfPath, externalBufferTriangleGltfJson("mesh.bin"));
 
-    auto request = cookGltfFileToCatalogRequest(
-        gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
     ASSERT_FALSE(request.has_value());
-    EXPECT_NE(request.error().message.find("size"), std::string::npos)
-        << request.error().message;
+    EXPECT_NE(request.error().message.find("size"), std::string::npos) << request.error().message;
 }
 
 TEST(GltfCookTests, RejectsSparseExternalBufferLargerThan64MiB)
@@ -1491,11 +2070,9 @@ TEST(GltfCookTests, RejectsSparseExternalBufferLargerThan64MiB)
     const auto gltfPath = dir / "scene.gltf";
     writeTextFile(gltfPath, externalBufferTriangleGltfJson("mesh.bin"));
 
-    auto request = cookGltfFileToCatalogRequest(
-        gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
     ASSERT_FALSE(request.has_value());
-    EXPECT_NE(request.error().message.find("size"), std::string::npos)
-        << request.error().message;
+    EXPECT_NE(request.error().message.find("size"), std::string::npos) << request.error().message;
 }
 
 TEST(GltfCookTests, RejectsSparsePrimaryGltfLargerThan64MiBBeforeParse)
@@ -1515,11 +2092,9 @@ TEST(GltfCookTests, RejectsSparsePrimaryGltfLargerThan64MiBBeforeParse)
         ASSERT_TRUE(output.good());
     }
 
-    auto request = cookGltfFileToCatalogRequest(
-        gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
     ASSERT_FALSE(request.has_value());
-    EXPECT_NE(request.error().message.find("size"), std::string::npos)
-        << request.error().message;
+    EXPECT_NE(request.error().message.find("size"), std::string::npos) << request.error().message;
 }
 
 TEST(GltfCookTests, RejectsBufferViewOffsetOverflowBeforeBufferLoad)
@@ -1532,16 +2107,13 @@ TEST(GltfCookTests, RejectsBufferViewOffsetOverflowBeforeBufferLoad)
     const std::string original = "\"byteOffset\": 0, \"byteLength\": 36";
     const std::size_t view = json.find(original);
     ASSERT_NE(view, std::string::npos);
-    json.replace(view, original.size(),
-                 "\"byteOffset\": 18446744073709551600, \"byteLength\": 36");
+    json.replace(view, original.size(), "\"byteOffset\": 18446744073709551600, \"byteLength\": 36");
     const auto gltfPath = dir / "overflow.gltf";
     writeTextFile(gltfPath, json);
 
-    auto request = cookGltfFileToCatalogRequest(
-        gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
     ASSERT_FALSE(request.has_value());
-    EXPECT_NE(request.error().message.find("bufferView"), std::string::npos)
-        << request.error().message;
+    EXPECT_NE(request.error().message.find("bufferView"), std::string::npos) << request.error().message;
 }
 
 TEST(GltfCookTests, RejectsAccessorCountBombBeforeBufferLoad)
@@ -1558,11 +2130,9 @@ TEST(GltfCookTests, RejectsAccessorCountBombBeforeBufferLoad)
     const auto gltfPath = dir / "count.gltf";
     writeTextFile(gltfPath, json);
 
-    auto request = cookGltfFileToCatalogRequest(
-        gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
     ASSERT_FALSE(request.has_value());
-    EXPECT_NE(request.error().message.find("accessor"), std::string::npos)
-        << request.error().message;
+    EXPECT_NE(request.error().message.find("accessor"), std::string::npos) << request.error().message;
 }
 
 TEST(GltfCookTests, RejectsImageCountBombBeforeBufferLoad)
@@ -1586,11 +2156,9 @@ TEST(GltfCookTests, RejectsImageCountBombBeforeBufferLoad)
     const auto gltfPath = dir / "count.gltf";
     writeTextFile(gltfPath, json);
 
-    auto request = cookGltfFileToCatalogRequest(
-        gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
     ASSERT_FALSE(request.has_value());
-    EXPECT_NE(request.error().message.find("object count"), std::string::npos)
-        << request.error().message;
+    EXPECT_NE(request.error().message.find("object count"), std::string::npos) << request.error().message;
 }
 
 TEST(GltfCookTests, RejectsImageDimensionBombFromHeaderBeforeDecode)
@@ -1605,11 +2173,9 @@ TEST(GltfCookTests, RejectsImageDimensionBombFromHeaderBeforeDecode)
     const auto gltfPath = dir / "scene.gltf";
     writeTextFile(gltfPath, texturedTriangleGltfJson());
 
-    auto request = cookGltfFileToCatalogRequest(
-        gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
     ASSERT_FALSE(request.has_value());
-    EXPECT_NE(request.error().message.find("dimensions"), std::string::npos)
-        << request.error().message;
+    EXPECT_NE(request.error().message.find("dimensions"), std::string::npos) << request.error().message;
 }
 
 TEST(GltfCookTests, RejectsDecodedImageByteBombFromHeaderBeforeDecode)
@@ -1625,11 +2191,9 @@ TEST(GltfCookTests, RejectsDecodedImageByteBombFromHeaderBeforeDecode)
     const auto gltfPath = dir / "scene.gltf";
     writeTextFile(gltfPath, texturedTriangleGltfJson());
 
-    auto request = cookGltfFileToCatalogRequest(
-        gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
     ASSERT_FALSE(request.has_value());
-    EXPECT_NE(request.error().message.find("decoded image byte budget"), std::string::npos)
-        << request.error().message;
+    EXPECT_NE(request.error().message.find("decoded image byte budget"), std::string::npos) << request.error().message;
 }
 
 // One mesh, two TRIANGLES prims with distinct materials (external multi-prim models).
@@ -1688,8 +2252,7 @@ TEST(GltfCookTests, SplitsMultiPrimitiveMeshIntoDistinctAssetsAndPrefabChildren)
         out << multiPrimitiveMeshGltfJson();
     }
 
-    auto request = cookGltfFileToCatalogRequest(
-        gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
     ASSERT_TRUE(request.has_value()) << (request ? "" : request.error().message);
     // 2 mesh + 2 material + 1 prefab
     ASSERT_EQ(request->assets.size(), 5U);
@@ -1706,12 +2269,10 @@ TEST(GltfCookTests, SplitsMultiPrimitiveMeshIntoDistinctAssetsAndPrefabChildren)
             EXPECT_EQ(view->vertexCount, 3U);
             EXPECT_EQ(view->indexCount, 3U);
             EXPECT_EQ(view->submeshCount, 1U);
-        }
-        else if (asset.assetKind == AssetFormat::AssetKind::Material)
+        } else if (asset.assetKind == AssetFormat::AssetKind::Material)
         {
             ++materialCount;
-        }
-        else if (asset.assetKind == AssetFormat::AssetKind::Prefab)
+        } else if (asset.assetKind == AssetFormat::AssetKind::Prefab)
         {
             // Parent transform + 2 primitive children, with identity carried by each payload node.
             EXPECT_EQ(asset.dependencies.size(), 4U);
@@ -1776,11 +2337,9 @@ TEST(GltfCookTests, RejectsNonTrianglePrimitiveInMultiPrimMesh)
 })json";
     }
 
-    auto request = cookGltfFileToCatalogRequest(
-        gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
     ASSERT_FALSE(request.has_value());
-    EXPECT_NE(request.error().message.find("TRIANGLES"), std::string::npos)
-        << request.error().message;
+    EXPECT_NE(request.error().message.find("TRIANGLES"), std::string::npos) << request.error().message;
 }
 
 #if defined(TINA_COMPLETE_PBR_GLTF_FIXTURE)
@@ -1790,8 +2349,7 @@ TEST(GltfCookTests, CooksRepoCompletePbrFixture)
     const std::filesystem::path gltfPath{TINA_COMPLETE_PBR_GLTF_FIXTURE};
     ASSERT_TRUE(std::filesystem::exists(gltfPath)) << TINA_COMPLETE_PBR_GLTF_FIXTURE;
 
-    auto request = cookGltfFileToCatalogRequest(
-        gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
     ASSERT_TRUE(request.has_value()) << (request ? "" : request.error().message);
 
     std::size_t meshCount = 0;
@@ -1809,8 +2367,7 @@ TEST(GltfCookTests, CooksRepoCompletePbrFixture)
             ASSERT_TRUE(mesh.has_value()) << (mesh ? "" : mesh.error().message);
             EXPECT_GT(mesh->vertexCount, 0U);
             EXPECT_GT(mesh->indexCount, 0U);
-        }
-        else if (asset.assetKind == AssetFormat::AssetKind::Material)
+        } else if (asset.assetKind == AssetFormat::AssetKind::Material)
         {
             ++materialCount;
             auto mat = AssetFormat::parseMaterialPayload(asset.payload);
@@ -1824,19 +2381,16 @@ TEST(GltfCookTests, CooksRepoCompletePbrFixture)
                 sawDielectric = true;
                 EXPECT_NEAR(mat->metallicFactor, 0.1F, 1.0e-4F);
                 EXPECT_NEAR(mat->roughnessFactor, 0.7F, 1.0e-4F);
-            }
-            else
+            } else
             {
                 sawMetal = true;
                 EXPECT_NEAR(mat->metallicFactor, 0.9F, 1.0e-4F);
                 EXPECT_NEAR(mat->roughnessFactor, 0.2F, 1.0e-4F);
             }
-        }
-        else if (asset.assetKind == AssetFormat::AssetKind::Texture2D)
+        } else if (asset.assetKind == AssetFormat::AssetKind::Texture2D)
         {
             ++textureCount;
-        }
-        else if (asset.assetKind == AssetFormat::AssetKind::Prefab)
+        } else if (asset.assetKind == AssetFormat::AssetKind::Prefab)
         {
             ++prefabCount;
             std::vector<AssetFormat::PrefabNodeView> nodes;
@@ -1852,8 +2406,7 @@ TEST(GltfCookTests, CooksRepoCompletePbrFixture)
     EXPECT_TRUE(sawDielectric);
     EXPECT_TRUE(sawMetal);
 
-    const auto catalogRoot =
-        std::filesystem::temp_directory_path() / "tina_gltf_complete_pbr_catalog";
+    const auto catalogRoot = std::filesystem::temp_directory_path() / "tina_gltf_complete_pbr_catalog";
     std::error_code ec;
     std::filesystem::remove_all(catalogRoot, ec);
     ASSERT_TRUE(cookAndPublishCatalogPackage(catalogRoot.string(), *request).has_value());
@@ -1873,11 +2426,9 @@ TEST(GltfCookTests, RejectsKhronosMetalRoughSpheresWithoutRequiredTexcoordsWhenP
         GTEST_SKIP() << "MetalRoughSpheresNoTextures.glb not vendored";
     }
 
-    auto request = cookGltfFileToCatalogRequest(
-        path.string(), AssetFormat::TargetPlatform::WindowsX64);
+    auto request = cookGltfFileToCatalogRequest(path.string(), AssetFormat::TargetPlatform::WindowsX64);
     ASSERT_FALSE(request.has_value());
-    EXPECT_NE(request.error().message.find("TEXCOORD_0"), std::string::npos)
-        << request.error().message;
+    EXPECT_NE(request.error().message.find("TEXCOORD_0"), std::string::npos) << request.error().message;
 #endif
 }
 

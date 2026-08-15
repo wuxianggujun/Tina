@@ -59,6 +59,11 @@ void writeF32(std::vector<std::byte>& bytes, usize offset, float value)
     return std::isfinite(value) && value >= 0.0F && value <= 1.0F;
 }
 
+[[nodiscard]] bool supportedAlphaMode(MaterialAlphaMode alphaMode) noexcept
+{
+    return alphaMode == MaterialAlphaMode::Opaque || alphaMode == MaterialAlphaMode::Blend;
+}
+
 [[nodiscard]] Core::Status validateMaterialDesc(const MaterialPayloadDesc& desc) noexcept
 {
     if (desc.model != MaterialModel::UnlitBaseColor)
@@ -82,9 +87,10 @@ void writeF32(std::vector<std::byte>& bytes, usize offset, float value)
     {
         return Core::failure(AssetFormatErrorCode::InvalidLayout, "material roughnessFactor must be in [0,1]");
     }
-    if (desc.alphaMode != MaterialAlphaMode::Opaque)
+    if (!supportedAlphaMode(desc.alphaMode))
     {
-        return Core::failure(AssetFormatErrorCode::UnsupportedValue, "material alphaMode must be Opaque in v2");
+        return Core::failure(AssetFormatErrorCode::UnsupportedValue,
+                             "material alphaMode must be Opaque or Blend in v2");
     }
     Core::AssetId previousTextureId{};
     const std::array textureIds{desc.baseColorTextureId, desc.metallicRoughnessTextureId,
@@ -201,7 +207,7 @@ Core::Result<MaterialPayloadView> parseMaterialPayload(std::span<const std::byte
         return Core::failure(AssetFormatErrorCode::InvalidLayout, "material doubleSided must be 0 or 1");
     }
     view.doubleSided = doubleSided == 1U;
-    if (view.alphaMode != MaterialAlphaMode::Opaque)
+    if (!supportedAlphaMode(view.alphaMode))
     {
         return Core::failure(AssetFormatErrorCode::UnsupportedValue, "unsupported material alphaMode");
     }

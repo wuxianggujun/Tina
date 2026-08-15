@@ -12,12 +12,15 @@
 #include "vs_tina_opaque3d_mr_spv.bin.h"
 #include "vs_tina_opaque3d_csm_depth_glsl.bin.h"
 #include "vs_tina_opaque3d_csm_depth_spv.bin.h"
+#include "vs_tina_opaque3d_skinned_glsl.bin.h"
+#include "vs_tina_opaque3d_skinned_spv.bin.h"
 
 #if BX_PLATFORM_WINDOWS
 #include "fs_tina_opaque3d_mr_dxbc.bin.h"
 #include "fs_tina_opaque3d_csm_depth_dxbc.bin.h"
 #include "vs_tina_opaque3d_mr_dxbc.bin.h"
 #include "vs_tina_opaque3d_csm_depth_dxbc.bin.h"
+#include "vs_tina_opaque3d_skinned_dxbc.bin.h"
 #endif
 
 namespace Tina::Render::Bgfx::ShaderDetail {
@@ -47,6 +50,20 @@ constexpr bgfx::EmbeddedShader EmbeddedShaders[] = {
             {bgfx::RendererType::OpenGL, fs_tina_opaque3d_mr_glsl,
              sizeof(fs_tina_opaque3d_mr_glsl)},
             {bgfx::RendererType::Vulkan, fs_tina_opaque3d_mr_spv, sizeof(fs_tina_opaque3d_mr_spv)},
+            {bgfx::RendererType::Count, nullptr, 0},
+        },
+    },
+    {
+        "vs_tina_opaque3d_skinned",
+        {
+#if BX_PLATFORM_WINDOWS
+            {bgfx::RendererType::Direct3D11, vs_tina_opaque3d_skinned_dxbc,
+             sizeof(vs_tina_opaque3d_skinned_dxbc)},
+#endif
+            {bgfx::RendererType::OpenGL, vs_tina_opaque3d_skinned_glsl,
+             sizeof(vs_tina_opaque3d_skinned_glsl)},
+            {bgfx::RendererType::Vulkan, vs_tina_opaque3d_skinned_spv,
+             sizeof(vs_tina_opaque3d_skinned_spv)},
             {bgfx::RendererType::Count, nullptr, 0},
         },
     },
@@ -126,6 +143,14 @@ Core::Result<bgfx::ProgramHandle> createOpaque3DMrProgram()
 {
     return createEmbeddedProgram("vs_tina_opaque3d_mr", "fs_tina_opaque3d_mr",
                                  "createOpaque3DMrProgram");
+}
+
+Core::Result<bgfx::ProgramHandle> createOpaque3DSkinnedMrProgram()
+{
+    // Shares the fs_tina_opaque3d_mr fragment stage: skinned meshes receive the
+    // full Cook-Torrance GGX + IBL + shadow shading path.
+    return createEmbeddedProgram("vs_tina_opaque3d_skinned", "fs_tina_opaque3d_mr",
+                                 "createOpaque3DSkinnedMrProgram");
 }
 
 Core::Result<bgfx::ProgramHandle> createOpaque3DCascadedShadowDepthProgram()

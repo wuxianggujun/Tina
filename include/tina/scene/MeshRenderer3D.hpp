@@ -8,7 +8,7 @@
 
 namespace Tina::Scene {
 
-// Scene-owned opaque mesh draw component. Stores copyable weak AssetHandles and
+// Scene-owned mesh draw component. Stores copyable weak AssetHandles and
 // semantic fields only; it never owns an AssetLease or backend/GPU handle.
 struct MeshRenderer3D final {
     Asset::AssetHandle mesh{};
@@ -16,6 +16,7 @@ struct MeshRenderer3D final {
     u32 submeshIndex = 0;
     Render::RenderBoundingSphereInput localBounds{.radius = 0.5F};
     Render::RenderLinearColor baseColorFactor{};
+    Render::Mesh3DAlphaMode alphaMode = Render::Mesh3DAlphaMode::Opaque;
     bool doubleSided = false;
     bool visible = true;
 
@@ -31,7 +32,8 @@ struct MeshRenderer3D final {
         return false;
     }
     if (!std::isfinite(mesh.baseColorFactor.red) || !std::isfinite(mesh.baseColorFactor.green)
-        || !std::isfinite(mesh.baseColorFactor.blue) || !std::isfinite(mesh.baseColorFactor.alpha))
+        || !std::isfinite(mesh.baseColorFactor.blue) || !std::isfinite(mesh.baseColorFactor.alpha)
+        || !Render::isSupportedMesh3DAlphaMode(mesh.alphaMode))
     {
         return false;
     }

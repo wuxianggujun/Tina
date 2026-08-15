@@ -4759,6 +4759,10 @@ static int cgltf_parse_json_material(cgltf_options* options, jsmntok_t const* to
 			{
 				out_material->alpha_mode = cgltf_alpha_mode_blend;
 			}
+			else
+			{
+				out_material->alpha_mode = cgltf_alpha_mode_max_enum;
+			}
 			++i;
 		}
 		else if (cgltf_json_strcmp(tokens + i, json_chunk, "alphaCutoff") == 0)

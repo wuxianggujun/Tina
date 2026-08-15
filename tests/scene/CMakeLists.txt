@@ -1,4 +1,5 @@
 set(TINA_SCENE_TEST_SOURCES
+    Animator3DTests.cpp
     CameraFollow2DTests.cpp
     Fx2DFactoryTests.cpp
     SceneWorldTests.cpp
@@ -8,6 +9,7 @@ set(TINA_SCENE_TEST_SOURCES
     Trail2DTests.cpp
     World2DSnapshotTests.cpp
     header_isolation/Camera2DHeader.cpp
+    header_isolation/Animator3DHeader.cpp
     header_isolation/CameraFollow2DHeader.cpp
     header_isolation/DirectionalLight3DHeader.cpp
     header_isolation/EntityHeader.cpp
@@ -22,6 +24,7 @@ set(TINA_SCENE_TEST_SOURCES
     header_isolation/SceneErrorsHeader.cpp
     header_isolation/SceneHeader.cpp
     header_isolation/ShadowOccluder2DHeader.cpp
+    header_isolation/SkinnedMeshRenderer3DHeader.cpp
     header_isolation/SpotLight3DHeader.cpp
     header_isolation/SpriteAnimator2DHeader.cpp
     header_isolation/SpriteRenderer2DHeader.cpp

@@ -103,23 +103,62 @@ Core::Result<std::vector<EntityId>> instantiatePrefab(
         {
             color = meshBinding.resolveBaseColor(node.materialId);
         }
-
-        MeshRenderer3D mesh{
-            .mesh = meshAsset,
-            .material = materialAsset,
-            .localBounds = bounds,
-            .baseColorFactor = color,
-            .visible = node.visible,
-        };
-        if (!isValid(mesh))
+        Render::Mesh3DAlphaMode alphaMode = meshBinding.alphaMode;
+        if (meshBinding.resolveAlphaMode && static_cast<bool>(node.materialId))
         {
-            rollback();
-            return Core::failure(SceneErrorCode::InvalidComponent, "prefab mesh binding is invalid");
+            alphaMode = meshBinding.resolveAlphaMode(node.materialId);
         }
-        if (auto status = world.setMeshRenderer3D(*entity, mesh); !status)
+
+        const AssetFormat::AssetKind meshKind = meshBinding.resolveMeshKind
+            ? meshBinding.resolveMeshKind(node.meshId)
+            : AssetFormat::AssetKind::StaticMesh;
+        Core::Status rendererStatus = Core::success();
+        if (meshKind == AssetFormat::AssetKind::StaticMesh)
+        {
+            MeshRenderer3D mesh{
+                .mesh = meshAsset,
+                .material = materialAsset,
+                .localBounds = bounds,
+                .baseColorFactor = color,
+                .alphaMode = alphaMode,
+                .visible = node.visible,
+            };
+            if (!isValid(mesh))
+            {
+                rollback();
+                return Core::failure(SceneErrorCode::InvalidComponent,
+                                     "prefab static mesh binding is invalid");
+            }
+            rendererStatus = world.setMeshRenderer3D(*entity, mesh);
+        }
+        else if (meshKind == AssetFormat::AssetKind::SkinnedMesh)
+        {
+            SkinnedMeshRenderer3D mesh{
+                .mesh = meshAsset,
+                .material = materialAsset,
+                .localBounds = bounds,
+                .baseColorFactor = color,
+                .alphaMode = alphaMode,
+                .visible = node.visible,
+            };
+            if (!isValid(mesh))
+            {
+                rollback();
+                return Core::failure(SceneErrorCode::InvalidComponent,
+                                     "prefab skinned mesh binding is invalid");
+            }
+            rendererStatus = world.setSkinnedMeshRenderer3D(*entity, mesh);
+        }
+        else
         {
             rollback();
-            return Core::failure(std::move(status.error()));
+            return Core::failure(SceneErrorCode::InvalidComponent,
+                                 "prefab mesh kind is neither StaticMesh nor SkinnedMesh");
+        }
+        if (!rendererStatus)
+        {
+            rollback();
+            return Core::failure(std::move(rendererStatus.error()));
         }
     }
 

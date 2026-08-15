@@ -11,7 +11,7 @@
 namespace Tina::AssetFormat {
 
 // Material cooked payload schema v2 (little-endian, after CookedAsset header/deps).
-// Opaque UnlitBaseColor product path (runtime still samples baseColor only).
+// Opaque/alpha-blended UnlitBaseColor product path.
 // PBR metallic/roughness factors + optional MR/normal Texture2D deps are cooked
 // data for RENDER-001; GPU PBR sampling is a separate branch.
 // Layout (40B):
@@ -21,7 +21,7 @@ namespace Tina::AssetFormat {
 //   f32 metallicFactor        // glTF pbrMetallicRoughness; default 1
 //   f32 roughnessFactor       // glTF pbrMetallicRoughness; default 1
 //   u8  doubleSided           (0/1)
-//   u8  alphaMode             (1 = Opaque)
+//   u8  alphaMode             (1 = Opaque, 2 = Blend)
 //   u16 flags
 //     bit0 = hasBaseColorTexture dependency
 //     bit1 = hasMetallicRoughnessTexture dependency
@@ -46,6 +46,7 @@ enum class MaterialModel : Core::u16 {
 enum class MaterialAlphaMode : Core::u8 {
     Invalid = 0,
     Opaque = 1,
+    Blend = 2,
 };
 
 struct MaterialPayloadDesc final {

@@ -15,6 +15,10 @@ enum class FrameResourceKind : Core::u8 {
     Texture2D = 1,
     Mesh3DGeometry = 2,
     Mesh3DMaterial = 3,
+    // Skinned geometry shares the device Mesh3D binding-key namespace but is a
+    // distinct kind: a skinned item resolving a static binding (or vice versa)
+    // fails closed at resolve time instead of drawing with the wrong pipeline.
+    SkinnedMesh3DGeometry = 4,
 };
 
 struct FrameResourceDescriptor final {

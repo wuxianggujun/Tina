@@ -25,6 +25,29 @@ Core::Result<Render::GpuMeshId> uploadStaticMeshFromCooked(Render::IRenderDevice
     });
 }
 
+Core::Result<Render::GpuMeshId> uploadSkinnedMeshFromCooked(Render::IRenderDevice& device,
+                                                            const CookedAssetFile& meshAsset)
+{
+    auto view = parseSkinnedMeshFromCooked(meshAsset);
+    if (!view)
+    {
+        return Core::failure(std::move(view.error()).withContext("uploadSkinnedMeshFromCooked", "parse"));
+    }
+    if (view->empty())
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "SkinnedMesh payload is empty");
+    }
+    return device.createSkinnedMesh(Render::SkinnedMeshUploadDesc{
+        .vertexCount = view->vertexCount,
+        .indexCount = view->indexCount,
+        .jointCount = view->jointCount,
+        .vertices = view->vertices,
+        .jointIndices = view->jointIndices,
+        .jointWeights = view->jointWeights,
+        .indices = view->indices,
+    });
+}
+
 Core::Status uploadAndBindStaticMeshForMeshKey(Render::IRenderDevice& device, const CookedAssetFile& meshAsset,
                                                Core::u32 meshKey)
 {

@@ -187,7 +187,9 @@ class AssetSystem final {
                                                Render::GpuTextureId& texture);
     [[nodiscard]] Core::Status retireStaticMesh(Render::IRenderDevice& device, AssetHandle handle,
                                                 Render::GpuMeshId mesh);
-    // StaticMesh counterpart to the lease-consuming Texture2D transaction.
+    // Mesh counterpart to the lease-consuming Texture2D transaction. The
+    // historical name is retained, but both StaticMesh and SkinnedMesh leases
+    // are accepted because they share the Render GpuMeshId retirement path.
     // Backend rejection and every pre-commit failure preserve both owners.
     [[nodiscard]] Core::Status retireStaticMesh(Render::IRenderDevice& device, AssetLease& lease,
                                                 Render::GpuMeshId& mesh);

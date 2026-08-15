@@ -34,6 +34,8 @@ struct World::EntityRecord final {
     PerspectiveCamera3D perspectiveCamera3D{};
     bool hasMeshRenderer3D = false;
     MeshRenderer3D meshRenderer3D{};
+    bool hasSkinnedMeshRenderer3D = false;
+    SkinnedMeshRenderer3D skinnedMeshRenderer3D{};
     bool hasDirectionalLight3D = false;
     DirectionalLight3D directionalLight3D{};
     bool hasPointLight3D = false;
@@ -1362,6 +1364,8 @@ Core::Status World::setMeshRenderer3D(EntityId entity, MeshRenderer3D mesh) noex
     }
     entityRecord->meshRenderer3D = mesh;
     entityRecord->hasMeshRenderer3D = true;
+    entityRecord->hasSkinnedMeshRenderer3D = false;
+    entityRecord->skinnedMeshRenderer3D = {};
     return Core::success();
 }
 
@@ -1388,6 +1392,67 @@ Core::Status World::clearMeshRenderer3D(EntityId entity) noexcept
     }
     entityRecord->hasMeshRenderer3D = false;
     entityRecord->meshRenderer3D = {};
+    return Core::success();
+}
+
+Core::Status World::setSkinnedMeshRenderer3D(
+    EntityId entity,
+    SkinnedMeshRenderer3D mesh) noexcept
+{
+    if (m_impl == nullptr) {
+        return Core::failure(
+            SceneErrorCode::InvalidEntity,
+            "Scene World is not initialized");
+    }
+    if (!m_impl->isOwnerThread()) {
+        return Core::failure(
+            SceneErrorCode::WrongOwnerThread,
+            "Scene World mutation must run on its owner thread");
+    }
+    if (const Core::Status status = validateEntity(entity); !status) {
+        return status;
+    }
+    if (!isValid(mesh)) {
+        return Core::failure(
+            SceneErrorCode::InvalidComponent,
+            "Scene SkinnedMeshRenderer3D has invalid bounds or material color");
+    }
+    EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr) {
+        return Core::failure(
+            SceneErrorCode::CorruptHierarchy,
+            "Scene entity could not be resolved for SkinnedMeshRenderer3D");
+    }
+    entityRecord->skinnedMeshRenderer3D = mesh;
+    entityRecord->hasSkinnedMeshRenderer3D = true;
+    entityRecord->hasMeshRenderer3D = false;
+    entityRecord->meshRenderer3D = {};
+    return Core::success();
+}
+
+Core::Status World::clearSkinnedMeshRenderer3D(EntityId entity) noexcept
+{
+    if (m_impl == nullptr) {
+        return Core::failure(
+            SceneErrorCode::InvalidEntity,
+            "Scene World is not initialized");
+    }
+    if (!m_impl->isOwnerThread()) {
+        return Core::failure(
+            SceneErrorCode::WrongOwnerThread,
+            "Scene World mutation must run on its owner thread");
+    }
+    if (const Core::Status status = validateEntity(entity); !status) {
+        return status;
+    }
+    EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr) {
+        return Core::failure(
+            SceneErrorCode::CorruptHierarchy,
+            "Scene entity could not be resolved for SkinnedMeshRenderer3D clear");
+    }
+    entityRecord->hasSkinnedMeshRenderer3D = false;
+    entityRecord->skinnedMeshRenderer3D = {};
     return Core::success();
 }
 
@@ -1586,6 +1651,18 @@ const MeshRenderer3D* World::meshRenderer3D(EntityId entity) const noexcept
         return nullptr;
     }
     return &entityRecord->meshRenderer3D;
+}
+
+const SkinnedMeshRenderer3D* World::skinnedMeshRenderer3D(EntityId entity) const noexcept
+{
+    if (m_impl == nullptr || !m_impl->isOwnerThread()) {
+        return nullptr;
+    }
+    const EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr || !entityRecord->hasSkinnedMeshRenderer3D) {
+        return nullptr;
+    }
+    return &entityRecord->skinnedMeshRenderer3D;
 }
 
 const DirectionalLight3D* World::directionalLight3D(EntityId entity) const noexcept

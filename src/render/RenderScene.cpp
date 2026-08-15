@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <new>
@@ -175,7 +176,7 @@ inline constexpr u64 FnvPrime = 1099511628211ULL;
 {
     return finite(color.red) && finite(color.green) && finite(color.blue) && finite(color.alpha) &&
            color.red >= 0.0F && color.red <= 1.0F && color.green >= 0.0F && color.green <= 1.0F &&
-           color.blue >= 0.0F && color.blue <= 1.0F && color.alpha == 1.0F;
+           color.blue >= 0.0F && color.blue <= 1.0F && color.alpha >= 0.0F && color.alpha <= 1.0F;
 }
 
 template <typename Value>
@@ -224,7 +225,8 @@ void hashUnsigned(u64& hash, Value value) noexcept
 [[nodiscard]] bool sameMeshBatch(const RenderMesh3DItem& left, const RenderMesh3DItem& right) noexcept
 {
     return left.mesh == right.mesh && left.material == right.material &&
-           left.submeshIndex == right.submeshIndex && left.doubleSided == right.doubleSided;
+           left.submeshIndex == right.submeshIndex && left.alphaMode == right.alphaMode &&
+           left.doubleSided == right.doubleSided;
 }
 
 } // namespace
@@ -235,7 +237,14 @@ Core::Status validateRenderSceneCapacity(const RenderSceneCapacity& capacity) no
         capacity.mesh3DItemCapacity == 0 ||
         capacity.mesh3DItemCapacity > RenderSceneCapacity::MaximumMesh3DItemCapacity ||
         capacity.mesh3DBatchCapacity == 0 ||
-        capacity.mesh3DBatchCapacity > RenderSceneCapacity::MaximumMesh3DBatchCapacity)
+        capacity.mesh3DBatchCapacity > RenderSceneCapacity::MaximumMesh3DBatchCapacity ||
+        capacity.skinnedMesh3DItemCapacity == 0 ||
+        capacity.skinnedMesh3DItemCapacity > RenderSceneCapacity::MaximumSkinnedMesh3DItemCapacity ||
+        capacity.transparent3DDrawCapacity == 0 ||
+        capacity.transparent3DDrawCapacity > RenderSceneCapacity::MaximumTransparent3DDrawCapacity ||
+        capacity.skinnedMesh3DPaletteJointCapacity < MaxSkinnedMesh3DPaletteJointCount ||
+        capacity.skinnedMesh3DPaletteJointCapacity >
+            RenderSceneCapacity::MaximumSkinnedMesh3DPaletteJointCapacity)
     {
         return Core::failure(RenderErrorCode::InvalidRenderSceneCapacity,
                              "RenderScene capacity is outside the supported range");
@@ -254,26 +263,62 @@ Core::Result<RenderSceneBuilder> RenderSceneBuilder::Create(RenderSceneCapacity 
     usize spriteBytes = 0;
     usize mesh3DBytes = 0;
     usize mesh3DBatchBytes = 0;
+    usize skinnedMesh3DBytes = 0;
+    usize transparent3DDrawBytes = 0;
+    usize skinnedPaletteFloatCount = 0;
+    usize skinnedPaletteBytes = 0;
     if (!checkedStorageBytes<RenderSprite2DItem>(capacity.spriteCapacity, spriteBytes) ||
         !checkedStorageBytes<RenderMesh3DItem>(capacity.mesh3DItemCapacity, mesh3DBytes) ||
-        !checkedStorageBytes<RenderMesh3DBatch>(capacity.mesh3DBatchCapacity, mesh3DBatchBytes))
+        !checkedStorageBytes<RenderMesh3DBatch>(capacity.mesh3DBatchCapacity, mesh3DBatchBytes) ||
+        !checkedStorageBytes<RenderSkinnedMesh3DItem>(capacity.skinnedMesh3DItemCapacity, skinnedMesh3DBytes) ||
+        !checkedStorageBytes<RenderTransparent3DDraw>(capacity.transparent3DDrawCapacity,
+                                                     transparent3DDrawBytes))
     {
         return Core::failure(RenderErrorCode::InvalidRenderSceneCapacity,
                              "RenderScene capacity exceeds addressable storage");
     }
+    skinnedPaletteFloatCount = static_cast<usize>(capacity.skinnedMesh3DPaletteJointCapacity) *
+                               SkinnedMesh3DPaletteFloatsPerJoint;
+    if (skinnedPaletteFloatCount > (std::numeric_limits<usize>::max)() / sizeof(float))
+    {
+        return Core::failure(RenderErrorCode::InvalidRenderSceneCapacity,
+                             "RenderScene capacity exceeds addressable storage");
+    }
+    skinnedPaletteBytes = skinnedPaletteFloatCount * sizeof(float);
 
     RenderSprite2DItem* sprites = nullptr;
     RenderMesh3DItem* meshes3D = nullptr;
     RenderMesh3DBatch* mesh3DBatches = nullptr;
+    RenderSkinnedMesh3DItem* skinnedMeshes3D = nullptr;
+    RenderTransparent3DDraw* transparent3DDraws = nullptr;
+    float* skinnedMesh3DPalette = nullptr;
     try
     {
         sprites = static_cast<RenderSprite2DItem*>(storage.allocate(spriteBytes, alignof(RenderSprite2DItem)));
         meshes3D = static_cast<RenderMesh3DItem*>(storage.allocate(mesh3DBytes, alignof(RenderMesh3DItem)));
         mesh3DBatches =
             static_cast<RenderMesh3DBatch*>(storage.allocate(mesh3DBatchBytes, alignof(RenderMesh3DBatch)));
+        skinnedMeshes3D = static_cast<RenderSkinnedMesh3DItem*>(
+            storage.allocate(skinnedMesh3DBytes, alignof(RenderSkinnedMesh3DItem)));
+        transparent3DDraws = static_cast<RenderTransparent3DDraw*>(
+            storage.allocate(transparent3DDrawBytes, alignof(RenderTransparent3DDraw)));
+        skinnedMesh3DPalette = static_cast<float*>(storage.allocate(skinnedPaletteBytes, alignof(float)));
     }
     catch (const std::bad_alloc&)
     {
+        if (transparent3DDraws != nullptr)
+        {
+            storage.deallocate(transparent3DDraws, transparent3DDrawBytes,
+                               alignof(RenderTransparent3DDraw));
+        }
+        if (skinnedMeshes3D != nullptr)
+        {
+            storage.deallocate(skinnedMeshes3D, skinnedMesh3DBytes, alignof(RenderSkinnedMesh3DItem));
+        }
+        if (mesh3DBatches != nullptr)
+        {
+            storage.deallocate(mesh3DBatches, mesh3DBatchBytes, alignof(RenderMesh3DBatch));
+        }
         if (meshes3D != nullptr)
         {
             storage.deallocate(meshes3D, mesh3DBytes, alignof(RenderMesh3DItem));
@@ -285,14 +330,20 @@ Core::Result<RenderSceneBuilder> RenderSceneBuilder::Create(RenderSceneCapacity 
         return Core::failure(RenderErrorCode::RenderSceneStorageAllocationFailed,
                              "RenderScene fixed storage allocation failed");
     }
-    return RenderSceneBuilder{capacity, storage, sprites, meshes3D, mesh3DBatches};
+    return RenderSceneBuilder{capacity, storage, sprites, meshes3D, mesh3DBatches,
+                              skinnedMeshes3D, transparent3DDraws, skinnedMesh3DPalette};
 }
 
 RenderSceneBuilder::RenderSceneBuilder(RenderSceneCapacity capacity, std::pmr::memory_resource& storage,
                                        RenderSprite2DItem* sprites, RenderMesh3DItem* meshes3D,
-                                       RenderMesh3DBatch* mesh3DBatches) noexcept
+                                       RenderMesh3DBatch* mesh3DBatches,
+                                       RenderSkinnedMesh3DItem* skinnedMeshes3D,
+                                       RenderTransparent3DDraw* transparent3DDraws,
+                                       float* skinnedMesh3DPalette) noexcept
     : m_capacity(capacity), m_storage(&storage), m_sprites(sprites), m_meshes3D(meshes3D),
-      m_mesh3DBatches(mesh3DBatches)
+      m_mesh3DBatches(mesh3DBatches), m_skinnedMeshes3D(skinnedMeshes3D),
+      m_transparent3DDraws(transparent3DDraws),
+      m_skinnedMesh3DPalette(skinnedMesh3DPalette)
 {
 }
 
@@ -300,8 +351,17 @@ RenderSceneBuilder::RenderSceneBuilder(RenderSceneBuilder&& other) noexcept
     : m_capacity(other.m_capacity), m_storage(std::exchange(other.m_storage, nullptr)),
       m_sprites(std::exchange(other.m_sprites, nullptr)), m_meshes3D(std::exchange(other.m_meshes3D, nullptr)),
       m_mesh3DBatches(std::exchange(other.m_mesh3DBatches, nullptr)),
+      m_skinnedMeshes3D(std::exchange(other.m_skinnedMeshes3D, nullptr)),
+      m_transparent3DDraws(std::exchange(other.m_transparent3DDraws, nullptr)),
+      m_skinnedMesh3DPalette(std::exchange(other.m_skinnedMesh3DPalette, nullptr)),
       m_spriteCount(std::exchange(other.m_spriteCount, 0)), m_mesh3DCount(std::exchange(other.m_mesh3DCount, 0)),
-      m_mesh3DBatchCount(std::exchange(other.m_mesh3DBatchCount, 0)), m_camera(std::move(other.m_camera)),
+      m_mesh3DBatchCount(std::exchange(other.m_mesh3DBatchCount, 0)),
+      m_skinnedMesh3DCount(std::exchange(other.m_skinnedMesh3DCount, 0)),
+      m_opaqueMesh3DCount(std::exchange(other.m_opaqueMesh3DCount, 0)),
+      m_opaqueSkinnedMesh3DCount(std::exchange(other.m_opaqueSkinnedMesh3DCount, 0)),
+      m_transparent3DDrawCount(std::exchange(other.m_transparent3DDrawCount, 0)),
+      m_skinnedMesh3DPaletteJointCount(std::exchange(other.m_skinnedMesh3DPaletteJointCount, 0)),
+      m_camera(std::move(other.m_camera)),
       m_sprite2DLighting(std::move(other.m_sprite2DLighting)),
       m_perspectiveCamera(std::move(other.m_perspectiveCamera)),
       m_mesh3DLighting(std::move(other.m_mesh3DLighting)), m_frameParameters(other.m_frameParameters),
@@ -404,6 +464,16 @@ Core::Status RenderSceneWriter::addMesh3D(const RenderMesh3DInput& mesh)
     return m_builder->addMesh3D(mesh);
 }
 
+Core::Status RenderSceneWriter::addSkinnedMesh3D(const RenderSkinnedMesh3DInput& mesh)
+{
+    if (m_builder == nullptr)
+    {
+        return Core::failure(RenderErrorCode::RenderSceneBuildNotOpen,
+                             "The RenderScene writer is no longer attached to a builder");
+    }
+    return m_builder->addSkinnedMesh3D(mesh);
+}
+
 Core::Status RenderSceneWriter::setMesh3DLighting(const Mesh3DLightingDesc& lighting)
 {
     if (m_builder == nullptr)
@@ -488,7 +558,8 @@ Core::Status RenderSceneBuilder::validateMesh3D(const RenderMesh3DInput& mesh) c
         !finite(mesh.worldTransform.scaleZ) || mesh.worldTransform.scaleX <= 0.0F ||
         mesh.worldTransform.scaleY <= 0.0F || mesh.worldTransform.scaleZ <= 0.0F ||
         !finite(bounds.centerX) || !finite(bounds.centerY) || !finite(bounds.centerZ) || !finite(bounds.radius) ||
-        bounds.radius <= 0.0F || !finiteColor(mesh.baseColorFactor))
+        bounds.radius <= 0.0F || !finiteColor(mesh.baseColorFactor) ||
+        !isSupportedMesh3DAlphaMode(mesh.alphaMode))
     {
         return Core::failure(RenderErrorCode::InvalidRenderSceneInput,
                              "RenderScene Mesh3D contains invalid geometry, transform, material, or resource values");
@@ -744,9 +815,138 @@ Core::Status RenderSceneBuilder::addMesh3D(const RenderMesh3DInput& mesh)
         .worldBoundsRadius = worldRadius,
         .columnMajorWorldTransform = worldTransform,
         .baseColorFactor = mesh.baseColorFactor,
+        .alphaMode = mesh.alphaMode,
         .doubleSided = mesh.doubleSided,
     });
     ++m_mesh3DCount;
+    return Core::success();
+}
+
+Core::Status RenderSceneBuilder::validateSkinnedMesh3D(const RenderSkinnedMesh3DInput& mesh) const noexcept
+{
+    const RenderPose3DInput& pose = mesh.worldTransform.pose;
+    const RenderBoundingSphereInput& bounds = mesh.localBounds;
+    const usize paletteFloatCount = mesh.paletteColumnMajorJointMatrices.size();
+    if (!mesh.mesh.hasValue() || !mesh.material.hasValue() || mesh.stableEntityKey == 0 ||
+        !finite(pose.positionX) || !finite(pose.positionY) || !finite(pose.positionZ) ||
+        !finite(pose.rotationX) || !finite(pose.rotationY) || !finite(pose.rotationZ) ||
+        !finite(pose.rotationW) || !finite(mesh.worldTransform.scaleX) ||
+        !finite(mesh.worldTransform.scaleY) || !finite(mesh.worldTransform.scaleZ) ||
+        mesh.worldTransform.scaleX <= 0.0F || mesh.worldTransform.scaleY <= 0.0F ||
+        mesh.worldTransform.scaleZ <= 0.0F || !finite(bounds.centerX) || !finite(bounds.centerY) ||
+        !finite(bounds.centerZ) || !finite(bounds.radius) || bounds.radius <= 0.0F ||
+        !finiteColor(mesh.baseColorFactor) || !isSupportedMesh3DAlphaMode(mesh.alphaMode))
+    {
+        return Core::failure(RenderErrorCode::InvalidRenderSceneInput,
+                             "RenderScene SkinnedMesh3D contains invalid geometry, transform, material, or "
+                             "resource values");
+    }
+    if (paletteFloatCount == 0 || (paletteFloatCount % SkinnedMesh3DPaletteFloatsPerJoint) != 0 ||
+        paletteFloatCount / SkinnedMesh3DPaletteFloatsPerJoint > MaxSkinnedMesh3DPaletteJointCount)
+    {
+        return Core::failure(RenderErrorCode::InvalidRenderSceneInput,
+                             "RenderScene SkinnedMesh3D palette must contain 1..256 column-major joint matrices");
+    }
+    for (const float value : mesh.paletteColumnMajorJointMatrices)
+    {
+        if (!finite(value))
+        {
+            return Core::failure(RenderErrorCode::InvalidRenderSceneInput,
+                                 "RenderScene SkinnedMesh3D palette values must be finite");
+        }
+    }
+    if (auto rotation = normalizedQuaternion(pose); !rotation)
+    {
+        return Core::failure(std::move(rotation.error()));
+    }
+    return Core::success();
+}
+
+Core::Status RenderSceneBuilder::addSkinnedMesh3D(const RenderSkinnedMesh3DInput& mesh)
+{
+    if (m_state != State::Building)
+    {
+        return buildStateFailure(RenderErrorCode::RenderSceneBuildNotOpen,
+                                 "A RenderScene build must be open before adding a skinned 3D mesh");
+    }
+    if (m_stickyBuildError.has_value())
+    {
+        return Core::failure(Core::Error{m_stickyBuildError->code, m_stickyBuildError->message,
+                                         m_stickyBuildError->origin});
+    }
+    if (auto status = validateSkinnedMesh3D(mesh); !status)
+    {
+        return failBuild(status.error().code, status.error().message.c_str());
+    }
+
+    ++m_candidateStatistics.submittedSkinnedMesh3DCount;
+    if (!mesh.visible)
+    {
+        ++m_candidateStatistics.prunedInvisibleSkinnedMesh3DCount;
+        return Core::success();
+    }
+    if (m_skinnedMesh3DCount >= m_capacity.skinnedMesh3DItemCapacity)
+    {
+        return failBuild(RenderErrorCode::RenderSceneCapacityExceeded,
+                         "RenderScene SkinnedMesh3D item capacity was exceeded");
+    }
+    const u32 paletteJointCount = static_cast<u32>(
+        mesh.paletteColumnMajorJointMatrices.size() / SkinnedMesh3DPaletteFloatsPerJoint);
+    if (paletteJointCount > m_capacity.skinnedMesh3DPaletteJointCapacity - m_skinnedMesh3DPaletteJointCount)
+    {
+        return failBuild(RenderErrorCode::RenderSceneCapacityExceeded,
+                         "RenderScene SkinnedMesh3D palette pool capacity was exceeded");
+    }
+
+    auto rotationResult = normalizedQuaternion(mesh.worldTransform.pose);
+    if (!rotationResult)
+    {
+        return failBuild(rotationResult.error().code, rotationResult.error().message.c_str());
+    }
+    const Quaternion rotation = *rotationResult;
+    const Vector3 scaledLocalCenter = multiply(
+        {mesh.localBounds.centerX, mesh.localBounds.centerY, mesh.localBounds.centerZ},
+        {mesh.worldTransform.scaleX, mesh.worldTransform.scaleY, mesh.worldTransform.scaleZ});
+    const Vector3 worldCenter = add(
+        {mesh.worldTransform.pose.positionX, mesh.worldTransform.pose.positionY, mesh.worldTransform.pose.positionZ},
+        rotate(rotation, scaledLocalCenter));
+    const float worldRadius = mesh.localBounds.radius *
+                              std::max({mesh.worldTransform.scaleX, mesh.worldTransform.scaleY,
+                                        mesh.worldTransform.scaleZ});
+    const std::array<float, 16> worldTransform = makeColumnMajorWorldTransform(mesh.worldTransform, rotation);
+    if (!finite(worldCenter) || !finite(worldRadius) || worldRadius <= 0.0F ||
+        !std::ranges::all_of(worldTransform, [](float value) noexcept { return finite(value); }))
+    {
+        return failBuild(RenderErrorCode::InvalidRenderSceneInput,
+                         "RenderScene SkinnedMesh3D world transform or bounds overflowed");
+    }
+
+    const u32 paletteJointOffset = m_skinnedMesh3DPaletteJointCount;
+    std::ranges::copy(mesh.paletteColumnMajorJointMatrices,
+                      m_skinnedMesh3DPalette +
+                          static_cast<usize>(paletteJointOffset) * SkinnedMesh3DPaletteFloatsPerJoint);
+    m_skinnedMesh3DPaletteJointCount += paletteJointCount;
+
+    std::construct_at(&m_skinnedMeshes3D[m_skinnedMesh3DCount], RenderSkinnedMesh3DItem{
+        .mesh = mesh.mesh,
+        .material = mesh.material,
+        .submeshIndex = mesh.submeshIndex,
+        .stableEntityKey = mesh.stableEntityKey,
+        .insertionOrder = m_skinnedMesh3DCount,
+        .depthBucket = 0,
+        .cameraDepth = 0.0F,
+        .worldBoundsCenterX = worldCenter.x,
+        .worldBoundsCenterY = worldCenter.y,
+        .worldBoundsCenterZ = worldCenter.z,
+        .worldBoundsRadius = worldRadius,
+        .columnMajorWorldTransform = worldTransform,
+        .baseColorFactor = mesh.baseColorFactor,
+        .paletteJointOffset = paletteJointOffset,
+        .paletteJointCount = paletteJointCount,
+        .alphaMode = mesh.alphaMode,
+        .doubleSided = mesh.doubleSided,
+    });
+    ++m_skinnedMesh3DCount;
     return Core::success();
 }
 
@@ -850,20 +1050,20 @@ bool RenderSceneBuilder::intersectsCamera(const RenderSprite2DItem& sprite,
            std::abs(localY) - halfHeight <= cameraHalfHeight;
 }
 
-bool RenderSceneBuilder::intersectsPerspectiveCamera(const RenderMesh3DItem& mesh,
+namespace {
+
+[[nodiscard]] bool sphereIntersectsPerspectiveCamera(Vector3 worldCenter, float radius,
                                                      const RenderPerspectiveCamera& camera,
-                                                     float& cameraDepth) const noexcept
+                                                     float& cameraDepth) noexcept
 {
     const Vector3 cameraPosition{camera.positionX, camera.positionY, camera.positionZ};
     const Vector3 forward{camera.forwardX, camera.forwardY, camera.forwardZ};
     const Vector3 up{camera.upX, camera.upY, camera.upZ};
     const Vector3 right = cross(forward, up);
-    const Vector3 relative = subtract(
-        {mesh.worldBoundsCenterX, mesh.worldBoundsCenterY, mesh.worldBoundsCenterZ}, cameraPosition);
+    const Vector3 relative = subtract(worldCenter, cameraPosition);
     const float x = dot(relative, right);
     const float y = dot(relative, up);
     const float depth = dot(relative, forward);
-    const float radius = mesh.worldBoundsRadius;
     cameraDepth = depth;
 
     if (!finite(x) || !finite(y) || !finite(depth) || !finite(radius) ||
@@ -882,18 +1082,30 @@ bool RenderSceneBuilder::intersectsPerspectiveCamera(const RenderMesh3DItem& mes
            depth * tangentY - y >= -radius * verticalRadiusScale;
 }
 
+} // namespace
+
+bool RenderSceneBuilder::intersectsPerspectiveCamera(const RenderMesh3DItem& mesh,
+                                                     const RenderPerspectiveCamera& camera,
+                                                     float& cameraDepth) const noexcept
+{
+    return sphereIntersectsPerspectiveCamera(
+        {mesh.worldBoundsCenterX, mesh.worldBoundsCenterY, mesh.worldBoundsCenterZ},
+        mesh.worldBoundsRadius, camera, cameraDepth);
+}
+
 Core::Status RenderSceneBuilder::finalizeMesh3DBatches()
 {
-    if (m_mesh3DCount == 0)
+    if (m_opaqueMesh3DCount == 0)
     {
         return Core::success();
     }
 
     u32 firstItem = 0;
-    while (firstItem < m_mesh3DCount)
+    while (firstItem < m_opaqueMesh3DCount)
     {
         u32 nextItem = firstItem + 1;
-        while (nextItem < m_mesh3DCount && sameMeshBatch(m_meshes3D[firstItem], m_meshes3D[nextItem]))
+        while (nextItem < m_opaqueMesh3DCount &&
+               sameMeshBatch(m_meshes3D[firstItem], m_meshes3D[nextItem]))
         {
             ++nextItem;
         }
@@ -919,6 +1131,94 @@ Core::Status RenderSceneBuilder::finalizeMesh3DBatches()
     return Core::success();
 }
 
+Core::Status RenderSceneBuilder::finalizeTransparent3DDraws()
+{
+    const u32 transparentStaticCount = m_mesh3DCount - m_opaqueMesh3DCount;
+    const u32 transparentSkinnedCount = m_skinnedMesh3DCount - m_opaqueSkinnedMesh3DCount;
+    const u64 transparentCount = static_cast<u64>(transparentStaticCount) + transparentSkinnedCount;
+    if (transparentCount > m_capacity.transparent3DDrawCapacity)
+    {
+        return failBuild(RenderErrorCode::RenderSceneCapacityExceeded,
+                         "RenderScene Transparent3D draw capacity was exceeded");
+    }
+    if (transparentCount == 0)
+    {
+        return Core::success();
+    }
+    if (!m_perspectiveCamera.has_value())
+    {
+        return failBuild(RenderErrorCode::RenderSceneMissingCamera,
+                         "Transparent3D draws require an active PerspectiveCamera");
+    }
+
+    const RenderPerspectiveCamera& camera = *m_perspectiveCamera;
+    const auto distanceSquared = [&camera](float x, float y, float z) noexcept {
+        const double deltaX = static_cast<double>(x) - camera.positionX;
+        const double deltaY = static_cast<double>(y) - camera.positionY;
+        const double deltaZ = static_cast<double>(z) - camera.positionZ;
+        return deltaX * deltaX + deltaY * deltaY + deltaZ * deltaZ;
+    };
+    const auto append = [&](RenderTransparent3DDrawKind kind, u32 itemIndex,
+                            u64 stableEntityKey, double itemDistanceSquared) {
+        std::construct_at(&m_transparent3DDraws[m_transparent3DDrawCount],
+                          RenderTransparent3DDraw{
+                              .kind = kind,
+                              .itemIndex = itemIndex,
+                              .stableEntityKey = stableEntityKey,
+                              .cameraDistanceSquared = itemDistanceSquared,
+                          });
+        ++m_transparent3DDrawCount;
+    };
+
+    for (u32 index = m_opaqueMesh3DCount; index < m_mesh3DCount; ++index)
+    {
+        const RenderMesh3DItem& item = m_meshes3D[index];
+        append(RenderTransparent3DDrawKind::StaticMesh, index, item.stableEntityKey,
+               distanceSquared(item.worldBoundsCenterX, item.worldBoundsCenterY,
+                               item.worldBoundsCenterZ));
+    }
+    for (u32 index = m_opaqueSkinnedMesh3DCount; index < m_skinnedMesh3DCount; ++index)
+    {
+        const RenderSkinnedMesh3DItem& item = m_skinnedMeshes3D[index];
+        append(RenderTransparent3DDrawKind::SkinnedMesh, index, item.stableEntityKey,
+               distanceSquared(item.worldBoundsCenterX, item.worldBoundsCenterY,
+                               item.worldBoundsCenterZ));
+    }
+
+    std::sort(m_transparent3DDraws, m_transparent3DDraws + m_transparent3DDrawCount,
+              [](const RenderTransparent3DDraw& left,
+                 const RenderTransparent3DDraw& right) noexcept {
+        if (left.cameraDistanceSquared != right.cameraDistanceSquared)
+        {
+            return left.cameraDistanceSquared > right.cameraDistanceSquared;
+        }
+        if (left.stableEntityKey != right.stableEntityKey)
+        {
+            return left.stableEntityKey < right.stableEntityKey;
+        }
+        if (left.kind != right.kind)
+        {
+            return left.kind < right.kind;
+        }
+        return left.itemIndex < right.itemIndex;
+    });
+
+    m_candidateStatistics.transparentMesh3DCount = transparentStaticCount;
+    m_candidateStatistics.transparentSkinnedMesh3DCount = transparentSkinnedCount;
+    m_candidateStatistics.transparent3DDrawCount = m_transparent3DDrawCount;
+    u64 checksum = FnvOffset;
+    for (const RenderTransparent3DDraw& draw :
+         std::span<const RenderTransparent3DDraw>{m_transparent3DDraws,
+                                                  m_transparent3DDrawCount})
+    {
+        hashUnsigned(checksum, static_cast<u8>(draw.kind));
+        hashUnsigned(checksum, draw.stableEntityKey);
+        hashUnsigned(checksum, draw.itemIndex);
+    }
+    m_candidateStatistics.transparent3DSortOrderChecksum = checksum;
+    return Core::success();
+}
+
 Core::Result<RenderSceneView> RenderSceneBuilder::commit()
 {
     if (m_state != State::Building)
@@ -940,7 +1240,7 @@ Core::Result<RenderSceneView> RenderSceneBuilder::commit()
         rollbackBuilding();
         return Core::failure(std::move(error));
     }
-    if (m_mesh3DCount != 0 && !m_perspectiveCamera.has_value())
+    if ((m_mesh3DCount != 0 || m_skinnedMesh3DCount != 0) && !m_perspectiveCamera.has_value())
     {
         Core::Status status = failBuild(RenderErrorCode::RenderSceneMissingCamera,
                                         "World meshes require exactly one active PerspectiveCamera");
@@ -1032,6 +1332,18 @@ Core::Result<RenderSceneView> RenderSceneBuilder::commit()
 
     std::sort(m_meshes3D, m_meshes3D + m_mesh3DCount, [](const RenderMesh3DItem& left,
                                                          const RenderMesh3DItem& right) noexcept {
+        if (left.alphaMode != right.alphaMode)
+        {
+            return left.alphaMode < right.alphaMode;
+        }
+        if (left.alphaMode == Mesh3DAlphaMode::Blend)
+        {
+            if (left.stableEntityKey != right.stableEntityKey)
+            {
+                return left.stableEntityKey < right.stableEntityKey;
+            }
+            return left.insertionOrder < right.insertionOrder;
+        }
         if (left.material != right.material)
         {
             return left.material < right.material;
@@ -1059,9 +1371,104 @@ Core::Result<RenderSceneView> RenderSceneBuilder::commit()
         return left.insertionOrder < right.insertionOrder;
     });
 
+    m_opaqueMesh3DCount = static_cast<u32>(std::distance(
+        m_meshes3D,
+        std::find_if(m_meshes3D, m_meshes3D + m_mesh3DCount,
+                     [](const RenderMesh3DItem& item) noexcept {
+                         return item.alphaMode != Mesh3DAlphaMode::Opaque;
+                     })));
+    m_candidateStatistics.opaqueMesh3DCount = m_opaqueMesh3DCount;
+    m_candidateStatistics.transparentMesh3DCount = m_mesh3DCount - m_opaqueMesh3DCount;
+
     if (auto batchStatus = finalizeMesh3DBatches(); !batchStatus)
     {
         Core::Error error = std::move(batchStatus.error());
+        rollbackBuilding();
+        return Core::failure(std::move(error));
+    }
+
+    if (m_perspectiveCamera.has_value())
+    {
+        // Palette ranges are not compacted: culled items simply leave their
+        // pool slots unused for the remainder of this frame.
+        usize writeIndex = 0;
+        for (usize readIndex = 0; readIndex < m_skinnedMesh3DCount; ++readIndex)
+        {
+            RenderSkinnedMesh3DItem candidate = m_skinnedMeshes3D[readIndex];
+            float cameraDepth = 0.0F;
+            if (!sphereIntersectsPerspectiveCamera(
+                    {candidate.worldBoundsCenterX, candidate.worldBoundsCenterY, candidate.worldBoundsCenterZ},
+                    candidate.worldBoundsRadius, *m_perspectiveCamera, cameraDepth))
+            {
+                ++m_candidateStatistics.culledSkinnedMesh3DCount;
+                continue;
+            }
+            candidate.cameraDepth = cameraDepth;
+            candidate.depthBucket = depthBucket(cameraDepth, *m_perspectiveCamera);
+            m_skinnedMeshes3D[writeIndex] = candidate;
+            ++writeIndex;
+        }
+        if (writeIndex < m_skinnedMesh3DCount)
+        {
+            std::destroy_n(m_skinnedMeshes3D + writeIndex, m_skinnedMesh3DCount - writeIndex);
+            m_skinnedMesh3DCount = static_cast<u32>(writeIndex);
+        }
+    }
+
+    std::sort(m_skinnedMeshes3D, m_skinnedMeshes3D + m_skinnedMesh3DCount,
+              [](const RenderSkinnedMesh3DItem& left, const RenderSkinnedMesh3DItem& right) noexcept {
+        if (left.alphaMode != right.alphaMode)
+        {
+            return left.alphaMode < right.alphaMode;
+        }
+        if (left.alphaMode == Mesh3DAlphaMode::Blend)
+        {
+            if (left.stableEntityKey != right.stableEntityKey)
+            {
+                return left.stableEntityKey < right.stableEntityKey;
+            }
+            return left.insertionOrder < right.insertionOrder;
+        }
+        if (left.material != right.material)
+        {
+            return left.material < right.material;
+        }
+        if (left.mesh != right.mesh)
+        {
+            return left.mesh < right.mesh;
+        }
+        if (left.submeshIndex != right.submeshIndex)
+        {
+            return left.submeshIndex < right.submeshIndex;
+        }
+        if (left.doubleSided != right.doubleSided)
+        {
+            return left.doubleSided < right.doubleSided;
+        }
+        if (left.depthBucket != right.depthBucket)
+        {
+            return left.depthBucket < right.depthBucket;
+        }
+        if (left.stableEntityKey != right.stableEntityKey)
+        {
+            return left.stableEntityKey < right.stableEntityKey;
+        }
+        return left.insertionOrder < right.insertionOrder;
+    });
+
+    m_opaqueSkinnedMesh3DCount = static_cast<u32>(std::distance(
+        m_skinnedMeshes3D,
+        std::find_if(m_skinnedMeshes3D, m_skinnedMeshes3D + m_skinnedMesh3DCount,
+                     [](const RenderSkinnedMesh3DItem& item) noexcept {
+                         return item.alphaMode != Mesh3DAlphaMode::Opaque;
+                     })));
+    m_candidateStatistics.opaqueSkinnedMesh3DCount = m_opaqueSkinnedMesh3DCount;
+    m_candidateStatistics.transparentSkinnedMesh3DCount =
+        m_skinnedMesh3DCount - m_opaqueSkinnedMesh3DCount;
+
+    if (auto transparentStatus = finalizeTransparent3DDraws(); !transparentStatus)
+    {
+        Core::Error error = std::move(transparentStatus.error());
         rollbackBuilding();
         return Core::failure(std::move(error));
     }
@@ -1084,11 +1491,29 @@ Core::Result<RenderSceneView> RenderSceneBuilder::commit()
         hashUnsigned(meshChecksum, mesh.material.index());
         hashUnsigned(meshChecksum, mesh.mesh.index());
         hashUnsigned(meshChecksum, mesh.submeshIndex);
+        hashUnsigned(meshChecksum, static_cast<u8>(mesh.alphaMode));
         hashUnsigned(meshChecksum, mesh.depthBucket);
         hashUnsigned(meshChecksum, mesh.stableEntityKey);
         hashUnsigned(meshChecksum, mesh.insertionOrder);
     }
     m_candidateStatistics.mesh3DSortOrderChecksum = meshChecksum;
+
+    m_candidateStatistics.visibleSkinnedMesh3DCount = m_skinnedMesh3DCount;
+    m_candidateStatistics.skinnedMesh3DPaletteJointCount = m_skinnedMesh3DPaletteJointCount;
+    u64 skinnedChecksum = FnvOffset;
+    for (const RenderSkinnedMesh3DItem& mesh :
+         std::span<const RenderSkinnedMesh3DItem>{m_skinnedMeshes3D, m_skinnedMesh3DCount})
+    {
+        hashUnsigned(skinnedChecksum, mesh.material.index());
+        hashUnsigned(skinnedChecksum, mesh.mesh.index());
+        hashUnsigned(skinnedChecksum, mesh.submeshIndex);
+        hashUnsigned(skinnedChecksum, static_cast<u8>(mesh.alphaMode));
+        hashUnsigned(skinnedChecksum, mesh.depthBucket);
+        hashUnsigned(skinnedChecksum, mesh.stableEntityKey);
+        hashUnsigned(skinnedChecksum, mesh.insertionOrder);
+        hashUnsigned(skinnedChecksum, mesh.paletteJointCount);
+    }
+    m_candidateStatistics.skinnedMesh3DSortOrderChecksum = skinnedChecksum;
 
     m_publishedStatistics = m_candidateStatistics;
     m_state = State::Published;
@@ -1106,6 +1531,19 @@ void RenderSceneBuilder::rollback() noexcept
 
 void RenderSceneBuilder::clearCandidate() noexcept
 {
+    if (m_transparent3DDrawCount != 0)
+    {
+        std::destroy_n(m_transparent3DDraws, m_transparent3DDrawCount);
+        m_transparent3DDrawCount = 0;
+    }
+    m_opaqueMesh3DCount = 0;
+    m_opaqueSkinnedMesh3DCount = 0;
+    if (m_skinnedMesh3DCount != 0)
+    {
+        std::destroy_n(m_skinnedMeshes3D, m_skinnedMesh3DCount);
+        m_skinnedMesh3DCount = 0;
+    }
+    m_skinnedMesh3DPaletteJointCount = 0;
     if (m_mesh3DBatchCount != 0)
     {
         std::destroy_n(m_mesh3DBatches, m_mesh3DBatchCount);
@@ -1137,6 +1575,18 @@ void RenderSceneBuilder::releaseStorage() noexcept
         return;
     }
     clearCandidate();
+    m_storage->deallocate(m_transparent3DDraws,
+                          sizeof(RenderTransparent3DDraw) *
+                              static_cast<usize>(m_capacity.transparent3DDrawCapacity),
+                          alignof(RenderTransparent3DDraw));
+    m_storage->deallocate(m_skinnedMesh3DPalette,
+                          sizeof(float) * static_cast<usize>(m_capacity.skinnedMesh3DPaletteJointCapacity) *
+                              SkinnedMesh3DPaletteFloatsPerJoint,
+                          alignof(float));
+    m_storage->deallocate(m_skinnedMeshes3D,
+                          sizeof(RenderSkinnedMesh3DItem) *
+                              static_cast<usize>(m_capacity.skinnedMesh3DItemCapacity),
+                          alignof(RenderSkinnedMesh3DItem));
     m_storage->deallocate(m_mesh3DBatches,
                           sizeof(RenderMesh3DBatch) * static_cast<usize>(m_capacity.mesh3DBatchCapacity),
                           alignof(RenderMesh3DBatch));
@@ -1150,6 +1600,9 @@ void RenderSceneBuilder::releaseStorage() noexcept
     m_sprites = nullptr;
     m_meshes3D = nullptr;
     m_mesh3DBatches = nullptr;
+    m_skinnedMeshes3D = nullptr;
+    m_transparent3DDraws = nullptr;
+    m_skinnedMesh3DPalette = nullptr;
 }
 
 void RenderSceneBuilder::rollbackBuilding() noexcept
@@ -1172,7 +1625,15 @@ RenderSceneView RenderSceneBuilder::makePublishedView() const noexcept
         m_sprite2DLighting,
         m_perspectiveCamera,
         std::span<const RenderMesh3DItem>{m_meshes3D, m_mesh3DCount},
+        m_opaqueMesh3DCount,
         std::span<const RenderMesh3DBatch>{m_mesh3DBatches, m_mesh3DBatchCount},
+        std::span<const RenderSkinnedMesh3DItem>{m_skinnedMeshes3D, m_skinnedMesh3DCount},
+        m_opaqueSkinnedMesh3DCount,
+        std::span<const RenderTransparent3DDraw>{m_transparent3DDraws,
+                                                 m_transparent3DDrawCount},
+        std::span<const float>{m_skinnedMesh3DPalette,
+                               static_cast<usize>(m_skinnedMesh3DPaletteJointCount) *
+                                   SkinnedMesh3DPaletteFloatsPerJoint},
         m_mesh3DLighting,
         m_publishedStatistics,
     };

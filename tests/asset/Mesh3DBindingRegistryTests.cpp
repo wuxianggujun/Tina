@@ -2,6 +2,7 @@
 #include <tina/asset/AssetSystem.hpp>
 #include <tina/asset/Mesh3DBindingRegistry.hpp>
 #include <tina/asset_format/MaterialPayload.hpp>
+#include <tina/asset_format/SkinnedMeshPayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
 #include <tina/render/FramePin.hpp>
 #include <tina/render/RenderErrors.hpp>
@@ -278,6 +279,52 @@ class RejectingFrameResourceSink final : public Render::FrameResourceSink {
                                       .assetId = assetId(seed),
                                       .payload = payload,
                                   }));
+}
+
+[[nodiscard]] CookedAssetFile makeSkinnedMesh(
+    std::pmr::memory_resource& memory,
+    Core::u8 seed)
+{
+    const std::array<AssetFormat::SkinnedMeshJointDesc, 1> joints{
+        AssetFormat::SkinnedMeshJointDesc{
+            .parentJoint = AssetFormat::SkinnedMeshWire::JointIndexNone,
+        },
+    };
+    const std::array<float, 16> inverseBind{
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1,
+    };
+    const std::array<AssetFormat::StaticMeshSubmeshDesc, 1> submeshes{
+        AssetFormat::StaticMeshSubmeshDesc{.indexCount = 3},
+    };
+    const std::array<float, 3 * AssetFormat::SkinnedMeshWire::FloatsPerVertex> vertices{
+        0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0,
+        1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0,
+        0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1,
+    };
+    const std::array<Core::u16, 12> jointIndices{};
+    const std::array<Core::u16, 12> jointWeights{
+        65535, 0, 0, 0,
+        65535, 0, 0, 0,
+        65535, 0, 0, 0,
+    };
+    const std::array<Core::u16, 3> indices{0, 1, 2};
+    return loadCooked(
+        memory,
+        AssetFormat::writeCookedSkinnedMeshAsset(
+            assetId(seed),
+            AssetFormat::SkinnedMeshPayloadDesc{
+                .boundsRadius = 1.0F,
+                .joints = joints,
+                .inverseBindMatrices = inverseBind,
+                .submeshes = submeshes,
+                .vertices = vertices,
+                .jointIndices = jointIndices,
+                .jointWeights = jointWeights,
+                .indices = indices,
+            }));
 }
 
 [[nodiscard]] CookedAssetFile makeTexture(std::pmr::memory_resource& memory, Core::u8 seed)
@@ -945,6 +992,67 @@ TEST(Mesh3DBindingRegistryTests, FrameResourcesDeduplicateAndBlockRetirementUnti
     ASSERT_TRUE(registry->retireAllBindings().has_value());
     EXPECT_EQ(device.materialClearCount(), 1U);
     EXPECT_EQ(device.meshRetirementCount(), 1U);
+}
+
+TEST(Mesh3DBindingRegistryTests, SkinnedBindingsKeepKindsIsolatedAndRetireTheirLeaseAndGpuOwner)
+{
+    TrackingMemoryResource memory;
+    auto assets = makeAssetSystem(memory);
+    ASSERT_TRUE(assets.has_value());
+    auto staticMesh = assets->store().publish(makeMesh(memory, 1U));
+    auto skinnedMesh = assets->store().publish(makeSkinnedMesh(memory, 2U));
+    ASSERT_TRUE(staticMesh.has_value());
+    ASSERT_TRUE(skinnedMesh.has_value());
+
+    RecordingRenderDevice device;
+    auto registry = makeRegistry(*assets, device);
+    ASSERT_TRUE(registry.has_value());
+    Render::GpuMeshId staticGpu{7U, 1U};
+    Render::GpuMeshId skinnedGpu{8U, 1U};
+
+    auto wrongStatic = registry->registerMeshBinding(*skinnedMesh, skinnedGpu);
+    auto wrongSkinned = registry->registerSkinnedMeshBinding(*staticMesh, staticGpu);
+    ASSERT_FALSE(wrongStatic.has_value());
+    ASSERT_FALSE(wrongSkinned.has_value());
+    EXPECT_EQ(wrongStatic.error().code, AssetErrorCode::InvalidHandle);
+    EXPECT_EQ(wrongSkinned.error().code, AssetErrorCode::InvalidHandle);
+    EXPECT_EQ(skinnedGpu, (Render::GpuMeshId{8U, 1U}));
+    EXPECT_EQ(staticGpu, (Render::GpuMeshId{7U, 1U}));
+
+    auto skinnedKey = registry->registerSkinnedMeshBinding(*skinnedMesh, skinnedGpu);
+    ASSERT_TRUE(skinnedKey.has_value()) << (skinnedKey ? "" : skinnedKey.error().message);
+    EXPECT_FALSE(skinnedGpu.hasValue());
+    EXPECT_EQ(registry->meshBindingCount(), 1U);
+    EXPECT_EQ(assets->store().leaseCount(*skinnedMesh), 1U);
+
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(1U));
+    auto staticRef = registry->internMeshFrameResource(*skinnedMesh, packet.resourceSink());
+    auto skinnedRef = registry->internSkinnedMeshFrameResource(*skinnedMesh, packet.resourceSink());
+    auto duplicate = registry->internSkinnedMeshFrameResource(*skinnedMesh, packet.resourceSink());
+    ASSERT_TRUE(staticRef.has_value());
+    EXPECT_FALSE(staticRef->hasValue());
+    ASSERT_TRUE(skinnedRef.has_value());
+    ASSERT_TRUE(duplicate.has_value());
+    EXPECT_EQ(*duplicate, *skinnedRef);
+    EXPECT_EQ(packet.resourceCount(), 1U);
+    const Render::FrameResourceDescriptor* descriptor = packet.resourceTableView().resolve(
+        *skinnedRef, Render::FrameResourceKind::SkinnedMesh3DGeometry);
+    ASSERT_NE(descriptor, nullptr);
+    EXPECT_EQ(descriptor->deviceBindingKey, *skinnedKey);
+    EXPECT_EQ(packet.resourceTableView().resolve(
+                  *skinnedRef, Render::FrameResourceKind::Mesh3DGeometry),
+              nullptr);
+
+    auto blocked = registry->retireMeshBinding(*skinnedMesh);
+    ASSERT_FALSE(blocked.has_value());
+    EXPECT_EQ(blocked.error().code, AssetErrorCode::AssetNotReady);
+    ASSERT_TRUE(packet.abandon());
+    ASSERT_TRUE(registry->retireMeshBinding(*skinnedMesh));
+    EXPECT_EQ(device.meshRetirementCount(), 1U);
+    EXPECT_EQ(device.retiredMesh(0), (Render::GpuMeshId{8U, 1U}));
+    EXPECT_EQ(assets->store().leaseCount(*skinnedMesh), 0U);
+    EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::GpuStaticMesh), 1U);
 }
 
 TEST(Mesh3DBindingRegistryTests, SinkRejectionRollsBackMeshAndMaterialFrameBorrows)

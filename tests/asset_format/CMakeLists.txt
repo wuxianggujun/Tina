@@ -1,5 +1,6 @@
 set(TINA_ASSET_FORMAT_TEST_SOURCES
     AssetFormatTests.cpp
+    AnimationClip3DPayloadTests.cpp
     AudioClipPayloadTests.cpp
     EnvironmentMapPayloadTests.cpp
     Fx2DPayloadTests.cpp
@@ -8,6 +9,7 @@ set(TINA_ASSET_FORMAT_TEST_SOURCES
     PrefabPayloadTests.cpp
     SpriteAnimationClipPayloadTests.cpp
     SourceImportMetadataFormatTests.cpp
+    SkinnedMeshPayloadTests.cpp
     StaticMeshPayloadTests.cpp
     TextureSpritePayloadTests.cpp
     TileMapTilesetPayloadTests.cpp
@@ -15,6 +17,7 @@ set(TINA_ASSET_FORMAT_TEST_SOURCES
     World2DSnapshotTests.cpp
     header_isolation/AssetFormatErrorsHeader.cpp
     header_isolation/AssetFormatHeader.cpp
+    header_isolation/AnimationClip3DPayloadHeader.cpp
     header_isolation/AudioClipPayloadHeader.cpp
     header_isolation/EnvironmentMapPayloadHeader.cpp
     header_isolation/Fx2DPayloadHeader.cpp
@@ -24,6 +27,7 @@ set(TINA_ASSET_FORMAT_TEST_SOURCES
     header_isolation/SpriteAnimationClipPayloadHeader.cpp
     header_isolation/SpritePayloadHeader.cpp
     header_isolation/SourceImportMetadataFormatHeader.cpp
+    header_isolation/SkinnedMeshPayloadHeader.cpp
     header_isolation/StaticMeshPayloadHeader.cpp
     header_isolation/Texture2DPayloadHeader.cpp
     header_isolation/TilesetPayloadHeader.cpp

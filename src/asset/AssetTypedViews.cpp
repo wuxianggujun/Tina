@@ -172,6 +172,37 @@ Core::Result<AssetFormat::StaticMeshPayloadView> parseStaticMeshFromCooked(const
     return AssetFormat::parseStaticMeshPayload(file.payload());
 }
 
+Core::Result<AssetFormat::SkinnedMeshPayloadView> parseSkinnedMeshFromCooked(const CookedAssetFile& file)
+{
+    if (!file)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "cooked asset is empty");
+    }
+    if (file.header().assetKind != AssetFormat::AssetKind::SkinnedMesh ||
+        file.header().assetTypeVersion != AssetFormat::SkinnedMeshWire::SchemaVersion)
+    {
+        return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                             "cooked asset is not a supported SkinnedMesh");
+    }
+    return AssetFormat::parseSkinnedMeshPayload(file.payload());
+}
+
+Core::Result<AssetFormat::AnimationClip3DPayloadView>
+parseAnimationClip3DFromCooked(const CookedAssetFile& file)
+{
+    if (!file)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "cooked asset is empty");
+    }
+    if (file.header().assetKind != AssetFormat::AssetKind::AnimationClip3D ||
+        file.header().assetTypeVersion != AssetFormat::AnimationClip3DWire::SchemaVersion)
+    {
+        return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                             "cooked asset is not a supported AnimationClip3D");
+    }
+    return AssetFormat::parseAnimationClip3DPayload(file.payload());
+}
+
 Core::Result<AssetFormat::MaterialPayloadView> parseMaterialFromCooked(const CookedAssetFile& file)
 {
     if (!file)
@@ -217,7 +248,7 @@ Core::Result<OwnedPrefabPayload> parsePrefabFromCooked(const CookedAssetFile& fi
                 continue;
             }
             expected.push_back(ExpectedDependency{.assetId = node.meshId,
-                                                  .kind = AssetFormat::AssetKind::StaticMesh});
+                                                  .kind = AssetFormat::AssetKind::Invalid});
             expected.push_back(ExpectedDependency{.assetId = node.materialId,
                                                   .kind = AssetFormat::AssetKind::Material});
         }
@@ -248,8 +279,13 @@ Core::Result<OwnedPrefabPayload> parsePrefabFromCooked(const CookedAssetFile& fi
         {
             const auto dependency = file.dependency(index);
             const auto& required = expected[index];
+            const bool kindMatches = required.kind == AssetFormat::AssetKind::Invalid
+                                         ? dependency &&
+                                               (dependency->expectedKind == AssetFormat::AssetKind::StaticMesh ||
+                                                dependency->expectedKind == AssetFormat::AssetKind::SkinnedMesh)
+                                         : dependency && dependency->expectedKind == required.kind;
             if (!dependency || dependency->assetId != required.assetId ||
-                dependency->expectedKind != required.kind ||
+                !kindMatches ||
                 dependency->flags != AssetFormat::DependencyFlags::Required)
             {
                 return Core::failure(AssetErrorCode::CatalogEntryMismatch,

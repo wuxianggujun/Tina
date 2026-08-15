@@ -3,8 +3,10 @@
 #include <tina/core/error/Result.hpp>
 #include <tina/render/RenderDevice.hpp>
 
+#include <cstddef>
 #include <memory>
 #include <optional>
+#include <span>
 #include <utility>
 
 namespace Tina::Sample3D {
@@ -35,6 +37,41 @@ class DeviceCapture final {
     void observeSubmittedScene(const Render::RenderSceneView& scene) noexcept
     {
         const Render::RenderSceneStatistics& statistics = scene.statistics();
+        if (statistics.transparent3DDrawCount != 0)
+        {
+            if (submittedTransparent3DFrames_ != 0 &&
+                submittedTransparent3DSortOrderChecksum_ !=
+                    statistics.transparent3DSortOrderChecksum)
+            {
+                transparent3DSortOrderStable_ = false;
+            }
+            ++submittedTransparent3DFrames_;
+            submittedTransparentStaticMesh3DCount_ =
+                statistics.transparentMesh3DCount;
+            submittedTransparentSkinnedMesh3DCount_ =
+                statistics.transparentSkinnedMesh3DCount;
+            submittedTransparent3DDrawCount_ =
+                statistics.transparent3DDrawCount;
+            submittedTransparent3DSortOrderChecksum_ =
+                statistics.transparent3DSortOrderChecksum;
+        }
+        if (statistics.submittedSkinnedMesh3DCount != 0)
+        {
+            const Core::u64 poseFingerprint = fingerprintSkinnedPose(scene.skinnedMesh3DPalette());
+            if (submittedSkinnedMesh3DFrames_ == 0)
+            {
+                firstSubmittedSkinnedPoseFingerprint_ = poseFingerprint;
+            }
+            else if (submittedSkinnedPoseFingerprint_ != poseFingerprint)
+            {
+                ++submittedSkinnedPoseFingerprintChanges_;
+            }
+            ++submittedSkinnedMesh3DFrames_;
+            submittedSkinnedMesh3DCount_ = statistics.submittedSkinnedMesh3DCount;
+            visibleSkinnedMesh3DCount_ = statistics.visibleSkinnedMesh3DCount;
+            submittedSkinnedPaletteJointCount_ = statistics.skinnedMesh3DPaletteJointCount;
+            submittedSkinnedPoseFingerprint_ = poseFingerprint;
+        }
         if (!statistics.mesh3DLightingConfigured)
         {
             return;
@@ -139,6 +176,71 @@ class DeviceCapture final {
     {
         return tangentMeshesUploaded_;
     }
+    void recordSkinnedMeshUpload(const Render::SkinnedMeshUploadDesc& desc) noexcept
+    {
+        ++skinnedMeshesUploaded_;
+        uploadedSkinnedJointCount_ = desc.jointCount;
+    }
+    [[nodiscard]] Core::u64 skinnedMeshesUploaded() const noexcept
+    {
+        return skinnedMeshesUploaded_;
+    }
+    [[nodiscard]] Core::u32 uploadedSkinnedJointCount() const noexcept
+    {
+        return uploadedSkinnedJointCount_;
+    }
+    [[nodiscard]] Core::u64 submittedSkinnedMesh3DFrames() const noexcept
+    {
+        return submittedSkinnedMesh3DFrames_;
+    }
+    [[nodiscard]] Core::u32 submittedSkinnedMesh3DCount() const noexcept
+    {
+        return submittedSkinnedMesh3DCount_;
+    }
+    [[nodiscard]] Core::u32 visibleSkinnedMesh3DCount() const noexcept
+    {
+        return visibleSkinnedMesh3DCount_;
+    }
+    [[nodiscard]] Core::u32 submittedSkinnedPaletteJointCount() const noexcept
+    {
+        return submittedSkinnedPaletteJointCount_;
+    }
+    [[nodiscard]] Core::u64 submittedSkinnedPoseFingerprint() const noexcept
+    {
+        return submittedSkinnedPoseFingerprint_;
+    }
+    [[nodiscard]] Core::u64 firstSubmittedSkinnedPoseFingerprint() const noexcept
+    {
+        return firstSubmittedSkinnedPoseFingerprint_;
+    }
+    [[nodiscard]] Core::u64 submittedSkinnedPoseFingerprintChanges() const noexcept
+    {
+        return submittedSkinnedPoseFingerprintChanges_;
+    }
+    [[nodiscard]] Core::u64 submittedTransparent3DFrames() const noexcept
+    {
+        return submittedTransparent3DFrames_;
+    }
+    [[nodiscard]] Core::u32 submittedTransparentStaticMesh3DCount() const noexcept
+    {
+        return submittedTransparentStaticMesh3DCount_;
+    }
+    [[nodiscard]] Core::u32 submittedTransparentSkinnedMesh3DCount() const noexcept
+    {
+        return submittedTransparentSkinnedMesh3DCount_;
+    }
+    [[nodiscard]] Core::u32 submittedTransparent3DDrawCount() const noexcept
+    {
+        return submittedTransparent3DDrawCount_;
+    }
+    [[nodiscard]] Core::u64 submittedTransparent3DSortOrderChecksum() const noexcept
+    {
+        return submittedTransparent3DSortOrderChecksum_;
+    }
+    [[nodiscard]] bool transparent3DSortOrderStable() const noexcept
+    {
+        return transparent3DSortOrderStable_;
+    }
     void recordEnvironmentMapUpload(const Render::EnvironmentMapUploadDesc& desc) noexcept
     {
         ++environmentMapsUploaded_;
@@ -183,6 +285,20 @@ class DeviceCapture final {
     [[nodiscard]] Core::u16 environmentBrdfHeight() const noexcept { return environmentBrdfHeight_; }
 
   private:
+    [[nodiscard]] static Core::u64 fingerprintSkinnedPose(std::span<const float> palette) noexcept
+    {
+        constexpr Core::u64 OffsetBasis = 14'695'981'039'346'656'037ULL;
+        constexpr Core::u64 Prime = 1'099'511'628'211ULL;
+        Core::u64 fingerprint = OffsetBasis;
+        const auto bytes = std::as_bytes(palette);
+        for (const std::byte value : bytes)
+        {
+            fingerprint ^= static_cast<Core::u64>(std::to_integer<unsigned char>(value));
+            fingerprint *= Prime;
+        }
+        return fingerprint;
+    }
+
     Render::IRenderDevice* device_ = nullptr;
     bool captureNextPresent_ = false;
     bool hasLastCapture_ = false;
@@ -198,6 +314,21 @@ class DeviceCapture final {
     float submittedCameraAspectRatio_ = 0.0F;
     Core::u64 cameraAspectChanges_ = 0;
     Core::u64 tangentMeshesUploaded_ = 0;
+    Core::u64 skinnedMeshesUploaded_ = 0;
+    Core::u32 uploadedSkinnedJointCount_ = 0;
+    Core::u64 submittedSkinnedMesh3DFrames_ = 0;
+    Core::u32 submittedSkinnedMesh3DCount_ = 0;
+    Core::u32 visibleSkinnedMesh3DCount_ = 0;
+    Core::u32 submittedSkinnedPaletteJointCount_ = 0;
+    Core::u64 firstSubmittedSkinnedPoseFingerprint_ = 0;
+    Core::u64 submittedSkinnedPoseFingerprint_ = 0;
+    Core::u64 submittedSkinnedPoseFingerprintChanges_ = 0;
+    Core::u64 submittedTransparent3DFrames_ = 0;
+    Core::u32 submittedTransparentStaticMesh3DCount_ = 0;
+    Core::u32 submittedTransparentSkinnedMesh3DCount_ = 0;
+    Core::u32 submittedTransparent3DDrawCount_ = 0;
+    Core::u64 submittedTransparent3DSortOrderChecksum_ = 0;
+    bool transparent3DSortOrderStable_ = true;
     Core::u64 environmentMapsUploaded_ = 0;
     Core::u64 imageBasedLightingBindings_ = 0;
     Core::u64 imageBasedLightingClears_ = 0;
@@ -318,6 +449,16 @@ class CapturingRenderDevice final : public Render::IRenderDevice {
         if (mesh && capture_ != nullptr)
         {
             capture_->recordTangentMeshUpload();
+        }
+        return mesh;
+    }
+    [[nodiscard]] Core::Result<Render::GpuMeshId>
+    createSkinnedMesh(const Render::SkinnedMeshUploadDesc& desc) override
+    {
+        auto mesh = inner_->createSkinnedMesh(desc);
+        if (mesh && capture_ != nullptr)
+        {
+            capture_->recordSkinnedMeshUpload(desc);
         }
         return mesh;
     }

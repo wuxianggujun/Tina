@@ -250,7 +250,7 @@ stop，timeout 返回 `TaskErrorCode::WaitTimeout` 并保留 stopping 对象/Wor
   `createMesh3DBinding()` allocator；
 - 独立 device-instance `createMesh3DMaterialBinding()` allocator，以及原子
   `set/clearMesh3DMaterialBinding()` texture/factor bundle；细粒度 material setter 是低层 direct SPI；
-- Opaque3D Cook-Torrance GGX direct-light `Mesh3DLightingDesc`（同步消费0..4 directional + 0..8 point +
+- Opaque3D/Transparent3D Cook-Torrance GGX direct-light `Mesh3DLightingDesc`（同步消费0..4 directional + 0..8 point +
   0..8 spot lights + 非负 ambient）；`IRenderDevice::setMesh3DLighting()` 是低层 fallback/direct SPI；
 - `EnvironmentMap` create/validate/destroy/retire、`Mesh3DImageBasedLightingDesc` bind 与显式 clear；
 - primary framebuffer RGBA8 capture。
@@ -266,7 +266,8 @@ wrong-kind ref fail closed。Runtime 使用 `RenderFramePacket`、`FramePin` 与
 后负责 complete/abandon。它不代表 GPU execution/retirement；Texture2D/StaticMesh/EnvironmentMap 使用独立的
 `retire*` + backend marker，不能把两类 completion 混用。
 
-`RenderSceneBuilder/Writer` 提供 fixed-capacity Camera2D/PerspectiveCamera3D/Sprite2D/Mesh3D extraction，
+`RenderSceneBuilder/Writer` 提供 fixed-capacity Camera2D/PerspectiveCamera3D/Sprite2D/static Mesh3D/
+SkinnedMesh3D extraction，
 并可把一次 `setSprite2DLighting()` / `setMesh3DLighting()` 深拷贝为 self-contained 的 committed frame
 snapshot；同类 lighting 重复设置或非法描述使当前 build 原子失败。Sprite2D snapshot 最多保存8个
 world-space point light、32个 world-space shadow segment 与 ambient；Mesh3D snapshot 最多保存4个 directional、
@@ -275,7 +276,10 @@ commit 后返回 borrowed view。
 `RenderSprite2DInput/Item::texture` 只接受当前 packet 签发的 required `FrameResourceRef`；
 `normalTexture` 是 optional packet-local Texture2D ref，invalid 表示无 normal map；
 `RenderMesh3DInput/Item/Batch::mesh/material` 同样只接受当前 packet 签发的 ref。
-backend 在同步 submit 中分别按 `Texture2D`、`Mesh3DGeometry`、`Mesh3DMaterial` kind 解析。
+`RenderSkinnedMesh3DInput` 还同步复制 1..256 个 column-major `globalPose * inverseBind` 矩阵到
+当前 frame 的固定容量 palette pool；committed item 只保存 palette offset/count，不借用 Animator storage，且不参与
+static instance batch。backend 在同步 submit 中分别按 `Texture2D`、`Mesh3DGeometry`、
+`SkinnedMesh3DGeometry`、`Mesh3DMaterial` kind 解析，并校验 palette joint count 与 bound skeleton 一致。
 `UIDisplayList` 支持 SolidQuad/SolidEllipse/Glyph/ImageQuad、SolidQuad 像素 corner radius、可选 exact
 `UISolidQuadVertices` 与 axis-aligned clip；SolidEllipse 支持填充和向内描边。UI Line 在 integration
 边界按 logical 法向构造四角并分别应用 X/Y framebuffer scale，随后以 exact SolidQuad 发布，不公开
@@ -449,7 +453,7 @@ Narrator/Inspect 人工金标仍由 UI-002 跟踪，Linux AT-SPI adapter/真机�
 ## Scene
 
 `Scene::World` 是 fixed-capacity、generation entity owner，提供 Transform hierarchy、Camera2D/
-SpriteRenderer2D/PointLight2D/ShadowOccluder2D/PerspectiveCamera3D/MeshRenderer3D/DirectionalLight3D/
+SpriteRenderer2D/PointLight2D/ShadowOccluder2D/PerspectiveCamera3D/MeshRenderer3D/SkinnedMeshRenderer3D/DirectionalLight3D/
 PointLight3D/SpotLight3D。
 `extractRenderSceneFromWorld()` 写调用方的
 RenderSceneWriter；`instantiatePrefab()` 事务式创建 hierarchy，并可通过 AssetId resolver 映射 mesh/
@@ -464,11 +468,23 @@ handle 由 `normalTextureBindingResolver` 独立按 Texture2D kind 解析；缺 
 handle 或空 ref 都在 `addSprite2D()` 前返回 `SceneErrorCode::UnresolvedSprite`，不发布半个 item。hidden
 sprite 不解析任一 handle。Scene 不保存 resolver、sink、ref 或任何 Asset owner。
 
-`MeshRenderer3D` 只复制 weak mesh/material `AssetHandle` 与渲染语义字段。extract params 分别提供
+`MeshRenderer3D` 只复制 weak mesh/material `AssetHandle` 与渲染语义字段；`Mesh3DAlphaMode` 只接受
+`Opaque`/`Blend`，Runtime 不根据 baseColor alpha 或纹理内容推断 pass。extract params 分别提供
 `mesh3DBindingResolver` 和 `material3DBindingResolver`，只在本次 extraction 调用有效；visible mesh 必须
 由两者按当前 Store owner/generation、预期 StaticMesh/Material kind 与 binding 状态 intern 为非空
 packet-local ref。任一 resolver/handle/binding 无效返回 `UnresolvedMesh`；mesh 解析失败时不调用 material
 resolver，hidden mesh 不解析。`PrefabMeshBinding` 只完成 AssetId→Handle，不保存或分配 Render key。
+
+`SkinnedMeshRenderer3D` 同样只复制 weak SkinnedMesh/Material handle、显式 alpha mode 与渲染语义字段，并与同一 Entity 上的
+`MeshRenderer3D` 互斥；成功设置任一 renderer 会清除另一种，非法 setter 保留原组件。visible skinned mesh
+通过独立 `skinnedMesh3DBindingResolver` 解析 geometry，并通过 phase-local `SkinnedPose3DProvider` 按 Entity
+取得 CPU palette；缺 resolver、wrong-kind/stale/unbound handle、空/非有限/非 mat4 对齐 palette 都 fail closed，
+hidden component 不调用任何 resolver/provider。Scene 同步把 palette 交给 writer 后不保留 provider/span。
+
+`Animator3D::Create(mesh, clip, resource)` 复制 borrowed SkinnedMesh/AnimationClip3D wire view，要求 joint count
+精确匹配，并一次性建立 PMR storage；`update()` 在 owner thread 无分配地评估 bind pose、LINEAR/STEP tracks、
+hierarchy global pose 与 `globalPose * inverseBind` skinning matrices。Once/Loop/PingPong、play/pause/restart/stop、
+finite playback speed 均为显式状态；`setClip()` 事务替换同 skeleton joint count 的 clip，失败保留旧 clip/pose。
 
 `captureWorld2DSnapshotBytes()` 将 owner-thread World 的 LocalTransform 与五类2D组件（含 SpriteAnimation
 绑定）写入唯一现行 schema-v2 snapshot；调用方 callback 提供稳定 entity ID，并把 Sprite/normal Texture weak handle 映射为
@@ -709,12 +725,20 @@ count。两者都创建父目录，不写 manifest，不维护 editor-only 或�
 
 ## Asset 与 Cooked
 
-`AssetFormat` 定义 versioned manifest/cooked wire format、World2D snapshot 和 Texture2D/StaticMesh/Material/Prefab/EnvironmentMap/TileMap/
-TileMapChunk/AudioClip 等 typed payload。Runtime 不解析源 glTF/WAV/image；cgltf/stb_image 与源文件解析只在
-Cooker/tool。
+`AssetFormat` 定义 versioned manifest/cooked wire format、World2D snapshot 和 Texture2D/StaticMesh/SkinnedMesh/
+AnimationClip3D/Material/Prefab/EnvironmentMap/TileMap/TileMapChunk/AudioClip 等 typed payload。Runtime 不解析源
+glTF/WAV/image；cgltf/stb_image 与源文件解析只在 Cooker/tool。SkinnedMesh v1 冻结为 P3N3T4UV2 + U16 index、固定
+4 influences、最多 256 joints；AnimationClip3D v1 冻结为最多 768 tracks、4096 keys/track、262144 total keys、
+1048576 value floats、3600 秒，只有 LINEAR/STEP。
 
 Prefab 当前唯一 schema 为 v2：node payload 自带 Mesh/Material `AssetId`；Cooked dependency 是按 `AssetId`
-排序去重的 required 引用集合，typed parser 对两者完整对账，不按 dependency 位置恢复 node identity。
+排序去重的 required 引用集合，mesh dependency 可明确声明 `StaticMesh` 或 `SkinnedMesh`；typed parser 对 payload
+与 dependency 完整对账，不按 dependency 位置恢复 node identity。
+
+`Asset::parseSkinnedMeshFromCooked()` 与 `parseAnimationClip3DFromCooked()` 同时校验 Cooked kind、type version 和
+payload wire；返回的 span/view 借用 `CookedAssetFile` bytes，caller 必须保活 file。两类 v1 Cooked asset 都没有
+Catalog dependency：SkinnedMesh 内嵌 skeleton/inverse bind，AnimationClip3D 携带 jointCount；
+`Animator3D::Create()`/`setClip()` 在复制 view 前要求该 count 与 skeleton 精确相等。
 
 `cookGltfFileToCatalogRequest(gltfUtf8Path, targetPlatform, ids)` 是 `noexcept` Cooker 边界，输入路径必须是 strict UTF-8
 without NUL，目标平台必须显式给出且不能为 `Invalid`。它从已打开主文件的有界快照解析 JSON/GLB；relative external buffer/image 先 percent-decode，
@@ -910,14 +934,17 @@ device 不会为 direct setter 自动保留或跳过该 key。
 `AssetSystem`、`IRenderDevice` 与可选 PMR。mesh/material 使用独立 device-instance key namespace，两类 key
 都从2开始并分别保留内置 key 1；成功绑定后才消费，retirement 后不复用，共享同一 device 的多个 registry
 仍获得 distinct key。`registerMeshBinding(mesh, gpuMesh&)` 成功后独占 StaticMesh Lease/GPU/binding；
+`registerSkinnedMeshBinding(mesh, gpuMesh&)` 使用同一 mesh key namespace，但只接受 SkinnedMesh handle 与
+`createSkinnedMesh()` 生成的 GPU owner，并发布 distinct `SkinnedMesh3DGeometry` frame-resource kind；
 `registerMaterialTexture(texture, gpuTexture&)` 按 AssetId 唯一取得共享 Texture Lease/GPU owner，并在 owner
 转移前通过 `validateTexture2D()` 拒绝 wrong-owner/invalid/stale 候选；
 `registerMaterialBinding(material)` 从 Cooked payload 解析 roles/factors，只引用已注册 live Texture owner，并
 通过单次 `Mesh3DMaterialBindingDesc` 原子发布 bundle。多个 Material 可共享同一 Texture owner；同一
 Material 内的 role dependency 仍由 Material v2 严格顺序与唯一性约束。
 
-`internMeshFrameResource()` / `internMaterialFrameResource()` 每次按当前 Store state fail closed，并把
-binding 登记为 packet-local `Mesh3DGeometry` / `Mesh3DMaterial` ref。首次 intern 的 Entry borrow pin 阻止
+`internMeshFrameResource()` / `internSkinnedMeshFrameResource()` / `internMaterialFrameResource()` 每次按当前
+Store state fail closed，并把 binding 登记为 packet-local `Mesh3DGeometry` / `SkinnedMesh3DGeometry` /
+`Mesh3DMaterial` ref。首次 intern 的 Entry borrow pin 阻止
 active frame retirement。Material retirement 清除 bundle 并减少 Texture 引用；有 live Material 引用时
 Texture retirement 失败。Mesh/Texture retirement 通过 AssetSystem 的 lease-consuming transaction 提交，
 失败保留 Entry；Catalog reload participant 联合 prepare Mesh、Material 与共享 Texture，并可为 replacement Material
@@ -927,11 +954,15 @@ Material→Texture→Mesh 顺序进入可重试 retirement；`retireAllBindings(
 
 multi-mesh / multi-primitive glTF Cooker：每个 TRIANGLES prim 生成 distinct StaticMesh/Material AssetId；
 单 prim 节点直接引用，多 prim mesh 在 Prefab 中展开为 transform 父 + 子 draw 节点。Material v2 含
-metallic/roughness factors 与可选 baseColor/MR/normal Texture2D deps。Runtime Opaque3D 使用 Cook-Torrance
-GGX；engine-provided、State-owned registry 使用原子 `setMesh3DMaterialBinding` 提交 baseColor/MR/normal/factors，
+metallic/roughness factors、显式 `Opaque`/`Blend` alpha intent 与可选 baseColor/MR/normal Texture2D deps；glTF
+`MASK` 与未知 alpha mode 当前均 fail closed。Registry 将同一 alpha intent 原子写入 `Mesh3DMaterialBindingDesc`，Scene renderer、
+packet item 与 device binding 必须一致。Runtime Opaque3D/Transparent3D 共用 Cook-Torrance GGX；
+engine-provided、State-owned registry 使用原子 `setMesh3DMaterialBinding` 提交 baseColor/MR/normal/factors/alpha mode，
 direct 细粒度 setter 仍属于低层 SPI；lighting 使用有界0..4 directional + 0..8 point + 0..8 spot lights，
 World directional/point/spot component 每帧提取到 RenderScene，point/spot influence sphere 在容量检查前
-按相机裁剪。StaticMesh v1 固定为 P3N3T4UV2：glTF authored `TANGENT` 优先，否则
+按相机裁剪。Opaque static item 保持相邻实例 batch；Blend static/skinned item 进入同一个固定容量
+back-to-front 全序，等距时以 stable Entity identity、kind、item index 决定，容量不足使本次 build 事务失败。
+StaticMesh v1 固定为 P3N3T4UV2：glTF authored `TANGENT` 优先，否则
 NORMAL+TEXCOORD_0 primitive 由 Cooker 使用 MikkTSpace 生成；缺少 NORMAL/UV 显式失败。Opaque3D
 只使用 vertex tangent TBN。`EnvironmentMap` cooked v1 固定封装 RGBA16F diffuse irradiance cubemap、带完整
 mip 链的 RGBA16F prefiltered specular cubemap 与 RG16F BRDF LUT；`uploadEnvironmentMapFromCooked()` 只把
@@ -945,7 +976,9 @@ depth/normal bias 必须有限且有界。每帧最多一个 camera-affecting sp
 把它深拷贝为 `Mesh3DSpotLightShadow`，以 `spotLightIndex` 关联 Render 灯槽。`PointLight3D::shadow` 同样
 携带 near/depth/normal bias；每帧最多一个 camera-affecting point shadow，Scene 深拷贝为
 `Mesh3DPointLightShadow` 并以 `pointLightIndex` 关联灯槽。Render scheduler 固定按 CSM×4 → Spot×1 →
-Point×6 → Opaque3D 排序；bgfx 为 point shadow 私有持有按 `+X/-X/+Y/-Y/+Z/-Z` 排列的六张
+Point×6 → Opaque3D → Transparent3D → Sprite2D → UI 排序；Transparent3D 使用 straight-alpha blend、
+depth test less 且不写 depth。透明 static/skinned 不进入 shadow caster pass，但仍接收 lighting、shadow、
+PBR 与 IBL。bgfx 为 point shadow 私有持有按 `+X/-X/+Y/-Y/+Z/-Z` 排列的六张
 sampled D16 map（默认512×512），receiver 以 dominant axis 选面并执行3×3 PCF。
 `ShadowMapExtentConfig` 以 `[128,4096]` 内2次幂分别配置 directional cascade tile、spot map 与 point face；
 默认值为 `1024/1024/512`，directional atlas 固定为2×2 tile。`EngineConfig::shadowMapExtents` 只在创建

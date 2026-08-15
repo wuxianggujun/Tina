@@ -471,6 +471,7 @@ Core::Result<std::vector<std::byte>> captureWorld2DSnapshotBytes(const World& wo
         {
             if (world.perspectiveCamera3D(captured.entity) != nullptr ||
                 world.meshRenderer3D(captured.entity) != nullptr ||
+                world.skinnedMeshRenderer3D(captured.entity) != nullptr ||
                 world.directionalLight3D(captured.entity) != nullptr ||
                 world.pointLight3D(captured.entity) != nullptr || world.spotLight3D(captured.entity) != nullptr)
             {

@@ -32,6 +32,13 @@ struct BgfxOpaque3DInstanceData final {
     std::array<float, 4> baseColorFactor{};
 };
 
+// Stream 1 of a skinned mesh: four u8 joint indices + four float32 weights.
+// Upload converts the cooked u16 indices/fixed-point weights into this layout.
+struct BgfxOpaque3DSkinVertex final {
+    std::array<u8, 4> jointIndices{};
+    std::array<float, 4> jointWeights{};
+};
+
 struct BgfxOpaque3DFrameRequirements final {
     u32 instanceCount = 0;
     u32 batchCount = 0;
@@ -45,9 +52,16 @@ struct BgfxOpaque3DFrameRequirements final {
 [[nodiscard]] float opaque3DModelLinearDeterminant(
     const std::array<float, 16>& columnMajorWorldTransform) noexcept;
 
-// Validates every packet-local Mesh3D geometry/material ref without touching
-// geometry output or backend state. This also applies to suspended frames.
+// Validates every packet-local static/skinned Mesh3D geometry/material ref,
+// alpha partition, and unified Transparent3D ordering without touching geometry
+// output or backend state. This also applies to suspended frames.
 [[nodiscard]] Core::Status validateOpaque3DFrameResources(
+    RenderSceneView scene, FrameResourceTableView resources) noexcept;
+
+// Validates skinned item refs (SkinnedMesh3DGeometry + Mesh3DMaterial), committed
+// palette ranges, camera presence, the fixture submesh restriction, and item
+// finiteness before any backend side effect.
+[[nodiscard]] Core::Status validateSkinnedOpaque3DFrame(
     RenderSceneView scene, FrameResourceTableView resources) noexcept;
 
 // Validates the private M9-B procedural fixture contract before the backend

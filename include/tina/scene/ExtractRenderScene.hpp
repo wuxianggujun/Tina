@@ -8,6 +8,29 @@
 
 namespace Tina::Scene {
 
+// Borrowed, allocation-free seam from an entity with SkinnedMeshRenderer3D to
+// the game-owned Animator3D CPU pose. The returned span must hold jointCount*16
+// finite column-major floats (globalPose * inverseBind) and stays owned by the
+// provider; extraction copies it into the committed RenderScene synchronously.
+// An empty span fails extraction closed (UnresolvedSkinnedPose).
+struct SkinnedPose3DProvider final {
+    using ResolveFn = std::span<const float> (*)(void* userData, EntityId entity) noexcept;
+
+    void* userData = nullptr;
+    ResolveFn resolve = nullptr;
+
+    [[nodiscard]] constexpr explicit operator bool() const noexcept { return resolve != nullptr; }
+
+    [[nodiscard]] std::span<const float> operator()(EntityId entity) const noexcept
+    {
+        if (resolve == nullptr)
+        {
+            return {};
+        }
+        return resolve(userData, entity);
+    }
+};
+
 // Surface framebuffer size for Camera2D projection resolve. Zero extent means
 // suspended surface: extract skips the World camera and camera-dependent point
 // light culling without treating either as a component configuration error
@@ -18,6 +41,8 @@ struct ExtractRenderSceneParams final {
     Asset::AssetFrameResourceResolver normalTextureBindingResolver{};
     Asset::AssetFrameResourceResolver mesh3DBindingResolver{};
     Asset::AssetFrameResourceResolver material3DBindingResolver{};
+    Asset::AssetFrameResourceResolver skinnedMesh3DBindingResolver{};
+    SkinnedPose3DProvider skinnedPose3DProvider{};
     float ambientLightScale = 0.18F;
     float ambientLight2DScale = 0.2F;
 };
@@ -44,6 +69,12 @@ struct ExtractRenderSceneParams final {
 //   becomes addMesh3D from WorldTransform pose/scale.
 // - A missing resolver, invalid/stale/wrong-kind/unbound handle, or either
 //   resolver empty result returns UnresolvedMesh. Hidden meshes are not resolved.
+// - Each visible SkinnedMeshRenderer3D resolves mesh/material through the
+//   kind-specific skinnedMesh3DBindingResolver/material3DBindingResolver and its
+//   CPU pose through skinnedPose3DProvider, then becomes addSkinnedMesh3D. A
+//   missing provider or empty/malformed palette returns UnresolvedSkinnedPose;
+//   resolver failures return UnresolvedMesh. Hidden skinned meshes resolve
+//   neither handles nor pose.
 // - Active DirectionalLight3D components are sorted by stable entity identity,
 //   transformed to world direction, and published as one bounded lighting snapshot.
 //   At most one active component may own CascadedDirectionalShadow3D; extraction
