@@ -49,6 +49,7 @@ UI-STUDIO-DESIGN 的代码与自动证据已固化，剩余 state-feedback 视�
 | UI-IMAGE-001 | Done；A Image/Icon、B NineSlice 与 C 产品/失效/尺寸/`ui_image_nineslice_v1` 性能证据均已关闭；Icon 复用 Image，不另建 Widget/Asset/atlas 系统 |
 | UI-STYLE-001 | Done；StyleClass/ColorToken、reverse-dependency、imageTint、dirty metadata、showcase Integration、`RunUiStyleVisualGate.ps1` 已落地 |
 | UI-MOTION-001 | Done；paint-only color/opacity/radius/visual-offset + reduced-motion + Style BackgroundColor reservation/activation + `ui_motion_v1` |
+| METRICS-001 | Blocked：Runtime Metrics 固定容量 counter registry 首切片；[ADR 0027](adr/0027-runtime-metrics-registry.md) 为 Proposed，待 maintainer 确认关键决策（D1-D8）后开工，确认前不建立占位 API |
 
 UI 框架主线按以下顺序推进；这是 UI lane 的依赖顺序，不阻塞 Asset、Render、UIA 等其他 lane 并行：
 

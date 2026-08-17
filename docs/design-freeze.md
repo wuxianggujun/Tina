@@ -19,7 +19,7 @@
 | 领域 | 决定 | ADR | 实现状态 |
 | --- | --- | --- | --- |
 | 迁移 | 完整目标、小步垂直切片、持续可运行 | [0001](adr/0001-vnext-vertical-slices.md) | Implemented |
-| Profiling | Tina Trace/Metrics；Tracy 用于定位，bench 用于回归 | [0002](adr/0002-tracy-and-benchmark.md) | Partial：None frontend、Tracy 0.13.1 64-byte opaque zone adapter、Runtime phase consumer 与 `tina_bench` schema v1 已落地；Metrics 与 session/capture 控制面仍后置 |
+| Profiling | Tina Trace/Metrics；Tracy 用于定位，bench 用于回归 | [0002](adr/0002-tracy-and-benchmark.md) | Partial：None frontend、Tracy 0.13.1 64-byte opaque zone adapter、Runtime phase consumer 与 `tina_bench` schema v1 已落地；Metrics 与 session/capture 控制面仍后置，Metrics 契约提案见 Proposed [0027](adr/0027-runtime-metrics-registry.md) |
 | 组合 | backend factory + 非全局 `EngineHost` | [0003](adr/0003-backend-factories.md) | Implemented |
 | 错误 | 内部可用 exception，模块边界转 `Result`/`Status` | [0004](adr/0004-exceptions-and-errors.md) | Implemented |
 | Platform | GLFW + 窄原生适配，不引入 SDL/SDL3 | [0005](adr/0005-glfw-without-sdl.md) | Implemented |
@@ -47,7 +47,10 @@
 
 ## Proposed
 
-当前没有未决的 Proposed ADR。新的候选决定必须先新增 ADR，不能只写入主题文档。
+当前唯一未决的 Proposed ADR 是 [0027](adr/0027-runtime-metrics-registry.md)（Runtime Metrics 固定
+容量 counter registry：owner/生命周期、counter 模型、注册身份与线程模型、热路径错误、容量、
+snapshot 语义、编译开关等关键决策待确认；Accepted 前不建立占位 API，不修改 Runtime）。新的候选
+决定必须先新增 ADR，不能只写入主题文档。
 
 固定机 hard-gate / 多进程 MAD 等实现尾巴记在 [Backlog](backlog.md)（PERF-002），不单独占 Proposed 行。
 `UI-FLOW-001` 复用现有 retained node：Layer 是 root 直接子节点，Screen 是 Layer 直接子节点，固定容量栈
