@@ -1079,7 +1079,7 @@ Invoke/Toggle/RangeValue/Value patterns；immutable weighted Navigation2D grid�
 - 通用 GPU submission fence（现有 readback marker 只服务 Texture/Mesh/EnvironmentMap retirement）；
 - TileMap 更高层 editor orchestration；
 - BiDi/复杂 shaping、Linux 原生 XIM/Wayland preedit/candidate placement，以及 Windows 真机 IME 候选窗人工金标；
-- generic TextInput/Scroll/Select 输入路由，以及 component transaction 对 text/canvas/各 Behavior pool 的统一预留与 counter；
+- generic TextInput/Scroll/Select 输入路由；
 - stylesheet 更广 opacity 等属性面、layout property 白名单扩展与高级 Motion playback；imageTint、paint-only
   transition、typed paint/bounded-layout timeline 与 ColorToken reverse-dependency 更新已落地；
 - Back/Confirm/Menu 之外的任意产品 action-id；

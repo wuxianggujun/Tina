@@ -123,13 +123,13 @@ listener 不保活 Context/root，退出时应先 reset listener 再释放 root�
 | `tina_sample_3d` | glTF cook、Catalog/Prefab、StaticMesh/Material upload、Scene 3D、bgfx |
 | `tina_sample_null` | Headless/Null 生命周期与 phase 契约 |
 
-样例内部的参数解析、fixture 和计数器不是通用 Game SDK。正式 SDK package/export 与通用
-save/load orchestration 尚未完成。
+样例内部的参数解析、fixture 和计数器不是通用 Game SDK。可安装 `Tina::GameSDK` package/export 与外部
+`find_package` consumer 已落地；通用 save/load orchestration 仍未完成。
 
 ## `RUNTIME-001` 状态
 
 已落地（见 `GameStateStackTests` / `GameStateStackIntegrationTests`，以及
-`tina_sample_2d` 自动 pause overlay 产品证据）：
+`tina_sample_2d` pause overlay 产品证据）：
 
 - push/pop/replace 只在 `updateFrame` 后、`extractRenderScene` 前唯一 commit；
 - enter 失败丢弃 candidate 且不调用 `onExit`，栈保持；
@@ -143,7 +143,6 @@ save/load orchestration 尚未完成。
 
 仍后置：
 
-- 交互式菜单/暂停（按键切换）；`tina_sample_2d` 仅自动收尾 pause overlay（≥60 帧 smoke）；
 - State UI root / listener / TaskGroup / AssetLease 在 transition 后的完整 stale-owner 矩阵；
 - `blocksUIUpdateBelow` 回改当帧 UI route（当前故意不接；route 在 stack 前）。
 

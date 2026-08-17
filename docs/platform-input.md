@@ -91,7 +91,8 @@ UI 读取上一帧 committed hit snapshot。Button、Checkbox、Slider、RadioBu
 `UIFocusScopeMode::Contain`、显式 focus、topmost committed Modal barrier、嵌套/跨 root focus 恢复与持久
 Primary Pointer Capture 已接入。capture 路由保留独立物理 hit；Up、输入 cancel、destroy、disable、
 Hidden/Collapsed 与 Modal scope change 会释放 capture，其中 target 失效路径先沿原 committed ancestry
-合成一次 synthetic-only `PointerCancel`。方向/手柄空间导航仍后置。
+合成一次 synthetic-only `PointerCancel`。Keyboard Arrow/Gamepad D-pad 方向空间导航已复用 committed geometry
+的 beam/axis scoring；成功移动的 Down/Up 由固定容量 latch 成对消费。
 
 `preventDefaultAction()`、route stop、transition consume 和 control claim 是不同语义：consume/claim 阻止
 Gameplay Action，不能隐式替代 UI default-action policy。
@@ -154,7 +155,6 @@ X11(Xvfb)/sanitizer 证据已经记录；可选 Wayland/真显示器、真实 Ga
 - 可选 Linux Wayland/真显示器与真实设备 Gamepad 矩阵；TEST-001 当前 tip 已完成；
 - Windows Narrator/Inspect 人工金标：`UI-002`（action/control patterns 与跨进程 HWND gate 已有）；
 - Linux AT-SPI adapter 与真实辅助技术验收：`UI-002-LINUX`；
-- 方向/手柄空间导航；
 - BiDi/复杂 shaping、Linux 原生 XIM/Wayland preedit/candidate placement，以及 Windows 真机 IME 候选窗
   跟随/提交/取消/失焦人工矩阵：`TEXT-001`。
 

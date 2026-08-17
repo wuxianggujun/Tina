@@ -102,7 +102,7 @@ ABI tuple 的 artifact/API/symbol baseline 与 previous-object probe 作为 rele
 - FX GPU simulation（`FX-ASSET-001` 完成 asset/editor 化后评估）；
 - 3D post-process（HDR/tone mapping）与跨 GPU golden（transparent pass 已由 `RENDER-002-TRANSPARENT` 闭环）；
 - layout whitelist 扩展，以及 loop/seek/pause/repeat/yoyo/completion callback、spring/inertia 等高级 Motion playback；
-- MeshRenderer3D 提取侧视锥剔除、LOD 与 instancing（当前仅 point/spot light 做 influence-sphere culling，mesh 只按 visible 标志提取）；
+- `MeshRenderer3D` / `SkinnedMeshRenderer3D` 的 LOD 与剩余 instancing 扩展（static/skinned sphere-frustum culling 已在 resolver 前完成；opaque static 当前仅对 mesh/material/submesh/doubleSided 相同的连续 item 合批并以 bgfx instanced draw 提交，transparent static 与 skinned path 仍逐 item draw）；
 - Asset Bundle/Patch、cache/LRU 与 network Asset；
 
 Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语义和验收命令，不能只按功能名称开工。
