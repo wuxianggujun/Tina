@@ -54,6 +54,13 @@ namespace {
 
 } // namespace
 
+Core::Status validateTransitionSpec(
+    const UITransitionSpec& spec,
+    UIAnimatableProperty expectedProperty) noexcept
+{
+    return validateSpec(spec, expectedProperty);
+}
+
 UIMotionTrackStorage::UIMotionTrackStorage(usize trackCapacity, std::pmr::memory_resource& resource)
     : tracks_(&resource), freeList_(&resource), availableCount_(trackCapacity),
       lastCompleted_(&resource), candidateStyleActivationSlots_(&resource)

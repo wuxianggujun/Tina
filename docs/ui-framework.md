@@ -710,6 +710,13 @@ transition 保存 node/property/start/target/time，状态再次变化时从当�
 先形成 candidate，再从同一 geometry 构建 Layout/Hit/Paint/Semantics；任一 builder 失败时不发布部分 snapshot
 或 presentation，下一次按绝对时间重试。
 
+Direct transition 在 zero-duration/reduced-motion snap 前仍完整校验 property/duration/delay/easing；失败不改
+retained target、dirty state 或既有 owner。`CornerRadius` 的 Rectangle 条件是 playback-time capability：Ellipse/
+Line 节点可持有或替换 timeline definition，但 direct/play/retarget 原子拒绝，恢复 Rectangle 后才可播放；显式
+scalar keyframe-0 允许从非对称 retained radii 启动。`setBoxPaint()` 在 dirty 预检成功后取消 active direct
+BackgroundColor/BorderColor/CornerRadius；对应 active timeline 存在时 setter fail closed，必须显式 cancel，
+而 Opacity/VisualOffset timeline 不构成 box-paint owner 冲突。
+
 已落地的 stylesheet `BackgroundColor` transition 遵守 ADR 0023：匹配 stateful BoxFill candidate 的节点
 在 Style 绑定阶段持久预留 track；运行期启用会先对已有节点做原子容量预检，pseudo-state 变化只激活
 已预留槽。reserved 与 active 分开计数/high-water，完成后 reservation 保留到 role 变更、node destroy 或

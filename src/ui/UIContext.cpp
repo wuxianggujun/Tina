@@ -6474,14 +6474,15 @@ struct UIContext::Impl final {
         {
             return Core::failure(nodeResult.error());
         }
+        if (Core::Status validation = Detail::validateTransitionSpec(spec, property);
+            !validation)
+        {
+            return validation;
+        }
         if (timelineStorage.hasPresentationOwner(node, property))
         {
             return fail(UIErrorCode::InvalidStyle,
                         "Direct UI motion conflicts with an active keyframe timeline");
-        }
-        if (spec.property != property)
-        {
-            return fail(UIErrorCode::InvalidStyle, "UI motion transition property mismatch");
         }
         const u32 index = node.index();
         UIStraightSrgba8Color start{};
@@ -6562,14 +6563,16 @@ struct UIContext::Impl final {
         {
             return Core::failure(nodeResult.error());
         }
+        if (Core::Status validation = Detail::validateTransitionSpec(
+                spec, UIAnimatableProperty::Opacity);
+            !validation)
+        {
+            return validation;
+        }
         if (timelineStorage.hasPresentationOwner(node, UIAnimatableProperty::Opacity))
         {
             return fail(UIErrorCode::InvalidStyle,
                         "Direct UI motion conflicts with an active keyframe timeline");
-        }
-        if (spec.property != UIAnimatableProperty::Opacity)
-        {
-            return fail(UIErrorCode::InvalidStyle, "UI motion transition property mismatch");
         }
         if (!std::isfinite(targetOpacity))
         {
@@ -6618,20 +6621,27 @@ struct UIContext::Impl final {
         {
             return Core::failure(nodeResult.error());
         }
+        if (Core::Status validation = Detail::validateTransitionSpec(
+                spec, UIAnimatableProperty::CornerRadius);
+            !validation)
+        {
+            return validation;
+        }
+        const u32 index = node.index();
+        if (boxPaintsByIndex[index].primitive != UIBoxPrimitiveKind::Rectangle)
+        {
+            return fail(UIErrorCode::InvalidStyle,
+                        "UI corner-radius motion requires Rectangle box paint");
+        }
         if (timelineStorage.hasPresentationOwner(node, UIAnimatableProperty::CornerRadius))
         {
             return fail(UIErrorCode::InvalidStyle,
                         "Direct UI motion conflicts with an active keyframe timeline");
         }
-        if (spec.property != UIAnimatableProperty::CornerRadius)
-        {
-            return fail(UIErrorCode::InvalidStyle, "UI motion transition property mismatch");
-        }
         if (!std::isfinite(targetRadius) || targetRadius < 0.0F)
         {
             return fail(UIErrorCode::InvalidStyle, "UI corner radius target must be finite and non-negative");
         }
-        const u32 index = node.index();
         const auto presentation = motionPresentationFor(node);
         if (!presentation.hasCornerRadius &&
             !boxPaintsByIndex[index].cornerRadii.isUniform())
@@ -6680,14 +6690,16 @@ struct UIContext::Impl final {
         {
             return Core::failure(nodeResult.error());
         }
+        if (Core::Status validation = Detail::validateTransitionSpec(
+                spec, UIAnimatableProperty::VisualOffset);
+            !validation)
+        {
+            return validation;
+        }
         if (timelineStorage.hasPresentationOwner(node, UIAnimatableProperty::VisualOffset))
         {
             return fail(UIErrorCode::InvalidStyle,
                         "Direct UI motion conflicts with an active keyframe timeline");
-        }
-        if (spec.property != UIAnimatableProperty::VisualOffset)
-        {
-            return fail(UIErrorCode::InvalidStyle, "UI motion transition property mismatch");
         }
         if (!std::isfinite(targetOffsetX) || !std::isfinite(targetOffsetY))
         {
@@ -6759,12 +6771,12 @@ struct UIContext::Impl final {
         {
             return Core::failure(nodeResult.error());
         }
-        if (track.property == UIAnimatableProperty::TextColor &&
-            (track.node.index() >= impl.textStatesByIndex.size() ||
-             !impl.textStatesByIndex[track.node.index()].hasContent))
+        if (Core::Status capability =
+                impl.validateTimelinePlaybackPropertyCapability(
+                    track.node, track.property);
+            !capability)
         {
-            return fail(UIErrorCode::InvalidText,
-                        "UI timeline text color track requires intrinsic text content");
+            return capability;
         }
         if (impl.motionTrackStorage.hasTrack(track.node, track.property))
         {
@@ -6818,6 +6830,37 @@ struct UIContext::Impl final {
                                       timelinePaintNodeScratch.size()));
     }
 
+    [[nodiscard]] Core::Status validateTimelineDefinitionPropertyCapability(
+        UINodeId node, UIAnimatableProperty property) const
+    {
+        const u32 index = node.index();
+        if (property == UIAnimatableProperty::TextColor &&
+            (index >= textStatesByIndex.size() || !textStatesByIndex[index].hasContent))
+        {
+            return fail(UIErrorCode::InvalidText,
+                        "UI timeline text color track requires intrinsic text content");
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status validateTimelinePlaybackPropertyCapability(
+        UINodeId node, UIAnimatableProperty property) const
+    {
+        if (Core::Status definitionCapability =
+                validateTimelineDefinitionPropertyCapability(node, property);
+            !definitionCapability)
+        {
+            return definitionCapability;
+        }
+        if (property == UIAnimatableProperty::CornerRadius &&
+            boxPaintsByIndex[node.index()].primitive != UIBoxPrimitiveKind::Rectangle)
+        {
+            return fail(UIErrorCode::InvalidStyle,
+                        "UI corner-radius timeline requires Rectangle box paint");
+        }
+        return Core::success();
+    }
+
     [[nodiscard]] Core::Result<UITimelineId> createTimeline(const UITimelineDesc& desc)
     {
         if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
@@ -6835,12 +6878,12 @@ struct UIContext::Impl final {
             {
                 return Core::failure(nodeResult.error());
             }
-            if (track.property == UIAnimatableProperty::TextColor &&
-                (track.node.index() >= textStatesByIndex.size() ||
-                 !textStatesByIndex[track.node.index()].hasContent))
+            if (Core::Status capability =
+                    validateTimelineDefinitionPropertyCapability(
+                        track.node, track.property);
+                !capability)
             {
-                return fail(UIErrorCode::InvalidText,
-                            "UI timeline text color track requires intrinsic text content");
+                return Core::failure(capability.error());
             }
         }
         return timelineStorage.create(desc);
@@ -6866,12 +6909,12 @@ struct UIContext::Impl final {
             {
                 return Core::failure(nodeResult.error());
             }
-            if (track.property == UIAnimatableProperty::TextColor &&
-                (track.node.index() >= textStatesByIndex.size() ||
-                 !textStatesByIndex[track.node.index()].hasContent))
+            if (Core::Status capability =
+                    validateTimelineDefinitionPropertyCapability(
+                        track.node, track.property);
+                !capability)
             {
-                return fail(UIErrorCode::InvalidText,
-                            "UI timeline text color track requires intrinsic text content");
+                return capability;
             }
         }
         if (Core::Status preflight = timelineStorage.preflightReplace(timeline, desc); !preflight)
@@ -9620,6 +9663,14 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::InvalidStyle,
                         "UI box corner radii must be finite and non-negative");
         }
+        if (timelineStorage.hasPresentationOwner(
+                node, UIAnimatableProperty::BackgroundColor) ||
+            timelineStorage.hasPresentationOwner(node, UIAnimatableProperty::BorderColor) ||
+            timelineStorage.hasPresentationOwner(node, UIAnimatableProperty::CornerRadius))
+        {
+            return fail(UIErrorCode::InvalidStyle,
+                        "UI box paint setter conflicts with an active keyframe timeline");
+        }
 
         const UIBoxPaint normalizedPaint = Detail::normalizeBoxPaint(paint);
         UIBoxPaint& currentPaint = boxPaintsByIndex[node.index()];
@@ -9628,7 +9679,13 @@ struct UIContext::Impl final {
              static_cast<u16>(UIStyleOverride::BoxPaint)) != 0;
         const bool hasActiveBackgroundMotion =
             motionTrackStorage.findActive(node, UIAnimatableProperty::BackgroundColor) != nullptr;
-        if (currentPaint == normalizedPaint && hasLocalOverride && !hasActiveBackgroundMotion)
+        const bool hasActiveBorderMotion =
+            motionTrackStorage.findActive(node, UIAnimatableProperty::BorderColor) != nullptr;
+        const bool hasActiveCornerRadiusMotion =
+            motionTrackStorage.findActive(node, UIAnimatableProperty::CornerRadius) != nullptr;
+        const bool hasActiveBoxPaintMotion =
+            hasActiveBackgroundMotion || hasActiveBorderMotion || hasActiveCornerRadiusMotion;
+        if (currentPaint == normalizedPaint && hasLocalOverride && !hasActiveBoxPaintMotion)
         {
             return Core::success();
         }
@@ -9639,6 +9696,8 @@ struct UIContext::Impl final {
             return dirtyStatus;
         }
         motionTrackStorage.cancelActiveProperty(node, UIAnimatableProperty::BackgroundColor);
+        motionTrackStorage.cancelActiveProperty(node, UIAnimatableProperty::BorderColor);
+        motionTrackStorage.cancelActiveProperty(node, UIAnimatableProperty::CornerRadius);
         if (currentPaint != normalizedPaint)
         {
             currentPaint = normalizedPaint;

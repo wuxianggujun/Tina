@@ -251,6 +251,16 @@ definition/track/keyframe/active-index 容量和 owner conflict，再原子发�
 retarget；active cancel/destroy 与 reduced-motion play 落 final target，inactive cancel 为 no-op，inactive
 destroy 只释放 definition。不同 Context、stale generation、direct/Style transition owner 冲突均 fail closed。
 
+Direct API 即使走 `duration=0` 或 `reduced-motion` snap，也会先完整校验 property、duration、delay 与
+easing；非法调用不写 retained target、不取消既有 direct owner，也不产生 Paint dirty。`CornerRadius`
+direct/playback 只接受 Rectangle box paint；timeline definition 可在 Ellipse/Line 状态下 create/replace，
+因为 primitive 是可变 retained capability，但每次 play/retarget 都会重新预检，切回 Rectangle 后才能播放。
+非对称 authored 四角仍可通过显式 scalar keyframe-0 timeline 启动并收敛到 uniform target。
+
+`setBoxPaint()` 对 active direct BackgroundColor/BorderColor/CornerRadius 采用 setter-wins：dirty 预检成功后
+一次取消这些 owner；dirty 容量失败则保留全部 owner 和旧 paint。任一对应 active timeline owner 存在时，
+setter 原子拒绝，调用方必须先显式 cancel；Opacity/VisualOffset timeline 不阻止 box-paint setter。
+
 direct transition 与 Style `BackgroundColor` transition 仍只覆盖 paint 属性。Timeline 在相同 paint 属性之外，
 还允许 `LayoutWidth`、`LayoutHeight` 与仅由 Overlay placement 消费的 `LayoutOffset`。含 layout track 的 sample
 会同时暂存同 timeline 的 paint track 与同帧 direct transition，再从同一 interpolated geometry 构建 Layout、

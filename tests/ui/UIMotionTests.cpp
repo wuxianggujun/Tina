@@ -270,6 +270,152 @@ TEST(UIMotionTests, ReducedMotionSnapsWithoutActiveTrack)
     EXPECT_EQ(paint->solidFill, UI::premultiply(UI::rgba8(200, 100, 50, 255)));
 }
 
+TEST(UIMotionTests, DirectSnapPathsRejectInvalidSpecsAtomically)
+{
+    auto context = createMotionContext(16);
+    ASSERT_NE(context, nullptr);
+    FakeMotionClock clock;
+    ASSERT_TRUE(context->setMotionClock(&clock).has_value());
+
+    auto rootResult = context->rootBuilder().createRoot();
+    ASSERT_TRUE(rootResult.has_value());
+    UI::UIRootOwner root = std::move(*rootResult);
+    auto updaterResult = context->treeUpdater(root);
+    ASSERT_TRUE(updaterResult.has_value());
+    UI::UITreeUpdater updater = std::move(*updaterResult);
+
+    UI::UIElementDescriptor panel = UI::makePanelElement(fixedSize(30.0F, 20.0F));
+    panel.visual.boxPaint = UI::makeSolidBox(UI::rgba8(10, 20, 30, 255), 2.0F);
+    const auto panelNode = updater.createElement(root.rootNodeId(), panel);
+    const auto textNode =
+        updater.createElement(root.rootNodeId(), UI::makeLabelElement("Motion"));
+    ASSERT_TRUE(panelNode.has_value());
+    ASSERT_TRUE(textNode.has_value());
+    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+
+    u64 paintRevision = context->committedPaint().paintRevision();
+    const auto expectRejectedAtomically = [&](Core::Status status) {
+        EXPECT_FALSE(status.has_value());
+        if (!status)
+        {
+            EXPECT_EQ(status.error().code, UI::UIErrorCode::InvalidStyle);
+        }
+        EXPECT_EQ(context->statistics().motion.activeTrackCount, 0U);
+        EXPECT_FALSE(context->statistics().paintDirty);
+        EXPECT_EQ(context->committedPaint().paintRevision(), paintRevision);
+    };
+    const auto exerciseInvalidSnapCalls = [&](Core::Duration snapDuration) {
+        expectRejectedAtomically(context->beginBackgroundColorTransition(
+            *panelNode, UI::rgba8(200, 0, 0, 255),
+            UI::UITransitionSpec{
+                .property = UI::UIAnimatableProperty::BorderColor,
+                .duration = snapDuration,
+            }));
+        expectRejectedAtomically(context->beginBorderColorTransition(
+            *panelNode, UI::rgba8(0, 200, 0, 255),
+            UI::UITransitionSpec{
+                .property = UI::UIAnimatableProperty::BorderColor,
+                .duration = Core::Duration{-0.001},
+            }));
+        expectRejectedAtomically(context->beginTextColorTransition(
+            *textNode, UI::rgba8(0, 0, 200, 255),
+            UI::UITransitionSpec{
+                .property = UI::UIAnimatableProperty::TextColor,
+                .duration = snapDuration,
+                .delay = Core::Duration{-0.001},
+            }));
+        expectRejectedAtomically(context->beginOpacityTransition(
+            *panelNode, 0.25F,
+            UI::UITransitionSpec{
+                .property = UI::UIAnimatableProperty::Opacity,
+                .duration = snapDuration,
+                .easing = static_cast<UI::UIEasing>(255),
+            }));
+        expectRejectedAtomically(context->beginCornerRadiusTransition(
+            *panelNode, 12.0F,
+            UI::UITransitionSpec{
+                .property = UI::UIAnimatableProperty::Opacity,
+                .duration = snapDuration,
+            }));
+        expectRejectedAtomically(context->beginVisualOffsetTransition(
+            *panelNode, 8.0F, 4.0F,
+            UI::UITransitionSpec{
+                .property = UI::UIAnimatableProperty::VisualOffset,
+                .duration = Core::Duration{-0.001},
+            }));
+    };
+
+    exerciseInvalidSnapCalls(Core::Duration{0.0});
+    ASSERT_TRUE(context->setReducedMotion(true).has_value());
+    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    paintRevision = context->committedPaint().paintRevision();
+    exerciseInvalidSnapCalls(Core::Duration{1.0});
+
+    const auto* paint = findSolidPaint(context->committedPaint(), *panelNode);
+    ASSERT_NE(paint, nullptr);
+    EXPECT_EQ(paint->solidFill, UI::premultiply(UI::rgba8(10, 20, 30, 255)));
+    EXPECT_EQ(paint->cornerRadii, UI::UILogicalCornerRadii::uniform(2.0F));
+}
+
+TEST(UIMotionTests, InvalidDirectRetargetPreservesActiveSchedule)
+{
+    auto context = createMotionContext();
+    ASSERT_NE(context, nullptr);
+    FakeMotionClock clock;
+    ASSERT_TRUE(context->setMotionClock(&clock).has_value());
+
+    auto rootResult = context->rootBuilder().createRoot();
+    ASSERT_TRUE(rootResult.has_value());
+    UI::UIRootOwner root = std::move(*rootResult);
+    auto updaterResult = context->treeUpdater(root);
+    ASSERT_TRUE(updaterResult.has_value());
+    UI::UITreeUpdater updater = std::move(*updaterResult);
+
+    UI::UIElementDescriptor panel = UI::makePanelElement(fixedSize(30.0F, 20.0F));
+    panel.visual.boxPaint = UI::makeSolidBox(UI::rgba8(0, 0, 0, 255));
+    const auto node = updater.createElement(root.rootNodeId(), panel);
+    ASSERT_TRUE(node.has_value());
+    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+
+    const UI::UITransitionSpec validSpec{
+        .property = UI::UIAnimatableProperty::BackgroundColor,
+        .duration = Core::Duration{1.0},
+        .easing = UI::UIEasing::Linear,
+    };
+    ASSERT_TRUE(context
+                    ->beginBackgroundColorTransition(
+                        *node, UI::rgba8(100, 0, 0, 255), validSpec)
+                    .has_value());
+    clock.advance(Core::Duration{0.25});
+    ASSERT_TRUE(context->sampleMotion(clock.now()).has_value());
+    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    const auto* firstQuarter = findSolidPaint(context->committedPaint(), *node);
+    ASSERT_NE(firstQuarter, nullptr);
+    ASSERT_EQ(firstQuarter->solidFill.red, 25);
+    ASSERT_EQ(context->statistics().motion.activeTrackCount, 1U);
+    const u64 paintRevision = context->committedPaint().paintRevision();
+
+    const Core::Status rejected = context->beginBackgroundColorTransition(
+        *node, UI::rgba8(0, 100, 0, 255),
+        UI::UITransitionSpec{
+            .property = UI::UIAnimatableProperty::BackgroundColor,
+            .duration = Core::Duration{-0.001},
+        });
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidStyle);
+    EXPECT_EQ(context->statistics().motion.activeTrackCount, 1U);
+    EXPECT_FALSE(context->statistics().paintDirty);
+    EXPECT_EQ(context->committedPaint().paintRevision(), paintRevision);
+
+    clock.advance(Core::Duration{0.25});
+    ASSERT_TRUE(context->sampleMotion(clock.now()).has_value());
+    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    const auto* halfway = findSolidPaint(context->committedPaint(), *node);
+    ASSERT_NE(halfway, nullptr);
+    EXPECT_EQ(halfway->solidFill, UI::premultiply(UI::rgba8(50, 0, 0, 255)));
+    EXPECT_EQ(context->statistics().motion.activeTrackCount, 1U);
+}
+
 TEST(UIMotionTests, CapacityFailureLeavesExistingTracksIntact)
 {
     auto context = createMotionContext(1);
@@ -525,6 +671,266 @@ TEST(UIMotionTests, CornerRadiusTimelineUsesExplicitUniformKeyframeFromAsymmetri
     const auto* finalTarget = findSolidPaint(context->committedPaint(), *node);
     ASSERT_NE(finalTarget, nullptr);
     EXPECT_EQ(finalTarget->cornerRadii, UI::UILogicalCornerRadii::uniform(11.0F));
+}
+
+TEST(UIMotionTests, CornerRadiusMotionChecksPrimitiveAtPlaybackTime)
+{
+    auto context = createMotionContext(8);
+    ASSERT_NE(context, nullptr);
+    FakeMotionClock clock;
+    ASSERT_TRUE(context->setMotionClock(&clock).has_value());
+
+    auto rootResult = context->rootBuilder().createRoot();
+    ASSERT_TRUE(rootResult.has_value());
+    UI::UIRootOwner root = std::move(*rootResult);
+    auto updaterResult = context->treeUpdater(root);
+    ASSERT_TRUE(updaterResult.has_value());
+    UI::UITreeUpdater updater = std::move(*updaterResult);
+
+    UI::UIElementDescriptor shape = UI::makePanelElement(fixedSize(30.0F, 20.0F));
+    shape.visual.boxPaint = UI::makeSolidEllipse(UI::rgba8(40, 40, 40, 255));
+    const auto node = updater.createElement(root.rootNodeId(), shape);
+    ASSERT_TRUE(node.has_value());
+    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+
+    const UI::UITransitionSpec radiusSpec{
+        .property = UI::UIAnimatableProperty::CornerRadius,
+        .duration = Core::Duration{0.100},
+        .easing = UI::UIEasing::Linear,
+    };
+    const Core::Status ellipseDirect =
+        context->beginCornerRadiusTransition(*node, 8.0F, radiusSpec);
+    ASSERT_FALSE(ellipseDirect.has_value());
+    EXPECT_EQ(ellipseDirect.error().code, UI::UIErrorCode::InvalidStyle);
+    EXPECT_EQ(context->statistics().motion.activeTrackCount, 0U);
+
+    const std::array initialFrames{
+        UI::UIKeyframe{.normalizedTime = 0.0F,
+                       .value = UI::UIKeyframeValue::Scalar(2.0F)},
+        UI::UIKeyframe{.normalizedTime = 1.0F,
+                       .value = UI::UIKeyframeValue::Scalar(8.0F)},
+    };
+    const std::array initialTracks{
+        UI::UITimelineTrackDesc{.node = *node,
+                                .property = UI::UIAnimatableProperty::CornerRadius,
+                                .keyframes = initialFrames},
+    };
+    auto timeline = context->createTimeline(
+        UI::UITimelineDesc{.duration = Core::Duration{0.100}, .tracks = initialTracks});
+    ASSERT_TRUE(timeline.has_value()) << timeline.error().message;
+
+    const std::array replacementFrames{
+        UI::UIKeyframe{.normalizedTime = 0.0F,
+                       .value = UI::UIKeyframeValue::Scalar(3.0F)},
+        UI::UIKeyframe{.normalizedTime = 1.0F,
+                       .value = UI::UIKeyframeValue::Scalar(11.0F)},
+    };
+    const std::array replacementTracks{
+        UI::UITimelineTrackDesc{.node = *node,
+                                .property = UI::UIAnimatableProperty::CornerRadius,
+                                .keyframes = replacementFrames},
+    };
+    ASSERT_TRUE(context
+                    ->replaceTimeline(
+                        *timeline,
+                        UI::UITimelineDesc{
+                            .duration = Core::Duration{0.100},
+                            .tracks = replacementTracks,
+                        })
+                    .has_value());
+
+    const Core::Status ellipsePlay = context->playTimeline(*timeline);
+    ASSERT_FALSE(ellipsePlay.has_value());
+    EXPECT_EQ(ellipsePlay.error().code, UI::UIErrorCode::InvalidStyle);
+    EXPECT_EQ(context->statistics().motion.activeTimelineCount, 0U);
+
+    const UI::UIBoxPaint linePaint = UI::makeSolidLine(
+        UI::rgba8(40, 40, 40, 255), {.x = 0.0F, .y = 0.0F},
+        {.x = 30.0F, .y = 20.0F}, 2.0F);
+    ASSERT_TRUE(updater.setBoxPaint(*node, linePaint).has_value());
+    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    const Core::Status lineDirect =
+        context->beginCornerRadiusTransition(*node, 8.0F, radiusSpec);
+    ASSERT_FALSE(lineDirect.has_value());
+    EXPECT_EQ(lineDirect.error().code, UI::UIErrorCode::InvalidStyle);
+    const Core::Status linePlay = context->playTimeline(*timeline);
+    ASSERT_FALSE(linePlay.has_value());
+    EXPECT_EQ(linePlay.error().code, UI::UIErrorCode::InvalidStyle);
+    EXPECT_EQ(context->statistics().motion.activeTimelineCount, 0U);
+
+    ASSERT_TRUE(
+        updater
+            .setBoxPaint(*node, UI::makeSolidBox(UI::rgba8(40, 40, 40, 255), 3.0F))
+            .has_value());
+    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    ASSERT_TRUE(context->playTimeline(*timeline).has_value());
+    EXPECT_EQ(context->statistics().motion.activeTimelineCount, 1U);
+    ASSERT_TRUE(context->cancelTimeline(*timeline).has_value());
+}
+
+TEST(UIMotionTests, BoxPaintSetterPreservesDirectOwnersWhenDirtyQueueIsFull)
+{
+    UI::UIContextCapacityConfig config{
+        .nodeCapacity = 4,
+        .rootCapacity = 1,
+        .dirtyQueueCapacity = 1,
+        .paintSnapshotCapacity = 8,
+        .motionTrackCapacity = 3,
+        .applyDefaultProductChrome = false,
+    };
+    auto contextResult = UI::UIContext::Create(makeMotionWindow(), config);
+    ASSERT_TRUE(contextResult.has_value()) << contextResult.error().message;
+    auto context = std::move(*contextResult);
+    FakeMotionClock clock;
+    ASSERT_TRUE(context->setMotionClock(&clock).has_value());
+
+    auto rootResult = context->rootBuilder().createRoot();
+    ASSERT_TRUE(rootResult.has_value());
+    UI::UIRootOwner root = std::move(*rootResult);
+    auto updaterResult = context->treeUpdater(root);
+    ASSERT_TRUE(updaterResult.has_value());
+    UI::UITreeUpdater updater = std::move(*updaterResult);
+
+    const UI::UIBoxPaint targetPaint =
+        UI::makeSolidBox(UI::rgba8(10, 20, 30, 255), 2.0F);
+    UI::UIElementDescriptor targetDescriptor =
+        UI::makePanelElement(fixedSize(30.0F, 20.0F));
+    targetDescriptor.visual.boxPaint = targetPaint;
+    UI::UIElementDescriptor blockerDescriptor =
+        UI::makePanelElement(fixedSize(30.0F, 20.0F));
+    blockerDescriptor.visual.boxPaint = UI::makeSolidBox(UI::rgba8(1, 2, 3, 255));
+    const auto target = updater.createElement(root.rootNodeId(), targetDescriptor);
+    const auto blocker = updater.createElement(root.rootNodeId(), blockerDescriptor);
+    ASSERT_TRUE(target.has_value());
+    ASSERT_TRUE(blocker.has_value());
+    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 60.0F}).has_value());
+
+    ASSERT_TRUE(context
+                    ->beginBackgroundColorTransition(
+                        *target, UI::rgba8(100, 0, 0, 255),
+                        UI::UITransitionSpec{
+                            .property = UI::UIAnimatableProperty::BackgroundColor,
+                            .duration = Core::Duration{1.0},
+                        })
+                    .has_value());
+    ASSERT_TRUE(context
+                    ->beginBorderColorTransition(
+                        *target, UI::rgba8(0, 100, 0, 255),
+                        UI::UITransitionSpec{
+                            .property = UI::UIAnimatableProperty::BorderColor,
+                            .duration = Core::Duration{1.0},
+                        })
+                    .has_value());
+    ASSERT_TRUE(context
+                    ->beginCornerRadiusTransition(
+                        *target, 12.0F,
+                        UI::UITransitionSpec{
+                            .property = UI::UIAnimatableProperty::CornerRadius,
+                            .duration = Core::Duration{1.0},
+                        })
+                    .has_value());
+    ASSERT_EQ(context->statistics().motion.activeTrackCount, 3U);
+    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 60.0F}).has_value());
+
+    ASSERT_TRUE(
+        updater
+            .setBoxPaint(*blocker, UI::makeSolidBox(UI::rgba8(9, 8, 7, 255)))
+            .has_value());
+    ASSERT_EQ(context->statistics().dirtyQueuePendingCount, 1U);
+    const Core::Status rejected = updater.setBoxPaint(*target, targetPaint);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::CapacityExceeded);
+    EXPECT_EQ(context->statistics().motion.activeTrackCount, 3U);
+    EXPECT_EQ(context->statistics().dirtyQueuePendingCount, 1U);
+
+    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 60.0F}).has_value());
+    ASSERT_EQ(context->statistics().motion.activeTrackCount, 3U);
+    ASSERT_TRUE(updater.setBoxPaint(*target, targetPaint).has_value());
+    EXPECT_EQ(context->statistics().motion.activeTrackCount, 0U);
+    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 60.0F}).has_value());
+    const auto* finalPaint = findSolidPaint(context->committedPaint(), *target);
+    ASSERT_NE(finalPaint, nullptr);
+    EXPECT_EQ(finalPaint->solidFill,
+              UI::premultiply(UI::rgba8(10, 20, 30, 255)));
+    EXPECT_EQ(finalPaint->cornerRadii, UI::UILogicalCornerRadii::uniform(2.0F));
+}
+
+TEST(UIMotionTests, BoxPaintSetterRequiresExplicitTimelineCancel)
+{
+    auto context = createMotionContext(8);
+    ASSERT_NE(context, nullptr);
+    FakeMotionClock clock;
+    ASSERT_TRUE(context->setMotionClock(&clock).has_value());
+
+    auto rootResult = context->rootBuilder().createRoot();
+    ASSERT_TRUE(rootResult.has_value());
+    UI::UIRootOwner root = std::move(*rootResult);
+    auto updaterResult = context->treeUpdater(root);
+    ASSERT_TRUE(updaterResult.has_value());
+    UI::UITreeUpdater updater = std::move(*updaterResult);
+
+    UI::UIElementDescriptor panel = UI::makePanelElement(fixedSize(30.0F, 20.0F));
+    panel.visual.boxPaint = UI::makeSolidBox(UI::rgba8(10, 20, 30, 255), 2.0F);
+    const auto node = updater.createElement(root.rootNodeId(), panel);
+    ASSERT_TRUE(node.has_value());
+    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+
+    const std::array radiusFrames{
+        UI::UIKeyframe{.normalizedTime = 0.0F,
+                       .value = UI::UIKeyframeValue::Scalar(2.0F)},
+        UI::UIKeyframe{.normalizedTime = 1.0F,
+                       .value = UI::UIKeyframeValue::Scalar(12.0F)},
+    };
+    const std::array radiusTracks{
+        UI::UITimelineTrackDesc{.node = *node,
+                                .property = UI::UIAnimatableProperty::CornerRadius,
+                                .keyframes = radiusFrames},
+    };
+    const std::array offsetFrames{
+        UI::UIKeyframe{.normalizedTime = 0.0F,
+                       .value = UI::UIKeyframeValue::Offset(0.0F, 0.0F)},
+        UI::UIKeyframe{.normalizedTime = 1.0F,
+                       .value = UI::UIKeyframeValue::Offset(8.0F, 4.0F)},
+    };
+    const std::array offsetTracks{
+        UI::UITimelineTrackDesc{.node = *node,
+                                .property = UI::UIAnimatableProperty::VisualOffset,
+                                .keyframes = offsetFrames},
+    };
+    auto radiusTimeline = context->createTimeline(
+        UI::UITimelineDesc{.duration = Core::Duration{1.0}, .tracks = radiusTracks});
+    auto offsetTimeline = context->createTimeline(
+        UI::UITimelineDesc{.duration = Core::Duration{1.0}, .tracks = offsetTracks});
+    ASSERT_TRUE(radiusTimeline.has_value());
+    ASSERT_TRUE(offsetTimeline.has_value());
+    ASSERT_TRUE(context->playTimeline(*radiusTimeline).has_value());
+    ASSERT_TRUE(context->playTimeline(*offsetTimeline).has_value());
+    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    ASSERT_EQ(context->statistics().motion.activeTimelineCount, 2U);
+
+    const UI::UIBoxPaint replacement =
+        UI::makeSolidBox(UI::rgba8(0, 80, 0, 255), 4.0F);
+    const u64 paintRevision = context->committedPaint().paintRevision();
+    const Core::Status rejected = updater.setBoxPaint(*node, replacement);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidStyle);
+    EXPECT_EQ(context->statistics().motion.activeTimelineCount, 2U);
+    EXPECT_EQ(context->committedPaint().paintRevision(), paintRevision);
+    EXPECT_FALSE(context->statistics().paintDirty);
+
+    ASSERT_TRUE(context->cancelTimeline(*radiusTimeline).has_value());
+    ASSERT_EQ(context->statistics().motion.activeTimelineCount, 1U);
+    ASSERT_TRUE(updater.setBoxPaint(*node, replacement).has_value());
+    EXPECT_EQ(context->statistics().motion.activeTimelineCount, 1U);
+    auto offsetActive = context->isTimelineActive(*offsetTimeline);
+    ASSERT_TRUE(offsetActive.has_value());
+    EXPECT_TRUE(*offsetActive);
+    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    const auto* finalPaint = findSolidPaint(context->committedPaint(), *node);
+    ASSERT_NE(finalPaint, nullptr);
+    EXPECT_EQ(finalPaint->solidFill, UI::premultiply(UI::rgba8(0, 80, 0, 255)));
+    EXPECT_EQ(finalPaint->cornerRadii, UI::UILogicalCornerRadii::uniform(4.0F));
+    ASSERT_TRUE(context->cancelTimeline(*offsetTimeline).has_value());
 }
 
 TEST(UIMotionTests, VisualOffsetShiftsPaintWorldRectNotLayout)

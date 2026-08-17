@@ -118,6 +118,19 @@ completion target、active playback 与对应 committed snapshot。任一 dirty 
 跑通 seed 0/1/2，`layout_commit_failures=0`、UI PMR allocation delta=0。共享开发机的墙钟结论仍为
 `provisional`，绝对性能 hard gate 继续由 `PERF-002` 跟踪。
 
+## 后续契约加固记录（2026-08-17）
+
+实现进一步区分 definition validation 与 playback capability。`CornerRadius` timeline 可在当前 box primitive 为
+Ellipse/Line 时 create/replace definition；每次 play/retarget 才按第3节重新验证 Rectangle capability，失败不写
+active index、target、presentation 或 dirty state，切回 Rectangle 后同一 definition 可播放。Direct transition
+无论是否 zero-duration/reduced-motion snap，均先验证 property、duration、delay 与 easing，非法 retarget 保留原
+schedule。非对称 retained radii 配合显式 scalar keyframe-0 仍是合法 timeline authoring。
+
+Box paint setter 的 owner 规则也固定为两类：对 active direct BackgroundColor/BorderColor/CornerRadius，setter 在
+dirty 预检成功后一次取消三类 owner；预检失败保留旧 paint 和全部 owner。对任一对应 active timeline owner，setter
+零发布拒绝并要求调用方先显式 cancel；Opacity/VisualOffset timeline 不阻止 box paint setter。该规则不引入隐式
+timeline track 抢占，保持第1节的多 track 同步边界。
+
 ## 被拒绝方案
 
 - 每个 Element 自带 heap timeline/vector：容量与 teardown 不再由 Context 统一证明；

@@ -14,6 +14,10 @@
 
 namespace Tina::UI::Detail {
 
+[[nodiscard]] Core::Status validateTransitionSpec(
+    const UITransitionSpec& spec,
+    UIAnimatableProperty expectedProperty) noexcept;
+
 // Fixed-capacity active transition store. One track per (node, property).
 // Sampling only walks the compact active list (O(M)).
 
