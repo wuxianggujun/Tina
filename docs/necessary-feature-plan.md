@@ -206,7 +206,8 @@ N4 当时明确保留的边界：这不是完整 PBR/light system；后续 `REND
 RenderScene snapshot、容量前 influence-sphere culling 与 backend shading；`RENDER-001-VERTEX-TANGENTS`
 后续已关闭 authored/generated tangent 与唯一 backend TBN 路径，并完成固定4级联 directional CSM、
 单 SpotLight/PointLight shadow、startup-only shadow extent、deterministic pass scheduler、Cook-Torrance GGX direct light 与 cooked
-EnvironmentMap split-sum IBL；skin/animation 仍未完成。
+EnvironmentMap split-sum IBL；N4 当时未覆盖 skin/animation，后续 `3D-SKIN-001` 已独立闭环其 wire/cook/typed、
+joint remap、CPU pose、packet-local palette 与 bgfx GPU skinning。
 
 ### 验收
 
@@ -517,7 +518,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
 
 N11 单独不宣称完成 `ASSET-HANDLE-SCENE` 总项：当时 FX/TileMap 虽已消费 registry key，组件仍没有保存
 AssetHandle。N12 已迁移 FX，N13 已迁移 TileMap，N14 已迁移 3D component/Prefab，N15 已补 engine-provided、State-owned
-3D Mesh/Material registry；统一 retirement ownership 与 `FrameResourceRef` 仍未完成。
+3D Mesh/Material registry；统一 retirement ownership 与 `FrameResourceRef` 在当时仍未完成，后续由 N16.1-N16.4
+完成并关闭 `ASSET-HANDLE-SCENE` 总项。
 
 ## N12 - ASSET-HANDLE-SCENE-2D-A3
 
