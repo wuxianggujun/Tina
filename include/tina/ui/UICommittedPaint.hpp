@@ -34,9 +34,9 @@ struct UICommittedPaintEntry final {
     u32 paintOrdinal = 0;
     // Premultiplied vertex/tint color for every paint kind.
     UIPremultipliedRgba8Color solidFill{};
-    // Logical-pixel radius for SolidQuad paint. Integration projects and clamps
-    // it before publishing the backend-neutral DisplayList command.
-    float cornerRadius = 0.0F;
+    // Logical-pixel per-corner radii for SolidQuad paint. Integration projects
+    // and clamps each value before publishing the backend-neutral DisplayList.
+    UILogicalCornerRadii cornerRadii{};
     UICommittedPaintKind kind = UICommittedPaintKind::SolidQuad;
     // Glyph entries describe an R8 placement in the context-owned CPU atlas.
     u32 atlasX = 0;

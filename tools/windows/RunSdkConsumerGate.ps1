@@ -78,6 +78,7 @@ $consumerTarget = if($isDesktopBootstrapConsumer) {
 $consumerExecutableName = "$consumerTarget.exe"
 $verificationScript = Join-Path $sourceDirectory "cmake/VerifyInstalledTinaSdkHeaders.cmake"
 $relocationVerificationScript = Join-Path $sourceDirectory "cmake/VerifyRelocatedTinaSdkPackage.cmake"
+$versionVerificationScript = Join-Path $sourceDirectory "cmake/VerifyTinaSdkPackageVersion.cmake"
 $generator = Get-CMakeCacheValue "CMAKE_GENERATOR"
 $generatorPlatform = Get-CMakeCacheValue "CMAKE_GENERATOR_PLATFORM"
 $toolchainFile = Get-CMakeCacheValue "CMAKE_TOOLCHAIN_FILE"
@@ -127,6 +128,17 @@ $audioMiniaudioEnabled = (Get-CMakeCacheValue "TINA_BUILD_AUDIO_MINIAUDIO") -eq 
 & cmake "-DTINA_SDK_INCLUDE_DIR=$($installStagingPrefix -replace '\\', '/')/include" `
     "-DTINA_EXPECT_AUDIO_MINIAUDIO=$audioMiniaudioEnabled" -P $verificationScript
 if($LASTEXITCODE -ne 0) { throw "Installed Tina SDK header verification failed with exit code $LASTEXITCODE" }
+
+$versionFiles = @(
+    Get-ChildItem -LiteralPath $installStagingPrefix -Filter "TinaConfigVersion.cmake" `
+        -File -Recurse -ErrorAction Stop
+)
+if($versionFiles.Count -ne 1) {
+    throw "Expected exactly one installed TinaConfigVersion.cmake, found $($versionFiles.Count)"
+}
+& cmake "-DTINA_SDK_VERSION_FILE=$($versionFiles[0].FullName -replace '\\', '/')" `
+    -P $versionVerificationScript
+if($LASTEXITCODE -ne 0) { throw "Tina SDK strict exact-version verification failed with exit code $LASTEXITCODE" }
 
 Move-Item -LiteralPath $installStagingPrefix -Destination $installPrefix
 if(Test-Path -LiteralPath $installStagingPrefix) {

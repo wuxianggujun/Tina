@@ -1,11 +1,13 @@
 #include <tina/asset/CatalogCook.hpp>
 #include <tina/asset/CatalogPackage.hpp>
+#include <tina/asset_format/EnvironmentMapPayload.hpp>
 #include <tina/asset_format/PrefabPayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
 #include <tina/core/id/AssetId.hpp>
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <memory_resource>
 #include <string>
@@ -116,6 +118,50 @@ TEST(TypedPayloadValidationTests, RejectsRawTextureWhenTypedRequired)
     openConfig.validation.verifyTypedPayload = false;
     auto catalogRaw = openCatalogPackage(toUtf8(root), openConfig);
     ASSERT_TRUE(catalogRaw.has_value()) << catalogRaw.error().message;
+
+    std::filesystem::remove_all(root, ec);
+}
+
+TEST(TypedPayloadValidationTests, RejectsMalformedEnvironmentMapWhenTypedRequired)
+{
+    std::pmr::unsynchronized_pool_resource memory;
+    const auto environmentMapId = *Core::AssetId::fromBytes(idBytes(9U));
+    CatalogCookRequest request{.targetPlatform = AssetFormat::TargetPlatform::WindowsX64};
+    request.assets.push_back(CatalogCookAssetSpec{
+        .assetKind = AssetFormat::AssetKind::EnvironmentMap,
+        .assetId = environmentMapId,
+        .assetTypeVersion = AssetFormat::EnvironmentMapWire::SchemaVersion,
+        .payload = std::vector<std::byte>(AssetFormat::EnvironmentMapWire::HeaderBytes, std::byte{0}),
+    });
+
+    const auto root = std::filesystem::temp_directory_path() / "tina_typed_validate_environment_map_bad";
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+    ASSERT_TRUE(cookAndPublishCatalogPackage(toUtf8(root), request).has_value());
+
+    auto catalog = openCatalogPackage(
+        toUtf8(root),
+        CatalogPackageOpenConfig{
+            .manifest = CatalogFileLoadConfig{.catalog = CatalogConfig{.maxEntries = 8,
+                                                                        .maxDependencies = 8,
+                                                                        .maxDependenciesPerAsset = 4,
+                                                                        .memoryResource = &memory}},
+            .validateOnOpen = true,
+            .validation = CatalogPackageValidationConfig{
+                .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
+                .verifyContent = true,
+                .verifyTypedPayload = true,
+            },
+        });
+    ASSERT_FALSE(catalog.has_value());
+    ASSERT_FALSE(catalog.error().message.empty());
+    const auto typedContext = std::find_if(
+        catalog.error().context.begin(), catalog.error().context.end(),
+        [](const Core::ErrorContext& context) {
+            return context.operation == "validateCatalogPackageOnDisk";
+        });
+    ASSERT_NE(typedContext, catalog.error().context.end());
+    EXPECT_EQ(typedContext->detail, "typedEnvironmentMap");
 
     std::filesystem::remove_all(root, ec);
 }

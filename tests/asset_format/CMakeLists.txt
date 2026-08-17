@@ -14,6 +14,7 @@ set(TINA_ASSET_FORMAT_TEST_SOURCES
     TextureSpritePayloadTests.cpp
     TileMapTilesetPayloadTests.cpp
     TileMapChunkPayloadTests.cpp
+    TypedPayloadMalformedCorpusTests.cpp
     World2DSnapshotTests.cpp
     header_isolation/AssetFormatErrorsHeader.cpp
     header_isolation/AssetFormatHeader.cpp

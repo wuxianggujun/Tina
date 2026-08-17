@@ -199,6 +199,9 @@ normalizeUIContextCapacityConfig(UIContextCapacityConfig config)
         .textByteCapacity = config.textByteCapacity == 0
                                 ? UIContextCapacityConfig::DefaultTextByteCapacity
                                 : config.textByteCapacity,
+        .textEditVisualLineCapacity = config.textEditVisualLineCapacity == 0
+                                          ? UIContextCapacityConfig::DefaultTextEditVisualLineCapacity
+                                          : config.textEditVisualLineCapacity,
         .styleClassCapacity = config.styleClassCapacity,
         .styleTokenCapacity = config.styleTokenCapacity,
         .styleRuleCapacity = config.styleRuleCapacity,
@@ -211,6 +214,22 @@ normalizeUIContextCapacityConfig(UIContextCapacityConfig config)
         .motionTrackCapacity = config.motionTrackCapacity == 0
                                    ? UIContextCapacityConfig::DefaultMotionTrackCapacity
                                    : config.motionTrackCapacity,
+        .timelineCapacity = config.timelineCapacity == 0
+                                ? UIContextCapacityConfig::DefaultTimelineCapacity
+                                : config.timelineCapacity,
+        .timelineTrackCapacity = config.timelineTrackCapacity == 0
+                                     ? UIContextCapacityConfig::DefaultTimelineTrackCapacity
+                                     : config.timelineTrackCapacity,
+        .timelineKeyframeCapacity = config.timelineKeyframeCapacity == 0
+                                        ? UIContextCapacityConfig::DefaultTimelineKeyframeCapacity
+                                        : config.timelineKeyframeCapacity,
+        .activeTimelineCapacity = config.activeTimelineCapacity == 0
+                                      ? (std::min)(
+                                            UIContextCapacityConfig::DefaultActiveTimelineCapacity,
+                                            config.timelineCapacity == 0
+                                                ? UIContextCapacityConfig::DefaultTimelineCapacity
+                                                : config.timelineCapacity)
+                                      : config.activeTimelineCapacity,
         .flowLayerCapacity = config.flowLayerCapacity == 0
                                  ? (std::min)(UIContextCapacityConfig::DefaultFlowLayerCapacity,
                                               config.nodeCapacity)
@@ -261,6 +280,14 @@ Core::Result<UIImageContent> normalizeImageContent(UIImageContent content)
     return content;
 }
 
+bool isValidLogicalCornerRadii(const UILogicalCornerRadii& radii) noexcept
+{
+    return std::isfinite(radii.topLeft) && radii.topLeft >= 0.0F &&
+           std::isfinite(radii.topRight) && radii.topRight >= 0.0F &&
+           std::isfinite(radii.bottomRight) && radii.bottomRight >= 0.0F &&
+           std::isfinite(radii.bottomLeft) && radii.bottomLeft >= 0.0F;
+}
+
 UIBoxPaint normalizeBoxPaint(UIBoxPaint paint) noexcept
 {
     const auto clearNonRectChrome = [&paint]() noexcept {
@@ -270,7 +297,7 @@ UIBoxPaint normalizeBoxPaint(UIBoxPaint paint) noexcept
         paint.shadow = {};
         paint.shadowOffsetX = 0.0F;
         paint.shadowOffsetY = 0.0F;
-        paint.cornerRadius = 0.0F;
+        paint.cornerRadii = {};
     };
     const auto clearPrimitiveGeometry = [&paint]() noexcept {
         paint.primitive = UIBoxPrimitiveKind::Rectangle;
@@ -358,10 +385,17 @@ UIBoxPaint normalizeBoxPaint(UIBoxPaint paint) noexcept
         paint.shadowOffsetX = 0.0F;
         paint.shadowOffsetY = 0.0F;
     }
-    if (!(std::isfinite(paint.cornerRadius) && paint.cornerRadius > 0.0F))
-    {
-        paint.cornerRadius = 0.0F;
-    }
+    const auto normalizeCornerRadius = [](float radius) noexcept {
+        return std::isfinite(radius) && radius > 0.0F
+                   ? normalizeFloat(radius)
+                   : 0.0F;
+    };
+    paint.cornerRadii = {
+        .topLeft = normalizeCornerRadius(paint.cornerRadii.topLeft),
+        .topRight = normalizeCornerRadius(paint.cornerRadii.topRight),
+        .bottomRight = normalizeCornerRadius(paint.cornerRadii.bottomRight),
+        .bottomLeft = normalizeCornerRadius(paint.cornerRadii.bottomLeft),
+    };
     return paint;
 }
 

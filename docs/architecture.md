@@ -265,29 +265,38 @@ dead zone、可选速度、viewport/world bounds 更新 previous/current simulat
 ## 当前 UI 边界
 
 当前内建 Element kind 包括 `Root`、`Panel`、`Modal`、`Label`、`Button`、`Checkbox`、`Slider`、`ProgressBar`、
-`RadioButton`、单行 `TextEdit`、`ScrollView`、`Dropdown`/`Popup`/`DropdownItem`，以及虚拟化
-`ListView`/`TreeView`。UI-004 的 Focus Scope、显式 focus、Modal barrier/焦点恢复与持久 Pointer Capture
-已经完成；UI-005 的滚动、弹出组合控件与固定 row pool 集合控件也已经完成。
+`RadioButton`、`TextEdit`（默认单行；可通过 `UITextEditMultilineConfig` 启用多行）、`ScrollView`、
+`Dropdown`/`Popup`/`DropdownItem`，以及虚拟化 `ListView`/`TreeView`。UI-004 的 Focus Scope、显式 focus、
+Modal barrier/焦点恢复与持久 Pointer Capture 已经完成；UI-005 的滚动、弹出组合控件与固定 row pool
+集合控件也已经完成。
 
 业务扩展当前以 Element 组合为主：第三方可组合 retained 子树、布局、Semantics、StyleRole/局部 paint、
 Image/Icon content、Canvas Image/NineSlice 与现有 callback，并可在首个 retained node 前注册 StyleClass/
-ColorToken、安装 node-local literal 或 token-backed BoxFill stylesheet；但不能注册 Widget subclass、新
-Behavior、通用 selector、运行期 token 更新、Motion 或 GPU paint callback。图片 retained tree 只保存
+ColorToken、安装 node-local literal 或 token-backed BoxFill stylesheet，并可使用运行期 ColorToken 更新与
+fixed-capacity direct/timeline Motion；但不能注册 Widget subclass、新 Behavior、通用 selector 或 GPU paint
+callback。图片 retained tree 只保存
 AssetId/geometry/tint/sampling metadata；
 Runtime root-scoped resolver 在 frame packet 构建时按 `(root, AssetId)` 去重并通过通用 Texture2D ref + pin
-交付 RGBA ImageQuad，NineSlice 在 committed paint 中原子展开1..9个相同 command。Button 已有即时
-hover/pressed/focus/disabled 反馈，尚无时间插值动画；`makeSliderElement()` 的
+交付 RGBA ImageQuad，NineSlice 在 committed paint 中原子展开1..9个相同 command。Button 默认仍即时切换
+hover/pressed/focus/disabled 反馈，也可通过既有 paint-only transition/timeline 产生时间插值；`makeSliderElement()` 的
 Focusable/Focus semantics 已与私有 keyboard-focus trait 对齐，Slider 可参与 Tab/空间导航与显式焦点；
 `UI-STATE-FEEDBACK` 的 Dark/Light 产品视觉证据已完成。RangeInput 通过独立 capability command 在 focused
 Slider 上消费 Arrow/D-pad 调值，不复用通用空间焦点状态机。Image、Component 与
-StyleClass/pseudo-state、ColorToken reverse-dependency 运行期更新、stylesheet imageTint 与 paint-only Motion
-的产品/性能/契约切片均已落地；更广 Style 属性面、完整 keyframe timeline 与 layout animation 仍未开放，具体取舍见
+StyleClass/pseudo-state、ColorToken reverse-dependency 运行期更新、stylesheet imageTint、paint-only transition
+与 typed keyframe timeline 的产品/性能/契约切片均已落地。Timeline 源码还支持 bounded
+`LayoutWidth`/`LayoutHeight`/`LayoutOffset`，由唯一 commit pipeline 从同一 sample 原子发布 Layout/Hit/Paint/
+Semantics；更广 Style 属性面、layout property 与高级 playback 仍未开放，具体取舍见
 [UI 框架设计](ui-framework.md)。
 
 文本使用严格 UTF-8；MSVC target 强制 `/utf-8`。可选 FreeType 负责 rasterization，UI/Render 通过 R8
 Glyph atlas 与后端无关 DisplayList 连接。ProgressBar 是非交互的 determinate range/value 控件；
-RadioButton 按直接父节点形成互斥组；TextEdit 按 Unicode scalar 保存 selection/caret，并支持 committed
-text 与 IME preedit 首切片。多行编辑、grapheme、BiDi/复杂 shaping 与完整候选窗定位仍未完成。
+RadioButton 按直接父节点形成互斥组。TextEdit 默认单行；启用 `UITextEditMultilineConfig` 后支持 LF、soft-wrap、
+固定容量 visual rows、垂直滚动、二维 hit-test 与 Up/Down/Home/End。selection/caret 仍以 Unicode scalar
+offset 存储，但编辑、删除、导航和生成的位置会对齐无第三方依赖的 UAX #29 grapheme 子集。
+Windows GLFW 已把 committed caret 的 logical geometry 转为 DPI-scaled client pixels，并接入 IMM32
+candidate/composition placement；失焦、隐藏、最小化或无效几何会清除提示并恢复 IMM32 默认策略。
+BiDi/复杂 shaping、Linux 原生 XIM/Wayland preedit/candidate placement，以及 Windows 真机 IME 跟随候选窗的
+人工金标仍由 `TEXT-001` 跟踪。
 
 后端无关 `UIAccessibilityAction` seam 已支持 Focus、Invoke、Toggle、SetRangeValue 与 SetTextValue，
 并在 owner thread 保留正常控件 callback/事务语义。可选 Windows UIA 私有 adapter 与 Host HWND 桥接

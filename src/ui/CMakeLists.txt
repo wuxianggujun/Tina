@@ -56,6 +56,8 @@ add_library(tina_ui STATIC
     detail/UICanvasCommandStorage.cpp
     detail/UIImageContentStorage.hpp
     detail/UIImageContentStorage.cpp
+    detail/UIKeyframeTimelineStorage.hpp
+    detail/UIKeyframeTimelineStorage.cpp
     detail/UIMotionTrackStorage.hpp
     detail/UIMotionTrackStorage.cpp
     detail/UICommandPressLatch.hpp
@@ -106,6 +108,9 @@ add_library(tina_ui STATIC
     detail/UIVirtualCollectionLayout.hpp
     detail/UITextStorage.hpp
     detail/UITextStorage.cpp
+    detail/UIGraphemeBreak.hpp
+    detail/UIGraphemeBreak.cpp
+    detail/UIGraphemeBreakData.inc
     detail/UITextEditModel.hpp
     detail/UITextEditModel.cpp
     detail/UITextEditPaintEmitter.hpp

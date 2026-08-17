@@ -73,7 +73,7 @@ private Render backend, currently bgfx
 | Style/Theme | `include/tina/ui/UIStyle.hpp`、`UITheme.hpp` 与属性 override/reset |
 | Paint | `include/tina/ui/UIImageSource.hpp`、`UIImage.hpp` 与 `UIPaint.hpp`；Rectangle/Ellipse/Line box paint、Image content 和 Canvas `SolidRect`/`SolidEllipse`/`SolidLine`/`Image`/`NineSlice` |
 | Render bridge | `include/tina/integration/UIRenderDisplayList.hpp` |
-| DisplayList | `include/tina/render/UIDisplayList.hpp`；当前有 `SolidQuad`、`SolidEllipse`、`Glyph` 与 `ImageQuad`；Line 在 bridge 投影为带 exact 四顶点的 `SolidQuad` |
+| DisplayList | `include/tina/render/UIDisplayList.hpp`；当前有 `SolidQuad`、`SolidEllipse`、`Glyph` 与 `ImageQuad`；`SolidQuad` 使用 `UIPixelCornerRadii`，Line 在 bridge 投影为带 exact 四顶点的 `SolidQuad` |
 | Runtime 帧序 | `src/runtime/EngineHost.cpp`；`updateUI()` 后统一 `commitForFrame()` |
 
 ### Element 不是传统 Widget 对象
@@ -108,9 +108,28 @@ indicator，但不复制 RadioButton 的 selection、Focus、Keyboard/Gamepad �
 paint、DisplayList clip 与 backend scissor 继续消费同一条既有数据链，不建立第二条渲染路径。
 
 该属性不改变 `Visible/Hidden/Collapsed`、tree/paint/focus/semantics 顺序或 authored semantics
-`worldRect`，也不额外改变 owner 自身的 paint clip。它不是 rounded/stencil clip；`cornerRadius` 仍只影响
-Rectangle 自身 chrome。ScrollView/ListView/TreeView 的 viewport clip 继续复用同一 descendant clip 传播和
-失败原子 publication 契约；viewport-level Popup 继续使用专用 anchor/clip policy。
+`worldRect`，也不额外改变 owner 自身的 paint clip。它不是 rounded/stencil clip；`cornerRadii` 仍只影响
+Rectangle 自身 chrome，`UI-PAINT-002-A` 的四角 authoring 也不会改变该边界。ScrollView/ListView/TreeView
+的 viewport clip 继续复用同一 descendant clip 传播和失败原子 publication 契约；viewport-level Popup
+继续使用专用 anchor/clip policy。
+
+### Retained per-corner authoring
+
+`UI-PAINT-002-A` 已关闭 box chrome 的逐角 authoring 缺口。产品 consumer 是 Tina Studio Compact /
+UI Showcase 的相邻 Segmented/header surface：仅外侧角为圆角、共享边为方角，并以 Canvas `SolidRect`
+preview 展示四个不同 logical radius。它必须沿唯一
+`UIBoxPaint/Canvas -> UICommittedPaintEntry -> UI-Render bridge -> UIPixelCornerRadii` 链路传播，不建立平行
+paint snapshot 或 backend command。
+
+容量与失败语义沿用现有事务：四角 inline 存储，不增加 capacity；Canvas `SolidRect` 仍消耗一个 command
+slot/paint entry，box chrome 的 shadow/fill/border entry 数不增加。任何角为 NaN/Inf/负值时 descriptor、setter
+或 Canvas assign fail-closed；dirty/paint/DisplayList 预检失败保留旧 retained/committed 状态，
+backend 无副作用。超出目标尺寸的有效值逐角 clamp。rounded/stencil descendant clip、backdrop/blur、
+per-corner Motion、新 shader/material 与跨 GPU/DPI golden 不属于 A。
+
+既有 `UIAnimatableProperty::CornerRadius` 保持 uniform scalar。direct transition 只有在当前 authored 四角一致或已有
+scalar presentation owner 时才有无歧义起点；否则返回 `InvalidStyle`。timeline 的 keyframe0 是显式 authoring，
+因此允许从非 uniform retained radii 启动，首帧和后续 presentation 都把 scalar 写成四个相同角。
 
 ### 一帧如何流动
 
@@ -130,6 +149,20 @@ Rectangle 自身 chrome。ScrollView/ListView/TreeView 的 viewport clip 继续�
 
 关键点是输入不会为了“看到刚修改的树”而隐式触发 layout。本帧 route 的 listener/callback 副作用也不会
 因为后续 commit 失败而重放。这个边界比普通桌面 UI 更严格，但很适合确定性的游戏 Runtime。
+
+### TextEdit 与 IME
+
+TextEdit 默认是单行；在 `UIElementDescriptor::textEditMultiline` 设置
+`UITextEditMultilineConfig::enabled` 后，LF、soft-wrap、固定容量 visual rows、垂直滚动、二维
+hit-test 以及 Up/Down/Home/End 共享同一份 committed layout。selection/caret 的存储仍使用 Unicode
+scalar offset，但编辑、删除、导航和替换位置会对齐无第三方依赖的 UAX #29 grapheme 子集；BiDi 与复杂
+shaping 暂不进入契约。`UIContext::committedTextInputCaretRect()` 复制最后一次成功 paint publication
+中的 logical caret，Runtime coordinator 再交给 Platform backend。
+
+Windows GLFW adapter 将该 geometry 按当前 DPI 转成 IMM32 所需的 client pixels，并在 composition/candidate
+placement 无效、失焦、隐藏或最小化时清除旧 hint；Headless 对非空 placement 返回不支持。Linux 当前只
+保证 committed text，原生 XIM/Wayland preedit/candidate placement 及 Windows 真机微软拼音人工证据仍由
+`TEXT-001` 跟踪。
 
 ## Button 完整链路
 
@@ -168,9 +201,9 @@ UIA Invoke
 
 ### 3. 当前视觉反馈
 
-Button 现在已经有 hover、focused、pressed、disabled 反馈。pressed 会交换亮/暗 border 并将 shadow offset
-设为零，表现出按下深度。这些状态直接选择新的 paint 值，不存在 duration、easing 或插值，所以它是
-“点击效果”，还不是“点击动画”。
+Button 现在已经有 hover、focused、pressed、disabled 反馈。未配置 Motion 时，pressed 会交换亮/暗 border
+并将 shadow offset 设为零，表现出按下深度；配置 direct/Style transition 后可对 paint 属性插值，typed
+timeline 还可在白名单内原子发布 layout/hit/paint。默认行为仍即时，不因动画延迟 action callback 或节点销毁。
 
 第一版动画建议：
 
@@ -202,11 +235,12 @@ Button 现在已经有 hover、focused、pressed、disabled 反馈。pressed 会
 
 ### 还不可以
 
-- 依赖正式 ABI/兼容策略；AudioMiniaudio 安装 adapter、Windows/Linux moved-prefix consumer 与
-  Ubuntu producer → Debian consumer 跨发行版 gate 已可用；
+- 把 package consumer 证据当作正式 supported ABI tuple；ADR 0024 与 pre-1.0 strict exact-version gate 已落地，但
+  previous-release object/API/symbol baseline 仍是 release 进入条件；
 - 注册任意新 Widget class 或 Behavior state machine；
 - 从 UI 持有 AssetHandle/Lease、FrameResourceRef 或 texture/bgfx handle；
-- 声明完整 timeline/keyframe 或 layout animation（paint-only color/opacity/radius/visual-offset transition 已可用）；
+- 声明白名单外的 layout animation，或 loop/seek/pause/repeat/yoyo/completion callback、spring/inertia 等高级
+  playback；direct/Style transition 仍严格只覆盖 paint-only color/opacity/radius/visual-offset；
 - 传入任意 GPU/paint callback。
 
 Activate/Toggle/RangeInput/TextInput/Scroll/Select 已从 concrete kind 拆到独立 fixed-capacity side store；TextInput/Scroll/Select resolver
@@ -481,11 +515,18 @@ struct UIImagePixelInsets final {
     u32 bottom{};
 };
 
+struct UILogicalCornerRadii final {
+    float topLeft = 0.0F;
+    float topRight = 0.0F;
+    float bottomRight = 0.0F;
+    float bottomLeft = 0.0F;
+};
+
 struct UICanvasCommand final {
     UICanvasCommandKind kind = UICanvasCommandKind::SolidRect;
     UILogicalRect bounds{};
     UIStraightSrgba8Color color{}; // Solid fill or image tint.
-    float cornerRadius = 0.0F;     // SolidRect only.
+    UILogicalCornerRadii cornerRadii{}; // SolidRect only.
     UIImageSource imageSource{};
     UIImagePixelInsets imageSourceInsets{};
     UIEdgeSpacing imageDestinationInsets{};
@@ -520,7 +561,8 @@ struct UICanvasCommand final {
 `UIBoxPaint::primitive` 当前支持 Rectangle、Ellipse 与 Line。Ellipse 使用 Element layout rect，零 stroke
 表示填充，正 stroke 表示向内描边；Line 使用 Element-local 起止点和 logical thickness。Canvas 的
 `SolidEllipse`/`SolidLine` 使用相同语义并复制进固定容量 command storage。非法、退化或非正厚度 Line
-fail closed，不回退成覆盖整个 Element 的矩形。
+fail closed，不回退成覆盖整个 Element 的矩形。box/Canvas `SolidRect` 只保留 canonical 四角 logical 值，
+`UILogicalCornerRadii::uniform()` 与 `makeSolidBox(color, radius)` 仅负责构造四个相同角。
 
 Line committed paint 保存 logical world endpoints、logical thickness 与覆盖实际线宽的 conservative envelope。
 UI-Render bridge 先在 logical 空间构造法向四角，再分别应用 framebuffer `scaleX/scaleY`，因此非等比 DPI
@@ -600,8 +642,8 @@ authoring metadata 非法时 descriptor/paint candidate 失败且旧 committed s
 DisplayList/frame-resource/pin 容量不足在 backend 副作用前让本帧构建原子失败。产品 fallback/strict policy
 尚未开放，不能把它写成现有 root API。
 
-bgfx 的 solid-shape/Glyph fragment shader 采样 R8 `.r` coverage，并按每顶点 shape 参数计算 Rectangle、
-RoundedRect 或 Ellipse coverage；`ImageQuad` 使用独立 RGBA sampling shader mode/program。command 保存
+bgfx 的 solid-shape/Glyph fragment shader 采样 R8 `.r` coverage，并按每顶点 shape 参数及四角像素半径计算
+Rectangle、RoundedRect 或 Ellipse coverage；`ImageQuad` 使用独立 RGBA sampling shader mode/program。command 保存
 bounds/可选 exact vertices/shape 参数/UV/tint/clip，batch 保存
 packet-local Texture2D ref 与 sampling。batch key 至少包含 `shader mode + texture ref + clip + sampling`，只合并
 paint-order 中相邻兼容命令，不为减少 draw call 全局重排 UI。cooked RGBA8 仍按 straight alpha 采样，
@@ -648,6 +690,9 @@ enum class UIAnimatableProperty : u16 {
     Opacity,
     CornerRadius,
     VisualOffset,
+    LayoutWidth,
+    LayoutHeight,
+    LayoutOffset,
 };
 
 struct UITransitionSpec final {
@@ -659,8 +704,11 @@ struct UITransitionSpec final {
 ```
 
 Runtime 将 monotonic time、delta 和 reduced-motion 传给每窗口 UI commit coordinator。每条 active
-transition 保存 node/property/start/target/time，状态再次变化时从当前 presentation value retarget。首版
-不插值布局属性，不改变 hit/semantics，不延迟 callback。
+transition 保存 node/property/start/target/time，状态再次变化时从当前 presentation value retarget。direct
+与 Style transition 仍不插值布局属性、不改变 hit/semantics、不延迟 callback；typed keyframe timeline 额外
+允许 `LayoutWidth`、`LayoutHeight`、`LayoutOffset` 三项 bounded whitelist。layout/mixed timeline 的 sample
+先形成 candidate，再从同一 geometry 构建 Layout/Hit/Paint/Semantics；任一 builder 失败时不发布部分 snapshot
+或 presentation，下一次按绝对时间重试。
 
 已落地的 stylesheet `BackgroundColor` transition 遵守 ADR 0023：匹配 stateful BoxFill candidate 的节点
 在 Style 绑定阶段持久预留 track；运行期启用会先对已有节点做原子容量预检，pseudo-state 变化只激活
@@ -686,13 +734,16 @@ Image/Icon/NineSlice 实际展开的 image quad 数，`U` 为本帧唯一 `(reso
 | Component build | 目标为创建期 `O(C)`；node/text/canvas/behavior reservation 分别计数，commit 后只留下 Element 与 side-state slot | retained wrapper object、每节点 heap/vtable、每帧重放 recipe |
 | 单节点 Style resolve / ColorToken update | node-local state resolve 为 `O(R)` 的 `role + fixed class set + state mask` bucket lookup；token update 经固定 reverse-dependency 链为 `O(affected links)`，并以四个 `lastStyleTokenUpdate*` counter 记录依赖链工作量 | descendant/ancestor selector、运行时字符串 CSS、局部 state 扫描整棵树 |
 | Pointer hit/route | 当前 point query 最坏反向扫描 `O(H)` 个 committed hit entry；找到 target 后 route 按 ancestry depth/listener 数工作，且不 layout、不分配 | 把当前 point query 宣称为常数时间；没有 workload 证据就提前引入复杂空间索引 |
-| active Motion | sample 目标为 `O(M)`，只遍历 active track；在当前 paint compiler 下，每个动画帧还必须如实计入 `O(N + P)` publication 成本 | 无 active track 仍使 Paint dirty、每帧扫描全部节点寻找动画、插值 Layout/Hit 属性 |
+| active Motion | direct transition sample 为 `O(M)`；keyframe timeline 只遍历 compact active-index 的 timeline/track 与实际 segment，分别报告 sampled timeline/track/segment；paint timeline 每帧发布 Paint，layout timeline 每帧以一次事务发布 Layout/Hit/Paint，definition high-water 独立于 active set | 无 active track 仍使 Paint dirty、扫描全部 definition/node 寻找动画、部分发布 layout/hit/paint、白名单外 layout 插值 |
 | Image/Icon/NineSlice | paint 展开为 `O(Q)`，资源工作为 `O(U)`；Image/Icon 均为 1 quad，NineSlice 每个命令最多 9 quad，完整容量预检后一次发布 | UI commit 同步 Asset I/O、每 quad 重复 resolve/pin、未 pin 的 GPU handle、容量不足时截断半个 NineSlice、为 batch 全局重排 paint order |
 | 虚拟 List/Tree | warmup 后按固定 row pool/可见行工作，不按 100k logical item 全量 materialize | 滚动时增长 row storage 或遍历全部 logical item |
 
 当前 paint candidate 的线性 publication 是已知事实，不是由 Style/Component 新设计新增的隐藏成本。Motion
-会把原本偶发的 paint commit 变成连续多帧，因此 `UI-MOTION-001` 不能只证明动画正确，还必须同时输出
-`N/P/M` 与 paint publication 计数；若固定 workload 超出受审预算，应先优化 paint candidate 构建，再扩大
+会把原本偶发的 paint commit 变成连续多帧，因此 `ui_motion_v1` / `ui_motion_timeline_v1` /
+`ui_motion_layout_v1` 不能只证明动画正确，还必须同时输出 `N/P/M`、timeline/track/keyframe/active-index
+high-water、sampled segment 与 publication；layout workload 额外证明每个 active sample 只发生一次原子
+Layout/Hit/Paint publication；
+若固定 workload 超出受审预算，应先优化 paint candidate 构建，再扩大
 默认 Motion 容量，不能通过减少工作、跳过原子 publication 或放宽 checksum 掩盖问题。
 
 即使 UI tree 是 clean，Image 的 packet-local ref/pin 也不能跨帧缓存，因此 Render bridge 每帧仍支付
@@ -734,6 +785,8 @@ counter、容量/分配不变量可以立即作为确定性门禁：
 | `ui_style_state_v1` | 4096 nodes、256 rules、每节点最多 4 classes | inspected/resolved nodes、candidate rules、bucket/class-link high-water；单节点 state change 不 layout/hit/全树 resolve，clean commit 为零 |
 | `ui_image_nineslice_v1` | 256 Image + 232 Icon + 512 full NineSlice、64 unique `(resolver scope, AssetId)` | 每 build `Q=5096/U=64/B=1000`；64 resolve hit、5032 cache dedupe、64 pin acquire/release；错误计数与 allocation delta 为 0，high-water/checksum 稳定 |
 | `ui_motion_v1` | 4096 nodes、active tracks 分别为 0/64/1024、固定 clock | sampled=`M`、active/high-water；0 active 时 motion work/额外 dirty 为 0；layout/hit rebuild 为 0 |
+| `ui_motion_timeline_v1` | 4096 nodes、256 retained definition/1024 track/4096 keyframe，seed 播放 0/16/256 active timeline | full definition 与 compact active-index high-water、sampled timeline/track/segment；paint-only sample 不重建 Layout/Hit，allocation delta 为 0 |
+| `ui_motion_layout_v1` | 4096 Overlay nodes、同样的 retained definition 容量与 seed | active sample 的 layout track 等于 sampled track，且每 iteration 恰好一次 Layout/Hit/Paint publication；active=0 不 rebuild，failure/allocation delta 为 0 |
 
 绝对毫秒阈值、median/MAD 与受审机器 baseline 仍由 `PERF-002` 冻结；开发机和共享 CI 不得用一次墙钟
 结果宣称“无性能回归”。详细测量口径见[性能与内存](performance-memory.md)。
@@ -772,14 +825,19 @@ counter、容量/分配不变量可以立即作为确定性门禁：
    （`UIStylePropertyKind` + Context 分发）、Visual ROI 门禁 `RunUiStyleVisualGate.ps1` 已落地；
 7. `UI-MOTION-001` Done：paint-only transition（color/opacity/radius/visual-offset）、Style BackgroundColor
    persistent reservation/activation + `ui_motion_v1`。
+8. `UI-MOTION-002` Done：ADR 0026 Accepted；Context-owned typed keyframe timeline、generation/owner identity、
+   四类固定容量、retarget/reduced-motion/失败原子性、Runtime facade、paint-only `ui_motion_timeline_v1`，以及
+   `LayoutWidth`/`LayoutHeight`/`LayoutOffset` 的原子 Layout/Hit/Paint `ui_motion_layout_v1` 均已接线。
+   2026-08-16 定向 gate 为 UI 28/28、Runtime facade 1/1、bench unit 10/10，两个 workload 的 seed 0/1/2
+   均以 `warmup=30,samples=120` 通过；墙钟仍为 provisional，固定机 hard gate 由 `PERF-002` 跟踪。
 
 独立或后置 lane：
 
 - `UI-RANGE-INPUT-KEYBOARD` 已关闭：它只依赖 Slider Focusable 子切片与 Runtime input route，不依赖
   ADR 0023；capability-shaped 调值 command 与 fixed-capacity exact-control Down/Up latch 不复用空间焦点状态；
 - `SDK-001` 的 GameSDK、PlatformGlfw、DesktopBootstrap/RenderBgfx、UIFreetype、AudioMiniaudio 安装、
-  Windows/Linux moved-prefix 与 Ubuntu producer → Debian consumer gate 已落地，待正式 ABI/兼容策略；此后每个新增公共 UI 切片同步增加
-  consumer 覆盖；
+  Windows/Linux moved-prefix 与 Ubuntu producer → Debian consumer gate 已落地；ADR 0024 已 Accepted，
+  strict exact-version 正反 probe（含 tweak/range 拒绝）已接入。正式 supported tuple 的 baseline/object probe 独立跟踪；此后每个新增公共 UI 切片同步增加 consumer 覆盖；
 - `UI-FLOW-001` Done：首切片复用 retained node，提供固定容量
   Layer/Screen 注册、push/pop/replace、栈顶 publication、失败原子性与生命周期回收；第二切片已增加
   topmost Screen 的 Back callback、Dropdown-first Escape/Gamepad East 路由与 Down/Up gameplay suppression；

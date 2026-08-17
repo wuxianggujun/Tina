@@ -267,6 +267,14 @@ Core::Status validateCatalogPackageOnDisk(std::string_view catalogRootUtf8, cons
                     {
                         return Core::failure(withEntryContext(std::move(typed.error()), *entry, "typedMaterial"));
                     }
+                } else if (entry->assetKind == AssetFormat::AssetKind::EnvironmentMap)
+                {
+                    auto typed = parseEnvironmentMapFromCooked(*asset);
+                    if (!typed)
+                    {
+                        return Core::failure(
+                            withEntryContext(std::move(typed.error()), *entry, "typedEnvironmentMap"));
+                    }
                 } else if (entry->assetKind == AssetFormat::AssetKind::Prefab)
                 {
                     auto typed = parsePrefabFromCooked(*asset);

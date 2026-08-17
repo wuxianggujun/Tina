@@ -304,6 +304,27 @@ struct TextInputTransition final {
     std::string_view committedUtf8;
 };
 
+// Committed TextEdit caret geometry in window-logical client coordinates. The
+// Runtime publishes this as a placement hint after UI layout/paint commit; a
+// backend converts it to the native client-pixel space required by its IME.
+// Width may be zero for a point caret, height must be positive and all values
+// must be finite when a placement is published.
+struct TextInputCaretRect final {
+    double x = 0.0;
+    double y = 0.0;
+    double width = 0.0;
+    double height = 0.0;
+
+    auto operator<=>(const TextInputCaretRect&) const = default;
+};
+
+struct TextInputPlacement final {
+    WindowId window{};
+    TextInputCaretRect caret{};
+
+    auto operator<=>(const TextInputPlacement&) const = default;
+};
+
 enum class TextCompositionStage : u8 {
     Started,
     Updated,

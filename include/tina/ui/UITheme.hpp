@@ -138,7 +138,7 @@ struct UITheme final {
         .borderDark = theme.borderDark,
         .borderWidth = theme.panelBorderWidth,
     };
-    paint.cornerRadius = theme.panelCornerRadius;
+    paint.cornerRadii = UILogicalCornerRadii::uniform(theme.panelCornerRadius);
     if (elevation == UIElevation::Low) {
         paint.shadow = theme.shadow;
         paint.shadowOffsetX = theme.panelShadowOffsetX;
@@ -208,7 +208,7 @@ struct UIButtonChrome final {
     const UIStraightSrgba8Color fill =
         normalFill.alpha != 0 ? normalFill : scaleColorAlpha(theme.buttonNormal, 230);
     UIBoxPaint box = makePanelBoxPaint(theme, fill, UIElevation::None);
-    box.cornerRadius = theme.controlCornerRadius;
+    box.cornerRadii = UILogicalCornerRadii::uniform(theme.controlCornerRadius);
     box.borderWidth = 0.0F;
     return UIButtonChrome{
         .box = box,
@@ -234,7 +234,7 @@ struct UIButtonChrome final {
 {
     const UIStraightSrgba8Color fill = scaleColorAlpha(theme.surface2, 245);
     UIBoxPaint box = makePanelBoxPaint(theme, fill, UIElevation::None);
-    box.cornerRadius = theme.controlCornerRadius;
+    box.cornerRadii = UILogicalCornerRadii::uniform(theme.controlCornerRadius);
     box.borderWidth = 0.0F;
     return UIButtonChrome{
         .box = box,
@@ -351,7 +351,7 @@ struct UISegmentedButtonChrome final {
 {
     const UIStraightSrgba8Color base = scaleColorAlpha(theme.surface1, 90);
     UIBoxPaint box = makePanelBoxPaint(theme, base, UIElevation::None);
-    box.cornerRadius = theme.controlCornerRadius;
+    box.cornerRadii = UILogicalCornerRadii::uniform(theme.controlCornerRadius);
     return UISegmentedButtonChrome{
         .box = box,
         .radio =

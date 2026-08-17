@@ -29,6 +29,23 @@ namespace {
            worldRect.height > paint.borderWidth * 2.0F;
 }
 
+[[nodiscard]] bool hasRoundedCorners(const UILogicalCornerRadii& radii) noexcept
+{
+    return radii.topLeft > 0.0F || radii.topRight > 0.0F ||
+           radii.bottomRight > 0.0F || radii.bottomLeft > 0.0F;
+}
+
+[[nodiscard]] UILogicalCornerRadii insetCornerRadii(
+    const UILogicalCornerRadii& radii, float inset) noexcept
+{
+    return {
+        .topLeft = (std::max)(0.0F, radii.topLeft - inset),
+        .topRight = (std::max)(0.0F, radii.topRight - inset),
+        .bottomRight = (std::max)(0.0F, radii.bottomRight - inset),
+        .bottomLeft = (std::max)(0.0F, radii.bottomLeft - inset),
+    };
+}
+
 [[nodiscard]] UIStraightSrgba8Color roundedBorderColor(const UIBoxPaint& paint) noexcept
 {
     // Rounded chrome uses one outer ring. Prefer the bottom/right tone so
@@ -165,7 +182,7 @@ usize countBoxChromePaintEntries(const UIBoxPaint& paint,
     }
     usize count = hasDrawableShadow(paint, worldRect) ? 1U : 0U;
     const bool hasBorder = hasDrawableBorder(paint, worldRect);
-    if (paint.cornerRadius > 0.0F && hasResolvedFill && hasBorder)
+    if (hasRoundedCorners(paint.cornerRadii) && hasResolvedFill && hasBorder)
     {
         return count + 2U;
     }
@@ -250,13 +267,13 @@ void appendBoxChromePaints(std::pmr::vector<UICommittedPaintEntry>& output,
             .effectiveClip = effectiveClip,
             .paintOrdinal = nextPaintOrdinal,
             .solidFill = premultiply(paint.shadow),
-            .cornerRadius = paint.cornerRadius,
+            .cornerRadii = paint.cornerRadii,
         });
         ++nextPaintOrdinal;
     }
 
     const bool hasBorder = hasDrawableBorder(paint, worldRect);
-    if (paint.cornerRadius > 0.0F && !resolvedFill.isTransparent() && hasBorder)
+    if (hasRoundedCorners(paint.cornerRadii) && !resolvedFill.isTransparent() && hasBorder)
     {
         output.push_back(UICommittedPaintEntry{
             .node = node,
@@ -264,7 +281,7 @@ void appendBoxChromePaints(std::pmr::vector<UICommittedPaintEntry>& output,
             .effectiveClip = effectiveClip,
             .paintOrdinal = nextPaintOrdinal,
             .solidFill = premultiply(roundedBorderColor(paint)),
-            .cornerRadius = paint.cornerRadius,
+            .cornerRadii = paint.cornerRadii,
         });
         ++nextPaintOrdinal;
 
@@ -281,7 +298,7 @@ void appendBoxChromePaints(std::pmr::vector<UICommittedPaintEntry>& output,
             .effectiveClip = effectiveClip,
             .paintOrdinal = nextPaintOrdinal,
             .solidFill = resolvedFill,
-            .cornerRadius = (std::max)(0.0F, paint.cornerRadius - inset),
+            .cornerRadii = insetCornerRadii(paint.cornerRadii, inset),
         });
         ++nextPaintOrdinal;
         return;
@@ -295,7 +312,7 @@ void appendBoxChromePaints(std::pmr::vector<UICommittedPaintEntry>& output,
             .effectiveClip = effectiveClip,
             .paintOrdinal = nextPaintOrdinal,
             .solidFill = resolvedFill,
-            .cornerRadius = paint.cornerRadius,
+            .cornerRadii = paint.cornerRadii,
         });
         ++nextPaintOrdinal;
     }

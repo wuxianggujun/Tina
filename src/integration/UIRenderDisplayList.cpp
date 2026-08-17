@@ -45,6 +45,15 @@ struct PixelProjection final {
     return point.x == 0.0F && point.y == 0.0F;
 }
 
+[[nodiscard]] bool validLogicalCornerRadii(
+    const UI::UILogicalCornerRadii& radii) noexcept
+{
+    return std::isfinite(radii.topLeft) && radii.topLeft >= 0.0F &&
+           std::isfinite(radii.topRight) && radii.topRight >= 0.0F &&
+           std::isfinite(radii.bottomRight) && radii.bottomRight >= 0.0F &&
+           std::isfinite(radii.bottomLeft) && radii.bottomLeft >= 0.0F;
+}
+
 [[nodiscard]] bool validLinePaint(const UI::UICommittedPaintEntry& entry) noexcept
 {
     if (entry.kind != UI::UICommittedPaintKind::SolidLine)
@@ -52,7 +61,7 @@ struct PixelProjection final {
         return zeroPoint(entry.lineStart) && zeroPoint(entry.lineEnd) &&
                entry.lineThickness == 0.0F;
     }
-    if (entry.cornerRadius != 0.0F || entry.ellipseStrokeWidth != 0.0F ||
+    if (!entry.cornerRadii.isZero() || entry.ellipseStrokeWidth != 0.0F ||
         !std::isfinite(entry.lineStart.x) || !std::isfinite(entry.lineStart.y) ||
         !std::isfinite(entry.lineEnd.x) || !std::isfinite(entry.lineEnd.y) ||
         !std::isfinite(entry.lineThickness) || entry.lineThickness <= 0.0F ||
@@ -107,7 +116,7 @@ struct PixelProjection final {
     {
         return entry.ellipseStrokeWidth == 0.0F;
     }
-    return entry.cornerRadius == 0.0F &&
+    return entry.cornerRadii.isZero() &&
            std::isfinite(entry.ellipseStrokeWidth) &&
            entry.ellipseStrokeWidth >= 0.0F;
 }
@@ -183,11 +192,11 @@ struct PixelProjection final {
                                entry.kind == UI::UICommittedPaintKind::SolidLine ||
                                entry.kind == UI::UICommittedPaintKind::Glyph ||
                                entry.kind == UI::UICommittedPaintKind::Image;
-        if (!validKind || !std::isfinite(entry.cornerRadius) || entry.cornerRadius < 0.0F ||
-            (entry.kind != UI::UICommittedPaintKind::SolidQuad && entry.cornerRadius != 0.0F))
+        if (!validKind || !validLogicalCornerRadii(entry.cornerRadii) ||
+            (entry.kind != UI::UICommittedPaintKind::SolidQuad && !entry.cornerRadii.isZero()))
         {
             return invalidInput(
-                "Committed UI paint kind and corner radius must be valid");
+                "Committed UI paint kind and corner radii must be valid");
         }
         if (!validLinePaint(entry))
         {
@@ -640,6 +649,19 @@ struct ProjectedQuad final {
     return (std::min)(static_cast<float>(projected), maximum);
 }
 
+[[nodiscard]] Render::UIPixelCornerRadii projectCornerRadii(
+    const UI::UILogicalCornerRadii& logicalRadii,
+    const PixelProjection& projection,
+    const Render::UIPixelRect& bounds) noexcept
+{
+    return {
+        .topLeft = projectCornerRadius(logicalRadii.topLeft, projection, bounds),
+        .topRight = projectCornerRadius(logicalRadii.topRight, projection, bounds),
+        .bottomRight = projectCornerRadius(logicalRadii.bottomRight, projection, bounds),
+        .bottomLeft = projectCornerRadius(logicalRadii.bottomLeft, projection, bounds),
+    };
+}
+
 [[nodiscard]] float projectEllipseStrokeWidth(
     float logicalStrokeWidth,
     const PixelProjection& projection,
@@ -852,7 +874,8 @@ Core::Result<UIRenderDisplayListBuild> buildUIDisplayList(
                 .paintOrdinal = entry.paintOrdinal,
                 .bounds = boundsValue,
                 .color = color,
-                .cornerRadius = projectCornerRadius(entry.cornerRadius, *projection, boundsValue),
+                .cornerRadii = projectCornerRadii(
+                    entry.cornerRadii, *projection, boundsValue),
                 .vertices = explicitVertices,
                 .effectiveClip = submittedClip,
             });

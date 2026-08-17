@@ -57,7 +57,7 @@ TEST(UIThemeTest, PanelBoxPaintIncludesBorderAndOptionalShadow)
     EXPECT_EQ(flat.borderLight, theme.borderLight);
     EXPECT_EQ(flat.borderDark, theme.borderDark);
     EXPECT_EQ(flat.borderWidth, theme.panelBorderWidth);
-    EXPECT_EQ(flat.cornerRadius, theme.panelCornerRadius);
+    EXPECT_EQ(flat.cornerRadii, UI::UILogicalCornerRadii::uniform(theme.panelCornerRadius));
     EXPECT_EQ(flat.shadow.alpha, 0);
 
     constexpr UI::UIBoxPaint elevated =
@@ -229,7 +229,7 @@ TEST(UIThemeTest, FilledButtonChromeUsesFlatThemeTokens)
     EXPECT_EQ(chrome.label.color, theme.onAccent);
     EXPECT_EQ(chrome.box.shadow, theme.shadow);
     EXPECT_FLOAT_EQ(chrome.box.borderWidth, 0.0F);
-    EXPECT_EQ(chrome.box.cornerRadius, theme.controlCornerRadius);
+    EXPECT_EQ(chrome.box.cornerRadii, UI::UILogicalCornerRadii::uniform(theme.controlCornerRadius));
 }
 
 TEST(UIThemeTest, SelectionControlsUseThemeInteractionStateTokens)

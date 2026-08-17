@@ -104,9 +104,11 @@ consume/claim，ActionMapper 才生成 Simulation/Frame Action；world pointer �
 当前已有 retained tree、layout/hit/paint/semantics、Text/Glyph、Focus Scope/Modal/持久 Pointer Capture、
 ScrollView、Dropdown/Popup、虚拟 ListView/TreeView、Keyboard/Gamepad default action 与 Windows IMM32。
 平台中立 accessibility action seam 已支持 Focus/Invoke/Toggle/SetRangeValue/SetTextValue，Windows UIA
-已有 HWND 自动接线、Invoke/Toggle/RangeValue/Value patterns 与跨进程 HWND client gate。目标差距是
-Narrator/Inspect 人工金标、Linux AT-SPI、多行/grapheme/BiDi/复杂 shaping 与完整 IME 候选窗，不是
-“UI 尚不可见”；自动 gate 也不等于真实辅助技术验收。
+已有 HWND 自动接线、Invoke/Toggle/RangeValue/Value patterns 与跨进程 HWND client gate。TextEdit 默认单行，
+启用 `UITextEditMultilineConfig` 后已有 LF/soft-wrap、固定容量 visual rows、滚动、二维 hit/navigation；
+UAX #29 grapheme 子集编辑与 Windows IMM32 caret/candidate placement 也已接线。目标差距是
+BiDi/复杂 shaping、Linux 原生 XIM/Wayland preedit/candidate placement、Windows 真机 IME 人工金标、
+Narrator/Inspect 人工金标与 Linux AT-SPI，不是“UI 尚不可见”；自动 gate 也不等于真实辅助技术验收。
 
 50,000 节点深树的 structure commit/destroy、layout、hit 与 paint publication 已有非递归回归，Popup
 publication 也已消除逐节点祖先回溯，当前步骤保持线性；完整 dirty-range pruning 和固定机 hard gate
@@ -160,7 +162,7 @@ TaskGroup barrier、Runtime-owned Asset/Audio lease drain 与通用 GPU completi
 | `3D-001` / `ASSET-001` | multi-mesh E2E + URI 安全 + base/MR/normal texture sampling + Cook-Torrance GGX/cooked EnvironmentMap IBL + 固定4级联 directional CSM + 单 SpotLight/PointLight shadow + startup-only shadow extent + pass scheduler **Done** |
 | `UI-002` / `UI-002-LINUX` / `UI-003` | action seam、Windows UIA patterns/HWND 产品接线与跨进程 gate 已有；Narrator/Inspect、AT-SPI 与 OS 级 DPI/跨 GPU 视觉矩阵仍开放 |
 | `UI-004` / `UI-005` | **Done**：Focus Scope/Modal/Pointer Capture，以及 ScrollView、Dropdown/Popup、虚拟 ListView/TreeView |
-| `TEXT-001` | 多行编辑、grapheme/shaping 与完整 IME 候选窗仍开放 |
+| `TEXT-001` | InProgress：多行、UAX #29 grapheme 子集与 Windows IMM32 placement 的代码/自动 gate 已完成；BiDi/复杂 shaping、Linux 原生 XIM/Wayland 与 Windows 真机 IME 人工证据仍开放 |
 | `PERF-001` / `PERF-002` | schema v1 **Done**；固定机 hard gate / 多进程 MAD 由 PERF-002 继续跟踪 |
 | `CLEAN-001`～`CLEAN-004` | **Done**（依赖、转发头、旧 alias/参数与死 fallback 扫尾记录） |
 | `TEST-001` / `TEST-002` | **Done**：Linux tip GCC13/Clang22（含 sanitizer）复验与 product-2d 同轮门禁 |

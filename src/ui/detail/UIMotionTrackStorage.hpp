@@ -44,20 +44,32 @@ class UIMotionTrackStorage final {
         UIStraightSrgba8Color startColor{};
         UIStraightSrgba8Color targetColor{};
         UIStraightSrgba8Color presentationColor{};
+        UIStraightSrgba8Color candidatePresentationColor{};
+        UIStraightSrgba8Color candidateStyleStartColor{};
+        UIStraightSrgba8Color candidateStyleTargetColor{};
         float startScalar = 0.0F;
         float targetScalar = 0.0F;
         float presentationScalar = 0.0F;
+        float candidatePresentationScalar = 0.0F;
         Scalar2 startOffset{};
         Scalar2 targetOffset{};
         Scalar2 presentationOffset{};
+        Scalar2 candidatePresentationOffset{};
         Core::MonotonicTimePoint startTime{};
         Core::Duration duration{0.0};
         Core::Duration delay{0.0};
+        Core::MonotonicTimePoint candidateStyleStartTime{};
+        Core::Duration candidateStyleDuration{0.0};
+        Core::Duration candidateStyleDelay{0.0};
         UIEasing easing = UIEasing::Linear;
+        UIEasing candidateStyleEasing = UIEasing::Linear;
         CompletionMode completionMode = CompletionMode::CommitProperty;
         bool occupied = false;
         bool persistentReservation = false;
         bool active = false;
+        bool hasCandidatePresentation = false;
+        bool candidateCompleted = false;
+        bool hasCandidateStyleActivation = false;
         u32 nextActive = InvalidSlot;
         u32 prevActive = InvalidSlot;
     };
@@ -122,6 +134,17 @@ class UIMotionTrackStorage final {
     void releaseNode(UINodeId node) noexcept;
     void releaseProperty(UINodeId node, UIAnimatableProperty property) noexcept;
 
+    // Candidate sampling lets UIContext include direct transitions in the same
+    // publication transaction as a layout timeline. The ordinary sample()
+    // entry point preserves its immediate-commit behavior.
+    void beginCandidateSample(Core::MonotonicTimePoint now) noexcept;
+    void ensureCandidateTransaction() noexcept;
+    void commitCandidateSample() noexcept;
+    // Rollback keeps builder-time Style activations pending so a failed layout
+    // publication can retry them without mutating the active list early.
+    void rollbackCandidateSample() noexcept;
+    void discardCandidateSample() noexcept;
+    [[nodiscard]] bool hasCandidateSample() const noexcept;
     [[nodiscard]] usize sample(Core::MonotonicTimePoint now) noexcept;
     [[nodiscard]] std::span<const Completed> lastCompleted() const noexcept;
 
@@ -152,6 +175,8 @@ class UIMotionTrackStorage final {
     usize reservedHighWater_ = 0;
     usize lastSampledCount_ = 0;
     std::pmr::vector<Completed> lastCompleted_;
+    std::pmr::vector<u32> candidateStyleActivationSlots_;
+    bool candidateSamplePending_ = false;
 };
 
 [[nodiscard]] constexpr UIMotionTrackStorage::ValueKind
@@ -164,8 +189,11 @@ valueKindForProperty(UIAnimatableProperty property) noexcept
         return UIMotionTrackStorage::ValueKind::Color;
     case UIAnimatableProperty::Opacity:
     case UIAnimatableProperty::CornerRadius:
+    case UIAnimatableProperty::LayoutWidth:
+    case UIAnimatableProperty::LayoutHeight:
         return UIMotionTrackStorage::ValueKind::Scalar;
     case UIAnimatableProperty::VisualOffset:
+    case UIAnimatableProperty::LayoutOffset:
         return UIMotionTrackStorage::ValueKind::Offset;
     }
     return UIMotionTrackStorage::ValueKind::Color;

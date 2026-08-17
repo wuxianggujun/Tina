@@ -1,0 +1,37 @@
+# Tina pre-1.0 package version gate (ADR 0024).
+#
+# CMake's stock ExactVersion template ignores a tweak component and accepts the
+# lower endpoint of a range. Tina has no compatibility baseline that permits
+# either relaxation, so only the exact three-component project version is
+# compatible. find_package() without a version does not consult this file.
+
+set(PACKAGE_VERSION "@PROJECT_VERSION@")
+set(PACKAGE_VERSION_COMPATIBLE FALSE)
+set(PACKAGE_VERSION_EXACT FALSE)
+unset(PACKAGE_VERSION_UNSUITABLE)
+
+if(DEFINED PACKAGE_FIND_VERSION_RANGE AND
+   NOT PACKAGE_FIND_VERSION_RANGE STREQUAL "")
+    return()
+endif()
+
+if(NOT DEFINED PACKAGE_FIND_VERSION_COUNT OR
+   NOT PACKAGE_FIND_VERSION_COUNT EQUAL 3 OR
+   NOT PACKAGE_FIND_VERSION STREQUAL PACKAGE_VERSION)
+    return()
+endif()
+
+# Match write_basic_package_version_file() architecture behavior while keeping
+# version selection strict. An unspecified pointer size on either side leaves
+# architecture suitability to the package/consumer configure.
+if(NOT "${CMAKE_SIZEOF_VOID_P}" STREQUAL "" AND
+   NOT "@CMAKE_SIZEOF_VOID_P@" STREQUAL "" AND
+   NOT CMAKE_SIZEOF_VOID_P STREQUAL "@CMAKE_SIZEOF_VOID_P@")
+    math(EXPR tina_installed_bits "@CMAKE_SIZEOF_VOID_P@ * 8")
+    set(PACKAGE_VERSION "${PACKAGE_VERSION} (${tina_installed_bits}bit)")
+    set(PACKAGE_VERSION_UNSUITABLE TRUE)
+    return()
+endif()
+
+set(PACKAGE_VERSION_COMPATIBLE TRUE)
+set(PACKAGE_VERSION_EXACT TRUE)

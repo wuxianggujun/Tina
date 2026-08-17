@@ -546,8 +546,23 @@ class UIContext final {
         UINodeId node, float targetRadius, const UITransitionSpec& spec);
     [[nodiscard]] Core::Status beginVisualOffsetTransition(
         UINodeId node, float targetOffsetX, float targetOffsetY, const UITransitionSpec& spec);
+    // UI-MOTION-002: retained typed multi-track keyframe definitions. Layout
+    // width/height/offset samples publish Layout/Hit/Paint atomically.
+    // Descriptors are copied into fixed Context-owned pools. create/replace/play
+    // preflight the full operation; failure preserves the prior definition,
+    // playback, property targets, and committed snapshots.
+    [[nodiscard]] Core::Result<UITimelineId> createTimeline(const UITimelineDesc& desc);
+    [[nodiscard]] Core::Status replaceTimeline(UITimelineId timeline,
+                                               const UITimelineDesc& desc);
+    [[nodiscard]] Core::Status playTimeline(UITimelineId timeline);
+    // Active cancel/destroy land every bound property on its final keyframe.
+    // Inactive cancel is a no-op; inactive destroy only releases the retained
+    // definition. destroy always invalidates the generation-safe identity.
+    [[nodiscard]] Core::Status cancelTimeline(UITimelineId timeline);
+    [[nodiscard]] Core::Status destroyTimeline(UITimelineId timeline);
+    [[nodiscard]] Core::Result<bool> isTimelineActive(UITimelineId timeline) const;
     // Advances fakeable clock sample before paint publication. Safe no-op when
-    // no tracks are active (M==0 does not force Paint dirty by itself).
+    // no transition/timeline tracks are active (M==0 does not force Paint dirty).
     [[nodiscard]] Core::Status sampleMotion(Core::MonotonicTimePoint now);
 
     // Opens (or replaces) the text face used by measure/paint. Closes the previous
@@ -566,6 +581,11 @@ class UIContext final {
     [[nodiscard]] UICommittedLayoutView committedLayout() const noexcept;
     [[nodiscard]] UICommittedHitView committedHit() const noexcept;
     [[nodiscard]] UICommittedPaintView committedPaint() const noexcept;
+    // Copy of the caret rectangle emitted by the last successful paint
+    // publication for the visible, enabled, focused TextEdit. Coordinates are
+    // owner-window logical client coordinates. nullopt clears platform IME
+    // placement when no committed TextEdit owns text focus.
+    [[nodiscard]] std::optional<UILogicalRect> committedTextInputCaretRect() const noexcept;
     // M11-C4: owner-thread accessible semantics snapshot (interactive kinds).
     [[nodiscard]] UICommittedSemanticsView committedSemantics() const noexcept;
     // Borrow of the context-owned R8 glyph atlas page after paint publication.

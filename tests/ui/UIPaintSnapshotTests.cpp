@@ -4,6 +4,7 @@
 #include <tina/ui/UI.hpp>
 
 #include <algorithm>
+#include <limits>
 #include <memory>
 #include <memory_resource>
 
@@ -382,6 +383,50 @@ TEST_F(UIPaintSnapshotTest, PaintOnlyCommitDoesNotRelayoutOrRebuildHitAndSameVal
     expectOk(context->commitLayout({.width = 100.0F, .height = 50.0F}));
     EXPECT_TRUE(context->committedPaint().empty());
     EXPECT_EQ(context->committedHit().hitRevision(), hitRevision);
+}
+
+TEST_F(UIPaintSnapshotTest, InvalidCornerRadiusSetterPreservesRetainedAndCommittedPaint)
+{
+    auto context = createContext(window, {.nodeCapacity = 3, .rootCapacity = 1});
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root);
+    const UI::UINodeId panel = createPanel(*context, root.rootNodeId());
+    auto updater = createUpdater(*context, root);
+    expectOk(updater.setLayoutStyle(panel, fixedSize(40.0F, 20.0F)));
+    UI::UIBoxPaint authored = solidFill(10, 20, 30);
+    authored.cornerRadii = {
+        .topLeft = 8.0F,
+        .topRight = 6.0F,
+        .bottomRight = 4.0F,
+        .bottomLeft = 2.0F,
+    };
+    expectOk(updater.setBoxPaint(panel, authored));
+    expectOk(context->commitLayout({.width = 100.0F, .height = 50.0F}));
+
+    const UI::UICommittedPaintView baseline = context->committedPaint();
+    ASSERT_EQ(baseline.size(), 1U);
+    const u64 paintRevision = baseline.paintRevision();
+    const UI::UILogicalCornerRadii committedRadii =
+        baseline.entries().front().cornerRadii;
+    const UI::UIContextStatistics before = context->statistics();
+    UI::UIBoxPaint invalid = authored;
+    invalid.cornerRadii.bottomLeft =
+        (std::numeric_limits<float>::quiet_NaN)();
+
+    const Core::Status rejected = updater.setBoxPaint(panel, invalid);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidStyle);
+    EXPECT_EQ(context->statistics().dirtyQueuePendingCount,
+              before.dirtyQueuePendingCount);
+    EXPECT_EQ(context->committedPaint().paintRevision(), paintRevision);
+    EXPECT_EQ(context->committedPaint().entries().front().cornerRadii,
+              committedRadii);
+
+    expectOk(context->commitLayout({.width = 120.0F, .height = 60.0F}));
+    ASSERT_EQ(context->committedPaint().size(), 1U);
+    EXPECT_EQ(context->committedPaint().entries().front().cornerRadii,
+              committedRadii);
 }
 
 TEST_F(UIPaintSnapshotTest, CommitStructureDoesNotPublishPendingPaintMutation)

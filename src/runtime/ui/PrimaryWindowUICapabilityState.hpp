@@ -173,6 +173,19 @@ class PrimaryWindowUICapabilityState final {
     [[nodiscard]] Core::Status beginVisualOffsetTransition(
         u64 epoch, PrimaryWindowUIPhase phase, UI::UINodeId node, float targetOffsetX, float targetOffsetY,
         const UI::UITransitionSpec& spec);
+    [[nodiscard]] Core::Result<UI::UITimelineId> createTimeline(
+        u64 epoch, PrimaryWindowUIPhase phase, const UI::UITimelineDesc& desc);
+    [[nodiscard]] Core::Status replaceTimeline(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITimelineId timeline,
+        const UI::UITimelineDesc& desc);
+    [[nodiscard]] Core::Status playTimeline(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITimelineId timeline);
+    [[nodiscard]] Core::Status cancelTimeline(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITimelineId timeline);
+    [[nodiscard]] Core::Status destroyTimeline(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITimelineId timeline);
+    [[nodiscard]] Core::Result<bool> isTimelineActive(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITimelineId timeline);
     [[nodiscard]] Core::Status setButtonPaint(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                               UI::UINodeId button, const UI::UIButtonPaint& paint);
     [[nodiscard]] Core::Result<UI::UIButtonPaint> buttonPaint(u64 epoch, PrimaryWindowUIPhase phase,

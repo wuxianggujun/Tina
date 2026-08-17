@@ -567,7 +567,8 @@ class ShowcaseApplication final : public Tina::IGameApplication {
     };
     if (counters.stateEnters != 1 || counters.stateExits != 1 || counters.applicationShutdowns != 1 ||
         counters.uiRootsCreated != 1 || counters.uiRootsReleased != 1 || counters.finalUI.rootAlive ||
-        counters.finalUI.controlCount != 20 || counters.finalUI.imageProductCount != 4 ||
+        counters.finalUI.controlCount != 21 || counters.finalUI.imageProductCount != 4 ||
+        counters.finalUI.asymmetricCornerProductCount != 3 ||
         !counters.finalUI.stylesheetInstalled || counters.finalUI.styleTokenUpdates == 0) {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                    "UI showcase lifecycle, stylesheet, or control inventory verification failed");
@@ -698,6 +699,8 @@ class ShowcaseApplication final : public Tina::IGameApplication {
               << ",\"scrollOffset\":" << counters.finalUI.scrollOffset
               << ",\"controls\":" << counters.finalUI.controlCount
               << ",\"imageProducts\":" << counters.finalUI.imageProductCount
+              << ",\"asymmetricCornerProducts\":"
+              << counters.finalUI.asymmetricCornerProductCount
               << ",\"stylesheetInstalled\":" << (counters.finalUI.stylesheetInstalled ? "true" : "false")
               << ",\"styleTokenUpdates\":" << counters.finalUI.styleTokenUpdates
               << ",\"motionBegins\":" << counters.finalUI.motionBegins
@@ -728,6 +731,7 @@ class ShowcaseApplication final : public Tina::IGameApplication {
               << ",\"quality\":";
     writeJsonString(std::cout, qualityName(counters.finalUI.quality));
     std::cout << ",\"notificationsEnabled\":" << (counters.finalUI.notificationsEnabled ? "true" : "false")
+              << ",\"multilineNotesScrolled\":" << (counters.finalUI.multilineNotesScrolled ? "true" : "false")
               << ",\"uiRootsCreated\":" << counters.uiRootsCreated
               << ",\"uiRootsReleased\":" << counters.uiRootsReleased << ",\"exit\":";
     writeJsonString(std::cout, exitReasonName(*result));

@@ -22,11 +22,13 @@
 #include "detail/UIElementContractResolver.hpp"
 #include "detail/UIFlexLayout.hpp"
 #include "detail/UIFocusNavigation.hpp"
+#include "detail/UIGraphemeBreak.hpp"
 #include "detail/UIDefaultActionPressState.hpp"
 #include "detail/UIDirtyQueueStorage.hpp"
 #include "detail/UIImeCompositionState.hpp"
 #include "detail/UIImageContentStorage.hpp"
 #include "detail/UIMotionTrackStorage.hpp"
+#include "detail/UIKeyframeTimelineStorage.hpp"
 #include "detail/UINineSlicePaintEmitter.hpp"
 #include "detail/UIInputPrimitives.hpp"
 #include "detail/UILayoutMeasurement.hpp"
@@ -60,6 +62,7 @@
 #include <initializer_list>
 #include <limits>
 #include <new>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -183,6 +186,7 @@ using Detail::utf8ByteOffsetForCodepoint;
 using Detail::validateSemanticsContract;
 using Detail::verticalMargin;
 using Detail::VirtualCollectionLayoutError;
+using Detail::UITextEditCommandPlan;
 using Detail::WidgetTextState;
 using Detail::findHitEntryIndex;
 using Detail::findFocusNavigationCandidate;
@@ -647,9 +651,13 @@ struct UIContext::Impl final {
     std::pmr::vector<UIStyleRoleId> styleRolesByNodeIndex;
     Detail::UIStyleSheetStorage styleSheetStorage;
     Detail::UIMotionTrackStorage motionTrackStorage;
+    Detail::UIKeyframeTimelineStorage timelineStorage;
+    std::pmr::vector<UINodeId> timelineLayoutNodeScratch;
+    std::pmr::vector<UINodeId> timelinePaintNodeScratch;
     const Core::IMonotonicClock* motionClock = nullptr;
     Core::SteadyMonotonicClock motionDefaultClock{};
     bool reducedMotionEnabled = false;
+    usize layoutTimelineCommitFailureCount = 0;
     // Default duration 0 = instant stylesheet BoxFill resolve (historical path).
     UITransitionSpec styleBackgroundColorTransitionSpec{
         .property = UIAnimatableProperty::BackgroundColor,
@@ -705,6 +713,18 @@ struct UIContext::Impl final {
     Detail::UIImageContentStorage imageContentStorage;
     // TextInput selection lives in the behavior side store; TextEdit chrome remains kind-owned.
     std::pmr::vector<UITextEditPaint> textEditPaintsByNodeIndex;
+    std::pmr::vector<UITextEditMultilineConfig> textEditMultilineByNodeIndex;
+    // Unprefixed visual state is route-visible committed data. CommitLayout
+    // builds the parallel candidate state and swaps it only after every
+    // fallible snapshot builder succeeds.
+    std::pmr::vector<std::pmr::vector<Detail::UITextEditVisualLine>> textEditVisualLinesByNodeIndex;
+    std::pmr::vector<Detail::UITextEditVisualLayout> textEditVisualLayoutsByNodeIndex;
+    std::pmr::vector<float> textEditScrollYByNodeIndex;
+    std::pmr::vector<std::pmr::vector<Detail::UITextEditVisualLine>> candidateTextEditVisualLinesByNodeIndex;
+    std::pmr::vector<Detail::UITextEditVisualLayout> candidateTextEditVisualLayoutsByNodeIndex;
+    std::pmr::vector<float> candidateTextEditScrollYByNodeIndex;
+    std::pmr::vector<std::optional<float>> textEditPreferredXByNodeIndex;
+    std::pmr::vector<Detail::UITextEditCaretAffinity> textEditCaretAffinityByNodeIndex;
     std::pmr::vector<ProgressBarState> progressBarStatesByNodeIndex;
     std::pmr::vector<RadioButtonState> radioButtonStatesByNodeIndex;
     // Scroll style/offset/metrics live in the behavior side store; chrome remains kind-owned.
@@ -773,6 +793,8 @@ struct UIContext::Impl final {
     u64 committedPaintLayoutRevision = 0;
     u64 committedPaintOrderRevision = 0;
     UILogicalSize committedPaintViewportSize{};
+    std::optional<UILogicalRect> committedTextInputCaretRect{};
+    std::optional<UILogicalRect> candidateTextInputCaretRect{};
     u64 committedSemanticsRevision = 0;
     u64 committedSemanticsStructureRevision = 0;
     u64 committedSemanticsLayoutRevision = 0;
@@ -868,6 +890,11 @@ struct UIContext::Impl final {
                             },
                             resource),
           motionTrackStorage(capacities.motionTrackCapacity, resource),
+          timelineStorage(capacities.nodeCapacity, capacities.timelineCapacity,
+                          capacities.timelineTrackCapacity, capacities.timelineKeyframeCapacity,
+                          capacities.activeTimelineCapacity, resource),
+          timelineLayoutNodeScratch(&resource),
+          timelinePaintNodeScratch(&resource),
           presentationOpacityByNodeIndex(&resource),
           presentationOpacityValidByNodeIndex(&resource),
           presentationOffsetXByNodeIndex(&resource),
@@ -895,7 +922,11 @@ struct UIContext::Impl final {
           semanticsSnapshotBuilder(capacities.nodeCapacity, capacities.nodeCapacity, resource),
           canvasCommandStorage(capacities.nodeCapacity, capacities.canvasCommandCapacity, resource),
           imageContentStorage(capacities.nodeCapacity, capacities.imageContentCapacity, resource),
-          textEditPaintsByNodeIndex(&resource),
+           textEditPaintsByNodeIndex(&resource), textEditMultilineByNodeIndex(&resource),
+           textEditVisualLinesByNodeIndex(&resource), textEditVisualLayoutsByNodeIndex(&resource),
+           textEditScrollYByNodeIndex(&resource), candidateTextEditVisualLinesByNodeIndex(&resource),
+           candidateTextEditVisualLayoutsByNodeIndex(&resource), candidateTextEditScrollYByNodeIndex(&resource),
+           textEditPreferredXByNodeIndex(&resource), textEditCaretAffinityByNodeIndex(&resource),
           progressBarStatesByNodeIndex(&resource), radioButtonStatesByNodeIndex(&resource),
           scrollViewPaintsByNodeIndex(&resource), scrollViewLayoutScratchByNodeIndex(&resource),
           dropdownStatesByNodeIndex(&resource), popupStatesByNodeIndex(&resource),
@@ -964,6 +995,7 @@ struct UIContext::Impl final {
             .routedPointerListenerCapacity = normalized.routedPointerListenerCapacity,
             .buttonActionCapacity = normalized.buttonActionCapacity,
             .textByteCapacity = normalized.textByteCapacity,
+            .textEditVisualLineCapacity = normalized.textEditVisualLineCapacity,
             .styleClassCapacity = normalized.styleClassCapacity,
             .styleTokenCapacity = normalized.styleTokenCapacity,
             .styleRuleCapacity = normalized.styleRuleCapacity,
@@ -971,6 +1003,10 @@ struct UIContext::Impl final {
             .styleRulesPerBucketCapacity = normalized.styleRulesPerBucketCapacity,
             .nodeStyleClassLinkCapacity = normalized.nodeStyleClassLinkCapacity,
             .motionTrackCapacity = normalized.motionTrackCapacity,
+            .timelineCapacity = normalized.timelineCapacity,
+            .timelineTrackCapacity = normalized.timelineTrackCapacity,
+            .timelineKeyframeCapacity = normalized.timelineKeyframeCapacity,
+            .activeTimelineCapacity = normalized.activeTimelineCapacity,
             .flowLayerCapacity = normalized.flowLayerCapacity,
             .flowScreenCapacity = normalized.flowScreenCapacity,
             .applyDefaultProductChrome = normalized.applyDefaultProductChrome,
@@ -979,6 +1015,8 @@ struct UIContext::Impl final {
         auto impl = std::unique_ptr<Impl>(new Impl(ownerWindow, capacities, std::this_thread::get_id(),
                                                    std::move(lifetimeControl), std::move(*poolResult), resource));
         impl->motionClock = &impl->motionDefaultClock;
+        impl->timelineLayoutNodeScratch.reserve(normalized.timelineTrackCapacity);
+        impl->timelinePaintNodeScratch.reserve(normalized.timelineTrackCapacity);
         impl->presentationOpacityByNodeIndex.resize(normalized.nodeCapacity, 1.0F);
         impl->presentationOpacityValidByNodeIndex.resize(normalized.nodeCapacity, 0);
         impl->presentationOffsetXByNodeIndex.resize(normalized.nodeCapacity, 0.0F);
@@ -1018,6 +1056,16 @@ struct UIContext::Impl final {
         impl->textStatesByIndex.resize(normalized.nodeCapacity);
         impl->semanticsStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->textEditPaintsByNodeIndex.resize(normalized.nodeCapacity);
+        impl->textEditMultilineByNodeIndex.resize(normalized.nodeCapacity);
+        impl->textEditVisualLinesByNodeIndex.resize(normalized.nodeCapacity);
+        impl->textEditVisualLayoutsByNodeIndex.resize(normalized.nodeCapacity);
+        impl->textEditScrollYByNodeIndex.resize(normalized.nodeCapacity, 0.0F);
+        impl->candidateTextEditVisualLinesByNodeIndex.resize(normalized.nodeCapacity);
+        impl->candidateTextEditVisualLayoutsByNodeIndex.resize(normalized.nodeCapacity);
+        impl->candidateTextEditScrollYByNodeIndex.resize(normalized.nodeCapacity, 0.0F);
+        impl->textEditPreferredXByNodeIndex.resize(normalized.nodeCapacity);
+        impl->textEditCaretAffinityByNodeIndex.resize(
+            normalized.nodeCapacity, Detail::UITextEditCaretAffinity::Downstream);
         impl->progressBarStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->radioButtonStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->scrollViewPaintsByNodeIndex.resize(normalized.nodeCapacity);
@@ -1266,7 +1314,7 @@ struct UIContext::Impl final {
             {
                 continue;
             }
-            const UILayoutStyle& style = layoutStylesByIndex[index];
+            const UILayoutStyle style = presentationLayoutStyle(index);
             UIVisibility ownVisibility = style.visibility;
             if (record->kind == BuiltinElementKind::Popup && index < popupStatesByNodeIndex.size() &&
                 !popupStatesByNodeIndex[index].open)
@@ -1359,7 +1407,7 @@ struct UIContext::Impl final {
             {
                 continue;
             }
-            const UILayoutStyle& style = layoutStylesByIndex[index];
+            const UILayoutStyle style = presentationLayoutStyle(index);
             LayoutScratchState& scratch = layoutScratchByIndex[index];
             const UILogicalSize previousMeasuredSize = scratch.measuredSize;
             ++statistics.measuredNodeCount;
@@ -1384,7 +1432,7 @@ struct UIContext::Impl final {
                 {
                     break;
                 }
-                const UILayoutStyle& childStyle = layoutStylesByIndex[childIndex];
+                const UILayoutStyle childStyle = presentationLayoutStyle(childIndex);
                 const LayoutScratchState& childScratch = layoutScratchByIndex[childIndex];
                 if (childScratch.effectiveVisibility != UIVisibility::Collapsed &&
                     childStyle.placement == UILayoutPlacement::Flow)
@@ -1468,7 +1516,7 @@ struct UIContext::Impl final {
                           UILogicalRect descendantClip) noexcept
     {
         LayoutScratchState& scratch = layoutScratchByIndex[index];
-        const UILayoutStyle& style = layoutStylesByIndex[index];
+        const UILayoutStyle style = presentationLayoutStyle(index);
         const UILogicalRect previousWorldRect = scratch.worldRect;
         const UILogicalRect previousLocalRect = scratch.localRect;
         const UILogicalRect previousEffectiveClip = scratch.effectiveClip;
@@ -1506,7 +1554,7 @@ struct UIContext::Impl final {
     void refreshMeasuredSizeForParentContent(u32 childIndex, UILogicalRect parentContentRect,
                                              LayoutPassStatistics& statistics) noexcept
     {
-        const UILayoutStyle& childStyle = layoutStylesByIndex[childIndex];
+        const UILayoutStyle childStyle = presentationLayoutStyle(childIndex);
         LayoutScratchState& childScratch = layoutScratchByIndex[childIndex];
         const UILogicalSize previousMeasuredSize = childScratch.measuredSize;
         childScratch.parentContentWidthDefinite = true;
@@ -1533,7 +1581,7 @@ struct UIContext::Impl final {
     {
         refreshMeasuredSizeForParentContent(childIndex, parentContentRect, statistics);
         assignLayoutRect(childIndex,
-                         resolveOverlayRect(layoutStylesByIndex[childIndex],
+                         resolveOverlayRect(presentationLayoutStyle(childIndex),
                                             layoutScratchByIndex[childIndex],
                                             parentContentRect, statistics),
                          parentWorldRect, descendantClip);
@@ -1542,7 +1590,7 @@ struct UIContext::Impl final {
     void arrangePopupChild(u32 popupIndex, UILogicalRect anchorRect, UILogicalRect viewportRect,
                            LayoutPassStatistics& statistics) noexcept
     {
-        const UILayoutStyle& popupLayoutStyle = layoutStylesByIndex[popupIndex];
+        const UILayoutStyle popupLayoutStyle = presentationLayoutStyle(popupIndex);
         LayoutScratchState& popupScratch = layoutScratchByIndex[popupIndex];
         PopupState& popup = popupStatesByNodeIndex[popupIndex];
         refreshMeasuredSizeForParentContent(popupIndex, viewportRect, statistics);
@@ -1956,7 +2004,7 @@ struct UIContext::Impl final {
         {
             return Core::success();
         }
-        const UILayoutStyle& parentStyle = layoutStylesByIndex[parentIndex];
+        const UILayoutStyle parentStyle = presentationLayoutStyle(parentIndex);
         const LayoutScratchState& parentScratch = layoutScratchByIndex[parentIndex];
         const UILogicalRect parentWorldRect = parentScratch.worldRect;
         const UILogicalRect unscrolledContentRect{
@@ -2035,7 +2083,7 @@ struct UIContext::Impl final {
             {
                 break;
             }
-            const UILayoutStyle& childStyle = layoutStylesByIndex[childIndex];
+            const UILayoutStyle childStyle = presentationLayoutStyle(childIndex);
             LayoutScratchState& childScratch = layoutScratchByIndex[childIndex];
             if (childScratch.effectiveVisibility != UIVisibility::Collapsed &&
                 childStyle.placement == UILayoutPlacement::Flow)
@@ -2094,7 +2142,7 @@ struct UIContext::Impl final {
             }
             const u32 currentChild = childIndex;
             childIndex = childRecord->nextSiblingIndex;
-            const UILayoutStyle& childStyle = layoutStylesByIndex[currentChild];
+            const UILayoutStyle childStyle = presentationLayoutStyle(currentChild);
             LayoutScratchState& childScratch = layoutScratchByIndex[currentChild];
 
             if (childScratch.effectiveVisibility == UIVisibility::Collapsed)
@@ -2171,7 +2219,7 @@ struct UIContext::Impl final {
     [[nodiscard]] UICommittedContentPlacement contentPlacementFor(u32 index) const noexcept
     {
         const LayoutScratchState& scratch = layoutScratchByIndex[index];
-        const UILayoutStyle& layout = layoutStylesByIndex[index];
+        const UILayoutStyle layout = presentationLayoutStyle(index);
         const NodeRecord* record = recordByIndex(index);
         float leadingReservedWidth = 0.0F;
         float trailingReservedWidth = 0.0F;
@@ -2804,7 +2852,7 @@ struct UIContext::Impl final {
                                                           node, UIAnimatableProperty::BackgroundColor);
             if (canAnimate)
             {
-                const auto presentation = motionTrackStorage.presentationFor(node);
+                const auto presentation = motionPresentationFor(node);
                 const UIStraightSrgba8Color startColor = presentation.hasBackgroundColor
                                                              ? presentation.backgroundColor
                                                              : unpremultiplyColor(previousFill);
@@ -3115,7 +3163,7 @@ struct UIContext::Impl final {
                     .effectiveClip = canvasClip,
                     .paintOrdinal = nextPaintOrdinal,
                     .solidFill = premultiply(command.color),
-                    .cornerRadius = command.cornerRadius,
+                    .cornerRadii = command.cornerRadii,
                 });
                 ++nextPaintOrdinal;
             } else if (command.kind == UICanvasCommandKind::SolidEllipse)
@@ -3403,8 +3451,8 @@ struct UIContext::Impl final {
         return batch;
     }
 
-    [[nodiscard]] Detail::UITextEditPaintState resolveTextEditPaintState(UINodeId node,
-                                                                         bool applyDisabledOpacity) const noexcept
+    [[nodiscard]] Detail::UITextEditPaintState resolveTextEditPaintState(
+        UINodeId node, bool applyDisabledOpacity, bool useCandidateVisualState) const noexcept
     {
         const u32 nodeIndex = node.index();
         const NodeRecord* record = recordByIndex(nodeIndex);
@@ -3416,7 +3464,7 @@ struct UIContext::Impl final {
         UIPremultipliedRgba8Color textColor{};
         if (textState != nullptr)
         {
-            const auto motionPresentation = motionTrackStorage.presentationFor(node);
+            const auto motionPresentation = motionPresentationFor(node);
             if (motionPresentation.hasTextColor)
             {
                 textColor = premultiply(motionPresentation.textColor);
@@ -3443,15 +3491,29 @@ struct UIContext::Impl final {
             }
         }
         const bool preeditActive = focused && imeComposition.active();
+        const bool multilineEnabled = nodeIndex < textEditMultilineByNodeIndex.size() &&
+                                      textEditMultilineByNodeIndex[nodeIndex].enabled;
         const UITextEditPaint paint =
             nodeIndex < textEditPaintsByNodeIndex.size() ? textEditPaintsByNodeIndex[nodeIndex]
                                                          : UITextEditPaint{};
         const Detail::UITextInputState* textInputState = behaviorStateStorage.tryTextInputState(nodeIndex);
+        const auto& visualLinesByNodeIndex = useCandidateVisualState
+                                                 ? candidateTextEditVisualLinesByNodeIndex
+                                                 : textEditVisualLinesByNodeIndex;
+        const auto& visualLayoutsByNodeIndex = useCandidateVisualState
+                                                   ? candidateTextEditVisualLayoutsByNodeIndex
+                                                   : textEditVisualLayoutsByNodeIndex;
+        const auto& scrollYByNodeIndex = useCandidateVisualState
+                                             ? candidateTextEditScrollYByNodeIndex
+                                             : textEditScrollYByNodeIndex;
         return Detail::UITextEditPaintState{
             .focused = focused,
             .preeditActive = preeditActive,
             .committedText = presentationTextViewFor(nodeIndex),
             .selection = focused && textInputState != nullptr ? textInputState->selection : UITextSelection{},
+            .caretAffinity = nodeIndex < textEditCaretAffinityByNodeIndex.size()
+                                 ? textEditCaretAffinityByNodeIndex[nodeIndex]
+                                 : Detail::UITextEditCaretAffinity::Downstream,
             .preeditText = preeditActive ? imeComposition.preeditUtf8() : std::string_view{},
             .preeditCursorCodepoint = preeditActive ? imeComposition.cursorCodepoint() : 0,
             .style = style,
@@ -3464,10 +3526,80 @@ struct UIContext::Impl final {
                     .face = textFace,
                     .atlas = glyphAtlas.get(),
                 },
+            .multilineEnabled = multilineEnabled,
+            .wrapMode = nodeIndex < textEditMultilineByNodeIndex.size()
+                            ? textEditMultilineByNodeIndex[nodeIndex].wrapMode
+                            : UITextEditWrapMode::NoWrap,
+            .visualLines = multilineEnabled && nodeIndex < visualLinesByNodeIndex.size()
+                               ? std::span<const Detail::UITextEditVisualLine>(visualLinesByNodeIndex[nodeIndex])
+                               : std::span<const Detail::UITextEditVisualLine>{},
+            .visualLayout = multilineEnabled && nodeIndex < visualLayoutsByNodeIndex.size()
+                                ? visualLayoutsByNodeIndex[nodeIndex]
+                                : Detail::UITextEditVisualLayout{},
+            .scrollY = nodeIndex < scrollYByNodeIndex.size()
+                           ? scrollYByNodeIndex[nodeIndex] : 0.0F,
         };
     }
 
-    [[nodiscard]] Core::Result<usize> countPaintEntries(const UICommittedLayoutEntry& layoutEntry) const
+    [[nodiscard]] Core::Status buildTextEditVisualState(
+        std::span<const UICommittedLayoutEntry> layoutEntries) noexcept
+    {
+        for (const UICommittedLayoutEntry& entry : layoutEntries)
+        {
+            const u32 index = entry.node.index();
+            if (index >= textEditMultilineByNodeIndex.size() ||
+                !textEditMultilineByNodeIndex[index].enabled ||
+                index >= textStatesByIndex.size())
+            {
+                continue;
+            }
+            const UITextEditMultilineConfig config = textEditMultilineByNodeIndex[index];
+            auto& lines = candidateTextEditVisualLinesByNodeIndex[index];
+            lines.clear();
+            const WidgetTextState& text = textStatesByIndex[index];
+            const float lineHeight = text.style.logicalSize * text.style.lineHeightScale;
+            const float fallback = text.style.logicalSize * text.style.advanceScale;
+            if (!std::isfinite(lineHeight) || lineHeight <= 0.0F ||
+                !std::isfinite(fallback) || fallback <= 0.0F)
+            {
+                return fail(UIErrorCode::InvalidText, "UI multiline TextEdit metrics are invalid");
+            }
+            const usize capacity = config.maximumVisualLines != 0
+                                       ? config.maximumVisualLines
+                                       : capacityConfig.textEditVisualLineCapacity;
+            lines.resize(capacity);
+            std::span<const UITextGlyphRaster> glyphs{};
+            if (textRasterizer != nullptr && textFace.hasValue())
+            {
+                auto raster = textRasterizer->raster(textFace, textViewFor(index), text.style);
+                if (raster)
+                {
+                    glyphs = raster->glyphs;
+                }
+            }
+            Detail::UITextEditVisualLayout result{};
+            if (!Detail::buildTextEditVisualLayout(
+                    textViewFor(index), entry.contentPlacement.contentBox.width,
+                    entry.contentPlacement.contentBox.height, lineHeight, fallback,
+                    config.wrapMode, glyphs, lines, result))
+            {
+                return fail(UIErrorCode::CapacityExceeded,
+                            "UI multiline TextEdit visual-line capacity has been exhausted");
+            }
+            lines.resize(result.lineCount);
+            candidateTextEditVisualLayoutsByNodeIndex[index] = result;
+            float scroll = textEditScrollYByNodeIndex[index];
+            if (!std::isfinite(scroll) || scroll < 0.0F)
+            {
+                scroll = 0.0F;
+            }
+            candidateTextEditScrollYByNodeIndex[index] =
+                (std::min)(scroll, result.maximumScrollY);
+        }
+        return Core::success();
+    }
+    [[nodiscard]] Core::Result<usize> countPaintEntries(
+        const UICommittedLayoutEntry& layoutEntry, bool useCandidateTextEditVisualState) const
     {
         usize paintEntryCount = 0;
         if (layoutEntry.effectiveVisibility != UIVisibility::Visible)
@@ -3502,8 +3634,9 @@ struct UIContext::Impl final {
             return Core::failure(controlPaintBatch.error());
         }
         paintEntryCount += controlPaintBatch->size();
-        paintEntryCount +=
-            Detail::UITextEditPaintEmitter::countEntries(resolveTextEditPaintState(layoutEntry.node, false));
+        paintEntryCount += Detail::UITextEditPaintEmitter::countEntries(
+            resolveTextEditPaintState(
+                layoutEntry.node, false, useCandidateTextEditVisualState));
         return paintEntryCount;
     }
 
@@ -3609,10 +3742,22 @@ struct UIContext::Impl final {
     }
 
     void appendTextGlyphPaints(std::pmr::vector<UICommittedPaintEntry>& output,
-                               const UICommittedLayoutEntry& layoutEntry, u32& nextPaintOrdinal) noexcept
+                               const UICommittedLayoutEntry& layoutEntry, u32& nextPaintOrdinal,
+                               bool useCandidateTextEditVisualState) noexcept
     {
-        Detail::UITextEditPaintEmitter::append(output, layoutEntry, nextPaintOrdinal,
-                                               resolveTextEditPaintState(layoutEntry.node, true));
+        const auto caretGeometry = Detail::UITextEditPaintEmitter::append(
+            output, layoutEntry, nextPaintOrdinal,
+            resolveTextEditPaintState(
+                layoutEntry.node, true, useCandidateTextEditVisualState));
+        if (caretGeometry.has_value() && caretGeometry->effectiveClip.width > 0.0F &&
+            caretGeometry->effectiveClip.height > 0.0F &&
+            caretGeometry->worldRect.x < caretGeometry->effectiveClip.right() &&
+            caretGeometry->worldRect.right() > caretGeometry->effectiveClip.x &&
+            caretGeometry->worldRect.y < caretGeometry->effectiveClip.bottom() &&
+            caretGeometry->worldRect.bottom() > caretGeometry->effectiveClip.y)
+        {
+            candidateTextInputCaretRect = caretGeometry->worldRect;
+        }
     }
 
     [[nodiscard]] static UILogicalRect resolveImageDestination(
@@ -3698,7 +3843,8 @@ struct UIContext::Impl final {
     }
 
     [[nodiscard]] Core::Status appendPaintEntries(std::pmr::vector<UICommittedPaintEntry>& output,
-                                                  const UICommittedLayoutEntry& layoutEntry, u32& nextPaintOrdinal)
+                                                  const UICommittedLayoutEntry& layoutEntry, u32& nextPaintOrdinal,
+                                                  bool useCandidateTextEditVisualState)
     {
         const u32 nodeIndex = layoutEntry.node.index();
         const UIBoxPaint boxPaint = resolvedBoxChrome(layoutEntry.node, nodeIndex);
@@ -3716,33 +3862,57 @@ struct UIContext::Impl final {
             return Core::failure(controlPaintBatch.error());
         }
         controlPaintBatch->appendTo(output, layoutEntry.node, layoutEntry.effectiveClip, nextPaintOrdinal);
-        appendTextGlyphPaints(output, layoutEntry, nextPaintOrdinal);
+        appendTextGlyphPaints(
+            output, layoutEntry, nextPaintOrdinal, useCandidateTextEditVisualState);
         return Core::success();
     }
+
+    struct PaintSnapshotSourceContext final {
+        Impl* impl = nullptr;
+        bool useCandidateTextEditVisualState = false;
+    };
 
     [[nodiscard]] static constexpr Detail::UIPaintSnapshotSourceAdapter paintSnapshotSourceAdapter() noexcept
     {
         return Detail::UIPaintSnapshotSourceAdapter{
             .countEntries = [](const void* context, const UICommittedLayoutEntry& layoutEntry) -> Core::Result<usize> {
-                return static_cast<const Impl*>(context)->countPaintEntries(layoutEntry);
+                const auto& source = *static_cast<const PaintSnapshotSourceContext*>(context);
+                return source.impl->countPaintEntries(
+                    layoutEntry, source.useCandidateTextEditVisualState);
             },
             .appendEntries = [](void* context, std::pmr::vector<UICommittedPaintEntry>& output,
                                 const UICommittedLayoutEntry& layoutEntry, u32& nextPaintOrdinal) -> Core::Status {
-                return static_cast<Impl*>(context)->appendPaintEntries(output, layoutEntry, nextPaintOrdinal);
+                auto& source = *static_cast<PaintSnapshotSourceContext*>(context);
+                return source.impl->appendPaintEntries(
+                    output, layoutEntry, nextPaintOrdinal,
+                    source.useCandidateTextEditVisualState);
             },
         };
     }
 
     [[nodiscard]] Core::Result<usize>
-    validatePaintCandidateCapacity(std::span<const UICommittedLayoutEntry> layoutEntries) const
+    validatePaintCandidateCapacity(std::span<const UICommittedLayoutEntry> layoutEntries,
+                                   bool useCandidateTextEditVisualState)
     {
-        return paintSnapshotBuilder.validateCapacity(layoutEntries, this, paintSnapshotSourceAdapter());
+        PaintSnapshotSourceContext source{
+            .impl = this,
+            .useCandidateTextEditVisualState = useCandidateTextEditVisualState,
+        };
+        return paintSnapshotBuilder.validateCapacity(
+            layoutEntries, &source, paintSnapshotSourceAdapter());
     }
 
     [[nodiscard]] Core::Status buildCommittedPaint(std::pmr::vector<UICommittedPaintEntry>& output,
-                                                   std::span<const UICommittedLayoutEntry> layoutEntries)
+                                                   std::span<const UICommittedLayoutEntry> layoutEntries,
+                                                   bool useCandidateTextEditVisualState)
     {
-        return paintSnapshotBuilder.build(output, layoutEntries, this, paintSnapshotSourceAdapter());
+        candidateTextInputCaretRect.reset();
+        PaintSnapshotSourceContext source{
+            .impl = this,
+            .useCandidateTextEditVisualState = useCandidateTextEditVisualState,
+        };
+        return paintSnapshotBuilder.build(
+            output, layoutEntries, &source, paintSnapshotSourceAdapter());
     }
 
     [[nodiscard]] bool resolveSemanticsSnapshotSource(UINodeId node, Detail::UISemanticsSnapshotSource& source) noexcept
@@ -4234,6 +4404,14 @@ struct UIContext::Impl final {
         return Core::success();
     }
 
+    void resetTextEditPreferredX(UINodeId node) noexcept
+    {
+        if (node.hasValue() && node.index() < textEditPreferredXByNodeIndex.size())
+        {
+            textEditPreferredXByNodeIndex[node.index()].reset();
+        }
+    }
+
     void clearImeFocus() noexcept
     {
         const UINodeId previousFocus = textInputFocus;
@@ -4245,6 +4423,7 @@ struct UIContext::Impl final {
             resetImeCompositionState();
         }
         textInputFocus = {};
+        resetTextEditPreferredX(previousFocus);
         if (defaultActionFocusButton == previousFocus)
         {
             clearDefaultActionFocus();
@@ -4760,6 +4939,42 @@ struct UIContext::Impl final {
         {
             textEditPaintsByNodeIndex[index] = {};
         }
+        if (index < textEditMultilineByNodeIndex.size())
+        {
+            textEditMultilineByNodeIndex[index] = {};
+        }
+        if (index < textEditVisualLinesByNodeIndex.size())
+        {
+            textEditVisualLinesByNodeIndex[index].clear();
+        }
+        if (index < textEditVisualLayoutsByNodeIndex.size())
+        {
+            textEditVisualLayoutsByNodeIndex[index] = {};
+        }
+        if (index < textEditScrollYByNodeIndex.size())
+        {
+            textEditScrollYByNodeIndex[index] = 0.0F;
+        }
+        if (index < candidateTextEditVisualLinesByNodeIndex.size())
+        {
+            candidateTextEditVisualLinesByNodeIndex[index].clear();
+        }
+        if (index < candidateTextEditVisualLayoutsByNodeIndex.size())
+        {
+            candidateTextEditVisualLayoutsByNodeIndex[index] = {};
+        }
+        if (index < candidateTextEditScrollYByNodeIndex.size())
+        {
+            candidateTextEditScrollYByNodeIndex[index] = 0.0F;
+        }
+        if (index < textEditPreferredXByNodeIndex.size())
+        {
+            textEditPreferredXByNodeIndex[index].reset();
+        }
+        if (index < textEditCaretAffinityByNodeIndex.size())
+        {
+            textEditCaretAffinityByNodeIndex[index] = Detail::UITextEditCaretAffinity::Downstream;
+        }
         if (index < progressBarStatesByNodeIndex.size())
         {
             progressBarStatesByNodeIndex[index] = {};
@@ -4935,10 +5150,12 @@ struct UIContext::Impl final {
         dirtyQueueStorage.releaseRouteReservations();
     }
 
-    [[nodiscard]] Core::Status markLayoutDirtyBatch(std::initializer_list<UINodeId> requestedNodes)
+    [[nodiscard]] Core::Status markLayoutAndPaintDirtyBatch(
+        std::span<const UINodeId> requestedLayoutNodes,
+        std::span<const UINodeId> requestedPaintNodes)
     {
         layoutOrderScratch.clear();
-        for (const UINodeId requested : requestedNodes)
+        for (const UINodeId requested : requestedLayoutNodes)
         {
             if (!requested.hasValue())
             {
@@ -4963,6 +5180,23 @@ struct UIContext::Impl final {
                     return fail(UIErrorCode::InvalidNode, "UI dirty ancestry is invalid");
                 }
                 index = record->parentIndex;
+            }
+        }
+        const usize layoutDirtyNodeCount = layoutOrderScratch.size();
+        for (const UINodeId requested : requestedPaintNodes)
+        {
+            if (!requested.hasValue())
+            {
+                continue;
+            }
+            if (!contains(requested) || requested.index() >= dirtyQueueStorage.nodeCapacity())
+            {
+                return fail(UIErrorCode::InvalidNode, "UI paint dirty node is invalid");
+            }
+            if (std::find(layoutOrderScratch.begin(), layoutOrderScratch.end(), requested.index()) ==
+                layoutOrderScratch.end())
+            {
+                layoutOrderScratch.push_back(requested.index());
             }
         }
         if (layoutOrderScratch.empty())
@@ -5001,21 +5235,54 @@ struct UIContext::Impl final {
         constexpr UIDirty ChangedNodeDirty = UIDirty::Style | UIDirty::Measure | UIDirty::Arrange | UIDirty::Composite |
                                              UIDirty::HitTest | UIDirty::Semantics;
         constexpr UIDirty AncestorDirty = UIDirty::Measure | UIDirty::Arrange | UIDirty::Composite | UIDirty::HitTest;
-        for (const u32 dirtyIndex : layoutOrderScratch)
+        for (usize candidateIndex = 0; candidateIndex < layoutDirtyNodeCount; ++candidateIndex)
         {
+            const u32 dirtyIndex = layoutOrderScratch[candidateIndex];
             if (!dirtyQueueStorage.isQueued(dirtyIndex))
             {
                 dirtyQueueStorage.enqueue(idForIndex(dirtyIndex));
             }
             const bool directlyRequested = std::any_of(
-                requestedNodes.begin(), requestedNodes.end(),
+                requestedLayoutNodes.begin(), requestedLayoutNodes.end(),
                 [dirtyIndex](UINodeId requested) noexcept {
                     return requested.hasValue() && requested.index() == dirtyIndex;
                 });
             dirtyQueueStorage.flags(dirtyIndex) |= directlyRequested ? ChangedNodeDirty : AncestorDirty;
         }
-        phaseDirty |= PhaseLayout | PhaseHit;
+        for (const UINodeId requested : requestedPaintNodes)
+        {
+            if (!requested.hasValue())
+            {
+                continue;
+            }
+            const u32 dirtyIndex = requested.index();
+            if (!dirtyQueueStorage.isQueued(dirtyIndex))
+            {
+                dirtyQueueStorage.enqueue(requested);
+            }
+            dirtyQueueStorage.flags(dirtyIndex) |= UIDirty::Paint;
+        }
+        if (layoutDirtyNodeCount != 0)
+        {
+            phaseDirty |= PhaseLayout | PhaseHit;
+        }
+        if (!requestedPaintNodes.empty())
+        {
+            phaseDirty |= PhasePaint;
+        }
         return Core::success();
+    }
+
+    [[nodiscard]] Core::Status markLayoutDirtyBatch(std::span<const UINodeId> requestedNodes)
+    {
+        return markLayoutAndPaintDirtyBatch(requestedNodes, {});
+    }
+
+    [[nodiscard]] Core::Status markLayoutDirtyBatch(
+        std::initializer_list<UINodeId> requestedNodes)
+    {
+        return markLayoutDirtyBatch(
+            std::span<const UINodeId>(requestedNodes.begin(), requestedNodes.size()));
     }
 
     [[nodiscard]] Core::Status markHitTestDirty(UINodeId node)
@@ -5784,11 +6051,20 @@ struct UIContext::Impl final {
         {
             return Core::success();
         }
-        reducedMotionEnabled = enabled;
         if (!enabled)
         {
+            reducedMotionEnabled = false;
             return Core::success();
         }
+        if (Core::Status collected = collectActiveTimelineDirtyNodes(); !collected)
+        {
+            return collected;
+        }
+        if (Core::Status dirty = markCollectedTimelineDirtyNodes(); !dirty)
+        {
+            return dirty;
+        }
+        reducedMotionEnabled = true;
         // Snap every active track to target and free slots (ADR: reduced-motion
         // does not keep tracks on the active list after the call).
         motionTrackStorage.snapAllActive();
@@ -5799,10 +6075,15 @@ struct UIContext::Impl final {
             {
                 continue;
             }
-            const u32 index = completed.node.index();
             applyCompletedMotion(completed);
         }
-        if (!motionTrackStorage.lastCompleted().empty())
+        timelineStorage.snapAllActive();
+        const auto timelineTargets = timelineStorage.lastTargets();
+        for (const Detail::UIKeyframeTimelineStorage::Target& target : timelineTargets)
+        {
+            applyTimelineTarget(target);
+        }
+        if (!motionTrackStorage.lastCompleted().empty() || !timelineTargets.empty())
         {
             phaseDirty |= PhasePaint;
         }
@@ -5865,6 +6146,11 @@ struct UIContext::Impl final {
                 {
                     continue;
                 }
+                if (timelineStorage.hasPresentationOwner(node, UIAnimatableProperty::BackgroundColor))
+                {
+                    return fail(UIErrorCode::InvalidStyle,
+                                "Style motion reservation conflicts with an active keyframe timeline");
+                }
                 if (Core::Status reserved =
                         motionTrackStorage.reservePersistent(node, UIAnimatableProperty::BackgroundColor);
                     !reserved)
@@ -5886,23 +6172,9 @@ struct UIContext::Impl final {
         return styleBackgroundColorTransitionSpec;
     }
 
-    void applyCompletedMotion(const Detail::UIMotionTrackStorage::Completed& completed) noexcept
+    void commitMotionProperty(const Detail::UIMotionTrackStorage::Completed& completed) noexcept
     {
-        if (!contains(completed.node))
-        {
-            return;
-        }
         const u32 index = completed.node.index();
-        if (completed.completionMode == Detail::UIMotionTrackStorage::CompletionMode::StylePresentationOnly)
-        {
-            if (!dirtyQueueStorage.isQueued(index))
-            {
-                dirtyQueueStorage.enqueue(completed.node);
-            }
-            dirtyQueueStorage.flags(index) |= UIDirty::Paint;
-            return;
-        }
-
         switch (completed.property)
         {
         case UIAnimatableProperty::BackgroundColor:
@@ -5933,7 +6205,8 @@ struct UIContext::Impl final {
             }
             break;
         case UIAnimatableProperty::CornerRadius:
-            boxPaintsByIndex[index].cornerRadius = (std::max)(0.0F, completed.scalar);
+            boxPaintsByIndex[index].cornerRadii = UILogicalCornerRadii::uniform(
+                (std::max)(0.0F, completed.scalar));
             detachThemeBinding(index, ThemeBindingBoxPaint);
             break;
         case UIAnimatableProperty::VisualOffset:
@@ -5944,12 +6217,82 @@ struct UIContext::Impl final {
                 presentationOffsetValidByNodeIndex[index] = 1;
             }
             break;
+        case UIAnimatableProperty::LayoutWidth:
+        case UIAnimatableProperty::LayoutHeight:
+        case UIAnimatableProperty::LayoutOffset:
+            // Direct transition storage never creates layout tracks.
+            break;
         }
-        if (!dirtyQueueStorage.isQueued(index))
+    }
+
+    void applyCompletedMotion(const Detail::UIMotionTrackStorage::Completed& completed) noexcept
+    {
+        if (!contains(completed.node))
         {
-            dirtyQueueStorage.enqueue(completed.node);
+            return;
         }
-        dirtyQueueStorage.flags(index) |= UIDirty::Paint;
+        if (completed.completionMode == Detail::UIMotionTrackStorage::CompletionMode::StylePresentationOnly)
+        {
+            return;
+        }
+
+        commitMotionProperty(completed);
+    }
+
+    void applyTimelineTarget(const Detail::UIKeyframeTimelineStorage::Target& target) noexcept
+    {
+        if (!contains(target.node))
+        {
+            return;
+        }
+        UILayoutStyle& layout = layoutStylesByIndex[target.node.index()];
+        switch (target.property)
+        {
+        case UIAnimatableProperty::LayoutWidth:
+            layout.size.width = UILayoutLength::Px((std::max)(0.0F, target.value.scalar));
+            return;
+        case UIAnimatableProperty::LayoutHeight:
+            layout.size.height = UILayoutLength::Px((std::max)(0.0F, target.value.scalar));
+            return;
+        case UIAnimatableProperty::LayoutOffset:
+            layout.overlay.offset.x = UILayoutLength::Px(target.value.offset.x);
+            layout.overlay.offset.y = UILayoutLength::Px(target.value.offset.y);
+            return;
+        case UIAnimatableProperty::BackgroundColor:
+        case UIAnimatableProperty::BorderColor:
+        case UIAnimatableProperty::TextColor:
+        case UIAnimatableProperty::Opacity:
+        case UIAnimatableProperty::CornerRadius:
+        case UIAnimatableProperty::VisualOffset:
+            break;
+        }
+        Detail::UIMotionTrackStorage::Completed completed{
+            .node = target.node,
+            .property = target.property,
+            .completionMode = Detail::UIMotionTrackStorage::CompletionMode::CommitProperty,
+        };
+        switch (target.value.kind)
+        {
+        case UIKeyframeValueKind::Color:
+            completed.valueKind = Detail::UIMotionTrackStorage::ValueKind::Color;
+            completed.color = target.value.color;
+            break;
+        case UIKeyframeValueKind::Scalar:
+            completed.valueKind = Detail::UIMotionTrackStorage::ValueKind::Scalar;
+            completed.scalar = target.value.scalar;
+            break;
+        case UIKeyframeValueKind::Offset:
+            completed.valueKind = Detail::UIMotionTrackStorage::ValueKind::Offset;
+            completed.offset = {
+                .x = target.value.offset.x,
+                .y = target.value.offset.y,
+            };
+            break;
+        }
+        // Timeline control operations preflight and mark the complete target
+        // set before mutating playback. Candidate completion already built the
+        // matching paint snapshot, so target application itself stays infallible.
+        commitMotionProperty(completed);
     }
 
     [[nodiscard]] UIStraightSrgba8Color unpremultiplyColor(UIPremultipliedRgba8Color premul) const noexcept
@@ -5967,9 +6310,70 @@ struct UIContext::Impl final {
         };
     }
 
+    [[nodiscard]] Detail::UIMotionTrackStorage::NodePresentation
+    motionPresentationFor(UINodeId node) const noexcept
+    {
+        auto presentation = motionTrackStorage.presentationFor(node);
+        const auto timeline = timelineStorage.presentationFor(node);
+        if (timeline.hasBackgroundColor)
+        {
+            presentation.hasBackgroundColor = true;
+            presentation.backgroundColor = timeline.backgroundColor;
+        }
+        if (timeline.hasBorderColor)
+        {
+            presentation.hasBorderColor = true;
+            presentation.borderColor = timeline.borderColor;
+        }
+        if (timeline.hasTextColor)
+        {
+            presentation.hasTextColor = true;
+            presentation.textColor = timeline.textColor;
+        }
+        if (timeline.hasOpacity)
+        {
+            presentation.hasOpacity = true;
+            presentation.opacity = timeline.opacity;
+        }
+        if (timeline.hasCornerRadius)
+        {
+            presentation.hasCornerRadius = true;
+            presentation.cornerRadius = timeline.cornerRadius;
+        }
+        if (timeline.hasVisualOffset)
+        {
+            presentation.hasVisualOffset = true;
+            presentation.visualOffset = {
+                .x = timeline.visualOffset.x,
+                .y = timeline.visualOffset.y,
+            };
+        }
+        return presentation;
+    }
+
+    [[nodiscard]] UILayoutStyle presentationLayoutStyle(u32 nodeIndex) const noexcept
+    {
+        UILayoutStyle result = layoutStylesByIndex[nodeIndex];
+        const auto presentation = timelineStorage.presentationFor(idForIndex(nodeIndex));
+        if (presentation.hasLayoutWidth)
+        {
+            result.size.width = UILayoutLength::Px(presentation.layoutWidth);
+        }
+        if (presentation.hasLayoutHeight)
+        {
+            result.size.height = UILayoutLength::Px(presentation.layoutHeight);
+        }
+        if (presentation.hasLayoutOffset)
+        {
+            result.overlay.offset.x = UILayoutLength::Px(presentation.layoutOffset.x);
+            result.overlay.offset.y = UILayoutLength::Px(presentation.layoutOffset.y);
+        }
+        return result;
+    }
+
     [[nodiscard]] UIStraightSrgba8Color currentBackgroundColor(UINodeId node, u32 nodeIndex) const noexcept
     {
-        const auto presentation = motionTrackStorage.presentationFor(node);
+        const auto presentation = motionPresentationFor(node);
         if (presentation.hasBackgroundColor)
         {
             return presentation.backgroundColor;
@@ -5987,7 +6391,7 @@ struct UIContext::Impl final {
 
     [[nodiscard]] UIStraightSrgba8Color currentBorderColor(UINodeId node, u32 nodeIndex) const noexcept
     {
-        const auto presentation = motionTrackStorage.presentationFor(node);
+        const auto presentation = motionPresentationFor(node);
         if (presentation.hasBorderColor)
         {
             return presentation.borderColor;
@@ -5998,7 +6402,7 @@ struct UIContext::Impl final {
 
     [[nodiscard]] UIStraightSrgba8Color currentTextColor(UINodeId node, u32 nodeIndex) const noexcept
     {
-        const auto presentation = motionTrackStorage.presentationFor(node);
+        const auto presentation = motionPresentationFor(node);
         if (presentation.hasTextColor)
         {
             return presentation.textColor;
@@ -6012,7 +6416,7 @@ struct UIContext::Impl final {
 
     [[nodiscard]] float currentOpacity(UINodeId node, u32 nodeIndex) const noexcept
     {
-        const auto presentation = motionTrackStorage.presentationFor(node);
+        const auto presentation = motionPresentationFor(node);
         if (presentation.hasOpacity)
         {
             return presentation.opacity;
@@ -6027,18 +6431,18 @@ struct UIContext::Impl final {
 
     [[nodiscard]] float currentCornerRadius(UINodeId node, u32 nodeIndex) const noexcept
     {
-        const auto presentation = motionTrackStorage.presentationFor(node);
+        const auto presentation = motionPresentationFor(node);
         if (presentation.hasCornerRadius)
         {
             return presentation.cornerRadius;
         }
-        return boxPaintsByIndex[nodeIndex].cornerRadius;
+        return boxPaintsByIndex[nodeIndex].cornerRadii.topLeft;
     }
 
     [[nodiscard]] Detail::UIMotionTrackStorage::Scalar2 currentVisualOffset(UINodeId node,
                                                                             u32 nodeIndex) const noexcept
     {
-        const auto presentation = motionTrackStorage.presentationFor(node);
+        const auto presentation = motionPresentationFor(node);
         if (presentation.hasVisualOffset)
         {
             return presentation.visualOffset;
@@ -6069,6 +6473,11 @@ struct UIContext::Impl final {
         if (!nodeResult)
         {
             return Core::failure(nodeResult.error());
+        }
+        if (timelineStorage.hasPresentationOwner(node, property))
+        {
+            return fail(UIErrorCode::InvalidStyle,
+                        "Direct UI motion conflicts with an active keyframe timeline");
         }
         if (spec.property != property)
         {
@@ -6153,6 +6562,11 @@ struct UIContext::Impl final {
         {
             return Core::failure(nodeResult.error());
         }
+        if (timelineStorage.hasPresentationOwner(node, UIAnimatableProperty::Opacity))
+        {
+            return fail(UIErrorCode::InvalidStyle,
+                        "Direct UI motion conflicts with an active keyframe timeline");
+        }
         if (spec.property != UIAnimatableProperty::Opacity)
         {
             return fail(UIErrorCode::InvalidStyle, "UI motion transition property mismatch");
@@ -6204,6 +6618,11 @@ struct UIContext::Impl final {
         {
             return Core::failure(nodeResult.error());
         }
+        if (timelineStorage.hasPresentationOwner(node, UIAnimatableProperty::CornerRadius))
+        {
+            return fail(UIErrorCode::InvalidStyle,
+                        "Direct UI motion conflicts with an active keyframe timeline");
+        }
         if (spec.property != UIAnimatableProperty::CornerRadius)
         {
             return fail(UIErrorCode::InvalidStyle, "UI motion transition property mismatch");
@@ -6213,6 +6632,13 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::InvalidStyle, "UI corner radius target must be finite and non-negative");
         }
         const u32 index = node.index();
+        const auto presentation = motionPresentationFor(node);
+        if (!presentation.hasCornerRadius &&
+            !boxPaintsByIndex[index].cornerRadii.isUniform())
+        {
+            return fail(UIErrorCode::InvalidStyle,
+                        "Uniform corner-radius motion cannot start from per-corner authored radii");
+        }
         const float start = currentCornerRadius(node, index);
         const Core::MonotonicTimePoint now = motionNow();
         if (reducedMotionEnabled || spec.duration.count() <= 0.0)
@@ -6254,6 +6680,11 @@ struct UIContext::Impl final {
         {
             return Core::failure(nodeResult.error());
         }
+        if (timelineStorage.hasPresentationOwner(node, UIAnimatableProperty::VisualOffset))
+        {
+            return fail(UIErrorCode::InvalidStyle,
+                        "Direct UI motion conflicts with an active keyframe timeline");
+        }
         if (spec.property != UIAnimatableProperty::VisualOffset)
         {
             return fail(UIErrorCode::InvalidStyle, "UI motion transition property mismatch");
@@ -6292,24 +6723,373 @@ struct UIContext::Impl final {
         return markStylePropertyDirty(node, UIStylePropertyKind::ColorOrOpacity);
     }
 
+    struct TimelineValidationContext final {
+        Impl* impl = nullptr;
+        UITimelineId timeline{};
+    };
+
+    struct TimelineDirtyNodeCollectionContext final {
+        std::pmr::vector<UINodeId>* layoutNodes = nullptr;
+        std::pmr::vector<UINodeId>* paintNodes = nullptr;
+    };
+
+    [[nodiscard]] static Core::Status collectTimelineDirtyNodeVisitor(
+        void* rawContext, const Detail::UIKeyframeTimelineStorage::TrackView& track)
+    {
+        auto& context = *static_cast<TimelineDirtyNodeCollectionContext*>(rawContext);
+        std::pmr::vector<UINodeId>* nodes = isLayoutAnimatableProperty(track.property)
+                                                    ? context.layoutNodes
+                                                    : context.paintNodes;
+        if (nodes == nullptr || nodes->size() >= nodes->capacity())
+        {
+            return fail(UIErrorCode::CapacityExceeded,
+                        "UI timeline dirty-node scratch capacity has been exhausted");
+        }
+        nodes->push_back(track.node);
+        return Core::success();
+    }
+
+    [[nodiscard]] static Core::Status validateTimelineTrackVisitor(
+        void* rawContext, const Detail::UIKeyframeTimelineStorage::TrackView& track)
+    {
+        auto& context = *static_cast<TimelineValidationContext*>(rawContext);
+        Impl& impl = *context.impl;
+        auto nodeResult = impl.resolveNode(track.node);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        if (track.property == UIAnimatableProperty::TextColor &&
+            (track.node.index() >= impl.textStatesByIndex.size() ||
+             !impl.textStatesByIndex[track.node.index()].hasContent))
+        {
+            return fail(UIErrorCode::InvalidText,
+                        "UI timeline text color track requires intrinsic text content");
+        }
+        if (impl.motionTrackStorage.hasTrack(track.node, track.property))
+        {
+            return fail(UIErrorCode::InvalidStyle,
+                        "UI timeline property conflicts with a direct or persistent motion owner");
+        }
+        if (impl.timelineStorage.hasPresentationOwner(track.node, track.property, context.timeline))
+        {
+            return fail(UIErrorCode::InvalidStyle,
+                        "UI timeline property is already owned by another active timeline");
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status validateTimelineNodes(UITimelineId timeline)
+    {
+        TimelineValidationContext context{.impl = this, .timeline = timeline};
+        return timelineStorage.visitTracks(timeline, &context, &validateTimelineTrackVisitor);
+    }
+
+    [[nodiscard]] Core::Status collectTimelineDirtyNodes(UITimelineId timeline)
+    {
+        timelineLayoutNodeScratch.clear();
+        timelinePaintNodeScratch.clear();
+        TimelineDirtyNodeCollectionContext context{
+            .layoutNodes = &timelineLayoutNodeScratch,
+            .paintNodes = &timelinePaintNodeScratch,
+        };
+        return timelineStorage.visitTracks(
+            timeline, &context, &collectTimelineDirtyNodeVisitor);
+    }
+
+    [[nodiscard]] Core::Status collectActiveTimelineDirtyNodes()
+    {
+        timelineLayoutNodeScratch.clear();
+        timelinePaintNodeScratch.clear();
+        TimelineDirtyNodeCollectionContext context{
+            .layoutNodes = &timelineLayoutNodeScratch,
+            .paintNodes = &timelinePaintNodeScratch,
+        };
+        return timelineStorage.visitActiveTracks(
+            &context, &collectTimelineDirtyNodeVisitor);
+    }
+
+    [[nodiscard]] Core::Status markCollectedTimelineDirtyNodes()
+    {
+        return markLayoutAndPaintDirtyBatch(
+            std::span<const UINodeId>(timelineLayoutNodeScratch.data(),
+                                      timelineLayoutNodeScratch.size()),
+            std::span<const UINodeId>(timelinePaintNodeScratch.data(),
+                                      timelinePaintNodeScratch.size()));
+    }
+
+    [[nodiscard]] Core::Result<UITimelineId> createTimeline(const UITimelineDesc& desc)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        drainDeferredRootDestroys();
+        // Validate the borrowed descriptor before copying it. The storage
+        // repeats structural/keyframe validation and performs the capacity
+        // preflight before publishing any slot.
+        for (const UITimelineTrackDesc& track : desc.tracks)
+        {
+            auto nodeResult = resolveNode(track.node);
+            if (!nodeResult)
+            {
+                return Core::failure(nodeResult.error());
+            }
+            if (track.property == UIAnimatableProperty::TextColor &&
+                (track.node.index() >= textStatesByIndex.size() ||
+                 !textStatesByIndex[track.node.index()].hasContent))
+            {
+                return fail(UIErrorCode::InvalidText,
+                            "UI timeline text color track requires intrinsic text content");
+            }
+        }
+        return timelineStorage.create(desc);
+    }
+
+    [[nodiscard]] Core::Status replaceTimeline(
+        UITimelineId timeline, const UITimelineDesc& desc)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!timelineStorage.contains(timeline))
+        {
+            return fail(UIErrorCode::InvalidStyle,
+                        "UI timeline ID is invalid, stale, or belongs to another context");
+        }
+        for (const UITimelineTrackDesc& track : desc.tracks)
+        {
+            auto nodeResult = resolveNode(track.node);
+            if (!nodeResult)
+            {
+                return Core::failure(nodeResult.error());
+            }
+            if (track.property == UIAnimatableProperty::TextColor &&
+                (track.node.index() >= textStatesByIndex.size() ||
+                 !textStatesByIndex[track.node.index()].hasContent))
+            {
+                return fail(UIErrorCode::InvalidText,
+                            "UI timeline text color track requires intrinsic text content");
+            }
+        }
+        if (Core::Status preflight = timelineStorage.preflightReplace(timeline, desc); !preflight)
+        {
+            return preflight;
+        }
+        auto wasActive = timelineStorage.isActive(timeline);
+        if (!wasActive)
+        {
+            return Core::failure(wasActive.error());
+        }
+        if (*wasActive)
+        {
+            if (Core::Status collected = collectTimelineDirtyNodes(timeline); !collected)
+            {
+                return collected;
+            }
+            if (Core::Status dirty = markCollectedTimelineDirtyNodes(); !dirty)
+            {
+                return dirty;
+            }
+        }
+        if (Core::Status status = timelineStorage.replace(timeline, desc); !status)
+        {
+            return status;
+        }
+        const auto targets = timelineStorage.lastTargets();
+        for (const Detail::UIKeyframeTimelineStorage::Target& target : targets)
+        {
+            applyTimelineTarget(target);
+        }
+        if (!targets.empty())
+        {
+            phaseDirty |= PhasePaint;
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status playTimeline(UITimelineId timeline)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!timelineStorage.contains(timeline))
+        {
+            return fail(UIErrorCode::InvalidStyle,
+                        "UI timeline ID is invalid, stale, or belongs to another context");
+        }
+        if (Core::Status validation = validateTimelineNodes(timeline); !validation)
+        {
+            return validation;
+        }
+        if (!reducedMotionEnabled)
+        {
+            if (Core::Status preflight = timelineStorage.preflightPlay(timeline); !preflight)
+            {
+                return preflight;
+            }
+        }
+        if (Core::Status collected = collectTimelineDirtyNodes(timeline); !collected)
+        {
+            return collected;
+        }
+        if (Core::Status dirty = markCollectedTimelineDirtyNodes(); !dirty)
+        {
+            return dirty;
+        }
+        if (reducedMotionEnabled)
+        {
+            if (Core::Status status = timelineStorage.snapToFinal(timeline); !status)
+            {
+                return status;
+            }
+        }
+        else if (Core::Status status = timelineStorage.play(timeline, motionNow()); !status)
+        {
+            return status;
+        }
+        const auto targets = timelineStorage.lastTargets();
+        for (const Detail::UIKeyframeTimelineStorage::Target& target : targets)
+        {
+            applyTimelineTarget(target);
+        }
+        phaseDirty |= PhasePaint;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status cancelTimeline(UITimelineId timeline)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        auto wasActive = timelineStorage.isActive(timeline);
+        if (!wasActive)
+        {
+            return Core::failure(wasActive.error());
+        }
+        if (*wasActive)
+        {
+            if (Core::Status collected = collectTimelineDirtyNodes(timeline); !collected)
+            {
+                return collected;
+            }
+            if (Core::Status dirty = markCollectedTimelineDirtyNodes(); !dirty)
+            {
+                return dirty;
+            }
+        }
+        if (Core::Status status = timelineStorage.cancel(timeline); !status)
+        {
+            return status;
+        }
+        const auto targets = timelineStorage.lastTargets();
+        for (const Detail::UIKeyframeTimelineStorage::Target& target : targets)
+        {
+            applyTimelineTarget(target);
+        }
+        if (!targets.empty())
+        {
+            phaseDirty |= PhasePaint;
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status destroyTimeline(UITimelineId timeline)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        auto wasActive = timelineStorage.isActive(timeline);
+        if (!wasActive)
+        {
+            return Core::failure(wasActive.error());
+        }
+        if (*wasActive)
+        {
+            if (Core::Status collected = collectTimelineDirtyNodes(timeline); !collected)
+            {
+                return collected;
+            }
+            if (Core::Status dirty = markCollectedTimelineDirtyNodes(); !dirty)
+            {
+                return dirty;
+            }
+        }
+        if (Core::Status status = timelineStorage.destroy(timeline); !status)
+        {
+            return status;
+        }
+        const auto targets = timelineStorage.lastTargets();
+        for (const Detail::UIKeyframeTimelineStorage::Target& target : targets)
+        {
+            applyTimelineTarget(target);
+        }
+        if (!targets.empty())
+        {
+            phaseDirty |= PhasePaint;
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<bool> isTimelineActive(UITimelineId timeline) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        return timelineStorage.isActive(timeline);
+    }
+
     [[nodiscard]] Core::Status sampleMotion(Core::MonotonicTimePoint now)
     {
         if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
         {
             return ownerThread;
         }
-        if (motionTrackStorage.activeCount() == 0)
-        {
-            return Core::success();
-        }
         const usize before = motionTrackStorage.activeCount();
-        static_cast<void>(motionTrackStorage.sample(now));
-        for (const Detail::UIMotionTrackStorage::Completed& completed :
-             motionTrackStorage.lastCompleted())
+        motionTrackStorage.beginCandidateSample(now);
+        const usize timelineBefore = timelineStorage.activeCount();
+        timelineStorage.beginCandidateSample(now);
+        const auto layoutNodes = timelineStorage.candidateLayoutNodes();
+        if (!layoutNodes.empty())
         {
-            applyCompletedMotion(completed);
+            motionTrackStorage.ensureCandidateTransaction();
+            if (Core::Status dirty = markLayoutDirtyBatch(layoutNodes); !dirty)
+            {
+                motionTrackStorage.rollbackCandidateSample();
+                timelineStorage.discardCandidateSample();
+                ++layoutTimelineCommitFailureCount;
+                return dirty;
+            }
+            // Candidate presentation stays staged until commitLayout publishes
+            // Layout, Hit, and Paint from this exact sample together.
+            phaseDirty |= PhasePaint;
         }
-        if (motionTrackStorage.lastSampledCount() == 0 && before == 0)
+        else
+        {
+            motionTrackStorage.commitCandidateSample();
+            for (const Detail::UIMotionTrackStorage::Completed& completed :
+                 motionTrackStorage.lastCompleted())
+            {
+                applyCompletedMotion(completed);
+            }
+            timelineStorage.commitCandidateSample();
+            const auto timelineTargets = timelineStorage.lastTargets();
+            for (const Detail::UIKeyframeTimelineStorage::Target& target : timelineTargets)
+            {
+                applyTimelineTarget(target);
+            }
+        }
+        if (motionTrackStorage.lastSampledCount() == 0 && before == 0 &&
+            timelineStorage.lastSampledTimelineCount() == 0 && timelineBefore == 0)
         {
             return Core::success();
         }
@@ -6320,7 +7100,7 @@ struct UIContext::Impl final {
     [[nodiscard]] UIBoxPaint presentationBoxPaint(UINodeId node, u32 nodeIndex) const noexcept
     {
         UIBoxPaint paint = boxPaintsByIndex[nodeIndex];
-        const auto presentation = motionTrackStorage.presentationFor(node);
+        const auto presentation = motionPresentationFor(node);
         if (presentation.hasBorderColor)
         {
             paint.borderLight = presentation.borderColor;
@@ -6328,7 +7108,8 @@ struct UIContext::Impl final {
         }
         if (presentation.hasCornerRadius)
         {
-            paint.cornerRadius = presentation.cornerRadius;
+            paint.cornerRadii = UILogicalCornerRadii::uniform(
+                presentation.cornerRadius);
         }
         // VisualOffset is applied to paint worldRect (not hit/layout) by callers.
         return paint;
@@ -6337,11 +7118,10 @@ struct UIContext::Impl final {
     [[nodiscard]] UILogicalRect presentationPaintWorldRect(UINodeId node, u32 nodeIndex,
                                                            UILogicalRect worldRect) const noexcept
     {
-        const auto offset = currentVisualOffset(node, nodeIndex);
         // Only residual/active motion offsets shift chrome; default currentVisualOffset
         // falls back to box shadow offsets for transition *starts*, but paint shift
         // must not double-count authored drop-shadow offsets.
-        const auto presentation = motionTrackStorage.presentationFor(node);
+        const auto presentation = motionPresentationFor(node);
         float dx = 0.0F;
         float dy = 0.0F;
         if (presentation.hasVisualOffset)
@@ -6368,7 +7148,7 @@ struct UIContext::Impl final {
                                                                 u32 nodeIndex) const noexcept
     {
         UIPremultipliedRgba8Color fill = resolvedBoxFillCacheByNodeIndex[nodeIndex];
-        const auto presentation = motionTrackStorage.presentationFor(node);
+        const auto presentation = motionPresentationFor(node);
         if (presentation.hasBackgroundColor)
         {
             fill = premultiply(presentation.backgroundColor);
@@ -6813,13 +7593,41 @@ struct UIContext::Impl final {
             focusScopeModesByNodeIndex[node.index()] = *descriptor.focusScopeMode;
         }
 
+        if (kind == BuiltinElementKind::TextEdit)
+        {
+            textEditMultilineByNodeIndex[node.index()] = descriptor.textEditMultiline;
+            if (descriptor.textEditMultiline.enabled)
+            {
+                // Reserve the authored row budget while the element is being
+                // created.  The commit path is noexcept and must only resize
+                // this already-reserved vector; a late PMR allocation would
+                // otherwise turn a bounded capacity failure into termination.
+                try
+                {
+                    const usize visualLineCapacity =
+                        descriptor.textEditMultiline.maximumVisualLines != 0
+                            ? descriptor.textEditMultiline.maximumVisualLines
+                            : capacityConfig.textEditVisualLineCapacity;
+                    auto& visualLines = textEditVisualLinesByNodeIndex[node.index()];
+                    visualLines.reserve(visualLineCapacity);
+                    auto& candidateVisualLines =
+                        candidateTextEditVisualLinesByNodeIndex[node.index()];
+                    candidateVisualLines.reserve(visualLineCapacity);
+                }
+                catch (const std::bad_alloc&)
+                {
+                    return fail(UIErrorCode::CapacityExceeded,
+                                "UI multiline TextEdit visual-line storage could not be reserved");
+                }
+            }
+        }
+
         if (!descriptor.text.has_value())
         {
             refreshLocalPaintCache(node.index());
             static_cast<void>(refreshResolvedStyleCache(node.index()));
             return Core::success();
         }
-
         WidgetTextState& state = textStatesByIndex[node.index()];
         if (descriptor.textStyle.has_value())
         {
@@ -6873,6 +7681,13 @@ struct UIContext::Impl final {
         {
             return Core::failure(normalizedLayout.error());
         }
+        if (descriptor.visual.boxPaint.has_value() &&
+            !Detail::isValidLogicalCornerRadii(
+                descriptor.visual.boxPaint->cornerRadii))
+        {
+            return fail(UIErrorCode::InvalidElementDescriptor,
+                        "UI box corner radii must be finite and non-negative");
+        }
         if (descriptor.pointerHitPolicy.has_value() && !isValidPointerHitPolicy(*descriptor.pointerHitPolicy))
         {
             return fail(UIErrorCode::InvalidPointerPolicy, "UI element pointer hit policy is not recognized");
@@ -6895,6 +7710,31 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidElementDescriptor,
                         "UI TreeView creation config requires the VirtualTree behavior");
+        }
+        if (kind == BuiltinElementKind::TextEdit)
+        {
+            const UITextEditMultilineConfig& multiline = descriptor.textEditMultiline;
+            if (!std::isfinite(multiline.wheelStep) || multiline.wheelStep < 0.0F ||
+                (multiline.enabled && multiline.maximumVisualLines == 0))
+            {
+                return fail(UIErrorCode::InvalidElementDescriptor,
+                            "UI multiline TextEdit requires finite wheel step and visual-line capacity");
+            }
+            if (multiline.maximumBytes > (std::numeric_limits<u32>::max)())
+            {
+                return fail(UIErrorCode::CapacityExceeded, "UI multiline TextEdit byte limit is too large");
+            }
+            if (multiline.enabled &&
+                static_cast<usize>(multiline.maximumVisualLines) > capacityConfig.textEditVisualLineCapacity)
+            {
+                return fail(UIErrorCode::CapacityExceeded,
+                            "UI multiline TextEdit visual-line capacity exceeds the context budget");
+            }
+        }
+        else if (descriptor.textEditMultiline != UITextEditMultilineConfig{})
+        {
+            return fail(UIErrorCode::InvalidElementDescriptor,
+                        "UI multiline TextEdit configuration requires a TextEdit element");
         }
         if (!isValidStyleRole(descriptor.visual.styleRole))
         {
@@ -6955,11 +7795,24 @@ struct UIContext::Impl final {
             {
                 return fail(UIErrorCode::CapacityExceeded, "UI element text payload is too large");
             }
-            if ((kind == BuiltinElementKind::TextEdit || kind == BuiltinElementKind::RadioButton) &&
-                containsLineBreak(*descriptor.text))
+            if ((kind == BuiltinElementKind::RadioButton && containsLineBreak(*descriptor.text)) ||
+                (kind == BuiltinElementKind::TextEdit &&
+                 (descriptor.text->find('\r') != std::string_view::npos ||
+                  (!descriptor.textEditMultiline.enabled && descriptor.text->find('\n') != std::string_view::npos))))
             {
                 return fail(UIErrorCode::InvalidText,
-                            "UI TextEdit and RadioButton accept one logical line without CR or LF");
+                            "UI RadioButton and single-line TextEdit accept one logical line without CR or LF");
+            }
+            if (kind == BuiltinElementKind::TextEdit && descriptor.textEditMultiline.enabled &&
+                descriptor.textEditMultiline.maximumVisualLines != 0)
+            {
+                const usize hardLineCount = 1U + static_cast<usize>(std::count(
+                    descriptor.text->begin(), descriptor.text->end(), '\n'));
+                if (hardLineCount > descriptor.textEditMultiline.maximumVisualLines)
+                {
+                    return fail(UIErrorCode::CapacityExceeded,
+                                "UI multiline TextEdit visual-line capacity has been exceeded");
+                }
             }
         } else if (!descriptor.image.has_value() && descriptor.contentAlignment != UIContentAlignment{})
         {
@@ -8087,6 +8940,12 @@ struct UIContext::Impl final {
             deactivateAllRoutedPointerListenersForNode(currentIndex);
             deactivateButtonActionForNode(currentIndex);
             sliderChangeCallbackRegistry.clearNode(currentIndex, true);
+            timelineStorage.releaseNode(node);
+            const auto timelineTargets = timelineStorage.lastTargets();
+            for (const Detail::UIKeyframeTimelineStorage::Target& target : timelineTargets)
+            {
+                applyTimelineTarget(target);
+            }
             motionTrackStorage.releaseNode(node);
             releaseFlowNode(currentIndex);
             idsByIndex[currentIndex] = {};
@@ -8452,6 +9311,7 @@ struct UIContext::Impl final {
             if (textInputFocus == node)
             {
                 textInputFocus = {};
+                resetTextEditPreferredX(node);
                 resetImeCompositionState();
             }
         }
@@ -8755,6 +9615,11 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidNode, "UI node is not owned by the updater root");
         }
+        if (!Detail::isValidLogicalCornerRadii(paint.cornerRadii))
+        {
+            return fail(UIErrorCode::InvalidStyle,
+                        "UI box corner radii must be finite and non-negative");
+        }
 
         const UIBoxPaint normalizedPaint = Detail::normalizeBoxPaint(paint);
         UIBoxPaint& currentPaint = boxPaintsByIndex[node.index()];
@@ -8986,11 +9851,31 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidText, "UI text requires an element with intrinsic text content");
         }
-        if ((record->kind == BuiltinElementKind::TextEdit || record->kind == BuiltinElementKind::RadioButton) &&
-            containsLineBreak(utf8))
+        const UITextEditMultilineConfig multiline =
+            node.index() < textEditMultilineByNodeIndex.size()
+                ? textEditMultilineByNodeIndex[node.index()] : UITextEditMultilineConfig{};
+        if ((record->kind == BuiltinElementKind::RadioButton && containsLineBreak(utf8)) ||
+            (utf8.find('\r') != std::string_view::npos) ||
+            (record->kind == BuiltinElementKind::TextEdit && !multiline.enabled &&
+             utf8.find('\n') != std::string_view::npos))
         {
             return fail(UIErrorCode::InvalidText,
-                        "UI TextEdit and RadioButton accept one logical line without CR or LF");
+                        "UI RadioButton and single-line TextEdit accept one logical line without CR or LF");
+        }
+        if (record->kind == BuiltinElementKind::TextEdit && multiline.maximumBytes != 0 &&
+            utf8.size() > multiline.maximumBytes)
+        {
+            return fail(UIErrorCode::CapacityExceeded, "UI multiline TextEdit byte capacity has been exceeded");
+        }
+        if (record->kind == BuiltinElementKind::TextEdit && multiline.enabled &&
+            multiline.maximumVisualLines != 0)
+        {
+            const usize hardLineCount = 1U + static_cast<usize>(std::count(utf8.begin(), utf8.end(), '\n'));
+            if (hardLineCount > multiline.maximumVisualLines)
+            {
+                return fail(UIErrorCode::CapacityExceeded,
+                            "UI multiline TextEdit visual-line capacity has been exceeded");
+            }
         }
         if (utf8.size() > (std::numeric_limits<u32>::max)())
         {
@@ -9053,6 +9938,17 @@ struct UIContext::Impl final {
             state.length = 0;
             state.metrics = {};
             state.hasContent = false;
+            if (record->kind == BuiltinElementKind::TextEdit &&
+                node.index() < textEditPreferredXByNodeIndex.size())
+            {
+                textEditPreferredXByNodeIndex[node.index()].reset();
+            }
+            if (record->kind == BuiltinElementKind::TextEdit &&
+                node.index() < textEditCaretAffinityByNodeIndex.size())
+            {
+                textEditCaretAffinityByNodeIndex[node.index()] =
+                    Detail::UITextEditCaretAffinity::Downstream;
+            }
             if (Detail::UITextInputState* textInputState =
                     behaviorStateStorage.tryTextInputState(node.index());
                 textInputState != nullptr)
@@ -9075,13 +9971,26 @@ struct UIContext::Impl final {
         state.length = static_cast<u32>(utf8.size());
         state.metrics = *metrics;
         state.hasContent = true;
+        if (record->kind == BuiltinElementKind::TextEdit &&
+            node.index() < textEditPreferredXByNodeIndex.size())
+        {
+            textEditPreferredXByNodeIndex[node.index()].reset();
+        }
+        if (record->kind == BuiltinElementKind::TextEdit &&
+            node.index() < textEditCaretAffinityByNodeIndex.size())
+        {
+            textEditCaretAffinityByNodeIndex[node.index()] =
+                Detail::UITextEditCaretAffinity::Downstream;
+        }
         if (Detail::UITextInputState* textInputState =
                 behaviorStateStorage.tryTextInputState(node.index());
             textInputState != nullptr)
         {
             UITextSelection& selection = textInputState->selection;
-            selection.anchorCodepoint = (std::min)(selection.anchorCodepoint, metrics->codepointCount);
-            selection.caretCodepoint = (std::min)(selection.caretCodepoint, metrics->codepointCount);
+            selection.anchorCodepoint = Detail::nearestGraphemeBoundary(
+                utf8, (std::min)(selection.anchorCodepoint, metrics->codepointCount));
+            selection.caretCodepoint = Detail::nearestGraphemeBoundary(
+                utf8, (std::min)(selection.caretCodepoint, metrics->codepointCount));
             if (clearActiveIme)
             {
                 resetImeCompositionState();
@@ -9321,8 +10230,23 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidText, "UI TextEdit selection exceeds the text length");
         }
-        if (state->selection == selection)
+        const std::string_view text = textViewFor(textEdit.index());
+        if (!Detail::isGraphemeBoundary(text, selection.anchorCodepoint) ||
+            !Detail::isGraphemeBoundary(text, selection.caretCodepoint))
         {
+            return fail(UIErrorCode::InvalidText,
+                        "UI TextEdit selection must align to grapheme boundaries");
+        }
+        const bool affinityChanged =
+            textEdit.index() < textEditCaretAffinityByNodeIndex.size() &&
+            textEditCaretAffinityByNodeIndex[textEdit.index()] !=
+                Detail::UITextEditCaretAffinity::Downstream;
+        if (state->selection == selection && !affinityChanged)
+        {
+            if (textEdit.index() < textEditPreferredXByNodeIndex.size())
+            {
+                textEditPreferredXByNodeIndex[textEdit.index()].reset();
+            }
             return Core::success();
         }
         if (Core::Status dirtyStatus = markPaintDirty(textEdit); !dirtyStatus)
@@ -9334,6 +10258,15 @@ struct UIContext::Impl final {
             static_cast<void>(clearImeComposition());
         }
         state->selection = selection;
+        if (textEdit.index() < textEditPreferredXByNodeIndex.size())
+        {
+            textEditPreferredXByNodeIndex[textEdit.index()].reset();
+        }
+        if (textEdit.index() < textEditCaretAffinityByNodeIndex.size())
+        {
+            textEditCaretAffinityByNodeIndex[textEdit.index()] =
+                Detail::UITextEditCaretAffinity::Downstream;
+        }
         return Core::success();
     }
 
@@ -9906,11 +10839,12 @@ struct UIContext::Impl final {
         return applySliderValue(slider, *next, platformFrame, sourceSequence, true);
     }
 
-    [[nodiscard]] u32 textEditCodepointFromPointer(UINodeId textEdit, UILogicalPoint position) const noexcept
+    [[nodiscard]] Detail::UITextEditVisualHit textEditHitFromPointer(
+        UINodeId textEdit, UILogicalPoint position) const noexcept
     {
         if (!isLiveTextEdit(textEdit))
         {
-            return 0;
+            return {};
         }
         UICommittedContentPlacement placement{};
         bool foundPlacement = false;
@@ -9924,11 +10858,32 @@ struct UIContext::Impl final {
                 break;
             }
         }
+        if (textEdit.index() < textEditMultilineByNodeIndex.size() &&
+            textEditMultilineByNodeIndex[textEdit.index()].enabled &&
+            textEdit.index() < textEditVisualLayoutsByNodeIndex.size() &&
+            textEditVisualLayoutsByNodeIndex[textEdit.index()].lineCount != 0)
+        {
+            const float relativeX = position.x - placement.origin.x;
+            const float relativeY = position.y - placement.origin.y;
+            const WidgetTextState& textState = textStatesByIndex[textEdit.index()];
+            const float fallbackAdvance = textState.style.logicalSize * textState.style.advanceScale;
+            std::span<const UITextGlyphRaster> glyphs{};
+            if (textRasterizer && textFace.hasValue())
+            {
+                auto raster = textRasterizer->raster(textFace, textViewFor(textEdit.index()), textState.style);
+                if (raster) { glyphs = raster->glyphs; }
+            }
+            return Detail::textEditHitFromVisualPosition(
+                textViewFor(textEdit.index()), relativeX, relativeY,
+                textEditScrollYByNodeIndex[textEdit.index()],
+                textEditVisualLayoutsByNodeIndex[textEdit.index()],
+                textEditVisualLinesByNodeIndex[textEdit.index()], fallbackAdvance, glyphs);
+        }
         const WidgetTextState& textState = textStatesByIndex[textEdit.index()];
         const u32 codepointCount = textState.metrics.codepointCount;
         if (!foundPlacement || codepointCount == 0)
         {
-            return 0;
+            return {};
         }
         const float relativeX = position.x - placement.origin.x;
         const float fallbackAdvance =
@@ -9939,12 +10894,17 @@ struct UIContext::Impl final {
             auto raster = textRasterizer->raster(textFace, textViewFor(textEdit.index()), textState.style);
             if (raster)
             {
-                return textEditCodepointFromHorizontalPosition(
-                    relativeX, codepointCount, fallbackAdvance, raster->glyphs);
+                return {
+                    .codepoint = textEditCodepointFromHorizontalPosition(
+                        textViewFor(textEdit.index()), relativeX, fallbackAdvance,
+                        raster->glyphs),
+                };
             }
         }
-        return textEditCodepointFromHorizontalPosition(
-            relativeX, codepointCount, fallbackAdvance);
+        return {
+            .codepoint = textEditCodepointFromHorizontalPosition(
+                textViewFor(textEdit.index()), relativeX, fallbackAdvance),
+        };
     }
 
     [[nodiscard]] Core::Status updateTextEditSelectionFromPointer(UINodeId textEdit, UILogicalPoint position,
@@ -9960,13 +10920,22 @@ struct UIContext::Impl final {
             return fail(Core::CoreErrorCode::Internal, "UI TextEdit is missing TextInput behavior state");
         }
         UITextSelection next = state->selection;
-        next.caretCodepoint = textEditCodepointFromPointer(textEdit, position);
+        const Detail::UITextEditVisualHit hit =
+            textEditHitFromPointer(textEdit, position);
+        next.caretCodepoint = hit.codepoint;
         if (!extendSelection)
         {
             next.anchorCodepoint = next.caretCodepoint;
         }
-        if (next == state->selection)
+        const bool affinityChanged =
+            textEdit.index() < textEditCaretAffinityByNodeIndex.size() &&
+            textEditCaretAffinityByNodeIndex[textEdit.index()] != hit.affinity;
+        if (next == state->selection && !affinityChanged)
         {
+            if (textEdit.index() < textEditPreferredXByNodeIndex.size())
+            {
+                textEditPreferredXByNodeIndex[textEdit.index()].reset();
+            }
             return Core::success();
         }
         if (Core::Status dirty = markPaintDirty(textEdit); !dirty)
@@ -9978,6 +10947,15 @@ struct UIContext::Impl final {
             return composition;
         }
         state->selection = next;
+        // Pointer caret placement resets preferred-X.
+        if (textEdit.index() < textEditPreferredXByNodeIndex.size())
+        {
+            textEditPreferredXByNodeIndex[textEdit.index()].reset();
+        }
+        if (textEdit.index() < textEditCaretAffinityByNodeIndex.size())
+        {
+            textEditCaretAffinityByNodeIndex[textEdit.index()] = hit.affinity;
+        }
         return Core::success();
     }
 
@@ -10350,6 +11328,59 @@ struct UIContext::Impl final {
     {
         return isLiveScrollView(node) || isLiveVirtualView(node);
     }
+
+    [[nodiscard]] bool isLiveMultilineTextEdit(UINodeId node) const noexcept
+    {
+        if (!node.hasValue() || !contains(node) || !isLiveTextEdit(node) ||
+            node.index() >= textEditMultilineByNodeIndex.size())
+        {
+            return false;
+        }
+        const UITextEditMultilineConfig& config = textEditMultilineByNodeIndex[node.index()];
+        return config.enabled && config.verticalScrollEnabled &&
+               node.index() < textEditVisualLayoutsByNodeIndex.size() &&
+               textEditVisualLayoutsByNodeIndex[node.index()].maximumScrollY > 0.0F;
+    }
+
+    [[nodiscard]] bool textEditWheelWouldChange(UINodeId textEdit, UILogicalPoint delta) const noexcept
+    {
+        if (!isLiveMultilineTextEdit(textEdit) || !isNodeEnabled(textEdit))
+        {
+            return false;
+        }
+        const u32 idx = textEdit.index();
+        const float wheelStep = textEditMultilineByNodeIndex[idx].wheelStep;
+        const float current = textEditScrollYByNodeIndex[idx];
+        const float maxScroll = textEditVisualLayoutsByNodeIndex[idx].maximumScrollY;
+        const float step = std::isfinite(wheelStep) && wheelStep > 0.0F ? wheelStep : 24.0F;
+        const float next = (std::clamp)(current - delta.y * step, 0.0F, maxScroll);
+        return next != current;
+    }
+
+    [[nodiscard]] Core::Result<bool> applyTextEditScrollWheel(UINodeId textEdit, UILogicalPoint delta)
+    {
+        if (!isLiveMultilineTextEdit(textEdit) || !isNodeEnabled(textEdit))
+        {
+            return false;
+        }
+        const u32 idx = textEdit.index();
+        const float wheelStep = textEditMultilineByNodeIndex[idx].wheelStep;
+        const float current = textEditScrollYByNodeIndex[idx];
+        const float maxScroll = textEditVisualLayoutsByNodeIndex[idx].maximumScrollY;
+        const float step = std::isfinite(wheelStep) && wheelStep > 0.0F ? wheelStep : 24.0F;
+        const float next = (std::clamp)(current - delta.y * step, 0.0F, maxScroll);
+        if (next == current)
+        {
+            return false;
+        }
+        if (Core::Status dirty = markPaintDirty(textEdit); !dirty)
+        {
+            return Core::failure(dirty.error());
+        }
+        textEditScrollYByNodeIndex[idx] = next;
+        return true;
+    }
+
 
     [[nodiscard]] ScrollBarGeometry committedScrollBarGeometry(UINodeId scrollView, UIScrollAxes axis) const noexcept
     {
@@ -12364,6 +13395,7 @@ struct UIContext::Impl final {
         }
         popupDismissPointerBarrierActive = false;
         defaultActionPressState.clearAll();
+        resetTextEditPreferredX(textInputFocus);
         resetImeCompositionState();
         textInputFocus = {};
         defaultActionFocusButton = dropdown;
@@ -13072,12 +14104,28 @@ struct UIContext::Impl final {
         {
             return viewportStatus;
         }
-        // Sample paint-only motion before deciding clean/dirty commit. M==0 is a
-        // pure no-op and does not force paint republication.
+        // Timeline layout tracks remain a candidate until every Layout/Hit/Paint
+        // builder below succeeds. M==0 remains a pure no-op.
         if (Core::Status motionStatus = sampleMotion(motionNow()); !motionStatus)
         {
             return motionStatus;
         }
+        const bool hasTransactionalTimelineSample = timelineStorage.hasCandidateSample();
+        const bool hasTransactionalDirectMotionSample = motionTrackStorage.hasCandidateSample();
+        const bool hasLayoutTimelineCandidate = !timelineStorage.candidateLayoutNodes().empty();
+        auto timelineSampleRollback = Core::makeScopeExit([&]() noexcept {
+            if (!timelineStorage.hasCandidateSample() &&
+                !motionTrackStorage.hasCandidateSample())
+            {
+                return;
+            }
+            motionTrackStorage.rollbackCandidateSample();
+            timelineStorage.discardCandidateSample();
+            if (hasLayoutTimelineCandidate)
+            {
+                ++layoutTimelineCommitFailureCount;
+            }
+        });
         viewportSize.width = normalizeFloat(viewportSize.width);
         viewportSize.height = normalizeFloat(viewportSize.height);
         const bool viewportChanged = !hasCommittedViewport || viewportSize != committedViewportSize;
@@ -13143,6 +14191,11 @@ struct UIContext::Impl final {
                 committedLayoutBuffers[publishedLayoutBufferIndex];
             candidateLayoutEntries =
                 std::span<const UICommittedLayoutEntry>(currentLayout.data(), currentLayout.size());
+        }
+
+        if (Core::Status textVisualStatus = buildTextEditVisualState(candidateLayoutEntries); !textVisualStatus)
+        {
+            return textVisualStatus;
         }
 
         const u64 candidateStructureRevision = committedRevision + (structureNeedsCommit ? 1u : 0u);
@@ -13392,14 +14445,15 @@ struct UIContext::Impl final {
             styleInteractionCachesMayNeedRollback = true;
             candidatePaintCacheStatistics =
                 rebuildDirtyPaintCaches(candidateLayoutEntries, styleInteractionCandidates);
-            auto paintCapacity = validatePaintCandidateCapacity(candidateLayoutEntries);
+            auto paintCapacity = validatePaintCandidateCapacity(candidateLayoutEntries, true);
             if (!paintCapacity)
             {
                 return Core::failure(paintCapacity.error());
             }
             writePaintBufferIndex = 1 - publishedPaintBufferIndex;
             if (Core::Status status =
-                    buildCommittedPaint(committedPaintBuffers[writePaintBufferIndex], candidateLayoutEntries);
+                    buildCommittedPaint(
+                        committedPaintBuffers[writePaintBufferIndex], candidateLayoutEntries, true);
                 !status)
             {
                 return status;
@@ -13418,6 +14472,41 @@ struct UIContext::Impl final {
                 return status;
             }
         }
+
+        // Every fallible candidate builder has succeeded. Commit the sampled
+        // presentation and any completed final targets immediately before the
+        // corresponding Layout/Hit/Paint/Semantics snapshots are published.
+        if (hasTransactionalDirectMotionSample)
+        {
+            motionTrackStorage.commitCandidateSample();
+            for (const Detail::UIMotionTrackStorage::Completed& completed :
+                 motionTrackStorage.lastCompleted())
+            {
+                applyCompletedMotion(completed);
+            }
+        }
+        if (hasTransactionalTimelineSample)
+        {
+            timelineStorage.commitCandidateSample();
+            const auto timelineTargets = timelineStorage.lastTargets();
+            for (const Detail::UIKeyframeTimelineStorage::Target& target : timelineTargets)
+            {
+                applyTimelineTarget(target);
+            }
+        }
+        timelineSampleRollback.release();
+
+        if (previousTextInputFocus != textInputFocus)
+        {
+            resetTextEditPreferredX(previousTextInputFocus);
+            resetTextEditPreferredX(textInputFocus);
+        }
+
+        // Publish visual rows atomically with the snapshots that were built
+        // from them. Any earlier return leaves route-visible state untouched.
+        textEditVisualLinesByNodeIndex.swap(candidateTextEditVisualLinesByNodeIndex);
+        textEditVisualLayoutsByNodeIndex.swap(candidateTextEditVisualLayoutsByNodeIndex);
+        textEditScrollYByNodeIndex.swap(candidateTextEditScrollYByNodeIndex);
 
         if (structureNeedsCommit)
         {
@@ -13451,6 +14540,7 @@ struct UIContext::Impl final {
             committedPaintLayoutRevision = candidateLayoutRevision;
             committedPaintOrderRevision = candidatePaintOrderRevision;
             committedPaintViewportSize = viewportSize;
+            committedTextInputCaretRect = candidateTextInputCaretRect;
             committedStyleInteractionNodes = currentStyleInteractionNodes();
         }
         if (semanticsNeedsCommit)
@@ -13528,6 +14618,11 @@ struct UIContext::Impl final {
             committedPaintOrderRevision,
             committedPaintRevision,
         };
+    }
+
+    [[nodiscard]] std::optional<UILogicalRect> committedTextInputCaretRectValue() const noexcept
+    {
+        return committedTextInputCaretRect;
     }
 
     [[nodiscard]] UICommittedSemanticsView committedSemantics() const noexcept
@@ -14189,7 +15284,8 @@ struct UIContext::Impl final {
                 if (routeEntryIndex < entries.size())
                 {
                     const UINodeId routeNode = entries[routeEntryIndex].node;
-                    if (scrollWheelWouldChange(routeNode, input.delta))
+                    if (textEditWheelWouldChange(routeNode, input.delta) ||
+                        scrollWheelWouldChange(routeNode, input.delta))
                     {
                         addRouteDirtyReservationCandidate(routeNode);
                     }
@@ -14480,6 +15576,8 @@ struct UIContext::Impl final {
                     {
                         return Core::failure(composition.error());
                     }
+                    resetTextEditPreferredX(previousFocus);
+                    resetTextEditPreferredX(targetNode);
                 }
                 textInputFocus = targetNode;
                 defaultActionFocusButton = targetNode;
@@ -14530,6 +15628,21 @@ struct UIContext::Impl final {
                     continue;
                 }
                 const UINodeId routeNode = entries[routeEntryIndex].node;
+                // Multiline TextEdit takes wheel before ScrollView.
+                if (isLiveMultilineTextEdit(routeNode) && isNodeEnabled(routeNode))
+                {
+                    auto applied = applyTextEditScrollWheel(routeNode, input.delta);
+                    if (!applied)
+                    {
+                        return Core::failure(applied.error());
+                    }
+                    if (*applied)
+                    {
+                        routedEvent.consumeInputTransition();
+                        break;
+                    }
+                    continue;
+                }
                 if (!isLiveScrollable(routeNode) || !isNodeEnabled(routeNode))
                 {
                     continue;
@@ -15764,6 +16877,11 @@ struct UIContext::Impl final {
         const NodeRecord* nextRecord =
             nextFocus.hasValue() && contains(nextFocus) ? nodes.tryGet(nextFocus.storageId()) : nullptr;
         textInputFocus = nextRecord != nullptr && nextRecord->kind == BuiltinElementKind::TextEdit ? nextFocus : UINodeId{};
+        if (previousTextFocus != textInputFocus)
+        {
+            resetTextEditPreferredX(previousTextFocus);
+            resetTextEditPreferredX(textInputFocus);
+        }
         return Core::success();
     }
 
@@ -16594,6 +17712,7 @@ struct UIContext::Impl final {
             if (textInputFocus != nextFocus)
             {
                 clearImeFocus();
+                resetTextEditPreferredX(nextFocus);
                 textInputFocus = nextFocus;
             }
         } else
@@ -16989,7 +18108,11 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidText, "UI text input must be strict UTF-8 without embedded NUL");
         }
-        if (containsLineBreak(committedUtf8))
+        const UITextEditMultilineConfig multiline =
+            textInputFocus.index() < textEditMultilineByNodeIndex.size()
+                ? textEditMultilineByNodeIndex[textInputFocus.index()] : UITextEditMultilineConfig{};
+        if (committedUtf8.find('\r') != std::string_view::npos ||
+            (!multiline.enabled && committedUtf8.find('\n') != std::string_view::npos))
         {
             return UITextInputRouteResult{.consumed = true, .applied = false};
         }
@@ -17055,11 +18178,23 @@ struct UIContext::Impl final {
             return Core::failure(dirty.error());
         }
         const auto insertedCodepoints = Core::countStrictUtf8CodepointsWithoutNul(committedUtf8);
-        const u32 nextCaret = selectionBegin + insertedCodepoints.value_or(0U);
+        const u32 insertedEnd = selectionBegin + insertedCodepoints.value_or(0U);
+        const u32 nextCaret =
+            Detail::graphemeBoundaryAtOrAfter(combined, insertedEnd);
         textInputState->selection = {
             .anchorCodepoint = nextCaret,
             .caretCodepoint = nextCaret,
         };
+        // Reset preferred-X after text insertion.
+        if (multiline.enabled && focusedTextEdit.index() < textEditPreferredXByNodeIndex.size())
+        {
+            textEditPreferredXByNodeIndex[focusedTextEdit.index()].reset();
+        }
+        if (focusedTextEdit.index() < textEditCaretAffinityByNodeIndex.size())
+        {
+            textEditCaretAffinityByNodeIndex[focusedTextEdit.index()] =
+                Detail::UITextEditCaretAffinity::Downstream;
+        }
         if (Core::Status status = clearImeComposition(); !status)
         {
             return Core::failure(status.error());
@@ -17111,23 +18246,80 @@ struct UIContext::Impl final {
             clearImeFocus();
             return fail(Core::CoreErrorCode::Internal, "UI TextEdit is missing TextInput behavior state");
         }
-        const u32 codepointCount = textStatesByIndex[focusedTextEdit.index()].metrics.codepointCount;
+        const std::string_view current =
+            textViewFor(focusedTextEdit.index());
         const UITextSelection currentSelection = editState->selection;
-        const auto plan = planTextEditCommand(currentSelection, codepointCount,
-                                              command, extendSelection);
+        const u32 idx = focusedTextEdit.index();
+        const auto multilineConfig = idx < textEditMultilineByNodeIndex.size()
+                                         ? textEditMultilineByNodeIndex[idx]
+                                         : UITextEditMultilineConfig{};
+        const bool isVerticalCommand =
+            command == UITextEditCommand::MoveUp || command == UITextEditCommand::MoveDown;
+        const Detail::UITextEditCaretAffinity currentCaretAffinity =
+            idx < textEditCaretAffinityByNodeIndex.size()
+                ? textEditCaretAffinityByNodeIndex[idx]
+                : Detail::UITextEditCaretAffinity::Downstream;
+        std::optional<UITextEditCommandPlan> plan;
+        if (multilineConfig.enabled && idx < textEditVisualLayoutsByNodeIndex.size() &&
+            textEditVisualLayoutsByNodeIndex[idx].lineCount != 0 &&
+            (command == UITextEditCommand::MoveLeft || command == UITextEditCommand::MoveRight ||
+             command == UITextEditCommand::MoveUp || command == UITextEditCommand::MoveDown ||
+             command == UITextEditCommand::MoveHome || command == UITextEditCommand::MoveEnd))
+        {
+            const float fallback = textStatesByIndex[idx].style.logicalSize *
+                                   textStatesByIndex[idx].style.advanceScale;
+            const std::optional<float> preferredX =
+                isVerticalCommand && idx < textEditPreferredXByNodeIndex.size()
+                    ? textEditPreferredXByNodeIndex[idx]
+                    : std::nullopt;
+            std::span<const UITextGlyphRaster> glyphs{};
+            if (isVerticalCommand && textRasterizer != nullptr && textFace.hasValue())
+            {
+                auto raster = textRasterizer->raster(
+                    textFace, current, textStatesByIndex[idx].style);
+                if (raster)
+                {
+                    glyphs = raster->glyphs;
+                }
+            }
+            plan = Detail::planTextEditVisualCommand(
+                current, editState->selection, command, extendSelection,
+                textEditVisualLinesByNodeIndex[idx], currentCaretAffinity,
+                preferredX, fallback, glyphs);
+        }
+        else
+        {
+            plan = planTextEditCommand(
+                current, currentSelection, command, extendSelection);
+        }
         if (!plan.has_value())
         {
             return fail(UIErrorCode::InvalidText, "UI TextEdit command is not recognized");
         }
+        const std::optional<float> nextPreferredX =
+            isVerticalCommand ? plan->updatedPreferredX : std::nullopt;
+        const bool caretAffinityChanged =
+            plan->nextCaretAffinity != currentCaretAffinity;
+        const auto commitNavigationState = [&]() noexcept {
+            if (idx < textEditPreferredXByNodeIndex.size())
+            {
+                textEditPreferredXByNodeIndex[idx] = nextPreferredX;
+            }
+            if (idx < textEditCaretAffinityByNodeIndex.size())
+            {
+                textEditCaretAffinityByNodeIndex[idx] = plan->nextCaretAffinity;
+            }
+        };
 
         if (!plan->deletesText)
         {
-            if (plan->nextSelection == currentSelection)
+            if (plan->nextSelection == currentSelection && !caretAffinityChanged)
             {
                 if (Core::Status status = clearImeComposition(); !status)
                 {
                     return Core::failure(status.error());
                 }
+                commitNavigationState();
                 return UITextInputRouteResult{.consumed = true, .applied = false};
             }
             if (Core::Status paintStatus = markPaintDirty(focusedTextEdit); !paintStatus)
@@ -17139,6 +18331,7 @@ struct UIContext::Impl final {
                 return Core::failure(status.error());
             }
             editState->selection = plan->nextSelection;
+            commitNavigationState();
             return UITextInputRouteResult{.consumed = true, .applied = true};
         }
 
@@ -17148,9 +18341,9 @@ struct UIContext::Impl final {
             {
                 return Core::failure(status.error());
             }
+            commitNavigationState();
             return UITextInputRouteResult{.consumed = true, .applied = false};
         }
-        const std::string_view current = textViewFor(focusedTextEdit.index());
         const usize deleteBeginByte =
             utf8ByteOffsetForCodepoint(current, plan->deleteBeginCodepoint);
         const usize deleteEndByte =
@@ -17169,14 +18362,22 @@ struct UIContext::Impl final {
         {
             return Core::failure(status.error());
         }
+        const u32 nextCaret = Detail::graphemeBoundaryAtOrAfter(
+            combined, plan->deleteBeginCodepoint);
         editState->selection = {
-            .anchorCodepoint = plan->deleteBeginCodepoint,
-            .caretCodepoint = plan->deleteBeginCodepoint,
+            .anchorCodepoint = nextCaret,
+            .caretCodepoint = nextCaret,
         };
+        // Reset preferred-X after text deletion.
+        if (multilineConfig.enabled && focusedTextEdit.index() < textEditPreferredXByNodeIndex.size())
+        {
+            textEditPreferredXByNodeIndex[focusedTextEdit.index()].reset();
+        }
         if (Core::Status status = clearImeComposition(); !status)
         {
             return Core::failure(status.error());
         }
+        commitNavigationState();
         return UITextInputRouteResult{.consumed = true, .applied = true};
     }
 
@@ -17352,6 +18553,25 @@ struct UIContext::Impl final {
                     .activeTrackCount = motionTrackStorage.activeCount(),
                     .trackHighWater = motionTrackStorage.highWater(),
                     .lastSampledTrackCount = motionTrackStorage.lastSampledCount(),
+                    .timelineCapacity = timelineStorage.timelineCapacity(),
+                    .timelineCount = timelineStorage.timelineCount(),
+                    .timelineHighWater = timelineStorage.timelineHighWater(),
+                    .timelineTrackCapacity = timelineStorage.trackCapacity(),
+                    .timelineTrackCount = timelineStorage.trackCount(),
+                    .timelineTrackHighWater = timelineStorage.trackHighWater(),
+                    .keyframeCapacity = timelineStorage.keyframeCapacity(),
+                    .keyframeCount = timelineStorage.keyframeCount(),
+                    .keyframeHighWater = timelineStorage.keyframeHighWater(),
+                    .activeTimelineCapacity = timelineStorage.activeCapacity(),
+                    .activeTimelineCount = timelineStorage.activeCount(),
+                    .activeTimelineHighWater = timelineStorage.activeHighWater(),
+                    .lastSampledTimelineCount = timelineStorage.lastSampledTimelineCount(),
+                    .lastSampledTimelineTrackCount = timelineStorage.lastSampledTrackCount(),
+                    .lastSampledTimelineLayoutTrackCount = timelineStorage.lastSampledLayoutTrackCount(),
+                    .lastSampledKeyframeSegmentCount = timelineStorage.lastSampledSegmentCount(),
+                    .timelineCancelCount = timelineStorage.cancelCount(),
+                    .timelineRetargetCount = timelineStorage.retargetCount(),
+                    .layoutTimelineCommitFailureCount = layoutTimelineCommitFailureCount,
                     .reducedMotion = reducedMotionEnabled,
                 },
             .flow =
@@ -19019,6 +20239,36 @@ Core::Status UIContext::beginVisualOffsetTransition(
     return m_impl->beginVisualOffsetTransition(node, targetOffsetX, targetOffsetY, spec);
 }
 
+Core::Result<UITimelineId> UIContext::createTimeline(const UITimelineDesc& desc)
+{
+    return m_impl->createTimeline(desc);
+}
+
+Core::Status UIContext::replaceTimeline(UITimelineId timeline, const UITimelineDesc& desc)
+{
+    return m_impl->replaceTimeline(timeline, desc);
+}
+
+Core::Status UIContext::playTimeline(UITimelineId timeline)
+{
+    return m_impl->playTimeline(timeline);
+}
+
+Core::Status UIContext::cancelTimeline(UITimelineId timeline)
+{
+    return m_impl->cancelTimeline(timeline);
+}
+
+Core::Status UIContext::destroyTimeline(UITimelineId timeline)
+{
+    return m_impl->destroyTimeline(timeline);
+}
+
+Core::Result<bool> UIContext::isTimelineActive(UITimelineId timeline) const
+{
+    return m_impl->isTimelineActive(timeline);
+}
+
 Core::Status UIContext::sampleMotion(Core::MonotonicTimePoint now)
 {
     return m_impl->sampleMotion(now);
@@ -19100,6 +20350,11 @@ UICommittedHitView UIContext::committedHit() const noexcept
 UICommittedPaintView UIContext::committedPaint() const noexcept
 {
     return m_impl->committedPaint();
+}
+
+std::optional<UILogicalRect> UIContext::committedTextInputCaretRect() const noexcept
+{
+    return m_impl->committedTextInputCaretRectValue();
 }
 
 UICommittedSemanticsView UIContext::committedSemantics() const noexcept

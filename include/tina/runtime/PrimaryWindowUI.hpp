@@ -184,6 +184,15 @@ class PrimaryWindowUITreeUpdater final {
         UI::UINodeId node, float targetRadius, const UI::UITransitionSpec& spec);
     [[nodiscard]] Core::Status beginVisualOffsetTransition(
         UI::UINodeId node, float targetOffsetX, float targetOffsetY, const UI::UITransitionSpec& spec);
+    // UI-MOTION-002 typed paint/bounded-layout timeline facade. Definitions
+    // are copied by UIContext and remain bounded by its fixed capacities.
+    [[nodiscard]] Core::Result<UI::UITimelineId> createTimeline(const UI::UITimelineDesc& desc);
+    [[nodiscard]] Core::Status replaceTimeline(UI::UITimelineId timeline,
+                                               const UI::UITimelineDesc& desc);
+    [[nodiscard]] Core::Status playTimeline(UI::UITimelineId timeline);
+    [[nodiscard]] Core::Status cancelTimeline(UI::UITimelineId timeline);
+    [[nodiscard]] Core::Status destroyTimeline(UI::UITimelineId timeline);
+    [[nodiscard]] Core::Result<bool> isTimelineActive(UI::UITimelineId timeline) const;
     [[nodiscard]] Core::Status setButtonPaint(UI::UINodeId button, const UI::UIButtonPaint& paint);
     [[nodiscard]] Core::Result<UI::UIButtonPaint> buttonPaint(UI::UINodeId button) const;
     [[nodiscard]] Core::Status setText(UI::UINodeId node, std::string_view utf8);

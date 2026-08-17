@@ -410,7 +410,7 @@ TEST_F(UIRenderDisplayListTest, ProjectsAndClampsLogicalCornerRadiusWithAnisotro
         1,
         {.x = 10.0F, .y = 10.0F, .width = 10.0F, .height = 8.0F},
         {.x = 0.0F, .y = 0.0F, .width = 100.0F, .height = 100.0F});
-    rounded.cornerRadius = 20.0F;
+    rounded.cornerRadii = UI::UILogicalCornerRadii::uniform(20.0F);
     const std::array entries{rounded};
     auto builder = createBuilder({.commandCount = 1, .clipCount = 0, .batchCount = 1});
 
@@ -423,7 +423,87 @@ TEST_F(UIRenderDisplayListTest, ProjectsAndClampsLogicalCornerRadiusWithAnisotro
     ASSERT_EQ(result->displayList.commands().size(), 1U);
     const Render::UIDrawCommand& command = result->displayList.commands().front();
     EXPECT_EQ(command.bounds, (Render::UIPixelRect{20, 10, 20, 8}));
-    EXPECT_FLOAT_EQ(command.cornerRadius, 4.0F);
+    EXPECT_EQ(command.cornerRadii, Render::UIPixelCornerRadii::uniform(4.0F));
+}
+
+TEST_F(UIRenderDisplayListTest, ProjectsAsymmetricCornerRadiiWithAnisotropicScaleAndChecksumsThem)
+{
+    const auto build = [](Render::UIDisplayListBuilder& builder,
+                          UI::UILogicalCornerRadii cornerRadii) {
+        auto rounded = solidEntry(
+            1,
+            {.x = 10.0F, .y = 10.0F, .width = 10.0F, .height = 8.0F},
+            {.x = 0.0F, .y = 0.0F, .width = 100.0F, .height = 100.0F});
+        rounded.cornerRadii = cornerRadii;
+        const std::array entries{rounded};
+        return Integration::buildUIDisplayList(
+            builder,
+            paintView(entries, {100.0F, 100.0F}),
+            {.framebufferViewport = {0, 0, 200, 100}});
+    };
+
+    auto builder = createBuilder({.commandCount = 1, .clipCount = 0, .batchCount = 1});
+    const UI::UILogicalCornerRadii radii{
+        .topLeft = 1.25F,
+        .topRight = 3.0F,
+        .bottomRight = 20.0F,
+        .bottomLeft = 0.5F,
+    };
+    auto first = build(builder, radii);
+    ASSERT_TRUE(first.has_value()) << (first ? "" : first.error().message);
+    ASSERT_EQ(first->displayList.commands().size(), 1U);
+    EXPECT_EQ(first->displayList.commands().front().cornerRadii,
+              (Render::UIPixelCornerRadii{
+                  .topLeft = 1.25F,
+                  .topRight = 3.0F,
+                  .bottomRight = 4.0F,
+                  .bottomLeft = 0.5F,
+              }));
+    const u64 firstChecksum = first->displayList.paintOrderChecksum();
+
+    auto repeated = build(builder, radii);
+    ASSERT_TRUE(repeated.has_value()) << (repeated ? "" : repeated.error().message);
+    EXPECT_EQ(repeated->displayList.paintOrderChecksum(), firstChecksum);
+
+    UI::UILogicalCornerRadii changedRadii = radii;
+    changedRadii.topLeft = 1.5F;
+    auto changed = build(builder, changedRadii);
+    ASSERT_TRUE(changed.has_value()) << (changed ? "" : changed.error().message);
+    EXPECT_NE(changed->displayList.paintOrderChecksum(), firstChecksum);
+}
+
+TEST_F(UIRenderDisplayListTest, RejectsInvalidLogicalCornerRadiiBeforeEmission)
+{
+    const auto verifyRejected = [](UI::UICommittedPaintEntry entry) {
+        const std::array entries{entry};
+        auto builder = createBuilder({.commandCount = 1, .clipCount = 1, .batchCount = 1});
+        auto result = Integration::buildUIDisplayList(
+            builder,
+            paintView(entries, {10.0F, 10.0F}),
+            {.framebufferViewport = {0, 0, 10, 10}});
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().code, Core::CoreErrorCode::InvalidArgument);
+        EXPECT_TRUE(builder.publishedView().empty());
+    };
+
+    auto notFinite = solidEntry(
+        1, {.width = 10.0F, .height = 10.0F},
+        {.width = 10.0F, .height = 10.0F});
+    notFinite.cornerRadii.topLeft = (std::numeric_limits<float>::quiet_NaN)();
+    verifyRejected(notFinite);
+
+    auto negative = solidEntry(
+        1, {.width = 10.0F, .height = 10.0F},
+        {.width = 10.0F, .height = 10.0F});
+    negative.cornerRadii.bottomRight = -1.0F;
+    verifyRejected(negative);
+
+    auto nonQuad = glyphEntry(
+        1, {.width = 10.0F, .height = 10.0F},
+        {.width = 10.0F, .height = 10.0F},
+        {.width = 1, .height = 1}, 0);
+    nonQuad.cornerRadii.topRight = 1.0F;
+    verifyRejected(nonQuad);
 }
 
 TEST_F(UIRenderDisplayListTest, Projects45DegreeSolidLineAsExactParallelogramWithConservativeAabb)

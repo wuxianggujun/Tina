@@ -64,7 +64,7 @@ borrowed resolver，并只传递 Tina-owned Core/Render，不会把完整 AssetS
 | `PointLight2D` | linear RGB color、非负 intensity、正影响半径、0..影响半径内的 source radius、active 标志 | Entity world position 是灯光中心；source radius=0 为硬阴影、正值启用连续 penumbra；有 resolved Camera2D 时每帧最多提交8个 camera-affecting light，无相机/0x0 surface 时对全部 active light 保留同一上限 |
 | `ShadowOccluder2D` | 一条 local-space 线段与 active 标志 | 应用已发布 XY scale/rotation/position；每帧最多32个 active segment，按稳定 Entity identity 发布且不做 camera culling |
 | `PerspectiveCamera3D` | perspective 参数与 active 标志 | 每帧最多一个 active 3D camera |
-| `MeshRenderer3D` | weak mesh/material `AssetHandle`、bounds、base color、可见性 | World 只校验结构；visible extract 通过两个 kind-specific resolver 解析非0 key |
+| `MeshRenderer3D` | weak mesh/material `AssetHandle`、local sphere bounds、base color、可见性 | World 只校验结构；有效 PerspectiveCamera3D + 非0 surface 时先按 world transformed sphere 做 frustum culling，再通过两个 kind-specific resolver 解析 packet-local ref；无相机/0x0 surface 保留全量提取 |
 | `DirectionalLight3D` | linear RGB color、非负 intensity、active 标志 | Entity world local `+Z` 指向光源；每帧最多4个 active light，按稳定 Entity identity 发布 |
 | `PointLight3D` | linear RGB color、非负 intensity、正 influence radius、optional `PointLightShadow3D`、active 标志 | Entity world position 是灯光中心；每帧最多8个 camera-affecting active light，按稳定 Entity identity 发布；有有效 PerspectiveCamera3D 时 influence sphere 在容量检查前做 frustum culling；最多一个 camera-affecting shadow config |
 | `SpotLight3D` | linear RGB color、非负 intensity、正 influence radius、合法 inner/outer cone half-angle、optional `SpotLightShadow3D`、active 标志 | Entity world position 是灯光中心，world local `-Z` 是出光方向；每帧最多8个 camera-affecting active light；与 point light 一样先做 influence sphere culling，再按稳定 Entity identity 发布；最多一个 camera-affecting shadow config |
@@ -154,8 +154,9 @@ updateWorldTransforms
   -> emit visible SpriteRenderer2D items
   -> validate/cull active PointLight2D, collect all active ShadowOccluder2D, then deep-copy lighting
   -> collect active DirectionalLight3D/PointLight3D/SpotLight3D, cull point/spot influence spheres, and deep-copy the frame lighting snapshot
-  -> borrowed kind-specific resolvers ask Mesh3D registry to intern current mesh/material bindings
-  -> emit visible MeshRenderer3D items
+  -> validate/transform static and skinned local bounds, then frustum-cull against the resolved 3D camera
+  -> borrowed kind-specific resolvers ask Mesh3D registry to intern bindings for camera-affecting meshes
+  -> emit camera-affecting MeshRenderer3D/SkinnedMeshRenderer3D items
   -> caller commits RenderSceneBuilder
 ```
 
@@ -166,10 +167,14 @@ borrowed function-pointer seam；它必须按当前 AssetStore 验证 owner/gene
 weak Texture2D handle 并返回 packet-local normal ref；任一解析失败都在 `addSprite2D()` 前返回
 `UnresolvedSprite`，不提交半成品。hidden sprite 不调用两个 resolver，normal binding 不改变排序。
 `MeshRenderer3D` 同样只保存 weak mesh/material
-`AssetHandle` 与 world pose/scale、local bounds、material color 等语义字段。extraction 分别借用
+`AssetHandle` 与 world pose/scale、local bounds、material color 等语义字段。extraction 先验证组件与 WorldTransform，
+以 local center 经过 scale/rotation/translation、radius 乘最大正 scale 得到保守 world sphere；有效
+PerspectiveCamera3D + 非0 surface 时复用 point/spot light 的精确 sphere-frustum 判定，在 resolver 和容量消费前
+剔除。边界接触保留可见；无相机或0x0 suspended surface 不做 mesh culling。camera-affecting mesh 才借用
 `mesh3DBindingResolver`/`material3DBindingResolver`，按预期 AssetKind intern 非空 packet-local ref；任一
-handle/resolver/binding 失效返回 `UnresolvedMesh`，mesh 失败不会继续调用 material resolver，hidden mesh
-不解析。`DirectionalLight3D` 使用已发布 world rotation 把 local `+Z` 转为朝向光源的 world direction，
+handle/resolver/binding 失效返回 `UnresolvedMesh`，mesh 失败不会继续调用 material resolver，hidden/culled mesh
+不解析。`SkinnedMeshRenderer3D` 使用 authored conservative sphere 的同一顺序，culled item 不调用 pose provider；
+bounds 不随 pose 自动扩张，authoring 必须覆盖完整动画形变。`DirectionalLight3D` 使用已发布 world rotation 把 local `+Z` 转为朝向光源的 world direction，
 将 color×intensity 与 `ExtractRenderSceneParams::ambientLightScale` 写入固定4槽的 self-contained
 RenderScene snapshot。`PointLight3D` 使用已发布 world position、influence radius 与 color×intensity；
 `SpotLight3D` 额外把 world local `-Z` 转成出光方向，并把 inner/outer half-angle 转成 cosine。optional

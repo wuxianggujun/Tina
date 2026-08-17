@@ -27,6 +27,7 @@ struct NormalizedUIContextCapacityConfig final {
     usize routedPointerListenerCapacity = 0;
     usize buttonActionCapacity = 0;
     usize textByteCapacity = 0;
+    usize textEditVisualLineCapacity = 0;
     usize styleClassCapacity = 0;
     usize styleTokenCapacity = 0;
     usize styleRuleCapacity = 0;
@@ -34,6 +35,10 @@ struct NormalizedUIContextCapacityConfig final {
     usize styleRulesPerBucketCapacity = 0;
     usize nodeStyleClassLinkCapacity = 0;
     usize motionTrackCapacity = 0;
+    usize timelineCapacity = 0;
+    usize timelineTrackCapacity = 0;
+    usize timelineKeyframeCapacity = 0;
+    usize activeTimelineCapacity = 0;
     usize flowLayerCapacity = 0;
     usize flowScreenCapacity = 0;
     bool applyDefaultProductChrome = true;
@@ -47,6 +52,8 @@ normalizeImageContent(UIImageContent content);
 [[nodiscard]] bool isValidImageSource(const UIImageSource& source) noexcept;
 [[nodiscard]] bool isValidImageSampling(UIImageSampling sampling) noexcept;
 
+[[nodiscard]] bool
+isValidLogicalCornerRadii(const UILogicalCornerRadii& radii) noexcept;
 [[nodiscard]] UIBoxPaint normalizeBoxPaint(UIBoxPaint paint) noexcept;
 
 [[nodiscard]] Core::Result<UIScrollViewStyle>

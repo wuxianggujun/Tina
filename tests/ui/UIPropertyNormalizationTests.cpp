@@ -20,7 +20,12 @@ TEST(UIPropertyNormalizationTests, BoxPaintDropsInvisibleChrome)
         .shadow = UI::rgb(0x000000, 0),
         .shadowOffsetX = 3.0F,
         .shadowOffsetY = 5.0F,
-        .cornerRadius = (std::numeric_limits<float>::quiet_NaN)(),
+        .cornerRadii = {
+            .topLeft = 0.0F,
+            .topRight = 2.0F,
+            .bottomRight = 4.0F,
+            .bottomLeft = 6.5F,
+        },
     };
 
     const UI::UIBoxPaint normalized =
@@ -32,7 +37,36 @@ TEST(UIPropertyNormalizationTests, BoxPaintDropsInvisibleChrome)
     EXPECT_EQ(normalized.shadow, UI::UIStraightSrgba8Color{});
     EXPECT_EQ(normalized.shadowOffsetX, 0.0F);
     EXPECT_EQ(normalized.shadowOffsetY, 0.0F);
-    EXPECT_EQ(normalized.cornerRadius, 0.0F);
+    EXPECT_EQ(normalized.cornerRadii,
+              (UI::UILogicalCornerRadii{
+                  .topLeft = 0.0F,
+                  .topRight = 2.0F,
+                  .bottomRight = 4.0F,
+                  .bottomLeft = 6.5F,
+              }));
+}
+
+TEST(UIPropertyNormalizationTests, CornerRadiiRequireEveryComponentFiniteAndNonNegative)
+{
+    UI::UILogicalCornerRadii radii{
+        .topLeft = 1.0F,
+        .topRight = 2.0F,
+        .bottomRight = 3.0F,
+        .bottomLeft = 4.0F,
+    };
+    EXPECT_TRUE(UI::Detail::isValidLogicalCornerRadii(radii));
+
+    radii.topLeft = (std::numeric_limits<float>::quiet_NaN)();
+    EXPECT_FALSE(UI::Detail::isValidLogicalCornerRadii(radii));
+    radii.topLeft = 1.0F;
+    radii.topRight = (std::numeric_limits<float>::infinity)();
+    EXPECT_FALSE(UI::Detail::isValidLogicalCornerRadii(radii));
+    radii.topRight = 2.0F;
+    radii.bottomRight = -1.0F;
+    EXPECT_FALSE(UI::Detail::isValidLogicalCornerRadii(radii));
+    radii.bottomRight = 3.0F;
+    radii.bottomLeft = -(std::numeric_limits<float>::infinity)();
+    EXPECT_FALSE(UI::Detail::isValidLogicalCornerRadii(radii));
 }
 
 TEST(UIPropertyNormalizationTests, BoxPaintPreservesValidEllipseAndLineGeometry)

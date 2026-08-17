@@ -36,10 +36,12 @@ struct ShowcaseUISnapshot final {
     float scrollOffset = 0.0F;
     Core::usize controlCount = 0;
     Core::usize imageProductCount = 0;
+    Core::usize asymmetricCornerProductCount = 0;
     ShowcaseQuality quality = ShowcaseQuality::Balanced;
     bool notificationsEnabled = false;
     bool stylesheetInstalled = false;
     bool rootAlive = false;
+    bool multilineNotesScrolled = false;
 };
 
 class ShowcaseUI final {
@@ -136,6 +138,7 @@ class ShowcaseUI final {
         UI::UINodeId scrollView{};
         UI::UINodeId scrollContent{};
         UI::UINodeId inventoryThumbnail{};
+        UI::UINodeId multilineNotes{};
     };
 
     [[nodiscard]] Core::Status applyTheme(PrimaryWindowUITreeUpdater& tree, ShowcaseTheme theme, bool countSwitch);
@@ -181,6 +184,8 @@ class ShowcaseUI final {
     Core::usize dropdownSelectionIndex_ = 0;
     Core::usize controlCount_ = 0;
     Core::usize imageProductCount_ = 0;
+    Core::usize asymmetricCornerProductCount_ = 0;
+    bool multilineNotesScrolled_ = false;
     Core::u64 styleTokenUpdates_ = 0;
     Core::u64 motionBegins_ = 0;
     UI::UIStyleClassId showcaseChromeClass_{};

@@ -5,6 +5,7 @@
 // poll-local pending slot. Public Platform headers never include IMM32.
 
 #include "Imm32CompositionSession.hpp"
+#include "GlfwTextInputPlacement.hpp"
 
 #include <windows.h>
 #include <imm.h>
@@ -25,6 +26,11 @@ class Imm32CompositionHostWin32 final {
 
     [[nodiscard]] Core::Status attach(HWND hwnd) noexcept;
     void detach() noexcept;
+    // Stores the latest committed caret placement and applies it to the active
+    // IMM context when one exists. IMM32 may not expose a context until
+    // WM_IME_STARTCOMPOSITION; the stored value is reapplied at that boundary.
+    void setTextInputPlacement(
+        std::optional<GlfwTextInputPlacementPixels> placement) noexcept;
 
     [[nodiscard]] bool attached() const noexcept { return hwnd_ != nullptr; }
     [[nodiscard]] Imm32CompositionSession& session() noexcept { return session_; }
@@ -57,6 +63,9 @@ class Imm32CompositionHostWin32 final {
     bool hasPending_ = false;
     Pending pending_{};
     std::array<wchar_t, DefaultImePreeditByteCapacity> wideScratch_{};
+    std::optional<GlfwTextInputPlacementPixels> textInputPlacement_{};
+
+    void applyTextInputPlacement(HIMC context) noexcept;
 };
 
 LRESULT CALLBACK imm32CompositionSubclassProc(

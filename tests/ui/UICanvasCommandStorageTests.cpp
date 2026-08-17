@@ -78,6 +78,12 @@ TEST(UICanvasCommandStorageTests, CopiesAndVisitsCommandsInAssignmentOrder)
         UI::UICanvasCommand{
             .bounds = {.x = 1.0F, .y = 2.0F, .width = 3.0F, .height = 4.0F},
             .color = UI::rgb(0x112233),
+            .cornerRadii = {
+                .topLeft = 4.0F,
+                .topRight = 3.0F,
+                .bottomRight = 2.0F,
+                .bottomLeft = 1.0F,
+            },
         },
         UI::UICanvasCommand{
             .bounds = {.x = 5.0F, .y = 6.0F, .width = 7.0F, .height = 8.0F},
@@ -95,6 +101,13 @@ TEST(UICanvasCommandStorageTests, CopiesAndVisitsCommandsInAssignmentOrder)
     ASSERT_EQ(visitedCount, 2U);
     EXPECT_FLOAT_EQ(visited[0].bounds.x, 1.0F);
     EXPECT_EQ(visited[0].color, UI::rgb(0x112233));
+    EXPECT_EQ(visited[0].cornerRadii,
+              (UI::UILogicalCornerRadii{
+                  .topLeft = 4.0F,
+                  .topRight = 3.0F,
+                  .bottomRight = 2.0F,
+                  .bottomLeft = 1.0F,
+              }));
     EXPECT_FLOAT_EQ(visited[1].bounds.x, 5.0F);
     EXPECT_EQ(visited[1].color, UI::rgb(0x445566));
     EXPECT_EQ(storage.capacity(), 3U);
@@ -202,7 +215,7 @@ TEST(UICanvasCommandStorageTests, RejectsMalformedImageAndNineSliceMetadataAtomi
     malformed[2].imageSourceInsets.left = 16;
     malformed[2].imageSourceInsets.right = 8;
     malformed[3].imageDestinationInsets.bottom = (std::numeric_limits<float>::quiet_NaN)();
-    malformed[4].cornerRadius = 1.0F;
+    malformed[4].cornerRadii = UI::UILogicalCornerRadii::uniform(1.0F);
 
     for (const UI::UICanvasCommand& command : malformed)
     {

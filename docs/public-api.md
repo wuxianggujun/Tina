@@ -212,6 +212,12 @@ RAII token/root/lease，而不是 Context 本身。
 Gamepad snapshot、ordered lifecycle/input transition、strict UTF-8 text/composition。所有 storage 创建时
 固定容量；view 到下一次 poll/build 失效。
 
+`TextInputCaretRect`/`TextInputPlacement` 是 backend-neutral 的 owner-window logical client geometry；
+Runtime 在成功 UI paint publication 后把 `UIContext::committedTextInputCaretRect()` 交给
+`IPlatformBackend::updateTextInputPlacement()`。`nullopt` 清除当前 IME hint。实现不得把 HWND/POINT/RECT、
+GLFW 或 X11/Wayland 类型带过公开边界；Windows GLFW 私有 adapter 将 geometry 转为 DPI-scaled client
+pixels 并驱动 IMM32 composition/candidate placement，Headless 的非空 placement 明确返回不支持错误。
+
 公开输入类型覆盖 Key、Pointer、标准 Gamepad、TextInput、TextComposition、Cancel/Reset。GLFW/native
 枚举不会越过 adapter。`PlatformEventSubscription` 是 generation-safe RAII token；dispatcher owner 和
 dispatch/shutdown 不暴露给游戏。
@@ -280,12 +286,12 @@ commit 后返回 borrowed view。
 当前 frame 的固定容量 palette pool；committed item 只保存 palette offset/count，不借用 Animator storage，且不参与
 static instance batch。backend 在同步 submit 中分别按 `Texture2D`、`Mesh3DGeometry`、
 `SkinnedMesh3DGeometry`、`Mesh3DMaterial` kind 解析，并校验 palette joint count 与 bound skeleton 一致。
-`UIDisplayList` 支持 SolidQuad/SolidEllipse/Glyph/ImageQuad、SolidQuad 像素 corner radius、可选 exact
+`UIDisplayList` 支持 SolidQuad/SolidEllipse/Glyph/ImageQuad、SolidQuad `UIPixelCornerRadii` 四角像素半径、可选 exact
 `UISolidQuadVertices` 与 axis-aligned clip；SolidEllipse 支持填充和向内描边。UI Line 在 integration
 边界按 logical 法向构造四角并分别应用 X/Y framebuffer scale，随后以 exact SolidQuad 发布，不公开
 `rotationRadians`/rotated-quad 兼容 API。
 ImageQuad 携带 normalized UV、premultiplied tint、packet-local Texture2D ref 与 Linear/Nearest sampling，
-相邻兼容 command 才合并 batch。corner radius、exact vertices 与 ellipse stroke 均计入 paint-order checksum，
+相邻兼容 command 才合并 batch。四角 radius、exact vertices 与 ellipse stroke 均计入 paint-order checksum，
 backend 验证其有限性、凸性、bounds 覆盖与最大半径/描边宽度。
 
 ## UI
@@ -295,7 +301,7 @@ backend 验证其有限性、凸性、bounds 覆盖与最大半径/描边宽度�
 StyleRole/box/Canvas、semantics、enabled、pointer/focus policy 与集合配置，`makeButtonElement()`、
 `makeListViewElement()` 等是内建控件的官方 recipes。旧 `createPanel/createButton/createListView/...`
 成员入口已删除，不提供 compatibility alias。当前内建行为覆盖 Root、Panel、Modal、Label、Button、
-Checkbox、Slider、ProgressBar、RadioButton、单行 TextEdit、ScrollView，以及
+Checkbox、Slider、ProgressBar、RadioButton、TextEdit（默认单行；可选多行）、ScrollView，以及
 Dropdown/Popup/DropdownItem、ListView/TreeView。
 
 `UILayoutStyle` 将父容器 `flexContainer`、子项 `flexItem` 与 `Flow/Overlay` placement 分开；Overlay 使用
@@ -308,6 +314,14 @@ authored semantics `worldRect` 不变。ScrollView/ListView/TreeView viewport cl
 作为 viewport-level overlay 继续使用专用 anchor/clip policy，不受普通祖先 clip owner 限制。
 控件内部文字由独立 `UIContentAlignment` 定位，layout snapshot 发布
 `UICommittedContentPlacement`，paint、caret/selection 与 pointer-to-text mapping 共用该 committed origin。
+
+`UIElementDescriptor::textEditMultiline` 只对带 `TextInput` behavior 的 TextEdit 生效。启用后，
+`UITextEditMultilineConfig` 允许 LF、`UITextEditWrapMode::SoftWrap`、固定 `maximumBytes` 与
+`maximumVisualLines`、垂直滚动和 wheel step；visual rows、caret/selection、二维 hit-test 与
+Up/Down/Home/End 都由同一份 committed layout 生成。selection/caret 的公开偏移仍是 Unicode scalar
+index，但所有编辑、删除、导航和替换位置都对齐无第三方依赖的 UAX #29 grapheme 子集；BiDi 和复杂
+shaping 不在当前契约内。多行配置容量不足或 visual-row 构建失败时，authored state 可以暂存并重试；
+最后一次成功提交的 layout/paint/semantics snapshot 以及 route-visible visual rows、scroll 保持不变。
 
 游戏通过 Runtime phase facade 创建/更新主窗口 root，不获得裸 UIContext。Text 使用 strict UTF-8，
 descriptor 的 `string_view` 在创建时复制到固定容量 storage，失败回滚本次节点；
@@ -367,16 +381,17 @@ Behavior slot；Runtime 对应的 move-only `PrimaryWindowUIBuildTransaction` �
 counter、活动事务数与失败事务数。
 
 `UIElementVisual::canvas` 接受 borrowed、backend-neutral `SolidRect`/`SolidEllipse`/`SolidLine`/Image/
-`NineSlice` command span。`SolidRect` 可设置统一 logical-pixel `cornerRadius`；`SolidEllipse` 使用 bounds，
+`NineSlice` command span。`SolidRect` 可设置 `UILogicalCornerRadii cornerRadii`；`SolidEllipse` 使用 bounds，
 零 stroke 表示填充、正 stroke 表示向内描边；`SolidLine` 使用 Element-local 起止点与 logical thickness，
 非法或退化线段 fail closed。Image/NineSlice 复用 `UIImageSource`，NineSlice 另带
 source-pixel 与 destination-logical insets，首版只支持 Stretch。命令在
 `createElement()` 返回前复制到 Context 固定容量 pool，destroy/transaction rollback 回收 slot。公开
 `UIWidgetKind` 已删除；私有实现 kind 不属于 authoring/inspection ABI。`UIBoxPaint::primitive` 支持
 Rectangle/Ellipse/Line；Ellipse 使用 Element layout rect，Line 使用 Element-local geometry。
-`UIBoxPaint::cornerRadius` 只圆化 Rectangle 自身 chrome，不建立子树 clip。NineSlice 在 committed paint 中按 row-major 精确展开1..9个 Image
+`UIBoxPaint::cornerRadii` 使用同一强类型四角 logical 半径，只圆化 Rectangle 自身 chrome，不建立子树 clip；
+UI→Render 逐角投影并夹紧到已有 `UIPixelCornerRadii`。NineSlice 在 committed paint 中按 row-major 精确展开1..9个 Image
 entry，小目标按两侧 destination inset 比例压缩并消除零面积 patch；paint/DisplayList 容量不足不截断。
-逐角半径与 rounded clip 仍是后续扩展。startup-only 强类型 StyleClass/ColorToken、node-local state、
+四角非法值在 descriptor/setter/Canvas assign 和 bridge 边界 fail-closed；rounded clip 仍是后续扩展。startup-only 强类型 StyleClass/ColorToken、node-local state、
 literal/token-backed BoxFill stylesheet，以及运行期 ColorToken getter/setter 与固定 reverse-dependency
 更新路径与 stylesheet imageTint 已开放；更广 opacity/其他属性面仍未开放。token update 按依赖链
 `O(affected links)` 预检并发布 Paint dirty，不是
@@ -395,12 +410,17 @@ resolver 选择 TextEdit/ScrollView/Dropdown，并要求匹配现有 `BuiltinEle
 `PrimaryWindowUIRootBuilder` 注册 StyleClass/ColorToken 并安装 node-local literal/token-backed BoxFill rules；
 `UIContext` 与 phase-scoped `PrimaryWindowUITreeUpdater` 提供 `styleColorToken()` / `setStyleColorToken()`；
 setter 先预检 dirty queue，失败时保持 token/dirty/committed 不变。`UIContext` 与 phase-scoped facade
-已提供 fixed-capacity paint-only Motion、reduced-motion 及 stylesheet `BackgroundColor` transition；仍
-**不支持**注册 Widget subclass、新 Behavior/state machine、通用 selector、完整 keyframe timeline、
-layout animation 或 GPU paint callback。
+已提供 fixed-capacity paint-only Motion、reduced-motion、stylesheet `BackgroundColor` transition，以及
+`UITimelineId` + `create/replace/play/cancel/destroy/isActive` 的 typed keyframe timeline。Timeline descriptor
+按 Context 固定的 definition/track/keyframe/active-index 四类容量复制，支持 paint color/scalar/offset 以及
+bounded `LayoutWidth`/`LayoutHeight`/`LayoutOffset`、retarget 与跨 Context/generation fail closed。含 layout track
+的 sampling 通过唯一 commit pipeline 从同一 candidate 原子发布 Layout/Hit/Paint/Semantics，失败保留旧
+presentation 与 active playback。当前仍**不支持**注册 Widget subclass、新 Behavior/state machine、通用
+selector、白名单外 layout animation 或 GPU paint callback。
 因此“可组合业务 UI”不等于“已有开放控件插件
 ABI”。目标边界见 [UI 框架设计](ui-framework.md)和 Accepted
-[ADR 0023](adr/0023-ui-extensibility-style-paint-motion.md)。正式外部使用仍以 `SDK-001` 的安装 package 与
+[ADR 0023](adr/0023-ui-extensibility-style-paint-motion.md)及
+[ADR 0026](adr/0026-ui-keyframe-timeline-and-layout-animation.md)。正式外部使用仍以 `SDK-001` 的安装 package 与
 consumer gate 为准；这些当前公开声明不代表跨发行版正式 ABI 已冻结。
 
 当前图片边界已按 ADR 0023 落地：Icon 是 Image 的 atlas source/tint/default-layout recipe，Image/Icon 均
@@ -1058,15 +1078,16 @@ Invoke/Toggle/RangeValue/Value patterns；immutable weighted Navigation2D grid�
 - 通用 Runtime owning event queue；
 - 通用 GPU submission fence（现有 readback marker 只服务 Texture/Mesh/EnvironmentMap retirement）；
 - TileMap 更高层 editor orchestration；
-- 多行 TextEdit、grapheme/BiDi/复杂 shaping 与完整 IME 候选窗；
+- BiDi/复杂 shaping、Linux 原生 XIM/Wayland preedit/candidate placement，以及 Windows 真机 IME 候选窗人工金标；
 - generic TextInput/Scroll/Select 输入路由，以及 component transaction 对 text/canvas/各 Behavior pool 的统一预留与 counter；
-- stylesheet 更广 opacity 等属性面、完整 keyframe timeline 与 layout animation；imageTint、paint-only Motion
-  与 ColorToken reverse-dependency 更新已落地；
+- stylesheet 更广 opacity 等属性面、layout property 白名单扩展与高级 Motion playback；imageTint、paint-only
+  transition、typed paint/bounded-layout timeline 与 ColorToken reverse-dependency 更新已落地；
 - Back/Confirm/Menu 之外的任意产品 action-id；
 - Narrator/Inspect 合规金标、Linux AT-SPI；
 - Jolt Physics3D；
-- 安装 SDK 的正式发布 ABI/兼容策略；Windows/Linux moved-prefix 及 Ubuntu producer → Debian consumer
-  的跨发行版 artifact transfer gate 已覆盖当前源码契约。
+- 安装 SDK 的正式 supported ABI tuple baseline/previous-object probe；ADR 0024 的版本策略和 pre-1.0
+  strict exact-version（含相邻版本/tweak/range 反例）probe 已落地，Windows/Linux moved-prefix 及 Ubuntu producer → Debian consumer 的
+  artifact transfer gate 已覆盖当前源码契约，但不替代旧对象兼容证据。
 
 任务状态见 [Backlog](backlog.md)。修改公开头后必须构建 header-isolation/consumer、扫描第三方 token，
 并按 [测试说明](testing.md) 运行受影响 executable 与 sample。

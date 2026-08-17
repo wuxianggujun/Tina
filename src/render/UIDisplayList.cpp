@@ -41,6 +41,20 @@ namespace {
     };
 }
 
+[[nodiscard]] bool validCornerRadii(const UIPixelCornerRadii& radii,
+                                    float maximumRadius) noexcept
+{
+    const std::array values{
+        radii.topLeft,
+        radii.topRight,
+        radii.bottomRight,
+        radii.bottomLeft,
+    };
+    return std::ranges::all_of(values, [maximumRadius](float radius) noexcept {
+        return std::isfinite(radius) && radius >= 0.0F && radius <= maximumRadius;
+    });
+}
+
 [[nodiscard]] bool validSolidQuadVertices(
     const UISolidQuadVertices& vertices,
     const UIPixelRect& bounds) noexcept
@@ -249,21 +263,20 @@ Core::Status UIDisplayListBuilder::addSolidQuad(const UISolidQuadInput& input)
     }
     const float maximumCornerRadius =
         static_cast<float>((std::min)(input.bounds.width, input.bounds.height)) * 0.5F;
-    if (!std::isfinite(input.cornerRadius) || input.cornerRadius < 0.0F ||
-        input.cornerRadius > maximumCornerRadius)
+    if (!validCornerRadii(input.cornerRadii, maximumCornerRadius))
     {
         ++m_statistics.invalidInputFailureCount;
         return failBuild(RenderErrorCode::InvalidDrawCommand,
-                         "UI solid quad corner radius must be finite and fit within its bounds");
+                         "UI solid quad corner radii must be finite and fit within its bounds");
     }
     if (input.vertices.has_value() &&
-        (input.cornerRadius != 0.0F ||
+        (!input.cornerRadii.empty() ||
          !validSolidQuadVertices(*input.vertices, input.bounds)))
     {
         ++m_statistics.invalidInputFailureCount;
         return failBuild(
             RenderErrorCode::InvalidDrawCommand,
-            "UI solid quad vertices must be finite, strictly convex, covered by bounds, and cannot be combined with a corner radius");
+            "UI solid quad vertices must be finite, strictly convex, covered by bounds, and cannot be combined with corner radii");
     }
     if (input.bounds.empty())
     {
@@ -319,7 +332,7 @@ Core::Status UIDisplayListBuilder::addSolidQuad(const UISolidQuadInput& input)
                                                        .paintOrdinal = input.paintOrdinal,
                                                        .bounds = input.bounds,
                                                        .color = input.color,
-                                                       .cornerRadius = input.cornerRadius,
+                                                       .cornerRadii = input.cornerRadii,
                                                        .vertices = input.vertices,
                                                        .clip = clip,
                                                    });
@@ -759,7 +772,10 @@ u64 UIDisplayListBuilder::calculatePaintOrderChecksum(std::span<const UIDrawComm
         hashByte(checksum, command.color.green);
         hashByte(checksum, command.color.blue);
         hashByte(checksum, command.color.alpha);
-        hashU32(checksum, std::bit_cast<u32>(command.cornerRadius));
+        hashU32(checksum, std::bit_cast<u32>(command.cornerRadii.topLeft));
+        hashU32(checksum, std::bit_cast<u32>(command.cornerRadii.topRight));
+        hashU32(checksum, std::bit_cast<u32>(command.cornerRadii.bottomRight));
+        hashU32(checksum, std::bit_cast<u32>(command.cornerRadii.bottomLeft));
         hashByte(checksum, static_cast<u8>(command.vertices.has_value()));
         if (command.vertices.has_value())
         {

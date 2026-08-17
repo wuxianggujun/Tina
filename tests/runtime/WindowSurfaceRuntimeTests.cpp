@@ -178,6 +178,16 @@ class ScriptedWindowSurfacePlatform final : public Integration::IWindowSurfacePl
         return Platform::PlatformPollResult::Continue(*frame);
     }
 
+    Core::Status updateTextInputPlacement(std::optional<Platform::TextInputPlacement> placement) override
+    {
+        static_cast<void>(placement);
+        if (stopped_)
+        {
+            return Core::failure(Platform::PlatformErrorCode::BackendStopped, "The scripted backend is stopped");
+        }
+        return Core::success();
+    }
+
     void shutdown() noexcept override
     {
         if (stopped_)

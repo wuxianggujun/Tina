@@ -324,7 +324,7 @@ TEST(UIDisplayListTest, InvalidPremultipliedColorFailsAndRollsBackTheBuild)
     EXPECT_EQ(builder.statistics().invalidInputFailureCount, 1U);
 }
 
-TEST(UIDisplayListTest, SolidQuadCornerRadiusIsValidatedStoredAndChecksummed)
+TEST(UIDisplayListTest, SolidQuadCornerRadiiAreValidatedStoredAndChecksummed)
 {
     auto builder = createBuilder({.commandCount = 1, .clipCount = 0, .batchCount = 1});
     ASSERT_TRUE(builder.beginFrame().has_value());
@@ -333,14 +333,43 @@ TEST(UIDisplayListTest, SolidQuadCornerRadiusIsValidatedStoredAndChecksummed)
                         .paintOrdinal = 0,
                         .bounds = {0, 0, 20, 10},
                         .color = opaque(10, 20, 30),
-                        .cornerRadius = 4.0F,
+                        .cornerRadii = {
+                            .topLeft = 4.0F,
+                            .topRight = 3.0F,
+                            .bottomRight = 2.0F,
+                            .bottomLeft = 1.0F,
+                        },
                     })
                     .has_value());
     auto rounded = builder.commit();
     ASSERT_TRUE(rounded.has_value());
     ASSERT_EQ(rounded->commands().size(), 1U);
-    EXPECT_FLOAT_EQ(rounded->commands().front().cornerRadius, 4.0F);
+    EXPECT_EQ(rounded->commands().front().cornerRadii,
+              (Render::UIPixelCornerRadii{
+                  .topLeft = 4.0F,
+                  .topRight = 3.0F,
+                  .bottomRight = 2.0F,
+                  .bottomLeft = 1.0F,
+              }));
     const u64 roundedChecksum = rounded->paintOrderChecksum();
+
+    ASSERT_TRUE(builder.beginFrame().has_value());
+    ASSERT_TRUE(builder
+                    .addSolidQuad({
+                        .paintOrdinal = 0,
+                        .bounds = {0, 0, 20, 10},
+                        .color = opaque(10, 20, 30),
+                        .cornerRadii = {
+                            .topLeft = 1.0F,
+                            .topRight = 2.0F,
+                            .bottomRight = 3.0F,
+                            .bottomLeft = 4.0F,
+                        },
+                    })
+                    .has_value());
+    auto reordered = builder.commit();
+    ASSERT_TRUE(reordered.has_value());
+    EXPECT_NE(reordered->paintOrderChecksum(), roundedChecksum);
 
     ASSERT_TRUE(builder.beginFrame().has_value());
     ASSERT_TRUE(builder
@@ -359,7 +388,7 @@ TEST(UIDisplayListTest, SolidQuadCornerRadiusIsValidatedStoredAndChecksummed)
         .paintOrdinal = 0,
         .bounds = {0, 0, 20, 10},
         .color = opaque(10, 20, 30),
-        .cornerRadius = 5.5F,
+        .cornerRadii = {.bottomRight = 5.5F},
     });
     ASSERT_FALSE(oversized.has_value());
     EXPECT_EQ(oversized.error().code, Render::RenderErrorCode::InvalidDrawCommand);

@@ -130,6 +130,131 @@ TEST_F(UIInputRouteProducerTest, FocusedTextEditConsumesTabCommandsTextAndAccept
     ASSERT_TRUE(text.has_value());
     EXPECT_TRUE(text->empty());
 }
+
+TEST_F(UIInputRouteProducerTest, FocusedSingleLineTextEditConsumesVerticalCommandsAsNoOps)
+{
+    auto producer = createProducer();
+    RouteTree tree = createTextEditRouteTree(window);
+    ASSERT_NE(producer, nullptr);
+    ASSERT_NE(tree.context, nullptr);
+    ASSERT_TRUE(tree.target.hasValue());
+    expectOk(tree.updater.setText(tree.target, "ABC"));
+    expectOk(tree.updater.setTextSelection(
+        tree.target, {.anchorCodepoint = 1U, .caretCodepoint = 1U}));
+    expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    expectOk(tree.context->requestFocus(tree.target));
+
+    u64 nextFrame = 16;
+    for (const Platform::Key key : {Platform::Key::Up, Platform::Key::Down})
+    {
+        auto frame = buildFrame(
+            *builder,
+            window,
+            {
+                .frameId = {nextFrame++},
+                .transitions = {keyDown(window, key), keyUp(window, key)},
+            });
+        ASSERT_TRUE(frame.has_value()) << (frame ? "" : frame.error().message);
+        auto output = producer->produce(tree.context.get(), *frame);
+        ASSERT_TRUE(output.has_value()) << (output ? "" : output.error().message);
+        EXPECT_TRUE(output->consumption.isConsumed(0));
+        EXPECT_TRUE(output->consumption.isConsumed(1));
+        EXPECT_EQ(tree.context->defaultActionFocus(), tree.target);
+        EXPECT_EQ(tree.context->imeFocus(), tree.target);
+
+        const auto selection = tree.updater.textSelection(tree.target);
+        ASSERT_TRUE(selection.has_value())
+            << (selection ? "" : selection.error().message);
+        EXPECT_EQ(
+            *selection,
+            (UI::UITextSelection{.anchorCodepoint = 1U, .caretCodepoint = 1U}));
+    }
+}
+
+TEST_F(UIInputRouteProducerTest, FocusedMultilineTextEditRoutesVerticalCommandsBeforeSpatialFocus)
+{
+    constexpr std::string_view MultilineText = "AB\nX\nAB";
+    auto producer = createProducer();
+    RouteTree tree = createTextEditRouteTree(window);
+    ASSERT_NE(producer, nullptr);
+    ASSERT_NE(tree.context, nullptr);
+    ASSERT_TRUE(tree.target.hasValue());
+
+    Core::Status destroyDefaultTextEdit = tree.updater.destroy(tree.target);
+    ASSERT_TRUE(destroyDefaultTextEdit.has_value())
+        << (destroyDefaultTextEdit ? "" : destroyDefaultTextEdit.error().message);
+
+    UI::UIElementDescriptor descriptor = UI::makeTextEditElement();
+    descriptor.textEditMultiline = {
+        .enabled = true,
+        .wrapMode = UI::UITextEditWrapMode::NoWrap,
+        .maximumBytes = 64,
+        .maximumVisualLines = 8,
+    };
+    auto textEdit = tree.updater.createElement(tree.panel, descriptor);
+    auto adjacentButton = tree.updater.createElement(tree.panel, UI::makeButtonElement());
+    ASSERT_TRUE(textEdit.has_value()) << (textEdit ? "" : textEdit.error().message);
+    ASSERT_TRUE(adjacentButton.has_value())
+        << (adjacentButton ? "" : adjacentButton.error().message);
+    tree.target = *textEdit;
+
+    expectOk(tree.updater.setLayoutStyle(tree.target, fixedSize(80.0F, 56.0F)));
+    expectOk(tree.updater.setLayoutStyle(*adjacentButton, fixedSize(80.0F, 20.0F)));
+    expectOk(tree.updater.setText(tree.target, MultilineText));
+    expectOk(tree.updater.setTextSelection(
+        tree.target, {.anchorCodepoint = 2U, .caretCodepoint = 2U}));
+    expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    expectOk(tree.context->requestFocus(tree.target));
+    ASSERT_EQ(tree.context->defaultActionFocus(), tree.target);
+    ASSERT_EQ(tree.context->imeFocus(), tree.target);
+
+    u64 nextFrame = 20;
+    const auto routeKeyPair = [&](Platform::Key key) -> bool {
+        auto frame = buildFrame(
+            *builder,
+            window,
+            {
+                .frameId = {nextFrame++},
+                .transitions = {keyDown(window, key), keyUp(window, key)},
+            });
+        if (!frame)
+        {
+            ADD_FAILURE() << frame.error().message;
+            return false;
+        }
+        auto output = producer->produce(tree.context.get(), *frame);
+        if (!output)
+        {
+            ADD_FAILURE() << output.error().message;
+            return false;
+        }
+        if (!output->consumption.isConsumed(0) || !output->consumption.isConsumed(1))
+        {
+            ADD_FAILURE() << "TextEdit did not consume a vertical keyboard Down/Up pair";
+            return false;
+        }
+        return true;
+    };
+
+    ASSERT_TRUE(routeKeyPair(Platform::Key::Down));
+    EXPECT_EQ(tree.context->defaultActionFocus(), tree.target);
+    EXPECT_EQ(tree.context->imeFocus(), tree.target);
+    auto selection = tree.updater.textSelection(tree.target);
+    ASSERT_TRUE(selection.has_value()) << (selection ? "" : selection.error().message);
+    EXPECT_EQ(
+        *selection,
+        (UI::UITextSelection{.anchorCodepoint = 4U, .caretCodepoint = 4U}));
+
+    ASSERT_TRUE(routeKeyPair(Platform::Key::Up));
+    EXPECT_EQ(tree.context->defaultActionFocus(), tree.target);
+    EXPECT_EQ(tree.context->imeFocus(), tree.target);
+    selection = tree.updater.textSelection(tree.target);
+    ASSERT_TRUE(selection.has_value()) << (selection ? "" : selection.error().message);
+    EXPECT_EQ(
+        *selection,
+        (UI::UITextSelection{.anchorCodepoint = 2U, .caretCodepoint = 2U}));
+}
+
 TEST_F(UIInputRouteProducerTest, DropdownConsumesArrowEscapeAndTabDownUpPairs)
 {
     auto producer = createProducer();

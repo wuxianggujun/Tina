@@ -54,10 +54,15 @@ GLFW backend 已实现：
 - owner-thread 创建、poll、publish、lease 与 shutdown。
 
 Windows 还接入 `Imm32CompositionHostWin32`：窗口 subclass 把 IMM32 preedit/commit/cancel 转为
-`TextCompositionTransition`/`TextInputTransition`，固定 preedit 容量并校验 UTF-16→UTF-8。对应 session
-测试覆盖 started/updated/ended、focus-lost cancel、非法 UTF-8 与 surrogate。
+`TextCompositionTransition`/`TextInputTransition`，固定 preedit 容量并校验 UTF-16→UTF-8。UI commit 后，
+Runtime 从 `UIContext::committedTextInputCaretRect()` 发布 owner-window logical caret geometry；GLFW
+adapter 按当前 content scale 转为 native client pixels，并更新 IMM32 composition/candidate placement。
+placement 为空、caret 与 clip 无正面积交集、窗口 hidden/minimized 或几何无效时会清除旧 hint 并恢复
+IMM32 默认候选窗策略。对应 session 测试覆盖 started/updated/ended、focus-lost cancel、非法 UTF-8 与
+surrogate；placement 的 logical/DPI/invalid/clear 矩阵由 `tina_platform_glfw_tests` 覆盖。
 
-Linux 当前只保证 GLFW committed text；原生 XIM/Wayland preedit、候选窗定位仍未完成。TEST-001 已完成
+Linux 当前只保证 GLFW committed text；原生 XIM/Wayland preedit、候选窗定位仍未完成。非空 placement
+在 Headless backend 明确返回不支持，`nullopt` 清理成功。TEST-001 已完成
 GCC13 Null + Platform/GLFW(Xvfb) 与 Clang22 Null/sanitizer 的当前 tip 复验；可选 Wayland/真显示器和真实
 设备 Gamepad 矩阵仍需独立平台证据，不能由 translation 单测替代。
 
@@ -150,6 +155,7 @@ X11(Xvfb)/sanitizer 证据已经记录；可选 Wayland/真显示器、真实 Ga
 - Windows Narrator/Inspect 人工金标：`UI-002`（action/control patterns 与跨进程 HWND gate 已有）；
 - Linux AT-SPI adapter 与真实辅助技术验收：`UI-002-LINUX`；
 - 方向/手柄空间导航；
-- 多行编辑、复杂 shaping 与候选窗定位：`TEXT-001`。
+- BiDi/复杂 shaping、Linux 原生 XIM/Wayland preedit/candidate placement，以及 Windows 真机 IME 候选窗
+  跟随/提交/取消/失焦人工矩阵：`TEXT-001`。
 
 这些能力不应从已有 `GamepadId`、composition type 或 focused flag 推断为已完成。

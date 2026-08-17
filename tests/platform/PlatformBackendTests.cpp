@@ -120,6 +120,24 @@ TEST(HeadlessPlatformBackendTest, RejectsInvalidCapacityAndPollAfterShutdown)
     EXPECT_EQ(stoppedPoll.error().code, Platform::PlatformErrorCode::BackendStopped);
 }
 
+TEST(HeadlessPlatformBackendTest, AcceptsPlacementClearAndRejectsNativePlacement)
+{
+    auto backendResult = Platform::createHeadlessPlatformBackend({});
+    ASSERT_TRUE(backendResult.has_value());
+    ASSERT_TRUE((*backendResult)->updateTextInputPlacement(std::nullopt).has_value());
+
+    auto windowPoolResult = TestWindowPool::Create(1);
+    ASSERT_TRUE(windowPoolResult.has_value());
+    const Platform::WindowId window = createWindowId(*windowPoolResult);
+    const Core::Status placement = (*backendResult)->updateTextInputPlacement(
+        Platform::TextInputPlacement{
+            .window = window,
+            .caret = {.x = 10.0, .y = 20.0, .width = 2.0, .height = 16.0},
+        });
+    ASSERT_FALSE(placement.has_value());
+    EXPECT_EQ(placement.error().code, Core::CoreErrorCode::InvalidArgument);
+}
+
 TEST(PlatformPollResultTest, ExitRequestedHasNoFrameView)
 {
     const auto result = Platform::PlatformPollResult::Exit();

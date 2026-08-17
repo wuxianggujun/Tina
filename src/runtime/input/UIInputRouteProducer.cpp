@@ -135,6 +135,10 @@ flowInputDeviceObservation(const Platform::InputTransitionPayload& payload,
         return UI::UITextEditCommand::MoveLeft;
     case Platform::Key::Right:
         return UI::UITextEditCommand::MoveRight;
+    case Platform::Key::Up:
+        return UI::UITextEditCommand::MoveUp;
+    case Platform::Key::Down:
+        return UI::UITextEditCommand::MoveDown;
     case Platform::Key::Home:
         return UI::UITextEditCommand::MoveHome;
     case Platform::Key::End:

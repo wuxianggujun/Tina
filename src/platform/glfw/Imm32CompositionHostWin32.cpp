@@ -72,8 +72,66 @@ void Imm32CompositionHostWin32::detach() noexcept
     static_cast<void>(session_.cancel());
     hasPending_ = false;
     pending_ = {};
+    textInputPlacement_.reset();
     hwnd_ = nullptr;
     previousProc_ = nullptr;
+}
+
+void Imm32CompositionHostWin32::setTextInputPlacement(
+    std::optional<GlfwTextInputPlacementPixels> placement) noexcept
+{
+    textInputPlacement_ = placement;
+    if (hwnd_ == nullptr)
+    {
+        return;
+    }
+    const HIMC context = ImmGetContext(hwnd_);
+    if (context != nullptr)
+    {
+        applyTextInputPlacement(context);
+        ImmReleaseContext(hwnd_, context);
+    }
+}
+
+void Imm32CompositionHostWin32::applyTextInputPlacement(HIMC context) noexcept
+{
+    if (context == nullptr)
+    {
+        return;
+    }
+    if (!textInputPlacement_.has_value())
+    {
+        // Restore IMM32's default composition/candidate policy when the
+        // retained UI caret is no longer publishable (focus loss, hidden
+        // window, or a failed paint commit).  Merely dropping the cached
+        // rectangle leaves an already-open candidate window at the old point.
+        CANDIDATEFORM candidate{};
+        candidate.dwIndex = 0;
+        candidate.dwStyle = CFS_DEFAULT;
+        static_cast<void>(ImmSetCandidateWindow(context, &candidate));
+
+        COMPOSITIONFORM composition{};
+        composition.dwStyle = CFS_DEFAULT;
+        static_cast<void>(ImmSetCompositionWindow(context, &composition));
+        return;
+    }
+    const GlfwTextInputPlacementPixels& placement = *textInputPlacement_;
+    CANDIDATEFORM candidate{};
+    candidate.dwIndex = 0;
+    candidate.dwStyle = CFS_CANDIDATEPOS;
+    candidate.ptCurrentPos = POINT{
+        .x = placement.candidateX,
+        .y = placement.candidateY,
+    };
+    static_cast<void>(ImmSetCandidateWindow(context, &candidate));
+
+    COMPOSITIONFORM composition{};
+    composition.dwStyle = CFS_POINT;
+    composition.ptCurrentPos = POINT{
+        .x = placement.caretLeft,
+        .y = placement.caretTop,
+    };
+    static_cast<void>(ImmSetCompositionWindow(context, &composition));
 }
 
 std::optional<Imm32CompositionHostWin32::Pending>
@@ -201,6 +259,11 @@ LRESULT Imm32CompositionHostWin32::subclassProc(
         }
         return 0;
     } else if (message == WM_IME_STARTCOMPOSITION) {
+        const HIMC context = ImmGetContext(hwnd);
+        if (context != nullptr) {
+            applyTextInputPlacement(context);
+            ImmReleaseContext(hwnd, context);
+        }
         // First GCS_COMPSTR will emit Started via updatePreedit.
         return 0;
     }

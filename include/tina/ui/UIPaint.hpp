@@ -81,6 +81,41 @@ struct UISolidFill final {
     auto operator<=>(const UISolidFill&) const = default;
 };
 
+// Logical-pixel corner radii authored by retained UI. The order matches the
+// Render pixel-radii contract and is kept backend-neutral until UI-Render
+// projection. Public authoring validates every component before UIContext
+// normalizes and publishes the retained value.
+struct UILogicalCornerRadii final {
+    float topLeft = 0.0F;
+    float topRight = 0.0F;
+    float bottomRight = 0.0F;
+    float bottomLeft = 0.0F;
+
+    [[nodiscard]] static constexpr UILogicalCornerRadii uniform(float radius) noexcept
+    {
+        return {
+            .topLeft = radius,
+            .topRight = radius,
+            .bottomRight = radius,
+            .bottomLeft = radius,
+        };
+    }
+
+    [[nodiscard]] constexpr bool isZero() const noexcept
+    {
+        return topLeft == 0.0F && topRight == 0.0F &&
+               bottomRight == 0.0F && bottomLeft == 0.0F;
+    }
+
+    [[nodiscard]] constexpr bool isUniform() const noexcept
+    {
+        return topLeft == topRight && topLeft == bottomRight &&
+               topLeft == bottomLeft;
+    }
+
+    auto operator<=>(const UILogicalCornerRadii&) const = default;
+};
+
 // Geometry primitive used by an Element's box paint. Rectangle preserves the
 // normal box chrome path; Ellipse uses the layout rect as its ellipse bounds;
 // Line uses the local endpoints and thickness below.
@@ -101,8 +136,8 @@ struct UILineGeometry final {
 };
 
 // Box paint: optional fill, dual-tone border (Phase A), optional shadow (Phase B),
-// and a uniform corner radius (Phase C1). Rounded chrome affects this box only;
-// descendant clipping remains axis-aligned until rounded clip is implemented.
+// and logical per-corner radii. Rounded chrome affects this box only; descendant
+// clipping remains axis-aligned until rounded clip is implemented.
 struct UIBoxPaint final {
     std::optional<UISolidFill> solidFill{};
     // Top/left edge color when borderWidth > 0 and alpha != 0.
@@ -114,7 +149,7 @@ struct UIBoxPaint final {
     UIStraightSrgba8Color shadow{};
     float shadowOffsetX = 0.0F;
     float shadowOffsetY = 0.0F;
-    float cornerRadius = 0.0F;
+    UILogicalCornerRadii cornerRadii{};
     UIBoxPrimitiveKind primitive = UIBoxPrimitiveKind::Rectangle;
     UILineGeometry line{};
     // Ellipse stroke width in logical pixels. Zero draws a filled ellipse;
@@ -130,7 +165,7 @@ struct UIBoxPaint final {
     float cornerRadius = 0.0F) noexcept
 {
     UIBoxPaint paint{.solidFill = UISolidFill{.color = color}};
-    paint.cornerRadius = cornerRadius;
+    paint.cornerRadii = UILogicalCornerRadii::uniform(cornerRadius);
     return paint;
 }
 
@@ -180,9 +215,9 @@ struct UICanvasCommand final {
     UILogicalRect bounds{};
     // Solid shape fill or Image/NineSlice tint.
     UIStraightSrgba8Color color{};
-    // Rounded SolidRect radius in logical pixels. Rendering clamps it to half
-    // the smallest projected extent; it does not establish a rounded clip.
-    float cornerRadius = 0.0F;
+    // Rounded SolidRect radii in logical pixels. Rendering clamps each corner
+    // to the projected half-extent; they do not establish a rounded clip.
+    UILogicalCornerRadii cornerRadii{};
     // Image metadata is ignored for solid shapes. Image requires zero insets;
     // NineSlice interprets source insets in pixels and destination insets in
     // logical pixels. The first NineSlice slice supports Stretch only.

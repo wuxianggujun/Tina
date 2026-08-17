@@ -47,7 +47,7 @@ namespace {
 
 [[nodiscard]] bool isValidCanvasCommand(const UICanvasCommand& command) noexcept
 {
-    if (!std::isfinite(command.cornerRadius) || command.cornerRadius < 0.0F)
+    if (!isValidLogicalCornerRadii(command.cornerRadii))
     {
         return false;
     }
@@ -58,7 +58,7 @@ namespace {
         return hasValidBounds(command.bounds);
     case UICanvasCommandKind::SolidEllipse:
         return hasValidBounds(command.bounds) && command.bounds.width > 0.0F &&
-               command.bounds.height > 0.0F && command.cornerRadius == 0.0F &&
+               command.bounds.height > 0.0F && command.cornerRadii.isZero() &&
                std::isfinite(command.ellipseStrokeWidth) && command.ellipseStrokeWidth >= 0.0F &&
                command.ellipseStrokeWidth <=
                    (std::min)(command.bounds.width, command.bounds.height) * 0.5F;
@@ -67,16 +67,16 @@ namespace {
         const float length = std::hypot(
             command.lineEnd.x - command.lineStart.x,
             command.lineEnd.y - command.lineStart.y);
-        return command.cornerRadius == 0.0F && hasValidPoint(command.lineStart) &&
+        return command.cornerRadii.isZero() && hasValidPoint(command.lineStart) &&
                hasValidPoint(command.lineEnd) && std::isfinite(command.lineThickness) &&
                command.lineThickness > 0.0F && std::isfinite(length) && length > 0.0F;
     }
     case UICanvasCommandKind::Image:
-        return command.cornerRadius == 0.0F && isValidImageSource(command.imageSource) &&
+        return command.cornerRadii.isZero() && isValidImageSource(command.imageSource) &&
                isValidImageSampling(command.imageSampling) &&
                hasZeroInsets(command.imageSourceInsets, command.imageDestinationInsets);
     case UICanvasCommandKind::NineSlice:
-        return command.cornerRadius == 0.0F && isValidImageSource(command.imageSource) &&
+        return command.cornerRadii.isZero() && isValidImageSource(command.imageSource) &&
                isValidImageSampling(command.imageSampling) &&
                hasValidSourceInsets(command.imageSource, command.imageSourceInsets) &&
                hasValidDestinationInsets(command.imageDestinationInsets);

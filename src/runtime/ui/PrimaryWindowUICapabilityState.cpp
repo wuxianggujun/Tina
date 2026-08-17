@@ -1227,6 +1227,103 @@ Core::Status PrimaryWindowUICapabilityState::beginVisualOffsetTransition(
     return Core::success();
 }
 
+Core::Result<UI::UITimelineId> PrimaryWindowUICapabilityState::createTimeline(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITimelineDesc& desc)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::createTimeline";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(status.error());
+    }
+    auto result = context_->createTimeline(desc);
+    if (!result)
+    {
+        return Core::failure(rememberFirstError(std::move(result.error()), Operation));
+    }
+    return *result;
+}
+
+Core::Status PrimaryWindowUICapabilityState::replaceTimeline(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITimelineId timeline,
+    const UI::UITimelineDesc& desc)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::replaceTimeline";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = context_->replaceTimeline(timeline, desc);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::playTimeline(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITimelineId timeline)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::playTimeline";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = context_->playTimeline(timeline);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::cancelTimeline(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITimelineId timeline)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::cancelTimeline";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = context_->cancelTimeline(timeline);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::destroyTimeline(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITimelineId timeline)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::destroyTimeline";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = context_->destroyTimeline(timeline);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<bool> PrimaryWindowUICapabilityState::isTimelineActive(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITimelineId timeline)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::isTimelineActive";
+    if (Core::Status status = validate(epoch, phase, false, Operation); !status)
+    {
+        return Core::failure(status.error());
+    }
+    auto result = context_->isTimelineActive(timeline);
+    if (!result)
+    {
+        return Core::failure(rememberFirstError(std::move(result.error()), Operation));
+    }
+    return *result;
+}
+
 Core::Status PrimaryWindowUICapabilityState::setButtonPaint(u64 epoch, PrimaryWindowUIPhase phase,
                                                             UI::UITreeUpdater& updater, UI::UINodeId button,
                                                             const UI::UIButtonPaint& paint)

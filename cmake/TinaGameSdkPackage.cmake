@@ -306,10 +306,14 @@ function(tina_configure_game_sdk_package)
         INSTALL_DESTINATION "${tina_package_directory}"
         PATH_VARS CMAKE_INSTALL_INCLUDEDIR
     )
-    write_basic_package_version_file(
+    # ADR 0024 requires stricter semantics than CMake's built-in ExactVersion
+    # template: that template ignores a tweak component and accepts the lower
+    # endpoint of a version range. Keep the version file explicit so every
+    # non-three-component or range request fails closed.
+    configure_file(
+        "${PROJECT_SOURCE_DIR}/cmake/TinaConfigVersion.cmake.in"
         "${PROJECT_BINARY_DIR}/TinaConfigVersion.cmake"
-        VERSION "${PROJECT_VERSION}"
-        COMPATIBILITY SameMajorVersion
+        @ONLY
     )
 
     install(EXPORT TinaTargets

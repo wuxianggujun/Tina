@@ -48,7 +48,11 @@ buildDisplayList(UIDisplayListBuilder& builder, std::span<const UISolidQuadInput
             .paintOrdinal = 3,
             .bounds = {10, 20, 30, 40},
             .color = {.red = 128, .green = 64, .blue = 1, .alpha = 128},
-            .cornerRadius = 6.0F,
+            .cornerRadii = {
+                .topLeft = 6.0F,
+                .topRight = 4.0F,
+                .bottomRight = 2.0F,
+            },
         },
         UISolidQuadInput{
             .paintOrdinal = 9,
@@ -133,6 +137,10 @@ TEST(BgfxUIDisplayGeometryTest, ExpandsTwoSolidQuadsInPaintOrderWithAbsoluteIndi
         EXPECT_FLOAT_EQ(vertices[index].shapeWidth, 30.0F);
         EXPECT_FLOAT_EQ(vertices[index].shapeHeight, 40.0F);
         EXPECT_FLOAT_EQ(vertices[index].shapeParameter, 6.0F);
+        EXPECT_FLOAT_EQ(vertices[index].cornerRadiusTopLeft, 6.0F);
+        EXPECT_FLOAT_EQ(vertices[index].cornerRadiusTopRight, 4.0F);
+        EXPECT_FLOAT_EQ(vertices[index].cornerRadiusBottomRight, 2.0F);
+        EXPECT_FLOAT_EQ(vertices[index].cornerRadiusBottomLeft, 0.0F);
     }
 
     constexpr u32 SecondAbgr = 0xFF1E140AU;

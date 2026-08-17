@@ -12,6 +12,7 @@
 #include "GlfwGamepadTranslation.hpp"
 #include "GlfwInputTranslation.hpp"
 #include "GlfwNativeWindowBinding.hpp"
+#include "GlfwTextInputPlacement.hpp"
 #if defined(_WIN32)
 #include "Imm32CompositionHostWin32.hpp"
 #endif
@@ -522,6 +523,53 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         surfaceSnapshot_ = *nextSurfaceSnapshot;
         discardPartialFrame.release();
         return PlatformPollResult::Continue(*frame);
+    }
+
+    Core::Status updateTextInputPlacement(std::optional<TextInputPlacement> placement) override
+    {
+        if (stopped_)
+        {
+            return Core::failure(PlatformErrorCode::BackendStopped, "The GLFW platform backend is stopped");
+        }
+        if (std::this_thread::get_id() != ownerThread_)
+        {
+            return Core::failure(PlatformErrorCode::WrongOwnerThread,
+                                 "The GLFW text input placement must be published on the creating thread");
+        }
+        if (!hasLiveWindow())
+        {
+            return Core::failure(PlatformErrorCode::BackendOperationFailed,
+                                 "The GLFW primary window registry entry is no longer live");
+        }
+        if (!placement.has_value())
+        {
+#if defined(_WIN32)
+            imeHost_.setTextInputPlacement(std::nullopt);
+#endif
+            return Core::success();
+        }
+
+        auto pixels = Detail::resolveGlfwTextInputPlacement(*placement, metrics_);
+        if (!pixels)
+        {
+            return std::unexpected(std::move(pixels.error()));
+        }
+        // IMM32/GLFW do not expose a candidate window while the native window
+        // is hidden, minimized, or unfocused. Keep the logical placement
+        // contract valid but clear the native hint until the next focused frame.
+        if (!metrics_.focused || metrics_.minimized || !metrics_.visible)
+        {
+#if defined(_WIN32)
+            imeHost_.setTextInputPlacement(std::nullopt);
+#endif
+            return Core::success();
+        }
+#if defined(_WIN32)
+        imeHost_.setTextInputPlacement(*pixels);
+#else
+        (void)pixels;
+#endif
+        return Core::success();
     }
 
     void shutdown() noexcept override
@@ -1661,6 +1709,11 @@ class GlfwIndependentPlatformBackend final : public IPlatformBackend {
     [[nodiscard]] Core::Result<PlatformPollResult> pollFrame() override
     {
         return implementation_->pollFrame();
+    }
+
+    Core::Status updateTextInputPlacement(std::optional<TextInputPlacement> placement) override
+    {
+        return implementation_->updateTextInputPlacement(std::move(placement));
     }
 
     void shutdown() noexcept override

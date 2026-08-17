@@ -2704,6 +2704,103 @@ TEST_F(SceneMeshAssetTest, ExtractsPerspectiveCameraAndResolvedMeshIntoRenderSce
     EXPECT_EQ(bindings.materialResolveCalls, 1U);
 }
 
+TEST_F(SceneMeshAssetTest, CullsStaticAndSkinnedMeshesBeforeResolvingFrameResources)
+{
+    World world = makeWorld();
+    const EntityId camera = world.createEntity().value();
+    ASSERT_TRUE(world.setPerspectiveCamera3D(camera, fixturePerspectiveCamera()));
+
+    LocalTransform transformedBounds = translated(10.0F, 0.0F, -10.0F);
+    transformedBounds.scale = {2.0F, 1.0F, 1.0F};
+    const EntityId visibleStatic = world.createEntity(transformedBounds).value();
+    MeshRenderer3D staticMesh = fixtureMesh(meshA_, materialA_);
+    staticMesh.localBounds.centerX = -5.0F;
+    ASSERT_TRUE(world.setMeshRenderer3D(visibleStatic, staticMesh));
+
+    const EntityId culledStatic = world.createEntity(translated(100.0F, 0.0F, -5.0F)).value();
+    ASSERT_TRUE(world.setMeshRenderer3D(culledStatic, fixtureMesh(meshA_, materialA_)));
+
+    const EntityId visibleSkinned = world.createEntity(translated(0.0F, 0.0F, -6.0F)).value();
+    ASSERT_TRUE(world.setSkinnedMeshRenderer3D(
+        visibleSkinned, fixtureSkinnedMesh(skinnedMesh_, materialA_)));
+
+    const EntityId culledSkinned = world.createEntity(translated(-100.0F, 0.0F, -6.0F)).value();
+    ASSERT_TRUE(world.setSkinnedMeshRenderer3D(
+        culledSkinned, fixtureSkinnedMesh(skinnedMesh_, materialA_)));
+
+    std::array<float, Render::SkinnedMesh3DPaletteFloatsPerJoint> palette{
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1,
+    };
+    TestSkinnedPoseProvider poses{.palette = palette};
+    TestMeshBindings bindings{.store = &store()};
+    bindings.bind(meshA_, 7);
+    bindings.bind(skinnedMesh_, 9);
+    bindings.bind(materialA_, 11);
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame(Render::RenderSceneFrameParameters{
+        .primarySurfaceAspectRatio = 1.0F,
+    }));
+    Render::RenderSceneWriter writer = builder->writer();
+    ASSERT_TRUE(extractRenderSceneFromWorld(
+        world,
+        writer,
+        ExtractRenderSceneParams{
+            .surfaceViewport = {.pixelWidth = 1000, .pixelHeight = 1000},
+            .mesh3DBindingResolver = bindings.meshResolver(),
+            .material3DBindingResolver = bindings.materialResolver(),
+            .skinnedMesh3DBindingResolver = bindings.skinnedMeshResolver(),
+            .skinnedPose3DProvider = poses.provider(),
+        }));
+
+    auto view = builder->commit();
+    ASSERT_TRUE(view.has_value()) << (view ? "" : view.error().message);
+    ASSERT_EQ(view->meshes3D().size(), 1U);
+    ASSERT_EQ(view->skinnedMeshes3D().size(), 1U);
+    EXPECT_FLOAT_EQ(view->meshes3D()[0].worldBoundsCenterX, 0.0F);
+    EXPECT_FLOAT_EQ(view->meshes3D()[0].worldBoundsRadius, 1.0F);
+    EXPECT_EQ(bindings.meshResolveCalls, 1U);
+    EXPECT_EQ(bindings.skinnedMeshResolveCalls, 1U);
+    EXPECT_EQ(bindings.materialResolveCalls, 2U);
+    EXPECT_EQ(poses.resolveCalls, 1U);
+    EXPECT_EQ(poses.lastEntity, visibleSkinned);
+}
+
+TEST_F(SceneMeshAssetTest, SuspendedSurfaceKeepsVisibleMeshesUnculled)
+{
+    World world = makeWorld();
+    const EntityId camera = world.createEntity().value();
+    ASSERT_TRUE(world.setPerspectiveCamera3D(camera, fixturePerspectiveCamera()));
+    const EntityId mesh = world.createEntity(translated(100.0F, 0.0F, -5.0F)).value();
+    ASSERT_TRUE(world.setMeshRenderer3D(mesh, fixtureMesh(meshA_, materialA_)));
+
+    TestMeshBindings bindings{.store = &store()};
+    bindings.bind(meshA_, 7);
+    bindings.bind(materialA_, 11);
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    ASSERT_TRUE(extractRenderSceneFromWorld(
+        world,
+        writer,
+        ExtractRenderSceneParams{
+            .surfaceViewport = {.pixelWidth = 0, .pixelHeight = 0},
+            .mesh3DBindingResolver = bindings.meshResolver(),
+            .material3DBindingResolver = bindings.materialResolver(),
+        }));
+
+    auto view = builder->commit();
+    ASSERT_TRUE(view.has_value()) << (view ? "" : view.error().message);
+    EXPECT_EQ(view->meshes3D().size(), 1U);
+    EXPECT_EQ(bindings.meshResolveCalls, 1U);
+    EXPECT_EQ(bindings.materialResolveCalls, 1U);
+}
+
 TEST_F(SceneMeshAssetTest, MissingResolverRejectsVisibleMesh)
 {
     World world = makeWorld();

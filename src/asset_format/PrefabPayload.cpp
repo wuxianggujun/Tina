@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <new>
 #include <vector>
 
 namespace Tina::AssetFormat {
@@ -100,6 +101,13 @@ void writeAssetId(std::vector<std::byte>& bytes, usize offset, Core::AssetId ass
     return std::isfinite(x) && std::isfinite(y) && std::isfinite(z) && std::isfinite(w);
 }
 
+[[nodiscard]] bool isNonZeroQuat(float x, float y, float z, float w) noexcept
+{
+    const double lengthSquared = static_cast<double>(x) * x + static_cast<double>(y) * y +
+                                 static_cast<double>(z) * z + static_cast<double>(w) * w;
+    return std::isfinite(lengthSquared) && lengthSquared > 1.0e-12;
+}
+
 [[nodiscard]] Core::Status validatePrefabDesc(const PrefabPayloadDesc& desc) noexcept
 {
     if (desc.nodes.empty())
@@ -113,6 +121,11 @@ void writeAssetId(std::vector<std::byte>& bytes, usize offset, Core::AssetId ass
     for (usize index = 0; index < desc.nodes.size(); ++index)
     {
         const PrefabNodeDesc& node = desc.nodes[index];
+        if (node.stableNodeId == 0U)
+        {
+            return Core::failure(AssetFormatErrorCode::InvalidIdentity,
+                                 "prefab stableNodeId must be non-zero");
+        }
         if (node.parentIndex < -1 || node.parentIndex >= static_cast<i32>(index))
         {
             return Core::failure(AssetFormatErrorCode::InvalidLayout,
@@ -124,9 +137,7 @@ void writeAssetId(std::vector<std::byte>& bytes, usize offset, Core::AssetId ass
         {
             return Core::failure(AssetFormatErrorCode::InvalidLayout, "prefab node transform must be finite");
         }
-        const float rotationLengthSquared = node.rotationX * node.rotationX + node.rotationY * node.rotationY +
-                                            node.rotationZ * node.rotationZ + node.rotationW * node.rotationW;
-        if (!(rotationLengthSquared > 1.0e-12F))
+        if (!isNonZeroQuat(node.rotationX, node.rotationY, node.rotationZ, node.rotationW))
         {
             return Core::failure(AssetFormatErrorCode::InvalidLayout, "prefab node rotation must be non-zero");
         }
@@ -143,6 +154,11 @@ void writeAssetId(std::vector<std::byte>& bytes, usize offset, Core::AssetId ass
         for (usize previousIndex = 0; previousIndex < index; ++previousIndex)
         {
             const PrefabNodeDesc& previous = desc.nodes[previousIndex];
+            if (node.stableNodeId == previous.stableNodeId)
+            {
+                return Core::failure(AssetFormatErrorCode::InvalidIdentity,
+                                     "prefab stableNodeId values must be unique");
+            }
             if ((node.meshId && node.meshId == previous.materialId) ||
                 (node.materialId && node.materialId == previous.meshId))
             {
@@ -225,74 +241,98 @@ Core::Result<PrefabPayloadView> parsePrefabPayload(std::span<const std::byte> pa
         return Core::failure(AssetFormatErrorCode::InvalidLayout, "prefab payload size mismatch");
     }
 
-    nodeStorage.clear();
-    nodeStorage.reserve(nodeCount);
-    for (u16 index = 0; index < nodeCount; ++index)
+    try
     {
-        const usize base = PrefabWire::HeaderBytes + static_cast<usize>(index) * PrefabWire::NodeBytes;
-        PrefabNodeView node{};
-        node.stableNodeId = readU32(payload, base + 0);
-        node.parentIndex = readI32(payload, base + 4);
-        if (node.parentIndex < -1 || node.parentIndex >= static_cast<i32>(index))
+        std::vector<PrefabNodeView> parsed;
+        parsed.reserve(nodeCount);
+        for (u16 index = 0; index < nodeCount; ++index)
         {
-            return Core::failure(AssetFormatErrorCode::InvalidLayout, "prefab parentIndex is invalid");
-        }
-        node.positionX = readF32(payload, base + 8);
-        node.positionY = readF32(payload, base + 12);
-        node.positionZ = readF32(payload, base + 16);
-        node.rotationX = readF32(payload, base + 20);
-        node.rotationY = readF32(payload, base + 24);
-        node.rotationZ = readF32(payload, base + 28);
-        node.rotationW = readF32(payload, base + 32);
-        node.scaleX = readF32(payload, base + 36);
-        node.scaleY = readF32(payload, base + 40);
-        node.scaleZ = readF32(payload, base + 44);
-        if (!isFiniteVec3(node.positionX, node.positionY, node.positionZ) ||
-            !isFiniteQuat(node.rotationX, node.rotationY, node.rotationZ, node.rotationW) ||
-            !isFiniteVec3(node.scaleX, node.scaleY, node.scaleZ))
-        {
-            return Core::failure(AssetFormatErrorCode::InvalidLayout, "prefab node transform must be finite");
-        }
-        const u16 flags = readU16(payload, base + 48);
-        if ((flags & static_cast<u16>(~PrefabWire::FlagHidden)) != 0U)
-        {
-            return Core::failure(AssetFormatErrorCode::InvalidLayout, "prefab node flags are invalid");
-        }
-        node.meshId = readAssetId(payload, base + 52);
-        node.materialId = readAssetId(payload, base + 68);
-        node.hasMesh = static_cast<bool>(node.meshId);
-        node.hasMaterial = static_cast<bool>(node.materialId);
-        node.visible = (flags & PrefabWire::FlagHidden) == 0U;
-        if (node.hasMesh != node.hasMaterial)
-        {
-            return Core::failure(AssetFormatErrorCode::InvalidLayout,
-                                 "prefab mesh and material AssetIds must both be present or absent");
-        }
-        if (node.hasMesh && node.meshId == node.materialId)
-        {
-            return Core::failure(AssetFormatErrorCode::InvalidLayout,
-                                 "prefab mesh and material AssetIds must be distinct");
-        }
-        for (const PrefabNodeView& previous : nodeStorage)
-        {
-            if ((node.meshId && node.meshId == previous.materialId) ||
-                (node.materialId && node.materialId == previous.meshId))
+            const usize base = PrefabWire::HeaderBytes + static_cast<usize>(index) * PrefabWire::NodeBytes;
+            PrefabNodeView node{};
+            node.stableNodeId = readU32(payload, base + 0);
+            if (node.stableNodeId == 0U)
+            {
+                return Core::failure(AssetFormatErrorCode::InvalidIdentity,
+                                     "prefab stableNodeId must be non-zero");
+            }
+            node.parentIndex = readI32(payload, base + 4);
+            if (node.parentIndex < -1 || node.parentIndex >= static_cast<i32>(index))
+            {
+                return Core::failure(AssetFormatErrorCode::InvalidLayout, "prefab parentIndex is invalid");
+            }
+            node.positionX = readF32(payload, base + 8);
+            node.positionY = readF32(payload, base + 12);
+            node.positionZ = readF32(payload, base + 16);
+            node.rotationX = readF32(payload, base + 20);
+            node.rotationY = readF32(payload, base + 24);
+            node.rotationZ = readF32(payload, base + 28);
+            node.rotationW = readF32(payload, base + 32);
+            node.scaleX = readF32(payload, base + 36);
+            node.scaleY = readF32(payload, base + 40);
+            node.scaleZ = readF32(payload, base + 44);
+            if (!isFiniteVec3(node.positionX, node.positionY, node.positionZ) ||
+                !isFiniteQuat(node.rotationX, node.rotationY, node.rotationZ, node.rotationW) ||
+                !isFiniteVec3(node.scaleX, node.scaleY, node.scaleZ))
+            {
+                return Core::failure(AssetFormatErrorCode::InvalidLayout, "prefab node transform must be finite");
+            }
+            if (!isNonZeroQuat(node.rotationX, node.rotationY, node.rotationZ, node.rotationW))
             {
                 return Core::failure(AssetFormatErrorCode::InvalidLayout,
-                                     "prefab AssetId cannot be used as both mesh and material");
+                                     "prefab node rotation must be non-zero");
             }
+            const u16 flags = readU16(payload, base + 48);
+            if ((flags & static_cast<u16>(~PrefabWire::FlagHidden)) != 0U)
+            {
+                return Core::failure(AssetFormatErrorCode::InvalidLayout, "prefab node flags are invalid");
+            }
+            node.meshId = readAssetId(payload, base + 52);
+            node.materialId = readAssetId(payload, base + 68);
+            node.hasMesh = static_cast<bool>(node.meshId);
+            node.hasMaterial = static_cast<bool>(node.materialId);
+            node.visible = (flags & PrefabWire::FlagHidden) == 0U;
+            if (node.hasMesh != node.hasMaterial)
+            {
+                return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                                     "prefab mesh and material AssetIds must both be present or absent");
+            }
+            if (node.hasMesh && node.meshId == node.materialId)
+            {
+                return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                                     "prefab mesh and material AssetIds must be distinct");
+            }
+            for (const PrefabNodeView& previous : parsed)
+            {
+                if (node.stableNodeId == previous.stableNodeId)
+                {
+                    return Core::failure(AssetFormatErrorCode::InvalidIdentity,
+                                         "prefab stableNodeId values must be unique");
+                }
+                if ((node.meshId && node.meshId == previous.materialId) ||
+                    (node.materialId && node.materialId == previous.meshId))
+                {
+                    return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                                         "prefab AssetId cannot be used as both mesh and material");
+                }
+            }
+            if (readU16(payload, base + 50) != 0)
+            {
+                return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                                     "prefab node reserved fields must be zero");
+            }
+            parsed.push_back(node);
         }
-        if (readU16(payload, base + 50) != 0)
-        {
-            return Core::failure(AssetFormatErrorCode::InvalidLayout, "prefab node reserved fields must be zero");
-        }
-        nodeStorage.push_back(node);
-    }
 
-    PrefabPayloadView view{};
-    view.schemaVersion = schema;
-    view.nodes = nodeStorage;
-    return view;
+        nodeStorage.swap(parsed);
+        PrefabPayloadView view{};
+        view.schemaVersion = schema;
+        view.nodes = nodeStorage;
+        return view;
+    }
+    catch (const std::bad_alloc&)
+    {
+        return Core::failure(Core::CoreErrorCode::OutOfMemory, "prefab payload parsing allocation failed");
+    }
 }
 
 Core::Result<std::vector<std::byte>> writeCookedPrefabAsset(Core::AssetId assetId, const PrefabPayloadDesc& desc,

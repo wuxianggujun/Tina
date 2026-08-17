@@ -100,10 +100,108 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunMsvcUiTes
 # 已确认 binary 对应当前源码时，只运行测试
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunMsvcUiTests.ps1 `
   -SkipBuild -GTestFilter 'UITextPaintEmitterTests.*'
+
+# UI-MOTION-002 focused regression gate (build the affected targets first, then
+# run the UI, Runtime facade, and workload assertions).
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunMsvcUiTests.ps1 `
+  -SkipBuild -GTestFilter 'UIMotionTests.*'
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_runtime_ui_tests.exe `
+  --gtest_filter='PrimaryWindowUICapabilityTest.TimelineFacadeOwnsDefinitionPlaybackAndExpiry'
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench_tests.exe `
+  --gtest_filter='UIBenchmarkWorkloadsTests.*Timeline*'
 ```
+
+### UI-PAINT-002-A 逐角圆角统一 gate
+
+强类型四角 authoring 是跨 UI/Integration/Render 的公开契约改动。源码、测试、Showcase 与文档全部完成后，
+复用常驻 `windows-msvc-vnext-bgfx-ui-freetype` Debug tree 一次性增量构建；不重新 configure、不使用 CTest：
+
+```powershell
+cmake --build --preset windows-vnext-bgfx-ui-freetype-debug `
+  --target tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests `
+           tina_render_bgfx_tests tina_bench_tests tina_sample_ui_showcase `
+  --parallel 2 -- /nr:false
+
+out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_ui_tests.exe
+out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_runtime_ui_tests.exe
+out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_ui_render_integration_tests.exe
+out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_render_bgfx_tests.exe
+out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_bench_tests.exe
+out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_sample_ui_showcase.exe `
+  --auto-demo --frames=120 --frame-delay-ms=0
+```
+
+逻辑断言覆盖四角 retained/canvas copy、rounded shadow/border/inset fill、descriptor/setter/Canvas/bridge 非法值
+原子拒绝、逐角 anisotropic 投影与 checksum。`CornerRadius` direct transition 从非 uniform authored 值启动必须
+返回 `InvalidStyle`，显式 keyframe0 的 scalar timeline 则允许启动并发布 uniform presentation。Showcase smoke
+还必须输出 `controls=21`、`asymmetricCornerProducts=3` 与既有生命周期/图片/主题字段。rounded descendant clip、
+backdrop/blur、per-corner Motion、新 shader/material 与跨 GPU/DPI golden 不由该 gate 证明。
+
+2026-08-17 在上述常驻 tree 完成统一 gate，所有命令均 exit 0：
+
+- 六个 target 增量 build：FastCtx job `j-ma0flp`；
+- `tina_ui_tests` 672/672、`tina_runtime_ui_tests` 130/130、`tina_ui_render_integration_tests` 28/28；
+- `tina_render_bgfx_tests` 111/111、`tina_bench_tests` 10/10；
+- UI Showcase 120 帧 smoke：`status=ok`、`frames=120`、`controls=21`、`asymmetricCornerProducts=3`、
+  `imageAtlasReleased=true`、`imageAtlasInvalidated=true`、`uiRootsCreated=1`、`uiRootsReleased=1`。
 
 默认 topology 是 `windows-msvc-vnext-bgfx` Debug；没有 build tree 时自动 configure，已有 tree 由
 CMake 在需要时自动 regenerate。脚本使用 `/nr:false`，不应再在调用处追加 `/m:2 /v:m`。
+
+### TEXT-001 多行 / grapheme / Windows IME 矩阵
+
+TEXT-001 的自动 gate 必须在同一轮先增量构建受影响 target，再直接运行下列 executable；不使用 CTest：
+
+```powershell
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_ui_tests.exe `
+  --gtest_filter='*TextEdit*:*Grapheme*:*Ime*:*TextInput*'
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_runtime_ui_tests.exe `
+  --gtest_filter='*TextInput*:*TextEdit*'
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_platform_glfw_tests.exe `
+  --gtest_filter='*TextInputPlacement*:*Imm32*'
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_ui_uia_tests.exe
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_ui_showcase.exe `
+  --auto-demo --frames=120 --frame-delay-ms=0
+```
+
+矩阵要求覆盖：默认单行回归；LF/CR、soft-wrap、每编辑器 byte/visual-line 容量、固定 visual-row span
+耗尽时零发布；二维 pointer hit、滚动边界 wheel 透传、Up/Down preferred-X、Home/End；组合字符/emoji
+等 UAX #29 子集边界的移动、选择、删除；IME preedit/commit/cancel、focus loss；caret logical geometry
+到 DPI-scaled client pixel 的转换、非 finite/0 高度/贴边 clip 清除与 Headless unsupported。当前自动证据为
+`tina_ui_tests` 667/667、`tina_runtime_ui_tests` 130/130、`tina_ui_uia_tests` 12/12；Windows 真机
+微软拼音候选窗跟随、提交、取消、失焦仍需人工矩阵，不能由单元或 Xvfb 结果替代。Linux 原生 XIM/Wayland
+preedit/candidate placement 是独立后置平台项。
+
+### 2026-08-16 当前主工作树定向复验
+
+在 `codex/tina-vnext-runtime` 的常驻 `windows-msvc-vnext-bgfx` Debug build tree 上，对未提交的
+`TEXT-001`、`UI-MOTION-002`、`ASSET-SEC-002` 与 SDK package 相关改动执行了增量构建。`tina_tests`、
+`tina_ui_tests`、`tina_runtime_ui_tests`、`tina_platform_glfw_tests`、`tina_asset_format_tests`、
+`tina_asset_tests`、`tina_bench_tests`、`tina_sample_ui_showcase`、`tina_sample_2d` 与
+`tina_sample_3d` 全部 build exit 0。随后直接运行的定向 GoogleTest 结果为：
+
+- TextEdit/grapheme/IME/Motion：95/95；
+- Runtime TextInput/TextEdit/timeline：7/7；
+- GLFW TextInputPlacement/IMM32：8/8；
+- typed malformed corpus/EnvironmentMap：23/23，其中 `TypedPayloadMalformedCorpusTests.*` 为 17/17；
+- Asset/Catalog/typed EnvironmentMap：124/124；
+- Motion/timeline benchmark assertions：6/6。
+
+同轮 `tina_sample_ui_showcase --auto-demo --frames=120 --frame-delay-ms=0`、
+`tina_sample_2d --frames=300 --frame-delay-ms=0` 与
+`tina_sample_3d --frames=30 --frame-delay-ms=0` 都输出 `status=ok`。这些结果只重新确认当前工作树的
+编译、自动行为和产品生命周期接线；不替代 TEXT-001 的 Windows 真机 IME 人工矩阵、Linux 原生 XIM/Wayland
+或 BiDi/复杂 shaping 后置项，也不替代跨 GPU/DPI 视觉门禁或 `PERF-002` 固定机 hard gate。
+
+### 2026-08-17 TextEdit horizontal soft-wrap 复验
+
+在上述常驻 Debug build tree 上，针对 soft-wrap 共享 scalar 边界的水平导航补充增量构建并直接运行受影响
+executable。`tina_ui_tests` 为 667/667，`tina_runtime_ui_tests` 为 130/130，`tina_ui_uia_tests` 为
+12/12，`tina_platform_glfw_tests` 为 39/39；`tina_tests` 的定向 Headless gate 为 1/1。新增
+`SoftWrapHorizontalNavigationVisitsBothBoundarySides` 与
+`SoftWrapHorizontalNavigationPublishesBothBoundarySides` 均通过，确认 Left/Right 会访问共享 scalar
+边界的上下游 visual caret affinity，而不会跳过其中一侧。`tina_sample_ui_showcase --auto-demo --frames=120
+--frame-delay-ms=0` 返回 `status=ok`、`exit=GameRequestedExitAfterCurrentFrame`。
 
 ## 测试 target 拓扑
 
@@ -336,6 +434,12 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_style_s
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_motion_v1 --warmup=30 --samples=120 --seed=0
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_motion_v1 --warmup=30 --samples=120 --seed=1
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_motion_v1 --warmup=30 --samples=120 --seed=2
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_motion_timeline_v1 --warmup=30 --samples=120 --seed=0
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_motion_timeline_v1 --warmup=30 --samples=120 --seed=1
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_motion_timeline_v1 --warmup=30 --samples=120 --seed=2
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_motion_layout_v1 --warmup=30 --samples=120 --seed=0
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_motion_layout_v1 --warmup=30 --samples=120 --seed=1
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe --workload=ui_motion_layout_v1 --warmup=30 --samples=120 --seed=2
 py -3 tools\bench\run_benchmark_gate.py --processes 5 `
   out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench.exe -- `
   --workload=ui_static_commit_v1 --warmup=60 --samples=600 --seed=1
@@ -366,6 +470,13 @@ class link；当前 workload 不注册 token，JSON 必须报告 `registered_tok
 clean commit style/rebuild=0、bucket/class-link high-water 稳定、非零 style/DisplayList checksum 与
 warmup 后 UI PMR allocation delta=0。
 
+`ui_motion_timeline_v1` 与 `ui_motion_layout_v1` 都固定创建 256 个 definition、1024 条 track、4096 个
+keyframe，seed 0/1/2 只播放前 0/16/256 个 active timeline。两者都必须证明 full definition high-water
+为 `256/1024/4096`、active-index high-water 为 `0/16/256`，且 warmup 后 UI PMR allocation delta 为 0。
+paint-only workload 的 active sample 只重建 Paint，Layout/Hit rebuild 均为 0；layout workload 的 active
+sample 则要求 sampled layout tracks 等于 sampled tracks，并且每个 measured iteration 恰好各一次
+Layout、Hit、Paint publication、failure=0。active=0 时两类 workload 都不得重建任何 snapshot。
+
 运行期 ColorToken 最小回归必须直接运行 `tina_ui_tests` 的
 `UIStyleContextTests.RuntimeColorToken*` 与 `tina_runtime_ui_tests` 的
 `PrimaryWindowUICapabilityTest.*StyleColorToken*`。前者验证只为 winning-token 依赖发布 Paint dirty、
@@ -395,7 +506,8 @@ out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_sample_ui_showcase.
   --frames=150 --frame-delay-ms=0 --theme=light --auto-demo
 ```
 
-两个自动 smoke 均须 exit 0，并输出 `controls=20`、`imageProducts=4`、`themeSwitches=2`、`sliderChanges>0`、
+两个自动 smoke 均须 exit 0，并输出 `controls=21`、`imageProducts=4`、`asymmetricCornerProducts=3`、
+`themeSwitches=2`、`sliderChanges>0`、
 `progressValue=84`、`dropdownSelection=1`、`listSelectionKey=1007`、`treeSelectionKey=4`、
 `treeExpansionChanges=2`、`scrollOffset=80`、`stylesheetInstalled=true`、`styleTokenUpdates>=3`、
 `motionBegins>=12`（auto-demo：2 次主题切换 × 6 cards）、
@@ -1256,6 +1368,44 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_asset_tests.exe `
   --gtest_filter=GltfCookTests.* --gtest_color=no
 ```
 
+`ASSET-SEC-002` 使用 `TypedPayloadMalformedCorpusTests.*` 统一登记 glTF 之外的 current-schema typed payload
+恶意输入。资源炸弹用“小 payload + 超限 header/count”构造，parser 必须在按该 count 分配或发布前返回
+`Result` error；只返回 borrowed view 的 parser 不存在 caller storage 发布，Prefab/World2D 则用 sentinel
+storage 验证完整校验成功前旧值保持不变。下表的 `N/A` 表示 wire format 没有该类字段，不为追求表面全绿
+而制造伪 UTF-8、伪 index 或把 opaque half-float image bytes 当作运行时 float 语义。
+
+| Typed payload | 截断/长度 | 越界 index / 自引用 | 超容量/resource bomb | 非法 UTF-8 | NaN/Inf | 失败发布语义 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Texture2D | header 截断、pixelBytes/尾随不一致 | N/A | dimension 超限，小 payload | N/A | N/A（像素为 opaque bytes） | borrowed view，不发布 owner storage |
+| Sprite | 固定 40B 截断/尾随 | N/A | N/A（固定尺寸） | N/A | UV、pivot、pixelsPerUnit | borrowed view |
+| Tileset | entry 截断、count/长度不一致 | unknown material flags + reserved tail | tileCount 超限，小 payload | N/A | UV | borrowed view |
+| TileMap root | header/stream 截断、尾随 | Cooked root→自身 chunk dependency | layer/property/object count 超限 | layer/property/object string | cell size / object geometry | borrowed view；stream 完整验证后返回 |
+| TileMap chunk | cell stream 截断、cell/nonEmpty count 不一致 | Cooked chunk id = parent id | dimension/coordinate 超限 | N/A | N/A | borrowed view |
+| SpriteAnimationClip | frame/event block 截断、长度不一致 | dependency index、event range、Cooked self dependency | frame/event/per-frame event count 超限 | N/A | frame duration | borrowed view；event block 全覆盖校验 |
+| StaticMesh | vertex/index block 截断、尾随、typed block 未对齐 | vertex index / submesh range | vertex/index/submesh count 超限 | N/A | bounds、vertex stream | borrowed view；形成 typed span 前验证实际地址对齐 |
+| SkinnedMesh | skin/geometry block 截断、尾随 | joint parent / influence joint index | joint/vertex/index/submesh count 超限 | N/A | bounds、inverse bind、joint/vertex stream | borrowed view；完整 skin 与 geometry 校验后返回 |
+| AnimationClip3D | track/time/value block 截断、尾随 | joint index、key/value exclusive-scan range | track/per-track/aggregate key count 超限 | N/A | duration、key time/value | borrowed view；全部 track 分区校验后返回 |
+| Material | 固定 40B 截断/尾随 | flags/reserved 拒绝 | N/A（固定尺寸） | N/A | base color、metallic/roughness | borrowed value view |
+| Prefab | node block 截断、长度不一致 | 零/重复 stable ID、self/forward parent | nodeCount 超限，小 payload | N/A | transform、零/非有限 quaternion | 局部 vector 完整校验后 `swap`；失败保留 sentinel |
+| EnvironmentMap | image block 截断、byte count/mip 不一致 | N/A | 极端 dimension 在 byte-layout/payload budget 处拒绝 | N/A | N/A（预过滤 image bytes 为 opaque half-float encoding） | borrowed view |
+| AudioClip | PCM 截断/尾随、geometry 不一致、PCM 未对齐 | N/A | channel/frameCount 超限，小 payload | N/A | 每个 float PCM sample | borrowed view；形成 typed span 前验证实际地址对齐，writer/parser 对称拒绝 |
+| NavigationGrid2D | table 截断/尾随、cellCount 不一致 | invalid flag/cost/reserved | dimension/cellCount 超限，小 payload | N/A | origin/cell size | borrowed view；table 完整校验后返回 |
+| Fx2D | 固定 184B 截断/尾随 | dependency index / zero dependency ID / reserved | particle/trail capacity 超限 | N/A | particle/trail float fields | 返回独立 value，不发布 owner storage |
+| World2D snapshot | entity/gameplay block 截断、尾随 | 零/重复 stable ID、self/forward parent | entity/gameplay count 超限，小 payload | N/A | transform 与 component values | 局部 vector 完整校验后发布；失败保留 sentinel |
+
+本矩阵已于 2026-08-16 统一执行以下定向 gate：
+
+```powershell
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_asset_format_tests.exe `
+  --gtest_filter=TypedPayloadMalformedCorpusTests.* --gtest_color=no
+out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_asset_tests.exe `
+  --gtest_filter=TypedPayloadValidationTests.RejectsMalformedEnvironmentMapWhenTypedRequired --gtest_color=no
+```
+
+结果为 `tina_asset_format_tests` 124/124、`TypedPayloadMalformedCorpusTests.*` 17/17、
+`tina_asset_tests` 312/312，EnvironmentMap typed-required 定向验证通过。该矩阵不依赖外部资源、网络、GPU、
+Physics2D 或 FreeType；`ASSET-SEC-002` 据此转为 Done。
+
 `SpriteAnimationClip` 覆盖 payload/schema、Catalog typed view、dependency contract 与
 `SpriteAnimator2D` 的 Once/Loop/PingPong、暂停、倍速和大 delta；`tina_sample_2d` 再提供
 `Idle -> Walk -> HitWall` 的产品状态证据。
@@ -1380,7 +1530,8 @@ UI 逻辑门禁至少包括：
 - routed input、default action、consume/claim、reset/cancel；
 - Flow Layer/Screen publication、Back/Confirm/Menu callback 生命周期、Dropdown-first Back、focused-control-first Confirm、TextEdit-first printable P 与 exact Down/Up latch；
 - Button/Checkbox/Slider/ProgressBar/RadioButton/TextEdit 的 kind/property/错误路径；
-- UTF-8、IME preedit/commit、Glyph atlas 与 FreeType adapter；
+- UTF-8、LF/soft-wrap 多行 TextEdit、UAX #29 grapheme 子集边界编辑、IME preedit/commit/cancel、
+  committed caret geometry、Windows IMM32 placement conversion/clear 与 Glyph atlas/FreeType adapter；
 - Runtime phase facade 过期、sticky error 与跨 root 拒绝。
 
 Visual 证据必须同时记录 sample 返回码、client-area 尺寸、是否强制终止、blank/black 比例、字体来源和

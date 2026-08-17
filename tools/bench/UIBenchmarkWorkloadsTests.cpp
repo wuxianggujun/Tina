@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -14,6 +15,8 @@ inline constexpr std::string_view ComponentPrerequisiteWorkload =
 inline constexpr std::string_view ComponentWorkload = "ui_component_build_v1";
 inline constexpr std::string_view StyleStateWorkload = "ui_style_state_v1";
 inline constexpr std::string_view MotionWorkload = "ui_motion_v1";
+inline constexpr std::string_view TimelineMotionWorkload = "ui_motion_timeline_v1";
+inline constexpr std::string_view LayoutTimelineMotionWorkload = "ui_motion_layout_v1";
 
 [[nodiscard]] std::string extractChecksum(std::string_view json)
 {
@@ -71,6 +74,8 @@ TEST(UIBenchmarkWorkloadsTests, RegistersPrerequisiteAndFrozenComponentWorkloads
     EXPECT_TRUE(isUIBenchmarkWorkload(ComponentWorkload));
     EXPECT_TRUE(isUIBenchmarkWorkload(StyleStateWorkload));
     EXPECT_TRUE(isUIBenchmarkWorkload(MotionWorkload));
+    EXPECT_TRUE(isUIBenchmarkWorkload(TimelineMotionWorkload));
+    EXPECT_TRUE(isUIBenchmarkWorkload(LayoutTimelineMotionWorkload));
 
     std::ostringstream help;
     printUIBenchmarkHelp(help);
@@ -78,6 +83,8 @@ TEST(UIBenchmarkWorkloadsTests, RegistersPrerequisiteAndFrozenComponentWorkloads
     EXPECT_NE(help.str().find(ComponentWorkload), std::string::npos);
     EXPECT_NE(help.str().find(StyleStateWorkload), std::string::npos);
     EXPECT_NE(help.str().find(MotionWorkload), std::string::npos);
+    EXPECT_NE(help.str().find(TimelineMotionWorkload), std::string::npos);
+    EXPECT_NE(help.str().find(LayoutTimelineMotionWorkload), std::string::npos);
 }
 
 TEST(UIBenchmarkWorkloadsTests, ComponentPrerequisiteReportsStableHonestSchema)
@@ -241,6 +248,141 @@ TEST(UIBenchmarkWorkloadsTests, MotionZeroActiveAddsNoExtraDirty)
     const std::string secondChecksum = extractChecksum(second);
     ASSERT_EQ(firstChecksum.size(), 16U);
     EXPECT_EQ(firstChecksum, secondChecksum);
+}
+
+TEST(UIBenchmarkWorkloadsTests, TimelineMotionZeroActiveKeepsCleanSnapshots)
+{
+    // seed % 3 == 0 -> zero active tracks/timelines.
+    const std::string first = runUIWorkload(TimelineMotionWorkload, 2, 0);
+    const std::string second = runUIWorkload(TimelineMotionWorkload, 2, 0);
+
+    EXPECT_NE(first.find("\"status\":\"ok\",\"schema\":1"), std::string::npos);
+    EXPECT_NE(first.find("\"id\":\"ui_motion_timeline_v1\""), std::string::npos);
+    EXPECT_NE(first.find("\"timeline_capacity\":256"), std::string::npos);
+    EXPECT_NE(first.find("\"timeline_track_capacity\":1024"), std::string::npos);
+    EXPECT_NE(first.find("\"timeline_keyframe_capacity\":4096"), std::string::npos);
+    EXPECT_NE(first.find("\"active_timeline_capacity\":256"), std::string::npos);
+    EXPECT_NE(first.find("\"active_timeline_tracks\":0"), std::string::npos);
+    EXPECT_NE(first.find("\"zero_active_iterations\":2"), std::string::npos);
+    EXPECT_NE(first.find("\"sampled_tracks\":0"), std::string::npos);
+    EXPECT_NE(first.find("\"timeline_high_water\":256"), std::string::npos);
+    EXPECT_NE(first.find("\"timeline_track_high_water\":1024"), std::string::npos);
+    EXPECT_NE(first.find("\"keyframe_high_water\":4096"), std::string::npos);
+    EXPECT_NE(first.find("\"active_timeline_high_water\":0"), std::string::npos);
+    EXPECT_NE(first.find("\"delta\":0"), std::string::npos);
+
+    const std::string firstChecksum = extractChecksum(first);
+    const std::string secondChecksum = extractChecksum(second);
+    ASSERT_EQ(firstChecksum.size(), 16U);
+    EXPECT_EQ(firstChecksum, secondChecksum);
+}
+
+TEST(UIBenchmarkWorkloadsTests, TimelineMotionActiveSeedsReportBoundedPaintOnlyCounters)
+{
+    // seed % 3 == 1 -> 64 active tracks = 16 timelines.
+    const std::string first = runUIWorkload(TimelineMotionWorkload, 2, 1);
+    const std::string second = runUIWorkload(TimelineMotionWorkload, 2, 1);
+
+    EXPECT_NE(first.find("\"active_timeline_tracks\":64"), std::string::npos);
+    EXPECT_NE(first.find("\"sampled_tracks\":128"), std::string::npos);
+    EXPECT_NE(first.find("\"timeline_high_water\":256"), std::string::npos);
+    EXPECT_NE(first.find("\"timeline_track_high_water\":1024"), std::string::npos);
+    EXPECT_NE(first.find("\"keyframe_high_water\":4096"), std::string::npos);
+    EXPECT_NE(first.find("\"active_timeline_high_water\":16"), std::string::npos);
+    EXPECT_NE(first.find("\"paint_only_timeline_does_not_rebuild_layout_or_hit\""),
+              std::string::npos);
+    EXPECT_NE(first.find("\"paint_only_workload_excludes_layout_tracks\""),
+              std::string::npos);
+    EXPECT_NE(first.find("\"delta\":0"), std::string::npos);
+
+    const std::string firstChecksum = extractChecksum(first);
+    const std::string secondChecksum = extractChecksum(second);
+    ASSERT_EQ(firstChecksum.size(), 16U);
+    EXPECT_EQ(firstChecksum, secondChecksum);
+}
+
+TEST(UIBenchmarkWorkloadsTests, LayoutTimelineMotionZeroActiveKeepsCleanSnapshots)
+{
+    const std::string first = runUIWorkload(LayoutTimelineMotionWorkload, 2, 0);
+    const std::string second = runUIWorkload(LayoutTimelineMotionWorkload, 2, 0);
+
+    EXPECT_NE(first.find("\"status\":\"ok\",\"schema\":1"), std::string::npos);
+    EXPECT_NE(first.find("\"id\":\"ui_motion_layout_v1\""), std::string::npos);
+    EXPECT_NE(first.find("\"active_timeline_tracks\":0"), std::string::npos);
+    EXPECT_NE(first.find("\"sampled_tracks\":0"), std::string::npos);
+    EXPECT_NE(first.find("\"sampled_layout_tracks\":0"), std::string::npos);
+    EXPECT_NE(first.find("\"layout_commit_failures\":0"), std::string::npos);
+    EXPECT_NE(first.find("\"layout_passes\":0"), std::string::npos);
+    EXPECT_NE(first.find("\"hit_rebuilds\":0"), std::string::npos);
+    EXPECT_NE(first.find("\"paint_snapshot_rebuilds\":0"), std::string::npos);
+    EXPECT_NE(first.find("\"zero_active_iterations\":2"), std::string::npos);
+    EXPECT_NE(first.find("\"timeline_high_water\":256"), std::string::npos);
+    EXPECT_NE(first.find("\"timeline_track_high_water\":1024"), std::string::npos);
+    EXPECT_NE(first.find("\"keyframe_high_water\":4096"), std::string::npos);
+    EXPECT_NE(first.find("\"active_timeline_high_water\":0"), std::string::npos);
+    EXPECT_NE(first.find("\"delta\":0"), std::string::npos);
+
+    const std::string firstChecksum = extractChecksum(first);
+    const std::string secondChecksum = extractChecksum(second);
+    ASSERT_EQ(firstChecksum.size(), 16U);
+    EXPECT_EQ(firstChecksum, secondChecksum);
+}
+
+TEST(UIBenchmarkWorkloadsTests, LayoutTimelineMotionActiveSeedsReportAtomicRebuildCounters)
+{
+    const std::string first = runUIWorkload(LayoutTimelineMotionWorkload, 2, 1);
+    const std::string second = runUIWorkload(LayoutTimelineMotionWorkload, 2, 1);
+
+    EXPECT_NE(first.find("\"active_timeline_tracks\":64"), std::string::npos);
+    EXPECT_NE(first.find("\"sampled_tracks\":128"), std::string::npos);
+    EXPECT_NE(first.find("\"sampled_layout_tracks\":128"), std::string::npos);
+    EXPECT_NE(first.find("\"layout_commit_failures\":0"), std::string::npos);
+    EXPECT_NE(first.find("\"layout_passes\":2"), std::string::npos);
+    EXPECT_NE(first.find("\"hit_rebuilds\":2"), std::string::npos);
+    EXPECT_NE(first.find("\"paint_snapshot_rebuilds\":2"), std::string::npos);
+    EXPECT_NE(first.find("\"timeline_high_water\":256"), std::string::npos);
+    EXPECT_NE(first.find("\"timeline_track_high_water\":1024"), std::string::npos);
+    EXPECT_NE(first.find("\"keyframe_high_water\":4096"), std::string::npos);
+    EXPECT_NE(first.find("\"active_timeline_high_water\":16"), std::string::npos);
+    EXPECT_NE(first.find("\"layout_timeline_rebuilds_layout_hit_and_paint_atomically\""),
+              std::string::npos);
+    EXPECT_EQ(first.find("\"paint_only_timeline_does_not_rebuild_layout_or_hit\""),
+              std::string::npos);
+    EXPECT_EQ(first.find("\"paint_only_workload_excludes_layout_tracks\""),
+              std::string::npos);
+    EXPECT_NE(first.find("\"delta\":0"), std::string::npos);
+
+    const std::string firstChecksum = extractChecksum(first);
+    const std::string secondChecksum = extractChecksum(second);
+    ASSERT_EQ(firstChecksum.size(), 16U);
+    EXPECT_EQ(firstChecksum, secondChecksum);
+}
+
+TEST(UIBenchmarkWorkloadsTests, TimelineMotionCapacitySeedExercisesEveryDefinitionSlot)
+{
+    // seed % 3 == 2 -> 256 timelines, 1024 tracks, and 4096 keyframes.
+    const std::string paintOnly = runUIWorkload(TimelineMotionWorkload, 1, 2);
+    const std::string layout = runUIWorkload(LayoutTimelineMotionWorkload, 1, 2);
+
+    const std::array outputs{&paintOnly, &layout};
+    for (const std::string* output : outputs) {
+        EXPECT_NE(output->find("\"active_timeline_tracks\":1024"), std::string::npos);
+        EXPECT_NE(output->find("\"sampled_timelines\":256"), std::string::npos);
+        EXPECT_NE(output->find("\"sampled_tracks\":1024"), std::string::npos);
+        EXPECT_NE(output->find("\"sampled_segments\":1024"), std::string::npos);
+        EXPECT_NE(output->find("\"active_timelines_sum\":256"), std::string::npos);
+        EXPECT_NE(output->find("\"timeline_high_water\":256"), std::string::npos);
+        EXPECT_NE(output->find("\"timeline_track_high_water\":1024"),
+                  std::string::npos);
+        EXPECT_NE(output->find("\"keyframe_high_water\":4096"), std::string::npos);
+        EXPECT_NE(output->find("\"active_timeline_high_water\":256"),
+                  std::string::npos);
+        EXPECT_NE(output->find("\"delta\":0"), std::string::npos);
+    }
+    EXPECT_NE(layout.find("\"sampled_layout_tracks\":1024"), std::string::npos);
+    EXPECT_NE(layout.find("\"layout_passes\":1"), std::string::npos);
+    EXPECT_NE(layout.find("\"hit_rebuilds\":1"), std::string::npos);
+    EXPECT_NE(layout.find("\"paint_snapshot_rebuilds\":1"), std::string::npos);
 }
 
 } // namespace

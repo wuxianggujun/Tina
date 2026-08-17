@@ -2,6 +2,7 @@
 
 #include <tina/ui/UIErrors.hpp>
 
+#include <algorithm>
 #include <string_view>
 
 namespace Tina::UI {
@@ -64,6 +65,10 @@ Core::Status validateUIContextCapacityConfig(const UIContextCapacityConfig& conf
     {
         return invalidContextConfig("UI text byte capacity exceeds the configured maximum");
     }
+    if (config.textEditVisualLineCapacity > UIContextCapacityConfig::MaxTextEditVisualLineCapacity)
+    {
+        return invalidContextConfig("UI TextEdit visual-line capacity exceeds the configured maximum");
+    }
     if (config.styleClassCapacity == 0 || config.styleTokenCapacity == 0 ||
         config.styleRuleCapacity == 0 ||
         config.styleBucketCapacity == 0 || config.styleRulesPerBucketCapacity == 0)
@@ -90,6 +95,26 @@ Core::Status validateUIContextCapacityConfig(const UIContextCapacityConfig& conf
     if (config.motionTrackCapacity > UIContextCapacityConfig::MaxMotionTrackCapacity)
     {
         return invalidContextConfig("UI motion track capacity exceeds the configured maximum");
+    }
+    if (config.timelineCapacity > UIContextCapacityConfig::MaxTimelineCapacity ||
+        config.timelineTrackCapacity > UIContextCapacityConfig::MaxTimelineTrackCapacity ||
+        config.timelineKeyframeCapacity > UIContextCapacityConfig::MaxTimelineKeyframeCapacity ||
+        config.activeTimelineCapacity > UIContextCapacityConfig::MaxActiveTimelineCapacity)
+    {
+        return invalidContextConfig("UI timeline capacity exceeds the configured maximum");
+    }
+    const usize effectiveTimelineCapacity =
+        config.timelineCapacity == 0
+            ? UIContextCapacityConfig::DefaultTimelineCapacity
+            : config.timelineCapacity;
+    const usize effectiveActiveTimelineCapacity =
+        config.activeTimelineCapacity == 0
+            ? (std::min)(UIContextCapacityConfig::DefaultActiveTimelineCapacity,
+                         effectiveTimelineCapacity)
+            : config.activeTimelineCapacity;
+    if (effectiveActiveTimelineCapacity > effectiveTimelineCapacity)
+    {
+        return invalidContextConfig("UI active timeline capacity cannot exceed definition capacity");
     }
     if (config.flowLayerCapacity > UIContextCapacityConfig::MaxFlowLayerCapacity ||
         config.flowScreenCapacity > UIContextCapacityConfig::MaxFlowScreenCapacity ||

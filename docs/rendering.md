@@ -77,7 +77,9 @@ fallback；未绑定 baseColor 用1×1白，未绑定 MR 图时 metallic=0、rou
 mesh 由 vertex shader 输出 tangent/handedness，fragment shader 构造正交 TBN；signed model scale 会修正
 handedness。StaticMesh 只有 P3N3T4UV2 一种布局，不存在旧布局运行时分支。诚实限制：当前
 DirectionalLight3D/PointLight3D/SpotLight3D 均可进入 Scene snapshot；point/spot 使用 world position/influence
-radius，在有效 PerspectiveCamera3D 与非0 surface 时做 sphere-frustum culling；spot 额外提交 world-space
+radius，在有效 PerspectiveCamera3D 与非0 surface 时做 sphere-frustum culling。static/skinned mesh 同样在
+Scene extraction 内将 authored local sphere 按 WorldTransform 转成保守 world sphere，并在 Asset resolver、pose
+provider 与 RenderScene 容量消费前剔除；无相机/0x0 surface 保留未裁剪行为。spot 额外提交 world-space
 出光方向与 inner/outer cone cosine。`outerConeHalfAngleDegrees` 的公开合法域保持 `<90°`，backend 不另行
 收紧完整 FOV，也不静默 clamp。一个 directional light 可携带 optional `CascadedDirectionalShadow3D`；
 它以 `maximumDistanceMeters`、`depthBias` 与 `normalBiasMeters` 描述固定4级联阴影。Render snapshot
@@ -166,7 +168,7 @@ beginFrame(surface facts)
 - Camera2D projection、viewport、pixel snap 与 world picking；
 - Sprite2D 视锥裁剪、layer/order/ordinal 稳定排序、相邻 `(baseTexture, normalTexture)` batch；
 - optional self-contained Sprite2D lighting snapshot、最多8个 committed point light、32个 shadow segment 与 ambient；
-- PerspectiveCamera3D、frustum culling、Opaque3D stable batch，以及 static/skinned 统一 Transparent3D back-to-front draw 序列；
+- PerspectiveCamera3D、point/spot/static/skinned sphere-frustum culling、Opaque3D stable batch，以及 static/skinned 统一 Transparent3D back-to-front draw 序列；
 - optional self-contained Mesh3D lighting snapshot、可选 CSM/SpotLight shadow 描述、重复设置/非法描述的事务失败与统计；
 - framebuffer 0x0 suspended 路径；
 - 容量/非法数值/非法 resource ref 失败时不发布半份 scene。
@@ -206,8 +208,10 @@ sampling，并选择独立 RGBA shader。
 - bgfx RGBA ImageQuad program、Texture2D binding preflight 与 straight-alpha-to-premultiplied sampling；
 - UI → Render integration tests 与 bgfx geometry tests。
 
-rounded/stencil 子树 clip、复杂 material 与跨 GPU golden 仍未完成；统一 RoundedRect/SolidQuad corner
-radius 和 Image/Icon/NineSlice 的产品、失效、尺寸矩阵及性能证据已实现，不再列作缺口。
+Render `SolidQuad` 已用 `UIPixelCornerRadii` 将四角像素半径贯通 DisplayList 校验/checksum、bgfx vertex 与
+coverage shader；Retained UI 的 `UILogicalCornerRadii` 现从 box/Canvas `SolidRect` 经 committed paint 逐角投影，
+并按目标 bounds half-extent 独立夹紧。rounded/stencil 子树 clip、复杂 material 与跨 GPU golden 仍未完成；Image/Icon/NineSlice 的产品、
+失效、尺寸矩阵及性能证据已实现，不再列作缺口。
 
 `UI-IMAGE-001` 让 Image/Icon 各发一个 Image entry，NineSlice 在 UI committed paint 中展开为
 1..9个相同 entry。batch 持有 packet-local 通用 Texture2D ref 与 sampling，command 持有

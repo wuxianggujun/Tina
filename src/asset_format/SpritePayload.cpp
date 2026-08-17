@@ -2,6 +2,7 @@
 
 #include <tina/asset_format/AssetFormatErrors.hpp>
 
+#include <cmath>
 #include <cstring>
 
 namespace Tina::AssetFormat {
@@ -47,7 +48,7 @@ void writeF32(std::vector<std::byte>& bytes, usize offset, float value)
 
 [[nodiscard]] bool isFiniteUv(float value) noexcept
 {
-    return value == value && value >= 0.0f && value <= 1.0f;
+    return std::isfinite(value) && value >= 0.0f && value <= 1.0f;
 }
 
 } // namespace
@@ -62,11 +63,11 @@ Core::Result<std::vector<std::byte>> writeSpritePayloadBytes(const SpritePayload
     {
         return Core::failure(AssetFormatErrorCode::InvalidLayout, "sprite UV rect must be non-empty");
     }
-    if (desc.pixelsPerUnit <= 0.0f || desc.pixelsPerUnit != desc.pixelsPerUnit)
+    if (!(desc.pixelsPerUnit > 0.0f) || !std::isfinite(desc.pixelsPerUnit))
     {
         return Core::failure(AssetFormatErrorCode::InvalidLayout, "pixelsPerUnit must be positive finite");
     }
-    if (desc.pivotX != desc.pivotX || desc.pivotY != desc.pivotY)
+    if (!std::isfinite(desc.pivotX) || !std::isfinite(desc.pivotY))
     {
         return Core::failure(AssetFormatErrorCode::InvalidLayout, "pivot must be finite");
     }
@@ -127,7 +128,11 @@ Core::Result<SpritePayloadView> parseSpritePayload(std::span<const std::byte> pa
     {
         return Core::failure(AssetFormatErrorCode::InvalidLayout, "sprite UV invalid");
     }
-    if (!(view.pixelsPerUnit > 0.0f) || view.pixelsPerUnit != view.pixelsPerUnit)
+    if (!std::isfinite(view.pivotX) || !std::isfinite(view.pivotY))
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout, "sprite pivot invalid");
+    }
+    if (!(view.pixelsPerUnit > 0.0f) || !std::isfinite(view.pixelsPerUnit))
     {
         return Core::failure(AssetFormatErrorCode::InvalidLayout, "sprite pixelsPerUnit invalid");
     }

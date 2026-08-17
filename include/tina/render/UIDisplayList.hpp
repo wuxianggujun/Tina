@@ -114,17 +114,42 @@ struct UINormalizedUvRect final {
     auto operator<=>(const UINormalizedUvRect&) const = default;
 };
 
+struct UIPixelCornerRadii final {
+    float topLeft = 0.0F;
+    float topRight = 0.0F;
+    float bottomRight = 0.0F;
+    float bottomLeft = 0.0F;
+
+    [[nodiscard]] static constexpr UIPixelCornerRadii uniform(float radius) noexcept
+    {
+        return {
+            .topLeft = radius,
+            .topRight = radius,
+            .bottomRight = radius,
+            .bottomLeft = radius,
+        };
+    }
+
+    [[nodiscard]] constexpr bool empty() const noexcept
+    {
+        return topLeft == 0.0F && topRight == 0.0F &&
+               bottomRight == 0.0F && bottomLeft == 0.0F;
+    }
+
+    auto operator<=>(const UIPixelCornerRadii&) const = default;
+};
+
 struct UISolidQuadInput final {
     u32 paintOrdinal = 0;
     UIPixelRect bounds{};
     UIPremultipliedRgba8 color{};
-    // Radius in framebuffer pixels. Must be finite, non-negative, and no
-    // greater than half the smallest bounds extent.
-    float cornerRadius = 0.0F;
+    // Radii in framebuffer pixels. Each value must be finite, non-negative,
+    // and no greater than half the smallest bounds extent.
+    UIPixelCornerRadii cornerRadii{};
     // Optional exact subpixel geometry. bounds remains a conservative integer
     // AABB for culling/clip decisions. Explicit vertices are SolidQuad-only,
     // must form a finite strictly-convex quad covered by bounds, and cannot be
-    // combined with cornerRadius.
+    // combined with non-zero corner radii.
     std::optional<UISolidQuadVertices> vertices{};
     std::optional<UIPixelRect> effectiveClip{};
 };
@@ -166,7 +191,7 @@ struct UIDrawCommand final {
     u32 paintOrdinal = 0;
     UIPixelRect bounds{};
     UIPremultipliedRgba8 color{};
-    float cornerRadius = 0.0F;
+    UIPixelCornerRadii cornerRadii{};
     // SolidQuad-only exact geometry; absent commands use bounds corners.
     std::optional<UISolidQuadVertices> vertices{};
     // SolidEllipse-only stroke width in framebuffer pixels. Zero means filled.

@@ -36,6 +36,8 @@ add_library(tina_runtime STATIC
     ui/PrimaryWindowUIDisplayCoordinator.hpp
     ui/PrimaryWindowUILayoutCoordinator.cpp
     ui/PrimaryWindowUILayoutCoordinator.hpp
+    ui/PrimaryWindowTextInputPlacementCoordinator.cpp
+    ui/PrimaryWindowTextInputPlacementCoordinator.hpp
 )
 add_library(Tina::Runtime ALIAS tina_runtime)
 

@@ -7,6 +7,7 @@
 
 #include "../../src/runtime/ui/PrimaryWindowUICapabilityState.hpp"
 
+#include <array>
 #include <memory>
 #include <optional>
 #include <span>
@@ -444,6 +445,58 @@ TEST_F(PrimaryWindowUICapabilityTest, MotionFacadeBeginsBackgroundTransitionAndE
     auto expiredStyleGet = tree->styleBackgroundColorTransition();
     ASSERT_FALSE(expiredStyleGet.has_value());
     EXPECT_EQ(expiredStyleGet.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+}
+
+TEST_F(PrimaryWindowUICapabilityTest, TimelineFacadeOwnsDefinitionPlaybackAndExpiry)
+{
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto enterTree = builder->treeUpdater(*root);
+    ASSERT_TRUE(enterTree.has_value()) << enterTree.error().message;
+    UI::UIElementDescriptor panel = UI::makePanelElement();
+    panel.visual.boxPaint = UI::makeSolidBox(UI::rgba8(0, 0, 0, 255));
+    const auto node = enterTree->createElement(root->rootNodeId(), panel);
+    ASSERT_TRUE(node.has_value()) << node.error().message;
+    ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
+
+    auto updateEpoch = state.beginUIUpdatePhase(context.get());
+    ASSERT_TRUE(updateEpoch.has_value()) << updateEpoch.error().message;
+    auto tree = state.treeUpdater(*updateEpoch, CapabilityPhase::UIUpdate, *root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+    const std::array keyframes{
+        UI::UIKeyframe{.normalizedTime = 0.0F,
+                       .value = UI::UIKeyframeValue::Color(UI::rgba8(0, 0, 0, 255))},
+        UI::UIKeyframe{.normalizedTime = 1.0F,
+                       .value = UI::UIKeyframeValue::Color(UI::rgba8(100, 0, 0, 255))},
+    };
+    const std::array tracks{
+        UI::UITimelineTrackDesc{
+            .node = *node,
+            .property = UI::UIAnimatableProperty::BackgroundColor,
+            .keyframes = keyframes,
+        },
+    };
+    auto timeline = tree->createTimeline(UI::UITimelineDesc{
+        .duration = Core::Duration{0.1},
+        .tracks = tracks,
+    });
+    ASSERT_TRUE(timeline.has_value()) << timeline.error().message;
+    ASSERT_TRUE(tree->playTimeline(*timeline).has_value());
+    auto active = tree->isTimelineActive(*timeline);
+    ASSERT_TRUE(active.has_value()) << active.error().message;
+    EXPECT_TRUE(*active);
+    ASSERT_TRUE(tree->cancelTimeline(*timeline).has_value());
+    ASSERT_TRUE(tree->destroyTimeline(*timeline).has_value());
+
+    ASSERT_TRUE(state.finishPhase(*updateEpoch, CapabilityPhase::UIUpdate).has_value());
+    auto expired = tree->isTimelineActive(*timeline);
+    ASSERT_FALSE(expired.has_value());
+    EXPECT_EQ(expired.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
 }
 
 TEST_F(PrimaryWindowUICapabilityTest, InvalidStyleColorTokenFailureIsSticky)

@@ -28,6 +28,12 @@ class IPlatformBackend {
     // explicitly Headless for the complete run.
     [[nodiscard]] virtual Core::Result<std::optional<WindowMetricsSnapshot>> initialPrimaryWindowMetrics() = 0;
     [[nodiscard]] virtual Core::Result<PlatformPollResult> pollFrame() = 0;
+    // Publishes or clears the committed TextEdit caret placement for the
+    // backend-owned primary window. The value is window-logical and must never
+    // expose native/third-party types. nullopt clears any active IME hint.
+    // Implementations remain thread-affine and may treat unsupported IME
+    // placement as a platform-specific no-op while preserving the contract.
+    virtual Core::Status updateTextInputPlacement(std::optional<TextInputPlacement> placement) = 0;
     virtual void shutdown() noexcept = 0;
 };
 

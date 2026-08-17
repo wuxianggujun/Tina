@@ -7,6 +7,8 @@ add_library(tina_platform_glfw STATIC
     GlfwInputTranslation.cpp
     GlfwNativeWindowBinding.hpp
     GlfwNativeWindowBinding.cpp
+    GlfwTextInputPlacement.hpp
+    GlfwTextInputPlacement.cpp
     GlfwPlatformBackend.cpp
 )
 

@@ -43,7 +43,16 @@ inline constexpr std::string_view kComponentActivateToggleWorkload =
 inline constexpr std::string_view kComponentBuildWorkload = "ui_component_build_v1";
 inline constexpr std::string_view kStyleStateWorkload = "ui_style_state_v1";
 inline constexpr std::string_view kMotionWorkload = "ui_motion_v1";
+inline constexpr std::string_view kTimelineMotionWorkload = "ui_motion_timeline_v1";
+inline constexpr std::string_view kLayoutTimelineMotionWorkload = "ui_motion_layout_v1";
 inline constexpr usize kMotionTrackCapacity = 1024;
+inline constexpr usize kTimelineCapacity = 256;
+inline constexpr usize kTimelineTracksPerDefinition = 4;
+inline constexpr usize kTimelineKeyframesPerTrack = 4;
+inline constexpr usize kTimelineTrackCapacity =
+    kTimelineCapacity * kTimelineTracksPerDefinition;
+inline constexpr usize kTimelineKeyframeCapacity =
+    kTimelineTrackCapacity * kTimelineKeyframesPerTrack;
 
 inline constexpr usize kLargeNodeCount = 4096;
 inline constexpr usize kFlatLeafCount = kLargeNodeCount - 1;
@@ -329,6 +338,18 @@ struct UIBenchmarkReport final {
     u64 motionActiveTracks = 0;
     u64 motionTrackHighWater = 0;
     u64 motionZeroActiveIterations = 0;
+    u64 configuredTimelineCapacity = 0;
+    u64 configuredTimelineTrackCapacity = 0;
+    u64 configuredTimelineKeyframeCapacity = 0;
+    u64 configuredActiveTimelineCapacity = 0;
+    u64 configuredActiveTimelineTracks = 0;
+    u64 timelineSampledTimelines = 0;
+    u64 timelineSampledTracks = 0;
+    u64 timelineSampledLayoutTracks = 0;
+    u64 timelineSampledSegments = 0;
+    u64 timelineActiveCount = 0;
+    u64 timelineZeroActiveIterations = 0;
+    u64 timelineLayoutCommitFailures = 0;
 
     usize pmrAllocationsBefore = 0;
     usize pmrAllocationsAfter = 0;
@@ -672,7 +693,7 @@ componentCanvasCommands() noexcept
         UI::UICanvasCommand{
             .bounds = {.x = 0.0F, .y = 0.0F, .width = 8.0F, .height = 8.0F},
             .color = UI::rgba8(24, 96, 176),
-            .cornerRadius = 1.0F,
+            .cornerRadii = UI::UILogicalCornerRadii::uniform(1.0F),
         },
         UI::UICanvasCommand{
             .bounds = {.x = 2.0F, .y = 2.0F, .width = 4.0F, .height = 4.0F},
@@ -894,6 +915,29 @@ struct StyleFixtureStartup final {
         auto node = fixture.updater.createElement(
             fixture.root.rootNodeId(),
             benchmarkPanel(true, true, UI::rgba8(channel, static_cast<u8>(255U - channel), 160U)));
+        if (!node) {
+            error = node.error().message;
+            return false;
+        }
+        leaves.push_back(*node);
+    }
+    return true;
+}
+
+[[nodiscard]] bool populateLayoutMotionTree(
+    UIFixture& fixture, std::vector<UI::UINodeId>& leaves, std::string& error)
+{
+    leaves.reserve(kFlatLeafCount);
+    for (usize index = 0; index < kFlatLeafCount; ++index) {
+        const u8 channel = static_cast<u8>(32U + (index % 192U));
+        UI::UIElementDescriptor descriptor =
+            benchmarkPanel(true, true,
+                           UI::rgba8(channel, static_cast<u8>(255U - channel), 160U));
+        descriptor.layout.placement = UI::UILayoutPlacement::Overlay;
+        descriptor.layout.overlay.offset.x = UI::UILayoutLength::Px(0.0F);
+        descriptor.layout.overlay.offset.y =
+            UI::UILayoutLength::Px(static_cast<float>(index));
+        auto node = fixture.updater.createElement(fixture.root.rootNodeId(), descriptor);
         if (!node) {
             error = node.error().message;
             return false;
@@ -1238,6 +1282,27 @@ void hashStatistics(DeterministicHash& hash, const UIBenchmarkReport& report) no
         hash.addU64(report.motionTrackHighWater);
         hash.addU64(report.motionZeroActiveIterations);
     }
+    if (report.workload == kTimelineMotionWorkload ||
+        report.workload == kLayoutTimelineMotionWorkload) {
+        hash.addU64(report.configuredTimelineCapacity);
+        hash.addU64(report.configuredTimelineTrackCapacity);
+        hash.addU64(report.configuredTimelineKeyframeCapacity);
+        hash.addU64(report.configuredActiveTimelineCapacity);
+        hash.addU64(report.configuredActiveTimelineTracks);
+        hash.addU64(report.timelineSampledTimelines);
+        hash.addU64(report.timelineSampledTracks);
+        hash.addU64(report.timelineSampledSegments);
+        hash.addU64(report.timelineActiveCount);
+        hash.addU64(report.timelineZeroActiveIterations);
+        hash.addU64(report.statistics.motion.timelineHighWater);
+        hash.addU64(report.statistics.motion.timelineTrackHighWater);
+        hash.addU64(report.statistics.motion.keyframeHighWater);
+        hash.addU64(report.statistics.motion.activeTimelineHighWater);
+        if (report.workload == kLayoutTimelineMotionWorkload) {
+            hash.addU64(report.timelineSampledLayoutTracks);
+            hash.addU64(report.timelineLayoutCommitFailures);
+        }
+    }
 }
 
 class BenchMotionClock final : public Core::IMonotonicClock {
@@ -1356,7 +1421,10 @@ void hashLogicalRect(DeterministicHash& hash, const UI::UILogicalRect& rect) noe
         hash.addU8(entry.solidFill.green);
         hash.addU8(entry.solidFill.blue);
         hash.addU8(entry.solidFill.alpha);
-        hash.addFloat(entry.cornerRadius);
+        hash.addFloat(entry.cornerRadii.topLeft);
+        hash.addFloat(entry.cornerRadii.topRight);
+        hash.addFloat(entry.cornerRadii.bottomRight);
+        hash.addFloat(entry.cornerRadii.bottomLeft);
         hash.addU8(static_cast<u8>(entry.kind));
         hash.addU32(entry.atlasX);
         hash.addU32(entry.atlasY);
@@ -1708,6 +1776,366 @@ void hashLogicalRect(DeterministicHash& hash, const UI::UILogicalRect& rect) noe
                report.motionTrackHighWater < activeTarget) {
         error = "ui_motion_v1 active-track counter invariant failed";
         return false;
+    }
+
+    DeterministicHash hash{};
+    hashStatistics(hash, report);
+    report.checksum = hash.value();
+    return true;
+}
+
+[[nodiscard]] bool runTimelineMotion(
+    const UIBenchmarkOptions& options, UIBenchmarkReport& report, std::string& error)
+{
+    const bool layoutTimeline = report.workload == kLayoutTimelineMotionWorkload;
+    const u64 activeTrackTarget = motionActiveTrackTarget(options.seed);
+    const usize activeTimelineTarget =
+        static_cast<usize>(activeTrackTarget / kTimelineTracksPerDefinition);
+    CountingMemoryResource memory{};
+    UI::UIContextCapacityConfig capacity = largeContextCapacity();
+    capacity.timelineCapacity = kTimelineCapacity;
+    capacity.timelineTrackCapacity = kTimelineTrackCapacity;
+    capacity.timelineKeyframeCapacity = kTimelineKeyframeCapacity;
+    capacity.activeTimelineCapacity = kTimelineCapacity;
+    auto fixtureResult = createFixture(capacity, memory, error);
+    if (!fixtureResult) {
+        return false;
+    }
+    UIFixture fixture = std::move(*fixtureResult);
+    std::vector<UI::UINodeId> leaves;
+    const bool populated = layoutTimeline
+                               ? populateLayoutMotionTree(fixture, leaves, error)
+                               : populateFlatPaintTree(fixture, leaves, error);
+    if (!populated) {
+        return false;
+    }
+    const usize requiredLeafCount = kTimelineCapacity * (layoutTimeline ? 2U : 1U);
+    if (requiredLeafCount > leaves.size()) {
+        error = std::string(report.workload) +
+                " leaf count is below active timeline target";
+        return false;
+    }
+
+    BenchMotionClock motionClock{};
+    if (Core::Status status = fixture.context->setMotionClock(&motionClock); !status) {
+        error = status.error().message;
+        return false;
+    }
+
+    std::vector<UI::UITimelineId> timelines;
+    timelines.reserve(kTimelineCapacity);
+    for (usize timelineIndex = 0; timelineIndex < kTimelineCapacity; ++timelineIndex) {
+        const auto retainTimeline = [&](const auto& tracks) {
+            auto timeline = fixture.context->createTimeline(UI::UITimelineDesc{
+                .duration = Core::Duration{0.100},
+                .delay = Core::Duration{0.0},
+                .tracks = tracks,
+            });
+            if (!timeline) {
+                error = timeline.error().message;
+                return false;
+            }
+            timelines.push_back(*timeline);
+            return true;
+        };
+        if (layoutTimeline) {
+            const usize primaryLeafIndex = timelineIndex * 2U;
+            const UI::UINodeId primaryNode = leaves[primaryLeafIndex];
+            const UI::UINodeId secondaryNode = leaves[primaryLeafIndex + 1U];
+            const float primaryY = static_cast<float>(primaryLeafIndex);
+            const float secondaryY = primaryY + 1.0F;
+            const std::array widthFrames{
+                UI::UIKeyframe{.normalizedTime = 0.0F,
+                               .value = UI::UIKeyframeValue::Scalar(1.0F)},
+                UI::UIKeyframe{.normalizedTime = 0.33F,
+                               .value = UI::UIKeyframeValue::Scalar(1.25F)},
+                UI::UIKeyframe{.normalizedTime = 0.66F,
+                               .value = UI::UIKeyframeValue::Scalar(1.5F)},
+                UI::UIKeyframe{.normalizedTime = 1.0F,
+                               .value = UI::UIKeyframeValue::Scalar(1.75F)},
+            };
+            const std::array heightFrames{
+                UI::UIKeyframe{.normalizedTime = 0.0F,
+                               .value = UI::UIKeyframeValue::Scalar(1.0F)},
+                UI::UIKeyframe{.normalizedTime = 0.33F,
+                               .value = UI::UIKeyframeValue::Scalar(0.9F)},
+                UI::UIKeyframe{.normalizedTime = 0.66F,
+                               .value = UI::UIKeyframeValue::Scalar(1.1F)},
+                UI::UIKeyframe{.normalizedTime = 1.0F,
+                               .value = UI::UIKeyframeValue::Scalar(1.25F)},
+            };
+            const std::array primaryOffsetFrames{
+                UI::UIKeyframe{.normalizedTime = 0.0F,
+                               .value = UI::UIKeyframeValue::Offset(0.0F, primaryY)},
+                UI::UIKeyframe{.normalizedTime = 0.33F,
+                               .value = UI::UIKeyframeValue::Offset(0.1F, primaryY + 0.1F)},
+                UI::UIKeyframe{.normalizedTime = 0.66F,
+                               .value = UI::UIKeyframeValue::Offset(0.2F, primaryY + 0.2F)},
+                UI::UIKeyframe{.normalizedTime = 1.0F,
+                               .value = UI::UIKeyframeValue::Offset(0.0F, primaryY + 0.3F)},
+            };
+            const std::array secondaryOffsetFrames{
+                UI::UIKeyframe{.normalizedTime = 0.0F,
+                               .value = UI::UIKeyframeValue::Offset(0.0F, secondaryY)},
+                UI::UIKeyframe{.normalizedTime = 0.33F,
+                               .value = UI::UIKeyframeValue::Offset(0.2F, secondaryY + 0.1F)},
+                UI::UIKeyframe{.normalizedTime = 0.66F,
+                               .value = UI::UIKeyframeValue::Offset(0.1F, secondaryY + 0.2F)},
+                UI::UIKeyframe{.normalizedTime = 1.0F,
+                               .value = UI::UIKeyframeValue::Offset(0.0F, secondaryY + 0.3F)},
+            };
+            const std::array tracks{
+                UI::UITimelineTrackDesc{.node = primaryNode,
+                                        .property = UI::UIAnimatableProperty::LayoutWidth,
+                                        .keyframes = widthFrames},
+                UI::UITimelineTrackDesc{.node = primaryNode,
+                                        .property = UI::UIAnimatableProperty::LayoutHeight,
+                                        .keyframes = heightFrames},
+                UI::UITimelineTrackDesc{.node = primaryNode,
+                                        .property = UI::UIAnimatableProperty::LayoutOffset,
+                                        .keyframes = primaryOffsetFrames},
+                UI::UITimelineTrackDesc{.node = secondaryNode,
+                                        .property = UI::UIAnimatableProperty::LayoutOffset,
+                                        .keyframes = secondaryOffsetFrames},
+            };
+            if (!retainTimeline(tracks)) {
+                return false;
+            }
+        } else {
+            const UI::UINodeId node = leaves[timelineIndex];
+            const std::array colorFrames{
+                UI::UIKeyframe{.normalizedTime = 0.0F,
+                               .value = UI::UIKeyframeValue::Color(UI::rgba8(20, 40, 80))},
+                UI::UIKeyframe{.normalizedTime = 0.33F,
+                               .value = UI::UIKeyframeValue::Color(UI::rgba8(60, 100, 160)),
+                               .easingToNext = UI::UIEasing::EaseOut},
+                UI::UIKeyframe{.normalizedTime = 0.66F,
+                               .value = UI::UIKeyframeValue::Color(UI::rgba8(160, 90, 50)),
+                               .easingToNext = UI::UIEasing::EaseInOut},
+                UI::UIKeyframe{.normalizedTime = 1.0F,
+                               .value = UI::UIKeyframeValue::Color(UI::rgba8(220, 130, 70))},
+            };
+            const std::array opacityFrames{
+                UI::UIKeyframe{.normalizedTime = 0.0F,
+                               .value = UI::UIKeyframeValue::Scalar(1.0F)},
+                UI::UIKeyframe{.normalizedTime = 0.33F,
+                               .value = UI::UIKeyframeValue::Scalar(0.85F)},
+                UI::UIKeyframe{.normalizedTime = 0.66F,
+                               .value = UI::UIKeyframeValue::Scalar(0.7F)},
+                UI::UIKeyframe{.normalizedTime = 1.0F,
+                               .value = UI::UIKeyframeValue::Scalar(0.55F)},
+            };
+            const std::array radiusFrames{
+                UI::UIKeyframe{.normalizedTime = 0.0F,
+                               .value = UI::UIKeyframeValue::Scalar(0.0F)},
+                UI::UIKeyframe{.normalizedTime = 0.33F,
+                               .value = UI::UIKeyframeValue::Scalar(2.0F)},
+                UI::UIKeyframe{.normalizedTime = 0.66F,
+                               .value = UI::UIKeyframeValue::Scalar(4.0F)},
+                UI::UIKeyframe{.normalizedTime = 1.0F,
+                               .value = UI::UIKeyframeValue::Scalar(8.0F)},
+            };
+            const std::array offsetFrames{
+                UI::UIKeyframe{.normalizedTime = 0.0F,
+                               .value = UI::UIKeyframeValue::Offset(0.0F, 0.0F)},
+                UI::UIKeyframe{.normalizedTime = 0.33F,
+                               .value = UI::UIKeyframeValue::Offset(1.0F, 0.0F)},
+                UI::UIKeyframe{.normalizedTime = 0.66F,
+                               .value = UI::UIKeyframeValue::Offset(1.0F, 1.0F)},
+                UI::UIKeyframe{.normalizedTime = 1.0F,
+                               .value = UI::UIKeyframeValue::Offset(2.0F, 1.0F)},
+            };
+            const std::array tracks{
+                UI::UITimelineTrackDesc{.node = node,
+                                        .property = UI::UIAnimatableProperty::BackgroundColor,
+                                        .keyframes = colorFrames},
+                UI::UITimelineTrackDesc{.node = node,
+                                        .property = UI::UIAnimatableProperty::Opacity,
+                                        .keyframes = opacityFrames},
+                UI::UITimelineTrackDesc{.node = node,
+                                        .property = UI::UIAnimatableProperty::CornerRadius,
+                                        .keyframes = radiusFrames},
+                UI::UITimelineTrackDesc{.node = node,
+                                        .property = UI::UIAnimatableProperty::VisualOffset,
+                                        .keyframes = offsetFrames},
+            };
+            if (!retainTimeline(tracks)) {
+                return false;
+            }
+        }
+    }
+
+    auto builderResult = createDisplayListBuilder(static_cast<u32>(kLargeNodeCount), memory, error);
+    if (!builderResult) {
+        return false;
+    }
+    Render::UIDisplayListBuilder builder = std::move(*builderResult);
+    constexpr UI::UILogicalSize Viewport{.width = 1.0F, .height = static_cast<float>(kLargeNodeCount)};
+    constexpr Render::UIPixelRect Framebuffer{.x = 0, .y = 0, .width = 1, .height = kLargeNodeCount};
+    if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
+        error = status.error().message;
+        return false;
+    }
+    if (!buildDisplayList(fixture, builder, Framebuffer, nullptr, error)) {
+        return false;
+    }
+
+    report.configuredNodeCount = kLargeNodeCount;
+    report.configuredTimelineCapacity = kTimelineCapacity;
+    report.configuredTimelineTrackCapacity = kTimelineTrackCapacity;
+    report.configuredTimelineKeyframeCapacity = kTimelineKeyframeCapacity;
+    report.configuredActiveTimelineCapacity = kTimelineCapacity;
+    report.configuredActiveTimelineTracks = activeTrackTarget;
+
+    Core::SteadyMonotonicClock wallClock{};
+    const auto wallBegin = wallClock.now();
+    const u64 totalIterations = options.warmUpIterations + options.measureIterations;
+    if (options.warmUpIterations == 0) {
+        captureAllocationBaseline(memory, report);
+    }
+    for (u64 iteration = 0; iteration < totalIterations; ++iteration) {
+        const bool measured = iteration >= options.warmUpIterations;
+        const auto totalBegin = wallClock.now();
+        for (usize timelineIndex = 0; timelineIndex < activeTimelineTarget;
+             ++timelineIndex) {
+            if (Core::Status status =
+                    fixture.context->playTimeline(timelines[timelineIndex]);
+                !status) {
+                error = status.error().message;
+                return false;
+            }
+        }
+        motionClock.advance(Core::Duration{0.025});
+        const auto commitBegin = wallClock.now();
+        if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
+            error = status.error().message;
+            return false;
+        }
+        const auto commitEnd = wallClock.now();
+        const UI::UIContextStatistics statistics = fixture.context->statistics();
+        const auto displayBegin = wallClock.now();
+        if (!buildDisplayList(fixture, builder, Framebuffer, measured ? &report : nullptr, error)) {
+            return false;
+        }
+        const auto displayEnd = wallClock.now();
+
+        if (measured) {
+            report.commitSamples.push_back(elapsedNs(commitBegin, commitEnd));
+            report.displayListSamples.push_back(elapsedNs(displayBegin, displayEnd));
+            report.totalSamples.push_back(elapsedNs(totalBegin, displayEnd));
+            accumulateCommitStatistics(statistics, report);
+            report.timelineSampledTimelines += statistics.motion.lastSampledTimelineCount;
+            report.timelineSampledTracks += statistics.motion.lastSampledTimelineTrackCount;
+            if (layoutTimeline) {
+                report.timelineSampledLayoutTracks +=
+                    statistics.motion.lastSampledTimelineLayoutTrackCount;
+            }
+            report.timelineSampledSegments += statistics.motion.lastSampledKeyframeSegmentCount;
+            report.timelineActiveCount += statistics.motion.activeTimelineCount;
+            if (activeTrackTarget == 0) {
+                ++report.timelineZeroActiveIterations;
+                if (statistics.motion.lastSampledTimelineCount != 0 ||
+                    statistics.motion.lastSampledTimelineTrackCount != 0 ||
+                    statistics.motion.lastSampledTimelineLayoutTrackCount != 0 ||
+                    statistics.motion.activeTimelineCount != 0 ||
+                    statistics.lastLayoutPassCount != 0 ||
+                    statistics.lastHitRebuildCount != 0 ||
+                    statistics.lastPaintCacheRebuildCount != 0 ||
+                    statistics.lastPaintSnapshotRebuildCount != 0) {
+                    error = std::string(report.workload) +
+                            " active=0 rebuilt a clean UI snapshot";
+                    return false;
+                }
+            } else if (layoutTimeline) {
+                if (statistics.motion.lastSampledTimelineTrackCount != activeTrackTarget ||
+                    statistics.motion.lastSampledTimelineLayoutTrackCount != activeTrackTarget ||
+                    statistics.lastLayoutPassCount != 1 ||
+                    statistics.lastHitRebuildCount != 1 ||
+                    statistics.lastPaintSnapshotRebuildCount != 1 ||
+                    statistics.motion.layoutTimelineCommitFailureCount != 0 ||
+                    statistics.layoutDirty || statistics.hitDirty || statistics.paintDirty) {
+                    error = "ui_motion_layout_v1 did not publish one atomic Layout/Hit/Paint rebuild";
+                    return false;
+                }
+            } else if (statistics.lastLayoutPassCount != 0 ||
+                       statistics.lastHitRebuildCount != 0 || statistics.layoutDirty ||
+                       statistics.hitDirty) {
+                error = "ui_motion_timeline_v1 paint-only sample dirtied layout/hit";
+                return false;
+            }
+        }
+        if (iteration + 1 == options.warmUpIterations) {
+            captureAllocationBaseline(memory, report);
+        }
+    }
+
+    report.wallNs = elapsedNs(wallBegin, wallClock.now());
+    captureFinalState(memory, report, fixture);
+    report.layoutSnapshotHighWater = report.workN;
+    report.hitSnapshotHighWater = report.workH;
+    report.paintSnapshotHighWater = report.workP;
+    report.workM = report.timelineSampledTracks;
+    report.timelineLayoutCommitFailures =
+        report.statistics.motion.layoutTimelineCommitFailureCount;
+    if (!layoutTimeline &&
+        (report.pmrAllocationsAfter != report.pmrAllocationsBefore ||
+         report.layoutPasses != 0 || report.measuredNodes != 0 ||
+         report.arrangedNodes != 0 || report.hitRebuilds != 0)) {
+        error = "ui_motion_timeline_v1 layout/hit/allocation invariant failed";
+        return false;
+    }
+    if (layoutTimeline &&
+        (report.pmrAllocationsAfter != report.pmrAllocationsBefore ||
+         report.timelineLayoutCommitFailures != 0)) {
+        error = "ui_motion_layout_v1 allocation/failure invariant failed";
+        return false;
+    }
+    if (report.statistics.motion.timelineHighWater != kTimelineCapacity ||
+        report.statistics.motion.timelineTrackHighWater != kTimelineTrackCapacity ||
+        report.statistics.motion.keyframeHighWater != kTimelineKeyframeCapacity ||
+        report.statistics.motion.activeTimelineHighWater != activeTimelineTarget) {
+        error = std::string(report.workload) +
+                " definition/active high-water invariant failed";
+        return false;
+    }
+    if (activeTrackTarget == 0) {
+        if (report.timelineZeroActiveIterations != options.measureIterations ||
+            report.timelineSampledTimelines != 0 || report.timelineSampledTracks != 0 ||
+            report.timelineSampledLayoutTracks != 0 || report.timelineSampledSegments != 0 ||
+            report.timelineActiveCount != 0 || report.paintCacheRebuilds != 0 ||
+            report.paintSnapshotRebuilds != 0 || report.layoutPasses != 0 ||
+            report.hitRebuilds != 0) {
+            error = std::string(report.workload) +
+                    " zero-active counter invariant failed";
+            return false;
+        }
+    } else {
+        const u64 expectedSampledTimelines =
+            static_cast<u64>(activeTimelineTarget) * options.measureIterations;
+        const u64 expectedSampledTracks = activeTrackTarget * options.measureIterations;
+        if (report.timelineSampledTimelines != expectedSampledTimelines ||
+            report.timelineSampledTracks != expectedSampledTracks ||
+            report.timelineSampledSegments != expectedSampledTracks ||
+            report.timelineActiveCount != expectedSampledTimelines) {
+            error = std::string(report.workload) +
+                    " active timeline counter invariant failed";
+            return false;
+        }
+        if (layoutTimeline &&
+            (report.timelineSampledLayoutTracks != expectedSampledTracks ||
+             report.layoutPasses != options.measureIterations ||
+             report.hitRebuilds != options.measureIterations ||
+             report.paintSnapshotRebuilds != options.measureIterations)) {
+            error = "ui_motion_layout_v1 atomic rebuild counter invariant failed";
+            return false;
+        }
+        if (!layoutTimeline &&
+            (report.timelineSampledLayoutTracks != 0 ||
+             report.paintCacheRebuilds != expectedSampledTimelines ||
+             report.paintSnapshotRebuilds != options.measureIterations)) {
+            error = "ui_motion_timeline_v1 paint publication counter invariant failed";
+            return false;
+        }
     }
 
     DeterministicHash hash{};
@@ -3037,6 +3465,18 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
         output << ",\"motion_track_capacity\":" << report.configuredMotionTrackCapacity
                << ",\"active_motion_tracks\":" << report.configuredActiveMotionTracks;
     }
+    if (report.workload == kTimelineMotionWorkload ||
+        report.workload == kLayoutTimelineMotionWorkload) {
+        output << ",\"timeline_capacity\":" << report.configuredTimelineCapacity
+               << ",\"timeline_track_capacity\":"
+               << report.configuredTimelineTrackCapacity
+               << ",\"timeline_keyframe_capacity\":"
+               << report.configuredTimelineKeyframeCapacity
+               << ",\"active_timeline_capacity\":"
+               << report.configuredActiveTimelineCapacity
+               << ",\"active_timeline_tracks\":"
+               << report.configuredActiveTimelineTracks;
+    }
     output << "}}";
     output << ",\"fingerprint\":{\"buildType\":";
     writeJsonString(output, BuildType);
@@ -3188,6 +3628,49 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
                << ",\"track_high_water\":" << report.motionTrackHighWater
                << ",\"zero_active_iterations\":" << report.motionZeroActiveIterations
                << ",\"track_capacity\":" << report.statistics.motion.trackCapacity << '}';
+    } else if (report.workload == kTimelineMotionWorkload ||
+               report.workload == kLayoutTimelineMotionWorkload) {
+        output << ",\"timeline_motion\":{\"sampled_timelines\":"
+               << report.timelineSampledTimelines
+               << ",\"sampled_tracks\":" << report.timelineSampledTracks;
+        if (report.workload == kLayoutTimelineMotionWorkload) {
+            output << ",\"sampled_layout_tracks\":"
+                   << report.timelineSampledLayoutTracks
+                   << ",\"layout_commit_failures\":"
+                   << report.timelineLayoutCommitFailures;
+        }
+        output
+               << ",\"sampled_segments\":" << report.timelineSampledSegments
+               << ",\"active_timelines_sum\":" << report.timelineActiveCount
+               << ",\"zero_active_iterations\":" << report.timelineZeroActiveIterations
+               << ",\"timeline_capacity\":"
+               << report.statistics.motion.timelineCapacity
+               << ",\"timeline_count\":" << report.statistics.motion.timelineCount
+               << ",\"timeline_track_capacity\":"
+               << report.statistics.motion.timelineTrackCapacity
+               << ",\"timeline_track_count\":"
+               << report.statistics.motion.timelineTrackCount
+               << ",\"keyframe_capacity\":"
+               << report.statistics.motion.keyframeCapacity
+               << ",\"keyframe_count\":" << report.statistics.motion.keyframeCount
+               << ",\"active_timeline_capacity\":"
+               << report.statistics.motion.activeTimelineCapacity
+               << ",\"active_timeline_count\":"
+               << report.statistics.motion.activeTimelineCount
+               << ",\"timeline_high_water\":"
+               << report.statistics.motion.timelineHighWater
+               << ",\"timeline_track_high_water\":"
+               << report.statistics.motion.timelineTrackHighWater
+               << ",\"keyframe_high_water\":"
+               << report.statistics.motion.keyframeHighWater
+               << ",\"active_timeline_high_water\":"
+               << report.statistics.motion.activeTimelineHighWater
+               << ",\"last_sampled_timeline_count\":"
+               << report.statistics.motion.lastSampledTimelineCount
+               << ",\"last_sampled_track_count\":"
+               << report.statistics.motion.lastSampledTimelineTrackCount
+               << ",\"last_sampled_segment_count\":"
+               << report.statistics.motion.lastSampledKeyframeSegmentCount << '}';
     }
     output << ",\"capacity\":{\"nodes\":" << report.statistics.nodeCapacity
            << ",\"dirty_queue\":" << report.statistics.dirtyQueueCapacity
@@ -3245,6 +3728,15 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
                << ",\"node_style_class_links\":"
                << report.statistics.style.nodeClassLinkHighWater;
     }
+    if (report.workload == kTimelineMotionWorkload ||
+        report.workload == kLayoutTimelineMotionWorkload) {
+        output << ",\"timelines\":" << report.statistics.motion.timelineHighWater
+               << ",\"timeline_tracks\":"
+               << report.statistics.motion.timelineTrackHighWater
+               << ",\"keyframes\":" << report.statistics.motion.keyframeHighWater
+               << ",\"active_timelines\":"
+               << report.statistics.motion.activeTimelineHighWater;
+    }
     output << '}';
     output << ",\"allocation\":{\"domain\":\"ui_pmr\",\"before\":"
            << report.pmrAllocationsBefore << ",\"after\":" << report.pmrAllocationsAfter
@@ -3282,6 +3774,15 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
         output << ",\"motion_samples_only_active_tracks\""
                   ",\"m_equals_zero_adds_no_extra_dirty_or_rebuild\""
                   ",\"seed_selects_active_track_count_0_64_or_1024\"";
+    } else if (report.workload == kTimelineMotionWorkload) {
+        output << ",\"timeline_samples_only_compact_active_index\""
+                  ",\"paint_only_timeline_does_not_rebuild_layout_or_hit\""
+                  ",\"seed_selects_active_track_count_0_64_or_1024\""
+                  ",\"paint_only_workload_excludes_layout_tracks\"";
+    } else if (report.workload == kLayoutTimelineMotionWorkload) {
+        output << ",\"timeline_samples_only_compact_active_index\""
+                  ",\"layout_timeline_rebuilds_layout_hit_and_paint_atomically\""
+                  ",\"seed_selects_active_track_count_0_64_or_1024\"";
     }
     output << "]}\n";
 }
@@ -3295,7 +3796,8 @@ bool isUIBenchmarkWorkload(std::string_view workload) noexcept
            workload == kImageNineSliceWorkload ||
            workload == kComponentActivateToggleWorkload ||
            workload == kComponentBuildWorkload || workload == kStyleStateWorkload ||
-           workload == kMotionWorkload;
+           workload == kMotionWorkload || workload == kTimelineMotionWorkload ||
+           workload == kLayoutTimelineMotionWorkload;
 }
 
 void printUIBenchmarkHelp(std::ostream& output)
@@ -3308,6 +3810,8 @@ void printUIBenchmarkHelp(std::ostream& output)
            << "  --workload=ui_component_build_v1     256 reserved four-node full-pool components\n"
            << "  --workload=ui_style_state_v1         4096 nodes, 256 rules, one state change\n"
            << "  --workload=ui_motion_v1              4096 nodes, active tracks 0/64/1024 by seed\n"
+           << "  --workload=ui_motion_timeline_v1    4096 nodes, 4-track/4-keyframe timelines, active tracks 0/64/1024\n"
+           << "  --workload=ui_motion_layout_v1      4096 nodes, 4095 overlay leaves, atomic Layout/Hit/Paint timeline rebuilds\n"
            << "  --workload=ui_component_build_activate_toggle_v1\n"
               "                                         legacy Activate/Toggle prerequisite\n";
 }
@@ -3343,6 +3847,10 @@ int runUIBenchmark(std::string_view workload, const UIBenchmarkOptions& options,
             (void)runStyleState(options, report, error);
         } else if (workload == kMotionWorkload) {
             (void)runMotion(options, report, error);
+        } else if (workload == kTimelineMotionWorkload) {
+            (void)runTimelineMotion(options, report, error);
+        } else if (workload == kLayoutTimelineMotionWorkload) {
+            (void)runTimelineMotion(options, report, error);
         } else {
             error = "unknown UI benchmark workload";
         }

@@ -1,5 +1,5 @@
-$input a_position, a_color0, a_texcoord0, a_texcoord1
-$output v_color0, v_texcoord0, v_shapeParams
+$input a_position, a_color0, a_texcoord0, a_texcoord1, a_texcoord2
+$output v_color0, v_texcoord0, v_shapeParams, v_cornerRadii
 
 #include <bgfx_shader.sh>
 
@@ -9,4 +9,5 @@ void main()
     v_color0 = a_color0;
     v_texcoord0 = a_texcoord0;
     v_shapeParams = a_texcoord1;
+    v_cornerRadii = a_texcoord2;
 }

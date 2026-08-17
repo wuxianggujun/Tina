@@ -1,7 +1,7 @@
 # ADR 0024：SDK 版本、ABI 与兼容性策略
 
-- 状态：Proposed
-- 日期：2026-08-02
+- 状态：Accepted
+- 日期：2026-08-16
 - 决策者：Tina maintainers
 
 ## 背景
@@ -18,8 +18,9 @@ consumer 重新编译、链接并运行”的证据。
 - moved-prefix 证明 package 不依赖原 source/build/install 绝对路径，不证明旧对象文件能链接新 archive；
 - 跨发行版 consumer 若用候选 SDK 头重新编译，只证明该实际组合可消费 artifact，不证明任意发行版、compiler
   或 STL 组合兼容；
-- `TinaConfigVersion.cmake` 当前由 CMake `SameMajorVersion` 生成。它只是版本选择机制；在 major 仍为 `0` 时，
-  不能据此推导所有 `0.x` 版本兼容，也没有 ADR、compatibility matrix 或 baseline 支撑这种承诺。
+- `TinaConfigVersion.cmake` 此前由 CMake `SameMajorVersion` 生成。它只是版本选择机制；在 major 仍为 `0` 时，
+  不能据此推导所有 `0.x` 版本兼容，也没有 compatibility matrix 或 baseline 支撑这种承诺。本决定接受时已把
+  package 改为 strict exact-version ConfigVersion，并以正反版本请求 probe 锁定该行为。
 
 因此“可安装、可搬移、可在另一环境重新编译”与“已发布、版本可协商、旧二进制兼容”必须分开记录。
 
@@ -37,11 +38,11 @@ consumer 重新编译、链接并运行”的证据。
 “支持的 ABI”只表示某个明确 compatibility tuple 内、某个已发布版本范围中的承诺，不表示 Tina 存在跨所有
 Windows/Linux、发行版和 C++ toolchain 的单一 ABI。
 
-## 建议决定（待接受）
+## 决定
 
 ### 1. 版本规则
 
-推荐采用以下 pre-1.0 SemVer 约束：
+采用以下 pre-1.0 SemVer 约束：
 
 - `0.y.z` 中 `y` 是 pre-1.0 compatibility epoch；有意破坏已发布 Public API、link ABI 或已承诺行为时递增
   `y`，并把 `z` 归零；当前 `0.0.1` 的下一次此类破坏至少发布为 `0.1.0`；
@@ -51,15 +52,14 @@ Windows/Linux、发行版和 C++ toolchain 的单一 ABI。
 - cooked schema、shader payload、benchmark schema 等已有独立版本的格式继续独立演进。它们的兼容性不能由
   SDK SemVer 代替，SDK release 只记录其支持矩阵。
 
-在首个受支持 baseline 和 previous-release probe 落地前，推荐 CMake package 对 pre-1.0 consumer 采用精确版本
-选择。baseline 覆盖完整 compatibility epoch 后，才可改为自定义 version check 或等价的 same-minor 选择。
-当前 `SameMajorVersion` 保留为待实施修正的事实，在本 Proposed ADR 中不修改 CMake，也不构成发布承诺。
+选择 **minor compatibility epoch + compatible patch**，但分阶段开放版本协商：
 
-维护者接受本 ADR 时需要在以下选项中明确选择：
-
-1. **推荐：minor epoch + compatible patch。** 配合 baseline/probe 后允许 `0.y.z` patch 自动协商；
-2. **更保守：pre-1.0 永远精确版本。** 每个版本都要求 consumer 明确更新，仍执行 baseline 以识别意外破坏；
-3. **不建议：沿用 `SameMajorVersion` 作为兼容规则。** major 为 `0` 时范围过宽，无法表达 pre-1.0 epoch。
+1. 当前 `0.0.1` 及在首个受支持 baseline/previous-release probe 落地前的 pre-1.0 package 使用 strict
+   exact-version ConfigVersion；只接受三段 `0.0.1`，`0.0.0`、`0.0.2`、tweak 与 version range 请求均拒绝；
+2. baseline 覆盖完整 `0.y` compatibility epoch、受支持 tuple 与 previous-release source/object probe 后，才可
+   通过新 ADR/变更评审改为自定义 version check 或等价的 same-minor compatible-patch 选择；
+3. 不使用 `SameMajorVersion`。major 为 `0` 时该策略会把不同 `y` epoch 放进同一范围，无法表达本决定；
+4. strict exact-version policy 是 baseline 建立前的保守 package gate，不把版本纪律降格为“pre-1.0 永远无兼容承诺”。
 
 ### 2. Compatibility tuple
 
@@ -121,8 +121,8 @@ baseline 必须来自已发布 artifact 或不可变 release candidate，不得�
 
 ### 5. 正式兼容承诺的进入条件
 
-在本 ADR Accepted 之前，Tina 只能报告已通过的 package/consumer 事实，不能宣布正式 ABI。接受后也只有同时
-满足以下条件的 release/tuple 才能标为 supported：
+本 ADR 的 Accepted 只冻结版本与证据规则，不自动宣布当前 artifact 具有正式 ABI。只有同时满足以下条件的
+release/tuple 才能标为 supported：
 
 - compatibility matrix 与最低 OS/runtime/toolchain 基线已发布；
 - exact release artifact、manifest、API/symbol baseline 可追溯；
@@ -139,8 +139,11 @@ artifact transfer 证据；在 previous-object probe 与 matrix 建立前，不�
 - pre-1.0 仍可演进，但 breaking change 不再藏在 patch 或宽泛的 major-0 version match 中；
 - 静态 C++、STL/PMR、模板/inline surface 带来的兼容限制被显式记录，consumer 不会误以为跨 toolchain 普遍兼容；
 - 代价是每个 supported tuple 都要保存 artifact/baseline 并运行 previous-release probe，matrix 必须保持小而真实；
-- 接受本 ADR 后还需单独实施 CMake version rule、release metadata、baseline 工具和 compatibility fixture；
-  Proposed 状态本身不改变当前 `0.0.1` package 行为。
+- CMake package 已从 `SameMajorVersion` 收紧为 custom strict exact-version ConfigVersion；
+  `VerifyTinaSdkPackageVersion.cmake` 和 Windows consumer gate 对 `0.0.1` exact、相邻版本、tweak 与 range
+  incompatible 做正反验证；
+- release metadata、API/symbol baseline 与 previous-release compatibility fixture 仍是将具体 tuple 标成
+  supported 的进入条件，不因 `SDK-001` package consumer 工作完成而被省略。
 
 ## 被拒绝方案
 
@@ -151,4 +154,7 @@ artifact transfer 证据；在 previous-object probe 与 matrix 建立前，不�
 - 以 header-only/PImpl 重写所有公开 API 后才发布：会扩大当前任务并牺牲类型与性能设计；应先缩小 matrix、
   建 baseline，用实际 diff 决定哪些高变动边界需要 PImpl/C facade；
 - pre-1.0 完全不做版本纪律：会让 SDK-001 consumer gate 无法转化为可维护的发布契约；
+- pre-1.0 永久只允许精确版本：当前阶段暂用 strict exact policy fail closed，但永久锁死会让完整 epoch baseline 建立后
+  仍无法表达经验证的 compatible patch；放宽必须另经评审，不能自动发生；
+- 沿用 `SameMajorVersion`：major=0 时范围横跨全部 `0.y`，与 compatibility epoch 语义冲突；
 - 永久精确锁死所有 1.x patch/minor：避免了承诺，也让 SemVer 和 compatibility automation 失去价值。

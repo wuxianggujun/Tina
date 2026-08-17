@@ -13,6 +13,9 @@ using Core::u32;
 using Core::u8;
 using Core::usize;
 
+inline constexpr u16 AllowedMaterialFlags = TilesetWire::MaterialSolid | TilesetWire::MaterialOneWay |
+                                            TilesetWire::MaterialTrigger;
+
 [[nodiscard]] u8 readU8(std::span<const std::byte> bytes, usize offset) noexcept
 {
     return std::to_integer<u8>(bytes[offset]);
@@ -110,8 +113,7 @@ Core::Result<std::vector<std::byte>> writeTilesetPayloadBytes(const TilesetPaylo
         {
             return Core::failure(AssetFormatErrorCode::InvalidLayout, "tileset tile UV invalid");
         }
-        constexpr u16 Allowed = TilesetWire::MaterialSolid | TilesetWire::MaterialOneWay | TilesetWire::MaterialTrigger;
-        if ((tile.materialFlags & ~Allowed) != 0U)
+        if ((tile.materialFlags & ~AllowedMaterialFlags) != 0U)
         {
             return Core::failure(AssetFormatErrorCode::UnsupportedValue, "unknown tileset material flags");
         }
@@ -184,6 +186,17 @@ Core::Result<TilesetPayloadView> parseTilesetPayload(std::span<const std::byte> 
             !(tile->u0 < tile->u1) || !(tile->v0 < tile->v1))
         {
             return Core::failure(AssetFormatErrorCode::InvalidLayout, "tileset entry UV invalid");
+        }
+        if ((tile->materialFlags & ~AllowedMaterialFlags) != 0U)
+        {
+            return Core::failure(AssetFormatErrorCode::UnsupportedValue,
+                                 "unknown tileset material flags");
+        }
+        const usize entryOffset = static_cast<usize>(index) * TilesetWire::EntryBytes;
+        if (readU32(view.entriesBytes, entryOffset + 20U) != 0U)
+        {
+            return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                                 "tileset entry reserved bytes must be zero");
         }
     }
     return view;

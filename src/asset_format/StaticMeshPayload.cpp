@@ -3,6 +3,7 @@
 #include <tina/asset_format/AssetFormatErrors.hpp>
 
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <limits>
 
@@ -348,6 +349,17 @@ Core::Result<StaticMeshPayloadView> parseStaticMeshPayload(std::span<const std::
     }
 
     const usize submeshOffset = StaticMeshWire::HeaderBytes;
+    const usize vertexOffset = submeshOffset + submeshBytes;
+    const usize indexOffset = vertexOffset + vertexBytes;
+    const auto isAligned = [&](usize offset, usize alignment) noexcept {
+        return (reinterpret_cast<std::uintptr_t>(payload.data() + offset) % alignment) == 0U;
+    };
+    if (!isAligned(submeshOffset, alignof(StaticMeshSubmeshView)) ||
+        !isAligned(vertexOffset, alignof(float)) || !isAligned(indexOffset, alignof(u16)))
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                             "static mesh typed block alignment invalid");
+    }
     const auto* submeshPtr =
         reinterpret_cast<const StaticMeshSubmeshView*>(payload.data() + submeshOffset);
     view.submeshes = std::span<const StaticMeshSubmeshView>{submeshPtr, view.submeshCount};
@@ -367,11 +379,6 @@ Core::Result<StaticMeshPayloadView> parseStaticMeshPayload(std::span<const std::
         }
     }
 
-    const usize vertexOffset = submeshOffset + submeshBytes;
-    if ((vertexOffset % alignof(float)) != 0U)
-    {
-        return Core::failure(AssetFormatErrorCode::InvalidLayout, "static mesh vertex alignment invalid");
-    }
     const auto* vertexPtr = reinterpret_cast<const float*>(payload.data() + vertexOffset);
     view.vertices =
         std::span<const float>{vertexPtr, static_cast<usize>(view.vertexCount) * vertexStrideFloats};
@@ -380,11 +387,6 @@ Core::Result<StaticMeshPayloadView> parseStaticMeshPayload(std::span<const std::
         return Core::failure(status.error());
     }
 
-    const usize indexOffset = vertexOffset + vertexBytes;
-    if ((indexOffset % alignof(u16)) != 0U)
-    {
-        return Core::failure(AssetFormatErrorCode::InvalidLayout, "static mesh index alignment invalid");
-    }
     const auto* indexPtr = reinterpret_cast<const u16*>(payload.data() + indexOffset);
     view.indices = std::span<const u16>{indexPtr, view.indexCount};
     if (Core::Status status = validateIndices(view.indices, view.vertexCount); !status)

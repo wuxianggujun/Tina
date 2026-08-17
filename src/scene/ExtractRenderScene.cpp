@@ -89,6 +89,11 @@ struct ShadowOccluder2DCandidate final {
     Render::Sprite2DShadowSegment segment{};
 };
 
+struct WorldBoundingSphere final {
+    Vec3 center{};
+    float radius = 0.0F;
+};
+
 [[nodiscard]] float snapCameraCoordinate(float value, float pixelsPerMeter) noexcept
 {
     const double snapped = std::round(static_cast<double>(value) * pixelsPerMeter) / pixelsPerMeter;
@@ -112,7 +117,7 @@ struct ShadowOccluder2DCandidate final {
     return std::hypot(outsideX, outsideY) <= static_cast<double>(light.radiusMeters);
 }
 
-[[nodiscard]] bool influenceSphereIntersectsPerspectiveCamera(
+[[nodiscard]] bool sphereIntersectsPerspectiveCamera(
     float positionX,
     float positionY,
     float positionZ,
@@ -149,6 +154,29 @@ struct ShadowOccluder2DCandidate final {
            depth * tangentX - x >= -radius * horizontalRadiusScale &&
            depth * tangentY + y >= -radius * verticalRadiusScale &&
            depth * tangentY - y >= -radius * verticalRadiusScale;
+}
+
+[[nodiscard]] std::optional<WorldBoundingSphere> resolveWorldBoundingSphere(
+    const Render::RenderBoundingSphereInput& localBounds,
+    const WorldTransform& transform) noexcept
+{
+    if (!isValid(transform) || transform.scale.x <= 0.0F || transform.scale.y <= 0.0F
+        || transform.scale.z <= 0.0F) {
+        return std::nullopt;
+    }
+
+    const Quaternion rotation = normalized(transform.rotation);
+    const Vec3 scaledLocalCenter =
+        Vec3{localBounds.centerX, localBounds.centerY, localBounds.centerZ} * transform.scale;
+    const WorldBoundingSphere sphere{
+        .center = transform.position + rotate(rotation, scaledLocalCenter),
+        .radius = localBounds.radius
+            * std::max({transform.scale.x, transform.scale.y, transform.scale.z}),
+    };
+    if (!isFinite(sphere.center) || !std::isfinite(sphere.radius) || sphere.radius <= 0.0F) {
+        return std::nullopt;
+    }
+    return sphere;
 }
 
 [[nodiscard]] Core::Status publishPointLights2D(
@@ -462,7 +490,7 @@ struct ShadowOccluder2DCandidate final {
             .colorB = component->color.blue * component->intensity,
         };
         if (cullingCamera != nullptr &&
-            !influenceSphereIntersectsPerspectiveCamera(
+            !sphereIntersectsPerspectiveCamera(
                 light.positionX,
                 light.positionY,
                 light.positionZ,
@@ -546,7 +574,7 @@ struct ShadowOccluder2DCandidate final {
             .colorB = component->color.blue * component->intensity,
         };
         if (cullingCamera != nullptr &&
-            !influenceSphereIntersectsPerspectiveCamera(
+            !sphereIntersectsPerspectiveCamera(
                 light.positionX,
                 light.positionY,
                 light.positionZ,
@@ -959,6 +987,24 @@ Core::Status extractRenderSceneFromWorld(
                 SceneErrorCode::UnresolvedMesh,
                 "Scene MeshRenderer3D has invalid render properties");
         }
+        const WorldTransform* transform = world.worldTransform(entity);
+        const std::optional<WorldBoundingSphere> worldBounds = transform == nullptr
+            ? std::nullopt
+            : resolveWorldBoundingSphere(mesh->localBounds, *transform);
+        if (!worldBounds) {
+            return Core::failure(
+                SceneErrorCode::InvalidTransform,
+                "Scene MeshRenderer3D WorldTransform or transformed bounds are invalid");
+        }
+        if (resolvedPerspectiveCamera
+            && !sphereIntersectsPerspectiveCamera(
+                worldBounds->center.x,
+                worldBounds->center.y,
+                worldBounds->center.z,
+                worldBounds->radius,
+                *resolvedPerspectiveCamera)) {
+            continue;
+        }
         if (!mesh->mesh || !mesh->material || !params.mesh3DBindingResolver
             || !params.material3DBindingResolver) {
             return Core::failure(
@@ -983,13 +1029,6 @@ Core::Status extractRenderSceneFromWorld(
                 SceneErrorCode::UnresolvedMesh,
                 "Scene MeshRenderer3D material asset has no render binding");
         }
-        const WorldTransform* transform = world.worldTransform(entity);
-        if (transform == nullptr || !isValid(*transform)) {
-            return Core::failure(
-                SceneErrorCode::InvalidTransform,
-                "Scene MeshRenderer3D WorldTransform is unavailable or invalid");
-        }
-
         const Render::RenderMesh3DInput input{
             .mesh = *meshResource,
             .material = *materialResource,
@@ -1035,6 +1074,24 @@ Core::Status extractRenderSceneFromWorld(
                 SceneErrorCode::UnresolvedMesh,
                 "Scene SkinnedMeshRenderer3D has invalid render properties");
         }
+        const WorldTransform* transform = world.worldTransform(entity);
+        const std::optional<WorldBoundingSphere> worldBounds = transform == nullptr
+            ? std::nullopt
+            : resolveWorldBoundingSphere(mesh->localBounds, *transform);
+        if (!worldBounds) {
+            return Core::failure(
+                SceneErrorCode::InvalidTransform,
+                "Scene SkinnedMeshRenderer3D WorldTransform or transformed bounds are invalid");
+        }
+        if (resolvedPerspectiveCamera
+            && !sphereIntersectsPerspectiveCamera(
+                worldBounds->center.x,
+                worldBounds->center.y,
+                worldBounds->center.z,
+                worldBounds->radius,
+                *resolvedPerspectiveCamera)) {
+            continue;
+        }
         if (!mesh->mesh || !mesh->material || !params.skinnedMesh3DBindingResolver
             || !params.material3DBindingResolver) {
             return Core::failure(
@@ -1076,13 +1133,6 @@ Core::Status extractRenderSceneFromWorld(
                 SceneErrorCode::UnresolvedSkinnedPose,
                 "Scene SkinnedMeshRenderer3D pose provider returned no usable joint palette");
         }
-        const WorldTransform* transform = world.worldTransform(entity);
-        if (transform == nullptr || !isValid(*transform)) {
-            return Core::failure(
-                SceneErrorCode::InvalidTransform,
-                "Scene SkinnedMeshRenderer3D WorldTransform is unavailable or invalid");
-        }
-
         const Render::RenderSkinnedMesh3DInput input{
             .mesh = *meshResource,
             .material = *materialResource,

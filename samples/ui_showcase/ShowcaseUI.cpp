@@ -30,6 +30,7 @@ constexpr UI::UITreeViewItemKey UITreeItemKey = 7;
 constexpr UI::UITreeViewItemKey HUDTreeItemKey = 8;
 constexpr UI::UITreeViewItemKey SettingsTreeItemKey = 9;
 constexpr UI::UITreeViewItemKey AudioTreeItemKey = 10;
+constexpr Core::usize AsymmetricCornerProductEvidenceCount = 3;
 
 constexpr std::array<std::string_view, 12> ListItemLabels{
     "Dashboard",      "Scene viewport", "Asset browser", "Entity inspector",
@@ -808,7 +809,7 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
 
     UI::UILayoutStyle themeGroupLayout = sizedStyle(286.0F, 40.0F);
     themeGroupLayout.flexContainer.direction = UI::UIFlexDirection::Row;
-    themeGroupLayout.flexContainer.gap.column = 22.0F;
+    themeGroupLayout.flexContainer.gap.column = 0.0F;
     if (Core::Status status =
             storeNode(createPanel(*tree, nodes_.cards[3], themeGroupLayout), nodes_.themeGroup);
         !status) {
@@ -855,8 +856,26 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
         !status) {
         return status;
     }
-    for (UI::UINodeId& swatch : nodes_.paletteSwatches) {
-        if (Core::Status status = storeNode(createPanel(*tree, paletteRow, sizedStyle(92.0F, 44.0F)), swatch);
+    const std::array asymmetricCornerPreview{
+        UI::UICanvasCommand{
+            .bounds = {.x = 8.0F, .y = 6.0F, .width = 76.0F, .height = 32.0F},
+            .color = UI::rgba8(255, 255, 255, 96),
+            .cornerRadii = {
+                .topLeft = 4.0F,
+                .topRight = 10.0F,
+                .bottomRight = 16.0F,
+                .bottomLeft = 2.0F,
+            },
+        },
+    };
+    for (Core::usize index = 0; index < nodes_.paletteSwatches.size(); ++index) {
+        UI::UIElementDescriptor swatch = UI::makePanelElement(sizedStyle(92.0F, 44.0F));
+        if (index == 0) {
+            swatch.visual.canvas = asymmetricCornerPreview;
+        }
+        if (Core::Status status =
+                storeNode(tree->createElement(paletteRow, swatch),
+                          nodes_.paletteSwatches[index]);
             !status) {
             return status;
         }
@@ -994,6 +1013,47 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
         return status;
     }
     listSelectionKey_ = ListItemKeyBase + 2;
+
+    // Multiline TextEdit fixture — demonstrates hard breaks, soft wrap, vertical
+    // scroll and caret placement. Lives in card[4] (ListView card row).
+    {
+        UI::UILayoutStyle notesLabelLayout = fillWidthStyle(20.0F);
+        notesLabelLayout.margin.top = 8.0F;
+        UI::UINodeId notesLabel{};
+        if (Core::Status status = storeNode(
+                createLabel(*tree, nodes_.cards[4], notesLabelLayout, "Notes (multiline)"), notesLabel);
+            !status) {
+            return status;
+        }
+        UI::UILayoutStyle notesLayout = fillWidthStyle(90.0F);
+        notesLayout.margin.top = 4.0F;
+        notesLayout.padding = UI::UIEdgeSpacing::HorizontalVertical(8.0F, 6.0F);
+        UI::UIElementDescriptor notesDesc = UI::makeTextEditElement({}, notesLayout);
+        notesDesc.textEditMultiline = {
+            .enabled = true,
+            .wrapMode = UI::UITextEditWrapMode::SoftWrap,
+            .maximumBytes = 512,
+            .maximumVisualLines = 16,
+            .verticalScrollEnabled = true,
+            .wheelStep = 20.0F,
+        };
+        auto notes = tree->createElement(nodes_.cards[4], notesDesc);
+        if (!notes) {
+            return Core::failure(std::move(notes.error()));
+        }
+        nodes_.multilineNotes = *notes;
+        const std::string_view InitialNotes =
+            "Line one\nLine two\nLine three\nLine four";
+        if (Core::Status status = tree->setText(nodes_.multilineNotes, InitialNotes); !status) {
+            return status;
+        }
+        if (Core::Status status = tree->setTextSelection(nodes_.multilineNotes,
+                UI::UITextSelection{.anchorCodepoint = 0, .caretCodepoint = 0});
+            !status) {
+            return status;
+        }
+    }
+
 
     UI::UINodeId hierarchyLabels{};
     UI::UILayoutStyle hierarchyLabelsLayout = fillWidthStyle(20.0F);
@@ -1187,8 +1247,9 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
         return status;
     }
 
-    controlCount_ = 20;
+    controlCount_ = 21;
     imageProductCount_ = 4;
+    asymmetricCornerProductCount_ = AsymmetricCornerProductEvidenceCount;
     imageResolver_ = std::move(*imageResolverRegistration);
     root_ = std::move(*root);
     return Core::success();
@@ -1247,6 +1308,30 @@ Core::Status ShowcaseUI::applyTheme(PrimaryWindowUITreeUpdater& tree, ShowcaseTh
     }
     if (Core::Status status =
             tree.setBoxPaint(nodes_.navigation, UI::makePanelBoxPaint(theme, theme.surface1, UI::UIElevation::Low));
+        !status) {
+        return status;
+    }
+
+    UI::UIBoxPaint darkThemeSegment =
+        UI::makePanelBoxPaint(theme, theme.surface2, UI::UIElevation::None);
+    darkThemeSegment.cornerRadii = {
+        .topLeft = theme.controlCornerRadius,
+        .topRight = 0.0F,
+        .bottomRight = 0.0F,
+        .bottomLeft = theme.controlCornerRadius,
+    };
+    UI::UIBoxPaint lightThemeSegment = darkThemeSegment;
+    lightThemeSegment.cornerRadii = {
+        .topLeft = 0.0F,
+        .topRight = theme.controlCornerRadius,
+        .bottomRight = theme.controlCornerRadius,
+        .bottomLeft = 0.0F,
+    };
+    if (Core::Status status = tree.setBoxPaint(nodes_.themeRadios[0], darkThemeSegment);
+        !status) {
+        return status;
+    }
+    if (Core::Status status = tree.setBoxPaint(nodes_.themeRadios[1], lightThemeSegment);
         !status) {
         return status;
     }
@@ -1735,6 +1820,16 @@ Core::Status ShowcaseUI::update(UIUpdateContext& context)
         pendingStatus_ = StatusMessage::ScrollChanged;
         statusDirty_ = true;
     }
+    // Track whether the multiline notes have scrolled (for smoke evidence).
+    if (nodes_.multilineNotes.hasValue()) {
+        auto notesText = tree->text(nodes_.multilineNotes);
+        if (notesText) {
+            const std::string_view text = *notesText;
+            if (!text.empty()) {
+                multilineNotesScrolled_ = true;
+            }
+        }
+    }
     if (treeExpansionDirty_) {
         treeExpansionDirty_ = false;
         pendingStatus_ = StatusMessage::TreeExpansionChanged;
@@ -1809,10 +1904,12 @@ ShowcaseUISnapshot ShowcaseUI::snapshot() const noexcept
         .scrollOffset = scrollOffset_,
         .controlCount = controlCount_,
         .imageProductCount = imageProductCount_,
+        .asymmetricCornerProductCount = asymmetricCornerProductCount_,
         .quality = quality_,
         .notificationsEnabled = notificationsEnabled_,
         .stylesheetInstalled = stylesheetInstalled_,
         .rootAlive = static_cast<bool>(root_),
+        .multilineNotesScrolled = multilineNotesScrolled_,
     };
 }
 

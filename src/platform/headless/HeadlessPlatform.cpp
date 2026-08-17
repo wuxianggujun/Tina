@@ -51,6 +51,23 @@ class HeadlessPlatformBackend final : public IPlatformBackend {
         return PlatformPollResult::Continue(*frame);
     }
 
+    Core::Status updateTextInputPlacement(std::optional<TextInputPlacement> placement) override
+    {
+        if (stopped_)
+        {
+            return Core::failure(PlatformErrorCode::BackendStopped, "The headless platform backend is stopped");
+        }
+        // Headless has no native text-input surface. A non-null placement is a
+        // caller contract error rather than a silently retained compatibility
+        // path; clearing remains a successful no-op.
+        if (placement.has_value())
+        {
+            return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                                 "Headless platform cannot publish native text input placement");
+        }
+        return Core::success();
+    }
+
     void shutdown() noexcept override
     {
         stopped_ = true;

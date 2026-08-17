@@ -31,10 +31,10 @@ struct SkinnedPose3DProvider final {
     }
 };
 
-// Surface framebuffer size for Camera2D projection resolve. Zero extent means
-// suspended surface: extract skips the World camera and camera-dependent point
-// light culling without treating either as a component configuration error
-// (callers may still emit sprites or pure UI).
+// Surface framebuffer size for camera projection resolve. Zero extent means a
+// suspended surface: extract skips camera-dependent light and mesh culling
+// without treating the World camera as a component configuration error (callers
+// may still emit scene items or pure UI).
 struct ExtractRenderSceneParams final {
     Render::Camera2DSurfaceViewport surfaceViewport{};
     Asset::AssetFrameResourceResolver spriteBindingResolver{};
@@ -64,17 +64,24 @@ struct ExtractRenderSceneParams final {
 //   non-empty Texture2D ref before addSprite2D receives either binding.
 // - A missing resolver, invalid/stale/wrong-kind/unbound handle, or resolver
 //   empty result returns UnresolvedSprite. Hidden sprites resolve neither handle.
-// - Each visible MeshRenderer3D resolves its mesh/material AssetHandles through
-//   the kind-specific mesh3DBindingResolver/material3DBindingResolver, then
-//   becomes addMesh3D from WorldTransform pose/scale.
+// - Each visible MeshRenderer3D first validates and transforms its authored
+//   local bounding sphere. With one resolved PerspectiveCamera3D on a non-zero
+//   surface, sphere-vs-frustum culling occurs before resolving frame resources.
+//   Camera-affecting meshes resolve mesh/material AssetHandles through the
+//   kind-specific mesh3DBindingResolver/material3DBindingResolver, then become
+//   addMesh3D from WorldTransform pose/scale. Without a resolved camera all
+//   visible meshes preserve the existing fixed-capacity extraction behavior.
 // - A missing resolver, invalid/stale/wrong-kind/unbound handle, or either
-//   resolver empty result returns UnresolvedMesh. Hidden meshes are not resolved.
-// - Each visible SkinnedMeshRenderer3D resolves mesh/material through the
+//   resolver empty result returns UnresolvedMesh. Hidden and frustum-culled
+//   meshes are not resolved.
+// - Each visible SkinnedMeshRenderer3D uses the same authored conservative
+//   sphere and culling order, then resolves mesh/material through the
 //   kind-specific skinnedMesh3DBindingResolver/material3DBindingResolver and its
-//   CPU pose through skinnedPose3DProvider, then becomes addSkinnedMesh3D. A
-//   missing provider or empty/malformed palette returns UnresolvedSkinnedPose;
-//   resolver failures return UnresolvedMesh. Hidden skinned meshes resolve
-//   neither handles nor pose.
+//   CPU pose through skinnedPose3DProvider before addSkinnedMesh3D. A missing
+//   provider or empty/malformed palette returns UnresolvedSkinnedPose; resolver
+//   failures return UnresolvedMesh. Hidden and frustum-culled skinned meshes
+//   resolve neither handles nor pose; extraction does not expand bounds for pose
+//   deformation.
 // - Active DirectionalLight3D components are sorted by stable entity identity,
 //   transformed to world direction, and published as one bounded lighting snapshot.
 //   At most one active component may own CascadedDirectionalShadow3D; extraction

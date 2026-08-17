@@ -26,6 +26,7 @@
 #include "ui/PrimaryWindowUIContextOwner.hpp"
 #include "ui/PrimaryWindowUIDisplayCoordinator.hpp"
 #include "ui/PrimaryWindowUILayoutCoordinator.hpp"
+#include "ui/PrimaryWindowTextInputPlacementCoordinator.hpp"
 
 #include "integration/WindowSurfaceLeaseAccess.hpp"
 
@@ -703,6 +704,13 @@ class EngineHostImplementation final {
             candidate.reset();
             return failBeforeStartupCommit(std::move(layoutStatus.error()));
         }
+        if (Core::Status placementStatus =
+                m_primaryWindowTextInputPlacement.publish(*uiContextResult, *m_modules.platform);
+            !placementStatus)
+        {
+            candidate.reset();
+            return failBeforeStartupCommit(std::move(placementStatus.error()));
+        }
         if (auto uiaStatus = publishPrimaryWindowUia(*uiContextResult); !uiaStatus)
         {
             candidate.reset();
@@ -1098,6 +1106,13 @@ class EngineHostImplementation final {
                     return failAfterStartupCommit(gameApplication, std::move(layoutStatus.error()), frameIndex,
                                                   simulationTick);
                 }
+            }
+            if (Core::Status placementStatus =
+                    m_primaryWindowTextInputPlacement.publish(*uiContextResult, *m_modules.platform);
+                !placementStatus)
+            {
+                return failAfterStartupCommit(gameApplication, std::move(placementStatus.error()), frameIndex,
+                                              simulationTick);
             }
             if (auto uiaStatus = publishPrimaryWindowUia(*uiContextResult); !uiaStatus)
             {
@@ -1512,6 +1527,7 @@ class EngineHostImplementation final {
     Runtime::Detail::PrimaryWindowUIContextOwner m_primaryWindowUi;
     Runtime::Detail::PrimaryWindowUICapabilityState m_primaryWindowUICapability;
     Runtime::Detail::PrimaryWindowUILayoutCoordinator m_primaryWindowUILayout;
+    Runtime::Detail::PrimaryWindowTextInputPlacementCoordinator m_primaryWindowTextInputPlacement;
     Runtime::Detail::PrimaryWindowUIDisplayCoordinator m_primaryWindowUIDisplay;
     Runtime::Input::LastPresentedCamera2DLatch m_lastPresentedCamera2D{};
     Render::RenderSceneBuilder m_renderSceneBuilder;

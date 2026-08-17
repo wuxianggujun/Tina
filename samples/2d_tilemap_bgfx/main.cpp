@@ -5572,6 +5572,22 @@ int main(int argc, char** argv)
         counters.tileMapStreamCommitted == ExpectedTileMapStreamChunks &&
         counters.tileMapStreamResident == ExpectedTileMapStreamChunks &&
         counters.tileMapStreamPeakResident >= ExpectedTileMapStreamChunks;
+    // PhysicsNavigationSync2D is an optional product slice.  Keep the base
+    // bgfx sample gate meaningful without requiring physics-only revisions and
+    // counters that are not compiled into that configuration.
+#if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
+    const bool navigationPhysicsValid =
+        counters.navigationGridRevision == 10U && counters.navigationPhysicsReady &&
+        counters.navigationPhysicsRegisteredBodies == 1U &&
+        counters.navigationPhysicsPublishedBlockers == 1U &&
+        counters.navigationPhysicsSynchronizations >= 2U;
+#else
+    const bool navigationPhysicsValid =
+        counters.navigationGridRevision == 3U && !counters.navigationPhysicsReady &&
+        counters.navigationPhysicsRegisteredBodies == 0U &&
+        counters.navigationPhysicsPublishedBlockers == 0U &&
+        counters.navigationPhysicsSynchronizations == 0U;
+#endif
     const bool navigationValid =
         resources.navigationGrid.has_value() && resources.navigationPathfinder.has_value() &&
         counters.navigationReady && counters.navigationFromCookedAsset &&
@@ -5592,14 +5608,11 @@ int main(int argc, char** argv)
         counters.navigationWeightedPathCells == ExpectedNavigationWeightedPathCells &&
         counters.navigationWeightedPathCost == ExpectedNavigationWeightedPathCost &&
         counters.navigationWeightedPathAvoidedCostCell &&
-        counters.navigationIncrementalExpandedNodes == 1U &&
-        counters.navigationGridRevision == 10U && counters.navigationDynamicBlockerMutations == 2U &&
+        counters.navigationIncrementalExpandedNodes == 1U && navigationPhysicsValid &&
+        counters.navigationDynamicBlockerMutations == 2U &&
         counters.navigationCancelled && resources.navigationGrid->dynamicBlockerCount() == 0U &&
         resources.navigationGrid->revision() == counters.navigationGridRevision &&
         resources.navigationPathfinder->cellCapacity() == resources.navigationGrid->cellCount() &&
-        counters.navigationPhysicsReady && counters.navigationPhysicsRegisteredBodies == 1U &&
-        counters.navigationPhysicsPublishedBlockers == 1U &&
-        counters.navigationPhysicsSynchronizations >= 2U &&
         resources.navigationGrid->dynamicBlockerCount() == 0U;
     const bool product300EffectsValid =
         options->targetFrameCount != 300U ||

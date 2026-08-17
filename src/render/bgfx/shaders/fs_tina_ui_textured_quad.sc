@@ -1,4 +1,4 @@
-$input v_color0, v_texcoord0, v_shapeParams
+$input v_color0, v_texcoord0, v_shapeParams, v_cornerRadii
 
 #include <bgfx_shader.sh>
 
@@ -48,9 +48,11 @@ void main()
     }
     else if (shapeParameter > 0.0)
     {
-        float radius = shapeParameter;
         vec2 halfExtent = v_shapeParams.xy * 0.5;
         vec2 localPoint = (v_texcoord0 - vec2(0.5, 0.5)) * v_shapeParams.xy;
+        float radius = localPoint.x > 0.0
+            ? (localPoint.y > 0.0 ? v_cornerRadii.z : v_cornerRadii.y)
+            : (localPoint.y > 0.0 ? v_cornerRadii.w : v_cornerRadii.x);
         vec2 outside = abs(localPoint) - (halfExtent - vec2(radius, radius));
         float distance = length(max(outside, vec2(0.0, 0.0)))
                        + min(max(outside.x, outside.y), 0.0) - radius;

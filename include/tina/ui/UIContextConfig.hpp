@@ -17,12 +17,18 @@ struct UIContextCapacityConfig final {
     static constexpr usize MaxImageContentCapacity = MaxNodeCapacity;
     static constexpr usize MaxTextByteCapacity = 64U * 1024U * 1024U;
     static constexpr usize DefaultTextByteCapacity = 64U * 1024U;
+    static constexpr usize DefaultTextEditVisualLineCapacity = 4096;
+    static constexpr usize MaxTextEditVisualLineCapacity = 1'048'576;
     static constexpr usize DefaultStyleClassCapacity = 256;
     static constexpr usize DefaultStyleTokenCapacity = 256;
     static constexpr usize DefaultStyleRuleCapacity = 256;
     static constexpr usize DefaultStyleBucketCapacity = 256;
     static constexpr usize DefaultStyleRulesPerBucketCapacity = 256;
     static constexpr usize DefaultMotionTrackCapacity = 64;
+    static constexpr usize DefaultTimelineCapacity = 16;
+    static constexpr usize DefaultTimelineTrackCapacity = 64;
+    static constexpr usize DefaultTimelineKeyframeCapacity = 256;
+    static constexpr usize DefaultActiveTimelineCapacity = 16;
     static constexpr usize DefaultFlowLayerCapacity = 16;
     static constexpr usize DefaultFlowScreenCapacity = 64;
     static constexpr usize MaxStyleClassCapacity = MaxNodeCapacity;
@@ -31,6 +37,10 @@ struct UIContextCapacityConfig final {
     static constexpr usize MaxStyleBucketCapacity = MaxNodeCapacity;
     static constexpr usize MaxNodeStyleClassLinkCapacity = MaxNodeCapacity * 4U;
     static constexpr usize MaxMotionTrackCapacity = MaxNodeCapacity;
+    static constexpr usize MaxTimelineCapacity = MaxNodeCapacity;
+    static constexpr usize MaxTimelineTrackCapacity = MaxNodeCapacity * 8U;
+    static constexpr usize MaxTimelineKeyframeCapacity = MaxNodeCapacity * 32U;
+    static constexpr usize MaxActiveTimelineCapacity = MaxTimelineCapacity;
     static constexpr usize MaxFlowLayerCapacity = MaxNodeCapacity;
     static constexpr usize MaxFlowScreenCapacity = MaxNodeCapacity;
 
@@ -65,6 +75,9 @@ struct UIContextCapacityConfig final {
     // across the context. Zero uses DefaultTextByteCapacity. Storage is
     // pre-reserved at Create.
     usize textByteCapacity = 0;
+    // Fixed visual-line records shared by multiline TextEdits. Zero uses the
+    // bounded default and never grows after context creation.
+    usize textEditVisualLineCapacity = 0;
     // Stylesheets own fixed token values and compile into fixed rule and
     // (role,class) bucket pools. Node links default to four class slots per node.
     usize styleClassCapacity = DefaultStyleClassCapacity;
@@ -75,6 +88,13 @@ struct UIContextCapacityConfig final {
     usize nodeStyleClassLinkCapacity = 0;
     // Fixed active transition tracks (UI-MOTION-001). Zero uses DefaultMotionTrackCapacity.
     usize motionTrackCapacity = 0;
+    // UI-MOTION-002 retained definitions, definition tracks, encoded
+    // keyframes, and compact active-playback index. Zero uses bounded defaults;
+    // all four pools are allocated once during Create and never grow later.
+    usize timelineCapacity = 0;
+    usize timelineTrackCapacity = 0;
+    usize timelineKeyframeCapacity = 0;
+    usize activeTimelineCapacity = 0;
     // UI-FLOW-001 identities reuse retained nodes. Zero derives a fixed context
     // capacity from min(DefaultFlow*, nodeCapacity); storage never grows later.
     usize flowLayerCapacity = 0;

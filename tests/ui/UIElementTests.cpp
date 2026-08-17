@@ -833,7 +833,12 @@ TEST_F(UIElementTest, CanvasCommandsAreCopiedAndPaintAfterTheElementBoxInLocalOr
         UI::UICanvasCommand{
             .bounds = {.x = 2.0F, .y = 3.0F, .width = 5.0F, .height = 6.0F},
             .color = UI::rgb(0xFF0000),
-            .cornerRadius = 2.5F,
+            .cornerRadii = {
+                .topLeft = 2.5F,
+                .topRight = 1.5F,
+                .bottomRight = 0.5F,
+                .bottomLeft = 0.0F,
+            },
         },
         UI::UICanvasCommand{
             .bounds = {.x = 35.0F, .y = 25.0F, .width = 10.0F, .height = 10.0F},
@@ -875,7 +880,13 @@ TEST_F(UIElementTest, CanvasCommandsAreCopiedAndPaintAfterTheElementBoxInLocalOr
         elementPaints[1]->worldRect,
         (UI::UILogicalRect{.x = 12.0F, .y = 18.0F, .width = 5.0F, .height = 6.0F}));
     EXPECT_EQ(elementPaints[1]->solidFill, UI::premultiply(UI::rgb(0xFF0000)));
-    EXPECT_FLOAT_EQ(elementPaints[1]->cornerRadius, 2.5F);
+    EXPECT_EQ(elementPaints[1]->cornerRadii,
+              (UI::UILogicalCornerRadii{
+                  .topLeft = 2.5F,
+                  .topRight = 1.5F,
+                  .bottomRight = 0.5F,
+                  .bottomLeft = 0.0F,
+              }));
     EXPECT_EQ(
         elementPaints[2]->worldRect,
         (UI::UILogicalRect{.x = 45.0F, .y = 40.0F, .width = 10.0F, .height = 10.0F}));
@@ -889,6 +900,34 @@ TEST_F(UIElementTest, CanvasCommandsAreCopiedAndPaintAfterTheElementBoxInLocalOr
     EXPECT_EQ(statistics.canvasCommandCapacity, 4U);
     EXPECT_EQ(statistics.activeCanvasCommandCount, 2U);
     EXPECT_EQ(statistics.canvasCommandHighWater, 2U);
+}
+
+TEST_F(UIElementTest, BoxPaintDescriptorRejectsInvalidCornerRadiiBeforeCreatingNode)
+{
+    auto context = createContext(
+        window,
+        {
+            .nodeCapacity = 4,
+            .rootCapacity = 1,
+        });
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root.hasValue());
+    auto updater = createUpdater(*context, root);
+    const usize liveNodeCount = context->liveNodeCount();
+    const UI::UIContextStatistics before = context->statistics();
+
+    UI::UIElementDescriptor invalid = UI::makePanelElement();
+    invalid.visual.boxPaint = UI::makeSolidBox(UI::rgb(0x336699));
+    invalid.visual.boxPaint->cornerRadii.topRight =
+        (std::numeric_limits<float>::infinity)();
+    const auto rejected = updater.createElement(root.rootNodeId(), invalid);
+
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidElementDescriptor);
+    EXPECT_EQ(context->liveNodeCount(), liveNodeCount);
+    EXPECT_EQ(context->statistics().dirtyQueuePendingCount,
+              before.dirtyQueuePendingCount);
 }
 
 TEST_F(UIElementTest, CanvasCapacityValidationDestroyAndTransactionRollbackRecycleSlots)
@@ -922,7 +961,9 @@ TEST_F(UIElementTest, CanvasCapacityValidationDestroyAndTransactionRollbackRecyc
     const UI::UICanvasCommand invalidRadiusCommand{
         .bounds = {.width = 1.0F, .height = 1.0F},
         .color = UI::rgb(0xFFFFFF),
-        .cornerRadius = (std::numeric_limits<float>::quiet_NaN)(),
+        .cornerRadii = {
+            .topLeft = (std::numeric_limits<float>::quiet_NaN)(),
+        },
     };
     UI::UIElementDescriptor invalidRadius = UI::makePanelElement();
     invalidRadius.visual.canvas = std::span<const UI::UICanvasCommand>(&invalidRadiusCommand, 1);

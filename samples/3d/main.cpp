@@ -2,6 +2,7 @@
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 #include <tina/platform/PlatformBackend.hpp>
+#include <tina/platform/PlatformErrors.hpp>
 #include <tina/render/RenderDevice.hpp>
 #include <tina/render/RenderErrors.hpp>
 #include <tina/render/FramePin.hpp>
@@ -126,6 +127,16 @@ class ResizingWindowPlatformBackend final : public Tina::Platform::IPlatformBack
         }
         ++pollCount_;
         return Tina::Platform::PlatformPollResult::Continue(*frame);
+    }
+
+    Tina::Core::Status updateTextInputPlacement(
+        std::optional<Tina::Platform::TextInputPlacement> placement) override
+    {
+        static_cast<void>(placement);
+        return stopped_
+                   ? Tina::Core::failure(Tina::Platform::PlatformErrorCode::BackendStopped,
+                                         "The 3D extraction platform backend is stopped")
+                   : Tina::Core::success();
     }
 
     void shutdown() noexcept override

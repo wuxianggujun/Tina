@@ -12,6 +12,7 @@
 #include <tina/ui/UISemantics.hpp>
 #include <tina/ui/UIStyle.hpp>
 #include <tina/ui/UIText.hpp>
+#include <tina/ui/UITextEdit.hpp>
 #include <tina/ui/UITreeView.hpp>
 
 #include <optional>
@@ -48,6 +49,8 @@ struct UIElementDescriptor final {
     bool enabled = true;
     UIListViewCreateConfig listView{};
     UITreeViewCreateConfig treeView{};
+    // Applied only when this descriptor creates a TextInput TextEdit.
+    UITextEditMultilineConfig textEditMultiline{};
 };
 
 [[nodiscard]] constexpr UIElementDescriptor makeImageElement(

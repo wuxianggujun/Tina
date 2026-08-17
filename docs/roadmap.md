@@ -32,17 +32,18 @@ UI-STUDIO-DESIGN 的代码与自动证据已固化，剩余 state-feedback 视�
 | UI-003 | 跨 DPI/GPU 容差视觉门禁 |
 | PERF-002 | 固定机 benchmark hard gate、多进程 median/MAD 与受审 baseline |
 | 2D-EDITOR | 2D/3D Editor 产品闭环：四类 current-schema authoring document/file、bounded history、per-tab session、Save/Save As/dirty-close、Project Browser/New/Open + live Catalog switch、事务化 source import 与一步 PNG/JPEG/WAV 导入、动态 Hierarchy、`EditorComponentOperations` 组件 authoring、TRS Inspector、viewport navigation/grid/gizmo/marquee、PlaySession、frame shortcuts 与 Line/Ellipse 视口视觉均已落地，实现明细与本轮证据见 [Backlog](backlog.md)。**待：** 跨 DPI/GPU 视觉金标与 Linux `zenity`/`kdialog` 真实 dialog 产品门禁；完成前保持 InProgress |
+| UI-PAINT-002-A | Done：`UIBoxPaint`/Canvas `SolidRect` 的 `UILogicalCornerRadii` 已沿 committed paint、border/inset/shadow 与 UI→Render bridge 进入已有 `UIPixelCornerRadii`；UI Showcase 以两个仅圆外侧角的相邻 Radio 和一个四角不同的 Canvas preview 固化 consumer。复用现有固定容量，失败保留旧 snapshot；2026-08-17 Windows gate：UI 672/672、Runtime UI 130/130、UI-Render 28/28、bgfx 111/111、bench 10/10，Showcase 120 帧 exit 0 |
 | RENDER-LINES-001 | UI Line/Ellipse 原语与 Editor 视口 grid/gizmo/rotation ring 已落地，100%/150%/200% DPI 证据完成；剩跨 GPU 证据随 UI-003 关闭 |
 | EDITOR-ANIM-EVENT-TIMELINE | Done：per-frame notify marker 显示、CRUD、tag/offset 解析、稳定排序、Undo/Redo 与 fail-closed 已落地；Editor tests 与 2D/3D 60帧 auto-demo gate 已闭环 |
 | 2D-ANIM-EVENTS-PRODUCT | Done：product-2d 消费 `crossedEvents`；300帧 gate 固化 footstep/hit=`15/1`、overflow/unknown=`0/0`（字段现由 schema 29 继承） |
-| TEXT-001 | 多行 TextEdit、grapheme 边界与 Windows IME 候选窗（T1/T2/T3 切片见 Backlog） |
+| TEXT-001 | InProgress：多行、UAX #29 grapheme 子集、二维 hit/navigation 与 Windows IMM32 caret/candidate placement 的代码和自动 gate 已完成；BiDi/复杂 shaping、Linux 原生 XIM/Wayland 与 Windows 真机 IME 人工矩阵仍待收口 |
 | NAV-COOK-001 | Done：Cooked NavigationGrid2D v1、typed load、Editor bake/persistent overlay 与 product bit-exact 双路径通过统一模块/Editor/product gate |
 | FX-ASSET-001 | Done：Fx2D v1、完整 recipe、typed dependency、Scene factory 与 Editor document 通过统一 gate；GPU simulation 留 Later |
 | PHYS2D-CHAIN | Done：static open/loop Chain、多 segment 生命周期/query 去重通过 Physics2D 49/49 与产品 ready gate |
-| ASSET-SEC-002 | glTF 之外全部 cooked payload 的资源炸弹/malformed 矩阵补齐 |
-| UI-MOTION-002 | keyframe timeline 与 layout animation（ADR 先行） |
+| ASSET-SEC-002 | Done：glTF 之外全部 cooked payload 的资源炸弹/malformed 矩阵已补齐，`tina_asset_format_tests` 124/124、corpus 17/17、`tina_asset_tests` 312/312 |
+| UI-MOTION-002 | Done：keyframe timeline、bounded `LayoutWidth`/`LayoutHeight`/`LayoutOffset` 与 atomic Layout/Hit/Paint publication；UI 28/28、Runtime facade 1/1、bench unit 10/10 及 paint/layout seed 0/1/2 通过 |
 | UI-PERF-001 | Done；含 `ui_motion_v1` 在内的 UI workload 集已齐 |
-| SDK-001 | 可安装的 Tina Game SDK、版本化 CMake package 与外部 `find_package` consumer gate |
+| SDK-001 | Done：可安装 Tina Game SDK、版本化 CMake package 与外部 `find_package` consumer gate；ADR 0024 Accepted，pre-1.0 strict exact-version 正反 probe 已接入 |
 | UI-FLOW-001 | Done；固定容量 Layer/Screen 栈、Back/Confirm/Menu Action Router、16 槽本地用户、Gamepad assignment、per-user 设备 revision 与 2D 产品已闭环 |
 | UI-COMPONENT-001 | Done；标准 Behavior 独立 side store、phase-scoped bounded transaction、全池 reservation/counter 与 `ui_component_build_v1` 已落地 |
 | UI-IMAGE-001 | Done；A Image/Icon、B NineSlice 与 C 产品/失效/尺寸/`ui_image_nineslice_v1` 性能证据均已关闭；Icon 复用 Image，不另建 Widget/Asset/atlas 系统 |
@@ -86,20 +87,21 @@ SDK-001 (independent packaging lane; does not wait for UI-FLOW-001)
 固定机绝对时间阈值仍由 `PERF-002` 冻结；在此之前 clean-frame rebuild、容量、
 分配和 checksum 等确定性不变量可以阻断，开发机墙钟只报告 `provisional`。`UI-FLOW-001` 已关闭：
 Layer/Screen、Action Router、多本地用户与设备提示都复用窗口级唯一 retained tree/focus，不引入第二棵 UI 树。
-`SDK-001` 继续独立推进，每个新增公共 UI 切片同步扩展 consumer gate。
+`SDK-001` package/consumer gate 已收口；后续新增公共 UI 切片仍需同步扩展 consumer gate，正式 supported
+ABI tuple 的 artifact/API/symbol baseline 与 previous-object probe 作为 release checklist 独立跟踪。
 
 ## Later：扩展能力
 
 - Jolt 3D physics adapter；
-- 逐角半径、圆角子树 clip、backdrop 与更完整的视觉效果；
+- `UI-PAINT-002-A` 已完成逐角 Retained box/Canvas chrome；后续另行推进 rounded/stencil 子树 clip、backdrop/blur、per-corner Motion 与更完整的视觉效果；
 - Back/Confirm/Menu 之外的任意产品 action-id；
 - 仅在标准 Behavior 不足时评估 startup-only 自定义 Behavior SPI；
 - Linux AT-SPI adapter 与真实辅助技术验收；
 - Linux Editor native dialog 定向编译与 `zenity`/`kdialog` 真实产品门禁（Windows/Linux adapter 与 Editor authoring/保存/导入闭环均已落地，明细见 Backlog `2D-EDITOR`）；
-- Linux IME 与文本输入平台矩阵（`TEXT-001` 的 Windows IME 切片之后）；
+- Linux 原生 XIM/Wayland IME 与文本输入平台矩阵（`TEXT-001` Windows IMM32 自动接线之后）；
 - FX GPU simulation（`FX-ASSET-001` 完成 asset/editor 化后评估）；
 - 3D post-process（HDR/tone mapping）与跨 GPU golden（transparent pass 已由 `RENDER-002-TRANSPARENT` 闭环）；
-- layout animation 实现切片（`UI-MOTION-002` 的 ADR Accepted 后展开）；
+- layout whitelist 扩展，以及 loop/seek/pause/repeat/yoyo/completion callback、spring/inertia 等高级 Motion playback；
 - MeshRenderer3D 提取侧视锥剔除、LOD 与 instancing（当前仅 point/spot light 做 influence-sphere culling，mesh 只按 visible 标志提取）；
 - Asset Bundle/Patch、cache/LRU 与 network Asset；
 
@@ -177,7 +179,7 @@ Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语
 | --- | --- | --- |
 | 2D product | TEST-002 保留 schema 23 的历史同轮证据；当前 sample/gate 已升级到 schema 29。TileMap v3 每帧 demand/pump/commit visual=10 与 hidden collision=20，gameplay objects=30 留在 root；Navigation2D 从 collision/gameplay layer 派生静态 immutable weighted grid，solid/rectangle/blocked=`11/0/11`、weighted/max-cost=`1/5`，`PhysicsNavigationSync2D` 每次 Physics step 后把 crate 的权威 transform 同步为动态 blocker，sync/add/update/remove=`301/1/5/0`、registered/published=`1/1`；基础/动态/严格/切角 path cells/cost=`5/40`，weighted path=`7/60` 且绕开高代价 cell，并保留单步 expanded=`1`、revision/mutation=`10/2` 与取消终态；World2D snapshot 以唯一现行 schema v2 保存 stable hierarchy、五类2D组件（含 SpriteAnimation binding）、稳定 AssetId 与 game-owned blob，旧 schema 拒绝且 restore 失败全量 rollback；CameraFollow2D 负责 dead zone/限速/world clamp 与 presentation interpolation；retain-window LRU、Advanced input、World/Particle/Trail weak Sprite Handle、TileMap weak Tileset Handle 已完成；Physics2D 已覆盖 Box/Circle/Capsule/ConvexPolygon/Chain 与 Distance/Revolute/Prismatic，产品断言 sensor enter/exit、Chain 和三类新增 shape/joint ready 字段；TileMap→Physics 已收敛为 per-resident-chunk static collider + greedy rectangle 合并 + residency/revision 增量同步，产品 `physicsStaticBodies=1`（11 solid cell → 2 box shape）并在 State 退出时证明 collider 全量退休；Sprite2D base/optional-normal 都使用 packet-local `FrameResourceRef`，fixed-capacity registry 唯一拥有 resident Lease/GPU/binding；schema 29 继承 schema 19 的 normal-map、双灯双遮挡、authored/committed/culled=`3/2/1` 与 soft/hard 差分，并保留 UI Flow base/pause Screen push/pop、Back/Confirm/Menu、Primary 用户设备 revision、Dark→Light→Dark、Scene Explorer TreeView、`texturesUploaded=3`、3份 owner/retirement handoff、ledger Released 与四类 resolver hits，以及 notify 消费计数、Cooked/live Navigation bit-exact、Catalog Fx2D `0/10/10` 与 Chain ready 证据 | 跨 GPU lighting exact golden、FX GPU simulation与高级约束 |
 | Linux tip | Docker GCC13 + Clang22（含 sanitizer）已复验（TEST-001） | 可选 Wayland |
-| UI product | 20控件独立 showcase、Dark/Light 实时换肤、Button hover/pressed/focus/disabled 反馈、product-2d Scene Explorer TreeView 与 product-3d Asset ListView/Scene TreeView 均有结构化与 Windows FreeType 视觉证据；authoring 已统一为 descriptor/recipe `createElement()`，Showcase 普通页面使用 Flow/Flex；Semantics/Theme role/reset、bounded build transaction、Canvas `SolidRect` 与统一 RoundedRect 已关闭；Image/Icon 的 root-scoped resolve/pin/RGBA ImageQuad 链路与 Canvas NineSlice 原子展开已完成；Showcase 已接入 icon-only/图文 Button、Inventory thumbnail、NineSlice panel、Dark/Light atlas/sampling 视觉和逐帧结构化证据，以 lifecycle mode 覆盖 atlas invalidation、unavailable 与 missing resolver 连续 skip，并以 6-case size matrix 覆盖 Dark/Light × 1x/1.25x/1.5x client footprint；`ui_image_nineslice_v1` 关闭 `Q=5096/U=64/B=1000`、resolve/pin/dedupe/high-water/allocation/checksum；Component 完成全池 reservation/counter 与 `ui_component_build_v1`；Style/Motion 完成 imageTint、Visual gate、persistent BackgroundColor reservation/activation 与 `ui_motion_v1`；`Tina Studio Compact` 按钮层级（默认 Tonal、Primary/Danger/Tonal/Outlined/Text 与 Segmented=RadioButton role）及 Editor 旧 disabled-active 视觉移除已合并主线（UI-STUDIO-DESIGN，state-feedback 视觉门禁待干净门禁机补跑） | OS 级 DPI 与跨 GPU 金标由 `UI-003` 跟踪；完整 keyframe timeline/layout animation 为独立后续项 |
+| UI product | 20控件独立 showcase、Dark/Light 实时换肤、Button hover/pressed/focus/disabled 反馈、product-2d Scene Explorer TreeView 与 product-3d Asset ListView/Scene TreeView 均有结构化与 Windows FreeType 视觉证据；authoring 已统一为 descriptor/recipe `createElement()`，Showcase 普通页面使用 Flow/Flex；Semantics/Theme role/reset、bounded build transaction、Canvas `SolidRect` 与统一 RoundedRect 已关闭；Image/Icon 的 root-scoped resolve/pin/RGBA ImageQuad 链路与 Canvas NineSlice 原子展开已完成；Showcase 已接入 icon-only/图文 Button、Inventory thumbnail、NineSlice panel、Dark/Light atlas/sampling 视觉和逐帧结构化证据，以 lifecycle mode 覆盖 atlas invalidation、unavailable 与 missing resolver 连续 skip，并以 6-case size matrix 覆盖 Dark/Light × 1x/1.25x/1.5x client footprint；`ui_image_nineslice_v1` 关闭 `Q=5096/U=64/B=1000`、resolve/pin/dedupe/high-water/allocation/checksum；Component 完成全池 reservation/counter 与 `ui_component_build_v1`；Style/Motion 完成 imageTint、Visual gate、persistent BackgroundColor reservation/activation、`ui_motion_v1`，以及 typed paint/bounded-layout timeline 与统一确定性 gate；`Tina Studio Compact` 按钮层级（默认 Tonal、Primary/Danger/Tonal/Outlined/Text 与 Segmented=RadioButton role）及 Editor 旧 disabled-active 视觉移除已合并主线（UI-STUDIO-DESIGN，state-feedback 视觉门禁待干净门禁机补跑） | OS 级 DPI 与跨 GPU 金标由 `UI-003` 跟踪 |
 | UI accessibility | 平台中立 action seam、Windows UIA Invoke/Toggle/RangeValue/Value patterns 与真实 showcase HWND 跨进程自动 gate 已落地；gate 可输出属性/fragment、action 结果和正常关闭的 schema 1 JSON | 固化当前 tip 的带日期 gate 结果并完成 Windows Narrator/Inspect 人工金标；Linux AT-SPI 由 `UI-002-LINUX` 独立跟踪 |
 | 3D product | 双静态 mesh + authored/MikkTSpace tangent + 唯一 P3N3T4UV2 + Resources-owned AssetSystem + Prefab/Scene weak mesh/material Handle + engine-provided、State-owned Mesh3D registry + packet-local geometry/material resolver、Mesh/Material/共享 Texture 统一 owner、原子 material bundle、baseColor/MR/normal 贴图采样、material factors、Cook-Torrance GGX + cooked EnvironmentMap split-sum IBL、World DirectionalLight3D/PointLight3D/SpotLight3D→逐帧 RenderScene snapshot、point/spot influence-sphere culling、固定4级联 CSM、固定单 SpotLight shadow、固定单 PointLight 六面全向 shadow、startup-only shadow extent 与 deterministic pass scheduler 已有证据；schema 15 的 SkinnedMesh/AnimationClip3D、Animator3D CPU pose、packet palette、GPU skinning、固定2-joint/3-instance witness 与 skin-animation on/off RGB 差分已于2026-08-14集中 gate 闭环；schema 16 的显式 Opaque/Blend、统一 static/skinned back-to-front 排序、Transparent3D straight-alpha/depth-less-no-write、不投 shadow但接收 lighting/shadow/PBR/IBL、双 static witness 与 transparency on/off RGB 差分已于2026-08-15闭环，并继承实时 surface/camera aspect、responsive UI、lighting、IBL/shadow、3 Mesh/4 Material/3 Texture handoff、weak handle 失效、ledger Released、Asset ListView/Scene TreeView 与 Dark→Light→Dark | post 与跨 GPU golden 后置 |
 | Runtime stack/packet | stack/commands/policy、FramePin present-return CPU completion、Texture/Mesh AssetLease-backed retirement 与 EnvironmentMap GPU-owner readback retirement，以及 Task timeout/retry + Host-enforced TaskSystem worker-exit/join deadline 已落地 | 产品 sample 暂停演示；通用 GPU submission fence 非当前 Runtime 契约 |

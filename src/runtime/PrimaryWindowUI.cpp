@@ -629,6 +629,62 @@ Core::Status PrimaryWindowUITreeUpdater::beginVisualOffsetTransition(
     return m_state->beginVisualOffsetTransition(m_epoch, m_phase, node, targetOffsetX, targetOffsetY, spec);
 }
 
+Core::Result<UI::UITimelineId>
+PrimaryWindowUITreeUpdater::createTimeline(const UI::UITimelineDesc& desc)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UITimelineId>("PrimaryWindowUITreeUpdater::createTimeline");
+    }
+    return m_state->createTimeline(m_epoch, m_phase, desc);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::replaceTimeline(
+    UI::UITimelineId timeline, const UI::UITimelineDesc& desc)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::replaceTimeline");
+    }
+    return m_state->replaceTimeline(m_epoch, m_phase, timeline, desc);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::playTimeline(UI::UITimelineId timeline)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::playTimeline");
+    }
+    return m_state->playTimeline(m_epoch, m_phase, timeline);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::cancelTimeline(UI::UITimelineId timeline)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::cancelTimeline");
+    }
+    return m_state->cancelTimeline(m_epoch, m_phase, timeline);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::destroyTimeline(UI::UITimelineId timeline)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::destroyTimeline");
+    }
+    return m_state->destroyTimeline(m_epoch, m_phase, timeline);
+}
+
+Core::Result<bool> PrimaryWindowUITreeUpdater::isTimelineActive(UI::UITimelineId timeline) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<bool>("PrimaryWindowUITreeUpdater::isTimelineActive");
+    }
+    return m_state->isTimelineActive(m_epoch, m_phase, timeline);
+}
+
 Core::Status PrimaryWindowUITreeUpdater::setButtonPaint(UI::UINodeId button, const UI::UIButtonPaint& paint)
 {
     if (m_state == nullptr)

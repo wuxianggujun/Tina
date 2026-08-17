@@ -2,6 +2,8 @@
 
 #include <tina/asset_format/AssetFormatErrors.hpp>
 
+#include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <limits>
 
@@ -103,6 +105,14 @@ Core::Result<std::vector<std::byte>> writeAudioClipPayloadBytes(const AudioClipP
     {
         return Core::failure(AssetFormatErrorCode::InvalidLayout, "audio clip pcm buffer size mismatch");
     }
+    for (const float sample : desc.interleavedPcm)
+    {
+        if (!std::isfinite(sample))
+        {
+            return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                                 "audio clip PCM samples must be finite");
+        }
+    }
 
     try
     {
@@ -161,13 +171,23 @@ Core::Result<AudioClipPayloadView> parseAudioClipPayload(std::span<const std::by
     {
         return Core::failure(AssetFormatErrorCode::InvalidLayout, "audio clip payload size mismatch");
     }
-    if ((AudioClipWire::HeaderBytes % alignof(float)) != 0)
+    const auto pcmAddress = reinterpret_cast<std::uintptr_t>(
+        payload.data() + AudioClipWire::HeaderBytes);
+    if ((pcmAddress % alignof(float)) != 0U)
     {
         return Core::failure(AssetFormatErrorCode::InvalidLayout, "audio clip pcm alignment invalid");
     }
 
     const auto* samples = reinterpret_cast<const float*>(payload.data() + AudioClipWire::HeaderBytes);
     view.interleavedPcm = std::span<const float>{samples, sampleCount};
+    for (const float sample : view.interleavedPcm)
+    {
+        if (!std::isfinite(sample))
+        {
+            return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                                 "audio clip PCM samples must be finite");
+        }
+    }
     return view;
 }
 

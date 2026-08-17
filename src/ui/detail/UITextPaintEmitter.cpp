@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <span>
 
 namespace Tina::UI::Detail {
@@ -56,7 +57,10 @@ void UITextPaintEmitter::append(std::pmr::vector<UICommittedPaintEntry>& output,
     {
         return;
     }
-    const u32 pixelSize = static_cast<u32>((std::max)(1.0F, std::floor(style.logicalSize)));
+    const double flooredSize = std::floor(static_cast<double>(style.logicalSize));
+    const double clampedPixelSize = (std::min)(
+        (std::max)(1.0, flooredSize), static_cast<double>((std::numeric_limits<u32>::max)()));
+    const u32 pixelSize = static_cast<u32>(clampedPixelSize);
 
     if (rasterSource.rasterizer != nullptr && rasterSource.face.hasValue() && rasterSource.atlas != nullptr)
     {
@@ -101,7 +105,7 @@ void UITextPaintEmitter::append(std::pmr::vector<UICommittedPaintEntry>& output,
                 const UITextGlyphRaster& glyph = batch->glyphs[glyphIndex];
                 ++glyphIndex;
                 float advance = glyph.advance;
-                if (!(std::isfinite(advance) && advance > 0.0F))
+                if (!(std::isfinite(advance) && advance >= 0.0F))
                 {
                     advance = fallbackAdvance;
                 }

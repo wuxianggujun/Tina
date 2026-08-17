@@ -51,6 +51,28 @@ geometryCapacityFailure(const char* message)
            kind == UIDrawCommandKind::ImageQuad;
 }
 
+[[nodiscard]] bool validCornerRadii(const UIPixelCornerRadii& radii,
+                                    float maximumRadius) noexcept
+{
+    const std::array values{
+        radii.topLeft,
+        radii.topRight,
+        radii.bottomRight,
+        radii.bottomLeft,
+    };
+    return std::ranges::all_of(values, [maximumRadius](float radius) noexcept {
+        return std::isfinite(radius) && radius >= 0.0F && radius <= maximumRadius;
+    });
+}
+
+[[nodiscard]] constexpr float largestCornerRadius(
+    const UIPixelCornerRadii& radii) noexcept
+{
+    return (std::max)(
+        (std::max)(radii.topLeft, radii.topRight),
+        (std::max)(radii.bottomRight, radii.bottomLeft));
+}
+
 [[nodiscard]] constexpr std::array<UISubpixelPoint, VerticesPerQuad> quadPoints(
     const UISolidQuadVertices& vertices) noexcept
 {
@@ -148,12 +170,11 @@ checkedGeometryRequirements(UIDisplayListView displayList)
         }
         const float maximumCornerRadius =
             static_cast<float>((std::min)(command.bounds.width, command.bounds.height)) * 0.5F;
-        if (!std::isfinite(command.cornerRadius) || command.cornerRadius < 0.0F ||
-            command.cornerRadius > maximumCornerRadius ||
-            (command.kind != UIDrawCommandKind::SolidQuad && command.cornerRadius != 0.0F))
+        if (!validCornerRadii(command.cornerRadii, maximumCornerRadius) ||
+            (command.kind != UIDrawCommandKind::SolidQuad && !command.cornerRadii.empty()))
         {
             return Core::failure(Core::CoreErrorCode::InvalidArgument,
-                                 "The UI DisplayList contains an invalid corner radius");
+                                 "The UI DisplayList contains invalid corner radii");
         }
         const float maximumStrokeWidth = maximumCornerRadius;
         if (!std::isfinite(command.strokeWidth) || command.strokeWidth < 0.0F ||
@@ -165,7 +186,7 @@ checkedGeometryRequirements(UIDisplayListView displayList)
         }
         if (command.vertices.has_value() &&
             (command.kind != UIDrawCommandKind::SolidQuad ||
-             command.cornerRadius != 0.0F ||
+             !command.cornerRadii.empty() ||
              command.strokeWidth != 0.0F ||
              !validSolidQuadVertices(*command.vertices, command.bounds)))
         {
@@ -240,7 +261,7 @@ writeGeometry(UIDisplayListView displayList, std::span<BgfxUIDisplayVertex> vert
         const float shapeParameter =
             command.kind == UIDrawCommandKind::SolidEllipse
                 ? -(command.strokeWidth + 1.0F)
-                : command.cornerRadius;
+                : largestCornerRadius(command.cornerRadii);
 
         float u0 = 0.0F;
         float v0 = 0.0F;
@@ -302,6 +323,10 @@ writeGeometry(UIDisplayListView displayList, std::span<BgfxUIDisplayVertex> vert
             .shapeWidth = shapeWidth,
             .shapeHeight = shapeHeight,
             .shapeParameter = shapeParameter,
+            .cornerRadiusTopLeft = command.cornerRadii.topLeft,
+            .cornerRadiusTopRight = command.cornerRadii.topRight,
+            .cornerRadiusBottomRight = command.cornerRadii.bottomRight,
+            .cornerRadiusBottomLeft = command.cornerRadii.bottomLeft,
         };
         vertices[vertexOffset + 1U] = {
             .x = positions[1U][0],
@@ -312,6 +337,10 @@ writeGeometry(UIDisplayListView displayList, std::span<BgfxUIDisplayVertex> vert
             .shapeWidth = shapeWidth,
             .shapeHeight = shapeHeight,
             .shapeParameter = shapeParameter,
+            .cornerRadiusTopLeft = command.cornerRadii.topLeft,
+            .cornerRadiusTopRight = command.cornerRadii.topRight,
+            .cornerRadiusBottomRight = command.cornerRadii.bottomRight,
+            .cornerRadiusBottomLeft = command.cornerRadii.bottomLeft,
         };
         vertices[vertexOffset + 2U] = {
             .x = positions[2U][0],
@@ -322,6 +351,10 @@ writeGeometry(UIDisplayListView displayList, std::span<BgfxUIDisplayVertex> vert
             .shapeWidth = shapeWidth,
             .shapeHeight = shapeHeight,
             .shapeParameter = shapeParameter,
+            .cornerRadiusTopLeft = command.cornerRadii.topLeft,
+            .cornerRadiusTopRight = command.cornerRadii.topRight,
+            .cornerRadiusBottomRight = command.cornerRadii.bottomRight,
+            .cornerRadiusBottomLeft = command.cornerRadii.bottomLeft,
         };
         vertices[vertexOffset + 3U] = {
             .x = positions[3U][0],
@@ -332,6 +365,10 @@ writeGeometry(UIDisplayListView displayList, std::span<BgfxUIDisplayVertex> vert
             .shapeWidth = shapeWidth,
             .shapeHeight = shapeHeight,
             .shapeParameter = shapeParameter,
+            .cornerRadiusTopLeft = command.cornerRadii.topLeft,
+            .cornerRadiusTopRight = command.cornerRadii.topRight,
+            .cornerRadiusBottomRight = command.cornerRadii.bottomRight,
+            .cornerRadiusBottomLeft = command.cornerRadii.bottomLeft,
         };
 
         const u32 absoluteVertex = static_cast<u32>(vertexOffset);

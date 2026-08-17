@@ -284,5 +284,43 @@ TEST_F(UITextEditTest, PaintSnapshotCapacityFiveAcceptsSelectionAndPreedit)
     EXPECT_EQ(localContext->imePreeditUtf8(), "XY");
 }
 
+TEST_F(UITextEditTest, FailedPaintCommitPreservesPublishedCaretGeometry)
+{
+    auto localContext = createContext(
+        window,
+        UI::UIContextCapacityConfig{
+            .nodeCapacity = 4,
+            .rootCapacity = 1,
+            .paintSnapshotCapacity = 2,
+            .textByteCapacity = 32,
+        });
+    ASSERT_NE(localContext, nullptr);
+    auto localRoot = createRoot(*localContext);
+    ASSERT_TRUE(localRoot.hasValue());
+    auto localUpdater = createUpdater(*localContext, localRoot);
+    assertOk(localUpdater.setLayoutStyle(localRoot.rootNodeId(), fixedSize(120.0F, 40.0F)));
+    auto textEditResult = localUpdater.createElement(
+        localRoot.rootNodeId(), UI::makeTextEditElement());
+    ASSERT_TRUE(textEditResult.has_value());
+    const UI::UINodeId textEdit = *textEditResult;
+    assertOk(localUpdater.setLayoutStyle(textEdit, fixedSize(100.0F, 24.0F)));
+    assertOk(localUpdater.setText(textEdit, "A"));
+    assertOk(localContext->commitLayout({.width = 120.0F, .height = 40.0F}));
+    assertOk(localContext->requestFocus(textEdit));
+    assertOk(localUpdater.setTextSelection(textEdit, {.anchorCodepoint = 1, .caretCodepoint = 1}));
+    assertOk(localContext->commitLayout({.width = 120.0F, .height = 40.0F}));
+    const std::optional<UI::UILogicalRect> published =
+        localContext->committedTextInputCaretRect();
+    ASSERT_TRUE(published.has_value());
+
+    assertOk(localUpdater.setText(textEdit, "AB"));
+    assertOk(localUpdater.setTextSelection(textEdit, {.anchorCodepoint = 2, .caretCodepoint = 2}));
+    const Core::Status rejected =
+        localContext->commitLayout({.width = 120.0F, .height = 40.0F});
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::CapacityExceeded);
+    EXPECT_EQ(localContext->committedTextInputCaretRect(), published);
+}
+
 } // namespace
 } // namespace Tina::Tests

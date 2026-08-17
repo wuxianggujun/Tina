@@ -55,11 +55,13 @@ namespace {
 } // namespace
 
 UIMotionTrackStorage::UIMotionTrackStorage(usize trackCapacity, std::pmr::memory_resource& resource)
-    : tracks_(&resource), freeList_(&resource), availableCount_(trackCapacity), lastCompleted_(&resource)
+    : tracks_(&resource), freeList_(&resource), availableCount_(trackCapacity),
+      lastCompleted_(&resource), candidateStyleActivationSlots_(&resource)
 {
     tracks_.resize(trackCapacity);
     freeList_.resize(trackCapacity, InvalidSlot);
     lastCompleted_.reserve(trackCapacity);
+    candidateStyleActivationSlots_.reserve(trackCapacity);
     if (trackCapacity == 0) {
         return;
     }
@@ -231,6 +233,8 @@ Core::Status UIMotionTrackStorage::beginOrRetargetCommon(
     }
 
     if (Track* existing = findOccupied(node, property); existing != nullptr) {
+        discardCandidateSample();
+        existing = findOccupied(node, property);
         existing->startTime = now;
         existing->duration = spec.duration;
         existing->delay = spec.delay;
@@ -241,11 +245,12 @@ Core::Status UIMotionTrackStorage::beginOrRetargetCommon(
         return Core::success();
     }
 
-    const u32 slot = allocateSlot();
-    if (slot == InvalidSlot) {
+    if (freeHead_ == InvalidSlot) {
         return Core::failure(UIErrorCode::CapacityExceeded,
                              "UI motion track capacity has been exhausted");
     }
+    discardCandidateSample();
+    const u32 slot = allocateSlot();
     Track& track = tracks_[slot];
     track = {};
     track.occupied = true;
@@ -330,6 +335,8 @@ Core::Status UIMotionTrackStorage::reservePersistent(UINodeId node, UIAnimatable
     }
     if (Track* existing = findOccupied(node, property); existing != nullptr)
     {
+        discardCandidateSample();
+        existing = findOccupied(node, property);
         if (!existing->persistentReservation)
         {
             existing->persistentReservation = true;
@@ -339,11 +346,12 @@ Core::Status UIMotionTrackStorage::reservePersistent(UINodeId node, UIAnimatable
         return Core::success();
     }
 
-    const u32 slot = allocateSlot();
-    if (slot == InvalidSlot)
+    if (freeHead_ == InvalidSlot)
     {
         return Core::failure(UIErrorCode::CapacityExceeded, "UI motion track capacity has been exhausted");
     }
+    discardCandidateSample();
+    const u32 slot = allocateSlot();
     Track& track = tracks_[slot];
     track = {};
     track.node = node;
@@ -371,6 +379,31 @@ Core::Status UIMotionTrackStorage::activateReservedStyleColor(UINodeId node, UIS
         return Core::failure(UIErrorCode::CapacityExceeded,
                              "UI style motion track was not reserved during style binding");
     }
+    if (candidateSamplePending_)
+    {
+        const u32 slot = static_cast<u32>(track - tracks_.data());
+        if (!track->hasCandidateStyleActivation)
+        {
+            if (candidateStyleActivationSlots_.size() >=
+                candidateStyleActivationSlots_.capacity())
+            {
+                return Core::failure(
+                    UIErrorCode::CapacityExceeded,
+                    "UI style motion candidate activation capacity has been exhausted");
+            }
+            candidateStyleActivationSlots_.push_back(slot);
+            track->hasCandidateStyleActivation = true;
+        }
+        track->candidateStyleStartColor = start;
+        track->candidateStyleTargetColor = target;
+        track->candidateStyleStartTime = now;
+        track->candidateStyleDuration = spec.duration;
+        track->candidateStyleDelay = spec.delay;
+        track->candidateStyleEasing = spec.easing;
+        return Core::success();
+    }
+    discardCandidateSample();
+    track = findOccupied(node, UIAnimatableProperty::BackgroundColor);
     track->startColor = start;
     track->targetColor = target;
     track->presentationColor = start;
@@ -401,6 +434,8 @@ void UIMotionTrackStorage::releasePersistentReservation(UINodeId node, UIAnimata
     {
         return;
     }
+    discardCandidateSample();
+    track = findOccupied(node, property);
     track->persistentReservation = false;
     if (reservedCount_ > 0)
     {
@@ -414,6 +449,7 @@ void UIMotionTrackStorage::releasePersistentReservation(UINodeId node, UIAnimata
 
 void UIMotionTrackStorage::releaseAllPersistentReservations(UIAnimatableProperty property) noexcept
 {
+    discardCandidateSample();
     for (u32 slot = 0; slot < tracks_.size(); ++slot)
     {
         Track& track = tracks_[slot];
@@ -440,6 +476,8 @@ void UIMotionTrackStorage::cancelActiveProperty(UINodeId node, UIAnimatablePrope
     {
         return;
     }
+    discardCandidateSample();
+    track = findOccupied(node, property);
     const u32 slot = static_cast<u32>(track - tracks_.data());
     if (track->active)
     {
@@ -453,6 +491,7 @@ void UIMotionTrackStorage::cancelActiveProperty(UINodeId node, UIAnimatablePrope
 
 void UIMotionTrackStorage::snapAllActive() noexcept
 {
+    discardCandidateSample();
     lastCompleted_.clear();
     for (u32 slot = activeHead_; slot != InvalidSlot;) {
         Track& track = tracks_[slot];
@@ -495,6 +534,7 @@ void UIMotionTrackStorage::releaseNode(UINodeId node) noexcept
     if (!node.hasValue()) {
         return;
     }
+    discardCandidateSample();
     for (u32 slot = 0; slot < tracks_.size(); ++slot)
     {
         Track& track = tracks_[slot];
@@ -511,6 +551,7 @@ void UIMotionTrackStorage::releaseProperty(UINodeId node, UIAnimatableProperty p
     {
         return;
     }
+    discardCandidateSample();
     for (u32 slot = 0; slot < tracks_.size(); ++slot)
     {
         Track& track = tracks_[slot];
@@ -526,52 +567,122 @@ std::span<const UIMotionTrackStorage::Completed> UIMotionTrackStorage::lastCompl
     return lastCompleted_;
 }
 
-usize UIMotionTrackStorage::sample(Core::MonotonicTimePoint now) noexcept
+void UIMotionTrackStorage::beginCandidateSample(Core::MonotonicTimePoint now) noexcept
 {
+    rollbackCandidateSample();
     lastCompleted_.clear();
     usize sampled = 0;
+    if (activeHead_ == InvalidSlot && candidateStyleActivationSlots_.empty())
+    {
+        lastSampledCount_ = 0;
+        return;
+    }
+    candidateSamplePending_ = true;
     for (u32 slot = activeHead_; slot != InvalidSlot;) {
         Track& track = tracks_[slot];
         const u32 next = track.nextActive;
         ++sampled;
         const float linear = progressAt(track, now);
         const float eased = evaluateUIEasing(track.easing, linear);
+        switch (track.valueKind) {
+        case ValueKind::Color:
+            track.candidatePresentationColor =
+                lerpStraightSrgba8(track.startColor, track.targetColor, eased);
+            if (linear >= 1.0F) {
+                track.candidatePresentationColor = track.targetColor;
+            }
+            break;
+        case ValueKind::Scalar:
+            track.candidatePresentationScalar =
+                lerpFloat(track.startScalar, track.targetScalar, eased);
+            if (linear >= 1.0F) {
+                track.candidatePresentationScalar = track.targetScalar;
+            }
+            break;
+        case ValueKind::Offset:
+            track.candidatePresentationOffset = {
+                .x = lerpFloat(track.startOffset.x, track.targetOffset.x, eased),
+                .y = lerpFloat(track.startOffset.y, track.targetOffset.y, eased),
+            };
+            if (linear >= 1.0F) {
+                track.candidatePresentationOffset = track.targetOffset;
+            }
+            break;
+        }
+        track.hasCandidatePresentation = true;
+        track.candidateCompleted = linear >= 1.0F;
+        slot = next;
+    }
+    for (const u32 slot : candidateStyleActivationSlots_)
+    {
+        if (slot >= tracks_.size())
+        {
+            continue;
+        }
+        Track& track = tracks_[slot];
+        if (!track.occupied || !track.hasCandidateStyleActivation)
+        {
+            continue;
+        }
+        if (track.hasCandidatePresentation)
+        {
+            track.candidateStyleStartColor = track.candidatePresentationColor;
+        }
+        track.candidateStyleStartTime = now;
+    }
+    lastSampledCount_ = sampled;
+}
+
+void UIMotionTrackStorage::ensureCandidateTransaction() noexcept
+{
+    candidateSamplePending_ = true;
+}
+
+void UIMotionTrackStorage::commitCandidateSample() noexcept
+{
+    if (!candidateSamplePending_)
+    {
+        return;
+    }
+    lastCompleted_.clear();
+    for (u32 slot = activeHead_; slot != InvalidSlot;)
+    {
+        Track& track = tracks_[slot];
+        const u32 next = track.nextActive;
+        if (!track.hasCandidatePresentation)
+        {
+            slot = next;
+            continue;
+        }
         Completed completed{
             .node = track.node,
             .property = track.property,
             .valueKind = track.valueKind,
             .completionMode = track.completionMode,
         };
-        switch (track.valueKind) {
+        switch (track.valueKind)
+        {
         case ValueKind::Color:
-            track.presentationColor =
-                lerpStraightSrgba8(track.startColor, track.targetColor, eased);
-            if (linear >= 1.0F) {
-                track.presentationColor = track.targetColor;
-                completed.color = track.targetColor;
-            }
+            track.presentationColor = track.candidatePresentationColor;
+            completed.color = track.candidatePresentationColor;
             break;
         case ValueKind::Scalar:
-            track.presentationScalar =
-                lerpFloat(track.startScalar, track.targetScalar, eased);
-            if (linear >= 1.0F) {
-                track.presentationScalar = track.targetScalar;
-                completed.scalar = track.targetScalar;
-            }
+            track.presentationScalar = track.candidatePresentationScalar;
+            completed.scalar = track.candidatePresentationScalar;
             break;
         case ValueKind::Offset:
-            track.presentationOffset = {
-                .x = lerpFloat(track.startOffset.x, track.targetOffset.x, eased),
-                .y = lerpFloat(track.startOffset.y, track.targetOffset.y, eased),
-            };
-            if (linear >= 1.0F) {
-                track.presentationOffset = track.targetOffset;
-                completed.offset = track.targetOffset;
-            }
+            track.presentationOffset = track.candidatePresentationOffset;
+            completed.offset = track.candidatePresentationOffset;
             break;
         }
-        if (linear >= 1.0F) {
-            if (lastCompleted_.size() < lastCompleted_.capacity()) {
+        const bool completedNow =
+            track.candidateCompleted && !track.hasCandidateStyleActivation;
+        track.hasCandidatePresentation = false;
+        track.candidateCompleted = false;
+        if (completedNow)
+        {
+            if (lastCompleted_.size() < lastCompleted_.capacity())
+            {
                 lastCompleted_.push_back(completed);
             }
             unlinkActive(slot);
@@ -582,7 +693,68 @@ usize UIMotionTrackStorage::sample(Core::MonotonicTimePoint now) noexcept
         }
         slot = next;
     }
-    lastSampledCount_ = sampled;
+    for (const u32 slot : candidateStyleActivationSlots_)
+    {
+        if (slot >= tracks_.size())
+        {
+            continue;
+        }
+        Track& track = tracks_[slot];
+        if (!track.occupied || !track.hasCandidateStyleActivation)
+        {
+            continue;
+        }
+        track.startColor = track.candidateStyleStartColor;
+        track.targetColor = track.candidateStyleTargetColor;
+        track.presentationColor = track.candidateStyleStartColor;
+        track.startTime = track.candidateStyleStartTime;
+        track.duration = track.candidateStyleDuration;
+        track.delay = track.candidateStyleDelay;
+        track.easing = track.candidateStyleEasing;
+        track.completionMode = CompletionMode::StylePresentationOnly;
+        track.hasCandidateStyleActivation = false;
+        linkActive(slot);
+    }
+    candidateStyleActivationSlots_.clear();
+    candidateSamplePending_ = false;
+}
+
+void UIMotionTrackStorage::rollbackCandidateSample() noexcept
+{
+    if (!candidateSamplePending_)
+    {
+        return;
+    }
+    for (u32 slot = activeHead_; slot != InvalidSlot; slot = tracks_[slot].nextActive)
+    {
+        tracks_[slot].hasCandidatePresentation = false;
+        tracks_[slot].candidateCompleted = false;
+    }
+    candidateSamplePending_ = false;
+}
+
+void UIMotionTrackStorage::discardCandidateSample() noexcept
+{
+    rollbackCandidateSample();
+    for (const u32 slot : candidateStyleActivationSlots_)
+    {
+        if (slot < tracks_.size())
+        {
+            tracks_[slot].hasCandidateStyleActivation = false;
+        }
+    }
+    candidateStyleActivationSlots_.clear();
+}
+
+bool UIMotionTrackStorage::hasCandidateSample() const noexcept
+{
+    return candidateSamplePending_;
+}
+
+usize UIMotionTrackStorage::sample(Core::MonotonicTimePoint now) noexcept
+{
+    beginCandidateSample(now);
+    commitCandidateSample();
     return activeCount_;
 }
 
@@ -603,30 +775,68 @@ UIMotionTrackStorage::presentationFor(UINodeId node) const noexcept
         switch (track.property) {
         case UIAnimatableProperty::BackgroundColor:
             presentation.hasBackgroundColor = true;
-            presentation.backgroundColor = track.presentationColor;
+            presentation.backgroundColor =
+                candidateSamplePending_ && track.hasCandidateStyleActivation
+                    ? track.candidateStyleStartColor
+                : candidateSamplePending_ && track.hasCandidatePresentation
+                    ? track.candidatePresentationColor
+                    : track.presentationColor;
             break;
         case UIAnimatableProperty::BorderColor:
             presentation.hasBorderColor = true;
-            presentation.borderColor = track.presentationColor;
+            presentation.borderColor = candidateSamplePending_ && track.hasCandidatePresentation
+                                           ? track.candidatePresentationColor
+                                           : track.presentationColor;
             break;
         case UIAnimatableProperty::TextColor:
             presentation.hasTextColor = true;
-            presentation.textColor = track.presentationColor;
+            presentation.textColor = candidateSamplePending_ && track.hasCandidatePresentation
+                                         ? track.candidatePresentationColor
+                                         : track.presentationColor;
             break;
         case UIAnimatableProperty::Opacity:
             presentation.hasOpacity = true;
-            presentation.opacity = track.presentationScalar;
+            presentation.opacity = candidateSamplePending_ && track.hasCandidatePresentation
+                                       ? track.candidatePresentationScalar
+                                       : track.presentationScalar;
             break;
         case UIAnimatableProperty::CornerRadius:
             presentation.hasCornerRadius = true;
-            presentation.cornerRadius = track.presentationScalar;
+            presentation.cornerRadius = candidateSamplePending_ && track.hasCandidatePresentation
+                                            ? track.candidatePresentationScalar
+                                            : track.presentationScalar;
             break;
         case UIAnimatableProperty::VisualOffset:
             presentation.hasVisualOffset = true;
-            presentation.visualOffset = track.presentationOffset;
+            presentation.visualOffset = candidateSamplePending_ && track.hasCandidatePresentation
+                                            ? track.candidatePresentationOffset
+                                            : track.presentationOffset;
+            break;
+        case UIAnimatableProperty::LayoutWidth:
+        case UIAnimatableProperty::LayoutHeight:
+        case UIAnimatableProperty::LayoutOffset:
+            // Direct UI-MOTION-001 tracks remain paint-only. Layout properties
+            // are owned exclusively by keyframe timelines.
             break;
         }
         slot = next;
+    }
+    if (candidateSamplePending_)
+    {
+        for (const u32 slot : candidateStyleActivationSlots_)
+        {
+            if (slot >= tracks_.size())
+            {
+                continue;
+            }
+            const Track& track = tracks_[slot];
+            if (track.occupied && track.hasCandidateStyleActivation &&
+                track.node == node)
+            {
+                presentation.hasBackgroundColor = true;
+                presentation.backgroundColor = track.candidateStyleStartColor;
+            }
+        }
     }
     return presentation;
 }
