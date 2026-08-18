@@ -46,6 +46,9 @@
 #include "detail/UISplitViewInput.hpp"
 #include "detail/UISplitViewLayout.hpp"
 #include "detail/UISplitViewStateStorage.hpp"
+#include "detail/UITabViewInput.hpp"
+#include "detail/UITabViewLayout.hpp"
+#include "detail/UITabViewStateStorage.hpp"
 #include "detail/UIStyleRoleResolver.hpp"
 #include "detail/UIStyleSheetStorage.hpp"
 #include "detail/UIThemeTransitionResolver.hpp"
@@ -211,6 +214,12 @@ using Detail::PopupState;
 using Detail::TooltipLayoutScratch;
 using Detail::TooltipState;
 using Detail::UISplitViewStateStorage;
+using Detail::UITabViewStateStorage;
+using Detail::UITabViewRegions;
+using Detail::TabViewState;
+using Detail::TabState;
+using Detail::isValidTabViewCommand;
+using Detail::resolveTabViewRegions;
 using Detail::ProgressBarState;
 using Detail::RadioButtonState;
 using Detail::supportsWidgetText;
@@ -227,6 +236,7 @@ using Detail::ThemeBindingRadioButtonPaint;
 using Detail::ThemeBindingScrollViewPaint;
 using Detail::ThemeBindingSliderPaint;
 using Detail::ThemeBindingTextEditPaint;
+using Detail::ThemeBindingTabPaint;
 using Detail::ThemeBindingTextStyle;
 using Detail::ThemeBindingTreeViewPaint;
 using Detail::UIPointerRouteInspectionError;
@@ -752,6 +762,7 @@ struct UIContext::Impl final {
     std::pmr::vector<PopupLayoutScratch> popupLayoutScratchByNodeIndex;
     Detail::UITooltipStateStorage tooltipStorage;
     UISplitViewStateStorage splitViewStorage;
+    UITabViewStateStorage tabViewStorage;
     std::pmr::vector<ListViewState> listViewStatesByNodeIndex;
     std::pmr::vector<ListViewLayoutScratch> listViewLayoutScratchByNodeIndex;
     std::pmr::vector<ListViewItemState> listViewItemStatesByNodeIndex;
@@ -882,6 +893,10 @@ struct UIContext::Impl final {
         treeViewCommandPressLatch;
     Detail::UICommandPressLatch<UIFocusNavigationDirection, UIFocusNavigationDirection::Down>
         focusNavigationPressLatch;
+    Detail::UICommandPressLatch<UITabViewCommand, UITabViewCommand::Last>
+        tabViewCommandPressLatch;
+    Detail::UICommandPressLatch<UIFocusNavigationDirection, UIFocusNavigationDirection::Down>
+        tabViewDirectionPressLatch;
     bool armedTreeDisclosure = false;
     bool popupDismissPointerBarrierActive = false;
     UINodeId pendingDestroyedModalRestoreFocus{};
@@ -952,6 +967,7 @@ struct UIContext::Impl final {
           popupLayoutScratchByNodeIndex(&resource),
           tooltipStorage(capacities.nodeCapacity, resource),
           splitViewStorage(capacities.nodeCapacity, resource),
+          tabViewStorage(capacities.nodeCapacity, resource),
           listViewStatesByNodeIndex(&resource),
           listViewLayoutScratchByNodeIndex(&resource), listViewItemStatesByNodeIndex(&resource),
           treeViewStatesByNodeIndex(&resource), treeViewLayoutScratchByNodeIndex(&resource),
@@ -1354,6 +1370,16 @@ struct UIContext::Impl final {
             {
                 ownVisibility = UIVisibility::Collapsed;
             }
+            if (record->kind != BuiltinElementKind::TabView &&
+                record->kind != BuiltinElementKind::Tab)
+            {
+                const UINodeId tabView = tabViewStorage.tabViewForPanel(idForIndex(index));
+                if (tabView.hasValue() &&
+                    tabViewStorage.activePanel(tabView) != idForIndex(index))
+                {
+                    ownVisibility = UIVisibility::Collapsed;
+                }
+            }
             LayoutScratchState& scratch = layoutScratchByIndex[index];
             const LayoutPreparedInputs previous = scratch.preparedInputs;
             if (!allowReuse)
@@ -1480,7 +1506,66 @@ struct UIContext::Impl final {
                 childIndex = childRecord->nextSiblingIndex;
             }
 
+            std::optional<UILogicalSize> tabViewContentSize;
+            if (record->kind == BuiltinElementKind::TabView &&
+                tabViewStorage.relationshipValid(idForIndex(index)))
+            {
+                tabViewContentSize = UILogicalSize{};
+                const UITabViewConfig& tabConfig =
+                    tabViewStorage.tryTabView(idForIndex(index))->config;
+                const bool horizontal = tabConfig.placement == UITabViewPlacement::Top ||
+                                        tabConfig.placement == UITabViewPlacement::Bottom;
+                float stripMain = 0.0F;
+                float stripCross = 0.0F;
+                u32 stripCount = 0;
+                const u32 itemCount = tabViewStorage.itemCount(idForIndex(index));
+                for (u32 itemIndex = 0; itemIndex < itemCount; ++itemIndex)
+                {
+                    const UITabViewItem item = tabViewStorage.itemAt(idForIndex(index), itemIndex);
+                    if (!item.hasValue())
+                    {
+                        continue;
+                    }
+                    const LayoutScratchState& tabScratch = layoutScratchByIndex[item.tab.index()];
+                    const float main = horizontal ? tabScratch.measuredSize.width
+                                                  : tabScratch.measuredSize.height;
+                    const float cross = horizontal ? tabScratch.measuredSize.height
+                                                   : tabScratch.measuredSize.width;
+                    stripMain += (std::max)(0.0F, main);
+                    stripCross = (std::max)(stripCross, (std::max)(0.0F, cross));
+                    ++stripCount;
+                }
+                if (stripCount > 1)
+                {
+                    stripMain += tabConfig.tabGap * static_cast<float>(stripCount - 1U);
+                }
+                const UINodeId panel = tabViewStorage.activePanel(idForIndex(index));
+                const LayoutScratchState* panelScratch =
+                    panel.hasValue() ? &layoutScratchByIndex[panel.index()] : nullptr;
+                const UILogicalSize panelSize = panelScratch != nullptr ? panelScratch->measuredSize
+                                                                          : UILogicalSize{};
+                if (horizontal)
+                {
+                    tabViewContentSize->width = (std::max)(stripMain, panelSize.width);
+                    tabViewContentSize->height = stripCross +
+                                                 (stripCross > 0.0F ? tabConfig.contentGap : 0.0F) +
+                                                 panelSize.height;
+                }
+                else
+                {
+                    tabViewContentSize->width = stripCross +
+                                                (stripCross > 0.0F ? tabConfig.contentGap : 0.0F) +
+                                                panelSize.width;
+                    tabViewContentSize->height = (std::max)(stripMain, panelSize.height);
+                }
+                flowMeasurement.childCount = 1;
+            }
+
             LayoutNodeMeasureContent content{.size = flowMeasurement.contentSize};
+            if (tabViewContentSize.has_value())
+            {
+                content.size = *tabViewContentSize;
+            }
             if (flowMeasurement.childCount == 0)
             {
                 if (const UIImageContent* image = imageContentStorage.get(index); image != nullptr)
@@ -2121,6 +2206,11 @@ struct UIContext::Impl final {
             {
                 splitViewStorage.layoutScratchByIndex(parentIndex) = {};
             }
+            if (parentRecord->kind == BuiltinElementKind::TabView &&
+                parentIndex < tabViewStorage.capacity())
+            {
+                tabViewStorage.layoutScratchByIndex(parentIndex) = {};
+            }
             if (parentRecord->kind == BuiltinElementKind::ListView && parentIndex < listViewLayoutScratchByNodeIndex.size())
             {
                 listViewLayoutScratchByNodeIndex[parentIndex] = {};
@@ -2158,6 +2248,84 @@ struct UIContext::Impl final {
         {
             return arrangeTreeViewItems(parentIndex, unscrolledContentRect, parentWorldRect,
                                         intersectRects(parentScratch.descendantClip, parentScratch.worldRect));
+        }
+        if (parentRecord->kind == BuiltinElementKind::TabView)
+        {
+            const UINodeId tabView = idForIndex(parentIndex);
+            const TabViewState* state = tabViewStorage.tryTabView(tabView);
+            if (state == nullptr)
+            {
+                return fail(Core::CoreErrorCode::Internal,
+                            "UI TabView is missing retained state");
+            }
+            tabViewStorage.layoutScratchByIndex(parentIndex).metrics = UITabViewMetrics{
+                .placement = state->config.placement,
+            };
+            // An unlinked TabView falls through to ordinary child layout with
+            // cleared candidate metrics.
+            if (tabViewStorage.relationshipValid(tabView))
+            {
+                const bool horizontal = state->config.placement == UITabViewPlacement::Top ||
+                                        state->config.placement == UITabViewPlacement::Bottom;
+                float stripExtent = 0.0F;
+                const u32 itemCount = tabViewStorage.itemCount(tabView);
+                for (u32 itemIndex = 0; itemIndex < itemCount; ++itemIndex)
+                {
+                    const UITabViewItem item = tabViewStorage.itemAt(tabView, itemIndex);
+                    if (!item.hasValue())
+                    {
+                        continue;
+                    }
+                    const UILogicalSize measured = layoutScratchByIndex[item.tab.index()].measuredSize;
+                    stripExtent = (std::max)(stripExtent, horizontal ? measured.height : measured.width);
+                }
+                const UITabViewRegions regions = resolveTabViewRegions(
+                    unscrolledContentRect, state->config.placement, stripExtent,
+                    state->config.contentGap);
+                UILogicalRect stripCursor = regions.tabStripRect;
+                for (u32 itemIndex = 0; itemIndex < itemCount; ++itemIndex)
+                {
+                    const UITabViewItem item = tabViewStorage.itemAt(tabView, itemIndex);
+                    if (!item.hasValue())
+                    {
+                        continue;
+                    }
+                    const UILogicalSize measured = layoutScratchByIndex[item.tab.index()].measuredSize;
+                    UILogicalRect tabRect = regions.tabStripRect;
+                    if (horizontal)
+                    {
+                        tabRect.x = stripCursor.x;
+                        tabRect.width = (std::max)(0.0F, measured.width);
+                        stripCursor.x = normalizeFloat(stripCursor.x + tabRect.width + state->config.tabGap);
+                    }
+                    else
+                    {
+                        tabRect.y = stripCursor.y;
+                        tabRect.height = (std::max)(0.0F, measured.height);
+                        stripCursor.y = normalizeFloat(stripCursor.y + tabRect.height + state->config.tabGap);
+                    }
+                    assignLayoutRect(item.tab.index(), tabRect, parentWorldRect, descendantClip);
+                }
+                const UINodeId activePanel = tabViewStorage.activePanel(tabView);
+                if (activePanel.hasValue())
+                {
+                    assignLayoutRect(activePanel.index(), regions.panelRect,
+                                     parentWorldRect, descendantClip);
+                }
+                tabViewStorage.layoutScratchByIndex(parentIndex).metrics = UITabViewMetrics{
+                    .tabStripRect = regions.tabStripRect,
+                    .activePanelRect = regions.panelRect,
+                    .activeTab = tabViewStorage.activeTab(tabView),
+                    .activePanel = activePanel,
+                    .activeIndex = [&]() noexcept {
+                        const TabState* active = tabViewStorage.tryTab(tabViewStorage.activeTab(tabView));
+                        return active != nullptr ? active->ordinal : 0U;
+                    }(),
+                    .itemCount = itemCount,
+                    .placement = state->config.placement,
+                };
+                return Core::success();
+            }
         }
         if (parentRecord->kind == BuiltinElementKind::SplitView)
         {
@@ -2584,6 +2752,40 @@ struct UIContext::Impl final {
             }
             return widgetPaintColor(node, color);
         }
+        if (record != nullptr && record->kind == BuiltinElementKind::Tab &&
+            nodeIndex < tabViewStorage.capacity())
+        {
+            const UITabPaint& paint = tabViewStorage.tabPaintByIndex(nodeIndex);
+            const UINodeId tabView = tabViewStorage.tabViewForTab(node);
+            const bool selected = tabView.hasValue() && tabViewStorage.activeTab(tabView) == node;
+            const auto applyOverride = [&color](UIStraightSrgba8Color overrideColor) noexcept {
+                if (overrideColor.alpha != 0)
+                {
+                    color = premultiply(overrideColor);
+                }
+            };
+            if (selected)
+            {
+                applyOverride(paint.selectedBackgroundColor);
+            }
+            if (!selected && defaultActionFocusButton == node)
+            {
+                applyOverride(paint.focusedBackgroundColor);
+            }
+            if (!selected && hoveredPrimaryControl == node)
+            {
+                applyOverride(paint.hoveredBackgroundColor);
+            }
+            if (isButtonPressed(node))
+            {
+                applyOverride(paint.pressedBackgroundColor);
+            }
+            if (!isNodeEnabled(node))
+            {
+                applyOverride(paint.disabledBackgroundColor);
+            }
+            return widgetPaintColor(node, color);
+        }
         if (record != nullptr && record->kind == BuiltinElementKind::TextEdit &&
             nodeIndex < textEditPaintsByNodeIndex.size())
         {
@@ -2658,6 +2860,10 @@ struct UIContext::Impl final {
         {
             relevantOverrides |= static_cast<u16>(UIStyleOverride::TextEditPaint);
         }
+        else if (record.kind == BuiltinElementKind::Tab)
+        {
+            relevantOverrides |= static_cast<u16>(UIStyleOverride::TabPaint);
+        }
         else if (isButtonChromeKind(record.kind))
         {
             relevantOverrides |= static_cast<u16>(UIStyleOverride::ButtonPaint);
@@ -2711,7 +2917,10 @@ struct UIContext::Impl final {
             (record->kind == BuiltinElementKind::ListViewItem &&
              isSelectedListViewItem(node)) ||
             (record->kind == BuiltinElementKind::TreeViewItem &&
-             isSelectedTreeViewItem(node)))
+             isSelectedTreeViewItem(node)) ||
+            (record->kind == BuiltinElementKind::Tab &&
+             tabViewStorage.tabViewForTab(node).hasValue() &&
+             tabViewStorage.activeTab(tabViewStorage.tabViewForTab(node)) == node))
         {
             states |= UIStyleState::Selected;
         }
@@ -3031,7 +3240,11 @@ struct UIContext::Impl final {
         }
 
         UIStraightSrgba8Color focusedBorderColor{};
-        if (isButtonChromeKind(record->kind) && nodeIndex < buttonPaintsByNodeIndex.size())
+        if (record->kind == BuiltinElementKind::Tab && nodeIndex < tabViewStorage.capacity())
+        {
+            focusedBorderColor = tabViewStorage.tabPaintByIndex(nodeIndex).focusedBorderColor;
+        }
+        else if (isButtonChromeKind(record->kind) && nodeIndex < buttonPaintsByNodeIndex.size())
         {
             focusedBorderColor = buttonPaintsByNodeIndex[nodeIndex].focusedBorderColor;
         }
@@ -4097,6 +4310,17 @@ struct UIContext::Impl final {
         if (record->kind == BuiltinElementKind::Dropdown && nodeIndex < dropdownStatesByNodeIndex.size())
         {
             entry.focused = enabled && defaultActionFocusButton == node;
+        } else if (record->kind == BuiltinElementKind::Tab &&
+                   tabViewStorage.tabViewForTab(node).hasValue())
+        {
+            const UINodeId owner = tabViewStorage.tabViewForTab(node);
+            entry.selected = tabViewStorage.activeTab(owner) == node;
+            entry.focused = enabled && defaultActionFocusButton == node;
+        } else if (tabViewStorage.tabViewForPanel(node).hasValue())
+        {
+            // Association promotes an ordinary retained content node to the
+            // TabPanel semantic role without creating a second node/state.
+            entry.role = UISemanticsRole::TabPanel;
         } else if (record->kind == BuiltinElementKind::DropdownItem)
         {
             entry.selected = isSelectedDropdownItem(node);
@@ -5158,6 +5382,7 @@ struct UIContext::Impl final {
         }
         tooltipStorage.resetNode(index);
         splitViewStorage.resetNode(index);
+        tabViewStorage.resetNode(index);
         if (index < listViewStatesByNodeIndex.size())
         {
             listViewStatesByNodeIndex[index] = {};
@@ -5729,6 +5954,7 @@ struct UIContext::Impl final {
             .listView = listViewStatesByNodeIndex[index].paint,
             .treeView = treeViewStatesByNodeIndex[index].paint,
             .textEdit = textEditPaintsByNodeIndex[index],
+            .tab = tabViewStorage.tabPaintByIndex(index),
         };
     }
 
@@ -7752,6 +7978,17 @@ struct UIContext::Impl final {
         {
             motionTrackStorage.releasePersistentReservation(node, UIAnimatableProperty::BackgroundColor);
         }
+        // Tab chrome lives with the dedicated relationship state. Initialize it
+        // before applying role chrome so the theme transition is not reset below.
+        if (kind == BuiltinElementKind::Tab)
+        {
+            if (!descriptor.tab.has_value())
+            {
+                return fail(Core::CoreErrorCode::Internal,
+                            "UI Tab is missing its retained configuration");
+            }
+            tabViewStorage.initializeTab(node, *descriptor.tab);
+        }
         const u16 previousBindings = themeBindingsByNodeIndex[node.index()];
         const u16 nextBindings = capacityConfig.applyDefaultProductChrome
                                      ? defaultThemeBindingsFor(descriptor.visual.styleRole)
@@ -7814,6 +8051,15 @@ struct UIContext::Impl final {
                             "UI SplitView is missing its retained configuration");
             }
             splitViewStorage.initializeSplitView(node, *descriptor.splitView);
+        }
+        if (kind == BuiltinElementKind::TabView)
+        {
+            if (!descriptor.tabView.has_value())
+            {
+                return fail(Core::CoreErrorCode::Internal,
+                            "UI TabView is missing its retained configuration");
+            }
+            tabViewStorage.initializeTabView(node, *descriptor.tabView);
         }
         if (kind == BuiltinElementKind::Splitter)
         {
@@ -8165,16 +8411,31 @@ struct UIContext::Impl final {
         }
         NodeRecord& parentRecord = **parentResult;
         if (parentRecord.kind == BuiltinElementKind::Tooltip ||
-            parentRecord.kind == BuiltinElementKind::Splitter)
+            parentRecord.kind == BuiltinElementKind::Splitter ||
+            parentRecord.kind == BuiltinElementKind::Tab)
         {
             return fail(UIErrorCode::InvalidParent,
-                        "UI Tooltip and Splitter elements cannot own child elements");
+                        "UI Tooltip, Tab, and Splitter elements cannot own child elements");
         }
         if (kind == BuiltinElementKind::Splitter &&
             parentRecord.kind != BuiltinElementKind::SplitView)
         {
             return fail(UIErrorCode::InvalidParent,
                         "UI Splitter requires a SplitView parent");
+        }
+        if (kind == BuiltinElementKind::Tab &&
+            parentRecord.kind != BuiltinElementKind::TabView)
+        {
+            return fail(UIErrorCode::InvalidParent,
+                        "UI Tab requires a TabView parent");
+        }
+        if (parentRecord.kind == BuiltinElementKind::TabView &&
+            tabViewStorage.relationshipValid(parent))
+        {
+            // Authoring may append children after an initial relationship was
+            // published. Invalidate the old pair list before structure mutation;
+            // callers must submit a new complete pair list before the next commit.
+            tabViewStorage.unlinkTabView(parent);
         }
         if (parentRecord.kind == BuiltinElementKind::SplitView)
         {
@@ -8238,6 +8499,11 @@ struct UIContext::Impl final {
             {
                 return fail(UIErrorCode::InvalidParent, "UI TreeViewItem requires a TreeView parent");
             }
+        } else if (parentRecord.kind == BuiltinElementKind::TabView &&
+                   kind == BuiltinElementKind::TabView)
+        {
+            return fail(UIErrorCode::InvalidParent,
+                        "UI TabView cannot directly contain another TabView");
         } else if (parentRecord.kind == BuiltinElementKind::Dropdown || parentRecord.kind == BuiltinElementKind::Popup)
         {
             return fail(UIErrorCode::InvalidParent,
@@ -9190,6 +9456,7 @@ struct UIContext::Impl final {
                 markTooltipPresentationDirty();
             }
             static_cast<void>(splitViewStorage.releaseNode(node));
+            static_cast<void>(tabViewStorage.releaseNode(node));
             if (record->kind == BuiltinElementKind::Modal)
             {
                 hardDismissAllTooltipsNoFail(true);
@@ -12127,6 +12394,768 @@ struct UIContext::Impl final {
         return isSplitterDraggingFromUpdater(root, splitter);
     }
 
+    [[nodiscard]] Core::Result<NodeRecord*> resolveTabView(UINodeId tabView)
+    {
+        auto nodeResult = resolveNode(tabView);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        if ((*nodeResult)->kind != BuiltinElementKind::TabView ||
+            !tabViewStorage.containsTabView(tabView))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI TabView API requires a TabView node");
+        }
+        return *nodeResult;
+    }
+
+    [[nodiscard]] Core::Result<NodeRecord*> resolveTab(UINodeId tab)
+    {
+        auto nodeResult = resolveNode(tab);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        if ((*nodeResult)->kind != BuiltinElementKind::Tab ||
+            !tabViewStorage.containsTab(tab))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI TabView API requires a Tab node");
+        }
+        return *nodeResult;
+    }
+
+    [[nodiscard]] Core::Status validateTabViewUpdaterRoot(
+        UINodeId updaterRoot, UINodeId tabView) const
+    {
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired,
+                        "UI tree updater requires a live root owner");
+        }
+        auto tabViewResult = const_cast<Impl*>(this)->resolveTabView(tabView);
+        if (!tabViewResult)
+        {
+            return Core::failure(tabViewResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, tabView))
+        {
+            return fail(UIErrorCode::InvalidNode,
+                        "UI TabView is not owned by the updater root");
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status setTabPaintFromUpdater(
+        UINodeId updaterRoot, UINodeId tab, const UITabPaint& paint)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired,
+                        "UI tree updater requires a live root owner");
+        }
+        auto tabResult = resolveTab(tab);
+        if (!tabResult)
+        {
+            return Core::failure(tabResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, tab))
+        {
+            return fail(UIErrorCode::InvalidNode,
+                        "UI Tab is not owned by the updater root");
+        }
+        UITabPaint& current = tabViewStorage.tabPaintByIndex(tab.index());
+        if (current == paint)
+        {
+            detachThemeBinding(tab.index(), ThemeBindingTabPaint);
+            return Core::success();
+        }
+        if (Core::Status dirty = markPaintDirty(tab); !dirty)
+        {
+            return dirty;
+        }
+        current = paint;
+        detachThemeBinding(tab.index(), ThemeBindingTabPaint);
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UITabPaint> tabPaintFromUpdater(
+        UINodeId updaterRoot, UINodeId tab) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired,
+                        "UI tree updater requires a live root owner");
+        }
+        auto tabResult = const_cast<Impl*>(this)->resolveTab(tab);
+        if (!tabResult)
+        {
+            return Core::failure(tabResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, tab))
+        {
+            return fail(UIErrorCode::InvalidNode,
+                        "UI Tab is not owned by the updater root");
+        }
+        return tabViewStorage.tabPaintByIndex(tab.index());
+    }
+
+    [[nodiscard]] Core::Status setTabViewItemsFromUpdater(
+        UINodeId updaterRoot, UINodeId tabView,
+        std::span<const UITabViewItem> items, u32 activeIndex)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateTabViewUpdaterRoot(updaterRoot, tabView); !valid)
+        {
+            return valid;
+        }
+        if (items.empty())
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI TabView requires at least one tab item; use clearTabViewItems to clear it");
+        }
+        if (items.size() > tabViewStorage.capacity() ||
+            items.size() > static_cast<usize>((std::numeric_limits<u32>::max)()))
+        {
+            return fail(UIErrorCode::CapacityExceeded,
+                        "UI TabView item capacity has been exceeded");
+        }
+        if (activeIndex >= items.size())
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI TabView active index is out of range");
+        }
+
+        const NodeRecord* viewRecord = nodes.tryGet(tabView.storageId());
+        if (viewRecord == nullptr)
+        {
+            return fail(UIErrorCode::InvalidNode, "UI TabView is stale");
+        }
+        for (usize i = 0; i < items.size(); ++i)
+        {
+            const UITabViewItem item = items[i];
+            if (!item.hasValue() || item.tab == item.panel || item.tab == tabView || item.panel == tabView)
+            {
+                return fail(UIErrorCode::InvalidParent,
+                            "UI TabView items must contain distinct live tab and panel nodes");
+            }
+            auto tabResult = resolveTab(item.tab);
+            auto panelResult = resolveNode(item.panel);
+            if (!tabResult)
+            {
+                return Core::failure(tabResult.error());
+            }
+            if (!panelResult)
+            {
+                return Core::failure(panelResult.error());
+            }
+            const NodeRecord* tabRecord = *tabResult;
+            const NodeRecord* panelRecord = *panelResult;
+            if (tabRecord->rootIndex != viewRecord->rootIndex || panelRecord->rootIndex != viewRecord->rootIndex)
+            {
+                return fail(UIErrorCode::WrongContext,
+                            "UI TabView, tabs, and panels must belong to the same root");
+            }
+            if (tabRecord->parentIndex != tabView.index() || panelRecord->parentIndex != tabView.index())
+            {
+                return fail(UIErrorCode::InvalidParent,
+                            "UI TabView tabs and panels must be direct children of the TabView");
+            }
+            if (panelRecord->kind == BuiltinElementKind::Tab ||
+                panelRecord->kind == BuiltinElementKind::TabView ||
+                panelRecord->kind == BuiltinElementKind::ListViewItem ||
+                panelRecord->kind == BuiltinElementKind::TreeViewItem)
+            {
+                return fail(UIErrorCode::InvalidParent,
+                            "UI TabView panels must be ordinary content nodes");
+            }
+            for (usize previous = 0; previous < i; ++previous)
+            {
+                if (items[previous].tab == item.tab || items[previous].panel == item.panel ||
+                    items[previous].tab == item.panel || items[previous].panel == item.tab)
+                {
+                    return fail(UIErrorCode::InvalidParent,
+                                "UI TabView items must not duplicate tab or panel nodes");
+                }
+            }
+            const UINodeId existingTabOwner = tabViewStorage.tabViewForTab(item.tab);
+            if (existingTabOwner.hasValue() && existingTabOwner != tabView)
+            {
+                return fail(UIErrorCode::InvalidParent,
+                            "UI Tab already belongs to another TabView");
+            }
+            const UINodeId existingPanelOwner = tabViewStorage.tabViewForPanel(item.panel);
+            if (existingPanelOwner.hasValue() && existingPanelOwner != tabView)
+            {
+                return fail(UIErrorCode::InvalidParent,
+                            "UI panel already belongs to another TabView");
+            }
+        }
+
+        usize directChildCount = 0;
+        for (u32 childIndex = viewRecord->firstChildIndex;
+             childIndex != InvalidNodeIndex;)
+        {
+            const NodeRecord* child = recordByIndex(childIndex);
+            if (child == nullptr)
+            {
+                return fail(Core::CoreErrorCode::Internal,
+                            "UI TabView direct-child chain is invalid");
+            }
+            ++directChildCount;
+            childIndex = child->nextSiblingIndex;
+        }
+        if (items.size() > (std::numeric_limits<usize>::max)() / 2U ||
+            directChildCount != items.size() * 2U)
+        {
+            return fail(UIErrorCode::InvalidParent,
+                        "UI TabView direct children must be exactly the declared tab/panel pairs");
+        }
+
+        const TabViewState* current = tabViewStorage.tryTabView(tabView);
+        if (current != nullptr && current->itemCount == items.size() &&
+            current->activeTab == items[activeIndex].tab)
+        {
+            bool same = true;
+            for (u32 i = 0; i < current->itemCount; ++i)
+            {
+                if (tabViewStorage.itemAt(tabView, i) != items[i])
+                {
+                    same = false;
+                    break;
+                }
+            }
+            if (same)
+            {
+                return Core::success();
+            }
+        }
+        if (Core::Status dirty = markLayoutDirtyBatch({tabView}); !dirty)
+        {
+            return dirty;
+        }
+        tabViewStorage.linkValidated(tabView, items, activeIndex);
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status clearTabViewItemsFromUpdater(
+        UINodeId updaterRoot, UINodeId tabView)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateTabViewUpdaterRoot(updaterRoot, tabView); !valid)
+        {
+            return valid;
+        }
+        if (tabViewStorage.itemCount(tabView) == 0)
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markLayoutDirtyBatch({tabView}); !dirty)
+        {
+            return dirty;
+        }
+        tabViewStorage.unlinkTabView(tabView);
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<u32> tabViewItemCountFromUpdater(
+        UINodeId updaterRoot, UINodeId tabView) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (Core::Status valid = validateTabViewUpdaterRoot(updaterRoot, tabView); !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        return tabViewStorage.itemCount(tabView);
+    }
+
+    [[nodiscard]] Core::Result<UITabViewItem> tabViewItemAtFromUpdater(
+        UINodeId updaterRoot, UINodeId tabView, u32 index) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (Core::Status valid = validateTabViewUpdaterRoot(updaterRoot, tabView); !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        const u32 count = tabViewStorage.itemCount(tabView);
+        if (index >= count)
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI TabView item index is out of range");
+        }
+        return tabViewStorage.itemAt(tabView, index);
+    }
+
+    [[nodiscard]] Core::Status setTabViewActiveTabFromUpdater(
+        UINodeId updaterRoot, UINodeId tabView, UINodeId tab)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateTabViewUpdaterRoot(updaterRoot, tabView); !valid)
+        {
+            return valid;
+        }
+        if (!tab.hasValue() || tabViewStorage.tabViewForTab(tab) != tabView)
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI Tab does not belong to the TabView");
+        }
+        const UINodeId previousTab = tabViewStorage.activeTab(tabView);
+        if (previousTab == tab)
+        {
+            return Core::success();
+        }
+        const UINodeId previousPanel = tabViewStorage.activePanel(tabView);
+        const TabState* nextState = tabViewStorage.tryTab(tab);
+        const UINodeId nextPanel = nextState != nullptr ? nextState->panel : UINodeId{};
+        if (Core::Status dirty = markLayoutDirtyBatch({tabView, previousTab, tab, previousPanel, nextPanel}); !dirty)
+        {
+            return dirty;
+        }
+        if (!tabViewStorage.setActiveTab(tabView, tab))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI TabView active tab could not be changed");
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UINodeId> tabViewActiveTabFromUpdater(
+        UINodeId updaterRoot, UINodeId tabView) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (Core::Status valid = validateTabViewUpdaterRoot(updaterRoot, tabView); !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        return tabViewStorage.activeTab(tabView);
+    }
+
+    [[nodiscard]] Core::Result<UINodeId> tabViewActivePanelFromUpdater(
+        UINodeId updaterRoot, UINodeId tabView) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (Core::Status valid = validateTabViewUpdaterRoot(updaterRoot, tabView); !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        return tabViewStorage.activePanel(tabView);
+    }
+
+    [[nodiscard]] Core::Result<UITabViewMetrics> tabViewMetricsFromUpdater(
+        UINodeId updaterRoot, UINodeId tabView) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (Core::Status valid = validateTabViewUpdaterRoot(updaterRoot, tabView); !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        return tabViewStorage.committedMetrics(tabView);
+    }
+
+    [[nodiscard]] Core::Result<UITabViewCommandResult> routeTabViewCommandFromUpdater(
+        UINodeId updaterRoot, UINodeId tabView, UITabViewCommand command)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (routeDispatchDepth != 0)
+        {
+            return fail(UIErrorCode::PointerRouteAlreadyInProgress,
+                        "UI TabView command cannot run during pointer routing");
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateTabViewUpdaterRoot(updaterRoot, tabView); !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        if (!isValidTabViewCommand(command))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI TabView command is not recognized");
+        }
+        const TabViewState* view = tabViewStorage.tryTabView(tabView);
+        const u32 count = tabViewStorage.itemCount(tabView);
+        if (view == nullptr || count == 0)
+        {
+            return UITabViewCommandResult{.tabView = tabView};
+        }
+        const UINodeId focusedTab =
+            tabViewStorage.tabViewForTab(defaultActionFocusButton) == tabView
+                ? defaultActionFocusButton
+                : UINodeId{};
+        const UINodeId currentTab = focusedTab.hasValue()
+                                        ? focusedTab
+                                        : tabViewStorage.activeTab(tabView);
+        const TabState* currentState = tabViewStorage.tryTab(currentTab);
+        const u32 currentIndex = currentState != nullptr ? currentState->ordinal : 0;
+        constexpr u32 InvalidTabIndex = (std::numeric_limits<u32>::max)();
+        u32 targetIndex = InvalidTabIndex;
+        const auto isFocusableTabAt = [&](u32 index) noexcept {
+            const UITabViewItem candidate = tabViewStorage.itemAt(tabView, index);
+            return candidate.hasValue() && isCommittedKeyboardFocusCandidate(candidate.tab);
+        };
+        switch (command)
+        {
+        case UITabViewCommand::Previous:
+            for (u32 step = 1; step <= count; ++step)
+            {
+                if (!view->config.wrapKeyboardNavigation && step > currentIndex)
+                {
+                    break;
+                }
+                const u32 candidateIndex = view->config.wrapKeyboardNavigation
+                                               ? static_cast<u32>((static_cast<u64>(currentIndex) + count -
+                                                                   (step % count)) % count)
+                                               : currentIndex - step;
+                if (isFocusableTabAt(candidateIndex))
+                {
+                    targetIndex = candidateIndex;
+                    break;
+                }
+            }
+            break;
+        case UITabViewCommand::Next:
+            for (u32 step = 1; step <= count; ++step)
+            {
+                if (!view->config.wrapKeyboardNavigation &&
+                    static_cast<u64>(currentIndex) + step >= count)
+                {
+                    break;
+                }
+                const u32 candidateIndex = view->config.wrapKeyboardNavigation
+                                               ? static_cast<u32>((static_cast<u64>(currentIndex) + step) % count)
+                                               : currentIndex + step;
+                if (isFocusableTabAt(candidateIndex))
+                {
+                    targetIndex = candidateIndex;
+                    break;
+                }
+            }
+            break;
+        case UITabViewCommand::First:
+            for (u32 index = 0; index < count; ++index)
+            {
+                if (isFocusableTabAt(index))
+                {
+                    targetIndex = index;
+                    break;
+                }
+            }
+            break;
+        case UITabViewCommand::Last:
+            for (u32 index = count; index > 0; --index)
+            {
+                if (isFocusableTabAt(index - 1))
+                {
+                    targetIndex = index - 1;
+                    break;
+                }
+            }
+            break;
+        }
+        if (targetIndex == InvalidTabIndex)
+        {
+            return UITabViewCommandResult{
+                .targeted = true,
+                .consumed = true,
+                .tabView = tabView,
+                .tab = currentTab,
+            };
+        }
+        const UITabViewItem item = tabViewStorage.itemAt(tabView, targetIndex);
+        if (!item.hasValue())
+        {
+            return fail(Core::CoreErrorCode::Internal, "UI TabView relationship is invalid");
+        }
+        const bool focusChanged = defaultActionFocusButton != item.tab;
+        const bool selectionChanged =
+            view->config.activationMode == UITabActivationMode::Automatic &&
+            tabViewStorage.activeTab(tabView) != item.tab;
+        if (focusChanged || selectionChanged)
+        {
+            releaseRouteDirtyQueueReservations();
+            auto reservationCleanup = Core::makeScopeExit(
+                [this]() noexcept { releaseRouteDirtyQueueReservations(); });
+            if (selectionChanged)
+            {
+                addTabActivationDirtyReservationCandidates(item.tab);
+            }
+            if (focusChanged)
+            {
+                addRouteDirtyReservationCandidate(defaultActionFocusButton);
+                addRouteDirtyReservationCandidate(textInputFocus);
+                addRouteDirtyReservationCandidate(item.tab);
+            }
+            if (Core::Status reserved = reserveRouteDirtyQueueSlots(); !reserved)
+            {
+                return Core::failure(reserved.error());
+            }
+            if (selectionChanged)
+            {
+                const UINodeId previousTab = tabViewStorage.activeTab(tabView);
+                const UINodeId previousPanel = tabViewStorage.activePanel(tabView);
+                const TabState* next = tabViewStorage.tryTab(item.tab);
+                const UINodeId nextPanel = next != nullptr ? next->panel : UINodeId{};
+                if (Core::Status dirty = markLayoutDirtyBatch(
+                        {tabView, previousTab, item.tab, previousPanel, nextPanel});
+                    !dirty)
+                {
+                    return Core::failure(dirty.error());
+                }
+            }
+            if (focusChanged)
+            {
+                if (Core::Status focused = applyExplicitFocus(item.tab); !focused)
+                {
+                    return Core::failure(focused.error());
+                }
+            }
+            if (selectionChanged && !tabViewStorage.setActiveTab(tabView, item.tab))
+            {
+                return fail(Core::CoreErrorCode::Internal,
+                            "UI TabView relationship rejected a validated command");
+            }
+        }
+        return UITabViewCommandResult{
+            .targeted = true,
+            .consumed = true,
+            .focusChanged = focusChanged,
+            .selectionChanged = selectionChanged,
+            .tabView = tabView,
+            .tab = item.tab,
+        };
+    }
+
+    [[nodiscard]] Core::Result<UITabViewCommandResult> routeFocusedTabViewCommand(
+        UITabViewCommand command, bool pressed)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (routeDispatchDepth != 0)
+        {
+            return fail(UIErrorCode::PointerRouteAlreadyInProgress,
+                        "UI TabView command cannot run during pointer routing");
+        }
+        if (!isValidTabViewCommand(command))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI TabView command is not recognized");
+        }
+        if (!pressed)
+        {
+            return UITabViewCommandResult{
+                .consumed = tabViewCommandPressLatch.release(command),
+            };
+        }
+        if (tabViewCommandPressLatch.isLatched(command))
+        {
+            return UITabViewCommandResult{.consumed = true};
+        }
+
+        const UINodeId tabView = tabViewStorage.tabViewForTab(defaultActionFocusButton);
+        if (!tabView.hasValue())
+        {
+            return UITabViewCommandResult{};
+        }
+        auto routed = routeTabViewCommandFromUpdater(rootForTabView(tabView), tabView, command);
+        if (!routed)
+        {
+            return Core::failure(routed.error());
+        }
+        if (routed->consumed)
+        {
+            tabViewCommandPressLatch.latch(command);
+        }
+        return routed;
+    }
+
+    [[nodiscard]] Core::Result<UITabViewCommandResult> routeFocusedTabViewDirection(
+        UIFocusNavigationDirection direction, bool pressed)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (routeDispatchDepth != 0)
+        {
+            return fail(UIErrorCode::PointerRouteAlreadyInProgress,
+                        "UI TabView direction cannot run during pointer routing");
+        }
+        if (!Detail::isValidFocusNavigationDirection(direction))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI TabView direction is not recognized");
+        }
+        if (!pressed)
+        {
+            return UITabViewCommandResult{
+                .consumed = tabViewDirectionPressLatch.release(direction),
+            };
+        }
+        if (tabViewDirectionPressLatch.isLatched(direction))
+        {
+            return UITabViewCommandResult{.consumed = true};
+        }
+
+        const UINodeId tabView = tabViewStorage.tabViewForTab(defaultActionFocusButton);
+        if (!tabView.hasValue())
+        {
+            return UITabViewCommandResult{};
+        }
+        const TabViewState* state = tabViewStorage.tryTabView(tabView);
+        if (state == nullptr)
+        {
+            return UITabViewCommandResult{};
+        }
+        const bool horizontal = state->config.placement == UITabViewPlacement::Top ||
+                                state->config.placement == UITabViewPlacement::Bottom;
+        std::optional<UITabViewCommand> command;
+        switch (direction)
+        {
+        case UIFocusNavigationDirection::Left:
+            if (horizontal)
+            {
+                command = UITabViewCommand::Previous;
+            }
+            break;
+        case UIFocusNavigationDirection::Right:
+            if (horizontal)
+            {
+                command = UITabViewCommand::Next;
+            }
+            break;
+        case UIFocusNavigationDirection::Up:
+            if (!horizontal)
+            {
+                command = UITabViewCommand::Previous;
+            }
+            break;
+        case UIFocusNavigationDirection::Down:
+            if (!horizontal)
+            {
+                command = UITabViewCommand::Next;
+            }
+            break;
+        }
+        if (!command.has_value())
+        {
+            return UITabViewCommandResult{};
+        }
+        auto routed = routeTabViewCommandFromUpdater(rootForTabView(tabView), tabView, *command);
+        if (!routed)
+        {
+            return Core::failure(routed.error());
+        }
+        if (routed->consumed)
+        {
+            tabViewDirectionPressLatch.latch(direction);
+        }
+        return routed;
+    }
+
+    [[nodiscard]] UINodeId rootForTabView(UINodeId tabView) const noexcept
+    {
+        const NodeRecord* record = nodes.tryGet(tabView.storageId());
+        return record != nullptr ? idForIndex(record->rootIndex) : UINodeId{};
+    }
+
+    [[nodiscard]] Core::Status setTabViewItems(
+        UINodeId tabView, std::span<const UITabViewItem> items, u32 activeIndex)
+    {
+        return setTabViewItemsFromUpdater(rootForTabView(tabView), tabView, items, activeIndex);
+    }
+
+    [[nodiscard]] Core::Status clearTabViewItems(UINodeId tabView)
+    {
+        return clearTabViewItemsFromUpdater(rootForTabView(tabView), tabView);
+    }
+
+    [[nodiscard]] Core::Result<u32> tabViewItemCount(UINodeId tabView) const
+    {
+        return tabViewItemCountFromUpdater(rootForTabView(tabView), tabView);
+    }
+
+    [[nodiscard]] Core::Result<UITabViewItem> tabViewItemAt(UINodeId tabView, u32 index) const
+    {
+        return tabViewItemAtFromUpdater(rootForTabView(tabView), tabView, index);
+    }
+
+    [[nodiscard]] Core::Status setTabViewActiveTab(UINodeId tabView, UINodeId tab)
+    {
+        return setTabViewActiveTabFromUpdater(rootForTabView(tabView), tabView, tab);
+    }
+
+    [[nodiscard]] Core::Result<UINodeId> tabViewActiveTab(UINodeId tabView) const
+    {
+        return tabViewActiveTabFromUpdater(rootForTabView(tabView), tabView);
+    }
+
+    [[nodiscard]] Core::Result<UINodeId> tabViewActivePanel(UINodeId tabView) const
+    {
+        return tabViewActivePanelFromUpdater(rootForTabView(tabView), tabView);
+    }
+
+    [[nodiscard]] Core::Result<UITabViewMetrics> tabViewMetrics(UINodeId tabView) const
+    {
+        return tabViewMetricsFromUpdater(rootForTabView(tabView), tabView);
+    }
+
+    [[nodiscard]] Core::Result<UITabViewCommandResult> routeTabViewCommand(
+        UINodeId tabView, UITabViewCommand command)
+    {
+        return routeTabViewCommandFromUpdater(rootForTabView(tabView), tabView, command);
+    }
+
+    [[nodiscard]] Core::Status setTabPaint(UINodeId tab, const UITabPaint& paint)
+    {
+        return setTabPaintFromUpdater(rootForTabView(tab), tab, paint);
+    }
+
+    [[nodiscard]] Core::Result<UITabPaint> tabPaint(UINodeId tab) const
+    {
+        return tabPaintFromUpdater(rootForTabView(tab), tab);
+    }
+
     [[nodiscard]] Core::Result<NodeRecord*> resolveScrollView(UINodeId scrollView)
     {
         auto nodeResult = resolveNode(scrollView);
@@ -14760,6 +15789,57 @@ struct UIContext::Impl final {
         }
     }
 
+    void addTabActivationDirtyReservationCandidates(UINodeId tab)
+    {
+        const UINodeId tabView = tabViewStorage.tabViewForTab(tab);
+        if (!tabView.hasValue())
+        {
+            return;
+        }
+        addRouteLayoutDirtyReservationCandidates(tabView);
+        addRouteLayoutDirtyReservationCandidates(tabViewStorage.activeTab(tabView));
+        addRouteLayoutDirtyReservationCandidates(tabViewStorage.activePanel(tabView));
+        addRouteLayoutDirtyReservationCandidates(tab);
+        const TabState* next = tabViewStorage.tryTab(tab);
+        addRouteLayoutDirtyReservationCandidates(next != nullptr ? next->panel : UINodeId{});
+    }
+
+    [[nodiscard]] Core::Result<bool> activateTabControl(UINodeId tab)
+    {
+        const NodeRecord* record = contains(tab) ? nodes.tryGet(tab.storageId()) : nullptr;
+        if (record == nullptr || record->kind != BuiltinElementKind::Tab || !isNodeEnabled(tab))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI Tab activation requires a live enabled Tab");
+        }
+        const UINodeId tabView = tabViewStorage.tabViewForTab(tab);
+        if (!tabView.hasValue())
+        {
+            return fail(UIErrorCode::InvalidParent,
+                        "UI Tab activation requires a valid TabView relationship");
+        }
+        const UINodeId previousTab = tabViewStorage.activeTab(tabView);
+        if (previousTab == tab)
+        {
+            return false;
+        }
+        const UINodeId previousPanel = tabViewStorage.activePanel(tabView);
+        const TabState* next = tabViewStorage.tryTab(tab);
+        const UINodeId nextPanel = next != nullptr ? next->panel : UINodeId{};
+        if (Core::Status dirty = markLayoutDirtyBatch(
+                {tabView, previousTab, tab, previousPanel, nextPanel});
+            !dirty)
+        {
+            return Core::failure(dirty.error());
+        }
+        if (!tabViewStorage.setActiveTab(tabView, tab))
+        {
+            return fail(Core::CoreErrorCode::Internal,
+                        "UI TabView relationship rejected a validated activation");
+        }
+        return true;
+    }
+
     [[nodiscard]] Core::Result<bool> activateDropdownControl(UINodeId control)
     {
         const NodeRecord* record = contains(control) ? nodes.tryGet(control.storageId()) : nullptr;
@@ -15482,6 +16562,16 @@ struct UIContext::Impl final {
                 continue;
             }
             splitViewStorage.publishMetrics(index);
+        }
+        for (const u32 index : order)
+        {
+            const NodeRecord* record = recordByIndex(index);
+            if (record == nullptr || record->kind != BuiltinElementKind::TabView ||
+                index >= tabViewStorage.capacity())
+            {
+                continue;
+            }
+            tabViewStorage.publishMetrics(index);
         }
         for (const u32 index : order)
         {
@@ -16718,6 +17808,7 @@ struct UIContext::Impl final {
                 if (pointWithinArmedButton && isNodeEnabled(armedButtonAtRouteStart))
                 {
                     addDropdownActivationDirtyReservationCandidates(armedButtonAtRouteStart);
+                    addTabActivationDirtyReservationCandidates(armedButtonAtRouteStart);
                     addRouteDirtyReservationCandidate(listViewForItem(armedButtonAtRouteStart));
                     const UINodeId armedTreeView = treeViewForItem(armedButtonAtRouteStart);
                     if (pointWithinArmedTreeDisclosure)
@@ -17328,6 +18419,14 @@ struct UIContext::Impl final {
                     }
                 }
                 if (const NodeRecord* armedRecord = nodes.tryGet(armedButtonAtRouteStart.storageId());
+                    armedRecord != nullptr && armedRecord->kind == BuiltinElementKind::Tab)
+                {
+                    if (auto activated = activateTabControl(armedButtonAtRouteStart); !activated)
+                    {
+                        return Core::failure(activated.error());
+                    }
+                }
+                if (const NodeRecord* armedRecord = nodes.tryGet(armedButtonAtRouteStart.storageId());
                     armedRecord != nullptr && armedRecord->kind == BuiltinElementKind::ListViewItem)
                 {
                     if (Core::Status selected = selectCommittedListViewItem(armedButtonAtRouteStart); !selected)
@@ -17433,6 +18532,8 @@ struct UIContext::Impl final {
         listViewCommandPressLatch.clear();
         treeViewCommandPressLatch.clear();
         focusNavigationPressLatch.clear();
+        tabViewCommandPressLatch.clear();
+        tabViewDirectionPressLatch.clear();
         rangeInputPressLatch.clear();
         defaultActionPressState.clearAll();
         clearImeFocus();
@@ -17693,6 +18794,8 @@ struct UIContext::Impl final {
         listViewCommandPressLatch.clear();
         treeViewCommandPressLatch.clear();
         focusNavigationPressLatch.clear();
+        tabViewCommandPressLatch.clear();
+        tabViewDirectionPressLatch.clear();
 
         if (gamepad.has_value())
         {
@@ -18049,6 +19152,7 @@ struct UIContext::Impl final {
             }
         }
         addDropdownActivationDirtyReservationCandidates(activationTarget);
+        addTabActivationDirtyReservationCandidates(activationTarget);
         if (Core::Status reservation = reserveRouteDirtyQueueSlots(); !reservation)
         {
             return Core::failure(reservation.error());
@@ -18090,6 +19194,16 @@ struct UIContext::Impl final {
             }
             dropdownActivated = *activated;
         }
+        bool tabActivated = false;
+        if (record->kind == BuiltinElementKind::Tab)
+        {
+            auto activated = activateTabControl(activationTarget);
+            if (!activated)
+            {
+                return Core::failure(activated.error());
+            }
+            tabActivated = *activated;
+        }
         if (control.has_value())
         {
             defaultActionPressState.setPressedTarget(*control, activationTarget);
@@ -18104,7 +19218,7 @@ struct UIContext::Impl final {
             // changed state above; a bare Button without a callback did not.
             const bool activated =
                 behaviorStateStorage.hasToggle(activationTarget.index()) ||
-                record->kind == BuiltinElementKind::RadioButton || dropdownActivated;
+                record->kind == BuiltinElementKind::RadioButton || dropdownActivated || tabActivated;
             return UIDefaultActionResult{.consumed = true, .activated = activated};
         }
         const u64 currentButtonRouteSerial = ++buttonRouteSerial;
@@ -21091,6 +22205,107 @@ Core::Result<bool> UITreeUpdater::isSplitterDragging(UINodeId splitter) const
     return m_context->isSplitterDraggingFromUpdater(m_root, splitter);
 }
 
+Core::Status UITreeUpdater::setTabViewItems(
+    UINodeId tabView, std::span<const UITabViewItem> items, u32 activeIndex)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setTabViewItemsFromUpdater(m_root, tabView, items, activeIndex);
+}
+
+Core::Status UITreeUpdater::clearTabViewItems(UINodeId tabView)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->clearTabViewItemsFromUpdater(m_root, tabView);
+}
+
+Core::Result<u32> UITreeUpdater::tabViewItemCount(UINodeId tabView) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->tabViewItemCountFromUpdater(m_root, tabView);
+}
+
+Core::Result<UITabViewItem> UITreeUpdater::tabViewItemAt(UINodeId tabView, u32 index) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->tabViewItemAtFromUpdater(m_root, tabView, index);
+}
+
+Core::Status UITreeUpdater::setTabViewActiveTab(UINodeId tabView, UINodeId tab)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setTabViewActiveTabFromUpdater(m_root, tabView, tab);
+}
+
+Core::Result<UINodeId> UITreeUpdater::tabViewActiveTab(UINodeId tabView) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->tabViewActiveTabFromUpdater(m_root, tabView);
+}
+
+Core::Result<UINodeId> UITreeUpdater::tabViewActivePanel(UINodeId tabView) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->tabViewActivePanelFromUpdater(m_root, tabView);
+}
+
+Core::Result<UITabViewMetrics> UITreeUpdater::tabViewMetrics(UINodeId tabView) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->tabViewMetricsFromUpdater(m_root, tabView);
+}
+
+Core::Result<UITabViewCommandResult> UITreeUpdater::routeTabViewCommand(
+    UINodeId tabView, UITabViewCommand command)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->routeTabViewCommandFromUpdater(m_root, tabView, command);
+}
+
+Core::Status UITreeUpdater::setTabPaint(UINodeId tab, const UITabPaint& paint)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setTabPaintFromUpdater(m_root, tab, paint);
+}
+
+Core::Result<UITabPaint> UITreeUpdater::tabPaint(UINodeId tab) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->tabPaintFromUpdater(m_root, tab);
+}
+
 Core::Status UITreeUpdater::setScrollViewStyle(UINodeId scrollView, const UIScrollViewStyle& style)
 {
     if (m_context == nullptr)
@@ -22138,6 +23353,18 @@ Core::Result<UITreeViewCommandResult> UIContext::routeTreeViewCommand(UITreeView
     return m_impl->routeTreeViewCommand(command, pressed);
 }
 
+Core::Result<UITabViewCommandResult> UIContext::routeFocusedTabViewDirection(
+    UIFocusNavigationDirection direction, bool pressed)
+{
+    return m_impl->routeFocusedTabViewDirection(direction, pressed);
+}
+
+Core::Result<UITabViewCommandResult> UIContext::routeFocusedTabViewCommand(
+    UITabViewCommand command, bool pressed)
+{
+    return m_impl->routeFocusedTabViewCommand(command, pressed);
+}
+
 UINodeId UIContext::defaultActionFocus() const noexcept
 {
     if (!m_impl->isOwnerThread())
@@ -22218,6 +23445,63 @@ Core::Result<UISplitViewMetrics> UIContext::splitViewMetrics(UINodeId splitView)
 Core::Result<bool> UIContext::isSplitterDragging(UINodeId splitter) const
 {
     return m_impl->isSplitterDragging(splitter);
+}
+
+Core::Status UIContext::setTabViewItems(
+    UINodeId tabView, std::span<const UITabViewItem> items, u32 activeIndex)
+{
+    return m_impl->setTabViewItems(tabView, items, activeIndex);
+}
+
+Core::Status UIContext::clearTabViewItems(UINodeId tabView)
+{
+    return m_impl->clearTabViewItems(tabView);
+}
+
+Core::Result<u32> UIContext::tabViewItemCount(UINodeId tabView) const
+{
+    return m_impl->tabViewItemCount(tabView);
+}
+
+Core::Result<UITabViewItem> UIContext::tabViewItemAt(UINodeId tabView, u32 index) const
+{
+    return m_impl->tabViewItemAt(tabView, index);
+}
+
+Core::Status UIContext::setTabViewActiveTab(UINodeId tabView, UINodeId tab)
+{
+    return m_impl->setTabViewActiveTab(tabView, tab);
+}
+
+Core::Result<UINodeId> UIContext::tabViewActiveTab(UINodeId tabView) const
+{
+    return m_impl->tabViewActiveTab(tabView);
+}
+
+Core::Result<UINodeId> UIContext::tabViewActivePanel(UINodeId tabView) const
+{
+    return m_impl->tabViewActivePanel(tabView);
+}
+
+Core::Result<UITabViewMetrics> UIContext::tabViewMetrics(UINodeId tabView) const
+{
+    return m_impl->tabViewMetrics(tabView);
+}
+
+Core::Result<UITabViewCommandResult> UIContext::routeTabViewCommand(
+    UINodeId tabView, UITabViewCommand command)
+{
+    return m_impl->routeTabViewCommand(tabView, command);
+}
+
+Core::Status UIContext::setTabPaint(UINodeId tab, const UITabPaint& paint)
+{
+    return m_impl->setTabPaint(tab, paint);
+}
+
+Core::Result<UITabPaint> UIContext::tabPaint(UINodeId tab) const
+{
+    return m_impl->tabPaint(tab);
 }
 
 Core::Status UIContext::setTooltipAnchor(UINodeId tooltip, UINodeId anchor)
@@ -22727,6 +24011,72 @@ Core::Result<bool> UIContext::isSplitterDraggingFromUpdater(
     UINodeId updaterRoot, UINodeId splitter) const
 {
     return m_impl->isSplitterDraggingFromUpdater(updaterRoot, splitter);
+}
+
+Core::Status UIContext::setTabViewItemsFromUpdater(
+    UINodeId updaterRoot, UINodeId tabView,
+    std::span<const UITabViewItem> items, u32 activeIndex)
+{
+    return m_impl->setTabViewItemsFromUpdater(updaterRoot, tabView, items, activeIndex);
+}
+
+Core::Status UIContext::clearTabViewItemsFromUpdater(
+    UINodeId updaterRoot, UINodeId tabView)
+{
+    return m_impl->clearTabViewItemsFromUpdater(updaterRoot, tabView);
+}
+
+Core::Result<u32> UIContext::tabViewItemCountFromUpdater(
+    UINodeId updaterRoot, UINodeId tabView) const
+{
+    return m_impl->tabViewItemCountFromUpdater(updaterRoot, tabView);
+}
+
+Core::Result<UITabViewItem> UIContext::tabViewItemAtFromUpdater(
+    UINodeId updaterRoot, UINodeId tabView, u32 index) const
+{
+    return m_impl->tabViewItemAtFromUpdater(updaterRoot, tabView, index);
+}
+
+Core::Status UIContext::setTabViewActiveTabFromUpdater(
+    UINodeId updaterRoot, UINodeId tabView, UINodeId tab)
+{
+    return m_impl->setTabViewActiveTabFromUpdater(updaterRoot, tabView, tab);
+}
+
+Core::Result<UINodeId> UIContext::tabViewActiveTabFromUpdater(
+    UINodeId updaterRoot, UINodeId tabView) const
+{
+    return m_impl->tabViewActiveTabFromUpdater(updaterRoot, tabView);
+}
+
+Core::Result<UINodeId> UIContext::tabViewActivePanelFromUpdater(
+    UINodeId updaterRoot, UINodeId tabView) const
+{
+    return m_impl->tabViewActivePanelFromUpdater(updaterRoot, tabView);
+}
+
+Core::Result<UITabViewMetrics> UIContext::tabViewMetricsFromUpdater(
+    UINodeId updaterRoot, UINodeId tabView) const
+{
+    return m_impl->tabViewMetricsFromUpdater(updaterRoot, tabView);
+}
+
+Core::Result<UITabViewCommandResult> UIContext::routeTabViewCommandFromUpdater(
+    UINodeId updaterRoot, UINodeId tabView, UITabViewCommand command)
+{
+    return m_impl->routeTabViewCommandFromUpdater(updaterRoot, tabView, command);
+}
+
+Core::Status UIContext::setTabPaintFromUpdater(UINodeId updaterRoot, UINodeId tab,
+                                               const UITabPaint& paint)
+{
+    return m_impl->setTabPaintFromUpdater(updaterRoot, tab, paint);
+}
+
+Core::Result<UITabPaint> UIContext::tabPaintFromUpdater(UINodeId updaterRoot, UINodeId tab) const
+{
+    return m_impl->tabPaintFromUpdater(updaterRoot, tab);
 }
 
 Core::Status UIContext::setScrollViewStyleFromUpdater(UINodeId updaterRoot, UINodeId scrollView,

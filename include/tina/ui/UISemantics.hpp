@@ -31,6 +31,9 @@ enum class UISemanticsRole : u8 {
     Tree,
     TreeItem,
     Image,
+    TabList,
+    Tab,
+    TabPanel,
 };
 
 enum class UISemanticsMode : u8 {

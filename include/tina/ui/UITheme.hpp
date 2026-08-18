@@ -10,6 +10,7 @@
 #include <tina/ui/UIScrollView.hpp>
 #include <tina/ui/UISlider.hpp>
 #include <tina/ui/UIStyle.hpp>
+#include <tina/ui/UITabView.hpp>
 #include <tina/ui/UIText.hpp>
 #include <tina/ui/UITextEdit.hpp>
 #include <tina/ui/UITreeView.hpp>
@@ -414,6 +415,32 @@ struct UISegmentedButtonChrome final {
     UIRadioButtonPaint radio{};
     UITextStyle label{};
 };
+
+struct UITabChrome final {
+    UIBoxPaint box{};
+    UITabPaint tab{};
+    UITextStyle label{};
+};
+
+[[nodiscard]] constexpr UITabChrome makeTabChrome(const UITheme& theme) noexcept
+{
+    const UIStraightSrgba8Color base = scaleColorAlpha(theme.surface1, 90);
+    UIBoxPaint box = makePanelBoxPaint(theme, base, UIElevation::None);
+    box.cornerRadii = UILogicalCornerRadii::uniform(theme.controlCornerRadius);
+    return UITabChrome{
+        .box = box,
+        .tab =
+            UITabPaint{
+                .selectedBackgroundColor = scaleColorAlpha(theme.accent, 185),
+                .hoveredBackgroundColor = scaleColorAlpha(theme.surface2, 245),
+                .focusedBackgroundColor = scaleColorAlpha(theme.surface2, 230),
+                .pressedBackgroundColor = scaleColorAlpha(theme.accent, 125),
+                .disabledBackgroundColor = theme.buttonDisabled,
+                .focusedBorderColor = theme.focusRing,
+            },
+        .label = makeBodyTextStyle(theme, theme.typography.control),
+    };
+}
 
 [[nodiscard]] constexpr UISegmentedButtonChrome makeSegmentedButtonChrome(const UITheme& theme) noexcept
 {

@@ -54,6 +54,10 @@ void clearDetachedBindings(ProductChrome& target, u16 targetBindings) noexcept
     {
         target.textEdit = {};
     }
+    if ((targetBindings & ThemeBindingTabPaint) == 0)
+    {
+        target.tab = {};
+    }
 }
 
 } // namespace
@@ -91,6 +95,7 @@ ProductChromeTransition resolveProductChromeTransition(ProductChromeStorage curr
     classify(ThemeBindingListViewPaint, current.listView, transition.target.listView);
     classify(ThemeBindingTreeViewPaint, current.treeView, transition.target.treeView);
     classify(ThemeBindingTextEditPaint, current.textEdit, transition.target.textEdit);
+    classify(ThemeBindingTabPaint, current.tab, transition.target.tab);
 
     const auto markLayoutChange = [&](u16 binding, bool changed) noexcept {
         if ((affectedBindings & binding) != 0 && changed)
@@ -170,6 +175,10 @@ void applyProductChromeTransition(ProductChromeStorage storage, const ProductChr
     if ((affectedBindings & ThemeBindingTextEditPaint) != 0)
     {
         storage.textEdit = transition.target.textEdit;
+    }
+    if ((affectedBindings & ThemeBindingTabPaint) != 0)
+    {
+        storage.tab = transition.target.tab;
     }
 }
 

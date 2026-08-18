@@ -13,6 +13,7 @@
 #include <tina/ui/UISemantics.hpp>
 #include <tina/ui/UISplitView.hpp>
 #include <tina/ui/UIStyle.hpp>
+#include <tina/ui/UITabView.hpp>
 #include <tina/ui/UIText.hpp>
 #include <tina/ui/UITextEdit.hpp>
 #include <tina/ui/UITooltip.hpp>
@@ -45,6 +46,8 @@ struct UIElementDescriptor final {
     std::optional<UITooltipConfig> tooltip{};
     std::optional<UISplitViewConfig> splitView{};
     std::optional<UISplitterConfig> splitter{};
+    std::optional<UITabViewConfig> tabView{};
+    std::optional<UITabConfig> tab{};
     std::optional<UITextStyle> textStyle{};
     UIContentAlignment contentAlignment{};
     UIElementVisual visual{};
@@ -149,6 +152,42 @@ struct UIElementDescriptor final {
             .actions = UISemanticsAction::Focus | UISemanticsAction::SetRangeValue,
         },
         .pointerHitPolicy = UIPointerHitPolicy::Targetable,
+    };
+}
+
+[[nodiscard]] constexpr UIElementDescriptor makeTabViewElement(
+    UITabViewConfig config = {}, UILayoutStyle layout = {}) noexcept
+{
+    return UIElementDescriptor{
+        .layout = layout,
+        .tabView = config,
+        .semantics = {
+            .mode = UISemanticsMode::Publish,
+            .role = UISemanticsRole::TabList,
+        },
+        .pointerHitPolicy = UIPointerHitPolicy::Ignore,
+    };
+}
+
+[[nodiscard]] constexpr UIElementDescriptor makeTabElement(
+    std::string_view text = {}, UITabConfig config = {}, UILayoutStyle layout = {}) noexcept
+{
+    return UIElementDescriptor{
+        .layout = layout,
+        .text = text,
+        .tab = config,
+        .contentAlignment = {
+            .horizontal = UIAxisAlignment::Center,
+            .vertical = UIAxisAlignment::Center,
+        },
+        .visual = {.styleRole = UIStyleRoleId::Tab},
+        .behaviors = UIElementBehavior::Focusable | UIElementBehavior::Activate,
+        .semantics = {
+            .mode = UISemanticsMode::Publish,
+            .role = UISemanticsRole::Tab,
+            .actions = UISemanticsAction::Focus | UISemanticsAction::Activate,
+            .useContentAsName = true,
+        },
     };
 }
 

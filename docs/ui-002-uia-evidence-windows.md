@@ -64,6 +64,30 @@ AutomationId is diagnostic only: some hosts return an empty id on the HWND root 
 when the Tina node reports keyboard focus. Mutations re-assert TextEdit focus each poll
 so Toggle/Range/Value do not permanently steal focus before verification.
 
+## 2026-08-18 current working tree automatic gate
+
+The showcase now contains both the single-line profile editor and a multiline
+notes editor. Both controls publish explicit accessible names. The external
+gate selects the actionable profile editor by `ControlType=Edit` and
+`Name=Profile name`, instead of depending on fragment traversal order.
+
+| Field | Value |
+| --- | --- |
+| Source base commit | `31f7ce68a37420ab942ea6ac92a273fa1571514f` plus the working-tree gate fix |
+| Report JSON | `artifacts/gates/ui-002-uia-20260818-200137.json` |
+| Showcase SHA-256 | `FEEEC890C8C268B5BDA6B9F8AFE362856E8A60E5957ED8BFD883740E661ADF10` |
+| `tina_ui_uia_tests` SHA-256 | `0ECCD1C1A0510CAB7028F7D176EBF87A1E494154572B4B6B2AA6F0069DA21DA3` |
+
+The full gate returned `ok=true`: `tina_ui_uia_tests` passed 12/12, the
+external client discovered 71 Tina providers with 71 positive bounds and 27
+focusable nodes, RuntimeId/AutomationId uniqueness and fragment integrity
+passed with zero orphans, and Invoke/Toggle/RangeValue/Value/Focus mutations
+were observed. The profile value changed from `Tina Player` to `UIA Player`,
+the slider changed from 72 to 64, the checkbox changed from On to Off, and
+`WM_CLOSE` produced a normal exit with no forced termination.
+
+This run still records `narratorGold=false`.
+
 ## Narrator / Inspect
 
 Automatic gate **does not** set `narratorGold=true`. Follow

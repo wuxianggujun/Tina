@@ -343,6 +343,20 @@ treeViewCommandForGamepadButton(Platform::GamepadButton button) noexcept
     }
 }
 
+[[nodiscard]] std::optional<UI::UITabViewCommand>
+tabViewBoundaryCommandForKey(Platform::Key key) noexcept
+{
+    switch (key)
+    {
+    case Platform::Key::Home:
+        return UI::UITabViewCommand::First;
+    case Platform::Key::End:
+        return UI::UITabViewCommand::Last;
+    default:
+        return std::nullopt;
+    }
+}
+
 [[nodiscard]] bool isRepresentableLogicalValue(double value) noexcept
 {
     constexpr double MaximumLogicalValue = static_cast<double>((std::numeric_limits<float>::max)());
@@ -1059,6 +1073,73 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                     u64{1} << (ordinal % BitsPerConsumptionWord);
                 anyConsumed = true;
                 continue;
+            }
+        }
+
+        // A focused Tab owns the axis matching its TabView placement before
+        // generic spatial focus. Home/End use the same fixed-capacity command
+        // path and claim their matching release.
+        if (const auto* key = std::get_if<Platform::KeyTransition>(&transitions[ordinal].payload);
+            key != nullptr && key->window == context->ownerWindow())
+        {
+            const bool pressed = key->state == Platform::DigitalTransition::Down;
+            if (const auto direction = focusNavigationDirectionForKey(key->key); direction.has_value())
+            {
+                auto routed = context->routeFocusedTabViewDirection(*direction, pressed);
+                if (!routed)
+                {
+                    Core::Error error = std::move(routed.error());
+                    error.addContext("UIInputRouteProducer::produce(tab-view-key-direction)");
+                    return Core::failure(std::move(error));
+                }
+                if (routed->consumed)
+                {
+                    stagingWords_[ordinal / BitsPerConsumptionWord] |=
+                        u64{1} << (ordinal % BitsPerConsumptionWord);
+                    anyConsumed = true;
+                    continue;
+                }
+            }
+            if (const auto command = tabViewBoundaryCommandForKey(key->key); command.has_value())
+            {
+                auto routed = context->routeFocusedTabViewCommand(*command, pressed);
+                if (!routed)
+                {
+                    Core::Error error = std::move(routed.error());
+                    error.addContext("UIInputRouteProducer::produce(tab-view-key-boundary)");
+                    return Core::failure(std::move(error));
+                }
+                if (routed->consumed)
+                {
+                    stagingWords_[ordinal / BitsPerConsumptionWord] |=
+                        u64{1} << (ordinal % BitsPerConsumptionWord);
+                    anyConsumed = true;
+                    continue;
+                }
+            }
+        }
+        if (const auto* gamepad =
+                std::get_if<Platform::GamepadButtonTransition>(&transitions[ordinal].payload);
+            gamepad != nullptr && gamepad->routedWindow == context->ownerWindow())
+        {
+            if (const auto direction = focusNavigationDirectionForGamepadButton(gamepad->button);
+                direction.has_value())
+            {
+                auto routed = context->routeFocusedTabViewDirection(
+                    *direction, gamepad->state == Platform::DigitalTransition::Down);
+                if (!routed)
+                {
+                    Core::Error error = std::move(routed.error());
+                    error.addContext("UIInputRouteProducer::produce(tab-view-gamepad-direction)");
+                    return Core::failure(std::move(error));
+                }
+                if (routed->consumed)
+                {
+                    stagingWords_[ordinal / BitsPerConsumptionWord] |=
+                        u64{1} << (ordinal % BitsPerConsumptionWord);
+                    anyConsumed = true;
+                    continue;
+                }
             }
         }
 

@@ -24,7 +24,7 @@ struct BuiltinSemanticsDefaults final {
 
 [[nodiscard]] constexpr bool isValidSemanticsRole(UISemanticsRole role) noexcept
 {
-    return role >= UISemanticsRole::Group && role <= UISemanticsRole::Image;
+    return role >= UISemanticsRole::Group && role <= UISemanticsRole::TabPanel;
 }
 
 [[nodiscard]] constexpr bool isValidSemanticsActions(UISemanticsAction actions) noexcept
@@ -87,6 +87,8 @@ defaultBehaviorsForKind(BuiltinElementKind kind) noexcept
     case BuiltinElementKind::TreeViewItem:
         return UIElementBehavior::Focusable | UIElementBehavior::Activate |
                UIElementBehavior::VirtualTreeItem;
+    case BuiltinElementKind::Tab:
+        return UIElementBehavior::Focusable | UIElementBehavior::Activate;
     case BuiltinElementKind::Splitter:
         return UIElementBehavior::Focusable | UIElementBehavior::RangeInput;
     case BuiltinElementKind::Root:
@@ -94,6 +96,7 @@ defaultBehaviorsForKind(BuiltinElementKind kind) noexcept
     case BuiltinElementKind::Label:
     case BuiltinElementKind::Tooltip:
     case BuiltinElementKind::SplitView:
+    case BuiltinElementKind::TabView:
         return UIElementBehavior::None;
     }
     return UIElementBehavior::None;
@@ -134,6 +137,8 @@ defaultStyleRoleForKind(BuiltinElementKind kind) noexcept
         return UIStyleRoleId::ListView;
     case BuiltinElementKind::TreeView:
         return UIStyleRoleId::TreeView;
+    case BuiltinElementKind::Tab:
+        return UIStyleRoleId::Tab;
     case BuiltinElementKind::Tooltip:
         return UIStyleRoleId::TooltipSurface;
     case BuiltinElementKind::Splitter:
@@ -226,6 +231,15 @@ defaultSemanticsForKind(BuiltinElementKind kind) noexcept
         break;
     case BuiltinElementKind::TreeViewItem:
         defaults.role = UISemanticsRole::TreeItem;
+        defaults.actions = UISemanticsAction::Focus | UISemanticsAction::Activate;
+        defaults.useContentAsName = true;
+        break;
+    case BuiltinElementKind::TabView:
+        defaults.mode = UISemanticsMode::Publish;
+        defaults.role = UISemanticsRole::TabList;
+        break;
+    case BuiltinElementKind::Tab:
+        defaults.role = UISemanticsRole::Tab;
         defaults.actions = UISemanticsAction::Focus | UISemanticsAction::Activate;
         defaults.useContentAsName = true;
         break;

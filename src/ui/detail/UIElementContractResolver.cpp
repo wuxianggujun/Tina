@@ -12,6 +12,60 @@ resolveElementBuiltinKind(const UIElementDescriptor& descriptor)
     const bool hasText = descriptor.text.has_value();
     const bool hasImage = descriptor.image.has_value();
 
+    if (descriptor.tabView.has_value() && descriptor.tab.has_value())
+    {
+        return Core::failure(UIErrorCode::InvalidElementDescriptor,
+                             "UI element cannot be both TabView and Tab");
+    }
+    if (descriptor.tabView.has_value())
+    {
+        const UITabViewConfig& config = *descriptor.tabView;
+        const bool validPlacement = config.placement >= UITabViewPlacement::Top &&
+                                    config.placement <= UITabViewPlacement::Right;
+        const bool validActivation = config.activationMode >= UITabActivationMode::Automatic &&
+                                     config.activationMode <= UITabActivationMode::Manual;
+        if (!validPlacement || !validActivation || !std::isfinite(config.tabGap) || config.tabGap < 0.0F ||
+            !std::isfinite(config.contentGap) || config.contentGap < 0.0F || hasText || hasImage ||
+            descriptor.tooltip.has_value() || descriptor.splitView.has_value() ||
+            descriptor.splitter.has_value() || descriptor.tab.has_value() ||
+            descriptor.behaviors != UIElementBehavior::None ||
+            descriptor.semantics.mode != UISemanticsMode::Publish ||
+            descriptor.semantics.role != UISemanticsRole::TabList ||
+            descriptor.semantics.actions != UISemanticsAction::None ||
+            (descriptor.pointerHitPolicy.has_value() &&
+             *descriptor.pointerHitPolicy != UIPointerHitPolicy::Ignore) ||
+            (descriptor.focusScopeMode.has_value() &&
+             *descriptor.focusScopeMode != UIFocusScopeMode::None))
+        {
+            return Core::failure(UIErrorCode::InvalidElementDescriptor,
+                                 "UI TabView configuration or contract is invalid");
+        }
+        return BuiltinElementKind::TabView;
+    }
+    if (descriptor.tab.has_value())
+    {
+        constexpr UIElementBehavior RequiredBehaviors =
+            UIElementBehavior::Focusable | UIElementBehavior::Activate;
+        constexpr UISemanticsAction RequiredActions =
+            UISemanticsAction::Focus | UISemanticsAction::Activate;
+        if (!hasText || hasImage || descriptor.tooltip.has_value() ||
+            descriptor.splitView.has_value() || descriptor.splitter.has_value() ||
+            descriptor.behaviors != RequiredBehaviors ||
+            descriptor.semantics.mode != UISemanticsMode::Publish ||
+            descriptor.semantics.role != UISemanticsRole::Tab ||
+            descriptor.semantics.actions != RequiredActions ||
+            !descriptor.semantics.useContentAsName ||
+            (descriptor.pointerHitPolicy.has_value() &&
+             *descriptor.pointerHitPolicy != UIPointerHitPolicy::Targetable) ||
+            (descriptor.focusScopeMode.has_value() &&
+             *descriptor.focusScopeMode != UIFocusScopeMode::None))
+        {
+            return Core::failure(UIErrorCode::InvalidElementDescriptor,
+                                 "UI Tab configuration or contract is invalid");
+        }
+        return BuiltinElementKind::Tab;
+    }
+
     if (descriptor.splitView.has_value() && descriptor.splitter.has_value())
     {
         return Core::failure(UIErrorCode::InvalidElementDescriptor,

@@ -41,6 +41,9 @@ TEST(UIStyleRoleResolverTests, ValidatesRolesAndPublishesExpectedBindingMasks)
         std::pair{UI::UIStyleRoleId::SegmentedButton,
                   static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingRadioButtonPaint |
                                    ThemeBindingTextStyle)},
+        std::pair{UI::UIStyleRoleId::Tab,
+                  static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingTabPaint |
+                                   ThemeBindingTextStyle)},
         std::pair{UI::UIStyleRoleId::ScrollView, ThemeBindingScrollViewPaint},
         std::pair{UI::UIStyleRoleId::Dropdown,
                   static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingButtonPaint | ThemeBindingTextStyle |
@@ -95,6 +98,12 @@ TEST(UIStyleRoleResolverTests, ResolvesControlChromeFromTheRequestedTheme)
     EXPECT_EQ(segmented.box, expectedSegmented.box);
     EXPECT_EQ(segmented.radioButton, expectedSegmented.radio);
     EXPECT_EQ(segmented.text, expectedSegmented.label);
+
+    const auto tab = UI::Detail::productChromeFor(UI::UIStyleRoleId::Tab, theme);
+    const UI::UITabChrome expectedTab = UI::makeTabChrome(theme);
+    EXPECT_EQ(tab.box, expectedTab.box);
+    EXPECT_EQ(tab.tab, expectedTab.tab);
+    EXPECT_EQ(tab.text, expectedTab.label);
 
     const auto dropdown = UI::Detail::productChromeFor(UI::UIStyleRoleId::Dropdown, theme);
     const UI::UIDropdownChrome expectedDropdown = UI::makeDropdownChrome(theme);

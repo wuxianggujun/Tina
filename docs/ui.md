@@ -12,16 +12,16 @@
 | --- | --- |
 | 所有权 | per-window `UIContext`、generation/owner-aware `UINodeId`、move-only `UIRootOwner` |
 | Authoring | `UIElementDescriptor` + `make*Element` recipes、组合 Semantics、StyleRole/override reset、固定预算 build transaction；旧 create-by-kind 与公开 `UIWidgetKind` 已删除 |
-| Tree | Root/Panel/Modal/Label/Button/Checkbox/Slider/ProgressBar/RadioButton/TextEdit/ScrollView/Dropdown/Popup/Tooltip/DropdownItem/ListView/TreeView/SplitView/Splitter，固定容量 mutation |
-| Layout/Content | Flex container/item 分离、Flow/Overlay placement、logical pixel、可选 axis-aligned border-box descendant clip、committed content placement、Tooltip 基于上一份成功 Anchor geometry 的 flip/clamp、SplitView committed pane/splitter geometry、事务 commit、clean-subtree reuse |
+| Tree | Root/Panel/Modal/Label/Button/Checkbox/Slider/ProgressBar/RadioButton/TextEdit/ScrollView/Dropdown/Popup/Tooltip/DropdownItem/ListView/TreeView/SplitView/Splitter/TabView/Tab，固定容量 mutation |
+| Layout/Content | Flex container/item 分离、Flow/Overlay placement、logical pixel、可选 axis-aligned border-box descendant clip、committed content placement、Tooltip 基于上一份成功 Anchor geometry 的 flip/clamp、SplitView 与 TabView committed geometry、事务 commit、clean-subtree reuse |
 | Hit/route | committed hit snapshot、Capture→Target→Bubble、持久 Pointer Capture、Modal/Popup barrier、Tooltip Ignore/click-through、listener token、consume/prevent/claim |
 | Paint | `UIBoxPaint` Rectangle/Ellipse/Line、box/text/control paint、第一类 Image/Icon content、固定容量 backend-neutral `SolidRect`/`SolidEllipse`/`SolidLine`/`Image`/`NineSlice` Canvas、axis-aligned clip、PaintCache、committed paint snapshot；NineSlice 在 commit 时原子展开为1..9个 Image entry |
 | Theme/Style（A/B/C1 + UI-STYLE-001 slice） | `UITheme` token + `UIStyleRoleId` recipe + 属性 override mask/reset；默认 Button 为 Tonal，显式提供 Primary/Danger/Outlined/Text，并以 RadioButton 状态机提供 SegmentedButton；强类型 StyleClass/ColorToken、node-local pseudo-state、literal/token-backed BoxFill stylesheet 与运行期 ColorToken getter/setter 已落地；token 更新经固定 reverse-dependency 链为 `O(affected links)`，**无**圆角子树 clip/毛玻璃/完整 CSS |
 | Motion | direct/Style transition 仍为 fixed-capacity paint-only；typed keyframe timeline 已支持 paint 属性及 bounded `LayoutWidth`/`LayoutHeight`/`LayoutOffset` 白名单，并沿唯一 commit pipeline 原子发布；`ui_motion_v1`、`ui_motion_timeline_v1` 与 `ui_motion_layout_v1` 均已有确定性 gate，墙钟结论保持 provisional |
 | Text | strict UTF-8、可选 FreeType rasterizer、R8 Glyph atlas、DisplayList Glyph |
-| Input | Focus Scope/显式 focus、Pointer capture/cancel、Tab 与 committed 几何空间焦点、Keyboard/Gamepad activation、Dropdown 与 List/Tree navigation、TextEdit edit/selection/IME、Tooltip PointerHover/KeyboardFocus/Manual 与 monotonic delay、Splitter Pointer drag/RangeInput keyboard；UI Flow 固定 16 槽本地用户、Gamepad assignment 与 per-user 设备 revision |
-| Semantics | Automatic/Publish/MergeDescendants/Exclude、显式 role/name/description/actions、Tooltip 文本作为 Anchor description/HelpText fallback、Splitter Slider range/value snapshot 与虚拟 item 元数据 |
-| Runtime | startup root builder、phase-scoped tree updater、Tooltip/SplitView facade 与 bounded component transaction（含集合 DataSource/metrics/selection/scroll/expansion）、DisplayList/Glyph atlas handoff |
+| Input | Focus Scope/显式 focus、Pointer capture/cancel、Tab 与 committed 几何空间焦点、Keyboard/Gamepad activation、Dropdown 与 List/Tree/TabView navigation、TextEdit edit/selection/IME、Tooltip PointerHover/KeyboardFocus/Manual 与 monotonic delay、Splitter Pointer drag/RangeInput keyboard；UI Flow 固定 16 槽本地用户、Gamepad assignment 与 per-user 设备 revision |
+| Semantics | Automatic/Publish/MergeDescendants/Exclude、显式 role/name/description/actions、Tooltip 文本作为 Anchor description/HelpText fallback、Splitter Slider range/value、TabList/Tab/TabPanel selected state 与虚拟 item 元数据 |
+| Runtime | startup root builder、phase-scoped tree updater、Tooltip/SplitView/TabView facade 与 bounded component transaction（含集合 DataSource/metrics/selection/scroll/expansion）、DisplayList/Glyph atlas handoff |
 | Performance | `tina_bench` 已接入 static commit、paint-only dirty、route/capture、100k virtual collection、Image/NineSlice、完整 Component build、Style 与 direct/timeline Motion schema-v1 provisional workload |
 | Product | 独立 20 控件 showcase、product-2d Scene Explorer TreeView、product-3d Asset ListView/Scene TreeView 与 Dark/Light Windows 视觉证据 |
 
@@ -47,7 +47,9 @@ UTF-8 arena、空闲块复用/合并、bump 回收与 used/high-water 统计；`
 registry 还封装 route clear barrier、registration serial 与 high-water 统计。
 `UISplitViewStateStorage` 固定按 node index 持有 SplitView/Splitter relationship、requested fraction、layout
 scratch 与 committed metrics；`UISplitViewLayout` 解析 orientation/minimum/clamp，`UISplitViewInput` 只提供
-splitter pointer fraction/grab 计算。`UIContext::Impl` 只保留
+splitter pointer fraction/grab 计算。`UITabViewStateStorage` 固定持有 TabView/Tab/Panel relationship、active Tab、
+专属 `UITabPaint` 与 committed metrics；`UITabViewLayout` 和 `UITabViewInput` 分别收口四向 regions 与命令校验。
+`UIContext::Impl` 只保留
 owner/root/kind 校验并编排 UTF-8 语义校验、测量、dirty transaction、焦点和控件行为。私有组件不得反向持有
 `UIContext`，也不得绕开 committed snapshot、owner-thread 或 PMR 固定容量约束。
 
@@ -151,6 +153,31 @@ paint 和 semantics 一起可见。Splitter 复用现有 `Focusable | RangeInput
 accessibility SetRangeValue 路由，不拥有独立 update loop、capture store、Widget 状态机或 GPU pipeline。
 SplitView 默认 Ignore hit；Splitter 为 Targetable、Slider semantics、Focus/SetRangeValue actions。destroy、root release、
 generation reuse 与 capacity failure 都由 Context owner-thread fixed-capacity storage 原子清理关系。
+
+### TabView / Tab 契约
+
+`makeTabViewElement(config, layout)` 与 `makeTabElement(text, config, layout)` 创建独立正式控件。TabView 默认
+Ignore hit 并发布 TabList semantics；Tab 是 `Focusable | Activate` 的 Targetable header，发布 Tab semantics，
+内容 Panel 在关联后由现有节点提升为 TabPanel semantics。`UITabViewConfig` 提供 Top/Bottom/Left/Right placement、
+Automatic/Manual activation、tab/content gap 与键盘导航是否循环。
+
+`setTabViewItems(tabView, items, activeIndex)` 必须一次提交完整关系：每个 Tab/Panel 都是同一 TabView 的不同
+direct Flow child，全部 pair 必须恰好覆盖 TabView 的所有 direct child，且 Tab 必须由 `makeTabElement()` 创建。
+self、重复、跨 root、stale generation、非 direct child、错误 kind、非法 active index 或不完整 child 集合均 fail
+closed。已关联 TabView 一旦追加 direct child，会先原子解除旧关系，调用者必须重新提交新的完整 pair list，避免
+旧 active Panel 与新树拓扑混用。
+
+Top/Bottom 使用水平 Tab strip，Left/Right 使用垂直 strip；只将 active Panel 发布为 Visible，其余关联 Panel
+以 Collapsed 进入同一 Layout/Hit/Paint/Semantics transaction。`UITabViewMetrics` 只保存最后成功 commit 的
+`tabStripRect/activePanelRect/activeTab/activePanel/activeIndex/itemCount/placement`，失败 commit、容量不足、
+destroy、root release 与 generation reuse 不泄漏半份关系或 metrics。
+
+Pointer、Activate accessibility action、Keyboard Arrow/Home/End 与 Gamepad D-pad 复用同一 selection/focus 路径。
+Automatic 模式随方向焦点同步选择，Manual 模式只移动焦点，Activate 才选择；方向输入只在 placement 对应轴上
+优先于通用空间焦点。一个 handled Down 使用既有 fixed-capacity latch 消费匹配 Up。`UITabPaint` 是 Tab 专属
+selected/hover/focus/pressed/disabled chrome，由 `UIStyleRoleId::Tab`、`makeTabChrome()`、Theme transition 与
+属性级 `TabPaint` override 管理，不复用 RadioButton paint。`UIContext`、`UITreeUpdater` 与 Runtime phase facade
+提供 items、active Tab/Panel、metrics、command 以及 `setTabPaint()/tabPaint()`。
 
 多节点业务组件可通过 `UIElementBuildTransaction` 或 Runtime 的 `PrimaryWindowUIBuildTransaction` 声明完整
 `UIComponentBuildBudget`；node、UTF-8 byte、Canvas command、Activate/Toggle/Range/TextInput/Scroll/Select slot
@@ -545,6 +572,8 @@ straight-alpha RGBA 在 shader 中 premultiply 后再应用 committed tint，继
 | `Tooltip` | Anchor help；PointerHover/KeyboardFocus/Manual，不可聚焦、Ignore hit、无 barrier | 独立顶层 overlay surface；基于最后成功 Anchor geometry 做 Auto/flip/clamp，最后成功 metrics 与整套 snapshot 原子发布 |
 | `SplitView` | 两个 direct pane + 一个专用 Splitter；fraction/minimum/orientation | 不绘制自身 chrome；一次 arrange 三个 pane/splitter rect，metrics 与 Layout/Hit/Paint/Semantics 同一成功 commit 发布 |
 | `Splitter` | Pointer drag、键盘 RangeInput、Slider semantics | 复用现有 RangeInput/Focus 路径的 targetable splitter surface；不新增 GPU 或 Widget pipeline |
+| `TabView` | 完整 direct-child Tab/Panel pairs、Top/Bottom/Left/Right、Automatic/Manual activation | 不绘制自身 chrome；Tab strip、active Panel visibility 与 committed metrics 在同一成功 transaction 发布 |
+| `Tab` | Pointer、Keyboard/Gamepad navigation、Activate、Tab selected state | `UITabPaint` 独立解析 selected/hover/focus/pressed/disabled surface 与 focused border，文本沿现有 Glyph pipeline 绘制 |
 | `DropdownItem` | ListItem selection 与焦点 | Button chrome + 选中背景 + 文本 |
 | `ListView` | 虚拟化 List/ListItem、键盘/手柄选择与滚动 | 固定 row pool + 选中/hover chrome + scrollbar |
 | `TreeView` | 虚拟化 Tree/TreeItem、层级展开/折叠 | 固定 row pool + disclosure/indent + 选中 chrome + scrollbar |
@@ -556,7 +585,7 @@ retained 状态并标记必要的 dirty 类别。
 
 - `UIContext` 持有 `productTheme()`，默认 `makeDefaultProductTheme()`；
 - `createElement(..., make*Element(...))` 按 descriptor 的 `UIStyleRoleId` 创建 Button/Checkbox/Slider/TextEdit/ProgressBar/RadioButton/
-  ScrollView/Dropdown/Popup/DropdownItem/ListView/TreeView 与 Label 文本样式在创建时 **自动 apply** 对应
+  ScrollView/Dropdown/Popup/DropdownItem/ListView/TreeView/Tab 与 Label 文本样式在创建时 **自动 apply** 对应
   `make*Chrome` / text style；Root/Panel 默认无底色（容器），需背景时用
   `makePanelBoxPaint` / `makeSettingsPanelChrome`；
 - `setProductTheme(theme)` 会校验 metric，并事务式重绑所有仍继承产品 Theme 的既有控件属性；容量、
@@ -568,7 +597,7 @@ retained 状态并标记必要的 dirty 类别。
   不再保留“所有按钮默认 Primary”的旧视觉行为；
 - `setStyleRole()` 原子切换 recipe，保留显式 local override；ButtonPrimary/ButtonDanger/ButtonTonal/
   ButtonOutlined/ButtonText/SegmentedButton、四级 Text、
-  Panel/Modal/Popup/Tooltip surface 与全部现有控件 role 均有 recipe；
+  Panel/Modal/Popup/Tooltip surface、Tab 与全部现有控件 role 均有 recipe；
 - Runtime 游戏通过 phase-scoped `PrimaryWindowUITreeUpdater::productTheme()` / `setProductTheme()` 换肤，
   不取得裸 `UIContext`；
 - 默认 panel/button 分别使用 6px/4px 统一圆角；普通 PanelSurface、Primary 与 Tonal 使用平面填充，
@@ -765,6 +794,7 @@ Back/Confirm/Menu 之外的任意 action-id 仍属于独立后续扩展。
 | `UI-PAINT-002-A` | Done；`UILogicalCornerRadii` 已贯通 Retained box/Canvas `SolidRect`、committed paint、border/inset/shadow、UI→Render 投影、checksum 与 Showcase consumer；2026-08-17 Windows gate 为 UI 672/672、Runtime UI 130/130、UI-Render 28/28、bgfx 111/111、bench 10/10，Showcase 120 帧 exit 0。rounded/stencil 子树 clip、backdrop/blur、per-corner Motion 与跨 GPU/DPI golden 仍由 `UI-PAINT-002`/`UI-003` 后置跟踪 |
 | `UI-FLOW-001` | Done：固定容量 Activatable Screen/Layer Stack、Back/Confirm/Menu Action Router、16 槽本地用户、完整 generation Gamepad assignment、per-user 设备 revision、断连/reset 清理与 2D 产品接入已落地 |
 | `UI-TOOLTIP-001` | Done：独立 Tooltip contract、同 root Anchor 关系、Hover/Focus/Manual + monotonic delay、Auto/flip/clamp、单 Window 独占、Ignore hit、输入/可见性/Modal dismissal、committed metrics、失败回滚、accessible description/HelpText fallback 与 Runtime phase facade 已落地 |
+| `UI-TABVIEW-001` | Done：独立 TabView/Tab recipes、完整 direct-child pair 关系、四向 placement、Automatic/Manual activation、Pointer/Keyboard/Gamepad/UIA 共享路径、TabList/Tab/TabPanel semantics、专属 `UITabPaint`、committed metrics、失败原子性与 Runtime phase facade 已落地 |
 | `UI-BEHAVIOR-SPI-001` | Deferred：只有标准 Behavior + routed listener 存在有证据的表达缺口时才评估 startup-only 高级 SPI |
 | `UI-002-LINUX` | Linux AT-SPI adapter 与真实辅助技术验收（Deferred，不阻塞 Windows UI-002） |
 | `SDK-001` | package/consumer gate 已落地；ADR 0024 已 Accepted，pre-1.0 strict exact-version 正反 probe（含 tweak/range 拒绝）已纳入 Windows gate。正式 supported ABI tuple baseline/object probe 仍是 release checklist |

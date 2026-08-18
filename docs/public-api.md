@@ -302,7 +302,7 @@ StyleRole/box/Canvas、semantics、enabled、pointer/focus policy 与集合配�
 `makeListViewElement()` 等是内建控件的官方 recipes。旧 `createPanel/createButton/createListView/...`
 成员入口已删除，不提供 compatibility alias。当前内建行为覆盖 Root、Panel、Modal、Label、Button、
 Checkbox、Slider、ProgressBar、RadioButton、TextEdit（默认单行；可选多行）、ScrollView，以及
-Dropdown/Popup/Tooltip/DropdownItem、ListView/TreeView、SplitView/Splitter。
+Dropdown/Popup/Tooltip/DropdownItem、ListView/TreeView、SplitView/Splitter、TabView/Tab。
 
 `UILayoutStyle` 将父容器 `flexContainer`、子项 `flexItem` 与 `Flow/Overlay` placement 分开；Overlay 使用
 alignment + offset，Px offset 可为有限负值，Percent offset 范围为 `-100..100`，以表达受父级 clip 的
@@ -330,7 +330,7 @@ shaping 不在当前契约内。多行配置容量不足或 visual-row 构建失
 
 游戏通过 Runtime phase facade 创建/更新主窗口 root，不获得裸 UIContext。Text 使用 strict UTF-8，
 descriptor 的 `string_view` 在创建时复制到固定容量 storage，失败回滚本次节点；
-`PrimaryWindowUITreeUpdater` 暴露同一组 ScrollView/Dropdown/Popup/Tooltip/ListView/TreeView/SplitView phase-scoped
+`PrimaryWindowUITreeUpdater` 暴露同一组 ScrollView/Dropdown/Popup/Tooltip/ListView/TreeView/SplitView/TabView phase-scoped
 mutation/query，包括集合 DataSource、metrics、selection、scroll 与 Tree expansion；
 `setTextOverflow()/textOverflow()` 也通过相同 phase facade 暴露；
 `setProductTheme()` 可事务式更新既有控件仍继承的产品 chrome；单节点
@@ -395,6 +395,19 @@ child、非专用 Splitter 或非三子节点均拒绝。`setSplitViewFraction()
 Splitter 只是强类型 authoring profile：复用现有 `Focusable | RangeInput`、Pointer Capture、键盘命令、Slider
 semantics 与 UIA SetRangeValue，不另建 Widget state machine、atlas、Asset 或 GPU pipeline。SplitView 默认 Ignore hit，
 Splitter 默认 Targetable/Slider semantics；icon-only Button 的 accessible name 仍由 Button root 提供。
+
+TabView authoring 使用 `UITabViewConfig`、`UITabConfig` 与 `makeTabViewElement()/makeTabElement()`。
+`setTabViewItems(tabView, items, activeIndex)` 一次声明完整 Tab/Panel pairs；每端都必须是同 root、不同且恰好覆盖
+TabView 所有 direct Flow child，Tab 还必须是专用 kind。追加 direct child 会解除已有 relationship，调用方需重新
+提交完整 list；self、重复、stale、跨 root、非 direct child、错误 kind、不完整集合和非法 active index 均零 mutation。
+Top/Bottom 使用水平 strip，Left/Right 使用垂直 strip；只有 active Panel 发布为 Visible。
+
+`UITabActivationMode::Automatic` 让方向导航同时移动 focus 与 selection，Manual 只移动 focus 并在 Activate 时选择；
+Pointer、Keyboard Arrow/Home/End、Gamepad D-pad 与 accessibility Activate 复用相同路径。`UITabViewMetrics` 发布最后
+成功 commit 的 strip/active Panel geometry、active Tab/Panel/index、item count 与 placement。`UITabPaint` 是
+`UIStyleRoleId::Tab` 的专属 interaction chrome，可由 `setTabPaint()/tabPaint()` 局部覆盖，不复用
+`UIRadioButtonPaint`。`UIContext`、`UITreeUpdater` 与 `PrimaryWindowUITreeUpdater` 均暴露 items、active state、
+metrics、command 和 paint API；Runtime facade 继续受 phase epoch/lifetime 约束。
 
 `UISemanticsDescriptor` 支持 Automatic/Publish/MergeDescendants/Exclude、显式 role/name/description/actions；
 committed semantics 使用最近 published ancestor，显式空 name 不回退 content。`UIStyleRoleId` 与 behavior/

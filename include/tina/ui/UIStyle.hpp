@@ -37,6 +37,7 @@ enum class UIStyleRoleId : u8 {
     ButtonText,
     SegmentedButton,
     TooltipSurface,
+    Tab,
 };
 
 // Startup-registered stylesheet identities. Zero is invalid so a default
@@ -144,7 +145,8 @@ enum class UIStyleOverride : u16 {
     TreeViewPaint = 1U << 10U,
     TextEditPaint = 1U << 11U,
     ImageTint = 1U << 12U,
-    All = (1U << 13U) - 1U,
+    TabPaint = 1U << 13U,
+    All = (1U << 14U) - 1U,
 };
 
 [[nodiscard]] constexpr UIStyleOverride operator|(UIStyleOverride left, UIStyleOverride right) noexcept

@@ -28,6 +28,7 @@ add_executable(tina_ui_tests
     UISliderChangeCallbackRegistryTests.cpp
     UISliderTests.cpp
     UISplitViewTests.cpp
+    UITabViewTests.cpp
     UIScrollViewTests.cpp
     UIScrollViewLayoutTests.cpp
     UIListViewTests.cpp
@@ -97,6 +98,7 @@ add_executable(tina_ui_tests
     header_isolation/UIPopupHeader.cpp
     header_isolation/UISliderHeader.cpp
     header_isolation/UISplitViewHeader.cpp
+    header_isolation/UITabViewHeader.cpp
     header_isolation/UIStyleHeader.cpp
     header_isolation/UIMotionHeader.cpp
     header_isolation/UISemanticsHeader.cpp

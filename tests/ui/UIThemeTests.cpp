@@ -452,7 +452,10 @@ TEST(UIThemeTest, SetProductThemeUpdatesEveryManagedControlProperty)
     auto textEdit = builder.createElement(root->rootNodeId(), UI::makeTextEditElement());
     auto progress = builder.createElement(root->rootNodeId(), UI::makeProgressBarElement());
     auto radio = builder.createElement(root->rootNodeId(), UI::makeRadioButtonElement());
-    ASSERT_TRUE(label && checkbox && slider && textEdit && progress && radio);
+    auto tabView = builder.createElement(root->rootNodeId(), UI::makeTabViewElement());
+    ASSERT_TRUE(tabView);
+    auto tab = builder.createElement(*tabView, UI::makeTabElement("Tab"));
+    ASSERT_TRUE(label && checkbox && slider && textEdit && progress && radio && tab);
     auto updater = context->treeUpdater(*root);
     ASSERT_TRUE(updater.has_value());
     ASSERT_TRUE(context->setProductTheme(UI::makeLightProductTheme()).has_value());
@@ -466,6 +469,8 @@ TEST(UIThemeTest, SetProductThemeUpdatesEveryManagedControlProperty)
     EXPECT_EQ(updater->progressBarPaint(*progress).value(), UI::makeProgressBarChrome(light).bar);
     EXPECT_EQ(updater->radioButtonPaint(*radio).value(), UI::makeRadioButtonChrome(light).radio);
     EXPECT_EQ(updater->textStyle(*radio).value(), UI::makeRadioButtonChrome(light).label);
+    EXPECT_EQ(updater->tabPaint(*tab).value(), UI::makeTabChrome(light).tab);
+    EXPECT_EQ(updater->textStyle(*tab).value(), UI::makeTabChrome(light).label);
 }
 
 TEST(UIThemeTest, InvalidThemeAndWrongThreadAreRejectedWithoutMutation)

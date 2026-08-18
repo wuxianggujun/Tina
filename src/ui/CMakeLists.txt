@@ -13,6 +13,7 @@ set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIScrollView.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UISlider.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UISplitView.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UITabView.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIStyle.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIMotion.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIDirty.hpp
@@ -104,6 +105,10 @@ add_library(tina_ui STATIC
     detail/UISplitViewLayout.hpp
     detail/UISplitViewStateStorage.hpp
     detail/UISplitViewStateStorage.cpp
+    detail/UITabViewInput.hpp
+    detail/UITabViewLayout.hpp
+    detail/UITabViewStateStorage.hpp
+    detail/UITabViewStateStorage.cpp
     detail/UISemanticsSnapshotBuilder.hpp
     detail/UISemanticsSnapshotBuilder.cpp
     detail/UIStyleRoleResolver.hpp

@@ -312,7 +312,7 @@ try {
                     if ($current.ControlType.Id -eq 50000 -and $current.Name -eq 'Primary action') {
                         $primaryButtonElement = $element
                     }
-                    if ($current.ControlType.Id -eq 50004) {
+                    if ($current.ControlType.Id -eq 50004 -and $current.Name -eq 'Profile name') {
                         $textEditElement = $element
                         $textEditAutomationId = [string]$current.AutomationId
                         $propertyValue = $element.GetCurrentPropertyValue(

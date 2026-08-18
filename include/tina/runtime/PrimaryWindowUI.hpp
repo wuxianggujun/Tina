@@ -239,6 +239,22 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Result<UI::UISplitViewMetrics>
     splitViewMetrics(UI::UINodeId splitView) const;
     [[nodiscard]] Core::Result<bool> isSplitterDragging(UI::UINodeId splitter) const;
+    [[nodiscard]] Core::Status setTabViewItems(
+        UI::UINodeId tabView, std::span<const UI::UITabViewItem> items,
+        u32 activeIndex = 0);
+    [[nodiscard]] Core::Status clearTabViewItems(UI::UINodeId tabView);
+    [[nodiscard]] Core::Result<u32> tabViewItemCount(UI::UINodeId tabView) const;
+    [[nodiscard]] Core::Result<UI::UITabViewItem>
+    tabViewItemAt(UI::UINodeId tabView, u32 index) const;
+    [[nodiscard]] Core::Status setTabViewActiveTab(UI::UINodeId tabView, UI::UINodeId tab);
+    [[nodiscard]] Core::Result<UI::UINodeId> tabViewActiveTab(UI::UINodeId tabView) const;
+    [[nodiscard]] Core::Result<UI::UINodeId> tabViewActivePanel(UI::UINodeId tabView) const;
+    [[nodiscard]] Core::Result<UI::UITabViewMetrics>
+    tabViewMetrics(UI::UINodeId tabView) const;
+    [[nodiscard]] Core::Result<UI::UITabViewCommandResult>
+    routeTabViewCommand(UI::UINodeId tabView, UI::UITabViewCommand command);
+    [[nodiscard]] Core::Status setTabPaint(UI::UINodeId tab, const UI::UITabPaint& paint);
+    [[nodiscard]] Core::Result<UI::UITabPaint> tabPaint(UI::UINodeId tab) const;
     [[nodiscard]] Core::Status setScrollViewStyle(UI::UINodeId scrollView, const UI::UIScrollViewStyle& style);
     [[nodiscard]] Core::Result<UI::UIScrollViewStyle> scrollViewStyle(UI::UINodeId scrollView) const;
     [[nodiscard]] Core::Status setScrollViewOffset(UI::UINodeId scrollView, UI::UIScrollOffset offset);

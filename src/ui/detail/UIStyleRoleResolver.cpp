@@ -106,6 +106,13 @@ ProductChrome productChromeFor(UIStyleRoleId role, const UITheme& theme) noexcep
         chrome.text = segmentedButton.label;
         break;
     }
+    case UIStyleRoleId::Tab: {
+        const UITabChrome tab = makeTabChrome(theme);
+        chrome.box = tab.box;
+        chrome.tab = tab.tab;
+        chrome.text = tab.label;
+        break;
+    }
     case UIStyleRoleId::ScrollView:
         chrome.scrollView = makeScrollViewPaint(theme);
         break;

@@ -1569,6 +1569,83 @@ TEST_F(PrimaryWindowUICapabilityTest, SplitViewFacadeRoundTripsAndExpiresWithPha
     EXPECT_EQ(expiredClear.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
 }
 
+TEST_F(PrimaryWindowUICapabilityTest, TabViewFacadeRoundTripsCommandsMetricsAndExpiresWithPhase)
+{
+    auto contextResult = UI::UIContext::Create(window, {.nodeCapacity = 16, .rootCapacity = 1});
+    ASSERT_TRUE(contextResult.has_value()) << contextResult.error().message;
+    context = std::move(*contextResult);
+
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+
+    ASSERT_TRUE(tree->setLayoutStyle(
+        root->rootNodeId(), fixedSize(240.0F, 120.0F)).has_value());
+    auto tabView = tree->createElement(
+        root->rootNodeId(), UI::makeTabViewElement({}, fixedSize(240.0F, 120.0F)));
+    ASSERT_TRUE(tabView.has_value()) << tabView.error().message;
+    auto firstTab = tree->createElement(
+        *tabView, UI::makeTabElement("First", {}, fixedSize(60.0F, 24.0F)));
+    auto secondTab = tree->createElement(
+        *tabView, UI::makeTabElement("Second", {}, fixedSize(70.0F, 24.0F)));
+    auto firstPanel = tree->createElement(*tabView, UI::makePanelElement());
+    auto secondPanel = tree->createElement(*tabView, UI::makePanelElement());
+    ASSERT_TRUE(firstTab && secondTab && firstPanel && secondPanel);
+    const std::array items{
+        UI::UITabViewItem{.tab = *firstTab, .panel = *firstPanel},
+        UI::UITabViewItem{.tab = *secondTab, .panel = *secondPanel},
+    };
+    ASSERT_TRUE(tree->setTabViewItems(*tabView, items).has_value());
+    constexpr UI::UITabPaint tabPaint{
+        .selectedBackgroundColor = {.red = 20, .green = 30, .blue = 40, .alpha = 255},
+        .focusedBorderColor = {.red = 240, .green = 240, .blue = 240, .alpha = 255},
+    };
+    ASSERT_TRUE(tree->setTabPaint(*firstTab, tabPaint).has_value());
+    EXPECT_EQ(tree->tabPaint(*firstTab).value(), tabPaint);
+    EXPECT_EQ(tree->tabViewItemCount(*tabView).value(), 2U);
+    EXPECT_EQ(tree->tabViewItemAt(*tabView, 1).value(), items[1]);
+    EXPECT_EQ(tree->tabViewActiveTab(*tabView).value(), *firstTab);
+    EXPECT_EQ(tree->tabViewActivePanel(*tabView).value(), *firstPanel);
+
+    ASSERT_TRUE(context->commitLayout({.width = 240.0F, .height = 120.0F}).has_value());
+    auto command = tree->routeTabViewCommand(*tabView, UI::UITabViewCommand::Next);
+    ASSERT_TRUE(command.has_value()) << command.error().message;
+    EXPECT_TRUE(command->targeted);
+    EXPECT_TRUE(command->selectionChanged);
+    EXPECT_EQ(tree->tabViewActiveTab(*tabView).value(), *secondTab);
+    ASSERT_TRUE(context->commitLayout({.width = 240.0F, .height = 120.0F}).has_value());
+    const UI::UITabViewMetrics metrics = tree->tabViewMetrics(*tabView).value();
+    EXPECT_EQ(metrics.activeTab, *secondTab);
+    EXPECT_EQ(metrics.activePanel, *secondPanel);
+    EXPECT_EQ(metrics.itemCount, 2U);
+
+    ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
+    auto expiredCount = tree->tabViewItemCount(*tabView);
+    ASSERT_FALSE(expiredCount.has_value());
+    EXPECT_EQ(expiredCount.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredMetrics = tree->tabViewMetrics(*tabView);
+    ASSERT_FALSE(expiredMetrics.has_value());
+    EXPECT_EQ(expiredMetrics.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredCommand = tree->routeTabViewCommand(*tabView, UI::UITabViewCommand::Previous);
+    ASSERT_FALSE(expiredCommand.has_value());
+    EXPECT_EQ(expiredCommand.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    Core::Status expiredSet = tree->setTabViewActiveTab(*tabView, *firstTab);
+    ASSERT_FALSE(expiredSet.has_value());
+    EXPECT_EQ(expiredSet.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    Core::Status expiredClear = tree->clearTabViewItems(*tabView);
+    ASSERT_FALSE(expiredClear.has_value());
+    EXPECT_EQ(expiredClear.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    Core::Status expiredTabPaint = tree->setTabPaint(*firstTab, tabPaint);
+    ASSERT_FALSE(expiredTabPaint.has_value());
+    EXPECT_EQ(expiredTabPaint.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+}
+
 TEST_F(PrimaryWindowUICapabilityTest, RangeAndSelectionControlFacadesRoundTripAndExpire)
 {
     CapabilityState state;

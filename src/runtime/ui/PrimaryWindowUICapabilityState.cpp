@@ -1979,6 +1979,193 @@ Core::Result<bool> PrimaryWindowUICapabilityState::isSplitterDragging(
     return *dragging;
 }
 
+Core::Status PrimaryWindowUICapabilityState::setTabViewItems(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId tabView, std::span<const UI::UITabViewItem> items, u32 activeIndex)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setTabViewItems";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setTabViewItems(tabView, items, activeIndex);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::clearTabViewItems(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId tabView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::clearTabViewItems";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.clearTabViewItems(tabView);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<u32> PrimaryWindowUICapabilityState::tabViewItemCount(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId tabView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::tabViewItemCount";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto count = updater.tabViewItemCount(tabView);
+    if (!count)
+    {
+        return Core::failure(rememberFirstError(std::move(count.error()), Operation));
+    }
+    return *count;
+}
+
+Core::Result<UI::UITabViewItem> PrimaryWindowUICapabilityState::tabViewItemAt(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId tabView, u32 index)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::tabViewItemAt";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto item = updater.tabViewItemAt(tabView, index);
+    if (!item)
+    {
+        return Core::failure(rememberFirstError(std::move(item.error()), Operation));
+    }
+    return *item;
+}
+
+Core::Status PrimaryWindowUICapabilityState::setTabViewActiveTab(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId tabView, UI::UINodeId tab)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setTabViewActiveTab";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setTabViewActiveTab(tabView, tab);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::tabViewActiveTab(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId tabView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::tabViewActiveTab";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto tab = updater.tabViewActiveTab(tabView);
+    if (!tab)
+    {
+        return Core::failure(rememberFirstError(std::move(tab.error()), Operation));
+    }
+    return *tab;
+}
+
+Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::tabViewActivePanel(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId tabView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::tabViewActivePanel";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto panel = updater.tabViewActivePanel(tabView);
+    if (!panel)
+    {
+        return Core::failure(rememberFirstError(std::move(panel.error()), Operation));
+    }
+    return *panel;
+}
+
+Core::Result<UI::UITabViewMetrics> PrimaryWindowUICapabilityState::tabViewMetrics(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId tabView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::tabViewMetrics";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto metrics = updater.tabViewMetrics(tabView);
+    if (!metrics)
+    {
+        return Core::failure(rememberFirstError(std::move(metrics.error()), Operation));
+    }
+    return *metrics;
+}
+
+Core::Result<UI::UITabViewCommandResult> PrimaryWindowUICapabilityState::routeTabViewCommand(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId tabView, UI::UITabViewCommand command)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::routeTabViewCommand";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto result = updater.routeTabViewCommand(tabView, command);
+    if (!result)
+    {
+        return Core::failure(rememberFirstError(std::move(result.error()), Operation));
+    }
+    return *result;
+}
+
+Core::Status PrimaryWindowUICapabilityState::setTabPaint(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId tab, const UI::UITabPaint& paint)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setTabPaint";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setTabPaint(tab, paint);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UITabPaint> PrimaryWindowUICapabilityState::tabPaint(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId tab)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::tabPaint";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto paint = updater.tabPaint(tab);
+    if (!paint)
+    {
+        return Core::failure(rememberFirstError(std::move(paint.error()), Operation));
+    }
+    return *paint;
+}
+
 Core::Status PrimaryWindowUICapabilityState::setScrollViewStyle(u64 epoch, PrimaryWindowUIPhase phase,
                                                                 UI::UITreeUpdater& updater,
                                                                 UI::UINodeId scrollView,

@@ -1050,6 +1050,114 @@ PrimaryWindowUITreeUpdater::isSplitterDragging(UI::UINodeId splitter) const
     return m_state->isSplitterDragging(m_epoch, m_phase, m_updater, splitter);
 }
 
+Core::Status PrimaryWindowUITreeUpdater::setTabViewItems(
+    UI::UINodeId tabView, std::span<const UI::UITabViewItem> items, u32 activeIndex)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setTabViewItems");
+    }
+    return m_state->setTabViewItems(m_epoch, m_phase, m_updater, tabView, items, activeIndex);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::clearTabViewItems(UI::UINodeId tabView)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::clearTabViewItems");
+    }
+    return m_state->clearTabViewItems(m_epoch, m_phase, m_updater, tabView);
+}
+
+Core::Result<u32> PrimaryWindowUITreeUpdater::tabViewItemCount(UI::UINodeId tabView) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<u32>("PrimaryWindowUITreeUpdater::tabViewItemCount");
+    }
+    return m_state->tabViewItemCount(m_epoch, m_phase, m_updater, tabView);
+}
+
+Core::Result<UI::UITabViewItem> PrimaryWindowUITreeUpdater::tabViewItemAt(
+    UI::UINodeId tabView, u32 index) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UITabViewItem>("PrimaryWindowUITreeUpdater::tabViewItemAt");
+    }
+    return m_state->tabViewItemAt(m_epoch, m_phase, m_updater, tabView, index);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setTabViewActiveTab(
+    UI::UINodeId tabView, UI::UINodeId tab)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setTabViewActiveTab");
+    }
+    return m_state->setTabViewActiveTab(m_epoch, m_phase, m_updater, tabView, tab);
+}
+
+Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::tabViewActiveTab(
+    UI::UINodeId tabView) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UINodeId>("PrimaryWindowUITreeUpdater::tabViewActiveTab");
+    }
+    return m_state->tabViewActiveTab(m_epoch, m_phase, m_updater, tabView);
+}
+
+Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::tabViewActivePanel(
+    UI::UINodeId tabView) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UINodeId>("PrimaryWindowUITreeUpdater::tabViewActivePanel");
+    }
+    return m_state->tabViewActivePanel(m_epoch, m_phase, m_updater, tabView);
+}
+
+Core::Result<UI::UITabViewMetrics> PrimaryWindowUITreeUpdater::tabViewMetrics(
+    UI::UINodeId tabView) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UITabViewMetrics>("PrimaryWindowUITreeUpdater::tabViewMetrics");
+    }
+    return m_state->tabViewMetrics(m_epoch, m_phase, m_updater, tabView);
+}
+
+Core::Result<UI::UITabViewCommandResult> PrimaryWindowUITreeUpdater::routeTabViewCommand(
+    UI::UINodeId tabView, UI::UITabViewCommand command)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UITabViewCommandResult>(
+            "PrimaryWindowUITreeUpdater::routeTabViewCommand");
+    }
+    return m_state->routeTabViewCommand(m_epoch, m_phase, m_updater, tabView, command);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setTabPaint(
+    UI::UINodeId tab, const UI::UITabPaint& paint)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setTabPaint");
+    }
+    return m_state->setTabPaint(m_epoch, m_phase, m_updater, tab, paint);
+}
+
+Core::Result<UI::UITabPaint> PrimaryWindowUITreeUpdater::tabPaint(UI::UINodeId tab) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UITabPaint>("PrimaryWindowUITreeUpdater::tabPaint");
+    }
+    return m_state->tabPaint(m_epoch, m_phase, m_updater, tab);
+}
+
 Core::Status PrimaryWindowUITreeUpdater::setScrollViewStyle(UI::UINodeId scrollView,
                                                            const UI::UIScrollViewStyle& style)
 {

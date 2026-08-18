@@ -20,6 +20,7 @@ namespace {
         .listView = chrome.listView,
         .treeView = chrome.treeView,
         .textEdit = chrome.textEdit,
+        .tab = chrome.tab,
     };
 }
 

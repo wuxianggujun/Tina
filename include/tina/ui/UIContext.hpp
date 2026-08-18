@@ -33,6 +33,7 @@
 #include <tina/ui/UISemantics.hpp>
 #include <tina/ui/UISlider.hpp>
 #include <tina/ui/UISplitView.hpp>
+#include <tina/ui/UITabView.hpp>
 #include <tina/ui/UIText.hpp>
 #include <tina/ui/UITextEdit.hpp>
 #include <tina/ui/UITheme.hpp>
@@ -401,6 +402,20 @@ class UITreeUpdater final {
     [[nodiscard]] Core::Result<float> splitViewFraction(UINodeId splitView) const;
     [[nodiscard]] Core::Result<UISplitViewMetrics> splitViewMetrics(UINodeId splitView) const;
     [[nodiscard]] Core::Result<bool> isSplitterDragging(UINodeId splitter) const;
+    [[nodiscard]] Core::Status setTabViewItems(UINodeId tabView,
+                                               std::span<const UITabViewItem> items,
+                                               u32 activeIndex = 0);
+    [[nodiscard]] Core::Status clearTabViewItems(UINodeId tabView);
+    [[nodiscard]] Core::Result<u32> tabViewItemCount(UINodeId tabView) const;
+    [[nodiscard]] Core::Result<UITabViewItem> tabViewItemAt(UINodeId tabView, u32 index) const;
+    [[nodiscard]] Core::Status setTabViewActiveTab(UINodeId tabView, UINodeId tab);
+    [[nodiscard]] Core::Result<UINodeId> tabViewActiveTab(UINodeId tabView) const;
+    [[nodiscard]] Core::Result<UINodeId> tabViewActivePanel(UINodeId tabView) const;
+    [[nodiscard]] Core::Result<UITabViewMetrics> tabViewMetrics(UINodeId tabView) const;
+    [[nodiscard]] Core::Result<UITabViewCommandResult>
+    routeTabViewCommand(UINodeId tabView, UITabViewCommand command);
+    [[nodiscard]] Core::Status setTabPaint(UINodeId tab, const UITabPaint& paint);
+    [[nodiscard]] Core::Result<UITabPaint> tabPaint(UINodeId tab) const;
     [[nodiscard]] Core::Status setScrollViewStyle(UINodeId scrollView, const UIScrollViewStyle& style);
     [[nodiscard]] Core::Result<UIScrollViewStyle> scrollViewStyle(UINodeId scrollView) const;
     [[nodiscard]] Core::Status setScrollViewOffset(UINodeId scrollView, UIScrollOffset offset);
@@ -704,6 +719,15 @@ class UIContext final {
     [[nodiscard]] Core::Result<UIDropdownCommandResult> routeDropdownCommand(UIDropdownCommand command, bool pressed);
     [[nodiscard]] Core::Result<UIListViewCommandResult> routeListViewCommand(UIListViewCommand command, bool pressed);
     [[nodiscard]] Core::Result<UITreeViewCommandResult> routeTreeViewCommand(UITreeViewCommand command, bool pressed);
+    // Routes a physical directional input to the focused TabView when its
+    // placement owns that axis. A non-matching axis declines so generic spatial
+    // focus can continue; a handled Down claims the matching Up.
+    [[nodiscard]] Core::Result<UITabViewCommandResult>
+    routeFocusedTabViewDirection(UIFocusNavigationDirection direction, bool pressed);
+    // Routes Home/End-style TabView commands to the focused Tab. Releases only
+    // consume a command previously claimed by its matching Down.
+    [[nodiscard]] Core::Result<UITabViewCommandResult>
+    routeFocusedTabViewCommand(UITabViewCommand command, bool pressed);
     [[nodiscard]] UINodeId defaultActionFocus() const noexcept;
     [[nodiscard]] UINodeId activeFocusScope() const noexcept;
     [[nodiscard]] UINodeId activeModal() const noexcept;
@@ -717,6 +741,20 @@ class UIContext final {
     [[nodiscard]] Core::Result<float> splitViewFraction(UINodeId splitView) const;
     [[nodiscard]] Core::Result<UISplitViewMetrics> splitViewMetrics(UINodeId splitView) const;
     [[nodiscard]] Core::Result<bool> isSplitterDragging(UINodeId splitter) const;
+    [[nodiscard]] Core::Status setTabViewItems(UINodeId tabView,
+                                               std::span<const UITabViewItem> items,
+                                               u32 activeIndex = 0);
+    [[nodiscard]] Core::Status clearTabViewItems(UINodeId tabView);
+    [[nodiscard]] Core::Result<u32> tabViewItemCount(UINodeId tabView) const;
+    [[nodiscard]] Core::Result<UITabViewItem> tabViewItemAt(UINodeId tabView, u32 index) const;
+    [[nodiscard]] Core::Status setTabViewActiveTab(UINodeId tabView, UINodeId tab);
+    [[nodiscard]] Core::Result<UINodeId> tabViewActiveTab(UINodeId tabView) const;
+    [[nodiscard]] Core::Result<UINodeId> tabViewActivePanel(UINodeId tabView) const;
+    [[nodiscard]] Core::Result<UITabViewMetrics> tabViewMetrics(UINodeId tabView) const;
+    [[nodiscard]] Core::Result<UITabViewCommandResult>
+    routeTabViewCommand(UINodeId tabView, UITabViewCommand command);
+    [[nodiscard]] Core::Status setTabPaint(UINodeId tab, const UITabPaint& paint);
+    [[nodiscard]] Core::Result<UITabPaint> tabPaint(UINodeId tab) const;
     // Tooltip relationships and presentation are owner-thread, per-Window, and
     // advanced by commitLayout() using the configured monotonic clock. These
     // direct Context APIs are useful to adapters; root-scoped authoring should
@@ -913,6 +951,30 @@ class UIContext final {
         UINodeId updaterRoot, UINodeId splitView) const;
     [[nodiscard]] Core::Result<bool> isSplitterDraggingFromUpdater(
         UINodeId updaterRoot, UINodeId splitter) const;
+    [[nodiscard]] Core::Status setTabViewItemsFromUpdater(
+        UINodeId updaterRoot, UINodeId tabView,
+        std::span<const UITabViewItem> items, u32 activeIndex);
+    [[nodiscard]] Core::Status clearTabViewItemsFromUpdater(
+        UINodeId updaterRoot, UINodeId tabView);
+    [[nodiscard]] Core::Result<u32> tabViewItemCountFromUpdater(
+        UINodeId updaterRoot, UINodeId tabView) const;
+    [[nodiscard]] Core::Result<UITabViewItem> tabViewItemAtFromUpdater(
+        UINodeId updaterRoot, UINodeId tabView, u32 index) const;
+    [[nodiscard]] Core::Status setTabViewActiveTabFromUpdater(
+        UINodeId updaterRoot, UINodeId tabView, UINodeId tab);
+    [[nodiscard]] Core::Result<UINodeId> tabViewActiveTabFromUpdater(
+        UINodeId updaterRoot, UINodeId tabView) const;
+    [[nodiscard]] Core::Result<UINodeId> tabViewActivePanelFromUpdater(
+        UINodeId updaterRoot, UINodeId tabView) const;
+    [[nodiscard]] Core::Result<UITabViewMetrics> tabViewMetricsFromUpdater(
+        UINodeId updaterRoot, UINodeId tabView) const;
+    [[nodiscard]] Core::Result<UITabViewCommandResult>
+    routeTabViewCommandFromUpdater(UINodeId updaterRoot, UINodeId tabView,
+                                   UITabViewCommand command);
+    [[nodiscard]] Core::Status setTabPaintFromUpdater(UINodeId updaterRoot, UINodeId tab,
+                                                      const UITabPaint& paint);
+    [[nodiscard]] Core::Result<UITabPaint> tabPaintFromUpdater(UINodeId updaterRoot,
+                                                               UINodeId tab) const;
     [[nodiscard]] Core::Status setScrollViewStyleFromUpdater(UINodeId updaterRoot, UINodeId scrollView,
                                                             const UIScrollViewStyle& style);
     [[nodiscard]] Core::Result<UIScrollViewStyle> scrollViewStyleFromUpdater(UINodeId updaterRoot,

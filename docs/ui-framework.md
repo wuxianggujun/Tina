@@ -73,6 +73,7 @@ private Render backend, currently bgfx
 | Behavior | `include/tina/ui/UIBehavior.hpp`；Activate/Toggle/RangeInput/TextInput/Scroll/Select 使用私有 fixed-capacity side store，输入与具体视觉仍由 resolver 约束到私有 kind |
 | Style/Theme | `include/tina/ui/UIStyle.hpp`、`UITheme.hpp` 与属性 override/reset |
 | Tooltip | `include/tina/ui/UITooltip.hpp` + `makeTooltipElement()`；显式同 root Anchor、monotonic delay、committed metrics，独立于 Popup barrier |
+| TabView | `include/tina/ui/UITabView.hpp` + `makeTabViewElement()/makeTabElement()`；完整 direct-child pair、四向 layout、激活/导航与 committed metrics |
 | Paint | `include/tina/ui/UIImageSource.hpp`、`UIImage.hpp`、`UIIcon.hpp` 与 `UIPaint.hpp`；Rectangle/Ellipse/Line box paint、Image/UIIcon content 和 Canvas `SolidRect`/`SolidEllipse`/`SolidLine`/`Image`/`NineSlice` |
 | Render bridge | `include/tina/integration/UIRenderDisplayList.hpp` |
 | DisplayList | `include/tina/render/UIDisplayList.hpp`；当前有 `SolidQuad`、`SolidEllipse`、`Glyph` 与 `ImageQuad`；`SolidQuad` 使用 `UIPixelCornerRadii`，Line 在 bridge 投影为带 exact 四顶点的 `SolidQuad` |
@@ -537,6 +538,29 @@ commit capacity failure 保留旧关系/旧 metrics 或原子释放全部反向�
 `Splitter` 复用 `Focusable | RangeInput`、现有 `armedSlider`/Pointer Capture、`routeRangeInputCommand()` 与
 `performAccessibilityAction(SetRangeValue)`，仅在 authoring/semantics 层区别于 Slider。它不拥有第二套 input/update loop、
 focus/capture store、Icon/Image pipeline 或 GPU shader；SplitView 本身默认 Ignore hit，Splitter 才是 targetable。
+
+### TabView / Tab：完整 pair relationship 与专属 Tab chrome
+
+TabView/Tab 是现有 retained tree 的独立 built-in contract。`UITabViewStateStorage` 按 node index 固定容量保存
+TabView config、Tab/Panel 双向 links、active Tab、`UITabPaint`、layout scratch 与 committed metrics；
+`UITabViewLayout` 只计算 Top/Bottom/Left/Right strip/panel regions，`UITabViewInput` 收口 command validation。
+它们不反向拥有 `UIContext`，也不增加第二套 focus、input、semantics、paint、Runtime facade 或 update loop。
+
+`setTabViewItems()` 是完整关系提交，而不是增量 append：所有 pair 必须由同一 TabView 的不同 direct Flow child
+构成并恰好覆盖其 direct children。Tab 必须是专用 Tab kind，Panel 复用普通 retained content node；关联后追加
+child 会解除旧关系，下一次必须重新提交完整 list。destroy、root release、generation reuse 与 dirty/capacity
+failure 均由 Context 协调固定容量 storage 原子清理或保留旧 committed publication。
+
+布局只发布 active Panel，其余 Panel 为 Collapsed；`UITabViewMetrics` 与 Layout/Hit/Paint/Semantics candidate 同时
+commit。Automatic activation 随方向 focus 选择，Manual activation 只移动 focus，直到 Pointer/Activate 明确选择。
+Keyboard Arrow/Home/End、Gamepad D-pad、Pointer 与 accessibility action 复用同一默认行为；placement 对应轴的
+Tab navigation 先于通用空间 focus，handled Down/Up 复用既有 fixed-capacity latch。
+
+TabView 发布 TabList，Tab 发布可 Focus/Activate 的 Tab 与 selected state，active Panel 由关系提升为 TabPanel；
+inactive Panel 不进入 committed semantics。`UITabPaint` 独立表达 selected/hover/focus/pressed/disabled surface 和
+focused border，`UIStyleRoleId::Tab`/`makeTabChrome()`/Theme transition/`UIStyleOverride::TabPaint` 共同管理。
+这不是 RadioButton chrome alias，也不新增 GPU primitive；实际 box/text 仍复用现有 committed paint、DisplayList
+与 shader pipeline。
 
 ### Image、Icon 与 NineSlice
 

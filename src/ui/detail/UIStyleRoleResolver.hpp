@@ -16,6 +16,7 @@ inline constexpr u16 ThemeBindingDropdownPaint = 1U << 8U;
 inline constexpr u16 ThemeBindingListViewPaint = 1U << 9U;
 inline constexpr u16 ThemeBindingTreeViewPaint = 1U << 10U;
 inline constexpr u16 ThemeBindingTextEditPaint = 1U << 11U;
+inline constexpr u16 ThemeBindingTabPaint = 1U << 13U;
 
 struct ProductChrome final {
     UIBoxPaint box{};
@@ -30,11 +31,12 @@ struct ProductChrome final {
     UIListViewPaint listView{};
     UITreeViewPaint treeView{};
     UITextEditPaint textEdit{};
+    UITabPaint tab{};
 };
 
 [[nodiscard]] constexpr bool isValidStyleRole(UIStyleRoleId role) noexcept
 {
-    return role >= UIStyleRoleId::None && role <= UIStyleRoleId::TooltipSurface;
+    return role >= UIStyleRoleId::None && role <= UIStyleRoleId::Tab;
 }
 
 [[nodiscard]] constexpr u16 defaultThemeBindingsFor(UIStyleRoleId role) noexcept
@@ -74,6 +76,8 @@ struct ProductChrome final {
         return ThemeBindingRadioButtonPaint | ThemeBindingTextStyle;
     case UIStyleRoleId::SegmentedButton:
         return ThemeBindingBoxPaint | ThemeBindingRadioButtonPaint | ThemeBindingTextStyle;
+    case UIStyleRoleId::Tab:
+        return ThemeBindingBoxPaint | ThemeBindingTabPaint | ThemeBindingTextStyle;
     case UIStyleRoleId::ScrollView:
         return ThemeBindingScrollViewPaint;
     case UIStyleRoleId::Dropdown:

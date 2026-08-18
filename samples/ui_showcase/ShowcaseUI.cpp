@@ -748,7 +748,10 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
     UI::UILayoutStyle textEditLayout = fillWidthStyle(46.0F);
     textEditLayout.margin.top = 6.0F;
     textEditLayout.padding = UI::UIEdgeSpacing::HorizontalVertical(12.0F, 6.0F);
-    auto textEdit = tree->createElement(nodes_.cards[2], UI::makeTextEditElement("Tina Player", textEditLayout));
+    UI::UIElementDescriptor profileTextEdit =
+        UI::makeTextEditElement("Tina Player", textEditLayout);
+    profileTextEdit.semantics.name = "Profile name";
+    auto textEdit = tree->createElement(nodes_.cards[2], profileTextEdit);
     if (!textEdit) {
         return Core::failure(std::move(textEdit.error()));
     }
@@ -1027,6 +1030,7 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
         notesLayout.margin.top = 4.0F;
         notesLayout.padding = UI::UIEdgeSpacing::HorizontalVertical(8.0F, 6.0F);
         UI::UIElementDescriptor notesDesc = UI::makeTextEditElement({}, notesLayout);
+        notesDesc.semantics.name = "Notes (multiline)";
         notesDesc.textEditMultiline = {
             .enabled = true,
             .wrapMode = UI::UITextEditWrapMode::SoftWrap,

@@ -29,6 +29,8 @@ enum class BuiltinElementKind : u8 {
     Tooltip,
     SplitView,
     Splitter,
+    TabView,
+    Tab,
 };
 
 struct UIWidgetTraits final {
@@ -47,6 +49,7 @@ struct UIWidgetTraits final {
     case BuiltinElementKind::DropdownItem:
     case BuiltinElementKind::ListViewItem:
     case BuiltinElementKind::TreeViewItem:
+    case BuiltinElementKind::Tab:
         return {
             .supportsButtonChrome = true,
             .defaultActivatable = true,
@@ -91,6 +94,7 @@ struct UIWidgetTraits final {
     case BuiltinElementKind::ScrollView:
     case BuiltinElementKind::Popup:
     case BuiltinElementKind::SplitView:
+    case BuiltinElementKind::TabView:
         return {};
     }
     return {};
@@ -120,6 +124,13 @@ struct UIWidgetTraits final {
 defaultContentAlignment(BuiltinElementKind kind) noexcept
 {
     if (kind == BuiltinElementKind::Button)
+    {
+        return {
+            .horizontal = UIAxisAlignment::Center,
+            .vertical = UIAxisAlignment::Center,
+        };
+    }
+    if (kind == BuiltinElementKind::Tab)
     {
         return {
             .horizontal = UIAxisAlignment::Center,

@@ -120,6 +120,12 @@ struct UIUiaMappedNode final {
         return kControlTypeTreeItem;
     case UISemanticsRole::Image:
         return kControlTypeImage;
+    case UISemanticsRole::TabList:
+        return kControlTypeTab;
+    case UISemanticsRole::Tab:
+        return kControlTypeTabItem;
+    case UISemanticsRole::TabPanel:
+        return kControlTypePane;
     case UISemanticsRole::Group:
         return kControlTypeGroup;
     }

@@ -277,6 +277,39 @@ class PrimaryWindowUICapabilityState final {
     [[nodiscard]] Core::Result<bool> isSplitterDragging(
         u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
         UI::UINodeId splitter);
+    [[nodiscard]] Core::Status setTabViewItems(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+        UI::UINodeId tabView, std::span<const UI::UITabViewItem> items, u32 activeIndex);
+    [[nodiscard]] Core::Status clearTabViewItems(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+        UI::UINodeId tabView);
+    [[nodiscard]] Core::Result<u32> tabViewItemCount(
+        u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+        UI::UINodeId tabView);
+    [[nodiscard]] Core::Result<UI::UITabViewItem> tabViewItemAt(
+        u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+        UI::UINodeId tabView, u32 index);
+    [[nodiscard]] Core::Status setTabViewActiveTab(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+        UI::UINodeId tabView, UI::UINodeId tab);
+    [[nodiscard]] Core::Result<UI::UINodeId> tabViewActiveTab(
+        u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+        UI::UINodeId tabView);
+    [[nodiscard]] Core::Result<UI::UINodeId> tabViewActivePanel(
+        u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+        UI::UINodeId tabView);
+    [[nodiscard]] Core::Result<UI::UITabViewMetrics> tabViewMetrics(
+        u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+        UI::UINodeId tabView);
+    [[nodiscard]] Core::Result<UI::UITabViewCommandResult> routeTabViewCommand(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+        UI::UINodeId tabView, UI::UITabViewCommand command);
+    [[nodiscard]] Core::Status setTabPaint(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+        UI::UINodeId tab, const UI::UITabPaint& paint);
+    [[nodiscard]] Core::Result<UI::UITabPaint> tabPaint(
+        u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+        UI::UINodeId tab);
     [[nodiscard]] Core::Status setScrollViewStyle(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                                   UI::UINodeId scrollView, const UI::UIScrollViewStyle& style);
     [[nodiscard]] Core::Result<UI::UIScrollViewStyle>
