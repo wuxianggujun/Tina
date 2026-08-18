@@ -11,6 +11,7 @@
 #include <tina/ui/UIListView.hpp>
 #include <tina/ui/UIPaint.hpp>
 #include <tina/ui/UISemantics.hpp>
+#include <tina/ui/UISplitView.hpp>
 #include <tina/ui/UIStyle.hpp>
 #include <tina/ui/UIText.hpp>
 #include <tina/ui/UITextEdit.hpp>
@@ -42,6 +43,8 @@ struct UIElementDescriptor final {
     std::optional<std::string_view> text{};
     std::optional<UIImageContent> image{};
     std::optional<UITooltipConfig> tooltip{};
+    std::optional<UISplitViewConfig> splitView{};
+    std::optional<UISplitterConfig> splitter{};
     std::optional<UITextStyle> textStyle{};
     UIContentAlignment contentAlignment{};
     UIElementVisual visual{};
@@ -114,6 +117,38 @@ struct UIElementDescriptor final {
         .visual = {.styleRole = UIStyleRoleId::TooltipSurface},
         .semantics = {.mode = UISemanticsMode::Exclude},
         .pointerHitPolicy = UIPointerHitPolicy::Ignore,
+    };
+}
+
+[[nodiscard]] constexpr UIElementDescriptor makeSplitViewElement(
+    UISplitViewConfig config = {}, UILayoutStyle layout = {}) noexcept
+{
+    layout.flexContainer.direction =
+        config.orientation == UISplitViewOrientation::Horizontal
+            ? UIFlexDirection::Row
+            : UIFlexDirection::Column;
+    return UIElementDescriptor{
+        .layout = layout,
+        .splitView = config,
+        .semantics = {.mode = UISemanticsMode::Automatic},
+        .pointerHitPolicy = UIPointerHitPolicy::Ignore,
+    };
+}
+
+[[nodiscard]] constexpr UIElementDescriptor makeSplitterElement(
+    UISplitterConfig config = {}, UILayoutStyle layout = {}) noexcept
+{
+    return UIElementDescriptor{
+        .layout = layout,
+        .splitter = config,
+        .visual = {.styleRole = UIStyleRoleId::PanelSurface},
+        .behaviors = UIElementBehavior::Focusable | UIElementBehavior::RangeInput,
+        .semantics = {
+            .mode = UISemanticsMode::Publish,
+            .role = UISemanticsRole::Slider,
+            .actions = UISemanticsAction::Focus | UISemanticsAction::SetRangeValue,
+        },
+        .pointerHitPolicy = UIPointerHitPolicy::Targetable,
     };
 }
 

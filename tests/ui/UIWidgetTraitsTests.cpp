@@ -33,6 +33,9 @@ TEST(UIWidgetTraitsTests, ClassifiesEveryWidgetKindThroughOneCanonicalTable)
         ExpectedWidgetTraits{UI::Detail::BuiltinElementKind::ListViewItem, {true, true, true, true}},
         ExpectedWidgetTraits{UI::Detail::BuiltinElementKind::TreeView, {false, false, true, false}},
         ExpectedWidgetTraits{UI::Detail::BuiltinElementKind::TreeViewItem, {true, true, true, true}},
+        ExpectedWidgetTraits{UI::Detail::BuiltinElementKind::Tooltip, {.supportsText = true}},
+        ExpectedWidgetTraits{UI::Detail::BuiltinElementKind::SplitView, {}},
+        ExpectedWidgetTraits{UI::Detail::BuiltinElementKind::Splitter, {false, false, true, false}},
     };
 
     for (const auto& testCase : Cases)

@@ -17,6 +17,7 @@
 #include <tina/ui/UIScrollView.hpp>
 #include <tina/ui/UISemantics.hpp>
 #include <tina/ui/UISlider.hpp>
+#include <tina/ui/UISplitView.hpp>
 #include <tina/ui/UIStyle.hpp>
 #include <tina/ui/UIText.hpp>
 #include <tina/ui/UITextEdit.hpp>
@@ -226,6 +227,18 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Status setSliderChangeCallback(UI::UINodeId slider, UI::UISliderChangeCallback callback);
     [[nodiscard]] Core::Status clearSliderChangeCallback(UI::UINodeId slider);
     [[nodiscard]] Core::Result<bool> isSliderDragging(UI::UINodeId slider) const;
+    [[nodiscard]] Core::Status setSplitViewParts(UI::UINodeId splitView,
+                                                 UI::UINodeId primaryPane,
+                                                 UI::UINodeId splitter,
+                                                 UI::UINodeId secondaryPane);
+    [[nodiscard]] Core::Status clearSplitViewParts(UI::UINodeId splitView);
+    [[nodiscard]] Core::Result<UI::UISplitViewParts>
+    splitViewParts(UI::UINodeId splitView) const;
+    [[nodiscard]] Core::Status setSplitViewFraction(UI::UINodeId splitView, float fraction);
+    [[nodiscard]] Core::Result<float> splitViewFraction(UI::UINodeId splitView) const;
+    [[nodiscard]] Core::Result<UI::UISplitViewMetrics>
+    splitViewMetrics(UI::UINodeId splitView) const;
+    [[nodiscard]] Core::Result<bool> isSplitterDragging(UI::UINodeId splitter) const;
     [[nodiscard]] Core::Status setScrollViewStyle(UI::UINodeId scrollView, const UI::UIScrollViewStyle& style);
     [[nodiscard]] Core::Result<UI::UIScrollViewStyle> scrollViewStyle(UI::UINodeId scrollView) const;
     [[nodiscard]] Core::Status setScrollViewOffset(UI::UINodeId scrollView, UI::UIScrollOffset offset);

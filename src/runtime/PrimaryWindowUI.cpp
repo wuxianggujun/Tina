@@ -977,6 +977,79 @@ Core::Result<bool> PrimaryWindowUITreeUpdater::isSliderDragging(UI::UINodeId sli
     return m_state->isSliderDragging(m_epoch, m_phase, m_updater, slider);
 }
 
+Core::Status PrimaryWindowUITreeUpdater::setSplitViewParts(
+    UI::UINodeId splitView, UI::UINodeId primaryPane, UI::UINodeId splitter,
+    UI::UINodeId secondaryPane)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setSplitViewParts");
+    }
+    return m_state->setSplitViewParts(m_epoch, m_phase, m_updater, splitView,
+                                      primaryPane, splitter, secondaryPane);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::clearSplitViewParts(UI::UINodeId splitView)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::clearSplitViewParts");
+    }
+    return m_state->clearSplitViewParts(m_epoch, m_phase, m_updater, splitView);
+}
+
+Core::Result<UI::UISplitViewParts>
+PrimaryWindowUITreeUpdater::splitViewParts(UI::UINodeId splitView) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UISplitViewParts>(
+            "PrimaryWindowUITreeUpdater::splitViewParts");
+    }
+    return m_state->splitViewParts(m_epoch, m_phase, m_updater, splitView);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setSplitViewFraction(
+    UI::UINodeId splitView, float fraction)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setSplitViewFraction");
+    }
+    return m_state->setSplitViewFraction(m_epoch, m_phase, m_updater, splitView, fraction);
+}
+
+Core::Result<float>
+PrimaryWindowUITreeUpdater::splitViewFraction(UI::UINodeId splitView) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<float>("PrimaryWindowUITreeUpdater::splitViewFraction");
+    }
+    return m_state->splitViewFraction(m_epoch, m_phase, m_updater, splitView);
+}
+
+Core::Result<UI::UISplitViewMetrics>
+PrimaryWindowUITreeUpdater::splitViewMetrics(UI::UINodeId splitView) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UISplitViewMetrics>(
+            "PrimaryWindowUITreeUpdater::splitViewMetrics");
+    }
+    return m_state->splitViewMetrics(m_epoch, m_phase, m_updater, splitView);
+}
+
+Core::Result<bool>
+PrimaryWindowUITreeUpdater::isSplitterDragging(UI::UINodeId splitter) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<bool>("PrimaryWindowUITreeUpdater::isSplitterDragging");
+    }
+    return m_state->isSplitterDragging(m_epoch, m_phase, m_updater, splitter);
+}
+
 Core::Status PrimaryWindowUITreeUpdater::setScrollViewStyle(UI::UINodeId scrollView,
                                                            const UI::UIScrollViewStyle& style)
 {

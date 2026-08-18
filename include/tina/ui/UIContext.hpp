@@ -32,6 +32,7 @@
 #include <tina/ui/UIScrollView.hpp>
 #include <tina/ui/UISemantics.hpp>
 #include <tina/ui/UISlider.hpp>
+#include <tina/ui/UISplitView.hpp>
 #include <tina/ui/UIText.hpp>
 #include <tina/ui/UITextEdit.hpp>
 #include <tina/ui/UITheme.hpp>
@@ -392,6 +393,14 @@ class UITreeUpdater final {
     [[nodiscard]] Core::Status setSliderChangeCallback(UINodeId slider, UISliderChangeCallback callback);
     [[nodiscard]] Core::Status clearSliderChangeCallback(UINodeId slider);
     [[nodiscard]] Core::Result<bool> isSliderDragging(UINodeId slider) const;
+    [[nodiscard]] Core::Status setSplitViewParts(UINodeId splitView, UINodeId primaryPane,
+                                                 UINodeId splitter, UINodeId secondaryPane);
+    [[nodiscard]] Core::Status clearSplitViewParts(UINodeId splitView);
+    [[nodiscard]] Core::Result<UISplitViewParts> splitViewParts(UINodeId splitView) const;
+    [[nodiscard]] Core::Status setSplitViewFraction(UINodeId splitView, float fraction);
+    [[nodiscard]] Core::Result<float> splitViewFraction(UINodeId splitView) const;
+    [[nodiscard]] Core::Result<UISplitViewMetrics> splitViewMetrics(UINodeId splitView) const;
+    [[nodiscard]] Core::Result<bool> isSplitterDragging(UINodeId splitter) const;
     [[nodiscard]] Core::Status setScrollViewStyle(UINodeId scrollView, const UIScrollViewStyle& style);
     [[nodiscard]] Core::Result<UIScrollViewStyle> scrollViewStyle(UINodeId scrollView) const;
     [[nodiscard]] Core::Status setScrollViewOffset(UINodeId scrollView, UIScrollOffset offset);
@@ -700,6 +709,14 @@ class UIContext final {
     [[nodiscard]] UINodeId activeModal() const noexcept;
     [[nodiscard]] UINodeId pointerCapture() const noexcept;
     [[nodiscard]] UINodeId activePopup() const noexcept;
+    [[nodiscard]] Core::Status setSplitViewParts(UINodeId splitView, UINodeId primaryPane,
+                                                 UINodeId splitter, UINodeId secondaryPane);
+    [[nodiscard]] Core::Status clearSplitViewParts(UINodeId splitView);
+    [[nodiscard]] Core::Result<UISplitViewParts> splitViewParts(UINodeId splitView) const;
+    [[nodiscard]] Core::Status setSplitViewFraction(UINodeId splitView, float fraction);
+    [[nodiscard]] Core::Result<float> splitViewFraction(UINodeId splitView) const;
+    [[nodiscard]] Core::Result<UISplitViewMetrics> splitViewMetrics(UINodeId splitView) const;
+    [[nodiscard]] Core::Result<bool> isSplitterDragging(UINodeId splitter) const;
     // Tooltip relationships and presentation are owner-thread, per-Window, and
     // advanced by commitLayout() using the configured monotonic clock. These
     // direct Context APIs are useful to adapters; root-scoped authoring should
@@ -881,6 +898,21 @@ class UIContext final {
                                                                   UISliderChangeCallback&& callback);
     [[nodiscard]] Core::Status clearSliderChangeCallbackFromUpdater(UINodeId updaterRoot, UINodeId slider);
     [[nodiscard]] Core::Result<bool> isSliderDraggingFromUpdater(UINodeId updaterRoot, UINodeId slider) const;
+    [[nodiscard]] Core::Status setSplitViewPartsFromUpdater(
+        UINodeId updaterRoot, UINodeId splitView, UINodeId primaryPane,
+        UINodeId splitter, UINodeId secondaryPane);
+    [[nodiscard]] Core::Status clearSplitViewPartsFromUpdater(UINodeId updaterRoot,
+                                                              UINodeId splitView);
+    [[nodiscard]] Core::Result<UISplitViewParts> splitViewPartsFromUpdater(
+        UINodeId updaterRoot, UINodeId splitView) const;
+    [[nodiscard]] Core::Status setSplitViewFractionFromUpdater(
+        UINodeId updaterRoot, UINodeId splitView, float fraction);
+    [[nodiscard]] Core::Result<float> splitViewFractionFromUpdater(
+        UINodeId updaterRoot, UINodeId splitView) const;
+    [[nodiscard]] Core::Result<UISplitViewMetrics> splitViewMetricsFromUpdater(
+        UINodeId updaterRoot, UINodeId splitView) const;
+    [[nodiscard]] Core::Result<bool> isSplitterDraggingFromUpdater(
+        UINodeId updaterRoot, UINodeId splitter) const;
     [[nodiscard]] Core::Status setScrollViewStyleFromUpdater(UINodeId updaterRoot, UINodeId scrollView,
                                                             const UIScrollViewStyle& style);
     [[nodiscard]] Core::Result<UIScrollViewStyle> scrollViewStyleFromUpdater(UINodeId updaterRoot,

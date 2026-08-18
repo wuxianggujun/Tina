@@ -1512,6 +1512,63 @@ TEST_F(PrimaryWindowUICapabilityTest, TooltipFacadeRoundTripsAndExpiresWithPhase
     EXPECT_EQ(expiredShow.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
 }
 
+TEST_F(PrimaryWindowUICapabilityTest, SplitViewFacadeRoundTripsAndExpiresWithPhase)
+{
+    auto contextResult = UI::UIContext::Create(window, {.nodeCapacity = 16, .rootCapacity = 1});
+    ASSERT_TRUE(contextResult.has_value()) << contextResult.error().message;
+    context = std::move(*contextResult);
+
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+
+    ASSERT_TRUE(tree->setLayoutStyle(
+        root->rootNodeId(), fixedSize(240.0F, 120.0F)).has_value());
+    auto splitView = tree->createElement(
+        root->rootNodeId(),
+        UI::makeSplitViewElement(
+            UI::UISplitViewConfig{.initialFraction = 0.4F, .splitterExtent = 8.0F},
+            fixedSize(240.0F, 120.0F)));
+    ASSERT_TRUE(splitView.has_value()) << splitView.error().message;
+    auto primary = tree->createElement(*splitView, UI::makePanelElement());
+    auto splitter = tree->createElement(
+        *splitView, UI::makeSplitterElement({.keyboardStep = 0.1F}));
+    auto secondary = tree->createElement(*splitView, UI::makePanelElement());
+    ASSERT_TRUE(primary && splitter && secondary);
+    ASSERT_TRUE(tree->setSplitViewParts(
+        *splitView, *primary, *splitter, *secondary).has_value());
+    EXPECT_EQ(tree->splitViewParts(*splitView).value().splitter, *splitter);
+    EXPECT_FALSE(tree->isSplitterDragging(*splitter).value());
+    ASSERT_TRUE(tree->setSplitViewFraction(*splitView, 0.6F).has_value());
+    EXPECT_FLOAT_EQ(tree->splitViewFraction(*splitView).value(), 0.6F);
+
+    ASSERT_TRUE(context->commitLayout({.width = 240.0F, .height = 120.0F}).has_value());
+    const UI::UISplitViewMetrics metrics = tree->splitViewMetrics(*splitView).value();
+    EXPECT_EQ(metrics.orientation, UI::UISplitViewOrientation::Horizontal);
+    EXPECT_FLOAT_EQ(metrics.splitterRect.width, 8.0F);
+    EXPECT_NEAR(metrics.fraction, 0.6F, 0.0001F);
+
+    ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
+    auto expiredParts = tree->splitViewParts(*splitView);
+    ASSERT_FALSE(expiredParts.has_value());
+    EXPECT_EQ(expiredParts.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredFraction = tree->splitViewFraction(*splitView);
+    ASSERT_FALSE(expiredFraction.has_value());
+    EXPECT_EQ(expiredFraction.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredMetrics = tree->splitViewMetrics(*splitView);
+    ASSERT_FALSE(expiredMetrics.has_value());
+    EXPECT_EQ(expiredMetrics.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    Core::Status expiredClear = tree->clearSplitViewParts(*splitView);
+    ASSERT_FALSE(expiredClear.has_value());
+    EXPECT_EQ(expiredClear.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+}
+
 TEST_F(PrimaryWindowUICapabilityTest, RangeAndSelectionControlFacadesRoundTripAndExpire)
 {
     CapabilityState state;

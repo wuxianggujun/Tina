@@ -43,9 +43,14 @@
 #include "detail/UIScrollViewLayout.hpp"
 #include "detail/UISemanticsSnapshotBuilder.hpp"
 #include "detail/UISliderChangeCallbackRegistry.hpp"
+#include "detail/UISplitViewInput.hpp"
+#include "detail/UISplitViewLayout.hpp"
+#include "detail/UISplitViewStateStorage.hpp"
 #include "detail/UIStyleRoleResolver.hpp"
 #include "detail/UIStyleSheetStorage.hpp"
 #include "detail/UIThemeTransitionResolver.hpp"
+#include "detail/UITooltipLayout.hpp"
+#include "detail/UITooltipStateStorage.hpp"
 #include "detail/UIVirtualCollectionLayout.hpp"
 #include "detail/UITextEditModel.hpp"
 #include "detail/UITextEditPaintEmitter.hpp"
@@ -55,7 +60,6 @@
 
 #include <algorithm>
 #include <array>
-#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <exception>
@@ -176,6 +180,11 @@ using Detail::ScrollBarGeometry;
 using Detail::ScrollBarPointerHit;
 using Detail::ScrollViewLayoutScratch;
 using Detail::ScrollViewLayoutInput;
+using Detail::resolveSplitViewFractionFromPointer;
+using Detail::resolveSplitViewLayout;
+using Detail::splitterGrabOffset;
+using Detail::SplitterState;
+using Detail::SplitViewState;
 using Detail::UIScrollBehaviorState;
 using Detail::SliderPaintGeometry;
 using Detail::sliderPaintGeometry;
@@ -201,6 +210,7 @@ using Detail::PopupLayoutScratch;
 using Detail::PopupState;
 using Detail::TooltipLayoutScratch;
 using Detail::TooltipState;
+using Detail::UISplitViewStateStorage;
 using Detail::ProgressBarState;
 using Detail::RadioButtonState;
 using Detail::supportsWidgetText;
@@ -245,7 +255,8 @@ void configureCollectionRowLayout(UILayoutStyle& layout, float rowHeight,
 [[nodiscard]] constexpr bool ownsDirectionalNavigation(BuiltinElementKind kind) noexcept
 {
     return kind == BuiltinElementKind::TextEdit || kind == BuiltinElementKind::Dropdown ||
-           kind == BuiltinElementKind::ListView || kind == BuiltinElementKind::TreeView;
+           kind == BuiltinElementKind::ListView || kind == BuiltinElementKind::TreeView ||
+           kind == BuiltinElementKind::Splitter;
 }
 
 [[nodiscard]] constexpr bool isCompositeFocusItem(BuiltinElementKind kind) noexcept
@@ -739,14 +750,8 @@ struct UIContext::Impl final {
     std::pmr::vector<DropdownState> dropdownStatesByNodeIndex;
     std::pmr::vector<PopupState> popupStatesByNodeIndex;
     std::pmr::vector<PopupLayoutScratch> popupLayoutScratchByNodeIndex;
-    std::pmr::vector<TooltipState> tooltipStatesByNodeIndex;
-    // Preallocated transaction scratch. commitLayout() snapshots every Tooltip
-    // state before advancing its clock-driven state machine so any later
-    // Layout/Hit/Paint/Semantics candidate failure can restore the live intent
-    // without allocating or losing the already-published snapshot.
-    std::pmr::vector<TooltipState> tooltipCommitRollbackStatesByNodeIndex;
-    std::pmr::vector<TooltipLayoutScratch> tooltipLayoutScratchByNodeIndex;
-    std::pmr::vector<UINodeId> tooltipForAnchorByNodeIndex;
+    Detail::UITooltipStateStorage tooltipStorage;
+    UISplitViewStateStorage splitViewStorage;
     std::pmr::vector<ListViewState> listViewStatesByNodeIndex;
     std::pmr::vector<ListViewLayoutScratch> listViewLayoutScratchByNodeIndex;
     std::pmr::vector<ListViewItemState> listViewItemStatesByNodeIndex;
@@ -857,6 +862,7 @@ struct UIContext::Impl final {
     UINodeId hoveredPrimaryControl{};
     // M11-C1: exclusive Primary drag capture for Slider (clears Button arm).
     UINodeId armedSlider{};
+    float splitterDragGrabOffset = 0.0F;
     UINodeId armedScrollView{};
     UIScrollAxes armedScrollAxis = UIScrollAxes::None;
     float scrollDragGrabOffset = 0.0F;
@@ -868,16 +874,6 @@ struct UIContext::Impl final {
     bool pointerCancelDispatchInProgress = false;
     UINodeId activeModalNode{};
     UINodeId activePopupNode{};
-    UINodeId activeTooltipNode{};
-    UINodeId pendingTooltipNode{};
-    UINodeId hoveredTooltipAnchor{};
-    UINodeId manualTooltipNode{};
-    Core::MonotonicTimePoint tooltipOpenDeadline{};
-    Core::MonotonicTimePoint tooltipCloseDeadline{};
-    Core::MonotonicTimePoint tooltipReshowExpiry{};
-    bool tooltipOpenPending = false;
-    bool tooltipClosePending = false;
-    bool tooltipReshowAvailable = false;
     Detail::UICommandPressLatch<UIDropdownCommand, UIDropdownCommand::ExitNext>
         dropdownCommandPressLatch;
     Detail::UICommandPressLatch<UIListViewCommand, UIListViewCommand::Activate>
@@ -953,9 +949,9 @@ struct UIContext::Impl final {
           progressBarStatesByNodeIndex(&resource), radioButtonStatesByNodeIndex(&resource),
           scrollViewPaintsByNodeIndex(&resource), scrollViewLayoutScratchByNodeIndex(&resource),
           dropdownStatesByNodeIndex(&resource), popupStatesByNodeIndex(&resource),
-          popupLayoutScratchByNodeIndex(&resource), tooltipStatesByNodeIndex(&resource),
-          tooltipCommitRollbackStatesByNodeIndex(&resource),
-          tooltipLayoutScratchByNodeIndex(&resource), tooltipForAnchorByNodeIndex(&resource),
+          popupLayoutScratchByNodeIndex(&resource),
+          tooltipStorage(capacities.nodeCapacity, resource),
+          splitViewStorage(capacities.nodeCapacity, resource),
           listViewStatesByNodeIndex(&resource),
           listViewLayoutScratchByNodeIndex(&resource), listViewItemStatesByNodeIndex(&resource),
           treeViewStatesByNodeIndex(&resource), treeViewLayoutScratchByNodeIndex(&resource),
@@ -1099,10 +1095,6 @@ struct UIContext::Impl final {
         impl->dropdownStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->popupStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->popupLayoutScratchByNodeIndex.resize(normalized.nodeCapacity);
-        impl->tooltipStatesByNodeIndex.resize(normalized.nodeCapacity);
-        impl->tooltipCommitRollbackStatesByNodeIndex.resize(normalized.nodeCapacity);
-        impl->tooltipLayoutScratchByNodeIndex.resize(normalized.nodeCapacity);
-        impl->tooltipForAnchorByNodeIndex.resize(normalized.nodeCapacity);
         impl->listViewStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->listViewLayoutScratchByNodeIndex.resize(normalized.nodeCapacity);
         impl->listViewItemStatesByNodeIndex.resize(normalized.nodeCapacity);
@@ -1351,8 +1343,8 @@ struct UIContext::Impl final {
             {
                 ownVisibility = UIVisibility::Collapsed;
             }
-            if (record->kind == BuiltinElementKind::Tooltip && index < tooltipStatesByNodeIndex.size() &&
-                !tooltipStatesByNodeIndex[index].open)
+            if (record->kind == BuiltinElementKind::Tooltip && index < tooltipStorage.capacity() &&
+                !tooltipStorage.stateByIndex(index).open)
             {
                 ownVisibility = UIVisibility::Collapsed;
             }
@@ -1664,18 +1656,18 @@ struct UIContext::Impl final {
                              UILogicalRect viewportRect,
                              LayoutPassStatistics& statistics) noexcept
     {
-        TooltipState& tooltip = tooltipStatesByNodeIndex[tooltipIndex];
+        TooltipState& tooltip = tooltipStorage.stateByIndex(tooltipIndex);
         LayoutScratchState& tooltipScratch = layoutScratchByIndex[tooltipIndex];
         const UINodeId tooltipNode = idForIndex(tooltipIndex);
         const UICommittedLayoutEntry* anchorEntry = committedLayoutEntryFor(tooltip.anchor);
-        if (!tooltip.open || activeTooltipNode != tooltipNode ||
+        if (!tooltip.open || tooltipStorage.activeTooltip() != tooltipNode ||
             !hasValidTooltipRelationship(tooltipNode, tooltip.anchor) ||
             anchorEntry == nullptr ||
             anchorEntry->effectiveVisibility != UIVisibility::Visible)
         {
             tooltipScratch.effectiveVisibility = UIVisibility::Collapsed;
             assignLayoutRect(tooltipIndex, {}, parentWorldRect, viewportRect);
-            tooltipLayoutScratchByNodeIndex[tooltipIndex] = {};
+            tooltipStorage.layoutScratchByIndex(tooltipIndex) = {};
             return;
         }
 
@@ -1684,7 +1676,7 @@ struct UIContext::Impl final {
             presentationLayoutStyle(tooltipIndex), tooltipScratch, tooltip.config,
             anchorEntry->worldRect, viewportRect, statistics);
         assignLayoutRect(tooltipIndex, resolved.rect, parentWorldRect, viewportRect);
-        tooltipLayoutScratchByNodeIndex[tooltipIndex].metrics = UITooltipMetrics{
+        tooltipStorage.layoutScratchByIndex(tooltipIndex).metrics = UITooltipMetrics{
             .anchorRect = anchorEntry->worldRect,
             .tooltipRect = resolved.rect,
             .resolvedPlacement = resolved.placement,
@@ -2120,9 +2112,14 @@ struct UIContext::Impl final {
                 popupLayoutScratchByNodeIndex[parentIndex] = {};
             }
             if (parentRecord->kind == BuiltinElementKind::Tooltip &&
-                parentIndex < tooltipLayoutScratchByNodeIndex.size())
+                parentIndex < tooltipStorage.capacity())
             {
-                tooltipLayoutScratchByNodeIndex[parentIndex] = {};
+                tooltipStorage.layoutScratchByIndex(parentIndex) = {};
+            }
+            if (parentRecord->kind == BuiltinElementKind::SplitView &&
+                parentIndex < splitViewStorage.capacity())
+            {
+                splitViewStorage.layoutScratchByIndex(parentIndex) = {};
             }
             if (parentRecord->kind == BuiltinElementKind::ListView && parentIndex < listViewLayoutScratchByNodeIndex.size())
             {
@@ -2161,6 +2158,34 @@ struct UIContext::Impl final {
         {
             return arrangeTreeViewItems(parentIndex, unscrolledContentRect, parentWorldRect,
                                         intersectRects(parentScratch.descendantClip, parentScratch.worldRect));
+        }
+        if (parentRecord->kind == BuiltinElementKind::SplitView)
+        {
+            const UINodeId splitView = idForIndex(parentIndex);
+            const SplitViewState* state = splitViewStorage.trySplitView(splitView);
+            if (state == nullptr)
+            {
+                return fail(Core::CoreErrorCode::Internal,
+                            "UI SplitView is missing retained state");
+            }
+            const UISplitViewParts parts = splitViewStorage.parts(splitView);
+            if (parts.hasValue())
+            {
+                const auto plan = resolveSplitViewLayout(
+                    unscrolledContentRect, state->config, state->requestedFraction);
+                splitViewStorage.layoutScratchByIndex(parentIndex).metrics = plan.metrics;
+                assignLayoutRect(parts.primaryPane.index(), plan.metrics.primaryRect,
+                                 parentWorldRect, descendantClip);
+                assignLayoutRect(parts.splitter.index(), plan.metrics.splitterRect,
+                                 parentWorldRect, descendantClip);
+                assignLayoutRect(parts.secondaryPane.index(), plan.metrics.secondaryRect,
+                                 parentWorldRect, descendantClip);
+                return Core::success();
+            }
+            splitViewStorage.layoutScratchByIndex(parentIndex).metrics = UISplitViewMetrics{
+                .fraction = state->requestedFraction,
+                .orientation = state->config.orientation,
+            };
         }
 
         const bool row = parentStyle.flexContainer.direction == UIFlexDirection::Row;
@@ -2250,8 +2275,7 @@ struct UIContext::Impl final {
                 {
                     arrangePopupChild(currentChild, parentWorldRect, viewportRect, statistics);
                 } else if (childRecord->kind == BuiltinElementKind::Tooltip &&
-                           currentChild < tooltipStatesByNodeIndex.size() &&
-                           currentChild < tooltipLayoutScratchByNodeIndex.size())
+                           currentChild < tooltipStorage.capacity())
                 {
                     arrangeTooltipChild(currentChild, parentWorldRect, viewportRect, statistics);
                 } else
@@ -4142,10 +4166,9 @@ struct UIContext::Impl final {
 
         source.name = semanticsNameSourceFor(nodeIndex);
         source.description = semanticsDescriptionViewFor(nodeIndex);
-        if (!state.hasExplicitDescription &&
-            nodeIndex < tooltipForAnchorByNodeIndex.size())
+        if (!state.hasExplicitDescription)
         {
-            const UINodeId tooltip = tooltipForAnchorByNodeIndex[nodeIndex];
+            const UINodeId tooltip = tooltipStorage.tooltipForAnchor(node);
             if (hasValidTooltipRelationship(tooltip, node))
             {
                 source.description = textViewFor(tooltip.index());
@@ -4463,7 +4486,8 @@ struct UIContext::Impl final {
             const NodeRecord* record = nodes.tryGet(candidate.storageId());
             if (record != nullptr &&
                 (isButtonChromeKind(record->kind) || record->kind == BuiltinElementKind::Checkbox ||
-                 record->kind == BuiltinElementKind::RadioButton || record->kind == BuiltinElementKind::TextEdit))
+                 record->kind == BuiltinElementKind::RadioButton || record->kind == BuiltinElementKind::TextEdit ||
+                 record->kind == BuiltinElementKind::Splitter))
             {
                 return candidate;
             }
@@ -4491,6 +4515,7 @@ struct UIContext::Impl final {
     void clearArmedSlider() noexcept
     {
         armedSlider = {};
+        splitterDragGrabOffset = 0.0F;
     }
 
     void clearArmedScrollView() noexcept
@@ -5131,18 +5156,8 @@ struct UIContext::Impl final {
         {
             popupLayoutScratchByNodeIndex[index] = {};
         }
-        if (index < tooltipStatesByNodeIndex.size())
-        {
-            tooltipStatesByNodeIndex[index] = {};
-        }
-        if (index < tooltipLayoutScratchByNodeIndex.size())
-        {
-            tooltipLayoutScratchByNodeIndex[index] = {};
-        }
-        if (index < tooltipForAnchorByNodeIndex.size())
-        {
-            tooltipForAnchorByNodeIndex[index] = {};
-        }
+        tooltipStorage.resetNode(index);
+        splitViewStorage.resetNode(index);
         if (index < listViewStatesByNodeIndex.size())
         {
             listViewStatesByNodeIndex[index] = {};
@@ -7789,7 +7804,35 @@ struct UIContext::Impl final {
                 return fail(Core::CoreErrorCode::Internal,
                             "UI Tooltip is missing its retained configuration");
             }
-            tooltipStatesByNodeIndex[node.index()].config = *descriptor.tooltip;
+            tooltipStorage.initializeTooltip(node, *descriptor.tooltip);
+        }
+        if (kind == BuiltinElementKind::SplitView)
+        {
+            if (!descriptor.splitView.has_value())
+            {
+                return fail(Core::CoreErrorCode::Internal,
+                            "UI SplitView is missing its retained configuration");
+            }
+            splitViewStorage.initializeSplitView(node, *descriptor.splitView);
+        }
+        if (kind == BuiltinElementKind::Splitter)
+        {
+            if (!descriptor.splitter.has_value())
+            {
+                return fail(Core::CoreErrorCode::Internal,
+                            "UI Splitter is missing its retained configuration");
+            }
+            splitViewStorage.initializeSplitter(node, *descriptor.splitter);
+            Detail::UIRangeInputState* range = behaviorStateStorage.tryRangeInputState(node.index());
+            if (range == nullptr)
+            {
+                return fail(Core::CoreErrorCode::Internal,
+                            "UI Splitter is missing RangeInput behavior state");
+            }
+            range->minValue = 0.0F;
+            range->maxValue = 1.0F;
+            range->step = descriptor.splitter->keyboardStep;
+            range->value = 0.5F;
         }
 
         if (kind == BuiltinElementKind::TextEdit)
@@ -8121,10 +8164,37 @@ struct UIContext::Impl final {
             return Core::failure(parentResult.error());
         }
         NodeRecord& parentRecord = **parentResult;
-        if (parentRecord.kind == BuiltinElementKind::Tooltip)
+        if (parentRecord.kind == BuiltinElementKind::Tooltip ||
+            parentRecord.kind == BuiltinElementKind::Splitter)
         {
             return fail(UIErrorCode::InvalidParent,
-                        "UI Tooltip elements cannot own child elements");
+                        "UI Tooltip and Splitter elements cannot own child elements");
+        }
+        if (kind == BuiltinElementKind::Splitter &&
+            parentRecord.kind != BuiltinElementKind::SplitView)
+        {
+            return fail(UIErrorCode::InvalidParent,
+                        "UI Splitter requires a SplitView parent");
+        }
+        if (parentRecord.kind == BuiltinElementKind::SplitView)
+        {
+            usize directChildCount = 0;
+            for (u32 childIndex = parentRecord.firstChildIndex;
+                 childIndex != InvalidNodeIndex;)
+            {
+                const NodeRecord* child = recordByIndex(childIndex);
+                if (child == nullptr)
+                {
+                    break;
+                }
+                ++directChildCount;
+                childIndex = child->nextSiblingIndex;
+            }
+            if (directChildCount >= 3)
+            {
+                return fail(UIErrorCode::InvalidParent,
+                            "UI SplitView accepts exactly three direct parts");
+            }
         }
         if (kind == BuiltinElementKind::Popup)
         {
@@ -9115,33 +9185,11 @@ struct UIContext::Impl final {
             }
 
             const UINodeId node = idForIndex(currentIndex);
-            if (record->kind == BuiltinElementKind::Tooltip &&
-                currentIndex < tooltipStatesByNodeIndex.size())
+            if (tooltipStorage.releaseNode(node, motionNow()))
             {
-                TooltipState& tooltip = tooltipStatesByNodeIndex[currentIndex];
-                const UINodeId anchor = tooltip.anchor;
-                dismissTooltipNoFail(node, false);
-                if (contains(anchor) &&
-                    anchor.index() < tooltipForAnchorByNodeIndex.size() &&
-                    tooltipForAnchorByNodeIndex[anchor.index()] == node)
-                {
-                    tooltipForAnchorByNodeIndex[anchor.index()] = {};
-                }
-                tooltip.anchor = {};
-            } else if (currentIndex < tooltipForAnchorByNodeIndex.size())
-            {
-                const UINodeId tooltip = tooltipForAnchorByNodeIndex[currentIndex];
-                if (hasValidTooltipRelationship(tooltip, node))
-                {
-                    dismissTooltipNoFail(tooltip, false);
-                    tooltipStatesByNodeIndex[tooltip.index()].anchor = {};
-                }
-                tooltipForAnchorByNodeIndex[currentIndex] = {};
+                markTooltipPresentationDirty();
             }
-            if (hoveredTooltipAnchor == node)
-            {
-                hoveredTooltipAnchor = {};
-            }
+            static_cast<void>(splitViewStorage.releaseNode(node));
             if (record->kind == BuiltinElementKind::Modal)
             {
                 hardDismissAllTooltipsNoFail(true);
@@ -11132,9 +11180,23 @@ struct UIContext::Impl final {
                !semanticsStatesByNodeIndex[node.index()].readOnly;
     }
 
+    [[nodiscard]] bool isPointerAdjustableRangeInput(UINodeId node) const noexcept
+    {
+        if (!isInteractiveRangeInput(node))
+        {
+            return false;
+        }
+        const NodeRecord* record = nodes.tryGet(node.storageId());
+        return record != nullptr &&
+               (record->kind == BuiltinElementKind::Slider ||
+                (record->kind == BuiltinElementKind::Splitter &&
+                 splitViewStorage.splitViewForSplitter(node).hasValue()));
+    }
+
     [[nodiscard]] Core::Result<bool> applySliderValue(UINodeId slider, double requestedValue,
                                                        Platform::PlatformFrameId platformFrame,
-                                                       u64 sourceSequence, bool requireInteractive)
+                                                       u64 sourceSequence, bool requireInteractive,
+                                                       bool quantizeToStep = true)
     {
         if (!slider.hasValue())
         {
@@ -11155,22 +11217,43 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidButtonAction, "UI Slider value update requires a finite range and value");
         }
-        const float next = quantizeSliderValue(requestedValue, state->minValue, state->maxValue, state->step);
+        const float next = quantizeToStep
+                               ? quantizeSliderValue(requestedValue, state->minValue,
+                                                     state->maxValue, state->step)
+                               : static_cast<float>(std::clamp(
+                                     requestedValue, static_cast<double>(state->minValue),
+                                     static_cast<double>(state->maxValue)));
         if (next == state->value)
         {
             return false;
         }
-        if (Core::Status dirty = markPaintDirty(slider); !dirty)
+        const bool splitter = record->kind == BuiltinElementKind::Splitter;
+        const UINodeId splitView = splitter ? splitViewStorage.splitViewForSplitter(slider)
+                                            : UINodeId{};
+        if (splitter && !splitView.hasValue())
+        {
+            return false;
+        }
+        Core::Status dirty = splitter ? markLayoutStyleDirty(splitView)
+                                      : markPaintDirty(slider);
+        if (!dirty)
         {
             return Core::failure(dirty.error());
         }
         state->value = next;
-        invokeSliderChangeCallback(captureSliderChangeCallback(slider), UISliderChangeEvent{
-                                                                         .sliderNode = slider,
-                                                                         .value = next,
-                                                                         .platformFrame = platformFrame,
-                                                                         .sourceSequence = sourceSequence,
-                                                                     });
+        if (splitter)
+        {
+            splitViewStorage.setRequestedFraction(splitView, next);
+        }
+        else
+        {
+            invokeSliderChangeCallback(captureSliderChangeCallback(slider), UISliderChangeEvent{
+                                                                             .sliderNode = slider,
+                                                                             .value = next,
+                                                                             .platformFrame = platformFrame,
+                                                                             .sourceSequence = sourceSequence,
+                                                                         });
+        }
         return true;
     }
 
@@ -11220,6 +11303,70 @@ struct UIContext::Impl final {
             return false;
         }
         return applySliderValue(slider, *next, platformFrame, sourceSequence, true);
+    }
+
+    [[nodiscard]] Core::Result<bool> applySplitterValueFromPointer(
+        UINodeId splitter, UILogicalPoint position,
+        Platform::PlatformFrameId platformFrame, u64 sourceSequence)
+    {
+        const UINodeId splitView = splitViewStorage.splitViewForSplitter(splitter);
+        const SplitViewState* state = splitViewStorage.trySplitView(splitView);
+        const Detail::UIRangeInputState* range =
+            behaviorStateStorage.tryRangeInputState(splitter.index());
+        if (state == nullptr || range == nullptr || !isInteractiveRangeInput(splitter))
+        {
+            return false;
+        }
+        const UISplitViewMetrics metrics = splitViewStorage.committedMetrics(splitView);
+        if (metrics.splitterRect.width <= 0.0F || metrics.splitterRect.height <= 0.0F)
+        {
+            return false;
+        }
+        UILogicalRect contentRect{};
+        if (metrics.orientation == UISplitViewOrientation::Horizontal)
+        {
+            contentRect = {
+                metrics.primaryRect.x,
+                metrics.primaryRect.y,
+                metrics.primaryRect.width + metrics.splitterRect.width +
+                    metrics.secondaryRect.width,
+                metrics.primaryRect.height,
+            };
+        }
+        else
+        {
+            contentRect = {
+                metrics.primaryRect.x,
+                metrics.primaryRect.y,
+                metrics.primaryRect.width,
+                metrics.primaryRect.height + metrics.splitterRect.height +
+                    metrics.secondaryRect.height,
+            };
+        }
+        const auto fraction = resolveSplitViewFractionFromPointer(
+            contentRect, state->config, position, splitterDragGrabOffset);
+        if (!fraction.has_value())
+        {
+            return false;
+        }
+        return applySliderValue(splitter, *fraction, platformFrame, sourceSequence, true,
+                                false);
+    }
+
+    [[nodiscard]] Core::Result<bool> applyRangeInputValueFromPointer(
+        UINodeId node, UILogicalPoint position,
+        Platform::PlatformFrameId platformFrame, u64 sourceSequence)
+    {
+        const NodeRecord* record = nodes.tryGet(node.storageId());
+        if (record == nullptr)
+        {
+            return false;
+        }
+        if (record->kind == BuiltinElementKind::Splitter)
+        {
+            return applySplitterValueFromPointer(node, position, platformFrame, sourceSequence);
+        }
+        return applySliderValueFromPointer(node, position, platformFrame, sourceSequence);
     }
 
     [[nodiscard]] Detail::UITextEditVisualHit textEditHitFromPointer(
@@ -11362,6 +11509,13 @@ struct UIContext::Impl final {
         if (!isNodeWithinRoot(updaterRoot, slider))
         {
             return fail(UIErrorCode::InvalidNode, "UI Slider is not owned by the updater root");
+        }
+        const NodeRecord* rangeRecord = nodes.tryGet(slider.storageId());
+        if (rangeRecord != nullptr && rangeRecord->kind == BuiltinElementKind::Splitter &&
+            (minValue != 0.0F || maxValue != 1.0F))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI Splitter RangeInput is fixed to zero through one");
         }
         if (!std::isfinite(minValue) || !std::isfinite(maxValue) || !(maxValue > minValue) || (step < 0.0F) ||
             !std::isfinite(step))
@@ -11621,6 +11775,356 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::InvalidNode, "UI Slider is not owned by the updater root");
         }
         return armedSlider == slider;
+    }
+
+    [[nodiscard]] Core::Result<NodeRecord*> resolveSplitView(UINodeId splitView)
+    {
+        auto nodeResult = resolveNode(splitView);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        if ((*nodeResult)->kind != BuiltinElementKind::SplitView ||
+            !splitViewStorage.containsSplitView(splitView))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI SplitView API requires a SplitView node");
+        }
+        return *nodeResult;
+    }
+
+    [[nodiscard]] Core::Result<NodeRecord*> resolveSplitter(UINodeId splitter)
+    {
+        auto nodeResult = resolveNode(splitter);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        if ((*nodeResult)->kind != BuiltinElementKind::Splitter ||
+            !splitViewStorage.containsSplitter(splitter))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI Splitter API requires a Splitter node");
+        }
+        return *nodeResult;
+    }
+
+    [[nodiscard]] Core::Status validateSplitViewUpdaterRoot(
+        UINodeId updaterRoot, UINodeId splitView) const
+    {
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired,
+                        "UI tree updater requires a live root owner");
+        }
+        auto splitViewResult = const_cast<Impl*>(this)->resolveSplitView(splitView);
+        if (!splitViewResult)
+        {
+            return Core::failure(splitViewResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, splitView))
+        {
+            return fail(UIErrorCode::InvalidNode,
+                        "UI SplitView is not owned by the updater root");
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status setSplitViewPartsFromUpdater(
+        UINodeId updaterRoot, UINodeId splitView, UINodeId primaryPane,
+        UINodeId splitter, UINodeId secondaryPane)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateSplitViewUpdaterRoot(updaterRoot, splitView); !valid)
+        {
+            return valid;
+        }
+        if (!primaryPane.hasValue() || !splitter.hasValue() || !secondaryPane.hasValue() ||
+            primaryPane == splitter || primaryPane == secondaryPane || splitter == secondaryPane ||
+            splitView == primaryPane || splitView == splitter || splitView == secondaryPane)
+        {
+            return fail(UIErrorCode::InvalidParent,
+                        "UI SplitView parts must be four distinct live nodes");
+        }
+        auto primaryResult = resolveNode(primaryPane);
+        auto splitterResult = resolveSplitter(splitter);
+        auto secondaryResult = resolveNode(secondaryPane);
+        if (!primaryResult)
+        {
+            return Core::failure(primaryResult.error());
+        }
+        if (!splitterResult)
+        {
+            return Core::failure(splitterResult.error());
+        }
+        if (!secondaryResult)
+        {
+            return Core::failure(secondaryResult.error());
+        }
+        const NodeRecord* splitViewRecord = nodes.tryGet(splitView.storageId());
+        const NodeRecord* primaryRecord = *primaryResult;
+        const NodeRecord* splitterRecord = *splitterResult;
+        const NodeRecord* secondaryRecord = *secondaryResult;
+        if (splitViewRecord == nullptr || primaryRecord->rootIndex != splitViewRecord->rootIndex ||
+            splitterRecord->rootIndex != splitViewRecord->rootIndex ||
+            secondaryRecord->rootIndex != splitViewRecord->rootIndex)
+        {
+            return fail(UIErrorCode::WrongContext,
+                        "UI SplitView and all parts must belong to the same root");
+        }
+        if (primaryRecord->parentIndex != splitView.index() ||
+            splitterRecord->parentIndex != splitView.index() ||
+            secondaryRecord->parentIndex != splitView.index())
+        {
+            return fail(UIErrorCode::InvalidParent,
+                        "UI SplitView parts must be direct children of the SplitView");
+        }
+        if (primaryRecord->kind == BuiltinElementKind::Splitter ||
+            secondaryRecord->kind == BuiltinElementKind::Splitter ||
+            layoutStylesByIndex[primaryPane.index()].placement != UILayoutPlacement::Flow ||
+            layoutStylesByIndex[splitter.index()].placement != UILayoutPlacement::Flow ||
+            layoutStylesByIndex[secondaryPane.index()].placement != UILayoutPlacement::Flow)
+        {
+            return fail(UIErrorCode::InvalidParent,
+                        "UI SplitView panes require ordinary Flow children and one Splitter");
+        }
+        usize directChildCount = 0;
+        for (u32 childIndex = splitViewRecord->firstChildIndex;
+             childIndex != InvalidNodeIndex;)
+        {
+            const NodeRecord* child = recordByIndex(childIndex);
+            if (child == nullptr)
+            {
+                break;
+            }
+            ++directChildCount;
+            childIndex = child->nextSiblingIndex;
+        }
+        if (directChildCount != 3)
+        {
+            return fail(UIErrorCode::InvalidParent,
+                        "UI SplitView requires exactly three direct children");
+        }
+        for (const UINodeId part : {primaryPane, splitter, secondaryPane})
+        {
+            const UINodeId existingOwner = splitViewStorage.splitViewForPart(part);
+            if (existingOwner.hasValue() && existingOwner != splitView)
+            {
+                return fail(UIErrorCode::InvalidParent,
+                            "UI SplitView part already belongs to another SplitView");
+            }
+        }
+
+        const UISplitViewParts nextParts{primaryPane, splitter, secondaryPane};
+        if (splitViewStorage.parts(splitView) == nextParts)
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markLayoutStyleDirty(splitView); !dirty)
+        {
+            return dirty;
+        }
+        splitViewStorage.linkValidated(splitView, nextParts);
+        if (Detail::UIRangeInputState* range =
+                behaviorStateStorage.tryRangeInputState(splitter.index());
+            range != nullptr)
+        {
+            const SplitterState* splitterState = splitViewStorage.trySplitter(splitter);
+            range->minValue = 0.0F;
+            range->maxValue = 1.0F;
+            range->step = splitterState != nullptr ? splitterState->config.keyboardStep : 0.02F;
+            range->value = splitViewStorage.requestedFraction(splitView);
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status clearSplitViewPartsFromUpdater(
+        UINodeId updaterRoot, UINodeId splitView)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateSplitViewUpdaterRoot(updaterRoot, splitView); !valid)
+        {
+            return valid;
+        }
+        const UISplitViewParts previous = splitViewStorage.parts(splitView);
+        if (!previous.hasValue())
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markLayoutStyleDirty(splitView); !dirty)
+        {
+            return dirty;
+        }
+        if (armedSlider == previous.splitter)
+        {
+            clearArmedSlider();
+            if (capturedPointerNode == previous.splitter)
+            {
+                capturedPointerNode = {};
+            }
+        }
+        static_cast<void>(splitViewStorage.unlinkSplitView(splitView));
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UISplitViewParts> splitViewPartsFromUpdater(
+        UINodeId updaterRoot, UINodeId splitView) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (Core::Status valid = validateSplitViewUpdaterRoot(updaterRoot, splitView); !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        return splitViewStorage.parts(splitView);
+    }
+
+    [[nodiscard]] Core::Status setSplitViewFractionFromUpdater(
+        UINodeId updaterRoot, UINodeId splitView, float fraction)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateSplitViewUpdaterRoot(updaterRoot, splitView); !valid)
+        {
+            return valid;
+        }
+        if (!std::isfinite(fraction) || fraction < 0.0F || fraction > 1.0F)
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI SplitView fraction must be finite and within zero to one");
+        }
+        if (splitViewStorage.requestedFraction(splitView) == fraction)
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markLayoutStyleDirty(splitView); !dirty)
+        {
+            return dirty;
+        }
+        splitViewStorage.setRequestedFraction(splitView, fraction);
+        const UISplitViewParts parts = splitViewStorage.parts(splitView);
+        if (parts.hasValue())
+        {
+            if (Detail::UIRangeInputState* range =
+                    behaviorStateStorage.tryRangeInputState(parts.splitter.index());
+                range != nullptr)
+            {
+                range->value = fraction;
+            }
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<float> splitViewFractionFromUpdater(
+        UINodeId updaterRoot, UINodeId splitView) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (Core::Status valid = validateSplitViewUpdaterRoot(updaterRoot, splitView); !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        return splitViewStorage.requestedFraction(splitView);
+    }
+
+    [[nodiscard]] Core::Result<UISplitViewMetrics> splitViewMetricsFromUpdater(
+        UINodeId updaterRoot, UINodeId splitView) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (Core::Status valid = validateSplitViewUpdaterRoot(updaterRoot, splitView); !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        return splitViewStorage.committedMetrics(splitView);
+    }
+
+    [[nodiscard]] Core::Result<bool> isSplitterDraggingFromUpdater(
+        UINodeId updaterRoot, UINodeId splitter) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired,
+                        "UI tree updater requires a live root owner");
+        }
+        auto splitterResult = const_cast<Impl*>(this)->resolveSplitter(splitter);
+        if (!splitterResult)
+        {
+            return Core::failure(splitterResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, splitter))
+        {
+            return fail(UIErrorCode::InvalidNode,
+                        "UI Splitter is not owned by the updater root");
+        }
+        return armedSlider == splitter;
+    }
+
+    [[nodiscard]] UINodeId rootForSplitView(UINodeId splitView) const noexcept
+    {
+        const NodeRecord* record = nodes.tryGet(splitView.storageId());
+        return record != nullptr ? idForIndex(record->rootIndex) : UINodeId{};
+    }
+
+    [[nodiscard]] Core::Status setSplitViewParts(
+        UINodeId splitView, UINodeId primaryPane, UINodeId splitter,
+        UINodeId secondaryPane)
+    {
+        return setSplitViewPartsFromUpdater(rootForSplitView(splitView), splitView,
+                                            primaryPane, splitter, secondaryPane);
+    }
+
+    [[nodiscard]] Core::Status clearSplitViewParts(UINodeId splitView)
+    {
+        return clearSplitViewPartsFromUpdater(rootForSplitView(splitView), splitView);
+    }
+
+    [[nodiscard]] Core::Result<UISplitViewParts> splitViewParts(UINodeId splitView) const
+    {
+        return splitViewPartsFromUpdater(rootForSplitView(splitView), splitView);
+    }
+
+    [[nodiscard]] Core::Status setSplitViewFraction(UINodeId splitView, float fraction)
+    {
+        return setSplitViewFractionFromUpdater(rootForSplitView(splitView), splitView, fraction);
+    }
+
+    [[nodiscard]] Core::Result<float> splitViewFraction(UINodeId splitView) const
+    {
+        return splitViewFractionFromUpdater(rootForSplitView(splitView), splitView);
+    }
+
+    [[nodiscard]] Core::Result<UISplitViewMetrics> splitViewMetrics(UINodeId splitView) const
+    {
+        return splitViewMetricsFromUpdater(rootForSplitView(splitView), splitView);
+    }
+
+    [[nodiscard]] Core::Result<bool> isSplitterDragging(UINodeId splitter) const
+    {
+        const NodeRecord* record = nodes.tryGet(splitter.storageId());
+        const UINodeId root = record != nullptr ? idForIndex(record->rootIndex) : UINodeId{};
+        return isSplitterDraggingFromUpdater(root, splitter);
     }
 
     [[nodiscard]] Core::Result<NodeRecord*> resolveScrollView(UINodeId scrollView)
@@ -12333,7 +12837,7 @@ struct UIContext::Impl final {
             return Core::failure(nodeResult.error());
         }
         if ((*nodeResult)->kind != BuiltinElementKind::Tooltip ||
-            tooltip.index() >= tooltipStatesByNodeIndex.size())
+            !tooltipStorage.containsTooltip(tooltip))
         {
             return fail(UIErrorCode::InvalidControlValue,
                         "UI Tooltip API requires a Tooltip node");
@@ -12344,9 +12848,7 @@ struct UIContext::Impl final {
     [[nodiscard]] bool hasValidTooltipRelationship(UINodeId tooltip,
                                                    UINodeId anchor) const noexcept
     {
-        if (!contains(tooltip) || !contains(anchor) ||
-            tooltip.index() >= tooltipStatesByNodeIndex.size() ||
-            anchor.index() >= tooltipForAnchorByNodeIndex.size())
+        if (!contains(tooltip) || !contains(anchor))
         {
             return false;
         }
@@ -12355,17 +12857,16 @@ struct UIContext::Impl final {
         return tooltipRecord != nullptr && anchorRecord != nullptr &&
                tooltipRecord->kind == BuiltinElementKind::Tooltip &&
                tooltipRecord->rootIndex == anchorRecord->rootIndex &&
-               tooltipStatesByNodeIndex[tooltip.index()].anchor == anchor &&
-               tooltipForAnchorByNodeIndex[anchor.index()] == tooltip;
+               tooltipStorage.hasRelationship(tooltip, anchor);
     }
 
     [[nodiscard]] UINodeId tooltipForAnchor(UINodeId anchor) const noexcept
     {
-        if (!contains(anchor) || anchor.index() >= tooltipForAnchorByNodeIndex.size())
+        if (!contains(anchor))
         {
             return {};
         }
-        const UINodeId tooltip = tooltipForAnchorByNodeIndex[anchor.index()];
+        const UINodeId tooltip = tooltipStorage.tooltipForAnchor(anchor);
         return hasValidTooltipRelationship(tooltip, anchor) ? tooltip : UINodeId{};
     }
 
@@ -12392,12 +12893,16 @@ struct UIContext::Impl final {
 
     [[nodiscard]] bool isTooltipAnchorEligible(UINodeId tooltip) const noexcept
     {
-        if (!contains(tooltip) || tooltip.index() >= tooltipStatesByNodeIndex.size())
+        if (!contains(tooltip))
         {
             return false;
         }
-        const TooltipState& state = tooltipStatesByNodeIndex[tooltip.index()];
-        const UINodeId anchor = state.anchor;
+        const TooltipState* state = tooltipStorage.tryState(tooltip);
+        if (state == nullptr)
+        {
+            return false;
+        }
+        const UINodeId anchor = state->anchor;
         if (!hasValidTooltipRelationship(tooltip, anchor) || !isNodeEnabled(anchor) ||
             !isAuthoredTooltipNodeVisible(anchor) ||
             !isAuthoredTooltipNodeVisible(tooltip))
@@ -12414,227 +12919,47 @@ struct UIContext::Impl final {
                anchorEntry->effectiveVisibility == UIVisibility::Visible;
     }
 
-    [[nodiscard]] static Core::MonotonicDuration
-    tooltipDelayDuration(Core::Duration delay) noexcept
-    {
-        return std::chrono::duration_cast<Core::MonotonicDuration>(delay);
-    }
-
-    [[nodiscard]] static Core::MonotonicTimePoint
-    tooltipDeadlineAfter(Core::MonotonicTimePoint now,
-                         Core::Duration delay) noexcept
-    {
-        if (delay <= Core::Duration::zero())
-        {
-            return now;
-        }
-
-        // UITooltipConfig accepts every finite non-negative Duration. Clamp a
-        // delay that cannot be represented by the native steady-clock duration,
-        // then check time-point addition explicitly instead of relying on a
-        // narrowing duration_cast or signed tick overflow.
-        const Core::Duration maximumNativeDelay =
-            std::chrono::duration_cast<Core::Duration>(
-                Core::MonotonicDuration::max());
-        if (delay >= maximumNativeDelay)
-        {
-            return Core::MonotonicTimePoint::max();
-        }
-
-        const Core::MonotonicDuration nativeDelay = tooltipDelayDuration(delay);
-        const auto nowTicks = now.time_since_epoch().count();
-        const auto delayTicks = nativeDelay.count();
-        const auto maximumTicks =
-            (std::numeric_limits<Core::MonotonicDuration::rep>::max)();
-        if (delayTicks > 0 && nowTicks > maximumTicks - delayTicks)
-        {
-            return Core::MonotonicTimePoint::max();
-        }
-        return Core::MonotonicTimePoint{
-            Core::MonotonicDuration{nowTicks + delayTicks}};
-    }
-
     void markTooltipPresentationDirty() noexcept
     {
         // A Window has at most one active Tooltip, so a bounded full snapshot
-        // rebuild is simpler and more robust than reserving an additional dirty
-        // ancestry path from inside the frame coordinator.
+        // rebuild avoids a second dirty ancestry path inside the frame coordinator.
         phaseDirty |= PhaseLayout | PhaseHit | PhasePaint | PhaseSemantics;
         layoutReuseCacheValid = false;
     }
 
-    [[nodiscard]] bool rawTooltipTriggerActive(UINodeId tooltip) const noexcept
+    [[nodiscard]] Detail::UITooltipAdvanceCandidate
+    tooltipAdvanceCandidate(UINodeId tooltip) const noexcept
     {
-        if (!hasValidTooltipRelationship(
-                tooltip, tooltipStatesByNodeIndex[tooltip.index()].anchor))
-        {
-            return false;
-        }
-        const TooltipState& state = tooltipStatesByNodeIndex[tooltip.index()];
-        const UINodeId anchor = state.anchor;
-        return (hasTooltipTrigger(state.config.triggers,
-                                  UITooltipTrigger::PointerHover) &&
-                hoveredTooltipAnchor == anchor) ||
-               (hasTooltipTrigger(state.config.triggers,
-                                  UITooltipTrigger::KeyboardFocus) &&
-                defaultActionFocusButton == anchor) ||
-               (hasTooltipTrigger(state.config.triggers,
-                                  UITooltipTrigger::Manual) &&
-                state.manualRequested && manualTooltipNode == tooltip);
+        return {
+            .tooltip = tooltip,
+            .eligible = isTooltipAnchorEligible(tooltip),
+        };
     }
 
-    void clearResettableTooltipSuppression() noexcept
+    void advanceTooltips(Core::MonotonicTimePoint now) noexcept
     {
-        for (u32 index = 0; index < tooltipStatesByNodeIndex.size(); ++index)
-        {
-            const NodeRecord* record = recordByIndex(index);
-            if (record == nullptr || record->kind != BuiltinElementKind::Tooltip)
-            {
-                continue;
-            }
-            TooltipState& state = tooltipStatesByNodeIndex[index];
-            if (!state.suppressedUntilTriggerReset)
-            {
-                continue;
-            }
-            const UINodeId tooltip = idForIndex(index);
-            if (!rawTooltipTriggerActive(tooltip))
-            {
-                state.suppressedUntilTriggerReset = false;
-            }
-        }
-    }
-
-    void cancelPendingTooltipOpen() noexcept
-    {
-        pendingTooltipNode = {};
-        tooltipOpenDeadline = {};
-        tooltipOpenPending = false;
-    }
-
-    void activateTooltipNoFail(UINodeId tooltip) noexcept
-    {
-        if (!contains(tooltip) || tooltip.index() >= tooltipStatesByNodeIndex.size())
-        {
-            return;
-        }
-        bool changed = false;
-        if (activeTooltipNode.hasValue() && activeTooltipNode != tooltip &&
-            contains(activeTooltipNode) &&
-            activeTooltipNode.index() < tooltipStatesByNodeIndex.size())
-        {
-            changed = tooltipStatesByNodeIndex[activeTooltipNode.index()].open || changed;
-            tooltipStatesByNodeIndex[activeTooltipNode.index()].open = false;
-        }
-        TooltipState& state = tooltipStatesByNodeIndex[tooltip.index()];
-        changed = changed || !state.open || activeTooltipNode != tooltip;
-        state.open = true;
-        state.suppressedUntilTriggerReset = false;
-        activeTooltipNode = tooltip;
-        cancelPendingTooltipOpen();
-        tooltipCloseDeadline = {};
-        tooltipClosePending = false;
-        tooltipReshowExpiry = {};
-        tooltipReshowAvailable = false;
-        if (changed)
+        const UINodeId active = tooltipStorage.activeTooltip();
+        const UINodeId manual = tooltipStorage.manualTooltip();
+        const UINodeId hover =
+            tooltipForAnchor(tooltipStorage.hoveredAnchor());
+        const UINodeId focus = tooltipForAnchor(defaultActionFocusButton);
+        const Detail::UITooltipAdvanceInput input{
+            .now = now,
+            .focusedAnchor = defaultActionFocusButton,
+            .active = tooltipAdvanceCandidate(active),
+            .manual = tooltipAdvanceCandidate(manual),
+            .hover = tooltipAdvanceCandidate(hover),
+            .focus = tooltipAdvanceCandidate(focus),
+        };
+        if (tooltipStorage.advance(input))
         {
             markTooltipPresentationDirty();
-        }
-    }
-
-    void deactivateTooltipNoFail(UINodeId tooltip, bool suppress,
-                                 bool allowReshow,
-                                 Core::MonotonicTimePoint now) noexcept
-    {
-        if (!contains(tooltip) || tooltip.index() >= tooltipStatesByNodeIndex.size())
-        {
-            if (activeTooltipNode == tooltip)
-            {
-                activeTooltipNode = {};
-            }
-            if (pendingTooltipNode == tooltip)
-            {
-                cancelPendingTooltipOpen();
-            }
-            tooltipClosePending = false;
-            tooltipCloseDeadline = {};
-            return;
-        }
-        TooltipState& state = tooltipStatesByNodeIndex[tooltip.index()];
-        const bool changed = state.open || activeTooltipNode == tooltip;
-        state.open = false;
-        state.suppressedUntilTriggerReset =
-            state.suppressedUntilTriggerReset || suppress;
-        if (activeTooltipNode == tooltip)
-        {
-            activeTooltipNode = {};
-        }
-        if (pendingTooltipNode == tooltip)
-        {
-            cancelPendingTooltipOpen();
-        }
-        tooltipClosePending = false;
-        tooltipCloseDeadline = {};
-        if (allowReshow)
-        {
-            const double windowSeconds = (std::max)(
-                state.config.initialDelay.count(),
-                state.config.reshowDelay.count());
-            tooltipReshowAvailable = true;
-            tooltipReshowExpiry =
-                tooltipDeadlineAfter(now, Core::Duration{windowSeconds});
-        } else
-        {
-            tooltipReshowAvailable = false;
-            tooltipReshowExpiry = {};
-        }
-        if (changed)
-        {
-            markTooltipPresentationDirty();
-        }
-    }
-
-    void suppressTooltipNode(UINodeId tooltip) noexcept
-    {
-        if (contains(tooltip) && tooltip.index() < tooltipStatesByNodeIndex.size())
-        {
-            tooltipStatesByNodeIndex[tooltip.index()].suppressedUntilTriggerReset = true;
         }
     }
 
     void hardDismissAllTooltipsNoFail(bool suppress) noexcept
     {
-        const UINodeId hovered = tooltipForAnchor(hoveredTooltipAnchor);
-        const UINodeId focused = tooltipForAnchor(defaultActionFocusButton);
-        if (suppress)
-        {
-            suppressTooltipNode(activeTooltipNode);
-            suppressTooltipNode(pendingTooltipNode);
-            suppressTooltipNode(manualTooltipNode);
-            suppressTooltipNode(hovered);
-            suppressTooltipNode(focused);
-        }
-        bool changed = false;
-        for (u32 index = 0; index < tooltipStatesByNodeIndex.size(); ++index)
-        {
-            const NodeRecord* record = recordByIndex(index);
-            if (record == nullptr || record->kind != BuiltinElementKind::Tooltip)
-            {
-                continue;
-            }
-            TooltipState& state = tooltipStatesByNodeIndex[index];
-            changed = changed || state.open;
-            state.open = false;
-            state.manualRequested = false;
-        }
-        activeTooltipNode = {};
-        cancelPendingTooltipOpen();
-        manualTooltipNode = {};
-        tooltipCloseDeadline = {};
-        tooltipClosePending = false;
-        tooltipReshowExpiry = {};
-        tooltipReshowAvailable = false;
-        if (changed)
+        if (tooltipStorage.hardDismiss(defaultActionFocusButton, suppress))
         {
             markTooltipPresentationDirty();
         }
@@ -12642,179 +12967,39 @@ struct UIContext::Impl final {
 
     void dismissTooltipNoFail(UINodeId tooltip, bool suppress) noexcept
     {
-        if (!contains(tooltip) || tooltip.index() >= tooltipStatesByNodeIndex.size())
+        if (tooltipStorage.dismiss(tooltip, suppress, motionNow()))
         {
-            return;
-        }
-        TooltipState& state = tooltipStatesByNodeIndex[tooltip.index()];
-        state.manualRequested = false;
-        state.suppressedUntilTriggerReset =
-            state.suppressedUntilTriggerReset || suppress;
-        if (manualTooltipNode == tooltip)
-        {
-            manualTooltipNode = {};
-        }
-        if (pendingTooltipNode == tooltip)
-        {
-            cancelPendingTooltipOpen();
-        }
-        if (activeTooltipNode == tooltip || state.open)
-        {
-            deactivateTooltipNoFail(tooltip, suppress, false, motionNow());
+            markTooltipPresentationDirty();
         }
     }
 
-    [[nodiscard]] UINodeId desiredTooltip() const noexcept
-    {
-        const auto candidate = [this](UINodeId tooltip,
-                                      UITooltipTrigger trigger) noexcept {
-            if (!contains(tooltip) || tooltip.index() >= tooltipStatesByNodeIndex.size())
-            {
-                return UINodeId{};
-            }
-            const TooltipState& state = tooltipStatesByNodeIndex[tooltip.index()];
-            if (state.suppressedUntilTriggerReset ||
-                !hasTooltipTrigger(state.config.triggers, trigger) ||
-                !isTooltipAnchorEligible(tooltip))
-            {
-                return UINodeId{};
-            }
-            return tooltip;
-        };
-
-        if (contains(manualTooltipNode) &&
-            manualTooltipNode.index() < tooltipStatesByNodeIndex.size() &&
-            tooltipStatesByNodeIndex[manualTooltipNode.index()].manualRequested)
-        {
-            if (const UINodeId manual = candidate(
-                    manualTooltipNode, UITooltipTrigger::Manual);
-                manual.hasValue())
-            {
-                return manual;
-            }
-        }
-        if (const UINodeId hover = candidate(
-                tooltipForAnchor(hoveredTooltipAnchor),
-                UITooltipTrigger::PointerHover);
-            hover.hasValue())
-        {
-            return hover;
-        }
-        return candidate(tooltipForAnchor(defaultActionFocusButton),
-                         UITooltipTrigger::KeyboardFocus);
-    }
-
-    void advanceTooltips(Core::MonotonicTimePoint now) noexcept
-    {
-        if (tooltipReshowAvailable && now > tooltipReshowExpiry)
-        {
-            tooltipReshowAvailable = false;
-            tooltipReshowExpiry = {};
-        }
-        clearResettableTooltipSuppression();
-
-        if (activeTooltipNode.hasValue() &&
-            !isTooltipAnchorEligible(activeTooltipNode))
-        {
-            if (contains(activeTooltipNode) &&
-                activeTooltipNode.index() < tooltipStatesByNodeIndex.size())
-            {
-                tooltipStatesByNodeIndex[activeTooltipNode.index()].manualRequested = false;
-            }
-            if (manualTooltipNode == activeTooltipNode)
-            {
-                manualTooltipNode = {};
-            }
-            deactivateTooltipNoFail(activeTooltipNode, true, false, now);
-        }
-
-        UINodeId desired = desiredTooltip();
-        if (activeTooltipNode.hasValue())
-        {
-            if (desired == activeTooltipNode)
-            {
-                tooltipClosePending = false;
-                tooltipCloseDeadline = {};
-                cancelPendingTooltipOpen();
-                return;
-            }
-            if (desired.hasValue() && desired == manualTooltipNode)
-            {
-                activateTooltipNoFail(desired);
-                return;
-            }
-            if (!tooltipClosePending)
-            {
-                const TooltipState& active =
-                    tooltipStatesByNodeIndex[activeTooltipNode.index()];
-                tooltipCloseDeadline =
-                    tooltipDeadlineAfter(now, active.config.dismissDelay);
-                tooltipClosePending = true;
-            }
-            if (now < tooltipCloseDeadline)
-            {
-                return;
-            }
-            const UINodeId closing = activeTooltipNode;
-            deactivateTooltipNoFail(closing, false, true, now);
-            desired = desiredTooltip();
-        }
-
-        if (!desired.hasValue())
-        {
-            cancelPendingTooltipOpen();
-            return;
-        }
-        if (desired == manualTooltipNode)
-        {
-            activateTooltipNoFail(desired);
-            return;
-        }
-        if (!tooltipOpenPending || pendingTooltipNode != desired)
-        {
-            const TooltipState& state =
-                tooltipStatesByNodeIndex[desired.index()];
-            const Core::Duration delay = tooltipReshowAvailable
-                                             ? state.config.reshowDelay
-                                             : state.config.initialDelay;
-            pendingTooltipNode = desired;
-            tooltipOpenDeadline = tooltipDeadlineAfter(now, delay);
-            tooltipOpenPending = true;
-        }
-        if (now >= tooltipOpenDeadline)
-        {
-            activateTooltipNoFail(desired);
-        }
-    }
 
     void reconcileTooltipAfterPublication(
         Core::MonotonicTimePoint now) noexcept
     {
-        if (!activeTooltipNode.hasValue())
+        const UINodeId active = tooltipStorage.activeTooltip();
+        if (!active.hasValue())
         {
             return;
         }
-        if (!isTooltipAnchorEligible(activeTooltipNode))
+        if (!isTooltipAnchorEligible(active))
         {
-            if (contains(activeTooltipNode) &&
-                activeTooltipNode.index() < tooltipStatesByNodeIndex.size())
+            if (tooltipStorage.dismiss(active, true, now))
             {
-                tooltipStatesByNodeIndex[activeTooltipNode.index()].manualRequested = false;
+                markTooltipPresentationDirty();
             }
-            if (manualTooltipNode == activeTooltipNode)
-            {
-                manualTooltipNode = {};
-            }
-            deactivateTooltipNoFail(activeTooltipNode, true, false, now);
             return;
         }
 
-        const TooltipState& state =
-            tooltipStatesByNodeIndex[activeTooltipNode.index()];
+        const TooltipState* state = tooltipStorage.tryState(active);
+        if (state == nullptr)
+        {
+            return;
+        }
         const UICommittedLayoutEntry* anchorEntry =
-            committedLayoutEntryFor(state.anchor);
-        if (anchorEntry == nullptr || !state.committedMetrics.open ||
-            state.committedMetrics.anchorRect != anchorEntry->worldRect)
+            committedLayoutEntryFor(state->anchor);
+        if (anchorEntry == nullptr || !state->committedMetrics.open ||
+            state->committedMetrics.anchorRect != anchorEntry->worldRect)
         {
             // Tooltip placement intentionally consumed the previous successful
             // Anchor geometry. Schedule one bounded follow-up publication when
@@ -12837,10 +13022,10 @@ struct UIContext::Impl final {
         {
             const UICommittedHitEntry& entry = entries[entryIndex];
             const UINodeId tooltip = tooltipForAnchor(entry.node);
-            if (tooltip.hasValue() &&
-                hasTooltipTrigger(
-                    tooltipStatesByNodeIndex[tooltip.index()].config.triggers,
-                    UITooltipTrigger::PointerHover))
+            const TooltipState* state = tooltipStorage.tryState(tooltip);
+            if (state != nullptr &&
+                hasTooltipTrigger(state->config.triggers,
+                                  UITooltipTrigger::PointerHover))
             {
                 return entry.node;
             }
@@ -12898,34 +13083,20 @@ struct UIContext::Impl final {
             break;
         }
 
-        UINodeId& reverse = tooltipForAnchorByNodeIndex[anchor.index()];
+        const UINodeId reverse = tooltipStorage.tooltipForAnchor(anchor);
         if (reverse.hasValue() && reverse != tooltip &&
             hasValidTooltipRelationship(reverse, anchor))
         {
             return fail(UIErrorCode::InvalidParent,
                         "UI Anchor already owns a Tooltip relationship");
         }
-        if (reverse.hasValue() &&
-            !hasValidTooltipRelationship(reverse, anchor))
-        {
-            reverse = {};
-        }
-
-        TooltipState& state = tooltipStatesByNodeIndex[tooltip.index()];
-        if (state.anchor == anchor && reverse == tooltip)
+        const TooltipState* state = tooltipStorage.tryState(tooltip);
+        if (state != nullptr && state->anchor == anchor && reverse == tooltip)
         {
             return Core::success();
         }
         dismissTooltipNoFail(tooltip, false);
-        if (contains(state.anchor) &&
-            state.anchor.index() < tooltipForAnchorByNodeIndex.size() &&
-            tooltipForAnchorByNodeIndex[state.anchor.index()] == tooltip)
-        {
-            tooltipForAnchorByNodeIndex[state.anchor.index()] = {};
-        }
-        state.anchor = anchor;
-        state.suppressedUntilTriggerReset = false;
-        reverse = tooltip;
+        tooltipStorage.linkValidated(tooltip, anchor);
         markTooltipPresentationDirty();
         return Core::success();
     }
@@ -12937,20 +13108,13 @@ struct UIContext::Impl final {
         {
             return Core::failure(tooltipResult.error());
         }
-        TooltipState& state = tooltipStatesByNodeIndex[tooltip.index()];
-        if (!state.anchor.hasValue())
+        const TooltipState* state = tooltipStorage.tryState(tooltip);
+        if (state == nullptr || !state->anchor.hasValue())
         {
             return Core::success();
         }
-        const UINodeId anchor = state.anchor;
         dismissTooltipNoFail(tooltip, false);
-        if (contains(anchor) && anchor.index() < tooltipForAnchorByNodeIndex.size() &&
-            tooltipForAnchorByNodeIndex[anchor.index()] == tooltip)
-        {
-            tooltipForAnchorByNodeIndex[anchor.index()] = {};
-        }
-        state.anchor = {};
-        state.suppressedUntilTriggerReset = false;
+        static_cast<void>(tooltipStorage.unlinkTooltip(tooltip));
         markTooltipPresentationDirty();
         return Core::success();
     }
@@ -12988,7 +13152,7 @@ struct UIContext::Impl final {
         {
             return Core::failure(tooltipResult.error());
         }
-        const UINodeId anchor = tooltipStatesByNodeIndex[tooltip.index()].anchor;
+        const UINodeId anchor = tooltipStorage.anchorForTooltip(tooltip);
         return hasValidTooltipRelationship(tooltip, anchor) ? anchor : UINodeId{};
     }
 
@@ -13004,30 +13168,19 @@ struct UIContext::Impl final {
         {
             return Core::failure(tooltipResult.error());
         }
-        TooltipState& state = tooltipStatesByNodeIndex[tooltip.index()];
-        if (!hasValidTooltipRelationship(tooltip, state.anchor))
+        const TooltipState* state = tooltipStorage.tryState(tooltip);
+        if (state == nullptr || !hasValidTooltipRelationship(tooltip, state->anchor))
         {
             return fail(UIErrorCode::InvalidParent,
                         "UI Tooltip requires a live Anchor before it can show");
         }
-        if (!hasTooltipTrigger(state.config.triggers, UITooltipTrigger::Manual))
+        if (!hasTooltipTrigger(state->config.triggers, UITooltipTrigger::Manual))
         {
             return fail(UIErrorCode::InvalidControlValue,
                         "UI Tooltip does not enable the Manual trigger");
         }
-        if (manualTooltipNode.hasValue() && manualTooltipNode != tooltip &&
-            contains(manualTooltipNode) &&
-            manualTooltipNode.index() < tooltipStatesByNodeIndex.size())
-        {
-            tooltipStatesByNodeIndex[manualTooltipNode.index()].manualRequested = false;
-        }
-        manualTooltipNode = tooltip;
-        state.manualRequested = true;
-        state.suppressedUntilTriggerReset = false;
-        if (isTooltipAnchorEligible(tooltip))
-        {
-            activateTooltipNoFail(tooltip);
-        } else
+        if (tooltipStorage.requestManual(tooltip,
+                                         isTooltipAnchorEligible(tooltip)))
         {
             markTooltipPresentationDirty();
         }
@@ -13072,7 +13225,7 @@ struct UIContext::Impl final {
         {
             return Core::failure(tooltipResult.error());
         }
-        return tooltipStatesByNodeIndex[tooltip.index()].committedMetrics;
+        return tooltipStorage.committedMetrics(tooltip);
     }
 
     [[nodiscard]] Core::Status validateTooltipUpdaterRoot(
@@ -15314,13 +15467,21 @@ struct UIContext::Impl final {
         {
             const NodeRecord* record = recordByIndex(index);
             if (record == nullptr || record->kind != BuiltinElementKind::Tooltip ||
-                index >= tooltipStatesByNodeIndex.size() ||
-                index >= tooltipLayoutScratchByNodeIndex.size())
+                index >= tooltipStorage.capacity())
             {
                 continue;
             }
-            tooltipStatesByNodeIndex[index].committedMetrics =
-                tooltipLayoutScratchByNodeIndex[index].metrics;
+            tooltipStorage.publishMetrics(index);
+        }
+        for (const u32 index : order)
+        {
+            const NodeRecord* record = recordByIndex(index);
+            if (record == nullptr || record->kind != BuiltinElementKind::SplitView ||
+                index >= splitViewStorage.capacity())
+            {
+                continue;
+            }
+            splitViewStorage.publishMetrics(index);
         }
         for (const u32 index : order)
         {
@@ -15393,47 +15554,9 @@ struct UIContext::Impl final {
             return motionStatus;
         }
 
-        std::copy(tooltipStatesByNodeIndex.begin(),
-                  tooltipStatesByNodeIndex.end(),
-                  tooltipCommitRollbackStatesByNodeIndex.begin());
-        struct TooltipCommitState final {
-            UINodeId active{};
-            UINodeId pending{};
-            UINodeId hoveredAnchor{};
-            UINodeId manual{};
-            Core::MonotonicTimePoint openDeadline{};
-            Core::MonotonicTimePoint closeDeadline{};
-            Core::MonotonicTimePoint reshowExpiry{};
-            bool openPending = false;
-            bool closePending = false;
-            bool reshowAvailable = false;
-        };
-        const TooltipCommitState previousTooltipState{
-            .active = activeTooltipNode,
-            .pending = pendingTooltipNode,
-            .hoveredAnchor = hoveredTooltipAnchor,
-            .manual = manualTooltipNode,
-            .openDeadline = tooltipOpenDeadline,
-            .closeDeadline = tooltipCloseDeadline,
-            .reshowExpiry = tooltipReshowExpiry,
-            .openPending = tooltipOpenPending,
-            .closePending = tooltipClosePending,
-            .reshowAvailable = tooltipReshowAvailable,
-        };
+        tooltipStorage.beginCommitTransaction();
         auto tooltipAdvanceRollback = Core::makeScopeExit([&]() noexcept {
-            std::copy(tooltipCommitRollbackStatesByNodeIndex.begin(),
-                      tooltipCommitRollbackStatesByNodeIndex.end(),
-                      tooltipStatesByNodeIndex.begin());
-            activeTooltipNode = previousTooltipState.active;
-            pendingTooltipNode = previousTooltipState.pending;
-            hoveredTooltipAnchor = previousTooltipState.hoveredAnchor;
-            manualTooltipNode = previousTooltipState.manual;
-            tooltipOpenDeadline = previousTooltipState.openDeadline;
-            tooltipCloseDeadline = previousTooltipState.closeDeadline;
-            tooltipReshowExpiry = previousTooltipState.reshowExpiry;
-            tooltipOpenPending = previousTooltipState.openPending;
-            tooltipClosePending = previousTooltipState.closePending;
-            tooltipReshowAvailable = previousTooltipState.reshowAvailable;
+            tooltipStorage.rollbackCommitTransaction();
         });
         advanceTooltips(frameNow);
         const bool hasTransactionalTimelineSample = timelineStorage.hasCandidateSample();
@@ -16520,8 +16643,8 @@ struct UIContext::Impl final {
                        targetNodeEnabledAtRouteStart)
             {
                 addRouteDirtyReservationCandidate(targetNode);
-            } else if (nearestSliderRecord != nullptr && nearestSliderRecord->kind == BuiltinElementKind::Slider &&
-                       isInteractiveRangeInput(nearestSlider))
+            } else if (nearestSliderRecord != nullptr &&
+                       isPointerAdjustableRangeInput(nearestSlider))
             {
                 addRouteDirtyReservationCandidate(nearestSlider);
             } else if (nearestButton.hasValue() && isNodeEnabled(nearestButton))
@@ -16784,8 +16907,7 @@ struct UIContext::Impl final {
                 nearestSlider.hasValue() && contains(nearestSlider) ? nodes.tryGet(nearestSlider.storageId()) : nullptr;
             const bool willArmSlider = allowsDefaultAction && !willUseScrollBar && !willFocusTextEdit &&
                                        nearestSlider.hasValue() && nearestSliderRecord != nullptr &&
-                                       nearestSliderRecord->kind == BuiltinElementKind::Slider &&
-                                       isInteractiveRangeInput(nearestSlider);
+                                       isPointerAdjustableRangeInput(nearestSlider);
             UINodeId nextKeyboardFocus =
                 preserveFocusForModalBarrier || preserveFocusForPopupBarrier ? previousKeyboardFocus : UINodeId{};
             UINodeId nextActivationTarget{};
@@ -16924,10 +17046,21 @@ struct UIContext::Impl final {
                 armedSlider = nearestSlider;
                 defaultActionFocusButton = nextKeyboardFocus;
                 capturedPointerNode = nearestSlider;
+                if (nearestSliderRecord->kind == BuiltinElementKind::Splitter)
+                {
+                    const UINodeId splitView = splitViewStorage.splitViewForSplitter(nearestSlider);
+                    const UISplitViewMetrics metrics = splitViewStorage.committedMetrics(splitView);
+                    const float extent = metrics.orientation == UISplitViewOrientation::Horizontal
+                                             ? metrics.splitterRect.width
+                                             : metrics.splitterRect.height;
+                    splitterDragGrabOffset = std::clamp(
+                        splitterGrabOffset(metrics, input.position), 0.0F,
+                        (std::max)(0.0F, extent));
+                }
                 routedEvent.consumeInputTransition();
                 static_cast<void>(routedEvent.claimPointerButton(Platform::PointerButton::Primary));
-                if (auto applied = applySliderValueFromPointer(nearestSlider, input.position, input.platformFrame,
-                                                               input.sourceSequence);
+                if (auto applied = applyRangeInputValueFromPointer(nearestSlider, input.position, input.platformFrame,
+                                                                   input.sourceSequence);
                     !applied)
                 {
                     return Core::failure(applied.error());
@@ -17020,8 +17153,8 @@ struct UIContext::Impl final {
             } else
             {
                 static_cast<void>(routedEvent.claimPointerButton(Platform::PointerButton::Primary));
-                if (auto applied = applySliderValueFromPointer(armedSliderAtRouteStart, input.position,
-                                                               input.platformFrame, input.sourceSequence);
+                if (auto applied = applyRangeInputValueFromPointer(armedSliderAtRouteStart, input.position,
+                                                                   input.platformFrame, input.sourceSequence);
                     !applied)
                 {
                     return Core::failure(applied.error());
@@ -17112,8 +17245,8 @@ struct UIContext::Impl final {
             routedEvent.consumeInputTransition();
             if (sliderStillArmed && isNodeEnabled(armedSliderAtRouteStart) && !routedEvent.isDefaultActionPrevented())
             {
-                if (auto applied = applySliderValueFromPointer(armedSliderAtRouteStart, input.position,
-                                                               input.platformFrame, input.sourceSequence);
+                if (auto applied = applyRangeInputValueFromPointer(armedSliderAtRouteStart, input.position,
+                                                                   input.platformFrame, input.sourceSequence);
                     !applied)
                 {
                     return Core::failure(applied.error());
@@ -17259,8 +17392,8 @@ struct UIContext::Impl final {
             // Hover intent always follows the physical committed hit rather
             // than Pointer Capture routing. Tooltip itself is Ignore, so it can
             // never become this target or prevent click-through.
-            hoveredTooltipAnchor =
-                tooltipAnchorFromCommittedHit(result.pointQuery.target, entries);
+            tooltipStorage.setHoveredAnchor(
+                tooltipAnchorFromCommittedHit(result.pointQuery.target, entries));
         } else if (input.kind == UIRoutedPointerEventKind::ButtonDown ||
                    input.kind == UIRoutedPointerEventKind::Wheel)
         {
@@ -17305,7 +17438,7 @@ struct UIContext::Impl final {
         clearImeFocus();
         clearDefaultActionFocus();
         clearHoveredPrimaryControl();
-        hoveredTooltipAnchor = {};
+        tooltipStorage.setHoveredAnchor({});
         hardDismissAllTooltipsNoFail(true);
         // Cancellation is a state barrier: a full dirty queue must not leave
         // any pointer interaction armed. Existing dirty work will rebuild the
@@ -20892,6 +21025,72 @@ Core::Result<bool> UITreeUpdater::isSliderDragging(UINodeId slider) const
     return m_context->isSliderDraggingFromUpdater(m_root, slider);
 }
 
+Core::Status UITreeUpdater::setSplitViewParts(
+    UINodeId splitView, UINodeId primaryPane, UINodeId splitter,
+    UINodeId secondaryPane)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setSplitViewPartsFromUpdater(
+        m_root, splitView, primaryPane, splitter, secondaryPane);
+}
+
+Core::Status UITreeUpdater::clearSplitViewParts(UINodeId splitView)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->clearSplitViewPartsFromUpdater(m_root, splitView);
+}
+
+Core::Result<UISplitViewParts> UITreeUpdater::splitViewParts(UINodeId splitView) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->splitViewPartsFromUpdater(m_root, splitView);
+}
+
+Core::Status UITreeUpdater::setSplitViewFraction(UINodeId splitView, float fraction)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setSplitViewFractionFromUpdater(m_root, splitView, fraction);
+}
+
+Core::Result<float> UITreeUpdater::splitViewFraction(UINodeId splitView) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->splitViewFractionFromUpdater(m_root, splitView);
+}
+
+Core::Result<UISplitViewMetrics> UITreeUpdater::splitViewMetrics(UINodeId splitView) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->splitViewMetricsFromUpdater(m_root, splitView);
+}
+
+Core::Result<bool> UITreeUpdater::isSplitterDragging(UINodeId splitter) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->isSplitterDraggingFromUpdater(m_root, splitter);
+}
+
 Core::Status UITreeUpdater::setScrollViewStyle(UINodeId scrollView, const UIScrollViewStyle& style)
 {
     if (m_context == nullptr)
@@ -21984,6 +22183,43 @@ UINodeId UIContext::activePopup() const noexcept
     return m_impl->activePopup();
 }
 
+Core::Status UIContext::setSplitViewParts(
+    UINodeId splitView, UINodeId primaryPane, UINodeId splitter,
+    UINodeId secondaryPane)
+{
+    return m_impl->setSplitViewParts(splitView, primaryPane, splitter, secondaryPane);
+}
+
+Core::Status UIContext::clearSplitViewParts(UINodeId splitView)
+{
+    return m_impl->clearSplitViewParts(splitView);
+}
+
+Core::Result<UISplitViewParts> UIContext::splitViewParts(UINodeId splitView) const
+{
+    return m_impl->splitViewParts(splitView);
+}
+
+Core::Status UIContext::setSplitViewFraction(UINodeId splitView, float fraction)
+{
+    return m_impl->setSplitViewFraction(splitView, fraction);
+}
+
+Core::Result<float> UIContext::splitViewFraction(UINodeId splitView) const
+{
+    return m_impl->splitViewFraction(splitView);
+}
+
+Core::Result<UISplitViewMetrics> UIContext::splitViewMetrics(UINodeId splitView) const
+{
+    return m_impl->splitViewMetrics(splitView);
+}
+
+Core::Result<bool> UIContext::isSplitterDragging(UINodeId splitter) const
+{
+    return m_impl->isSplitterDragging(splitter);
+}
+
 Core::Status UIContext::setTooltipAnchor(UINodeId tooltip, UINodeId anchor)
 {
     return m_impl->setTooltipAnchor(tooltip, anchor);
@@ -22447,6 +22683,50 @@ Core::Status UIContext::clearSliderChangeCallbackFromUpdater(UINodeId updaterRoo
 Core::Result<bool> UIContext::isSliderDraggingFromUpdater(UINodeId updaterRoot, UINodeId slider) const
 {
     return m_impl->isSliderDraggingFromUpdater(updaterRoot, slider);
+}
+
+Core::Status UIContext::setSplitViewPartsFromUpdater(
+    UINodeId updaterRoot, UINodeId splitView, UINodeId primaryPane,
+    UINodeId splitter, UINodeId secondaryPane)
+{
+    return m_impl->setSplitViewPartsFromUpdater(
+        updaterRoot, splitView, primaryPane, splitter, secondaryPane);
+}
+
+Core::Status UIContext::clearSplitViewPartsFromUpdater(
+    UINodeId updaterRoot, UINodeId splitView)
+{
+    return m_impl->clearSplitViewPartsFromUpdater(updaterRoot, splitView);
+}
+
+Core::Result<UISplitViewParts> UIContext::splitViewPartsFromUpdater(
+    UINodeId updaterRoot, UINodeId splitView) const
+{
+    return m_impl->splitViewPartsFromUpdater(updaterRoot, splitView);
+}
+
+Core::Status UIContext::setSplitViewFractionFromUpdater(
+    UINodeId updaterRoot, UINodeId splitView, float fraction)
+{
+    return m_impl->setSplitViewFractionFromUpdater(updaterRoot, splitView, fraction);
+}
+
+Core::Result<float> UIContext::splitViewFractionFromUpdater(
+    UINodeId updaterRoot, UINodeId splitView) const
+{
+    return m_impl->splitViewFractionFromUpdater(updaterRoot, splitView);
+}
+
+Core::Result<UISplitViewMetrics> UIContext::splitViewMetricsFromUpdater(
+    UINodeId updaterRoot, UINodeId splitView) const
+{
+    return m_impl->splitViewMetricsFromUpdater(updaterRoot, splitView);
+}
+
+Core::Result<bool> UIContext::isSplitterDraggingFromUpdater(
+    UINodeId updaterRoot, UINodeId splitter) const
+{
+    return m_impl->isSplitterDraggingFromUpdater(updaterRoot, splitter);
 }
 
 Core::Status UIContext::setScrollViewStyleFromUpdater(UINodeId updaterRoot, UINodeId scrollView,

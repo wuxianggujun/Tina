@@ -255,6 +255,28 @@ class PrimaryWindowUICapabilityState final {
                                                          UI::UITreeUpdater& updater, UI::UINodeId slider);
     [[nodiscard]] Core::Result<bool> isSliderDragging(u64 epoch, PrimaryWindowUIPhase phase,
                                                       const UI::UITreeUpdater& updater, UI::UINodeId slider);
+    [[nodiscard]] Core::Status setSplitViewParts(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+        UI::UINodeId splitView, UI::UINodeId primaryPane, UI::UINodeId splitter,
+        UI::UINodeId secondaryPane);
+    [[nodiscard]] Core::Status clearSplitViewParts(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+        UI::UINodeId splitView);
+    [[nodiscard]] Core::Result<UI::UISplitViewParts> splitViewParts(
+        u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+        UI::UINodeId splitView);
+    [[nodiscard]] Core::Status setSplitViewFraction(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+        UI::UINodeId splitView, float fraction);
+    [[nodiscard]] Core::Result<float> splitViewFraction(
+        u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+        UI::UINodeId splitView);
+    [[nodiscard]] Core::Result<UI::UISplitViewMetrics> splitViewMetrics(
+        u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+        UI::UINodeId splitView);
+    [[nodiscard]] Core::Result<bool> isSplitterDragging(
+        u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+        UI::UINodeId splitter);
     [[nodiscard]] Core::Status setScrollViewStyle(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                                   UI::UINodeId scrollView, const UI::UIScrollViewStyle& style);
     [[nodiscard]] Core::Result<UI::UIScrollViewStyle>

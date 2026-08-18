@@ -65,8 +65,11 @@ RoundedRect/Image/NineSlice 等更宽 Canvas command、圆角 clip 与可组合 
 
 - 所有公开文本严格 UTF-8；MSVC target 保持 `/utf-8`。FreeType 私有，字体通过 `TINA_UI_FONT_PATH`
   或显式字节注入；placeholder 不能冒充 CJK 视觉通过。
-- TextEdit 当前是单行 scalar selection + committed text/IME preedit；多行、grapheme/BiDi/shaping、候选窗
-  定位属于 `TEXT-001`，不要无意冻结新契约。
+- TextEdit 默认是单行 scalar selection；`UITextEditMultilineConfig` 可启用 LF/soft-wrap、固定容量 visual rows、
+  滚动、二维 hit/navigation。selection/caret 仍 scalar-indexed，但编辑、删除、导航位置对齐无第三方依赖的
+  UAX #29 grapheme 子集。Windows GLFW 已有 logical caret → DPI-scaled client pixels 与 IMM32
+  candidate/composition placement；BiDi/复杂 shaping、Linux 原生 XIM/Wayland 和 Windows 真机人工 IME 证据仍属
+  `TEXT-001` 后置范围。
 - UI 只输出后端无关 committed paint/DisplayList/Glyph atlas，不调用 bgfx。
 - `UIAccessibilityAction` 只表达 Focus/Invoke/Toggle/SetRangeValue/SetTextValue；Context owner thread 验证后
   复用默认行为。Windows UIA adapter 负责 COM/线程 marshal，不直接写 retained storage。

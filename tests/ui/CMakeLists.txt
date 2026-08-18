@@ -27,6 +27,7 @@ add_executable(tina_ui_tests
     UIRoutedPointerListenerRegistryTests.cpp
     UISliderChangeCallbackRegistryTests.cpp
     UISliderTests.cpp
+    UISplitViewTests.cpp
     UIScrollViewTests.cpp
     UIScrollViewLayoutTests.cpp
     UIListViewTests.cpp
@@ -95,6 +96,7 @@ add_executable(tina_ui_tests
     header_isolation/UIDropdownHeader.cpp
     header_isolation/UIPopupHeader.cpp
     header_isolation/UISliderHeader.cpp
+    header_isolation/UISplitViewHeader.cpp
     header_isolation/UIStyleHeader.cpp
     header_isolation/UIMotionHeader.cpp
     header_isolation/UISemanticsHeader.cpp

@@ -12,6 +12,7 @@ set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIRangeInput.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIScrollView.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UISlider.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UISplitView.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIStyle.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIMotion.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIDirty.hpp
@@ -99,6 +100,10 @@ add_library(tina_ui STATIC
     detail/UIScrollViewLayout.hpp
     detail/UISliderChangeCallbackRegistry.hpp
     detail/UISliderChangeCallbackRegistry.cpp
+    detail/UISplitViewInput.hpp
+    detail/UISplitViewLayout.hpp
+    detail/UISplitViewStateStorage.hpp
+    detail/UISplitViewStateStorage.cpp
     detail/UISemanticsSnapshotBuilder.hpp
     detail/UISemanticsSnapshotBuilder.cpp
     detail/UIStyleRoleResolver.hpp
@@ -107,6 +112,9 @@ add_library(tina_ui STATIC
     detail/UIStyleSheetStorage.cpp
     detail/UIThemeTransitionResolver.hpp
     detail/UIThemeTransitionResolver.cpp
+    detail/UITooltipLayout.hpp
+    detail/UITooltipStateStorage.hpp
+    detail/UITooltipStateStorage.cpp
     detail/UIVirtualCollectionLayout.hpp
     detail/UITextStorage.hpp
     detail/UITextStorage.cpp

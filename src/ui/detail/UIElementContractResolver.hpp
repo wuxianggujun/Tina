@@ -87,10 +87,13 @@ defaultBehaviorsForKind(BuiltinElementKind kind) noexcept
     case BuiltinElementKind::TreeViewItem:
         return UIElementBehavior::Focusable | UIElementBehavior::Activate |
                UIElementBehavior::VirtualTreeItem;
+    case BuiltinElementKind::Splitter:
+        return UIElementBehavior::Focusable | UIElementBehavior::RangeInput;
     case BuiltinElementKind::Root:
     case BuiltinElementKind::Panel:
     case BuiltinElementKind::Label:
     case BuiltinElementKind::Tooltip:
+    case BuiltinElementKind::SplitView:
         return UIElementBehavior::None;
     }
     return UIElementBehavior::None;
@@ -133,8 +136,11 @@ defaultStyleRoleForKind(BuiltinElementKind kind) noexcept
         return UIStyleRoleId::TreeView;
     case BuiltinElementKind::Tooltip:
         return UIStyleRoleId::TooltipSurface;
+    case BuiltinElementKind::Splitter:
+        return UIStyleRoleId::PanelSurface;
     case BuiltinElementKind::Root:
     case BuiltinElementKind::Panel:
+    case BuiltinElementKind::SplitView:
         return UIStyleRoleId::None;
     }
     return UIStyleRoleId::None;
@@ -148,6 +154,7 @@ defaultSemanticsForKind(BuiltinElementKind kind) noexcept
     {
     case BuiltinElementKind::Root:
     case BuiltinElementKind::Panel:
+    case BuiltinElementKind::SplitView:
         defaults.mode = UISemanticsMode::Automatic;
         break;
     case BuiltinElementKind::Tooltip:
@@ -169,6 +176,7 @@ defaultSemanticsForKind(BuiltinElementKind kind) noexcept
                            UISemanticsAction::Toggle;
         break;
     case BuiltinElementKind::Slider:
+    case BuiltinElementKind::Splitter:
         defaults.role = UISemanticsRole::Slider;
         defaults.actions = UISemanticsAction::Focus |
                            UISemanticsAction::SetRangeValue;

@@ -522,6 +522,22 @@ Anchor description/Windows HelpText，Tooltip 本身不发布 Focus/Activate 等
 `setTooltipAnchor/clearTooltipAnchor/tooltipAnchor/showTooltip/dismissTooltip/isTooltipOpen/tooltipMetrics`；Runtime
 版本继续受 phase epoch/lifetime 与 sticky error 约束。
 
+### SplitView / Splitter：复用既有 capability 的分栏控件
+
+SplitView 是独立的 retained built-in contract，但仍由现有 `UIContext` 唯一 owner 协调。`UISplitViewStateStorage`
+按 node index 固定容量保存 config、双向 parts、pending fraction、layout scratch 与 committed metrics；
+`UISplitViewLayout` 和 `UISplitViewInput` 分别负责三个 direct child 的 arrange 计划与 splitter pointer fraction 计算。
+这让新增控件主要落在 state/layout/input 模块，Context 只接入 resolver、dirty、publication 与生命周期清理。
+
+`UISplitViewConfig` 的 orientation 为 Horizontal/Vertical，`initialFraction` 与两侧 minimum size 在 arrange 时 clamp；
+`UISplitViewMetrics` 仅在 layout/Hit/Paint/Semantics 同一 atomic commit 成功后更新。`setSplitViewParts()` 要求同 root、
+恰好三个不同 direct Flow child，并且中间 child 必须是 `Splitter`；清理、destroy、generation reuse、root release 与
+commit capacity failure 保留旧关系/旧 metrics 或原子释放全部反向边。
+
+`Splitter` 复用 `Focusable | RangeInput`、现有 `armedSlider`/Pointer Capture、`routeRangeInputCommand()` 与
+`performAccessibilityAction(SetRangeValue)`，仅在 authoring/semantics 层区别于 Slider。它不拥有第二套 input/update loop、
+focus/capture store、Icon/Image pipeline 或 GPU shader；SplitView 本身默认 Ignore hit，Splitter 才是 targetable。
+
 ### Image、Icon 与 NineSlice
 
 ```cpp

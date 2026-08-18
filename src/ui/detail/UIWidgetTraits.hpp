@@ -27,6 +27,8 @@ enum class BuiltinElementKind : u8 {
     TreeView,
     TreeViewItem,
     Tooltip,
+    SplitView,
+    Splitter,
 };
 
 struct UIWidgetTraits final {
@@ -68,6 +70,7 @@ struct UIWidgetTraits final {
             .supportsText = true,
         };
     case BuiltinElementKind::Slider:
+    case BuiltinElementKind::Splitter:
         return {
             .keyboardFocusable = true,
         };
@@ -87,6 +90,7 @@ struct UIWidgetTraits final {
     case BuiltinElementKind::Modal:
     case BuiltinElementKind::ScrollView:
     case BuiltinElementKind::Popup:
+    case BuiltinElementKind::SplitView:
         return {};
     }
     return {};

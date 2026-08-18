@@ -1858,6 +1858,127 @@ Core::Result<bool> PrimaryWindowUICapabilityState::isSliderDragging(u64 epoch, P
     return *dragging;
 }
 
+Core::Status PrimaryWindowUICapabilityState::setSplitViewParts(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId splitView, UI::UINodeId primaryPane, UI::UINodeId splitter,
+    UI::UINodeId secondaryPane)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setSplitViewParts";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setSplitViewParts(
+        splitView, primaryPane, splitter, secondaryPane);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::clearSplitViewParts(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId splitView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::clearSplitViewParts";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.clearSplitViewParts(splitView);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UISplitViewParts> PrimaryWindowUICapabilityState::splitViewParts(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId splitView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::splitViewParts";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto parts = updater.splitViewParts(splitView);
+    if (!parts)
+    {
+        return Core::failure(rememberFirstError(std::move(parts.error()), Operation));
+    }
+    return *parts;
+}
+
+Core::Status PrimaryWindowUICapabilityState::setSplitViewFraction(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId splitView, float fraction)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setSplitViewFraction";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setSplitViewFraction(splitView, fraction);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<float> PrimaryWindowUICapabilityState::splitViewFraction(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId splitView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::splitViewFraction";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto fraction = updater.splitViewFraction(splitView);
+    if (!fraction)
+    {
+        return Core::failure(rememberFirstError(std::move(fraction.error()), Operation));
+    }
+    return *fraction;
+}
+
+Core::Result<UI::UISplitViewMetrics> PrimaryWindowUICapabilityState::splitViewMetrics(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId splitView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::splitViewMetrics";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto metrics = updater.splitViewMetrics(splitView);
+    if (!metrics)
+    {
+        return Core::failure(rememberFirstError(std::move(metrics.error()), Operation));
+    }
+    return *metrics;
+}
+
+Core::Result<bool> PrimaryWindowUICapabilityState::isSplitterDragging(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId splitter)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::isSplitterDragging";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto dragging = updater.isSplitterDragging(splitter);
+    if (!dragging)
+    {
+        return Core::failure(rememberFirstError(std::move(dragging.error()), Operation));
+    }
+    return *dragging;
+}
+
 Core::Status PrimaryWindowUICapabilityState::setScrollViewStyle(u64 epoch, PrimaryWindowUIPhase phase,
                                                                 UI::UITreeUpdater& updater,
                                                                 UI::UINodeId scrollView,

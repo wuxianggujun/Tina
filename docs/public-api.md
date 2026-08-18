@@ -302,7 +302,7 @@ StyleRole/box/Canvas、semantics、enabled、pointer/focus policy 与集合配�
 `makeListViewElement()` 等是内建控件的官方 recipes。旧 `createPanel/createButton/createListView/...`
 成员入口已删除，不提供 compatibility alias。当前内建行为覆盖 Root、Panel、Modal、Label、Button、
 Checkbox、Slider、ProgressBar、RadioButton、TextEdit（默认单行；可选多行）、ScrollView，以及
-Dropdown/Popup/Tooltip/DropdownItem、ListView/TreeView。
+Dropdown/Popup/Tooltip/DropdownItem、ListView/TreeView、SplitView/Splitter。
 
 `UILayoutStyle` 将父容器 `flexContainer`、子项 `flexItem` 与 `Flow/Overlay` placement 分开；Overlay 使用
 alignment + offset，Px offset 可为有限负值，Percent offset 范围为 `-100..100`，以表达受父级 clip 的
@@ -330,7 +330,7 @@ shaping 不在当前契约内。多行配置容量不足或 visual-row 构建失
 
 游戏通过 Runtime phase facade 创建/更新主窗口 root，不获得裸 UIContext。Text 使用 strict UTF-8，
 descriptor 的 `string_view` 在创建时复制到固定容量 storage，失败回滚本次节点；
-`PrimaryWindowUITreeUpdater` 暴露同一组 ScrollView/Dropdown/Popup/Tooltip/ListView/TreeView phase-scoped
+`PrimaryWindowUITreeUpdater` 暴露同一组 ScrollView/Dropdown/Popup/Tooltip/ListView/TreeView/SplitView phase-scoped
 mutation/query，包括集合 DataSource、metrics、selection、scroll 与 Tree expansion；
 `setTextOverflow()/textOverflow()` 也通过相同 phase facade 暴露；
 `setProductTheme()` 可事务式更新既有控件仍继承的产品 chrome；单节点
@@ -385,6 +385,16 @@ Tooltip authoring 使用 `UITooltipConfig` 与 `makeTooltipElement(text, config,
 open 状态；失败 commit 回滚 clock-driven transient state 并保留旧 snapshot/metrics。Tooltip 文本只在 Anchor
 没有显式 description 时作为 accessible description/HelpText fallback。`UIContext`、`UITreeUpdater` 和 Runtime
 phase facade 均提供 `setTooltipAnchor/clearTooltipAnchor/tooltipAnchor/showTooltip/dismissTooltip/isTooltipOpen/tooltipMetrics`。
+
+SplitView authoring 使用 `UISplitViewConfig`、`UISplitterConfig` 与
+`makeSplitViewElement()/makeSplitterElement()`。一个 SplitView 必须绑定同 root 的三个 direct Flow child，顺序由
+`setSplitViewParts(splitView, primaryPane, splitter, secondaryPane)` 显式声明；重复、self、跨 root、stale、非 direct
+child、非专用 Splitter 或非三子节点均拒绝。`setSplitViewFraction()` 与 `splitViewFraction()` 访问 pending fraction，
+`splitViewMetrics()` 返回最后成功 commit 的 `primaryRect/splitterRect/secondaryRect/fraction/orientation`。
+`PrimaryWindowUITreeUpdater` 同样 phase-scoped 暴露 parts、fraction、metrics 与 `isSplitterDragging()`。
+Splitter 只是强类型 authoring profile：复用现有 `Focusable | RangeInput`、Pointer Capture、键盘命令、Slider
+semantics 与 UIA SetRangeValue，不另建 Widget state machine、atlas、Asset 或 GPU pipeline。SplitView 默认 Ignore hit，
+Splitter 默认 Targetable/Slider semantics；icon-only Button 的 accessible name 仍由 Button root 提供。
 
 `UISemanticsDescriptor` 支持 Automatic/Publish/MergeDescendants/Exclude、显式 role/name/description/actions；
 committed semantics 使用最近 published ancestor，显式空 name 不回退 content。`UIStyleRoleId` 与 behavior/

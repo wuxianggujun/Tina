@@ -12,16 +12,16 @@
 | --- | --- |
 | 所有权 | per-window `UIContext`、generation/owner-aware `UINodeId`、move-only `UIRootOwner` |
 | Authoring | `UIElementDescriptor` + `make*Element` recipes、组合 Semantics、StyleRole/override reset、固定预算 build transaction；旧 create-by-kind 与公开 `UIWidgetKind` 已删除 |
-| Tree | Root/Panel/Modal/Label/Button/Checkbox/Slider/ProgressBar/RadioButton/TextEdit/ScrollView/Dropdown/Popup/Tooltip/DropdownItem/ListView/TreeView，固定容量 mutation |
-| Layout/Content | Flex container/item 分离、Flow/Overlay placement、logical pixel、可选 axis-aligned border-box descendant clip、committed content placement、Tooltip 基于上一份成功 Anchor geometry 的 flip/clamp、事务 commit、clean-subtree reuse |
+| Tree | Root/Panel/Modal/Label/Button/Checkbox/Slider/ProgressBar/RadioButton/TextEdit/ScrollView/Dropdown/Popup/Tooltip/DropdownItem/ListView/TreeView/SplitView/Splitter，固定容量 mutation |
+| Layout/Content | Flex container/item 分离、Flow/Overlay placement、logical pixel、可选 axis-aligned border-box descendant clip、committed content placement、Tooltip 基于上一份成功 Anchor geometry 的 flip/clamp、SplitView committed pane/splitter geometry、事务 commit、clean-subtree reuse |
 | Hit/route | committed hit snapshot、Capture→Target→Bubble、持久 Pointer Capture、Modal/Popup barrier、Tooltip Ignore/click-through、listener token、consume/prevent/claim |
 | Paint | `UIBoxPaint` Rectangle/Ellipse/Line、box/text/control paint、第一类 Image/Icon content、固定容量 backend-neutral `SolidRect`/`SolidEllipse`/`SolidLine`/`Image`/`NineSlice` Canvas、axis-aligned clip、PaintCache、committed paint snapshot；NineSlice 在 commit 时原子展开为1..9个 Image entry |
 | Theme/Style（A/B/C1 + UI-STYLE-001 slice） | `UITheme` token + `UIStyleRoleId` recipe + 属性 override mask/reset；默认 Button 为 Tonal，显式提供 Primary/Danger/Outlined/Text，并以 RadioButton 状态机提供 SegmentedButton；强类型 StyleClass/ColorToken、node-local pseudo-state、literal/token-backed BoxFill stylesheet 与运行期 ColorToken getter/setter 已落地；token 更新经固定 reverse-dependency 链为 `O(affected links)`，**无**圆角子树 clip/毛玻璃/完整 CSS |
 | Motion | direct/Style transition 仍为 fixed-capacity paint-only；typed keyframe timeline 已支持 paint 属性及 bounded `LayoutWidth`/`LayoutHeight`/`LayoutOffset` 白名单，并沿唯一 commit pipeline 原子发布；`ui_motion_v1`、`ui_motion_timeline_v1` 与 `ui_motion_layout_v1` 均已有确定性 gate，墙钟结论保持 provisional |
 | Text | strict UTF-8、可选 FreeType rasterizer、R8 Glyph atlas、DisplayList Glyph |
-| Input | Focus Scope/显式 focus、Pointer capture/cancel、Tab 与 committed 几何空间焦点、Keyboard/Gamepad activation、Dropdown 与 List/Tree navigation、TextEdit edit/selection/IME、Tooltip PointerHover/KeyboardFocus/Manual 与 monotonic delay；UI Flow 固定 16 槽本地用户、Gamepad assignment 与 per-user 设备 revision |
-| Semantics | Automatic/Publish/MergeDescendants/Exclude、显式 role/name/description/actions、Tooltip 文本作为 Anchor description/HelpText fallback、状态/range/value snapshot 与虚拟 item 元数据 |
-| Runtime | startup root builder、phase-scoped tree updater、Tooltip facade 与 bounded component transaction（含集合 DataSource/metrics/selection/scroll/expansion）、DisplayList/Glyph atlas handoff |
+| Input | Focus Scope/显式 focus、Pointer capture/cancel、Tab 与 committed 几何空间焦点、Keyboard/Gamepad activation、Dropdown 与 List/Tree navigation、TextEdit edit/selection/IME、Tooltip PointerHover/KeyboardFocus/Manual 与 monotonic delay、Splitter Pointer drag/RangeInput keyboard；UI Flow 固定 16 槽本地用户、Gamepad assignment 与 per-user 设备 revision |
+| Semantics | Automatic/Publish/MergeDescendants/Exclude、显式 role/name/description/actions、Tooltip 文本作为 Anchor description/HelpText fallback、Splitter Slider range/value snapshot 与虚拟 item 元数据 |
+| Runtime | startup root builder、phase-scoped tree updater、Tooltip/SplitView facade 与 bounded component transaction（含集合 DataSource/metrics/selection/scroll/expansion）、DisplayList/Glyph atlas handoff |
 | Performance | `tina_bench` 已接入 static commit、paint-only dirty、route/capture、100k virtual collection、Image/NineSlice、完整 Component build、Style 与 direct/timeline Motion schema-v1 provisional workload |
 | Product | 独立 20 控件 showcase、product-2d Scene Explorer TreeView、product-3d Asset ListView/Scene TreeView 与 Dark/Light Windows 视觉证据 |
 
@@ -44,7 +44,10 @@ UTF-8 arena、空闲块复用/合并、bump 回收与 used/high-water 统计；`
 固定 preedit buffer、active/cursor 状态、容量契约和可复制的事务快照；
 `UIButtonActionRegistry` 与 `UISliderChangeCallbackRegistry` 分别独立拥有 Button/Slider callback 的
 固定容量 slot、stage/commit/rollback、generation-aware capture/invoke 与调用期间延迟回收；Button
-registry 还封装 route clear barrier、registration serial 与 high-water 统计。`UIContext::Impl` 只保留
+registry 还封装 route clear barrier、registration serial 与 high-water 统计。
+`UISplitViewStateStorage` 固定按 node index 持有 SplitView/Splitter relationship、requested fraction、layout
+scratch 与 committed metrics；`UISplitViewLayout` 解析 orientation/minimum/clamp，`UISplitViewInput` 只提供
+splitter pointer fraction/grab 计算。`UIContext::Impl` 只保留
 owner/root/kind 校验并编排 UTF-8 语义校验、测量、dirty transaction、焦点和控件行为。私有组件不得反向持有
 `UIContext`，也不得绕开 committed snapshot、owner-thread 或 PMR 固定容量约束。
 
@@ -126,6 +129,28 @@ wheel、文本输入、Anchor disable/Hidden/Collapsed/destroy、Modal scope 改
 accessible description/Windows HelpText fallback；不会覆盖作者 description，也不发布 Activate/Focus 等 action。
 直接 `UIContext`、root-scoped `UITreeUpdater` 与 phase-scoped `PrimaryWindowUITreeUpdater` 都提供
 `setTooltipAnchor/clearTooltipAnchor/tooltipAnchor/showTooltip/dismissTooltip/isTooltipOpen/tooltipMetrics`。
+
+### SplitView / Splitter 契约
+
+`makeSplitViewElement(config, layout)` 与 `makeSplitterElement(config, layout)` 是第一方 recipes。SplitView 只解释
+三个 direct Flow child：primary pane、专用 Splitter、secondary pane；`setSplitViewParts()` 对 self、重复、跨 root、
+非 direct child、错误 kind、已有关系和非三子节点配置 fail closed。`UISplitViewConfig` 提供
+`Horizontal/Vertical`、initial fraction、两侧最小尺寸与 splitter extent；空间不足时按最小尺寸比例退让。
+
+```cpp
+enum class UISplitViewOrientation : u8 { Horizontal, Vertical };
+struct UISplitViewConfig final;
+struct UISplitterConfig final; // keyboardStep
+struct UISplitViewParts final;
+struct UISplitViewMetrics final;
+```
+
+`UISplitViewMetrics` 只发布最后一次成功 layout commit 的三个 rect、resolved fraction 与 orientation。
+`setSplitViewFraction()` 修改 pending fraction，失败 commit 不覆盖旧 metrics；成功 commit 后三个子节点的 layout、hit、
+paint 和 semantics 一起可见。Splitter 复用现有 `Focusable | RangeInput`、Pointer Capture、键盘 RangeInput 和
+accessibility SetRangeValue 路由，不拥有独立 update loop、capture store、Widget 状态机或 GPU pipeline。
+SplitView 默认 Ignore hit；Splitter 为 Targetable、Slider semantics、Focus/SetRangeValue actions。destroy、root release、
+generation reuse 与 capacity failure 都由 Context owner-thread fixed-capacity storage 原子清理关系。
 
 多节点业务组件可通过 `UIElementBuildTransaction` 或 Runtime 的 `PrimaryWindowUIBuildTransaction` 声明完整
 `UIComponentBuildBudget`；node、UTF-8 byte、Canvas command、Activate/Toggle/Range/TextInput/Scroll/Select slot
@@ -518,6 +543,8 @@ straight-alpha RGBA 在 shader 中 premultiply 后再应用 committed tint，继
 | `Dropdown` | ComboBox value、Pointer/Keyboard/Gamepad 开关 | Button chrome + 文本 + 下拉指示块 |
 | `Popup` | 独立 List/focus scope、anchor flip/clamp、输入 barrier | 顶层 overlay surface chrome，始终晚于普通树绘制 |
 | `Tooltip` | Anchor help；PointerHover/KeyboardFocus/Manual，不可聚焦、Ignore hit、无 barrier | 独立顶层 overlay surface；基于最后成功 Anchor geometry 做 Auto/flip/clamp，最后成功 metrics 与整套 snapshot 原子发布 |
+| `SplitView` | 两个 direct pane + 一个专用 Splitter；fraction/minimum/orientation | 不绘制自身 chrome；一次 arrange 三个 pane/splitter rect，metrics 与 Layout/Hit/Paint/Semantics 同一成功 commit 发布 |
+| `Splitter` | Pointer drag、键盘 RangeInput、Slider semantics | 复用现有 RangeInput/Focus 路径的 targetable splitter surface；不新增 GPU 或 Widget pipeline |
 | `DropdownItem` | ListItem selection 与焦点 | Button chrome + 选中背景 + 文本 |
 | `ListView` | 虚拟化 List/ListItem、键盘/手柄选择与滚动 | 固定 row pool + 选中/hover chrome + scrollbar |
 | `TreeView` | 虚拟化 Tree/TreeItem、层级展开/折叠 | 固定 row pool + disclosure/indent + 选中 chrome + scrollbar |

@@ -12,6 +12,49 @@ resolveElementBuiltinKind(const UIElementDescriptor& descriptor)
     const bool hasText = descriptor.text.has_value();
     const bool hasImage = descriptor.image.has_value();
 
+    if (descriptor.splitView.has_value() && descriptor.splitter.has_value())
+    {
+        return Core::failure(UIErrorCode::InvalidElementDescriptor,
+                             "UI element cannot be both SplitView and Splitter");
+    }
+    if (descriptor.splitView.has_value())
+    {
+        const UISplitViewConfig& config = *descriptor.splitView;
+        const bool validOrientation =
+            config.orientation >= UISplitViewOrientation::Horizontal &&
+            config.orientation <= UISplitViewOrientation::Vertical;
+        if (!validOrientation || !std::isfinite(config.initialFraction) ||
+            config.initialFraction < 0.0F || config.initialFraction > 1.0F ||
+            !std::isfinite(config.minPrimarySize) || config.minPrimarySize < 0.0F ||
+            !std::isfinite(config.minSecondarySize) || config.minSecondarySize < 0.0F ||
+            !std::isfinite(config.splitterExtent) || !(config.splitterExtent > 0.0F) ||
+            hasText || hasImage || descriptor.tooltip.has_value() ||
+            descriptor.behaviors != UIElementBehavior::None ||
+            descriptor.semantics.actions != UISemanticsAction::None)
+        {
+            return Core::failure(UIErrorCode::InvalidElementDescriptor,
+                                 "UI SplitView configuration or contract is invalid");
+        }
+        return BuiltinElementKind::SplitView;
+    }
+    if (descriptor.splitter.has_value())
+    {
+        const UISplitterConfig& config = *descriptor.splitter;
+        constexpr UIElementBehavior RequiredBehaviors =
+            UIElementBehavior::Focusable | UIElementBehavior::RangeInput;
+        if (!std::isfinite(config.keyboardStep) || !(config.keyboardStep > 0.0F) ||
+            config.keyboardStep > 1.0F || hasText || hasImage ||
+            descriptor.tooltip.has_value() || descriptor.behaviors != RequiredBehaviors ||
+            descriptor.semantics.role != UISemanticsRole::Slider ||
+            descriptor.semantics.actions !=
+                (UISemanticsAction::Focus | UISemanticsAction::SetRangeValue))
+        {
+            return Core::failure(UIErrorCode::InvalidElementDescriptor,
+                                 "UI Splitter configuration or contract is invalid");
+        }
+        return BuiltinElementKind::Splitter;
+    }
+
     if (descriptor.tooltip.has_value())
     {
         const UITooltipConfig& tooltip = *descriptor.tooltip;
