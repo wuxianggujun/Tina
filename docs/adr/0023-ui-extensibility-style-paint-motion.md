@@ -16,6 +16,12 @@ dirty（`O(affected links)`，不再两遍全树 resolve）。预检容量不足
 inspected/resolved/affected/candidate 工作量（reverse path 上 candidate=0）。正式发布 ABI 仍由 SDK/ABI
 工作流决定。
 
+实现注记（2026-08-18）：Icon authoring 已收紧为独立公开 `UIIconContent`（`UIImageSource`、tint、sampling、
+content alignment）与 `makeIconElement(UIIconContent, layout)`；recipe 固定 Contain、居中默认、Ignore hit 与
+Exclude semantics。业务代码不再直接用 `UIImageContent` 表达 Icon，也不保留旧 overload。该收紧不改变本
+ADR 的 Accepted 决策：UIIcon 继续复用 Image content fixed-capacity storage、resolver/pin、Texture2D、
+ImageQuad、DisplayList 与 GPU shader，不新增 Icon Widget/Asset/atlas/pipeline。
+
 ## 背景
 
 ADR 0011 已决定使用自研 Retained UI 和 backend-neutral DisplayList；ADR 0021 已决定 Game SDK 只取得

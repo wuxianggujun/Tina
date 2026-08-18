@@ -129,12 +129,78 @@ TEST_F(UIImageTest, ImageRecipePublishesIntrinsicLayoutPaintAndSemantics)
 
 TEST_F(UIImageTest, IconRecipeIsDecorativeAndIgnoresPointerHits)
 {
-    constexpr UI::UIElementDescriptor icon = UI::makeIconElement(UI::UIImageContent{});
+    constexpr UI::UIElementDescriptor icon = UI::makeIconElement(UI::UIIconContent{});
     EXPECT_EQ(icon.semantics.mode, UI::UISemanticsMode::Exclude);
     ASSERT_TRUE(icon.pointerHitPolicy.has_value());
     EXPECT_EQ(*icon.pointerHitPolicy, UI::UIPointerHitPolicy::Ignore);
     ASSERT_TRUE(icon.image.has_value());
     EXPECT_EQ(icon.image->fit, UI::UIImageFit::Contain);
+    EXPECT_EQ(icon.contentAlignment.horizontal, UI::UIAxisAlignment::Center);
+    EXPECT_EQ(icon.contentAlignment.vertical, UI::UIAxisAlignment::Center);
+}
+
+TEST_F(UIImageTest, IconRecipeReusesImageStorageAndPaintResourceChain)
+{
+    auto context = createContext();
+    ASSERT_NE(context, nullptr);
+    auto rootResult = context->rootBuilder().createRoot();
+    ASSERT_TRUE(rootResult.has_value());
+    UI::UIRootOwner root = std::move(*rootResult);
+    auto updaterResult = context->treeUpdater(root);
+    ASSERT_TRUE(updaterResult.has_value());
+    UI::UITreeUpdater updater = std::move(*updaterResult);
+
+    const UI::UIIconContent content{
+        .source = imageContent().source,
+        .tint = UI::rgba8(24, 48, 96, 192),
+        .sampling = UI::UIImageSampling::Nearest,
+        .alignment = {
+            .horizontal = UI::UIAxisAlignment::End,
+            .vertical = UI::UIAxisAlignment::Start,
+        },
+    };
+    const auto icon = updater.createElement(
+        root.rootNodeId(), UI::makeIconElement(content, fixedSize(100.0F, 100.0F)));
+    ASSERT_TRUE(icon.has_value()) << icon.error().message;
+    ASSERT_TRUE(context->commitLayout({.width = 320.0F, .height = 200.0F}).has_value());
+
+    const UI::UICommittedPaintView paint = context->committedPaint();
+    const auto entry = std::ranges::find_if(
+        paint, [icon](const UI::UICommittedPaintEntry& candidate) {
+            return candidate.node == *icon;
+        });
+    ASSERT_NE(entry, paint.end());
+    EXPECT_EQ(entry->kind, UI::UICommittedPaintKind::Image);
+    EXPECT_EQ(entry->imageSource, content.source);
+    EXPECT_EQ(entry->imageSampling, content.sampling);
+    EXPECT_EQ(entry->solidFill, UI::premultiply(content.tint));
+    EXPECT_FLOAT_EQ(entry->worldRect.x, 0.0F);
+    EXPECT_FLOAT_EQ(entry->worldRect.y, 0.0F);
+    EXPECT_FLOAT_EQ(entry->worldRect.width, 100.0F);
+    EXPECT_FLOAT_EQ(entry->worldRect.height, 50.0F);
+
+    const UI::UICommittedLayoutView layout = context->committedLayout();
+    const auto layoutEntry = std::ranges::find_if(
+        layout, [icon](const UI::UICommittedLayoutEntry& candidate) {
+            return candidate.node == *icon;
+        });
+    ASSERT_NE(layoutEntry, layout.end());
+    EXPECT_TRUE(layoutEntry->contentPlacement.hasIntrinsicContent);
+    EXPECT_FLOAT_EQ(layoutEntry->contentPlacement.origin.x, 60.0F);
+    EXPECT_FLOAT_EQ(layoutEntry->contentPlacement.origin.y, 0.0F);
+    EXPECT_FLOAT_EQ(layoutEntry->contentPlacement.intrinsicSize.width, 40.0F);
+    EXPECT_FLOAT_EQ(layoutEntry->contentPlacement.intrinsicSize.height, 20.0F);
+
+    const UI::UIContextStatistics statistics = context->statistics();
+    EXPECT_EQ(statistics.activeImageContentCount, 1U);
+    EXPECT_EQ(statistics.imageContentHighWater, 1U);
+
+    const UI::UICommittedSemanticsView semantics = context->committedSemantics();
+    EXPECT_EQ(std::ranges::find_if(
+                  semantics, [icon](const UI::UISemanticsEntry& candidate) {
+                      return candidate.node == *icon;
+                  }),
+              semantics.end());
 }
 
 TEST_F(UIImageTest, InvalidImageAndMixedTextFailWithoutPublishingNodes)

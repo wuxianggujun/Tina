@@ -2,6 +2,8 @@
 
 #include <tina/ui/UIErrors.hpp>
 
+#include <cmath>
+
 namespace Tina::UI::Detail {
 
 Core::Result<BuiltinElementKind>
@@ -9,6 +11,47 @@ resolveElementBuiltinKind(const UIElementDescriptor& descriptor)
 {
     const bool hasText = descriptor.text.has_value();
     const bool hasImage = descriptor.image.has_value();
+
+    if (descriptor.tooltip.has_value())
+    {
+        const UITooltipConfig& tooltip = *descriptor.tooltip;
+        constexpr u8 AllTooltipTriggers =
+            static_cast<u8>(UITooltipTrigger::PointerHover) |
+            static_cast<u8>(UITooltipTrigger::KeyboardFocus) |
+            static_cast<u8>(UITooltipTrigger::Manual);
+        const bool validPlacement =
+            tooltip.placement >= UITooltipPlacement::Auto &&
+            tooltip.placement <= UITooltipPlacement::Right;
+        const bool validTriggers =
+            (static_cast<u8>(tooltip.triggers) & static_cast<u8>(~AllTooltipTriggers)) == 0;
+        const bool validDelays = std::isfinite(tooltip.initialDelay.count()) &&
+                                 std::isfinite(tooltip.reshowDelay.count()) &&
+                                 std::isfinite(tooltip.dismissDelay.count()) &&
+                                 tooltip.initialDelay.count() >= 0.0 &&
+                                 tooltip.reshowDelay.count() >= 0.0 &&
+                                 tooltip.dismissDelay.count() >= 0.0;
+        if (!validPlacement || !validTriggers || !validDelays ||
+            !std::isfinite(tooltip.anchorGap) || tooltip.anchorGap < 0.0F ||
+            !std::isfinite(tooltip.viewportMargin) || tooltip.viewportMargin < 0.0F)
+        {
+            return Core::failure(UIErrorCode::InvalidElementDescriptor,
+                                 "UI Tooltip configuration is invalid");
+        }
+        if (!hasText || hasImage || descriptor.behaviors != UIElementBehavior::None ||
+            descriptor.layout.placement != UILayoutPlacement::Overlay ||
+            descriptor.semantics.mode != UISemanticsMode::Exclude ||
+            descriptor.semantics.actions != UISemanticsAction::None ||
+            (descriptor.pointerHitPolicy.has_value() &&
+             *descriptor.pointerHitPolicy != UIPointerHitPolicy::Ignore) ||
+            (descriptor.focusScopeMode.has_value() &&
+             *descriptor.focusScopeMode != UIFocusScopeMode::None))
+        {
+            return Core::failure(
+                UIErrorCode::InvalidElementDescriptor,
+                "UI Tooltip requires text, Overlay placement, Ignore hit policy, excluded semantics, and no behavior or focus scope");
+        }
+        return BuiltinElementKind::Tooltip;
+    }
     const auto requireText = [hasText](BuiltinElementKind kind)
         -> Core::Result<BuiltinElementKind> {
         if (!hasText)

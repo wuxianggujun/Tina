@@ -23,8 +23,9 @@ Tina 当前最接近：
 其中 Image/Icon/NineSlice 不是装饰性补充，而是 HUD、Inventory、装备栏、技能栏、对话框和设置页的
 基础视觉能力。它不依赖 Behavior side store 或 Component transaction 才能成立：`UI-PERF-001` 建立首份
 计数协议后，Image 主线可与 Component 主线并行。当前 Image/Icon、NineSlice A/B 与 C 产品采用、失效、
-尺寸矩阵及 `ui_image_nineslice_v1` benchmark 已全部交付，`UI-IMAGE-001` 已关闭。Icon 不另建一套控件或
-渲染协议，而是 Image 的 atlas-source、tint 和默认布局 profile。
+尺寸矩阵及 `ui_image_nineslice_v1` benchmark 已全部交付，`UI-IMAGE-001` 已关闭。`UIIconContent` 是
+Icon 的强类型 atlas-source/tint/sampling/alignment authoring profile；它不另建控件、图片存储、Asset、atlas
+或渲染协议。
 
 ## 当前框架
 
@@ -42,7 +43,7 @@ Runtime phase capability
 per-window UIContext, owner-thread
   Element tree + generation UINodeId
   fixed-capacity text/canvas/control side storage
-  routed input + focus/modal/pointer capture
+  routed input + focus/modal/pointer capture + Tooltip triggers
   theme role + local property override
         |
         v commitLayout(logical viewport)
@@ -71,7 +72,8 @@ private Render backend, currently bgfx
 | Tree/事务/快照 | `include/tina/ui/UIContext.hpp` 的 builder、updater、`UIElementBuildTransaction` 与 committed views |
 | Behavior | `include/tina/ui/UIBehavior.hpp`；Activate/Toggle/RangeInput/TextInput/Scroll/Select 使用私有 fixed-capacity side store，输入与具体视觉仍由 resolver 约束到私有 kind |
 | Style/Theme | `include/tina/ui/UIStyle.hpp`、`UITheme.hpp` 与属性 override/reset |
-| Paint | `include/tina/ui/UIImageSource.hpp`、`UIImage.hpp` 与 `UIPaint.hpp`；Rectangle/Ellipse/Line box paint、Image content 和 Canvas `SolidRect`/`SolidEllipse`/`SolidLine`/`Image`/`NineSlice` |
+| Tooltip | `include/tina/ui/UITooltip.hpp` + `makeTooltipElement()`；显式同 root Anchor、monotonic delay、committed metrics，独立于 Popup barrier |
+| Paint | `include/tina/ui/UIImageSource.hpp`、`UIImage.hpp`、`UIIcon.hpp` 与 `UIPaint.hpp`；Rectangle/Ellipse/Line box paint、Image/UIIcon content 和 Canvas `SolidRect`/`SolidEllipse`/`SolidLine`/`Image`/`NineSlice` |
 | Render bridge | `include/tina/integration/UIRenderDisplayList.hpp` |
 | DisplayList | `include/tina/render/UIDisplayList.hpp`；当前有 `SolidQuad`、`SolidEllipse`、`Glyph` 与 `ImageQuad`；`SolidQuad` 使用 `UIPixelCornerRadii`，Line 在 bridge 投影为带 exact 四顶点的 `SolidQuad` |
 | Runtime 帧序 | `src/runtime/EngineHost.cpp`；`updateUI()` 后统一 `commitForFrame()` |
@@ -459,6 +461,67 @@ TextOverflow 仅 Paint——截断按已提交 content box 解析，intrinsic me
   snapshot 不变；容量通过后才修改 token，并再次遍历依赖链为 affected 节点发布 Paint dirty；
 - 因此 token update 为 `O(affected links)`，不再对 live tree 做两遍 `O(N)` resolve。
 
+### Tooltip：独立 Anchor presentation contract
+
+Tooltip 是现有 retained tree 的独立 `BuiltinElementKind::Tooltip`，不是 Dropdown Popup 的别名。Popup 继续拥有
+focus scope、输入 barrier 与 dropdown linkage；Tooltip 固定 Overlay、Ignore hit、Exclude semantics、无 behavior/
+focus scope，不能拥有 child，也不会取得 focus、Pointer capture 或 active Popup/Modal 身份。Tooltip pass 只调整
+既有 layout/paint order，不增加第二棵树、第二条 Runtime facade 或第二个 update loop。
+
+公开 authoring/查询面为：
+
+```cpp
+enum class UITooltipPlacement : u8 { Auto, Above, Below, Left, Right };
+enum class UITooltipTrigger : u8 {
+    None = 0,
+    PointerHover = 1U << 0U,
+    KeyboardFocus = 1U << 1U,
+    Manual = 1U << 2U,
+};
+
+struct UITooltipConfig final {
+    UITooltipPlacement placement = UITooltipPlacement::Auto;
+    float anchorGap = 6.0F;
+    float viewportMargin = 8.0F;
+    Core::Duration initialDelay{0.5};
+    Core::Duration reshowDelay{0.1};
+    Core::Duration dismissDelay{0.1};
+    UITooltipTrigger triggers = UITooltipTrigger::PointerHover |
+                                UITooltipTrigger::KeyboardFocus |
+                                UITooltipTrigger::Manual;
+};
+
+struct UITooltipMetrics final {
+    UILogicalRect anchorRect{};
+    UILogicalRect tooltipRect{};
+    UITooltipPlacement resolvedPlacement = UITooltipPlacement::Below;
+    bool open = false;
+};
+```
+
+`makeTooltipElement(text, config, layout)` 创建节点，`setTooltipAnchor(tooltip, anchor)` 建立 Context-owned、按 node
+index 固定容量的双向关系。两端必须 live 且位于同一 root；自身、祖先/后代、跨 root、stale generation、
+Tooltip/Popup/Modal/虚拟 row 等不稳定节点 fail closed。destroy/root release/slot reuse 同时清理正反边；一个
+Anchor 至多一个 Tooltip，Context/per-Window 全局只允许一个 active Tooltip。
+
+状态流固定为 `trigger intent -> pending deadline -> active -> dismiss deadline -> reshow window`。Hover 读取最后
+committed physical hit ancestry而不是 capture target；Focus 读取 committed keyboard focus；Manual 由
+`showTooltip()` 显式请求且立即替换同 Window 的 active Tooltip。`Core::IMonotonicClock` 通过 Context 既有
+`setMotionClock()` 注入，`commitLayout()` 在原帧阶段推进；超出 native steady-clock 范围的有限 delay 饱和而不
+wrap。Pointer Down、wheel、text/composition、anchor disable/visibility/destroy 与 Modal scope change 是 hard
+dismiss barrier。
+
+placement 只读取最后一次成功提交的 Anchor rect。Auto 从四向可用空间中选择，显式方向不够时 flip，最后在
+viewport margin 内 clamp。Tooltip open/geometry 与 Layout/Hit/Paint/Semantics candidate 一起发布；
+`UITooltipMetrics` 仅保存最后成功 commit。Context 创建时按 node capacity 预分配 Tooltip state、反向 Anchor 与
+commit rollback scratch；任何后续 candidate/capacity failure 都恢复 clock-driven live state并保留旧 snapshot/
+metrics，不 heap fallback。Anchor 已有显式 semantics description 时保持作者值；否则 Tooltip text 复制为
+Anchor description/Windows HelpText，Tooltip 本身不发布 Focus/Activate 等 action。
+
+`UIContext`、`UITreeUpdater` 与 Runtime `PrimaryWindowUITreeUpdater` 共享
+`setTooltipAnchor/clearTooltipAnchor/tooltipAnchor/showTooltip/dismissTooltip/isTooltipOpen/tooltipMetrics`；Runtime
+版本继续受 phase epoch/lifetime 与 sticky error 约束。
+
 ### Image、Icon 与 NineSlice
 
 ```cpp
@@ -501,6 +564,16 @@ struct UIImageContent final {
     UIImageSampling sampling = UIImageSampling::Linear;
 };
 
+struct UIIconContent final {
+    UIImageSource source{};
+    UIStraightSrgba8Color tint = rgba8(255, 255, 255);
+    UIImageSampling sampling = UIImageSampling::Linear;
+    UIContentAlignment alignment{
+        .horizontal = UIAxisAlignment::Center,
+        .vertical = UIAxisAlignment::Center,
+    };
+};
+
 enum class UICanvasCommandKind : u8 {
     SolidRect,
     Image,
@@ -539,8 +612,8 @@ struct UICanvasCommand final {
 };
 ```
 
-以上是当前公开契约的简化摘录，精确签名以 `UIImageSource.hpp`、`UIImage.hpp`、`UIPaint.hpp` 和
-`UIElement.hpp` 为准。`UIImageContent` 是第一类 Element content：
+以上是当前公开契约的简化摘录，精确签名以 `UIImageSource.hpp`、`UIImage.hpp`、`UIIcon.hpp`、
+`UIPaint.hpp` 和 `UIElement.hpp` 为准。`UIImageContent` 是第一类 Element content：
 
 - `Fill/Contain/Cover/None`、alignment、tint/opacity 和 `Linear/Nearest` 都是 authoring metadata；
 - `Fill` 拉伸到 content box；`Contain` 保持比例完整显示；`Cover` 保持比例并按 alignment 裁 source；`None`
@@ -572,8 +645,10 @@ rotated-quad 兼容入口。Ellipse 保持完整未预裁切 bounds，发布 `So
 shader 用 local UV 计算解析椭圆 coverage，并用外 coverage 减内 coverage形成向内描边。最终可见区域仍由
 axis-aligned clip/scissor 决定，避免把部分越界的圆形或图片先裁 bounds 后错误拉伸。
 
-Icon 只是 Image 的官方 authoring profile。`makeIconElement()` 可以默认 `Contain`、可 tint、固定 logical
-size、`UIPointerHitPolicy::Ignore` 和 decorative semantics，但它仍创建普通 Element，最终只产生一个
+Icon 只在 authoring/语义层与 Image 区分。业务代码使用强类型
+`makeIconElement(UIIconContent, layout)`；recipe 固定 `Contain`，`UIIconContent` 默认居中并携带 tint/sampling，
+节点固定 `UIPointerHitPolicy::Ignore` 和 decorative `UISemanticsMode::Exclude`。它仍创建普通 Image Element，
+消耗既有 image content slot，最终只产生一个
 `ImageQuad`。Ignored Icon 自身不成为 pointer target，targetable 后代规则和父 Button route ancestry 仍沿用
 现有命中契约。不新增 Icon Widget、
 Icon Behavior、`IconAsset`、`UITexture` 或第二套 atlas manager。icon atlas 直接使用 `sourcePixels`；
@@ -599,7 +674,7 @@ patch 消耗1..9个 paint-entry slot；descriptor 创建、build transaction rol
 资源与渲染链路固定为：
 
 ```text
-UIImageContent / Canvas Image / Canvas NineSlice
+UIImageContent / UIIconContent / Canvas Image / Canvas NineSlice
   -> fixed-capacity retained image metadata
   -> UICommittedPaintKind::Image entries + opaque root resolver-scope id
   -> owning-root scoped image resolver
@@ -612,7 +687,7 @@ UIImageContent / Canvas Image / Canvas NineSlice
 
 | 模块 | 当前 A/B 职责 |
 | --- | --- |
-| `Tina::UI` | `UIImageSource/Content/NineSlice` authoring、intrinsic layout、fit/crop 与 NineSlice logical patch 展开、committed Image paint；root 只携带 opaque resolver-scope id，只依赖 Core AssetId，不认识 AssetSystem/Render/backend |
+| `Tina::UI` | `UIImageSource/UIImageContent/UIIconContent/NineSlice` authoring、intrinsic layout、fit/crop 与 NineSlice logical patch 展开、committed Image paint；UIIcon 仅是强类型 authoring profile；root 只携带 opaque resolver-scope id，只依赖 Core AssetId，不认识 AssetSystem/Render/backend |
 | Runtime root capability | 将 root 绑定到 generation-checked resolver scope；root destroy/unbind 先于 State-owned AssetSystem/registry teardown，stale scope fail closed |
 | `tina_ui_render_integration` | 直接读取 committed Image entry 的 scope id，执行 logical-to-pixel、clip、resolve/dedupe/pin，并事务构建 DisplayList；不重复布局/切片，也不为每个 entry 回溯祖先找 root |
 | `Tina::Render` | 通用 Texture2D frame resource、`ImageQuad` command/batch、packet-local ref 校验和 Null/backend preflight |
@@ -667,7 +742,7 @@ A/B 的 authoring、committed paint、root-scoped resolver/pin、DisplayList/bac
 
 | 边界 | 必须留下的证据 |
 | --- | --- |
-| Authoring/layout | full texture 与 atlas subrect；Fill/Contain/Cover/None + alignment；intrinsic auto-size；text/image 互斥；invalid extent/source/inset 零 mutation；destroy/build rollback 回收 image slot |
+| Authoring/layout | full texture 与 atlas subrect；Fill/Contain/Cover/None + alignment；强类型 `UIIconContent` 的 Contain/居中默认值、tint/sampling/alignment；intrinsic auto-size；text/image 互斥；invalid extent/source/inset 零 mutation；destroy/build rollback 回收 image slot |
 | Committed paint | 显式 `UICommittedPaintKind` 替代 `isGlyph` 布尔扩张；Image/Icon 各 1 entry；NineSlice 1..9 entry；小 destination、零面积 patch、paint capacity failure 保留旧 snapshot |
 | Resource lifetime | 两个 root/两个 resolver scope、相同 AssetId 不串域；同 scope 同资源只 resolve/pin 一次；missing/not-ready/wrong-kind/extent mismatch policy；packet complete/abandon 后 pin exactly-once 释放；stale scope fail closed |
 | Display/backend | ImageQuad UV/tint/clip/checksum；高对比相邻 atlas cell 的 source-edge/1px gutter 无串色；相邻同 texture/clip/sampling/shader 批合并且不跨 paint order；Linear/Nearest；Null preflight；bgfx RGBA straight-to-premultiplied shader；D3D11/OpenGL/Vulkan cooked program |

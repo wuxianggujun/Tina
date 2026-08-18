@@ -22,6 +22,10 @@ ProductChrome productChromeFor(UIStyleRoleId role, const UITheme& theme) noexcep
     case UIStyleRoleId::PopupSurface:
         chrome.box = makePopupBoxPaint(theme);
         break;
+    case UIStyleRoleId::TooltipSurface:
+        chrome.box = makePopupBoxPaint(theme);
+        chrome.text = makeSecondaryTextStyle(theme);
+        break;
     case UIStyleRoleId::TextBody:
         chrome.text = makeBodyTextStyle(theme);
         break;

@@ -1442,6 +1442,76 @@ TEST_F(PrimaryWindowUICapabilityTest, DropdownPopupFacadeRoundTripsAndExpiresWit
     EXPECT_EQ(expiredMetrics.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
 }
 
+TEST_F(PrimaryWindowUICapabilityTest, TooltipFacadeRoundTripsAndExpiresWithPhase)
+{
+    auto contextResult = UI::UIContext::Create(window, {.nodeCapacity = 32, .rootCapacity = 2});
+    ASSERT_TRUE(contextResult.has_value()) << contextResult.error().message;
+    context = std::move(*contextResult);
+
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+
+    UI::UILayoutStyle anchorLayout = fixedSize(60.0F, 24.0F);
+    anchorLayout.placement = UI::UILayoutPlacement::Overlay;
+    anchorLayout.overlay.offset.x = UI::UILayoutLength::Px(20.0F);
+    anchorLayout.overlay.offset.y = UI::UILayoutLength::Px(20.0F);
+    UI::UITooltipConfig config{
+        .initialDelay = Core::Duration{0.0},
+        .reshowDelay = Core::Duration{0.0},
+        .dismissDelay = Core::Duration{0.0},
+        .triggers = UI::UITooltipTrigger::Manual,
+    };
+    auto anchor = tree->createElement(
+        root->rootNodeId(), UI::makeButtonElement("Anchor", anchorLayout));
+    auto tooltip = tree->createElement(
+        root->rootNodeId(), UI::makeTooltipElement("Runtime help", config, fixedSize(90.0F, 24.0F)));
+    ASSERT_TRUE(anchor.has_value()) << anchor.error().message;
+    ASSERT_TRUE(tooltip.has_value()) << tooltip.error().message;
+    ASSERT_TRUE(tree->setTooltipAnchor(*tooltip, *anchor).has_value());
+    ASSERT_EQ(tree->tooltipAnchor(*tooltip).value(), *anchor);
+
+    ASSERT_TRUE(tree->setLayoutStyle(root->rootNodeId(), fixedSize(240.0F, 140.0F)).has_value());
+    ASSERT_TRUE(context->commitLayout({.width = 240.0F, .height = 140.0F}).has_value());
+    ASSERT_FALSE(tree->isTooltipOpen(*tooltip).value());
+
+    ASSERT_TRUE(tree->showTooltip(*tooltip).has_value());
+    ASSERT_FALSE(tree->isTooltipOpen(*tooltip).value());
+    ASSERT_TRUE(context->commitLayout({.width = 240.0F, .height = 140.0F}).has_value());
+    EXPECT_TRUE(tree->isTooltipOpen(*tooltip).value());
+    const UI::UITooltipMetrics metrics = tree->tooltipMetrics(*tooltip).value();
+    EXPECT_TRUE(metrics.open);
+    EXPECT_EQ(metrics.anchorRect.width, 60.0F);
+    EXPECT_EQ(metrics.tooltipRect.width, 90.0F);
+
+    ASSERT_TRUE(tree->dismissTooltip(*tooltip).has_value());
+    EXPECT_TRUE(tree->isTooltipOpen(*tooltip).value());
+    ASSERT_TRUE(context->commitLayout({.width = 240.0F, .height = 140.0F}).has_value());
+    EXPECT_FALSE(tree->isTooltipOpen(*tooltip).value());
+    ASSERT_TRUE(tree->clearTooltipAnchor(*tooltip).has_value());
+    EXPECT_FALSE(tree->tooltipAnchor(*tooltip).value().hasValue());
+
+    ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
+    auto expiredAnchor = tree->tooltipAnchor(*tooltip);
+    ASSERT_FALSE(expiredAnchor.has_value());
+    EXPECT_EQ(expiredAnchor.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredOpen = tree->isTooltipOpen(*tooltip);
+    ASSERT_FALSE(expiredOpen.has_value());
+    EXPECT_EQ(expiredOpen.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredMetrics = tree->tooltipMetrics(*tooltip);
+    ASSERT_FALSE(expiredMetrics.has_value());
+    EXPECT_EQ(expiredMetrics.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    Core::Status expiredShow = tree->showTooltip(*tooltip);
+    ASSERT_FALSE(expiredShow.has_value());
+    EXPECT_EQ(expiredShow.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+}
+
 TEST_F(PrimaryWindowUICapabilityTest, RangeAndSelectionControlFacadesRoundTripAndExpire)
 {
     CapabilityState state;

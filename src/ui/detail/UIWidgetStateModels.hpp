@@ -9,6 +9,7 @@
 #include <tina/ui/UIScrollView.hpp>
 #include <tina/ui/UISlider.hpp>
 #include <tina/ui/UIText.hpp>
+#include <tina/ui/UITooltip.hpp>
 #include <tina/ui/UITreeView.hpp>
 
 #include "UITextStorage.hpp"
@@ -57,6 +58,19 @@ struct PopupState final {
 
 struct PopupLayoutScratch final {
     UIPopupMetrics metrics{};
+};
+
+struct TooltipState final {
+    UITooltipConfig config{};
+    UINodeId anchor{};
+    UITooltipMetrics committedMetrics{};
+    bool open = false;
+    bool manualRequested = false;
+    bool suppressedUntilTriggerReset = false;
+};
+
+struct TooltipLayoutScratch final {
+    UITooltipMetrics metrics{};
 };
 
 struct ListViewState final {

@@ -55,6 +55,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <exception>
@@ -157,6 +158,7 @@ using Detail::resolveLengthNoFallbackCount;
 using Detail::resolveMeasuredLayoutSize;
 using Detail::resolveOverlayRect;
 using Detail::resolvePopupPlacement;
+using Detail::resolveTooltipPlacement;
 using Detail::resolveCommittedLineGeometry;
 using Detail::resolveScrollViewLayout;
 using Detail::resolveScrollThumbOffset;
@@ -197,6 +199,8 @@ using Detail::phaseMaskFor;
 using Detail::pointerHitTargetForEntry;
 using Detail::PopupLayoutScratch;
 using Detail::PopupState;
+using Detail::TooltipLayoutScratch;
+using Detail::TooltipState;
 using Detail::ProgressBarState;
 using Detail::RadioButtonState;
 using Detail::supportsWidgetText;
@@ -270,6 +274,7 @@ struct SemanticsState final {
     UISemanticsRole role = UISemanticsRole::Group;
     UISemanticsAction actions = UISemanticsAction::None;
     bool hasExplicitName = false;
+    bool hasExplicitDescription = false;
     bool useContentAsName = false;
     bool readOnly = false;
 };
@@ -734,6 +739,14 @@ struct UIContext::Impl final {
     std::pmr::vector<DropdownState> dropdownStatesByNodeIndex;
     std::pmr::vector<PopupState> popupStatesByNodeIndex;
     std::pmr::vector<PopupLayoutScratch> popupLayoutScratchByNodeIndex;
+    std::pmr::vector<TooltipState> tooltipStatesByNodeIndex;
+    // Preallocated transaction scratch. commitLayout() snapshots every Tooltip
+    // state before advancing its clock-driven state machine so any later
+    // Layout/Hit/Paint/Semantics candidate failure can restore the live intent
+    // without allocating or losing the already-published snapshot.
+    std::pmr::vector<TooltipState> tooltipCommitRollbackStatesByNodeIndex;
+    std::pmr::vector<TooltipLayoutScratch> tooltipLayoutScratchByNodeIndex;
+    std::pmr::vector<UINodeId> tooltipForAnchorByNodeIndex;
     std::pmr::vector<ListViewState> listViewStatesByNodeIndex;
     std::pmr::vector<ListViewLayoutScratch> listViewLayoutScratchByNodeIndex;
     std::pmr::vector<ListViewItemState> listViewItemStatesByNodeIndex;
@@ -855,6 +868,16 @@ struct UIContext::Impl final {
     bool pointerCancelDispatchInProgress = false;
     UINodeId activeModalNode{};
     UINodeId activePopupNode{};
+    UINodeId activeTooltipNode{};
+    UINodeId pendingTooltipNode{};
+    UINodeId hoveredTooltipAnchor{};
+    UINodeId manualTooltipNode{};
+    Core::MonotonicTimePoint tooltipOpenDeadline{};
+    Core::MonotonicTimePoint tooltipCloseDeadline{};
+    Core::MonotonicTimePoint tooltipReshowExpiry{};
+    bool tooltipOpenPending = false;
+    bool tooltipClosePending = false;
+    bool tooltipReshowAvailable = false;
     Detail::UICommandPressLatch<UIDropdownCommand, UIDropdownCommand::ExitNext>
         dropdownCommandPressLatch;
     Detail::UICommandPressLatch<UIListViewCommand, UIListViewCommand::Activate>
@@ -930,7 +953,10 @@ struct UIContext::Impl final {
           progressBarStatesByNodeIndex(&resource), radioButtonStatesByNodeIndex(&resource),
           scrollViewPaintsByNodeIndex(&resource), scrollViewLayoutScratchByNodeIndex(&resource),
           dropdownStatesByNodeIndex(&resource), popupStatesByNodeIndex(&resource),
-          popupLayoutScratchByNodeIndex(&resource), listViewStatesByNodeIndex(&resource),
+          popupLayoutScratchByNodeIndex(&resource), tooltipStatesByNodeIndex(&resource),
+          tooltipCommitRollbackStatesByNodeIndex(&resource),
+          tooltipLayoutScratchByNodeIndex(&resource), tooltipForAnchorByNodeIndex(&resource),
+          listViewStatesByNodeIndex(&resource),
           listViewLayoutScratchByNodeIndex(&resource), listViewItemStatesByNodeIndex(&resource),
           treeViewStatesByNodeIndex(&resource), treeViewLayoutScratchByNodeIndex(&resource),
           treeViewItemStatesByNodeIndex(&resource),
@@ -1073,6 +1099,10 @@ struct UIContext::Impl final {
         impl->dropdownStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->popupStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->popupLayoutScratchByNodeIndex.resize(normalized.nodeCapacity);
+        impl->tooltipStatesByNodeIndex.resize(normalized.nodeCapacity);
+        impl->tooltipCommitRollbackStatesByNodeIndex.resize(normalized.nodeCapacity);
+        impl->tooltipLayoutScratchByNodeIndex.resize(normalized.nodeCapacity);
+        impl->tooltipForAnchorByNodeIndex.resize(normalized.nodeCapacity);
         impl->listViewStatesByNodeIndex.resize(normalized.nodeCapacity);
         impl->listViewLayoutScratchByNodeIndex.resize(normalized.nodeCapacity);
         impl->listViewItemStatesByNodeIndex.resize(normalized.nodeCapacity);
@@ -1321,6 +1351,11 @@ struct UIContext::Impl final {
             {
                 ownVisibility = UIVisibility::Collapsed;
             }
+            if (record->kind == BuiltinElementKind::Tooltip && index < tooltipStatesByNodeIndex.size() &&
+                !tooltipStatesByNodeIndex[index].open)
+            {
+                ownVisibility = UIVisibility::Collapsed;
+            }
             if (index < flowStatesByNodeIndex.size() &&
                 flowStatesByNodeIndex[index].kind == UIFlowNodeKind::Screen &&
                 !isActiveFlowScreenIndex(index))
@@ -1338,6 +1373,7 @@ struct UIContext::Impl final {
             {
                 scratch.effectiveVisibility = ownVisibility;
                 scratch.inPopupSubtree = record->kind == BuiltinElementKind::Popup;
+                scratch.inTooltipSubtree = record->kind == BuiltinElementKind::Tooltip;
                 scratch.parentContentWidthDefinite = true;
                 scratch.parentContentHeightDefinite = true;
                 scratch.parentContentWidth = viewportSize.width;
@@ -1348,6 +1384,8 @@ struct UIContext::Impl final {
                 scratch.effectiveVisibility = combineVisibility(parentScratch.effectiveVisibility, ownVisibility);
                 scratch.inPopupSubtree =
                     record->kind == BuiltinElementKind::Popup || parentScratch.inPopupSubtree;
+                scratch.inTooltipSubtree =
+                    record->kind == BuiltinElementKind::Tooltip || parentScratch.inTooltipSubtree;
                 scratch.parentContentWidthDefinite = parentScratch.contentWidthDefinite;
                 scratch.parentContentHeightDefinite = parentScratch.contentHeightDefinite;
                 scratch.parentContentWidth = parentScratch.contentWidth;
@@ -1603,6 +1641,54 @@ struct UIContext::Impl final {
             .popupRect = resolved.rect,
             .resolvedPlacement = resolved.placement,
             .open = popupScratch.effectiveVisibility == UIVisibility::Visible,
+        };
+    }
+
+    [[nodiscard]] const UICommittedLayoutEntry*
+    committedLayoutEntryFor(UINodeId node) const noexcept
+    {
+        if (!node.hasValue())
+        {
+            return nullptr;
+        }
+        const auto& entries = committedLayoutBuffers[publishedLayoutBufferIndex];
+        const auto found = std::find_if(
+            entries.begin(), entries.end(),
+            [node](const UICommittedLayoutEntry& entry) noexcept {
+                return entry.node == node;
+            });
+        return found != entries.end() ? &*found : nullptr;
+    }
+
+    void arrangeTooltipChild(u32 tooltipIndex, UILogicalRect parentWorldRect,
+                             UILogicalRect viewportRect,
+                             LayoutPassStatistics& statistics) noexcept
+    {
+        TooltipState& tooltip = tooltipStatesByNodeIndex[tooltipIndex];
+        LayoutScratchState& tooltipScratch = layoutScratchByIndex[tooltipIndex];
+        const UINodeId tooltipNode = idForIndex(tooltipIndex);
+        const UICommittedLayoutEntry* anchorEntry = committedLayoutEntryFor(tooltip.anchor);
+        if (!tooltip.open || activeTooltipNode != tooltipNode ||
+            !hasValidTooltipRelationship(tooltipNode, tooltip.anchor) ||
+            anchorEntry == nullptr ||
+            anchorEntry->effectiveVisibility != UIVisibility::Visible)
+        {
+            tooltipScratch.effectiveVisibility = UIVisibility::Collapsed;
+            assignLayoutRect(tooltipIndex, {}, parentWorldRect, viewportRect);
+            tooltipLayoutScratchByNodeIndex[tooltipIndex] = {};
+            return;
+        }
+
+        refreshMeasuredSizeForParentContent(tooltipIndex, viewportRect, statistics);
+        const auto resolved = resolveTooltipPlacement(
+            presentationLayoutStyle(tooltipIndex), tooltipScratch, tooltip.config,
+            anchorEntry->worldRect, viewportRect, statistics);
+        assignLayoutRect(tooltipIndex, resolved.rect, parentWorldRect, viewportRect);
+        tooltipLayoutScratchByNodeIndex[tooltipIndex].metrics = UITooltipMetrics{
+            .anchorRect = anchorEntry->worldRect,
+            .tooltipRect = resolved.rect,
+            .resolvedPlacement = resolved.placement,
+            .open = tooltipScratch.effectiveVisibility == UIVisibility::Visible,
         };
     }
 
@@ -2015,7 +2101,9 @@ struct UIContext::Impl final {
         };
         UILogicalRect layoutContentRect = unscrolledContentRect;
         UILogicalRect descendantClip = parentScratch.descendantClip;
-        if (parentRecord->kind == BuiltinElementKind::Popup || parentStyle.clipDescendants)
+        if (parentRecord->kind == BuiltinElementKind::Popup ||
+            parentRecord->kind == BuiltinElementKind::Tooltip ||
+            parentStyle.clipDescendants)
         {
             descendantClip = intersectRects(descendantClip, parentScratch.worldRect);
         }
@@ -2030,6 +2118,11 @@ struct UIContext::Impl final {
             if (parentRecord->kind == BuiltinElementKind::Popup && parentIndex < popupLayoutScratchByNodeIndex.size())
             {
                 popupLayoutScratchByNodeIndex[parentIndex] = {};
+            }
+            if (parentRecord->kind == BuiltinElementKind::Tooltip &&
+                parentIndex < tooltipLayoutScratchByNodeIndex.size())
+            {
+                tooltipLayoutScratchByNodeIndex[parentIndex] = {};
             }
             if (parentRecord->kind == BuiltinElementKind::ListView && parentIndex < listViewLayoutScratchByNodeIndex.size())
             {
@@ -2156,6 +2249,11 @@ struct UIContext::Impl final {
                     currentChild < popupLayoutScratchByNodeIndex.size())
                 {
                     arrangePopupChild(currentChild, parentWorldRect, viewportRect, statistics);
+                } else if (childRecord->kind == BuiltinElementKind::Tooltip &&
+                           currentChild < tooltipStatesByNodeIndex.size() &&
+                           currentChild < tooltipLayoutScratchByNodeIndex.size())
+                {
+                    arrangeTooltipChild(currentChild, parentWorldRect, viewportRect, statistics);
                 } else
                 {
                     arrangeOverlayChild(currentChild, layoutContentRect, parentWorldRect, descendantClip, statistics);
@@ -2259,10 +2357,11 @@ struct UIContext::Impl final {
     {
         output.clear();
         u32 paintOrdinal = 0;
-        const auto appendPass = [&](bool popupPass) noexcept {
+        const auto appendPass = [&](bool popupPass, bool tooltipPass) noexcept {
             for (const u32 index : order)
             {
-                if (layoutScratchByIndex[index].inPopupSubtree != popupPass)
+                if (layoutScratchByIndex[index].inPopupSubtree != popupPass ||
+                    layoutScratchByIndex[index].inTooltipSubtree != tooltipPass)
                 {
                     continue;
                 }
@@ -2280,8 +2379,10 @@ struct UIContext::Impl final {
                 ++paintOrdinal;
             }
         };
-        appendPass(false);
-        appendPass(true);
+        appendPass(false, false);
+        appendPass(true, false);
+        appendPass(false, true);
+        appendPass(true, true);
     }
 
     [[nodiscard]] Core::Result<CommittedHitBuildResult>
@@ -4041,6 +4142,15 @@ struct UIContext::Impl final {
 
         source.name = semanticsNameSourceFor(nodeIndex);
         source.description = semanticsDescriptionViewFor(nodeIndex);
+        if (!state.hasExplicitDescription &&
+            nodeIndex < tooltipForAnchorByNodeIndex.size())
+        {
+            const UINodeId tooltip = tooltipForAnchorByNodeIndex[nodeIndex];
+            if (hasValidTooltipRelationship(tooltip, node))
+            {
+                source.description = textViewFor(tooltip.index());
+            }
+        }
         if (record->kind == BuiltinElementKind::Dropdown && nodeIndex < dropdownStatesByNodeIndex.size())
         {
             const Detail::UISelectBehaviorState* select = behaviorStateStorage.trySelectState(nodeIndex);
@@ -5020,6 +5130,18 @@ struct UIContext::Impl final {
         if (index < popupLayoutScratchByNodeIndex.size())
         {
             popupLayoutScratchByNodeIndex[index] = {};
+        }
+        if (index < tooltipStatesByNodeIndex.size())
+        {
+            tooltipStatesByNodeIndex[index] = {};
+        }
+        if (index < tooltipLayoutScratchByNodeIndex.size())
+        {
+            tooltipLayoutScratchByNodeIndex[index] = {};
+        }
+        if (index < tooltipForAnchorByNodeIndex.size())
+        {
+            tooltipForAnchorByNodeIndex[index] = {};
         }
         if (index < listViewStatesByNodeIndex.size())
         {
@@ -7485,7 +7607,7 @@ struct UIContext::Impl final {
         {
             focusScopeModesByNodeIndex[node.index()] = UIFocusScopeMode::Contain;
         }
-        if (kind == BuiltinElementKind::Popup)
+        if (kind == BuiltinElementKind::Popup || kind == BuiltinElementKind::Tooltip)
         {
             layoutStylesByIndex[node.index()].placement = UILayoutPlacement::Overlay;
         }
@@ -7571,6 +7693,7 @@ struct UIContext::Impl final {
             .role = descriptor.role,
             .actions = descriptor.actions,
             .hasExplicitName = descriptor.name.has_value(),
+            .hasExplicitDescription = descriptor.description.has_value(),
             .useContentAsName = descriptor.useContentAsName,
             .readOnly = descriptor.readOnly,
         };
@@ -7658,6 +7781,15 @@ struct UIContext::Impl final {
         if (descriptor.focusScopeMode.has_value())
         {
             focusScopeModesByNodeIndex[node.index()] = *descriptor.focusScopeMode;
+        }
+        if (kind == BuiltinElementKind::Tooltip)
+        {
+            if (!descriptor.tooltip.has_value())
+            {
+                return fail(Core::CoreErrorCode::Internal,
+                            "UI Tooltip is missing its retained configuration");
+            }
+            tooltipStatesByNodeIndex[node.index()].config = *descriptor.tooltip;
         }
 
         if (kind == BuiltinElementKind::TextEdit)
@@ -7767,6 +7899,11 @@ struct UIContext::Impl final {
             descriptor.focusScopeMode.has_value() && *descriptor.focusScopeMode != UIFocusScopeMode::Contain)
         {
             return fail(UIErrorCode::InvalidFocusScope, "UI Modal and Popup elements always contain focus");
+        }
+        if (kind != BuiltinElementKind::Tooltip && descriptor.tooltip.has_value())
+        {
+            return fail(UIErrorCode::InvalidElementDescriptor,
+                        "UI Tooltip configuration requires the Tooltip contract");
         }
         if (kind != BuiltinElementKind::ListView && descriptor.listView != UIListViewCreateConfig{})
         {
@@ -7913,6 +8050,13 @@ struct UIContext::Impl final {
             return Core::failure(initialized.error());
         }
         rollback.release();
+        if (kind == BuiltinElementKind::Modal)
+        {
+            // A newly authored Modal changes the Window interaction scope. Keep
+            // Tooltip presentation out of the same pending publication rather
+            // than waiting for the new Modal to become the committed barrier.
+            hardDismissAllTooltipsNoFail(true);
+        }
         return node;
     }
 
@@ -7977,6 +8121,11 @@ struct UIContext::Impl final {
             return Core::failure(parentResult.error());
         }
         NodeRecord& parentRecord = **parentResult;
+        if (parentRecord.kind == BuiltinElementKind::Tooltip)
+        {
+            return fail(UIErrorCode::InvalidParent,
+                        "UI Tooltip elements cannot own child elements");
+        }
         if (kind == BuiltinElementKind::Popup)
         {
             if (parentRecord.kind != BuiltinElementKind::Dropdown)
@@ -7990,6 +8139,16 @@ struct UIContext::Impl final {
             if (contains(dropdownStatesByNodeIndex[parent.index()].popup))
             {
                 return fail(UIErrorCode::InvalidParent, "UI Dropdown already owns a Popup");
+            }
+        } else if (kind == BuiltinElementKind::Tooltip)
+        {
+            if (parentRecord.kind == BuiltinElementKind::Dropdown ||
+                parentRecord.kind == BuiltinElementKind::Popup ||
+                parentRecord.kind == BuiltinElementKind::ListView ||
+                parentRecord.kind == BuiltinElementKind::TreeView)
+            {
+                return fail(UIErrorCode::InvalidParent,
+                            "UI Tooltip requires an ordinary retained parent");
             }
         } else if (kind == BuiltinElementKind::DropdownItem)
         {
@@ -8956,6 +9115,37 @@ struct UIContext::Impl final {
             }
 
             const UINodeId node = idForIndex(currentIndex);
+            if (record->kind == BuiltinElementKind::Tooltip &&
+                currentIndex < tooltipStatesByNodeIndex.size())
+            {
+                TooltipState& tooltip = tooltipStatesByNodeIndex[currentIndex];
+                const UINodeId anchor = tooltip.anchor;
+                dismissTooltipNoFail(node, false);
+                if (contains(anchor) &&
+                    anchor.index() < tooltipForAnchorByNodeIndex.size() &&
+                    tooltipForAnchorByNodeIndex[anchor.index()] == node)
+                {
+                    tooltipForAnchorByNodeIndex[anchor.index()] = {};
+                }
+                tooltip.anchor = {};
+            } else if (currentIndex < tooltipForAnchorByNodeIndex.size())
+            {
+                const UINodeId tooltip = tooltipForAnchorByNodeIndex[currentIndex];
+                if (hasValidTooltipRelationship(tooltip, node))
+                {
+                    dismissTooltipNoFail(tooltip, false);
+                    tooltipStatesByNodeIndex[tooltip.index()].anchor = {};
+                }
+                tooltipForAnchorByNodeIndex[currentIndex] = {};
+            }
+            if (hoveredTooltipAnchor == node)
+            {
+                hoveredTooltipAnchor = {};
+            }
+            if (record->kind == BuiltinElementKind::Modal)
+            {
+                hardDismissAllTooltipsNoFail(true);
+            }
             if (record->kind == BuiltinElementKind::Modal && currentIndex < focusRestoreByNodeIndex.size())
             {
                 const auto& committedEntries = committedHitBuffers[publishedHitBufferIndex];
@@ -9181,6 +9371,14 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::InvalidNode, "UI node is not owned by the updater root");
         }
 
+        const NodeRecord* nodeRecord = *nodeResult;
+        if (nodeRecord->kind == BuiltinElementKind::Tooltip &&
+            normalizedStyle->placement != UILayoutPlacement::Overlay)
+        {
+            return fail(UIErrorCode::InvalidLayout,
+                        "UI Tooltip nodes always require Overlay placement");
+        }
+
         UILayoutStyle& currentStyle = layoutStylesByIndex[node.index()];
         if (currentStyle == *normalizedStyle)
         {
@@ -9194,6 +9392,14 @@ struct UIContext::Impl final {
             return dirtyStatus;
         }
         currentStyle = *normalizedStyle;
+        if (nodeRecord->kind == BuiltinElementKind::Modal ||
+            normalizedStyle->visibility != UIVisibility::Visible)
+        {
+            // Modal scope mutations and a Hidden/Collapsed endpoint or ancestor
+            // are hard dismissal barriers. The next successful commit publishes
+            // the visibility/layout/hit/paint/semantics transition atomically.
+            hardDismissAllTooltipsNoFail(true);
+        }
         return Core::success();
     }
 
@@ -9225,6 +9431,12 @@ struct UIContext::Impl final {
         if (!isValidPointerHitPolicy(policy))
         {
             return fail(UIErrorCode::InvalidPointerPolicy, "UI pointer hit policy is not recognized");
+        }
+        if ((*nodeResult)->kind == BuiltinElementKind::Tooltip &&
+            policy != UIPointerHitPolicy::Ignore)
+        {
+            return fail(UIErrorCode::InvalidPointerPolicy,
+                        "UI Tooltip nodes always ignore Pointer hit testing");
         }
 
         UIPointerHitPolicy& currentPolicy = pointerHitPoliciesByIndex[node.index()];
@@ -9382,6 +9594,10 @@ struct UIContext::Impl final {
                 resetTextEditPreferredX(node);
                 resetImeCompositionState();
             }
+            if (tooltipForAnchor(node).hasValue())
+            {
+                hardDismissAllTooltipsNoFail(true);
+            }
         }
         return Core::success();
     }
@@ -9445,6 +9661,12 @@ struct UIContext::Impl final {
             mode != UIFocusScopeMode::Contain)
         {
             return fail(UIErrorCode::InvalidFocusScope, "UI Modal and Popup nodes always contain focus");
+        }
+        if ((*nodeResult)->kind == BuiltinElementKind::Tooltip &&
+            mode != UIFocusScopeMode::None)
+        {
+            return fail(UIErrorCode::InvalidFocusScope,
+                        "UI Tooltip nodes never establish a focus scope");
         }
         UIFocusScopeMode& current = focusScopeModesByNodeIndex[node.index()];
         if (current == mode)
@@ -12103,6 +12325,891 @@ struct UIContext::Impl final {
         return *nodeResult;
     }
 
+    [[nodiscard]] Core::Result<NodeRecord*> resolveTooltip(UINodeId tooltip)
+    {
+        auto nodeResult = resolveNode(tooltip);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        if ((*nodeResult)->kind != BuiltinElementKind::Tooltip ||
+            tooltip.index() >= tooltipStatesByNodeIndex.size())
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI Tooltip API requires a Tooltip node");
+        }
+        return *nodeResult;
+    }
+
+    [[nodiscard]] bool hasValidTooltipRelationship(UINodeId tooltip,
+                                                   UINodeId anchor) const noexcept
+    {
+        if (!contains(tooltip) || !contains(anchor) ||
+            tooltip.index() >= tooltipStatesByNodeIndex.size() ||
+            anchor.index() >= tooltipForAnchorByNodeIndex.size())
+        {
+            return false;
+        }
+        const NodeRecord* tooltipRecord = nodes.tryGet(tooltip.storageId());
+        const NodeRecord* anchorRecord = nodes.tryGet(anchor.storageId());
+        return tooltipRecord != nullptr && anchorRecord != nullptr &&
+               tooltipRecord->kind == BuiltinElementKind::Tooltip &&
+               tooltipRecord->rootIndex == anchorRecord->rootIndex &&
+               tooltipStatesByNodeIndex[tooltip.index()].anchor == anchor &&
+               tooltipForAnchorByNodeIndex[anchor.index()] == tooltip;
+    }
+
+    [[nodiscard]] UINodeId tooltipForAnchor(UINodeId anchor) const noexcept
+    {
+        if (!contains(anchor) || anchor.index() >= tooltipForAnchorByNodeIndex.size())
+        {
+            return {};
+        }
+        const UINodeId tooltip = tooltipForAnchorByNodeIndex[anchor.index()];
+        return hasValidTooltipRelationship(tooltip, anchor) ? tooltip : UINodeId{};
+    }
+
+    [[nodiscard]] bool isAuthoredTooltipNodeVisible(UINodeId node) const noexcept
+    {
+        if (!contains(node))
+        {
+            return false;
+        }
+        u32 currentIndex = node.index();
+        usize visited = 0;
+        while (currentIndex != InvalidNodeIndex && visited++ < nodes.capacity())
+        {
+            const NodeRecord* record = recordByIndex(currentIndex);
+            if (record == nullptr || currentIndex >= layoutStylesByIndex.size() ||
+                layoutStylesByIndex[currentIndex].visibility != UIVisibility::Visible)
+            {
+                return false;
+            }
+            currentIndex = record->parentIndex;
+        }
+        return currentIndex == InvalidNodeIndex;
+    }
+
+    [[nodiscard]] bool isTooltipAnchorEligible(UINodeId tooltip) const noexcept
+    {
+        if (!contains(tooltip) || tooltip.index() >= tooltipStatesByNodeIndex.size())
+        {
+            return false;
+        }
+        const TooltipState& state = tooltipStatesByNodeIndex[tooltip.index()];
+        const UINodeId anchor = state.anchor;
+        if (!hasValidTooltipRelationship(tooltip, anchor) || !isNodeEnabled(anchor) ||
+            !isAuthoredTooltipNodeVisible(anchor) ||
+            !isAuthoredTooltipNodeVisible(tooltip))
+        {
+            return false;
+        }
+        if (activeModalNode.hasValue() &&
+            !isNodeWithinSubtree(activeModalNode, anchor))
+        {
+            return false;
+        }
+        const UICommittedLayoutEntry* anchorEntry = committedLayoutEntryFor(anchor);
+        return anchorEntry != nullptr &&
+               anchorEntry->effectiveVisibility == UIVisibility::Visible;
+    }
+
+    [[nodiscard]] static Core::MonotonicDuration
+    tooltipDelayDuration(Core::Duration delay) noexcept
+    {
+        return std::chrono::duration_cast<Core::MonotonicDuration>(delay);
+    }
+
+    [[nodiscard]] static Core::MonotonicTimePoint
+    tooltipDeadlineAfter(Core::MonotonicTimePoint now,
+                         Core::Duration delay) noexcept
+    {
+        if (delay <= Core::Duration::zero())
+        {
+            return now;
+        }
+
+        // UITooltipConfig accepts every finite non-negative Duration. Clamp a
+        // delay that cannot be represented by the native steady-clock duration,
+        // then check time-point addition explicitly instead of relying on a
+        // narrowing duration_cast or signed tick overflow.
+        const Core::Duration maximumNativeDelay =
+            std::chrono::duration_cast<Core::Duration>(
+                Core::MonotonicDuration::max());
+        if (delay >= maximumNativeDelay)
+        {
+            return Core::MonotonicTimePoint::max();
+        }
+
+        const Core::MonotonicDuration nativeDelay = tooltipDelayDuration(delay);
+        const auto nowTicks = now.time_since_epoch().count();
+        const auto delayTicks = nativeDelay.count();
+        const auto maximumTicks =
+            (std::numeric_limits<Core::MonotonicDuration::rep>::max)();
+        if (delayTicks > 0 && nowTicks > maximumTicks - delayTicks)
+        {
+            return Core::MonotonicTimePoint::max();
+        }
+        return Core::MonotonicTimePoint{
+            Core::MonotonicDuration{nowTicks + delayTicks}};
+    }
+
+    void markTooltipPresentationDirty() noexcept
+    {
+        // A Window has at most one active Tooltip, so a bounded full snapshot
+        // rebuild is simpler and more robust than reserving an additional dirty
+        // ancestry path from inside the frame coordinator.
+        phaseDirty |= PhaseLayout | PhaseHit | PhasePaint | PhaseSemantics;
+        layoutReuseCacheValid = false;
+    }
+
+    [[nodiscard]] bool rawTooltipTriggerActive(UINodeId tooltip) const noexcept
+    {
+        if (!hasValidTooltipRelationship(
+                tooltip, tooltipStatesByNodeIndex[tooltip.index()].anchor))
+        {
+            return false;
+        }
+        const TooltipState& state = tooltipStatesByNodeIndex[tooltip.index()];
+        const UINodeId anchor = state.anchor;
+        return (hasTooltipTrigger(state.config.triggers,
+                                  UITooltipTrigger::PointerHover) &&
+                hoveredTooltipAnchor == anchor) ||
+               (hasTooltipTrigger(state.config.triggers,
+                                  UITooltipTrigger::KeyboardFocus) &&
+                defaultActionFocusButton == anchor) ||
+               (hasTooltipTrigger(state.config.triggers,
+                                  UITooltipTrigger::Manual) &&
+                state.manualRequested && manualTooltipNode == tooltip);
+    }
+
+    void clearResettableTooltipSuppression() noexcept
+    {
+        for (u32 index = 0; index < tooltipStatesByNodeIndex.size(); ++index)
+        {
+            const NodeRecord* record = recordByIndex(index);
+            if (record == nullptr || record->kind != BuiltinElementKind::Tooltip)
+            {
+                continue;
+            }
+            TooltipState& state = tooltipStatesByNodeIndex[index];
+            if (!state.suppressedUntilTriggerReset)
+            {
+                continue;
+            }
+            const UINodeId tooltip = idForIndex(index);
+            if (!rawTooltipTriggerActive(tooltip))
+            {
+                state.suppressedUntilTriggerReset = false;
+            }
+        }
+    }
+
+    void cancelPendingTooltipOpen() noexcept
+    {
+        pendingTooltipNode = {};
+        tooltipOpenDeadline = {};
+        tooltipOpenPending = false;
+    }
+
+    void activateTooltipNoFail(UINodeId tooltip) noexcept
+    {
+        if (!contains(tooltip) || tooltip.index() >= tooltipStatesByNodeIndex.size())
+        {
+            return;
+        }
+        bool changed = false;
+        if (activeTooltipNode.hasValue() && activeTooltipNode != tooltip &&
+            contains(activeTooltipNode) &&
+            activeTooltipNode.index() < tooltipStatesByNodeIndex.size())
+        {
+            changed = tooltipStatesByNodeIndex[activeTooltipNode.index()].open || changed;
+            tooltipStatesByNodeIndex[activeTooltipNode.index()].open = false;
+        }
+        TooltipState& state = tooltipStatesByNodeIndex[tooltip.index()];
+        changed = changed || !state.open || activeTooltipNode != tooltip;
+        state.open = true;
+        state.suppressedUntilTriggerReset = false;
+        activeTooltipNode = tooltip;
+        cancelPendingTooltipOpen();
+        tooltipCloseDeadline = {};
+        tooltipClosePending = false;
+        tooltipReshowExpiry = {};
+        tooltipReshowAvailable = false;
+        if (changed)
+        {
+            markTooltipPresentationDirty();
+        }
+    }
+
+    void deactivateTooltipNoFail(UINodeId tooltip, bool suppress,
+                                 bool allowReshow,
+                                 Core::MonotonicTimePoint now) noexcept
+    {
+        if (!contains(tooltip) || tooltip.index() >= tooltipStatesByNodeIndex.size())
+        {
+            if (activeTooltipNode == tooltip)
+            {
+                activeTooltipNode = {};
+            }
+            if (pendingTooltipNode == tooltip)
+            {
+                cancelPendingTooltipOpen();
+            }
+            tooltipClosePending = false;
+            tooltipCloseDeadline = {};
+            return;
+        }
+        TooltipState& state = tooltipStatesByNodeIndex[tooltip.index()];
+        const bool changed = state.open || activeTooltipNode == tooltip;
+        state.open = false;
+        state.suppressedUntilTriggerReset =
+            state.suppressedUntilTriggerReset || suppress;
+        if (activeTooltipNode == tooltip)
+        {
+            activeTooltipNode = {};
+        }
+        if (pendingTooltipNode == tooltip)
+        {
+            cancelPendingTooltipOpen();
+        }
+        tooltipClosePending = false;
+        tooltipCloseDeadline = {};
+        if (allowReshow)
+        {
+            const double windowSeconds = (std::max)(
+                state.config.initialDelay.count(),
+                state.config.reshowDelay.count());
+            tooltipReshowAvailable = true;
+            tooltipReshowExpiry =
+                tooltipDeadlineAfter(now, Core::Duration{windowSeconds});
+        } else
+        {
+            tooltipReshowAvailable = false;
+            tooltipReshowExpiry = {};
+        }
+        if (changed)
+        {
+            markTooltipPresentationDirty();
+        }
+    }
+
+    void suppressTooltipNode(UINodeId tooltip) noexcept
+    {
+        if (contains(tooltip) && tooltip.index() < tooltipStatesByNodeIndex.size())
+        {
+            tooltipStatesByNodeIndex[tooltip.index()].suppressedUntilTriggerReset = true;
+        }
+    }
+
+    void hardDismissAllTooltipsNoFail(bool suppress) noexcept
+    {
+        const UINodeId hovered = tooltipForAnchor(hoveredTooltipAnchor);
+        const UINodeId focused = tooltipForAnchor(defaultActionFocusButton);
+        if (suppress)
+        {
+            suppressTooltipNode(activeTooltipNode);
+            suppressTooltipNode(pendingTooltipNode);
+            suppressTooltipNode(manualTooltipNode);
+            suppressTooltipNode(hovered);
+            suppressTooltipNode(focused);
+        }
+        bool changed = false;
+        for (u32 index = 0; index < tooltipStatesByNodeIndex.size(); ++index)
+        {
+            const NodeRecord* record = recordByIndex(index);
+            if (record == nullptr || record->kind != BuiltinElementKind::Tooltip)
+            {
+                continue;
+            }
+            TooltipState& state = tooltipStatesByNodeIndex[index];
+            changed = changed || state.open;
+            state.open = false;
+            state.manualRequested = false;
+        }
+        activeTooltipNode = {};
+        cancelPendingTooltipOpen();
+        manualTooltipNode = {};
+        tooltipCloseDeadline = {};
+        tooltipClosePending = false;
+        tooltipReshowExpiry = {};
+        tooltipReshowAvailable = false;
+        if (changed)
+        {
+            markTooltipPresentationDirty();
+        }
+    }
+
+    void dismissTooltipNoFail(UINodeId tooltip, bool suppress) noexcept
+    {
+        if (!contains(tooltip) || tooltip.index() >= tooltipStatesByNodeIndex.size())
+        {
+            return;
+        }
+        TooltipState& state = tooltipStatesByNodeIndex[tooltip.index()];
+        state.manualRequested = false;
+        state.suppressedUntilTriggerReset =
+            state.suppressedUntilTriggerReset || suppress;
+        if (manualTooltipNode == tooltip)
+        {
+            manualTooltipNode = {};
+        }
+        if (pendingTooltipNode == tooltip)
+        {
+            cancelPendingTooltipOpen();
+        }
+        if (activeTooltipNode == tooltip || state.open)
+        {
+            deactivateTooltipNoFail(tooltip, suppress, false, motionNow());
+        }
+    }
+
+    [[nodiscard]] UINodeId desiredTooltip() const noexcept
+    {
+        const auto candidate = [this](UINodeId tooltip,
+                                      UITooltipTrigger trigger) noexcept {
+            if (!contains(tooltip) || tooltip.index() >= tooltipStatesByNodeIndex.size())
+            {
+                return UINodeId{};
+            }
+            const TooltipState& state = tooltipStatesByNodeIndex[tooltip.index()];
+            if (state.suppressedUntilTriggerReset ||
+                !hasTooltipTrigger(state.config.triggers, trigger) ||
+                !isTooltipAnchorEligible(tooltip))
+            {
+                return UINodeId{};
+            }
+            return tooltip;
+        };
+
+        if (contains(manualTooltipNode) &&
+            manualTooltipNode.index() < tooltipStatesByNodeIndex.size() &&
+            tooltipStatesByNodeIndex[manualTooltipNode.index()].manualRequested)
+        {
+            if (const UINodeId manual = candidate(
+                    manualTooltipNode, UITooltipTrigger::Manual);
+                manual.hasValue())
+            {
+                return manual;
+            }
+        }
+        if (const UINodeId hover = candidate(
+                tooltipForAnchor(hoveredTooltipAnchor),
+                UITooltipTrigger::PointerHover);
+            hover.hasValue())
+        {
+            return hover;
+        }
+        return candidate(tooltipForAnchor(defaultActionFocusButton),
+                         UITooltipTrigger::KeyboardFocus);
+    }
+
+    void advanceTooltips(Core::MonotonicTimePoint now) noexcept
+    {
+        if (tooltipReshowAvailable && now > tooltipReshowExpiry)
+        {
+            tooltipReshowAvailable = false;
+            tooltipReshowExpiry = {};
+        }
+        clearResettableTooltipSuppression();
+
+        if (activeTooltipNode.hasValue() &&
+            !isTooltipAnchorEligible(activeTooltipNode))
+        {
+            if (contains(activeTooltipNode) &&
+                activeTooltipNode.index() < tooltipStatesByNodeIndex.size())
+            {
+                tooltipStatesByNodeIndex[activeTooltipNode.index()].manualRequested = false;
+            }
+            if (manualTooltipNode == activeTooltipNode)
+            {
+                manualTooltipNode = {};
+            }
+            deactivateTooltipNoFail(activeTooltipNode, true, false, now);
+        }
+
+        UINodeId desired = desiredTooltip();
+        if (activeTooltipNode.hasValue())
+        {
+            if (desired == activeTooltipNode)
+            {
+                tooltipClosePending = false;
+                tooltipCloseDeadline = {};
+                cancelPendingTooltipOpen();
+                return;
+            }
+            if (desired.hasValue() && desired == manualTooltipNode)
+            {
+                activateTooltipNoFail(desired);
+                return;
+            }
+            if (!tooltipClosePending)
+            {
+                const TooltipState& active =
+                    tooltipStatesByNodeIndex[activeTooltipNode.index()];
+                tooltipCloseDeadline =
+                    tooltipDeadlineAfter(now, active.config.dismissDelay);
+                tooltipClosePending = true;
+            }
+            if (now < tooltipCloseDeadline)
+            {
+                return;
+            }
+            const UINodeId closing = activeTooltipNode;
+            deactivateTooltipNoFail(closing, false, true, now);
+            desired = desiredTooltip();
+        }
+
+        if (!desired.hasValue())
+        {
+            cancelPendingTooltipOpen();
+            return;
+        }
+        if (desired == manualTooltipNode)
+        {
+            activateTooltipNoFail(desired);
+            return;
+        }
+        if (!tooltipOpenPending || pendingTooltipNode != desired)
+        {
+            const TooltipState& state =
+                tooltipStatesByNodeIndex[desired.index()];
+            const Core::Duration delay = tooltipReshowAvailable
+                                             ? state.config.reshowDelay
+                                             : state.config.initialDelay;
+            pendingTooltipNode = desired;
+            tooltipOpenDeadline = tooltipDeadlineAfter(now, delay);
+            tooltipOpenPending = true;
+        }
+        if (now >= tooltipOpenDeadline)
+        {
+            activateTooltipNoFail(desired);
+        }
+    }
+
+    void reconcileTooltipAfterPublication(
+        Core::MonotonicTimePoint now) noexcept
+    {
+        if (!activeTooltipNode.hasValue())
+        {
+            return;
+        }
+        if (!isTooltipAnchorEligible(activeTooltipNode))
+        {
+            if (contains(activeTooltipNode) &&
+                activeTooltipNode.index() < tooltipStatesByNodeIndex.size())
+            {
+                tooltipStatesByNodeIndex[activeTooltipNode.index()].manualRequested = false;
+            }
+            if (manualTooltipNode == activeTooltipNode)
+            {
+                manualTooltipNode = {};
+            }
+            deactivateTooltipNoFail(activeTooltipNode, true, false, now);
+            return;
+        }
+
+        const TooltipState& state =
+            tooltipStatesByNodeIndex[activeTooltipNode.index()];
+        const UICommittedLayoutEntry* anchorEntry =
+            committedLayoutEntryFor(state.anchor);
+        if (anchorEntry == nullptr || !state.committedMetrics.open ||
+            state.committedMetrics.anchorRect != anchorEntry->worldRect)
+        {
+            // Tooltip placement intentionally consumed the previous successful
+            // Anchor geometry. Schedule one bounded follow-up publication when
+            // the newly committed Anchor snapshot differs.
+            markTooltipPresentationDirty();
+        }
+    }
+
+    [[nodiscard]] UINodeId tooltipAnchorFromCommittedHit(
+        const UIPointerHitTarget& target,
+        std::span<const UICommittedHitEntry> entries) const noexcept
+    {
+        if (!target.hasValue() || target.hitEntryIndex >= entries.size())
+        {
+            return {};
+        }
+        u32 entryIndex = target.hitEntryIndex;
+        usize visited = 0;
+        while (entryIndex < entries.size() && visited++ < entries.size())
+        {
+            const UICommittedHitEntry& entry = entries[entryIndex];
+            const UINodeId tooltip = tooltipForAnchor(entry.node);
+            if (tooltip.hasValue() &&
+                hasTooltipTrigger(
+                    tooltipStatesByNodeIndex[tooltip.index()].config.triggers,
+                    UITooltipTrigger::PointerHover))
+            {
+                return entry.node;
+            }
+            if (entry.parentEntryIndex == InvalidUIHitEntryIndex)
+            {
+                break;
+            }
+            entryIndex = entry.parentEntryIndex;
+        }
+        return {};
+    }
+
+    [[nodiscard]] Core::Status setTooltipAnchorRelation(UINodeId tooltip,
+                                                        UINodeId anchor)
+    {
+        auto tooltipResult = resolveTooltip(tooltip);
+        if (!tooltipResult)
+        {
+            return Core::failure(tooltipResult.error());
+        }
+        auto anchorResult = resolveNode(anchor);
+        if (!anchorResult)
+        {
+            return Core::failure(anchorResult.error());
+        }
+        NodeRecord* tooltipRecord = *tooltipResult;
+        NodeRecord* anchorRecord = *anchorResult;
+        if (tooltip == anchor)
+        {
+            return fail(UIErrorCode::InvalidParent,
+                        "UI Tooltip cannot anchor to itself");
+        }
+        if (tooltipRecord->rootIndex != anchorRecord->rootIndex)
+        {
+            return fail(UIErrorCode::InvalidParent,
+                        "UI Tooltip and Anchor must belong to the same root");
+        }
+        if (isNodeWithinSubtree(tooltip, anchor) ||
+            isNodeWithinSubtree(anchor, tooltip))
+        {
+            return fail(UIErrorCode::InvalidParent,
+                        "UI Tooltip and Anchor cannot form an ancestor cycle");
+        }
+        switch (anchorRecord->kind)
+        {
+        case BuiltinElementKind::Root:
+        case BuiltinElementKind::Tooltip:
+        case BuiltinElementKind::Popup:
+        case BuiltinElementKind::Modal:
+        case BuiltinElementKind::ListViewItem:
+        case BuiltinElementKind::TreeViewItem:
+            return fail(UIErrorCode::InvalidParent,
+                        "UI node kind is not a stable Tooltip Anchor");
+        default:
+            break;
+        }
+
+        UINodeId& reverse = tooltipForAnchorByNodeIndex[anchor.index()];
+        if (reverse.hasValue() && reverse != tooltip &&
+            hasValidTooltipRelationship(reverse, anchor))
+        {
+            return fail(UIErrorCode::InvalidParent,
+                        "UI Anchor already owns a Tooltip relationship");
+        }
+        if (reverse.hasValue() &&
+            !hasValidTooltipRelationship(reverse, anchor))
+        {
+            reverse = {};
+        }
+
+        TooltipState& state = tooltipStatesByNodeIndex[tooltip.index()];
+        if (state.anchor == anchor && reverse == tooltip)
+        {
+            return Core::success();
+        }
+        dismissTooltipNoFail(tooltip, false);
+        if (contains(state.anchor) &&
+            state.anchor.index() < tooltipForAnchorByNodeIndex.size() &&
+            tooltipForAnchorByNodeIndex[state.anchor.index()] == tooltip)
+        {
+            tooltipForAnchorByNodeIndex[state.anchor.index()] = {};
+        }
+        state.anchor = anchor;
+        state.suppressedUntilTriggerReset = false;
+        reverse = tooltip;
+        markTooltipPresentationDirty();
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status clearTooltipAnchorRelation(UINodeId tooltip)
+    {
+        auto tooltipResult = resolveTooltip(tooltip);
+        if (!tooltipResult)
+        {
+            return Core::failure(tooltipResult.error());
+        }
+        TooltipState& state = tooltipStatesByNodeIndex[tooltip.index()];
+        if (!state.anchor.hasValue())
+        {
+            return Core::success();
+        }
+        const UINodeId anchor = state.anchor;
+        dismissTooltipNoFail(tooltip, false);
+        if (contains(anchor) && anchor.index() < tooltipForAnchorByNodeIndex.size() &&
+            tooltipForAnchorByNodeIndex[anchor.index()] == tooltip)
+        {
+            tooltipForAnchorByNodeIndex[anchor.index()] = {};
+        }
+        state.anchor = {};
+        state.suppressedUntilTriggerReset = false;
+        markTooltipPresentationDirty();
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status setTooltipAnchor(UINodeId tooltip,
+                                                UINodeId anchor)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        return setTooltipAnchorRelation(tooltip, anchor);
+    }
+
+    [[nodiscard]] Core::Status clearTooltipAnchor(UINodeId tooltip)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        return clearTooltipAnchorRelation(tooltip);
+    }
+
+    [[nodiscard]] Core::Result<UINodeId>
+    tooltipAnchor(UINodeId tooltip) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        auto tooltipResult = const_cast<Impl*>(this)->resolveTooltip(tooltip);
+        if (!tooltipResult)
+        {
+            return Core::failure(tooltipResult.error());
+        }
+        const UINodeId anchor = tooltipStatesByNodeIndex[tooltip.index()].anchor;
+        return hasValidTooltipRelationship(tooltip, anchor) ? anchor : UINodeId{};
+    }
+
+    [[nodiscard]] Core::Status showTooltip(UINodeId tooltip)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        auto tooltipResult = resolveTooltip(tooltip);
+        if (!tooltipResult)
+        {
+            return Core::failure(tooltipResult.error());
+        }
+        TooltipState& state = tooltipStatesByNodeIndex[tooltip.index()];
+        if (!hasValidTooltipRelationship(tooltip, state.anchor))
+        {
+            return fail(UIErrorCode::InvalidParent,
+                        "UI Tooltip requires a live Anchor before it can show");
+        }
+        if (!hasTooltipTrigger(state.config.triggers, UITooltipTrigger::Manual))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI Tooltip does not enable the Manual trigger");
+        }
+        if (manualTooltipNode.hasValue() && manualTooltipNode != tooltip &&
+            contains(manualTooltipNode) &&
+            manualTooltipNode.index() < tooltipStatesByNodeIndex.size())
+        {
+            tooltipStatesByNodeIndex[manualTooltipNode.index()].manualRequested = false;
+        }
+        manualTooltipNode = tooltip;
+        state.manualRequested = true;
+        state.suppressedUntilTriggerReset = false;
+        if (isTooltipAnchorEligible(tooltip))
+        {
+            activateTooltipNoFail(tooltip);
+        } else
+        {
+            markTooltipPresentationDirty();
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status dismissTooltip(UINodeId tooltip)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        auto tooltipResult = resolveTooltip(tooltip);
+        if (!tooltipResult)
+        {
+            return Core::failure(tooltipResult.error());
+        }
+        dismissTooltipNoFail(tooltip, true);
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<bool> isTooltipOpen(UINodeId tooltip) const
+    {
+        auto metrics = tooltipMetrics(tooltip);
+        if (!metrics)
+        {
+            return Core::failure(metrics.error());
+        }
+        return metrics->open;
+    }
+
+    [[nodiscard]] Core::Result<UITooltipMetrics>
+    tooltipMetrics(UINodeId tooltip) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        auto tooltipResult = const_cast<Impl*>(this)->resolveTooltip(tooltip);
+        if (!tooltipResult)
+        {
+            return Core::failure(tooltipResult.error());
+        }
+        return tooltipStatesByNodeIndex[tooltip.index()].committedMetrics;
+    }
+
+    [[nodiscard]] Core::Status validateTooltipUpdaterRoot(
+        UINodeId updaterRoot, UINodeId tooltip) const
+    {
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired,
+                        "UI tree updater requires a live root owner");
+        }
+        auto tooltipResult = const_cast<Impl*>(this)->resolveTooltip(tooltip);
+        if (!tooltipResult)
+        {
+            return Core::failure(tooltipResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, tooltip))
+        {
+            return fail(UIErrorCode::InvalidNode,
+                        "UI Tooltip is not owned by the updater root");
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status setTooltipAnchorFromUpdater(
+        UINodeId updaterRoot, UINodeId tooltip, UINodeId anchor)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateTooltipUpdaterRoot(updaterRoot, tooltip);
+            !valid)
+        {
+            return valid;
+        }
+        if (!contains(anchor) || !isNodeWithinRoot(updaterRoot, anchor))
+        {
+            return fail(UIErrorCode::InvalidNode,
+                        "UI Tooltip Anchor is not owned by the updater root");
+        }
+        return setTooltipAnchorRelation(tooltip, anchor);
+    }
+
+    [[nodiscard]] Core::Status clearTooltipAnchorFromUpdater(
+        UINodeId updaterRoot, UINodeId tooltip)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateTooltipUpdaterRoot(updaterRoot, tooltip);
+            !valid)
+        {
+            return valid;
+        }
+        return clearTooltipAnchorRelation(tooltip);
+    }
+
+    [[nodiscard]] Core::Result<UINodeId> tooltipAnchorFromUpdater(
+        UINodeId updaterRoot, UINodeId tooltip) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (Core::Status valid = validateTooltipUpdaterRoot(updaterRoot, tooltip);
+            !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        return tooltipAnchor(tooltip);
+    }
+
+    [[nodiscard]] Core::Status showTooltipFromUpdater(
+        UINodeId updaterRoot, UINodeId tooltip)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateTooltipUpdaterRoot(updaterRoot, tooltip);
+            !valid)
+        {
+            return valid;
+        }
+        return showTooltip(tooltip);
+    }
+
+    [[nodiscard]] Core::Status dismissTooltipFromUpdater(
+        UINodeId updaterRoot, UINodeId tooltip)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateTooltipUpdaterRoot(updaterRoot, tooltip);
+            !valid)
+        {
+            return valid;
+        }
+        return dismissTooltip(tooltip);
+    }
+
+    [[nodiscard]] Core::Result<bool> isTooltipOpenFromUpdater(
+        UINodeId updaterRoot, UINodeId tooltip) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (Core::Status valid = validateTooltipUpdaterRoot(updaterRoot, tooltip);
+            !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        return isTooltipOpen(tooltip);
+    }
+
+    [[nodiscard]] Core::Result<UITooltipMetrics> tooltipMetricsFromUpdater(
+        UINodeId updaterRoot, UINodeId tooltip) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (Core::Status valid = validateTooltipUpdaterRoot(updaterRoot, tooltip);
+            !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        return tooltipMetrics(tooltip);
+    }
+
     [[nodiscard]] Core::Result<NodeRecord*> resolveDropdown(UINodeId dropdown)
     {
         auto nodeResult = resolveNode(dropdown);
@@ -14206,6 +15313,18 @@ struct UIContext::Impl final {
         for (const u32 index : order)
         {
             const NodeRecord* record = recordByIndex(index);
+            if (record == nullptr || record->kind != BuiltinElementKind::Tooltip ||
+                index >= tooltipStatesByNodeIndex.size() ||
+                index >= tooltipLayoutScratchByNodeIndex.size())
+            {
+                continue;
+            }
+            tooltipStatesByNodeIndex[index].committedMetrics =
+                tooltipLayoutScratchByNodeIndex[index].metrics;
+        }
+        for (const u32 index : order)
+        {
+            const NodeRecord* record = recordByIndex(index);
             if (record == nullptr)
             {
                 continue;
@@ -14268,10 +15387,55 @@ struct UIContext::Impl final {
         }
         // Timeline layout tracks remain a candidate until every Layout/Hit/Paint
         // builder below succeeds. M==0 remains a pure no-op.
-        if (Core::Status motionStatus = sampleMotion(motionNow()); !motionStatus)
+        const Core::MonotonicTimePoint frameNow = motionNow();
+        if (Core::Status motionStatus = sampleMotion(frameNow); !motionStatus)
         {
             return motionStatus;
         }
+
+        std::copy(tooltipStatesByNodeIndex.begin(),
+                  tooltipStatesByNodeIndex.end(),
+                  tooltipCommitRollbackStatesByNodeIndex.begin());
+        struct TooltipCommitState final {
+            UINodeId active{};
+            UINodeId pending{};
+            UINodeId hoveredAnchor{};
+            UINodeId manual{};
+            Core::MonotonicTimePoint openDeadline{};
+            Core::MonotonicTimePoint closeDeadline{};
+            Core::MonotonicTimePoint reshowExpiry{};
+            bool openPending = false;
+            bool closePending = false;
+            bool reshowAvailable = false;
+        };
+        const TooltipCommitState previousTooltipState{
+            .active = activeTooltipNode,
+            .pending = pendingTooltipNode,
+            .hoveredAnchor = hoveredTooltipAnchor,
+            .manual = manualTooltipNode,
+            .openDeadline = tooltipOpenDeadline,
+            .closeDeadline = tooltipCloseDeadline,
+            .reshowExpiry = tooltipReshowExpiry,
+            .openPending = tooltipOpenPending,
+            .closePending = tooltipClosePending,
+            .reshowAvailable = tooltipReshowAvailable,
+        };
+        auto tooltipAdvanceRollback = Core::makeScopeExit([&]() noexcept {
+            std::copy(tooltipCommitRollbackStatesByNodeIndex.begin(),
+                      tooltipCommitRollbackStatesByNodeIndex.end(),
+                      tooltipStatesByNodeIndex.begin());
+            activeTooltipNode = previousTooltipState.active;
+            pendingTooltipNode = previousTooltipState.pending;
+            hoveredTooltipAnchor = previousTooltipState.hoveredAnchor;
+            manualTooltipNode = previousTooltipState.manual;
+            tooltipOpenDeadline = previousTooltipState.openDeadline;
+            tooltipCloseDeadline = previousTooltipState.closeDeadline;
+            tooltipReshowExpiry = previousTooltipState.reshowExpiry;
+            tooltipOpenPending = previousTooltipState.openPending;
+            tooltipClosePending = previousTooltipState.closePending;
+            tooltipReshowAvailable = previousTooltipState.reshowAvailable;
+        });
+        advanceTooltips(frameNow);
         const bool hasTransactionalTimelineSample = timelineStorage.hasCandidateSample();
         const bool hasTransactionalDirectMotionSample = motionTrackStorage.hasCandidateSample();
         const bool hasLayoutTimelineCandidate = !timelineStorage.candidateLayoutNodes().empty();
@@ -14307,6 +15471,7 @@ struct UIContext::Impl final {
             lastStyleInspectedNodeCount = 0;
             lastStyleResolvedNodeCount = 0;
             lastStyleCandidateRuleCount = 0;
+            tooltipAdvanceRollback.release();
             return Core::success();
         }
         if (layoutNeedsCommit && nodes.activeCount() > capacityConfig.layoutSnapshotCapacity)
@@ -14726,6 +15891,8 @@ struct UIContext::Impl final {
             layoutReuseCacheValid = true;
         }
         clearDirtyState();
+        tooltipAdvanceRollback.release();
+        reconcileTooltipAfterPublication(frameNow);
         pendingDestroyedModalRestoreFocus = {};
         hasPendingDestroyedModalRestoreFocus = false;
         focusRollback.release();
@@ -16087,6 +17254,18 @@ struct UIContext::Impl final {
         result.consumed = routedEvent.isInputTransitionConsumed();
         result.stopped = routedEvent.isPropagationStopped();
         result.pointerCaptureChanged = capturedPointerNode != captureAtRouteStart;
+        if (input.kind == UIRoutedPointerEventKind::Move)
+        {
+            // Hover intent always follows the physical committed hit rather
+            // than Pointer Capture routing. Tooltip itself is Ignore, so it can
+            // never become this target or prevent click-through.
+            hoveredTooltipAnchor =
+                tooltipAnchorFromCommittedHit(result.pointQuery.target, entries);
+        } else if (input.kind == UIRoutedPointerEventKind::ButtonDown ||
+                   input.kind == UIRoutedPointerEventKind::Wheel)
+        {
+            hardDismissAllTooltipsNoFail(true);
+        }
         return result;
     }
 
@@ -16126,6 +17305,8 @@ struct UIContext::Impl final {
         clearImeFocus();
         clearDefaultActionFocus();
         clearHoveredPrimaryControl();
+        hoveredTooltipAnchor = {};
+        hardDismissAllTooltipsNoFail(true);
         // Cancellation is a state barrier: a full dirty queue must not leave
         // any pointer interaction armed. Existing dirty work will rebuild the
         // paint/semantics snapshot; otherwise this best-effort mark schedules
@@ -18204,6 +19385,7 @@ struct UIContext::Impl final {
         }
         if (!isCommittedTextEditFocusCandidate(textInputFocus))
         {
+            hardDismissAllTooltipsNoFail(true);
             clearImeFocus();
             return UITextInputRouteResult{};
         }
@@ -18215,6 +19397,7 @@ struct UIContext::Impl final {
             {
                 return Core::failure(status.error());
             }
+            hardDismissAllTooltipsNoFail(true);
             return UITextInputRouteResult{.consumed = true, .applied = true};
         }
         if (!Core::isStrictUtf8WithoutNul(preeditUtf8))
@@ -18240,6 +19423,7 @@ struct UIContext::Impl final {
             return Core::failure(paintStatus.error());
         }
         imeComposition.assign(preeditUtf8, cursorCodepoint, *codepoints);
+        hardDismissAllTooltipsNoFail(true);
         return UITextInputRouteResult{.consumed = true, .applied = true};
     }
 
@@ -18261,12 +19445,17 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidPointerInput, "UI text input requires a platform frame and sequence");
         }
+        const bool validCommittedUtf8 = Core::isStrictUtf8WithoutNul(committedUtf8);
         if (!isCommittedTextEditFocusCandidate(textInputFocus))
         {
+            if (validCommittedUtf8)
+            {
+                hardDismissAllTooltipsNoFail(true);
+            }
             clearImeFocus();
             return UITextInputRouteResult{};
         }
-        if (!Core::isStrictUtf8WithoutNul(committedUtf8))
+        if (!validCommittedUtf8)
         {
             return fail(UIErrorCode::InvalidText, "UI text input must be strict UTF-8 without embedded NUL");
         }
@@ -18276,6 +19465,7 @@ struct UIContext::Impl final {
         if (committedUtf8.find('\r') != std::string_view::npos ||
             (!multiline.enabled && committedUtf8.find('\n') != std::string_view::npos))
         {
+            hardDismissAllTooltipsNoFail(true);
             return UITextInputRouteResult{.consumed = true, .applied = false};
         }
         if (committedUtf8.empty())
@@ -18284,6 +19474,7 @@ struct UIContext::Impl final {
             {
                 return Core::failure(status.error());
             }
+            hardDismissAllTooltipsNoFail(true);
             return UITextInputRouteResult{.consumed = true, .applied = true};
         }
 
@@ -18361,6 +19552,7 @@ struct UIContext::Impl final {
         {
             return Core::failure(status.error());
         }
+        hardDismissAllTooltipsNoFail(true);
         return UITextInputRouteResult{.consumed = true, .applied = true};
     }
 
@@ -19817,6 +21009,69 @@ Core::Result<UIPopupMetrics> UITreeUpdater::popupMetrics(UINodeId popup) const
     return m_context->popupMetricsFromUpdater(m_root, popup);
 }
 
+Core::Status UITreeUpdater::setTooltipAnchor(UINodeId tooltip, UINodeId anchor)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setTooltipAnchorFromUpdater(m_root, tooltip, anchor);
+}
+
+Core::Status UITreeUpdater::clearTooltipAnchor(UINodeId tooltip)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->clearTooltipAnchorFromUpdater(m_root, tooltip);
+}
+
+Core::Result<UINodeId> UITreeUpdater::tooltipAnchor(UINodeId tooltip) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->tooltipAnchorFromUpdater(m_root, tooltip);
+}
+
+Core::Status UITreeUpdater::showTooltip(UINodeId tooltip)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->showTooltipFromUpdater(m_root, tooltip);
+}
+
+Core::Status UITreeUpdater::dismissTooltip(UINodeId tooltip)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->dismissTooltipFromUpdater(m_root, tooltip);
+}
+
+Core::Result<bool> UITreeUpdater::isTooltipOpen(UINodeId tooltip) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->isTooltipOpenFromUpdater(m_root, tooltip);
+}
+
+Core::Result<UITooltipMetrics> UITreeUpdater::tooltipMetrics(UINodeId tooltip) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->tooltipMetricsFromUpdater(m_root, tooltip);
+}
+
 Core::Status UITreeUpdater::setDropdownOpen(UINodeId dropdown, bool open)
 {
     if (m_context == nullptr)
@@ -20729,6 +21984,41 @@ UINodeId UIContext::activePopup() const noexcept
     return m_impl->activePopup();
 }
 
+Core::Status UIContext::setTooltipAnchor(UINodeId tooltip, UINodeId anchor)
+{
+    return m_impl->setTooltipAnchor(tooltip, anchor);
+}
+
+Core::Status UIContext::clearTooltipAnchor(UINodeId tooltip)
+{
+    return m_impl->clearTooltipAnchor(tooltip);
+}
+
+Core::Result<UINodeId> UIContext::tooltipAnchor(UINodeId tooltip) const
+{
+    return m_impl->tooltipAnchor(tooltip);
+}
+
+Core::Status UIContext::showTooltip(UINodeId tooltip)
+{
+    return m_impl->showTooltip(tooltip);
+}
+
+Core::Status UIContext::dismissTooltip(UINodeId tooltip)
+{
+    return m_impl->dismissTooltip(tooltip);
+}
+
+Core::Result<bool> UIContext::isTooltipOpen(UINodeId tooltip) const
+{
+    return m_impl->isTooltipOpen(tooltip);
+}
+
+Core::Result<UITooltipMetrics> UIContext::tooltipMetrics(UINodeId tooltip) const
+{
+    return m_impl->tooltipMetrics(tooltip);
+}
+
 Core::Status UIContext::requestFocus(UINodeId node)
 {
     return m_impl->requestFocus(node);
@@ -21231,6 +22521,49 @@ Core::Result<bool> UIContext::isPopupOpenFromUpdater(UINodeId updaterRoot, UINod
 Core::Result<UIPopupMetrics> UIContext::popupMetricsFromUpdater(UINodeId updaterRoot, UINodeId popup) const
 {
     return m_impl->popupMetricsFromUpdater(updaterRoot, popup);
+}
+
+Core::Status UIContext::setTooltipAnchorFromUpdater(UINodeId updaterRoot,
+                                                    UINodeId tooltip,
+                                                    UINodeId anchor)
+{
+    return m_impl->setTooltipAnchorFromUpdater(updaterRoot, tooltip, anchor);
+}
+
+Core::Status UIContext::clearTooltipAnchorFromUpdater(UINodeId updaterRoot,
+                                                      UINodeId tooltip)
+{
+    return m_impl->clearTooltipAnchorFromUpdater(updaterRoot, tooltip);
+}
+
+Core::Result<UINodeId> UIContext::tooltipAnchorFromUpdater(
+    UINodeId updaterRoot, UINodeId tooltip) const
+{
+    return m_impl->tooltipAnchorFromUpdater(updaterRoot, tooltip);
+}
+
+Core::Status UIContext::showTooltipFromUpdater(UINodeId updaterRoot,
+                                               UINodeId tooltip)
+{
+    return m_impl->showTooltipFromUpdater(updaterRoot, tooltip);
+}
+
+Core::Status UIContext::dismissTooltipFromUpdater(UINodeId updaterRoot,
+                                                  UINodeId tooltip)
+{
+    return m_impl->dismissTooltipFromUpdater(updaterRoot, tooltip);
+}
+
+Core::Result<bool> UIContext::isTooltipOpenFromUpdater(
+    UINodeId updaterRoot, UINodeId tooltip) const
+{
+    return m_impl->isTooltipOpenFromUpdater(updaterRoot, tooltip);
+}
+
+Core::Result<UITooltipMetrics> UIContext::tooltipMetricsFromUpdater(
+    UINodeId updaterRoot, UINodeId tooltip) const
+{
+    return m_impl->tooltipMetricsFromUpdater(updaterRoot, tooltip);
 }
 
 Core::Status UIContext::setDropdownOpenFromUpdater(UINodeId updaterRoot, UINodeId dropdown, bool open)

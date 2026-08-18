@@ -35,6 +35,7 @@
 #include <tina/ui/UIText.hpp>
 #include <tina/ui/UITextEdit.hpp>
 #include <tina/ui/UITheme.hpp>
+#include <tina/ui/UITooltip.hpp>
 #include <tina/ui/UITreeView.hpp>
 #include <tina/ui/text/UITextRasterizer.hpp>
 
@@ -404,6 +405,13 @@ class UITreeUpdater final {
     [[nodiscard]] Core::Status setPopupOpen(UINodeId popup, bool open);
     [[nodiscard]] Core::Result<bool> isPopupOpen(UINodeId popup) const;
     [[nodiscard]] Core::Result<UIPopupMetrics> popupMetrics(UINodeId popup) const;
+    [[nodiscard]] Core::Status setTooltipAnchor(UINodeId tooltip, UINodeId anchor);
+    [[nodiscard]] Core::Status clearTooltipAnchor(UINodeId tooltip);
+    [[nodiscard]] Core::Result<UINodeId> tooltipAnchor(UINodeId tooltip) const;
+    [[nodiscard]] Core::Status showTooltip(UINodeId tooltip);
+    [[nodiscard]] Core::Status dismissTooltip(UINodeId tooltip);
+    [[nodiscard]] Core::Result<bool> isTooltipOpen(UINodeId tooltip) const;
+    [[nodiscard]] Core::Result<UITooltipMetrics> tooltipMetrics(UINodeId tooltip) const;
     [[nodiscard]] Core::Status setDropdownOpen(UINodeId dropdown, bool open);
     [[nodiscard]] Core::Result<bool> isDropdownOpen(UINodeId dropdown) const;
     [[nodiscard]] Core::Status setDropdownSelectedItem(UINodeId dropdown, UINodeId item);
@@ -692,6 +700,17 @@ class UIContext final {
     [[nodiscard]] UINodeId activeModal() const noexcept;
     [[nodiscard]] UINodeId pointerCapture() const noexcept;
     [[nodiscard]] UINodeId activePopup() const noexcept;
+    // Tooltip relationships and presentation are owner-thread, per-Window, and
+    // advanced by commitLayout() using the configured monotonic clock. These
+    // direct Context APIs are useful to adapters; root-scoped authoring should
+    // prefer UITreeUpdater.
+    [[nodiscard]] Core::Status setTooltipAnchor(UINodeId tooltip, UINodeId anchor);
+    [[nodiscard]] Core::Status clearTooltipAnchor(UINodeId tooltip);
+    [[nodiscard]] Core::Result<UINodeId> tooltipAnchor(UINodeId tooltip) const;
+    [[nodiscard]] Core::Status showTooltip(UINodeId tooltip);
+    [[nodiscard]] Core::Status dismissTooltip(UINodeId tooltip);
+    [[nodiscard]] Core::Result<bool> isTooltipOpen(UINodeId tooltip) const;
+    [[nodiscard]] Core::Result<UITooltipMetrics> tooltipMetrics(UINodeId tooltip) const;
     // Explicit focus changes use the last committed hit/focus-scope snapshot.
     // A target must be visible, enabled, Targetable, keyboard-focusable, and
     // inside the active Modal. clearFocus is idempotent.
@@ -884,6 +903,17 @@ class UIContext final {
     [[nodiscard]] Core::Status setPopupOpenFromUpdater(UINodeId updaterRoot, UINodeId popup, bool open);
     [[nodiscard]] Core::Result<bool> isPopupOpenFromUpdater(UINodeId updaterRoot, UINodeId popup) const;
     [[nodiscard]] Core::Result<UIPopupMetrics> popupMetricsFromUpdater(UINodeId updaterRoot, UINodeId popup) const;
+    [[nodiscard]] Core::Status setTooltipAnchorFromUpdater(UINodeId updaterRoot, UINodeId tooltip,
+                                                          UINodeId anchor);
+    [[nodiscard]] Core::Status clearTooltipAnchorFromUpdater(UINodeId updaterRoot, UINodeId tooltip);
+    [[nodiscard]] Core::Result<UINodeId> tooltipAnchorFromUpdater(UINodeId updaterRoot,
+                                                                  UINodeId tooltip) const;
+    [[nodiscard]] Core::Status showTooltipFromUpdater(UINodeId updaterRoot, UINodeId tooltip);
+    [[nodiscard]] Core::Status dismissTooltipFromUpdater(UINodeId updaterRoot, UINodeId tooltip);
+    [[nodiscard]] Core::Result<bool> isTooltipOpenFromUpdater(UINodeId updaterRoot,
+                                                              UINodeId tooltip) const;
+    [[nodiscard]] Core::Result<UITooltipMetrics> tooltipMetricsFromUpdater(UINodeId updaterRoot,
+                                                                           UINodeId tooltip) const;
     [[nodiscard]] Core::Status setDropdownOpenFromUpdater(UINodeId updaterRoot, UINodeId dropdown, bool open);
     [[nodiscard]] Core::Result<bool> isDropdownOpenFromUpdater(UINodeId updaterRoot, UINodeId dropdown) const;
     [[nodiscard]] Core::Status setDropdownSelectedItemFromUpdater(UINodeId updaterRoot, UINodeId dropdown,

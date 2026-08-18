@@ -654,6 +654,15 @@ void writeTimingSummary(std::ostream& output, const TimingSummary& summary,
     };
 }
 
+[[nodiscard]] UI::UIIconContent iconBenchmarkContent(usize resourceIndex) noexcept
+{
+    return UI::UIIconContent{
+        .source = imageBenchmarkSource(resourceIndex),
+        .tint = UI::rgba8(255, 255, 255),
+        .sampling = UI::UIImageSampling::Nearest,
+    };
+}
+
 [[nodiscard]] UI::UIContextCapacityConfig imageBenchmarkContextCapacity() noexcept
 {
     UI::UIContextCapacityConfig capacity{};
@@ -759,7 +768,7 @@ componentCanvasCommands() noexcept
     }
     for (usize index = 0; index < kIconElementCount; ++index) {
         auto node = fixture.updater.createElement(
-            fixture.root.rootNodeId(), UI::makeIconElement(imageBenchmarkContent(nextResource()), layout));
+            fixture.root.rootNodeId(), UI::makeIconElement(iconBenchmarkContent(nextResource()), layout));
         if (!node) {
             error = node.error().message;
             return false;

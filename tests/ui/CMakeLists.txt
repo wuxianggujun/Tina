@@ -42,6 +42,7 @@ add_executable(tina_ui_tests
     UIStyleSheetStorageTests.cpp
     UIMotionTests.cpp
     UIThemeTransitionResolverTests.cpp
+    UITooltipTests.cpp
     UIWidgetTraitsTests.cpp
     UIWidgetStateModelsTests.cpp
     UIVirtualCollectionLayoutTests.cpp
@@ -113,11 +114,13 @@ add_executable(tina_ui_tests
     header_isolation/UIFocusHeader.cpp
     header_isolation/UIFlowHeader.cpp
     header_isolation/UIHitTestHeader.cpp
+    header_isolation/UIIconHeader.cpp
     header_isolation/UIImageHeader.cpp
     header_isolation/UIImageSourceHeader.cpp
     header_isolation/UILayoutHeader.cpp
     header_isolation/UIPaintHeader.cpp
     header_isolation/UIThemeHeader.cpp
+    header_isolation/UITooltipHeader.cpp
     header_isolation/UITextHeader.cpp
     header_isolation/UITextEditHeader.cpp
     header_isolation/UITextRasterizerHeader.cpp

@@ -26,6 +26,7 @@ enum class BuiltinElementKind : u8 {
     ListViewItem,
     TreeView,
     TreeViewItem,
+    Tooltip,
 };
 
 struct UIWidgetTraits final {
@@ -76,6 +77,7 @@ struct UIWidgetTraits final {
             .keyboardFocusable = true,
         };
     case BuiltinElementKind::Label:
+    case BuiltinElementKind::Tooltip:
         return {
             .supportsText = true,
         };
@@ -121,6 +123,7 @@ defaultContentAlignment(BuiltinElementKind kind) noexcept
         };
     }
     if (kind == BuiltinElementKind::TextEdit ||
+        kind == BuiltinElementKind::Tooltip ||
         kind == BuiltinElementKind::Dropdown ||
         kind == BuiltinElementKind::DropdownItem ||
         kind == BuiltinElementKind::RadioButton ||

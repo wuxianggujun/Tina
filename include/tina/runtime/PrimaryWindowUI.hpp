@@ -20,6 +20,7 @@
 #include <tina/ui/UIStyle.hpp>
 #include <tina/ui/UIText.hpp>
 #include <tina/ui/UITextEdit.hpp>
+#include <tina/ui/UITooltip.hpp>
 #include <tina/ui/UITreeView.hpp>
 
 #include <span>
@@ -267,6 +268,13 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Status setPopupOpen(UI::UINodeId popup, bool open);
     [[nodiscard]] Core::Result<bool> isPopupOpen(UI::UINodeId popup) const;
     [[nodiscard]] Core::Result<UI::UIPopupMetrics> popupMetrics(UI::UINodeId popup) const;
+    [[nodiscard]] Core::Status setTooltipAnchor(UI::UINodeId tooltip, UI::UINodeId anchor);
+    [[nodiscard]] Core::Status clearTooltipAnchor(UI::UINodeId tooltip);
+    [[nodiscard]] Core::Result<UI::UINodeId> tooltipAnchor(UI::UINodeId tooltip) const;
+    [[nodiscard]] Core::Status showTooltip(UI::UINodeId tooltip);
+    [[nodiscard]] Core::Status dismissTooltip(UI::UINodeId tooltip);
+    [[nodiscard]] Core::Result<bool> isTooltipOpen(UI::UINodeId tooltip) const;
+    [[nodiscard]] Core::Result<UI::UITooltipMetrics> tooltipMetrics(UI::UINodeId tooltip) const;
     [[nodiscard]] Core::Status setDropdownOpen(UI::UINodeId dropdown, bool open);
     [[nodiscard]] Core::Result<bool> isDropdownOpen(UI::UINodeId dropdown) const;
     [[nodiscard]] Core::Status setDropdownSelectedItem(UI::UINodeId dropdown, UI::UINodeId item);

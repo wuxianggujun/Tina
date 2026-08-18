@@ -2512,6 +2512,125 @@ Core::Result<UI::UIPopupMetrics> PrimaryWindowUICapabilityState::popupMetrics(u6
     return *metrics;
 }
 
+Core::Status PrimaryWindowUICapabilityState::setTooltipAnchor(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId tooltip, UI::UINodeId anchor)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setTooltipAnchor";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setTooltipAnchor(tooltip, anchor);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::clearTooltipAnchor(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId tooltip)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::clearTooltipAnchor";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.clearTooltipAnchor(tooltip);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::tooltipAnchor(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId tooltip)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::tooltipAnchor";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto anchor = updater.tooltipAnchor(tooltip);
+    if (!anchor)
+    {
+        return Core::failure(rememberFirstError(std::move(anchor.error()), Operation));
+    }
+    return *anchor;
+}
+
+Core::Status PrimaryWindowUICapabilityState::showTooltip(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId tooltip)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::showTooltip";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.showTooltip(tooltip);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::dismissTooltip(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId tooltip)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::dismissTooltip";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.dismissTooltip(tooltip);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<bool> PrimaryWindowUICapabilityState::isTooltipOpen(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId tooltip)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::isTooltipOpen";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto open = updater.isTooltipOpen(tooltip);
+    if (!open)
+    {
+        return Core::failure(rememberFirstError(std::move(open.error()), Operation));
+    }
+    return *open;
+}
+
+Core::Result<UI::UITooltipMetrics> PrimaryWindowUICapabilityState::tooltipMetrics(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId tooltip)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::tooltipMetrics";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto metrics = updater.tooltipMetrics(tooltip);
+    if (!metrics)
+    {
+        return Core::failure(rememberFirstError(std::move(metrics.error()), Operation));
+    }
+    return *metrics;
+}
+
 Core::Status PrimaryWindowUICapabilityState::setDropdownOpen(u64 epoch, PrimaryWindowUIPhase phase,
                                                              UI::UITreeUpdater& updater, UI::UINodeId dropdown,
                                                              bool open)

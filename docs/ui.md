@@ -12,16 +12,16 @@
 | --- | --- |
 | 所有权 | per-window `UIContext`、generation/owner-aware `UINodeId`、move-only `UIRootOwner` |
 | Authoring | `UIElementDescriptor` + `make*Element` recipes、组合 Semantics、StyleRole/override reset、固定预算 build transaction；旧 create-by-kind 与公开 `UIWidgetKind` 已删除 |
-| Tree | Root/Panel/Modal/Label/Button/Checkbox/Slider/ProgressBar/RadioButton/TextEdit/ScrollView/Dropdown/Popup/DropdownItem/ListView/TreeView，固定容量 mutation |
-| Layout/Content | Flex container/item 分离、Flow/Overlay placement、logical pixel、可选 axis-aligned border-box descendant clip、committed content placement、事务 commit、clean-subtree reuse |
-| Hit/route | committed hit snapshot、Capture→Target→Bubble、持久 Pointer Capture、Modal/Popup barrier、listener token、consume/prevent/claim |
+| Tree | Root/Panel/Modal/Label/Button/Checkbox/Slider/ProgressBar/RadioButton/TextEdit/ScrollView/Dropdown/Popup/Tooltip/DropdownItem/ListView/TreeView，固定容量 mutation |
+| Layout/Content | Flex container/item 分离、Flow/Overlay placement、logical pixel、可选 axis-aligned border-box descendant clip、committed content placement、Tooltip 基于上一份成功 Anchor geometry 的 flip/clamp、事务 commit、clean-subtree reuse |
+| Hit/route | committed hit snapshot、Capture→Target→Bubble、持久 Pointer Capture、Modal/Popup barrier、Tooltip Ignore/click-through、listener token、consume/prevent/claim |
 | Paint | `UIBoxPaint` Rectangle/Ellipse/Line、box/text/control paint、第一类 Image/Icon content、固定容量 backend-neutral `SolidRect`/`SolidEllipse`/`SolidLine`/`Image`/`NineSlice` Canvas、axis-aligned clip、PaintCache、committed paint snapshot；NineSlice 在 commit 时原子展开为1..9个 Image entry |
 | Theme/Style（A/B/C1 + UI-STYLE-001 slice） | `UITheme` token + `UIStyleRoleId` recipe + 属性 override mask/reset；默认 Button 为 Tonal，显式提供 Primary/Danger/Outlined/Text，并以 RadioButton 状态机提供 SegmentedButton；强类型 StyleClass/ColorToken、node-local pseudo-state、literal/token-backed BoxFill stylesheet 与运行期 ColorToken getter/setter 已落地；token 更新经固定 reverse-dependency 链为 `O(affected links)`，**无**圆角子树 clip/毛玻璃/完整 CSS |
 | Motion | direct/Style transition 仍为 fixed-capacity paint-only；typed keyframe timeline 已支持 paint 属性及 bounded `LayoutWidth`/`LayoutHeight`/`LayoutOffset` 白名单，并沿唯一 commit pipeline 原子发布；`ui_motion_v1`、`ui_motion_timeline_v1` 与 `ui_motion_layout_v1` 均已有确定性 gate，墙钟结论保持 provisional |
 | Text | strict UTF-8、可选 FreeType rasterizer、R8 Glyph atlas、DisplayList Glyph |
-| Input | Focus Scope/显式 focus、Pointer capture/cancel、Tab 与 committed 几何空间焦点、Keyboard/Gamepad activation、Dropdown 与 List/Tree navigation、TextEdit edit/selection/IME；UI Flow 固定 16 槽本地用户、Gamepad assignment 与 per-user 设备 revision |
-| Semantics | Automatic/Publish/MergeDescendants/Exclude、显式 role/name/description/actions、状态/range/value snapshot 与虚拟 item 元数据 |
-| Runtime | startup root builder、phase-scoped tree updater 与 bounded component transaction（含集合 DataSource/metrics/selection/scroll/expansion）、DisplayList/Glyph atlas handoff |
+| Input | Focus Scope/显式 focus、Pointer capture/cancel、Tab 与 committed 几何空间焦点、Keyboard/Gamepad activation、Dropdown 与 List/Tree navigation、TextEdit edit/selection/IME、Tooltip PointerHover/KeyboardFocus/Manual 与 monotonic delay；UI Flow 固定 16 槽本地用户、Gamepad assignment 与 per-user 设备 revision |
+| Semantics | Automatic/Publish/MergeDescendants/Exclude、显式 role/name/description/actions、Tooltip 文本作为 Anchor description/HelpText fallback、状态/range/value snapshot 与虚拟 item 元数据 |
+| Runtime | startup root builder、phase-scoped tree updater、Tooltip facade 与 bounded component transaction（含集合 DataSource/metrics/selection/scroll/expansion）、DisplayList/Glyph atlas handoff |
 | Performance | `tina_bench` 已接入 static commit、paint-only dirty、route/capture、100k virtual collection、Image/NineSlice、完整 Component build、Style 与 direct/timeline Motion schema-v1 provisional workload |
 | Product | 独立 20 控件 showcase、product-2d Scene Explorer TreeView、product-3d Asset ListView/Scene TreeView 与 Dark/Light Windows 视觉证据 |
 
@@ -80,7 +80,8 @@ text/text style、visual box/Canvas、enabled、pointer hit policy 与 focus sco
 - `flexContainer`（direction/justifyContent/alignItems/gap）由父节点解释；
 - `flexItem`（grow/shrink/basis/alignSelf）由父容器为当前子节点解释；
 - `placement=Flow` 参与正常 Flex 顺序，`placement=Overlay` 使用 horizontal/vertical alignment、offset 与
-  margin，不参与 Flow 尺寸和顺序；Popup recipe 强制 Overlay，仍走受控 anchor/flip/clamp policy；
+  margin，不参与 Flow 尺寸和顺序；Popup 与 Tooltip recipe 强制 Overlay，但二者是独立内建契约：Popup
+  保留受控 popup anchor/barrier，Tooltip 使用显式 Anchor 关系且永不形成 Popup/Modal barrier；
 - `clipDescendants=false` 是普通容器默认值；启用后，该节点成为 axis-aligned clip owner，普通 in-tree Flow
   与 Overlay 后代沿既有 `descendantClip` 链与 owner 的 world border-box 求交。后代 `worldRect`、布局和
   tree/semantics 顺序不变，committed `effectiveClip` 统一供 hit/paint 使用；viewport-level Popup 继续走专用
@@ -96,9 +97,35 @@ Merge 按 tree 顺序合并 eligible descendant name，Exclude 删除完整语�
 semantics 独立，属性 setter 只 detach 对应 theme binding，`clearOverride()` 从当前 role/theme 恢复；
 Runtime phase facade 同样可切换/query role 和 reset override。
 
-当前 `UISemanticsRole::Image` 已实现。`makeIconElement()` 默认作为装饰内容使用 `Exclude`；icon-only Button
-必须由 Button root 提供显式 name。`makeImageElement()` 只为独立表达信息的图片发布 Image role，并要求
-调用方显式给出 name，不能从 AssetId 或资源文件名推导可访问名称。
+当前 `UISemanticsRole::Image` 已实现。`UIIconContent` 是 Icon 的强类型 authoring profile，包含
+`UIImageSource`、tint、sampling 与 content alignment；`makeIconElement(UIIconContent, layout)` 固定使用
+`UIImageFit::Contain`、居中默认值、`UIPointerHitPolicy::Ignore` 与 `UISemanticsMode::Exclude`。它继续消耗普通
+Image content slot 并复用 ImageQuad/resolver/pin/Texture2D/DisplayList/GPU shader，不是第二套图片、Asset、atlas
+或 GPU pipeline。icon-only Button 必须由 Button root 提供显式 name。`makeImageElement()` 只为独立表达信息的
+图片发布 Image role，并要求调用方显式给出 name，不能从 AssetId 或资源文件名推导可访问名称。
+
+### Tooltip 契约
+
+`makeTooltipElement(text, config, layout)` 创建独立 `Tooltip` 内建契约；它不是把 Dropdown Popup 改名或复用
+Popup 的 focus/input barrier。`UITooltipConfig` 提供 `Auto/Above/Below/Left/Right`、`anchorGap`、
+`viewportMargin`、`initialDelay/reshowDelay/dismissDelay` 与
+`PointerHover/KeyboardFocus/Manual` trigger flags。`setTooltipAnchor(tooltip, anchor)` 建立同 root 的显式双向关系；
+自身锚定、祖先/后代循环、跨 root、stale generation、Tooltip/Popup/Modal/虚拟 row 等不稳定 Anchor 均拒绝。
+一个 Anchor 至多关联一个 Tooltip，一个 Window 同时最多发布一个 Tooltip。
+
+延迟由 `Core::IMonotonicClock`/`MonotonicTimePoint` 推进并复用 `UIContext::setMotionClock()` 的可注入时钟；
+没有第二条 update loop，现有 `commitLayout()` 帧阶段只推进 fixed-capacity 状态。Tooltip 读取**最后一次成功
+提交**的 Anchor `worldRect`：Auto 按可用空间选方向，显式方向空间不足时 flip，最终在 `viewportMargin` 内
+clamp。`UITooltipMetrics` 只报告最后成功 publication 的 `anchorRect/tooltipRect/resolvedPlacement/open`；
+Layout/Hit/Paint/Semantics 或容量失败会回滚本次时钟状态推进并保留旧 snapshot/metrics，后续按绝对时钟重试。
+所有有限非负 delay 均合法，超过 native steady-clock 可表示范围时 deadline 饱和到最大时间点而不溢出。
+
+Tooltip 固定 Ignore hit、Exclude semantics、不可聚焦、不捕获 Pointer，也不建立 Modal/Popup barrier；Pointer Down、
+wheel、文本输入、Anchor disable/Hidden/Collapsed/destroy、Modal scope 改变会关闭，hover/focus 离开应用
+`dismissDelay`，快速切换 Anchor 再应用 `reshowDelay`。Tooltip 文本只作为 Anchor 缺少显式 description 时的
+accessible description/Windows HelpText fallback；不会覆盖作者 description，也不发布 Activate/Focus 等 action。
+直接 `UIContext`、root-scoped `UITreeUpdater` 与 phase-scoped `PrimaryWindowUITreeUpdater` 都提供
+`setTooltipAnchor/clearTooltipAnchor/tooltipAnchor/showTooltip/dismissTooltip/isTooltipOpen/tooltipMetrics`。
 
 多节点业务组件可通过 `UIElementBuildTransaction` 或 Runtime 的 `PrimaryWindowUIBuildTransaction` 声明完整
 `UIComponentBuildBudget`；node、UTF-8 byte、Canvas command、Activate/Toggle/Range/TextInput/Scroll/Select slot
@@ -212,6 +239,8 @@ callback 副作用。
 - ScrollView：wheel、thumb drag、轴向 clamp 与持久 pointer capture；
 - Dropdown/Popup：Pointer/Keyboard/Gamepad 开关与选择，Up/Down/D-pad 导航，Escape/Gamepad East dismiss，
   Tab/Shift+Tab 关闭并退出 Popup scope，外部点击关闭且阻止 click-through；
+- Tooltip：Pointer hover、键盘 focus 或显式 Manual show；initial/reshow/dismiss delay 由可注入 monotonic clock
+  推进；Pointer Down/wheel/text input 与 Anchor/Modal 失效关闭，始终 click-through 且不改变 focus/capture；
 - ListView：Up/Down、PageUp/PageDown、Home/End、Keyboard/Gamepad activate 与 stable-key selection；
 - TreeView：沿用集合导航，并以 Left/Right 折叠、展开或移动到父/子项；
 - ListView/TreeView 的 `rowHeight` 是精确行高，必须容纳当前 `CollectionItem` 单行文本；内部 row 仅保留
@@ -488,6 +517,7 @@ straight-alpha RGBA 在 shader 中 premultiply 后再应用 committed tint，继
 | `ScrollView` | wheel/thumb drag 与 viewport clip | 内容沿 offset 平移并裁剪，追加 track/thumb SolidQuad |
 | `Dropdown` | ComboBox value、Pointer/Keyboard/Gamepad 开关 | Button chrome + 文本 + 下拉指示块 |
 | `Popup` | 独立 List/focus scope、anchor flip/clamp、输入 barrier | 顶层 overlay surface chrome，始终晚于普通树绘制 |
+| `Tooltip` | Anchor help；PointerHover/KeyboardFocus/Manual，不可聚焦、Ignore hit、无 barrier | 独立顶层 overlay surface；基于最后成功 Anchor geometry 做 Auto/flip/clamp，最后成功 metrics 与整套 snapshot 原子发布 |
 | `DropdownItem` | ListItem selection 与焦点 | Button chrome + 选中背景 + 文本 |
 | `ListView` | 虚拟化 List/ListItem、键盘/手柄选择与滚动 | 固定 row pool + 选中/hover chrome + scrollbar |
 | `TreeView` | 虚拟化 Tree/TreeItem、层级展开/折叠 | 固定 row pool + disclosure/indent + 选中 chrome + scrollbar |
@@ -511,7 +541,7 @@ retained 状态并标记必要的 dirty 类别。
   不再保留“所有按钮默认 Primary”的旧视觉行为；
 - `setStyleRole()` 原子切换 recipe，保留显式 local override；ButtonPrimary/ButtonDanger/ButtonTonal/
   ButtonOutlined/ButtonText/SegmentedButton、四级 Text、
-  Panel/Modal/Popup surface 与全部现有控件 role 均有 recipe；
+  Panel/Modal/Popup/Tooltip surface 与全部现有控件 role 均有 recipe；
 - Runtime 游戏通过 phase-scoped `PrimaryWindowUITreeUpdater::productTheme()` / `setProductTheme()` 换肤，
   不取得裸 `UIContext`；
 - 默认 panel/button 分别使用 6px/4px 统一圆角；普通 PanelSurface、Primary 与 Tonal 使用平面填充，
@@ -707,6 +737,7 @@ Back/Confirm/Menu 之外的任意 action-id 仍属于独立后续扩展。
 | `UI-MOTION-002` | Done；bounded layout whitelist、跨 direct/timeline candidate transaction 与两个 timeline workload 已落地；2026-08-16 定向 gate 为 UI 28/28、Runtime facade 1/1、bench unit 10/10，paint/layout seed 0/1/2 均通过且 allocation delta=0；固定机 hard gate 仍由 `PERF-002` 跟踪 |
 | `UI-PAINT-002-A` | Done；`UILogicalCornerRadii` 已贯通 Retained box/Canvas `SolidRect`、committed paint、border/inset/shadow、UI→Render 投影、checksum 与 Showcase consumer；2026-08-17 Windows gate 为 UI 672/672、Runtime UI 130/130、UI-Render 28/28、bgfx 111/111、bench 10/10，Showcase 120 帧 exit 0。rounded/stencil 子树 clip、backdrop/blur、per-corner Motion 与跨 GPU/DPI golden 仍由 `UI-PAINT-002`/`UI-003` 后置跟踪 |
 | `UI-FLOW-001` | Done：固定容量 Activatable Screen/Layer Stack、Back/Confirm/Menu Action Router、16 槽本地用户、完整 generation Gamepad assignment、per-user 设备 revision、断连/reset 清理与 2D 产品接入已落地 |
+| `UI-TOOLTIP-001` | Done：独立 Tooltip contract、同 root Anchor 关系、Hover/Focus/Manual + monotonic delay、Auto/flip/clamp、单 Window 独占、Ignore hit、输入/可见性/Modal dismissal、committed metrics、失败回滚、accessible description/HelpText fallback 与 Runtime phase facade 已落地 |
 | `UI-BEHAVIOR-SPI-001` | Deferred：只有标准 Behavior + routed listener 存在有证据的表达缺口时才评估 startup-only 高级 SPI |
 | `UI-002-LINUX` | Linux AT-SPI adapter 与真实辅助技术验收（Deferred，不阻塞 Windows UI-002） |
 | `SDK-001` | package/consumer gate 已落地；ADR 0024 已 Accepted，pre-1.0 strict exact-version 正反 probe（含 tweak/range 拒绝）已纳入 Windows gate。正式 supported ABI tuple baseline/object probe 仍是 release checklist |

@@ -21,6 +21,7 @@
 #include <tina/ui/UIFocus.hpp>
 #include <tina/ui/UIFlow.hpp>
 #include <tina/ui/UIHitTest.hpp>
+#include <tina/ui/UIIcon.hpp>
 #include <tina/ui/UIImage.hpp>
 #include <tina/ui/UIImageSource.hpp>
 #include <tina/ui/UILayout.hpp>
@@ -39,6 +40,7 @@
 #include <tina/ui/UIText.hpp>
 #include <tina/ui/UITextEdit.hpp>
 #include <tina/ui/UITheme.hpp>
+#include <tina/ui/UITooltip.hpp>
 #include <tina/ui/UITreeView.hpp>
 #include <tina/ui/text/UIGlyphAtlas.hpp>
 #include <tina/ui/text/UITextRasterizer.hpp>

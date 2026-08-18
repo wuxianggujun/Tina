@@ -302,7 +302,7 @@ StyleRole/box/Canvas、semantics、enabled、pointer/focus policy 与集合配�
 `makeListViewElement()` 等是内建控件的官方 recipes。旧 `createPanel/createButton/createListView/...`
 成员入口已删除，不提供 compatibility alias。当前内建行为覆盖 Root、Panel、Modal、Label、Button、
 Checkbox、Slider、ProgressBar、RadioButton、TextEdit（默认单行；可选多行）、ScrollView，以及
-Dropdown/Popup/DropdownItem、ListView/TreeView。
+Dropdown/Popup/Tooltip/DropdownItem、ListView/TreeView。
 
 `UILayoutStyle` 将父容器 `flexContainer`、子项 `flexItem` 与 `Flow/Overlay` placement 分开；Overlay 使用
 alignment + offset，Px offset 可为有限负值，Percent offset 范围为 `-100..100`，以表达受父级 clip 的
@@ -311,7 +311,8 @@ alignment + offset，Px offset 可为有限负值，Percent offset 范围为 `-1
 committed `effectiveClip` 与 owner 的 world border-box 求交，但不改后代 `worldRect`，不建立 rounded clip，
 也不额外改变 owner 自身的 paint clip。hit 与 paint 读取同一 committed clip；可见性、tree/semantics 顺序和
 authored semantics `worldRect` 不变。ScrollView/ListView/TreeView viewport clip 复用同一传播机制；Popup
-作为 viewport-level overlay 继续使用专用 anchor/clip policy，不受普通祖先 clip owner 限制。
+作为 viewport-level overlay 继续使用专用 anchor/clip policy，不受普通祖先 clip owner 限制。Tooltip 同样
+强制 Overlay，但使用独立的显式 Anchor/placement contract，不复用 Popup 的 focus、input 或 barrier 状态机。
 控件内部文字由独立 `UIContentAlignment` 定位，layout snapshot 发布
 `UICommittedContentPlacement`，paint、caret/selection 与 pointer-to-text mapping 共用该 committed origin。
 `UITextOverflow::{Clip,Ellipsis}` 是独立于 `UITextStyle` 的节点 authoring intent；`Ellipsis` 只在 paint 阶段按
@@ -329,7 +330,7 @@ shaping 不在当前契约内。多行配置容量不足或 visual-row 构建失
 
 游戏通过 Runtime phase facade 创建/更新主窗口 root，不获得裸 UIContext。Text 使用 strict UTF-8，
 descriptor 的 `string_view` 在创建时复制到固定容量 storage，失败回滚本次节点；
-`PrimaryWindowUITreeUpdater` 暴露同一组 ScrollView/Dropdown/Popup/ListView/TreeView phase-scoped
+`PrimaryWindowUITreeUpdater` 暴露同一组 ScrollView/Dropdown/Popup/Tooltip/ListView/TreeView phase-scoped
 mutation/query，包括集合 DataSource、metrics、selection、scroll 与 Tree expansion；
 `setTextOverflow()/textOverflow()` 也通过相同 phase facade 暴露；
 `setProductTheme()` 可事务式更新既有控件仍继承的产品 chrome；单节点
@@ -368,10 +369,22 @@ stream reset 清除全部 assignment/latch。Layer/Screen 栈、focus 与 Modal 
 Back/Confirm/Menu 之外的任意 action-id。
 
 `UIImageSource` 只保存 Texture2D `AssetId`、source pixel rect、texture pixel extent 与 intrinsic logical size；
-`UIImageContent` 增加 Fill/Contain/Cover/None、alignment、tint 和 Linear/Nearest sampling。
-`makeImageElement(image, accessibleName)` 发布 `UISemanticsRole::Image`，`makeIconElement(image)` 是 decorative
-Image profile，不增加 Widget/Behavior/Asset kind。Runtime 的 `bindImageResolver()` 返回 move-only root-scoped
+`UIImageContent` 增加 Fill/Contain/Cover/None、alignment、tint 和 Linear/Nearest sampling。`UIIconContent` 是
+强类型 authoring profile，至少包含 `UIImageSource`、tint、sampling 与 content alignment；
+`makeIconElement(UIIconContent, layout)` 固定 `Contain`、居中、`UIPointerHitPolicy::Ignore` 和
+`UISemanticsMode::Exclude`。`makeImageElement(image, accessibleName)` 发布 `UISemanticsRole::Image`，不再提供
+要求业务直接传 `UIImageContent` 的 Icon 入口。UIIcon 仍是普通 Image content，不增加 Widget/Behavior/Asset kind。
+Runtime 的 `bindImageResolver()` 返回 move-only root-scoped
 registration；frame build 按 `(root, AssetId)` 去重 resolve/pin，不在 UI commit 中同步 I/O。
+
+Tooltip authoring 使用 `UITooltipConfig` 与 `makeTooltipElement(text, config, layout)`。配置包含
+`UITooltipPlacement::{Auto,Above,Below,Left,Right}`、anchor gap/viewport margin、三种 monotonic delay 与
+`UITooltipTrigger::{PointerHover,KeyboardFocus,Manual}`。`setTooltipAnchor()` 只接受同 root 的 live、非循环、
+兼容 Anchor；Tooltip 自身永远 Ignore hit、不可聚焦、Exclude semantics、无 Popup/Modal barrier。它读取最后一次
+成功提交的 Anchor geometry 做 Auto/flip/clamp，并以 `UITooltipMetrics` 发布 committed anchor/tooltip rect、方向和
+open 状态；失败 commit 回滚 clock-driven transient state 并保留旧 snapshot/metrics。Tooltip 文本只在 Anchor
+没有显式 description 时作为 accessible description/HelpText fallback。`UIContext`、`UITreeUpdater` 和 Runtime
+phase facade 均提供 `setTooltipAnchor/clearTooltipAnchor/tooltipAnchor/showTooltip/dismissTooltip/isTooltipOpen/tooltipMetrics`。
 
 `UISemanticsDescriptor` 支持 Automatic/Publish/MergeDescendants/Exclude、显式 role/name/description/actions；
 committed semantics 使用最近 published ancestor，显式空 name 不回退 content。`UIStyleRoleId` 与 behavior/
@@ -428,7 +441,8 @@ ABI”。目标边界见 [UI 框架设计](ui-framework.md)和 Accepted
 [ADR 0026](adr/0026-ui-keyframe-timeline-and-layout-animation.md)。正式外部使用仍以 `SDK-001` 的安装 package 与
 consumer gate 为准；这些当前公开声明不代表跨发行版正式 ABI 已冻结。
 
-当前图片边界已按 ADR 0023 落地：Icon 是 Image 的 atlas source/tint/default-layout recipe，Image/Icon 均
+当前图片边界已按 ADR 0023 落地：`UIIconContent`/Icon 是 Image 的 atlas source/tint/default-layout 强类型
+authoring profile，Image/Icon 均
 落到同一 RGBA ImageQuad；NineSlice 复用同一图片源并在 DisplayList 前展开，没有专用 backend command。
 普通 Image bounds 保持 cover 投影；NineSlice committed patch 使用
 `UICommittedImageBoundsProjection::SharedBoundary` 并显式携带 authored half-open right/bottom cut，Integration

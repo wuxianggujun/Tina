@@ -34,7 +34,7 @@ struct ProductChrome final {
 
 [[nodiscard]] constexpr bool isValidStyleRole(UIStyleRoleId role) noexcept
 {
-    return role >= UIStyleRoleId::None && role <= UIStyleRoleId::SegmentedButton;
+    return role >= UIStyleRoleId::None && role <= UIStyleRoleId::TooltipSurface;
 }
 
 [[nodiscard]] constexpr u16 defaultThemeBindingsFor(UIStyleRoleId role) noexcept
@@ -48,6 +48,8 @@ struct ProductChrome final {
     case UIStyleRoleId::ModalSurface:
     case UIStyleRoleId::PopupSurface:
         return ThemeBindingBoxPaint;
+    case UIStyleRoleId::TooltipSurface:
+        return ThemeBindingBoxPaint | ThemeBindingTextStyle;
     case UIStyleRoleId::TextBody:
     case UIStyleRoleId::TextTitle:
     case UIStyleRoleId::TextSecondary:

@@ -617,10 +617,9 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
         !status) {
         return status;
     }
-    const UI::UIImageContent primaryIcon{
+    const UI::UIIconContent primaryIcon{
         .source = showcaseAtlasSource({.x = 0, .y = 0, .width = 16, .height = 16},
                                       {.width = 16.0F, .height = 16.0F}),
-        .fit = UI::UIImageFit::Contain,
         .tint = UI::rgba8(255, 255, 255),
         .sampling = UI::UIImageSampling::Nearest,
     };
@@ -653,10 +652,9 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseTheme ini
         !status) {
         return status;
     }
-    const UI::UIImageContent destructiveIcon{
+    const UI::UIIconContent destructiveIcon{
         .source = showcaseAtlasSource({.x = 16, .y = 0, .width = 16, .height = 16},
                                       {.width = 16.0F, .height = 16.0F}),
-        .fit = UI::UIImageFit::Contain,
         .tint = UI::rgba8(255, 255, 255),
         .sampling = UI::UIImageSampling::Nearest,
     };

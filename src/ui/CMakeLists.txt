@@ -31,6 +31,7 @@ set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIEventRouting.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIFocus.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIHitTest.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UIIcon.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIImage.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIImageSource.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UILayout.hpp
@@ -38,6 +39,7 @@ set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UITheme.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIText.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UITextEdit.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UITooltip.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/text/UIGlyphAtlas.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/text/UITextRasterizer.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/InputRouting.hpp

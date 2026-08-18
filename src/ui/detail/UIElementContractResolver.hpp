@@ -90,6 +90,7 @@ defaultBehaviorsForKind(BuiltinElementKind kind) noexcept
     case BuiltinElementKind::Root:
     case BuiltinElementKind::Panel:
     case BuiltinElementKind::Label:
+    case BuiltinElementKind::Tooltip:
         return UIElementBehavior::None;
     }
     return UIElementBehavior::None;
@@ -130,6 +131,8 @@ defaultStyleRoleForKind(BuiltinElementKind kind) noexcept
         return UIStyleRoleId::ListView;
     case BuiltinElementKind::TreeView:
         return UIStyleRoleId::TreeView;
+    case BuiltinElementKind::Tooltip:
+        return UIStyleRoleId::TooltipSurface;
     case BuiltinElementKind::Root:
     case BuiltinElementKind::Panel:
         return UIStyleRoleId::None;
@@ -146,6 +149,9 @@ defaultSemanticsForKind(BuiltinElementKind kind) noexcept
     case BuiltinElementKind::Root:
     case BuiltinElementKind::Panel:
         defaults.mode = UISemanticsMode::Automatic;
+        break;
+    case BuiltinElementKind::Tooltip:
+        defaults.mode = UISemanticsMode::Exclude;
         break;
     case BuiltinElementKind::Label:
         defaults.role = UISemanticsRole::Label;

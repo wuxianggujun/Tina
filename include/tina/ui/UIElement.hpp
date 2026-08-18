@@ -5,6 +5,7 @@
 #include <tina/ui/UIContent.hpp>
 #include <tina/ui/UIFocus.hpp>
 #include <tina/ui/UIHitTest.hpp>
+#include <tina/ui/UIIcon.hpp>
 #include <tina/ui/UIImage.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UIListView.hpp>
@@ -13,6 +14,7 @@
 #include <tina/ui/UIStyle.hpp>
 #include <tina/ui/UIText.hpp>
 #include <tina/ui/UITextEdit.hpp>
+#include <tina/ui/UITooltip.hpp>
 #include <tina/ui/UITreeView.hpp>
 
 #include <optional>
@@ -39,6 +41,7 @@ struct UIElementDescriptor final {
     UILayoutStyle layout{};
     std::optional<std::string_view> text{};
     std::optional<UIImageContent> image{};
+    std::optional<UITooltipConfig> tooltip{};
     std::optional<UITextStyle> textStyle{};
     UIContentAlignment contentAlignment{};
     UIElementVisual visual{};
@@ -71,9 +74,15 @@ struct UIElementDescriptor final {
 }
 
 [[nodiscard]] constexpr UIElementDescriptor makeIconElement(
-    UIImageContent image, UILayoutStyle layout = {}) noexcept
+    UIIconContent icon, UILayoutStyle layout = {}) noexcept
 {
-    image.fit = UIImageFit::Contain;
+    const UIImageContent image{
+        .source = icon.source,
+        .fit = UIImageFit::Contain,
+        .alignment = icon.alignment,
+        .tint = icon.tint,
+        .sampling = icon.sampling,
+    };
     return UIElementDescriptor{
         .layout = layout,
         .image = image,
@@ -81,6 +90,29 @@ struct UIElementDescriptor final {
         .semantics = {
             .mode = UISemanticsMode::Exclude,
         },
+        .pointerHitPolicy = UIPointerHitPolicy::Ignore,
+    };
+}
+
+[[nodiscard]] constexpr UIElementDescriptor makeTooltipElement(
+    std::string_view text, UITooltipConfig config = {},
+    UILayoutStyle layout = {}) noexcept
+{
+    layout.placement = UILayoutPlacement::Overlay;
+    if (layout.padding == UIEdgeSpacing{})
+    {
+        layout.padding = UIEdgeSpacing::HorizontalVertical(8.0F, 4.0F);
+    }
+    return UIElementDescriptor{
+        .layout = layout,
+        .text = text,
+        .tooltip = config,
+        .contentAlignment = {
+            .horizontal = UIAxisAlignment::Start,
+            .vertical = UIAxisAlignment::Center,
+        },
+        .visual = {.styleRole = UIStyleRoleId::TooltipSurface},
+        .semantics = {.mode = UISemanticsMode::Exclude},
         .pointerHitPolicy = UIPointerHitPolicy::Ignore,
     };
 }

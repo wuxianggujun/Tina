@@ -1330,6 +1330,73 @@ Core::Result<UI::UIPopupMetrics> PrimaryWindowUITreeUpdater::popupMetrics(UI::UI
     return m_state->popupMetrics(m_epoch, m_phase, m_updater, popup);
 }
 
+Core::Status PrimaryWindowUITreeUpdater::setTooltipAnchor(UI::UINodeId tooltip,
+                                                          UI::UINodeId anchor)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setTooltipAnchor");
+    }
+    return m_state->setTooltipAnchor(m_epoch, m_phase, m_updater, tooltip, anchor);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::clearTooltipAnchor(UI::UINodeId tooltip)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::clearTooltipAnchor");
+    }
+    return m_state->clearTooltipAnchor(m_epoch, m_phase, m_updater, tooltip);
+}
+
+Core::Result<UI::UINodeId>
+PrimaryWindowUITreeUpdater::tooltipAnchor(UI::UINodeId tooltip) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UINodeId>("PrimaryWindowUITreeUpdater::tooltipAnchor");
+    }
+    return m_state->tooltipAnchor(m_epoch, m_phase, m_updater, tooltip);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::showTooltip(UI::UINodeId tooltip)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::showTooltip");
+    }
+    return m_state->showTooltip(m_epoch, m_phase, m_updater, tooltip);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::dismissTooltip(UI::UINodeId tooltip)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::dismissTooltip");
+    }
+    return m_state->dismissTooltip(m_epoch, m_phase, m_updater, tooltip);
+}
+
+Core::Result<bool> PrimaryWindowUITreeUpdater::isTooltipOpen(UI::UINodeId tooltip) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<bool>("PrimaryWindowUITreeUpdater::isTooltipOpen");
+    }
+    return m_state->isTooltipOpen(m_epoch, m_phase, m_updater, tooltip);
+}
+
+Core::Result<UI::UITooltipMetrics>
+PrimaryWindowUITreeUpdater::tooltipMetrics(UI::UINodeId tooltip) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UITooltipMetrics>(
+            "PrimaryWindowUITreeUpdater::tooltipMetrics");
+    }
+    return m_state->tooltipMetrics(m_epoch, m_phase, m_updater, tooltip);
+}
+
 Core::Status PrimaryWindowUITreeUpdater::setDropdownOpen(UI::UINodeId dropdown, bool open)
 {
     if (m_state == nullptr)

@@ -345,6 +345,24 @@ class PrimaryWindowUICapabilityState final {
                                                 const UI::UITreeUpdater& updater, UI::UINodeId popup);
     [[nodiscard]] Core::Result<UI::UIPopupMetrics> popupMetrics(u64 epoch, PrimaryWindowUIPhase phase,
                                                                 const UI::UITreeUpdater& updater, UI::UINodeId popup);
+    [[nodiscard]] Core::Status setTooltipAnchor(u64 epoch, PrimaryWindowUIPhase phase,
+                                                UI::UITreeUpdater& updater, UI::UINodeId tooltip,
+                                                UI::UINodeId anchor);
+    [[nodiscard]] Core::Status clearTooltipAnchor(u64 epoch, PrimaryWindowUIPhase phase,
+                                                  UI::UITreeUpdater& updater, UI::UINodeId tooltip);
+    [[nodiscard]] Core::Result<UI::UINodeId> tooltipAnchor(
+        u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+        UI::UINodeId tooltip);
+    [[nodiscard]] Core::Status showTooltip(u64 epoch, PrimaryWindowUIPhase phase,
+                                           UI::UITreeUpdater& updater, UI::UINodeId tooltip);
+    [[nodiscard]] Core::Status dismissTooltip(u64 epoch, PrimaryWindowUIPhase phase,
+                                              UI::UITreeUpdater& updater, UI::UINodeId tooltip);
+    [[nodiscard]] Core::Result<bool> isTooltipOpen(
+        u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+        UI::UINodeId tooltip);
+    [[nodiscard]] Core::Result<UI::UITooltipMetrics> tooltipMetrics(
+        u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+        UI::UINodeId tooltip);
     [[nodiscard]] Core::Status setDropdownOpen(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                               UI::UINodeId dropdown, bool open);
     [[nodiscard]] Core::Result<bool> isDropdownOpen(u64 epoch, PrimaryWindowUIPhase phase,

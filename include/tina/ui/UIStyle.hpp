@@ -36,6 +36,7 @@ enum class UIStyleRoleId : u8 {
     ButtonOutlined,
     ButtonText,
     SegmentedButton,
+    TooltipSurface,
 };
 
 // Startup-registered stylesheet identities. Zero is invalid so a default

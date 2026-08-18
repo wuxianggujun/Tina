@@ -46,7 +46,8 @@ UI-STUDIO-DESIGN 的代码与自动证据已固化，剩余 state-feedback 视�
 | SDK-001 | Done：可安装 Tina Game SDK、版本化 CMake package 与外部 `find_package` consumer gate；ADR 0024 Accepted，pre-1.0 strict exact-version 正反 probe 已接入 |
 | UI-FLOW-001 | Done；固定容量 Layer/Screen 栈、Back/Confirm/Menu Action Router、16 槽本地用户、Gamepad assignment、per-user 设备 revision 与 2D 产品已闭环 |
 | UI-COMPONENT-001 | Done；标准 Behavior 独立 side store、phase-scoped bounded transaction、全池 reservation/counter 与 `ui_component_build_v1` 已落地 |
-| UI-IMAGE-001 | Done；A Image/Icon、B NineSlice 与 C 产品/失效/尺寸/`ui_image_nineslice_v1` 性能证据均已关闭；Icon 复用 Image，不另建 Widget/Asset/atlas 系统 |
+| UI-IMAGE-001 | Done；A Image/强类型 `UIIconContent`、B NineSlice 与 C 产品/失效/尺寸/`ui_image_nineslice_v1` 性能证据均已关闭；UIIcon 只在 authoring/语义层区分，复用 Image storage/资源链/atlas/GPU pipeline，不另建 Widget/Asset 系统 |
+| UI-TOOLTIP-001 | Done；独立 Tooltip contract、显式 Anchor、Hover/Focus/Manual monotonic delay、Auto/flip/clamp、单 Window 独占、Ignore hit、输入/Anchor/Modal dismissal、committed metrics/失败回滚、HelpText fallback 与 Runtime facade 已闭环 |
 | UI-STYLE-001 | Done；StyleClass/ColorToken、reverse-dependency、imageTint、dirty metadata、showcase Integration、`RunUiStyleVisualGate.ps1` 已落地 |
 | UI-MOTION-001 | Done；paint-only color/opacity/radius/visual-offset + reduced-motion + Style BackgroundColor reservation/activation + `ui_motion_v1` |
 | METRICS-001 | Blocked：Runtime Metrics 固定容量 counter registry 首切片；[ADR 0027](adr/0027-runtime-metrics-registry.md) 为 Proposed，待 maintainer 确认关键决策（D1-D8）后开工，确认前不建立占位 API |
@@ -79,7 +80,7 @@ UI-FLOW-001 Done
 SDK-001 (independent packaging lane; does not wait for UI-FLOW-001)
 ```
 
-`UI-IMAGE-001` 与 `UI-COMPONENT-001` 两条无直接依赖的 lane 均已完成：前者关闭 Image/Icon/NineSlice
+`UI-IMAGE-001` 与 `UI-COMPONENT-001` 两条无直接依赖的 lane 均已完成：前者关闭 Image/强类型 UIIcon/NineSlice
 产品与性能证据，后者关闭完整 component reservation/counter 与 `ui_component_build_v1`。汇合后的
 `UI-STYLE-001` 与 `UI-MOTION-001` 也已完成：stylesheet imageTint、属性 dirty metadata、Integration/Visual
 门禁、paint-only Motion 与 `ui_motion_v1` 均已落地。
