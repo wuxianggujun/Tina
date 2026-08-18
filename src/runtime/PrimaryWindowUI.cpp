@@ -721,6 +721,25 @@ Core::Status PrimaryWindowUITreeUpdater::setTextStyle(UI::UINodeId node, const U
     return m_state->setTextStyle(m_epoch, m_phase, m_updater, node, style);
 }
 
+Core::Status PrimaryWindowUITreeUpdater::setTextOverflow(UI::UINodeId node,
+                                                         UI::UITextOverflow overflow)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setTextOverflow");
+    }
+    return m_state->setTextOverflow(m_epoch, m_phase, m_updater, node, overflow);
+}
+
+Core::Result<UI::UITextOverflow> PrimaryWindowUITreeUpdater::textOverflow(UI::UINodeId node)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UITextOverflow>("PrimaryWindowUITreeUpdater::textOverflow");
+    }
+    return m_state->textOverflow(m_epoch, m_phase, m_updater, node);
+}
+
 Core::Status PrimaryWindowUITreeUpdater::setContentAlignment(UI::UINodeId node,
                                                               UI::UIContentAlignment alignment)
 {

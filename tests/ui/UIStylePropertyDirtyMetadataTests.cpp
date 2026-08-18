@@ -61,6 +61,18 @@ TEST(UIStylePropertyDirtyMetadataTests, LayoutStyleDirtiesLayoutNotPaint)
     EXPECT_TRUE(UI::stylePropertyDirtiesSemantics(UIStylePropertyKind::LayoutStyle));
 }
 
+TEST(UIStylePropertyDirtyMetadataTests, TextOverflowIsPaintOnly)
+{
+    constexpr UIDirty flags = UI::dirtyFlagsForStyleProperty(UIStylePropertyKind::TextOverflow);
+    EXPECT_TRUE(UI::stylePropertyDirtiesPaint(UIStylePropertyKind::TextOverflow));
+    // Truncation reads the already committed content box, so it must not
+    // re-enter Measure/Arrange, and the accessibility name keeps the full text.
+    EXPECT_FALSE(UI::stylePropertyDirtiesLayout(UIStylePropertyKind::TextOverflow));
+    EXPECT_FALSE(UI::stylePropertyDirtiesHit(UIStylePropertyKind::TextOverflow));
+    EXPECT_FALSE(UI::stylePropertyDirtiesSemantics(UIStylePropertyKind::TextOverflow));
+    EXPECT_EQ(flags, UIDirty::Paint);
+}
+
 TEST(UIStylePropertyDirtyMetadataTests, StyleOverrideMapsPaintChromeAndTextStyle)
 {
     EXPECT_EQ(UI::dirtyFlagsForStyleOverride(UIStyleOverride::BoxPaint),

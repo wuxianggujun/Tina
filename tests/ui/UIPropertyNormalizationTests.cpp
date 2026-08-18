@@ -300,14 +300,45 @@ TEST(UIPropertyNormalizationTests, CollectionStylesRejectNonFiniteMetrics)
               UI::UIErrorCode::InvalidControlValue);
 }
 
+TEST(UIPropertyNormalizationTests, ListViewStyleRejectsUnknownRowTextOverflow)
+{
+    UI::UIListViewStyle style{};
+    style.rowTextOverflow = static_cast<UI::UITextOverflow>(7);
+
+    auto rejected = UI::Detail::normalizeListViewStyle(style);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidControlValue);
+}
+
 TEST(UIPropertyNormalizationTests, ThemeRejectsNonFiniteMetrics)
 {
     UI::UITheme theme = UI::makeDefaultProductTheme();
-    theme.buttonTextSize =
+    theme.typography.control =
         (std::numeric_limits<float>::quiet_NaN)();
     Core::Status status = UI::Detail::validateProductTheme(theme);
     ASSERT_FALSE(status.has_value());
     EXPECT_EQ(status.error().code, UI::UIErrorCode::InvalidTheme);
+}
+
+TEST(UIPropertyNormalizationTests, ThemeRejectsNonPositiveTypographyLevels)
+{
+    // Every named ramp level is validated, not just the three the control
+    // chrome factories happen to read today.
+    const auto rejects = [](auto assign) {
+        UI::UITheme theme = UI::makeDefaultProductTheme();
+        assign(theme.typography);
+        const Core::Status status = UI::Detail::validateProductTheme(theme);
+        return !status.has_value() && status.error().code == UI::UIErrorCode::InvalidTheme;
+    };
+
+    EXPECT_TRUE(rejects([](UI::UITypographyScale& scale) { scale.display = 0.0F; }));
+    EXPECT_TRUE(rejects([](UI::UITypographyScale& scale) { scale.title = -1.0F; }));
+    EXPECT_TRUE(rejects([](UI::UITypographyScale& scale) { scale.section = 0.0F; }));
+    EXPECT_TRUE(rejects([](UI::UITypographyScale& scale) { scale.body = -2.0F; }));
+    EXPECT_TRUE(rejects([](UI::UITypographyScale& scale) {
+        scale.caption = (std::numeric_limits<float>::infinity)();
+    }));
+    EXPECT_TRUE(UI::Detail::validateProductTheme(UI::makeDefaultProductTheme()).has_value());
 }
 
 } // namespace

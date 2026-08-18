@@ -117,6 +117,8 @@ add_library(tina_ui STATIC
     detail/UITextEditPaintEmitter.cpp
     detail/UITextPaintEmitter.hpp
     detail/UITextPaintEmitter.cpp
+    detail/UITextTruncation.hpp
+    detail/UITextTruncation.cpp
     detail/UIWidgetTraits.hpp
     detail/UIWidgetStateModels.hpp
     UIText.cpp

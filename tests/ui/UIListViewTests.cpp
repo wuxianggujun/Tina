@@ -698,5 +698,54 @@ TEST_F(UIListViewTest, ProductChromeKeepsConsecutiveRowTextInsideRequestedBounds
     EXPECT_GT(secondRowTextPaintCount, 0U);
 }
 
+TEST_F(UIListViewTest, RowEllipsisTruncatesPaintButKeepsTheFullAccessibleLabel)
+{
+    constexpr u32 RowCapacity = 4;
+    auto context = createContext(window, ContextNodeCapacity);
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    auto updater = createUpdater(*context, root);
+    ListDataSource source{.count = 1, .label = "ABCDEFGH"};
+
+    const UI::UINodeId listView = *updater.createElement(
+        root.rootNodeId(),
+        UI::makeListViewElement({.materializedItemCapacity = RowCapacity}));
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(50.0F, 40.0F)));
+    assertOk(updater.setLayoutStyle(listView, fixedSize(50.0F, 40.0F)));
+    assertOk(updater.setListViewStyle(
+        listView,
+        {
+            .rowHeight = 24.0F,
+            .overscanRows = 0,
+            .scrollBarVisibility = UI::UIScrollBarVisibility::Hidden,
+            .wheelStep = 24.0F,
+            .rowTextOverflow = UI::UITextOverflow::Ellipsis,
+        }));
+    assertOk(updater.setListViewDataSource(listView, source.view()));
+    assertOk(context->commitLayout({.width = 50.0F, .height = 40.0F}));
+
+    const UI::UISemanticsEntry* row = findVirtualItem(context->committedSemantics(), 0);
+    ASSERT_NE(row, nullptr);
+    EXPECT_EQ(row->name, source.label);
+    const auto rowOverflow = updater.textOverflow(row->node);
+    ASSERT_TRUE(rowOverflow.has_value())
+        << (rowOverflow ? "" : rowOverflow.error().message);
+    EXPECT_EQ(*rowOverflow, UI::UITextOverflow::Ellipsis);
+    const auto listStyle = updater.listViewStyle(listView);
+    ASSERT_TRUE(listStyle.has_value()) << (listStyle ? "" : listStyle.error().message);
+    EXPECT_EQ(listStyle->rowTextOverflow, UI::UITextOverflow::Ellipsis);
+
+    // The 50px row leaves a 34px content box after the built-in 8px horizontal
+    // padding. At 9.6px per placeholder glyph, two leading glyphs plus U+2026 fit.
+    const UI::UIPremultipliedRgba8Color textColor =
+        UI::premultiply(UI::UITextStyle{}.color);
+    const usize textPaintCount = static_cast<usize>(std::ranges::count_if(
+        context->committedPaint().entries(),
+        [&](const UI::UICommittedPaintEntry& entry) noexcept {
+            return entry.node == row->node && entry.solidFill == textColor;
+        }));
+    EXPECT_EQ(textPaintCount, 3U);
+}
+
 } // namespace
 } // namespace Tina::Tests

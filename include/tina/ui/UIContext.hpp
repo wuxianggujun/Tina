@@ -351,6 +351,12 @@ class UITreeUpdater final {
     // Glyph raster and FreeType remain out of this API.
     [[nodiscard]] Core::Status setText(UINodeId node, std::string_view utf8);
     [[nodiscard]] Core::Status setTextStyle(UINodeId node, const UITextStyle& style);
+    // Paint-only single-line overflow policy. Ellipsis drops trailing grapheme
+    // clusters that do not fit the committed content box and appends
+    // UITextEllipsisUtf8. Intrinsic measure keeps reporting the untruncated
+    // size and the accessibility name keeps the full text.
+    [[nodiscard]] Core::Status setTextOverflow(UINodeId node, UITextOverflow overflow);
+    [[nodiscard]] Core::Result<UITextOverflow> textOverflow(UINodeId node);
     [[nodiscard]] Core::Status setContentAlignment(UINodeId node, UIContentAlignment alignment);
     [[nodiscard]] Core::Result<std::string_view> text(UINodeId node);
     [[nodiscard]] Core::Result<UITextStyle> textStyle(UINodeId node);
@@ -812,6 +818,13 @@ class UIContext final {
     [[nodiscard]] Core::Result<UIButtonPaint> buttonPaintFromUpdater(UINodeId updaterRoot, UINodeId button) const;
     [[nodiscard]] Core::Status setTextFromUpdater(UINodeId updaterRoot, UINodeId node, std::string_view utf8);
     [[nodiscard]] Core::Status setTextStyleFromUpdater(UINodeId updaterRoot, UINodeId node, const UITextStyle& style);
+    // Paint-only single-line overflow policy. Intrinsic measure keeps reporting
+    // the untruncated size and the accessibility name keeps the full text, so
+    // this never dirties Measure/Arrange/Hit/Semantics.
+    [[nodiscard]] Core::Status setTextOverflowFromUpdater(UINodeId updaterRoot, UINodeId node,
+                                                          UITextOverflow overflow);
+    [[nodiscard]] Core::Result<UITextOverflow> textOverflowFromUpdater(UINodeId updaterRoot,
+                                                                       UINodeId node);
     [[nodiscard]] Core::Status setContentAlignmentFromUpdater(UINodeId updaterRoot, UINodeId node,
                                                               UIContentAlignment alignment);
     [[nodiscard]] Core::Result<std::string_view> textFromUpdater(UINodeId updaterRoot, UINodeId node);

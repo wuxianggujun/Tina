@@ -272,6 +272,11 @@ auto EditorWorkspaceState::buildDocumentTabsUi(UiBuildContext& ui, UI::UINodeId 
             !status) {
             return status;
         }
+        if (auto status = ui.tree.setTextOverflow(documentTabButtons_[index],
+                                                  UI::UITextOverflow::Ellipsis);
+            !status) {
+            return status;
+        }
     }
     if (auto status = storeNode(ui.createButton(documentTabsBar, "Close",
                                              fixedSize(58.0F, 28.0F), false),
@@ -519,6 +524,7 @@ auto EditorWorkspaceState::buildLeftDockUi(UiBuildContext& ui, UI::UINodeId pare
                 .overscanRows = 1,
                 .scrollBarVisibility = UI::UIScrollBarVisibility::Auto,
                 .wheelStep = 32.0F,
+                .rowTextOverflow = UI::UITextOverflow::Ellipsis,
             });
         !status) {
         return status;
@@ -1797,6 +1803,10 @@ auto EditorWorkspaceState::buildStatusBarUi(UiBuildContext& ui, UI::UINodeId par
         !status) {
         return status;
     }
+    if (auto status = ui.tree.setTextOverflow(statusDocument_, UI::UITextOverflow::Ellipsis);
+        !status) {
+        return status;
+    }
     if (auto status = storeNode(ui.createLabel(statusBar, {}, statusSegmentStyle, ui.secondaryText),
                                 statusPreview_);
         !status) {
@@ -2425,9 +2435,7 @@ auto EditorWorkspaceState::onEnter(Tina::GameStateEnterContext& context) -> Tina
     }
 
     UI::UITheme productTheme = UI::makeDefaultProductTheme();
-    productTheme.buttonTextSize = EditorTypographyMetrics::Compact;
-    productTheme.bodyTextSize = EditorTypographyMetrics::Body;
-    productTheme.titleTextSize = EditorTypographyMetrics::Title;
+    productTheme.typography = UI::makeCompactTypographyScale();
     if (auto status = tree->setProductTheme(productTheme); !status) {
         return status;
     }
@@ -2435,12 +2443,12 @@ auto EditorWorkspaceState::onEnter(Tina::GameStateEnterContext& context) -> Tina
     UiBuildContext ui{
         .tree = *tree,
         .productTheme = productTheme,
-        .titleText = UI::makeTitleTextStyle(productTheme, EditorTypographyMetrics::Title),
-        .sectionText = UI::makeTitleTextStyle(productTheme, EditorTypographyMetrics::Section),
-        .bodyText = UI::makeBodyTextStyle(productTheme, EditorTypographyMetrics::Body),
-        .compactText = UI::makeBodyTextStyle(productTheme, EditorTypographyMetrics::Compact),
-        .secondaryText = UI::makeSecondaryTextStyle(productTheme, EditorTypographyMetrics::Secondary),
-        .accentText = UI::makeAccentTextStyle(productTheme, EditorTypographyMetrics::Accent),
+        .titleText = UI::makeTitleTextStyle(productTheme),
+        .sectionText = UI::makeSectionTextStyle(productTheme),
+        .bodyText = UI::makeBodyTextStyle(productTheme),
+        .compactText = UI::makeBodyTextStyle(productTheme, productTheme.typography.control),
+        .secondaryText = UI::makeCaptionTextStyle(productTheme),
+        .accentText = UI::makeAccentTextStyle(productTheme, productTheme.typography.body),
     };
     UI::UILayoutStyle rootStyle = percentSize(100.0F, 100.0F);
     rootStyle.flexContainer.direction = UI::UIFlexDirection::Column;

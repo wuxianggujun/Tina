@@ -3526,6 +3526,7 @@ struct UIContext::Impl final {
                     .face = textFace,
                     .atlas = glyphAtlas.get(),
                 },
+            .overflow = textState != nullptr ? textState->overflow : UITextOverflow::Clip,
             .multilineEnabled = multilineEnabled,
             .wrapMode = nodeIndex < textEditMultilineByNodeIndex.size()
                             ? textEditMultilineByNodeIndex[nodeIndex].wrapMode
@@ -3539,6 +3540,23 @@ struct UIContext::Impl final {
             .scrollY = nodeIndex < scrollYByNodeIndex.size()
                            ? scrollYByNodeIndex[nodeIndex] : 0.0F,
         };
+    }
+
+    // Both the counting and the appending paint pass must observe the same
+    // available width, so the content box is injected here instead of at each
+    // call site. ADR 0022: truncation reads the one committed content
+    // placement and never re-derives geometry from worldRect + padding.
+    [[nodiscard]] Detail::UITextEditPaintState resolveTextEditPaintStateFor(
+        const UICommittedLayoutEntry& layoutEntry, bool applyDisabledOpacity,
+        bool useCandidateVisualState) const noexcept
+    {
+        Detail::UITextEditPaintState state = resolveTextEditPaintState(
+            layoutEntry.node, applyDisabledOpacity, useCandidateVisualState);
+        state.availableWidth = layoutEntry.contentPlacement.contentBox.width;
+        state.intrinsicWidth = layoutEntry.contentPlacement.hasIntrinsicContent
+                                   ? layoutEntry.contentPlacement.intrinsicSize.width
+                                   : 0.0F;
+        return state;
     }
 
     [[nodiscard]] Core::Status buildTextEditVisualState(
@@ -3635,8 +3653,8 @@ struct UIContext::Impl final {
         }
         paintEntryCount += controlPaintBatch->size();
         paintEntryCount += Detail::UITextEditPaintEmitter::countEntries(
-            resolveTextEditPaintState(
-                layoutEntry.node, false, useCandidateTextEditVisualState));
+            resolveTextEditPaintStateFor(
+                layoutEntry, false, useCandidateTextEditVisualState));
         return paintEntryCount;
     }
 
@@ -3747,8 +3765,8 @@ struct UIContext::Impl final {
     {
         const auto caretGeometry = Detail::UITextEditPaintEmitter::append(
             output, layoutEntry, nextPaintOrdinal,
-            resolveTextEditPaintState(
-                layoutEntry.node, true, useCandidateTextEditVisualState));
+            resolveTextEditPaintStateFor(
+                layoutEntry, true, useCandidateTextEditVisualState));
         if (caretGeometry.has_value() && caretGeometry->effectiveClip.width > 0.0F &&
             caretGeometry->effectiveClip.height > 0.0F &&
             caretGeometry->worldRect.x < caretGeometry->effectiveClip.right() &&
@@ -5469,11 +5487,17 @@ struct UIContext::Impl final {
         static_assert(!stylePropertyDirtiesPaint(UIStylePropertyKind::PointerHitPolicy));
         static_assert(stylePropertyDirtiesLayout(UIStylePropertyKind::LayoutStyle));
         static_assert(!stylePropertyDirtiesPaint(UIStylePropertyKind::LayoutStyle));
+        static_assert(!stylePropertyDirtiesLayout(UIStylePropertyKind::TextOverflow));
+        static_assert(stylePropertyDirtiesPaint(UIStylePropertyKind::TextOverflow));
+        static_assert(!stylePropertyDirtiesSemantics(UIStylePropertyKind::TextOverflow));
 
         switch (kind) {
         case UIStylePropertyKind::ColorOrOpacity:
             return markPaintDirty(node);
-        case UIStylePropertyKind::ColorToken: {
+        // Paint-only kinds share one path: reserve a dirty-queue slot, then mark
+        // Paint without touching the layout, hit, or semantics phases.
+        case UIStylePropertyKind::ColorToken:
+        case UIStylePropertyKind::TextOverflow: {
             if (!contains(node) || node.index() >= dirtyQueueStorage.nodeCapacity()) {
                 return fail(UIErrorCode::InvalidNode, "UI style property dirty node is invalid");
             }
@@ -8075,6 +8099,7 @@ struct UIContext::Impl final {
             const UINodeId item = *itemResult;
             UILayoutStyle& itemLayout = layoutStylesByIndex[item.index()];
             configureCollectionRowLayout(itemLayout, state.style.rowHeight);
+            textStatesByIndex[item.index()].overflow = state.style.rowTextOverflow;
         }
         rollback.release();
         return listView;
@@ -10163,6 +10188,83 @@ struct UIContext::Impl final {
         }
         state.alignment = alignment;
         return Core::success();
+    }
+
+    [[nodiscard]] Core::Status setTextOverflowFromUpdater(UINodeId updaterRoot, UINodeId node,
+                                                          UITextOverflow overflow)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto nodeResult = resolveNode(node);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, node))
+        {
+            return fail(UIErrorCode::InvalidNode, "UI node is not owned by the updater root");
+        }
+        const NodeRecord* record = nodes.tryGet(node.storageId());
+        if (record == nullptr || !supportsWidgetText(record->kind))
+        {
+            return fail(UIErrorCode::InvalidText, "UI text overflow requires an element with intrinsic text");
+        }
+        if (overflow != UITextOverflow::Clip && overflow != UITextOverflow::Ellipsis)
+        {
+            return fail(UIErrorCode::InvalidText, "UI text overflow must be Clip or Ellipsis");
+        }
+
+        WidgetTextState& state = textStatesByIndex[node.index()];
+        if (state.overflow == overflow)
+        {
+            return Core::success();
+        }
+        // Paint only: intrinsic metrics keep describing the untruncated text, so
+        // neither layout nor the accessibility name changes.
+        if (Core::Status dirtyStatus =
+                markStylePropertyDirty(node, UIStylePropertyKind::TextOverflow);
+            !dirtyStatus)
+        {
+            return dirtyStatus;
+        }
+        state.overflow = overflow;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UITextOverflow> textOverflowFromUpdater(
+        UINodeId updaterRoot, UINodeId node)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+        }
+        auto nodeResult = resolveNode(node);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, node))
+        {
+            return fail(UIErrorCode::InvalidNode, "UI node is not owned by the updater root");
+        }
+        const NodeRecord* record = nodes.tryGet(node.storageId());
+        if (record == nullptr || !supportsWidgetText(record->kind))
+        {
+            return fail(UIErrorCode::InvalidText, "UI text overflow requires an element with intrinsic text");
+        }
+        return textStatesByIndex[node.index()].overflow;
     }
 
     [[nodiscard]] Core::Result<std::string_view> textFromUpdater(UINodeId updaterRoot, UINodeId node)
@@ -12771,6 +12873,7 @@ struct UIContext::Impl final {
                 break;
             }
             configureCollectionRowLayout(layoutStylesByIndex[child], state.style.rowHeight);
+            textStatesByIndex[child].overflow = state.style.rowTextOverflow;
             child = childRecord->nextSiblingIndex;
         }
         return Core::success();
@@ -19354,6 +19457,24 @@ Core::Status UITreeUpdater::setContentAlignment(UINodeId node, UIContentAlignmen
     return m_context->setContentAlignmentFromUpdater(m_root, node, alignment);
 }
 
+Core::Status UITreeUpdater::setTextOverflow(UINodeId node, UITextOverflow overflow)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setTextOverflowFromUpdater(m_root, node, overflow);
+}
+
+Core::Result<UITextOverflow> UITreeUpdater::textOverflow(UINodeId node)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->textOverflowFromUpdater(m_root, node);
+}
+
 Core::Result<std::string_view> UITreeUpdater::text(UINodeId node)
 {
     if (m_context == nullptr)
@@ -20892,6 +21013,18 @@ Core::Status UIContext::setContentAlignmentFromUpdater(UINodeId updaterRoot, UIN
                                                        UIContentAlignment alignment)
 {
     return m_impl->setContentAlignmentFromUpdater(updaterRoot, node, alignment);
+}
+
+Core::Status UIContext::setTextOverflowFromUpdater(UINodeId updaterRoot, UINodeId node,
+                                                   UITextOverflow overflow)
+{
+    return m_impl->setTextOverflowFromUpdater(updaterRoot, node, overflow);
+}
+
+Core::Result<UITextOverflow> UIContext::textOverflowFromUpdater(UINodeId updaterRoot,
+                                                                UINodeId node)
+{
+    return m_impl->textOverflowFromUpdater(updaterRoot, node);
 }
 
 Core::Result<std::string_view> UIContext::textFromUpdater(UINodeId updaterRoot, UINodeId node)

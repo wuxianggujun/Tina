@@ -463,11 +463,13 @@ normalizeListViewStyle(UIListViewStyle style)
 {
     if (!(std::isfinite(style.rowHeight) && style.rowHeight > 0.0F) ||
         !isValidScrollBarVisibility(style.scrollBarVisibility) ||
-        !(std::isfinite(style.wheelStep) && style.wheelStep > 0.0F))
+        !(std::isfinite(style.wheelStep) && style.wheelStep > 0.0F) ||
+        (style.rowTextOverflow != UITextOverflow::Clip &&
+         style.rowTextOverflow != UITextOverflow::Ellipsis))
     {
         return Core::failure(
             UIErrorCode::InvalidControlValue,
-            "UI ListView row height/wheel step must be finite and positive and visibility must be valid");
+            "UI ListView row height/wheel step must be finite and positive, visibility must be valid, and row text overflow must be Clip or Ellipsis");
     }
     style.rowHeight = normalizeFloat(style.rowHeight);
     style.wheelStep = normalizeFloat(style.wheelStep);
@@ -599,9 +601,12 @@ Core::Status validateProductTheme(const UITheme& theme)
         !isFiniteNonNegative(theme.radioLabelGap) ||
         !isFiniteNonNegative(theme.sliderContentInset) ||
         !isFiniteNonNegative(theme.sliderThumbWidth) ||
-        !(std::isfinite(theme.buttonTextSize) && theme.buttonTextSize > 0.0F) ||
-        !(std::isfinite(theme.bodyTextSize) && theme.bodyTextSize > 0.0F) ||
-        !(std::isfinite(theme.titleTextSize) && theme.titleTextSize > 0.0F))
+        !(std::isfinite(theme.typography.display) && theme.typography.display > 0.0F) ||
+        !(std::isfinite(theme.typography.title) && theme.typography.title > 0.0F) ||
+        !(std::isfinite(theme.typography.section) && theme.typography.section > 0.0F) ||
+        !(std::isfinite(theme.typography.body) && theme.typography.body > 0.0F) ||
+        !(std::isfinite(theme.typography.control) && theme.typography.control > 0.0F) ||
+        !(std::isfinite(theme.typography.caption) && theme.typography.caption > 0.0F))
     {
         return Core::failure(
             UIErrorCode::InvalidTheme,

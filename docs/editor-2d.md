@@ -142,6 +142,10 @@ Project Browser 的 Refresh 在下一帧 Render packet 建立前调用 `AssetSys
 registry participant；成功后重建 browser selection 与 preview binding，失败继续使用旧 Catalog。所有路径只写当前
 schema，不增加 editor-only wire 或旧资产兼容分支。
 
+长文本显示统一使用框架级单行 `Ellipsis`：document tab 与状态栏文档路径直接设置节点 overflow，Project Browser
+通过 `UIListViewStyle::rowTextOverflow` 配置私有 materialized row；data source 与 Semantics/UIA 始终保留完整标题、
+资源名和路径，不在 Editor 业务层预先截断 UTF-8 字符串。
+
 `EditorProjectWorkspace::Create()` 已提供 owning、move-only 的 project/source/Cooked Catalog root 模型：三个 root 必须是
 bounded strict UTF-8 absolute path，Source 与 Catalog 都严格位于 project root 下且彼此不重叠；这里只做 lexical
 normalization。`CreateNewEditorProject()` 进一步创建或采用一个既有空 project root，建立默认 `Source/` 与 `Catalog/`

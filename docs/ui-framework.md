@@ -444,8 +444,9 @@ built-in recipe
 
 每个属性静态声明 dirty 影响（公开 `UIStylePropertyKind` / `dirtyFlagsForStyleProperty`）：颜色/opacity 与
 ImageTint 只影响 Paint（+ 通用 paint 路径的 Semantics）；ColorToken reverse 路径仅 Paint；TextStyle/
-ContentAlignment 触发 Layout+Paint；hit policy 触发 Hit；LayoutStyle 触发 Layout/Hit 不强制 Paint。
-Context 关键 visual setter 经 `markStylePropertyDirty` 分发，禁止 ad-hoc 相位组合。运行期 ColorToken
+ContentAlignment 触发 Layout+Paint；hit policy 触发 Hit；LayoutStyle 触发 Layout/Hit 不强制 Paint；
+TextOverflow 仅 Paint——截断按已提交 content box 解析，intrinsic measure 与 accessibility name 都保持
+完整文本。Context 关键 visual setter 经 `markStylePropertyDirty` 分发，禁止 ad-hoc 相位组合。运行期 ColorToken
 更新使用固定容量 reverse-dependency 链：
 
 - 相同值直接 no-op，`lastStyleTokenUpdateInspectedNodeCount`、

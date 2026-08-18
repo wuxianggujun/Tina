@@ -29,5 +29,7 @@ static_assert(Tina::UI::stylePropertyDirtiesHit(Tina::UI::UIStylePropertyKind::P
 static_assert(!Tina::UI::stylePropertyDirtiesPaint(Tina::UI::UIStylePropertyKind::PointerHitPolicy));
 static_assert(Tina::UI::stylePropertyDirtiesLayout(Tina::UI::UIStylePropertyKind::LayoutStyle));
 static_assert(!Tina::UI::stylePropertyDirtiesPaint(Tina::UI::UIStylePropertyKind::LayoutStyle));
+static_assert(!Tina::UI::stylePropertyDirtiesLayout(Tina::UI::UIStylePropertyKind::TextOverflow));
+static_assert(Tina::UI::stylePropertyDirtiesPaint(Tina::UI::UIStylePropertyKind::TextOverflow));
 static_assert(Tina::UI::dirtyFlagsForStyleOverride(Tina::UI::UIStyleOverride::ImageTint) ==
               Tina::UI::dirtyFlagsForStyleProperty(Tina::UI::UIStylePropertyKind::ColorOrOpacity));

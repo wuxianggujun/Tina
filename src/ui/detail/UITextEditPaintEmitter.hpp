@@ -29,6 +29,15 @@ struct UITextEditPaintState final {
     UIPremultipliedRgba8Color selectionColor = premultiply(UITextEditPaint{}.selectionBackgroundColor);
     UIPremultipliedRgba8Color caretColor = premultiply(UITextEditPaint{}.caretColor);
     UITextPaintRasterSource rasterSource{};
+    // Single-line overflow policy plus the geometry it is resolved against. Both
+    // widths come from the committed content placement, so truncation never
+    // re-derives geometry from worldRect + padding. A non-positive
+    // availableWidth disables truncation, which keeps unmeasured/zero-size boxes
+    // on Clip behaviour; a positive intrinsicWidth that already fits skips the
+    // measure work entirely.
+    UITextOverflow overflow = UITextOverflow::Clip;
+    float availableWidth = 0.0F;
+    float intrinsicWidth = 0.0F;
     bool multilineEnabled = false;
     UITextEditWrapMode wrapMode = UITextEditWrapMode::NoWrap;
     std::span<const UITextEditVisualLine> visualLines{};

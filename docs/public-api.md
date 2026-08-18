@@ -314,6 +314,10 @@ authored semantics `worldRect` 不变。ScrollView/ListView/TreeView viewport cl
 作为 viewport-level overlay 继续使用专用 anchor/clip policy，不受普通祖先 clip owner 限制。
 控件内部文字由独立 `UIContentAlignment` 定位，layout snapshot 发布
 `UICommittedContentPlacement`，paint、caret/selection 与 pointer-to-text mapping 共用该 committed origin。
+`UITextOverflow::{Clip,Ellipsis}` 是独立于 `UITextStyle` 的节点 authoring intent；`Ellipsis` 只在 paint 阶段按
+committed content box 和 UAX #29 grapheme 边界截断单行，intrinsic measure 与 Semantics name 始终保留完整文本。
+虚拟列表通过 `UIListViewStyle::rowTextOverflow` 将相同策略应用到私有 materialized row，不要求 DataSource
+预先截断 label。`UITheme::typography` 是 display/title/section/body/control/caption 六级命名字号 ramp。
 
 `UIElementDescriptor::textEditMultiline` 只对带 `TextInput` behavior 的 TextEdit 生效。启用后，
 `UITextEditMultilineConfig` 允许 LF、`UITextEditWrapMode::SoftWrap`、固定 `maximumBytes` 与
@@ -327,6 +331,7 @@ shaping 不在当前契约内。多行配置容量不足或 visual-row 构建失
 descriptor 的 `string_view` 在创建时复制到固定容量 storage，失败回滚本次节点；
 `PrimaryWindowUITreeUpdater` 暴露同一组 ScrollView/Dropdown/Popup/ListView/TreeView phase-scoped
 mutation/query，包括集合 DataSource、metrics、selection、scroll 与 Tree expansion；
+`setTextOverflow()/textOverflow()` 也通过相同 phase facade 暴露；
 `setProductTheme()` 可事务式更新既有控件仍继承的产品 chrome；单节点
 paint/text setter 只将对应属性转为局部覆盖，其余属性继续跟随 Theme。Theme metric 非法、owner-thread
 错误或 dirty queue 容量不足均零发布。

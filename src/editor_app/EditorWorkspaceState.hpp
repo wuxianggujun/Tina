@@ -168,14 +168,6 @@ inline constexpr Tina::Core::usize ViewportMarqueeCandidateCapacity = 64;
 inline constexpr Tina::Core::usize ViewportTransformTargetCapacity =
     ViewportMarqueeCandidateCapacity;
 inline constexpr u64 ViewportPrimaryPointerToken = 1;
-struct EditorTypographyMetrics final {
-    static constexpr float Title = 20.0F;
-    static constexpr float Section = 16.0F;
-    static constexpr float Body = 15.0F;
-    static constexpr float Compact = 14.0F;
-    static constexpr float Secondary = 14.0F;
-    static constexpr float Accent = 15.0F;
-};
 namespace EditorShortcutActions {
 
 inline constexpr Tina::InputActionId Control{1};

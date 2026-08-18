@@ -197,6 +197,8 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Result<UI::UIButtonPaint> buttonPaint(UI::UINodeId button) const;
     [[nodiscard]] Core::Status setText(UI::UINodeId node, std::string_view utf8);
     [[nodiscard]] Core::Status setTextStyle(UI::UINodeId node, const UI::UITextStyle& style);
+    [[nodiscard]] Core::Status setTextOverflow(UI::UINodeId node, UI::UITextOverflow overflow);
+    [[nodiscard]] Core::Result<UI::UITextOverflow> textOverflow(UI::UINodeId node);
     [[nodiscard]] Core::Status setContentAlignment(UI::UINodeId node, UI::UIContentAlignment alignment);
     [[nodiscard]] Core::Result<std::string_view> text(UI::UINodeId node);
     [[nodiscard]] Core::Result<UI::UITextStyle> textStyle(UI::UINodeId node);

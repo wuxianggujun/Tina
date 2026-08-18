@@ -21,6 +21,9 @@ struct WidgetTextState final {
     UITextStyle style{};
     UIContentAlignment alignment{};
     UITextMetrics metrics{};
+    // Authoring intent kept beside the text rather than inside UITextStyle, so
+    // a Theme rebind never resets it and metrics stay untruncated.
+    UITextOverflow overflow = UITextOverflow::Clip;
     bool hasContent = false;
 };
 

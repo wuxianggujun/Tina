@@ -194,6 +194,12 @@ class PrimaryWindowUICapabilityState final {
                                        UI::UINodeId node, std::string_view utf8);
     [[nodiscard]] Core::Status setTextStyle(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                             UI::UINodeId node, const UI::UITextStyle& style);
+    [[nodiscard]] Core::Status setTextOverflow(u64 epoch, PrimaryWindowUIPhase phase,
+                                               UI::UITreeUpdater& updater, UI::UINodeId node,
+                                               UI::UITextOverflow overflow);
+    [[nodiscard]] Core::Result<UI::UITextOverflow>
+    textOverflow(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                 UI::UINodeId node);
     [[nodiscard]] Core::Status setContentAlignment(u64 epoch, PrimaryWindowUIPhase phase,
                                                    UI::UITreeUpdater& updater, UI::UINodeId node,
                                                    UI::UIContentAlignment alignment);

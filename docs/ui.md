@@ -297,6 +297,28 @@ hit-test、Up/Down/Home/End、垂直滚动与边界 wheel 透传。CR 仍拒绝�
 维护，不把 UTF-8 byte offset 暴露给游戏；编辑、删除、导航和替换位置会对齐无第三方依赖的 UAX #29
 grapheme 子集。BiDi/复杂 shaping 仍后置。
 
+### 单行溢出与 typography
+
+`setTextOverflow(node, UITextOverflow)` 控制单行文本超出 content box 时的行为。默认 `Clip` 保留全部
+glyph 并依赖 content-box 裁剪；`Ellipsis` 丢弃放不下的尾部 grapheme cluster 并追加 `UITextEllipsisUtf8`
+（U+2026），因此不会把 cluster 切成两半。三条边界：只作用于未聚焦的单行文本（聚焦 TextEdit 需要完整
+run 定位 caret/selection，多行 box 换行而不省略）；含显式 `\n` 的文本退回 `Clip`；content box 宽度非正
+时不截断。截断在 paint 阶段按已提交 content placement 解析，所以属性只标 Paint dirty，intrinsic measure
+与 accessibility name 继续发布完整文本；布局提交必然重建 paint snapshot，宽度变化会自动重算截断点。
+若字体缺少 U+2026 的可见字形，省略号不产生 paint entry，退化为无标记硬截断。
+Runtime 产品通过 `PrimaryWindowUITreeUpdater::setTextOverflow()/textOverflow()` 使用相同契约与 phase
+capability 校验。
+
+`ListView` 的 materialized row 是框架私有节点；调用方不要预先截断 data source label。需要省略长行名时，
+设置 `UIListViewStyle::rowTextOverflow = UITextOverflow::Ellipsis`，框架会把策略同步到固定容量 row pool，
+paint 使用省略号而 Semantics/UIA 继续发布 data source 的完整 label。
+
+`UITheme::typography` 是唯一命名字号 ramp（`display`/`title`/`section`/`body`/`control`/`caption`，
+logical px），由 `validateProductTheme` 要求每级有限且为正。控件 chrome 与
+`makeDisplay/Title/Section/Body/Secondary/Caption/AccentTextStyle` 都从该 ramp 取值，产品换字号只需替换
+整个 ramp。`makeCompactTypographyScale()` 是 Tina Studio Compact 的紧凑桌面 ramp（20/16/15/14/14），
+Editor 使用它。
+
 文本路径：
 
 ```text

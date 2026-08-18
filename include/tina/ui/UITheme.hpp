@@ -19,6 +19,34 @@
 
 namespace Tina::UI {
 
+// Named desktop typography ramp in logical px. One ramp per Theme keeps font
+// sizes out of call sites and lets a product swap the whole scale in one
+// assignment. Every level must be finite and positive (validateProductTheme).
+struct UITypographyScale final {
+    float display = 28.0F;
+    float title = 22.0F;
+    float section = 20.0F;
+    float body = 18.0F;
+    float control = 18.0F;
+    float caption = 14.0F;
+
+    auto operator<=>(const UITypographyScale&) const = default;
+};
+
+// Tina Studio Compact: the tighter desktop ramp used by Editor-style tool
+// surfaces where vertical density matters more than reading comfort.
+[[nodiscard]] constexpr UITypographyScale makeCompactTypographyScale() noexcept
+{
+    return UITypographyScale{
+        .display = 24.0F,
+        .title = 20.0F,
+        .section = 16.0F,
+        .body = 15.0F,
+        .control = 14.0F,
+        .caption = 14.0F,
+    };
+}
+
 // Minimal visual elevation for Phase B fake shadow.
 enum class UIElevation : u8 {
     None = 0,
@@ -60,9 +88,7 @@ struct UITheme final {
     float radioLabelGap = 8.0F;
     float sliderContentInset = 4.0F;
     float sliderThumbWidth = 8.0F;
-    float buttonTextSize = 18.0F;
-    float bodyTextSize = 18.0F;
-    float titleTextSize = 22.0F;
+    UITypographyScale typography{};
 
     auto operator<=>(const UITheme&) const = default;
 };
@@ -152,7 +178,7 @@ struct UITheme final {
     float logicalSize = 0.0F) noexcept
 {
     return UITextStyle{
-        .logicalSize = logicalSize > 0.0F ? logicalSize : theme.titleTextSize,
+        .logicalSize = logicalSize > 0.0F ? logicalSize : theme.typography.title,
         .advanceScale = 0.65F,
         .lineHeightScale = 1.15F,
         .color = theme.textTitle,
@@ -164,7 +190,7 @@ struct UITheme final {
     float logicalSize = 0.0F) noexcept
 {
     return UITextStyle{
-        .logicalSize = logicalSize > 0.0F ? logicalSize : theme.bodyTextSize,
+        .logicalSize = logicalSize > 0.0F ? logicalSize : theme.typography.body,
         .advanceScale = 0.62F,
         .lineHeightScale = 1.12F,
         .color = theme.textPrimary,
@@ -176,7 +202,7 @@ struct UITheme final {
     float logicalSize = 0.0F) noexcept
 {
     return UITextStyle{
-        .logicalSize = logicalSize > 0.0F ? logicalSize : theme.bodyTextSize,
+        .logicalSize = logicalSize > 0.0F ? logicalSize : theme.typography.body,
         .advanceScale = 0.62F,
         .lineHeightScale = 1.12F,
         .color = theme.textSecondary,
@@ -188,10 +214,52 @@ struct UITheme final {
     float logicalSize = 0.0F) noexcept
 {
     return UITextStyle{
-        .logicalSize = logicalSize > 0.0F ? logicalSize : theme.titleTextSize,
+        .logicalSize = logicalSize > 0.0F ? logicalSize : theme.typography.title,
         .advanceScale = 0.65F,
         .lineHeightScale = 1.15F,
         .color = theme.textAccent,
+    };
+}
+
+// Largest ramp level. Reserved for hero/empty-state surfaces; no control chrome
+// uses it by default.
+[[nodiscard]] constexpr UITextStyle makeDisplayTextStyle(
+    const UITheme& theme,
+    float logicalSize = 0.0F) noexcept
+{
+    return UITextStyle{
+        .logicalSize = logicalSize > 0.0F ? logicalSize : theme.typography.display,
+        .advanceScale = 0.65F,
+        .lineHeightScale = 1.15F,
+        .color = theme.textTitle,
+    };
+}
+
+// Group/section headers between title and body. Shares the title family's
+// advance/line-height so a section header only differs from a title by size.
+[[nodiscard]] constexpr UITextStyle makeSectionTextStyle(
+    const UITheme& theme,
+    float logicalSize = 0.0F) noexcept
+{
+    return UITextStyle{
+        .logicalSize = logicalSize > 0.0F ? logicalSize : theme.typography.section,
+        .advanceScale = 0.65F,
+        .lineHeightScale = 1.15F,
+        .color = theme.textTitle,
+    };
+}
+
+// Dense metadata rows: paths, hints, counters. Uses the secondary text color so
+// captions stay subordinate to body text without a per-call override.
+[[nodiscard]] constexpr UITextStyle makeCaptionTextStyle(
+    const UITheme& theme,
+    float logicalSize = 0.0F) noexcept
+{
+    return UITextStyle{
+        .logicalSize = logicalSize > 0.0F ? logicalSize : theme.typography.caption,
+        .advanceScale = 0.62F,
+        .lineHeightScale = 1.12F,
+        .color = theme.textSecondary,
     };
 }
 
@@ -222,7 +290,7 @@ struct UIButtonChrome final {
             },
         .label =
             UITextStyle{
-                .logicalSize = theme.buttonTextSize,
+                .logicalSize = theme.typography.control,
                 .advanceScale = 0.62F,
                 .lineHeightScale = 1.15F,
                 .color = theme.onAccent,
@@ -246,7 +314,7 @@ struct UIButtonChrome final {
                 .disabledBackgroundColor = theme.buttonDisabled,
                 .focusedBorderColor = theme.focusRing,
             },
-        .label = makeBodyTextStyle(theme, theme.buttonTextSize),
+        .label = makeBodyTextStyle(theme, theme.typography.control),
     };
 }
 
@@ -364,7 +432,7 @@ struct UISegmentedButtonChrome final {
                 .disabledBackgroundColor = theme.buttonDisabled,
                 .focusedBorderColor = theme.focusRing,
             },
-        .label = makeBodyTextStyle(theme, theme.buttonTextSize),
+        .label = makeBodyTextStyle(theme, theme.typography.control),
     };
 }
 

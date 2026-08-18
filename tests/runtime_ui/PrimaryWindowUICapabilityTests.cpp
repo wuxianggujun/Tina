@@ -952,6 +952,34 @@ TEST_F(PrimaryWindowUICapabilityTest, TextEditSelectionFacadeRoundTripsAndExpire
     EXPECT_EQ(expiredPaintQuery.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
 }
 
+TEST_F(PrimaryWindowUICapabilityTest, TextOverflowFacadeRoundTripsAndExpiresWithPhase)
+{
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+    auto label = tree->createElement(root->rootNodeId(), UI::makeLabelElement("A long label"));
+    ASSERT_TRUE(label.has_value()) << label.error().message;
+
+    ASSERT_TRUE(tree->setTextOverflow(*label, UI::UITextOverflow::Ellipsis).has_value());
+    auto overflow = tree->textOverflow(*label);
+    ASSERT_TRUE(overflow.has_value()) << overflow.error().message;
+    EXPECT_EQ(*overflow, UI::UITextOverflow::Ellipsis);
+
+    ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
+    Core::Status expiredSet = tree->setTextOverflow(*label, UI::UITextOverflow::Clip);
+    ASSERT_FALSE(expiredSet.has_value());
+    EXPECT_EQ(expiredSet.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredGet = tree->textOverflow(*label);
+    ASSERT_FALSE(expiredGet.has_value());
+    EXPECT_EQ(expiredGet.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+}
+
 TEST_F(PrimaryWindowUICapabilityTest, EnabledFacadeRoundTripsAndExpiresWithPhase)
 {
     CapabilityState state;

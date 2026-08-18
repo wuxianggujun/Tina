@@ -3,6 +3,7 @@
 #include <tina/core/base/Types.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UIScrollView.hpp>
+#include <tina/ui/UIText.hpp>
 
 #include <compare>
 #include <string_view>
@@ -54,6 +55,9 @@ struct UIListViewStyle final {
     u32 overscanRows = 2;
     UIScrollBarVisibility scrollBarVisibility = UIScrollBarVisibility::Auto;
     float wheelStep = 48.0F;
+    // Applied to every private materialized row. The retained/source label and
+    // accessibility name remain complete when paint uses Ellipsis.
+    UITextOverflow rowTextOverflow = UITextOverflow::Clip;
 
     auto operator<=>(const UIListViewStyle&) const = default;
 };

@@ -184,6 +184,10 @@ enum class UIStylePropertyKind : u8 {
     PointerHitPolicy = 4,
     // Full layout style (size/flex/padding/etc.).
     LayoutStyle = 5,
+    // Single-line overflow policy. Truncation is resolved against the already
+    // committed content box, so intrinsic measure is unchanged and only the
+    // glyph run is rebuilt.
+    TextOverflow = 6,
 };
 
 [[nodiscard]] constexpr UIDirty dirtyFlagsForStyleProperty(UIStylePropertyKind kind) noexcept
@@ -207,6 +211,9 @@ enum class UIStylePropertyKind : u8 {
         // Matches markLayoutDirtyBatch changed-node mask (incl. Semantics).
         return UIDirty::Style | UIDirty::Measure | UIDirty::Arrange | UIDirty::Composite |
                UIDirty::HitTest | UIDirty::Semantics;
+    case UIStylePropertyKind::TextOverflow:
+        // Paint only: the accessibility name keeps publishing the full text.
+        return UIDirty::Paint;
     }
     return UIDirty::None;
 }

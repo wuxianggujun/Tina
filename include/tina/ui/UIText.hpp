@@ -30,6 +30,24 @@ struct UITextStyle final {
     auto operator<=>(const UITextStyle&) const = default;
 };
 
+// What a single logical line does when the measured text is wider than the
+// committed content box. Clip keeps every glyph and relies on the content-box
+// clip; Ellipsis drops trailing grapheme clusters and appends
+// UITextEllipsisUtf8 so no glyph is cut in half.
+//
+// Overflow is authoring intent, not a Theme property: it lives beside the text
+// instead of inside UITextStyle so re-theming never resets it and so intrinsic
+// measure keeps reporting the untruncated size.
+enum class UITextOverflow : u8 {
+    Clip = 0,
+    Ellipsis = 1,
+};
+
+// U+2026 HORIZONTAL ELLIPSIS. A face without a visible glyph for it emits no
+// paint entry, so truncation degrades to an unmarked hard cut rather than a
+// fallback box; the reserved entry count stays a safe over-estimate.
+inline constexpr std::string_view UITextEllipsisUtf8{"\xE2\x80\xA6"};
+
 struct UITextContent final {
     std::string_view utf8{};
     UITextStyle style{};

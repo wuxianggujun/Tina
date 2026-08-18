@@ -476,7 +476,7 @@ TEST(UIThemeTest, InvalidThemeAndWrongThreadAreRejectedWithoutMutation)
     const UI::UITheme original = context->productTheme();
 
     UI::UITheme invalid = UI::makeLightProductTheme();
-    invalid.buttonTextSize = (std::numeric_limits<float>::quiet_NaN)();
+    invalid.typography.control = (std::numeric_limits<float>::quiet_NaN)();
     Core::Status invalidStatus = context->setProductTheme(invalid);
     ASSERT_FALSE(invalidStatus.has_value());
     EXPECT_EQ(invalidStatus.error().code, UI::UIErrorCode::InvalidTheme);

@@ -4,6 +4,7 @@
 #include "UILayoutPrimitives.hpp"
 #include "UIPaintPrimitives.hpp"
 #include "UITextEditModel.hpp"
+#include "UITextTruncation.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -130,6 +131,24 @@ struct CompositionCursor final {
         return 0;
     }
     return countDrawableTextCodepoints(text.substr(beginByte, endByte - beginByte));
+}
+
+// Single source of truth for the ellipsis decision. countEntries() reserves
+// capacity from this plan and append() emits from it, so the two passes can
+// never disagree about how many entries a truncated label produces.
+//
+// Truncation is limited to unfocused single-line text: a focused TextEdit needs
+// the full run for caret/selection geometry, and a multiline box wraps instead
+// of eliding.
+[[nodiscard]] UITextTruncationPlan committedTextPlan(const UITextEditPaintState& state) noexcept
+{
+    if (state.focused || state.multilineEnabled)
+    {
+        return UITextTruncationPlan{.visibleText = state.committedText};
+    }
+    return resolveTextTruncation(
+        state.rasterSource, state.committedText, state.style, state.overflow, state.availableWidth,
+        state.intrinsicWidth);
 }
 
 [[nodiscard]] UIPremultipliedRgba8Color preeditColor() noexcept
@@ -403,7 +422,17 @@ usize UITextEditPaintEmitter::countEntries(const UITextEditPaintState& state) no
     const bool textVisible = !state.textColor.isTransparent();
     if (!state.focused)
     {
-        return textVisible ? countDrawableTextCodepoints(state.committedText) : 0;
+        if (!textVisible)
+        {
+            return 0;
+        }
+        const UITextTruncationPlan plan = committedTextPlan(state);
+        usize count = countDrawableTextCodepoints(plan.visibleText);
+        if (plan.showEllipsis)
+        {
+            count += countDrawableTextCodepoints(UITextEllipsisUtf8);
+        }
+        return count;
     }
 
     if (state.preeditActive)
@@ -543,7 +572,12 @@ UITextEditPaintEmitter::append(std::pmr::vector<UICommittedPaintEntry>& output,
 
     if (!state.focused)
     {
-        appendText(state.committedText, state.textColor);
+        const UITextTruncationPlan plan = committedTextPlan(state);
+        appendText(plan.visibleText, state.textColor);
+        if (plan.showEllipsis)
+        {
+            appendText(UITextEllipsisUtf8, state.textColor);
+        }
         return std::nullopt;
     }
 
