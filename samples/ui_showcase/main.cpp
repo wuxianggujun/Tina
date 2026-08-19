@@ -656,8 +656,13 @@ class ShowcaseApplication final : public Tina::IGameApplication {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                    "UI workbench lifecycle, structure, stylesheet, or component inventory verification failed");
     }
-    if (counters.logicalPixelWidth != options.windowLogicalWidth ||
-        counters.logicalPixelHeight != options.windowLogicalHeight ||
+    // The window manager may clamp the requested logical extent to the usable
+    // desktop area (a high logical height at 200% scale exceeds the work area).
+    // A clamp is a host constraint, not a product defect, so only reject an
+    // extent larger than requested or a broken logical/framebuffer relation.
+    if (counters.logicalPixelWidth > options.windowLogicalWidth ||
+        counters.logicalPixelHeight > options.windowLogicalHeight ||
+        counters.logicalPixelWidth == 0 || counters.logicalPixelHeight == 0 ||
         !surfaceAxisMatches(counters.logicalPixelWidth, counters.framebufferPixelWidth, counters.contentScaleX) ||
         !surfaceAxisMatches(counters.logicalPixelHeight, counters.framebufferPixelHeight, counters.contentScaleY)) {
         return Tina::Core::failure(
