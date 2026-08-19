@@ -1,7 +1,7 @@
 # Tina Modern Desktop UI 设计规范与落地计划
 
-> 状态：InProgress，父任务为 `UI-MODERN-DESKTOP-001`。TMD-00..TMD-06 已完成；TMD-07
-> Desktop workbench 源码与文档已实现，正在执行集中门禁，之后进入 TMD-08。
+> 状态：InProgress，父任务为 `UI-MODERN-DESKTOP-001`。TMD-00..TMD-07 已完成并通过集中门禁；
+> 下一切片为 TMD-08 Desktop Shell reference。
 >
 > 文档职责：冻结目标视觉语言、Desktop 组合方式、工程边界、实施切片和验收标准。
 >
@@ -662,10 +662,11 @@ rg -n "surface[012]|borderLight|borderDark|buttonNormal|makeDefaultProductTheme|
 
 下面的 `TMD-*` 是 `UI-MODERN-DESKTOP-001` 内部切片，不在 Backlog 重复维护状态。
 
-截至 2026-08-19，TMD-00..TMD-06 已完成：破坏式 semantic Theme、Dark/Light x
+截至 2026-08-19，TMD-00..TMD-07 已完成：破坏式 semantic Theme、Dark/Light x
 Compact/Comfortable、State Layer/FocusVisible/Elevation、统一 metrics、基础控件及导航/集合/浮层 chrome
 已经迁移；`UIIconButton`、`UIFormField`、`UIDialog` composition profile 已进入直接 UIContext、
-`UITreeUpdater` 和 Runtime phase facade。TMD-07 已把 Showcase 改为 Desktop workbench，并进入集中验证；
+`UITreeUpdater` 和 Runtime phase facade；Showcase 已是 Desktop workbench，并通过 UI 762/762、
+Runtime UI 142/142、UI-Render 28/28、UIA 13/13 与 12/12 smoke 矩阵。
 TMD-08 Desktop Shell reference、TMD-09 产品/Editor 迁移、TMD-10 OS scheme 与 TMD-11 完整门禁仍未完成。
 
 | ID | 工作 | 主要产物 | 验收重点 |
@@ -888,5 +889,6 @@ Showcase、2D/3D 与 Editor 产品 gate 按各自文档和 Editor 集中验证�
 
 ## 推荐的下一实施切片
 
-当前集中关闭 TMD-07 的 Showcase build、Dark/Light x Compact/Comfortable x 960/1280/1600 smoke 与视觉证据。
-该 gate 通过后，下一大功能只推进 TMD-08 Desktop Shell reference；TMD-08 完成并集中验证前仍不修改 Editor。
+TMD-07 的 Showcase build、Dark/Light x Compact/Comfortable x 960/1280/1600 smoke 与结构化证据已通过。
+下一大功能只推进 TMD-08 Desktop Shell reference：嵌套 SplitView、Command Bar、Tabs、Viewport、Inspector、
+Timeline、Status 的完整 resize/DPI/focus/menu/dialog 工作流。TMD-08 完成并集中验证前仍不修改 Editor。
