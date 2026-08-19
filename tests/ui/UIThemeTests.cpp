@@ -37,34 +37,35 @@ using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
 
 TEST(UIThemeTest, DefaultTokensAreDistinctSurfacesAndTextTiers)
 {
-    constexpr UI::UITheme theme = UI::makeDefaultProductTheme();
-    EXPECT_NE(theme.surface0, theme.surface1);
-    EXPECT_NE(theme.surface1, theme.surface2);
-    EXPECT_NE(theme.textPrimary, theme.textSecondary);
-    EXPECT_NE(theme.textTitle, theme.textAccent);
-    EXPECT_GT(theme.panelBorderWidth, 0.0F);
-    EXPECT_GT(theme.panelCornerRadius, 0.0F);
-    EXPECT_GT(theme.controlCornerRadius, 0.0F);
+    constexpr UI::UITheme theme = UI::makeModernDesktopTheme();
+    EXPECT_NE(theme.colors.background, theme.colors.surface);
+    EXPECT_NE(theme.colors.surface, theme.colors.surfaceContainer);
+    EXPECT_NE(theme.colors.onSurface, theme.colors.onSurfaceVariant);
+    EXPECT_NE(theme.colors.primary, theme.colors.warning);
+    EXPECT_GT(theme.controls.panelBorderWidth, 0.0F);
+    EXPECT_GT(theme.controls.panelCornerRadius, 0.0F);
+    EXPECT_GT(theme.controls.controlCornerRadius, 0.0F);
+    EXPECT_EQ(theme.density, UI::UIDensity::Compact);
 }
 
 TEST(UIThemeTest, PanelBoxPaintIncludesBorderAndOptionalShadow)
 {
-    constexpr UI::UITheme theme = UI::makeDefaultProductTheme();
+    constexpr UI::UITheme theme = UI::makeModernDesktopTheme();
     constexpr UI::UIBoxPaint flat =
-        UI::makePanelBoxPaint(theme, theme.surface1, UI::UIElevation::None);
+        UI::makePanelBoxPaint(theme, theme.colors.surface, UI::UIElevation::Flat);
     ASSERT_TRUE(flat.solidFill.has_value());
-    EXPECT_EQ(flat.solidFill->color, theme.surface1);
-    EXPECT_EQ(flat.borderLight, theme.borderLight);
-    EXPECT_EQ(flat.borderDark, theme.borderDark);
-    EXPECT_EQ(flat.borderWidth, theme.panelBorderWidth);
-    EXPECT_EQ(flat.cornerRadii, UI::UILogicalCornerRadii::uniform(theme.panelCornerRadius));
+    EXPECT_EQ(flat.solidFill->color, theme.colors.surface);
+    EXPECT_EQ(flat.borderLight, theme.colors.outline);
+    EXPECT_EQ(flat.borderDark, theme.colors.outlineVariant);
+    EXPECT_EQ(flat.borderWidth, theme.controls.panelBorderWidth);
+    EXPECT_EQ(flat.cornerRadii, UI::UILogicalCornerRadii::uniform(theme.controls.panelCornerRadius));
     EXPECT_EQ(flat.shadow.alpha, 0);
 
     constexpr UI::UIBoxPaint elevated =
-        UI::makePanelBoxPaint(theme, theme.surface0, UI::UIElevation::Low);
-    EXPECT_EQ(elevated.shadow, theme.shadow);
-    EXPECT_EQ(elevated.shadowOffsetX, theme.panelShadowOffsetX);
-    EXPECT_EQ(elevated.shadowOffsetY, theme.panelShadowOffsetY);
+        UI::makePanelBoxPaint(theme, theme.colors.background, UI::UIElevation::Raised);
+    EXPECT_EQ(elevated.shadow, theme.colors.shadow);
+    EXPECT_EQ(elevated.shadowOffsetX, theme.controls.panelShadowOffsetX);
+    EXPECT_EQ(elevated.shadowOffsetY, theme.elevations.raisedOffsetY);
 }
 
 TEST(UIThemeTest, PrimitiveAuthoringHelpersPopulateGeometry)
@@ -200,8 +201,8 @@ TEST(UIThemeTest, CanvasLineAndEllipsePublishCommittedGeometry)
 TEST(UIThemeTest, PressedAndDisabledHelpersAreDeterministic)
 {
     constexpr UI::UIStraightSrgba8Color base = UI::rgb(0x40A070, 230);
-    constexpr UI::UIStraightSrgba8Color pressed = UI::darkenChannel(base, 36);
-    constexpr UI::UIStraightSrgba8Color hovered = UI::lightenChannel(base, 28);
+    constexpr UI::UIStraightSrgba8Color pressed = UI::stateLayer(base, UI::rgb(0x000000), 31);
+    constexpr UI::UIStraightSrgba8Color hovered = UI::stateLayer(base, UI::rgb(0xFFFFFF), 20);
     EXPECT_LT(pressed.red, base.red);
     EXPECT_GT(hovered.red, base.red);
     EXPECT_EQ(pressed.alpha, base.alpha);
@@ -210,58 +211,91 @@ TEST(UIThemeTest, PressedAndDisabledHelpersAreDeterministic)
 
 TEST(UIThemeTest, TextStyleHelpersUseTokenColors)
 {
-    constexpr UI::UITheme theme = UI::makeDefaultProductTheme();
-    EXPECT_EQ(UI::makeTitleTextStyle(theme).color, theme.textTitle);
-    EXPECT_EQ(UI::makeBodyTextStyle(theme).color, theme.textPrimary);
-    EXPECT_EQ(UI::makeSecondaryTextStyle(theme).color, theme.textSecondary);
-    EXPECT_EQ(UI::makeAccentTextStyle(theme).color, theme.textAccent);
+    constexpr UI::UITheme theme = UI::makeModernDesktopTheme();
+    EXPECT_EQ(UI::makeTitleTextStyle(theme).color, theme.colors.onSurface);
+    EXPECT_EQ(UI::makeBodyTextStyle(theme).color, theme.colors.onSurface);
+    EXPECT_EQ(UI::makeSecondaryTextStyle(theme).color, theme.colors.onSurfaceVariant);
+    EXPECT_EQ(UI::makeAccentTextStyle(theme).color, theme.colors.warning);
 }
 
 TEST(UIThemeTest, FilledButtonChromeUsesFlatThemeTokens)
 {
-    constexpr UI::UITheme theme = UI::makeDefaultProductTheme();
+    constexpr UI::UITheme theme = UI::makeModernDesktopTheme();
     constexpr UI::UIButtonChrome chrome = UI::makeButtonChrome(theme);
     ASSERT_TRUE(chrome.box.solidFill.has_value());
     EXPECT_EQ(chrome.box.solidFill->color.alpha, 230);
     EXPECT_NE(chrome.states.focusedBackgroundColor.alpha, 0);
-    EXPECT_EQ(chrome.states.disabledBackgroundColor, theme.buttonDisabled);
-    EXPECT_EQ(chrome.states.focusedBorderColor, theme.focusRing);
-    EXPECT_EQ(chrome.label.color, theme.onAccent);
-    EXPECT_EQ(chrome.box.shadow, theme.shadow);
+    EXPECT_EQ(chrome.states.disabledBackgroundColor,
+              UI::stateLayer(chrome.box.solidFill->color, theme.colors.onSurface,
+                             theme.states.disabledContainerAlpha));
+    EXPECT_EQ(chrome.states.focusedBorderColor, theme.colors.focusRing);
+    EXPECT_EQ(chrome.label.color, theme.colors.onPrimary);
+    EXPECT_EQ(chrome.box.shadow, theme.colors.shadow);
     EXPECT_FLOAT_EQ(chrome.box.borderWidth, 0.0F);
-    EXPECT_EQ(chrome.box.cornerRadii, UI::UILogicalCornerRadii::uniform(theme.controlCornerRadius));
+    EXPECT_EQ(chrome.box.cornerRadii, UI::UILogicalCornerRadii::uniform(theme.controls.controlCornerRadius));
 }
 
 TEST(UIThemeTest, SelectionControlsUseThemeInteractionStateTokens)
 {
-    constexpr UI::UITheme theme = UI::makeDefaultProductTheme();
+    constexpr UI::UITheme theme = UI::makeModernDesktopTheme();
     constexpr UI::UICheckboxChrome checkbox = UI::makeCheckboxChrome(theme);
     constexpr UI::UIRadioButtonChrome radio = UI::makeRadioButtonChrome(theme);
 
     EXPECT_NE(checkbox.indicator.hoveredIndicatorColor.alpha, 0);
-    EXPECT_EQ(checkbox.indicator.focusedIndicatorColor, theme.focusRing);
+    EXPECT_EQ(checkbox.indicator.focusedIndicatorColor, theme.colors.focusRing);
     EXPECT_NE(checkbox.indicator.pressedIndicatorColor.alpha, 0);
     EXPECT_NE(radio.radio.hoveredIndicatorColor.alpha, 0);
-    EXPECT_EQ(radio.radio.focusedIndicatorColor, theme.focusRing);
+    EXPECT_EQ(radio.radio.focusedIndicatorColor, theme.colors.focusRing);
     EXPECT_NE(radio.radio.pressedIndicatorColor.alpha, 0);
+}
+
+TEST(UIThemeTest, VisualComponentAndToggleSwitchChromeUseThemeTokens)
+{
+    constexpr UI::UITheme theme = UI::makeModernDesktopTheme();
+    constexpr UI::UICheckboxChrome toggleSwitch = UI::makeToggleSwitchChrome(theme);
+    ASSERT_TRUE(toggleSwitch.box.solidFill.has_value());
+    EXPECT_EQ(toggleSwitch.box.solidFill->color,
+              UI::scaleColorAlpha(theme.colors.surfaceContainer, 245));
+    EXPECT_EQ(toggleSwitch.box.cornerRadii,
+              UI::UILogicalCornerRadii::uniform(theme.controls.toggleSwitchCornerRadius));
+    EXPECT_EQ(toggleSwitch.indicator.presentation,
+              UI::UIToggleIndicatorPresentation::Switch);
+    EXPECT_EQ(toggleSwitch.indicator.checkedBackgroundColor, theme.colors.primary);
+    EXPECT_EQ(toggleSwitch.indicator.uncheckedIndicatorColor,
+              theme.colors.onSurfaceVariant);
+
+    constexpr UI::UIDividerChrome divider =
+        UI::makeDividerChrome(theme, UI::UIDividerTone::Accent);
+    ASSERT_TRUE(divider.line.solidFill.has_value());
+    EXPECT_EQ(divider.line.solidFill->color,
+              UI::scaleColorAlpha(theme.colors.primary, 190));
+
+    constexpr UI::UIBadgeChrome badge =
+        UI::makeBadgeChrome(theme, UI::UIBadgeTone::Danger);
+    ASSERT_TRUE(badge.box.solidFill.has_value());
+    EXPECT_EQ(badge.box.solidFill->color,
+              UI::scaleColorAlpha(theme.colors.errorContainer, 230));
+    EXPECT_EQ(badge.label.color, theme.colors.onErrorContainer);
 }
 
 TEST(UIThemeTest, TextEditChromeUsesThemeInteractionAndEditingTokens)
 {
-    constexpr UI::UITheme theme = UI::makeDefaultProductTheme();
+    constexpr UI::UITheme theme = UI::makeModernDesktopTheme();
     constexpr UI::UITextEditChrome textEdit = UI::makeTextEditChrome(theme);
 
     EXPECT_NE(textEdit.paint.hoveredBackgroundColor.alpha, 0);
     EXPECT_NE(textEdit.paint.pressedBackgroundColor.alpha, 0);
     EXPECT_NE(textEdit.paint.focusedBackgroundColor.alpha, 0);
-    EXPECT_EQ(textEdit.paint.disabledBackgroundColor, theme.buttonDisabled);
-    EXPECT_EQ(textEdit.paint.selectionBackgroundColor, UI::scaleColorAlpha(theme.focusRing, 190));
-    EXPECT_EQ(textEdit.paint.caretColor, theme.textPrimary);
+    EXPECT_EQ(textEdit.paint.disabledBackgroundColor,
+              UI::stateLayer(textEdit.box.solidFill->color, theme.colors.onSurface,
+                             theme.states.disabledContainerAlpha));
+    EXPECT_EQ(textEdit.paint.selectionBackgroundColor, UI::scaleColorAlpha(theme.colors.focusRing, 190));
+    EXPECT_EQ(textEdit.paint.caretColor, theme.colors.onSurface);
 }
 
 TEST(UIThemeTest, CollectionPaintUsesThemeSelectionStateTokens)
 {
-    constexpr UI::UITheme theme = UI::makeDefaultProductTheme();
+    constexpr UI::UITheme theme = UI::makeModernDesktopTheme();
     constexpr UI::UIListViewPaint list = UI::makeListViewPaint(theme);
     constexpr UI::UITreeViewPaint tree = UI::makeTreeViewPaint(theme);
 
@@ -277,10 +311,10 @@ TEST(UIThemeTest, CollectionPaintUsesThemeSelectionStateTokens)
 
 TEST(UIThemeTest, LightThemeDiffersFromDefault)
 {
-    constexpr UI::UITheme dark = UI::makeDefaultProductTheme();
-    constexpr UI::UITheme light = UI::makeLightProductTheme();
-    EXPECT_NE(dark.surface0, light.surface0);
-    EXPECT_NE(dark.textPrimary, light.textPrimary);
+    constexpr UI::UITheme dark = UI::makeModernDesktopTheme(UI::UIColorScheme::Dark);
+    constexpr UI::UITheme light = UI::makeModernDesktopTheme(UI::UIColorScheme::Light);
+    EXPECT_NE(dark.colors.background, light.colors.background);
+    EXPECT_NE(dark.colors.onSurface, light.colors.onSurface);
     const auto darkChrome = UI::makeButtonChrome(dark);
     const auto lightChrome = UI::makeButtonChrome(light);
     ASSERT_TRUE(darkChrome.box.solidFill.has_value());
@@ -294,7 +328,7 @@ TEST(UIThemeTest, CreateAppliesDefaultButtonChrome)
     ASSERT_TRUE(window.hasValue());
     auto context = createProductContext(window);
     ASSERT_NE(context, nullptr);
-    EXPECT_TRUE(context->productTheme() == UI::makeDefaultProductTheme());
+    EXPECT_TRUE(context->productTheme() == UI::makeModernDesktopTheme());
 
     auto root = context->rootBuilder().createRoot();
     ASSERT_TRUE(root.has_value()) << (root ? "" : root.error().message);
@@ -326,8 +360,8 @@ TEST(UIThemeTest, SetProductThemeUpdatesExistingAndSubsequentControls)
     auto darkButton = context->rootBuilder().createElement(root->rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(darkButton.has_value());
 
-    ASSERT_TRUE(context->setProductTheme(UI::makeLightProductTheme()).has_value());
-    EXPECT_TRUE(context->productTheme() == UI::makeLightProductTheme());
+    ASSERT_TRUE(context->setProductTheme(UI::makeModernDesktopTheme(UI::UIColorScheme::Light)).has_value());
+    EXPECT_TRUE(context->productTheme() == UI::makeModernDesktopTheme(UI::UIColorScheme::Light));
 
     auto lightButton = context->rootBuilder().createElement(root->rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(lightButton.has_value());
@@ -338,8 +372,8 @@ TEST(UIThemeTest, SetProductThemeUpdatesExistingAndSubsequentControls)
     auto lightPaint = updater->buttonPaint(*lightButton);
     ASSERT_TRUE(darkPaint.has_value());
     ASSERT_TRUE(lightPaint.has_value());
-    EXPECT_EQ(*darkPaint, UI::makeTonalButtonChrome(UI::makeLightProductTheme()).states);
-    EXPECT_EQ(*lightPaint, UI::makeTonalButtonChrome(UI::makeLightProductTheme()).states);
+    EXPECT_EQ(*darkPaint, UI::makeTonalButtonChrome(UI::makeModernDesktopTheme(UI::UIColorScheme::Light)).states);
+    EXPECT_EQ(*lightPaint, UI::makeTonalButtonChrome(UI::makeModernDesktopTheme(UI::UIColorScheme::Light)).states);
     EXPECT_EQ(*darkPaint, *lightPaint);
 }
 
@@ -361,7 +395,7 @@ TEST(UIThemeTest, LocalPaintOverrideDoesNotClearButtonStateChrome)
 
     auto buttonPaint = updater->buttonPaint(*button);
     ASSERT_TRUE(buttonPaint.has_value());
-    EXPECT_EQ(*buttonPaint, UI::makeTonalButtonChrome(UI::makeDefaultProductTheme()).states);
+    EXPECT_EQ(*buttonPaint, UI::makeTonalButtonChrome(UI::makeModernDesktopTheme()).states);
 }
 
 TEST(UIThemeTest, LocalOverridesDetachOnlyTheirCorrespondingThemeProperties)
@@ -384,14 +418,14 @@ TEST(UIThemeTest, LocalOverridesDetachOnlyTheirCorrespondingThemeProperties)
         .focusedBorderColor = UI::rgb(0xFFFFFF),
     };
     ASSERT_TRUE(updater->setButtonPaint(*button, localStates).has_value());
-    ASSERT_TRUE(context->setProductTheme(UI::makeLightProductTheme()).has_value());
+    ASSERT_TRUE(context->setProductTheme(UI::makeModernDesktopTheme(UI::UIColorScheme::Light)).has_value());
 
     auto states = updater->buttonPaint(*button);
     auto textStyle = updater->textStyle(*button);
     ASSERT_TRUE(states.has_value());
     ASSERT_TRUE(textStyle.has_value());
     EXPECT_EQ(*states, localStates);
-    EXPECT_EQ(*textStyle, UI::makeTonalButtonChrome(UI::makeLightProductTheme()).label);
+    EXPECT_EQ(*textStyle, UI::makeTonalButtonChrome(UI::makeModernDesktopTheme(UI::UIColorScheme::Light)).label);
 }
 
 TEST(UIThemeTest, ExplicitSameValueSetterStillDetachesThatProperty)
@@ -408,7 +442,7 @@ TEST(UIThemeTest, ExplicitSameValueSetterStillDetachesThatProperty)
 
     const UI::UIButtonPaint darkStates = updater->buttonPaint(*button).value();
     ASSERT_TRUE(updater->setButtonPaint(*button, darkStates).has_value());
-    ASSERT_TRUE(context->setProductTheme(UI::makeLightProductTheme()).has_value());
+    ASSERT_TRUE(context->setProductTheme(UI::makeModernDesktopTheme(UI::UIColorScheme::Light)).has_value());
     EXPECT_EQ(updater->buttonPaint(*button).value(), darkStates);
 }
 
@@ -428,7 +462,7 @@ TEST(UIThemeTest, TextEditPaintOverrideDetachesOnlyPaintAndCanRestoreThemeRecipe
     localPaint.hoveredBackgroundColor = UI::rgb(0xAA2200);
     ASSERT_TRUE(updater->setTextEditPaint(*textEdit, localPaint).has_value());
 
-    const UI::UITheme light = UI::makeLightProductTheme();
+    const UI::UITheme light = UI::makeModernDesktopTheme(UI::UIColorScheme::Light);
     ASSERT_TRUE(context->setProductTheme(light).has_value());
     const UI::UITextEditChrome lightChrome = UI::makeTextEditChrome(light);
     EXPECT_EQ(updater->textEditPaint(*textEdit).value(), localPaint);
@@ -448,6 +482,9 @@ TEST(UIThemeTest, SetProductThemeUpdatesEveryManagedControlProperty)
     auto builder = context->rootBuilder();
     auto label = builder.createElement(root->rootNodeId(), UI::makeLabelElement());
     auto checkbox = builder.createElement(root->rootNodeId(), UI::makeCheckboxElement());
+    auto toggleSwitch = builder.createElement(
+        root->rootNodeId(),
+        UI::makeToggleSwitchElement({.accessibleName = "Live preview"}));
     auto slider = builder.createElement(root->rootNodeId(), UI::makeSliderElement());
     auto textEdit = builder.createElement(root->rootNodeId(), UI::makeTextEditElement());
     auto progress = builder.createElement(root->rootNodeId(), UI::makeProgressBarElement());
@@ -455,14 +492,16 @@ TEST(UIThemeTest, SetProductThemeUpdatesEveryManagedControlProperty)
     auto tabView = builder.createElement(root->rootNodeId(), UI::makeTabViewElement());
     ASSERT_TRUE(tabView);
     auto tab = builder.createElement(*tabView, UI::makeTabElement("Tab"));
-    ASSERT_TRUE(label && checkbox && slider && textEdit && progress && radio && tab);
+    ASSERT_TRUE(label && checkbox && toggleSwitch && slider && textEdit && progress && radio && tab);
     auto updater = context->treeUpdater(*root);
     ASSERT_TRUE(updater.has_value());
-    ASSERT_TRUE(context->setProductTheme(UI::makeLightProductTheme()).has_value());
+    ASSERT_TRUE(context->setProductTheme(UI::makeModernDesktopTheme(UI::UIColorScheme::Light)).has_value());
 
-    const UI::UITheme light = UI::makeLightProductTheme();
+    const UI::UITheme light = UI::makeModernDesktopTheme(UI::UIColorScheme::Light);
     EXPECT_EQ(updater->textStyle(*label).value(), UI::makeBodyTextStyle(light));
     EXPECT_EQ(updater->checkboxPaint(*checkbox).value(), UI::makeCheckboxChrome(light).indicator);
+    EXPECT_EQ(updater->checkboxPaint(*toggleSwitch).value(),
+              UI::makeToggleSwitchChrome(light).indicator);
     EXPECT_EQ(updater->sliderPaint(*slider).value(), UI::makeSliderChrome(light).slider);
     EXPECT_EQ(updater->textEditPaint(*textEdit).value(), UI::makeTextEditChrome(light).paint);
     EXPECT_EQ(updater->textStyle(*textEdit).value(), UI::makeTextEditChrome(light).text);
@@ -473,6 +512,47 @@ TEST(UIThemeTest, SetProductThemeUpdatesEveryManagedControlProperty)
     EXPECT_EQ(updater->textStyle(*tab).value(), UI::makeTabChrome(light).label);
 }
 
+TEST(UIThemeTest, CanonicalFactoriesBindSchemeAndDensityMetrics)
+{
+    constexpr UI::UITheme darkCompact = UI::makeModernDesktopTheme(
+        UI::UIColorScheme::Dark, UI::UIDensity::Compact);
+    constexpr UI::UITheme lightCompact = UI::makeModernDesktopTheme(
+        UI::UIColorScheme::Light, UI::UIDensity::Compact);
+    constexpr UI::UITheme darkComfortable = UI::makeModernDesktopTheme(
+        UI::UIColorScheme::Dark, UI::UIDensity::Comfortable);
+    constexpr UI::UITheme lightComfortable = UI::makeModernDesktopTheme(
+        UI::UIColorScheme::Light, UI::UIDensity::Comfortable);
+
+    EXPECT_EQ(darkCompact.controls, lightCompact.controls);
+    EXPECT_EQ(darkCompact.typography, lightCompact.typography);
+    EXPECT_EQ(darkComfortable.controls, lightComfortable.controls);
+    EXPECT_EQ(darkComfortable.typography, lightComfortable.typography);
+    EXPECT_LT(darkCompact.controls.buttonHeight, darkComfortable.controls.buttonHeight);
+    EXPECT_LT(darkCompact.controls.listRowHeight, darkComfortable.controls.listRowHeight);
+    EXPECT_LT(darkCompact.typography.body, darkComfortable.typography.body);
+    EXPECT_NE(darkCompact.colors.background, lightCompact.colors.background);
+}
+
+TEST(UIThemeTest, LiveRootRejectsDensityChangeAndPreservesCurrentTheme)
+{
+    auto context = createProductContext(makeTestWindow());
+    ASSERT_NE(context, nullptr);
+    auto root = context->rootBuilder().createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    const UI::UITheme original = context->productTheme();
+
+    Core::Status status = context->setProductTheme(UI::makeModernDesktopTheme(
+        UI::UIColorScheme::Dark, UI::UIDensity::Comfortable));
+    ASSERT_FALSE(status.has_value());
+    EXPECT_EQ(status.error().code, UI::UIErrorCode::InvalidTheme);
+    EXPECT_EQ(context->productTheme(), original);
+
+    root->reset();
+    ASSERT_TRUE(context->setProductTheme(UI::makeModernDesktopTheme(
+        UI::UIColorScheme::Dark, UI::UIDensity::Comfortable)));
+    EXPECT_EQ(context->productTheme().density, UI::UIDensity::Comfortable);
+}
+
 TEST(UIThemeTest, InvalidThemeAndWrongThreadAreRejectedWithoutMutation)
 {
     const Platform::WindowId window = makeTestWindow();
@@ -480,7 +560,7 @@ TEST(UIThemeTest, InvalidThemeAndWrongThreadAreRejectedWithoutMutation)
     ASSERT_NE(context, nullptr);
     const UI::UITheme original = context->productTheme();
 
-    UI::UITheme invalid = UI::makeLightProductTheme();
+    UI::UITheme invalid = UI::makeModernDesktopTheme(UI::UIColorScheme::Light);
     invalid.typography.control = (std::numeric_limits<float>::quiet_NaN)();
     Core::Status invalidStatus = context->setProductTheme(invalid);
     ASSERT_FALSE(invalidStatus.has_value());
@@ -489,7 +569,7 @@ TEST(UIThemeTest, InvalidThemeAndWrongThreadAreRejectedWithoutMutation)
 
     Core::Status threadedStatus = Core::success();
     std::thread worker([&] {
-        threadedStatus = context->setProductTheme(UI::makeLightProductTheme());
+        threadedStatus = context->setProductTheme(UI::makeModernDesktopTheme(UI::UIColorScheme::Light));
     });
     worker.join();
     ASSERT_FALSE(threadedStatus.has_value());
@@ -519,10 +599,10 @@ TEST(UIThemeTest, DirtyCapacityFailureLeavesThemeAndManagedPropertiesUntouched)
     ASSERT_TRUE(updater.has_value());
     const UI::UIButtonPaint original = updater->buttonPaint(*first).value();
 
-    Core::Status status = context->setProductTheme(UI::makeLightProductTheme());
+    Core::Status status = context->setProductTheme(UI::makeModernDesktopTheme(UI::UIColorScheme::Light));
     ASSERT_FALSE(status.has_value());
     EXPECT_EQ(status.error().code, UI::UIErrorCode::CapacityExceeded);
-    EXPECT_EQ(context->productTheme(), UI::makeDefaultProductTheme());
+    EXPECT_EQ(context->productTheme(), UI::makeModernDesktopTheme());
     EXPECT_EQ(updater->buttonPaint(*first).value(), original);
     EXPECT_EQ(updater->buttonPaint(*second).value(), original);
 }
@@ -560,8 +640,8 @@ TEST(UIThemeTest, CreateAppliesDefaultSliderAndProgressChrome)
     auto progressPaint = updater->progressBarPaint(*progress);
     ASSERT_TRUE(sliderPaint.has_value());
     ASSERT_TRUE(progressPaint.has_value());
-    EXPECT_EQ(*sliderPaint, UI::makeSliderChrome(UI::makeDefaultProductTheme()).slider);
-    EXPECT_EQ(*progressPaint, UI::makeProgressBarChrome(UI::makeDefaultProductTheme()).bar);
+    EXPECT_EQ(*sliderPaint, UI::makeSliderChrome(UI::makeModernDesktopTheme()).slider);
+    EXPECT_EQ(*progressPaint, UI::makeProgressBarChrome(UI::makeModernDesktopTheme()).bar);
 }
 
 TEST(UIThemeTest, ConfigCanDisableDefaultChromeForTests)

@@ -13,15 +13,19 @@
 #include <tina/ui/UIComponentBuild.hpp>
 #include <tina/ui/UIContent.hpp>
 #include <tina/ui/UIContextConfig.hpp>
+#include <tina/ui/UIDialog.hpp>
 #include <tina/ui/UIElement.hpp>
 #include <tina/ui/UIDropdown.hpp>
 #include <tina/ui/UIErrors.hpp>
 #include <tina/ui/UIEventRouting.hpp>
 #include <tina/ui/UIFocus.hpp>
 #include <tina/ui/UIFlow.hpp>
+#include <tina/ui/UIFormField.hpp>
 #include <tina/ui/UIHitTest.hpp>
+#include <tina/ui/UIIconButton.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UIListView.hpp>
+#include <tina/ui/UIMenu.hpp>
 #include <tina/ui/UIMotion.hpp>
 #include <tina/ui/UINodeId.hpp>
 #include <tina/ui/UIPaint.hpp>
@@ -303,6 +307,12 @@ class UITreeUpdater final {
     [[nodiscard]] Core::Result<UIElementBuildTransaction>
     beginBuildTransaction(UINodeId parent, const UIElementDescriptor& rootDescriptor,
                           UIComponentBuildBudget budget);
+    [[nodiscard]] Core::Result<UIIconButtonParts>
+    buildIconButton(UINodeId parent, const UIIconButtonConfig& config);
+    [[nodiscard]] Core::Result<UIFormFieldParts>
+    buildFormField(UINodeId parent, const UIFormFieldConfig& config);
+    [[nodiscard]] Core::Result<UIDialogParts>
+    buildDialog(UINodeId parent, const UIDialogConfig& config);
     // A Layer is a direct child of this updater's root. A Screen is a direct
     // child of its Layer and starts inactive. Only the stack top is published;
     // inactive Screens behave as Collapsed without rewriting authored style.
@@ -373,13 +383,15 @@ class UITreeUpdater final {
     [[nodiscard]] Core::Status setButtonAction(UINodeId button, UIButtonActionCallback callback);
     [[nodiscard]] Core::Status clearButtonAction(UINodeId button);
     [[nodiscard]] Core::Result<bool> isButtonPressed(UINodeId button) const;
-    // Checkbox reuses Button action slots/arm path; callback fires after toggle.
+    // Checkbox and ToggleSwitch reuse Button action slots/arm path; callback
+    // fires after the shared Toggle value changes.
     [[nodiscard]] Core::Status setCheckboxAction(UINodeId checkbox, UIButtonActionCallback callback);
     [[nodiscard]] Core::Status clearCheckboxAction(UINodeId checkbox);
     [[nodiscard]] Core::Status setCheckboxPaint(UINodeId checkbox, const UICheckboxPaint& paint);
     [[nodiscard]] Core::Result<UICheckboxPaint> checkboxPaint(UINodeId checkbox) const;
-    // Toggle-capable Elements own checked state. Checkbox-specific paint APIs
-    // remain restricted to the official Checkbox recipe.
+    // Toggle-capable Elements own checked state. Checkbox paint APIs remain
+    // restricted to the resolved Checkbox built-in, including the official
+    // ToggleSwitch authoring profile.
     [[nodiscard]] Core::Status setChecked(UINodeId checkbox, bool checked);
     [[nodiscard]] Core::Result<bool> isChecked(UINodeId checkbox) const;
     [[nodiscard]] Core::Result<bool> isCheckboxPressed(UINodeId checkbox) const;
@@ -402,6 +414,9 @@ class UITreeUpdater final {
     [[nodiscard]] Core::Result<float> splitViewFraction(UINodeId splitView) const;
     [[nodiscard]] Core::Result<UISplitViewMetrics> splitViewMetrics(UINodeId splitView) const;
     [[nodiscard]] Core::Result<bool> isSplitterDragging(UINodeId splitter) const;
+    [[nodiscard]] Core::Status setSplitterPaint(UINodeId splitter,
+                                                 const UISplitterPaint& paint);
+    [[nodiscard]] Core::Result<UISplitterPaint> splitterPaint(UINodeId splitter) const;
     [[nodiscard]] Core::Status setTabViewItems(UINodeId tabView,
                                                std::span<const UITabViewItem> items,
                                                u32 activeIndex = 0);
@@ -436,6 +451,16 @@ class UITreeUpdater final {
     [[nodiscard]] Core::Status dismissTooltip(UINodeId tooltip);
     [[nodiscard]] Core::Result<bool> isTooltipOpen(UINodeId tooltip) const;
     [[nodiscard]] Core::Result<UITooltipMetrics> tooltipMetrics(UINodeId tooltip) const;
+    [[nodiscard]] Core::Status setMenuAnchor(UINodeId menu, UINodeId anchor);
+    [[nodiscard]] Core::Status clearMenuAnchor(UINodeId menu);
+    [[nodiscard]] Core::Result<UINodeId> menuAnchor(UINodeId menu) const;
+    [[nodiscard]] Core::Status setMenuOpen(UINodeId menu, bool open);
+    [[nodiscard]] Core::Result<bool> isMenuOpen(UINodeId menu) const;
+    [[nodiscard]] Core::Result<UIMenuMetrics> menuMetrics(UINodeId menu) const;
+    [[nodiscard]] Core::Status setMenuItemChecked(UINodeId item, bool checked);
+    [[nodiscard]] Core::Result<bool> isMenuItemChecked(UINodeId item) const;
+    [[nodiscard]] Core::Result<UIMenuCommandResult>
+    routeMenuCommand(UINodeId menu, UIMenuCommand command);
     [[nodiscard]] Core::Status setDropdownOpen(UINodeId dropdown, bool open);
     [[nodiscard]] Core::Result<bool> isDropdownOpen(UINodeId dropdown) const;
     [[nodiscard]] Core::Status setDropdownSelectedItem(UINodeId dropdown, UINodeId item);
@@ -534,7 +559,7 @@ class UIContext final {
     [[nodiscard]] bool contains(UINodeId node) const noexcept;
 
     // Active product theme for default control chrome. Defaults to
-    // makeDefaultProductTheme(). setProductTheme validates and atomically
+    // makeModernDesktopTheme(). setProductTheme validates and atomically
     // re-themes existing properties that still inherit product chrome. A local
     // setBoxPaint / set*Paint / setTextStyle call detaches only that property;
     // new nodes inherit the latest theme. Owner-thread only.
@@ -610,6 +635,17 @@ class UIContext final {
 
     [[nodiscard]] UIRootBuilder rootBuilder() noexcept;
     [[nodiscard]] Core::Result<UITreeUpdater> treeUpdater(UIRootOwner& rootOwner);
+    // Direct owner-thread component authoring for adapters that do not retain a
+    // root-scoped updater. The parent determines and validates the single root.
+    [[nodiscard]] Core::Result<UIElementBuildTransaction>
+    beginBuildTransaction(UINodeId parent, const UIElementDescriptor& rootDescriptor,
+                          UIComponentBuildBudget budget);
+    [[nodiscard]] Core::Result<UIIconButtonParts>
+    buildIconButton(UINodeId parent, const UIIconButtonConfig& config);
+    [[nodiscard]] Core::Result<UIFormFieldParts>
+    buildFormField(UINodeId parent, const UIFormFieldConfig& config);
+    [[nodiscard]] Core::Result<UIDialogParts>
+    buildDialog(UINodeId parent, const UIDialogConfig& config);
 
     // C1a diagnostic seam. Runtime frame publication uses commitLayout() so a
     // pending structure and its geometry become visible in one transaction.
@@ -705,7 +741,8 @@ class UIContext final {
     // Navigation never wraps. A successful move claims its matching release;
     // no focus or no candidate leaves gameplay input unconsumed.
     [[nodiscard]] Core::Result<UIDefaultFocusStepResult>
-    routeFocusNavigation(UIFocusNavigationDirection direction, bool pressed = true);
+    routeFocusNavigation(UIFocusNavigationDirection direction, bool pressed = true,
+                         UIInputModality modality = UIInputModality::Keyboard);
     // Adjusts the focused RangeInput without reusing spatial focus commands.
     // A successful Down latches its exact physical control so the matching Up
     // remains consumed after focus or retained-state changes. step=0 uses one
@@ -728,11 +765,14 @@ class UIContext final {
     // consume a command previously claimed by its matching Down.
     [[nodiscard]] Core::Result<UITabViewCommandResult>
     routeFocusedTabViewCommand(UITabViewCommand command, bool pressed);
+    [[nodiscard]] Core::Result<UIMenuCommandResult>
+    routeMenuCommand(UIMenuCommand command, bool pressed);
     [[nodiscard]] UINodeId defaultActionFocus() const noexcept;
     [[nodiscard]] UINodeId activeFocusScope() const noexcept;
     [[nodiscard]] UINodeId activeModal() const noexcept;
     [[nodiscard]] UINodeId pointerCapture() const noexcept;
     [[nodiscard]] UINodeId activePopup() const noexcept;
+    [[nodiscard]] UINodeId activeMenu() const noexcept;
     [[nodiscard]] Core::Status setSplitViewParts(UINodeId splitView, UINodeId primaryPane,
                                                  UINodeId splitter, UINodeId secondaryPane);
     [[nodiscard]] Core::Status clearSplitViewParts(UINodeId splitView);
@@ -741,6 +781,9 @@ class UIContext final {
     [[nodiscard]] Core::Result<float> splitViewFraction(UINodeId splitView) const;
     [[nodiscard]] Core::Result<UISplitViewMetrics> splitViewMetrics(UINodeId splitView) const;
     [[nodiscard]] Core::Result<bool> isSplitterDragging(UINodeId splitter) const;
+    [[nodiscard]] Core::Status setSplitterPaint(UINodeId splitter,
+                                                 const UISplitterPaint& paint);
+    [[nodiscard]] Core::Result<UISplitterPaint> splitterPaint(UINodeId splitter) const;
     [[nodiscard]] Core::Status setTabViewItems(UINodeId tabView,
                                                std::span<const UITabViewItem> items,
                                                u32 activeIndex = 0);
@@ -766,6 +809,16 @@ class UIContext final {
     [[nodiscard]] Core::Status dismissTooltip(UINodeId tooltip);
     [[nodiscard]] Core::Result<bool> isTooltipOpen(UINodeId tooltip) const;
     [[nodiscard]] Core::Result<UITooltipMetrics> tooltipMetrics(UINodeId tooltip) const;
+    [[nodiscard]] Core::Status setMenuAnchor(UINodeId menu, UINodeId anchor);
+    [[nodiscard]] Core::Status clearMenuAnchor(UINodeId menu);
+    [[nodiscard]] Core::Result<UINodeId> menuAnchor(UINodeId menu) const;
+    [[nodiscard]] Core::Status setMenuOpen(UINodeId menu, bool open);
+    [[nodiscard]] Core::Result<bool> isMenuOpen(UINodeId menu) const;
+    [[nodiscard]] Core::Result<UIMenuMetrics> menuMetrics(UINodeId menu) const;
+    [[nodiscard]] Core::Status setMenuItemChecked(UINodeId item, bool checked);
+    [[nodiscard]] Core::Result<bool> isMenuItemChecked(UINodeId item) const;
+    [[nodiscard]] Core::Result<UIMenuCommandResult>
+    routeMenuCommand(UINodeId menu, UIMenuCommand command);
     // Explicit focus changes use the last committed hit/focus-scope snapshot.
     // A target must be visible, enabled, Targetable, keyboard-focusable, and
     // inside the active Modal. clearFocus is idempotent.
@@ -951,6 +1004,10 @@ class UIContext final {
         UINodeId updaterRoot, UINodeId splitView) const;
     [[nodiscard]] Core::Result<bool> isSplitterDraggingFromUpdater(
         UINodeId updaterRoot, UINodeId splitter) const;
+    [[nodiscard]] Core::Status setSplitterPaintFromUpdater(
+        UINodeId updaterRoot, UINodeId splitter, const UISplitterPaint& paint);
+    [[nodiscard]] Core::Result<UISplitterPaint> splitterPaintFromUpdater(
+        UINodeId updaterRoot, UINodeId splitter) const;
     [[nodiscard]] Core::Status setTabViewItemsFromUpdater(
         UINodeId updaterRoot, UINodeId tabView,
         std::span<const UITabViewItem> items, u32 activeIndex);
@@ -1008,6 +1065,23 @@ class UIContext final {
                                                               UINodeId tooltip) const;
     [[nodiscard]] Core::Result<UITooltipMetrics> tooltipMetricsFromUpdater(UINodeId updaterRoot,
                                                                            UINodeId tooltip) const;
+    [[nodiscard]] Core::Status setMenuAnchorFromUpdater(UINodeId updaterRoot, UINodeId menu,
+                                                       UINodeId anchor);
+    [[nodiscard]] Core::Status clearMenuAnchorFromUpdater(UINodeId updaterRoot, UINodeId menu);
+    [[nodiscard]] Core::Result<UINodeId> menuAnchorFromUpdater(UINodeId updaterRoot,
+                                                               UINodeId menu) const;
+    [[nodiscard]] Core::Status setMenuOpenFromUpdater(UINodeId updaterRoot, UINodeId menu,
+                                                     bool open);
+    [[nodiscard]] Core::Result<bool> isMenuOpenFromUpdater(UINodeId updaterRoot,
+                                                           UINodeId menu) const;
+    [[nodiscard]] Core::Result<UIMenuMetrics> menuMetricsFromUpdater(UINodeId updaterRoot,
+                                                                     UINodeId menu) const;
+    [[nodiscard]] Core::Status setMenuItemCheckedFromUpdater(UINodeId updaterRoot,
+                                                            UINodeId item, bool checked);
+    [[nodiscard]] Core::Result<bool> isMenuItemCheckedFromUpdater(UINodeId updaterRoot,
+                                                                  UINodeId item) const;
+    [[nodiscard]] Core::Result<UIMenuCommandResult> routeMenuCommandFromUpdater(
+        UINodeId updaterRoot, UINodeId menu, UIMenuCommand command);
     [[nodiscard]] Core::Status setDropdownOpenFromUpdater(UINodeId updaterRoot, UINodeId dropdown, bool open);
     [[nodiscard]] Core::Result<bool> isDropdownOpenFromUpdater(UINodeId updaterRoot, UINodeId dropdown) const;
     [[nodiscard]] Core::Status setDropdownSelectedItemFromUpdater(UINodeId updaterRoot, UINodeId dropdown,

@@ -312,7 +312,7 @@ TEST(UIPropertyNormalizationTests, ListViewStyleRejectsUnknownRowTextOverflow)
 
 TEST(UIPropertyNormalizationTests, ThemeRejectsNonFiniteMetrics)
 {
-    UI::UITheme theme = UI::makeDefaultProductTheme();
+    UI::UITheme theme = UI::makeModernDesktopTheme();
     theme.typography.control =
         (std::numeric_limits<float>::quiet_NaN)();
     Core::Status status = UI::Detail::validateProductTheme(theme);
@@ -325,7 +325,7 @@ TEST(UIPropertyNormalizationTests, ThemeRejectsNonPositiveTypographyLevels)
     // Every named ramp level is validated, not just the three the control
     // chrome factories happen to read today.
     const auto rejects = [](auto assign) {
-        UI::UITheme theme = UI::makeDefaultProductTheme();
+        UI::UITheme theme = UI::makeModernDesktopTheme();
         assign(theme.typography);
         const Core::Status status = UI::Detail::validateProductTheme(theme);
         return !status.has_value() && status.error().code == UI::UIErrorCode::InvalidTheme;
@@ -338,7 +338,59 @@ TEST(UIPropertyNormalizationTests, ThemeRejectsNonPositiveTypographyLevels)
     EXPECT_TRUE(rejects([](UI::UITypographyScale& scale) {
         scale.caption = (std::numeric_limits<float>::infinity)();
     }));
-    EXPECT_TRUE(UI::Detail::validateProductTheme(UI::makeDefaultProductTheme()).has_value());
+    EXPECT_TRUE(UI::Detail::validateProductTheme(UI::makeModernDesktopTheme()).has_value());
+}
+
+TEST(UIPropertyNormalizationTests, ThemeDensityGeometryIsExplicitAndSchemeIndependent)
+{
+    const UI::UITheme darkCompact =
+        UI::makeModernDesktopTheme(UI::UIColorScheme::Dark, UI::UIDensity::Compact);
+    const UI::UITheme lightCompact =
+        UI::makeModernDesktopTheme(UI::UIColorScheme::Light, UI::UIDensity::Compact);
+    const UI::UITheme darkComfortable =
+        UI::makeModernDesktopTheme(UI::UIColorScheme::Dark, UI::UIDensity::Comfortable);
+    const UI::UITheme lightComfortable =
+        UI::makeModernDesktopTheme(UI::UIColorScheme::Light, UI::UIDensity::Comfortable);
+
+    EXPECT_EQ(darkCompact.controls, lightCompact.controls);
+    EXPECT_EQ(darkCompact.typography, lightCompact.typography);
+    EXPECT_EQ(darkComfortable.controls, lightComfortable.controls);
+    EXPECT_EQ(darkComfortable.typography, lightComfortable.typography);
+    EXPECT_LT(darkCompact.controls.buttonHeight, darkComfortable.controls.buttonHeight);
+    EXPECT_LT(darkCompact.controls.iconExtent, darkComfortable.controls.iconExtent);
+    EXPECT_LT(darkCompact.controls.sliderThumbExtent, darkComfortable.controls.sliderThumbExtent);
+    EXPECT_LT(darkCompact.controls.listRowHeight, darkComfortable.controls.listRowHeight);
+    EXPECT_EQ(darkCompact.controls.splitterLineThickness,
+              darkComfortable.controls.splitterLineThickness);
+}
+
+TEST(UIPropertyNormalizationTests, ThemeRejectsInvalidGeometryAndEnumValues)
+{
+    const auto rejects = [](auto mutate) {
+        UI::UITheme theme = UI::makeModernDesktopTheme();
+        mutate(theme);
+        const Core::Status status = UI::Detail::validateProductTheme(theme);
+        return !status.has_value() && status.error().code == UI::UIErrorCode::InvalidTheme;
+    };
+
+    EXPECT_TRUE(rejects([](UI::UITheme& theme) {
+        theme.colorScheme = static_cast<UI::UIColorScheme>(255);
+    }));
+    EXPECT_TRUE(rejects([](UI::UITheme& theme) {
+        theme.density = static_cast<UI::UIDensity>(255);
+    }));
+    EXPECT_TRUE(rejects([](UI::UITheme& theme) {
+        theme.controls.sliderThumbExtent = theme.controls.sliderHeight + 1.0F;
+    }));
+    EXPECT_TRUE(rejects([](UI::UITheme& theme) {
+        theme.controls.checkboxIndicatorInset = theme.controls.checkboxMarkExtent * 0.5F;
+    }));
+    EXPECT_TRUE(rejects([](UI::UITheme& theme) {
+        theme.controls.splitterLineThickness = theme.controls.splitterHitExtent + 1.0F;
+    }));
+    EXPECT_TRUE(rejects([](UI::UITheme& theme) {
+        theme.spacing.space5 = theme.spacing.space4 - 1.0F;
+    }));
 }
 
 } // namespace

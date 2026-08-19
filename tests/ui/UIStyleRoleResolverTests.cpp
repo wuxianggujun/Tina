@@ -14,12 +14,17 @@ TEST(UIStyleRoleResolverTests, ValidatesRolesAndPublishesExpectedBindingMasks)
 
     EXPECT_TRUE(isValidStyleRole(UI::UIStyleRoleId::None));
     EXPECT_TRUE(isValidStyleRole(UI::UIStyleRoleId::TreeView));
+    EXPECT_TRUE(isValidStyleRole(UI::UIStyleRoleId::ToggleSwitch));
+    EXPECT_TRUE(isValidStyleRole(UI::UIStyleRoleId::Splitter));
+    EXPECT_TRUE(isValidStyleRole(UI::UIStyleRoleId::IconOnError));
     EXPECT_FALSE(isValidStyleRole(static_cast<UI::UIStyleRoleId>(255)));
     EXPECT_EQ(defaultThemeBindingsFor(static_cast<UI::UIStyleRoleId>(255)), 0U);
 
     const std::array expected{
         std::pair{UI::UIStyleRoleId::PanelSurface, ThemeBindingBoxPaint},
+        std::pair{UI::UIStyleRoleId::ModalScrim, ThemeBindingBoxPaint},
         std::pair{UI::UIStyleRoleId::TextBody, ThemeBindingTextStyle},
+        std::pair{UI::UIStyleRoleId::TextError, ThemeBindingTextStyle},
         std::pair{UI::UIStyleRoleId::ButtonPrimary,
                   static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingButtonPaint | ThemeBindingTextStyle)},
         std::pair{UI::UIStyleRoleId::ButtonTonal,
@@ -34,6 +39,9 @@ TEST(UIStyleRoleResolverTests, ValidatesRolesAndPublishesExpectedBindingMasks)
                   static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingSliderPaint)},
         std::pair{UI::UIStyleRoleId::TextInput,
                   static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingTextStyle | ThemeBindingTextEditPaint)},
+        std::pair{UI::UIStyleRoleId::TextInputInvalid,
+                  static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingTextStyle |
+                                   ThemeBindingTextEditPaint)},
         std::pair{UI::UIStyleRoleId::ProgressBar,
                   static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingProgressBarPaint)},
         std::pair{UI::UIStyleRoleId::RadioButton,
@@ -52,6 +60,13 @@ TEST(UIStyleRoleResolverTests, ValidatesRolesAndPublishesExpectedBindingMasks)
                   static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingListViewPaint)},
         std::pair{UI::UIStyleRoleId::TreeView,
                   static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingTreeViewPaint)},
+        std::pair{UI::UIStyleRoleId::DividerAccent, ThemeBindingBoxPaint},
+        std::pair{UI::UIStyleRoleId::BadgeDanger,
+                  static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingTextStyle)},
+        std::pair{UI::UIStyleRoleId::ToggleSwitch,
+                  static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingCheckboxPaint)},
+        std::pair{UI::UIStyleRoleId::Splitter, ThemeBindingSplitterPaint},
+        std::pair{UI::UIStyleRoleId::IconOnPrimary, ThemeBindingImageTint},
     };
     for (const auto& [role, bindings] : expected)
     {
@@ -61,7 +76,7 @@ TEST(UIStyleRoleResolverTests, ValidatesRolesAndPublishesExpectedBindingMasks)
 
 TEST(UIStyleRoleResolverTests, ResolvesControlChromeFromTheRequestedTheme)
 {
-    const UI::UITheme theme = UI::makeLightProductTheme();
+    const UI::UITheme theme = UI::makeModernDesktopTheme(UI::UIColorScheme::Light);
 
     const auto primary = UI::Detail::productChromeFor(UI::UIStyleRoleId::ButtonPrimary, theme);
     const UI::UIButtonChrome expectedPrimary = UI::makeButtonChrome(theme);
@@ -70,7 +85,7 @@ TEST(UIStyleRoleResolverTests, ResolvesControlChromeFromTheRequestedTheme)
     EXPECT_EQ(primary.text, expectedPrimary.label);
 
     const auto danger = UI::Detail::productChromeFor(UI::UIStyleRoleId::ButtonDanger, theme);
-    const UI::UIButtonChrome expectedDanger = UI::makeButtonChrome(theme, theme.danger);
+    const UI::UIButtonChrome expectedDanger = UI::makeButtonChrome(theme, theme.colors.error);
     EXPECT_EQ(danger.box, expectedDanger.box);
     EXPECT_EQ(danger.button, expectedDanger.states);
     EXPECT_EQ(danger.text, expectedDanger.label);
@@ -118,14 +133,57 @@ TEST(UIStyleRoleResolverTests, ResolvesControlChromeFromTheRequestedTheme)
     EXPECT_EQ(textEdit.textEdit, expectedTextEdit.paint);
     EXPECT_EQ(textEdit.text, expectedTextEdit.text);
 
+    const auto invalidTextEdit =
+        UI::Detail::productChromeFor(UI::UIStyleRoleId::TextInputInvalid, theme);
+    const UI::UITextEditChrome expectedInvalidTextEdit =
+        UI::makeInvalidTextEditChrome(theme);
+    EXPECT_EQ(invalidTextEdit.box, expectedInvalidTextEdit.box);
+    EXPECT_EQ(invalidTextEdit.textEdit, expectedInvalidTextEdit.paint);
+    EXPECT_EQ(invalidTextEdit.text, expectedInvalidTextEdit.text);
+
+    const auto errorText =
+        UI::Detail::productChromeFor(UI::UIStyleRoleId::TextError, theme);
+    EXPECT_EQ(errorText.text, UI::makeErrorTextStyle(theme));
+
+    const auto scrim =
+        UI::Detail::productChromeFor(UI::UIStyleRoleId::ModalScrim, theme);
+    ASSERT_TRUE(scrim.box.solidFill.has_value());
+    EXPECT_EQ(scrim.box.solidFill->color, theme.colors.scrim);
+
+    EXPECT_EQ(UI::Detail::productChromeFor(
+                  UI::UIStyleRoleId::IconOnSurface, theme).imageTint,
+              theme.colors.onSurface);
+    EXPECT_EQ(UI::Detail::productChromeFor(
+                  UI::UIStyleRoleId::IconOnPrimary, theme).imageTint,
+              theme.colors.onPrimary);
+    EXPECT_EQ(UI::Detail::productChromeFor(
+                  UI::UIStyleRoleId::IconOnError, theme).imageTint,
+              theme.colors.onError);
+
     const auto tree = UI::Detail::productChromeFor(UI::UIStyleRoleId::TreeView, theme);
-    EXPECT_EQ(tree.box, UI::makePanelBoxPaint(theme, UI::scaleColorAlpha(theme.surface1, 245)));
+    EXPECT_EQ(tree.box, UI::makePanelBoxPaint(theme, UI::scaleColorAlpha(theme.colors.surfaceContainerLow, 245)));
     EXPECT_EQ(tree.treeView, UI::makeTreeViewPaint(theme));
+
+    const auto divider = UI::Detail::productChromeFor(UI::UIStyleRoleId::DividerAccent, theme);
+    EXPECT_EQ(divider.box, UI::makeDividerChrome(theme, UI::UIDividerTone::Accent).line);
+
+    const auto badge = UI::Detail::productChromeFor(UI::UIStyleRoleId::BadgeDanger, theme);
+    const UI::UIBadgeChrome expectedBadge = UI::makeBadgeChrome(theme, UI::UIBadgeTone::Danger);
+    EXPECT_EQ(badge.box, expectedBadge.box);
+    EXPECT_EQ(badge.text, expectedBadge.label);
+
+    const auto toggleSwitch = UI::Detail::productChromeFor(UI::UIStyleRoleId::ToggleSwitch, theme);
+    const UI::UICheckboxChrome expectedToggleSwitch = UI::makeToggleSwitchChrome(theme);
+    EXPECT_EQ(toggleSwitch.box, expectedToggleSwitch.box);
+    EXPECT_EQ(toggleSwitch.checkbox, expectedToggleSwitch.indicator);
+
+    const auto splitter = UI::Detail::productChromeFor(UI::UIStyleRoleId::Splitter, theme);
+    EXPECT_EQ(splitter.splitter, UI::makeSplitterChrome(theme).splitter);
 }
 
 TEST(UIStyleRoleResolverTests, NoneAndInvalidRolesResolveEmptyChrome)
 {
-    const UI::UITheme theme = UI::makeDefaultProductTheme();
+    const UI::UITheme theme = UI::makeModernDesktopTheme();
     const UI::Detail::ProductChrome empty{};
 
     const auto none = UI::Detail::productChromeFor(UI::UIStyleRoleId::None, theme);

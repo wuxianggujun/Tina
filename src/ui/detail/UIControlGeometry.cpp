@@ -157,15 +157,15 @@ SliderTrackGeometry sliderTrackGeometry(UILogicalRect worldRect,
     const float width = (std::max)(0.0F, worldRect.width);
     const float height = (std::max)(0.0F, worldRect.height);
     const float horizontalInset = (std::min)(paint.contentInset, width * 0.5F);
-    const float verticalInset = (std::min)(paint.contentInset, height * 0.5F);
-    const float thumbWidth = (std::min)(paint.thumbWidth, width);
-    const float minimumCenterX = worldRect.x + thumbWidth * 0.5F;
-    const float maximumCenterX = worldRect.x + width - thumbWidth * 0.5F;
+    const float trackThickness = (std::min)(paint.trackThickness, height);
+    const float thumbExtent = (std::min)({paint.thumbExtent, width, height});
+    const float minimumCenterX = worldRect.x + thumbExtent * 0.5F;
+    const float maximumCenterX = worldRect.x + width - thumbExtent * 0.5F;
     const float rawStartCenterX = worldRect.x + horizontalInset;
     const float rawEndCenterX = worldRect.x + width - horizontalInset;
     return SliderTrackGeometry{
-        .verticalInset = verticalInset,
-        .thumbWidth = thumbWidth,
+        .trackThickness = trackThickness,
+        .thumbExtent = thumbExtent,
         .startCenterX =
             std::clamp(rawStartCenterX, minimumCenterX, maximumCenterX),
         .endCenterX =
@@ -183,23 +183,29 @@ SliderPaintGeometry sliderPaintGeometry(UILogicalRect worldRect,
     const float centerSpan =
         (std::max)(0.0F, track.endCenterX - track.startCenterX);
     const float thumbCenterX = track.startCenterX + centerSpan * fraction;
-    const float thumbX = thumbCenterX - track.thumbWidth * 0.5F;
-    const float trackHeight =
-        (std::max)(0.0F, worldRect.height - track.verticalInset * 2.0F);
+    const float thumbX = thumbCenterX - track.thumbExtent * 0.5F;
+    const float trackY = worldRect.y + (worldRect.height - track.trackThickness) * 0.5F;
     return SliderPaintGeometry{
+        .track =
+            UILogicalRect{
+                .x = normalizeFloat(track.startCenterX),
+                .y = normalizeFloat(trackY),
+                .width = normalizeFloat(centerSpan),
+                .height = normalizeFloat(track.trackThickness),
+            },
         .filledTrack =
             UILogicalRect{
                 .x = normalizeFloat(track.startCenterX),
-                .y = normalizeFloat(worldRect.y + track.verticalInset),
+                .y = normalizeFloat(trackY),
                 .width = normalizeFloat(centerSpan * fraction),
-                .height = normalizeFloat(trackHeight),
+                .height = normalizeFloat(track.trackThickness),
             },
         .thumb =
             UILogicalRect{
                 .x = normalizeFloat(thumbX),
-                .y = worldRect.y,
-                .width = normalizeFloat(track.thumbWidth),
-                .height = worldRect.height,
+                .y = normalizeFloat(worldRect.y + (worldRect.height - track.thumbExtent) * 0.5F),
+                .width = normalizeFloat(track.thumbExtent),
+                .height = normalizeFloat(track.thumbExtent),
             },
         .fraction = fraction,
     };

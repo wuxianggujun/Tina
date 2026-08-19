@@ -51,6 +51,7 @@ Tina 文档按用途分为四类，避免把设计目标、当前事实和一次
 | --- | --- |
 | 改帧相位 / 输入 / 栈 | [Runtime](runtime.md) · [Platform 与 Input](platform-input.md) |
 | 改 UI 树 / 命中 / DisplayList | [Retained UI](ui.md) · [UI 框架设计](ui-framework.md) |
+| 改现代视觉 / Desktop Shell / Theme Token | [Modern Desktop UI](ui-modern-desktop.md) · [Retained UI](ui.md) |
 | 改 2D/3D 抽取或 World | [Scene](scene-ecs.md) · [2D](game-2d.md) · [3D](game-3d.md) |
 | 改 2D 栅格导航 / TileMap 导航转换 | [2D 导航](navigation2d.md) · [2D](game-2d.md) · [资源](resources.md) |
 | 改 2D World/gameplay 存档 | [World2D 序列化](world2d-serialization.md) · [Scene](scene-ecs.md) |
@@ -78,7 +79,7 @@ Tina 文档按用途分为四类，避免把设计目标、当前事实和一次
 | Platform / Input / Task | [Platform 与 Input](platform-input.md) · [Task System](task-system.md) |
 | Scene / 2D / 3D / Navigation / Editor | [Scene](scene-ecs.md) · [2D](game-2d.md) · [2D 导航](navigation2d.md) · [World2D 序列化](world2d-serialization.md) · [Editor 2D / 3D](editor-2d.md) · [3D](game-3d.md) |
 | Render / Asset | [Render](rendering.md) · [资源](resources.md) |
-| UI / Audio / Physics | [Retained UI](ui.md) · [UI 框架设计](ui-framework.md) · [Audio](audio.md) · [Physics](physics.md) |
+| UI / Audio / Physics | [Retained UI](ui.md) · [UI 框架设计](ui-framework.md) · [Modern Desktop UI](ui-modern-desktop.md) · [Audio](audio.md) · [Physics](physics.md) |
 | Core / 性能 / 依赖 | [Core](core.md) · [性能与内存](performance-memory.md) · [依赖治理](dependencies.md) |
 | 参考与完整目标 | [vNext 目标架构](vnext-architecture.md) · [Carbon 参考](carbon-reference.md) |
 | 风险 | [风险登记](risks.md) |

@@ -302,17 +302,19 @@ StyleRole/box/Canvas、semantics、enabled、pointer/focus policy 与集合配�
 `makeListViewElement()` 等是内建控件的官方 recipes。旧 `createPanel/createButton/createListView/...`
 成员入口已删除，不提供 compatibility alias。当前内建行为覆盖 Root、Panel、Modal、Label、Button、
 Checkbox、Slider、ProgressBar、RadioButton、TextEdit（默认单行；可选多行）、ScrollView，以及
-Dropdown/Popup/Tooltip/DropdownItem、ListView/TreeView、SplitView/Splitter、TabView/Tab。
+Dropdown/Popup/Tooltip/Menu/MenuItem/DropdownItem、ListView/TreeView、SplitView/Splitter、TabView/Tab。
 
 `UILayoutStyle` 将父容器 `flexContainer`、子项 `flexItem` 与 `Flow/Overlay` placement 分开；Overlay 使用
 alignment + offset，Px offset 可为有限负值，Percent offset 范围为 `-100..100`，以表达受父级 clip 的
-部分越界图元；Stretch 的边距用 margin 表达，Popup recipe 强制 Overlay 并继续采用 anchor policy。
+部分越界图元；Stretch 的边距用 margin 表达，Popup、Tooltip 与 Menu recipe 强制 Overlay。
 `clipDescendants` 是默认 `false` 的显式 axis-aligned clip-owner 契约：开启后，普通 Flow/Overlay 后代的
 committed `effectiveClip` 与 owner 的 world border-box 求交，但不改后代 `worldRect`，不建立 rounded clip，
 也不额外改变 owner 自身的 paint clip。hit 与 paint 读取同一 committed clip；可见性、tree/semantics 顺序和
 authored semantics `worldRect` 不变。ScrollView/ListView/TreeView viewport clip 复用同一传播机制；Popup
 作为 viewport-level overlay 继续使用专用 anchor/clip policy，不受普通祖先 clip owner 限制。Tooltip 同样
 强制 Overlay，但使用独立的显式 Anchor/placement contract，不复用 Popup 的 focus、input 或 barrier 状态机。
+Menu 也拥有独立 Anchor/placement/state contract，仅在 Context 协调层与 Popup 共享单 Window transient overlay；
+它不会把 Dropdown Popup 改造成 Menu。
 控件内部文字由独立 `UIContentAlignment` 定位，layout snapshot 发布
 `UICommittedContentPlacement`，paint、caret/selection 与 pointer-to-text mapping 共用该 committed origin。
 `UITextOverflow::{Clip,Ellipsis}` 是独立于 `UITextStyle` 的节点 authoring intent；`Ellipsis` 只在 paint 阶段按
@@ -330,7 +332,7 @@ shaping 不在当前契约内。多行配置容量不足或 visual-row 构建失
 
 游戏通过 Runtime phase facade 创建/更新主窗口 root，不获得裸 UIContext。Text 使用 strict UTF-8，
 descriptor 的 `string_view` 在创建时复制到固定容量 storage，失败回滚本次节点；
-`PrimaryWindowUITreeUpdater` 暴露同一组 ScrollView/Dropdown/Popup/Tooltip/ListView/TreeView/SplitView/TabView phase-scoped
+`PrimaryWindowUITreeUpdater` 暴露同一组 ScrollView/Dropdown/Popup/Tooltip/Menu/ListView/TreeView/SplitView/TabView phase-scoped
 mutation/query，包括集合 DataSource、metrics、selection、scroll 与 Tree expansion；
 `setTextOverflow()/textOverflow()` 也通过相同 phase facade 暴露；
 `setProductTheme()` 可事务式更新既有控件仍继承的产品 chrome；单节点
@@ -377,6 +379,27 @@ Back/Confirm/Menu 之外的任意 action-id。
 Runtime 的 `bindImageResolver()` 返回 move-only root-scoped
 registration；frame build 按 `(root, AssetId)` 去重 resolve/pin，不在 UI commit 中同步 I/O。
 
+UI 美化 authoring 使用 `UISurfaceConfig`、`UIDividerConfig`、`UIBadgeConfig`、`UIToggleSwitchConfig` 与
+`makeSurfaceElement()/makeDividerElement()/makeBadgeElement()/makeToggleSwitchElement()`。Surface 提供
+Plain/Filled/Elevated，Divider 提供 Horizontal/Vertical、Subtle/Strong/Accent 与 logical thickness，Badge 提供
+Neutral/Accent/Danger。它们是普通 Panel/Label 的强类型 StyleRole/Layout/Semantics profile，不增加 retained
+状态或 Render 类型；Surface/Divider 固定 Ignore hit，Divider Exclude semantics，Badge 发布只读 Label name。
+
+`UIIconButtonConfig`、`UIFormFieldConfig` 与 `UIDialogConfig` 是第一方多节点 composition profile；对应
+`UIIconButtonParts`、`UIFormFieldParts`、`UIDialogParts` 返回实际 retained node id，供调用者注册既有 Button
+action 或更新 TextEdit。`requiredIconButtonBuildBudget()`、`requiredFormFieldBuildBudget()`、
+`requiredDialogBuildBudget()` 在 mutation 前给出精确 node/text/Behavior reservation；`UIContext`、
+`UITreeUpdater` 和 phase-scoped `PrimaryWindowUITreeUpdater` 均提供
+`buildIconButton()/buildFormField()/buildDialog()`。IconButton 的 Button 是唯一 behavior/semantics root，Icon
+默认 Exclude semantics，Tooltip 保持独立 Anchor；FormField 只有一个 TextInput owner；Dialog 的既有 Modal
+是唯一 barrier/Focus Scope owner。三者复用同一 fixed-capacity transaction，失败不发布半棵组件树。
+
+ToggleSwitch 默认 Standard 44x24，也提供 Compact 36x20；control root 通过 `accessibleName` 发布
+`UISemanticsRole::Switch`。它继续解析为 Checkbox built-in，复用 Toggle state、`setChecked()/isChecked()`、
+Checkbox action/paint API、Focus/Input/容量与 UIA TogglePattern；只有 theme track/thumb chrome 和 semantics role
+不同。Windows UIA 将 Switch 映射为 CheckBox ControlType。该 profile 不新增 Switch Widget、状态池、update loop
+或 GPU pipeline。
+
 Tooltip authoring 使用 `UITooltipConfig` 与 `makeTooltipElement(text, config, layout)`。配置包含
 `UITooltipPlacement::{Auto,Above,Below,Left,Right}`、anchor gap/viewport margin、三种 monotonic delay 与
 `UITooltipTrigger::{PointerHover,KeyboardFocus,Manual}`。`setTooltipAnchor()` 只接受同 root 的 live、非循环、
@@ -385,6 +408,28 @@ Tooltip authoring 使用 `UITooltipConfig` 与 `makeTooltipElement(text, config,
 open 状态；失败 commit 回滚 clock-driven transient state 并保留旧 snapshot/metrics。Tooltip 文本只在 Anchor
 没有显式 description 时作为 accessible description/HelpText fallback。`UIContext`、`UITreeUpdater` 和 Runtime
 phase facade 均提供 `setTooltipAnchor/clearTooltipAnchor/tooltipAnchor/showTooltip/dismissTooltip/isTooltipOpen/tooltipMetrics`。
+
+Menu authoring 使用 `UIMenuConfig`、`UIMenuItemConfig` 与
+`makeMenuElement()/makeMenuItemElement()`。Menu 只接受 direct MenuItem child，Item 不能再拥有 child；
+`setMenuAnchor(menu, anchor)` 要求同 root、live、非循环且 Anchor kind 稳定。一个 Window 同时最多一个 active
+Menu，且 Menu 与 Dropdown Popup 共用同一个 transient overlay 槽，打开一方会原子关闭另一方。
+
+`UIMenuConfig` 提供 `UIMenuPlacement::{Auto,Below,Above,Left,Right}`、anchor gap、viewport margin、
+match-anchor-width、keyboard wrap 与 close-on-activate。`UIMenuItemKind::{Command,Check,Radio,Separator}`
+分别发布命令、checked、按 `radioGroup` 互斥和非交互分隔线；同组第二个初始 checked Radio 会在 authoring
+阶段失败原子地拒绝。Check/Radio 使用 Menu 专属固定容量 state，
+不占用通用 Toggle storage。布局读取最后成功 committed Anchor geometry 做 Auto/flip/clamp，
+`UIMenuMetrics` 发布 committed `anchorRect/menuRect/resolvedPlacement/open`，失败 commit 保留旧 snapshot/metrics。
+
+Menu surface 固定 Ignore hit，但其 chrome/outside Pointer Down 使用 transient barrier 阻止 click-through；Item
+为 Targetable。Keyboard Up/Down/Home/End/Escape 与 Gamepad D-pad Up/Down/East 通过 `UIMenuCommand`
+共用一条导航/关闭路径，并优先于 Dropdown、TabView 和通用空间焦点。Menu/MenuItem 映射 Windows UIA
+Menu/MenuItem；Command 发布 Invoke 且无 TogglePattern，Check/Radio 发布 Invoke、checked 与 TogglePattern。
+当前契约不包含 MenuBar 或 submenu。
+
+`UIContext`、`UITreeUpdater` 与 `PrimaryWindowUITreeUpdater` 均提供
+`setMenuAnchor/clearMenuAnchor/menuAnchor/setMenuOpen/isMenuOpen/menuMetrics/setMenuItemChecked/`
+`isMenuItemChecked/routeMenuCommand`；Runtime facade 继续受 phase epoch/lifetime 约束。
 
 SplitView authoring 使用 `UISplitViewConfig`、`UISplitterConfig` 与
 `makeSplitViewElement()/makeSplitterElement()`。一个 SplitView 必须绑定同 root 的三个 direct Flow child，顺序由
@@ -481,7 +526,7 @@ disabled、Hidden/Collapsed、destroy 与 Modal change 会清除或迁移焦点�
 
 `UIRangeInputCommand::{Decrease,Increase}` 与 `UIContext::routeRangeInputCommand()` 提供独立于空间焦点的
 capability-level 调值契约。Runtime 将 Keyboard Left/Down 与 D-pad Left/Down 映射为 Decrease，将
-Right/Up 映射为 Increase；路由优先级位于 Dropdown/ListView/TreeView/TextEdit 等复合方向控件之后、
+Right/Up 映射为 Increase；路由优先级位于 Menu/Dropdown/ListView/TreeView/TextEdit 等复合方向控件之后、
 通用空间焦点之前。focused Slider 复用 Pointer/UIA 已有的 min/max/step/clamp、量化、value storage 与 callback
 路径；`step == 0` 时使用 range 的 1%。`UIRangeInputCommandResult` 分开报告 `consumed`、`changed` 与
 `targeted`：只有成功改变 value 的 Down 才建立 fixed-capacity exact-control latch，匹配 Up 即使焦点或
@@ -508,7 +553,9 @@ structure commit/destroy、layout、hit 与 paint publication；Popup membership
 Toggle、SetRangeValue 与 SetTextValue seam；adapter 通过它保留正常控件 callback，stale、disabled、
 类型不匹配或非法 action 返回明确错误。可选 Windows UIA 私有 adapter（`TINA_BUILD_UI_UIA`）映射 UIA 属性，
 公开头无 COM；产品路径经 EngineHost 自动附着 HWND HostBridge，并实现 Invoke/Toggle/RangeValue/Value
-patterns 的 owner-thread dispatch；`RunUi002UiaGate.ps1` 可由外部 client 进程连接真实 showcase HWND。
+patterns 的 owner-thread dispatch；Menu/MenuItem 映射对应 ControlType，只有发布 Toggle 的 Check/Radio MenuItem
+暴露 TogglePattern，发布 Activate 的 Button/MenuItem 暴露 InvokePattern。`RunUi002UiaGate.ps1` 可由外部 client
+进程连接真实 showcase HWND。
 Narrator/Inspect 人工金标仍由 UI-002 跟踪，Linux AT-SPI adapter/真机验收由 UI-002-LINUX 跟踪；自动 gate
 不等于真实 screen reader 合规金标。
 
@@ -1110,7 +1157,7 @@ Jolt/Physics3D 尚未接入。
 **已存在（勿再文档成“没有”）：** `GameStateStack` 与 structural commands；相位 `blocks*Below` 与
 `blocksGameplayInputBelow` 空 snapshot；`RenderFramePacket` / `FramePin` / present-return CPU
 submission ledger；Focus Scope/Modal/持久 Pointer Capture；ScrollView/Dropdown/Popup/虚拟
-ListView/TreeView；`UIFlowLayerId`/`UIFlowScreenId`、固定容量 Screen stack、16 槽 `UIFlowLocalUserId` 与 Gamepad assignment；accessibility action seam 与 Windows UIA provider + HWND HostBridge +
+ListView/TreeView；Tooltip、Menu/MenuItem、SplitView/Splitter、TabView/Tab；`UIFlowLayerId`/`UIFlowScreenId`、固定容量 Screen stack、16 槽 `UIFlowLocalUserId` 与 Gamepad assignment；accessibility action seam 与 Windows UIA provider + HWND HostBridge +
 Invoke/Toggle/RangeValue/Value patterns；immutable weighted Navigation2D grid、动态 blocker、四向/对角同步与
 分步 A*；allocation-free `CameraFollow2D`；Physics2D ConvexPolygon 与 Revolute/Prismatic joint。
 

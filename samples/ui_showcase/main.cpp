@@ -35,7 +35,7 @@ using Tina::Core::u64;
 inline constexpr u64 ImageAtlasInvalidationFrame = 10;
 inline constexpr u64 ImageResolverUnbindFrame = 20;
 inline constexpr u32 ShowcaseLogicalWidth = 1280;
-inline constexpr u32 ShowcaseLogicalHeight = 980;
+inline constexpr u32 ShowcaseLogicalHeight = 800;
 
 struct SampleOptions final {
     u64 targetFrameCount = 0;
@@ -43,6 +43,7 @@ struct SampleOptions final {
     u32 windowLogicalWidth = ShowcaseLogicalWidth;
     u32 windowLogicalHeight = ShowcaseLogicalHeight;
     Tina::SampleUI::ShowcaseTheme initialTheme = Tina::SampleUI::ShowcaseTheme::Dark;
+    Tina::UI::UIDensity initialDensity = Tina::UI::UIDensity::Comfortable;
     bool autoDemo = false;
     bool imageLifecycleDemo = false;
 };
@@ -54,6 +55,7 @@ struct LifecycleCounters final {
     u64 applicationShutdowns = 0;
     u64 uiRootsCreated = 0;
     u64 uiRootsReleased = 0;
+    u64 densityRebuilds = 0;
     u64 imageResolverCalls = 0;
     u64 imageResolverHits = 0;
     u64 imageResolverUnavailable = 0;
@@ -132,6 +134,7 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
     constexpr std::string_view FramesPrefix = "--frames=";
     constexpr std::string_view DelayPrefix = "--frame-delay-ms=";
     constexpr std::string_view ThemePrefix = "--theme=";
+    constexpr std::string_view DensityPrefix = "--density=";
     constexpr std::string_view WidthPrefix = "--width=";
     constexpr std::string_view HeightPrefix = "--height=";
 
@@ -139,6 +142,7 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
     bool hasFrames = false;
     bool hasDelay = false;
     bool hasTheme = false;
+    bool hasDensity = false;
     bool hasWidth = false;
     bool hasHeight = false;
     for (int index = 1; index < argumentCount; ++index) {
@@ -183,6 +187,23 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
             hasTheme = true;
             continue;
         }
+        if (argument.starts_with(DensityPrefix)) {
+            if (hasDensity) {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                           "Duplicate --density argument");
+            }
+            const std::string_view value = argument.substr(DensityPrefix.size());
+            if (value == "compact") {
+                options.initialDensity = Tina::UI::UIDensity::Compact;
+            } else if (value == "comfortable") {
+                options.initialDensity = Tina::UI::UIDensity::Comfortable;
+            } else {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                           "--density must be compact or comfortable");
+            }
+            hasDensity = true;
+            continue;
+        }
         if (argument == "--auto-demo") {
             if (options.autoDemo) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
@@ -196,10 +217,10 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument, "Duplicate --width argument");
             }
             const std::string_view value = argument.substr(WidthPrefix.size());
-            if (!parseUnsigned(value, options.windowLogicalWidth) || options.windowLogicalWidth < ShowcaseLogicalWidth ||
+            if (!parseUnsigned(value, options.windowLogicalWidth) || options.windowLogicalWidth < 960U ||
                 options.windowLogicalWidth > 3840U) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
-                                           "--width must be in the range 1280..3840");
+                                            "--width must be in the range 960..3840");
             }
             hasWidth = true;
             continue;
@@ -210,9 +231,9 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
             }
             const std::string_view value = argument.substr(HeightPrefix.size());
             if (!parseUnsigned(value, options.windowLogicalHeight) ||
-                options.windowLogicalHeight < ShowcaseLogicalHeight || options.windowLogicalHeight > 2160U) {
+                options.windowLogicalHeight < 640U || options.windowLogicalHeight > 2160U) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
-                                           "--height must be in the range 980..2160");
+                                            "--height must be in the range 640..2160");
             }
             hasHeight = true;
             continue;
@@ -251,6 +272,11 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
 [[nodiscard]] std::string_view themeName(Tina::SampleUI::ShowcaseTheme theme) noexcept
 {
     return theme == Tina::SampleUI::ShowcaseTheme::Dark ? "dark" : "light";
+}
+
+[[nodiscard]] std::string_view densityName(Tina::UI::UIDensity density) noexcept
+{
+    return density == Tina::UI::UIDensity::Compact ? "compact" : "comfortable";
 }
 
 [[nodiscard]] std::string_view qualityName(Tina::SampleUI::ShowcaseQuality quality) noexcept
@@ -396,11 +422,31 @@ class ShowcaseImageResources final {
     Tina::Samples::SampleSpriteFrameResource frameResource_{};
 };
 
+void mergeShowcaseSnapshot(Tina::SampleUI::ShowcaseUISnapshot& aggregate,
+                           Tina::SampleUI::ShowcaseUISnapshot latest) noexcept
+{
+    latest.themeSwitches += aggregate.themeSwitches;
+    latest.densitySwitchRequests += aggregate.densitySwitchRequests;
+    latest.buttonActivations += aggregate.buttonActivations;
+    latest.sliderChanges += aggregate.sliderChanges;
+    latest.treeExpansionChanges += aggregate.treeExpansionChanges;
+    latest.styleTokenUpdates += aggregate.styleTokenUpdates;
+    latest.motionBegins += aggregate.motionBegins;
+    latest.stylesheetInstalled =
+        latest.stylesheetInstalled || aggregate.stylesheetInstalled;
+    latest.multilineNotesScrolled =
+        latest.multilineNotesScrolled || aggregate.multilineNotesScrolled;
+    latest.desktopWorkbench = latest.desktopWorkbench || aggregate.desktopWorkbench;
+    aggregate = latest;
+}
+
 class ShowcaseState final : public Tina::IGameState {
   public:
-    ShowcaseState(SampleOptions options, LifecycleCounters& counters,
-                  Tina::SampleUI::ShowcaseRenderDeviceAccess& deviceAccess) noexcept
-        : options_(options), counters_(counters), imageResources_(deviceAccess, counters)
+    ShowcaseState(SampleOptions options, Tina::SampleUI::ShowcaseUIState& uiState,
+                   LifecycleCounters& counters,
+                   Tina::SampleUI::ShowcaseRenderDeviceAccess& deviceAccess) noexcept
+        : options_(options), uiState_(uiState), counters_(counters),
+          deviceAccess_(deviceAccess), imageResources_(deviceAccess, counters)
     {
     }
 
@@ -411,7 +457,8 @@ class ShowcaseState final : public Tina::IGameState {
             return status;
         }
         if (Tina::Core::Status status =
-                ui_.build(context, options_.initialTheme, imageResources_.resolver());
+                ui_.build(context, uiState_, options_.initialTheme,
+                          options_.initialDensity, imageResources_.resolver());
             !status) {
             imageResources_.release();
             return status;
@@ -425,7 +472,7 @@ class ShowcaseState final : public Tina::IGameState {
         ++counters_.stateExits;
         ui_.release();
         imageResources_.release();
-        counters_.finalUI = ui_.snapshot();
+        mergeShowcaseSnapshot(counters_.finalUI, ui_.snapshot());
         ++counters_.uiRootsReleased;
     }
 
@@ -439,6 +486,13 @@ class ShowcaseState final : public Tina::IGameState {
         ++counters_.frameUpdates;
         if (options_.autoDemo) {
             ui_.requestAutomatedStep(counters_.frameUpdates);
+        }
+        if (auto density = ui_.takeDensityRebuildRequest(); density.has_value()) {
+            uiState_.density = *density;
+            ++counters_.densityRebuilds;
+            auto replacement = std::make_unique<ShowcaseState>(
+                options_, uiState_, counters_, deviceAccess_);
+            return context.requestReplace(std::move(replacement));
         }
         if (options_.imageLifecycleDemo && counters_.frameUpdates == ImageAtlasInvalidationFrame) {
             imageResources_.release();
@@ -463,7 +517,9 @@ class ShowcaseState final : public Tina::IGameState {
 
   private:
     SampleOptions options_{};
+    Tina::SampleUI::ShowcaseUIState& uiState_;
     LifecycleCounters& counters_;
+    Tina::SampleUI::ShowcaseRenderDeviceAccess& deviceAccess_;
     ShowcaseImageResources imageResources_;
     Tina::SampleUI::ShowcaseUI ui_{};
 };
@@ -471,9 +527,11 @@ class ShowcaseState final : public Tina::IGameState {
 class ShowcaseApplication final : public Tina::IGameApplication {
   public:
     ShowcaseApplication(SampleOptions options, LifecycleCounters& counters,
-                        Tina::SampleUI::ShowcaseRenderDeviceAccess& deviceAccess) noexcept
+                         Tina::SampleUI::ShowcaseRenderDeviceAccess& deviceAccess) noexcept
         : options_(options), counters_(counters), deviceAccess_(deviceAccess)
     {
+        uiState_.theme = options.initialTheme;
+        uiState_.density = options.initialDensity;
     }
 
     Tina::Core::Result<std::unique_ptr<Tina::IGameState>> createInitialState(Tina::GameStartupContext& context) override
@@ -505,7 +563,7 @@ class ShowcaseApplication final : public Tina::IGameApplication {
         }
         platformEvents_.emplace(std::move(*subscription));
         std::unique_ptr<Tina::IGameState> state =
-            std::make_unique<ShowcaseState>(options_, counters_, deviceAccess_);
+            std::make_unique<ShowcaseState>(options_, uiState_, counters_, deviceAccess_);
         return state;
     }
 
@@ -519,21 +577,25 @@ class ShowcaseApplication final : public Tina::IGameApplication {
     SampleOptions options_{};
     LifecycleCounters& counters_;
     Tina::SampleUI::ShowcaseRenderDeviceAccess& deviceAccess_;
+    Tina::SampleUI::ShowcaseUIState uiState_{};
     std::optional<Tina::PlatformEventSubscription> platformEvents_{};
 };
 
 [[nodiscard]] Tina::EngineConfig createEngineConfig(const SampleOptions& options)
 {
     Tina::EngineConfig config = Tina::EngineConfig::Defaults();
-    config.applicationName = "Tina UI Showcase";
-    config.primaryWindow.title = "Tina UI Showcase - Complete Retained Controls";
+    config.applicationName = "Tina Modern Desktop Workbench";
+    config.primaryWindow.title = "Tina Modern Desktop Workbench";
     config.primaryWindow.initialLogicalExtent = {options.windowLogicalWidth, options.windowLogicalHeight};
-    config.primaryWindow.resizable = false;
+    config.primaryWindow.resizable = true;
     config.primaryWindow.initiallyVisible = true;
 
     config.primaryWindowUICapacities = Tina::UI::UIContextCapacityConfig{
         .nodeCapacity = 2048,
-        .rootCapacity = 1,
+        // GameState replacement enters the new state before releasing the old
+        // one so a failed replacement cannot blank the product. Steady state
+        // still owns one root; the second slot is only the atomic handoff.
+        .rootCapacity = 2,
         .dirtyQueueCapacity = 256,
         .layoutSnapshotCapacity = 256,
         .hitSnapshotCapacity = 256,
@@ -565,13 +627,18 @@ class ShowcaseApplication final : public Tina::IGameApplication {
         return std::abs(framebuffer - logical * static_cast<double>(contentScale)) <= 2.0 ||
                std::abs(framebuffer - logical) <= 2.0;
     };
-    if (counters.stateEnters != 1 || counters.stateExits != 1 || counters.applicationShutdowns != 1 ||
-        counters.uiRootsCreated != 1 || counters.uiRootsReleased != 1 || counters.finalUI.rootAlive ||
-        counters.finalUI.controlCount != 21 || counters.finalUI.imageProductCount != 4 ||
+    const u64 expectedLifecycleCount = 1 + counters.densityRebuilds;
+    if (counters.stateEnters != expectedLifecycleCount ||
+        counters.stateExits != expectedLifecycleCount || counters.applicationShutdowns != 1 ||
+        counters.uiRootsCreated != expectedLifecycleCount ||
+        counters.uiRootsReleased != expectedLifecycleCount || counters.finalUI.rootAlive ||
+        counters.finalUI.controlCount != 24 || counters.finalUI.imageProductCount != 5 ||
         counters.finalUI.asymmetricCornerProductCount != 3 ||
+        counters.finalUI.componentProfileCount != 3 ||
+        counters.finalUI.workbenchBandCount != 5 || !counters.finalUI.desktopWorkbench ||
         !counters.finalUI.stylesheetInstalled || counters.finalUI.styleTokenUpdates == 0) {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                   "UI showcase lifecycle, stylesheet, or control inventory verification failed");
+                                   "UI workbench lifecycle, structure, stylesheet, or component inventory verification failed");
     }
     if (counters.logicalPixelWidth != options.windowLogicalWidth ||
         counters.logicalPixelHeight != options.windowLogicalHeight ||
@@ -632,17 +699,20 @@ class ShowcaseApplication final : public Tina::IGameApplication {
     if (options.autoDemo) {
         constexpr Tina::UI::UIListViewItemKey ExpectedListSelectionKey = 1'007;
         constexpr Tina::UI::UITreeViewItemKey ExpectedTreeSelectionKey = 4;
-        // styleTokenUpdates: 1 initial applyTheme + 2 Dark/Light switches (header accent ColorToken path).
-        // motionBegins: 2 theme switches × 6 cards (BackgroundColor paint-only product Motion).
+        // Density rebuilds replace the sole root while preserving the application-owned state.
+        // motionBegins: 2 theme switches x 6 sections/inspector panels.
         if (counters.finalUI.themeSwitches != 2 || counters.finalUI.sliderChanges == 0 ||
             std::lround(counters.finalUI.progressValue) != 84 || counters.finalUI.theme != options.initialTheme ||
+            counters.finalUI.density != options.initialDensity ||
+            counters.densityRebuilds != 2 || counters.finalUI.densitySwitchRequests != 2 ||
             counters.finalUI.treeExpansionChanges != 2 ||
             counters.finalUI.listSelectionKey != ExpectedListSelectionKey ||
             counters.finalUI.treeSelectionKey != ExpectedTreeSelectionKey || counters.finalUI.dropdownSelection != 1 ||
             std::lround(counters.finalUI.scrollOffset) != 80 || counters.finalUI.styleTokenUpdates < 3 ||
-            counters.finalUI.motionBegins < 12) {
+            std::lround(counters.finalUI.componentScrollOffset) != 240 ||
+            counters.finalUI.motionBegins < 12 || counters.finalUI.dialogOpen) {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                       "UI showcase automated theme, stylesheet token, motion, value, popup, collection, or scrolling exercise did not complete");
+                                       "UI workbench automated theme, density rebuild, component, dialog, collection, or scrolling exercise did not complete");
         }
     }
     return Tina::Core::success();
@@ -688,7 +758,13 @@ class ShowcaseApplication final : public Tina::IGameApplication {
     writeJsonString(std::cout, themeName(options->initialTheme));
     std::cout << ",\"finalTheme\":";
     writeJsonString(std::cout, themeName(counters.finalUI.theme));
+    std::cout << ",\"initialDensity\":";
+    writeJsonString(std::cout, densityName(options->initialDensity));
+    std::cout << ",\"finalDensity\":";
+    writeJsonString(std::cout, densityName(counters.finalUI.density));
     std::cout << ",\"themeSwitches\":" << counters.finalUI.themeSwitches
+              << ",\"densitySwitchRequests\":" << counters.finalUI.densitySwitchRequests
+              << ",\"densityRebuilds\":" << counters.densityRebuilds
               << ",\"sliderChanges\":" << counters.finalUI.sliderChanges
               << ",\"treeExpansionChanges\":" << counters.finalUI.treeExpansionChanges
               << ",\"progressValue\":" << counters.finalUI.progressValue
@@ -697,10 +773,15 @@ class ShowcaseApplication final : public Tina::IGameApplication {
               << ",\"treeSelectionKey\":" << counters.finalUI.treeSelectionKey
               << ",\"dropdownSelection\":" << counters.finalUI.dropdownSelection
               << ",\"scrollOffset\":" << counters.finalUI.scrollOffset
+              << ",\"componentScrollOffset\":" << counters.finalUI.componentScrollOffset
               << ",\"controls\":" << counters.finalUI.controlCount
               << ",\"imageProducts\":" << counters.finalUI.imageProductCount
               << ",\"asymmetricCornerProducts\":"
               << counters.finalUI.asymmetricCornerProductCount
+              << ",\"componentProfiles\":" << counters.finalUI.componentProfileCount
+              << ",\"workbenchBands\":" << counters.finalUI.workbenchBandCount
+              << ",\"desktopWorkbench\":" << (counters.finalUI.desktopWorkbench ? "true" : "false")
+              << ",\"dialogOpen\":" << (counters.finalUI.dialogOpen ? "true" : "false")
               << ",\"stylesheetInstalled\":" << (counters.finalUI.stylesheetInstalled ? "true" : "false")
               << ",\"styleTokenUpdates\":" << counters.finalUI.styleTokenUpdates
               << ",\"motionBegins\":" << counters.finalUI.motionBegins
@@ -732,6 +813,8 @@ class ShowcaseApplication final : public Tina::IGameApplication {
     writeJsonString(std::cout, qualityName(counters.finalUI.quality));
     std::cout << ",\"notificationsEnabled\":" << (counters.finalUI.notificationsEnabled ? "true" : "false")
               << ",\"multilineNotesScrolled\":" << (counters.finalUI.multilineNotesScrolled ? "true" : "false")
+              << ",\"stateEnters\":" << counters.stateEnters
+              << ",\"stateExits\":" << counters.stateExits
               << ",\"uiRootsCreated\":" << counters.uiRootsCreated
               << ",\"uiRootsReleased\":" << counters.uiRootsReleased << ",\"exit\":";
     writeJsonString(std::cout, exitReasonName(*result));

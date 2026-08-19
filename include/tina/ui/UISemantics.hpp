@@ -34,6 +34,9 @@ enum class UISemanticsRole : u8 {
     TabList,
     Tab,
     TabPanel,
+    Menu,
+    MenuItem,
+    Switch,
 };
 
 enum class UISemanticsMode : u8 {

@@ -10,22 +10,53 @@ ProductChrome productChromeFor(UIStyleRoleId role, const UITheme& theme) noexcep
     case UIStyleRoleId::None:
         break;
     case UIStyleRoleId::PanelSurface:
-        chrome.box = makePanelBoxPaint(theme, theme.surface1);
+        chrome.box = makePanelBoxPaint(theme, theme.colors.surface);
         chrome.box.borderWidth = 0.0F;
         break;
     case UIStyleRoleId::PanelElevated:
-        chrome.box = makePanelBoxPaint(theme, theme.surface1, UIElevation::Low);
+        chrome.box = makePanelBoxPaint(theme, theme.colors.surfaceContainerLow, UIElevation::Raised);
         break;
     case UIStyleRoleId::ModalSurface:
-        chrome.box = makePanelBoxPaint(theme, scaleColorAlpha(theme.surface1, 248), UIElevation::Low);
+        chrome.box = makePanelBoxPaint(theme, scaleColorAlpha(theme.colors.surfaceContainerHigh, 248), UIElevation::Modal);
+        break;
+    case UIStyleRoleId::ModalScrim:
+        chrome.box.solidFill = UISolidFill{.color = theme.colors.scrim};
         break;
     case UIStyleRoleId::PopupSurface:
+    case UIStyleRoleId::MenuSurface:
         chrome.box = makePopupBoxPaint(theme);
         break;
     case UIStyleRoleId::TooltipSurface:
         chrome.box = makePopupBoxPaint(theme);
         chrome.text = makeSecondaryTextStyle(theme);
         break;
+    case UIStyleRoleId::DividerSubtle:
+        chrome.box = makeDividerChrome(theme, UIDividerTone::Subtle).line;
+        break;
+    case UIStyleRoleId::DividerStrong:
+        chrome.box = makeDividerChrome(theme, UIDividerTone::Strong).line;
+        break;
+    case UIStyleRoleId::DividerAccent:
+        chrome.box = makeDividerChrome(theme, UIDividerTone::Accent).line;
+        break;
+    case UIStyleRoleId::BadgeNeutral: {
+        const UIBadgeChrome badge = makeBadgeChrome(theme, UIBadgeTone::Neutral);
+        chrome.box = badge.box;
+        chrome.text = badge.label;
+        break;
+    }
+    case UIStyleRoleId::BadgeAccent: {
+        const UIBadgeChrome badge = makeBadgeChrome(theme, UIBadgeTone::Accent);
+        chrome.box = badge.box;
+        chrome.text = badge.label;
+        break;
+    }
+    case UIStyleRoleId::BadgeDanger: {
+        const UIBadgeChrome badge = makeBadgeChrome(theme, UIBadgeTone::Danger);
+        chrome.box = badge.box;
+        chrome.text = badge.label;
+        break;
+    }
     case UIStyleRoleId::TextBody:
         chrome.text = makeBodyTextStyle(theme);
         break;
@@ -38,10 +69,13 @@ ProductChrome productChromeFor(UIStyleRoleId role, const UITheme& theme) noexcep
     case UIStyleRoleId::TextAccent:
         chrome.text = makeAccentTextStyle(theme);
         break;
+    case UIStyleRoleId::TextError:
+        chrome.text = makeErrorTextStyle(theme);
+        break;
     case UIStyleRoleId::ButtonPrimary:
     case UIStyleRoleId::ButtonDanger: {
         const UIButtonChrome button =
-            makeButtonChrome(theme, role == UIStyleRoleId::ButtonDanger ? theme.danger : UIStraightSrgba8Color{});
+            makeButtonChrome(theme, role == UIStyleRoleId::ButtonDanger ? theme.colors.error : UIStraightSrgba8Color{});
         chrome.box = button.box;
         chrome.button = button.states;
         chrome.text = button.label;
@@ -74,14 +108,30 @@ ProductChrome productChromeFor(UIStyleRoleId role, const UITheme& theme) noexcep
         chrome.checkbox = checkbox.indicator;
         break;
     }
+    case UIStyleRoleId::ToggleSwitch: {
+        const UICheckboxChrome toggleSwitch = makeToggleSwitchChrome(theme);
+        chrome.box = toggleSwitch.box;
+        chrome.checkbox = toggleSwitch.indicator;
+        break;
+    }
     case UIStyleRoleId::Slider: {
         const UISliderChrome slider = makeSliderChrome(theme);
-        chrome.box = slider.track;
+        chrome.box = slider.hitSurface;
         chrome.slider = slider.slider;
         break;
     }
+    case UIStyleRoleId::Splitter:
+        chrome.splitter = makeSplitterChrome(theme).splitter;
+        break;
     case UIStyleRoleId::TextInput: {
         const UITextEditChrome textInput = makeTextEditChrome(theme);
+        chrome.box = textInput.box;
+        chrome.textEdit = textInput.paint;
+        chrome.text = textInput.text;
+        break;
+    }
+    case UIStyleRoleId::TextInputInvalid: {
+        const UITextEditChrome textInput = makeInvalidTextEditChrome(theme);
         chrome.box = textInput.box;
         chrome.textEdit = textInput.paint;
         chrome.text = textInput.text;
@@ -124,7 +174,8 @@ ProductChrome productChromeFor(UIStyleRoleId role, const UITheme& theme) noexcep
         chrome.dropdown = dropdown.dropdown;
         break;
     }
-    case UIStyleRoleId::CollectionItem: {
+    case UIStyleRoleId::CollectionItem:
+    case UIStyleRoleId::MenuItem: {
         const UIButtonChrome item = makeDropdownItemChrome(theme);
         chrome.box = item.box;
         chrome.button = item.states;
@@ -132,12 +183,21 @@ ProductChrome productChromeFor(UIStyleRoleId role, const UITheme& theme) noexcep
         break;
     }
     case UIStyleRoleId::ListView:
-        chrome.box = makePanelBoxPaint(theme, scaleColorAlpha(theme.surface1, 245));
+        chrome.box = makePanelBoxPaint(theme, scaleColorAlpha(theme.colors.surfaceContainerLow, 245));
         chrome.listView = makeListViewPaint(theme);
         break;
     case UIStyleRoleId::TreeView:
-        chrome.box = makePanelBoxPaint(theme, scaleColorAlpha(theme.surface1, 245));
+        chrome.box = makePanelBoxPaint(theme, scaleColorAlpha(theme.colors.surfaceContainerLow, 245));
         chrome.treeView = makeTreeViewPaint(theme);
+        break;
+    case UIStyleRoleId::IconOnSurface:
+        chrome.imageTint = theme.colors.onSurface;
+        break;
+    case UIStyleRoleId::IconOnPrimary:
+        chrome.imageTint = theme.colors.onPrimary;
+        break;
+    case UIStyleRoleId::IconOnError:
+        chrome.imageTint = theme.colors.onError;
         break;
     }
     return chrome;

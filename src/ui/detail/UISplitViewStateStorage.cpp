@@ -53,6 +53,18 @@ const SplitterState* UISplitViewStateStorage::trySplitter(UINodeId splitter) con
     return containsSplitter(splitter) ? &splittersByNodeIndex_[splitter.index()] : nullptr;
 }
 
+UISplitterPaint& UISplitViewStateStorage::splitterPaintByIndex(u32 nodeIndex) noexcept
+{
+    assert(nodeIndex < splittersByNodeIndex_.size());
+    return splittersByNodeIndex_[nodeIndex].paint;
+}
+
+const UISplitterPaint& UISplitViewStateStorage::splitterPaintByIndex(u32 nodeIndex) const noexcept
+{
+    assert(nodeIndex < splittersByNodeIndex_.size());
+    return splittersByNodeIndex_[nodeIndex].paint;
+}
+
 SplitViewLayoutScratch& UISplitViewStateStorage::layoutScratchByIndex(u32 nodeIndex) noexcept
 {
     assert(nodeIndex < layoutScratchByNodeIndex_.size());

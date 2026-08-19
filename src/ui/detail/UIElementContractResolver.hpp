@@ -24,7 +24,7 @@ struct BuiltinSemanticsDefaults final {
 
 [[nodiscard]] constexpr bool isValidSemanticsRole(UISemanticsRole role) noexcept
 {
-    return role >= UISemanticsRole::Group && role <= UISemanticsRole::TabPanel;
+    return role >= UISemanticsRole::Group && role <= UISemanticsRole::Switch;
 }
 
 [[nodiscard]] constexpr bool isValidSemanticsActions(UISemanticsAction actions) noexcept
@@ -91,12 +91,15 @@ defaultBehaviorsForKind(BuiltinElementKind kind) noexcept
         return UIElementBehavior::Focusable | UIElementBehavior::Activate;
     case BuiltinElementKind::Splitter:
         return UIElementBehavior::Focusable | UIElementBehavior::RangeInput;
+    case BuiltinElementKind::MenuItem:
+        return UIElementBehavior::Focusable | UIElementBehavior::Activate;
     case BuiltinElementKind::Root:
     case BuiltinElementKind::Panel:
     case BuiltinElementKind::Label:
     case BuiltinElementKind::Tooltip:
     case BuiltinElementKind::SplitView:
     case BuiltinElementKind::TabView:
+    case BuiltinElementKind::Menu:
         return UIElementBehavior::None;
     }
     return UIElementBehavior::None;
@@ -141,11 +144,16 @@ defaultStyleRoleForKind(BuiltinElementKind kind) noexcept
         return UIStyleRoleId::Tab;
     case BuiltinElementKind::Tooltip:
         return UIStyleRoleId::TooltipSurface;
+    case BuiltinElementKind::Menu:
+        return UIStyleRoleId::MenuSurface;
+    case BuiltinElementKind::MenuItem:
+        return UIStyleRoleId::MenuItem;
     case BuiltinElementKind::Splitter:
-        return UIStyleRoleId::PanelSurface;
+        return UIStyleRoleId::Splitter;
     case BuiltinElementKind::Root:
     case BuiltinElementKind::Panel:
     case BuiltinElementKind::SplitView:
+    case BuiltinElementKind::TabView:
         return UIStyleRoleId::None;
     }
     return UIStyleRoleId::None;
@@ -243,12 +251,21 @@ defaultSemanticsForKind(BuiltinElementKind kind) noexcept
         defaults.actions = UISemanticsAction::Focus | UISemanticsAction::Activate;
         defaults.useContentAsName = true;
         break;
+    case BuiltinElementKind::Menu:
+        defaults.role = UISemanticsRole::Menu;
+        break;
+    case BuiltinElementKind::MenuItem:
+        defaults.role = UISemanticsRole::MenuItem;
+        defaults.actions = UISemanticsAction::Focus | UISemanticsAction::Activate;
+        defaults.useContentAsName = true;
+        break;
     }
     return defaults;
 }
 
 [[nodiscard]] Core::Status
 validateSemanticsContract(const UISemanticsDescriptor& descriptor,
-                          UIElementBehavior behaviors);
+                          UIElementBehavior behaviors,
+                          BuiltinElementKind kind = BuiltinElementKind::Panel);
 
 } // namespace Tina::UI::Detail

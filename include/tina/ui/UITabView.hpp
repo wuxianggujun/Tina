@@ -43,8 +43,11 @@ struct UITabConfig final {
 struct UITabPaint final {
     UIStraightSrgba8Color selectedBackgroundColor{};
     UIStraightSrgba8Color hoveredBackgroundColor{};
+    UIStraightSrgba8Color selectedHoveredBackgroundColor{};
     UIStraightSrgba8Color focusedBackgroundColor{};
+    UIStraightSrgba8Color selectedFocusedBackgroundColor{};
     UIStraightSrgba8Color pressedBackgroundColor{};
+    UIStraightSrgba8Color selectedPressedBackgroundColor{};
     UIStraightSrgba8Color disabledBackgroundColor{};
     UIStraightSrgba8Color focusedBorderColor{};
 

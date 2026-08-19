@@ -103,6 +103,15 @@ class PrimaryWindowUICapabilityState final {
     beginBuildTransaction(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                           UI::UINodeId parent, const UI::UIElementDescriptor& rootDescriptor,
                           UI::UIComponentBuildBudget budget);
+    [[nodiscard]] Core::Result<UI::UIIconButtonParts>
+    buildIconButton(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                    UI::UINodeId parent, const UI::UIIconButtonConfig& config);
+    [[nodiscard]] Core::Result<UI::UIFormFieldParts>
+    buildFormField(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                   UI::UINodeId parent, const UI::UIFormFieldConfig& config);
+    [[nodiscard]] Core::Result<UI::UIDialogParts>
+    buildDialog(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                UI::UINodeId parent, const UI::UIDialogConfig& config);
     [[nodiscard]] Core::Result<UI::UINodeId>
     createElementFromBuildTransaction(u64 epoch, PrimaryWindowUIPhase phase, UI::UINodeId parent,
                                       const UI::UIElementDescriptor& descriptor);
@@ -277,6 +286,12 @@ class PrimaryWindowUICapabilityState final {
     [[nodiscard]] Core::Result<bool> isSplitterDragging(
         u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
         UI::UINodeId splitter);
+    [[nodiscard]] Core::Status setSplitterPaint(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+        UI::UINodeId splitter, const UI::UISplitterPaint& paint);
+    [[nodiscard]] Core::Result<UI::UISplitterPaint> splitterPaint(
+        u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+        UI::UINodeId splitter);
     [[nodiscard]] Core::Status setTabViewItems(
         u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
         UI::UINodeId tabView, std::span<const UI::UITabViewItem> items, u32 activeIndex);
@@ -418,6 +433,32 @@ class PrimaryWindowUICapabilityState final {
     [[nodiscard]] Core::Result<UI::UITooltipMetrics> tooltipMetrics(
         u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
         UI::UINodeId tooltip);
+    [[nodiscard]] Core::Status setMenuAnchor(u64 epoch, PrimaryWindowUIPhase phase,
+                                             UI::UITreeUpdater& updater, UI::UINodeId menu,
+                                             UI::UINodeId anchor);
+    [[nodiscard]] Core::Status clearMenuAnchor(u64 epoch, PrimaryWindowUIPhase phase,
+                                               UI::UITreeUpdater& updater, UI::UINodeId menu);
+    [[nodiscard]] Core::Result<UI::UINodeId> menuAnchor(
+        u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+        UI::UINodeId menu);
+    [[nodiscard]] Core::Status setMenuOpen(u64 epoch, PrimaryWindowUIPhase phase,
+                                           UI::UITreeUpdater& updater, UI::UINodeId menu,
+                                           bool open);
+    [[nodiscard]] Core::Result<bool> isMenuOpen(
+        u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+        UI::UINodeId menu);
+    [[nodiscard]] Core::Result<UI::UIMenuMetrics> menuMetrics(
+        u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+        UI::UINodeId menu);
+    [[nodiscard]] Core::Status setMenuItemChecked(u64 epoch, PrimaryWindowUIPhase phase,
+                                                  UI::UITreeUpdater& updater, UI::UINodeId item,
+                                                  bool checked);
+    [[nodiscard]] Core::Result<bool> isMenuItemChecked(
+        u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+        UI::UINodeId item);
+    [[nodiscard]] Core::Result<UI::UIMenuCommandResult> routeMenuCommand(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+        UI::UINodeId menu, UI::UIMenuCommand command);
     [[nodiscard]] Core::Status setDropdownOpen(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                               UI::UINodeId dropdown, bool open);
     [[nodiscard]] Core::Result<bool> isDropdownOpen(u64 epoch, PrimaryWindowUIPhase phase,

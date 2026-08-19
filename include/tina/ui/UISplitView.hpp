@@ -3,6 +3,7 @@
 #include <tina/core/base/Types.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UINodeId.hpp>
+#include <tina/ui/UIPaint.hpp>
 
 #include <compare>
 
@@ -18,7 +19,9 @@ struct UISplitViewConfig final {
     float initialFraction = 0.5F;
     float minPrimarySize = 0.0F;
     float minSecondarySize = 0.0F;
-    float splitterExtent = 6.0F;
+    // Zero selects the active Theme density metric; a positive value is an
+    // explicit product override for this SplitView.
+    float splitterExtent = 0.0F;
 
     auto operator<=>(const UISplitViewConfig&) const = default;
 };
@@ -29,6 +32,20 @@ struct UISplitterConfig final {
     float keyboardStep = 0.02F;
 
     auto operator<=>(const UISplitterConfig&) const = default;
+};
+
+// Splitter chrome is intentionally separate from its hit extent. The owning
+// SplitView controls layout and pointer geometry; this profile only paints a
+// centered line and an optional FocusVisible ring inside that hit target.
+struct UISplitterPaint final {
+    UIStraightSrgba8Color lineColor{};
+    UIStraightSrgba8Color hoveredLineColor{};
+    UIStraightSrgba8Color draggingLineColor{};
+    UIStraightSrgba8Color focusRingColor{};
+    float lineThickness = 1.0F;
+    float focusRingThickness = 3.0F;
+
+    auto operator<=>(const UISplitterPaint&) const = default;
 };
 
 struct UISplitViewParts final {

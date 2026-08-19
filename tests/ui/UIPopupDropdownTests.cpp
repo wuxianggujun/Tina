@@ -526,7 +526,7 @@ TEST_F(UIPopupDropdownTest, ThemeAndSemanticsExposeComboListValueAndSelection)
     EXPECT_FALSE(firstSemantics->selected);
     EXPECT_TRUE(secondSemantics->selected);
 
-    const UI::UITheme light = UI::makeLightProductTheme();
+    const UI::UITheme light = UI::makeModernDesktopTheme(UI::UIColorScheme::Light);
     assertOk(context->setProductTheme(light));
     EXPECT_EQ(updater.buttonPaint(tree.dropdown).value(), UI::makeDropdownChrome(light).states);
     EXPECT_EQ(updater.dropdownPaint(tree.dropdown).value(), UI::makeDropdownChrome(light).dropdown);

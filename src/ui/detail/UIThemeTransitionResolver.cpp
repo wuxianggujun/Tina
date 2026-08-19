@@ -54,9 +54,17 @@ void clearDetachedBindings(ProductChrome& target, u16 targetBindings) noexcept
     {
         target.textEdit = {};
     }
+    if ((targetBindings & ThemeBindingImageTint) == 0)
+    {
+        target.imageTint = {};
+    }
     if ((targetBindings & ThemeBindingTabPaint) == 0)
     {
         target.tab = {};
+    }
+    if ((targetBindings & ThemeBindingSplitterPaint) == 0)
+    {
+        target.splitter = {};
     }
 }
 
@@ -95,7 +103,12 @@ ProductChromeTransition resolveProductChromeTransition(ProductChromeStorage curr
     classify(ThemeBindingListViewPaint, current.listView, transition.target.listView);
     classify(ThemeBindingTreeViewPaint, current.treeView, transition.target.treeView);
     classify(ThemeBindingTextEditPaint, current.textEdit, transition.target.textEdit);
+    classify(ThemeBindingImageTint,
+             current.imageTint != nullptr ? *current.imageTint
+                                          : UIStraightSrgba8Color{},
+             transition.target.imageTint);
     classify(ThemeBindingTabPaint, current.tab, transition.target.tab);
+    classify(ThemeBindingSplitterPaint, current.splitter, transition.target.splitter);
 
     const auto markLayoutChange = [&](u16 binding, bool changed) noexcept {
         if ((affectedBindings & binding) != 0 && changed)
@@ -105,7 +118,8 @@ ProductChromeTransition resolveProductChromeTransition(ProductChromeStorage curr
     };
     markLayoutChange(ThemeBindingTextStyle, textMeasureInputsDiffer(current.text, transition.target.text));
     markLayoutChange(ThemeBindingRadioButtonPaint,
-                     current.radioButton.labelGap != transition.target.radioButton.labelGap ||
+                     current.radioButton.indicatorExtent != transition.target.radioButton.indicatorExtent ||
+                         current.radioButton.labelGap != transition.target.radioButton.labelGap ||
                          current.radioButton.indicatorVisible != transition.target.radioButton.indicatorVisible);
     markLayoutChange(ThemeBindingScrollViewPaint,
                      current.scrollView.thickness != transition.target.scrollView.thickness ||
@@ -176,9 +190,17 @@ void applyProductChromeTransition(ProductChromeStorage storage, const ProductChr
     {
         storage.textEdit = transition.target.textEdit;
     }
+    if ((affectedBindings & ThemeBindingImageTint) != 0 && storage.imageTint != nullptr)
+    {
+        *storage.imageTint = transition.target.imageTint;
+    }
     if ((affectedBindings & ThemeBindingTabPaint) != 0)
     {
         storage.tab = transition.target.tab;
+    }
+    if ((affectedBindings & ThemeBindingSplitterPaint) != 0)
+    {
+        storage.splitter = transition.target.splitter;
     }
 }
 

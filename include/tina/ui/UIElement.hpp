@@ -2,23 +2,29 @@
 
 #include <tina/core/base/Types.hpp>
 #include <tina/ui/UIBehavior.hpp>
+#include <tina/ui/UIBadge.hpp>
 #include <tina/ui/UIContent.hpp>
+#include <tina/ui/UIDivider.hpp>
 #include <tina/ui/UIFocus.hpp>
 #include <tina/ui/UIHitTest.hpp>
 #include <tina/ui/UIIcon.hpp>
 #include <tina/ui/UIImage.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UIListView.hpp>
+#include <tina/ui/UIMenu.hpp>
 #include <tina/ui/UIPaint.hpp>
 #include <tina/ui/UISemantics.hpp>
 #include <tina/ui/UISplitView.hpp>
 #include <tina/ui/UIStyle.hpp>
+#include <tina/ui/UISurface.hpp>
 #include <tina/ui/UITabView.hpp>
 #include <tina/ui/UIText.hpp>
 #include <tina/ui/UITextEdit.hpp>
+#include <tina/ui/UIToggleSwitch.hpp>
 #include <tina/ui/UITooltip.hpp>
 #include <tina/ui/UITreeView.hpp>
 
+#include <limits>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -48,6 +54,8 @@ struct UIElementDescriptor final {
     std::optional<UISplitterConfig> splitter{};
     std::optional<UITabViewConfig> tabView{};
     std::optional<UITabConfig> tab{};
+    std::optional<UIMenuConfig> menu{};
+    std::optional<UIMenuItemConfig> menuItem{};
     std::optional<UITextStyle> textStyle{};
     UIContentAlignment contentAlignment{};
     UIElementVisual visual{};
@@ -188,6 +196,252 @@ struct UIElementDescriptor final {
             .actions = UISemanticsAction::Focus | UISemanticsAction::Activate,
             .useContentAsName = true,
         },
+    };
+}
+
+[[nodiscard]] constexpr UIElementDescriptor makeMenuElement(
+    UIMenuConfig config = {}, UILayoutStyle layout = {}) noexcept
+{
+    layout.placement = UILayoutPlacement::Overlay;
+    layout.flexContainer.direction = UIFlexDirection::Column;
+    if (layout.padding == UIEdgeSpacing{})
+    {
+        layout.padding = UIEdgeSpacing::All(4.0F);
+    }
+    return UIElementDescriptor{
+        .layout = layout,
+        .menu = config,
+        .visual = {.styleRole = UIStyleRoleId::MenuSurface},
+        .semantics = {
+            .mode = UISemanticsMode::Publish,
+            .role = UISemanticsRole::Menu,
+        },
+        .pointerHitPolicy = UIPointerHitPolicy::Ignore,
+        .focusScopeMode = UIFocusScopeMode::Contain,
+    };
+}
+
+[[nodiscard]] constexpr UIElementDescriptor makeMenuItemElement(
+    std::string_view text = {}, UIMenuItemConfig config = {},
+    UILayoutStyle layout = {}) noexcept
+{
+    if (layout.padding == UIEdgeSpacing{})
+    {
+        layout.padding = UIEdgeSpacing::HorizontalVertical(8.0F, 6.0F);
+    }
+    const bool separator = config.kind == UIMenuItemKind::Separator;
+    const UIElementBehavior behaviors = separator
+                                            ? UIElementBehavior::None
+                                            : UIElementBehavior::Focusable |
+                                                  UIElementBehavior::Activate;
+    const bool check = config.kind == UIMenuItemKind::Check;
+    const bool radio = config.kind == UIMenuItemKind::Radio;
+    return UIElementDescriptor{
+        .layout = layout,
+        .text = separator ? std::optional<std::string_view>{}
+                          : std::optional<std::string_view>{text},
+        .menuItem = config,
+        .contentAlignment = separator
+                              ? UIContentAlignment{}
+                              : UIContentAlignment{
+                                    .horizontal = UIAxisAlignment::Start,
+                                    .vertical = UIAxisAlignment::Center,
+                                },
+        .visual = {.styleRole = UIStyleRoleId::MenuItem},
+        .behaviors = behaviors,
+        .semantics = separator
+                         ? UISemanticsDescriptor{.mode = UISemanticsMode::Exclude}
+                         : UISemanticsDescriptor{
+                               .mode = UISemanticsMode::Publish,
+                               .role = UISemanticsRole::MenuItem,
+                               .actions = UIElementBehavior::None == behaviors
+                                              ? UISemanticsAction::None
+                                              : UISemanticsAction::Focus |
+                                                    UISemanticsAction::Activate |
+                                                    ((check || radio) ? UISemanticsAction::Toggle
+                                                                      : UISemanticsAction::None),
+                               .useContentAsName = true,
+                           },
+        .pointerHitPolicy = separator ? std::optional{UIPointerHitPolicy::Ignore}
+                                      : std::optional{UIPointerHitPolicy::Targetable},
+    };
+}
+
+[[nodiscard]] constexpr UIElementDescriptor makeSurfaceElement(
+    UISurfaceConfig config = {}, UILayoutStyle layout = {}) noexcept
+{
+    UIStyleRoleId role = UIStyleRoleId::None;
+    switch (config.variant)
+    {
+    case UISurfaceVariant::Plain:
+        role = UIStyleRoleId::None;
+        break;
+    case UISurfaceVariant::Filled:
+        role = UIStyleRoleId::PanelSurface;
+        break;
+    case UISurfaceVariant::Elevated:
+        role = UIStyleRoleId::PanelElevated;
+        break;
+    default:
+        role = static_cast<UIStyleRoleId>(0xFFU);
+        break;
+    }
+    return UIElementDescriptor{
+        .layout = layout,
+        .visual = {.styleRole = role},
+        .semantics = {.mode = UISemanticsMode::Automatic},
+        .pointerHitPolicy = UIPointerHitPolicy::Ignore,
+    };
+}
+
+[[nodiscard]] constexpr UIElementDescriptor makeDividerElement(
+    UIDividerConfig config = {}, UILayoutStyle layout = {}) noexcept
+{
+    UIStyleRoleId role = UIStyleRoleId::DividerSubtle;
+    switch (config.tone)
+    {
+    case UIDividerTone::Subtle:
+        role = UIStyleRoleId::DividerSubtle;
+        break;
+    case UIDividerTone::Strong:
+        role = UIStyleRoleId::DividerStrong;
+        break;
+    case UIDividerTone::Accent:
+        role = UIStyleRoleId::DividerAccent;
+        break;
+    default:
+        role = static_cast<UIStyleRoleId>(0xFFU);
+        break;
+    }
+
+    switch (config.orientation)
+    {
+    case UIDividerOrientation::Horizontal:
+        // Preserve an invalid thickness in the descriptor even when callers
+        // provide an explicit height; normalizeLayoutStyle then rejects the
+        // whole recipe instead of silently accepting a malformed profile.
+        if (!(config.thickness >= 0.0F &&
+              config.thickness < (std::numeric_limits<float>::infinity)()))
+        {
+            layout.size.height = UILayoutLength::Px(config.thickness);
+        }
+        if (layout.size.height.isAuto())
+        {
+            layout.size.height = UILayoutLength::Px(config.thickness);
+        }
+        break;
+    case UIDividerOrientation::Vertical:
+        if (!(config.thickness >= 0.0F &&
+              config.thickness < (std::numeric_limits<float>::infinity)()))
+        {
+            layout.size.width = UILayoutLength::Px(config.thickness);
+        }
+        if (layout.size.width.isAuto())
+        {
+            layout.size.width = UILayoutLength::Px(config.thickness);
+        }
+        break;
+    default:
+        role = static_cast<UIStyleRoleId>(0xFFU);
+        break;
+    }
+
+    return UIElementDescriptor{
+        .layout = layout,
+        .visual = {.styleRole = role},
+        .semantics = {.mode = UISemanticsMode::Exclude},
+        .pointerHitPolicy = UIPointerHitPolicy::Ignore,
+    };
+}
+
+[[nodiscard]] constexpr UIElementDescriptor makeBadgeElement(
+    std::string_view text, UIBadgeConfig config = {},
+    UILayoutStyle layout = {}) noexcept
+{
+    if (layout.padding == UIEdgeSpacing{})
+    {
+        layout.padding = UIEdgeSpacing::HorizontalVertical(8.0F, 3.0F);
+    }
+
+    UIStyleRoleId role = UIStyleRoleId::BadgeNeutral;
+    switch (config.tone)
+    {
+    case UIBadgeTone::Neutral:
+        role = UIStyleRoleId::BadgeNeutral;
+        break;
+    case UIBadgeTone::Accent:
+        role = UIStyleRoleId::BadgeAccent;
+        break;
+    case UIBadgeTone::Danger:
+        role = UIStyleRoleId::BadgeDanger;
+        break;
+    default:
+        role = static_cast<UIStyleRoleId>(0xFFU);
+        break;
+    }
+
+    return UIElementDescriptor{
+        .layout = layout,
+        .text = text,
+        .contentAlignment = {
+            .horizontal = UIAxisAlignment::Center,
+            .vertical = UIAxisAlignment::Center,
+        },
+        .visual = {.styleRole = role},
+        .semantics = {
+            .mode = UISemanticsMode::Publish,
+            .role = UISemanticsRole::Label,
+            .useContentAsName = true,
+            .readOnly = true,
+        },
+        .pointerHitPolicy = UIPointerHitPolicy::Ignore,
+    };
+}
+
+[[nodiscard]] constexpr UIElementDescriptor makeToggleSwitchElement(
+    UIToggleSwitchConfig config = {}, UILayoutStyle layout = {}) noexcept
+{
+    UIStyleRoleId role = UIStyleRoleId::ToggleSwitch;
+    switch (config.size)
+    {
+    case UIToggleSwitchSize::Compact:
+        if (layout.size.width.isAuto())
+        {
+            layout.size.width = UILayoutLength::Px(36.0F);
+        }
+        if (layout.size.height.isAuto())
+        {
+            layout.size.height = UILayoutLength::Px(20.0F);
+        }
+        break;
+    case UIToggleSwitchSize::Standard:
+        if (layout.size.width.isAuto())
+        {
+            layout.size.width = UILayoutLength::Px(44.0F);
+        }
+        if (layout.size.height.isAuto())
+        {
+            layout.size.height = UILayoutLength::Px(24.0F);
+        }
+        break;
+    default:
+        role = static_cast<UIStyleRoleId>(0xFFU);
+        break;
+    }
+
+    return UIElementDescriptor{
+        .layout = layout,
+        .visual = {.styleRole = role},
+        .behaviors = UIElementBehavior::Focusable | UIElementBehavior::Activate |
+                     UIElementBehavior::Toggle,
+        .semantics = {
+            .mode = UISemanticsMode::Publish,
+            .role = UISemanticsRole::Switch,
+            .name = config.accessibleName,
+            .actions = UISemanticsAction::Focus | UISemanticsAction::Activate |
+                       UISemanticsAction::Toggle,
+        },
+        .pointerHitPolicy = UIPointerHitPolicy::Targetable,
     };
 }
 

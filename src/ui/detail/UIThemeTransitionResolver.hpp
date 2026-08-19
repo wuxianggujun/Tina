@@ -18,6 +18,8 @@ struct ProductChromeStorage final {
     UITreeViewPaint& treeView;
     UITextEditPaint& textEdit;
     UITabPaint& tab;
+    UISplitterPaint& splitter;
+    UIStraightSrgba8Color* imageTint = nullptr;
 };
 
 struct ProductChromeTransition final {

@@ -2,6 +2,7 @@
 
 #include <tina/ui/InputRouting.hpp>
 #include <tina/ui/UIAccessibility.hpp>
+#include <tina/ui/UIBadge.hpp>
 #include <tina/ui/UIBehavior.hpp>
 #include <tina/ui/UIButton.hpp>
 #include <tina/ui/UICheckbox.hpp>
@@ -13,6 +14,8 @@
 #include <tina/ui/UIContent.hpp>
 #include <tina/ui/UIContext.hpp>
 #include <tina/ui/UIContextConfig.hpp>
+#include <tina/ui/UIDialog.hpp>
+#include <tina/ui/UIDivider.hpp>
 #include <tina/ui/UIDirty.hpp>
 #include <tina/ui/UIElement.hpp>
 #include <tina/ui/UIDropdown.hpp>
@@ -20,12 +23,15 @@
 #include <tina/ui/UIEventRouting.hpp>
 #include <tina/ui/UIFocus.hpp>
 #include <tina/ui/UIFlow.hpp>
+#include <tina/ui/UIFormField.hpp>
 #include <tina/ui/UIHitTest.hpp>
 #include <tina/ui/UIIcon.hpp>
+#include <tina/ui/UIIconButton.hpp>
 #include <tina/ui/UIImage.hpp>
 #include <tina/ui/UIImageSource.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UIListView.hpp>
+#include <tina/ui/UIMenu.hpp>
 #include <tina/ui/UIMotion.hpp>
 #include <tina/ui/UINodeId.hpp>
 #include <tina/ui/UIPaint.hpp>
@@ -38,10 +44,12 @@
 #include <tina/ui/UISlider.hpp>
 #include <tina/ui/UISplitView.hpp>
 #include <tina/ui/UIStyle.hpp>
+#include <tina/ui/UISurface.hpp>
 #include <tina/ui/UITabView.hpp>
 #include <tina/ui/UIText.hpp>
 #include <tina/ui/UITextEdit.hpp>
 #include <tina/ui/UITheme.hpp>
+#include <tina/ui/UIToggleSwitch.hpp>
 #include <tina/ui/UITooltip.hpp>
 #include <tina/ui/UITreeView.hpp>
 #include <tina/ui/text/UIGlyphAtlas.hpp>

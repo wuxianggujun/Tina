@@ -21,6 +21,8 @@ namespace {
         .treeView = chrome.treeView,
         .textEdit = chrome.textEdit,
         .tab = chrome.tab,
+        .splitter = chrome.splitter,
+        .imageTint = &chrome.imageTint,
     };
 }
 
@@ -28,8 +30,8 @@ TEST(UIThemeTransitionResolverTests, TracksTextEditPaintAsPaintOnlyBinding)
 {
     using namespace UI::Detail;
 
-    const UI::UITheme theme = UI::makeLightProductTheme();
-    ProductChrome current = productChromeFor(UI::UIStyleRoleId::TextInput, UI::makeDefaultProductTheme());
+    const UI::UITheme theme = UI::makeModernDesktopTheme(UI::UIColorScheme::Light);
+    ProductChrome current = productChromeFor(UI::UIStyleRoleId::TextInput, UI::makeModernDesktopTheme());
 
     const ProductChromeTransition transition = resolveProductChromeTransition(
         storageFor(current), UI::UIStyleRoleId::TextInput, theme, ThemeBindingTextEditPaint,
@@ -41,11 +43,32 @@ TEST(UIThemeTransitionResolverTests, TracksTextEditPaintAsPaintOnlyBinding)
     EXPECT_EQ(current.textEdit, UI::makeTextEditChrome(theme).paint);
 }
 
+TEST(UIThemeTransitionResolverTests, TracksImageTintAsPaintOnlyBinding)
+{
+    using namespace UI::Detail;
+
+    const UI::UITheme light =
+        UI::makeModernDesktopTheme(UI::UIColorScheme::Light);
+    ProductChrome current = productChromeFor(
+        UI::UIStyleRoleId::IconOnPrimary,
+        UI::makeModernDesktopTheme(UI::UIColorScheme::Dark));
+
+    const ProductChromeTransition transition = resolveProductChromeTransition(
+        storageFor(current), UI::UIStyleRoleId::IconOnPrimary, light,
+        ThemeBindingImageTint, ThemeBindingImageTint);
+
+    EXPECT_EQ(transition.changedBindings, ThemeBindingImageTint);
+    EXPECT_EQ(transition.layoutAffectingBindings, 0U);
+    applyProductChromeTransition(storageFor(current), transition,
+                                 ThemeBindingImageTint);
+    EXPECT_EQ(current.imageTint, light.colors.onPrimary);
+}
+
 TEST(UIThemeTransitionResolverTests, IdenticalChromeHasNoChanges)
 {
     using namespace UI::Detail;
 
-    const UI::UITheme theme = UI::makeLightProductTheme();
+    const UI::UITheme theme = UI::makeModernDesktopTheme(UI::UIColorScheme::Light);
     ProductChrome current = productChromeFor(UI::UIStyleRoleId::Dropdown, theme);
     const u16 bindings = defaultThemeBindingsFor(UI::UIStyleRoleId::Dropdown);
 
@@ -60,7 +83,7 @@ TEST(UIThemeTransitionResolverTests, ClassifiesEveryLayoutAffectingChromeInput)
 {
     using namespace UI::Detail;
 
-    const UI::UITheme theme = UI::makeDefaultProductTheme();
+    const UI::UITheme theme = UI::makeModernDesktopTheme();
     ProductChrome current = productChromeFor(UI::UIStyleRoleId::None, theme);
     current.text.logicalSize = 1.0F;
     current.radioButton.labelGap = 1.0F;
@@ -82,7 +105,7 @@ TEST(UIThemeTransitionResolverTests, IndicatorVisibilityChangeRequiresLayout)
 {
     using namespace UI::Detail;
 
-    const UI::UITheme theme = UI::makeDefaultProductTheme();
+    const UI::UITheme theme = UI::makeModernDesktopTheme();
     ProductChrome current = productChromeFor(UI::UIStyleRoleId::RadioButton, theme);
 
     const ProductChromeTransition transition = resolveProductChromeTransition(
@@ -98,7 +121,7 @@ TEST(UIThemeTransitionResolverTests, ClearsDetachedBindingsAndAppliesOnlyAffecte
 {
     using namespace UI::Detail;
 
-    const UI::UITheme theme = UI::makeLightProductTheme();
+    const UI::UITheme theme = UI::makeModernDesktopTheme(UI::UIColorScheme::Light);
     ProductChrome current = productChromeFor(UI::UIStyleRoleId::ButtonPrimary, theme);
     const UI::UITreeViewPaint retainedTreeView = UI::makeTreeViewPaint(theme);
     current.treeView = retainedTreeView;

@@ -22,6 +22,21 @@ Exclude semantics。业务代码不再直接用 `UIImageContent` 表达 Icon，�
 ADR 的 Accepted 决策：UIIcon 继续复用 Image content fixed-capacity storage、resolver/pin、Texture2D、
 ImageQuad、DisplayList 与 GPU shader，不新增 Icon Widget/Asset/atlas/pipeline。
 
+实现注记（2026-08-19）：`UI-MENU-001` 已以独立 `UIMenuStateStorage`、`UIMenuLayout`、`UIMenuInput`
+固定容量模块落地；`UIContext` 仍是唯一 owner/commit coordinator，Menu 与 Popup 只共享 transient overlay
+协调，不共享 state/runtime。这是本 ADR 已接受模块边界的实现收口，不改变 Accepted 理由。
+
+实现注记（2026-08-19）：`UI-VISUAL-COMPONENTS-001` 以 Surface/Divider/Badge 强类型无状态 authoring
+profiles 与 ToggleSwitch 落地。前三者只映射普通 Element chrome，Switch 复用 Checkbox Toggle/input/action/
+capacity，仅增加 theme track/thumb projection 与 Switch semantics；未新增 Widget ABI、state store、update loop
+或 Render pipeline。这是本 ADR 已接受组合优先边界的实现注记，不改变 Accepted 理由。
+
+实现注记（2026-08-19）：Tina Modern Desktop 的 `UIIconButton`、`UIFormField`、`UIDialog` 已作为固定预算
+多节点 composition profile 落地。它们通过精确 `required*BuildBudget()` 和同一 component transaction 组合
+既有 Button/Icon/Tooltip、Label/TextEdit 与 Modal/Surface，不新增 Behavior、Focus/Modal、Semantics、Image
+或 Render owner；直接 UIContext、UITreeUpdater 与 Runtime phase facade 共享同一实现。这是对本 ADR
+“优先组合既有 Element/Behavior”的实现注记，不改写 Accepted 决策理由。
+
 ## 背景
 
 ADR 0011 已决定使用自研 Retained UI 和 backend-neutral DisplayList；ADR 0021 已决定 Game SDK 只取得

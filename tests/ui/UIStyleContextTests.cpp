@@ -222,6 +222,47 @@ TEST(UIStyleContextTests, RegisteredColorTokenDrivesCommittedBoxFill)
     EXPECT_EQ(lateToken.error().code, UI::UIErrorCode::InvalidStyle);
 }
 
+TEST(UIStyleContextTests, FocusVisibleIsDerivedFromFocusAndNonPointerModality)
+{
+    auto context = createStyleContext(styleTestCapacity());
+    ASSERT_NE(context, nullptr);
+    const UI::UIStraightSrgba8Color focusedColor = UI::rgb(0xA04444);
+    const UI::UIStraightSrgba8Color focusVisibleColor = UI::rgb(0x4488DD);
+    const std::array rules{
+        UI::UIStyleBoxFillRule{
+            .role = UI::UIStyleRoleId::ButtonTonal,
+            .requiredStates = UI::UIStyleState::Focused,
+            .color = focusedColor,
+        },
+        UI::UIStyleBoxFillRule{
+            .role = UI::UIStyleRoleId::ButtonTonal,
+            .requiredStates = UI::UIStyleState::FocusVisible,
+            .color = focusVisibleColor,
+        },
+    };
+    assertOk(context->installStyleSheet(rules));
+
+    auto root = createStyleRoot(*context);
+    ASSERT_TRUE(root);
+    auto button = context->rootBuilder().createElement(
+        root.rootNodeId(), UI::makeButtonElement("", fixedSize(60.0F, 30.0F)));
+    ASSERT_TRUE(button.has_value()) << button.error().message;
+    assertOk(context->commitLayout({.width = 100.0F, .height = 60.0F}));
+    assertOk(context->requestFocus(*button));
+    assertOk(context->commitLayout({.width = 100.0F, .height = 60.0F}));
+    EXPECT_TRUE(hasPaintFill(context->committedPaint(), *button,
+                             UI::premultiply(focusedColor)));
+    EXPECT_FALSE(hasPaintFill(context->committedPaint(), *button,
+                              UI::premultiply(focusVisibleColor)));
+
+    auto navigation = context->routeFocusNavigation(
+        UI::UIFocusNavigationDirection::Right, true, UI::UIInputModality::Keyboard);
+    ASSERT_TRUE(navigation.has_value()) << navigation.error().message;
+    assertOk(context->commitLayout({.width = 100.0F, .height = 60.0F}));
+    EXPECT_TRUE(hasPaintFill(context->committedPaint(), *button,
+                             UI::premultiply(focusVisibleColor)));
+}
+
 TEST(UIStyleContextTests, RuntimeColorTokenUpdateDirtiesOnlyWinningDependencies)
 {
     auto context = createStyleContext(styleTestCapacity());

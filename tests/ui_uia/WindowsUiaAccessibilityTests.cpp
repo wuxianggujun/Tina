@@ -71,6 +71,7 @@ TEST(WindowsUiaMappingTest, RoleMapsToUiaControlTypeConstants)
 {
     EXPECT_EQ(UI::Uia::controlTypeFromRole(UI::UISemanticsRole::Button), UI::Uia::kControlTypeButton);
     EXPECT_EQ(UI::Uia::controlTypeFromRole(UI::UISemanticsRole::Checkbox), UI::Uia::kControlTypeCheckBox);
+    EXPECT_EQ(UI::Uia::controlTypeFromRole(UI::UISemanticsRole::Switch), UI::Uia::kControlTypeCheckBox);
     EXPECT_EQ(UI::Uia::controlTypeFromRole(UI::UISemanticsRole::Slider), UI::Uia::kControlTypeSlider);
     EXPECT_EQ(UI::Uia::controlTypeFromRole(UI::UISemanticsRole::ProgressBar), UI::Uia::kControlTypeProgressBar);
     EXPECT_EQ(UI::Uia::controlTypeFromRole(UI::UISemanticsRole::RadioButton), UI::Uia::kControlTypeRadioButton);
@@ -82,6 +83,8 @@ TEST(WindowsUiaMappingTest, RoleMapsToUiaControlTypeConstants)
     EXPECT_EQ(UI::Uia::controlTypeFromRole(UI::UISemanticsRole::TabList), UI::Uia::kControlTypeTab);
     EXPECT_EQ(UI::Uia::controlTypeFromRole(UI::UISemanticsRole::Tab), UI::Uia::kControlTypeTabItem);
     EXPECT_EQ(UI::Uia::controlTypeFromRole(UI::UISemanticsRole::TabPanel), UI::Uia::kControlTypePane);
+    EXPECT_EQ(UI::Uia::controlTypeFromRole(UI::UISemanticsRole::Menu), UI::Uia::kControlTypeMenu);
+    EXPECT_EQ(UI::Uia::controlTypeFromRole(UI::UISemanticsRole::MenuItem), UI::Uia::kControlTypeMenuItem);
     EXPECT_EQ(UI::Uia::controlTypeFromRole(UI::UISemanticsRole::Group), UI::Uia::kControlTypeGroup);
 }
 
@@ -112,6 +115,12 @@ TEST(WindowsUiaMappingTest, MapsEnabledFocusRangeToggleAndValue)
     const auto mappedCheckbox = UI::Uia::mapAccessibilityNode(checkbox);
     ASSERT_TRUE(mappedCheckbox.toggleState.has_value());
     EXPECT_EQ(*mappedCheckbox.toggleState, UI::Uia::kToggleStateOn);
+
+    checkbox.role = UI::UISemanticsRole::Switch;
+    const auto mappedSwitch = UI::Uia::mapAccessibilityNode(checkbox);
+    EXPECT_EQ(mappedSwitch.controlTypeId, UI::Uia::kControlTypeCheckBox);
+    ASSERT_TRUE(mappedSwitch.toggleState.has_value());
+    EXPECT_EQ(*mappedSwitch.toggleState, UI::Uia::kToggleStateOn);
 
     UI::UIAccessibilityNode slider{
         .role = UI::UISemanticsRole::Slider,
@@ -630,6 +639,149 @@ TEST(WindowsUiaHostBridgeTest, PatternsMarshalActionsAndPreserveControlBehavior)
     auto text = updater.text(*textEdit);
     ASSERT_TRUE(text.has_value());
     EXPECT_EQ(*text, "Accessible Player");
+
+    bridge->detach();
+    (void)::DestroyWindow(hwnd);
+}
+
+TEST(WindowsUiaHostBridgeTest, MenuItemsExposeControlTypesAndTypedPatterns)
+{
+    auto bridgeResult = UI::createWindowsUiaHostBridge();
+    ASSERT_TRUE(bridgeResult.has_value());
+    auto bridge = std::move(*bridgeResult);
+    const HWND hwnd =
+        ::CreateWindowExW(0, L"STATIC", L"TinaUiaMenuTest", WS_OVERLAPPEDWINDOW,
+                          CW_USEDEFAULT, CW_USEDEFAULT, 400, 260, nullptr, nullptr,
+                          ::GetModuleHandleW(nullptr), nullptr);
+    ASSERT_NE(hwnd, nullptr);
+    assertOk(bridge->attach(hwnd));
+
+    auto windows = WindowPool::Create(1);
+    ASSERT_TRUE(windows.has_value());
+    const auto window = *windows->tryEmplace(1);
+    auto context = createContext(window);
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root.hasValue());
+    auto updater = createUpdater(*context, root);
+
+    auto menu = updater.createElement(
+        root.rootNodeId(),
+        UI::makeMenuElement(
+            {.placement = UI::UIMenuPlacement::Below, .closeOnActivate = false},
+            fixedSize(160.0F, 92.0F)));
+    ASSERT_TRUE(menu.has_value()) << menu.error().message;
+    auto command = updater.createElement(
+        *menu, UI::makeMenuItemElement("Open", {}, fixedSize(152.0F, 28.0F)));
+    auto check = updater.createElement(
+        *menu, UI::makeMenuItemElement(
+                   "Grid", {.kind = UI::UIMenuItemKind::Check, .checked = true},
+                   fixedSize(152.0F, 28.0F)));
+    auto radio = updater.createElement(
+        *menu, UI::makeMenuItemElement(
+                   "Nearest", {.kind = UI::UIMenuItemKind::Radio, .checked = true},
+                   fixedSize(152.0F, 28.0F)));
+    auto anchor = updater.createElement(
+        root.rootNodeId(), UI::makeButtonElement("View", fixedSize(120.0F, 32.0F)));
+    ASSERT_TRUE(command.has_value()) << command.error().message;
+    ASSERT_TRUE(check.has_value()) << check.error().message;
+    ASSERT_TRUE(radio.has_value()) << radio.error().message;
+    ASSERT_TRUE(anchor.has_value()) << anchor.error().message;
+
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(360.0F, 220.0F)));
+    assertOk(updater.setMenuAnchor(*menu, *anchor));
+    assertOk(context->commitLayout({.width = 360.0F, .height = 220.0F}));
+    assertOk(updater.setMenuOpen(*menu, true));
+    assertOk(context->commitLayout({.width = 360.0F, .height = 220.0F}));
+
+    UI::UIAccessibilityTree tree;
+    assertOk(tree.rebuildFrom(context->committedSemantics()));
+    assertOk(bridge->publish(tree, *context));
+
+    ComPtr<IRawElementProviderSimple> rootSimple;
+    rootSimple.Attach(bridge->acquireRootProvider());
+    ASSERT_NE(rootSimple.Get(), nullptr);
+    ComPtr<IRawElementProviderFragment> rootFragment;
+    ASSERT_HRESULT_SUCCEEDED(rootSimple.As(&rootFragment));
+
+    const auto controlType = [](IRawElementProviderFragment* fragment) {
+        ComPtr<IRawElementProviderSimple> simple;
+        EXPECT_HRESULT_SUCCEEDED(fragment->QueryInterface(IID_PPV_ARGS(&simple)));
+        VARIANT value{};
+        ::VariantInit(&value);
+        EXPECT_HRESULT_SUCCEEDED(
+            simple->GetPropertyValue(UIA_ControlTypePropertyId, &value));
+        const LONG result = value.vt == VT_I4 ? value.lVal : 0;
+        ::VariantClear(&value);
+        return result;
+    };
+
+    ComPtr<IRawElementProviderFragment> menuFragment;
+    ASSERT_HRESULT_SUCCEEDED(
+        rootFragment->Navigate(NavigateDirection_FirstChild, &menuFragment));
+    while (menuFragment.Get() != nullptr &&
+           controlType(menuFragment.Get()) != static_cast<LONG>(UI::Uia::kControlTypeMenu))
+    {
+        ComPtr<IRawElementProviderFragment> next;
+        ASSERT_HRESULT_SUCCEEDED(
+            menuFragment->Navigate(NavigateDirection_NextSibling, &next));
+        menuFragment = std::move(next);
+    }
+    ASSERT_NE(menuFragment.Get(), nullptr);
+    EXPECT_EQ(controlType(menuFragment.Get()), static_cast<LONG>(UI::Uia::kControlTypeMenu));
+
+    ComPtr<IRawElementProviderFragment> commandFragment;
+    ASSERT_HRESULT_SUCCEEDED(
+        menuFragment->Navigate(NavigateDirection_FirstChild, &commandFragment));
+    ASSERT_NE(commandFragment.Get(), nullptr);
+    EXPECT_EQ(controlType(commandFragment.Get()),
+              static_cast<LONG>(UI::Uia::kControlTypeMenuItem));
+    ComPtr<IRawElementProviderSimple> commandSimple;
+    ASSERT_HRESULT_SUCCEEDED(commandFragment.As(&commandSimple));
+    ComPtr<IUnknown> invokeUnknown;
+    ASSERT_HRESULT_SUCCEEDED(
+        commandSimple->GetPatternProvider(UIA_InvokePatternId, &invokeUnknown));
+    EXPECT_NE(invokeUnknown.Get(), nullptr);
+    ComPtr<IUnknown> commandToggleUnknown;
+    ASSERT_HRESULT_SUCCEEDED(
+        commandSimple->GetPatternProvider(UIA_TogglePatternId, &commandToggleUnknown));
+    EXPECT_EQ(commandToggleUnknown.Get(), nullptr);
+
+    ComPtr<IRawElementProviderFragment> checkFragment;
+    ASSERT_HRESULT_SUCCEEDED(
+        commandFragment->Navigate(NavigateDirection_NextSibling, &checkFragment));
+    ASSERT_NE(checkFragment.Get(), nullptr);
+    EXPECT_EQ(controlType(checkFragment.Get()),
+              static_cast<LONG>(UI::Uia::kControlTypeMenuItem));
+    ComPtr<IRawElementProviderSimple> checkSimple;
+    ASSERT_HRESULT_SUCCEEDED(checkFragment.As(&checkSimple));
+    ComPtr<IUnknown> checkToggleUnknown;
+    ASSERT_HRESULT_SUCCEEDED(
+        checkSimple->GetPatternProvider(UIA_TogglePatternId, &checkToggleUnknown));
+    ASSERT_NE(checkToggleUnknown.Get(), nullptr);
+    ComPtr<IToggleProvider> checkToggle;
+    ASSERT_HRESULT_SUCCEEDED(checkToggleUnknown.As(&checkToggle));
+    ToggleState checkState = ToggleState_Indeterminate;
+    ASSERT_HRESULT_SUCCEEDED(checkToggle->get_ToggleState(&checkState));
+    EXPECT_EQ(checkState, ToggleState_On);
+
+    ComPtr<IRawElementProviderFragment> radioFragment;
+    ASSERT_HRESULT_SUCCEEDED(
+        checkFragment->Navigate(NavigateDirection_NextSibling, &radioFragment));
+    ASSERT_NE(radioFragment.Get(), nullptr);
+    EXPECT_EQ(controlType(radioFragment.Get()),
+              static_cast<LONG>(UI::Uia::kControlTypeMenuItem));
+    ComPtr<IRawElementProviderSimple> radioSimple;
+    ASSERT_HRESULT_SUCCEEDED(radioFragment.As(&radioSimple));
+    ComPtr<IUnknown> radioToggleUnknown;
+    ASSERT_HRESULT_SUCCEEDED(
+        radioSimple->GetPatternProvider(UIA_TogglePatternId, &radioToggleUnknown));
+    ASSERT_NE(radioToggleUnknown.Get(), nullptr);
+    ComPtr<IToggleProvider> radioToggle;
+    ASSERT_HRESULT_SUCCEEDED(radioToggleUnknown.As(&radioToggle));
+    ToggleState radioState = ToggleState_Indeterminate;
+    ASSERT_HRESULT_SUCCEEDED(radioToggle->get_ToggleState(&radioState));
+    EXPECT_EQ(radioState, ToggleState_On);
 
     bridge->detach();
     (void)::DestroyWindow(hwnd);

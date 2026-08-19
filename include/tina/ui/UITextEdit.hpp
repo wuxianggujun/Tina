@@ -12,6 +12,7 @@ struct UITextEditPaint final {
     UIStraightSrgba8Color pressedBackgroundColor{};
     UIStraightSrgba8Color focusedBackgroundColor{};
     UIStraightSrgba8Color disabledBackgroundColor{};
+    UIStraightSrgba8Color focusedBorderColor{};
     UIStraightSrgba8Color selectionBackgroundColor{
         .red = 42,
         .green = 112,

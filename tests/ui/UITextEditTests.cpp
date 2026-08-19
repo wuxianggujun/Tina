@@ -124,6 +124,13 @@ TEST_F(UITextEditTest, PaintStatesReuseHoverArmAndFocusWithoutStalePressedFeedba
         window, UI::UIRoutedPointerEventKind::Move, 6, 300.0F, 10.0F));
     ASSERT_TRUE(outside.has_value()) << (outside ? "" : outside.error().message);
     publishLayout();
+    expectBackground(UI::premultiply(Normal));
+
+    auto keyboardNavigation = context->routeFocusNavigation(
+        UI::UIFocusNavigationDirection::Right, true,
+        UI::UIInputModality::Keyboard);
+    ASSERT_TRUE(keyboardNavigation.has_value()) << keyboardNavigation.error().message;
+    publishLayout();
     expectBackground(UI::premultiply(Paint.focusedBackgroundColor));
 
     assertOk(updater.setEnabled(textEdit, false));

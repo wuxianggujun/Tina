@@ -80,7 +80,7 @@ TEST(UILayoutMeasurementTests, ResolvesSquareIndicatorAfterHeightConstraints)
             .size = {.width = 30.0F, .height = 10.0F},
             .indicatorLabelWidth = 30.0F,
             .indicatorLabelGap = 4.0F,
-            .squareLeadingIndicator = true,
+            .leadingIndicatorExtent = 24.0F,
             .hasIndicatorLabel = true,
         },
         statistics);

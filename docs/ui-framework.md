@@ -20,6 +20,11 @@ Tina 当前最接近：
 这条路线允许游戏开发者组合 Inventory、HUD、Settings、Dialogue 等业务组件，同时保留 Tina 已有的
 确定帧序、固定容量、失败原子性和 Render 隔离。
 
+桌面产品的具体视觉语言、Compact/Comfortable density、semantic Theme、State Layer 和 Desktop Shell 不在这里
+重复展开，统一见 [Tina Modern Desktop UI 设计规范](ui-modern-desktop.md)。该 program 正在实施：TMD-00..06
+已经闭环，TMD-07 Showcase Desktop workbench 已实现并进入集中 gate，TMD-08..11 仍按文档推进；文档会明确
+区分当前 API 与尚未完成的 Shell/产品目标。
+
 其中 Image/Icon/NineSlice 不是装饰性补充，而是 HUD、Inventory、装备栏、技能栏、对话框和设置页的
 基础视觉能力。它不依赖 Behavior side store 或 Component transaction 才能成立：`UI-PERF-001` 建立首份
 计数协议后，Image 主线可与 Component 主线并行。当前 Image/Icon、NineSlice A/B 与 C 产品采用、失效、
@@ -43,7 +48,7 @@ Runtime phase capability
 per-window UIContext, owner-thread
   Element tree + generation UINodeId
   fixed-capacity text/canvas/control side storage
-  routed input + focus/modal/pointer capture + Tooltip triggers
+  routed input + focus/modal/pointer capture + Tooltip triggers + Menu commands
   theme role + local property override
         |
         v commitLayout(logical viewport)
@@ -72,7 +77,9 @@ private Render backend, currently bgfx
 | Tree/事务/快照 | `include/tina/ui/UIContext.hpp` 的 builder、updater、`UIElementBuildTransaction` 与 committed views |
 | Behavior | `include/tina/ui/UIBehavior.hpp`；Activate/Toggle/RangeInput/TextInput/Scroll/Select 使用私有 fixed-capacity side store，输入与具体视觉仍由 resolver 约束到私有 kind |
 | Style/Theme | `include/tina/ui/UIStyle.hpp`、`UITheme.hpp` 与属性 override/reset |
+| Visual profiles | `UISurface.hpp`、`UIDivider.hpp`、`UIBadge.hpp`、`UIToggleSwitch.hpp` + 对应 recipes；前三者复用普通 Element chrome，Switch 复用 Checkbox Toggle 状态机 |
 | Tooltip | `include/tina/ui/UITooltip.hpp` + `makeTooltipElement()`；显式同 root Anchor、monotonic delay、committed metrics，独立于 Popup barrier |
+| Menu | `include/tina/ui/UIMenu.hpp` + `makeMenuElement()/makeMenuItemElement()`；显式 Anchor、单 Window transient overlay、typed item state 与 committed metrics |
 | TabView | `include/tina/ui/UITabView.hpp` + `makeTabViewElement()/makeTabElement()`；完整 direct-child pair、四向 layout、激活/导航与 committed metrics |
 | Paint | `include/tina/ui/UIImageSource.hpp`、`UIImage.hpp`、`UIIcon.hpp` 与 `UIPaint.hpp`；Rectangle/Ellipse/Line box paint、Image/UIIcon content 和 Canvas `SolidRect`/`SolidEllipse`/`SolidLine`/`Image`/`NineSlice` |
 | Render bridge | `include/tina/integration/UIRenderDisplayList.hpp` |
@@ -101,6 +108,16 @@ indicator，但不复制 RadioButton 的 selection、Focus、Keyboard/Gamepad �
 游戏保存 `UINodeId`，不保存 `Widget*`。节点状态由 `UIContext` 的固定容量 store 拥有；generation/owner
 校验拒绝 stale 或跨窗口 ID。多节点组件由 `UIElementBuildTransaction` 先声明 node/text/canvas/Behavior
 完整预算，任一步失败时回滚整个子树及所有已消费或未消费 reservation。
+
+第一方视觉 profile 不等于新增 Widget ABI。Surface/Divider/Badge 只把 variant/tone/orientation 映射为
+普通 Panel/Label 的 StyleRole、布局、Hit 与 Semantics 默认值；ToggleSwitch 则把 Standard/Compact authoring
+映射到既有 Checkbox kind、Toggle side store 和 action path，并仅在 theme chrome、track/thumb geometry 与
+Switch semantics role 上区分。它们仍走同一 `createElement()`、固定容量 publication、DisplayList 与 GPU backend。
+
+第一方多节点 profile 也不新增 owner。IconButton、FormField、Dialog 分别组合现有 Button/Icon/Tooltip、
+Label/TextEdit/Button/Tooltip 与 Modal/Panel/Label/Button；`required*BuildBudget()` 先计算精确预算，三个
+`build*()` 入口再经同一 `UIElementBuildTransaction` 原子构建。行为、Focus/Modal、Semantics、Image 和 Render
+继续读取既有状态与 committed snapshot，不为 profile 建立平行 store、事件循环或 GPU pipeline。
 
 ### Axis-aligned descendant clip
 
@@ -522,6 +539,32 @@ Anchor description/Windows HelpText，Tooltip 本身不发布 Focus/Activate 等
 `UIContext`、`UITreeUpdater` 与 Runtime `PrimaryWindowUITreeUpdater` 共享
 `setTooltipAnchor/clearTooltipAnchor/tooltipAnchor/showTooltip/dismissTooltip/isTooltipOpen/tooltipMetrics`；Runtime
 版本继续受 phase epoch/lifetime 与 sticky error 约束。
+
+### Menu / MenuItem：独立 transient overlay contract
+
+Menu 是现有 retained tree 的独立 `BuiltinElementKind::Menu`，不是 Popup alias。`UIMenuStateStorage` 按 node
+index 固定容量保存 Menu config、MenuItem config/checked state、Menu↔Anchor 正反边、Item→Menu 关系、active
+Menu、layout scratch 与 committed metrics；`UIMenuLayout` 只负责四向 Auto/flip/clamp，`UIMenuInput` 收口
+command validation。模块不反向持有 Context，也不建立第二套 update loop、focus/capture store 或 GPU pipeline。
+
+`setMenuAnchor()` 由 Context 校验同 root、self/ancestor cycle、generation 与稳定 Anchor kind。Menu 只接受 direct
+MenuItem，Item 禁止 child；Command/Check/Radio/Separator 的行为和 semantics 在 recipe/resolver 时固化。
+Check/Radio state 留在 Menu storage，Radio 按同 Menu 的 `radioGroup` 互斥，同组重复初始 checked authoring
+会失败原子地拒绝，不占用标准 Toggle behavior slot。
+destroy、root release、generation reuse、relationship replace 与 capacity failure 都由 Context 协调正反边和 dirty
+reservation，失败时不泄漏半份 checked/open/focus 状态。
+
+Menu 与 Dropdown Popup 只共享 `UIContext` 的 single-transient-overlay coordinator：打开一方关闭另一方；各自仍保留
+独立 storage、relationship、placement 与输入实现。Menu surface 为 Ignore hit + Contain focus scope，Item 才是
+Targetable。inside blank chrome/outside Primary Down 使用一个 Down/Up barrier 防止 click-through，不建立 Modal
+barrier，也不捕获 Pointer；wheel/text input、Anchor/Menu disable/visibility/destroy 与 Modal scope change 会关闭。
+
+布局从上一份成功 committed Anchor geometry 解析；Menu candidate 与 Layout/Hit/Paint/Semantics 一起提交，
+`UIMenuMetrics` 只在成功后 publish。Up/Down/Home/End/Escape、D-pad Up/Down/East 使用固定容量 command latch，
+先于 Dropdown、TabView 与通用 spatial focus。Pointer、默认 Activate 与 accessibility Invoke/Toggle 最终调用同一
+MenuItem activation；UIA 仅让 Command/Check/Radio 暴露 Invoke，只有 Check/Radio 暴露 TogglePattern。
+`MenuSurface` 与 `MenuItem` StyleRole 复用 Popup/DropdownItem chrome，indicator/separator 仍输出现有 box paint
+primitive。当前没有 MenuBar、submenu、第二套 atlas 或 shader。
 
 ### SplitView / Splitter：复用既有 capability 的分栏控件
 

@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 #include <memory>
 #include <utility>
 
@@ -188,6 +189,56 @@ TEST_F(UISplitViewTest, RecipesPublishDedicatedContractsAndRejectMalformedDescri
     auto splitter = updater.createElement(*splitView, splitterRecipe);
     ASSERT_TRUE(splitter.has_value());
     EXPECT_FALSE(context->isSplitterDragging(*splitter).value());
+}
+
+TEST_F(UISplitViewTest, SplitterPaintRoundTripsAndRejectsInvalidOrForeignNodesAtomically)
+{
+    auto context = createContext();
+    ASSERT_NE(context, nullptr);
+    auto firstRoot = createRoot(*context);
+    auto secondRoot = createRoot(*context);
+    auto first = createUpdater(*context, firstRoot);
+    auto second = createUpdater(*context, secondRoot);
+    const SplitViewNodes nodes = createSplitView(first, firstRoot.rootNodeId());
+    ASSERT_TRUE(nodes.splitter.hasValue());
+
+    const UI::UISplitterPaint expected{
+        .lineColor = UI::rgb(0x203040),
+        .hoveredLineColor = UI::rgb(0x405060),
+        .draggingLineColor = UI::rgb(0x607080),
+        .focusRingColor = UI::rgb(0x8090A0),
+        .lineThickness = 2.0F,
+        .focusRingThickness = 4.0F,
+    };
+    assertOk(first.setSplitterPaint(nodes.splitter, expected));
+    EXPECT_EQ(first.splitterPaint(nodes.splitter).value(), expected);
+    EXPECT_EQ(context->splitterPaint(nodes.splitter).value(), expected);
+
+    UI::UISplitterPaint invalid = expected;
+    invalid.lineThickness = 0.0F;
+    auto rejected = first.setSplitterPaint(nodes.splitter, invalid);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidControlValue);
+
+    invalid = expected;
+    invalid.focusRingThickness = 1.0F;
+    rejected = first.setSplitterPaint(nodes.splitter, invalid);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidControlValue);
+
+    invalid = expected;
+    invalid.lineThickness = (std::numeric_limits<float>::quiet_NaN)();
+    rejected = first.setSplitterPaint(nodes.splitter, invalid);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidControlValue);
+    EXPECT_EQ(first.splitterPaint(nodes.splitter).value(), expected);
+
+    rejected = first.setSplitterPaint(nodes.splitView, expected);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidControlValue);
+    rejected = second.setSplitterPaint(nodes.splitter, expected);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidNode);
 }
 
 TEST_F(UISplitViewTest, PartsRequireDistinctDirectChildrenAndOneSameRootSplitter)

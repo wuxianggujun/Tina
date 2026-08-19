@@ -367,6 +367,42 @@ PrimaryWindowUITreeUpdater::beginBuildTransaction(
         m_epoch, m_phase, m_updater, parent, rootDescriptor, budget);
 }
 
+Core::Result<UI::UIIconButtonParts>
+PrimaryWindowUITreeUpdater::buildIconButton(
+    UI::UINodeId parent, const UI::UIIconButtonConfig& config)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIIconButtonParts>(
+            "PrimaryWindowUITreeUpdater::buildIconButton");
+    }
+    return m_state->buildIconButton(m_epoch, m_phase, m_updater, parent, config);
+}
+
+Core::Result<UI::UIFormFieldParts>
+PrimaryWindowUITreeUpdater::buildFormField(
+    UI::UINodeId parent, const UI::UIFormFieldConfig& config)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIFormFieldParts>(
+            "PrimaryWindowUITreeUpdater::buildFormField");
+    }
+    return m_state->buildFormField(m_epoch, m_phase, m_updater, parent, config);
+}
+
+Core::Result<UI::UIDialogParts>
+PrimaryWindowUITreeUpdater::buildDialog(
+    UI::UINodeId parent, const UI::UIDialogConfig& config)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIDialogParts>(
+            "PrimaryWindowUITreeUpdater::buildDialog");
+    }
+    return m_state->buildDialog(m_epoch, m_phase, m_updater, parent, config);
+}
+
 Core::Status PrimaryWindowUITreeUpdater::setLayoutStyle(UI::UINodeId node, const UI::UILayoutStyle& style)
 {
     if (m_state == nullptr)
@@ -1050,6 +1086,29 @@ PrimaryWindowUITreeUpdater::isSplitterDragging(UI::UINodeId splitter) const
     return m_state->isSplitterDragging(m_epoch, m_phase, m_updater, splitter);
 }
 
+Core::Status PrimaryWindowUITreeUpdater::setSplitterPaint(
+    UI::UINodeId splitter, const UI::UISplitterPaint& paint)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>(
+            "PrimaryWindowUITreeUpdater::setSplitterPaint");
+    }
+    return m_state->setSplitterPaint(
+        m_epoch, m_phase, m_updater, splitter, paint);
+}
+
+Core::Result<UI::UISplitterPaint>
+PrimaryWindowUITreeUpdater::splitterPaint(UI::UINodeId splitter) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UISplitterPaint>(
+            "PrimaryWindowUITreeUpdater::splitterPaint");
+    }
+    return m_state->splitterPaint(m_epoch, m_phase, m_updater, splitter);
+}
+
 Core::Status PrimaryWindowUITreeUpdater::setTabViewItems(
     UI::UINodeId tabView, std::span<const UI::UITabViewItem> items, u32 activeIndex)
 {
@@ -1576,6 +1635,89 @@ PrimaryWindowUITreeUpdater::tooltipMetrics(UI::UINodeId tooltip) const
             "PrimaryWindowUITreeUpdater::tooltipMetrics");
     }
     return m_state->tooltipMetrics(m_epoch, m_phase, m_updater, tooltip);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setMenuAnchor(UI::UINodeId menu, UI::UINodeId anchor)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setMenuAnchor");
+    }
+    return m_state->setMenuAnchor(m_epoch, m_phase, m_updater, menu, anchor);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::clearMenuAnchor(UI::UINodeId menu)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::clearMenuAnchor");
+    }
+    return m_state->clearMenuAnchor(m_epoch, m_phase, m_updater, menu);
+}
+
+Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::menuAnchor(UI::UINodeId menu) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UINodeId>("PrimaryWindowUITreeUpdater::menuAnchor");
+    }
+    return m_state->menuAnchor(m_epoch, m_phase, m_updater, menu);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setMenuOpen(UI::UINodeId menu, bool open)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setMenuOpen");
+    }
+    return m_state->setMenuOpen(m_epoch, m_phase, m_updater, menu, open);
+}
+
+Core::Result<bool> PrimaryWindowUITreeUpdater::isMenuOpen(UI::UINodeId menu) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<bool>("PrimaryWindowUITreeUpdater::isMenuOpen");
+    }
+    return m_state->isMenuOpen(m_epoch, m_phase, m_updater, menu);
+}
+
+Core::Result<UI::UIMenuMetrics> PrimaryWindowUITreeUpdater::menuMetrics(UI::UINodeId menu) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIMenuMetrics>("PrimaryWindowUITreeUpdater::menuMetrics");
+    }
+    return m_state->menuMetrics(m_epoch, m_phase, m_updater, menu);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setMenuItemChecked(UI::UINodeId item, bool checked)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setMenuItemChecked");
+    }
+    return m_state->setMenuItemChecked(m_epoch, m_phase, m_updater, item, checked);
+}
+
+Core::Result<bool> PrimaryWindowUITreeUpdater::isMenuItemChecked(UI::UINodeId item) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<bool>("PrimaryWindowUITreeUpdater::isMenuItemChecked");
+    }
+    return m_state->isMenuItemChecked(m_epoch, m_phase, m_updater, item);
+}
+
+Core::Result<UI::UIMenuCommandResult> PrimaryWindowUITreeUpdater::routeMenuCommand(
+    UI::UINodeId menu, UI::UIMenuCommand command)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIMenuCommandResult>(
+            "PrimaryWindowUITreeUpdater::routeMenuCommand");
+    }
+    return m_state->routeMenuCommand(m_epoch, m_phase, m_updater, menu, command);
 }
 
 Core::Status PrimaryWindowUITreeUpdater::setDropdownOpen(UI::UINodeId dropdown, bool open)

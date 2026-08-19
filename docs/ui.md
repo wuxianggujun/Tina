@@ -11,17 +11,17 @@
 | 领域 | 已实现 |
 | --- | --- |
 | 所有权 | per-window `UIContext`、generation/owner-aware `UINodeId`、move-only `UIRootOwner` |
-| Authoring | `UIElementDescriptor` + `make*Element` recipes、组合 Semantics、StyleRole/override reset、固定预算 build transaction；旧 create-by-kind 与公开 `UIWidgetKind` 已删除 |
-| Tree | Root/Panel/Modal/Label/Button/Checkbox/Slider/ProgressBar/RadioButton/TextEdit/ScrollView/Dropdown/Popup/Tooltip/DropdownItem/ListView/TreeView/SplitView/Splitter/TabView/Tab，固定容量 mutation |
-| Layout/Content | Flex container/item 分离、Flow/Overlay placement、logical pixel、可选 axis-aligned border-box descendant clip、committed content placement、Tooltip 基于上一份成功 Anchor geometry 的 flip/clamp、SplitView 与 TabView committed geometry、事务 commit、clean-subtree reuse |
-| Hit/route | committed hit snapshot、Capture→Target→Bubble、持久 Pointer Capture、Modal/Popup barrier、Tooltip Ignore/click-through、listener token、consume/prevent/claim |
+| Authoring | `UIElementDescriptor` + `make*Element` recipes、组合 Semantics、StyleRole/override reset、固定预算 build transaction；Surface/Divider/Badge/ToggleSwitch 是强类型第一方 profile；IconButton/FormField/Dialog 是固定预算多节点 composition profile；旧 create-by-kind 与公开 `UIWidgetKind` 已删除 |
+| Tree | Root/Panel/Modal/Label/Button/Checkbox/Slider/ProgressBar/RadioButton/TextEdit/ScrollView/Dropdown/Popup/Tooltip/Menu/MenuItem/DropdownItem/ListView/TreeView/SplitView/Splitter/TabView/Tab，固定容量 mutation |
+| Layout/Content | Flex container/item 分离、Flow/Overlay placement、logical pixel、可选 axis-aligned border-box descendant clip、committed content placement、Tooltip/Menu 基于上一份成功 Anchor geometry 的 flip/clamp、SplitView 与 TabView committed geometry、事务 commit、clean-subtree reuse |
+| Hit/route | committed hit snapshot、Capture→Target→Bubble、持久 Pointer Capture、Modal/Popup/Menu transient barrier、Tooltip Ignore/click-through、listener token、consume/prevent/claim |
 | Paint | `UIBoxPaint` Rectangle/Ellipse/Line、box/text/control paint、第一类 Image/Icon content、固定容量 backend-neutral `SolidRect`/`SolidEllipse`/`SolidLine`/`Image`/`NineSlice` Canvas、axis-aligned clip、PaintCache、committed paint snapshot；NineSlice 在 commit 时原子展开为1..9个 Image entry |
-| Theme/Style（A/B/C1 + UI-STYLE-001 slice） | `UITheme` token + `UIStyleRoleId` recipe + 属性 override mask/reset；默认 Button 为 Tonal，显式提供 Primary/Danger/Outlined/Text，并以 RadioButton 状态机提供 SegmentedButton；强类型 StyleClass/ColorToken、node-local pseudo-state、literal/token-backed BoxFill stylesheet 与运行期 ColorToken getter/setter 已落地；token 更新经固定 reverse-dependency 链为 `O(affected links)`，**无**圆角子树 clip/毛玻璃/完整 CSS |
+| Theme/Style（A/B/C1 + UI-STYLE-001 slice） | `UITheme` token + `UIStyleRoleId` recipe + 属性 override mask/reset；默认 Button 为 Tonal，显式提供 Primary/Danger/Outlined/Text，并以 RadioButton/Checkbox 状态机分别提供 SegmentedButton/ToggleSwitch；Surface、Divider 与 Badge 复用 Box/Text chrome；强类型 StyleClass/ColorToken、node-local pseudo-state、literal/token-backed BoxFill stylesheet 与运行期 ColorToken getter/setter 已落地；token 更新经固定 reverse-dependency 链为 `O(affected links)`，**无**圆角子树 clip/毛玻璃/完整 CSS |
 | Motion | direct/Style transition 仍为 fixed-capacity paint-only；typed keyframe timeline 已支持 paint 属性及 bounded `LayoutWidth`/`LayoutHeight`/`LayoutOffset` 白名单，并沿唯一 commit pipeline 原子发布；`ui_motion_v1`、`ui_motion_timeline_v1` 与 `ui_motion_layout_v1` 均已有确定性 gate，墙钟结论保持 provisional |
 | Text | strict UTF-8、可选 FreeType rasterizer、R8 Glyph atlas、DisplayList Glyph |
-| Input | Focus Scope/显式 focus、Pointer capture/cancel、Tab 与 committed 几何空间焦点、Keyboard/Gamepad activation、Dropdown 与 List/Tree/TabView navigation、TextEdit edit/selection/IME、Tooltip PointerHover/KeyboardFocus/Manual 与 monotonic delay、Splitter Pointer drag/RangeInput keyboard；UI Flow 固定 16 槽本地用户、Gamepad assignment 与 per-user 设备 revision |
-| Semantics | Automatic/Publish/MergeDescendants/Exclude、显式 role/name/description/actions、Tooltip 文本作为 Anchor description/HelpText fallback、Splitter Slider range/value、TabList/Tab/TabPanel selected state 与虚拟 item 元数据 |
-| Runtime | startup root builder、phase-scoped tree updater、Tooltip/SplitView/TabView facade 与 bounded component transaction（含集合 DataSource/metrics/selection/scroll/expansion）、DisplayList/Glyph atlas handoff |
+| Input | Focus Scope/显式 focus、Pointer capture/cancel、Tab 与 committed 几何空间焦点、Keyboard/Gamepad activation、Menu/Dropdown/List/Tree/TabView navigation、TextEdit edit/selection/IME、Tooltip PointerHover/KeyboardFocus/Manual 与 monotonic delay、Splitter Pointer drag/RangeInput keyboard；UI Flow 固定 16 槽本地用户、Gamepad assignment 与 per-user 设备 revision |
+| Semantics | Automatic/Publish/MergeDescendants/Exclude、显式 role/name/description/actions、Tooltip 文本作为 Anchor description/HelpText fallback、Menu/MenuItem 与 checked state、Splitter Slider range/value、TabList/Tab/TabPanel selected state 与虚拟 item 元数据 |
+| Runtime | startup root builder、phase-scoped tree updater、Tooltip/Menu/SplitView/TabView facade 与 bounded component transaction（含集合 DataSource/metrics/selection/scroll/expansion）、DisplayList/Glyph atlas handoff |
 | Performance | `tina_bench` 已接入 static commit、paint-only dirty、route/capture、100k virtual collection、Image/NineSlice、完整 Component build、Style 与 direct/timeline Motion schema-v1 provisional workload |
 | Product | 独立 20 控件 showcase、product-2d Scene Explorer TreeView、product-3d Asset ListView/Scene TreeView 与 Dark/Light Windows 视觉证据 |
 
@@ -49,6 +49,8 @@ registry 还封装 route clear barrier、registration serial 与 high-water 统�
 scratch 与 committed metrics；`UISplitViewLayout` 解析 orientation/minimum/clamp，`UISplitViewInput` 只提供
 splitter pointer fraction/grab 计算。`UITabViewStateStorage` 固定持有 TabView/Tab/Panel relationship、active Tab、
 专属 `UITabPaint` 与 committed metrics；`UITabViewLayout` 和 `UITabViewInput` 分别收口四向 regions 与命令校验。
+`UIMenuStateStorage` 固定持有 Menu/Item/Anchor 双向关系、checked state、active Menu 与 committed metrics；
+`UIMenuLayout` 和 `UIMenuInput` 分别收口 placement/flip/clamp 与命令校验。
 `UIContext::Impl` 只保留
 owner/root/kind 校验并编排 UTF-8 语义校验、测量、dirty transaction、焦点和控件行为。私有组件不得反向持有
 `UIContext`，也不得绕开 committed snapshot、owner-thread 或 PMR 固定容量约束。
@@ -85,8 +87,9 @@ text/text style、visual box/Canvas、enabled、pointer hit policy 与 focus sco
 - `flexContainer`（direction/justifyContent/alignItems/gap）由父节点解释；
 - `flexItem`（grow/shrink/basis/alignSelf）由父容器为当前子节点解释；
 - `placement=Flow` 参与正常 Flex 顺序，`placement=Overlay` 使用 horizontal/vertical alignment、offset 与
-  margin，不参与 Flow 尺寸和顺序；Popup 与 Tooltip recipe 强制 Overlay，但二者是独立内建契约：Popup
-  保留受控 popup anchor/barrier，Tooltip 使用显式 Anchor 关系且永不形成 Popup/Modal barrier；
+  margin，不参与 Flow 尺寸和顺序；Popup、Tooltip 与 Menu recipe 强制 Overlay。Tooltip 使用显式 Anchor
+  且永不形成 barrier；Menu 也使用独立 Anchor/placement contract，但拥有自己的 transient input barrier，
+  不借用 Dropdown Popup 的 relationship 或 state；
 - `clipDescendants=false` 是普通容器默认值；启用后，该节点成为 axis-aligned clip owner，普通 in-tree Flow
   与 Overlay 后代沿既有 `descendantClip` 链与 owner 的 world border-box 求交。后代 `worldRect`、布局和
   tree/semantics 顺序不变，committed `effectiveClip` 统一供 hit/paint 使用；viewport-level Popup 继续走专用
@@ -108,6 +111,31 @@ Runtime phase facade 同样可切换/query role 和 reset override。
 Image content slot 并复用 ImageQuad/resolver/pin/Texture2D/DisplayList/GPU shader，不是第二套图片、Asset、atlas
 或 GPU pipeline。icon-only Button 必须由 Button root 提供显式 name。`makeImageElement()` 只为独立表达信息的
 图片发布 Image role，并要求调用方显式给出 name，不能从 AssetId 或资源文件名推导可访问名称。
+
+### 视觉组件 authoring profile
+
+`UISurface.hpp`、`UIDivider.hpp` 与 `UIBadge.hpp` 提供无行为的强类型视觉 profile：
+`makeSurfaceElement()` 选择 Plain/Filled/Elevated surface，`makeDividerElement()` 提供 Horizontal/Vertical、
+Subtle/Strong/Accent 与有限非负 logical thickness，`makeBadgeElement()` 提供 Neutral/Accent/Danger 的只读紧凑
+label。三者继续创建普通 Panel/Label Element，只复用 `UIStyleRoleId`、`UIBoxPaint`、`UITextStyle`、固定节点/text
+storage 与现有 committed paint；不增加 Widget kind、side state、atlas 或 Render pipeline。Surface/Divider 默认
+Ignore hit，Divider 排除 semantics；Badge 发布只读 Label semantics，并以其完整文本作为 accessible name。
+
+`UIToggleSwitch.hpp` 的 `UIToggleSwitchConfig` 提供 Standard/Compact 尺寸与由 control root 发布的
+`accessibleName`；`makeToggleSwitchElement()` 默认创建 44x24 logical px 的 Standard switch。它解析为既有
+Checkbox built-in，复用同一个 Toggle value、Activate callback、Focus、Pointer/Keyboard/Gamepad、capacity、
+dirty transaction 与 UIA TogglePattern，只通过 `UIStyleRoleId::ToggleSwitch`、
+`UIToggleIndicatorPresentation::Switch` 和 committed track/thumb geometry 区分外观。Semantics 使用
+`UISemanticsRole::Switch`，Windows UIA 映射为 CheckBox ControlType；没有第二套 Switch 状态机。
+
+### 桌面多节点 composition profile
+
+`UIIconButtonConfig`、`UIFormFieldConfig`、`UIDialogConfig` 及对应 `Parts` 返回值提供第一方桌面组合入口。
+`requiredIconButtonBuildBudget()/requiredFormFieldBuildBudget()/requiredDialogBuildBudget()` 在 mutation 前计算精确
+node/text/Behavior 预算，`UIContext`、`UITreeUpdater` 与 `PrimaryWindowUITreeUpdater` 均提供
+`buildIconButton()/buildFormField()/buildDialog()`。IconButton 复用 Button + Icon + 独立 Tooltip；FormField 复用
+Label/TextEdit/Button/Tooltip；Dialog 复用 Modal/Panel/Label/Button。它们不新增 Behavior store、Modal/Focus owner、
+update loop、Semantics pipeline 或 Render pipeline，失败时由同一 build transaction 回滚完整组合树。
 
 ### Tooltip 契约
 
@@ -131,6 +159,36 @@ wheel、文本输入、Anchor disable/Hidden/Collapsed/destroy、Modal scope 改
 accessible description/Windows HelpText fallback；不会覆盖作者 description，也不发布 Activate/Focus 等 action。
 直接 `UIContext`、root-scoped `UITreeUpdater` 与 phase-scoped `PrimaryWindowUITreeUpdater` 都提供
 `setTooltipAnchor/clearTooltipAnchor/tooltipAnchor/showTooltip/dismissTooltip/isTooltipOpen/tooltipMetrics`。
+
+### Menu / MenuItem 契约
+
+`makeMenuElement(config, layout)` 与 `makeMenuItemElement(text, config, layout)` 创建单层正式 Menu。Menu 是
+独立 `BuiltinElementKind::Menu`，不是 Dropdown Popup 的别名；两者只在 `UIContext` 协调层共享同一 Window
+最多一个 transient overlay 的规则，打开 Menu 会关闭 active Popup，打开 Popup 也会关闭 active Menu。
+`setMenuAnchor(menu, anchor)` 建立同 root 的显式双向关系，并拒绝 self、祖先/后代循环、跨 root、stale、
+ Popup/Tooltip/Menu/MenuItem/DropdownItem/Modal 与虚拟 row 等不稳定 Anchor。一个 Anchor 至多关联一个 Menu。
+
+Menu 强制 Overlay、Ignore hit、Contain focus scope，只接受 direct `MenuItem` child。Item 不能拥有 child，
+`UIMenuItemKind::{Command,Check,Radio,Separator}` 分别表达普通命令、可切换项、按 `radioGroup` 互斥项和
+非交互分隔线；Check/Radio checked state 只存在于 `UIMenuStateStorage`，不占用通用 Toggle slot。
+Menu surface 的空白区域和 outside Pointer Down 由 transient barrier 消费，防止同一按键 click-through；
+Item 仍是 Targetable，Menu 不捕获 Pointer。wheel、文本输入、Anchor/Menu disable、Hidden/Collapsed、destroy
+与 Modal scope 改变都会关闭 Menu并恢复进入 overlay 前的合法焦点。
+
+`UIMenuConfig` 提供 `Auto/Above/Below/Left/Right` placement、`anchorGap`、`viewportMargin`、
+`matchAnchorWidth`、keyboard wrap 与 `closeOnActivate`。布局读取最后成功提交的 Anchor geometry，按可用空间
+Auto/flip 并在 viewport 内 clamp；`UIMenuMetrics` 只在 Layout/Hit/Paint/Semantics 同一提交成功后更新
+`anchorRect/menuRect/resolvedPlacement/open`，失败提交保留旧 snapshot 与 metrics。
+
+Keyboard Up/Down/Home/End/Escape 与 Gamepad D-pad Up/Down/East 通过同一 `UIMenuCommand` 路径导航或关闭，
+handled Down 的匹配 Up 由固定容量 latch 消费；Menu 命令先于 Dropdown、TabView 和通用空间焦点。
+Pointer、Keyboard/Gamepad Accept 与 accessibility Invoke/Toggle 共用 MenuItem 默认激活路径。Menu/MenuItem
+发布对应 semantics role；Command 无 TogglePattern，Check/Radio 发布 checked state 与 TogglePattern，
+Separator 排除 semantics。当前不提供 MenuBar、submenu 或第二套 popup/runtime/update loop。
+
+`UIContext`、`UITreeUpdater` 与 Runtime facade 均提供
+`setMenuAnchor/clearMenuAnchor/menuAnchor/setMenuOpen/isMenuOpen/menuMetrics/setMenuItemChecked/`
+`isMenuItemChecked/routeMenuCommand`。
 
 ### SplitView / Splitter 契约
 
@@ -291,6 +349,8 @@ callback 副作用。
 - ScrollView：wheel、thumb drag、轴向 clamp 与持久 pointer capture；
 - Dropdown/Popup：Pointer/Keyboard/Gamepad 开关与选择，Up/Down/D-pad 导航，Escape/Gamepad East dismiss，
   Tab/Shift+Tab 关闭并退出 Popup scope，外部点击关闭且阻止 click-through；
+- Menu/MenuItem：Up/Down/Home/End、D-pad Up/Down 导航，Escape/Gamepad East dismiss；Command/Check/Radio
+  复用默认 Activate，Separator 跳过，inside chrome/outside Down barrier 阻止 click-through；
 - Tooltip：Pointer hover、键盘 focus 或显式 Manual show；initial/reshow/dismiss delay 由可注入 monotonic clock
   推进；Pointer Down/wheel/text input 与 Anchor/Modal 失效关闭，始终 click-through 且不改变 focus/capture；
 - ListView：Up/Down、PageUp/PageDown、Home/End、Keyboard/Gamepad activate 与 stable-key selection；
@@ -570,6 +630,8 @@ straight-alpha RGBA 在 shader 中 premultiply 后再应用 committed tint，继
 | `Dropdown` | ComboBox value、Pointer/Keyboard/Gamepad 开关 | Button chrome + 文本 + 下拉指示块 |
 | `Popup` | 独立 List/focus scope、anchor flip/clamp、输入 barrier | 顶层 overlay surface chrome，始终晚于普通树绘制 |
 | `Tooltip` | Anchor help；PointerHover/KeyboardFocus/Manual，不可聚焦、Ignore hit、无 barrier | 独立顶层 overlay surface；基于最后成功 Anchor geometry 做 Auto/flip/clamp，最后成功 metrics 与整套 snapshot 原子发布 |
+| `Menu` | 显式 Anchor、单 Window transient overlay、键盘/Gamepad navigation 与焦点恢复 | `MenuSurface` 复用 Popup surface chrome；四向 Auto/flip/clamp，surface Ignore hit、chrome/outside barrier 不 click-through |
+| `MenuItem` | Command/Check/Radio/Separator；Activate、checked/radio group 与 UIA Invoke/Toggle | `MenuItem` 复用 DropdownItem state chrome，Check/Radio 追加 theme metric 驱动的 indicator，Separator 绘制细线 |
 | `SplitView` | 两个 direct pane + 一个专用 Splitter；fraction/minimum/orientation | 不绘制自身 chrome；一次 arrange 三个 pane/splitter rect，metrics 与 Layout/Hit/Paint/Semantics 同一成功 commit 发布 |
 | `Splitter` | Pointer drag、键盘 RangeInput、Slider semantics | 复用现有 RangeInput/Focus 路径的 targetable splitter surface；不新增 GPU 或 Widget pipeline |
 | `TabView` | 完整 direct-child Tab/Panel pairs、Top/Bottom/Left/Right、Automatic/Manual activation | 不绘制自身 chrome；Tab strip、active Panel visibility 与 committed metrics 在同一成功 transaction 发布 |
@@ -585,7 +647,7 @@ retained 状态并标记必要的 dirty 类别。
 
 - `UIContext` 持有 `productTheme()`，默认 `makeDefaultProductTheme()`；
 - `createElement(..., make*Element(...))` 按 descriptor 的 `UIStyleRoleId` 创建 Button/Checkbox/Slider/TextEdit/ProgressBar/RadioButton/
-  ScrollView/Dropdown/Popup/DropdownItem/ListView/TreeView/Tab 与 Label 文本样式在创建时 **自动 apply** 对应
+  ScrollView/Dropdown/Popup/Menu/MenuItem/DropdownItem/ListView/TreeView/Tab 与 Label 文本样式在创建时 **自动 apply** 对应
   `make*Chrome` / text style；Root/Panel 默认无底色（容器），需背景时用
   `makePanelBoxPaint` / `makeSettingsPanelChrome`；
 - `setProductTheme(theme)` 会校验 metric，并事务式重绑所有仍继承产品 Theme 的既有控件属性；容量、
@@ -597,7 +659,7 @@ retained 状态并标记必要的 dirty 类别。
   不再保留“所有按钮默认 Primary”的旧视觉行为；
 - `setStyleRole()` 原子切换 recipe，保留显式 local override；ButtonPrimary/ButtonDanger/ButtonTonal/
   ButtonOutlined/ButtonText/SegmentedButton、四级 Text、
-  Panel/Modal/Popup/Tooltip surface、Tab 与全部现有控件 role 均有 recipe；
+  Panel/Modal/Popup/Tooltip/Menu surface、MenuItem、Tab 与全部现有控件 role 均有 recipe；
 - Runtime 游戏通过 phase-scoped `PrimaryWindowUITreeUpdater::productTheme()` / `setProductTheme()` 换肤，
   不取得裸 `UIContext`；
 - 默认 panel/button 分别使用 6px/4px 统一圆角；普通 PanelSurface、Primary 与 Tonal 使用平面填充，
@@ -621,29 +683,33 @@ ColorToken startup registry/value 与运行期 reverse-dependency update、liter
 
 ## 产品接入与证据
 
-`tina_sample_ui_showcase` 是控件与换肤的独立工作台，固定 1280×980 logical extent，同屏展示21个控件：
+`tina_sample_ui_showcase` 是可调整窗口的 Modern Desktop workbench，默认 `1280x800`，最小
+`960x640`。它使用一棵 retained root 和五个 Desktop band：Command Bar、Explorer、可滚动 Component Canvas、
+Token/State Inspector 与 Status Bar，并展示 24 个控件和三个第一方 composition profile：
 
 - Primary、Danger、disabled Outlined 与 Text reset Button；
 - Checkbox、Slider→ProgressBar 联动、UTF-8 TextEdit；
-- Performance/Balanced/Quality 与 Dark/Light 两组 RadioButton；
+- Performance/Balanced/Quality、Dark/Light 与 Compact/Comfortable 三组 RadioButton；
 - Dropdown、虚拟化 ListView/TreeView 与 ScrollView；
-- Panel elevation、圆角/边框/阴影、状态栏与主题色板；Dark/Light 相邻 Radio 只圆外侧角，首个 palette swatch
-  通过 Canvas `SolidRect` 发布四个不同 radius，合计 `asymmetricCornerProducts=3`。
+- `UIIconButton`、`UIFormField`、`UIDialog`，以及 Panel elevation、圆角/边框/阴影和主题色板；相邻
+  segmented Radio 只圆外侧角，首个 palette swatch 通过 Canvas 发布四个不同 radius，合计
+  `asymmetricCornerProducts=3`。
 
-Showcase 的普通页面树使用 Flow/Flex：`Root -> Background -> Header/Main`，`Main -> Navigation/Cards`，
-Cards 再按三行双列组织；控件均挂在对应 Card/Row/Column 下。只有 Dropdown Popup 使用 Overlay，普通
-页面不再依赖固定绝对 offset 排版。
+Showcase 的普通页面树使用 Flow/Flex：`Root -> Background -> CommandBar/Main/StatusBar`，
+`Main -> Explorer/ComponentScrollView/Inspector`，中央 Component Canvas 下的 section 是全宽纵向 Flow 子项，
+不再使用双列卡片墙或嵌套卡片。只有 Dropdown Popup、Tooltip 与 Dialog Modal 使用 Overlay。
 
 它使用默认 product chrome 呈现 hover/pressed/focused/disabled 层次，并通过
-`setProductTheme()` 在既有 retained tree 上事务切换 Dark/Light。`--auto-demo` 会执行
-Dark→Light→Dark（或相反）、Slider→ProgressBar、Dropdown/List/Tree selection、Tree expansion 与滚动联动，
-并在退出 JSON 中验证 `controls=21`、`asymmetricCornerProducts=3`、`treeExpansionChanges=2`、`listSelectionKey=1007`、
-`treeSelectionKey=4`、`dropdownSelection=1`、`scrollOffset=80` 和 root 生命周期。完整文字视觉验收必须使用
-bgfx + FreeType preset；普通 bgfx preset 的 placeholder text 只用于确定性降级和生命周期 smoke。
-最新 Dark/Light FreeType client capture 分别位于
-`artifacts/screenshots/ui-showcase-dark/20260728-155526/frame-03.png` 和
-`artifacts/screenshots/ui-showcase-light/20260728-155914/frame-03.png`；两张 1280×980 画面完整呈现
-20个控件、集合区、滚动区及主题差异，没有裁剪或重叠。
+`setProductTheme()` 在既有 retained tree 上事务切换 Dark/Light。Density 不在 live root 上热改：
+`ShowcaseApplication` 持有 `ShowcaseUIState`，保存 FormField 文本、值控件、选择/展开、两个 ScrollView offset 与
+Dialog 状态；切换 Compact/Comfortable 时通过 `GameState::requestReplace()` 释放并重建唯一 root，业务状态连续保留。
+Context 为失败原子的 State replacement handoff 预留两个 root slot，稳定帧仍只有一个 active root；Window 级
+StyleClass/ColorToken/StyleSheet 只注册一次并由 replacement root 复用。
+`--auto-demo` 会执行 scheme 往返、两次 density replacement、Slider/ProgressBar、Dropdown/List/Tree、两个滚动区和
+Dialog，并在退出 JSON 中验证 `controls=24`、`componentProfiles=3`、`workbenchBands=5`、
+`densityRebuilds=2`、`uiRootsCreated=3`、`componentScrollOffset=240` 与最终 Dialog closed。完整文字视觉验收必须使用
+bgfx + FreeType preset；普通 bgfx preset 的 placeholder text 只用于确定性降级和生命周期 smoke。旧 1280x980
+capture 仅作为 TMD-07 前的卡片墙基线，不再代表当前布局。
 
 2026-07-31 的 `RunUiStateFeedbackVisualGate.ps1` 通过 Windows MSVC/bgfx/FreeType 产品路径驱动真实
 Win32 pointer route，对 Dark/Light 的 normal、hover、focus、pressed/drag、selected 与 disabled 状态执行
@@ -783,6 +849,7 @@ Back/Confirm/Menu 之外的任意 action-id 仍属于独立后续扩展。
 
 | ID | 范围 |
 | --- | --- |
+| `UI-MODERN-DESKTOP-001` | InProgress：TMD-00..06 已完成并通过集中 UI/Runtime/UI-Render/UIA 门禁；TMD-07 Showcase Desktop workbench 源码/文档已实现并进入集中 gate，TMD-08 Desktop Shell、产品/Editor 迁移、OS scheme 与最终视觉/产品门禁仍待完成；完整规范见 [Tina Modern Desktop UI](ui-modern-desktop.md) |
 | `UI-002` | Windows UIA：tip 跨进程 gate 证据已固化（2026-08-03）；待 Narrator/Inspect 人工金标 |
 | `UI-003` | 跨 DPI/GPU 容差视觉门禁（映射单测 + 单机 ROI/baseline + content-scale-like 逻辑尺寸矩阵 + sample contentScale JSON + 字体 identity fingerprint 已有；2026-08-10 当前 Windows 宿主 100%/150%/200% raster baseline 已分别通过独立复跑；多显示器混合 DPI 与跨 GPU 像素金标后置） |
 | `TEXT-001` | InProgress：T1 多行、T2 UAX #29 grapheme 子集、T3 Windows IMM32 placement 的代码/自动 gate 已完成；BiDi/复杂 shaping、Linux 原生 XIM/Wayland 与 Windows 真机 IME 人工证据待补 |
@@ -794,6 +861,7 @@ Back/Confirm/Menu 之外的任意 action-id 仍属于独立后续扩展。
 | `UI-PAINT-002-A` | Done；`UILogicalCornerRadii` 已贯通 Retained box/Canvas `SolidRect`、committed paint、border/inset/shadow、UI→Render 投影、checksum 与 Showcase consumer；2026-08-17 Windows gate 为 UI 672/672、Runtime UI 130/130、UI-Render 28/28、bgfx 111/111、bench 10/10，Showcase 120 帧 exit 0。rounded/stencil 子树 clip、backdrop/blur、per-corner Motion 与跨 GPU/DPI golden 仍由 `UI-PAINT-002`/`UI-003` 后置跟踪 |
 | `UI-FLOW-001` | Done：固定容量 Activatable Screen/Layer Stack、Back/Confirm/Menu Action Router、16 槽本地用户、完整 generation Gamepad assignment、per-user 设备 revision、断连/reset 清理与 2D 产品接入已落地 |
 | `UI-TOOLTIP-001` | Done：独立 Tooltip contract、同 root Anchor 关系、Hover/Focus/Manual + monotonic delay、Auto/flip/clamp、单 Window 独占、Ignore hit、输入/可见性/Modal dismissal、committed metrics、失败回滚、accessible description/HelpText fallback 与 Runtime phase facade 已落地 |
+| `UI-MENU-001` | Done：独立 Menu/MenuItem recipes、显式同 root Anchor、单 Window transient overlay 与 Popup 协调、Command/Check/Radio/Separator、四向 Auto/flip/clamp、Pointer barrier、Keyboard/Gamepad/accessibility 共享激活、Menu/MenuItem UIA、committed metrics/失败原子性、固定容量 state/layout/input 模块与 Runtime facade 已落地 |
 | `UI-TABVIEW-001` | Done：独立 TabView/Tab recipes、完整 direct-child pair 关系、四向 placement、Automatic/Manual activation、Pointer/Keyboard/Gamepad/UIA 共享路径、TabList/Tab/TabPanel semantics、专属 `UITabPaint`、committed metrics、失败原子性与 Runtime phase facade 已落地 |
 | `UI-BEHAVIOR-SPI-001` | Deferred：只有标准 Behavior + routed listener 存在有证据的表达缺口时才评估 startup-only 高级 SPI |
 | `UI-002-LINUX` | Linux AT-SPI adapter 与真实辅助技术验收（Deferred，不阻塞 Windows UI-002） |

@@ -61,6 +61,17 @@ struct DropdownRouteTree final {
     UI::UINodeId after{};
 };
 
+struct MenuRouteTree final {
+    std::unique_ptr<UI::UIContext> context;
+    UI::UIRootOwner root;
+    UI::UITreeUpdater updater;
+    UI::UINodeId anchor{};
+    UI::UINodeId menu{};
+    UI::UINodeId firstItem{};
+    UI::UINodeId secondItem{};
+    UI::UINodeId after{};
+};
+
 struct ListRouteSource final {
     [[nodiscard]] UI::UIListViewDataSource view() const noexcept;
 };
@@ -117,6 +128,7 @@ addListener(UI::UIContext& context, UI::UIRoutedPointerListenerDesc descriptor,
     std::pmr::memory_resource& resource = *std::pmr::get_default_resource());
 [[nodiscard]] RouteTree createTextEditRouteTree(Platform::WindowId window);
 [[nodiscard]] DropdownRouteTree createDropdownRouteTree(Platform::WindowId window);
+[[nodiscard]] MenuRouteTree createMenuRouteTree(Platform::WindowId window);
 [[nodiscard]] CollectionRouteTree createCollectionRouteTree(Platform::WindowId window);
 [[nodiscard]] Core::Result<Platform::PlatformFrameView>
 buildFrame(Platform::PlatformFrameBuilder& builder, Platform::WindowId window, const FrameSpec& spec);

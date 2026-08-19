@@ -12,13 +12,15 @@ namespace Tina::UI::Detail {
 struct UIControlPaintPrimitive final {
     UILogicalRect worldRect{};
     UIPremultipliedRgba8Color color{};
+    UILogicalCornerRadii cornerRadii{};
 };
 
 class UIControlPaintBatch final {
   public:
     static constexpr usize Capacity = 4;
 
-    [[nodiscard]] bool add(UILogicalRect worldRect, UIPremultipliedRgba8Color color) noexcept;
+    [[nodiscard]] bool add(UILogicalRect worldRect, UIPremultipliedRgba8Color color,
+                           UILogicalCornerRadii cornerRadii = {}) noexcept;
 
     [[nodiscard]] usize size() const noexcept;
 

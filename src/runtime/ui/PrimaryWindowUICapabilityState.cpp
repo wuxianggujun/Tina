@@ -680,6 +680,84 @@ PrimaryWindowUICapabilityState::beginBuildTransaction(
     return PrimaryWindowUIBuildTransaction{*this, epoch, phase};
 }
 
+Core::Result<UI::UIIconButtonParts>
+PrimaryWindowUICapabilityState::buildIconButton(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId parent, const UI::UIIconButtonConfig& config)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::buildIconButton";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    if (buildTransaction_.has_value())
+    {
+        return Core::failure(rememberFirstError(
+            Core::Error{UI::UIErrorCode::BuildTransactionInProgress,
+                        "A primary-window UI build transaction is already active"},
+            Operation));
+    }
+    auto parts = updater.buildIconButton(parent, config);
+    if (!parts)
+    {
+        return Core::failure(rememberFirstError(std::move(parts.error()), Operation));
+    }
+    return *parts;
+}
+
+Core::Result<UI::UIFormFieldParts>
+PrimaryWindowUICapabilityState::buildFormField(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId parent, const UI::UIFormFieldConfig& config)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::buildFormField";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    if (buildTransaction_.has_value())
+    {
+        return Core::failure(rememberFirstError(
+            Core::Error{UI::UIErrorCode::BuildTransactionInProgress,
+                        "A primary-window UI build transaction is already active"},
+            Operation));
+    }
+    auto parts = updater.buildFormField(parent, config);
+    if (!parts)
+    {
+        return Core::failure(rememberFirstError(std::move(parts.error()), Operation));
+    }
+    return *parts;
+}
+
+Core::Result<UI::UIDialogParts>
+PrimaryWindowUICapabilityState::buildDialog(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId parent, const UI::UIDialogConfig& config)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::buildDialog";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    if (buildTransaction_.has_value())
+    {
+        return Core::failure(rememberFirstError(
+            Core::Error{UI::UIErrorCode::BuildTransactionInProgress,
+                        "A primary-window UI build transaction is already active"},
+            Operation));
+    }
+    auto parts = updater.buildDialog(parent, config);
+    if (!parts)
+    {
+        return Core::failure(rememberFirstError(std::move(parts.error()), Operation));
+    }
+    return *parts;
+}
+
 Core::Result<UI::UINodeId>
 PrimaryWindowUICapabilityState::createElementFromBuildTransaction(
     u64 epoch, PrimaryWindowUIPhase phase, UI::UINodeId parent,
@@ -1979,6 +2057,45 @@ Core::Result<bool> PrimaryWindowUICapabilityState::isSplitterDragging(
     return *dragging;
 }
 
+Core::Status PrimaryWindowUICapabilityState::setSplitterPaint(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId splitter, const UI::UISplitterPaint& paint)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::setSplitterPaint";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setSplitterPaint(splitter, paint);
+    if (!status)
+    {
+        return Core::failure(
+            rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UISplitterPaint>
+PrimaryWindowUICapabilityState::splitterPaint(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId splitter)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::splitterPaint";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto paint = updater.splitterPaint(splitter);
+    if (!paint)
+    {
+        return Core::failure(
+            rememberFirstError(std::move(paint.error()), Operation));
+    }
+    return *paint;
+}
+
 Core::Status PrimaryWindowUICapabilityState::setTabViewItems(
     u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
     UI::UINodeId tabView, std::span<const UI::UITabViewItem> items, u32 activeIndex)
@@ -2937,6 +3054,159 @@ Core::Result<UI::UITooltipMetrics> PrimaryWindowUICapabilityState::tooltipMetric
         return Core::failure(rememberFirstError(std::move(metrics.error()), Operation));
     }
     return *metrics;
+}
+
+Core::Status PrimaryWindowUICapabilityState::setMenuAnchor(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId menu, UI::UINodeId anchor)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setMenuAnchor";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setMenuAnchor(menu, anchor);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::clearMenuAnchor(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId menu)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::clearMenuAnchor";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.clearMenuAnchor(menu);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::menuAnchor(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId menu)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::menuAnchor";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto anchor = updater.menuAnchor(menu);
+    if (!anchor)
+    {
+        return Core::failure(rememberFirstError(std::move(anchor.error()), Operation));
+    }
+    return *anchor;
+}
+
+Core::Status PrimaryWindowUICapabilityState::setMenuOpen(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId menu, bool open)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setMenuOpen";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setMenuOpen(menu, open);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<bool> PrimaryWindowUICapabilityState::isMenuOpen(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId menu)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::isMenuOpen";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto open = updater.isMenuOpen(menu);
+    if (!open)
+    {
+        return Core::failure(rememberFirstError(std::move(open.error()), Operation));
+    }
+    return *open;
+}
+
+Core::Result<UI::UIMenuMetrics> PrimaryWindowUICapabilityState::menuMetrics(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId menu)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::menuMetrics";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto metrics = updater.menuMetrics(menu);
+    if (!metrics)
+    {
+        return Core::failure(rememberFirstError(std::move(metrics.error()), Operation));
+    }
+    return *metrics;
+}
+
+Core::Status PrimaryWindowUICapabilityState::setMenuItemChecked(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId item, bool checked)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setMenuItemChecked";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setMenuItemChecked(item, checked);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<bool> PrimaryWindowUICapabilityState::isMenuItemChecked(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId item)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::isMenuItemChecked";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto checked = updater.isMenuItemChecked(item);
+    if (!checked)
+    {
+        return Core::failure(rememberFirstError(std::move(checked.error()), Operation));
+    }
+    return *checked;
+}
+
+Core::Result<UI::UIMenuCommandResult> PrimaryWindowUICapabilityState::routeMenuCommand(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId menu, UI::UIMenuCommand command)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::routeMenuCommand";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto result = updater.routeMenuCommand(menu, command);
+    if (!result)
+    {
+        return Core::failure(rememberFirstError(std::move(result.error()), Operation));
+    }
+    return *result;
 }
 
 Core::Status PrimaryWindowUICapabilityState::setDropdownOpen(u64 epoch, PrimaryWindowUIPhase phase,

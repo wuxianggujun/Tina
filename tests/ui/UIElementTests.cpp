@@ -440,7 +440,7 @@ TEST_F(UIElementTest, StyleRoleAndPropertyOverridesTrackTheActiveThemeIndependen
     ASSERT_EQ(updater.styleRole(*button).value(), UI::UIStyleRoleId::ButtonDanger);
     EXPECT_EQ(
         updater.buttonPaint(*button).value(),
-        UI::makeButtonChrome(context->productTheme(), context->productTheme().danger).states);
+        UI::makeButtonChrome(context->productTheme(), context->productTheme().colors.error).states);
 
     const UI::UIButtonPaint localStates{
         .hoveredBackgroundColor = UI::rgb(0xAA2200),
@@ -450,14 +450,14 @@ TEST_F(UIElementTest, StyleRoleAndPropertyOverridesTrackTheActiveThemeIndependen
         .focusedBorderColor = UI::rgb(0xFFFFFF),
     };
     assertOk(updater.setButtonPaint(*button, localStates));
-    assertOk(context->setProductTheme(UI::makeLightProductTheme()));
+    assertOk(context->setProductTheme(UI::makeModernDesktopTheme(UI::UIColorScheme::Light)));
     EXPECT_EQ(updater.buttonPaint(*button).value(), localStates);
 
     assertOk(updater.clearOverride(*button, UI::UIStyleOverride::ButtonPaint));
     EXPECT_EQ(updater.styleRole(*button).value(), UI::UIStyleRoleId::ButtonDanger);
     EXPECT_EQ(
         updater.buttonPaint(*button).value(),
-        UI::makeButtonChrome(context->productTheme(), context->productTheme().danger).states);
+        UI::makeButtonChrome(context->productTheme(), context->productTheme().colors.error).states);
 }
 
 TEST_F(UIElementTest, StyleRoleCapacityFailureLeavesRoleAndChromeUntouched)

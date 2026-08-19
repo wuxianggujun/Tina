@@ -16,6 +16,7 @@ namespace Tina::UI {
 struct UIRadioButtonPaint final {
     UIStraightSrgba8Color indicatorColor{};
     UIStraightSrgba8Color selectedIndicatorColor{};
+    float indicatorExtent = 16.0F;
     float selectedIndicatorInset = 6.0F;
     float labelGap = 8.0F;
     UIStraightSrgba8Color hoveredIndicatorColor{};
@@ -24,8 +25,11 @@ struct UIRadioButtonPaint final {
     bool indicatorVisible = true;
     UIStraightSrgba8Color selectedBackgroundColor{};
     UIStraightSrgba8Color hoveredBackgroundColor{};
+    UIStraightSrgba8Color selectedHoveredBackgroundColor{};
     UIStraightSrgba8Color focusedBackgroundColor{};
+    UIStraightSrgba8Color selectedFocusedBackgroundColor{};
     UIStraightSrgba8Color pressedBackgroundColor{};
+    UIStraightSrgba8Color selectedPressedBackgroundColor{};
     UIStraightSrgba8Color disabledBackgroundColor{};
     UIStraightSrgba8Color focusedBorderColor{};
 

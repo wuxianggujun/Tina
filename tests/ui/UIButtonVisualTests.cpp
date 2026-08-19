@@ -316,7 +316,7 @@ TEST(UIButtonVisualTest, PaintTracksHoverPressMoveReleaseAndFocus)
             {.x = 90.0F, .y = 90.0F}));
     EXPECT_FALSE(isButtonPressed(updater, button));
     publishLayout(*context);
-    expectButtonFill(*context, button, FocusedColor);
+    expectButtonFill(*context, button, NormalColor);
 
     (void)route(
         *context,
@@ -350,13 +350,13 @@ TEST(UIButtonVisualTest, PaintTracksHoverPressMoveReleaseAndFocus)
             6,
             {.x = 90.0F, .y = 90.0F}));
     publishLayout(*context);
-    expectButtonFill(*context, button, FocusedColor);
+    expectButtonFill(*context, button, NormalColor);
     semantics = findSemanticsEntry(context->committedSemantics(), button);
     ASSERT_NE(semantics, nullptr);
     EXPECT_TRUE(semantics->focused);
 }
 
-TEST(UIButtonVisualTest, ProductChromeStaysFlatAndPublishesFocusBorder)
+TEST(UIButtonVisualTest, ProductChromeUsesSemanticElevationAndPublishesFocusBorder)
 {
     auto windows = WindowPool::Create(1);
     ASSERT_TRUE(windows.has_value());
@@ -385,8 +385,8 @@ TEST(UIButtonVisualTest, ProductChromeStaysFlatAndPublishesFocusBorder)
     publishLayout(*context);
 
     const UI::UIButtonChrome chrome = UI::makeTonalButtonChrome(context->productTheme());
-    EXPECT_EQ(countSolidEntries(context->committedPaint(), button), 1U);
-    EXPECT_FALSE(hasSolidColor(context->committedPaint(), button, chrome.box.shadow));
+    EXPECT_EQ(countSolidEntries(context->committedPaint(), button), 2U);
+    EXPECT_TRUE(hasSolidColor(context->committedPaint(), button, chrome.box.shadow));
 
     const UI::UIPointerRouteResult downRoute = route(
         *context,
@@ -414,6 +414,20 @@ TEST(UIButtonVisualTest, ProductChromeStaysFlatAndPublishesFocusBorder)
     EXPECT_TRUE(upRoute.consumed);
     publishLayout(*context);
     EXPECT_EQ(countSolidEntries(context->committedPaint(), button), 2U);
+    EXPECT_FALSE(hasSolidColor(
+        context->committedPaint(),
+        button,
+        chrome.states.focusedBorderColor));
+
+    const UI::UISemanticsEntry* semantics =
+        findSemanticsEntry(context->committedSemantics(), button);
+    ASSERT_NE(semantics, nullptr);
+    EXPECT_TRUE(semantics->focused);
+
+    auto navigation = context->routeFocusNavigation(
+        UI::UIFocusNavigationDirection::Right, true, UI::UIInputModality::Keyboard);
+    ASSERT_TRUE(navigation.has_value()) << navigation.error().message;
+    publishLayout(*context);
     EXPECT_TRUE(hasSolidColor(
         context->committedPaint(),
         button,

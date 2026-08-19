@@ -29,6 +29,9 @@
 #include "detail/UIImageContentStorage.hpp"
 #include "detail/UIMotionTrackStorage.hpp"
 #include "detail/UIKeyframeTimelineStorage.hpp"
+#include "detail/UIMenuInput.hpp"
+#include "detail/UIMenuLayout.hpp"
+#include "detail/UIMenuStateStorage.hpp"
 #include "detail/UINineSlicePaintEmitter.hpp"
 #include "detail/UIInputPrimitives.hpp"
 #include "detail/UILayoutMeasurement.hpp"
@@ -52,6 +55,7 @@
 #include "detail/UIStyleRoleResolver.hpp"
 #include "detail/UIStyleSheetStorage.hpp"
 #include "detail/UIThemeTransitionResolver.hpp"
+#include "detail/UIToggleSwitchGeometry.hpp"
 #include "detail/UITooltipLayout.hpp"
 #include "detail/UITooltipStateStorage.hpp"
 #include "detail/UIVirtualCollectionLayout.hpp"
@@ -130,6 +134,8 @@ using Detail::LayoutWorkMeasureComplete;
 using Detail::ListViewItemState;
 using Detail::ListViewLayoutScratch;
 using Detail::ListViewState;
+using Detail::MenuItemState;
+using Detail::MenuState;
 using Detail::makeListViewScrollBarGeometry;
 using Detail::makeScrollBarGeometry;
 using Detail::makeTreeViewDisclosureRect;
@@ -165,6 +171,7 @@ using Detail::resolveLengthNoFallbackCount;
 using Detail::resolveMeasuredLayoutSize;
 using Detail::resolveOverlayRect;
 using Detail::resolvePopupPlacement;
+using Detail::resolveMenuPlacement;
 using Detail::resolveTooltipPlacement;
 using Detail::resolveCommittedLineGeometry;
 using Detail::resolveScrollViewLayout;
@@ -215,10 +222,12 @@ using Detail::TooltipLayoutScratch;
 using Detail::TooltipState;
 using Detail::UISplitViewStateStorage;
 using Detail::UITabViewStateStorage;
+using Detail::UIMenuStateStorage;
 using Detail::UITabViewRegions;
 using Detail::TabViewState;
 using Detail::TabState;
 using Detail::isValidTabViewCommand;
+using Detail::isValidMenuCommand;
 using Detail::resolveTabViewRegions;
 using Detail::ProgressBarState;
 using Detail::RadioButtonState;
@@ -230,11 +239,13 @@ using Detail::ThemeBindingBoxPaint;
 using Detail::ThemeBindingButtonPaint;
 using Detail::ThemeBindingCheckboxPaint;
 using Detail::ThemeBindingDropdownPaint;
+using Detail::ThemeBindingImageTint;
 using Detail::ThemeBindingListViewPaint;
 using Detail::ThemeBindingProgressBarPaint;
 using Detail::ThemeBindingRadioButtonPaint;
 using Detail::ThemeBindingScrollViewPaint;
 using Detail::ThemeBindingSliderPaint;
+using Detail::ThemeBindingSplitterPaint;
 using Detail::ThemeBindingTextEditPaint;
 using Detail::ThemeBindingTabPaint;
 using Detail::ThemeBindingTextStyle;
@@ -643,7 +654,7 @@ struct UIContext::Impl final {
     // Active product theme used when create* installs default control chrome.
     // Not a global singleton; one copy per UIContext. Local set*Paint overrides
     // remain on the node after create.
-    UITheme productTheme = makeDefaultProductTheme();
+    UITheme productTheme = makeModernDesktopTheme();
     std::shared_ptr<Detail::UIContextLifetimeControl> lifetime;
     NodePool nodes;
     std::pmr::vector<UINodeId> idsByIndex;
@@ -763,6 +774,7 @@ struct UIContext::Impl final {
     Detail::UITooltipStateStorage tooltipStorage;
     UISplitViewStateStorage splitViewStorage;
     UITabViewStateStorage tabViewStorage;
+    UIMenuStateStorage menuStorage;
     std::pmr::vector<ListViewState> listViewStatesByNodeIndex;
     std::pmr::vector<ListViewLayoutScratch> listViewLayoutScratchByNodeIndex;
     std::pmr::vector<ListViewItemState> listViewItemStatesByNodeIndex;
@@ -882,6 +894,7 @@ struct UIContext::Impl final {
     UINodeId capturedPointerNode{};
     UIPointerInputEvent lastPointerInput{};
     bool hasLastPointerInput = false;
+    UIInputModality inputModality = UIInputModality::Pointer;
     bool pointerCancelDispatchInProgress = false;
     UINodeId activeModalNode{};
     UINodeId activePopupNode{};
@@ -895,10 +908,12 @@ struct UIContext::Impl final {
         focusNavigationPressLatch;
     Detail::UICommandPressLatch<UITabViewCommand, UITabViewCommand::Last>
         tabViewCommandPressLatch;
+    Detail::UICommandPressLatch<UIMenuCommand, UIMenuCommand::Dismiss>
+        menuCommandPressLatch;
     Detail::UICommandPressLatch<UIFocusNavigationDirection, UIFocusNavigationDirection::Down>
         tabViewDirectionPressLatch;
     bool armedTreeDisclosure = false;
-    bool popupDismissPointerBarrierActive = false;
+    bool transientOverlayDismissPointerBarrierActive = false;
     UINodeId pendingDestroyedModalRestoreFocus{};
     bool hasPendingDestroyedModalRestoreFocus = false;
     // Last Button that received Primary Pointer arm. Keyboard/Gamepad Accept
@@ -968,6 +983,7 @@ struct UIContext::Impl final {
           tooltipStorage(capacities.nodeCapacity, resource),
           splitViewStorage(capacities.nodeCapacity, resource),
           tabViewStorage(capacities.nodeCapacity, resource),
+          menuStorage(capacities.nodeCapacity, resource),
           listViewStatesByNodeIndex(&resource),
           listViewLayoutScratchByNodeIndex(&resource), listViewItemStatesByNodeIndex(&resource),
           treeViewStatesByNodeIndex(&resource), treeViewLayoutScratchByNodeIndex(&resource),
@@ -1364,6 +1380,14 @@ struct UIContext::Impl final {
             {
                 ownVisibility = UIVisibility::Collapsed;
             }
+            if (record->kind == BuiltinElementKind::Menu && index < menuStorage.capacity())
+            {
+                const MenuState* menu = menuStorage.tryMenu(idForIndex(index));
+                if (menu == nullptr || !menu->open)
+                {
+                    ownVisibility = UIVisibility::Collapsed;
+                }
+            }
             if (index < flowStatesByNodeIndex.size() &&
                 flowStatesByNodeIndex[index].kind == UIFlowNodeKind::Screen &&
                 !isActiveFlowScreenIndex(index))
@@ -1390,7 +1414,8 @@ struct UIContext::Impl final {
             if (record->parentIndex == InvalidNodeIndex)
             {
                 scratch.effectiveVisibility = ownVisibility;
-                scratch.inPopupSubtree = record->kind == BuiltinElementKind::Popup;
+                scratch.inPopupSubtree = record->kind == BuiltinElementKind::Popup ||
+                                         record->kind == BuiltinElementKind::Menu;
                 scratch.inTooltipSubtree = record->kind == BuiltinElementKind::Tooltip;
                 scratch.parentContentWidthDefinite = true;
                 scratch.parentContentHeightDefinite = true;
@@ -1401,7 +1426,9 @@ struct UIContext::Impl final {
                 const LayoutScratchState& parentScratch = layoutScratchByIndex[record->parentIndex];
                 scratch.effectiveVisibility = combineVisibility(parentScratch.effectiveVisibility, ownVisibility);
                 scratch.inPopupSubtree =
-                    record->kind == BuiltinElementKind::Popup || parentScratch.inPopupSubtree;
+                    record->kind == BuiltinElementKind::Popup ||
+                    record->kind == BuiltinElementKind::Menu ||
+                    parentScratch.inPopupSubtree;
                 scratch.inTooltipSubtree =
                     record->kind == BuiltinElementKind::Tooltip || parentScratch.inTooltipSubtree;
                 scratch.parentContentWidthDefinite = parentScratch.contentWidthDefinite;
@@ -1600,17 +1627,9 @@ struct UIContext::Impl final {
                 index < radioButtonStatesByNodeIndex.size() &&
                 radioButtonStatesByNodeIndex[index].paint.indicatorVisible)
             {
-                content.squareLeadingIndicator = true;
+                content.leadingIndicatorExtent =
+                    radioButtonStatesByNodeIndex[index].paint.indicatorExtent;
                 content.indicatorLabelGap = radioButtonStatesByNodeIndex[index].paint.labelGap;
-                if (!content.hasIndicatorLabel && index < textStatesByIndex.size())
-                {
-                    const UITextStyle& textStyle = textStatesByIndex[index].style;
-                    const float defaultIndicatorExtent = textStyle.logicalSize * textStyle.lineHeightScale;
-                    if (std::isfinite(defaultIndicatorExtent) && defaultIndicatorExtent > 0.0F)
-                    {
-                        content.size.height = defaultIndicatorExtent;
-                    }
-                }
             }
 
             scratch.measuredSize = resolveMeasuredLayoutSize(
@@ -1766,6 +1785,41 @@ struct UIContext::Impl final {
             .tooltipRect = resolved.rect,
             .resolvedPlacement = resolved.placement,
             .open = tooltipScratch.effectiveVisibility == UIVisibility::Visible,
+        };
+    }
+
+    void arrangeMenuChild(u32 menuIndex, UILogicalRect parentWorldRect,
+                          UILogicalRect viewportRect,
+                          LayoutPassStatistics& statistics) noexcept
+    {
+        MenuState* menu = menuStorage.tryMenu(idForIndex(menuIndex));
+        LayoutScratchState& menuScratch = layoutScratchByIndex[menuIndex];
+        const UINodeId menuNode = idForIndex(menuIndex);
+        const UINodeId anchor = menu != nullptr ? menu->anchor : UINodeId{};
+        const UICommittedLayoutEntry* anchorEntry = committedLayoutEntryFor(anchor);
+        if (menu == nullptr || !menu->open || menuStorage.activeMenu() != menuNode ||
+            !hasValidMenuRelationship(menuNode, anchor) || anchorEntry == nullptr ||
+            anchorEntry->effectiveVisibility != UIVisibility::Visible ||
+            !isNodeEnabled(menuNode) || !isNodeEnabled(anchor) ||
+            !isAuthoredTooltipNodeVisible(menuNode) ||
+            !isAuthoredTooltipNodeVisible(anchor))
+        {
+            menuScratch.effectiveVisibility = UIVisibility::Collapsed;
+            assignLayoutRect(menuIndex, {}, parentWorldRect, viewportRect);
+            menuStorage.layoutScratchByIndex(menuIndex) = {};
+            return;
+        }
+
+        refreshMeasuredSizeForParentContent(menuIndex, viewportRect, statistics);
+        const auto resolved = resolveMenuPlacement(
+            presentationLayoutStyle(menuIndex), menuScratch, menu->config,
+            anchorEntry->worldRect, viewportRect, statistics);
+        assignLayoutRect(menuIndex, resolved.rect, parentWorldRect, viewportRect);
+        menuStorage.layoutScratchByIndex(menuIndex).metrics = UIMenuMetrics{
+            .anchorRect = anchorEntry->worldRect,
+            .menuRect = resolved.rect,
+            .resolvedPlacement = resolved.placement,
+            .open = menuScratch.effectiveVisibility == UIVisibility::Visible,
         };
     }
 
@@ -2179,6 +2233,7 @@ struct UIContext::Impl final {
         UILogicalRect layoutContentRect = unscrolledContentRect;
         UILogicalRect descendantClip = parentScratch.descendantClip;
         if (parentRecord->kind == BuiltinElementKind::Popup ||
+            parentRecord->kind == BuiltinElementKind::Menu ||
             parentRecord->kind == BuiltinElementKind::Tooltip ||
             parentStyle.clipDescendants)
         {
@@ -2200,6 +2255,11 @@ struct UIContext::Impl final {
                 parentIndex < tooltipStorage.capacity())
             {
                 tooltipStorage.layoutScratchByIndex(parentIndex) = {};
+            }
+            if (parentRecord->kind == BuiltinElementKind::Menu &&
+                parentIndex < menuStorage.capacity())
+            {
+                menuStorage.layoutScratchByIndex(parentIndex) = {};
             }
             if (parentRecord->kind == BuiltinElementKind::SplitView &&
                 parentIndex < splitViewStorage.capacity())
@@ -2340,7 +2400,8 @@ struct UIContext::Impl final {
             if (parts.hasValue())
             {
                 const auto plan = resolveSplitViewLayout(
-                    unscrolledContentRect, state->config, state->requestedFraction);
+                    unscrolledContentRect, resolvedSplitViewConfig(state->config),
+                    state->requestedFraction);
                 splitViewStorage.layoutScratchByIndex(parentIndex).metrics = plan.metrics;
                 assignLayoutRect(parts.primaryPane.index(), plan.metrics.primaryRect,
                                  parentWorldRect, descendantClip);
@@ -2434,6 +2495,11 @@ struct UIContext::Impl final {
             if (childScratch.effectiveVisibility == UIVisibility::Collapsed)
             {
                 assignLayoutRect(currentChild, layoutContentRect, parentWorldRect, descendantClip);
+                if (childRecord->kind == BuiltinElementKind::Menu &&
+                    currentChild < menuStorage.capacity())
+                {
+                    menuStorage.layoutScratchByIndex(currentChild) = {};
+                }
                 continue;
             }
             if (childStyle.placement == UILayoutPlacement::Overlay)
@@ -2446,6 +2512,10 @@ struct UIContext::Impl final {
                            currentChild < tooltipStorage.capacity())
                 {
                     arrangeTooltipChild(currentChild, parentWorldRect, viewportRect, statistics);
+                } else if (childRecord->kind == BuiltinElementKind::Menu &&
+                           currentChild < menuStorage.capacity())
+                {
+                    arrangeMenuChild(currentChild, parentWorldRect, viewportRect, statistics);
                 } else
                 {
                     arrangeOverlayChild(currentChild, layoutContentRect, parentWorldRect, descendantClip, statistics);
@@ -2524,9 +2594,22 @@ struct UIContext::Impl final {
             index < radioButtonStatesByNodeIndex.size() &&
             radioButtonStatesByNodeIndex[index].paint.indicatorVisible)
         {
-            const float indicatorExtent = (std::min)(scratch.worldRect.width, scratch.worldRect.height);
+            const float indicatorExtent = (std::min)({
+                radioButtonStatesByNodeIndex[index].paint.indicatorExtent,
+                scratch.worldRect.width,
+                scratch.worldRect.height,
+            });
             leadingReservedWidth =
                 indicatorExtent + radioButtonStatesByNodeIndex[index].paint.labelGap;
+        }
+        if (record != nullptr && record->kind == BuiltinElementKind::MenuItem)
+        {
+            const MenuItemState* item = menuStorage.tryItem(idForIndex(index));
+            if (item != nullptr && item->config.kind != UIMenuItemKind::Separator)
+            {
+                leadingReservedWidth = productTheme.controls.menuItemIndicatorExtent +
+                                       productTheme.controls.menuItemIndicatorGap;
+            }
         }
 
         const UIImageContent* image = imageContentStorage.get(index);
@@ -2689,6 +2772,23 @@ struct UIContext::Impl final {
         return isCandidateNodeEnabled(node) ? color : applyOpacity(color, DisabledOpacity);
     }
 
+    [[nodiscard]] bool isFocusVisible(UINodeId node) const noexcept
+    {
+        return inputModality != UIInputModality::Pointer &&
+               (defaultActionFocusButton == node || textInputFocus == node);
+    }
+
+    [[nodiscard]] UISplitViewConfig resolvedSplitViewConfig(
+        const UISplitViewConfig& authored) const noexcept
+    {
+        UISplitViewConfig resolved = authored;
+        if (!(resolved.splitterExtent > 0.0F))
+        {
+            resolved.splitterExtent = productTheme.controls.splitterHitExtent;
+        }
+        return resolved;
+    }
+
     [[nodiscard]] UIPremultipliedRgba8Color resolveBuiltinBoxFillColor(
         UINodeId node, u32 nodeIndex,
         UIPremultipliedRgba8Color normalColor) const noexcept
@@ -2699,23 +2799,37 @@ struct UIContext::Impl final {
             nodeIndex < checkboxPaintsByNodeIndex.size())
         {
             const UICheckboxPaint& paint = checkboxPaintsByNodeIndex[nodeIndex];
+            const u8* toggleValue = behaviorStateStorage.tryToggleValue(nodeIndex);
+            const bool checked = toggleValue != nullptr && *toggleValue != 0;
+            const bool switchPresentation =
+                paint.presentation == UIToggleIndicatorPresentation::Switch;
             const auto applyOverride = [&color](UIStraightSrgba8Color overrideColor) noexcept {
                 if (overrideColor.alpha != 0)
                 {
                     color = premultiply(overrideColor);
                 }
             };
-            if (defaultActionFocusButton == node)
+            if (switchPresentation && checked)
             {
-                applyOverride(paint.focusedIndicatorColor);
+                applyOverride(paint.checkedBackgroundColor);
+            }
+            if (isFocusVisible(node))
+            {
+                applyOverride(switchPresentation && checked
+                                  ? paint.checkedFocusedBackgroundColor
+                                  : paint.focusedIndicatorColor);
             }
             if (hoveredPrimaryControl == node)
             {
-                applyOverride(paint.hoveredIndicatorColor);
+                applyOverride(switchPresentation && checked
+                                  ? paint.checkedHoveredBackgroundColor
+                                  : paint.hoveredIndicatorColor);
             }
             if (isButtonPressed(node))
             {
-                applyOverride(paint.pressedIndicatorColor);
+                applyOverride(switchPresentation && checked
+                                  ? paint.checkedPressedBackgroundColor
+                                  : paint.pressedIndicatorColor);
             }
             return widgetPaintColor(node, color);
         }
@@ -2734,17 +2848,20 @@ struct UIContext::Impl final {
             {
                 applyOverride(paint.selectedBackgroundColor);
             }
-            if (!radio.selected && defaultActionFocusButton == node)
+            if (isFocusVisible(node))
             {
-                applyOverride(paint.focusedBackgroundColor);
+                applyOverride(radio.selected ? paint.selectedFocusedBackgroundColor
+                                             : paint.focusedBackgroundColor);
             }
-            if (!radio.selected && hoveredPrimaryControl == node)
+            if (hoveredPrimaryControl == node)
             {
-                applyOverride(paint.hoveredBackgroundColor);
+                applyOverride(radio.selected ? paint.selectedHoveredBackgroundColor
+                                             : paint.hoveredBackgroundColor);
             }
             if (isButtonPressed(node))
             {
-                applyOverride(paint.pressedBackgroundColor);
+                applyOverride(radio.selected ? paint.selectedPressedBackgroundColor
+                                             : paint.pressedBackgroundColor);
             }
             if (!isNodeEnabled(node))
             {
@@ -2768,17 +2885,20 @@ struct UIContext::Impl final {
             {
                 applyOverride(paint.selectedBackgroundColor);
             }
-            if (!selected && defaultActionFocusButton == node)
+            if (isFocusVisible(node))
             {
-                applyOverride(paint.focusedBackgroundColor);
+                applyOverride(selected ? paint.selectedFocusedBackgroundColor
+                                       : paint.focusedBackgroundColor);
             }
-            if (!selected && hoveredPrimaryControl == node)
+            if (hoveredPrimaryControl == node)
             {
-                applyOverride(paint.hoveredBackgroundColor);
+                applyOverride(selected ? paint.selectedHoveredBackgroundColor
+                                       : paint.hoveredBackgroundColor);
             }
             if (isButtonPressed(node))
             {
-                applyOverride(paint.pressedBackgroundColor);
+                applyOverride(selected ? paint.selectedPressedBackgroundColor
+                                       : paint.pressedBackgroundColor);
             }
             if (!isNodeEnabled(node))
             {
@@ -2796,7 +2916,7 @@ struct UIContext::Impl final {
                     color = premultiply(overrideColor);
                 }
             };
-            if (textInputFocus == node && isLiveTextEdit(node))
+            if (textInputFocus == node && isLiveTextEdit(node) && isFocusVisible(node))
             {
                 applyOverride(paint.focusedBackgroundColor);
             }
@@ -2814,6 +2934,19 @@ struct UIContext::Impl final {
             }
             return widgetPaintColor(node, color);
         }
+        if (record != nullptr && record->kind == BuiltinElementKind::Dropdown &&
+            nodeIndex < dropdownStatesByNodeIndex.size())
+        {
+            const UINodeId popup = popupForDropdown(node);
+            const bool open = popup.hasValue() && popup.index() < popupStatesByNodeIndex.size() &&
+                              popupStatesByNodeIndex[popup.index()].open;
+            const UIStraightSrgba8Color openColor =
+                dropdownStatesByNodeIndex[nodeIndex].paint.openBackgroundColor;
+            if (open && openColor.alpha != 0)
+            {
+                color = premultiply(openColor);
+            }
+        }
         if (record == nullptr || !isButtonChromeKind(record->kind) || nodeIndex >= buttonPaintsByNodeIndex.size())
         {
             return widgetPaintColor(node, color);
@@ -2826,7 +2959,7 @@ struct UIContext::Impl final {
                 color = premultiply(overrideColor);
             }
         };
-        if (defaultActionFocusButton == node)
+        if (isFocusVisible(node))
         {
             applyOverride(paint.focusedBackgroundColor);
         }
@@ -2893,6 +3026,10 @@ struct UIContext::Impl final {
         if (defaultActionFocusButton == node || textInputFocus == node)
         {
             states |= UIStyleState::Focused;
+            if (isFocusVisible(node))
+            {
+                states |= UIStyleState::FocusVisible;
+            }
         }
         if (!isCandidateNodeEnabled(node))
         {
@@ -2908,6 +3045,11 @@ struct UIContext::Impl final {
         if (record == nullptr)
         {
             return states;
+        }
+        if (record->kind == BuiltinElementKind::MenuItem &&
+            menuStorage.itemChecked(node))
+        {
+            states |= UIStyleState::Checked;
         }
         if ((record->kind == BuiltinElementKind::RadioButton &&
              nodeIndex < radioButtonStatesByNodeIndex.size() &&
@@ -2927,6 +3069,11 @@ struct UIContext::Impl final {
         bool open = record->kind == BuiltinElementKind::Popup &&
                     nodeIndex < popupStatesByNodeIndex.size() &&
                     popupStatesByNodeIndex[nodeIndex].open;
+        if (record->kind == BuiltinElementKind::Menu)
+        {
+            const MenuState* menu = menuStorage.tryMenu(node);
+            open = menu != nullptr && menu->open && menuStorage.activeMenu() == node;
+        }
         if (record->kind == BuiltinElementKind::Dropdown)
         {
             const UINodeId popup = popupForDropdown(node);
@@ -3231,7 +3378,7 @@ struct UIContext::Impl final {
     [[nodiscard]] UIBoxPaint resolvedBoxChrome(UINodeId node, u32 nodeIndex) const noexcept
     {
         // Motion presentation (border/radius/visual offset) is applied first;
-        // button pressed/focus chrome may still override for interaction feedback.
+        // button pressed/focus-visible chrome may still override for interaction feedback.
         UIBoxPaint chrome = presentationBoxPaint(node, nodeIndex);
         const NodeRecord* record = recordByIndex(nodeIndex);
         if (record == nullptr || !isCandidateNodeEnabled(node))
@@ -3253,6 +3400,11 @@ struct UIContext::Impl final {
         {
             focusedBorderColor = radioButtonStatesByNodeIndex[nodeIndex].paint.focusedBorderColor;
         }
+        else if (record->kind == BuiltinElementKind::TextEdit &&
+                 nodeIndex < textEditPaintsByNodeIndex.size())
+        {
+            focusedBorderColor = textEditPaintsByNodeIndex[nodeIndex].focusedBorderColor;
+        }
         else
         {
             return chrome;
@@ -3266,7 +3418,7 @@ struct UIContext::Impl final {
             return chrome;
         }
 
-        if (defaultActionFocusButton == node && focusedBorderColor.alpha != 0)
+        if (isFocusVisible(node) && focusedBorderColor.alpha != 0)
         {
             chrome.borderLight = focusedBorderColor;
             chrome.borderDark = focusedBorderColor;
@@ -3293,7 +3445,7 @@ struct UIContext::Impl final {
                 color = premultiply(overrideColor);
             }
         };
-        if (defaultActionFocusButton == node)
+        if (isFocusVisible(node))
         {
             applyOverride(paint.focusedIndicatorColor);
         }
@@ -3337,7 +3489,7 @@ struct UIContext::Impl final {
         };
         if (isCandidateNodeEnabled(collection) && isCandidateNodeEnabled(item))
         {
-            if (defaultActionFocusButton == collection)
+            if (isFocusVisible(collection))
             {
                 applyOverride(focusedColor);
             }
@@ -3569,8 +3721,10 @@ struct UIContext::Impl final {
     {
         Detail::UIControlPaintBatch batch;
         bool batchCapacityExceeded = false;
-        const auto add = [&](UILogicalRect worldRect, UIPremultipliedRgba8Color color) noexcept {
-            batchCapacityExceeded = !batch.add(worldRect, color) || batchCapacityExceeded;
+        const auto add = [&](UILogicalRect worldRect, UIPremultipliedRgba8Color color,
+                             UILogicalCornerRadii cornerRadii = {}) noexcept {
+            batchCapacityExceeded = !batch.add(worldRect, color, cornerRadii) ||
+                                    batchCapacityExceeded;
         };
         const auto controlColor = [&](UIStraightSrgba8Color color) noexcept {
             const UIPremultipliedRgba8Color premultiplied = premultiply(color);
@@ -3581,20 +3735,36 @@ struct UIContext::Impl final {
         const NodeRecord* record = recordByIndex(nodeIndex);
         const u8* toggleValue = behaviorStateStorage.tryToggleValue(nodeIndex);
         if (record != nullptr && record->kind == BuiltinElementKind::Checkbox &&
-            nodeIndex < checkboxPaintsByNodeIndex.size() && toggleValue != nullptr &&
-            *toggleValue != 0)
+            nodeIndex < checkboxPaintsByNodeIndex.size() && toggleValue != nullptr)
         {
             const UICheckboxPaint& paint = checkboxPaintsByNodeIndex[nodeIndex];
-            const float extent = (std::min)(layoutEntry.worldRect.width, layoutEntry.worldRect.height);
-            const float inset = paint.checkedIndicatorInset;
-            add(
-                UILogicalRect{
-                    .x = normalizeFloat(layoutEntry.worldRect.x + inset),
-                    .y = normalizeFloat(layoutEntry.worldRect.y + inset),
-                    .width = normalizeFloat(extent - inset * 2.0F),
-                    .height = normalizeFloat(extent - inset * 2.0F),
-                },
-                controlColor(paint.checkedIndicatorColor));
+            const bool checked = *toggleValue != 0;
+            if (paint.presentation == UIToggleIndicatorPresentation::Switch)
+            {
+                const Detail::UIToggleSwitchGeometry geometry =
+                    Detail::resolveToggleSwitchGeometry(
+                        layoutEntry.worldRect, paint.checkedIndicatorInset, checked);
+                const UIStraightSrgba8Color thumbColor =
+                    checked ? paint.checkedIndicatorColor
+                            : paint.uncheckedIndicatorColor;
+                batchCapacityExceeded =
+                    !batch.add(geometry.thumb, controlColor(thumbColor),
+                               geometry.thumbCornerRadii) ||
+                    batchCapacityExceeded;
+            } else if (checked)
+            {
+                const float extent =
+                    (std::min)(layoutEntry.worldRect.width, layoutEntry.worldRect.height);
+                const float inset = paint.checkedIndicatorInset;
+                add(
+                    UILogicalRect{
+                        .x = normalizeFloat(layoutEntry.worldRect.x + inset),
+                        .y = normalizeFloat(layoutEntry.worldRect.y + inset),
+                        .width = normalizeFloat(extent - inset * 2.0F),
+                        .height = normalizeFloat(extent - inset * 2.0F),
+                    },
+                    controlColor(paint.checkedIndicatorColor));
+            }
         } else if (record != nullptr && record->kind == BuiltinElementKind::Slider &&
                    nodeIndex < sliderPaintsByNodeIndex.size())
         {
@@ -3606,17 +3776,74 @@ struct UIContext::Impl final {
             const UISliderPaint& paint = sliderPaintsByNodeIndex[nodeIndex];
             const SliderPaintGeometry geometry = sliderPaintGeometry(layoutEntry.worldRect, range->minValue,
                                                                      range->maxValue, range->value, paint);
+            const UILogicalCornerRadii trackRadii =
+                UILogicalCornerRadii::uniform(paint.trackThickness * 0.5F);
+            const UILogicalCornerRadii thumbRadii =
+                UILogicalCornerRadii::uniform(paint.thumbExtent * 0.5F);
+            add(geometry.track, controlColor(paint.trackColor), trackRadii);
             if (geometry.fraction > 0.0F)
             {
-                add(geometry.filledTrack, controlColor(paint.filledTrackColor));
+                add(geometry.filledTrack, controlColor(paint.filledTrackColor), trackRadii);
             }
             const UIStraightSrgba8Color thumbColor =
                 armedSlider == layoutEntry.node && paint.draggingThumbColor.alpha != 0
                     ? paint.draggingThumbColor
-                    : defaultActionFocusButton == layoutEntry.node && paint.focusedThumbColor.alpha != 0
+                    : isFocusVisible(layoutEntry.node) && paint.focusedThumbColor.alpha != 0
                         ? paint.focusedThumbColor
+                        : hoveredPrimaryControl == layoutEntry.node &&
+                                  paint.hoveredThumbColor.alpha != 0
+                            ? paint.hoveredThumbColor
                         : paint.thumbColor;
-            add(geometry.thumb, controlColor(thumbColor));
+            add(geometry.thumb, controlColor(thumbColor), thumbRadii);
+        } else if (record != nullptr && record->kind == BuiltinElementKind::Splitter &&
+                   splitViewStorage.containsSplitter(layoutEntry.node))
+        {
+            const UISplitterPaint& paint = splitViewStorage.splitterPaintByIndex(nodeIndex);
+            const UINodeId splitView = splitViewStorage.splitViewForSplitter(layoutEntry.node);
+            const SplitViewState* splitState = splitViewStorage.trySplitView(splitView);
+            if (splitState != nullptr)
+            {
+                const bool horizontal =
+                    splitState->config.orientation == UISplitViewOrientation::Horizontal;
+                const auto centeredLine = [&](float thickness) noexcept {
+                    const float resolvedThickness = (std::min)(
+                        thickness, horizontal ? layoutEntry.worldRect.width
+                                              : layoutEntry.worldRect.height);
+                    return horizontal
+                               ? UILogicalRect{
+                                     .x = normalizeFloat(layoutEntry.worldRect.x +
+                                                         (layoutEntry.worldRect.width - resolvedThickness) * 0.5F),
+                                     .y = layoutEntry.worldRect.y,
+                                     .width = normalizeFloat(resolvedThickness),
+                                     .height = layoutEntry.worldRect.height,
+                                 }
+                               : UILogicalRect{
+                                     .x = layoutEntry.worldRect.x,
+                                     .y = normalizeFloat(layoutEntry.worldRect.y +
+                                                         (layoutEntry.worldRect.height - resolvedThickness) * 0.5F),
+                                     .width = layoutEntry.worldRect.width,
+                                     .height = normalizeFloat(resolvedThickness),
+                                 };
+                };
+                if (isFocusVisible(layoutEntry.node) && paint.focusRingColor.alpha != 0)
+                {
+                    add(centeredLine(paint.focusRingThickness),
+                        controlColor(paint.focusRingColor));
+                }
+                UIStraightSrgba8Color lineColor = paint.lineColor;
+                if (isCandidateNodeEnabled(layoutEntry.node))
+                {
+                    if (armedSlider == layoutEntry.node && paint.draggingLineColor.alpha != 0)
+                    {
+                        lineColor = paint.draggingLineColor;
+                    } else if (hoveredPrimaryControl == layoutEntry.node &&
+                               paint.hoveredLineColor.alpha != 0)
+                    {
+                        lineColor = paint.hoveredLineColor;
+                    }
+                }
+                add(centeredLine(paint.lineThickness), controlColor(lineColor));
+            }
         } else if (record != nullptr && record->kind == BuiltinElementKind::ScrollView &&
                    nodeIndex < scrollViewPaintsByNodeIndex.size() &&
                    nodeIndex < scrollViewLayoutScratchByNodeIndex.size())
@@ -3699,6 +3926,50 @@ struct UIContext::Impl final {
                         color);
                 }
             }
+        } else if (record != nullptr && record->kind == BuiltinElementKind::MenuItem)
+        {
+            const MenuItemState* item = menuStorage.tryItem(layoutEntry.node);
+            if (item != nullptr && item->config.kind == UIMenuItemKind::Separator)
+            {
+                const float thickness = (std::min)(
+                         productTheme.controls.menuSeparatorThickness,
+                    layoutEntry.contentPlacement.contentBox.height);
+                if (thickness > 0.0F)
+                {
+                    add(
+                        UILogicalRect{
+                            .x = layoutEntry.contentPlacement.contentBox.x,
+                            .y = normalizeFloat(
+                                layoutEntry.contentPlacement.contentBox.y +
+                                (layoutEntry.contentPlacement.contentBox.height - thickness) * 0.5F),
+                            .width = layoutEntry.contentPlacement.contentBox.width,
+                            .height = thickness,
+                        },
+                        controlColor(productTheme.colors.outline));
+                }
+            } else if (item != nullptr && item->checked &&
+                       (item->config.kind == UIMenuItemKind::Check ||
+                        item->config.kind == UIMenuItemKind::Radio))
+            {
+                const float outerExtent = (std::min)(
+                    productTheme.controls.menuItemIndicatorExtent,
+                    layoutEntry.contentPlacement.contentBox.height);
+                const float inset = item->config.kind == UIMenuItemKind::Radio
+                                        ? outerExtent * 0.25F
+                                        : 0.0F;
+                const float extent = (std::max)(0.0F, outerExtent - inset * 2.0F);
+                add(
+                    UILogicalRect{
+                        .x = normalizeFloat(
+                            layoutEntry.contentPlacement.contentBox.x + inset),
+                        .y = normalizeFloat(
+                            layoutEntry.contentPlacement.contentBox.y +
+                            (layoutEntry.contentPlacement.contentBox.height - outerExtent) * 0.5F + inset),
+                        .width = extent,
+                        .height = extent,
+                    },
+                    controlColor(productTheme.colors.primary));
+            }
         } else if (record != nullptr && record->kind == BuiltinElementKind::DropdownItem)
         {
             add(layoutEntry.worldRect, resolvedDropdownSelectionColor(layoutEntry.node));
@@ -3759,26 +4030,32 @@ struct UIContext::Impl final {
                    radioButtonStatesByNodeIndex[nodeIndex].paint.indicatorVisible)
         {
             const RadioButtonState& radio = radioButtonStatesByNodeIndex[nodeIndex];
-            const float extent = (std::min)(layoutEntry.worldRect.width, layoutEntry.worldRect.height);
-            add(
-                UILogicalRect{
-                    .x = layoutEntry.worldRect.x,
-                    .y = layoutEntry.worldRect.y,
-                    .width = normalizeFloat(extent),
-                    .height = normalizeFloat(extent),
-                },
-                resolvedRadioIndicatorColor(layoutEntry.node, nodeIndex));
+            const float extent = (std::min)({
+                radio.paint.indicatorExtent,
+                layoutEntry.worldRect.width,
+                layoutEntry.worldRect.height,
+            });
+            const UILogicalRect indicatorRect{
+                .x = layoutEntry.worldRect.x,
+                .y = normalizeFloat(layoutEntry.worldRect.y +
+                                    (layoutEntry.worldRect.height - extent) * 0.5F),
+                .width = normalizeFloat(extent),
+                .height = normalizeFloat(extent),
+            };
+            add(indicatorRect, resolvedRadioIndicatorColor(layoutEntry.node, nodeIndex),
+                UILogicalCornerRadii::uniform(extent * 0.5F));
             if (radio.selected)
             {
                 const float inset = radio.paint.selectedIndicatorInset;
                 add(
                     UILogicalRect{
-                        .x = normalizeFloat(layoutEntry.worldRect.x + inset),
-                        .y = normalizeFloat(layoutEntry.worldRect.y + inset),
+                        .x = normalizeFloat(indicatorRect.x + inset),
+                        .y = normalizeFloat(indicatorRect.y + inset),
                         .width = normalizeFloat(extent - inset * 2.0F),
                         .height = normalizeFloat(extent - inset * 2.0F),
                     },
-                    controlColor(radio.paint.selectedIndicatorColor));
+                    controlColor(radio.paint.selectedIndicatorColor),
+                    UILogicalCornerRadii::uniform((extent - inset * 2.0F) * 0.5F));
             }
         }
 
@@ -4324,6 +4601,11 @@ struct UIContext::Impl final {
         } else if (record->kind == BuiltinElementKind::DropdownItem)
         {
             entry.selected = isSelectedDropdownItem(node);
+        } else if (record->kind == BuiltinElementKind::MenuItem)
+        {
+            const MenuItemState* item = menuStorage.tryItem(node);
+            entry.checked = item != nullptr && item->checked;
+            entry.focused = enabled && defaultActionFocusButton == node;
         } else if (record->kind == BuiltinElementKind::TextEdit)
         {
             entry.focused = enabled && textInputFocus == node;
@@ -5383,6 +5665,7 @@ struct UIContext::Impl final {
         tooltipStorage.resetNode(index);
         splitViewStorage.resetNode(index);
         tabViewStorage.resetNode(index);
+        menuStorage.resetNode(index);
         if (index < listViewStatesByNodeIndex.size())
         {
             listViewStatesByNodeIndex[index] = {};
@@ -5835,6 +6118,30 @@ struct UIContext::Impl final {
         return markPaintDirtyBatch({node});
     }
 
+    [[nodiscard]] Core::Status setInputModality(UIInputModality modality)
+    {
+        if (modality != UIInputModality::Pointer &&
+            modality != UIInputModality::Keyboard &&
+            modality != UIInputModality::Gamepad &&
+            modality != UIInputModality::Accessibility)
+        {
+            return fail(UIErrorCode::InvalidFocusTarget,
+                        "UI input modality is not recognized");
+        }
+        if (inputModality == modality)
+        {
+            return Core::success();
+        }
+        const UINodeId focusedButton = defaultActionFocusButton;
+        const UINodeId focusedTextEdit = textInputFocus;
+        if (Core::Status dirty = markPaintDirtyBatch({focusedButton, focusedTextEdit}); !dirty)
+        {
+            return dirty;
+        }
+        inputModality = modality;
+        return Core::success();
+    }
+
     // Dispatches through UIStylePropertyKind static dirty metadata (UI-STYLE-001).
     // Keeps capacity/atomic dirty-queue helpers as the only mutation path.
     [[nodiscard]] Core::Status markStylePropertyDirty(UINodeId node, UIStylePropertyKind kind)
@@ -5955,6 +6262,11 @@ struct UIContext::Impl final {
             .treeView = treeViewStatesByNodeIndex[index].paint,
             .textEdit = textEditPaintsByNodeIndex[index],
             .tab = tabViewStorage.tabPaintByIndex(index),
+            .splitter = splitViewStorage.splitterPaintByIndex(index),
+            .imageTint = [&]() noexcept -> UIStraightSrgba8Color* {
+                UIImageContent* image = imageContentStorage.getMutable(index);
+                return image == nullptr ? nullptr : &image->tint;
+            }(),
         };
     }
 
@@ -6165,6 +6477,11 @@ struct UIContext::Impl final {
         if (Core::Status validation = Detail::validateProductTheme(theme); !validation)
         {
             return validation;
+        }
+        if (theme.density != productTheme.density && liveRootCount != 0)
+        {
+            return fail(UIErrorCode::InvalidTheme,
+                        "UI Theme density cannot change while a live root exists; rebuild the root");
         }
         if (productTheme == theme)
         {
@@ -7844,11 +8161,13 @@ struct UIContext::Impl final {
             .readOnly = semanticsDefaults.readOnly,
         };
         textStatesByIndex[node.index()].alignment = defaultContentAlignment(kind);
-        if (kind == BuiltinElementKind::Modal || kind == BuiltinElementKind::Popup)
+        if (kind == BuiltinElementKind::Modal || kind == BuiltinElementKind::Popup ||
+            kind == BuiltinElementKind::Menu)
         {
             focusScopeModesByNodeIndex[node.index()] = UIFocusScopeMode::Contain;
         }
-        if (kind == BuiltinElementKind::Popup || kind == BuiltinElementKind::Tooltip)
+        if (kind == BuiltinElementKind::Popup || kind == BuiltinElementKind::Tooltip ||
+            kind == BuiltinElementKind::Menu)
         {
             layoutStylesByIndex[node.index()].placement = UILayoutPlacement::Overlay;
         }
@@ -7885,11 +8204,12 @@ struct UIContext::Impl final {
         return available - componentBuildNodeStatistics.outstandingReservations;
     }
 
-    [[nodiscard]] Core::Status initializeSemantics(u32 index, const UISemanticsDescriptor& descriptor,
-                                                   UIElementBehavior behaviors)
+    [[nodiscard]] Core::Status initializeSemantics(
+        u32 index, BuiltinElementKind kind, const UISemanticsDescriptor& descriptor,
+        UIElementBehavior behaviors)
     {
         if (Core::Status contract =
-                validateSemanticsContract(descriptor, behaviors);
+                validateSemanticsContract(descriptor, behaviors, kind);
             !contract)
         {
             return contract;
@@ -7978,8 +8298,8 @@ struct UIContext::Impl final {
         {
             motionTrackStorage.releasePersistentReservation(node, UIAnimatableProperty::BackgroundColor);
         }
-        // Tab chrome lives with the dedicated relationship state. Initialize it
-        // before applying role chrome so the theme transition is not reset below.
+        // Relationship-owned chrome must exist before applying role chrome so
+        // the theme transition is not reset by later specialized initialization.
         if (kind == BuiltinElementKind::Tab)
         {
             if (!descriptor.tab.has_value())
@@ -7988,6 +8308,15 @@ struct UIContext::Impl final {
                             "UI Tab is missing its retained configuration");
             }
             tabViewStorage.initializeTab(node, *descriptor.tab);
+        }
+        if (kind == BuiltinElementKind::Splitter)
+        {
+            if (!descriptor.splitter.has_value())
+            {
+                return fail(Core::CoreErrorCode::Internal,
+                            "UI Splitter is missing its retained configuration");
+            }
+            splitViewStorage.initializeSplitter(node, *descriptor.splitter);
         }
         const u16 previousBindings = themeBindingsByNodeIndex[node.index()];
         const u16 nextBindings = capacityConfig.applyDefaultProductChrome
@@ -8004,7 +8333,8 @@ struct UIContext::Impl final {
         themeBindingsByNodeIndex[node.index()] = nextBindings;
         applyProductChromeTransition(node.index(), descriptor.visual.styleRole, productTheme,
                                      previousBindings | nextBindings, nextBindings);
-        if (Core::Status semantics = initializeSemantics(node.index(), descriptor.semantics, descriptor.behaviors);
+        if (Core::Status semantics = initializeSemantics(
+                node.index(), kind, descriptor.semantics, descriptor.behaviors);
             !semantics)
         {
             return semantics;
@@ -8018,6 +8348,16 @@ struct UIContext::Impl final {
             if (Core::Status image = imageContentStorage.assign(node.index(), *descriptor.image); !image)
             {
                 return image;
+            }
+            if ((nextBindings & ThemeBindingImageTint) != 0)
+            {
+                const UIStraightSrgba8Color tint =
+                    Detail::productChromeFor(descriptor.visual.styleRole, productTheme).imageTint;
+                if (Core::Status tintStatus = imageContentStorage.setTint(node.index(), tint);
+                    !tintStatus)
+                {
+                    return tintStatus;
+                }
             }
         }
         if (descriptor.visual.boxPaint.has_value())
@@ -8061,14 +8401,34 @@ struct UIContext::Impl final {
             }
             tabViewStorage.initializeTabView(node, *descriptor.tabView);
         }
-        if (kind == BuiltinElementKind::Splitter)
+        if (kind == BuiltinElementKind::Menu)
         {
-            if (!descriptor.splitter.has_value())
+            if (!descriptor.menu.has_value())
             {
                 return fail(Core::CoreErrorCode::Internal,
-                            "UI Splitter is missing its retained configuration");
+                            "UI Menu is missing its retained configuration");
             }
-            splitViewStorage.initializeSplitter(node, *descriptor.splitter);
+            menuStorage.initializeMenu(node, *descriptor.menu);
+        }
+        if (kind == BuiltinElementKind::MenuItem)
+        {
+            if (!descriptor.menuItem.has_value() || record->parentIndex == InvalidNodeIndex)
+            {
+                return fail(Core::CoreErrorCode::Internal,
+                            "UI MenuItem is missing its retained configuration or Menu parent");
+            }
+            menuStorage.initializeMenuItem(
+                node, idForIndex(record->parentIndex), *descriptor.menuItem);
+            if (descriptor.menuItem->kind == UIMenuItemKind::Radio &&
+                descriptor.menuItem->checked &&
+                menuStorage.hasCheckedRadioPeer(node))
+            {
+                return fail(UIErrorCode::InvalidElementDescriptor,
+                            "UI Menu cannot author multiple checked Radio items in one group");
+            }
+        }
+        if (kind == BuiltinElementKind::Splitter)
+        {
             Detail::UIRangeInputState* range = behaviorStateStorage.tryRangeInputState(node.index());
             if (range == nullptr)
             {
@@ -8184,10 +8544,12 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidFocusScope, "UI element focus-scope mode is not recognized");
         }
-        if ((kind == BuiltinElementKind::Modal || kind == BuiltinElementKind::Popup) &&
+        if ((kind == BuiltinElementKind::Modal || kind == BuiltinElementKind::Popup ||
+             kind == BuiltinElementKind::Menu) &&
             descriptor.focusScopeMode.has_value() && *descriptor.focusScopeMode != UIFocusScopeMode::Contain)
         {
-            return fail(UIErrorCode::InvalidFocusScope, "UI Modal and Popup elements always contain focus");
+            return fail(UIErrorCode::InvalidFocusScope,
+                        "UI Modal, Popup, and Menu elements always contain focus");
         }
         if (kind != BuiltinElementKind::Tooltip && descriptor.tooltip.has_value())
         {
@@ -8345,6 +8707,12 @@ struct UIContext::Impl final {
             // Tooltip presentation out of the same pending publication rather
             // than waiting for the new Modal to become the committed barrier.
             hardDismissAllTooltipsNoFail(true);
+            if (const UINodeId activeMenuNode = menuStorage.activeMenu(); activeMenuNode.hasValue())
+            {
+                static_cast<void>(menuStorage.close(activeMenuNode));
+                menuCommandPressLatch.clear();
+                transientOverlayDismissPointerBarrierActive = false;
+            }
         }
         return node;
     }
@@ -8412,10 +8780,11 @@ struct UIContext::Impl final {
         NodeRecord& parentRecord = **parentResult;
         if (parentRecord.kind == BuiltinElementKind::Tooltip ||
             parentRecord.kind == BuiltinElementKind::Splitter ||
-            parentRecord.kind == BuiltinElementKind::Tab)
+            parentRecord.kind == BuiltinElementKind::Tab ||
+            parentRecord.kind == BuiltinElementKind::MenuItem)
         {
             return fail(UIErrorCode::InvalidParent,
-                        "UI Tooltip, Tab, and Splitter elements cannot own child elements");
+                        "UI Tooltip, Tab, Splitter, and MenuItem elements cannot own child elements");
         }
         if (kind == BuiltinElementKind::Splitter &&
             parentRecord.kind != BuiltinElementKind::SplitView)
@@ -8487,6 +8856,25 @@ struct UIContext::Impl final {
             {
                 return fail(UIErrorCode::InvalidParent, "UI DropdownItem requires a Popup parent");
             }
+        } else if (kind == BuiltinElementKind::MenuItem)
+        {
+            if (parentRecord.kind != BuiltinElementKind::Menu)
+            {
+                return fail(UIErrorCode::InvalidParent,
+                            "UI MenuItem requires a Menu parent");
+            }
+        } else if (kind == BuiltinElementKind::Menu)
+        {
+            if (parentRecord.kind == BuiltinElementKind::Menu ||
+                parentRecord.kind == BuiltinElementKind::MenuItem ||
+                parentRecord.kind == BuiltinElementKind::Dropdown ||
+                parentRecord.kind == BuiltinElementKind::Popup ||
+                parentRecord.kind == BuiltinElementKind::ListView ||
+                parentRecord.kind == BuiltinElementKind::TreeView)
+            {
+                return fail(UIErrorCode::InvalidParent,
+                            "UI Menu requires an ordinary retained parent");
+            }
         } else if (kind == BuiltinElementKind::ListViewItem)
         {
             if (parentRecord.kind != BuiltinElementKind::ListView)
@@ -8504,7 +8892,8 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidParent,
                         "UI TabView cannot directly contain another TabView");
-        } else if (parentRecord.kind == BuiltinElementKind::Dropdown || parentRecord.kind == BuiltinElementKind::Popup)
+        } else if (parentRecord.kind == BuiltinElementKind::Dropdown ||
+                   parentRecord.kind == BuiltinElementKind::Popup)
         {
             return fail(UIErrorCode::InvalidParent,
                         "UI Dropdown composites only accept Popup and DropdownItem children");
@@ -8514,6 +8903,10 @@ struct UIContext::Impl final {
         } else if (parentRecord.kind == BuiltinElementKind::TreeView)
         {
             return fail(UIErrorCode::InvalidParent, "UI TreeView only accepts its internal item rows");
+        } else if (parentRecord.kind == BuiltinElementKind::Menu)
+        {
+            return fail(UIErrorCode::InvalidParent,
+                        "UI Menu only accepts MenuItem children");
         }
         if (parentRecord.depth == (std::numeric_limits<u32>::max)())
         {
@@ -9198,6 +9591,31 @@ struct UIContext::Impl final {
     }
 
     [[nodiscard]] Core::Result<UIElementBuildTransaction>
+    beginBuildTransaction(UIContext& context, UINodeId parent,
+                          const UIElementDescriptor& rootDescriptor,
+                          UIComponentBuildBudget budget)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        drainDeferredRootDestroys();
+        auto parentResult = resolveNode(parent);
+        if (!parentResult)
+        {
+            return Core::failure(parentResult.error());
+        }
+        const u32 rootIndex = (*parentResult)->rootIndex;
+        if (rootIndex >= idsByIndex.size() || !contains(idsByIndex[rootIndex]))
+        {
+            return fail(UIErrorCode::RootRequired,
+                        "UI component parent does not belong to a live root");
+        }
+        return beginBuildTransaction(
+            context, idsByIndex[rootIndex], parent, rootDescriptor, budget);
+    }
+
+    [[nodiscard]] Core::Result<UIElementBuildTransaction>
     beginBuildTransaction(UIContext& context, UINodeId updaterRoot, UINodeId parent,
                           const UIElementDescriptor& rootDescriptor, UIComponentBuildBudget budget)
     {
@@ -9457,6 +9875,11 @@ struct UIContext::Impl final {
             }
             static_cast<void>(splitViewStorage.releaseNode(node));
             static_cast<void>(tabViewStorage.releaseNode(node));
+            if (menuStorage.releaseNode(node))
+            {
+                menuCommandPressLatch.clear();
+                transientOverlayDismissPointerBarrierActive = false;
+            }
             if (record->kind == BuiltinElementKind::Modal)
             {
                 hardDismissAllTooltipsNoFail(true);
@@ -9506,7 +9929,7 @@ struct UIContext::Impl final {
                 if (activePopupNode == node)
                 {
                     activePopupNode = {};
-                    popupDismissPointerBarrierActive = false;
+                    transientOverlayDismissPointerBarrierActive = false;
                     dropdownCommandPressLatch.clear();
                 }
             }
@@ -9687,11 +10110,12 @@ struct UIContext::Impl final {
         }
 
         const NodeRecord* nodeRecord = *nodeResult;
-        if (nodeRecord->kind == BuiltinElementKind::Tooltip &&
+        if ((nodeRecord->kind == BuiltinElementKind::Tooltip ||
+             nodeRecord->kind == BuiltinElementKind::Menu) &&
             normalizedStyle->placement != UILayoutPlacement::Overlay)
         {
             return fail(UIErrorCode::InvalidLayout,
-                        "UI Tooltip nodes always require Overlay placement");
+                        "UI Tooltip and Menu nodes always require Overlay placement");
         }
 
         UILayoutStyle& currentStyle = layoutStylesByIndex[node.index()];
@@ -9700,15 +10124,33 @@ struct UIContext::Impl final {
             return Core::success();
         }
 
-        if (Core::Status dirtyStatus =
-                markStylePropertyDirty(node, UIStylePropertyKind::LayoutStyle);
-            !dirtyStatus)
+        const bool hardDismissBarrier =
+            nodeRecord->kind == BuiltinElementKind::Modal ||
+            normalizedStyle->visibility != UIVisibility::Visible;
+        const UINodeId activeMenuNode = menuStorage.activeMenu();
+        const UINodeId activeMenuAnchor = menuStorage.anchorForMenu(activeMenuNode);
+        const bool closeActiveMenu = activeMenuNode.hasValue() && hardDismissBarrier &&
+                                     (nodeRecord->kind == BuiltinElementKind::Modal ||
+                                      isNodeWithinSubtree(node, activeMenuNode) ||
+                                      isNodeWithinSubtree(node, activeMenuAnchor));
+        const Core::Status dirtyStatus = closeActiveMenu
+                                             ? markLayoutDirtyBatch(
+                                                   {node, activeMenuNode, activeMenuAnchor})
+                                             : markStylePropertyDirty(
+                                                   node, UIStylePropertyKind::LayoutStyle);
+        if (!dirtyStatus)
         {
             return dirtyStatus;
         }
         currentStyle = *normalizedStyle;
-        if (nodeRecord->kind == BuiltinElementKind::Modal ||
-            normalizedStyle->visibility != UIVisibility::Visible)
+        if (closeActiveMenu)
+        {
+            if (Core::Status closed = setMenuOpenState(activeMenuNode, false); !closed)
+            {
+                return closed;
+            }
+        }
+        if (hardDismissBarrier)
         {
             // Modal scope mutations and a Hidden/Collapsed endpoint or ancestor
             // are hard dismissal barriers. The next successful commit publishes
@@ -9747,11 +10189,12 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidPointerPolicy, "UI pointer hit policy is not recognized");
         }
-        if ((*nodeResult)->kind == BuiltinElementKind::Tooltip &&
+        if (((*nodeResult)->kind == BuiltinElementKind::Tooltip ||
+             (*nodeResult)->kind == BuiltinElementKind::Menu) &&
             policy != UIPointerHitPolicy::Ignore)
         {
             return fail(UIErrorCode::InvalidPointerPolicy,
-                        "UI Tooltip nodes always ignore Pointer hit testing");
+                        "UI Tooltip and Menu nodes always ignore Pointer hit testing");
         }
 
         UIPointerHitPolicy& currentPolicy = pointerHitPoliciesByIndex[node.index()];
@@ -9821,6 +10264,7 @@ struct UIContext::Impl final {
         }
 
         UINodeId popupToClose{};
+        UINodeId menuToClose{};
         if (!enabled)
         {
             if ((*nodeResult)->kind == BuiltinElementKind::Dropdown)
@@ -9835,6 +10279,13 @@ struct UIContext::Impl final {
             {
                 popupToClose = node;
             }
+            const UINodeId activeMenuNode = menuStorage.activeMenu();
+            const UINodeId activeMenuAnchor = menuStorage.anchorForMenu(activeMenuNode);
+            if (activeMenuNode.hasValue() &&
+                (node == activeMenuNode || node == activeMenuAnchor))
+            {
+                menuToClose = activeMenuNode;
+            }
         }
 
         // Dirty capacity is reserved before interaction state changes so a
@@ -9845,6 +10296,11 @@ struct UIContext::Impl final {
         {
             addRouteLayoutDirtyReservationCandidates(popupToClose);
             addRouteLayoutDirtyReservationCandidates(dropdownForPopup(popupToClose));
+        }
+        if (menuToClose.hasValue())
+        {
+            addRouteLayoutDirtyReservationCandidates(menuToClose);
+            addRouteLayoutDirtyReservationCandidates(menuStorage.anchorForMenu(menuToClose));
         }
         if (Core::Status reservation = reserveRouteDirtyQueueSlots(); !reservation)
         {
@@ -9859,6 +10315,13 @@ struct UIContext::Impl final {
         if (popupToClose.hasValue())
         {
             if (Core::Status closed = setPopupOpenState(popupToClose, false); !closed)
+            {
+                return closed;
+            }
+        }
+        if (menuToClose.hasValue())
+        {
+            if (Core::Status closed = setMenuOpenState(menuToClose, false); !closed)
             {
                 return closed;
             }
@@ -10303,16 +10766,20 @@ struct UIContext::Impl final {
         {
             if (!alreadyLocal)
             {
-                styleOverridesByNodeIndex[index] |= static_cast<u16>(UIStyleOverride::ImageTint);
+                if (current->tint != tint)
+                {
+                    if (Core::Status setTint = imageContentStorage.setTint(index, tint);
+                        !setTint)
+                    {
+                        return setTint;
+                    }
+                }
+                detachThemeBinding(index, ThemeBindingImageTint);
                 setResolvedImageTintTokenDependency(index, {});
                 if (index < resolvedImageTintValidByNodeIndex.size())
                 {
                     resolvedImageTintValidByNodeIndex[index] = 0;
                     resolvedImageTintCacheByNodeIndex[index] = {};
-                }
-                if (current->tint != tint)
-                {
-                    return imageContentStorage.setTint(index, tint);
                 }
             }
             return Core::success();
@@ -10329,7 +10796,7 @@ struct UIContext::Impl final {
         {
             return setTint;
         }
-        styleOverridesByNodeIndex[index] |= static_cast<u16>(UIStyleOverride::ImageTint);
+        detachThemeBinding(index, ThemeBindingImageTint);
         setResolvedImageTintTokenDependency(index, {});
         if (index < resolvedImageTintValidByNodeIndex.size())
         {
@@ -11273,9 +11740,12 @@ struct UIContext::Impl final {
         {
             return fail(Core::CoreErrorCode::Internal, "UI Checkbox paint index out of range");
         }
-        if (!std::isfinite(paint.checkedIndicatorInset) || paint.checkedIndicatorInset < 0.0F)
+        if (!std::isfinite(paint.checkedIndicatorInset) || paint.checkedIndicatorInset < 0.0F ||
+            paint.presentation < UIToggleIndicatorPresentation::Checkbox ||
+            paint.presentation > UIToggleIndicatorPresentation::Switch)
         {
-            return fail(UIErrorCode::InvalidControlValue, "UI Checkbox paint inset must be finite and non-negative");
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI Checkbox paint inset or indicator presentation is invalid");
         }
         UICheckboxPaint& currentPaint = checkboxPaintsByNodeIndex[checkbox.index()];
         if (currentPaint == paint)
@@ -11611,7 +12081,8 @@ struct UIContext::Impl final {
             };
         }
         const auto fraction = resolveSplitViewFractionFromPointer(
-            contentRect, state->config, position, splitterDragGrabOffset);
+            contentRect, resolvedSplitViewConfig(state->config), position,
+            splitterDragGrabOffset);
         if (!fraction.has_value())
         {
             return false;
@@ -11891,8 +12362,11 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidNode, "UI Slider is not owned by the updater root");
         }
-        if (!std::isfinite(paint.contentInset) || paint.contentInset < 0.0F || !std::isfinite(paint.thumbWidth) ||
-            paint.thumbWidth < 0.0F)
+        if (!std::isfinite(paint.contentInset) || paint.contentInset < 0.0F ||
+            !std::isfinite(paint.trackThickness) || paint.trackThickness <= 0.0F ||
+            !std::isfinite(paint.thumbExtent) || paint.thumbExtent <= 0.0F ||
+            paint.contentInset < paint.thumbExtent * 0.5F ||
+            paint.trackThickness > paint.thumbExtent)
         {
             return fail(UIErrorCode::InvalidControlValue, "UI Slider paint metrics must be finite and non-negative");
         }
@@ -12348,6 +12822,77 @@ struct UIContext::Impl final {
         return armedSlider == splitter;
     }
 
+    [[nodiscard]] Core::Status setSplitterPaintFromUpdater(
+        UINodeId updaterRoot, UINodeId splitter, const UISplitterPaint& paint)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired,
+                        "UI tree updater requires a live root owner");
+        }
+        auto splitterResult = resolveSplitter(splitter);
+        if (!splitterResult)
+        {
+            return Core::failure(splitterResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, splitter))
+        {
+            return fail(UIErrorCode::InvalidNode,
+                        "UI Splitter is not owned by the updater root");
+        }
+        if (!std::isfinite(paint.lineThickness) || paint.lineThickness <= 0.0F ||
+            !std::isfinite(paint.focusRingThickness) ||
+            paint.focusRingThickness < paint.lineThickness)
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI Splitter paint thicknesses must be finite, positive, and ordered");
+        }
+        UISplitterPaint& state =
+            splitViewStorage.splitterPaintByIndex(splitter.index());
+        if (state == paint)
+        {
+            detachThemeBinding(splitter.index(), ThemeBindingSplitterPaint);
+            return Core::success();
+        }
+        if (Core::Status dirty = markPaintDirty(splitter); !dirty)
+        {
+            return dirty;
+        }
+        state = paint;
+        detachThemeBinding(splitter.index(), ThemeBindingSplitterPaint);
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UISplitterPaint> splitterPaintFromUpdater(
+        UINodeId updaterRoot, UINodeId splitter) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired,
+                        "UI tree updater requires a live root owner");
+        }
+        auto splitterResult = const_cast<Impl*>(this)->resolveSplitter(splitter);
+        if (!splitterResult)
+        {
+            return Core::failure(splitterResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, splitter))
+        {
+            return fail(UIErrorCode::InvalidNode,
+                        "UI Splitter is not owned by the updater root");
+        }
+        return splitViewStorage.splitterPaintByIndex(splitter.index());
+    }
+
     [[nodiscard]] UINodeId rootForSplitView(UINodeId splitView) const noexcept
     {
         const NodeRecord* record = nodes.tryGet(splitView.storageId());
@@ -12392,6 +12937,24 @@ struct UIContext::Impl final {
         const NodeRecord* record = nodes.tryGet(splitter.storageId());
         const UINodeId root = record != nullptr ? idForIndex(record->rootIndex) : UINodeId{};
         return isSplitterDraggingFromUpdater(root, splitter);
+    }
+
+    [[nodiscard]] Core::Status setSplitterPaint(
+        UINodeId splitter, const UISplitterPaint& paint)
+    {
+        const NodeRecord* record = nodes.tryGet(splitter.storageId());
+        const UINodeId root =
+            record != nullptr ? idForIndex(record->rootIndex) : UINodeId{};
+        return setSplitterPaintFromUpdater(root, splitter, paint);
+    }
+
+    [[nodiscard]] Core::Result<UISplitterPaint> splitterPaint(
+        UINodeId splitter) const
+    {
+        const NodeRecord* record = nodes.tryGet(splitter.storageId());
+        const UINodeId root =
+            record != nullptr ? idForIndex(record->rootIndex) : UINodeId{};
+        return splitterPaintFromUpdater(root, splitter);
     }
 
     [[nodiscard]] Core::Result<NodeRecord*> resolveTabView(UINodeId tabView)
@@ -13144,6 +13707,217 @@ struct UIContext::Impl final {
         UINodeId tabView, UITabViewCommand command)
     {
         return routeTabViewCommandFromUpdater(rootForTabView(tabView), tabView, command);
+    }
+
+    [[nodiscard]] Core::Result<UIMenuCommandResult> routeMenuCommandFromUpdater(
+        UINodeId updaterRoot, UINodeId menu, UIMenuCommand command)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (routeDispatchDepth != 0)
+        {
+            return fail(UIErrorCode::PointerRouteAlreadyInProgress,
+                        "UI Menu command cannot run during pointer routing");
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateMenuUpdaterRoot(updaterRoot, menu); !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        if (!isValidMenuCommand(command))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI Menu command is not recognized");
+        }
+        const MenuState* state = menuStorage.tryMenu(menu);
+        if (state == nullptr || !state->open || menuStorage.activeMenu() != menu)
+        {
+            return UIMenuCommandResult{.menu = menu};
+        }
+        if (command == UIMenuCommand::Dismiss)
+        {
+            if (Core::Status closed = setMenuOpenState(menu, false); !closed)
+            {
+                return Core::failure(closed.error());
+            }
+            return UIMenuCommandResult{
+                .targeted = true,
+                .consumed = true,
+                .dismissed = true,
+                .menu = menu,
+                .focus = defaultActionFocusButton,
+            };
+        }
+
+        const NodeRecord* menuRecord = nodes.tryGet(menu.storageId());
+        if (menuRecord == nullptr)
+        {
+            return fail(Core::CoreErrorCode::Internal,
+                        "UI Menu record is unavailable");
+        }
+        const auto focusableItem = [&](u32 index) noexcept {
+            if (index == InvalidNodeIndex)
+            {
+                return false;
+            }
+            const UINodeId item = idForIndex(index);
+            const MenuItemState* itemState = menuStorage.tryItem(item);
+            return itemState != nullptr &&
+                   itemState->config.kind != UIMenuItemKind::Separator &&
+                   isCommittedKeyboardFocusCandidate(item);
+        };
+        const auto firstFocusable = [&](bool reverse) noexcept {
+            u32 index = reverse ? menuRecord->lastChildIndex
+                                : menuRecord->firstChildIndex;
+            usize visited = 0;
+            while (index != InvalidNodeIndex && visited++ < nodes.capacity())
+            {
+                const NodeRecord* child = recordByIndex(index);
+                if (child == nullptr)
+                {
+                    break;
+                }
+                if (focusableItem(index))
+                {
+                    return idForIndex(index);
+                }
+                index = reverse ? child->previousSiblingIndex
+                                : child->nextSiblingIndex;
+            }
+            return UINodeId{};
+        };
+        const auto adjacentFocusable = [&](bool reverse) noexcept {
+            const MenuItemState* focused = menuStorage.tryItem(defaultActionFocusButton);
+            if (focused == nullptr || focused->menu != menu)
+            {
+                return firstFocusable(reverse);
+            }
+            const NodeRecord* focusedRecord = nodes.tryGet(defaultActionFocusButton.storageId());
+            u32 index = focusedRecord != nullptr
+                            ? (reverse ? focusedRecord->previousSiblingIndex
+                                       : focusedRecord->nextSiblingIndex)
+                            : InvalidNodeIndex;
+            usize visited = 0;
+            while (index != InvalidNodeIndex && visited++ < nodes.capacity())
+            {
+                const NodeRecord* child = recordByIndex(index);
+                if (child == nullptr)
+                {
+                    break;
+                }
+                if (focusableItem(index))
+                {
+                    return idForIndex(index);
+                }
+                index = reverse ? child->previousSiblingIndex
+                                : child->nextSiblingIndex;
+            }
+            return state->config.wrapKeyboardNavigation
+                       ? firstFocusable(reverse)
+                       : UINodeId{};
+        };
+
+        UINodeId target{};
+        switch (command)
+        {
+        case UIMenuCommand::Previous:
+            target = adjacentFocusable(true);
+            break;
+        case UIMenuCommand::Next:
+            target = adjacentFocusable(false);
+            break;
+        case UIMenuCommand::First:
+            target = firstFocusable(false);
+            break;
+        case UIMenuCommand::Last:
+            target = firstFocusable(true);
+            break;
+        case UIMenuCommand::Dismiss:
+            break;
+        }
+        if (!target.hasValue())
+        {
+            return UIMenuCommandResult{
+                .targeted = true,
+                .consumed = true,
+                .menu = menu,
+                .focus = defaultActionFocusButton,
+            };
+        }
+        const bool focusChanged = defaultActionFocusButton != target;
+        if (focusChanged)
+        {
+            releaseRouteDirtyQueueReservations();
+            auto reservationCleanup = Core::makeScopeExit(
+                [this]() noexcept { releaseRouteDirtyQueueReservations(); });
+            addRouteDirtyReservationCandidate(defaultActionFocusButton);
+            addRouteDirtyReservationCandidate(textInputFocus);
+            addRouteDirtyReservationCandidate(target);
+            if (Core::Status reserved = reserveRouteDirtyQueueSlots(); !reserved)
+            {
+                return Core::failure(reserved.error());
+            }
+            if (Core::Status focused = applyExplicitFocus(target); !focused)
+            {
+                return Core::failure(focused.error());
+            }
+        }
+        return UIMenuCommandResult{
+            .targeted = true,
+            .consumed = true,
+            .focusChanged = focusChanged,
+            .menu = menu,
+            .focus = target,
+        };
+    }
+
+    [[nodiscard]] Core::Result<UIMenuCommandResult> routeMenuCommand(
+        UINodeId menu, UIMenuCommand command)
+    {
+        const NodeRecord* record = contains(menu) ? nodes.tryGet(menu.storageId()) : nullptr;
+        const UINodeId root = record != nullptr ? idForIndex(record->rootIndex) : UINodeId{};
+        return routeMenuCommandFromUpdater(root, menu, command);
+    }
+
+    [[nodiscard]] Core::Result<UIMenuCommandResult> routeMenuCommand(
+        UIMenuCommand command, bool pressed)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (!isValidMenuCommand(command))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI Menu command is not recognized");
+        }
+        if (!pressed)
+        {
+            return UIMenuCommandResult{
+                .consumed = menuCommandPressLatch.release(command),
+            };
+        }
+        if (menuCommandPressLatch.isLatched(command))
+        {
+            return UIMenuCommandResult{.consumed = true};
+        }
+        const UINodeId menu = menuStorage.activeMenu();
+        if (!menu.hasValue())
+        {
+            return UIMenuCommandResult{};
+        }
+        auto routed = routeMenuCommand(menu, command);
+        if (!routed)
+        {
+            return Core::failure(routed.error());
+        }
+        if (routed->consumed)
+        {
+            menuCommandPressLatch.latch(command);
+        }
+        return routed;
     }
 
     [[nodiscard]] Core::Status setTabPaint(UINodeId tab, const UITabPaint& paint)
@@ -14037,6 +14811,37 @@ struct UIContext::Impl final {
         }
     }
 
+    void reconcileMenuAfterPublication() noexcept
+    {
+        const UINodeId active = menuStorage.activeMenu();
+        const MenuState* state = menuStorage.tryMenu(active);
+        if (state == nullptr)
+        {
+            return;
+        }
+        const UICommittedLayoutEntry* anchorEntry =
+            committedLayoutEntryFor(state->anchor);
+        if (anchorEntry == nullptr ||
+            anchorEntry->effectiveVisibility != UIVisibility::Visible ||
+            !isNodeEnabled(state->anchor) || !isNodeEnabled(active) ||
+            (activeModalNode.hasValue() &&
+             !isNodeWithinSubtree(activeModalNode, state->anchor)))
+        {
+            static_cast<void>(menuStorage.close(active));
+            menuCommandPressLatch.clear();
+            transientOverlayDismissPointerBarrierActive = false;
+            phaseDirty |= PhaseLayout | PhaseHit | PhasePaint | PhaseSemantics;
+            layoutReuseCacheValid = false;
+            return;
+        }
+        if (!state->committedMetrics.open ||
+            state->committedMetrics.anchorRect != anchorEntry->worldRect)
+        {
+            phaseDirty |= PhaseLayout | PhaseHit | PhasePaint | PhaseSemantics;
+            layoutReuseCacheValid = false;
+        }
+    }
+
     [[nodiscard]] UINodeId tooltipAnchorFromCommittedHit(
         const UIPointerHitTarget& target,
         std::span<const UICommittedHitEntry> entries) const noexcept
@@ -14392,6 +15197,572 @@ struct UIContext::Impl final {
         return tooltipMetrics(tooltip);
     }
 
+    [[nodiscard]] Core::Result<NodeRecord*> resolveMenu(UINodeId menu)
+    {
+        auto nodeResult = resolveNode(menu);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        if ((*nodeResult)->kind != BuiltinElementKind::Menu ||
+            !menuStorage.containsMenu(menu))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI Menu API requires a Menu node");
+        }
+        return *nodeResult;
+    }
+
+    [[nodiscard]] Core::Result<NodeRecord*> resolveMenuItem(UINodeId item)
+    {
+        auto nodeResult = resolveNode(item);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        if ((*nodeResult)->kind != BuiltinElementKind::MenuItem ||
+            !menuStorage.containsMenuItem(item))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI MenuItem API requires a MenuItem node");
+        }
+        return *nodeResult;
+    }
+
+    [[nodiscard]] bool hasValidMenuRelationship(UINodeId menu,
+                                                UINodeId anchor) const noexcept
+    {
+        if (!contains(menu) || !contains(anchor))
+        {
+            return false;
+        }
+        const NodeRecord* menuRecord = nodes.tryGet(menu.storageId());
+        const NodeRecord* anchorRecord = nodes.tryGet(anchor.storageId());
+        return menuRecord != nullptr && anchorRecord != nullptr &&
+               menuRecord->kind == BuiltinElementKind::Menu &&
+               menuRecord->rootIndex == anchorRecord->rootIndex &&
+               menuStorage.hasRelationship(menu, anchor);
+    }
+
+    [[nodiscard]] Core::Status validateMenuAnchor(UINodeId menu,
+                                                  UINodeId anchor)
+    {
+        auto menuResult = resolveMenu(menu);
+        if (!menuResult)
+        {
+            return Core::failure(menuResult.error());
+        }
+        auto anchorResult = resolveNode(anchor);
+        if (!anchorResult)
+        {
+            return Core::failure(anchorResult.error());
+        }
+        const NodeRecord* menuRecord = *menuResult;
+        const NodeRecord* anchorRecord = *anchorResult;
+        if (menu == anchor)
+        {
+            return fail(UIErrorCode::InvalidParent, "UI Menu cannot anchor to itself");
+        }
+        if (menuRecord->rootIndex != anchorRecord->rootIndex)
+        {
+            return fail(UIErrorCode::InvalidParent,
+                        "UI Menu and Anchor must belong to the same root");
+        }
+        if (isNodeWithinSubtree(menu, anchor) ||
+            isNodeWithinSubtree(anchor, menu))
+        {
+            return fail(UIErrorCode::InvalidParent,
+                        "UI Menu and Anchor cannot form an ancestor cycle");
+        }
+        switch (anchorRecord->kind)
+        {
+        case BuiltinElementKind::Root:
+        case BuiltinElementKind::Popup:
+        case BuiltinElementKind::Tooltip:
+        case BuiltinElementKind::Menu:
+        case BuiltinElementKind::MenuItem:
+        case BuiltinElementKind::DropdownItem:
+        case BuiltinElementKind::Modal:
+        case BuiltinElementKind::ListViewItem:
+        case BuiltinElementKind::TreeViewItem:
+            return fail(UIErrorCode::InvalidParent,
+                        "UI node kind is not a stable Menu Anchor");
+        default:
+            break;
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status setMenuAnchorRelation(UINodeId menu,
+                                                     UINodeId anchor)
+    {
+        if (Core::Status valid = validateMenuAnchor(menu, anchor); !valid)
+        {
+            return valid;
+        }
+        const UINodeId reverse = menuStorage.menuForAnchor(anchor);
+        if (reverse.hasValue() && reverse != menu &&
+            hasValidMenuRelationship(reverse, anchor))
+        {
+            return fail(UIErrorCode::InvalidParent,
+                        "UI Anchor already owns a Menu relationship");
+        }
+        if (menuStorage.anchorForMenu(menu) == anchor && reverse == menu)
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markLayoutDirtyBatch({menu}); !dirty)
+        {
+            return dirty;
+        }
+        static_cast<void>(menuStorage.close(menu));
+        menuStorage.linkAnchorValidated(menu, anchor);
+        menuCommandPressLatch.clear();
+        transientOverlayDismissPointerBarrierActive = false;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status clearMenuAnchorRelation(UINodeId menu)
+    {
+        auto menuResult = resolveMenu(menu);
+        if (!menuResult)
+        {
+            return Core::failure(menuResult.error());
+        }
+        if (!menuStorage.anchorForMenu(menu).hasValue())
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markLayoutDirtyBatch({menu}); !dirty)
+        {
+            return dirty;
+        }
+        static_cast<void>(menuStorage.unlinkMenu(menu));
+        menuCommandPressLatch.clear();
+        transientOverlayDismissPointerBarrierActive = false;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status setMenuOpenState(UINodeId menu, bool open)
+    {
+        auto menuResult = resolveMenu(menu);
+        if (!menuResult)
+        {
+            return Core::failure(menuResult.error());
+        }
+        MenuState* state = menuStorage.tryMenu(menu);
+        const UINodeId anchor = menuStorage.anchorForMenu(menu);
+        if (state == nullptr || !hasValidMenuRelationship(menu, anchor))
+        {
+            return fail(UIErrorCode::InvalidParent,
+                        "UI Menu requires a live Anchor before it can open");
+        }
+        if (open && (!isNodeEnabled(menu) || !isNodeEnabled(anchor) ||
+                     !isAuthoredTooltipNodeVisible(menu) ||
+                     !isAuthoredTooltipNodeVisible(anchor) ||
+                     (activeModalNode.hasValue() &&
+                      !isNodeWithinSubtree(activeModalNode, anchor))))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI Menu and Anchor must be enabled, visible, and inside the active Modal scope");
+        }
+        if (state->open == open && (!open || menuStorage.activeMenu() == menu))
+        {
+            return Core::success();
+        }
+
+        const UINodeId previousMenu = open ? menuStorage.activeMenu() : UINodeId{};
+        const UINodeId previousMenuAnchor = menuStorage.anchorForMenu(previousMenu);
+        const UINodeId previousPopup = open ? activePopup() : UINodeId{};
+        const UINodeId previousDropdown = dropdownForPopup(previousPopup);
+        if (Core::Status dirty = markLayoutDirtyBatch(
+                {menu, anchor, previousMenu, previousMenuAnchor,
+                 previousPopup, previousDropdown});
+            !dirty)
+        {
+            return dirty;
+        }
+
+        const bool focusWasInClosingOverlay =
+            (!open && isNodeWithinSubtree(menu, defaultActionFocusButton)) ||
+            (previousMenu.hasValue() && previousMenu != menu &&
+             isNodeWithinSubtree(previousMenu, defaultActionFocusButton)) ||
+            (previousPopup.hasValue() &&
+             isNodeWithinSubtree(previousPopup, defaultActionFocusButton));
+        if (open)
+        {
+            focusRestoreByNodeIndex[menu.index()] = defaultActionFocusButton;
+            static_cast<void>(menuStorage.openValidated(menu));
+            if (previousPopup.hasValue())
+            {
+                popupStatesByNodeIndex[previousPopup.index()].open = false;
+                activePopupNode = {};
+                dropdownCommandPressLatch.clear();
+            }
+        } else
+        {
+            static_cast<void>(menuStorage.close(menu));
+        }
+        transientOverlayDismissPointerBarrierActive = false;
+        menuCommandPressLatch.clear();
+
+        if (focusWasInClosingOverlay)
+        {
+            UINodeId nextFocus = open ? anchor : focusRestoreByNodeIndex[menu.index()];
+            if (!nextFocus.hasValue() || !contains(nextFocus) || !isNodeEnabled(nextFocus))
+            {
+                nextFocus = isNodeEnabled(anchor) ? anchor : UINodeId{};
+            }
+            defaultActionPressState.clearAll();
+            clearArmedPrimaryButton();
+            clearArmedSlider();
+            clearArmedTextEdit();
+            capturedPointerNode = {};
+            resetImeCompositionState();
+            textInputFocus = {};
+            defaultActionFocusButton = nextFocus;
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status setMenuItemCheckedState(UINodeId item,
+                                                       bool checked)
+    {
+        auto itemResult = resolveMenuItem(item);
+        if (!itemResult)
+        {
+            return Core::failure(itemResult.error());
+        }
+        MenuItemState* itemState = menuStorage.tryItem(item);
+        if (itemState == nullptr ||
+            (itemState->config.kind != UIMenuItemKind::Check &&
+             itemState->config.kind != UIMenuItemKind::Radio))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI MenuItem checked state requires a Check or Radio item");
+        }
+        if (itemState->config.kind == UIMenuItemKind::Radio && !checked)
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI Radio MenuItem cannot be cleared without selecting a peer");
+        }
+        const UINodeId menu = menuStorage.menuForItem(item);
+        if (!menu.hasValue())
+        {
+            return fail(UIErrorCode::InvalidParent,
+                        "UI MenuItem is detached from its Menu");
+        }
+        if (itemState->checked == checked)
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markPaintDirty(menu); !dirty)
+        {
+            return dirty;
+        }
+        if (itemState->config.kind == UIMenuItemKind::Radio)
+        {
+            const NodeRecord* menuRecord = nodes.tryGet(menu.storageId());
+            u32 childIndex = menuRecord != nullptr ? menuRecord->firstChildIndex
+                                                  : InvalidNodeIndex;
+            while (childIndex != InvalidNodeIndex)
+            {
+                const NodeRecord* child = recordByIndex(childIndex);
+                if (child == nullptr)
+                {
+                    break;
+                }
+                const u32 next = child->nextSiblingIndex;
+                MenuItemState* peer = menuStorage.tryItem(idForIndex(childIndex));
+                if (peer != nullptr && peer->config.kind == UIMenuItemKind::Radio &&
+                    peer->config.radioGroup == itemState->config.radioGroup)
+                {
+                    static_cast<void>(menuStorage.setItemChecked(peer->node,
+                                                                peer->node == item));
+                }
+                childIndex = next;
+            }
+            return Core::success();
+        }
+        static_cast<void>(menuStorage.setItemChecked(item, checked));
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status setMenuAnchor(UINodeId menu, UINodeId anchor)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        return setMenuAnchorRelation(menu, anchor);
+    }
+
+    [[nodiscard]] Core::Status clearMenuAnchor(UINodeId menu)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        return clearMenuAnchorRelation(menu);
+    }
+
+    [[nodiscard]] Core::Result<UINodeId> menuAnchor(UINodeId menu) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        auto menuResult = const_cast<Impl*>(this)->resolveMenu(menu);
+        if (!menuResult)
+        {
+            return Core::failure(menuResult.error());
+        }
+        const UINodeId anchor = menuStorage.anchorForMenu(menu);
+        return hasValidMenuRelationship(menu, anchor) ? anchor : UINodeId{};
+    }
+
+    [[nodiscard]] Core::Status setMenuOpen(UINodeId menu, bool open)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        return setMenuOpenState(menu, open);
+    }
+
+    [[nodiscard]] Core::Result<bool> isMenuOpen(UINodeId menu) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        auto menuResult = const_cast<Impl*>(this)->resolveMenu(menu);
+        if (!menuResult)
+        {
+            return Core::failure(menuResult.error());
+        }
+        const MenuState* state = menuStorage.tryMenu(menu);
+        return state != nullptr && state->open && menuStorage.activeMenu() == menu;
+    }
+
+    [[nodiscard]] Core::Result<UIMenuMetrics> menuMetrics(UINodeId menu) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        auto menuResult = const_cast<Impl*>(this)->resolveMenu(menu);
+        if (!menuResult)
+        {
+            return Core::failure(menuResult.error());
+        }
+        return menuStorage.committedMetrics(menu);
+    }
+
+    [[nodiscard]] Core::Status setMenuItemChecked(UINodeId item, bool checked)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        return setMenuItemCheckedState(item, checked);
+    }
+
+    [[nodiscard]] Core::Result<bool> isMenuItemChecked(UINodeId item) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        auto itemResult = const_cast<Impl*>(this)->resolveMenuItem(item);
+        if (!itemResult)
+        {
+            return Core::failure(itemResult.error());
+        }
+        const MenuItemState* state = menuStorage.tryItem(item);
+        if (state == nullptr ||
+            (state->config.kind != UIMenuItemKind::Check &&
+             state->config.kind != UIMenuItemKind::Radio))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI MenuItem checked state requires a Check or Radio item");
+        }
+        return state->checked;
+    }
+
+    [[nodiscard]] Core::Status validateMenuUpdaterRoot(UINodeId updaterRoot,
+                                                       UINodeId menu) const
+    {
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired,
+                        "UI tree updater requires a live root owner");
+        }
+        auto menuResult = const_cast<Impl*>(this)->resolveMenu(menu);
+        if (!menuResult)
+        {
+            return Core::failure(menuResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, menu))
+        {
+            return fail(UIErrorCode::InvalidNode,
+                        "UI Menu is not owned by the updater root");
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status setMenuAnchorFromUpdater(
+        UINodeId updaterRoot, UINodeId menu, UINodeId anchor)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateMenuUpdaterRoot(updaterRoot, menu); !valid)
+        {
+            return valid;
+        }
+        if (!contains(anchor) || !isNodeWithinRoot(updaterRoot, anchor))
+        {
+            return fail(UIErrorCode::InvalidNode,
+                        "UI Menu Anchor is not owned by the updater root");
+        }
+        return setMenuAnchorRelation(menu, anchor);
+    }
+
+    [[nodiscard]] Core::Status clearMenuAnchorFromUpdater(
+        UINodeId updaterRoot, UINodeId menu)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateMenuUpdaterRoot(updaterRoot, menu); !valid)
+        {
+            return valid;
+        }
+        return clearMenuAnchorRelation(menu);
+    }
+
+    [[nodiscard]] Core::Result<UINodeId> menuAnchorFromUpdater(
+        UINodeId updaterRoot, UINodeId menu) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (Core::Status valid = validateMenuUpdaterRoot(updaterRoot, menu); !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        const UINodeId anchor = menuStorage.anchorForMenu(menu);
+        return hasValidMenuRelationship(menu, anchor) ? anchor : UINodeId{};
+    }
+
+    [[nodiscard]] Core::Status setMenuOpenFromUpdater(
+        UINodeId updaterRoot, UINodeId menu, bool open)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateMenuUpdaterRoot(updaterRoot, menu); !valid)
+        {
+            return valid;
+        }
+        return setMenuOpenState(menu, open);
+    }
+
+    [[nodiscard]] Core::Result<bool> isMenuOpenFromUpdater(
+        UINodeId updaterRoot, UINodeId menu) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (Core::Status valid = validateMenuUpdaterRoot(updaterRoot, menu); !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        const MenuState* state = menuStorage.tryMenu(menu);
+        return state != nullptr && state->open && menuStorage.activeMenu() == menu;
+    }
+
+    [[nodiscard]] Core::Result<UIMenuMetrics> menuMetricsFromUpdater(
+        UINodeId updaterRoot, UINodeId menu) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (Core::Status valid = validateMenuUpdaterRoot(updaterRoot, menu); !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        return menuStorage.committedMetrics(menu);
+    }
+
+    [[nodiscard]] Core::Status setMenuItemCheckedFromUpdater(
+        UINodeId updaterRoot, UINodeId item, bool checked)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired,
+                        "UI tree updater requires a live root owner");
+        }
+        if (!isNodeWithinRoot(updaterRoot, item))
+        {
+            return fail(UIErrorCode::InvalidNode,
+                        "UI MenuItem is not owned by the updater root");
+        }
+        return setMenuItemCheckedState(item, checked);
+    }
+
+    [[nodiscard]] Core::Result<bool> isMenuItemCheckedFromUpdater(
+        UINodeId updaterRoot, UINodeId item) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired,
+                        "UI tree updater requires a live root owner");
+        }
+        auto itemResult = const_cast<Impl*>(this)->resolveMenuItem(item);
+        if (!itemResult)
+        {
+            return Core::failure(itemResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, item))
+        {
+            return fail(UIErrorCode::InvalidNode,
+                        "UI MenuItem is not owned by the updater root");
+        }
+        const MenuItemState* state = menuStorage.tryItem(item);
+        if (state == nullptr ||
+            (state->config.kind != UIMenuItemKind::Check &&
+             state->config.kind != UIMenuItemKind::Radio))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI MenuItem checked state requires a Check or Radio item");
+        }
+        return state->checked;
+    }
+
     [[nodiscard]] Core::Result<NodeRecord*> resolveDropdown(UINodeId dropdown)
     {
         auto nodeResult = resolveNode(dropdown);
@@ -14649,6 +16020,8 @@ struct UIContext::Impl final {
 
         UINodeId previousPopup{};
         UINodeId previousDropdown{};
+        const UINodeId previousMenu = open ? menuStorage.activeMenu() : UINodeId{};
+        const UINodeId previousMenuAnchor = menuStorage.anchorForMenu(previousMenu);
         if (open && activePopupNode.hasValue() && activePopupNode != popup && contains(activePopupNode) &&
             activePopupNode.index() < popupStatesByNodeIndex.size() &&
             popupStatesByNodeIndex[activePopupNode.index()].open)
@@ -14656,7 +16029,10 @@ struct UIContext::Impl final {
             previousPopup = activePopupNode;
             previousDropdown = dropdownForPopup(previousPopup);
         }
-        if (Core::Status dirty = markLayoutDirtyBatch({popup, dropdown, previousPopup, previousDropdown}); !dirty)
+        if (Core::Status dirty = markLayoutDirtyBatch(
+                {popup, dropdown, previousPopup, previousDropdown,
+                 previousMenu, previousMenuAnchor});
+            !dirty)
         {
             return dirty;
         }
@@ -14667,12 +16043,19 @@ struct UIContext::Impl final {
         }
         const bool focusWasInClosingPopup =
             (!open && isNodeWithinSubtree(popup, defaultActionFocusButton)) ||
-            (previousPopup.hasValue() && isNodeWithinSubtree(previousPopup, defaultActionFocusButton));
+            (previousPopup.hasValue() && isNodeWithinSubtree(previousPopup, defaultActionFocusButton)) ||
+            (previousMenu.hasValue() &&
+             isNodeWithinSubtree(previousMenu, defaultActionFocusButton));
         if (open)
         {
             focusRestoreByNodeIndex[popup.index()] = defaultActionFocusButton;
             popupState.open = true;
             activePopupNode = popup;
+            if (previousMenu.hasValue())
+            {
+                static_cast<void>(menuStorage.close(previousMenu));
+                menuCommandPressLatch.clear();
+            }
         } else
         {
             popupState.open = false;
@@ -14681,8 +16064,9 @@ struct UIContext::Impl final {
                 activePopupNode = {};
             }
         }
-        popupDismissPointerBarrierActive = false;
+        transientOverlayDismissPointerBarrierActive = false;
         dropdownCommandPressLatch.clear();
+        menuCommandPressLatch.clear();
 
         if (focusWasInClosingPopup)
         {
@@ -15789,6 +17173,64 @@ struct UIContext::Impl final {
         }
     }
 
+    void addMenuActivationDirtyReservationCandidates(UINodeId control)
+    {
+        const MenuItemState* item = menuStorage.tryItem(control);
+        if (item == nullptr)
+        {
+            return;
+        }
+        const UINodeId menu = menuStorage.menuForItem(control);
+        addRouteDirtyReservationCandidate(control);
+        addRouteLayoutDirtyReservationCandidates(menu);
+        addRouteLayoutDirtyReservationCandidates(menuStorage.anchorForMenu(menu));
+    }
+
+    [[nodiscard]] Core::Result<bool> activateMenuItem(UINodeId item)
+    {
+        const NodeRecord* record = contains(item) ? nodes.tryGet(item.storageId()) : nullptr;
+        MenuItemState* itemState = menuStorage.tryItem(item);
+        if (record == nullptr || record->kind != BuiltinElementKind::MenuItem ||
+            itemState == nullptr || itemState->config.kind == UIMenuItemKind::Separator ||
+            !isNodeEnabled(item))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI MenuItem activation requires a live enabled non-separator item");
+        }
+        const UINodeId menu = menuStorage.menuForItem(item);
+        const MenuState* menuState = menuStorage.tryMenu(menu);
+        if (menuState == nullptr || !menuState->open || menuStorage.activeMenu() != menu)
+        {
+            return fail(UIErrorCode::InvalidParent,
+                        "UI MenuItem activation requires its Menu to be active");
+        }
+
+        const UIMenuItemKind kind = itemState->config.kind;
+        const bool checked = itemState->checked;
+        const bool closeOnActivate = menuState->config.closeOnActivate;
+        if (kind == UIMenuItemKind::Check)
+        {
+            if (Core::Status changed = setMenuItemCheckedState(item, !checked); !changed)
+            {
+                return Core::failure(changed.error());
+            }
+        } else if (kind == UIMenuItemKind::Radio && !checked)
+        {
+            if (Core::Status changed = setMenuItemCheckedState(item, true); !changed)
+            {
+                return Core::failure(changed.error());
+            }
+        }
+        if (closeOnActivate)
+        {
+            if (Core::Status closed = setMenuOpenState(menu, false); !closed)
+            {
+                return Core::failure(closed.error());
+            }
+        }
+        return true;
+    }
+
     void addTabActivationDirtyReservationCandidates(UINodeId tab)
     {
         const UINodeId tabView = tabViewStorage.tabViewForTab(tab);
@@ -15895,7 +17337,7 @@ struct UIContext::Impl final {
         {
             activePopupNode = {};
         }
-        popupDismissPointerBarrierActive = false;
+        transientOverlayDismissPointerBarrierActive = false;
         defaultActionPressState.clearAll();
         resetTextEditPreferredX(textInputFocus);
         resetImeCompositionState();
@@ -16300,7 +17742,9 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidNode, "UI RadioButton is not owned by the updater root");
         }
-        if (!std::isfinite(paint.selectedIndicatorInset) || paint.selectedIndicatorInset < 0.0F ||
+        if (!std::isfinite(paint.indicatorExtent) || paint.indicatorExtent <= 0.0F ||
+            !std::isfinite(paint.selectedIndicatorInset) || paint.selectedIndicatorInset < 0.0F ||
+            paint.selectedIndicatorInset * 2.0F >= paint.indicatorExtent ||
             !std::isfinite(paint.labelGap) || paint.labelGap < 0.0F)
         {
             return fail(UIErrorCode::InvalidControlValue,
@@ -16312,7 +17756,8 @@ struct UIContext::Impl final {
             detachThemeBinding(radioButton.index(), ThemeBindingRadioButtonPaint);
             return Core::success();
         }
-        const bool layoutChanged = state.paint.labelGap != paint.labelGap ||
+        const bool layoutChanged = state.paint.indicatorExtent != paint.indicatorExtent ||
+                                   state.paint.labelGap != paint.labelGap ||
                                    state.paint.indicatorVisible != paint.indicatorVisible;
         Core::Status dirty = layoutChanged ? markLayoutStyleDirty(radioButton) : markPaintDirty(radioButton);
         if (!dirty)
@@ -16572,6 +18017,16 @@ struct UIContext::Impl final {
                 continue;
             }
             tabViewStorage.publishMetrics(index);
+        }
+        for (const u32 index : order)
+        {
+            const NodeRecord* record = recordByIndex(index);
+            if (record == nullptr || record->kind != BuiltinElementKind::Menu ||
+                index >= menuStorage.capacity())
+            {
+                continue;
+            }
+            menuStorage.publishMetrics(index);
         }
         for (const u32 index : order)
         {
@@ -17106,6 +18561,7 @@ struct UIContext::Impl final {
         clearDirtyState();
         tooltipAdvanceRollback.release();
         reconcileTooltipAfterPublication(frameNow);
+        reconcileMenuAfterPublication();
         pendingDestroyedModalRestoreFocus = {};
         hasPendingDestroyedModalRestoreFocus = false;
         focusRollback.release();
@@ -17557,6 +19013,10 @@ struct UIContext::Impl final {
         {
             return Core::failure(inputStatus.error());
         }
+        if (Core::Status modality = setInputModality(UIInputModality::Pointer); !modality)
+        {
+            return Core::failure(modality.error());
+        }
         lastPointerInput = input;
         hasLastPointerInput = true;
 
@@ -17682,7 +19142,23 @@ struct UIContext::Impl final {
                                                      !pointInsideActivePopup && !pointTargetsPopupDropdown;
         const bool blockPopupChromeClickThrough = primaryButtonDown && popupAtRouteStart.hasValue() &&
                                                   pointInsideActivePopup && !pointTargetsActivePopup;
-        const bool popupBarrierAtRouteStart = popupDismissPointerBarrierActive;
+        const UINodeId menuAtRouteStart = activeMenu();
+        const UINodeId menuAnchorAtRouteStart = menuStorage.anchorForMenu(menuAtRouteStart);
+        const u32 menuEntryIndexAtRouteStart = findHitEntryIndex(menuAtRouteStart, entries);
+        const bool pointInsideActiveMenu =
+            menuEntryIndexAtRouteStart < entries.size() &&
+            containsPointHalfOpen(entries[menuEntryIndexAtRouteStart].worldRect, input.position) &&
+            containsPointHalfOpen(entries[menuEntryIndexAtRouteStart].effectiveClip, input.position);
+        const bool pointTargetsActiveMenu = isNodeWithinSubtree(menuAtRouteStart, physicalTarget);
+        const bool pointTargetsMenuAnchor =
+            isNodeWithinSubtree(menuAnchorAtRouteStart, physicalTarget) && !pointTargetsActiveMenu;
+        const bool dismissActiveMenuOnPrimaryDown = primaryButtonDown && menuAtRouteStart.hasValue() &&
+                                                    !pointInsideActiveMenu && !pointTargetsMenuAnchor;
+        const bool blockMenuChromeClickThrough = primaryButtonDown && menuAtRouteStart.hasValue() &&
+                                                 pointInsideActiveMenu && !pointTargetsActiveMenu;
+        const bool dismissActiveMenuOnWheel = input.kind == UIRoutedPointerEventKind::Wheel &&
+                                              menuAtRouteStart.hasValue();
+        const bool transientOverlayBarrierAtRouteStart = transientOverlayDismissPointerBarrierActive;
         const ScrollBarPointerHit scrollBarHitAtRouteStart =
             primaryButtonDown ? scrollBarPointerHit(routePathScratch, entries, input.position) : ScrollBarPointerHit{};
         const UINodeId armedButtonAtRouteStart = armedPrimaryButton;
@@ -17705,6 +19181,11 @@ struct UIContext::Impl final {
         {
             addRouteLayoutDirtyReservationCandidates(popupAtRouteStart);
             addRouteLayoutDirtyReservationCandidates(popupDropdownAtRouteStart);
+        }
+        if (dismissActiveMenuOnPrimaryDown || dismissActiveMenuOnWheel)
+        {
+            addRouteLayoutDirtyReservationCandidates(menuAtRouteStart);
+            addRouteLayoutDirtyReservationCandidates(menuAnchorAtRouteStart);
         }
         const UINodeId hoverCandidate = physicalNearestButton.hasValue() ? physicalNearestButton : physicalTarget;
         const UINodeId nextHoveredControl = resolvedHoveredPrimaryControl(hoverCandidate);
@@ -17808,6 +19289,7 @@ struct UIContext::Impl final {
                 if (pointWithinArmedButton && isNodeEnabled(armedButtonAtRouteStart))
                 {
                     addDropdownActivationDirtyReservationCandidates(armedButtonAtRouteStart);
+                    addMenuActivationDirtyReservationCandidates(armedButtonAtRouteStart);
                     addTabActivationDirtyReservationCandidates(armedButtonAtRouteStart);
                     addRouteDirtyReservationCandidate(listViewForItem(armedButtonAtRouteStart));
                     const UINodeId armedTreeView = treeViewForItem(armedButtonAtRouteStart);
@@ -17941,8 +19423,10 @@ struct UIContext::Impl final {
             capturedPointerNode = {};
         }
 
-        bool preserveFocusForPopupBarrier = false;
-        if (primaryButtonDown && (dismissActivePopupOnPrimaryDown || blockPopupChromeClickThrough))
+        bool preserveFocusForTransientOverlayBarrier = false;
+        if (primaryButtonDown &&
+            (dismissActivePopupOnPrimaryDown || blockPopupChromeClickThrough ||
+             dismissActiveMenuOnPrimaryDown || blockMenuChromeClickThrough))
         {
             if (dismissActivePopupOnPrimaryDown && !routedEvent.isDefaultActionPrevented() &&
                 contains(popupAtRouteStart) && popupAtRouteStart.index() < popupStatesByNodeIndex.size() &&
@@ -17953,18 +19437,35 @@ struct UIContext::Impl final {
                     return Core::failure(closed.error());
                 }
             }
-            popupDismissPointerBarrierActive = true;
+            if (dismissActiveMenuOnPrimaryDown && !routedEvent.isDefaultActionPrevented() &&
+                menuStorage.activeMenu() == menuAtRouteStart)
+            {
+                if (Core::Status closed = setMenuOpenState(menuAtRouteStart, false); !closed)
+                {
+                    return Core::failure(closed.error());
+                }
+            }
+            transientOverlayDismissPointerBarrierActive = true;
             routedEvent.preventDefaultAction();
             routedEvent.consumeInputTransition();
             static_cast<void>(routedEvent.claimPointerButton(Platform::PointerButton::Primary));
-            preserveFocusForPopupBarrier = true;
-        } else if (primaryButtonUp && popupBarrierAtRouteStart)
+            preserveFocusForTransientOverlayBarrier = true;
+        } else if (primaryButtonUp && transientOverlayBarrierAtRouteStart)
         {
-            popupDismissPointerBarrierActive = false;
+            transientOverlayDismissPointerBarrierActive = false;
             routedEvent.preventDefaultAction();
             routedEvent.consumeInputTransition();
             static_cast<void>(routedEvent.claimPointerButton(Platform::PointerButton::Primary));
-            preserveFocusForPopupBarrier = true;
+            preserveFocusForTransientOverlayBarrier = true;
+        } else if (dismissActiveMenuOnWheel && !routedEvent.isDefaultActionPrevented() &&
+                   menuStorage.activeMenu() == menuAtRouteStart)
+        {
+            if (Core::Status closed = setMenuOpenState(menuAtRouteStart, false); !closed)
+            {
+                return Core::failure(closed.error());
+            }
+            routedEvent.preventDefaultAction();
+            routedEvent.consumeInputTransition();
         }
 
         Core::Status hoverPaintStatus = updateHoveredPrimaryControl(hoverCandidate);
@@ -18000,7 +19501,9 @@ struct UIContext::Impl final {
                                        nearestSlider.hasValue() && nearestSliderRecord != nullptr &&
                                        isPointerAdjustableRangeInput(nearestSlider);
             UINodeId nextKeyboardFocus =
-                preserveFocusForModalBarrier || preserveFocusForPopupBarrier ? previousKeyboardFocus : UINodeId{};
+                preserveFocusForModalBarrier || preserveFocusForTransientOverlayBarrier
+                    ? previousKeyboardFocus
+                    : UINodeId{};
             UINodeId nextActivationTarget{};
             UINodeId interactionPaintNode{};
             if (willUseScrollBar)
@@ -18067,7 +19570,7 @@ struct UIContext::Impl final {
             {
                 return Core::failure(dirty.error());
             }
-            if (!preserveFocusForModalBarrier && !preserveFocusForPopupBarrier)
+            if (!preserveFocusForModalBarrier && !preserveFocusForTransientOverlayBarrier)
             {
                 clearDefaultActionFocus();
                 if (!willFocusTextEdit && textInputFocus.hasValue())
@@ -18081,10 +19584,10 @@ struct UIContext::Impl final {
             if (preserveFocusForModalBarrier)
             {
                 // A Modal backdrop owns the input but is not a focus target.
-            } else if (preserveFocusForPopupBarrier)
+            } else if (preserveFocusForTransientOverlayBarrier)
             {
-                // Popup chrome and outside-dismiss clicks are click-through
-                // barriers and preserve the focus restored by Popup close.
+                // Transient overlay chrome and outside-dismiss clicks are
+                // click-through barriers and preserve restored focus.
             } else if (willUseScrollBar)
             {
                 armedScrollView = scrollBarHitAtRouteStart.scrollView;
@@ -18419,6 +19922,14 @@ struct UIContext::Impl final {
                     }
                 }
                 if (const NodeRecord* armedRecord = nodes.tryGet(armedButtonAtRouteStart.storageId());
+                    armedRecord != nullptr && armedRecord->kind == BuiltinElementKind::MenuItem)
+                {
+                    if (auto activated = activateMenuItem(armedButtonAtRouteStart); !activated)
+                    {
+                        return Core::failure(activated.error());
+                    }
+                }
+                if (const NodeRecord* armedRecord = nodes.tryGet(armedButtonAtRouteStart.storageId());
                     armedRecord != nullptr && armedRecord->kind == BuiltinElementKind::Tab)
                 {
                     if (auto activated = activateTabControl(armedButtonAtRouteStart); !activated)
@@ -18527,7 +20038,7 @@ struct UIContext::Impl final {
         clearArmedScrollView();
         clearArmedTextEdit();
         capturedPointerNode = {};
-        popupDismissPointerBarrierActive = false;
+        transientOverlayDismissPointerBarrierActive = false;
         dropdownCommandPressLatch.clear();
         listViewCommandPressLatch.clear();
         treeViewCommandPressLatch.clear();
@@ -18913,6 +20424,13 @@ struct UIContext::Impl final {
         {
             return Core::failure(valid.error());
         }
+        const UIInputModality modality = source == UIFlowActionSource::Gamepad
+                                             ? UIInputModality::Gamepad
+                                             : UIInputModality::Keyboard;
+        if (Core::Status modalityStatus = setInputModality(modality); !modalityStatus)
+        {
+            return Core::failure(modalityStatus.error());
+        }
         if (source == UIFlowActionSource::Keyboard &&
             localUser != UIFlowPrimaryLocalUser)
         {
@@ -19043,6 +20561,15 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::InvalidButtonAction,
                         "UI default-action activation source must be Keyboard, Gamepad, or Accessibility");
         }
+        const UIInputModality modality = source == UIButtonActivationSource::Gamepad
+                                             ? UIInputModality::Gamepad
+                                             : source == UIButtonActivationSource::Accessibility
+                                                   ? UIInputModality::Accessibility
+                                                   : UIInputModality::Keyboard;
+        if (Core::Status modalityStatus = setInputModality(modality); !modalityStatus)
+        {
+            return Core::failure(modalityStatus.error());
+        }
         if (explicitAccessibilityTarget.hasValue() &&
             (source != UIButtonActivationSource::Accessibility || control.has_value()))
         {
@@ -19152,6 +20679,7 @@ struct UIContext::Impl final {
             }
         }
         addDropdownActivationDirtyReservationCandidates(activationTarget);
+        addMenuActivationDirtyReservationCandidates(activationTarget);
         addTabActivationDirtyReservationCandidates(activationTarget);
         if (Core::Status reservation = reserveRouteDirtyQueueSlots(); !reservation)
         {
@@ -19195,6 +20723,16 @@ struct UIContext::Impl final {
             dropdownActivated = *activated;
         }
         bool tabActivated = false;
+        bool menuItemActivated = false;
+        if (record->kind == BuiltinElementKind::MenuItem)
+        {
+            auto activated = activateMenuItem(activationTarget);
+            if (!activated)
+            {
+                return Core::failure(activated.error());
+            }
+            menuItemActivated = *activated;
+        }
         if (record->kind == BuiltinElementKind::Tab)
         {
             auto activated = activateTabControl(activationTarget);
@@ -19218,7 +20756,8 @@ struct UIContext::Impl final {
             // changed state above; a bare Button without a callback did not.
             const bool activated =
                 behaviorStateStorage.hasToggle(activationTarget.index()) ||
-                record->kind == BuiltinElementKind::RadioButton || dropdownActivated || tabActivated;
+                record->kind == BuiltinElementKind::RadioButton || dropdownActivated ||
+                menuItemActivated || tabActivated;
             return UIDefaultActionResult{.consumed = true, .activated = activated};
         }
         const u64 currentButtonRouteSerial = ++buttonRouteSerial;
@@ -19296,6 +20835,10 @@ struct UIContext::Impl final {
         switch (action.kind)
         {
         case UIAccessibilityActionKind::Focus:
+            if (Core::Status modality = setInputModality(UIInputModality::Accessibility); !modality)
+            {
+                return modality;
+            }
             return requestFocus(action.node);
         case UIAccessibilityActionKind::Invoke:
             if (!behaviorStateStorage.hasActivate(action.node.index()))
@@ -19306,7 +20849,8 @@ struct UIContext::Impl final {
             break;
         case UIAccessibilityActionKind::Toggle:
             if (!behaviorStateStorage.hasToggle(action.node.index()) &&
-                !hasBehavior(record->behaviors, UIElementBehavior::ExclusiveChoice))
+                !hasBehavior(record->behaviors, UIElementBehavior::ExclusiveChoice) &&
+                record->kind != BuiltinElementKind::MenuItem)
             {
                 return fail(UIErrorCode::InvalidAccessibilityAction,
                             "UI accessibility Toggle requires toggle behavior");
@@ -19407,6 +20951,15 @@ struct UIContext::Impl final {
             !validControl)
         {
             return Core::failure(validControl.error());
+        }
+        const UIInputModality modality = source == UIButtonActivationSource::Gamepad
+                                             ? UIInputModality::Gamepad
+                                             : source == UIButtonActivationSource::Accessibility
+                                                   ? UIInputModality::Accessibility
+                                                   : UIInputModality::Keyboard;
+        if (Core::Status modalityStatus = setInputModality(modality); !modalityStatus)
+        {
+            return Core::failure(modalityStatus.error());
         }
 
         const UINodeId releasedTarget = defaultActionPressState.pressedTarget(control);
@@ -19579,6 +21132,19 @@ struct UIContext::Impl final {
         }
         const NodeRecord* record = nodes.tryGet(activePopupNode.storageId());
         return record != nullptr && record->kind == BuiltinElementKind::Popup ? activePopupNode : UINodeId{};
+    }
+
+    [[nodiscard]] UINodeId activeMenu() const noexcept
+    {
+        const UINodeId menu = menuStorage.activeMenu();
+        if (!contains(menu))
+        {
+            return {};
+        }
+        const NodeRecord* record = nodes.tryGet(menu.storageId());
+        return record != nullptr && record->kind == BuiltinElementKind::Menu
+                   ? menu
+                   : UINodeId{};
     }
 
     [[nodiscard]] Core::Result<UIDropdownCommandResult> routeDropdownCommand(UIDropdownCommand command,
@@ -20324,6 +21890,11 @@ struct UIContext::Impl final {
                         "UI focus traversal cannot run during pointer routing");
         }
         drainDeferredRootDestroys();
+        if (Core::Status modalityStatus = setInputModality(UIInputModality::Keyboard);
+            !modalityStatus)
+        {
+            return Core::failure(modalityStatus.error());
+        }
 
         const auto& entries = committedHitBuffers[publishedHitBufferIndex];
         u32 scopeEntryIndex = committedActiveModalEntryIndex;
@@ -20475,7 +22046,8 @@ struct UIContext::Impl final {
     }
 
     [[nodiscard]] Core::Result<UIDefaultFocusStepResult>
-    routeFocusNavigation(UIFocusNavigationDirection direction, bool pressed)
+    routeFocusNavigation(UIFocusNavigationDirection direction, bool pressed,
+                         UIInputModality modality)
     {
         if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
         {
@@ -20491,6 +22063,10 @@ struct UIContext::Impl final {
                         "UI focus navigation cannot run during pointer routing");
         }
         drainDeferredRootDestroys();
+        if (Core::Status modalityStatus = setInputModality(modality); !modalityStatus)
+        {
+            return Core::failure(modalityStatus.error());
+        }
 
         const UINodeId currentFocus = defaultActionFocus();
         if (!pressed)
@@ -20630,6 +22206,13 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidText, "UI text composition stage is not recognized");
         }
+        if (const UINodeId activeMenuNode = menuStorage.activeMenu(); activeMenuNode.hasValue())
+        {
+            if (Core::Status closed = setMenuOpenState(activeMenuNode, false); !closed)
+            {
+                return Core::failure(closed.error());
+            }
+        }
         if (!isCommittedTextEditFocusCandidate(textInputFocus))
         {
             hardDismissAllTooltipsNoFail(true);
@@ -20693,6 +22276,16 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::InvalidPointerInput, "UI text input requires a platform frame and sequence");
         }
         const bool validCommittedUtf8 = Core::isStrictUtf8WithoutNul(committedUtf8);
+        if (validCommittedUtf8)
+        {
+            if (const UINodeId activeMenuNode = menuStorage.activeMenu(); activeMenuNode.hasValue())
+            {
+                if (Core::Status closed = setMenuOpenState(activeMenuNode, false); !closed)
+                {
+                    return Core::failure(closed.error());
+                }
+            }
+        }
         if (!isCommittedTextEditFocusCandidate(textInputFocus))
         {
             if (validCommittedUtf8)
@@ -22205,6 +23798,28 @@ Core::Result<bool> UITreeUpdater::isSplitterDragging(UINodeId splitter) const
     return m_context->isSplitterDraggingFromUpdater(m_root, splitter);
 }
 
+Core::Status UITreeUpdater::setSplitterPaint(
+    UINodeId splitter, const UISplitterPaint& paint)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext,
+                    "UI tree updater is not bound to a context");
+    }
+    return m_context->setSplitterPaintFromUpdater(m_root, splitter, paint);
+}
+
+Core::Result<UISplitterPaint> UITreeUpdater::splitterPaint(
+    UINodeId splitter) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext,
+                    "UI tree updater is not bound to a context");
+    }
+    return m_context->splitterPaintFromUpdater(m_root, splitter);
+}
+
 Core::Status UITreeUpdater::setTabViewItems(
     UINodeId tabView, std::span<const UITabViewItem> items, u32 activeIndex)
 {
@@ -22484,6 +24099,88 @@ Core::Result<UITooltipMetrics> UITreeUpdater::tooltipMetrics(UINodeId tooltip) c
         return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
     }
     return m_context->tooltipMetricsFromUpdater(m_root, tooltip);
+}
+
+Core::Status UITreeUpdater::setMenuAnchor(UINodeId menu, UINodeId anchor)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setMenuAnchorFromUpdater(m_root, menu, anchor);
+}
+
+Core::Status UITreeUpdater::clearMenuAnchor(UINodeId menu)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->clearMenuAnchorFromUpdater(m_root, menu);
+}
+
+Core::Result<UINodeId> UITreeUpdater::menuAnchor(UINodeId menu) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->menuAnchorFromUpdater(m_root, menu);
+}
+
+Core::Status UITreeUpdater::setMenuOpen(UINodeId menu, bool open)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setMenuOpenFromUpdater(m_root, menu, open);
+}
+
+Core::Result<bool> UITreeUpdater::isMenuOpen(UINodeId menu) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->isMenuOpenFromUpdater(m_root, menu);
+}
+
+Core::Result<UIMenuMetrics> UITreeUpdater::menuMetrics(UINodeId menu) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->menuMetricsFromUpdater(m_root, menu);
+}
+
+Core::Status UITreeUpdater::setMenuItemChecked(UINodeId item, bool checked)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->setMenuItemCheckedFromUpdater(m_root, item, checked);
+}
+
+Core::Result<bool> UITreeUpdater::isMenuItemChecked(UINodeId item) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->isMenuItemCheckedFromUpdater(m_root, item);
+}
+
+Core::Result<UIMenuCommandResult>
+UITreeUpdater::routeMenuCommand(UINodeId menu, UIMenuCommand command)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->routeMenuCommandFromUpdater(m_root, menu, command);
 }
 
 Core::Status UITreeUpdater::setDropdownOpen(UINodeId dropdown, bool open)
@@ -23325,9 +25022,18 @@ Core::Result<UIContext::UIDefaultFocusStepResult> UIContext::routeDefaultActionF
 }
 
 Core::Result<UIContext::UIDefaultFocusStepResult>
-UIContext::routeFocusNavigation(UIFocusNavigationDirection direction, bool pressed)
+UIContext::routeFocusNavigation(UIFocusNavigationDirection direction, bool pressed,
+                                UIInputModality modality)
 {
-    return m_impl->routeFocusNavigation(direction, pressed);
+    return m_impl->routeFocusNavigation(direction, pressed, modality);
+}
+
+Core::Result<UIElementBuildTransaction>
+UIContext::beginBuildTransaction(UINodeId parent,
+                                 const UIElementDescriptor& rootDescriptor,
+                                 UIComponentBuildBudget budget)
+{
+    return m_impl->beginBuildTransaction(*this, parent, rootDescriptor, budget);
 }
 
 Core::Result<UIRangeInputCommandResult>
@@ -23363,6 +25069,12 @@ Core::Result<UITabViewCommandResult> UIContext::routeFocusedTabViewCommand(
     UITabViewCommand command, bool pressed)
 {
     return m_impl->routeFocusedTabViewCommand(command, pressed);
+}
+
+Core::Result<UIMenuCommandResult> UIContext::routeMenuCommand(
+    UIMenuCommand command, bool pressed)
+{
+    return m_impl->routeMenuCommand(command, pressed);
 }
 
 UINodeId UIContext::defaultActionFocus() const noexcept
@@ -23410,6 +25122,15 @@ UINodeId UIContext::activePopup() const noexcept
     return m_impl->activePopup();
 }
 
+UINodeId UIContext::activeMenu() const noexcept
+{
+    if (!m_impl->isOwnerThread())
+    {
+        return {};
+    }
+    return m_impl->activeMenu();
+}
+
 Core::Status UIContext::setSplitViewParts(
     UINodeId splitView, UINodeId primaryPane, UINodeId splitter,
     UINodeId secondaryPane)
@@ -23445,6 +25166,17 @@ Core::Result<UISplitViewMetrics> UIContext::splitViewMetrics(UINodeId splitView)
 Core::Result<bool> UIContext::isSplitterDragging(UINodeId splitter) const
 {
     return m_impl->isSplitterDragging(splitter);
+}
+
+Core::Status UIContext::setSplitterPaint(
+    UINodeId splitter, const UISplitterPaint& paint)
+{
+    return m_impl->setSplitterPaint(splitter, paint);
+}
+
+Core::Result<UISplitterPaint> UIContext::splitterPaint(UINodeId splitter) const
+{
+    return m_impl->splitterPaint(splitter);
 }
 
 Core::Status UIContext::setTabViewItems(
@@ -23537,6 +25269,52 @@ Core::Result<bool> UIContext::isTooltipOpen(UINodeId tooltip) const
 Core::Result<UITooltipMetrics> UIContext::tooltipMetrics(UINodeId tooltip) const
 {
     return m_impl->tooltipMetrics(tooltip);
+}
+
+Core::Status UIContext::setMenuAnchor(UINodeId menu, UINodeId anchor)
+{
+    return m_impl->setMenuAnchor(menu, anchor);
+}
+
+Core::Status UIContext::clearMenuAnchor(UINodeId menu)
+{
+    return m_impl->clearMenuAnchor(menu);
+}
+
+Core::Result<UINodeId> UIContext::menuAnchor(UINodeId menu) const
+{
+    return m_impl->menuAnchor(menu);
+}
+
+Core::Status UIContext::setMenuOpen(UINodeId menu, bool open)
+{
+    return m_impl->setMenuOpen(menu, open);
+}
+
+Core::Result<bool> UIContext::isMenuOpen(UINodeId menu) const
+{
+    return m_impl->isMenuOpen(menu);
+}
+
+Core::Result<UIMenuMetrics> UIContext::menuMetrics(UINodeId menu) const
+{
+    return m_impl->menuMetrics(menu);
+}
+
+Core::Status UIContext::setMenuItemChecked(UINodeId item, bool checked)
+{
+    return m_impl->setMenuItemChecked(item, checked);
+}
+
+Core::Result<bool> UIContext::isMenuItemChecked(UINodeId item) const
+{
+    return m_impl->isMenuItemChecked(item);
+}
+
+Core::Result<UIMenuCommandResult> UIContext::routeMenuCommand(
+    UINodeId menu, UIMenuCommand command)
+{
+    return m_impl->routeMenuCommand(menu, command);
 }
 
 Core::Status UIContext::requestFocus(UINodeId node)
@@ -24013,6 +25791,18 @@ Core::Result<bool> UIContext::isSplitterDraggingFromUpdater(
     return m_impl->isSplitterDraggingFromUpdater(updaterRoot, splitter);
 }
 
+Core::Status UIContext::setSplitterPaintFromUpdater(
+    UINodeId updaterRoot, UINodeId splitter, const UISplitterPaint& paint)
+{
+    return m_impl->setSplitterPaintFromUpdater(updaterRoot, splitter, paint);
+}
+
+Core::Result<UISplitterPaint> UIContext::splitterPaintFromUpdater(
+    UINodeId updaterRoot, UINodeId splitter) const
+{
+    return m_impl->splitterPaintFromUpdater(updaterRoot, splitter);
+}
+
 Core::Status UIContext::setTabViewItemsFromUpdater(
     UINodeId updaterRoot, UINodeId tabView,
     std::span<const UITabViewItem> items, u32 activeIndex)
@@ -24194,6 +25984,60 @@ Core::Result<UITooltipMetrics> UIContext::tooltipMetricsFromUpdater(
     UINodeId updaterRoot, UINodeId tooltip) const
 {
     return m_impl->tooltipMetricsFromUpdater(updaterRoot, tooltip);
+}
+
+Core::Status UIContext::setMenuAnchorFromUpdater(
+    UINodeId updaterRoot, UINodeId menu, UINodeId anchor)
+{
+    return m_impl->setMenuAnchorFromUpdater(updaterRoot, menu, anchor);
+}
+
+Core::Status UIContext::clearMenuAnchorFromUpdater(
+    UINodeId updaterRoot, UINodeId menu)
+{
+    return m_impl->clearMenuAnchorFromUpdater(updaterRoot, menu);
+}
+
+Core::Result<UINodeId> UIContext::menuAnchorFromUpdater(
+    UINodeId updaterRoot, UINodeId menu) const
+{
+    return m_impl->menuAnchorFromUpdater(updaterRoot, menu);
+}
+
+Core::Status UIContext::setMenuOpenFromUpdater(
+    UINodeId updaterRoot, UINodeId menu, bool open)
+{
+    return m_impl->setMenuOpenFromUpdater(updaterRoot, menu, open);
+}
+
+Core::Result<bool> UIContext::isMenuOpenFromUpdater(
+    UINodeId updaterRoot, UINodeId menu) const
+{
+    return m_impl->isMenuOpenFromUpdater(updaterRoot, menu);
+}
+
+Core::Result<UIMenuMetrics> UIContext::menuMetricsFromUpdater(
+    UINodeId updaterRoot, UINodeId menu) const
+{
+    return m_impl->menuMetricsFromUpdater(updaterRoot, menu);
+}
+
+Core::Status UIContext::setMenuItemCheckedFromUpdater(
+    UINodeId updaterRoot, UINodeId item, bool checked)
+{
+    return m_impl->setMenuItemCheckedFromUpdater(updaterRoot, item, checked);
+}
+
+Core::Result<bool> UIContext::isMenuItemCheckedFromUpdater(
+    UINodeId updaterRoot, UINodeId item) const
+{
+    return m_impl->isMenuItemCheckedFromUpdater(updaterRoot, item);
+}
+
+Core::Result<UIMenuCommandResult> UIContext::routeMenuCommandFromUpdater(
+    UINodeId updaterRoot, UINodeId menu, UIMenuCommand command)
+{
+    return m_impl->routeMenuCommandFromUpdater(updaterRoot, menu, command);
 }
 
 Core::Status UIContext::setDropdownOpenFromUpdater(UINodeId updaterRoot, UINodeId dropdown, bool open)

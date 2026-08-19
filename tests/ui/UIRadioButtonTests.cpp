@@ -341,10 +341,10 @@ TEST_F(UIRadioButtonTest, IndicatorPaintPublishesDeterministicGeometry)
     EXPECT_EQ(indicator.paintOrdinal, 2U);
     EXPECT_EQ(
         track.worldRect,
-        (UI::UILogicalRect{.x = 0.0F, .y = 0.0F, .width = 24.0F, .height = 24.0F}));
+        (UI::UILogicalRect{.x = 0.0F, .y = 4.0F, .width = 16.0F, .height = 16.0F}));
     EXPECT_EQ(
         indicator.worldRect,
-        (UI::UILogicalRect{.x = 4.0F, .y = 4.0F, .width = 16.0F, .height = 16.0F}));
+        (UI::UILogicalRect{.x = 4.0F, .y = 8.0F, .width = 8.0F, .height = 8.0F}));
     EXPECT_EQ(track.effectiveClip, indicator.effectiveClip);
     EXPECT_EQ(
         track.solidFill,
@@ -387,6 +387,15 @@ TEST_F(UIRadioButtonTest, HoveredFocusedPressedAndDisabledStatesResolveCommitted
         (UI::UIPremultipliedRgba8Color{10, 20, 30, 255}));
 
     assertOk(context->requestFocus(radioButton));
+    publishLayout();
+    EXPECT_EQ(
+        context->committedPaint().entries()[0].solidFill,
+        (UI::UIPremultipliedRgba8Color{10, 20, 30, 255}));
+
+    auto keyboardNavigation = context->routeFocusNavigation(
+        UI::UIFocusNavigationDirection::Right, true,
+        UI::UIInputModality::Keyboard);
+    ASSERT_TRUE(keyboardNavigation.has_value()) << keyboardNavigation.error().message;
     publishLayout();
     EXPECT_EQ(
         context->committedPaint().entries()[0].solidFill,
@@ -442,7 +451,7 @@ TEST_F(UIRadioButtonTest, HoveredFocusedPressedAndDisabledStatesResolveCommitted
     publishLayout();
     EXPECT_EQ(
         context->committedPaint().entries()[0].solidFill,
-        (UI::UIPremultipliedRgba8Color{40, 50, 60, 255}));
+        (UI::UIPremultipliedRgba8Color{10, 20, 30, 255}));
 
     assertOk(updater.setEnabled(radioButton, false));
     EXPECT_FALSE(context->defaultActionFocus().hasValue());
@@ -453,7 +462,7 @@ TEST_F(UIRadioButtonTest, HoveredFocusedPressedAndDisabledStatesResolveCommitted
         (UI::UIPremultipliedRgba8Color{5, 11, 16, 140}));
 }
 
-TEST_F(UIRadioButtonTest, AutoWidthUsesResolvedHeightAndTracksLabelGap)
+TEST_F(UIRadioButtonTest, AutoWidthUsesIndicatorExtentAndTracksLabelGap)
 {
     UI::UILayoutStyle rootStyle = fixedSize(160.0F, 120.0F);
     rootStyle.flexContainer.alignItems = UI::UIAxisAlignment::Start;
@@ -475,7 +484,7 @@ TEST_F(UIRadioButtonTest, AutoWidthUsesResolvedHeightAndTracksLabelGap)
         findLayoutEntry(context->committedLayout(), radioButton);
     ASSERT_NE(firstLayout, nullptr);
     const float firstWidth = firstLayout->worldRect.width;
-    EXPECT_GT(firstWidth, 50.0F);
+    EXPECT_FLOAT_EQ(firstWidth, 45.2F);
     EXPECT_FLOAT_EQ(firstLayout->worldRect.height, 40.0F);
 
     assertOk(updater.setRadioButtonPaint(
@@ -522,7 +531,7 @@ TEST_F(UIRadioButtonTest, IndicatorlessAutoWidthDoesNotReserveLeadingSpace)
     const UI::UICommittedLayoutEntry* withoutIndicator =
         findLayoutEntry(context->committedLayout(), radioButton);
     ASSERT_NE(withoutIndicator, nullptr);
-    EXPECT_FLOAT_EQ(withoutIndicator->worldRect.width + 50.0F, widthWithIndicator);
+    EXPECT_FLOAT_EQ(withoutIndicator->worldRect.width + 26.0F, widthWithIndicator);
     EXPECT_FLOAT_EQ(withoutIndicator->worldRect.height, 40.0F);
 }
 

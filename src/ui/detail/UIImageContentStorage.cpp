@@ -3,6 +3,7 @@
 #include <tina/ui/UIErrors.hpp>
 
 #include <algorithm>
+#include <utility>
 
 namespace Tina::UI::Detail {
 
@@ -102,6 +103,11 @@ const UIImageContent* UIImageContentStorage::get(u32 nodeIndex) const noexcept
         return nullptr;
     }
     return &slots_[slotIndex].content;
+}
+
+UIImageContent* UIImageContentStorage::getMutable(u32 nodeIndex) noexcept
+{
+    return const_cast<UIImageContent*>(std::as_const(*this).get(nodeIndex));
 }
 
 usize UIImageContentStorage::capacity() const noexcept

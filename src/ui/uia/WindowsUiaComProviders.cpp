@@ -171,7 +171,7 @@ const ProviderSnapshotNode& NodeProvider::node() const noexcept
 
 bool NodeProvider::supportsInvoke() const noexcept
 {
-    return node().mapped.controlTypeId == Uia::kControlTypeButton;
+    return node().mapped.invokeSupported;
 }
 
 bool NodeProvider::supportsToggle() const noexcept

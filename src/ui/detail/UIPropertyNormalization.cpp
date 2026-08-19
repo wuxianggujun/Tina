@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <initializer_list>
 
 namespace Tina::UI::Detail {
 namespace {
@@ -591,16 +592,81 @@ normalizeDropdownPaint(UIDropdownPaint paint)
 
 Core::Status validateProductTheme(const UITheme& theme)
 {
-    if (!isFiniteNonNegative(theme.panelBorderWidth) ||
-        !isFiniteNonNegative(theme.panelCornerRadius) ||
-        !isFiniteNonNegative(theme.controlCornerRadius) ||
-        !std::isfinite(theme.panelShadowOffsetX) ||
-        !std::isfinite(theme.panelShadowOffsetY) ||
-        !isFiniteNonNegative(theme.checkboxIndicatorInset) ||
-        !isFiniteNonNegative(theme.radioSelectedInset) ||
-        !isFiniteNonNegative(theme.radioLabelGap) ||
-        !isFiniteNonNegative(theme.sliderContentInset) ||
-        !isFiniteNonNegative(theme.sliderThumbWidth) ||
+    const UIControlMetrics& controls = theme.controls;
+    const UISpacingTokens& spacing = theme.spacing;
+    const UIShapeTokens& shapes = theme.shapes;
+    const UIElevationTokens& elevations = theme.elevations;
+    const auto allFiniteNonNegative = [](std::initializer_list<float> values) noexcept {
+        return std::ranges::all_of(values, [](float value) noexcept {
+            return isFiniteNonNegative(value);
+        });
+    };
+    const auto allFinitePositive = [](std::initializer_list<float> values) noexcept {
+        return std::ranges::all_of(values, [](float value) noexcept {
+            return std::isfinite(value) && value > 0.0F;
+        });
+    };
+    const bool validScheme = theme.colorScheme == UIColorScheme::Dark ||
+                             theme.colorScheme == UIColorScheme::Light;
+    const bool validDensity = theme.density == UIDensity::Compact ||
+                              theme.density == UIDensity::Comfortable;
+    if (!validScheme || !validDensity ||
+        !allFinitePositive({controls.commandBarHeight, controls.contextToolbarHeight,
+                            controls.buttonHeight, controls.iconButtonExtent,
+                            controls.iconExtent, controls.textEditHeight,
+                            controls.checkboxHitExtent, controls.checkboxMarkExtent,
+                            controls.radioIndicatorExtent, controls.toggleSwitchWidth,
+                            controls.toggleSwitchHeight, controls.sliderHeight,
+                            controls.sliderTrackThickness, controls.sliderThumbExtent,
+                            controls.progressBarHeight, controls.tabHeight,
+                            controls.menuItemHeight, controls.listRowHeight,
+                            controls.treeRowHeight, controls.statusBarHeight,
+                            controls.splitterHitExtent, controls.splitterLineThickness,
+                            controls.tooltipMaxWidth, controls.dialogMinWidth,
+                            controls.dropdownIndicatorWidth,
+                            controls.dropdownIndicatorHeight,
+                            controls.menuItemIndicatorExtent,
+                            controls.menuSeparatorThickness,
+                            controls.scrollBarThickness,
+                            controls.scrollBarMinThumbExtent}) ||
+        !allFiniteNonNegative({controls.panelBorderWidth, controls.panelCornerRadius,
+                               controls.controlCornerRadius,
+                               controls.checkboxIndicatorInset,
+                               controls.toggleSwitchThumbInset,
+                               controls.toggleSwitchCornerRadius,
+                               controls.radioSelectedInset, controls.radioLabelGap,
+                               controls.sliderContentInset,
+                               controls.dropdownIndicatorInset,
+                               controls.menuItemIndicatorGap}) ||
+        !std::isfinite(controls.panelShadowOffsetX) ||
+        !std::isfinite(controls.panelShadowOffsetY) ||
+        !allFiniteNonNegative({shapes.none, shapes.extraSmall, shapes.smallRadius,
+                               shapes.medium, shapes.large, shapes.full,
+                               elevations.raisedOffsetY, elevations.floatingOffsetY,
+                               elevations.modalOffsetY,
+                               spacing.space0, spacing.space1, spacing.space2,
+                               spacing.space3, spacing.space4, spacing.space5,
+                               spacing.space6, spacing.space7, spacing.space8,
+                               spacing.space9}) ||
+        !(spacing.space0 <= spacing.space1 && spacing.space1 <= spacing.space2 &&
+          spacing.space2 <= spacing.space3 && spacing.space3 <= spacing.space4 &&
+          spacing.space4 <= spacing.space5 && spacing.space5 <= spacing.space6 &&
+          spacing.space6 <= spacing.space7 && spacing.space7 <= spacing.space8 &&
+          spacing.space8 <= spacing.space9) ||
+        !(shapes.none <= shapes.extraSmall && shapes.extraSmall <= shapes.smallRadius &&
+          shapes.smallRadius <= shapes.medium && shapes.medium <= shapes.large &&
+          shapes.large <= shapes.full) ||
+        controls.checkboxMarkExtent > controls.checkboxHitExtent ||
+        controls.checkboxIndicatorInset * 2.0F >= controls.checkboxMarkExtent ||
+        controls.radioSelectedInset * 2.0F >= controls.radioIndicatorExtent ||
+        controls.toggleSwitchHeight > controls.toggleSwitchWidth ||
+        controls.toggleSwitchThumbInset * 2.0F >= controls.toggleSwitchHeight ||
+        controls.sliderTrackThickness > controls.sliderHeight ||
+        controls.sliderThumbExtent > controls.sliderHeight ||
+        controls.sliderContentInset < controls.sliderThumbExtent * 0.5F ||
+        controls.progressBarHeight > controls.buttonHeight ||
+        controls.splitterLineThickness > controls.splitterHitExtent ||
+        controls.dropdownIndicatorHeight > controls.textEditHeight ||
         !(std::isfinite(theme.typography.display) && theme.typography.display > 0.0F) ||
         !(std::isfinite(theme.typography.title) && theme.typography.title > 0.0F) ||
         !(std::isfinite(theme.typography.section) && theme.typography.section > 0.0F) ||
@@ -610,7 +676,7 @@ Core::Status validateProductTheme(const UITheme& theme)
     {
         return Core::failure(
             UIErrorCode::InvalidTheme,
-            "UI Theme metrics must be finite; sizes must be positive and insets non-negative");
+            "UI Theme semantic tokens must be valid, finite, ordered and non-negative");
     }
     return Core::success();
 }

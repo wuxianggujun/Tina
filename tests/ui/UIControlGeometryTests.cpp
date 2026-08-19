@@ -51,17 +51,19 @@ TEST(UIControlGeometryTests, SliderGeometryUsesTrackAndThumbCenters)
 {
     const UI::UISliderPaint paint{
         .contentInset = 4.0F,
-        .thumbWidth = 8.0F,
+        .thumbExtent = 8.0F,
     };
     const auto geometry = UI::Detail::sliderPaintGeometry(
         UI::UILogicalRect{.x = 0.0F, .y = 0.0F, .width = 100.0F, .height = 20.0F},
         0.0F, 10.0F, 5.0F, paint);
 
     EXPECT_FLOAT_EQ(geometry.fraction, 0.5F);
+    EXPECT_EQ(geometry.track,
+              (UI::UILogicalRect{.x = 4.0F, .y = 8.0F, .width = 92.0F, .height = 4.0F}));
     EXPECT_EQ(geometry.filledTrack,
-              (UI::UILogicalRect{.x = 4.0F, .y = 4.0F, .width = 46.0F, .height = 12.0F}));
+              (UI::UILogicalRect{.x = 4.0F, .y = 8.0F, .width = 46.0F, .height = 4.0F}));
     EXPECT_EQ(geometry.thumb,
-              (UI::UILogicalRect{.x = 46.0F, .y = 0.0F, .width = 8.0F, .height = 20.0F}));
+              (UI::UILogicalRect{.x = 46.0F, .y = 6.0F, .width = 8.0F, .height = 8.0F}));
 }
 
 TEST(UIControlGeometryTests, RangeFractionRejectsInvalidAndClampsFiniteValues)

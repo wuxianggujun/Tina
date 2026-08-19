@@ -787,7 +787,7 @@ TEST_F(UITreeViewTest, ProductChromeKeepsConsecutiveRowTextInsideRequestedBounds
     }
 
     const UI::UIPremultipliedRgba8Color textColor =
-        UI::premultiply(UI::makeDefaultProductTheme().textPrimary);
+        UI::premultiply(UI::makeModernDesktopTheme().colors.onSurface);
     usize firstRowTextPaintCount = 0;
     usize secondRowTextPaintCount = 0;
     for (const UI::UICommittedPaintEntry& paint : context->committedPaint().entries())

@@ -19,6 +19,7 @@ struct SplitViewState final {
 struct SplitterState final {
     UINodeId node{};
     UISplitterConfig config{};
+    UISplitterPaint paint{};
     UINodeId splitView{};
 };
 
@@ -40,6 +41,8 @@ class UISplitViewStateStorage final {
     [[nodiscard]] const SplitViewState* trySplitView(UINodeId splitView) const noexcept;
     [[nodiscard]] SplitterState* trySplitter(UINodeId splitter) noexcept;
     [[nodiscard]] const SplitterState* trySplitter(UINodeId splitter) const noexcept;
+    [[nodiscard]] UISplitterPaint& splitterPaintByIndex(u32 nodeIndex) noexcept;
+    [[nodiscard]] const UISplitterPaint& splitterPaintByIndex(u32 nodeIndex) const noexcept;
     [[nodiscard]] SplitViewLayoutScratch& layoutScratchByIndex(u32 nodeIndex) noexcept;
 
     void initializeSplitView(UINodeId splitView, const UISplitViewConfig& config) noexcept;

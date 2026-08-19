@@ -81,6 +81,7 @@ struct UIUiaMappedNode final {
     bool isKeyboardFocusable = false;
     bool hasKeyboardFocus = false;
     bool isSelected = false;
+    bool invokeSupported = false;
     std::optional<UIUiaRangeValue> rangeValue{};
     std::optional<u32> toggleState{};
     std::optional<UIUiaValuePattern> value{};
@@ -93,6 +94,7 @@ struct UIUiaMappedNode final {
     case UISemanticsRole::Button:
         return kControlTypeButton;
     case UISemanticsRole::Checkbox:
+    case UISemanticsRole::Switch:
         return kControlTypeCheckBox;
     case UISemanticsRole::Slider:
         return kControlTypeSlider;
@@ -126,6 +128,10 @@ struct UIUiaMappedNode final {
         return kControlTypeTabItem;
     case UISemanticsRole::TabPanel:
         return kControlTypePane;
+    case UISemanticsRole::Menu:
+        return kControlTypeMenu;
+    case UISemanticsRole::MenuItem:
+        return kControlTypeMenuItem;
     case UISemanticsRole::Group:
         return kControlTypeGroup;
     }
@@ -144,6 +150,10 @@ struct UIUiaMappedNode final {
         .isKeyboardFocusable = false,
         .hasKeyboardFocus = hasState(source.states, UIAccessibilityState::Focused),
         .isSelected = hasState(source.states, UIAccessibilityState::Selected),
+        .invokeSupported =
+            hasSemanticsAction(source.actions, UISemanticsAction::Activate) &&
+            (source.role == UISemanticsRole::Button ||
+             source.role == UISemanticsRole::MenuItem),
     };
 
     mapped.isKeyboardFocusable =
@@ -165,7 +175,10 @@ struct UIUiaMappedNode final {
         };
     }
 
-    if (source.role == UISemanticsRole::Checkbox || source.role == UISemanticsRole::RadioButton)
+    if (source.role == UISemanticsRole::Checkbox || source.role == UISemanticsRole::Switch ||
+        source.role == UISemanticsRole::RadioButton ||
+        (source.role == UISemanticsRole::MenuItem &&
+         hasSemanticsAction(source.actions, UISemanticsAction::Toggle)))
     {
         if (hasState(source.states, UIAccessibilityState::Checked))
         {

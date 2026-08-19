@@ -14,16 +14,19 @@
 
 namespace Tina::UI {
 
-// Slider-specific derived paint. UIBoxPaint remains the full track/background;
-// this schema adds the value-derived fill and the thumb without coupling the
-// retained UI to a render backend.
+// Slider-specific chrome. The retained node remains the full hit target while
+// trackThickness and thumbExtent define centered visual geometry inside it.
+// All primitives continue through the existing committed paint pipeline.
 struct UISliderPaint final {
+    UIStraightSrgba8Color trackColor{};
     UIStraightSrgba8Color filledTrackColor{};
     UIStraightSrgba8Color thumbColor{};
+    UIStraightSrgba8Color hoveredThumbColor{};
     UIStraightSrgba8Color draggingThumbColor{};
     UIStraightSrgba8Color focusedThumbColor{};
-    float contentInset = 3.0F;
-    float thumbWidth = 8.0F;
+    float contentInset = 6.0F;
+    float trackThickness = 4.0F;
+    float thumbExtent = 12.0F;
 
     auto operator<=>(const UISliderPaint&) const = default;
 };

@@ -29,6 +29,7 @@ UI-STUDIO-DESIGN 的代码与自动证据已固化，剩余 state-feedback 视�
 
 | Backlog | 目标 |
 | --- | --- |
+| UI-MODERN-DESKTOP-001 | InProgress：TMD-00..06 已闭环；TMD-07 已实现可调整的 Showcase Desktop workbench、Dark/Light 与 Compact/Comfortable selector、应用状态跨唯一 root replacement 连续保留、IconButton/FormField/Dialog 产品消费及结构化 JSON，当前执行集中 gate。下一步推进 TMD-08 Desktop Shell，再迁移 2D/3D 与 EditorApp Compact，不建立第二套 UI/Style/Render Runtime |
 | UI-003 | 跨 DPI/GPU 容差视觉门禁 |
 | PERF-002 | 固定机 benchmark hard gate、多进程 median/MAD 与受审 baseline |
 | 2D-EDITOR | 2D/3D Editor 产品闭环：四类 current-schema authoring document/file、bounded history、per-tab session、Save/Save As/dirty-close、Project Browser/New/Open + live Catalog switch、事务化 source import 与一步 PNG/JPEG/WAV 导入、动态 Hierarchy、`EditorComponentOperations` 组件 authoring、TRS Inspector、viewport navigation/grid/gizmo/marquee、PlaySession、frame shortcuts 与 Line/Ellipse 视口视觉均已落地，实现明细与本轮证据见 [Backlog](backlog.md)。**待：** 跨 DPI/GPU 视觉金标与 Linux `zenity`/`kdialog` 真实 dialog 产品门禁；完成前保持 InProgress |
@@ -48,6 +49,8 @@ UI-STUDIO-DESIGN 的代码与自动证据已固化，剩余 state-feedback 视�
 | UI-COMPONENT-001 | Done；标准 Behavior 独立 side store、phase-scoped bounded transaction、全池 reservation/counter 与 `ui_component_build_v1` 已落地 |
 | UI-IMAGE-001 | Done；A Image/强类型 `UIIconContent`、B NineSlice 与 C 产品/失效/尺寸/`ui_image_nineslice_v1` 性能证据均已关闭；UIIcon 只在 authoring/语义层区分，复用 Image storage/资源链/atlas/GPU pipeline，不另建 Widget/Asset 系统 |
 | UI-TOOLTIP-001 | Done；独立 Tooltip contract、显式 Anchor、Hover/Focus/Manual monotonic delay、Auto/flip/clamp、单 Window 独占、Ignore hit、输入/Anchor/Modal dismissal、committed metrics/失败回滚、HelpText fallback 与 Runtime facade 已闭环 |
+| UI-VISUAL-COMPONENTS-001 | Done；Surface/Divider/Badge 强类型无状态视觉 profile 与 ToggleSwitch 已落地；前三者复用普通 Element/Theme/paint，Switch 复用 Checkbox Toggle/input/action/capacity 并增加 track/thumb chrome、Switch semantics 与 UIA TogglePattern，无第二套 state/runtime/render pipeline |
+| UI-MENU-001 | Done；独立 Menu/MenuItem recipes、固定容量 state/layout/input 模块、显式 Anchor、单 Window transient overlay 与 Popup 协调、Command/Check/Radio/Separator、四向 Auto/flip/clamp、Pointer barrier、Keyboard/Gamepad/accessibility 共享激活、Menu/MenuItem UIA、committed metrics 与 Runtime facade 已闭环 |
 | UI-SPLITVIEW-001 | Done；强类型 SplitView/Splitter recipes、固定容量 state/layout/input 模块、三 direct child 同 root parts、横纵 orientation/minimum/fraction clamp、committed metrics、Pointer Capture/RangeInput keyboard、Slider semantics/UIA SetRangeValue、generation/root/capacity cleanup 与 Runtime facade 已闭环 |
 | UI-TABVIEW-001 | Done；独立 TabView/Tab recipes、固定容量 state/layout/input 模块、完整 direct-child Tab/Panel pairs、四向 placement、Automatic/Manual activation、Pointer/Keyboard/Gamepad/accessibility 共享路径、TabList/Tab/TabPanel semantics、专属 `UITabPaint`、committed metrics 与 Runtime facade 已闭环 |
 | UI-STYLE-001 | Done；StyleClass/ColorToken、reverse-dependency、imageTint、dirty metadata、showcase Integration、`RunUiStyleVisualGate.ps1` 已落地 |

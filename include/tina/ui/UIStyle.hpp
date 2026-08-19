@@ -38,6 +38,22 @@ enum class UIStyleRoleId : u8 {
     SegmentedButton,
     TooltipSurface,
     Tab,
+    MenuSurface,
+    MenuItem,
+    DividerSubtle,
+    DividerStrong,
+    DividerAccent,
+    BadgeNeutral,
+    BadgeAccent,
+    BadgeDanger,
+    ToggleSwitch,
+    Splitter,
+    ModalScrim,
+    TextInputInvalid,
+    TextError,
+    IconOnSurface,
+    IconOnPrimary,
+    IconOnError,
 };
 
 // Startup-registered stylesheet identities. Zero is invalid so a default
@@ -81,12 +97,23 @@ enum class UIStyleState : u16 {
     Hovered = 1U << 0U,
     Pressed = 1U << 1U,
     Focused = 1U << 2U,
+    FocusVisible = 1U << 8U,
     Disabled = 1U << 3U,
     Checked = 1U << 4U,
     Selected = 1U << 5U,
     Open = 1U << 6U,
     Dragging = 1U << 7U,
-    All = (1U << 8U) - 1U,
+    All = (1U << 9U) - 1U,
+};
+
+// The retained focus owner is shared by pointer, keyboard, gamepad and UIA.
+// Modality only controls whether a focused node receives the visible focus
+// treatment; it never creates a second focus store.
+enum class UIInputModality : u8 {
+    Pointer = 0,
+    Keyboard,
+    Gamepad,
+    Accessibility,
 };
 
 [[nodiscard]] constexpr UIStyleState operator|(UIStyleState left, UIStyleState right) noexcept
@@ -146,7 +173,8 @@ enum class UIStyleOverride : u16 {
     TextEditPaint = 1U << 11U,
     ImageTint = 1U << 12U,
     TabPaint = 1U << 13U,
-    All = (1U << 14U) - 1U,
+    SplitterPaint = 1U << 14U,
+    All = (1U << 15U) - 1U,
 };
 
 [[nodiscard]] constexpr UIStyleOverride operator|(UIStyleOverride left, UIStyleOverride right) noexcept

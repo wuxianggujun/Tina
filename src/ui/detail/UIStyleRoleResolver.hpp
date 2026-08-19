@@ -16,7 +16,9 @@ inline constexpr u16 ThemeBindingDropdownPaint = 1U << 8U;
 inline constexpr u16 ThemeBindingListViewPaint = 1U << 9U;
 inline constexpr u16 ThemeBindingTreeViewPaint = 1U << 10U;
 inline constexpr u16 ThemeBindingTextEditPaint = 1U << 11U;
+inline constexpr u16 ThemeBindingImageTint = 1U << 12U;
 inline constexpr u16 ThemeBindingTabPaint = 1U << 13U;
+inline constexpr u16 ThemeBindingSplitterPaint = 1U << 14U;
 
 struct ProductChrome final {
     UIBoxPaint box{};
@@ -32,11 +34,13 @@ struct ProductChrome final {
     UITreeViewPaint treeView{};
     UITextEditPaint textEdit{};
     UITabPaint tab{};
+    UISplitterPaint splitter{};
+    UIStraightSrgba8Color imageTint{};
 };
 
 [[nodiscard]] constexpr bool isValidStyleRole(UIStyleRoleId role) noexcept
 {
-    return role >= UIStyleRoleId::None && role <= UIStyleRoleId::Tab;
+    return role >= UIStyleRoleId::None && role <= UIStyleRoleId::IconOnError;
 }
 
 [[nodiscard]] constexpr u16 defaultThemeBindingsFor(UIStyleRoleId role) noexcept
@@ -48,7 +52,12 @@ struct ProductChrome final {
     case UIStyleRoleId::PanelSurface:
     case UIStyleRoleId::PanelElevated:
     case UIStyleRoleId::ModalSurface:
+    case UIStyleRoleId::ModalScrim:
     case UIStyleRoleId::PopupSurface:
+    case UIStyleRoleId::MenuSurface:
+    case UIStyleRoleId::DividerSubtle:
+    case UIStyleRoleId::DividerStrong:
+    case UIStyleRoleId::DividerAccent:
         return ThemeBindingBoxPaint;
     case UIStyleRoleId::TooltipSurface:
         return ThemeBindingBoxPaint | ThemeBindingTextStyle;
@@ -56,6 +65,7 @@ struct ProductChrome final {
     case UIStyleRoleId::TextTitle:
     case UIStyleRoleId::TextSecondary:
     case UIStyleRoleId::TextAccent:
+    case UIStyleRoleId::TextError:
         return ThemeBindingTextStyle;
     case UIStyleRoleId::ButtonPrimary:
     case UIStyleRoleId::ButtonDanger:
@@ -63,12 +73,21 @@ struct ProductChrome final {
     case UIStyleRoleId::ButtonOutlined:
     case UIStyleRoleId::ButtonText:
     case UIStyleRoleId::CollectionItem:
+    case UIStyleRoleId::MenuItem:
         return ThemeBindingBoxPaint | ThemeBindingButtonPaint | ThemeBindingTextStyle;
+    case UIStyleRoleId::BadgeNeutral:
+    case UIStyleRoleId::BadgeAccent:
+    case UIStyleRoleId::BadgeDanger:
+        return ThemeBindingBoxPaint | ThemeBindingTextStyle;
     case UIStyleRoleId::Checkbox:
+    case UIStyleRoleId::ToggleSwitch:
         return ThemeBindingBoxPaint | ThemeBindingCheckboxPaint;
+    case UIStyleRoleId::Splitter:
+        return ThemeBindingSplitterPaint;
     case UIStyleRoleId::Slider:
         return ThemeBindingBoxPaint | ThemeBindingSliderPaint;
     case UIStyleRoleId::TextInput:
+    case UIStyleRoleId::TextInputInvalid:
         return ThemeBindingBoxPaint | ThemeBindingTextStyle | ThemeBindingTextEditPaint;
     case UIStyleRoleId::ProgressBar:
         return ThemeBindingBoxPaint | ThemeBindingProgressBarPaint;
@@ -87,6 +106,10 @@ struct ProductChrome final {
         return ThemeBindingBoxPaint | ThemeBindingListViewPaint;
     case UIStyleRoleId::TreeView:
         return ThemeBindingBoxPaint | ThemeBindingTreeViewPaint;
+    case UIStyleRoleId::IconOnSurface:
+    case UIStyleRoleId::IconOnPrimary:
+    case UIStyleRoleId::IconOnError:
+        return ThemeBindingImageTint;
     }
     return 0;
 }

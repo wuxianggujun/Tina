@@ -11,11 +11,13 @@ add_executable(tina_ui_tests
     UIButtonVisualTests.cpp
     UICanvasCommandStorageTests.cpp
     UICheckboxTests.cpp
+    UIToggleSwitchTests.cpp
     UICommandPressLatchTests.cpp
     UIControlGeometryTests.cpp
     UIControlPaintEmitterTests.cpp
     UIControlValuePrimitivesTests.cpp
     UIContextLifetimeControlTests.cpp
+    UIComponentProfileTests.cpp
     UIDefaultActionPressStateTests.cpp
     UIElementContractResolverTests.cpp
     UIElementTests.cpp
@@ -29,6 +31,7 @@ add_executable(tina_ui_tests
     UISliderTests.cpp
     UISplitViewTests.cpp
     UITabViewTests.cpp
+    UIMenuTests.cpp
     UIScrollViewTests.cpp
     UIScrollViewLayoutTests.cpp
     UIListViewTests.cpp
@@ -70,6 +73,7 @@ add_executable(tina_ui_tests
     UILayoutPrimitivesTests.cpp
     UIPaintSnapshotTests.cpp
     UIThemeTests.cpp
+    UIVisualComponentsTests.cpp
     UIImeCompositionStateTests.cpp
     UITextTests.cpp
     UITextEllipsisTests.cpp
@@ -88,6 +92,11 @@ add_executable(tina_ui_tests
     header_isolation/UIBehaviorHeader.cpp
     header_isolation/UIButtonHeader.cpp
     header_isolation/UICheckboxHeader.cpp
+    header_isolation/UIDialogHeader.cpp
+    header_isolation/UIToggleSwitchHeader.cpp
+    header_isolation/UISurfaceHeader.cpp
+    header_isolation/UIDividerHeader.cpp
+    header_isolation/UIBadgeHeader.cpp
     header_isolation/UIProgressBarHeader.cpp
     header_isolation/UIRadioButtonHeader.cpp
     header_isolation/UIRangeInputHeader.cpp
@@ -99,6 +108,7 @@ add_executable(tina_ui_tests
     header_isolation/UISliderHeader.cpp
     header_isolation/UISplitViewHeader.cpp
     header_isolation/UITabViewHeader.cpp
+    header_isolation/UIMenuHeader.cpp
     header_isolation/UIStyleHeader.cpp
     header_isolation/UIMotionHeader.cpp
     header_isolation/UISemanticsHeader.cpp
@@ -117,8 +127,10 @@ add_executable(tina_ui_tests
     header_isolation/UIEventRoutingHeader.cpp
     header_isolation/UIFocusHeader.cpp
     header_isolation/UIFlowHeader.cpp
+    header_isolation/UIFormFieldHeader.cpp
     header_isolation/UIHitTestHeader.cpp
     header_isolation/UIIconHeader.cpp
+    header_isolation/UIIconButtonHeader.cpp
     header_isolation/UIImageHeader.cpp
     header_isolation/UIImageSourceHeader.cpp
     header_isolation/UILayoutHeader.cpp

@@ -252,6 +252,15 @@ TEST(UICheckboxTest, HoveredFocusedPressedAndDisabledStatesResolveCommittedOuter
     publishLayout(*context);
     EXPECT_EQ(
         context->committedPaint().entries()[0].solidFill,
+        (UI::UIPremultipliedRgba8Color{10, 20, 30, 255}));
+
+    auto keyboardNavigation = context->routeFocusNavigation(
+        UI::UIFocusNavigationDirection::Right, true,
+        UI::UIInputModality::Keyboard);
+    ASSERT_TRUE(keyboardNavigation.has_value()) << keyboardNavigation.error().message;
+    publishLayout(*context);
+    EXPECT_EQ(
+        context->committedPaint().entries()[0].solidFill,
         (UI::UIPremultipliedRgba8Color{70, 80, 90, 255}));
 
     auto movedInside = context->routePointerInput(makePointerInput(
@@ -298,7 +307,7 @@ TEST(UICheckboxTest, HoveredFocusedPressedAndDisabledStatesResolveCommittedOuter
     EXPECT_EQ(context->defaultActionFocus(), checkbox);
     EXPECT_EQ(
         context->committedPaint().entries()[0].solidFill,
-        (UI::UIPremultipliedRgba8Color{70, 80, 90, 255}));
+        (UI::UIPremultipliedRgba8Color{10, 20, 30, 255}));
 
     assertOk(updater.setEnabled(checkbox, false));
     EXPECT_FALSE(context->defaultActionFocus().hasValue());

@@ -20,6 +20,7 @@ class UIImageContentStorage final {
     [[nodiscard]] Core::Status setTint(u32 nodeIndex, UIStraightSrgba8Color tint);
     void release(u32 nodeIndex) noexcept;
 
+    [[nodiscard]] UIImageContent* getMutable(u32 nodeIndex) noexcept;
     [[nodiscard]] const UIImageContent* get(u32 nodeIndex) const noexcept;
     [[nodiscard]] usize capacity() const noexcept;
     [[nodiscard]] usize activeCount() const noexcept;

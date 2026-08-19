@@ -3093,7 +3093,8 @@ class TileMapBgfxState final : public Tina::IGameState {
 
         // Product controls inherit this Theme. Panels and title text keep a small
         // set of intentional hierarchy overrides which applyUITheme() refreshes.
-        constexpr Tina::UI::UITheme initialTheme = Tina::UI::makeDefaultProductTheme();
+        constexpr Tina::UI::UITheme initialTheme = Tina::UI::makeModernDesktopTheme(
+            Tina::UI::UIColorScheme::Dark, Tina::UI::UIDensity::Compact);
         struct PanelSpec final {
             Tina::UI::UILayoutStyle layout{};
         };
@@ -4992,20 +4993,21 @@ class TileMapBgfxState final : public Tina::IGameState {
     Tina::Core::Status applyUITheme(Tina::PrimaryWindowUITreeUpdater& tree, bool light, bool countSwitch)
     {
         const Tina::UI::UITheme theme =
-            light ? Tina::UI::makeLightProductTheme() : Tina::UI::makeDefaultProductTheme();
+            Tina::UI::makeModernDesktopTheme(light ? Tina::UI::UIColorScheme::Light : Tina::UI::UIColorScheme::Dark,
+                                              Tina::UI::UIDensity::Compact);
         if (auto status = tree.setProductTheme(theme); !status)
         {
             return status;
         }
 
         const std::array panelPaints{
-            Tina::UI::makePanelBoxPaint(theme, Tina::UI::scaleColorAlpha(theme.surface1, 230),
-                                        Tina::UI::UIElevation::None),
-            Tina::UI::makePanelBoxPaint(theme, Tina::UI::scaleColorAlpha(theme.surface0, 236),
-                                        Tina::UI::UIElevation::Low),
-            Tina::UI::makeSolidBox(Tina::UI::scaleColorAlpha(theme.textAccent, 230)),
-            Tina::UI::makePanelBoxPaint(theme, Tina::UI::scaleColorAlpha(theme.surface0, 236),
-                                        Tina::UI::UIElevation::Low),
+            Tina::UI::makePanelBoxPaint(theme, Tina::UI::scaleColorAlpha(theme.colors.surfaceContainerLow, 230),
+                                        Tina::UI::UIElevation::Flat),
+            Tina::UI::makePanelBoxPaint(theme, Tina::UI::scaleColorAlpha(theme.colors.background, 236),
+                                        Tina::UI::UIElevation::Raised),
+            Tina::UI::makeSolidBox(Tina::UI::scaleColorAlpha(theme.colors.warning, 230)),
+            Tina::UI::makePanelBoxPaint(theme, Tina::UI::scaleColorAlpha(theme.colors.background, 236),
+                                        Tina::UI::UIElevation::Raised),
         };
         for (std::size_t index = 0; index < uiPanelNodes_.size(); ++index)
         {

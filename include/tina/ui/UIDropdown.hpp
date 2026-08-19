@@ -12,6 +12,7 @@ namespace Tina::UI {
 // use UIButtonPaint so Dropdown and DropdownItem share the mature Button path.
 struct UIDropdownPaint final {
     UIStraightSrgba8Color indicatorColor{};
+    UIStraightSrgba8Color openBackgroundColor{};
     UIStraightSrgba8Color selectedItemBackgroundColor{};
     float indicatorWidth = 10.0F;
     float indicatorHeight = 6.0F;

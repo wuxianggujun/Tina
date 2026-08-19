@@ -7,6 +7,7 @@
 
 #include <array>
 #include <optional>
+#include <string>
 
 namespace Tina::SampleUI {
 
@@ -21,10 +22,36 @@ enum class ShowcaseQuality : Core::u8 {
     Quality,
 };
 
+// Application-owned state survives density-driven UI root rebuilds. The
+// retained tree remains the sole interaction/render owner while this model is
+// the durable source used to seed the replacement tree.
+struct ShowcaseUIState final {
+    ShowcaseTheme theme = ShowcaseTheme::Dark;
+    UI::UIDensity density = UI::UIDensity::Comfortable;
+    float progressValue = 72.0F;
+    Core::u64 listSelectionIndex = 2;
+    Core::u64 treeSelectionIndex = 0;
+    Core::usize dropdownSelection = 0;
+    float scrollOffset = 0.0F;
+    float componentScrollOffset = 0.0F;
+    ShowcaseQuality quality = ShowcaseQuality::Balanced;
+    std::string profileName{"Tina Player"};
+    UI::UIStyleClassId showcaseChromeClass{};
+    UI::UIStyleTokenId headerAccentToken{};
+    bool notificationsEnabled = true;
+    bool worldExpanded = true;
+    bool playerExpanded = true;
+    bool uiExpanded = false;
+    bool dialogOpen = false;
+    bool stylesheetInstalled = false;
+};
+
 struct ShowcaseUISnapshot final {
     ShowcaseTheme theme = ShowcaseTheme::Dark;
+    UI::UIDensity density = UI::UIDensity::Comfortable;
     float progressValue = 0.0F;
     Core::u64 themeSwitches = 0;
+    Core::u64 densitySwitchRequests = 0;
     Core::u64 buttonActivations = 0;
     Core::u64 sliderChanges = 0;
     Core::u64 treeExpansionChanges = 0;
@@ -34,14 +61,19 @@ struct ShowcaseUISnapshot final {
     UI::UITreeViewItemKey treeSelectionKey = UI::InvalidUITreeViewItemKey;
     Core::usize dropdownSelection = 0;
     float scrollOffset = 0.0F;
+    float componentScrollOffset = 0.0F;
     Core::usize controlCount = 0;
     Core::usize imageProductCount = 0;
     Core::usize asymmetricCornerProductCount = 0;
+    Core::usize componentProfileCount = 0;
+    Core::usize workbenchBandCount = 0;
     ShowcaseQuality quality = ShowcaseQuality::Balanced;
     bool notificationsEnabled = false;
     bool stylesheetInstalled = false;
     bool rootAlive = false;
     bool multilineNotesScrolled = false;
+    bool desktopWorkbench = false;
+    bool dialogOpen = false;
 };
 
 class ShowcaseUI final {
@@ -54,11 +86,14 @@ class ShowcaseUI final {
     ShowcaseUI(ShowcaseUI&&) = delete;
     ShowcaseUI& operator=(ShowcaseUI&&) = delete;
 
-    [[nodiscard]] Core::Status build(GameStateEnterContext& context, ShowcaseTheme initialTheme,
+    [[nodiscard]] Core::Status build(GameStateEnterContext& context, ShowcaseUIState& state,
+                                     ShowcaseTheme automationBaselineTheme,
+                                     UI::UIDensity automationBaselineDensity,
                                      Render::Texture2DFrameResourceResolver imageResolver);
     [[nodiscard]] Core::Status update(UIUpdateContext& context);
 
     void requestAutomatedStep(Core::u64 frameIndex) noexcept;
+    [[nodiscard]] std::optional<UI::UIDensity> takeDensityRebuildRequest() noexcept;
     [[nodiscard]] bool unbindImageResolver() noexcept;
     void release() noexcept;
 
@@ -83,6 +118,10 @@ class ShowcaseUI final {
         TreeSelectionChanged,
         TreeExpansionChanged,
         ScrollChanged,
+        DensityCompact,
+        DensityComfortable,
+        DialogOpened,
+        DialogClosed,
     };
 
     struct Nodes final {
@@ -90,12 +129,20 @@ class ShowcaseUI final {
         UI::UINodeId header{};
         UI::UINodeId headerAccent{};
         UI::UINodeId navigation{};
+        UI::UINodeId componentScrollView{};
+        UI::UINodeId componentCanvas{};
+        UI::UINodeId statusBar{};
         std::array<UI::UINodeId, 6> cards{};
         std::array<UI::UINodeId, 5> navigationAccents{};
         std::array<UI::UINodeId, 3> paletteSwatches{};
         UI::UINodeId statusPanel{};
         UI::UINodeId qualityGroup{};
         UI::UINodeId themeGroup{};
+        UI::UINodeId densityGroup{};
+        UI::UINodeId formFieldRoot{};
+        UI::UINodeId formFieldActionButton{};
+        UI::UINodeId destructiveButtonRoot{};
+        UI::UIDialogParts dialog{};
 
         UI::UINodeId title{};
         UI::UINodeId subtitle{};
@@ -130,6 +177,7 @@ class ShowcaseUI final {
         UI::UINodeId profileTextEdit{};
         std::array<UI::UINodeId, 3> qualityRadios{};
         std::array<UI::UINodeId, 2> themeRadios{};
+        std::array<UI::UINodeId, 2> densityRadios{};
         UI::UINodeId dropdown{};
         UI::UINodeId dropdownPopup{};
         std::array<UI::UINodeId, 3> dropdownItems{};
@@ -161,9 +209,12 @@ class ShowcaseUI final {
     Nodes nodes_{};
     ShowcaseTheme initialTheme_ = ShowcaseTheme::Dark;
     ShowcaseTheme currentTheme_ = ShowcaseTheme::Dark;
+    UI::UIDensity initialDensity_ = UI::UIDensity::Comfortable;
+    UI::UIDensity density_ = UI::UIDensity::Comfortable;
     ShowcaseQuality quality_ = ShowcaseQuality::Balanced;
     StatusMessage pendingStatus_ = StatusMessage::Ready;
     std::optional<ShowcaseTheme> requestedTheme_{};
+    std::optional<UI::UIDensity> requestedDensityRebuild_{};
     std::optional<float> requestedSliderValue_{};
     std::optional<Core::u64> requestedListSelection_{};
     std::optional<Core::u64> requestedTreeSelection_{};
@@ -171,10 +222,13 @@ class ShowcaseUI final {
     std::optional<Core::usize> requestedDropdownSelection_{};
     std::optional<bool> requestedDropdownOpen_{};
     std::optional<float> requestedScrollOffset_{};
+    std::optional<float> requestedComponentScrollOffset_{};
     float requestedProgressValue_ = 72.0F;
     float progressValue_ = 72.0F;
     float scrollOffset_ = 0.0F;
+    float componentScrollOffset_ = 0.0F;
     Core::u64 themeSwitches_ = 0;
+    Core::u64 densitySwitchRequests_ = 0;
     Core::u64 buttonActivations_ = 0;
     Core::u64 sliderChanges_ = 0;
     Core::u64 treeExpansionChanges_ = 0;
@@ -185,11 +239,18 @@ class ShowcaseUI final {
     Core::usize controlCount_ = 0;
     Core::usize imageProductCount_ = 0;
     Core::usize asymmetricCornerProductCount_ = 0;
+    Core::usize componentProfileCount_ = 0;
+    Core::usize workbenchBandCount_ = 0;
     bool multilineNotesScrolled_ = false;
+    bool desktopWorkbench_ = false;
+    bool dialogOpen_ = false;
+    bool dialogVisibilityDirty_ = false;
+    bool profileClearRequested_ = false;
     Core::u64 styleTokenUpdates_ = 0;
     Core::u64 motionBegins_ = 0;
     UI::UIStyleClassId showcaseChromeClass_{};
     UI::UIStyleTokenId headerAccentToken_{};
+    ShowcaseUIState* state_ = nullptr;
     bool stylesheetInstalled_ = false;
     bool progressDirty_ = false;
     bool notificationsDirty_ = false;

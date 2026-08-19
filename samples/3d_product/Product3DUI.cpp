@@ -165,8 +165,8 @@ struct Rect final {
 
 [[nodiscard]] const UI::UITheme& themeFor(Product3DUITheme mode) noexcept
 {
-    static constexpr UI::UITheme Dark = UI::makeDefaultProductTheme();
-    static constexpr UI::UITheme Light = UI::makeLightProductTheme();
+    static constexpr UI::UITheme Dark = UI::makeModernDesktopTheme(UI::UIColorScheme::Dark, UI::UIDensity::Compact);
+    static constexpr UI::UITheme Light = UI::makeModernDesktopTheme(UI::UIColorScheme::Light, UI::UIDensity::Compact);
     return mode == Product3DUITheme::Dark ? Dark : Light;
 }
 
@@ -801,41 +801,41 @@ Core::Status Product3DUI::applyTheme(PrimaryWindowUITreeUpdater& tree, Product3D
     }
 
     if (Core::Status status =
-            tree.setBoxPaint(nodes_.headerPanel, UI::makePanelBoxPaint(theme, UI::scaleColorAlpha(theme.surface1, 224),
-                                                                       UI::UIElevation::Low));
+            tree.setBoxPaint(nodes_.headerPanel, UI::makePanelBoxPaint(theme, UI::scaleColorAlpha(theme.colors.surfaceContainerLow, 224),
+                                                                       UI::UIElevation::Raised));
         !status)
     {
         return status;
     }
-    if (Core::Status status = tree.setBoxPaint(nodes_.headerAccent, UI::makeSolidBox(theme.accent)); !status)
+    if (Core::Status status = tree.setBoxPaint(nodes_.headerAccent, UI::makeSolidBox(theme.colors.primary)); !status)
     {
         return status;
     }
     if (Core::Status status = tree.setBoxPaint(
             nodes_.inspectorPanel,
-            UI::makePanelBoxPaint(theme, UI::scaleColorAlpha(theme.surface0, 236), UI::UIElevation::Low));
+            UI::makePanelBoxPaint(theme, UI::scaleColorAlpha(theme.colors.background, 236), UI::UIElevation::Raised));
         !status)
     {
         return status;
     }
-    if (Core::Status status = tree.setBoxPaint(nodes_.inspectorAccent, UI::makeSolidBox(theme.textAccent)); !status)
+    if (Core::Status status = tree.setBoxPaint(nodes_.inspectorAccent, UI::makeSolidBox(theme.colors.warning)); !status)
     {
         return status;
     }
     if (Core::Status status = tree.setBoxPaint(
             nodes_.collectionPanel,
-            UI::makePanelBoxPaint(theme, UI::scaleColorAlpha(theme.surface0, 236), UI::UIElevation::Low));
+            UI::makePanelBoxPaint(theme, UI::scaleColorAlpha(theme.colors.background, 236), UI::UIElevation::Raised));
         !status)
     {
         return status;
     }
-    if (Core::Status status = tree.setBoxPaint(nodes_.collectionAccent, UI::makeSolidBox(theme.textAccent)); !status)
+    if (Core::Status status = tree.setBoxPaint(nodes_.collectionAccent, UI::makeSolidBox(theme.colors.warning)); !status)
     {
         return status;
     }
     if (Core::Status status =
-            tree.setBoxPaint(nodes_.statusPanel, UI::makePanelBoxPaint(theme, UI::scaleColorAlpha(theme.surface2, 222),
-                                                                       UI::UIElevation::None));
+            tree.setBoxPaint(nodes_.statusPanel, UI::makePanelBoxPaint(theme, UI::scaleColorAlpha(theme.colors.surfaceContainer, 222),
+                                                                       UI::UIElevation::Flat));
         !status)
     {
         return status;
@@ -884,7 +884,7 @@ Core::Status Product3DUI::applyTheme(PrimaryWindowUITreeUpdater& tree, Product3D
     {
         return status;
     }
-    const UI::UIBoxPaint collectionBox = UI::makePanelBoxPaint(theme, theme.surface0, UI::UIElevation::None);
+    const UI::UIBoxPaint collectionBox = UI::makePanelBoxPaint(theme, theme.colors.background, UI::UIElevation::Flat);
     if (Core::Status status = tree.setBoxPaint(nodes_.assetList, collectionBox); !status)
     {
         return status;

@@ -31,6 +31,8 @@ enum class BuiltinElementKind : u8 {
     Splitter,
     TabView,
     Tab,
+    Menu,
+    MenuItem,
 };
 
 struct UIWidgetTraits final {
@@ -50,6 +52,7 @@ struct UIWidgetTraits final {
     case BuiltinElementKind::ListViewItem:
     case BuiltinElementKind::TreeViewItem:
     case BuiltinElementKind::Tab:
+    case BuiltinElementKind::MenuItem:
         return {
             .supportsButtonChrome = true,
             .defaultActivatable = true,
@@ -95,6 +98,7 @@ struct UIWidgetTraits final {
     case BuiltinElementKind::Popup:
     case BuiltinElementKind::SplitView:
     case BuiltinElementKind::TabView:
+    case BuiltinElementKind::Menu:
         return {};
     }
     return {};
@@ -143,7 +147,8 @@ defaultContentAlignment(BuiltinElementKind kind) noexcept
         kind == BuiltinElementKind::DropdownItem ||
         kind == BuiltinElementKind::RadioButton ||
         kind == BuiltinElementKind::ListViewItem ||
-        kind == BuiltinElementKind::TreeViewItem)
+        kind == BuiltinElementKind::TreeViewItem ||
+        kind == BuiltinElementKind::MenuItem)
     {
         return {
             .horizontal = UIAxisAlignment::Start,

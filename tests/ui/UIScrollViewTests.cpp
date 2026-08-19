@@ -643,13 +643,13 @@ TEST(UIScrollViewStandaloneTest, ThemeInheritanceAndLocalPaintOverrideRemainInde
     auto scrollResult = updater.createElement(root.rootNodeId(), UI::makeScrollViewElement());
     ASSERT_TRUE(scrollResult.has_value()) << scrollResult.error().message;
 
-    EXPECT_EQ(updater.scrollViewPaint(*scrollResult).value(), UI::makeScrollViewPaint(UI::makeDefaultProductTheme()));
-    assertOk(context->setProductTheme(UI::makeLightProductTheme()));
-    EXPECT_EQ(updater.scrollViewPaint(*scrollResult).value(), UI::makeScrollViewPaint(UI::makeLightProductTheme()));
+    EXPECT_EQ(updater.scrollViewPaint(*scrollResult).value(), UI::makeScrollViewPaint(UI::makeModernDesktopTheme()));
+    assertOk(context->setProductTheme(UI::makeModernDesktopTheme(UI::UIColorScheme::Light)));
+    EXPECT_EQ(updater.scrollViewPaint(*scrollResult).value(), UI::makeScrollViewPaint(UI::makeModernDesktopTheme(UI::UIColorScheme::Light)));
 
     const UI::UIScrollViewPaint localPaint = visibleScrollPaint();
     assertOk(updater.setScrollViewPaint(*scrollResult, localPaint));
-    assertOk(context->setProductTheme(UI::makeDefaultProductTheme()));
+    assertOk(context->setProductTheme(UI::makeModernDesktopTheme()));
     EXPECT_EQ(updater.scrollViewPaint(*scrollResult).value(), localPaint);
 }
 

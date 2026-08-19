@@ -336,7 +336,7 @@ TEST_F(UIListViewTest, PointerSelectionWheelAndScrollbarUseCommittedVirtualRows)
         window, UI::UIRoutedPointerEventKind::Move, 3, {.x = 120.0F, .y = 50.0F}));
     ASSERT_TRUE(movedOutside.has_value()) << (movedOutside ? "" : movedOutside.error().message);
     assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
-    expectSelectedRowColor(focusedSelectionColor);
+    expectSelectedRowColor(selectionColor);
 
     assertOk(context->clearFocus());
     assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
@@ -673,7 +673,7 @@ TEST_F(UIListViewTest, ProductChromeKeepsConsecutiveRowTextInsideRequestedBounds
     }
 
     const UI::UIPremultipliedRgba8Color textColor =
-        UI::premultiply(UI::makeDefaultProductTheme().textPrimary);
+        UI::premultiply(UI::makeModernDesktopTheme().colors.onSurface);
     usize firstRowTextPaintCount = 0;
     usize secondRowTextPaintCount = 0;
     for (const UI::UICommittedPaintEntry& paint : context->committedPaint().entries())

@@ -493,5 +493,140 @@ TEST_F(UIInputRouteProducerTest, DropdownCommandsTakePriorityThenClosedStateUses
     EXPECT_EQ(tree.context->defaultActionFocus(), tree.dropdown);
 }
 
+TEST_F(UIInputRouteProducerTest, MenuConsumesKeyboardNavigationAndDismissalDownUpPairs)
+{
+    auto producer = createProducer();
+    MenuRouteTree tree = createMenuRouteTree(window);
+    ASSERT_NE(producer, nullptr);
+    ASSERT_NE(tree.context, nullptr);
+    ASSERT_EQ(tree.context->activeMenu(), tree.menu);
+    ASSERT_EQ(tree.context->defaultActionFocus(), tree.anchor);
+
+    Platform::PlatformFrameId frameId{100};
+    const auto routeKeyPair = [&](Platform::Key key) {
+        auto down = buildFrame(*builder, window,
+                               {
+                                   .frameId = frameId,
+                                   .transitions = {keyDown(window, key)},
+                                   .heldKeys = {key},
+                               });
+        ++frameId.value;
+        EXPECT_TRUE(down.has_value()) << (down ? "" : down.error().message);
+        if (!down)
+        {
+            return false;
+        }
+        auto downOutput = producer->produce(tree.context.get(), *down);
+        EXPECT_TRUE(downOutput.has_value())
+            << (downOutput ? "" : downOutput.error().message);
+        if (!downOutput)
+        {
+            return false;
+        }
+        EXPECT_TRUE(downOutput->consumption.isConsumed(0));
+
+        auto up = buildFrame(*builder, window,
+                             {
+                                 .frameId = frameId,
+                                 .transitions = {keyUp(window, key)},
+                             });
+        ++frameId.value;
+        EXPECT_TRUE(up.has_value()) << (up ? "" : up.error().message);
+        if (!up)
+        {
+            return false;
+        }
+        auto upOutput = producer->produce(tree.context.get(), *up);
+        EXPECT_TRUE(upOutput.has_value()) << (upOutput ? "" : upOutput.error().message);
+        if (!upOutput)
+        {
+            return false;
+        }
+        EXPECT_TRUE(upOutput->consumption.isConsumed(0));
+        return true;
+    };
+
+    ASSERT_TRUE(routeKeyPair(Platform::Key::Down));
+    EXPECT_EQ(tree.context->defaultActionFocus(), tree.firstItem);
+    ASSERT_TRUE(routeKeyPair(Platform::Key::End));
+    EXPECT_EQ(tree.context->defaultActionFocus(), tree.secondItem);
+    ASSERT_TRUE(routeKeyPair(Platform::Key::Home));
+    EXPECT_EQ(tree.context->defaultActionFocus(), tree.firstItem);
+    ASSERT_TRUE(routeKeyPair(Platform::Key::Up));
+    EXPECT_EQ(tree.context->defaultActionFocus(), tree.secondItem);
+    ASSERT_TRUE(routeKeyPair(Platform::Key::Escape));
+    EXPECT_FALSE(tree.context->activeMenu().hasValue());
+    EXPECT_EQ(tree.context->defaultActionFocus(), tree.anchor);
+}
+
+TEST_F(UIInputRouteProducerTest, MenuConsumesGamepadDpadAndEastBeforeUnderlyingNavigation)
+{
+    auto producer = createProducer();
+    MenuRouteTree tree = createMenuRouteTree(window);
+    ASSERT_NE(producer, nullptr);
+    ASSERT_NE(tree.context, nullptr);
+
+    Platform::PlatformFrameId frameId{120};
+    u64 revision = 120;
+    const auto routeGamepadPair = [&](Platform::GamepadButton button) {
+        Platform::GamepadSnapshot held{.gamepad = gamepad, .revision = revision++};
+        held.heldButtons.set(static_cast<usize>(button));
+        auto down = buildFrame(
+            *builder, window,
+            {
+                .frameId = frameId,
+                .transitions = {gamepadButton(
+                    window, gamepad, button, Platform::DigitalTransition::Down)},
+                .gamepadSnapshots = {held},
+            });
+        ++frameId.value;
+        EXPECT_TRUE(down.has_value()) << (down ? "" : down.error().message);
+        if (!down)
+        {
+            return false;
+        }
+        auto downOutput = producer->produce(tree.context.get(), *down);
+        EXPECT_TRUE(downOutput.has_value())
+            << (downOutput ? "" : downOutput.error().message);
+        if (!downOutput)
+        {
+            return false;
+        }
+        EXPECT_TRUE(downOutput->consumption.isConsumed(0));
+
+        auto up = buildFrame(
+            *builder, window,
+            {
+                .frameId = frameId,
+                .transitions = {gamepadButton(
+                    window, gamepad, button, Platform::DigitalTransition::Up)},
+                .gamepadSnapshots = {
+                    Platform::GamepadSnapshot{.gamepad = gamepad, .revision = revision++}},
+            });
+        ++frameId.value;
+        EXPECT_TRUE(up.has_value()) << (up ? "" : up.error().message);
+        if (!up)
+        {
+            return false;
+        }
+        auto upOutput = producer->produce(tree.context.get(), *up);
+        EXPECT_TRUE(upOutput.has_value()) << (upOutput ? "" : upOutput.error().message);
+        if (!upOutput)
+        {
+            return false;
+        }
+        EXPECT_TRUE(upOutput->consumption.isConsumed(0));
+        return true;
+    };
+
+    ASSERT_TRUE(routeGamepadPair(Platform::GamepadButton::DpadDown));
+    EXPECT_EQ(tree.context->defaultActionFocus(), tree.firstItem);
+    ASSERT_TRUE(routeGamepadPair(Platform::GamepadButton::DpadUp));
+    EXPECT_EQ(tree.context->defaultActionFocus(), tree.secondItem);
+    ASSERT_TRUE(routeGamepadPair(Platform::GamepadButton::East));
+    EXPECT_FALSE(tree.context->activeMenu().hasValue());
+    EXPECT_EQ(tree.context->defaultActionFocus(), tree.anchor);
+}
+
 } // namespace
 } // namespace Tina::Tests

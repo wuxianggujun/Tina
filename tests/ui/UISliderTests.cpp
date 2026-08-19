@@ -265,7 +265,7 @@ TEST(UISliderTest, PointerMappingUsesThePaintTrackAndThumbCenter)
             .thumbColor = {.red = 235, .green = 240, .blue = 245, .alpha = 255},
             .draggingThumbColor = {.red = 255, .green = 200, .blue = 40, .alpha = 255},
             .contentInset = 4.0F,
-            .thumbWidth = 8.0F,
+            .thumbExtent = 8.0F,
         }));
     assertOk(updater.setSliderRange(slider, 0.0F, 100.0F, 1.0F));
     assertOk(updater.setSliderValue(slider, 25.0F));
@@ -312,12 +312,13 @@ TEST(UISliderTest, PaintPublishesTrackFillThumbAndPressedResetState)
     assertOk(updater.setLayoutStyle(slider, fixedSize(100.0F, 20.0F)));
     assertOk(updater.setBoxPaint(slider, solidFill(30, 40, 50)));
     const UI::UISliderPaint expectedPaint{
+        .trackColor = {.red = 10, .green = 20, .blue = 30, .alpha = 255},
         .filledTrackColor = {.red = 40, .green = 160, .blue = 220, .alpha = 255},
         .thumbColor = {.red = 235, .green = 240, .blue = 245, .alpha = 255},
         .draggingThumbColor = {.red = 255, .green = 200, .blue = 40, .alpha = 255},
         .focusedThumbColor = {.red = 80, .green = 180, .blue = 250, .alpha = 255},
         .contentInset = 4.0F,
-        .thumbWidth = 8.0F,
+        .thumbExtent = 8.0F,
     };
     assertOk(updater.setSliderPaint(slider, expectedPaint));
     assertOk(updater.setSliderRange(slider, 0.0F, 100.0F, 1.0F));
@@ -328,15 +329,18 @@ TEST(UISliderTest, PaintPublishesTrackFillThumbAndPressedResetState)
     assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
 
     UI::UICommittedPaintView paint = context->committedPaint();
-    ASSERT_EQ(paint.size(), 3U);
+    ASSERT_EQ(paint.size(), 4U);
     EXPECT_EQ(paint.entries()[0].worldRect, (UI::UILogicalRect{.x = 0.0F, .y = 0.0F, .width = 100.0F, .height = 20.0F}));
-    EXPECT_EQ(paint.entries()[1].worldRect, (UI::UILogicalRect{.x = 4.0F, .y = 4.0F, .width = 23.0F, .height = 12.0F}));
-    EXPECT_EQ(paint.entries()[2].worldRect, (UI::UILogicalRect{.x = 23.0F, .y = 0.0F, .width = 8.0F, .height = 20.0F}));
+    EXPECT_EQ(paint.entries()[1].worldRect, (UI::UILogicalRect{.x = 4.0F, .y = 8.0F, .width = 92.0F, .height = 4.0F}));
+    EXPECT_EQ(paint.entries()[2].worldRect, (UI::UILogicalRect{.x = 4.0F, .y = 8.0F, .width = 23.0F, .height = 4.0F}));
+    EXPECT_EQ(paint.entries()[3].worldRect, (UI::UILogicalRect{.x = 23.0F, .y = 6.0F, .width = 8.0F, .height = 8.0F}));
     EXPECT_EQ(paint.entries()[0].paintOrdinal, 1U);
     EXPECT_EQ(paint.entries()[1].paintOrdinal, 2U);
     EXPECT_EQ(paint.entries()[2].paintOrdinal, 3U);
-    EXPECT_EQ(paint.entries()[1].solidFill, (UI::UIPremultipliedRgba8Color{.red = 40, .green = 160, .blue = 220, .alpha = 255}));
-    EXPECT_EQ(paint.entries()[2].solidFill, (UI::UIPremultipliedRgba8Color{.red = 235, .green = 240, .blue = 245, .alpha = 255}));
+    EXPECT_EQ(paint.entries()[3].paintOrdinal, 4U);
+    EXPECT_EQ(paint.entries()[1].solidFill, (UI::UIPremultipliedRgba8Color{.red = 10, .green = 20, .blue = 30, .alpha = 255}));
+    EXPECT_EQ(paint.entries()[2].solidFill, (UI::UIPremultipliedRgba8Color{.red = 40, .green = 160, .blue = 220, .alpha = 255}));
+    EXPECT_EQ(paint.entries()[3].solidFill, (UI::UIPremultipliedRgba8Color{.red = 235, .green = 240, .blue = 245, .alpha = 255}));
 
     auto down = context->routePointerInput(makePointerInput(
         window,
@@ -348,12 +352,12 @@ TEST(UISliderTest, PaintPublishesTrackFillThumbAndPressedResetState)
     EXPECT_EQ(context->defaultActionFocus(), slider);
     assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
     paint = context->committedPaint();
-    ASSERT_EQ(paint.size(), 3U);
-    EXPECT_NEAR(paint.entries()[2].worldRect.x, 70.84F, 0.001F);
-    EXPECT_FLOAT_EQ(paint.entries()[2].worldRect.y, 0.0F);
-    EXPECT_FLOAT_EQ(paint.entries()[2].worldRect.width, 8.0F);
-    EXPECT_FLOAT_EQ(paint.entries()[2].worldRect.height, 20.0F);
-    EXPECT_EQ(paint.entries()[2].solidFill, (UI::UIPremultipliedRgba8Color{.red = 255, .green = 200, .blue = 40, .alpha = 255}));
+    ASSERT_EQ(paint.size(), 4U);
+    EXPECT_NEAR(paint.entries()[3].worldRect.x, 70.84F, 0.001F);
+    EXPECT_FLOAT_EQ(paint.entries()[3].worldRect.y, 6.0F);
+    EXPECT_FLOAT_EQ(paint.entries()[3].worldRect.width, 8.0F);
+    EXPECT_FLOAT_EQ(paint.entries()[3].worldRect.height, 8.0F);
+    EXPECT_EQ(paint.entries()[3].solidFill, (UI::UIPremultipliedRgba8Color{.red = 255, .green = 200, .blue = 40, .alpha = 255}));
     auto value = updater.sliderValue(slider);
     ASSERT_TRUE(value.has_value());
     EXPECT_FLOAT_EQ(*value, 77.0F);
@@ -369,10 +373,10 @@ TEST(UISliderTest, PaintPublishesTrackFillThumbAndPressedResetState)
     ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
     assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
     paint = context->committedPaint();
-    ASSERT_EQ(paint.size(), 3U);
+    ASSERT_EQ(paint.size(), 4U);
     EXPECT_EQ(
-        paint.entries()[2].solidFill,
-        (UI::UIPremultipliedRgba8Color{.red = 80, .green = 180, .blue = 250, .alpha = 255}));
+        paint.entries()[3].solidFill,
+        (UI::UIPremultipliedRgba8Color{.red = 235, .green = 240, .blue = 245, .alpha = 255}));
     dragging = updater.isSliderDragging(slider);
     ASSERT_TRUE(dragging.has_value());
     EXPECT_FALSE(*dragging);
@@ -380,9 +384,9 @@ TEST(UISliderTest, PaintPublishesTrackFillThumbAndPressedResetState)
     assertOk(updater.setEnabled(slider, false));
     assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
     paint = context->committedPaint();
-    ASSERT_EQ(paint.size(), 3U);
-    EXPECT_EQ(paint.entries()[1].solidFill, (UI::UIPremultipliedRgba8Color{.red = 22, .green = 88, .blue = 121, .alpha = 140}));
-    EXPECT_EQ(paint.entries()[2].solidFill, (UI::UIPremultipliedRgba8Color{.red = 129, .green = 132, .blue = 135, .alpha = 140}));
+    ASSERT_EQ(paint.size(), 4U);
+    EXPECT_EQ(paint.entries()[2].solidFill, (UI::UIPremultipliedRgba8Color{.red = 22, .green = 88, .blue = 121, .alpha = 140}));
+    EXPECT_EQ(paint.entries()[3].solidFill, (UI::UIPremultipliedRgba8Color{.red = 129, .green = 132, .blue = 135, .alpha = 140}));
 }
 
 TEST(UISliderTest, ExplicitFocusPublishesFocusSemanticsAndFocusedThumb)
@@ -409,7 +413,7 @@ TEST(UISliderTest, ExplicitFocusPublishesFocusSemanticsAndFocusedThumb)
             .draggingThumbColor = {.red = 255, .green = 200, .blue = 40, .alpha = 255},
             .focusedThumbColor = {.red = 80, .green = 180, .blue = 250, .alpha = 255},
             .contentInset = 4.0F,
-            .thumbWidth = 8.0F,
+            .thumbExtent = 8.0F,
         }));
     assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
 
@@ -509,8 +513,8 @@ TEST(UISliderTest, PaintCapacityFailurePreservesPublishedSnapshotAtomically)
             .filledTrackColor = {.red = 4, .green = 5, .blue = 6, .alpha = 255},
             .thumbColor = {.red = 7, .green = 8, .blue = 9, .alpha = 255},
             .draggingThumbColor = {.red = 10, .green = 11, .blue = 12, .alpha = 255},
-            .contentInset = 2.0F,
-            .thumbWidth = 6.0F,
+            .contentInset = 3.0F,
+            .thumbExtent = 6.0F,
         }));
     assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
     const UI::UICommittedPaintView oldPaint = context->committedPaint();
@@ -551,8 +555,8 @@ TEST(UISliderTest, PaintRejectsInvalidMetricsAndWrongKindsWithoutMutation)
         .filledTrackColor = {.red = 10, .green = 20, .blue = 30, .alpha = 255},
         .thumbColor = {.red = 40, .green = 50, .blue = 60, .alpha = 255},
         .draggingThumbColor = {.red = 70, .green = 80, .blue = 90, .alpha = 255},
-        .contentInset = 3.0F,
-        .thumbWidth = 8.0F,
+        .contentInset = 4.0F,
+        .thumbExtent = 8.0F,
     };
     assertOk(updater.setSliderPaint(slider, expected));
     UI::UISliderPaint invalid = expected;
@@ -600,7 +604,7 @@ TEST(UISliderTest, CancelClearsDraggingWhenDirtyQueueIsFull)
             .thumbColor = {.red = 235, .green = 240, .blue = 245, .alpha = 255},
             .draggingThumbColor = {.red = 255, .green = 200, .blue = 40, .alpha = 255},
             .contentInset = 4.0F,
-            .thumbWidth = 8.0F,
+            .thumbExtent = 8.0F,
         }));
     assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
 
@@ -652,7 +656,7 @@ TEST(UISliderTest, ExtremeFiniteRangeAndOversizedInsetRemainStable)
             .thumbColor = {.red = 235, .green = 240, .blue = 245, .alpha = 255},
             .draggingThumbColor = {.red = 255, .green = 200, .blue = 40, .alpha = 255},
             .contentInset = 4.0F,
-            .thumbWidth = 8.0F,
+            .thumbExtent = 8.0F,
         }));
     const float maximum = (std::numeric_limits<float>::max)();
     assertOk(updater.setSliderRange(slider, -maximum, maximum, 0.0F));
@@ -698,16 +702,16 @@ TEST(UISliderTest, ExtremeFiniteRangeAndOversizedInsetRemainStable)
             .thumbColor = {.red = 235, .green = 240, .blue = 245, .alpha = 255},
             .draggingThumbColor = {.red = 255, .green = 200, .blue = 40, .alpha = 255},
             .contentInset = 100.0F,
-            .thumbWidth = 8.0F,
+            .thumbExtent = 8.0F,
         }));
     assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
     const UI::UICommittedPaintView paint = context->committedPaint();
     ASSERT_EQ(paint.size(), 2U);
     EXPECT_EQ(paint.entries()[1].worldRect, (UI::UILogicalRect{
         .x = 6.0F,
-        .y = 0.0F,
+        .y = 1.0F,
         .width = 8.0F,
-        .height = 10.0F,
+        .height = 8.0F,
     }));
     EXPECT_TRUE(std::isfinite(paint.entries()[1].worldRect.x));
 

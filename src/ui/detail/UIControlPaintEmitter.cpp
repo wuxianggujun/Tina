@@ -2,7 +2,8 @@
 
 namespace Tina::UI::Detail {
 
-bool UIControlPaintBatch::add(UILogicalRect worldRect, UIPremultipliedRgba8Color color) noexcept
+bool UIControlPaintBatch::add(UILogicalRect worldRect, UIPremultipliedRgba8Color color,
+                              UILogicalCornerRadii cornerRadii) noexcept
 {
     if (worldRect.width <= 0.0F || worldRect.height <= 0.0F || color.isTransparent())
     {
@@ -16,6 +17,7 @@ bool UIControlPaintBatch::add(UILogicalRect worldRect, UIPremultipliedRgba8Color
     primitives_[size_] = UIControlPaintPrimitive{
         .worldRect = worldRect,
         .color = color,
+        .cornerRadii = cornerRadii,
     };
     ++size_;
     return true;
@@ -38,6 +40,7 @@ void UIControlPaintBatch::appendTo(std::pmr::vector<UICommittedPaintEntry>& outp
             .effectiveClip = effectiveClip,
             .paintOrdinal = nextPaintOrdinal++,
             .solidFill = primitive.color,
+            .cornerRadii = primitive.cornerRadii,
         });
     }
 }

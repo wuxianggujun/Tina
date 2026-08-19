@@ -12,6 +12,81 @@ resolveElementBuiltinKind(const UIElementDescriptor& descriptor)
     const bool hasText = descriptor.text.has_value();
     const bool hasImage = descriptor.image.has_value();
 
+    if (descriptor.menu.has_value() && descriptor.menuItem.has_value())
+    {
+        return Core::failure(UIErrorCode::InvalidElementDescriptor,
+                             "UI element cannot be both Menu and MenuItem");
+    }
+    if (descriptor.menu.has_value())
+    {
+        const UIMenuConfig& config = *descriptor.menu;
+        const bool validPlacement = config.placement >= UIMenuPlacement::Auto &&
+                                    config.placement <= UIMenuPlacement::Right;
+        if (!validPlacement || !std::isfinite(config.anchorGap) ||
+            config.anchorGap < 0.0F || !std::isfinite(config.viewportMargin) ||
+            config.viewportMargin < 0.0F || hasText || hasImage ||
+            descriptor.tooltip.has_value() || descriptor.splitView.has_value() ||
+            descriptor.splitter.has_value() || descriptor.tabView.has_value() ||
+            descriptor.tab.has_value() || descriptor.behaviors != UIElementBehavior::None ||
+            descriptor.layout.placement != UILayoutPlacement::Overlay ||
+            descriptor.semantics.mode != UISemanticsMode::Publish ||
+            descriptor.semantics.role != UISemanticsRole::Menu ||
+            descriptor.semantics.actions != UISemanticsAction::None ||
+            (descriptor.pointerHitPolicy.has_value() &&
+             *descriptor.pointerHitPolicy != UIPointerHitPolicy::Ignore) ||
+            !descriptor.focusScopeMode.has_value() ||
+            *descriptor.focusScopeMode != UIFocusScopeMode::Contain)
+        {
+            return Core::failure(UIErrorCode::InvalidElementDescriptor,
+                                 "UI Menu configuration or contract is invalid");
+        }
+        return BuiltinElementKind::Menu;
+    }
+    if (descriptor.menuItem.has_value())
+    {
+        const UIMenuItemConfig& config = *descriptor.menuItem;
+        const bool validKind = config.kind >= UIMenuItemKind::Command &&
+                               config.kind <= UIMenuItemKind::Separator;
+        if (!validKind)
+        {
+            return Core::failure(UIErrorCode::InvalidElementDescriptor,
+                                 "UI MenuItem kind is invalid");
+        }
+        const bool separator = config.kind == UIMenuItemKind::Separator;
+        const bool check = config.kind == UIMenuItemKind::Check;
+        const bool radio = config.kind == UIMenuItemKind::Radio;
+        const UIElementBehavior expectedBehaviors =
+            separator ? UIElementBehavior::None
+                      : UIElementBehavior::Focusable | UIElementBehavior::Activate;
+        const UISemanticsAction expectedActions =
+            separator ? UISemanticsAction::None
+                      : UISemanticsAction::Focus | UISemanticsAction::Activate |
+                            ((check || radio) ? UISemanticsAction::Toggle
+                                              : UISemanticsAction::None);
+        if (hasImage || descriptor.tooltip.has_value() ||
+            descriptor.splitView.has_value() || descriptor.splitter.has_value() ||
+            descriptor.tabView.has_value() || descriptor.tab.has_value() ||
+            descriptor.behaviors != expectedBehaviors ||
+            (separator ? hasText : !hasText) ||
+            (!check && !radio && config.checked) || (!radio && config.radioGroup != 0U) ||
+            descriptor.semantics.mode !=
+                (separator ? UISemanticsMode::Exclude : UISemanticsMode::Publish) ||
+            (!separator && descriptor.semantics.role != UISemanticsRole::MenuItem) ||
+            descriptor.semantics.actions != expectedActions ||
+            (!separator && !descriptor.semantics.useContentAsName) ||
+            (descriptor.pointerHitPolicy.has_value() &&
+             *descriptor.pointerHitPolicy !=
+                 (separator ? UIPointerHitPolicy::Ignore
+                            : UIPointerHitPolicy::Targetable)) ||
+            (descriptor.focusScopeMode.has_value() &&
+             *descriptor.focusScopeMode != UIFocusScopeMode::None))
+        {
+            return Core::failure(UIErrorCode::InvalidElementDescriptor,
+                                 "UI MenuItem configuration or contract is invalid");
+        }
+        return BuiltinElementKind::MenuItem;
+    }
+
     if (descriptor.tabView.has_value() && descriptor.tab.has_value())
     {
         return Core::failure(UIErrorCode::InvalidElementDescriptor,
@@ -81,7 +156,7 @@ resolveElementBuiltinKind(const UIElementDescriptor& descriptor)
             config.initialFraction < 0.0F || config.initialFraction > 1.0F ||
             !std::isfinite(config.minPrimarySize) || config.minPrimarySize < 0.0F ||
             !std::isfinite(config.minSecondarySize) || config.minSecondarySize < 0.0F ||
-            !std::isfinite(config.splitterExtent) || !(config.splitterExtent > 0.0F) ||
+            !std::isfinite(config.splitterExtent) || config.splitterExtent < 0.0F ||
             hasText || hasImage || descriptor.tooltip.has_value() ||
             descriptor.behaviors != UIElementBehavior::None ||
             descriptor.semantics.actions != UISemanticsAction::None)
@@ -269,7 +344,8 @@ resolveElementBuiltinKind(const UIElementDescriptor& descriptor)
 }
 
 Core::Status validateSemanticsContract(const UISemanticsDescriptor& descriptor,
-                                       UIElementBehavior behaviors)
+                                       UIElementBehavior behaviors,
+                                       BuiltinElementKind kind)
 {
     if (!isValidSemanticsMode(descriptor.mode) ||
         !isValidSemanticsRole(descriptor.role) ||
@@ -285,7 +361,8 @@ Core::Status validateSemanticsContract(const UISemanticsDescriptor& descriptor,
          !hasBehavior(behaviors, UIElementBehavior::Activate)) ||
         (hasSemanticsAction(descriptor.actions, UISemanticsAction::Toggle) &&
          !hasBehavior(behaviors, UIElementBehavior::Toggle) &&
-         !hasBehavior(behaviors, UIElementBehavior::ExclusiveChoice)) ||
+         !hasBehavior(behaviors, UIElementBehavior::ExclusiveChoice) &&
+         kind != BuiltinElementKind::MenuItem) ||
         (hasSemanticsAction(descriptor.actions,
                             UISemanticsAction::SetRangeValue) &&
          !hasBehavior(behaviors, UIElementBehavior::RangeInput)) ||

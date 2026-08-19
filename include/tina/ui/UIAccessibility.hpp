@@ -94,7 +94,10 @@ struct UIAccessibilityAction final {
     if (entry.focused) {
         states = states | UIAccessibilityState::Focused;
     }
-    if (entry.role == UISemanticsRole::Checkbox || entry.role == UISemanticsRole::RadioButton) {
+    if (entry.role == UISemanticsRole::Checkbox || entry.role == UISemanticsRole::Switch ||
+        entry.role == UISemanticsRole::RadioButton ||
+        (entry.role == UISemanticsRole::MenuItem &&
+         hasSemanticsAction(entry.actions, UISemanticsAction::Toggle))) {
         states = states | (entry.checked ? UIAccessibilityState::Checked : UIAccessibilityState::Unchecked);
     }
     if (entry.hasRange) {

@@ -4,6 +4,7 @@
 #include <tina/platform/PlatformFrame.hpp>
 #include <tina/ui/UINodeId.hpp>
 #include <tina/ui/UIPaint.hpp>
+#include <tina/ui/UIStyle.hpp>
 
 #include <array>
 #include <compare>
@@ -14,6 +15,38 @@
 #include <utility>
 
 namespace Tina::UI {
+
+enum class UIButtonVariant : u8 {
+    Primary = 0,
+    Tonal,
+    Outlined,
+    Text,
+    Danger,
+};
+
+[[nodiscard]] constexpr bool isValidButtonVariant(UIButtonVariant variant) noexcept
+{
+    return variant >= UIButtonVariant::Primary && variant <= UIButtonVariant::Danger;
+}
+
+[[nodiscard]] constexpr UIStyleRoleId styleRoleForButtonVariant(
+    UIButtonVariant variant) noexcept
+{
+    switch (variant)
+    {
+    case UIButtonVariant::Primary:
+        return UIStyleRoleId::ButtonPrimary;
+    case UIButtonVariant::Tonal:
+        return UIStyleRoleId::ButtonTonal;
+    case UIButtonVariant::Outlined:
+        return UIStyleRoleId::ButtonOutlined;
+    case UIButtonVariant::Text:
+        return UIStyleRoleId::ButtonText;
+    case UIButtonVariant::Danger:
+        return UIStyleRoleId::ButtonDanger;
+    }
+    return static_cast<UIStyleRoleId>(0xFFU);
+}
 
 // Interaction-state overrides for a Button. UIBoxPaint remains the normal-state
 // escape hatch. A zero-alpha background override falls back to the next state,

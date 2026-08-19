@@ -385,6 +385,78 @@ addListener(UI::UIContext& context, UI::UIRoutedPointerListenerDesc descriptor, 
     return tree;
 }
 
+[[nodiscard]] MenuRouteTree createMenuRouteTree(Platform::WindowId window)
+{
+    MenuRouteTree tree;
+    auto context = UI::UIContext::Create(window, {
+                                                     .nodeCapacity = 32,
+                                                     .rootCapacity = 1,
+                                                     .paintSnapshotCapacity = 32,
+                                                     .routePathCapacity = 16,
+                                                 });
+    EXPECT_TRUE(context.has_value()) << (context ? "" : context.error().message);
+    if (!context)
+    {
+        return tree;
+    }
+    tree.context = std::move(*context);
+    auto root = tree.context->rootBuilder().createRoot();
+    EXPECT_TRUE(root.has_value()) << (root ? "" : root.error().message);
+    if (!root)
+    {
+        return tree;
+    }
+    tree.root = std::move(*root);
+    auto updater = tree.context->treeUpdater(tree.root);
+    EXPECT_TRUE(updater.has_value()) << (updater ? "" : updater.error().message);
+    if (!updater)
+    {
+        return tree;
+    }
+    tree.updater = std::move(*updater);
+
+    auto anchor = tree.updater.createElement(
+        tree.root.rootNodeId(), UI::makeButtonElement("Menu", fixedSize(80.0F, 24.0F)));
+    auto menu = tree.updater.createElement(
+        tree.root.rootNodeId(),
+        UI::makeMenuElement(
+            {.placement = UI::UIMenuPlacement::Below}, fixedSize(80.0F, 48.0F)));
+    EXPECT_TRUE(anchor.has_value()) << (anchor ? "" : anchor.error().message);
+    EXPECT_TRUE(menu.has_value()) << (menu ? "" : menu.error().message);
+    if (!anchor || !menu)
+    {
+        return tree;
+    }
+    auto firstItem = tree.updater.createElement(
+        *menu, UI::makeMenuItemElement("First", {}, fixedSize(72.0F, 20.0F)));
+    auto secondItem = tree.updater.createElement(
+        *menu, UI::makeMenuItemElement(
+                   "Second", {.kind = UI::UIMenuItemKind::Check},
+                   fixedSize(72.0F, 20.0F)));
+    auto after = tree.updater.createElement(
+        tree.root.rootNodeId(), UI::makeButtonElement("After", fixedSize(80.0F, 24.0F)));
+    EXPECT_TRUE(firstItem.has_value()) << (firstItem ? "" : firstItem.error().message);
+    EXPECT_TRUE(secondItem.has_value()) << (secondItem ? "" : secondItem.error().message);
+    EXPECT_TRUE(after.has_value()) << (after ? "" : after.error().message);
+    if (!firstItem || !secondItem || !after)
+    {
+        return tree;
+    }
+
+    tree.anchor = *anchor;
+    tree.menu = *menu;
+    tree.firstItem = *firstItem;
+    tree.secondItem = *secondItem;
+    tree.after = *after;
+    expectOk(tree.updater.setLayoutStyle(tree.root.rootNodeId(), fixedSize(120.0F, 120.0F)));
+    expectOk(tree.updater.setMenuAnchor(tree.menu, tree.anchor));
+    expectOk(tree.context->commitLayout({.width = 120.0F, .height = 120.0F}));
+    expectOk(tree.context->requestFocus(tree.anchor));
+    expectOk(tree.updater.setMenuOpen(tree.menu, true));
+    expectOk(tree.context->commitLayout({.width = 120.0F, .height = 120.0F}));
+    return tree;
+}
+
 [[nodiscard]] CollectionRouteTree createCollectionRouteTree(Platform::WindowId window)
 {
     CollectionRouteTree tree;

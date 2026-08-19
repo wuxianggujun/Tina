@@ -219,6 +219,41 @@ rangeInputCommandForGamepadButton(Platform::GamepadButton button) noexcept
     }
 }
 
+[[nodiscard]] std::optional<UI::UIMenuCommand> menuCommandForKey(Platform::Key key) noexcept
+{
+    switch (key)
+    {
+    case Platform::Key::Up:
+        return UI::UIMenuCommand::Previous;
+    case Platform::Key::Down:
+        return UI::UIMenuCommand::Next;
+    case Platform::Key::Home:
+        return UI::UIMenuCommand::First;
+    case Platform::Key::End:
+        return UI::UIMenuCommand::Last;
+    case Platform::Key::Escape:
+        return UI::UIMenuCommand::Dismiss;
+    default:
+        return std::nullopt;
+    }
+}
+
+[[nodiscard]] std::optional<UI::UIMenuCommand>
+menuCommandForGamepadButton(Platform::GamepadButton button) noexcept
+{
+    switch (button)
+    {
+    case Platform::GamepadButton::DpadUp:
+        return UI::UIMenuCommand::Previous;
+    case Platform::GamepadButton::DpadDown:
+        return UI::UIMenuCommand::Next;
+    case Platform::GamepadButton::East:
+        return UI::UIMenuCommand::Dismiss;
+    default:
+        return std::nullopt;
+    }
+}
+
 [[nodiscard]] std::optional<UI::UIDropdownCommand> dropdownCommandForKey(Platform::Key key,
                                                                         bool shiftHeld) noexcept
 {
@@ -797,6 +832,54 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             continue;
         }
 
+        // A Menu owns its directional and dismissal commands before every other
+        // focused control. Matching releases remain consumed after dismissal.
+        if (const auto* key = std::get_if<Platform::KeyTransition>(&transitions[ordinal].payload);
+            key != nullptr && key->window == context->ownerWindow())
+        {
+            if (const auto command = menuCommandForKey(key->key); command.has_value())
+            {
+                auto routed = context->routeMenuCommand(
+                    *command, key->state == Platform::DigitalTransition::Down);
+                if (!routed)
+                {
+                    Core::Error error = std::move(routed.error());
+                    error.addContext("UIInputRouteProducer::produce(menu-key-command)");
+                    return Core::failure(std::move(error));
+                }
+                if (routed->consumed)
+                {
+                    stagingWords_[ordinal / BitsPerConsumptionWord] |=
+                        u64{1} << (ordinal % BitsPerConsumptionWord);
+                    anyConsumed = true;
+                    continue;
+                }
+            }
+        }
+        if (const auto* gamepad =
+                std::get_if<Platform::GamepadButtonTransition>(&transitions[ordinal].payload);
+            gamepad != nullptr && gamepad->routedWindow == context->ownerWindow())
+        {
+            if (const auto command = menuCommandForGamepadButton(gamepad->button); command.has_value())
+            {
+                auto routed = context->routeMenuCommand(
+                    *command, gamepad->state == Platform::DigitalTransition::Down);
+                if (!routed)
+                {
+                    Core::Error error = std::move(routed.error());
+                    error.addContext("UIInputRouteProducer::produce(menu-gamepad-command)");
+                    return Core::failure(std::move(error));
+                }
+                if (routed->consumed)
+                {
+                    stagingWords_[ordinal / BitsPerConsumptionWord] |=
+                        u64{1} << (ordinal % BitsPerConsumptionWord);
+                    anyConsumed = true;
+                    continue;
+                }
+            }
+        }
+
         // An open Dropdown owns navigation/cancel/Tab before general text-edit
         // commands and focus traversal. Matching releases remain consumed after
         // dismissal so gameplay never observes half of a digital transition.
@@ -877,7 +960,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             }
         }
 
-        // An open Dropdown gets first refusal above. Otherwise Escape and
+        // An open Menu or Dropdown gets first refusal above. Otherwise Escape and
         // Gamepad East route Back only to the topmost committed active Flow
         // Screen. A handled Down claims its matching Up across Screen changes.
         if (const auto* key = std::get_if<Platform::KeyTransition>(&transitions[ordinal].payload);
@@ -1222,7 +1305,8 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                 direction.has_value())
             {
                 auto routed = context->routeFocusNavigation(
-                    *direction, gamepad->state == Platform::DigitalTransition::Down);
+                    *direction, gamepad->state == Platform::DigitalTransition::Down,
+                    UI::UIInputModality::Gamepad);
                 if (!routed)
                 {
                     Core::Error error = std::move(routed.error());
@@ -1290,7 +1374,9 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             if (const auto direction = focusNavigationDirectionForKey(key->key); direction.has_value())
             {
                 auto routed =
-                    context->routeFocusNavigation(*direction, key->state == Platform::DigitalTransition::Down);
+                    context->routeFocusNavigation(*direction,
+                                                   key->state == Platform::DigitalTransition::Down,
+                                                   UI::UIInputModality::Keyboard);
                 if (!routed)
                 {
                     Core::Error error = std::move(routed.error());

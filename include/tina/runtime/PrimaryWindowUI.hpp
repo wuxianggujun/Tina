@@ -7,9 +7,13 @@
 #include <tina/ui/UICheckbox.hpp>
 #include <tina/ui/UIContent.hpp>
 #include <tina/ui/UIContext.hpp>
+#include <tina/ui/UIDialog.hpp>
 #include <tina/ui/UIDropdown.hpp>
 #include <tina/ui/UIElement.hpp>
 #include <tina/ui/UIListView.hpp>
+#include <tina/ui/UIFormField.hpp>
+#include <tina/ui/UIIconButton.hpp>
+#include <tina/ui/UIMenu.hpp>
 #include <tina/ui/UIMotion.hpp>
 #include <tina/ui/UIProgressBar.hpp>
 #include <tina/ui/UIPopup.hpp>
@@ -144,6 +148,12 @@ class PrimaryWindowUITreeUpdater final {
     beginBuildTransaction(UI::UINodeId parent,
                           const UI::UIElementDescriptor& rootDescriptor,
                           UI::UIComponentBuildBudget budget);
+    [[nodiscard]] Core::Result<UI::UIIconButtonParts>
+    buildIconButton(UI::UINodeId parent, const UI::UIIconButtonConfig& config);
+    [[nodiscard]] Core::Result<UI::UIFormFieldParts>
+    buildFormField(UI::UINodeId parent, const UI::UIFormFieldConfig& config);
+    [[nodiscard]] Core::Result<UI::UIDialogParts>
+    buildDialog(UI::UINodeId parent, const UI::UIDialogConfig& config);
     [[nodiscard]] Core::Status setLayoutStyle(UI::UINodeId node, const UI::UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(UI::UINodeId node, UI::UIPointerHitPolicy policy);
     [[nodiscard]] Core::Status setEnabled(UI::UINodeId node, bool enabled);
@@ -239,6 +249,10 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Result<UI::UISplitViewMetrics>
     splitViewMetrics(UI::UINodeId splitView) const;
     [[nodiscard]] Core::Result<bool> isSplitterDragging(UI::UINodeId splitter) const;
+    [[nodiscard]] Core::Status setSplitterPaint(
+        UI::UINodeId splitter, const UI::UISplitterPaint& paint);
+    [[nodiscard]] Core::Result<UI::UISplitterPaint>
+    splitterPaint(UI::UINodeId splitter) const;
     [[nodiscard]] Core::Status setTabViewItems(
         UI::UINodeId tabView, std::span<const UI::UITabViewItem> items,
         u32 activeIndex = 0);
@@ -304,6 +318,16 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Status dismissTooltip(UI::UINodeId tooltip);
     [[nodiscard]] Core::Result<bool> isTooltipOpen(UI::UINodeId tooltip) const;
     [[nodiscard]] Core::Result<UI::UITooltipMetrics> tooltipMetrics(UI::UINodeId tooltip) const;
+    [[nodiscard]] Core::Status setMenuAnchor(UI::UINodeId menu, UI::UINodeId anchor);
+    [[nodiscard]] Core::Status clearMenuAnchor(UI::UINodeId menu);
+    [[nodiscard]] Core::Result<UI::UINodeId> menuAnchor(UI::UINodeId menu) const;
+    [[nodiscard]] Core::Status setMenuOpen(UI::UINodeId menu, bool open);
+    [[nodiscard]] Core::Result<bool> isMenuOpen(UI::UINodeId menu) const;
+    [[nodiscard]] Core::Result<UI::UIMenuMetrics> menuMetrics(UI::UINodeId menu) const;
+    [[nodiscard]] Core::Status setMenuItemChecked(UI::UINodeId item, bool checked);
+    [[nodiscard]] Core::Result<bool> isMenuItemChecked(UI::UINodeId item) const;
+    [[nodiscard]] Core::Result<UI::UIMenuCommandResult>
+    routeMenuCommand(UI::UINodeId menu, UI::UIMenuCommand command);
     [[nodiscard]] Core::Status setDropdownOpen(UI::UINodeId dropdown, bool open);
     [[nodiscard]] Core::Result<bool> isDropdownOpen(UI::UINodeId dropdown) const;
     [[nodiscard]] Core::Status setDropdownSelectedItem(UI::UINodeId dropdown, UI::UINodeId item);

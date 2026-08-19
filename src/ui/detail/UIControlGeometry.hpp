@@ -23,13 +23,14 @@ struct ScrollBarPointerHit final {
 };
 
 struct SliderTrackGeometry final {
-    float verticalInset = 0.0F;
-    float thumbWidth = 0.0F;
+    float trackThickness = 0.0F;
+    float thumbExtent = 0.0F;
     float startCenterX = 0.0F;
     float endCenterX = 0.0F;
 };
 
 struct SliderPaintGeometry final {
+    UILogicalRect track{};
     UILogicalRect filledTrack{};
     UILogicalRect thumb{};
     float fraction = 0.0F;

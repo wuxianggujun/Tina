@@ -48,7 +48,7 @@ struct LayoutNodeMeasureContent final {
     UILogicalSize size{};
     float indicatorLabelWidth = 0.0F;
     float indicatorLabelGap = 0.0F;
-    bool squareLeadingIndicator = false;
+    float leadingIndicatorExtent = 0.0F;
     bool hasIndicatorLabel = false;
 };
 
@@ -60,6 +60,11 @@ struct LayoutNodeMeasureContent final {
     LayoutNodeMeasureContent content,
     LayoutPassStatistics& statistics) noexcept
 {
+    if (content.leadingIndicatorExtent > 0.0F)
+    {
+        content.size.height =
+            (std::max)(content.size.height, content.leadingIndicatorExtent);
+    }
     float outerHeight = resolvedHeight(style, scratch, statistics);
     if (outerHeight < 0.0F)
     {
@@ -71,9 +76,9 @@ struct LayoutNodeMeasureContent final {
     }
     outerHeight = clampHeight(outerHeight, style, scratch, statistics);
 
-    if (content.squareLeadingIndicator)
+    if (content.leadingIndicatorExtent > 0.0F)
     {
-        content.size.width = outerHeight;
+        content.size.width = content.leadingIndicatorExtent;
         if (content.hasIndicatorLabel)
         {
             content.size.width +=

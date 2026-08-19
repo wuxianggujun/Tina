@@ -80,6 +80,20 @@ class PrimaryWindowUICapabilityTest : public testing::Test {
     return style;
 }
 
+[[nodiscard]] UI::UIIconContent runtimeIconContent()
+{
+    Core::AssetId::Bytes bytes{};
+    bytes[0] = std::byte{0x51};
+    return {
+        .source = {
+            .texture = *Core::AssetId::fromBytes(bytes),
+            .sourcePixels = {.width = 16, .height = 16},
+            .texturePixelExtent = {.width = 16, .height = 16},
+            .intrinsicLogicalSize = {.width = 16.0F, .height = 16.0F},
+        },
+    };
+}
+
 [[nodiscard]] UI::UIButtonActionCallback buttonAction(usize& activationCount) noexcept
 {
     return UI::UIButtonActionCallback{
@@ -628,6 +642,93 @@ TEST_F(PrimaryWindowUICapabilityTest, BuildTransactionCommitsBoundedComponentDur
     EXPECT_EQ(context->liveNodeCount(), 5U);
 }
 
+TEST_F(PrimaryWindowUICapabilityTest, ComponentProfilesHonorRuntimePhaseLifetime)
+{
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+
+    auto iconButton = tree->buildIconButton(
+        root->rootNodeId(),
+        UI::UIIconButtonConfig{
+            .icon = runtimeIconContent(),
+            .accessibleName = "Refresh",
+            .tooltipText = "Reload",
+        });
+    ASSERT_TRUE(iconButton.has_value()) << iconButton.error().message;
+
+    auto formField = tree->buildFormField(
+        root->rootNodeId(),
+        UI::UIFormFieldConfig{
+            .label = "Name",
+            .value = "Tina",
+            .helperText = "Project name",
+        });
+    ASSERT_TRUE(formField.has_value()) << formField.error().message;
+
+    const std::array actions{
+        UI::UIDialogActionConfig{
+            .text = "Close", .variant = UI::UIButtonVariant::Primary},
+    };
+    auto dialog = tree->buildDialog(
+        root->rootNodeId(),
+        UI::UIDialogConfig{
+            .title = "Settings",
+            .body = "Changes are applied immediately.",
+            .actions = actions,
+        });
+    ASSERT_TRUE(dialog.has_value()) << dialog.error().message;
+    EXPECT_EQ(context->liveNodeCount(), 16U);
+    EXPECT_EQ(context->statistics().activeImageContentCount, 1U);
+    EXPECT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
+
+    const auto expired = tree->buildFormField(
+        root->rootNodeId(),
+        UI::UIFormFieldConfig{.label = "Expired", .value = {}});
+    ASSERT_FALSE(expired.has_value());
+    EXPECT_EQ(expired.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    EXPECT_EQ(context->liveNodeCount(), 16U);
+}
+
+TEST_F(PrimaryWindowUICapabilityTest, ComponentProfileRejectsConcurrentBuildTransaction)
+{
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+
+    auto transaction = tree->beginBuildTransaction(
+        root->rootNodeId(), UI::makePanelElement(), {.nodes = 1});
+    ASSERT_TRUE(transaction.has_value()) << transaction.error().message;
+    const auto rejected = tree->buildIconButton(
+        root->rootNodeId(),
+        UI::UIIconButtonConfig{
+            .icon = runtimeIconContent(),
+            .accessibleName = "Refresh",
+        });
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::BuildTransactionInProgress);
+    EXPECT_TRUE(transaction->isActive());
+    transaction->reset();
+    EXPECT_EQ(context->liveNodeCount(), 1U);
+
+    const Core::Status finish =
+        state.finishPhase(*epoch, CapabilityPhase::GameStateEnter);
+    ASSERT_FALSE(finish.has_value());
+    EXPECT_EQ(finish.error().code, UI::UIErrorCode::BuildTransactionInProgress);
+}
+
 TEST_F(PrimaryWindowUICapabilityTest, BuildTransactionCommitsDuringUIUpdatePhase)
 {
     CapabilityState state;
@@ -1074,26 +1175,27 @@ TEST_F(PrimaryWindowUICapabilityTest, ProductThemeFacadeUpdatesExistingControlsA
 
     auto initialTheme = tree->productTheme();
     ASSERT_TRUE(initialTheme.has_value()) << initialTheme.error().message;
-    EXPECT_EQ(*initialTheme, UI::makeDefaultProductTheme());
+    EXPECT_EQ(*initialTheme, UI::makeModernDesktopTheme());
 
     ASSERT_TRUE(tree->setStyleRole(*button, UI::UIStyleRoleId::ButtonDanger).has_value());
     EXPECT_EQ(tree->styleRole(*button).value(), UI::UIStyleRoleId::ButtonDanger);
     EXPECT_EQ(
         tree->buttonPaint(*button).value(),
-        UI::makeButtonChrome(UI::makeDefaultProductTheme(), UI::makeDefaultProductTheme().danger).states);
+        UI::makeButtonChrome(UI::makeModernDesktopTheme(), UI::makeModernDesktopTheme().colors.error).states);
 
     const UI::UIButtonPaint localPaint{};
     ASSERT_TRUE(tree->setButtonPaint(*button, localPaint).has_value());
-    ASSERT_TRUE(tree->setProductTheme(UI::makeLightProductTheme()).has_value());
-    EXPECT_EQ(tree->productTheme().value(), UI::makeLightProductTheme());
+    ASSERT_TRUE(tree->setProductTheme(UI::makeModernDesktopTheme(UI::UIColorScheme::Light)).has_value());
+    EXPECT_EQ(tree->productTheme().value(), UI::makeModernDesktopTheme(UI::UIColorScheme::Light));
     EXPECT_EQ(tree->buttonPaint(*button).value(), localPaint);
     ASSERT_TRUE(tree->clearOverride(*button, UI::UIStyleOverride::ButtonPaint).has_value());
     EXPECT_EQ(
         tree->buttonPaint(*button).value(),
-        UI::makeButtonChrome(UI::makeLightProductTheme(), UI::makeLightProductTheme().danger).states);
+        UI::makeButtonChrome(UI::makeModernDesktopTheme(UI::UIColorScheme::Light),
+                             UI::makeModernDesktopTheme(UI::UIColorScheme::Light).colors.error).states);
 
     ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
-    Core::Status expiredSet = tree->setProductTheme(UI::makeDefaultProductTheme());
+    Core::Status expiredSet = tree->setProductTheme(UI::makeModernDesktopTheme());
     ASSERT_FALSE(expiredSet.has_value());
     EXPECT_EQ(expiredSet.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
     auto expiredGet = tree->productTheme();
@@ -1442,6 +1544,103 @@ TEST_F(PrimaryWindowUICapabilityTest, DropdownPopupFacadeRoundTripsAndExpiresWit
     EXPECT_EQ(expiredMetrics.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
 }
 
+TEST_F(PrimaryWindowUICapabilityTest, MenuFacadeRoundTripsCommandsMetricsAndExpiresWithPhase)
+{
+    constexpr UI::UIMenuConfig Config{
+        .placement = UI::UIMenuPlacement::Right,
+        .anchorGap = 6.0F,
+        .viewportMargin = 10.0F,
+        .matchAnchorWidth = false,
+        .wrapKeyboardNavigation = false,
+        .closeOnActivate = false,
+    };
+    auto contextResult = UI::UIContext::Create(window, {.nodeCapacity = 32, .rootCapacity = 2});
+    ASSERT_TRUE(contextResult.has_value()) << contextResult.error().message;
+    context = std::move(*contextResult);
+
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+
+    UI::UILayoutStyle anchorLayout = fixedSize(60.0F, 24.0F);
+    anchorLayout.placement = UI::UILayoutPlacement::Overlay;
+    anchorLayout.overlay.offset.x = UI::UILayoutLength::Px(20.0F);
+    anchorLayout.overlay.offset.y = UI::UILayoutLength::Px(20.0F);
+    auto anchor = tree->createElement(
+        root->rootNodeId(), UI::makeButtonElement("Menu", anchorLayout));
+    auto menu = tree->createElement(
+        root->rootNodeId(), UI::makeMenuElement(Config, fixedSize(96.0F, 48.0F)));
+    ASSERT_TRUE(anchor.has_value()) << anchor.error().message;
+    ASSERT_TRUE(menu.has_value()) << menu.error().message;
+    auto checkItem = tree->createElement(
+        *menu, UI::makeMenuItemElement(
+                   "Check", {.kind = UI::UIMenuItemKind::Check}, fixedSize(88.0F, 20.0F)));
+    auto commandItem = tree->createElement(
+        *menu, UI::makeMenuItemElement("Command", {}, fixedSize(88.0F, 20.0F)));
+    ASSERT_TRUE(checkItem.has_value()) << checkItem.error().message;
+    ASSERT_TRUE(commandItem.has_value()) << commandItem.error().message;
+
+    ASSERT_TRUE(tree->setLayoutStyle(
+        root->rootNodeId(), fixedSize(240.0F, 140.0F)).has_value());
+    ASSERT_TRUE(tree->setMenuAnchor(*menu, *anchor).has_value());
+    EXPECT_EQ(tree->menuAnchor(*menu).value(), *anchor);
+    ASSERT_TRUE(tree->setMenuItemChecked(*checkItem, true).has_value());
+    EXPECT_TRUE(tree->isMenuItemChecked(*checkItem).value());
+    auto anchorCommitted = context->commitLayout({.width = 240.0F, .height = 140.0F});
+    ASSERT_TRUE(anchorCommitted.has_value()) << anchorCommitted.error().message;
+    ASSERT_TRUE(tree->setMenuOpen(*menu, true).has_value());
+    auto committed = context->commitLayout({.width = 240.0F, .height = 140.0F});
+    ASSERT_TRUE(committed.has_value()) << committed.error().message;
+
+    const PrimaryWindowUITreeUpdater& treeView = *tree;
+    EXPECT_TRUE(treeView.isMenuOpen(*menu).value());
+    const UI::UIMenuMetrics metrics = treeView.menuMetrics(*menu).value();
+    EXPECT_TRUE(metrics.open);
+    EXPECT_EQ(metrics.resolvedPlacement, UI::UIMenuPlacement::Right);
+    EXPECT_EQ(metrics.anchorRect, (UI::UILogicalRect{20.0F, 20.0F, 60.0F, 24.0F}));
+    EXPECT_FLOAT_EQ(metrics.menuRect.x, 86.0F);
+    EXPECT_FLOAT_EQ(metrics.menuRect.width, 96.0F);
+
+    auto first = tree->routeMenuCommand(*menu, UI::UIMenuCommand::First);
+    ASSERT_TRUE(first.has_value()) << first.error().message;
+    EXPECT_TRUE(first->targeted);
+    EXPECT_TRUE(first->consumed);
+    EXPECT_EQ(first->focus, *checkItem);
+    auto next = tree->routeMenuCommand(*menu, UI::UIMenuCommand::Next);
+    ASSERT_TRUE(next.has_value()) << next.error().message;
+    EXPECT_EQ(next->focus, *commandItem);
+    auto edge = tree->routeMenuCommand(*menu, UI::UIMenuCommand::Next);
+    ASSERT_TRUE(edge.has_value()) << edge.error().message;
+    EXPECT_TRUE(edge->consumed);
+    EXPECT_FALSE(edge->focusChanged);
+    EXPECT_EQ(edge->focus, *commandItem);
+
+    ASSERT_TRUE(tree->setMenuOpen(*menu, false).has_value());
+    EXPECT_FALSE(treeView.isMenuOpen(*menu).value());
+    ASSERT_TRUE(tree->clearMenuAnchor(*menu).has_value());
+    EXPECT_FALSE(treeView.menuAnchor(*menu).value().hasValue());
+    ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
+
+    Core::Status expiredOpen = tree->setMenuOpen(*menu, true);
+    ASSERT_FALSE(expiredOpen.has_value());
+    EXPECT_EQ(expiredOpen.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredMetrics = treeView.menuMetrics(*menu);
+    ASSERT_FALSE(expiredMetrics.has_value());
+    EXPECT_EQ(expiredMetrics.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredCommand = tree->routeMenuCommand(*menu, UI::UIMenuCommand::First);
+    ASSERT_FALSE(expiredCommand.has_value());
+    EXPECT_EQ(expiredCommand.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredChecked = treeView.isMenuItemChecked(*checkItem);
+    ASSERT_FALSE(expiredChecked.has_value());
+    EXPECT_EQ(expiredChecked.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+}
+
 TEST_F(PrimaryWindowUICapabilityTest, TooltipFacadeRoundTripsAndExpiresWithPhase)
 {
     auto contextResult = UI::UIContext::Create(window, {.nodeCapacity = 32, .rootCapacity = 2});
@@ -1545,6 +1744,16 @@ TEST_F(PrimaryWindowUICapabilityTest, SplitViewFacadeRoundTripsAndExpiresWithPha
         *splitView, *primary, *splitter, *secondary).has_value());
     EXPECT_EQ(tree->splitViewParts(*splitView).value().splitter, *splitter);
     EXPECT_FALSE(tree->isSplitterDragging(*splitter).value());
+    const UI::UISplitterPaint splitterPaint{
+        .lineColor = UI::rgb(0x203040),
+        .hoveredLineColor = UI::rgb(0x405060),
+        .draggingLineColor = UI::rgb(0x607080),
+        .focusRingColor = UI::rgb(0x8090A0),
+        .lineThickness = 2.0F,
+        .focusRingThickness = 4.0F,
+    };
+    ASSERT_TRUE(tree->setSplitterPaint(*splitter, splitterPaint).has_value());
+    EXPECT_EQ(tree->splitterPaint(*splitter).value(), splitterPaint);
     ASSERT_TRUE(tree->setSplitViewFraction(*splitView, 0.6F).has_value());
     EXPECT_FLOAT_EQ(tree->splitViewFraction(*splitView).value(), 0.6F);
 
@@ -1564,6 +1773,9 @@ TEST_F(PrimaryWindowUICapabilityTest, SplitViewFacadeRoundTripsAndExpiresWithPha
     auto expiredMetrics = tree->splitViewMetrics(*splitView);
     ASSERT_FALSE(expiredMetrics.has_value());
     EXPECT_EQ(expiredMetrics.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredPaint = tree->splitterPaint(*splitter);
+    ASSERT_FALSE(expiredPaint.has_value());
+    EXPECT_EQ(expiredPaint.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
     Core::Status expiredClear = tree->clearSplitViewParts(*splitView);
     ASSERT_FALSE(expiredClear.has_value());
     EXPECT_EQ(expiredClear.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
@@ -1687,7 +1899,7 @@ TEST_F(PrimaryWindowUICapabilityTest, RangeAndSelectionControlFacadesRoundTripAn
         .thumbColor = {.red = 235, .green = 240, .blue = 245, .alpha = 255},
         .draggingThumbColor = {.red = 255, .green = 200, .blue = 40, .alpha = 255},
         .contentInset = 4.0F,
-        .thumbWidth = 8.0F,
+        .thumbExtent = 8.0F,
     };
     ASSERT_TRUE(tree->setProgressBarRange(*progressBar, 10.0F, 20.0F).has_value());
     ASSERT_TRUE(tree->setProgressBarValue(*progressBar, 15.0F).has_value());

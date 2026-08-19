@@ -133,8 +133,9 @@ out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_sample_ui_showcase.
 
 逻辑断言覆盖四角 retained/canvas copy、rounded shadow/border/inset fill、descriptor/setter/Canvas/bridge 非法值
 原子拒绝、逐角 anisotropic 投影与 checksum。`CornerRadius` direct transition 从非 uniform authored 值启动必须
-返回 `InvalidStyle`，显式 keyframe0 的 scalar timeline 则允许启动并发布 uniform presentation。Showcase smoke
-还必须输出 `controls=21`、`asymmetricCornerProducts=3` 与既有生命周期/图片/主题字段。rounded descendant clip、
+返回 `InvalidStyle`，显式 keyframe0 的 scalar timeline 则允许启动并发布 uniform presentation。当前 Showcase smoke
+还必须输出 `controls=24`、`componentProfiles=3`、`workbenchBands=5`、`asymmetricCornerProducts=3` 与
+既有生命周期/图片/主题字段。rounded descendant clip、
 backdrop/blur、per-corner Motion、新 shader/material 与跨 GPU/DPI golden 不由该 gate 证明。
 
 2026-08-17 在上述常驻 tree 完成统一 gate，所有命令均 exit 0：
@@ -501,19 +502,21 @@ cmake --build --preset windows-vnext-bgfx-ui-freetype-debug `
            tina_ui_render_integration_tests tina_ui_freetype_tests --parallel 2 -- /nr:false
 
 out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_sample_ui_showcase.exe `
-  --frames=150 --frame-delay-ms=0 --theme=dark --auto-demo
+  --frames=150 --frame-delay-ms=0 --theme=dark --density=compact --auto-demo
 out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_sample_ui_showcase.exe `
-  --frames=150 --frame-delay-ms=0 --theme=light --auto-demo
+  --frames=150 --frame-delay-ms=0 --theme=light --density=comfortable --auto-demo
 ```
 
-两个自动 smoke 均须 exit 0，并输出 `controls=21`、`imageProducts=4`、`asymmetricCornerProducts=3`、
-`themeSwitches=2`、`sliderChanges>0`、
+两个自动 smoke 均须 exit 0，并输出 `controls=24`、`imageProducts=5`、`componentProfiles=3`、
+`workbenchBands=5`、`desktopWorkbench=true`、`asymmetricCornerProducts=3`、`themeSwitches=2`、
+`densitySwitchRequests=2`、`densityRebuilds=2`、`sliderChanges>0`、
 `progressValue=84`、`dropdownSelection=1`、`listSelectionKey=1007`、`treeSelectionKey=4`、
-`treeExpansionChanges=2`、`scrollOffset=80`、`stylesheetInstalled=true`、`styleTokenUpdates>=3`、
-`motionBegins>=12`（auto-demo：2 次主题切换 × 6 cards）、
-`uiRootsCreated=1`、`uiRootsReleased=1`，最终主题回到 `initialTheme`。图片产品证据还必须满足
+`treeExpansionChanges=2`、`scrollOffset=80`、`componentScrollOffset=240`、`dialogOpen=false`、
+`stylesheetInstalled=true`、`styleTokenUpdates>=3`、`motionBegins>=12`（auto-demo：2 次主题切换 x 6 panels）、
+`stateEnters=3`、`stateExits=3`、`uiRootsCreated=3`、`uiRootsReleased=3`，最终主题与 density 分别回到
+`initialTheme`/`initialDensity`。图片产品证据还必须满足
 `imageAtlasUploaded=true`、`imageAtlasReleased=true`、`imageResolverCalls=imageResolverHits>0`、
-`imageResolverUnavailable=0`、`maxImageQuads=12`、`maxImageBatches=4`、`maxUniqueImageResources=1`、
+`imageResolverUnavailable=0`、`maxImageQuads>=12`、`maxImageBatches>=3`、`maxUniqueImageResources=1`、
 `imageLinear=true`、`imageNearest=true` 与非零 `paintOrderChecksum`；退出阶段还须有
 `imageAtlasInvalidated=true`。`--auto-demo` 与显式 `--frames` 同用时至少 120 帧。
 
