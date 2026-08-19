@@ -36,6 +36,7 @@ struct SampleOptions final {
     u32 windowLogicalHeight = ShellLogicalHeight;
     Tina::SampleUI::ShellTheme initialTheme = Tina::SampleUI::ShellTheme::Dark;
     Tina::UI::UIDensity initialDensity = Tina::UI::UIDensity::Compact;
+    bool autoDemo = false;
 };
 
 struct LifecycleCounters final {
@@ -177,12 +178,20 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
             hasHeight = true;
             continue;
         }
+        if (argument == "--auto-demo") {
+            options.autoDemo = true;
+            continue;
+        }
         return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                    "Unsupported desktop shell command-line argument");
     }
     if (hasWidth != hasHeight) {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                    "--width and --height must be supplied together");
+    }
+    if (options.autoDemo && options.targetFrameCount != 0 && options.targetFrameCount < 60) {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                   "--auto-demo requires at least 60 frames when --frames is supplied");
     }
     return options;
 }
@@ -259,6 +268,9 @@ class ShellState final : public Tina::IGameState {
     {
         ++counters_.frameUpdates;
         ui_.setLogicalWidth(static_cast<float>(counters_.logicalPixelWidth));
+        if (options_.autoDemo) {
+            ui_.requestAutomatedStep(counters_.frameUpdates);
+        }
         if (options_.targetFrameCount != 0 && counters_.frameUpdates >= options_.targetFrameCount) {
             context.requestExitAfterFrame();
         }
@@ -432,6 +444,45 @@ class ShellApplication final : public Tina::IGameApplication {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                    "Desktop shell theme/density verification failed");
     }
+    // Keyboard-only entry point: the Context rejects a focus target that is not
+    // an enabled committed candidate, so this proves the command bar is focusable.
+    if (!ui.initialFocusApplied || !ui.focusedNode.hasValue()) {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                   "Desktop shell initial focus verification failed");
+    }
+    if (options.autoDemo) {
+        // Menu open was read back from the Menu store; dialog open/dismiss were
+        // read back from committed Modal geometry.
+        if (!ui.menuOpenObserved || !ui.dialogOpenObserved || !ui.dialogDismissed) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::Internal,
+                "Desktop shell overlay workflow verification failed: menu=" +
+                    std::string(ui.menuOpenObserved ? "true" : "false") + " dialogOpen=" +
+                    std::string(ui.dialogOpenObserved ? "true" : "false") + " dialogDismissed=" +
+                    std::string(ui.dialogDismissed ? "true" : "false"));
+        }
+        // Explicit pane commands took effect while requested.
+        if (!ui.timelineHideObserved || !ui.inspectorHideObserved) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::Internal,
+                "Desktop shell explicit pane command verification failed: timeline=" +
+                    std::string(ui.timelineHideObserved ? "true" : "false") + " inspector=" +
+                    std::string(ui.inspectorHideObserved ? "true" : "false"));
+        }
+        // Overlays closed and command intent cleared. Resolved pane visibility is
+        // then governed by the width tier alone, not by leftover intent.
+        if (ui.menuOpen || ui.dialogOpen || ui.timelineHideRequested ||
+            ui.inspectorHideRequested) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                       "Desktop shell automated restore verification failed");
+        }
+        const bool tierCollapsesTimeline = ui.tier != Tina::SampleUI::ShellResponsiveTier::Full;
+        if (ui.timelineCollapsed != tierCollapsesTimeline || !ui.inspectorVisible) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::Internal,
+                "Desktop shell tier-resolved pane visibility verification failed");
+        }
+    }
     if (counters.logicalPixelWidth > options.windowLogicalWidth ||
         counters.logicalPixelHeight > options.windowLogicalHeight ||
         counters.logicalPixelWidth == 0 || counters.logicalPixelHeight == 0) {
@@ -497,6 +548,13 @@ class ShellApplication final : public Tina::IGameApplication {
               << ",\"timelineHeight\":" << ui.timelineHeight
               << ",\"statusBarHeight\":" << ui.statusBarHeight
               << ",\"viewportUnobstructed\":" << (ui.viewportUnobstructed ? "true" : "false")
+              << ",\"autoDemo\":" << (options->autoDemo ? "true" : "false")
+              << ",\"initialFocusApplied\":" << (ui.initialFocusApplied ? "true" : "false")
+              << ",\"menuOpenObserved\":" << (ui.menuOpenObserved ? "true" : "false")
+              << ",\"dialogOpenObserved\":" << (ui.dialogOpenObserved ? "true" : "false")
+              << ",\"dialogDismissed\":" << (ui.dialogDismissed ? "true" : "false")
+              << ",\"commandActivations\":" << ui.commandActivations
+              << ",\"documentSwitches\":" << ui.documentSwitches
               << ",\"timelineCollapsed\":" << (ui.timelineCollapsed ? "true" : "false")
               << ",\"inspectorVisible\":" << (ui.inspectorVisible ? "true" : "false")
               << ",\"logicalPixelWidth\":" << counters.logicalPixelWidth

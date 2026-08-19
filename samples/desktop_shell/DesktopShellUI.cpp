@@ -84,6 +84,18 @@ inline constexpr float CompressedTierMinWidth = 960.0F;
     return UI::UIEdgeSpacing::HorizontalVertical(logicalPixels, 0.0F);
 }
 
+// The Modal barrier must stretch across the viewport to own an area, so the
+// scrim covers the shell and the dialog centres inside it.
+[[nodiscard]] UI::UILayoutStyle modalLayout(UI::UIVisibility visibility) noexcept
+{
+    UI::UILayoutStyle style = fillStyle();
+    style.placement = UI::UILayoutPlacement::Overlay;
+    style.overlay.horizontal = UI::UIAxisAlignment::Stretch;
+    style.overlay.vertical = UI::UIAxisAlignment::Stretch;
+    style.visibility = visibility;
+    return style;
+}
+
 [[nodiscard]] Core::Result<UI::UINodeId> createLabel(PrimaryWindowUITreeUpdater& tree, UI::UINodeId parent,
                                                      const UI::UILayoutStyle& layout, std::string_view text)
 {
@@ -291,9 +303,21 @@ Core::Status DesktopShellUI::build(GameStateEnterContext& context, DesktopShellS
         return status;
     }
 
+    // Overlays need the root node id, so publish the owner first.
     root_.emplace(std::move(*root));
+    if (Core::Status status = buildOverlays(*tree, theme); !status) {
+        root_.reset();
+        return status;
+    }
+    if (Core::Status status = wireCommands(*tree); !status) {
+        root_.reset();
+        return status;
+    }
+
     layoutDirty_ = true;
     statusDirty_ = true;
+    menuStateDirty_ = true;
+    dialogVisibilityDirty_ = true;
     return Core::success();
 }
 
@@ -520,14 +544,15 @@ Core::Status DesktopShellUI::buildCommandBar(PrimaryWindowUITreeUpdater& tree, c
         return status;
     }
 
-    for (const ShellCommand& command : PrimaryCommands) {
+    for (usize index = 0; index < PrimaryCommands.size(); ++index) {
+        const ShellCommand& command = PrimaryCommands[index];
         UI::UILayoutStyle buttonLayout{};
         buttonLayout.size.height = UI::UILayoutLength::Px(theme.controls.buttonHeight);
         buttonLayout.flexItem.shrink = 0.0F;
         buttonLayout.padding = horizontalPadding(theme.spacing.space4);
-        UI::UINodeId button{};
         if (Core::Status status = storeNode(
-                createButton(tree, nodes_.commandBar, buttonLayout, command.label, command.role), button);
+                createButton(tree, nodes_.commandBar, buttonLayout, command.label, command.role),
+                nodes_.commandButtons[index]);
             !status) {
             return status;
         }
@@ -997,6 +1022,236 @@ Core::Status DesktopShellUI::buildTimelineContent(PrimaryWindowUITreeUpdater& tr
     return Core::success();
 }
 
+// Menu and Dialog anchor into the same root and reuse the existing barrier,
+// focus-scope and dismissal machinery. Neither gets a parallel state machine.
+Core::Status DesktopShellUI::buildOverlays(PrimaryWindowUITreeUpdater& tree, const UI::UITheme& theme)
+{
+    const UI::UINodeId rootNode = root_ ? root_->rootNodeId() : nodes_.background;
+
+    // View menu: two pane toggles, expressed as checkable menu items so the
+    // menu reflects committed pane intent instead of duplicating it.
+    UI::UILayoutStyle menuLayout{};
+    menuLayout.size.width = UI::UILayoutLength::Px(220.0F);
+    auto menu = tree.createElement(
+        rootNode, UI::makeMenuElement({.closeOnActivate = true}, menuLayout));
+    if (!menu) {
+        return Core::failure(std::move(menu.error()));
+    }
+    nodes_.menu = *menu;
+    if (Core::Status status = tree.setMenuAnchor(nodes_.menu, nodes_.menuAnchor); !status) {
+        return status;
+    }
+
+    UI::UILayoutStyle itemLayout{};
+    itemLayout.size.height = UI::UILayoutLength::Px(theme.controls.menuItemHeight);
+    auto timelineItem = tree.createElement(
+        nodes_.menu,
+        UI::makeMenuItemElement("Timeline", {.kind = UI::UIMenuItemKind::Check}, itemLayout));
+    if (!timelineItem) {
+        return Core::failure(std::move(timelineItem.error()));
+    }
+    nodes_.menuToggleTimeline = *timelineItem;
+
+    auto inspectorItem = tree.createElement(
+        nodes_.menu,
+        UI::makeMenuItemElement("Inspector", {.kind = UI::UIMenuItemKind::Check},
+                                itemLayout));
+    if (!inspectorItem) {
+        return Core::failure(std::move(inspectorItem.error()));
+    }
+    nodes_.menuToggleInspector = *inspectorItem;
+
+    // Dialog reuses the Modal barrier; it starts collapsed.
+    static constexpr std::array DialogActions{
+        UI::UIDialogActionConfig{.text = "Cancel", .variant = UI::UIButtonVariant::Text},
+        UI::UIDialogActionConfig{.text = "Discard", .variant = UI::UIButtonVariant::Danger},
+    };
+    const UI::UILayoutStyle dialogLayout = modalLayout(UI::UIVisibility::Collapsed);
+    auto dialog = tree.buildDialog(
+        rootNode,
+        UI::UIDialogConfig{
+            .title = "Discard unsaved changes?",
+            .body = "The active document has unsaved edits. Discarding cannot be undone.",
+            .actions = DialogActions,
+            .layout = dialogLayout,
+        });
+    if (!dialog) {
+        return Core::failure(std::move(dialog.error()));
+    }
+    nodes_.dialog = *dialog;
+    return Core::success();
+}
+
+Core::Status DesktopShellUI::wireCommands(PrimaryWindowUITreeUpdater& tree)
+{
+    // Play: a safe primary command; only reports through the status bar.
+    if (Core::Status status = tree.setButtonAction(
+            nodes_.commandButtons[0],
+            UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                ++commandActivations_;
+                pendingStatus_ = "Playing";
+                statusDirty_ = true;
+            }});
+        !status) {
+        return status;
+    }
+    if (Core::Status status = tree.setButtonAction(
+            nodes_.commandButtons[1],
+            UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                ++commandActivations_;
+                pendingStatus_ = "Saved";
+                statusDirty_ = true;
+            }});
+        !status) {
+        return status;
+    }
+    if (Core::Status status = tree.setButtonAction(
+            nodes_.commandButtons[2],
+            UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                ++commandActivations_;
+                pendingStatus_ = "Undo";
+                statusDirty_ = true;
+            }});
+        !status) {
+        return status;
+    }
+    if (Core::Status status = tree.setButtonAction(
+            nodes_.commandButtons[3],
+            UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                ++commandActivations_;
+                pendingStatus_ = "Redo";
+                statusDirty_ = true;
+            }});
+        !status) {
+        return status;
+    }
+    // Delete is destructive, so it asks through the Modal-based Dialog.
+    if (Core::Status status = tree.setButtonAction(
+            nodes_.commandButtons[4],
+            UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                ++commandActivations_;
+                state_->dialogOpen = true;
+                dialogVisibilityDirty_ = true;
+                pendingStatus_ = "Confirm discard";
+                statusDirty_ = true;
+            }});
+        !status) {
+        return status;
+    }
+
+    // View menu anchor toggles the menu open state.
+    if (Core::Status status = tree.setButtonAction(
+            nodes_.menuAnchor,
+            UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                state_->menuOpen = !state_->menuOpen;
+                menuStateDirty_ = true;
+            }});
+        !status) {
+        return status;
+    }
+
+    // Dialog actions: both close it; Discard also reports the outcome.
+    const std::span<const UI::UINodeId> dialogActions = nodes_.dialog.actionButtons();
+    if (dialogActions.size() >= 2) {
+        if (Core::Status status = tree.setButtonAction(
+                dialogActions[0],
+                UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                    state_->dialogOpen = false;
+                    dialogVisibilityDirty_ = true;
+                    pendingStatus_ = "Discard cancelled";
+                    statusDirty_ = true;
+                }});
+            !status) {
+            return status;
+        }
+        if (Core::Status status = tree.setButtonAction(
+                dialogActions[1],
+                UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                    state_->dialogOpen = false;
+                    dialogVisibilityDirty_ = true;
+                    pendingStatus_ = "Changes discarded";
+                    statusDirty_ = true;
+                }});
+            !status) {
+            return status;
+        }
+    }
+
+    // Menu items are the explicit pane commands required at the minimum width.
+    // They flip user intent; the responsive pass resolves final visibility.
+    if (Core::Status status = tree.setButtonAction(
+            nodes_.menuToggleTimeline,
+            UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                state_->timelineHideRequested = !state_->timelineHideRequested;
+                paneIntentDirty_ = true;
+                pendingStatus_ =
+                    state_->timelineHideRequested ? "Timeline hidden" : "Timeline shown";
+                statusDirty_ = true;
+            }});
+        !status) {
+        return status;
+    }
+    if (Core::Status status = tree.setButtonAction(
+            nodes_.menuToggleInspector,
+            UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                state_->inspectorHideRequested = !state_->inspectorHideRequested;
+                paneIntentDirty_ = true;
+                pendingStatus_ =
+                    state_->inspectorHideRequested ? "Inspector hidden" : "Inspector shown";
+                statusDirty_ = true;
+            }});
+        !status) {
+        return status;
+    }
+
+    // Document tabs reuse RadioButton selection; switching updates durable state.
+    for (usize index = 0; index < nodes_.documentTabButtons.size(); ++index) {
+        const auto document = static_cast<ShellDocument>(index);
+        if (Core::Status status = tree.setRadioButtonAction(
+                nodes_.documentTabButtons[index],
+                UI::UIButtonActionCallback{[this, document](const UI::UIButtonActionEvent&) noexcept {
+                    if (state_->activeDocument == document) {
+                        return;
+                    }
+                    state_->activeDocument = document;
+                    ++documentSwitches_;
+                    statusDirty_ = true;
+                }});
+            !status) {
+            return status;
+        }
+    }
+    return Core::success();
+}
+
+// Focus starts on the first command so keyboard-only users land in the command
+// bar, matching the documented reading order.
+//
+// A focus target must already be an enabled committed keyboard-focus candidate,
+// and nothing is committed during GameStateEnter. Initial focus is therefore
+// deferred until the node appears in a committed layout snapshot, which is the
+// first update after the first successful publication.
+Core::Status DesktopShellUI::applyInitialFocus(PrimaryWindowUITreeUpdater& tree)
+{
+    if (initialFocusApplied_) {
+        return Core::success();
+    }
+    const UI::UINodeId target = nodes_.commandButtons[0];
+    auto committed = tree.committedLayoutRect(target);
+    if (!committed || committed->width <= 0.0F) {
+        // Not published yet; retry on the next update.
+        return Core::success();
+    }
+    if (Core::Status status = tree.requestFocus(target); !status) {
+        return status;
+    }
+    // Success is meaningful evidence: the Context rejects a focus target that is
+    // not an enabled committed keyboard-focus candidate.
+    initialFocusApplied_ = true;
+    focusedNode_ = target;
+    return Core::success();
+}
+
 Core::Status DesktopShellUI::buildStatusBar(PrimaryWindowUITreeUpdater& tree, const UI::UITheme& theme)
 {
     UI::UILayoutStyle statusLayout = fillWidthStyle(theme.controls.statusBarHeight);
@@ -1067,10 +1322,21 @@ Core::Status DesktopShellUI::applyResponsiveTier(PrimaryWindowUITreeUpdater& tre
     const ShellResponsiveTier tier = tierForWidth(logicalWidth_);
     tier_ = tier;
 
-    const bool timelineCollapsed = tier != ShellResponsiveTier::Full;
-    const bool inspectorVisible = tier != ShellResponsiveTier::Minimal;
+    // Resolved visibility combines the width tier with explicit user intent, so
+    // a command can hide a pane the tier would otherwise show.
+    const bool timelineCollapsed =
+        tier != ShellResponsiveTier::Full || state_->timelineHideRequested;
+    const bool inspectorVisible =
+        tier != ShellResponsiveTier::Minimal && !state_->inspectorHideRequested;
     state_->timelineCollapsed = timelineCollapsed;
     state_->inspectorVisible = inspectorVisible;
+    // Latch that an explicit command actually took effect, independent of tier.
+    if (state_->timelineHideRequested) {
+        timelineHideObserved_ = true;
+    }
+    if (state_->inspectorHideRequested && !inspectorVisible) {
+        inspectorHideObserved_ = true;
+    }
 
     // Timeline: collapse by giving the viewport the whole vertical extent.
     auto metricsC = tree.splitViewMetrics(nodes_.splitC);
@@ -1133,26 +1399,87 @@ Core::Status DesktopShellUI::update(UIUpdateContext& context)
         return Core::failure(std::move(tree.error()));
     }
 
-    if (layoutDirty_) {
+    if (layoutDirty_ || paneIntentDirty_) {
         if (Core::Status status = applyResponsiveTier(*tree); !status) {
             return status;
         }
         layoutDirty_ = false;
+        paneIntentDirty_ = false;
         statusDirty_ = true;
+        menuStateDirty_ = true;
     }
 
     if (Core::Status status = refreshCommittedGeometry(*tree); !status) {
         return status;
     }
+    if (Core::Status status = applyInitialFocus(*tree); !status) {
+        return status;
+    }
+
+    if (dialogVisibilityDirty_) {
+        if (Core::Status status = tree->setLayoutStyle(
+                nodes_.dialog.modal,
+                modalLayout(state_->dialogOpen ? UI::UIVisibility::Visible
+                                               : UI::UIVisibility::Collapsed));
+            !status) {
+            return status;
+        }
+        dialogVisibilityDirty_ = false;
+    }
+
+    // Dialog evidence read back from committed geometry, not from intent: a
+    // visible Modal owns a non-empty rect, a collapsed one does not.
+    {
+        auto dialogRect = tree->committedLayoutRect(nodes_.dialog.modal);
+        const bool dialogHasArea =
+            dialogRect.has_value() && dialogRect->width > 0.0F && dialogRect->height > 0.0F;
+        if (dialogHasArea) {
+            dialogOpenObserved_ = true;
+        } else if (dialogOpenObserved_) {
+            dialogDismissed_ = true;
+        }
+    }
+
+    if (menuStateDirty_) {
+        // Menu item check state mirrors committed pane intent.
+        if (Core::Status status =
+                tree->setMenuItemChecked(nodes_.menuToggleTimeline, !state_->timelineCollapsed);
+            !status) {
+            return status;
+        }
+        if (Core::Status status =
+                tree->setMenuItemChecked(nodes_.menuToggleInspector, state_->inspectorVisible);
+            !status) {
+            return status;
+        }
+        if (Core::Status status = tree->setMenuOpen(nodes_.menu, state_->menuOpen); !status) {
+            return status;
+        }
+        menuStateDirty_ = false;
+    }
+
+    // Menu evidence read back from the Menu store rather than from intent.
+    {
+        auto menuOpen = tree->isMenuOpen(nodes_.menu);
+        if (!menuOpen) {
+            return Core::failure(std::move(menuOpen.error()));
+        }
+        if (*menuOpen) {
+            menuOpenObserved_ = true;
+        }
+    }
 
     if (statusDirty_) {
         const std::string_view message =
-            tier_ == ShellResponsiveTier::Full      ? "Ready — full workspace"
-            : tier_ == ShellResponsiveTier::Compressed ? "Ready — timeline collapsed"
-                                                       : "Ready — inspector on demand";
+            !pendingStatus_.empty() ? pendingStatus_
+            : tier_ == ShellResponsiveTier::Full ? "Ready — full workspace"
+            : tier_ == ShellResponsiveTier::Compressed
+                ? "Ready — timeline collapsed"
+                : "Ready — inspector on demand";
         if (Core::Status status = tree->setText(nodes_.statusLabel, message); !status) {
             return status;
         }
+        pendingStatus_ = {};
         statusDirty_ = false;
     }
     return Core::success();
@@ -1173,6 +1500,47 @@ void DesktopShellUI::setLogicalWidth(float logicalWidth) noexcept
 void DesktopShellUI::release() noexcept
 {
     root_.reset();
+}
+
+void DesktopShellUI::requestAutomatedStep(u64 frameIndex) noexcept
+{
+    if (state_ == nullptr) {
+        return;
+    }
+    switch (frameIndex) {
+    case 6:
+        state_->menuOpen = true;
+        menuStateDirty_ = true;
+        break;
+    case 12:
+        state_->menuOpen = false;
+        menuStateDirty_ = true;
+        break;
+    case 18:
+        state_->dialogOpen = true;
+        dialogVisibilityDirty_ = true;
+        break;
+    case 26:
+        state_->dialogOpen = false;
+        dialogVisibilityDirty_ = true;
+        break;
+    case 32:
+        state_->timelineHideRequested = true;
+        paneIntentDirty_ = true;
+        break;
+    case 38:
+        state_->inspectorHideRequested = true;
+        paneIntentDirty_ = true;
+        break;
+    case 44:
+        // Restore both panes so the final snapshot matches the initial intent.
+        state_->timelineHideRequested = false;
+        state_->inspectorHideRequested = false;
+        paneIntentDirty_ = true;
+        break;
+    default:
+        break;
+    }
 }
 
 DesktopShellSnapshot DesktopShellUI::snapshot() const noexcept
@@ -1203,6 +1571,15 @@ DesktopShellSnapshot DesktopShellUI::snapshot() const noexcept
         .dialogOpen = state_ != nullptr && state_->dialogOpen,
         .menuOpen = state_ != nullptr && state_->menuOpen,
         .rootAlive = root_.has_value(),
+        .initialFocusApplied = initialFocusApplied_,
+        .menuOpenObserved = menuOpenObserved_,
+        .dialogOpenObserved = dialogOpenObserved_,
+        .dialogDismissed = dialogDismissed_,
+        .focusedNode = focusedNode_,
+        .timelineHideRequested = state_ != nullptr && state_->timelineHideRequested,
+        .inspectorHideRequested = state_ != nullptr && state_->inspectorHideRequested,
+        .timelineHideObserved = timelineHideObserved_,
+        .inspectorHideObserved = inspectorHideObserved_,
     };
 }
 

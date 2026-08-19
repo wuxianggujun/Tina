@@ -6,6 +6,7 @@
 
 #include <array>
 #include <optional>
+#include <string_view>
 
 namespace Tina::SampleUI {
 
@@ -40,10 +41,13 @@ struct DesktopShellState final {
     ShellTheme theme = ShellTheme::Dark;
     UI::UIDensity density = UI::UIDensity::Compact;
 
-    // Pane intent, not committed geometry. UI publishes the resolved rects.
-    float leftDockFraction = 0.0F;
-    float inspectorFraction = 0.0F;
-    float timelineFraction = 0.0F;
+    // Explicit user intent from commands, independent of window width. Doc rule
+    // 3 requires the inspector to be command-toggled at the minimum width.
+    bool timelineHideRequested = false;
+    bool inspectorHideRequested = false;
+
+    // Resolved pane visibility = responsive tier OR user intent. These are
+    // outputs of the responsive pass, not inputs.
     bool timelineCollapsed = false;
     bool inspectorVisible = true;
 
@@ -93,6 +97,20 @@ struct DesktopShellSnapshot final {
     bool dialogOpen = false;
     bool menuOpen = false;
     bool rootAlive = false;
+
+    // Workflow evidence: proves focus/menu/dialog actually engaged rather than
+    // merely not erroring.
+    bool initialFocusApplied = false;
+    bool menuOpenObserved = false;
+    bool dialogOpenObserved = false;
+    bool dialogDismissed = false;
+    UI::UINodeId focusedNode{};
+
+    // Explicit command intent, separate from tier-resolved visibility above.
+    bool timelineHideRequested = false;
+    bool inspectorHideRequested = false;
+    bool timelineHideObserved = false;
+    bool inspectorHideObserved = false;
 };
 
 // One retained root composed from three nested SplitViews. It owns no second UI
@@ -112,6 +130,10 @@ class DesktopShellUI final {
     // rules. Supplied by the host from primary-window metrics.
     void setLogicalWidth(float logicalWidth) noexcept;
 
+    // Scripted workflow for the headless gate. It drives the same durable state
+    // the command callbacks write, then update() verifies the committed effect.
+    // It does not synthesize pointer or keyboard input.
+    void requestAutomatedStep(u64 frameIndex) noexcept;
     [[nodiscard]] DesktopShellSnapshot snapshot() const noexcept;
 
   private:
@@ -154,7 +176,12 @@ class DesktopShellUI final {
 
         UI::UINodeId menuAnchor{};
         UI::UINodeId menu{};
-        UI::UINodeId dialogModal{};
+        UI::UINodeId menuToggleTimeline{};
+        UI::UINodeId menuToggleInspector{};
+        UI::UIDialogParts dialog{};
+
+        // Command buttons in the command bar, wired to shell commands.
+        std::array<UI::UINodeId, 5> commandButtons{};
 
         // Document tab strip reuses RadioButton selection; three documents.
         std::array<UI::UINodeId, 3> documentTabButtons{};
@@ -177,6 +204,14 @@ class DesktopShellUI final {
                                                      const UI::UITheme& theme);
     [[nodiscard]] Core::Status buildTimelineContent(PrimaryWindowUITreeUpdater& tree,
                                                     const UI::UITheme& theme);
+
+    // Overlays live in the same root and the same focus/modal scope.
+    [[nodiscard]] Core::Status buildOverlays(PrimaryWindowUITreeUpdater& tree,
+                                             const UI::UITheme& theme);
+    // Wires command, tab and menu callbacks once the nodes exist.
+    [[nodiscard]] Core::Status wireCommands(PrimaryWindowUITreeUpdater& tree);
+    // Focus order follows tree/document reading order.
+    [[nodiscard]] Core::Status applyInitialFocus(PrimaryWindowUITreeUpdater& tree);
 
     // Reads committed SplitView metrics into the snapshot and checks that the
     // viewport keeps its minimum unobstructed area.
@@ -224,8 +259,24 @@ class DesktopShellUI final {
     float statusBarHeight_ = 0.0F;
     bool viewportUnobstructed_ = false;
 
+    // Latest status message, published on the next update.
+    std::string_view pendingStatus_{};
     bool statusDirty_ = false;
     bool layoutDirty_ = false;
+    bool dialogVisibilityDirty_ = false;
+    bool menuStateDirty_ = false;
+    // Initial focus waits for the first committed publication.
+    bool initialFocusApplied_ = false;
+    // Latched workflow observations, read back from committed UI state.
+    bool menuOpenObserved_ = false;
+    bool dialogOpenObserved_ = false;
+    bool dialogDismissed_ = false;
+    bool timelineHideObserved_ = false;
+    bool inspectorHideObserved_ = false;
+    UI::UINodeId focusedNode_{};
+    // Set when a command changed pane visibility intent, so the responsive
+    // pass re-resolves fractions without waiting for a resize.
+    bool paneIntentDirty_ = false;
 };
 
 } // namespace Tina::SampleUI
