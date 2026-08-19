@@ -51,6 +51,8 @@ class PrimaryWindowUICapabilityState final {
     registerStyleColorToken(u64 epoch, UI::UIStraightSrgba8Color value);
     [[nodiscard]] Core::Status installStyleSheet(
         u64 epoch, std::span<const UI::UIStyleBoxFillRule> rules);
+    [[nodiscard]] Core::Result<UI::UITheme> rootBuilderProductTheme(u64 epoch);
+    [[nodiscard]] Core::Status setRootBuilderProductTheme(u64 epoch, const UI::UITheme& theme);
     [[nodiscard]] Core::Result<UI::UIRootOwner> createRoot(u64 epoch);
     [[nodiscard]] Core::Result<bool> isAlive(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
                                              UI::UINodeId node);

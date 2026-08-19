@@ -1969,6 +1969,24 @@ Core::Status PrimaryWindowUIRootBuilder::installStyleSheet(
     return m_state->installStyleSheet(m_epoch, rules);
 }
 
+Core::Result<UI::UITheme> PrimaryWindowUIRootBuilder::productTheme() const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UITheme>("PrimaryWindowUIRootBuilder::productTheme");
+    }
+    return m_state->rootBuilderProductTheme(m_epoch);
+}
+
+Core::Status PrimaryWindowUIRootBuilder::setProductTheme(const UI::UITheme& theme)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUIRootBuilder::setProductTheme");
+    }
+    return m_state->setRootBuilderProductTheme(m_epoch, theme);
+}
+
 Core::Result<UI::UIRootOwner> PrimaryWindowUIRootBuilder::createRoot()
 {
     if (m_state == nullptr)

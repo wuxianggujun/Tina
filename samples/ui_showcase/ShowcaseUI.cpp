@@ -365,6 +365,11 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseUIState& 
         activeTheme == ShowcaseTheme::Dark
             ? UI::makeModernDesktopTheme(UI::UIColorScheme::Dark, activeDensity)
             : UI::makeModernDesktopTheme(UI::UIColorScheme::Light, activeDensity);
+    // Density is a root-construction property, so choose the complete theme
+    // before createRoot() publishes the retained root.
+    if (Core::Status status = rootBuilder->setProductTheme(productTheme); !status) {
+        return status;
+    }
     if (!state.stylesheetInstalled) {
         auto chromeClass = rootBuilder->registerStyleClass();
         if (!chromeClass) {

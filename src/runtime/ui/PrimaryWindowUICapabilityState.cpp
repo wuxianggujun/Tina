@@ -1073,6 +1073,31 @@ Core::Status PrimaryWindowUICapabilityState::clearOverride(u64 epoch, PrimaryWin
     return Core::success();
 }
 
+Core::Result<UI::UITheme> PrimaryWindowUICapabilityState::rootBuilderProductTheme(u64 epoch)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUIRootBuilder::productTheme";
+    if (Core::Status status = validate(epoch, PrimaryWindowUIPhase::GameStateEnter, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    return context_->productTheme();
+}
+
+Core::Status PrimaryWindowUICapabilityState::setRootBuilderProductTheme(u64 epoch, const UI::UITheme& theme)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUIRootBuilder::setProductTheme";
+    if (Core::Status status = validate(epoch, PrimaryWindowUIPhase::GameStateEnter, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = context_->setProductTheme(theme);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
 Core::Result<UI::UITheme> PrimaryWindowUICapabilityState::productTheme(u64 epoch, PrimaryWindowUIPhase phase)
 {
     constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::productTheme";

@@ -383,6 +383,11 @@ class PrimaryWindowUIRootBuilder final {
     registerStyleColorToken(UI::UIStraightSrgba8Color value);
     [[nodiscard]] Core::Status installStyleSheet(
         std::span<const UI::UIStyleBoxFillRule> rules);
+    // Density is selected before the first retained root is created. A density
+    // change remains rejected once any root is live; live-root color-scheme
+    // changes continue through PrimaryWindowUITreeUpdater.
+    [[nodiscard]] Core::Result<UI::UITheme> productTheme() const;
+    [[nodiscard]] Core::Status setProductTheme(const UI::UITheme& theme);
     [[nodiscard]] Core::Result<UI::UIRootOwner> createRoot();
     [[nodiscard]] Core::Result<PrimaryWindowUITreeUpdater> treeUpdater(UI::UIRootOwner& rootOwner);
     [[nodiscard]] Core::Result<PrimaryWindowUIImageResolverRegistration>
