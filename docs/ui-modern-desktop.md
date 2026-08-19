@@ -753,12 +753,29 @@ ScrollView 承担溢出，不缩放字号、不覆盖相邻区域。
 
 Density 不是 live-root 属性。`ShowcaseApplication` 持有唯一 `ShowcaseUIState`，保存 scheme/density、FormField
 文本、Slider/Checkbox/Radio、Dropdown/List/Tree selection、Tree expansion、组件画布与局部 ScrollView offset、
-Dialog open 状态；`ShowcaseState::requestReplace()` 先更新 density，再用同一应用状态构建 replacement root，成功后
-释放旧 root。Runtime 为失败原子的 State handoff 先完成 replacement `onEnter()`，因此 Context 预留两个 root slot；稳定帧仍只有
-一个 active root，第二个 slot 不是第二套 UI Runtime。Window 级 StyleClass/ColorToken/StyleSheet 也由应用状态只注册一次，
-replacement root 复用稳定 ID。Theme 仍在现有 root 上通过 `setProductTheme()` 事务切换。这样 root replacement 不复制 UI 状态机，也不会用
-自动演示重放掩盖状态丢失。`--auto-demo` 会在最终值建立后往返两次 density、恢复初始 scheme、打开并关闭 Dialog，
-并由结构化 JSON 验证三次 state/root 生命周期和跨 root 状态连续性。
+Dialog open 状态。
+
+Density 重建采用 destroy-then-rebuild，顺序由 Context 不变式决定，不是实现偏好：
+
+1. `createRoot()` 在任何子节点存在前就使 `liveRootCount` 变为 1，而 `setProductTheme()` 只在零 live root 时接受
+   density 变化。因此 density 必须在 root 构建前通过 `PrimaryWindowUIRootBuilder::setProductTheme()` 确立；
+   在 `createRoot()` 之后 stage 会被拒绝，即使是第一个 root。
+2. 交接时 `ShowcaseState::updateFrame()` 先释放本状态的 root，再 `requestReplace()`；replacement 因而在零
+   live root 下 stage 新 density 并构建。稳定态与交接峰值都只有一个 live root，`rootCapacity` 为 1。
+3. 代价是失去「replacement 失败时旧像素仍在」这一性质。因此 `updateUI()` 在已释放 root 而交接未提交时
+   返回错误，fail closed，绝不呈现无 root 的窗口。
+
+不采用「新 root 先建立、旧 root 后释放」的双 root 原子交接：`buildCommittedStructure()` 与
+`buildLayoutOrder()` 会遍历全部 root 并一起送入 Layout/Hit/Paint/Semantics；candidate 中创建 Modal 会立即
+关闭 active root 的 Tooltip/Menu；layout 容量 guard 使用跨 root 的 `nodes.activeCount()`。要让第二个 slot
+真正只服务交接，必须把 staged/live 贯穿全部发布路径、输入路由与每个 root-scoped mutation 边界，并为两棵树
+做容量预算 —— 那等于在 UIContext 内建第二棵 UI 树，与本文「不建立第二棵 UI 树」和「UIContext 只协调」冲突。
+
+Window 级 StyleClass/ColorToken/StyleSheet 由应用状态只注册一次（`styleRegistrationClosed` 在首个节点后永久
+置位，销毁全部 root 也不重开），replacement root 复用稳定 ID。Color scheme 仍在现有 root 上通过
+`setProductTheme()` 事务切换。这样 root replacement 不复制 UI 状态机，也不会用自动演示重放掩盖状态丢失。
+`--auto-demo` 会在最终值建立后往返两次 density、恢复初始 scheme、打开并关闭 Dialog，并由结构化 JSON 验证
+三次 state/root 生命周期和跨 root 状态连续性。
 
 Showcase 通过后才迁移 EditorApp，避免把视觉 foundation 调试和复杂 authoring workflow 回归混在一起。
 

@@ -492,6 +492,13 @@ class ShowcaseState final : public Tina::IGameState {
             ++counters_.densityRebuilds;
             auto replacement = std::make_unique<ShowcaseState>(
                 options_, uiState_, counters_, deviceAccess_);
+            // Density binds at root construction and the Context rejects a
+            // density change while any root is live. GameState replacement
+            // enters the replacement before exiting this state, so this root is
+            // released first and the replacement builds at zero live roots.
+            // Application-owned ShowcaseUIState carries the UI state across.
+            ui_.release();
+            densityHandoffRequested_ = true;
             return context.requestReplace(std::move(replacement));
         }
         if (options_.imageLifecycleDemo && counters_.frameUpdates == ImageAtlasInvalidationFrame) {
@@ -512,6 +519,14 @@ class ShowcaseState final : public Tina::IGameState {
 
     Tina::Core::Status updateUI(Tina::UIUpdateContext& context) override
     {
+        // Reached only when a requested density handoff did not commit: this
+        // state already released its root and the replacement never took over.
+        // Fail closed instead of presenting a rootless window.
+        if (densityHandoffRequested_) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::Internal,
+                "UI showcase density handoff did not commit; the root was already released");
+        }
         return ui_.update(context);
     }
 
@@ -522,6 +537,7 @@ class ShowcaseState final : public Tina::IGameState {
     Tina::SampleUI::ShowcaseRenderDeviceAccess& deviceAccess_;
     ShowcaseImageResources imageResources_;
     Tina::SampleUI::ShowcaseUI ui_{};
+    bool densityHandoffRequested_ = false;
 };
 
 class ShowcaseApplication final : public Tina::IGameApplication {
@@ -592,10 +608,10 @@ class ShowcaseApplication final : public Tina::IGameApplication {
 
     config.primaryWindowUICapacities = Tina::UI::UIContextCapacityConfig{
         .nodeCapacity = 2048,
-        // GameState replacement enters the new state before releasing the old
-        // one so a failed replacement cannot blank the product. Steady state
-        // still owns one root; the second slot is only the atomic handoff.
-        .rootCapacity = 2,
+        // A density rebuild releases the outgoing root before the replacement
+        // state builds, because the Context rejects a density change while any
+        // root is live. Exactly one root is therefore ever live.
+        .rootCapacity = 1,
         .dirtyQueueCapacity = 256,
         .layoutSnapshotCapacity = 256,
         .hitSnapshotCapacity = 256,

@@ -553,6 +553,59 @@ TEST(UIThemeTest, LiveRootRejectsDensityChangeAndPreservesCurrentTheme)
     EXPECT_EQ(context->productTheme().density, UI::UIDensity::Comfortable);
 }
 
+// A density rebuild releases the outgoing populated root before the replacement
+// builds, so the density is staged at zero live roots and the replacement root
+// is created afterwards. This is the ordering products must follow; staging the
+// density after createRoot() is rejected even for the very first root.
+TEST(UIThemeTest, DensityRebuildStagesThemeBeforeCreatingTheReplacementRoot)
+{
+    auto context = createProductContext(makeTestWindow());
+    ASSERT_NE(context, nullptr);
+
+    ASSERT_TRUE(context->setProductTheme(
+        UI::makeModernDesktopTheme(UI::UIColorScheme::Dark, UI::UIDensity::Compact)));
+    auto outgoing = context->rootBuilder().createRoot();
+    ASSERT_TRUE(outgoing.has_value()) << (outgoing ? "" : outgoing.error().message);
+    auto populated =
+        context->rootBuilder().createElement(outgoing->rootNodeId(), UI::makeButtonElement());
+    ASSERT_TRUE(populated.has_value()) << (populated ? "" : populated.error().message);
+
+    const UI::UITheme compact = context->productTheme();
+    const UI::UITheme comfortable =
+        UI::makeModernDesktopTheme(UI::UIColorScheme::Dark, UI::UIDensity::Comfortable);
+
+    // Populated outgoing root still blocks the density change.
+    Core::Status blocked = context->setProductTheme(comfortable);
+    ASSERT_FALSE(blocked.has_value());
+    EXPECT_EQ(blocked.error().code, UI::UIErrorCode::InvalidTheme);
+    EXPECT_EQ(context->productTheme(), compact);
+
+    // Release the outgoing root, then stage the new density before the
+    // replacement root exists.
+    outgoing->reset();
+    ASSERT_TRUE(context->setProductTheme(comfortable));
+    EXPECT_EQ(context->productTheme().density, UI::UIDensity::Comfortable);
+
+    auto replacement = context->rootBuilder().createRoot();
+    ASSERT_TRUE(replacement.has_value()) << (replacement ? "" : replacement.error().message);
+    auto rebuilt =
+        context->rootBuilder().createElement(replacement->rootNodeId(), UI::makeButtonElement());
+    ASSERT_TRUE(rebuilt.has_value()) << (rebuilt ? "" : rebuilt.error().message);
+
+    // The replacement tree resolved its chrome from the Comfortable metrics.
+    auto replacementTree = context->treeUpdater(*replacement);
+    ASSERT_TRUE(replacementTree.has_value()) << (replacementTree ? "" : replacementTree.error().message);
+    auto rebuiltPaint = replacementTree->buttonPaint(*rebuilt);
+    ASSERT_TRUE(rebuiltPaint.has_value()) << (rebuiltPaint ? "" : rebuiltPaint.error().message);
+    EXPECT_EQ(*rebuiltPaint, UI::makeTonalButtonChrome(comfortable).states);
+
+    // Staging a density after the replacement root exists stays rejected.
+    Core::Status late = context->setProductTheme(compact);
+    ASSERT_FALSE(late.has_value());
+    EXPECT_EQ(late.error().code, UI::UIErrorCode::InvalidTheme);
+    EXPECT_EQ(context->productTheme().density, UI::UIDensity::Comfortable);
+}
+
 TEST(UIThemeTest, InvalidThemeAndWrongThreadAreRejectedWithoutMutation)
 {
     const Platform::WindowId window = makeTestWindow();

@@ -494,6 +494,9 @@ ScrollView paint/thumb geometry 与 Dropdown selection API/popup/paint/input rou
 resolver 选择 TextEdit/ScrollView/Dropdown，并要求匹配现有 `BuiltinElementKind` contract；不受支持的混合组合返回
 `InvalidElementDescriptor`。当前可在首个 retained node 前通过 `UIContext` 或 `GameStateEnter` 的
 `PrimaryWindowUIRootBuilder` 注册 StyleClass/ColorToken 并安装 node-local literal/token-backed BoxFill rules；
+`PrimaryWindowUIRootBuilder` 另提供 `productTheme()` / `setProductTheme()`，用于在 `createRoot()` 之前确立
+density —— density 是 root 构建期属性，`setProductTheme()` 只在零 live root 时接受 density 变化，因此
+密度切换必须重建 root，而 color scheme 仍可在 live root 上经 `PrimaryWindowUITreeUpdater` 事务切换；
 `UIContext` 与 phase-scoped `PrimaryWindowUITreeUpdater` 提供 `styleColorToken()` / `setStyleColorToken()`；
 setter 先预检 dirty queue，失败时保持 token/dirty/committed 不变。`UIContext` 与 phase-scoped facade
 已提供 fixed-capacity paint-only Motion、reduced-motion、stylesheet `BackgroundColor` transition，以及
