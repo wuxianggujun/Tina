@@ -7,14 +7,14 @@
 
 namespace Tina::UI::Detail {
 
-struct UIToggleSwitchGeometry final {
+struct UISwitchGeometry final {
     UILogicalRect thumb{};
     UILogicalCornerRadii thumbCornerRadii{};
 };
 
 // Pure committed-geometry projection. The track is the Element box; the thumb
 // stays centered on the cross axis and moves only along the logical X axis.
-[[nodiscard]] constexpr UIToggleSwitchGeometry resolveToggleSwitchGeometry(
+[[nodiscard]] constexpr UISwitchGeometry resolveSwitchGeometry(
     UILogicalRect track, float inset, bool checked) noexcept
 {
     const float availableWidth = (std::max)(0.0F, track.width - inset * 2.0F);
@@ -23,7 +23,7 @@ struct UIToggleSwitchGeometry final {
     const float x = checked ? track.x + track.width - inset - extent
                             : track.x + inset;
     const float y = track.y + (track.height - extent) * 0.5F;
-    return UIToggleSwitchGeometry{
+    return UISwitchGeometry{
         .thumb = {
             .x = x,
             .y = y,

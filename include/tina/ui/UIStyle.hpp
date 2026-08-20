@@ -24,6 +24,10 @@ enum class UIStyleRoleId : u8 {
     ButtonDanger,
     Checkbox,
     Slider,
+    SliderRed,
+    SliderGreen,
+    SliderBlue,
+    SliderAlpha,
     TextInput,
     ProgressBar,
     RadioButton,
@@ -46,7 +50,7 @@ enum class UIStyleRoleId : u8 {
     BadgeNeutral,
     BadgeAccent,
     BadgeDanger,
-    ToggleSwitch,
+    Switch,
     Splitter,
     ModalScrim,
     TextInputInvalid,
@@ -54,6 +58,9 @@ enum class UIStyleRoleId : u8 {
     IconOnSurface,
     IconOnPrimary,
     IconOnError,
+    VirtualGridView,
+    DataGrid,
+    FloatingSurface,
 };
 
 // Startup-registered stylesheet identities. Zero is invalid so a default
@@ -174,7 +181,8 @@ enum class UIStyleOverride : u16 {
     ImageTint = 1U << 12U,
     TabPaint = 1U << 13U,
     SplitterPaint = 1U << 14U,
-    All = (1U << 15U) - 1U,
+    GridPaint = 1U << 15U,
+    All = (1U << 16U) - 1U,
 };
 
 [[nodiscard]] constexpr UIStyleOverride operator|(UIStyleOverride left, UIStyleOverride right) noexcept

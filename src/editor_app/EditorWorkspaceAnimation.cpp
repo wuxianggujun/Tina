@@ -265,10 +265,6 @@ auto EditorWorkspaceState::refreshAnimationTimelineUi(
     if (auto status = tree.setText(animationModeButton_, modeText); !status) {
         return status;
     }
-    if (auto status = tree.setText(animationPlayButton_, animationPreview_.playing() ? "Pause" : "Play");
-        !status) {
-        return status;
-    }
 
     const auto selectedFrame = spriteAnimationDocument_.frameAt(animationPreview_.selectedFrameIndex());
     if (!selectedFrame) {
@@ -301,22 +297,20 @@ auto EditorWorkspaceState::refreshAnimationTimelineUi(
     for (u32 slot = 0; slot < animationFrameButtons_.size(); ++slot) {
         const u32 frameIndex = animationPreview_.visibleFrameStart() + slot;
         const bool materialized = frameIndex < frameCount;
+        const bool selected = materialized &&
+                              frameIndex == animationPreview_.selectedFrameIndex();
         std::string label = "--";
         if (materialized) {
-            const auto frame = spriteAnimationDocument_.frameAt(frameIndex);
-            label = frameIndex == animationPreview_.selectedFrameIndex() ? ">" : "";
-            label += std::to_string(frameIndex + 1U);
-            label += " ";
-            label += std::to_string(
-                static_cast<u32>(std::lround(frame->durationSeconds * 1000.0F)));
-            label += "ms";
-            if (!frame->events.empty()) {
-                label += " [";
-                label += std::to_string(frame->events.size());
-                label += "]";
-            }
+            label = std::to_string(frameIndex + 1U);
         }
         if (auto status = tree.setText(animationFrameButtons_[slot], label); !status) {
+            return status;
+        }
+        if (auto status = tree.setStyleRole(
+                animationFrameButtons_[slot],
+                selected ? UI::UIStyleRoleId::ButtonPrimary
+                         : UI::UIStyleRoleId::ButtonOutlined);
+            !status) {
             return status;
         }
         if (auto status = tree.setEnabled(animationFrameButtons_[slot], editable && materialized);
@@ -331,6 +325,16 @@ auto EditorWorkspaceState::refreshAnimationTimelineUi(
                                        : (std::min)(animationSelectedEventIndex_, eventCount - 1U);
     counters_.animationEventCount = eventCount;
     counters_.animationSelectedEventIndex = animationSelectedEventIndex_;
+    std::string eventPositionText = "Notify ";
+    eventPositionText += std::to_string(
+        eventCount == 0U ? 0U : animationSelectedEventIndex_ + 1U);
+    eventPositionText += "/";
+    eventPositionText += std::to_string(eventCount);
+    if (auto status = tree.setText(animationEventPosition_, eventPositionText);
+        !status)
+    {
+        return status;
+    }
     if (eventCount != 0U)
     {
         const auto& selectedEvent = selectedFrame->events[animationSelectedEventIndex_];
@@ -340,8 +344,13 @@ auto EditorWorkspaceState::refreshAnimationTimelineUi(
         {
             return status;
         }
-        std::string offset = std::to_string(selectedEvent.normalizedOffset);
-        if (auto status = tree.setText(animationEventOffset_, offset); !status)
+        auto offsetText = formatEditorNumber(selectedEvent.normalizedOffset);
+        if (!offsetText)
+        {
+            return Tina::Core::failure(std::move(offsetText.error()));
+        }
+        if (auto status = tree.setText(animationEventOffset_, offsetText->view());
+            !status)
         {
             return status;
         }
@@ -385,7 +394,32 @@ auto EditorWorkspaceState::refreshAnimationTimelineUi(
         return status;
     }
 
-    if (auto status = tree.setEnabled(animationPlayButton_, editable && animationPreview_.previewAvailable());
+    UI::UILayoutStyle playButtonLayout = animationPlaybackButtons_.layout;
+    playButtonLayout.visibility = animationPreview_.playing()
+                                      ? UI::UIVisibility::Collapsed
+                                      : UI::UIVisibility::Visible;
+    if (auto status = tree.setLayoutStyle(
+            animationPlaybackButtons_.play.root, playButtonLayout);
+        !status) {
+        return status;
+    }
+    UI::UILayoutStyle pauseButtonLayout = animationPlaybackButtons_.layout;
+    pauseButtonLayout.visibility = animationPreview_.playing()
+                                       ? UI::UIVisibility::Visible
+                                       : UI::UIVisibility::Collapsed;
+    if (auto status = tree.setLayoutStyle(
+            animationPlaybackButtons_.pause.root, pauseButtonLayout);
+        !status) {
+        return status;
+    }
+    const bool playbackEnabled = editable && animationPreview_.previewAvailable();
+    if (auto status = tree.setEnabled(
+            animationPlaybackButtons_.play.button, playbackEnabled);
+        !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(
+            animationPlaybackButtons_.pause.button, playbackEnabled);
         !status) {
         return status;
     }
@@ -430,13 +464,7 @@ auto EditorWorkspaceState::refreshAnimationTimelineUi(
             return status;
         }
     }
-    if (auto status = tree.setEnabled(animationUndoButton_,
-                                      editable && spriteAnimationDocument_.canUndo());
-        !status) {
-        return status;
-    }
-    return tree.setEnabled(animationRedoButton_,
-                           editable && spriteAnimationDocument_.canRedo());
+    return Tina::Core::success();
 }
 
 } // namespace Tina::EditorApp::WorkspaceInternal

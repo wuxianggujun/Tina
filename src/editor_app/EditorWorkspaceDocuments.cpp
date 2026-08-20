@@ -7,9 +7,13 @@ auto EditorWorkspaceState::refreshDocumentTabsUi(
     if (auto status = synchronizeActiveTabDirty(); !status) {
         return status;
     }
+    auto productTheme = tree.productTheme();
+    if (!productTheme) {
+        return Tina::Core::failure(std::move(productTheme.error()));
+    }
     for (u32 index = 0; index < documentTabButtons_.size(); ++index) {
         const auto* tab = documentTabs_.tab(index);
-        std::string title = tab != nullptr ? tab->title : "Empty";
+        std::string title = tab != nullptr ? tab->title : std::string{};
         if (tab != nullptr && tab->dirty) {
             title += " *";
         }
@@ -24,17 +28,20 @@ auto EditorWorkspaceState::refreshDocumentTabsUi(
         if (auto status = tree.setEnabled(documentTabButtons_[index], tab != nullptr); !status) {
             return status;
         }
+        if (auto status = tree.setLayoutStyle(
+                documentTabButtons_[index],
+                editorDocumentTabLayout(
+                    *productTheme, tab != nullptr ? UI::UIVisibility::Visible
+                                                  : UI::UIVisibility::Collapsed));
+            !status) {
+            return status;
+        }
     }
     const auto* active = documentTabs_.activeTab();
     if (auto status = tree.setEnabled(closeDocumentButton_,
                                       active != nullptr && !active->pinned);
         !status) {
         return status;
-    }
-    if (active != nullptr) {
-        if (auto status = tree.setText(toolbarDocument_, active->title); !status) {
-            return status;
-        }
     }
     counters_.documentTabCount = documentTabs_.tabCount();
     return Tina::Core::success();
@@ -128,18 +135,6 @@ auto EditorWorkspaceState::documentPathOwnedByOtherSession(
     std::string_view path,
     Tina::Editor::EditorDocumentKey activeKey) const noexcept -> bool{
     return documentSessions_.pathOwnedByOtherSession(path, activeKey);
-}
-
-auto EditorWorkspaceState::refreshToolbarPathForActiveTab(
-    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status{
-    const WorkspaceSessionState* session = activeDocumentSession();
-    if (auto status = tree.setText(
-            toolbarPath_, session != nullptr ? session->documentPathUtf8
-                                             : std::string_view{});
-        !status) {
-        return status;
-    }
-    return tree.setEnabled(toolbarPath_, session != nullptr);
 }
 
 auto EditorWorkspaceState::activeAuthoringDocumentOwner(Tina::Editor::EditorDocumentKind kind) noexcept -> Tina::Editor::EditorDocumentKey*{
@@ -490,12 +485,12 @@ auto EditorWorkspaceState::showDirtyCloseModal(
         return status;
     }
     if (auto status = tree.setText(
-            dirtyClosePath_,
+            dirtyClosePathInput_,
             session != nullptr ? session->documentPathUtf8 : std::string_view{});
         !status) {
         return status;
     }
-    if (auto status = tree.setEnabled(dirtyClosePath_, session != nullptr); !status) {
+    if (auto status = tree.setEnabled(dirtyClosePathInput_, session != nullptr); !status) {
         return status;
     }
     if (auto status = tree.setText(
@@ -514,7 +509,7 @@ auto EditorWorkspaceState::showDirtyCloseModal(
     return tree.requestFocus(
         session != nullptr && session->hasDocumentPath()
             ? dirtyCloseSaveButton_
-            : dirtyClosePath_);
+            : dirtyClosePathInput_);
 }
 
 auto EditorWorkspaceState::hideDirtyCloseModal(
@@ -609,7 +604,7 @@ auto EditorWorkspaceState::confirmDirtyCloseSave(
     if (session->hasDocumentPath()) {
         saveStatus = saveActiveDocument();
     } else {
-        auto path = tree.text(dirtyClosePath_);
+        auto path = tree.text(dirtyClosePathInput_);
         if (!path) {
             return Tina::Core::failure(std::move(path.error()));
         }
@@ -688,9 +683,6 @@ auto EditorWorkspaceState::activateDocumentTab(
         return status;
     }
     if (auto status = documentTabs_.activate(index); !status) {
-        return status;
-    }
-    if (auto status = refreshToolbarPathForActiveTab(tree); !status) {
         return status;
     }
     const bool restoreSceneSelection = assetInspectorActive_;

@@ -46,7 +46,7 @@ resolveElementBuiltinKind(const UIElementDescriptor& descriptor)
     {
         const UIMenuItemConfig& config = *descriptor.menuItem;
         const bool validKind = config.kind >= UIMenuItemKind::Command &&
-                               config.kind <= UIMenuItemKind::Separator;
+                               config.kind <= UIMenuItemKind::Submenu;
         if (!validKind)
         {
             return Core::failure(UIErrorCode::InvalidElementDescriptor,
@@ -259,11 +259,23 @@ resolveElementBuiltinKind(const UIElementDescriptor& descriptor)
     {
         return hasText ? BuiltinElementKind::Label : BuiltinElementKind::Panel;
     }
+    if (specialized == UIElementBehavior::Activate)
+    {
+        return hasText || hasImage ? BuiltinElementKind::Button
+                                   : BuiltinElementKind::Panel;
+    }
+    if (specialized ==
+        (UIElementBehavior::Activate | UIElementBehavior::ExclusiveChoice))
+    {
+        return hasText || hasImage
+                   ? Core::Result<BuiltinElementKind>{BuiltinElementKind::RadioButton}
+                   : requireText(BuiltinElementKind::RadioButton);
+    }
     if (hasImage)
     {
         return Core::failure(
             UIErrorCode::InvalidElementDescriptor,
-            "UI image content requires a behavior-neutral Element");
+            "UI image content is only supported by behavior-neutral, Button, and RadioButton Elements");
     }
     constexpr auto ComposableBehaviors = static_cast<UIElementBehavior>(
         static_cast<u32>(UIElementBehavior::Activate) |
@@ -275,10 +287,6 @@ resolveElementBuiltinKind(const UIElementDescriptor& descriptor)
         hasBehavior(specialized, UIElementBehavior::RangeInput))
     {
         return hasText ? BuiltinElementKind::Label : BuiltinElementKind::Slider;
-    }
-    if (specialized == UIElementBehavior::Activate)
-    {
-        return hasText ? BuiltinElementKind::Button : BuiltinElementKind::Panel;
     }
     if (specialized ==
         (UIElementBehavior::Activate | UIElementBehavior::Toggle))
@@ -297,11 +305,6 @@ resolveElementBuiltinKind(const UIElementDescriptor& descriptor)
     if (specialized == UIElementBehavior::ProgressValue)
     {
         return rejectIntrinsicContent(BuiltinElementKind::ProgressBar);
-    }
-    if (specialized ==
-        (UIElementBehavior::Activate | UIElementBehavior::ExclusiveChoice))
-    {
-        return requireText(BuiltinElementKind::RadioButton);
     }
     if (specialized == UIElementBehavior::ModalBarrier)
     {
@@ -338,6 +341,14 @@ resolveElementBuiltinKind(const UIElementDescriptor& descriptor)
     {
         return rejectIntrinsicContent(BuiltinElementKind::TreeView);
     }
+    if (specialized == UIElementBehavior::VirtualGrid)
+    {
+        return rejectIntrinsicContent(BuiltinElementKind::VirtualGridView);
+    }
+    if (specialized == UIElementBehavior::DataGrid)
+    {
+        return rejectIntrinsicContent(BuiltinElementKind::DataGrid);
+    }
     return Core::failure(
         UIErrorCode::InvalidElementDescriptor,
         "UI element behavior composition has no retained built-in storage contract");
@@ -349,11 +360,12 @@ Core::Status validateSemanticsContract(const UISemanticsDescriptor& descriptor,
 {
     if (!isValidSemanticsMode(descriptor.mode) ||
         !isValidSemanticsRole(descriptor.role) ||
+        !isValidSemanticsLiveSetting(descriptor.liveSetting) ||
         !isValidSemanticsActions(descriptor.actions))
     {
         return Core::failure(
             UIErrorCode::InvalidElementDescriptor,
-            "UI element semantics contain an unknown mode, role, or action");
+            "UI element semantics contain an unknown mode, role, live setting, or action");
     }
     if ((hasSemanticsAction(descriptor.actions, UISemanticsAction::Focus) &&
          !hasBehavior(behaviors, UIElementBehavior::Focusable)) ||

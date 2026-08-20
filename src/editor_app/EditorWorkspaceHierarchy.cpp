@@ -1,6 +1,42 @@
 ﻿#include "EditorWorkspaceState.hpp"
 
 namespace Tina::EditorApp::WorkspaceInternal {
+namespace {
+
+[[nodiscard]] constexpr char hierarchyAsciiLower(char value) noexcept
+{
+    return value >= 'A' && value <= 'Z'
+               ? static_cast<char>(value + ('a' - 'A'))
+               : value;
+}
+
+[[nodiscard]] bool hierarchyLabelContains(
+    std::string_view label, std::string_view filter) noexcept
+{
+    if (filter.empty()) {
+        return true;
+    }
+    if (filter.size() > label.size()) {
+        return false;
+    }
+    for (Tina::Core::usize offset = 0;
+         offset + filter.size() <= label.size(); ++offset) {
+        bool matches = true;
+        for (Tina::Core::usize index = 0; index < filter.size(); ++index) {
+            if (hierarchyAsciiLower(label[offset + index]) !=
+                hierarchyAsciiLower(filter[index])) {
+                matches = false;
+                break;
+            }
+        }
+        if (matches) {
+            return true;
+        }
+    }
+    return false;
+}
+
+} // namespace
 
 auto EditorWorkspaceState::hierarchyIndexForStableId(
     u64 stableId) const noexcept -> std::optional<u64>{
@@ -125,6 +161,26 @@ auto EditorWorkspaceState::hierarchyDisplayNote(
 auto EditorWorkspaceState::hierarchyRowVisible(const EditorHierarchyRow& row) const noexcept -> bool{
     if (row.stableId == 0) {
         return true;
+    }
+    if (!hierarchyFilterUtf8_.empty()) {
+        const auto rowIterator = std::find_if(
+            hierarchyRows_.begin(), hierarchyRows_.end(),
+            [&row](const EditorHierarchyRow& candidate) {
+                return candidate.stableId == row.stableId;
+            });
+        if (rowIterator == hierarchyRows_.end()) {
+            return false;
+        }
+        for (auto candidate = rowIterator; candidate != hierarchyRows_.end();
+             ++candidate) {
+            if (candidate != rowIterator && candidate->level <= row.level) {
+                break;
+            }
+            if (hierarchyLabelContains(candidate->label, hierarchyFilterUtf8_)) {
+                return true;
+            }
+        }
+        return false;
     }
     if (hierarchyRowCollapsed(0)) {
         return false;
@@ -470,7 +526,8 @@ auto EditorWorkspaceState::resolveHierarchyItem(const void* state, u64 logicalIn
             .enabled = true,
             .expandable = row.expandable,
             .expanded = row.expandable &&
-                !self->hierarchyRowCollapsed(row.stableId),
+                (!self->hierarchyFilterUtf8_.empty() ||
+                 !self->hierarchyRowCollapsed(row.stableId)),
         };
         return true;
     }

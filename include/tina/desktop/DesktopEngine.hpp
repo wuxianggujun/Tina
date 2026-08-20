@@ -22,6 +22,10 @@ using WindowSurfaceRenderDeviceWrap =
         std::unique_ptr<Render::IRenderDevice> device)>;
 
 struct CreateEngineOptions final {
+    // Opt-in OS Dark/Light observation. The Desktop adapter publishes only
+    // Tina-owned preference events; Runtime applies them on its owner thread
+    // while preserving the active UI density. Disabled keeps explicit themes.
+    bool followSystemColorScheme = false;
     WindowSurfaceRenderDeviceWrap wrapWindowSurfaceRenderDevice{};
 };
 

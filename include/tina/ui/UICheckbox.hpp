@@ -6,7 +6,7 @@
 
 namespace Tina::UI {
 
-// Checkbox and ToggleSwitch deliberately share one Toggle state machine. This
+// Checkbox and Switch deliberately share one Toggle state machine. This
 // discriminator changes only committed chrome geometry.
 enum class UIToggleIndicatorPresentation : u8 {
     Checkbox = 0,

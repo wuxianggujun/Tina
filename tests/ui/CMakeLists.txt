@@ -11,7 +11,7 @@ add_executable(tina_ui_tests
     UIButtonVisualTests.cpp
     UICanvasCommandStorageTests.cpp
     UICheckboxTests.cpp
-    UIToggleSwitchTests.cpp
+    UISwitchTests.cpp
     UICommandPressLatchTests.cpp
     UIControlGeometryTests.cpp
     UIControlPaintEmitterTests.cpp
@@ -74,6 +74,7 @@ add_executable(tina_ui_tests
     UIPaintSnapshotTests.cpp
     UIThemeTests.cpp
     UIVisualComponentsTests.cpp
+    UISnackbarTests.cpp
     UIImeCompositionStateTests.cpp
     UITextTests.cpp
     UITextEllipsisTests.cpp
@@ -92,9 +93,14 @@ add_executable(tina_ui_tests
     header_isolation/UIBehaviorHeader.cpp
     header_isolation/UIButtonHeader.cpp
     header_isolation/UICheckboxHeader.cpp
+    header_isolation/UICollapsibleSectionHeader.cpp
+    header_isolation/UIColorFieldHeader.cpp
+    header_isolation/UIColorPickerHeader.cpp
+    header_isolation/UIDataGridHeader.cpp
     header_isolation/UIDialogHeader.cpp
-    header_isolation/UIToggleSwitchHeader.cpp
+    header_isolation/UISwitchHeader.cpp
     header_isolation/UISurfaceHeader.cpp
+    header_isolation/UISnackbarHeader.cpp
     header_isolation/UIDividerHeader.cpp
     header_isolation/UIBadgeHeader.cpp
     header_isolation/UIProgressBarHeader.cpp
@@ -103,6 +109,7 @@ add_executable(tina_ui_tests
     header_isolation/UIScrollViewHeader.cpp
     header_isolation/UIListViewHeader.cpp
     header_isolation/UITreeViewHeader.cpp
+    header_isolation/UIVirtualGridViewHeader.cpp
     header_isolation/UIDropdownHeader.cpp
     header_isolation/UIPopupHeader.cpp
     header_isolation/UISliderHeader.cpp
@@ -111,6 +118,7 @@ add_executable(tina_ui_tests
     header_isolation/UIMenuHeader.cpp
     header_isolation/UIStyleHeader.cpp
     header_isolation/UIMotionHeader.cpp
+    header_isolation/UINumberFieldHeader.cpp
     header_isolation/UISemanticsHeader.cpp
     header_isolation/UIAccessibilityHeader.cpp
     header_isolation/UIDirtyHeader.cpp

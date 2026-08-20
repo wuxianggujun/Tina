@@ -540,6 +540,115 @@ buildDialogImpl(Authoring& authoring, UINodeId parent,
     return parts;
 }
 
+template <typename Authoring>
+[[nodiscard]] Core::Result<UISnackbarHostParts>
+buildSnackbarHostImpl(Authoring& authoring, UINodeId parent,
+                      const UISnackbarHostConfig& config,
+                      const UITheme& theme)
+{
+    auto budget = requiredSnackbarHostBuildBudget(config);
+    if (!budget) {
+        return Core::failure(budget.error());
+    }
+
+    UILayoutStyle rootLayout = config.layout;
+    rootLayout.placement = UILayoutPlacement::Overlay;
+    rootLayout.overlay.horizontal = UIAxisAlignment::Stretch;
+    rootLayout.overlay.vertical = UIAxisAlignment::Stretch;
+    rootLayout.visibility = UIVisibility::Collapsed;
+    UIElementDescriptor rootDescriptor = makePanelElement(rootLayout);
+    rootDescriptor.pointerHitPolicy = UIPointerHitPolicy::Ignore;
+    rootDescriptor.semantics.mode = UISemanticsMode::Automatic;
+    auto transactionResult = authoring.beginBuildTransaction(
+        parent, rootDescriptor, *budget);
+    if (!transactionResult) {
+        return Core::failure(transactionResult.error());
+    }
+    UIElementBuildTransaction transaction = std::move(*transactionResult);
+    UISnackbarHostParts parts{.root = transaction.rootNodeId()};
+
+    UILayoutStyle surfaceLayout = config.surfaceLayout;
+    surfaceLayout.placement = UILayoutPlacement::Overlay;
+    surfaceLayout.overlay.horizontal = UIAxisAlignment::Center;
+    surfaceLayout.overlay.vertical = UIAxisAlignment::End;
+    if (surfaceLayout.size.width.isAuto()) {
+        surfaceLayout.size.width = UILayoutLength::Px(480.0F);
+    }
+    if (surfaceLayout.minMax.maxWidth.isAuto()) {
+        surfaceLayout.minMax.maxWidth = UILayoutLength::Percent(100.0F);
+    }
+    if (surfaceLayout.margin == UIEdgeSpacing{}) {
+        surfaceLayout.margin = UIEdgeSpacing::All(config.viewportMargin);
+    }
+    if (surfaceLayout.padding == UIEdgeSpacing{}) {
+        surfaceLayout.padding = UIEdgeSpacing::HorizontalVertical(
+            theme.spacing.space5, theme.spacing.space3);
+    }
+    surfaceLayout.flexContainer.direction = UIFlexDirection::Row;
+    surfaceLayout.flexContainer.alignItems = UIAxisAlignment::Center;
+    if (surfaceLayout.flexContainer.gap == UILayoutGap{}) {
+        surfaceLayout.flexContainer.gap = UILayoutGap::All(theme.spacing.space4);
+    }
+    UIElementDescriptor surfaceDescriptor = makePanelElement(surfaceLayout);
+    surfaceDescriptor.visual.styleRole = UIStyleRoleId::FloatingSurface;
+    surfaceDescriptor.pointerHitPolicy = UIPointerHitPolicy::Ignore;
+    auto surface = transaction.createElement(parts.root, surfaceDescriptor);
+    if (!surface) {
+        return Core::failure(surface.error());
+    }
+    parts.surface = *surface;
+
+    UILayoutStyle toneBarLayout{};
+    toneBarLayout.size.width = UILayoutLength::Px(4.0F);
+    toneBarLayout.size.height = UILayoutLength::Px(theme.controls.buttonHeight);
+    toneBarLayout.flexItem.shrink = 0.0F;
+    UIElementDescriptor toneBarDescriptor = makePanelElement(toneBarLayout);
+    toneBarDescriptor.visual.boxPaint = makeSolidBox(theme.colors.primary);
+    toneBarDescriptor.semantics.mode = UISemanticsMode::Exclude;
+    auto toneBar = transaction.createElement(parts.surface, toneBarDescriptor);
+    if (!toneBar) {
+        return Core::failure(toneBar.error());
+    }
+    parts.toneBar = *toneBar;
+
+    UILayoutStyle messageLayout{};
+    messageLayout.size.width = UILayoutLength::Auto();
+    messageLayout.size.height = UILayoutLength::Px(theme.controls.buttonHeight);
+    messageLayout.flexItem.grow = 1.0F;
+    messageLayout.flexItem.shrink = 1.0F;
+    messageLayout.flexItem.basis = UILayoutLength::Px(0.0F);
+    UIElementDescriptor messageDescriptor = makeLabelElement({}, messageLayout);
+    messageDescriptor.visual.styleRole = UIStyleRoleId::TextBody;
+    messageDescriptor.semantics.mode = UISemanticsMode::Publish;
+    messageDescriptor.semantics.role = UISemanticsRole::Label;
+    messageDescriptor.semantics.useContentAsName = true;
+    messageDescriptor.semantics.liveSetting = UISemanticsLiveSetting::Polite;
+    auto message = transaction.createElement(parts.surface, messageDescriptor);
+    if (!message) {
+        return Core::failure(message.error());
+    }
+    parts.message = *message;
+
+    UILayoutStyle actionLayout{};
+    actionLayout.size.height = UILayoutLength::Px(theme.controls.buttonHeight);
+    actionLayout.padding = UIEdgeSpacing::HorizontalVertical(
+        theme.spacing.space4, theme.spacing.space2);
+    actionLayout.visibility = UIVisibility::Collapsed;
+    UIElementDescriptor actionDescriptor = makeButtonElement("Action", actionLayout);
+    actionDescriptor.visual.styleRole = UIStyleRoleId::ButtonText;
+    auto action = transaction.createElement(parts.surface, actionDescriptor);
+    if (!action) {
+        return Core::failure(action.error());
+    }
+    parts.action = *action;
+
+    auto committed = transaction.commit();
+    if (!committed) {
+        return Core::failure(committed.error());
+    }
+    return parts;
+}
+
 } // namespace
 
 Core::Result<UIComponentBuildBudget>
@@ -810,6 +919,13 @@ UIContext::buildDialog(UINodeId parent, const UIDialogConfig& config)
     return buildDialogImpl(*this, parent, config, productTheme());
 }
 
+Core::Result<UISnackbarHostParts>
+UIContext::buildSnackbarHost(UINodeId parent,
+                             const UISnackbarHostConfig& config)
+{
+    return buildSnackbarHostImpl(*this, parent, config, productTheme());
+}
+
 Core::Result<UIIconButtonParts>
 UITreeUpdater::buildIconButton(UINodeId parent, const UIIconButtonConfig& config)
 {
@@ -841,6 +957,18 @@ UITreeUpdater::buildDialog(UINodeId parent, const UIDialogConfig& config)
                              "UI tree updater is not bound to a context");
     }
     return buildDialogImpl(*this, parent, config, m_context->productTheme());
+}
+
+Core::Result<UISnackbarHostParts>
+UITreeUpdater::buildSnackbarHost(UINodeId parent,
+                                 const UISnackbarHostConfig& config)
+{
+    if (m_context == nullptr) {
+        return Core::failure(UIErrorCode::WrongContext,
+                             "UI tree updater is not bound to a context");
+    }
+    return buildSnackbarHostImpl(*this, parent, config,
+                                 m_context->productTheme());
 }
 
 } // namespace Tina::UI

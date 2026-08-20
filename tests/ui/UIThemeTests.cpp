@@ -249,19 +249,19 @@ TEST(UIThemeTest, SelectionControlsUseThemeInteractionStateTokens)
     EXPECT_NE(radio.radio.pressedIndicatorColor.alpha, 0);
 }
 
-TEST(UIThemeTest, VisualComponentAndToggleSwitchChromeUseThemeTokens)
+TEST(UIThemeTest, VisualComponentAndSwitchChromeUseThemeTokens)
 {
     constexpr UI::UITheme theme = UI::makeModernDesktopTheme();
-    constexpr UI::UICheckboxChrome toggleSwitch = UI::makeToggleSwitchChrome(theme);
-    ASSERT_TRUE(toggleSwitch.box.solidFill.has_value());
-    EXPECT_EQ(toggleSwitch.box.solidFill->color,
+    constexpr UI::UICheckboxChrome switchChrome = UI::makeSwitchChrome(theme);
+    ASSERT_TRUE(switchChrome.box.solidFill.has_value());
+    EXPECT_EQ(switchChrome.box.solidFill->color,
               UI::scaleColorAlpha(theme.colors.surfaceContainer, 245));
-    EXPECT_EQ(toggleSwitch.box.cornerRadii,
-              UI::UILogicalCornerRadii::uniform(theme.controls.toggleSwitchCornerRadius));
-    EXPECT_EQ(toggleSwitch.indicator.presentation,
+    EXPECT_EQ(switchChrome.box.cornerRadii,
+              UI::UILogicalCornerRadii::uniform(theme.controls.switchCornerRadius));
+    EXPECT_EQ(switchChrome.indicator.presentation,
               UI::UIToggleIndicatorPresentation::Switch);
-    EXPECT_EQ(toggleSwitch.indicator.checkedBackgroundColor, theme.colors.primary);
-    EXPECT_EQ(toggleSwitch.indicator.uncheckedIndicatorColor,
+    EXPECT_EQ(switchChrome.indicator.checkedBackgroundColor, theme.colors.primary);
+    EXPECT_EQ(switchChrome.indicator.uncheckedIndicatorColor,
               theme.colors.onSurfaceVariant);
 
     constexpr UI::UIDividerChrome divider =
@@ -482,9 +482,9 @@ TEST(UIThemeTest, SetProductThemeUpdatesEveryManagedControlProperty)
     auto builder = context->rootBuilder();
     auto label = builder.createElement(root->rootNodeId(), UI::makeLabelElement());
     auto checkbox = builder.createElement(root->rootNodeId(), UI::makeCheckboxElement());
-    auto toggleSwitch = builder.createElement(
+    auto switchElement = builder.createElement(
         root->rootNodeId(),
-        UI::makeToggleSwitchElement({.accessibleName = "Live preview"}));
+        UI::makeSwitchElement({.accessibleName = "Live preview"}));
     auto slider = builder.createElement(root->rootNodeId(), UI::makeSliderElement());
     auto textEdit = builder.createElement(root->rootNodeId(), UI::makeTextEditElement());
     auto progress = builder.createElement(root->rootNodeId(), UI::makeProgressBarElement());
@@ -492,7 +492,7 @@ TEST(UIThemeTest, SetProductThemeUpdatesEveryManagedControlProperty)
     auto tabView = builder.createElement(root->rootNodeId(), UI::makeTabViewElement());
     ASSERT_TRUE(tabView);
     auto tab = builder.createElement(*tabView, UI::makeTabElement("Tab"));
-    ASSERT_TRUE(label && checkbox && toggleSwitch && slider && textEdit && progress && radio && tab);
+    ASSERT_TRUE(label && checkbox && switchElement && slider && textEdit && progress && radio && tab);
     auto updater = context->treeUpdater(*root);
     ASSERT_TRUE(updater.has_value());
     ASSERT_TRUE(context->setProductTheme(UI::makeModernDesktopTheme(UI::UIColorScheme::Light)).has_value());
@@ -500,8 +500,8 @@ TEST(UIThemeTest, SetProductThemeUpdatesEveryManagedControlProperty)
     const UI::UITheme light = UI::makeModernDesktopTheme(UI::UIColorScheme::Light);
     EXPECT_EQ(updater->textStyle(*label).value(), UI::makeBodyTextStyle(light));
     EXPECT_EQ(updater->checkboxPaint(*checkbox).value(), UI::makeCheckboxChrome(light).indicator);
-    EXPECT_EQ(updater->checkboxPaint(*toggleSwitch).value(),
-              UI::makeToggleSwitchChrome(light).indicator);
+    EXPECT_EQ(updater->checkboxPaint(*switchElement).value(),
+              UI::makeSwitchChrome(light).indicator);
     EXPECT_EQ(updater->sliderPaint(*slider).value(), UI::makeSliderChrome(light).slider);
     EXPECT_EQ(updater->textEditPaint(*textEdit).value(), UI::makeTextEditChrome(light).paint);
     EXPECT_EQ(updater->textStyle(*textEdit).value(), UI::makeTextEditChrome(light).text);

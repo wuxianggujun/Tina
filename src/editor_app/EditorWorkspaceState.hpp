@@ -5,9 +5,11 @@
 
 #include "EditorAnimationPreview.hpp"
 #include "EditorFileDialog.hpp"
+#include "EditorIconResources.hpp"
 #include "EditorSourceImportLaunchOptions.hpp"
 #include "EditorSourceImportSelection.hpp"
 #include "EditorSourceImportService.hpp"
+#include "EditorWorkspaceUiRecipes.hpp"
 
 #include <tina/asset/AssetGpuMesh.hpp>
 #include <tina/asset/AssetGpuTexture.hpp>
@@ -70,9 +72,15 @@
 #include <tina/scene/World.hpp>
 #include <tina/scene/World2DSnapshot.hpp>
 #include <tina/ui/UIElement.hpp>
+#include <tina/ui/UICollapsibleSection.hpp>
+#include <tina/ui/UIColorField.hpp>
+#include <tina/ui/UIColorPicker.hpp>
+#include <tina/ui/UIDialog.hpp>
 #include <tina/ui/UIListView.hpp>
 #include <tina/ui/UILayout.hpp>
+#include <tina/ui/UINumberField.hpp>
 #include <tina/ui/UIPaint.hpp>
+#include <tina/ui/UISnackbar.hpp>
 #include <tina/ui/UIStyle.hpp>
 #include <tina/ui/UITheme.hpp>
 #include <tina/ui/UITreeView.hpp>
@@ -128,13 +136,18 @@ inline constexpr u32 WindowLogicalWidth = 1280;
 inline constexpr u32 WindowLogicalHeight = 800;
 inline constexpr u32 HierarchyMaterializedCapacity = 16;
 inline constexpr u32 AssetBrowserMaterializedCapacity = 12;
+inline constexpr u32 ProjectAssetCompactIdCharacterCount = 4;
+inline constexpr float ProjectAssetMinimumItemWidth = 120.0F;
 inline constexpr u32 SourceImportMaterializedCapacity = 5;
 inline constexpr u32 AuthoringEntityCapacity = 16;
 inline constexpr u32 InitialAuthoringEntityCount = 5;
 inline constexpr u32 AnimationVisibleFrameSlots = 6;
 inline constexpr u32 DocumentTabSlots = 6;
-inline constexpr u32 AutomaticAuthoringStageCount = 51;
-inline constexpr u64 AutomaticAuthoringFrameReserve = 8;
+inline constexpr u32 AutomaticColorPickerVisibleStage = 52;
+inline constexpr u32 AutomaticFinalSelectionCommitStage = 56;
+inline constexpr u32 AutomaticAuthoringStageCount = 57;
+inline constexpr u64 AutomaticAuthoringFrameReserve = 11;
+inline constexpr float AutomaticInspectorCaptureInset = 8.0F;
 inline constexpr u64 AutomaticAuthoringMinimumFrameCount =
     static_cast<u64>(AutomaticAuthoringStageCount) +
     AutomaticAuthoringFrameReserve;
@@ -226,6 +239,24 @@ enum class WorkspaceMode : u8 {
     World2D,
     World3D,
 };
+enum class RgbaCaptureStage : u8 {
+    Workspace,
+    ColorPicker,
+    DeleteDialog,
+};
+[[nodiscard]] constexpr std::string_view rgbaCaptureStageName(
+    RgbaCaptureStage stage) noexcept
+{
+    switch (stage) {
+    case RgbaCaptureStage::Workspace:
+        return "workspace";
+    case RgbaCaptureStage::ColorPicker:
+        return "color-picker";
+    case RgbaCaptureStage::DeleteDialog:
+        return "delete-dialog";
+    }
+    return "workspace";
+}
 enum class ViewportToolMode : u8 {
     Select,
     Translate,
@@ -338,8 +369,10 @@ struct EditorLaunchOptions final {
     std::string world2DDocumentPathUtf8{};
     std::string world3DDocumentPathUtf8{};
     std::string catalogRootUtf8{};
+    std::string rgbaOutputUtf8{};
     Tina::EditorApp::Detail::EditorSourceImportLaunchOptions sourceImport{};
     WorkspaceMode initialWorkspace = WorkspaceMode::World2D;
+    RgbaCaptureStage rgbaStage = RgbaCaptureStage::Workspace;
     bool autoDemo = false;
 };
 class EditorRenderDeviceAccess final {
@@ -1368,11 +1401,6 @@ struct LifecycleCounters final {
     u64 animationPlaybackTransitions = 0;
     u64 catalogEntryCount = 0;
     u64 workspaceSwitches = 0;
-    u64 styleRegisteredClasses = 0;
-    u64 styleRegisteredTokens = 0;
-    u64 styleActiveRules = 0;
-    u64 styleRevision = 0;
-    u64 styleTokenUpdates = 0;
     bool editorActionsReady = false;
     u64 authoringEdits = 0;
     u64 authoringUndos = 0;
@@ -1413,6 +1441,12 @@ struct LifecycleCounters final {
     u64 sceneReparentRootCommands = 0;
     u64 sceneReparentCommands = 0;
     u64 sceneDeleteCommands = 0;
+    u32 rgbaCaptureWidth = 0;
+    u32 rgbaCaptureHeight = 0;
+    u64 rgbaCaptureBytes = 0;
+    bool rgbaCaptureAttempted = false;
+    bool rgbaCaptureOk = false;
+    bool rgbaCaptureOutputWritten = false;
     u32 automaticAddedStableId = 0;
     u32 automaticDuplicatedStableId = 0;
     u32 automaticAuthoringStage = 0;
@@ -1464,7 +1498,6 @@ struct LifecycleCounters final {
     float viewportZoomPercent = 100.0F;
     u64 editorLayoutRegions = 0;
     bool selectionVerified = false;
-    bool stylesheetInstalled = false;
     bool runtimePreviewValid = false;
     bool gpuViewportReady = false;
     bool viewportGridReady = false;
@@ -1544,6 +1577,8 @@ enum class EditorCommand : u32 {
     SceneAdd,
     SceneDuplicate,
     SceneDelete,
+    SceneDeleteConfirm,
+    SceneDeleteCancel,
     SceneReparentRoot,
     SceneReparent,
     SceneFocus,
@@ -1577,8 +1612,6 @@ enum class EditorCommand : u32 {
     AnimationRemoveEvent,
     AnimationCycleMode,
     AnimationCookPreview,
-    AnimationUndo,
-    AnimationRedo,
     ProjectFilterAll,
     ProjectFilter2D,
     ProjectFilter3D,
@@ -1694,10 +1727,54 @@ enum class InspectorTransformField : u8 {
     ScaleY = 7,
     ScaleZ = 8,
 };
+struct InspectorTransformStepRequest final {
+    InspectorTransformField field = InspectorTransformField::PositionX;
+    i32 stepCount = 0;
+};
 [[nodiscard]] constexpr std::size_t inspectorTransformFieldIndex(
     InspectorTransformField field) noexcept
 {
     return static_cast<std::size_t>(field);
+}
+[[nodiscard]] constexpr bool inspectorTransformFieldRequires3D(
+    InspectorTransformField field) noexcept
+{
+    return field == InspectorTransformField::PositionZ ||
+           field == InspectorTransformField::RotationX ||
+           field == InspectorTransformField::RotationY ||
+           field == InspectorTransformField::ScaleZ;
+}
+[[nodiscard]] constexpr UI::UINumberFieldValueSpec
+inspectorTransformNumberSpec(InspectorTransformField field) noexcept
+{
+    constexpr float MaximumMagnitude = 1'000'000.0F;
+    switch (field) {
+    case InspectorTransformField::RotationX:
+    case InspectorTransformField::RotationY:
+    case InspectorTransformField::RotationZ:
+        return {
+            .minValue = -MaximumMagnitude,
+            .maxValue = MaximumMagnitude,
+            .step = 1.0F,
+            .decimalPlaces = 6,
+        };
+    case InspectorTransformField::ScaleX:
+    case InspectorTransformField::ScaleY:
+    case InspectorTransformField::ScaleZ:
+        return {
+            .minValue = 0.01F,
+            .maxValue = MaximumMagnitude,
+            .step = 0.01F,
+            .decimalPlaces = 6,
+        };
+    default:
+        return {
+            .minValue = -MaximumMagnitude,
+            .maxValue = MaximumMagnitude,
+            .step = 0.1F,
+            .decimalPlaces = 6,
+        };
+    }
 }
 [[nodiscard]] inline Tina::Core::Result<std::optional<float>>
 parseInspectorTransformValue(std::string_view text, std::string_view fieldName)
@@ -1773,6 +1850,8 @@ parseInspectorTransformValue(std::string_view text, std::string_view fieldName)
     constexpr std::string_view World2DPathPrefix = "--world2d-path=";
     constexpr std::string_view World3DPathPrefix = "--world3d-path=";
     constexpr std::string_view CatalogRootPrefix = "--catalog-root=";
+    constexpr std::string_view RgbaOutputPrefix = "--rgba-output=";
+    constexpr std::string_view RgbaStagePrefix = "--rgba-stage=";
     constexpr std::string_view WorkspacePrefix = "--workspace=";
 
     EditorLaunchOptions options{};
@@ -1781,6 +1860,8 @@ parseInspectorTransformValue(std::string_view text, std::string_view fieldName)
     bool hasWorld2DPath = false;
     bool hasWorld3DPath = false;
     bool hasCatalogRoot = false;
+    bool hasRgbaOutput = false;
+    bool hasRgbaStage = false;
     bool hasWorkspace = false;
     bool hasAutoDemo = false;
     for (int index = 1; index < argumentCount; ++index) {
@@ -1877,6 +1958,49 @@ parseInspectorTransformValue(std::string_view text, std::string_view fieldName)
             hasCatalogRoot = true;
             continue;
         }
+        if (argument.starts_with(RgbaOutputPrefix)) {
+            if (hasRgbaOutput) {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::InvalidArgument,
+                    "Duplicate --rgba-output argument");
+            }
+            const std::string_view value = argument.substr(RgbaOutputPrefix.size());
+            if (value.empty() || !Tina::Core::isStrictUtf8WithoutNul(value)) {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::InvalidArgument,
+                    "--rgba-output must be a non-empty strict UTF-8 path");
+            }
+            try {
+                options.rgbaOutputUtf8.assign(value);
+            } catch (const std::bad_alloc&) {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::OutOfMemory,
+                    "Could not retain --rgba-output");
+            }
+            hasRgbaOutput = true;
+            continue;
+        }
+        if (argument.starts_with(RgbaStagePrefix)) {
+            if (hasRgbaStage) {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::InvalidArgument,
+                    "Duplicate --rgba-stage argument");
+            }
+            const std::string_view value = argument.substr(RgbaStagePrefix.size());
+            if (value == "workspace") {
+                options.rgbaStage = RgbaCaptureStage::Workspace;
+            } else if (value == "color-picker") {
+                options.rgbaStage = RgbaCaptureStage::ColorPicker;
+            } else if (value == "delete-dialog") {
+                options.rgbaStage = RgbaCaptureStage::DeleteDialog;
+            } else {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::InvalidArgument,
+                    "--rgba-stage must be workspace, color-picker, or delete-dialog");
+            }
+            hasRgbaStage = true;
+            continue;
+        }
         if (argument.starts_with(WorkspacePrefix)) {
             if (hasWorkspace) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
@@ -1922,6 +2046,16 @@ parseInspectorTransformValue(std::string_view text, std::string_view fieldName)
             Tina::Core::CoreErrorCode::InvalidArgument,
             "--auto-demo requires an explicit --frames value");
     }
+    if (hasRgbaOutput && !options.autoDemo) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::InvalidArgument,
+            "--rgba-output requires --auto-demo");
+    }
+    if (hasRgbaStage && !hasRgbaOutput) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::InvalidArgument,
+            "--rgba-stage requires --rgba-output");
+    }
     if (options.autoDemo &&
         options.targetFrameCount < AutomaticAuthoringMinimumFrameCount) {
         std::string message = "--auto-demo requires --frames of at least ";
@@ -1936,14 +2070,6 @@ parseInspectorTransformValue(std::string_view text, std::string_view fieldName)
     UI::UILayoutStyle style{};
     style.size.width = UI::UILayoutLength::Percent(widthPercent);
     style.size.height = UI::UILayoutLength::Percent(heightPercent);
-    return style;
-}
-[[nodiscard]] inline UI::UILayoutStyle flexChild(float grow, float basisPercent, float heightPercent) noexcept
-{
-    UI::UILayoutStyle style = percentSize(basisPercent, heightPercent);
-    style.flexItem.grow = grow;
-    style.flexItem.shrink = 1.0F;
-    style.flexItem.basis = UI::UILayoutLength::Percent(basisPercent);
     return style;
 }
 [[nodiscard]] inline UI::UILayoutStyle fixedSize(float width, float height) noexcept
@@ -1971,24 +2097,30 @@ parseInspectorTransformValue(std::string_view text, std::string_view fieldName)
 [[nodiscard]] inline UI::UILayoutStyle dirtyCloseModalLayout(
     UI::UIVisibility visibility) noexcept
 {
+    constexpr UI::UITheme theme =
+        UI::makeModernDesktopTheme(UI::UIColorScheme::Dark, UI::UIDensity::Compact);
     UI::UILayoutStyle style = fixedSize(520.0F, 214.0F);
     style.placement = UI::UILayoutPlacement::Overlay;
     style.overlay.horizontal = UI::UIAxisAlignment::Center;
     style.overlay.vertical = UI::UIAxisAlignment::Center;
     style.visibility = visibility;
-    style.padding = UI::UIEdgeSpacing::All(18.0F);
+    style.padding = UI::UIEdgeSpacing::All(theme.spacing.space6);
     style.flexContainer.direction = UI::UIFlexDirection::Column;
-    style.flexContainer.gap.row = 10.0F;
+    style.flexContainer.gap.row = theme.spacing.space5;
     return style;
 }
-[[nodiscard]] inline UI::UILayoutStyle boundedDock(float basisPercent, float minimumWidth,
-                                            float maximumWidth) noexcept
+[[nodiscard]] inline UI::UILayoutStyle sceneDeleteDialogLayout(
+    UI::UIVisibility visibility) noexcept
 {
-    UI::UILayoutStyle style = flexChild(0.0F, basisPercent, 100.0F);
-    style.minMax.minWidth = UI::UILayoutLength::Px(minimumWidth);
-    style.minMax.maxWidth = UI::UILayoutLength::Px(maximumWidth);
+    UI::UILayoutStyle style = percentSize(100.0F, 100.0F);
+    style.placement = UI::UILayoutPlacement::Overlay;
+    style.overlay.horizontal = UI::UIAxisAlignment::Stretch;
+    style.overlay.vertical = UI::UIAxisAlignment::Stretch;
+    style.visibility = visibility;
     return style;
 }
+inline constexpr u32 SceneDeleteCancelActionIndex = 0U;
+inline constexpr u32 SceneDeleteConfirmActionIndex = 1U;
 [[nodiscard]] inline u32 stableEntityIdForHierarchyItem(UI::UITreeViewItemKey key) noexcept
 {
     return key <= (std::numeric_limits<u32>::max)()
@@ -2002,6 +2134,13 @@ struct EditorHierarchyRow final {
     u32 level = 0;
     bool expandable = false;
     std::string label{};
+};
+struct SceneDeleteConfirmation final {
+    Tina::Editor::EditorDocumentKey documentKey{};
+    WorkspaceMode workspace = WorkspaceMode::World2D;
+    u32 stableId = 0;
+    u64 documentRevision = 0;
+    bool confirming = false;
 };
 struct SavedTileMapChunkBaseline final {
     Tina::Core::AssetId assetId{};
@@ -2625,8 +2764,8 @@ createProjectAssetBrowser(const Tina::Asset::CatalogSnapshot& catalog)
             }
             const auto idText = entry->assetId.canonicalText();
             std::string displayName{Tina::Editor::projectAssetKindLabel(entry->assetKind)};
-            displayName += "  ";
-            displayName.append(idText.data(), 8U);
+            displayName += "  #";
+            displayName.append(idText.data(), ProjectAssetCompactIdCharacterCount);
             std::vector<Tina::AssetFormat::AssetDependency> dependencies;
             dependencies.reserve(entry->dependencyCount);
             for (u32 dependencyIndex = 0;
@@ -2810,12 +2949,17 @@ class EditorWorkspaceState final : public Tina::IGameState {
         UI::UITextStyle secondaryText{};
         UI::UITextStyle accentText{};
 
+        [[nodiscard]] Tina::Core::Result<UI::UINodeId> createSurface(
+            UI::UINodeId parent, UI::UILayoutStyle layout,
+            UI::UISurfaceVariant variant);
         [[nodiscard]] Tina::Core::Result<UI::UINodeId> createPanel(
-            UI::UINodeId parent, UI::UILayoutStyle layout, UI::UIStyleRoleId role,
-            UI::UIStyleClassId styleClass = {});
+            UI::UINodeId parent, UI::UILayoutStyle layout);
         [[nodiscard]] Tina::Core::Result<UI::UINodeId> createLabel(
             UI::UINodeId parent, std::string_view text, UI::UILayoutStyle layout,
             const UI::UITextStyle& style);
+        [[nodiscard]] Tina::Core::Result<UI::UINodeId> createBadge(
+            UI::UINodeId parent, std::string_view text, UI::UILayoutStyle layout,
+            UI::UIBadgeTone tone = UI::UIBadgeTone::Neutral);
         [[nodiscard]] Tina::Core::Result<UI::UINodeId> createButton(
             UI::UINodeId parent, std::string_view text, UI::UILayoutStyle layout,
             bool enabled = true,
@@ -2823,20 +2967,35 @@ class EditorWorkspaceState final : public Tina::IGameState {
         [[nodiscard]] Tina::Core::Result<UI::UINodeId> createSegmentedButton(
             UI::UINodeId parent, std::string_view text, UI::UILayoutStyle layout,
             bool enabled = true);
+        [[nodiscard]] Tina::Core::Result<UI::UINodeId> createIconButton(
+            UI::UINodeId parent, EditorIcon icon, std::string_view accessibleName,
+            UI::UILayoutStyle layout = {}, bool enabled = true,
+            UI::UIButtonVariant variant = UI::UIButtonVariant::Text);
+        [[nodiscard]] Tina::Core::Result<UI::UINodeId> createIconToggleButton(
+            UI::UINodeId parent, EditorIcon icon, std::string_view accessibleName,
+            UI::UILayoutStyle layout = {}, bool enabled = true);
         [[nodiscard]] Tina::Core::Result<UI::UINodeId> createTextEdit(
             UI::UINodeId parent, std::string_view text, UI::UILayoutStyle layout,
             bool enabled);
     };
 
-    [[nodiscard]] Tina::Core::Status buildToolbarUi(UiBuildContext& ui, UI::UINodeId parent);
-    [[nodiscard]] Tina::Core::Status buildContextBarUi(UiBuildContext& ui, UI::UINodeId parent);
+    [[nodiscard]] Tina::Core::Status buildCommandBarUi(UiBuildContext& ui, UI::UINodeId parent);
     [[nodiscard]] Tina::Core::Status buildDocumentTabsUi(UiBuildContext& ui, UI::UINodeId parent);
-    [[nodiscard]] Tina::Core::Status buildLeftDockUi(UiBuildContext& ui, UI::UINodeId parent);
-    [[nodiscard]] Tina::Core::Status buildViewportUi(UiBuildContext& ui, UI::UINodeId parent);
-    [[nodiscard]] Tina::Core::Status buildInspectorUi(UiBuildContext& ui, UI::UINodeId parent);
-    [[nodiscard]] Tina::Core::Status buildTimelineUi(UiBuildContext& ui, UI::UINodeId parent);
+    [[nodiscard]] Tina::Core::Status buildWorkspaceUi(UiBuildContext& ui, UI::UINodeId parent);
+    [[nodiscard]] Tina::Core::Status buildLeftDockUi(
+        UiBuildContext& ui, UI::UINodeId parent, UI::UINodeId& leftDock);
+    [[nodiscard]] Tina::Core::Status buildViewportUi(
+        UiBuildContext& ui, UI::UINodeId parent, UI::UINodeId& viewport);
+    [[nodiscard]] Tina::Core::Status buildInspectorUi(
+        UiBuildContext& ui, UI::UINodeId parent, UI::UINodeId& inspector);
+    [[nodiscard]] Tina::Core::Status buildTimelineUi(
+        UiBuildContext& ui, UI::UINodeId parent, UI::UINodeId& timeline);
     [[nodiscard]] Tina::Core::Status buildStatusBarUi(UiBuildContext& ui, UI::UINodeId parent);
     [[nodiscard]] Tina::Core::Status buildDirtyCloseModalUi(UiBuildContext& ui, UI::UINodeId parent);
+    [[nodiscard]] Tina::Core::Status buildSceneDeleteDialogUi(
+        UiBuildContext& ui, UI::UINodeId parent);
+    [[nodiscard]] Tina::Core::Status buildSnackbarUi(
+        UiBuildContext& ui, UI::UINodeId parent);
     [[nodiscard]] Tina::Core::Status registerUiCallbacks(UiBuildContext& ui);
 
     void onExit(Tina::GameStateExitContext&) noexcept override;
@@ -2849,6 +3008,14 @@ class EditorWorkspaceState final : public Tina::IGameState {
     void resetViewportInteractionState() noexcept;
     [[nodiscard]] Tina::Core::Status processEditorShortcuts(
         const Tina::FrameActionSnapshot& actions);
+    [[nodiscard]] Tina::Core::Status processPendingInspectorTransformStep(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status processPendingInspectorSectionUpdates(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status updateHierarchySearch(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status updateSnackbarUi(
+        Tina::PrimaryWindowUITreeUpdater& tree);
     bool queueEditorCommand(EditorCommand command) noexcept;
     void queueViewportToolMode(ViewportToolMode mode) noexcept;
     [[nodiscard]] bool tileMapEditingContext() const noexcept;
@@ -3053,6 +3220,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] Tina::Core::Status applyProjectAssetFilter(
         Tina::PrimaryWindowUITreeUpdater& tree,
         Tina::Editor::ProjectAssetFilter filter);
+    [[nodiscard]] Tina::Core::Status synchronizePendingProjectAssetSelection(
+        Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] WorkspaceSessionState*
     findDocumentSession(Tina::Editor::EditorDocumentKey key) noexcept;
     [[nodiscard]] const WorkspaceSessionState*
@@ -3070,8 +3239,6 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] bool documentPathOwnedByOtherSession(
         std::string_view path,
         Tina::Editor::EditorDocumentKey activeKey) const noexcept;
-    [[nodiscard]] Tina::Core::Status refreshToolbarPathForActiveTab(
-        Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Editor::EditorDocumentKey*
     activeAuthoringDocumentOwner(Tina::Editor::EditorDocumentKind kind) noexcept;
     [[nodiscard]] const SuspendedTabAuthoringDocument*
@@ -3103,6 +3270,14 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] Tina::Core::Status confirmDirtyCloseDiscard(
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status cancelDirtyClose(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status showSceneDeleteConfirmation(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status hideSceneDeleteConfirmation(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status captureRequestedRgbaFrame(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status processPendingPointLightColorUpdates(
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status activateDocumentTab(
         Tina::PrimaryWindowUITreeUpdater& tree, u32 index);
@@ -3196,10 +3371,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
     static bool resolveSourceImportItem(
         const void* state, u64 logicalIndex,
         UI::UIListViewItemDescriptor& output) noexcept;
-    [[nodiscard]] UI::UIListViewDataSource projectAssetDataSource() const noexcept;
+    [[nodiscard]] UI::UIVirtualGridViewDataSource projectAssetDataSource() const noexcept;
     [[nodiscard]] static u64 projectAssetItemCount(const void* state) noexcept;
     static bool resolveProjectAssetItem(const void* state, u64 logicalIndex,
-                                        UI::UIListViewItemDescriptor& output) noexcept;
+                                        UI::UIVirtualGridViewItemDescriptor& output) noexcept;
     [[nodiscard]] bool hierarchyRowCollapsed(u32 stableId) const noexcept;
     [[nodiscard]] const EditorHierarchyRow*
     hierarchyRow(u32 stableId) const noexcept;
@@ -3261,29 +3436,40 @@ class EditorWorkspaceState final : public Tina::IGameState {
     bool sourceImportStartPending_ = false;
     bool sourceImportCatalogCommitted_ = false;
     Tina::EditorApp::Detail::EditorFileDialog fileDialog_{};
+    EditorIconResources iconResources_{};
+    Tina::PrimaryWindowUIImageResolverRegistration iconResolverRegistration_{};
     Tina::UI::UIRootOwner uiRoot_{};
     UI::UINodeId hierarchyTree_{};
     UI::UINodeId hierarchyCount_{};
+    UI::UINodeId hierarchySearchInput_{};
     UI::UINodeId projectAssetList_{};
     UI::UINodeId projectAssetCount_{};
+    UI::UINodeId projectAssetSummary_{};
     UI::UINodeId projectAssetSource_{};
+    UI::UINodeId sourceImportSection_{};
+    UI::UILayoutStyle sourceImportSectionLayout_{};
     UI::UINodeId sourceImportList_{};
     UI::UINodeId sourceImportCount_{};
+    UI::UINodeId inspectorScroll_{};
     UI::UINodeId inspectorMode_{};
     UI::UINodeId inspectorName_{};
     UI::UINodeId inspectorKind_{};
     UI::UINodeId inspectorNote_{};
+    UI::UINodeId inspectorAssetRow_{};
     UI::UINodeId inspectorAssetPath_{};
     UI::UINodeId inspectorDependencySummary_{};
     UI::UINodeId inspectorDependencyList_{};
     UI::UINodeId inspectorDocument_{};
-    UI::UINodeId hierarchySelectionSummary_{};
     UI::UINodeId viewportPreviewLayer_{};
     std::array<UI::UINodeId, ViewportGridVisualNodeCapacity>
         viewportGridNodes_{};
     std::array<UI::UINodeId, ViewportGizmoVisualNodeCapacity>
         viewportGizmoVisualNodes_{};
     UI::UINodeId viewportMarqueeNode_{};
+    UI::UINodeId inspectorTransformHeader_{};
+    UI::UILayoutStyle inspectorTransformHeaderLayout_{};
+    UI::UINodeId inspectorComponentsHeader_{};
+    UI::UILayoutStyle inspectorComponentsHeaderLayout_{};
     UI::UINodeId inspectorPositionX_{};
     UI::UINodeId inspectorPositionY_{};
     UI::UINodeId inspectorPositionZ_{};
@@ -3294,21 +3480,41 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId inspectorScaleX_{};
     UI::UINodeId inspectorScaleY_{};
     UI::UINodeId inspectorScaleZ_{};
-    UI::UINodeId authoringHint_{};
+    struct InspectorTransformNumberFieldUi final {
+        UI::UINodeId root{};
+        UI::UILayoutStyle layout{};
+        UI::UINodeId decrementButton{};
+        UI::UINodeId incrementButton{};
+    };
+    std::array<InspectorTransformNumberFieldUi, 9>
+        inspectorTransformNumberFields_{};
+    struct InspectorLayoutNodeUi final {
+        UI::UINodeId root{};
+        UI::UILayoutStyle layout{};
+    };
+    InspectorLayoutNodeUi inspectorHierarchyHeaderUi_{};
+    InspectorLayoutNodeUi inspectorHierarchyParentRowUi_{};
+    InspectorLayoutNodeUi inspectorHierarchyApplyParentUi_{};
+    InspectorLayoutNodeUi inspectorTileMapHeaderUi_{};
+    InspectorLayoutNodeUi inspectorTileMapStatusUi_{};
+    std::array<InspectorLayoutNodeUi, 4> inspectorTileMapActionRows_{};
     UI::UINodeId tileMapStatus_{};
     UI::UINodeId animationStatus_{};
     UI::UINodeId animationSelection_{};
+    UI::UINodeId animationEventPosition_{};
     UI::UINodeId statusDocument_{};
     UI::UINodeId statusPreview_{};
     UI::UINodeId statusSelection_{};
-    UI::UINodeId toolbarPath_{};
-    UI::UINodeId toolbarDocument_{};
     UI::UINodeId dirtyCloseModal_{};
     UI::UINodeId dirtyCloseTitle_{};
     UI::UINodeId dirtyCloseMessage_{};
-    UI::UINodeId dirtyClosePath_{};
+    UI::UINodeId dirtyClosePathInput_{};
+    UI::UIDialogParts sceneDeleteDialog_{};
+    UI::UISnackbarHostParts snackbarParts_{};
+    UI::UILayoutStyle snackbarRootLayout_{};
+    UI::UILayoutStyle snackbarActionLayout_{};
+    std::array<UI::UIStraightSrgba8Color, 4> snackbarToneColors_{};
     UI::UINodeId breadcrumb_{};
-    UI::UINodeId viewportTitle_{};
     UI::UINodeId viewportMode_{};
     UI::UINodeId gridStatus_{};
     UI::UINodeId previewAssetStatus_{};
@@ -3321,8 +3527,13 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId frameAllButton_{};
     UI::UINodeId documentFormat_{};
     struct ComponentSectionUi final {
-        UI::UINodeId activeCheckbox{};
-        UI::UINodeId headerLabel{};
+        UI::UICollapsibleSectionParts collapsible{};
+        UI::UILayoutStyle rootLayout{};
+        UI::UILayoutStyle indicatorLayout{};
+        UI::UILayoutStyle contentLayout{};
+        bool expanded = true;
+        bool collapseUpdatePending = false;
+        UI::UINodeId activeSwitch{};
         UI::UINodeId addButton{};
         UI::UINodeId removeButton{};
         std::array<UI::UINodeId, 6> fields{};
@@ -3333,29 +3544,40 @@ class EditorWorkspaceState final : public Tina::IGameState {
     // 0..4 mirror Tina::Editor::World2DComponentKind; 5 is the 3D MeshRenderer.
     static constexpr Tina::Core::usize MeshRendererSectionIndex = 5;
     std::array<ComponentSectionUi, 6> componentSections_{};
-    UI::UINodeId mode2DButton_{};
-    UI::UINodeId mode3DButton_{};
+    struct InspectorPointLightColorChannelRequest final {
+        UI::UIColorPickerChannel channel = UI::UIColorPickerChannel::Red;
+        float value = 0.0F;
+    };
+    UI::UIColorFieldParts pointLightColorField_{};
+    UI::UIColorPickerParts pointLightColorPicker_{};
+    UI::UILayoutStyle pointLightColorPickerLayout_{};
+    UI::UIStraightSrgba8Color pointLightColorValue_{UI::rgba8(255, 255, 255)};
+    std::optional<InspectorPointLightColorChannelRequest>
+        pendingPointLightColorChannel_{};
+    bool pointLightColorPickerVisible_ = false;
+    bool pendingPointLightColorPickerToggle_ = false;
+    bool pointLightColorMixed_ = false;
     UI::UINodeId playButton_{};
     UI::UINodeId pauseButton_{};
     UI::UINodeId stepButton_{};
     UI::UINodeId stopButton_{};
-    std::array<UI::UINodeId, 2> selectToolButtons_{};
-    std::array<UI::UINodeId, 2> translateToolButtons_{};
-    std::array<UI::UINodeId, 2> rotateToolButtons_{};
-    std::array<UI::UINodeId, 2> scaleToolButtons_{};
+    std::array<UI::UINodeId, 1> selectToolButtons_{};
+    std::array<UI::UINodeId, 1> translateToolButtons_{};
+    std::array<UI::UINodeId, 1> rotateToolButtons_{};
+    std::array<UI::UINodeId, 1> scaleToolButtons_{};
     UI::UINodeId orientationButton_{};
     UI::UINodeId snapButton_{};
     std::array<UI::UINodeId, 3> marqueeModeButtons_{};
-    UI::UINodeId moveButton_{};
     UI::UINodeId addEntityButton_{};
     UI::UINodeId duplicateEntityButton_{};
     UI::UINodeId deleteEntityButton_{};
-    UI::UINodeId reparentEntityRootButton_{};
     UI::UINodeId reparentEntityButton_{};
     UI::UINodeId focusEntityButton_{};
     UI::UINodeId tilePaintToolButton_{};
     UI::UINodeId tileEraseToolButton_{};
     UI::UINodeId applyTransformButton_{};
+    UI::UINodeId applyTransformButtonRoot_{};
+    UI::UILayoutStyle applyTransformButtonLayout_{};
     UI::UINodeId undoButton_{};
     UI::UINodeId redoButton_{};
     UI::UINodeId saveButton_{};
@@ -3381,7 +3603,11 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId bakeNavigationButton_{};
     UI::UINodeId generateTileMapGameplayButton_{};
     UI::UINodeId animationModeButton_{};
-    UI::UINodeId animationPlayButton_{};
+    struct AnimationPlaybackButtonsUi final {
+        UI::UIIconButtonParts play{};
+        UI::UIIconButtonParts pause{};
+        UI::UILayoutStyle layout{};
+    } animationPlaybackButtons_{};
     UI::UINodeId animationCookButton_{};
     UI::UINodeId animationPreviousButton_{};
     UI::UINodeId animationNextButton_{};
@@ -3400,15 +3626,11 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId animationEventAddButton_{};
     UI::UINodeId animationEventApplyButton_{};
     UI::UINodeId animationEventRemoveButton_{};
-    UI::UINodeId animationUndoButton_{};
-    UI::UINodeId animationRedoButton_{};
     std::array<UI::UINodeId, AnimationVisibleFrameSlots> animationFrameButtons_{};
-    UI::UIStyleClassId dockClass_{};
-    UI::UIStyleClassId viewportClass_{};
-    UI::UIStyleTokenId viewportToken_{};
     UI::UITreeViewItemKey selectionKey_ = UI::InvalidUITreeViewItemKey;
     std::vector<EditorHierarchyRow> hierarchyRows_{};
     std::vector<u32> collapsedHierarchyIds_{};
+    std::string hierarchyFilterUtf8_{};
     ViewportToolMode viewportToolMode_ = ViewportToolMode::Select;
     Tina::Editor::EditorTransformGizmo viewportTransformGizmo_{};
     ViewportTransformTransaction viewportGizmo_{};
@@ -3424,7 +3646,6 @@ class EditorWorkspaceState final : public Tina::IGameState {
     bool preserveViewportSelectionOnHierarchyPublish_ = false;
     std::array<UI::UIRoutedPointerListenerToken, 5> viewportPointerListeners_{};
     bool queuedFirstSelection_ = false;
-    bool queuedSecondStyleUpdate_ = false;
     bool pendingAutoTransformInput_ = false;
     u32 autoAuthoringStage_ = 0;
     UI::UILogicalPoint autoGizmoStart_{};
@@ -3463,6 +3684,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     bool previewAssetBindingsRefreshPending_ = false;
     bool catalogRefreshPending_ = false;
     bool projectBrowserUiRefreshPending_ = false;
+    bool projectAssetSelectionSyncPending_ = false;
     bool sourceImportUiRefreshPending_ = false;
     bool assetInspectorActive_ = false;
     bool pendingAnimationTimelineRefresh_ = false;
@@ -3502,15 +3724,23 @@ class EditorWorkspaceState final : public Tina::IGameState {
     u32 surfacePixelWidth_ = WindowLogicalWidth;
     u32 surfacePixelHeight_ = WindowLogicalHeight;
     std::string authoringFeedback_ = "One validated revision per command";
+    std::optional<UI::UISnackbarHost> snackbarHost_{};
+    Tina::Core::SteadyMonotonicClock snackbarClock_{};
+    std::string lastSnackbarFeedback_{};
+    u64 observedSnackbarRevision_ = 0;
     std::optional<u32> pendingSelectionStableId_{};
     std::optional<u64> observedProjectAssetSelectionIndex_{};
     std::optional<u64> observedSourceImportSelectionIndex_{};
     std::vector<std::string> inspectorDependencyLabels_{};
     std::optional<u32> pendingDocumentTabActivation_{};
     std::optional<EditorCommand> pendingEditorCommand_{};
+    std::optional<InspectorTransformStepRequest>
+        pendingInspectorTransformStep_{};
     std::optional<Tina::Editor::EditorDocumentKey> pendingDirtyCloseKey_{};
+    std::optional<SceneDeleteConfirmation> pendingSceneDeleteConfirmation_{};
+    bool pendingSceneDeleteDialogFocus_ = false;
+    bool pendingHierarchyFocusRestore_ = false;
     std::optional<ViewportToolMode> pendingViewportToolMode_{};
-    std::optional<UI::UIStraightSrgba8Color> pendingViewportTokenColor_{};
     std::optional<float> pendingViewportSliderValue_{};
     std::optional<float> pendingViewportZoomPercent_{};
     std::optional<Tina::Editor::EditorMarqueeSelectionMode>

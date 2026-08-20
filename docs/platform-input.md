@@ -50,6 +50,8 @@ GLFW backend 已实现：
 - committed Unicode text 转 strict UTF-8；
 - 标准 Gamepad 轮询（`glfwGetGamepadState`）、generation registry、button diff、axis deadzone/hysteresis、
   connect/disconnect 与 snapshot revision；
+- 可选系统 Dark/Light 偏好观察；只有 Desktop 显式开启时才发布 Tina-owned
+  `SystemColorSchemeChangedEvent`，同帧变化合并且不携带 Win32/GLFW 类型；
 - Windows 原生 WindowSurface binding；Linux X11/Wayland binding；
 - owner-thread 创建、poll、publish、lease 与 shutdown。
 
@@ -60,6 +62,11 @@ adapter 按当前 content scale 转为 native client pixels，并更新 IMM32 co
 placement 为空、caret 与 clip 无正面积交集、窗口 hidden/minimized 或几何无效时会清除旧 hint 并恢复
 IMM32 默认候选窗策略。对应 session 测试覆盖 started/updated/ended、focus-lost cancel、非法 UTF-8 与
 surrogate；placement 的 logical/DPI/invalid/clear 矩阵由 `tina_platform_glfw_tests` 覆盖。
+
+Windows 系统配色 observer 从用户 Theme preference 读取 `AppsUseLightTheme`，查询不到时不发布事件；
+Linux 当前没有系统配色 adapter，因此即使请求 follow 也保持应用默认 Theme。该能力默认关闭，避免产品
+CLI、像素 gate 与 Headless 测试被宿主设置隐式改写。事件若因 platform-event capacity reset 未发布，observer
+不会提前提交已发布状态，下一帧继续尝试。
 
 Linux 当前只保证 GLFW committed text；原生 XIM/Wayland preedit、候选窗定位仍未完成。非空 placement
 在 Headless backend 明确返回不支持，`nullopt` 清理成功。TEST-001 已完成

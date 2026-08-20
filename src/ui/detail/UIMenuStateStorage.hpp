@@ -12,7 +12,10 @@ struct MenuState final {
     UINodeId node{};
     UIMenuConfig config{};
     UINodeId anchor{};
+    UINodeId parentItem{};
+    UILogicalRect invocationAnchorRect{};
     UIMenuMetrics committedMetrics{};
+    bool hasInvocationAnchorRect = false;
     bool open = false;
 };
 
@@ -20,6 +23,7 @@ struct MenuItemState final {
     UINodeId node{};
     UIMenuItemConfig config{};
     UINodeId menu{};
+    UINodeId submenu{};
     bool checked = false;
 };
 
@@ -55,9 +59,28 @@ class UIMenuStateStorage final {
     [[nodiscard]] UINodeId unlinkMenu(UINodeId menu) noexcept;
     [[nodiscard]] UINodeId unlinkAnchor(UINodeId anchor) noexcept;
 
+    [[nodiscard]] bool hasSubmenuRelationship(UINodeId item,
+                                               UINodeId submenu) const noexcept;
+    [[nodiscard]] UINodeId submenuForItem(UINodeId item) const noexcept;
+    [[nodiscard]] UINodeId parentItemForMenu(UINodeId menu) const noexcept;
+    [[nodiscard]] UINodeId parentMenu(UINodeId menu) const noexcept;
+    void linkSubmenuValidated(UINodeId item, UINodeId submenu) noexcept;
+    [[nodiscard]] UINodeId unlinkSubmenuItem(UINodeId item) noexcept;
+    [[nodiscard]] UINodeId unlinkSubmenuMenu(UINodeId submenu) noexcept;
+
     [[nodiscard]] UINodeId menuForItem(UINodeId item) const noexcept;
+    [[nodiscard]] bool hasInvocationAnchorRect(UINodeId menu) const noexcept;
+    [[nodiscard]] UILogicalRect invocationAnchorRect(UINodeId menu) const noexcept;
+    void setInvocationAnchorRectValidated(UINodeId menu,
+                                          UILogicalRect rect) noexcept;
+    void clearInvocationAnchorRect(UINodeId menu) noexcept;
+    [[nodiscard]] bool isOpen(UINodeId menu) const noexcept;
+    [[nodiscard]] bool isInActiveChain(UINodeId menu) const noexcept;
+    [[nodiscard]] UINodeId rootMenu() const noexcept;
     [[nodiscard]] UINodeId activeMenu() const noexcept;
-    [[nodiscard]] UINodeId openValidated(UINodeId menu) noexcept;
+    [[nodiscard]] UINodeId activeChildMenu(UINodeId menu) const noexcept;
+    [[nodiscard]] UINodeId openRootValidated(UINodeId menu) noexcept;
+    [[nodiscard]] UINodeId openSubmenuValidated(UINodeId menu) noexcept;
     [[nodiscard]] bool close(UINodeId menu) noexcept;
 
     [[nodiscard]] bool itemChecked(UINodeId item) const noexcept;

@@ -46,6 +46,15 @@ struct WindowMetricsChangedEvent final {
     u64 metricsRevision = 0;
 };
 
+enum class SystemColorScheme : u8 {
+    Dark = 0,
+    Light = 1,
+};
+
+struct SystemColorSchemeChangedEvent final {
+    SystemColorScheme colorScheme = SystemColorScheme::Dark;
+};
+
 struct GamepadConnectedEvent final {
     GamepadId gamepad{};
 };
@@ -64,7 +73,8 @@ struct PlatformEventStreamReset final {
 };
 
 using PlatformEventPayload =
-    std::variant<WindowMetricsChangedEvent, GamepadConnectedEvent, GamepadDisconnectedEvent, PlatformEventStreamReset>;
+    std::variant<WindowMetricsChangedEvent, SystemColorSchemeChangedEvent, GamepadConnectedEvent,
+                 GamepadDisconnectedEvent, PlatformEventStreamReset>;
 
 struct PlatformEvent final {
     u64 sequence = 0;
@@ -438,6 +448,23 @@ class PlatformFrameBuilder final {
                 return FrameBatchAppendResult::Coalesced;
             }
         }
+        if (std::holds_alternative<SystemColorSchemeChangedEvent>(payload))
+        {
+            for (usize index = 0; index < eventCount_; ++index)
+            {
+                if (!std::holds_alternative<SystemColorSchemeChangedEvent>(eventStorage_[index].payload))
+                {
+                    continue;
+                }
+                for (usize shift = index + 1; shift < eventCount_; ++shift)
+                {
+                    eventStorage_[shift - 1] = std::move(eventStorage_[shift]);
+                }
+                --eventCount_;
+                eventStorage_[eventCount_++] = PlatformEvent{*sequence, std::move(payload)};
+                return FrameBatchAppendResult::Coalesced;
+            }
+        }
 
         if (eventCount_ < capacities_.platformEventCapacity)
         {
@@ -762,6 +789,11 @@ class PlatformFrameBuilder final {
         if (const auto* value = std::get_if<WindowMetricsChangedEvent>(&payload); value != nullptr)
         {
             return value->window.hasValue() && value->metricsRevision != 0;
+        }
+        if (const auto* value = std::get_if<SystemColorSchemeChangedEvent>(&payload); value != nullptr)
+        {
+            return value->colorScheme == SystemColorScheme::Dark ||
+                   value->colorScheme == SystemColorScheme::Light;
         }
         if (const auto* value = std::get_if<GamepadConnectedEvent>(&payload); value != nullptr)
         {

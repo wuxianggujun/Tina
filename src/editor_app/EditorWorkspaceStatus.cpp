@@ -17,21 +17,12 @@ auto EditorWorkspaceState::reportAuthoringFailure(
 
 auto EditorWorkspaceState::refreshWorkspaceChrome(Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status{
     const bool world2D = workspaceMode_ == WorkspaceMode::World2D;
-    if (auto status = tree.setText(toolbarDocument_, world2D ? "World2D Scene" : "World3D Scene");
-        !status) {
-        return status;
-    }
     std::string breadcrumb = world2D ? "Scene / World2D" : "Scene / World3D";
     if (stableEntityIdForHierarchyItem(selectionKey_) != 0U) {
         breadcrumb += " / ";
         breadcrumb += hierarchyDisplayLabel(selectionKey_);
     }
     if (auto status = tree.setText(breadcrumb_, breadcrumb);
-        !status) {
-        return status;
-    }
-    if (auto status = tree.setText(viewportTitle_, world2D ? "World2D Viewport"
-                                                           : "World3D Viewport");
         !status) {
         return status;
     }
@@ -63,16 +54,7 @@ auto EditorWorkspaceState::refreshWorkspaceChrome(Tina::PrimaryWindowUITreeUpdat
         !status) {
         return status;
     }
-    if (auto status = tree.setRadioButtonSelected(mode2DButton_, world2D); !status) {
-        return status;
-    }
-    if (auto status = tree.setRadioButtonSelected(mode3DButton_, !world2D); !status) {
-        return status;
-    }
-    if (auto status = tree.setEnabled(mode2DButton_, true); !status) {
-        return status;
-    }
-    return tree.setEnabled(mode3DButton_, true);
+    return Tina::Core::success();
 }
 
 auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status{
@@ -169,21 +151,6 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
     if (auto status = publishRuntimePreviewStatus(tree); !status) {
         return status;
     }
-    std::string selectionSummary = "Selected: ";
-    selectionSummary += hierarchyDisplayLabel(selectionKey_);
-    const u32 selectedEntityId = stableEntityIdForHierarchyItem(selectionKey_);
-    if (selectedEntityId != 0U) {
-        selectionSummary += "  |  ID ";
-        selectionSummary += std::to_string(selectedEntityId);
-    }
-    if (!assetInspectorActive_ && viewportSelectedEntityCount_ > 1U) {
-        selectionSummary += "  |  ";
-        selectionSummary += std::to_string(viewportSelectedEntityCount_);
-        selectionSummary += " selected  |  Group pivot";
-    }
-    if (auto status = tree.setText(hierarchySelectionSummary_, selectionSummary); !status) {
-        return status;
-    }
     std::string statusSelection = "Selected: ";
     if (assetInspectorActive_) {
         const auto* asset = inspectedProjectAsset();
@@ -197,9 +164,6 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
         }
     }
     if (auto status = tree.setText(statusSelection_, statusSelection); !status) {
-        return status;
-    }
-    if (auto status = tree.setText(authoringHint_, authoringFeedback_); !status) {
         return status;
     }
     auto tileMapRoot = Tina::AssetFormat::parseTileMapPayload(
@@ -223,6 +187,80 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
                          ? "Dirty"
                          : "Current";
     if (auto status = tree.setText(tileMapStatus_, tileMapStatus); !status) {
+        return status;
+    }
+    const u32 selectedStableId = stableEntityIdForHierarchyItem(selectionKey_);
+    const bool tileMapContextVisible = tileMapEditingContext();
+    const bool entityContextVisible = !assetInspectorActive_ &&
+                                      !tileMapContextVisible &&
+                                      selectedStableId != 0U;
+    const auto publishContextVisibility =
+        [&](InspectorLayoutNodeUi& node, bool visible) -> Tina::Core::Status {
+        node.layout.visibility = visible ? UI::UIVisibility::Visible
+                                         : UI::UIVisibility::Collapsed;
+        return tree.setLayoutStyle(node.root, node.layout);
+    };
+    if (auto status = publishContextVisibility(
+            inspectorHierarchyHeaderUi_, entityContextVisible);
+        !status) {
+        return status;
+    }
+    if (auto status = publishContextVisibility(
+            inspectorHierarchyParentRowUi_, entityContextVisible);
+        !status) {
+        return status;
+    }
+    if (auto status = publishContextVisibility(
+            inspectorHierarchyApplyParentUi_, entityContextVisible);
+        !status) {
+        return status;
+    }
+    if (auto status = publishContextVisibility(
+            inspectorTileMapHeaderUi_, tileMapContextVisible);
+        !status) {
+        return status;
+    }
+    if (auto status = publishContextVisibility(
+            inspectorTileMapStatusUi_, tileMapContextVisible);
+        !status) {
+        return status;
+    }
+    for (auto& row : inspectorTileMapActionRows_) {
+        if (auto status = publishContextVisibility(row, tileMapContextVisible);
+            !status) {
+            return status;
+        }
+    }
+    const bool transformVisible = entityContextVisible;
+    const UI::UIVisibility transformVisibility =
+        transformVisible ? UI::UIVisibility::Visible
+                         : UI::UIVisibility::Collapsed;
+    inspectorTransformHeaderLayout_.visibility = transformVisibility;
+    if (auto status = tree.setLayoutStyle(
+            inspectorTransformHeader_, inspectorTransformHeaderLayout_);
+        !status) {
+        return status;
+    }
+    for (Tina::Core::usize index = 0;
+         index < inspectorTransformNumberFields_.size(); ++index) {
+        const auto field = static_cast<InspectorTransformField>(index);
+        auto& controls = inspectorTransformNumberFields_[index];
+        const bool fieldVisible =
+            transformVisible &&
+            (workspaceMode_ == WorkspaceMode::World3D ||
+             !inspectorTransformFieldRequires3D(field));
+        controls.layout.visibility = fieldVisible
+                                         ? UI::UIVisibility::Visible
+                                         : UI::UIVisibility::Collapsed;
+        if (auto status = tree.setLayoutStyle(controls.root, controls.layout);
+            !status) {
+            return status;
+        }
+    }
+    applyTransformButtonLayout_.visibility = transformVisibility;
+    if (auto status = tree.setLayoutStyle(
+            applyTransformButtonRoot_, applyTransformButtonLayout_);
+        !status) {
         return status;
     }
     if (auto status = tree.setEnabled(inspectorPositionX_, selectionEditable); !status) {
@@ -252,16 +290,31 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
     if (auto status = tree.setEnabled(inspectorScaleZ_, selectionEditable3D); !status) {
         return status;
     }
+    const std::array transformFieldEnabled{
+        selectionEditable, selectionEditable, selectionEditable3D,
+        selectionEditable3D, selectionEditable3D, selectionEditable,
+        selectionEditable, selectionEditable, selectionEditable3D,
+    };
+    for (Tina::Core::usize index = 0;
+         index < inspectorTransformNumberFields_.size(); ++index) {
+        const auto& controls = inspectorTransformNumberFields_[index];
+        if (auto status = tree.setEnabled(
+                controls.decrementButton, transformFieldEnabled[index]);
+            !status) {
+            return status;
+        }
+        if (auto status = tree.setEnabled(
+                controls.incrementButton, transformFieldEnabled[index]);
+            !status) {
+            return status;
+        }
+    }
     if (auto status = tree.setEnabled(inspectorParentStableId_, selectionEditable); !status) {
         return status;
     }
     if (auto status = tree.setEnabled(applyTransformButton_, selectionEditable); !status) {
         return status;
     }
-    if (auto status = tree.setEnabled(moveButton_, selectionEditable); !status) {
-        return status;
-    }
-    const u32 selectedStableId = stableEntityIdForHierarchyItem(selectionKey_);
     const EditorHierarchyRow* selectedRow = hierarchyRow(selectedStableId);
     const bool sceneEditable = authoringEnabled() && sceneDocumentActive() &&
                                !assetInspectorActive_;
@@ -277,12 +330,6 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
     const bool canDeleteSelection = sceneEditable && sceneItemSelected &&
         (workspaceMode_ == WorkspaceMode::World2D || document3D_.nodeCount() > 1U);
     if (auto status = tree.setEnabled(deleteEntityButton_, canDeleteSelection); !status) {
-        return status;
-    }
-    if (auto status = tree.setEnabled(
-            reparentEntityRootButton_,
-            sceneEditable && sceneItemSelected && selectedRow->parentStableId != 0U);
-        !status) {
         return status;
     }
     if (auto status = tree.setEnabled(
@@ -329,9 +376,6 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
         return status;
     }
     const bool documentCanSave = activeDocumentSession() != nullptr;
-    if (auto status = tree.setEnabled(toolbarPath_, documentCanSave); !status) {
-        return status;
-    }
     if (auto status = tree.setEnabled(saveAsButton_, documentCanSave); !status) {
         return status;
     }
@@ -352,9 +396,6 @@ auto EditorWorkspaceState::refreshPlaySessionUi(
     const bool playing = state == Tina::Editor::EditorPlayState::Playing;
     const bool paused = state == Tina::Editor::EditorPlayState::Paused;
 
-    if (auto status = tree.setText(playButton_, paused ? "Resume" : "Play"); !status) {
-        return status;
-    }
     if (auto status = tree.setEnabled(
             playButton_,
             (editing && !pendingDirtyCloseKey_.has_value() &&
@@ -389,25 +430,23 @@ auto EditorWorkspaceState::refreshPlaySessionUi(
     }
 
     const std::array lockedButtons{
-        mode2DButton_, mode3DButton_, undoButton_, redoButton_, saveButton_,
+        undoButton_, redoButton_, saveButton_,
         saveAsButton_, addEntityButton_, duplicateEntityButton_, deleteEntityButton_,
-        reparentEntityRootButton_, reparentEntityButton_, inspectorParentStableId_,
-        moveButton_,
-        translateToolButtons_[0], translateToolButtons_[1], rotateToolButtons_[0],
-        rotateToolButtons_[1], scaleToolButtons_[0], scaleToolButtons_[1],
+        reparentEntityButton_, inspectorParentStableId_,
+        translateToolButtons_[0], rotateToolButtons_[0], scaleToolButtons_[0],
         orientationButton_, snapButton_, tilePaintToolButton_, tileEraseToolButton_,
         paintTileButton_, eraseTileButton_, toggleTileLayerButton_, addTileLayerButton_,
         addObjectLayerButton_, cookTileMapButton_, generateTileMapGameplayButton_,
         bakeNavigationButton_,
-        animationModeButton_, animationPlayButton_, animationCookButton_,
+        animationModeButton_, animationPlaybackButtons_.play.button,
+        animationPlaybackButtons_.pause.button, animationCookButton_,
         animationPreviousButton_, animationNextButton_, animationAddButton_,
         animationDuplicateButton_, animationDeleteButton_, animationMoveLeftButton_,
         animationMoveRightButton_, animationCycleSpriteButton_,
         animationDurationDecreaseButton_, animationDurationIncreaseButton_,
         animationEventPreviousButton_, animationEventNextButton_,
         animationEventAddButton_, animationEventApplyButton_,
-        animationEventRemoveButton_,
-        animationUndoButton_, animationRedoButton_, openProjectAssetButton_,
+        animationEventRemoveButton_, openProjectAssetButton_,
         refreshProjectCatalogButton_, createProjectButton_, openProjectButton_,
         importSourceButton_, removeSourceImportButton_, closeDocumentButton_,
     };
@@ -439,7 +478,7 @@ auto EditorWorkspaceState::refreshPlaySessionUi(
     }
     for (const ComponentSectionUi& section : componentSections_) {
         const std::array sectionControls{
-            section.activeCheckbox, section.addButton, section.removeButton,
+            section.activeSwitch, section.addButton, section.removeButton,
             section.assignButton, section.applyButton};
         for (const UI::UINodeId control : sectionControls) {
             if (!control.hasValue()) {
@@ -455,9 +494,6 @@ auto EditorWorkspaceState::refreshPlaySessionUi(
                 return status;
             }
         }
-    }
-    if (auto status = tree.setEnabled(toolbarPath_, false); !status) {
-        return status;
     }
     return Tina::Core::success();
 }

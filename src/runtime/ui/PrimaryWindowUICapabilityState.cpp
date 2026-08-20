@@ -758,6 +758,137 @@ PrimaryWindowUICapabilityState::buildDialog(
     return *parts;
 }
 
+Core::Result<UI::UISnackbarHostParts>
+PrimaryWindowUICapabilityState::buildSnackbarHost(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId parent, const UI::UISnackbarHostConfig& config)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::buildSnackbarHost";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    if (buildTransaction_.has_value())
+    {
+        return Core::failure(rememberFirstError(
+            Core::Error{UI::UIErrorCode::BuildTransactionInProgress,
+                        "A primary-window UI build transaction is already active"},
+            Operation));
+    }
+    auto parts = updater.buildSnackbarHost(parent, config);
+    if (!parts)
+    {
+        return Core::failure(
+            rememberFirstError(std::move(parts.error()), Operation));
+    }
+    return *parts;
+}
+
+Core::Result<UI::UINumberFieldParts>
+PrimaryWindowUICapabilityState::buildNumberField(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId parent, const UI::UINumberFieldConfig& config)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::buildNumberField";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    if (buildTransaction_.has_value())
+    {
+        return Core::failure(rememberFirstError(
+            Core::Error{UI::UIErrorCode::BuildTransactionInProgress,
+                        "A primary-window UI build transaction is already active"},
+            Operation));
+    }
+    auto parts = updater.buildNumberField(parent, config);
+    if (!parts)
+    {
+        return Core::failure(rememberFirstError(std::move(parts.error()), Operation));
+    }
+    return *parts;
+}
+
+Core::Result<UI::UICollapsibleSectionParts>
+PrimaryWindowUICapabilityState::buildCollapsibleSection(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId parent, const UI::UICollapsibleSectionConfig& config)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::buildCollapsibleSection";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    if (buildTransaction_.has_value())
+    {
+        return Core::failure(rememberFirstError(
+            Core::Error{UI::UIErrorCode::BuildTransactionInProgress,
+                        "A primary-window UI build transaction is already active"},
+            Operation));
+    }
+    auto parts = updater.buildCollapsibleSection(parent, config);
+    if (!parts)
+    {
+        return Core::failure(rememberFirstError(std::move(parts.error()), Operation));
+    }
+    return *parts;
+}
+
+Core::Result<UI::UIColorFieldParts>
+PrimaryWindowUICapabilityState::buildColorField(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId parent, const UI::UIColorFieldConfig& config)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::buildColorField";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    if (buildTransaction_.has_value())
+    {
+        return Core::failure(rememberFirstError(
+            Core::Error{UI::UIErrorCode::BuildTransactionInProgress,
+                        "A primary-window UI build transaction is already active"},
+            Operation));
+    }
+    auto parts = updater.buildColorField(parent, config);
+    if (!parts)
+    {
+        return Core::failure(rememberFirstError(std::move(parts.error()), Operation));
+    }
+    return *parts;
+}
+
+Core::Result<UI::UIColorPickerParts>
+PrimaryWindowUICapabilityState::buildColorPicker(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId parent, const UI::UIColorPickerConfig& config)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::buildColorPicker";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    if (buildTransaction_.has_value())
+    {
+        return Core::failure(rememberFirstError(
+            Core::Error{UI::UIErrorCode::BuildTransactionInProgress,
+                        "A primary-window UI build transaction is already active"},
+            Operation));
+    }
+    auto parts = updater.buildColorPicker(parent, config);
+    if (!parts)
+    {
+        return Core::failure(rememberFirstError(std::move(parts.error()), Operation));
+    }
+    return *parts;
+}
+
 Core::Result<UI::UINodeId>
 PrimaryWindowUICapabilityState::createElementFromBuildTransaction(
     u64 epoch, PrimaryWindowUIPhase phase, UI::UINodeId parent,
@@ -2653,6 +2784,139 @@ Core::Status PrimaryWindowUICapabilityState::scrollListViewToIndex(u64 epoch, Pr
     return Core::success();
 }
 
+Core::Status PrimaryWindowUICapabilityState::setVirtualGridViewDataSource(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId virtualGridView, UI::UIVirtualGridViewDataSource source)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setVirtualGridViewDataSource";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status) return status;
+    Core::Status status = updater.setVirtualGridViewDataSource(virtualGridView, source);
+    return status ? Core::success() : Core::failure(rememberFirstError(std::move(status.error()), Operation));
+}
+
+Core::Status PrimaryWindowUICapabilityState::clearVirtualGridViewDataSource(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId virtualGridView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::clearVirtualGridViewDataSource";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status) return status;
+    Core::Status status = updater.clearVirtualGridViewDataSource(virtualGridView);
+    return status ? Core::success() : Core::failure(rememberFirstError(std::move(status.error()), Operation));
+}
+
+Core::Status PrimaryWindowUICapabilityState::invalidateVirtualGridViewItems(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId virtualGridView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::invalidateVirtualGridViewItems";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status) return status;
+    Core::Status status = updater.invalidateVirtualGridViewItems(virtualGridView);
+    return status ? Core::success() : Core::failure(rememberFirstError(std::move(status.error()), Operation));
+}
+
+Core::Status PrimaryWindowUICapabilityState::setVirtualGridViewStyle(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId virtualGridView, const UI::UIVirtualGridViewStyle& style)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setVirtualGridViewStyle";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status) return status;
+    Core::Status status = updater.setVirtualGridViewStyle(virtualGridView, style);
+    return status ? Core::success() : Core::failure(rememberFirstError(std::move(status.error()), Operation));
+}
+
+Core::Result<UI::UIVirtualGridViewStyle>
+PrimaryWindowUICapabilityState::virtualGridViewStyle(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId virtualGridView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::virtualGridViewStyle";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+        return Core::failure(std::move(status.error()));
+    auto result = updater.virtualGridViewStyle(virtualGridView);
+    return result ? Core::Result<UI::UIVirtualGridViewStyle>(*result)
+                  : Core::failure(rememberFirstError(std::move(result.error()), Operation));
+}
+
+Core::Status PrimaryWindowUICapabilityState::setVirtualGridViewPaint(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId virtualGridView, const UI::UIVirtualGridViewPaint& paint)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setVirtualGridViewPaint";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status) return status;
+    Core::Status status = updater.setVirtualGridViewPaint(virtualGridView, paint);
+    return status ? Core::success() : Core::failure(rememberFirstError(std::move(status.error()), Operation));
+}
+
+Core::Result<UI::UIVirtualGridViewPaint>
+PrimaryWindowUICapabilityState::virtualGridViewPaint(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId virtualGridView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::virtualGridViewPaint";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+        return Core::failure(std::move(status.error()));
+    auto result = updater.virtualGridViewPaint(virtualGridView);
+    return result ? Core::Result<UI::UIVirtualGridViewPaint>(*result)
+                  : Core::failure(rememberFirstError(std::move(result.error()), Operation));
+}
+
+Core::Result<UI::UIVirtualGridViewMetrics>
+PrimaryWindowUICapabilityState::virtualGridViewMetrics(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId virtualGridView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::virtualGridViewMetrics";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+        return Core::failure(std::move(status.error()));
+    auto result = updater.virtualGridViewMetrics(virtualGridView);
+    return result ? Core::Result<UI::UIVirtualGridViewMetrics>(*result)
+                  : Core::failure(rememberFirstError(std::move(result.error()), Operation));
+}
+
+Core::Status PrimaryWindowUICapabilityState::setVirtualGridViewSelectedIndex(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId virtualGridView, u64 logicalIndex)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::setVirtualGridViewSelectedIndex";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status) return status;
+    Core::Status status = updater.setVirtualGridViewSelectedIndex(virtualGridView, logicalIndex);
+    return status ? Core::success() : Core::failure(rememberFirstError(std::move(status.error()), Operation));
+}
+
+Core::Status PrimaryWindowUICapabilityState::clearVirtualGridViewSelection(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId virtualGridView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::clearVirtualGridViewSelection";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status) return status;
+    Core::Status status = updater.clearVirtualGridViewSelection(virtualGridView);
+    return status ? Core::success() : Core::failure(rememberFirstError(std::move(status.error()), Operation));
+}
+
+Core::Result<UI::UIVirtualGridViewSelection>
+PrimaryWindowUICapabilityState::virtualGridViewSelection(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId virtualGridView)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::virtualGridViewSelection";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+        return Core::failure(std::move(status.error()));
+    auto result = updater.virtualGridViewSelection(virtualGridView);
+    return result ? Core::Result<UI::UIVirtualGridViewSelection>(*result)
+                  : Core::failure(rememberFirstError(std::move(result.error()), Operation));
+}
+
+Core::Status PrimaryWindowUICapabilityState::scrollVirtualGridViewToIndex(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId virtualGridView, u64 logicalIndex,
+    UI::UIVirtualGridViewScrollAlignment alignment)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::scrollVirtualGridViewToIndex";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status) return status;
+    Core::Status status = updater.scrollVirtualGridViewToIndex(virtualGridView, logicalIndex, alignment);
+    return status ? Core::success() : Core::failure(rememberFirstError(std::move(status.error()), Operation));
+}
+
 Core::Status PrimaryWindowUICapabilityState::setTreeViewDataSource(u64 epoch, PrimaryWindowUIPhase phase,
                                                                    UI::UITreeUpdater& updater,
                                                                    UI::UINodeId treeView,
@@ -3181,6 +3445,82 @@ Core::Result<UI::UIMenuMetrics> PrimaryWindowUICapabilityState::menuMetrics(
         return Core::failure(rememberFirstError(std::move(metrics.error()), Operation));
     }
     return *metrics;
+}
+
+Core::Status PrimaryWindowUICapabilityState::setMenuItemSubmenu(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId item, UI::UINodeId submenu)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::setMenuItemSubmenu";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setMenuItemSubmenu(item, submenu);
+    if (!status)
+    {
+        return Core::failure(
+            rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::clearMenuItemSubmenu(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId item)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::clearMenuItemSubmenu";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.clearMenuItemSubmenu(item);
+    if (!status)
+    {
+        return Core::failure(
+            rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::menuItemSubmenu(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId item)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::menuItemSubmenu";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto submenu = updater.menuItemSubmenu(item);
+    if (!submenu)
+    {
+        return Core::failure(
+            rememberFirstError(std::move(submenu.error()), Operation));
+    }
+    return *submenu;
+}
+
+Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::menuParentItem(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId menu)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::menuParentItem";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto item = updater.menuParentItem(menu);
+    if (!item)
+    {
+        return Core::failure(
+            rememberFirstError(std::move(item.error()), Operation));
+    }
+    return *item;
 }
 
 Core::Status PrimaryWindowUICapabilityState::setMenuItemChecked(

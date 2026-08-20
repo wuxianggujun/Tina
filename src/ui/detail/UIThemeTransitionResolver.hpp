@@ -20,6 +20,8 @@ struct ProductChromeStorage final {
     UITabPaint& tab;
     UISplitterPaint& splitter;
     UIStraightSrgba8Color* imageTint = nullptr;
+    UIVirtualGridViewPaint* virtualGridView = nullptr;
+    UIDataGridPaint* dataGrid = nullptr;
 };
 
 struct ProductChromeTransition final {

@@ -2,6 +2,71 @@
 
 namespace Tina::EditorApp::WorkspaceInternal {
 
+auto EditorWorkspaceState::showSceneDeleteConfirmation(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    if (pendingSceneDeleteConfirmation_.has_value() ||
+        pendingDirtyCloseKey_.has_value() || !sceneDocumentActive()) {
+        return Tina::Core::success();
+    }
+    const auto* activeTab = documentTabs_.activeTab();
+    const u32 stableId = stableEntityIdForHierarchyItem(selectionKey_);
+    const EditorHierarchyRow* target = hierarchyRow(stableId);
+    if (activeTab == nullptr || stableId == 0U || target == nullptr) {
+        return Tina::Core::success();
+    }
+    if (workspaceMode_ == WorkspaceMode::World3D) {
+        const bool hasSiblingRoot = target->parentStableId != 0U ||
+            std::any_of(
+                hierarchyRows_.begin(), hierarchyRows_.end(),
+                [stableId](const EditorHierarchyRow& row) noexcept {
+                    return row.stableId != 0U && row.stableId != stableId &&
+                           row.parentStableId == 0U;
+                });
+        if (document3D_.nodeCount() <= 1U || !hasSiblingRoot) {
+            authoringFeedback_ =
+                "Delete rejected: a World3D document must retain at least one node";
+            return Tina::Core::success();
+        }
+    }
+
+    pendingSceneDeleteConfirmation_ = SceneDeleteConfirmation{
+        .documentKey = activeTab->key,
+        .workspace = workspaceMode_,
+        .stableId = stableId,
+        .documentRevision = activeDocumentRevision(),
+    };
+    if (auto status = tree.setLayoutStyle(
+            sceneDeleteDialog_.modal,
+            sceneDeleteDialogLayout(UI::UIVisibility::Visible));
+        !status) {
+        pendingSceneDeleteConfirmation_.reset();
+        return status;
+    }
+    authoringFeedback_ =
+        "Delete confirmation opened for the selected scene subtree";
+    pendingSceneDeleteDialogFocus_ = true;
+    return Tina::Core::success();
+}
+
+auto EditorWorkspaceState::hideSceneDeleteConfirmation(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    if (!pendingSceneDeleteConfirmation_.has_value()) {
+        return Tina::Core::success();
+    }
+    if (auto status = tree.setLayoutStyle(
+            sceneDeleteDialog_.modal,
+            sceneDeleteDialogLayout(UI::UIVisibility::Collapsed));
+        !status) {
+        return status;
+    }
+    pendingSceneDeleteConfirmation_.reset();
+    pendingSceneDeleteDialogFocus_ = false;
+    pendingHierarchyFocusRestore_ = true;
+    return Tina::Core::success();
+}
+
 auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status{
     const EditorCommand command = *pendingEditorCommand_;
     pendingEditorCommand_.reset();
@@ -23,7 +88,7 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
             "Editor authoring commands are locked while the isolated play session is active");
     }
     if (command >= EditorCommand::AnimationTogglePlayback &&
-        command <= EditorCommand::AnimationRedo &&
+        command <= EditorCommand::AnimationCookPreview &&
         workspaceMode_ != WorkspaceMode::World2D) {
         return Tina::Core::failure(
             Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
@@ -287,17 +352,13 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
     case EditorCommand::Save:
     case EditorCommand::SaveAs: {
         if (command == EditorCommand::SaveAs) {
-            auto path = tree.text(toolbarPath_);
-            if (!path) {
-                return Tina::Core::failure(std::move(path.error()));
-            }
-            auto selectedPath = requestNativeSaveAsPath(*path);
+            const WorkspaceSessionState* session = activeDocumentSession();
+            const std::string_view currentPath = session != nullptr
+                                                     ? session->documentPathUtf8
+                                                     : std::string_view{};
+            auto selectedPath = requestNativeSaveAsPath(currentPath);
             if (!selectedPath) {
-                if (selectedPath.error().code == Tina::Core::CoreErrorCode::Unsupported) {
-                    status = saveActiveDocument(*path);
-                } else {
-                    status = Tina::Core::failure(std::move(selectedPath.error()));
-                }
+                status = Tina::Core::failure(std::move(selectedPath.error()));
             } else if (!selectedPath->has_value()) {
                 authoringFeedback_ = "Save As cancelled; document preserved";
                 status = Tina::Core::success();
@@ -319,9 +380,6 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
             }
             status = Tina::Core::success();
             break;
-        }
-        if (auto pathStatus = refreshToolbarPathForActiveTab(tree); !pathStatus) {
-            return pathStatus;
         }
         switch (documentTabs_.activeTab()->key.kind) {
         case Tina::Editor::EditorDocumentKind::World2D:
@@ -405,26 +463,41 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         break;
     }
     case EditorCommand::SceneDelete: {
-        if (!sceneDocumentActive()) {
-            status = Tina::Core::failure(
-                Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
-                "Scene hierarchy commands require an active World2D or World3D document");
+        status = showSceneDeleteConfirmation(tree);
+        break;
+    }
+    case EditorCommand::SceneDeleteConfirm: {
+        if (!pendingSceneDeleteConfirmation_.has_value() ||
+            pendingSceneDeleteConfirmation_->confirming) {
             break;
         }
-        const u32 stableId = stableEntityIdForHierarchyItem(selectionKey_);
-        if (stableId == 0U) {
-            status = Tina::Core::failure(
-                Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
-                "The document root cannot be deleted");
+        pendingSceneDeleteConfirmation_->confirming = true;
+        const SceneDeleteConfirmation confirmation =
+            *pendingSceneDeleteConfirmation_;
+        const auto* activeTab = documentTabs_.activeTab();
+        const bool targetIsCurrent =
+            activeTab != nullptr && activeTab->key == confirmation.documentKey &&
+            workspaceMode_ == confirmation.workspace && sceneDocumentActive() &&
+            activeDocumentRevision() == confirmation.documentRevision &&
+            hierarchyRow(confirmation.stableId) != nullptr;
+        if (!targetIsCurrent) {
+            authoringFeedback_ =
+                "Delete cancelled: the target or canonical document changed before confirmation";
+            status = hideSceneDeleteConfirmation(tree);
             break;
         }
-        auto deleted = workspaceMode_ == WorkspaceMode::World2D
+        auto deleted = confirmation.workspace == WorkspaceMode::World2D
                            ? Tina::Editor::deleteWorld2DEntitySubtree(
-                                 document_, stableId)
+                                 document_, confirmation.stableId)
                            : Tina::Editor::deleteWorld3DNodeSubtree(
-                                 document3D_, stableId);
+                                 document3D_, confirmation.stableId);
         if (!deleted) {
-            status = Tina::Core::failure(std::move(deleted.error()));
+            Tina::Core::Error deleteError = std::move(deleted.error());
+            status = reportAuthoringFailure("Delete failed; scene hierarchy preserved: ",
+                                            deleteError);
+            if (status) {
+                status = hideSceneDeleteConfirmation(tree);
+            }
             break;
         }
         hierarchyRefreshStableId = deleted->primaryStableId;
@@ -432,8 +505,16 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         ++counters_.authoringEdits;
         ++counters_.sceneDeleteCommands;
         authoringFeedback_ = "Scene subtree deleted as one canonical revision";
+        status = hideSceneDeleteConfirmation(tree);
         break;
     }
+    case EditorCommand::SceneDeleteCancel:
+        if (pendingSceneDeleteConfirmation_.has_value()) {
+            authoringFeedback_ =
+                "Delete cancelled; scene hierarchy and selection preserved";
+            status = hideSceneDeleteConfirmation(tree);
+        }
+        break;
     case EditorCommand::SceneReparentRoot: {
         if (!sceneDocumentActive()) {
             status = Tina::Core::failure(
@@ -1025,26 +1106,6 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         authoringFeedback_ = "SpriteAnimationClip Cook preview rebuilt";
         break;
     }
-    case EditorCommand::AnimationUndo:
-        status = spriteAnimationDocument_.undo();
-        if (status) {
-            animationPreview_.clampSelection(static_cast<u32>(spriteAnimationDocument_.frameCount()));
-            animationDocumentChanged = true;
-            ++counters_.animationUndos;
-            ++counters_.authoringUndos;
-            authoringFeedback_ = "Animation Undo restored the previous clip revision";
-        }
-        break;
-    case EditorCommand::AnimationRedo:
-        status = spriteAnimationDocument_.redo();
-        if (status) {
-            animationPreview_.clampSelection(static_cast<u32>(spriteAnimationDocument_.frameCount()));
-            animationDocumentChanged = true;
-            ++counters_.animationRedos;
-            ++counters_.authoringRedos;
-            authoringFeedback_ = "Animation Redo restored the next clip revision";
-        }
-        break;
     case EditorCommand::ViewportCyclePreset: {
         if (workspaceMode_ != WorkspaceMode::World3D) {
             authoringFeedback_ = "2D viewport uses a fixed Orthographic view";

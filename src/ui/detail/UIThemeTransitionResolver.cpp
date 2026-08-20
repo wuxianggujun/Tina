@@ -66,6 +66,11 @@ void clearDetachedBindings(ProductChrome& target, u16 targetBindings) noexcept
     {
         target.splitter = {};
     }
+    if ((targetBindings & ThemeBindingGridPaint) == 0)
+    {
+        target.virtualGridView = {};
+        target.dataGrid = {};
+    }
 }
 
 } // namespace
@@ -109,6 +114,16 @@ ProductChromeTransition resolveProductChromeTransition(ProductChromeStorage curr
              transition.target.imageTint);
     classify(ThemeBindingTabPaint, current.tab, transition.target.tab);
     classify(ThemeBindingSplitterPaint, current.splitter, transition.target.splitter);
+    if (current.virtualGridView != nullptr)
+    {
+        classify(ThemeBindingGridPaint, *current.virtualGridView,
+                 transition.target.virtualGridView);
+    }
+    if (current.dataGrid != nullptr)
+    {
+        classify(ThemeBindingGridPaint, *current.dataGrid,
+                 transition.target.dataGrid);
+    }
 
     const auto markLayoutChange = [&](u16 binding, bool changed) noexcept {
         if ((affectedBindings & binding) != 0 && changed)
@@ -136,6 +151,24 @@ ProductChromeTransition resolveProductChromeTransition(ProductChromeStorage curr
                      current.treeView.scrollBar.thickness != transition.target.treeView.scrollBar.thickness ||
                          current.treeView.scrollBar.minThumbExtent !=
                              transition.target.treeView.scrollBar.minThumbExtent);
+    if (current.virtualGridView != nullptr)
+    {
+        markLayoutChange(
+            ThemeBindingGridPaint,
+            current.virtualGridView->scrollBar.thickness !=
+                    transition.target.virtualGridView.scrollBar.thickness ||
+                current.virtualGridView->scrollBar.minThumbExtent !=
+                    transition.target.virtualGridView.scrollBar.minThumbExtent);
+    }
+    if (current.dataGrid != nullptr)
+    {
+        markLayoutChange(
+            ThemeBindingGridPaint,
+            current.dataGrid->scrollBar.thickness !=
+                    transition.target.dataGrid.scrollBar.thickness ||
+                current.dataGrid->scrollBar.minThumbExtent !=
+                    transition.target.dataGrid.scrollBar.minThumbExtent);
+    }
     return transition;
 }
 
@@ -201,6 +234,17 @@ void applyProductChromeTransition(ProductChromeStorage storage, const ProductChr
     if ((affectedBindings & ThemeBindingSplitterPaint) != 0)
     {
         storage.splitter = transition.target.splitter;
+    }
+    if ((affectedBindings & ThemeBindingGridPaint) != 0)
+    {
+        if (storage.virtualGridView != nullptr)
+        {
+            *storage.virtualGridView = transition.target.virtualGridView;
+        }
+        if (storage.dataGrid != nullptr)
+        {
+            *storage.dataGrid = transition.target.dataGrid;
+        }
     }
 }
 

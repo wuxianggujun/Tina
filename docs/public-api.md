@@ -131,6 +131,9 @@ Tina::Desktop::CreateEngine(const EngineConfig& config,
 
 `CreateEngineOptions::wrapWindowSurfaceRenderDevice` 可在产品/门禁路径包装已创建的
 `IRenderDevice`（例如帧捕获装饰器），不暴露 bgfx/GLFW，也不替代 EngineHost 组合根。
+`CreateEngineOptions::followSystemColorScheme` 默认 `false`；显式开启后，Desktop 私有 adapter 发布
+Tina-owned Dark/Light preference event，Runtime 在 owner thread 的 UI Update phase 把它转换为与当前
+density 相同的 canonical `UITheme`。无系统 observer、查询失败或 Headless 图都保留应用显式 Theme。
 
 高级测试/集成可使用：
 
@@ -303,6 +306,9 @@ StyleRole/box/Canvas、semantics、enabled、pointer/focus policy 与集合配�
 成员入口已删除，不提供 compatibility alias。当前内建行为覆盖 Root、Panel、Modal、Label、Button、
 Checkbox、Slider、ProgressBar、RadioButton、TextEdit（默认单行；可选多行）、ScrollView，以及
 Dropdown/Popup/Tooltip/Menu/MenuItem/DropdownItem、ListView/TreeView、SplitView/Splitter、TabView/Tab。
+Button 与 RadioButton descriptor 可直接使用与 text 互斥的 Image intrinsic content；此时控件必须显式发布
+semantics name 并关闭 content-as-name，使图标、control chrome 与交互状态共享同一 retained node。其他带行为
+Element 不接受 Image content。
 
 `UILayoutStyle` 将父容器 `flexContainer`、子项 `flexItem` 与 `Flow/Overlay` placement 分开；Overlay 使用
 alignment + offset，Px offset 可为有限负值，Percent offset 范围为 `-100..100`，以表达受父级 clip 的
@@ -379,22 +385,35 @@ Back/Confirm/Menu 之外的任意 action-id。
 Runtime 的 `bindImageResolver()` 返回 move-only root-scoped
 registration；frame build 按 `(root, AssetId)` 去重 resolve/pin，不在 UI commit 中同步 I/O。
 
-UI 美化 authoring 使用 `UISurfaceConfig`、`UIDividerConfig`、`UIBadgeConfig`、`UIToggleSwitchConfig` 与
-`makeSurfaceElement()/makeDividerElement()/makeBadgeElement()/makeToggleSwitchElement()`。Surface 提供
+UI 美化 authoring 使用 `UISurfaceConfig`、`UIDividerConfig`、`UIBadgeConfig`、`UISwitchConfig` 与
+`makeSurfaceElement()/makeDividerElement()/makeBadgeElement()/makeSwitchElement()`。Surface 提供
 Plain/Filled/Elevated，Divider 提供 Horizontal/Vertical、Subtle/Strong/Accent 与 logical thickness，Badge 提供
 Neutral/Accent/Danger。它们是普通 Panel/Label 的强类型 StyleRole/Layout/Semantics profile，不增加 retained
 状态或 Render 类型；Surface/Divider 固定 Ignore hit，Divider Exclude semantics，Badge 发布只读 Label name。
 
-`UIIconButtonConfig`、`UIFormFieldConfig` 与 `UIDialogConfig` 是第一方多节点 composition profile；对应
-`UIIconButtonParts`、`UIFormFieldParts`、`UIDialogParts` 返回实际 retained node id，供调用者注册既有 Button
+`UIIconButtonConfig`、`UIFormFieldConfig`、`UIDialogConfig` 与 `UISnackbarHostConfig` 是第一方多节点 composition
+profile；对应 `UIIconButtonParts`、`UIFormFieldParts`、`UIDialogParts`、`UISnackbarHostParts` 返回实际 retained node id，供调用者注册既有 Button
 action 或更新 TextEdit。`requiredIconButtonBuildBudget()`、`requiredFormFieldBuildBudget()`、
-`requiredDialogBuildBudget()` 在 mutation 前给出精确 node/text/Behavior reservation；`UIContext`、
+`requiredDialogBuildBudget()`、`requiredSnackbarHostBuildBudget()` 在 mutation 前给出精确 node/text/Behavior reservation；`UIContext`、
 `UITreeUpdater` 和 phase-scoped `PrimaryWindowUITreeUpdater` 均提供
-`buildIconButton()/buildFormField()/buildDialog()`。IconButton 的 Button 是唯一 behavior/semantics root，Icon
+`buildIconButton()/buildFormField()/buildDialog()/buildSnackbarHost()`。IconButton 的 Button 是唯一 behavior/semantics root，Icon
 默认 Exclude semantics，Tooltip 保持独立 Anchor；FormField 只有一个 TextInput owner；Dialog 的既有 Modal
-是唯一 barrier/Focus Scope owner。三者复用同一 fixed-capacity transaction，失败不发布半棵组件树。
+是唯一 barrier/Focus Scope owner。Snackbar 使用调用方持有的最大 4 条 inline queue、显式 monotonic clock、可选
+action token 和 `Polite` live-region；它不请求 Focus，也不建立 Tooltip/Popup/Modal barrier。四类 recipe 复用同一
+fixed-capacity transaction，失败不发布半棵组件树。
 
-ToggleSwitch 默认 Standard 44x24，也提供 Compact 36x20；control root 通过 `accessibleName` 发布
+`UINumberFieldConfig` 通过 `UINumberFieldLabelPlacement::{Above,Leading}` 明确区分表单纵向标签与
+Inspector 两列属性行。`Above` 不创建额外容器，`UINumberFieldParts::content` 等于 `root`；`Leading`
+创建独立、可伸缩的 content column，因此无 helper/error 时精确 node budget 从 6 增加到 7，text 与
+Activate/TextInput Behavior reservation 不变。`requiredNumberFieldBuildBudget()` 与
+`buildNumberField()` 继续使用同一 fixed-capacity transaction；这只是现有 Element/Button/TextEdit 的组合
+profile，不增加公开 Widget kind 或兼容入口。
+
+`UICollapsibleSectionConfig` 由产品提供 `collapsedIndicator` / `expandedIndicator` 两份 `UIIconContent` 与共享
+`indicatorLayout`。recipe 在同一 6-node fixed-capacity transaction 中创建两个真实 Icon node，展开状态只切换两者和
+content 的 `UIVisibility`；Header 仍是唯一 Toggle/Activate owner，不再把 `>` / `v` 字符写进 Label 来模拟图标。
+
+Switch 默认 Standard 44x24，也提供 Compact 36x20；control root 通过 `accessibleName` 发布
 `UISemanticsRole::Switch`。它继续解析为 Checkbox built-in，复用 Toggle state、`setChecked()/isChecked()`、
 Checkbox action/paint API、Focus/Input/容量与 UIA TogglePattern；只有 theme track/thumb chrome 和 semantics role
 不同。Windows UIA 将 Switch 映射为 CheckBox ControlType。该 profile 不新增 Switch Widget、状态池、update loop
@@ -465,6 +484,12 @@ Behavior slot；Runtime 对应的 move-only `PrimaryWindowUIBuildTransaction` �
 逃逸时 phase finish 强制回滚并返回 `BuildTransactionInProgress`，成功 commit 后只留下普通 retained subtree。
 `UIContextStatistics::componentBuild` 提供各 reservation pool 的 requested/reserved/published/failure/outstanding
 counter、活动事务数与失败事务数。
+
+`UIColorField` 是 swatch + 可编辑 `#RRGGBBAA` summary；紧随其后的 `UIColorPicker` 是固定预算通道编辑组件，
+只发布短 label、标准 RangeInput Slider 和 fixed-capacity `0..255` value label，不重复 preview 或 hex。
+`SliderRed/SliderGreen/SliderBlue/SliderAlpha`
+是只改变 filled-track 色相的 Theme recipe，仍复用标准 Slider behavior、semantics、geometry、paint storage 与
+Dark/Light theme refresh；它们不建立新的 control kind 或 RangeInput 状态。
 
 `UIElementVisual::canvas` 接受 borrowed、backend-neutral `SolidRect`/`SolidEllipse`/`SolidLine`/Image/
 `NineSlice` command span。`SolidRect` 可设置 `UILogicalCornerRadii cornerRadii`；`SolidEllipse` 使用 bounds，

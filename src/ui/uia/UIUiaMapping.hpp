@@ -58,6 +58,11 @@ inline constexpr u32 kToggleStateOff = 0U;
 inline constexpr u32 kToggleStateOn = 1U;
 inline constexpr u32 kToggleStateIndeterminate = 2U;
 
+// AutomationLiveSetting values (UIAutomationClient.h).
+inline constexpr u32 kLiveSettingOff = 0U;
+inline constexpr u32 kLiveSettingPolite = 1U;
+inline constexpr u32 kLiveSettingAssertive = 2U;
+
 struct UIUiaRangeValue final {
     double value = 0.0;
     double minimum = 0.0;
@@ -82,6 +87,7 @@ struct UIUiaMappedNode final {
     bool hasKeyboardFocus = false;
     bool isSelected = false;
     bool invokeSupported = false;
+    u32 liveSetting = kLiveSettingOff;
     std::optional<UIUiaRangeValue> rangeValue{};
     std::optional<u32> toggleState{};
     std::optional<UIUiaValuePattern> value{};
@@ -154,6 +160,11 @@ struct UIUiaMappedNode final {
             hasSemanticsAction(source.actions, UISemanticsAction::Activate) &&
             (source.role == UISemanticsRole::Button ||
              source.role == UISemanticsRole::MenuItem),
+        .liveSetting = source.liveSetting == UISemanticsLiveSetting::Polite
+                           ? kLiveSettingPolite
+                       : source.liveSetting == UISemanticsLiveSetting::Assertive
+                           ? kLiveSettingAssertive
+                           : kLiveSettingOff,
     };
 
     mapped.isKeyboardFocusable =

@@ -23,6 +23,7 @@ param(
     [int]$InputSettleMs = 180,
     [int]$CaptureIntervalMs = 70,
     [int]$CaptureAttempts = 4,
+    [int]$WindowReadyTimeoutMs = 45000,
     [int]$ProcessExitTimeoutMs = 10000,
     [switch]$SkipBuild,
     [string]$OutJson = ''
@@ -30,6 +31,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
 
 if ($WarmupMs -lt 0 -or $InputSettleMs -lt 0 -or $CaptureIntervalMs -lt 1) {
     throw 'WarmupMs/InputSettleMs must be non-negative and CaptureIntervalMs must be positive'
@@ -37,8 +40,8 @@ if ($WarmupMs -lt 0 -or $InputSettleMs -lt 0 -or $CaptureIntervalMs -lt 1) {
 if ($CaptureAttempts -lt 2) {
     throw 'CaptureAttempts must be at least two for repeatability evidence'
 }
-if ($ProcessExitTimeoutMs -lt 1000) {
-    throw 'ProcessExitTimeoutMs must be at least 1000'
+if ($WindowReadyTimeoutMs -lt 1000 -or $ProcessExitTimeoutMs -lt 1000) {
+    throw 'WindowReadyTimeoutMs and ProcessExitTimeoutMs must be at least 1000'
 }
 
 if ([string]::IsNullOrWhiteSpace($SourceRoot)) {
@@ -97,12 +100,17 @@ public static class TinaUiStateFeedbackWin32 {
 
     [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr value);
     [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+    [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr hWnd, out Rect rect);
     [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr hWnd, ref Point point);
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hWnd, IntPtr hdc, uint flags);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int command);
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll", SetLastError = true)] public static extern bool SetWindowPos(
+        IntPtr hWnd, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
+    [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
     [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(Point point);
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
@@ -117,8 +125,17 @@ public static class TinaUiStateFeedbackWin32 {
     public const uint PrintRenderFullContent = 2;
     public const uint MouseLeftDown = 0x0002;
     public const uint MouseLeftUp = 0x0004;
+    public const uint MouseWheel = 0x0800;
     public const uint WindowClose = 0x0010;
     public const int ShowRestore = 9;
+    public const uint WindowPosNoSize = 0x0001;
+    public const uint WindowPosNoMove = 0x0002;
+    public const uint WindowPosShowWindow = 0x0040;
+    public static readonly IntPtr TopMost = new IntPtr(-1);
+
+    public static void SendMouseWheel(int delta) {
+        mouse_event(MouseWheel, 0, 0, unchecked((uint)delta), UIntPtr.Zero);
+    }
 
     [StructLayout(LayoutKind.Sequential)]
     public struct Rect { public int Left, Top, Right, Bottom; }
@@ -130,27 +147,11 @@ public static class TinaUiStateFeedbackWin32 {
 }
 
 $designWidth = 1280
-$designHeight = 980
+$designHeight = 800
 $neutralPoint = @(150, 700)
-$inputPoints = [ordered]@{
-    slider = @(1103, 216)
-    checkbox = @(303, 340)
-    textEdit = @(500, 529)
-    radio = @(480, 620)
-    listSelected = @(600, 882)
-    treeSelected = @(900, 831)
-}
-$roiDefinitions = [ordered]@{
-    slider = @(780, 198, 1234, 236)
-    checkbox = @(288, 326, 318, 355)
-    textEdit = @(288, 505, 709, 553)
-    radio = @(458, 601, 500, 644)
-    listSelected = @(496, 870, 708, 896)
-    treeSelected = @(780, 818, 1030, 844)
-    disabledButton = @(289, 262, 486, 306)
-    disabledButtonChrome = @(440, 270, 480, 298)
-    enabledButtonChrome = @(662, 270, 702, 298)
-}
+$componentScrollPoint = @(900, 400)
+$pointerInterferenceTolerancePx = 2
+$script:expectedPointerScreen = $null
 
 function Find-SampleWindow {
     param([Parameter(Mandatory = $true)][int]$ProcessId)
@@ -175,6 +176,14 @@ function Find-SampleWindow {
 function Get-ClientExtent {
     param([Parameter(Mandatory = $true)][IntPtr]$Hwnd)
 
+    if (-not [TinaUiStateFeedbackWin32]::IsWindow($Hwnd)) {
+        throw "showcase HWND is no longer valid: $Hwnd"
+    }
+    if ([TinaUiStateFeedbackWin32]::IsIconic($Hwnd)) {
+        [void][TinaUiStateFeedbackWin32]::ShowWindow(
+            $Hwnd, [TinaUiStateFeedbackWin32]::ShowRestore)
+        Promote-InputWindow -Hwnd $Hwnd
+    }
     $rect = New-Object TinaUiStateFeedbackWin32+Rect
     if (-not [TinaUiStateFeedbackWin32]::GetClientRect($Hwnd, [ref]$rect)) {
         throw 'GetClientRect failed'
@@ -207,6 +216,279 @@ function Convert-DesignPointToScreen {
     return $point
 }
 
+function New-UiaControlGeometry {
+    param(
+        [Parameter(Mandatory = $true)]$Current,
+        [Parameter(Mandatory = $true)]$Extent,
+        [Parameter(Mandatory = $true)]$ClientOrigin,
+        [Parameter(Mandatory = $true)]$Spec
+    )
+
+    $controlTypeId = [int]$Spec.controlTypeId
+    $name = [string]$Spec.name
+    $identity = if ([string]::IsNullOrWhiteSpace($name)) {
+        "type=$controlTypeId"
+    } else {
+        "type=$controlTypeId name='$name'"
+    }
+    $bounds = $Current.BoundingRectangle
+    if ($bounds.Width -le 0.0 -or $bounds.Height -le 0.0 -or
+        [double]::IsNaN($bounds.Left) -or [double]::IsNaN($bounds.Top) -or
+        [double]::IsInfinity($bounds.Left) -or [double]::IsInfinity($bounds.Top)) {
+        throw "UIA control has invalid bounds: $identity bounds=$bounds"
+    }
+    $scaleX = $designWidth / [double]$Extent.width
+    $scaleY = $designHeight / [double]$Extent.height
+    $left = ($bounds.Left - $ClientOrigin.X) * $scaleX
+    $top = ($bounds.Top - $ClientOrigin.Y) * $scaleY
+    $right = ($bounds.Right - $ClientOrigin.X) * $scaleX
+    $bottom = ($bounds.Bottom - $ClientOrigin.Y) * $scaleY
+    $inputX = $left + (($right - $left) * [double]$Spec.inputFractionX)
+    $inputY = $top + (($bottom - $top) * [double]$Spec.inputFractionY)
+    $roiPadding = [double]$Spec.roiPadding
+    $roi = @(
+        [Math]::Max(0.0, $left - $roiPadding),
+        [Math]::Max(0.0, $top - $roiPadding),
+        [Math]::Min([double]$designWidth, $right + $roiPadding),
+        [Math]::Min([double]$designHeight, $bottom + $roiPadding))
+    return [pscustomobject]@{
+        automationId = [string]$Current.AutomationId
+        controlTypeId = $controlTypeId
+        name = [string]$Current.Name
+        isOffscreen = [bool]$Current.IsOffscreen
+        bounds = @($left, $top, $right, $bottom)
+        inputPoint = @([int][Math]::Round($inputX), [int][Math]::Round($inputY))
+        roi = $roi
+    }
+}
+
+function Get-UiaGeometrySet {
+    param(
+        [Parameter(Mandatory = $true)][IntPtr]$Hwnd,
+        [Parameter(Mandatory = $true)]$Extent,
+        [Parameter(Mandatory = $true)][object[]]$Specs
+    )
+
+    Assert-PointerOwnership -Hwnd $Hwnd -Context 'before UIA snapshot'
+    $root = [System.Windows.Automation.AutomationElement]::FromHandle($Hwnd)
+    if ($null -eq $root) {
+        throw "UIA did not publish a root for $Hwnd"
+    }
+    $elements = $root.FindAll(
+        [System.Windows.Automation.TreeScope]::Subtree,
+        [System.Windows.Automation.Condition]::TrueCondition)
+    $matches = [ordered]@{}
+    foreach ($spec in $Specs) {
+        $matches[[string]$spec.key] = New-Object System.Collections.Generic.List[object]
+    }
+    for ($index = 0; $index -lt $elements.Count; ++$index) {
+        $current = $elements.Item($index).Current
+        if ($current.FrameworkId -ne 'Tina') {
+            continue
+        }
+        foreach ($spec in $Specs) {
+            if ($current.ControlType.Id -ne [int]$spec.controlTypeId) {
+                continue
+            }
+            if (-not [string]::IsNullOrWhiteSpace([string]$spec.name) -and
+                $current.Name -ne [string]$spec.name) {
+                continue
+            }
+            [void]$matches[[string]$spec.key].Add($current)
+        }
+    }
+    Assert-PointerOwnership -Hwnd $Hwnd -Context 'after UIA snapshot'
+
+    $clientOrigin = New-Object TinaUiStateFeedbackWin32+Point
+    if (-not [TinaUiStateFeedbackWin32]::ClientToScreen($Hwnd, [ref]$clientOrigin)) {
+        throw 'ClientToScreen failed while converting UIA bounds'
+    }
+    $geometries = [ordered]@{}
+    foreach ($spec in $Specs) {
+        $key = [string]$spec.key
+        $name = [string]$spec.name
+        $identity = if ([string]::IsNullOrWhiteSpace($name)) {
+            "type=$([int]$spec.controlTypeId)"
+        } else {
+            "type=$([int]$spec.controlTypeId) name='$name'"
+        }
+        if ($matches[$key].Count -eq 0) {
+            throw "UIA control not found: $identity"
+        }
+        if ($matches[$key].Count -ne 1) {
+            throw "UIA control is ambiguous: $identity matches=$($matches[$key].Count)"
+        }
+        $geometries[$key] = New-UiaControlGeometry `
+            -Current $matches[$key][0] -Extent $Extent -ClientOrigin $clientOrigin -Spec $spec
+    }
+    return [pscustomobject]$geometries
+}
+
+function Test-UiaGeometryVisible {
+    param([Parameter(Mandatory = $true)]$Geometry)
+
+    $visibleTop = 52.0
+    $visibleBottom = $designHeight - 36.0
+    return -not $Geometry.isOffscreen -and
+        $Geometry.bounds[0] -ge 0.0 -and $Geometry.bounds[2] -le $designWidth -and
+        $Geometry.bounds[1] -ge $visibleTop -and $Geometry.bounds[3] -le $visibleBottom
+}
+
+function Format-UiaGeometrySet {
+    param([Parameter(Mandatory = $true)]$GeometrySet)
+
+    return (($GeometrySet.PSObject.Properties | ForEach-Object {
+        "$($_.Name)=id=$($_.Value.automationId),bounds=$($_.Value.bounds -join ','),offscreen=$($_.Value.isOffscreen)"
+    }) -join '; ')
+}
+
+function Assert-UiaGeometrySetVisible {
+    param(
+        [Parameter(Mandatory = $true)]$GeometrySet,
+        [Parameter(Mandatory = $true)][string]$Region
+    )
+
+    $invalid = New-Object System.Collections.Generic.List[string]
+    foreach ($property in $GeometrySet.PSObject.Properties) {
+        if (-not (Test-UiaGeometryVisible -Geometry $property.Value)) {
+            [void]$invalid.Add(
+                "$($property.Name)=bounds=$($property.Value.bounds -join ',') offscreen=$($property.Value.isOffscreen)")
+        }
+    }
+    if ($invalid.Count -ne 0) {
+        throw "$Region UIA controls are not fully visible: $($invalid -join '; ')"
+    }
+}
+
+function Wait-UiaGeometrySetVisibleWithWheel {
+    param(
+        [Parameter(Mandatory = $true)][IntPtr]$Hwnd,
+        [Parameter(Mandatory = $true)]$Extent,
+        [Parameter(Mandatory = $true)][object[]]$Specs,
+        [Parameter(Mandatory = $true)][string]$Region,
+        [int]$MaximumWheelSteps = 48
+    )
+
+    $lastDetail = '<not resolved>'
+    $wheelSteps = 0
+    $lastWheelDirection = 0
+    while ($wheelSteps -le $MaximumWheelSteps) {
+        try {
+            $geometries = Get-UiaGeometrySet -Hwnd $Hwnd -Extent $Extent -Specs $Specs
+            $details = New-Object System.Collections.Generic.List[string]
+            $allVisible = $true
+            $requiresScrollDown = $false
+            $requiresScrollUp = $false
+            foreach ($property in $geometries.PSObject.Properties) {
+                $geometry = $property.Value
+                [void]$details.Add(
+                    "$($property.Name)=bounds=$($geometry.bounds -join ',') offscreen=$($geometry.isOffscreen)")
+                if (-not (Test-UiaGeometryVisible -Geometry $geometry)) {
+                    $allVisible = $false
+                    if ($geometry.bounds[3] -gt ($designHeight - 36.0)) {
+                        $requiresScrollDown = $true
+                    } elseif ($geometry.bounds[1] -lt 52.0) {
+                        $requiresScrollUp = $true
+                    } elseif ($geometry.isOffscreen) {
+                        $requiresScrollDown = $true
+                    }
+                }
+            }
+            $lastDetail = $details -join '; '
+            if ($allVisible) {
+                Write-Host "uiaGeometry region=$Region $(Format-UiaGeometrySet -GeometrySet $geometries)"
+                return $geometries
+            }
+            if ($requiresScrollDown -and $requiresScrollUp) {
+                $lastDetail = "$Region controls cannot fit in the Component Canvas viewport: $lastDetail"
+                break
+            }
+            $wheelDelta = if ($requiresScrollUp) { 120 } else { -120 }
+        } catch {
+            if ($_.Exception.Message -match '^external (pointer|desktop) interference') {
+                throw
+            }
+            $lastDetail = $_.Exception.Message
+            $wheelDelta = -120
+        }
+        $remainingSteps = $MaximumWheelSteps - $wheelSteps
+        if ($remainingSteps -le 0) {
+            break
+        }
+        $wheelDirection = [Math]::Sign($wheelDelta)
+        $batchLimit = if ($lastWheelDirection -ne 0 -and
+            $wheelDirection -ne $lastWheelDirection) { 1 } else { 3 }
+        $batchSize = [Math]::Min($batchLimit, $remainingSteps)
+        Move-DesignPointer -Hwnd $Hwnd -Extent $Extent `
+            -DesignX $componentScrollPoint[0] -DesignY $componentScrollPoint[1]
+        for ($batchIndex = 0; $batchIndex -lt $batchSize; ++$batchIndex) {
+            Assert-InputTarget -Hwnd $Hwnd -Context "$Region wheel batch"
+            [TinaUiStateFeedbackWin32]::SendMouseWheel($wheelDelta)
+            if ($batchIndex + 1 -lt $batchSize) {
+                Start-Sleep -Milliseconds 20
+            }
+        }
+        $wheelSteps += $batchSize
+        $lastWheelDirection = $wheelDirection
+        Start-Sleep -Milliseconds ([Math]::Max(90, $InputSettleMs))
+    }
+    throw "$Region controls did not become visible after $MaximumWheelSteps wheel steps: $lastDetail"
+}
+
+function Promote-InputWindow {
+    param([Parameter(Mandatory = $true)][IntPtr]$Hwnd)
+
+    $flags = [TinaUiStateFeedbackWin32]::WindowPosNoMove -bor
+        [TinaUiStateFeedbackWin32]::WindowPosNoSize -bor
+        [TinaUiStateFeedbackWin32]::WindowPosShowWindow
+    if (-not [TinaUiStateFeedbackWin32]::SetWindowPos(
+            $Hwnd, [TinaUiStateFeedbackWin32]::TopMost, 0, 0, 0, 0, $flags)) {
+        throw "SetWindowPos(HWND_TOPMOST) failed for $Hwnd"
+    }
+    [void][TinaUiStateFeedbackWin32]::BringWindowToTop($Hwnd)
+    if (-not [TinaUiStateFeedbackWin32]::SetForegroundWindow($Hwnd)) {
+        throw "input window could not become the foreground window: $Hwnd"
+    }
+    Start-Sleep -Milliseconds 30
+}
+
+function Assert-PointerOwnership {
+    param(
+        [Parameter(Mandatory = $true)][IntPtr]$Hwnd,
+        [string]$Context = 'pointer operation'
+    )
+
+    if ($null -eq $script:expectedPointerScreen) {
+        throw "pointer ownership was not initialized: context=$Context"
+    }
+    if ($script:expectedPointerScreen.hwnd -ne $Hwnd) {
+        throw "pointer ownership belongs to another window: context=$Context " +
+            "expected=$($script:expectedPointerScreen.hwnd) actual=$Hwnd"
+    }
+    $foreground = [TinaUiStateFeedbackWin32]::GetForegroundWindow()
+    if ($foreground -ne $Hwnd -or [TinaUiStateFeedbackWin32]::IsIconic($Hwnd)) {
+        throw "external desktop interference: context=$Context expectedForeground=$Hwnd " +
+            "actualForeground=$foreground iconic=$([TinaUiStateFeedbackWin32]::IsIconic($Hwnd))"
+    }
+    $cursor = New-Object TinaUiStateFeedbackWin32+Point
+    if (-not [TinaUiStateFeedbackWin32]::GetCursorPos([ref]$cursor)) {
+        throw 'GetCursorPos failed while validating pointer ownership'
+    }
+    $deltaX = [Math]::Abs($cursor.X - [int]$script:expectedPointerScreen.x)
+    $deltaY = [Math]::Abs($cursor.Y - [int]$script:expectedPointerScreen.y)
+    if ($deltaX -gt $pointerInterferenceTolerancePx -or
+        $deltaY -gt $pointerInterferenceTolerancePx) {
+        throw "external pointer interference: context=$Context " +
+            "expected=$($script:expectedPointerScreen.x),$($script:expectedPointerScreen.y) " +
+            "actual=$($cursor.X),$($cursor.Y) delta=${deltaX},${deltaY}"
+    }
+    $target = [TinaUiStateFeedbackWin32]::WindowFromPoint($cursor)
+    if ($target -ne $Hwnd) {
+        throw "external pointer interference: context=$Context expectedTarget=$Hwnd actualTarget=$target " +
+            "screen=$($cursor.X),$($cursor.Y)"
+    }
+}
+
 function Move-DesignPointer {
     param(
         [Parameter(Mandatory = $true)][IntPtr]$Hwnd,
@@ -215,34 +497,37 @@ function Move-DesignPointer {
         [Parameter(Mandatory = $true)][int]$DesignY
     )
 
+    if ($null -ne $script:expectedPointerScreen) {
+        Assert-PointerOwnership -Hwnd $Hwnd -Context 'before scripted pointer move'
+    } else {
+        if ([TinaUiStateFeedbackWin32]::IsIconic($Hwnd) -or
+            [TinaUiStateFeedbackWin32]::GetForegroundWindow() -ne $Hwnd) {
+            [void][TinaUiStateFeedbackWin32]::ShowWindow(
+                $Hwnd, [TinaUiStateFeedbackWin32]::ShowRestore)
+            Promote-InputWindow -Hwnd $Hwnd
+        }
+    }
     $screen = Convert-DesignPointToScreen -Hwnd $Hwnd -Extent $Extent -DesignX $DesignX -DesignY $DesignY
     if (-not [TinaUiStateFeedbackWin32]::SetCursorPos($screen.X, $screen.Y)) {
         throw 'SetCursorPos failed'
     }
-    $target = [TinaUiStateFeedbackWin32]::WindowFromPoint($screen)
-    if ($target -ne $Hwnd) {
-        throw "pointer target mismatch expected=$Hwnd actual=$target"
+    $script:expectedPointerScreen = [pscustomobject]@{
+        hwnd = $Hwnd
+        x = [int]$screen.X
+        y = [int]$screen.Y
+        designX = $DesignX
+        designY = $DesignY
     }
+    Assert-PointerOwnership -Hwnd $Hwnd -Context 'after scripted pointer move'
 }
 
 function Assert-InputTarget {
-    param([Parameter(Mandatory = $true)][IntPtr]$Hwnd)
+    param(
+        [Parameter(Mandatory = $true)][IntPtr]$Hwnd,
+        [string]$Context = 'before pointer input'
+    )
 
-    if ([TinaUiStateFeedbackWin32]::GetForegroundWindow() -ne $Hwnd) {
-        [void][TinaUiStateFeedbackWin32]::SetForegroundWindow($Hwnd)
-        Start-Sleep -Milliseconds 30
-    }
-    if ([TinaUiStateFeedbackWin32]::GetForegroundWindow() -ne $Hwnd) {
-        throw "input target is not foreground: $Hwnd"
-    }
-    $cursor = New-Object TinaUiStateFeedbackWin32+Point
-    if (-not [TinaUiStateFeedbackWin32]::GetCursorPos([ref]$cursor)) {
-        throw 'GetCursorPos failed before pointer input'
-    }
-    $target = [TinaUiStateFeedbackWin32]::WindowFromPoint($cursor)
-    if ($target -ne $Hwnd) {
-        throw "pointer input would target another window expected=$Hwnd actual=$target"
-    }
+    Assert-PointerOwnership -Hwnd $Hwnd -Context $Context
 }
 
 function Send-PrimaryDown {
@@ -267,10 +552,11 @@ function Invoke-ClickAndHover {
     Start-Sleep -Milliseconds 80
     $primaryHeld = $false
     try {
-        Assert-InputTarget -Hwnd $Hwnd
+        Assert-InputTarget -Hwnd $Hwnd -Context 'before primary down'
         $primaryHeld = $true
         Send-PrimaryDown
         Start-Sleep -Milliseconds 45
+        Assert-InputTarget -Hwnd $Hwnd -Context 'before primary up'
         Send-PrimaryUp
         $primaryHeld = $false
     } finally {
@@ -293,10 +579,11 @@ function Start-PrimaryHold {
 
     Move-DesignPointer -Hwnd $Hwnd -Extent $Extent -DesignX $Point[0] -DesignY $Point[1]
     Start-Sleep -Milliseconds 80
-    Assert-InputTarget -Hwnd $Hwnd
+    Assert-InputTarget -Hwnd $Hwnd -Context 'before primary hold'
     $Held.Value = $true
     Send-PrimaryDown
     Start-Sleep -Milliseconds $InputSettleMs
+    Assert-InputTarget -Hwnd $Hwnd -Context 'after primary hold settle'
 }
 
 function Test-UsefulBitmap {
@@ -438,6 +725,7 @@ function Get-RoiFingerprint {
         $pixelCount = [double]($width * $height)
         return [pscustomobject]@{
             name = $Name
+            designRect = @($DesignRect | ForEach-Object { [double]$_ })
             left = $left
             top = $top
             width = $width
@@ -458,15 +746,18 @@ function Capture-StableState {
     param(
         [Parameter(Mandatory = $true)][IntPtr]$Hwnd,
         [Parameter(Mandatory = $true)][string]$ThemeDirectory,
-        [Parameter(Mandatory = $true)][string]$Name
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][System.Collections.IDictionary]$RoiDefinitions
     )
 
     $lastUsefulHash = $null
     $consecutiveUseful = 0
     $attempts = New-Object System.Collections.Generic.List[object]
     for ($attempt = 1; $attempt -le $CaptureAttempts; ++$attempt) {
+        Assert-PointerOwnership -Hwnd $Hwnd -Context "before $Name capture $attempt"
         $path = Join-Path $ThemeDirectory ('{0}-{1:D2}.png' -f $Name, $attempt)
         $method = Capture-Client -Hwnd $Hwnd -Path $path
+        Assert-PointerOwnership -Hwnd $Hwnd -Context "after $Name capture $attempt"
         $useful = Test-UsefulCapture -Path $path
         $fullHash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
         [void]$attempts.Add([pscustomobject]@{
@@ -484,10 +775,11 @@ function Capture-StableState {
             }
             if ($consecutiveUseful -ge 2) {
                 $roiResults = [ordered]@{}
-                foreach ($roiName in $roiDefinitions.Keys) {
+                foreach ($roiName in $RoiDefinitions.Keys) {
                     $roiResults[$roiName] = Get-RoiFingerprint `
-                        -Path $path -Name $roiName -DesignRect $roiDefinitions[$roiName]
+                        -Path $path -Name $roiName -DesignRect $RoiDefinitions[$roiName]
                 }
+                Assert-PointerOwnership -Hwnd $Hwnd -Context "after $Name ROI fingerprints"
                 $extent = Get-ClientExtent -Hwnd $Hwnd
                 return [pscustomobject]@{
                     name = $Name
@@ -532,10 +824,31 @@ function Read-ShowcaseSuccess {
     if ([string]$evidence.finalTheme -ne $Theme) {
         [void]$errors.Add("finalTheme expected=$Theme actual=$($evidence.finalTheme)")
     }
+    if ([string]$evidence.initialDensity -ne 'comfortable' -or
+        [string]$evidence.finalDensity -ne 'comfortable') {
+        [void]$errors.Add(
+            "density expected=comfortable/comfortable actual=$($evidence.initialDensity)/$($evidence.finalDensity)")
+    }
     if ([bool]$evidence.autoDemo) { [void]$errors.Add('autoDemo must be false') }
     if ([int64]$evidence.themeSwitches -ne 0) { [void]$errors.Add('themeSwitches must be zero') }
-    if ([int64]$evidence.controls -ne 20) {
-        [void]$errors.Add("controls expected=20 actual=$($evidence.controls)")
+    if ([int64]$evidence.densitySwitchRequests -ne 0 -or [int64]$evidence.densityRebuilds -ne 0) {
+        [void]$errors.Add('density switches and rebuilds must be zero')
+    }
+    if ([int64]$evidence.controls -ne 24) {
+        [void]$errors.Add("controls expected=24 actual=$($evidence.controls)")
+    }
+    if ([int64]$evidence.imageProducts -ne 5 -or
+        [int64]$evidence.asymmetricCornerProducts -ne 3) {
+        [void]$errors.Add(
+            "image products expected=5/3 actual=$($evidence.imageProducts)/$($evidence.asymmetricCornerProducts)")
+    }
+    if ([int64]$evidence.componentProfiles -ne 3 -or [int64]$evidence.workbenchBands -ne 5) {
+        [void]$errors.Add(
+            "workbench structure expected=3/5 actual=$($evidence.componentProfiles)/$($evidence.workbenchBands)")
+    }
+    if (-not [bool]$evidence.desktopWorkbench -or [bool]$evidence.dialogOpen -or
+        -not [bool]$evidence.stylesheetInstalled) {
+        [void]$errors.Add('desktopWorkbench/stylesheetInstalled must be true and dialogOpen must be false')
     }
     if ([string]$evidence.exit -ne 'PrimaryWindowRequestedClose') {
         [void]$errors.Add("exit expected=PrimaryWindowRequestedClose actual=$($evidence.exit)")
@@ -552,6 +865,7 @@ function Capture-ThemeMatrix {
         [Parameter(Mandatory = $true)][string]$RunRoot
     )
 
+    $script:expectedPointerScreen = $null
     $themeDirectory = Join-Path $RunRoot $Theme
     New-Item -ItemType Directory -Path $themeDirectory -Force | Out-Null
     $stdoutPath = Join-Path $themeDirectory 'stdout.txt'
@@ -567,7 +881,7 @@ function Capture-ThemeMatrix {
     $closedNormally = $false
     $hwnd = [IntPtr]::Zero
     try {
-        $windowDeadline = (Get-Date).AddSeconds(15)
+        $windowDeadline = (Get-Date).AddMilliseconds($WindowReadyTimeoutMs)
         while ((Get-Date) -lt $windowDeadline -and -not $process.HasExited) {
             try { $process.Refresh() } catch {}
             if ($process.MainWindowHandle -ne [IntPtr]::Zero) {
@@ -579,14 +893,22 @@ function Capture-ThemeMatrix {
             Start-Sleep -Milliseconds 80
         }
         if ($hwnd -eq [IntPtr]::Zero) {
+            if ($process.HasExited) {
+                $process.WaitForExit()
+                $process.Refresh()
+                $stderr = if (Test-Path -LiteralPath $stderrPath) {
+                    (Get-Content -LiteralPath $stderrPath -Encoding utf8 -Raw).Trim()
+                } else { '' }
+                $detail = if ([string]::IsNullOrWhiteSpace($stderr)) { '<empty>' } else { $stderr }
+                throw "$Theme showcase exited before publishing a visible window exit=$($process.ExitCode) stderr=$detail"
+            }
             throw "$Theme showcase did not publish a visible window"
         }
 
         [void][TinaUiStateFeedbackWin32]::ShowWindow(
             $hwnd, [TinaUiStateFeedbackWin32]::ShowRestore)
-        if (-not [TinaUiStateFeedbackWin32]::SetForegroundWindow($hwnd)) {
-            throw "$Theme showcase could not become the foreground window"
-        }
+        Promote-InputWindow -Hwnd $hwnd
+        Write-Host "inputWindowIsolation=HWND_TOPMOST hwnd=$hwnd"
         $extent = Get-ClientExtent -Hwnd $hwnd
         $aspect = $extent.width / [double]$extent.height
         $expectedAspect = $designWidth / [double]$designHeight
@@ -594,22 +916,77 @@ function Capture-ThemeMatrix {
             throw "$Theme showcase client aspect mismatch actual=$aspect expected=$expectedAspect"
         }
 
+        $initialSpecs = @(
+            [pscustomobject]@{
+                key = 'slider'; controlTypeId = 50015; name = ''
+                inputFractionX = 0.72; inputFractionY = 0.5; roiPadding = 4.0
+            },
+            [pscustomobject]@{
+                key = 'checkbox'; controlTypeId = 50002; name = ''
+                inputFractionX = 0.5; inputFractionY = 0.5; roiPadding = 4.0
+            },
+            [pscustomobject]@{
+                key = 'disabledButton'; controlTypeId = 50000; name = 'Disabled'
+                inputFractionX = 0.5; inputFractionY = 0.5; roiPadding = 3.0
+            },
+            [pscustomobject]@{
+                key = 'enabledButton'; controlTypeId = 50000; name = 'Reset state'
+                inputFractionX = 0.5; inputFractionY = 0.5; roiPadding = 3.0
+            }
+        )
+        $formSpecs = @(
+            [pscustomobject]@{
+                key = 'textEdit'; controlTypeId = 50004; name = 'Profile name'
+                inputFractionX = 0.35; inputFractionY = 0.5; roiPadding = 4.0
+            },
+            [pscustomobject]@{
+                key = 'radio'; controlTypeId = 50013; name = 'Balanced'
+                inputFractionX = 0.5; inputFractionY = 0.5; roiPadding = 4.0
+            }
+        )
+        $collectionSpecs = @(
+            [pscustomobject]@{
+                key = 'listSelected'; controlTypeId = 50007; name = 'Asset browser'
+                inputFractionX = 0.6; inputFractionY = 0.5; roiPadding = 2.0
+            },
+            [pscustomobject]@{
+                key = 'treeSelected'; controlTypeId = 50024; name = 'World'
+                inputFractionX = 0.65; inputFractionY = 0.5; roiPadding = 2.0
+            }
+        )
+
         Move-DesignPointer -Hwnd $hwnd -Extent $extent `
             -DesignX $neutralPoint[0] -DesignY $neutralPoint[1]
         Start-Sleep -Milliseconds $WarmupMs
+        $initialGeometry = Get-UiaGeometrySet `
+            -Hwnd $hwnd -Extent $extent -Specs $initialSpecs
+        Assert-UiaGeometrySetVisible -GeometrySet $initialGeometry -Region 'initial'
+        Write-Host "uiaGeometry region=initial $(Format-UiaGeometrySet -GeometrySet $initialGeometry)"
+        $initialRois = [ordered]@{
+            slider = $initialGeometry.slider.roi
+            checkbox = $initialGeometry.checkbox.roi
+            disabledButton = $initialGeometry.disabledButton.roi
+            disabledButtonChrome = $initialGeometry.disabledButton.roi
+            enabledButtonChrome = $initialGeometry.enabledButton.roi
+        }
         $states['normal'] = Capture-StableState `
-            -Hwnd $hwnd -ThemeDirectory $themeDirectory -Name 'normal'
+            -Hwnd $hwnd -ThemeDirectory $themeDirectory -Name 'normal' `
+            -RoiDefinitions $initialRois
 
         Invoke-ClickAndHover -Hwnd $hwnd -Extent $extent `
-            -ClickPoint $inputPoints.slider -HoverPoint $inputPoints.checkbox
+            -ClickPoint $initialGeometry.slider.inputPoint `
+            -HoverPoint $initialGeometry.checkbox.inputPoint
         $states['slider-focus-checkbox-hover'] = Capture-StableState `
-            -Hwnd $hwnd -ThemeDirectory $themeDirectory -Name 'slider-focus-checkbox-hover'
+            -Hwnd $hwnd -ThemeDirectory $themeDirectory -Name 'slider-focus-checkbox-hover' `
+            -RoiDefinitions $initialRois
 
-        Start-PrimaryHold -Hwnd $hwnd -Extent $extent -Point $inputPoints.slider `
+        Start-PrimaryHold -Hwnd $hwnd -Extent $extent `
+            -Point $initialGeometry.slider.inputPoint `
             -Held ([ref]$primaryHeld)
         try {
             $states['slider-drag'] = Capture-StableState `
-                -Hwnd $hwnd -ThemeDirectory $themeDirectory -Name 'slider-drag'
+                -Hwnd $hwnd -ThemeDirectory $themeDirectory -Name 'slider-drag' `
+                -RoiDefinitions $initialRois
         } finally {
             if ($primaryHeld) {
                 Send-PrimaryUp
@@ -618,22 +995,41 @@ function Capture-ThemeMatrix {
             }
         }
 
+        $formGeometry = Wait-UiaGeometrySetVisibleWithWheel `
+            -Hwnd $hwnd -Extent $extent -Specs $formSpecs -Region 'forms'
+        $formRois = [ordered]@{
+            textEdit = $formGeometry.textEdit.roi
+            radio = $formGeometry.radio.roi
+        }
+        Move-DesignPointer -Hwnd $hwnd -Extent $extent `
+            -DesignX $neutralPoint[0] -DesignY $neutralPoint[1]
+        Start-Sleep -Milliseconds $InputSettleMs
+        $states['forms-normal'] = Capture-StableState `
+            -Hwnd $hwnd -ThemeDirectory $themeDirectory -Name 'forms-normal' `
+            -RoiDefinitions $formRois
+
         Invoke-ClickAndHover -Hwnd $hwnd -Extent $extent `
-            -ClickPoint $inputPoints.textEdit -HoverPoint $inputPoints.radio
+            -ClickPoint $formGeometry.textEdit.inputPoint `
+            -HoverPoint $formGeometry.radio.inputPoint
         $states['text-focus-radio-hover'] = Capture-StableState `
-            -Hwnd $hwnd -ThemeDirectory $themeDirectory -Name 'text-focus-radio-hover'
+            -Hwnd $hwnd -ThemeDirectory $themeDirectory -Name 'text-focus-radio-hover' `
+            -RoiDefinitions $formRois
 
         Move-DesignPointer -Hwnd $hwnd -Extent $extent `
-            -DesignX $inputPoints.textEdit[0] -DesignY $inputPoints.textEdit[1]
+            -DesignX $formGeometry.textEdit.inputPoint[0] `
+            -DesignY $formGeometry.textEdit.inputPoint[1]
         Start-Sleep -Milliseconds $InputSettleMs
         $states['text-focus-hover'] = Capture-StableState `
-            -Hwnd $hwnd -ThemeDirectory $themeDirectory -Name 'text-focus-hover'
+            -Hwnd $hwnd -ThemeDirectory $themeDirectory -Name 'text-focus-hover' `
+            -RoiDefinitions $formRois
 
-        Start-PrimaryHold -Hwnd $hwnd -Extent $extent -Point $inputPoints.textEdit `
+        Start-PrimaryHold -Hwnd $hwnd -Extent $extent `
+            -Point $formGeometry.textEdit.inputPoint `
             -Held ([ref]$primaryHeld)
         try {
             $states['text-press'] = Capture-StableState `
-                -Hwnd $hwnd -ThemeDirectory $themeDirectory -Name 'text-press'
+                -Hwnd $hwnd -ThemeDirectory $themeDirectory -Name 'text-press' `
+                -RoiDefinitions $formRois
         } finally {
             if ($primaryHeld) {
                 Send-PrimaryUp
@@ -642,22 +1038,41 @@ function Capture-ThemeMatrix {
             }
         }
 
+        $collectionGeometry = Wait-UiaGeometrySetVisibleWithWheel `
+            -Hwnd $hwnd -Extent $extent -Specs $collectionSpecs -Region 'collections'
+        $collectionRois = [ordered]@{
+            listSelected = $collectionGeometry.listSelected.roi
+            treeSelected = $collectionGeometry.treeSelected.roi
+        }
+        Move-DesignPointer -Hwnd $hwnd -Extent $extent `
+            -DesignX $neutralPoint[0] -DesignY $neutralPoint[1]
+        Start-Sleep -Milliseconds $InputSettleMs
+        $states['collections-normal'] = Capture-StableState `
+            -Hwnd $hwnd -ThemeDirectory $themeDirectory -Name 'collections-normal' `
+            -RoiDefinitions $collectionRois
+
         Invoke-ClickAndHover -Hwnd $hwnd -Extent $extent `
-            -ClickPoint $inputPoints.listSelected -HoverPoint $inputPoints.treeSelected
+            -ClickPoint $collectionGeometry.listSelected.inputPoint `
+            -HoverPoint $collectionGeometry.treeSelected.inputPoint
         $states['list-focus-tree-hover'] = Capture-StableState `
-            -Hwnd $hwnd -ThemeDirectory $themeDirectory -Name 'list-focus-tree-hover'
+            -Hwnd $hwnd -ThemeDirectory $themeDirectory -Name 'list-focus-tree-hover' `
+            -RoiDefinitions $collectionRois
 
         Move-DesignPointer -Hwnd $hwnd -Extent $extent `
-            -DesignX $inputPoints.listSelected[0] -DesignY $inputPoints.listSelected[1]
+            -DesignX $collectionGeometry.listSelected.inputPoint[0] `
+            -DesignY $collectionGeometry.listSelected.inputPoint[1]
         Start-Sleep -Milliseconds $InputSettleMs
         $states['list-focus-hover'] = Capture-StableState `
-            -Hwnd $hwnd -ThemeDirectory $themeDirectory -Name 'list-focus-hover'
+            -Hwnd $hwnd -ThemeDirectory $themeDirectory -Name 'list-focus-hover' `
+            -RoiDefinitions $collectionRois
 
-        Start-PrimaryHold -Hwnd $hwnd -Extent $extent -Point $inputPoints.listSelected `
+        Start-PrimaryHold -Hwnd $hwnd -Extent $extent `
+            -Point $collectionGeometry.listSelected.inputPoint `
             -Held ([ref]$primaryHeld)
         try {
             $states['list-press'] = Capture-StableState `
-                -Hwnd $hwnd -ThemeDirectory $themeDirectory -Name 'list-press'
+                -Hwnd $hwnd -ThemeDirectory $themeDirectory -Name 'list-press' `
+                -RoiDefinitions $collectionRois
         } finally {
             if ($primaryHeld) {
                 Send-PrimaryUp
@@ -667,15 +1082,19 @@ function Capture-ThemeMatrix {
         }
 
         Invoke-ClickAndHover -Hwnd $hwnd -Extent $extent `
-            -ClickPoint $inputPoints.treeSelected -HoverPoint $inputPoints.treeSelected
+            -ClickPoint $collectionGeometry.treeSelected.inputPoint `
+            -HoverPoint $collectionGeometry.treeSelected.inputPoint
         $states['tree-focus-hover'] = Capture-StableState `
-            -Hwnd $hwnd -ThemeDirectory $themeDirectory -Name 'tree-focus-hover'
+            -Hwnd $hwnd -ThemeDirectory $themeDirectory -Name 'tree-focus-hover' `
+            -RoiDefinitions $collectionRois
 
-        Start-PrimaryHold -Hwnd $hwnd -Extent $extent -Point $inputPoints.treeSelected `
+        Start-PrimaryHold -Hwnd $hwnd -Extent $extent `
+            -Point $collectionGeometry.treeSelected.inputPoint `
             -Held ([ref]$primaryHeld)
         try {
             $states['tree-press'] = Capture-StableState `
-                -Hwnd $hwnd -ThemeDirectory $themeDirectory -Name 'tree-press'
+                -Hwnd $hwnd -ThemeDirectory $themeDirectory -Name 'tree-press' `
+                -RoiDefinitions $collectionRois
         } finally {
             if ($primaryHeld) {
                 Send-PrimaryUp
@@ -713,6 +1132,11 @@ function Capture-ThemeMatrix {
             clientHeight = $extent.height
             processExitCode = $exitCode
             processEvidence = $evidence
+            geometry = [pscustomobject]@{
+                initial = $initialGeometry
+                forms = $formGeometry
+                collections = $collectionGeometry
+            }
             states = [pscustomobject]$states
         }
     } finally {
@@ -743,6 +1167,7 @@ function Capture-ThemeMatrix {
         if (-not $closedNormally -and $process.HasExited) {
             Write-Verbose "$Theme showcase cleanup completed"
         }
+        $script:expectedPointerScreen = $null
     }
 }
 
@@ -882,8 +1307,8 @@ function Add-RoiDifferenceCheck {
     $first = Get-Roi -ThemeResult $ThemeResult -StateName $FirstState -RoiName $FirstRoiName
     $second = Get-Roi -ThemeResult $ThemeResult -StateName $SecondState -RoiName $SecondRoiName
     $difference = Measure-RoiDifference `
-        -FirstPath $firstStateResult.path -FirstDesignRect $roiDefinitions[$FirstRoiName] `
-        -SecondPath $secondStateResult.path -SecondDesignRect $roiDefinitions[$SecondRoiName]
+        -FirstPath $firstStateResult.path -FirstDesignRect $first.designRect `
+        -SecondPath $secondStateResult.path -SecondDesignRect $second.designRect
     $requiredChangedPixels = [Math]::Max(
         $MinChangedPixels, [int][Math]::Ceiling($difference.pixelCount * $MinChangedRatio))
     $different =
@@ -919,15 +1344,15 @@ foreach ($themeResult in @($dark, $light)) {
     Add-RoiDifferenceCheck $themeResult 'slider-focus-checkbox-hover' 'slider-drag' 'slider' `
         -MinChangedPixels 12
     Add-RoiDifferenceCheck $themeResult 'normal' 'slider-focus-checkbox-hover' 'checkbox'
-    Add-RoiDifferenceCheck $themeResult 'normal' 'text-focus-radio-hover' 'textEdit'
+    Add-RoiDifferenceCheck $themeResult 'forms-normal' 'text-focus-radio-hover' 'textEdit'
     Add-RoiDifferenceCheck $themeResult 'text-focus-hover' 'text-press' 'textEdit' `
         -MinChangedPixels 16
-    Add-RoiDifferenceCheck $themeResult 'normal' 'text-focus-radio-hover' 'radio'
-    Add-RoiDifferenceCheck $themeResult 'normal' 'list-focus-tree-hover' 'listSelected' `
+    Add-RoiDifferenceCheck $themeResult 'forms-normal' 'text-focus-radio-hover' 'radio'
+    Add-RoiDifferenceCheck $themeResult 'collections-normal' 'list-focus-tree-hover' 'listSelected' `
         -MinChangedPixels 16 -MinChangedRatio 0.001
     Add-RoiDifferenceCheck $themeResult 'list-focus-hover' 'list-press' 'listSelected' `
         -MinChangedPixels 16 -MinChangedRatio 0.001
-    Add-RoiDifferenceCheck $themeResult 'normal' 'list-focus-tree-hover' 'treeSelected' `
+    Add-RoiDifferenceCheck $themeResult 'collections-normal' 'list-focus-tree-hover' 'treeSelected' `
         -MinChangedPixels 16 -MinChangedRatio 0.001
     Add-RoiDifferenceCheck $themeResult 'tree-focus-hover' 'tree-press' 'treeSelected' `
         -MinChangedPixels 16 -MinChangedRatio 0.001

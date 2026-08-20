@@ -9,7 +9,8 @@
 - 旧 UI 产品实现与其专属测试/资源；
 - CoreLegacy、Procedural 和 EASTL/EABase submodule；
 - `src/vnext` 迁移前缀，当前模块已扁平为 `src/<module>`；
-- Legacy 玩法音频、纹理、shader/config 等无引用资源。
+- Legacy 玩法音频、纹理、shader/config 等无引用资源；
+- 根 `image/` 下的旧 2D Sandbox 产品截图与重复 mascot 副本。
 
 历史上旧 UI 与当前 UI 曾使用过相同的 `src/ui` 路径名称。不能根据路径名判断退役状态：当前工作树的
 `include/tina/ui` 与 `src/ui` 是 vNext Retained UI 产品实现，必须保留。
@@ -33,17 +34,16 @@
 | `branding/Tina.jpg` | 引擎品牌资产，不是 Legacy 玩法资源 |
 | `resources/fonts/SourceHanSansSC-Regular.otf` | 可选 FreeType/CJK fixture；可用 `TINA_UI_FONT_PATH` 外置 |
 
-## 尚待清理
+## 清理收口
 
-产品退役完成不等于整库零残留：
+`CLEAN-001`～`CLEAN-004` 已完成。2026-08-19 的定向资源复核继续删除了无消费者的根 `image/`
+目录，并移除了根 CMake 中不再参与任何资源复制或 staging 的 `BUILD_DIR`、`RESOURCE_DIR` 与
+`RESOURCE_DEST_DIR` 缓存变量。
 
-- `vcpkg.json` 的死 `legacy` feature；
-- `src/core/utils/StringUtils.hpp` 的无引用 EASTL include；
-- Core compatibility Clock/FrameTimer/FixedStepTicker 的保留/删除决定；
-- miniaudio 与 CMake 中会误导当前目录边界的 Legacy 文案；
-- 当前 tip 的 Linux 全门禁。
-
-这些工作分别由 CLEAN-001～003 和 TEST-001 跟踪，见 [Backlog](backlog.md)。
+当前仓库资源均有明确边界：`branding/Tina.jpg` 是唯一品牌图；
+`resources/fonts/SourceHanSansSC-Regular.otf` 是可选 FreeType/CJK fixture；`tests/fixtures/gltf/` 由
+Asset 测试与 3D 产品 sample 消费。vNext sample 继续自行 staging cooked asset，根 CMake 不扫描或复制
+源码 `resources/`。
 
 ## 复验
 
@@ -57,4 +57,3 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --fra
 ```
 
 产品退役证据只证明旧产品不再参与构建/运行，不替代当前 2D、3D、UI、Audio 和 Linux 门禁。
-

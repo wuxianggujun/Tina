@@ -302,6 +302,9 @@ HRESULT STDMETHODCALLTYPE NodeProvider::GetPropertyValue(PROPERTYID propertyId, 
     case UIA_IsContentElementPropertyId:
         setBoolVariant(pRetVal, true);
         return S_OK;
+    case UIA_LiveSettingPropertyId:
+        setI4Variant(pRetVal, static_cast<LONG>(mapped.liveSetting));
+        return S_OK;
     case UIA_ProviderDescriptionPropertyId:
         return setBstrVariant(pRetVal, "Tina.UI.WindowsUia.NodeProvider");
     case UIA_FrameworkIdPropertyId:
@@ -734,6 +737,37 @@ HRESULT HostBridgeRoot::createNodeProvider(const std::shared_ptr<const ProviderS
     }
     *pRetVal = static_cast<IRawElementProviderFragment*>(provider);
     return S_OK;
+}
+
+HRESULT HostBridgeRoot::raiseLiveRegionChanged(UINodeId node) noexcept
+{
+    const auto current = snapshot();
+    if (!current) {
+        return UIA_E_ELEMENTNOTAVAILABLE;
+    }
+    for (std::size_t index = 0; index < current->nodes.size(); ++index) {
+        if (current->nodes[index].mapped.node != node) {
+            continue;
+        }
+        IRawElementProviderFragment* fragment = nullptr;
+        const HRESULT created = createNodeProvider(current, index, &fragment);
+        if (FAILED(created) || fragment == nullptr) {
+            return created;
+        }
+        IRawElementProviderSimple* simple = nullptr;
+        const HRESULT queried = fragment->QueryInterface(
+            IID_IRawElementProviderSimple,
+            reinterpret_cast<void**>(&simple));
+        fragment->Release();
+        if (FAILED(queried) || simple == nullptr) {
+            return queried;
+        }
+        const HRESULT raised =
+            ::UiaRaiseAutomationEvent(simple, UIA_LiveRegionChangedEventId);
+        simple->Release();
+        return raised;
+    }
+    return UIA_E_ELEMENTNOTAVAILABLE;
 }
 
 HRESULT STDMETHODCALLTYPE HostBridgeRoot::QueryInterface(REFIID riid, void** ppvObject)

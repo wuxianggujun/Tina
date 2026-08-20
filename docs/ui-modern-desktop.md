@@ -1,7 +1,10 @@
 # Tina Modern Desktop UI 设计规范与落地计划
 
 > 状态：InProgress，父任务为 `UI-MODERN-DESKTOP-001`。TMD-00..TMD-07 已完成并通过集中门禁；
-> 下一切片为 TMD-08 Desktop Shell reference。
+> TMD-08 Desktop Shell reference 已实现结构、命令、Menu/Dialog/Tooltip、Splitter、产品 icon atlas 与响应式档位；
+> 专用真实 DPI 视觉门禁已就绪，100%/150% 配对证据因当前宿主性能与固定 200% 环境暂缓。
+> TMD-09 EditorApp Compact 与 TMD-10 OS scheme 接线已完成，并通过统一产品/Runtime/Platform gate。
+> TMD-11 已通过 benchmark unit 与冻结 workload 确定性 gate；开发机墙钟仍为 provisional，父任务继续等待真实 DPI 配对视觉与最终文档收口。
 >
 > 文档职责：冻结目标视觉语言、Desktop 组合方式、工程边界、实施切片和验收标准。
 >
@@ -87,7 +90,7 @@ Compact 允许 24-34 logical px 控件，但命中区域、文字基线、图标
 
 ### 5. 一个行为真相源
 
-IconButton 复用 Button Activate，ToggleSwitch 复用 Toggle，Segmented 复用 RadioButton，FormField 复用 TextEdit，
+IconButton 复用 Button Activate，Switch 复用 Toggle，Segmented 复用 RadioButton，FormField 复用 TextEdit，
 Dialog 复用 Modal，Desktop Shell 复用 SplitView/TabView/Menu/Tooltip。外观 profile 不复制输入、Focus、UIA 或状态。
 
 ### 6. Desktop 逻辑像素
@@ -368,7 +371,7 @@ UIA Focus 显示 ring，Pointer focus 默认只保留焦点而不显示强 ring�
 | TextEdit / Dropdown 高度 | 30 | 38 |
 | Checkbox 命中区域 | 28 x 28 | 36 x 36 |
 | Checkbox mark | 16 | 18 |
-| ToggleSwitch | 36 x 20 | 44 x 24 |
+| Switch | 36 x 20 | 44 x 24 |
 | Tab 高度 | 30 | 38 |
 | MenuItem 高度 | 28 | 36 |
 | List row 高度 | 26 | 34 |
@@ -484,10 +487,22 @@ Modal barrier、Focus scope、restore 和 Dialog semantics 仍由现有 Modal �
 - Action row 右对齐：Cancel/Text 或 Outlined，主动作 Primary，破坏动作 Danger。
 - 不在 Dialog 中嵌套装饰 card；长内容使用一个 ScrollView。
 
+### Snackbar
+
+`UISnackbarHost` 是调用方持有的窗口级 fixed-capacity 状态，最多排队 4 条 bounded strict UTF-8 消息；显式
+`MonotonicTimePoint` 驱动 Entering/Visible/Exiting/Hidden，相同状态机同时决定 120 ms 入场和 100 ms 退场
+opacity/visual-offset Motion。可选 action 使用非零 token 返回业务层，不复制命令状态，也不自动请求 Focus。
+`buildSnackbarHost()` 通过一个精确预算事务构建 overlay root、Floating surface、tone bar、polite live-region Label
+与可选 action Button；UIContext、UITreeUpdater 和 Runtime phase facade 使用同一 recipe。队列耗尽返回
+`CapacityExceeded`，产品可选择丢弃非关键反馈，但不能让已成功的业务事务回滚。
+
+Windows UIA 将 `UISemanticsLiveSetting::Polite/Assertive` 映射到 `UIA_LiveSettingPropertyId`，且只在已发布
+live-region 的文本或 setting 真正变化时发出 `UIA_LiveRegionChangedEventId`。Snackbar 不是 Tooltip，不建立
+Anchor、hover delay、Popup barrier 或并行可访问状态。
+
 ### 后置组件
 
 - `UIChip`：仅在 Filter/Tag 有真实产品场景时，以 Button/Toggle/Radio capability 组合，不新增并行选择状态。
-- `UISnackbar`：需要窗口级单例、monotonic timeout、action 和 accessibility live-region 设计，单独立项，不能伪装成 Tooltip。
 - `UISearchField`：优先由 `UIFormField + UIIconButton` 组合；只有重复使用后才冻结 recipe。
 
 ## Desktop Shell 实现
@@ -531,6 +546,10 @@ Dock Runtime。应用状态只保存 pane fraction、active tab 和 collapsed in
 | Status Bar | 24 高 | 只放状态、计数、错误入口 |
 | Window | 最小 960 x 640 | 低于此值优先折叠右 Dock/Timeline，不缩放字体 |
 
+Timeline 的六个 frame slot 在 Compact Editor 中使用固定 `44 logical px` 宽度，并显式保持 `flex shrink=0`；
+slot 只承载可扫描的帧号，时长、Sprite 与事件数放在 selected-frame summary，summary 过长时使用 paint-only
+ellipsis。这样动态 authoring 文案不会改变播放、添加、复制、删除命令的相对位置。
+
 ### Command Bar
 
 - 高复用工具使用 IconButton + Tooltip；不熟悉或高风险命令使用 Icon+Text。
@@ -538,12 +557,38 @@ Dock Runtime。应用状态只保存 pane fraction、active tab 和 collapsed in
 - Undo/Redo、Save、Play/Pause、Viewport tool 使用熟悉图标，不重复显示冗长说明。
 - 使用 Divider 和 8-12 px group gap，不把每个命令放进独立 card。
 
+TinaEditor 使用私有 `EditorToolbarGroup` 把紧凑 icon command 聚成一个低层级 surface，并通过 90 ms
+BackgroundColor transition 提供 hover 状态；`EditorIconButton`/`EditorIconToggleButton` 仍复用公共 Button、Radio、
+Tooltip 和 Image atlas 链。该私有 recipe 不增加公共 Widget kind，也不要求旧文字工具条兼容。
+TinaEditor 的主 Command Bar 不承载 document path 或 2D/3D workspace switch；grow spacer 直接保护右侧
+play/history/save controls。路径由 document session 持有，Save As 使用平台 dialog；workspace 切换只由 Document Tab 表达。
+
 ### Dock 与 Inspector
 
 - Dock 是全高 surface band，不是浮动 card。
 - Section header 使用 Section/Control typography，支持 collapse 时才提供 disclosure Button。
 - 属性行建议使用 `minmax(label, control)` 两列；Label 左对齐，Control stretch，错误/helper 放在下一行。
 - 大量条目使用 ListView/TreeView 虚拟化；不为每行创建独立 card。
+
+TinaEditor 的 `EditorPanelHeader`、`EditorSectionHeader`、`EditorPropertyRow` 与 `EditorSearchField` 是 EditorApp 私有
+固定预算组合：PanelHeader 是无圆角、无描边的扁平 surface band，title 可收缩且 action 区占据剩余空间并末端对齐；
+SectionHeader 用 3 个节点组合 section title 和可伸缩的 subtle horizontal Divider。PropertyRow 固定 92 px label column，
+SearchField 组合 decorative Search icon 与唯一 TextEdit。
+Hierarchy 搜索按 ASCII 大小写不敏感匹配完整 UTF-8 label byte sequence，显示匹配项及祖先，搜索期间展开匹配路径，
+并按 stable ID 保留当前选择；被过滤的选择回退到 document root。
+Inspector Transform 仍以九个第一方 `UINumberFieldLabelPlacement::Leading` 统一 authoring：World2D entity 只呈现
+Position X/Y、Rotation Z、Scale X/Y，World3D entity 呈现完整九轴；Asset Inspector、TileMap document 或无 entity
+selection 时折叠整个 Transform 区块。每行 92 px label 与独立、可伸缩 content column 同行；通用表单保留默认
+`Above`。Leading 精确比 Above 多一个 content node，Behavior/text 预算不变。普通信息文字使用 Theme primary，
+warning/error tone 只表达真实反馈状态。
+Components 同样按上下文发布：World2D entity 只显示五个 2D section，World3D entity 只显示
+`MeshRenderer3D`；Asset Inspector、TileMap document 或无 entity selection 时折叠 Components Header 与全部 root，
+但不改写各 collapsible section 的 retained expanded state。
+Hierarchy Header、Parent ID 行和 Apply Parent wrapper 只在 entity context 可见；TileMap Header、状态摘要和四个
+action row 只在 TileMap document 可见。因此 Asset Inspector 的稳定组成是 Identity + metadata/dependencies + Document，
+Scene entity 是 Identity + Transform + Components + Hierarchy + Document，TileMap document 是 Identity + TileMap +
+Document；Scene 无 entity selection 时退化为 Identity + Document。实现保存每个 contextual root 的完整构建 layout，
+切换时只发布 `Visible`/`Collapsed`，不会把 PropertyRow 或 IconButton wrapper 恢复成不完整的默认布局。
 
 ### Viewport
 
@@ -562,7 +607,7 @@ Dock Runtime。应用状态只保存 pane fraction、active tab 和 collapsed in
 
 ### Focus 与命令顺序
 
-- Focus 顺序按 tree/document reading order：Command Bar -> Tabs -> Context Toolbar -> Left -> Viewport -> Right -> Timeline -> Status actions。
+- Focus 顺序按 tree/document reading order：Command Bar -> Tabs -> Left -> Viewport toolbar/content -> Right -> Timeline -> Status actions。
 - Menu/Modal 打开时只在对应 committed scope 内导航；关闭后恢复合法 anchor/previous focus。
 - Tooltip 不进入 Focus 顺序；decorative Icon 不进入 semantics tree。
 - Keyboard/Gamepad 调用与 Pointer/UIA 调用复用同一默认 action，不建立 Desktop command bypass。
@@ -587,6 +632,11 @@ User selects Dark/Light
 系统跟随是后置 Desktop adapter：Windows/macOS/Linux adapter 只发布 `Dark` 或 `Light` preference event；Runtime
 在 owner thread 的有效 UI phase 消费。Headless 与无 adapter 平台使用应用显式默认值。公开 `UITheme` 不暴露 HWND、
 GLFW、WinRT、Cocoa、DBus 或 platform enum。
+
+当前实现通过 `Desktop::CreateEngineOptions::followSystemColorScheme` 显式 opt-in，默认关闭。GLFW 私有 observer
+当前只在 Windows 读取 `AppsUseLightTheme`；查询不到或非 Windows adapter 时不发布事件。Runtime 私有
+`PrimaryWindowUIColorSchemeCoordinator` 在 UI Update phase 应用最后一个完整 preference event，保持 active
+density；包含 `PlatformEventStreamReset` 的批次被忽略，adapter 在事件未成功 append 时下一帧重试。
 
 ### Density
 
@@ -630,6 +680,7 @@ src/ui/detail/
 
 ```text
 samples/ui_showcase/          # 第一视觉消费者；同时展示 Compact/Comfortable、Dark/Light
+samples/desktop_shell/        # Desktop Shell reference；嵌套 SplitView 工作流与第一个 SplitView 产品消费者
 src/editor_app/               # 体系稳定后的 Compact 迁移；遵守 Editor 大功能统一验证节奏
 samples/2d_tilemap_bgfx/      # 只迁移产品 Theme/role，不改 gameplay
 samples/3d_product/           # 只迁移产品 Theme/role，不改 Render/Asset owner
@@ -665,9 +716,14 @@ rg -n "surface[012]|borderLight|borderDark|buttonNormal|makeDefaultProductTheme|
 截至 2026-08-19，TMD-00..TMD-07 已完成：破坏式 semantic Theme、Dark/Light x
 Compact/Comfortable、State Layer/FocusVisible/Elevation、统一 metrics、基础控件及导航/集合/浮层 chrome
 已经迁移；`UIIconButton`、`UIFormField`、`UIDialog` composition profile 已进入直接 UIContext、
-`UITreeUpdater` 和 Runtime phase facade；Showcase 已是 Desktop workbench，并通过 UI 762/762、
+`UITreeUpdater` 和 Runtime phase facade；Showcase 已是 Desktop workbench，并通过 UI 771/771、
 Runtime UI 142/142、UI-Render 28/28、UIA 13/13 与 12/12 smoke 矩阵。
-TMD-08 Desktop Shell reference、TMD-09 产品/Editor 迁移、TMD-10 OS scheme 与 TMD-11 完整门禁仍未完成。
+TMD-08 的真实 100%/150% DPI 配对证据仍暂缓；TMD-09/TMD-10 已完成本轮集中 gate；
+TMD-11 的 benchmark unit（10/10）与冻结 workload 确定性 gate 已通过：`ui_static_commit_v1`、
+`ui_component_build_v1`、`ui_style_state_v1`、`ui_motion_v1`（seed 0/1/2，对应 0/64/1024 active
+tracks）均为 `status=ok`，counter/checksum/allocation/clean-rebuild invariant 保持。Debug 开发机墙钟仍为
+`provisional`，approved fixed-machine baseline/hard gate 继续由 `PERF-002` 跟踪；父任务仍待 TMD-08
+真实 100%/150% DPI 配对视觉和随后最终文档收口。
 
 | ID | 工作 | 主要产物 | 验收重点 |
 | --- | --- | --- | --- |
@@ -679,7 +735,7 @@ TMD-08 Desktop Shell reference、TMD-09 产品/Editor 迁移、TMD-10 OS scheme 
 | TMD-05 | 导航、集合和浮层 chrome 迁移 | Dropdown/Menu/Tooltip/List/Tree/Tab/Splitter/Popup/Modal | transient barrier、virtual row reuse、focus restore 不回归 |
 | TMD-06 | 缺失的桌面 authoring profile | `UIIconButton`、`UIFormField`、`UIDialog` | bounded component transaction；复用现有行为与 semantics |
 | TMD-07 | Showcase 重构 | 真实 Desktop workbench、density/theme selector、全部组件状态 | 无嵌套卡片/重叠；首屏可操作；结构化与视觉证据 |
-| TMD-08 | Desktop Shell reference | 嵌套 SplitView、Command Bar、Tabs、Viewport、Inspector、Timeline、Status | resize/DPI/focus/menu/dialog 全工作流 |
+| TMD-08 | Desktop Shell reference（`samples/desktop_shell/`） | 嵌套 SplitView、Command Bar、Tabs、Viewport、Inspector、Timeline、Status | resize/DPI/focus/menu/dialog/tooltip/splitter 工作流 |
 | TMD-09 | 产品迁移 | 2D/3D Theme；最后迁移 EditorApp Compact | 不改 gameplay/asset/render owner；Editor 单次大功能 gate |
 | TMD-10 | OS scheme 后置接线 | 私有 platform observer + Runtime owner-thread coordinator | public header 无平台类型；无 adapter 时 deterministic |
 | TMD-11 | 完整门禁与文档收口 | Unit/Runtime/UIA/Render/Visual/Perf/Consumer/docs | Definition of Done 全部满足后父任务 Done |
@@ -780,13 +836,117 @@ Window 级 StyleClass/ColorToken/StyleSheet 由应用状态只注册一次（`st
 
 Showcase 通过后才迁移 EditorApp，避免把视觉 foundation 调试和复杂 authoring workflow 回归混在一起。
 
+### TMD-08 当前实现
+
+`samples/desktop_shell/` 是 Desktop Shell reference，与 Showcase 分工不同：Showcase 是组件目录与
+Dark/Light x density 证据，Shell 证明真实工作流。它是本文推荐树结构的第一个消费者，也是
+SplitView 的第一个产品消费者。
+
+一棵 retained root，五个 band（Command Bar、Document Tabs、Context Toolbar、Workspace、Status Bar），
+Workspace 由三个嵌套 SplitView 组成：A 为 `左 Dock | main`，B 为 `center | Inspector`，C 为
+`Viewport | Timeline`。每个 pane 都是普通 Element 子树，没有 Dock Runtime，也没有第二棵 UI 树。
+
+几何只读不算：产品从 `splitViewMetrics()` 读取 UI 已发布的唯一 committed 几何，不自己推算 pane 矩形。
+
+Pane 可见性分两层，避免响应式档位与显式命令互相覆盖：
+
+- `timelineHideRequested` / `inspectorHideRequested` 是命令写入的用户意图；
+- 解析结果 = 宽度档位 `OR` 用户意图。这样本文响应规则 3 的「右 Dock 通过显式命令切换显示」才真正可达，
+  而不是只由宽度决定。
+
+两个实现约束值得记录，它们不是 bug：
+
+1. Focus 目标必须已经是 committed keyboard-focus candidate，而 GameStateEnter 阶段没有任何提交，
+   因此初始 focus 必须延后到首次成功发布之后。
+2. `setSplitViewFraction()` 改的是 retained 状态，committed 几何要到下一次 commit 才变化，
+   所以验证 splitter 效果必须跨一次发布，不能同帧读回。
+
+Command Bar 的五个 icon-only 工具现在使用 `DesktopShellIconAtlas.hpp` 提供的产品 fixture atlas，
+并通过既有 `Texture2DFrameResourceResolver`、FramePin、Texture2D、DisplayList 和 GPU shader 链发布。
+Shell 不拥有第二套 atlas manager 或 Icon runtime；按钮仍由 `UIIconButton` 复用 Button 行为，装饰 Icon child
+默认 Ignore/Exclude，Save Tooltip 与 Button 同 root 绑定。自动 gate 同时验证 atlas upload、每帧 resolve/pin
+命中、ImageQuad 资源复用、root 释放后的 texture invalidation 和零 frame borrow。
+
+`--auto-demo` 脚本驱动的是命令回调写入的同一份 durable state，然后从 committed 状态读回验证：Menu 开关
+取自 Menu store，Dialog 开关取自 committed Modal 几何，Tooltip 取自 committed tooltip metrics，
+Splitter 取自跨帧 committed pane 宽度。它不合成指针与键盘输入，因此不声明端到端输入验证；输入路由由
+`tina_runtime_ui_tests` 覆盖。
+
+TMD-08 的真实 DPI 证据统一由 `tools/windows/RunTmd08DesktopShellVisualGate.ps1` 采集。脚本在 build/launch
+之前调用 Windows scale probe，实际主显示器缩放与 `-ExpectedScalePercent` 不一致时立即失败，不允许用窗口尺寸或
+process DPI compatibility 冒充 OS 100%/150%。每轮固定运行 Dark/Light × Compact/Comfortable ×
+960/1280/1600 logical width，验证 sample JSON、logical/framebuffer/contentScale、committed pane geometry、
+focus/Menu/Dialog/Tooltip/Splitter workflow、icon atlas resolve/release、关键区域非空，以及 theme/density raster
+差分。门禁只接受 FreeType 产品 preset，并记录真实字体路径/哈希，避免 placeholder 冒充 typography 证据。
+第二轮通过 `-PeerReportPath` 对照第一轮，要求 EXE 与字体 SHA-256 相同并逐 case 比较 logical geometry。
+
+```powershell
+# OS Settings 为 100% 时：构建一次并保存第一份报告
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  .\tools\windows\RunTmd08DesktopShellVisualGate.ps1 `
+  -ExpectedScalePercent 100 `
+  -OutJson artifacts\gates\tmd-08-desktop-shell-100pct.json
+
+# 切换到真实 150% 后复用同一二进制，并与 100% 报告交叉核验
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  .\tools\windows\RunTmd08DesktopShellVisualGate.ps1 `
+  -ExpectedScalePercent 150 -SkipBuild `
+  -PeerReportPath artifacts\gates\tmd-08-desktop-shell-100pct.json `
+  -OutJson artifacts\gates\tmd-08-desktop-shell-150pct.json
+```
+
+两轮报告只证明同机、同 backend、同二进制的真实 DPI 一致性；混合 DPI 多显示器与跨 GPU golden 继续由
+`UI-003` 跟踪。
+
 ### TMD-09：产品迁移
 
 - 2D/3D sample 只替换 Theme、StyleRole 和必要 layout metrics，不改 Scene/Asset/Render 数据流。
 - EditorApp 使用 Compact；设置、New Project、Dialog 可局部使用 Comfortable 只在独立 root/dialog profile 明确配置。
 - 删除 Editor 局部手写 surface/accent/disabled-active 颜色。
-- Command Bar、Context Toolbar、Dock、Viewport、Inspector、Timeline、Status Bar 按本文 Shell 结构重排。
+- Command Bar、Dock、Viewport、Inspector、Timeline、Status Bar 按本文 Shell 结构重排；Editor 将 context tools 合并进 active Viewport，避免重复 band。
 - 遵守 Editor “大功能闭环后统一验证”：迁移期间不按小切片反复构建和测试。
+
+当前产品侧进度：2D sample 已使用 semantic Theme、产品 chrome 和 Compact control recipes；3D product
+已进一步移除控件高度、列表/树行高、按钮 padding 与标题/正文/Caption 的旧字面量，统一读取
+`UITheme.controls`、`UITheme.spacing` 和 `UITheme.typography`。本轮只改 authoring/metrics 层，Render、Asset、
+Scene 和资源生命周期不变；Dark/Light 60 帧产品 smoke 均通过。EditorApp 源码现已固定使用
+`makeModernDesktopTheme(Dark, Compact)`，Theme 在 `createRoot()` 前绑定；根 band 顺序为 Command Bar、
+Document Tabs、Workspace、Status Bar，Workspace 使用三层嵌套 SplitView 表达
+`Left Dock | Main`、`Center | Inspector`、`Viewport | Timeline`。Editor 的 Button/TextEdit/Tab、List/Tree
+行高、Splitter、Status Bar、spacing/padding 均读取 Theme metrics，旧的局部 surface ColorToken、StyleClass
+及自动换色路径已删除。Command Bar 只保留运行、历史与保存命令；固定 Document Tab 是 workspace/document
+的唯一切换入口，槽为空时为 `Collapsed`，refresh 会重设完整 layout 并恢复重新占用槽的 `Visible`。Viewport 只保留
+一组 transform/snap/marquee/frame tools；Project Assets 使用 120 logical px 最小格宽的紧凑 virtual grid，以
+`AssetKind #abcd` 保持类型优先的扫描层级，完整 AssetId 留在固定 22 logical px selected summary 与 Inspector；summary
+在窄 Dock 仅做 ellipsis，不改变 retained 文本或后续布局。Project Open 使用 FolderOpen，打开当前 Asset 使用
+divider 后的 ArrowRight。空 Source Imports 整段折叠；Inspector
+NumberField 使用 92 px Leading label column，并按 World2D/World3D/Asset/TileMap 上下文折叠无效 Transform 行；六个
+authoring 内容段统一使用 `EditorSectionHeader`，Components 只发布当前 workspace 有效的 component root；Hierarchy、Project Assets、
+Source Imports 的计数使用 Neutral Badge，Inspector selection 使用 Accent Badge，Timeline 顶栏复用同一个扁平
+`EditorPanelHeader`。Timeline 的六个帧槽使用固定紧凑宽度，只显示可扫描的帧号；时长、Sprite 与事件数留在
+selected-frame summary，summary 过长时以 ellipsis 收敛，帧槽和播放/添加/复制/删除命令不会因动态文案改变位置。
+常规信息色不再滥用 warning，旧 `Authoring` 提示段和 `Move X +1` 调试入口已删除，
+authoring feedback 只通过 `UISnackbarHost` 发布；Status document/runtime 按 0.8/1.2 分配剩余宽度，二者与 Snackbar
+message 都使用 ellipsis，完整 retained/semantics 文本不变。上述均为现行 Editor 私有组合，
+不增加公共 Widget kind，也不保留旧设计兼容。此次不改 Render、Asset、Scene owner。2026-08-19 按 Editor 专项节奏完成一次集中
+增量 build；`tina_editor_tests` 114/114、`tina_editor_app_tests` 13/13，Editor 2D/3D `--auto-demo`
+各 600 帧均 exit 0。Desktop Shell 120 帧、2D 300 帧和 3D 60 帧 Theme smoke 也均 exit 0。
+
+### TMD-10：OS scheme 后置接线
+
+- `PlatformBackendCreateParams::publishSystemColorSchemeEvents` 默认关闭；GLFW observer 是私有实现，公开
+  Platform event 只携带 Tina-owned `SystemColorScheme::Dark/Light`。
+- `Desktop::CreateEngineOptions::followSystemColorScheme` 是产品 opt-in。关闭时现有 sample、CLI Theme、
+  Headless 与自定义 factory 行为不变。
+- Windows observer 查询 `AppsUseLightTheme`；无值、查询失败和当前 Linux adapter 都不发布事件，应用默认值
+  因而确定。事件 append 遇到 capacity reset 时不提交 observer 状态，后续帧可重试。
+- Runtime 私有 coordinator 在 owner-thread UI Update phase、游戏 `updateUI()` 之前应用最后一个完整事件，
+  通过 `makeModernDesktopTheme(requestedScheme, activeDensity)` 保持 density。Theme 事务失败保留旧状态并沿
+  Runtime 错误边界 fail closed；含 platform-event reset 的批次不消费不完整 preference。
+- 已补 Platform payload validation/coalescing、observer 状态与 Runtime coordinator 测试；修复同帧后续事件触发
+  capacity reset 时 observer 提前提交状态、导致下一帧不重试的问题。2026-08-19 集中 gate 为 `tina_tests`
+  370/370、`tina_runtime_ui_tests` 145/145、`tina_platform_glfw_tests` 43/43，公开头 header-isolation 随
+  `tina_tests` 编译通过。
 
 ## 测试与视觉门禁
 
@@ -848,6 +1008,9 @@ Showcase、2D/3D 与 Editor 产品 gate 按各自文档和 Editor 集中验证�
 - clean frame 不因现代 Theme 增加全树扫描或 DisplayList rebuild。
 - `ui_style_state_v1`、`ui_component_build_v1`、`ui_motion_v1` 继续作为确定性基线；必要时新增
   `ui_modern_desktop_theme_v1`，但固定机墙钟仍由 `PERF-002` 管理。
+- 2026-08-19 集中 gate：`tina_bench_tests` 10/10；`ui_static_commit_v1`、
+  `ui_component_build_v1`、`ui_style_state_v1` 与 `ui_motion_v1` seed 0/1/2 均 `status=ok`。确定性不变量
+  可阻断，Debug 开发机毫秒数仅作 `provisional` 证据。
 
 ## 无障碍与本地化
 
@@ -889,6 +1052,10 @@ Showcase、2D/3D 与 Editor 产品 gate 按各自文档和 Editor 集中验证�
 
 ## 推荐的下一实施切片
 
-TMD-07 的 Showcase build、Dark/Light x Compact/Comfortable x 960/1280/1600 smoke 与结构化证据已通过。
-下一大功能只推进 TMD-08 Desktop Shell reference：嵌套 SplitView、Command Bar、Tabs、Viewport、Inspector、
-Timeline、Status 的完整 resize/DPI/focus/menu/dialog 工作流。TMD-08 完成并集中验证前仍不修改 Editor。
+TMD-07 已通过。TMD-08 的 `samples/desktop_shell/` 已提供结构、命令、Menu/Dialog/Tooltip、Splitter、
+产品 icon atlas 与响应式档位的结构化证据，专用真实 DPI 视觉门禁也已就绪；真实 100%/150% 配对证据
+暂缓。TMD-09 的 2D/3D 与 EditorApp、TMD-10 OS scheme 已通过本轮集中 build/test/smoke；公开头还通过
+installed `DesktopBootstrap` consumer gate，验证 262 个安装头、relocation、component isolation 与外部运行。
+TMD-11 的 benchmark unit 与冻结 workload 确定性 gate 已通过；固定机绝对时间仍由 `PERF-002` 跟踪，
+不阻塞本任务以确定性契约验收。下一实施切片是补齐 Desktop Shell 真实 100%/150% DPI 配对视觉，随后完成
+最终文档收口；在此之前父任务保持 InProgress。

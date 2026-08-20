@@ -22,6 +22,8 @@
 - Runtime 已组合 Clock、Platform、Task、Render 和可选 Audio；AssetSystem/World/Physics2D 仍由
   产品 State 或样例显式持有，不是 `EngineHost` 模块。
 - Desktop 使用 GLFW、bgfx、有界 TaskSystem（含 ADR 0017 交互 CPU 默认）和 backend-neutral `AudioEngine`。
+- Desktop 可选择跟随系统 Dark/Light；Runtime 私有 coordinator 在 owner-thread UI Update phase 消费
+  `SystemColorSchemeChangedEvent`，保持当前 density 并事务切换 canonical Theme；event-stream reset 批次不应用。
 - Null/测试图可以显式注入 Headless、DisabledTaskSystem、NullRender 和无 Audio 组合。
 
 Legacy `Application`、`SceneManager` 与 `Tina.exe` 已删除；禁止恢复 Singleton、Service Locator 或

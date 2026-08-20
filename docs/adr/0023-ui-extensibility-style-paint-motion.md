@@ -22,12 +22,17 @@ Exclude semantics。业务代码不再直接用 `UIImageContent` 表达 Icon，�
 ADR 的 Accepted 决策：UIIcon 继续复用 Image content fixed-capacity storage、resolver/pin、Texture2D、
 ImageQuad、DisplayList 与 GPU shader，不新增 Icon Widget/Asset/atlas/pipeline。
 
+实现注记（2026-08-20）：Editor 私有图标改用提交仓库的 Lucide SVG 源和 deterministic offline cooker，生成
+单通道 alpha atlas 与 source-pixel metadata 后仍通过 `UIIconContent -> ImageQuad -> Texture2D` 消费。正常
+CMake configure/build 不解析 SVG 或依赖 Python；这一产品资源流程不引入 runtime vector renderer、公开
+`IconAsset`、第二套 atlas manager 或第三方 SDK token，保持本 ADR 的运行时边界不变。
+
 实现注记（2026-08-19）：`UI-MENU-001` 已以独立 `UIMenuStateStorage`、`UIMenuLayout`、`UIMenuInput`
 固定容量模块落地；`UIContext` 仍是唯一 owner/commit coordinator，Menu 与 Popup 只共享 transient overlay
 协调，不共享 state/runtime。这是本 ADR 已接受模块边界的实现收口，不改变 Accepted 理由。
 
 实现注记（2026-08-19）：`UI-VISUAL-COMPONENTS-001` 以 Surface/Divider/Badge 强类型无状态 authoring
-profiles 与 ToggleSwitch 落地。前三者只映射普通 Element chrome，Switch 复用 Checkbox Toggle/input/action/
+profiles 与 Switch 落地。前三者只映射普通 Element chrome，Switch 复用 Checkbox Toggle/input/action/
 capacity，仅增加 theme track/thumb projection 与 Switch semantics；未新增 Widget ABI、state store、update loop
 或 Render pipeline。这是本 ADR 已接受组合优先边界的实现注记，不改变 Accepted 理由。
 

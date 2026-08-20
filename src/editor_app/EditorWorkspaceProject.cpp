@@ -10,6 +10,20 @@ auto EditorWorkspaceState::refreshProjectAssetUi(
     if (auto status = tree.setText(projectAssetCount_, count); !status) {
         return status;
     }
+    std::string selectedAssetSummary;
+    if (const auto* asset = projectAssets_.selectedItem(); asset != nullptr) {
+        selectedAssetSummary.assign(
+            Tina::Editor::projectAssetKindLabel(asset->assetKind));
+        selectedAssetSummary += "  |  ";
+        const auto idText = asset->assetId.canonicalText();
+        selectedAssetSummary.append(idText.data(), idText.size());
+    } else {
+        selectedAssetSummary = "No assets match this filter";
+    }
+    if (auto status = tree.setText(projectAssetSummary_, selectedAssetSummary);
+        !status) {
+        return status;
+    }
     if (auto status = tree.setText(
             projectAssetSource_,
             assetResources_.projectCatalogConfigured ? "Project" : "Preview");
@@ -18,6 +32,14 @@ auto EditorWorkspaceState::refreshProjectAssetUi(
     }
     if (auto status = tree.setText(
             sourceImportCount_, std::to_string(sourceImportUnits_.size()));
+        !status) {
+        return status;
+    }
+    sourceImportSectionLayout_.visibility = sourceImportUnits_.empty()
+                                                ? UI::UIVisibility::Collapsed
+                                                : UI::UIVisibility::Visible;
+    if (auto status = tree.setLayoutStyle(
+            sourceImportSection_, sourceImportSectionLayout_);
         !status) {
         return status;
     }
@@ -675,17 +697,20 @@ auto EditorWorkspaceState::applyProjectAssetFilter(
         return status;
     }
     observedProjectAssetSelectionIndex_.reset();
-    if (auto status = tree.setListViewDataSource(projectAssetList_,
+    if (auto status = tree.setVirtualGridViewDataSource(projectAssetList_,
                                                  projectAssetDataSource());
         !status) {
         return status;
     }
     if (projectAssets_.visibleItemCount() != 0U) {
-        if (auto status = tree.setListViewSelectedIndex(projectAssetList_, 0U); !status) {
-            return status;
-        }
+        projectAssetSelectionSyncPending_ = true;
         assetInspectorActive_ = true;
     } else {
+        projectAssetSelectionSyncPending_ = false;
+        if (auto status = tree.clearVirtualGridViewSelection(projectAssetList_);
+            !status) {
+            return status;
+        }
         assetInspectorActive_ = false;
     }
     synchronizeViewportSelectionFromHierarchy();
@@ -707,7 +732,7 @@ auto EditorWorkspaceState::inspectedProjectAsset() const noexcept -> const Tina:
 }
 
 auto EditorWorkspaceState::resolveProjectAssetItem(const void* state, u64 logicalIndex,
-                                    UI::UIListViewItemDescriptor& output) noexcept -> bool{
+                                    UI::UIVirtualGridViewItemDescriptor& output) noexcept -> bool{
     const auto* self = static_cast<const EditorWorkspaceState*>(state);
     if (self == nullptr) {
         return false;
@@ -717,7 +742,7 @@ auto EditorWorkspaceState::resolveProjectAssetItem(const void* state, u64 logica
     if (asset == nullptr) {
         return false;
     }
-    output = UI::UIListViewItemDescriptor{
+    output = UI::UIVirtualGridViewItemDescriptor{
         .key = 10'000U + logicalIndex,
         .label = asset->displayName,
         .enabled = true,

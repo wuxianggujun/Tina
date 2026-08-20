@@ -91,15 +91,15 @@ using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
     };
 }
 
-TEST(UIToggleSwitchTests, RecipeUsesExistingToggleContractWithSwitchSemantics)
+TEST(UISwitchTests, RecipeUsesExistingToggleContractWithSwitchSemantics)
 {
-    constexpr auto defaults = UI::makeToggleSwitchElement();
-    constexpr auto standard = UI::makeToggleSwitchElement({
+    constexpr auto defaults = UI::makeSwitchElement();
+    constexpr auto standard = UI::makeSwitchElement({
         .accessibleName = "Snap to grid",
     });
-    constexpr auto compact = UI::makeToggleSwitchElement({
+    constexpr auto compact = UI::makeSwitchElement({
         .accessibleName = "Compact",
-        .size = UI::UIToggleSwitchSize::Compact,
+        .size = UI::UISwitchSize::Compact,
     });
     static_assert(defaults.layout.size.width == UI::UILayoutLength::Px(44.0F));
     static_assert(defaults.layout.size.height == UI::UILayoutLength::Px(24.0F));
@@ -107,7 +107,7 @@ TEST(UIToggleSwitchTests, RecipeUsesExistingToggleContractWithSwitchSemantics)
     static_assert(standard.layout.size.height == UI::UILayoutLength::Px(24.0F));
     static_assert(compact.layout.size.width == UI::UILayoutLength::Px(36.0F));
     static_assert(compact.layout.size.height == UI::UILayoutLength::Px(20.0F));
-    static_assert(standard.visual.styleRole == UI::UIStyleRoleId::ToggleSwitch);
+    static_assert(standard.visual.styleRole == UI::UIStyleRoleId::Switch);
     static_assert(standard.semantics.role == UI::UISemanticsRole::Switch);
     static_assert(standard.semantics.name == std::string_view{"Snap to grid"});
     static_assert(UI::hasBehavior(standard.behaviors, UI::UIElementBehavior::Toggle));
@@ -119,25 +119,25 @@ TEST(UIToggleSwitchTests, RecipeUsesExistingToggleContractWithSwitchSemantics)
     EXPECT_EQ(*kind, UI::Detail::BuiltinElementKind::Checkbox);
 }
 
-TEST(UIToggleSwitchTests, TrackThumbCheckedStateAndSemanticsCommitTogether)
+TEST(UISwitchTests, TrackThumbCheckedStateAndSemanticsCommitTogether)
 {
     const Platform::WindowId window = makeWindow();
     auto context = createContext(window);
     ASSERT_NE(context, nullptr);
     auto root = context->rootBuilder().createRoot();
     ASSERT_TRUE(root);
-    auto toggle = context->rootBuilder().createElement(
-        root->rootNodeId(), UI::makeToggleSwitchElement({
+    auto switchElement = context->rootBuilder().createElement(
+        root->rootNodeId(), UI::makeSwitchElement({
                                 .accessibleName = "Snap to grid",
                             }));
-    ASSERT_TRUE(toggle);
+    ASSERT_TRUE(switchElement);
     auto updater = context->treeUpdater(*root);
     ASSERT_TRUE(updater);
     ASSERT_TRUE(updater->setLayoutStyle(root->rootNodeId(), fixedSize(100.0F, 60.0F)));
 
     int activations = 0;
     ASSERT_TRUE(updater->setCheckboxAction(
-        *toggle,
+        *switchElement,
         UI::UIButtonActionCallback{
             [&activations](const UI::UIButtonActionEvent&) noexcept {
                 ++activations;
@@ -145,16 +145,16 @@ TEST(UIToggleSwitchTests, TrackThumbCheckedStateAndSemanticsCommitTogether)
     ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 60.0F}));
 
     const UI::UITheme dark = UI::makeModernDesktopTheme();
-    const UI::UICheckboxChrome expected = UI::makeToggleSwitchChrome(dark);
-    EXPECT_EQ(updater->checkboxPaint(*toggle).value(), expected.indicator);
-    EXPECT_FALSE(updater->isChecked(*toggle).value());
+    const UI::UICheckboxChrome expected = UI::makeSwitchChrome(dark);
+    EXPECT_EQ(updater->checkboxPaint(*switchElement).value(), expected.indicator);
+    EXPECT_FALSE(updater->isChecked(*switchElement).value());
 
-    auto paint = paintsFor(context->committedPaint(), *toggle);
+    auto paint = paintsFor(context->committedPaint(), *switchElement);
     ASSERT_EQ(paint.size(), 2U);
     EXPECT_EQ(paint[0].solidFill,
               UI::premultiply(UI::scaleColorAlpha(dark.colors.surfaceContainer, 245)));
     EXPECT_EQ(paint[0].cornerRadii,
-              UI::UILogicalCornerRadii::uniform(dark.controls.toggleSwitchCornerRadius));
+              UI::UILogicalCornerRadii::uniform(dark.controls.switchCornerRadius));
     EXPECT_EQ(paint[1].worldRect,
               (UI::UILogicalRect{.x = 3.0F, .y = 3.0F,
                                  .width = 18.0F, .height = 18.0F}));
@@ -162,22 +162,22 @@ TEST(UIToggleSwitchTests, TrackThumbCheckedStateAndSemanticsCommitTogether)
     EXPECT_EQ(paint[1].solidFill, UI::premultiply(dark.colors.onSurfaceVariant));
 
     const UI::UISemanticsEntry* semantics =
-        semanticsFor(context->committedSemantics(), *toggle);
+        semanticsFor(context->committedSemantics(), *switchElement);
     ASSERT_NE(semantics, nullptr);
     EXPECT_EQ(semantics->role, UI::UISemanticsRole::Switch);
     EXPECT_EQ(semantics->name, "Snap to grid");
     EXPECT_FALSE(semantics->checked);
 
-    ASSERT_TRUE(updater->setChecked(*toggle, true));
+    ASSERT_TRUE(updater->setChecked(*switchElement, true));
     ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 60.0F}));
-    paint = paintsFor(context->committedPaint(), *toggle);
+    paint = paintsFor(context->committedPaint(), *switchElement);
     ASSERT_EQ(paint.size(), 2U);
     EXPECT_EQ(paint[0].solidFill, UI::premultiply(dark.colors.primary));
     EXPECT_EQ(paint[1].worldRect,
               (UI::UILogicalRect{.x = 23.0F, .y = 3.0F,
                                  .width = 18.0F, .height = 18.0F}));
     EXPECT_EQ(paint[1].solidFill, UI::premultiply(dark.colors.onPrimary));
-    semantics = semanticsFor(context->committedSemantics(), *toggle);
+    semantics = semanticsFor(context->committedSemantics(), *switchElement);
     ASSERT_NE(semantics, nullptr);
     EXPECT_TRUE(semantics->checked);
 
@@ -189,40 +189,40 @@ TEST(UIToggleSwitchTests, TrackThumbCheckedStateAndSemanticsCommitTogether)
     EXPECT_TRUE(down->consumed);
     EXPECT_TRUE(up->consumed);
     EXPECT_EQ(activations, 1);
-    EXPECT_FALSE(updater->isChecked(*toggle).value());
+    EXPECT_FALSE(updater->isChecked(*switchElement).value());
 }
 
-TEST(UIToggleSwitchTests, ThemeAndInvalidChromeUpdatesRemainTransactional)
+TEST(UISwitchTests, ThemeAndInvalidChromeUpdatesRemainTransactional)
 {
     auto context = createContext(makeWindow());
     ASSERT_NE(context, nullptr);
     auto root = context->rootBuilder().createRoot();
     ASSERT_TRUE(root);
-    auto toggle = context->rootBuilder().createElement(
-        root->rootNodeId(), UI::makeToggleSwitchElement({
+    auto switchElement = context->rootBuilder().createElement(
+        root->rootNodeId(), UI::makeSwitchElement({
                                 .accessibleName = "Live preview",
                             }));
-    ASSERT_TRUE(toggle);
+    ASSERT_TRUE(switchElement);
     auto updater = context->treeUpdater(*root);
     ASSERT_TRUE(updater);
 
     const UI::UITheme light = UI::makeModernDesktopTheme(UI::UIColorScheme::Light);
     ASSERT_TRUE(context->setProductTheme(light));
-    EXPECT_EQ(updater->checkboxPaint(*toggle).value(),
-              UI::makeToggleSwitchChrome(light).indicator);
+    EXPECT_EQ(updater->checkboxPaint(*switchElement).value(),
+              UI::makeSwitchChrome(light).indicator);
 
-    const UI::UICheckboxPaint before = updater->checkboxPaint(*toggle).value();
+    const UI::UICheckboxPaint before = updater->checkboxPaint(*switchElement).value();
     UI::UICheckboxPaint invalid = before;
     invalid.presentation = static_cast<UI::UIToggleIndicatorPresentation>(255);
-    const Core::Status rejected = updater->setCheckboxPaint(*toggle, invalid);
+    const Core::Status rejected = updater->setCheckboxPaint(*switchElement, invalid);
     EXPECT_FALSE(rejected);
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidControlValue);
-    EXPECT_EQ(updater->checkboxPaint(*toggle).value(), before);
+    EXPECT_EQ(updater->checkboxPaint(*switchElement).value(), before);
 
     const auto invalidRecipe = context->rootBuilder().createElement(
-        root->rootNodeId(), UI::makeToggleSwitchElement({
+        root->rootNodeId(), UI::makeSwitchElement({
                                 .accessibleName = "Invalid",
-                                .size = static_cast<UI::UIToggleSwitchSize>(255),
+                                .size = static_cast<UI::UISwitchSize>(255),
                             }));
     EXPECT_FALSE(invalidRecipe);
     EXPECT_EQ(invalidRecipe.error().code, UI::UIErrorCode::InvalidElementDescriptor);

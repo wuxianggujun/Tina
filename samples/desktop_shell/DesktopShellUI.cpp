@@ -1,4 +1,5 @@
 #include "DesktopShellUI.hpp"
+#include "DesktopShellIconAtlas.hpp"
 
 #include <algorithm>
 #include <array>
@@ -149,7 +150,7 @@ inline constexpr float CompressedTierMinWidth = 960.0F;
 
 struct ShellCommand final {
     std::string_view label;
-    UI::UIStyleRoleId role;
+    UI::UIButtonVariant variant;
 };
 
 // Hierarchy rows. Two collapsible groups keep the projection small enough to
@@ -188,14 +189,14 @@ inline constexpr std::array<std::string_view, 5> AssetRows{{
 inline constexpr UI::UITreeViewItemKey HierarchyKeyBase = 100;
 inline constexpr UI::UIListViewItemKey AssetKeyBase = 200;
 
-// One Primary per cluster; destructive commands use Danger. Icon-only tools are
-// out of this slice because they require Tooltip anchors per icon.
+// One Primary per cluster; destructive commands use Danger. The visible chrome
+// comes from product-owned atlas icons while the Button root owns the command.
 inline constexpr std::array<ShellCommand, 5> PrimaryCommands{{
-    {"Play", UI::UIStyleRoleId::ButtonPrimary},
-    {"Save", UI::UIStyleRoleId::ButtonOutlined},
-    {"Undo", UI::UIStyleRoleId::ButtonText},
-    {"Redo", UI::UIStyleRoleId::ButtonText},
-    {"Delete", UI::UIStyleRoleId::ButtonDanger},
+    {"Play", UI::UIButtonVariant::Primary},
+    {"Save", UI::UIButtonVariant::Outlined},
+    {"Undo", UI::UIButtonVariant::Text},
+    {"Redo", UI::UIButtonVariant::Text},
+    {"Delete", UI::UIButtonVariant::Danger},
 }};
 
 inline constexpr std::array<std::string_view, 3> DocumentLabels{{
@@ -213,7 +214,8 @@ inline constexpr std::array<std::string_view, 4> InspectorRows{{
 
 } // namespace
 
-Core::Status DesktopShellUI::build(GameStateEnterContext& context, DesktopShellState& state)
+Core::Status DesktopShellUI::build(GameStateEnterContext& context, DesktopShellState& state,
+                                   Render::Texture2DFrameResourceResolver iconResolver)
 {
     if (root_) {
         return Core::failure(Core::CoreErrorCode::InvalidArgument,
@@ -265,6 +267,10 @@ Core::Status DesktopShellUI::build(GameStateEnterContext& context, DesktopShellS
     if (!root) {
         return Core::failure(std::move(root.error()));
     }
+    auto imageResolver = rootBuilder->bindImageResolver(*root, iconResolver);
+    if (!imageResolver) {
+        return Core::failure(std::move(imageResolver.error()));
+    }
     auto tree = rootBuilder->treeUpdater(*root);
     if (!tree) {
         return Core::failure(std::move(tree.error()));
@@ -313,6 +319,8 @@ Core::Status DesktopShellUI::build(GameStateEnterContext& context, DesktopShellS
         root_.reset();
         return status;
     }
+
+    imageResolver_ = std::move(*imageResolver);
 
     layoutDirty_ = true;
     statusDirty_ = true;
@@ -544,17 +552,36 @@ Core::Status DesktopShellUI::buildCommandBar(PrimaryWindowUITreeUpdater& tree, c
         return status;
     }
 
+    constexpr std::array CommandIcons{
+        DesktopShellIcon::Play,
+        DesktopShellIcon::Save,
+        DesktopShellIcon::Undo,
+        DesktopShellIcon::Redo,
+        DesktopShellIcon::Delete,
+    };
     for (usize index = 0; index < PrimaryCommands.size(); ++index) {
         const ShellCommand& command = PrimaryCommands[index];
         UI::UILayoutStyle buttonLayout{};
-        buttonLayout.size.height = UI::UILayoutLength::Px(theme.controls.buttonHeight);
+        buttonLayout.size.width = UI::UILayoutLength::Px(theme.controls.iconButtonExtent);
+        buttonLayout.size.height = UI::UILayoutLength::Px(theme.controls.iconButtonExtent);
         buttonLayout.flexItem.shrink = 0.0F;
-        buttonLayout.padding = horizontalPadding(theme.spacing.space4);
-        if (Core::Status status = storeNode(
-                createButton(tree, nodes_.commandBar, buttonLayout, command.label, command.role),
-                nodes_.commandButtons[index]);
-            !status) {
-            return status;
+        UI::UIIconButtonConfig iconButton{
+            .icon = desktopShellIconContent(CommandIcons[index]),
+            .accessibleName = command.label,
+            .variant = command.variant,
+            .layout = buttonLayout,
+        };
+        if (index == 1) {
+            iconButton.tooltipText = "Save the active document";
+        }
+        auto parts = tree.buildIconButton(nodes_.commandBar, iconButton);
+        if (!parts) {
+            return Core::failure(std::move(parts.error()));
+        }
+        nodes_.commandButtons[index] = parts->button;
+        nodes_.commandButtonIcons[index] = parts->icon;
+        if (parts->hasTooltip()) {
+            nodes_.saveTooltip = parts->tooltip;
         }
         ++commandCount_;
     }
@@ -601,26 +628,56 @@ Core::Status DesktopShellUI::buildDocumentTabs(PrimaryWindowUITreeUpdater& tree,
     ++bandCount_;
 
     const auto activeIndex = static_cast<usize>(state_->activeDocument);
+    if (activeIndex >= DocumentLabels.size()) {
+        return Core::failure(Core::CoreErrorCode::Internal,
+                             "Desktop shell document selection is out of range");
+    }
+    UI::UILayoutStyle tabViewLayout = fillStyle();
+    tabViewLayout.flexItem.shrink = 0.0F;
+    auto tabView = tree.createElement(
+        nodes_.documentTabs,
+        UI::makeTabViewElement(
+            UI::UITabViewConfig{
+                .placement = UI::UITabViewPlacement::Top,
+                .activationMode = UI::UITabActivationMode::Automatic,
+                .tabGap = theme.spacing.space1,
+                .contentGap = 0.0F,
+                .wrapKeyboardNavigation = true,
+            },
+            tabViewLayout));
+    if (!tabView) {
+        return Core::failure(std::move(tabView.error()));
+    }
+    nodes_.documentTabView = *tabView;
+
+    std::array<UI::UITabViewItem, 3> items{};
     for (usize index = 0; index < DocumentLabels.size(); ++index) {
         UI::UILayoutStyle tabLayout{};
         tabLayout.size.height = UI::UILayoutLength::Px(theme.controls.tabHeight);
         tabLayout.flexItem.shrink = 0.0F;
         tabLayout.padding = horizontalPadding(theme.spacing.space4);
-        // Selected tab uses a RadioButton role so the shell reuses the existing
-        // mutually-exclusive selection behaviour instead of a parallel state.
-        UI::UIElementDescriptor tabDesc =
-            UI::makeRadioButtonElement(DocumentLabels[index], tabLayout);
-        tabDesc.semantics.name = DocumentLabels[index];
-        auto tab = tree.createElement(nodes_.documentTabs, tabDesc);
+        auto tab = tree.createElement(
+            nodes_.documentTabView, UI::makeTabElement(DocumentLabels[index], {}, tabLayout));
         if (!tab) {
             return Core::failure(std::move(tab.error()));
         }
-        if (Core::Status status =
-                tree.setRadioButtonSelected(*tab, index == activeIndex);
-            !status) {
-            return status;
+        auto panel = tree.createElement(nodes_.documentTabView, UI::makePanelElement());
+        if (!panel) {
+            return Core::failure(std::move(panel.error()));
         }
+        items[index] = UI::UITabViewItem{.tab = *tab, .panel = *panel};
         nodes_.documentTabButtons[index] = *tab;
+        nodes_.documentTabPanels[index] = *panel;
+    }
+    if (Core::Status status = tree.setTabViewItems(
+            nodes_.documentTabView, items, static_cast<Core::u32>(activeIndex));
+        !status) {
+        return status;
+    }
+    if (Core::Status status = tree.setTabViewActiveTab(
+            nodes_.documentTabView, nodes_.documentTabButtons[activeIndex]);
+        !status) {
+        return status;
     }
     return Core::success();
 }
@@ -757,6 +814,7 @@ Core::Status DesktopShellUI::buildWorkspace(PrimaryWindowUITreeUpdater& tree, co
     inspectorLayout.flexContainer.direction = UI::UIFlexDirection::Column;
     inspectorLayout.padding = UI::UIEdgeSpacing::All(theme.spacing.space4);
     inspectorLayout.flexContainer.gap.row = theme.spacing.space3;
+    inspectorLayout_ = inspectorLayout;
     if (Core::Status status = storeNode(
             createSurface(tree, nodes_.splitB, inspectorLayout, UI::UISurfaceVariant::Filled),
             nodes_.inspector);
@@ -805,6 +863,7 @@ Core::Status DesktopShellUI::buildWorkspace(PrimaryWindowUITreeUpdater& tree, co
     timelineLayout.flexContainer.direction = UI::UIFlexDirection::Column;
     timelineLayout.padding = UI::UIEdgeSpacing::All(theme.spacing.space4);
     timelineLayout.flexContainer.gap.row = theme.spacing.space2;
+    timelineLayout_ = timelineLayout;
     if (Core::Status status = storeNode(
             createSurface(tree, nodes_.splitC, timelineLayout, UI::UISurfaceVariant::Filled),
             nodes_.timeline);
@@ -1204,23 +1263,6 @@ Core::Status DesktopShellUI::wireCommands(PrimaryWindowUITreeUpdater& tree)
         return status;
     }
 
-    // Document tabs reuse RadioButton selection; switching updates durable state.
-    for (usize index = 0; index < nodes_.documentTabButtons.size(); ++index) {
-        const auto document = static_cast<ShellDocument>(index);
-        if (Core::Status status = tree.setRadioButtonAction(
-                nodes_.documentTabButtons[index],
-                UI::UIButtonActionCallback{[this, document](const UI::UIButtonActionEvent&) noexcept {
-                    if (state_->activeDocument == document) {
-                        return;
-                    }
-                    state_->activeDocument = document;
-                    ++documentSwitches_;
-                    statusDirty_ = true;
-                }});
-            !status) {
-            return status;
-        }
-    }
     return Core::success();
 }
 
@@ -1358,6 +1400,14 @@ Core::Status DesktopShellUI::applyResponsiveTier(PrimaryWindowUITreeUpdater& tre
         !status) {
         return status;
     }
+    {
+        UI::UILayoutStyle timelinePaneLayout = timelineLayout_;
+        timelinePaneLayout.visibility = timelineCollapsed ? UI::UIVisibility::Collapsed
+                                                           : UI::UIVisibility::Visible;
+        if (Core::Status status = tree.setLayoutStyle(nodes_.timeline, timelinePaneLayout); !status) {
+            return status;
+        }
+    }
 
     auto metricsB = tree.splitViewMetrics(nodes_.splitB);
     if (!metricsB) {
@@ -1370,6 +1420,21 @@ Core::Status DesktopShellUI::applyResponsiveTier(PrimaryWindowUITreeUpdater& tre
         inspectorVisible ? fractionForSecondary(InspectorDefaultWidth, horizontalTotal) : 1.0F;
     if (Core::Status status = tree.setSplitViewFraction(nodes_.splitB, inspectorFraction); !status) {
         return status;
+    }
+    {
+        UI::UILayoutStyle inspectorPaneLayout = inspectorLayout_;
+        inspectorPaneLayout.visibility = inspectorVisible ? UI::UIVisibility::Visible
+                                                          : UI::UIVisibility::Collapsed;
+        if (Core::Status status = tree.setLayoutStyle(nodes_.inspector, inspectorPaneLayout); !status) {
+            return status;
+        }
+        if (Core::Status status = tree.setLayoutStyle(
+                nodes_.splitterB,
+                inspectorVisible ? UI::UILayoutStyle{}
+                                 : UI::UILayoutStyle{.visibility = UI::UIVisibility::Collapsed});
+            !status) {
+            return status;
+        }
     }
 
     auto metricsA = tree.splitViewMetrics(nodes_.splitA);
@@ -1409,11 +1474,91 @@ Core::Status DesktopShellUI::update(UIUpdateContext& context)
         menuStateDirty_ = true;
     }
 
+    // Verify a previously requested splitter change now that a commit has
+    // published its geometry.
+    if (pendingDockCheck_ != DockDragCheck::None) {
+        if (Core::Status status = refreshCommittedGeometry(*tree); !status) {
+            return status;
+        }
+        leftDockWidthAfterDrag_ = leftDockWidth_;
+        if (pendingDockCheck_ == DockDragCheck::ExpectMove) {
+            if (std::abs(leftDockWidth_ - dockWidthBeforeDrag_) > 1.0F) {
+                splitterMovedGeometry_ = true;
+            }
+        } else if (leftDockWidth_ >= LeftDockMinWidth - 1.0F) {
+            // The requested fraction was far below the pane minimum, so honouring
+            // it would have produced a much narrower dock.
+            splitterMinimumClamped_ = true;
+        }
+        pendingDockCheck_ = DockDragCheck::None;
+    }
+
+    // Scripted splitter move. A real drag routes through the Splitter's pointer
+    // geometry; this exercises the same committed fraction publication path.
+    if (pendingDockFraction_.has_value()) {
+        const float requested = *pendingDockFraction_;
+        pendingDockFraction_.reset();
+        dockWidthBeforeDrag_ = leftDockWidth_;
+        pendingDockCheck_ =
+            requested < 0.05F ? DockDragCheck::ExpectClamp : DockDragCheck::ExpectMove;
+        if (Core::Status status = tree->setSplitViewFraction(nodes_.splitA, requested); !status) {
+            return status;
+        }
+    }
+
     if (Core::Status status = refreshCommittedGeometry(*tree); !status) {
         return status;
     }
     if (Core::Status status = applyInitialFocus(*tree); !status) {
         return status;
+    }
+
+    // TabView owns activation, focus and selected semantics. Mirror its
+    // retained active tab into the application model after routing, without
+    // installing a parallel RadioButton callback/state machine.
+    {
+        auto activeTab = tree->tabViewActiveTab(nodes_.documentTabView);
+        if (!activeTab) {
+            return Core::failure(std::move(activeTab.error()));
+        }
+        for (usize index = 0; index < nodes_.documentTabButtons.size(); ++index) {
+            if (*activeTab == nodes_.documentTabButtons[index]) {
+                const auto document = static_cast<ShellDocument>(index);
+                if (state_->activeDocument != document) {
+                    state_->activeDocument = document;
+                    ++documentSwitches_;
+                    statusDirty_ = true;
+                }
+                break;
+            }
+        }
+    }
+
+    if (tooltipStateDirty_) {
+        if (Core::Status status = tooltipRequested_ ? tree->showTooltip(nodes_.saveTooltip)
+                                                   : tree->dismissTooltip(nodes_.saveTooltip);
+            !status) {
+            return status;
+        }
+        tooltipStateDirty_ = false;
+    }
+
+    // Tooltip evidence read back from committed metrics, including the density
+    // maximum width constraint.
+    {
+        auto metrics = tree->tooltipMetrics(nodes_.saveTooltip);
+        if (!metrics) {
+            return Core::failure(std::move(metrics.error()));
+        }
+        if (metrics->open) {
+            tooltipOpenObserved_ = true;
+            const float maxWidth = density_ == UI::UIDensity::Compact ? 320.0F : 360.0F;
+            if (metrics->tooltipRect.width > 0.0F && metrics->tooltipRect.width <= maxWidth + 1.0F) {
+                tooltipWithinMaxWidth_ = true;
+            }
+        } else if (tooltipOpenObserved_) {
+            tooltipDismissed_ = true;
+        }
     }
 
     if (dialogVisibilityDirty_) {
@@ -1499,6 +1644,7 @@ void DesktopShellUI::setLogicalWidth(float logicalWidth) noexcept
 
 void DesktopShellUI::release() noexcept
 {
+    imageResolver_.reset();
     root_.reset();
 }
 
@@ -1537,6 +1683,23 @@ void DesktopShellUI::requestAutomatedStep(u64 frameIndex) noexcept
         state_->timelineHideRequested = false;
         state_->inspectorHideRequested = false;
         paneIntentDirty_ = true;
+        break;
+    case 48:
+        // Splitter move: a wider left dock must move committed geometry.
+        pendingDockFraction_ = 0.30F;
+        break;
+    case 52:
+        // Beyond the pane minimum: SplitView must clamp instead of honouring it.
+        pendingDockFraction_ = 0.01F;
+        break;
+    case 56:
+        // Tooltip is manually triggered here; pointer hover is not synthesized.
+        tooltipRequested_ = true;
+        tooltipStateDirty_ = true;
+        break;
+    case 58:
+        tooltipRequested_ = false;
+        tooltipStateDirty_ = true;
         break;
     default:
         break;
@@ -1580,6 +1743,12 @@ DesktopShellSnapshot DesktopShellUI::snapshot() const noexcept
         .inspectorHideRequested = state_ != nullptr && state_->inspectorHideRequested,
         .timelineHideObserved = timelineHideObserved_,
         .inspectorHideObserved = inspectorHideObserved_,
+        .tooltipOpenObserved = tooltipOpenObserved_,
+        .tooltipDismissed = tooltipDismissed_,
+        .tooltipWithinMaxWidth = tooltipWithinMaxWidth_,
+        .splitterMovedGeometry = splitterMovedGeometry_,
+        .splitterMinimumClamped = splitterMinimumClamped_,
+        .leftDockWidthAfterDrag = leftDockWidthAfterDrag_,
     };
 }
 

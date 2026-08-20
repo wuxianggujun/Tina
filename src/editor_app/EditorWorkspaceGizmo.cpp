@@ -94,19 +94,14 @@ auto EditorWorkspaceState::automaticViewportGizmoPoint(float fraction) const noe
             .y = autoGizmoStart_.y - AutomaticScaleDragPixels * fraction,
         };
     }
-    if (!previewWorld_.has_value()) {
+    if (viewportGizmo_.targetCount == 0U) {
         return std::nullopt;
     }
-    const Tina::Scene::EntityId entity =
-        findPreviewEntity(viewportGizmo_.stableEntityId);
-    const Tina::Scene::WorldTransform* transform =
-        entity.hasValue() ? previewWorld_->worldTransform(entity) : nullptr;
-    if (transform == nullptr) {
-        return std::nullopt;
-    }
+    // The automatic drag spans multiple frames. Keep its pointer path anchored
+    // to the frozen transaction baseline while preview publication mutates World.
     const Tina::Scene::Vec3 originWorld =
         viewportGizmo_.selectionCount > 1U ? viewportGizmo_.pivot
-                                           : transform->position;
+                                           : viewportGizmo_.targets[0].baselineWorld.position;
     const ViewportProjectedPoint origin =
         projectViewportWorldPoint(originWorld);
     const ViewportProjectedPoint xAxis = projectViewportWorldPoint(
@@ -818,10 +813,6 @@ auto EditorWorkspaceState::processViewportGizmo(Tina::PrimaryWindowUITreeUpdater
         } else {
             authoringFeedback_ = "Viewport transform started";
         }
-        if (auto status = tree.setText(authoringHint_, authoringFeedback_);
-            !status) {
-            return status;
-        }
     }
 
     const auto& snapshot = viewportTransformGizmo_.snapshot();
@@ -905,10 +896,6 @@ auto EditorWorkspaceState::processViewportGizmo(Tina::PrimaryWindowUITreeUpdater
                                                 ? "Move preview on the World2D XY plane"
                                                 : "Move preview in the World3D viewport");
                 break;
-            }
-            if (auto status = tree.setText(authoringHint_, authoringFeedback_);
-                !status) {
-                return status;
             }
         }
     }

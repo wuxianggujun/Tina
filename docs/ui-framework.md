@@ -21,9 +21,10 @@ Tina 当前最接近：
 确定帧序、固定容量、失败原子性和 Render 隔离。
 
 桌面产品的具体视觉语言、Compact/Comfortable density、semantic Theme、State Layer 和 Desktop Shell 不在这里
-重复展开，统一见 [Tina Modern Desktop UI 设计规范](ui-modern-desktop.md)。该 program 正在实施：TMD-00..06
-已经闭环，TMD-07 Showcase Desktop workbench 已实现并进入集中 gate，TMD-08..11 仍按文档推进；文档会明确
-区分当前 API 与尚未完成的 Shell/产品目标。
+重复展开，统一见 [Tina Modern Desktop UI 设计规范](ui-modern-desktop.md)。该 program 正在实施：TMD-00..07
+已经闭环，TMD-08 Desktop Shell reference 已实现结构、自动工作流与产品 icon atlas，100%/150% DPI 配对证据
+暂缓；TMD-09 的 2D/3D 与 EditorApp Compact 源码迁移已完成，仍待 Editor 集中 gate，之后继续 TMD-10..11
+的 OS scheme 与最终门禁。文档会明确区分当前 API 与尚未完成的产品证据。
 
 其中 Image/Icon/NineSlice 不是装饰性补充，而是 HUD、Inventory、装备栏、技能栏、对话框和设置页的
 基础视觉能力。它不依赖 Behavior side store 或 Component transaction 才能成立：`UI-PERF-001` 建立首份
@@ -77,7 +78,7 @@ private Render backend, currently bgfx
 | Tree/事务/快照 | `include/tina/ui/UIContext.hpp` 的 builder、updater、`UIElementBuildTransaction` 与 committed views |
 | Behavior | `include/tina/ui/UIBehavior.hpp`；Activate/Toggle/RangeInput/TextInput/Scroll/Select 使用私有 fixed-capacity side store，输入与具体视觉仍由 resolver 约束到私有 kind |
 | Style/Theme | `include/tina/ui/UIStyle.hpp`、`UITheme.hpp` 与属性 override/reset |
-| Visual profiles | `UISurface.hpp`、`UIDivider.hpp`、`UIBadge.hpp`、`UIToggleSwitch.hpp` + 对应 recipes；前三者复用普通 Element chrome，Switch 复用 Checkbox Toggle 状态机 |
+| Visual profiles | `UISurface.hpp`、`UIDivider.hpp`、`UIBadge.hpp`、`UISwitch.hpp` + 对应 recipes；前三者复用普通 Element chrome，Switch 复用 Checkbox Toggle 状态机 |
 | Tooltip | `include/tina/ui/UITooltip.hpp` + `makeTooltipElement()`；显式同 root Anchor、monotonic delay、committed metrics，独立于 Popup barrier |
 | Menu | `include/tina/ui/UIMenu.hpp` + `makeMenuElement()/makeMenuItemElement()`；显式 Anchor、单 Window transient overlay、typed item state 与 committed metrics |
 | TabView | `include/tina/ui/UITabView.hpp` + `makeTabViewElement()/makeTabElement()`；完整 direct-child pair、四向 layout、激活/导航与 committed metrics |
@@ -110,7 +111,7 @@ indicator，但不复制 RadioButton 的 selection、Focus、Keyboard/Gamepad �
 完整预算，任一步失败时回滚整个子树及所有已消费或未消费 reservation。
 
 第一方视觉 profile 不等于新增 Widget ABI。Surface/Divider/Badge 只把 variant/tone/orientation 映射为
-普通 Panel/Label 的 StyleRole、布局、Hit 与 Semantics 默认值；ToggleSwitch 则把 Standard/Compact authoring
+普通 Panel/Label 的 StyleRole、布局、Hit 与 Semantics 默认值；Switch 则把 Standard/Compact authoring
 映射到既有 Checkbox kind、Toggle side store 和 action path，并仅在 theme chrome、track/thumb geometry 与
 Switch semantics role 上区分。它们仍走同一 `createElement()`、固定容量 publication、DisplayList 与 GPU backend。
 

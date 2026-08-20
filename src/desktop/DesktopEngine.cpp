@@ -66,6 +66,7 @@ namespace {
 {
     try
     {
+        const bool followSystemColorScheme = options.followSystemColorScheme;
         WindowSurfaceRenderDeviceWrap wrap = std::move(options.wrapWindowSurfaceRenderDevice);
 
         EngineCompositionFactories factories{
@@ -87,8 +88,10 @@ namespace {
             .platformRender =
                 WindowSurfacePlatformRenderFactories{
                     .createWindowSurfacePlatformBackend =
-                        [](const Platform::PlatformBackendCreateParams& params) {
-                            return Platform::createGlfwWindowSurfacePlatformBackend(params);
+                        [followSystemColorScheme](const Platform::PlatformBackendCreateParams& params) {
+                            Platform::PlatformBackendCreateParams desktopParams = params;
+                            desktopParams.publishSystemColorSchemeEvents = followSystemColorScheme;
+                            return Platform::createGlfwWindowSurfacePlatformBackend(desktopParams);
                         },
                     .createWindowSurfaceRenderDevice =
                         [wrap = std::move(wrap)](const Render::RenderDeviceCreateParams& params,

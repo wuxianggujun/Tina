@@ -863,16 +863,13 @@ auto EditorWorkspaceState::refreshViewportToolUi(Tina::PrimaryWindowUITreeUpdate
 
     const auto orientation = viewportTransformGizmo_.snapshot().orientation;
     const bool snapEnabled = viewportTransformGizmo_.snap().enabled;
-    if (auto status = tree.setText(
+    if (auto status = tree.setRadioButtonSelected(
             orientationButton_,
-            orientation == Tina::Editor::EditorTransformGizmoOrientation::World
-                ? "World"
-                : "Local");
+            orientation == Tina::Editor::EditorTransformGizmoOrientation::World);
         !status) {
         return status;
     }
-    if (auto status = tree.setText(snapButton_,
-                                   snapEnabled ? "Snap On" : "Snap Off");
+    if (auto status = tree.setRadioButtonSelected(snapButton_, snapEnabled);
         !status) {
         return status;
     }

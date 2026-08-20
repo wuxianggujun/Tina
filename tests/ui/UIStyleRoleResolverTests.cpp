@@ -14,9 +14,10 @@ TEST(UIStyleRoleResolverTests, ValidatesRolesAndPublishesExpectedBindingMasks)
 
     EXPECT_TRUE(isValidStyleRole(UI::UIStyleRoleId::None));
     EXPECT_TRUE(isValidStyleRole(UI::UIStyleRoleId::TreeView));
-    EXPECT_TRUE(isValidStyleRole(UI::UIStyleRoleId::ToggleSwitch));
+    EXPECT_TRUE(isValidStyleRole(UI::UIStyleRoleId::Switch));
     EXPECT_TRUE(isValidStyleRole(UI::UIStyleRoleId::Splitter));
     EXPECT_TRUE(isValidStyleRole(UI::UIStyleRoleId::IconOnError));
+    EXPECT_TRUE(isValidStyleRole(UI::UIStyleRoleId::FloatingSurface));
     EXPECT_FALSE(isValidStyleRole(static_cast<UI::UIStyleRoleId>(255)));
     EXPECT_EQ(defaultThemeBindingsFor(static_cast<UI::UIStyleRoleId>(255)), 0U);
 
@@ -26,13 +27,17 @@ TEST(UIStyleRoleResolverTests, ValidatesRolesAndPublishesExpectedBindingMasks)
         std::pair{UI::UIStyleRoleId::TextBody, ThemeBindingTextStyle},
         std::pair{UI::UIStyleRoleId::TextError, ThemeBindingTextStyle},
         std::pair{UI::UIStyleRoleId::ButtonPrimary,
-                  static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingButtonPaint | ThemeBindingTextStyle)},
+                  static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingButtonPaint |
+                                   ThemeBindingTextStyle | ThemeBindingImageTint)},
         std::pair{UI::UIStyleRoleId::ButtonTonal,
-                  static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingButtonPaint | ThemeBindingTextStyle)},
+                  static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingButtonPaint |
+                                   ThemeBindingTextStyle | ThemeBindingImageTint)},
         std::pair{UI::UIStyleRoleId::ButtonOutlined,
-                  static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingButtonPaint | ThemeBindingTextStyle)},
+                  static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingButtonPaint |
+                                   ThemeBindingTextStyle | ThemeBindingImageTint)},
         std::pair{UI::UIStyleRoleId::ButtonText,
-                  static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingButtonPaint | ThemeBindingTextStyle)},
+                  static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingButtonPaint |
+                                   ThemeBindingTextStyle | ThemeBindingImageTint)},
         std::pair{UI::UIStyleRoleId::Checkbox,
                   static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingCheckboxPaint)},
         std::pair{UI::UIStyleRoleId::Slider,
@@ -48,7 +53,7 @@ TEST(UIStyleRoleResolverTests, ValidatesRolesAndPublishesExpectedBindingMasks)
                   static_cast<u16>(ThemeBindingRadioButtonPaint | ThemeBindingTextStyle)},
         std::pair{UI::UIStyleRoleId::SegmentedButton,
                   static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingRadioButtonPaint |
-                                   ThemeBindingTextStyle)},
+                                   ThemeBindingTextStyle | ThemeBindingImageTint)},
         std::pair{UI::UIStyleRoleId::Tab,
                   static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingTabPaint |
                                    ThemeBindingTextStyle)},
@@ -63,10 +68,11 @@ TEST(UIStyleRoleResolverTests, ValidatesRolesAndPublishesExpectedBindingMasks)
         std::pair{UI::UIStyleRoleId::DividerAccent, ThemeBindingBoxPaint},
         std::pair{UI::UIStyleRoleId::BadgeDanger,
                   static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingTextStyle)},
-        std::pair{UI::UIStyleRoleId::ToggleSwitch,
+        std::pair{UI::UIStyleRoleId::Switch,
                   static_cast<u16>(ThemeBindingBoxPaint | ThemeBindingCheckboxPaint)},
         std::pair{UI::UIStyleRoleId::Splitter, ThemeBindingSplitterPaint},
         std::pair{UI::UIStyleRoleId::IconOnPrimary, ThemeBindingImageTint},
+        std::pair{UI::UIStyleRoleId::FloatingSurface, ThemeBindingBoxPaint},
     };
     for (const auto& [role, bindings] : expected)
     {
@@ -83,36 +89,42 @@ TEST(UIStyleRoleResolverTests, ResolvesControlChromeFromTheRequestedTheme)
     EXPECT_EQ(primary.box, expectedPrimary.box);
     EXPECT_EQ(primary.button, expectedPrimary.states);
     EXPECT_EQ(primary.text, expectedPrimary.label);
+    EXPECT_EQ(primary.imageTint, theme.colors.onPrimary);
 
     const auto danger = UI::Detail::productChromeFor(UI::UIStyleRoleId::ButtonDanger, theme);
     const UI::UIButtonChrome expectedDanger = UI::makeButtonChrome(theme, theme.colors.error);
     EXPECT_EQ(danger.box, expectedDanger.box);
     EXPECT_EQ(danger.button, expectedDanger.states);
     EXPECT_EQ(danger.text, expectedDanger.label);
+    EXPECT_EQ(danger.imageTint, theme.colors.onError);
 
     const auto tonal = UI::Detail::productChromeFor(UI::UIStyleRoleId::ButtonTonal, theme);
     const UI::UIButtonChrome expectedTonal = UI::makeTonalButtonChrome(theme);
     EXPECT_EQ(tonal.box, expectedTonal.box);
     EXPECT_EQ(tonal.button, expectedTonal.states);
     EXPECT_EQ(tonal.text, expectedTonal.label);
+    EXPECT_EQ(tonal.imageTint, theme.colors.onSurface);
 
     const auto outlined = UI::Detail::productChromeFor(UI::UIStyleRoleId::ButtonOutlined, theme);
     const UI::UIButtonChrome expectedOutlined = UI::makeOutlinedButtonChrome(theme);
     EXPECT_EQ(outlined.box, expectedOutlined.box);
     EXPECT_EQ(outlined.button, expectedOutlined.states);
     EXPECT_EQ(outlined.text, expectedOutlined.label);
+    EXPECT_EQ(outlined.imageTint, theme.colors.onSurface);
 
     const auto textButton = UI::Detail::productChromeFor(UI::UIStyleRoleId::ButtonText, theme);
     const UI::UIButtonChrome expectedTextButton = UI::makeTextButtonChrome(theme);
     EXPECT_EQ(textButton.box, expectedTextButton.box);
     EXPECT_EQ(textButton.button, expectedTextButton.states);
     EXPECT_EQ(textButton.text, expectedTextButton.label);
+    EXPECT_EQ(textButton.imageTint, theme.colors.onSurfaceVariant);
 
     const auto segmented = UI::Detail::productChromeFor(UI::UIStyleRoleId::SegmentedButton, theme);
     const UI::UISegmentedButtonChrome expectedSegmented = UI::makeSegmentedButtonChrome(theme);
     EXPECT_EQ(segmented.box, expectedSegmented.box);
     EXPECT_EQ(segmented.radioButton, expectedSegmented.radio);
     EXPECT_EQ(segmented.text, expectedSegmented.label);
+    EXPECT_EQ(segmented.imageTint, theme.colors.onSurfaceVariant);
 
     const auto tab = UI::Detail::productChromeFor(UI::UIStyleRoleId::Tab, theme);
     const UI::UITabChrome expectedTab = UI::makeTabChrome(theme);
@@ -172,13 +184,21 @@ TEST(UIStyleRoleResolverTests, ResolvesControlChromeFromTheRequestedTheme)
     EXPECT_EQ(badge.box, expectedBadge.box);
     EXPECT_EQ(badge.text, expectedBadge.label);
 
-    const auto toggleSwitch = UI::Detail::productChromeFor(UI::UIStyleRoleId::ToggleSwitch, theme);
-    const UI::UICheckboxChrome expectedToggleSwitch = UI::makeToggleSwitchChrome(theme);
-    EXPECT_EQ(toggleSwitch.box, expectedToggleSwitch.box);
-    EXPECT_EQ(toggleSwitch.checkbox, expectedToggleSwitch.indicator);
+    const auto switchChrome = UI::Detail::productChromeFor(UI::UIStyleRoleId::Switch, theme);
+    const UI::UICheckboxChrome expectedSwitch = UI::makeSwitchChrome(theme);
+    EXPECT_EQ(switchChrome.box, expectedSwitch.box);
+    EXPECT_EQ(switchChrome.checkbox, expectedSwitch.indicator);
 
     const auto splitter = UI::Detail::productChromeFor(UI::UIStyleRoleId::Splitter, theme);
     EXPECT_EQ(splitter.splitter, UI::makeSplitterChrome(theme).splitter);
+
+    const auto floating =
+        UI::Detail::productChromeFor(UI::UIStyleRoleId::FloatingSurface, theme);
+    EXPECT_EQ(floating.box,
+              UI::makePanelBoxPaint(
+                  theme,
+                  UI::scaleColorAlpha(theme.colors.surfaceContainerHigh, 252),
+                  UI::UIElevation::Floating));
 }
 
 TEST(UIStyleRoleResolverTests, NoneAndInvalidRolesResolveEmptyChrome)

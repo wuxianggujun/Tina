@@ -2,6 +2,7 @@
 
 #include <tina/core/error/Result.hpp>
 #include <tina/ui/UIContextConfig.hpp>
+#include <tina/ui/UIDataGrid.hpp>
 #include <tina/ui/UIDropdown.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UIImage.hpp>
@@ -11,6 +12,7 @@
 #include <tina/ui/UIScrollView.hpp>
 #include <tina/ui/UITheme.hpp>
 #include <tina/ui/UITreeView.hpp>
+#include <tina/ui/UIVirtualGridView.hpp>
 
 namespace Tina::UI::Detail {
 
@@ -80,6 +82,24 @@ normalizeTreeViewStyle(UITreeViewStyle style);
 normalizeTreeViewPaint(UITreeViewPaint paint);
 [[nodiscard]] bool
 isValidTreeViewScrollAlignment(UITreeViewScrollAlignment alignment) noexcept;
+
+[[nodiscard]] Core::Result<UIVirtualGridViewCreateConfig>
+normalizeVirtualGridViewCreateConfig(UIVirtualGridViewCreateConfig config);
+[[nodiscard]] Core::Result<UIVirtualGridViewStyle>
+normalizeVirtualGridViewStyle(UIVirtualGridViewStyle style);
+[[nodiscard]] Core::Result<UIVirtualGridViewPaint>
+normalizeVirtualGridViewPaint(UIVirtualGridViewPaint paint);
+[[nodiscard]] bool isValidVirtualGridViewScrollAlignment(
+    UIVirtualGridViewScrollAlignment alignment) noexcept;
+
+[[nodiscard]] Core::Result<UIDataGridCreateConfig>
+normalizeDataGridCreateConfig(UIDataGridCreateConfig config);
+[[nodiscard]] Core::Result<UIDataGridStyle>
+normalizeDataGridStyle(UIDataGridStyle style);
+[[nodiscard]] Core::Result<UIDataGridPaint>
+normalizeDataGridPaint(UIDataGridPaint paint);
+[[nodiscard]] bool
+isValidDataGridScrollAlignment(UIDataGridScrollAlignment alignment) noexcept;
 
 [[nodiscard]] Core::Result<UIPopupStyle>
 normalizePopupStyle(UIPopupStyle style);

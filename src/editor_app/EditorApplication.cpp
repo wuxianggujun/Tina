@@ -141,6 +141,17 @@ class EditorApplication final : public Tina::IGameApplication {
         }
         return Tina::Core::success();
     }
+    if (!options.rgbaOutputUtf8.empty() &&
+        (!counters.rgbaCaptureAttempted || !counters.rgbaCaptureOk ||
+         !counters.rgbaCaptureOutputWritten || counters.rgbaCaptureWidth == 0U ||
+         counters.rgbaCaptureHeight == 0U ||
+         counters.rgbaCaptureBytes !=
+             static_cast<u64>(counters.rgbaCaptureWidth) *
+                 counters.rgbaCaptureHeight * 4U)) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::Internal,
+            "Tina Editor did not capture the requested RGBA8 frame");
+    }
     const bool world2D = options.initialWorkspace == WorkspaceMode::World2D;
     const bool world2DPathConfigured = !options.world2DDocumentPathUtf8.empty();
     const bool world3DPathConfigured = !options.world3DDocumentPathUtf8.empty();
@@ -226,8 +237,6 @@ class EditorApplication final : public Tina::IGameApplication {
             !counters.selectionVerified || counters.hierarchyLogicalItems == 0U ||
             counters.finalSelectionKey == UI::InvalidUITreeViewItemKey ||
             counters.finalSelectionIndex >= counters.hierarchyLogicalItems ||
-            !counters.stylesheetInstalled || counters.styleRegisteredClasses == 0U ||
-            counters.styleRegisteredTokens == 0U || counters.styleActiveRules == 0U ||
             !counters.editorActionsReady || !counters.runtimePreviewValid ||
             counters.editorLayoutRegions == 0U || !counters.viewportLayoutReady ||
             !counters.gpuViewportReady || !counters.viewportGridReady ||
@@ -268,8 +277,6 @@ class EditorApplication final : public Tina::IGameApplication {
     if (!frameCountMatches || counters.stateEnters != 1 ||
         counters.stateExits != 1 || counters.applicationShutdowns != 1 || counters.uiRootsCreated != 1 ||
         counters.uiRootsReleased != 1 || !counters.selectionVerified || counters.hierarchyLogicalItems == 0 ||
-        !counters.stylesheetInstalled || counters.styleRegisteredClasses != 2 ||
-        counters.styleRegisteredTokens != 2 || counters.styleActiveRules != 2 ||
         !counters.editorActionsReady || !counters.runtimePreviewValid ||
         counters.editorLayoutRegions != EditorLayoutRegionCount || !counters.viewportLayoutReady ||
         !counters.gpuViewportReady || !counters.viewportGridReady ||
@@ -431,7 +438,7 @@ class EditorApplication final : public Tina::IGameApplication {
                       counters.tileMapGameplayBytes == 0U &&
                       counters.tileMapGameplaySourceRevision == 0U;
         if (counters.automaticTransformStableId == 0U ||
-            counters.hierarchySelectionChanges == 0U || counters.styleTokenUpdates < 2U ||
+            counters.hierarchySelectionChanges == 0U ||
             counters.authoringEdits < 3U || counters.inspectorTransactions != 1U ||
             counters.inspectorRejectedTransactions != 0U ||
             counters.viewportGizmoBegins != 3U || counters.viewportGizmoPreviews < 3U ||
@@ -600,8 +607,7 @@ class EditorApplication final : public Tina::IGameApplication {
     writeJsonString(std::cout, options.initialWorkspace == WorkspaceMode::World2D ? "2d" : "3d");
     std::cout << ",\"finalWorkspace\":";
     writeJsonString(std::cout, counters.finalWorkspaceWorld2D ? "2d" : "3d");
-    std::cout << ",\"stylesheetInstalled\":"
-              << (counters.stylesheetInstalled ? "true" : "false") << ",\"frames\":" << counters.frameUpdates
+    std::cout << ",\"frames\":" << counters.frameUpdates
               << ",\"targetFrames\":" << options.targetFrameCount
               << ",\"frameDelayMs\":" << options.frameDelayMilliseconds
               << ",\"autoDemo\":" << (options.autoDemo ? "true" : "false") << ",\"exit\":";
@@ -655,11 +661,6 @@ class EditorApplication final : public Tina::IGameApplication {
               << counters.previewAssetBindingRefreshes
               << ",\"documentTabsReady\":"
               << (counters.documentTabsReady ? "true" : "false")
-              << ",\"styleRegisteredClasses\":" << counters.styleRegisteredClasses
-              << ",\"styleRegisteredTokens\":" << counters.styleRegisteredTokens
-              << ",\"styleActiveRules\":" << counters.styleActiveRules
-              << ",\"styleRevision\":" << counters.styleRevision
-              << ",\"styleTokenUpdates\":" << counters.styleTokenUpdates
               << ",\"editorActionsReady\":"
               << (counters.editorActionsReady ? "true" : "false")
               << ",\"authoringEdits\":" << counters.authoringEdits
@@ -719,6 +720,20 @@ class EditorApplication final : public Tina::IGameApplication {
               << counters.sceneReparentRootCommands
               << ",\"sceneReparentCommands\":" << counters.sceneReparentCommands
               << ",\"sceneDeleteCommands\":" << counters.sceneDeleteCommands
+              << ",\"rgbaCaptureAttempted\":"
+              << (counters.rgbaCaptureAttempted ? "true" : "false")
+              << ",\"rgbaCaptureOk\":"
+              << (counters.rgbaCaptureOk ? "true" : "false")
+              << ",\"rgbaCaptureOutputWritten\":"
+              << (counters.rgbaCaptureOutputWritten ? "true" : "false")
+              << ",\"rgbaCaptureWidth\":" << counters.rgbaCaptureWidth
+              << ",\"rgbaCaptureHeight\":" << counters.rgbaCaptureHeight
+              << ",\"rgbaCaptureBytes\":" << counters.rgbaCaptureBytes
+              << ",\"rgbaOutput\":";
+    writeJsonString(std::cout, options.rgbaOutputUtf8);
+    std::cout << ",\"rgbaStage\":";
+    writeJsonString(std::cout, rgbaCaptureStageName(options.rgbaStage));
+    std::cout
               << ",\"automaticAddedStableId\":" << counters.automaticAddedStableId
               << ",\"automaticDuplicatedStableId\":"
               << counters.automaticDuplicatedStableId

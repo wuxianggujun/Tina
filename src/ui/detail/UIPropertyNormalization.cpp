@@ -1,5 +1,7 @@
 #include "UIPropertyNormalization.hpp"
 
+#include "UIGridControlValidation.hpp"
+
 #include <tina/ui/UIErrors.hpp>
 
 #include <algorithm>
@@ -556,6 +558,108 @@ bool isValidTreeViewScrollAlignment(
            alignment == UITreeViewScrollAlignment::End;
 }
 
+Core::Result<UIVirtualGridViewCreateConfig>
+normalizeVirtualGridViewCreateConfig(UIVirtualGridViewCreateConfig config)
+{
+    const auto validated = validateVirtualGridViewCreateConfig(config);
+    if (!validated)
+    {
+        return Core::failure(
+            UIErrorCode::InvalidControlValue,
+            "UI VirtualGridView materialized item capacity must be within the supported range");
+    }
+    return *validated;
+}
+
+Core::Result<UIVirtualGridViewStyle>
+normalizeVirtualGridViewStyle(UIVirtualGridViewStyle style)
+{
+    const auto validated = validateVirtualGridViewStyle(style);
+    if (!validated)
+    {
+        return Core::failure(
+            UIErrorCode::InvalidControlValue,
+            "UI VirtualGridView geometry/wheel step must be finite and valid, visibility must be valid, and item text overflow must be Clip or Ellipsis");
+    }
+    style.minimumItemWidth = normalizeFloat(style.minimumItemWidth);
+    style.itemHeight = normalizeFloat(style.itemHeight);
+    style.columnGap = normalizeFloat(style.columnGap);
+    style.rowGap = normalizeFloat(style.rowGap);
+    style.wheelStep = normalizeFloat(style.wheelStep);
+    return style;
+}
+
+Core::Result<UIVirtualGridViewPaint>
+normalizeVirtualGridViewPaint(UIVirtualGridViewPaint paint)
+{
+    auto scrollBar = normalizeScrollViewPaint(paint.scrollBar);
+    if (!scrollBar)
+    {
+        return Core::failure(scrollBar.error());
+    }
+    paint.scrollBar = *scrollBar;
+    return paint;
+}
+
+bool isValidVirtualGridViewScrollAlignment(
+    UIVirtualGridViewScrollAlignment alignment) noexcept
+{
+    return alignment == UIVirtualGridViewScrollAlignment::Nearest ||
+           alignment == UIVirtualGridViewScrollAlignment::Start ||
+           alignment == UIVirtualGridViewScrollAlignment::Center ||
+           alignment == UIVirtualGridViewScrollAlignment::End;
+}
+
+Core::Result<UIDataGridCreateConfig>
+normalizeDataGridCreateConfig(UIDataGridCreateConfig config)
+{
+    const auto validated = validateDataGridCreateConfig(config);
+    if (!validated)
+    {
+        return Core::failure(
+            UIErrorCode::InvalidControlValue,
+            "UI DataGrid column and materialized row capacities must be within the supported ranges");
+    }
+    return *validated;
+}
+
+Core::Result<UIDataGridStyle>
+normalizeDataGridStyle(UIDataGridStyle style)
+{
+    const auto validated = validateDataGridStyle(style);
+    if (!validated)
+    {
+        return Core::failure(
+            UIErrorCode::InvalidControlValue,
+            "UI DataGrid header/row geometry and wheel step must be finite and valid, visibility must be valid, and text overflow must be Clip or Ellipsis");
+    }
+    style.columnHeaderHeight = normalizeFloat(style.columnHeaderHeight);
+    style.rowHeight = normalizeFloat(style.rowHeight);
+    style.wheelStep = normalizeFloat(style.wheelStep);
+    return style;
+}
+
+Core::Result<UIDataGridPaint>
+normalizeDataGridPaint(UIDataGridPaint paint)
+{
+    auto scrollBar = normalizeScrollViewPaint(paint.scrollBar);
+    if (!scrollBar)
+    {
+        return Core::failure(scrollBar.error());
+    }
+    paint.scrollBar = *scrollBar;
+    return paint;
+}
+
+bool isValidDataGridScrollAlignment(
+    UIDataGridScrollAlignment alignment) noexcept
+{
+    return alignment == UIDataGridScrollAlignment::Nearest ||
+           alignment == UIDataGridScrollAlignment::Start ||
+           alignment == UIDataGridScrollAlignment::Center ||
+           alignment == UIDataGridScrollAlignment::End;
+}
+
 Core::Result<UIPopupStyle> normalizePopupStyle(UIPopupStyle style)
 {
     if ((style.placement != UIPopupPlacement::Auto &&
@@ -615,8 +719,8 @@ Core::Status validateProductTheme(const UITheme& theme)
                             controls.buttonHeight, controls.iconButtonExtent,
                             controls.iconExtent, controls.textEditHeight,
                             controls.checkboxHitExtent, controls.checkboxMarkExtent,
-                            controls.radioIndicatorExtent, controls.toggleSwitchWidth,
-                            controls.toggleSwitchHeight, controls.sliderHeight,
+                            controls.radioIndicatorExtent, controls.switchWidth,
+                            controls.switchHeight, controls.sliderHeight,
                             controls.sliderTrackThickness, controls.sliderThumbExtent,
                             controls.progressBarHeight, controls.tabHeight,
                             controls.menuItemHeight, controls.listRowHeight,
@@ -632,8 +736,8 @@ Core::Status validateProductTheme(const UITheme& theme)
         !allFiniteNonNegative({controls.panelBorderWidth, controls.panelCornerRadius,
                                controls.controlCornerRadius,
                                controls.checkboxIndicatorInset,
-                               controls.toggleSwitchThumbInset,
-                               controls.toggleSwitchCornerRadius,
+                               controls.switchThumbInset,
+                               controls.switchCornerRadius,
                                controls.radioSelectedInset, controls.radioLabelGap,
                                controls.sliderContentInset,
                                controls.dropdownIndicatorInset,
@@ -659,8 +763,8 @@ Core::Status validateProductTheme(const UITheme& theme)
         controls.checkboxMarkExtent > controls.checkboxHitExtent ||
         controls.checkboxIndicatorInset * 2.0F >= controls.checkboxMarkExtent ||
         controls.radioSelectedInset * 2.0F >= controls.radioIndicatorExtent ||
-        controls.toggleSwitchHeight > controls.toggleSwitchWidth ||
-        controls.toggleSwitchThumbInset * 2.0F >= controls.toggleSwitchHeight ||
+        controls.switchHeight > controls.switchWidth ||
+        controls.switchThumbInset * 2.0F >= controls.switchHeight ||
         controls.sliderTrackThickness > controls.sliderHeight ||
         controls.sliderThumbExtent > controls.sliderHeight ||
         controls.sliderContentInset < controls.sliderThumbExtent * 0.5F ||

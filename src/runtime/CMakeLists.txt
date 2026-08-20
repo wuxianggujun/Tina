@@ -32,6 +32,8 @@ add_library(tina_runtime STATIC
     ui/PrimaryWindowUIContextOwner.hpp
     ui/PrimaryWindowUICapabilityState.cpp
     ui/PrimaryWindowUICapabilityState.hpp
+    ui/PrimaryWindowUIColorSchemeCoordinator.cpp
+    ui/PrimaryWindowUIColorSchemeCoordinator.hpp
     ui/PrimaryWindowUIDisplayCoordinator.cpp
     ui/PrimaryWindowUIDisplayCoordinator.hpp
     ui/PrimaryWindowUILayoutCoordinator.cpp

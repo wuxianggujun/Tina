@@ -479,18 +479,30 @@ auto EditorWorkspaceState::runComponentCommand(
     case EditorCommand::ComponentApplyPointLight: {
         const auto& section = componentSections_[2];
         Tina::Editor::World2DPointLightEditInput input{};
-        const std::array<std::pair<UI::UINodeId, std::optional<float>*>, 6>
+        auto colorText = tree.text(pointLightColorField_.textEdit);
+        if (!colorText) {
+            return Tina::Core::failure(std::move(colorText.error()));
+        }
+        if (*colorText != "Mixed" && *colorText != "n/a") {
+            auto color = UI::parseColorFieldValue(*colorText);
+            if (!color) {
+                return reject(Tina::Core::Error{
+                    Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                    "Color must use #RRGGBBAA hexadecimal format"});
+            }
+            constexpr float ByteToUnit = 1.0F / 255.0F;
+            input.colorRed = static_cast<float>(color->red) * ByteToUnit;
+            input.colorGreen = static_cast<float>(color->green) * ByteToUnit;
+            input.colorBlue = static_cast<float>(color->blue) * ByteToUnit;
+        }
+        const std::array<std::pair<UI::UINodeId, std::optional<float>*>, 3>
             fieldBindings{{
-                {section.fields[0], &input.colorRed},
-                {section.fields[1], &input.colorGreen},
-                {section.fields[2], &input.colorBlue},
-                {section.fields[3], &input.intensity},
-                {section.fields[4], &input.radiusMeters},
-                {section.fields[5], &input.sourceRadiusMeters},
+                {section.fields[0], &input.intensity},
+                {section.fields[1], &input.radiusMeters},
+                {section.fields[2], &input.sourceRadiusMeters},
             }};
-        const std::array<std::string_view, 6> fieldNames{
-            "Color R", "Color G", "Color B", "Intensity", "Radius",
-            "Src Radius"};
+        const std::array<std::string_view, 3> fieldNames{
+            "Intensity", "Radius", "Src Radius"};
         Tina::Core::Status parseStatus = Tina::Core::success();
         for (Tina::Core::usize index = 0; index < fieldBindings.size();
              ++index) {
@@ -584,13 +596,39 @@ auto EditorWorkspaceState::refreshComponentSectionsUi(
                                    primaryId != 0U && !tileMapEditingContext() &&
                                    sceneDocumentActive();
     const bool world2D = workspaceMode_ == WorkspaceMode::World2D;
+    const bool componentContextVisible = !assetInspectorActive_ &&
+                                         !tileMapEditingContext() &&
+                                         primaryId != 0U;
+    inspectorComponentsHeaderLayout_.visibility =
+        componentContextVisible ? UI::UIVisibility::Visible
+                                : UI::UIVisibility::Collapsed;
+    if (auto status = tree.setLayoutStyle(
+            inspectorComponentsHeader_, inspectorComponentsHeaderLayout_);
+        !status) {
+        return status;
+    }
+    for (Tina::Core::usize sectionIndex = 0;
+         sectionIndex < componentSections_.size(); ++sectionIndex) {
+        auto& section = componentSections_[sectionIndex];
+        const bool sectionVisible = componentContextVisible &&
+            (world2D ? sectionIndex < MeshRendererSectionIndex
+                     : sectionIndex == MeshRendererSectionIndex);
+        section.rootLayout.visibility = sectionVisible
+                                            ? UI::UIVisibility::Visible
+                                            : UI::UIVisibility::Collapsed;
+        if (auto status = tree.setLayoutStyle(
+                section.collapsible.root, section.rootLayout);
+            !status) {
+            return status;
+        }
+    }
 
     const auto resetSection = [&](const ComponentSectionUi& section)
         -> Tina::Core::Status {
-        if (auto status = tree.setEnabled(section.activeCheckbox, false); !status) {
+        if (auto status = tree.setEnabled(section.activeSwitch, false); !status) {
             return status;
         }
-        if (auto status = tree.setChecked(section.activeCheckbox, false); !status) {
+        if (auto status = tree.setChecked(section.activeSwitch, false); !status) {
             return status;
         }
         if (auto status = tree.setEnabled(section.addButton, false); !status) {
@@ -617,14 +655,37 @@ auto EditorWorkspaceState::refreshComponentSectionsUi(
                 return status;
             }
         }
+        if (&section == &componentSections_[2]) {
+            pointLightColorMixed_ = false;
+            if (auto status = tree.setText(pointLightColorField_.textEdit, "n/a");
+                !status) {
+                return status;
+            }
+            if (auto status = tree.setEnabled(
+                    pointLightColorField_.swatchButton, false); !status) {
+                return status;
+            }
+            if (auto status = tree.setEnabled(
+                    pointLightColorField_.textEdit, false); !status) {
+                return status;
+            }
+            for (const UI::UINodeId slider : pointLightColorPicker_.sliders()) {
+                if (auto status = tree.setEnabled(slider, false); !status) {
+                    return status;
+                }
+            }
+        }
         return Tina::Core::success();
     };
 
-    // A field publishes the primary value, or "Mixed" when any other
-    // selected entity that has the component disagrees.
-    const auto fieldText = [](bool mixedValue, std::string value) {
-        return mixedValue ? std::string{"Mixed"} : std::move(value);
-    };
+    if (!componentContextVisible) {
+        for (const ComponentSectionUi& section : componentSections_) {
+            if (auto status = resetSection(section); !status) {
+                return status;
+            }
+        }
+        return Tina::Core::success();
+    }
 
     if (world2D) {
         if (auto status = resetSection(
@@ -706,7 +767,7 @@ auto EditorWorkspaceState::refreshComponentSectionsUi(
                 !status) {
                 return status;
             }
-            if (auto status = tree.setEnabled(section.activeCheckbox,
+            if (auto status = tree.setEnabled(section.activeSwitch,
                                               selectionEditable && primaryHas);
                 !status) {
                 return status;
@@ -734,8 +795,26 @@ auto EditorWorkspaceState::refreshComponentSectionsUi(
                     return status;
                 }
             }
+            if (sectionIndex == 2U) {
+                if (auto status = tree.setEnabled(
+                        pointLightColorField_.swatchButton, fieldsEditable);
+                    !status) {
+                    return status;
+                }
+                if (auto status = tree.setEnabled(
+                        pointLightColorField_.textEdit, fieldsEditable);
+                    !status) {
+                    return status;
+                }
+                for (const UI::UINodeId slider : pointLightColorPicker_.sliders()) {
+                    if (auto status = tree.setEnabled(slider, fieldsEditable);
+                        !status) {
+                        return status;
+                    }
+                }
+            }
             if (!primaryHas) {
-                if (auto status = tree.setChecked(section.activeCheckbox, false);
+                if (auto status = tree.setChecked(section.activeSwitch, false);
                     !status) {
                     return status;
                 }
@@ -743,6 +822,13 @@ auto EditorWorkspaceState::refreshComponentSectionsUi(
                      ++index) {
                     if (auto status = tree.setText(section.fields[index], "n/a");
                         !status) {
+                        return status;
+                    }
+                }
+                if (sectionIndex == 2U) {
+                    pointLightColorMixed_ = false;
+                    if (auto status = tree.setText(
+                            pointLightColorField_.textEdit, "n/a"); !status) {
                         return status;
                     }
                 }
@@ -774,9 +860,21 @@ auto EditorWorkspaceState::refreshComponentSectionsUi(
                 return false;
             };
             const auto setField = [&](Tina::Core::usize index, bool mixedValue,
-                                      std::string value) -> Tina::Core::Status {
+                                      std::string_view value) -> Tina::Core::Status {
                 return tree.setText(section.fields[index],
-                                    fieldText(mixedValue, std::move(value)));
+                                    mixedValue ? std::string_view{"Mixed"} : value);
+            };
+            const auto setNumberField = [&](Tina::Core::usize index,
+                                            bool mixedValue,
+                                            float value) -> Tina::Core::Status {
+                if (mixedValue) {
+                    return setField(index, true, {});
+                }
+                auto text = formatEditorNumber(value);
+                if (!text) {
+                    return Tina::Core::failure(std::move(text.error()));
+                }
+                return setField(index, false, text->view());
             };
 
             Tina::Core::Status status = Tina::Core::success();
@@ -784,32 +882,32 @@ auto EditorWorkspaceState::refreshComponentSectionsUi(
             case Tina::Editor::World2DComponentKind::Sprite: {
                 const auto& sprite = *primary->sprite;
                 status = tree.setChecked(
-                    section.activeCheckbox,
+                    section.activeSwitch,
                     sprite.visible &&
                         !mixedBool([](const auto& e) { return e.sprite->visible; }));
                 if (status) {
-                    status = setField(
+                    status = setNumberField(
                         0,
                         mixedFloat([](const auto& e) { return e.sprite->sizeX; }),
-                        std::to_string(sprite.sizeX));
+                        sprite.sizeX);
                 }
                 if (status) {
-                    status = setField(
+                    status = setNumberField(
                         1,
                         mixedFloat([](const auto& e) { return e.sprite->sizeY; }),
-                        std::to_string(sprite.sizeY));
+                        sprite.sizeY);
                 }
                 if (status) {
-                    status = setField(
+                    status = setNumberField(
                         2,
                         mixedFloat([](const auto& e) { return e.sprite->pivotX; }),
-                        std::to_string(sprite.pivotX));
+                        sprite.pivotX);
                 }
                 if (status) {
-                    status = setField(
+                    status = setNumberField(
                         3,
                         mixedFloat([](const auto& e) { return e.sprite->pivotY; }),
-                        std::to_string(sprite.pivotY));
+                        sprite.pivotY);
                 }
                 if (status) {
                     status = setField(
@@ -832,24 +930,24 @@ auto EditorWorkspaceState::refreshComponentSectionsUi(
             case Tina::Editor::World2DComponentKind::Camera: {
                 const auto& camera = *primary->camera;
                 status = tree.setChecked(
-                    section.activeCheckbox,
+                    section.activeSwitch,
                     camera.active &&
                         !mixedBool([](const auto& e) { return e.camera->active; }));
                 if (status) {
-                    status = setField(
+                    status = setNumberField(
                         0,
                         mixedFloat([](const auto& e) {
                             return e.camera->fixedWorldHeightMeters;
                         }),
-                        std::to_string(camera.fixedWorldHeightMeters));
+                        camera.fixedWorldHeightMeters);
                 }
                 if (status) {
-                    status = setField(
+                    status = setNumberField(
                         1,
                         mixedFloat([](const auto& e) {
                             return e.camera->referencePixelsPerMeter;
                         }),
-                        std::to_string(camera.referencePixelsPerMeter));
+                        camera.referencePixelsPerMeter);
                 }
                 if (status) {
                     status = setField(
@@ -865,21 +963,73 @@ auto EditorWorkspaceState::refreshComponentSectionsUi(
             case Tina::Editor::World2DComponentKind::PointLight: {
                 const auto& light = *primary->pointLight;
                 status = tree.setChecked(
-                    section.activeCheckbox,
+                    section.activeSwitch,
                     light.active &&
                         !mixedBool([](const auto& e) {
                             return e.pointLight->active;
                         }));
-                const std::array<std::pair<float, bool>, 6> values{{
-                    {light.colorRed, mixedFloat([](const auto& e) {
-                         return e.pointLight->colorRed;
-                     })},
-                    {light.colorGreen, mixedFloat([](const auto& e) {
-                         return e.pointLight->colorGreen;
-                     })},
-                    {light.colorBlue, mixedFloat([](const auto& e) {
-                         return e.pointLight->colorBlue;
-                     })},
+                pointLightColorMixed_ =
+                    mixedFloat([](const auto& e) {
+                        return e.pointLight->colorRed;
+                    }) ||
+                    mixedFloat([](const auto& e) {
+                        return e.pointLight->colorGreen;
+                    }) ||
+                    mixedFloat([](const auto& e) {
+                        return e.pointLight->colorBlue;
+                    });
+                const auto toByte = [](float channel) noexcept {
+                    return static_cast<u8>(std::lround(
+                        std::clamp(channel, 0.0F, 1.0F) * 255.0F));
+                };
+                pointLightColorValue_ = UI::rgba8(
+                    toByte(light.colorRed), toByte(light.colorGreen),
+                    toByte(light.colorBlue));
+                const UI::UIColorPickerState colorState =
+                    UI::synchronizeColorPickerValue(pointLightColorValue_, false);
+                if (status) {
+                    status = tree.setText(
+                        pointLightColorField_.textEdit,
+                        pointLightColorMixed_ ? std::string_view{"Mixed"}
+                                              : colorState.text.view());
+                }
+                for (Tina::Core::usize index = 0;
+                     status && index < colorState.channelCount; ++index) {
+                    status = tree.setSliderValue(
+                        pointLightColorPicker_.channelSliders[index],
+                        colorState.channelValues[index]);
+                    if (status) {
+                        status = tree.setText(
+                            pointLightColorPicker_.channelValueLabels[index],
+                            colorState.channelTexts[index].view());
+                    }
+                }
+                if (!status) {
+                    return status;
+                }
+                auto productTheme = tree.productTheme();
+                if (!productTheme) {
+                    return Tina::Core::failure(std::move(productTheme.error()));
+                }
+                status = tree.setBoxPaint(
+                    pointLightColorField_.swatchButton,
+                    UI::makePanelBoxPaint(*productTheme, pointLightColorValue_,
+                                          UI::UIElevation::Flat));
+                const bool colorEditable = fieldsEditable && !pointLightColorMixed_;
+                if (status) {
+                    status = tree.setEnabled(
+                        pointLightColorField_.swatchButton, colorEditable);
+                }
+                if (status) {
+                    status = tree.setEnabled(
+                        pointLightColorField_.textEdit, colorEditable);
+                }
+                for (const UI::UINodeId slider : pointLightColorPicker_.sliders()) {
+                    if (status) {
+                        status = tree.setEnabled(slider, colorEditable);
+                    }
+                }
+                const std::array<std::pair<float, bool>, 3> values{{
                     {light.intensity, mixedFloat([](const auto& e) {
                          return e.pointLight->intensity;
                      })},
@@ -892,15 +1042,15 @@ auto EditorWorkspaceState::refreshComponentSectionsUi(
                 }};
                 for (Tina::Core::usize index = 0;
                      status && index < values.size(); ++index) {
-                    status = setField(index, values[index].second,
-                                      std::to_string(values[index].first));
+                    status = setNumberField(index, values[index].second,
+                                            values[index].first);
                 }
                 break;
             }
             case Tina::Editor::World2DComponentKind::ShadowOccluder: {
                 const auto& occluder = *primary->shadowOccluder;
                 status = tree.setChecked(
-                    section.activeCheckbox,
+                    section.activeSwitch,
                     occluder.active &&
                         !mixedBool([](const auto& e) {
                             return e.shadowOccluder->active;
@@ -921,15 +1071,15 @@ auto EditorWorkspaceState::refreshComponentSectionsUi(
                 }};
                 for (Tina::Core::usize index = 0;
                      status && index < values.size(); ++index) {
-                    status = setField(index, values[index].second,
-                                      std::to_string(values[index].first));
+                    status = setNumberField(index, values[index].second,
+                                            values[index].first);
                 }
                 break;
             }
             case Tina::Editor::World2DComponentKind::SpriteAnimation: {
                 const auto& animation = *primary->spriteAnimation;
                 status = tree.setChecked(
-                    section.activeCheckbox,
+                    section.activeSwitch,
                     animation.autoPlay &&
                         !mixedBool([](const auto& e) {
                             return e.spriteAnimation->autoPlay;
@@ -949,12 +1099,12 @@ auto EditorWorkspaceState::refreshComponentSectionsUi(
                         std::string{clipText.data(), clipText.size()});
                 }
                 if (status) {
-                    status = setField(
+                    status = setNumberField(
                         1,
                         mixedFloat([](const auto& e) {
                             return e.spriteAnimation->playbackSpeed;
                         }),
-                        std::to_string(animation.playbackSpeed));
+                        animation.playbackSpeed);
                 }
                 break;
             }
@@ -996,12 +1146,12 @@ auto EditorWorkspaceState::refreshComponentSectionsUi(
         !status) {
         return status;
     }
-    if (auto status = tree.setEnabled(section.activeCheckbox,
+    if (auto status = tree.setEnabled(section.activeSwitch,
                                       selectionEditable && primaryHas);
         !status) {
         return status;
     }
-    if (auto status = tree.setChecked(section.activeCheckbox,
+    if (auto status = tree.setChecked(section.activeSwitch,
                                       primaryHas && primaryNode->visible);
         !status) {
         return status;

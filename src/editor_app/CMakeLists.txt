@@ -18,9 +18,16 @@ add_library(tina_editor_app STATIC
     EditorWorkspaceStatus.cpp
     EditorWorkspaceTileMap.cpp
     EditorWorkspaceUiBuild.cpp
+    EditorWorkspaceUiRecipes.cpp
+    EditorWorkspaceUiRecipes.hpp
     EditorWorkspaceViewport.cpp
     EditorFileDialog.cpp
     EditorFileDialog.hpp
+    EditorIconAtlas.hpp
+    EditorIconAtlas.generated.hpp
+    EditorIconAtlas.generated.inc
+    EditorIconResources.cpp
+    EditorIconResources.hpp
     EditorSourceImportLaunchOptions.cpp
     EditorSourceImportLaunchOptions.hpp
     EditorSourceImportLimits.hpp

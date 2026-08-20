@@ -403,6 +403,68 @@ PrimaryWindowUITreeUpdater::buildDialog(
     return m_state->buildDialog(m_epoch, m_phase, m_updater, parent, config);
 }
 
+Core::Result<UI::UISnackbarHostParts>
+PrimaryWindowUITreeUpdater::buildSnackbarHost(
+    UI::UINodeId parent, const UI::UISnackbarHostConfig& config)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UISnackbarHostParts>(
+            "PrimaryWindowUITreeUpdater::buildSnackbarHost");
+    }
+    return m_state->buildSnackbarHost(
+        m_epoch, m_phase, m_updater, parent, config);
+}
+
+Core::Result<UI::UINumberFieldParts>
+PrimaryWindowUITreeUpdater::buildNumberField(
+    UI::UINodeId parent, const UI::UINumberFieldConfig& config)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UINumberFieldParts>(
+            "PrimaryWindowUITreeUpdater::buildNumberField");
+    }
+    return m_state->buildNumberField(m_epoch, m_phase, m_updater, parent, config);
+}
+
+Core::Result<UI::UICollapsibleSectionParts>
+PrimaryWindowUITreeUpdater::buildCollapsibleSection(
+    UI::UINodeId parent, const UI::UICollapsibleSectionConfig& config)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UICollapsibleSectionParts>(
+            "PrimaryWindowUITreeUpdater::buildCollapsibleSection");
+    }
+    return m_state->buildCollapsibleSection(
+        m_epoch, m_phase, m_updater, parent, config);
+}
+
+Core::Result<UI::UIColorFieldParts>
+PrimaryWindowUITreeUpdater::buildColorField(
+    UI::UINodeId parent, const UI::UIColorFieldConfig& config)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIColorFieldParts>(
+            "PrimaryWindowUITreeUpdater::buildColorField");
+    }
+    return m_state->buildColorField(m_epoch, m_phase, m_updater, parent, config);
+}
+
+Core::Result<UI::UIColorPickerParts>
+PrimaryWindowUITreeUpdater::buildColorPicker(
+    UI::UINodeId parent, const UI::UIColorPickerConfig& config)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UIColorPickerParts>(
+            "PrimaryWindowUITreeUpdater::buildColorPicker");
+    }
+    return m_state->buildColorPicker(m_epoch, m_phase, m_updater, parent, config);
+}
+
 Core::Status PrimaryWindowUITreeUpdater::setLayoutStyle(UI::UINodeId node, const UI::UILayoutStyle& style)
 {
     if (m_state == nullptr)
@@ -1403,6 +1465,101 @@ Core::Status PrimaryWindowUITreeUpdater::scrollListViewToIndex(UI::UINodeId list
     return m_state->scrollListViewToIndex(m_epoch, m_phase, m_updater, listView, logicalIndex, alignment);
 }
 
+Core::Status PrimaryWindowUITreeUpdater::setVirtualGridViewDataSource(
+    UI::UINodeId virtualGridView, UI::UIVirtualGridViewDataSource source)
+{
+    if (m_state == nullptr)
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setVirtualGridViewDataSource");
+    return m_state->setVirtualGridViewDataSource(m_epoch, m_phase, m_updater, virtualGridView, source);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::clearVirtualGridViewDataSource(UI::UINodeId virtualGridView)
+{
+    if (m_state == nullptr)
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::clearVirtualGridViewDataSource");
+    return m_state->clearVirtualGridViewDataSource(m_epoch, m_phase, m_updater, virtualGridView);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::invalidateVirtualGridViewItems(UI::UINodeId virtualGridView)
+{
+    if (m_state == nullptr)
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::invalidateVirtualGridViewItems");
+    return m_state->invalidateVirtualGridViewItems(m_epoch, m_phase, m_updater, virtualGridView);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setVirtualGridViewStyle(
+    UI::UINodeId virtualGridView, const UI::UIVirtualGridViewStyle& style)
+{
+    if (m_state == nullptr)
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setVirtualGridViewStyle");
+    return m_state->setVirtualGridViewStyle(m_epoch, m_phase, m_updater, virtualGridView, style);
+}
+
+Core::Result<UI::UIVirtualGridViewStyle>
+PrimaryWindowUITreeUpdater::virtualGridViewStyle(UI::UINodeId virtualGridView) const
+{
+    if (m_state == nullptr)
+        return expiredFacade<UI::UIVirtualGridViewStyle>("PrimaryWindowUITreeUpdater::virtualGridViewStyle");
+    return m_state->virtualGridViewStyle(m_epoch, m_phase, m_updater, virtualGridView);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setVirtualGridViewPaint(
+    UI::UINodeId virtualGridView, const UI::UIVirtualGridViewPaint& paint)
+{
+    if (m_state == nullptr)
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setVirtualGridViewPaint");
+    return m_state->setVirtualGridViewPaint(m_epoch, m_phase, m_updater, virtualGridView, paint);
+}
+
+Core::Result<UI::UIVirtualGridViewPaint>
+PrimaryWindowUITreeUpdater::virtualGridViewPaint(UI::UINodeId virtualGridView) const
+{
+    if (m_state == nullptr)
+        return expiredFacade<UI::UIVirtualGridViewPaint>("PrimaryWindowUITreeUpdater::virtualGridViewPaint");
+    return m_state->virtualGridViewPaint(m_epoch, m_phase, m_updater, virtualGridView);
+}
+
+Core::Result<UI::UIVirtualGridViewMetrics>
+PrimaryWindowUITreeUpdater::virtualGridViewMetrics(UI::UINodeId virtualGridView) const
+{
+    if (m_state == nullptr)
+        return expiredFacade<UI::UIVirtualGridViewMetrics>("PrimaryWindowUITreeUpdater::virtualGridViewMetrics");
+    return m_state->virtualGridViewMetrics(m_epoch, m_phase, m_updater, virtualGridView);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setVirtualGridViewSelectedIndex(
+    UI::UINodeId virtualGridView, u64 logicalIndex)
+{
+    if (m_state == nullptr)
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setVirtualGridViewSelectedIndex");
+    return m_state->setVirtualGridViewSelectedIndex(m_epoch, m_phase, m_updater, virtualGridView, logicalIndex);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::clearVirtualGridViewSelection(UI::UINodeId virtualGridView)
+{
+    if (m_state == nullptr)
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::clearVirtualGridViewSelection");
+    return m_state->clearVirtualGridViewSelection(m_epoch, m_phase, m_updater, virtualGridView);
+}
+
+Core::Result<UI::UIVirtualGridViewSelection>
+PrimaryWindowUITreeUpdater::virtualGridViewSelection(UI::UINodeId virtualGridView) const
+{
+    if (m_state == nullptr)
+        return expiredFacade<UI::UIVirtualGridViewSelection>("PrimaryWindowUITreeUpdater::virtualGridViewSelection");
+    return m_state->virtualGridViewSelection(m_epoch, m_phase, m_updater, virtualGridView);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::scrollVirtualGridViewToIndex(
+    UI::UINodeId virtualGridView, u64 logicalIndex,
+    UI::UIVirtualGridViewScrollAlignment alignment)
+{
+    if (m_state == nullptr)
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::scrollVirtualGridViewToIndex");
+    return m_state->scrollVirtualGridViewToIndex(
+        m_epoch, m_phase, m_updater, virtualGridView, logicalIndex, alignment);
+}
+
 Core::Status PrimaryWindowUITreeUpdater::setTreeViewDataSource(UI::UINodeId treeView,
                                                                UI::UITreeViewDataSource source)
 {
@@ -1689,6 +1846,52 @@ Core::Result<UI::UIMenuMetrics> PrimaryWindowUITreeUpdater::menuMetrics(UI::UINo
         return expiredFacade<UI::UIMenuMetrics>("PrimaryWindowUITreeUpdater::menuMetrics");
     }
     return m_state->menuMetrics(m_epoch, m_phase, m_updater, menu);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setMenuItemSubmenu(
+    UI::UINodeId item, UI::UINodeId submenu)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>(
+            "PrimaryWindowUITreeUpdater::setMenuItemSubmenu");
+    }
+    return m_state->setMenuItemSubmenu(
+        m_epoch, m_phase, m_updater, item, submenu);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::clearMenuItemSubmenu(
+    UI::UINodeId item)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>(
+            "PrimaryWindowUITreeUpdater::clearMenuItemSubmenu");
+    }
+    return m_state->clearMenuItemSubmenu(
+        m_epoch, m_phase, m_updater, item);
+}
+
+Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::menuItemSubmenu(
+    UI::UINodeId item) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UINodeId>(
+            "PrimaryWindowUITreeUpdater::menuItemSubmenu");
+    }
+    return m_state->menuItemSubmenu(m_epoch, m_phase, m_updater, item);
+}
+
+Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::menuParentItem(
+    UI::UINodeId menu) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UINodeId>(
+            "PrimaryWindowUITreeUpdater::menuParentItem");
+    }
+    return m_state->menuParentItem(m_epoch, m_phase, m_updater, menu);
 }
 
 Core::Status PrimaryWindowUITreeUpdater::setMenuItemChecked(UI::UINodeId item, bool checked)

@@ -2,6 +2,7 @@
 
 #include <tina/core/error/Result.hpp>
 #include <tina/runtime/PhaseContexts.hpp>
+#include <tina/render/Texture2DFrameResourceResolver.hpp>
 #include <tina/ui/UI.hpp>
 
 #include <array>
@@ -111,6 +112,17 @@ struct DesktopShellSnapshot final {
     bool inspectorHideRequested = false;
     bool timelineHideObserved = false;
     bool inspectorHideObserved = false;
+
+    // Tooltip anchored-overlay evidence, read back from committed metrics.
+    bool tooltipOpenObserved = false;
+    bool tooltipDismissed = false;
+    bool tooltipWithinMaxWidth = false;
+
+    // Splitter evidence: a fraction change moved committed pane geometry, and a
+    // fraction beyond the pane minimum was clamped rather than honoured.
+    bool splitterMovedGeometry = false;
+    bool splitterMinimumClamped = false;
+    float leftDockWidthAfterDrag = 0.0F;
 };
 
 // One retained root composed from three nested SplitViews. It owns no second UI
@@ -122,7 +134,8 @@ class DesktopShellUI final {
     DesktopShellUI(const DesktopShellUI&) = delete;
     DesktopShellUI& operator=(const DesktopShellUI&) = delete;
 
-    [[nodiscard]] Core::Status build(GameStateEnterContext& context, DesktopShellState& state);
+    [[nodiscard]] Core::Status build(GameStateEnterContext& context, DesktopShellState& state,
+                                     Render::Texture2DFrameResourceResolver iconResolver);
     [[nodiscard]] Core::Status update(UIUpdateContext& context);
     void release() noexcept;
 
@@ -143,6 +156,7 @@ class DesktopShellUI final {
         UI::UINodeId accentRule{};
         UI::UINodeId brandLabel{};
         UI::UINodeId documentTabs{};
+        UI::UINodeId documentTabView{};
         UI::UINodeId contextToolbar{};
         UI::UINodeId cameraLabel{};
         UI::UINodeId workspace{};
@@ -174,6 +188,7 @@ class DesktopShellUI final {
         UI::UINodeId timelineLabel{};
         UI::UINodeId inspectorTitle{};
 
+        UI::UINodeId saveTooltip{};
         UI::UINodeId menuAnchor{};
         UI::UINodeId menu{};
         UI::UINodeId menuToggleTimeline{};
@@ -182,9 +197,11 @@ class DesktopShellUI final {
 
         // Command buttons in the command bar, wired to shell commands.
         std::array<UI::UINodeId, 5> commandButtons{};
+        std::array<UI::UINodeId, 5> commandButtonIcons{};
 
-        // Document tab strip reuses RadioButton selection; three documents.
+        // Document tabs and their private panels are owned by the TabView.
         std::array<UI::UINodeId, 3> documentTabButtons{};
+        std::array<UI::UINodeId, 3> documentTabPanels{};
     };
 
     // Band builders. Each appends one direct child of nodes_.background so the
@@ -232,6 +249,7 @@ class DesktopShellUI final {
 
     DesktopShellState* state_ = nullptr;
     std::optional<UI::UIRootOwner> root_{};
+    PrimaryWindowUIImageResolverRegistration imageResolver_{};
     Nodes nodes_{};
 
     ShellTheme currentTheme_ = ShellTheme::Dark;
@@ -273,10 +291,34 @@ class DesktopShellUI final {
     bool dialogDismissed_ = false;
     bool timelineHideObserved_ = false;
     bool inspectorHideObserved_ = false;
+    bool tooltipOpenObserved_ = false;
+    bool tooltipDismissed_ = false;
+    bool tooltipWithinMaxWidth_ = false;
+    bool splitterMovedGeometry_ = false;
+    bool splitterMinimumClamped_ = false;
+    float leftDockWidthAfterDrag_ = 0.0F;
+    // Splitter verification is deferred one publication: setSplitViewFraction
+    // mutates retained state, and committed geometry only changes at the next
+    // successful commit, so the same-frame read still sees the old rect.
+    enum class DockDragCheck : Core::u8 {
+        None = 0,
+        ExpectMove,
+        ExpectClamp,
+    };
+    std::optional<float> pendingDockFraction_{};
+    DockDragCheck pendingDockCheck_ = DockDragCheck::None;
+    float dockWidthBeforeDrag_ = 0.0F;
+    bool tooltipRequested_ = false;
+    bool tooltipStateDirty_ = false;
     UI::UINodeId focusedNode_{};
     // Set when a command changed pane visibility intent, so the responsive
     // pass re-resolves fractions without waiting for a resize.
     bool paneIntentDirty_ = false;
+
+    // Base layouts are retained so responsive visibility changes do not erase
+    // pane padding, flex direction, or surface sizing.
+    UI::UILayoutStyle inspectorLayout_{};
+    UI::UILayoutStyle timelineLayout_{};
 };
 
 } // namespace Tina::SampleUI

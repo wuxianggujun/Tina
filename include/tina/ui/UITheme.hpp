@@ -3,6 +3,7 @@
 #include <tina/ui/UIBadge.hpp>
 #include <tina/ui/UIButton.hpp>
 #include <tina/ui/UICheckbox.hpp>
+#include <tina/ui/UIDataGrid.hpp>
 #include <tina/ui/UIDivider.hpp>
 #include <tina/ui/UIDropdown.hpp>
 #include <tina/ui/UIListView.hpp>
@@ -17,6 +18,7 @@
 #include <tina/ui/UIText.hpp>
 #include <tina/ui/UITextEdit.hpp>
 #include <tina/ui/UITreeView.hpp>
+#include <tina/ui/UIVirtualGridView.hpp>
 
 #include <algorithm>
 #include <compare>
@@ -162,8 +164,8 @@ struct UIControlMetrics final {
     float checkboxHitExtent = 28.0F;
     float checkboxMarkExtent = 16.0F;
     float radioIndicatorExtent = 16.0F;
-    float toggleSwitchWidth = 36.0F;
-    float toggleSwitchHeight = 20.0F;
+    float switchWidth = 36.0F;
+    float switchHeight = 20.0F;
     float sliderHeight = 30.0F;
     float sliderTrackThickness = 4.0F;
     float sliderThumbExtent = 12.0F;
@@ -183,8 +185,8 @@ struct UIControlMetrics final {
     float panelShadowOffsetX = 0.0F;
     float panelShadowOffsetY = 0.0F;
     float checkboxIndicatorInset = 6.0F;
-    float toggleSwitchThumbInset = 3.0F;
-    float toggleSwitchCornerRadius = 10.0F;
+    float switchThumbInset = 3.0F;
+    float switchCornerRadius = 10.0F;
     float radioSelectedInset = 6.0F;
     float radioLabelGap = 8.0F;
     float sliderContentInset = 6.0F;
@@ -277,7 +279,7 @@ struct UITheme final {
             .buttonHeight = 36.0F, .iconButtonExtent = 36.0F, .iconExtent = 20.0F,
             .textEditHeight = 38.0F, .checkboxHitExtent = 36.0F,
             .checkboxMarkExtent = 18.0F, .radioIndicatorExtent = 18.0F,
-            .toggleSwitchWidth = 44.0F, .toggleSwitchHeight = 24.0F,
+            .switchWidth = 44.0F, .switchHeight = 24.0F,
             .sliderHeight = 36.0F, .sliderTrackThickness = 4.0F,
             .sliderThumbExtent = 14.0F, .progressBarHeight = 6.0F, .tabHeight = 38.0F,
             .menuItemHeight = 36.0F, .listRowHeight = 34.0F, .treeRowHeight = 32.0F,
@@ -285,8 +287,8 @@ struct UITheme final {
             .splitterLineThickness = 1.0F, .tooltipMaxWidth = 360.0F,
             .dialogMinWidth = 480.0F, .panelBorderWidth = 1.0F, .panelCornerRadius = 6.0F,
             .controlCornerRadius = 6.0F, .panelShadowOffsetX = 0.0F, .panelShadowOffsetY = 0.0F,
-            .checkboxIndicatorInset = 7.0F, .toggleSwitchThumbInset = 3.0F,
-            .toggleSwitchCornerRadius = 12.0F, .radioSelectedInset = 7.0F, .radioLabelGap = 8.0F,
+            .checkboxIndicatorInset = 7.0F, .switchThumbInset = 3.0F,
+            .switchCornerRadius = 12.0F, .radioSelectedInset = 7.0F, .radioLabelGap = 8.0F,
             .sliderContentInset = 7.0F, .dropdownIndicatorWidth = 12.0F,
             .dropdownIndicatorHeight = 8.0F, .dropdownIndicatorInset = 12.0F,
             .menuItemIndicatorExtent = 14.0F, .menuItemIndicatorGap = 8.0F,
@@ -549,17 +551,17 @@ struct UICheckboxChrome final {
     };
 }
 
-[[nodiscard]] constexpr UICheckboxChrome makeToggleSwitchChrome(
+[[nodiscard]] constexpr UICheckboxChrome makeSwitchChrome(
     const UITheme& theme) noexcept
 {
     const UIStraightSrgba8Color uncheckedTrack = scaleColorAlpha(theme.colors.surfaceContainer, 245);
-    UIBoxPaint track = makeSolidBox(uncheckedTrack, theme.controls.toggleSwitchCornerRadius);
+    UIBoxPaint track = makeSolidBox(uncheckedTrack, theme.controls.switchCornerRadius);
     return UICheckboxChrome{
         .box = track,
         .indicator =
             UICheckboxPaint{
                 .checkedIndicatorColor = theme.colors.onPrimary,
-                .checkedIndicatorInset = theme.controls.toggleSwitchThumbInset,
+                .checkedIndicatorInset = theme.controls.switchThumbInset,
                 .hoveredIndicatorColor = stateLayer(uncheckedTrack, theme.colors.onSurface, theme.states.hoveredAlpha),
                 .focusedIndicatorColor = theme.colors.focusRing,
                 .pressedIndicatorColor = stateLayer(uncheckedTrack, theme.colors.onSurface, theme.states.pressedAlpha),
@@ -853,6 +855,45 @@ struct UISettingsPanelChrome final {
         .focusedSelectedItemBackgroundColor = stateLayer(selected, theme.colors.onPrimaryContainer, theme.states.focusVisibleAlpha),
         .pressedSelectedItemBackgroundColor = stateLayer(selected, theme.colors.onPrimaryContainer, theme.states.pressedAlpha),
         .disclosureColor = theme.colors.onSurfaceVariant,
+    };
+}
+
+[[nodiscard]] constexpr UIVirtualGridViewPaint
+makeVirtualGridViewPaint(const UITheme& theme) noexcept
+{
+    const UIStraightSrgba8Color selected =
+        scaleColorAlpha(theme.colors.primaryContainer, 255);
+    return UIVirtualGridViewPaint{
+        .scrollBar = makeScrollViewPaint(theme),
+        .selectedItemBackgroundColor = selected,
+        .hoveredSelectedItemBackgroundColor = stateLayer(
+            selected, theme.colors.onPrimaryContainer,
+            theme.states.hoveredAlpha),
+        .focusedSelectedItemBackgroundColor = stateLayer(
+            selected, theme.colors.onPrimaryContainer,
+            theme.states.focusVisibleAlpha),
+        .pressedSelectedItemBackgroundColor = stateLayer(
+            selected, theme.colors.onPrimaryContainer,
+            theme.states.pressedAlpha),
+    };
+}
+
+[[nodiscard]] constexpr UIDataGridPaint
+makeDataGridPaint(const UITheme& theme) noexcept
+{
+    const UIStraightSrgba8Color selected =
+        scaleColorAlpha(theme.colors.primaryContainer, 255);
+    return UIDataGridPaint{
+        .scrollBar = makeScrollViewPaint(theme),
+        .columnHeaderBackgroundColor = theme.colors.surfaceContainer,
+        .selectedRowBackgroundColor = selected,
+        .hoveredSelectedRowBackgroundColor = stateLayer(
+            selected, theme.colors.onPrimaryContainer,
+            theme.states.hoveredAlpha),
+        .focusedSelectedRowBackgroundColor = stateLayer(
+            selected, theme.colors.onPrimaryContainer,
+            theme.states.focusVisibleAlpha),
+        .gridLineColor = theme.colors.outlineVariant,
     };
 }
 

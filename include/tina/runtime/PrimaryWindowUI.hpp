@@ -5,6 +5,9 @@
 #include <tina/render/Texture2DFrameResourceResolver.hpp>
 #include <tina/ui/UIButton.hpp>
 #include <tina/ui/UICheckbox.hpp>
+#include <tina/ui/UICollapsibleSection.hpp>
+#include <tina/ui/UIColorField.hpp>
+#include <tina/ui/UIColorPicker.hpp>
 #include <tina/ui/UIContent.hpp>
 #include <tina/ui/UIContext.hpp>
 #include <tina/ui/UIDialog.hpp>
@@ -15,6 +18,7 @@
 #include <tina/ui/UIIconButton.hpp>
 #include <tina/ui/UIMenu.hpp>
 #include <tina/ui/UIMotion.hpp>
+#include <tina/ui/UINumberField.hpp>
 #include <tina/ui/UIProgressBar.hpp>
 #include <tina/ui/UIPopup.hpp>
 #include <tina/ui/UIRadioButton.hpp>
@@ -27,6 +31,7 @@
 #include <tina/ui/UITextEdit.hpp>
 #include <tina/ui/UITooltip.hpp>
 #include <tina/ui/UITreeView.hpp>
+#include <tina/ui/UIVirtualGridView.hpp>
 
 #include <span>
 #include <string_view>
@@ -154,6 +159,17 @@ class PrimaryWindowUITreeUpdater final {
     buildFormField(UI::UINodeId parent, const UI::UIFormFieldConfig& config);
     [[nodiscard]] Core::Result<UI::UIDialogParts>
     buildDialog(UI::UINodeId parent, const UI::UIDialogConfig& config);
+    [[nodiscard]] Core::Result<UI::UISnackbarHostParts>
+    buildSnackbarHost(UI::UINodeId parent, const UI::UISnackbarHostConfig& config);
+    [[nodiscard]] Core::Result<UI::UINumberFieldParts>
+    buildNumberField(UI::UINodeId parent, const UI::UINumberFieldConfig& config);
+    [[nodiscard]] Core::Result<UI::UICollapsibleSectionParts>
+    buildCollapsibleSection(UI::UINodeId parent,
+                            const UI::UICollapsibleSectionConfig& config);
+    [[nodiscard]] Core::Result<UI::UIColorFieldParts>
+    buildColorField(UI::UINodeId parent, const UI::UIColorFieldConfig& config);
+    [[nodiscard]] Core::Result<UI::UIColorPickerParts>
+    buildColorPicker(UI::UINodeId parent, const UI::UIColorPickerConfig& config);
     [[nodiscard]] Core::Status setLayoutStyle(UI::UINodeId node, const UI::UILayoutStyle& style);
     [[nodiscard]] Core::Status setPointerHitPolicy(UI::UINodeId node, UI::UIPointerHitPolicy policy);
     [[nodiscard]] Core::Status setEnabled(UI::UINodeId node, bool enabled);
@@ -291,6 +307,29 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Status
     scrollListViewToIndex(UI::UINodeId listView, u64 logicalIndex,
                           UI::UIListViewScrollAlignment alignment = UI::UIListViewScrollAlignment::Nearest);
+    [[nodiscard]] Core::Status setVirtualGridViewDataSource(
+        UI::UINodeId virtualGridView, UI::UIVirtualGridViewDataSource source);
+    [[nodiscard]] Core::Status clearVirtualGridViewDataSource(UI::UINodeId virtualGridView);
+    [[nodiscard]] Core::Status invalidateVirtualGridViewItems(UI::UINodeId virtualGridView);
+    [[nodiscard]] Core::Status setVirtualGridViewStyle(
+        UI::UINodeId virtualGridView, const UI::UIVirtualGridViewStyle& style);
+    [[nodiscard]] Core::Result<UI::UIVirtualGridViewStyle>
+    virtualGridViewStyle(UI::UINodeId virtualGridView) const;
+    [[nodiscard]] Core::Status setVirtualGridViewPaint(
+        UI::UINodeId virtualGridView, const UI::UIVirtualGridViewPaint& paint);
+    [[nodiscard]] Core::Result<UI::UIVirtualGridViewPaint>
+    virtualGridViewPaint(UI::UINodeId virtualGridView) const;
+    [[nodiscard]] Core::Result<UI::UIVirtualGridViewMetrics>
+    virtualGridViewMetrics(UI::UINodeId virtualGridView) const;
+    [[nodiscard]] Core::Status setVirtualGridViewSelectedIndex(
+        UI::UINodeId virtualGridView, u64 logicalIndex);
+    [[nodiscard]] Core::Status clearVirtualGridViewSelection(UI::UINodeId virtualGridView);
+    [[nodiscard]] Core::Result<UI::UIVirtualGridViewSelection>
+    virtualGridViewSelection(UI::UINodeId virtualGridView) const;
+    [[nodiscard]] Core::Status scrollVirtualGridViewToIndex(
+        UI::UINodeId virtualGridView, u64 logicalIndex,
+        UI::UIVirtualGridViewScrollAlignment alignment =
+            UI::UIVirtualGridViewScrollAlignment::Nearest);
     [[nodiscard]] Core::Status setTreeViewDataSource(UI::UINodeId treeView, UI::UITreeViewDataSource source);
     [[nodiscard]] Core::Status clearTreeViewDataSource(UI::UINodeId treeView);
     [[nodiscard]] Core::Status invalidateTreeViewItems(UI::UINodeId treeView);
@@ -324,6 +363,10 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Status setMenuOpen(UI::UINodeId menu, bool open);
     [[nodiscard]] Core::Result<bool> isMenuOpen(UI::UINodeId menu) const;
     [[nodiscard]] Core::Result<UI::UIMenuMetrics> menuMetrics(UI::UINodeId menu) const;
+    [[nodiscard]] Core::Status setMenuItemSubmenu(UI::UINodeId item, UI::UINodeId submenu);
+    [[nodiscard]] Core::Status clearMenuItemSubmenu(UI::UINodeId item);
+    [[nodiscard]] Core::Result<UI::UINodeId> menuItemSubmenu(UI::UINodeId item) const;
+    [[nodiscard]] Core::Result<UI::UINodeId> menuParentItem(UI::UINodeId menu) const;
     [[nodiscard]] Core::Status setMenuItemChecked(UI::UINodeId item, bool checked);
     [[nodiscard]] Core::Result<bool> isMenuItemChecked(UI::UINodeId item) const;
     [[nodiscard]] Core::Result<UI::UIMenuCommandResult>

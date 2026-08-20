@@ -7,19 +7,19 @@
 
 namespace Tina::UI {
 
-enum class UIToggleSwitchSize : u8 {
+enum class UISwitchSize : u8 {
     Compact = 0,
     Standard,
 };
 
-// ToggleSwitch is the switch authoring/semantics profile of the existing
+// Switch is the switch authoring/semantics profile of the existing
 // Toggle behavior. accessibleName is published by the control root; no text or
 // decorative child is needed.
-struct UIToggleSwitchConfig final {
+struct UISwitchConfig final {
     std::string_view accessibleName{};
-    UIToggleSwitchSize size = UIToggleSwitchSize::Standard;
+    UISwitchSize size = UISwitchSize::Standard;
 
-    auto operator<=>(const UIToggleSwitchConfig&) const = default;
+    auto operator<=>(const UISwitchConfig&) const = default;
 };
 
 } // namespace Tina::UI

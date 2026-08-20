@@ -520,6 +520,31 @@ out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_sample_ui_showcase.
 `imageLinear=true`、`imageNearest=true` 与非零 `paintOrderChecksum`；退出阶段还须有
 `imageAtlasInvalidated=true`。`--auto-demo` 与显式 `--frames` 同用时至少 120 帧。
 
+TMD-08 Desktop Shell 的 100%/150% 真实 DPI 视觉门禁使用专用入口，不能用 `--width/--height` 尺寸矩阵
+替代 OS scale：
+
+```powershell
+# 100%：构建一次
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  .\tools\windows\RunTmd08DesktopShellVisualGate.ps1 `
+  -ExpectedScalePercent 100 `
+  -OutJson artifacts\gates\tmd-08-desktop-shell-100pct.json
+
+# 150%：复用相同 EXE，并核验 EXE hash 与 logical geometry
+powershell -NoProfile -ExecutionPolicy Bypass -File `
+  .\tools\windows\RunTmd08DesktopShellVisualGate.ps1 `
+  -ExpectedScalePercent 150 -SkipBuild `
+  -PeerReportPath artifacts\gates\tmd-08-desktop-shell-100pct.json `
+  -OutJson artifacts\gates\tmd-08-desktop-shell-150pct.json
+```
+
+脚本在 build/launch 前严格核对主显示器实际 scale；每轮执行 Dark/Light × Compact/Comfortable ×
+960/1280/1600 logical width 共 12 个 case，验证非空稳定截图、sample 生命周期与 workflow、
+logical/framebuffer/contentScale、committed pane geometry、icon atlas、关键区域内容和 theme/density raster 差分。
+门禁只接受 FreeType 产品 preset，并记录真实字体路径/哈希，placeholder 不得计为 typography 证据；
+`-PeerReportPath` 要求两轮 EXE 与字体 SHA-256 相同，并比较全部 logical geometry。报告属于同机同 backend DPI
+证据，不证明混合 DPI 多显示器或跨 GPU golden。
+
 UI-STYLE-001 产品 Visual（header accent ColorToken Dark/Light ROI 差分，同机同后端，非跨 GPU 金标）：
 
 ```powershell
@@ -1095,15 +1120,21 @@ artifact/byte count；TileMap 保存必须使用 canonical relative path 并 roo
 
 TinaEditor GPU viewport 大功能完整闭环后只做一次受影响正式 target 的增量验证，不在内部小切片重复构建或测试，
 也不重跑全量 UI/产品矩阵。
-`--auto-demo` 的最小预算为 54 帧，正式 2D/3D smoke 固定使用 60 帧：
+`--auto-demo` 的最小预算为 68 帧，正式 2D/3D smoke 固定使用 68 帧；Color Picker 阶段会等待
+Inspector 自动滚动与目标控件几何一起 committed，再由 RenderDevice 捕获可见画面，并继续保留最终
+Hierarchy selection 的确认帧：
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
   --target tina_editor_desktop --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\TinaEditor.exe `
-  --frames=60 --frame-delay-ms=0 --workspace=2d --auto-demo
+  --frames=68 --frame-delay-ms=0 --workspace=2d --auto-demo `
+  --rgba-output=artifacts/editor/captures/delete-dialog-2d.rgba `
+  --rgba-stage=delete-dialog
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\TinaEditor.exe `
-  --frames=60 --frame-delay-ms=0 --workspace=3d --auto-demo
+  --frames=68 --frame-delay-ms=0 --workspace=3d --auto-demo `
+  --rgba-output=artifacts/editor/captures/delete-dialog-3d.rgba `
+  --rgba-stage=delete-dialog
 ```
 
 布局/Catalog/GPU smoke 除既有 authoring/runtime-preview 字段外，还要检查 `editorLayoutRegions=9`、
@@ -1127,6 +1158,12 @@ Translate/Rotate/Scale Gizmo 各 commit 一次，cancel/reject 为零；Rotate/S
 
 Marquee Replace/Add/Toggle 各 commit 一次且 selection change=`3`，added/removed 非零、maximum selection 至少为 2。
 Scene Add/Duplicate/To Root/Reparent/Delete 固定为 `1/1/1/1/2`，自动创建的两个 stable ID 均非零，结束时实体数恢复为 5。
+指定 `--rgba-output` 时必须同时指定 `--auto-demo`，可选的
+`--rgba-stage=workspace|color-picker|delete-dialog` 默认为 `workspace`；单独传 stage 或非法 stage 都拒绝启动。
+结果必须满足 `rgbaCaptureAttempted=true`、`rgbaCaptureOk=true`、`rgbaCaptureOutputWritten=true`，尺寸非零且
+`rgbaCaptureBytes=width*height*4`；raw 文件来自 Tina RenderDevice 内部 capture，不是桌面窗口抓取。
+像素检查至少拒绝全零/单色帧；workspace 检查工作台主要 band，color-picker 检查 Color Field/preview/RGB slider，
+delete-dialog 检查中央 Dialog surface、全屏 scrim、title/body 与 Delete/Cancel action 所在区域。
 Play Start/Pause/Step/Resume/Stop 固定为 `1/1/1/1/1`；即使 `--frame-delay-ms=0`，paused Step 仍必须令
 `playSimulationSteps` 与 `playMaximumSimulationTick` 非零。最后继续检查 2D/3D workspace round-trip、runtime preview
 多次重建、最终 document revision/undo depth 非零且 GPU revision 对齐。
@@ -1140,7 +1177,7 @@ cmake --build --preset windows-vnext-bgfx-product-2d-debug `
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_editor_tests.exe `
   --gtest_filter=World2DAuthoringFileTests.*:World3DAuthoringFileTests.*:SpriteAnimationAuthoringFileTests.*:TileMapAuthoringFileTests.*:ProjectAssetBrowserTests.*:EditorProjectWorkspaceTests.*:EditorProjectCreationTests.*
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\TinaEditor.exe `
-  --frames=60 --frame-delay-ms=0 --workspace=2d --auto-demo `
+  --frames=68 --frame-delay-ms=0 --workspace=2d --auto-demo `
   --world2d-path=artifacts/editor/smoke/world2d.tworld `
   --world3d-path=artifacts/editor/smoke/world3d.tprefab
 ```

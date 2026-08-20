@@ -6,12 +6,16 @@
 #include <tina/ui/UIAccessibility.hpp>
 #include <tina/ui/UIButton.hpp>
 #include <tina/ui/UICheckbox.hpp>
+#include <tina/ui/UICollapsibleSection.hpp>
+#include <tina/ui/UIColorField.hpp>
+#include <tina/ui/UIColorPicker.hpp>
 #include <tina/ui/UICommittedHit.hpp>
 #include <tina/ui/UICommittedLayout.hpp>
 #include <tina/ui/UICommittedPaint.hpp>
 #include <tina/ui/UICommittedStructure.hpp>
 #include <tina/ui/UIComponentBuild.hpp>
 #include <tina/ui/UIContent.hpp>
+#include <tina/ui/UIDataGrid.hpp>
 #include <tina/ui/UIContextConfig.hpp>
 #include <tina/ui/UIDialog.hpp>
 #include <tina/ui/UIElement.hpp>
@@ -28,6 +32,7 @@
 #include <tina/ui/UIMenu.hpp>
 #include <tina/ui/UIMotion.hpp>
 #include <tina/ui/UINodeId.hpp>
+#include <tina/ui/UINumberField.hpp>
 #include <tina/ui/UIPaint.hpp>
 #include <tina/ui/UIPopup.hpp>
 #include <tina/ui/UIProgressBar.hpp>
@@ -36,6 +41,7 @@
 #include <tina/ui/UIScrollView.hpp>
 #include <tina/ui/UISemantics.hpp>
 #include <tina/ui/UISlider.hpp>
+#include <tina/ui/UISnackbar.hpp>
 #include <tina/ui/UISplitView.hpp>
 #include <tina/ui/UITabView.hpp>
 #include <tina/ui/UIText.hpp>
@@ -43,6 +49,7 @@
 #include <tina/ui/UITheme.hpp>
 #include <tina/ui/UITooltip.hpp>
 #include <tina/ui/UITreeView.hpp>
+#include <tina/ui/UIVirtualGridView.hpp>
 #include <tina/ui/text/UITextRasterizer.hpp>
 
 #include <memory>
@@ -313,6 +320,16 @@ class UITreeUpdater final {
     buildFormField(UINodeId parent, const UIFormFieldConfig& config);
     [[nodiscard]] Core::Result<UIDialogParts>
     buildDialog(UINodeId parent, const UIDialogConfig& config);
+    [[nodiscard]] Core::Result<UISnackbarHostParts>
+    buildSnackbarHost(UINodeId parent, const UISnackbarHostConfig& config);
+    [[nodiscard]] Core::Result<UINumberFieldParts>
+    buildNumberField(UINodeId parent, const UINumberFieldConfig& config);
+    [[nodiscard]] Core::Result<UICollapsibleSectionParts>
+    buildCollapsibleSection(UINodeId parent, const UICollapsibleSectionConfig& config);
+    [[nodiscard]] Core::Result<UIColorFieldParts>
+    buildColorField(UINodeId parent, const UIColorFieldConfig& config);
+    [[nodiscard]] Core::Result<UIColorPickerParts>
+    buildColorPicker(UINodeId parent, const UIColorPickerConfig& config);
     // A Layer is a direct child of this updater's root. A Screen is a direct
     // child of its Layer and starts inactive. Only the stack top is published;
     // inactive Screens behave as Collapsed without rewriting authored style.
@@ -383,7 +400,7 @@ class UITreeUpdater final {
     [[nodiscard]] Core::Status setButtonAction(UINodeId button, UIButtonActionCallback callback);
     [[nodiscard]] Core::Status clearButtonAction(UINodeId button);
     [[nodiscard]] Core::Result<bool> isButtonPressed(UINodeId button) const;
-    // Checkbox and ToggleSwitch reuse Button action slots/arm path; callback
+    // Checkbox and Switch reuse Button action slots/arm path; callback
     // fires after the shared Toggle value changes.
     [[nodiscard]] Core::Status setCheckboxAction(UINodeId checkbox, UIButtonActionCallback callback);
     [[nodiscard]] Core::Status clearCheckboxAction(UINodeId checkbox);
@@ -391,7 +408,7 @@ class UITreeUpdater final {
     [[nodiscard]] Core::Result<UICheckboxPaint> checkboxPaint(UINodeId checkbox) const;
     // Toggle-capable Elements own checked state. Checkbox paint APIs remain
     // restricted to the resolved Checkbox built-in, including the official
-    // ToggleSwitch authoring profile.
+    // Switch authoring profile.
     [[nodiscard]] Core::Status setChecked(UINodeId checkbox, bool checked);
     [[nodiscard]] Core::Result<bool> isChecked(UINodeId checkbox) const;
     [[nodiscard]] Core::Result<bool> isCheckboxPressed(UINodeId checkbox) const;
@@ -457,6 +474,10 @@ class UITreeUpdater final {
     [[nodiscard]] Core::Status setMenuOpen(UINodeId menu, bool open);
     [[nodiscard]] Core::Result<bool> isMenuOpen(UINodeId menu) const;
     [[nodiscard]] Core::Result<UIMenuMetrics> menuMetrics(UINodeId menu) const;
+    [[nodiscard]] Core::Status setMenuItemSubmenu(UINodeId item, UINodeId submenu);
+    [[nodiscard]] Core::Status clearMenuItemSubmenu(UINodeId item);
+    [[nodiscard]] Core::Result<UINodeId> menuItemSubmenu(UINodeId item) const;
+    [[nodiscard]] Core::Result<UINodeId> menuParentItem(UINodeId menu) const;
     [[nodiscard]] Core::Status setMenuItemChecked(UINodeId item, bool checked);
     [[nodiscard]] Core::Result<bool> isMenuItemChecked(UINodeId item) const;
     [[nodiscard]] Core::Result<UIMenuCommandResult>
@@ -482,6 +503,47 @@ class UITreeUpdater final {
     [[nodiscard]] Core::Status
     scrollListViewToIndex(UINodeId listView, u64 logicalIndex,
                           UIListViewScrollAlignment alignment = UIListViewScrollAlignment::Nearest);
+    [[nodiscard]] Core::Status setVirtualGridViewDataSource(
+        UINodeId virtualGridView, UIVirtualGridViewDataSource source);
+    [[nodiscard]] Core::Status clearVirtualGridViewDataSource(UINodeId virtualGridView);
+    [[nodiscard]] Core::Status invalidateVirtualGridViewItems(UINodeId virtualGridView);
+    [[nodiscard]] Core::Status setVirtualGridViewStyle(
+        UINodeId virtualGridView, const UIVirtualGridViewStyle& style);
+    [[nodiscard]] Core::Result<UIVirtualGridViewStyle>
+    virtualGridViewStyle(UINodeId virtualGridView) const;
+    [[nodiscard]] Core::Status setVirtualGridViewPaint(
+        UINodeId virtualGridView, const UIVirtualGridViewPaint& paint);
+    [[nodiscard]] Core::Result<UIVirtualGridViewPaint>
+    virtualGridViewPaint(UINodeId virtualGridView) const;
+    [[nodiscard]] Core::Result<UIVirtualGridViewMetrics>
+    virtualGridViewMetrics(UINodeId virtualGridView) const;
+    [[nodiscard]] Core::Status setVirtualGridViewSelectedIndex(
+        UINodeId virtualGridView, u64 logicalIndex);
+    [[nodiscard]] Core::Status clearVirtualGridViewSelection(UINodeId virtualGridView);
+    [[nodiscard]] Core::Result<UIVirtualGridViewSelection>
+    virtualGridViewSelection(UINodeId virtualGridView) const;
+    [[nodiscard]] Core::Status scrollVirtualGridViewToIndex(
+        UINodeId virtualGridView, u64 logicalIndex,
+        UIVirtualGridViewScrollAlignment alignment =
+            UIVirtualGridViewScrollAlignment::Nearest);
+    [[nodiscard]] Core::Status setDataGridDataSource(
+        UINodeId dataGrid, UIDataGridDataSource source);
+    [[nodiscard]] Core::Status clearDataGridDataSource(UINodeId dataGrid);
+    [[nodiscard]] Core::Status invalidateDataGridItems(UINodeId dataGrid);
+    [[nodiscard]] Core::Status setDataGridStyle(
+        UINodeId dataGrid, const UIDataGridStyle& style);
+    [[nodiscard]] Core::Result<UIDataGridStyle> dataGridStyle(UINodeId dataGrid) const;
+    [[nodiscard]] Core::Status setDataGridPaint(
+        UINodeId dataGrid, const UIDataGridPaint& paint);
+    [[nodiscard]] Core::Result<UIDataGridPaint> dataGridPaint(UINodeId dataGrid) const;
+    [[nodiscard]] Core::Result<UIDataGridMetrics> dataGridMetrics(UINodeId dataGrid) const;
+    [[nodiscard]] Core::Status setDataGridSelectedCell(
+        UINodeId dataGrid, u64 logicalRow, u32 logicalColumn);
+    [[nodiscard]] Core::Status clearDataGridSelection(UINodeId dataGrid);
+    [[nodiscard]] Core::Result<UIDataGridSelection> dataGridSelection(UINodeId dataGrid) const;
+    [[nodiscard]] Core::Status scrollDataGridToCell(
+        UINodeId dataGrid, u64 logicalRow, u32 logicalColumn,
+        UIDataGridScrollAlignment alignment = UIDataGridScrollAlignment::Nearest);
     [[nodiscard]] Core::Status setTreeViewDataSource(UINodeId treeView, UITreeViewDataSource source);
     [[nodiscard]] Core::Status clearTreeViewDataSource(UINodeId treeView);
     [[nodiscard]] Core::Status invalidateTreeViewItems(UINodeId treeView);
@@ -646,6 +708,16 @@ class UIContext final {
     buildFormField(UINodeId parent, const UIFormFieldConfig& config);
     [[nodiscard]] Core::Result<UIDialogParts>
     buildDialog(UINodeId parent, const UIDialogConfig& config);
+    [[nodiscard]] Core::Result<UISnackbarHostParts>
+    buildSnackbarHost(UINodeId parent, const UISnackbarHostConfig& config);
+    [[nodiscard]] Core::Result<UINumberFieldParts>
+    buildNumberField(UINodeId parent, const UINumberFieldConfig& config);
+    [[nodiscard]] Core::Result<UICollapsibleSectionParts>
+    buildCollapsibleSection(UINodeId parent, const UICollapsibleSectionConfig& config);
+    [[nodiscard]] Core::Result<UIColorFieldParts>
+    buildColorField(UINodeId parent, const UIColorFieldConfig& config);
+    [[nodiscard]] Core::Result<UIColorPickerParts>
+    buildColorPicker(UINodeId parent, const UIColorPickerConfig& config);
 
     // C1a diagnostic seam. Runtime frame publication uses commitLayout() so a
     // pending structure and its geometry become visible in one transaction.
@@ -755,6 +827,10 @@ class UIContext final {
     // previously claimed on key-down without repeating its state transition.
     [[nodiscard]] Core::Result<UIDropdownCommandResult> routeDropdownCommand(UIDropdownCommand command, bool pressed);
     [[nodiscard]] Core::Result<UIListViewCommandResult> routeListViewCommand(UIListViewCommand command, bool pressed);
+    [[nodiscard]] Core::Result<UIVirtualGridViewCommandResult>
+    routeVirtualGridViewCommand(UIVirtualGridViewCommand command, bool pressed);
+    [[nodiscard]] Core::Result<UIDataGridCommandResult>
+    routeDataGridCommand(UIDataGridCommand command, bool pressed);
     [[nodiscard]] Core::Result<UITreeViewCommandResult> routeTreeViewCommand(UITreeViewCommand command, bool pressed);
     // Routes a physical directional input to the focused TabView when its
     // placement owns that axis. A non-matching axis declines so generic spatial
@@ -767,6 +843,10 @@ class UIContext final {
     routeFocusedTabViewCommand(UITabViewCommand command, bool pressed);
     [[nodiscard]] Core::Result<UIMenuCommandResult>
     routeMenuCommand(UIMenuCommand command, bool pressed);
+    // Opens the Menu associated with the focused node or its nearest ancestor.
+    // A consumed press claims only the matching Context Menu/Shift+F10 release.
+    [[nodiscard]] Core::Result<UIMenuInvocationResult>
+    routeMenuInvocation(UIMenuInvocationCommand command, bool pressed);
     [[nodiscard]] UINodeId defaultActionFocus() const noexcept;
     [[nodiscard]] UINodeId activeFocusScope() const noexcept;
     [[nodiscard]] UINodeId activeModal() const noexcept;
@@ -798,6 +878,47 @@ class UIContext final {
     routeTabViewCommand(UINodeId tabView, UITabViewCommand command);
     [[nodiscard]] Core::Status setTabPaint(UINodeId tab, const UITabPaint& paint);
     [[nodiscard]] Core::Result<UITabPaint> tabPaint(UINodeId tab) const;
+    [[nodiscard]] Core::Status setVirtualGridViewDataSource(
+        UINodeId virtualGridView, UIVirtualGridViewDataSource source);
+    [[nodiscard]] Core::Status clearVirtualGridViewDataSource(UINodeId virtualGridView);
+    [[nodiscard]] Core::Status invalidateVirtualGridViewItems(UINodeId virtualGridView);
+    [[nodiscard]] Core::Status setVirtualGridViewStyle(
+        UINodeId virtualGridView, const UIVirtualGridViewStyle& style);
+    [[nodiscard]] Core::Result<UIVirtualGridViewStyle>
+    virtualGridViewStyle(UINodeId virtualGridView) const;
+    [[nodiscard]] Core::Status setVirtualGridViewPaint(
+        UINodeId virtualGridView, const UIVirtualGridViewPaint& paint);
+    [[nodiscard]] Core::Result<UIVirtualGridViewPaint>
+    virtualGridViewPaint(UINodeId virtualGridView) const;
+    [[nodiscard]] Core::Result<UIVirtualGridViewMetrics>
+    virtualGridViewMetrics(UINodeId virtualGridView) const;
+    [[nodiscard]] Core::Status setVirtualGridViewSelectedIndex(
+        UINodeId virtualGridView, u64 logicalIndex);
+    [[nodiscard]] Core::Status clearVirtualGridViewSelection(UINodeId virtualGridView);
+    [[nodiscard]] Core::Result<UIVirtualGridViewSelection>
+    virtualGridViewSelection(UINodeId virtualGridView) const;
+    [[nodiscard]] Core::Status scrollVirtualGridViewToIndex(
+        UINodeId virtualGridView, u64 logicalIndex,
+        UIVirtualGridViewScrollAlignment alignment =
+            UIVirtualGridViewScrollAlignment::Nearest);
+    [[nodiscard]] Core::Status setDataGridDataSource(
+        UINodeId dataGrid, UIDataGridDataSource source);
+    [[nodiscard]] Core::Status clearDataGridDataSource(UINodeId dataGrid);
+    [[nodiscard]] Core::Status invalidateDataGridItems(UINodeId dataGrid);
+    [[nodiscard]] Core::Status setDataGridStyle(
+        UINodeId dataGrid, const UIDataGridStyle& style);
+    [[nodiscard]] Core::Result<UIDataGridStyle> dataGridStyle(UINodeId dataGrid) const;
+    [[nodiscard]] Core::Status setDataGridPaint(
+        UINodeId dataGrid, const UIDataGridPaint& paint);
+    [[nodiscard]] Core::Result<UIDataGridPaint> dataGridPaint(UINodeId dataGrid) const;
+    [[nodiscard]] Core::Result<UIDataGridMetrics> dataGridMetrics(UINodeId dataGrid) const;
+    [[nodiscard]] Core::Status setDataGridSelectedCell(
+        UINodeId dataGrid, u64 logicalRow, u32 logicalColumn);
+    [[nodiscard]] Core::Status clearDataGridSelection(UINodeId dataGrid);
+    [[nodiscard]] Core::Result<UIDataGridSelection> dataGridSelection(UINodeId dataGrid) const;
+    [[nodiscard]] Core::Status scrollDataGridToCell(
+        UINodeId dataGrid, u64 logicalRow, u32 logicalColumn,
+        UIDataGridScrollAlignment alignment = UIDataGridScrollAlignment::Nearest);
     // Tooltip relationships and presentation are owner-thread, per-Window, and
     // advanced by commitLayout() using the configured monotonic clock. These
     // direct Context APIs are useful to adapters; root-scoped authoring should
@@ -815,6 +936,10 @@ class UIContext final {
     [[nodiscard]] Core::Status setMenuOpen(UINodeId menu, bool open);
     [[nodiscard]] Core::Result<bool> isMenuOpen(UINodeId menu) const;
     [[nodiscard]] Core::Result<UIMenuMetrics> menuMetrics(UINodeId menu) const;
+    [[nodiscard]] Core::Status setMenuItemSubmenu(UINodeId item, UINodeId submenu);
+    [[nodiscard]] Core::Status clearMenuItemSubmenu(UINodeId item);
+    [[nodiscard]] Core::Result<UINodeId> menuItemSubmenu(UINodeId item) const;
+    [[nodiscard]] Core::Result<UINodeId> menuParentItem(UINodeId menu) const;
     [[nodiscard]] Core::Status setMenuItemChecked(UINodeId item, bool checked);
     [[nodiscard]] Core::Result<bool> isMenuItemChecked(UINodeId item) const;
     [[nodiscard]] Core::Result<UIMenuCommandResult>
@@ -1076,6 +1201,14 @@ class UIContext final {
                                                            UINodeId menu) const;
     [[nodiscard]] Core::Result<UIMenuMetrics> menuMetricsFromUpdater(UINodeId updaterRoot,
                                                                      UINodeId menu) const;
+    [[nodiscard]] Core::Status setMenuItemSubmenuFromUpdater(
+        UINodeId updaterRoot, UINodeId item, UINodeId submenu);
+    [[nodiscard]] Core::Status clearMenuItemSubmenuFromUpdater(
+        UINodeId updaterRoot, UINodeId item);
+    [[nodiscard]] Core::Result<UINodeId> menuItemSubmenuFromUpdater(
+        UINodeId updaterRoot, UINodeId item) const;
+    [[nodiscard]] Core::Result<UINodeId> menuParentItemFromUpdater(
+        UINodeId updaterRoot, UINodeId menu) const;
     [[nodiscard]] Core::Status setMenuItemCheckedFromUpdater(UINodeId updaterRoot,
                                                             UINodeId item, bool checked);
     [[nodiscard]] Core::Result<bool> isMenuItemCheckedFromUpdater(UINodeId updaterRoot,
@@ -1114,6 +1247,64 @@ class UIContext final {
                                                                                 UINodeId listView) const;
     [[nodiscard]] Core::Status scrollListViewToIndexFromUpdater(UINodeId updaterRoot, UINodeId listView,
                                                                 u64 logicalIndex, UIListViewScrollAlignment alignment);
+    [[nodiscard]] Core::Status setVirtualGridViewDataSourceFromUpdater(
+        UINodeId updaterRoot, UINodeId virtualGridView,
+        UIVirtualGridViewDataSource source);
+    [[nodiscard]] Core::Status clearVirtualGridViewDataSourceFromUpdater(
+        UINodeId updaterRoot, UINodeId virtualGridView);
+    [[nodiscard]] Core::Status invalidateVirtualGridViewItemsFromUpdater(
+        UINodeId updaterRoot, UINodeId virtualGridView);
+    [[nodiscard]] Core::Status setVirtualGridViewStyleFromUpdater(
+        UINodeId updaterRoot, UINodeId virtualGridView,
+        const UIVirtualGridViewStyle& style);
+    [[nodiscard]] Core::Result<UIVirtualGridViewStyle>
+    virtualGridViewStyleFromUpdater(
+        UINodeId updaterRoot, UINodeId virtualGridView) const;
+    [[nodiscard]] Core::Status setVirtualGridViewPaintFromUpdater(
+        UINodeId updaterRoot, UINodeId virtualGridView,
+        const UIVirtualGridViewPaint& paint);
+    [[nodiscard]] Core::Result<UIVirtualGridViewPaint>
+    virtualGridViewPaintFromUpdater(
+        UINodeId updaterRoot, UINodeId virtualGridView) const;
+    [[nodiscard]] Core::Result<UIVirtualGridViewMetrics>
+    virtualGridViewMetricsFromUpdater(
+        UINodeId updaterRoot, UINodeId virtualGridView) const;
+    [[nodiscard]] Core::Status setVirtualGridViewSelectedIndexFromUpdater(
+        UINodeId updaterRoot, UINodeId virtualGridView, u64 logicalIndex);
+    [[nodiscard]] Core::Status clearVirtualGridViewSelectionFromUpdater(
+        UINodeId updaterRoot, UINodeId virtualGridView);
+    [[nodiscard]] Core::Result<UIVirtualGridViewSelection>
+    virtualGridViewSelectionFromUpdater(
+        UINodeId updaterRoot, UINodeId virtualGridView) const;
+    [[nodiscard]] Core::Status scrollVirtualGridViewToIndexFromUpdater(
+        UINodeId updaterRoot, UINodeId virtualGridView, u64 logicalIndex,
+        UIVirtualGridViewScrollAlignment alignment);
+    [[nodiscard]] Core::Status setDataGridDataSourceFromUpdater(
+        UINodeId updaterRoot, UINodeId dataGrid, UIDataGridDataSource source);
+    [[nodiscard]] Core::Status clearDataGridDataSourceFromUpdater(
+        UINodeId updaterRoot, UINodeId dataGrid);
+    [[nodiscard]] Core::Status invalidateDataGridItemsFromUpdater(
+        UINodeId updaterRoot, UINodeId dataGrid);
+    [[nodiscard]] Core::Status setDataGridStyleFromUpdater(
+        UINodeId updaterRoot, UINodeId dataGrid, const UIDataGridStyle& style);
+    [[nodiscard]] Core::Result<UIDataGridStyle> dataGridStyleFromUpdater(
+        UINodeId updaterRoot, UINodeId dataGrid) const;
+    [[nodiscard]] Core::Status setDataGridPaintFromUpdater(
+        UINodeId updaterRoot, UINodeId dataGrid, const UIDataGridPaint& paint);
+    [[nodiscard]] Core::Result<UIDataGridPaint> dataGridPaintFromUpdater(
+        UINodeId updaterRoot, UINodeId dataGrid) const;
+    [[nodiscard]] Core::Result<UIDataGridMetrics> dataGridMetricsFromUpdater(
+        UINodeId updaterRoot, UINodeId dataGrid) const;
+    [[nodiscard]] Core::Status setDataGridSelectedCellFromUpdater(
+        UINodeId updaterRoot, UINodeId dataGrid, u64 logicalRow,
+        u32 logicalColumn);
+    [[nodiscard]] Core::Status clearDataGridSelectionFromUpdater(
+        UINodeId updaterRoot, UINodeId dataGrid);
+    [[nodiscard]] Core::Result<UIDataGridSelection> dataGridSelectionFromUpdater(
+        UINodeId updaterRoot, UINodeId dataGrid) const;
+    [[nodiscard]] Core::Status scrollDataGridToCellFromUpdater(
+        UINodeId updaterRoot, UINodeId dataGrid, u64 logicalRow,
+        u32 logicalColumn, UIDataGridScrollAlignment alignment);
     [[nodiscard]] Core::Status setTreeViewDataSourceFromUpdater(UINodeId updaterRoot, UINodeId treeView,
                                                                 UITreeViewDataSource source);
     [[nodiscard]] Core::Status clearTreeViewDataSourceFromUpdater(UINodeId updaterRoot, UINodeId treeView);

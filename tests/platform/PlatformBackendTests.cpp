@@ -834,6 +834,9 @@ TEST(PlatformFrameBuilderTest, RejectsInvalidPlatformEventPayloads)
 
     expectInvalidPlatformEvent(Platform::WindowMetricsChangedEvent{});
     expectInvalidPlatformEvent(Platform::WindowMetricsChangedEvent{window, 0});
+    expectInvalidPlatformEvent(Platform::SystemColorSchemeChangedEvent{
+        .colorScheme = static_cast<Platform::SystemColorScheme>(255),
+    });
     expectInvalidPlatformEvent(Platform::GamepadConnectedEvent{});
     expectInvalidPlatformEvent(Platform::GamepadDisconnectedEvent{});
     expectInvalidPlatformEvent(Platform::GamepadConnectedEvent{gamepadOutsideRoutingSlots});
@@ -1664,6 +1667,34 @@ TEST(PlatformFrameBuilderTest, CoalescesWindowMetricsBeforeEventOverflow)
     const auto* metrics = std::get_if<Platform::WindowMetricsChangedEvent>(&frame->platformEvents().front().payload);
     ASSERT_NE(metrics, nullptr);
     EXPECT_EQ(metrics->metricsRevision, 2U);
+    EXPECT_EQ(frame->diagnostics().platformEventOverflowCount, 0U);
+}
+
+TEST(PlatformFrameBuilderTest, CoalescesSystemColorSchemeToLatestPreference)
+{
+    auto builderResult = Platform::PlatformFrameBuilder::Create({
+        .inputTransitionCapacity = 1,
+        .platformEventCapacity = 1,
+    });
+    ASSERT_TRUE(builderResult.has_value());
+    auto& builder = *builderResult;
+    ASSERT_TRUE(builder.beginFrame({1}).has_value());
+    EXPECT_EQ(builder.appendPlatformEvent(Platform::SystemColorSchemeChangedEvent{
+                  .colorScheme = Platform::SystemColorScheme::Dark,
+              }),
+              Platform::FrameBatchAppendResult::Appended);
+    EXPECT_EQ(builder.appendPlatformEvent(Platform::SystemColorSchemeChangedEvent{
+                  .colorScheme = Platform::SystemColorScheme::Light,
+              }),
+              Platform::FrameBatchAppendResult::Coalesced);
+
+    auto frame = builder.finishFrame();
+    ASSERT_TRUE(frame.has_value());
+    ASSERT_EQ(frame->platformEvents().size(), 1U);
+    const auto* scheme = std::get_if<Platform::SystemColorSchemeChangedEvent>(
+        &frame->platformEvents().front().payload);
+    ASSERT_NE(scheme, nullptr);
+    EXPECT_EQ(scheme->colorScheme, Platform::SystemColorScheme::Light);
     EXPECT_EQ(frame->diagnostics().platformEventOverflowCount, 0U);
 }
 

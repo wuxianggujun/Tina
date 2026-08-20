@@ -3241,11 +3241,11 @@ class TileMapBgfxState final : public Tina::IGameState {
         if (auto status = tree->setTreeViewStyle(
                 *sceneTree,
                 Tina::UI::UITreeViewStyle{
-                    .rowHeight = 24.0F,
+                    .rowHeight = initialTheme.controls.treeRowHeight,
                     .overscanRows = 1,
                     .scrollBarVisibility = Tina::UI::UIScrollBarVisibility::Auto,
-                    .wheelStep = 24.0F,
-                    .indentation = 14.0F,
+                    .wheelStep = initialTheme.controls.treeRowHeight,
+                    .indentation = initialTheme.spacing.space5,
                     .disclosureExtent = 9.0F,
                     .disclosureGap = 4.0F,
                 });
@@ -3290,7 +3290,7 @@ class TileMapBgfxState final : public Tina::IGameState {
                     *button, absolutePanelStyle(Tina::UI::UILayoutLength::Px(700.0F),
                                                 Tina::UI::UILayoutLength::Px(24.0F),
                                                 Tina::UI::UILayoutLength::Px(220.0F),
-                                                Tina::UI::UILayoutLength::Px(40.0F)));
+                                                Tina::UI::UILayoutLength::Px(initialTheme.controls.buttonHeight)));
                 !status)
             {
                 return status;
@@ -3364,7 +3364,7 @@ class TileMapBgfxState final : public Tina::IGameState {
                         *slider, absolutePanelStyle(Tina::UI::UILayoutLength::Px(764.0F),
                                                     Tina::UI::UILayoutLength::Px(y),
                                                     Tina::UI::UILayoutLength::Px(158.0F),
-                                                    Tina::UI::UILayoutLength::Px(20.0F)));
+                                                    Tina::UI::UILayoutLength::Px(initialTheme.controls.sliderHeight)));
                     !status)
                 {
                     return status;
@@ -3432,8 +3432,8 @@ class TileMapBgfxState final : public Tina::IGameState {
                 if (auto status = tree->setLayoutStyle(
                         *checkbox, absolutePanelStyle(Tina::UI::UILayoutLength::Px(684.0F),
                                                       Tina::UI::UILayoutLength::Px(y),
-                                                      Tina::UI::UILayoutLength::Px(28.0F),
-                                                      Tina::UI::UILayoutLength::Px(28.0F)));
+                                                       Tina::UI::UILayoutLength::Px(initialTheme.controls.checkboxHitExtent),
+                                                       Tina::UI::UILayoutLength::Px(initialTheme.controls.checkboxHitExtent)));
                     !status)
                 {
                     return status;
@@ -3510,7 +3510,7 @@ class TileMapBgfxState final : public Tina::IGameState {
                     *profileName, absolutePanelStyle(Tina::UI::UILayoutLength::Px(700.0F),
                                                      Tina::UI::UILayoutLength::Px(292.0F),
                                                      Tina::UI::UILayoutLength::Px(220.0F),
-                                                     Tina::UI::UILayoutLength::Px(42.0F)));
+                                                     Tina::UI::UILayoutLength::Px(initialTheme.controls.textEditHeight)));
                 !status)
             {
                 return status;
@@ -3553,7 +3553,8 @@ class TileMapBgfxState final : public Tina::IGameState {
                     *progress, absolutePanelStyle(Tina::UI::UILayoutLength::Px(700.0F),
                                                   Tina::UI::UILayoutLength::Px(350.0F),
                                                   Tina::UI::UILayoutLength::Px(220.0F),
-                                                  Tina::UI::UILayoutLength::Px(20.0F)));
+                                                  Tina::UI::UILayoutLength::Px(initialTheme.controls.progressBarHeight +
+                                                                               initialTheme.spacing.space4)));
                 !status)
             {
                 return status;
@@ -3599,7 +3600,7 @@ class TileMapBgfxState final : public Tina::IGameState {
                         *radioButton, absolutePanelStyle(Tina::UI::UILayoutLength::Px(700.0F),
                                                         Tina::UI::UILayoutLength::Px(radioSpecs[index].y),
                                                         Tina::UI::UILayoutLength::Px(220.0F),
-                                                        Tina::UI::UILayoutLength::Px(28.0F)));
+                                                        Tina::UI::UILayoutLength::Px(initialTheme.controls.checkboxHitExtent)));
                     !status)
                 {
                     return status;

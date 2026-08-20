@@ -343,6 +343,47 @@ TEST_F(UISplitViewTest, LayoutResolvesHorizontalVerticalMinimumsAndCommittedMetr
     EXPECT_EQ(splitterEntry->worldRect, horizontalMetrics.splitterRect);
 }
 
+TEST_F(UISplitViewTest, CollapsedPartsReleaseSplitViewExtent)
+{
+    auto context = createContext();
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    auto updater = createUpdater(*context, root);
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(300.0F, 100.0F)));
+    const SplitViewNodes nodes = createSplitView(
+        updater, root.rootNodeId(),
+        UI::UISplitViewConfig{
+            .orientation = UI::UISplitViewOrientation::Horizontal,
+            .initialFraction = 0.5F,
+            .minPrimarySize = 100.0F,
+            .minSecondarySize = 80.0F,
+            .splitterExtent = 10.0F,
+        },
+        {}, fixedSize(300.0F, 100.0F));
+    ASSERT_TRUE(nodes.secondaryPane.hasValue());
+    assertOk(context->commitLayout({.width = 300.0F, .height = 100.0F}));
+
+    UI::UILayoutStyle collapsed{};
+    collapsed.visibility = UI::UIVisibility::Collapsed;
+    assertOk(updater.setLayoutStyle(nodes.secondaryPane, collapsed));
+    assertOk(updater.setLayoutStyle(nodes.splitter, collapsed));
+    assertOk(updater.setSplitViewFraction(nodes.splitView, 1.0F));
+    assertOk(context->commitLayout({.width = 300.0F, .height = 100.0F}));
+
+    const UI::UISplitViewMetrics collapsedMetrics = updater.splitViewMetrics(nodes.splitView).value();
+    EXPECT_FLOAT_EQ(collapsedMetrics.primaryRect.width, 300.0F);
+    EXPECT_FLOAT_EQ(collapsedMetrics.splitterRect.width, 0.0F);
+    EXPECT_FLOAT_EQ(collapsedMetrics.secondaryRect.width, 0.0F);
+
+    assertOk(updater.setLayoutStyle(nodes.secondaryPane, {}));
+    assertOk(updater.setLayoutStyle(nodes.splitter, {}));
+    assertOk(updater.setSplitViewFraction(nodes.splitView, 0.5F));
+    assertOk(context->commitLayout({.width = 300.0F, .height = 100.0F}));
+    const UI::UISplitViewMetrics restoredMetrics = updater.splitViewMetrics(nodes.splitView).value();
+    EXPECT_FLOAT_EQ(restoredMetrics.splitterRect.width, 10.0F);
+    EXPECT_GE(restoredMetrics.secondaryRect.width, 80.0F);
+}
+
 TEST_F(UISplitViewTest, PointerDragCapturesSplitterAndKeyboardRangeInputUpdatesFraction)
 {
     auto context = createContext();

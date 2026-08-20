@@ -26,6 +26,11 @@ ProductChrome productChromeFor(UIStyleRoleId role, const UITheme& theme) noexcep
     case UIStyleRoleId::MenuSurface:
         chrome.box = makePopupBoxPaint(theme);
         break;
+    case UIStyleRoleId::FloatingSurface:
+        chrome.box = makePanelBoxPaint(
+            theme, scaleColorAlpha(theme.colors.surfaceContainerHigh, 252),
+            UIElevation::Floating);
+        break;
     case UIStyleRoleId::TooltipSurface:
         chrome.box = makePopupBoxPaint(theme);
         chrome.text = makeSecondaryTextStyle(theme);
@@ -79,6 +84,9 @@ ProductChrome productChromeFor(UIStyleRoleId role, const UITheme& theme) noexcep
         chrome.box = button.box;
         chrome.button = button.states;
         chrome.text = button.label;
+        chrome.imageTint = role == UIStyleRoleId::ButtonDanger
+                               ? theme.colors.onError
+                               : theme.colors.onPrimary;
         break;
     }
     case UIStyleRoleId::ButtonTonal: {
@@ -86,6 +94,7 @@ ProductChrome productChromeFor(UIStyleRoleId role, const UITheme& theme) noexcep
         chrome.box = button.box;
         chrome.button = button.states;
         chrome.text = button.label;
+        chrome.imageTint = theme.colors.onSurface;
         break;
     }
     case UIStyleRoleId::ButtonOutlined: {
@@ -93,6 +102,7 @@ ProductChrome productChromeFor(UIStyleRoleId role, const UITheme& theme) noexcep
         chrome.box = button.box;
         chrome.button = button.states;
         chrome.text = button.label;
+        chrome.imageTint = theme.colors.onSurface;
         break;
     }
     case UIStyleRoleId::ButtonText: {
@@ -100,6 +110,7 @@ ProductChrome productChromeFor(UIStyleRoleId role, const UITheme& theme) noexcep
         chrome.box = button.box;
         chrome.button = button.states;
         chrome.text = button.label;
+        chrome.imageTint = theme.colors.onSurfaceVariant;
         break;
     }
     case UIStyleRoleId::Checkbox: {
@@ -108,14 +119,35 @@ ProductChrome productChromeFor(UIStyleRoleId role, const UITheme& theme) noexcep
         chrome.checkbox = checkbox.indicator;
         break;
     }
-    case UIStyleRoleId::ToggleSwitch: {
-        const UICheckboxChrome toggleSwitch = makeToggleSwitchChrome(theme);
-        chrome.box = toggleSwitch.box;
-        chrome.checkbox = toggleSwitch.indicator;
+    case UIStyleRoleId::Switch: {
+        const UICheckboxChrome switchChrome = makeSwitchChrome(theme);
+        chrome.box = switchChrome.box;
+        chrome.checkbox = switchChrome.indicator;
         break;
     }
-    case UIStyleRoleId::Slider: {
-        const UISliderChrome slider = makeSliderChrome(theme);
+    case UIStyleRoleId::Slider:
+    case UIStyleRoleId::SliderRed:
+    case UIStyleRoleId::SliderGreen:
+    case UIStyleRoleId::SliderBlue:
+    case UIStyleRoleId::SliderAlpha: {
+        UIStraightSrgba8Color filledTrack{};
+        if (role == UIStyleRoleId::SliderRed)
+        {
+            filledTrack = rgba8(235, 91, 91);
+        }
+        else if (role == UIStyleRoleId::SliderGreen)
+        {
+            filledTrack = rgba8(74, 176, 113);
+        }
+        else if (role == UIStyleRoleId::SliderBlue)
+        {
+            filledTrack = rgba8(77, 142, 234);
+        }
+        else if (role == UIStyleRoleId::SliderAlpha)
+        {
+            filledTrack = theme.colors.onSurfaceVariant;
+        }
+        const UISliderChrome slider = makeSliderChrome(theme, filledTrack);
         chrome.box = slider.hitSurface;
         chrome.slider = slider.slider;
         break;
@@ -154,6 +186,7 @@ ProductChrome productChromeFor(UIStyleRoleId role, const UITheme& theme) noexcep
         chrome.box = segmentedButton.box;
         chrome.radioButton = segmentedButton.radio;
         chrome.text = segmentedButton.label;
+        chrome.imageTint = theme.colors.onSurfaceVariant;
         break;
     }
     case UIStyleRoleId::Tab: {
@@ -189,6 +222,14 @@ ProductChrome productChromeFor(UIStyleRoleId role, const UITheme& theme) noexcep
     case UIStyleRoleId::TreeView:
         chrome.box = makePanelBoxPaint(theme, scaleColorAlpha(theme.colors.surfaceContainerLow, 245));
         chrome.treeView = makeTreeViewPaint(theme);
+        break;
+    case UIStyleRoleId::VirtualGridView:
+        chrome.box = makePanelBoxPaint(theme, scaleColorAlpha(theme.colors.surfaceContainerLow, 245));
+        chrome.virtualGridView = makeVirtualGridViewPaint(theme);
+        break;
+    case UIStyleRoleId::DataGrid:
+        chrome.box = makePanelBoxPaint(theme, scaleColorAlpha(theme.colors.surfaceContainerLow, 245));
+        chrome.dataGrid = makeDataGridPaint(theme);
         break;
     case UIStyleRoleId::IconOnSurface:
         chrome.imageTint = theme.colors.onSurface;

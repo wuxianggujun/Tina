@@ -23,6 +23,7 @@
 #include "input/LastPresentedCamera2DLatch.hpp"
 #include "input/UIInputRouteProducer.hpp"
 #include "ui/PrimaryWindowUICapabilityState.hpp"
+#include "ui/PrimaryWindowUIColorSchemeCoordinator.hpp"
 #include "ui/PrimaryWindowUIContextOwner.hpp"
 #include "ui/PrimaryWindowUIDisplayCoordinator.hpp"
 #include "ui/PrimaryWindowUILayoutCoordinator.hpp"
@@ -858,6 +859,7 @@ class EngineHostImplementation final {
                 error.addContext("PrimaryWindowUIContextOwner::selectForFrame");
                 return failAfterStartupCommit(gameApplication, std::move(error), frameIndex, simulationTick);
             }
+            m_primaryWindowUIColorScheme.observe(platformFrame->platformEvents());
 
             {
                 TINA_TRACE_ZONE("Runtime.Input.RouteAndMap");
@@ -1076,6 +1078,15 @@ class EngineHostImplementation final {
             auto updateUIPhaseGuard = Core::makeScopeExit([this, epoch = *updateUIPhase]() noexcept {
                 m_primaryWindowUICapability.abortPhase(epoch, Runtime::Detail::PrimaryWindowUIPhase::UIUpdate);
             });
+            if (Core::Status colorSchemeStatus =
+                    m_primaryWindowUIColorScheme.apply(*uiContextResult);
+                !colorSchemeStatus)
+            {
+                auto error = std::move(colorSchemeStatus.error());
+                error.addContext("EngineHost::run", "primary-window system color scheme");
+                return failAfterStartupCommit(gameApplication, std::move(error), frameIndex,
+                                              simulationTick);
+            }
             UIUpdateContext uiContext{frameTiming, m_primaryWindowUICapability, *updateUIPhase};
             auto uiResult = m_gameStateStack.forEachDispatch(
                 GameStateDispatchPhase::UIUpdate,
@@ -1526,6 +1537,7 @@ class EngineHostImplementation final {
     EngineModules m_modules;
     Runtime::Detail::PrimaryWindowUIContextOwner m_primaryWindowUi;
     Runtime::Detail::PrimaryWindowUICapabilityState m_primaryWindowUICapability;
+    Runtime::Detail::PrimaryWindowUIColorSchemeCoordinator m_primaryWindowUIColorScheme;
     Runtime::Detail::PrimaryWindowUILayoutCoordinator m_primaryWindowUILayout;
     Runtime::Detail::PrimaryWindowTextInputPlacementCoordinator m_primaryWindowTextInputPlacement;
     Runtime::Detail::PrimaryWindowUIDisplayCoordinator m_primaryWindowUIDisplay;

@@ -138,7 +138,7 @@ struct Rect final {
 }
 
 [[nodiscard]] Core::Result<UI::UINodeId> createButton(PrimaryWindowUITreeUpdater& tree, UI::UINodeId parent, Rect rect,
-                                                      std::string_view text)
+                                                      std::string_view text, const UI::UITheme& theme)
 {
     auto node = tree.createElement(parent, UI::makeButtonElement());
     if (!node)
@@ -146,7 +146,10 @@ struct Rect final {
         return Core::failure(std::move(node.error()));
     }
     if (Core::Status status =
-            tree.setLayoutStyle(*node, absoluteStyle(rect, UI::UIEdgeSpacing::HorizontalVertical(14.0F, 8.0F)));
+            tree.setLayoutStyle(*node,
+                                absoluteStyle(rect,
+                                              UI::UIEdgeSpacing::HorizontalVertical(theme.spacing.space5,
+                                                                                    theme.spacing.space2)));
         !status)
     {
         return Core::failure(std::move(status.error()));
@@ -391,7 +394,8 @@ Core::Status Product3DUI::build(GameStateEnterContext& context, Product3DUIConfi
         return Core::failure(std::move(tree.error()));
     }
 
-    if (Core::Status status = tree->setProductTheme(themeFor(config.initialTheme)); !status)
+    const UI::UITheme& initialTheme = themeFor(config.initialTheme);
+    if (Core::Status status = tree->setProductTheme(initialTheme); !status)
     {
         return status;
     }
@@ -502,8 +506,10 @@ Core::Status Product3DUI::build(GameStateEnterContext& context, Product3DUIConfi
     }
 
     if (Core::Status status = storeNode(
-            createButton(*tree, rootNode, {956.0F, 105.0F, 276.0F, 42.0F},
-                         config.initialTheme == Product3DUITheme::Dark ? "Switch to light" : "Switch to dark"),
+            createButton(*tree, rootNode,
+                         {956.0F, 105.0F, 276.0F, initialTheme.controls.buttonHeight},
+                         config.initialTheme == Product3DUITheme::Dark ? "Switch to light" : "Switch to dark",
+                         initialTheme),
             nodes_.themeButton);
         !status)
     {
@@ -525,7 +531,11 @@ Core::Status Product3DUI::build(GameStateEnterContext& context, Product3DUIConfi
         return Core::failure(std::move(checkbox.error()));
     }
     nodes_.autoRotateCheckbox = *checkbox;
-    if (Core::Status status = tree->setLayoutStyle(*checkbox, absoluteStyle({956.0F, 170.0F, 28.0F, 28.0F})); !status)
+    if (Core::Status status = tree->setLayoutStyle(
+            *checkbox,
+            absoluteStyle({956.0F, 170.0F, initialTheme.controls.checkboxHitExtent,
+                           initialTheme.controls.checkboxHitExtent}));
+        !status)
     {
         return status;
     }
@@ -549,7 +559,9 @@ Core::Status Product3DUI::build(GameStateEnterContext& context, Product3DUIConfi
         return Core::failure(std::move(slider.error()));
     }
     nodes_.rotationSpeedSlider = *slider;
-    if (Core::Status status = tree->setLayoutStyle(*slider, absoluteStyle({956.0F, 245.0F, 276.0F, 32.0F})); !status)
+    if (Core::Status status = tree->setLayoutStyle(
+            *slider, absoluteStyle({956.0F, 245.0F, 276.0F, initialTheme.controls.sliderHeight}));
+        !status)
     {
         return status;
     }
@@ -604,10 +616,10 @@ Core::Status Product3DUI::build(GameStateEnterContext& context, Product3DUIConfi
     if (Core::Status status = tree->setListViewStyle(
             *assetList,
             UI::UIListViewStyle{
-                .rowHeight = 27.0F,
+                .rowHeight = initialTheme.controls.listRowHeight,
                 .overscanRows = 1,
                 .scrollBarVisibility = UI::UIScrollBarVisibility::Auto,
-                .wheelStep = 27.0F,
+                .wheelStep = initialTheme.controls.listRowHeight,
             });
         !status)
     {
@@ -636,11 +648,11 @@ Core::Status Product3DUI::build(GameStateEnterContext& context, Product3DUIConfi
     if (Core::Status status = tree->setTreeViewStyle(
             *sceneTree,
             UI::UITreeViewStyle{
-                .rowHeight = 27.0F,
+                .rowHeight = initialTheme.controls.treeRowHeight,
                 .overscanRows = 1,
                 .scrollBarVisibility = UI::UIScrollBarVisibility::Auto,
-                .wheelStep = 27.0F,
-                .indentation = 12.0F,
+                .wheelStep = initialTheme.controls.treeRowHeight,
+                .indentation = initialTheme.spacing.space5,
                 .disclosureExtent = 9.0F,
                 .disclosureGap = 4.0F,
             });
@@ -728,6 +740,9 @@ Core::Status Product3DUI::build(GameStateEnterContext& context, Product3DUIConfi
 
 Core::Status Product3DUI::applyResponsiveLayout(PrimaryWindowUITreeUpdater& tree)
 {
+    const UI::UITheme& theme = themeFor(currentTheme_);
+    const float sectionLabelHeight = theme.typography.section + theme.spacing.space4;
+    const float bodyLabelHeight = theme.typography.control + theme.spacing.space4;
     struct NodeLayout final {
         UI::UINodeId node{};
         Rect reference{};
@@ -736,20 +751,22 @@ Core::Status Product3DUI::applyResponsiveLayout(PrimaryWindowUITreeUpdater& tree
     const std::array rightAnchored{
         NodeLayout{nodes_.inspectorPanel, {932.0F, 20.0F, 324.0F, 376.0F}},
         NodeLayout{nodes_.inspectorAccent, {932.0F, 20.0F, 6.0F, 376.0F}},
-        NodeLayout{nodes_.inspectorTitle, {956.0F, 38.0F, 276.0F, 28.0F}},
-        NodeLayout{nodes_.inspectorMeta, {956.0F, 69.0F, 276.0F, 22.0F}},
-        NodeLayout{nodes_.autoRotateLabel, {996.0F, 174.0F, 230.0F, 24.0F}},
-        NodeLayout{nodes_.rotationSpeedLabel, {956.0F, 215.0F, 276.0F, 24.0F}},
-        NodeLayout{nodes_.progressCaption, {956.0F, 293.0F, 190.0F, 24.0F}},
-        NodeLayout{nodes_.progressValue, {1168.0F, 293.0F, 64.0F, 24.0F}},
-        NodeLayout{nodes_.collectionTitle, {956.0F, 428.0F, 276.0F, 28.0F}},
-        NodeLayout{nodes_.collectionMeta, {956.0F, 459.0F, 276.0F, 22.0F}},
-        NodeLayout{nodes_.assetListLabel, {956.0F, 489.0F, 128.0F, 22.0F}},
-        NodeLayout{nodes_.sceneTreeLabel, {1096.0F, 489.0F, 136.0F, 22.0F}},
-        NodeLayout{nodes_.themeButton, {956.0F, 105.0F, 276.0F, 42.0F}},
-        NodeLayout{nodes_.autoRotateCheckbox, {956.0F, 170.0F, 28.0F, 28.0F}},
-        NodeLayout{nodes_.rotationSpeedSlider, {956.0F, 245.0F, 276.0F, 32.0F}},
-        NodeLayout{nodes_.frameProgress, {956.0F, 327.0F, 276.0F, 18.0F}},
+        NodeLayout{nodes_.inspectorTitle, {956.0F, 38.0F, 276.0F, sectionLabelHeight}},
+        NodeLayout{nodes_.inspectorMeta, {956.0F, 69.0F, 276.0F, bodyLabelHeight}},
+        NodeLayout{nodes_.autoRotateLabel, {996.0F, 174.0F, 230.0F, bodyLabelHeight}},
+        NodeLayout{nodes_.rotationSpeedLabel, {956.0F, 215.0F, 276.0F, bodyLabelHeight}},
+        NodeLayout{nodes_.progressCaption, {956.0F, 293.0F, 190.0F, bodyLabelHeight}},
+        NodeLayout{nodes_.progressValue, {1168.0F, 293.0F, 64.0F, bodyLabelHeight}},
+        NodeLayout{nodes_.collectionTitle, {956.0F, 428.0F, 276.0F, sectionLabelHeight}},
+        NodeLayout{nodes_.collectionMeta, {956.0F, 459.0F, 276.0F, bodyLabelHeight}},
+        NodeLayout{nodes_.assetListLabel, {956.0F, 489.0F, 128.0F, bodyLabelHeight}},
+        NodeLayout{nodes_.sceneTreeLabel, {1096.0F, 489.0F, 136.0F, bodyLabelHeight}},
+        NodeLayout{nodes_.themeButton, {956.0F, 105.0F, 276.0F, theme.controls.buttonHeight}},
+        NodeLayout{nodes_.autoRotateCheckbox, {956.0F, 170.0F, theme.controls.checkboxHitExtent,
+                                               theme.controls.checkboxHitExtent}},
+        NodeLayout{nodes_.rotationSpeedSlider, {956.0F, 245.0F, 276.0F, theme.controls.sliderHeight}},
+        NodeLayout{nodes_.frameProgress, {956.0F, 327.0F, 276.0F,
+                                         theme.controls.progressBarHeight + theme.spacing.space4}},
     };
     for (const NodeLayout& layout : rightAnchored)
     {
@@ -841,28 +858,28 @@ Core::Status Product3DUI::applyTheme(PrimaryWindowUITreeUpdater& tree, Product3D
         return status;
     }
 
-    if (Core::Status status = tree.setTextStyle(nodes_.title, UI::makeTitleTextStyle(theme, 27.0F)); !status)
+    if (Core::Status status = tree.setTextStyle(nodes_.title, UI::makeTitleTextStyle(theme, theme.typography.title)); !status)
     {
         return status;
     }
-    if (Core::Status status = tree.setTextStyle(nodes_.subtitle, UI::makeSecondaryTextStyle(theme, 16.0F)); !status)
+    if (Core::Status status = tree.setTextStyle(nodes_.subtitle, UI::makeSecondaryTextStyle(theme, theme.typography.body)); !status)
     {
         return status;
     }
-    if (Core::Status status = tree.setTextStyle(nodes_.inspectorTitle, UI::makeTitleTextStyle(theme, 22.0F)); !status)
+    if (Core::Status status = tree.setTextStyle(nodes_.inspectorTitle, UI::makeSectionTextStyle(theme, theme.typography.section)); !status)
     {
         return status;
     }
-    if (Core::Status status = tree.setTextStyle(nodes_.inspectorMeta, UI::makeSecondaryTextStyle(theme, 15.0F));
+    if (Core::Status status = tree.setTextStyle(nodes_.inspectorMeta, UI::makeSecondaryTextStyle(theme, theme.typography.caption));
         !status)
     {
         return status;
     }
-    if (Core::Status status = tree.setTextStyle(nodes_.collectionTitle, UI::makeTitleTextStyle(theme, 22.0F)); !status)
+    if (Core::Status status = tree.setTextStyle(nodes_.collectionTitle, UI::makeSectionTextStyle(theme, theme.typography.section)); !status)
     {
         return status;
     }
-    if (Core::Status status = tree.setTextStyle(nodes_.collectionMeta, UI::makeSecondaryTextStyle(theme, 15.0F));
+    if (Core::Status status = tree.setTextStyle(nodes_.collectionMeta, UI::makeSecondaryTextStyle(theme, theme.typography.caption));
         !status)
     {
         return status;
@@ -871,16 +888,16 @@ Core::Status Product3DUI::applyTheme(PrimaryWindowUITreeUpdater& tree, Product3D
                                 nodes_.assetListLabel, nodes_.sceneTreeLabel};
     for (UI::UINodeId label : bodyLabels)
     {
-        if (Core::Status status = tree.setTextStyle(label, UI::makeBodyTextStyle(theme, 17.0F)); !status)
+        if (Core::Status status = tree.setTextStyle(label, UI::makeBodyTextStyle(theme, theme.typography.control)); !status)
         {
             return status;
         }
     }
-    if (Core::Status status = tree.setTextStyle(nodes_.progressValue, UI::makeAccentTextStyle(theme, 17.0F)); !status)
+    if (Core::Status status = tree.setTextStyle(nodes_.progressValue, UI::makeAccentTextStyle(theme, theme.typography.control)); !status)
     {
         return status;
     }
-    if (Core::Status status = tree.setTextStyle(nodes_.status, UI::makeSecondaryTextStyle(theme, 16.0F)); !status)
+    if (Core::Status status = tree.setTextStyle(nodes_.status, UI::makeSecondaryTextStyle(theme, theme.typography.caption)); !status)
     {
         return status;
     }

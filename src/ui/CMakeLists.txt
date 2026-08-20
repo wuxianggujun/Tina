@@ -4,23 +4,30 @@ set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIBehavior.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIButton.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UICheckbox.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UICollapsibleSection.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UIColorField.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UIColorPicker.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UIDataGrid.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIDialog.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIDivider.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIDropdown.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIListView.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIMenu.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UITreeView.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UIVirtualGridView.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIProgressBar.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIPopup.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIRadioButton.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIRangeInput.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIScrollView.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UISlider.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UISnackbar.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UISplitView.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UITabView.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIStyle.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UISurface.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIMotion.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UINumberField.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIDirty.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UICommittedHit.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UICommittedLayout.hpp
@@ -48,7 +55,7 @@ set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UITheme.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIText.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UITextEdit.hpp
-    ${PROJECT_SOURCE_DIR}/include/tina/ui/UIToggleSwitch.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UISwitch.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UITooltip.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/text/UIGlyphAtlas.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/text/UITextRasterizer.hpp
@@ -60,7 +67,12 @@ add_library(tina_ui STATIC
     ${TINA_UI_PUBLIC_HEADERS}
     UIContext.cpp
     UIContextConfig.cpp
+    UISnackbar.cpp
     detail/UIComponentRecipes.cpp
+    detail/UIStudioComponentRecipes.cpp
+    detail/UIDataGridLayout.hpp
+    detail/UIDataGridStateStorage.hpp
+    detail/UIDataGridStateStorage.cpp
     detail/UIBehaviorStateStorage.hpp
     detail/UIBehaviorStateStorage.cpp
     detail/UIButtonActionRegistry.hpp
@@ -130,11 +142,14 @@ add_library(tina_ui STATIC
     detail/UIStyleSheetStorage.cpp
     detail/UIThemeTransitionResolver.hpp
     detail/UIThemeTransitionResolver.cpp
-    detail/UIToggleSwitchGeometry.hpp
+    detail/UISwitchGeometry.hpp
     detail/UITooltipLayout.hpp
     detail/UITooltipStateStorage.hpp
     detail/UITooltipStateStorage.cpp
     detail/UIVirtualCollectionLayout.hpp
+    detail/UIVirtualGridLayout.hpp
+    detail/UIVirtualGridViewStateStorage.hpp
+    detail/UIVirtualGridViewStateStorage.cpp
     detail/UITextStorage.hpp
     detail/UITextStorage.cpp
     detail/UIGraphemeBreak.hpp

@@ -50,6 +50,14 @@ enum class UISemanticsMode : u8 {
     Exclude,
 };
 
+// Platform-neutral live-region intent. Adapters map Polite/Assertive to their
+// native announcement mechanism; changing visible content never moves focus.
+enum class UISemanticsLiveSetting : u8 {
+    Off = 0,
+    Polite,
+    Assertive,
+};
+
 enum class UISemanticsAction : u8 {
     None = 0,
     Focus = 1U << 0U,
@@ -86,6 +94,7 @@ struct UISemanticsDescriptor final {
     std::optional<std::string_view> name{};
     std::optional<std::string_view> description{};
     UISemanticsAction actions = UISemanticsAction::None;
+    UISemanticsLiveSetting liveSetting = UISemanticsLiveSetting::Off;
     // Uses intrinsic Element text when an explicit name is absent. A merged
     // node additionally appends eligible descendant names in tree order.
     bool useContentAsName = false;
@@ -99,6 +108,7 @@ struct UISemanticsEntry final {
     UINodeId parent{};
     UISemanticsRole role = UISemanticsRole::Group;
     UISemanticsAction actions = UISemanticsAction::None;
+    UISemanticsLiveSetting liveSetting = UISemanticsLiveSetting::Off;
     UILogicalRect worldRect{};
     std::string_view name{};
     std::string_view description{};

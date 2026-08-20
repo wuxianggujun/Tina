@@ -32,11 +32,6 @@ if ("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_CURRENT_BINARY_DIR}")
             "\n cd build"
             "\n cmake ..")
 endif ()
-# Cache the root directory
-set(ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR} CACHE PATH "Root directory path")
-set(BUILD_DIR ${CMAKE_CURRENT_SOURCE_DIR}/build CACHE PATH "Build directory path")
-set(RESOURCE_DIR ${ROOT_DIR}/resources CACHE PATH "Resource directory path")
-set(RESOURCE_DEST_DIR ${CMAKE_BINARY_DIR}/resources CACHE PATH "Resource directory path")
 # 统一可执行输出目录到构建目录/bin（强制覆盖缓存，避免沿用旧值指向源码根）
 set(BIN_DIR ${CMAKE_BINARY_DIR}/bin CACHE PATH "Binary output directory path" FORCE)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${BIN_DIR})
@@ -154,7 +149,7 @@ if (TINA_BUILD_WAYLAND)
     endif ()
 endif ()
 
-list(APPEND CMAKE_MODULE_PATH ${ROOT_DIR}/cmake)
+list(APPEND CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake)
 
 if (TINA_AUTOUPDATE_SUBMODULE)
     find_package(Git)

@@ -51,6 +51,7 @@ struct UIAccessibilityNode final {
     UINodeId parent{};
     UISemanticsRole role = UISemanticsRole::Group;
     UISemanticsAction actions = UISemanticsAction::None;
+    UISemanticsLiveSetting liveSetting = UISemanticsLiveSetting::Off;
     UILogicalRect worldRect{};
     std::string_view name{};
     std::string_view description{};
@@ -225,6 +226,7 @@ public:
                 .parent = entry.parent,
                 .role = entry.role,
                 .actions = entry.actions,
+                .liveSetting = entry.liveSetting,
                 .worldRect = entry.worldRect,
                 .value = entry.value,
                 .minValue = entry.minValue,
@@ -303,6 +305,7 @@ private:
                 .parent = source.parent,
                 .role = source.role,
                 .actions = source.actions,
+                .liveSetting = source.liveSetting,
                 .worldRect = source.worldRect,
                 .value = source.value,
                 .minValue = source.minValue,

@@ -11,6 +11,7 @@
 #include <commctrl.h>
 
 #include <memory_resource>
+#include <vector>
 
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "oleacc.lib")
@@ -118,6 +119,22 @@ Core::Status WindowsUiaHostBridge::publish(const UIAccessibilityTree& tree, UICo
     if (m_hwnd == nullptr || m_provider == nullptr || m_rootProvider == nullptr) {
         return Core::failure(Core::CoreErrorCode::InvalidArgument, "WindowsUiaHostBridge is not attached");
     }
+    std::vector<UINodeId> changedLiveRegions;
+    changedLiveRegions.reserve(tree.size());
+    const bool hadPublishedTree = m_provider->hasPublishedTree();
+    const UIAccessibilityTree& previousTree = m_provider->tree();
+    for (const UIAccessibilityNode& node : tree.nodes()) {
+        if (node.liveSetting == UISemanticsLiveSetting::Off || node.name.empty()) {
+            continue;
+        }
+        const UIAccessibilityNode* previous =
+            hadPublishedTree ? previousTree.findNode(node.node) : nullptr;
+        if (previous == nullptr || previous->name != node.name ||
+            previous->liveSetting != node.liveSetting) {
+            changedLiveRegions.push_back(node.node);
+        }
+    }
+
     if (auto status = m_provider->publish(tree); !status) {
         return status;
     }
@@ -129,6 +146,9 @@ Core::Status WindowsUiaHostBridge::publish(const UIAccessibilityTree& tree, UICo
     m_actionContext = &actionContext;
     if (::UiaClientsAreListening()) {
         (void)::UiaRaiseStructureChangedEvent(m_rootProvider, StructureChangeType_ChildrenInvalidated, nullptr, 0);
+        for (const UINodeId node : changedLiveRegions) {
+            (void)root->raiseLiveRegionChanged(node);
+        }
     }
     return Core::success();
 }

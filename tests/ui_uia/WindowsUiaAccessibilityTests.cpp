@@ -787,6 +787,25 @@ TEST(WindowsUiaHostBridgeTest, MenuItemsExposeControlTypesAndTypedPatterns)
     (void)::DestroyWindow(hwnd);
 }
 
+TEST(WindowsUiaMappingTest, MapsLiveRegionPriority)
+{
+    UI::UIAccessibilityNode polite{
+        .role = UI::UISemanticsRole::Label,
+        .liveSetting = UI::UISemanticsLiveSetting::Polite,
+        .name = "Saved",
+    };
+    UI::UIAccessibilityNode assertive = polite;
+    assertive.liveSetting = UI::UISemanticsLiveSetting::Assertive;
+    UI::UIAccessibilityNode off = polite;
+    off.liveSetting = UI::UISemanticsLiveSetting::Off;
+    EXPECT_EQ(UI::Uia::mapAccessibilityNode(polite).liveSetting,
+              UI::Uia::kLiveSettingPolite);
+    EXPECT_EQ(UI::Uia::mapAccessibilityNode(assertive).liveSetting,
+              UI::Uia::kLiveSettingAssertive);
+    EXPECT_EQ(UI::Uia::mapAccessibilityNode(off).liveSetting,
+              UI::Uia::kLiveSettingOff);
+}
+
 TEST(WindowsUiaHostBridgeTest, FragmentHierarchyAndOldSnapshotSurviveRepublishAndClear)
 {
     auto bridgeResult = UI::createWindowsUiaHostBridge();

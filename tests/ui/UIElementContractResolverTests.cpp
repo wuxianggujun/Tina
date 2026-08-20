@@ -135,6 +135,37 @@ TEST(UIElementContractResolverTests, ActivateAndToggleComposeOnGenericPanelAndLa
     EXPECT_EQ(*kind, BuiltinElementKind::Label);
 }
 
+TEST(UIElementContractResolverTests, ImageContentResolvesOnlyForImageCapableControls)
+{
+    const UI::UIImageContent image{
+        .source = {
+            .sourcePixels = {.width = 16, .height = 16},
+            .texturePixelExtent = {.width = 16, .height = 16},
+            .intrinsicLogicalSize = {.width = 16.0F, .height = 16.0F},
+        },
+    };
+
+    UI::UIElementDescriptor descriptor = UI::makeButtonElement();
+    descriptor.text.reset();
+    descriptor.image = image;
+    auto kind = UI::Detail::resolveElementBuiltinKind(descriptor);
+    ASSERT_TRUE(kind) << kind.error().message;
+    EXPECT_EQ(*kind, BuiltinElementKind::Button);
+
+    descriptor = UI::makeRadioButtonElement();
+    descriptor.text.reset();
+    descriptor.image = image;
+    kind = UI::Detail::resolveElementBuiltinKind(descriptor);
+    ASSERT_TRUE(kind) << kind.error().message;
+    EXPECT_EQ(*kind, BuiltinElementKind::RadioButton);
+
+    descriptor = UI::makeSliderElement();
+    descriptor.image = image;
+    kind = UI::Detail::resolveElementBuiltinKind(descriptor);
+    ASSERT_FALSE(kind);
+    EXPECT_EQ(kind.error().code, UI::UIErrorCode::InvalidElementDescriptor);
+}
+
 TEST(UIElementContractResolverTests, RangeInputComposesWithActivateAndToggleWithoutConcreteKindEquality)
 {
     UI::UIElementDescriptor descriptor = UI::makePanelElement();

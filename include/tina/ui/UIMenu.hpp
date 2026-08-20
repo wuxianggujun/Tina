@@ -32,6 +32,7 @@ enum class UIMenuItemKind : u8 {
     Check,
     Radio,
     Separator,
+    Submenu,
 };
 
 struct UIMenuItemConfig final {
@@ -60,6 +61,8 @@ enum class UIMenuCommand : u8 {
     First,
     Last,
     Dismiss,
+    OpenSubmenu,
+    CloseSubmenu,
 };
 
 struct UIMenuCommandResult final {
@@ -69,6 +72,21 @@ struct UIMenuCommandResult final {
     bool dismissed = false;
     UINodeId menu{};
     UINodeId focus{};
+};
+
+// Physical Context Menu and Shift+F10 keys remain distinct so a consumed
+// press can claim only its matching release.
+enum class UIMenuInvocationCommand : u8 {
+    ContextMenuKey = 0,
+    ShiftF10,
+};
+
+struct UIMenuInvocationResult final {
+    bool targeted = false;
+    bool consumed = false;
+    bool opened = false;
+    UINodeId menu{};
+    UINodeId anchor{};
 };
 
 } // namespace Tina::UI

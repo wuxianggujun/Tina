@@ -11,12 +11,12 @@
 | 领域 | 已实现 |
 | --- | --- |
 | 所有权 | per-window `UIContext`、generation/owner-aware `UINodeId`、move-only `UIRootOwner` |
-| Authoring | `UIElementDescriptor` + `make*Element` recipes、组合 Semantics、StyleRole/override reset、固定预算 build transaction；Surface/Divider/Badge/ToggleSwitch 是强类型第一方 profile；IconButton/FormField/Dialog 是固定预算多节点 composition profile；旧 create-by-kind 与公开 `UIWidgetKind` 已删除 |
+| Authoring | `UIElementDescriptor` + `make*Element` recipes、组合 Semantics、StyleRole/override reset、固定预算 build transaction；Surface/Divider/Badge/Switch 是强类型第一方 profile；IconButton/FormField/Dialog 是固定预算多节点 composition profile；旧 create-by-kind 与公开 `UIWidgetKind` 已删除 |
 | Tree | Root/Panel/Modal/Label/Button/Checkbox/Slider/ProgressBar/RadioButton/TextEdit/ScrollView/Dropdown/Popup/Tooltip/Menu/MenuItem/DropdownItem/ListView/TreeView/SplitView/Splitter/TabView/Tab，固定容量 mutation |
 | Layout/Content | Flex container/item 分离、Flow/Overlay placement、logical pixel、可选 axis-aligned border-box descendant clip、committed content placement、Tooltip/Menu 基于上一份成功 Anchor geometry 的 flip/clamp、SplitView 与 TabView committed geometry、事务 commit、clean-subtree reuse |
 | Hit/route | committed hit snapshot、Capture→Target→Bubble、持久 Pointer Capture、Modal/Popup/Menu transient barrier、Tooltip Ignore/click-through、listener token、consume/prevent/claim |
 | Paint | `UIBoxPaint` Rectangle/Ellipse/Line、box/text/control paint、第一类 Image/Icon content、固定容量 backend-neutral `SolidRect`/`SolidEllipse`/`SolidLine`/`Image`/`NineSlice` Canvas、axis-aligned clip、PaintCache、committed paint snapshot；NineSlice 在 commit 时原子展开为1..9个 Image entry |
-| Theme/Style（A/B/C1 + UI-STYLE-001 slice） | `UITheme` token + `UIStyleRoleId` recipe + 属性 override mask/reset；默认 Button 为 Tonal，显式提供 Primary/Danger/Outlined/Text，并以 RadioButton/Checkbox 状态机分别提供 SegmentedButton/ToggleSwitch；Surface、Divider 与 Badge 复用 Box/Text chrome；强类型 StyleClass/ColorToken、node-local pseudo-state、literal/token-backed BoxFill stylesheet 与运行期 ColorToken getter/setter 已落地；token 更新经固定 reverse-dependency 链为 `O(affected links)`，**无**圆角子树 clip/毛玻璃/完整 CSS |
+| Theme/Style（A/B/C1 + UI-STYLE-001 slice） | `UITheme` token + `UIStyleRoleId` recipe + 属性 override mask/reset；默认 Button 为 Tonal，显式提供 Primary/Danger/Outlined/Text，并以 RadioButton/Checkbox 状态机分别提供 SegmentedButton/Switch；Surface、Divider 与 Badge 复用 Box/Text chrome；强类型 StyleClass/ColorToken、node-local pseudo-state、literal/token-backed BoxFill stylesheet 与运行期 ColorToken getter/setter 已落地；token 更新经固定 reverse-dependency 链为 `O(affected links)`，**无**圆角子树 clip/毛玻璃/完整 CSS |
 | Motion | direct/Style transition 仍为 fixed-capacity paint-only；typed keyframe timeline 已支持 paint 属性及 bounded `LayoutWidth`/`LayoutHeight`/`LayoutOffset` 白名单，并沿唯一 commit pipeline 原子发布；`ui_motion_v1`、`ui_motion_timeline_v1` 与 `ui_motion_layout_v1` 均已有确定性 gate，墙钟结论保持 provisional |
 | Text | strict UTF-8、可选 FreeType rasterizer、R8 Glyph atlas、DisplayList Glyph |
 | Input | Focus Scope/显式 focus、Pointer capture/cancel、Tab 与 committed 几何空间焦点、Keyboard/Gamepad activation、Menu/Dropdown/List/Tree/TabView navigation、TextEdit edit/selection/IME、Tooltip PointerHover/KeyboardFocus/Manual 与 monotonic delay、Splitter Pointer drag/RangeInput keyboard；UI Flow 固定 16 槽本地用户、Gamepad assignment 与 per-user 设备 revision |
@@ -109,7 +109,9 @@ Runtime phase facade 同样可切换/query role 和 reset override。
 `UIImageSource`、tint、sampling 与 content alignment；`makeIconElement(UIIconContent, layout)` 固定使用
 `UIImageFit::Contain`、居中默认值、`UIPointerHitPolicy::Ignore` 与 `UISemanticsMode::Exclude`。它继续消耗普通
 Image content slot 并复用 ImageQuad/resolver/pin/Texture2D/DisplayList/GPU shader，不是第二套图片、Asset、atlas
-或 GPU pipeline。icon-only Button 必须由 Button root 提供显式 name。`makeImageElement()` 只为独立表达信息的
+或 GPU pipeline。Button/RadioButton 可直接拥有与 text 互斥的 Image intrinsic content，使 control chrome、交互状态和
+图标共享同一 layout/paint 节点；这种 icon-only control 必须提供显式 semantics name，并关闭 content-as-name。
+其他带行为 Element 仍拒绝 Image content。`makeImageElement()` 只为独立表达信息的
 图片发布 Image role，并要求调用方显式给出 name，不能从 AssetId 或资源文件名推导可访问名称。
 
 ### 视觉组件 authoring profile
@@ -121,20 +123,22 @@ label。三者继续创建普通 Panel/Label Element，只复用 `UIStyleRoleId`
 storage 与现有 committed paint；不增加 Widget kind、side state、atlas 或 Render pipeline。Surface/Divider 默认
 Ignore hit，Divider 排除 semantics；Badge 发布只读 Label semantics，并以其完整文本作为 accessible name。
 
-`UIToggleSwitch.hpp` 的 `UIToggleSwitchConfig` 提供 Standard/Compact 尺寸与由 control root 发布的
-`accessibleName`；`makeToggleSwitchElement()` 默认创建 44x24 logical px 的 Standard switch。它解析为既有
+`UISwitch.hpp` 的 `UISwitchConfig` 提供 Standard/Compact 尺寸与由 control root 发布的
+`accessibleName`；`makeSwitchElement()` 默认创建 44x24 logical px 的 Standard switch。它解析为既有
 Checkbox built-in，复用同一个 Toggle value、Activate callback、Focus、Pointer/Keyboard/Gamepad、capacity、
-dirty transaction 与 UIA TogglePattern，只通过 `UIStyleRoleId::ToggleSwitch`、
+dirty transaction 与 UIA TogglePattern，只通过 `UIStyleRoleId::Switch`、
 `UIToggleIndicatorPresentation::Switch` 和 committed track/thumb geometry 区分外观。Semantics 使用
 `UISemanticsRole::Switch`，Windows UIA 映射为 CheckBox ControlType；没有第二套 Switch 状态机。
 
 ### 桌面多节点 composition profile
 
-`UIIconButtonConfig`、`UIFormFieldConfig`、`UIDialogConfig` 及对应 `Parts` 返回值提供第一方桌面组合入口。
-`requiredIconButtonBuildBudget()/requiredFormFieldBuildBudget()/requiredDialogBuildBudget()` 在 mutation 前计算精确
+`UIIconButtonConfig`、`UIFormFieldConfig`、`UIDialogConfig`、`UISnackbarHostConfig` 及对应 `Parts` 返回值提供第一方桌面组合入口。
+`requiredIconButtonBuildBudget()/requiredFormFieldBuildBudget()/requiredDialogBuildBudget()/requiredSnackbarHostBuildBudget()` 在 mutation 前计算精确
 node/text/Behavior 预算，`UIContext`、`UITreeUpdater` 与 `PrimaryWindowUITreeUpdater` 均提供
-`buildIconButton()/buildFormField()/buildDialog()`。IconButton 复用 Button + Icon + 独立 Tooltip；FormField 复用
-Label/TextEdit/Button/Tooltip；Dialog 复用 Modal/Panel/Label/Button。它们不新增 Behavior store、Modal/Focus owner、
+`buildIconButton()/buildFormField()/buildDialog()/buildSnackbarHost()`。IconButton 复用 Button + Icon + 独立 Tooltip；FormField 复用
+Label/TextEdit/Button/Tooltip；Dialog 复用 Modal/Panel/Label/Button；Snackbar 复用 Panel/Label/Button 与
+`FloatingSurface` elevation。Snackbar 状态使用调用方 fixed-capacity inline queue 和显式 monotonic sample，消息发布
+`Polite` live-region 且永不自动改变 Focus。它们不新增 Behavior store、Modal/Focus owner、
 update loop、Semantics pipeline 或 Render pipeline，失败时由同一 build transaction 回滚完整组合树。
 
 ### Tooltip 契约
@@ -758,6 +762,62 @@ collection/list/tree 与 footer 使用 Stretch/End 保持边距并扩展；字�
 `artifacts/screenshots/3d-product-ui-freetype-light-fixed/20260729-004012/frame-01.png`；实际双 mesh、
 集合控件、主题层级及动态 `10%`/`1%` 进度均清晰可见，没有裁剪或重叠。
 
+`TinaEditor` 的 Modern Desktop 源码迁移使用 Dark/Compact `UITheme`，并在 `createRoot()` 前绑定 density。
+根节点按 Command Bar、Document Tabs、Workspace、Status Bar 排列；context tools 合并在 active Viewport，Workspace 由三层
+`SplitView` 表达 Left Dock、Viewport、Inspector 与 Timeline，不引入 Dock Runtime 或第二棵 UI tree。
+Editor 的 Button/TextEdit/Tab、List/Tree row、Splitter、Status Bar 与 spacing/padding 读取 Theme metrics；
+旧的 Editor 局部 surface ColorToken、StyleClass 和自动换色路径已删除。Render viewport 仍只消费成功提交的
+retained layout rect，Scene/Asset/Render owner 与数据流未改变。2026-08-20 按 Editor 大功能规则完成统一增量
+build；`tina_ui_tests` 771/771、`tina_editor_tests` 114/114、`tina_editor_app_tests` 13/13。TinaEditor
+workspace、Color Picker 与 Delete Dialog 的产品取证均通过
+`IRenderDevice::capturePrimaryFrameRgba8()` 写出 2560x1600 RGBA8（16,384,000 bytes）；Color Picker capture
+还会验证 Color Field swatch/text-edit 与 R/G/B slider/value 的 committed rect 全部位于 Inspector viewport 内，避免只凭
+内部展开状态误报视觉通过。2D/3D `--auto-demo --frames=68` 均完成 stage 57 与最终 selection commit。
+
+`UIColorField` 统一承担 swatch 与规范化 `#RRGGBBAA` summary；展开的 `UIColorPicker` 不再重复同一颜色信息，
+每个通道行固定为 `R/G/B/A + Slider + 0..255`。通道数值由 fixed-capacity ASCII snapshot 生成，Slider 分别绑定
+`SliderRed/SliderGreen/SliderBlue/SliderAlpha` Theme role，因此 Dark/Light 切换会重算完整 slider chrome，
+不依赖会 detach Theme binding 的局部 paint override。Editor 在 selection publication 与 Slider callback 的下一次
+retained update 中同步 Color Field hex/swatch、全部 channel value 和 slider value。
+
+Editor Inspector 的 Transform 字段使用第一方 `UINumberField` 的 `Leading` placement：九个字段统一 authoring，
+World2D entity 只呈现 Position X/Y、Rotation Z、Scale X/Y，World3D entity 呈现完整九轴；Asset Inspector、
+TileMap document 或无 entity selection 时，Header、字段与 Apply 一并 `Collapsed`。每行 92 px label 与可伸缩
+content column 同行，不再各自拼装 Label/TextEdit/step Button；通用表单仍使用默认 `Above`。`Above` 的
+`parts.content` 等于 root，`Leading` 精确多一个 content node，固定预算保持可预检。Toolbar 的
+document path 使用 360 px preferred、160 px minimum 和 shrink，后接 grow spacer，窄窗口优先压缩路径而不
+挤压 mode/play/history/save 命令。六个固定 Tab 槽中空槽为 `Collapsed`，刷新时从统一 layout recipe 恢复
+`Visible`；普通信息文字使用 Theme primary，只有 warning/error feedback 使用对应 tone。Inspector 的 Transform、
+Sprite、Camera、PointLight、ShadowOccluder 与 SpriteAnimation 浮点显示统一经过 fixed-capacity、locale-independent
+`to_chars` snapshot，以 6 位有效数字去除无意义尾零；该 presentation 不改变输入解析、canonical document 或事务精度。
+组件折叠 Header 的收起/展开提示分别使用产品 atlas 提供的 ChevronRight/ChevronDown `UIIconContent`，两个 Icon node
+随同一 retained state 切换 visibility，不再用文本字符模拟图标。Timeline 六个帧槽保持固定 `44 logical px` 宽度，只显示帧号；
+选中帧 summary 承载 Sprite、时长和事件数，并在空间不足时以 ellipsis 绘制。当前帧使用 `ButtonPrimary` chrome，
+其余与空槽使用 `ButtonOutlined`，不再在标签前拼接 `>`。
+
+Inspector Components 按 selection/workspace 发布：World2D entity 只显示五个 2D section，World3D entity 只显示
+`MeshRenderer3D`；Asset Inspector、TileMap document 或无 entity selection 时折叠 Components Header 与全部
+collapsible root。context 切换不覆盖各 section 的 retained expanded state。
+Hierarchy 的 Header、Parent ID 行与 Apply Parent wrapper 仅在 entity context 发布，TileMap 的 Header、状态摘要与
+四个 action row 仅在 TileMap document 发布。Asset Inspector 因而只保留 Identity、asset metadata/dependencies 与
+Document，Scene entity 保留 Identity、Transform、Components、Hierarchy 与 Document，TileMap document 保留
+Identity、TileMap 与 Document；Scene 无 entity selection 时只保留 Identity 与 Document。切换只更新构建时保存的
+完整 root layout 的 `visibility`，不会破坏 PropertyRow 的 Row/Center/gap、IconButton wrapper 的居中布局或 section state。
+
+Project Assets 的 compact virtual grid 使用 120 logical px 最小格宽和固定 compact 行高；格子显示类型优先的
+`AssetKind #abcd` 短标签。完整 canonical AssetId 由网格下固定 22 logical px 的 selected summary 与 Inspector 保留，
+summary 在窄 Dock 中只做单行 ellipsis，不改变 retained 文本、格子尺寸或下游布局。Project Open 使用 FolderOpen，
+打开当前 Asset 使用 divider 后的 ArrowRight，两个命令不再共享图形。
+
+EditorApp 私有 `EditorPanelHeader` 以无圆角、无描边的扁平 surface band 统一 Dock、Inspector 与 Timeline 顶栏，
+actions 区占据剩余宽度并末端对齐；`EditorSectionHeader` 以固定 3 节点组合标题与可伸缩 subtle Divider，统一 Inspector
+的 Identity、Transform、Components、Hierarchy、TileMap 与 Document 六个 authoring 段，并按 context 仅发布有效段。
+Hierarchy、Project Assets、Source Imports
+计数使用 Neutral Badge，Inspector selection 使用 Accent Badge。原 `Authoring` 提示段、`Move X +1` 调试按钮及重复的
+静态说明已从可见树删除，编辑结果只由现有 `UISnackbarHost` 发布。Status document/runtime 按 0.8/1.2 分配剩余
+宽度，二者与 Snackbar message 都使用 ellipsis，完整 retained/semantics 文本不变；command、document transaction
+与 auto-demo 路径不变。
+
 bgfx glyph atlas 必须保持可变：向 `createTexture2D` 传入 initial memory 会创建 immutable texture，
 导致运行时新 glyph 的 `updateTexture2D` 被拒绝。当前实现以 `nullptr` 创建 R8 atlas，并让首次和后续上传
 统一走 update 路径；首次上传失败会立即销毁 texture。`tina_render_bgfx_tests` 中的生产源码合同测试覆盖
@@ -849,7 +909,7 @@ Back/Confirm/Menu 之外的任意 action-id 仍属于独立后续扩展。
 
 | ID | 范围 |
 | --- | --- |
-| `UI-MODERN-DESKTOP-001` | InProgress：TMD-00..06 已完成并通过集中 UI/Runtime/UI-Render/UIA 门禁；TMD-07 Showcase Desktop workbench 源码/文档已实现并进入集中 gate，TMD-08 Desktop Shell、产品/Editor 迁移、OS scheme 与最终视觉/产品门禁仍待完成；完整规范见 [Tina Modern Desktop UI](ui-modern-desktop.md) |
+| `UI-MODERN-DESKTOP-001` | InProgress：TMD-00..07 已完成并通过集中 UI/Runtime/UI-Render/UIA 门禁；TMD-08 Desktop Shell reference 已完成结构、嵌套 SplitView、正式 TabView、Menu/Dialog/Tooltip、Splitter、产品 icon atlas 与响应式档位，真实 DPI 专用门禁已就绪。TMD-09 Editor/2D/3D 迁移与 TMD-10 OS scheme 已通过 2026-08-19 集中 build、定向测试、产品 smoke 和 installed DesktopBootstrap consumer gate。TMD-11 已通过 `tina_bench_tests` 10/10 与 Static/Component/Style/Motion 冻结 workload 确定性 gate，开发机墙钟仍为 provisional，固定机 hard gate 继续由 PERF-002 跟踪。当前宿主固定 200%，仍待 Desktop Shell 100%/150% 配对视觉报告及最终文档收口；完整规范见 [Tina Modern Desktop UI](ui-modern-desktop.md) |
 | `UI-002` | Windows UIA：tip 跨进程 gate 证据已固化（2026-08-03）；待 Narrator/Inspect 人工金标 |
 | `UI-003` | 跨 DPI/GPU 容差视觉门禁（映射单测 + 单机 ROI/baseline + content-scale-like 逻辑尺寸矩阵 + sample contentScale JSON + 字体 identity fingerprint 已有；2026-08-10 当前 Windows 宿主 100%/150%/200% raster baseline 已分别通过独立复跑；多显示器混合 DPI 与跨 GPU 像素金标后置） |
 | `TEXT-001` | InProgress：T1 多行、T2 UAX #29 grapheme 子集、T3 Windows IMM32 placement 的代码/自动 gate 已完成；BiDi/复杂 shaping、Linux 原生 XIM/Wayland 与 Windows 真机 IME 人工证据待补 |

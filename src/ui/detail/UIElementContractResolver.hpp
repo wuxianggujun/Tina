@@ -27,6 +27,13 @@ struct BuiltinSemanticsDefaults final {
     return role >= UISemanticsRole::Group && role <= UISemanticsRole::Switch;
 }
 
+[[nodiscard]] constexpr bool
+isValidSemanticsLiveSetting(UISemanticsLiveSetting setting) noexcept
+{
+    return setting >= UISemanticsLiveSetting::Off &&
+           setting <= UISemanticsLiveSetting::Assertive;
+}
+
 [[nodiscard]] constexpr bool isValidSemanticsActions(UISemanticsAction actions) noexcept
 {
     constexpr u8 AllActions = static_cast<u8>(UISemanticsAction::Focus) |
@@ -39,7 +46,7 @@ struct BuiltinSemanticsDefaults final {
 
 [[nodiscard]] constexpr bool isValidElementBehaviors(UIElementBehavior behaviors) noexcept
 {
-    constexpr u32 AllBehaviors = (1U << 16U) - 1U;
+    constexpr u32 AllBehaviors = (1U << 22U) - 1U;
     return (static_cast<u32>(behaviors) & ~AllBehaviors) == 0;
 }
 
@@ -87,6 +94,20 @@ defaultBehaviorsForKind(BuiltinElementKind kind) noexcept
     case BuiltinElementKind::TreeViewItem:
         return UIElementBehavior::Focusable | UIElementBehavior::Activate |
                UIElementBehavior::VirtualTreeItem;
+    case BuiltinElementKind::VirtualGridView:
+        return UIElementBehavior::Focusable | UIElementBehavior::VirtualGrid;
+    case BuiltinElementKind::VirtualGridViewItem:
+        return UIElementBehavior::Focusable | UIElementBehavior::Activate |
+               UIElementBehavior::VirtualGridItem;
+    case BuiltinElementKind::DataGrid:
+        return UIElementBehavior::Focusable | UIElementBehavior::DataGrid;
+    case BuiltinElementKind::DataGridRow:
+        return UIElementBehavior::DataGridRow;
+    case BuiltinElementKind::DataGridCell:
+        return UIElementBehavior::Focusable | UIElementBehavior::Activate |
+               UIElementBehavior::DataGridCell;
+    case BuiltinElementKind::DataGridColumnHeader:
+        return UIElementBehavior::DataGridColumnHeader;
     case BuiltinElementKind::Tab:
         return UIElementBehavior::Focusable | UIElementBehavior::Activate;
     case BuiltinElementKind::Splitter:
@@ -135,11 +156,19 @@ defaultStyleRoleForKind(BuiltinElementKind kind) noexcept
     case BuiltinElementKind::DropdownItem:
     case BuiltinElementKind::ListViewItem:
     case BuiltinElementKind::TreeViewItem:
+    case BuiltinElementKind::VirtualGridViewItem:
+    case BuiltinElementKind::DataGridCell:
         return UIStyleRoleId::CollectionItem;
     case BuiltinElementKind::ListView:
         return UIStyleRoleId::ListView;
     case BuiltinElementKind::TreeView:
         return UIStyleRoleId::TreeView;
+    case BuiltinElementKind::VirtualGridView:
+        return UIStyleRoleId::VirtualGridView;
+    case BuiltinElementKind::DataGrid:
+        return UIStyleRoleId::DataGrid;
+    case BuiltinElementKind::DataGridColumnHeader:
+        return UIStyleRoleId::TextSecondary;
     case BuiltinElementKind::Tab:
         return UIStyleRoleId::Tab;
     case BuiltinElementKind::Tooltip:
@@ -154,6 +183,7 @@ defaultStyleRoleForKind(BuiltinElementKind kind) noexcept
     case BuiltinElementKind::Panel:
     case BuiltinElementKind::SplitView:
     case BuiltinElementKind::TabView:
+    case BuiltinElementKind::DataGridRow:
         return UIStyleRoleId::None;
     }
     return UIStyleRoleId::None;
@@ -225,6 +255,8 @@ defaultSemanticsForKind(BuiltinElementKind kind) noexcept
         break;
     case BuiltinElementKind::DropdownItem:
     case BuiltinElementKind::ListViewItem:
+    case BuiltinElementKind::VirtualGridViewItem:
+    case BuiltinElementKind::DataGridCell:
         defaults.role = UISemanticsRole::ListItem;
         defaults.actions = UISemanticsAction::Focus | UISemanticsAction::Activate;
         defaults.useContentAsName = true;
@@ -236,6 +268,22 @@ defaultSemanticsForKind(BuiltinElementKind kind) noexcept
     case BuiltinElementKind::TreeView:
         defaults.role = UISemanticsRole::Tree;
         defaults.actions = UISemanticsAction::Focus;
+        break;
+    case BuiltinElementKind::VirtualGridView:
+        defaults.role = UISemanticsRole::List;
+        defaults.actions = UISemanticsAction::Focus;
+        break;
+    case BuiltinElementKind::DataGrid:
+        defaults.role = UISemanticsRole::Group;
+        defaults.actions = UISemanticsAction::Focus;
+        break;
+    case BuiltinElementKind::DataGridRow:
+        defaults.mode = UISemanticsMode::Automatic;
+        break;
+    case BuiltinElementKind::DataGridColumnHeader:
+        defaults.role = UISemanticsRole::Label;
+        defaults.useContentAsName = true;
+        defaults.readOnly = true;
         break;
     case BuiltinElementKind::TreeViewItem:
         defaults.role = UISemanticsRole::TreeItem;

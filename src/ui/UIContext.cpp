@@ -19,9 +19,13 @@
 #include "detail/UIControlPaintEmitter.hpp"
 #include "detail/UIControlValuePrimitives.hpp"
 #include "detail/UIContextLifetimeControl.hpp"
+#include "detail/UIDataGridLayout.hpp"
+#include "detail/UIDataGridStateStorage.hpp"
 #include "detail/UIElementContractResolver.hpp"
 #include "detail/UIFlexLayout.hpp"
 #include "detail/UIFocusNavigation.hpp"
+#include "detail/UIGridCommandNavigation.hpp"
+#include "detail/UIGridScrollBarGeometry.hpp"
 #include "detail/UIGraphemeBreak.hpp"
 #include "detail/UIDefaultActionPressState.hpp"
 #include "detail/UIDirtyQueueStorage.hpp"
@@ -55,10 +59,12 @@
 #include "detail/UIStyleRoleResolver.hpp"
 #include "detail/UIStyleSheetStorage.hpp"
 #include "detail/UIThemeTransitionResolver.hpp"
-#include "detail/UIToggleSwitchGeometry.hpp"
+#include "detail/UISwitchGeometry.hpp"
 #include "detail/UITooltipLayout.hpp"
 #include "detail/UITooltipStateStorage.hpp"
 #include "detail/UIVirtualCollectionLayout.hpp"
+#include "detail/UIVirtualGridLayout.hpp"
+#include "detail/UIVirtualGridViewStateStorage.hpp"
 #include "detail/UITextEditModel.hpp"
 #include "detail/UITextEditPaintEmitter.hpp"
 #include "detail/UITextStorage.hpp"
@@ -107,6 +113,11 @@ using Detail::defaultContentAlignment;
 using Detail::defaultSemanticsForKind;
 using Detail::defaultStyleRoleForKind;
 using Detail::DropdownState;
+using Detail::DataGridCellState;
+using Detail::DataGridColumnState;
+using Detail::DataGridLayoutScratch;
+using Detail::DataGridRowState;
+using Detail::DataGridState;
 using Detail::FlexLineSummary;
 using Detail::hasLayoutWork;
 using Detail::horizontalMargin;
@@ -137,9 +148,11 @@ using Detail::ListViewState;
 using Detail::MenuItemState;
 using Detail::MenuState;
 using Detail::makeListViewScrollBarGeometry;
+using Detail::makeDataGridScrollBarGeometry;
 using Detail::makeScrollBarGeometry;
 using Detail::makeTreeViewDisclosureRect;
 using Detail::makeTreeViewScrollBarGeometry;
+using Detail::makeVirtualGridViewScrollBarGeometry;
 using Detail::normalizedRangeFraction;
 using Detail::normalizeBoxPaint;
 using Detail::normalizeDropdownPaint;
@@ -156,6 +169,13 @@ using Detail::normalizeScrollViewStyle;
 using Detail::normalizeTreeViewCreateConfig;
 using Detail::normalizeTreeViewPaint;
 using Detail::normalizeTreeViewStyle;
+using Detail::normalizeVirtualGridViewCreateConfig;
+using Detail::normalizeVirtualGridViewPaint;
+using Detail::normalizeVirtualGridViewStyle;
+using Detail::normalizeDataGridCreateConfig;
+using Detail::normalizeDataGridPaint;
+using Detail::normalizeDataGridStyle;
+using Detail::resolveVirtualGridViewCommandNavigation;
 using Detail::NormalizedUIContextCapacityConfig;
 using Detail::makeNineSlicePatches;
 using Detail::planTextEditCommand;
@@ -180,6 +200,8 @@ using Detail::resolveScrollTrackPageOffset;
 using Detail::resolveScrollWheelOffset;
 using Detail::resolveSliderValueFromPointer;
 using Detail::resolveVirtualCollectionLayout;
+using Detail::resolveVirtualGridItemRect;
+using Detail::resolveVirtualGridLayout;
 using Detail::resolveVirtualRowScrollOffset;
 using Detail::resolveVirtualScrollWheelOffset;
 using Detail::resolvedHeight;
@@ -203,6 +225,10 @@ using Detail::textEditCodepointFromHorizontalPosition;
 using Detail::TreeViewItemState;
 using Detail::TreeViewLayoutScratch;
 using Detail::TreeViewState;
+using Detail::VirtualGridLayoutError;
+using Detail::VirtualGridViewItemState;
+using Detail::VirtualGridViewLayoutScratch;
+using Detail::VirtualGridViewState;
 using Detail::utf8ByteOffsetForCodepoint;
 using Detail::validateSemanticsContract;
 using Detail::verticalMargin;
@@ -228,6 +254,7 @@ using Detail::TabViewState;
 using Detail::TabState;
 using Detail::isValidTabViewCommand;
 using Detail::isValidMenuCommand;
+using Detail::isValidMenuInvocationCommand;
 using Detail::resolveTabViewRegions;
 using Detail::ProgressBarState;
 using Detail::RadioButtonState;
@@ -239,6 +266,7 @@ using Detail::ThemeBindingBoxPaint;
 using Detail::ThemeBindingButtonPaint;
 using Detail::ThemeBindingCheckboxPaint;
 using Detail::ThemeBindingDropdownPaint;
+using Detail::ThemeBindingGridPaint;
 using Detail::ThemeBindingImageTint;
 using Detail::ThemeBindingListViewPaint;
 using Detail::ThemeBindingProgressBarPaint;
@@ -277,13 +305,17 @@ void configureCollectionRowLayout(UILayoutStyle& layout, float rowHeight,
 {
     return kind == BuiltinElementKind::TextEdit || kind == BuiltinElementKind::Dropdown ||
            kind == BuiltinElementKind::ListView || kind == BuiltinElementKind::TreeView ||
+           kind == BuiltinElementKind::VirtualGridView ||
+           kind == BuiltinElementKind::DataGrid ||
            kind == BuiltinElementKind::Splitter;
 }
 
 [[nodiscard]] constexpr bool isCompositeFocusItem(BuiltinElementKind kind) noexcept
 {
     return kind == BuiltinElementKind::DropdownItem || kind == BuiltinElementKind::ListViewItem ||
-           kind == BuiltinElementKind::TreeViewItem;
+           kind == BuiltinElementKind::TreeViewItem ||
+           kind == BuiltinElementKind::VirtualGridViewItem ||
+           kind == BuiltinElementKind::DataGridCell;
 }
 
 struct NodeRecord final {
@@ -305,6 +337,7 @@ struct SemanticsState final {
     UISemanticsMode mode = UISemanticsMode::Automatic;
     UISemanticsRole role = UISemanticsRole::Group;
     UISemanticsAction actions = UISemanticsAction::None;
+    UISemanticsLiveSetting liveSetting = UISemanticsLiveSetting::Off;
     bool hasExplicitName = false;
     bool hasExplicitDescription = false;
     bool useContentAsName = false;
@@ -775,9 +808,17 @@ struct UIContext::Impl final {
     UISplitViewStateStorage splitViewStorage;
     UITabViewStateStorage tabViewStorage;
     UIMenuStateStorage menuStorage;
+    std::pmr::vector<UINodeId> menuMutationNodeScratch;
     std::pmr::vector<ListViewState> listViewStatesByNodeIndex;
     std::pmr::vector<ListViewLayoutScratch> listViewLayoutScratchByNodeIndex;
     std::pmr::vector<ListViewItemState> listViewItemStatesByNodeIndex;
+    Detail::UIVirtualGridViewStateStorage virtualGridViewStorage;
+    std::pmr::vector<UINodeId> virtualGridItemLinkScratch;
+    Detail::UIDataGridStateStorage dataGridStorage;
+    std::pmr::vector<UINodeId> dataGridColumnLinkScratch;
+    std::pmr::vector<UINodeId> dataGridRowLinkScratch;
+    std::pmr::vector<UINodeId> dataGridCellLinkScratch;
+    std::pmr::vector<float> dataGridColumnWidthScratch;
     std::pmr::vector<TreeViewState> treeViewStatesByNodeIndex;
     std::pmr::vector<TreeViewLayoutScratch> treeViewLayoutScratchByNodeIndex;
     std::pmr::vector<TreeViewItemState> treeViewItemStatesByNodeIndex;
@@ -902,18 +943,27 @@ struct UIContext::Impl final {
         dropdownCommandPressLatch;
     Detail::UICommandPressLatch<UIListViewCommand, UIListViewCommand::Activate>
         listViewCommandPressLatch;
+    Detail::UICommandPressLatch<UIVirtualGridViewCommand,
+                                UIVirtualGridViewCommand::Activate>
+        virtualGridViewCommandPressLatch;
+    Detail::UICommandPressLatch<UIDataGridCommand, UIDataGridCommand::Activate>
+        dataGridCommandPressLatch;
     Detail::UICommandPressLatch<UITreeViewCommand, UITreeViewCommand::Activate>
         treeViewCommandPressLatch;
     Detail::UICommandPressLatch<UIFocusNavigationDirection, UIFocusNavigationDirection::Down>
         focusNavigationPressLatch;
     Detail::UICommandPressLatch<UITabViewCommand, UITabViewCommand::Last>
         tabViewCommandPressLatch;
-    Detail::UICommandPressLatch<UIMenuCommand, UIMenuCommand::Dismiss>
+    Detail::UICommandPressLatch<UIMenuCommand, UIMenuCommand::CloseSubmenu>
         menuCommandPressLatch;
+    Detail::UICommandPressLatch<UIMenuInvocationCommand,
+                                UIMenuInvocationCommand::ShiftF10>
+        menuInvocationPressLatch;
     Detail::UICommandPressLatch<UIFocusNavigationDirection, UIFocusNavigationDirection::Down>
         tabViewDirectionPressLatch;
     bool armedTreeDisclosure = false;
     bool transientOverlayDismissPointerBarrierActive = false;
+    bool secondaryMenuInvocationPressLatched = false;
     UINodeId pendingDestroyedModalRestoreFocus{};
     bool hasPendingDestroyedModalRestoreFocus = false;
     // Last Button that received Primary Pointer arm. Keyboard/Gamepad Accept
@@ -984,8 +1034,16 @@ struct UIContext::Impl final {
           splitViewStorage(capacities.nodeCapacity, resource),
           tabViewStorage(capacities.nodeCapacity, resource),
           menuStorage(capacities.nodeCapacity, resource),
+          menuMutationNodeScratch(&resource),
           listViewStatesByNodeIndex(&resource),
           listViewLayoutScratchByNodeIndex(&resource), listViewItemStatesByNodeIndex(&resource),
+          virtualGridViewStorage(capacities.nodeCapacity, resource),
+          virtualGridItemLinkScratch(&resource),
+          dataGridStorage(capacities.nodeCapacity, resource),
+          dataGridColumnLinkScratch(&resource),
+          dataGridRowLinkScratch(&resource),
+          dataGridCellLinkScratch(&resource),
+          dataGridColumnWidthScratch(&resource),
           treeViewStatesByNodeIndex(&resource), treeViewLayoutScratchByNodeIndex(&resource),
           treeViewItemStatesByNodeIndex(&resource),
           textStorage(capacities.textByteCapacity, capacities.nodeCapacity * 2U, resource),
@@ -1071,6 +1129,12 @@ struct UIContext::Impl final {
         impl->motionClock = &impl->motionDefaultClock;
         impl->timelineLayoutNodeScratch.reserve(normalized.timelineTrackCapacity);
         impl->timelinePaintNodeScratch.reserve(normalized.timelineTrackCapacity);
+        impl->menuMutationNodeScratch.reserve(normalized.nodeCapacity);
+        impl->virtualGridItemLinkScratch.reserve(normalized.nodeCapacity);
+        impl->dataGridColumnLinkScratch.reserve(normalized.nodeCapacity);
+        impl->dataGridRowLinkScratch.reserve(normalized.nodeCapacity);
+        impl->dataGridCellLinkScratch.reserve(normalized.nodeCapacity);
+        impl->dataGridColumnWidthScratch.reserve(normalized.nodeCapacity);
         impl->presentationOpacityByNodeIndex.resize(normalized.nodeCapacity, 1.0F);
         impl->presentationOpacityValidByNodeIndex.resize(normalized.nodeCapacity, 0);
         impl->presentationOffsetXByNodeIndex.resize(normalized.nodeCapacity, 0.0F);
@@ -1382,8 +1446,7 @@ struct UIContext::Impl final {
             }
             if (record->kind == BuiltinElementKind::Menu && index < menuStorage.capacity())
             {
-                const MenuState* menu = menuStorage.tryMenu(idForIndex(index));
-                if (menu == nullptr || !menu->open)
+                if (!menuStorage.isOpen(idForIndex(index)))
                 {
                     ownVisibility = UIVisibility::Collapsed;
                 }
@@ -1795,10 +1858,10 @@ struct UIContext::Impl final {
         MenuState* menu = menuStorage.tryMenu(idForIndex(menuIndex));
         LayoutScratchState& menuScratch = layoutScratchByIndex[menuIndex];
         const UINodeId menuNode = idForIndex(menuIndex);
-        const UINodeId anchor = menu != nullptr ? menu->anchor : UINodeId{};
+        const UINodeId anchor = menuPlacementAnchor(menuNode);
         const UICommittedLayoutEntry* anchorEntry = committedLayoutEntryFor(anchor);
-        if (menu == nullptr || !menu->open || menuStorage.activeMenu() != menuNode ||
-            !hasValidMenuRelationship(menuNode, anchor) || anchorEntry == nullptr ||
+        if (menu == nullptr || !menuStorage.isOpen(menuNode) ||
+            !hasValidMenuPlacementRelationship(menuNode, anchor) || anchorEntry == nullptr ||
             anchorEntry->effectiveVisibility != UIVisibility::Visible ||
             !isNodeEnabled(menuNode) || !isNodeEnabled(anchor) ||
             !isAuthoredTooltipNodeVisible(menuNode) ||
@@ -1811,12 +1874,22 @@ struct UIContext::Impl final {
         }
 
         refreshMeasuredSizeForParentContent(menuIndex, viewportRect, statistics);
+        const UILogicalRect placementAnchorRect =
+            menuStorage.hasInvocationAnchorRect(menuNode)
+                ? menuStorage.invocationAnchorRect(menuNode)
+                : anchorEntry->worldRect;
+        UIMenuConfig placementConfig = menu->config;
+        if (menuStorage.parentItemForMenu(menuNode).hasValue() &&
+            placementConfig.placement == UIMenuPlacement::Auto)
+        {
+            placementConfig.placement = UIMenuPlacement::Right;
+        }
         const auto resolved = resolveMenuPlacement(
-            presentationLayoutStyle(menuIndex), menuScratch, menu->config,
-            anchorEntry->worldRect, viewportRect, statistics);
+            presentationLayoutStyle(menuIndex), menuScratch, placementConfig,
+            placementAnchorRect, viewportRect, statistics);
         assignLayoutRect(menuIndex, resolved.rect, parentWorldRect, viewportRect);
         menuStorage.layoutScratchByIndex(menuIndex).metrics = UIMenuMetrics{
-            .anchorRect = anchorEntry->worldRect,
+            .anchorRect = placementAnchorRect,
             .menuRect = resolved.rect,
             .resolvedPlacement = resolved.placement,
             .open = menuScratch.effectiveVisibility == UIVisibility::Visible,
@@ -2011,6 +2084,592 @@ struct UIContext::Impl final {
                              },
                              parentWorldRect, rowClip);
             ++materializedOrdinal;
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status bindVirtualGridViewItem(
+        UINodeId item, u64 logicalIndex,
+        const UIVirtualGridViewItemDescriptor& descriptor)
+    {
+        if (item.index() >= textStatesByIndex.size() ||
+            virtualGridViewStorage.tryItem(item) == nullptr)
+        {
+            return fail(Core::CoreErrorCode::Internal,
+                        "UI VirtualGridView item side state is out of range");
+        }
+        if (descriptor.key == InvalidUIVirtualGridViewItemKey ||
+            containsLineBreak(descriptor.label))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI VirtualGridView item requires a non-zero key and a single-line label");
+        }
+        if (descriptor.label.size() > (std::numeric_limits<u32>::max)())
+        {
+            return fail(UIErrorCode::CapacityExceeded,
+                        "UI VirtualGridView item label is too large");
+        }
+
+        WidgetTextState& text = textStatesByIndex[item.index()];
+        auto metrics = measureWidgetText(descriptor.label, text.style);
+        if (!metrics)
+        {
+            return Core::failure(metrics.error());
+        }
+
+        TextByteAllocation replacement{};
+        bool replaceAllocation = false;
+        if (!descriptor.label.empty() &&
+            text.allocation.capacity < descriptor.label.size())
+        {
+            auto allocation =
+                textStorage.allocate(static_cast<u32>(descriptor.label.size()));
+            if (!allocation)
+            {
+                return Core::failure(allocation.error());
+            }
+            replacement = *allocation;
+            replaceAllocation = true;
+        }
+        if (descriptor.label.empty())
+        {
+            textStorage.release(text.allocation);
+            text.allocation = {};
+            text.length = 0;
+            text.metrics = {};
+            text.hasContent = false;
+        }
+        else
+        {
+            if (replaceAllocation)
+            {
+                textStorage.release(text.allocation);
+                text.allocation = replacement;
+            }
+            textStorage.write(text.allocation, descriptor.label);
+            text.length = static_cast<u32>(descriptor.label.size());
+            text.metrics = *metrics;
+            text.hasContent = true;
+        }
+        localTextColorCacheByIndex[item.index()] =
+            text.hasContent ? premultiply(text.style.color)
+                            : UIPremultipliedRgba8Color{};
+        if (!virtualGridViewStorage.bindItem(
+                item, descriptor.key, logicalIndex, descriptor.enabled))
+        {
+            return fail(Core::CoreErrorCode::Internal,
+                        "UI VirtualGridView item binding failed");
+        }
+        return Core::success();
+    }
+
+    void collapseVirtualGridViewItems(
+        UINodeId virtualGridView, UILogicalRect contentRect,
+        UILogicalRect parentWorldRect, UILogicalRect descendantClip) noexcept
+    {
+        if (VirtualGridViewLayoutScratch* scratch =
+                virtualGridViewStorage.tryLayoutScratch(virtualGridView))
+        {
+            *scratch = {};
+        }
+        VirtualGridViewState* state =
+            virtualGridViewStorage.tryView(virtualGridView);
+        if (state == nullptr)
+        {
+            return;
+        }
+        UINodeId item = state->firstMaterializedItem;
+        for (u32 visited = 0;
+             item.hasValue() && visited < state->linkedMaterializedItemCount;
+             ++visited)
+        {
+            VirtualGridViewItemState* itemState =
+                virtualGridViewStorage.tryItem(item);
+            if (itemState == nullptr ||
+                itemState->virtualGridView != virtualGridView)
+            {
+                break;
+            }
+            const UINodeId next = itemState->nextItem;
+            virtualGridViewStorage.clearItemBinding(item);
+            layoutScratchByIndex[item.index()].effectiveVisibility =
+                UIVisibility::Collapsed;
+            assignLayoutRect(
+                item.index(), contentRect, parentWorldRect, descendantClip);
+            item = next;
+        }
+    }
+
+    [[nodiscard]] Core::Status arrangeVirtualGridViewItems(
+        UINodeId virtualGridView, UILogicalRect unscrolledContentRect,
+        UILogicalRect parentWorldRect, UILogicalRect descendantClip)
+    {
+        VirtualGridViewState* state =
+            virtualGridViewStorage.tryView(virtualGridView);
+        VirtualGridViewLayoutScratch* layout =
+            virtualGridViewStorage.tryLayoutScratch(virtualGridView);
+        if (state == nullptr || layout == nullptr ||
+            !virtualGridViewStorage.relationshipValid(virtualGridView))
+        {
+            return fail(Core::CoreErrorCode::Internal,
+                        "UI VirtualGridView item pool relationship is invalid");
+        }
+        const u64 logicalItemCount = state->dataSource.hasValue()
+                                         ? state->dataSource.itemCount(
+                                               state->dataSource.state)
+                                         : 0;
+        const auto resolved = resolveVirtualGridLayout({
+            .logicalItemCount = logicalItemCount,
+            .materializedItemCapacity = state->materializedItemCapacity,
+            .minimumItemWidth = state->style.minimumItemWidth,
+            .itemHeight = state->style.itemHeight,
+            .columnGap = state->style.columnGap,
+            .rowGap = state->style.rowGap,
+            .maximumColumnCount = state->style.maximumColumnCount,
+            .overscanRows = state->style.overscanRows,
+            .scrollBarVisibility = state->style.scrollBarVisibility,
+            .scrollBarThickness = state->paint.scrollBar.thickness,
+            .requestedScrollOffset = state->requestedScrollOffset,
+            .availableRect = unscrolledContentRect,
+        });
+        if (!resolved)
+        {
+            switch (resolved.error())
+            {
+            case VirtualGridLayoutError::ContentHeightNotRepresentable:
+                return fail(UIErrorCode::InvalidControlValue,
+                            "UI VirtualGridView logical content height is not representable");
+            case VirtualGridLayoutError::MaterializedRangeExceedsCapacity:
+                return fail(UIErrorCode::CapacityExceeded,
+                            "UI VirtualGridView item pool cannot cover the viewport and configured overscan");
+            case VirtualGridLayoutError::InvalidGeometry:
+                return fail(UIErrorCode::InvalidControlValue,
+                            "UI VirtualGridView layout geometry is invalid");
+            }
+        }
+        const auto& plan = *resolved;
+        *layout = VirtualGridViewLayoutScratch{
+            .metrics =
+                UIVirtualGridViewMetrics{
+                    .logicalItemCount = logicalItemCount,
+                    .logicalRowCount = plan.logicalRowCount,
+                    .logicalColumnCount = plan.logicalColumnCount,
+                    .firstVisibleRow = plan.firstVisibleRow,
+                    .visibleRowCount = static_cast<u32>(plan.visibleRowCount),
+                    .firstMaterializedRow = plan.firstMaterializedRow,
+                    .materializedRowCount =
+                        static_cast<u32>(plan.materializedRowCount),
+                    .firstMaterializedIndex = plan.firstMaterializedIndex,
+                    .materializedItemCount =
+                        static_cast<u32>(plan.materializedItemCount),
+                    .materializedItemCapacity =
+                        state->materializedItemCapacity,
+                    .itemWidth = plan.itemWidth,
+                    .scrollOffset = plan.scrollOffset,
+                    .maxScrollOffset = plan.maximumScrollOffset,
+                    .viewportSize = plan.viewportRect.size(),
+                    .contentSize = plan.contentSize,
+                    .verticalScrollBarVisible =
+                        plan.verticalScrollBarVisible,
+                },
+            .viewportRect = plan.viewportRect,
+        };
+
+        const UIVisibility itemVisibility =
+            layoutScratchByIndex[virtualGridView.index()].effectiveVisibility;
+        const UILogicalRect itemClip =
+            intersectRects(descendantClip, plan.viewportRect);
+        UINodeId item = state->firstMaterializedItem;
+        u64 materializedOrdinal = 0;
+        for (u32 visited = 0;
+             item.hasValue() && visited < state->linkedMaterializedItemCount;
+             ++visited)
+        {
+            VirtualGridViewItemState* itemState =
+                virtualGridViewStorage.tryItem(item);
+            if (itemState == nullptr ||
+                itemState->virtualGridView != virtualGridView)
+            {
+                return fail(Core::CoreErrorCode::Internal,
+                            "UI VirtualGridView item pool traversal failed");
+            }
+            const UINodeId next = itemState->nextItem;
+            if (materializedOrdinal >= plan.materializedItemCount)
+            {
+                virtualGridViewStorage.clearItemBinding(item);
+                layoutScratchByIndex[item.index()].effectiveVisibility =
+                    UIVisibility::Collapsed;
+                assignLayoutRect(
+                    item.index(), plan.viewportRect, parentWorldRect, itemClip);
+                item = next;
+                continue;
+            }
+
+            const u64 logicalIndex =
+                plan.firstMaterializedIndex + materializedOrdinal;
+            auto descriptor = resolveVirtualGridViewLogicalItem(
+                virtualGridView, logicalIndex);
+            if (!descriptor)
+            {
+                return Core::failure(descriptor.error());
+            }
+            if (Core::Status bound = bindVirtualGridViewItem(
+                    item, logicalIndex, *descriptor);
+                !bound)
+            {
+                return bound;
+            }
+            if (textStatesByIndex[item.index()].metrics.measuredSize.height >
+                state->style.itemHeight + CollectionRowTextFitTolerance)
+            {
+                return fail(UIErrorCode::InvalidControlValue,
+                            "UI VirtualGridView item height is smaller than its text line box");
+            }
+            configureCollectionRowLayout(
+                layoutStylesByIndex[item.index()], state->style.itemHeight);
+            layoutScratchByIndex[item.index()].effectiveVisibility =
+                itemVisibility;
+            assignLayoutRect(
+                item.index(), resolveVirtualGridItemRect(plan, logicalIndex),
+                parentWorldRect, itemClip);
+            ++materializedOrdinal;
+            item = next;
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status bindDataGridText(
+        UINodeId node, std::string_view value)
+    {
+        if (node.index() >= textStatesByIndex.size() || containsLineBreak(value))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI DataGrid text must be a single line");
+        }
+        if (value.size() > (std::numeric_limits<u32>::max)())
+        {
+            return fail(UIErrorCode::CapacityExceeded,
+                        "UI DataGrid text is too large");
+        }
+        WidgetTextState& text = textStatesByIndex[node.index()];
+        auto metrics = measureWidgetText(value, text.style);
+        if (!metrics)
+        {
+            return Core::failure(metrics.error());
+        }
+        TextByteAllocation replacement{};
+        bool replaceAllocation = false;
+        if (!value.empty() && text.allocation.capacity < value.size())
+        {
+            auto allocation = textStorage.allocate(static_cast<u32>(value.size()));
+            if (!allocation)
+            {
+                return Core::failure(allocation.error());
+            }
+            replacement = *allocation;
+            replaceAllocation = true;
+        }
+        if (value.empty())
+        {
+            textStorage.release(text.allocation);
+            text = WidgetTextState{.style = text.style, .overflow = text.overflow};
+        }
+        else
+        {
+            if (replaceAllocation)
+            {
+                textStorage.release(text.allocation);
+                text.allocation = replacement;
+            }
+            textStorage.write(text.allocation, value);
+            text.length = static_cast<u32>(value.size());
+            text.metrics = *metrics;
+            text.hasContent = true;
+        }
+        localTextColorCacheByIndex[node.index()] =
+            text.hasContent ? premultiply(text.style.color)
+                            : UIPremultipliedRgba8Color{};
+        return Core::success();
+    }
+
+    void collapseDataGrid(
+        UINodeId dataGrid, UILogicalRect contentRect,
+        UILogicalRect parentWorldRect, UILogicalRect descendantClip) noexcept
+    {
+        DataGridLayoutScratch* layout = dataGridStorage.tryLayoutScratch(dataGrid);
+        DataGridState* state = dataGridStorage.tryGrid(dataGrid);
+        if (layout != nullptr)
+        {
+            *layout = {};
+        }
+        if (state == nullptr)
+        {
+            return;
+        }
+        dataGridStorage.clearColumnBindings(dataGrid);
+        dataGridStorage.clearRowBindings(dataGrid);
+        for (u32 column = 0; column < state->linkedColumnCount; ++column)
+        {
+            const UINodeId header = dataGridStorage.columnAt(dataGrid, column);
+            if (!header.hasValue())
+            {
+                continue;
+            }
+            layoutScratchByIndex[header.index()].effectiveVisibility =
+                UIVisibility::Collapsed;
+            assignLayoutRect(header.index(), contentRect, parentWorldRect,
+                             descendantClip);
+        }
+        for (u32 rowOrdinal = 0;
+             rowOrdinal < state->linkedMaterializedRowCount; ++rowOrdinal)
+        {
+            const UINodeId row = dataGridStorage.rowAt(dataGrid, rowOrdinal);
+            if (!row.hasValue())
+            {
+                continue;
+            }
+            layoutScratchByIndex[row.index()].effectiveVisibility =
+                UIVisibility::Collapsed;
+            assignLayoutRect(row.index(), contentRect, parentWorldRect,
+                             descendantClip);
+            for (u32 column = 0; column < state->linkedColumnCount; ++column)
+            {
+                const UINodeId cell =
+                    dataGridStorage.cellAt(dataGrid, rowOrdinal, column);
+                if (!cell.hasValue())
+                {
+                    continue;
+                }
+                layoutScratchByIndex[cell.index()].effectiveVisibility =
+                    UIVisibility::Collapsed;
+                assignLayoutRect(cell.index(), contentRect, contentRect,
+                                 descendantClip);
+            }
+        }
+    }
+
+    [[nodiscard]] Core::Status arrangeDataGrid(
+        UINodeId dataGrid, UILogicalRect unscrolledContentRect,
+        UILogicalRect parentWorldRect, UILogicalRect descendantClip)
+    {
+        DataGridState* state = dataGridStorage.tryGrid(dataGrid);
+        DataGridLayoutScratch* layout = dataGridStorage.tryLayoutScratch(dataGrid);
+        if (state == nullptr || layout == nullptr ||
+            !dataGridStorage.relationshipValid(dataGrid))
+        {
+            return fail(Core::CoreErrorCode::Internal,
+                        "UI DataGrid fixed-pool relationship is invalid");
+        }
+        const u64 rowCount = state->dataSource.hasValue()
+                                 ? state->dataSource.rowCount(state->dataSource.state)
+                                 : 0;
+        const u32 columnCount = state->dataSource.hasValue()
+                                    ? state->dataSource.columnCount(state->dataSource.state)
+                                    : 0;
+        if (columnCount > state->columnCapacity)
+        {
+            return fail(UIErrorCode::CapacityExceeded,
+                        "UI DataGrid logical columns exceed the fixed column pool");
+        }
+
+        dataGridColumnWidthScratch.clear();
+        for (u32 logicalColumn = 0; logicalColumn < columnCount;
+             ++logicalColumn)
+        {
+            UIDataGridColumnDescriptor descriptor{};
+            if (!state->dataSource.resolveColumn(
+                    state->dataSource.state, logicalColumn, descriptor) ||
+                descriptor.key == InvalidUIDataGridColumnKey ||
+                !std::isfinite(descriptor.width) || descriptor.width <= 0.0F ||
+                containsLineBreak(descriptor.header))
+            {
+                return fail(UIErrorCode::InvalidControlValue,
+                            "UI DataGrid column descriptor is invalid");
+            }
+            const UINodeId header = dataGridStorage.columnAt(
+                dataGrid, logicalColumn);
+            if (!header.hasValue() ||
+                !dataGridStorage.bindColumn(
+                    header, descriptor.key, descriptor.width))
+            {
+                return fail(Core::CoreErrorCode::Internal,
+                            "UI DataGrid column binding failed");
+            }
+            if (Core::Status text = bindDataGridText(header, descriptor.header);
+                !text)
+            {
+                return text;
+            }
+            dataGridColumnWidthScratch.push_back(descriptor.width);
+        }
+        for (u32 column = columnCount; column < state->columnCapacity; ++column)
+        {
+            const UINodeId header = dataGridStorage.columnAt(dataGrid, column);
+            if (DataGridColumnState* columnState =
+                    dataGridStorage.tryColumn(header))
+            {
+                columnState->key = InvalidUIDataGridColumnKey;
+                columnState->width = 0.0F;
+                columnState->bound = false;
+            }
+        }
+
+        const auto resolved = Detail::resolveDataGridLayout({
+            .logicalRowCount = rowCount,
+            .columnCapacity = state->columnCapacity,
+            .materializedRowCapacity = state->materializedRowCapacity,
+            .columnWidths = dataGridColumnWidthScratch,
+            .columnHeaderHeight = state->style.columnHeaderHeight,
+            .rowHeight = state->style.rowHeight,
+            .overscanRows = state->style.overscanRows,
+            .scrollBarVisibility = state->style.scrollBarVisibility,
+            .scrollBarThickness = state->paint.scrollBar.thickness,
+            .requestedOffset = state->requestedScrollOffset,
+            .availableRect = unscrolledContentRect,
+        });
+        if (!resolved)
+        {
+            return resolved.error() == Detail::DataGridLayoutError::MaterializedRangeExceedsCapacity
+                       ? fail(UIErrorCode::CapacityExceeded,
+                              "UI DataGrid row pool cannot cover the viewport and configured overscan")
+                       : fail(UIErrorCode::InvalidControlValue,
+                              "UI DataGrid layout geometry or logical extent is invalid");
+        }
+        const auto& plan = *resolved;
+        *layout = DataGridLayoutScratch{
+            .metrics = UIDataGridMetrics{
+                .logicalRowCount = rowCount,
+                .logicalColumnCount = columnCount,
+                .firstVisibleRow = plan.firstVisibleRow,
+                .visibleRowCount = static_cast<u32>(plan.visibleRowCount),
+                .firstMaterializedRow = plan.firstMaterializedRow,
+                .materializedRowCount = static_cast<u32>(plan.materializedRowCount),
+                .materializedRowCapacity = state->materializedRowCapacity,
+                .columnCapacity = state->columnCapacity,
+                .scrollOffset = plan.scrollOffset,
+                .maxScrollOffset = plan.maximumScrollOffset,
+                .viewportSize = plan.bodyViewportRect.size(),
+                .contentSize = plan.contentSize,
+                .horizontalScrollBarVisible = plan.horizontalScrollBarVisible,
+                .verticalScrollBarVisible = plan.verticalScrollBarVisible,
+            },
+            .headerViewportRect = plan.headerViewportRect,
+            .bodyViewportRect = plan.bodyViewportRect,
+        };
+
+        const UIVisibility visibility =
+            layoutScratchByIndex[dataGrid.index()].effectiveVisibility;
+        const UILogicalRect headerClip =
+            intersectRects(descendantClip, plan.headerViewportRect);
+        const UILogicalRect bodyClip =
+            intersectRects(descendantClip, plan.bodyViewportRect);
+        for (u32 column = 0; column < state->columnCapacity; ++column)
+        {
+            const UINodeId header = dataGridStorage.columnAt(dataGrid, column);
+            const bool bound = column < columnCount;
+            layoutScratchByIndex[header.index()].effectiveVisibility =
+                bound ? visibility : UIVisibility::Collapsed;
+            const UILogicalRect rect = bound
+                                           ? Detail::resolveDataGridHeaderCellRect(
+                                                 plan, dataGridColumnWidthScratch,
+                                                 column)
+                                           : plan.headerViewportRect;
+            assignLayoutRect(header.index(), rect, parentWorldRect, headerClip);
+        }
+
+        for (u32 rowOrdinal = 0;
+             rowOrdinal < state->materializedRowCapacity; ++rowOrdinal)
+        {
+            const UINodeId row = dataGridStorage.rowAt(dataGrid, rowOrdinal);
+            const bool materialized = rowOrdinal < plan.materializedRowCount;
+            if (!materialized)
+            {
+                if (DataGridRowState* rowState = dataGridStorage.tryRow(row))
+                {
+                    rowState->key = InvalidUIDataGridRowKey;
+                    rowState->logicalRow = 0;
+                    rowState->bound = false;
+                    rowState->enabled = true;
+                }
+                layoutScratchByIndex[row.index()].effectiveVisibility =
+                    UIVisibility::Collapsed;
+                assignLayoutRect(row.index(), plan.bodyViewportRect,
+                                 parentWorldRect, bodyClip);
+                for (u32 column = 0; column < state->columnCapacity; ++column)
+                {
+                    const UINodeId cell = dataGridStorage.cellAt(
+                        dataGrid, rowOrdinal, column);
+                    if (DataGridCellState* cellState =
+                            dataGridStorage.tryCell(cell))
+                    {
+                        cellState->bound = false;
+                    }
+                    layoutScratchByIndex[cell.index()].effectiveVisibility =
+                        UIVisibility::Collapsed;
+                    assignLayoutRect(cell.index(), plan.bodyViewportRect,
+                                     plan.bodyViewportRect, bodyClip);
+                }
+                continue;
+            }
+
+            const u64 logicalRow = plan.firstMaterializedRow + rowOrdinal;
+            UIDataGridRowDescriptor rowDescriptor{};
+            if (!state->dataSource.resolveRow(
+                    state->dataSource.state, logicalRow, rowDescriptor) ||
+                rowDescriptor.key == InvalidUIDataGridRowKey ||
+                !dataGridStorage.bindRow(
+                    row, rowDescriptor.key, logicalRow, rowDescriptor.enabled))
+            {
+                return fail(UIErrorCode::InvalidControlValue,
+                            "UI DataGrid row descriptor is invalid");
+            }
+            const UILogicalRect rowRect{
+                .x = plan.bodyContentRect.x,
+                .y = normalizeFloat(plan.bodyContentRect.y +
+                                    static_cast<float>(logicalRow) * plan.rowHeight),
+                .width = plan.contentSize.width,
+                .height = plan.rowHeight,
+            };
+            layoutScratchByIndex[row.index()].effectiveVisibility = visibility;
+            assignLayoutRect(row.index(), rowRect, parentWorldRect, bodyClip);
+            for (u32 column = 0; column < state->columnCapacity; ++column)
+            {
+                const UINodeId cell = dataGridStorage.cellAt(
+                    dataGrid, rowOrdinal, column);
+                if (column >= columnCount)
+                {
+                    if (DataGridCellState* cellState =
+                            dataGridStorage.tryCell(cell))
+                    {
+                        cellState->bound = false;
+                    }
+                    layoutScratchByIndex[cell.index()].effectiveVisibility =
+                        UIVisibility::Collapsed;
+                    assignLayoutRect(cell.index(), rowRect, rowRect, bodyClip);
+                    continue;
+                }
+                UIDataGridCellDescriptor cellDescriptor{};
+                if (!state->dataSource.resolveCell(
+                        state->dataSource.state, logicalRow, column,
+                        cellDescriptor) || containsLineBreak(cellDescriptor.text) ||
+                    !dataGridStorage.bindCell(cell, logicalRow, column))
+                {
+                    return fail(UIErrorCode::InvalidControlValue,
+                                "UI DataGrid cell descriptor is invalid");
+                }
+                if (Core::Status text =
+                        bindDataGridText(cell, cellDescriptor.text);
+                    !text)
+                {
+                    return text;
+                }
+                layoutScratchByIndex[cell.index()].effectiveVisibility = visibility;
+                assignLayoutRect(
+                    cell.index(), Detail::resolveDataGridCellRect(
+                                      plan, dataGridColumnWidthScratch,
+                                      logicalRow, column),
+                    rowRect, bodyClip);
+            }
         }
         return Core::success();
     }
@@ -2277,6 +2936,24 @@ struct UIContext::Impl final {
                 collapseListViewItems(parentIndex, unscrolledContentRect, parentWorldRect, descendantClip);
                 return Core::success();
             }
+            if (parentRecord->kind == BuiltinElementKind::VirtualGridView)
+            {
+                collapseVirtualGridViewItems(
+                    idForIndex(parentIndex), unscrolledContentRect,
+                    parentWorldRect, descendantClip);
+                return Core::success();
+            }
+            if (parentRecord->kind == BuiltinElementKind::DataGrid)
+            {
+                collapseDataGrid(
+                    idForIndex(parentIndex), unscrolledContentRect,
+                    parentWorldRect, descendantClip);
+                return Core::success();
+            }
+            if (parentRecord->kind == BuiltinElementKind::DataGridRow)
+            {
+                return Core::success();
+            }
             if (parentRecord->kind == BuiltinElementKind::TreeView && parentIndex < treeViewLayoutScratchByNodeIndex.size())
             {
                 treeViewLayoutScratchByNodeIndex[parentIndex] = {};
@@ -2302,6 +2979,28 @@ struct UIContext::Impl final {
         {
             return arrangeListViewItems(parentIndex, unscrolledContentRect, parentWorldRect,
                                         intersectRects(parentScratch.descendantClip, parentScratch.worldRect));
+        }
+        if (parentRecord->kind == BuiltinElementKind::VirtualGridView)
+        {
+            return arrangeVirtualGridViewItems(
+                idForIndex(parentIndex), unscrolledContentRect,
+                parentWorldRect,
+                intersectRects(parentScratch.descendantClip,
+                               parentScratch.worldRect));
+        }
+        if (parentRecord->kind == BuiltinElementKind::DataGrid)
+        {
+            return arrangeDataGrid(
+                idForIndex(parentIndex), unscrolledContentRect,
+                parentWorldRect,
+                intersectRects(parentScratch.descendantClip,
+                               parentScratch.worldRect));
+        }
+        if (parentRecord->kind == BuiltinElementKind::DataGridRow)
+        {
+            // The owning DataGrid resolves every row-major cell rect in one
+            // fixed-pool pass; ordinary child layout must not overwrite it.
+            return Core::success();
         }
         if (parentRecord->kind == BuiltinElementKind::TreeView && parentIndex < treeViewStatesByNodeIndex.size() &&
             parentIndex < treeViewLayoutScratchByNodeIndex.size())
@@ -2399,9 +3098,31 @@ struct UIContext::Impl final {
             const UISplitViewParts parts = splitViewStorage.parts(splitView);
             if (parts.hasValue())
             {
+                // A SplitView owns the geometry of its three direct parts, so a
+                // Collapsed pane/splitter must be reflected in the resolved
+                // contract rather than only in paint/hit filtering. Hidden
+                // parts keep their extent; Collapsed parts release it.
+                UISplitViewConfig layoutConfig = resolvedSplitViewConfig(state->config);
+                if (parts.primaryPane.index() < layoutScratchByIndex.size() &&
+                    layoutScratchByIndex[parts.primaryPane.index()].effectiveVisibility ==
+                        UIVisibility::Collapsed)
+                {
+                    layoutConfig.minPrimarySize = 0.0F;
+                }
+                if (parts.secondaryPane.index() < layoutScratchByIndex.size() &&
+                    layoutScratchByIndex[parts.secondaryPane.index()].effectiveVisibility ==
+                        UIVisibility::Collapsed)
+                {
+                    layoutConfig.minSecondarySize = 0.0F;
+                }
+                if (parts.splitter.index() < layoutScratchByIndex.size() &&
+                    layoutScratchByIndex[parts.splitter.index()].effectiveVisibility ==
+                        UIVisibility::Collapsed)
+                {
+                    layoutConfig.splitterExtent = 0.0F;
+                }
                 const auto plan = resolveSplitViewLayout(
-                    unscrolledContentRect, resolvedSplitViewConfig(state->config),
-                    state->requestedFraction);
+                    unscrolledContentRect, layoutConfig, state->requestedFraction);
                 splitViewStorage.layoutScratchByIndex(parentIndex).metrics = plan.metrics;
                 assignLayoutRect(parts.primaryPane.index(), plan.metrics.primaryRect,
                                  parentWorldRect, descendantClip);
@@ -2609,6 +3330,12 @@ struct UIContext::Impl final {
             {
                 leadingReservedWidth = productTheme.controls.menuItemIndicatorExtent +
                                        productTheme.controls.menuItemIndicatorGap;
+                if (item->config.kind == UIMenuItemKind::Submenu)
+                {
+                    trailingReservedWidth =
+                        productTheme.controls.menuItemIndicatorExtent +
+                        productTheme.controls.menuItemIndicatorGap;
+                }
             }
         }
 
@@ -2632,30 +3359,76 @@ struct UIContext::Impl final {
     {
         output.clear();
         u32 paintOrdinal = 0;
-        const auto appendPass = [&](bool popupPass, bool tooltipPass) noexcept {
+        const auto appendNode = [&](u32 index) noexcept {
+            const LayoutScratchState& scratch = layoutScratchByIndex[index];
+            output.push_back(UICommittedLayoutEntry{
+                .node = idForIndex(index),
+                .localRect = scratch.localRect,
+                .worldRect = scratch.worldRect,
+                .effectiveClip = scratch.effectiveClip,
+                .contentPlacement = contentPlacementFor(index),
+                .effectiveVisibility = scratch.effectiveVisibility,
+                .layoutOrdinal = scratch.layoutOrdinal,
+                .paintOrdinal = paintOrdinal,
+            });
+            ++paintOrdinal;
+        };
+        const auto belongsToActiveMenuChain = [&](u32 index) noexcept {
+            const NodeRecord* record = recordByIndex(index);
+            if (record == nullptr)
+            {
+                return false;
+            }
+            if (record->kind == BuiltinElementKind::Menu)
+            {
+                return menuStorage.isInActiveChain(idForIndex(index));
+            }
+            if (record->kind == BuiltinElementKind::MenuItem)
+            {
+                return menuStorage.isInActiveChain(
+                    menuStorage.menuForItem(idForIndex(index)));
+            }
+            return false;
+        };
+        const auto appendPass = [&](bool popupPass, bool tooltipPass,
+                                    bool deferActiveMenus = false) noexcept {
             for (const u32 index : order)
             {
                 if (layoutScratchByIndex[index].inPopupSubtree != popupPass ||
-                    layoutScratchByIndex[index].inTooltipSubtree != tooltipPass)
+                    layoutScratchByIndex[index].inTooltipSubtree != tooltipPass ||
+                    (deferActiveMenus && belongsToActiveMenuChain(index)))
                 {
                     continue;
                 }
-                const LayoutScratchState& scratch = layoutScratchByIndex[index];
-                output.push_back(UICommittedLayoutEntry{
-                    .node = idForIndex(index),
-                    .localRect = scratch.localRect,
-                    .worldRect = scratch.worldRect,
-                    .effectiveClip = scratch.effectiveClip,
-                    .contentPlacement = contentPlacementFor(index),
-                    .effectiveVisibility = scratch.effectiveVisibility,
-                    .layoutOrdinal = scratch.layoutOrdinal,
-                    .paintOrdinal = paintOrdinal,
-                });
-                ++paintOrdinal;
+                appendNode(index);
             }
         };
         appendPass(false, false);
-        appendPass(true, false);
+        appendPass(true, false, true);
+
+        UINodeId activeChainMenu = menuStorage.rootMenu();
+        usize visited = 0;
+        while (activeChainMenu.hasValue() &&
+               visited++ < menuStorage.capacity())
+        {
+            appendNode(activeChainMenu.index());
+            const NodeRecord* menuRecord =
+                nodes.tryGet(activeChainMenu.storageId());
+            u32 childIndex = menuRecord != nullptr
+                                 ? menuRecord->firstChildIndex
+                                 : InvalidNodeIndex;
+            while (childIndex != InvalidNodeIndex)
+            {
+                const NodeRecord* child = recordByIndex(childIndex);
+                if (child == nullptr)
+                {
+                    break;
+                }
+                appendNode(childIndex);
+                childIndex = child->nextSiblingIndex;
+            }
+            activeChainMenu = menuStorage.activeChildMenu(activeChainMenu);
+        }
         appendPass(false, true);
         appendPass(true, true);
     }
@@ -3058,6 +3831,8 @@ struct UIContext::Impl final {
              isSelectedDropdownItem(node)) ||
             (record->kind == BuiltinElementKind::ListViewItem &&
              isSelectedListViewItem(node)) ||
+            (record->kind == BuiltinElementKind::VirtualGridViewItem &&
+             isSelectedVirtualGridViewItem(node)) ||
             (record->kind == BuiltinElementKind::TreeViewItem &&
              isSelectedTreeViewItem(node)) ||
             (record->kind == BuiltinElementKind::Tab &&
@@ -3071,8 +3846,7 @@ struct UIContext::Impl final {
                     popupStatesByNodeIndex[nodeIndex].open;
         if (record->kind == BuiltinElementKind::Menu)
         {
-            const MenuState* menu = menuStorage.tryMenu(node);
-            open = menu != nullptr && menu->open && menuStorage.activeMenu() == node;
+            open = menuStorage.isOpen(node);
         }
         if (record->kind == BuiltinElementKind::Dropdown)
         {
@@ -3275,6 +4049,74 @@ struct UIContext::Impl final {
                 static_cast<u16>(UIStyleOverride::ImageTint)) != 0;
     }
 
+    [[nodiscard]] static bool isStatefulControlImageTintRole(
+        UIStyleRoleId role) noexcept
+    {
+        return role == UIStyleRoleId::ButtonPrimary ||
+               role == UIStyleRoleId::ButtonDanger ||
+               role == UIStyleRoleId::ButtonTonal ||
+               role == UIStyleRoleId::ButtonOutlined ||
+               role == UIStyleRoleId::ButtonText ||
+               role == UIStyleRoleId::SegmentedButton;
+    }
+
+    [[nodiscard]] UIStraightSrgba8Color resolveBuiltinControlImageTint(
+        UINodeId node, u32 nodeIndex, UIStraightSrgba8Color authoredTint) const noexcept
+    {
+        if (nodeIndex >= styleRolesByNodeIndex.size())
+        {
+            return authoredTint;
+        }
+        const UIStyleRoleId role = styleRolesByNodeIndex[nodeIndex];
+        if (!isStatefulControlImageTintRole(role))
+        {
+            return authoredTint;
+        }
+
+        UIStraightSrgba8Color tint = authoredTint;
+        switch (role)
+        {
+        case UIStyleRoleId::ButtonPrimary:
+            tint = productTheme.colors.onPrimary;
+            break;
+        case UIStyleRoleId::ButtonDanger:
+            tint = productTheme.colors.onError;
+            break;
+        case UIStyleRoleId::ButtonTonal:
+        case UIStyleRoleId::ButtonOutlined:
+            tint = isButtonPressed(node) ? productTheme.colors.primary
+                                         : productTheme.colors.onSurface;
+            break;
+        case UIStyleRoleId::ButtonText:
+            tint = isButtonPressed(node)
+                       ? productTheme.colors.primary
+                       : ((hoveredPrimaryControl == node || isFocusVisible(node))
+                              ? productTheme.colors.onSurface
+                              : productTheme.colors.onSurfaceVariant);
+            break;
+        case UIStyleRoleId::SegmentedButton: {
+            const bool selected =
+                nodeIndex < radioButtonStatesByNodeIndex.size() &&
+                radioButtonStatesByNodeIndex[nodeIndex].selected;
+            tint = selected
+                       ? productTheme.colors.onPrimaryContainer
+                       : (isButtonPressed(node)
+                              ? productTheme.colors.primary
+                              : ((hoveredPrimaryControl == node || isFocusVisible(node))
+                                     ? productTheme.colors.onSurface
+                                     : productTheme.colors.onSurfaceVariant));
+            break;
+        }
+        default:
+            break;
+        }
+        if (!isCandidateNodeEnabled(node))
+        {
+            tint = scaleColorAlpha(tint, productTheme.states.disabledContentAlpha);
+        }
+        return tint;
+    }
+
     [[nodiscard]] UIStraightSrgba8Color resolvedImageTintColor(u32 nodeIndex,
                                                                const UIImageContent& image) const noexcept
     {
@@ -3350,7 +4192,12 @@ struct UIContext::Impl final {
             setResolvedStyleColorTokenDependency(nodeIndex, resolution.colorToken);
         }
 
-        if (hasLocalImageTintOverride(nodeIndex) || !resolution.imageTint.has_value())
+        const UIImageContent* retainedImage = imageContentStorage.get(nodeIndex);
+        const bool hasBuiltinControlTint =
+            retainedImage != nullptr &&
+            isStatefulControlImageTintRole(styleRolesByNodeIndex[nodeIndex]);
+        if (hasLocalImageTintOverride(nodeIndex) ||
+            (!resolution.imageTint.has_value() && !hasBuiltinControlTint))
         {
             if (nodeIndex < resolvedImageTintValidByNodeIndex.size())
             {
@@ -3361,7 +4208,11 @@ struct UIContext::Impl final {
         }
         else
         {
-            resolvedImageTintCacheByNodeIndex[nodeIndex] = *resolution.imageTint;
+            resolvedImageTintCacheByNodeIndex[nodeIndex] =
+                resolution.imageTint.has_value()
+                    ? *resolution.imageTint
+                    : resolveBuiltinControlImageTint(node, nodeIndex,
+                                                     retainedImage->tint);
             resolvedImageTintValidByNodeIndex[nodeIndex] = 1;
             setResolvedImageTintTokenDependency(nodeIndex, resolution.imageTintToken);
         }
@@ -3517,6 +4368,24 @@ struct UIContext::Impl final {
         return resolvedCollectionSelectionColor(
             item, listView, paint.selectedItemBackgroundColor, paint.hoveredSelectedItemBackgroundColor,
             paint.focusedSelectedItemBackgroundColor, paint.pressedSelectedItemBackgroundColor);
+    }
+
+    [[nodiscard]] UIPremultipliedRgba8Color
+    resolvedVirtualGridViewSelectionColor(UINodeId item) const noexcept
+    {
+        const UINodeId virtualGridView = virtualGridViewForItem(item);
+        const VirtualGridViewState* state =
+            virtualGridViewStorage.tryView(virtualGridView);
+        if (state == nullptr || !isSelectedVirtualGridViewItem(item))
+        {
+            return {};
+        }
+        return resolvedCollectionSelectionColor(
+            item, virtualGridView,
+            state->paint.selectedItemBackgroundColor,
+            state->paint.hoveredSelectedItemBackgroundColor,
+            state->paint.focusedSelectedItemBackgroundColor,
+            state->paint.pressedSelectedItemBackgroundColor);
     }
 
     [[nodiscard]] UIPremultipliedRgba8Color resolvedTreeViewSelectionColor(UINodeId item) const noexcept
@@ -3741,8 +4610,8 @@ struct UIContext::Impl final {
             const bool checked = *toggleValue != 0;
             if (paint.presentation == UIToggleIndicatorPresentation::Switch)
             {
-                const Detail::UIToggleSwitchGeometry geometry =
-                    Detail::resolveToggleSwitchGeometry(
+                const Detail::UISwitchGeometry geometry =
+                    Detail::resolveSwitchGeometry(
                         layoutEntry.worldRect, paint.checkedIndicatorInset, checked);
                 const UIStraightSrgba8Color thumbColor =
                     checked ? paint.checkedIndicatorColor
@@ -3883,6 +4752,32 @@ struct UIContext::Impl final {
                                                              : list.paint.scrollBar.thumbColor;
                 add(geometry.thumb, controlColor(thumbColor));
             }
+        } else if (record != nullptr &&
+                   record->kind == BuiltinElementKind::VirtualGridView)
+        {
+            const VirtualGridViewState* state =
+                virtualGridViewStorage.tryView(layoutEntry.node);
+            const VirtualGridViewLayoutScratch* gridLayout =
+                virtualGridViewStorage.tryLayoutScratch(layoutEntry.node);
+            if (state != nullptr && gridLayout != nullptr)
+            {
+                const ScrollBarGeometry geometry =
+                    makeVirtualGridViewScrollBarGeometry(
+                        gridLayout->metrics, gridLayout->viewportRect,
+                        state->paint.scrollBar);
+                if (geometry.visible)
+                {
+                    add(geometry.track,
+                        controlColor(state->paint.scrollBar.trackColor));
+                    const UIStraightSrgba8Color thumbColor =
+                        scrollThumbDragActive &&
+                                armedScrollView == layoutEntry.node &&
+                                state->paint.scrollBar.draggingThumbColor.alpha != 0
+                            ? state->paint.scrollBar.draggingThumbColor
+                            : state->paint.scrollBar.thumbColor;
+                    add(geometry.thumb, controlColor(thumbColor));
+                }
+            }
         } else if (record != nullptr && record->kind == BuiltinElementKind::TreeView &&
                    nodeIndex < treeViewStatesByNodeIndex.size() && nodeIndex < treeViewLayoutScratchByNodeIndex.size())
         {
@@ -3969,6 +4864,35 @@ struct UIContext::Impl final {
                         .height = extent,
                     },
                     controlColor(productTheme.colors.primary));
+            } else if (item != nullptr &&
+                       item->config.kind == UIMenuItemKind::Submenu)
+            {
+                constexpr usize StripeCount = 3;
+                const UILayoutStyle itemLayout =
+                    presentationLayoutStyle(nodeIndex);
+                const float extent = (std::min)(
+                    productTheme.controls.menuItemIndicatorExtent,
+                    layoutEntry.worldRect.height);
+                const float stripeExtent = extent /
+                                           static_cast<float>(StripeCount);
+                const float left = layoutEntry.worldRect.right() -
+                                   itemLayout.padding.right - extent;
+                const float top = layoutEntry.worldRect.y +
+                                  (layoutEntry.worldRect.height - extent) * 0.5F;
+                const UIPremultipliedRgba8Color color =
+                    controlColor(productTheme.colors.onSurface);
+                for (usize stripe = 0; stripe < StripeCount; ++stripe)
+                {
+                    const float offset = stripe == 1 ? stripeExtent : 0.0F;
+                    add(UILogicalRect{
+                            .x = normalizeFloat(left + offset),
+                            .y = normalizeFloat(
+                                top + stripeExtent * static_cast<float>(stripe)),
+                            .width = stripeExtent,
+                            .height = stripeExtent,
+                        },
+                        color);
+                }
             }
         } else if (record != nullptr && record->kind == BuiltinElementKind::DropdownItem)
         {
@@ -3976,6 +4900,11 @@ struct UIContext::Impl final {
         } else if (record != nullptr && record->kind == BuiltinElementKind::ListViewItem)
         {
             add(layoutEntry.worldRect, resolvedListViewSelectionColor(layoutEntry.node));
+        } else if (record != nullptr &&
+                   record->kind == BuiltinElementKind::VirtualGridViewItem)
+        {
+            add(layoutEntry.worldRect,
+                resolvedVirtualGridViewSelectionColor(layoutEntry.node));
         } else if (record != nullptr && record->kind == BuiltinElementKind::TreeViewItem &&
                    nodeIndex < treeViewItemStatesByNodeIndex.size())
         {
@@ -4321,7 +5250,9 @@ struct UIContext::Impl final {
             const bool virtualCollectionOwner =
                 record != nullptr &&
                 (record->kind == BuiltinElementKind::ListView ||
-                 record->kind == BuiltinElementKind::TreeView);
+                 record->kind == BuiltinElementKind::TreeView ||
+                 record->kind == BuiltinElementKind::VirtualGridView ||
+                 record->kind == BuiltinElementKind::DataGrid);
             if (paintDirty)
             {
                 rebuildNode(nodeIndex);
@@ -4346,7 +5277,8 @@ struct UIContext::Impl final {
                 const u32 nextSiblingIndex = child->nextSiblingIndex;
                 const bool materializedRow =
                     child->kind == BuiltinElementKind::ListViewItem ||
-                    child->kind == BuiltinElementKind::TreeViewItem;
+                    child->kind == BuiltinElementKind::TreeViewItem ||
+                    child->kind == BuiltinElementKind::VirtualGridViewItem;
                 const bool childAlreadyDirty =
                     childIndex < dirtyQueueStorage.nodeCapacity() &&
                     hasDirty(dirtyQueueStorage.flags(childIndex), UIDirty::Paint);
@@ -4565,6 +5497,7 @@ struct UIContext::Impl final {
             .node = node,
             .role = state.role,
             .actions = state.actions,
+            .liveSetting = state.liveSetting,
             .enabled = isCandidateNodeEnabled(node),
             .readOnly = state.readOnly,
         };
@@ -4650,6 +5583,30 @@ struct UIContext::Impl final {
             entry.virtualItemIndex = item.logicalIndex;
             entry.selected = item.bound && isSelectedListViewItem(node);
             entry.focused = entry.enabled && entry.selected && defaultActionFocusButton == listViewForItem(node);
+        } else if (record->kind == BuiltinElementKind::VirtualGridView)
+        {
+            const VirtualGridViewLayoutScratch* layout =
+                virtualGridViewStorage.tryLayoutScratch(node);
+            if (layout != nullptr)
+            {
+                entry.hasRange = true;
+                entry.maxValue = layout->metrics.maxScrollOffset;
+                entry.value = layout->metrics.scrollOffset;
+            }
+        } else if (record->kind == BuiltinElementKind::VirtualGridViewItem)
+        {
+            const VirtualGridViewItemState* item =
+                virtualGridViewStorage.tryItem(node);
+            if (item != nullptr)
+            {
+                entry.virtualItemKey = item->key;
+                entry.virtualItemIndex = item->logicalIndex;
+                entry.selected = item->bound &&
+                                 isSelectedVirtualGridViewItem(node);
+                entry.focused = entry.enabled && entry.selected &&
+                                defaultActionFocusButton ==
+                                    virtualGridViewForItem(node);
+            }
         } else if (record->kind == BuiltinElementKind::TreeView &&
                    nodeIndex < treeViewLayoutScratchByNodeIndex.size())
         {
@@ -4923,6 +5880,16 @@ struct UIContext::Impl final {
             return item.committedBound && item.committedEnabled &&
                    record->parentIndex != InvalidNodeIndex && isNodeEnabled(idForIndex(record->parentIndex));
         }
+        if (record != nullptr &&
+            record->kind == BuiltinElementKind::VirtualGridViewItem)
+        {
+            const VirtualGridViewItemState* item =
+                virtualGridViewStorage.tryItem(node);
+            return item != nullptr && item->committedBound &&
+                   item->committedEnabled &&
+                   record->parentIndex != InvalidNodeIndex &&
+                   isNodeEnabled(idForIndex(record->parentIndex));
+        }
         return true;
     }
 
@@ -4947,6 +5914,15 @@ struct UIContext::Impl final {
             return item.bound && item.enabled && record->parentIndex != InvalidNodeIndex &&
                    isCandidateNodeEnabled(idForIndex(record->parentIndex));
         }
+        if (record != nullptr &&
+            record->kind == BuiltinElementKind::VirtualGridViewItem)
+        {
+            const VirtualGridViewItemState* item =
+                virtualGridViewStorage.tryItem(node);
+            return item != nullptr && item->bound && item->enabled &&
+                   record->parentIndex != InvalidNodeIndex &&
+                   isCandidateNodeEnabled(idForIndex(record->parentIndex));
+        }
         return true;
     }
 
@@ -4959,7 +5935,8 @@ struct UIContext::Impl final {
         }
         if (!behaviorStateStorage.hasActivate(button.index()) ||
             (*nodeResult)->kind == BuiltinElementKind::ListViewItem ||
-            (*nodeResult)->kind == BuiltinElementKind::TreeViewItem)
+            (*nodeResult)->kind == BuiltinElementKind::TreeViewItem ||
+            (*nodeResult)->kind == BuiltinElementKind::VirtualGridViewItem)
         {
             return fail(UIErrorCode::InvalidButtonAction,
                         "UI action requires an Activate-capable non-virtual Element");
@@ -5678,6 +6655,8 @@ struct UIContext::Impl final {
         {
             listViewItemStatesByNodeIndex[index] = {};
         }
+        virtualGridViewStorage.resetNode(index);
+        dataGridStorage.resetNode(index);
         if (index < treeViewStatesByNodeIndex.size())
         {
             treeViewStatesByNodeIndex[index] = {};
@@ -6266,6 +7245,16 @@ struct UIContext::Impl final {
             .imageTint = [&]() noexcept -> UIStraightSrgba8Color* {
                 UIImageContent* image = imageContentStorage.getMutable(index);
                 return image == nullptr ? nullptr : &image->tint;
+            }(),
+            .virtualGridView = [&]() noexcept -> UIVirtualGridViewPaint* {
+                VirtualGridViewState* state =
+                    virtualGridViewStorage.tryView(idForIndex(index));
+                return state != nullptr ? &state->paint : nullptr;
+            }(),
+            .dataGrid = [&]() noexcept -> UIDataGridPaint* {
+                DataGridState* state =
+                    dataGridStorage.tryGrid(idForIndex(index));
+                return state != nullptr ? &state->paint : nullptr;
             }(),
         };
     }
@@ -8253,6 +9242,7 @@ struct UIContext::Impl final {
             .mode = descriptor.mode,
             .role = descriptor.role,
             .actions = descriptor.actions,
+            .liveSetting = descriptor.liveSetting,
             .hasExplicitName = descriptor.name.has_value(),
             .hasExplicitDescription = descriptor.description.has_value(),
             .useContentAsName = descriptor.useContentAsName,
@@ -8566,6 +9556,18 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::InvalidElementDescriptor,
                         "UI TreeView creation config requires the VirtualTree behavior");
         }
+        if (kind != BuiltinElementKind::VirtualGridView &&
+            descriptor.virtualGridView != UIVirtualGridViewCreateConfig{})
+        {
+            return fail(UIErrorCode::InvalidElementDescriptor,
+                        "UI VirtualGridView creation config requires the VirtualGrid behavior");
+        }
+        if (kind != BuiltinElementKind::DataGrid &&
+            descriptor.dataGrid != UIDataGridCreateConfig{})
+        {
+            return fail(UIErrorCode::InvalidElementDescriptor,
+                        "UI DataGrid creation config requires the DataGrid behavior");
+        }
         if (kind == BuiltinElementKind::TextEdit)
         {
             const UITextEditMultilineConfig& multiline = descriptor.textEditMultiline;
@@ -8629,7 +9631,36 @@ struct UIContext::Impl final {
             }
             normalizedDescriptor.image = *image;
             normalizedDescriptor.contentAlignment = image->alignment;
-            const bool publishesAccessibleImage = descriptor.semantics.mode != UISemanticsMode::Exclude;
+            const bool isButtonImage = kind == BuiltinElementKind::Button;
+            const bool isRadioButtonImage =
+                kind == BuiltinElementKind::RadioButton;
+            if (isButtonImage || isRadioButtonImage)
+            {
+                const UISemanticsRole expectedRole =
+                    isButtonImage ? UISemanticsRole::Button
+                                  : UISemanticsRole::RadioButton;
+                const UISemanticsAction expectedActions =
+                    isButtonImage
+                        ? UISemanticsAction::Focus |
+                              UISemanticsAction::Activate
+                        : UISemanticsAction::Focus |
+                              UISemanticsAction::Activate |
+                              UISemanticsAction::Toggle;
+                if (descriptor.semantics.mode != UISemanticsMode::Publish ||
+                    descriptor.semantics.role != expectedRole ||
+                    descriptor.semantics.actions != expectedActions ||
+                    !descriptor.semantics.name.has_value() ||
+                    descriptor.semantics.name->empty() ||
+                    descriptor.semantics.useContentAsName)
+                {
+                    return fail(
+                        UIErrorCode::InvalidElementDescriptor,
+                        "UI image controls require their control role, actions, and an explicit accessible name");
+                }
+            }
+            const bool publishesAccessibleImage =
+                !isButtonImage && !isRadioButtonImage &&
+                descriptor.semantics.mode != UISemanticsMode::Exclude;
             if (publishesAccessibleImage &&
                 (descriptor.semantics.role != UISemanticsRole::Image ||
                  !descriptor.semantics.name.has_value() || descriptor.semantics.name->empty() ||
@@ -8682,8 +9713,19 @@ struct UIContext::Impl final {
                 : kind == BuiltinElementKind::TreeView
                       ? createTreeViewComposite(parent, descriptor.treeView, descriptor.visual.styleRole,
                                                 descriptor.visual.styleClasses)
-                      : createChild(parent, kind, descriptor.behaviors, descriptor.visual.styleRole,
-                                    descriptor.visual.styleClasses);
+                      : kind == BuiltinElementKind::VirtualGridView
+                            ? createVirtualGridViewComposite(
+                                  parent, descriptor.virtualGridView,
+                                  descriptor.visual.styleRole,
+                                  descriptor.visual.styleClasses)
+                            : kind == BuiltinElementKind::DataGrid
+                                  ? createDataGridComposite(
+                                        parent, descriptor.dataGrid,
+                                        descriptor.visual.styleRole,
+                                        descriptor.visual.styleClasses)
+                            : createChild(parent, kind, descriptor.behaviors,
+                                          descriptor.visual.styleRole,
+                                          descriptor.visual.styleClasses);
         if (!nodeResult)
         {
             return Core::failure(nodeResult.error());
@@ -8707,7 +9749,7 @@ struct UIContext::Impl final {
             // Tooltip presentation out of the same pending publication rather
             // than waiting for the new Modal to become the committed barrier.
             hardDismissAllTooltipsNoFail(true);
-            if (const UINodeId activeMenuNode = menuStorage.activeMenu(); activeMenuNode.hasValue())
+            if (const UINodeId activeMenuNode = menuStorage.rootMenu(); activeMenuNode.hasValue())
             {
                 static_cast<void>(menuStorage.close(activeMenuNode));
                 menuCommandPressLatch.clear();
@@ -8781,7 +9823,10 @@ struct UIContext::Impl final {
         if (parentRecord.kind == BuiltinElementKind::Tooltip ||
             parentRecord.kind == BuiltinElementKind::Splitter ||
             parentRecord.kind == BuiltinElementKind::Tab ||
-            parentRecord.kind == BuiltinElementKind::MenuItem)
+            parentRecord.kind == BuiltinElementKind::MenuItem ||
+            parentRecord.kind == BuiltinElementKind::VirtualGridViewItem ||
+            parentRecord.kind == BuiltinElementKind::DataGridColumnHeader ||
+            parentRecord.kind == BuiltinElementKind::DataGridCell)
         {
             return fail(UIErrorCode::InvalidParent,
                         "UI Tooltip, Tab, Splitter, and MenuItem elements cannot own child elements");
@@ -8845,7 +9890,9 @@ struct UIContext::Impl final {
             if (parentRecord.kind == BuiltinElementKind::Dropdown ||
                 parentRecord.kind == BuiltinElementKind::Popup ||
                 parentRecord.kind == BuiltinElementKind::ListView ||
-                parentRecord.kind == BuiltinElementKind::TreeView)
+                parentRecord.kind == BuiltinElementKind::TreeView ||
+                parentRecord.kind == BuiltinElementKind::VirtualGridView ||
+                parentRecord.kind == BuiltinElementKind::DataGrid)
             {
                 return fail(UIErrorCode::InvalidParent,
                             "UI Tooltip requires an ordinary retained parent");
@@ -8868,9 +9915,11 @@ struct UIContext::Impl final {
             if (parentRecord.kind == BuiltinElementKind::Menu ||
                 parentRecord.kind == BuiltinElementKind::MenuItem ||
                 parentRecord.kind == BuiltinElementKind::Dropdown ||
-                parentRecord.kind == BuiltinElementKind::Popup ||
-                parentRecord.kind == BuiltinElementKind::ListView ||
-                parentRecord.kind == BuiltinElementKind::TreeView)
+                 parentRecord.kind == BuiltinElementKind::Popup ||
+                 parentRecord.kind == BuiltinElementKind::ListView ||
+                 parentRecord.kind == BuiltinElementKind::TreeView ||
+                 parentRecord.kind == BuiltinElementKind::VirtualGridView ||
+                 parentRecord.kind == BuiltinElementKind::DataGrid)
             {
                 return fail(UIErrorCode::InvalidParent,
                             "UI Menu requires an ordinary retained parent");
@@ -8886,6 +9935,34 @@ struct UIContext::Impl final {
             if (parentRecord.kind != BuiltinElementKind::TreeView)
             {
                 return fail(UIErrorCode::InvalidParent, "UI TreeViewItem requires a TreeView parent");
+            }
+        } else if (kind == BuiltinElementKind::VirtualGridViewItem)
+        {
+            if (parentRecord.kind != BuiltinElementKind::VirtualGridView)
+            {
+                return fail(UIErrorCode::InvalidParent,
+                            "UI VirtualGridViewItem requires a VirtualGridView parent");
+            }
+        } else if (kind == BuiltinElementKind::DataGridColumnHeader)
+        {
+            if (parentRecord.kind != BuiltinElementKind::DataGrid)
+            {
+                return fail(UIErrorCode::InvalidParent,
+                            "UI DataGridColumnHeader requires a DataGrid parent");
+            }
+        } else if (kind == BuiltinElementKind::DataGridRow)
+        {
+            if (parentRecord.kind != BuiltinElementKind::DataGrid)
+            {
+                return fail(UIErrorCode::InvalidParent,
+                            "UI DataGridRow requires a DataGrid parent");
+            }
+        } else if (kind == BuiltinElementKind::DataGridCell)
+        {
+            if (parentRecord.kind != BuiltinElementKind::DataGridRow)
+            {
+                return fail(UIErrorCode::InvalidParent,
+                            "UI DataGridCell requires a DataGridRow parent");
             }
         } else if (parentRecord.kind == BuiltinElementKind::TabView &&
                    kind == BuiltinElementKind::TabView)
@@ -8903,6 +9980,15 @@ struct UIContext::Impl final {
         } else if (parentRecord.kind == BuiltinElementKind::TreeView)
         {
             return fail(UIErrorCode::InvalidParent, "UI TreeView only accepts its internal item rows");
+        } else if (parentRecord.kind == BuiltinElementKind::VirtualGridView)
+        {
+            return fail(UIErrorCode::InvalidParent,
+                        "UI VirtualGridView only accepts its internal item pool");
+        } else if (parentRecord.kind == BuiltinElementKind::DataGrid ||
+                   parentRecord.kind == BuiltinElementKind::DataGridRow)
+        {
+            return fail(UIErrorCode::InvalidParent,
+                        "UI DataGrid only accepts its internal fixed pools");
         } else if (parentRecord.kind == BuiltinElementKind::Menu)
         {
             return fail(UIErrorCode::InvalidParent,
@@ -8991,6 +10077,188 @@ struct UIContext::Impl final {
         }
         rollback.release();
         return listView;
+    }
+
+    [[nodiscard]] Core::Result<UINodeId>
+    createVirtualGridViewComposite(
+        UINodeId parent, UIVirtualGridViewCreateConfig config,
+        UIStyleRoleId authoredStyleRole,
+        std::span<const UIStyleClassId> authoredStyleClasses)
+    {
+        auto normalized = normalizeVirtualGridViewCreateConfig(config);
+        if (!normalized)
+        {
+            return Core::failure(normalized.error());
+        }
+        const auto requirements =
+            Detail::resolveVirtualGridViewFixedPoolRequirements(*normalized);
+        if (!requirements)
+        {
+            return fail(UIErrorCode::CapacityExceeded,
+                        "UI VirtualGridView item pool size cannot be represented");
+        }
+        if (availableNodeCountForCurrentCreation() < requirements->totalNodes)
+        {
+            return fail(UIErrorCode::CapacityExceeded,
+                        "UI VirtualGridView item pool exceeds the remaining node capacity");
+        }
+
+        auto viewResult = createChild(
+            parent, BuiltinElementKind::VirtualGridView, std::nullopt,
+            authoredStyleRole, authoredStyleClasses);
+        if (!viewResult)
+        {
+            return Core::failure(viewResult.error());
+        }
+        const UINodeId virtualGridView = *viewResult;
+        auto rollback = Core::makeScopeExit([this, virtualGridView]() noexcept {
+            if (contains(virtualGridView))
+            {
+                static_cast<void>(destroySubtree(virtualGridView));
+            }
+        });
+        virtualGridViewStorage.initializeView(virtualGridView, *normalized);
+        VirtualGridViewState* state =
+            virtualGridViewStorage.tryView(virtualGridView);
+        if (state == nullptr)
+        {
+            return fail(Core::CoreErrorCode::Internal,
+                        "UI VirtualGridView state initialization failed");
+        }
+
+        virtualGridItemLinkScratch.clear();
+        for (u32 ordinal = 0;
+             ordinal < normalized->materializedItemCapacity; ++ordinal)
+        {
+            auto itemResult = createChild(
+                virtualGridView, BuiltinElementKind::VirtualGridViewItem);
+            if (!itemResult)
+            {
+                return Core::failure(itemResult.error());
+            }
+            const UINodeId item = *itemResult;
+            configureCollectionRowLayout(
+                layoutStylesByIndex[item.index()], state->style.itemHeight);
+            textStatesByIndex[item.index()].overflow =
+                state->style.itemTextOverflow;
+            virtualGridItemLinkScratch.push_back(item);
+        }
+        if (!virtualGridViewStorage.linkMaterializedItems(
+                virtualGridView, virtualGridItemLinkScratch))
+        {
+            return fail(Core::CoreErrorCode::Internal,
+                        "UI VirtualGridView item pool linkage failed");
+        }
+        rollback.release();
+        return virtualGridView;
+    }
+
+    [[nodiscard]] Core::Result<UINodeId>
+    createDataGridComposite(
+        UINodeId parent, UIDataGridCreateConfig config,
+        UIStyleRoleId authoredStyleRole,
+        std::span<const UIStyleClassId> authoredStyleClasses)
+    {
+        const auto normalized = Detail::validateDataGridCreateConfig(config);
+        if (!normalized)
+        {
+            return fail(UIErrorCode::InvalidElementDescriptor,
+                        "UI DataGrid fixed-pool capacity is invalid");
+        }
+        const auto requirements =
+            Detail::resolveDataGridFixedPoolRequirements(*normalized);
+        if (!requirements)
+        {
+            return fail(UIErrorCode::CapacityExceeded,
+                        "UI DataGrid fixed-pool size cannot be represented");
+        }
+        if (availableNodeCountForCurrentCreation() < requirements->totalNodes)
+        {
+            return fail(UIErrorCode::CapacityExceeded,
+                        "UI DataGrid fixed pools exceed the remaining node capacity");
+        }
+
+        auto gridResult = createChild(
+            parent, BuiltinElementKind::DataGrid, std::nullopt,
+            authoredStyleRole, authoredStyleClasses);
+        if (!gridResult)
+        {
+            return Core::failure(gridResult.error());
+        }
+        const UINodeId dataGrid = *gridResult;
+        auto rollback = Core::makeScopeExit([this, dataGrid]() noexcept {
+            if (contains(dataGrid))
+            {
+                static_cast<void>(destroySubtree(dataGrid));
+            }
+        });
+        dataGridStorage.initializeGrid(dataGrid, *normalized);
+        DataGridState* state = dataGridStorage.tryGrid(dataGrid);
+        if (state == nullptr)
+        {
+            return fail(Core::CoreErrorCode::Internal,
+                        "UI DataGrid state initialization failed");
+        }
+
+        dataGridColumnLinkScratch.clear();
+        dataGridRowLinkScratch.clear();
+        dataGridCellLinkScratch.clear();
+        for (u32 columnOrdinal = 0;
+             columnOrdinal < normalized->columnCapacity; ++columnOrdinal)
+        {
+            auto columnResult = createChild(
+                dataGrid, BuiltinElementKind::DataGridColumnHeader);
+            if (!columnResult)
+            {
+                return Core::failure(columnResult.error());
+            }
+            const UINodeId column = *columnResult;
+            configureCollectionRowLayout(
+                layoutStylesByIndex[column.index()],
+                state->style.columnHeaderHeight);
+            textStatesByIndex[column.index()].overflow =
+                state->style.headerTextOverflow;
+            dataGridColumnLinkScratch.push_back(column);
+        }
+        for (u32 rowOrdinal = 0;
+             rowOrdinal < normalized->materializedRowCapacity; ++rowOrdinal)
+        {
+            auto rowResult = createChild(
+                dataGrid, BuiltinElementKind::DataGridRow);
+            if (!rowResult)
+            {
+                return Core::failure(rowResult.error());
+            }
+            const UINodeId row = *rowResult;
+            configureCollectionRowLayout(
+                layoutStylesByIndex[row.index()], state->style.rowHeight);
+            dataGridRowLinkScratch.push_back(row);
+            for (u32 columnOrdinal = 0;
+                 columnOrdinal < normalized->columnCapacity; ++columnOrdinal)
+            {
+                auto cellResult = createChild(
+                    row, BuiltinElementKind::DataGridCell);
+                if (!cellResult)
+                {
+                    return Core::failure(cellResult.error());
+                }
+                const UINodeId cell = *cellResult;
+                configureCollectionRowLayout(
+                    layoutStylesByIndex[cell.index()], state->style.rowHeight);
+                textStatesByIndex[cell.index()].overflow =
+                    state->style.cellTextOverflow;
+                dataGridCellLinkScratch.push_back(cell);
+            }
+        }
+        if (!dataGridStorage.linkFixedPools(
+                dataGrid, dataGridColumnLinkScratch,
+                dataGridRowLinkScratch, dataGridCellLinkScratch))
+        {
+            return fail(Core::CoreErrorCode::Internal,
+                        "UI DataGrid fixed-pool linkage failed");
+        }
+        rollback.release();
+        return dataGrid;
     }
 
     [[nodiscard]] Core::Result<UINodeId>
@@ -9587,6 +10855,45 @@ struct UIContext::Impl final {
             addBehaviorSlots(required.behaviors,
                              defaultBehaviorsForKind(BuiltinElementKind::TreeViewItem), rowCount);
         }
+        else if (*kind == BuiltinElementKind::VirtualGridView)
+        {
+            auto config = normalizeVirtualGridViewCreateConfig(
+                descriptor.virtualGridView);
+            if (!config)
+            {
+                return Core::failure(config.error());
+            }
+            const usize itemCount = config->materializedItemCapacity;
+            required.nodes += itemCount;
+            addBehaviorSlots(
+                required.behaviors,
+                defaultBehaviorsForKind(BuiltinElementKind::VirtualGridViewItem),
+                itemCount);
+        }
+        else if (*kind == BuiltinElementKind::DataGrid)
+        {
+            const auto requirements = Detail::resolveDataGridFixedPoolRequirements(
+                descriptor.dataGrid);
+            if (!requirements)
+            {
+                return fail(UIErrorCode::InvalidElementDescriptor,
+                            "UI DataGrid fixed-pool capacity is invalid");
+            }
+            required.nodes += requirements->columns + requirements->rows +
+                              requirements->cells;
+            addBehaviorSlots(
+                required.behaviors,
+                defaultBehaviorsForKind(BuiltinElementKind::DataGridColumnHeader),
+                requirements->columns);
+            addBehaviorSlots(
+                required.behaviors,
+                defaultBehaviorsForKind(BuiltinElementKind::DataGridRow),
+                requirements->rows);
+            addBehaviorSlots(
+                required.behaviors,
+                defaultBehaviorsForKind(BuiltinElementKind::DataGridCell),
+                requirements->cells);
+        }
         return required;
     }
 
@@ -10070,6 +11377,20 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::InvalidControlValue,
                         "UI TreeView item rows are internal and cannot be destroyed independently");
         }
+        if (record != nullptr &&
+            record->kind == BuiltinElementKind::VirtualGridViewItem)
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI VirtualGridView items are internal and cannot be destroyed independently");
+        }
+        if (record != nullptr &&
+            (record->kind == BuiltinElementKind::DataGridColumnHeader ||
+             record->kind == BuiltinElementKind::DataGridRow ||
+             record->kind == BuiltinElementKind::DataGridCell))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI DataGrid fixed-pool nodes cannot be destroyed independently");
+        }
 
         if (updaterRoot == node)
         {
@@ -10127,15 +11448,16 @@ struct UIContext::Impl final {
         const bool hardDismissBarrier =
             nodeRecord->kind == BuiltinElementKind::Modal ||
             normalizedStyle->visibility != UIVisibility::Visible;
-        const UINodeId activeMenuNode = menuStorage.activeMenu();
-        const UINodeId activeMenuAnchor = menuStorage.anchorForMenu(activeMenuNode);
-        const bool closeActiveMenu = activeMenuNode.hasValue() && hardDismissBarrier &&
-                                     (nodeRecord->kind == BuiltinElementKind::Modal ||
-                                      isNodeWithinSubtree(node, activeMenuNode) ||
-                                      isNodeWithinSubtree(node, activeMenuAnchor));
+        const UINodeId menuToClose =
+            hardDismissBarrier
+                ? nodeRecord->kind == BuiltinElementKind::Modal
+                      ? menuStorage.rootMenu()
+                      : firstActiveMenuBranchAffectedBy(node, true)
+                : UINodeId{};
+        const bool closeActiveMenu = menuToClose.hasValue();
         const Core::Status dirtyStatus = closeActiveMenu
-                                             ? markLayoutDirtyBatch(
-                                                   {node, activeMenuNode, activeMenuAnchor})
+                                             ? markMenuMutationLayoutDirty(
+                                                   {node}, {menuToClose})
                                              : markStylePropertyDirty(
                                                    node, UIStylePropertyKind::LayoutStyle);
         if (!dirtyStatus)
@@ -10145,7 +11467,7 @@ struct UIContext::Impl final {
         currentStyle = *normalizedStyle;
         if (closeActiveMenu)
         {
-            if (Core::Status closed = setMenuOpenState(activeMenuNode, false); !closed)
+            if (Core::Status closed = setMenuOpenState(menuToClose, false); !closed)
             {
                 return closed;
             }
@@ -10279,13 +11601,7 @@ struct UIContext::Impl final {
             {
                 popupToClose = node;
             }
-            const UINodeId activeMenuNode = menuStorage.activeMenu();
-            const UINodeId activeMenuAnchor = menuStorage.anchorForMenu(activeMenuNode);
-            if (activeMenuNode.hasValue() &&
-                (node == activeMenuNode || node == activeMenuAnchor))
-            {
-                menuToClose = activeMenuNode;
-            }
+            menuToClose = firstActiveMenuBranchAffectedBy(node, true);
         }
 
         // Dirty capacity is reserved before interaction state changes so a
@@ -10299,8 +11615,7 @@ struct UIContext::Impl final {
         }
         if (menuToClose.hasValue())
         {
-            addRouteLayoutDirtyReservationCandidates(menuToClose);
-            addRouteLayoutDirtyReservationCandidates(menuStorage.anchorForMenu(menuToClose));
+            addActiveMenuBranchDirtyReservationCandidates(menuToClose);
         }
         if (Core::Status reservation = reserveRouteDirtyQueueSlots(); !reservation)
         {
@@ -13732,20 +15047,28 @@ struct UIContext::Impl final {
                         "UI Menu command is not recognized");
         }
         const MenuState* state = menuStorage.tryMenu(menu);
-        if (state == nullptr || !state->open || menuStorage.activeMenu() != menu)
+        if (state == nullptr || !menuStorage.isOpen(menu) ||
+            menuStorage.activeMenu() != menu)
         {
             return UIMenuCommandResult{.menu = menu};
         }
-        if (command == UIMenuCommand::Dismiss)
+        if (command == UIMenuCommand::Dismiss ||
+            command == UIMenuCommand::CloseSubmenu)
         {
-            if (Core::Status closed = setMenuOpenState(menu, false); !closed)
+            const UINodeId parentItem = menuStorage.parentItemForMenu(menu);
+            const bool shouldClose = command == UIMenuCommand::Dismiss ||
+                                     parentItem.hasValue();
+            if (shouldClose)
             {
-                return Core::failure(closed.error());
+                if (Core::Status closed = setMenuOpenState(menu, false); !closed)
+                {
+                    return Core::failure(closed.error());
+                }
             }
             return UIMenuCommandResult{
                 .targeted = true,
                 .consumed = true,
-                .dismissed = true,
+                .dismissed = shouldClose,
                 .menu = menu,
                 .focus = defaultActionFocusButton,
             };
@@ -13819,6 +15142,100 @@ struct UIContext::Impl final {
                        : UINodeId{};
         };
 
+        if (command == UIMenuCommand::OpenSubmenu)
+        {
+            const MenuItemState* focused =
+                menuStorage.tryItem(defaultActionFocusButton);
+            const UINodeId submenuNode =
+                focused != nullptr && focused->menu == menu &&
+                        focused->config.kind == UIMenuItemKind::Submenu
+                    ? menuStorage.submenuForItem(focused->node)
+                    : UINodeId{};
+            if (!hasValidSubmenuRelationship(defaultActionFocusButton,
+                                             submenuNode))
+            {
+                return UIMenuCommandResult{
+                    .targeted = true,
+                    .consumed = true,
+                    .menu = menu,
+                    .focus = defaultActionFocusButton,
+                };
+            }
+
+            UINodeId childFocus{};
+            const NodeRecord* submenuRecord =
+                nodes.tryGet(submenuNode.storageId());
+            u32 childIndex = submenuRecord != nullptr
+                                 ? submenuRecord->firstChildIndex
+                                 : InvalidNodeIndex;
+            usize visited = 0;
+            while (childIndex != InvalidNodeIndex &&
+                   visited++ < nodes.capacity())
+            {
+                const NodeRecord* child = recordByIndex(childIndex);
+                if (child == nullptr)
+                {
+                    break;
+                }
+                const UINodeId candidate = idForIndex(childIndex);
+                const MenuItemState* candidateState =
+                    menuStorage.tryItem(candidate);
+                if (candidateState != nullptr &&
+                    candidateState->config.kind != UIMenuItemKind::Separator &&
+                    isNodeEnabled(candidate) &&
+                    isAuthoredTooltipNodeVisible(candidate) &&
+                    hasBehavior(child->behaviors,
+                                UIElementBehavior::Focusable))
+                {
+                    childFocus = candidate;
+                    break;
+                }
+                childIndex = child->nextSiblingIndex;
+            }
+
+            releaseRouteDirtyQueueReservations();
+            auto reservationCleanup = Core::makeScopeExit(
+                [this]() noexcept { releaseRouteDirtyQueueReservations(); });
+            addRouteDirtyReservationCandidate(defaultActionFocusButton);
+            addRouteDirtyReservationCandidate(textInputFocus);
+            addRouteDirtyReservationCandidate(childFocus);
+            addRouteLayoutDirtyReservationCandidates(submenuNode);
+            addRouteLayoutDirtyReservationCandidates(
+                menuPlacementAnchor(submenuNode));
+            addActiveMenuBranchDirtyReservationCandidates(
+                menuStorage.activeChildMenu(menu));
+            addRouteLayoutDirtyReservationCandidates(activePopup());
+            addRouteLayoutDirtyReservationCandidates(
+                dropdownForPopup(activePopup()));
+            if (Core::Status reserved = reserveRouteDirtyQueueSlots(); !reserved)
+            {
+                return Core::failure(reserved.error());
+            }
+            if (Core::Status opened =
+                    setMenuOpenState(submenuNode, true);
+                !opened)
+            {
+                return Core::failure(opened.error());
+            }
+            const bool focusChanged = childFocus.hasValue() &&
+                                      defaultActionFocusButton != childFocus;
+            if (focusChanged)
+            {
+                if (Core::Status focused = applyExplicitFocus(childFocus);
+                    !focused)
+                {
+                    return Core::failure(focused.error());
+                }
+            }
+            return UIMenuCommandResult{
+                .targeted = true,
+                .consumed = true,
+                .focusChanged = focusChanged,
+                .menu = menu,
+                .focus = defaultActionFocusButton,
+            };
+        }
+
         UINodeId target{};
         switch (command)
         {
@@ -13834,6 +15251,8 @@ struct UIContext::Impl final {
         case UIMenuCommand::Last:
             target = firstFocusable(true);
             break;
+        case UIMenuCommand::OpenSubmenu:
+        case UIMenuCommand::CloseSubmenu:
         case UIMenuCommand::Dismiss:
             break;
         }
@@ -13918,6 +15337,60 @@ struct UIContext::Impl final {
             menuCommandPressLatch.latch(command);
         }
         return routed;
+    }
+
+    [[nodiscard]] Core::Result<UIMenuInvocationResult> routeMenuInvocation(
+        UIMenuInvocationCommand command, bool pressed)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (!isValidMenuInvocationCommand(command))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI Menu invocation command is not recognized");
+        }
+        if (routeDispatchDepth != 0)
+        {
+            return fail(UIErrorCode::PointerRouteAlreadyInProgress,
+                        "UI Menu invocation cannot run during pointer routing");
+        }
+        drainDeferredRootDestroys();
+        if (!pressed)
+        {
+            return UIMenuInvocationResult{
+                .consumed = menuInvocationPressLatch.release(command),
+            };
+        }
+        if (menuInvocationPressLatch.isLatched(command))
+        {
+            return UIMenuInvocationResult{.consumed = true};
+        }
+        if (Core::Status modality = setInputModality(UIInputModality::Keyboard);
+            !modality)
+        {
+            return Core::failure(modality.error());
+        }
+
+        const auto [menu, anchor] = contextMenuForTarget(defaultActionFocus());
+        if (!menu.hasValue())
+        {
+            return UIMenuInvocationResult{};
+        }
+        const bool wasOpen = menuStorage.isOpen(menu);
+        if (Core::Status opened = setMenuOpenState(menu, true); !opened)
+        {
+            return Core::failure(opened.error());
+        }
+        menuInvocationPressLatch.latch(command);
+        return UIMenuInvocationResult{
+            .targeted = true,
+            .consumed = true,
+            .opened = !wasOpen,
+            .menu = menu,
+            .anchor = anchor,
+        };
     }
 
     [[nodiscard]] Core::Status setTabPaint(UINodeId tab, const UITabPaint& paint)
@@ -14813,32 +16286,42 @@ struct UIContext::Impl final {
 
     void reconcileMenuAfterPublication() noexcept
     {
-        const UINodeId active = menuStorage.activeMenu();
-        const MenuState* state = menuStorage.tryMenu(active);
-        if (state == nullptr)
+        UINodeId active = menuStorage.rootMenu();
+        usize visited = 0;
+        while (active.hasValue() && visited++ < menuStorage.capacity())
         {
-            return;
-        }
-        const UICommittedLayoutEntry* anchorEntry =
-            committedLayoutEntryFor(state->anchor);
-        if (anchorEntry == nullptr ||
-            anchorEntry->effectiveVisibility != UIVisibility::Visible ||
-            !isNodeEnabled(state->anchor) || !isNodeEnabled(active) ||
-            (activeModalNode.hasValue() &&
-             !isNodeWithinSubtree(activeModalNode, state->anchor)))
-        {
-            static_cast<void>(menuStorage.close(active));
-            menuCommandPressLatch.clear();
-            transientOverlayDismissPointerBarrierActive = false;
-            phaseDirty |= PhaseLayout | PhaseHit | PhasePaint | PhaseSemantics;
-            layoutReuseCacheValid = false;
-            return;
-        }
-        if (!state->committedMetrics.open ||
-            state->committedMetrics.anchorRect != anchorEntry->worldRect)
-        {
-            phaseDirty |= PhaseLayout | PhaseHit | PhasePaint | PhaseSemantics;
-            layoutReuseCacheValid = false;
+            const MenuState* state = menuStorage.tryMenu(active);
+            const UINodeId anchor = menuPlacementAnchor(active);
+            const UICommittedLayoutEntry* anchorEntry =
+                committedLayoutEntryFor(anchor);
+            if (state == nullptr ||
+                !hasValidMenuPlacementRelationship(active, anchor) ||
+                anchorEntry == nullptr ||
+                anchorEntry->effectiveVisibility != UIVisibility::Visible ||
+                !isNodeEnabled(anchor) || !isNodeEnabled(active) ||
+                (activeModalNode.hasValue() &&
+                 !isNodeWithinSubtree(activeModalNode, anchor)))
+            {
+                static_cast<void>(menuStorage.close(active));
+                menuCommandPressLatch.clear();
+                transientOverlayDismissPointerBarrierActive = false;
+                phaseDirty |=
+                    PhaseLayout | PhaseHit | PhasePaint | PhaseSemantics;
+                layoutReuseCacheValid = false;
+                return;
+            }
+            const UILogicalRect placementAnchorRect =
+                menuStorage.hasInvocationAnchorRect(active)
+                    ? menuStorage.invocationAnchorRect(active)
+                    : anchorEntry->worldRect;
+            if (!state->committedMetrics.open ||
+                state->committedMetrics.anchorRect != placementAnchorRect)
+            {
+                phaseDirty |=
+                    PhaseLayout | PhaseHit | PhasePaint | PhaseSemantics;
+                layoutReuseCacheValid = false;
+            }
+            active = menuStorage.activeChildMenu(active);
         }
     }
 
@@ -15229,6 +16712,143 @@ struct UIContext::Impl final {
         return *nodeResult;
     }
 
+    [[nodiscard]] bool hasValidSubmenuRelationship(
+        UINodeId item, UINodeId submenu) const noexcept
+    {
+        if (!contains(item) || !contains(submenu))
+        {
+            return false;
+        }
+        const NodeRecord* itemRecord = nodes.tryGet(item.storageId());
+        const NodeRecord* submenuRecord = nodes.tryGet(submenu.storageId());
+        const MenuItemState* itemState = menuStorage.tryItem(item);
+        const UINodeId parentMenu = menuStorage.menuForItem(item);
+        return itemRecord != nullptr && submenuRecord != nullptr &&
+               itemState != nullptr &&
+               itemRecord->kind == BuiltinElementKind::MenuItem &&
+               submenuRecord->kind == BuiltinElementKind::Menu &&
+               itemState->config.kind == UIMenuItemKind::Submenu &&
+               parentMenu.hasValue() && parentMenu != submenu &&
+               itemRecord->rootIndex == submenuRecord->rootIndex &&
+               menuStorage.hasSubmenuRelationship(item, submenu);
+    }
+
+    [[nodiscard]] UINodeId menuPlacementAnchor(UINodeId menu) const noexcept
+    {
+        const UINodeId anchor = menuStorage.anchorForMenu(menu);
+        if (hasValidMenuRelationship(menu, anchor))
+        {
+            return anchor;
+        }
+        const UINodeId parentItem = menuStorage.parentItemForMenu(menu);
+        return hasValidSubmenuRelationship(parentItem, menu)
+                   ? parentItem
+                   : UINodeId{};
+    }
+
+    [[nodiscard]] bool hasValidMenuPlacementRelationship(
+        UINodeId menu, UINodeId anchor) const noexcept
+    {
+        return hasValidMenuRelationship(menu, anchor) ||
+               hasValidSubmenuRelationship(anchor, menu);
+    }
+
+    void appendMenuMutationNode(UINodeId node)
+    {
+        if (!node.hasValue() || !contains(node) ||
+            std::find(menuMutationNodeScratch.begin(),
+                      menuMutationNodeScratch.end(), node) !=
+                menuMutationNodeScratch.end())
+        {
+            return;
+        }
+        menuMutationNodeScratch.push_back(node);
+    }
+
+    void appendActiveMenuBranchMutationNodes(UINodeId menu)
+    {
+        UINodeId current = menu;
+        usize visited = 0;
+        while (current.hasValue() && visited++ < menuStorage.capacity())
+        {
+            appendMenuMutationNode(current);
+            appendMenuMutationNode(menuPlacementAnchor(current));
+            current = menuStorage.activeChildMenu(current);
+        }
+    }
+
+    [[nodiscard]] Core::Status markMenuMutationLayoutDirty(
+        std::initializer_list<UINodeId> nodesToDirty,
+        std::initializer_list<UINodeId> activeBranchRoots = {})
+    {
+        menuMutationNodeScratch.clear();
+        for (const UINodeId node : nodesToDirty)
+        {
+            appendMenuMutationNode(node);
+        }
+        for (const UINodeId branchRoot : activeBranchRoots)
+        {
+            appendActiveMenuBranchMutationNodes(branchRoot);
+        }
+        return markLayoutDirtyBatch(std::span<const UINodeId>(
+            menuMutationNodeScratch.data(), menuMutationNodeScratch.size()));
+    }
+
+    void addActiveMenuBranchDirtyReservationCandidates(UINodeId menu)
+    {
+        UINodeId current = menu;
+        usize visited = 0;
+        while (current.hasValue() && visited++ < menuStorage.capacity())
+        {
+            addRouteLayoutDirtyReservationCandidates(current);
+            addRouteLayoutDirtyReservationCandidates(menuPlacementAnchor(current));
+            current = menuStorage.activeChildMenu(current);
+        }
+    }
+
+    [[nodiscard]] bool isNodeWithinActiveMenuBranch(
+        UINodeId menu, UINodeId node) const noexcept
+    {
+        UINodeId current = menu;
+        usize visited = 0;
+        while (current.hasValue() && visited++ < menuStorage.capacity())
+        {
+            if (isNodeWithinSubtree(current, node))
+            {
+                return true;
+            }
+            current = menuStorage.activeChildMenu(current);
+        }
+        return false;
+    }
+
+    [[nodiscard]] UINodeId firstActiveMenuBranchAffectedBy(
+        UINodeId node, bool includeDescendants) const noexcept
+    {
+        if (!contains(node))
+        {
+            return {};
+        }
+        UINodeId current = menuStorage.rootMenu();
+        usize visited = 0;
+        while (current.hasValue() && visited++ < menuStorage.capacity())
+        {
+            const UINodeId anchor = menuPlacementAnchor(current);
+            const bool affectsMenu = includeDescendants
+                                         ? isNodeWithinSubtree(node, current)
+                                         : node == current;
+            const bool affectsAnchor = includeDescendants
+                                           ? isNodeWithinSubtree(node, anchor)
+                                           : node == anchor;
+            if (affectsMenu || affectsAnchor)
+            {
+                return current;
+            }
+            current = menuStorage.activeChildMenu(current);
+        }
+        return {};
+    }
+
     [[nodiscard]] bool hasValidMenuRelationship(UINodeId menu,
                                                 UINodeId anchor) const noexcept
     {
@@ -15242,6 +16862,45 @@ struct UIContext::Impl final {
                menuRecord->kind == BuiltinElementKind::Menu &&
                menuRecord->rootIndex == anchorRecord->rootIndex &&
                menuStorage.hasRelationship(menu, anchor);
+    }
+
+    [[nodiscard]] std::pair<UINodeId, UINodeId>
+    contextMenuForTarget(UINodeId target) const noexcept
+    {
+        if (!contains(target))
+        {
+            return {};
+        }
+        const auto& entries = committedHitBuffers[publishedHitBufferIndex];
+        u32 entryIndex = findHitEntryIndex(target, entries);
+        usize visited = 0;
+        while (entryIndex < entries.size() && visited++ < entries.size())
+        {
+            const UICommittedHitEntry& entry = entries[entryIndex];
+            const UINodeId anchor = entry.node;
+            const UINodeId menu = menuStorage.menuForAnchor(anchor);
+            if (isContextMenuInvocationCandidate(menu, anchor))
+            {
+                return {menu, anchor};
+            }
+            if (entry.parentEntryIndex == InvalidUIHitEntryIndex)
+            {
+                break;
+            }
+            entryIndex = entry.parentEntryIndex;
+        }
+        return {};
+    }
+
+    [[nodiscard]] bool isContextMenuInvocationCandidate(
+        UINodeId menu, UINodeId anchor) const noexcept
+    {
+        return hasValidMenuRelationship(menu, anchor) &&
+               isNodeEnabled(menu) && isNodeEnabled(anchor) &&
+               isAuthoredTooltipNodeVisible(menu) &&
+               isAuthoredTooltipNodeVisible(anchor) &&
+               (!activeModalNode.hasValue() ||
+                isNodeWithinSubtree(activeModalNode, anchor));
     }
 
     [[nodiscard]] Core::Status validateMenuAnchor(UINodeId menu,
@@ -15300,6 +16959,11 @@ struct UIContext::Impl final {
         {
             return valid;
         }
+        if (menuStorage.parentItemForMenu(menu).hasValue())
+        {
+            return fail(UIErrorCode::InvalidParent,
+                        "UI Submenu must be detached from its parent MenuItem before assigning an Anchor");
+        }
         const UINodeId reverse = menuStorage.menuForAnchor(anchor);
         if (reverse.hasValue() && reverse != menu &&
             hasValidMenuRelationship(reverse, anchor))
@@ -15311,7 +16975,9 @@ struct UIContext::Impl final {
         {
             return Core::success();
         }
-        if (Core::Status dirty = markLayoutDirtyBatch({menu}); !dirty)
+        if (Core::Status dirty = markMenuMutationLayoutDirty(
+                {menu, anchor}, {menu});
+            !dirty)
         {
             return dirty;
         }
@@ -15333,7 +16999,9 @@ struct UIContext::Impl final {
         {
             return Core::success();
         }
-        if (Core::Status dirty = markLayoutDirtyBatch({menu}); !dirty)
+        if (Core::Status dirty = markMenuMutationLayoutDirty(
+                {menu}, {menu});
+            !dirty)
         {
             return dirty;
         }
@@ -15343,7 +17011,117 @@ struct UIContext::Impl final {
         return Core::success();
     }
 
-    [[nodiscard]] Core::Status setMenuOpenState(UINodeId menu, bool open)
+    [[nodiscard]] Core::Status validateMenuItemSubmenu(
+        UINodeId item, UINodeId submenu)
+    {
+        auto itemResult = resolveMenuItem(item);
+        if (!itemResult)
+        {
+            return Core::failure(itemResult.error());
+        }
+        auto submenuResult = resolveMenu(submenu);
+        if (!submenuResult)
+        {
+            return Core::failure(submenuResult.error());
+        }
+        const MenuItemState* itemState = menuStorage.tryItem(item);
+        if (itemState == nullptr ||
+            itemState->config.kind != UIMenuItemKind::Submenu)
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI submenu relationship requires a Submenu MenuItem");
+        }
+        const UINodeId parentMenu = menuStorage.menuForItem(item);
+        if (!parentMenu.hasValue() || parentMenu == submenu)
+        {
+            return fail(UIErrorCode::InvalidParent,
+                        "UI submenu cannot reference its parent Menu");
+        }
+        if ((*itemResult)->rootIndex != (*submenuResult)->rootIndex)
+        {
+            return fail(UIErrorCode::InvalidParent,
+                        "UI Submenu and parent MenuItem must belong to the same root");
+        }
+        if (menuStorage.anchorForMenu(submenu).hasValue())
+        {
+            return fail(UIErrorCode::InvalidParent,
+                        "UI Menu with an ordinary Anchor cannot also be a Submenu");
+        }
+        const UINodeId currentParentItem =
+            menuStorage.parentItemForMenu(submenu);
+        if (currentParentItem.hasValue() && currentParentItem != item)
+        {
+            return fail(UIErrorCode::InvalidParent,
+                        "UI Submenu is already owned by another MenuItem");
+        }
+
+        UINodeId ancestor = parentMenu;
+        usize visited = 0;
+        while (ancestor.hasValue() && visited++ < menuStorage.capacity())
+        {
+            if (ancestor == submenu)
+            {
+                return fail(UIErrorCode::InvalidParent,
+                            "UI submenu relationships cannot form a cycle");
+            }
+            ancestor = menuStorage.parentMenu(ancestor);
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status setMenuItemSubmenuRelation(
+        UINodeId item, UINodeId submenu)
+    {
+        if (Core::Status valid = validateMenuItemSubmenu(item, submenu); !valid)
+        {
+            return valid;
+        }
+        const UINodeId previousSubmenu = menuStorage.submenuForItem(item);
+        if (previousSubmenu == submenu &&
+            menuStorage.parentItemForMenu(submenu) == item)
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markMenuMutationLayoutDirty(
+                {item, submenu, previousSubmenu},
+                {previousSubmenu, submenu});
+            !dirty)
+        {
+            return dirty;
+        }
+        menuStorage.linkSubmenuValidated(item, submenu);
+        menuCommandPressLatch.clear();
+        transientOverlayDismissPointerBarrierActive = false;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status clearMenuItemSubmenuRelation(UINodeId item)
+    {
+        auto itemResult = resolveMenuItem(item);
+        if (!itemResult)
+        {
+            return Core::failure(itemResult.error());
+        }
+        const UINodeId submenu = menuStorage.submenuForItem(item);
+        if (!submenu.hasValue())
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markMenuMutationLayoutDirty(
+                {item, submenu}, {submenu});
+            !dirty)
+        {
+            return dirty;
+        }
+        static_cast<void>(menuStorage.unlinkSubmenuItem(item));
+        menuCommandPressLatch.clear();
+        transientOverlayDismissPointerBarrierActive = false;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status setMenuOpenState(
+        UINodeId menu, bool open,
+        const UILogicalPoint* invocationPoint = nullptr)
     {
         auto menuResult = resolveMenu(menu);
         if (!menuResult)
@@ -15351,48 +17129,107 @@ struct UIContext::Impl final {
             return Core::failure(menuResult.error());
         }
         MenuState* state = menuStorage.tryMenu(menu);
-        const UINodeId anchor = menuStorage.anchorForMenu(menu);
-        if (state == nullptr || !hasValidMenuRelationship(menu, anchor))
+        const UINodeId anchor = menuPlacementAnchor(menu);
+        const UINodeId parentItem = menuStorage.parentItemForMenu(menu);
+        const UINodeId parentMenu = menuStorage.parentMenu(menu);
+        const bool submenu = parentItem.hasValue();
+        const bool useInvocationAnchor =
+            open && !submenu && invocationPoint != nullptr;
+        const UILogicalRect requestedInvocationAnchor =
+            useInvocationAnchor
+                ? UILogicalRect{
+                      .x = invocationPoint->x,
+                      .y = invocationPoint->y,
+                  }
+                : UILogicalRect{};
+        const bool invocationAnchorMatches =
+            useInvocationAnchor
+                ? menuStorage.hasInvocationAnchorRect(menu) &&
+                      menuStorage.invocationAnchorRect(menu) ==
+                          requestedInvocationAnchor
+                : !menuStorage.hasInvocationAnchorRect(menu);
+        const bool menuWasOpen = menuStorage.isOpen(menu);
+        if (state == nullptr ||
+            !hasValidMenuPlacementRelationship(menu, anchor))
         {
             return fail(UIErrorCode::InvalidParent,
-                        "UI Menu requires a live Anchor before it can open");
+                        "UI Menu requires a live Anchor or parent MenuItem before it can open");
         }
         if (open && (!isNodeEnabled(menu) || !isNodeEnabled(anchor) ||
                      !isAuthoredTooltipNodeVisible(menu) ||
                      !isAuthoredTooltipNodeVisible(anchor) ||
+                     (submenu && !menuStorage.isOpen(parentMenu)) ||
                      (activeModalNode.hasValue() &&
                       !isNodeWithinSubtree(activeModalNode, anchor))))
         {
             return fail(UIErrorCode::InvalidControlValue,
                         "UI Menu and Anchor must be enabled, visible, and inside the active Modal scope");
         }
-        if (state->open == open && (!open || menuStorage.activeMenu() == menu))
+        if ((open && menuWasOpen && invocationAnchorMatches) ||
+            (!open && !state->open && !menuStorage.isInActiveChain(menu) &&
+             !menuStorage.hasInvocationAnchorRect(menu)))
         {
             return Core::success();
         }
 
-        const UINodeId previousMenu = open ? menuStorage.activeMenu() : UINodeId{};
-        const UINodeId previousMenuAnchor = menuStorage.anchorForMenu(previousMenu);
+        UINodeId branchToClose{};
+        if (open)
+        {
+            if (submenu)
+            {
+                branchToClose = menuStorage.activeChildMenu(parentMenu);
+            } else
+            {
+                const UINodeId previousRoot = menuStorage.rootMenu();
+                branchToClose =
+                    previousRoot != menu
+                        ? previousRoot
+                        : !invocationAnchorMatches
+                              ? menuStorage.activeChildMenu(menu)
+                              : UINodeId{};
+            }
+        } else if (menuStorage.isInActiveChain(menu))
+        {
+            branchToClose = menu;
+        }
         const UINodeId previousPopup = open ? activePopup() : UINodeId{};
         const UINodeId previousDropdown = dropdownForPopup(previousPopup);
-        if (Core::Status dirty = markLayoutDirtyBatch(
-                {menu, anchor, previousMenu, previousMenuAnchor,
-                 previousPopup, previousDropdown});
+        if (Core::Status dirty = markMenuMutationLayoutDirty(
+                {menu, anchor, previousPopup, previousDropdown},
+                {branchToClose});
             !dirty)
         {
             return dirty;
         }
 
         const bool focusWasInClosingOverlay =
-            (!open && isNodeWithinSubtree(menu, defaultActionFocusButton)) ||
-            (previousMenu.hasValue() && previousMenu != menu &&
-             isNodeWithinSubtree(previousMenu, defaultActionFocusButton)) ||
+            (branchToClose.hasValue() &&
+             isNodeWithinActiveMenuBranch(branchToClose,
+                                          defaultActionFocusButton)) ||
             (previousPopup.hasValue() &&
              isNodeWithinSubtree(previousPopup, defaultActionFocusButton));
         if (open)
         {
-            focusRestoreByNodeIndex[menu.index()] = defaultActionFocusButton;
-            static_cast<void>(menuStorage.openValidated(menu));
+            if (!menuWasOpen)
+            {
+                focusRestoreByNodeIndex[menu.index()] = defaultActionFocusButton;
+            }
+            if (submenu)
+            {
+                menuStorage.clearInvocationAnchorRect(menu);
+                static_cast<void>(menuStorage.openSubmenuValidated(menu));
+            } else
+            {
+                if (useInvocationAnchor)
+                {
+                    menuStorage.setInvocationAnchorRectValidated(
+                        menu, requestedInvocationAnchor);
+                } else
+                {
+                    menuStorage.clearInvocationAnchorRect(menu);
+                }
+                static_cast<void>(menuStorage.openRootValidated(menu));
+            }
             if (previousPopup.hasValue())
             {
                 popupStatesByNodeIndex[previousPopup.index()].open = false;
@@ -15408,7 +17245,9 @@ struct UIContext::Impl final {
 
         if (focusWasInClosingOverlay)
         {
-            UINodeId nextFocus = open ? anchor : focusRestoreByNodeIndex[menu.index()];
+            UINodeId nextFocus = open ? anchor
+                                      : submenu ? parentItem
+                                                : focusRestoreByNodeIndex[menu.index()];
             if (!nextFocus.hasValue() || !contains(nextFocus) || !isNodeEnabled(nextFocus))
             {
                 nextFocus = isNodeEnabled(anchor) ? anchor : UINodeId{};
@@ -15544,8 +17383,7 @@ struct UIContext::Impl final {
         {
             return Core::failure(menuResult.error());
         }
-        const MenuState* state = menuStorage.tryMenu(menu);
-        return state != nullptr && state->open && menuStorage.activeMenu() == menu;
+        return menuStorage.isOpen(menu);
     }
 
     [[nodiscard]] Core::Result<UIMenuMetrics> menuMetrics(UINodeId menu) const
@@ -15560,6 +17398,67 @@ struct UIContext::Impl final {
             return Core::failure(menuResult.error());
         }
         return menuStorage.committedMetrics(menu);
+    }
+
+    [[nodiscard]] Core::Status setMenuItemSubmenu(
+        UINodeId item, UINodeId submenu)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        return setMenuItemSubmenuRelation(item, submenu);
+    }
+
+    [[nodiscard]] Core::Status clearMenuItemSubmenu(UINodeId item)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        return clearMenuItemSubmenuRelation(item);
+    }
+
+    [[nodiscard]] Core::Result<UINodeId> menuItemSubmenu(
+        UINodeId item) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        auto itemResult = const_cast<Impl*>(this)->resolveMenuItem(item);
+        if (!itemResult)
+        {
+            return Core::failure(itemResult.error());
+        }
+        const MenuItemState* state = menuStorage.tryItem(item);
+        if (state == nullptr || state->config.kind != UIMenuItemKind::Submenu)
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI submenu query requires a Submenu MenuItem");
+        }
+        const UINodeId submenu = menuStorage.submenuForItem(item);
+        return hasValidSubmenuRelationship(item, submenu)
+                   ? submenu
+                   : UINodeId{};
+    }
+
+    [[nodiscard]] Core::Result<UINodeId> menuParentItem(
+        UINodeId menu) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        auto menuResult = const_cast<Impl*>(this)->resolveMenu(menu);
+        if (!menuResult)
+        {
+            return Core::failure(menuResult.error());
+        }
+        const UINodeId item = menuStorage.parentItemForMenu(menu);
+        return hasValidSubmenuRelationship(item, menu) ? item : UINodeId{};
     }
 
     [[nodiscard]] Core::Status setMenuItemChecked(UINodeId item, bool checked)
@@ -15691,8 +17590,7 @@ struct UIContext::Impl final {
         {
             return Core::failure(valid.error());
         }
-        const MenuState* state = menuStorage.tryMenu(menu);
-        return state != nullptr && state->open && menuStorage.activeMenu() == menu;
+        return menuStorage.isOpen(menu);
     }
 
     [[nodiscard]] Core::Result<UIMenuMetrics> menuMetricsFromUpdater(
@@ -15707,6 +17605,84 @@ struct UIContext::Impl final {
             return Core::failure(valid.error());
         }
         return menuStorage.committedMetrics(menu);
+    }
+
+    [[nodiscard]] Core::Status setMenuItemSubmenuFromUpdater(
+        UINodeId updaterRoot, UINodeId item, UINodeId submenu)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired,
+                        "UI tree updater requires a live root owner");
+        }
+        if (!contains(item) || !contains(submenu) ||
+            !isNodeWithinRoot(updaterRoot, item) ||
+            !isNodeWithinRoot(updaterRoot, submenu))
+        {
+            return fail(UIErrorCode::InvalidNode,
+                        "UI MenuItem and Submenu must be owned by the updater root");
+        }
+        return setMenuItemSubmenuRelation(item, submenu);
+    }
+
+    [[nodiscard]] Core::Status clearMenuItemSubmenuFromUpdater(
+        UINodeId updaterRoot, UINodeId item)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired,
+                        "UI tree updater requires a live root owner");
+        }
+        if (!contains(item) || !isNodeWithinRoot(updaterRoot, item))
+        {
+            return fail(UIErrorCode::InvalidNode,
+                        "UI MenuItem is not owned by the updater root");
+        }
+        return clearMenuItemSubmenuRelation(item);
+    }
+
+    [[nodiscard]] Core::Result<UINodeId> menuItemSubmenuFromUpdater(
+        UINodeId updaterRoot, UINodeId item) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired,
+                        "UI tree updater requires a live root owner");
+        }
+        if (!contains(item) || !isNodeWithinRoot(updaterRoot, item))
+        {
+            return fail(UIErrorCode::InvalidNode,
+                        "UI MenuItem is not owned by the updater root");
+        }
+        return menuItemSubmenu(item);
+    }
+
+    [[nodiscard]] Core::Result<UINodeId> menuParentItemFromUpdater(
+        UINodeId updaterRoot, UINodeId menu) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (Core::Status valid = validateMenuUpdaterRoot(updaterRoot, menu); !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        return menuParentItem(menu);
     }
 
     [[nodiscard]] Core::Status setMenuItemCheckedFromUpdater(
@@ -15861,6 +17837,138 @@ struct UIContext::Impl final {
             return dirty;
         }
         listState.selection = selection;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<NodeRecord*> resolveVirtualGridView(
+        UINodeId virtualGridView)
+    {
+        auto nodeResult = resolveNode(virtualGridView);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        if ((*nodeResult)->kind != BuiltinElementKind::VirtualGridView ||
+            virtualGridViewStorage.tryView(virtualGridView) == nullptr)
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI VirtualGridView API requires a VirtualGridView node");
+        }
+        return *nodeResult;
+    }
+
+    [[nodiscard]] Core::Result<NodeRecord*> resolveDataGrid(UINodeId dataGrid)
+    {
+        auto nodeResult = resolveNode(dataGrid);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        if ((*nodeResult)->kind != BuiltinElementKind::DataGrid ||
+            dataGridStorage.tryGrid(dataGrid) == nullptr)
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI DataGrid API requires a DataGrid node");
+        }
+        return *nodeResult;
+    }
+
+    [[nodiscard]] Core::Status validateDataGridUpdater(
+        UINodeId updaterRoot, UINodeId dataGrid) const
+    {
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired,
+                        "UI tree updater requires a live root owner");
+        }
+        auto result = const_cast<Impl*>(this)->resolveDataGrid(dataGrid);
+        if (!result)
+        {
+            return Core::failure(result.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, dataGrid))
+        {
+            return fail(UIErrorCode::InvalidNode,
+                        "UI DataGrid is not owned by the updater root");
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] UINodeId virtualGridViewForItem(
+        UINodeId item) const noexcept
+    {
+        if (!contains(item))
+        {
+            return {};
+        }
+        const NodeRecord* itemRecord = nodes.tryGet(item.storageId());
+        if (itemRecord == nullptr ||
+            itemRecord->kind != BuiltinElementKind::VirtualGridViewItem ||
+            itemRecord->parentIndex == InvalidNodeIndex)
+        {
+            return {};
+        }
+        const UINodeId owner = virtualGridViewStorage.viewForItem(item);
+        const UINodeId parent = idForIndex(itemRecord->parentIndex);
+        return owner == parent &&
+                       virtualGridViewStorage.tryView(owner) != nullptr
+                   ? owner
+                   : UINodeId{};
+    }
+
+    [[nodiscard]] bool isSelectedVirtualGridViewItem(
+        UINodeId item) const noexcept
+    {
+        const UINodeId virtualGridView = virtualGridViewForItem(item);
+        const VirtualGridViewState* view =
+            virtualGridViewStorage.tryView(virtualGridView);
+        const VirtualGridViewItemState* itemState =
+            virtualGridViewStorage.tryItem(item);
+        return view != nullptr && itemState != nullptr && itemState->bound &&
+               view->selection.hasValue() &&
+               itemState->key == view->selection.key;
+    }
+
+    [[nodiscard]] Core::Status selectCommittedVirtualGridViewItem(
+        UINodeId item)
+    {
+        const UINodeId virtualGridView = virtualGridViewForItem(item);
+        VirtualGridViewState* view =
+            virtualGridViewStorage.tryView(virtualGridView);
+        const VirtualGridViewItemState* itemState =
+            virtualGridViewStorage.tryItem(item);
+        if (view == nullptr || itemState == nullptr)
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI VirtualGridView selection requires a bound item");
+        }
+        if (!itemState->committedBound || !itemState->committedEnabled)
+        {
+            return Core::success();
+        }
+        const u32 columnCount = view->committedMetrics.logicalColumnCount;
+        if (columnCount == 0)
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI VirtualGridView selection requires a committed layout shape");
+        }
+        const UIVirtualGridViewSelection selection{
+            .key = itemState->committedKey,
+            .logicalIndex = itemState->committedLogicalIndex,
+            .logicalRow = itemState->committedLogicalIndex / columnCount,
+            .logicalColumn = static_cast<u32>(
+                itemState->committedLogicalIndex % columnCount),
+        };
+        if (view->selection == selection)
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markPaintDirty(virtualGridView); !dirty)
+        {
+            return dirty;
+        }
+        static_cast<void>(virtualGridViewStorage.setSelection(
+            virtualGridView, selection));
         return Core::success();
     }
 
@@ -16020,8 +18128,8 @@ struct UIContext::Impl final {
 
         UINodeId previousPopup{};
         UINodeId previousDropdown{};
-        const UINodeId previousMenu = open ? menuStorage.activeMenu() : UINodeId{};
-        const UINodeId previousMenuAnchor = menuStorage.anchorForMenu(previousMenu);
+        const UINodeId previousMenu = open ? menuStorage.rootMenu() : UINodeId{};
+        const UINodeId previousMenuAnchor = menuPlacementAnchor(previousMenu);
         if (open && activePopupNode.hasValue() && activePopupNode != popup && contains(activePopupNode) &&
             activePopupNode.index() < popupStatesByNodeIndex.size() &&
             popupStatesByNodeIndex[activePopupNode.index()].open)
@@ -16029,9 +18137,10 @@ struct UIContext::Impl final {
             previousPopup = activePopupNode;
             previousDropdown = dropdownForPopup(previousPopup);
         }
-        if (Core::Status dirty = markLayoutDirtyBatch(
+        if (Core::Status dirty = markMenuMutationLayoutDirty(
                 {popup, dropdown, previousPopup, previousDropdown,
-                 previousMenu, previousMenuAnchor});
+                 previousMenu, previousMenuAnchor},
+                {previousMenu});
             !dirty)
         {
             return dirty;
@@ -16743,6 +18852,903 @@ struct UIContext::Impl final {
         return Core::success();
     }
 
+    [[nodiscard]] Core::Status validateVirtualGridViewUpdater(
+        UINodeId updaterRoot, UINodeId virtualGridView) const
+    {
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired,
+                        "UI tree updater requires a live root owner");
+        }
+        auto viewResult =
+            const_cast<Impl*>(this)->resolveVirtualGridView(virtualGridView);
+        if (!viewResult)
+        {
+            return Core::failure(viewResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, virtualGridView))
+        {
+            return fail(UIErrorCode::InvalidNode,
+                        "UI VirtualGridView is not owned by the updater root");
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UIVirtualGridViewItemDescriptor>
+    resolveVirtualGridViewLogicalItem(
+        UINodeId virtualGridView, u64 logicalIndex) const
+    {
+        const VirtualGridViewState* state =
+            virtualGridViewStorage.tryView(virtualGridView);
+        if (state == nullptr || !state->dataSource.hasValue())
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI VirtualGridView has no data source");
+        }
+        const u64 itemCount =
+            state->dataSource.itemCount(state->dataSource.state);
+        if (logicalIndex >= itemCount)
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI VirtualGridView logical item index is out of range");
+        }
+        UIVirtualGridViewItemDescriptor descriptor{};
+        if (!state->dataSource.resolveItem(
+                state->dataSource.state, logicalIndex, descriptor))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI VirtualGridView data source failed to resolve an item");
+        }
+        if (descriptor.key == InvalidUIVirtualGridViewItemKey ||
+            containsLineBreak(descriptor.label))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI VirtualGridView item requires a non-zero key and a single-line label");
+        }
+        return descriptor;
+    }
+
+    [[nodiscard]] Core::Status setVirtualGridViewDataSourceFromUpdater(
+        UINodeId updaterRoot, UINodeId virtualGridView,
+        UIVirtualGridViewDataSource source)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateVirtualGridViewUpdater(
+                updaterRoot, virtualGridView);
+            !valid)
+        {
+            return valid;
+        }
+        if (!source.hasValue())
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI VirtualGridView data source requires state, itemCount, and resolveItem");
+        }
+        if (Core::Status dirty = markLayoutStyleDirty(virtualGridView); !dirty)
+        {
+            return dirty;
+        }
+        virtualGridViewStorage.setDataSource(virtualGridView, source);
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status clearVirtualGridViewDataSourceFromUpdater(
+        UINodeId updaterRoot, UINodeId virtualGridView)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateVirtualGridViewUpdater(
+                updaterRoot, virtualGridView);
+            !valid)
+        {
+            return valid;
+        }
+        VirtualGridViewState* state =
+            virtualGridViewStorage.tryView(virtualGridView);
+        if (state == nullptr || !state->dataSource.hasValue())
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markLayoutStyleDirty(virtualGridView); !dirty)
+        {
+            return dirty;
+        }
+        virtualGridViewStorage.clearDataSource(virtualGridView);
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status invalidateVirtualGridViewItemsFromUpdater(
+        UINodeId updaterRoot, UINodeId virtualGridView)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateVirtualGridViewUpdater(
+                updaterRoot, virtualGridView);
+            !valid)
+        {
+            return valid;
+        }
+        return markLayoutStyleDirty(virtualGridView);
+    }
+
+    [[nodiscard]] Core::Status setVirtualGridViewStyleFromUpdater(
+        UINodeId updaterRoot, UINodeId virtualGridView,
+        const UIVirtualGridViewStyle& style)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateVirtualGridViewUpdater(
+                updaterRoot, virtualGridView);
+            !valid)
+        {
+            return valid;
+        }
+        auto normalized = normalizeVirtualGridViewStyle(style);
+        if (!normalized)
+        {
+            return Core::failure(normalized.error());
+        }
+        VirtualGridViewState* state =
+            virtualGridViewStorage.tryView(virtualGridView);
+        if (state == nullptr)
+        {
+            return fail(Core::CoreErrorCode::Internal,
+                        "UI VirtualGridView state is unavailable");
+        }
+        if (state->style == *normalized)
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markLayoutStyleDirty(virtualGridView); !dirty)
+        {
+            return dirty;
+        }
+        state->style = *normalized;
+        UINodeId item = state->firstMaterializedItem;
+        for (u32 visited = 0;
+             item.hasValue() && visited < state->linkedMaterializedItemCount;
+             ++visited)
+        {
+            VirtualGridViewItemState* itemState =
+                virtualGridViewStorage.tryItem(item);
+            if (itemState == nullptr ||
+                itemState->virtualGridView != virtualGridView)
+            {
+                break;
+            }
+            const UINodeId next = itemState->nextItem;
+            configureCollectionRowLayout(
+                layoutStylesByIndex[item.index()], state->style.itemHeight);
+            textStatesByIndex[item.index()].overflow =
+                state->style.itemTextOverflow;
+            item = next;
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UIVirtualGridViewStyle>
+    virtualGridViewStyleFromUpdater(
+        UINodeId updaterRoot, UINodeId virtualGridView) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (Core::Status valid = validateVirtualGridViewUpdater(
+                updaterRoot, virtualGridView);
+            !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        return virtualGridViewStorage.tryView(virtualGridView)->style;
+    }
+
+    [[nodiscard]] Core::Status setVirtualGridViewPaintFromUpdater(
+        UINodeId updaterRoot, UINodeId virtualGridView,
+        const UIVirtualGridViewPaint& paint)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateVirtualGridViewUpdater(
+                updaterRoot, virtualGridView);
+            !valid)
+        {
+            return valid;
+        }
+        auto normalized = normalizeVirtualGridViewPaint(paint);
+        if (!normalized)
+        {
+            return Core::failure(normalized.error());
+        }
+        VirtualGridViewState* state =
+            virtualGridViewStorage.tryView(virtualGridView);
+        if (state == nullptr)
+        {
+            return fail(Core::CoreErrorCode::Internal,
+                        "UI VirtualGridView state is unavailable");
+        }
+        if (state->paint == *normalized)
+        {
+            detachThemeBinding(virtualGridView.index(), ThemeBindingGridPaint);
+            return Core::success();
+        }
+        const bool layoutChanged =
+            state->paint.scrollBar.thickness !=
+                normalized->scrollBar.thickness ||
+            state->paint.scrollBar.minThumbExtent !=
+                normalized->scrollBar.minThumbExtent;
+        Core::Status dirty = layoutChanged
+                                 ? markLayoutStyleDirty(virtualGridView)
+                                 : markPaintDirty(virtualGridView);
+        if (!dirty)
+        {
+            return dirty;
+        }
+        state->paint = *normalized;
+        detachThemeBinding(virtualGridView.index(), ThemeBindingGridPaint);
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UIVirtualGridViewPaint>
+    virtualGridViewPaintFromUpdater(
+        UINodeId updaterRoot, UINodeId virtualGridView) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (Core::Status valid = validateVirtualGridViewUpdater(
+                updaterRoot, virtualGridView);
+            !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        return virtualGridViewStorage.tryView(virtualGridView)->paint;
+    }
+
+    [[nodiscard]] Core::Result<UIVirtualGridViewMetrics>
+    virtualGridViewMetricsFromUpdater(
+        UINodeId updaterRoot, UINodeId virtualGridView) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (Core::Status valid = validateVirtualGridViewUpdater(
+                updaterRoot, virtualGridView);
+            !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        return virtualGridViewStorage.tryView(virtualGridView)
+            ->committedMetrics;
+    }
+
+    [[nodiscard]] Core::Status setVirtualGridViewSelectedIndexFromUpdater(
+        UINodeId updaterRoot, UINodeId virtualGridView, u64 logicalIndex)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateVirtualGridViewUpdater(
+                updaterRoot, virtualGridView);
+            !valid)
+        {
+            return valid;
+        }
+        auto descriptor = resolveVirtualGridViewLogicalItem(
+            virtualGridView, logicalIndex);
+        if (!descriptor)
+        {
+            return Core::failure(descriptor.error());
+        }
+        VirtualGridViewState* state =
+            virtualGridViewStorage.tryView(virtualGridView);
+        const u32 columnCount = state->committedMetrics.logicalColumnCount;
+        if (columnCount == 0)
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI VirtualGridView selection requires a committed layout shape");
+        }
+        const UIVirtualGridViewSelection selection{
+            .key = descriptor->key,
+            .logicalIndex = logicalIndex,
+            .logicalRow = logicalIndex / columnCount,
+            .logicalColumn =
+                static_cast<u32>(logicalIndex % columnCount),
+        };
+        if (state->selection == selection)
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markPaintDirty(virtualGridView); !dirty)
+        {
+            return dirty;
+        }
+        static_cast<void>(virtualGridViewStorage.setSelection(
+            virtualGridView, selection));
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status clearVirtualGridViewSelectionFromUpdater(
+        UINodeId updaterRoot, UINodeId virtualGridView)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateVirtualGridViewUpdater(
+                updaterRoot, virtualGridView);
+            !valid)
+        {
+            return valid;
+        }
+        const VirtualGridViewState* state =
+            virtualGridViewStorage.tryView(virtualGridView);
+        if (state == nullptr || !state->selection.hasValue())
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markPaintDirty(virtualGridView); !dirty)
+        {
+            return dirty;
+        }
+        static_cast<void>(
+            virtualGridViewStorage.clearSelection(virtualGridView));
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UIVirtualGridViewSelection>
+    virtualGridViewSelectionFromUpdater(
+        UINodeId updaterRoot, UINodeId virtualGridView) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (Core::Status valid = validateVirtualGridViewUpdater(
+                updaterRoot, virtualGridView);
+            !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        return virtualGridViewStorage.tryView(virtualGridView)->selection;
+    }
+
+    [[nodiscard]] Core::Status scrollVirtualGridViewToIndexFromUpdater(
+        UINodeId updaterRoot, UINodeId virtualGridView, u64 logicalIndex,
+        UIVirtualGridViewScrollAlignment alignment)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateVirtualGridViewUpdater(
+                updaterRoot, virtualGridView);
+            !valid)
+        {
+            return valid;
+        }
+        if (!Detail::isValidVirtualGridViewScrollAlignment(alignment))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI VirtualGridView scroll alignment is not recognized");
+        }
+        auto descriptor = resolveVirtualGridViewLogicalItem(
+            virtualGridView, logicalIndex);
+        if (!descriptor)
+        {
+            return Core::failure(descriptor.error());
+        }
+        VirtualGridViewState* state =
+            virtualGridViewStorage.tryView(virtualGridView);
+        const u32 columnCount = state->committedMetrics.logicalColumnCount;
+        if (columnCount == 0)
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI VirtualGridView scrolling requires a committed layout shape");
+        }
+        const u64 logicalRow = logicalIndex / columnCount;
+        const double rowStride =
+            static_cast<double>(state->style.itemHeight) +
+            static_cast<double>(state->style.rowGap);
+        const double itemStart =
+            static_cast<double>(logicalRow) * rowStride;
+        const double itemEnd =
+            itemStart + static_cast<double>(state->style.itemHeight);
+        const double viewportExtent =
+            state->committedMetrics.viewportSize.height;
+        const double current = state->requestedScrollOffset;
+        double requested = current;
+        switch (alignment)
+        {
+        case UIVirtualGridViewScrollAlignment::Nearest:
+            if (itemStart < current)
+            {
+                requested = itemStart;
+            }
+            else if (itemEnd > current + viewportExtent)
+            {
+                requested = itemEnd - viewportExtent;
+            }
+            break;
+        case UIVirtualGridViewScrollAlignment::Start:
+            requested = itemStart;
+            break;
+        case UIVirtualGridViewScrollAlignment::Center:
+            requested = itemStart -
+                        (viewportExtent - state->style.itemHeight) * 0.5;
+            break;
+        case UIVirtualGridViewScrollAlignment::End:
+            requested = itemEnd - viewportExtent;
+            break;
+        }
+        if (!std::isfinite(requested))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI VirtualGridView logical scroll offset is not representable");
+        }
+        const float nextOffset = normalizeFloat(static_cast<float>(
+            (std::clamp)(requested, 0.0,
+                         static_cast<double>(
+                             state->committedMetrics.maxScrollOffset))));
+        if (nextOffset == state->requestedScrollOffset)
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markLayoutStyleDirty(virtualGridView); !dirty)
+        {
+            return dirty;
+        }
+        state->requestedScrollOffset = nextOffset;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UIDataGridSelection> resolveDataGridSelection(
+        UINodeId dataGrid, u64 logicalRow, u32 logicalColumn) const
+    {
+        const DataGridState* state = dataGridStorage.tryGrid(dataGrid);
+        if (state == nullptr || !state->dataSource.hasValue())
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI DataGrid has no data source");
+        }
+        const u64 rowCount = state->dataSource.rowCount(state->dataSource.state);
+        const u32 columnCount =
+            state->dataSource.columnCount(state->dataSource.state);
+        if (logicalRow >= rowCount || logicalColumn >= columnCount ||
+            columnCount > state->columnCapacity)
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI DataGrid logical cell is out of range");
+        }
+        UIDataGridRowDescriptor row{};
+        UIDataGridColumnDescriptor column{};
+        if (!state->dataSource.resolveRow(
+                state->dataSource.state, logicalRow, row) ||
+            !state->dataSource.resolveColumn(
+                state->dataSource.state, logicalColumn, column) ||
+            row.key == InvalidUIDataGridRowKey ||
+            column.key == InvalidUIDataGridColumnKey ||
+            !std::isfinite(column.width) || column.width <= 0.0F)
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI DataGrid failed to resolve a stable logical cell");
+        }
+        return UIDataGridSelection{
+            .rowKey = row.key,
+            .columnKey = column.key,
+            .logicalRow = logicalRow,
+            .logicalColumn = logicalColumn,
+        };
+    }
+
+    [[nodiscard]] Core::Status setDataGridDataSourceFromUpdater(
+        UINodeId updaterRoot, UINodeId dataGrid, UIDataGridDataSource source)
+    {
+        if (Core::Status owner = ensureOwnerThread(); !owner)
+        {
+            return owner;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateDataGridUpdater(updaterRoot, dataGrid);
+            !valid)
+        {
+            return valid;
+        }
+        if (!source.hasValue())
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI DataGrid data source is incomplete");
+        }
+        const DataGridState* state = dataGridStorage.tryGrid(dataGrid);
+        if (source.columnCount(source.state) > state->columnCapacity)
+        {
+            return fail(UIErrorCode::CapacityExceeded,
+                        "UI DataGrid data source exceeds the fixed column pool");
+        }
+        if (Core::Status dirty = markLayoutStyleDirty(dataGrid); !dirty)
+        {
+            return dirty;
+        }
+        dataGridStorage.setDataSource(dataGrid, source);
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status clearDataGridDataSourceFromUpdater(
+        UINodeId updaterRoot, UINodeId dataGrid)
+    {
+        if (Core::Status owner = ensureOwnerThread(); !owner)
+        {
+            return owner;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateDataGridUpdater(updaterRoot, dataGrid);
+            !valid)
+        {
+            return valid;
+        }
+        DataGridState* state = dataGridStorage.tryGrid(dataGrid);
+        if (!state->dataSource.hasValue())
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markLayoutStyleDirty(dataGrid); !dirty)
+        {
+            return dirty;
+        }
+        dataGridStorage.clearDataSource(dataGrid);
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status invalidateDataGridItemsFromUpdater(
+        UINodeId updaterRoot, UINodeId dataGrid)
+    {
+        if (Core::Status owner = ensureOwnerThread(); !owner)
+        {
+            return owner;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateDataGridUpdater(updaterRoot, dataGrid);
+            !valid)
+        {
+            return valid;
+        }
+        return markLayoutStyleDirty(dataGrid);
+    }
+
+    [[nodiscard]] Core::Status setDataGridStyleFromUpdater(
+        UINodeId updaterRoot, UINodeId dataGrid,
+        const UIDataGridStyle& style)
+    {
+        if (Core::Status owner = ensureOwnerThread(); !owner)
+        {
+            return owner;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateDataGridUpdater(updaterRoot, dataGrid);
+            !valid)
+        {
+            return valid;
+        }
+        auto normalized = normalizeDataGridStyle(style);
+        if (!normalized)
+        {
+            return Core::failure(normalized.error());
+        }
+        DataGridState* state = dataGridStorage.tryGrid(dataGrid);
+        if (state->style == *normalized)
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markLayoutStyleDirty(dataGrid); !dirty)
+        {
+            return dirty;
+        }
+        state->style = *normalized;
+        for (u32 column = 0; column < state->columnCapacity; ++column)
+        {
+            const UINodeId header = dataGridStorage.columnAt(dataGrid, column);
+            configureCollectionRowLayout(
+                layoutStylesByIndex[header.index()], state->style.columnHeaderHeight);
+            textStatesByIndex[header.index()].overflow =
+                state->style.headerTextOverflow;
+        }
+        for (u32 rowOrdinal = 0; rowOrdinal < state->materializedRowCapacity;
+             ++rowOrdinal)
+        {
+            const UINodeId row = dataGridStorage.rowAt(dataGrid, rowOrdinal);
+            configureCollectionRowLayout(
+                layoutStylesByIndex[row.index()], state->style.rowHeight);
+            for (u32 column = 0; column < state->columnCapacity; ++column)
+            {
+                const UINodeId cell =
+                    dataGridStorage.cellAt(dataGrid, rowOrdinal, column);
+                configureCollectionRowLayout(
+                    layoutStylesByIndex[cell.index()], state->style.rowHeight);
+                textStatesByIndex[cell.index()].overflow =
+                    state->style.cellTextOverflow;
+            }
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UIDataGridStyle> dataGridStyleFromUpdater(
+        UINodeId updaterRoot, UINodeId dataGrid) const
+    {
+        if (Core::Status owner = ensureOwnerThread(); !owner)
+        {
+            return Core::failure(owner.error());
+        }
+        if (Core::Status valid = validateDataGridUpdater(updaterRoot, dataGrid);
+            !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        return dataGridStorage.tryGrid(dataGrid)->style;
+    }
+
+    [[nodiscard]] Core::Status setDataGridPaintFromUpdater(
+        UINodeId updaterRoot, UINodeId dataGrid,
+        const UIDataGridPaint& paint)
+    {
+        if (Core::Status owner = ensureOwnerThread(); !owner)
+        {
+            return owner;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateDataGridUpdater(updaterRoot, dataGrid);
+            !valid)
+        {
+            return valid;
+        }
+        auto normalized = normalizeDataGridPaint(paint);
+        if (!normalized)
+        {
+            return Core::failure(normalized.error());
+        }
+        DataGridState* state = dataGridStorage.tryGrid(dataGrid);
+        if (state->paint == *normalized)
+        {
+            detachThemeBinding(dataGrid.index(), ThemeBindingGridPaint);
+            return Core::success();
+        }
+        const bool layoutChanged =
+            state->paint.scrollBar.thickness != normalized->scrollBar.thickness ||
+            state->paint.scrollBar.minThumbExtent != normalized->scrollBar.minThumbExtent;
+        Core::Status dirty = layoutChanged ? markLayoutStyleDirty(dataGrid)
+                                           : markPaintDirty(dataGrid);
+        if (!dirty)
+        {
+            return dirty;
+        }
+        state->paint = *normalized;
+        detachThemeBinding(dataGrid.index(), ThemeBindingGridPaint);
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UIDataGridPaint> dataGridPaintFromUpdater(
+        UINodeId updaterRoot, UINodeId dataGrid) const
+    {
+        if (Core::Status owner = ensureOwnerThread(); !owner)
+        {
+            return Core::failure(owner.error());
+        }
+        if (Core::Status valid = validateDataGridUpdater(updaterRoot, dataGrid);
+            !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        return dataGridStorage.tryGrid(dataGrid)->paint;
+    }
+
+    [[nodiscard]] Core::Result<UIDataGridMetrics> dataGridMetricsFromUpdater(
+        UINodeId updaterRoot, UINodeId dataGrid) const
+    {
+        if (Core::Status owner = ensureOwnerThread(); !owner)
+        {
+            return Core::failure(owner.error());
+        }
+        if (Core::Status valid = validateDataGridUpdater(updaterRoot, dataGrid);
+            !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        return dataGridStorage.tryGrid(dataGrid)->committedMetrics;
+    }
+
+    [[nodiscard]] Core::Status setDataGridSelectedCellFromUpdater(
+        UINodeId updaterRoot, UINodeId dataGrid, u64 logicalRow,
+        u32 logicalColumn)
+    {
+        if (Core::Status owner = ensureOwnerThread(); !owner)
+        {
+            return owner;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateDataGridUpdater(updaterRoot, dataGrid);
+            !valid)
+        {
+            return valid;
+        }
+        auto selection = resolveDataGridSelection(
+            dataGrid, logicalRow, logicalColumn);
+        if (!selection)
+        {
+            return Core::failure(selection.error());
+        }
+        DataGridState* state = dataGridStorage.tryGrid(dataGrid);
+        if (state->selection == *selection)
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markPaintDirty(dataGrid); !dirty)
+        {
+            return dirty;
+        }
+        static_cast<void>(dataGridStorage.setSelection(dataGrid, *selection));
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status clearDataGridSelectionFromUpdater(
+        UINodeId updaterRoot, UINodeId dataGrid)
+    {
+        if (Core::Status owner = ensureOwnerThread(); !owner)
+        {
+            return owner;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateDataGridUpdater(updaterRoot, dataGrid);
+            !valid)
+        {
+            return valid;
+        }
+        DataGridState* state = dataGridStorage.tryGrid(dataGrid);
+        if (!state->selection.hasValue())
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markPaintDirty(dataGrid); !dirty)
+        {
+            return dirty;
+        }
+        static_cast<void>(dataGridStorage.clearSelection(dataGrid));
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UIDataGridSelection>
+    dataGridSelectionFromUpdater(
+        UINodeId updaterRoot, UINodeId dataGrid) const
+    {
+        if (Core::Status owner = ensureOwnerThread(); !owner)
+        {
+            return Core::failure(owner.error());
+        }
+        if (Core::Status valid = validateDataGridUpdater(updaterRoot, dataGrid);
+            !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        return dataGridStorage.tryGrid(dataGrid)->selection;
+    }
+
+    [[nodiscard]] Core::Status scrollDataGridToCellFromUpdater(
+        UINodeId updaterRoot, UINodeId dataGrid, u64 logicalRow,
+        u32 logicalColumn, UIDataGridScrollAlignment alignment)
+    {
+        if (Core::Status owner = ensureOwnerThread(); !owner)
+        {
+            return owner;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateDataGridUpdater(updaterRoot, dataGrid);
+            !valid)
+        {
+            return valid;
+        }
+        if (!Detail::isValidDataGridScrollAlignment(alignment))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI DataGrid scroll alignment is not recognized");
+        }
+        auto selection = resolveDataGridSelection(
+            dataGrid, logicalRow, logicalColumn);
+        if (!selection)
+        {
+            return Core::failure(selection.error());
+        }
+        DataGridState* state = dataGridStorage.tryGrid(dataGrid);
+        dataGridColumnWidthScratch.clear();
+        const u32 columnCount =
+            state->dataSource.columnCount(state->dataSource.state);
+        for (u32 column = 0; column < columnCount; ++column)
+        {
+            UIDataGridColumnDescriptor descriptor{};
+            if (!state->dataSource.resolveColumn(
+                    state->dataSource.state, column, descriptor) ||
+                descriptor.key == InvalidUIDataGridColumnKey ||
+                !std::isfinite(descriptor.width) || descriptor.width <= 0.0F)
+            {
+                return fail(UIErrorCode::InvalidControlValue,
+                            "UI DataGrid column descriptor is invalid");
+            }
+            dataGridColumnWidthScratch.push_back(descriptor.width);
+        }
+        const double cellStartX = Detail::resolveDataGridColumnOffset(
+            dataGridColumnWidthScratch, logicalColumn);
+        const double cellEndX =
+            cellStartX + dataGridColumnWidthScratch[logicalColumn];
+        const double cellStartY =
+            static_cast<double>(logicalRow) * state->style.rowHeight;
+        const double cellEndY = cellStartY + state->style.rowHeight;
+        const auto alignAxis = [alignment](double start, double end,
+                                           double viewport,
+                                           double current) noexcept {
+            switch (alignment)
+            {
+            case UIDataGridScrollAlignment::Nearest:
+                if (start < current)
+                {
+                    return start;
+                }
+                if (end > current + viewport)
+                {
+                    return end - viewport;
+                }
+                return current;
+            case UIDataGridScrollAlignment::Start:
+                return start;
+            case UIDataGridScrollAlignment::Center:
+                return start - (viewport - (end - start)) * 0.5;
+            case UIDataGridScrollAlignment::End:
+                return end - viewport;
+            }
+            return current;
+        };
+        const UIScrollOffset requested{
+            .x = normalizeFloat(static_cast<float>((std::clamp)(
+                alignAxis(cellStartX, cellEndX,
+                          state->committedMetrics.viewportSize.width,
+                          state->requestedScrollOffset.x),
+                0.0, static_cast<double>(state->committedMetrics.maxScrollOffset.x)))),
+            .y = normalizeFloat(static_cast<float>((std::clamp)(
+                alignAxis(cellStartY, cellEndY,
+                          state->committedMetrics.viewportSize.height,
+                          state->requestedScrollOffset.y),
+                0.0, static_cast<double>(state->committedMetrics.maxScrollOffset.y)))),
+        };
+        if (requested == state->requestedScrollOffset)
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markLayoutStyleDirty(dataGrid); !dirty)
+        {
+            return dirty;
+        }
+        state->requestedScrollOffset = requested;
+        return Core::success();
+    }
+
     [[nodiscard]] Core::Status validateTreeViewUpdater(UINodeId updaterRoot, UINodeId treeView) const
     {
         if (!updaterRoot.hasValue() || !contains(updaterRoot))
@@ -17182,8 +20188,21 @@ struct UIContext::Impl final {
         }
         const UINodeId menu = menuStorage.menuForItem(control);
         addRouteDirtyReservationCandidate(control);
-        addRouteLayoutDirtyReservationCandidates(menu);
-        addRouteLayoutDirtyReservationCandidates(menuStorage.anchorForMenu(menu));
+        addActiveMenuBranchDirtyReservationCandidates(menuStorage.rootMenu());
+        if (item->config.kind == UIMenuItemKind::Submenu)
+        {
+            const UINodeId submenu = menuStorage.submenuForItem(control);
+            addRouteLayoutDirtyReservationCandidates(submenu);
+            addRouteLayoutDirtyReservationCandidates(
+                menuPlacementAnchor(submenu));
+        }
+    }
+
+    [[nodiscard]] bool isSubmenuMenuItem(UINodeId item) const noexcept
+    {
+        const MenuItemState* state = menuStorage.tryItem(item);
+        return state != nullptr &&
+               state->config.kind == UIMenuItemKind::Submenu;
     }
 
     [[nodiscard]] Core::Result<bool> activateMenuItem(UINodeId item)
@@ -17199,7 +20218,7 @@ struct UIContext::Impl final {
         }
         const UINodeId menu = menuStorage.menuForItem(item);
         const MenuState* menuState = menuStorage.tryMenu(menu);
-        if (menuState == nullptr || !menuState->open || menuStorage.activeMenu() != menu)
+        if (menuState == nullptr || !menuStorage.isOpen(menu))
         {
             return fail(UIErrorCode::InvalidParent,
                         "UI MenuItem activation requires its Menu to be active");
@@ -17208,6 +20227,20 @@ struct UIContext::Impl final {
         const UIMenuItemKind kind = itemState->config.kind;
         const bool checked = itemState->checked;
         const bool closeOnActivate = menuState->config.closeOnActivate;
+        if (kind == UIMenuItemKind::Submenu)
+        {
+            const UINodeId submenu = menuStorage.submenuForItem(item);
+            if (!hasValidSubmenuRelationship(item, submenu))
+            {
+                return fail(UIErrorCode::InvalidParent,
+                            "UI Submenu MenuItem requires a live child Menu");
+            }
+            if (Core::Status opened = setMenuOpenState(submenu, true); !opened)
+            {
+                return Core::failure(opened.error());
+            }
+            return true;
+        }
         if (kind == UIMenuItemKind::Check)
         {
             if (Core::Status changed = setMenuItemCheckedState(item, !checked); !changed)
@@ -17223,7 +20256,8 @@ struct UIContext::Impl final {
         }
         if (closeOnActivate)
         {
-            if (Core::Status closed = setMenuOpenState(menu, false); !closed)
+            const UINodeId rootMenu = menuStorage.rootMenu();
+            if (Core::Status closed = setMenuOpenState(rootMenu, false); !closed)
             {
                 return Core::failure(closed.error());
             }
@@ -18049,6 +21083,20 @@ struct UIContext::Impl final {
                 item.committedLogicalIndex = item.logicalIndex;
                 item.committedBound = item.bound;
                 item.committedEnabled = item.enabled;
+            } else if (record->kind == BuiltinElementKind::VirtualGridView)
+            {
+                VirtualGridViewState* state =
+                    virtualGridViewStorage.tryView(idForIndex(index));
+                VirtualGridViewLayoutScratch* layout =
+                    virtualGridViewStorage.tryLayoutScratch(idForIndex(index));
+                if (state != nullptr && layout != nullptr)
+                {
+                    state->requestedScrollOffset =
+                        layout->metrics.scrollOffset;
+                    virtualGridViewStorage.publishMetrics(idForIndex(index));
+                    virtualGridViewStorage.publishItemBindings(
+                        idForIndex(index));
+                }
             } else if (record->kind == BuiltinElementKind::TreeView && index < treeViewStatesByNodeIndex.size() &&
                        index < treeViewLayoutScratchByNodeIndex.size())
             {
@@ -19122,6 +22170,12 @@ struct UIContext::Impl final {
             input.kind == UIRoutedPointerEventKind::ButtonDown && input.button == Platform::PointerButton::Primary;
         const bool primaryButtonUp =
             input.kind == UIRoutedPointerEventKind::ButtonUp && input.button == Platform::PointerButton::Primary;
+        const bool secondaryButtonDown =
+            input.kind == UIRoutedPointerEventKind::ButtonDown &&
+            input.button == Platform::PointerButton::Secondary;
+        const bool secondaryButtonUp =
+            input.kind == UIRoutedPointerEventKind::ButtonUp &&
+            input.button == Platform::PointerButton::Secondary;
         const UINodeId popupAtRouteStart =
             activePopupNode.hasValue() && contains(activePopupNode) &&
                     activePopupNode.index() < popupStatesByNodeIndex.size() &&
@@ -19135,6 +22189,9 @@ struct UIContext::Impl final {
             containsPointHalfOpen(entries[popupEntryIndexAtRouteStart].worldRect, input.position) &&
             containsPointHalfOpen(entries[popupEntryIndexAtRouteStart].effectiveClip, input.position);
         const UINodeId physicalTarget = result.pointQuery.target.node;
+        const auto [contextMenuAtRouteStart, contextMenuAnchorAtRouteStart] =
+            secondaryButtonDown ? contextMenuForTarget(physicalTarget)
+                                : std::pair<UINodeId, UINodeId>{};
         const bool pointTargetsActivePopup = isNodeWithinSubtree(popupAtRouteStart, physicalTarget);
         const bool pointTargetsPopupDropdown =
             isNodeWithinSubtree(popupDropdownAtRouteStart, physicalTarget) && !pointTargetsActivePopup;
@@ -19142,14 +22199,29 @@ struct UIContext::Impl final {
                                                      !pointInsideActivePopup && !pointTargetsPopupDropdown;
         const bool blockPopupChromeClickThrough = primaryButtonDown && popupAtRouteStart.hasValue() &&
                                                   pointInsideActivePopup && !pointTargetsActivePopup;
-        const UINodeId menuAtRouteStart = activeMenu();
-        const UINodeId menuAnchorAtRouteStart = menuStorage.anchorForMenu(menuAtRouteStart);
-        const u32 menuEntryIndexAtRouteStart = findHitEntryIndex(menuAtRouteStart, entries);
-        const bool pointInsideActiveMenu =
-            menuEntryIndexAtRouteStart < entries.size() &&
-            containsPointHalfOpen(entries[menuEntryIndexAtRouteStart].worldRect, input.position) &&
-            containsPointHalfOpen(entries[menuEntryIndexAtRouteStart].effectiveClip, input.position);
-        const bool pointTargetsActiveMenu = isNodeWithinSubtree(menuAtRouteStart, physicalTarget);
+        const UINodeId menuAtRouteStart = menuStorage.rootMenu();
+        const UINodeId menuAnchorAtRouteStart = menuPlacementAnchor(menuAtRouteStart);
+        bool pointInsideActiveMenu = false;
+        bool pointTargetsActiveMenu = false;
+        UINodeId activeChainMenuAtRouteStart = menuAtRouteStart;
+        usize activeChainVisitCount = 0;
+        while (activeChainMenuAtRouteStart.hasValue() &&
+               activeChainVisitCount++ < menuStorage.capacity())
+        {
+            const u32 entryIndex =
+                findHitEntryIndex(activeChainMenuAtRouteStart, entries);
+            pointInsideActiveMenu = pointInsideActiveMenu ||
+                (entryIndex < entries.size() &&
+                 containsPointHalfOpen(entries[entryIndex].worldRect,
+                                       input.position) &&
+                 containsPointHalfOpen(entries[entryIndex].effectiveClip,
+                                       input.position));
+            pointTargetsActiveMenu = pointTargetsActiveMenu ||
+                isNodeWithinSubtree(activeChainMenuAtRouteStart,
+                                    physicalTarget);
+            activeChainMenuAtRouteStart =
+                menuStorage.activeChildMenu(activeChainMenuAtRouteStart);
+        }
         const bool pointTargetsMenuAnchor =
             isNodeWithinSubtree(menuAnchorAtRouteStart, physicalTarget) && !pointTargetsActiveMenu;
         const bool dismissActiveMenuOnPrimaryDown = primaryButtonDown && menuAtRouteStart.hasValue() &&
@@ -19158,6 +22230,28 @@ struct UIContext::Impl final {
                                                  pointInsideActiveMenu && !pointTargetsActiveMenu;
         const bool dismissActiveMenuOnWheel = input.kind == UIRoutedPointerEventKind::Wheel &&
                                               menuAtRouteStart.hasValue();
+        const MenuItemState* hoveredMenuItemAtRouteStart =
+            input.kind == UIRoutedPointerEventKind::Move
+                ? menuStorage.tryItem(physicalNearestButton)
+                : nullptr;
+        const UINodeId hoveredMenuAtRouteStart =
+            hoveredMenuItemAtRouteStart != nullptr
+                ? menuStorage.menuForItem(physicalNearestButton)
+                : UINodeId{};
+        const UINodeId hoverSubmenuToOpen =
+            hoveredMenuItemAtRouteStart != nullptr &&
+                    hoveredMenuItemAtRouteStart->config.kind ==
+                        UIMenuItemKind::Submenu &&
+                    menuStorage.isOpen(hoveredMenuAtRouteStart)
+                ? menuStorage.submenuForItem(physicalNearestButton)
+                : UINodeId{};
+        const UINodeId hoverSubmenuToClose =
+            hoveredMenuItemAtRouteStart != nullptr &&
+                    hoveredMenuItemAtRouteStart->config.kind !=
+                        UIMenuItemKind::Submenu &&
+                    menuStorage.isOpen(hoveredMenuAtRouteStart)
+                ? menuStorage.activeChildMenu(hoveredMenuAtRouteStart)
+                : UINodeId{};
         const bool transientOverlayBarrierAtRouteStart = transientOverlayDismissPointerBarrierActive;
         const ScrollBarPointerHit scrollBarHitAtRouteStart =
             primaryButtonDown ? scrollBarPointerHit(routePathScratch, entries, input.position) : ScrollBarPointerHit{};
@@ -19184,8 +22278,28 @@ struct UIContext::Impl final {
         }
         if (dismissActiveMenuOnPrimaryDown || dismissActiveMenuOnWheel)
         {
-            addRouteLayoutDirtyReservationCandidates(menuAtRouteStart);
-            addRouteLayoutDirtyReservationCandidates(menuAnchorAtRouteStart);
+            addActiveMenuBranchDirtyReservationCandidates(menuAtRouteStart);
+        }
+        if (contextMenuAtRouteStart.hasValue())
+        {
+            addRouteLayoutDirtyReservationCandidates(contextMenuAtRouteStart);
+            addRouteLayoutDirtyReservationCandidates(contextMenuAnchorAtRouteStart);
+            addActiveMenuBranchDirtyReservationCandidates(menuAtRouteStart);
+            addRouteLayoutDirtyReservationCandidates(popupAtRouteStart);
+            addRouteLayoutDirtyReservationCandidates(popupDropdownAtRouteStart);
+        }
+        if (hoverSubmenuToOpen.hasValue())
+        {
+            addRouteLayoutDirtyReservationCandidates(hoverSubmenuToOpen);
+            addRouteLayoutDirtyReservationCandidates(
+                menuPlacementAnchor(hoverSubmenuToOpen));
+            addActiveMenuBranchDirtyReservationCandidates(
+                menuStorage.activeChildMenu(hoveredMenuAtRouteStart));
+        }
+        if (hoverSubmenuToClose.hasValue())
+        {
+            addActiveMenuBranchDirtyReservationCandidates(
+                hoverSubmenuToClose);
         }
         const UINodeId hoverCandidate = physicalNearestButton.hasValue() ? physicalNearestButton : physicalTarget;
         const UINodeId nextHoveredControl = resolvedHoveredPrimaryControl(hoverCandidate);
@@ -19346,7 +22460,9 @@ struct UIContext::Impl final {
         auto reservationCleanup = Core::makeScopeExit([this]() noexcept { releaseRouteDirtyQueueReservations(); });
         const u64 actionRegistrationSerialBoundary = buttonActionRegistry.registrationSerial();
         const Detail::UIButtonActionInvocation actionCandidate =
-            primaryButtonUp && hadArmedInteraction && pointWithinArmedButton && isNodeEnabled(armedButtonAtRouteStart)
+            primaryButtonUp && hadArmedInteraction && pointWithinArmedButton &&
+                    isNodeEnabled(armedButtonAtRouteStart) &&
+                    !isSubmenuMenuItem(armedButtonAtRouteStart)
                 ? captureButtonAction(armedButtonAtRouteStart, actionRegistrationSerialBoundary)
                 : Detail::UIButtonActionInvocation{};
         const u64 currentButtonRouteSerial = ++buttonRouteSerial;
@@ -19438,7 +22554,7 @@ struct UIContext::Impl final {
                 }
             }
             if (dismissActiveMenuOnPrimaryDown && !routedEvent.isDefaultActionPrevented() &&
-                menuStorage.activeMenu() == menuAtRouteStart)
+                menuStorage.rootMenu() == menuAtRouteStart)
             {
                 if (Core::Status closed = setMenuOpenState(menuAtRouteStart, false); !closed)
                 {
@@ -19458,7 +22574,7 @@ struct UIContext::Impl final {
             static_cast<void>(routedEvent.claimPointerButton(Platform::PointerButton::Primary));
             preserveFocusForTransientOverlayBarrier = true;
         } else if (dismissActiveMenuOnWheel && !routedEvent.isDefaultActionPrevented() &&
-                   menuStorage.activeMenu() == menuAtRouteStart)
+                   menuStorage.rootMenu() == menuAtRouteStart)
         {
             if (Core::Status closed = setMenuOpenState(menuAtRouteStart, false); !closed)
             {
@@ -19466,6 +22582,61 @@ struct UIContext::Impl final {
             }
             routedEvent.preventDefaultAction();
             routedEvent.consumeInputTransition();
+        }
+
+        if (secondaryButtonDown)
+        {
+            // A new physical press supersedes a missing prior release. The
+            // listener route gets first refusal through preventDefaultAction().
+            secondaryMenuInvocationPressLatched = false;
+            if (!routedEvent.isDefaultActionPrevented() &&
+                isContextMenuInvocationCandidate(contextMenuAtRouteStart,
+                                                 contextMenuAnchorAtRouteStart))
+            {
+                if (Core::Status opened = setMenuOpenState(
+                        contextMenuAtRouteStart, true, &input.position);
+                    !opened)
+                {
+                    return Core::failure(opened.error());
+                }
+                secondaryMenuInvocationPressLatched = true;
+                routedEvent.preventDefaultAction();
+                routedEvent.consumeInputTransition();
+                static_cast<void>(routedEvent.claimPointerButton(
+                    Platform::PointerButton::Secondary));
+            }
+        } else if (secondaryButtonUp && secondaryMenuInvocationPressLatched)
+        {
+            secondaryMenuInvocationPressLatched = false;
+            routedEvent.preventDefaultAction();
+            routedEvent.consumeInputTransition();
+            static_cast<void>(routedEvent.claimPointerButton(
+                Platform::PointerButton::Secondary));
+        }
+
+        if (input.kind == UIRoutedPointerEventKind::Move &&
+            !routedEvent.isDefaultActionPrevented())
+        {
+            if (hasValidSubmenuRelationship(physicalNearestButton,
+                                            hoverSubmenuToOpen) &&
+                menuStorage.isOpen(hoveredMenuAtRouteStart))
+            {
+                if (Core::Status opened =
+                        setMenuOpenState(hoverSubmenuToOpen, true);
+                    !opened)
+                {
+                    return Core::failure(opened.error());
+                }
+            } else if (hoverSubmenuToClose.hasValue() &&
+                       menuStorage.isInActiveChain(hoverSubmenuToClose))
+            {
+                if (Core::Status closed =
+                        setMenuOpenState(hoverSubmenuToClose, false);
+                    !closed)
+                {
+                    return Core::failure(closed.error());
+                }
+            }
         }
 
         Core::Status hoverPaintStatus = updateHoveredPrimaryControl(hoverCandidate);
@@ -20039,12 +23210,17 @@ struct UIContext::Impl final {
         clearArmedTextEdit();
         capturedPointerNode = {};
         transientOverlayDismissPointerBarrierActive = false;
+        secondaryMenuInvocationPressLatched = false;
         dropdownCommandPressLatch.clear();
         listViewCommandPressLatch.clear();
+        virtualGridViewCommandPressLatch.clear();
+        dataGridCommandPressLatch.clear();
         treeViewCommandPressLatch.clear();
         focusNavigationPressLatch.clear();
         tabViewCommandPressLatch.clear();
+        menuCommandPressLatch.clear();
         tabViewDirectionPressLatch.clear();
+        menuInvocationPressLatch.clear();
         rangeInputPressLatch.clear();
         defaultActionPressState.clearAll();
         clearImeFocus();
@@ -20303,6 +23479,8 @@ struct UIContext::Impl final {
 
         dropdownCommandPressLatch.clear();
         listViewCommandPressLatch.clear();
+        virtualGridViewCommandPressLatch.clear();
+        dataGridCommandPressLatch.clear();
         treeViewCommandPressLatch.clear();
         focusNavigationPressLatch.clear();
         tabViewCommandPressLatch.clear();
@@ -20748,7 +23926,10 @@ struct UIContext::Impl final {
         }
         const u64 actionRegistrationSerialBoundary = buttonActionRegistry.registrationSerial();
         const Detail::UIButtonActionInvocation actionCandidate =
-            captureButtonAction(activationTarget, actionRegistrationSerialBoundary);
+            isSubmenuMenuItem(activationTarget)
+                ? Detail::UIButtonActionInvocation{}
+                : captureButtonAction(activationTarget,
+                                      actionRegistrationSerialBoundary);
         if (!actionCandidate.hasValue())
         {
             // Focused control without a registered action still consumes Accept
@@ -21525,6 +24706,314 @@ struct UIContext::Impl final {
         };
     }
 
+    [[nodiscard]] Core::Result<UIVirtualGridViewCommandResult>
+    routeVirtualGridViewCommand(UIVirtualGridViewCommand command, bool pressed)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (routeDispatchDepth != 0)
+        {
+            return fail(UIErrorCode::PointerRouteAlreadyInProgress,
+                        "UI VirtualGridView command cannot run during pointer routing");
+        }
+        drainDeferredRootDestroys();
+
+        if (!virtualGridViewCommandPressLatch.accepts(command))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI VirtualGridView command is not recognized");
+        }
+        if (!pressed)
+        {
+            return UIVirtualGridViewCommandResult{
+                .consumed = virtualGridViewCommandPressLatch.release(command)};
+        }
+        if (virtualGridViewCommandPressLatch.isLatched(command))
+        {
+            return UIVirtualGridViewCommandResult{.consumed = true};
+        }
+
+        UINodeId virtualGridView = defaultActionFocusButton;
+        const NodeRecord* focusRecord =
+            contains(virtualGridView) ? nodes.tryGet(virtualGridView.storageId()) : nullptr;
+        if (focusRecord != nullptr &&
+            focusRecord->kind == BuiltinElementKind::VirtualGridViewItem)
+        {
+            virtualGridView = virtualGridViewForItem(virtualGridView);
+            focusRecord = contains(virtualGridView)
+                              ? nodes.tryGet(virtualGridView.storageId())
+                              : nullptr;
+        }
+        if (focusRecord == nullptr ||
+            focusRecord->kind != BuiltinElementKind::VirtualGridView ||
+            !isNodeEnabled(virtualGridView))
+        {
+            return UIVirtualGridViewCommandResult{};
+        }
+
+        VirtualGridViewState* statePointer =
+            virtualGridViewStorage.tryView(virtualGridView);
+        if (statePointer == nullptr)
+        {
+            return fail(Core::CoreErrorCode::Internal,
+                        "UI VirtualGridView state is unavailable");
+        }
+        VirtualGridViewState& state = *statePointer;
+        const u64 itemCount = state.dataSource.hasValue()
+                                  ? state.dataSource.itemCount(state.dataSource.state)
+                                  : 0;
+        const auto plan = resolveVirtualGridViewCommandNavigation(
+            command, state, itemCount);
+        if (!plan)
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI VirtualGridView command navigation shape is invalid");
+        }
+        if (plan->activateCurrentSelection)
+        {
+            virtualGridViewCommandPressLatch.latch(command);
+            return UIVirtualGridViewCommandResult{
+                .consumed = true,
+                .activated = state.selection.hasValue(),
+                .selection = state.selection,
+            };
+        }
+        if (!plan->hasTarget)
+        {
+            virtualGridViewCommandPressLatch.latch(command);
+            return UIVirtualGridViewCommandResult{
+                .consumed = true,
+                .selection = state.selection,
+            };
+        }
+
+        auto descriptor = resolveVirtualGridViewLogicalItem(
+            virtualGridView, plan->targetIndex);
+        if (!descriptor)
+        {
+            return Core::failure(descriptor.error());
+        }
+        if (!descriptor->enabled)
+        {
+            virtualGridViewCommandPressLatch.latch(command);
+            return UIVirtualGridViewCommandResult{
+                .consumed = true,
+                .selection = state.selection,
+            };
+        }
+
+        const UIVirtualGridViewSelection nextSelection{
+            .key = descriptor->key,
+            .logicalIndex = plan->targetIndex,
+            .logicalRow = plan->targetRow,
+            .logicalColumn = plan->targetColumn,
+        };
+        const bool changed = state.selection != nextSelection;
+        if (changed)
+        {
+            if (Core::Status dirty = markPaintDirty(virtualGridView); !dirty)
+            {
+                return Core::failure(dirty.error());
+            }
+            static_cast<void>(virtualGridViewStorage.setSelection(
+                virtualGridView, nextSelection));
+        }
+        const UINodeId updaterRoot = idForIndex(focusRecord->rootIndex);
+        if (Core::Status revealed = scrollVirtualGridViewToIndexFromUpdater(
+                updaterRoot, virtualGridView, plan->targetIndex,
+                UIVirtualGridViewScrollAlignment::Nearest);
+            !revealed)
+        {
+            return Core::failure(revealed.error());
+        }
+        virtualGridViewCommandPressLatch.latch(command);
+        return UIVirtualGridViewCommandResult{
+            .consumed = true,
+            .changed = changed,
+            .selection = state.selection,
+        };
+    }
+
+    [[nodiscard]] UINodeId rootForVirtualGridView(UINodeId virtualGridView) const noexcept
+    {
+        const NodeRecord* record = nodes.tryGet(virtualGridView.storageId());
+        return record != nullptr ? idForIndex(record->rootIndex) : UINodeId{};
+    }
+
+    [[nodiscard]] Core::Status setVirtualGridViewDataSource(
+        UINodeId virtualGridView, UIVirtualGridViewDataSource source)
+    {
+        return setVirtualGridViewDataSourceFromUpdater(
+            rootForVirtualGridView(virtualGridView), virtualGridView, source);
+    }
+
+    [[nodiscard]] Core::Status clearVirtualGridViewDataSource(UINodeId virtualGridView)
+    {
+        return clearVirtualGridViewDataSourceFromUpdater(
+            rootForVirtualGridView(virtualGridView), virtualGridView);
+    }
+
+    [[nodiscard]] Core::Status invalidateVirtualGridViewItems(UINodeId virtualGridView)
+    {
+        return invalidateVirtualGridViewItemsFromUpdater(
+            rootForVirtualGridView(virtualGridView), virtualGridView);
+    }
+
+    [[nodiscard]] Core::Status setVirtualGridViewStyle(
+        UINodeId virtualGridView, const UIVirtualGridViewStyle& style)
+    {
+        return setVirtualGridViewStyleFromUpdater(
+            rootForVirtualGridView(virtualGridView), virtualGridView, style);
+    }
+
+    [[nodiscard]] Core::Result<UIVirtualGridViewStyle>
+    virtualGridViewStyle(UINodeId virtualGridView) const
+    {
+        return virtualGridViewStyleFromUpdater(
+            rootForVirtualGridView(virtualGridView), virtualGridView);
+    }
+
+    [[nodiscard]] Core::Status setVirtualGridViewPaint(
+        UINodeId virtualGridView, const UIVirtualGridViewPaint& paint)
+    {
+        return setVirtualGridViewPaintFromUpdater(
+            rootForVirtualGridView(virtualGridView), virtualGridView, paint);
+    }
+
+    [[nodiscard]] Core::Result<UIVirtualGridViewPaint>
+    virtualGridViewPaint(UINodeId virtualGridView) const
+    {
+        return virtualGridViewPaintFromUpdater(
+            rootForVirtualGridView(virtualGridView), virtualGridView);
+    }
+
+    [[nodiscard]] Core::Result<UIVirtualGridViewMetrics>
+    virtualGridViewMetrics(UINodeId virtualGridView) const
+    {
+        return virtualGridViewMetricsFromUpdater(
+            rootForVirtualGridView(virtualGridView), virtualGridView);
+    }
+
+    [[nodiscard]] Core::Status setVirtualGridViewSelectedIndex(
+        UINodeId virtualGridView, u64 logicalIndex)
+    {
+        return setVirtualGridViewSelectedIndexFromUpdater(
+            rootForVirtualGridView(virtualGridView), virtualGridView, logicalIndex);
+    }
+
+    [[nodiscard]] Core::Status clearVirtualGridViewSelection(UINodeId virtualGridView)
+    {
+        return clearVirtualGridViewSelectionFromUpdater(
+            rootForVirtualGridView(virtualGridView), virtualGridView);
+    }
+
+    [[nodiscard]] Core::Result<UIVirtualGridViewSelection>
+    virtualGridViewSelection(UINodeId virtualGridView) const
+    {
+        return virtualGridViewSelectionFromUpdater(
+            rootForVirtualGridView(virtualGridView), virtualGridView);
+    }
+
+    [[nodiscard]] Core::Status scrollVirtualGridViewToIndex(
+        UINodeId virtualGridView, u64 logicalIndex,
+        UIVirtualGridViewScrollAlignment alignment)
+    {
+        return scrollVirtualGridViewToIndexFromUpdater(
+            rootForVirtualGridView(virtualGridView), virtualGridView,
+            logicalIndex, alignment);
+    }
+
+    [[nodiscard]] UINodeId rootForDataGrid(UINodeId dataGrid) const noexcept
+    {
+        const NodeRecord* record = nodes.tryGet(dataGrid.storageId());
+        return record != nullptr ? idForIndex(record->rootIndex) : UINodeId{};
+    }
+
+    [[nodiscard]] Core::Status setDataGridDataSource(
+        UINodeId dataGrid, UIDataGridDataSource source)
+    {
+        return setDataGridDataSourceFromUpdater(
+            rootForDataGrid(dataGrid), dataGrid, source);
+    }
+
+    [[nodiscard]] Core::Status clearDataGridDataSource(UINodeId dataGrid)
+    {
+        return clearDataGridDataSourceFromUpdater(
+            rootForDataGrid(dataGrid), dataGrid);
+    }
+
+    [[nodiscard]] Core::Status invalidateDataGridItems(UINodeId dataGrid)
+    {
+        return invalidateDataGridItemsFromUpdater(
+            rootForDataGrid(dataGrid), dataGrid);
+    }
+
+    [[nodiscard]] Core::Status setDataGridStyle(
+        UINodeId dataGrid, const UIDataGridStyle& style)
+    {
+        return setDataGridStyleFromUpdater(
+            rootForDataGrid(dataGrid), dataGrid, style);
+    }
+
+    [[nodiscard]] Core::Result<UIDataGridStyle>
+    dataGridStyle(UINodeId dataGrid) const
+    {
+        return dataGridStyleFromUpdater(
+            rootForDataGrid(dataGrid), dataGrid);
+    }
+
+    [[nodiscard]] Core::Status setDataGridPaint(
+        UINodeId dataGrid, const UIDataGridPaint& paint)
+    {
+        return setDataGridPaintFromUpdater(
+            rootForDataGrid(dataGrid), dataGrid, paint);
+    }
+
+    [[nodiscard]] Core::Result<UIDataGridPaint>
+    dataGridPaint(UINodeId dataGrid) const
+    {
+        return dataGridPaintFromUpdater(
+            rootForDataGrid(dataGrid), dataGrid);
+    }
+
+    [[nodiscard]] Core::Result<UIDataGridMetrics>
+    dataGridMetrics(UINodeId dataGrid) const
+    {
+        return dataGridMetricsFromUpdater(
+            rootForDataGrid(dataGrid), dataGrid);
+    }
+
+    [[nodiscard]] Core::Status setDataGridSelectedCell(
+        UINodeId dataGrid, u64 logicalRow, u32 logicalColumn)
+    {
+        return setDataGridSelectedCellFromUpdater(
+            rootForDataGrid(dataGrid), dataGrid, logicalRow, logicalColumn);
+    }
+
+    [[nodiscard]] Core::Status clearDataGridSelection(UINodeId dataGrid)
+    {
+        return clearDataGridSelectionFromUpdater(
+            rootForDataGrid(dataGrid), dataGrid);
+    }
+
+    [[nodiscard]] Core::Result<UIDataGridSelection>
+    dataGridSelection(UINodeId dataGrid) const
+    {
+        return dataGridSelectionFromUpdater(
+            rootForDataGrid(dataGrid), dataGrid);
+    }
+
+    [[nodiscard]] Core::Status scrollDataGridToCell(
+        UINodeId dataGrid, u64 logicalRow, u32 logicalColumn,
+        UIDataGridScrollAlignment alignment)
+    {
+        return scrollDataGridToCellFromUpdater(
+            rootForDataGrid(dataGrid), dataGrid, logicalRow, logicalColumn,
+            alignment);
+    }
+
     [[nodiscard]] Core::Result<UITreeViewCommandResult> routeTreeViewCommand(UITreeViewCommand command, bool pressed)
     {
         if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
@@ -22206,7 +25695,7 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidText, "UI text composition stage is not recognized");
         }
-        if (const UINodeId activeMenuNode = menuStorage.activeMenu(); activeMenuNode.hasValue())
+        if (const UINodeId activeMenuNode = menuStorage.rootMenu(); activeMenuNode.hasValue())
         {
             if (Core::Status closed = setMenuOpenState(activeMenuNode, false); !closed)
             {
@@ -22278,7 +25767,7 @@ struct UIContext::Impl final {
         const bool validCommittedUtf8 = Core::isStrictUtf8WithoutNul(committedUtf8);
         if (validCommittedUtf8)
         {
-            if (const UINodeId activeMenuNode = menuStorage.activeMenu(); activeMenuNode.hasValue())
+            if (const UINodeId activeMenuNode = menuStorage.rootMenu(); activeMenuNode.hasValue())
             {
                 if (Core::Status closed = setMenuOpenState(activeMenuNode, false); !closed)
                 {
@@ -24155,6 +27644,47 @@ Core::Result<UIMenuMetrics> UITreeUpdater::menuMetrics(UINodeId menu) const
     return m_context->menuMetricsFromUpdater(m_root, menu);
 }
 
+Core::Status UITreeUpdater::setMenuItemSubmenu(
+    UINodeId item, UINodeId submenu)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext,
+                    "UI tree updater is not bound to a context");
+    }
+    return m_context->setMenuItemSubmenuFromUpdater(m_root, item, submenu);
+}
+
+Core::Status UITreeUpdater::clearMenuItemSubmenu(UINodeId item)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext,
+                    "UI tree updater is not bound to a context");
+    }
+    return m_context->clearMenuItemSubmenuFromUpdater(m_root, item);
+}
+
+Core::Result<UINodeId> UITreeUpdater::menuItemSubmenu(UINodeId item) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext,
+                    "UI tree updater is not bound to a context");
+    }
+    return m_context->menuItemSubmenuFromUpdater(m_root, item);
+}
+
+Core::Result<UINodeId> UITreeUpdater::menuParentItem(UINodeId menu) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext,
+                    "UI tree updater is not bound to a context");
+    }
+    return m_context->menuParentItemFromUpdater(m_root, menu);
+}
+
 Core::Status UITreeUpdater::setMenuItemChecked(UINodeId item, bool checked)
 {
     if (m_context == nullptr)
@@ -24336,6 +27866,109 @@ Core::Status UITreeUpdater::scrollListViewToIndex(UINodeId listView, u64 logical
 {
     return m_context != nullptr ? m_context->scrollListViewToIndexFromUpdater(m_root, listView, logicalIndex, alignment)
                                 : fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+}
+
+Core::Status UITreeUpdater::setVirtualGridViewDataSource(
+    UINodeId virtualGridView, UIVirtualGridViewDataSource source)
+{
+    return m_context != nullptr
+               ? m_context->setVirtualGridViewDataSourceFromUpdater(m_root, virtualGridView, source)
+               : fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+}
+
+Core::Status UITreeUpdater::clearVirtualGridViewDataSource(UINodeId virtualGridView)
+{
+    return m_context != nullptr
+               ? m_context->clearVirtualGridViewDataSourceFromUpdater(m_root, virtualGridView)
+               : fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+}
+
+Core::Status UITreeUpdater::invalidateVirtualGridViewItems(UINodeId virtualGridView)
+{
+    return m_context != nullptr
+               ? m_context->invalidateVirtualGridViewItemsFromUpdater(m_root, virtualGridView)
+               : fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+}
+
+Core::Status UITreeUpdater::setVirtualGridViewStyle(
+    UINodeId virtualGridView, const UIVirtualGridViewStyle& style)
+{
+    return m_context != nullptr
+               ? m_context->setVirtualGridViewStyleFromUpdater(m_root, virtualGridView, style)
+               : fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+}
+
+Core::Result<UIVirtualGridViewStyle>
+UITreeUpdater::virtualGridViewStyle(UINodeId virtualGridView) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->virtualGridViewStyleFromUpdater(m_root, virtualGridView);
+}
+
+Core::Status UITreeUpdater::setVirtualGridViewPaint(
+    UINodeId virtualGridView, const UIVirtualGridViewPaint& paint)
+{
+    return m_context != nullptr
+               ? m_context->setVirtualGridViewPaintFromUpdater(m_root, virtualGridView, paint)
+               : fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+}
+
+Core::Result<UIVirtualGridViewPaint>
+UITreeUpdater::virtualGridViewPaint(UINodeId virtualGridView) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->virtualGridViewPaintFromUpdater(m_root, virtualGridView);
+}
+
+Core::Result<UIVirtualGridViewMetrics>
+UITreeUpdater::virtualGridViewMetrics(UINodeId virtualGridView) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->virtualGridViewMetricsFromUpdater(m_root, virtualGridView);
+}
+
+Core::Status UITreeUpdater::setVirtualGridViewSelectedIndex(
+    UINodeId virtualGridView, u64 logicalIndex)
+{
+    return m_context != nullptr
+               ? m_context->setVirtualGridViewSelectedIndexFromUpdater(m_root, virtualGridView, logicalIndex)
+               : fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+}
+
+Core::Status UITreeUpdater::clearVirtualGridViewSelection(UINodeId virtualGridView)
+{
+    return m_context != nullptr
+               ? m_context->clearVirtualGridViewSelectionFromUpdater(m_root, virtualGridView)
+               : fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+}
+
+Core::Result<UIVirtualGridViewSelection>
+UITreeUpdater::virtualGridViewSelection(UINodeId virtualGridView) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->virtualGridViewSelectionFromUpdater(m_root, virtualGridView);
+}
+
+Core::Status UITreeUpdater::scrollVirtualGridViewToIndex(
+    UINodeId virtualGridView, u64 logicalIndex,
+    UIVirtualGridViewScrollAlignment alignment)
+{
+    return m_context != nullptr
+               ? m_context->scrollVirtualGridViewToIndexFromUpdater(
+                     m_root, virtualGridView, logicalIndex, alignment)
+               : fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
 }
 
 Core::Status UITreeUpdater::setTreeViewDataSource(UINodeId treeView, UITreeViewDataSource source)
@@ -25054,6 +28687,12 @@ Core::Result<UIListViewCommandResult> UIContext::routeListViewCommand(UIListView
     return m_impl->routeListViewCommand(command, pressed);
 }
 
+Core::Result<UIVirtualGridViewCommandResult>
+UIContext::routeVirtualGridViewCommand(UIVirtualGridViewCommand command, bool pressed)
+{
+    return m_impl->routeVirtualGridViewCommand(command, pressed);
+}
+
 Core::Result<UITreeViewCommandResult> UIContext::routeTreeViewCommand(UITreeViewCommand command, bool pressed)
 {
     return m_impl->routeTreeViewCommand(command, pressed);
@@ -25075,6 +28714,12 @@ Core::Result<UIMenuCommandResult> UIContext::routeMenuCommand(
     UIMenuCommand command, bool pressed)
 {
     return m_impl->routeMenuCommand(command, pressed);
+}
+
+Core::Result<UIMenuInvocationResult> UIContext::routeMenuInvocation(
+    UIMenuInvocationCommand command, bool pressed)
+{
+    return m_impl->routeMenuInvocation(command, pressed);
 }
 
 UINodeId UIContext::defaultActionFocus() const noexcept
@@ -25236,6 +28881,77 @@ Core::Result<UITabPaint> UIContext::tabPaint(UINodeId tab) const
     return m_impl->tabPaint(tab);
 }
 
+Core::Status UIContext::setVirtualGridViewDataSource(
+    UINodeId virtualGridView, UIVirtualGridViewDataSource source)
+{
+    return m_impl->setVirtualGridViewDataSource(virtualGridView, source);
+}
+
+Core::Status UIContext::clearVirtualGridViewDataSource(UINodeId virtualGridView)
+{
+    return m_impl->clearVirtualGridViewDataSource(virtualGridView);
+}
+
+Core::Status UIContext::invalidateVirtualGridViewItems(UINodeId virtualGridView)
+{
+    return m_impl->invalidateVirtualGridViewItems(virtualGridView);
+}
+
+Core::Status UIContext::setVirtualGridViewStyle(
+    UINodeId virtualGridView, const UIVirtualGridViewStyle& style)
+{
+    return m_impl->setVirtualGridViewStyle(virtualGridView, style);
+}
+
+Core::Result<UIVirtualGridViewStyle>
+UIContext::virtualGridViewStyle(UINodeId virtualGridView) const
+{
+    return m_impl->virtualGridViewStyle(virtualGridView);
+}
+
+Core::Status UIContext::setVirtualGridViewPaint(
+    UINodeId virtualGridView, const UIVirtualGridViewPaint& paint)
+{
+    return m_impl->setVirtualGridViewPaint(virtualGridView, paint);
+}
+
+Core::Result<UIVirtualGridViewPaint>
+UIContext::virtualGridViewPaint(UINodeId virtualGridView) const
+{
+    return m_impl->virtualGridViewPaint(virtualGridView);
+}
+
+Core::Result<UIVirtualGridViewMetrics>
+UIContext::virtualGridViewMetrics(UINodeId virtualGridView) const
+{
+    return m_impl->virtualGridViewMetrics(virtualGridView);
+}
+
+Core::Status UIContext::setVirtualGridViewSelectedIndex(
+    UINodeId virtualGridView, u64 logicalIndex)
+{
+    return m_impl->setVirtualGridViewSelectedIndex(virtualGridView, logicalIndex);
+}
+
+Core::Status UIContext::clearVirtualGridViewSelection(UINodeId virtualGridView)
+{
+    return m_impl->clearVirtualGridViewSelection(virtualGridView);
+}
+
+Core::Result<UIVirtualGridViewSelection>
+UIContext::virtualGridViewSelection(UINodeId virtualGridView) const
+{
+    return m_impl->virtualGridViewSelection(virtualGridView);
+}
+
+Core::Status UIContext::scrollVirtualGridViewToIndex(
+    UINodeId virtualGridView, u64 logicalIndex,
+    UIVirtualGridViewScrollAlignment alignment)
+{
+    return m_impl->scrollVirtualGridViewToIndex(
+        virtualGridView, logicalIndex, alignment);
+}
+
 Core::Status UIContext::setTooltipAnchor(UINodeId tooltip, UINodeId anchor)
 {
     return m_impl->setTooltipAnchor(tooltip, anchor);
@@ -25299,6 +29015,27 @@ Core::Result<bool> UIContext::isMenuOpen(UINodeId menu) const
 Core::Result<UIMenuMetrics> UIContext::menuMetrics(UINodeId menu) const
 {
     return m_impl->menuMetrics(menu);
+}
+
+Core::Status UIContext::setMenuItemSubmenu(
+    UINodeId item, UINodeId submenu)
+{
+    return m_impl->setMenuItemSubmenu(item, submenu);
+}
+
+Core::Status UIContext::clearMenuItemSubmenu(UINodeId item)
+{
+    return m_impl->clearMenuItemSubmenu(item);
+}
+
+Core::Result<UINodeId> UIContext::menuItemSubmenu(UINodeId item) const
+{
+    return m_impl->menuItemSubmenu(item);
+}
+
+Core::Result<UINodeId> UIContext::menuParentItem(UINodeId menu) const
+{
+    return m_impl->menuParentItem(menu);
 }
 
 Core::Status UIContext::setMenuItemChecked(UINodeId item, bool checked)
@@ -26022,6 +29759,31 @@ Core::Result<UIMenuMetrics> UIContext::menuMetricsFromUpdater(
     return m_impl->menuMetricsFromUpdater(updaterRoot, menu);
 }
 
+Core::Status UIContext::setMenuItemSubmenuFromUpdater(
+    UINodeId updaterRoot, UINodeId item, UINodeId submenu)
+{
+    return m_impl->setMenuItemSubmenuFromUpdater(
+        updaterRoot, item, submenu);
+}
+
+Core::Status UIContext::clearMenuItemSubmenuFromUpdater(
+    UINodeId updaterRoot, UINodeId item)
+{
+    return m_impl->clearMenuItemSubmenuFromUpdater(updaterRoot, item);
+}
+
+Core::Result<UINodeId> UIContext::menuItemSubmenuFromUpdater(
+    UINodeId updaterRoot, UINodeId item) const
+{
+    return m_impl->menuItemSubmenuFromUpdater(updaterRoot, item);
+}
+
+Core::Result<UINodeId> UIContext::menuParentItemFromUpdater(
+    UINodeId updaterRoot, UINodeId menu) const
+{
+    return m_impl->menuParentItemFromUpdater(updaterRoot, menu);
+}
+
 Core::Status UIContext::setMenuItemCheckedFromUpdater(
     UINodeId updaterRoot, UINodeId item, bool checked)
 {
@@ -26146,6 +29908,87 @@ Core::Status UIContext::scrollListViewToIndexFromUpdater(UINodeId updaterRoot, U
                                                         u64 logicalIndex, UIListViewScrollAlignment alignment)
 {
     return m_impl->scrollListViewToIndexFromUpdater(updaterRoot, listView, logicalIndex, alignment);
+}
+
+Core::Status UIContext::setVirtualGridViewDataSourceFromUpdater(
+    UINodeId updaterRoot, UINodeId virtualGridView,
+    UIVirtualGridViewDataSource source)
+{
+    return m_impl->setVirtualGridViewDataSourceFromUpdater(updaterRoot, virtualGridView, source);
+}
+
+Core::Status UIContext::clearVirtualGridViewDataSourceFromUpdater(
+    UINodeId updaterRoot, UINodeId virtualGridView)
+{
+    return m_impl->clearVirtualGridViewDataSourceFromUpdater(updaterRoot, virtualGridView);
+}
+
+Core::Status UIContext::invalidateVirtualGridViewItemsFromUpdater(
+    UINodeId updaterRoot, UINodeId virtualGridView)
+{
+    return m_impl->invalidateVirtualGridViewItemsFromUpdater(updaterRoot, virtualGridView);
+}
+
+Core::Status UIContext::setVirtualGridViewStyleFromUpdater(
+    UINodeId updaterRoot, UINodeId virtualGridView,
+    const UIVirtualGridViewStyle& style)
+{
+    return m_impl->setVirtualGridViewStyleFromUpdater(updaterRoot, virtualGridView, style);
+}
+
+Core::Result<UIVirtualGridViewStyle>
+UIContext::virtualGridViewStyleFromUpdater(
+    UINodeId updaterRoot, UINodeId virtualGridView) const
+{
+    return m_impl->virtualGridViewStyleFromUpdater(updaterRoot, virtualGridView);
+}
+
+Core::Status UIContext::setVirtualGridViewPaintFromUpdater(
+    UINodeId updaterRoot, UINodeId virtualGridView,
+    const UIVirtualGridViewPaint& paint)
+{
+    return m_impl->setVirtualGridViewPaintFromUpdater(updaterRoot, virtualGridView, paint);
+}
+
+Core::Result<UIVirtualGridViewPaint>
+UIContext::virtualGridViewPaintFromUpdater(
+    UINodeId updaterRoot, UINodeId virtualGridView) const
+{
+    return m_impl->virtualGridViewPaintFromUpdater(updaterRoot, virtualGridView);
+}
+
+Core::Result<UIVirtualGridViewMetrics>
+UIContext::virtualGridViewMetricsFromUpdater(
+    UINodeId updaterRoot, UINodeId virtualGridView) const
+{
+    return m_impl->virtualGridViewMetricsFromUpdater(updaterRoot, virtualGridView);
+}
+
+Core::Status UIContext::setVirtualGridViewSelectedIndexFromUpdater(
+    UINodeId updaterRoot, UINodeId virtualGridView, u64 logicalIndex)
+{
+    return m_impl->setVirtualGridViewSelectedIndexFromUpdater(updaterRoot, virtualGridView, logicalIndex);
+}
+
+Core::Status UIContext::clearVirtualGridViewSelectionFromUpdater(
+    UINodeId updaterRoot, UINodeId virtualGridView)
+{
+    return m_impl->clearVirtualGridViewSelectionFromUpdater(updaterRoot, virtualGridView);
+}
+
+Core::Result<UIVirtualGridViewSelection>
+UIContext::virtualGridViewSelectionFromUpdater(
+    UINodeId updaterRoot, UINodeId virtualGridView) const
+{
+    return m_impl->virtualGridViewSelectionFromUpdater(updaterRoot, virtualGridView);
+}
+
+Core::Status UIContext::scrollVirtualGridViewToIndexFromUpdater(
+    UINodeId updaterRoot, UINodeId virtualGridView, u64 logicalIndex,
+    UIVirtualGridViewScrollAlignment alignment)
+{
+    return m_impl->scrollVirtualGridViewToIndexFromUpdater(
+        updaterRoot, virtualGridView, logicalIndex, alignment);
 }
 
 Core::Status UIContext::setTreeViewDataSourceFromUpdater(UINodeId updaterRoot, UINodeId treeView,

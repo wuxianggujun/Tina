@@ -7,6 +7,8 @@ add_library(tina_platform_glfw STATIC
     GlfwInputTranslation.cpp
     GlfwNativeWindowBinding.hpp
     GlfwNativeWindowBinding.cpp
+    GlfwSystemColorSchemeObserver.hpp
+    GlfwSystemColorSchemeObserver.cpp
     GlfwTextInputPlacement.hpp
     GlfwTextInputPlacement.cpp
     GlfwPlatformBackend.cpp
@@ -50,7 +52,7 @@ target_link_libraries(tina_platform_glfw
         glfw
 )
 if(WIN32)
-    target_link_libraries(tina_platform_glfw PRIVATE imm32)
+    target_link_libraries(tina_platform_glfw PRIVATE advapi32 imm32)
 endif()
 set_target_properties(tina_platform_glfw PROPERTIES
     CXX_EXTENSIONS OFF

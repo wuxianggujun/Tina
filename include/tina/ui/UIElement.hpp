@@ -4,6 +4,7 @@
 #include <tina/ui/UIBehavior.hpp>
 #include <tina/ui/UIBadge.hpp>
 #include <tina/ui/UIContent.hpp>
+#include <tina/ui/UIDataGrid.hpp>
 #include <tina/ui/UIDivider.hpp>
 #include <tina/ui/UIFocus.hpp>
 #include <tina/ui/UIHitTest.hpp>
@@ -20,9 +21,10 @@
 #include <tina/ui/UITabView.hpp>
 #include <tina/ui/UIText.hpp>
 #include <tina/ui/UITextEdit.hpp>
-#include <tina/ui/UIToggleSwitch.hpp>
+#include <tina/ui/UISwitch.hpp>
 #include <tina/ui/UITooltip.hpp>
 #include <tina/ui/UITreeView.hpp>
+#include <tina/ui/UIVirtualGridView.hpp>
 
 #include <limits>
 #include <optional>
@@ -68,6 +70,8 @@ struct UIElementDescriptor final {
     UITreeViewCreateConfig treeView{};
     // Applied only when this descriptor creates a TextInput TextEdit.
     UITextEditMultilineConfig textEditMultiline{};
+    UIVirtualGridViewCreateConfig virtualGridView{};
+    UIDataGridCreateConfig dataGrid{};
 };
 
 [[nodiscard]] constexpr UIElementDescriptor makeImageElement(
@@ -398,13 +402,13 @@ struct UIElementDescriptor final {
     };
 }
 
-[[nodiscard]] constexpr UIElementDescriptor makeToggleSwitchElement(
-    UIToggleSwitchConfig config = {}, UILayoutStyle layout = {}) noexcept
+[[nodiscard]] constexpr UIElementDescriptor makeSwitchElement(
+    UISwitchConfig config = {}, UILayoutStyle layout = {}) noexcept
 {
-    UIStyleRoleId role = UIStyleRoleId::ToggleSwitch;
+    UIStyleRoleId role = UIStyleRoleId::Switch;
     switch (config.size)
     {
-    case UIToggleSwitchSize::Compact:
+    case UISwitchSize::Compact:
         if (layout.size.width.isAuto())
         {
             layout.size.width = UILayoutLength::Px(36.0F);
@@ -414,7 +418,7 @@ struct UIElementDescriptor final {
             layout.size.height = UILayoutLength::Px(20.0F);
         }
         break;
-    case UIToggleSwitchSize::Standard:
+    case UISwitchSize::Standard:
         if (layout.size.width.isAuto())
         {
             layout.size.width = UILayoutLength::Px(44.0F);
@@ -684,6 +688,41 @@ struct UIElementDescriptor final {
             .actions = UISemanticsAction::Focus,
         },
         .treeView = config,
+    };
+}
+
+[[nodiscard]] constexpr UIElementDescriptor makeVirtualGridViewElement(
+    UIVirtualGridViewCreateConfig config = {},
+    UILayoutStyle layout = {}) noexcept
+{
+    return UIElementDescriptor{
+        .layout = layout,
+        .visual = {.styleRole = UIStyleRoleId::VirtualGridView},
+        .behaviors = UIElementBehavior::Focusable |
+                     UIElementBehavior::VirtualGrid,
+        .semantics = {
+            .mode = UISemanticsMode::Publish,
+            .role = UISemanticsRole::List,
+            .actions = UISemanticsAction::Focus,
+        },
+        .virtualGridView = config,
+    };
+}
+
+[[nodiscard]] constexpr UIElementDescriptor makeDataGridElement(
+    UIDataGridCreateConfig config = {}, UILayoutStyle layout = {}) noexcept
+{
+    return UIElementDescriptor{
+        .layout = layout,
+        .visual = {.styleRole = UIStyleRoleId::DataGrid},
+        .behaviors = UIElementBehavior::Focusable |
+                     UIElementBehavior::DataGrid,
+        .semantics = {
+            .mode = UISemanticsMode::Publish,
+            .role = UISemanticsRole::Group,
+            .actions = UISemanticsAction::Focus,
+        },
+        .dataGrid = config,
     };
 }
 

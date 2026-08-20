@@ -1,6 +1,64 @@
 ﻿#include "EditorWorkspaceState.hpp"
 
 namespace Tina::EditorApp::WorkspaceInternal {
+namespace {
+
+[[nodiscard]] constexpr char asciiLower(char value) noexcept
+{
+    return value >= 'A' && value <= 'Z'
+               ? static_cast<char>(value + ('a' - 'A'))
+               : value;
+}
+
+[[nodiscard]] bool containsAsciiCaseInsensitive(
+    std::string_view text, std::string_view needle) noexcept
+{
+    if (needle.empty()) {
+        return true;
+    }
+    if (needle.size() > text.size()) {
+        return false;
+    }
+    for (Tina::Core::usize offset = 0;
+         offset + needle.size() <= text.size(); ++offset) {
+        bool matches = true;
+        for (Tina::Core::usize index = 0; index < needle.size(); ++index) {
+            if (asciiLower(text[offset + index]) != asciiLower(needle[index])) {
+                matches = false;
+                break;
+            }
+        }
+        if (matches) {
+            return true;
+        }
+    }
+    return false;
+}
+
+[[nodiscard]] UI::UISnackbarTone snackbarToneFor(
+    std::string_view feedback) noexcept
+{
+    for (const std::string_view word :
+         {"failed", "rejected", "error", "invalid", "cannot"}) {
+        if (containsAsciiCaseInsensitive(feedback, word)) {
+            return UI::UISnackbarTone::Error;
+        }
+    }
+    for (const std::string_view word :
+         {"cancel", "unchanged", "preserved", "retry", "stop"}) {
+        if (containsAsciiCaseInsensitive(feedback, word)) {
+            return UI::UISnackbarTone::Warning;
+        }
+    }
+    for (const std::string_view word : {"ready", "selected", "preview"}) {
+        if (containsAsciiCaseInsensitive(feedback, word)) {
+            return UI::UISnackbarTone::Neutral;
+        }
+    }
+    return UI::UISnackbarTone::Success;
+}
+
+} // namespace
 
 auto EditorWorkspaceState::onExit(Tina::GameStateExitContext&) noexcept -> void{
     if (sourceImportService_.state() ==
@@ -30,10 +88,13 @@ auto EditorWorkspaceState::onExit(Tina::GameStateExitContext&) noexcept -> void{
     previewWorld_.reset();
     animationPreview_.resetAnimator();
     releasePreviewAssetBindings();
+    iconResolverRegistration_.reset();
     if (uiRoot_) {
         uiRoot_.reset();
         ++counters_.uiRootsReleased;
     }
+    iconResources_.release();
+    snackbarHost_.reset();
     if (sourceImportCatalogCommitted_) {
         assetResources_.system.reset();
     }
@@ -99,22 +160,14 @@ auto EditorWorkspaceState::updateFrame(Tina::FrameUpdateContext& context) -> Tin
                 ? options_.targetFrameCount -
                       AutomaticAuthoringMinimumFrameCount
                 : u64{1};
-        const u64 second = (std::max)(
-            first + u64{1},
-            options_.targetFrameCount - options_.targetFrameCount / u64{6});
         if (!queuedFirstSelection_ && counters_.frameUpdates >= first) {
             const auto stableId = automaticHierarchyStableId(false);
             if (stableId.has_value()) {
                 pendingSelectionStableId_ = *stableId;
                 counters_.automaticTransformStableId = *stableId;
-                pendingViewportTokenColor_ = UI::rgb(0x1A3348);
                 pendingViewportToolMode_ = ViewportToolMode::Translate;
                 queuedFirstSelection_ = true;
             }
-        } else if (queuedFirstSelection_ && !queuedSecondStyleUpdate_ &&
-                   counters_.frameUpdates >= second) {
-            pendingViewportTokenColor_ = UI::rgb(0x0C141E);
-            queuedSecondStyleUpdate_ = true;
         }
         if (queuedFirstSelection_) {
             const auto queueAutoCommand = [&](EditorCommand command) noexcept {
@@ -274,13 +327,23 @@ auto EditorWorkspaceState::updateFrame(Tina::FrameUpdateContext& context) -> Tin
                 break;
             }
             case 22:
-                if (stableEntityIdForHierarchyItem(selectionKey_) ==
-                    counters_.automaticAddedStableId) {
+                if (pendingSceneDeleteConfirmation_.has_value() &&
+                    pendingSceneDeleteConfirmation_->stableId ==
+                        counters_.automaticDuplicatedStableId) {
+                    (void)queueEditorCommand(EditorCommand::SceneDeleteConfirm);
+                } else if (stableEntityIdForHierarchyItem(selectionKey_) ==
+                           counters_.automaticAddedStableId) {
                     (void)queueAutoCommand(EditorCommand::SceneDelete);
                 }
                 break;
             case 23:
-                (void)queueAutoCommand(EditorCommand::PlayStartOrResume);
+                if (pendingSceneDeleteConfirmation_.has_value() &&
+                    pendingSceneDeleteConfirmation_->stableId ==
+                        counters_.automaticAddedStableId) {
+                    (void)queueEditorCommand(EditorCommand::SceneDeleteConfirm);
+                } else {
+                    (void)queueAutoCommand(EditorCommand::PlayStartOrResume);
+                }
                 break;
             case 24:
                 if (playSession_.has_value() &&
@@ -396,10 +459,10 @@ auto EditorWorkspaceState::updateFrame(Tina::FrameUpdateContext& context) -> Tin
                 (void)queueAutoCommand(EditorCommand::AnimationRemoveEvent);
                 break;
             case 38:
-                (void)queueAutoCommand(EditorCommand::AnimationUndo);
+                (void)queueAutoCommand(EditorCommand::Undo);
                 break;
             case 39:
-                (void)queueAutoCommand(EditorCommand::AnimationRedo);
+                (void)queueAutoCommand(EditorCommand::Redo);
                 break;
             case 40:
                 (void)queueAutoCommand(EditorCommand::AnimationAddEvent);
@@ -408,10 +471,10 @@ auto EditorWorkspaceState::updateFrame(Tina::FrameUpdateContext& context) -> Tin
                 (void)queueAutoCommand(EditorCommand::AnimationCycleMode);
                 break;
             case 42:
-                (void)queueAutoCommand(EditorCommand::AnimationUndo);
+                (void)queueAutoCommand(EditorCommand::Undo);
                 break;
             case 43:
-                (void)queueAutoCommand(EditorCommand::AnimationRedo);
+                (void)queueAutoCommand(EditorCommand::Redo);
                 break;
             case 44:
                 (void)queueAutoCommand(EditorCommand::AnimationCookPreview);
@@ -451,11 +514,48 @@ auto EditorWorkspaceState::updateFrame(Tina::FrameUpdateContext& context) -> Tin
                 ++autoAuthoringStage_;
                 break;
             case 48:
+                (void)queueAutoCommand(EditorCommand::SwitchToWorld2D);
+                break;
+            case 49:
+                if (workspaceMode_ == WorkspaceMode::World2D &&
+                    !pendingEditorCommand_.has_value()) {
+                    pendingSelectionStableId_ = 6U;
+                    ++autoAuthoringStage_;
+                }
+                break;
+            case 50:
+                if (!pendingSelectionStableId_.has_value() &&
+                    stableEntityIdForHierarchyItem(selectionKey_) == 6U) {
+                    ++autoAuthoringStage_;
+                }
+                break;
+            case 51:
+                if (stableEntityIdForHierarchyItem(selectionKey_) == 6U &&
+                    !pointLightColorPickerVisible_) {
+                    pendingPointLightColorPickerToggle_ = true;
+                    ++autoAuthoringStage_;
+                }
+                break;
+            case AutomaticColorPickerVisibleStage:
+                if (pointLightColorPickerVisible_ &&
+                    (options_.rgbaOutputUtf8.empty() ||
+                     options_.rgbaStage != RgbaCaptureStage::ColorPicker ||
+                     counters_.rgbaCaptureOk)) {
+                    ++autoAuthoringStage_;
+                }
+                break;
+            case 53:
+                if (pointLightColorPickerVisible_) {
+                    pendingPointLightColorPickerToggle_ = true;
+                    ++autoAuthoringStage_;
+                }
+                break;
+            case 54:
                 (void)queueAutoCommand(options_.initialWorkspace == WorkspaceMode::World2D
                                            ? EditorCommand::SwitchToWorld2D
                                            : EditorCommand::SwitchToWorld3D);
                 break;
-            case 49:
+            case 55:
                 if (workspaceMode_ == options_.initialWorkspace &&
                     !pendingEditorCommand_.has_value()) {
                     const auto stableId = automaticHierarchyStableId(true);
@@ -466,10 +566,16 @@ auto EditorWorkspaceState::updateFrame(Tina::FrameUpdateContext& context) -> Tin
                     }
                 }
                 break;
-            case 50:
-                // Allow the final workspace/selection mutations to publish
-                // through one complete retained-UI frame before shutdown.
-                ++autoAuthoringStage_;
+            case AutomaticFinalSelectionCommitStage:
+                // The setter publishes through a retained-UI commit. Do not
+                // report the demo as settled until the next UI update has
+                // observed that committed selection.
+                if (!pendingSelectionStableId_.has_value() &&
+                    counters_.automaticFinalSelectionStableId != 0U &&
+                    stableEntityIdForHierarchyItem(selectionKey_) ==
+                        counters_.automaticFinalSelectionStableId) {
+                    ++autoAuthoringStage_;
+                }
                 break;
             default:
                 break;
@@ -637,6 +743,36 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
     if (!tree) {
         return Tina::Core::failure(std::move(tree.error()));
     }
+    if (auto status = captureRequestedRgbaFrame(*tree); !status) {
+        return status;
+    }
+    if (auto status = updateHierarchySearch(*tree); !status) {
+        return status;
+    }
+    if (!projectBrowserUiRefreshPending_) {
+        if (auto status = synchronizePendingProjectAssetSelection(*tree); !status) {
+            return status;
+        }
+    }
+    if (pendingSceneDeleteDialogFocus_) {
+        if (auto status = tree->requestFocus(
+                sceneDeleteDialog_.actions[SceneDeleteConfirmActionIndex]);
+            !status) {
+            return status;
+        }
+        pendingSceneDeleteDialogFocus_ = false;
+    } else if (pendingHierarchyFocusRestore_) {
+        if (auto status = tree->requestFocus(hierarchyTree_); !status) {
+            return status;
+        }
+        pendingHierarchyFocusRestore_ = false;
+    }
+    if (auto status = processPendingInspectorSectionUpdates(*tree); !status) {
+        return status;
+    }
+    if (auto status = processPendingPointLightColorUpdates(*tree); !status) {
+        return status;
+    }
     if (playSessionActive() &&
         observedPlaySessionRevision_ != playSession_->snapshot().revision) {
         observedPlaySessionRevision_ = playSession_->snapshot().revision;
@@ -705,24 +841,20 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
     }
     if (projectBrowserUiRefreshPending_) {
         projectBrowserUiRefreshPending_ = false;
-        if (auto status = tree->setListViewDataSource(
+        if (auto status = tree->setVirtualGridViewDataSource(
                 projectAssetList_, projectAssetDataSource());
             !status) {
             return status;
         }
-        if (auto status = tree->invalidateListViewItems(projectAssetList_); !status) {
+        if (auto status = tree->invalidateVirtualGridViewItems(projectAssetList_); !status) {
             return status;
         }
         const auto selectedIndex = projectAssets_.selectedVisibleIndex();
         if (selectedIndex.has_value()) {
-            if (auto status = tree->setListViewSelectedIndex(
-                    projectAssetList_, *selectedIndex);
-                !status) {
-                return status;
-            }
-            observedProjectAssetSelectionIndex_ = *selectedIndex;
+            projectAssetSelectionSyncPending_ = true;
         } else {
-            if (auto status = tree->clearListViewSelection(projectAssetList_); !status) {
+            projectAssetSelectionSyncPending_ = false;
+            if (auto status = tree->clearVirtualGridViewSelection(projectAssetList_); !status) {
                 return status;
             }
             observedProjectAssetSelectionIndex_.reset();
@@ -735,14 +867,6 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
     }
     if (auto status = processPendingAnimationFrameSelection(*tree); !status) {
         return status;
-    }
-    if (pendingViewportTokenColor_.has_value()) {
-        const UI::UIStraightSrgba8Color color = *pendingViewportTokenColor_;
-        pendingViewportTokenColor_.reset();
-        if (auto status = tree->setStyleColorToken(viewportToken_, color); !status) {
-            return status;
-        }
-        ++counters_.styleTokenUpdates;
     }
     if (auto status = processViewportMarquee(*tree); !status) {
         return status;
@@ -776,31 +900,33 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
         }
     }
     preserveViewportSelectionOnHierarchyPublish_ = false;
-    auto projectSelection = tree->listViewSelection(projectAssetList_);
-    if (!projectSelection) {
-        return Tina::Core::failure(std::move(projectSelection.error()));
-    }
-    if (projectSelection->hasValue() &&
-        observedProjectAssetSelectionIndex_ != projectSelection->logicalIndex) {
-        if (auto status = projectAssets_.selectVisibleIndex(
-                static_cast<Tina::Core::usize>(projectSelection->logicalIndex));
-            !status) {
-            return status;
+    if (!projectAssetSelectionSyncPending_) {
+        auto projectSelection = tree->virtualGridViewSelection(projectAssetList_);
+        if (!projectSelection) {
+            return Tina::Core::failure(std::move(projectSelection.error()));
         }
-        observedProjectAssetSelectionIndex_ = projectSelection->logicalIndex;
-        assetInspectorActive_ = true;
-        synchronizeViewportSelectionFromHierarchy();
-        ++counters_.projectAssetSelectionChanges;
-        if (auto status = refreshAuthoringUi(*tree); !status) {
-            return status;
-        }
-    } else if (!projectSelection->hasValue() &&
-               observedProjectAssetSelectionIndex_.has_value()) {
-        observedProjectAssetSelectionIndex_.reset();
-        assetInspectorActive_ = false;
-        synchronizeViewportSelectionFromHierarchy();
-        if (auto status = refreshAuthoringUi(*tree); !status) {
-            return status;
+        if (projectSelection->hasValue() &&
+            observedProjectAssetSelectionIndex_ != projectSelection->logicalIndex) {
+            if (auto status = projectAssets_.selectVisibleIndex(
+                    static_cast<Tina::Core::usize>(projectSelection->logicalIndex));
+                !status) {
+                return status;
+            }
+            observedProjectAssetSelectionIndex_ = projectSelection->logicalIndex;
+            assetInspectorActive_ = true;
+            synchronizeViewportSelectionFromHierarchy();
+            ++counters_.projectAssetSelectionChanges;
+            if (auto status = refreshAuthoringUi(*tree); !status) {
+                return status;
+            }
+        } else if (!projectSelection->hasValue() &&
+                   observedProjectAssetSelectionIndex_.has_value()) {
+            observedProjectAssetSelectionIndex_.reset();
+            assetInspectorActive_ = false;
+            synchronizeViewportSelectionFromHierarchy();
+            if (auto status = refreshAuthoringUi(*tree); !status) {
+                return status;
+            }
         }
     }
     auto sourceImportSelection = tree->listViewSelection(sourceImportList_);
@@ -939,6 +1065,9 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
     if (auto status = processPendingTileBrush(*tree); !status) {
         return status;
     }
+    if (auto status = processPendingInspectorTransformStep(*tree); !status) {
+        return status;
+    }
     if (pendingAutoTransformInput_ && pendingEditorCommand_ == EditorCommand::ApplyTransform) {
         pendingAutoTransformInput_ = false;
         const char* automaticScale =
@@ -994,11 +1123,241 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
     counters_.selectionVerified =
         resolveHierarchyItem(this, selection->logicalIndex, descriptor) &&
         descriptor.key == selection->key;
+    if (options_.autoDemo &&
+        autoAuthoringStage_ == AutomaticFinalSelectionCommitStage &&
+        !pendingSelectionStableId_.has_value() &&
+        counters_.automaticFinalSelectionStableId != 0U &&
+        stableEntityIdForHierarchyItem(selection->key) ==
+            counters_.automaticFinalSelectionStableId) {
+        ++autoAuthoringStage_;
+        counters_.automaticAuthoringStage = autoAuthoringStage_;
+    }
     auto metrics = tree->treeViewMetrics(hierarchyTree_);
     if (!metrics) {
         return Tina::Core::failure(std::move(metrics.error()));
     }
     counters_.hierarchyLogicalItems = metrics->logicalItemCount;
+    return updateSnackbarUi(*tree);
+}
+
+auto EditorWorkspaceState::captureRequestedRgbaFrame(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    if (options_.rgbaOutputUtf8.empty() || counters_.rgbaCaptureAttempted) {
+        return Tina::Core::success();
+    }
+
+    bool stageReady = false;
+    switch (options_.rgbaStage) {
+    case RgbaCaptureStage::Workspace:
+        stageReady = automaticDemoStartFrame_ != 0U &&
+                     counters_.frameUpdates > automaticDemoStartFrame_;
+        break;
+    case RgbaCaptureStage::ColorPicker:
+        stageReady = workspaceMode_ == WorkspaceMode::World2D &&
+                     stableEntityIdForHierarchyItem(selectionKey_) == 6U &&
+                     pointLightColorPickerVisible_;
+        if (stageReady) {
+            auto viewportRect = tree.committedLayoutRect(inspectorScroll_);
+            if (!viewportRect) {
+                return Tina::Core::failure(std::move(viewportRect.error()));
+            }
+            const auto isVerticallyVisible = [&](UI::UINodeId node)
+                -> Tina::Core::Result<bool> {
+                auto rect = tree.committedLayoutRect(node);
+                if (!rect) {
+                    return Tina::Core::failure(std::move(rect.error()));
+                }
+                return rect->width > 0.0F && rect->height > 0.0F &&
+                       rect->y >= viewportRect->y &&
+                       rect->y + rect->height <=
+                           viewportRect->y + viewportRect->height;
+            };
+            const std::array<UI::UINodeId, 8> requiredNodes{
+                pointLightColorField_.swatchButton,
+                pointLightColorField_.textEdit,
+                pointLightColorPicker_.channelSliders[0],
+                pointLightColorPicker_.channelSliders[1],
+                pointLightColorPicker_.channelSliders[2],
+                pointLightColorPicker_.channelValueLabels[0],
+                pointLightColorPicker_.channelValueLabels[1],
+                pointLightColorPicker_.channelValueLabels[2],
+            };
+            for (const UI::UINodeId node : requiredNodes) {
+                auto visible = isVerticallyVisible(node);
+                if (!visible) {
+                    return Tina::Core::failure(std::move(visible.error()));
+                }
+                if (!*visible) {
+                    stageReady = false;
+                    break;
+                }
+            }
+        }
+        break;
+    case RgbaCaptureStage::DeleteDialog:
+        stageReady = pendingSceneDeleteConfirmation_.has_value();
+        break;
+    }
+    if (!stageReady) {
+        return Tina::Core::success();
+    }
+    counters_.rgbaCaptureAttempted = true;
+    Tina::Render::IRenderDevice* device = renderDeviceAccess_.get();
+    if (device == nullptr) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::Internal,
+            "Editor RGBA8 capture requires the active render device");
+    }
+    auto captured = device->capturePrimaryFrameRgba8();
+    if (!captured) {
+        return Tina::Core::failure(std::move(captured.error()));
+    }
+    const u64 expectedBytes =
+        static_cast<u64>(captured->width) * captured->height * 4U;
+    if (captured->empty() || captured->byteCount() != expectedBytes) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::Internal,
+            "Editor capture returned an invalid RGBA8 frame");
+    }
+    if (auto status = Tina::Core::writeFile(
+            options_.rgbaOutputUtf8,
+            std::span<const std::byte>{captured->rgba8Pixels});
+        !status) {
+        return status;
+    }
+    counters_.rgbaCaptureWidth = captured->width;
+    counters_.rgbaCaptureHeight = captured->height;
+    counters_.rgbaCaptureBytes = expectedBytes;
+    counters_.rgbaCaptureOutputWritten = true;
+    counters_.rgbaCaptureOk = true;
+    return Tina::Core::success();
+}
+
+auto EditorWorkspaceState::processPendingPointLightColorUpdates(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    if (std::exchange(pendingPointLightColorPickerToggle_, false)) {
+        pointLightColorPickerVisible_ = !pointLightColorPickerVisible_;
+        pointLightColorPickerLayout_.visibility =
+            pointLightColorPickerVisible_ ? UI::UIVisibility::Visible
+                                          : UI::UIVisibility::Collapsed;
+        if (auto status = tree.setLayoutStyle(
+                pointLightColorPicker_.root, pointLightColorPickerLayout_);
+            !status) {
+            return status;
+        }
+        if (options_.autoDemo) {
+            if (!pointLightColorPickerVisible_) {
+                if (auto status = tree.setScrollViewOffset(
+                        inspectorScroll_, UI::UIScrollOffset{});
+                    !status) {
+                    return status;
+                }
+            } else {
+                auto viewportRect = tree.committedLayoutRect(inspectorScroll_);
+                if (!viewportRect) {
+                    return Tina::Core::failure(std::move(viewportRect.error()));
+                }
+                auto colorFieldRect = tree.committedLayoutRect(
+                    pointLightColorField_.root);
+                if (!colorFieldRect) {
+                    return Tina::Core::failure(std::move(colorFieldRect.error()));
+                }
+                auto metrics = tree.scrollViewMetrics(inspectorScroll_);
+                if (!metrics) {
+                    return Tina::Core::failure(std::move(metrics.error()));
+                }
+                const float requestedOffsetY = std::max(
+                    0.0F,
+                    metrics->offset.y + colorFieldRect->y - viewportRect->y -
+                        AutomaticInspectorCaptureInset);
+                if (auto status = tree.setScrollViewOffset(
+                        inspectorScroll_,
+                        UI::UIScrollOffset{.x = 0.0F, .y = requestedOffsetY});
+                    !status) {
+                    return status;
+                }
+            }
+        }
+    }
+    if (!pendingPointLightColorChannel_.has_value()) {
+        return Tina::Core::success();
+    }
+    const InspectorPointLightColorChannelRequest request =
+        std::exchange(pendingPointLightColorChannel_, std::nullopt).value();
+    if (pointLightColorMixed_) {
+        return Tina::Core::success();
+    }
+    auto synchronized = UI::synchronizeColorPickerChannel(
+        pointLightColorValue_, false, request.channel, request.value);
+    if (!synchronized) {
+        return Tina::Core::failure(std::move(synchronized.error()));
+    }
+    pointLightColorValue_ = synchronized->value;
+    if (auto status = tree.setText(
+            pointLightColorField_.textEdit, synchronized->text.view()); !status) {
+        return status;
+    }
+    for (Tina::Core::usize index = 0;
+         index < synchronized->channelCount; ++index) {
+        if (auto status = tree.setSliderValue(
+                pointLightColorPicker_.channelSliders[index],
+                synchronized->channelValues[index]); !status) {
+            return status;
+        }
+        if (auto status = tree.setText(
+                pointLightColorPicker_.channelValueLabels[index],
+                synchronized->channelTexts[index].view()); !status) {
+            return status;
+        }
+    }
+    auto productTheme = tree.productTheme();
+    if (!productTheme) {
+        return Tina::Core::failure(std::move(productTheme.error()));
+    }
+    const UI::UIBoxPaint paint = UI::makePanelBoxPaint(
+        *productTheme, pointLightColorValue_, UI::UIElevation::Flat);
+    if (auto status = tree.setBoxPaint(
+            pointLightColorField_.swatchButton, paint); !status) {
+        return status;
+    }
+    return Tina::Core::success();
+}
+
+auto EditorWorkspaceState::synchronizePendingProjectAssetSelection(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status{
+    if (!projectAssetSelectionSyncPending_) {
+        return Tina::Core::success();
+    }
+    const auto selectedIndex = projectAssets_.selectedVisibleIndex();
+    if (!selectedIndex.has_value()) {
+        projectAssetSelectionSyncPending_ = false;
+        observedProjectAssetSelectionIndex_.reset();
+        return tree.clearVirtualGridViewSelection(projectAssetList_);
+    }
+    auto metrics = tree.virtualGridViewMetrics(projectAssetList_);
+    if (!metrics) {
+        return Tina::Core::failure(std::move(metrics.error()));
+    }
+    const u64 visibleItemCount =
+        static_cast<u64>(projectAssets_.visibleItemCount());
+    if (metrics->logicalColumnCount == 0U ||
+        metrics->logicalItemCount != visibleItemCount) {
+        return Tina::Core::success();
+    }
+    if (*selectedIndex >= visibleItemCount) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::Internal,
+            "Editor Project Asset Browser selected index is outside its committed item shape");
+    }
+    if (auto status = tree.setVirtualGridViewSelectedIndex(
+            projectAssetList_, static_cast<u64>(*selectedIndex));
+        !status) {
+        return status;
+    }
+    observedProjectAssetSelectionIndex_ = static_cast<u64>(*selectedIndex);
+    projectAssetSelectionSyncPending_ = false;
     return Tina::Core::success();
 }
 
@@ -1011,6 +1370,19 @@ auto EditorWorkspaceState::processEditorShortcuts(
             pendingEditorCommand_ = command;
         }
     };
+
+    if (pendingSceneDeleteConfirmation_.has_value()) {
+        if (editorShortcutStarted(actions, EditorShortcutActions::Escape)) {
+            queue(EditorCommand::SceneDeleteCancel);
+        }
+        return Tina::Core::success();
+    }
+    if (pendingDirtyCloseKey_.has_value()) {
+        if (editorShortcutStarted(actions, EditorShortcutActions::Escape)) {
+            queue(EditorCommand::DirtyCloseCancel);
+        }
+        return Tina::Core::success();
+    }
 
     // Chords are intentionally limited to control/function keys so text
     // entry in Inspector fields never changes the active viewport tool.
@@ -1056,9 +1428,7 @@ auto EditorWorkspaceState::processEditorShortcuts(
                playSessionActive()) {
         queue(EditorCommand::PlayStop);
     } else if (editorShortcutStarted(actions, EditorShortcutActions::Escape)) {
-        if (pendingDirtyCloseKey_.has_value()) {
-            queue(EditorCommand::DirtyCloseCancel);
-        } else if (playSessionActive()) {
+        if (playSessionActive()) {
             queue(EditorCommand::PlayStop);
         } else {
             if (viewportGizmo_.captured) {
@@ -1083,6 +1453,278 @@ auto EditorWorkspaceState::queueEditorCommand(EditorCommand command) noexcept ->
     }
     pendingEditorCommand_ = command;
     return true;
+}
+
+auto EditorWorkspaceState::processPendingInspectorTransformStep(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    if (!pendingInspectorTransformStep_.has_value()) {
+        return Tina::Core::success();
+    }
+    const InspectorTransformStepRequest request =
+        *pendingInspectorTransformStep_;
+    const std::array fields{
+        inspectorPositionX_, inspectorPositionY_, inspectorPositionZ_,
+        inspectorRotationX_, inspectorRotationY_, inspectorRotationZ_,
+        inspectorScaleX_, inspectorScaleY_, inspectorScaleZ_,
+    };
+    const UI::UINodeId field =
+        fields[inspectorTransformFieldIndex(request.field)];
+    auto text = tree.text(field);
+    if (!text) {
+        return Tina::Core::failure(std::move(text.error()));
+    }
+    const UI::UINumberFieldValueSpec spec =
+        inspectorTransformNumberSpec(request.field);
+    auto current = UI::synchronizeNumberFieldText(*text, spec);
+    if (!current) {
+        pendingInspectorTransformStep_.reset();
+        try {
+            authoringFeedback_ =
+                "Transform step rejected: enter one finite value instead of Mixed or n/a";
+        } catch (const std::bad_alloc&) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::OutOfMemory,
+                "Transform step rejection feedback allocation failed");
+        }
+        return Tina::Core::success();
+    }
+    auto stepped = UI::stepNumberFieldValue(
+        current->value, request.stepCount, spec);
+    if (!stepped) {
+        return Tina::Core::failure(std::move(stepped.error()));
+    }
+    if (auto status = tree.setText(field, stepped->text.view()); !status) {
+        return status;
+    }
+    pendingInspectorTransformStep_.reset();
+    return Tina::Core::success();
+}
+
+auto EditorWorkspaceState::processPendingInspectorSectionUpdates(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    for (ComponentSectionUi& section : componentSections_) {
+        if (!section.collapseUpdatePending) {
+            continue;
+        }
+        auto checked = tree.isChecked(section.collapsible.header);
+        if (!checked) {
+            return Tina::Core::failure(std::move(checked.error()));
+        }
+        const UI::UICollapsibleSectionState state =
+            UI::synchronizeCollapsibleSectionState(*checked);
+        if (auto status = tree.setChecked(
+                section.collapsible.header, state.headerChecked);
+            !status) {
+            return status;
+        }
+        UI::UILayoutStyle collapsedIndicatorLayout = section.indicatorLayout;
+        collapsedIndicatorLayout.visibility =
+            state.collapsedIndicatorVisibility;
+        if (auto status = tree.setLayoutStyle(
+                section.collapsible.collapsedIndicator,
+                collapsedIndicatorLayout);
+            !status) {
+            return status;
+        }
+        UI::UILayoutStyle expandedIndicatorLayout = section.indicatorLayout;
+        expandedIndicatorLayout.visibility = state.expandedIndicatorVisibility;
+        if (auto status = tree.setLayoutStyle(
+                section.collapsible.expandedIndicator,
+                expandedIndicatorLayout);
+            !status) {
+            return status;
+        }
+        UI::UILayoutStyle contentLayout = section.contentLayout;
+        contentLayout.visibility = state.contentVisibility;
+        if (auto status = tree.setLayoutStyle(
+                section.collapsible.content, contentLayout);
+            !status) {
+            return status;
+        }
+        section.expanded = *checked;
+        section.collapseUpdatePending = false;
+    }
+    return Tina::Core::success();
+}
+
+auto EditorWorkspaceState::updateHierarchySearch(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    auto text = tree.text(hierarchySearchInput_);
+    if (!text) {
+        return Tina::Core::failure(std::move(text.error()));
+    }
+    if (*text == hierarchyFilterUtf8_) {
+        return Tina::Core::success();
+    }
+
+    const u32 selectedStableId = stableEntityIdForHierarchyItem(selectionKey_);
+    try {
+        hierarchyFilterUtf8_.assign(text->data(), text->size());
+    } catch (const std::bad_alloc&) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::OutOfMemory,
+            "Editor hierarchy search filter allocation failed");
+    }
+    if (auto status = tree.invalidateTreeViewItems(hierarchyTree_); !status) {
+        return status;
+    }
+
+    u64 visibleEntityCount = 0U;
+    for (const EditorHierarchyRow& row : hierarchyRows_) {
+        if (row.stableId != 0U && hierarchyRowVisible(row)) {
+            ++visibleEntityCount;
+        }
+    }
+    std::string countText;
+    try {
+        countText = std::to_string(visibleEntityCount);
+        countText += hierarchyFilterUtf8_.empty() ? " nodes" : " matches";
+    } catch (const std::bad_alloc&) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::OutOfMemory,
+            "Editor hierarchy search result count allocation failed");
+    }
+    if (auto status = tree.setText(hierarchyCount_, countText); !status) {
+        return status;
+    }
+
+    const u64 selectedIndex = visibleHierarchyIndex(selectedStableId).value_or(0U);
+    return tree.setTreeViewSelectedIndex(hierarchyTree_, selectedIndex);
+}
+
+auto EditorWorkspaceState::updateSnackbarUi(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    if (!snackbarHost_.has_value()) {
+        return Tina::Core::success();
+    }
+    const Tina::Core::MonotonicTimePoint now = snackbarClock_.now();
+    if (authoringFeedback_ != lastSnackbarFeedback_) {
+        const UI::UISnackbarTone tone = snackbarToneFor(authoringFeedback_);
+        const bool offerUndo = tone == UI::UISnackbarTone::Success &&
+                               authoringEnabled() && activeCanUndo();
+        const UI::UISnackbarMessage message{
+            .text = authoringFeedback_,
+            .actionLabel = offerUndo
+                               ? std::optional<std::string_view>{"Undo"}
+                               : std::nullopt,
+            .actionToken = offerUndo ? u64{1} : u64{0},
+            .tone = tone,
+        };
+        const Tina::Core::Status enqueued = snackbarHost_->enqueue(message, now);
+        try {
+            lastSnackbarFeedback_ = authoringFeedback_;
+        } catch (const std::bad_alloc&) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::OutOfMemory,
+                "Editor Snackbar feedback tracking allocation failed");
+        }
+        if (!enqueued &&
+            enqueued.error().code != UI::UIErrorCode::CapacityExceeded) {
+            return enqueued;
+        }
+    }
+    (void)snackbarHost_->update(now);
+
+    const UI::UISnackbarPresentation presentation =
+        snackbarHost_->presentation();
+    if (presentation.revision == observedSnackbarRevision_) {
+        return Tina::Core::success();
+    }
+
+    UI::UILayoutStyle rootLayout = snackbarRootLayout_;
+    rootLayout.visibility = presentation.visible()
+                                ? UI::UIVisibility::Visible
+                                : UI::UIVisibility::Collapsed;
+    if (auto status = tree.setLayoutStyle(snackbarParts_.root, rootLayout);
+        !status) {
+        return status;
+    }
+    if (!presentation.visible()) {
+        observedSnackbarRevision_ = presentation.revision;
+        return Tina::Core::success();
+    }
+
+    if (auto status = tree.setText(snackbarParts_.message, presentation.text);
+        !status) {
+        return status;
+    }
+    const auto toneIndex = static_cast<Tina::Core::usize>(presentation.tone);
+    if (toneIndex >= snackbarToneColors_.size()) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::Internal,
+            "Editor Snackbar resolved an invalid presentation tone");
+    }
+    if (auto status = tree.setBoxPaint(
+            snackbarParts_.toneBar,
+            UI::makeSolidBox(snackbarToneColors_[toneIndex], 2.0F));
+        !status) {
+        return status;
+    }
+    UI::UILayoutStyle actionLayout = snackbarActionLayout_;
+    actionLayout.visibility = presentation.hasAction()
+                                  ? UI::UIVisibility::Visible
+                                  : UI::UIVisibility::Collapsed;
+    if (auto status = tree.setLayoutStyle(snackbarParts_.action, actionLayout);
+        !status) {
+        return status;
+    }
+    if (presentation.hasAction()) {
+        if (auto status = tree.setText(
+                snackbarParts_.action, presentation.actionLabel);
+            !status) {
+            return status;
+        }
+    }
+
+    if (presentation.phase == UI::UISnackbarPhase::Entering) {
+        if (auto status = tree.beginOpacityTransition(
+                snackbarParts_.surface, 1.0F,
+                UI::UITransitionSpec{
+                    .property = UI::UIAnimatableProperty::Opacity,
+                    .duration = snackbarHost_->config().enterDuration,
+                    .easing = UI::UIEasing::EaseOut,
+                });
+            !status) {
+            return status;
+        }
+        if (auto status = tree.beginVisualOffsetTransition(
+                snackbarParts_.surface, 0.0F, 0.0F,
+                UI::UITransitionSpec{
+                    .property = UI::UIAnimatableProperty::VisualOffset,
+                    .duration = snackbarHost_->config().enterDuration,
+                    .easing = UI::UIEasing::EaseOut,
+                });
+            !status) {
+            return status;
+        }
+    } else if (presentation.phase == UI::UISnackbarPhase::Exiting) {
+        if (auto status = tree.beginOpacityTransition(
+                snackbarParts_.surface, 0.0F,
+                UI::UITransitionSpec{
+                    .property = UI::UIAnimatableProperty::Opacity,
+                    .duration = snackbarHost_->config().exitDuration,
+                    .easing = UI::UIEasing::EaseInOut,
+                });
+            !status) {
+            return status;
+        }
+        if (auto status = tree.beginVisualOffsetTransition(
+                snackbarParts_.surface, 0.0F, 8.0F,
+                UI::UITransitionSpec{
+                    .property = UI::UIAnimatableProperty::VisualOffset,
+                    .duration = snackbarHost_->config().exitDuration,
+                    .easing = UI::UIEasing::EaseInOut,
+                });
+            !status) {
+            return status;
+        }
+    }
+    observedSnackbarRevision_ = presentation.revision;
+    return Tina::Core::success();
 }
 
 auto EditorWorkspaceState::tileMapEditingContext() const noexcept -> bool{
@@ -1252,8 +1894,8 @@ auto EditorWorkspaceState::sourceImportItemCount(const void* state) noexcept -> 
     return self != nullptr ? self->sourceImportUnits_.size() : 0U;
 }
 
-auto EditorWorkspaceState::projectAssetDataSource() const noexcept -> UI::UIListViewDataSource{
-    return UI::UIListViewDataSource{
+auto EditorWorkspaceState::projectAssetDataSource() const noexcept -> UI::UIVirtualGridViewDataSource{
+    return UI::UIVirtualGridViewDataSource{
         .state = this,
         .itemCount = &EditorWorkspaceState::projectAssetItemCount,
         .resolveItem = &EditorWorkspaceState::resolveProjectAssetItem,

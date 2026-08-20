@@ -12,6 +12,7 @@
 #include "GlfwGamepadTranslation.hpp"
 #include "GlfwInputTranslation.hpp"
 #include "GlfwNativeWindowBinding.hpp"
+#include "GlfwSystemColorSchemeObserver.hpp"
 #include "GlfwTextInputPlacement.hpp"
 #if defined(_WIN32)
 #include "Imm32CompositionHostWin32.hpp"
@@ -305,11 +306,13 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
                         Integration::WindowSurfaceId surfaceId,
                         std::shared_ptr<Integration::Detail::NativeWindowSurfaceLeaseControl> surfaceLeaseControl,
                         GLFWwindow* window, PlatformFrameBuilder frameBuilder, WindowMetricsSnapshot metrics,
-                        WindowInputSnapshot input, bool initiallyVisible) noexcept
+                        WindowInputSnapshot input, bool initiallyVisible,
+                        bool publishSystemColorSchemeEvents) noexcept
         : windows_(std::move(windows)), windowId_(windowId), surfaces_(std::move(surfaces)), surfaceId_(surfaceId),
           surfaceLeaseControl_(std::move(surfaceLeaseControl)), window_(window), frameBuilder_(std::move(frameBuilder)),
           metrics_(metrics), input_(input), pointerContentScaleX_(metrics.contentScale.x),
-          pointerContentScaleY_(metrics.contentScale.y), ownerThread_(std::this_thread::get_id()),
+          pointerContentScaleY_(metrics.contentScale.y),
+          systemColorSchemeObserver_(publishSystemColorSchemeEvents), ownerThread_(std::this_thread::get_id()),
           surfaceSnapshot_(makeSurfaceSnapshot(surfaceId_, metrics_, 1)), initiallyVisible_(initiallyVisible)
     {
     }
@@ -463,6 +466,15 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         }
 #endif
 
+        const std::optional<SystemColorScheme> pendingColorScheme =
+            systemColorSchemeObserver_.pendingPreference();
+        if (pendingColorScheme.has_value())
+        {
+            const FrameBatchAppendResult appendResult = frameBuilder_.appendPlatformEvent(
+                SystemColorSchemeChangedEvent{.colorScheme = *pendingColorScheme});
+            recordAppend(appendResult);
+        }
+
         bool metricsEventPublishedThisFrame = false;
         if (metricsDirty_)
         {
@@ -519,6 +531,11 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         if (!frame)
         {
             return std::unexpected(std::move(frame.error()));
+        }
+        if (pendingColorScheme.has_value())
+        {
+            systemColorSchemeObserver_.commitPublishedPreference(
+                *pendingColorScheme, frame->platformEvents());
         }
         surfaceSnapshot_ = *nextSurfaceSnapshot;
         discardPartialFrame.release();
@@ -1657,6 +1674,7 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
     float pointerContentScaleX_ = 1.0F;
     float pointerContentScaleY_ = 1.0F;
     Detail::GlfwDigitalFocusFilter focusFilter_{};
+    Detail::GlfwSystemColorSchemeObserver systemColorSchemeObserver_{false};
     Core::GenerationPool<int, GamepadRegistryTag> gamepadPool_ =
         *Core::GenerationPool<int, GamepadRegistryTag>::Create(
             PlatformFrameBuilder::MaximumGamepadSlots);
@@ -1844,7 +1862,8 @@ createBackendUnchecked(const PlatformBackendCreateParams& params, bool publishDu
 
     auto* concreteBackend = new (std::nothrow) GlfwPlatformBackend(
         std::move(*windowPool), *windowId, std::move(*surfacePool), *surfaceId, std::move(surfaceLeaseControl),
-        nativeWindow, std::move(*frameBuilder), *initialMetrics, initialInput, params.primaryWindow.initiallyVisible);
+        nativeWindow, std::move(*frameBuilder), *initialMetrics, initialInput, params.primaryWindow.initiallyVisible,
+        params.publishSystemColorSchemeEvents);
     if (concreteBackend == nullptr)
     {
         return Core::failure(Core::CoreErrorCode::OutOfMemory, "The GLFW platform backend allocation failed");

@@ -25,6 +25,12 @@ enum class UIElementBehavior : u32 {
     VirtualListItem = 1U << 13U,
     VirtualTree = 1U << 14U,
     VirtualTreeItem = 1U << 15U,
+    VirtualGrid = 1U << 16U,
+    VirtualGridItem = 1U << 17U,
+    DataGrid = 1U << 18U,
+    DataGridRow = 1U << 19U,
+    DataGridCell = 1U << 20U,
+    DataGridColumnHeader = 1U << 21U,
 };
 
 [[nodiscard]] constexpr UIElementBehavior operator|(UIElementBehavior left, UIElementBehavior right) noexcept

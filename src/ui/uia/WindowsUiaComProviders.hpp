@@ -106,6 +106,7 @@ public:
     [[nodiscard]] HRESULT createNodeProvider(const std::shared_ptr<const ProviderSnapshot>& snapshot,
                                              std::size_t nodeIndex,
                                              IRawElementProviderFragment** pRetVal) noexcept;
+    [[nodiscard]] HRESULT raiseLiveRegionChanged(UINodeId node) noexcept;
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppvObject) override;
     ULONG STDMETHODCALLTYPE AddRef() override;

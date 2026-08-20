@@ -227,6 +227,10 @@ rangeInputCommandForGamepadButton(Platform::GamepadButton button) noexcept
         return UI::UIMenuCommand::Previous;
     case Platform::Key::Down:
         return UI::UIMenuCommand::Next;
+    case Platform::Key::Right:
+        return UI::UIMenuCommand::OpenSubmenu;
+    case Platform::Key::Left:
+        return UI::UIMenuCommand::CloseSubmenu;
     case Platform::Key::Home:
         return UI::UIMenuCommand::First;
     case Platform::Key::End:
@@ -247,6 +251,10 @@ menuCommandForGamepadButton(Platform::GamepadButton button) noexcept
         return UI::UIMenuCommand::Previous;
     case Platform::GamepadButton::DpadDown:
         return UI::UIMenuCommand::Next;
+    case Platform::GamepadButton::DpadRight:
+        return UI::UIMenuCommand::OpenSubmenu;
+    case Platform::GamepadButton::DpadLeft:
+        return UI::UIMenuCommand::CloseSubmenu;
     case Platform::GamepadButton::East:
         return UI::UIMenuCommand::Dismiss;
     default:
@@ -307,6 +315,55 @@ dropdownCommandForGamepadButton(Platform::GamepadButton button) noexcept
     case Platform::Key::Enter:
     case Platform::Key::KeypadEnter:
         return UI::UIListViewCommand::Activate;
+    default:
+        return std::nullopt;
+    }
+}
+
+[[nodiscard]] std::optional<UI::UIVirtualGridViewCommand>
+virtualGridViewCommandForKey(Platform::Key key) noexcept
+{
+    switch (key)
+    {
+    case Platform::Key::Left:
+        return UI::UIVirtualGridViewCommand::PreviousItem;
+    case Platform::Key::Right:
+        return UI::UIVirtualGridViewCommand::NextItem;
+    case Platform::Key::Up:
+        return UI::UIVirtualGridViewCommand::PreviousRow;
+    case Platform::Key::Down:
+        return UI::UIVirtualGridViewCommand::NextRow;
+    case Platform::Key::PageUp:
+        return UI::UIVirtualGridViewCommand::PreviousPage;
+    case Platform::Key::PageDown:
+        return UI::UIVirtualGridViewCommand::NextPage;
+    case Platform::Key::Home:
+        return UI::UIVirtualGridViewCommand::FirstItem;
+    case Platform::Key::End:
+        return UI::UIVirtualGridViewCommand::LastItem;
+    case Platform::Key::Enter:
+    case Platform::Key::KeypadEnter:
+        return UI::UIVirtualGridViewCommand::Activate;
+    default:
+        return std::nullopt;
+    }
+}
+
+[[nodiscard]] std::optional<UI::UIVirtualGridViewCommand>
+virtualGridViewCommandForGamepadButton(Platform::GamepadButton button) noexcept
+{
+    switch (button)
+    {
+    case Platform::GamepadButton::DpadLeft:
+        return UI::UIVirtualGridViewCommand::PreviousItem;
+    case Platform::GamepadButton::DpadRight:
+        return UI::UIVirtualGridViewCommand::NextItem;
+    case Platform::GamepadButton::DpadUp:
+        return UI::UIVirtualGridViewCommand::PreviousRow;
+    case Platform::GamepadButton::DpadDown:
+        return UI::UIVirtualGridViewCommand::NextRow;
+    case Platform::GamepadButton::South:
+        return UI::UIVirtualGridViewCommand::Activate;
     default:
         return std::nullopt;
     }
@@ -832,6 +889,48 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             continue;
         }
 
+        // Context Menu and Shift+F10 open the Menu associated with the focused
+        // node (or its nearest ancestor). Route F10 Up even if Shift was
+        // released first so a claimed physical pair cannot leak to gameplay.
+        if (const auto* key = std::get_if<Platform::KeyTransition>(
+                &transitions[ordinal].payload);
+            key != nullptr && key->window == context->ownerWindow())
+        {
+            const bool pressed = key->state == Platform::DigitalTransition::Down;
+            std::optional<UI::UIMenuInvocationCommand> command;
+            if (key->key == Platform::Key::Menu)
+            {
+                command = UI::UIMenuInvocationCommand::ContextMenuKey;
+            } else if (key->key == Platform::Key::F10)
+            {
+                const bool shiftHeld = primaryWindow != nullptr &&
+                    (primaryWindow->input.isHeld(Platform::Key::LeftShift) ||
+                     primaryWindow->input.isHeld(Platform::Key::RightShift));
+                if (!pressed || shiftHeld)
+                {
+                    command = UI::UIMenuInvocationCommand::ShiftF10;
+                }
+            }
+            if (command.has_value())
+            {
+                auto routed = context->routeMenuInvocation(*command, pressed);
+                if (!routed)
+                {
+                    Core::Error error = std::move(routed.error());
+                    error.addContext(
+                        "UIInputRouteProducer::produce(menu-invocation)");
+                    return Core::failure(std::move(error));
+                }
+                if (routed->consumed)
+                {
+                    stagingWords_[ordinal / BitsPerConsumptionWord] |=
+                        u64{1} << (ordinal % BitsPerConsumptionWord);
+                    anyConsumed = true;
+                    continue;
+                }
+            }
+        }
+
         // A Menu owns its directional and dismissal commands before every other
         // focused control. Matching releases remain consumed after dismissal.
         if (const auto* key = std::get_if<Platform::KeyTransition>(&transitions[ordinal].payload);
@@ -1114,6 +1213,17 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                 }
                 consumed = consumed || routed->consumed;
             }
+            if (const auto command = virtualGridViewCommandForKey(key->key); command.has_value())
+            {
+                auto routed = context->routeVirtualGridViewCommand(*command, pressed);
+                if (!routed)
+                {
+                    Core::Error error = std::move(routed.error());
+                    error.addContext("UIInputRouteProducer::produce(virtual-grid-key-command)");
+                    return Core::failure(std::move(error));
+                }
+                consumed = consumed || routed->consumed;
+            }
             if (consumed)
             {
                 stagingWords_[ordinal / BitsPerConsumptionWord] |=
@@ -1146,6 +1256,17 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                 {
                     Core::Error error = std::move(routed.error());
                     error.addContext("UIInputRouteProducer::produce(list-view-gamepad-command)");
+                    return Core::failure(std::move(error));
+                }
+                consumed = consumed || routed->consumed;
+            }
+            if (const auto command = virtualGridViewCommandForGamepadButton(gamepad->button); command.has_value())
+            {
+                auto routed = context->routeVirtualGridViewCommand(*command, pressed);
+                if (!routed)
+                {
+                    Core::Error error = std::move(routed.error());
+                    error.addContext("UIInputRouteProducer::produce(virtual-grid-gamepad-command)");
                     return Core::failure(std::move(error));
                 }
                 consumed = consumed || routed->consumed;

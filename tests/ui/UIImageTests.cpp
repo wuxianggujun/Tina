@@ -139,6 +139,91 @@ TEST_F(UIImageTest, IconRecipeIsDecorativeAndIgnoresPointerHits)
     EXPECT_EQ(icon.contentAlignment.vertical, UI::UIAxisAlignment::Center);
 }
 
+TEST_F(UIImageTest, ImageButtonsOwnControlBehaviorPaintAndSemanticsOnOneNode)
+{
+    auto context = createContext();
+    ASSERT_NE(context, nullptr);
+    auto rootResult = context->rootBuilder().createRoot();
+    ASSERT_TRUE(rootResult.has_value());
+    UI::UIRootOwner root = std::move(*rootResult);
+    auto updaterResult = context->treeUpdater(root);
+    ASSERT_TRUE(updaterResult.has_value());
+    UI::UITreeUpdater updater = std::move(*updaterResult);
+
+    UI::UIElementDescriptor buttonDescriptor =
+        UI::makeButtonElement({}, fixedSize(40.0F, 40.0F));
+    buttonDescriptor.text.reset();
+    buttonDescriptor.image = imageContent();
+    const usize baselineNodes = context->liveNodeCount();
+    const auto unnamedButton =
+        updater.createElement(root.rootNodeId(), buttonDescriptor);
+    ASSERT_FALSE(unnamedButton.has_value());
+    EXPECT_EQ(unnamedButton.error().code,
+              UI::UIErrorCode::InvalidElementDescriptor);
+    EXPECT_EQ(context->liveNodeCount(), baselineNodes);
+
+    buttonDescriptor.semantics.name = "Refresh";
+    buttonDescriptor.semantics.useContentAsName = false;
+    const auto button = updater.createElement(root.rootNodeId(), buttonDescriptor);
+    ASSERT_TRUE(button.has_value()) << button.error().message;
+
+    UI::UIElementDescriptor radioDescriptor =
+        UI::makeRadioButtonElement({}, fixedSize(40.0F, 40.0F));
+    radioDescriptor.text.reset();
+    radioDescriptor.image = imageContent();
+    radioDescriptor.visual.styleRole = UI::UIStyleRoleId::SegmentedButton;
+    radioDescriptor.semantics.name = "Move";
+    radioDescriptor.semantics.useContentAsName = false;
+    const auto radio = updater.createElement(root.rootNodeId(), radioDescriptor);
+    ASSERT_TRUE(radio.has_value()) << radio.error().message;
+
+    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
+    const UI::UICommittedPaintView paint = context->committedPaint();
+    const UI::UICommittedLayoutView layout = context->committedLayout();
+    for (const UI::UINodeId node : {*button, *radio})
+    {
+        const auto image = std::ranges::find_if(
+            paint, [node](const UI::UICommittedPaintEntry& entry) {
+                return entry.node == node &&
+                       entry.kind == UI::UICommittedPaintKind::Image;
+            });
+        ASSERT_NE(image, paint.end());
+        const auto placement = std::ranges::find_if(
+            layout, [node](const UI::UICommittedLayoutEntry& entry) {
+                return entry.node == node;
+            });
+        ASSERT_NE(placement, layout.end());
+        const UI::UILogicalRect contentBox = placement->contentPlacement.contentBox;
+        EXPECT_GT(image->worldRect.width, 0.0F);
+        EXPECT_GT(image->worldRect.height, 0.0F);
+        EXPECT_GE(image->worldRect.x, contentBox.x);
+        EXPECT_GE(image->worldRect.y, contentBox.y);
+        EXPECT_LE(image->worldRect.right(), contentBox.right());
+        EXPECT_LE(image->worldRect.bottom(), contentBox.bottom());
+        EXPECT_FLOAT_EQ(image->worldRect.x + image->worldRect.width * 0.5F,
+                        contentBox.x + contentBox.width * 0.5F);
+        EXPECT_FLOAT_EQ(image->worldRect.y + image->worldRect.height * 0.5F,
+                        contentBox.y + contentBox.height * 0.5F);
+    }
+
+    const UI::UICommittedSemanticsView semantics = context->committedSemantics();
+    const auto buttonSemantics = std::ranges::find_if(
+        semantics, [button](const UI::UISemanticsEntry& entry) {
+            return entry.node == *button;
+        });
+    ASSERT_NE(buttonSemantics, semantics.end());
+    EXPECT_EQ(buttonSemantics->role, UI::UISemanticsRole::Button);
+    EXPECT_EQ(buttonSemantics->name, "Refresh");
+
+    const auto radioSemantics = std::ranges::find_if(
+        semantics, [radio](const UI::UISemanticsEntry& entry) {
+            return entry.node == *radio;
+        });
+    ASSERT_NE(radioSemantics, semantics.end());
+    EXPECT_EQ(radioSemantics->role, UI::UISemanticsRole::RadioButton);
+    EXPECT_EQ(radioSemantics->name, "Move");
+}
+
 TEST_F(UIImageTest, IconRecipeReusesImageStorageAndPaintResourceChain)
 {
     auto context = createContext();

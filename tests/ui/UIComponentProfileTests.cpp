@@ -53,6 +53,16 @@ using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
     return found == view.end() ? nullptr : &*found;
 }
 
+[[nodiscard]] const UI::UICommittedLayoutEntry* findLayout(
+    UI::UICommittedLayoutView view, UI::UINodeId node) noexcept
+{
+    const auto found = std::ranges::find_if(
+        view, [node](const UI::UICommittedLayoutEntry& entry) {
+            return entry.node == node;
+        });
+    return found == view.end() ? nullptr : &*found;
+}
+
 void expectSuccess(const Core::Status& status)
 {
     ASSERT_TRUE(status.has_value()) << status.error().message;
@@ -155,11 +165,116 @@ TEST_F(UIComponentProfileTest, RequiredBudgetsAreExactAndRejectInvalidContracts)
                   .behaviors = {.activate = 2},
               }));
 
+    const UI::UINumberFieldConfig numberField{
+        .label = "Position X",
+        .value = 1.25F,
+        .valueSpec = {
+            .minValue = -100.0F,
+            .maxValue = 100.0F,
+            .step = 0.25F,
+            .decimalPlaces = 2,
+        },
+    };
+    auto aboveNumberBudget = UI::requiredNumberFieldBuildBudget(numberField);
+    ASSERT_TRUE(aboveNumberBudget.has_value())
+        << aboveNumberBudget.error().message;
+    EXPECT_EQ(*aboveNumberBudget,
+              (UI::UIComponentBuildBudget{
+                  .nodes = 6,
+                  .textBytes = 42,
+                  .behaviors = {.activate = 2, .textInput = 1},
+              }));
+
+    UI::UINumberFieldConfig leadingNumberField = numberField;
+    leadingNumberField.labelPlacement =
+        UI::UINumberFieldLabelPlacement::Leading;
+    auto leadingNumberBudget =
+        UI::requiredNumberFieldBuildBudget(leadingNumberField);
+    ASSERT_TRUE(leadingNumberBudget.has_value())
+        << leadingNumberBudget.error().message;
+    EXPECT_EQ(*leadingNumberBudget,
+              (UI::UIComponentBuildBudget{
+                  .nodes = 7,
+                  .textBytes = 42,
+                  .behaviors = {.activate = 2, .textInput = 1},
+              }));
+
+    leadingNumberField.labelPlacement =
+        static_cast<UI::UINumberFieldLabelPlacement>(0xFF);
+    const auto invalidPlacement =
+        UI::requiredNumberFieldBuildBudget(leadingNumberField);
+    ASSERT_FALSE(invalidPlacement.has_value());
+    EXPECT_EQ(invalidPlacement.error().code,
+              UI::UIErrorCode::InvalidElementDescriptor);
+
     UI::UIIconButtonConfig invalid = iconButton;
     invalid.accessibleName = {};
     const auto rejected = UI::requiredIconButtonBuildBudget(invalid);
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidElementDescriptor);
+}
+
+TEST_F(UIComponentProfileTest, NumberFieldLeadingLabelOwnsHorizontalContentColumn)
+{
+    auto context = createContext();
+    ASSERT_NE(context, nullptr);
+    auto rootResult = context->rootBuilder().createRoot();
+    ASSERT_TRUE(rootResult.has_value()) << rootResult.error().message;
+    UI::UIRootOwner root = std::move(*rootResult);
+    auto updaterResult = context->treeUpdater(root);
+    ASSERT_TRUE(updaterResult.has_value()) << updaterResult.error().message;
+    UI::UITreeUpdater updater = std::move(*updaterResult);
+
+    UI::UILayoutStyle fieldLayout{};
+    fieldLayout.size.width = UI::UILayoutLength::Px(320.0F);
+    fieldLayout.size.height = UI::UILayoutLength::Px(40.0F);
+    UI::UILayoutStyle labelLayout{};
+    labelLayout.size.width = UI::UILayoutLength::Px(80.0F);
+    labelLayout.flexItem.shrink = 0.0F;
+    auto built = updater.buildNumberField(
+        root.rootNodeId(),
+        UI::UINumberFieldConfig{
+            .label = "Position X",
+            .value = 1.25F,
+            .valueSpec = {
+                .minValue = -100.0F,
+                .maxValue = 100.0F,
+                .step = 0.25F,
+                .decimalPlaces = 2,
+            },
+            .labelPlacement = UI::UINumberFieldLabelPlacement::Leading,
+            .layout = fieldLayout,
+            .labelLayout = labelLayout,
+        });
+    ASSERT_TRUE(built.has_value()) << built.error().message;
+    const UI::UINumberFieldParts parts = *built;
+    expectSuccess(context->commitLayout({.width = 480.0F, .height = 120.0F}));
+
+    const UI::UICommittedNodeEntry* labelStructure =
+        findStructure(context->committedStructure(), parts.label);
+    const UI::UICommittedNodeEntry* contentStructure =
+        findStructure(context->committedStructure(), parts.content);
+    const UI::UICommittedNodeEntry* inputStructure =
+        findStructure(context->committedStructure(), parts.inputRow);
+    ASSERT_NE(labelStructure, nullptr);
+    ASSERT_NE(contentStructure, nullptr);
+    ASSERT_NE(inputStructure, nullptr);
+    EXPECT_EQ(labelStructure->parent, parts.root);
+    EXPECT_EQ(contentStructure->parent, parts.root);
+    EXPECT_EQ(inputStructure->parent, parts.content);
+
+    const UI::UICommittedLayoutEntry* label =
+        findLayout(context->committedLayout(), parts.label);
+    const UI::UICommittedLayoutEntry* content =
+        findLayout(context->committedLayout(), parts.content);
+    const UI::UICommittedLayoutEntry* input =
+        findLayout(context->committedLayout(), parts.inputRow);
+    ASSERT_NE(label, nullptr);
+    ASSERT_NE(content, nullptr);
+    ASSERT_NE(input, nullptr);
+    EXPECT_LE(label->worldRect.x + label->worldRect.width, content->worldRect.x);
+    EXPECT_FLOAT_EQ(input->worldRect.x, content->worldRect.x);
+    EXPECT_FLOAT_EQ(input->worldRect.width, content->worldRect.width);
 }
 
 TEST_F(UIComponentProfileTest, IconButtonPublishesSiblingTooltipAndSingleAccessibleRoot)

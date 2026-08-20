@@ -13,6 +13,9 @@ namespace Tina::Platform {
 struct PlatformBackendCreateParams final {
     PrimaryWindowConfig primaryWindow{};
     PlatformFrameCapacityConfig frameCapacities{};
+    // Optional Desktop adapter event source. Disabled by default so Headless,
+    // tests, and products with an explicit theme remain deterministic.
+    bool publishSystemColorSchemeEvents = false;
 };
 
 class IPlatformBackend {

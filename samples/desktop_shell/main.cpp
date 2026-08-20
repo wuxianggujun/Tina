@@ -1,4 +1,7 @@
 #include "DesktopShellUI.hpp"
+#include "DesktopShellIconAtlas.hpp"
+
+#include "SampleSpriteFrameResource.hpp"
 
 #include <tina/core/error/Error.hpp>
 #include <tina/desktop/DesktopEngine.hpp>
@@ -53,7 +56,123 @@ struct LifecycleCounters final {
     float contentScaleX = 1.0F;
     float contentScaleY = 1.0F;
     u64 windowMetricsEvents = 0;
+    u64 iconResolverCalls = 0;
+    u64 iconResolverHits = 0;
+    bool iconAtlasUploaded = false;
+    bool iconAtlasReleased = false;
+    bool iconAtlasValidatedBeforeRelease = false;
+    bool iconAtlasInvalidatedAfterRelease = false;
+    u32 iconFrameBorrowsAtRelease = 0;
     Tina::SampleUI::DesktopShellSnapshot finalUI{};
+};
+
+class ShellIconResources final {
+  public:
+    ShellIconResources(Tina::Render::IRenderDevice& device, LifecycleCounters& counters) noexcept
+        : device_(&device), counters_(&counters)
+    {
+    }
+
+    ShellIconResources(const ShellIconResources&) = delete;
+    ShellIconResources& operator=(const ShellIconResources&) = delete;
+
+    ~ShellIconResources() noexcept
+    {
+        if (texture_) {
+            release();
+        }
+        if (frameResource_.frameBorrowCount() != 0) {
+            std::terminate();
+        }
+    }
+
+    [[nodiscard]] Tina::Core::Status initialize()
+    {
+        if (texture_ || bindingKey_ != 0) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                       "Desktop shell icon atlas is already initialized");
+        }
+        static constexpr Tina::SampleUI::DesktopShellIconAtlasPixels AtlasPixels =
+            Tina::SampleUI::makeDesktopShellIconAtlasPixels();
+        auto uploaded = device_->createTexture2DRgba8(Tina::Render::Texture2DUploadDesc{
+            .width = static_cast<Tina::Core::u16>(Tina::SampleUI::DesktopShellIconAtlasWidth),
+            .height = static_cast<Tina::Core::u16>(Tina::SampleUI::DesktopShellIconAtlasHeight),
+            .rgba8Pixels = AtlasPixels,
+        });
+        if (!uploaded) {
+            return Tina::Core::failure(std::move(uploaded.error()));
+        }
+        texture_ = *uploaded;
+
+        auto binding = device_->createTexture2DBinding(texture_);
+        if (!binding) {
+            (void)device_->destroyTexture2D(texture_);
+            texture_ = {};
+            return Tina::Core::failure(std::move(binding.error()));
+        }
+        bindingKey_ = *binding;
+        counters_->iconAtlasUploaded = true;
+        return Tina::Core::success();
+    }
+
+    [[nodiscard]] Tina::Render::Texture2DFrameResourceResolver resolver() noexcept
+    {
+        return {
+            .userData = this,
+            .resolve = &ShellIconResources::resolve,
+        };
+    }
+
+    void release() noexcept
+    {
+        counters_->iconFrameBorrowsAtRelease = frameResource_.frameBorrowCount();
+        if (texture_) {
+            counters_->iconAtlasValidatedBeforeRelease =
+                static_cast<bool>(device_->validateTexture2D(texture_));
+            counters_->iconAtlasReleased = static_cast<bool>(device_->destroyTexture2D(texture_));
+            if (counters_->iconAtlasReleased) {
+                counters_->iconAtlasInvalidatedAfterRelease =
+                    !device_->validateTexture2D(texture_);
+            }
+        }
+        texture_ = {};
+        bindingKey_ = 0;
+    }
+
+  private:
+    [[nodiscard]] static Tina::Core::Result<
+        std::optional<Tina::Render::Texture2DFrameResourceResolution>>
+    resolve(void* userData, Tina::Core::AssetId asset,
+            Tina::Render::FrameResourceSink& sink) noexcept
+    {
+        auto* resources = static_cast<ShellIconResources*>(userData);
+        if (resources == nullptr) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                       "Desktop shell icon resolver received null user data");
+        }
+        ++resources->counters_->iconResolverCalls;
+        if (asset != Tina::SampleUI::desktopShellIconAtlasAssetId() ||
+            resources->bindingKey_ == 0) {
+            return std::optional<Tina::Render::Texture2DFrameResourceResolution>{};
+        }
+        auto frameResource = resources->frameResource_.intern(sink, resources->bindingKey_);
+        if (!frameResource) {
+            return Tina::Core::failure(std::move(frameResource.error()));
+        }
+        ++resources->counters_->iconResolverHits;
+        return std::optional<Tina::Render::Texture2DFrameResourceResolution>{
+            Tina::Render::Texture2DFrameResourceResolution{
+                .resource = *frameResource,
+                .pixelWidth = Tina::SampleUI::DesktopShellIconAtlasWidth,
+                .pixelHeight = Tina::SampleUI::DesktopShellIconAtlasHeight,
+            }};
+    }
+
+    Tina::Render::IRenderDevice* device_ = nullptr;
+    LifecycleCounters* counters_ = nullptr;
+    Tina::Render::GpuTextureId texture_{};
+    u32 bindingKey_ = 0;
+    Tina::Samples::SampleSpriteFrameResource frameResource_{};
 };
 
 void writeJsonString(std::ostream& output, std::string_view value)
@@ -235,15 +354,20 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
 class ShellState final : public Tina::IGameState {
   public:
     ShellState(SampleOptions options, Tina::SampleUI::DesktopShellState& shellState,
-               LifecycleCounters& counters) noexcept
-        : options_(options), shellState_(shellState), counters_(counters)
+               LifecycleCounters& counters, Tina::Render::IRenderDevice& renderDevice) noexcept
+        : options_(options), shellState_(shellState), counters_(counters),
+          iconResources_(renderDevice, counters)
     {
     }
 
     Tina::Core::Status onEnter(Tina::GameStateEnterContext& context) override
     {
         ++counters_.stateEnters;
-        if (Tina::Core::Status status = ui_.build(context, shellState_); !status) {
+        if (Tina::Core::Status status = iconResources_.initialize(); !status) {
+            return status;
+        }
+        if (Tina::Core::Status status = ui_.build(context, shellState_, iconResources_.resolver()); !status) {
+            iconResources_.release();
             return status;
         }
         ui_.setLogicalWidth(static_cast<float>(counters_.logicalPixelWidth));
@@ -255,6 +379,7 @@ class ShellState final : public Tina::IGameState {
     {
         ++counters_.stateExits;
         ui_.release();
+        iconResources_.release();
         counters_.finalUI = ui_.snapshot();
         ++counters_.uiRootsReleased;
     }
@@ -289,13 +414,15 @@ class ShellState final : public Tina::IGameState {
     SampleOptions options_{};
     Tina::SampleUI::DesktopShellState& shellState_;
     LifecycleCounters& counters_;
+    ShellIconResources iconResources_;
     Tina::SampleUI::DesktopShellUI ui_{};
 };
 
 class ShellApplication final : public Tina::IGameApplication {
   public:
-    ShellApplication(SampleOptions options, LifecycleCounters& counters) noexcept
-        : options_(options), counters_(counters)
+    ShellApplication(SampleOptions options, LifecycleCounters& counters,
+                     Tina::Render::IRenderDevice& renderDevice) noexcept
+        : options_(options), counters_(counters), renderDevice_(&renderDevice)
     {
         shellState_.theme = options.initialTheme;
         shellState_.density = options.initialDensity;
@@ -330,7 +457,7 @@ class ShellApplication final : public Tina::IGameApplication {
         }
         platformEvents_.emplace(std::move(*subscription));
         std::unique_ptr<Tina::IGameState> state =
-            std::make_unique<ShellState>(options_, shellState_, counters_);
+            std::make_unique<ShellState>(options_, shellState_, counters_, *renderDevice_);
         return state;
     }
 
@@ -343,6 +470,7 @@ class ShellApplication final : public Tina::IGameApplication {
   private:
     SampleOptions options_{};
     LifecycleCounters& counters_;
+    Tina::Render::IRenderDevice* renderDevice_ = nullptr;
     Tina::SampleUI::DesktopShellState shellState_{};
     std::optional<Tina::PlatformEventSubscription> platformEvents_{};
 };
@@ -389,6 +517,18 @@ class ShellApplication final : public Tina::IGameApplication {
         counters.uiRootsReleased != 1 || ui.rootAlive) {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                    "Desktop shell lifecycle verification failed");
+    }
+    if (!counters.iconAtlasUploaded || !counters.iconAtlasReleased ||
+        !counters.iconAtlasValidatedBeforeRelease ||
+        !counters.iconAtlasInvalidatedAfterRelease ||
+        counters.iconFrameBorrowsAtRelease != 0 || counters.iconResolverCalls == 0 ||
+        counters.iconResolverHits != counters.iconResolverCalls) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::Internal,
+            "Desktop shell icon resource lifecycle verification failed: calls=" +
+                std::to_string(counters.iconResolverCalls) + " hits=" +
+                std::to_string(counters.iconResolverHits) + " borrows=" +
+                std::to_string(counters.iconFrameBorrowsAtRelease));
     }
     // Three nested SplitViews and five bands are the frozen shell structure.
     if (ui.splitViewCount != 3 || ui.bandCount != 5 || ui.commandCount != 6 ||
@@ -482,6 +622,27 @@ class ShellApplication final : public Tina::IGameApplication {
                 Tina::Core::CoreErrorCode::Internal,
                 "Desktop shell tier-resolved pane visibility verification failed");
         }
+        // Tooltip anchored overlay: opened, bounded by the density maximum width,
+        // and dismissed without ever taking focus away from the command bar.
+        if (!ui.tooltipOpenObserved || !ui.tooltipWithinMaxWidth || !ui.tooltipDismissed) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::Internal,
+                "Desktop shell tooltip verification failed: open=" +
+                    std::string(ui.tooltipOpenObserved ? "true" : "false") + " width=" +
+                    std::string(ui.tooltipWithinMaxWidth ? "true" : "false") + " dismissed=" +
+                    std::string(ui.tooltipDismissed ? "true" : "false"));
+        }
+        // Splitter: a fraction change moved committed geometry, and a fraction
+        // past the pane minimum was clamped by the SplitView instead of honoured.
+        if (!ui.splitterMovedGeometry || !ui.splitterMinimumClamped ||
+            ui.leftDockWidthAfterDrag < 200.0F) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::Internal,
+                "Desktop shell splitter verification failed: moved=" +
+                    std::string(ui.splitterMovedGeometry ? "true" : "false") + " clamped=" +
+                    std::string(ui.splitterMinimumClamped ? "true" : "false") + " dockAfterDrag=" +
+                    std::to_string(ui.leftDockWidthAfterDrag));
+        }
     }
     if (counters.logicalPixelWidth > options.windowLogicalWidth ||
         counters.logicalPixelHeight > options.windowLogicalHeight ||
@@ -512,14 +673,30 @@ class ShellApplication final : public Tina::IGameApplication {
         return 2;
     }
 
-    auto host = Tina::Desktop::CreateEngine(createEngineConfig(*options));
+    Tina::Render::IRenderDevice* renderDevice = nullptr;
+    auto host = Tina::Desktop::CreateEngine(
+        createEngineConfig(*options),
+        Tina::Desktop::CreateEngineOptions{
+            .wrapWindowSurfaceRenderDevice =
+                [&renderDevice](std::unique_ptr<Tina::Render::IRenderDevice> device)
+                    -> Tina::Core::Result<std::unique_ptr<Tina::Render::IRenderDevice>> {
+                    renderDevice = device.get();
+                    return device;
+                },
+        });
     if (!host) {
         writeError(host.error());
         return 1;
     }
+    if (renderDevice == nullptr) {
+        writeError(Tina::Core::Error{
+            Tina::Core::CoreErrorCode::Internal,
+            "Desktop shell render device hook did not receive the product device"});
+        return 1;
+    }
 
     LifecycleCounters counters{};
-    ShellApplication application{*options, counters};
+    ShellApplication application{*options, counters, *renderDevice};
     auto result = (*host)->run(application);
     if (!result) {
         writeError(result.error());
@@ -553,6 +730,16 @@ class ShellApplication final : public Tina::IGameApplication {
               << ",\"menuOpenObserved\":" << (ui.menuOpenObserved ? "true" : "false")
               << ",\"dialogOpenObserved\":" << (ui.dialogOpenObserved ? "true" : "false")
               << ",\"dialogDismissed\":" << (ui.dialogDismissed ? "true" : "false")
+              << ",\"tooltipOpenObserved\":" << (ui.tooltipOpenObserved ? "true" : "false")
+              << ",\"tooltipDismissed\":" << (ui.tooltipDismissed ? "true" : "false")
+              << ",\"tooltipWithinMaxWidth\":" << (ui.tooltipWithinMaxWidth ? "true" : "false")
+              << ",\"splitterMovedGeometry\":" << (ui.splitterMovedGeometry ? "true" : "false")
+              << ",\"splitterMinimumClamped\":" << (ui.splitterMinimumClamped ? "true" : "false")
+              << ",\"leftDockWidthAfterDrag\":" << ui.leftDockWidthAfterDrag
+              << ",\"iconAtlasUploaded\":" << (counters.iconAtlasUploaded ? "true" : "false")
+              << ",\"iconAtlasReleased\":" << (counters.iconAtlasReleased ? "true" : "false")
+              << ",\"iconResolverCalls\":" << counters.iconResolverCalls
+              << ",\"iconResolverHits\":" << counters.iconResolverHits
               << ",\"commandActivations\":" << ui.commandActivations
               << ",\"documentSwitches\":" << ui.documentSwitches
               << ",\"timelineCollapsed\":" << (ui.timelineCollapsed ? "true" : "false")

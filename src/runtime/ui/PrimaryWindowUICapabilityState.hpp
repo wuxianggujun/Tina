@@ -114,6 +114,23 @@ class PrimaryWindowUICapabilityState final {
     [[nodiscard]] Core::Result<UI::UIDialogParts>
     buildDialog(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                 UI::UINodeId parent, const UI::UIDialogConfig& config);
+    [[nodiscard]] Core::Result<UI::UISnackbarHostParts>
+    buildSnackbarHost(u64 epoch, PrimaryWindowUIPhase phase,
+                      UI::UITreeUpdater& updater, UI::UINodeId parent,
+                      const UI::UISnackbarHostConfig& config);
+    [[nodiscard]] Core::Result<UI::UINumberFieldParts>
+    buildNumberField(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                     UI::UINodeId parent, const UI::UINumberFieldConfig& config);
+    [[nodiscard]] Core::Result<UI::UICollapsibleSectionParts>
+    buildCollapsibleSection(u64 epoch, PrimaryWindowUIPhase phase,
+                            UI::UITreeUpdater& updater, UI::UINodeId parent,
+                            const UI::UICollapsibleSectionConfig& config);
+    [[nodiscard]] Core::Result<UI::UIColorFieldParts>
+    buildColorField(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                    UI::UINodeId parent, const UI::UIColorFieldConfig& config);
+    [[nodiscard]] Core::Result<UI::UIColorPickerParts>
+    buildColorPicker(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+                     UI::UINodeId parent, const UI::UIColorPickerConfig& config);
     [[nodiscard]] Core::Result<UI::UINodeId>
     createElementFromBuildTransaction(u64 epoch, PrimaryWindowUIPhase phase, UI::UINodeId parent,
                                       const UI::UIElementDescriptor& descriptor);
@@ -376,6 +393,47 @@ class PrimaryWindowUICapabilityState final {
     [[nodiscard]] Core::Status scrollListViewToIndex(u64 epoch, PrimaryWindowUIPhase phase,
                                                      UI::UITreeUpdater& updater, UI::UINodeId listView,
                                                      u64 logicalIndex, UI::UIListViewScrollAlignment alignment);
+    [[nodiscard]] Core::Status setVirtualGridViewDataSource(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+        UI::UINodeId virtualGridView, UI::UIVirtualGridViewDataSource source);
+    [[nodiscard]] Core::Status clearVirtualGridViewDataSource(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+        UI::UINodeId virtualGridView);
+    [[nodiscard]] Core::Status invalidateVirtualGridViewItems(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+        UI::UINodeId virtualGridView);
+    [[nodiscard]] Core::Status setVirtualGridViewStyle(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+        UI::UINodeId virtualGridView, const UI::UIVirtualGridViewStyle& style);
+    [[nodiscard]] Core::Result<UI::UIVirtualGridViewStyle>
+    virtualGridViewStyle(u64 epoch, PrimaryWindowUIPhase phase,
+                         const UI::UITreeUpdater& updater,
+                         UI::UINodeId virtualGridView);
+    [[nodiscard]] Core::Status setVirtualGridViewPaint(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+        UI::UINodeId virtualGridView, const UI::UIVirtualGridViewPaint& paint);
+    [[nodiscard]] Core::Result<UI::UIVirtualGridViewPaint>
+    virtualGridViewPaint(u64 epoch, PrimaryWindowUIPhase phase,
+                         const UI::UITreeUpdater& updater,
+                         UI::UINodeId virtualGridView);
+    [[nodiscard]] Core::Result<UI::UIVirtualGridViewMetrics>
+    virtualGridViewMetrics(u64 epoch, PrimaryWindowUIPhase phase,
+                           const UI::UITreeUpdater& updater,
+                           UI::UINodeId virtualGridView);
+    [[nodiscard]] Core::Status setVirtualGridViewSelectedIndex(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+        UI::UINodeId virtualGridView, u64 logicalIndex);
+    [[nodiscard]] Core::Status clearVirtualGridViewSelection(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+        UI::UINodeId virtualGridView);
+    [[nodiscard]] Core::Result<UI::UIVirtualGridViewSelection>
+    virtualGridViewSelection(u64 epoch, PrimaryWindowUIPhase phase,
+                             const UI::UITreeUpdater& updater,
+                             UI::UINodeId virtualGridView);
+    [[nodiscard]] Core::Status scrollVirtualGridViewToIndex(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+        UI::UINodeId virtualGridView, u64 logicalIndex,
+        UI::UIVirtualGridViewScrollAlignment alignment);
     [[nodiscard]] Core::Status setTreeViewDataSource(u64 epoch, PrimaryWindowUIPhase phase,
                                                      UI::UITreeUpdater& updater, UI::UINodeId treeView,
                                                      UI::UITreeViewDataSource source);
@@ -450,6 +508,18 @@ class PrimaryWindowUICapabilityState final {
         u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
         UI::UINodeId menu);
     [[nodiscard]] Core::Result<UI::UIMenuMetrics> menuMetrics(
+        u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+        UI::UINodeId menu);
+    [[nodiscard]] Core::Status setMenuItemSubmenu(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+        UI::UINodeId item, UI::UINodeId submenu);
+    [[nodiscard]] Core::Status clearMenuItemSubmenu(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+        UI::UINodeId item);
+    [[nodiscard]] Core::Result<UI::UINodeId> menuItemSubmenu(
+        u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+        UI::UINodeId item);
+    [[nodiscard]] Core::Result<UI::UINodeId> menuParentItem(
         u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
         UI::UINodeId menu);
     [[nodiscard]] Core::Status setMenuItemChecked(u64 epoch, PrimaryWindowUIPhase phase,

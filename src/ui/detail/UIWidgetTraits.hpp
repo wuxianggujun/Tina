@@ -26,6 +26,12 @@ enum class BuiltinElementKind : u8 {
     ListViewItem,
     TreeView,
     TreeViewItem,
+    VirtualGridView,
+    VirtualGridViewItem,
+    DataGrid,
+    DataGridRow,
+    DataGridCell,
+    DataGridColumnHeader,
     Tooltip,
     SplitView,
     Splitter,
@@ -51,6 +57,8 @@ struct UIWidgetTraits final {
     case BuiltinElementKind::DropdownItem:
     case BuiltinElementKind::ListViewItem:
     case BuiltinElementKind::TreeViewItem:
+    case BuiltinElementKind::VirtualGridViewItem:
+    case BuiltinElementKind::DataGridCell:
     case BuiltinElementKind::Tab:
     case BuiltinElementKind::MenuItem:
         return {
@@ -82,11 +90,14 @@ struct UIWidgetTraits final {
         };
     case BuiltinElementKind::ListView:
     case BuiltinElementKind::TreeView:
+    case BuiltinElementKind::VirtualGridView:
+    case BuiltinElementKind::DataGrid:
         return {
             .keyboardFocusable = true,
         };
     case BuiltinElementKind::Label:
     case BuiltinElementKind::Tooltip:
+    case BuiltinElementKind::DataGridColumnHeader:
         return {
             .supportsText = true,
         };
@@ -99,6 +110,7 @@ struct UIWidgetTraits final {
     case BuiltinElementKind::SplitView:
     case BuiltinElementKind::TabView:
     case BuiltinElementKind::Menu:
+    case BuiltinElementKind::DataGridRow:
         return {};
     }
     return {};
@@ -148,6 +160,9 @@ defaultContentAlignment(BuiltinElementKind kind) noexcept
         kind == BuiltinElementKind::RadioButton ||
         kind == BuiltinElementKind::ListViewItem ||
         kind == BuiltinElementKind::TreeViewItem ||
+        kind == BuiltinElementKind::VirtualGridViewItem ||
+        kind == BuiltinElementKind::DataGridCell ||
+        kind == BuiltinElementKind::DataGridColumnHeader ||
         kind == BuiltinElementKind::MenuItem)
     {
         return {

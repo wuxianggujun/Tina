@@ -373,7 +373,32 @@ auto EditorWorkspaceState::inspectorMixedTransformFlags(u32 primaryStableId) con
 
 auto EditorWorkspaceState::publishInspector(Tina::PrimaryWindowUITreeUpdater& tree,
                                                   UI::UITreeViewItemKey key) -> Tina::Core::Status{
+    const auto setAssetMetadataVisibility =
+        [&](UI::UIVisibility visibility) -> Tina::Core::Status {
+        UI::UILayoutStyle assetRowStyle = fillWidth(42.0F);
+        assetRowStyle.flexItem.shrink = 0.0F;
+        assetRowStyle.visibility = visibility;
+        if (auto status = tree.setLayoutStyle(inspectorAssetRow_, assetRowStyle);
+            !status) {
+            return status;
+        }
+        UI::UILayoutStyle summaryStyle = fillWidth(22.0F);
+        summaryStyle.flexItem.shrink = 0.0F;
+        summaryStyle.visibility = visibility;
+        if (auto status = tree.setLayoutStyle(inspectorDependencySummary_, summaryStyle);
+            !status) {
+            return status;
+        }
+        UI::UILayoutStyle listStyle = fillWidth(156.0F);
+        listStyle.flexItem.shrink = 0.0F;
+        listStyle.visibility = visibility;
+        return tree.setLayoutStyle(inspectorDependencyList_, listStyle);
+    };
     if (assetInspectorActive_) {
+        if (auto status = setAssetMetadataVisibility(UI::UIVisibility::Visible);
+            !status) {
+            return status;
+        }
         if (auto status = tree.setText(inspectorMode_, "Asset"); !status) {
             return status;
         }
@@ -382,7 +407,7 @@ auto EditorWorkspaceState::publishInspector(Tina::PrimaryWindowUITreeUpdater& tr
             if (auto status = tree.setText(inspectorName_, "Asset unavailable"); !status) {
                 return status;
             }
-            if (auto status = tree.setText(inspectorKind_, "Kind: Missing from active Catalog");
+            if (auto status = tree.setText(inspectorKind_, "Missing from active Catalog");
                 !status) {
                 return status;
             }
@@ -421,14 +446,13 @@ auto EditorWorkspaceState::publishInspector(Tina::PrimaryWindowUITreeUpdater& tr
             }
             return Tina::Core::success();
         }
-        std::string name = "Asset: ";
-        name += asset->displayName;
-        if (auto status = tree.setText(inspectorName_, name); !status) {
+        if (auto status = tree.setText(inspectorName_, asset->displayName); !status) {
             return status;
         }
-        std::string kind = "Kind: ";
-        kind += Tina::Editor::projectAssetKindLabel(asset->assetKind);
-        if (auto status = tree.setText(inspectorKind_, kind); !status) {
+        if (auto status = tree.setText(
+                inspectorKind_,
+                Tina::Editor::projectAssetKindLabel(asset->assetKind));
+            !status) {
             return status;
         }
         const auto idText = asset->assetId.canonicalText();
@@ -493,6 +517,10 @@ auto EditorWorkspaceState::publishInspector(Tina::PrimaryWindowUITreeUpdater& tr
         }
         return Tina::Core::success();
     }
+    if (auto status = setAssetMetadataVisibility(UI::UIVisibility::Collapsed);
+        !status) {
+        return status;
+    }
     inspectorDependencyLabels_.clear();
     if (auto status = tree.setText(inspectorAssetPath_, {}); !status) {
         return status;
@@ -515,23 +543,33 @@ auto EditorWorkspaceState::publishInspector(Tina::PrimaryWindowUITreeUpdater& tr
         !status) {
         return status;
     }
-    std::string name = "Name: ";
-    name += tileMapEditingContext() ? std::string_view{"TileMap2D"}
-                                    : hierarchyDisplayLabel(key);
-    if (auto status = tree.setText(inspectorName_, name); !status) {
+    if (auto status = tree.setText(
+            inspectorName_,
+            tileMapEditingContext() ? std::string_view{"TileMap2D"}
+                                    : hierarchyDisplayLabel(key));
+        !status) {
         return status;
     }
-    std::string kind = "Kind: ";
-    kind += tileMapEditingContext() ? std::string_view{"TileMap document"}
-                                    : hierarchyDisplayKind(key);
-    if (auto status = tree.setText(inspectorKind_, kind); !status) {
+    if (auto status = tree.setText(
+            inspectorKind_,
+            tileMapEditingContext() ? std::string_view{"TileMap document"}
+                                    : hierarchyDisplayKind(key));
+        !status) {
         return status;
     }
-    std::string note = "Note: ";
-    note += tileMapEditingContext()
-                ? std::string_view{
-                      "Root and streamed chunks publish one canonical revision."}
-                : hierarchyDisplayNote(key);
+    std::string note{
+        tileMapEditingContext()
+            ? std::string_view{
+                  "Root and streamed chunks publish one canonical revision."}
+            : hierarchyDisplayNote(key)};
+    const auto appendNumber = [&](float value) -> Tina::Core::Status {
+        auto text = formatEditorNumber(value);
+        if (!text) {
+            return Tina::Core::failure(std::move(text.error()));
+        }
+        note.append(text->view());
+        return Tina::Core::success();
+    };
     if (tileMapEditingContext()) {
         note += " Layers=";
         note += std::to_string(tileMapDocument_.layerCount());
@@ -574,7 +612,9 @@ auto EditorWorkspaceState::publishInspector(Tina::PrimaryWindowUITreeUpdater& tr
                 scaleY = entity->scaleY;
                 scaleZ = entity->scaleZ;
                 note += " X=";
-                note += std::to_string(entity->positionX);
+                if (auto status = appendNumber(entity->positionX); !status) {
+                    return status;
+                }
             }
         } else {
             std::vector<Tina::AssetFormat::PrefabNodeView> storage;
@@ -598,11 +638,17 @@ auto EditorWorkspaceState::publishInspector(Tina::PrimaryWindowUITreeUpdater& tr
                 scaleY = node->scaleY;
                 scaleZ = node->scaleZ;
                 note += " XYZ=";
-                note += std::to_string(node->positionX);
+                if (auto status = appendNumber(node->positionX); !status) {
+                    return status;
+                }
                 note += ",";
-                note += std::to_string(node->positionY);
+                if (auto status = appendNumber(node->positionY); !status) {
+                    return status;
+                }
                 note += ",";
-                note += std::to_string(node->positionZ);
+                if (auto status = appendNumber(node->positionZ); !status) {
+                    return status;
+                }
             }
         }
     }
@@ -617,15 +663,20 @@ auto EditorWorkspaceState::publishInspector(Tina::PrimaryWindowUITreeUpdater& tr
         }
         mixed = *mixedResult;
     }
-    const auto transformText = [&](InspectorTransformField field,
-                                   float value) -> std::string {
+    const auto setTransformField = [&](UI::UINodeId node,
+                                       InspectorTransformField field,
+                                       float value) -> Tina::Core::Status {
         if (!hasEntity) {
-            return "n/a";
+            return tree.setText(node, "n/a");
         }
         if (mixed[inspectorTransformFieldIndex(field)]) {
-            return "Mixed";
+            return tree.setText(node, "Mixed");
         }
-        return std::to_string(value);
+        auto text = formatEditorNumber(value);
+        if (!text) {
+            return Tina::Core::failure(std::move(text.error()));
+        }
+        return tree.setText(node, text->view());
     };
     const EditorHierarchyRow* selectedRow = hierarchyRow(stableEntityId);
     if (auto status = tree.setText(
@@ -636,60 +687,51 @@ auto EditorWorkspaceState::publishInspector(Tina::PrimaryWindowUITreeUpdater& tr
         !status) {
         return status;
     }
-    if (auto status = tree.setText(
-            inspectorPositionX_,
-            transformText(InspectorTransformField::PositionX, positionX));
+    if (auto status = setTransformField(
+            inspectorPositionX_, InspectorTransformField::PositionX, positionX);
         !status) {
         return status;
     }
-    if (auto status = tree.setText(
-            inspectorPositionY_,
-            transformText(InspectorTransformField::PositionY, positionY));
+    if (auto status = setTransformField(
+            inspectorPositionY_, InspectorTransformField::PositionY, positionY);
         !status) {
         return status;
     }
-    if (auto status = tree.setText(
-            inspectorPositionZ_,
-            transformText(InspectorTransformField::PositionZ, positionZ));
+    if (auto status = setTransformField(
+            inspectorPositionZ_, InspectorTransformField::PositionZ, positionZ);
         !status) {
         return status;
     }
-    if (auto status = tree.setText(
-            inspectorRotationX_,
-            transformText(InspectorTransformField::RotationX,
-                          rotationDegrees.x));
+    if (auto status = setTransformField(
+            inspectorRotationX_, InspectorTransformField::RotationX,
+            rotationDegrees.x);
         !status) {
         return status;
     }
-    if (auto status = tree.setText(
-            inspectorRotationY_,
-            transformText(InspectorTransformField::RotationY,
-                          rotationDegrees.y));
+    if (auto status = setTransformField(
+            inspectorRotationY_, InspectorTransformField::RotationY,
+            rotationDegrees.y);
         !status) {
         return status;
     }
-    if (auto status = tree.setText(
-            inspectorRotationZ_,
-            transformText(InspectorTransformField::RotationZ,
-                          rotationDegrees.z));
+    if (auto status = setTransformField(
+            inspectorRotationZ_, InspectorTransformField::RotationZ,
+            rotationDegrees.z);
         !status) {
         return status;
     }
-    if (auto status = tree.setText(
-            inspectorScaleX_,
-            transformText(InspectorTransformField::ScaleX, scaleX));
+    if (auto status = setTransformField(
+            inspectorScaleX_, InspectorTransformField::ScaleX, scaleX);
         !status) {
         return status;
     }
-    if (auto status = tree.setText(
-            inspectorScaleY_,
-            transformText(InspectorTransformField::ScaleY, scaleY));
+    if (auto status = setTransformField(
+            inspectorScaleY_, InspectorTransformField::ScaleY, scaleY);
         !status) {
         return status;
     }
-    return tree.setText(
-        inspectorScaleZ_,
-        transformText(InspectorTransformField::ScaleZ, scaleZ));
+    return setTransformField(inspectorScaleZ_, InspectorTransformField::ScaleZ,
+                             scaleZ);
 }
 
 auto EditorWorkspaceState::inspectorDependencyDataSource() const noexcept -> UI::UIListViewDataSource{
