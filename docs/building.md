@@ -16,7 +16,23 @@
 管理；`xxHash` 与 `mikktspace` 是 backend-neutral SDK 的必需 package，bgfx 源码由
 `thirdparty/bgfx.cmake` 锁定。`TINA_BUILD_LEGACY=ON` 会立即失败。
 
+## 编译、运行与测试是独立请求
+
+用户请求决定本轮授权边界，不能因为工程文档列出了完整 gate 就自动扩大范围：
+
+| 用户请求 | 允许执行 | 明确禁止 |
+| --- | --- | --- |
+| 编译、构建、生成版本、给出编译版本 | 必要的 configure；指定 target build；报告产物 | 执行 GoogleTest/CTest、sample、smoke、产品/视觉 gate；启动产物 |
+| 编译并运行 | 上述 build；启动用户指定的程序 | 未明确要求的 GoogleTest、smoke 与其他 gate |
+| 编译并测试 | 上述 build；运行明确相关的测试范围 | 未授权的产品运行、视觉或平台 gate |
+| 编译给用户手动测试 | build；交付可执行文件绝对路径、时间与大小 | 代替用户启动程序或追加任何自动测试 |
+
+因此，“编译成功”只表示编译和链接 exit 0，不表示测试、启动、真实资源导入或视觉效果通过。用户急需人工验证
+真实 Editor 时，优先构建 `tina_editor_desktop` 并交付 `TinaEditor.exe`，到此停止。后续测试必须得到单独明确请求。
+
 ## 增量构建与验证层级
+
+以下是获得对应验证授权后的范围选择规则，不会覆盖上一节的用户请求边界。
 
 - 小功能/单一切片：复用常驻 build tree，只构建改动直接影响的 target，并只运行新增用例及直接回归的
   `--gtest_filter`；没有改 CMake/preset/toolchain 时不主动重新 configure，不运行完整产品图。

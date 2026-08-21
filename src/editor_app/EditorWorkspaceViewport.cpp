@@ -2,13 +2,6 @@
 
 namespace Tina::EditorApp::WorkspaceInternal {
 
-auto EditorWorkspaceState::queueViewportZoomStep(float deltaPercent) noexcept -> void{
-    const float basePercent =
-        pendingViewportZoomPercent_.value_or(viewportZoomPercent_);
-    pendingViewportZoomPercent_ =
-        std::clamp(basePercent + deltaPercent, 25.0F, 400.0F);
-}
-
 auto EditorWorkspaceState::resetViewportInteractionState() noexcept -> void{
     if (viewportTransformGizmo_.snapshot().dragging()) {
         (void)viewportTransformGizmo_.cancelDrag(ViewportPrimaryPointerToken);
@@ -23,7 +16,6 @@ auto EditorWorkspaceState::resetViewportInteractionState() noexcept -> void{
     preserveViewportSelectionOnHierarchyPublish_ = false;
     pendingViewportNavigationCount_ = 0;
     viewportNavigationQueueOverflowed_ = false;
-    pendingViewportZoomPercent_.reset();
     pendingGizmoOrientationToggle_ = false;
     pendingGizmoSnapToggle_ = false;
     pendingMarqueeSelectionMode_.reset();
@@ -382,41 +374,6 @@ auto EditorWorkspaceState::queueViewportNavigationInput(
     return true;
 }
 
-auto EditorWorkspaceState::applyViewportZoomPercent(float percent) -> Tina::Core::Status{
-    if (auto status = ensureViewportNavigation(); !status) {
-        return status;
-    }
-    percent = std::clamp(percent, 25.0F, 400.0F);
-    const auto& config = viewportNavigation_->config();
-    if (workspaceMode_ == WorkspaceMode::World2D) {
-        const float targetZoom = percent / 100.0F;
-        const float steps = std::log(
-                                targetZoom / viewportNavigation_->twoD().zoom) /
-                            std::log(config.twoDZoomStepFactor);
-        if (auto status = viewportNavigation_->zoom2D(
-                steps,
-                {.x = viewportLogicalRect_.width,
-                 .y = viewportLogicalRect_.height},
-                {.x = viewportLogicalRect_.width * 0.5F,
-                 .y = viewportLogicalRect_.height * 0.5F});
-            !status) {
-            return status;
-        }
-    } else {
-        const float targetDistance = std::clamp(
-            viewport3DFrameAllState_.distance * 100.0F / percent,
-            config.minimumThreeDDistance, config.maximumThreeDDistance);
-        const float steps = std::log(
-                                viewportNavigation_->threeD().distance /
-                                targetDistance) /
-                            std::log(config.threeDDollyStepFactor);
-        if (auto status = viewportNavigation_->dolly3D(steps); !status) {
-            return status;
-        }
-    }
-    return applyViewportNavigationToPreview();
-}
-
 auto EditorWorkspaceState::frameViewportContents() -> Tina::Core::Status{
     if (auto status = ensureViewportNavigation(); !status) {
         return status;
@@ -529,16 +486,9 @@ auto EditorWorkspaceState::processViewportNavigation() -> Tina::Core::Status{
             viewportViewModeRefreshPending_ = true;
         }
     }
-    if (pendingViewportZoomPercent_.has_value()) {
-        const float percent = *pendingViewportZoomPercent_;
-        pendingViewportZoomPercent_.reset();
-        if (auto status = applyViewportZoomPercent(percent); !status) {
-            return status;
-        }
-    } else if (auto status = applyViewportNavigationToPreview(); !status) {
+    if (auto status = applyViewportNavigationToPreview(); !status) {
         return status;
     }
-    pendingViewportSliderValue_ = viewportZoomPercent_;
     return Tina::Core::success();
 }
 
@@ -890,49 +840,7 @@ auto EditorWorkspaceState::refreshViewportToolUi(Tina::PrimaryWindowUITreeUpdate
             return status;
         }
     }
-
-    std::string toolStatus;
-    switch (viewportToolMode_) {
-    case ViewportToolMode::Translate:
-        toolStatus = "Translate";
-        break;
-    case ViewportToolMode::Rotate:
-        toolStatus = "Rotate";
-        break;
-    case ViewportToolMode::Scale:
-        toolStatus = "Scale";
-        break;
-    case ViewportToolMode::TilePaint:
-        toolStatus = "Tile Paint | Grid Snap";
-        break;
-    case ViewportToolMode::TileErase:
-        toolStatus = "Tile Erase | Grid Snap";
-        break;
-    case ViewportToolMode::Select:
-    default:
-        toolStatus = "Select | ";
-        switch (marqueeSelectionMode_) {
-        case Tina::Editor::EditorMarqueeSelectionMode::Add:
-            toolStatus += "Add";
-            break;
-        case Tina::Editor::EditorMarqueeSelectionMode::Toggle:
-            toolStatus += "Toggle";
-            break;
-        case Tina::Editor::EditorMarqueeSelectionMode::Replace:
-        default:
-            toolStatus += "Replace";
-            break;
-        }
-        return tree.setText(viewportToolStatus_, toolStatus);
-    }
-    if (transformTool) {
-        toolStatus += orientation ==
-                              Tina::Editor::EditorTransformGizmoOrientation::World
-                          ? " | World"
-                          : " | Local";
-        toolStatus += snapEnabled ? " | Snap" : " | Free";
-    }
-    return tree.setText(viewportToolStatus_, toolStatus);
+    return Tina::Core::success();
 }
 
 auto EditorWorkspaceState::extractWorld3DViewport(Tina::RenderSceneExtractionContext& context) const -> Tina::Core::Status{
@@ -1140,16 +1048,202 @@ auto EditorWorkspaceState::updateViewportGrid(Tina::PrimaryWindowUITreeUpdater& 
         counters_.viewportGrid3DObserved = true;
     }
 
-    const std::string_view gridLabel = workspaceMode_ == WorkspaceMode::World2D
-                                           ? "Tile Grid 1 m"
-                                           : "Grid 1 m";
-    if (auto status = tree.setText(gridStatus_, gridLabel); !status) {
+    return Tina::Core::success();
+}
+
+auto EditorWorkspaceState::updateViewportOrientationCompass(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    if (!viewportNavigation_.has_value()) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::Internal,
+            "editor viewport orientation compass has no navigation state");
+    }
+    const auto& navigation3D = viewportNavigation_->threeD();
+    const ViewportOrientationCompassVisualState visualState{
+        .workspace = workspaceMode_,
+        .viewportWidth = viewportLogicalRect_.width,
+        .viewportHeight = viewportLogicalRect_.height,
+        .cameraYawRadians = workspaceMode_ == WorkspaceMode::World3D
+                                ? navigation3D.yawRadians
+                                : 0.0F,
+        .cameraPitchRadians = workspaceMode_ == WorkspaceMode::World3D
+                                  ? navigation3D.pitchRadians
+                                  : 0.0F,
+    };
+    if (viewportOrientationCompassVisualState_ == visualState) {
+        return Tina::Core::success();
+    }
+    const bool world3D = workspaceMode_ == WorkspaceMode::World3D;
+    const float compassExtent = world3D ? ViewportOrientationCompassExtent
+                                        : ViewportOrientationCompass2DExtent;
+    const float axisLength = world3D ? ViewportOrientationAxisLength
+                                     : ViewportOrientationAxis2DLength;
+    if (!std::isfinite(visualState.viewportWidth) ||
+        !std::isfinite(visualState.viewportHeight) ||
+        visualState.viewportWidth <= 0.0F || visualState.viewportHeight <= 0.0F ||
+        visualState.viewportWidth < compassExtent +
+                                        ViewportOrientationCompassInset * 2.0F ||
+        visualState.viewportHeight < compassExtent +
+                                         ViewportOrientationCompassInset * 2.0F) {
+        UI::UILayoutStyle collapsed = fixedSize(
+            compassExtent, compassExtent);
+        collapsed.placement = UI::UILayoutPlacement::Overlay;
+        collapsed.visibility = UI::UIVisibility::Collapsed;
+        if (auto status = tree.setLayoutStyle(
+                viewportOrientationCompass_, collapsed);
+            !status) {
+            return status;
+        }
+        viewportOrientationCompassVisualState_ = visualState;
+        return Tina::Core::success();
+    }
+
+    UI::UILayoutStyle compassLayout = fixedSize(
+        compassExtent, compassExtent);
+    compassLayout.placement = UI::UILayoutPlacement::Overlay;
+    compassLayout.overlay.horizontal = UI::UIAxisAlignment::Start;
+    compassLayout.overlay.vertical = UI::UIAxisAlignment::Start;
+    compassLayout.overlay.offset.x = UI::UILayoutLength::Px(
+        visualState.viewportWidth - compassExtent -
+        ViewportOrientationCompassInset);
+    compassLayout.overlay.offset.y = UI::UILayoutLength::Px(
+        ViewportOrientationCompassInset);
+    if (auto status = tree.setLayoutStyle(
+            viewportOrientationCompass_, compassLayout);
+        !status) {
         return status;
     }
-    std::string zoomLabel = std::to_string(
-        static_cast<int>(std::lround(viewportZoomPercent_)));
-    zoomLabel += '%';
-    return tree.setText(zoomValue_, zoomLabel);
+    if (auto status = tree.setBoxPaint(
+            viewportOrientationCompass_,
+            UI::makeSolidEllipse(
+                world3D ? UI::rgb(0x10171C, 242)
+                        : UI::rgb(0x000000, 0)));
+        !status) {
+        return status;
+    }
+    for (Tina::Core::usize layer = 0;
+         layer < ViewportOrientationOrbLayerCount; ++layer) {
+        UI::UILayoutStyle layerLayout =
+            viewportOrientationOrbLayerLayouts_[layer];
+        layerLayout.visibility = world3D ? UI::UIVisibility::Visible
+                                         : UI::UIVisibility::Collapsed;
+        if (auto status = tree.setLayoutStyle(
+                viewportOrientationOrbLayers_[layer], layerLayout);
+            !status) {
+            return status;
+        }
+    }
+
+    constexpr std::array worldDirections{
+        Tina::Scene::Vec3{1.0F, 0.0F, 0.0F},
+        Tina::Scene::Vec3{0.0F, 1.0F, 0.0F},
+        Tina::Scene::Vec3{0.0F, 0.0F, 1.0F},
+    };
+    constexpr std::array axisKinds{
+        Tina::Editor::EditorViewportGridSegmentKind::AxisX,
+        Tina::Editor::EditorViewportGridSegmentKind::AxisY,
+        Tina::Editor::EditorViewportGridSegmentKind::AxisZ,
+    };
+    const float center = compassExtent * 0.5F;
+    const Tina::Scene::Quaternion inverseCameraRotation =
+        Tina::Scene::quaternionConjugate(viewportOrbitRotation(
+            visualState.cameraYawRadians, visualState.cameraPitchRadians));
+
+    for (Tina::Core::usize axis = 0; axis < ViewportOrientationAxisCount;
+         ++axis) {
+        const bool visible = world3D || axis < 2U;
+        UI::UILayoutStyle lineLayout = fixedSize(
+            compassExtent, compassExtent);
+        lineLayout.placement = UI::UILayoutPlacement::Overlay;
+        UI::UILayoutStyle endpointLayout = fixedSize(
+            ViewportOrientationEndpointExtent,
+            ViewportOrientationEndpointExtent);
+        endpointLayout.placement = UI::UILayoutPlacement::Overlay;
+        if (!visible) {
+            lineLayout.visibility = UI::UIVisibility::Collapsed;
+            endpointLayout.visibility = UI::UIVisibility::Collapsed;
+            if (auto status = tree.setLayoutStyle(
+                    viewportOrientationAxisLines_[axis], lineLayout);
+                !status) {
+                return status;
+            }
+            if (auto status = tree.setLayoutStyle(
+                    viewportOrientationAxisEndpoints_[axis], endpointLayout);
+                !status) {
+                return status;
+            }
+            if (auto status = tree.setLayoutStyle(
+                    viewportOrientationAxisLabels_[axis], endpointLayout);
+                !status) {
+                return status;
+            }
+            continue;
+        }
+
+        Tina::Scene::Vec3 cameraDirection = worldDirections[axis];
+        if (world3D) {
+            cameraDirection = Tina::Scene::rotate(
+                inverseCameraRotation, worldDirections[axis]);
+        }
+        const UI::UILogicalPoint endpoint{
+            .x = center + cameraDirection.x * axisLength,
+            .y = center - cameraDirection.y * axisLength,
+        };
+        const float projectedLength = std::hypot(
+            endpoint.x - center, endpoint.y - center);
+        if (!(std::isfinite(projectedLength) && projectedLength > 0.5F)) {
+            lineLayout.visibility = UI::UIVisibility::Collapsed;
+        }
+        if (auto status = tree.setLayoutStyle(
+                viewportOrientationAxisLines_[axis], lineLayout);
+            !status) {
+            return status;
+        }
+
+        UI::UIStraightSrgba8Color axisColor = viewportGridColor(axisKinds[axis]);
+        if (world3D && cameraDirection.z < 0.0F) {
+            axisColor.alpha = 165U;
+        } else {
+            axisColor.alpha = 238U;
+        }
+        if (auto status = tree.setBoxPaint(
+                viewportOrientationAxisLines_[axis],
+                UI::makeSolidLine(
+                    axisColor,
+                    UI::UILogicalPoint{.x = center, .y = center}, endpoint,
+                    2.0F));
+            !status) {
+            return status;
+        }
+
+        const float endpointHalf = ViewportOrientationEndpointExtent * 0.5F;
+        endpointLayout.overlay.horizontal = UI::UIAxisAlignment::Start;
+        endpointLayout.overlay.vertical = UI::UIAxisAlignment::Start;
+        endpointLayout.overlay.offset.x = UI::UILayoutLength::Px(
+            endpoint.x - endpointHalf);
+        endpointLayout.overlay.offset.y = UI::UILayoutLength::Px(
+            endpoint.y - endpointHalf);
+        if (auto status = tree.setLayoutStyle(
+                viewportOrientationAxisEndpoints_[axis], endpointLayout);
+            !status) {
+            return status;
+        }
+        if (auto status = tree.setBoxPaint(
+                viewportOrientationAxisEndpoints_[axis],
+                UI::makeSolidEllipse(axisColor));
+            !status) {
+            return status;
+        }
+        if (auto status = tree.setLayoutStyle(
+                viewportOrientationAxisLabels_[axis], endpointLayout);
+            !status) {
+            return status;
+        }
+    }
+
+    viewportOrientationCompassVisualState_ = visualState;
+    return Tina::Core::success();
 }
 
 auto EditorWorkspaceState::updateGpuViewport(Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status{
@@ -1231,17 +1325,19 @@ auto EditorWorkspaceState::updateGpuViewport(Tina::PrimaryWindowUITreeUpdater& t
 
 auto EditorWorkspaceState::refreshViewportViewModeUi(Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status{
     const bool world2D = workspaceMode_ == WorkspaceMode::World2D;
-    std::string label = "Orthographic";
-    if (!world2D) {
-        label = "View: ";
-        label += viewport3DViewPreset_.has_value()
-                     ? viewportViewPresetName(*viewport3DViewPreset_)
-                     : "Custom";
-    }
+    std::string label = "View: ";
+    label += viewport3DViewPreset_.has_value()
+                 ? viewportViewPresetName(*viewport3DViewPreset_)
+                 : "Custom";
     if (auto status = tree.setText(viewportMode_, label); !status) {
         return status;
     }
-    return tree.setEnabled(viewportMode_, !world2D);
+    if (auto status = tree.setEnabled(viewportMode_, !world2D); !status) {
+        return status;
+    }
+    viewportModeLayout_.visibility = world2D ? UI::UIVisibility::Collapsed
+                                             : UI::UIVisibility::Visible;
+    return tree.setLayoutStyle(viewportMode_, viewportModeLayout_);
 }
 
 } // namespace Tina::EditorApp::WorkspaceInternal

@@ -5,29 +5,31 @@ CTest 测试。测试进程任一返回非0即失败。
 
 ## 基本规则
 
-1. 开发中的小功能或单一切片只构建最小受影响 target，并优先用 `--gtest_filter` 运行新增用例及其直接
+1. 先区分用户请求：只要求编译/构建/生成版本时属于所有平台通用的 `compile-only`，不得执行 GoogleTest、
+   CTest、sample、smoke、产品/视觉 gate，也不得启动编译产物；用户明确要求测试后才适用下列测试范围规则。
+2. 开发中的小功能或单一切片只构建最小受影响 target，并优先用 `--gtest_filter` 运行新增用例及其直接
    回归用例；存在精确 filter 时，不得默认运行整个 executable、完整产品 gate 或无关 backend 矩阵。
-2. 一个垂直切片功能闭环后，只扩大到该切片直接影响的 executable 和必要 sample smoke。多个连续小切片
+3. 一个垂直切片功能闭环后，只扩大到该切片直接影响的 executable 和必要 sample smoke。多个连续小切片
    命中同一测试图时，合并后集中扩大一次，不在每个提交上重复全套验证。
-3. 只有 Backlog 大功能/里程碑关闭、共享基础设施或跨模块公开契约变更、release candidate，以及明确要求
+4. 只有 Backlog 大功能/里程碑关闭、共享基础设施或跨模块公开契约变更、release candidate，以及明确要求
    生成正式产品证据时，才运行完整 executable 集、sanitizer、跨平台或完整产品 gate。
-4. Windows 多配置输出使用 `bin/Debug` 或 `bin/Release`，不能混用运行时 DLL。
-5. 同一 Visual Studio build tree 的 Debug/Release 构建串行执行。
-6. 日常门禁不使用 `--clean-first`，不删除 `out/build`。
-7. 测试数量是易变证据；架构状态不以固定数量定义。
-8. sample exit 0 只证明生命周期/结构化断言；画面正确必须另有 Visual 证据。
-9. sanitizer、真实 backend、字体和 accessibility 结果不能由 Null 单元测试替代。
-10. 多 worktree 开发先提交并合并功能分支，再在核心集成 worktree 的常驻 build tree 集中验证；不要在
+5. Windows 多配置输出使用 `bin/Debug` 或 `bin/Release`，不能混用运行时 DLL。
+6. 同一 Visual Studio build tree 的 Debug/Release 构建串行执行。
+7. 日常门禁不使用 `--clean-first`，不删除 `out/build`。
+8. 测试数量是易变证据；架构状态不以固定数量定义。
+9. sample exit 0 只证明生命周期/结构化断言；画面正确必须另有 Visual 证据。
+10. sanitizer、真实 backend、字体和 accessibility 结果不能由 Null 单元测试替代。
+11. 多 worktree 开发先提交并合并功能分支，再在核心集成 worktree 的常驻 build tree 集中验证；不要在
    每个功能 worktree 重复构建 bgfx、shaderc 或完整产品图。
-11. 不得跨 worktree 共用 `binaryDir`。Preset 路径基于 `${sourceDir}`，CMake cache 和生成项目绑定源码
+12. 不得跨 worktree 共用 `binaryDir`。Preset 路径基于 `${sourceDir}`，CMake cache 和生成项目绑定源码
    绝对路径；需要隔离验证时使用该 worktree 自己的临时 build tree。
-12. 同一提交/工作树的跨环境验证先构建一次，再用 source fingerprint + binary hash 复用产物；secondary
+13. 同一提交/工作树的跨环境验证先构建一次，再用 source fingerprint + binary hash 复用产物；secondary
    环境不得为了“确认编译”重复 configure/build/test。最后一个环境完成后回收专用 build tree、容器、
    helper/watchdog/窗口管理器和 agent，并在结果中记录资源状态。
-13. `compile-only` 与 test gate 严格分离：前者最多 configure/build 一次最小 target，且
+14. `compile-only` 与 test gate 严格分离：前者最多 configure/build 一次最小 target，且
     `testRuns=0`、`sampleRuns=0`；不得运行 GoogleTest、sample、smoke 或 visual/platform gate。相同
     source/toolchain/target 指纹已有成功结果时不重复编译。
-14. Linux compile-only、Docker/WSL、临时 worktree 和 gate 专用 build tree 默认是 ephemeral。取得退出码与首错
+15. Linux compile-only、Docker/WSL、临时 worktree 和 gate 专用 build tree 默认是 ephemeral。取得退出码与首错
     记录后，无论成功失败都回收，不能为了未来可能运行的测试保留数十 GiB 产物。收尾必须报告 tree 已不存在，
     且 compiler/helper/container/volume/agent 均归零；核心集成常驻 tree 和外部共享 `VCPKG_ROOT` 不在清理范围。
 
@@ -41,8 +43,9 @@ CTest 测试。测试进程任一返回非0即失败。
    configure、build、GoogleTest、CTest、sample、smoke、Visual 或平台 gate。
 2. 实施期间只进行源码/API 阅读、定向静态搜索、编译契约人工核对、`git status` 和 `git diff --check`；这些
    静态检查不产生编译通过、测试通过或产品 smoke 通过的结论。
-3. 大功能全部实现、交互与错误状态收口、文档同步完成后，复用核心常驻 build tree 集中执行一次受影响
-   Editor target 的增量 build、仓库已有的定向 Editor executable，以及该功能确实需要的最短 2D/3D smoke。
+3. 大功能全部实现、交互与错误状态收口、文档同步完成后，在用户授权 test gate 时复用核心常驻 build tree 集中
+   执行一次受影响 Editor target 的增量 build、仓库已有的定向 Editor executable，以及该功能确实需要的最短
+   2D/3D smoke；若用户只要求编译给其手动测试，则只 build 并交付 `TinaEditor.exe`，不得执行任何产物。
 4. 统一 gate 发现问题时，先完成同批问题修复，再只重跑失败项或直接受影响项；不得在每个修复点后重新执行
    整套 gate。完整 UI/Runtime/product/cross-platform 矩阵只用于 Editor 里程碑、release candidate 或明确要求的
    正式产品证据。
@@ -52,12 +55,13 @@ Editor 功能完成不以新增测试数量为条件。下文的 Editor 构建�
 
 ## Compile-only 结果口径
 
-Linux compile-only 的通过条件只有“指定最小 target 编译 exit 0”。它不产生测试通过、sample 生命周期、真实
+所有平台 compile-only 的通过条件都只有“指定最小 target 编译 exit 0”。它不产生测试通过、sample 生命周期、真实
 backend、sanitizer 或视觉结论；报告中不得出现相应的 passed 表述。需要这些结论时另开 test gate，优先复用
 同一 source fingerprint 与 binary hash，直接运行对应 executable，不再次 configure/build。
 
 | 请求类型 | configure/build | GoogleTest / sample | 临时资源生命周期 |
 | --- | --- | --- | --- |
+| Windows/Editor 编译给用户手动测试 | 常驻 build tree 中只构建指定 target | 一律不运行，也不启动 `TinaEditor.exe` | 保留核心常驻 tree；报告产物与进程状态 |
 | 仅验证 Linux 编译 | 每个 source/toolchain/target tuple 最多各一次 | 一律不运行，`testRuns=0 sampleRuns=0` | 记录编译结果或首错后立即回收 |
 | 同一轮 Linux 编译 + test gate | 只在 primary 构建一次 | 直接复用刚生成且 hash 匹配的 binary，各运行一次 | 最后一个 gate 结束后立即回收 |
 | secondary helper/container 验证 | 不 configure、不 build | 不重复 GoogleTest/workspace smoke，只运行该环境独有的 helper probe | probe 结束后回收该环境及共享临时 tree |
@@ -1141,7 +1145,7 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\TinaEditor.exe `
 `viewportLayoutReady=true`、`inspectorScrollConfigured=true`、`renderExtractions=frames`、
 2D `gpuViewportSprites=13`（1 World Sprite + 12 Tile sprites）、3D `gpuViewportMeshes=3`、`gpuViewportReady=true`、
 `gpuViewportDocumentRevision=documentRevision`，以及非空 logical rect、位于 `[0,1]` 内的 normalized viewport 和
-`uiRootsCreated=1` / `uiRootsReleased=1`。built-in Catalog 还固定检查 entry/load=`9/7`、Texture/Mesh upload=`1/1`、
+`uiRootsCreated=1` / `uiRootsReleased=1`。auto-demo test fixture Catalog 还固定检查 entry/load=`9/7`、Texture/Mesh upload=`1/1`、
 Sprite/Mesh/Material binding=`1/1/1`、unresolved=`0`、resolved 2D/3D=`1/3`，以及 TileMap
 layer/chunk/cell/artifact/emitted=`2/2/12/3/12`、Animation revision/frame/cook=`4/4/256 B` 和 cook bytes 非零。
 Project Browser/tabs 还要求 ready=`true/true`、visible assets 非零；自动演示从 4 个 pinned tab 打开一个额外 Animation，
@@ -1150,7 +1154,8 @@ Project Browser/tabs 还要求 ready=`true/true`、visible assets 非零；自�
 `editorActionsReady=true`；2D 自动路径还要求 gameplay generation/records/bytes 非零、source revision 非零，3D
 对应四字段全为零；viewport 使用上一轮 committed
 layout，所以首帧不提交 world，窗口尺寸改变后下一帧跟随新 rect。
-不带 `--auto-demo` 就是默认人工操作模式；本切片不扩大到完整 product-2d gate。
+不带 `--auto-demo` 就是默认人工操作模式；未打开项目时必须报告 `testFixtureCatalog=false` 且 Catalog
+entry/load/GPU/resolved 计数全为零。本切片不扩大到完整 product-2d gate。
 自动交互 smoke 必须消费 2D pan/anchored zoom 与 3D orbit/pan/dolly，且两个 workspace 都至少形成一个 navigation batch。
 Translate/Rotate/Scale Gizmo 各 commit 一次，cancel/reject 为零；Rotate/Scale 各自必须是实际 multi-target commit，
 `viewportMaximumGizmoTargets >= 2`，不能只依据 selection count。Translate delta、rotation degrees 和 scale factors
@@ -1210,7 +1215,7 @@ child 已 reaped。primary 成功暂时报告 `resource_build_tree=retained-for-
 不得启动第二套编译；保留的专用 tree 只用于首错诊断，完成重试或记录后定向删除。
 Windows Project `New` 人工门禁选择一个空目录，要求生成 `Source/`、`Catalog/` 和零 entry current-schema manifest；随后
 用 `openCatalogPackage()` 的 typed validation 重新打开成功，并在下一安全帧报告 `projectSwitches=1`、
-`projectCatalogConfigured=true`、`builtInPreviewCatalog=false`，active Catalog root 指向新项目，空 Browser 与无资源 preview
+`projectCatalogConfigured=true`、`testFixtureCatalog=false`，active Catalog root 指向新项目，空 Browser 与无资源 preview
 仍保持有效。随后 Project `Open` 选择同一 root，应再次安全切换；选择缺少 Source/Catalog、含 reparse/junction 或无效
 current-schema manifest 的 root 必须保留旧 Catalog、Browser 与 preview。另需先打开并修改一个 Catalog document，确认
 New/Open 被阻止且旧状态不变；保存或丢弃后重试，确认动态 Catalog tab 被关闭、固定 TileMap/Animation tab 从已提交
@@ -1247,6 +1252,10 @@ intended/total unit=`2/2`、`sourceImportStateCommitted=true`、Running/Ready=fa
 `--import-on-start` reopen，要求恢复该 stage 及完整 intended unit 集，而不是退回固定 `Catalog/`。这是一轮大功能定向验收，
 不要求同时运行全量 UI、Runtime 或 product-2d gate。另需覆盖 Source 外选择、缺失物理文件和 cooker 首错，确认均保留旧
 Catalog，且有限帧 JSON 返回真实错误而不是 lifecycle 通用失败。
+真实资源人工验收必须从普通模式 New/Open Project 开始，不使用 `--auto-demo`：把 `.png`/`.jpg`/`.jpeg` 放入
+项目 `Source/` 后用 Import Source，确认 Catalog 出现 Texture2D + Sprite，并可把 Sprite 用于 2D 文档预览；再导入
+`.gltf`/`.glb`，确认 Mesh/Material/Prefab 出现在 Browser 且 3D 文档能解析并绘制对应资源。导入失败时旧 Catalog、
+Browser 和 preview 必须保持不变，且不能显示 test fixture 的纹理或 Cube 作为回退。
 Core 的目录替换失败回归保留在 `WriteFileTests.FailedAtomicReplacePreservesExistingTargetDirectory`；当前
 `tina_tests` 是 Core + Runtime monolithic target，小型 Editor 切片不为单个 filter 重编全部对象，留到大功能统一 gate。
 

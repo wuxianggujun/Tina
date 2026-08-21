@@ -7,7 +7,7 @@
 ## 模块边界
 
 ```text
-authoring source / recipe / glTF
+authoring source / recipe / glTF / image / audio
   -> tina_assetc 或 Asset Cooker API
   -> CatalogCookRequest
   -> fresh-stage full validation or manifest-last package publish
@@ -48,9 +48,9 @@ Catalog package
 | 异步加载 | 有界 request queue；IO Task 读取；owner-thread Main completion 解析并发布 |
 | GPU 生命周期 | Null `UploadTicket` 状态机；Texture/Mesh/EnvironmentMap backend retirement marker；AssetLease pin 与 retirement ledger |
 | 产品路径 | Texture2D/Sprite/SpriteAnimationClip/TileMap root/TileMapChunk/NavigationGrid2D/Fx2D 2D、StaticMesh/SkinnedMesh/AnimationClip3D/Material/Prefab/EnvironmentMap 3D、AudioClip 均有 Cooked typed validation；`SkinnedMeshRenderer3D`/`Animator3D` CPU pose、packet-local palette 与 bgfx GPU skinning 已于2026-08-14通过 schema 15 集中产品 gate；独立 Blend Material + 双 static witness 的 Transparent3D 已于2026-08-15通过 schema 16 集中 gate，并证明第4个 Material 在透明 on/off 下均完成 load/bind/retire |
-| Editor viewport | `TinaEditor.exe --catalog-root=<UTF-8 path>` 通过真实 AssetSystem + Sprite/Tileset/Mesh registry 解析同一 World2D/TileMap/Prefab/SpriteAnimationClip 文档中的 AssetId；未配置时仅使用明确标记的临时 built-in preview Catalog |
+| Editor viewport | `TinaEditor.exe --catalog-root=<UTF-8 path>` 通过真实 AssetSystem + Sprite/Tileset/Mesh registry 解析同一 World2D/TileMap/Prefab/SpriteAnimationClip 文档中的 AssetId；普通无项目启动使用零 entry session Catalog，只有 `--auto-demo` 使用明确标记的 test fixture Catalog |
 | Editor Project Browser | 拥有 Catalog metadata、canonical cooked 相对路径与完整 dependency records 的 AssetId 排序索引，All/2D/3D/Media 过滤并按 current schema 打开 Prefab/TileMap/SpriteAnimationClip；其他 kind 进入资源 Inspector |
-| Editor source import | `--project-root` + 可重复混合 `--import-recipe`/`--import-gltf` 保留完整 intended unit 集；后台共享 pipeline 生成 fully validated fresh stage + sibling state，主线程安全帧 reload 后只提交 active pointer，reopen 验证并恢复 Catalog 与 unit 集 |
+| Editor source import | `--project-root` + 可重复混合 `--import-recipe`/`--import-gltf`/`--import-texture`/`--import-audio` 保留完整 intended unit 集；后台共享 pipeline 生成 fully validated fresh stage + sibling state，主线程安全帧 reload 后只提交 active pointer，reopen 验证并恢复 Catalog 与 unit 集 |
 | TileMap 导航派生 | `buildTileMapNavigation2DData()` 从 resident solid tile layer、exact material-cost rule 与 property-tagged visible Rectangle 原子生成 immutable `NavigationGrid2DData`；`NavigationGrid2D` v1 可作为独立 Cooked AssetKind 保存同一 flags/cost 数据 |
 
 `AssetHandle.hpp` 被拆为窄 `Tina::AssetTypes` 公共面。2D World 的 `SpriteRenderer2D`、standalone
@@ -74,7 +74,9 @@ Mesh Lease/GPU/binding、Material Lease/binding 与按 AssetId 去重的共享 T
 canonical World2D/TileMap/Prefab/SpriteAnimationClip 收集并去重 Sprite、Tileset、StaticMesh 与 Material 根引用，`AssetSystem::load()` 后由 registry
 取得依赖 Lease、上传 Texture2D/StaticMesh 并注册 binding。Scene 仅保存 weak Handle，Render item 仅保存当前 packet
 的 `FrameResourceRef`。项目 Catalog 中 unresolved/wrong-kind 引用 fail closed：只过滤对应 preview component，document、
-history 与持久化 AssetId 不变。内建 Catalog 是未指定项目路径时的临时预览 fixture，退出时连同临时 package 一并释放。
+history 与持久化 AssetId 不变。普通无项目启动发布零 entry session Catalog；只有显式 `--auto-demo` 创建测试资源
+fixture，退出时连同临时 package 一并释放。真实用户资源只能通过项目 Source Import 或显式项目 Catalog 进入 preview，
+不能从测试 fixture 回退或混入。
 Project Browser 复制 Catalog identity/kind/version/dependency count/file size/display label、由 kind+AssetId 派生的 canonical
 cooked 相对路径和全部 dependency records，不借用 CatalogSnapshot entry。Project Asset 虚拟列表使用固定 32 px 行高；
 Asset Inspector 按 active Inspector tab 的 AssetId 取得 owning snapshot，并用固定 36 px 行高虚拟 dependency list 显示 kind、

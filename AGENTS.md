@@ -38,6 +38,17 @@ Tina 是 C++23 游戏 Runtime。产品路径为 vNext Desktop + samples；Legacy
 
 ## 构建与测试（禁止 clean-first 全量 wipe）
 
+### 用户请求授权边界（优先于默认验证流程）
+
+- “编译”“构建”“生成版本”“给我编译版本”默认都是 **compile-only**：只允许必要的 configure 和指定 target
+  build，不得运行 GoogleTest、CTest、sample、smoke、产品 gate、视觉 gate，也不得启动刚生成的可执行文件。
+- 用户说“我手动测试”“编译给我看看”时，交付可执行文件路径后立即停止；不得以“验证编译版本”为由代替用户
+  启动程序。只有用户明确要求“运行”时才可启动对应程序，明确要求“测试/smoke/gate”时才可运行对应自动门禁。
+- “编译并运行”只授权 build + 启动用户指定程序，不自动授权 GoogleTest、smoke 或其他 gate；“编译并测试”才
+  授权 build + 明确相关测试。授权范围不从“大功能闭环”“完成验证”或下方示例命令中隐式扩大。
+- compile-only 的结果只报告编译 target、退出码、产物路径/时间和残留进程；不得报告“测试通过”。如编译成功，
+  必须直接把 `TinaEditor.exe` 等产物交给用户人工测试真实交互与真实导入流程。
+
 ```powershell
 cmake --preset windows-msvc-vnext-bgfx
 cmake --build --preset windows-vnext-bgfx-debug --target tina_sample_2d tina_sample_3d tina_tests --parallel 2 -- /nr:false
@@ -51,7 +62,8 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --fra
   或产品 gate；此阶段只做源码/API 阅读、定向静态搜索、`git status` 与 `git diff --check`。
 - Editor 大功能或里程碑全部实现并完成文档同步后，才复用常驻 build tree 集中执行一次受影响 target 的增量
   build、已有 Editor test executable 和必要的 2D/3D 短 smoke。统一 gate 发现问题时先集中修复，再只重跑失败
-  或直接受影响项；禁止退化为每修一个小细节就构建或测试。Editor 功能验收不要求补测试代码。
+  或直接受影响项；禁止退化为每修一个小细节就构建或测试。该默认统一 gate 仅在用户没有把请求限定为
+  compile-only 时适用；用户要求手动测试时只 build。Editor 功能验收不要求补测试代码。
 - FreeType 字体：`-DTINA_UI_FONT_PATH=...` 或环境变量 `TINA_UI_FONT_PATH`（见 `cmake/TinaUiFont.cmake`）。
 - 不要提交 `.agents/`、`.tmp_*`；用户未要求不要提交 `AGENTS.md`。
 - 多 worktree 默认先在功能分支完成编码并提交，再合并到核心集成 worktree，最后复用核心 worktree 的
@@ -89,8 +101,9 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --fra
 1. `git status` / `git diff --check`
 2. 非 Editor 改动构建最小受影响 target；Editor 小切片在大功能闭环前到第1步即止，不新增/修改/运行测试，
    也不运行 build 或 smoke
-3. Editor 大功能/里程碑闭环后才统一增量构建并运行一次已有定向 gate；只有 test gate 才直接运行 GoogleTest，
+3. 先按用户授权区分 compile-only、run 与 test gate；compile-only 到成功 build 和产物交付即止。只有明确 test gate
+   才直接运行 GoogleTest；Editor 大功能/里程碑闭环后的默认统一 gate 不覆盖用户明确限定的 compile-only，
    Linux `compile-only` 必须保持
    `testRuns=0 sampleRuns=0`
-4. 相关 sample 短 smoke
+4. 只有明确授权 smoke/gate 时才运行相关 sample 短 smoke
 5. 公开头无第三方泄漏

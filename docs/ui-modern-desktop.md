@@ -534,6 +534,8 @@ Root Surface(background), Column
 
 三个嵌套 SplitView 足以表达左 Dock、中央 Viewport、右 Inspector 和底部 Timeline，不需要引入 Desktop 专用
 Dock Runtime。应用状态只保存 pane fraction、active tab 和 collapsed intent；UI 仍发布唯一 committed geometry。
+显式收起必须同时将 pane/splitter 设为 `Collapsed` 并把 fraction 落到对应边界（primary 为 `0`、secondary 为
+`1`），否则隐藏内容仍会占用布局空间。恢复时重新发布完整 layout 并还原收起前的 fraction。
 
 ### 默认尺寸
 
@@ -560,12 +562,15 @@ ellipsis。这样动态 authoring 文案不会改变播放、添加、复制、�
 TinaEditor 使用私有 `EditorToolbarGroup` 把紧凑 icon command 聚成一个低层级 surface，并通过 90 ms
 BackgroundColor transition 提供 hover 状态；`EditorIconButton`/`EditorIconToggleButton` 仍复用公共 Button、Radio、
 Tooltip 和 Image atlas 链。该私有 recipe 不增加公共 Widget kind，也不要求旧文字工具条兼容。
-TinaEditor 的主 Command Bar 不承载 document path 或 2D/3D workspace switch；grow spacer 直接保护右侧
-play/history/save controls。路径由 document session 持有，Save As 使用平台 dialog；workspace 切换只由 Document Tab 表达。
+TinaEditor 的主 Command Bar 不承载 document path 或产品名，中央只保留 2D/3D workspace selector；等宽 grow region
+保护右侧 play/history/save controls。路径由 document session 持有，Save As 使用平台 dialog；Document Tab strip
+只在用户实际打开外部 scene/Catalog document 时出现。
 
 ### Dock 与 Inspector
 
 - Dock 是全高 surface band，不是浮动 card。
+- 左右 Dock Header 提供向外收起的 IconButton；`View` 菜单提供可勾选入口，确保隐藏后仍可恢复。
+- `Help > About Tina Editor` 打开单动作 Modal Dialog，关闭后恢复 Help anchor focus。
 - Section header 使用 Section/Control typography，支持 collapse 时才提供 disclosure Button。
 - 属性行建议使用 `minmax(label, control)` 两列；Label 左对齐，Control stretch，错误/helper 放在下一行。
 - 大量条目使用 ListView/TreeView 虚拟化；不为每行创建独立 card。
@@ -595,7 +600,12 @@ Document；Scene 无 entity selection 时退化为 Identity + Document。实现�
 - Viewport 是第一视觉信号，占用最大剩余区域，背景使用 `Sunken`。
 - Overlay 工具、gizmo、marquee 继续使用现有 Canvas/Line/Ellipse/Image 和 Ignore hit 子节点；真实交互由 viewport
   route owner 处理。
-- Zoom、grid、camera 信息集中在 Context Toolbar 或 footer，不能覆盖场景关键区域。
+- 右上角 orientation control 使用 Tina 自身世界坐标：2D 为无底盘的紧凑 X/Y 罗盘，3D 为带球面层、
+  高光、经纬线和深度衰减轴的球形 X/Y/Z View Gizmo。完整控件区域建立 Pointer barrier，不能把空白处的输入
+  穿透给 viewport；3D 正轴端点使用标准 Button 行为切换
+  `Right` / `Top` / `Front` 视图，2D 保持固定 Orthographic 方向反馈。
+- Viewport 不发布 footer；Grid、Catalog、camera 的正常状态不常驻显示，tool mode 由 toolbar 选中态表达，缩放由
+  视口滚轮完成，不重复提供按钮、Slider 或常驻百分比。
 
 ### 响应规则
 
@@ -842,7 +852,8 @@ Showcase 通过后才迁移 EditorApp，避免把视觉 foundation 调试和复�
 Dark/Light x density 证据，Shell 证明真实工作流。它是本文推荐树结构的第一个消费者，也是
 SplitView 的第一个产品消费者。
 
-一棵 retained root，五个 band（Command Bar、Document Tabs、Context Toolbar、Workspace、Status Bar），
+一棵 retained root，四个常驻 band（Command Bar、Workspace、Status Bar，加上 Workspace 内的 Viewport Context Toolbar），
+外部文档存在时才插入 Document Tabs；
 Workspace 由三个嵌套 SplitView 组成：A 为 `左 Dock | main`，B 为 `center | Inspector`，C 为
 `Viewport | Timeline`。每个 pane 都是普通 Element 子树，没有 Dock Runtime，也没有第二棵 UI 树。
 
@@ -911,12 +922,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
 `UITheme.controls`、`UITheme.spacing` 和 `UITheme.typography`。本轮只改 authoring/metrics 层，Render、Asset、
 Scene 和资源生命周期不变；Dark/Light 60 帧产品 smoke 均通过。EditorApp 源码现已固定使用
 `makeModernDesktopTheme(Dark, Compact)`，Theme 在 `createRoot()` 前绑定；根 band 顺序为 Command Bar、
-Document Tabs、Workspace、Status Bar，Workspace 使用三层嵌套 SplitView 表达
+按需出现的 Document Tabs、Workspace、Status Bar，Workspace 使用三层嵌套 SplitView 表达
 `Left Dock | Main`、`Center | Inspector`、`Viewport | Timeline`。Editor 的 Button/TextEdit/Tab、List/Tree
 行高、Splitter、Status Bar、spacing/padding 均读取 Theme metrics，旧的局部 surface ColorToken、StyleClass
-及自动换色路径已删除。Command Bar 只保留运行、历史与保存命令；固定 Document Tab 是 workspace/document
-的唯一切换入口，槽为空时为 `Collapsed`，refresh 会重设完整 layout 并恢复重新占用槽的 `Visible`。Viewport 只保留
-一组 transform/snap/marquee/frame tools；Project Assets 使用 120 logical px 最小格宽的紧凑 virtual grid，以
+及自动换色路径已删除。Left Dock/Inspector 可从 Header 收起并由 `View` 菜单恢复，底部面板关闭时同步释放
+SplitView fraction；三者恢复时保留最后拖拽尺寸。Command Bar 移除产品名，并在同一行放置菜单、中央 workspace selector、
+历史/保存和运行命令；Document Tab 只承载外部 document，全部槽为空时整个 strip 为 `Collapsed`。Viewport 把
+Scene/TileMap context 与 transform/snap/marquee/frame/view tools 合并为一行，画布只保留一条状态 footer；Project Assets 使用
+120 logical px 最小格宽的紧凑 virtual grid，以
 `AssetKind #abcd` 保持类型优先的扫描层级，完整 AssetId 留在固定 22 logical px selected summary 与 Inspector；summary
 在窄 Dock 仅做 ellipsis，不改变 retained 文本或后续布局。Project Open 使用 FolderOpen，打开当前 Asset 使用
 divider 后的 ArrowRight。空 Source Imports 整段折叠；Inspector

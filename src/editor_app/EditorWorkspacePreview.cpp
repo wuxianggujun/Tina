@@ -428,7 +428,7 @@ auto EditorWorkspaceState::preparePreviewAssetBindings() -> Tina::Core::Status{
 
     counters_.catalogReady = true;
     counters_.projectCatalogConfigured = assetResources_.projectCatalogConfigured;
-    counters_.builtInPreviewCatalog = assetResources_.builtInPreviewCatalog;
+    counters_.testFixtureCatalog = assetResources_.testFixtureCatalog;
     counters_.catalogEntryCount = assetResources_.catalogEntryCount;
     return Tina::Core::success();
 }
@@ -1026,7 +1026,9 @@ auto EditorWorkspaceState::publishRuntimePreviewStatus(
     statusPreview += "  |  Cook ";
     statusPreview += std::to_string(activeDocumentCanonicalByteCount());
     statusPreview += " B  |  Catalog ";
-    statusPreview += assetResources_.projectCatalogConfigured ? "project" : "built-in";
+    statusPreview += assetResources_.projectCatalogConfigured
+                         ? "project"
+                         : (assetResources_.testFixtureCatalog ? "test fixture" : "empty");
     statusPreview += "  |  Resolved ";
     statusPreview += std::to_string(workspaceMode_ == WorkspaceMode::World2D
                                         ? previewResolvedSpriteCount_

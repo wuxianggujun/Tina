@@ -18,7 +18,11 @@ auto EditorWorkspaceState::refreshProjectAssetUi(
         const auto idText = asset->assetId.canonicalText();
         selectedAssetSummary.append(idText.data(), idText.size());
     } else {
-        selectedAssetSummary = "No assets match this filter";
+        selectedAssetSummary = assetResources_.projectCatalogConfigured
+                                   ? "No assets match this filter"
+                                   : (assetResources_.testFixtureCatalog
+                                          ? "No test assets match this filter"
+                                          : "No project assets");
     }
     if (auto status = tree.setText(projectAssetSummary_, selectedAssetSummary);
         !status) {
@@ -26,7 +30,9 @@ auto EditorWorkspaceState::refreshProjectAssetUi(
     }
     if (auto status = tree.setText(
             projectAssetSource_,
-            assetResources_.projectCatalogConfigured ? "Project" : "Preview");
+            assetResources_.projectCatalogConfigured
+                ? "Project"
+                : (assetResources_.testFixtureCatalog ? "Test Data" : "No Project"));
         !status) {
         return status;
     }
@@ -434,10 +440,10 @@ auto EditorWorkspaceState::switchLiveProjectCatalog(
     assetResources_.catalogEntryCount =
         static_cast<u32>(candidateBrowser->itemCount());
     assetResources_.projectCatalogConfigured = true;
-    assetResources_.builtInPreviewCatalog = false;
+    assetResources_.testFixtureCatalog = false;
     counters_.catalogEntryCount = assetResources_.catalogEntryCount;
     counters_.projectCatalogConfigured = true;
-    counters_.builtInPreviewCatalog = false;
+    counters_.testFixtureCatalog = false;
     if (auto status = rebuildLiveCatalogPreview(std::move(successFeedback)); !status) {
         return status;
     }
@@ -500,16 +506,8 @@ auto EditorWorkspaceState::createNewProjectFromDialog() -> Tina::Core::Status{
         }
     }
 
-    auto emptyManifest = Tina::AssetFormat::writeCookedManifestBytes({
-        .targetPlatform = workspace->targetPlatform(),
-    });
-    if (!emptyManifest) {
-        return Tina::Core::failure(std::move(emptyManifest.error()));
-    }
-    if (auto status = Tina::Asset::publishCatalogPackage(
-            workspace->cookedCatalogRootUtf8(),
-            Tina::Asset::DefaultCatalogManifestRelativePath,
-            *emptyManifest, {}, {.writeObjects = false});
+    if (auto status = publishEmptyEditorCatalog(
+            workspace->cookedCatalogRootUtf8(), workspace->targetPlatform());
         !status) {
         try {
             authoringFeedback_ =

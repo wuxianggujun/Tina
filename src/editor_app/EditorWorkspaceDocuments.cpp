@@ -12,13 +12,15 @@ auto EditorWorkspaceState::refreshDocumentTabsUi(
         return Tina::Core::failure(std::move(productTheme.error()));
     }
     u32 selectedIndex = static_cast<u32>(documentTabs_.activeIndex());
+    bool hasExternalDocumentTab = false;
     if (const auto* active = documentTabs_.activeTab();
-        active != nullptr && isContextOnlyDocumentTab(*active)) {
+        active != nullptr && isWorkspaceContextDocumentTab(*active)) {
         selectedIndex = 0U;
     }
     for (u32 index = 0; index < documentTabButtons_.size(); ++index) {
         const auto* tab = documentTabs_.tab(index);
-        const bool visible = tab != nullptr && !isContextOnlyDocumentTab(*tab);
+        const bool visible = tab != nullptr && !isWorkspaceContextDocumentTab(*tab);
+        hasExternalDocumentTab = hasExternalDocumentTab || visible;
         std::string title = tab != nullptr ? tab->title : std::string{};
         if (tab != nullptr && tab->dirty) {
             title += " *";
@@ -43,9 +45,26 @@ auto EditorWorkspaceState::refreshDocumentTabsUi(
             return status;
         }
     }
+    documentTabsBarLayout_.visibility = hasExternalDocumentTab
+                                            ? UI::UIVisibility::Visible
+                                            : UI::UIVisibility::Collapsed;
+    if (auto status = tree.setLayoutStyle(
+            documentTabsBar_, documentTabsBarLayout_);
+        !status) {
+        return status;
+    }
     const auto* active = documentTabs_.activeTab();
-    if (auto status = tree.setEnabled(closeDocumentButton_,
-                                      active != nullptr && !active->pinned);
+    const bool closeVisible = active != nullptr && !active->pinned &&
+                              !isWorkspaceContextDocumentTab(*active);
+    closeDocumentButtonLayout_.visibility = closeVisible
+                                                ? UI::UIVisibility::Visible
+                                                : UI::UIVisibility::Collapsed;
+    if (auto status = tree.setLayoutStyle(
+            closeDocumentButtonRoot_, closeDocumentButtonLayout_);
+        !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(closeDocumentButton_, closeVisible);
         !status) {
         return status;
     }

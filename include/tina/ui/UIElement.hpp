@@ -156,7 +156,7 @@ struct UIElementDescriptor final {
     return UIElementDescriptor{
         .layout = layout,
         .splitter = config,
-        .visual = {.styleRole = UIStyleRoleId::PanelSurface},
+        .visual = {.styleRole = UIStyleRoleId::Splitter},
         .behaviors = UIElementBehavior::Focusable | UIElementBehavior::RangeInput,
         .semantics = {
             .mode = UISemanticsMode::Publish,

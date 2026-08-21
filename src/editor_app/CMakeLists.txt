@@ -93,6 +93,10 @@ set_target_properties(tina_editor_desktop PROPERTIES
 )
 
 if(WIN32)
+    set_target_properties(tina_editor_desktop PROPERTIES
+        WIN32_EXECUTABLE TRUE
+    )
+    target_link_libraries(tina_editor_desktop PRIVATE shell32)
     add_custom_command(TARGET tina_editor_desktop POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             $<TARGET_RUNTIME_DLLS:tina_editor_desktop>

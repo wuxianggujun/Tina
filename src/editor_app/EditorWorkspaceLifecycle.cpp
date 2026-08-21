@@ -79,6 +79,9 @@ auto EditorWorkspaceState::onExit(Tina::GameStateExitContext&) noexcept -> void{
     for (auto& listener : viewportPointerListeners_) {
         listener.reset();
     }
+    for (auto& listener : viewportOrientationCompassPointerBarrierListeners_) {
+        listener.reset();
+    }
     viewportNormalized_.reset();
     previewBindings_.clear();
     preview3DBindings_.clear();
@@ -764,6 +767,20 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
             return status;
         }
         pendingSceneDeleteDialogFocus_ = false;
+    } else if (pendingAboutDialogFocus_) {
+        if (auto status = tree->requestFocus(
+                aboutDialog_.actions[AboutCloseActionIndex]);
+            !status) {
+            return status;
+        }
+        pendingAboutDialogFocus_ = false;
+    } else if (pendingAboutDialogFocusRestore_) {
+        if (auto status = tree->requestFocus(
+                mainMenuAnchors_[HelpMainMenuIndex]);
+            !status) {
+            return status;
+        }
+        pendingAboutDialogFocusRestore_ = false;
     } else if (pendingHierarchyFocusRestore_) {
         if (auto status = tree->requestFocus(hierarchyTree_); !status) {
             return status;
@@ -783,12 +800,6 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
             return status;
         }
     }
-    if (pendingViewportSliderValue_.has_value()) {
-        const float value = std::exchange(pendingViewportSliderValue_, std::nullopt).value();
-        if (auto status = tree->setSliderValue(zoomSlider_, value); !status) {
-            return status;
-        }
-    }
     if (auto status = updateGpuViewport(*tree); !status) {
         return status;
     }
@@ -801,6 +812,9 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
         }
     }
     if (auto status = updateViewportGrid(*tree); !status) {
+        return status;
+    }
+    if (auto status = updateViewportOrientationCompass(*tree); !status) {
         return status;
     }
     if (auto status = updateViewportTransformGizmo(*tree); !status) {
@@ -1140,6 +1154,9 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
         return Tina::Core::failure(std::move(metrics.error()));
     }
     counters_.hierarchyLogicalItems = metrics->logicalItemCount;
+    if (auto status = refreshWorkspacePanelsUi(*tree); !status) {
+        return status;
+    }
     return updateSnackbarUi(*tree);
 }
 

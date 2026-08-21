@@ -159,6 +159,8 @@ class EditorApplication final : public Tina::IGameApplication {
         !options.catalogRootUtf8.empty() ||
         !options.sourceImport.projectRootUtf8.empty() ||
         counters.projectSwitches != 0U;
+    const bool emptySessionCatalog =
+        !options.autoDemo && !projectCatalogConfigured;
     const bool documentPathConfigured = world2D ? world2DPathConfigured
                                                 : world3DPathConfigured;
     const bool activeDocumentLoaded = world2D ? counters.world2DDocumentLoaded
@@ -249,7 +251,7 @@ class EditorApplication final : public Tina::IGameApplication {
                      : !counters.viewportGrid3DObserved) ||
             !counters.inspectorScrollConfigured || !counters.projectAssetBrowserReady ||
             !counters.documentTabsReady || counters.documentTabCount == 0U ||
-            counters.projectAssetVisibleItems == 0U || !counters.catalogReady ||
+            !counters.catalogReady ||
             counters.documentPathConfigured != documentPathConfigured ||
             counters.documentLoaded != activeDocumentLoaded ||
             counters.documentDirty != activeDocumentDirty ||
@@ -259,6 +261,15 @@ class EditorApplication final : public Tina::IGameApplication {
                                     activeDocumentDirty, activeSavedSnapshotBytes) ||
             counters.finalWorkspaceWorld2D != world2D ||
             counters.projectCatalogConfigured != projectCatalogConfigured ||
+            counters.testFixtureCatalog ||
+            (emptySessionCatalog &&
+             (counters.catalogEntryCount != 0U ||
+              counters.projectAssetVisibleItems != 0U ||
+              counters.catalogAssetsLoaded != 0U ||
+              counters.catalogGpuTextures != 0U ||
+              counters.catalogGpuMeshes != 0U ||
+              counters.catalogResolved2DSprites != 0U ||
+              counters.catalogResolved3DMeshes != 0U)) ||
             counters.runtimePreviewInstantiations == 0U ||
             counters.renderExtractions != counters.frameUpdates ||
             (world2D ? !counters.world2DWorkspaceReady
@@ -266,7 +277,7 @@ class EditorApplication final : public Tina::IGameApplication {
             !viewportBoundsValid || !selectedTransformFinite ||
             counters.documentRevision == 0U ||
             counters.gpuViewportDocumentRevision != counters.documentRevision ||
-            counters.documentEntityCount == 0U || counters.cookPreviewBytes == 0U ||
+            counters.cookPreviewBytes == 0U ||
             !sourceImportFinished) {
             return Tina::Core::failure(
                 Tina::Core::CoreErrorCode::Internal,
@@ -309,7 +320,8 @@ class EditorApplication final : public Tina::IGameApplication {
         counters.world3DDocumentPathConfigured != world3DPathConfigured ||
         !counters.catalogReady ||
         counters.projectCatalogConfigured != projectCatalogConfigured ||
-        counters.builtInPreviewCatalog == projectCatalogConfigured ||
+        counters.testFixtureCatalog !=
+            (options.autoDemo && !projectCatalogConfigured) ||
         counters.runtimePreviewInstantiations < 1 ||
         counters.renderExtractions != counters.frameUpdates ||
         (options.targetFrameCount > 1 &&
@@ -354,7 +366,7 @@ class EditorApplication final : public Tina::IGameApplication {
             Tina::Core::CoreErrorCode::Internal,
             "Tina Editor startup source import did not complete and commit state");
     }
-    if (!projectCatalogConfigured && counters.projectSwitches == 0U &&
+    if (counters.testFixtureCatalog &&
         (counters.catalogEntryCount != 9U + counters.navigationCatalogPublishes ||
          counters.catalogAssetsLoaded != 7 ||
          counters.catalogGpuTextures != 1 || counters.catalogGpuMeshes != 1 ||
@@ -373,7 +385,7 @@ class EditorApplication final : public Tina::IGameApplication {
            counters.animationCookPreviewBytes == 0 ||
            counters.animationPreviewFrameIndex >= counters.animationFrameCount)) ||
          (!world2D && counters.catalogResolved3DMeshes != GpuViewportMeshCount))) {
-        std::string message = "Tina Editor built-in Catalog counters mismatch: entries=";
+        std::string message = "Tina Editor auto-demo fixture Catalog counters mismatch: entries=";
         message += std::to_string(counters.catalogEntryCount);
         message += ", loaded=";
         message += std::to_string(counters.catalogAssetsLoaded);
@@ -772,8 +784,8 @@ class EditorApplication final : public Tina::IGameApplication {
               << ",\"catalogReady\":" << (counters.catalogReady ? "true" : "false")
               << ",\"projectCatalogConfigured\":"
               << (counters.projectCatalogConfigured ? "true" : "false")
-              << ",\"builtInPreviewCatalog\":"
-              << (counters.builtInPreviewCatalog ? "true" : "false")
+              << ",\"testFixtureCatalog\":"
+              << (counters.testFixtureCatalog ? "true" : "false")
               << ",\"projectSwitches\":" << counters.projectSwitches
               << ",\"sourceImportStarts\":" << counters.sourceImportStarts
               << ",\"sourceImportCompletions\":" << counters.sourceImportCompletions

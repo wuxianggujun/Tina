@@ -3,9 +3,6 @@
 namespace Tina::EditorApp::WorkspaceInternal {
 namespace {
 
-inline constexpr float LeftDockInitialFraction = 0.22F;
-inline constexpr float MainCenterInitialFraction = 0.68F;
-inline constexpr float ViewportInitialFraction = 0.68F;
 inline constexpr float LeftDockMinWidth = 200.0F;
 inline constexpr float ViewportMinWidth = 480.0F;
 inline constexpr float InspectorMinWidth = 280.0F;
@@ -55,6 +52,8 @@ inline constexpr u64 SnackbarUndoActionToken = 1U;
     theme.controls.dialogMinWidth = 560.0F;
     theme.controls.panelCornerRadius = 6.0F;
     theme.controls.controlCornerRadius = 4.0F;
+    theme.controls.splitterHitExtent = 10.0F;
+    theme.controls.splitterLineThickness = theme.controls.splitterHitExtent;
     theme.controls.panelShadowOffsetX = 0.0F;
     theme.controls.panelShadowOffsetY = 2.0F;
     theme.elevations.raisedOffsetY = 1.0F;
@@ -63,7 +62,7 @@ inline constexpr u64 SnackbarUndoActionToken = 1U;
     return theme;
 }
 
-[[nodiscard]] UI::UILayoutStyle sceneDeleteDialogSurfaceLayout(
+[[nodiscard]] UI::UILayoutStyle editorDialogSurfaceLayout(
     const UI::UITheme& theme) noexcept
 {
     UI::UILayoutStyle style{};
@@ -101,6 +100,14 @@ template <typename NodeResult>
         return Tina::Core::failure(std::move(divider.error()));
     }
     return Tina::Core::success();
+}
+
+[[nodiscard]] constexpr UI::UIElementDescriptor makeEditorSplitter(
+    std::string_view accessibleName) noexcept
+{
+    UI::UIElementDescriptor descriptor = UI::makeSplitterElement({});
+    descriptor.semantics.name = accessibleName;
+    return descriptor;
 }
 
 } // namespace
@@ -226,13 +233,6 @@ auto EditorWorkspaceState::buildCommandBarUi(UiBuildContext& ui, UI::UINodeId pa
         !status) {
         return status;
     }
-    UI::UINodeId toolbarBrand{};
-    if (auto status = storeNode(ui.createLabel(leftRegion, "Tina Editor", fixedSize(118.0F, 26.0F), ui.titleText),
-                                toolbarBrand);
-        !status) {
-        return status;
-    }
-
     constexpr std::array<std::string_view, MainMenuCount> menuLabels{
         "File", "Edit", "View", "Help"};
     constexpr std::array<float, MainMenuCount> menuWidths{44.0F, 44.0F, 48.0F, 48.0F};
@@ -281,6 +281,39 @@ auto EditorWorkspaceState::buildCommandBarUi(UiBuildContext& ui, UI::UINodeId pa
         !status) {
         return status;
     }
+    UI::UINodeId historyGroup{};
+    if (auto status = storeNode(EditorToolbarGroup::Build(
+                                    ui.tree, rightRegion, ui.productTheme),
+                                historyGroup);
+        !status) {
+        return status;
+    }
+    if (auto status = storeNode(ui.createIconButton(
+                                    historyGroup, EditorIcon::Undo, "Undo"),
+                                undoButton_);
+        !status) {
+        return status;
+    }
+    if (auto status = storeNode(ui.createIconButton(
+                                    historyGroup, EditorIcon::Redo, "Redo"),
+                                redoButton_);
+        !status) {
+        return status;
+    }
+    const WorkspaceSessionState& initialSession = activeWorkspaceSession();
+    if (auto status = storeNode(ui.createIconButton(
+                                    historyGroup, EditorIcon::Save, "Save", {},
+                                    initialSession.hasDocumentPath()),
+                                saveButton_);
+        !status) {
+        return status;
+    }
+    if (auto status = storeNode(ui.createIconButton(
+                                    historyGroup, EditorIcon::SaveAs, "Save As"),
+                                saveAsButton_);
+        !status) {
+        return status;
+    }
     UI::UINodeId playGroup{};
     if (auto status = storeNode(EditorToolbarGroup::Build(
                                     ui.tree, rightRegion, ui.productTheme),
@@ -319,24 +352,32 @@ auto EditorWorkspaceState::buildCommandBarUi(UiBuildContext& ui, UI::UINodeId pa
 
 auto EditorWorkspaceState::buildDocumentTabsUi(UiBuildContext& ui, UI::UINodeId parent) -> Tina::Core::Status
 {
-    UI::UINodeId documentTabsBar{};
-    UI::UILayoutStyle documentTabsBarStyle = fillWidth(ui.productTheme.controls.tabHeight);
-    documentTabsBarStyle.flexItem.shrink = 0.0F;
-    documentTabsBarStyle.flexContainer.direction = UI::UIFlexDirection::Row;
-    documentTabsBarStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
-    documentTabsBarStyle.flexContainer.gap.column = ui.productTheme.spacing.space1;
-    documentTabsBarStyle.padding = UI::UIEdgeSpacing::HorizontalVertical(
+    bool hasExternalDocumentTab = false;
+    for (u32 index = 0; index < DocumentTabSlots; ++index) {
+        const auto* tab = documentTabs_.tab(index);
+        hasExternalDocumentTab = hasExternalDocumentTab ||
+                                 (tab != nullptr && !isWorkspaceContextDocumentTab(*tab));
+    }
+    documentTabsBarLayout_ = fillWidth(ui.productTheme.controls.tabHeight);
+    documentTabsBarLayout_.flexItem.shrink = 0.0F;
+    documentTabsBarLayout_.flexContainer.direction = UI::UIFlexDirection::Row;
+    documentTabsBarLayout_.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+    documentTabsBarLayout_.flexContainer.gap.column = ui.productTheme.spacing.space1;
+    documentTabsBarLayout_.padding = UI::UIEdgeSpacing::HorizontalVertical(
         ui.productTheme.spacing.space3, ui.productTheme.spacing.space0);
-    if (auto status = storeNode(ui.createSurface(parent, documentTabsBarStyle,
+    documentTabsBarLayout_.visibility = hasExternalDocumentTab
+                                            ? UI::UIVisibility::Visible
+                                            : UI::UIVisibility::Collapsed;
+    if (auto status = storeNode(ui.createSurface(parent, documentTabsBarLayout_,
                                               UI::UISurfaceVariant::Filled),
-                                documentTabsBar);
+                                documentTabsBar_);
         !status) {
         return status;
     }
     for (u32 index = 0; index < DocumentTabSlots; ++index) {
         const auto* tab = documentTabs_.tab(index);
-        const bool visible = tab != nullptr && !isContextOnlyDocumentTab(*tab);
-        if (auto status = storeNode(ui.createSegmentedButton(documentTabsBar,
+        const bool visible = tab != nullptr && !isWorkspaceContextDocumentTab(*tab);
+        if (auto status = storeNode(ui.createSegmentedButton(documentTabsBar_,
                                                           tab != nullptr ? tab->title : std::string_view{},
                                                           editorDocumentTabLayout(
                                                               ui.productTheme,
@@ -354,65 +395,22 @@ auto EditorWorkspaceState::buildDocumentTabsUi(UiBuildContext& ui, UI::UINodeId 
             return status;
         }
     }
-    if (auto status = storeNode(ui.createIconButton(
-                                    documentTabsBar, EditorIcon::Close,
-                                    "Close document", {}, false),
-                                closeDocumentButton_);
-        !status) {
-        return status;
+    closeDocumentButtonLayout_ = fixedSize(
+        ui.productTheme.controls.iconButtonExtent,
+        ui.productTheme.controls.iconButtonExtent);
+    closeDocumentButtonLayout_.flexContainer.justifyContent =
+        UI::UIJustifyContent::Center;
+    closeDocumentButtonLayout_.flexContainer.alignItems =
+        UI::UIAxisAlignment::Center;
+    closeDocumentButtonLayout_.visibility = UI::UIVisibility::Collapsed;
+    auto closeDocumentParts = EditorIconButton::Build(
+        ui.tree, documentTabsBar_, ui.productTheme, EditorIcon::Close,
+        "Close document", closeDocumentButtonLayout_, false);
+    if (!closeDocumentParts) {
+        return Tina::Core::failure(std::move(closeDocumentParts.error()));
     }
-
-    UI::UINodeId documentBarSpacer{};
-    UI::UILayoutStyle documentBarSpacerStyle{};
-    documentBarSpacerStyle.flexItem.grow = 1.0F;
-    documentBarSpacerStyle.flexItem.shrink = 1.0F;
-    documentBarSpacerStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
-    if (auto status = storeNode(
-            ui.createPanel(documentTabsBar, documentBarSpacerStyle),
-            documentBarSpacer);
-        !status) {
-        return status;
-    }
-    if (auto status = appendVerticalDivider(
-            ui.tree, documentTabsBar,
-            ui.productTheme.controls.iconButtonExtent);
-        !status) {
-        return status;
-    }
-    UI::UINodeId historyGroup{};
-    if (auto status = storeNode(EditorToolbarGroup::Build(
-                                    ui.tree, documentTabsBar,
-                                    ui.productTheme),
-                                historyGroup);
-        !status) {
-        return status;
-    }
-    if (auto status = storeNode(ui.createIconButton(
-                                    historyGroup, EditorIcon::Undo, "Undo"),
-                                undoButton_);
-        !status) {
-        return status;
-    }
-    if (auto status = storeNode(ui.createIconButton(
-                                    historyGroup, EditorIcon::Redo, "Redo"),
-                                redoButton_);
-        !status) {
-        return status;
-    }
-    const WorkspaceSessionState& initialSession = activeWorkspaceSession();
-    if (auto status = storeNode(ui.createIconButton(
-                                    historyGroup, EditorIcon::Save, "Save", {},
-                                    initialSession.hasDocumentPath()),
-                                saveButton_);
-        !status) {
-        return status;
-    }
-    if (auto status = storeNode(ui.createIconButton(
-                                    historyGroup, EditorIcon::SaveAs, "Save As"),
-                                saveAsButton_);
-        !status) {
-        return status;
-    }
+    closeDocumentButtonRoot_ = closeDocumentParts->root;
+    closeDocumentButton_ = closeDocumentParts->button;
 
     return Tina::Core::success();
 }
@@ -423,7 +421,6 @@ auto EditorWorkspaceState::buildWorkspaceUi(UiBuildContext& ui, UI::UINodeId par
     const float splitterExtent = ui.productTheme.controls.splitterHitExtent;
     const UI::UILayoutStyle workspaceStyle = growingRegion();
 
-    UI::UINodeId splitA{};
     const UI::UISplitViewConfig splitAConfig{
         .orientation = UI::UISplitViewOrientation::Horizontal,
         .initialFraction = LeftDockInitialFraction,
@@ -433,32 +430,35 @@ auto EditorWorkspaceState::buildWorkspaceUi(UiBuildContext& ui, UI::UINodeId par
     };
     if (auto status = storeNode(
             ui.tree.createElement(parent, UI::makeSplitViewElement(splitAConfig, workspaceStyle)),
-            splitA);
+            leftDockSplitView_);
         !status) {
         return status;
     }
 
-    UI::UINodeId leftDock{};
-    if (auto status = buildLeftDockUi(ui, splitA, leftDock); !status) {
+    if (auto status = buildLeftDockUi(ui, leftDockSplitView_, leftDock_); !status) {
         return status;
     }
-    UI::UINodeId splitterA{};
+    UI::UIElementDescriptor leftDockSplitterDescriptor =
+        makeEditorSplitter("Resize left dock");
+    leftDockSplitterLayout_ = leftDockSplitterDescriptor.layout;
     if (auto status = storeNode(
-            ui.tree.createElement(splitA, UI::makeSplitterElement({})), splitterA);
+            ui.tree.createElement(
+                leftDockSplitView_, leftDockSplitterDescriptor), leftDockSplitter_);
         !status) {
         return status;
     }
     UI::UINodeId main{};
     if (auto status = storeNode(
-            ui.createPanel(splitA, growingRegion()), main);
+            ui.createPanel(leftDockSplitView_, growingRegion()), main);
         !status) {
         return status;
     }
-    if (auto status = ui.tree.setSplitViewParts(splitA, leftDock, splitterA, main); !status) {
+    if (auto status = ui.tree.setSplitViewParts(
+            leftDockSplitView_, leftDock_, leftDockSplitter_, main);
+        !status) {
         return status;
     }
 
-    UI::UINodeId splitB{};
     const UI::UISplitViewConfig splitBConfig{
         .orientation = UI::UISplitViewOrientation::Horizontal,
         .initialFraction = MainCenterInitialFraction,
@@ -468,72 +468,92 @@ auto EditorWorkspaceState::buildWorkspaceUi(UiBuildContext& ui, UI::UINodeId par
     };
     if (auto status = storeNode(
             ui.tree.createElement(main, UI::makeSplitViewElement(splitBConfig, growingRegion())),
-            splitB);
+            inspectorSplitView_);
         !status) {
         return status;
     }
 
     UI::UINodeId center{};
     if (auto status = storeNode(
-            ui.createPanel(splitB, growingRegion()), center);
+            ui.createPanel(inspectorSplitView_, growingRegion()), center);
         !status) {
         return status;
     }
-    UI::UINodeId splitterB{};
+    UI::UIElementDescriptor inspectorSplitterDescriptor =
+        makeEditorSplitter("Resize Inspector");
+    inspectorSplitterLayout_ = inspectorSplitterDescriptor.layout;
     if (auto status = storeNode(
-            ui.tree.createElement(splitB, UI::makeSplitterElement({})), splitterB);
+            ui.tree.createElement(
+                inspectorSplitView_, inspectorSplitterDescriptor), inspectorSplitter_);
         !status) {
         return status;
     }
-    UI::UINodeId inspector{};
-    if (auto status = buildInspectorUi(ui, splitB, inspector); !status) {
+    if (auto status = buildInspectorUi(ui, inspectorSplitView_, inspectorDock_); !status) {
         return status;
     }
-    if (auto status = ui.tree.setSplitViewParts(splitB, center, splitterB, inspector); !status) {
+    if (auto status = ui.tree.setSplitViewParts(
+            inspectorSplitView_, center, inspectorSplitter_, inspectorDock_);
+        !status) {
         return status;
     }
 
-    UI::UINodeId splitC{};
     const UI::UISplitViewConfig splitCConfig{
         .orientation = UI::UISplitViewOrientation::Vertical,
-        .initialFraction = ViewportInitialFraction,
+        .initialFraction = 1.0F,
         .minPrimarySize = ViewportMinHeight,
         .minSecondarySize = TimelineMinHeight,
         .splitterExtent = splitterExtent,
     };
     if (auto status = storeNode(
             ui.tree.createElement(center, UI::makeSplitViewElement(splitCConfig, growingRegion())),
-            splitC);
+            bottomPanelSplitView_);
         !status) {
         return status;
     }
 
     UI::UINodeId viewport{};
-    if (auto status = buildViewportUi(ui, splitC, viewport); !status) {
+    if (auto status = buildViewportUi(ui, bottomPanelSplitView_, viewport); !status) {
         return status;
     }
-    UI::UINodeId splitterC{};
+    bottomPanelSplitterLayout_.visibility = UI::UIVisibility::Collapsed;
+    UI::UIElementDescriptor bottomPanelSplitterDescriptor =
+        makeEditorSplitter("Resize bottom panel");
+    bottomPanelSplitterDescriptor.layout = bottomPanelSplitterLayout_;
     if (auto status = storeNode(
-            ui.tree.createElement(splitC, UI::makeSplitterElement({})), splitterC);
+            ui.tree.createElement(
+                bottomPanelSplitView_, bottomPanelSplitterDescriptor), bottomPanelSplitter_);
         !status) {
         return status;
     }
-    UI::UINodeId timeline{};
-    if (auto status = buildTimelineUi(ui, splitC, timeline); !status) {
+
+    bottomPanelHostLayout_ = growingRegion();
+    bottomPanelHostLayout_.flexContainer.direction = UI::UIFlexDirection::Column;
+    bottomPanelHostLayout_.flexContainer.gap = UI::UILayoutGap::All(0.0F);
+    bottomPanelHostLayout_.visibility = UI::UIVisibility::Collapsed;
+    if (auto status = storeNode(
+            ui.createPanel(bottomPanelSplitView_, bottomPanelHostLayout_), bottomPanelHost_);
+        !status) {
         return status;
     }
-    return ui.tree.setSplitViewParts(splitC, viewport, splitterC, timeline);
+    if (auto status = buildTimelineUi(ui, bottomPanelHost_, animationPanel_); !status) {
+        return status;
+    }
+    if (auto status = buildOutputPanelUi(ui, bottomPanelHost_, outputPanel_); !status) {
+        return status;
+    }
+    return ui.tree.setSplitViewParts(
+        bottomPanelSplitView_, viewport, bottomPanelSplitter_, bottomPanelHost_);
 }
 
 auto EditorWorkspaceState::buildLeftDockUi(
     UiBuildContext& ui, UI::UINodeId parent, UI::UINodeId& left) -> Tina::Core::Status
 {
-    UI::UILayoutStyle leftStyle = growingRegion();
-    leftStyle.flexContainer.direction = UI::UIFlexDirection::Column;
-    leftStyle.flexContainer.gap.row = ui.productTheme.spacing.space3;
-    leftStyle.padding = UI::UIEdgeSpacing::All(ui.productTheme.spacing.space4);
+    leftDockLayout_ = growingRegion();
+    leftDockLayout_.flexContainer.direction = UI::UIFlexDirection::Column;
+    leftDockLayout_.flexContainer.gap.row = ui.productTheme.spacing.space3;
+    leftDockLayout_.padding = UI::UIEdgeSpacing::All(ui.productTheme.spacing.space4);
     if (auto status = storeNode(
-            ui.createSurface(parent, leftStyle, UI::UISurfaceVariant::Filled), left);
+            ui.createSurface(parent, leftDockLayout_, UI::UISurfaceVariant::Filled), left);
         !status) {
         return status;
     }
@@ -717,10 +737,25 @@ auto EditorWorkspaceState::buildLeftDockUi(
 
     UI::UILayoutStyle projectAssetSummaryStyle = fillWidth(22.0F);
     projectAssetSummaryStyle.flexItem.shrink = 0.0F;
+    const std::string_view initialProjectAssetSummary =
+        projectAssets_.selectedItem() != nullptr
+            ? "Selected project asset"
+            : (assetResources_.projectCatalogConfigured
+                   ? "No assets match this filter"
+                   : (assetResources_.testFixtureCatalog
+                          ? "No test assets match this filter"
+                          : "No project assets"));
     if (auto status = storeNode(
-            ui.createLabel(left, "No assets match this filter",
+            ui.createLabel(left, initialProjectAssetSummary,
                            projectAssetSummaryStyle, ui.secondaryText),
             projectAssetSummary_);
+        !status) {
+        return status;
+    }
+    if (auto status = storeNode(ui.createIconButton(
+                                    hierarchyHeader->actions, EditorIcon::ChevronLeft,
+                                    "Hide left dock"),
+                                leftDockCollapseButton_);
         !status) {
         return status;
     }
@@ -878,20 +913,25 @@ auto EditorWorkspaceState::buildViewportUi(
 {
     UI::UILayoutStyle centerStyle = growingRegion();
     centerStyle.flexContainer.direction = UI::UIFlexDirection::Column;
-    centerStyle.flexContainer.gap.row = ui.productTheme.spacing.space3;
-    centerStyle.padding = UI::UIEdgeSpacing::All(ui.productTheme.spacing.space4);
+    centerStyle.flexContainer.gap.row = ui.productTheme.spacing.space2;
+    centerStyle.padding = UI::UIEdgeSpacing::All(ui.productTheme.spacing.space3);
     if (auto status = storeNode(ui.createPanel(parent, centerStyle), center);
         !status) {
         return status;
     }
 
-    UI::UINodeId viewportHeader{};
-    UI::UILayoutStyle viewportHeaderStyle = fillWidth(ui.productTheme.controls.buttonHeight);
-    viewportHeaderStyle.flexContainer.direction = UI::UIFlexDirection::Row;
-    viewportHeaderStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
-    viewportHeaderStyle.flexContainer.gap.column = ui.productTheme.spacing.space4;
-    if (auto status = storeNode(ui.createPanel(center, viewportHeaderStyle),
-                                viewportHeader);
+    UI::UINodeId viewportToolbar{};
+    UI::UILayoutStyle viewportToolbarStyle = fillWidth(
+        ui.productTheme.controls.contextToolbarHeight);
+    viewportToolbarStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+    viewportToolbarStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+    viewportToolbarStyle.flexContainer.gap.column = ui.productTheme.spacing.space2;
+    viewportToolbarStyle.padding = UI::UIEdgeSpacing::HorizontalVertical(
+        ui.productTheme.spacing.space2, ui.productTheme.spacing.space0);
+    if (auto status = storeNode(
+            ui.createSurface(center, viewportToolbarStyle,
+                             UI::UISurfaceVariant::Filled),
+            viewportToolbar);
         !status) {
         return status;
     }
@@ -906,14 +946,14 @@ auto EditorWorkspaceState::buildViewportUi(
     }
     if (auto status = storeNode(
             ui.createSegmentedButton(
-                viewportHeader, "Scene", viewportContextButtonLayouts_[0]),
+                viewportToolbar, "Scene", viewportContextButtonLayouts_[0]),
             viewportContextButtons_[0]);
         !status) {
         return status;
     }
     if (auto status = storeNode(
             ui.createSegmentedButton(
-                viewportHeader, "TileMap", viewportContextButtonLayouts_[1]),
+                viewportToolbar, "TileMap", viewportContextButtonLayouts_[1]),
             viewportContextButtons_[1]);
         !status) {
         return status;
@@ -928,139 +968,128 @@ auto EditorWorkspaceState::buildViewportUi(
         !status) {
         return status;
     }
-    UI::UILayoutStyle breadcrumbStyle = fixedSize(0.0F, 24.0F);
-    breadcrumbStyle.size.width = UI::UILayoutLength::Auto();
-    breadcrumbStyle.flexItem.grow = 1.0F;
-    breadcrumbStyle.flexItem.shrink = 1.0F;
-    breadcrumbStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
-    if (auto status = storeNode(ui.createLabel(viewportHeader,
-                                            workspaceMode_ == WorkspaceMode::World2D
-                                                ? "Scene / World2D"
-                                                : "Scene / World3D",
-                                            breadcrumbStyle, ui.secondaryText),
-                                breadcrumb_);
-        !status) {
-        return status;
-    }
-    if (auto status = ui.tree.setTextOverflow(breadcrumb_, UI::UITextOverflow::Ellipsis);
-        !status) {
-        return status;
-    }
-    if (auto status = storeNode(
-            ui.createButton(viewportHeader,
-                         workspaceMode_ == WorkspaceMode::World2D
-                             ? "Orthographic"
-                             : "View: Custom",
-                         fixedSize(136.0F, ui.productTheme.controls.buttonHeight),
-                         workspaceMode_ == WorkspaceMode::World3D),
-            viewportMode_);
-        !status) {
-        return status;
-    }
-
-    UI::UINodeId viewportTools{};
-    UI::UILayoutStyle viewportToolsStyle = fillWidth(
-        ui.productTheme.controls.contextToolbarHeight);
-    viewportToolsStyle.flexContainer.direction = UI::UIFlexDirection::Row;
-    viewportToolsStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
-    viewportToolsStyle.flexContainer.gap.column = ui.productTheme.spacing.space3;
-    if (auto status = storeNode(ui.createSurface(center, viewportToolsStyle, UI::UISurfaceVariant::Filled),
-                                viewportTools);
+    if (auto status = appendVerticalDivider(
+            ui.tree, viewportToolbar,
+            ui.productTheme.controls.iconButtonExtent);
         !status) {
         return status;
     }
     if (auto status = storeNode(ui.createIconToggleButton(
-                                    viewportTools, EditorIcon::Select, "Select tool"),
+                                    viewportToolbar, EditorIcon::Select, "Select tool"),
                                 selectToolButtons_[0]);
         !status) {
         return status;
     }
     if (auto status = storeNode(ui.createIconToggleButton(
-                                    viewportTools, EditorIcon::Move, "Move tool"),
+                                    viewportToolbar, EditorIcon::Move, "Move tool"),
                                 translateToolButtons_[0]);
         !status) {
         return status;
     }
     if (auto status = storeNode(ui.createIconToggleButton(
-                                    viewportTools, EditorIcon::Rotate, "Rotate tool"),
+                                    viewportToolbar, EditorIcon::Rotate, "Rotate tool"),
                                 rotateToolButtons_[0]);
         !status) {
         return status;
     }
     if (auto status = storeNode(ui.createIconToggleButton(
-                                    viewportTools, EditorIcon::Scale, "Scale tool"),
+                                    viewportToolbar, EditorIcon::Scale, "Scale tool"),
                                 scaleToolButtons_[0]);
         !status) {
         return status;
     }
     if (auto status = storeNode(ui.createIconToggleButton(
-                                    viewportTools, EditorIcon::Paint,
+                                    viewportToolbar, EditorIcon::Paint,
                                     "Paint tiles", {}, false),
                                 tilePaintToolButton_);
         !status) {
         return status;
     }
     if (auto status = storeNode(ui.createIconToggleButton(
-                                    viewportTools, EditorIcon::Erase,
+                                    viewportToolbar, EditorIcon::Erase,
                                     "Erase tiles", {}, false),
                                 tileEraseToolButton_);
         !status) {
         return status;
     }
     if (auto status = appendVerticalDivider(
-            ui.tree, viewportTools, ui.productTheme.controls.iconButtonExtent);
+            ui.tree, viewportToolbar, ui.productTheme.controls.iconButtonExtent);
         !status) {
         return status;
     }
     if (auto status = storeNode(ui.createIconToggleButton(
-                                    viewportTools, EditorIcon::World,
+                                    viewportToolbar, EditorIcon::World,
                                     "World or local transform orientation"),
                                 orientationButton_);
         !status) {
         return status;
     }
     if (auto status = storeNode(ui.createIconToggleButton(
-                                    viewportTools, EditorIcon::Snap,
+                                    viewportToolbar, EditorIcon::Snap,
                                     "Transform snapping"),
                                 snapButton_);
         !status) {
         return status;
     }
     if (auto status = appendVerticalDivider(
-            ui.tree, viewportTools, ui.productTheme.controls.iconButtonExtent);
+            ui.tree, viewportToolbar, ui.productTheme.controls.iconButtonExtent);
         !status) {
         return status;
     }
     if (auto status = storeNode(ui.createSegmentedButton(
-                                    viewportTools, "Replace",
+                                    viewportToolbar, "Replace",
                                     fixedSize(58.0F, ui.productTheme.controls.buttonHeight)),
                                 marqueeModeButtons_[0]);
         !status) {
         return status;
     }
     if (auto status = storeNode(ui.createSegmentedButton(
-                                    viewportTools, "Add",
+                                    viewportToolbar, "Add",
                                     fixedSize(40.0F, ui.productTheme.controls.buttonHeight)),
                                 marqueeModeButtons_[1]);
         !status) {
         return status;
     }
     if (auto status = storeNode(ui.createSegmentedButton(
-                                    viewportTools, "Toggle",
+                                    viewportToolbar, "Toggle",
                                     fixedSize(52.0F, ui.productTheme.controls.buttonHeight)),
                                 marqueeModeButtons_[2]);
         !status) {
         return status;
     }
     if (auto status = appendVerticalDivider(
-            ui.tree, viewportTools, ui.productTheme.controls.iconButtonExtent);
+            ui.tree, viewportToolbar, ui.productTheme.controls.iconButtonExtent);
         !status) {
         return status;
     }
     if (auto status = storeNode(ui.createIconButton(
-                                    viewportTools, EditorIcon::FrameAll,
+                                    viewportToolbar, EditorIcon::FrameAll,
                                     "Frame all"),
                                 frameAllButton_);
+        !status) {
+        return status;
+    }
+    UI::UILayoutStyle viewportToolbarSpacerStyle{};
+    viewportToolbarSpacerStyle.flexItem.grow = 1.0F;
+    viewportToolbarSpacerStyle.flexItem.shrink = 1.0F;
+    viewportToolbarSpacerStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
+    UI::UINodeId viewportToolbarSpacer{};
+    if (auto status = storeNode(
+            ui.createPanel(viewportToolbar, viewportToolbarSpacerStyle),
+            viewportToolbarSpacer);
+        !status) {
+        return status;
+    }
+    viewportModeLayout_ = fixedSize(
+        136.0F, ui.productTheme.controls.buttonHeight);
+    viewportModeLayout_.visibility = workspaceMode_ == WorkspaceMode::World3D
+                                         ? UI::UIVisibility::Visible
+                                         : UI::UIVisibility::Collapsed;
+    if (auto status = storeNode(
+            ui.createButton(viewportToolbar, "View: Custom",
+                            viewportModeLayout_,
+                            workspaceMode_ == WorkspaceMode::World3D),
+            viewportMode_);
         !status) {
         return status;
     }
@@ -1068,42 +1097,11 @@ auto EditorWorkspaceState::buildViewportUi(
     UI::UILayoutStyle viewportCanvasStyle = growingRegion();
     viewportCanvasStyle.minMax.minHeight = UI::UILayoutLength::Px(220.0F);
     viewportCanvasStyle.padding = UI::UIEdgeSpacing::All(ui.productTheme.spacing.space2);
-    viewportCanvasStyle.flexContainer.gap.row = ui.productTheme.spacing.space2;
     if (auto status = storeNode(ui.createPanel(center, viewportCanvasStyle),
                                 viewportCanvas);
         !status) {
         return status;
     }
-    UI::UINodeId viewportCanvasTop{};
-    UI::UILayoutStyle viewportCanvasTopStyle = fillWidth(22.0F);
-    viewportCanvasTopStyle.flexContainer.direction = UI::UIFlexDirection::Row;
-    viewportCanvasTopStyle.flexContainer.justifyContent = UI::UIJustifyContent::SpaceBetween;
-    if (auto status = storeNode(ui.createPanel(viewportCanvas, viewportCanvasTopStyle),
-                                viewportCanvasTop);
-        !status) {
-        return status;
-    }
-    if (auto status = storeNode(ui.createLabel(viewportCanvasTop,
-                                            workspaceMode_ == WorkspaceMode::World2D
-                                                ? "Tile Grid 1 m"
-                                                : "Grid 1 m",
-                                            fixedSize(160.0F, 20.0F), ui.secondaryText),
-                                gridStatus_);
-        !status) {
-        return status;
-    }
-    const std::string_view initialAssetStatus =
-        counters_.catalogUnresolvedReferences != 0
-            ? "Catalog refs unresolved"
-            : (assetResources_.projectCatalogConfigured ? "Project Catalog ready"
-                                                        : "Built-in Catalog ready");
-    if (auto status = storeNode(ui.createLabel(viewportCanvasTop, initialAssetStatus,
-                                            fixedSize(240.0F, 20.0F), ui.accentText),
-                                previewAssetStatus_);
-        !status) {
-        return status;
-    }
-
     UI::UINodeId viewportSceneArea{};
     UI::UILayoutStyle viewportSceneAreaStyle = growingRegion();
     viewportSceneAreaStyle.flexContainer.justifyContent = UI::UIJustifyContent::Start;
@@ -1161,6 +1159,140 @@ auto EditorWorkspaceState::buildViewportUi(
             return status;
         }
     }
+    UI::UILayoutStyle compassStyle = fixedSize(
+        ViewportOrientationCompassExtent, ViewportOrientationCompassExtent);
+    compassStyle.placement = UI::UILayoutPlacement::Overlay;
+    compassStyle.visibility = UI::UIVisibility::Collapsed;
+    UI::UIElementDescriptor compass = UI::makePanelElement(compassStyle);
+    compass.visual.boxPaint = UI::makeSolidEllipse(UI::rgb(0x11171B, 218));
+    compass.pointerHitPolicy = UI::UIPointerHitPolicy::Targetable;
+    compass.semantics.mode = UI::UISemanticsMode::Automatic;
+    if (auto status = storeNode(
+            ui.tree.createElement(viewportPreviewLayer_, compass),
+            viewportOrientationCompass_);
+        !status) {
+        return status;
+    }
+
+    const auto makeOrbLayerLayout = [](float width, float height, float x,
+                                       float y) noexcept {
+        UI::UILayoutStyle layout = fixedSize(width, height);
+        layout.placement = UI::UILayoutPlacement::Overlay;
+        layout.overlay.horizontal = UI::UIAxisAlignment::Start;
+        layout.overlay.vertical = UI::UIAxisAlignment::Start;
+        layout.overlay.offset.x = UI::UILayoutLength::Px(x);
+        layout.overlay.offset.y = UI::UILayoutLength::Px(y);
+        return layout;
+    };
+    viewportOrientationOrbLayerLayouts_ = {
+        makeOrbLayerLayout(70.0F, 70.0F, 6.0F, 6.0F),
+        makeOrbLayerLayout(32.0F, 68.0F, 25.0F, 7.0F),
+        makeOrbLayerLayout(68.0F, 30.0F, 7.0F, 26.0F),
+        makeOrbLayerLayout(26.0F, 16.0F, 15.0F, 13.0F),
+        makeOrbLayerLayout(
+            ViewportOrientationCompassExtent,
+            ViewportOrientationCompassExtent, 0.0F, 0.0F),
+    };
+    const std::array<UI::UIBoxPaint, ViewportOrientationOrbLayerCount>
+        orbLayerPaints{
+            UI::makeSolidEllipse(UI::rgb(0x1C2A33, 236)),
+            UI::makeEllipseOutline(UI::rgb(0xA6B5BF, 72), 1.0F),
+            UI::makeEllipseOutline(UI::rgb(0xA6B5BF, 62), 1.0F),
+            UI::makeSolidEllipse(UI::rgb(0xDCE7EC, 56)),
+            UI::makeEllipseOutline(UI::rgb(0x82939D, 190), 1.0F),
+        };
+    for (Tina::Core::usize layer = 0;
+         layer < ViewportOrientationOrbLayerCount; ++layer) {
+        UI::UIElementDescriptor orbLayer = UI::makePanelElement(
+            viewportOrientationOrbLayerLayouts_[layer]);
+        orbLayer.visual.boxPaint = orbLayerPaints[layer];
+        orbLayer.pointerHitPolicy = UI::UIPointerHitPolicy::Ignore;
+        orbLayer.semantics.mode = UI::UISemanticsMode::Exclude;
+        if (auto status = storeNode(
+                ui.tree.createElement(viewportOrientationCompass_, orbLayer),
+                viewportOrientationOrbLayers_[layer]);
+            !status) {
+            return status;
+        }
+    }
+
+    UI::UILayoutStyle compassFillStyle = fixedSize(
+        ViewportOrientationCompassExtent, ViewportOrientationCompassExtent);
+    compassFillStyle.placement = UI::UILayoutPlacement::Overlay;
+
+    UI::UITextStyle axisLabelStyle = ui.compactText;
+    axisLabelStyle.logicalSize = 10.0F;
+    axisLabelStyle.color = UI::rgb(0xF7FAFB);
+    constexpr std::array<std::string_view, ViewportOrientationAxisCount>
+        AxisLabels{"X", "Y", "Z"};
+    constexpr std::array<std::string_view, ViewportOrientationAxisCount>
+        AxisAccessibleNames{"Right view", "Top view", "Front view"};
+    for (Tina::Core::usize axis = 0; axis < ViewportOrientationAxisCount;
+         ++axis) {
+        UI::UILayoutStyle lineStyle = compassFillStyle;
+        lineStyle.visibility = UI::UIVisibility::Collapsed;
+        UI::UIElementDescriptor line = UI::makePanelElement(lineStyle);
+        line.visual.boxPaint = UI::makeSolidLine(
+            UI::rgb(0x9AA8B8, 180), {}, {}, 2.0F);
+        line.pointerHitPolicy = UI::UIPointerHitPolicy::Ignore;
+        line.semantics.mode = UI::UISemanticsMode::Exclude;
+        if (auto status = storeNode(
+                ui.tree.createElement(viewportOrientationCompass_, line),
+                viewportOrientationAxisLines_[axis]);
+            !status) {
+            return status;
+        }
+
+        UI::UILayoutStyle endpointStyle = fixedSize(
+            ViewportOrientationEndpointExtent,
+            ViewportOrientationEndpointExtent);
+        endpointStyle.placement = UI::UILayoutPlacement::Overlay;
+        endpointStyle.visibility = UI::UIVisibility::Collapsed;
+        UI::UIElementDescriptor endpoint = UI::makeButtonElement({}, endpointStyle);
+        endpoint.visual.styleRole = UI::UIStyleRoleId::ButtonText;
+        endpoint.visual.boxPaint = UI::makeSolidEllipse(
+            UI::rgb(0x9AA8B8, 230));
+        endpoint.pointerHitPolicy = UI::UIPointerHitPolicy::Targetable;
+        endpoint.semantics.name = AxisAccessibleNames[axis];
+        endpoint.semantics.useContentAsName = false;
+        if (auto status = storeNode(
+                ui.tree.createElement(viewportOrientationCompass_, endpoint),
+                viewportOrientationAxisEndpoints_[axis]);
+            !status) {
+            return status;
+        }
+
+        UI::UIElementDescriptor label = UI::makeLabelElement(
+            AxisLabels[axis], endpointStyle);
+        label.textStyle = axisLabelStyle;
+        label.contentAlignment.horizontal = UI::UIAxisAlignment::Center;
+        label.contentAlignment.vertical = UI::UIAxisAlignment::Center;
+        label.pointerHitPolicy = UI::UIPointerHitPolicy::Ignore;
+        label.semantics.mode = UI::UISemanticsMode::Exclude;
+        if (auto status = storeNode(
+                ui.tree.createElement(viewportOrientationCompass_, label),
+                viewportOrientationAxisLabels_[axis]);
+            !status) {
+            return status;
+        }
+    }
+
+    UI::UILayoutStyle compassCenterStyle = fixedSize(
+        ViewportOrientationCenterExtent, ViewportOrientationCenterExtent);
+    compassCenterStyle.placement = UI::UILayoutPlacement::Overlay;
+    compassCenterStyle.overlay.horizontal = UI::UIAxisAlignment::Center;
+    compassCenterStyle.overlay.vertical = UI::UIAxisAlignment::Center;
+    UI::UIElementDescriptor compassCenter = UI::makePanelElement(
+        compassCenterStyle);
+    compassCenter.visual.boxPaint = UI::makeSolidEllipse(
+        UI::rgb(0xE8EDF3, 235));
+    compassCenter.pointerHitPolicy = UI::UIPointerHitPolicy::Ignore;
+    compassCenter.semantics.mode = UI::UISemanticsMode::Exclude;
+    auto compassCenterNode = ui.tree.createElement(
+        viewportOrientationCompass_, compassCenter);
+    if (!compassCenterNode) {
+        return Tina::Core::failure(std::move(compassCenterNode.error()));
+    }
     UI::UILayoutStyle marqueeStyle = fixedSize(1.0F, 1.0F);
     marqueeStyle.placement = UI::UILayoutPlacement::Overlay;
     marqueeStyle.visibility = UI::UIVisibility::Collapsed;
@@ -1174,119 +1306,17 @@ auto EditorWorkspaceState::buildViewportUi(
         return status;
     }
 
-    UI::UINodeId viewportCanvasBottom{};
-    UI::UILayoutStyle viewportCanvasBottomStyle = fillWidth(22.0F);
-    viewportCanvasBottomStyle.flexContainer.direction = UI::UIFlexDirection::Row;
-    viewportCanvasBottomStyle.flexContainer.justifyContent = UI::UIJustifyContent::SpaceBetween;
-    if (auto status = storeNode(ui.createPanel(viewportCanvas, viewportCanvasBottomStyle),
-                                viewportCanvasBottom);
-        !status) {
-        return status;
-    }
-    UI::UINodeId viewportOrigin{};
-    if (auto status = storeNode(ui.createLabel(viewportCanvasBottom, "Origin 0, 0", fixedSize(76.0F, 20.0F),
-                                            ui.secondaryText),
-                                viewportOrigin);
-        !status) {
-        return status;
-    }
-    UI::UINodeId viewportExtent{};
-    if (auto status = storeNode(ui.createLabel(viewportCanvasBottom, "1280 x 800 logical",
-                                            fixedSize(120.0F, 20.0F), ui.secondaryText),
-                                viewportExtent);
-        !status) {
-        return status;
-    }
-
-    UI::UINodeId viewportFooter{};
-    UI::UILayoutStyle viewportFooterStyle = fillWidth(
-        ui.productTheme.controls.contextToolbarHeight);
-    viewportFooterStyle.flexContainer.direction = UI::UIFlexDirection::Row;
-    viewportFooterStyle.flexContainer.justifyContent = UI::UIJustifyContent::SpaceBetween;
-    viewportFooterStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
-    viewportFooterStyle.padding = UI::UIEdgeSpacing::HorizontalVertical(
-        ui.productTheme.spacing.space4, ui.productTheme.spacing.space1);
-    if (auto status = storeNode(ui.createSurface(center, viewportFooterStyle, UI::UISurfaceVariant::Filled),
-                                viewportFooter);
-        !status) {
-        return status;
-    }
-    UI::UILayoutStyle cameraStatusStyle = fixedSize(0.0F, 22.0F);
-    cameraStatusStyle.size.width = UI::UILayoutLength::Auto();
-    cameraStatusStyle.flexItem.grow = 1.0F;
-    cameraStatusStyle.flexItem.shrink = 1.0F;
-    cameraStatusStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
-    if (auto status = storeNode(ui.createLabel(viewportFooter,
-                                            workspaceMode_ == WorkspaceMode::World2D
-                                                ? "Camera2D"
-                                                : "Camera3D",
-                                            cameraStatusStyle, ui.bodyText),
-                                cameraStatus_);
-        !status) {
-        return status;
-    }
-    if (auto status = storeNode(ui.createLabel(viewportFooter, "Select | Local | Snap",
-                                            fixedSize(160.0F, 22.0F), ui.secondaryText),
-                                viewportToolStatus_);
-        !status) {
-        return status;
-    }
-
-    UI::UINodeId zoomControls{};
-    UI::UILayoutStyle zoomControlsStyle = fixedSize(
-        208.0F, ui.productTheme.controls.sliderHeight);
-    zoomControlsStyle.flexContainer.direction = UI::UIFlexDirection::Row;
-    zoomControlsStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
-    zoomControlsStyle.flexContainer.gap.column = ui.productTheme.spacing.space2;
-    if (auto status = storeNode(ui.createPanel(viewportFooter, zoomControlsStyle),
-                                zoomControls);
-        !status) {
-        return status;
-    }
-    if (auto status = storeNode(ui.createIconButton(
-                                    zoomControls, EditorIcon::ZoomOut,
-                                    "Zoom out"),
-                                zoomOutButton_);
-        !status) {
-        return status;
-    }
-    UI::UIElementDescriptor zoomSliderDesc = UI::makeSliderElement(
-        fixedSize(86.0F, ui.productTheme.controls.sliderHeight));
-    if (auto status = storeNode(ui.tree.createElement(zoomControls, zoomSliderDesc), zoomSlider_);
-        !status) {
-        return status;
-    }
-    if (auto status = ui.tree.setSliderRange(zoomSlider_, 25.0F, 400.0F, 25.0F); !status) {
-        return status;
-    }
-    if (auto status = ui.tree.setSliderValue(zoomSlider_, viewportZoomPercent_); !status) {
-        return status;
-    }
-    if (auto status = storeNode(ui.createLabel(zoomControls, "100%", fixedSize(46.0F, 22.0F),
-                                            ui.accentText),
-                                zoomValue_);
-        !status) {
-        return status;
-    }
-    if (auto status = storeNode(ui.createIconButton(
-                                    zoomControls, EditorIcon::ZoomIn,
-                                    "Zoom in"),
-                                zoomInButton_);
-        !status) {
-        return status;
-    }
-
     return Tina::Core::success();
 }
 
 auto EditorWorkspaceState::buildInspectorUi(
     UiBuildContext& ui, UI::UINodeId parent, UI::UINodeId& right) -> Tina::Core::Status
 {
-    UI::UILayoutStyle rightStyle = growingRegion();
-    rightStyle.flexContainer.direction = UI::UIFlexDirection::Column;
-    rightStyle.flexContainer.gap.row = ui.productTheme.spacing.space3;
-    rightStyle.padding = UI::UIEdgeSpacing::All(ui.productTheme.spacing.space4);
-    if (auto status = storeNode(ui.createSurface(parent, rightStyle, UI::UISurfaceVariant::Filled),
+    inspectorDockLayout_ = growingRegion();
+    inspectorDockLayout_.flexContainer.direction = UI::UIFlexDirection::Column;
+    inspectorDockLayout_.flexContainer.gap.row = ui.productTheme.spacing.space3;
+    inspectorDockLayout_.padding = UI::UIEdgeSpacing::All(ui.productTheme.spacing.space4);
+    if (auto status = storeNode(ui.createSurface(parent, inspectorDockLayout_, UI::UISurfaceVariant::Filled),
                                 right);
         !status) {
         return status;
@@ -1314,6 +1344,13 @@ auto EditorWorkspaceState::buildInspectorUi(
             ui.tree.createElement(
                 right, UI::makeScrollViewElement(inspectorScrollStyle)),
             inspectorScroll_);
+        !status) {
+        return status;
+    }
+    if (auto status = storeNode(ui.createIconButton(
+                                    inspectorHeader->actions, EditorIcon::ChevronRight,
+                                    "Hide Inspector"),
+                                inspectorCollapseButton_);
         !status) {
         return status;
     }
@@ -1975,11 +2012,12 @@ auto EditorWorkspaceState::buildTimelineUi(
     UiBuildContext& ui, UI::UINodeId parent, UI::UINodeId& animationTimeline)
     -> Tina::Core::Status
 {
-    UI::UILayoutStyle animationTimelineStyle = growingRegion();
-    animationTimelineStyle.flexContainer.direction = UI::UIFlexDirection::Column;
-    animationTimelineStyle.flexContainer.gap.row = ui.productTheme.spacing.space2;
-    animationTimelineStyle.padding = UI::UIEdgeSpacing::All(ui.productTheme.spacing.space4);
-    if (auto status = storeNode(ui.createSurface(parent, animationTimelineStyle,
+    animationPanelLayout_ = growingRegion();
+    animationPanelLayout_.flexContainer.direction = UI::UIFlexDirection::Column;
+    animationPanelLayout_.flexContainer.gap.row = ui.productTheme.spacing.space2;
+    animationPanelLayout_.padding = UI::UIEdgeSpacing::All(ui.productTheme.spacing.space4);
+    animationPanelLayout_.visibility = UI::UIVisibility::Collapsed;
+    if (auto status = storeNode(ui.createSurface(parent, animationPanelLayout_,
                                               UI::UISurfaceVariant::Filled),
                                 animationTimeline);
         !status) {
@@ -2041,6 +2079,13 @@ auto EditorWorkspaceState::buildTimelineUi(
                                     animationHeader->actions, EditorIcon::Cook,
                                     "Cook animation preview"),
                                 animationCookButton_);
+        !status) {
+        return status;
+    }
+    if (auto status = storeNode(ui.createIconButton(
+                                    animationHeader->actions, EditorIcon::ChevronDown,
+                                    "Hide Animation panel"),
+                                animationCollapseButton_);
         !status) {
         return status;
     }
@@ -2249,6 +2294,49 @@ auto EditorWorkspaceState::buildTimelineUi(
     return Tina::Core::success();
 }
 
+auto EditorWorkspaceState::buildOutputPanelUi(
+    UiBuildContext& ui, UI::UINodeId parent, UI::UINodeId& outputPanel)
+    -> Tina::Core::Status
+{
+    outputPanelLayout_ = growingRegion();
+    outputPanelLayout_.flexContainer.direction = UI::UIFlexDirection::Column;
+    outputPanelLayout_.flexContainer.gap.row = ui.productTheme.spacing.space3;
+    outputPanelLayout_.padding = UI::UIEdgeSpacing::All(ui.productTheme.spacing.space4);
+    outputPanelLayout_.visibility = UI::UIVisibility::Collapsed;
+    if (auto status = storeNode(
+            ui.createSurface(parent, outputPanelLayout_, UI::UISurfaceVariant::Filled),
+            outputPanel);
+        !status) {
+        return status;
+    }
+
+    auto outputHeader = EditorPanelHeader::Build(
+        ui.tree, outputPanel, ui.productTheme, "Output", ui.sectionText,
+        fillWidth(ui.productTheme.controls.buttonHeight));
+    if (!outputHeader) {
+        return Tina::Core::failure(std::move(outputHeader.error()));
+    }
+    if (auto status = storeNode(ui.createIconButton(
+                                    outputHeader->actions, EditorIcon::ChevronDown,
+                                    "Hide Output panel"),
+                                outputCollapseButton_);
+        !status) {
+        return status;
+    }
+
+    UI::UILayoutStyle outputMessageStyle = growingRegion();
+    outputMessageStyle.padding = UI::UIEdgeSpacing::All(ui.productTheme.spacing.space3);
+    if (auto status = storeNode(
+            ui.createLabel(outputPanel, authoringFeedback_, outputMessageStyle,
+                           ui.bodyText),
+            outputMessage_);
+        !status) {
+        return status;
+    }
+    return ui.tree.setTextOverflow(
+        outputMessage_, UI::UITextOverflow::Ellipsis);
+}
+
 auto EditorWorkspaceState::buildStatusBarUi(UiBuildContext& ui, UI::UINodeId parent) -> Tina::Core::Status
 {
     UI::UINodeId statusBar{};
@@ -2289,6 +2377,31 @@ auto EditorWorkspaceState::buildStatusBarUi(UiBuildContext& ui, UI::UINodeId par
             statusPreview_, UI::UITextOverflow::Ellipsis);
         !status) {
         return status;
+    }
+    UI::UINodeId bottomPanelControls{};
+    UI::UILayoutStyle bottomPanelControlsStyle{};
+    bottomPanelControlsStyle.size.height = UI::UILayoutLength::Px(24.0F);
+    bottomPanelControlsStyle.flexItem.shrink = 0.0F;
+    bottomPanelControlsStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+    bottomPanelControlsStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+    bottomPanelControlsStyle.flexContainer.gap.column = ui.productTheme.spacing.space1;
+    if (auto status = storeNode(
+            ui.createPanel(statusBar, bottomPanelControlsStyle),
+            bottomPanelControls);
+        !status) {
+        return status;
+    }
+    constexpr std::array<std::string_view, 2> BottomPanelLabels{
+        "Animation", "Output"};
+    for (u32 index = 0; index < bottomPanelButtons_.size(); ++index) {
+        if (auto status = storeNode(
+                ui.createSegmentedButton(
+                    bottomPanelControls, BottomPanelLabels[index],
+                    fixedSize(82.0F, 24.0F)),
+                bottomPanelButtons_[index]);
+            !status) {
+            return status;
+        }
     }
     if (auto status = storeNode(ui.tree.createElement(
                                     statusBar,
@@ -2357,7 +2470,7 @@ auto EditorWorkspaceState::buildMainMenuOverlaysUi(
     constexpr u32 FileMenu = 0U;
     constexpr u32 EditMenu = 1U;
     constexpr u32 ViewMenu = 2U;
-    constexpr u32 HelpMenu = 3U;
+    constexpr u32 HelpMenu = HelpMainMenuIndex;
     if (auto status = createMenuItem(
             mainMenus_[FileMenu], "New Project", UI::UIMenuItemKind::Command,
             fileCreateProjectMenuItem_);
@@ -2462,6 +2575,18 @@ auto EditorWorkspaceState::buildMainMenuOverlaysUi(
     if (auto status = createMenuItem(
             viewWorkspaceSubmenu_, "3D", UI::UIMenuItemKind::Radio,
             viewWorkspaceMenuItems_[1]);
+        !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            mainMenus_[ViewMenu], "Left Dock", UI::UIMenuItemKind::Check,
+            viewPanelMenuItems_[0]);
+        !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            mainMenus_[ViewMenu], "Inspector", UI::UIMenuItemKind::Check,
+            viewPanelMenuItems_[1]);
         !status) {
         return status;
     }
@@ -2587,13 +2712,38 @@ auto EditorWorkspaceState::buildSceneDeleteDialogUi(
             .title = "Delete scene subtree?",
             .body = "The selected item and its descendants will be deleted.\nThis action can be undone.",
             .actions = actions,
-            .layout = sceneDeleteDialogLayout(UI::UIVisibility::Collapsed),
-            .surfaceLayout = sceneDeleteDialogSurfaceLayout(ui.productTheme),
+            .layout = editorDialogOverlayLayout(UI::UIVisibility::Collapsed),
+            .surfaceLayout = editorDialogSurfaceLayout(ui.productTheme),
         });
     if (!dialog) {
         return Tina::Core::failure(std::move(dialog.error()));
     }
     sceneDeleteDialog_ = *dialog;
+    return Tina::Core::success();
+}
+
+auto EditorWorkspaceState::buildAboutDialogUi(
+    UiBuildContext& ui, UI::UINodeId parent) -> Tina::Core::Status
+{
+    constexpr std::array actions{
+        UI::UIDialogActionConfig{
+            .text = "Close",
+            .variant = UI::UIButtonVariant::Primary,
+        },
+    };
+    auto dialog = ui.tree.buildDialog(
+        parent,
+        UI::UIDialogConfig{
+            .title = "About Tina Editor",
+            .body = "Tina Editor\nC++23 game runtime and authoring environment\n2D and 3D scene editing",
+            .actions = actions,
+            .layout = editorDialogOverlayLayout(UI::UIVisibility::Collapsed),
+            .surfaceLayout = editorDialogSurfaceLayout(ui.productTheme),
+        });
+    if (!dialog) {
+        return Tina::Core::failure(std::move(dialog.error()));
+    }
+    aboutDialog_ = *dialog;
     return Tina::Core::success();
 }
 
@@ -2838,6 +2988,23 @@ auto EditorWorkspaceState::registerUiCallbacks(UiBuildContext& ui) -> Tina::Core
             return status;
         }
     }
+    const std::array workspacePanelBindings{
+        std::pair{leftDockCollapseButton_, WorkspacePanelKind::LeftDock},
+        std::pair{viewPanelMenuItems_[0], WorkspacePanelKind::LeftDock},
+        std::pair{inspectorCollapseButton_, WorkspacePanelKind::Inspector},
+        std::pair{viewPanelMenuItems_[1], WorkspacePanelKind::Inspector},
+    };
+    for (const auto& [button, panel] : workspacePanelBindings) {
+        if (auto status = ui.tree.setButtonAction(
+                button,
+                UI::UIButtonActionCallback{
+                    [this, panel](const UI::UIButtonActionEvent&) noexcept {
+                        pendingWorkspacePanelToggle_ = panel;
+                    }});
+            !status) {
+            return status;
+        }
+    }
     if (auto status = bindEditorCommand(
             viewportContextButtons_[0], EditorCommand::SwitchToWorld2D);
         !status) {
@@ -2956,6 +3123,37 @@ auto EditorWorkspaceState::registerUiCallbacks(UiBuildContext& ui) -> Tina::Core
             return status;
         }
     }
+    constexpr std::array BottomPanels{
+        BottomPanelKind::Animation,
+        BottomPanelKind::Output,
+    };
+    for (u32 index = 0; index < bottomPanelButtons_.size(); ++index) {
+        if (auto status = ui.tree.setButtonAction(
+                bottomPanelButtons_[index],
+                UI::UIButtonActionCallback{
+                    [this, panel = BottomPanels[index]](
+                        const UI::UIButtonActionEvent&) noexcept {
+                        pendingBottomPanelToggle_ = panel;
+                    }});
+            !status) {
+            return status;
+        }
+    }
+    const std::array bottomPanelCollapseBindings{
+        std::pair{animationCollapseButton_, BottomPanelKind::Animation},
+        std::pair{outputCollapseButton_, BottomPanelKind::Output},
+    };
+    for (const auto& [button, panel] : bottomPanelCollapseBindings) {
+        if (auto status = ui.tree.setButtonAction(
+                button,
+                UI::UIButtonActionCallback{
+                    [this, panel](const UI::UIButtonActionEvent&) noexcept {
+                        pendingBottomPanelToggle_ = panel;
+                    }});
+            !status) {
+            return status;
+        }
+    }
     for (u32 frameIndex = 0; frameIndex < animationFrameButtons_.size(); ++frameIndex) {
         if (auto status = ui.tree.setButtonAction(
                 animationFrameButtons_[frameIndex],
@@ -3019,32 +3217,6 @@ auto EditorWorkspaceState::registerUiCallbacks(UiBuildContext& ui) -> Tina::Core
         !status) {
         return status;
     }
-    if (auto status = ui.tree.setSliderChangeCallback(
-            zoomSlider_,
-            UI::UISliderChangeCallback{
-                [this](const UI::UISliderChangeEvent& event) noexcept {
-                    pendingViewportZoomPercent_ =
-                        std::clamp(event.value, 25.0F, 400.0F);
-                }});
-        !status) {
-        return status;
-    }
-    if (auto status = ui.tree.setButtonAction(
-            zoomOutButton_,
-            UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
-                queueViewportZoomStep(-25.0F);
-            }});
-        !status) {
-        return status;
-    }
-    if (auto status = ui.tree.setButtonAction(
-            zoomInButton_,
-            UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
-                queueViewportZoomStep(25.0F);
-            }});
-        !status) {
-        return status;
-    }
     if (auto status = ui.tree.setButtonAction(
             frameAllButton_,
             UI::UIButtonActionCallback{
@@ -3053,6 +3225,50 @@ auto EditorWorkspaceState::registerUiCallbacks(UiBuildContext& ui) -> Tina::Core
                 }});
         !status) {
         return status;
+    }
+    constexpr std::array OrientationCommands{
+        EditorCommand::ViewportPresetRight,
+        EditorCommand::ViewportPresetTop,
+        EditorCommand::ViewportPresetFront,
+    };
+    for (Tina::Core::usize axis = 0; axis < ViewportOrientationAxisCount;
+         ++axis) {
+        if (auto status = ui.tree.setButtonAction(
+                viewportOrientationAxisEndpoints_[axis],
+                UI::UIButtonActionCallback{
+                    [this, command = OrientationCommands[axis]](
+                        const UI::UIButtonActionEvent&) noexcept {
+                        queueEditorCommand(command);
+                    }});
+            !status) {
+            return status;
+        }
+    }
+    constexpr std::array OrientationBarrierKinds{
+        UI::UIRoutedPointerEventKind::Move,
+        UI::UIRoutedPointerEventKind::ButtonDown,
+        UI::UIRoutedPointerEventKind::ButtonUp,
+        UI::UIRoutedPointerEventKind::Wheel,
+    };
+    for (Tina::Core::usize index = 0; index < OrientationBarrierKinds.size();
+         ++index) {
+        auto listener = ui.tree.addRoutedPointerListener(
+            {
+                .node = viewportOrientationCompass_,
+                .kind = OrientationBarrierKinds[index],
+                .phases = UI::UIEventPhaseMask::Capture |
+                          UI::UIEventPhaseMask::Target,
+            },
+            UI::UIRoutedPointerCallback{
+                [](UI::UIRoutedPointerEvent& event) noexcept {
+                    event.consumeInputTransition();
+                    event.stopPropagation();
+                }});
+        if (!listener) {
+            return Tina::Core::failure(std::move(listener.error()));
+        }
+        viewportOrientationCompassPointerBarrierListeners_[index] =
+            std::move(*listener);
     }
     if (auto status = ui.tree.setButtonAction(
             orientationButton_,
@@ -3222,6 +3438,15 @@ auto EditorWorkspaceState::registerUiCallbacks(UiBuildContext& ui) -> Tina::Core
         return status;
     }
     if (auto status = ui.tree.setButtonAction(
+            aboutDialog_.actions[AboutCloseActionIndex],
+            UI::UIButtonActionCallback{
+                [this](const UI::UIButtonActionEvent&) noexcept {
+                    queueEditorCommand(EditorCommand::HideAbout);
+                }});
+        !status) {
+        return status;
+    }
+    if (auto status = ui.tree.setButtonAction(
             snackbarParts_.action,
             UI::UIButtonActionCallback{
                 [this](const UI::UIButtonActionEvent&) noexcept {
@@ -3367,6 +3592,9 @@ auto EditorWorkspaceState::onEnter(Tina::GameStateEnterContext& context) -> Tina
         return status;
     }
     if (auto status = buildSceneDeleteDialogUi(ui, rootNode); !status) {
+        return status;
+    }
+    if (auto status = buildAboutDialogUi(ui, rootNode); !status) {
         return status;
     }
     if (auto status = registerUiCallbacks(ui); !status) {

@@ -769,9 +769,14 @@ collection/list/tree 与 footer 使用 Stretch/End 保持边距并扩展；字�
 集合控件、主题层级及动态 `10%`/`1%` 进度均清晰可见，没有裁剪或重叠。
 
 `TinaEditor` 的 Modern Desktop 源码迁移使用 Dark/Compact `UITheme`，并在 `createRoot()` 前绑定 density。
-根节点按 Command Bar、Document Tabs、Workspace、Status Bar 排列；context tools 合并在 active Viewport，Workspace 由三层
-`SplitView` 表达 Left Dock、Viewport、Inspector 与 Timeline，不引入 Dock Runtime 或第二棵 UI tree。
-Editor 的 Button/TextEdit/Tab、List/Tree row、Splitter、Status Bar 与 spacing/padding 读取 Theme metrics；
+根节点按 Command Bar、按需出现的外部 Document Tabs、Workspace、Status Bar 排列；Command Bar 同行放置菜单、居中的
+2D/3D selector、history/save 与 play controls，active Viewport 只保留一条 context toolbar、画布和一条状态 footer；Workspace 由三层
+`SplitView` 表达 Left Dock、Viewport、Inspector 与可折叠底部面板，不引入 Dock Runtime 或第二棵 UI tree。底部面板
+默认 `Collapsed` 且 vertical SplitView fraction 为 `1`，Status Bar 可在 Animation 与 Output 间切换或再次点击当前项
+收起；Output 复用最新 authoring feedback。Left Dock/Inspector Header 提供向外收起按钮，`View` 菜单提供 Check
+入口恢复；三类 pane 隐藏时 pane、splitter 与 fraction 同步更新，恢复时还原用户最后拖拽尺寸。
+Editor 的 Button/TextEdit/Tab、List/Tree row、Splitter、Status Bar 与 spacing/padding 读取 Theme metrics；Editor 专属
+Splitter 将 10 logical px 的可见线宽与命中宽度统一，不再绘制 1 px 中线并浪费两侧热区；
 旧的 Editor 局部 surface ColorToken、StyleClass 和自动换色路径已删除。Render viewport 仍只消费成功提交的
 retained layout rect，Scene/Asset/Render owner 与数据流未改变。2026-08-20 按 Editor 大功能规则完成统一增量
 build；`tina_ui_tests` 771/771、`tina_editor_tests` 114/114、`tina_editor_app_tests` 13/13。TinaEditor
@@ -820,7 +825,8 @@ actions 区占据剩余宽度并末端对齐；`EditorSectionHeader` 以固定 3
 的 Identity、Transform、Components、Hierarchy、TileMap 与 Document 六个 authoring 段，并按 context 仅发布有效段。
 Hierarchy、Project Assets、Source Imports
 计数使用 Neutral Badge，Inspector selection 使用 Accent Badge。原 `Authoring` 提示段、`Move X +1` 调试按钮及重复的
-静态说明已从可见树删除，编辑结果只由现有 `UISnackbarHost` 发布。Status document/runtime 按 0.8/1.2 分配剩余
+静态说明已从可见树删除，短时编辑结果由现有 `UISnackbarHost` 发布，用户主动打开的 Output 底部面板镜像最新反馈。
+Status document/runtime 按 0.8/1.2 分配剩余
 宽度，二者与 Snackbar message 都使用 ellipsis，完整 retained/semantics 文本不变；command、document transaction
 与 auto-demo 路径不变。
 

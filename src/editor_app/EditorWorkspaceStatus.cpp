@@ -17,40 +17,7 @@ auto EditorWorkspaceState::reportAuthoringFailure(
 
 auto EditorWorkspaceState::refreshWorkspaceChrome(Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status{
     const bool world2D = workspaceMode_ == WorkspaceMode::World2D;
-    const bool tileMapContext = tileMapEditingContext();
-    std::string breadcrumb = world2D
-                                 ? (tileMapContext ? "2D / TileMap" : "2D / Scene")
-                                 : "3D / Scene";
-    if (stableEntityIdForHierarchyItem(selectionKey_) != 0U) {
-        breadcrumb += " / ";
-        breadcrumb += hierarchyDisplayLabel(selectionKey_);
-    }
-    if (auto status = tree.setText(breadcrumb_, breadcrumb);
-        !status) {
-        return status;
-    }
     if (auto status = refreshViewportViewModeUi(tree); !status) {
-        return status;
-    }
-    if (auto status = tree.setText(
-            gridStatus_, tileMapContext ? "Tile Grid 1 m" : "Grid 1 m");
-        !status) {
-        return status;
-    }
-    std::string assetStatus = assetResources_.projectCatalogConfigured
-                                  ? "Project Catalog | "
-                                  : "Built-in Catalog | ";
-    assetStatus += world2D ? "2D " : "3D ";
-    assetStatus += std::to_string(world2D ? previewResolvedSpriteCount_
-                                          : previewResolvedMeshCount_);
-    assetStatus += " resolved";
-    if (auto status = tree.setText(previewAssetStatus_, assetStatus); !status) {
-        return status;
-    }
-    if (auto status = tree.setText(
-            cameraStatus_,
-            world2D ? "Camera2D" : "Camera3D");
-        !status) {
         return status;
     }
     if (auto status = tree.setText(documentFormat_,
@@ -60,6 +27,148 @@ auto EditorWorkspaceState::refreshWorkspaceChrome(Tina::PrimaryWindowUITreeUpdat
         return status;
     }
     return Tina::Core::success();
+}
+
+auto EditorWorkspaceState::refreshWorkspacePanelsUi(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    if (pendingWorkspacePanelToggle_.has_value()) {
+        const WorkspacePanelKind panel = *pendingWorkspacePanelToggle_;
+        const bool isLeftDock = panel == WorkspacePanelKind::LeftDock;
+        bool& visible = isLeftDock ? leftDockVisible_ : inspectorVisible_;
+        float& visibleFraction = isLeftDock ? leftDockVisibleFraction_
+                                            : inspectorVisibleFraction_;
+        const UI::UINodeId splitView = isLeftDock ? leftDockSplitView_
+                                                   : inspectorSplitView_;
+        const UI::UINodeId dock = isLeftDock ? leftDock_ : inspectorDock_;
+        const UI::UINodeId splitter = isLeftDock ? leftDockSplitter_
+                                                  : inspectorSplitter_;
+        UI::UILayoutStyle dockLayout = isLeftDock ? leftDockLayout_
+                                                   : inspectorDockLayout_;
+        UI::UILayoutStyle splitterLayout = isLeftDock
+                                                ? leftDockSplitterLayout_
+                                                : inspectorSplitterLayout_;
+        const bool nextVisible = !visible;
+
+        if (!nextVisible) {
+            auto fraction = tree.splitViewFraction(splitView);
+            if (!fraction) {
+                return Tina::Core::failure(std::move(fraction.error()));
+            }
+            if (*fraction > 0.0F && *fraction < 1.0F) {
+                visibleFraction = *fraction;
+            }
+        }
+
+        dockLayout.visibility = nextVisible ? UI::UIVisibility::Visible
+                                            : UI::UIVisibility::Collapsed;
+        splitterLayout.visibility = nextVisible ? UI::UIVisibility::Visible
+                                                : UI::UIVisibility::Collapsed;
+        if (auto status = tree.setLayoutStyle(dock, dockLayout); !status) {
+            return status;
+        }
+        if (auto status = tree.setLayoutStyle(splitter, splitterLayout); !status) {
+            return status;
+        }
+        const float collapsedFraction = isLeftDock ? 0.0F : 1.0F;
+        if (auto status = tree.setSplitViewFraction(
+                splitView, nextVisible ? visibleFraction : collapsedFraction);
+            !status) {
+            return status;
+        }
+        if (auto status = tree.setMenuItemChecked(
+                viewPanelMenuItems_[isLeftDock ? 0U : 1U], nextVisible);
+            !status) {
+            return status;
+        }
+
+        if (isLeftDock) {
+            leftDockLayout_ = dockLayout;
+            leftDockSplitterLayout_ = splitterLayout;
+        } else {
+            inspectorDockLayout_ = dockLayout;
+            inspectorSplitterLayout_ = splitterLayout;
+        }
+        visible = nextVisible;
+        pendingWorkspacePanelToggle_.reset();
+    }
+
+    if (pendingBottomPanelToggle_.has_value()) {
+        const BottomPanelKind requested = *pendingBottomPanelToggle_;
+        const BottomPanelKind next = requested == bottomPanel_
+                                         ? BottomPanelKind::None
+                                         : requested;
+        const bool panelVisible = next != BottomPanelKind::None;
+        const bool panelWasVisible = bottomPanel_ != BottomPanelKind::None;
+
+        if (!panelVisible && panelWasVisible) {
+            auto fraction = tree.splitViewFraction(bottomPanelSplitView_);
+            if (!fraction) {
+                return Tina::Core::failure(std::move(fraction.error()));
+            }
+            if (*fraction > 0.0F && *fraction < 1.0F) {
+                bottomPanelVisibleFraction_ = *fraction;
+            }
+        }
+
+        UI::UILayoutStyle splitterLayout = bottomPanelSplitterLayout_;
+        splitterLayout.visibility = panelVisible ? UI::UIVisibility::Visible
+                                                 : UI::UIVisibility::Collapsed;
+        UI::UILayoutStyle hostLayout = bottomPanelHostLayout_;
+        hostLayout.visibility = panelVisible ? UI::UIVisibility::Visible
+                                             : UI::UIVisibility::Collapsed;
+        UI::UILayoutStyle animationLayout = animationPanelLayout_;
+        animationLayout.visibility = next == BottomPanelKind::Animation
+                                         ? UI::UIVisibility::Visible
+                                         : UI::UIVisibility::Collapsed;
+        UI::UILayoutStyle outputLayout = outputPanelLayout_;
+        outputLayout.visibility = next == BottomPanelKind::Output
+                                      ? UI::UIVisibility::Visible
+                                      : UI::UIVisibility::Collapsed;
+
+        if (auto status = tree.setLayoutStyle(
+                bottomPanelSplitter_, splitterLayout);
+            !status) {
+            return status;
+        }
+        if (auto status = tree.setLayoutStyle(bottomPanelHost_, hostLayout);
+            !status) {
+            return status;
+        }
+        if (auto status = tree.setLayoutStyle(animationPanel_, animationLayout);
+            !status) {
+            return status;
+        }
+        if (auto status = tree.setLayoutStyle(outputPanel_, outputLayout);
+            !status) {
+            return status;
+        }
+        if (auto status = tree.setSplitViewFraction(
+                bottomPanelSplitView_,
+                panelVisible ? bottomPanelVisibleFraction_ : 1.0F);
+            !status) {
+            return status;
+        }
+        for (u32 index = 0; index < bottomPanelButtons_.size(); ++index) {
+            const BottomPanelKind buttonPanel = index == 0U
+                                                    ? BottomPanelKind::Animation
+                                                    : BottomPanelKind::Output;
+            if (auto status = tree.setRadioButtonSelected(
+                    bottomPanelButtons_[index], next == buttonPanel);
+                !status) {
+                return status;
+            }
+        }
+
+        bottomPanelSplitterLayout_ = splitterLayout;
+        bottomPanelHostLayout_ = hostLayout;
+        animationPanelLayout_ = animationLayout;
+        outputPanelLayout_ = outputLayout;
+        bottomPanel_ = next;
+        pendingBottomPanelToggle_.reset();
+    }
+
+    return tree.setText(outputMessage_, authoringFeedback_);
 }
 
 auto EditorWorkspaceState::refreshMainMenuUi(
@@ -88,6 +197,16 @@ auto EditorWorkspaceState::refreshMainMenuUi(
         if (auto status = tree.setEnabled(item, editing); !status) {
             return status;
         }
+    }
+    if (auto status = tree.setMenuItemChecked(
+            viewPanelMenuItems_[0], leftDockVisible_);
+        !status) {
+        return status;
+    }
+    if (auto status = tree.setMenuItemChecked(
+            viewPanelMenuItems_[1], inspectorVisible_);
+        !status) {
+        return status;
     }
 
     for (u32 index = 0; index < viewportContextButtons_.size(); ++index) {

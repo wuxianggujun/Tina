@@ -38,7 +38,7 @@ auto EditorWorkspaceState::showSceneDeleteConfirmation(
     };
     if (auto status = tree.setLayoutStyle(
             sceneDeleteDialog_.modal,
-            sceneDeleteDialogLayout(UI::UIVisibility::Visible));
+            editorDialogOverlayLayout(UI::UIVisibility::Visible));
         !status) {
         pendingSceneDeleteConfirmation_.reset();
         return status;
@@ -57,7 +57,7 @@ auto EditorWorkspaceState::hideSceneDeleteConfirmation(
     }
     if (auto status = tree.setLayoutStyle(
             sceneDeleteDialog_.modal,
-            sceneDeleteDialogLayout(UI::UIVisibility::Collapsed));
+            editorDialogOverlayLayout(UI::UIVisibility::Collapsed));
         !status) {
         return status;
     }
@@ -81,8 +81,12 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
     const bool previewNavigationCommand =
         command == EditorCommand::SceneFocus ||
         command == EditorCommand::ViewportCyclePreset ||
+        command == EditorCommand::ViewportPresetTop ||
+        command == EditorCommand::ViewportPresetFront ||
+        command == EditorCommand::ViewportPresetRight ||
         command == EditorCommand::ViewportResetView;
-    const bool informationalCommand = command == EditorCommand::ShowAbout;
+    const bool informationalCommand =
+        command == EditorCommand::ShowAbout || command == EditorCommand::HideAbout;
     if (playSessionActive() && !playCommand && !previewNavigationCommand &&
         !informationalCommand) {
         return Tina::Core::failure(
@@ -1108,7 +1112,10 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         authoringFeedback_ = "SpriteAnimationClip Cook preview rebuilt";
         break;
     }
-    case EditorCommand::ViewportCyclePreset: {
+    case EditorCommand::ViewportCyclePreset:
+    case EditorCommand::ViewportPresetTop:
+    case EditorCommand::ViewportPresetFront:
+    case EditorCommand::ViewportPresetRight: {
         if (workspaceMode_ != WorkspaceMode::World3D) {
             authoringFeedback_ = "2D viewport uses a fixed Orthographic view";
             break;
@@ -1116,7 +1123,15 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         if (auto navigationStatus = ensureViewportNavigation(); !navigationStatus) {
             return navigationStatus;
         }
-        const auto preset = nextViewportViewPreset(viewport3DViewPreset_);
+        using Preset = Tina::Editor::EditorViewport3DViewPreset;
+        const Preset preset =
+            command == EditorCommand::ViewportPresetTop
+                ? Preset::Top
+                : command == EditorCommand::ViewportPresetFront
+                      ? Preset::Front
+                      : command == EditorCommand::ViewportPresetRight
+                            ? Preset::Right
+                            : nextViewportViewPreset(viewport3DViewPreset_);
         status = viewportNavigation_->set3DViewPreset(preset);
         if (status) {
             viewport3DViewPreset_ = preset;
@@ -1179,8 +1194,28 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         status = cancelDirtyClose(tree);
         break;
     case EditorCommand::ShowAbout:
-        authoringFeedback_ =
-            "Tina Editor | C++23 retained UI | 2D and 3D authoring runtime";
+        if (!aboutDialogVisible_) {
+            status = tree.setLayoutStyle(
+                aboutDialog_.modal,
+                editorDialogOverlayLayout(UI::UIVisibility::Visible));
+            if (status) {
+                aboutDialogVisible_ = true;
+                pendingAboutDialogFocus_ = true;
+                pendingAboutDialogFocusRestore_ = false;
+            }
+        }
+        break;
+    case EditorCommand::HideAbout:
+        if (aboutDialogVisible_) {
+            status = tree.setLayoutStyle(
+                aboutDialog_.modal,
+                editorDialogOverlayLayout(UI::UIVisibility::Collapsed));
+            if (status) {
+                aboutDialogVisible_ = false;
+                pendingAboutDialogFocus_ = false;
+                pendingAboutDialogFocusRestore_ = true;
+            }
+        }
         break;
     }
     if (!status) {
