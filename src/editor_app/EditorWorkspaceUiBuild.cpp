@@ -1330,7 +1330,9 @@ auto EditorWorkspaceState::buildInspectorUi(
     counters_.inspectorScrollConfigured = true;
 
     UI::UINodeId inspectorContent{};
-    UI::UILayoutStyle inspectorContentStyle = fillWidth(1980.0F);
+    UI::UILayoutStyle inspectorContentStyle{};
+    inspectorContentStyle.size.width = UI::UILayoutLength::Percent(100.0F);
+    inspectorContentStyle.flexItem.shrink = 0.0F;
     inspectorContentStyle.padding = UI::UIEdgeSpacing::All(ui.productTheme.spacing.space4);
     inspectorContentStyle.flexContainer.gap.row = ui.productTheme.spacing.space3;
     if (auto status = storeNode(ui.createSurface(inspectorScroll_, inspectorContentStyle,

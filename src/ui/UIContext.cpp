@@ -3343,12 +3343,23 @@ struct UIContext::Impl final {
         const UITextMetrics* metrics =
             index < textStatesByIndex.size() ? presentationTextMetricsFor(index)
                                              : nullptr;
-        const UIContentAlignment alignment =
+        UIContentAlignment alignment =
             metrics != nullptr ? textStatesByIndex[index].alignment
                                : image != nullptr ? image->alignment : UIContentAlignment{};
         const UILogicalSize* intrinsicSize =
             metrics != nullptr ? &metrics->measuredSize
                                : image != nullptr ? &image->source.intrinsicLogicalSize : nullptr;
+        UILogicalSize emptyTextEditIntrinsicSize{};
+        if (metrics == nullptr && record != nullptr &&
+            record->kind == BuiltinElementKind::TextEdit &&
+            index < textStatesByIndex.size())
+        {
+            const WidgetTextState& text = textStatesByIndex[index];
+            alignment = text.alignment;
+            emptyTextEditIntrinsicSize.height = normalizeFloat(
+                (std::max)(0.0F, text.style.logicalSize * text.style.lineHeightScale));
+            intrinsicSize = &emptyTextEditIntrinsicSize;
+        }
         return resolveContentPlacement(
             scratch.worldRect, layout.padding, leadingReservedWidth,
             trailingReservedWidth, alignment, intrinsicSize);
@@ -22073,6 +22084,37 @@ struct UIContext::Impl final {
         };
         const UICommittedHitView hit = committedHit();
         const std::span<const UICommittedHitEntry> entries = hit.entries();
+        const UINodeId physicalTarget = result.pointQuery.target.node;
+        const UINodeId menuAtRouteStart = menuStorage.rootMenu();
+        const UINodeId menuAnchorAtRouteStart = menuPlacementAnchor(menuAtRouteStart);
+        bool pointTargetsActiveMenu = false;
+        UINodeId activeMenuSurfaceAtPointer{};
+        UINodeId activeChainMenuAtRouteStart = menuAtRouteStart;
+        usize activeChainVisitCount = 0;
+        while (activeChainMenuAtRouteStart.hasValue() &&
+               activeChainVisitCount++ < menuStorage.capacity())
+        {
+            const u32 entryIndex =
+                findHitEntryIndex(activeChainMenuAtRouteStart, entries);
+            if (entryIndex < entries.size() &&
+                containsPointHalfOpen(entries[entryIndex].worldRect,
+                                      input.position) &&
+                containsPointHalfOpen(entries[entryIndex].effectiveClip,
+                                      input.position))
+            {
+                activeMenuSurfaceAtPointer = activeChainMenuAtRouteStart;
+            }
+            pointTargetsActiveMenu = pointTargetsActiveMenu ||
+                isNodeWithinSubtree(activeChainMenuAtRouteStart,
+                                    physicalTarget);
+            activeChainMenuAtRouteStart =
+                menuStorage.activeChildMenu(activeChainMenuAtRouteStart);
+        }
+        const bool pointInsideActiveMenu =
+            activeMenuSurfaceAtPointer.hasValue();
+        const bool activeMenuChromeOccludesPhysicalTarget =
+            pointInsideActiveMenu &&
+            !isNodeWithinSubtree(activeMenuSurfaceAtPointer, physicalTarget);
         const UINodeId captureAtRouteStart = capturedPointerNode;
         const u32 capturedEntryIndex = findHitEntryIndex(capturedPointerNode, entries);
         if (capturedEntryIndex < entries.size() &&
@@ -22086,7 +22128,16 @@ struct UIContext::Impl final {
             {
                 dispatchPointerCancelToCapture(entries);
             }
-            result.routedTarget = result.pointQuery.target;
+            if (activeMenuChromeOccludesPhysicalTarget)
+            {
+                result.routedTarget = pointerHitTargetForEntry(
+                    entries,
+                    findHitEntryIndex(activeMenuSurfaceAtPointer, entries));
+            }
+            else
+            {
+                result.routedTarget = result.pointQuery.target;
+            }
         }
         result.blockedByModal = result.pointQuery.modalBarrierActive && !result.pointQuery.hasTarget();
         routePathScratch.clear();
@@ -22188,7 +22239,6 @@ struct UIContext::Impl final {
             popupEntryIndexAtRouteStart < entries.size() &&
             containsPointHalfOpen(entries[popupEntryIndexAtRouteStart].worldRect, input.position) &&
             containsPointHalfOpen(entries[popupEntryIndexAtRouteStart].effectiveClip, input.position);
-        const UINodeId physicalTarget = result.pointQuery.target.node;
         const auto [contextMenuAtRouteStart, contextMenuAnchorAtRouteStart] =
             secondaryButtonDown ? contextMenuForTarget(physicalTarget)
                                 : std::pair<UINodeId, UINodeId>{};
@@ -22199,29 +22249,6 @@ struct UIContext::Impl final {
                                                      !pointInsideActivePopup && !pointTargetsPopupDropdown;
         const bool blockPopupChromeClickThrough = primaryButtonDown && popupAtRouteStart.hasValue() &&
                                                   pointInsideActivePopup && !pointTargetsActivePopup;
-        const UINodeId menuAtRouteStart = menuStorage.rootMenu();
-        const UINodeId menuAnchorAtRouteStart = menuPlacementAnchor(menuAtRouteStart);
-        bool pointInsideActiveMenu = false;
-        bool pointTargetsActiveMenu = false;
-        UINodeId activeChainMenuAtRouteStart = menuAtRouteStart;
-        usize activeChainVisitCount = 0;
-        while (activeChainMenuAtRouteStart.hasValue() &&
-               activeChainVisitCount++ < menuStorage.capacity())
-        {
-            const u32 entryIndex =
-                findHitEntryIndex(activeChainMenuAtRouteStart, entries);
-            pointInsideActiveMenu = pointInsideActiveMenu ||
-                (entryIndex < entries.size() &&
-                 containsPointHalfOpen(entries[entryIndex].worldRect,
-                                       input.position) &&
-                 containsPointHalfOpen(entries[entryIndex].effectiveClip,
-                                       input.position));
-            pointTargetsActiveMenu = pointTargetsActiveMenu ||
-                isNodeWithinSubtree(activeChainMenuAtRouteStart,
-                                    physicalTarget);
-            activeChainMenuAtRouteStart =
-                menuStorage.activeChildMenu(activeChainMenuAtRouteStart);
-        }
         const bool pointTargetsMenuAnchor =
             isNodeWithinSubtree(menuAnchorAtRouteStart, physicalTarget) && !pointTargetsActiveMenu;
         const bool dismissActiveMenuOnPrimaryDown = primaryButtonDown && menuAtRouteStart.hasValue() &&
@@ -22301,7 +22328,11 @@ struct UIContext::Impl final {
             addActiveMenuBranchDirtyReservationCandidates(
                 hoverSubmenuToClose);
         }
-        const UINodeId hoverCandidate = physicalNearestButton.hasValue() ? physicalNearestButton : physicalTarget;
+        const UINodeId hoverCandidate = activeMenuChromeOccludesPhysicalTarget
+                                            ? UINodeId{}
+                                            : physicalNearestButton.hasValue()
+                                                  ? physicalNearestButton
+                                                  : physicalTarget;
         const UINodeId nextHoveredControl = resolvedHoveredPrimaryControl(hoverCandidate);
         if (nextHoveredControl != hoveredPrimaryControl)
         {
@@ -23171,10 +23202,14 @@ struct UIContext::Impl final {
         if (input.kind == UIRoutedPointerEventKind::Move)
         {
             // Hover intent always follows the physical committed hit rather
-            // than Pointer Capture routing. Tooltip itself is Ignore, so it can
-            // never become this target or prevent click-through.
+            // than Pointer Capture routing. Active Menu chrome is the exception:
+            // its Ignore surface still occludes lower tooltip anchors.
             tooltipStorage.setHoveredAnchor(
-                tooltipAnchorFromCommittedHit(result.pointQuery.target, entries));
+                tooltipAnchorFromCommittedHit(
+                    activeMenuChromeOccludesPhysicalTarget
+                        ? result.routedTarget
+                        : result.pointQuery.target,
+                    entries));
         } else if (input.kind == UIRoutedPointerEventKind::ButtonDown ||
                    input.kind == UIRoutedPointerEventKind::Wheel)
         {

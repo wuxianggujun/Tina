@@ -461,7 +461,7 @@ Core::Result<EditorSearchFieldParts> EditorSearchField::Build(
     inputLayout.size.height =
         UI::UILayoutLength::Px(theme.controls.textEditHeight);
     inputLayout.padding = UI::UIEdgeSpacing::HorizontalVertical(
-        theme.spacing.space3, theme.spacing.space1);
+        theme.spacing.space4, theme.spacing.space1);
     inputLayout.flexItem.grow = 1.0F;
     inputLayout.flexItem.shrink = 1.0F;
     inputLayout.flexItem.basis = UI::UILayoutLength::Px(0.0F);

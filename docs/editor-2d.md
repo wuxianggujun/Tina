@@ -96,7 +96,8 @@ Inspector 的内容段而不再制造嵌套 card。Undo/Redo、Save/Save As、Pl
 唯一 Button/RadioButton 节点上；Text Button 的 disabled background 保持与 normal 一样透明，只有图标/文字按
 `disabledContentAlpha` 降灰，不再绘制整块灰色矩形。hover/pressed/selected tint 与背景共享同一 retained state，因此图标始终居中于
 对应 chrome；选中工具继续由 RadioButton 状态表达，视觉统一采用无 indicator 的 SegmentedButton chrome。Header、92 px property label
-column 和 Search icon/TextEdit 统一密集工作台的对齐。Hierarchy filter 按 ASCII 大小写不敏感匹配 label，发布匹配项
+column 和 Search icon/TextEdit 统一密集工作台的对齐；SearchField 内层 TextEdit 使用明确的水平 content inset，
+空值 caret 也按当前文字行高在输入区域内垂直居中。Hierarchy filter 按 ASCII 大小写不敏感匹配 label，发布匹配项
 及其祖先，搜索期间不受 collapsed 分支遮挡，并按 stable ID 保留可见选择。
 Inspector 组件折叠 Header 使用同一私有 atlas 中的 ChevronRight/ChevronDown Icon node，并按 retained expanded state
 切换 visibility，不再显示文本伪箭头。
@@ -113,6 +114,8 @@ Hierarchy 的 Header、Parent ID 行和 Apply Parent wrapper 只在同一 entity
 和 Document，Scene entity 呈现 Identity、Transform、Components、Hierarchy 和 Document，TileMap document 呈现
 Identity、TileMap 和 Document；Scene 无 entity selection 时只保留 Identity 与 Document。所有上下文切换都从构建时
 保存的完整 root layout 修改 `visibility`，恢复后不会丢失 PropertyRow 的 Row/Center/gap 或 IconButton wrapper 的居中布局。
+Inspector ScrollView 的内容高度由这些实际可见 section 的 Flow intrinsic height 决定，不再使用固定 1980 px canvas；
+`Auto` scrollbar 只在 content extent 真正超过 viewport 时绘制并参与命中。
 维护图标映射后使用工作区 Python 执行 `tools/editor_icons/cook_editor_icons.py`，提交
 `EditorIconAtlas.generated.hpp/.inc`；CI 或本地审计可追加 `--check` 验证生成物未漂移。cooker 对 SVG element、attribute、
 path command 与资源根目录执行 allowlist 校验，避免静默接受脚本、外部引用或未支持的 vector 特性。

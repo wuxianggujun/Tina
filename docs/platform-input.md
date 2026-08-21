@@ -59,7 +59,9 @@ Windows 还接入 `Imm32CompositionHostWin32`：窗口 subclass 把 IMM32 preedi
 `TextCompositionTransition`/`TextInputTransition`，固定 preedit 容量并校验 UTF-16→UTF-8。同一轮 native poll
 使用有界 FIFO 保留 Started/Updated/Ended 顺序，连续 progress 合并为最新 preedit；即使输入法没有先发布 preedit，
 非空 `GCS_RESULTSTR` 也会直接产生 Ended + committed text。失焦会先 drain 已发生事件，再取消 active session，
-不会让旧 progress 晚于 Cancel 发布；commit 由 IMM32 result 路径唯一发布，不再用跨 poll 的“吞下一字符”标记去重。UI commit 后，
+不会让旧 progress 晚于 Cancel 发布；FIFO 元素和返回的 optional 每次 move 都会把 composition 的 borrowed
+`string_view` 重绑到目标 `Pending` 自有 UTF-8 storage，包含 SSO 的短中文 preedit/commit 也不会悬空。commit 由
+IMM32 result 路径唯一发布，不再用跨 poll 的“吞下一字符”标记去重。UI commit 后，
 Runtime 从 `UIContext::committedTextInputCaretRect()` 发布 owner-window logical caret geometry；GLFW
 adapter 按当前 content scale 转为 native client pixels，并更新 IMM32 composition/candidate placement。
 placement 为空、caret 与 clip 无正面积交集、窗口 hidden/minimized 或几何无效时会清除旧 hint 并恢复

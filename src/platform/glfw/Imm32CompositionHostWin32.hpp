@@ -38,10 +38,22 @@ class Imm32CompositionHostWin32 final {
     // Drain one pending composition event produced by the subclass during
     // glfwPollEvents / DefWindowProc. May also yield a commit string.
     struct Pending final {
+        Pending() = default;
+        Pending(const Pending&) = delete;
+        Pending& operator=(const Pending&) = delete;
+        Pending(Pending&& other) noexcept;
+        Pending& operator=(Pending&& other) noexcept;
+
+        void assign(Imm32CompositionEvent event, std::string preedit,
+                    std::string commit) noexcept;
+
         Imm32CompositionEvent composition{};
-        // Owned copy so the event's string_view remains valid until takePending.
+        // Owned copies keep the borrowed event views valid across FIFO moves.
         std::string preeditStorage{};
         std::string commitStorage{};
+
+      private:
+        void rebindViews() noexcept;
     };
     [[nodiscard]] std::optional<Pending> takePending() noexcept;
 

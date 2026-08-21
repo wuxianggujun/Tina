@@ -5,6 +5,7 @@
 #include <imm.h>
 
 #include <cstring>
+#include <utility>
 
 #pragma comment(lib, "imm32.lib")
 
@@ -19,6 +20,45 @@ constexpr const wchar_t* kHostPropName = L"Tina.Imm32CompositionHost";
 }
 
 } // namespace
+
+Imm32CompositionHostWin32::Pending::Pending(Pending&& other) noexcept
+    : composition(other.composition),
+      preeditStorage(std::move(other.preeditStorage)),
+      commitStorage(std::move(other.commitStorage))
+{
+    rebindViews();
+    other.rebindViews();
+}
+
+auto Imm32CompositionHostWin32::Pending::operator=(Pending&& other) noexcept
+    -> Pending&
+{
+    if (this != &other) {
+        composition = other.composition;
+        preeditStorage = std::move(other.preeditStorage);
+        commitStorage = std::move(other.commitStorage);
+        rebindViews();
+        other.rebindViews();
+    }
+    return *this;
+}
+
+void Imm32CompositionHostWin32::Pending::assign(
+    Imm32CompositionEvent event,
+    std::string preedit,
+    std::string commit) noexcept
+{
+    composition = event;
+    preeditStorage = std::move(preedit);
+    commitStorage = std::move(commit);
+    rebindViews();
+}
+
+void Imm32CompositionHostWin32::Pending::rebindViews() noexcept
+{
+    composition.preeditUtf8 = preeditStorage;
+    composition.committedUtf8 = commitStorage;
+}
 
 Core::Status Imm32CompositionHostWin32::attach(HWND hwnd) noexcept
 {
@@ -145,10 +185,7 @@ Imm32CompositionHostWin32::takePending() noexcept
     }
     --pendingEventCount_;
     pendingEvents_[pendingEventCount_] = {};
-    // Rebind string_views to the moved storage.
-    out.composition.preeditUtf8 = out.preeditStorage;
-    out.composition.committedUtf8 = out.commitStorage;
-    return out;
+    return std::optional<Pending>{std::move(out)};
 }
 
 std::optional<Imm32CompositionEvent>
@@ -169,9 +206,7 @@ void Imm32CompositionHostWin32::publish(
         if (previous.composition.stage == TextCompositionStage::Started ||
             previous.composition.stage == TextCompositionStage::Updated) {
             event.stage = previous.composition.stage;
-            previous.preeditStorage = std::move(preedit);
-            previous.commitStorage = std::move(commit);
-            previous.composition = event;
+            previous.assign(event, std::move(preedit), std::move(commit));
             return;
         }
     }
@@ -189,9 +224,7 @@ void Imm32CompositionHostWin32::publish(
         slot = pendingEventCount_ - 1U;
     }
     Pending& pending = pendingEvents_[slot];
-    pending.preeditStorage = std::move(preedit);
-    pending.commitStorage = std::move(commit);
-    pending.composition = event;
+    pending.assign(event, std::move(preedit), std::move(commit));
 }
 
 void Imm32CompositionHostWin32::clearPending() noexcept

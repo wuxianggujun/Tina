@@ -175,8 +175,9 @@ accessible description/Windows HelpText fallback；不会覆盖作者 descriptio
 Menu 强制 Overlay、Ignore hit、Contain focus scope，只接受 direct `MenuItem` child。Item 不能拥有 child，
 `UIMenuItemKind::{Command,Check,Radio,Separator}` 分别表达普通命令、可切换项、按 `radioGroup` 互斥项和
 非交互分隔线；Check/Radio checked state 只存在于 `UIMenuStateStorage`，不占用通用 Toggle slot。
-Menu surface 的空白区域和 outside Pointer Down 由 transient barrier 消费，防止同一按键 click-through；
-Item 仍是 Targetable，Menu 不捕获 Pointer。wheel、文本输入、Anchor/Menu disable、Hidden/Collapsed、destroy
+Menu surface 的空白区域和 outside Pointer Down 由 transient barrier 消费，防止同一按键 click-through；active
+Menu chain 的几何还会遮挡下层 Pointer Move/hover/tooltip，disabled Item 与 Separator 不可激活但仍不会让下层控件
+获得 hover。Item 仍是 Targetable，Menu 不捕获 Pointer。wheel、文本输入、Anchor/Menu disable、Hidden/Collapsed、destroy
 与 Modal scope 改变都会关闭 Menu并恢复进入 overlay 前的合法焦点。
 
 `UIMenuConfig` 提供 `Auto/Above/Below/Left/Right` placement、`anchorGap`、`viewportMargin`、
@@ -319,7 +320,8 @@ clean commit、局部 dirty、active Motion 与 DisplayList 构建；口径见[�
 element（Label、Button、TextEdit、RadioButton、Dropdown/DropdownItem 及虚拟 List/Tree row）的文字
 origin 都由 `UIContentAlignment` 在该 content box 内计算；多行文字回到同一 committed origin，
 TextEdit pointer-to-caret、selection 与 caret 也使用该 origin。四边 padding 均参与固有尺寸和 content
-box，不再由 paint/input 各自从 `worldRect + padding` 重算平行结果。
+box，不再由 paint/input 各自从 `worldRect + padding` 重算平行结果。空 TextEdit 没有 glyph metrics 时仍以当前
+text style 的 line height 作为零宽 intrinsic content，因此默认 caret 保持在 padded content box 内垂直居中。
 
 ## 输入与默认行为
 
@@ -350,7 +352,8 @@ callback 副作用。
   committed keyboard focus；focused Slider 将 Left/Down Arrow 与 D-pad 映射为 Decrease，将 Right/Up
   映射为 Increase，复用 Pointer/UIA 的 min/max/step/clamp、量化、value storage 与 callback 路径；
 - RadioButton：同一直接父节点互斥，Pointer/Keyboard/Gamepad selection；
-- ScrollView：wheel、thumb drag、轴向 clamp 与持久 pointer capture；
+- ScrollView：wheel、thumb drag、轴向 clamp 与持久 pointer capture；`Auto` scrollbar 只有在对应轴
+  `contentExtent > viewportExtent` 时才绘制并参与命中；
 - Dropdown/Popup：Pointer/Keyboard/Gamepad 开关与选择，Up/Down/D-pad 导航，Escape/Gamepad East dismiss，
   Tab/Shift+Tab 关闭并退出 Popup scope，外部点击关闭且阻止 click-through；
 - Menu/MenuItem：Up/Down/Home/End、D-pad Up/Down 导航，Escape/Gamepad East dismiss；Command/Check/Radio
@@ -479,7 +482,8 @@ Intrinsic element text (Label/Button/TextEdit/Radio/Dropdown/List/Tree row)
 FreeType 是可选私有 rasterizer。字体 fixture 优先由 `TINA_UI_FONT_PATH` 注入；未加载字体时 placeholder
 路径不能冒充 CJK 视觉通过。Windows GLFW adapter 已提供 IMM32 preedit/commit/cancel，以及由 committed
 caret geometry 驱动的 DPI-scaled composition/candidate placement；poll-local 有界队列保留 composition 顺序、
-合并连续 progress，并支持无 preedit 的 direct result commit，失焦不会在 Cancel 后补发旧 progress。
+合并连续 progress，并支持无 preedit 的 direct result commit；队列项在 FIFO/optional move 后会把 borrowed view
+重绑到目标对象自己的 UTF-8 storage，短字符串 SSO 也不会留下悬空 view。失焦不会在 Cancel 后补发旧 progress。
 placement 清除会恢复 IMM32 默认策略。
 Linux 当前只保证 committed text，原生 XIM/Wayland preedit/candidate placement 仍后置；Windows 真机候选窗
 跟随/提交/取消/失焦人工证据见 `TEXT-001`。
