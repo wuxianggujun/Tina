@@ -51,9 +51,12 @@ GoogleTest、sample、smoke、Visual 或平台 gate。大功能的交互、状�
 smoke。统一 gate 的失败集中修复后只重跑失败或直接受影响项，不按每个小修复重复整套验证。详细命令与证据边界
 见[测试与验证](testing.md#editor-开发与验证节奏)。
 
-当前 Editor application 的 retained UI 布局已完整铺开：Command Bar、Document Tabs、
+当前 Editor application 的 retained UI 布局已完整铺开：带 `File/Edit/View/Help` 的 Command Bar、Document Toolbar、
 Hierarchy/Project Assets Left Dock、active Viewport、可滚动 Inspector
 （Identity/Transform/Components/Hierarchy/TileMap/Document）、SpriteAnimationClip Timeline 和底部 Status Bar。
+Command Bar 中央的 `2D/3D` 是 workspace selector，`View > Workspace` 提供同一命令的菜单入口；Document Toolbar
+只呈现 scene/Catalog document 与 Undo/Redo/Save，内建 TileMap/Animation session 不再冒充全局顶层文档标签。
+2D Viewport Header 以 `Scene/TileMap` 切换当前 authoring context，Animation authoring 保持在底部 Timeline。
 根使用四个连续 band；Workspace 由三个嵌套 `SplitView` 组成：`Left Dock | Main`、`Center | Inspector`、
 `Viewport | Timeline`。pane 最小尺寸与 splitter hit extent 由 SplitView/Compact Theme 约束，Button、TextEdit、Tab、
 List/Tree row、Status Bar 和 spacing/padding 读取 `UITheme` metrics，不再由 Editor 局部颜色 token 和固定控件高度
@@ -76,13 +79,13 @@ Editor 视觉系统为 `Tina Studio Compact`：它从
 `createRoot()` 前绑定，按桌面 authoring 工作台维持高密度控件，不照搬移动端 Material 组件尺寸。Theme 使用
 graphite 中性 surface、teal selection/focus、coral destructive action、低对比 outline 与仅用于 modal 的短阴影；
 普通命令默认 Tonal，Play 使用 Primary，Save 与 inline Delete/Remove 使用 Outlined，Undo/Redo/Cancel 使用
-Text，只有 Dialog 的最终 Delete/Discard 使用 Danger。Select/Move/Rotate/Scale/Tile、marquee、Project filter 与 document
-tab 都使用 `SegmentedButton` role，并通过真实 `setRadioButtonSelected()` 表达 active selection；enabled 只表示
+Text，只有 Dialog 的最终 Delete/Discard 使用 Danger。2D/3D workspace、Scene/TileMap context、Select/Move/Rotate/Scale/Tile、
+marquee、Project filter 与 document tab 都使用 `SegmentedButton` role，并通过真实 `setRadioButtonSelected()` 表达 active selection；enabled 只表示
 命令是否可执行，不再兼作选中视觉。Segmented 仍复用 RadioButton 的互斥、Focus、Keyboard/Gamepad、UIA 和
 `Selected` pseudo-state，不建立 Editor 私有状态机或 backend paint 分支。
-Command Bar、Document Tabs、Dock、Inspector、Timeline 与 Status Bar 的有色容器通过
-`UISurface` 的 Filled/Elevated profile authoring，纯布局容器仍保持普通 Panel；Command Bar 与 Viewport toolbar
-使用无行为、从 Semantics 排除的竖向 `UIDivider` 区分 play、history/save 与 transform/snap/marquee/frame 命令组。
+Command Bar、Document Toolbar、Dock、Inspector、Timeline 与 Status Bar 的有色容器通过
+`UISurface` 的 Filled/Elevated profile authoring，纯布局容器仍保持普通 Panel；Document Toolbar 与 Viewport toolbar
+使用无行为、从 Semantics 排除的竖向 `UIDivider` 区分 history/save 与 transform/snap/marquee/frame 命令组。
 EditorApp 另以私有固定预算 recipe 实现 `EditorToolbarGroup`、`EditorPanelHeader`、`EditorSectionHeader`、
 `EditorPropertyRow` 与 `EditorSearchField`：`EditorPanelHeader` 使用无圆角、无描边的扁平 surface band，并把 badge、
 状态和命令统一末端对齐；`EditorSectionHeader` 以 3 个节点组合标题和可伸缩的 subtle horizontal divider，明确区分
@@ -90,7 +93,8 @@ Inspector 的内容段而不再制造嵌套 card。Undo/Redo、Save/Save As、Pl
 使用 Lucide 1.33.0 SVG 离线 cook 的单色私有 atlas 与 IconButton/Tooltip：cooker 以 4x coverage 栅格化后 Lanczos
 缩至每格 36 px，并保留 2 px 内部 gutter 与透明边界，运行时按逻辑 18 px 线性过滤；SVG、manifest、license、生成的 atlas alpha 与 UV metadata 一并提交，
 普通 configure/build 不运行 Python、SVG parser 或 runtime vector renderer。IconButton/Toggle 把 image content 直接放在
-唯一 Button/RadioButton 节点上，hover/pressed/selected/disabled tint 与背景共享同一 retained state，因此图标始终居中于
+唯一 Button/RadioButton 节点上；Text Button 的 disabled background 保持与 normal 一样透明，只有图标/文字按
+`disabledContentAlpha` 降灰，不再绘制整块灰色矩形。hover/pressed/selected tint 与背景共享同一 retained state，因此图标始终居中于
 对应 chrome；选中工具继续由 RadioButton 状态表达，视觉统一采用无 indicator 的 SegmentedButton chrome。Header、92 px property label
 column 和 Search icon/TextEdit 统一密集工作台的对齐。Hierarchy filter 按 ASCII 大小写不敏感匹配 label，发布匹配项
 及其祖先，搜索期间不受 collapsed 分支遮挡，并按 stable ID 保留可见选择。
@@ -132,13 +136,15 @@ UTF-8 文本仍保留在 polite live-region semantics。Inspector 不再保留 `
 `--world2d-path=<UTF-8 path>` 与 `--world3d-path=<UTF-8 path>` 分别配置两个 pinned workspace session；已有文件按各自
 schema 原子加载为 clean baseline，不存在的路径保留为该 workspace 的新文档 Save target。每个 pinned/Catalog tab
 都有固定容量 session，独立持有 document key、strict UTF-8 path、target platform、loaded flag 与完整 canonical
-baseline。主 Command Bar 不显示可编辑路径：Save 只在 active document 已有路径且 dirty 时启用；Save As 对四类可写
+baseline。主 Command Bar 不显示可编辑路径：Document Toolbar 与 File menu 的 Save 只在 active document 已有路径且 dirty 时启用；Save As 对四类可写
 document 启用，Asset Inspector 保持只读。Windows 使用系统 native dialog；Linux 私有 adapter 使用 `zenity` 并在缺失时
 回退 `kdialog`。World2D 选择 `.tworld`、World3D 选择 `.tprefab`、SpriteAnimation 选择 `.tasset` 文件，TileMap 选择 package
 输出目录。取消 dialog 不修改 path、baseline、dirty、tab 或 selection；其他未支持平台返回 `Unsupported`，EditorApp
-显示明确失败反馈，不再把主工具栏输入框当作平台 fallback。Command Bar 的 grow spacer 保护右侧
-play/history/save controls。Document Tab 是 2D/3D workspace 与其他文档的唯一切换入口；每槽使用 170 px preferred、112 px minimum 和 shrink，未占用槽
-为 `Collapsed`，每次 refresh 都重新应用完整 slot layout，因此重新打开文档可恢复 `Visible`，不会保留旧折叠状态。
+显示明确失败反馈，不再把主工具栏输入框当作平台 fallback。Command Bar 使用等宽 grow 的左右 region，保持中央
+workspace selector 稳定居中并保护右侧 play controls。Document Tab 仅负责 scene/Catalog document；内建 pinned TileMap/Animation tab
+保留 session、dirty 与自动门禁所有权，但 UI 固定折叠，其中 TileMap 由 2D Viewport context 进入，Animation 由 Timeline 承载。
+每个可见槽使用 170 px preferred、112 px minimum 和 shrink，未占用及 context-only 槽为 `Collapsed`；每次 refresh
+都重新应用完整 slot layout，因此重新打开 Catalog document 可恢复 `Visible`，不会保留旧折叠状态。
 两个打开的 document 不得拥有相同文本路径。
 2D 的五个字段和 3D 的九个字段都通过显式 Apply 合并为一次 document revision；严格拒绝 trailing text、NaN 和 Infinity，
 拒绝时恢复 canonical 字段并保持 document/history/preview 不变。多选 batch 对每个 optional 缺失字段保留原值，并要求
@@ -169,8 +175,8 @@ scrim、surface、文案与 action，`color-picker` 用于确认 Inspector 的�
 空结果把 Hierarchy 明确切回 document root，不会用伪造 stable ID 恢复旧 viewport selection。只有 selection 实际变化才推进
 selection revision，活动 gizmo 通过该 revision 检测并安全取消。
 
-`EditorPlaySession` 已接入 Toolbar 的 Play/Pause/Step/Stop。Timeline 不再重复提供专用 Undo/Redo，动画文档统一走 Command Bar
-的 active-document Undo/Redo。启动时复制当前 2D snapshot 或 3D Prefab canonical bytes，
+`EditorPlaySession` 已接入 Toolbar 的 Play/Pause/Step/Stop。Timeline 不再重复提供专用 Undo/Redo，动画文档统一走
+Document Toolbar 或 Edit menu 的 active-document Undo/Redo。启动时复制当前 2D snapshot 或 3D Prefab canonical bytes，
 以有界 fixed-step clock 驱动隔离 preview；authoring document 不被 simulation 修改。play session 活跃期间锁定 authoring command
 与 document tab 切换，仍允许 viewport Focus；Stop 后丢弃隔离 snapshot 并从 canonical authoring document 重建 preview。
 
@@ -183,7 +189,8 @@ Editor 快捷键使用 frame action mapping：`Ctrl+S` Save、`Ctrl+Shift+S` Sav
 gizmo、marquee、navigation 或停止 Play。
 不绑定裸 `Q/W/E/R`，避免 Inspector TextEdit 输入期间误触 viewport tool。
 
-2D workspace 激活 TileMap document tab 后开放 viewport `Tile Paint` / `Tile Erase` 和 Inspector 的 Paint、Erase、Toggle Layer、
+2D workspace 通过 Viewport Header 的 `TileMap` context 激活内建 TileMap session 后，开放 viewport `Tile Paint` / `Tile Erase`
+和 Inspector 的 Paint、Erase、Toggle Layer、
 Add Tile Layer、Add Object Layer、Cook Preview、Generate Gameplay 与 Bake Navigation。Pointer 坐标通过 committed viewport rect 和 Camera2D 投影换算到
 真实 cell；每次点击只发布一个完整 root/chunk revision，空 chunk 自动删除。TileMap Undo/Redo 与 World2D document
 history 相互独立；切到 3D 或离开 TileMap document 会关闭 tile tools。新增 Tile layer 会立即成为 active brush layer，
@@ -266,13 +273,13 @@ shell。Linux 定向编译和真实 helper 产品门禁仍是平台证据，但�
 ## Editor application layout
 
 ```text
-Command bar (brand/play/pause/step/stop/undo/redo/save/save-as)
-Document tabs (World2D/World3D/TileMap/Animation/Catalog assets/close)
+Command bar (brand/File/Edit/View/Help/centered 2D-3D workspace/play-pause-step-stop)
+Document toolbar (scene/Catalog tabs/close/undo/redo/save/save-as; built-in TileMap/Animation hidden)
 Workspace
   Left dock
     Hierarchy (filter/add/duplicate/delete/focus/virtual dynamic TreeView)
     Project Assets (All/2D/3D/Media/compact virtual grid/new/open/import/refresh/collapsed-empty imports)
-  Active 2D/3D viewport (breadcrumb/view mode/transform/snap/marquee/tile/frame/zoom/preview canvas/footer)
+  Active 2D/3D viewport (2D Scene-TileMap context/breadcrumb/view mode/transform/snap/marquee/tile/frame/zoom/preview canvas/footer)
   Inspector dock (scrollable identity/transform/components/hierarchy/TileMap/document/36px dependency list)
 SpriteAnimationClip Timeline (frames/playback/mode/duration/reorder/event markers/cook)
 Status bar (schema/entities/revision/preview/selection)

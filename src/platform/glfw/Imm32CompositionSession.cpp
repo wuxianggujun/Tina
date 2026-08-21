@@ -73,7 +73,7 @@ Core::Result<Imm32CompositionEvent> Imm32CompositionSession::updatePreedit(
 std::optional<Imm32CompositionEvent> Imm32CompositionSession::end(
     std::string_view committedUtf8) noexcept
 {
-    if (!active_) {
+    if (!active_ && committedUtf8.empty()) {
         return std::nullopt;
     }
     Imm32CompositionEvent event{

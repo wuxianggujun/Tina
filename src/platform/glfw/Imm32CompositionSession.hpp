@@ -40,7 +40,7 @@ class Imm32CompositionSession final {
         u32 cursorCodepoint) noexcept;
 
     // Ends an active composition and optionally carries a commit payload.
-    // Without an active session, returns nullopt (nothing to end).
+    // A non-empty direct commit is emitted even when the IME skipped preedit.
     [[nodiscard]] std::optional<Imm32CompositionEvent> end(
         std::string_view committedUtf8 = {}) noexcept;
 

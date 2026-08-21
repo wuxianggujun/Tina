@@ -143,6 +143,7 @@ inline constexpr u32 AuthoringEntityCapacity = 16;
 inline constexpr u32 InitialAuthoringEntityCount = 5;
 inline constexpr u32 AnimationVisibleFrameSlots = 6;
 inline constexpr u32 DocumentTabSlots = 6;
+inline constexpr u32 MainMenuCount = 4;
 inline constexpr u32 AutomaticColorPickerVisibleStage = 52;
 inline constexpr u32 AutomaticFinalSelectionCommitStage = 56;
 inline constexpr u32 AutomaticAuthoringStageCount = 57;
@@ -239,6 +240,13 @@ enum class WorkspaceMode : u8 {
     World2D,
     World3D,
 };
+[[nodiscard]] inline bool isContextOnlyDocumentTab(
+    const Tina::Editor::EditorDocumentTabDesc& tab) noexcept
+{
+    return tab.pinned &&
+           (tab.key.kind == Tina::Editor::EditorDocumentKind::TileMap2D ||
+            tab.key.kind == Tina::Editor::EditorDocumentKind::SpriteAnimation2D);
+}
 enum class RgbaCaptureStage : u8 {
     Workspace,
     ColorPicker,
@@ -1628,6 +1636,7 @@ enum class EditorCommand : u32 {
     DirtyCloseSave,
     DirtyCloseDiscard,
     DirtyCloseCancel,
+    ShowAbout,
 };
 [[nodiscard]] inline bool editorShortcutStarted(
     const Tina::FrameActionSnapshot& snapshot,
@@ -2981,6 +2990,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
 
     [[nodiscard]] Tina::Core::Status buildCommandBarUi(UiBuildContext& ui, UI::UINodeId parent);
     [[nodiscard]] Tina::Core::Status buildDocumentTabsUi(UiBuildContext& ui, UI::UINodeId parent);
+    [[nodiscard]] Tina::Core::Status buildMainMenuOverlaysUi(
+        UiBuildContext& ui, UI::UINodeId parent);
     [[nodiscard]] Tina::Core::Status buildWorkspaceUi(UiBuildContext& ui, UI::UINodeId parent);
     [[nodiscard]] Tina::Core::Status buildLeftDockUi(
         UiBuildContext& ui, UI::UINodeId parent, UI::UINodeId& leftDock);
@@ -3015,6 +3026,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] Tina::Core::Status updateHierarchySearch(
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status updateSnackbarUi(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status processPendingMainMenuToggle(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status refreshMainMenuUi(
         Tina::PrimaryWindowUITreeUpdater& tree);
     bool queueEditorCommand(EditorCommand command) noexcept;
     void queueViewportToolMode(ViewportToolMode mode) noexcept;
@@ -3561,6 +3576,26 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId pauseButton_{};
     UI::UINodeId stepButton_{};
     UI::UINodeId stopButton_{};
+    std::array<UI::UINodeId, MainMenuCount> mainMenuAnchors_{};
+    std::array<UI::UINodeId, MainMenuCount> mainMenus_{};
+    std::array<UI::UINodeId, 2> workspaceModeButtons_{};
+    std::array<UI::UINodeId, 2> viewportContextButtons_{};
+    std::array<UI::UILayoutStyle, 2> viewportContextButtonLayouts_{};
+    UI::UINodeId fileCreateProjectMenuItem_{};
+    UI::UINodeId fileOpenProjectMenuItem_{};
+    UI::UINodeId fileImportSourceMenuItem_{};
+    UI::UINodeId fileSaveMenuItem_{};
+    UI::UINodeId fileSaveAsMenuItem_{};
+    UI::UINodeId fileCloseDocumentMenuItem_{};
+    UI::UINodeId editUndoMenuItem_{};
+    UI::UINodeId editRedoMenuItem_{};
+    UI::UINodeId editDuplicateMenuItem_{};
+    UI::UINodeId editDeleteMenuItem_{};
+    UI::UINodeId viewWorkspaceSubmenu_{};
+    std::array<UI::UINodeId, 2> viewWorkspaceMenuItems_{};
+    UI::UINodeId viewFrameAllMenuItem_{};
+    UI::UINodeId viewFocusSelectionMenuItem_{};
+    UI::UINodeId helpAboutMenuItem_{};
     std::array<UI::UINodeId, 1> selectToolButtons_{};
     std::array<UI::UINodeId, 1> translateToolButtons_{};
     std::array<UI::UINodeId, 1> rotateToolButtons_{};
@@ -3733,6 +3768,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     std::optional<u64> observedSourceImportSelectionIndex_{};
     std::vector<std::string> inspectorDependencyLabels_{};
     std::optional<u32> pendingDocumentTabActivation_{};
+    std::optional<u32> pendingMainMenuToggle_{};
     std::optional<EditorCommand> pendingEditorCommand_{};
     std::optional<InspectorTransformStepRequest>
         pendingInspectorTransformStep_{};

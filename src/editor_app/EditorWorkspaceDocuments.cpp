@@ -11,8 +11,14 @@ auto EditorWorkspaceState::refreshDocumentTabsUi(
     if (!productTheme) {
         return Tina::Core::failure(std::move(productTheme.error()));
     }
+    u32 selectedIndex = static_cast<u32>(documentTabs_.activeIndex());
+    if (const auto* active = documentTabs_.activeTab();
+        active != nullptr && isContextOnlyDocumentTab(*active)) {
+        selectedIndex = 0U;
+    }
     for (u32 index = 0; index < documentTabButtons_.size(); ++index) {
         const auto* tab = documentTabs_.tab(index);
+        const bool visible = tab != nullptr && !isContextOnlyDocumentTab(*tab);
         std::string title = tab != nullptr ? tab->title : std::string{};
         if (tab != nullptr && tab->dirty) {
             title += " *";
@@ -21,18 +27,18 @@ auto EditorWorkspaceState::refreshDocumentTabsUi(
             return status;
         }
         if (auto status = tree.setRadioButtonSelected(
-                documentTabButtons_[index], tab != nullptr && index == documentTabs_.activeIndex());
+                documentTabButtons_[index], visible && index == selectedIndex);
             !status) {
             return status;
         }
-        if (auto status = tree.setEnabled(documentTabButtons_[index], tab != nullptr); !status) {
+        if (auto status = tree.setEnabled(documentTabButtons_[index], visible); !status) {
             return status;
         }
         if (auto status = tree.setLayoutStyle(
                 documentTabButtons_[index],
                 editorDocumentTabLayout(
-                    *productTheme, tab != nullptr ? UI::UIVisibility::Visible
-                                                  : UI::UIVisibility::Collapsed));
+                    *productTheme, visible ? UI::UIVisibility::Visible
+                                           : UI::UIVisibility::Collapsed));
             !status) {
             return status;
         }

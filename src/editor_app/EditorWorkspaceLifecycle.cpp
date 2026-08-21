@@ -743,6 +743,9 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
     if (!tree) {
         return Tina::Core::failure(std::move(tree.error()));
     }
+    if (auto status = processPendingMainMenuToggle(*tree); !status) {
+        return status;
+    }
     if (auto status = captureRequestedRgbaFrame(*tree); !status) {
         return status;
     }
@@ -1453,6 +1456,32 @@ auto EditorWorkspaceState::queueEditorCommand(EditorCommand command) noexcept ->
     }
     pendingEditorCommand_ = command;
     return true;
+}
+
+auto EditorWorkspaceState::processPendingMainMenuToggle(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    if (!pendingMainMenuToggle_.has_value()) {
+        return Tina::Core::success();
+    }
+    const u32 requestedIndex = *pendingMainMenuToggle_;
+    pendingMainMenuToggle_.reset();
+    if (requestedIndex >= mainMenus_.size()) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::Internal,
+            "Editor main-menu toggle index is outside the menu registry");
+    }
+    auto targetOpen = tree.isMenuOpen(mainMenus_[requestedIndex]);
+    if (!targetOpen) {
+        return Tina::Core::failure(std::move(targetOpen.error()));
+    }
+    for (u32 index = 0; index < mainMenus_.size(); ++index) {
+        const bool open = index == requestedIndex && !*targetOpen;
+        if (auto status = tree.setMenuOpen(mainMenus_[index], open); !status) {
+            return status;
+        }
+    }
+    return Tina::Core::success();
 }
 
 auto EditorWorkspaceState::processPendingInspectorTransformStep(

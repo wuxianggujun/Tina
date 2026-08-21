@@ -478,7 +478,9 @@ Intrinsic element text (Label/Button/TextEdit/Radio/Dropdown/List/Tree row)
 
 FreeType 是可选私有 rasterizer。字体 fixture 优先由 `TINA_UI_FONT_PATH` 注入；未加载字体时 placeholder
 路径不能冒充 CJK 视觉通过。Windows GLFW adapter 已提供 IMM32 preedit/commit/cancel，以及由 committed
-caret geometry 驱动的 DPI-scaled composition/candidate placement；placement 清除会恢复 IMM32 默认策略。
+caret geometry 驱动的 DPI-scaled composition/candidate placement；poll-local 有界队列保留 composition 顺序、
+合并连续 progress，并支持无 preedit 的 direct result commit，失焦不会在 Cancel 后补发旧 progress。
+placement 清除会恢复 IMM32 默认策略。
 Linux 当前只保证 committed text，原生 XIM/Wayland preedit/candidate placement 仍后置；Windows 真机候选窗
 跟随/提交/取消/失焦人工证据见 `TEXT-001`。
 
@@ -624,7 +626,7 @@ straight-alpha RGBA 在 shader 中 premultiply 后再应用 committed tint，继
 | `Panel` | 容器和布局 | `UIBoxPaint` 的 SolidQuad；默认允许后代越过自身 border-box，`clipDescendants` 可选择 axis-aligned 后代裁剪 |
 | `Modal` | committed Focus/Input scope、下层输入 barrier、Dialog semantics | Theme surface chrome；布局/内容由 retained 子树组合 |
 | `Label` | 只读 UTF-8 文本 | Glyph quads；没有可用字体时为确定性的 placeholder SolidQuad |
-| `Button` | Pointer、Tab、Enter/Space/KeypadEnter、Gamepad South | 默认 Tonal；Primary/Danger 为强调填充，Outlined 保留边界，Text 仅在交互态显示 state layer；统一使用 `UIButtonPaint` 状态色 + 文本 |
+| `Button` | Pointer、Tab、Enter/Space/KeypadEnter、Gamepad South | 默认 Tonal；Primary/Danger 为强调填充，Outlined 保留边界，Text 仅在交互态显示 state layer，disabled 仍保持透明背景并仅降低内容 alpha；统一使用 `UIButtonPaint` 状态色 + 文本/图标 tint |
 | `Checkbox` | checked 切换，复用 Button action/焦点路径 | 背景 SolidQuad + `UICheckboxPaint` 勾选指示块；标签由相邻 Label 组合 |
 | `Slider` | Pointer 横向拖动、Tab/空间导航/显式焦点，min/max/value/step | 背景 track + `UISliderPaint` filled track/thumb；状态优先级为 drag > focus > normal |
 | `TextEdit` | 默认单行；可选 LF/soft-wrap 多行、选择、grapheme 对齐光标、IME | `UIBoxPaint` 背景 + `UITextEditPaint` hover/press/focus/disabled、selection highlight 与 caret + 按 visual row 的文本 Glyph/placeholder |

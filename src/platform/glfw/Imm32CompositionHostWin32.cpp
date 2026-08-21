@@ -70,8 +70,7 @@ void Imm32CompositionHostWin32::detach() noexcept
     }
     RemovePropW(hwnd_, kHostPropName);
     static_cast<void>(session_.cancel());
-    hasPending_ = false;
-    pending_ = {};
+    clearPending();
     textInputPlacement_.reset();
     hwnd_ = nullptr;
     previousProc_ = nullptr;
@@ -137,12 +136,15 @@ void Imm32CompositionHostWin32::applyTextInputPlacement(HIMC context) noexcept
 std::optional<Imm32CompositionHostWin32::Pending>
 Imm32CompositionHostWin32::takePending() noexcept
 {
-    if (!hasPending_) {
+    if (pendingEventCount_ == 0U) {
         return std::nullopt;
     }
-    hasPending_ = false;
-    Pending out = std::move(pending_);
-    pending_ = {};
+    Pending out = std::move(pendingEvents_[0]);
+    for (usize index = 1; index < pendingEventCount_; ++index) {
+        pendingEvents_[index - 1U] = std::move(pendingEvents_[index]);
+    }
+    --pendingEventCount_;
+    pendingEvents_[pendingEventCount_] = {};
     // Rebind string_views to the moved storage.
     out.composition.preeditUtf8 = out.preeditStorage;
     out.composition.committedUtf8 = out.commitStorage;
@@ -152,6 +154,7 @@ Imm32CompositionHostWin32::takePending() noexcept
 std::optional<Imm32CompositionEvent>
 Imm32CompositionHostWin32::onFocusLost() noexcept
 {
+    clearPending();
     return session_.onFocusLost();
 }
 
@@ -160,12 +163,43 @@ void Imm32CompositionHostWin32::publish(
     std::string preedit,
     std::string commit) noexcept
 {
-    pending_.preeditStorage = std::move(preedit);
-    pending_.commitStorage = std::move(commit);
-    pending_.composition = event;
-    pending_.composition.preeditUtf8 = pending_.preeditStorage;
-    pending_.composition.committedUtf8 = pending_.commitStorage;
-    hasPending_ = true;
+    if (event.stage == TextCompositionStage::Updated &&
+        pendingEventCount_ != 0U) {
+        Pending& previous = pendingEvents_[pendingEventCount_ - 1U];
+        if (previous.composition.stage == TextCompositionStage::Started ||
+            previous.composition.stage == TextCompositionStage::Updated) {
+            event.stage = previous.composition.stage;
+            previous.preeditStorage = std::move(preedit);
+            previous.commitStorage = std::move(commit);
+            previous.composition = event;
+            return;
+        }
+    }
+
+    usize slot = pendingEventCount_;
+    if (pendingEventCount_ < pendingEvents_.size()) {
+        ++pendingEventCount_;
+    } else if (event.stage == TextCompositionStage::Started ||
+               event.stage == TextCompositionStage::Updated) {
+        return;
+    } else {
+        for (usize index = 1; index < pendingEventCount_; ++index) {
+            pendingEvents_[index - 1U] = std::move(pendingEvents_[index]);
+        }
+        slot = pendingEventCount_ - 1U;
+    }
+    Pending& pending = pendingEvents_[slot];
+    pending.preeditStorage = std::move(preedit);
+    pending.commitStorage = std::move(commit);
+    pending.composition = event;
+}
+
+void Imm32CompositionHostWin32::clearPending() noexcept
+{
+    for (usize index = 0; index < pendingEventCount_; ++index) {
+        pendingEvents_[index] = {};
+    }
+    pendingEventCount_ = 0U;
 }
 
 bool Imm32CompositionHostWin32::readImmString(

@@ -82,7 +82,9 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         command == EditorCommand::SceneFocus ||
         command == EditorCommand::ViewportCyclePreset ||
         command == EditorCommand::ViewportResetView;
-    if (playSessionActive() && !playCommand && !previewNavigationCommand) {
+    const bool informationalCommand = command == EditorCommand::ShowAbout;
+    if (playSessionActive() && !playCommand && !previewNavigationCommand &&
+        !informationalCommand) {
         return Tina::Core::failure(
             Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
             "Editor authoring commands are locked while the isolated play session is active");
@@ -1175,6 +1177,10 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         break;
     case EditorCommand::DirtyCloseCancel:
         status = cancelDirtyClose(tree);
+        break;
+    case EditorCommand::ShowAbout:
+        authoringFeedback_ =
+            "Tina Editor | C++23 retained UI | 2D and 3D authoring runtime";
         break;
     }
     if (!status) {

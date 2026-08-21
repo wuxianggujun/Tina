@@ -523,6 +523,7 @@ struct UIButtonChrome final {
     chrome.states.hoveredBackgroundColor = stateLayer(theme.colors.surface, theme.colors.onSurface, theme.states.hoveredAlpha);
     chrome.states.focusedBackgroundColor = stateLayer(theme.colors.surface, theme.colors.onSurface, theme.states.focusVisibleAlpha);
     chrome.states.pressedBackgroundColor = stateLayer(theme.colors.surface, theme.colors.primary, theme.states.pressedAlpha);
+    chrome.states.disabledBackgroundColor = scaleColorAlpha(theme.colors.surface, 1);
     chrome.label.color = theme.colors.onSurfaceVariant;
     return chrome;
 }

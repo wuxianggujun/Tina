@@ -1,8 +1,8 @@
 #pragma once
 
 // Private Win32 IMM32 host for the GLFW platform backend. Translates IMM
-// composition messages into Imm32CompositionEvent values stored in a
-// poll-local pending slot. Public Platform headers never include IMM32.
+// composition messages into ordered Imm32CompositionEvent values stored in a
+// bounded poll-local queue. Public Platform headers never include IMM32.
 
 #include "Imm32CompositionSession.hpp"
 #include "GlfwTextInputPlacement.hpp"
@@ -35,8 +35,8 @@ class Imm32CompositionHostWin32 final {
     [[nodiscard]] bool attached() const noexcept { return hwnd_ != nullptr; }
     [[nodiscard]] Imm32CompositionSession& session() noexcept { return session_; }
 
-    // Drain at most one pending composition event produced by the subclass
-    // during glfwPollEvents / DefWindowProc. May also yield a commit string.
+    // Drain one pending composition event produced by the subclass during
+    // glfwPollEvents / DefWindowProc. May also yield a commit string.
     struct Pending final {
         Imm32CompositionEvent composition{};
         // Owned copy so the event's string_view remains valid until takePending.
@@ -51,7 +51,10 @@ class Imm32CompositionHostWin32 final {
     LRESULT subclassProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam) noexcept;
 
   private:
+    static constexpr usize MaximumPendingEvents = 32;
+
     void publish(Imm32CompositionEvent event, std::string preedit, std::string commit) noexcept;
+    void clearPending() noexcept;
     [[nodiscard]] bool readImmString(
         HIMC context,
         DWORD index,
@@ -60,8 +63,8 @@ class Imm32CompositionHostWin32 final {
     HWND hwnd_ = nullptr;
     WNDPROC previousProc_ = nullptr;
     Imm32CompositionSession session_{};
-    bool hasPending_ = false;
-    Pending pending_{};
+    std::array<Pending, MaximumPendingEvents> pendingEvents_{};
+    usize pendingEventCount_ = 0;
     std::array<wchar_t, DefaultImePreeditByteCapacity> wideScratch_{};
     std::optional<GlfwTextInputPlacementPixels> textInputPlacement_{};
 

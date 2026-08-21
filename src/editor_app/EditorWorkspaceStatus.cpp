@@ -17,7 +17,10 @@ auto EditorWorkspaceState::reportAuthoringFailure(
 
 auto EditorWorkspaceState::refreshWorkspaceChrome(Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status{
     const bool world2D = workspaceMode_ == WorkspaceMode::World2D;
-    std::string breadcrumb = world2D ? "Scene / World2D" : "Scene / World3D";
+    const bool tileMapContext = tileMapEditingContext();
+    std::string breadcrumb = world2D
+                                 ? (tileMapContext ? "2D / TileMap" : "2D / Scene")
+                                 : "3D / Scene";
     if (stableEntityIdForHierarchyItem(selectionKey_) != 0U) {
         breadcrumb += " / ";
         breadcrumb += hierarchyDisplayLabel(selectionKey_);
@@ -29,7 +32,9 @@ auto EditorWorkspaceState::refreshWorkspaceChrome(Tina::PrimaryWindowUITreeUpdat
     if (auto status = refreshViewportViewModeUi(tree); !status) {
         return status;
     }
-    if (auto status = tree.setText(gridStatus_, world2D ? "Tile Grid 1 m" : "Grid 1 m"); !status) {
+    if (auto status = tree.setText(
+            gridStatus_, tileMapContext ? "Tile Grid 1 m" : "Grid 1 m");
+        !status) {
         return status;
     }
     std::string assetStatus = assetResources_.projectCatalogConfigured
@@ -55,6 +60,95 @@ auto EditorWorkspaceState::refreshWorkspaceChrome(Tina::PrimaryWindowUITreeUpdat
         return status;
     }
     return Tina::Core::success();
+}
+
+auto EditorWorkspaceState::refreshMainMenuUi(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    const bool world2D = workspaceMode_ == WorkspaceMode::World2D;
+    const bool editing = authoringEnabled();
+    const bool tileMapContext = tileMapEditingContext();
+    for (u32 index = 0; index < workspaceModeButtons_.size(); ++index) {
+        if (auto status = tree.setRadioButtonSelected(
+                workspaceModeButtons_[index], index == (world2D ? 0U : 1U));
+            !status) {
+            return status;
+        }
+        if (auto status = tree.setEnabled(workspaceModeButtons_[index], editing);
+            !status) {
+            return status;
+        }
+    }
+    if (auto status = tree.setMenuItemChecked(
+            viewWorkspaceMenuItems_[world2D ? 0U : 1U], true);
+        !status) {
+        return status;
+    }
+    for (const UI::UINodeId item : viewWorkspaceMenuItems_) {
+        if (auto status = tree.setEnabled(item, editing); !status) {
+            return status;
+        }
+    }
+
+    for (u32 index = 0; index < viewportContextButtons_.size(); ++index) {
+        viewportContextButtonLayouts_[index].visibility =
+            world2D ? UI::UIVisibility::Visible
+                    : UI::UIVisibility::Collapsed;
+        if (auto status = tree.setLayoutStyle(
+                viewportContextButtons_[index],
+                viewportContextButtonLayouts_[index]);
+            !status) {
+            return status;
+        }
+        if (auto status = tree.setRadioButtonSelected(
+                viewportContextButtons_[index],
+                index == (tileMapContext ? 1U : 0U));
+            !status) {
+            return status;
+        }
+    }
+    if (auto status = tree.setEnabled(
+            viewportContextButtons_[0], editing && world2D);
+        !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(
+            viewportContextButtons_[1],
+            editing && world2D &&
+                documentTabs_.find(tileMapDocumentOwnerKey_).has_value());
+        !status) {
+        return status;
+    }
+
+    const auto mirrorEnabled = [&tree](
+                                   UI::UINodeId source,
+                                   UI::UINodeId target) -> Tina::Core::Status {
+        auto enabled = tree.isEnabled(source);
+        if (!enabled) {
+            return Tina::Core::failure(std::move(enabled.error()));
+        }
+        return tree.setEnabled(target, *enabled);
+    };
+    const std::array mirroredItems{
+        std::pair{createProjectButton_, fileCreateProjectMenuItem_},
+        std::pair{openProjectButton_, fileOpenProjectMenuItem_},
+        std::pair{importSourceButton_, fileImportSourceMenuItem_},
+        std::pair{saveButton_, fileSaveMenuItem_},
+        std::pair{saveAsButton_, fileSaveAsMenuItem_},
+        std::pair{closeDocumentButton_, fileCloseDocumentMenuItem_},
+        std::pair{undoButton_, editUndoMenuItem_},
+        std::pair{redoButton_, editRedoMenuItem_},
+        std::pair{duplicateEntityButton_, editDuplicateMenuItem_},
+        std::pair{deleteEntityButton_, editDeleteMenuItem_},
+        std::pair{frameAllButton_, viewFrameAllMenuItem_},
+        std::pair{focusEntityButton_, viewFocusSelectionMenuItem_},
+    };
+    for (const auto& [source, target] : mirroredItems) {
+        if (auto status = mirrorEnabled(source, target); !status) {
+            return status;
+        }
+    }
+    return tree.setEnabled(helpAboutMenuItem_, true);
 }
 
 auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status{
@@ -384,7 +478,10 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
         !status) {
         return status;
     }
-    return refreshPlaySessionUi(tree);
+    if (auto status = refreshPlaySessionUi(tree); !status) {
+        return status;
+    }
+    return refreshMainMenuUi(tree);
 }
 
 auto EditorWorkspaceState::refreshPlaySessionUi(

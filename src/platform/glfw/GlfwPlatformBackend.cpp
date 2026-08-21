@@ -1149,13 +1149,6 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
             return;
         }
 #if defined(_WIN32)
-        // IMM32 result path already published TextInput; skip the follow-up
-        // WM_CHAR/glfw char that would double-commit the same text.
-        if (imeSuppressNextCharacter_)
-        {
-            imeSuppressNextCharacter_ = false;
-            return;
-        }
         if (imeHost_.session().active())
         {
             return;
@@ -1474,6 +1467,12 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         input_.heldKeys.reset();
         input_.pointer.heldButtons.reset();
 #if defined(_WIN32)
+        if (collectingFrame_)
+        {
+            // Preserve every IMM event that preceded focus loss in this poll;
+            // onFocusLost then clears only state that has not been published.
+            static_cast<void>(drainImeCompositionEvents());
+        }
         if (auto cancelled = imeHost_.onFocusLost(); cancelled.has_value() && collectingFrame_)
         {
             recordAppend(frameBuilder_.appendInputTransition(TextCompositionTransition{
@@ -1498,25 +1497,22 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
 #if defined(_WIN32)
     [[nodiscard]] Core::Status drainImeCompositionEvents()
     {
-        auto pending = imeHost_.takePending();
-        if (!pending.has_value())
+        while (auto pending = imeHost_.takePending())
         {
-            return Core::success();
-        }
-        recordAppend(frameBuilder_.appendInputTransition(TextCompositionTransition{
-            .window = windowId_,
-            .preeditUtf8 = pending->composition.preeditUtf8,
-            .cursorCodepoint = pending->composition.cursorCodepoint,
-            .stage = pending->composition.stage,
-        }));
-        if (pending->composition.stage == TextCompositionStage::Ended
-            && !pending->composition.committedUtf8.empty())
-        {
-            recordAppend(frameBuilder_.appendInputTransition(TextInputTransition{
+            recordAppend(frameBuilder_.appendInputTransition(TextCompositionTransition{
                 .window = windowId_,
-                .committedUtf8 = pending->composition.committedUtf8,
+                .preeditUtf8 = pending->composition.preeditUtf8,
+                .cursorCodepoint = pending->composition.cursorCodepoint,
+                .stage = pending->composition.stage,
             }));
-            imeSuppressNextCharacter_ = true;
+            if (pending->composition.stage == TextCompositionStage::Ended
+                && !pending->composition.committedUtf8.empty())
+            {
+                recordAppend(frameBuilder_.appendInputTransition(TextInputTransition{
+                    .window = windowId_,
+                    .committedUtf8 = pending->composition.committedUtf8,
+                }));
+            }
         }
         if (callbackFailure_ != CallbackAssemblyFailure::None)
         {
@@ -1693,7 +1689,6 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
     bool closeRequested_ = false;
 #if defined(_WIN32)
     Detail::Imm32CompositionHostWin32 imeHost_{};
-    bool imeSuppressNextCharacter_ = false;
 #endif
 #if defined(TINA_PLATFORM_GLFW_ENABLE_TEST_ACCESS)
     static constexpr usize MaximumQueuedPointerEventsForTest = 16;

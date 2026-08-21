@@ -212,26 +212,78 @@ auto EditorWorkspaceState::buildCommandBarUi(UiBuildContext& ui, UI::UINodeId pa
         return status;
     }
 
+    UI::UILayoutStyle sideRegionStyle{};
+    sideRegionStyle.flexItem.grow = 1.0F;
+    sideRegionStyle.flexItem.shrink = 1.0F;
+    sideRegionStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
+    sideRegionStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+    sideRegionStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+    sideRegionStyle.flexContainer.gap.column = ui.productTheme.spacing.space4;
+
+    UI::UINodeId leftRegion{};
+    if (auto status = storeNode(
+            ui.createPanel(toolbar, sideRegionStyle), leftRegion);
+        !status) {
+        return status;
+    }
     UI::UINodeId toolbarBrand{};
-    if (auto status = storeNode(ui.createLabel(toolbar, "Tina Editor", fixedSize(132.0F, 26.0F), ui.titleText),
+    if (auto status = storeNode(ui.createLabel(leftRegion, "Tina Editor", fixedSize(118.0F, 26.0F), ui.titleText),
                                 toolbarBrand);
         !status) {
         return status;
     }
-    UI::UINodeId toolbarSpacer{};
-    UI::UILayoutStyle toolbarSpacerStyle{};
-    toolbarSpacerStyle.flexItem.grow = 1.0F;
-    toolbarSpacerStyle.flexItem.shrink = 1.0F;
-    toolbarSpacerStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
+
+    constexpr std::array<std::string_view, MainMenuCount> menuLabels{
+        "File", "Edit", "View", "Help"};
+    constexpr std::array<float, MainMenuCount> menuWidths{44.0F, 44.0F, 48.0F, 48.0F};
+    for (u32 index = 0; index < MainMenuCount; ++index) {
+        if (auto status = storeNode(
+                ui.createButton(
+                    leftRegion, menuLabels[index],
+                    fixedSize(menuWidths[index], ui.productTheme.controls.buttonHeight),
+                    true, UI::UIStyleRoleId::ButtonText),
+                mainMenuAnchors_[index]);
+            !status) {
+            return status;
+        }
+    }
+
+    UI::UINodeId workspaceGroup{};
     if (auto status = storeNode(
-            ui.createPanel(toolbar, toolbarSpacerStyle), toolbarSpacer);
+            EditorToolbarGroup::Build(ui.tree, toolbar, ui.productTheme),
+            workspaceGroup);
         !status) {
         return status;
     }
-    const WorkspaceSessionState& initialSession = activeWorkspaceSession();
+    constexpr std::array<std::string_view, 2> workspaceLabels{"2D", "3D"};
+    for (u32 index = 0; index < workspaceModeButtons_.size(); ++index) {
+        if (auto status = storeNode(
+                ui.createSegmentedButton(
+                    workspaceGroup, workspaceLabels[index],
+                    fixedSize(48.0F, ui.productTheme.controls.buttonHeight)),
+                workspaceModeButtons_[index]);
+            !status) {
+            return status;
+        }
+        if (auto status = ui.tree.setRadioButtonSelected(
+                workspaceModeButtons_[index],
+                index == (workspaceMode_ == WorkspaceMode::World2D ? 0U : 1U));
+            !status) {
+            return status;
+        }
+    }
+
+    UI::UILayoutStyle rightRegionStyle = sideRegionStyle;
+    rightRegionStyle.flexContainer.justifyContent = UI::UIJustifyContent::End;
+    UI::UINodeId rightRegion{};
+    if (auto status = storeNode(
+            ui.createPanel(toolbar, rightRegionStyle), rightRegion);
+        !status) {
+        return status;
+    }
     UI::UINodeId playGroup{};
     if (auto status = storeNode(EditorToolbarGroup::Build(
-                                    ui.tree, toolbar, ui.productTheme),
+                                    ui.tree, rightRegion, ui.productTheme),
                                 playGroup);
         !status) {
         return status;
@@ -261,45 +313,6 @@ auto EditorWorkspaceState::buildCommandBarUi(UiBuildContext& ui, UI::UINodeId pa
         !status) {
         return status;
     }
-    if (auto status = appendVerticalDivider(
-            ui.tree, toolbar, ui.productTheme.controls.buttonHeight);
-        !status) {
-        return status;
-    }
-    UI::UINodeId historyGroup{};
-    if (auto status = storeNode(EditorToolbarGroup::Build(
-                                    ui.tree, toolbar, ui.productTheme),
-                                historyGroup);
-        !status) {
-        return status;
-    }
-    if (auto status = storeNode(ui.createIconButton(
-                                    historyGroup, EditorIcon::Undo, "Undo"),
-                                undoButton_);
-        !status) {
-        return status;
-    }
-    if (auto status = storeNode(ui.createIconButton(
-                                    historyGroup, EditorIcon::Redo, "Redo"),
-                                redoButton_);
-        !status) {
-        return status;
-    }
-    if (auto status = storeNode(ui.createIconButton(
-                                    historyGroup, EditorIcon::Save, "Save", {},
-                                    initialSession.hasDocumentPath(),
-                                    UI::UIButtonVariant::Outlined),
-                                saveButton_);
-        !status) {
-        return status;
-    }
-    if (auto status = storeNode(ui.createIconButton(
-                                    historyGroup, EditorIcon::SaveAs, "Save As", {}, true,
-                                    UI::UIButtonVariant::Outlined),
-                                saveAsButton_);
-        !status) {
-        return status;
-    }
 
     return Tina::Core::success();
 }
@@ -322,14 +335,15 @@ auto EditorWorkspaceState::buildDocumentTabsUi(UiBuildContext& ui, UI::UINodeId 
     }
     for (u32 index = 0; index < DocumentTabSlots; ++index) {
         const auto* tab = documentTabs_.tab(index);
+        const bool visible = tab != nullptr && !isContextOnlyDocumentTab(*tab);
         if (auto status = storeNode(ui.createSegmentedButton(documentTabsBar,
                                                           tab != nullptr ? tab->title : std::string_view{},
                                                           editorDocumentTabLayout(
                                                               ui.productTheme,
-                                                              tab != nullptr
+                                                              visible
                                                                   ? UI::UIVisibility::Visible
                                                                   : UI::UIVisibility::Collapsed),
-                                                          tab != nullptr),
+                                                          visible),
                                     documentTabButtons_[index]);
             !status) {
             return status;
@@ -344,6 +358,58 @@ auto EditorWorkspaceState::buildDocumentTabsUi(UiBuildContext& ui, UI::UINodeId 
                                     documentTabsBar, EditorIcon::Close,
                                     "Close document", {}, false),
                                 closeDocumentButton_);
+        !status) {
+        return status;
+    }
+
+    UI::UINodeId documentBarSpacer{};
+    UI::UILayoutStyle documentBarSpacerStyle{};
+    documentBarSpacerStyle.flexItem.grow = 1.0F;
+    documentBarSpacerStyle.flexItem.shrink = 1.0F;
+    documentBarSpacerStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
+    if (auto status = storeNode(
+            ui.createPanel(documentTabsBar, documentBarSpacerStyle),
+            documentBarSpacer);
+        !status) {
+        return status;
+    }
+    if (auto status = appendVerticalDivider(
+            ui.tree, documentTabsBar,
+            ui.productTheme.controls.iconButtonExtent);
+        !status) {
+        return status;
+    }
+    UI::UINodeId historyGroup{};
+    if (auto status = storeNode(EditorToolbarGroup::Build(
+                                    ui.tree, documentTabsBar,
+                                    ui.productTheme),
+                                historyGroup);
+        !status) {
+        return status;
+    }
+    if (auto status = storeNode(ui.createIconButton(
+                                    historyGroup, EditorIcon::Undo, "Undo"),
+                                undoButton_);
+        !status) {
+        return status;
+    }
+    if (auto status = storeNode(ui.createIconButton(
+                                    historyGroup, EditorIcon::Redo, "Redo"),
+                                redoButton_);
+        !status) {
+        return status;
+    }
+    const WorkspaceSessionState& initialSession = activeWorkspaceSession();
+    if (auto status = storeNode(ui.createIconButton(
+                                    historyGroup, EditorIcon::Save, "Save", {},
+                                    initialSession.hasDocumentPath()),
+                                saveButton_);
+        !status) {
+        return status;
+    }
+    if (auto status = storeNode(ui.createIconButton(
+                                    historyGroup, EditorIcon::SaveAs, "Save As"),
+                                saveAsButton_);
         !status) {
         return status;
     }
@@ -826,6 +892,39 @@ auto EditorWorkspaceState::buildViewportUi(
     viewportHeaderStyle.flexContainer.gap.column = ui.productTheme.spacing.space4;
     if (auto status = storeNode(ui.createPanel(center, viewportHeaderStyle),
                                 viewportHeader);
+        !status) {
+        return status;
+    }
+    viewportContextButtonLayouts_[0] = fixedSize(
+        58.0F, ui.productTheme.controls.buttonHeight);
+    viewportContextButtonLayouts_[1] = fixedSize(
+        72.0F, ui.productTheme.controls.buttonHeight);
+    for (UI::UILayoutStyle& layout : viewportContextButtonLayouts_) {
+        layout.visibility = workspaceMode_ == WorkspaceMode::World2D
+                                ? UI::UIVisibility::Visible
+                                : UI::UIVisibility::Collapsed;
+    }
+    if (auto status = storeNode(
+            ui.createSegmentedButton(
+                viewportHeader, "Scene", viewportContextButtonLayouts_[0]),
+            viewportContextButtons_[0]);
+        !status) {
+        return status;
+    }
+    if (auto status = storeNode(
+            ui.createSegmentedButton(
+                viewportHeader, "TileMap", viewportContextButtonLayouts_[1]),
+            viewportContextButtons_[1]);
+        !status) {
+        return status;
+    }
+    if (auto status = ui.tree.setRadioButtonSelected(
+            viewportContextButtons_[0], !tileMapEditingContext());
+        !status) {
+        return status;
+    }
+    if (auto status = ui.tree.setRadioButtonSelected(
+            viewportContextButtons_[1], tileMapEditingContext());
         !status) {
         return status;
     }
@@ -2207,6 +2306,184 @@ auto EditorWorkspaceState::buildStatusBarUi(UiBuildContext& ui, UI::UINodeId par
     return Tina::Core::success();
 }
 
+auto EditorWorkspaceState::buildMainMenuOverlaysUi(
+    UiBuildContext& ui, UI::UINodeId parent) -> Tina::Core::Status
+{
+    const auto createMenu = [&](u32 index, float width) -> Tina::Core::Status {
+        UI::UILayoutStyle layout{};
+        layout.size.width = UI::UILayoutLength::Px(width);
+        auto menu = ui.tree.createElement(
+            parent,
+            UI::makeMenuElement(
+                {.placement = UI::UIMenuPlacement::Below,
+                 .anchorGap = ui.productTheme.spacing.space1},
+                layout));
+        if (!menu) {
+            return Tina::Core::failure(std::move(menu.error()));
+        }
+        mainMenus_[index] = *menu;
+        return ui.tree.setMenuAnchor(mainMenus_[index], mainMenuAnchors_[index]);
+    };
+    constexpr std::array<float, MainMenuCount> menuWidths{
+        236.0F, 220.0F, 220.0F, 210.0F};
+    for (u32 index = 0; index < MainMenuCount; ++index) {
+        if (auto status = createMenu(index, menuWidths[index]); !status) {
+            return status;
+        }
+    }
+
+    const auto createMenuItem = [&](
+                                    UI::UINodeId menu, std::string_view text,
+                                    UI::UIMenuItemKind kind, UI::UINodeId& output,
+                                    bool enabled = true) -> Tina::Core::Status {
+        UI::UILayoutStyle layout{};
+        layout.size.height = UI::UILayoutLength::Px(
+            kind == UI::UIMenuItemKind::Separator
+                ? ui.productTheme.spacing.space4
+                : ui.productTheme.controls.menuItemHeight);
+        UI::UIElementDescriptor descriptor = UI::makeMenuItemElement(
+            text, {.kind = kind}, layout);
+        descriptor.enabled = enabled;
+        return storeNode(ui.tree.createElement(menu, descriptor), output);
+    };
+    const auto appendSeparator = [&](UI::UINodeId menu) -> Tina::Core::Status {
+        UI::UINodeId separator{};
+        return createMenuItem(
+            menu, {}, UI::UIMenuItemKind::Separator, separator, false);
+    };
+
+    constexpr u32 FileMenu = 0U;
+    constexpr u32 EditMenu = 1U;
+    constexpr u32 ViewMenu = 2U;
+    constexpr u32 HelpMenu = 3U;
+    if (auto status = createMenuItem(
+            mainMenus_[FileMenu], "New Project", UI::UIMenuItemKind::Command,
+            fileCreateProjectMenuItem_);
+        !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            mainMenus_[FileMenu], "Open Project", UI::UIMenuItemKind::Command,
+            fileOpenProjectMenuItem_);
+        !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            mainMenus_[FileMenu], "Import Source", UI::UIMenuItemKind::Command,
+            fileImportSourceMenuItem_);
+        !status) {
+        return status;
+    }
+    if (auto status = appendSeparator(mainMenus_[FileMenu]); !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            mainMenus_[FileMenu], "Save  Ctrl+S", UI::UIMenuItemKind::Command,
+            fileSaveMenuItem_);
+        !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            mainMenus_[FileMenu], "Save As  Ctrl+Shift+S",
+            UI::UIMenuItemKind::Command, fileSaveAsMenuItem_);
+        !status) {
+        return status;
+    }
+    if (auto status = appendSeparator(mainMenus_[FileMenu]); !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            mainMenus_[FileMenu], "Close Document",
+            UI::UIMenuItemKind::Command, fileCloseDocumentMenuItem_);
+        !status) {
+        return status;
+    }
+
+    if (auto status = createMenuItem(
+            mainMenus_[EditMenu], "Undo  Ctrl+Z", UI::UIMenuItemKind::Command,
+            editUndoMenuItem_);
+        !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            mainMenus_[EditMenu], "Redo  Ctrl+Y", UI::UIMenuItemKind::Command,
+            editRedoMenuItem_);
+        !status) {
+        return status;
+    }
+    if (auto status = appendSeparator(mainMenus_[EditMenu]); !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            mainMenus_[EditMenu], "Duplicate  Ctrl+D",
+            UI::UIMenuItemKind::Command, editDuplicateMenuItem_);
+        !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            mainMenus_[EditMenu], "Delete", UI::UIMenuItemKind::Command,
+            editDeleteMenuItem_);
+        !status) {
+        return status;
+    }
+
+    UI::UINodeId workspaceSubmenuItem{};
+    if (auto status = createMenuItem(
+            mainMenus_[ViewMenu], "Workspace",
+            UI::UIMenuItemKind::Submenu, workspaceSubmenuItem);
+        !status) {
+        return status;
+    }
+    UI::UILayoutStyle workspaceMenuLayout{};
+    workspaceMenuLayout.size.width = UI::UILayoutLength::Px(150.0F);
+    auto workspaceMenu = ui.tree.createElement(
+        parent,
+        UI::makeMenuElement(
+            {.placement = UI::UIMenuPlacement::Right,
+             .anchorGap = ui.productTheme.spacing.space1},
+            workspaceMenuLayout));
+    if (!workspaceMenu) {
+        return Tina::Core::failure(std::move(workspaceMenu.error()));
+    }
+    viewWorkspaceSubmenu_ = *workspaceMenu;
+    if (auto status = ui.tree.setMenuItemSubmenu(
+            workspaceSubmenuItem, viewWorkspaceSubmenu_);
+        !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            viewWorkspaceSubmenu_, "2D", UI::UIMenuItemKind::Radio,
+            viewWorkspaceMenuItems_[0]);
+        !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            viewWorkspaceSubmenu_, "3D", UI::UIMenuItemKind::Radio,
+            viewWorkspaceMenuItems_[1]);
+        !status) {
+        return status;
+    }
+    if (auto status = appendSeparator(mainMenus_[ViewMenu]); !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            mainMenus_[ViewMenu], "Frame All  Ctrl+0",
+            UI::UIMenuItemKind::Command, viewFrameAllMenuItem_);
+        !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            mainMenus_[ViewMenu], "Focus Selection  Ctrl+F",
+            UI::UIMenuItemKind::Command, viewFocusSelectionMenuItem_);
+        !status) {
+        return status;
+    }
+
+    return createMenuItem(
+        mainMenus_[HelpMenu], "About Tina Editor",
+        UI::UIMenuItemKind::Command, helpAboutMenuItem_);
+}
+
 auto EditorWorkspaceState::buildDirtyCloseModalUi(UiBuildContext& ui, UI::UINodeId parent) -> Tina::Core::Status
 {
     if (auto status = storeNode(
@@ -2537,6 +2814,67 @@ auto EditorWorkspaceState::registerUiCallbacks(UiBuildContext& ui) -> Tina::Core
                 queueEditorCommand(command);
             }});
     };
+    for (u32 index = 0; index < mainMenuAnchors_.size(); ++index) {
+        if (auto status = ui.tree.setButtonAction(
+                mainMenuAnchors_[index],
+                UI::UIButtonActionCallback{
+                    [this, index](const UI::UIButtonActionEvent&) noexcept {
+                        pendingMainMenuToggle_ = index;
+                    }});
+            !status) {
+            return status;
+        }
+    }
+    const std::array workspaceCommandBindings{
+        std::pair{workspaceModeButtons_[0], EditorCommand::SwitchToWorld2D},
+        std::pair{workspaceModeButtons_[1], EditorCommand::SwitchToWorld3D},
+        std::pair{viewWorkspaceMenuItems_[0], EditorCommand::SwitchToWorld2D},
+        std::pair{viewWorkspaceMenuItems_[1], EditorCommand::SwitchToWorld3D},
+    };
+    for (const auto& [button, command] : workspaceCommandBindings) {
+        if (auto status = bindEditorCommand(button, command); !status) {
+            return status;
+        }
+    }
+    if (auto status = bindEditorCommand(
+            viewportContextButtons_[0], EditorCommand::SwitchToWorld2D);
+        !status) {
+        return status;
+    }
+    if (auto status = ui.tree.setButtonAction(
+            viewportContextButtons_[1],
+            UI::UIButtonActionCallback{
+                [this](const UI::UIButtonActionEvent&) noexcept {
+                    const auto tileMapIndex =
+                        documentTabs_.find(tileMapDocumentOwnerKey_);
+                    if (tileMapIndex.has_value()) {
+                        pendingDocumentTabActivation_ =
+                            static_cast<u32>(*tileMapIndex);
+                    }
+                }});
+        !status) {
+        return status;
+    }
+    const std::array menuCommandBindings{
+        std::pair{fileCreateProjectMenuItem_, EditorCommand::CreateProject},
+        std::pair{fileOpenProjectMenuItem_, EditorCommand::OpenProject},
+        std::pair{fileImportSourceMenuItem_, EditorCommand::ImportSource},
+        std::pair{fileSaveMenuItem_, EditorCommand::Save},
+        std::pair{fileSaveAsMenuItem_, EditorCommand::SaveAs},
+        std::pair{fileCloseDocumentMenuItem_, EditorCommand::CloseActiveDocument},
+        std::pair{editUndoMenuItem_, EditorCommand::Undo},
+        std::pair{editRedoMenuItem_, EditorCommand::Redo},
+        std::pair{editDuplicateMenuItem_, EditorCommand::SceneDuplicate},
+        std::pair{editDeleteMenuItem_, EditorCommand::SceneDelete},
+        std::pair{viewFrameAllMenuItem_, EditorCommand::ViewportResetView},
+        std::pair{viewFocusSelectionMenuItem_, EditorCommand::SceneFocus},
+        std::pair{helpAboutMenuItem_, EditorCommand::ShowAbout},
+    };
+    for (const auto& [item, command] : menuCommandBindings) {
+        if (auto status = bindEditorCommand(item, command); !status) {
+            return status;
+        }
+    }
     const std::array sceneCommandBindings{
         std::pair{addEntityButton_, EditorCommand::SceneAdd},
         std::pair{duplicateEntityButton_, EditorCommand::SceneDuplicate},
@@ -3015,6 +3353,9 @@ auto EditorWorkspaceState::onEnter(Tina::GameStateEnterContext& context) -> Tina
         return status;
     }
     if (auto status = buildStatusBarUi(ui, rootNode); !status) {
+        return status;
+    }
+    if (auto status = buildMainMenuOverlaysUi(ui, rootNode); !status) {
         return status;
     }
     if (auto status = buildSnackbarUi(ui, rootNode); !status) {
