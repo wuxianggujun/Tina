@@ -84,19 +84,19 @@ TEST(NullRenderDeviceMeshTest, CreateBindDestroyLifecycle)
     auto foreignBinding = (*device)->setMesh3DBinding(2U, *foreignMesh);
     ASSERT_FALSE(foreignBinding.has_value());
     EXPECT_EQ(foreignBinding.error().code, Render::RenderErrorCode::MeshNotFound);
-    auto foreignDestroy = (*device)->destroyStaticMesh(*foreignMesh);
+    auto foreignDestroy = (*device)->destroyGpuMesh(*foreignMesh);
     ASSERT_FALSE(foreignDestroy.has_value());
     EXPECT_EQ(foreignDestroy.error().code, Render::RenderErrorCode::MeshNotFound);
 
     ASSERT_TRUE((*device)->setMesh3DBinding(2U, *mesh).has_value());
     ASSERT_TRUE((*device)->setMesh3DBinding(2U, {}).has_value());
-    ASSERT_TRUE((*device)->destroyStaticMesh(*mesh).has_value());
+    ASSERT_TRUE((*device)->destroyGpuMesh(*mesh).has_value());
     EXPECT_EQ((*device)->statistics().liveResources, 0U);
 
-    auto stale = (*device)->destroyStaticMesh(*mesh);
+    auto stale = (*device)->destroyGpuMesh(*mesh);
     ASSERT_FALSE(stale.has_value());
     EXPECT_EQ(stale.error().code, Render::RenderErrorCode::MeshNotFound);
-    ASSERT_TRUE((*foreignDevice)->destroyStaticMesh(*foreignMesh).has_value());
+    ASSERT_TRUE((*foreignDevice)->destroyGpuMesh(*foreignMesh).has_value());
 }
 
 TEST(NullRenderDeviceMeshTest, RejectsBadUpload)
@@ -171,7 +171,7 @@ TEST(NullRenderDeviceMeshTest, TangentLayoutUsesValidatedUploadPath)
 
     Core::u32 releases = 0;
     Render::FramePin completionPin{Render::FramePinKind::AssetLease, 11, &releases, &countPinRelease};
-    ASSERT_TRUE((*device)->retireStaticMesh(*mesh, completionPin).has_value());
+    ASSERT_TRUE((*device)->retireGpuMesh(*mesh, completionPin).has_value());
     EXPECT_FALSE(completionPin.hasValue());
     EXPECT_EQ(releases, 1U);
     EXPECT_EQ((*device)->statistics().liveResources, 0U);
@@ -181,7 +181,7 @@ TEST(NullRenderDeviceMeshTest, TangentLayoutUsesValidatedUploadPath)
     ASSERT_FALSE(staleBinding.has_value());
     EXPECT_EQ(staleBinding.error().code, Render::RenderErrorCode::MeshNotFound);
     Render::FramePin stalePin{Render::FramePinKind::AssetLease, 12, &releases, &countPinRelease};
-    auto staleRetirement = (*device)->retireStaticMesh(*mesh, stalePin);
+    auto staleRetirement = (*device)->retireGpuMesh(*mesh, stalePin);
     ASSERT_FALSE(staleRetirement.has_value());
     EXPECT_TRUE(stalePin.hasValue());
     EXPECT_EQ(releases, 1U);
@@ -190,8 +190,8 @@ TEST(NullRenderDeviceMeshTest, TangentLayoutUsesValidatedUploadPath)
     vertices[9] = -1.0F;
     auto replacement = (*device)->createStaticMesh(desc);
     ASSERT_TRUE(replacement.has_value()) << replacement.error().message;
-    ASSERT_TRUE((*device)->destroyStaticMesh(*replacement).has_value());
-    auto staleDestroy = (*device)->destroyStaticMesh(*replacement);
+    ASSERT_TRUE((*device)->destroyGpuMesh(*replacement).has_value());
+    auto staleDestroy = (*device)->destroyGpuMesh(*replacement);
     ASSERT_FALSE(staleDestroy.has_value());
     EXPECT_EQ(staleDestroy.error().code, Render::RenderErrorCode::MeshNotFound);
     EXPECT_EQ(releases, 2U);
@@ -214,7 +214,7 @@ TEST(NullRenderDeviceMeshTest, RejectsZeroMeshKeyBinding)
     ASSERT_FALSE(bad.has_value());
     EXPECT_EQ(bad.error().code, Render::RenderErrorCode::InvalidMeshUpload);
 
-    ASSERT_TRUE((*device)->destroyStaticMesh(*mesh).has_value());
+    ASSERT_TRUE((*device)->destroyGpuMesh(*mesh).has_value());
 }
 
 TEST(NullRenderDeviceMeshTest, SkinnedUploadValidatesInfluencesAndSharesRetirementLifecycle)
@@ -246,7 +246,7 @@ TEST(NullRenderDeviceMeshTest, SkinnedUploadValidatesInfluencesAndSharesRetireme
     Core::u32 releases = 0;
     Render::FramePin completionPin{
         Render::FramePinKind::AssetLease, 20, &releases, &countPinRelease};
-    ASSERT_TRUE((*device)->retireStaticMesh(*mesh, completionPin));
+    ASSERT_TRUE((*device)->retireGpuMesh(*mesh, completionPin));
     EXPECT_FALSE(completionPin.hasValue());
     EXPECT_EQ(releases, 1U);
     EXPECT_EQ((*device)->statistics().liveResources, 0U);
@@ -265,7 +265,7 @@ TEST(NullRenderDeviceMeshTest, AllocatedBindingKeysStartAtTwoAndAreNeverConsumed
     std::array<std::uint16_t, 3> indices{};
     auto staleMesh = (*device)->createStaticMesh(makeUnitTriangleDesc(vertices, indices));
     ASSERT_TRUE(staleMesh.has_value()) << staleMesh.error().message;
-    ASSERT_TRUE((*device)->destroyStaticMesh(*staleMesh).has_value());
+    ASSERT_TRUE((*device)->destroyGpuMesh(*staleMesh).has_value());
     auto staleBinding = (*device)->createMesh3DBinding(*staleMesh);
     ASSERT_FALSE(staleBinding.has_value());
     EXPECT_EQ(staleBinding.error().code, Render::RenderErrorCode::MeshNotFound);
@@ -287,7 +287,7 @@ TEST(NullRenderDeviceMeshTest, AllocatedBindingKeysStartAtTwoAndAreNeverConsumed
 
     ASSERT_TRUE((*device)->setMesh3DBinding(*second, {}).has_value());
     ASSERT_TRUE((*device)->setMesh3DBinding(*third, {}).has_value());
-    ASSERT_TRUE((*device)->destroyStaticMesh(*mesh).has_value());
+    ASSERT_TRUE((*device)->destroyGpuMesh(*mesh).has_value());
 }
 
 TEST(NullRenderDeviceMeshTest, RetirementPinCompletesImmediatelyAndIsNotConsumedOnFailure)
@@ -302,14 +302,14 @@ TEST(NullRenderDeviceMeshTest, RetirementPinCompletesImmediatelyAndIsNotConsumed
 
     Core::u32 releases = 0;
     Render::FramePin completionPin{Render::FramePinKind::AssetLease, 9, &releases, &countPinRelease};
-    ASSERT_TRUE((*device)->retireStaticMesh(*mesh, completionPin).has_value());
+    ASSERT_TRUE((*device)->retireGpuMesh(*mesh, completionPin).has_value());
     EXPECT_FALSE(completionPin.hasValue());
     EXPECT_EQ(releases, 1U);
     EXPECT_EQ((*device)->statistics().pendingGpuRetirements, 0U);
     EXPECT_EQ((*device)->statistics().completedGpuRetirements, 1U);
 
     Render::FramePin failurePin{Render::FramePinKind::AssetLease, 10, &releases, &countPinRelease};
-    auto stale = (*device)->retireStaticMesh(*mesh, failurePin);
+    auto stale = (*device)->retireGpuMesh(*mesh, failurePin);
     ASSERT_FALSE(stale.has_value());
     EXPECT_TRUE(failurePin.hasValue());
     EXPECT_EQ(releases, 1U);

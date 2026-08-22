@@ -7,13 +7,13 @@
 namespace Tina::Asset {
 
 // Uploads a loaded StaticMesh cooked asset (P3_N3_UV2 + U16) to the render device.
-// Returns a backend GpuMeshId owned by the device until destroyStaticMesh.
+// Returns a backend GpuMeshId owned by the device until destroyGpuMesh.
 [[nodiscard]] Core::Result<Render::GpuMeshId> uploadStaticMeshFromCooked(Render::IRenderDevice& device,
                                                                           const CookedAssetFile& meshAsset);
 
 // Uploads a loaded SkinnedMesh v1 cooked asset (P3N3T4UV2 + 4-influence skin
-// stream + U16 indices). The id shares the static mesh namespace and retires
-// through destroyStaticMesh; only skinned draw items may consume its binding.
+// stream + U16 indices). The id shares the GPU mesh namespace and retires
+// through destroyGpuMesh; only skinned draw items may consume its binding.
 [[nodiscard]] Core::Result<Render::GpuMeshId> uploadSkinnedMeshFromCooked(Render::IRenderDevice& device,
                                                                            const CookedAssetFile& meshAsset);
 

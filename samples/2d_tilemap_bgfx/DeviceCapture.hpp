@@ -211,14 +211,14 @@ class CapturingRenderDevice final : public Render::IRenderDevice {
     {
         return inner_->createStaticMesh(desc);
     }
-    [[nodiscard]] Core::Status destroyStaticMesh(Render::GpuMeshId mesh) noexcept override
+    [[nodiscard]] Core::Status destroyGpuMesh(Render::GpuMeshId mesh) noexcept override
     {
-        return inner_->destroyStaticMesh(mesh);
+        return inner_->destroyGpuMesh(mesh);
     }
-    [[nodiscard]] Core::Status retireStaticMesh(Render::GpuMeshId mesh,
-                                                Render::FramePin& completionPin) noexcept override
+    [[nodiscard]] Core::Status retireGpuMesh(Render::GpuMeshId mesh,
+                                             Render::FramePin& completionPin) noexcept override
     {
-        return inner_->retireStaticMesh(mesh, completionPin);
+        return inner_->retireGpuMesh(mesh, completionPin);
     }
     [[nodiscard]] Core::Status drainGpuRetirements() noexcept override
     {

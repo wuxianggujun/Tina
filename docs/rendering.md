@@ -9,7 +9,7 @@ diffuse irradiance cubemap、prefiltered specular cubemap 与 BRDF LUT。`setMes
 fallback/direct SPI。当前已有 PointLight3D 与 SpotLight3D、PerspectiveCamera3D influence-sphere culling，以及
 固定4级联 directional CSM、单 SpotLight shadow、单 PointLight 全向 shadow、startup-only shadow extent 配置、
 显式 alpha-blended Transparent3D 与确定性 pass scheduler；仍无通用 GPU submission fence；
-Texture2D/StaticMesh/EnvironmentMap 已有独立、backend-proven 的 GPU resource retirement completion。
+Texture2D/GPU mesh/EnvironmentMap 已有独立、backend-proven 的 GPU resource retirement completion。
 
 ## Target 边界
 
@@ -230,8 +230,8 @@ shader mode/program，并在采样后 premultiply。DisplayList/frame resource �
 | `retireTexture2D(texture, pin)` | 成功同步释放 pin | 成功消费 pin，readback marker 后释放 |
 | `createTexture2DBinding` | device-instance allocator；bind 成功才消费非0 key | device-instance allocator；bind 成功才消费非0 key |
 | `setTexture2DBinding` | 校验/记录 binding | device binding key → texture |
-| `createStaticMesh` / `destroyStaticMesh` | 唯一 P3N3T4UV2/U16 mesh generation storage；同步 retire | 唯一 tangent vertex layout 对应 VB/共享 U16 IB；逻辑失效后 marker 延迟销毁 |
-| `retireStaticMesh(mesh, pin)` | 成功同步释放 pin | 成功消费 pin，readback marker 后释放 |
+| `createStaticMesh` / `createSkinnedMesh` / `destroyGpuMesh` | 共享 `GpuMeshId` generation storage；同步 retire | 静态 tangent vertex stream 与可选 skin stream；逻辑失效后 marker 延迟销毁 |
+| `retireGpuMesh(mesh, pin)` | 成功同步释放 pin | 成功消费 pin，readback marker 后释放 |
 | `drainGpuRetirements` | 已完成，无操作 | owner-thread completion-only flush；有界失败返回结构化错误 |
 | `createMesh3DBinding` | device-instance mesh allocator；成功才消费 key | device-instance mesh allocator；成功才消费 key |
 | `setMesh3DBinding` | 校验/记录 binding | mesh key → GPU mesh |
@@ -287,8 +287,8 @@ pin，才以 `bgfx::shutdown()` 返回作为 hard completion fallback。
 - Opaque3D/Transparent3D metallic-roughness Cook-Torrance GGX mesh pass 与 opaque-only shadow depth pass（优先消费 frame-scoped 0..4 directional + 0..8 point + 0..8 spot lights；可选 split-sum IBL；每帧只编码一次 uniform arrays）；
 - 确定性 `Clear -> CascadedDirectionalShadowDepth[0..3] -> SpotLightShadowDepth -> PointLightShadowDepth[0..5] -> Opaque3D -> Transparent3D -> Sprite2D -> UI` scheduler；三类 shadow resource 使用 startup-only 配置 extent，且都不取得 primary-surface clear ownership；
 - UI solid/glyph pass；
-- Texture2D/StaticMesh/EnvironmentMap generation storage、唯一 P3N3T4UV2 layout 与 key binding；
-- Texture2D/StaticMesh/EnvironmentMap backend-proven retirement marker、suspend flush 与 shutdown hard drain；
+- Texture2D/GPU mesh/EnvironmentMap generation storage、静态与蒙皮 vertex layout 及 key binding；
+- Texture2D/GPU mesh/EnvironmentMap backend-proven retirement marker、suspend flush 与 shutdown hard drain；
 - present 后 primary framebuffer capture；
 - D3D11/OpenGL/Vulkan 对应 embedded shader 选择（按构建与平台可用性）。
 

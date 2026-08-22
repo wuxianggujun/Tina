@@ -404,7 +404,7 @@ auto EditorWorkspaceState::preparePreviewAssetBindings() -> Tina::Core::Status{
             Tina::Render::GpuMeshId gpuMesh = *mesh;
             auto meshCleanup = Tina::Core::makeScopeExit([device, &gpuMesh]() noexcept {
                 if (gpuMesh) {
-                    (void)device->destroyStaticMesh(gpuMesh);
+                    (void)device->destroyGpuMesh(gpuMesh);
                 }
             });
             auto binding = mesh3DBindings_->registerMeshBinding(meshAsset, gpuMesh);

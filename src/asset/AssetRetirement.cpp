@@ -66,14 +66,14 @@ Core::Status AssetRetirementLedger::enqueueTexture2D(AssetHandle handle, Core::A
     });
 }
 
-Core::Status AssetRetirementLedger::enqueueStaticMesh(AssetHandle handle, Core::AssetId assetId,
-                                                       Render::GpuMeshId mesh) noexcept
+Core::Status AssetRetirementLedger::enqueueGpuMesh(AssetHandle handle, Core::AssetId assetId,
+                                                    Render::GpuMeshId mesh) noexcept
 {
     return enqueue(AssetRetirementRecord{
         .assetId = assetId,
         .handle = handle,
         .mesh = mesh,
-        .kind = AssetRetirementKind::GpuStaticMesh,
+        .kind = AssetRetirementKind::GpuMesh,
         .state = AssetRetirementState::DestroyQueued,
     });
 }

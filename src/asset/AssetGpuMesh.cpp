@@ -62,7 +62,7 @@ Core::Status uploadAndBindStaticMeshForMeshKey(Render::IRenderDevice& device, co
     }
     if (auto status = device.setMesh3DBinding(meshKey, *mesh); !status)
     {
-        (void)device.destroyStaticMesh(*mesh);
+        (void)device.destroyGpuMesh(*mesh);
         return status;
     }
     return Core::success();

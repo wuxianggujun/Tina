@@ -48,7 +48,7 @@ TEST(AssetGpuMeshTests, UploadTypedStaticMeshToNullDevice)
     EXPECT_GE((*device)->statistics().liveResources, 1U);
 
     ASSERT_TRUE((*device)->setMesh3DBinding(2U, {}).has_value());
-    ASSERT_TRUE((*device)->destroyStaticMesh(*gpu).has_value());
+    ASSERT_TRUE((*device)->destroyGpuMesh(*gpu).has_value());
 }
 
 TEST(AssetGpuMeshTests, RejectsZeroMeshKey)
@@ -101,7 +101,7 @@ TEST(AssetGpuMeshTests, UploadsStaticMeshToNullDevice)
 
     auto gpu = uploadStaticMeshFromCooked(**device, *file);
     ASSERT_TRUE(gpu.has_value()) << (gpu ? "" : gpu.error().message);
-    EXPECT_TRUE((*device)->destroyStaticMesh(*gpu).has_value());
+    EXPECT_TRUE((*device)->destroyGpuMesh(*gpu).has_value());
 }
 
 } // namespace

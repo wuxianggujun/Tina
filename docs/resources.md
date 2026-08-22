@@ -220,7 +220,7 @@ kind/type 与 Catalog entry 对齐检查；它不替代包签名或信任策略�
   每个 Entry 唯一拥有 Texture2D `AssetLease`、`GpuTextureId` 与 binding。它为 packet-local Sprite ref
   维护 entry borrow count，active frame pin 清零前拒绝 retirement；成功 handoff 后 Entry 才清空；
 - `Mesh3DBindingRegistry` 是 fixed-capacity owner-thread owner；借用 AssetSystem/device/可选 PMR。Mesh entry
-  唯一拥有 StaticMesh `AssetLease`/`GpuMeshId`/binding，Material entry 拥有 Material `AssetLease`/binding，
+  唯一拥有 StaticMesh/SkinnedMesh `AssetLease`/`GpuMeshId`/binding，Material entry 拥有 Material `AssetLease`/binding，
   Texture entry 按 AssetId 去重拥有共享 Texture2D `AssetLease`/`GpuTextureId`；Material v2 writer 要求同一
   Material 内的 required Texture2D dependency 按 baseColor/MR/normal role 顺序严格递增且唯一，并要求
   alpha mode 明确为 `Opaque` 或 `Blend`；
@@ -230,7 +230,7 @@ kind/type 与 Catalog entry 对齐检查；它不替代包签名或信任策略�
 - `TileMapStream` 持有 root/tileset lease 与 demanded chunk handle/lease；必须先把 `AssetSystem` 和 stream
   放到最终地址，再创建借用 `stream.map()` 的 collision adapter，且 stream 必须先于 AssetSystem 析构；
 - `UploadTicket` 当前只由 Null ledger 完整实现，用于验证 staging 与逻辑状态；
-- `AssetRetirementLedger` 按 Logical/UploadStaging/GpuTexture2D/GpuStaticMesh 记录
+- `AssetRetirementLedger` 按 Logical/UploadStaging/GpuTexture2D/GpuMesh 记录
   `DestroyQueued`、`Retiring`、`Released`；真实 GPU 销毁仍由 RenderDevice 执行。
 
 Handle 不能持久化、不能手工构造，也不能跨 Store 混用。需要跨 Task、Audio callback 或未来 Render
@@ -313,8 +313,8 @@ UnloadPending -- last lease released --> generation erased / stale Handle
 可选 `AssetGpuUploadCoordinator` 把 Cooked payload bytes 复制到 `NullUploadLedger`，用于验证预算、ticket、
 ReadyGpu 与 unload/retirement 状态机；`retireOnGpuReady=true` 是 Null staging 路径行为。真实 bgfx texture/
 mesh 产品上传使用 `RenderDevice` typed upload 和 key binding；handle-based `AssetSystem::retireTexture2D` /
-`retireStaticMesh` 会先 acquire `AssetLease`，把 lease 转入 render completion pin，再立即 logical unload 与
-移除 AssetId lookup。Texture2D 与 StaticMesh 均提供 `AssetLease&` + 对应 GPU generation handle ref overload：
+`retireGpuMesh` 会先 acquire `AssetLease`，把 lease 转入 render completion pin，再立即 logical unload 与
+移除 AssetId lookup。Texture2D 与 GPU mesh 均提供 `AssetLease&` + 对应 GPU generation handle ref overload：
 只有 backend 接受 retirement 后才消费两个 owner；owner-thread、kind/store/state、PMR payload allocation、
 ledger 或 backend 失败都保留输入供重试。marker 前 Store 保持 `UnloadPending`，callback 后进入
 `Released/Unloaded`。
@@ -458,7 +458,7 @@ Opaque3D→Transparent3D→Sprite2D→UI 的确定性 pass scheduler 已完成�
 
 ## 当前限制与下一步
 
-- owning `RenderFramePacket` 的 present-return CPU completion 不承担 GPU retirement；Texture2D/StaticMesh/EnvironmentMap
+- owning `RenderFramePacket` 的 present-return CPU completion 不承担 GPU retirement；Texture2D/GPU mesh/EnvironmentMap
   已改走独立 readback marker。通用 GPU submission fence 仍未提供；
 - `ASSET-002` 已完成 manifest OS watcher hint、revision polling、immutable Catalog change planner、fresh staging
   package 生成/验证、resident CPU Handle/Lease migration、Sprite/Mesh active GPU owner participant transaction，以及

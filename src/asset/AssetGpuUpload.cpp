@@ -15,7 +15,7 @@ namespace {
     {
         if (record.handle == handle &&
             (record.kind == AssetRetirementKind::GpuTexture2D ||
-             record.kind == AssetRetirementKind::GpuStaticMesh))
+             record.kind == AssetRetirementKind::GpuMesh))
         {
             return true;
         }

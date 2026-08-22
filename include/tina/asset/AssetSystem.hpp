@@ -185,14 +185,14 @@ class AssetSystem final {
     // values and leaves the asset and retirement ledger retryable. Owner-thread only.
     [[nodiscard]] Core::Status retireTexture2D(Render::IRenderDevice& device, AssetLease& lease,
                                                Render::GpuTextureId& texture);
-    [[nodiscard]] Core::Status retireStaticMesh(Render::IRenderDevice& device, AssetHandle handle,
-                                                Render::GpuMeshId mesh);
+    [[nodiscard]] Core::Status retireGpuMesh(Render::IRenderDevice& device, AssetHandle handle,
+                                             Render::GpuMeshId mesh);
     // Mesh counterpart to the lease-consuming Texture2D transaction. The
-    // historical name is retained, but both StaticMesh and SkinnedMesh leases
-    // are accepted because they share the Render GpuMeshId retirement path.
+    // transaction accepts both StaticMesh and SkinnedMesh leases because they
+    // share the Render GpuMeshId retirement path.
     // Backend rejection and every pre-commit failure preserve both owners.
-    [[nodiscard]] Core::Status retireStaticMesh(Render::IRenderDevice& device, AssetLease& lease,
-                                                Render::GpuMeshId& mesh);
+    [[nodiscard]] Core::Status retireGpuMesh(Render::IRenderDevice& device, AssetLease& lease,
+                                             Render::GpuMeshId& mesh);
     [[nodiscard]] Core::Status drainGpuRetirements() noexcept;
 
   private:

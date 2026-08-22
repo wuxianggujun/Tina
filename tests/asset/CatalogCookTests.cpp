@@ -1610,7 +1610,24 @@ TEST(CatalogCookTests, StaticMeshCubeRecipe)
     std::filesystem::remove_all(root, ec);
 }
 
-// M11-E4: cook UnlitBaseColor Material via recipe `material <id> unlit r g b [a]`.
+TEST(CatalogCookTests, MaterialRecipeRequiresExplicitAlphaMode)
+{
+    const auto materialId = *Core::AssetId::fromBytes(idBytes(10U));
+    const auto materialHex = materialId.canonicalText();
+
+    std::string recipe;
+    recipe += "platform WindowsX64\n";
+    recipe += "material ";
+    recipe.append(materialHex.data(), materialHex.size());
+    recipe += " unlit 0.95 0.24 0.30 1.0\n";
+
+    auto request = parseCatalogCookRecipe(recipe, ".");
+    ASSERT_FALSE(request.has_value());
+    EXPECT_EQ(request.error().code, AssetErrorCode::InvalidCatalogConfig);
+    EXPECT_EQ(request.error().message, "material alpha mode must be opaque or blend");
+}
+
+// M11-E4: cook UnlitBaseColor Material via an explicit opaque recipe.
 TEST(CatalogCookTests, MaterialUnlitRecipe)
 {
     std::pmr::unsynchronized_pool_resource memory;
@@ -1621,7 +1638,7 @@ TEST(CatalogCookTests, MaterialUnlitRecipe)
     recipe += "platform WindowsX64\n";
     recipe += "material ";
     recipe.append(materialHex.data(), materialHex.size());
-    recipe += " unlit 0.95 0.24 0.30 1.0\n";
+    recipe += " unlit opaque 0.95 0.24 0.30 1.0\n";
 
     auto request = parseCatalogCookRecipe(recipe, ".");
     ASSERT_TRUE(request.has_value()) << request.error().message;
@@ -1693,7 +1710,7 @@ TEST(CatalogCookTests, MaterialUnlitWithTextureRecipe)
     recipe += " 2 2 FFFFFFFF 000000FF FFFFFFFF 000000FF\n";
     recipe += "material ";
     recipe.append(materialHex.data(), materialHex.size());
-    recipe += " unlit 1 1 1 1 ";
+    recipe += " unlit opaque 1 1 1 1 ";
     recipe.append(textureHex.data(), textureHex.size());
     recipe += "\n";
 

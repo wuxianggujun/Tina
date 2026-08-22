@@ -1291,7 +1291,7 @@ createEditorAutoDemoCatalogFixtureRequest()
     recipe += " cube\n";
     recipe += "material ";
     appendId(editorAssetId(0x32U));
-    recipe += " unlit 0.26 0.68 0.92 1.0\n";
+    recipe += " unlit opaque 0.26 0.68 0.92 1.0\n";
     return Tina::Asset::parseCatalogCookRecipe(recipe, ".");
 }
 

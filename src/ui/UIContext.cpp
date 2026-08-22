@@ -732,7 +732,7 @@ struct UIContext::Impl final {
     Core::SteadyMonotonicClock motionDefaultClock{};
     bool reducedMotionEnabled = false;
     usize layoutTimelineCommitFailureCount = 0;
-    // Default duration 0 = instant stylesheet BoxFill resolve (historical path).
+    // Default duration 0 resolves stylesheet BoxFill immediately.
     UITransitionSpec styleBackgroundColorTransitionSpec{
         .property = UIAnimatableProperty::BackgroundColor,
         .duration = Core::Duration{0.0},

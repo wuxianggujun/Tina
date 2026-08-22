@@ -232,7 +232,7 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --fra
 - 删除 `SubmissionCompletionMode`、`BgfxSubmissionCompletionLedger`、deferred handoff、dynamic_cast 与
   `lastPresentFrameToken()`；`bgfx::frame()` 只推进 backend 帧，不再冒充 fence token。
 - `submitFrame()` 的 borrowed view 继续要求同步消费；GPU Texture/Mesh/EnvironmentMap 资源所有权由 bgfx backend 管理。
-- `IRenderDevice::retireTexture2D/retireStaticMesh` 成功才消费 `FramePin`；generation 与 binding 立即失效，
+- `IRenderDevice::retireTexture2D/retireGpuMesh` 成功才消费 `FramePin`；generation 与 binding 立即失效，
   native handle 等 backend-proven completion 后销毁。Null 同步完成，统计统一暴露 pending/completed。
 - bgfx 在所有资源引用 view 之后提交 1×1 blit + readback marker，只以 `readTexture()` 返回的 ready frame
   完成 retirement；frame wrap 使用半区间比较，suspend/drain 使用 `BGFX_FRAME_FLUSH` 推进。

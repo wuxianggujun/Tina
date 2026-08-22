@@ -981,7 +981,7 @@ Core::Status Mesh3DBindingRegistry::drainPendingRetirements() noexcept
     while (m_pendingMeshCount != 0)
     {
         auto& pending = m_pendingMeshes[m_pendingMeshCount - 1U];
-        if (auto status = m_assets->retireStaticMesh(*m_device, pending.lease, pending.gpuMesh); !status)
+        if (auto status = m_assets->retireGpuMesh(*m_device, pending.lease, pending.gpuMesh); !status)
         {
             return Core::failure(std::move(status.error()).withContext(
                 "Mesh3DBindingRegistry::drainPendingRetirements", "mesh"));
@@ -1272,7 +1272,7 @@ Core::Status Mesh3DBindingRegistry::retireMeshBinding(AssetHandle meshAsset) noe
         return Core::failure(AssetErrorCode::AssetNotReady,
                              "Mesh3D geometry binding is still borrowed by an active frame resource");
     }
-    if (auto status = m_assets->retireStaticMesh(*m_device, entry->lease, entry->gpuMesh); !status)
+    if (auto status = m_assets->retireGpuMesh(*m_device, entry->lease, entry->gpuMesh); !status)
     {
         return Core::failure(std::move(status.error()).withContext(
             "Mesh3DBindingRegistry::retireMeshBinding", "assets"));

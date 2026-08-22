@@ -101,7 +101,7 @@ struct GpuEnvironmentMapId final {
                                                    const GpuEnvironmentMapId&) = default;
 };
 
-// Backend-owned GPU static mesh handle. Owner rejects cross-device use,
+// Backend-owned GPU mesh handle. Owner rejects cross-device use,
 // generation rejects stale slot reuse. Product-3D path (M11-E2).
 struct GpuMeshId final {
     inline static constexpr u32 InvalidIndex = (std::numeric_limits<u32>::max)();
@@ -370,8 +370,8 @@ class IRenderDevice {
                              "This render device does not support StaticMesh upload");
     }
     // Optional SkinnedMesh GPU path. Returned ids share the
-    // static mesh slot/binding-key namespace and retire through
-    // destroyStaticMesh()/retireStaticMesh(), but the slot remembers its skin
+    // GPU mesh slot/binding-key namespace and retire through
+    // destroyGpuMesh()/retireGpuMesh(), but the slot remembers its skin
     // stream and joint count: only skinned draw items may consume it, and
     // static batches referencing a skinned binding fail closed.
     [[nodiscard]] virtual Core::Result<GpuMeshId> createSkinnedMesh(const SkinnedMeshUploadDesc& desc)
@@ -380,17 +380,17 @@ class IRenderDevice {
         return Core::failure(RenderErrorCode::MeshUploadUnsupported,
                              "This render device does not support SkinnedMesh upload");
     }
-    [[nodiscard]] virtual Core::Status destroyStaticMesh(GpuMeshId mesh) noexcept
+    [[nodiscard]] virtual Core::Status destroyGpuMesh(GpuMeshId mesh) noexcept
     {
         static_cast<void>(mesh);
         return Core::failure(RenderErrorCode::MeshUploadUnsupported,
-                             "This render device does not support StaticMesh destroy");
+                             "This render device does not support GPU mesh destroy");
     }
     // Same ownership contract as retireTexture2D().
-    [[nodiscard]] virtual Core::Status retireStaticMesh(GpuMeshId mesh,
-                                                        FramePin& completionPin) noexcept
+    [[nodiscard]] virtual Core::Status retireGpuMesh(GpuMeshId mesh,
+                                                     FramePin& completionPin) noexcept
     {
-        auto status = destroyStaticMesh(mesh);
+        auto status = destroyGpuMesh(mesh);
         if (status)
         {
             completionPin.release();

@@ -10,8 +10,6 @@
 namespace Tina::Bench {
 namespace {
 
-inline constexpr std::string_view ComponentPrerequisiteWorkload =
-    "ui_component_build_activate_toggle_v1";
 inline constexpr std::string_view ComponentWorkload = "ui_component_build_v1";
 inline constexpr std::string_view StyleStateWorkload = "ui_style_state_v1";
 inline constexpr std::string_view MotionWorkload = "ui_motion_v1";
@@ -68,9 +66,8 @@ inline constexpr std::string_view LayoutTimelineMotionWorkload = "ui_motion_layo
     return output.str();
 }
 
-TEST(UIBenchmarkWorkloadsTests, RegistersPrerequisiteAndFrozenComponentWorkloads)
+TEST(UIBenchmarkWorkloadsTests, RegistersCurrentUIWorkloads)
 {
-    EXPECT_TRUE(isUIBenchmarkWorkload(ComponentPrerequisiteWorkload));
     EXPECT_TRUE(isUIBenchmarkWorkload(ComponentWorkload));
     EXPECT_TRUE(isUIBenchmarkWorkload(StyleStateWorkload));
     EXPECT_TRUE(isUIBenchmarkWorkload(MotionWorkload));
@@ -79,45 +76,11 @@ TEST(UIBenchmarkWorkloadsTests, RegistersPrerequisiteAndFrozenComponentWorkloads
 
     std::ostringstream help;
     printUIBenchmarkHelp(help);
-    EXPECT_NE(help.str().find(ComponentPrerequisiteWorkload), std::string::npos);
     EXPECT_NE(help.str().find(ComponentWorkload), std::string::npos);
     EXPECT_NE(help.str().find(StyleStateWorkload), std::string::npos);
     EXPECT_NE(help.str().find(MotionWorkload), std::string::npos);
     EXPECT_NE(help.str().find(TimelineMotionWorkload), std::string::npos);
     EXPECT_NE(help.str().find(LayoutTimelineMotionWorkload), std::string::npos);
-}
-
-TEST(UIBenchmarkWorkloadsTests, ComponentPrerequisiteReportsStableHonestSchema)
-{
-    const std::string first = runUIWorkload(ComponentPrerequisiteWorkload);
-    const std::string second = runUIWorkload(ComponentPrerequisiteWorkload);
-
-    EXPECT_NE(first.find("\"status\":\"ok\",\"schema\":1"), std::string::npos);
-    EXPECT_NE(first.find("\"schemaName\":\"tina_bench\""), std::string::npos);
-    EXPECT_NE(first.find("\"id\":\"ui_component_build_activate_toggle_v1\""), std::string::npos);
-    EXPECT_NE(first.find("\"component_count\":256"), std::string::npos);
-    EXPECT_NE(first.find("\"component_nodes_per_transaction\":4"), std::string::npos);
-    EXPECT_NE(first.find("\"component_text_bytes_per_transaction\":11"), std::string::npos);
-    EXPECT_NE(first.find("\"component_canvas_commands_per_transaction\":2"), std::string::npos);
-    EXPECT_NE(first.find("\"coverage\":\"activate_toggle_only\""), std::string::npos);
-    EXPECT_NE(first.find("\"transaction_scope\":\"UIElementBuildTransaction\""), std::string::npos);
-    EXPECT_NE(first.find("\"frozen_workload_complete\":false"), std::string::npos);
-    EXPECT_NE(first.find("\"reservation_counters_available\":false"), std::string::npos);
-    EXPECT_NE(first.find("\"transactions_started\":256"), std::string::npos);
-    EXPECT_NE(first.find("\"transactions_committed\":256"), std::string::npos);
-    EXPECT_NE(first.find("\"nodes_requested\":1024,\"nodes_published\":1024"), std::string::npos);
-    EXPECT_NE(first.find("\"clean_commits\":1,\"clean_commit_rebuilds\":0"), std::string::npos);
-    EXPECT_NE(first.find("\"range\":{\"supported\":false}"), std::string::npos);
-    EXPECT_NE(first.find("\"selection\":{\"supported\":false}"), std::string::npos);
-    EXPECT_NE(first.find("\"activate_behavior\":512"), std::string::npos);
-    EXPECT_NE(first.find("\"toggle_behavior\":512"), std::string::npos);
-    EXPECT_NE(first.find("\"delta\":0"), std::string::npos);
-    EXPECT_EQ(first.find("\"component_tree\":\"0000000000000000\""), std::string::npos);
-
-    const std::string firstChecksum = extractChecksum(first);
-    const std::string secondChecksum = extractChecksum(second);
-    ASSERT_EQ(firstChecksum.size(), 16U);
-    EXPECT_EQ(firstChecksum, secondChecksum);
 }
 
 TEST(UIBenchmarkWorkloadsTests, FrozenComponentWorkloadReportsRealReservationCounters)

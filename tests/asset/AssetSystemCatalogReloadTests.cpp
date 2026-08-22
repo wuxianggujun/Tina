@@ -215,7 +215,7 @@ class CatalogReloadRenderDevice final : public Render::IRenderDevice {
         return Core::success();
     }
 
-    [[nodiscard]] Core::Status retireStaticMesh(
+    [[nodiscard]] Core::Status retireGpuMesh(
         Render::GpuMeshId mesh, Render::FramePin& completionPin) noexcept override
     {
         if (m_retiredMeshCount < m_retiredMeshes.size())

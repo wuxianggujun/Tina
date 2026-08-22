@@ -4046,7 +4046,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             bgfx::createVertexBuffer(skinMemory, opaque3DSkinVertexLayout_);
         if (!bgfx::isValid(skinBuffer))
         {
-            (void)destroyStaticMesh(*meshId);
+            (void)destroyGpuMesh(*meshId);
             return Core::failure(RenderErrorCode::InvalidMeshUpload,
                                  "bgfx rejected the SkinnedMesh skin vertex buffer");
         }
@@ -4059,16 +4059,16 @@ class BgfxRenderDevice final : public IRenderDevice {
         return meshId;
     }
 
-    [[nodiscard]] Core::Status destroyStaticMesh(GpuMeshId mesh) noexcept override
+    [[nodiscard]] Core::Status destroyGpuMesh(GpuMeshId mesh) noexcept override
     {
         FramePin completionPin;
-        return retireStaticMesh(mesh, completionPin);
+        return retireGpuMesh(mesh, completionPin);
     }
 
-    [[nodiscard]] Core::Status retireStaticMesh(GpuMeshId mesh,
-                                                FramePin& completionPin) noexcept override
+    [[nodiscard]] Core::Status retireGpuMesh(GpuMeshId mesh,
+                                             FramePin& completionPin) noexcept override
     {
-        if (auto status = validateApiThread("BgfxRenderDevice::retireStaticMesh"); !status)
+        if (auto status = validateApiThread("BgfxRenderDevice::retireGpuMesh"); !status)
         {
             return Core::failure(std::move(status.error()));
         }
@@ -4085,12 +4085,13 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         if (!mesh || mesh.owner != resourceOwnerId() || mesh.index >= meshes_.size())
         {
-            return Core::failure(RenderErrorCode::MeshNotFound, "StaticMesh handle is invalid");
+            return Core::failure(RenderErrorCode::MeshNotFound, "GPU mesh handle is invalid");
         }
         MeshSlot& slot = meshes_[mesh.index];
         if (!slot.live || slot.identity.value() != mesh.generation)
         {
-            return Core::failure(RenderErrorCode::MeshNotFound, "StaticMesh handle is stale or destroyed");
+            return Core::failure(RenderErrorCode::MeshNotFound,
+                                 "GPU mesh handle is stale or destroyed");
         }
         slot.live = false;
         slot.identity.advanceAfterRelease();
@@ -4164,7 +4165,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             !meshes_[mesh.index].live ||
             meshes_[mesh.index].identity.value() != mesh.generation)
         {
-            return Core::failure(RenderErrorCode::MeshNotFound, "StaticMesh handle is invalid");
+            return Core::failure(RenderErrorCode::MeshNotFound, "GPU mesh handle is invalid");
         }
         mesh3DBindings_[meshKey] = mesh;
         return Core::success();

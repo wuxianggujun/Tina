@@ -38,8 +38,6 @@ inline constexpr std::string_view kPaintDirtyWorkload = "ui_paint_dirty_v1";
 inline constexpr std::string_view kRouteWorkload = "ui_route_v1";
 inline constexpr std::string_view kVirtualCollectionWorkload = "ui_virtual_collection_v1";
 inline constexpr std::string_view kImageNineSliceWorkload = "ui_image_nineslice_v1";
-inline constexpr std::string_view kComponentActivateToggleWorkload =
-    "ui_component_build_activate_toggle_v1";
 inline constexpr std::string_view kComponentBuildWorkload = "ui_component_build_v1";
 inline constexpr std::string_view kStyleStateWorkload = "ui_style_state_v1";
 inline constexpr std::string_view kMotionWorkload = "ui_motion_v1";
@@ -77,27 +75,12 @@ inline constexpr usize kComponentContextNodeCount = kComponentNodeCount + 1;
 inline constexpr usize kComponentCanvasCommandsPerTransaction = 2;
 inline constexpr usize kComponentCanvasCommandCount =
     kComponentCount * kComponentCanvasCommandsPerTransaction;
-inline constexpr std::string_view kComponentActivateText = "Apply";
-inline constexpr std::string_view kComponentToggleText = "Switch";
 inline constexpr std::string_view kComponentTextInputText = "Input";
 inline constexpr std::string_view kComponentDropdownText = "Select";
 inline constexpr usize kComponentTextBytesPerTransaction =
-    kComponentActivateText.size() + kComponentToggleText.size();
-static_assert(kComponentTextInputText.size() + kComponentDropdownText.size() ==
-              kComponentTextBytesPerTransaction);
+    kComponentTextInputText.size() + kComponentDropdownText.size();
 inline constexpr usize kComponentTextByteCount =
     kComponentCount * kComponentTextBytesPerTransaction;
-inline constexpr usize kComponentActivateSlotsPerTransaction = 2;
-inline constexpr usize kComponentToggleSlotsPerTransaction = 2;
-inline constexpr UI::UIComponentBuildBudget kComponentActivateToggleBudget{
-    .nodes = kComponentNodesPerTransaction,
-    .textBytes = kComponentTextBytesPerTransaction,
-    .canvasCommands = kComponentCanvasCommandsPerTransaction,
-    .behaviors = {
-        .activate = kComponentActivateSlotsPerTransaction,
-        .toggle = kComponentToggleSlotsPerTransaction,
-    },
-};
 inline constexpr UI::UIComponentBuildBudget kComponentBuildBudget{
     .nodes = kComponentNodesPerTransaction,
     .textBytes = kComponentTextBytesPerTransaction,
@@ -709,35 +692,6 @@ componentCanvasCommands() noexcept
             .color = UI::rgba8(232, 200, 72),
         },
     };
-}
-
-[[nodiscard]] UI::UIElementDescriptor componentToggleOnlyDescriptor() noexcept
-{
-    UI::UIElementDescriptor descriptor = UI::makePanelElement(fixedLayout(8.0F, 8.0F));
-    descriptor.behaviors = UI::UIElementBehavior::Toggle;
-    descriptor.semantics = {
-        .mode = UI::UISemanticsMode::Publish,
-        .role = UI::UISemanticsRole::Checkbox,
-        .actions = UI::UISemanticsAction::Toggle,
-    };
-    return descriptor;
-}
-
-[[nodiscard]] UI::UIElementDescriptor componentActivateToggleDescriptor() noexcept
-{
-    UI::UIElementDescriptor descriptor =
-        UI::makeLabelElement(kComponentToggleText, fixedLayout(32.0F, 8.0F));
-    descriptor.behaviors = UI::UIElementBehavior::Focusable |
-                           UI::UIElementBehavior::Activate |
-                           UI::UIElementBehavior::Toggle;
-    descriptor.semantics = {
-        .mode = UI::UISemanticsMode::Publish,
-        .role = UI::UISemanticsRole::Checkbox,
-        .actions = UI::UISemanticsAction::Focus | UI::UISemanticsAction::Activate |
-                   UI::UISemanticsAction::Toggle,
-        .useContentAsName = true,
-    };
-    return descriptor;
 }
 
 [[nodiscard]] UI::UIElementDescriptor componentRangeActivateToggleDescriptor() noexcept
@@ -2941,64 +2895,6 @@ void recordComponentBudgetPublished(UIBenchmarkReport& report,
     report.componentSelectionSlotsPublished += budget.behaviors.selection;
 }
 
-[[nodiscard]] bool buildActivateToggleComponents(UIFixture& fixture,
-                                                 ComponentRootArray& componentRoots,
-                                                 UIBenchmarkReport* report,
-                                                 std::string& error)
-{
-    const auto canvasCommands = componentCanvasCommands();
-    UI::UIElementDescriptor rootDescriptor =
-        UI::makePanelElement(fixedLayout(64.0F, 32.0F));
-    rootDescriptor.visual.canvas = canvasCommands;
-    const UI::UIElementDescriptor activateDescriptor =
-        UI::makeButtonElement(kComponentActivateText, fixedLayout(32.0F, 8.0F));
-    const UI::UIElementDescriptor toggleDescriptor = componentToggleOnlyDescriptor();
-    const UI::UIElementDescriptor activateToggleDescriptor =
-        componentActivateToggleDescriptor();
-
-    for (usize index = 0; index < componentRoots.size(); ++index) {
-        auto transactionResult = fixture.updater.beginBuildTransaction(
-            fixture.root.rootNodeId(), rootDescriptor, kComponentActivateToggleBudget);
-        if (!transactionResult) {
-            error = transactionResult.error().message;
-            return false;
-        }
-        UI::UIElementBuildTransaction transaction = std::move(*transactionResult);
-        if (report != nullptr) {
-            ++report->componentTransactionsStarted;
-            recordComponentBudgetRequested(*report, kComponentActivateToggleBudget);
-        }
-
-        const UI::UINodeId componentRoot = transaction.rootNodeId();
-        auto activate = transaction.createElement(componentRoot, activateDescriptor);
-        if (!activate) {
-            error = activate.error().message;
-            return false;
-        }
-        auto toggle = transaction.createElement(componentRoot, toggleDescriptor);
-        if (!toggle) {
-            error = toggle.error().message;
-            return false;
-        }
-        auto activateToggle = transaction.createElement(componentRoot, activateToggleDescriptor);
-        if (!activateToggle) {
-            error = activateToggle.error().message;
-            return false;
-        }
-        auto committedRoot = transaction.commit();
-        if (!committedRoot) {
-            error = committedRoot.error().message;
-            return false;
-        }
-        componentRoots[index] = *committedRoot;
-        if (report != nullptr) {
-            ++report->componentTransactionsCommitted;
-            recordComponentBudgetPublished(*report, kComponentActivateToggleBudget);
-        }
-    }
-    return true;
-}
-
 [[nodiscard]] bool buildReservedComponents(UIFixture& fixture,
                                            ComponentRootArray& componentRoots,
                                            UIBenchmarkReport* report,
@@ -3547,33 +3443,7 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
            << ",\"selection_key\":" << report.selectionKey
            << ",\"selection_index\":" << report.selectionIndex
            << ",\"semantics_entries\":" << report.semanticsEntryCount << '}';
-    if (report.workload == kComponentActivateToggleWorkload) {
-        output << ",\"component_build\":{\"coverage\":\"activate_toggle_only\""
-                  ",\"transaction_scope\":\"UIElementBuildTransaction\""
-                  ",\"frozen_workload_complete\":false"
-                  ",\"reservation_counters_available\":false"
-                  ",\"transactions_started\":"
-               << report.componentTransactionsStarted
-               << ",\"transactions_committed\":" << report.componentTransactionsCommitted
-               << ",\"nodes_requested\":" << report.componentNodesRequested
-               << ",\"nodes_published\":" << report.componentNodesPublished
-               << ",\"text_bytes_requested\":" << report.componentTextBytesRequested
-               << ",\"text_bytes_published\":" << report.componentTextBytesPublished
-               << ",\"canvas_commands_requested\":"
-               << report.componentCanvasCommandsRequested
-               << ",\"canvas_commands_published\":"
-               << report.componentCanvasCommandsPublished
-               << ",\"clean_commits\":" << report.componentCleanCommitCount
-               << ",\"clean_commit_rebuilds\":" << report.componentCleanCommitRebuildCount
-               << ",\"behaviors\":{\"activate\":{\"supported\":true,\"requested\":"
-               << report.componentActivateSlotsRequested << ",\"published\":"
-               << report.componentActivateSlotsPublished
-               << "},\"toggle\":{\"supported\":true,\"requested\":"
-               << report.componentToggleSlotsRequested << ",\"published\":"
-               << report.componentToggleSlotsPublished
-               << "},\"range\":{\"supported\":false},\"text_input\":{\"supported\":false},"
-                  "\"scroll\":{\"supported\":false},\"selection\":{\"supported\":false}}}";
-    } else if (report.workload == kComponentBuildWorkload) {
+    if (report.workload == kComponentBuildWorkload) {
         const UI::UIComponentBuildStatistics& statistics =
             report.componentReservationStatistics;
         output << ",\"component_build\":{\"coverage\":\"all_reserved_pools\""
@@ -3770,10 +3640,7 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
               "\"shared_dev_or_ci_is_provisional_not_hard_gate\","
               "\"tracy_disabled\",\"single_process_run\","
               "\"allocation_delta_counts_tina_routed_ui_pmr_only\"";
-    if (report.workload == kComponentActivateToggleWorkload) {
-        output << ",\"component_cleanup_excluded_from_stage_timing\""
-                  ",\"ui_component_build_v1_waits_for_all_behavior_reservations\"";
-    } else if (report.workload == kComponentBuildWorkload) {
+    if (report.workload == kComponentBuildWorkload) {
         output << ",\"component_cleanup_excluded_from_stage_timing\""
                   ",\"component_reservation_counters_are_measurement_window_deltas\"";
     } else if (report.workload == kStyleStateWorkload) {
@@ -3802,9 +3669,8 @@ bool isUIBenchmarkWorkload(std::string_view workload) noexcept
 {
     return workload == kStaticCommitWorkload || workload == kPaintDirtyWorkload ||
            workload == kRouteWorkload || workload == kVirtualCollectionWorkload ||
-           workload == kImageNineSliceWorkload ||
-           workload == kComponentActivateToggleWorkload ||
-           workload == kComponentBuildWorkload || workload == kStyleStateWorkload ||
+           workload == kImageNineSliceWorkload || workload == kComponentBuildWorkload ||
+           workload == kStyleStateWorkload ||
            workload == kMotionWorkload || workload == kTimelineMotionWorkload ||
            workload == kLayoutTimelineMotionWorkload;
 }
@@ -3820,9 +3686,7 @@ void printUIBenchmarkHelp(std::ostream& output)
            << "  --workload=ui_style_state_v1         4096 nodes, 256 rules, one state change\n"
            << "  --workload=ui_motion_v1              4096 nodes, active tracks 0/64/1024 by seed\n"
            << "  --workload=ui_motion_timeline_v1    4096 nodes, 4-track/4-keyframe timelines, active tracks 0/64/1024\n"
-           << "  --workload=ui_motion_layout_v1      4096 nodes, 4095 overlay leaves, atomic Layout/Hit/Paint timeline rebuilds\n"
-           << "  --workload=ui_component_build_activate_toggle_v1\n"
-              "                                         legacy Activate/Toggle prerequisite\n";
+           << "  --workload=ui_motion_layout_v1      4096 nodes, 4095 overlay leaves, atomic Layout/Hit/Paint timeline rebuilds\n";
 }
 
 int runUIBenchmark(std::string_view workload, const UIBenchmarkOptions& options,
@@ -3846,9 +3710,6 @@ int runUIBenchmark(std::string_view workload, const UIBenchmarkOptions& options,
             (void)runVirtualCollection(options, report, error);
         } else if (workload == kImageNineSliceWorkload) {
             (void)runImageNineSlice(options, report, error);
-        } else if (workload == kComponentActivateToggleWorkload) {
-            (void)runComponentBuild(options, report, kComponentActivateToggleBudget,
-                                    &buildActivateToggleComponents, error);
         } else if (workload == kComponentBuildWorkload) {
             (void)runComponentBuild(options, report, kComponentBuildBudget,
                                     &buildReservedComponents, error);

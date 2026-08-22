@@ -1881,7 +1881,7 @@ class Product3DState final : public Tina::IGameState {
             auto meshCleanup = Tina::Core::makeScopeExit([device, &gpuMesh]() noexcept {
                 if (gpuMesh)
                 {
-                    (void)device->destroyStaticMesh(gpuMesh);
+                    (void)device->destroyGpuMesh(gpuMesh);
                 }
             });
             auto meshBinding = productMesh.meshKind == Tina::AssetFormat::AssetKind::SkinnedMesh
@@ -3028,7 +3028,7 @@ class Product3DApplication final : public Tina::IGameApplication {
     auto& assetSystem = *resources.assetSystem;
     for (const Tina::Asset::AssetRetirementRecord& record : assetSystem.retirement().records())
     {
-        if (record.kind == Tina::Asset::AssetRetirementKind::GpuStaticMesh)
+        if (record.kind == Tina::Asset::AssetRetirementKind::GpuMesh)
         {
             ++counters.meshRetirementRecords;
             if (record.state == Tina::Asset::AssetRetirementState::Released)

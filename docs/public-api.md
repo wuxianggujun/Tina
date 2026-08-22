@@ -272,7 +272,7 @@ Surface/resource table/Scene/UI/Glyph view 只在 `submitFrame()` 调用内有�
 `FrameResourceRef` 是 packet-local owner/generation/index token；table resolve 对 cross-packet、stale、越界与
 wrong-kind ref fail closed。Runtime 使用 `RenderFramePacket`、`FramePin` 与 submission completion ledger（成功 present 返回后关闭 CPU 借用，见
 `include/tina/render/FramePin.hpp`）。`SubmissionTicket` 不可复制且绑定签发 ledger，packet 取得唯一所有权
-后负责 complete/abandon。它不代表 GPU execution/retirement；Texture2D/StaticMesh/EnvironmentMap 使用独立的
+后负责 complete/abandon。它不代表 GPU execution/retirement；Texture2D/GPU mesh/EnvironmentMap 使用独立的
 `retire*` + backend marker，不能把两类 completion 混用。
 
 `RenderSceneBuilder/Writer` 提供 fixed-capacity Camera2D/PerspectiveCamera3D/Sprite2D/static Mesh3D/
@@ -1047,9 +1047,9 @@ map 会被拒绝，world 关闭时返回 `WorldClosed`。必须在 world 关闭�
 
 `AssetSystem` 提供 request/load/pump、generation slot 与 typed state。`AssetHandle` 是弱 lookup；
 `AssetLease` 强保活 CPU payload。逻辑 invalidation 不等于物理释放。产品 helper 可把 Cooked Texture2D/
-StaticMesh 上传到 RenderDevice，并建立 backend key binding；`AssetSystem::retireTexture2D` /
-`retireStaticMesh` 把 lease 移入 `FramePin`，成功后弱 lookup 立即失效，backend completion 后才释放 payload。
-Texture2D 与 StaticMesh 的 `AssetLease&` + 对应 GPU generation handle ref overload 仅在 backend 接受后
+StaticMesh/SkinnedMesh 上传到 RenderDevice，并建立 backend key binding；`AssetSystem::retireTexture2D` /
+`retireGpuMesh` 把 lease 移入 `FramePin`，成功后弱 lookup 立即失效，backend completion 后才释放 payload。
+Texture2D 与 GPU mesh 的 `AssetLease&` + 对应 GPU generation handle ref overload 仅在 backend 接受后
 消费两者；失败完整恢复供重试。`drainGpuRetirements()` 用于 owner-thread teardown。
 
 `Sprite2DBindingRegistry::Create(assets, device, config)` 必须在借用 `AssetSystem` 与 RenderDevice 的共享

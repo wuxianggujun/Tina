@@ -597,7 +597,7 @@ class NullRenderDevice final : public IRenderDevice {
         return meshId;
     }
 
-    [[nodiscard]] Core::Status destroyStaticMesh(GpuMeshId mesh) noexcept override
+    [[nodiscard]] Core::Status destroyGpuMesh(GpuMeshId mesh) noexcept override
     {
         if (stopped_)
         {
@@ -607,7 +607,8 @@ class NullRenderDevice final : public IRenderDevice {
             !meshes_[mesh.index].live ||
             meshes_[mesh.index].generation != mesh.generation)
         {
-            return Core::failure(RenderErrorCode::MeshNotFound, "StaticMesh handle is invalid or already destroyed");
+            return Core::failure(RenderErrorCode::MeshNotFound,
+                                 "GPU mesh handle is invalid or already destroyed");
         }
         meshes_[mesh.index].live = false;
         ++meshes_[mesh.index].generation;
@@ -649,7 +650,7 @@ class NullRenderDevice final : public IRenderDevice {
             !meshes_[mesh.index].live ||
             meshes_[mesh.index].generation != mesh.generation)
         {
-            return Core::failure(RenderErrorCode::MeshNotFound, "StaticMesh handle is invalid");
+            return Core::failure(RenderErrorCode::MeshNotFound, "GPU mesh handle is invalid");
         }
         meshBindings_[meshKey] = mesh;
         return Core::success();

@@ -159,7 +159,7 @@ class RecordingRenderDevice final : public Render::IRenderDevice {
         return Core::success();
     }
 
-    [[nodiscard]] Core::Status retireStaticMesh(
+    [[nodiscard]] Core::Status retireGpuMesh(
         Render::GpuMeshId mesh,
         Render::FramePin& completionPin) noexcept override
     {
@@ -729,7 +729,7 @@ TEST(Mesh3DBindingRegistryTests, RegistrationTransfersGpuAndLeaseOwnersAndDerive
     ASSERT_EQ(assets->retirement().records().size(), 3U);
     EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::Logical), 1U);
     EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::GpuTexture2D), 1U);
-    EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::GpuStaticMesh), 1U);
+    EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::GpuMesh), 1U);
     EXPECT_EQ(assets->retirementStats().released, 3U);
     EXPECT_EQ(assets->retirementStats().live, 0U);
 }
@@ -1052,7 +1052,7 @@ TEST(Mesh3DBindingRegistryTests, SkinnedBindingsKeepKindsIsolatedAndRetireTheirL
     EXPECT_EQ(device.meshRetirementCount(), 1U);
     EXPECT_EQ(device.retiredMesh(0), (Render::GpuMeshId{8U, 1U}));
     EXPECT_EQ(assets->store().leaseCount(*skinnedMesh), 0U);
-    EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::GpuStaticMesh), 1U);
+    EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::GpuMesh), 1U);
 }
 
 TEST(Mesh3DBindingRegistryTests, SinkRejectionRollsBackMeshAndMaterialFrameBorrows)
@@ -1227,7 +1227,7 @@ TEST(Mesh3DBindingRegistryTests, RetirementRejectionsPreserveOwnersAndCanBeRetri
     EXPECT_EQ(assets->store().leaseCount(*mesh), 1U);
     ASSERT_EQ(assets->retirement().records().size(), 2U);
     EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::GpuTexture2D), 1U);
-    EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::GpuStaticMesh), 0U);
+    EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::GpuMesh), 0U);
     ASSERT_TRUE(registry->retireMeshBinding(*mesh).has_value());
 
     EXPECT_EQ(device.textureRetirementAttempts(), 2U);
@@ -1235,7 +1235,7 @@ TEST(Mesh3DBindingRegistryTests, RetirementRejectionsPreserveOwnersAndCanBeRetri
     EXPECT_EQ(device.meshRetirementAttempts(), 2U);
     EXPECT_EQ(device.meshRetirementCount(), 1U);
     ASSERT_EQ(assets->retirement().records().size(), 3U);
-    EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::GpuStaticMesh), 1U);
+    EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::GpuMesh), 1U);
     EXPECT_EQ(assets->retirementStats().released, 3U);
     EXPECT_EQ(assets->retirementStats().live, 0U);
 }
@@ -1310,7 +1310,7 @@ TEST(Mesh3DBindingRegistryTests, RetireAllCommitsPrefixAndRetriesRemainingOwners
     ASSERT_EQ(assets->retirement().records().size(), 6U);
     EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::Logical), 2U);
     EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::GpuTexture2D), 2U);
-    EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::GpuStaticMesh), 2U);
+    EXPECT_EQ(retirementRecordCount(*assets, AssetRetirementKind::GpuMesh), 2U);
     EXPECT_EQ(assets->retirementStats().released, 6U);
     EXPECT_EQ(assets->retirementStats().live, 0U);
 }

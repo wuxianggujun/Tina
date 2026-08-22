@@ -833,8 +833,8 @@ TEST(NullRenderDeviceTest, SkinnedSubmissionRequiresMatchingBoundSkeletonAndReso
         Render::FrameResourceKind::SkinnedMesh3DGeometry, 7U, IdentityPalette, 0U);
     ASSERT_TRUE(accepted.has_value()) << (accepted ? "" : accepted.error().message);
     ASSERT_TRUE(device->present());
-    ASSERT_TRUE(device->destroyStaticMesh(*skinnedGpu));
-    ASSERT_TRUE(device->destroyStaticMesh(*staticGpu));
+    ASSERT_TRUE(device->destroyGpuMesh(*skinnedGpu));
+    ASSERT_TRUE(device->destroyGpuMesh(*staticGpu));
 }
 
 TEST(NullRenderDeviceTest, RunsThreeHundredFramesWithoutGpuResources)

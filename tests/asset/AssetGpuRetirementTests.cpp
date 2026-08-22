@@ -209,8 +209,8 @@ class DelayedRetirementRenderDevice final : public Render::IRenderDevice {
         return Core::success();
     }
 
-    [[nodiscard]] Core::Status retireStaticMesh(Render::GpuMeshId mesh,
-                                                Render::FramePin& completionPin) noexcept override
+    [[nodiscard]] Core::Status retireGpuMesh(Render::GpuMeshId mesh,
+                                             Render::FramePin& completionPin) noexcept override
     {
         if (m_acceptance == Acceptance::Reject)
         {
@@ -654,14 +654,14 @@ TEST_F(AssetGpuRetirementTests, ExistingStaticMeshLeaseAndGpuOwnerTransferUntilD
     DelayedRetirementRenderDevice device;
     constexpr Render::GpuMeshId ExpectedMesh{11U, 5U};
     Render::GpuMeshId mesh = ExpectedMesh;
-    ASSERT_TRUE(system->retireStaticMesh(device, *lease, mesh).has_value());
+    ASSERT_TRUE(system->retireGpuMesh(device, *lease, mesh).has_value());
     EXPECT_FALSE(static_cast<bool>(*lease));
     EXPECT_FALSE(static_cast<bool>(mesh));
     EXPECT_EQ(system->state(*loaded), AssetLogicalState::UnloadPending);
     EXPECT_EQ(system->store().leaseCount(*loaded), 1U);
     ASSERT_TRUE(device.hasPendingMesh());
     ASSERT_EQ(system->retirement().records().size(), 1U);
-    EXPECT_EQ(system->retirement().records()[0].kind, AssetRetirementKind::GpuStaticMesh);
+    EXPECT_EQ(system->retirement().records()[0].kind, AssetRetirementKind::GpuMesh);
     EXPECT_EQ(system->retirement().records()[0].mesh, ExpectedMesh);
 
     ASSERT_TRUE(system->drainGpuRetirements().has_value());
@@ -684,14 +684,14 @@ TEST_F(AssetGpuRetirementTests, SkinnedMeshLeaseUsesTheSharedGpuMeshRetirementCo
     DelayedRetirementRenderDevice device;
     constexpr Render::GpuMeshId ExpectedMesh{14U, 8U};
     Render::GpuMeshId mesh = ExpectedMesh;
-    ASSERT_TRUE(system->retireStaticMesh(device, *lease, mesh));
+    ASSERT_TRUE(system->retireGpuMesh(device, *lease, mesh));
     EXPECT_FALSE(static_cast<bool>(*lease));
     EXPECT_FALSE(static_cast<bool>(mesh));
     EXPECT_EQ(system->state(*loaded), AssetLogicalState::UnloadPending);
     EXPECT_EQ(system->store().leaseCount(*loaded), 1U);
     ASSERT_TRUE(device.hasPendingMesh());
     ASSERT_EQ(system->retirement().records().size(), 1U);
-    EXPECT_EQ(system->retirement().records()[0].kind, AssetRetirementKind::GpuStaticMesh);
+    EXPECT_EQ(system->retirement().records()[0].kind, AssetRetirementKind::GpuMesh);
     EXPECT_EQ(system->retirement().records()[0].mesh, ExpectedMesh);
 
     ASSERT_TRUE(system->drainGpuRetirements());
@@ -714,7 +714,7 @@ TEST_F(AssetGpuRetirementTests, StaticMeshBackendRejectionRestoresCallerOwnersFo
 
     DelayedRetirementRenderDevice rejectingDevice{
         DelayedRetirementRenderDevice::Acceptance::Reject};
-    const auto rejected = system->retireStaticMesh(rejectingDevice, *lease, mesh);
+    const auto rejected = system->retireGpuMesh(rejectingDevice, *lease, mesh);
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, Render::RenderErrorCode::GpuRetirementUnsupported);
     EXPECT_TRUE(static_cast<bool>(*lease));
@@ -727,7 +727,7 @@ TEST_F(AssetGpuRetirementTests, StaticMeshBackendRejectionRestoresCallerOwnersFo
     EXPECT_FALSE(rejectingDevice.hasPendingMesh());
 
     DelayedRetirementRenderDevice acceptingDevice;
-    ASSERT_TRUE(system->retireStaticMesh(acceptingDevice, *lease, mesh).has_value());
+    ASSERT_TRUE(system->retireGpuMesh(acceptingDevice, *lease, mesh).has_value());
     EXPECT_FALSE(static_cast<bool>(*lease));
     EXPECT_FALSE(static_cast<bool>(mesh));
     EXPECT_TRUE(acceptingDevice.completeMesh());
@@ -758,14 +758,14 @@ TEST_F(AssetGpuRetirementTests, StaticMeshLeaseRejectsWrongKindCrossStoreAndWron
     DelayedRetirementRenderDevice device;
     constexpr Render::GpuMeshId ExpectedMesh{13U, 7U};
     Render::GpuMeshId wrongKindMesh = ExpectedMesh;
-    const auto wrongKind = system->retireStaticMesh(device, *materialLease, wrongKindMesh);
+    const auto wrongKind = system->retireGpuMesh(device, *materialLease, wrongKindMesh);
     ASSERT_FALSE(wrongKind.has_value());
     EXPECT_EQ(wrongKind.error().code, AssetErrorCode::InvalidHandle);
     EXPECT_TRUE(static_cast<bool>(*materialLease));
     EXPECT_EQ(wrongKindMesh, ExpectedMesh);
 
     Render::GpuMeshId crossStoreMesh = ExpectedMesh;
-    const auto crossStore = system->retireStaticMesh(device, *foreignMeshLease, crossStoreMesh);
+    const auto crossStore = system->retireGpuMesh(device, *foreignMeshLease, crossStoreMesh);
     ASSERT_FALSE(crossStore.has_value());
     EXPECT_EQ(crossStore.error().code, AssetErrorCode::InvalidHandle);
     EXPECT_TRUE(static_cast<bool>(*foreignMeshLease));
@@ -774,7 +774,7 @@ TEST_F(AssetGpuRetirementTests, StaticMeshLeaseRejectsWrongKindCrossStoreAndWron
     Render::GpuMeshId wrongThreadMesh = ExpectedMesh;
     std::optional<Core::ErrorCode> wrongThreadError;
     std::thread otherThread([&] {
-        const auto status = system->retireStaticMesh(device, *meshLease, wrongThreadMesh);
+        const auto status = system->retireGpuMesh(device, *meshLease, wrongThreadMesh);
         if (!status)
         {
             wrongThreadError = status.error().code;

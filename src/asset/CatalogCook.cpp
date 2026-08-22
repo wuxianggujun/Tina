@@ -2596,32 +2596,31 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
         }
         if (tokens[0] == "material")
         {
-            // material <id> unlit [opaque|blend] <r> <g> <b> [a] [tex32hex]
-            // The legacy form without a mode remains an explicit opaque recipe.
+            // material <id> unlit <opaque|blend> <r> <g> <b> [a] [tex32hex]
             if (tokens.size() < 3U)
             {
                 return Core::failure(
                     AssetErrorCode::InvalidCatalogConfig,
-                    "material supports: material <id> unlit [opaque|blend] <r> <g> <b> [a] [textureId]");
+                    "material supports: material <id> unlit <opaque|blend> <r> <g> <b> [a] [textureId]");
             }
             if (tokens[2] != "unlit")
             {
                 return Core::failure(AssetErrorCode::InvalidCatalogConfig, "material model must be unlit");
             }
-            AssetFormat::MaterialAlphaMode alphaMode = AssetFormat::MaterialAlphaMode::Opaque;
-            std::size_t colorOffset = 3;
-            if (tokens.size() > colorOffset && (tokens[colorOffset] == "opaque" || tokens[colorOffset] == "blend"))
+            if (tokens.size() < 4U || (tokens[3] != "opaque" && tokens[3] != "blend"))
             {
-                alphaMode = tokens[colorOffset] == "blend"
-                                ? AssetFormat::MaterialAlphaMode::Blend
-                                : AssetFormat::MaterialAlphaMode::Opaque;
-                ++colorOffset;
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "material alpha mode must be opaque or blend");
             }
-            if (tokens.size() < colorOffset + 3U || tokens.size() > colorOffset + 5U)
+            const AssetFormat::MaterialAlphaMode alphaMode =
+                tokens[3] == "blend" ? AssetFormat::MaterialAlphaMode::Blend
+                                     : AssetFormat::MaterialAlphaMode::Opaque;
+            constexpr std::size_t ColorOffset = 4;
+            if (tokens.size() < ColorOffset + 3U || tokens.size() > ColorOffset + 5U)
             {
                 return Core::failure(
                     AssetErrorCode::InvalidCatalogConfig,
-                    "material supports: material <id> unlit [opaque|blend] <r> <g> <b> [a] [textureId]");
+                    "material supports: material <id> unlit <opaque|blend> <r> <g> <b> [a] [textureId]");
             }
             auto materialId = Core::AssetId::parseCanonical(tokens[1]);
             if (!materialId)
@@ -2632,14 +2631,14 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
             float g = 0.0F;
             float b = 0.0F;
             float a = 1.0F;
-            if (!parseFloatToken(tokens[colorOffset], r) ||
-                !parseFloatToken(tokens[colorOffset + 1U], g) ||
-                !parseFloatToken(tokens[colorOffset + 2U], b))
+            if (!parseFloatToken(tokens[ColorOffset], r) ||
+                !parseFloatToken(tokens[ColorOffset + 1U], g) ||
+                !parseFloatToken(tokens[ColorOffset + 2U], b))
             {
                 return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid material baseColor RGB");
             }
             Core::AssetId textureId{};
-            const std::size_t optionalOffset = colorOffset + 3U;
+            const std::size_t optionalOffset = ColorOffset + 3U;
             if (tokens.size() > optionalOffset)
             {
                 // A canonical AssetId can contain only decimal digits and still

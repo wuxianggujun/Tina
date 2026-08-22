@@ -75,8 +75,7 @@ Image/Icon/NineSlice 和 Motion 必须扩展现有统计模型，而不是另建
   resolve/pin 唯一资源并合并相邻 batch。该成本必须单列，不能错误归入 UI commit rebuild。
 
 `UI-PERF-001` 的首个 milestone 已建立前四条版本化 workload，Image 与 Component 垂直切片已分别补齐
-`ui_image_nineslice_v1` 和 `ui_component_build_v1`。旧
-`ui_component_build_activate_toggle_v1` 仅保留为 Activate/Toggle 前置诊断 workload，不替代完整验收。
+`ui_image_nineslice_v1` 和 `ui_component_build_v1`。
 Style 垂直切片已补齐 `ui_style_state_v1`，并将 style token capacity/count/high-water 纳入 JSON/checksum；
 其余 workload 随 Motion 垂直切片补齐。
 在 `PERF-002` 固定门禁机完成前，时间结论保持 `conclusion=provisional`：
@@ -88,7 +87,6 @@ Style 垂直切片已补齐 `ui_style_state_v1`，并将 style token capacity/co
 | `ui_route_v1` | 4096 hit entries、route depth 64；target/miss/capture 固定序列 | visited entries、path depth、listener calls、consume/claim checksum；allocation delta 为 0 |
 | `ui_virtual_collection_v1` | 100k logical items、固定 64-row pool/scroll sequence | materialized row/high-water，warmup 后 Tina-routed storage 不增长，selection/semantics checksum |
 | `ui_component_build_v1` | 256 个四节点 Component；固定 text/canvas payload 与 Activate/Toggle/Range/TextInput/Scroll/Selection slot mix | build/commit 时间、node/text-byte/canvas/behavior 的 reserved/published counter、各 pool high-water、allocation delta 与 tree checksum；commit 后无 retained wrapper，后续 clean commit rebuild 为 0 |
-| `ui_component_build_activate_toggle_v1` | 256 个四节点 Component；每组件固定 11 text bytes、2 Canvas commands、2 Activate + 2 Toggle slots | **前置证据，非冻结 workload 验收：** 直接测 `UIElementBuildTransaction` 的 build/commit/clean-commit 时间、requested/published 与 side-store capacity/high-water、稳定 tree checksum、allocation delta/clean rebuild 为 0；schema 明示其余 Behavior 和 reservation counter 未覆盖 |
 | `ui_style_state_v1` | 4096 nodes、256 rules、每节点最多 4 classes | resolved/inspected nodes、candidate rules、token/bucket/class-link capacity/high-water；当前 workload 注册 token=0，只验证单节点 state change；运行期 token update 的 reverse-dependency 路径由 unit tests 覆盖 |
 | `ui_image_nineslice_v1` | 256 Image + 232 Icon + 512 full NineSlice、64 unique `(resolver scope, AssetId)` | 每 build `Q=5096/U=64/B=1000`、64 resolve hit、5032 cache dedupe、64 pin acquire/release；missing/not-ready/extent mismatch/resource-intern dedupe 与 allocation delta 为 0；command/batch/resource/pin high-water 和 DisplayList checksum 稳定 |
 | `ui_motion_v1` | 4096 nodes、seed%3→active tracks 0/64/1024、固定 fakeable clock | sampled/active/high-water；`M==0` 时 motion work/额外 dirty 为 0；layout/hit rebuild 为 0，记录 paint publication |
@@ -141,8 +139,7 @@ Motion 只遍历 active list，`M == 0` 不产生额外 dirty；Image/Icon/NineS
 版本化 JSON：`schema`、workload id/version/seed/parameters、build/host fingerprint、counters
 checksum、p50/p95/p99。当前包含 `null_runtime_frames`（Headless+Null+DisabledTask）以及
 `ui_static_commit_v1`、`ui_paint_dirty_v1`、`ui_route_v1`、`ui_virtual_collection_v1`、
-`ui_image_nineslice_v1`、`ui_component_build_v1`，以及仅作历史前置诊断的
-`ui_component_build_activate_toggle_v1` workload。
+`ui_image_nineslice_v1`、`ui_component_build_v1` workload。
 
 `tools/bench/run_benchmark_gate.py` 顺序启动独立 `tina_bench` 进程，先要求全部子结果的 schema、
 workload/version/seed/parameters、fingerprint 和 checksum 完全兼容，再对 run-level p99 计算 median/MAD。

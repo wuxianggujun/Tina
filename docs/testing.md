@@ -509,8 +509,7 @@ DisplayList checksum 与 `allocation.delta=0`。
 root（Scroll + 2 Canvas commands）、RangeInput + Activate + Toggle、TextEdit、Dropdown（Activate + Select）。
 每事务固定预留 4 nodes、11 text bytes、2 Canvas commands，以及 Activate=2、Toggle/Range/TextInput/Scroll/
 Selection=1；JSON 必须报告各池 requested=reserved=published、capacity failure/outstanding=0、稳定非零 tree
-checksum、warmup 后 UI PMR allocation delta=0 与 clean commit rebuild=0。旧
-`ui_component_build_activate_toggle_v1` 只保留为 `coverage=activate_toggle_only` 的前置诊断 workload。
+checksum、warmup 后 UI PMR allocation delta=0 与 clean commit rebuild=0。
 
 `ui_style_state_v1` 固定 4096 nodes、64 classes、64 ColorToken capacity、256 rules 与每个 styled node 4 个
 class link；当前 workload 不注册 token，JSON 必须报告 `registered_tokens=0`、token high-water=0。每个 sample
@@ -1036,7 +1035,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3d
 - StaticMesh payload v1 固定校验 P3N3T4UV2（12 floats/vertex）与 UInt16 index，不接受其他 stride/layout；
 - glTF authored `TANGENT` 读取、校验并规范化，NORMAL+TEXCOORD_0 缺 tangent 时由 MikkTSpace 生成；
 - 缺 NORMAL/UV primitive 显式 cook 失败，不发布不完整 StaticMesh；
-- Asset upload 只有 `createStaticMesh(StaticMeshUploadDesc)`，Null/bgfx 对唯一 stride、index range、generation/retirement 使用同一契约；
+- Asset mesh upload 使用 `createStaticMesh(StaticMeshUploadDesc)` 与 `createSkinnedMesh(SkinnedMeshUploadDesc)`，Null/bgfx 对共享 `GpuMeshId` generation/retirement 使用同一契约；
 - Opaque3D vertex tangent TBN 与 signed model scale handedness 由 shader/backend test 覆盖，不存在 derivative fallback；
 - product-3d schema 16 继续要求 complete-PBR fixture `tangentMeshesUploaded=2`。
 

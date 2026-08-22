@@ -104,7 +104,7 @@ void releaseAssetLeaseRetirementPin(void* userData) noexcept
     for (const auto& record : ledger.records())
     {
         const bool gpuResource = record.kind == AssetRetirementKind::GpuTexture2D ||
-                                 record.kind == AssetRetirementKind::GpuStaticMesh;
+                                 record.kind == AssetRetirementKind::GpuMesh;
         if (gpuResource && record.state != AssetRetirementState::Released)
         {
             return true;
@@ -1725,8 +1725,8 @@ Core::Status AssetSystem::retireTexture2D(Render::IRenderDevice& device, AssetLe
     return Core::success();
 }
 
-Core::Status AssetSystem::retireStaticMesh(Render::IRenderDevice& device, AssetHandle handle,
-                                           Render::GpuMeshId mesh)
+Core::Status AssetSystem::retireGpuMesh(Render::IRenderDevice& device, AssetHandle handle,
+                                        Render::GpuMeshId mesh)
 {
     if (std::this_thread::get_id() != m_ownerThread)
     {
@@ -1742,18 +1742,18 @@ Core::Status AssetSystem::retireStaticMesh(Render::IRenderDevice& device, AssetH
     auto lease = m_store.acquire(handle);
     if (!lease)
     {
-        return Core::failure(std::move(lease.error()).withContext("AssetSystem::retireStaticMesh", "acquire"));
+        return Core::failure(std::move(lease.error()).withContext("AssetSystem::retireGpuMesh", "acquire"));
     }
-    auto status = retireStaticMesh(device, *lease, mesh);
+    auto status = retireGpuMesh(device, *lease, mesh);
     if (!status)
     {
-        return Core::failure(std::move(status.error()).withContext("AssetSystem::retireStaticMesh", "lease"));
+        return Core::failure(std::move(status.error()).withContext("AssetSystem::retireGpuMesh", "lease"));
     }
     return Core::success();
 }
 
-Core::Status AssetSystem::retireStaticMesh(Render::IRenderDevice& device, AssetLease& lease,
-                                           Render::GpuMeshId& mesh)
+Core::Status AssetSystem::retireGpuMesh(Render::IRenderDevice& device, AssetLease& lease,
+                                        Render::GpuMeshId& mesh)
 {
     if (std::this_thread::get_id() != m_ownerThread)
     {
@@ -1800,12 +1800,12 @@ Core::Status AssetSystem::retireStaticMesh(Render::IRenderDevice& device, AssetL
     {
         if (auto status = drainGpuRetirements(); !status)
         {
-            return Core::failure(std::move(status.error()).withContext("AssetSystem::retireStaticMesh",
+            return Core::failure(std::move(status.error()).withContext("AssetSystem::retireGpuMesh",
                                                                        "previousDeviceDrain"));
         }
     }
 
-    if (auto status = m_retirement.enqueueStaticMesh(handle, storeAssetId, mesh); !status)
+    if (auto status = m_retirement.enqueueGpuMesh(handle, storeAssetId, mesh); !status)
     {
         return status;
     }
@@ -1823,13 +1823,13 @@ Core::Status AssetSystem::retireStaticMesh(Render::IRenderDevice& device, AssetL
                                    &releaseAssetLeaseRetirementPin};
     m_retirement.markRetiring(handle);
 
-    if (auto status = device.retireStaticMesh(mesh, completionPin); !status)
+    if (auto status = device.retireGpuMesh(mesh, completionPin); !status)
     {
         lease = std::move(payload->lease);
         payload->ledger = nullptr;
         m_retirement.cancel(handle);
         completionPin.release();
-        return Core::failure(std::move(status.error()).withContext("AssetSystem::retireStaticMesh", "render"));
+        return Core::failure(std::move(status.error()).withContext("AssetSystem::retireGpuMesh", "render"));
     }
 
     mesh = {};

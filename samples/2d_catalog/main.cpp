@@ -28,6 +28,7 @@
 #include <iostream>
 #include <memory>
 #include <memory_resource>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -219,6 +220,7 @@ struct CatalogResources final {
     Tina::Asset::AssetHandle textureHandle{};
     Tina::Render::GpuTextureId gpuTexture{};
     std::filesystem::path catalogRoot{};
+    std::optional<Tina::Core::Error> shutdownError{};
 };
 
 [[nodiscard]] Tina::Core::Status prepareCatalog(CatalogResources& resources)
@@ -376,17 +378,17 @@ class Catalog2DState final : public Tina::IGameState {
         if (auto* device = capture_->get(); device != nullptr && resources_->gpuTexture)
         {
             (void)device->setTexture2DBinding(ProductSpriteBindingKey, {});
-            const auto retirement = resources_->system->retireTexture2D(
+            auto retirement = resources_->system->retireTexture2D(
                 *device, resources_->textureHandle, resources_->gpuTexture);
             if (!retirement)
             {
-                // Capability fallback keeps the old logical-destroy behavior;
-                // the bgfx device still owns the native shutdown drain.
-                (void)device->destroyTexture2D(resources_->gpuTexture);
-                (void)resources_->system->unload(resources_->textureHandle);
+                resources_->shutdownError.emplace(std::move(retirement.error()));
             }
-            resources_->gpuTexture = {};
-            resources_->textureHandle = {};
+            else
+            {
+                resources_->gpuTexture = {};
+                resources_->textureHandle = {};
+            }
         }
         ++counters_->stateExits;
     }
@@ -590,6 +592,11 @@ int main(int argc, char** argv)
     if (!run)
     {
         writeError(run.error());
+        return 1;
+    }
+    if (resources.shutdownError.has_value())
+    {
+        writeError(*resources.shutdownError);
         return 1;
     }
 

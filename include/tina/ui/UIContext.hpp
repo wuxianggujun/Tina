@@ -659,7 +659,7 @@ class UIContext final {
     [[nodiscard]] bool reducedMotion() const noexcept;
     // When duration > 0, stylesheet BoxFill color changes driven by interaction
     // state (hover/press/focus/...) begin a paint-only BackgroundColor transition
-    // instead of snapping. Duration 0 keeps the historical instant resolve path.
+    // instead of snapping. Duration 0 resolves the target style immediately.
     // Matching nodes reserve one persistent track during style binding. Enabling
     // this after nodes exist preflights all reservations atomically; capacity
     // failure preserves the previous spec and never reaches input routing.
