@@ -120,10 +120,62 @@ namespace {
     return normalizeSpacing(spacing.bottom);
 }
 
+[[nodiscard]] Core::Status normalizeGridTracks(UIGridTrackList& tracks)
+{
+    if (tracks.count > UIGridTrackCapacity)
+    {
+        return Core::failure(
+            UIErrorCode::InvalidLayout,
+            "UI Grid track count exceeds the fixed per-axis capacity");
+    }
+    for (usize index = 0; index < tracks.count; ++index)
+    {
+        UIGridTrack& track = tracks.tracks[index];
+        switch (track.unit)
+        {
+        case UIGridTrackUnit::Auto:
+            track.value = 0.0F;
+            break;
+        case UIGridTrackUnit::Px:
+            if (!isFiniteNonNegative(track.value))
+            {
+                return Core::failure(
+                    UIErrorCode::InvalidLayout,
+                    "UI Grid pixel track must be finite and non-negative");
+            }
+            track.value = normalizeFloat(track.value);
+            break;
+        case UIGridTrackUnit::Fraction:
+            if (!std::isfinite(track.value) || track.value <= 0.0F)
+            {
+                return Core::failure(
+                    UIErrorCode::InvalidLayout,
+                    "UI Grid fraction track must be finite and positive");
+            }
+            track.value = normalizeFloat(track.value);
+            break;
+        default:
+            return Core::failure(UIErrorCode::InvalidLayout,
+                                 "UI Grid track unit is invalid");
+        }
+    }
+    for (usize index = tracks.count; index < tracks.tracks.size(); ++index)
+    {
+        tracks.tracks[index] = UIGridTrack::Auto();
+    }
+    return Core::success();
+}
+
 [[nodiscard]] bool isValidFlexDirection(UIFlexDirection value) noexcept
 {
     return value == UIFlexDirection::Row ||
            value == UIFlexDirection::Column;
+}
+
+[[nodiscard]] bool isValidContainerLayout(UIContainerLayout value) noexcept
+{
+    return value == UIContainerLayout::Flex ||
+           value == UIContainerLayout::Grid;
 }
 
 [[nodiscard]] bool isValidJustifyContent(UIJustifyContent value) noexcept
@@ -852,6 +904,44 @@ Core::Result<UILayoutStyle> normalizeLayoutStyle(UILayoutStyle style)
     {
         return Core::failure(status.error());
     }
+    if (Core::Status status = normalizeGridTracks(style.gridContainer.columns);
+        !status)
+    {
+        return Core::failure(status.error());
+    }
+    if (Core::Status status = normalizeGridTracks(style.gridContainer.rows);
+        !status)
+    {
+        return Core::failure(status.error());
+    }
+    if (Core::Status status = normalizeSpacing(style.gridContainer.gap.row);
+        !status)
+    {
+        return Core::failure(status.error());
+    }
+    if (Core::Status status = normalizeSpacing(style.gridContainer.gap.column);
+        !status)
+    {
+        return Core::failure(status.error());
+    }
+    const auto validGridIndexAndSpan = [](u8 index, u8 span) noexcept {
+        if (span == 0U || span > UIGridTrackCapacity)
+        {
+            return false;
+        }
+        return index == UIGridAutoIndex ||
+               static_cast<usize>(index) + static_cast<usize>(span) <=
+                   UIGridTrackCapacity;
+    };
+    if (!validGridIndexAndSpan(style.gridItem.row,
+                               style.gridItem.rowSpan) ||
+        !validGridIndexAndSpan(style.gridItem.column,
+                               style.gridItem.columnSpan))
+    {
+        return Core::failure(
+            UIErrorCode::InvalidLayout,
+            "UI Grid item index or span exceeds the fixed track capacity");
+    }
     if (Core::Status status = normalizeOverlayOffsetLength(style.overlay.offset.x);
         !status)
     {
@@ -862,10 +952,15 @@ Core::Result<UILayoutStyle> normalizeLayoutStyle(UILayoutStyle style)
     {
         return Core::failure(status.error());
     }
-    if (!isValidFlexDirection(style.flexContainer.direction) ||
+    if (!isValidContainerLayout(style.containerLayout) ||
+        !isValidFlexDirection(style.flexContainer.direction) ||
         !isValidJustifyContent(style.flexContainer.justifyContent) ||
         !isValidAxisAlignment(style.flexContainer.alignItems) ||
         !isValidAlignSelf(style.flexItem.alignSelf) ||
+        !isValidAxisAlignment(style.gridContainer.justifyItems) ||
+        !isValidAxisAlignment(style.gridContainer.alignItems) ||
+        !isValidAlignSelf(style.gridItem.justifySelf) ||
+        !isValidAlignSelf(style.gridItem.alignSelf) ||
         !isValidAxisAlignment(style.overlay.horizontal) ||
         !isValidAxisAlignment(style.overlay.vertical) ||
         !isValidPlacement(style.placement) ||

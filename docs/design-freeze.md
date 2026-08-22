@@ -44,6 +44,7 @@
 | SDK 发布 | `0.y.z` compatibility epoch、tuple-scoped 静态 C++ 兼容、API/symbol baseline 与 previous-release probe | [0024](adr/0024-sdk-abi-compatibility.md) | Accepted；当前 package 已用 strict exact-version ConfigVersion 对三段 exact、相邻版本、tweak/range 正反 probe fail closed。正式 supported tuple 仍需 release artifact/baseline/object probe |
 | UI 绘制图元 | Line 使用 exact 四顶点投影，Ellipse 使用解析 coverage；不保留阶梯折线、弦环或 rotated-quad 兼容 API | [0025](adr/0025-ui-line-and-ellipse-primitives.md) | 代码已实现：Box/Canvas authoring、committed paint、DisplayList、bgfx 与 Editor grid/gizmo 已贯通；100%/150%/200% Editor/UI-003 视觉证据已完成，`RENDER-LINES-001` 在跨 GPU UI-003 证据完成前保持 InProgress |
 | UI Keyframe | 每窗口 fixed-capacity timeline、唯一 monotonic clock、presentation owner，以及 Layout/Hit/Paint 原子 layout-animation 边界 | [0026](adr/0026-ui-keyframe-timeline-and-layout-animation.md) | Accepted/Implemented：paint 与 bounded `LayoutWidth`/`LayoutHeight`/`LayoutOffset` timeline、跨 motion candidate transaction、Runtime facade 与两个 workload 均已落地；UI/Runtime/bench unit 及 seed 0/1/2 确定性 gate 已通过 |
+| UI Grid | Flex/Grid 并存；普通 Flow child 使用固定8x8 `Px/Auto/Fr` track、span、row-major auto placement 与 per-item alignment | [0028](adr/0028-ui-fixed-capacity-grid-layout.md) | Implemented：公开 layout 契约、normalization、私有 Measure/Arrange、header isolation 与 Editor Inspector consumer 已落地；不替代 VirtualGridView/DataGrid |
 
 ## Proposed
 

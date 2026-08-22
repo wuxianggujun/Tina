@@ -760,7 +760,7 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
     if (!tree) {
         return Tina::Core::failure(std::move(tree.error()));
     }
-    if (auto status = processPendingMainMenuToggle(*tree); !status) {
+    if (auto status = processPendingMenuToggle(*tree); !status) {
         return status;
     }
     if (auto status = captureRequestedRgbaFrame(*tree); !status) {
@@ -783,7 +783,7 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
     if (auto status = processPendingHierarchyRename(*tree); !status) {
         return status;
     }
-    if (auto status = processPendingHierarchyReorder(*tree); !status) {
+    if (auto status = processPendingHierarchyDrop(*tree); !status) {
         return status;
     }
     if (pendingDirtyCloseDialogFocus_) {
@@ -1126,9 +1126,6 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
     if (auto status = processPendingTileBrush(*tree); !status) {
         return status;
     }
-    if (auto status = processPendingInspectorTransformStep(*tree); !status) {
-        return status;
-    }
     if (pendingAutoTransformInput_ && pendingEditorCommand_ == EditorCommand::ApplyTransform) {
         pendingAutoTransformInput_ = false;
         const char* automaticScale =
@@ -1354,14 +1351,12 @@ auto EditorWorkspaceState::processPendingPointLightColorUpdates(
     }
     const InspectorPointLightColorChannelRequest request =
         std::exchange(pendingPointLightColorChannel_, std::nullopt).value();
-    if (pointLightColorMixed_) {
-        return Tina::Core::success();
-    }
     auto synchronized = UI::synchronizeColorPickerChannel(
         pointLightColorValue_, false, request.channel, request.value);
     if (!synchronized) {
         return Tina::Core::failure(std::move(synchronized.error()));
     }
+    pointLightColorMixed_ = false;
     pointLightColorValue_ = synchronized->value;
     if (auto status = tree.setText(
             pointLightColorField_.textEdit, synchronized->text.view()); !status) {
@@ -1529,7 +1524,7 @@ auto EditorWorkspaceState::queueEditorCommand(EditorCommand command) noexcept ->
     return true;
 }
 
-auto EditorWorkspaceState::processPendingMainMenuToggle(
+auto EditorWorkspaceState::processPendingMenuToggle(
     Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
 {
     if (!pendingMainMenuToggle_.has_value()) {
@@ -1555,56 +1550,10 @@ auto EditorWorkspaceState::processPendingMainMenuToggle(
     return Tina::Core::success();
 }
 
-auto EditorWorkspaceState::processPendingInspectorTransformStep(
-    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
-{
-    if (!pendingInspectorTransformStep_.has_value()) {
-        return Tina::Core::success();
-    }
-    const InspectorTransformStepRequest request =
-        *pendingInspectorTransformStep_;
-    const std::array fields{
-        inspectorPositionX_, inspectorPositionY_, inspectorPositionZ_,
-        inspectorRotationX_, inspectorRotationY_, inspectorRotationZ_,
-        inspectorScaleX_, inspectorScaleY_, inspectorScaleZ_,
-    };
-    const UI::UINodeId field =
-        fields[inspectorTransformFieldIndex(request.field)];
-    auto text = tree.text(field);
-    if (!text) {
-        return Tina::Core::failure(std::move(text.error()));
-    }
-    const UI::UINumberFieldValueSpec spec =
-        inspectorTransformNumberSpec(request.field);
-    auto current = UI::synchronizeNumberFieldText(*text, spec);
-    if (!current) {
-        pendingInspectorTransformStep_.reset();
-        try {
-            authoringFeedback_ =
-                "Transform step rejected: enter one finite value instead of Mixed or n/a";
-        } catch (const std::bad_alloc&) {
-            return Tina::Core::failure(
-                Tina::Core::CoreErrorCode::OutOfMemory,
-                "Transform step rejection feedback allocation failed");
-        }
-        return Tina::Core::success();
-    }
-    auto stepped = UI::stepNumberFieldValue(
-        current->value, request.stepCount, spec);
-    if (!stepped) {
-        return Tina::Core::failure(std::move(stepped.error()));
-    }
-    if (auto status = tree.setText(field, stepped->text.view()); !status) {
-        return status;
-    }
-    pendingInspectorTransformStep_.reset();
-    return Tina::Core::success();
-}
-
 auto EditorWorkspaceState::processPendingInspectorSectionUpdates(
     Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
 {
-    for (ComponentSectionUi& section : componentSections_) {
+    for (NodePropertySectionUi& section : nodePropertySections_) {
         if (!section.collapseUpdatePending) {
             continue;
         }

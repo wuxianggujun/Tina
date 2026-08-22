@@ -7,7 +7,6 @@
 #include <tina/ui/UIText.hpp>
 
 #include <array>
-#include <optional>
 #include <string_view>
 
 namespace Tina::EditorApp::WorkspaceInternal {
@@ -49,7 +48,11 @@ struct EditorPropertyRowParts final {
     UI::UINodeId root{};
     UI::UINodeId label{};
     UI::UINodeId value{};
+    UI::UILayoutStyle rootLayout{};
+    UI::UILayoutStyle valueLayout{};
 };
+
+inline constexpr float EditorPropertyLabelWidth = 68.0F;
 
 struct EditorSearchFieldParts final {
     UI::UINodeId root{};
@@ -110,7 +113,10 @@ class EditorPropertyRow final {
     [[nodiscard]] static Core::Result<EditorPropertyRowParts>
     Build(PrimaryWindowUITreeUpdater& tree, UI::UINodeId parent,
           const UI::UITheme& theme, std::string_view label,
-          const UI::UITextStyle& labelStyle, UI::UILayoutStyle layout = {});
+          const UI::UITextStyle& labelStyle, UI::UILayoutStyle layout = {},
+          float labelWidth = EditorPropertyLabelWidth,
+          UI::UIGridTrackList valueColumns = UI::UIGridTrackList::Of(
+              {UI::UIGridTrack::Fr()}));
 };
 
 class EditorSearchField final {

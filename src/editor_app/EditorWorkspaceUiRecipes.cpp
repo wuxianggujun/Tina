@@ -367,14 +367,20 @@ Core::Result<EditorSectionHeaderParts> EditorSectionHeader::Build(
 Core::Result<EditorPropertyRowParts> EditorPropertyRow::Build(
     PrimaryWindowUITreeUpdater& tree, UI::UINodeId parent,
     const UI::UITheme& theme, std::string_view label,
-    const UI::UITextStyle& labelStyle, UI::UILayoutStyle layout)
+    const UI::UITextStyle& labelStyle, UI::UILayoutStyle layout,
+    float labelWidth, UI::UIGridTrackList valueColumns)
 {
-    layout.flexContainer.direction = UI::UIFlexDirection::Row;
-    layout.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+    layout.containerLayout = UI::UIContainerLayout::Grid;
+    layout.gridContainer.columns = UI::UIGridTrackList::Of({
+        UI::UIGridTrack::Px(labelWidth),
+        UI::UIGridTrack::Fr(),
+    });
+    layout.gridContainer.rows =
+        UI::UIGridTrackList::Of({UI::UIGridTrack::Fr()});
+    layout.gridContainer.alignItems = UI::UIAxisAlignment::Center;
+    layout.gridContainer.gap.row = 0.0F;
+    layout.gridContainer.gap.column = theme.spacing.space3;
     layout.flexItem.shrink = 0.0F;
-    if (layout.flexContainer.gap == UI::UILayoutGap{}) {
-        layout.flexContainer.gap = UI::UILayoutGap::All(theme.spacing.space3);
-    }
     auto transactionResult = tree.beginBuildTransaction(
         parent, UI::makePanelElement(layout),
         UI::UIComponentBuildBudget{
@@ -386,14 +392,19 @@ Core::Result<EditorPropertyRowParts> EditorPropertyRow::Build(
     }
     PrimaryWindowUIBuildTransaction transaction =
         std::move(*transactionResult);
-    EditorPropertyRowParts parts{.root = transaction.rootNodeId()};
+    EditorPropertyRowParts parts{
+        .root = transaction.rootNodeId(),
+        .rootLayout = layout,
+    };
 
     UI::UILayoutStyle labelLayout{};
-    labelLayout.size.width = UI::UILayoutLength::Px(92.0F);
-    labelLayout.flexItem.shrink = 0.0F;
+    labelLayout.gridItem.row = 0U;
+    labelLayout.gridItem.column = 0U;
+    labelLayout.gridItem.alignSelf = UI::UIAlignSelf::Stretch;
     UI::UIElementDescriptor labelDescriptor =
         UI::makeLabelElement(label, labelLayout);
     labelDescriptor.textStyle = labelStyle;
+    labelDescriptor.contentAlignment.vertical = UI::UIAxisAlignment::Center;
     auto labelNode = transaction.createElement(parts.root, labelDescriptor);
     if (!labelNode) {
         return Core::failure(labelNode.error());
@@ -401,18 +412,22 @@ Core::Result<EditorPropertyRowParts> EditorPropertyRow::Build(
     parts.label = *labelNode;
 
     UI::UILayoutStyle valueLayout{};
-    valueLayout.flexItem.grow = 1.0F;
-    valueLayout.flexItem.shrink = 1.0F;
-    valueLayout.flexItem.basis = UI::UILayoutLength::Px(0.0F);
-    valueLayout.flexContainer.direction = UI::UIFlexDirection::Row;
-    valueLayout.flexContainer.alignItems = UI::UIAxisAlignment::Center;
-    valueLayout.flexContainer.gap = UI::UILayoutGap::All(theme.spacing.space2);
+    valueLayout.gridItem.row = 0U;
+    valueLayout.gridItem.column = 1U;
+    valueLayout.gridItem.alignSelf = UI::UIAlignSelf::Stretch;
+    valueLayout.containerLayout = UI::UIContainerLayout::Grid;
+    valueLayout.gridContainer.columns = valueColumns;
+    valueLayout.gridContainer.rows =
+        UI::UIGridTrackList::Of({UI::UIGridTrack::Fr()});
+    valueLayout.gridContainer.alignItems = UI::UIAxisAlignment::Center;
+    valueLayout.gridContainer.gap.column = theme.spacing.space2;
     auto value = transaction.createElement(
         parts.root, UI::makePanelElement(valueLayout));
     if (!value) {
         return Core::failure(value.error());
     }
     parts.value = *value;
+    parts.valueLayout = valueLayout;
     auto committed = transaction.commit();
     if (!committed) {
         return Core::failure(committed.error());

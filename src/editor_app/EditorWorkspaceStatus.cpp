@@ -16,16 +16,35 @@ auto EditorWorkspaceState::reportAuthoringFailure(
 }
 
 auto EditorWorkspaceState::refreshWorkspaceChrome(Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status{
-    const bool world2D = workspaceMode_ == WorkspaceMode::World2D;
-    if (auto status = refreshViewportViewModeUi(tree); !status) {
-        return status;
+    return refreshViewportViewModeUi(tree);
+}
+
+auto EditorWorkspaceState::refreshInspectorGridLayout(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    if (inspectorTransformGridWorkspace_ == workspaceMode_) {
+        return Tina::Core::success();
     }
-    if (auto status = tree.setText(documentFormat_,
-                                   world2D ? "World2D v2 + TileMap v3/v1 | canonical"
-                                           : "Prefab schema v2 | canonical");
-        !status) {
-        return status;
+    for (Tina::Core::usize index = 0;
+         index < inspectorTransformValueGrids_.size(); ++index) {
+        auto& grid = inspectorTransformValueGrids_[index];
+        if (workspaceMode_ == WorkspaceMode::World3D) {
+            grid.layout.gridContainer.columns = UI::UIGridTrackList::Of({
+                UI::UIGridTrack::Fr(), UI::UIGridTrack::Fr(),
+                UI::UIGridTrack::Fr(),
+            });
+        } else if (index == 1U) {
+            grid.layout.gridContainer.columns =
+                UI::UIGridTrackList::Of({UI::UIGridTrack::Fr()});
+        } else {
+            grid.layout.gridContainer.columns = UI::UIGridTrackList::Of(
+                {UI::UIGridTrack::Fr(), UI::UIGridTrack::Fr()});
+        }
+        if (auto status = tree.setLayoutStyle(grid.root, grid.layout); !status) {
+            return status;
+        }
     }
+    inspectorTransformGridWorkspace_ = workspaceMode_;
     return Tina::Core::success();
 }
 
@@ -168,6 +187,9 @@ auto EditorWorkspaceState::refreshWorkspacePanelsUi(
         pendingBottomPanelToggle_.reset();
     }
 
+    if (auto status = refreshInspectorGridLayout(tree); !status) {
+        return status;
+    }
     return tree.setText(outputMessage_, authoringFeedback_);
 }
 
@@ -249,8 +271,6 @@ auto EditorWorkspaceState::refreshMainMenuUi(
         return tree.setEnabled(target, *enabled);
     };
     const std::array mirroredItems{
-        std::pair{createProjectButton_, fileCreateProjectMenuItem_},
-        std::pair{openProjectButton_, fileOpenProjectMenuItem_},
         std::pair{importSourceButton_, fileImportSourceMenuItem_},
         std::pair{saveButton_, fileSaveMenuItem_},
         std::pair{saveAsButton_, fileSaveAsMenuItem_},
@@ -277,7 +297,6 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
     const bool selectionEditable = authoringEnabled() && !assetInspectorActive_ &&
                                    stableEntityIdForHierarchyItem(selectionKey_) != 0U &&
                                    !tileMapEditingContext();
-    const bool selectionEditable3D = selectionEditable && workspaceMode_ == WorkspaceMode::World3D;
 
     if (auto status = refreshWorkspaceChrome(tree); !status) {
         return status;
@@ -297,31 +316,7 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
     if (auto status = publishInspector(tree, selectionKey_); !status) {
         return status;
     }
-    if (auto status = refreshComponentSectionsUi(tree); !status) {
-        return status;
-    }
-    std::string documentStatus;
-    if (assetInspectorActive_) {
-        const auto* asset = inspectedProjectAsset();
-        if (asset != nullptr) {
-            documentStatus = "Catalog asset | Type v";
-            documentStatus += std::to_string(asset->assetTypeVersion);
-            documentStatus += " | Dependencies ";
-            documentStatus += std::to_string(asset->dependencyCount);
-        } else {
-            documentStatus = "Catalog asset unavailable in active project";
-        }
-    } else {
-        documentStatus = "Revision ";
-        documentStatus += std::to_string(activeDocumentRevision());
-        documentStatus += " | Undo ";
-        documentStatus += std::to_string(activeUndoDepth());
-        documentStatus += " | Redo ";
-        documentStatus += std::to_string(activeRedoDepth());
-        documentStatus += pathConfigured ? (dirty ? " | Modified" : " | Saved")
-                                         : " | Unsaved";
-    }
-    if (auto status = tree.setText(inspectorDocument_, documentStatus); !status) {
+    if (auto status = refreshNodePropertySectionsUi(tree); !status) {
         return status;
     }
     std::string_view documentKindLabel = "No document";
@@ -454,70 +449,40 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
         !status) {
         return status;
     }
+    inspectorTransformFieldsLayout_.visibility = transformVisibility;
+    if (auto status = tree.setLayoutStyle(
+            inspectorTransformFields_, inspectorTransformFieldsLayout_);
+        !status) {
+        return status;
+    }
     for (Tina::Core::usize index = 0;
-         index < inspectorTransformNumberFields_.size(); ++index) {
+         index < inspectorTransformAxisFields_.size(); ++index) {
         const auto field = static_cast<InspectorTransformField>(index);
-        auto& controls = inspectorTransformNumberFields_[index];
+        auto& axis = inspectorTransformAxisFields_[index];
         const bool fieldVisible =
             transformVisible &&
             (workspaceMode_ == WorkspaceMode::World3D ||
              !inspectorTransformFieldRequires3D(field));
-        controls.layout.visibility = fieldVisible
-                                         ? UI::UIVisibility::Visible
-                                         : UI::UIVisibility::Collapsed;
-        if (auto status = tree.setLayoutStyle(controls.root, controls.layout);
+        axis.layout.visibility = fieldVisible
+                                     ? UI::UIVisibility::Visible
+                                     : UI::UIVisibility::Collapsed;
+        if (auto status = tree.setLayoutStyle(axis.root, axis.layout);
             !status) {
             return status;
         }
     }
-    applyTransformButtonLayout_.visibility = transformVisibility;
-    if (auto status = tree.setLayoutStyle(
-            applyTransformButtonRoot_, applyTransformButtonLayout_);
-        !status) {
-        return status;
-    }
-    if (auto status = tree.setEnabled(inspectorPositionX_, selectionEditable); !status) {
-        return status;
-    }
-    if (auto status = tree.setEnabled(inspectorPositionY_, selectionEditable); !status) {
-        return status;
-    }
-    if (auto status = tree.setEnabled(inspectorPositionZ_, selectionEditable3D); !status) {
-        return status;
-    }
-    if (auto status = tree.setEnabled(inspectorRotationX_, selectionEditable3D); !status) {
-        return status;
-    }
-    if (auto status = tree.setEnabled(inspectorRotationY_, selectionEditable3D); !status) {
-        return status;
-    }
-    if (auto status = tree.setEnabled(inspectorRotationZ_, selectionEditable); !status) {
-        return status;
-    }
-    if (auto status = tree.setEnabled(inspectorScaleX_, selectionEditable); !status) {
-        return status;
-    }
-    if (auto status = tree.setEnabled(inspectorScaleY_, selectionEditable); !status) {
-        return status;
-    }
-    if (auto status = tree.setEnabled(inspectorScaleZ_, selectionEditable3D); !status) {
-        return status;
-    }
-    const std::array transformFieldEnabled{
-        selectionEditable, selectionEditable, selectionEditable3D,
-        selectionEditable3D, selectionEditable3D, selectionEditable,
-        selectionEditable, selectionEditable, selectionEditable3D,
+    const std::array transformInputs{
+        inspectorPositionX_, inspectorPositionY_, inspectorPositionZ_,
+        inspectorRotationX_, inspectorRotationY_, inspectorRotationZ_,
+        inspectorScaleX_, inspectorScaleY_, inspectorScaleZ_,
     };
     for (Tina::Core::usize index = 0;
-         index < inspectorTransformNumberFields_.size(); ++index) {
-        const auto& controls = inspectorTransformNumberFields_[index];
-        if (auto status = tree.setEnabled(
-                controls.decrementButton, transformFieldEnabled[index]);
-            !status) {
-            return status;
-        }
-        if (auto status = tree.setEnabled(
-                controls.incrementButton, transformFieldEnabled[index]);
+         index < transformInputs.size(); ++index) {
+        const auto field = static_cast<InspectorTransformField>(index);
+        const bool enabled = selectionEditable &&
+            (workspaceMode_ == WorkspaceMode::World3D ||
+             !inspectorTransformFieldRequires3D(field));
+        if (auto status = tree.setEnabled(transformInputs[index], enabled);
             !status) {
             return status;
         }
@@ -671,7 +636,7 @@ auto EditorWorkspaceState::refreshPlaySessionUi(
         animationEventPreviousButton_, animationEventNextButton_,
         animationEventAddButton_, animationEventApplyButton_,
         animationEventRemoveButton_, openProjectAssetButton_,
-        refreshProjectCatalogButton_, createProjectButton_, openProjectButton_,
+        refreshProjectCatalogButton_,
         importSourceButton_, removeSourceImportButton_, closeDocumentButton_,
     };
     for (const UI::UINodeId button : lockedButtons) {
@@ -700,10 +665,9 @@ auto EditorWorkspaceState::refreshPlaySessionUi(
     if (auto status = tree.setEnabled(animationEventOffset_, false); !status) {
         return status;
     }
-    for (const ComponentSectionUi& section : componentSections_) {
+    for (const NodePropertySectionUi& section : nodePropertySections_) {
         const std::array sectionControls{
-            section.activeSwitch, section.addButton, section.removeButton,
-            section.assignButton, section.applyButton};
+            section.activeSwitch, section.assignButton, section.applyButton};
         for (const UI::UINodeId control : sectionControls) {
             if (!control.hasValue()) {
                 continue;

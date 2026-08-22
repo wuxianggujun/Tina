@@ -268,6 +268,45 @@ TEST(UIPropertyNormalizationTests, LayoutAllowsSignedOverlayOffsetsWithoutAllowi
     EXPECT_EQ(invalidSize.error().code, UI::UIErrorCode::InvalidLayout);
 }
 
+TEST(UIPropertyNormalizationTests, LayoutValidatesAndCanonicalizesGridContracts)
+{
+    UI::UILayoutStyle style{};
+    style.containerLayout = UI::UIContainerLayout::Grid;
+    style.gridContainer.columns = UI::UIGridTrackList::Of({
+        UI::UIGridTrack::Px(-0.0F), UI::UIGridTrack::Auto(),
+        UI::UIGridTrack::Fr(2.0F),
+    });
+    style.gridContainer.gap = {.row = -0.0F, .column = 4.0F};
+    style.gridItem.row = 1U;
+    style.gridItem.column = 2U;
+    style.gridItem.columnSpan = 2U;
+
+    auto normalized = UI::Detail::normalizeLayoutStyle(style);
+    ASSERT_TRUE(normalized.has_value());
+    EXPECT_FALSE(std::signbit(
+        normalized->gridContainer.columns.tracks[0].value));
+    EXPECT_FALSE(std::signbit(normalized->gridContainer.gap.row));
+    EXPECT_EQ(normalized->gridContainer.columns.tracks[1],
+              UI::UIGridTrack::Auto());
+
+    style.gridContainer.columns.tracks[2] = UI::UIGridTrack::Fr(0.0F);
+    auto rejected = UI::Detail::normalizeLayoutStyle(style);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidLayout);
+
+    style.gridContainer.columns.tracks[2] = UI::UIGridTrack::Fr();
+    style.gridItem.column = 7U;
+    rejected = UI::Detail::normalizeLayoutStyle(style);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidLayout);
+
+    style.gridItem.column = UI::UIGridAutoIndex;
+    style.gridItem.rowSpan = 0U;
+    rejected = UI::Detail::normalizeLayoutStyle(style);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidLayout);
+}
+
 TEST(UIPropertyNormalizationTests, ScrollOffsetRejectsNegativeAndCanonicalizesZero)
 {
     auto normalized = UI::Detail::normalizeScrollOffset(

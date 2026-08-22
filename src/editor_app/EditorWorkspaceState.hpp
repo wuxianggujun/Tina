@@ -36,7 +36,7 @@
 #include <tina/core/io/WriteFile.hpp>
 #include <tina/core/text/Utf8.hpp>
 #include <tina/desktop/DesktopEngine.hpp>
-#include <tina/editor/EditorComponentOperations.hpp>
+#include <tina/editor/EditorNodePropertyOperations.hpp>
 #include <tina/editor/EditorDocumentTabs.hpp>
 #include <tina/editor/EditorErrors.hpp>
 #include <tina/editor/EditorMarqueeSelection.hpp>
@@ -80,7 +80,6 @@
 #include <tina/ui/UIDialog.hpp>
 #include <tina/ui/UIListView.hpp>
 #include <tina/ui/UILayout.hpp>
-#include <tina/ui/UINumberField.hpp>
 #include <tina/ui/UIPaint.hpp>
 #include <tina/ui/UISnackbar.hpp>
 #include <tina/ui/UIStyle.hpp>
@@ -1625,30 +1624,18 @@ enum class EditorCommand : u32 {
     SwitchToWorld3D,
     MoveSelectedPositiveX,
     ApplyTransform,
-    ComponentAddSprite,
-    ComponentAddCamera,
-    ComponentAddPointLight,
-    ComponentAddShadowOccluder,
-    ComponentAddSpriteAnimation,
-    ComponentAddMeshRenderer,
-    ComponentRemoveSprite,
-    ComponentRemoveCamera,
-    ComponentRemovePointLight,
-    ComponentRemoveShadowOccluder,
-    ComponentRemoveSpriteAnimation,
-    ComponentRemoveMeshRenderer,
-    ComponentApplySprite,
-    ComponentApplyCamera,
-    ComponentApplyPointLight,
-    ComponentApplyShadowOccluder,
-    ComponentApplySpriteAnimation,
-    ComponentToggleSpriteVisible,
-    ComponentToggleCameraActive,
-    ComponentTogglePointLightActive,
-    ComponentToggleShadowOccluderActive,
-    ComponentToggleSpriteAnimationAutoPlay,
-    ComponentToggleMeshVisible,
-    ComponentAssignSprite,
+    NodeApplySprite,
+    NodeApplyCamera,
+    NodeApplyPointLight,
+    NodeApplyShadowOccluder,
+    NodeApplyAnimationProperties,
+    NodeToggleSpriteVisible,
+    NodeToggleCameraActive,
+    NodeTogglePointLightActive,
+    NodeToggleShadowOccluderActive,
+    NodeToggleSpriteAnimationAutoPlay,
+    NodeToggleMeshVisible,
+    NodeAssignSprite,
     Undo,
     Redo,
     Save,
@@ -1813,10 +1800,6 @@ enum class InspectorTransformField : u8 {
     ScaleY = 7,
     ScaleZ = 8,
 };
-struct InspectorTransformStepRequest final {
-    InspectorTransformField field = InspectorTransformField::PositionX;
-    i32 stepCount = 0;
-};
 [[nodiscard]] constexpr std::size_t inspectorTransformFieldIndex(
     InspectorTransformField field) noexcept
 {
@@ -1829,38 +1812,6 @@ struct InspectorTransformStepRequest final {
            field == InspectorTransformField::RotationX ||
            field == InspectorTransformField::RotationY ||
            field == InspectorTransformField::ScaleZ;
-}
-[[nodiscard]] constexpr UI::UINumberFieldValueSpec
-inspectorTransformNumberSpec(InspectorTransformField field) noexcept
-{
-    constexpr float MaximumMagnitude = 1'000'000.0F;
-    switch (field) {
-    case InspectorTransformField::RotationX:
-    case InspectorTransformField::RotationY:
-    case InspectorTransformField::RotationZ:
-        return {
-            .minValue = -MaximumMagnitude,
-            .maxValue = MaximumMagnitude,
-            .step = 1.0F,
-            .decimalPlaces = 6,
-        };
-    case InspectorTransformField::ScaleX:
-    case InspectorTransformField::ScaleY:
-    case InspectorTransformField::ScaleZ:
-        return {
-            .minValue = 0.01F,
-            .maxValue = MaximumMagnitude,
-            .step = 0.01F,
-            .decimalPlaces = 6,
-        };
-    default:
-        return {
-            .minValue = -MaximumMagnitude,
-            .maxValue = MaximumMagnitude,
-            .step = 0.1F,
-            .decimalPlaces = 6,
-        };
-    }
 }
 [[nodiscard]] inline Tina::Core::Result<std::optional<float>>
 parseInspectorTransformValue(std::string_view text, std::string_view fieldName)
@@ -2256,6 +2207,16 @@ struct SceneAddRequest final {
     u32 parentStableId = 0;
     u64 documentRevision = 0;
     bool creating = false;
+};
+enum class HierarchyDropIntent : u8 {
+    Reparent,
+    ReorderBefore,
+    ReorderAfter,
+};
+struct HierarchyDropRequest final {
+    u32 sourceStableId = 0;
+    u32 targetStableId = 0;
+    HierarchyDropIntent intent = HierarchyDropIntent::Reparent;
 };
 struct SavedTileMapChunkBaseline final {
     Tina::Core::AssetId assetId{};
@@ -3118,7 +3079,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
 
     [[nodiscard]] Tina::Core::Status buildCommandBarUi(UiBuildContext& ui, UI::UINodeId parent);
     [[nodiscard]] Tina::Core::Status buildDocumentTabsUi(UiBuildContext& ui, UI::UINodeId parent);
-    [[nodiscard]] Tina::Core::Status buildMainMenuOverlaysUi(
+    [[nodiscard]] Tina::Core::Status buildMenuOverlaysUi(
         UiBuildContext& ui, UI::UINodeId parent);
     [[nodiscard]] Tina::Core::Status buildWorkspaceUi(UiBuildContext& ui, UI::UINodeId parent);
     [[nodiscard]] Tina::Core::Status buildLeftDockUi(
@@ -3152,8 +3113,6 @@ class EditorWorkspaceState final : public Tina::IGameState {
     void resetViewportInteractionState() noexcept;
     [[nodiscard]] Tina::Core::Status processEditorShortcuts(
         const Tina::FrameActionSnapshot& actions);
-    [[nodiscard]] Tina::Core::Status processPendingInspectorTransformStep(
-        Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status processPendingInspectorSectionUpdates(
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status updateHierarchySearch(
@@ -3162,7 +3121,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status processPendingHierarchyRename(
         Tina::PrimaryWindowUITreeUpdater& tree);
-    [[nodiscard]] Tina::Core::Status processPendingHierarchyReorder(
+    [[nodiscard]] Tina::Core::Status processPendingHierarchyDrop(
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status showHierarchyRename(
         Tina::PrimaryWindowUITreeUpdater& tree, u32 stableId);
@@ -3177,7 +3136,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     void handleHierarchyPointerUp(UI::UIRoutedPointerEvent& event) noexcept;
     [[nodiscard]] Tina::Core::Status updateSnackbarUi(
         Tina::PrimaryWindowUITreeUpdater& tree);
-    [[nodiscard]] Tina::Core::Status processPendingMainMenuToggle(
+    [[nodiscard]] Tina::Core::Status processPendingMenuToggle(
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status refreshMainMenuUi(
         Tina::PrimaryWindowUITreeUpdater& tree);
@@ -3484,6 +3443,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] Tina::Core::Status
     refreshWorkspaceChrome(Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status
+    refreshInspectorGridLayout(Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status
     refreshWorkspacePanelsUi(Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Result<SavedDocumentBaseline>
     captureActiveDocumentSavedBaseline() const;
@@ -3527,17 +3488,17 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] Tina::Core::Status applySelectedTransform(
         const InspectorTransformInput& input);
     [[nodiscard]] Tina::Core::Result<std::vector<u32>>
-    componentSelectionStableIds() const;
+    nodePropertySelectionStableIds() const;
     [[nodiscard]] Tina::Core::AssetId
     selectedProjectAssetIdOfKind(Tina::AssetFormat::AssetKind kind) const noexcept;
-    // Runs one Inspector component command against the active world document.
-    // Rejections (invalid selection, redundant add/remove, invalid values) are
+    // Runs one Inspector property edit against nodes of the matching kind.
+    // Rejections (invalid selection, kind mismatch, invalid values) are
     // reported through authoringFeedback_ and return success; `published` is
     // true only when exactly one document revision was published.
-    [[nodiscard]] Tina::Core::Status runComponentCommand(
+    [[nodiscard]] Tina::Core::Status runNodePropertyCommand(
         Tina::PrimaryWindowUITreeUpdater& tree, EditorCommand command,
         bool& published);
-    [[nodiscard]] Tina::Core::Status refreshComponentSectionsUi(
+    [[nodiscard]] Tina::Core::Status refreshNodePropertySectionsUi(
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Asset::AssetHandle
     loadedAsset(Tina::Core::AssetId assetId, Tina::AssetFormat::AssetKind expectedKind) const noexcept;
@@ -3672,10 +3633,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId inspectorKind_{};
     UI::UINodeId inspectorNote_{};
     UI::UINodeId inspectorAssetRow_{};
+    UI::UILayoutStyle inspectorAssetRowLayout_{};
     UI::UINodeId inspectorAssetPath_{};
     UI::UINodeId inspectorDependencySummary_{};
     UI::UINodeId inspectorDependencyList_{};
-    UI::UINodeId inspectorDocument_{};
     UI::UINodeId viewportPreviewLayer_{};
     std::array<UI::UINodeId, ViewportGridVisualNodeCapacity>
         viewportGridNodes_{};
@@ -3695,8 +3656,6 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId viewportMarqueeNode_{};
     UI::UINodeId inspectorTransformHeader_{};
     UI::UILayoutStyle inspectorTransformHeaderLayout_{};
-    UI::UINodeId inspectorComponentsHeader_{};
-    UI::UILayoutStyle inspectorComponentsHeaderLayout_{};
     UI::UINodeId inspectorPositionX_{};
     UI::UINodeId inspectorPositionY_{};
     UI::UINodeId inspectorPositionZ_{};
@@ -3707,18 +3666,15 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId inspectorScaleX_{};
     UI::UINodeId inspectorScaleY_{};
     UI::UINodeId inspectorScaleZ_{};
-    struct InspectorTransformNumberFieldUi final {
-        UI::UINodeId root{};
-        UI::UILayoutStyle layout{};
-        UI::UINodeId decrementButton{};
-        UI::UINodeId incrementButton{};
-    };
-    std::array<InspectorTransformNumberFieldUi, 9>
-        inspectorTransformNumberFields_{};
     struct InspectorLayoutNodeUi final {
         UI::UINodeId root{};
         UI::UILayoutStyle layout{};
     };
+    UI::UINodeId inspectorTransformFields_{};
+    UI::UILayoutStyle inspectorTransformFieldsLayout_{};
+    std::array<InspectorLayoutNodeUi, 3> inspectorTransformValueGrids_{};
+    WorkspaceMode inspectorTransformGridWorkspace_ = WorkspaceMode::World2D;
+    std::array<InspectorLayoutNodeUi, 9> inspectorTransformAxisFields_{};
     InspectorLayoutNodeUi inspectorHierarchyHeaderUi_{};
     InspectorLayoutNodeUi inspectorHierarchyParentRowUi_{};
     InspectorLayoutNodeUi inspectorHierarchyApplyParentUi_{};
@@ -3777,8 +3733,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId viewportMode_{};
     UI::UILayoutStyle viewportModeLayout_{};
     UI::UINodeId frameAllButton_{};
-    UI::UINodeId documentFormat_{};
-    struct ComponentSectionUi final {
+    struct NodePropertySectionUi final {
         UI::UICollapsibleSectionParts collapsible{};
         UI::UILayoutStyle rootLayout{};
         UI::UILayoutStyle indicatorLayout{};
@@ -3786,16 +3741,14 @@ class EditorWorkspaceState final : public Tina::IGameState {
         bool expanded = true;
         bool collapseUpdatePending = false;
         UI::UINodeId activeSwitch{};
-        UI::UINodeId addButton{};
-        UI::UINodeId removeButton{};
         std::array<UI::UINodeId, 6> fields{};
         Tina::Core::usize fieldCount = 0;
         UI::UINodeId assignButton{};
         UI::UINodeId applyButton{};
     };
-    // 0..4 mirror Tina::Editor::World2DComponentKind; 5 is the 3D MeshRenderer.
-    static constexpr Tina::Core::usize MeshRendererSectionIndex = 5;
-    std::array<ComponentSectionUi, 6> componentSections_{};
+    // Rendering, Camera, Light, Occlusion, Animation, and 3D Rendering.
+    static constexpr Tina::Core::usize MeshPropertiesSectionIndex = 5;
+    std::array<NodePropertySectionUi, 6> nodePropertySections_{};
     struct InspectorPointLightColorChannelRequest final {
         UI::UIColorPickerChannel channel = UI::UIColorPickerChannel::Red;
         float value = 0.0F;
@@ -3849,16 +3802,12 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId tilePaintToolButton_{};
     UI::UINodeId tileEraseToolButton_{};
     UI::UINodeId applyTransformButton_{};
-    UI::UINodeId applyTransformButtonRoot_{};
-    UI::UILayoutStyle applyTransformButtonLayout_{};
     UI::UINodeId undoButton_{};
     UI::UINodeId redoButton_{};
     UI::UINodeId saveButton_{};
     UI::UINodeId saveAsButton_{};
     UI::UINodeId openProjectAssetButton_{};
     UI::UINodeId refreshProjectCatalogButton_{};
-    UI::UINodeId createProjectButton_{};
-    UI::UINodeId openProjectButton_{};
     UI::UINodeId importSourceButton_{};
     UI::UINodeId removeSourceImportButton_{};
     UI::UINodeId closeDocumentButtonRoot_{};
@@ -3919,8 +3868,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     std::optional<u32> pendingHierarchyRenameStableId_{};
     bool pendingHierarchyRenameCancel_ = false;
     bool pendingHierarchyRenameCommit_ = false;
-    std::optional<u32> pendingHierarchyReorderBeforeStableId_{};
-    std::optional<u32> pendingHierarchyReorderStableId_{};
+    std::optional<HierarchyDropRequest> pendingHierarchyDrop_{};
     u32 hierarchyRenameStableId_ = 0;
     u64 hierarchyRenameDocumentRevision_ = 0;
     bool hierarchyRenameVisible_ = false;
@@ -4036,8 +3984,6 @@ class EditorWorkspaceState final : public Tina::IGameState {
     std::optional<WorkspacePanelKind> pendingWorkspacePanelToggle_{};
     std::optional<BottomPanelKind> pendingBottomPanelToggle_{};
     std::optional<EditorCommand> pendingEditorCommand_{};
-    std::optional<InspectorTransformStepRequest>
-        pendingInspectorTransformStep_{};
     std::optional<Tina::Editor::EditorDocumentKey> pendingDirtyCloseKey_{};
     bool pendingDirtyCloseDialogFocus_ = false;
     std::optional<SceneDeleteConfirmation> pendingSceneDeleteConfirmation_{};

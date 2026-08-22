@@ -6,7 +6,7 @@ add_library(tina_editor_app STATIC
     EditorWorkspaceState.hpp
     EditorWorkspaceAnimation.cpp
     EditorWorkspaceCommands.cpp
-    EditorWorkspaceComponents.cpp
+    EditorWorkspaceNodeProperties.cpp
     EditorWorkspaceDocuments.cpp
     EditorWorkspaceGizmo.cpp
     EditorWorkspaceHierarchy.cpp

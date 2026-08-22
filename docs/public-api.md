@@ -311,7 +311,12 @@ Button 与 RadioButton descriptor 可直接使用与 text 互斥的 Image intrin
 semantics name 并关闭 content-as-name，使图标、control chrome 与交互状态共享同一 retained node。其他带行为
 Element 不接受 Image content。
 
-`UILayoutStyle` 将父容器 `flexContainer`、子项 `flexItem` 与 `Flow/Overlay` placement 分开；Overlay 使用
+`UILayoutStyle::containerLayout` 为 direct `Flow` child 选择 Flex 或固定容量 Grid。Flex 使用父级
+`flexContainer` 与子项 `flexItem`；Grid 使用父级 `gridContainer` 和子项 `gridItem`，每轴最多8条显式或
+隐式 `Px/Auto/Fr` track，支持 gap、zero-based row/column、span、row-major auto placement 和 per-item alignment。
+容量、非有限 track、非法 index/span 或自动放置溢出均 fail closed；Grid 与 `UIVirtualGridView` / `UIDataGrid`
+的数据虚拟化契约彼此独立。
+`Flow/Overlay` placement 继续与容器类型正交；Overlay 使用
 alignment + offset，Px offset 可为有限负值，Percent offset 范围为 `-100..100`，以表达受父级 clip 的
 部分越界图元；Stretch 的边距用 margin 表达，Popup、Tooltip 与 Menu recipe 强制 Overlay。
 `clipDescendants` 是默认 `false` 的显式 axis-aligned clip-owner 契约：开启后，普通 Flow/Overlay 后代的
@@ -815,6 +820,18 @@ strict UTF-8 `--project-root`、可重复混合 `--import-recipe` / `--import-gl
 revision/output binding 与 physical containment 后恢复 Catalog 和完整 intended units。Editor file dialog 仍是 EditorApp 私有
 adapter：Windows 调用系统 dialog，Linux 使用 `zenity` 并在缺失时回退 `kdialog`，通过 argv 直传且回收 helper 子进程。
 Linux 定向编译和真实 helper 产品门禁完成前，`2D-EDITOR` 仍保持 InProgress。
+
+`EditorSceneOperations` 暴露单一 Node authoring 契约：`world2DNodeTemplateRegistry()` /
+`world3DNodeTemplateRegistry()` 是 Create Node、Hierarchy Kind 与 Inspector 的共享类型词表；`addWorld2DNode()` /
+`addWorld3DNode()` 以一次 canonical revision 创建完整类型节点，duplicate/reparent/reorder/delete 只操作 Node hierarchy。
+旧的空 Entity/Node 包装方法与 Add/Remove Component API 不保留。World2D optional payload 和 Prefab mesh/material 仍是
+current-schema wire 细节；`classifyWorld2DNodeTemplate()` / `classifyWorld3DNodeTemplate()` 只接受精确对应一个受支持
+Node kind 的形状，旧式多 payload 混合 fail-closed。
+
+`EditorNodePropertyOperations` 只修改现有 Node kind 固有的 Rendering/Camera/Light/Occlusion/Animation 属性；它不改变
+Node kind。optional 输入表示多选 `Mixed` 字段保持各节点原值，成功 batch 最多发布一次 `replace()`，kind mismatch、
+非法值和未知 stable ID 保留 document/history，no-op 不发布 revision。
+
 `World2DAuthoringDocument::Create(config)` 创建一个仅含 canonical 空 snapshot 的 move-only owner。配置显式限制
 entity、gameplay bytes、history entries 与 history bytes；history entry 至少为 2，因此每次成功编辑至少可撤销一步。
 
@@ -822,7 +839,7 @@ entity、gameplay bytes、history entries 与 history bytes；history entry 至�
 baseline，成功后清空 undo/redo；`upsertEntity()`、`eraseEntitySubtree()` 与 `setGameplay()` 是同一 revision
 机制上的窄操作。候选先经唯一现行
 `AssetFormat::writeWorld2DSnapshotBytes()` 或 parser 完整校验，成功后才替换 current 并裁剪 redo；非法 stable ID/
-parent、非有限 component、旧 schema、document 容量或 history byte 容量失败都保持 current、undo、redo 和 revision
+parent、非有限 node payload、旧 schema、document 容量或 history byte 容量失败都保持 current、undo、redo 和 revision
 不变。history 到达预算时淘汰最老 revision，不扩展声明容量；若 current + candidate 无法同时容纳则编辑失败。
 
 `snapshotBytes()` 就是 cook/runtime preview，不存在 editor-only wire format；可直接交给

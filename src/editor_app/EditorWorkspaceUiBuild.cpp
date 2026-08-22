@@ -5,12 +5,25 @@ namespace {
 
 inline constexpr float LeftDockMinWidth = 200.0F;
 inline constexpr float ViewportMinWidth = 480.0F;
-inline constexpr float InspectorMinWidth = 280.0F;
+inline constexpr float InspectorMinWidth = 360.0F;
 inline constexpr float ViewportMinHeight = 320.0F;
 inline constexpr float TimelineMinHeight = 160.0F;
 inline constexpr float AnimationModeButtonWidth = 120.0F;
 inline constexpr float AnimationFrameSlotWidth = 44.0F;
+inline constexpr float InspectorValueInputMaxWidth = 132.0F;
+inline constexpr float InspectorTransformLabelWidth = 52.0F;
+inline constexpr float InspectorTransformAxisMinWidth = 52.0F;
+inline constexpr float InspectorTransformAxisMaxWidth = 96.0F;
+inline constexpr float InspectorTransformAxisLabelWidth = 12.0F;
 inline constexpr u64 SnackbarUndoActionToken = 1U;
+
+struct InspectorNodePropertyFieldRow final {
+    std::string_view caption{};
+    std::array<std::string_view, 2> axisLabels{};
+    std::array<std::string_view, 2> accessibleNames{};
+    Tina::Core::usize valueCount = 1U;
+    float axisLabelWidth = 0.0F;
+};
 
 [[nodiscard]] constexpr UI::UITheme makeEditorProductTheme() noexcept
 {
@@ -71,6 +84,21 @@ inline constexpr u64 SnackbarUndoActionToken = 1U;
     style.padding = UI::UIEdgeSpacing::All(theme.spacing.space8);
     style.flexContainer.gap = UI::UILayoutGap::All(theme.spacing.space6);
     return style;
+}
+
+[[nodiscard]] UI::UILayoutStyle inspectorValueInputLayout(
+    const UI::UITheme& theme) noexcept
+{
+    UI::UILayoutStyle layout{};
+    layout.size.width = UI::UILayoutLength::Auto();
+    layout.size.height = UI::UILayoutLength::Px(
+        theme.controls.textEditHeight);
+    layout.minMax.maxWidth = UI::UILayoutLength::Px(
+        InspectorValueInputMaxWidth);
+    layout.flexItem.grow = 1.0F;
+    layout.flexItem.shrink = 1.0F;
+    layout.flexItem.basis = UI::UILayoutLength::Px(0.0F);
+    return layout;
 }
 
 template <typename NodeResult>
@@ -656,9 +684,6 @@ auto EditorWorkspaceState::buildLeftDockUi(
     if (auto status = ui.tree.setTreeViewSelectedIndex(hierarchyTree_, 0); !status) {
         return status;
     }
-    if (auto status = buildSceneAddModalUi(ui, left); !status) {
-        return status;
-    }
     hierarchyRenameRootLayout_ = hierarchyRenameLayout(UI::UIVisibility::Collapsed);
     if (auto status = storeNode(
             ui.createPanel(left, hierarchyRenameRootLayout_), hierarchyRenameRoot_);
@@ -902,37 +927,6 @@ auto EditorWorkspaceState::buildLeftDockUi(
             return status;
         }
         observedSourceImportSelectionIndex_ = 0U;
-    }
-
-    UI::UINodeId projectActions{};
-    UI::UILayoutStyle projectActionsStyle = fillWidth(
-        ui.productTheme.controls.buttonHeight);
-    projectActionsStyle.flexContainer.direction = UI::UIFlexDirection::Row;
-    projectActionsStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
-    projectActionsStyle.flexContainer.gap.column = ui.productTheme.spacing.space3;
-    if (auto status = storeNode(ui.createPanel(left, projectActionsStyle),
-                                projectActions);
-        !status) {
-        return status;
-    }
-    UI::UILayoutStyle projectLifecycleButtonStyle = fixedSize(
-        0.0F, ui.productTheme.controls.buttonHeight);
-    projectLifecycleButtonStyle.size.width = UI::UILayoutLength::Auto();
-    projectLifecycleButtonStyle.flexItem.grow = 1.0F;
-    projectLifecycleButtonStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
-    if (auto status = storeNode(ui.createButton(
-                                    projectActions, "New Project",
-                                    projectLifecycleButtonStyle),
-                                createProjectButton_);
-        !status) {
-        return status;
-    }
-    if (auto status = storeNode(ui.createButton(
-                                    projectActions, "Open Project",
-                                    projectLifecycleButtonStyle),
-                                openProjectButton_);
-        !status) {
-        return status;
     }
 
     UI::UINodeId projectCatalogActions{};
@@ -1537,6 +1531,7 @@ auto EditorWorkspaceState::buildInspectorUi(
         return Tina::Core::failure(std::move(assetRow.error()));
     }
     inspectorAssetRow_ = assetRow->root;
+    inspectorAssetRowLayout_ = assetRow->rootLayout;
     if (auto status = storeNode(ui.createLabel(assetRow->value, {}, fillWidth(42.0F), ui.secondaryText),
                                 inspectorAssetPath_);
         !status) {
@@ -1594,131 +1589,176 @@ auto EditorWorkspaceState::buildInspectorUi(
         !status) {
         return status;
     }
-    const auto createTransformField =
-        [&](InspectorTransformField field, std::string_view caption, float value,
-            bool enabled, UI::UINodeId& valueNode) -> Tina::Core::Status {
-        UI::UILayoutStyle fieldLayout{};
-        fieldLayout.size.width = UI::UILayoutLength::Percent(100.0F);
-        fieldLayout.size.height = UI::UILayoutLength::Px(
+    if (auto status = storeNode(
+            ui.createIconButton(inspectorTransformHeader_, EditorIcon::Apply,
+                                "Apply transform", {}, false),
+            applyTransformButton_);
+        !status) {
+        return status;
+    }
+    inspectorTransformFieldsLayout_.size.width =
+        UI::UILayoutLength::Percent(100.0F);
+    inspectorTransformFieldsLayout_.flexItem.shrink = 0.0F;
+    inspectorTransformFieldsLayout_.flexContainer.direction =
+        UI::UIFlexDirection::Column;
+    inspectorTransformFieldsLayout_.flexContainer.gap =
+        UI::UILayoutGap::All(ui.productTheme.spacing.space2);
+    if (auto status = storeNode(
+            ui.createPanel(inspectorContent, inspectorTransformFieldsLayout_),
+            inspectorTransformFields_);
+        !status) {
+        return status;
+    }
+    const auto createTransformVector =
+        [&](Tina::Core::usize rowIndex, std::string_view caption,
+            const std::array<InspectorTransformField, 3>& fields,
+            const std::array<std::string_view, 3>& values,
+            const std::array<std::string_view, 3>& accessibleNames,
+            const std::array<UI::UINodeId*, 3>& valueNodes)
+        -> Tina::Core::Status {
+        UI::UILayoutStyle rowLayout = fillWidth(
             ui.productTheme.controls.textEditHeight);
-        fieldLayout.flexItem.shrink = 0.0F;
-        fieldLayout.flexContainer.direction = UI::UIFlexDirection::Row;
-        fieldLayout.flexContainer.alignItems = UI::UIAxisAlignment::Center;
-        fieldLayout.flexContainer.gap =
-            UI::UILayoutGap::All(ui.productTheme.spacing.space2);
-        UI::UILayoutStyle labelLayout{};
-        labelLayout.size.width = UI::UILayoutLength::Px(92.0F);
-        labelLayout.flexItem.shrink = 0.0F;
-        UI::UILayoutStyle valueLayout{};
-        valueLayout.size.width = UI::UILayoutLength::Auto();
-        valueLayout.size.height = UI::UILayoutLength::Px(
-            ui.productTheme.controls.textEditHeight);
-        valueLayout.flexItem.grow = 1.0F;
-        valueLayout.flexItem.basis = UI::UILayoutLength::Px(0.0F);
-        auto parts = ui.tree.buildNumberField(
-            inspectorContent,
-            UI::UINumberFieldConfig{
-                .label = caption,
-                .value = value,
-                .valueSpec = inspectorTransformNumberSpec(field),
-                .decrementAccessibleName = "Decrease transform value",
-                .incrementAccessibleName = "Increase transform value",
-                .labelPlacement = UI::UINumberFieldLabelPlacement::Leading,
-                .layout = fieldLayout,
-                .labelLayout = labelLayout,
-                .textEditLayout = valueLayout,
-                .enabled = enabled,
+        rowLayout.flexItem.shrink = 0.0F;
+
+        constexpr std::array<std::string_view, 3> AxisLabels{"X", "Y", "Z"};
+        const Tina::Core::usize visibleValueCount =
+            workspaceMode_ == WorkspaceMode::World3D
+                ? 3U
+                : rowIndex == 1U ? 1U : 2U;
+        UI::UIGridTrackList valueColumns{};
+        if (visibleValueCount == 1U) {
+            valueColumns = UI::UIGridTrackList::Of({UI::UIGridTrack::Fr()});
+        } else if (visibleValueCount == 2U) {
+            valueColumns = UI::UIGridTrackList::Of(
+                {UI::UIGridTrack::Fr(), UI::UIGridTrack::Fr()});
+        } else {
+            valueColumns = UI::UIGridTrackList::Of({
+                UI::UIGridTrack::Fr(), UI::UIGridTrack::Fr(),
+                UI::UIGridTrack::Fr(),
             });
-        if (!parts) {
-            return Tina::Core::failure(std::move(parts.error()));
         }
-        valueNode = parts->textEdit;
-        auto& controls = inspectorTransformNumberFields_[
-            inspectorTransformFieldIndex(field)];
-        controls.root = parts->root;
-        controls.layout = fieldLayout;
-        controls.decrementButton = parts->decrementButton;
-        controls.incrementButton = parts->incrementButton;
+        auto row = EditorPropertyRow::Build(
+            ui.tree, inspectorTransformFields_, ui.productTheme, caption,
+            ui.secondaryText, rowLayout, InspectorTransformLabelWidth,
+            valueColumns);
+        if (!row) {
+            return Tina::Core::failure(std::move(row.error()));
+        }
+        inspectorTransformValueGrids_[rowIndex] = {
+            .root = row->value,
+            .layout = row->valueLayout,
+        };
+
+        for (Tina::Core::usize axisIndex = 0;
+             axisIndex < fields.size(); ++axisIndex) {
+            const InspectorTransformField field = fields[axisIndex];
+            const bool visible = workspaceMode_ == WorkspaceMode::World3D ||
+                !inspectorTransformFieldRequires3D(field);
+            UI::UILayoutStyle groupLayout{};
+            groupLayout.size.height = UI::UILayoutLength::Px(
+                ui.productTheme.controls.textEditHeight);
+            groupLayout.minMax.minWidth = UI::UILayoutLength::Px(
+                InspectorTransformAxisMinWidth);
+            groupLayout.minMax.maxWidth = UI::UILayoutLength::Px(
+                InspectorTransformAxisMaxWidth);
+            groupLayout.containerLayout = UI::UIContainerLayout::Grid;
+            groupLayout.gridContainer.columns = UI::UIGridTrackList::Of({
+                UI::UIGridTrack::Px(InspectorTransformAxisLabelWidth),
+                UI::UIGridTrack::Fr(),
+            });
+            groupLayout.gridContainer.rows = UI::UIGridTrackList::Of(
+                {UI::UIGridTrack::Fr()});
+            groupLayout.gridContainer.alignItems = UI::UIAxisAlignment::Center;
+            groupLayout.gridContainer.gap.column = ui.productTheme.spacing.space1;
+            groupLayout.visibility = visible ? UI::UIVisibility::Visible
+                                             : UI::UIVisibility::Collapsed;
+            auto group = ui.tree.createElement(
+                row->value, UI::makePanelElement(groupLayout));
+            if (!group) {
+                return Tina::Core::failure(std::move(group.error()));
+            }
+            inspectorTransformAxisFields_[
+                inspectorTransformFieldIndex(field)] = {
+                    .root = *group,
+                    .layout = groupLayout,
+                };
+
+            UI::UILayoutStyle axisLabelLayout{};
+            axisLabelLayout.gridItem.row = 0U;
+            axisLabelLayout.gridItem.column = 0U;
+            axisLabelLayout.gridItem.alignSelf = UI::UIAlignSelf::Stretch;
+            UI::UIElementDescriptor axisLabel = UI::makeLabelElement(
+                AxisLabels[axisIndex], axisLabelLayout);
+            axisLabel.textStyle = ui.compactText;
+            axisLabel.contentAlignment.horizontal = UI::UIAxisAlignment::Center;
+            axisLabel.contentAlignment.vertical = UI::UIAxisAlignment::Center;
+            axisLabel.pointerHitPolicy = UI::UIPointerHitPolicy::Ignore;
+            axisLabel.semantics.mode = UI::UISemanticsMode::Exclude;
+            auto axisLabelNode = ui.tree.createElement(*group, axisLabel);
+            if (!axisLabelNode) {
+                return Tina::Core::failure(std::move(axisLabelNode.error()));
+            }
+
+            UI::UILayoutStyle inputLayout{};
+            inputLayout.size.height = UI::UILayoutLength::Px(
+                ui.productTheme.controls.textEditHeight);
+            inputLayout.gridItem.row = 0U;
+            inputLayout.gridItem.column = 1U;
+            inputLayout.gridItem.alignSelf = UI::UIAlignSelf::Stretch;
+            UI::UIElementDescriptor input = UI::makeTextEditElement(
+                values[axisIndex], inputLayout);
+            input.textStyle = ui.compactText;
+            input.semantics.name = accessibleNames[axisIndex];
+            input.semantics.useContentAsName = false;
+            input.enabled = visible;
+            auto inputNode = ui.tree.createElement(*group, input);
+            if (!inputNode) {
+                return Tina::Core::failure(std::move(inputNode.error()));
+            }
+            *valueNodes[axisIndex] = *inputNode;
+        }
         return Tina::Core::success();
     };
-    if (auto status = createTransformField(
-            InspectorTransformField::PositionX, "Position X", 0.0F, true,
-            inspectorPositionX_);
+    if (auto status = createTransformVector(
+            0U, "Position",
+            {InspectorTransformField::PositionX,
+             InspectorTransformField::PositionY,
+             InspectorTransformField::PositionZ},
+            {"0", "0", "0"},
+            {"Position X", "Position Y", "Position Z"},
+            {&inspectorPositionX_, &inspectorPositionY_,
+             &inspectorPositionZ_});
         !status) {
         return status;
     }
-    if (auto status = createTransformField(
-            InspectorTransformField::PositionY, "Position Y", 0.0F, true,
-            inspectorPositionY_);
+    if (auto status = createTransformVector(
+            1U, "Rotation",
+            {InspectorTransformField::RotationX,
+             InspectorTransformField::RotationY,
+             InspectorTransformField::RotationZ},
+            {"0", "0", "0"},
+            {"Rotation X", "Rotation Y", "Rotation Z"},
+            {&inspectorRotationX_, &inspectorRotationY_,
+             &inspectorRotationZ_});
         !status) {
         return status;
     }
-    if (auto status = createTransformField(
-            InspectorTransformField::PositionZ, "Position Z", 0.0F, false,
-            inspectorPositionZ_);
+    if (auto status = createTransformVector(
+            2U, "Scale",
+            {InspectorTransformField::ScaleX,
+             InspectorTransformField::ScaleY,
+             InspectorTransformField::ScaleZ},
+            {"1", "1", "1"},
+            {"Scale X", "Scale Y", "Scale Z"},
+            {&inspectorScaleX_, &inspectorScaleY_, &inspectorScaleZ_});
         !status) {
         return status;
     }
-    if (auto status = createTransformField(
-            InspectorTransformField::RotationX, "Rotation X", 0.0F, false,
-            inspectorRotationX_);
-        !status) {
-        return status;
-    }
-    if (auto status = createTransformField(
-            InspectorTransformField::RotationY, "Rotation Y", 0.0F, false,
-            inspectorRotationY_);
-        !status) {
-        return status;
-    }
-    if (auto status = createTransformField(
-            InspectorTransformField::RotationZ, "Rotation Z", 0.0F, true,
-            inspectorRotationZ_);
-        !status) {
-        return status;
-    }
-    if (auto status = createTransformField(
-            InspectorTransformField::ScaleX, "Scale X", 1.0F, true,
-            inspectorScaleX_);
-        !status) {
-        return status;
-    }
-    if (auto status = createTransformField(
-            InspectorTransformField::ScaleY, "Scale Y", 1.0F, true,
-            inspectorScaleY_);
-        !status) {
-        return status;
-    }
-    if (auto status = createTransformField(
-            InspectorTransformField::ScaleZ, "Scale Z", 1.0F, false,
-            inspectorScaleZ_);
-        !status) {
-        return status;
-    }
-    applyTransformButtonLayout_ = fillWidth(
-        ui.productTheme.controls.buttonHeight);
-    applyTransformButtonLayout_.flexContainer.justifyContent =
-        UI::UIJustifyContent::Center;
-    applyTransformButtonLayout_.flexContainer.alignItems =
-        UI::UIAxisAlignment::Center;
-    auto applyTransformButton = EditorIconButton::Build(
-        ui.tree, inspectorContent, ui.productTheme, EditorIcon::Apply,
-        "Apply transform", applyTransformButtonLayout_);
-    if (!applyTransformButton) {
-        return Tina::Core::failure(std::move(applyTransformButton.error()));
-    }
-    applyTransformButtonRoot_ = applyTransformButton->root;
-    applyTransformButton_ = applyTransformButton->button;
-
-    if (auto status = appendInspectorSectionHeader(
-            "Components", &inspectorComponentsHeader_,
-            &inspectorComponentsHeaderLayout_);
-        !status) {
-        return status;
-    }
-    const auto createComponentSection =
-        [&](ComponentSectionUi& section, std::string_view name,
-            std::span<const std::string_view> captions, bool withAssign,
+    const auto createNodePropertySection =
+        [&](NodePropertySectionUi& section, std::string_view name,
+            std::string_view activeCaption,
+            std::span<const InspectorNodePropertyFieldRow> fieldRows,
+            bool withAssign,
             std::string_view applyCaption,
             bool withPointLightColor = false) -> Tina::Core::Status {
         section.rootLayout.size.width = UI::UILayoutLength::Percent(100.0F);
@@ -1727,6 +1767,7 @@ auto EditorWorkspaceState::buildInspectorUi(
             UI::UIFlexDirection::Column;
         section.rootLayout.flexContainer.gap =
             UI::UILayoutGap::All(ui.productTheme.spacing.space2);
+        section.rootLayout.visibility = UI::UIVisibility::Collapsed;
         section.indicatorLayout.size.width =
             UI::UILayoutLength::Px(ui.productTheme.controls.iconExtent);
         section.indicatorLayout.size.height =
@@ -1761,28 +1802,21 @@ auto EditorWorkspaceState::buildInspectorUi(
             !status) {
             return status;
         }
+        UI::UINodeId activeLabel{};
+        if (auto status = storeNode(
+                ui.createLabel(headerRow, activeCaption, growingRegion(),
+                               ui.secondaryText),
+                activeLabel);
+            !status) {
+            return status;
+        }
         UI::UIElementDescriptor switchDesc = UI::makeSwitchElement({
-            .accessibleName = name,
+            .accessibleName = activeCaption,
             .size = UI::UISwitchSize::Compact,
         });
         switchDesc.enabled = false;
         if (auto status = storeNode(ui.tree.createElement(headerRow, switchDesc),
                                     section.activeSwitch);
-            !status) {
-            return status;
-        }
-        if (auto status = storeNode(ui.createIconButton(
-                                        headerRow, EditorIcon::Add,
-                                        "Add component", {}, false),
-                                    section.addButton);
-            !status) {
-            return status;
-        }
-        if (auto status = storeNode(ui.createIconButton(
-                                        headerRow, EditorIcon::Delete,
-                                        "Remove component", {}, false,
-                                        UI::UIButtonVariant::Danger),
-                                    section.removeButton);
             !status) {
             return status;
         }
@@ -1797,6 +1831,8 @@ auto EditorWorkspaceState::buildInspectorUi(
                     .value = pointLightColorValue_,
                     .swatchAccessibleName = "Choose PointLight2D color",
                     .layout = colorFieldLayout,
+                    .textEditLayout = inspectorValueInputLayout(
+                        ui.productTheme),
                     .enabled = false,
                 });
             if (!colorField) {
@@ -1821,24 +1857,83 @@ auto EditorWorkspaceState::buildInspectorUi(
             }
             pointLightColorPicker_ = *colorPicker;
         }
-        section.fieldCount = captions.size();
-        for (Tina::Core::usize fieldIndex = 0; fieldIndex < captions.size(); ++fieldIndex) {
+        section.fieldCount = 0U;
+        for (const InspectorNodePropertyFieldRow& fieldRow : fieldRows) {
             UI::UILayoutStyle rowStyle = fillWidth(ui.productTheme.controls.textEditHeight);
+            const UI::UIGridTrackList valueColumns =
+                fieldRow.valueCount == 1U
+                    ? UI::UIGridTrackList::Of({UI::UIGridTrack::Fr()})
+                    : UI::UIGridTrackList::Of(
+                          {UI::UIGridTrack::Fr(), UI::UIGridTrack::Fr()});
             auto row = EditorPropertyRow::Build(
                 ui.tree, section.collapsible.content, ui.productTheme,
-                captions[fieldIndex], ui.secondaryText, rowStyle);
+                fieldRow.caption, ui.secondaryText, rowStyle,
+                EditorPropertyLabelWidth, valueColumns);
             if (!row) {
                 return Tina::Core::failure(std::move(row.error()));
             }
-            UI::UILayoutStyle valueStyle = fixedSize(
-                0.0F, ui.productTheme.controls.textEditHeight);
-            valueStyle.size.width = UI::UILayoutLength::Auto();
-            valueStyle.flexItem.grow = 1.0F;
-            valueStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
-            if (auto status = storeNode(ui.createTextEdit(row->value, "n/a", valueStyle, false),
-                                        section.fields[fieldIndex]);
-                !status) {
-                return status;
+            for (Tina::Core::usize valueIndex = 0U;
+                 valueIndex < fieldRow.valueCount; ++valueIndex) {
+                UI::UINodeId valueParent = row->value;
+                if (fieldRow.valueCount > 1U) {
+                    UI::UILayoutStyle groupLayout{};
+                    groupLayout.size.height = UI::UILayoutLength::Px(
+                        ui.productTheme.controls.textEditHeight);
+                    groupLayout.containerLayout = UI::UIContainerLayout::Grid;
+                    groupLayout.gridContainer.columns =
+                        UI::UIGridTrackList::Of({
+                            UI::UIGridTrack::Px(fieldRow.axisLabelWidth),
+                            UI::UIGridTrack::Fr(),
+                        });
+                    groupLayout.gridContainer.rows =
+                        UI::UIGridTrackList::Of({UI::UIGridTrack::Fr()});
+                    groupLayout.gridContainer.alignItems =
+                        UI::UIAxisAlignment::Center;
+                    groupLayout.gridContainer.gap.column =
+                        ui.productTheme.spacing.space1;
+                    auto group = ui.tree.createElement(
+                        row->value, UI::makePanelElement(groupLayout));
+                    if (!group) {
+                        return Tina::Core::failure(std::move(group.error()));
+                    }
+                    valueParent = *group;
+
+                    UI::UILayoutStyle axisLayout{};
+                    axisLayout.gridItem.row = 0U;
+                    axisLayout.gridItem.column = 0U;
+                    axisLayout.gridItem.alignSelf = UI::UIAlignSelf::Stretch;
+                    UI::UIElementDescriptor axis = UI::makeLabelElement(
+                        fieldRow.axisLabels[valueIndex], axisLayout);
+                    axis.textStyle = ui.compactText;
+                    axis.contentAlignment.horizontal =
+                        UI::UIAxisAlignment::Center;
+                    axis.contentAlignment.vertical = UI::UIAxisAlignment::Center;
+                    axis.pointerHitPolicy = UI::UIPointerHitPolicy::Ignore;
+                    axis.semantics.mode = UI::UISemanticsMode::Exclude;
+                    auto axisNode = ui.tree.createElement(valueParent, axis);
+                    if (!axisNode) {
+                        return Tina::Core::failure(std::move(axisNode.error()));
+                    }
+                }
+
+                UI::UILayoutStyle valueStyle =
+                    inspectorValueInputLayout(ui.productTheme);
+                if (fieldRow.valueCount > 1U) {
+                    valueStyle.gridItem.row = 0U;
+                    valueStyle.gridItem.column = 1U;
+                    valueStyle.gridItem.alignSelf = UI::UIAlignSelf::Stretch;
+                }
+                UI::UIElementDescriptor input = UI::makeTextEditElement(
+                    "n/a", valueStyle);
+                input.textStyle = ui.compactText;
+                input.semantics.name = fieldRow.accessibleNames[valueIndex];
+                input.semantics.useContentAsName = false;
+                input.enabled = false;
+                auto inputNode = ui.tree.createElement(valueParent, input);
+                if (!inputNode) {
+                    return Tina::Core::failure(std::move(inputNode.error()));
+                }
+                section.fields[section.fieldCount++] = *inputNode;
             }
         }
         if (withAssign) {
@@ -1862,49 +1957,77 @@ auto EditorWorkspaceState::buildInspectorUi(
         return Tina::Core::success();
     };
     {
-        const std::array<std::string_view, 6> spriteCaptions{
-            "Size X", "Size Y", "Pivot X", "Pivot Y", "Sort Layer", "Order"};
-        if (auto status = createComponentSection(
-                componentSections_[0], "SpriteRenderer2D", spriteCaptions, true,
-                "Apply SpriteRenderer2D");
+        const std::array<InspectorNodePropertyFieldRow, 4> spriteFields{{
+            {.caption = "Size", .axisLabels = {"X", "Y"},
+             .accessibleNames = {"Sprite size X", "Sprite size Y"},
+             .valueCount = 2U, .axisLabelWidth = InspectorTransformAxisLabelWidth},
+            {.caption = "Pivot", .axisLabels = {"X", "Y"},
+             .accessibleNames = {"Sprite pivot X", "Sprite pivot Y"},
+             .valueCount = 2U, .axisLabelWidth = InspectorTransformAxisLabelWidth},
+            {.caption = "Sort Layer", .accessibleNames = {"Sprite sort layer", ""},
+             .valueCount = 1U},
+            {.caption = "Order", .accessibleNames = {"Sprite order", ""},
+             .valueCount = 1U},
+        };
+        if (auto status = createNodePropertySection(
+                nodePropertySections_[0], "Rendering", "Visible", spriteFields,
+                true, "Apply Rendering");
             !status) {
             return status;
         }
-        const std::array<std::string_view, 3> cameraCaptions{
-            "Height m", "Ref Px/m", "Ref Px H"};
-        if (auto status = createComponentSection(
-                componentSections_[1], "Camera2D", cameraCaptions, false,
-                "Apply Camera2D");
+        const std::array<InspectorNodePropertyFieldRow, 3> cameraFields{{
+            {.caption = "Height m", .accessibleNames = {"Camera height", ""}},
+            {.caption = "Ref Px/m", .accessibleNames = {"Camera reference pixels per meter", ""}},
+            {.caption = "Ref Px H", .accessibleNames = {"Camera reference pixel height", ""}},
+        }};
+        if (auto status = createNodePropertySection(
+                nodePropertySections_[1], "Camera", "Active", cameraFields,
+                false, "Apply Camera");
             !status) {
             return status;
         }
-        const std::array<std::string_view, 3> lightCaptions{
-            "Intensity", "Radius", "Src Radius"};
-        if (auto status = createComponentSection(
-                componentSections_[2], "PointLight2D", lightCaptions, false,
-                "Apply PointLight2D", true);
+        const std::array<InspectorNodePropertyFieldRow, 3> lightFields{{
+            {.caption = "Intensity", .accessibleNames = {"Light intensity", ""}},
+            {.caption = "Radius", .accessibleNames = {"Light radius", ""}},
+            {.caption = "Src Radius", .accessibleNames = {"Light source radius", ""}},
+        }};
+        if (auto status = createNodePropertySection(
+                nodePropertySections_[2], "Light", "Active", lightFields,
+                false, "Apply Light", true);
             !status) {
             return status;
         }
-        const std::array<std::string_view, 4> occluderCaptions{
-            "Start X", "Start Y", "End X", "End Y"};
-        if (auto status = createComponentSection(
-                componentSections_[3], "ShadowOccluder2D", occluderCaptions, false,
-                "Apply ShadowOccluder2D");
+        const std::array<InspectorNodePropertyFieldRow, 2> occluderFields{{
+            {.caption = "Start", .axisLabels = {"X", "Y"},
+             .accessibleNames = {"Occluder start X", "Occluder start Y"},
+             .valueCount = 2U, .axisLabelWidth = InspectorTransformAxisLabelWidth},
+            {.caption = "End", .axisLabels = {"X", "Y"},
+             .accessibleNames = {"Occluder end X", "Occluder end Y"},
+             .valueCount = 2U, .axisLabelWidth = InspectorTransformAxisLabelWidth},
+        }};
+        if (auto status = createNodePropertySection(
+                nodePropertySections_[3], "Occlusion", "Active",
+                occluderFields, false, "Apply Occlusion");
             !status) {
             return status;
         }
-        const std::array<std::string_view, 2> animationCaptions{"Clip", "Speed"};
-        if (auto status = createComponentSection(
-                componentSections_[4], "SpriteAnimation2D", animationCaptions, false,
-                "Apply SpriteAnimation2D");
+        const std::array<InspectorNodePropertyFieldRow, 2> animationFields{{
+            {.caption = "Clip", .accessibleNames = {"Animation clip", ""}},
+            {.caption = "Speed", .accessibleNames = {"Animation speed", ""}},
+        }};
+        if (auto status = createNodePropertySection(
+                nodePropertySections_[4], "Animation", "Auto Play",
+                animationFields, false, "Apply Animation");
             !status) {
             return status;
         }
-        const std::array<std::string_view, 2> meshCaptions{"Mesh", "Material"};
-        if (auto status = createComponentSection(
-                componentSections_[MeshRendererSectionIndex], "MeshRenderer3D",
-                meshCaptions, false, {});
+        const std::array<InspectorNodePropertyFieldRow, 2> meshFields{{
+            {.caption = "Mesh", .accessibleNames = {"Mesh asset", ""}},
+            {.caption = "Material", .accessibleNames = {"Material asset", ""}},
+        }};
+        if (auto status = createNodePropertySection(
+                nodePropertySections_[MeshPropertiesSectionIndex], "Rendering",
+                "Visible", meshFields, false, {});
             !status) {
             return status;
         }
@@ -1918,10 +2041,6 @@ auto EditorWorkspaceState::buildInspectorUi(
     }
     UI::UILayoutStyle parentRowStyle = fillWidth(ui.productTheme.controls.textEditHeight);
     parentRowStyle.flexItem.shrink = 0.0F;
-    parentRowStyle.flexContainer.direction = UI::UIFlexDirection::Row;
-    parentRowStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
-    parentRowStyle.flexContainer.gap =
-        UI::UILayoutGap::All(ui.productTheme.spacing.space3);
     auto parentRow = EditorPropertyRow::Build(
         ui.tree, inspectorContent, ui.productTheme, "Parent ID",
         ui.secondaryText, parentRowStyle);
@@ -1930,14 +2049,10 @@ auto EditorWorkspaceState::buildInspectorUi(
     }
     inspectorHierarchyParentRowUi_ = {
         .root = parentRow->root,
-        .layout = parentRowStyle,
+        .layout = parentRow->rootLayout,
     };
-    UI::UILayoutStyle parentValueStyle = fixedSize(
-        0.0F, ui.productTheme.controls.textEditHeight);
-    parentValueStyle.size.width = UI::UILayoutLength::Auto();
-    parentValueStyle.flexItem.grow = 1.0F;
-    parentValueStyle.flexItem.shrink = 1.0F;
-    parentValueStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
+    const UI::UILayoutStyle parentValueStyle =
+        inspectorValueInputLayout(ui.productTheme);
     if (auto status = storeNode(
             ui.createTextEdit(parentRow->value, "0", parentValueStyle, false),
             inspectorParentStableId_);
@@ -2051,26 +2166,6 @@ auto EditorWorkspaceState::buildInspectorUi(
     if (auto status = storeNode(ui.createButton(tileMapGameplayRow.root, "Bake Navigation",
                                               fixedSize(104.0F, ui.productTheme.controls.buttonHeight)),
                                 bakeNavigationButton_);
-        !status) {
-        return status;
-    }
-
-    if (auto status = appendInspectorSectionHeader(
-            "Document", nullptr, nullptr);
-        !status) {
-        return status;
-    }
-    if (auto status = storeNode(ui.createLabel(inspectorContent, {}, fillWidth(22.0F), ui.bodyText),
-                                inspectorDocument_);
-        !status) {
-        return status;
-    }
-    if (auto status = storeNode(ui.createLabel(inspectorContent,
-                                            workspaceMode_ == WorkspaceMode::World2D
-                                                ? "World2D v1 + TileMap v3/v1 | canonical"
-                                                : "Prefab schema v2 | canonical",
-                                            fillWidth(20.0F), ui.secondaryText),
-                                documentFormat_);
         !status) {
         return status;
     }
@@ -2491,7 +2586,7 @@ auto EditorWorkspaceState::buildStatusBarUi(UiBuildContext& ui, UI::UINodeId par
     return Tina::Core::success();
 }
 
-auto EditorWorkspaceState::buildMainMenuOverlaysUi(
+auto EditorWorkspaceState::buildMenuOverlaysUi(
     UiBuildContext& ui, UI::UINodeId parent) -> Tina::Core::Status
 {
     const auto createMenu = [&](u32 index, float width) -> Tina::Core::Status {
@@ -2676,9 +2771,14 @@ auto EditorWorkspaceState::buildMainMenuOverlaysUi(
         return status;
     }
 
-    return createMenuItem(
-        mainMenus_[HelpMenu], "About Tina Editor",
-        UI::UIMenuItemKind::Command, helpAboutMenuItem_);
+    if (auto status = createMenuItem(
+            mainMenus_[HelpMenu], "About Tina Editor",
+            UI::UIMenuItemKind::Command, helpAboutMenuItem_);
+        !status) {
+        return status;
+    }
+
+    return Tina::Core::success();
 }
 
 auto EditorWorkspaceState::buildSceneAddModalUi(
@@ -2939,86 +3039,36 @@ auto EditorWorkspaceState::registerUiCallbacks(UiBuildContext& ui) -> Tina::Core
         !status) {
         return status;
     }
-    for (Tina::Core::usize index = 0;
-         index < inspectorTransformNumberFields_.size(); ++index) {
-        const auto field = static_cast<InspectorTransformField>(index);
-        const auto& controls = inspectorTransformNumberFields_[index];
-        if (auto status = ui.tree.setButtonAction(
-                controls.decrementButton,
-                UI::UIButtonActionCallback{
-                    [this, field](const UI::UIButtonActionEvent&) noexcept {
-                        pendingInspectorTransformStep_ =
-                            InspectorTransformStepRequest{field, -1};
-                    }});
-            !status) {
-            return status;
-        }
-        if (auto status = ui.tree.setButtonAction(
-                controls.incrementButton,
-                UI::UIButtonActionCallback{
-                    [this, field](const UI::UIButtonActionEvent&) noexcept {
-                        pendingInspectorTransformStep_ =
-                            InspectorTransformStepRequest{field, 1};
-                    }});
-            !status) {
-            return status;
-        }
-    }
     {
-        const std::array<std::array<EditorCommand, 3>, 6> sectionCommands{{
-            {EditorCommand::ComponentAddSprite, EditorCommand::ComponentRemoveSprite,
-             EditorCommand::ComponentToggleSpriteVisible},
-            {EditorCommand::ComponentAddCamera, EditorCommand::ComponentRemoveCamera,
-             EditorCommand::ComponentToggleCameraActive},
-            {EditorCommand::ComponentAddPointLight, EditorCommand::ComponentRemovePointLight,
-             EditorCommand::ComponentTogglePointLightActive},
-            {EditorCommand::ComponentAddShadowOccluder, EditorCommand::ComponentRemoveShadowOccluder,
-             EditorCommand::ComponentToggleShadowOccluderActive},
-            {EditorCommand::ComponentAddSpriteAnimation, EditorCommand::ComponentRemoveSpriteAnimation,
-             EditorCommand::ComponentToggleSpriteAnimationAutoPlay},
-            {EditorCommand::ComponentAddMeshRenderer, EditorCommand::ComponentRemoveMeshRenderer,
-             EditorCommand::ComponentToggleMeshVisible},
-        }};
+        constexpr std::array sectionToggleCommands{
+            EditorCommand::NodeToggleSpriteVisible,
+            EditorCommand::NodeToggleCameraActive,
+            EditorCommand::NodeTogglePointLightActive,
+            EditorCommand::NodeToggleShadowOccluderActive,
+            EditorCommand::NodeToggleSpriteAnimationAutoPlay,
+            EditorCommand::NodeToggleMeshVisible,
+        };
         const std::array<EditorCommand, 5> sectionApplyCommands{
-            EditorCommand::ComponentApplySprite, EditorCommand::ComponentApplyCamera,
-            EditorCommand::ComponentApplyPointLight,
-            EditorCommand::ComponentApplyShadowOccluder,
-            EditorCommand::ComponentApplySpriteAnimation};
+            EditorCommand::NodeApplySprite, EditorCommand::NodeApplyCamera,
+            EditorCommand::NodeApplyPointLight,
+            EditorCommand::NodeApplyShadowOccluder,
+            EditorCommand::NodeApplyAnimationProperties};
         for (Tina::Core::usize sectionIndex = 0;
-             sectionIndex < componentSections_.size(); ++sectionIndex) {
-            const auto& section = componentSections_[sectionIndex];
-            const auto commands = sectionCommands[sectionIndex];
+             sectionIndex < nodePropertySections_.size(); ++sectionIndex) {
+            const auto& section = nodePropertySections_[sectionIndex];
             if (auto status = ui.tree.setCheckboxAction(
                     section.collapsible.header,
                     UI::UIButtonActionCallback{
                         [this, sectionIndex](const UI::UIButtonActionEvent&) noexcept {
-                            componentSections_[sectionIndex]
+                            nodePropertySections_[sectionIndex]
                                 .collapseUpdatePending = true;
                         }});
                 !status) {
                 return status;
             }
-            if (auto status = ui.tree.setButtonAction(
-                    section.addButton,
-                    UI::UIButtonActionCallback{[this, command = commands[0]](
-                                                   const UI::UIButtonActionEvent&) noexcept {
-                        queueEditorCommand(command);
-                    }});
-                !status) {
-                return status;
-            }
-            if (auto status = ui.tree.setButtonAction(
-                    section.removeButton,
-                    UI::UIButtonActionCallback{[this, command = commands[1]](
-                                                   const UI::UIButtonActionEvent&) noexcept {
-                        queueEditorCommand(command);
-                    }});
-                !status) {
-                return status;
-            }
             if (auto status = ui.tree.setCheckboxAction(
                     section.activeSwitch,
-                    UI::UIButtonActionCallback{[this, command = commands[2]](
+                    UI::UIButtonActionCallback{[this, command = sectionToggleCommands[sectionIndex]](
                                                    const UI::UIButtonActionEvent&) noexcept {
                         queueEditorCommand(command);
                     }});
@@ -3038,9 +3088,9 @@ auto EditorWorkspaceState::registerUiCallbacks(UiBuildContext& ui) -> Tina::Core
             }
         }
         if (auto status = ui.tree.setButtonAction(
-                componentSections_[0].assignButton,
+                nodePropertySections_[0].assignButton,
                 UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
-                    queueEditorCommand(EditorCommand::ComponentAssignSprite);
+                    queueEditorCommand(EditorCommand::NodeAssignSprite);
                 }});
             !status) {
             return status;
@@ -3453,22 +3503,6 @@ auto EditorWorkspaceState::registerUiCallbacks(UiBuildContext& ui) -> Tina::Core
         return status;
     }
     if (auto status = ui.tree.setButtonAction(
-            createProjectButton_,
-            UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
-                queueEditorCommand(EditorCommand::CreateProject);
-            }});
-        !status) {
-        return status;
-    }
-    if (auto status = ui.tree.setButtonAction(
-            openProjectButton_,
-            UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
-                queueEditorCommand(EditorCommand::OpenProject);
-            }});
-        !status) {
-        return status;
-    }
-    if (auto status = ui.tree.setButtonAction(
             importSourceButton_,
             UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
                 queueEditorCommand(EditorCommand::ImportSource);
@@ -3776,10 +3810,13 @@ auto EditorWorkspaceState::onEnter(Tina::GameStateEnterContext& context) -> Tina
     if (auto status = buildStatusBarUi(ui, rootNode); !status) {
         return status;
     }
-    if (auto status = buildMainMenuOverlaysUi(ui, rootNode); !status) {
+    if (auto status = buildMenuOverlaysUi(ui, rootNode); !status) {
         return status;
     }
     if (auto status = buildSnackbarUi(ui, rootNode); !status) {
+        return status;
+    }
+    if (auto status = buildSceneAddModalUi(ui, rootNode); !status) {
         return status;
     }
     if (auto status = buildDirtyCloseModalUi(ui, rootNode); !status) {

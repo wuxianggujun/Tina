@@ -21,19 +21,19 @@ gizmo、Undo、Redo 都接到 active document，每次成功 canonical command �
 2D Camera/Sprite 与 3D PerspectiveCamera/Mesh preview 都由同一个
 World/binding 驱动，不维护平行的 UI 模拟状态，也不把默认 proxy 冒充已解析的 Catalog 产品资源。
 
-Inspector 的 Components 区块由 `Tina::Editor::EditorComponentOperations` 后端驱动：`world2DComponentRegistry()`
-静态注册 SpriteRenderer2D/Camera2D/PointLight2D/ShadowOccluder2D/SpriteAnimation2D 五种 2D 组件（数据结构沿用
-AssetFormat 的 `World2DEntityDesc` optional payload），3D 侧以成对非零 mesh/material AssetId 表示 MeshRenderer3D。
-SpriteAnimation2D 是 schema-v2 新增的剪辑绑定组件（clip AssetId + playback speed + autoPlay），要求同实体存在
-SpriteRenderer2D，Remove Sprite 会级联摘除该绑定；preview 优先把 autoPlay 绑定实体作为动画目标。
-每个组件区块提供 Add/Remove、可编辑属性行、`Apply <Component>` 与表示 `visible/active` 的 Compact switch；Add/Remove/Apply
-遵循 scene operations 同一契约——成功恰好发布一条 canonical revision，失败（未知 stable ID、重复 Add、对缺失组件
-Remove/Apply、非有限或非法值）fail-closed 且 document/history 字节不变，值未变化的 Apply 成功但不发布 revision。
-多选时 Add 只补齐缺失组件、Remove 只摘除持有组件，均合并为一次 `replace()`；属性行按选中集合一致性显示 `Mixed`，
-`Mixed` 字段保留每个实体自己的值。Add Sprite/MeshRenderer 需要 sprite（或 mesh+material）资产：优先取 Project Assets
-当前选中的对应 kind 资产，否则回退到内置 preview 资产；`Assign Sprite From Selection` 把选中 Sprite 资产写入现有组件。
-Play active 时全部组件控件与其它 authoring 控件一同锁定；组件增删后 Hierarchy 标签（按组件存在性生成）与 runtime
-preview 从新 canonical bytes 重建。
+Editor 只暴露单一 Node authoring 模型。`world2DNodeTemplateRegistry()` 注册 `Node2D`、`Sprite2D`、
+`AnimatedSprite2D`、`Camera2D`、`PointLight2D`、`ShadowOccluder2D`，3D registry 注册 `Node3D` 与 `Mesh3D`；
+Hierarchy 创建器、Hierarchy Kind 和 Inspector 都读取同一词表。AssetFormat 的 `World2DEntityDesc` optional payload
+与 Prefab 的 mesh/material 字段只是 current-schema wire 表示，不暴露为可挂载、可移除的组件 API。分类必须精确映射到
+一个受支持 Node kind；旧式多 payload 混合直接 fail-closed，不用“最具体组件优先”掩盖数据形状。
+`EditorNodePropertyOperations` 只编辑节点类型本来拥有的属性，不改变节点类型：`Sprite2D`/`AnimatedSprite2D` 发布
+Rendering，`Camera2D` 发布 Camera，`PointLight2D` 发布 Light，`ShadowOccluder2D` 发布 Occlusion，
+`AnimatedSprite2D` 额外发布 Animation，`Mesh3D` 发布 Rendering。每个可见区段只包含属性行、Apply 与
+`visible/active/autoPlay` Compact switch，不存在 Components Header、Add Component、Remove Component 或兼容菜单。
+同类型多选时属性按一致性显示 `Mixed`，未明确填写的字段保留每个节点自己的 canonical 值；一次 Apply 最多发布一条
+revision，非法值、未知 stable ID 或类型不匹配保持 document/history 字节不变，no-op 不发布 revision。
+`Assign Sprite From Selection` 只更新 `Sprite2D`/`AnimatedSprite2D` 的 Sprite AssetId。Play active 时全部节点属性控件
+与其它 authoring 控件一同锁定；成功编辑后 runtime preview 从新的 canonical bytes 重建。
 
 Editor 默认进入无帧数上限的交互模式，由主窗口关闭结束生命周期；自动演示不再默认执行。只有同时显式传入
 `--auto-demo` 与 `--frames=<N>` 且 `N >= 70` 才运行自动 authoring 流程，重复 `--auto-demo`、缺少 `--frames`
@@ -53,7 +53,7 @@ smoke。统一 gate 的失败集中修复后只重跑失败或直接受影响项
 
 当前 Editor application 的 retained UI 布局已完整铺开：带 `File/Edit/View/Help` 的 Command Bar、按需出现的 Document Tab strip、
 Hierarchy/Project Assets Left Dock、active Viewport、可滚动 Inspector
-（Identity/Transform/Components/Hierarchy/TileMap/Document）、可折叠底部面板和 Status Bar。
+（Identity/Transform/节点专属属性/Hierarchy/TileMap）、可折叠底部面板和 Status Bar。
 Command Bar 中央的 `2D/3D` 是 workspace selector，`View > Workspace` 提供同一命令的菜单入口；Document Tab strip
 只呈现从 Project Assets 实际打开的 scene/Catalog document，Undo/Redo/Save 已并入 Command Bar。内建 World2D/World3D/TileMap/Animation
 session 都是 workspace/context 的内部状态，不再重复显示成顶层文档标签；没有可关闭的项目文档时关闭按钮也折叠。
@@ -104,25 +104,30 @@ Inspector 的内容段而不再制造嵌套 card。Undo/Redo、Save/Save As、Pl
 普通 configure/build 不运行 Python、SVG parser 或 runtime vector renderer。IconButton/Toggle 把 image content 直接放在
 唯一 Button/RadioButton 节点上；Text Button 的 disabled background 保持与 normal 一样透明，只有图标/文字按
 `disabledContentAlpha` 降灰，不再绘制整块灰色矩形。hover/pressed/selected tint 与背景共享同一 retained state，因此图标始终居中于
-对应 chrome；选中工具继续由 RadioButton 状态表达，视觉统一采用无 indicator 的 SegmentedButton chrome。Header、92 px property label
+对应 chrome；选中工具继续由 RadioButton 状态表达，视觉统一采用无 indicator 的 SegmentedButton chrome。Header、68 px property label
 column 和 Search icon/TextEdit 统一密集工作台的对齐；SearchField 内层 TextEdit 使用明确的水平 content inset，
 空值 caret 也按当前文字行高在输入区域内垂直居中。Hierarchy filter 按 ASCII 大小写不敏感匹配 label，发布匹配项
 及其祖先，搜索期间不受 collapsed 分支遮挡，并按 stable ID 保留可见选择。
-Inspector 组件折叠 Header 使用同一私有 atlas 中的 ChevronRight/ChevronDown Icon node，并按 retained expanded state
+Inspector 节点属性折叠 Header 使用同一私有 atlas 中的 ChevronRight/ChevronDown Icon node，并按 retained expanded state
 切换 visibility，不再显示文本伪箭头。
-Transform 仍以九个第一方 `UINumberFieldLabelPlacement::Leading` 统一 authoring：World2D entity 只呈现
-Position X/Y、Rotation Z、Scale X/Y，World3D entity 呈现完整九轴；Asset Inspector、TileMap document 或无 entity
-selection 时，Header、字段与 Apply 一并 `Collapsed`。每行固定 92 px label，右侧 content column 承载减号、
-TextEdit 与加号并获得剩余宽度；普通表单仍可使用默认 `Above`。Leading 只比 Above 多一个 content node，node
-budget 精确为 7（无 helper/error），不增加独立 NumberField 状态机或 Editor 私有 Widget kind。
-Components 也按当前 selection/workspace 发布：World2D entity 只显示五个 2D component section，World3D entity
-只显示 `MeshRenderer3D`；Asset Inspector、TileMap document 或无 entity selection 时，Components Header 与全部
-collapsible root 一并 `Collapsed`。workspace/context 切换只改 section root visibility，不覆盖用户保留的内部 expanded state。
+Transform 使用 Position、Rotation、Scale 三行第一方 Grid：每行以52 logical px label track + `Fr` value track
+约束内容，value track 再按 workspace 发布一至三个等权 `Fr` axis cell；每个 axis cell 使用12 logical px 居中的
+X/Y/Z label + `Fr` TextEdit，并把整体限制在52..96 logical px。拖动 Inspector 只改变 track 分配，不切换
+方向、不重建节点，也不使用宽度阈值。World2D entity 的 Position/Scale 发布 X/Y，Rotation 只发布 Z；
+World3D entity 发布完整九轴。Asset Inspector、TileMap document 或无 entity selection 时，Header、向量字段容器与
+Apply 一并 `Collapsed`。旧的九行 `UINumberField`、逐轴减号/加号回调与延迟 step 状态已删除，数值仍由 Transform
+Header 右侧的 Apply action 统一解析并提交。节点专属属性与 Parent ID 等其他 Inspector PropertyRow 使用
+68 logical px label + `Fr` value Grid，单值 TextEdit 最大宽度统一为132 logical px。Sprite Size/Pivot 与
+ShadowOccluder Start/End 分别把 X/Y 合并在同一属性行，轴 label 的 horizontal/vertical content alignment 均居中。
+节点专属属性按当前 selection/workspace 发布：只有同类型 Node 多选才显示该类型固有的 property section；
+`AnimatedSprite2D` 同时显示 Rendering 与 Animation，其余 Node 只显示对应区段。Asset Inspector、TileMap document、
+无 Node selection 或多选类型不一致时全部专属 root 收口；workspace/context 切换只改 root visibility，不覆盖用户
+保留的内部 expanded state，也不提供改变 Node kind 的 Inspector 入口。
 Hierarchy 的 Header、Parent ID 行和 Apply Parent wrapper 只在同一 entity context 发布；TileMap 的 Header、状态摘要与
-四个 action row 只在 TileMap document 激活时发布。最终 Asset Inspector 只呈现 Identity、asset metadata/dependencies
-和 Document，Scene entity 呈现 Identity、Transform、Components、Hierarchy 和 Document，TileMap document 呈现
-Identity、TileMap 和 Document；Scene 无 entity selection 时只保留 Identity 与 Document。所有上下文切换都从构建时
-保存的完整 root layout 修改 `visibility`，恢复后不会丢失 PropertyRow 的 Row/Center/gap 或 IconButton wrapper 的居中布局。
+四个 action row 只在 TileMap document 激活时发布。最终 Asset Inspector 只呈现 Identity 与 asset metadata/dependencies，
+Scene node 呈现 Identity、Transform、节点专属属性与 Hierarchy，TileMap document 呈现 Identity 与 TileMap；
+Scene 无 entity selection 时只保留 Identity。所有上下文切换都从构建时保存的完整 Grid/root layout 修改
+`visibility`，恢复后不会把 PropertyRow 重置为旧 Flex，也不会丢失 IconButton wrapper 的居中布局。
 Inspector ScrollView 的内容高度由这些实际可见 section 的 Flow intrinsic height 决定，不再使用固定 1980 px canvas；
 `Auto` scrollbar 只在 content extent 真正超过 viewport 时绘制并参与命中。
 维护图标映射后使用工作区 Python 执行 `tools/editor_icons/cook_editor_icons.py`，提交
@@ -131,7 +136,7 @@ path command 与资源根目录执行 allowlist 校验，避免静默接受脚�
 Viewport 的 World/Local orientation 与 Snap 状态使用 `World`/`Snap` icon toggle 和 tooltip，不再运行时改写文字按钮；
 Inspector 的 Identity 使用固定高度 `EditorPropertyRow` 表达 Name/Kind，说明文字独占整行并使用 ellipsis，
 Scene selection 折叠 Asset 专属 metadata/dependency 区域，Asset Inspector 激活时再显式展开，避免空区域挤压字段。
-可见 Inspector 组件的启用状态使用 Compact `UISwitch`，继续复用既有 Toggle storage、`setChecked()`、
+可见 Node 属性中的布尔状态使用 Compact `UISwitch`，继续复用既有 Toggle storage、`setChecked()`、
 `setCheckboxAction()` 以及 Focus/Keyboard/Gamepad/UIA action；Status Bar 的选择摘要使用 Accent `UIBadge`，仍由
 同一个 `statusSelection_` 节点通过 `setText()` 动态刷新；document/runtime 两段按 0.8/1.2 分配剩余宽度并分别
 ellipsis，不引入 Editor 私有控件状态。Create Node picker、dirty-close、Scene Delete 和 About Tina 均持有
@@ -176,19 +181,20 @@ PointerCancel、pointer/selection/workspace/document revision 冲突、no-op 或
 preview，document/history 不变。Status bar 在多选时显示 `N selected | Group pivot`，Inspector 标题显示
 `Mixed values`，gizmo 开始、预览、提交与取消都有明确状态反馈。
 
-Hierarchy 每次在 World2D/World3D document 变化后都从 canonical entity/node
-及其 parent stable ID 重建动态树；document root 使用非持久化的 UI key，实际场景项直接以 stable ID 作为 key。Header 下只常驻
-`Add`、`Duplicate`、`Delete` 与 `Focus`；任意 `Reparent` 和 `To Root` 统一由 Inspector 的 Parent 字段完成。这些操作均同时接入 2D/3D，
-状态操作只发布一个 canonical revision，刷新后按
-stable ID 恢复选择。`Add` 先打开第一方 Create Node picker `UIDialog`，列出当前 workspace 的 node template：World2D 为
-`Entity2D`、`Sprite2D`、`AnimatedSprite2D`、`Camera2D`、`PointLight2D`、`ShadowOccluder2D`，World3D 为 `Node3D`、`Mesh3D`；
-选中 template 后 Confirm 以一次 canonical revision 直接创建带完整组件的节点，因此选择节点类型只消耗一次 Undo，
-不再需要先建空节点再到 Inspector 转换。picker 固定 active document key、workspace、parent stable ID 与 document
+Hierarchy 每次在 World2D/World3D document 变化后都从 canonical wire item 及其 parent stable ID 重建动态树；
+document root 使用非持久化的 UI key，实际场景 Node 直接以 stable ID 作为 key。Header 下只常驻 `Add`、`Duplicate`、
+`Delete` 与 `Focus`。拖放到目标行中间 50% 会把源 Node 设为目标子节点，拖到上/下 25% 会在同级执行 before/after
+排序；拖到 document root 会回到场景根。跨父级边缘排序、拖入自身 subtree 与无效目标均 fail-closed，no-op 不发布
+revision；成功操作只发布一个 canonical revision，并按 stable ID 恢复选择、重建 preview 和 Inspector。`Add` 先打开
+第一方 Create Node picker `UIDialog`，列出当前 workspace 的 node template：World2D 为
+`Node2D`、`Sprite2D`、`AnimatedSprite2D`、`Camera2D`、`PointLight2D`、`ShadowOccluder2D`，World3D 为 `Node3D`、`Mesh3D`；
+选中 template 后 Confirm 以一次 canonical revision 直接创建完整类型节点，因此选择节点类型只消耗一次 Undo，也不存在
+先建空节点再追加组件的转换路径。新 Node 默认成为打开 picker 时当前选中 Node 的子节点；选择 document root 时创建在
+场景根。picker 固定 active document key、workspace、parent stable ID 与 document
 revision，Confirm 前任一项变化即事务安全取消；Cancel/Escape 不修改 canonical document 或 selection，关闭后 focus
-恢复到 Hierarchy。`Sprite2D` / `AnimatedSprite2D` / `Mesh3D` 所需 AssetId 与 Inspector 的 Add Component 同源解析
-（Project Assets 选中项，否则内建 preview asset），因此没有不可达的 template。node template registry 同时是 Hierarchy
-标签与 Inspector Kind 的唯一词表，创建为 `AnimatedSprite2D` 的节点在两处也读回 `AnimatedSprite2D`。Inspector 的逐组件
-Add/Remove 继续保留，负责在已有节点上增删组件，与创建时选类型互补。`Delete` 先打开第一方 `UIDialog`，并固定 active document key、workspace、stable ID 与 document
+恢复到 Hierarchy。`Sprite2D` / `AnimatedSprite2D` / `Mesh3D` 所需 AssetId 优先读取 Project Assets 当前对应 kind 的选择，
+否则使用内建 preview asset，因此没有不可达 template。node template registry 同时是 Hierarchy 标签与 Inspector Kind 的
+唯一词表，创建为 `AnimatedSprite2D` 的节点在两处也读回 `AnimatedSprite2D`。`Delete` 先打开第一方 `UIDialog`，并固定 active document key、workspace、stable ID 与 document
 revision；只有 Confirm 执行原有 subtree 删除，Cancel/Escape/关闭不修改 canonical document 或 selection。Confirm 前目标、
 document/session 或 revision 已变化时事务安全取消，重复 Delete/Confirm 不会建立第二条删除流程；Dialog 关闭提交后 focus
 恢复到 Hierarchy。Auto-demo 可通过 `--rgba-output=<path>` 与
@@ -310,15 +316,15 @@ shell。Linux 定向编译和真实 helper 产品门禁仍是平台证据，但�
 ## Editor application layout
 
 ```text
-Command bar (File/Edit/View/Help/centered 2D-3D workspace/undo-redo-save-save-as/play-pause-step-stop)
+Command bar (File/Edit/View/Help; project lifecycle only under File; centered 2D-3D workspace/undo-redo-save-save-as/play-pause-step-stop)
 Conditional document tab strip (external scene/Catalog tabs/close; hidden when empty)
 Workspace
   Left dock
     Hierarchy (filter/add/duplicate/delete/focus/virtual dynamic TreeView)
-    Project Assets (All/2D/3D/Media/compact virtual grid/new/open/import/refresh/collapsed-empty imports)
+    Project Assets (All/2D/3D/Media/compact virtual grid/import/refresh/collapsed-empty imports)
     Source Imports (Kind | Source virtual DataGrid/remove; collapsed when empty)
   Active 2D/3D viewport (one Scene-TileMap/transform/snap/marquee/tile/frame/view toolbar + preview canvas)
-  Inspector dock (scrollable identity/transform/components/hierarchy/TileMap/document/36px dependency list)
+  Inspector dock (scrollable identity/transform/node properties/hierarchy/TileMap/document/36px dependency list)
 Collapsible bottom panel (Animation timeline or latest Output; closed by default)
 Status bar (schema/entities/revision/preview/selection)
 Dirty-close modal (save/save-as/discard/cancel)
@@ -523,7 +529,7 @@ history vector 在 Create 时一次 reserve 到配置 entry 上限。发布新 r
 history 可撤销性检查。以下失败均保留 current bytes、revision、undo depth 与 redo depth：
 
 - stable ID 为零/重复、parent 自引用/前向引用/缺失；
-- transform/component 非有限、枚举/flag/AssetId/Gameplay identity 非法；
+- transform/node property payload 非有限、枚举/flag/AssetId/Gameplay identity 非法；
 - 输入为旧 schema、非 canonical wire bytes、截断 payload，或 chunk 不属于 root/稳定派生 ID 不匹配；
 - entity/gameplay 超出 document config；
 - current + candidate 超出 history byte budget；

@@ -1,5 +1,5 @@
 add_executable(tina_editor_tests
-    EditorComponentOperationsTests.cpp
+    EditorNodePropertyOperationsTests.cpp
     EditorDocumentTabsTests.cpp
     EditorMarqueeSelectionTests.cpp
     EditorPlaySessionTests.cpp
@@ -20,7 +20,7 @@ add_executable(tina_editor_tests
     World3DAuthoringDocumentTests.cpp
     World3DAuthoringFileTests.cpp
     header_isolation/EditorErrorsHeader.cpp
-    header_isolation/EditorComponentOperationsHeader.cpp
+    header_isolation/EditorNodePropertyOperationsHeader.cpp
     header_isolation/EditorDocumentTabsHeader.cpp
     header_isolation/EditorMarqueeSelectionHeader.cpp
     header_isolation/EditorPlaySessionHeader.cpp

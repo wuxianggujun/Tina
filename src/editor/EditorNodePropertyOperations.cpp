@@ -1,4 +1,4 @@
-#include <tina/editor/EditorComponentOperations.hpp>
+#include <tina/editor/EditorNodePropertyOperations.hpp>
 
 #include <tina/editor/EditorErrors.hpp>
 
@@ -12,34 +12,10 @@
 namespace Tina::Editor {
 namespace {
 
-inline constexpr std::array<EditorComponentInfo, World2DComponentKindCount>
-    World2DComponentRegistry{{
-        {.kind = World2DComponentKind::Sprite,
-         .displayName = "SpriteRenderer2D",
-         .removable = true},
-        {.kind = World2DComponentKind::Camera,
-         .displayName = "Camera2D",
-         .removable = true},
-        {.kind = World2DComponentKind::PointLight,
-         .displayName = "PointLight2D",
-         .removable = true},
-        {.kind = World2DComponentKind::ShadowOccluder,
-         .displayName = "ShadowOccluder2D",
-         .removable = true},
-        {.kind = World2DComponentKind::SpriteAnimation,
-         .displayName = "SpriteAnimation2D",
-         .removable = true},
-    }};
-
-[[nodiscard]] std::unexpected<Core::Error> componentOperationAllocationFailure()
+[[nodiscard]] std::unexpected<Core::Error> nodePropertyAllocationFailure()
 {
     return Core::failure(Core::CoreErrorCode::OutOfMemory,
-                         "Editor component operation allocation failed");
-}
-
-[[nodiscard]] bool isKnownWorld2DComponentKind(World2DComponentKind kind) noexcept
-{
-    return static_cast<Core::u8>(kind) < World2DComponentKindCount;
+                         "Editor node property operation allocation failed");
 }
 
 [[nodiscard]] bool allFinite(std::initializer_list<float> values) noexcept
@@ -64,7 +40,7 @@ resolveSelection(std::span<const Item> items, std::span<const Core::u32> stableI
             });
         if (found == items.end()) {
             return Core::failure(EditorErrorCode::EntityNotFound,
-                                 "Editor component operation target was not found");
+                                 "Editor node property target was not found");
         }
         const auto index =
             static_cast<Core::usize>(std::distance(items.begin(), found));
@@ -73,71 +49,6 @@ resolveSelection(std::span<const Item> items, std::span<const Core::u32> stableI
         }
     }
     return indices;
-}
-
-[[nodiscard]] Core::Status validateWorld2DComponentSelection(
-    std::span<const Core::u32> stableEntityIds, World2DComponentKind kind) noexcept
-{
-    if (!isKnownWorld2DComponentKind(kind)) {
-        return Core::failure(EditorErrorCode::InvalidAuthoringOperation,
-                             "Editor component kind is unknown");
-    }
-    if (stableEntityIds.empty()) {
-        return Core::failure(EditorErrorCode::InvalidAuthoringOperation,
-                             "Editor component operation requires a selection");
-    }
-    return Core::success();
-}
-
-void attachDefaultWorld2DComponent(AssetFormat::World2DEntityDesc& entity,
-                                   World2DComponentKind kind,
-                                   Core::AssetId componentAssetId)
-{
-    switch (kind) {
-    case World2DComponentKind::Sprite: {
-        auto& sprite = entity.sprite.emplace();
-        sprite.spriteId = componentAssetId;
-        break;
-    }
-    case World2DComponentKind::Camera:
-        entity.camera.emplace();
-        break;
-    case World2DComponentKind::PointLight:
-        entity.pointLight.emplace();
-        break;
-    case World2DComponentKind::ShadowOccluder:
-        entity.shadowOccluder.emplace();
-        break;
-    case World2DComponentKind::SpriteAnimation: {
-        auto& animation = entity.spriteAnimation.emplace();
-        animation.clipId = componentAssetId;
-        break;
-    }
-    }
-}
-
-void detachWorld2DComponent(AssetFormat::World2DEntityDesc& entity,
-                            World2DComponentKind kind) noexcept
-{
-    switch (kind) {
-    case World2DComponentKind::Sprite:
-        entity.sprite.reset();
-        // The animation binding targets the sprite, so it cannot outlive it.
-        entity.spriteAnimation.reset();
-        break;
-    case World2DComponentKind::Camera:
-        entity.camera.reset();
-        break;
-    case World2DComponentKind::PointLight:
-        entity.pointLight.reset();
-        break;
-    case World2DComponentKind::ShadowOccluder:
-        entity.shadowOccluder.reset();
-        break;
-    case World2DComponentKind::SpriteAnimation:
-        entity.spriteAnimation.reset();
-        break;
-    }
 }
 
 // Shared batch-edit harness: parse, resolve the selection, let `editEntity`
@@ -152,7 +63,7 @@ try
 {
     if (stableEntityIds.empty()) {
         return Core::failure(EditorErrorCode::InvalidAuthoringOperation,
-                             "Editor component operation requires a selection");
+                             "Editor node property edit requires a selection");
     }
     std::vector<AssetFormat::World2DEntityDesc> storage;
     auto snapshot = document.parseCurrentSnapshot(storage);
@@ -201,7 +112,7 @@ try
 }
 catch (const std::bad_alloc&)
 {
-    return componentOperationAllocationFailure();
+    return nodePropertyAllocationFailure();
 }
 
 template <typename Value>
@@ -216,7 +127,24 @@ void applyOptional(std::optional<Value> input, Value& target) noexcept
 {
     if (!finite) {
         return Core::failure(EditorErrorCode::InvalidAuthoringOperation,
-                             "Editor component edit rejects non-finite values");
+                             "Editor node property edit rejects non-finite values");
+    }
+    return Core::success();
+}
+
+[[nodiscard]] Core::Status requireWorld2DNodeKind(
+    const AssetFormat::World2DEntityDesc& entity,
+    std::initializer_list<World2DNodeTemplate> allowedKinds,
+    const char* mismatchMessage)
+{
+    auto nodeKind = classifyWorld2DNodeTemplate(entity);
+    if (!nodeKind) {
+        return Core::failure(std::move(nodeKind.error()));
+    }
+    if (std::find(allowedKinds.begin(), allowedKinds.end(), *nodeKind) ==
+        allowedKinds.end()) {
+        return Core::failure(EditorErrorCode::NodePropertyUnavailable,
+                             mismatchMessage);
     }
     return Core::success();
 }
@@ -229,7 +157,7 @@ try
 {
     if (stableNodeIds.empty()) {
         return Core::failure(EditorErrorCode::InvalidAuthoringOperation,
-                             "Editor component operation requires a selection");
+                             "Editor node property edit requires a selection");
     }
     std::vector<AssetFormat::PrefabNodeView> storage;
     auto prefab = document.parseCurrentPrefab(storage);
@@ -299,105 +227,15 @@ try
 }
 catch (const std::bad_alloc&)
 {
-    return componentOperationAllocationFailure();
+    return nodePropertyAllocationFailure();
 }
 
 } // namespace
 
-std::span<const EditorComponentInfo> world2DComponentRegistry() noexcept
-{
-    return World2DComponentRegistry;
-}
-
-bool hasWorld2DComponent(const AssetFormat::World2DEntityDesc& entity,
-                         World2DComponentKind kind) noexcept
-{
-    switch (kind) {
-    case World2DComponentKind::Sprite:
-        return entity.sprite.has_value();
-    case World2DComponentKind::Camera:
-        return entity.camera.has_value();
-    case World2DComponentKind::PointLight:
-        return entity.pointLight.has_value();
-    case World2DComponentKind::ShadowOccluder:
-        return entity.shadowOccluder.has_value();
-    case World2DComponentKind::SpriteAnimation:
-        return entity.spriteAnimation.has_value();
-    }
-    return false;
-}
-
 Core::Result<EditorSceneOperationResult>
-addWorld2DComponent(World2DAuthoringDocument& document,
-                    std::span<const Core::u32> stableEntityIds,
-                    World2DComponentKind kind, Core::AssetId componentAssetId)
-{
-    if (auto status = validateWorld2DComponentSelection(stableEntityIds, kind);
-        !status) {
-        return Core::failure(std::move(status.error()));
-    }
-    if ((kind == World2DComponentKind::Sprite ||
-         kind == World2DComponentKind::SpriteAnimation) &&
-        !componentAssetId) {
-        return Core::failure(
-            EditorErrorCode::InvalidAuthoringOperation,
-            "Editor component requires a non-zero AssetId for this kind");
-    }
-    bool anyMissing = false;
-    auto result = editWorld2DEntities(
-        document, stableEntityIds,
-        [&](AssetFormat::World2DEntityDesc& entity) -> Core::Status {
-            if (!hasWorld2DComponent(entity, kind)) {
-                if (kind == World2DComponentKind::SpriteAnimation &&
-                    !entity.sprite) {
-                    return Core::failure(
-                        EditorErrorCode::InvalidAuthoringOperation,
-                        "Editor sprite animation requires a SpriteRenderer2D on the entity");
-                }
-                anyMissing = true;
-                attachDefaultWorld2DComponent(entity, kind, componentAssetId);
-            }
-            return Core::success();
-        });
-    if (result && !anyMissing) {
-        return Core::failure(
-            EditorErrorCode::ComponentAlreadyPresent,
-            "Editor component is already present on every selected entity");
-    }
-    return result;
-}
-
-Core::Result<EditorSceneOperationResult>
-removeWorld2DComponent(World2DAuthoringDocument& document,
+applyWorld2DSpriteNodeProperties(World2DAuthoringDocument& document,
                        std::span<const Core::u32> stableEntityIds,
-                       World2DComponentKind kind)
-{
-    if (auto status = validateWorld2DComponentSelection(stableEntityIds, kind);
-        !status) {
-        return Core::failure(std::move(status.error()));
-    }
-    bool anyPresent = false;
-    auto result = editWorld2DEntities(
-        document, stableEntityIds,
-        [&](AssetFormat::World2DEntityDesc& entity) -> Core::Status {
-            if (hasWorld2DComponent(entity, kind)) {
-                anyPresent = true;
-                detachWorld2DComponent(entity, kind);
-            }
-            return Core::success();
-        });
-    if (result && !anyPresent) {
-        return Core::failure(
-            EditorErrorCode::ComponentNotFound,
-            "Editor component is missing from every selected entity");
-    }
-    return result;
-}
-
-Core::Result<EditorSceneOperationResult>
-applyWorld2DSpriteEdit(World2DAuthoringDocument& document,
-                       std::span<const Core::u32> stableEntityIds,
-                       const World2DSpriteEditInput& input)
+                       const World2DSpriteNodeProperties& input)
 {
     if (auto status = finiteEditStatus(allFinite({
             input.sizeX.value_or(1.0F),
@@ -410,15 +248,18 @@ applyWorld2DSpriteEdit(World2DAuthoringDocument& document,
     if (input.spriteId.has_value() && !*input.spriteId) {
         return Core::failure(
             EditorErrorCode::InvalidAuthoringOperation,
-            "Editor sprite component requires a non-zero sprite AssetId");
+            "Sprite2D properties require a non-zero sprite AssetId");
     }
     return editWorld2DEntities(
         document, stableEntityIds,
         [&](AssetFormat::World2DEntityDesc& entity) -> Core::Status {
-            if (!entity.sprite) {
-                return Core::failure(
-                    EditorErrorCode::ComponentNotFound,
-                    "Editor sprite edit targets an entity without a sprite");
+            if (auto status = requireWorld2DNodeKind(
+                    entity,
+                    {World2DNodeTemplate::Sprite,
+                     World2DNodeTemplate::AnimatedSprite},
+                    "Rendering properties require a Sprite2D or AnimatedSprite2D node");
+                !status) {
+                return status;
             }
             auto& sprite = *entity.sprite;
             applyOptional(input.spriteId, sprite.spriteId);
@@ -450,9 +291,9 @@ applyWorld2DSpriteEdit(World2DAuthoringDocument& document,
 }
 
 Core::Result<EditorSceneOperationResult>
-applyWorld2DCameraEdit(World2DAuthoringDocument& document,
+applyWorld2DCameraNodeProperties(World2DAuthoringDocument& document,
                        std::span<const Core::u32> stableEntityIds,
-                       const World2DCameraEditInput& input)
+                       const World2DCameraNodeProperties& input)
 {
     if (auto status = finiteEditStatus(allFinite({
             input.viewportX.value_or(0.0F),
@@ -467,10 +308,11 @@ applyWorld2DCameraEdit(World2DAuthoringDocument& document,
     return editWorld2DEntities(
         document, stableEntityIds,
         [&](AssetFormat::World2DEntityDesc& entity) -> Core::Status {
-            if (!entity.camera) {
-                return Core::failure(
-                    EditorErrorCode::ComponentNotFound,
-                    "Editor camera edit targets an entity without a camera");
+            if (auto status = requireWorld2DNodeKind(
+                    entity, {World2DNodeTemplate::Camera},
+                    "Camera properties require a Camera2D node");
+                !status) {
+                return status;
             }
             auto& camera = *entity.camera;
             applyOptional(input.projection, camera.projection);
@@ -488,9 +330,9 @@ applyWorld2DCameraEdit(World2DAuthoringDocument& document,
 }
 
 Core::Result<EditorSceneOperationResult>
-applyWorld2DPointLightEdit(World2DAuthoringDocument& document,
+applyWorld2DPointLightNodeProperties(World2DAuthoringDocument& document,
                            std::span<const Core::u32> stableEntityIds,
-                           const World2DPointLightEditInput& input)
+                           const World2DPointLightNodeProperties& input)
 {
     if (auto status = finiteEditStatus(allFinite({
             input.colorRed.value_or(1.0F),
@@ -506,10 +348,11 @@ applyWorld2DPointLightEdit(World2DAuthoringDocument& document,
     return editWorld2DEntities(
         document, stableEntityIds,
         [&](AssetFormat::World2DEntityDesc& entity) -> Core::Status {
-            if (!entity.pointLight) {
-                return Core::failure(
-                    EditorErrorCode::ComponentNotFound,
-                    "Editor point light edit targets an entity without a light");
+            if (auto status = requireWorld2DNodeKind(
+                    entity, {World2DNodeTemplate::PointLight},
+                    "Light properties require a PointLight2D node");
+                !status) {
+                return status;
             }
             auto& light = *entity.pointLight;
             applyOptional(input.colorRed, light.colorRed);
@@ -525,9 +368,9 @@ applyWorld2DPointLightEdit(World2DAuthoringDocument& document,
 }
 
 Core::Result<EditorSceneOperationResult>
-applyWorld2DShadowOccluderEdit(World2DAuthoringDocument& document,
+applyWorld2DShadowOccluderNodeProperties(World2DAuthoringDocument& document,
                                std::span<const Core::u32> stableEntityIds,
-                               const World2DShadowOccluderEditInput& input)
+                               const World2DShadowOccluderNodeProperties& input)
 {
     if (auto status = finiteEditStatus(allFinite({
             input.localStartX.value_or(-0.5F),
@@ -540,10 +383,11 @@ applyWorld2DShadowOccluderEdit(World2DAuthoringDocument& document,
     return editWorld2DEntities(
         document, stableEntityIds,
         [&](AssetFormat::World2DEntityDesc& entity) -> Core::Status {
-            if (!entity.shadowOccluder) {
-                return Core::failure(
-                    EditorErrorCode::ComponentNotFound,
-                    "Editor occluder edit targets an entity without an occluder");
+            if (auto status = requireWorld2DNodeKind(
+                    entity, {World2DNodeTemplate::ShadowOccluder},
+                    "Occlusion properties require a ShadowOccluder2D node");
+                !status) {
+                return status;
             }
             auto& occluder = *entity.shadowOccluder;
             applyOptional(input.localStartX, occluder.localStartX);
@@ -556,15 +400,18 @@ applyWorld2DShadowOccluderEdit(World2DAuthoringDocument& document,
 }
 
 Core::Result<EditorSceneOperationResult>
-applyWorld2DSpriteAnimationEdit(World2DAuthoringDocument& document,
+applyWorld2DAnimatedSpriteNodeProperties(World2DAuthoringDocument& document,
                                 std::span<const Core::u32> stableEntityIds,
-                                const World2DSpriteAnimationEditInput& input)
+                                const World2DAnimatedSpriteNodeProperties& input)
 {
     if (auto status = finiteEditStatus(
-            allFinite({input.playbackSpeed.value_or(1.0F)}) &&
-            (!input.playbackSpeed.has_value() || *input.playbackSpeed > 0.0F));
-        !status) {
+            allFinite({input.playbackSpeed.value_or(1.0F)})); !status) {
         return Core::failure(std::move(status.error()));
+    }
+    if (input.playbackSpeed.has_value() && *input.playbackSpeed <= 0.0F) {
+        return Core::failure(
+            EditorErrorCode::InvalidAuthoringOperation,
+            "AnimatedSprite2D playback speed must be greater than zero");
     }
     if (input.clipId.has_value() && !*input.clipId) {
         return Core::failure(
@@ -574,10 +421,11 @@ applyWorld2DSpriteAnimationEdit(World2DAuthoringDocument& document,
     return editWorld2DEntities(
         document, stableEntityIds,
         [&](AssetFormat::World2DEntityDesc& entity) -> Core::Status {
-            if (!entity.spriteAnimation) {
-                return Core::failure(
-                    EditorErrorCode::ComponentNotFound,
-                    "Editor animation edit targets an entity without a binding");
+            if (auto status = requireWorld2DNodeKind(
+                    entity, {World2DNodeTemplate::AnimatedSprite},
+                    "Animation properties require an AnimatedSprite2D node");
+                !status) {
+                return status;
             }
             auto& animation = *entity.spriteAnimation;
             applyOptional(input.clipId, animation.clipId);
@@ -587,81 +435,24 @@ applyWorld2DSpriteAnimationEdit(World2DAuthoringDocument& document,
         });
 }
 
-bool hasWorld3DMeshRenderer(const AssetFormat::PrefabNodeView& node) noexcept
-{
-    return node.hasMesh && node.hasMaterial;
-}
-
 Core::Result<EditorSceneOperationResult>
-addWorld3DMeshRenderer(World3DAuthoringDocument& document,
-                       std::span<const Core::u32> stableNodeIds,
-                       Core::AssetId meshId, Core::AssetId materialId)
-{
-    if (!meshId || !materialId) {
-        return Core::failure(
-            EditorErrorCode::InvalidAuthoringOperation,
-            "Editor mesh renderer requires paired mesh and material assets");
-    }
-    bool anyMissing = false;
-    auto result = editWorld3DNodes(
-        document, stableNodeIds,
-        [&](AssetFormat::PrefabNodeDesc& node) -> Core::Status {
-            if (!node.meshId || !node.materialId) {
-                anyMissing = true;
-                node.meshId = meshId;
-                node.materialId = materialId;
-            }
-            return Core::success();
-        });
-    if (result && !anyMissing) {
-        return Core::failure(
-            EditorErrorCode::ComponentAlreadyPresent,
-            "Editor mesh renderer is already present on every selected node");
-    }
-    return result;
-}
-
-Core::Result<EditorSceneOperationResult>
-removeWorld3DMeshRenderer(World3DAuthoringDocument& document,
-                          std::span<const Core::u32> stableNodeIds)
-{
-    bool anyPresent = false;
-    auto result = editWorld3DNodes(
-        document, stableNodeIds,
-        [&](AssetFormat::PrefabNodeDesc& node) -> Core::Status {
-            if (node.meshId || node.materialId) {
-                anyPresent = true;
-                node.meshId = {};
-                node.materialId = {};
-            }
-            return Core::success();
-        });
-    if (result && !anyPresent) {
-        return Core::failure(
-            EditorErrorCode::ComponentNotFound,
-            "Editor mesh renderer is missing from every selected node");
-    }
-    return result;
-}
-
-Core::Result<EditorSceneOperationResult>
-applyWorld3DMeshRendererEdit(World3DAuthoringDocument& document,
+applyWorld3DMeshNodeProperties(World3DAuthoringDocument& document,
                              std::span<const Core::u32> stableNodeIds,
-                             const World3DMeshRendererEditInput& input)
+                             const World3DMeshNodeProperties& input)
 {
     if ((input.meshId.has_value() && !*input.meshId) ||
         (input.materialId.has_value() && !*input.materialId)) {
         return Core::failure(
             EditorErrorCode::InvalidAuthoringOperation,
-            "Editor mesh renderer edit requires non-zero asset IDs");
+            "Mesh3D properties require non-zero asset IDs");
     }
     return editWorld3DNodes(
         document, stableNodeIds,
         [&](AssetFormat::PrefabNodeDesc& node) -> Core::Status {
             if (!node.meshId || !node.materialId) {
                 return Core::failure(
-                    EditorErrorCode::ComponentNotFound,
-                    "Editor mesh renderer edit targets a node without one");
+                    EditorErrorCode::NodePropertyUnavailable,
+                    "Rendering properties require a Mesh3D node");
             }
             applyOptional(input.meshId, node.meshId);
             applyOptional(input.materialId, node.materialId);

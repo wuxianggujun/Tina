@@ -477,6 +477,61 @@ TEST_F(UILayoutTest, AlignStretchUsesContainerCrossAxisWhenChildCrossSizeIsAuto)
         {.x = 0.0F, .y = 0.0F, .width = 25.0F, .height = 40.0F});
 }
 
+TEST_F(UILayoutTest, GridTracksSpanAndPerItemAlignmentPublishDeterministicRects)
+{
+    auto context = makeContext({.nodeCapacity = 5, .rootCapacity = 1});
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root);
+    const UI::UINodeId grid = createPanel(*context, root.rootNodeId());
+    const UI::UINodeId label = createPanel(*context, grid);
+    const UI::UINodeId input = createPanel(*context, grid);
+    const UI::UINodeId spanning = createPanel(*context, grid);
+
+    auto updater = createUpdater(*context, root);
+    UI::UILayoutStyle gridStyle = fixedSize(200.0F, 80.0F);
+    gridStyle.containerLayout = UI::UIContainerLayout::Grid;
+    gridStyle.gridContainer.columns = UI::UIGridTrackList::Of({
+        UI::UIGridTrack::Px(40.0F), UI::UIGridTrack::Auto(),
+        UI::UIGridTrack::Fr(),
+    });
+    gridStyle.gridContainer.rows = UI::UIGridTrackList::Of({
+        UI::UIGridTrack::Auto(), UI::UIGridTrack::Fr(),
+    });
+    gridStyle.gridContainer.gap = {.row = 4.0F, .column = 5.0F};
+    gridStyle.gridContainer.alignItems = UI::UIAxisAlignment::Center;
+    assertOk(updater.setLayoutStyle(grid, gridStyle));
+
+    UI::UILayoutStyle labelStyle = fixedSize(30.0F, 10.0F);
+    labelStyle.gridItem.row = 0U;
+    labelStyle.gridItem.column = 0U;
+    labelStyle.gridItem.justifySelf = UI::UIAlignSelf::Center;
+    assertOk(updater.setLayoutStyle(label, labelStyle));
+
+    UI::UILayoutStyle inputStyle = fixedSize(30.0F, 20.0F);
+    inputStyle.gridItem.row = 0U;
+    inputStyle.gridItem.column = 1U;
+    assertOk(updater.setLayoutStyle(input, inputStyle));
+
+    UI::UILayoutStyle spanningStyle{};
+    spanningStyle.size.height = UI::UILayoutLength::Px(10.0F);
+    spanningStyle.gridItem.row = 1U;
+    spanningStyle.gridItem.column = 0U;
+    spanningStyle.gridItem.columnSpan = 3U;
+    spanningStyle.gridItem.alignSelf = UI::UIAlignSelf::Center;
+    assertOk(updater.setLayoutStyle(spanning, spanningStyle));
+
+    assertOk(context->commitStructure());
+    assertOk(context->commitLayout({.width = 240.0F, .height = 100.0F}));
+    const UI::UICommittedLayoutView layout = context->committedLayout();
+    expectRectNear(requireLayoutEntry(layout, label).worldRect,
+                   {.x = 5.0F, .y = 5.0F, .width = 30.0F, .height = 10.0F});
+    expectRectNear(requireLayoutEntry(layout, input).worldRect,
+                   {.x = 45.0F, .y = 0.0F, .width = 30.0F, .height = 20.0F});
+    expectRectNear(requireLayoutEntry(layout, spanning).worldRect,
+                   {.x = 0.0F, .y = 47.0F, .width = 200.0F, .height = 10.0F});
+}
+
 TEST_F(UILayoutTest, OverlayDoesNotParticipateInFlowAndKeepsSnapshotOrder)
 {
     auto context = makeContext({.nodeCapacity = 4, .rootCapacity = 1});

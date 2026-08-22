@@ -36,24 +36,38 @@ namespace {
     return false;
 }
 
-[[nodiscard]] std::string_view world2DHierarchyKindName(
-    const Tina::AssetFormat::World2DEntityDesc& entity) noexcept
+[[nodiscard]] Tina::Core::Result<std::string_view> world2DHierarchyKindName(
+    const Tina::AssetFormat::World2DEntityDesc& entity)
 {
     const auto registry = Tina::Editor::world2DNodeTemplateRegistry();
-    const auto index = static_cast<Tina::Core::usize>(
-        Tina::Editor::classifyWorld2DEntityTemplate(entity));
-    return index < registry.size() ? registry[index].displayName
-                                   : std::string_view{"Entity2D"};
+    auto nodeKind = Tina::Editor::classifyWorld2DNodeTemplate(entity);
+    if (!nodeKind) {
+        return Tina::Core::failure(std::move(nodeKind.error()));
+    }
+    const auto index = static_cast<Tina::Core::usize>(*nodeKind);
+    if (index >= registry.size()) {
+        return Tina::Core::failure(
+            Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+            "World2D node kind is outside the creation registry");
+    }
+    return registry[index].displayName;
 }
 
-[[nodiscard]] std::string_view world3DHierarchyKindName(
-    const Tina::AssetFormat::PrefabNodeView& node) noexcept
+[[nodiscard]] Tina::Core::Result<std::string_view> world3DHierarchyKindName(
+    const Tina::AssetFormat::PrefabNodeView& node)
 {
     const auto registry = Tina::Editor::world3DNodeTemplateRegistry();
-    const auto index = static_cast<Tina::Core::usize>(
-        Tina::Editor::classifyWorld3DNodeTemplate(node));
-    return index < registry.size() ? registry[index].displayName
-                                   : std::string_view{"Node3D"};
+    auto nodeKind = Tina::Editor::classifyWorld3DNodeTemplate(node);
+    if (!nodeKind) {
+        return Tina::Core::failure(std::move(nodeKind.error()));
+    }
+    const auto index = static_cast<Tina::Core::usize>(*nodeKind);
+    if (index >= registry.size()) {
+        return Tina::Core::failure(
+            Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+            "World3D node kind is outside the creation registry");
+    }
+    return registry[index].displayName;
 }
 
 } // namespace
@@ -169,7 +183,7 @@ auto EditorWorkspaceState::hierarchyDisplayKind(
         return row->kindName;
     }
     return workspaceMode_ == WorkspaceMode::World2D
-               ? std::string_view{"Entity2D"}
+               ? std::string_view{"Node2D"}
                : std::string_view{"Node3D"};
 }
 
@@ -180,9 +194,9 @@ auto EditorWorkspaceState::hierarchyDisplayNote(
                    ? std::string_view{"Canonical World2D scene root."}
                    : std::string_view{"Canonical Prefab v2 scene root."};
     }
-    return workspaceMode_ == WorkspaceMode::World2D
-               ? std::string_view{"Stable entity identity with validated components."}
-               : std::string_view{"Stable node identity in the parent-first hierarchy."};
+        return workspaceMode_ == WorkspaceMode::World2D
+               ? std::string_view{"Stable Node2D identity in the scene hierarchy."}
+               : std::string_view{"Stable Node3D identity in the scene hierarchy."};
 }
 
 auto EditorWorkspaceState::hierarchyRowVisible(const EditorHierarchyRow& row) const noexcept -> bool{
@@ -346,17 +360,19 @@ auto EditorWorkspaceState::rebuildHierarchyModel() -> Tina::Core::Status{
                 published[current.index] = 1U;
                 ++publishedCount;
                 const auto& entity = entities[current.index];
-                const std::string_view kindName =
-                    world2DHierarchyKindName(entity);
+                auto kindName = world2DHierarchyKindName(entity);
+                if (!kindName) {
+                    return Tina::Core::failure(std::move(kindName.error()));
+                }
                 candidate.push_back({
                     .key = entity.stableEntityId,
                     .stableId = entity.stableEntityId,
                     .parentStableId = entity.parentStableEntityId,
                     .level = current.level,
                     .expandable = !children[current.index].empty(),
-                    .label = hierarchyLabelForStableId(kindName,
+                    .label = hierarchyLabelForStableId(*kindName,
                                                        entity.stableEntityId),
-                    .kindName = kindName,
+                    .kindName = *kindName,
                 });
                 for (auto child = children[current.index].rbegin();
                      child != children[current.index].rend(); ++child) {
@@ -432,15 +448,18 @@ auto EditorWorkspaceState::rebuildHierarchyModel() -> Tina::Core::Status{
                     ? 0U
                     : nodes[static_cast<Tina::Core::usize>(node.parentIndex)]
                           .stableNodeId;
-                const std::string_view kindName = world3DHierarchyKindName(node);
+                auto kindName = world3DHierarchyKindName(node);
+                if (!kindName) {
+                    return Tina::Core::failure(std::move(kindName.error()));
+                }
                 candidate.push_back({
                     .key = node.stableNodeId,
                     .stableId = node.stableNodeId,
                     .parentStableId = parentStableId,
                     .level = current.level,
                     .expandable = !children[current.index].empty(),
-                    .label = hierarchyLabelForStableId(kindName, node.stableNodeId),
-                    .kindName = kindName,
+                    .label = hierarchyLabelForStableId(*kindName, node.stableNodeId),
+                    .kindName = *kindName,
                 });
                 for (auto child = children[current.index].rbegin();
                      child != children[current.index].rend(); ++child) {
@@ -615,8 +634,7 @@ auto EditorWorkspaceState::hierarchyStableIdAtPosition(
     if (!resolveHierarchyItem(this, logicalIndex, descriptor)) {
         return std::nullopt;
     }
-    const u32 stableId = stableEntityIdForHierarchyItem(descriptor.key);
-    return stableId == 0U ? std::nullopt : std::optional<u32>{stableId};
+    return stableEntityIdForHierarchyItem(descriptor.key);
 }
 
 void EditorWorkspaceState::handleHierarchyPointerDown(
@@ -627,7 +645,7 @@ void EditorWorkspaceState::handleHierarchyPointerDown(
         return;
     }
     const auto stableId = hierarchyStableIdAtPosition(input.position);
-    if (!stableId.has_value()) {
+    if (!stableId.has_value() || *stableId == 0U) {
         return;
     }
     const u64 frame = counters_.frameUpdates;
@@ -675,10 +693,22 @@ void EditorWorkspaceState::handleHierarchyPointerUp(
         if (hovered.has_value() && *hovered != hierarchyDragStableId_) {
             const EditorHierarchyRow* source = hierarchyRow(hierarchyDragStableId_);
             const EditorHierarchyRow* destination = hierarchyRow(*hovered);
-            if (source != nullptr && destination != nullptr &&
-                source->parentStableId == destination->parentStableId) {
-                pendingHierarchyReorderStableId_ = hierarchyDragStableId_;
-                pendingHierarchyReorderBeforeStableId_ = *hovered;
+            if (source != nullptr && destination != nullptr) {
+                const float localY = event.input().position.y - hierarchyTreeRect_.y +
+                                     hierarchyTreeMetrics_.scrollOffset;
+                const float rowOffset = std::fmod(localY, hierarchyTreeRowHeight_);
+                const float rowFraction = rowOffset / hierarchyTreeRowHeight_;
+                HierarchyDropIntent intent = HierarchyDropIntent::Reparent;
+                if (*hovered != 0U && rowFraction < 0.25F) {
+                    intent = HierarchyDropIntent::ReorderBefore;
+                } else if (*hovered != 0U && rowFraction > 0.75F) {
+                    intent = HierarchyDropIntent::ReorderAfter;
+                }
+                pendingHierarchyDrop_ = HierarchyDropRequest{
+                    .sourceStableId = hierarchyDragStableId_,
+                    .targetStableId = *hovered,
+                    .intent = intent,
+                };
             }
         }
         event.consumeInputTransition();

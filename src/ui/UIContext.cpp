@@ -24,6 +24,7 @@
 #include "detail/UIDialogStateStorage.hpp"
 #include "detail/UIElementContractResolver.hpp"
 #include "detail/UIFlexLayout.hpp"
+#include "detail/UIGridLayout.hpp"
 #include "detail/UIFocusNavigation.hpp"
 #include "detail/UIGridCommandNavigation.hpp"
 #include "detail/UIGridScrollBarGeometry.hpp"
@@ -101,6 +102,8 @@ using TextByteAllocation = Detail::UITextStorage::Allocation;
 using Detail::appendBoxChromePaints;
 using Detail::appendFlexLineItem;
 using Detail::appendFlowMeasuredChild;
+using Detail::appendGridMeasuredChild;
+using Detail::beginGridMeasurement;
 using Detail::applyOpacity;
 using Detail::buildPointerRoutePath;
 using Detail::BuiltinElementKind;
@@ -121,7 +124,10 @@ using Detail::DataGridLayoutScratch;
 using Detail::DataGridRowState;
 using Detail::DataGridState;
 using Detail::FlexLineSummary;
+using Detail::GridMeasurement;
+using Detail::gridAreaRect;
 using Detail::hasLayoutWork;
+using Detail::gridMeasuredContentSize;
 using Detail::horizontalMargin;
 using Detail::intersectRects;
 using Detail::inspectPointerRouteTargets;
@@ -129,6 +135,7 @@ using Detail::isButtonChromeKind;
 using Detail::isFiniteLayoutRect;
 using Detail::isFiniteNonNegative;
 using Detail::isValidFlexLineSummary;
+using Detail::isValidGridMeasurement;
 using Detail::isValidContentAlignment;
 using Detail::isValidEventPhaseMask;
 using Detail::isValidFocusScopeMode;
@@ -190,6 +197,9 @@ using Detail::resolveContentPlacement;
 using Detail::resolveElementBuiltinKind;
 using Detail::resolveFlexItemRect;
 using Detail::resolveFlexLinePlan;
+using Detail::resolveGridItemRectInArea;
+using Detail::resolveGridLayout;
+using Detail::resolveGridArea;
 using Detail::resolveLength;
 using Detail::resolveLengthNoFallbackCount;
 using Detail::resolveMeasuredLayoutSize;
@@ -1581,6 +1591,8 @@ struct UIContext::Impl final {
             }
 
             LayoutFlowMeasurement flowMeasurement{};
+            GridMeasurement gridMeasurement =
+                beginGridMeasurement(style.gridContainer);
 
             u32 childIndex = record->firstChildIndex;
             while (childIndex != InvalidNodeIndex)
@@ -1595,19 +1607,38 @@ struct UIContext::Impl final {
                 if (childScratch.effectiveVisibility != UIVisibility::Collapsed &&
                     childStyle.placement == UILayoutPlacement::Flow)
                 {
-                    const float gap = style.flexContainer.direction == UIFlexDirection::Row
-                                          ? style.flexContainer.gap.column
-                                          : style.flexContainer.gap.row;
-                    appendFlowMeasuredChild(
-                        flowMeasurement,
-                        style.flexContainer.direction,
-                        gap,
-                        childStyle,
-                        childScratch.measuredSize);
+                    if (style.containerLayout == UIContainerLayout::Grid)
+                    {
+                        (void)appendGridMeasuredChild(
+                            gridMeasurement, style.gridContainer, childStyle,
+                            childScratch.measuredSize);
+                    }
+                    else
+                    {
+                        const float gap =
+                            style.flexContainer.direction == UIFlexDirection::Row
+                                ? style.flexContainer.gap.column
+                                : style.flexContainer.gap.row;
+                        appendFlowMeasuredChild(
+                            flowMeasurement,
+                            style.flexContainer.direction,
+                            gap,
+                            childStyle,
+                            childScratch.measuredSize);
+                    }
                 }
                 childIndex = childRecord->nextSiblingIndex;
             }
 
+            usize layoutChildCount =
+                style.containerLayout == UIContainerLayout::Grid
+                    ? gridMeasurement.childCount
+                    : flowMeasurement.childCount;
+            UILogicalSize layoutContentSize =
+                style.containerLayout == UIContainerLayout::Grid
+                    ? gridMeasuredContentSize(
+                          gridMeasurement, style.gridContainer)
+                    : flowMeasurement.contentSize;
             std::optional<UILogicalSize> tabViewContentSize;
             if (record->kind == BuiltinElementKind::TabView &&
                 tabViewStorage.relationshipValid(idForIndex(index)))
@@ -1660,22 +1691,22 @@ struct UIContext::Impl final {
                                                 panelSize.width;
                     tabViewContentSize->height = (std::max)(stripMain, panelSize.height);
                 }
-                flowMeasurement.childCount = 1;
+                layoutChildCount = 1U;
             }
 
-            LayoutNodeMeasureContent content{.size = flowMeasurement.contentSize};
+            LayoutNodeMeasureContent content{.size = layoutContentSize};
             if (tabViewContentSize.has_value())
             {
                 content.size = *tabViewContentSize;
             }
-            if (flowMeasurement.childCount == 0)
+            if (layoutChildCount == 0)
             {
                 if (const UIImageContent* image = imageContentStorage.get(index); image != nullptr)
                 {
                     content.size = image->source.intrinsicLogicalSize;
                 }
             }
-            if (flowMeasurement.childCount == 0 && supportsWidgetText(record->kind))
+            if (layoutChildCount == 0 && supportsWidgetText(record->kind))
             {
                 if (const UITextMetrics* metrics = presentationTextMetricsFor(index); metrics != nullptr)
                 {
@@ -1690,7 +1721,7 @@ struct UIContext::Impl final {
                     }
                 }
             }
-            if (flowMeasurement.childCount == 0 && record->kind == BuiltinElementKind::Dropdown &&
+            if (layoutChildCount == 0 && record->kind == BuiltinElementKind::Dropdown &&
                 index < dropdownStatesByNodeIndex.size())
             {
                 const UIDropdownPaint& dropdownPaint = dropdownStatesByNodeIndex[index].paint;
@@ -1698,7 +1729,7 @@ struct UIContext::Impl final {
                 content.size.height = (std::max)(content.size.height, dropdownPaint.indicatorHeight);
             }
 
-            if (flowMeasurement.childCount == 0 && record->kind == BuiltinElementKind::RadioButton &&
+            if (layoutChildCount == 0 && record->kind == BuiltinElementKind::RadioButton &&
                 index < radioButtonStatesByNodeIndex.size() &&
                 radioButtonStatesByNodeIndex[index].paint.indicatorVisible)
             {
@@ -3154,6 +3185,8 @@ struct UIContext::Impl final {
         const float configuredGap = row ? parentStyle.flexContainer.gap.column : parentStyle.flexContainer.gap.row;
 
         FlexLineSummary flexSummary{};
+        GridMeasurement gridMeasurement =
+            beginGridMeasurement(parentStyle.gridContainer);
         const float initialContentMain = row ? unscrolledContentRect.width : unscrolledContentRect.height;
         u32 childIndex = parentRecord->firstChildIndex;
         while (childIndex != InvalidNodeIndex)
@@ -3169,21 +3202,36 @@ struct UIContext::Impl final {
                 childStyle.placement == UILayoutPlacement::Flow)
             {
                 refreshMeasuredSizeForParentContent(childIndex, unscrolledContentRect, statistics);
-                appendFlexLineItem(
-                    flexSummary,
-                    parentStyle.flexContainer.direction,
-                    configuredGap,
-                    initialContentMain,
-                    childStyle,
-                    childScratch,
-                    statistics);
+                if (parentStyle.containerLayout == UIContainerLayout::Grid)
+                {
+                    (void)appendGridMeasuredChild(
+                        gridMeasurement, parentStyle.gridContainer,
+                        childStyle, childScratch.measuredSize);
+                }
+                else
+                {
+                    appendFlexLineItem(
+                        flexSummary,
+                        parentStyle.flexContainer.direction,
+                        configuredGap,
+                        initialContentMain,
+                        childStyle,
+                        childScratch,
+                        statistics);
+                }
             }
             childIndex = childRecord->nextSiblingIndex;
         }
 
-        if (!isValidFlexLineSummary(flexSummary))
+        if ((parentStyle.containerLayout == UIContainerLayout::Grid &&
+             !isValidGridMeasurement(
+                 gridMeasurement, parentStyle.gridContainer)) ||
+            (parentStyle.containerLayout == UIContainerLayout::Flex &&
+             !isValidFlexLineSummary(flexSummary)))
         {
-            return fail(UIErrorCode::InvalidLayout, "UI flex layout accumulation produced a non-finite value");
+            return fail(
+                UIErrorCode::InvalidLayout,
+                "UI container layout accumulation exceeded capacity or produced a non-finite value");
         }
 
         if (parentRecord->kind == BuiltinElementKind::ScrollView && parentIndex < scrollViewPaintsByNodeIndex.size() &&
@@ -3197,7 +3245,12 @@ struct UIContext::Impl final {
             const UIScrollViewPaint& paint = scrollViewPaintsByNodeIndex[parentIndex];
             const auto plan = resolveScrollViewLayout(ScrollViewLayoutInput{
                 .availableRect = unscrolledContentRect,
-                .rawContentSize = flexSummary.contentSize(parentStyle.flexContainer.direction),
+                .rawContentSize =
+                    parentStyle.containerLayout == UIContainerLayout::Grid
+                        ? gridMeasuredContentSize(
+                              gridMeasurement, parentStyle.gridContainer)
+                        : flexSummary.contentSize(
+                              parentStyle.flexContainer.direction),
                 .style = state->style,
                 .scrollBarThickness = paint.thickness,
                 .requestedOffset = state->requestedOffset,
@@ -3211,6 +3264,14 @@ struct UIContext::Impl final {
         }
 
         auto flexPlan = resolveFlexLinePlan(parentStyle, layoutContentRect, flexSummary);
+        auto gridPlan = resolveGridLayout(
+            parentStyle.gridContainer, layoutContentRect, gridMeasurement);
+        if (parentStyle.containerLayout == UIContainerLayout::Grid &&
+            !gridPlan.valid)
+        {
+            return fail(UIErrorCode::InvalidLayout,
+                        "UI Grid track resolution produced invalid geometry");
+        }
 
         childIndex = parentRecord->firstChildIndex;
         while (childIndex != InvalidNodeIndex)
@@ -3256,9 +3317,34 @@ struct UIContext::Impl final {
                 continue;
             }
 
-            assignLayoutRect(currentChild,
-                             resolveFlexItemRect(flexPlan, childStyle, childScratch, statistics),
-                             parentWorldRect, descendantClip);
+            if (parentStyle.containerLayout == UIContainerLayout::Grid)
+            {
+                const auto area = resolveGridArea(
+                    gridPlan.placement, childStyle.gridItem);
+                if (!area.valid)
+                {
+                    return fail(
+                        UIErrorCode::InvalidLayout,
+                        "UI Grid automatic placement exceeded the fixed 8x8 capacity");
+                }
+                const UILogicalRect cell = gridAreaRect(gridPlan, area);
+                refreshMeasuredSizeForParentContent(
+                    currentChild, cell, statistics);
+                assignLayoutRect(
+                    currentChild,
+                    resolveGridItemRectInArea(
+                        gridPlan, area, parentStyle.gridContainer,
+                        childStyle, childScratch, statistics),
+                    parentWorldRect, descendantClip);
+            }
+            else
+            {
+                assignLayoutRect(
+                    currentChild,
+                    resolveFlexItemRect(
+                        flexPlan, childStyle, childScratch, statistics),
+                    parentWorldRect, descendantClip);
+            }
         }
         return Core::success();
     }

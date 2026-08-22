@@ -3,6 +3,7 @@
 #include <type_traits>
 
 static_assert(std::is_trivially_copyable_v<Tina::UI::UILayoutLength>);
+static_assert(std::is_trivially_copyable_v<Tina::UI::UIGridTrackList>);
 static_assert(std::is_trivially_copyable_v<Tina::UI::UILayoutStyle>);
 static_assert(Tina::UI::UILayoutLength::Auto().isAuto());
 static_assert(Tina::UI::UILayoutLength::Px(24.0F).isPx());
@@ -40,3 +41,24 @@ constexpr Tina::UI::UILayoutStyle OverlayStyle{
 };
 static_assert(OverlayStyle.placement == Tina::UI::UILayoutPlacement::Overlay);
 static_assert(OverlayStyle.flexContainer.direction == Tina::UI::UIFlexDirection::Row);
+
+constexpr Tina::UI::UIGridTrackList GridColumns =
+    Tina::UI::UIGridTrackList::Of({
+        Tina::UI::UIGridTrack::Px(68.0F),
+        Tina::UI::UIGridTrack::Fr(),
+    });
+static_assert(GridColumns.count == 2U);
+static_assert(GridColumns.tracks[0] == Tina::UI::UIGridTrack::Px(68.0F));
+static_assert(GridColumns.tracks[1] == Tina::UI::UIGridTrack::Fr());
+
+constexpr Tina::UI::UILayoutStyle GridStyle{
+    .gridContainer = {
+        .columns = GridColumns,
+        .rows = Tina::UI::UIGridTrackList::Of(
+            {Tina::UI::UIGridTrack::Auto()}),
+        .gap = {.row = 4.0F, .column = 8.0F},
+    },
+    .gridItem = {.row = 0U, .column = 1U, .columnSpan = 2U},
+    .containerLayout = Tina::UI::UIContainerLayout::Grid,
+};
+static_assert(GridStyle.containerLayout == Tina::UI::UIContainerLayout::Grid);

@@ -1,14 +1,25 @@
 ﻿#include "EditorWorkspaceState.hpp"
 
 namespace Tina::EditorApp::WorkspaceInternal {
+namespace {
 
-auto EditorWorkspaceState::componentSelectionStableIds() const
+enum class World2DNodePropertyGroup : Tina::Core::u8 {
+    Rendering = 0,
+    Camera = 1,
+    Light = 2,
+    Occlusion = 3,
+    Animation = 4,
+};
+
+} // namespace
+
+auto EditorWorkspaceState::nodePropertySelectionStableIds() const
  -> Tina::Core::Result<std::vector<u32>>
 try{
     if (viewportSelectedEntityCount_ == 0U) {
         return Tina::Core::failure(
             Tina::Editor::EditorErrorCode::EntityNotFound,
-            "Component commands require a viewport scene selection");
+            "Node property commands require a viewport scene selection");
     }
     std::vector<u32> ids;
     ids.reserve(viewportSelectedEntityCount_);
@@ -18,7 +29,7 @@ try{
         if (stableId == 0U || stableId > (std::numeric_limits<u32>::max)()) {
             return Tina::Core::failure(
                 Tina::Editor::EditorErrorCode::EntityNotFound,
-                "Component selection contains an invalid stable ID");
+                "Node property selection contains an invalid stable ID");
         }
         ids.push_back(static_cast<u32>(stableId));
     }
@@ -27,7 +38,7 @@ try{
 catch (const std::bad_alloc&)
 {
     return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
-                               "Component selection staging allocation failed");
+                               "Node property selection staging allocation failed");
 }
 
 auto EditorWorkspaceState::selectedProjectAssetIdOfKind(Tina::AssetFormat::AssetKind kind) const noexcept -> Tina::Core::AssetId{
@@ -38,18 +49,18 @@ auto EditorWorkspaceState::selectedProjectAssetIdOfKind(Tina::AssetFormat::Asset
     return {};
 }
 
-auto EditorWorkspaceState::runComponentCommand(
+auto EditorWorkspaceState::runNodePropertyCommand(
     Tina::PrimaryWindowUITreeUpdater& tree, EditorCommand command,
     bool& published) -> Tina::Core::Status{
     published = false;
     const auto reject = [&](const Tina::Core::Error& error) -> Tina::Core::Status {
         try {
-            authoringFeedback_ = "Component command rejected: ";
+            authoringFeedback_ = "Node property edit rejected: ";
             authoringFeedback_ += error.message;
         } catch (const std::bad_alloc&) {
             return Tina::Core::failure(
                 Tina::Core::CoreErrorCode::OutOfMemory,
-                "Component rejection feedback allocation failed");
+                "Node property rejection feedback allocation failed");
         }
         ++counters_.inspectorRejectedTransactions;
         return Tina::Core::success();
@@ -57,28 +68,24 @@ auto EditorWorkspaceState::runComponentCommand(
     const auto isRejectable = [](const Tina::Core::Error& error) noexcept {
         return error.code == Tina::Editor::EditorErrorCode::InvalidAuthoringOperation ||
                error.code == Tina::Editor::EditorErrorCode::EntityNotFound ||
-               error.code == Tina::Editor::EditorErrorCode::ComponentAlreadyPresent ||
-               error.code == Tina::Editor::EditorErrorCode::ComponentNotFound ||
+               error.code == Tina::Editor::EditorErrorCode::NodePropertyUnavailable ||
                error.code.domain == Tina::Core::ErrorDomain::Asset;
     };
 
-    const bool meshCommand =
-        command == EditorCommand::ComponentAddMeshRenderer ||
-        command == EditorCommand::ComponentRemoveMeshRenderer ||
-        command == EditorCommand::ComponentToggleMeshVisible;
+    const bool meshCommand = command == EditorCommand::NodeToggleMeshVisible;
     if (!authoringEnabled() || assetInspectorActive_ || !sceneDocumentActive() ||
         tileMapEditingContext()) {
         return reject(Tina::Core::Error{
             Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
-            "Component commands require an editable scene document"});
+            "Node property edits require an editable scene document"});
     }
     if (meshCommand != (workspaceMode_ == WorkspaceMode::World3D)) {
         return reject(Tina::Core::Error{
             Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
-            "Component command does not match the active workspace"});
+            "Node property edit does not match the active workspace"});
     }
 
-    auto idsResult = componentSelectionStableIds();
+    auto idsResult = nodePropertySelectionStableIds();
     if (!idsResult) {
         if (isRejectable(idsResult.error())) {
             return reject(idsResult.error());
@@ -123,7 +130,7 @@ auto EditorWorkspaceState::runComponentCommand(
             } catch (const std::bad_alloc&) {
                 return Tina::Core::failure(
                     Tina::Core::CoreErrorCode::OutOfMemory,
-                    "Component field validation message allocation failed");
+                    "Node property validation message allocation failed");
             }
         }
         return std::optional<long>{value};
@@ -145,113 +152,18 @@ auto EditorWorkspaceState::runComponentCommand(
         if (entity == storage.end()) {
             return Tina::Core::failure(
                 Tina::Editor::EditorErrorCode::EntityNotFound,
-                "Component selection is absent from the World2D document");
+                "Node property selection is absent from the World2D document");
         }
         return *entity;
     };
 
-    using Tina::Editor::World2DComponentKind;
     Tina::Core::Result<Tina::Editor::EditorSceneOperationResult> result =
         Tina::Editor::EditorSceneOperationResult{};
     std::string_view successVerb{};
-    std::string_view componentName{};
+    std::string_view propertyGroupName{};
 
     switch (command) {
-    case EditorCommand::ComponentAddSprite: {
-        Tina::Core::AssetId spriteId = selectedProjectAssetIdOfKind(
-            Tina::AssetFormat::AssetKind::Sprite);
-        if (!spriteId) {
-            spriteId = editorAssetId(0x22U);
-        }
-        result = Tina::Editor::addWorld2DComponent(
-            document_, ids, World2DComponentKind::Sprite, spriteId);
-        successVerb = "added";
-        componentName = "SpriteRenderer2D";
-        break;
-    }
-    case EditorCommand::ComponentAddCamera:
-        result = Tina::Editor::addWorld2DComponent(
-            document_, ids, World2DComponentKind::Camera);
-        successVerb = "added";
-        componentName = "Camera2D";
-        break;
-    case EditorCommand::ComponentAddPointLight:
-        result = Tina::Editor::addWorld2DComponent(
-            document_, ids, World2DComponentKind::PointLight);
-        successVerb = "added";
-        componentName = "PointLight2D";
-        break;
-    case EditorCommand::ComponentAddShadowOccluder:
-        result = Tina::Editor::addWorld2DComponent(
-            document_, ids, World2DComponentKind::ShadowOccluder);
-        successVerb = "added";
-        componentName = "ShadowOccluder2D";
-        break;
-    case EditorCommand::ComponentAddSpriteAnimation: {
-        Tina::Core::AssetId clipId = selectedProjectAssetIdOfKind(
-            Tina::AssetFormat::AssetKind::SpriteAnimationClip);
-        if (!clipId) {
-            clipId = editorAssetId(0x10U);
-        }
-        result = Tina::Editor::addWorld2DComponent(
-            document_, ids, World2DComponentKind::SpriteAnimation, clipId);
-        successVerb = "added";
-        componentName = "SpriteAnimation2D";
-        break;
-    }
-    case EditorCommand::ComponentAddMeshRenderer: {
-        Tina::Core::AssetId meshId = selectedProjectAssetIdOfKind(
-            Tina::AssetFormat::AssetKind::StaticMesh);
-        Tina::Core::AssetId materialId = selectedProjectAssetIdOfKind(
-            Tina::AssetFormat::AssetKind::Material);
-        if (!meshId) {
-            meshId = editorAssetId(0x31U);
-        }
-        if (!materialId) {
-            materialId = editorAssetId(0x32U);
-        }
-        result = Tina::Editor::addWorld3DMeshRenderer(document3D_, ids,
-                                                      meshId, materialId);
-        successVerb = "added";
-        componentName = "MeshRenderer3D";
-        break;
-    }
-    case EditorCommand::ComponentRemoveSprite:
-        result = Tina::Editor::removeWorld2DComponent(
-            document_, ids, World2DComponentKind::Sprite);
-        successVerb = "removed";
-        componentName = "SpriteRenderer2D";
-        break;
-    case EditorCommand::ComponentRemoveCamera:
-        result = Tina::Editor::removeWorld2DComponent(
-            document_, ids, World2DComponentKind::Camera);
-        successVerb = "removed";
-        componentName = "Camera2D";
-        break;
-    case EditorCommand::ComponentRemovePointLight:
-        result = Tina::Editor::removeWorld2DComponent(
-            document_, ids, World2DComponentKind::PointLight);
-        successVerb = "removed";
-        componentName = "PointLight2D";
-        break;
-    case EditorCommand::ComponentRemoveShadowOccluder:
-        result = Tina::Editor::removeWorld2DComponent(
-            document_, ids, World2DComponentKind::ShadowOccluder);
-        successVerb = "removed";
-        componentName = "ShadowOccluder2D";
-        break;
-    case EditorCommand::ComponentRemoveSpriteAnimation:
-        result = Tina::Editor::removeWorld2DComponent(
-            document_, ids, World2DComponentKind::SpriteAnimation);
-        successVerb = "removed";
-        componentName = "SpriteAnimation2D";
-        break;
-    case EditorCommand::ComponentRemoveMeshRenderer:
-        result = Tina::Editor::removeWorld3DMeshRenderer(document3D_, ids);
-        successVerb = "removed";
-        componentName = "MeshRenderer3D";
-        break;
-    case EditorCommand::ComponentToggleSpriteVisible: {
+    case EditorCommand::NodeToggleSpriteVisible: {
         auto primary = primaryWorld2DEntity();
         if (!primary) {
             result = Tina::Core::failure(std::move(primary.error()));
@@ -259,17 +171,17 @@ auto EditorWorkspaceState::runComponentCommand(
         }
         if (!primary->sprite) {
             result = Tina::Core::failure(
-                Tina::Editor::EditorErrorCode::ComponentNotFound,
-                "Toggle requires a SpriteRenderer2D on the primary selection");
+                Tina::Editor::EditorErrorCode::NodePropertyUnavailable,
+                "Rendering properties require a Sprite2D selection");
             break;
         }
-        result = Tina::Editor::applyWorld2DSpriteEdit(
+        result = Tina::Editor::applyWorld2DSpriteNodeProperties(
             document_, ids, {.visible = !primary->sprite->visible});
         successVerb = "toggled";
-        componentName = "SpriteRenderer2D visibility";
+        propertyGroupName = "Rendering visibility";
         break;
     }
-    case EditorCommand::ComponentToggleCameraActive: {
+    case EditorCommand::NodeToggleCameraActive: {
         auto primary = primaryWorld2DEntity();
         if (!primary) {
             result = Tina::Core::failure(std::move(primary.error()));
@@ -277,17 +189,17 @@ auto EditorWorkspaceState::runComponentCommand(
         }
         if (!primary->camera) {
             result = Tina::Core::failure(
-                Tina::Editor::EditorErrorCode::ComponentNotFound,
+                Tina::Editor::EditorErrorCode::NodePropertyUnavailable,
                 "Toggle requires a Camera2D on the primary selection");
             break;
         }
-        result = Tina::Editor::applyWorld2DCameraEdit(
+        result = Tina::Editor::applyWorld2DCameraNodeProperties(
             document_, ids, {.active = !primary->camera->active});
         successVerb = "toggled";
-        componentName = "Camera2D active";
+        propertyGroupName = "Camera active";
         break;
     }
-    case EditorCommand::ComponentTogglePointLightActive: {
+    case EditorCommand::NodeTogglePointLightActive: {
         auto primary = primaryWorld2DEntity();
         if (!primary) {
             result = Tina::Core::failure(std::move(primary.error()));
@@ -295,17 +207,17 @@ auto EditorWorkspaceState::runComponentCommand(
         }
         if (!primary->pointLight) {
             result = Tina::Core::failure(
-                Tina::Editor::EditorErrorCode::ComponentNotFound,
+                Tina::Editor::EditorErrorCode::NodePropertyUnavailable,
                 "Toggle requires a PointLight2D on the primary selection");
             break;
         }
-        result = Tina::Editor::applyWorld2DPointLightEdit(
+        result = Tina::Editor::applyWorld2DPointLightNodeProperties(
             document_, ids, {.active = !primary->pointLight->active});
         successVerb = "toggled";
-        componentName = "PointLight2D active";
+        propertyGroupName = "Light active";
         break;
     }
-    case EditorCommand::ComponentToggleShadowOccluderActive: {
+    case EditorCommand::NodeToggleShadowOccluderActive: {
         auto primary = primaryWorld2DEntity();
         if (!primary) {
             result = Tina::Core::failure(std::move(primary.error()));
@@ -313,17 +225,17 @@ auto EditorWorkspaceState::runComponentCommand(
         }
         if (!primary->shadowOccluder) {
             result = Tina::Core::failure(
-                Tina::Editor::EditorErrorCode::ComponentNotFound,
+                Tina::Editor::EditorErrorCode::NodePropertyUnavailable,
                 "Toggle requires a ShadowOccluder2D on the primary selection");
             break;
         }
-        result = Tina::Editor::applyWorld2DShadowOccluderEdit(
+        result = Tina::Editor::applyWorld2DShadowOccluderNodeProperties(
             document_, ids, {.active = !primary->shadowOccluder->active});
         successVerb = "toggled";
-        componentName = "ShadowOccluder2D active";
+        propertyGroupName = "Occlusion active";
         break;
     }
-    case EditorCommand::ComponentToggleSpriteAnimationAutoPlay: {
+    case EditorCommand::NodeToggleSpriteAnimationAutoPlay: {
         auto primary = primaryWorld2DEntity();
         if (!primary) {
             result = Tina::Core::failure(std::move(primary.error()));
@@ -331,23 +243,23 @@ auto EditorWorkspaceState::runComponentCommand(
         }
         if (!primary->spriteAnimation) {
             result = Tina::Core::failure(
-                Tina::Editor::EditorErrorCode::ComponentNotFound,
+                Tina::Editor::EditorErrorCode::NodePropertyUnavailable,
                 "Toggle requires a SpriteAnimation2D on the primary selection");
             break;
         }
-        result = Tina::Editor::applyWorld2DSpriteAnimationEdit(
+        result = Tina::Editor::applyWorld2DAnimatedSpriteNodeProperties(
             document_, ids, {.autoPlay = !primary->spriteAnimation->autoPlay});
         successVerb = "toggled";
-        componentName = "SpriteAnimation2D autoPlay";
+        propertyGroupName = "Animation auto play";
         break;
     }
-    case EditorCommand::ComponentApplySpriteAnimation: {
-        const auto& section = componentSections_[4];
+    case EditorCommand::NodeApplyAnimationProperties: {
+        const auto& section = nodePropertySections_[4];
         auto clipText = tree.text(section.fields[0]);
         if (!clipText) {
             return Tina::Core::failure(std::move(clipText.error()));
         }
-        Tina::Editor::World2DSpriteAnimationEditInput input{};
+        Tina::Editor::World2DAnimatedSpriteNodeProperties input{};
         if (*clipText != "Mixed" && *clipText != "n/a") {
             const auto parsedClip =
                 Tina::Core::AssetId::parseCanonical(*clipText);
@@ -366,13 +278,13 @@ auto EditorWorkspaceState::runComponentCommand(
             return Tina::Core::failure(std::move(speed.error()));
         }
         input.playbackSpeed = *speed;
-        result = Tina::Editor::applyWorld2DSpriteAnimationEdit(document_, ids,
+        result = Tina::Editor::applyWorld2DAnimatedSpriteNodeProperties(document_, ids,
                                                                input);
         successVerb = "applied";
-        componentName = "SpriteAnimation2D";
+        propertyGroupName = "Animation";
         break;
     }
-    case EditorCommand::ComponentToggleMeshVisible: {
+    case EditorCommand::NodeToggleMeshVisible: {
         std::vector<Tina::AssetFormat::PrefabNodeView> storage;
         auto prefab = document3D_.parseCurrentPrefab(storage);
         if (!prefab) {
@@ -382,20 +294,19 @@ auto EditorWorkspaceState::runComponentCommand(
             storage.begin(), storage.end(), [&](const auto& candidate) {
                 return candidate.stableNodeId == ids.front();
             });
-        if (node == storage.end() ||
-            !Tina::Editor::hasWorld3DMeshRenderer(*node)) {
+        if (node == storage.end() || !node->hasMesh || !node->hasMaterial) {
             result = Tina::Core::failure(
-                Tina::Editor::EditorErrorCode::ComponentNotFound,
-                "Toggle requires a MeshRenderer3D on the primary selection");
+                Tina::Editor::EditorErrorCode::NodePropertyUnavailable,
+                "Rendering properties require a Mesh3D selection");
             break;
         }
-        result = Tina::Editor::applyWorld3DMeshRendererEdit(
+        result = Tina::Editor::applyWorld3DMeshNodeProperties(
             document3D_, ids, {.visible = !node->visible});
         successVerb = "toggled";
-        componentName = "MeshRenderer3D visibility";
+        propertyGroupName = "Rendering visibility";
         break;
     }
-    case EditorCommand::ComponentAssignSprite: {
+    case EditorCommand::NodeAssignSprite: {
         const Tina::Core::AssetId spriteId = selectedProjectAssetIdOfKind(
             Tina::AssetFormat::AssetKind::Sprite);
         if (!spriteId) {
@@ -404,15 +315,15 @@ auto EditorWorkspaceState::runComponentCommand(
                 "Assign requires a Sprite asset selected in Project Assets");
             break;
         }
-        result = Tina::Editor::applyWorld2DSpriteEdit(document_, ids,
+        result = Tina::Editor::applyWorld2DSpriteNodeProperties(document_, ids,
                                                       {.spriteId = spriteId});
         successVerb = "assigned";
-        componentName = "SpriteRenderer2D sprite";
+        propertyGroupName = "Rendering sprite";
         break;
     }
-    case EditorCommand::ComponentApplySprite: {
-        const auto& section = componentSections_[0];
-        Tina::Editor::World2DSpriteEditInput input{};
+    case EditorCommand::NodeApplySprite: {
+        const auto& section = nodePropertySections_[0];
+        Tina::Editor::World2DSpriteNodeProperties input{};
         auto sizeX = parseFloatField(section.fields[0], "Size X");
         auto sizeY = parseFloatField(section.fields[1], "Size Y");
         auto pivotX = parseFloatField(section.fields[2], "Pivot X");
@@ -444,13 +355,13 @@ auto EditorWorkspaceState::runComponentCommand(
         if (orderInLayer->has_value()) {
             input.orderInLayer = static_cast<Tina::Core::i32>(**orderInLayer);
         }
-        result = Tina::Editor::applyWorld2DSpriteEdit(document_, ids, input);
+        result = Tina::Editor::applyWorld2DSpriteNodeProperties(document_, ids, input);
         successVerb = "applied";
-        componentName = "SpriteRenderer2D";
+        propertyGroupName = "Rendering";
         break;
     }
-    case EditorCommand::ComponentApplyCamera: {
-        const auto& section = componentSections_[1];
+    case EditorCommand::NodeApplyCamera: {
+        const auto& section = nodePropertySections_[1];
         auto height = parseFloatField(section.fields[0], "Height m");
         auto pixelsPerMeter = parseFloatField(section.fields[1], "Ref Px/m");
         auto heightPixels = height && pixelsPerMeter
@@ -465,20 +376,20 @@ auto EditorWorkspaceState::runComponentCommand(
             }
             return Tina::Core::failure(error);
         }
-        Tina::Editor::World2DCameraEditInput input{};
+        Tina::Editor::World2DCameraNodeProperties input{};
         input.fixedWorldHeightMeters = *height;
         input.referencePixelsPerMeter = *pixelsPerMeter;
         if (heightPixels->has_value()) {
             input.referenceHeightPixels = static_cast<u32>(**heightPixels);
         }
-        result = Tina::Editor::applyWorld2DCameraEdit(document_, ids, input);
+        result = Tina::Editor::applyWorld2DCameraNodeProperties(document_, ids, input);
         successVerb = "applied";
-        componentName = "Camera2D";
+        propertyGroupName = "Camera";
         break;
     }
-    case EditorCommand::ComponentApplyPointLight: {
-        const auto& section = componentSections_[2];
-        Tina::Editor::World2DPointLightEditInput input{};
+    case EditorCommand::NodeApplyPointLight: {
+        const auto& section = nodePropertySections_[2];
+        Tina::Editor::World2DPointLightNodeProperties input{};
         auto colorText = tree.text(pointLightColorField_.textEdit);
         if (!colorText) {
             return Tina::Core::failure(std::move(colorText.error()));
@@ -520,13 +431,13 @@ auto EditorWorkspaceState::runComponentCommand(
             }
             return parseStatus;
         }
-        result = Tina::Editor::applyWorld2DPointLightEdit(document_, ids, input);
+        result = Tina::Editor::applyWorld2DPointLightNodeProperties(document_, ids, input);
         successVerb = "applied";
-        componentName = "PointLight2D";
+        propertyGroupName = "Light";
         break;
     }
-    case EditorCommand::ComponentApplyShadowOccluder: {
-        const auto& section = componentSections_[3];
+    case EditorCommand::NodeApplyShadowOccluder: {
+        const auto& section = nodePropertySections_[3];
         auto startX = parseFloatField(section.fields[0], "Start X");
         auto startY = parseFloatField(section.fields[1], "Start Y");
         auto endX = parseFloatField(section.fields[2], "End X");
@@ -540,18 +451,18 @@ auto EditorWorkspaceState::runComponentCommand(
             }
             return Tina::Core::failure(error);
         }
-        result = Tina::Editor::applyWorld2DShadowOccluderEdit(
+        result = Tina::Editor::applyWorld2DShadowOccluderNodeProperties(
             document_, ids,
             {.localStartX = *startX, .localStartY = *startY,
              .localEndX = *endX, .localEndY = *endY});
         successVerb = "applied";
-        componentName = "ShadowOccluder2D";
+        propertyGroupName = "Occlusion";
         break;
     }
     default:
         return Tina::Core::failure(
             Tina::Core::CoreErrorCode::InvalidArgument,
-            "Unknown Inspector component command");
+            "Unknown Inspector node property command");
     }
 
     if (!result) {
@@ -561,13 +472,13 @@ auto EditorWorkspaceState::runComponentCommand(
         return Tina::Core::failure(std::move(result.error()));
     }
     try {
-        authoringFeedback_ = "Component ";
-        authoringFeedback_ += componentName;
+        authoringFeedback_ = "Node ";
+        authoringFeedback_ += propertyGroupName;
         authoringFeedback_ += ' ';
         authoringFeedback_ += successVerb;
         if (result->affectedItemCount == 0U) {
             authoringFeedback_ =
-                "Component values unchanged; no document revision published";
+                "Node properties unchanged; no document revision published";
         } else {
             authoringFeedback_ += " on ";
             authoringFeedback_ += std::to_string(result->affectedItemCount);
@@ -579,7 +490,7 @@ auto EditorWorkspaceState::runComponentCommand(
     } catch (const std::bad_alloc&) {
         return Tina::Core::failure(
             Tina::Core::CoreErrorCode::OutOfMemory,
-            "Component feedback allocation failed");
+            "Node property feedback allocation failed");
     }
     if (result->affectedItemCount > 0U) {
         published = true;
@@ -589,33 +500,17 @@ auto EditorWorkspaceState::runComponentCommand(
     return Tina::Core::success();
 }
 
-auto EditorWorkspaceState::refreshComponentSectionsUi(
+auto EditorWorkspaceState::refreshNodePropertySectionsUi(
     Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status{
     const u32 primaryId = stableEntityIdForHierarchyItem(selectionKey_);
     const bool selectionEditable = authoringEnabled() && !assetInspectorActive_ &&
                                    primaryId != 0U && !tileMapEditingContext() &&
                                    sceneDocumentActive();
     const bool world2D = workspaceMode_ == WorkspaceMode::World2D;
-    const bool componentContextVisible = !assetInspectorActive_ &&
-                                         !tileMapEditingContext() &&
-                                         primaryId != 0U;
-    inspectorComponentsHeaderLayout_.visibility =
-        componentContextVisible ? UI::UIVisibility::Visible
-                                : UI::UIVisibility::Collapsed;
-    if (auto status = tree.setLayoutStyle(
-            inspectorComponentsHeader_, inspectorComponentsHeaderLayout_);
-        !status) {
-        return status;
-    }
-    for (Tina::Core::usize sectionIndex = 0;
-         sectionIndex < componentSections_.size(); ++sectionIndex) {
-        auto& section = componentSections_[sectionIndex];
-        const bool sectionVisible = componentContextVisible &&
-            (world2D ? sectionIndex < MeshRendererSectionIndex
-                     : sectionIndex == MeshRendererSectionIndex);
-        section.rootLayout.visibility = sectionVisible
-                                            ? UI::UIVisibility::Visible
-                                            : UI::UIVisibility::Collapsed;
+    const bool nodeContextVisible = !assetInspectorActive_ &&
+                                    !tileMapEditingContext() && primaryId != 0U;
+    for (NodePropertySectionUi& section : nodePropertySections_) {
+        section.rootLayout.visibility = UI::UIVisibility::Collapsed;
         if (auto status = tree.setLayoutStyle(
                 section.collapsible.root, section.rootLayout);
             !status) {
@@ -623,18 +518,12 @@ auto EditorWorkspaceState::refreshComponentSectionsUi(
         }
     }
 
-    const auto resetSection = [&](const ComponentSectionUi& section)
+    const auto resetSection = [&](const NodePropertySectionUi& section)
         -> Tina::Core::Status {
         if (auto status = tree.setEnabled(section.activeSwitch, false); !status) {
             return status;
         }
         if (auto status = tree.setChecked(section.activeSwitch, false); !status) {
-            return status;
-        }
-        if (auto status = tree.setEnabled(section.addButton, false); !status) {
-            return status;
-        }
-        if (auto status = tree.setEnabled(section.removeButton, false); !status) {
             return status;
         }
         for (Tina::Core::usize index = 0; index < section.fieldCount; ++index) {
@@ -655,7 +544,7 @@ auto EditorWorkspaceState::refreshComponentSectionsUi(
                 return status;
             }
         }
-        if (&section == &componentSections_[2]) {
+        if (&section == &nodePropertySections_[2]) {
             pointLightColorMixed_ = false;
             if (auto status = tree.setText(pointLightColorField_.textEdit, "n/a");
                 !status) {
@@ -678,8 +567,16 @@ auto EditorWorkspaceState::refreshComponentSectionsUi(
         return Tina::Core::success();
     };
 
-    if (!componentContextVisible) {
-        for (const ComponentSectionUi& section : componentSections_) {
+    const auto setSectionVisible =
+        [&](Tina::Core::usize sectionIndex, bool visible) -> Tina::Core::Status {
+        auto& section = nodePropertySections_[sectionIndex];
+        section.rootLayout.visibility = visible ? UI::UIVisibility::Visible
+                                                : UI::UIVisibility::Collapsed;
+        return tree.setLayoutStyle(section.collapsible.root, section.rootLayout);
+    };
+
+    if (!nodeContextVisible) {
+        for (const NodePropertySectionUi& section : nodePropertySections_) {
             if (auto status = resetSection(section); !status) {
                 return status;
             }
@@ -689,7 +586,7 @@ auto EditorWorkspaceState::refreshComponentSectionsUi(
 
     if (world2D) {
         if (auto status = resetSection(
-                componentSections_[MeshRendererSectionIndex]);
+                nodePropertySections_[MeshPropertiesSectionIndex]);
             !status) {
             return status;
         }
@@ -729,50 +626,79 @@ auto EditorWorkspaceState::refreshComponentSectionsUi(
         } catch (const std::bad_alloc&) {
             return Tina::Core::failure(
                 Tina::Core::CoreErrorCode::OutOfMemory,
-                "Component section staging allocation failed");
+                "Node property section staging allocation failed");
         }
         if (primary == nullptr && !selected.empty()) {
             primary = selected.front();
         }
 
+        if (primary == nullptr || selected.empty()) {
+            for (Tina::Core::usize sectionIndex = 0; sectionIndex < 5U;
+                 ++sectionIndex) {
+                if (auto status = resetSection(nodePropertySections_[sectionIndex]);
+                    !status) {
+                    return status;
+                }
+            }
+            return Tina::Core::success();
+        }
+        auto primaryTemplate = Tina::Editor::classifyWorld2DNodeTemplate(*primary);
+        if (!primaryTemplate) {
+            return Tina::Core::failure(std::move(primaryTemplate.error()));
+        }
+        bool uniformNodeKinds = true;
+        for (const auto* entity : selected) {
+            auto nodeTemplate =
+                Tina::Editor::classifyWorld2DNodeTemplate(*entity);
+            if (!nodeTemplate) {
+                return Tina::Core::failure(std::move(nodeTemplate.error()));
+            }
+            uniformNodeKinds = uniformNodeKinds &&
+                               *nodeTemplate == *primaryTemplate;
+        }
+        const auto groupBelongsToNode =
+            [nodeTemplate = *primaryTemplate](
+                World2DNodePropertyGroup group) noexcept {
+                switch (nodeTemplate) {
+                case Tina::Editor::World2DNodeTemplate::Sprite:
+                    return group == World2DNodePropertyGroup::Rendering;
+                case Tina::Editor::World2DNodeTemplate::AnimatedSprite:
+                    return group == World2DNodePropertyGroup::Rendering ||
+                           group == World2DNodePropertyGroup::Animation;
+                case Tina::Editor::World2DNodeTemplate::Camera:
+                    return group == World2DNodePropertyGroup::Camera;
+                case Tina::Editor::World2DNodeTemplate::PointLight:
+                    return group == World2DNodePropertyGroup::Light;
+                case Tina::Editor::World2DNodeTemplate::ShadowOccluder:
+                    return group == World2DNodePropertyGroup::Occlusion;
+                case Tina::Editor::World2DNodeTemplate::Empty:
+                    return false;
+                }
+                return false;
+            };
         for (Tina::Core::usize sectionIndex = 0; sectionIndex < 5U;
              ++sectionIndex) {
-            const auto& section = componentSections_[sectionIndex];
-            const auto kind = static_cast<Tina::Editor::World2DComponentKind>(
+            const auto& section = nodePropertySections_[sectionIndex];
+            const auto group = static_cast<World2DNodePropertyGroup>(
                 sectionIndex);
-            if (primary == nullptr || selected.empty()) {
+            const bool sectionVisible = uniformNodeKinds &&
+                                        groupBelongsToNode(group);
+            if (auto status = setSectionVisible(sectionIndex, sectionVisible);
+                !status) {
+                return status;
+            }
+            if (!sectionVisible) {
                 if (auto status = resetSection(section); !status) {
                     return status;
                 }
                 continue;
             }
-            bool anyHas = false;
-            bool anyLacks = false;
-            for (const auto* entity : selected) {
-                if (Tina::Editor::hasWorld2DComponent(*entity, kind)) {
-                    anyHas = true;
-                } else {
-                    anyLacks = true;
-                }
-            }
-            const bool primaryHas =
-                Tina::Editor::hasWorld2DComponent(*primary, kind);
-            if (auto status = tree.setEnabled(section.addButton,
-                                              selectionEditable && anyLacks);
-                !status) {
-                return status;
-            }
-            if (auto status = tree.setEnabled(section.removeButton,
-                                              selectionEditable && anyHas);
-                !status) {
-                return status;
-            }
             if (auto status = tree.setEnabled(section.activeSwitch,
-                                              selectionEditable && primaryHas);
+                                              selectionEditable);
                 !status) {
                 return status;
             }
-            const bool fieldsEditable = selectionEditable && primaryHas;
+            const bool fieldsEditable = selectionEditable;
             for (Tina::Core::usize index = 0; index < section.fieldCount;
                  ++index) {
                 if (auto status = tree.setEnabled(section.fields[index],
@@ -813,34 +739,9 @@ auto EditorWorkspaceState::refreshComponentSectionsUi(
                     }
                 }
             }
-            if (!primaryHas) {
-                if (auto status = tree.setChecked(section.activeSwitch, false);
-                    !status) {
-                    return status;
-                }
-                for (Tina::Core::usize index = 0; index < section.fieldCount;
-                     ++index) {
-                    if (auto status = tree.setText(section.fields[index], "n/a");
-                        !status) {
-                        return status;
-                    }
-                }
-                if (sectionIndex == 2U) {
-                    pointLightColorMixed_ = false;
-                    if (auto status = tree.setText(
-                            pointLightColorField_.textEdit, "n/a"); !status) {
-                        return status;
-                    }
-                }
-                continue;
-            }
-
             const auto mixedFloat = [&](auto&& accessor) {
                 const float primaryValue = accessor(*primary);
                 for (const auto* entity : selected) {
-                    if (!Tina::Editor::hasWorld2DComponent(*entity, kind)) {
-                        continue;
-                    }
                     if (std::abs(accessor(*entity) - primaryValue) > 1.0e-4F) {
                         return true;
                     }
@@ -850,9 +751,6 @@ auto EditorWorkspaceState::refreshComponentSectionsUi(
             const auto mixedBool = [&](auto&& accessor) {
                 const bool primaryValue = accessor(*primary);
                 for (const auto* entity : selected) {
-                    if (!Tina::Editor::hasWorld2DComponent(*entity, kind)) {
-                        continue;
-                    }
                     if (accessor(*entity) != primaryValue) {
                         return true;
                     }
@@ -878,8 +776,8 @@ auto EditorWorkspaceState::refreshComponentSectionsUi(
             };
 
             Tina::Core::Status status = Tina::Core::success();
-            switch (kind) {
-            case Tina::Editor::World2DComponentKind::Sprite: {
+            switch (group) {
+            case World2DNodePropertyGroup::Rendering: {
                 const auto& sprite = *primary->sprite;
                 status = tree.setChecked(
                     section.activeSwitch,
@@ -927,7 +825,7 @@ auto EditorWorkspaceState::refreshComponentSectionsUi(
                 }
                 break;
             }
-            case Tina::Editor::World2DComponentKind::Camera: {
+            case World2DNodePropertyGroup::Camera: {
                 const auto& camera = *primary->camera;
                 status = tree.setChecked(
                     section.activeSwitch,
@@ -960,7 +858,7 @@ auto EditorWorkspaceState::refreshComponentSectionsUi(
                 }
                 break;
             }
-            case Tina::Editor::World2DComponentKind::PointLight: {
+            case World2DNodePropertyGroup::Light: {
                 const auto& light = *primary->pointLight;
                 status = tree.setChecked(
                     section.activeSwitch,
@@ -1015,7 +913,7 @@ auto EditorWorkspaceState::refreshComponentSectionsUi(
                     pointLightColorField_.swatchButton,
                     UI::makePanelBoxPaint(*productTheme, pointLightColorValue_,
                                           UI::UIElevation::Flat));
-                const bool colorEditable = fieldsEditable && !pointLightColorMixed_;
+                const bool colorEditable = fieldsEditable;
                 if (status) {
                     status = tree.setEnabled(
                         pointLightColorField_.swatchButton, colorEditable);
@@ -1047,7 +945,7 @@ auto EditorWorkspaceState::refreshComponentSectionsUi(
                 }
                 break;
             }
-            case Tina::Editor::World2DComponentKind::ShadowOccluder: {
+            case World2DNodePropertyGroup::Occlusion: {
                 const auto& occluder = *primary->shadowOccluder;
                 status = tree.setChecked(
                     section.activeSwitch,
@@ -1076,7 +974,7 @@ auto EditorWorkspaceState::refreshComponentSectionsUi(
                 }
                 break;
             }
-            case Tina::Editor::World2DComponentKind::SpriteAnimation: {
+            case World2DNodePropertyGroup::Animation: {
                 const auto& animation = *primary->spriteAnimation;
                 status = tree.setChecked(
                     section.activeSwitch,
@@ -1087,8 +985,7 @@ auto EditorWorkspaceState::refreshComponentSectionsUi(
                 if (status) {
                     bool clipMixed = false;
                     for (const auto* entity : selected) {
-                        if (Tina::Editor::hasWorld2DComponent(*entity, kind) &&
-                            entity->spriteAnimation->clipId != animation.clipId) {
+                        if (entity->spriteAnimation->clipId != animation.clipId) {
                             clipMixed = true;
                             break;
                         }
@@ -1117,12 +1014,12 @@ auto EditorWorkspaceState::refreshComponentSectionsUi(
     }
 
     for (Tina::Core::usize sectionIndex = 0; sectionIndex < 5U; ++sectionIndex) {
-        if (auto status = resetSection(componentSections_[sectionIndex]);
+        if (auto status = resetSection(nodePropertySections_[sectionIndex]);
             !status) {
             return status;
         }
     }
-    const auto& section = componentSections_[MeshRendererSectionIndex];
+    const auto& section = nodePropertySections_[MeshPropertiesSectionIndex];
     std::vector<Tina::AssetFormat::PrefabNodeView> storage;
     auto prefab = document3D_.parseCurrentPrefab(storage);
     if (!prefab) {
@@ -1133,26 +1030,65 @@ auto EditorWorkspaceState::refreshComponentSectionsUi(
             return candidate.stableNodeId == primaryId;
         });
     if (primaryId == 0U || primaryNode == storage.end()) {
-        return resetSection(section);
+        if (auto status = resetSection(section); !status) {
+            return status;
+        }
+        return Tina::Core::success();
     }
-    const bool primaryHas = Tina::Editor::hasWorld3DMeshRenderer(*primaryNode);
-    if (auto status = tree.setEnabled(section.addButton,
-                                      selectionEditable && !primaryHas);
+    auto primaryTemplate =
+        Tina::Editor::classifyWorld3DNodeTemplate(*primaryNode);
+    if (!primaryTemplate) {
+        return Tina::Core::failure(std::move(primaryTemplate.error()));
+    }
+    bool uniformMeshNodes =
+        *primaryTemplate == Tina::Editor::World3DNodeTemplate::Mesh;
+    bool visibilityMixed = false;
+    bool meshMixed = false;
+    bool materialMixed = false;
+    for (Tina::Core::usize index = 0;
+         uniformMeshNodes && index < viewportSelectedEntityCount_; ++index) {
+        const u64 selectedId = viewportSelectedEntityIds_[index];
+        const auto selectedNode = std::find_if(
+            storage.begin(), storage.end(), [&](const auto& candidate) {
+                return candidate.stableNodeId == selectedId;
+            });
+        if (selectedNode == storage.end()) {
+            uniformMeshNodes = false;
+            continue;
+        }
+        auto nodeTemplate =
+            Tina::Editor::classifyWorld3DNodeTemplate(*selectedNode);
+        if (!nodeTemplate) {
+            return Tina::Core::failure(std::move(nodeTemplate.error()));
+        }
+        uniformMeshNodes =
+            *nodeTemplate == Tina::Editor::World3DNodeTemplate::Mesh;
+        if (uniformMeshNodes) {
+            visibilityMixed = visibilityMixed ||
+                              selectedNode->visible != primaryNode->visible;
+            meshMixed = meshMixed || selectedNode->meshId != primaryNode->meshId;
+            materialMixed = materialMixed ||
+                            selectedNode->materialId != primaryNode->materialId;
+        }
+    }
+    if (auto status = setSectionVisible(MeshPropertiesSectionIndex,
+                                        uniformMeshNodes);
         !status) {
         return status;
     }
-    if (auto status = tree.setEnabled(section.removeButton,
-                                      selectionEditable && primaryHas);
-        !status) {
-        return status;
+    if (!uniformMeshNodes) {
+        if (auto status = resetSection(section); !status) {
+            return status;
+        }
+        return Tina::Core::success();
     }
     if (auto status = tree.setEnabled(section.activeSwitch,
-                                      selectionEditable && primaryHas);
+                                      selectionEditable);
         !status) {
         return status;
     }
-    if (auto status = tree.setChecked(section.activeSwitch,
-                                      primaryHas && primaryNode->visible);
+    if (auto status = tree.setChecked(
+            section.activeSwitch, primaryNode->visible && !visibilityMixed);
         !status) {
         return status;
     }
@@ -1169,13 +1105,21 @@ auto EditorWorkspaceState::refreshComponentSectionsUi(
         const auto text = assetId.canonicalText();
         return std::string{text.data(), 8U};
     };
-    if (auto status = tree.setText(section.fields[0],
-                                   assetIdPrefix(primaryNode->meshId));
+    const std::string meshText = assetIdPrefix(primaryNode->meshId);
+    if (auto status = tree.setText(
+            section.fields[0],
+            meshMixed ? std::string_view{"Mixed"} : std::string_view{meshText});
         !status) {
         return status;
     }
-    return tree.setText(section.fields[1],
-                        assetIdPrefix(primaryNode->materialId));
+    const std::string materialText = assetIdPrefix(primaryNode->materialId);
+    if (auto status = tree.setText(
+            section.fields[1], materialMixed ? std::string_view{"Mixed"}
+                                             : std::string_view{materialText});
+        !status) {
+        return status;
+    }
+    return Tina::Core::success();
 }
 
 } // namespace Tina::EditorApp::WorkspaceInternal

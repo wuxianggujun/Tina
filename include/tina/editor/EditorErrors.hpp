@@ -22,7 +22,6 @@ inline constexpr Core::ErrorCode PinnedDocumentCannotClose{Core::ErrorDomain::Ed
 inline constexpr Core::ErrorCode ProjectAssetNotFound{Core::ErrorDomain::Editor, 16};
 inline constexpr Core::ErrorCode UnknownGameplayArchetype{Core::ErrorDomain::Editor, 17};
 inline constexpr Core::ErrorCode DuplicateGameplayArchetype{Core::ErrorDomain::Editor, 18};
-inline constexpr Core::ErrorCode ComponentAlreadyPresent{Core::ErrorDomain::Editor, 19};
-inline constexpr Core::ErrorCode ComponentNotFound{Core::ErrorDomain::Editor, 20};
+inline constexpr Core::ErrorCode NodePropertyUnavailable{Core::ErrorDomain::Editor, 19};
 
 } // namespace Tina::Editor::EditorErrorCode

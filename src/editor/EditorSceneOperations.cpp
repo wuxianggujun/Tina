@@ -42,8 +42,8 @@ allocateStableId(std::span<const Item> items, IdResolver&& resolveId,
 // order. Display names match the hierarchy label vocabulary exactly.
 inline constexpr std::array<EditorNodeTemplateInfo, World2DNodeTemplateCount>
     World2DNodeTemplateRegistry{{
-        {.displayName = "Entity2D",
-         .description = "Transform only. Start here and add components later."},
+        {.displayName = "Node2D",
+         .description = "Transform-only container for organizing child nodes."},
         {.displayName = "Sprite2D",
          .description = "Draws a sprite. Needs a Sprite asset.",
          .requiresSpriteAsset = true},
@@ -62,7 +62,7 @@ inline constexpr std::array<EditorNodeTemplateInfo, World2DNodeTemplateCount>
 inline constexpr std::array<EditorNodeTemplateInfo, World3DNodeTemplateCount>
     World3DNodeTemplateRegistry{{
         {.displayName = "Node3D",
-         .description = "Transform only. Start here and add a mesh later."},
+         .description = "3D transform container for organizing child nodes."},
         {.displayName = "Mesh3D",
          .description = "Renders a mesh. Needs mesh and material assets.",
          .requiresMeshAssets = true},
@@ -243,40 +243,56 @@ std::span<const EditorNodeTemplateInfo> world3DNodeTemplateRegistry() noexcept
     return World3DNodeTemplateRegistry;
 }
 
-World2DNodeTemplate classifyWorld2DEntityTemplate(
-    const AssetFormat::World2DEntityDesc& entity) noexcept
+Core::Result<World2DNodeTemplate> classifyWorld2DNodeTemplate(
+    const AssetFormat::World2DEntityDesc& entity)
 {
-    // Most specific first: an animated sprite also carries a sprite, and a
-    // camera or light is a more useful label than the occluder it may also own.
-    if (entity.spriteAnimation.has_value()) {
+    const Core::usize payloadCount =
+        static_cast<Core::usize>(entity.sprite.has_value()) +
+        static_cast<Core::usize>(entity.camera.has_value()) +
+        static_cast<Core::usize>(entity.pointLight.has_value()) +
+        static_cast<Core::usize>(entity.shadowOccluder.has_value()) +
+        static_cast<Core::usize>(entity.spriteAnimation.has_value());
+    if (payloadCount == 0U) {
+        return World2DNodeTemplate::Empty;
+    }
+    if (payloadCount == 2U && entity.sprite.has_value() &&
+        entity.spriteAnimation.has_value()) {
         return World2DNodeTemplate::AnimatedSprite;
     }
-    if (entity.camera.has_value()) {
-        return World2DNodeTemplate::Camera;
-    }
-    if (entity.pointLight.has_value()) {
-        return World2DNodeTemplate::PointLight;
-    }
-    if (entity.sprite.has_value()) {
+    if (payloadCount == 1U && entity.sprite.has_value()) {
         return World2DNodeTemplate::Sprite;
     }
-    if (entity.shadowOccluder.has_value()) {
+    if (payloadCount == 1U && entity.camera.has_value()) {
+        return World2DNodeTemplate::Camera;
+    }
+    if (payloadCount == 1U && entity.pointLight.has_value()) {
+        return World2DNodeTemplate::PointLight;
+    }
+    if (payloadCount == 1U && entity.shadowOccluder.has_value()) {
         return World2DNodeTemplate::ShadowOccluder;
     }
-    return World2DNodeTemplate::Empty;
+    return Core::failure(
+        EditorErrorCode::InvalidAuthoringOperation,
+        "World2D wire item does not represent one supported Editor node kind");
 }
 
-World3DNodeTemplate classifyWorld3DNodeTemplate(
-    const AssetFormat::PrefabNodeView& node) noexcept
+Core::Result<World3DNodeTemplate> classifyWorld3DNodeTemplate(
+    const AssetFormat::PrefabNodeView& node)
 {
-    return node.hasMesh ? World3DNodeTemplate::Mesh : World3DNodeTemplate::Empty;
+    if (node.hasMesh != node.hasMaterial) {
+        return Core::failure(
+            EditorErrorCode::InvalidAuthoringOperation,
+            "World3D wire item does not represent one supported Editor node kind");
+    }
+    return node.hasMesh ? World3DNodeTemplate::Mesh
+                        : World3DNodeTemplate::Empty;
 }
 
 Core::Result<EditorSceneOperationResult>
-addWorld2DEntityOfTemplate(World2DAuthoringDocument& document,
-                           World2DNodeTemplate nodeTemplate,
-                           Core::u32 parentStableId,
-                           const World2DNodeTemplateAssets& assets)
+addWorld2DNode(World2DAuthoringDocument& document,
+               World2DNodeTemplate nodeTemplate,
+               Core::u32 parentStableId,
+               const World2DNodeTemplateAssets& assets)
 try
 {
     if (static_cast<Core::usize>(nodeTemplate) >= World2DNodeTemplateCount) {
@@ -304,11 +320,11 @@ try
     if (parentStableId != 0 &&
         findWorld2DEntity(storage, parentStableId) == nullptr) {
         return Core::failure(EditorErrorCode::EntityNotFound,
-                             "Editor scene parent entity was not found");
+                             "Editor scene parent node was not found");
     }
     if (storage.size() >= document.config().entityCapacity) {
         return Core::failure(EditorErrorCode::DocumentCapacityExceeded,
-                             "Editor scene entity capacity is exhausted");
+                             "Editor scene node capacity is exhausted");
     }
     auto stableId = allocateStableId(
         std::span<const AssetFormat::World2DEntityDesc>{storage},
@@ -317,8 +333,8 @@ try
         return Core::failure(std::move(stableId.error()));
     }
 
-    // Built as one desc so the whole node, components included, publishes as a
-    // single canonical revision and undoes in one step.
+    // The type-specific wire payload is created with the node, so creation is
+    // one canonical revision and one undo step.
     AssetFormat::World2DEntityDesc created{
         .stableEntityId = *stableId,
         .parentStableEntityId = parentStableId,
@@ -357,16 +373,8 @@ catch (const std::bad_alloc&)
 }
 
 Core::Result<EditorSceneOperationResult>
-addWorld2DEntity(World2DAuthoringDocument& document,
-                 Core::u32 parentStableId)
-{
-    return addWorld2DEntityOfTemplate(document, World2DNodeTemplate::Empty,
-                                      parentStableId);
-}
-
-Core::Result<EditorSceneOperationResult>
-duplicateWorld2DEntitySubtree(World2DAuthoringDocument& document,
-                              Core::u32 stableEntityId)
+duplicateWorld2DNodeSubtree(World2DAuthoringDocument& document,
+                            Core::u32 stableEntityId)
 try
 {
     std::vector<AssetFormat::World2DEntityDesc> storage;
@@ -376,7 +384,7 @@ try
     }
     if (findWorld2DEntity(storage, stableEntityId) == nullptr) {
         return Core::failure(EditorErrorCode::EntityNotFound,
-                             "Editor scene entity to duplicate was not found");
+                             "Editor scene node to duplicate was not found");
     }
 
     const Core::usize subtreeSize = static_cast<Core::usize>(std::count_if(
@@ -387,7 +395,7 @@ try
     if (storage.size() > document.config().entityCapacity ||
         subtreeSize > document.config().entityCapacity - storage.size()) {
         return Core::failure(EditorErrorCode::DocumentCapacityExceeded,
-                             "Duplicated Editor scene subtree exceeds entity capacity");
+                             "Duplicated Editor scene subtree exceeds node capacity");
     }
 
     std::vector<AssetFormat::World2DEntityDesc> duplicates;
@@ -444,7 +452,7 @@ catch (const std::bad_alloc&)
     return sceneOperationAllocationFailure();
 }
 
-Core::Status reparentWorld2DEntity(World2DAuthoringDocument& document,
+Core::Status reparentWorld2DNode(World2DAuthoringDocument& document,
                                    Core::u32 stableEntityId,
                                    Core::u32 newParentStableId)
 try
@@ -469,7 +477,7 @@ try
          isWorld2DDescendantOrSelf(storage, newParentStableId,
                                   stableEntityId))) {
         return Core::failure(EditorErrorCode::InvalidAuthoringOperation,
-                             "Editor scene entity cannot be parented to its subtree");
+                             "Editor scene node cannot be parented to its subtree");
     }
     if (target->parentStableEntityId == newParentStableId) {
         return Core::success();
@@ -482,7 +490,7 @@ catch (const std::bad_alloc&)
     return sceneOperationAllocationFailure();
 }
 
-Core::Status reorderWorld2DEntity(World2DAuthoringDocument& document,
+Core::Status reorderWorld2DNode(World2DAuthoringDocument& document,
                                   Core::u32 stableEntityId,
                                   Core::u32 beforeSiblingStableId)
 try
@@ -601,7 +609,7 @@ catch (const std::bad_alloc&)
 }
 
 Core::Result<EditorSceneOperationResult>
-deleteWorld2DEntitySubtree(World2DAuthoringDocument& document,
+deleteWorld2DNodeSubtree(World2DAuthoringDocument& document,
                            Core::u32 stableEntityId)
 try
 {
@@ -613,7 +621,7 @@ try
     const auto* target = findWorld2DEntity(storage, stableEntityId);
     if (target == nullptr) {
         return Core::failure(EditorErrorCode::EntityNotFound,
-                             "Editor scene entity to delete was not found");
+                             "Editor scene node to delete was not found");
     }
     const Core::u32 fallbackStableId = target->parentStableEntityId;
     const Core::usize affectedItemCount = static_cast<Core::usize>(std::count_if(
@@ -635,10 +643,10 @@ catch (const std::bad_alloc&)
 }
 
 Core::Result<EditorSceneOperationResult>
-addWorld3DNodeOfTemplate(World3DAuthoringDocument& document,
-                         World3DNodeTemplate nodeTemplate,
-                         Core::u32 parentStableId,
-                         const World3DNodeTemplateAssets& assets)
+addWorld3DNode(World3DAuthoringDocument& document,
+               World3DNodeTemplate nodeTemplate,
+               Core::u32 parentStableId,
+               const World3DNodeTemplateAssets& assets)
 try
 {
     if (static_cast<Core::usize>(nodeTemplate) >= World3DNodeTemplateCount) {
@@ -692,13 +700,6 @@ try
 catch (const std::bad_alloc&)
 {
     return sceneOperationAllocationFailure();
-}
-
-Core::Result<EditorSceneOperationResult>
-addWorld3DNode(World3DAuthoringDocument& document, Core::u32 parentStableId)
-{
-    return addWorld3DNodeOfTemplate(document, World3DNodeTemplate::Empty,
-                                    parentStableId);
 }
 
 Core::Result<EditorSceneOperationResult>

@@ -375,8 +375,7 @@ auto EditorWorkspaceState::publishInspector(Tina::PrimaryWindowUITreeUpdater& tr
                                                   UI::UITreeViewItemKey key) -> Tina::Core::Status{
     const auto setAssetMetadataVisibility =
         [&](UI::UIVisibility visibility) -> Tina::Core::Status {
-        UI::UILayoutStyle assetRowStyle = fillWidth(42.0F);
-        assetRowStyle.flexItem.shrink = 0.0F;
+        UI::UILayoutStyle assetRowStyle = inspectorAssetRowLayout_;
         assetRowStyle.visibility = visibility;
         if (auto status = tree.setLayoutStyle(inspectorAssetRow_, assetRowStyle);
             !status) {
@@ -562,14 +561,6 @@ auto EditorWorkspaceState::publishInspector(Tina::PrimaryWindowUITreeUpdater& tr
             ? std::string_view{
                   "Root and streamed chunks publish one canonical revision."}
             : hierarchyDisplayNote(key)};
-    const auto appendNumber = [&](float value) -> Tina::Core::Status {
-        auto text = formatEditorNumber(value);
-        if (!text) {
-            return Tina::Core::failure(std::move(text.error()));
-        }
-        note.append(text->view());
-        return Tina::Core::success();
-    };
     if (tileMapEditingContext()) {
         note += " Layers=";
         note += std::to_string(tileMapDocument_.layerCount());
@@ -611,10 +602,6 @@ auto EditorWorkspaceState::publishInspector(Tina::PrimaryWindowUITreeUpdater& tr
                 scaleX = entity->scaleX;
                 scaleY = entity->scaleY;
                 scaleZ = entity->scaleZ;
-                note += " X=";
-                if (auto status = appendNumber(entity->positionX); !status) {
-                    return status;
-                }
             }
         } else {
             std::vector<Tina::AssetFormat::PrefabNodeView> storage;
@@ -637,18 +624,6 @@ auto EditorWorkspaceState::publishInspector(Tina::PrimaryWindowUITreeUpdater& tr
                 scaleX = node->scaleX;
                 scaleY = node->scaleY;
                 scaleZ = node->scaleZ;
-                note += " XYZ=";
-                if (auto status = appendNumber(node->positionX); !status) {
-                    return status;
-                }
-                note += ",";
-                if (auto status = appendNumber(node->positionY); !status) {
-                    return status;
-                }
-                note += ",";
-                if (auto status = appendNumber(node->positionZ); !status) {
-                    return status;
-                }
             }
         }
     }

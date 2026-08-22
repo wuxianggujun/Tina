@@ -87,19 +87,20 @@ TEST(EditorSceneOperationsTests, World2DCommandsPublishOneRevisionAndKeepHierarc
     auto document = createWorld2D();
     Core::u64 revision = document.revision();
 
-    auto root = addWorld2DEntity(document);
+    auto root = addWorld2DNode(document, World2DNodeTemplate::Empty);
     ASSERT_TRUE(root);
     EXPECT_EQ(root->primaryStableId, 1U);
     EXPECT_EQ(root->affectedItemCount, 1U);
     EXPECT_EQ(document.revision(), ++revision);
 
-    auto child = addWorld2DEntity(document, root->primaryStableId);
+    auto child = addWorld2DNode(
+        document, World2DNodeTemplate::Empty, root->primaryStableId);
     ASSERT_TRUE(child);
     EXPECT_EQ(child->primaryStableId, 2U);
     EXPECT_EQ(document.revision(), ++revision);
 
     auto duplicate =
-        duplicateWorld2DEntitySubtree(document, root->primaryStableId);
+        duplicateWorld2DNodeSubtree(document, root->primaryStableId);
     ASSERT_TRUE(duplicate);
     EXPECT_EQ(duplicate->primaryStableId, 3U);
     EXPECT_EQ(duplicate->affectedItemCount, 2U);
@@ -111,16 +112,16 @@ TEST(EditorSceneOperationsTests, World2DCommandsPublishOneRevisionAndKeepHierarc
     EXPECT_EQ(findEntity(entities, 3)->parentStableEntityId, 0U);
     EXPECT_EQ(findEntity(entities, 4)->parentStableEntityId, 3U);
 
-    ASSERT_TRUE(reparentWorld2DEntity(document, 3, 2));
+    ASSERT_TRUE(reparentWorld2DNode(document, 3, 2));
     EXPECT_EQ(document.revision(), ++revision);
     entities = world2DEntities(document);
     ASSERT_NE(findEntity(entities, 3), nullptr);
     EXPECT_EQ(findEntity(entities, 3)->parentStableEntityId, 2U);
 
-    ASSERT_TRUE(reparentWorld2DEntity(document, 3, 2));
+    ASSERT_TRUE(reparentWorld2DNode(document, 3, 2));
     EXPECT_EQ(document.revision(), revision);
 
-    auto removed = deleteWorld2DEntitySubtree(document, 3);
+    auto removed = deleteWorld2DNodeSubtree(document, 3);
     ASSERT_TRUE(removed);
     EXPECT_EQ(removed->primaryStableId, 2U);
     EXPECT_EQ(removed->affectedItemCount, 2U);
@@ -134,27 +135,27 @@ TEST(EditorSceneOperationsTests, World2DCommandsPublishOneRevisionAndKeepHierarc
 TEST(EditorSceneOperationsTests, World2DFailuresPreserveCanonicalStateAndHistory)
 {
     auto document = createWorld2D({.entityCapacity = 2});
-    ASSERT_TRUE(addWorld2DEntity(document));
-    ASSERT_TRUE(addWorld2DEntity(document, 1));
+    ASSERT_TRUE(addWorld2DNode(document, World2DNodeTemplate::Empty));
+    ASSERT_TRUE(addWorld2DNode(document, World2DNodeTemplate::Empty, 1));
     const auto beforeBytes = std::vector(document.snapshotBytes().begin(),
                                          document.snapshotBytes().end());
     const Core::u64 beforeRevision = document.revision();
     const Core::usize beforeHistory = document.historyEntryCount();
     const Core::usize beforeUndo = document.undoDepth();
 
-    auto full = addWorld2DEntity(document);
+    auto full = addWorld2DNode(document, World2DNodeTemplate::Empty);
     ASSERT_FALSE(full);
     EXPECT_EQ(full.error().code, EditorErrorCode::DocumentCapacityExceeded);
-    auto duplicate = duplicateWorld2DEntitySubtree(document, 1);
+    auto duplicate = duplicateWorld2DNodeSubtree(document, 1);
     ASSERT_FALSE(duplicate);
     EXPECT_EQ(duplicate.error().code,
               EditorErrorCode::DocumentCapacityExceeded);
-    auto cycle = reparentWorld2DEntity(document, 1, 2);
+    auto cycle = reparentWorld2DNode(document, 1, 2);
     ASSERT_FALSE(cycle);
     EXPECT_EQ(cycle.error().code,
               EditorErrorCode::InvalidAuthoringOperation);
-    EXPECT_FALSE(reparentWorld2DEntity(document, 99, 0));
-    EXPECT_FALSE(deleteWorld2DEntitySubtree(document, 99));
+    EXPECT_FALSE(reparentWorld2DNode(document, 99, 0));
+    EXPECT_FALSE(deleteWorld2DNodeSubtree(document, 99));
 
     EXPECT_EQ(std::vector(document.snapshotBytes().begin(),
                           document.snapshotBytes().end()),
@@ -169,11 +170,12 @@ TEST(EditorSceneOperationsTests, World3DCommandsPublishOneRevisionAndKeepHierarc
     auto document = createWorld3D();
     Core::u64 revision = document.revision();
 
-    auto child = addWorld3DNode(document, 1);
+    auto child = addWorld3DNode(
+        document, World3DNodeTemplate::Empty, 1);
     ASSERT_TRUE(child);
     EXPECT_EQ(child->primaryStableId, 2U);
     EXPECT_EQ(document.revision(), ++revision);
-    auto secondRoot = addWorld3DNode(document);
+    auto secondRoot = addWorld3DNode(document, World3DNodeTemplate::Empty);
     ASSERT_TRUE(secondRoot);
     EXPECT_EQ(secondRoot->primaryStableId, 3U);
     EXPECT_EQ(document.revision(), ++revision);
@@ -212,7 +214,7 @@ TEST(EditorSceneOperationsTests, World3DCommandsPublishOneRevisionAndKeepHierarc
 TEST(EditorSceneOperationsTests, World3DFailuresAndNoOpPreserveCanonicalState)
 {
     auto document = createWorld3D();
-    ASSERT_TRUE(addWorld3DNode(document, 1));
+    ASSERT_TRUE(addWorld3DNode(document, World3DNodeTemplate::Empty, 1));
     const auto beforeBytes = std::vector(document.payloadBytes().begin(),
                                          document.payloadBytes().end());
     const Core::u64 beforeRevision = document.revision();
@@ -220,7 +222,8 @@ TEST(EditorSceneOperationsTests, World3DFailuresAndNoOpPreserveCanonicalState)
 
     ASSERT_TRUE(reparentWorld3DNode(document, 2, 1));
     EXPECT_EQ(document.revision(), beforeRevision);
-    EXPECT_FALSE(addWorld3DNode(document, 99));
+    EXPECT_FALSE(addWorld3DNode(
+        document, World3DNodeTemplate::Empty, 99));
     EXPECT_FALSE(duplicateWorld3DNodeSubtree(document, 99));
     auto cycle = reparentWorld3DNode(document, 1, 2);
     ASSERT_FALSE(cycle);
@@ -239,7 +242,8 @@ TEST(EditorSceneOperationsTests, World3DFailuresAndNoOpPreserveCanonicalState)
 
     auto fullDocument = createWorld3D({.nodeCapacity = 1});
     const Core::u64 fullRevision = fullDocument.revision();
-    auto full = addWorld3DNode(fullDocument);
+    auto full = addWorld3DNode(
+        fullDocument, World3DNodeTemplate::Empty);
     ASSERT_FALSE(full);
     EXPECT_EQ(full.error().code, EditorErrorCode::DocumentCapacityExceeded);
     EXPECT_EQ(fullDocument.revision(), fullRevision);

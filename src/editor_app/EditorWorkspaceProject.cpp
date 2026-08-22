@@ -95,15 +95,16 @@ auto EditorWorkspaceState::refreshProjectAssetUi(
         !status) {
         return status;
     }
-    if (auto status = tree.setEnabled(createProjectButton_,
-                                      !pendingProjectSwitch_.has_value() &&
-                                          sourceImportIdle);
+    const bool projectLifecycleAvailable =
+        authoringEnabled() && !pendingProjectSwitch_.has_value() &&
+        sourceImportIdle;
+    if (auto status = tree.setEnabled(fileCreateProjectMenuItem_,
+                                      projectLifecycleAvailable);
         !status) {
         return status;
     }
-    if (auto status = tree.setEnabled(openProjectButton_,
-                                      !pendingProjectSwitch_.has_value() &&
-                                          sourceImportIdle);
+    if (auto status = tree.setEnabled(fileOpenProjectMenuItem_,
+                                      projectLifecycleAvailable);
         !status) {
         return status;
     }

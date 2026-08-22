@@ -2,7 +2,9 @@
 
 #include <tina/core/base/Types.hpp>
 
+#include <array>
 #include <compare>
+#include <initializer_list>
 
 namespace Tina::UI {
 
@@ -161,6 +163,11 @@ enum class UIFlexDirection : u8 {
     Column,
 };
 
+enum class UIContainerLayout : u8 {
+    Flex,
+    Grid,
+};
+
 enum class UIJustifyContent : u8 {
     Start,
     Center,
@@ -217,6 +224,99 @@ struct UIFlexItemStyle final {
     auto operator<=>(const UIFlexItemStyle&) const = default;
 };
 
+inline constexpr usize UIGridTrackCapacity = 8U;
+inline constexpr u8 UIGridAutoIndex = 0xffU;
+
+enum class UIGridTrackUnit : u8 {
+    Px,
+    Auto,
+    Fraction,
+};
+
+struct UIGridTrack final {
+    UIGridTrackUnit unit = UIGridTrackUnit::Auto;
+    float value = 0.0F;
+
+    [[nodiscard]] static constexpr UIGridTrack Px(
+        float logicalPixels) noexcept
+    {
+        return UIGridTrack{
+            .unit = UIGridTrackUnit::Px,
+            .value = logicalPixels,
+        };
+    }
+
+    [[nodiscard]] static constexpr UIGridTrack Auto() noexcept
+    {
+        return UIGridTrack{};
+    }
+
+    [[nodiscard]] static constexpr UIGridTrack Fr(
+        float fraction = 1.0F) noexcept
+    {
+        return UIGridTrack{
+            .unit = UIGridTrackUnit::Fraction,
+            .value = fraction,
+        };
+    }
+
+    auto operator<=>(const UIGridTrack&) const = default;
+};
+
+struct UIGridTrackList final {
+    std::array<UIGridTrack, UIGridTrackCapacity> tracks{};
+    u8 count = 0U;
+
+    [[nodiscard]] static constexpr UIGridTrackList Of(
+        std::initializer_list<UIGridTrack> values) noexcept
+    {
+        UIGridTrackList result{};
+        if (values.size() > result.tracks.size())
+        {
+            result.count = UIGridAutoIndex;
+            return result;
+        }
+        for (const UIGridTrack value : values)
+        {
+            result.tracks[result.count++] = value;
+        }
+        return result;
+    }
+
+    [[nodiscard]] constexpr bool empty() const noexcept
+    {
+        return count == 0U;
+    }
+
+    auto operator<=>(const UIGridTrackList&) const = default;
+};
+
+// Properties interpreted by a Grid container. Empty track lists create
+// implicit Auto tracks as children are placed. Explicit and implicit tracks
+// share the same fixed per-axis capacity.
+struct UIGridContainerStyle final {
+    UIGridTrackList columns{};
+    UIGridTrackList rows{};
+    UILayoutGap gap{};
+    UIAxisAlignment justifyItems = UIAxisAlignment::Stretch;
+    UIAxisAlignment alignItems = UIAxisAlignment::Stretch;
+
+    auto operator<=>(const UIGridContainerStyle&) const = default;
+};
+
+// Zero-based row/column indices are interpreted by the parent Grid. Auto
+// placement is row-major and skips occupied cells. Explicit items may overlap.
+struct UIGridItemStyle final {
+    u8 row = UIGridAutoIndex;
+    u8 column = UIGridAutoIndex;
+    u8 rowSpan = 1U;
+    u8 columnSpan = 1U;
+    UIAlignSelf justifySelf = UIAlignSelf::Auto;
+    UIAlignSelf alignSelf = UIAlignSelf::Auto;
+
+    auto operator<=>(const UIGridItemStyle&) const = default;
+};
+
 struct UIOverlayOffset final {
     UILayoutLength x = UILayoutLength::Px(0.0F);
     UILayoutLength y = UILayoutLength::Px(0.0F);
@@ -242,7 +342,10 @@ struct UILayoutStyle final {
     UIEdgeSpacing padding{};
     UIFlexContainerStyle flexContainer{};
     UIFlexItemStyle flexItem{};
+    UIGridContainerStyle gridContainer{};
+    UIGridItemStyle gridItem{};
     UIOverlayStyle overlay{};
+    UIContainerLayout containerLayout = UIContainerLayout::Flex;
     UILayoutPlacement placement = UILayoutPlacement::Flow;
     UIVisibility visibility = UIVisibility::Visible;
     // Clips ordinary in-tree descendants to this element's axis-aligned border

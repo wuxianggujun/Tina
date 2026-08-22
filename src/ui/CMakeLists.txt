@@ -102,6 +102,7 @@ add_library(tina_ui STATIC
     detail/UIElementContractResolver.hpp
     detail/UIElementContractResolver.cpp
     detail/UIFlexLayout.hpp
+    detail/UIGridLayout.hpp
     detail/UIDefaultActionPressState.hpp
     detail/UIDefaultActionPressState.cpp
     detail/UIDirtyQueueStorage.hpp

@@ -3,7 +3,8 @@
 当前产品 UI 位于 `include/tina/ui` 与 `src/ui`。旧 Legacy UI 产品图已删除，但这两个目录是 vNext
 正式实现，不得作为 Legacy 残留移除。架构决策见 [ADR 0011](adr/0011-retained-ui.md)、
 [ADR 0021](adr/0021-runtime-ui-startup-capability.md)和
-[ADR 0022](adr/0022-ui-element-authoring-and-layout.md)。当前实现与下一阶段框架演进的分界见
+[ADR 0022](adr/0022-ui-element-authoring-and-layout.md)和
+[ADR 0028](adr/0028-ui-fixed-capacity-grid-layout.md)。当前实现与下一阶段框架演进的分界见
 [UI 框架设计](ui-framework.md)和 Accepted [ADR 0023](adr/0023-ui-extensibility-style-paint-motion.md)。
 
 ## 当前能力
@@ -13,7 +14,7 @@
 | 所有权 | per-window `UIContext`、generation/owner-aware `UINodeId`、move-only `UIRootOwner` |
 | Authoring | `UIElementDescriptor` + `make*Element` recipes、组合 Semantics、StyleRole/override reset、固定预算 build transaction；Surface/Divider/Badge/Switch 是强类型第一方 profile；IconButton/FormField/Dialog 是固定预算多节点 composition profile；旧 create-by-kind 与公开 `UIWidgetKind` 已删除 |
 | Tree | Root/Panel/Modal/Label/Button/Checkbox/Slider/ProgressBar/RadioButton/TextEdit/ScrollView/Dropdown/Popup/Tooltip/Menu/MenuItem/DropdownItem/ListView/TreeView/VirtualGridView/DataGrid/SplitView/Splitter/TabView/Tab，固定容量 mutation |
-| Layout/Content | Flex container/item 分离、Flow/Overlay placement、logical pixel、可选 axis-aligned border-box descendant clip、committed content placement、Tooltip/Menu 基于上一份成功 Anchor geometry 的 flip/clamp、SplitView 与 TabView committed geometry、事务 commit、clean-subtree reuse |
+| Layout/Content | Flex/Grid container 与 item 分离、固定8x8 `Px/Auto/Fr` Grid track、Flow/Overlay placement、logical pixel、可选 axis-aligned border-box descendant clip、committed content placement、Tooltip/Menu 基于上一份成功 Anchor geometry 的 flip/clamp、SplitView 与 TabView committed geometry、事务 commit、clean-subtree reuse |
 | Hit/route | committed hit snapshot、Capture→Target→Bubble、持久 Pointer Capture、Modal/Popup/Menu transient barrier、Tooltip Ignore/click-through、listener token、consume/prevent/claim |
 | Paint | `UIBoxPaint` Rectangle/Ellipse/Line、box/text/control paint、第一类 Image/Icon content、固定容量 backend-neutral `SolidRect`/`SolidEllipse`/`SolidLine`/`Image`/`NineSlice` Canvas、axis-aligned clip、PaintCache、committed paint snapshot；NineSlice 在 commit 时原子展开为1..9个 Image entry |
 | Theme/Style（A/B/C1 + UI-STYLE-001 slice） | `UITheme` token + `UIStyleRoleId` recipe + 属性 override mask/reset；默认 Button 为 Tonal，显式提供 Primary/Danger/Outlined/Text，并以 RadioButton/Checkbox 状态机分别提供 SegmentedButton/Switch；Surface、Divider 与 Badge 复用 Box/Text chrome；强类型 StyleClass/ColorToken、node-local pseudo-state、literal/token-backed BoxFill stylesheet 与运行期 ColorToken getter/setter 已落地；token 更新经固定 reverse-dependency 链为 `O(affected links)`，**无**圆角子树 clip/毛玻璃/完整 CSS |
@@ -53,6 +54,9 @@ splitter pointer fraction/grab 计算。`UITabViewStateStorage` 固定持有 Tab
 专属 `UITabPaint` 与 committed metrics；`UITabViewLayout` 和 `UITabViewInput` 分别收口四向 regions 与命令校验。
 `UIMenuStateStorage` 固定持有 Menu/Item/Anchor 双向关系、checked state、active Menu 与 committed metrics；
 `UIMenuLayout` 和 `UIMenuInput` 分别收口 placement/flip/clamp 与命令校验。
+`UIGridLayout` 使用局部固定数组与64-bit occupancy 完成普通 Element 子树的 intrinsic measurement、row-major
+auto placement、span demand、`Px/Auto/Fr` track resolution 和 item alignment；它不持有 Context side state，
+也不替代带 DataSource/materialized pool 的 VirtualGridView/DataGrid。
 `UIContext::Impl` 只保留
 owner/root/kind 校验并编排 UTF-8 语义校验、测量、dirty transaction、焦点和控件行为。私有组件不得反向持有
 `UIContext`，也不得绕开 committed snapshot、owner-thread 或 PMR 固定容量约束。
@@ -86,9 +90,13 @@ text/text style、visual box/Canvas、enabled、pointer hit policy 与 focus sco
 
 布局属性按解释方拆分：
 
-- `flexContainer`（direction/justifyContent/alignItems/gap）由父节点解释；
-- `flexItem`（grow/shrink/basis/alignSelf）由父容器为当前子节点解释；
-- `placement=Flow` 参与正常 Flex 顺序，`placement=Overlay` 使用 horizontal/vertical alignment、offset 与
+- `containerLayout=Flex` 时，`flexContainer`（direction/justifyContent/alignItems/gap）由父节点解释，
+  `flexItem`（grow/shrink/basis/alignSelf）由该父容器为当前子节点解释；
+- `containerLayout=Grid` 时，`gridContainer` 提供每轴最多8条 `Px/Auto/Fr` track、row/column gap 和
+  `justifyItems/alignItems`；`gridItem` 提供 zero-based row/column、span 与 self alignment。空 track list 按
+  source-order row-major 自动放置生成隐式 `Auto` track；显式与隐式 track 共用8条容量，超限 fail closed。
+  `Collapsed`/`Overlay` child 不占 cell；Arrange 前百分比 item size/min/max 以最终 grid area 为 basis 刷新；
+- `placement=Flow` 参与当前父级选择的 Flex 或 Grid，`placement=Overlay` 使用 horizontal/vertical alignment、offset 与
   margin，不参与 Flow 尺寸和顺序；Popup、Tooltip 与 Menu recipe 强制 Overlay。Tooltip 使用显式 Anchor
   且永不形成 barrier；Menu 也使用独立 Anchor/placement contract，但拥有自己的 transient input barrier，
   不借用 Dropdown Popup 的 relationship 或 state；
@@ -796,7 +804,7 @@ collection/list/tree 与 footer 使用 Stretch/End 保持边距并扩展；字�
 
 `TinaEditor` 的 Modern Desktop 源码迁移使用 Dark/Compact `UITheme`，并在 `createRoot()` 前绑定 density。
 根节点按 Command Bar、按需出现的外部 Document Tabs、Workspace、Status Bar 排列；Command Bar 同行放置菜单、居中的
-2D/3D selector、history/save 与 play controls，active Viewport 只保留一条 context toolbar、画布和一条状态 footer；Workspace 由三层
+2D/3D selector、history/save 与 play controls，active Viewport 只保留一条 context toolbar 与画布，不再发布 footer；Workspace 由三层
 `SplitView` 表达 Left Dock、Viewport、Inspector 与可折叠底部面板，不引入 Dock Runtime 或第二棵 UI tree。底部面板
 默认 `Collapsed` 且 vertical SplitView fraction 为 `1`，Status Bar 可在 Animation 与 Output 间切换或再次点击当前项
 收起；Output 复用最新 authoring feedback。Left Dock/Inspector Header 提供向外收起按钮，`View` 菜单提供 Check
@@ -817,38 +825,43 @@ workspace、Color Picker 与 Delete Dialog 的产品取证均通过
 不依赖会 detach Theme binding 的局部 paint override。Editor 在 selection publication 与 Slider callback 的下一次
 retained update 中同步 Color Field hex/swatch、全部 channel value 和 slider value。
 
-Editor Inspector 的 Transform 字段使用第一方 `UINumberField` 的 `Leading` placement：九个字段统一 authoring，
-World2D entity 只呈现 Position X/Y、Rotation Z、Scale X/Y，World3D entity 呈现完整九轴；Asset Inspector、
-TileMap document 或无 entity selection 时，Header、字段与 Apply 一并 `Collapsed`。每行 92 px label 与可伸缩
-content column 同行，不再各自拼装 Label/TextEdit/step Button；通用表单仍使用默认 `Above`。`Above` 的
-`parts.content` 等于 root，`Leading` 精确多一个 content node，固定预算保持可预检。Toolbar 的
-document path 使用 360 px preferred、160 px minimum 和 shrink，后接 grow spacer，窄窗口优先压缩路径而不
-挤压 mode/play/history/save 命令。六个固定 Tab 槽中空槽为 `Collapsed`，刷新时从统一 layout recipe 恢复
+Editor Inspector 的 Transform 使用三行固定父级 Grid：每行以52 logical px label track 加一个 `Fr` value track
+表达 Position、Rotation、Scale，value track 再按当前 workspace 发布一至三个等权 `Fr` axis cell。每个 axis cell
+使用12 logical px 居中轴标签加 `Fr` TextEdit，整体限制在52..96 logical px；拖动 Inspector 只改变 Grid 分配，
+不切换方向、不重建节点，也不使用宽度阈值。World2D entity 的 Position/Scale 发布 X/Y，
+Rotation 只发布 Z；World3D entity 发布完整九轴。Asset Inspector、TileMap document 或无 entity selection 时，
+Header、字段与 Apply 一并 `Collapsed`。旧的九行 `UINumberField`、逐轴 step Button 与延迟 step 状态不再属于
+Editor 产品布局。Apply action 位于 Transform Header 右侧。节点专属属性与 Parent ID 等其他 Inspector PropertyRow
+使用68 logical px label + `Fr` value Grid，单值 TextEdit 最大宽度统一为132 logical px；Sprite Size/Pivot 与
+ShadowOccluder Start/End 分别把 X/Y 合并在同一属性行。通用表单仍可独立使用 `UINumberField` 的
+`Above`/`Leading` placement。Command Bar 使用等宽 grow region 保持 workspace selector 居中，并保护
+mode/play/history/save 命令；document path 由 session 与平台 Save As dialog 持有，不再显示为 toolbar 输入框。
+六个固定 Tab 槽中空槽为 `Collapsed`，刷新时从统一 layout recipe 恢复
 `Visible`；普通信息文字使用 Theme primary，只有 warning/error feedback 使用对应 tone。Inspector 的 Transform、
 Sprite、Camera、PointLight、ShadowOccluder 与 SpriteAnimation 浮点显示统一经过 fixed-capacity、locale-independent
 `to_chars` snapshot，以 6 位有效数字去除无意义尾零；该 presentation 不改变输入解析、canonical document 或事务精度。
-组件折叠 Header 的收起/展开提示分别使用产品 atlas 提供的 ChevronRight/ChevronDown `UIIconContent`，两个 Icon node
+节点属性折叠 Header 的收起/展开提示分别使用产品 atlas 提供的 ChevronRight/ChevronDown `UIIconContent`，两个 Icon node
 随同一 retained state 切换 visibility，不再用文本字符模拟图标。Timeline 六个帧槽保持固定 `44 logical px` 宽度，只显示帧号；
 选中帧 summary 承载 Sprite、时长和事件数，并在空间不足时以 ellipsis 绘制。当前帧使用 `ButtonPrimary` chrome，
 其余与空槽使用 `ButtonOutlined`，不再在标签前拼接 `>`。
 
-Inspector Components 按 selection/workspace 发布：World2D entity 只显示五个 2D section，World3D entity 只显示
-`MeshRenderer3D`；Asset Inspector、TileMap document 或无 entity selection 时折叠 Components Header 与全部
-collapsible root。context 切换不覆盖各 section 的 retained expanded state。
+Inspector 节点专属属性按 selection/workspace 和严格 Node kind 发布：同类型多选只显示该类型固有的 property section，
+`AnimatedSprite2D` 显示 Rendering + Animation，其他 Node 只显示对应区段。不存在 Components Header、Add/Remove
+Component 或兼容菜单；Asset Inspector、TileMap document、无 Node selection 或多选类型不一致时折叠全部专属 root。
 Hierarchy 的 Header、Parent ID 行与 Apply Parent wrapper 仅在 entity context 发布，TileMap 的 Header、状态摘要与
-四个 action row 仅在 TileMap document 发布。Asset Inspector 因而只保留 Identity、asset metadata/dependencies 与
-Document，Scene entity 保留 Identity、Transform、Components、Hierarchy 与 Document，TileMap document 保留
-Identity、TileMap 与 Document；Scene 无 entity selection 时只保留 Identity 与 Document。切换只更新构建时保存的
-完整 root layout 的 `visibility`，不会破坏 PropertyRow 的 Row/Center/gap、IconButton wrapper 的居中布局或 section state。
+四个 action row 仅在 TileMap document 发布。Asset Inspector 只保留 Identity 与 asset metadata/dependencies，
+Scene node 保留 Identity、Transform、节点专属属性与 Hierarchy，TileMap document 保留 Identity 与 TileMap；
+Scene 无 entity selection 时只保留 Identity。切换只更新构建时保存的完整 Grid/root layout 的 `visibility`，
+不会把 PropertyRow 恢复成旧 Flex、破坏 IconButton wrapper 的居中布局或丢失 section state。
 
 Project Assets 的 compact virtual grid 使用 120 logical px 最小格宽和固定 compact 行高；格子显示类型优先的
 `AssetKind #abcd` 短标签。完整 canonical AssetId 由网格下固定 22 logical px 的 selected summary 与 Inspector 保留，
-summary 在窄 Dock 中只做单行 ellipsis，不改变 retained 文本、格子尺寸或下游布局。Project Open 使用 FolderOpen，
-打开当前 Asset 使用 divider 后的 ArrowRight，两个命令不再共享图形。
+summary 在窄 Dock 中只做单行 ellipsis，不改变 retained 文本、格子尺寸或下游布局。New/Open Project 只保留在
+`File` 菜单；左侧 Dock 不再重复项目生命周期命令。打开当前 Asset 使用 divider 后的 ArrowRight。
 
 EditorApp 私有 `EditorPanelHeader` 以无圆角、无描边的扁平 surface band 统一 Dock、Inspector 与 Timeline 顶栏，
 actions 区占据剩余宽度并末端对齐；`EditorSectionHeader` 以固定 3 节点组合标题与可伸缩 subtle Divider，统一 Inspector
-的 Identity、Transform、Components、Hierarchy、TileMap 与 Document 六个 authoring 段，并按 context 仅发布有效段。
+的 Identity、Transform、节点专属属性、Hierarchy 与 TileMap authoring 段，并按 context 仅发布有效段。
 Hierarchy、Project Assets、Source Imports
 计数使用 Neutral Badge，Inspector selection 使用 Accent Badge。原 `Authoring` 提示段、`Move X +1` 调试按钮及重复的
 静态说明已从可见树删除，短时编辑结果由现有 `UISnackbarHost` 发布，用户主动打开的 Output 底部面板镜像最新反馈。

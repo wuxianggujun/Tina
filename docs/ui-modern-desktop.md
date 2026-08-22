@@ -577,23 +577,27 @@ TinaEditor 的主 Command Bar 不承载 document path 或产品名，中央只�
 
 TinaEditor 的 `EditorPanelHeader`、`EditorSectionHeader`、`EditorPropertyRow` 与 `EditorSearchField` 是 EditorApp 私有
 固定预算组合：PanelHeader 是无圆角、无描边的扁平 surface band，title 可收缩且 action 区占据剩余空间并末端对齐；
-SectionHeader 用 3 个节点组合 section title 和可伸缩的 subtle horizontal Divider。PropertyRow 固定 92 px label column，
-SearchField 组合 decorative Search icon 与唯一 TextEdit。
+SectionHeader 用 3 个节点组合 section title 和可伸缩的 subtle horizontal Divider。PropertyRow 直接消费第一方
+Grid，以68 px label track + `Fr` value track 统一父级约束；SearchField 组合 decorative Search icon 与唯一 TextEdit。
 Hierarchy 搜索按 ASCII 大小写不敏感匹配完整 UTF-8 label byte sequence，显示匹配项及祖先，搜索期间展开匹配路径，
 并按 stable ID 保留当前选择；被过滤的选择回退到 document root。
-Inspector Transform 仍以九个第一方 `UINumberFieldLabelPlacement::Leading` 统一 authoring：World2D entity 只呈现
-Position X/Y、Rotation Z、Scale X/Y，World3D entity 呈现完整九轴；Asset Inspector、TileMap document 或无 entity
-selection 时折叠整个 Transform 区块。每行 92 px label 与独立、可伸缩 content column 同行；通用表单保留默认
-`Above`。Leading 精确比 Above 多一个 content node，Behavior/text 预算不变。普通信息文字使用 Theme primary，
-warning/error tone 只表达真实反馈状态。
-Components 同样按上下文发布：World2D entity 只显示五个 2D section，World3D entity 只显示
-`MeshRenderer3D`；Asset Inspector、TileMap document 或无 entity selection 时折叠 Components Header 与全部 root，
-但不改写各 collapsible section 的 retained expanded state。
+Inspector Transform 固定发布 Position、Rotation、Scale 三行父级 Grid；每行使用52 px label track，右侧按
+workspace 以一至三个 `Fr` cell 发布轴字段。每个轴字段再用12 px 居中的 X/Y/Z label + `Fr` TextEdit，整体
+限制在52..96 logical px。拖动 Inspector 只重新分配 track，不切换方向、不重建节点，也不使用宽度阈值。
+World2D entity 的 Position/Scale 显示 X/Y，Rotation
+只显示 Z；World3D entity 显示完整九轴。Asset Inspector、TileMap document 或无 entity selection 时折叠整个
+Transform 区块。旧的九行 NumberField 与逐轴 step Button 已删除；普通信息文字使用 Theme primary，warning/error
+tone 只表达真实反馈状态。Transform Header 右侧承载 Apply action；其他 Inspector PropertyRow 使用68 logical px
+label + `Fr` value Grid，单值 TextEdit 最大宽度为132 logical px。Sprite Size/Pivot 与 ShadowOccluder Start/End
+分别把 X/Y 放在同一属性行，轴标签水平和垂直居中。
+节点专属属性按上下文与严格 Node kind 发布：同类型多选只显示该类型固有的 property section，`AnimatedSprite2D`
+显示 Rendering + Animation，其余 Node 只显示对应区段。不存在 Components Header、Add/Remove Component 或兼容
+Menu；Asset Inspector、TileMap document、无 Node selection 或多选类型不一致时折叠全部专属 root。
 Hierarchy Header、Parent ID 行和 Apply Parent wrapper 只在 entity context 可见；TileMap Header、状态摘要和四个
-action row 只在 TileMap document 可见。因此 Asset Inspector 的稳定组成是 Identity + metadata/dependencies + Document，
-Scene entity 是 Identity + Transform + Components + Hierarchy + Document，TileMap document 是 Identity + TileMap +
-Document；Scene 无 entity selection 时退化为 Identity + Document。实现保存每个 contextual root 的完整构建 layout，
-切换时只发布 `Visible`/`Collapsed`，不会把 PropertyRow 或 IconButton wrapper 恢复成不完整的默认布局。
+action row 只在 TileMap document 可见。因此 Asset Inspector 的稳定组成是 Identity + metadata/dependencies，
+Scene node 是 Identity + Transform + 节点专属属性 + Hierarchy，TileMap document 是 Identity + TileMap；
+Scene 无 entity selection 时退化为 Identity。实现保存每个 contextual root 与 PropertyRow 的完整构建 layout，
+切换时只发布 `Visible`/`Collapsed`，不会把 Grid 恢复成不完整的 Flex/default 布局。
 
 ### Viewport
 
@@ -928,13 +932,14 @@ Scene 和资源生命周期不变；Dark/Light 60 帧产品 smoke 均通过。Ed
 及自动换色路径已删除。Left Dock/Inspector 可从 Header 收起并由 `View` 菜单恢复，底部面板关闭时同步释放
 SplitView fraction；三者恢复时保留最后拖拽尺寸。Command Bar 移除产品名，并在同一行放置菜单、中央 workspace selector、
 历史/保存和运行命令；Document Tab 只承载外部 document，全部槽为空时整个 strip 为 `Collapsed`。Viewport 把
-Scene/TileMap context 与 transform/snap/marquee/frame/view tools 合并为一行，画布只保留一条状态 footer；Project Assets 使用
+Scene/TileMap context 与 transform/snap/marquee/frame/view tools 合并为一行，画布不再发布 footer；Project Assets 使用
 120 logical px 最小格宽的紧凑 virtual grid，以
 `AssetKind #abcd` 保持类型优先的扫描层级，完整 AssetId 留在固定 22 logical px selected summary 与 Inspector；summary
-在窄 Dock 仅做 ellipsis，不改变 retained 文本或后续布局。Project Open 使用 FolderOpen，打开当前 Asset 使用
-divider 后的 ArrowRight。空 Source Imports 整段折叠；Inspector
-NumberField 使用 92 px Leading label column，并按 World2D/World3D/Asset/TileMap 上下文折叠无效 Transform 行；六个
-authoring 内容段统一使用 `EditorSectionHeader`，Components 只发布当前 workspace 有效的 component root；Hierarchy、Project Assets、
+在窄 Dock 仅做 ellipsis，不改变 retained 文本或后续布局。New/Open Project 只保留在 `File` 菜单，左侧 Dock
+不再重复项目生命周期命令；打开当前 Asset 使用 divider 后的 ArrowRight。空 Source Imports 整段折叠；Inspector
+Transform 使用52 px label + `Fr` value 的三行 Grid，并按 World2D/World3D 上下文折叠无效轴；
+authoring 内容段统一使用 `EditorSectionHeader`，节点专属 property root 只按当前 selection 的严格 Node kind 发布，
+不提供 Add/Remove Component 或兼容菜单；Hierarchy、Project Assets、
 Source Imports 的计数使用 Neutral Badge，Inspector selection 使用 Accent Badge，Timeline 顶栏复用同一个扁平
 `EditorPanelHeader`。Timeline 的六个帧槽使用固定紧凑宽度，只显示可扫描的帧号；时长、Sprite 与事件数留在
 selected-frame summary，summary 过长时以 ellipsis 收敛，帧槽和播放/添加/复制/删除命令不会因动态文案改变位置。
