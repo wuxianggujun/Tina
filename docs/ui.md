@@ -12,17 +12,17 @@
 | --- | --- |
 | 所有权 | per-window `UIContext`、generation/owner-aware `UINodeId`、move-only `UIRootOwner` |
 | Authoring | `UIElementDescriptor` + `make*Element` recipes、组合 Semantics、StyleRole/override reset、固定预算 build transaction；Surface/Divider/Badge/Switch 是强类型第一方 profile；IconButton/FormField/Dialog 是固定预算多节点 composition profile；旧 create-by-kind 与公开 `UIWidgetKind` 已删除 |
-| Tree | Root/Panel/Modal/Label/Button/Checkbox/Slider/ProgressBar/RadioButton/TextEdit/ScrollView/Dropdown/Popup/Tooltip/Menu/MenuItem/DropdownItem/ListView/TreeView/SplitView/Splitter/TabView/Tab，固定容量 mutation |
+| Tree | Root/Panel/Modal/Label/Button/Checkbox/Slider/ProgressBar/RadioButton/TextEdit/ScrollView/Dropdown/Popup/Tooltip/Menu/MenuItem/DropdownItem/ListView/TreeView/VirtualGridView/DataGrid/SplitView/Splitter/TabView/Tab，固定容量 mutation |
 | Layout/Content | Flex container/item 分离、Flow/Overlay placement、logical pixel、可选 axis-aligned border-box descendant clip、committed content placement、Tooltip/Menu 基于上一份成功 Anchor geometry 的 flip/clamp、SplitView 与 TabView committed geometry、事务 commit、clean-subtree reuse |
 | Hit/route | committed hit snapshot、Capture→Target→Bubble、持久 Pointer Capture、Modal/Popup/Menu transient barrier、Tooltip Ignore/click-through、listener token、consume/prevent/claim |
 | Paint | `UIBoxPaint` Rectangle/Ellipse/Line、box/text/control paint、第一类 Image/Icon content、固定容量 backend-neutral `SolidRect`/`SolidEllipse`/`SolidLine`/`Image`/`NineSlice` Canvas、axis-aligned clip、PaintCache、committed paint snapshot；NineSlice 在 commit 时原子展开为1..9个 Image entry |
 | Theme/Style（A/B/C1 + UI-STYLE-001 slice） | `UITheme` token + `UIStyleRoleId` recipe + 属性 override mask/reset；默认 Button 为 Tonal，显式提供 Primary/Danger/Outlined/Text，并以 RadioButton/Checkbox 状态机分别提供 SegmentedButton/Switch；Surface、Divider 与 Badge 复用 Box/Text chrome；强类型 StyleClass/ColorToken、node-local pseudo-state、literal/token-backed BoxFill stylesheet 与运行期 ColorToken getter/setter 已落地；token 更新经固定 reverse-dependency 链为 `O(affected links)`，**无**圆角子树 clip/毛玻璃/完整 CSS |
 | Motion | direct/Style transition 仍为 fixed-capacity paint-only；typed keyframe timeline 已支持 paint 属性及 bounded `LayoutWidth`/`LayoutHeight`/`LayoutOffset` 白名单，并沿唯一 commit pipeline 原子发布；`ui_motion_v1`、`ui_motion_timeline_v1` 与 `ui_motion_layout_v1` 均已有确定性 gate，墙钟结论保持 provisional |
 | Text | strict UTF-8、可选 FreeType rasterizer、R8 Glyph atlas、DisplayList Glyph |
-| Input | Focus Scope/显式 focus、Pointer capture/cancel、Tab 与 committed 几何空间焦点、Keyboard/Gamepad activation、Menu/Dropdown/List/Tree/TabView navigation、TextEdit edit/selection/IME、Tooltip PointerHover/KeyboardFocus/Manual 与 monotonic delay、Splitter Pointer drag/RangeInput keyboard；UI Flow 固定 16 槽本地用户、Gamepad assignment 与 per-user 设备 revision |
-| Semantics | Automatic/Publish/MergeDescendants/Exclude、显式 role/name/description/actions、Tooltip 文本作为 Anchor description/HelpText fallback、Menu/MenuItem 与 checked state、Splitter Slider range/value、TabList/Tab/TabPanel selected state 与虚拟 item 元数据 |
-| Runtime | startup root builder、phase-scoped tree updater、Tooltip/Menu/SplitView/TabView facade 与 bounded component transaction（含集合 DataSource/metrics/selection/scroll/expansion）、DisplayList/Glyph atlas handoff |
-| Performance | `tina_bench` 已接入 static commit、paint-only dirty、route/capture、100k virtual collection、Image/NineSlice、完整 Component build、Style 与 direct/timeline Motion schema-v1 provisional workload |
+| Input | Focus Scope/显式 focus、Pointer capture/cancel、Tab 与 committed 几何空间焦点、Keyboard/Gamepad activation、Menu/Dropdown/List/Tree/VirtualGrid/DataGrid/TabView navigation、TextEdit edit/selection/IME、Tooltip PointerHover/KeyboardFocus/Manual 与 monotonic delay、Splitter Pointer drag/RangeInput keyboard；UI Flow 固定 16 槽本地用户、Gamepad assignment 与 per-user 设备 revision |
+| Semantics | Automatic/Publish/MergeDescendants/Exclude、显式 role/name/description/actions、Tooltip 文本作为 Anchor description/HelpText fallback、Menu/MenuItem 与 checked state、Splitter Slider range/value、TabList/Tab/TabPanel selected state，以及 List/Tree/VirtualGrid/DataGrid materialized item 的 stable row 元数据与 selected/focused state |
+| Runtime | startup root builder、phase-scoped tree updater、Tooltip/Menu/SplitView/TabView facade 与 bounded component transaction（含 List/Tree/VirtualGrid/DataGrid 的 DataSource/metrics/selection/scroll，及 Tree expansion）、DisplayList/Glyph atlas handoff |
+| Performance | `tina_bench` 已接入 static commit、paint-only dirty、route/capture、100k virtual collection、Image/NineSlice、完整 Component build、Style 与 direct/timeline Motion schema-v1 provisional workload；VirtualGrid/DataGrid 的 100k logical item/row 由固定 materialized pool 单测约束 |
 | Product | 独立 20 控件 showcase、product-2d Scene Explorer TreeView、product-3d Asset ListView/Scene TreeView 与 Dark/Light Windows 视觉证据 |
 
 ## 所有权与句柄
@@ -45,7 +45,9 @@ UTF-8 arena、空闲块复用/合并、bump 回收与 used/high-water 统计；`
 `UIButtonActionRegistry` 与 `UISliderChangeCallbackRegistry` 分别独立拥有 Button/Slider callback 的
 固定容量 slot、stage/commit/rollback、generation-aware capture/invoke 与调用期间延迟回收；Button
 registry 还封装 route clear barrier、registration serial 与 high-water 统计。
-`UISplitViewStateStorage` 固定按 node index 持有 SplitView/Splitter relationship、requested fraction、layout
+`UIVirtualGridViewStateStorage` 固定持有响应式网格、materialized item pool、selection、layout scratch 与 committed
+metrics；`UIDataGridStateStorage` 独立持有 column、materialized row/cell pool、二维 selection 和双轴 metrics，列数与
+可见行数都必须落在创建时容量内。`UISplitViewStateStorage` 固定按 node index 持有 SplitView/Splitter relationship、requested fraction、layout
 scratch 与 committed metrics；`UISplitViewLayout` 解析 orientation/minimum/clamp，`UISplitViewInput` 只提供
 splitter pointer fraction/grab 计算。`UITabViewStateStorage` 固定持有 TabView/Tab/Panel relationship、active Tab、
 专属 `UITabPaint` 与 committed metrics；`UITabViewLayout` 和 `UITabViewInput` 分别收口四向 regions 与命令校验。
@@ -66,7 +68,7 @@ Runtime 私有持有主窗口 UIContext；普通游戏不取得裸 `UIContext*`�
 - builder/updater/transaction、span 和 committed view 不得跨 phase 保存；活动 transaction 若逃逸 callback，
   phase finish 会先回滚整棵组件，再返回 `BuildTransactionInProgress`。
 
-`PrimaryWindowUITreeUpdater` 通过统一 `createElement()` 创建 ListView/TreeView，并暴露其 DataSource、
+`PrimaryWindowUITreeUpdater` 通过统一 `createElement()` 创建 ListView/TreeView/VirtualGridView/DataGrid，并暴露其 DataSource、
 style/paint、metrics、selection、scroll，以及 Tree expansion 操作；这些 facade 与其他 mutation 一样受 phase epoch 和
 owner-thread 约束，不把 `UIContext` 或第三方类型暴露给游戏。
 直接 `UITreeUpdater` 提供相同的 `committedLayoutRect()` 数值复制契约。由于 Runtime 的 RenderScene extraction 位于
@@ -301,8 +303,10 @@ Tree mutation、layout、hit、paint 与 semantics 都有固定容量和明确 c
 `UIContextStatistics::componentBuild` 同时发布各池 requested/reserved/published/failure/outstanding counter。
 
 Layout 使用窗口 logical extent，不直接读取 framebuffer pixel。content scale/resize 更新 layout size，但同一
-WindowId 不重建 Context。clean-subtree measure/arrange reuse 已实现；ListView/TreeView 通过固定 row pool
-支持 100k logical item 虚拟化，完整通用 dirty-range pruning 仍未实现。
+WindowId 不重建 Context。clean-subtree measure/arrange reuse 已实现；ListView/TreeView 通过固定 row pool、
+VirtualGridView 通过固定 item pool、DataGrid 通过固定 column/row/cell pool 支持 100k logical item/row 虚拟化。
+DataSource descriptor、文本或容量失败时，候选 bindings/layout/paint/semantics 不发布，旧 committed snapshot 保持可读；
+完整通用 dirty-range pruning 仍未实现。
 
 Tree structure publication、subtree destroy 以及 layout/hit/paint snapshot 构建不依赖 C++ 调用栈递归；
 专项 stress gate 使用 50,000 层 retained tree 覆盖这些路径。Popup 最终绘制顺序所需的
@@ -362,6 +366,11 @@ callback 副作用。
   推进；Pointer Down/wheel/text input 与 Anchor/Modal 失效关闭，始终 click-through 且不改变 focus/capture；
 - ListView：Up/Down、PageUp/PageDown、Home/End、Keyboard/Gamepad activate 与 stable-key selection；
 - TreeView：沿用集合导航，并以 Left/Right 折叠、展开或移动到父/子项；
+- VirtualGridView：响应式等宽列、纵向滚动；Left/Right 移动到前/后相邻 item（可跨 logical row），Up/Down/Page 保持 logical column
+  跨行移动，Home/End 到首尾可用 item，disabled item 会沿命令方向继续搜索；
+- DataGrid：固定 authored 列宽、虚拟 logical row 与双轴滚动；Left/Right 切换 column，Up/Down/Page 保持 column
+  跨行移动，Home/End 到首尾可用 cell，disabled row 跳过；Pointer 选择完整 row/column cell，Activate 只对当前
+  committed 且 enabled 的 cell 成功；
 - ListView/TreeView 的 `rowHeight` 是精确行高，必须容纳当前 `CollectionItem` 单行文本；内部 row 仅保留
   横向 padding，纵向内容盒使用完整行高并居中放置文本。字体 raster batch 显式发布 line-top baseline，
   glyph paint 与 clip 必须完整落在所属 row 内，不能依赖下一行覆盖或静默裁掉 descender；
@@ -649,6 +658,8 @@ straight-alpha RGBA 在 shader 中 premultiply 后再应用 committed tint，继
 | `DropdownItem` | ListItem selection 与焦点 | Button chrome + 选中背景 + 文本 |
 | `ListView` | 虚拟化 List/ListItem、键盘/手柄选择与滚动 | 固定 row pool + 选中/hover chrome + scrollbar |
 | `TreeView` | 虚拟化 Tree/TreeItem、层级展开/折叠 | 固定 row pool + disclosure/indent + 选中 chrome + scrollbar |
+| `VirtualGridView` | 响应式等宽列、虚拟 item、二维键盘/手柄选择与纵向滚动 | 固定 item pool + 选中/hover chrome + vertical scrollbar |
+| `DataGrid` | 固定列宽/header、虚拟 row/cell、二维选择与双轴滚动 | 固定 column/row/cell pool + header/grid line/selected-row chrome + horizontal/vertical scrollbar |
 
 控件创建入口集中为 `UIRootBuilder`/`UITreeUpdater::createElement(descriptor)`；属性 setter 只修改
 retained 状态并标记必要的 dirty 类别。
@@ -657,7 +668,7 @@ retained 状态并标记必要的 dirty 类别。
 
 - `UIContext` 持有 `productTheme()`，默认 `makeDefaultProductTheme()`；
 - `createElement(..., make*Element(...))` 按 descriptor 的 `UIStyleRoleId` 创建 Button/Checkbox/Slider/TextEdit/ProgressBar/RadioButton/
-  ScrollView/Dropdown/Popup/Menu/MenuItem/DropdownItem/ListView/TreeView/Tab 与 Label 文本样式在创建时 **自动 apply** 对应
+  ScrollView/Dropdown/Popup/Menu/MenuItem/DropdownItem/ListView/TreeView/VirtualGridView/DataGrid/Tab 与 Label 文本样式在创建时 **自动 apply** 对应
   `make*Chrome` / text style；Root/Panel 默认无底色（容器），需背景时用
   `makePanelBoxPaint` / `makeSettingsPanelChrome`；
 - `setProductTheme(theme)` 会校验 metric，并事务式重绑所有仍继承产品 Theme 的既有控件属性；容量、
@@ -935,6 +946,7 @@ Back/Confirm/Menu 之外的任意 action-id 仍属于独立后续扩展。
 | `UI-TOOLTIP-001` | Done：独立 Tooltip contract、同 root Anchor 关系、Hover/Focus/Manual + monotonic delay、Auto/flip/clamp、单 Window 独占、Ignore hit、输入/可见性/Modal dismissal、committed metrics、失败回滚、accessible description/HelpText fallback 与 Runtime phase facade 已落地 |
 | `UI-MENU-001` | Done：独立 Menu/MenuItem recipes、显式同 root Anchor、单 Window transient overlay 与 Popup 协调、Command/Check/Radio/Separator、四向 Auto/flip/clamp、Pointer barrier、Keyboard/Gamepad/accessibility 共享激活、Menu/MenuItem UIA、committed metrics/失败原子性、固定容量 state/layout/input 模块与 Runtime facade 已落地 |
 | `UI-TABVIEW-001` | Done：独立 TabView/Tab recipes、完整 direct-child pair 关系、四向 placement、Automatic/Manual activation、Pointer/Keyboard/Gamepad/UIA 共享路径、TabList/Tab/TabPanel semantics、专属 `UITabPaint`、committed metrics、失败原子性与 Runtime phase facade 已落地 |
+| `UI-GRID-COLLECTIONS` | Done：VirtualGridView/DataGrid 的固定容量 layout、双轴/单轴滚动、Pointer/Keyboard/Gamepad、selection、paint、semantics 与 Runtime phase facade 已实现；Editor Project Assets/Source Imports 已分别成为首批 VirtualGrid/DataGrid consumer。2026-08-21 集中 gate：定向 UI 10/10、Runtime facade 3/3、UI 782/782、Runtime UI 148/148、UI-Render 28/28、EditorApp 20/20，Editor 2D/3D 各 68 帧 exit 0 |
 | `UI-BEHAVIOR-SPI-001` | Deferred：只有标准 Behavior + routed listener 存在有证据的表达缺口时才评估 startup-only 高级 SPI |
 | `UI-002-LINUX` | Linux AT-SPI adapter 与真实辅助技术验收（Deferred，不阻塞 Windows UI-002） |
 | `SDK-001` | package/consumer gate 已落地；ADR 0024 已 Accepted，pre-1.0 strict exact-version 正反 probe（含 tweak/range 拒绝）已纳入 Windows gate。正式 supported ABI tuple baseline/object probe 仍是 release checklist |

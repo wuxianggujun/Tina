@@ -6,6 +6,7 @@
 #include "EditorAnimationPreview.hpp"
 #include "EditorFileDialog.hpp"
 #include "EditorIconResources.hpp"
+#include "EditorSourceImportIngress.hpp"
 #include "EditorSourceImportLaunchOptions.hpp"
 #include "EditorSourceImportSelection.hpp"
 #include "EditorSourceImportService.hpp"
@@ -75,6 +76,7 @@
 #include <tina/ui/UICollapsibleSection.hpp>
 #include <tina/ui/UIColorField.hpp>
 #include <tina/ui/UIColorPicker.hpp>
+#include <tina/ui/UIDataGrid.hpp>
 #include <tina/ui/UIDialog.hpp>
 #include <tina/ui/UIListView.hpp>
 #include <tina/ui/UILayout.hpp>
@@ -141,7 +143,10 @@ inline constexpr u32 HierarchyMaterializedCapacity = 16;
 inline constexpr u32 AssetBrowserMaterializedCapacity = 12;
 inline constexpr u32 ProjectAssetCompactIdCharacterCount = 4;
 inline constexpr float ProjectAssetMinimumItemWidth = 120.0F;
+inline constexpr u32 SourceImportColumnCapacity = 2;
 inline constexpr u32 SourceImportMaterializedCapacity = 5;
+inline constexpr float SourceImportKindColumnWidth = 88.0F;
+inline constexpr float SourceImportSourceColumnWidth = 240.0F;
 inline constexpr u32 AuthoringEntityCapacity = 16;
 inline constexpr u32 InitialAuthoringEntityCount = 5;
 inline constexpr u32 AnimationVisibleFrameSlots = 6;
@@ -150,7 +155,9 @@ inline constexpr u32 MainMenuCount = 4;
 inline constexpr u32 AutomaticColorPickerVisibleStage = 52;
 inline constexpr u32 AutomaticFinalSelectionCommitStage = 56;
 inline constexpr u32 AutomaticAuthoringStageCount = 57;
-inline constexpr u64 AutomaticAuthoringFrameReserve = 11;
+// Covers the stages that need more than one frame: the scene Add picker and the
+// Delete dialog each spend an extra frame opening and confirming.
+inline constexpr u64 AutomaticAuthoringFrameReserve = 13;
 inline constexpr float AutomaticInspectorCaptureInset = 8.0F;
 inline constexpr u64 AutomaticAuthoringMinimumFrameCount =
     static_cast<u64>(AutomaticAuthoringStageCount) +
@@ -1187,7 +1194,8 @@ restoreSourceImportUnits(
         return Tina::Core::failure(std::move(error));
     }
 }
-[[nodiscard]] inline Tina::Core::Result<std::filesystem::path> createUniqueEditorTempDirectory()
+[[nodiscard]] inline Tina::Core::Result<std::filesystem::path> createUniqueEditorTempDirectory(
+    std::string_view directoryPrefix = "tina_editor_catalog_")
 {
     std::error_code tempError;
     const std::filesystem::path tempRoot = std::filesystem::temp_directory_path(tempError);
@@ -1203,7 +1211,7 @@ restoreSourceImportUnits(
     constexpr u32 MaximumAttempts = 256;
     for (u32 attempt = 0; attempt < MaximumAttempts; ++attempt) {
         const std::filesystem::path candidate =
-            tempRoot / ("tina_editor_catalog_" + std::to_string(seed) + "_" +
+            tempRoot / (std::string{directoryPrefix} + std::to_string(seed) + "_" +
                         std::to_string(attempt));
         std::error_code createError;
         if (std::filesystem::create_directory(candidate, createError)) {
@@ -1216,14 +1224,14 @@ restoreSourceImportUnits(
         const bool exists = std::filesystem::exists(candidate, existsError);
         if (existsError || !exists) {
             Tina::Core::Error error{Tina::Core::CoreErrorCode::Io,
-                                    "Tina Editor could not create a temporary Catalog root"};
+                                    "Tina Editor could not create a temporary directory"};
             error.setNativeCode(createError.value());
             error.addContext("candidate", pathToUtf8(candidate));
             return Tina::Core::failure(std::move(error));
         }
     }
     return Tina::Core::failure(Tina::Core::CoreErrorCode::AlreadyExists,
-                               "Tina Editor exhausted temporary Catalog directory attempts");
+                               "Tina Editor exhausted temporary directory attempts");
 }
 [[nodiscard]] inline Tina::Core::Result<Tina::Asset::CatalogCookRequest>
 createEditorAutoDemoCatalogFixtureRequest()
@@ -1646,6 +1654,8 @@ enum class EditorCommand : u32 {
     Save,
     SaveAs,
     SceneAdd,
+    SceneAddConfirm,
+    SceneAddCancel,
     SceneDuplicate,
     SceneDelete,
     SceneDeleteConfirm,
@@ -2185,6 +2195,44 @@ parseInspectorTransformValue(std::string_view text, std::string_view fieldName)
     style.flexContainer.gap.row = theme.spacing.space5;
     return style;
 }
+[[nodiscard]] inline UI::UILayoutStyle sceneAddModalLayout(
+    UI::UIVisibility visibility) noexcept
+{
+    constexpr UI::UITheme theme =
+        UI::makeModernDesktopTheme(UI::UIColorScheme::Dark, UI::UIDensity::Compact);
+    UI::UILayoutStyle style = fillWidth(246.0F);
+    style.flexItem.shrink = 0.0F;
+    style.visibility = visibility;
+    style.padding = UI::UIEdgeSpacing::All(theme.spacing.space6);
+    style.flexContainer.direction = UI::UIFlexDirection::Column;
+    style.flexContainer.gap.row = theme.spacing.space4;
+    return style;
+}
+[[nodiscard]] inline UI::UILayoutStyle hierarchyRenameLayout(
+    UI::UIVisibility visibility) noexcept
+{
+    constexpr UI::UITheme theme =
+        UI::makeModernDesktopTheme(UI::UIColorScheme::Dark, UI::UIDensity::Compact);
+    UI::UILayoutStyle style = fillWidth(66.0F);
+    style.flexItem.shrink = 0.0F;
+    style.visibility = visibility;
+    style.padding = UI::UIEdgeSpacing::All(theme.spacing.space3);
+    style.flexContainer.direction = UI::UIFlexDirection::Column;
+    style.flexContainer.gap.row = theme.spacing.space2;
+    return style;
+}
+[[nodiscard]] inline UI::UILayoutStyle sceneAddTemplateRowLayout(
+    UI::UIVisibility visibility) noexcept
+{
+    constexpr UI::UITheme theme =
+        UI::makeModernDesktopTheme(UI::UIColorScheme::Dark, UI::UIDensity::Compact);
+    UI::UILayoutStyle style = fillWidth(theme.controls.buttonHeight);
+    style.visibility = visibility;
+    return style;
+}
+// One row per node template. Sized for the widest registry (World2D).
+inline constexpr Tina::Core::usize SceneAddTemplateSlotCount =
+    Tina::Editor::World2DNodeTemplateCount;
 [[nodiscard]] inline UI::UILayoutStyle editorDialogOverlayLayout(
     UI::UIVisibility visibility) noexcept
 {
@@ -2212,6 +2260,13 @@ struct EditorHierarchyRow final {
     u32 level = 0;
     bool expandable = false;
     std::string label{};
+    // Node template display name, shared with the creation picker so the
+    // hierarchy and the Inspector report the same kind vocabulary.
+    std::string_view kindName{};
+};
+struct EditorHierarchyNameOverride final {
+    u32 stableId = 0;
+    std::string name{};
 };
 struct SceneDeleteConfirmation final {
     Tina::Editor::EditorDocumentKey documentKey{};
@@ -2219,6 +2274,15 @@ struct SceneDeleteConfirmation final {
     u32 stableId = 0;
     u64 documentRevision = 0;
     bool confirming = false;
+};
+// Pending "create node" choice. Captured when the picker opens so a document
+// that changes underneath it is detected before anything is published.
+struct SceneAddRequest final {
+    Tina::Editor::EditorDocumentKey documentKey{};
+    WorkspaceMode workspace = WorkspaceMode::World2D;
+    u32 parentStableId = 0;
+    u64 documentRevision = 0;
+    bool creating = false;
 };
 struct SavedTileMapChunkBaseline final {
     Tina::Core::AssetId assetId{};
@@ -2994,6 +3058,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
                   createEditorImportStageConfig(&sourceImportMemory_)))
     {
         hierarchyRows_.reserve(AuthoringEntityCapacity + 1U);
+        hierarchyNameOverrides_.reserve(AuthoringEntityCapacity);
         collapsedHierarchyIds_.reserve(AuthoringEntityCapacity + 1U);
         activeProjectWorkspace_ = std::move(assetResources_.initialProjectWorkspace);
         sourceImportStartPending_ = options_.sourceImport.importOnStart;
@@ -3095,6 +3160,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
         UiBuildContext& ui, UI::UINodeId parent, UI::UINodeId& outputPanel);
     [[nodiscard]] Tina::Core::Status buildStatusBarUi(UiBuildContext& ui, UI::UINodeId parent);
     [[nodiscard]] Tina::Core::Status buildDirtyCloseModalUi(UiBuildContext& ui, UI::UINodeId parent);
+    [[nodiscard]] Tina::Core::Status buildSceneAddModalUi(
+        UiBuildContext& ui, UI::UINodeId parent);
+    [[nodiscard]] Tina::Core::Status buildSceneAddModalActionsUi(
+        UiBuildContext& ui);
     [[nodiscard]] Tina::Core::Status buildSceneDeleteDialogUi(
         UiBuildContext& ui, UI::UINodeId parent);
     [[nodiscard]] Tina::Core::Status buildAboutDialogUi(
@@ -3118,6 +3187,23 @@ class EditorWorkspaceState final : public Tina::IGameState {
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status updateHierarchySearch(
         Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status updateSceneAddSearch(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status processPendingHierarchyRename(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status processPendingHierarchyReorder(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status showHierarchyRename(
+        Tina::PrimaryWindowUITreeUpdater& tree, u32 stableId);
+    [[nodiscard]] Tina::Core::Status hideHierarchyRename(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status applyHierarchyRename(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] std::optional<u32> hierarchyStableIdAtPosition(
+        UI::UILogicalPoint position) const noexcept;
+    void handleHierarchyPointerDown(UI::UIRoutedPointerEvent& event) noexcept;
+    void handleHierarchyPointerMove(UI::UIRoutedPointerEvent& event) noexcept;
+    void handleHierarchyPointerUp(UI::UIRoutedPointerEvent& event) noexcept;
     [[nodiscard]] Tina::Core::Status updateSnackbarUi(
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status processPendingMainMenuToggle(
@@ -3308,10 +3394,22 @@ class EditorWorkspaceState final : public Tina::IGameState {
         std::string successFeedback);
     [[nodiscard]] Tina::Core::Status switchLiveProjectCatalog(
         Tina::Editor::EditorProjectWorkspace workspace);
+    [[nodiscard]] Tina::Core::Result<Tina::Editor::EditorProjectWorkspace>
+    initializeNewProjectAt(std::string_view projectRootUtf8);
+    [[nodiscard]] Tina::Core::Status scheduleNewProjectAt(
+        std::string_view projectRootUtf8,
+        std::vector<std::string> pendingSourceImportPathsUtf8 = {});
+    [[nodiscard]] Tina::Core::Status createTemporaryProjectForImport(
+        std::vector<std::string> pendingSourceImportPathsUtf8);
+    [[nodiscard]] Tina::Core::Status saveTemporaryProjectFromDialog();
+    [[nodiscard]] bool temporaryProjectActive() const noexcept;
+    void cleanupOwnedTemporaryProject(std::string& projectRootUtf8) noexcept;
     [[nodiscard]] Tina::Core::Status createNewProjectFromDialog();
     [[nodiscard]] Tina::Core::Status openProjectFromDialog();
     [[nodiscard]] Tina::Core::Status startSourceImport(
         std::span<const Tina::EditorApp::Detail::EditorSourceImportUnit> intendedUnits);
+    [[nodiscard]] Tina::Core::Status importSelectedSourceFiles(
+        std::span<const std::string> selectedPathsUtf8);
     [[nodiscard]] Tina::Core::Status importSourceFromDialog();
     [[nodiscard]] Tina::Core::Status removeSelectedSourceImport();
     void cleanupOwnedSourceImportStage(std::string_view catalogRootUtf8) noexcept;
@@ -3370,6 +3468,23 @@ class EditorWorkspaceState final : public Tina::IGameState {
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status hideDirtyCloseModal(
         Tina::PrimaryWindowUITreeUpdater& tree);
+    // Node creation picker. showSceneAddModal captures the target parent and
+    // document revision; createNodeFromSceneAddRequest re-validates both before
+    // publishing so a stale request is rejected instead of writing the wrong
+    // parent.
+    [[nodiscard]] Tina::Core::Status showSceneAddModal(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status hideSceneAddModal(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status refreshSceneAddModalUi(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status processPendingSceneAddTemplate(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::usize sceneAddTemplateCount() const noexcept;
+    [[nodiscard]] Tina::Core::Status createNodeFromSceneAddRequest(
+        Tina::PrimaryWindowUITreeUpdater& tree,
+        std::optional<u32>& hierarchyRefreshStableId,
+        bool& requiresPreviewValidation);
     [[nodiscard]] Tina::Core::Status closeActiveDocument(
         Tina::PrimaryWindowUITreeUpdater& tree,
         bool discardDirty = false);
@@ -3477,11 +3592,18 @@ class EditorWorkspaceState final : public Tina::IGameState {
     static bool resolveInspectorDependencyItem(
         const void* state, u64 logicalIndex,
         UI::UIListViewItemDescriptor& output) noexcept;
-    [[nodiscard]] UI::UIListViewDataSource sourceImportDataSource() const noexcept;
-    [[nodiscard]] static u64 sourceImportItemCount(const void* state) noexcept;
-    static bool resolveSourceImportItem(
-        const void* state, u64 logicalIndex,
-        UI::UIListViewItemDescriptor& output) noexcept;
+    [[nodiscard]] UI::UIDataGridDataSource sourceImportGridDataSource() const noexcept;
+    [[nodiscard]] static u64 sourceImportRowCount(const void* state) noexcept;
+    [[nodiscard]] static u32 sourceImportColumnCount(const void* state) noexcept;
+    static bool resolveSourceImportRow(
+        const void* state, u64 logicalRow,
+        UI::UIDataGridRowDescriptor& output) noexcept;
+    static bool resolveSourceImportColumn(
+        const void* state, u32 logicalColumn,
+        UI::UIDataGridColumnDescriptor& output) noexcept;
+    static bool resolveSourceImportCell(
+        const void* state, u64 logicalRow, u32 logicalColumn,
+        UI::UIDataGridCellDescriptor& output) noexcept;
     [[nodiscard]] UI::UIVirtualGridViewDataSource projectAssetDataSource() const noexcept;
     [[nodiscard]] static u64 projectAssetItemCount(const void* state) noexcept;
     static bool resolveProjectAssetItem(const void* state, u64 logicalIndex,
@@ -3500,8 +3622,9 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] std::optional<u64>
     visibleHierarchyIndex(u32 stableId) const noexcept;
     [[nodiscard]] static std::string hierarchyEntityLabel(
-        WorkspaceMode mode, u32 stableId, bool hasRenderable,
-        bool hasCamera, bool hasLight);
+        std::string_view kindName, u32 stableId);
+    [[nodiscard]] std::string hierarchyLabelForStableId(
+        std::string_view kindName, u32 stableId) const;
     [[nodiscard]] Tina::Core::Status rebuildHierarchyModel();
     [[nodiscard]] Tina::Core::Status refreshHierarchyTree(
         Tina::PrimaryWindowUITreeUpdater& tree, u32 preferredStableId);
@@ -3534,12 +3657,17 @@ class EditorWorkspaceState final : public Tina::IGameState {
     Tina::Editor::ProjectAssetBrowserModel projectAssets_;
     Tina::Editor::EditorDocumentTabs documentTabs_;
     std::optional<Tina::Editor::EditorProjectWorkspace> pendingProjectSwitch_{};
+    bool projectSwitchBlockedByDirty_ = false;
     std::optional<Tina::Editor::EditorProjectWorkspace> activeProjectWorkspace_{};
+    std::string temporaryProjectRootUtf8_{};
+    std::string temporaryProjectSaveTargetRootUtf8_{};
+    std::string pendingTemporaryProjectCleanupRootUtf8_{};
     EditorAssetResources& assetResources_;
     EditorRenderDeviceAccess& renderDeviceAccess_;
     std::pmr::unsynchronized_pool_resource sourceImportMemory_{};
     Tina::EditorApp::Detail::EditorSourceImportService sourceImportService_;
     std::vector<Tina::EditorApp::Detail::EditorSourceImportUnit> sourceImportUnits_{};
+    std::vector<std::string> pendingSourceImportPathsUtf8_{};
     std::string sourceImportPointerPathUtf8_{};
     std::string sourceImportPendingStageRootUtf8_{};
     std::string sourceImportSupersededCatalogRootUtf8_{};
@@ -3553,13 +3681,19 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId hierarchyTree_{};
     UI::UINodeId hierarchyCount_{};
     UI::UINodeId hierarchySearchInput_{};
+    UI::UINodeId hierarchyRenameRoot_{};
+    UI::UINodeId hierarchyRenameTitle_{};
+    UI::UINodeId hierarchyRenameInput_{};
+    UI::UINodeId hierarchyRenameApplyButton_{};
+    UI::UINodeId hierarchyRenameCancelButton_{};
+    UI::UILayoutStyle hierarchyRenameRootLayout_{};
     UI::UINodeId projectAssetList_{};
     UI::UINodeId projectAssetCount_{};
     UI::UINodeId projectAssetSummary_{};
     UI::UINodeId projectAssetSource_{};
     UI::UINodeId sourceImportSection_{};
     UI::UILayoutStyle sourceImportSectionLayout_{};
-    UI::UINodeId sourceImportList_{};
+    UI::UINodeId sourceImportGrid_{};
     UI::UINodeId sourceImportCount_{};
     UI::UINodeId inspectorScroll_{};
     UI::UINodeId inspectorMode_{};
@@ -3652,6 +3786,14 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId statusDocument_{};
     UI::UINodeId statusPreview_{};
     UI::UINodeId statusSelection_{};
+    UI::UINodeId sceneAddModal_{};
+    UI::UINodeId sceneAddTitle_{};
+    UI::UINodeId sceneAddParentLabel_{};
+    UI::UINodeId sceneAddSearchInput_{};
+    UI::UINodeId sceneAddDescription_{};
+    std::array<UI::UINodeId, SceneAddTemplateSlotCount> sceneAddTemplateButtons_{};
+    UI::UINodeId sceneAddCreateButton_{};
+    UI::UINodeId sceneAddCancelButton_{};
     UI::UINodeId dirtyCloseModal_{};
     UI::UINodeId dirtyCloseTitle_{};
     UI::UINodeId dirtyCloseMessage_{};
@@ -3794,8 +3936,29 @@ class EditorWorkspaceState final : public Tina::IGameState {
     std::array<UI::UINodeId, AnimationVisibleFrameSlots> animationFrameButtons_{};
     UI::UITreeViewItemKey selectionKey_ = UI::InvalidUITreeViewItemKey;
     std::vector<EditorHierarchyRow> hierarchyRows_{};
+    std::vector<EditorHierarchyNameOverride> hierarchyNameOverrides_{};
     std::vector<u32> collapsedHierarchyIds_{};
     std::string hierarchyFilterUtf8_{};
+    std::string sceneAddFilterUtf8_{};
+    UI::UILogicalRect hierarchyTreeRect_{};
+    UI::UITreeViewMetrics hierarchyTreeMetrics_{};
+    float hierarchyTreeRowHeight_ = 28.0F;
+    u64 lastHierarchyPointerDownFrame_ = 0;
+    u32 lastHierarchyPointerDownStableId_ = 0;
+    Tina::Platform::PointerId hierarchyDragPointer_ = Tina::Platform::PrimaryPointerId;
+    u32 hierarchyDragStableId_ = 0;
+    bool hierarchyDragActive_ = false;
+    UI::UILogicalPoint hierarchyDragStartPosition_{};
+    std::optional<u32> pendingHierarchyRenameStableId_{};
+    bool pendingHierarchyRenameCancel_ = false;
+    bool pendingHierarchyRenameCommit_ = false;
+    std::optional<u32> pendingHierarchyReorderBeforeStableId_{};
+    std::optional<u32> pendingHierarchyReorderStableId_{};
+    u32 hierarchyRenameStableId_ = 0;
+    u64 hierarchyRenameDocumentRevision_ = 0;
+    bool hierarchyRenameVisible_ = false;
+    std::array<UI::UIRoutedPointerListenerToken, 3>
+        hierarchyPointerListeners_{};
     ViewportToolMode viewportToolMode_ = ViewportToolMode::Select;
     Tina::Editor::EditorTransformGizmo viewportTransformGizmo_{};
     ViewportTransformTransaction viewportGizmo_{};
@@ -3911,6 +4074,12 @@ class EditorWorkspaceState final : public Tina::IGameState {
     std::optional<Tina::Editor::EditorDocumentKey> pendingDirtyCloseKey_{};
     std::optional<SceneDeleteConfirmation> pendingSceneDeleteConfirmation_{};
     bool pendingSceneDeleteDialogFocus_ = false;
+    std::optional<SceneAddRequest> pendingSceneAddRequest_{};
+    bool pendingSceneAddDialogFocus_ = false;
+    // Highlighted template row; applied from a button callback next frame so
+    // selection follows the same deferred pattern as the main menu toggle.
+    u32 sceneAddTemplateIndex_ = 0;
+    std::optional<u32> pendingSceneAddTemplateIndex_{};
     bool pendingHierarchyFocusRestore_ = false;
     bool aboutDialogVisible_ = false;
     bool pendingAboutDialogFocus_ = false;

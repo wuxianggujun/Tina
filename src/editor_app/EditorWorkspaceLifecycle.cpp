@@ -98,10 +98,16 @@ auto EditorWorkspaceState::onExit(Tina::GameStateExitContext&) noexcept -> void{
     }
     iconResources_.release();
     snackbarHost_.reset();
-    if (sourceImportCatalogCommitted_) {
+    if (sourceImportCatalogCommitted_ || !temporaryProjectRootUtf8_.empty() ||
+        !pendingTemporaryProjectCleanupRootUtf8_.empty()) {
         assetResources_.system.reset();
     }
     cleanupFailedSourceImportStage();
+    pendingProjectSwitch_.reset();
+    projectSwitchBlockedByDirty_ = false;
+    activeProjectWorkspace_.reset();
+    cleanupOwnedTemporaryProject(pendingTemporaryProjectCleanupRootUtf8_);
+    cleanupOwnedTemporaryProject(temporaryProjectRootUtf8_);
     sourceImportCatalogCommitted_ = false;
     ++counters_.stateExits;
 }
@@ -126,7 +132,7 @@ auto EditorWorkspaceState::updateFrame(Tina::FrameUpdateContext& context) -> Tin
     if (auto status = processEditorShortcuts(context.frameActions()); !status) {
         return status;
     }
-    if (pendingProjectSwitch_.has_value()) {
+    if (pendingProjectSwitch_.has_value() && !projectSwitchBlockedByDirty_) {
         auto workspace = std::move(*pendingProjectSwitch_);
         pendingProjectSwitch_.reset();
         if (auto status = switchLiveProjectCatalog(std::move(workspace)); !status) {
@@ -290,7 +296,15 @@ auto EditorWorkspaceState::updateFrame(Tina::FrameUpdateContext& context) -> Tin
                 (void)queueAutoCommand(EditorCommand::Redo);
                 break;
             case 17:
-                (void)queueAutoCommand(EditorCommand::SceneAdd);
+                // SceneAdd only opens the picker, so this stage drives the
+                // confirm too and advances once the entity actually exists.
+                if (pendingSceneAddRequest_.has_value()) {
+                    (void)queueEditorCommand(EditorCommand::SceneAddConfirm);
+                } else if (counters_.automaticAddedStableId != 0U) {
+                    ++autoAuthoringStage_;
+                } else {
+                    (void)queueEditorCommand(EditorCommand::SceneAdd);
+                }
                 break;
             case 18:
                 if (counters_.automaticAddedStableId != 0U &&
@@ -755,12 +769,29 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
     if (auto status = updateHierarchySearch(*tree); !status) {
         return status;
     }
+    if (auto status = updateSceneAddSearch(*tree); !status) {
+        return status;
+    }
     if (!projectBrowserUiRefreshPending_) {
         if (auto status = synchronizePendingProjectAssetSelection(*tree); !status) {
             return status;
         }
     }
-    if (pendingSceneDeleteDialogFocus_) {
+    if (auto status = processPendingSceneAddTemplate(*tree); !status) {
+        return status;
+    }
+    if (auto status = processPendingHierarchyRename(*tree); !status) {
+        return status;
+    }
+    if (auto status = processPendingHierarchyReorder(*tree); !status) {
+        return status;
+    }
+    if (pendingSceneAddDialogFocus_) {
+        if (auto status = tree->requestFocus(sceneAddSearchInput_); !status) {
+            return status;
+        }
+        pendingSceneAddDialogFocus_ = false;
+    } else if (pendingSceneDeleteDialogFocus_) {
         if (auto status = tree->requestFocus(
                 sceneDeleteDialog_.actions[SceneDeleteConfirmActionIndex]);
             !status) {
@@ -831,16 +862,16 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
     }
     if (sourceImportUiRefreshPending_) {
         sourceImportUiRefreshPending_ = false;
-        if (auto status = tree->setListViewDataSource(
-                sourceImportList_, sourceImportDataSource());
+        if (auto status = tree->setDataGridDataSource(
+                sourceImportGrid_, sourceImportGridDataSource());
             !status) {
             return status;
         }
-        if (auto status = tree->invalidateListViewItems(sourceImportList_); !status) {
+        if (auto status = tree->invalidateDataGridItems(sourceImportGrid_); !status) {
             return status;
         }
         if (sourceImportUnits_.empty()) {
-            if (auto status = tree->clearListViewSelection(sourceImportList_); !status) {
+            if (auto status = tree->clearDataGridSelection(sourceImportGrid_); !status) {
                 return status;
             }
             observedSourceImportSelectionIndex_.reset();
@@ -848,8 +879,8 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
             const u64 selectedIndex = std::min<u64>(
                 observedSourceImportSelectionIndex_.value_or(0U),
                 static_cast<u64>(sourceImportUnits_.size() - 1U));
-            if (auto status = tree->setListViewSelectedIndex(
-                    sourceImportList_, selectedIndex);
+            if (auto status = tree->setDataGridSelectedCell(
+                    sourceImportGrid_, selectedIndex, 0U);
                 !status) {
                 return status;
             }
@@ -946,20 +977,20 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
             }
         }
     }
-    auto sourceImportSelection = tree->listViewSelection(sourceImportList_);
+    auto sourceImportSelection = tree->dataGridSelection(sourceImportGrid_);
     if (!sourceImportSelection) {
         return Tina::Core::failure(std::move(sourceImportSelection.error()));
     }
     if (sourceImportSelection->hasValue() &&
         observedSourceImportSelectionIndex_ !=
-            sourceImportSelection->logicalIndex) {
-        if (sourceImportSelection->logicalIndex >= sourceImportUnits_.size()) {
+            sourceImportSelection->logicalRow) {
+        if (sourceImportSelection->logicalRow >= sourceImportUnits_.size()) {
             return Tina::Core::failure(
                 Tina::Core::CoreErrorCode::Internal,
-                "Source import ListView selected an unavailable intended unit");
+                "Source import DataGrid selected an unavailable intended unit");
         }
         observedSourceImportSelectionIndex_ =
-            sourceImportSelection->logicalIndex;
+            sourceImportSelection->logicalRow;
         if (auto status = refreshProjectAssetUi(*tree); !status) {
             return status;
         }
@@ -1152,6 +1183,10 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
     auto metrics = tree->treeViewMetrics(hierarchyTree_);
     if (!metrics) {
         return Tina::Core::failure(std::move(metrics.error()));
+    }
+    hierarchyTreeMetrics_ = *metrics;
+    if (auto rect = tree->committedLayoutRect(hierarchyTree_); rect) {
+        hierarchyTreeRect_ = *rect;
     }
     counters_.hierarchyLogicalItems = metrics->logicalItemCount;
     if (auto status = refreshWorkspacePanelsUi(*tree); !status) {
@@ -1391,6 +1426,12 @@ auto EditorWorkspaceState::processEditorShortcuts(
         }
     };
 
+    if (pendingSceneAddRequest_.has_value()) {
+        if (editorShortcutStarted(actions, EditorShortcutActions::Escape)) {
+            queue(EditorCommand::SceneAddCancel);
+        }
+        return Tina::Core::success();
+    }
     if (pendingSceneDeleteConfirmation_.has_value()) {
         if (editorShortcutStarted(actions, EditorShortcutActions::Escape)) {
             queue(EditorCommand::SceneDeleteCancel);
@@ -1792,6 +1833,7 @@ auto EditorWorkspaceState::playStartReady() const noexcept -> bool{
         Tina::EditorApp::Detail::EditorSourceImportServiceState;
     return sceneDocumentActive() && counters_.runtimePreviewValid &&
            !sourceImportStartPending_ &&
+           pendingSourceImportPathsUtf8_.empty() &&
            sourceImportService_.state() == ImportState::Idle &&
            !sourceImportCatalogCommitted_ &&
            !pendingProjectSwitch_.has_value() &&
@@ -1840,11 +1882,37 @@ auto EditorWorkspaceState::previewEntityHasSelectedAncestor(
                              viewportSelectedEntityCount_});
 }
 
-auto EditorWorkspaceState::importSourceFromDialog() -> Tina::Core::Status{
+auto EditorWorkspaceState::importSelectedSourceFiles(
+    std::span<const std::string> selectedPathsUtf8) -> Tina::Core::Status
+{
     if (!activeProjectWorkspace_.has_value()) {
-        authoringFeedback_ = "Open or create a project before importing source assets";
+        authoringFeedback_ = "File import requires an open Tina project";
         return Tina::Core::success();
     }
+
+    auto ingress = Tina::EditorApp::Detail::prepareEditorSourceImportIngress(
+        activeProjectWorkspace_->sourceRootUtf8(), selectedPathsUtf8);
+    if (!ingress) {
+        return reportAuthoringFailure("File import preparation rejected: ",
+                                      ingress.error());
+    }
+
+    auto merged = Tina::EditorApp::Detail::mergeEditorSourceImportSelection(
+        activeProjectWorkspace_->sourceRootUtf8(),
+        sourceImportUnits_,
+        ingress->projectPathsUtf8());
+    if (!merged) {
+        return reportAuthoringFailure("File import selection rejected: ",
+                                      merged.error());
+    }
+    if (auto status = startSourceImport(merged->intendedUnits); !status) {
+        return status;
+    }
+    ingress->commit();
+    return Tina::Core::success();
+}
+
+auto EditorWorkspaceState::importSourceFromDialog() -> Tina::Core::Status{
     if (sourceImportService_.state() !=
         Tina::EditorApp::Detail::EditorSourceImportServiceState::Idle) {
         authoringFeedback_ =
@@ -1870,8 +1938,10 @@ auto EditorWorkspaceState::importSourceFromDialog() -> Tina::Core::Status{
         },
     };
     auto selected = fileDialog_.openExistingFiles({
-        .titleUtf8 = "Import Source into Tina Project",
-        .initialDirectoryUtf8 = activeProjectWorkspace_->sourceRootUtf8(),
+        .titleUtf8 = "Select Files to Import",
+        .initialDirectoryUtf8 = activeProjectWorkspace_.has_value()
+                                    ? activeProjectWorkspace_->sourceRootUtf8()
+                                    : std::string_view{},
         .filters = filters,
         .maxSelectedPaths = Tina::EditorApp::Detail::EditorSourceImportUnitCapacity,
     });
@@ -1888,15 +1958,12 @@ auto EditorWorkspaceState::importSourceFromDialog() -> Tina::Core::Status{
         return Tina::Core::success();
     }
 
-    auto merged = Tina::EditorApp::Detail::mergeEditorSourceImportSelection(
-        activeProjectWorkspace_->sourceRootUtf8(),
-        sourceImportUnits_,
-        selected->selectedPathsUtf8);
-    if (!merged) {
-        return reportAuthoringFailure("Source import selection rejected: ",
-                                      merged.error());
+    if (activeProjectWorkspace_.has_value()) {
+        return importSelectedSourceFiles(selected->selectedPathsUtf8);
     }
-    return startSourceImport(merged->intendedUnits);
+
+    return createTemporaryProjectForImport(
+        std::move(selected->selectedPathsUtf8));
 }
 
 auto EditorWorkspaceState::activateWorkspace(Tina::PrimaryWindowUITreeUpdater& tree, WorkspaceMode mode) -> Tina::Core::Status{
@@ -1927,17 +1994,28 @@ auto EditorWorkspaceState::activateWorkspace(Tina::PrimaryWindowUITreeUpdater& t
     return Tina::Core::success();
 }
 
-auto EditorWorkspaceState::sourceImportDataSource() const noexcept -> UI::UIListViewDataSource{
-    return UI::UIListViewDataSource{
+auto EditorWorkspaceState::sourceImportGridDataSource() const noexcept
+    -> UI::UIDataGridDataSource
+{
+    return UI::UIDataGridDataSource{
         .state = this,
-        .itemCount = &EditorWorkspaceState::sourceImportItemCount,
-        .resolveItem = &EditorWorkspaceState::resolveSourceImportItem,
+        .rowCount = &EditorWorkspaceState::sourceImportRowCount,
+        .columnCount = &EditorWorkspaceState::sourceImportColumnCount,
+        .resolveRow = &EditorWorkspaceState::resolveSourceImportRow,
+        .resolveColumn = &EditorWorkspaceState::resolveSourceImportColumn,
+        .resolveCell = &EditorWorkspaceState::resolveSourceImportCell,
     };
 }
 
-auto EditorWorkspaceState::sourceImportItemCount(const void* state) noexcept -> u64{
+auto EditorWorkspaceState::sourceImportRowCount(const void* state) noexcept -> u64
+{
     const auto* self = static_cast<const EditorWorkspaceState*>(state);
     return self != nullptr ? self->sourceImportUnits_.size() : 0U;
+}
+
+auto EditorWorkspaceState::sourceImportColumnCount(const void* state) noexcept -> u32
+{
+    return state != nullptr ? SourceImportColumnCapacity : 0U;
 }
 
 auto EditorWorkspaceState::projectAssetDataSource() const noexcept -> UI::UIVirtualGridViewDataSource{

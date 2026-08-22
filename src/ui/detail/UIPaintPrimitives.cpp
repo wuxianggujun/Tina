@@ -106,6 +106,38 @@ std::optional<UICommittedLineGeometry> resolveCommittedLineGeometry(
                    ? std::optional<float>{normalizeFloat(converted)}
                    : std::nullopt;
     };
+    const auto finiteFloatAtOrBelow = [&](double value) noexcept
+        -> std::optional<float> {
+        auto converted = finiteFloat(value);
+        if (!converted)
+        {
+            return std::nullopt;
+        }
+        if (static_cast<double>(*converted) > value)
+        {
+            *converted = std::nextafter(
+                *converted, -(std::numeric_limits<float>::infinity)());
+        }
+        return std::isfinite(*converted)
+                   ? std::optional<float>{normalizeFloat(*converted)}
+                   : std::nullopt;
+    };
+    const auto finiteFloatAtOrAbove = [&](double value) noexcept
+        -> std::optional<float> {
+        auto converted = finiteFloat(value);
+        if (!converted)
+        {
+            return std::nullopt;
+        }
+        if (static_cast<double>(*converted) < value)
+        {
+            *converted = std::nextafter(
+                *converted, (std::numeric_limits<float>::infinity)());
+        }
+        return std::isfinite(*converted)
+                   ? std::optional<float>{normalizeFloat(*converted)}
+                   : std::nullopt;
+    };
 
     const auto startX = finiteFloat(static_cast<double>(worldOrigin.x) + line.start.x);
     const auto startY = finiteFloat(static_cast<double>(worldOrigin.y) + line.start.y);
@@ -135,11 +167,17 @@ std::optional<UICommittedLineGeometry> resolveCommittedLineGeometry(
                                     static_cast<double>(*endX)) + extentX;
     const double bottom = (std::max)(static_cast<double>(*startY),
                                      static_cast<double>(*endY)) + extentY;
-    const auto envelopeX = finiteFloat(left);
-    const auto envelopeY = finiteFloat(top);
-    const auto envelopeWidth = finiteFloat(right - left);
-    const auto envelopeHeight = finiteFloat(bottom - top);
-    if (!envelopeX || !envelopeY || !envelopeWidth || !envelopeHeight ||
+    const auto envelopeX = finiteFloatAtOrBelow(left);
+    const auto envelopeY = finiteFloatAtOrBelow(top);
+    if (!envelopeX || !envelopeY)
+    {
+        return std::nullopt;
+    }
+    const auto envelopeWidth = finiteFloatAtOrAbove(
+        right - static_cast<double>(*envelopeX));
+    const auto envelopeHeight = finiteFloatAtOrAbove(
+        bottom - static_cast<double>(*envelopeY));
+    if (!envelopeWidth || !envelopeHeight ||
         *envelopeWidth <= 0.0F || *envelopeHeight <= 0.0F)
     {
         return std::nullopt;

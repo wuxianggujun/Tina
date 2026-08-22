@@ -2,6 +2,463 @@
 
 namespace Tina::EditorApp::WorkspaceInternal {
 
+auto EditorWorkspaceState::sceneAddTemplateCount() const noexcept
+    -> Tina::Core::usize
+{
+    return workspaceMode_ == WorkspaceMode::World2D
+               ? Tina::Editor::world2DNodeTemplateRegistry().size()
+               : Tina::Editor::world3DNodeTemplateRegistry().size();
+}
+
+auto EditorWorkspaceState::showSceneAddModal(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    if (pendingSceneAddRequest_.has_value() ||
+        pendingSceneDeleteConfirmation_.has_value() ||
+        pendingDirtyCloseKey_.has_value() || !sceneDocumentActive()) {
+        return Tina::Core::success();
+    }
+    const auto* activeTab = documentTabs_.activeTab();
+    if (activeTab == nullptr) {
+        return Tina::Core::success();
+    }
+    // The selected item becomes the parent, matching what SceneAdd did before
+    // the picker existed.
+    const u32 parentStableId =
+        assetInspectorActive_ ? 0U : stableEntityIdForHierarchyItem(selectionKey_);
+    pendingSceneAddRequest_ = SceneAddRequest{
+        .documentKey = activeTab->key,
+        .workspace = workspaceMode_,
+        .parentStableId = parentStableId,
+        .documentRevision = activeDocumentRevision(),
+    };
+    if (sceneAddTemplateIndex_ >= sceneAddTemplateCount()) {
+        sceneAddTemplateIndex_ = 0;
+    }
+    if (auto status = refreshSceneAddModalUi(tree); !status) {
+        pendingSceneAddRequest_.reset();
+        return status;
+    }
+    if (auto status = tree.setLayoutStyle(
+            sceneAddModal_, sceneAddModalLayout(UI::UIVisibility::Visible));
+        !status) {
+        pendingSceneAddRequest_.reset();
+        return status;
+    }
+    authoringFeedback_ = "Choose the node kind to create";
+    pendingSceneAddDialogFocus_ = true;
+    sceneAddFilterUtf8_.clear();
+    return Tina::Core::success();
+}
+
+auto EditorWorkspaceState::hideSceneAddModal(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    if (!pendingSceneAddRequest_.has_value()) {
+        return Tina::Core::success();
+    }
+    if (auto status = tree.setLayoutStyle(
+            sceneAddModal_, sceneAddModalLayout(UI::UIVisibility::Collapsed));
+        !status) {
+        return status;
+    }
+    pendingSceneAddRequest_.reset();
+    pendingSceneAddTemplateIndex_.reset();
+    sceneAddFilterUtf8_.clear();
+    pendingSceneAddDialogFocus_ = false;
+    pendingHierarchyFocusRestore_ = true;
+    return Tina::Core::success();
+}
+
+auto EditorWorkspaceState::createNodeFromSceneAddRequest(
+    Tina::PrimaryWindowUITreeUpdater& tree,
+    std::optional<u32>& hierarchyRefreshStableId,
+    bool& requiresPreviewValidation) -> Tina::Core::Status
+{
+    if (!pendingSceneAddRequest_.has_value() ||
+        pendingSceneAddRequest_->creating) {
+        return Tina::Core::success();
+    }
+    pendingSceneAddRequest_->creating = true;
+    const SceneAddRequest request = *pendingSceneAddRequest_;
+    const auto* activeTab = documentTabs_.activeTab();
+    // The picker is modal, but a queued command or an external reload can still
+    // land first, so the captured target is re-checked before publishing.
+    const bool targetIsCurrent =
+        activeTab != nullptr && activeTab->key == request.documentKey &&
+        workspaceMode_ == request.workspace && sceneDocumentActive() &&
+        activeDocumentRevision() == request.documentRevision &&
+        (request.parentStableId == 0U ||
+         hierarchyRow(request.parentStableId) != nullptr);
+    if (!targetIsCurrent) {
+        authoringFeedback_ =
+            "Create cancelled: the target or canonical document changed before confirmation";
+        return hideSceneAddModal(tree);
+    }
+    const auto slot = static_cast<Tina::Core::usize>(sceneAddTemplateIndex_);
+    if (slot >= sceneAddTemplateCount()) {
+        authoringFeedback_ = "Create cancelled: the node kind is unavailable";
+        return hideSceneAddModal(tree);
+    }
+
+    Tina::Core::Result<Tina::Editor::EditorSceneOperationResult> added =
+        Tina::Core::failure(
+            Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+            "Editor scene node template is unknown");
+    std::string_view createdKind{};
+    if (request.workspace == WorkspaceMode::World2D) {
+        const auto registry = Tina::Editor::world2DNodeTemplateRegistry();
+        const auto& info = registry[slot];
+        createdKind = info.displayName;
+        Tina::Editor::World2DNodeTemplateAssets assets{};
+        if (info.requiresSpriteAsset) {
+            assets.spriteId = selectedProjectAssetIdOfKind(
+                Tina::AssetFormat::AssetKind::Sprite);
+            if (!assets.spriteId) {
+                assets.spriteId = editorAssetId(0x22U);
+            }
+        }
+        if (info.requiresAnimationClipAsset) {
+            assets.animationClipId = selectedProjectAssetIdOfKind(
+                Tina::AssetFormat::AssetKind::SpriteAnimationClip);
+            if (!assets.animationClipId) {
+                assets.animationClipId = editorAssetId(0x10U);
+            }
+        }
+        added = Tina::Editor::addWorld2DEntityOfTemplate(
+            document_,
+            static_cast<Tina::Editor::World2DNodeTemplate>(slot),
+            request.parentStableId, assets);
+    } else {
+        const auto registry = Tina::Editor::world3DNodeTemplateRegistry();
+        const auto& info = registry[slot];
+        createdKind = info.displayName;
+        Tina::Editor::World3DNodeTemplateAssets assets{};
+        if (info.requiresMeshAssets) {
+            assets.meshId = selectedProjectAssetIdOfKind(
+                Tina::AssetFormat::AssetKind::StaticMesh);
+            if (!assets.meshId) {
+                assets.meshId = editorAssetId(0x31U);
+            }
+            assets.materialId = selectedProjectAssetIdOfKind(
+                Tina::AssetFormat::AssetKind::Material);
+            if (!assets.materialId) {
+                assets.materialId = editorAssetId(0x32U);
+            }
+        }
+        added = Tina::Editor::addWorld3DNodeOfTemplate(
+            document3D_, static_cast<Tina::Editor::World3DNodeTemplate>(slot),
+            request.parentStableId, assets);
+    }
+    if (!added) {
+        Tina::Core::Error createError = std::move(added.error());
+        if (auto status = reportAuthoringFailure(
+                "Create failed; scene hierarchy preserved: ", createError);
+            !status) {
+            return status;
+        }
+        return hideSceneAddModal(tree);
+    }
+
+    hierarchyRefreshStableId = added->primaryStableId;
+    requiresPreviewValidation = true;
+    ++counters_.authoringEdits;
+    ++counters_.sceneAddCommands;
+    if (options_.autoDemo) {
+        counters_.automaticAddedStableId = added->primaryStableId;
+    }
+    try {
+        authoringFeedback_ = createdKind;
+        authoringFeedback_ += " added as one scene revision";
+    } catch (const std::bad_alloc&) {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
+                                   "Create Node feedback allocation failed");
+    }
+    return hideSceneAddModal(tree);
+}
+
+auto EditorWorkspaceState::refreshSceneAddModalUi(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    const bool world2D = workspaceMode_ == WorkspaceMode::World2D;
+    const auto registry = world2D
+                              ? Tina::Editor::world2DNodeTemplateRegistry()
+                              : Tina::Editor::world3DNodeTemplateRegistry();
+    try {
+        std::string parentText = "Parent: ";
+        const u32 parentStableId = pendingSceneAddRequest_.has_value()
+                                       ? pendingSceneAddRequest_->parentStableId
+                                       : 0U;
+        const EditorHierarchyRow* parentRow = hierarchyRow(parentStableId);
+        parentText += parentStableId != 0U && parentRow != nullptr
+                          ? std::string_view{parentRow->label}
+                          : (world2D ? std::string_view{"World2D Scene"}
+                                     : std::string_view{"World3D Scene"});
+        if (auto status = tree.setText(sceneAddParentLabel_, parentText);
+            !status) {
+            return status;
+        }
+    } catch (const std::bad_alloc&) {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
+                                   "Create Node parent label allocation failed");
+    }
+
+    for (Tina::Core::usize slot = 0; slot < sceneAddTemplateButtons_.size();
+         ++slot) {
+        const UI::UINodeId button = sceneAddTemplateButtons_[slot];
+        // Slots beyond the active registry are collapsed, so switching
+        // workspaces never leaves a stale row behind.
+        if (slot >= registry.size()) {
+            if (auto status = tree.setLayoutStyle(
+                    button,
+                    sceneAddTemplateRowLayout(UI::UIVisibility::Collapsed));
+                !status) {
+                return status;
+            }
+            continue;
+        }
+        const auto matchesFilter = [&](std::string_view text) {
+            if (sceneAddFilterUtf8_.empty()) {
+                return true;
+            }
+            if (sceneAddFilterUtf8_.size() > text.size()) {
+                return false;
+            }
+            for (Tina::Core::usize offset = 0;
+                 offset + sceneAddFilterUtf8_.size() <= text.size(); ++offset) {
+                bool matches = true;
+                for (Tina::Core::usize index = 0;
+                     index < sceneAddFilterUtf8_.size(); ++index) {
+                    const char left = text[offset + index];
+                    const char right = sceneAddFilterUtf8_[index];
+                    const char lowerLeft = left >= 'A' && left <= 'Z'
+                        ? static_cast<char>(left + ('a' - 'A')) : left;
+                    const char lowerRight = right >= 'A' && right <= 'Z'
+                        ? static_cast<char>(right + ('a' - 'A')) : right;
+                    if (lowerLeft != lowerRight) {
+                        matches = false;
+                        break;
+                    }
+                }
+                if (matches) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        const bool visible = matchesFilter(registry[slot].displayName) ||
+                             matchesFilter(registry[slot].description);
+        if (auto status = tree.setLayoutStyle(
+                button, sceneAddTemplateRowLayout(visible
+                    ? UI::UIVisibility::Visible : UI::UIVisibility::Collapsed));
+            !status) {
+            return status;
+        }
+        if (auto status = tree.setText(button, registry[slot].displayName);
+            !status) {
+            return status;
+        }
+        if (auto status = tree.setRadioButtonSelected(
+                button, slot == static_cast<Tina::Core::usize>(
+                                    sceneAddTemplateIndex_));
+            !status) {
+            return status;
+        }
+    }
+
+    // Asset-backed templates resolve the same way the Inspector's Add
+    // Component does (Project Assets selection, else the built-in preview
+    // asset), so no row is ever unreachable.
+    const Tina::Core::usize selected =
+        static_cast<Tina::Core::usize>(sceneAddTemplateIndex_) < registry.size()
+            ? static_cast<Tina::Core::usize>(sceneAddTemplateIndex_)
+            : 0U;
+    return tree.setText(
+        sceneAddDescription_,
+        registry.empty() ? std::string_view{} : registry[selected].description);
+}
+
+auto EditorWorkspaceState::processPendingSceneAddTemplate(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    if (!pendingSceneAddTemplateIndex_.has_value()) {
+        return Tina::Core::success();
+    }
+    const u32 requested = *pendingSceneAddTemplateIndex_;
+    pendingSceneAddTemplateIndex_.reset();
+    if (!pendingSceneAddRequest_.has_value() ||
+        requested >= sceneAddTemplateCount()) {
+        return Tina::Core::success();
+    }
+    sceneAddTemplateIndex_ = requested;
+    return refreshSceneAddModalUi(tree);
+}
+
+auto EditorWorkspaceState::updateSceneAddSearch(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    auto text = tree.text(sceneAddSearchInput_);
+    if (!text) {
+        return Tina::Core::failure(std::move(text.error()));
+    }
+    if (*text == sceneAddFilterUtf8_) {
+        return Tina::Core::success();
+    }
+    try {
+        sceneAddFilterUtf8_.assign(text->data(), text->size());
+    } catch (const std::bad_alloc&) {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
+                                   "Scene add search filter allocation failed");
+    }
+    return refreshSceneAddModalUi(tree);
+}
+
+auto EditorWorkspaceState::showHierarchyRename(
+    Tina::PrimaryWindowUITreeUpdater& tree, u32 stableId) -> Tina::Core::Status
+{
+    const EditorHierarchyRow* row = hierarchyRow(stableId);
+    if (row == nullptr || stableId == 0U || !sceneDocumentActive()) {
+        return Tina::Core::success();
+    }
+    hierarchyRenameStableId_ = stableId;
+    hierarchyRenameDocumentRevision_ = activeDocumentRevision();
+    hierarchyRenameVisible_ = true;
+    if (auto status = tree.setLayoutStyle(
+            hierarchyRenameRoot_, hierarchyRenameLayout(UI::UIVisibility::Visible));
+        !status) {
+        return status;
+    }
+    if (auto status = tree.setText(hierarchyRenameInput_, row->label); !status) {
+        return status;
+    }
+    if (auto status = tree.setTextSelection(
+            hierarchyRenameInput_, UI::UITextSelection{
+                .anchorCodepoint = 0,
+                .caretCodepoint = static_cast<u32>(row->label.size())}); !status) {
+        return status;
+    }
+    return tree.requestFocus(hierarchyRenameInput_);
+}
+
+auto EditorWorkspaceState::hideHierarchyRename(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    hierarchyRenameVisible_ = false;
+    hierarchyRenameStableId_ = 0;
+    hierarchyRenameDocumentRevision_ = 0;
+    pendingHierarchyRenameCancel_ = false;
+    pendingHierarchyRenameCommit_ = false;
+    return tree.setLayoutStyle(
+        hierarchyRenameRoot_, hierarchyRenameLayout(UI::UIVisibility::Collapsed));
+}
+
+auto EditorWorkspaceState::applyHierarchyRename(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    if (!hierarchyRenameVisible_ || hierarchyRenameStableId_ == 0U) {
+        return Tina::Core::success();
+    }
+    if (activeDocumentRevision() != hierarchyRenameDocumentRevision_ ||
+        hierarchyRow(hierarchyRenameStableId_) == nullptr) {
+        authoringFeedback_ = "Rename cancelled: the scene document changed";
+        return hideHierarchyRename(tree);
+    }
+    auto text = tree.text(hierarchyRenameInput_);
+    if (!text) {
+        return Tina::Core::failure(std::move(text.error()));
+    }
+    if (text->empty() || text->size() > 128U ||
+        !Tina::Core::isStrictUtf8WithoutNul(*text)) {
+        authoringFeedback_ = "Rename rejected: enter a non-empty UTF-8 name";
+        return Tina::Core::success();
+    }
+    try {
+        const auto existing = std::find_if(
+            hierarchyNameOverrides_.begin(), hierarchyNameOverrides_.end(),
+            [this](const EditorHierarchyNameOverride& candidate) {
+                return candidate.stableId == hierarchyRenameStableId_;
+            });
+        if (existing != hierarchyNameOverrides_.end()) {
+            existing->name.assign(text->data(), text->size());
+        } else {
+            hierarchyNameOverrides_.push_back({
+                .stableId = hierarchyRenameStableId_,
+                .name = std::string{text->data(), text->size()},
+            });
+        }
+    } catch (const std::bad_alloc&) {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
+                                   "Hierarchy rename allocation failed");
+    }
+    const u32 renamedStableId = hierarchyRenameStableId_;
+    if (auto status = rebuildHierarchyModel(); !status) {
+        return status;
+    }
+    if (auto status = tree.invalidateTreeViewItems(hierarchyTree_); !status) {
+        return status;
+    }
+    authoringFeedback_ = "Scene node renamed for this Editor session";
+    if (auto status = hideHierarchyRename(tree); !status) {
+        return status;
+    }
+    return tree.setTreeViewSelectedIndex(
+        hierarchyTree_, visibleHierarchyIndex(renamedStableId).value_or(0U));
+}
+
+auto EditorWorkspaceState::processPendingHierarchyRename(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    if (pendingHierarchyRenameCancel_) {
+        return hideHierarchyRename(tree);
+    }
+    if (pendingHierarchyRenameCommit_) {
+        pendingHierarchyRenameCommit_ = false;
+        pendingHierarchyRenameStableId_.reset();
+        return applyHierarchyRename(tree);
+    }
+    if (!pendingHierarchyRenameStableId_.has_value()) {
+        return Tina::Core::success();
+    }
+    const u32 stableId = *pendingHierarchyRenameStableId_;
+    pendingHierarchyRenameStableId_.reset();
+    return showHierarchyRename(tree, stableId);
+}
+
+auto EditorWorkspaceState::processPendingHierarchyReorder(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    if (!pendingHierarchyReorderStableId_.has_value() ||
+        !pendingHierarchyReorderBeforeStableId_.has_value()) {
+        return Tina::Core::success();
+    }
+    const u32 stableId = *pendingHierarchyReorderStableId_;
+    const u32 beforeStableId = *pendingHierarchyReorderBeforeStableId_;
+    pendingHierarchyReorderStableId_.reset();
+    pendingHierarchyReorderBeforeStableId_.reset();
+    if (!sceneDocumentActive() || hierarchyRow(stableId) == nullptr ||
+        hierarchyRow(beforeStableId) == nullptr) {
+        return Tina::Core::success();
+    }
+    const EditorHierarchyRow* source = hierarchyRow(stableId);
+    const EditorHierarchyRow* destination = hierarchyRow(beforeStableId);
+    if (source == nullptr || destination == nullptr ||
+        source->parentStableId != destination->parentStableId) {
+        return Tina::Core::success();
+    }
+    Tina::Core::Status status = workspaceMode_ == WorkspaceMode::World2D
+        ? Tina::Editor::reorderWorld2DEntity(document_, stableId, beforeStableId)
+        : Tina::Editor::reorderWorld3DNode(document3D_, stableId, beforeStableId);
+    if (!status) {
+        return status;
+    }
+    ++counters_.authoringEdits;
+    authoringFeedback_ = "Scene sibling order updated as one canonical revision";
+    if (auto refresh = refreshHierarchyTree(tree, stableId); !refresh) {
+        return refresh;
+    }
+    return refreshAuthoringUi(tree);
+}
+
 auto EditorWorkspaceState::showSceneDeleteConfirmation(
     Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
 {
@@ -357,6 +814,21 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
     }
     case EditorCommand::Save:
     case EditorCommand::SaveAs: {
+        if (temporaryProjectActive()) {
+            status = saveTemporaryProjectFromDialog();
+            if (!status) {
+                try {
+                    authoringFeedback_ = "Project save failed; temporary project preserved: ";
+                    authoringFeedback_ += status.error().message;
+                } catch (const std::bad_alloc&) {
+                    return Tina::Core::failure(
+                        Tina::Core::CoreErrorCode::OutOfMemory,
+                        "Project save failure message allocation failed");
+                }
+                status = Tina::Core::success();
+            }
+            break;
+        }
         if (command == EditorCommand::SaveAs) {
             const WorkspaceSessionState* session = activeDocumentSession();
             const std::string_view currentPath = session != nullptr
@@ -387,6 +859,7 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
             status = Tina::Core::success();
             break;
         }
+        projectSwitchBlockedByDirty_ = false;
         switch (documentTabs_.activeTab()->key.kind) {
         case Tina::Editor::EditorDocumentKind::World2D:
             authoringFeedback_ = "Canonical World2D document saved atomically";
@@ -413,27 +886,22 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
                 "Scene hierarchy commands require an active World2D or World3D document");
             break;
         }
-        const u32 parentStableId =
-            assetInspectorActive_ ? 0U : stableEntityIdForHierarchyItem(selectionKey_);
-        auto added = workspaceMode_ == WorkspaceMode::World2D
-                         ? Tina::Editor::addWorld2DEntity(document_, parentStableId)
-                         : Tina::Editor::addWorld3DNode(document3D_, parentStableId);
-        if (!added) {
-            status = Tina::Core::failure(std::move(added.error()));
-            break;
-        }
-        hierarchyRefreshStableId = added->primaryStableId;
-        requiresPreviewValidation = true;
-        ++counters_.authoringEdits;
-        ++counters_.sceneAddCommands;
-        if (options_.autoDemo) {
-            counters_.automaticAddedStableId = added->primaryStableId;
-        }
-        authoringFeedback_ = workspaceMode_ == WorkspaceMode::World2D
-                                 ? "Entity2D added as one scene revision"
-                                 : "Node3D added as one scene revision";
+        // Creation is a two-step command now: pick the node kind, then confirm.
+        // The kind is applied at Confirm so the whole node, components
+        // included, publishes as one canonical revision.
+        status = showSceneAddModal(tree);
         break;
     }
+    case EditorCommand::SceneAddConfirm:
+        status = createNodeFromSceneAddRequest(tree, hierarchyRefreshStableId,
+                                               requiresPreviewValidation);
+        break;
+    case EditorCommand::SceneAddCancel:
+        if (pendingSceneAddRequest_.has_value()) {
+            authoringFeedback_ = "Create cancelled; scene hierarchy preserved";
+            status = hideSceneAddModal(tree);
+        }
+        break;
     case EditorCommand::SceneDuplicate: {
         if (!sceneDocumentActive()) {
             status = Tina::Core::failure(

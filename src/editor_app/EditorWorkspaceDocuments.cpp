@@ -661,6 +661,7 @@ auto EditorWorkspaceState::confirmDirtyCloseSave(
     if (auto status = closeActiveDocument(tree); !status) {
         return status;
     }
+    projectSwitchBlockedByDirty_ = false;
     return hideDirtyCloseModal(tree);
 }
 
@@ -674,6 +675,7 @@ auto EditorWorkspaceState::confirmDirtyCloseDiscard(
     if (auto status = closeActiveDocument(tree, true); !status) {
         return status;
     }
+    projectSwitchBlockedByDirty_ = false;
     return hideDirtyCloseModal(tree);
 }
 

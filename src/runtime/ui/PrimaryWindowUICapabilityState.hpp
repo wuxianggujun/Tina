@@ -434,6 +434,43 @@ class PrimaryWindowUICapabilityState final {
         u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
         UI::UINodeId virtualGridView, u64 logicalIndex,
         UI::UIVirtualGridViewScrollAlignment alignment);
+    [[nodiscard]] Core::Status setDataGridDataSource(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+        UI::UINodeId dataGrid, UI::UIDataGridDataSource source);
+    [[nodiscard]] Core::Status clearDataGridDataSource(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+        UI::UINodeId dataGrid);
+    [[nodiscard]] Core::Status invalidateDataGridItems(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+        UI::UINodeId dataGrid);
+    [[nodiscard]] Core::Status setDataGridStyle(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+        UI::UINodeId dataGrid, const UI::UIDataGridStyle& style);
+    [[nodiscard]] Core::Result<UI::UIDataGridStyle>
+    dataGridStyle(u64 epoch, PrimaryWindowUIPhase phase,
+                  const UI::UITreeUpdater& updater, UI::UINodeId dataGrid);
+    [[nodiscard]] Core::Status setDataGridPaint(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+        UI::UINodeId dataGrid, const UI::UIDataGridPaint& paint);
+    [[nodiscard]] Core::Result<UI::UIDataGridPaint>
+    dataGridPaint(u64 epoch, PrimaryWindowUIPhase phase,
+                  const UI::UITreeUpdater& updater, UI::UINodeId dataGrid);
+    [[nodiscard]] Core::Result<UI::UIDataGridMetrics>
+    dataGridMetrics(u64 epoch, PrimaryWindowUIPhase phase,
+                    const UI::UITreeUpdater& updater, UI::UINodeId dataGrid);
+    [[nodiscard]] Core::Status setDataGridSelectedCell(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+        UI::UINodeId dataGrid, u64 logicalRow, u32 logicalColumn);
+    [[nodiscard]] Core::Status clearDataGridSelection(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+        UI::UINodeId dataGrid);
+    [[nodiscard]] Core::Result<UI::UIDataGridSelection>
+    dataGridSelection(u64 epoch, PrimaryWindowUIPhase phase,
+                      const UI::UITreeUpdater& updater, UI::UINodeId dataGrid);
+    [[nodiscard]] Core::Status scrollDataGridToCell(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+        UI::UINodeId dataGrid, u64 logicalRow, u32 logicalColumn,
+        UI::UIDataGridScrollAlignment alignment);
     [[nodiscard]] Core::Status setTreeViewDataSource(u64 epoch, PrimaryWindowUIPhase phase,
                                                      UI::UITreeUpdater& updater, UI::UINodeId treeView,
                                                      UI::UITreeViewDataSource source);

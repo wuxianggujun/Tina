@@ -158,9 +158,10 @@ TEST_F(UIComponentProfileTest, RequiredBudgetsAreExactAndRejectInvalidContracts)
     };
     auto dialogBudget = UI::requiredDialogBuildBudget(dialog);
     ASSERT_TRUE(dialogBudget.has_value()) << dialogBudget.error().message;
+    // modal, surface, header, title, content, body, action row, two actions.
     EXPECT_EQ(*dialogBudget,
               (UI::UIComponentBuildBudget{
-                  .nodes = 7,
+                  .nodes = 9,
                   .textBytes = 46,
                   .behaviors = {.activate = 2},
               }));

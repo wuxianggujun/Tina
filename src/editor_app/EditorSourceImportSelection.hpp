@@ -18,6 +18,9 @@ struct EditorSourceImportSelectionResult final {
     Core::u32 addedUnitCount = 0;
 };
 
+[[nodiscard]] Core::Result<EditorSourceImportUnitKind>
+editorSourceImportUnitKindForPath(std::string_view sourcePathUtf8);
+
 [[nodiscard]] Core::Result<std::vector<EditorSourceImportUnit>>
 validateEditorSourceImportIntendedSet(
     std::string_view sourceRootUtf8,

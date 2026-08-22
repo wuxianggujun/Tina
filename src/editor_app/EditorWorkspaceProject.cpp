@@ -22,7 +22,7 @@ auto EditorWorkspaceState::refreshProjectAssetUi(
                                    ? "No assets match this filter"
                                    : (assetResources_.testFixtureCatalog
                                           ? "No test assets match this filter"
-                                          : "No project assets");
+                                          : "No project open");
     }
     if (auto status = tree.setText(projectAssetSummary_, selectedAssetSummary);
         !status) {
@@ -30,7 +30,9 @@ auto EditorWorkspaceState::refreshProjectAssetUi(
     }
     if (auto status = tree.setText(
             projectAssetSource_,
-            assetResources_.projectCatalogConfigured
+            temporaryProjectActive()
+                ? "Temp"
+                : assetResources_.projectCatalogConfigured
                 ? "Project"
                 : (assetResources_.testFixtureCatalog ? "Test Data" : "No Project"));
         !status) {
@@ -67,11 +69,13 @@ auto EditorWorkspaceState::refreshProjectAssetUi(
     const bool sourceImportIdle =
         sourceImportService_.state() ==
         Tina::EditorApp::Detail::EditorSourceImportServiceState::Idle;
-    const bool sourceImportEditable =
-        activeProjectWorkspace_.has_value() &&
+    const bool sourceImportAvailable =
         !pendingProjectSwitch_.has_value() && !catalogRefreshPending_ &&
+        pendingSourceImportPathsUtf8_.empty() &&
         sourceImportIdle;
-    if (auto status = tree.setEnabled(sourceImportList_, sourceImportEditable);
+    const bool sourceImportEditable =
+        activeProjectWorkspace_.has_value() && sourceImportAvailable;
+    if (auto status = tree.setEnabled(sourceImportGrid_, sourceImportEditable);
         !status) {
         return status;
     }
@@ -104,7 +108,7 @@ auto EditorWorkspaceState::refreshProjectAssetUi(
         return status;
     }
     if (auto status = tree.setEnabled(importSourceButton_,
-                                      sourceImportEditable);
+                                      sourceImportAvailable);
         !status) {
         return status;
     }
@@ -346,6 +350,8 @@ auto EditorWorkspaceState::switchLiveProjectCatalog(
     if (!candidateTabs) {
         if (candidateTabs.error().code ==
             Tina::Editor::EditorErrorCode::DirtyDocumentRequiresConfirmation) {
+            pendingProjectSwitch_ = std::move(workspace);
+            projectSwitchBlockedByDirty_ = true;
             return reportAuthoringFailure(
                 "Project switch blocked; previous Catalog preserved: ",
                 candidateTabs.error());
@@ -460,14 +466,250 @@ auto EditorWorkspaceState::switchLiveProjectCatalog(
     sourceImportSupersededCatalogRootUtf8_.clear();
     sourceImportSupersededAuthoringCatalogRootUtf8_.clear();
     sourceImportCatalogCommitted_ = false;
+    projectSwitchBlockedByDirty_ = false;
     ++counters_.projectSwitches;
     observedProjectAssetSelectionIndex_.reset();
     previewAssetBindingsRefreshPending_ = false;
     projectBrowserUiRefreshPending_ = true;
+    if (!temporaryProjectSaveTargetRootUtf8_.empty() &&
+        activeProjectWorkspace_->projectRootUtf8() ==
+            temporaryProjectSaveTargetRootUtf8_) {
+        pendingTemporaryProjectCleanupRootUtf8_ =
+            std::move(temporaryProjectRootUtf8_);
+        temporaryProjectSaveTargetRootUtf8_.clear();
+        if (pendingSourceImportPathsUtf8_.empty()) {
+            cleanupOwnedTemporaryProject(
+                pendingTemporaryProjectCleanupRootUtf8_);
+            authoringFeedback_ = "Temporary project saved to its permanent location";
+        }
+    }
     return Tina::Core::success();
 }
 
+auto EditorWorkspaceState::initializeNewProjectAt(
+    std::string_view projectRootUtf8)
+    -> Tina::Core::Result<Tina::Editor::EditorProjectWorkspace>
+{
+    auto workspace = Tina::Editor::CreateNewEditorProject({
+        .projectRootUtf8 = projectRootUtf8,
+        .targetPlatform = editorTargetPlatform(),
+    });
+    if (!workspace) {
+        return Tina::Core::failure(std::move(workspace.error()));
+    }
+
+    if (auto status = publishEmptyEditorCatalog(
+            workspace->cookedCatalogRootUtf8(), workspace->targetPlatform());
+        !status) {
+        return Tina::Core::failure(std::move(status.error()));
+    }
+    std::pmr::unsynchronized_pool_resource validationMemory;
+    Tina::Asset::CatalogPackageOpenConfig openConfig{};
+    openConfig.manifest.catalog = {
+        .maxEntries = 1,
+        .maxDependencies = 0,
+        .maxDependenciesPerAsset = 0,
+        .memoryResource = &validationMemory,
+    };
+    openConfig.validation.verifyTypedPayload = true;
+    auto validatedCatalog = Tina::Asset::openCatalogPackage(
+        workspace->cookedCatalogRootUtf8(), openConfig);
+    if (!validatedCatalog) {
+        return Tina::Core::failure(std::move(validatedCatalog.error()));
+    }
+    return std::move(*workspace);
+}
+
+auto EditorWorkspaceState::scheduleNewProjectAt(
+    std::string_view projectRootUtf8,
+    std::vector<std::string> pendingSourceImportPathsUtf8) -> Tina::Core::Status
+{
+    auto workspace = initializeNewProjectAt(projectRootUtf8);
+    if (!workspace) {
+        return reportAuthoringFailure("Project creation failed: ", workspace.error());
+    }
+
+    try {
+        std::string feedback = pendingSourceImportPathsUtf8.empty()
+                                   ? "Project created; live Catalog switch scheduled: "
+                                   : "Project created; selected files will import after the Catalog switch: ";
+        feedback += workspace->projectRootUtf8();
+        pendingSourceImportPathsUtf8_ = std::move(pendingSourceImportPathsUtf8);
+        pendingProjectSwitch_ = std::move(*workspace);
+        projectSwitchBlockedByDirty_ = false;
+        authoringFeedback_.swap(feedback);
+    } catch (const std::bad_alloc&) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::OutOfMemory,
+            "Project creation success message allocation failed");
+    }
+    return Tina::Core::success();
+}
+
+auto EditorWorkspaceState::createTemporaryProjectForImport(
+    std::vector<std::string> pendingSourceImportPathsUtf8) -> Tina::Core::Status
+{
+    auto projectRoot = createUniqueEditorTempDirectory("tina_editor_project_");
+    if (!projectRoot) {
+        return reportAuthoringFailure(
+            "Temporary project creation failed: ", projectRoot.error());
+    }
+
+    try {
+        temporaryProjectRootUtf8_ = pathToUtf8(*projectRoot);
+    } catch (const std::bad_alloc&) {
+        std::error_code cleanupError;
+        (void)std::filesystem::remove_all(*projectRoot, cleanupError);
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::OutOfMemory,
+            "Temporary project path allocation failed");
+    }
+
+    auto status = scheduleNewProjectAt(
+        temporaryProjectRootUtf8_, std::move(pendingSourceImportPathsUtf8));
+    if (!status || !pendingProjectSwitch_.has_value()) {
+        cleanupOwnedTemporaryProject(temporaryProjectRootUtf8_);
+        return status;
+    }
+    authoringFeedback_ =
+        "Temporary project created; selected files will import without choosing a project folder";
+    return Tina::Core::success();
+}
+
+auto EditorWorkspaceState::saveTemporaryProjectFromDialog() -> Tina::Core::Status
+{
+    using ImportState =
+        Tina::EditorApp::Detail::EditorSourceImportServiceState;
+    if (!temporaryProjectActive()) {
+        return Tina::Core::failure(
+            Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+            "No temporary Editor project is active");
+    }
+    if (pendingProjectSwitch_.has_value() ||
+        !pendingSourceImportPathsUtf8_.empty() ||
+        sourceImportService_.state() != ImportState::Idle) {
+        authoringFeedback_ =
+            "Wait for the current resource import to finish before saving the project";
+        return Tina::Core::success();
+    }
+
+    auto selected = fileDialog_.pickFolder({
+        .titleUtf8 = "Save Tina Project in Empty Folder",
+    });
+    if (!selected) {
+        if (selected.error().code == Tina::Core::CoreErrorCode::Unsupported) {
+            authoringFeedback_ =
+                "Native project folder selection is unavailable on this platform";
+            return Tina::Core::success();
+        }
+        return Tina::Core::failure(std::move(selected.error()));
+    }
+    if (!selected->selected()) {
+        authoringFeedback_ = "Project save cancelled; temporary project preserved";
+        return Tina::Core::success();
+    }
+
+    auto workspace = initializeNewProjectAt(selected->selectedPathUtf8);
+    if (!workspace) {
+        return reportAuthoringFailure(
+            "Project save failed; temporary project preserved: ",
+            workspace.error());
+    }
+
+    try {
+        std::vector<std::string> temporarySourcePaths;
+        temporarySourcePaths.reserve(sourceImportUnits_.size());
+        for (const auto& unit : sourceImportUnits_) {
+            temporarySourcePaths.push_back(unit.sourcePathUtf8);
+        }
+
+        std::optional<Tina::EditorApp::Detail::EditorSourceImportIngress>
+            sourceIngress{};
+        std::vector<std::string> permanentSourcePaths;
+        if (!temporarySourcePaths.empty()) {
+            auto prepared =
+                Tina::EditorApp::Detail::prepareEditorSourceImportIngress(
+                    workspace->sourceRootUtf8(), temporarySourcePaths);
+            if (!prepared) {
+                return reportAuthoringFailure(
+                    "Project destination was initialized, but resource migration failed; "
+                    "temporary project preserved: ",
+                    prepared.error());
+            }
+            permanentSourcePaths.assign(
+                prepared->projectPathsUtf8().begin(),
+                prepared->projectPathsUtf8().end());
+            sourceIngress.emplace(std::move(*prepared));
+        }
+
+        std::string targetRoot{workspace->projectRootUtf8()};
+        std::string feedback =
+            permanentSourcePaths.empty()
+                ? "Temporary project save scheduled: "
+                : "Temporary project save scheduled; resources will recook at: ";
+        feedback += targetRoot;
+
+        pendingSourceImportPathsUtf8_ = std::move(permanentSourcePaths);
+        temporaryProjectSaveTargetRootUtf8_ = std::move(targetRoot);
+        pendingProjectSwitch_ = std::move(*workspace);
+        projectSwitchBlockedByDirty_ = false;
+        authoringFeedback_.swap(feedback);
+        if (sourceIngress.has_value()) {
+            sourceIngress->commit();
+        }
+    } catch (const std::bad_alloc&) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::OutOfMemory,
+            "Temporary project save staging allocation failed");
+    }
+    return Tina::Core::success();
+}
+
+auto EditorWorkspaceState::temporaryProjectActive() const noexcept -> bool
+{
+    return !temporaryProjectRootUtf8_.empty() &&
+           activeProjectWorkspace_.has_value() &&
+           activeProjectWorkspace_->projectRootUtf8() == temporaryProjectRootUtf8_;
+}
+
+auto EditorWorkspaceState::cleanupOwnedTemporaryProject(
+    std::string& projectRootUtf8) noexcept -> void
+{
+    if (projectRootUtf8.empty()) {
+        return;
+    }
+    try {
+        std::error_code tempError;
+        const auto tempRoot = std::filesystem::temp_directory_path(tempError);
+        const auto projectRoot = std::filesystem::u8path(
+            projectRootUtf8.begin(), projectRootUtf8.end()).lexically_normal();
+        const std::string fileName = pathToUtf8(projectRoot.filename());
+        if (tempError ||
+            !pathsReferToSameLocation(projectRoot.parent_path(),
+                                      tempRoot.lexically_normal()) ||
+            !fileName.starts_with("tina_editor_project_")) {
+            return;
+        }
+
+        std::error_code cleanupError;
+        if (validatePhysicalProjectDirectory(projectRoot, "temporaryProjectRoot")) {
+            (void)std::filesystem::remove_all(projectRoot, cleanupError);
+        } else {
+            (void)std::filesystem::remove(projectRoot, cleanupError);
+        }
+        if (!cleanupError) {
+            projectRootUtf8.clear();
+        }
+    } catch (...) {
+    }
+}
+
 auto EditorWorkspaceState::createNewProjectFromDialog() -> Tina::Core::Status{
+    if (temporaryProjectActive()) {
+        authoringFeedback_ =
+            "Save the temporary project before creating another project";
+        return Tina::Core::success();
+    }
     auto location = makeSaveDialogLocation(
         assetResources_.catalogRootUtf8, {}, true);
     if (!location) {
@@ -489,76 +731,15 @@ auto EditorWorkspaceState::createNewProjectFromDialog() -> Tina::Core::Status{
         authoringFeedback_ = "New project creation cancelled";
         return Tina::Core::success();
     }
-
-    auto workspace = Tina::Editor::CreateNewEditorProject({
-        .projectRootUtf8 = selected->selectedPathUtf8,
-        .targetPlatform = editorTargetPlatform(),
-    });
-    if (!workspace) {
-        try {
-            authoringFeedback_ = "Project creation failed: ";
-            authoringFeedback_ += workspace.error().message;
-            return Tina::Core::success();
-        } catch (const std::bad_alloc&) {
-            return Tina::Core::failure(
-                Tina::Core::CoreErrorCode::OutOfMemory,
-                "Project creation failure message allocation failed");
-        }
-    }
-
-    if (auto status = publishEmptyEditorCatalog(
-            workspace->cookedCatalogRootUtf8(), workspace->targetPlatform());
-        !status) {
-        try {
-            authoringFeedback_ =
-                "Project directories created, but empty Catalog initialization failed: ";
-            authoringFeedback_ += status.error().message;
-            return Tina::Core::success();
-        } catch (const std::bad_alloc&) {
-            return Tina::Core::failure(
-                Tina::Core::CoreErrorCode::OutOfMemory,
-                "Project Catalog initialization failure message allocation failed");
-        }
-    }
-    std::pmr::unsynchronized_pool_resource validationMemory;
-    Tina::Asset::CatalogPackageOpenConfig openConfig{};
-    openConfig.manifest.catalog = {
-        .maxEntries = 1,
-        .maxDependencies = 0,
-        .maxDependenciesPerAsset = 0,
-        .memoryResource = &validationMemory,
-    };
-    openConfig.validation.verifyTypedPayload = true;
-    auto validatedCatalog = Tina::Asset::openCatalogPackage(
-        workspace->cookedCatalogRootUtf8(), openConfig);
-    if (!validatedCatalog) {
-        try {
-            authoringFeedback_ =
-                "Project directories created, but empty Catalog validation failed: ";
-            authoringFeedback_ += validatedCatalog.error().message;
-            return Tina::Core::success();
-        } catch (const std::bad_alloc&) {
-            return Tina::Core::failure(
-                Tina::Core::CoreErrorCode::OutOfMemory,
-                "Project Catalog validation failure message allocation failed");
-        }
-    }
-
-    try {
-        std::string feedback =
-            "Project created; live Catalog switch scheduled: ";
-        feedback += workspace->projectRootUtf8();
-        pendingProjectSwitch_ = std::move(*workspace);
-        authoringFeedback_.swap(feedback);
-    } catch (const std::bad_alloc&) {
-        return Tina::Core::failure(
-            Tina::Core::CoreErrorCode::OutOfMemory,
-            "Project creation success message allocation failed");
-    }
-    return Tina::Core::success();
+    return scheduleNewProjectAt(selected->selectedPathUtf8);
 }
 
 auto EditorWorkspaceState::openProjectFromDialog() -> Tina::Core::Status{
+    if (temporaryProjectActive()) {
+        authoringFeedback_ =
+            "Save the temporary project before opening another project";
+        return Tina::Core::success();
+    }
     const std::string_view currentRoot = activeProjectWorkspace_.has_value()
                                              ? activeProjectWorkspace_->projectRootUtf8()
                                              : std::string_view{assetResources_.catalogRootUtf8};
@@ -591,6 +772,7 @@ auto EditorWorkspaceState::openProjectFromDialog() -> Tina::Core::Status{
         std::string feedback = "Project open scheduled: ";
         feedback += workspace->projectRootUtf8();
         pendingProjectSwitch_ = std::move(*workspace);
+        projectSwitchBlockedByDirty_ = false;
         authoringFeedback_.swap(feedback);
     } catch (const std::bad_alloc&) {
         return Tina::Core::failure(

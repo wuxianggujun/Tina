@@ -115,6 +115,28 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench_tests.exe `
   --gtest_filter='UIBenchmarkWorkloadsTests.*Timeline*'
 ```
 
+### UI-GRID-COLLECTIONS 集中 gate
+
+VirtualGridView/DataGrid 与 Editor consumer 的源码、测试和文档全部闭环后，复用常驻
+`windows-msvc-vnext-bgfx-product-2d` tree 做一次集中增量构建；不得在内部小切片重复 configure/build/test：
+
+```powershell
+cmake --build --preset windows-vnext-bgfx-product-2d-debug `
+  --target tina_ui_tests tina_runtime_ui_tests tina_editor_app_tests tina_editor_desktop `
+  --parallel 2 -- /nr:false
+
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_ui_tests.exe `
+  --gtest_filter='UIVirtualGridViewTest.*:UIDataGridTest.*'
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_runtime_ui_tests.exe `
+  --gtest_filter='UIInputRouteProducerTest.*Grid*:PrimaryWindowUICapabilityTest.DataGridFacade*'
+```
+
+随后直接运行完整 `tina_ui_tests.exe`、`tina_runtime_ui_tests.exe` 与既有 `tina_editor_app_tests.exe`，并执行
+`TinaEditor.exe --auto-demo --frames=70 --frame-delay-ms=0 --workspace=2d|3d` 两个最短产品 smoke。逻辑门禁覆盖
+100k logical item/row、固定 item/column/row/cell pool、响应式列、双轴/单轴 scrollbar、Pointer/Keyboard/Gamepad、
+disabled navigation、selection/semantics/paint、capacity overflow、失败原子 publication 和 warmup 后 PMR allocation
+不增长。具体 pass 数只能在本轮 executable 实际运行后回写 Backlog，不能由测试源码数量推断。
+
 ### UI-PAINT-002-A 逐角圆角统一 gate
 
 强类型四角 authoring 是跨 UI/Integration/Render 的公开契约改动。源码、测试、Showcase 与文档全部完成后，
@@ -1124,7 +1146,7 @@ artifact/byte count；TileMap 保存必须使用 canonical relative path 并 roo
 
 TinaEditor GPU viewport 大功能完整闭环后只做一次受影响正式 target 的增量验证，不在内部小切片重复构建或测试，
 也不重跑全量 UI/产品矩阵。
-`--auto-demo` 的最小预算为 68 帧，正式 2D/3D smoke 固定使用 68 帧；Color Picker 阶段会等待
+`--auto-demo` 的最小预算为 70 帧，正式 2D/3D smoke 固定使用 70 帧；Color Picker 阶段会等待
 Inspector 自动滚动与目标控件几何一起 committed，再由 RenderDevice 捕获可见画面，并继续保留最终
 Hierarchy selection 的确认帧：
 
@@ -1132,11 +1154,11 @@ Hierarchy selection 的确认帧：
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
   --target tina_editor_desktop --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\TinaEditor.exe `
-  --frames=68 --frame-delay-ms=0 --workspace=2d --auto-demo `
+  --frames=70 --frame-delay-ms=0 --workspace=2d --auto-demo `
   --rgba-output=artifacts/editor/captures/delete-dialog-2d.rgba `
   --rgba-stage=delete-dialog
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\TinaEditor.exe `
-  --frames=68 --frame-delay-ms=0 --workspace=3d --auto-demo `
+  --frames=70 --frame-delay-ms=0 --workspace=3d --auto-demo `
   --rgba-output=artifacts/editor/captures/delete-dialog-3d.rgba `
   --rgba-stage=delete-dialog
 ```
@@ -1182,7 +1204,7 @@ cmake --build --preset windows-vnext-bgfx-product-2d-debug `
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_editor_tests.exe `
   --gtest_filter=World2DAuthoringFileTests.*:World3DAuthoringFileTests.*:SpriteAnimationAuthoringFileTests.*:TileMapAuthoringFileTests.*:ProjectAssetBrowserTests.*:EditorProjectWorkspaceTests.*:EditorProjectCreationTests.*
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\TinaEditor.exe `
-  --frames=68 --frame-delay-ms=0 --workspace=2d --auto-demo `
+  --frames=70 --frame-delay-ms=0 --workspace=2d --auto-demo `
   --world2d-path=artifacts/editor/smoke/world2d.tworld `
   --world3d-path=artifacts/editor/smoke/world3d.tprefab
 ```
@@ -1250,11 +1272,13 @@ intended/total unit=`2/2`、`sourceImportStateCommitted=true`、Running/Ready=fa
 直到后续安全帧成功。state 必须是 immutable stage 的 sibling 文件，项目 tool cache 只以
 `.tina/cache/source-import/active-catalog.path` 作为唯一原子 commit marker；结束后以同一 `--project-root` 无
 `--import-on-start` reopen，要求恢复该 stage 及完整 intended unit 集，而不是退回固定 `Catalog/`。这是一轮大功能定向验收，
-不要求同时运行全量 UI、Runtime 或 product-2d gate。另需覆盖 Source 外选择、缺失物理文件和 cooker 首错，确认均保留旧
+不要求同时运行全量 UI、Runtime 或 product-2d gate。ingress unit 需覆盖外部媒体分类复制、未 commit 回滚、整批预检零写入、
+同名同内容复用、同名异内容后缀和重复物理选择单次复制；另需覆盖外部 recipe/glTF、缺失物理文件和 cooker 首错，确认均保留旧
 Catalog，且有限帧 JSON 返回真实错误而不是 lifecycle 通用失败。
-真实资源人工验收必须从普通模式 New/Open Project 开始，不使用 `--auto-demo`：把 `.png`/`.jpg`/`.jpeg` 放入
-项目 `Source/` 后用 Import Source，确认 Catalog 出现 Texture2D + Sprite，并可把 Sprite 用于 2D 文档预览；再导入
-`.gltf`/`.glb`，确认 Mesh/Material/Prefab 出现在 Browser 且 3D 文档能解析并绘制对应资源。导入失败时旧 Catalog、
+真实资源人工验收必须从普通模式 New/Open Project 开始，不使用 `--auto-demo`：用 `Import Files...` 直接选择项目外
+`.png`/`.jpg`/`.jpeg`，确认源文件复制到 `Source/Imported/Images/`，Catalog 出现 Texture2D + Sprite，并可把 Sprite 用于
+2D 文档预览；再把 `.gltf`/`.glb` 及其相对依赖完整放入项目 `Source/` 后选择，确认 Mesh/Material/Prefab 出现在 Browser
+且 3D 文档能解析并绘制对应资源。导入失败时旧 Catalog、
 Browser 和 preview 必须保持不变，且不能显示 test fixture 的纹理或 Cube 作为回退。
 Core 的目录替换失败回归保留在 `WriteFileTests.FailedAtomicReplacePreservesExistingTargetDirectory`；当前
 `tina_tests` 是 Core + Runtime monolithic target，小型 Editor 切片不为单个 filter 重编全部对象，留到大功能统一 gate。

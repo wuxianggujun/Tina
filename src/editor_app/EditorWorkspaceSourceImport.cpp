@@ -371,6 +371,16 @@ auto EditorWorkspaceState::commitSourceImportCatalog(
 }
 
 auto EditorWorkspaceState::updateSourceImport() -> Tina::Core::Status{
+    if (pendingProjectSwitch_.has_value()) {
+        return Tina::Core::success();
+    }
+    if (!pendingSourceImportPathsUtf8_.empty()) {
+        if (auto status = importSelectedSourceFiles(pendingSourceImportPathsUtf8_);
+            !status) {
+            return status;
+        }
+        pendingSourceImportPathsUtf8_.clear();
+    }
     if (sourceImportStartPending_) {
         sourceImportStartPending_ = false;
         if (auto status = startSourceImport(sourceImportUnits_); !status) {
@@ -457,24 +467,81 @@ auto EditorWorkspaceState::updateSourceImport() -> Tina::Core::Status{
     }
     sourceImportCatalogCommitted_ = false;
     sourceImportPendingStageRootUtf8_.clear();
+    cleanupOwnedTemporaryProject(pendingTemporaryProjectCleanupRootUtf8_);
     return Tina::Core::success();
 }
 
-auto EditorWorkspaceState::resolveSourceImportItem(
-    const void* state, u64 logicalIndex,
-    UI::UIListViewItemDescriptor& output) noexcept -> bool{
+auto EditorWorkspaceState::resolveSourceImportRow(
+    const void* state, u64 logicalRow,
+    UI::UIDataGridRowDescriptor& output) noexcept -> bool
+{
     const auto* self = static_cast<const EditorWorkspaceState*>(state);
-    if (self == nullptr || logicalIndex >= self->sourceImportUnits_.size()) {
+    if (self == nullptr || logicalRow >= self->sourceImportUnits_.size()) {
         return false;
     }
-    const auto& unit = self->sourceImportUnits_[
-        static_cast<Tina::Core::usize>(logicalIndex)];
-    output = UI::UIListViewItemDescriptor{
-        .key = 30'000U + logicalIndex,
-        .label = unit.sourcePathUtf8,
+    output = UI::UIDataGridRowDescriptor{
+        .key = 30'000U + logicalRow,
         .enabled = true,
     };
     return true;
+}
+
+auto EditorWorkspaceState::resolveSourceImportColumn(
+    const void* state, u32 logicalColumn,
+    UI::UIDataGridColumnDescriptor& output) noexcept -> bool
+{
+    if (state == nullptr || logicalColumn >= SourceImportColumnCapacity) {
+        return false;
+    }
+    if (logicalColumn == 0U) {
+        output = UI::UIDataGridColumnDescriptor{
+            .key = 1U,
+            .header = "Kind",
+            .width = SourceImportKindColumnWidth,
+        };
+    } else {
+        output = UI::UIDataGridColumnDescriptor{
+            .key = 2U,
+            .header = "Source",
+            .width = SourceImportSourceColumnWidth,
+        };
+    }
+    return true;
+}
+
+auto EditorWorkspaceState::resolveSourceImportCell(
+    const void* state, u64 logicalRow, u32 logicalColumn,
+    UI::UIDataGridCellDescriptor& output) noexcept -> bool
+{
+    const auto* self = static_cast<const EditorWorkspaceState*>(state);
+    if (self == nullptr || logicalRow >= self->sourceImportUnits_.size() ||
+        logicalColumn >= SourceImportColumnCapacity) {
+        return false;
+    }
+    const auto& unit = self->sourceImportUnits_[
+        static_cast<Tina::Core::usize>(logicalRow)];
+    if (logicalColumn == 1U) {
+        output = UI::UIDataGridCellDescriptor{.text = unit.sourcePathUtf8};
+        return true;
+    }
+
+    std::string_view kind{};
+    switch (unit.kind) {
+    case Tina::EditorApp::Detail::EditorSourceImportUnitKind::CatalogRecipe:
+        kind = "Catalog";
+        break;
+    case Tina::EditorApp::Detail::EditorSourceImportUnitKind::Gltf:
+        kind = "glTF";
+        break;
+    case Tina::EditorApp::Detail::EditorSourceImportUnitKind::Texture:
+        kind = "Texture";
+        break;
+    case Tina::EditorApp::Detail::EditorSourceImportUnitKind::Audio:
+        kind = "Audio";
+        break;
+    }
+    output = UI::UIDataGridCellDescriptor{.text = kind};
+    return !kind.empty();
 }
 
 } // namespace Tina::EditorApp::WorkspaceInternal

@@ -98,7 +98,15 @@ Windows EditorApp Project `New` 随后写零 entry current-schema manifest，以
 
 Editor source import 已在同一 Project/Catalog owner 上闭环。launch parser 强制 absolute strict UTF-8
 `--project-root`，可重复混合的 `--import-recipe` / `--import-gltf` / `--import-texture` / `--import-audio` 按 caller order 保留完整 intended unit 集，
-`--import-on-start` 只负责排队安全帧启动；人工 Import Source 支持 `.recipe`、`.gltf`、`.glb`、`.png`、`.jpg`、`.jpeg`、`.wav` 并复用该集合。
+`--import-on-start` 只负责排队安全帧启动；人工 `Import Files...` 支持 `.recipe`、`.gltf`、`.glb`、`.png`、`.jpg`、`.jpeg`、`.wav` 并复用该集合。
+无项目时，人工导入先创建 Editor 独占的系统临时 Project 并直接 cook，不要求用户提前选择永久目录；用户点击
+`Save` / `Save As` 后才选择空目录。保存路径会初始化新的 Project、把临时 `Source` 资源事务迁移到新根并重新 cook，
+不会复制包含绝对路径的 `.tina/cache` active pointer；成功切换后清理旧临时 Project，取消、迁移失败或 cook 失败均保留
+至少一份 Source 数据，未保存退出时只删除 Editor 自己创建且仍持有的临时 Project。
+项目 `Source/` 内文件直接进入 intended set；外部 PNG/JPEG/WAV 会在整批预检后复制到
+`Source/Imported/Images/` 或 `Source/Imported/Audio/`。ingress 不覆盖既有文件：同名同内容复用，同名异内容追加
+`_2`、`_3` 后缀，批内重复物理文件只复制一次；合并或 service 启动失败会回滚本批新文件与空目录。外部 recipe/glTF
+因可能依赖相对文件而拒绝单文件复制，必须先把完整依赖集置于 `Source/`。
 普通媒体一步导入：Texture importer 把一张图片 cook 成 path-derived Texture2D + 全幅默认 Sprite（Sprite 以 required 依赖引用纹理），
 Audio importer 把 PCM16 WAV cook 成 AudioClip；输出 AssetId 由 source-root 相对路径确定性派生，rename 视为 Removed+Added。后台
 `EditorSourceImportService` 只调用共享 `executeSourceImportPipeline()`，不触碰 UI/Render/AssetSystem；dirty/added unit

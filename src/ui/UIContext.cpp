@@ -149,6 +149,7 @@ using Detail::MenuItemState;
 using Detail::MenuState;
 using Detail::makeListViewScrollBarGeometry;
 using Detail::makeDataGridScrollBarGeometry;
+using Detail::makeDataGridScrollMetrics;
 using Detail::makeScrollBarGeometry;
 using Detail::makeTreeViewDisclosureRect;
 using Detail::makeTreeViewScrollBarGeometry;
@@ -175,6 +176,7 @@ using Detail::normalizeVirtualGridViewStyle;
 using Detail::normalizeDataGridCreateConfig;
 using Detail::normalizeDataGridPaint;
 using Detail::normalizeDataGridStyle;
+using Detail::resolveDataGridCommandNavigation;
 using Detail::resolveVirtualGridViewCommandNavigation;
 using Detail::NormalizedUIContextCapacityConfig;
 using Detail::makeNineSlicePatches;
@@ -4399,6 +4401,29 @@ struct UIContext::Impl final {
             state->paint.pressedSelectedItemBackgroundColor);
     }
 
+    [[nodiscard]] UIPremultipliedRgba8Color
+    resolvedDataGridRowSelectionColor(UINodeId cell) const noexcept
+    {
+        const UINodeId dataGrid = dataGridForCell(cell);
+        const DataGridState* state = dataGridStorage.tryGrid(dataGrid);
+        if (state == nullptr || !isSelectedDataGridRowCell(cell))
+        {
+            return {};
+        }
+        UIStraightSrgba8Color color = state->paint.selectedRowBackgroundColor;
+        if (isFocusVisible(dataGrid) &&
+            state->paint.focusedSelectedRowBackgroundColor.alpha != 0)
+        {
+            color = state->paint.focusedSelectedRowBackgroundColor;
+        }
+        if (isHoveredDataGridRowCell(cell) &&
+            state->paint.hoveredSelectedRowBackgroundColor.alpha != 0)
+        {
+            color = state->paint.hoveredSelectedRowBackgroundColor;
+        }
+        return widgetPaintColor(cell, premultiply(color));
+    }
+
     [[nodiscard]] UIPremultipliedRgba8Color resolvedTreeViewSelectionColor(UINodeId item) const noexcept
     {
         const UINodeId treeView = treeViewForItem(item);
@@ -4610,6 +4635,33 @@ struct UIContext::Impl final {
             const UIPremultipliedRgba8Color premultiplied = premultiply(color);
             return applyDisabledOpacity ? widgetPaintColor(layoutEntry.node, premultiplied) : premultiplied;
         };
+        const auto addGridLines = [&](UILogicalRect rect,
+                                      UIStraightSrgba8Color color) noexcept {
+            if (color.alpha == 0 || rect.width <= 0.0F || rect.height <= 0.0F)
+            {
+                return;
+            }
+            constexpr float GridLineThickness = 1.0F;
+            const float verticalThickness =
+                (std::min)(GridLineThickness, rect.width);
+            const float horizontalThickness =
+                (std::min)(GridLineThickness, rect.height);
+            const UIPremultipliedRgba8Color resolved = controlColor(color);
+            add(UILogicalRect{
+                    .x = normalizeFloat(rect.right() - verticalThickness),
+                    .y = rect.y,
+                    .width = verticalThickness,
+                    .height = rect.height,
+                },
+                resolved);
+            add(UILogicalRect{
+                    .x = rect.x,
+                    .y = normalizeFloat(rect.bottom() - horizontalThickness),
+                    .width = rect.width,
+                    .height = horizontalThickness,
+                },
+                resolved);
+        };
 
         const u32 nodeIndex = layoutEntry.node.index();
         const NodeRecord* record = recordByIndex(nodeIndex);
@@ -4789,6 +4841,38 @@ struct UIContext::Impl final {
                     add(geometry.thumb, controlColor(thumbColor));
                 }
             }
+        } else if (record != nullptr &&
+                   record->kind == BuiltinElementKind::DataGrid)
+        {
+            const DataGridState* state =
+                dataGridStorage.tryGrid(layoutEntry.node);
+            const DataGridLayoutScratch* gridLayout =
+                dataGridStorage.tryLayoutScratch(layoutEntry.node);
+            if (state != nullptr && gridLayout != nullptr)
+            {
+                const auto geometry = makeDataGridScrollBarGeometry(
+                    gridLayout->metrics, gridLayout->bodyViewportRect,
+                    state->paint.scrollBar);
+                const auto addBar = [&](UIScrollAxes axis,
+                                        const ScrollBarGeometry& bar) noexcept {
+                    if (!bar.visible)
+                    {
+                        return;
+                    }
+                    add(bar.track,
+                        controlColor(state->paint.scrollBar.trackColor));
+                    const UIStraightSrgba8Color thumbColor =
+                        scrollThumbDragActive &&
+                                armedScrollView == layoutEntry.node &&
+                                armedScrollAxis == axis &&
+                                state->paint.scrollBar.draggingThumbColor.alpha != 0
+                            ? state->paint.scrollBar.draggingThumbColor
+                            : state->paint.scrollBar.thumbColor;
+                    add(bar.thumb, controlColor(thumbColor));
+                };
+                addBar(UIScrollAxes::Horizontal, geometry.horizontal);
+                addBar(UIScrollAxes::Vertical, geometry.vertical);
+            }
         } else if (record != nullptr && record->kind == BuiltinElementKind::TreeView &&
                    nodeIndex < treeViewStatesByNodeIndex.size() && nodeIndex < treeViewLayoutScratchByNodeIndex.size())
         {
@@ -4916,6 +5000,46 @@ struct UIContext::Impl final {
         {
             add(layoutEntry.worldRect,
                 resolvedVirtualGridViewSelectionColor(layoutEntry.node));
+        } else if (record != nullptr &&
+                   record->kind == BuiltinElementKind::DataGridColumnHeader)
+        {
+            const DataGridColumnState* column =
+                dataGridStorage.tryColumn(layoutEntry.node);
+            const DataGridState* state = column != nullptr
+                                             ? dataGridStorage.tryGrid(
+                                                   column->dataGrid)
+                                             : nullptr;
+            if (column != nullptr && column->bound && state != nullptr)
+            {
+                if (state->paint.columnHeaderBackgroundColor.alpha != 0)
+                {
+                    add(layoutEntry.worldRect,
+                        controlColor(
+                            state->paint.columnHeaderBackgroundColor));
+                }
+                addGridLines(layoutEntry.worldRect,
+                             state->paint.gridLineColor);
+            }
+        } else if (record != nullptr &&
+                   record->kind == BuiltinElementKind::DataGridCell)
+        {
+            const DataGridCellState* cell =
+                dataGridStorage.tryCell(layoutEntry.node);
+            const DataGridState* state = cell != nullptr
+                                             ? dataGridStorage.tryGrid(
+                                                   cell->dataGrid)
+                                             : nullptr;
+            if (cell != nullptr && cell->bound && state != nullptr)
+            {
+                const UIPremultipliedRgba8Color selection =
+                    resolvedDataGridRowSelectionColor(layoutEntry.node);
+                if (!selection.isTransparent())
+                {
+                    add(layoutEntry.worldRect, selection);
+                }
+                addGridLines(layoutEntry.worldRect,
+                             state->paint.gridLineColor);
+            }
         } else if (record != nullptr && record->kind == BuiltinElementKind::TreeViewItem &&
                    nodeIndex < treeViewItemStatesByNodeIndex.size())
         {
@@ -5618,6 +5742,39 @@ struct UIContext::Impl final {
                                 defaultActionFocusButton ==
                                     virtualGridViewForItem(node);
             }
+        } else if (record->kind == BuiltinElementKind::DataGrid)
+        {
+            const DataGridLayoutScratch* layout =
+                dataGridStorage.tryLayoutScratch(node);
+            if (layout != nullptr)
+            {
+                const bool publishVertical =
+                    layout->metrics.maxScrollOffset.y > 0.0F ||
+                    layout->metrics.maxScrollOffset.x <= 0.0F;
+                entry.hasRange = true;
+                entry.maxValue = publishVertical
+                                     ? layout->metrics.maxScrollOffset.y
+                                     : layout->metrics.maxScrollOffset.x;
+                entry.value = publishVertical
+                                  ? layout->metrics.scrollOffset.y
+                                  : layout->metrics.scrollOffset.x;
+            }
+        } else if (record->kind == BuiltinElementKind::DataGridCell)
+        {
+            const DataGridCellState* cell = dataGridStorage.tryCell(node);
+            const DataGridRowState* row = cell != nullptr
+                                              ? dataGridStorage.tryRow(cell->row)
+                                              : nullptr;
+            if (cell != nullptr && row != nullptr)
+            {
+                entry.virtualItemKey = row->key;
+                entry.virtualItemIndex = row->logicalRow;
+                entry.selected = cell->bound && row->bound &&
+                                 isSelectedDataGridCell(node);
+                entry.focused = entry.enabled && entry.selected &&
+                                defaultActionFocusButton ==
+                                    dataGridForCell(node);
+            }
         } else if (record->kind == BuiltinElementKind::TreeView &&
                    nodeIndex < treeViewLayoutScratchByNodeIndex.size())
         {
@@ -5901,6 +6058,15 @@ struct UIContext::Impl final {
                    record->parentIndex != InvalidNodeIndex &&
                    isNodeEnabled(idForIndex(record->parentIndex));
         }
+        if (record != nullptr && record->kind == BuiltinElementKind::DataGridCell)
+        {
+            const DataGridCellState* cell = dataGridStorage.tryCell(node);
+            const DataGridRowState* row =
+                cell != nullptr ? dataGridStorage.tryRow(cell->row) : nullptr;
+            return cell != nullptr && cell->committedBound && row != nullptr &&
+                   row->committedBound && row->committedEnabled &&
+                   isNodeEnabled(cell->dataGrid);
+        }
         return true;
     }
 
@@ -5934,6 +6100,15 @@ struct UIContext::Impl final {
                    record->parentIndex != InvalidNodeIndex &&
                    isCandidateNodeEnabled(idForIndex(record->parentIndex));
         }
+        if (record != nullptr && record->kind == BuiltinElementKind::DataGridCell)
+        {
+            const DataGridCellState* cell = dataGridStorage.tryCell(node);
+            const DataGridRowState* row =
+                cell != nullptr ? dataGridStorage.tryRow(cell->row) : nullptr;
+            return cell != nullptr && cell->bound && row != nullptr &&
+                   row->bound && row->enabled &&
+                   isCandidateNodeEnabled(cell->dataGrid);
+        }
         return true;
     }
 
@@ -5947,7 +6122,8 @@ struct UIContext::Impl final {
         if (!behaviorStateStorage.hasActivate(button.index()) ||
             (*nodeResult)->kind == BuiltinElementKind::ListViewItem ||
             (*nodeResult)->kind == BuiltinElementKind::TreeViewItem ||
-            (*nodeResult)->kind == BuiltinElementKind::VirtualGridViewItem)
+            (*nodeResult)->kind == BuiltinElementKind::VirtualGridViewItem ||
+            (*nodeResult)->kind == BuiltinElementKind::DataGridCell)
         {
             return fail(UIErrorCode::InvalidButtonAction,
                         "UI action requires an Activate-capable non-virtual Element");
@@ -15493,9 +15669,40 @@ struct UIContext::Impl final {
         return record != nullptr && record->kind == BuiltinElementKind::TreeView;
     }
 
+    [[nodiscard]] bool isLiveVirtualGridView(
+        UINodeId virtualGridView) const noexcept
+    {
+        if (!virtualGridView.hasValue() || !contains(virtualGridView))
+        {
+            return false;
+        }
+        const NodeRecord* record = nodes.tryGet(virtualGridView.storageId());
+        return record != nullptr &&
+               record->kind == BuiltinElementKind::VirtualGridView &&
+               virtualGridViewStorage.tryView(virtualGridView) != nullptr;
+    }
+
+    [[nodiscard]] bool isLiveDataGrid(UINodeId dataGrid) const noexcept
+    {
+        if (!dataGrid.hasValue() || !contains(dataGrid))
+        {
+            return false;
+        }
+        const NodeRecord* record = nodes.tryGet(dataGrid.storageId());
+        return record != nullptr && record->kind == BuiltinElementKind::DataGrid &&
+               dataGridStorage.tryGrid(dataGrid) != nullptr;
+    }
+
     [[nodiscard]] bool isLiveVirtualView(UINodeId node) const noexcept
     {
-        return isLiveListView(node) || isLiveTreeView(node);
+        return isLiveListView(node) || isLiveTreeView(node) ||
+               isLiveVirtualGridView(node) || isLiveDataGrid(node);
+    }
+
+    [[nodiscard]] bool isLiveVerticalVirtualView(UINodeId node) const noexcept
+    {
+        return isLiveListView(node) || isLiveTreeView(node) ||
+               isLiveVirtualGridView(node);
     }
 
     [[nodiscard]] bool isLiveScrollable(UINodeId node) const noexcept
@@ -15578,6 +15785,34 @@ struct UIContext::Impl final {
             return makeTreeViewScrollBarGeometry(state.committedMetrics, state.committedViewportRect,
                                                  state.paint.scrollBar);
         }
+        if (isLiveVirtualGridView(scrollView))
+        {
+            if (axis != UIScrollAxes::Vertical)
+            {
+                return {};
+            }
+            const VirtualGridViewState* state =
+                virtualGridViewStorage.tryView(scrollView);
+            return state != nullptr
+                       ? makeVirtualGridViewScrollBarGeometry(
+                             state->committedMetrics,
+                             state->committedViewportRect,
+                             state->paint.scrollBar)
+                       : ScrollBarGeometry{};
+        }
+        if (isLiveDataGrid(scrollView))
+        {
+            const DataGridState* state = dataGridStorage.tryGrid(scrollView);
+            if (state == nullptr)
+            {
+                return {};
+            }
+            const auto geometry = makeDataGridScrollBarGeometry(
+                state->committedMetrics, state->committedBodyViewportRect,
+                state->paint.scrollBar);
+            return axis == UIScrollAxes::Horizontal ? geometry.horizontal
+                                                    : geometry.vertical;
+        }
         if (!isLiveScrollView(scrollView))
         {
             return {};
@@ -15627,6 +15862,53 @@ struct UIContext::Impl final {
                 return Core::failure(dirty.error());
             }
             state.requestedScrollOffset = requested.y;
+            return true;
+        }
+        if (isLiveVirtualGridView(scrollView))
+        {
+            VirtualGridViewState* state =
+                virtualGridViewStorage.tryView(scrollView);
+            if (state == nullptr)
+            {
+                return false;
+            }
+            requested.x = 0.0F;
+            requested.y = normalizeFloat((std::clamp)(
+                requested.y, 0.0F,
+                state->committedMetrics.maxScrollOffset));
+            if (state->requestedScrollOffset == requested.y)
+            {
+                return false;
+            }
+            if (Core::Status dirty = markScrollOffsetDirty(scrollView); !dirty)
+            {
+                return Core::failure(dirty.error());
+            }
+            state->requestedScrollOffset = requested.y;
+            return true;
+        }
+        if (isLiveDataGrid(scrollView))
+        {
+            DataGridState* state = dataGridStorage.tryGrid(scrollView);
+            if (state == nullptr)
+            {
+                return false;
+            }
+            requested.x = normalizeFloat((std::clamp)(
+                requested.x, 0.0F,
+                state->committedMetrics.maxScrollOffset.x));
+            requested.y = normalizeFloat((std::clamp)(
+                requested.y, 0.0F,
+                state->committedMetrics.maxScrollOffset.y));
+            if (state->requestedScrollOffset == requested)
+            {
+                return false;
+            }
+            if (Core::Status dirty = markScrollOffsetDirty(scrollView); !dirty)
+            {
+                return Core::failure(dirty.error());
+            }
+            state->requestedScrollOffset = requested;
             return true;
         }
         UIScrollBehaviorState* state = behaviorStateStorage.tryScrollState(scrollView.index());
@@ -15679,7 +15961,38 @@ struct UIContext::Impl final {
                     state.requestedScrollOffset,
                     state.committedMetrics.maxScrollOffset,
                     state.style.wheelStep, delta),
-            };
+                };
+        }
+        if (isLiveVirtualGridView(scrollView))
+        {
+            const VirtualGridViewState* state =
+                virtualGridViewStorage.tryView(scrollView);
+            return state != nullptr
+                       ? UIScrollOffset{
+                             .x = 0.0F,
+                             .y = resolveVirtualScrollWheelOffset(
+                                 state->requestedScrollOffset,
+                                 state->committedMetrics.maxScrollOffset,
+                                 state->style.wheelStep, delta),
+                         }
+                       : UIScrollOffset{};
+        }
+        if (isLiveDataGrid(scrollView))
+        {
+            const DataGridState* state = dataGridStorage.tryGrid(scrollView);
+            return state != nullptr
+                       ? resolveScrollWheelOffset(
+                             state->requestedScrollOffset,
+                             UIScrollViewStyle{
+                                 .axes = UIScrollAxes::Both,
+                                 .scrollBarVisibility =
+                                     state->style.scrollBarVisibility,
+                                 .wheelStep = state->style.wheelStep,
+                             },
+                             makeDataGridScrollMetrics(
+                                 state->committedMetrics),
+                             delta)
+                       : UIScrollOffset{};
         }
         const UIScrollBehaviorState* state = behaviorStateStorage.tryScrollState(scrollView.index());
         if (state == nullptr)
@@ -15705,6 +16018,18 @@ struct UIContext::Impl final {
         {
             return treeViewStatesByNodeIndex[scrollView.index()].requestedScrollOffset != resolved.y;
         }
+        if (isLiveVirtualGridView(scrollView))
+        {
+            const VirtualGridViewState* state =
+                virtualGridViewStorage.tryView(scrollView);
+            return state != nullptr &&
+                   state->requestedScrollOffset != resolved.y;
+        }
+        if (isLiveDataGrid(scrollView))
+        {
+            const DataGridState* state = dataGridStorage.tryGrid(scrollView);
+            return state != nullptr && state->requestedScrollOffset != resolved;
+        }
         const UIScrollBehaviorState* state = behaviorStateStorage.tryScrollState(scrollView.index());
         return state != nullptr && state->requestedOffset != resolved;
     }
@@ -15723,35 +16048,69 @@ struct UIContext::Impl final {
                                                                 UILogicalPoint position, float grabOffset)
     {
         if (!isLiveScrollable(scrollView) || !isNodeEnabled(scrollView) ||
-            (isLiveVirtualView(scrollView) && axis != UIScrollAxes::Vertical))
+            (isLiveVerticalVirtualView(scrollView) &&
+             axis != UIScrollAxes::Vertical))
         {
             return false;
         }
         const bool listView = isLiveListView(scrollView);
         const bool treeView = isLiveTreeView(scrollView);
+        const bool virtualGridView = isLiveVirtualGridView(scrollView);
+        const bool dataGrid = isLiveDataGrid(scrollView);
         const UIScrollBehaviorState* scrollState =
-            listView || treeView ? nullptr : behaviorStateStorage.tryScrollState(scrollView.index());
-        if (!listView && !treeView && scrollState == nullptr)
+            listView || treeView || virtualGridView || dataGrid
+                ? nullptr
+                : behaviorStateStorage.tryScrollState(scrollView.index());
+        if (!listView && !treeView && !virtualGridView && !dataGrid &&
+            scrollState == nullptr)
         {
             return false;
         }
         const ScrollBarGeometry geometry = committedScrollBarGeometry(scrollView, axis);
-        const float maxOffset =
-            listView ? listViewStatesByNodeIndex[scrollView.index()].committedMetrics.maxScrollOffset
-            : treeView
-                ? treeViewStatesByNodeIndex[scrollView.index()].committedMetrics.maxScrollOffset
-                : scrollAxisMaxOffset(scrollState->committedMetrics, axis);
+        const float maxOffset = listView
+                                    ? listViewStatesByNodeIndex[scrollView.index()]
+                                          .committedMetrics.maxScrollOffset
+                                : treeView
+                                    ? treeViewStatesByNodeIndex[scrollView.index()]
+                                          .committedMetrics.maxScrollOffset
+                                : virtualGridView
+                                    ? virtualGridViewStorage.tryView(scrollView)
+                                          ->committedMetrics.maxScrollOffset
+                                : dataGrid
+                                    ? (axis == UIScrollAxes::Horizontal
+                                           ? dataGridStorage.tryGrid(scrollView)
+                                                 ->committedMetrics.maxScrollOffset.x
+                                           : dataGridStorage.tryGrid(scrollView)
+                                                 ->committedMetrics.maxScrollOffset.y)
+                                    : scrollAxisMaxOffset(
+                                          scrollState->committedMetrics, axis);
         const auto axisOffset = resolveScrollThumbOffset(
             geometry, axis, position, grabOffset, maxOffset);
         if (!axisOffset)
         {
             return false;
         }
-        UIScrollOffset next =
-            listView
-                ? UIScrollOffset{.x = 0.0F, .y = listViewStatesByNodeIndex[scrollView.index()].requestedScrollOffset}
-            : treeView
-                ? UIScrollOffset{.x = 0.0F, .y = treeViewStatesByNodeIndex[scrollView.index()].requestedScrollOffset}
+        UIScrollOffset next = listView
+                                  ? UIScrollOffset{
+                                        .x = 0.0F,
+                                        .y = listViewStatesByNodeIndex[scrollView.index()]
+                                                 .requestedScrollOffset,
+                                    }
+                              : treeView
+                                  ? UIScrollOffset{
+                                        .x = 0.0F,
+                                        .y = treeViewStatesByNodeIndex[scrollView.index()]
+                                                 .requestedScrollOffset,
+                                    }
+                              : virtualGridView
+                                  ? UIScrollOffset{
+                                        .x = 0.0F,
+                                        .y = virtualGridViewStorage.tryView(scrollView)
+                                                 ->requestedScrollOffset,
+                                    }
+                              : dataGrid
+                                  ? dataGridStorage.tryGrid(scrollView)
+                                        ->requestedScrollOffset
                                   : scrollState->requestedOffset;
         setScrollAxisOffset(next, axis, *axisOffset);
         return applyScrollOffsetFromInput(scrollView, next);
@@ -15761,15 +16120,21 @@ struct UIContext::Impl final {
                                                          UILogicalPoint position)
     {
         if (!isLiveScrollable(scrollView) || !isNodeEnabled(scrollView) ||
-            (isLiveVirtualView(scrollView) && axis != UIScrollAxes::Vertical))
+            (isLiveVerticalVirtualView(scrollView) &&
+             axis != UIScrollAxes::Vertical))
         {
             return false;
         }
         const bool listView = isLiveListView(scrollView);
         const bool treeView = isLiveTreeView(scrollView);
+        const bool virtualGridView = isLiveVirtualGridView(scrollView);
+        const bool dataGrid = isLiveDataGrid(scrollView);
         const UIScrollBehaviorState* scrollState =
-            listView || treeView ? nullptr : behaviorStateStorage.tryScrollState(scrollView.index());
-        if (!listView && !treeView && scrollState == nullptr)
+            listView || treeView || virtualGridView || dataGrid
+                ? nullptr
+                : behaviorStateStorage.tryScrollState(scrollView.index());
+        if (!listView && !treeView && !virtualGridView && !dataGrid &&
+            scrollState == nullptr)
         {
             return false;
         }
@@ -15779,17 +16144,44 @@ struct UIContext::Impl final {
             return false;
         }
         const float pageExtent = listView
-                                     ? listViewStatesByNodeIndex[scrollView.index()].committedMetrics.viewportSize.height
-            : treeView
-                ? treeViewStatesByNodeIndex[scrollView.index()].committedMetrics.viewportSize.height
+                                     ? listViewStatesByNodeIndex[scrollView.index()]
+                                           .committedMetrics.viewportSize.height
+                                 : treeView
+                                     ? treeViewStatesByNodeIndex[scrollView.index()]
+                                           .committedMetrics.viewportSize.height
+                                 : virtualGridView
+                                     ? virtualGridViewStorage.tryView(scrollView)
+                                           ->committedMetrics.viewportSize.height
+                                 : dataGrid
+                                     ? (axis == UIScrollAxes::Horizontal
+                                            ? dataGridStorage.tryGrid(scrollView)
+                                                  ->committedMetrics.viewportSize.width
+                                            : dataGridStorage.tryGrid(scrollView)
+                                                  ->committedMetrics.viewportSize.height)
                                      : (axis == UIScrollAxes::Horizontal
                                             ? scrollState->committedMetrics.viewportSize.width
                                             : scrollState->committedMetrics.viewportSize.height);
-        UIScrollOffset next =
-            listView
-                ? UIScrollOffset{.x = 0.0F, .y = listViewStatesByNodeIndex[scrollView.index()].requestedScrollOffset}
-            : treeView
-                ? UIScrollOffset{.x = 0.0F, .y = treeViewStatesByNodeIndex[scrollView.index()].requestedScrollOffset}
+        UIScrollOffset next = listView
+                                  ? UIScrollOffset{
+                                        .x = 0.0F,
+                                        .y = listViewStatesByNodeIndex[scrollView.index()]
+                                                 .requestedScrollOffset,
+                                    }
+                              : treeView
+                                  ? UIScrollOffset{
+                                        .x = 0.0F,
+                                        .y = treeViewStatesByNodeIndex[scrollView.index()]
+                                                 .requestedScrollOffset,
+                                    }
+                              : virtualGridView
+                                  ? UIScrollOffset{
+                                        .x = 0.0F,
+                                        .y = virtualGridViewStorage.tryView(scrollView)
+                                                 ->requestedScrollOffset,
+                                    }
+                              : dataGrid
+                                  ? dataGridStorage.tryGrid(scrollView)
+                                        ->requestedScrollOffset
                                   : scrollState->requestedOffset;
         const auto axisOffset = resolveScrollTrackPageOffset(
             geometry, axis, position, scrollAxisOffset(next, axis), pageExtent);
@@ -15816,11 +16208,20 @@ struct UIContext::Impl final {
             {
                 continue;
             }
-            if (isLiveVirtualView(node))
+            if (isLiveVerticalVirtualView(node))
             {
-                const float maxOffset = isLiveListView(node)
-                                            ? listViewStatesByNodeIndex[node.index()].committedMetrics.maxScrollOffset
-                                            : treeViewStatesByNodeIndex[node.index()].committedMetrics.maxScrollOffset;
+                const VirtualGridViewState* virtualGrid =
+                    virtualGridViewStorage.tryView(node);
+                const float maxOffset =
+                    isLiveListView(node)
+                        ? listViewStatesByNodeIndex[node.index()]
+                              .committedMetrics.maxScrollOffset
+                    : isLiveTreeView(node)
+                        ? treeViewStatesByNodeIndex[node.index()]
+                              .committedMetrics.maxScrollOffset
+                    : virtualGrid != nullptr
+                        ? virtualGrid->committedMetrics.maxScrollOffset
+                        : 0.0F;
                 if (!(maxOffset > 0.0F))
                 {
                     continue;
@@ -15833,6 +16234,43 @@ struct UIContext::Impl final {
                         .axis = UIScrollAxes::Vertical,
                         .geometry = geometry,
                         .thumb = containsPointHalfOpen(geometry.thumb, position),
+                    };
+                }
+                continue;
+            }
+            if (isLiveDataGrid(node))
+            {
+                const DataGridState* state = dataGridStorage.tryGrid(node);
+                if (state == nullptr)
+                {
+                    continue;
+                }
+                for (const UIScrollAxes axis : {
+                         UIScrollAxes::Horizontal,
+                         UIScrollAxes::Vertical,
+                     })
+                {
+                    const float maxOffset =
+                        axis == UIScrollAxes::Horizontal
+                            ? state->committedMetrics.maxScrollOffset.x
+                            : state->committedMetrics.maxScrollOffset.y;
+                    if (!(maxOffset > 0.0F))
+                    {
+                        continue;
+                    }
+                    const ScrollBarGeometry geometry =
+                        committedScrollBarGeometry(node, axis);
+                    if (!geometry.visible ||
+                        !containsPointHalfOpen(geometry.track, position))
+                    {
+                        continue;
+                    }
+                    return ScrollBarPointerHit{
+                        .scrollView = node,
+                        .axis = axis,
+                        .geometry = geometry,
+                        .thumb = containsPointHalfOpen(
+                            geometry.thumb, position),
                     };
                 }
                 continue;
@@ -17983,6 +18421,118 @@ struct UIContext::Impl final {
         return Core::success();
     }
 
+    [[nodiscard]] UINodeId dataGridForCell(UINodeId cell) const noexcept
+    {
+        if (!contains(cell))
+        {
+            return {};
+        }
+        const NodeRecord* record = nodes.tryGet(cell.storageId());
+        const DataGridCellState* cellState = dataGridStorage.tryCell(cell);
+        if (record == nullptr || record->kind != BuiltinElementKind::DataGridCell ||
+            cellState == nullptr || record->parentIndex != cellState->row.index())
+        {
+            return {};
+        }
+        const DataGridRowState* row = dataGridStorage.tryRow(cellState->row);
+        const DataGridColumnState* column =
+            dataGridStorage.tryColumn(cellState->column);
+        const DataGridState* grid = dataGridStorage.tryGrid(cellState->dataGrid);
+        return row != nullptr && column != nullptr && grid != nullptr &&
+                       row->dataGrid == cellState->dataGrid &&
+                       column->dataGrid == cellState->dataGrid
+                   ? cellState->dataGrid
+                   : UINodeId{};
+    }
+
+    [[nodiscard]] bool isSelectedDataGridCell(UINodeId cell) const noexcept
+    {
+        const UINodeId dataGrid = dataGridForCell(cell);
+        const DataGridState* grid = dataGridStorage.tryGrid(dataGrid);
+        const DataGridCellState* cellState = dataGridStorage.tryCell(cell);
+        const DataGridRowState* row =
+            cellState != nullptr ? dataGridStorage.tryRow(cellState->row) : nullptr;
+        const DataGridColumnState* column =
+            cellState != nullptr ? dataGridStorage.tryColumn(cellState->column)
+                                 : nullptr;
+        return grid != nullptr && grid->selection.hasValue() &&
+               cellState != nullptr && cellState->bound && row != nullptr &&
+               row->bound && column != nullptr && column->bound &&
+               row->key == grid->selection.rowKey &&
+               column->key == grid->selection.columnKey &&
+               cellState->logicalRow == grid->selection.logicalRow &&
+               cellState->logicalColumn == grid->selection.logicalColumn;
+    }
+
+    [[nodiscard]] bool isSelectedDataGridRowCell(UINodeId cell) const noexcept
+    {
+        const UINodeId dataGrid = dataGridForCell(cell);
+        const DataGridState* grid = dataGridStorage.tryGrid(dataGrid);
+        const DataGridCellState* cellState = dataGridStorage.tryCell(cell);
+        const DataGridRowState* row =
+            cellState != nullptr ? dataGridStorage.tryRow(cellState->row) : nullptr;
+        return grid != nullptr && grid->selection.hasValue() &&
+               cellState != nullptr && cellState->bound && row != nullptr &&
+               row->bound && row->key == grid->selection.rowKey &&
+               cellState->logicalRow == grid->selection.logicalRow;
+    }
+
+    [[nodiscard]] bool isHoveredDataGridRowCell(UINodeId cell) const noexcept
+    {
+        const DataGridCellState* cellState = dataGridStorage.tryCell(cell);
+        const DataGridCellState* hoveredState =
+            dataGridStorage.tryCell(hoveredPrimaryControl);
+        const DataGridRowState* row =
+            cellState != nullptr ? dataGridStorage.tryRow(cellState->row) : nullptr;
+        const DataGridRowState* hoveredRow = hoveredState != nullptr
+                                                 ? dataGridStorage.tryRow(
+                                                       hoveredState->row)
+                                                 : nullptr;
+        return cellState != nullptr && hoveredState != nullptr && row != nullptr &&
+               hoveredRow != nullptr && cellState->dataGrid == hoveredState->dataGrid &&
+               row->bound && hoveredRow->bound && row->key == hoveredRow->key &&
+               row->logicalRow == hoveredRow->logicalRow;
+    }
+
+    [[nodiscard]] Core::Status selectCommittedDataGridCell(UINodeId cell)
+    {
+        const UINodeId dataGrid = dataGridForCell(cell);
+        DataGridState* grid = dataGridStorage.tryGrid(dataGrid);
+        const DataGridCellState* cellState = dataGridStorage.tryCell(cell);
+        const DataGridRowState* row =
+            cellState != nullptr ? dataGridStorage.tryRow(cellState->row) : nullptr;
+        const DataGridColumnState* column =
+            cellState != nullptr ? dataGridStorage.tryColumn(cellState->column)
+                                 : nullptr;
+        if (grid == nullptr || cellState == nullptr || row == nullptr ||
+            column == nullptr)
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI DataGrid selection requires a bound cell");
+        }
+        if (!cellState->committedBound || !row->committedBound ||
+            !row->committedEnabled || !column->committedBound)
+        {
+            return Core::success();
+        }
+        const UIDataGridSelection selection{
+            .rowKey = row->committedKey,
+            .columnKey = column->committedKey,
+            .logicalRow = cellState->committedLogicalRow,
+            .logicalColumn = cellState->committedLogicalColumn,
+        };
+        if (grid->selection == selection)
+        {
+            return Core::success();
+        }
+        if (Core::Status dirty = markPaintDirty(dataGrid); !dirty)
+        {
+            return dirty;
+        }
+        static_cast<void>(dataGridStorage.setSelection(dataGrid, selection));
+        return Core::success();
+    }
+
     [[nodiscard]] Core::Result<NodeRecord*> resolveTreeView(UINodeId treeView)
     {
         auto nodeResult = resolveNode(treeView);
@@ -19336,7 +19886,8 @@ struct UIContext::Impl final {
     }
 
     [[nodiscard]] Core::Result<UIDataGridSelection> resolveDataGridSelection(
-        UINodeId dataGrid, u64 logicalRow, u32 logicalColumn) const
+        UINodeId dataGrid, u64 logicalRow, u32 logicalColumn,
+        bool* rowEnabled = nullptr) const
     {
         const DataGridState* state = dataGridStorage.tryGrid(dataGrid);
         if (state == nullptr || !state->dataSource.hasValue())
@@ -19365,6 +19916,10 @@ struct UIContext::Impl final {
         {
             return fail(UIErrorCode::InvalidControlValue,
                         "UI DataGrid failed to resolve a stable logical cell");
+        }
+        if (rowEnabled != nullptr)
+        {
+            *rowEnabled = row.enabled;
         }
         return UIDataGridSelection{
             .rowKey = row.key,
@@ -19692,6 +20247,7 @@ struct UIContext::Impl final {
         dataGridColumnWidthScratch.clear();
         const u32 columnCount =
             state->dataSource.columnCount(state->dataSource.state);
+        double logicalContentWidth = 0.0;
         for (u32 column = 0; column < columnCount; ++column)
         {
             UIDataGridColumnDescriptor descriptor{};
@@ -19704,6 +20260,21 @@ struct UIContext::Impl final {
                             "UI DataGrid column descriptor is invalid");
             }
             dataGridColumnWidthScratch.push_back(descriptor.width);
+            logicalContentWidth += static_cast<double>(descriptor.width);
+        }
+        const u64 rowCount =
+            state->dataSource.rowCount(state->dataSource.state);
+        const double logicalContentHeight =
+            static_cast<double>(rowCount) * state->style.rowHeight;
+        const double maximumFloat =
+            static_cast<double>((std::numeric_limits<float>::max)());
+        if (!std::isfinite(logicalContentWidth) ||
+            !std::isfinite(logicalContentHeight) ||
+            logicalContentWidth > maximumFloat ||
+            logicalContentHeight > maximumFloat)
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI DataGrid logical content extent is not representable");
         }
         const double cellStartX = Detail::resolveDataGridColumnOffset(
             dataGridColumnWidthScratch, logicalColumn);
@@ -19712,6 +20283,12 @@ struct UIContext::Impl final {
         const double cellStartY =
             static_cast<double>(logicalRow) * state->style.rowHeight;
         const double cellEndY = cellStartY + state->style.rowHeight;
+        const double maximumScrollOffsetX = (std::max)(
+            0.0, logicalContentWidth -
+                     state->committedMetrics.viewportSize.width);
+        const double maximumScrollOffsetY = (std::max)(
+            0.0, logicalContentHeight -
+                     state->committedMetrics.viewportSize.height);
         const auto alignAxis = [alignment](double start, double end,
                                            double viewport,
                                            double current) noexcept {
@@ -19741,12 +20318,12 @@ struct UIContext::Impl final {
                 alignAxis(cellStartX, cellEndX,
                           state->committedMetrics.viewportSize.width,
                           state->requestedScrollOffset.x),
-                0.0, static_cast<double>(state->committedMetrics.maxScrollOffset.x)))),
+                0.0, maximumScrollOffsetX))),
             .y = normalizeFloat(static_cast<float>((std::clamp)(
                 alignAxis(cellStartY, cellEndY,
                           state->committedMetrics.viewportSize.height,
                           state->requestedScrollOffset.y),
-                0.0, static_cast<double>(state->committedMetrics.maxScrollOffset.y)))),
+                0.0, maximumScrollOffsetY))),
         };
         if (requested == state->requestedScrollOffset)
         {
@@ -21108,6 +21685,18 @@ struct UIContext::Impl final {
                     virtualGridViewStorage.publishItemBindings(
                         idForIndex(index));
                 }
+            } else if (record->kind == BuiltinElementKind::DataGrid)
+            {
+                const UINodeId dataGrid = idForIndex(index);
+                DataGridState* state = dataGridStorage.tryGrid(dataGrid);
+                DataGridLayoutScratch* layout =
+                    dataGridStorage.tryLayoutScratch(dataGrid);
+                if (state != nullptr && layout != nullptr)
+                {
+                    state->requestedScrollOffset = layout->metrics.scrollOffset;
+                    dataGridStorage.publishMetrics(dataGrid);
+                    dataGridStorage.publishBindings(dataGrid);
+                }
             } else if (record->kind == BuiltinElementKind::TreeView && index < treeViewStatesByNodeIndex.size() &&
                        index < treeViewLayoutScratchByNodeIndex.size())
             {
@@ -22212,6 +22801,17 @@ struct UIContext::Impl final {
             nearestButtonRecord != nullptr && nearestButtonRecord->kind == BuiltinElementKind::TreeViewItem
                 ? treeViewForItem(nearestButton)
                 : UINodeId{};
+        const UINodeId nearestVirtualGridView =
+            nearestButtonRecord != nullptr &&
+                    nearestButtonRecord->kind ==
+                        BuiltinElementKind::VirtualGridViewItem
+                ? virtualGridViewForItem(nearestButton)
+                : UINodeId{};
+        const UINodeId nearestDataGrid =
+            nearestButtonRecord != nullptr &&
+                    nearestButtonRecord->kind == BuiltinElementKind::DataGridCell
+                ? dataGridForCell(nearestButton)
+                : UINodeId{};
         const bool nearestTreeDisclosureAtRouteStart =
             nearestTreeView.hasValue() && pointWithinCommittedTreeDisclosure(nearestButton, input.position, entries);
 
@@ -22368,6 +22968,8 @@ struct UIContext::Impl final {
                 addRouteDirtyReservationCandidate(nearestButton);
                 addRouteDirtyReservationCandidate(nearestListView);
                 addRouteDirtyReservationCandidate(nearestTreeView);
+                addRouteDirtyReservationCandidate(nearestVirtualGridView);
+                addRouteDirtyReservationCandidate(nearestDataGrid);
             }
         } else if (input.kind == UIRoutedPointerEventKind::Move)
         {
@@ -22437,6 +23039,10 @@ struct UIContext::Impl final {
                     addMenuActivationDirtyReservationCandidates(armedButtonAtRouteStart);
                     addTabActivationDirtyReservationCandidates(armedButtonAtRouteStart);
                     addRouteDirtyReservationCandidate(listViewForItem(armedButtonAtRouteStart));
+                    addRouteDirtyReservationCandidate(
+                        virtualGridViewForItem(armedButtonAtRouteStart));
+                    addRouteDirtyReservationCandidate(
+                        dataGridForCell(armedButtonAtRouteStart));
                     const UINodeId armedTreeView = treeViewForItem(armedButtonAtRouteStart);
                     if (pointWithinArmedTreeDisclosure)
                     {
@@ -22733,7 +23339,11 @@ struct UIContext::Impl final {
                         nextKeyboardFocus =
                             nextButtonRecord->kind == BuiltinElementKind::ListViewItem ? nearestListView
                             : nextButtonRecord->kind == BuiltinElementKind::TreeViewItem ? nearestTreeView
-                                                                                       : nearestButton;
+                            : nextButtonRecord->kind == BuiltinElementKind::VirtualGridViewItem
+                                ? nearestVirtualGridView
+                            : nextButtonRecord->kind == BuiltinElementKind::DataGridCell
+                                ? nearestDataGrid
+                                : nearestButton;
                     }
                     interactionPaintNode = nearestButton;
                 }
@@ -23143,6 +23753,29 @@ struct UIContext::Impl final {
                     armedRecord != nullptr && armedRecord->kind == BuiltinElementKind::ListViewItem)
                 {
                     if (Core::Status selected = selectCommittedListViewItem(armedButtonAtRouteStart); !selected)
+                    {
+                        return Core::failure(selected.error());
+                    }
+                }
+                if (const NodeRecord* armedRecord = nodes.tryGet(armedButtonAtRouteStart.storageId());
+                    armedRecord != nullptr &&
+                    armedRecord->kind == BuiltinElementKind::VirtualGridViewItem)
+                {
+                    if (Core::Status selected =
+                            selectCommittedVirtualGridViewItem(
+                                armedButtonAtRouteStart);
+                        !selected)
+                    {
+                        return Core::failure(selected.error());
+                    }
+                }
+                if (const NodeRecord* armedRecord = nodes.tryGet(armedButtonAtRouteStart.storageId());
+                    armedRecord != nullptr &&
+                    armedRecord->kind == BuiltinElementKind::DataGridCell)
+                {
+                    if (Core::Status selected = selectCommittedDataGridCell(
+                            armedButtonAtRouteStart);
+                        !selected)
                     {
                         return Core::failure(selected.error());
                     }
@@ -24808,10 +25441,22 @@ struct UIContext::Impl final {
         }
         if (plan->activateCurrentSelection)
         {
+            bool activated = false;
+            if (state.selection.hasValue())
+            {
+                auto resolved = resolveVirtualGridViewLogicalItem(
+                    virtualGridView, state.selection.logicalIndex);
+                if (!resolved)
+                {
+                    return Core::failure(resolved.error());
+                }
+                activated = resolved->enabled &&
+                            resolved->key == state.selection.key;
+            }
             virtualGridViewCommandPressLatch.latch(command);
             return UIVirtualGridViewCommandResult{
                 .consumed = true,
-                .activated = state.selection.hasValue(),
+                .activated = activated,
                 .selection = state.selection,
             };
         }
@@ -24824,13 +25469,55 @@ struct UIContext::Impl final {
             };
         }
 
-        auto descriptor = resolveVirtualGridViewLogicalItem(
-            virtualGridView, plan->targetIndex);
-        if (!descriptor)
+        const bool searchByRow =
+            command == UIVirtualGridViewCommand::PreviousRow ||
+            command == UIVirtualGridViewCommand::NextRow ||
+            command == UIVirtualGridViewCommand::PreviousPage ||
+            command == UIVirtualGridViewCommand::NextPage;
+        const bool searchBackward =
+            command == UIVirtualGridViewCommand::PreviousItem ||
+            command == UIVirtualGridViewCommand::PreviousRow ||
+            command == UIVirtualGridViewCommand::PreviousPage ||
+            command == UIVirtualGridViewCommand::LastItem;
+        u32 logicalColumnCount = state.committedMetrics.logicalColumnCount;
+        if (itemCount < logicalColumnCount)
         {
-            return Core::failure(descriptor.error());
+            logicalColumnCount = static_cast<u32>(itemCount);
         }
-        if (!descriptor->enabled)
+        const u64 searchStride = searchByRow ? logicalColumnCount : u64{1};
+        u64 candidateIndex = plan->targetIndex;
+        std::optional<UIVirtualGridViewItemDescriptor> candidateDescriptor{};
+        for (u64 visited = 0; visited < itemCount; ++visited)
+        {
+            auto resolved = resolveVirtualGridViewLogicalItem(
+                virtualGridView, candidateIndex);
+            if (!resolved)
+            {
+                return Core::failure(resolved.error());
+            }
+            if (resolved->enabled)
+            {
+                candidateDescriptor = *resolved;
+                break;
+            }
+            if (searchBackward)
+            {
+                if (candidateIndex < searchStride)
+                {
+                    break;
+                }
+                candidateIndex -= searchStride;
+            }
+            else
+            {
+                if (searchStride > itemCount - 1 - candidateIndex)
+                {
+                    break;
+                }
+                candidateIndex += searchStride;
+            }
+        }
+        if (!candidateDescriptor.has_value())
         {
             virtualGridViewCommandPressLatch.latch(command);
             return UIVirtualGridViewCommandResult{
@@ -24840,10 +25527,11 @@ struct UIContext::Impl final {
         }
 
         const UIVirtualGridViewSelection nextSelection{
-            .key = descriptor->key,
-            .logicalIndex = plan->targetIndex,
-            .logicalRow = plan->targetRow,
-            .logicalColumn = plan->targetColumn,
+            .key = candidateDescriptor->key,
+            .logicalIndex = candidateIndex,
+            .logicalRow = candidateIndex / logicalColumnCount,
+            .logicalColumn = static_cast<u32>(
+                candidateIndex % logicalColumnCount),
         };
         const bool changed = state.selection != nextSelection;
         if (changed)
@@ -24857,7 +25545,7 @@ struct UIContext::Impl final {
         }
         const UINodeId updaterRoot = idForIndex(focusRecord->rootIndex);
         if (Core::Status revealed = scrollVirtualGridViewToIndexFromUpdater(
-                updaterRoot, virtualGridView, plan->targetIndex,
+                updaterRoot, virtualGridView, candidateIndex,
                 UIVirtualGridViewScrollAlignment::Nearest);
             !revealed)
         {
@@ -24865,6 +25553,197 @@ struct UIContext::Impl final {
         }
         virtualGridViewCommandPressLatch.latch(command);
         return UIVirtualGridViewCommandResult{
+            .consumed = true,
+            .changed = changed,
+            .selection = state.selection,
+        };
+    }
+
+    [[nodiscard]] Core::Result<UIDataGridCommandResult>
+    routeDataGridCommand(UIDataGridCommand command, bool pressed)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (routeDispatchDepth != 0)
+        {
+            return fail(UIErrorCode::PointerRouteAlreadyInProgress,
+                        "UI DataGrid command cannot run during pointer routing");
+        }
+        drainDeferredRootDestroys();
+
+        if (!dataGridCommandPressLatch.accepts(command))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI DataGrid command is not recognized");
+        }
+        if (!pressed)
+        {
+            return UIDataGridCommandResult{
+                .consumed = dataGridCommandPressLatch.release(command)};
+        }
+        if (dataGridCommandPressLatch.isLatched(command))
+        {
+            return UIDataGridCommandResult{.consumed = true};
+        }
+
+        UINodeId dataGrid = defaultActionFocusButton;
+        const NodeRecord* focusRecord =
+            contains(dataGrid) ? nodes.tryGet(dataGrid.storageId()) : nullptr;
+        if (focusRecord != nullptr &&
+            focusRecord->kind == BuiltinElementKind::DataGridCell)
+        {
+            dataGrid = dataGridForCell(dataGrid);
+            focusRecord = contains(dataGrid)
+                              ? nodes.tryGet(dataGrid.storageId())
+                              : nullptr;
+        }
+        if (focusRecord == nullptr ||
+            focusRecord->kind != BuiltinElementKind::DataGrid ||
+            !isNodeEnabled(dataGrid))
+        {
+            return UIDataGridCommandResult{};
+        }
+
+        DataGridState* statePointer = dataGridStorage.tryGrid(dataGrid);
+        if (statePointer == nullptr)
+        {
+            return fail(Core::CoreErrorCode::Internal,
+                        "UI DataGrid state is unavailable");
+        }
+        DataGridState& state = *statePointer;
+        const u64 rowCount = state.dataSource.hasValue()
+                                 ? state.dataSource.rowCount(state.dataSource.state)
+                                 : 0;
+        const u32 columnCount = state.dataSource.hasValue()
+                                    ? state.dataSource.columnCount(
+                                          state.dataSource.state)
+                                    : 0;
+        if (columnCount > state.columnCapacity)
+        {
+            return fail(UIErrorCode::CapacityExceeded,
+                        "UI DataGrid logical columns exceed the fixed column pool");
+        }
+        const auto plan = resolveDataGridCommandNavigation(
+            command, state, rowCount, columnCount);
+        if (!plan)
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI DataGrid command navigation shape is invalid");
+        }
+        const auto consumeWithoutChange = [&]() noexcept {
+            dataGridCommandPressLatch.latch(command);
+            return UIDataGridCommandResult{
+                .consumed = true,
+                .selection = state.selection,
+            };
+        };
+        if (plan->activateCurrentSelection)
+        {
+            bool selectedRowEnabled = false;
+            UIDataGridSelection resolvedSelection{};
+            if (state.selection.hasValue())
+            {
+                auto resolved = resolveDataGridSelection(
+                    dataGrid, state.selection.logicalRow,
+                    state.selection.logicalColumn, &selectedRowEnabled);
+                if (!resolved)
+                {
+                    return Core::failure(resolved.error());
+                }
+                resolvedSelection = *resolved;
+            }
+            const bool activated = selectedRowEnabled &&
+                                   resolvedSelection.hasValue() &&
+                                   resolvedSelection == state.selection;
+            dataGridCommandPressLatch.latch(command);
+            return UIDataGridCommandResult{
+                .consumed = true,
+                .activated = activated,
+                .selection = state.selection,
+            };
+        }
+        if (!plan->hasTarget)
+        {
+            return consumeWithoutChange();
+        }
+
+        const bool maySearchAnotherRow =
+            !state.selection.hasValue() ||
+            command == UIDataGridCommand::PreviousRow ||
+            command == UIDataGridCommand::NextRow ||
+            command == UIDataGridCommand::PreviousPage ||
+            command == UIDataGridCommand::NextPage ||
+            command == UIDataGridCommand::FirstCell ||
+            command == UIDataGridCommand::LastCell;
+        const bool searchBackward =
+            command == UIDataGridCommand::PreviousRow ||
+            command == UIDataGridCommand::PreviousPage ||
+            command == UIDataGridCommand::LastCell;
+        u64 candidateRow = plan->targetRow;
+        std::optional<UIDataGridSelection> candidateSelection{};
+        for (u64 visited = 0; visited < rowCount; ++visited)
+        {
+            bool rowEnabled = false;
+            auto resolved = resolveDataGridSelection(
+                dataGrid, candidateRow, plan->targetColumn, &rowEnabled);
+            if (!resolved)
+            {
+                return Core::failure(resolved.error());
+            }
+            if (rowEnabled)
+            {
+                candidateSelection = *resolved;
+                break;
+            }
+            if (!maySearchAnotherRow)
+            {
+                break;
+            }
+            if (searchBackward)
+            {
+                if (candidateRow == 0)
+                {
+                    break;
+                }
+                --candidateRow;
+            }
+            else
+            {
+                if (candidateRow + 1 >= rowCount)
+                {
+                    break;
+                }
+                ++candidateRow;
+            }
+        }
+        if (!candidateSelection.has_value())
+        {
+            return consumeWithoutChange();
+        }
+
+        const bool changed = state.selection != *candidateSelection;
+        if (changed)
+        {
+            if (Core::Status dirty = markPaintDirty(dataGrid); !dirty)
+            {
+                return Core::failure(dirty.error());
+            }
+            static_cast<void>(dataGridStorage.setSelection(
+                dataGrid, *candidateSelection));
+        }
+        const UINodeId updaterRoot = idForIndex(focusRecord->rootIndex);
+        if (Core::Status revealed = scrollDataGridToCellFromUpdater(
+                updaterRoot, dataGrid, candidateSelection->logicalRow,
+                candidateSelection->logicalColumn,
+                UIDataGridScrollAlignment::Nearest);
+            !revealed)
+        {
+            return Core::failure(revealed.error());
+        }
+        dataGridCommandPressLatch.latch(command);
+        return UIDataGridCommandResult{
             .consumed = true,
             .changed = changed,
             .selection = state.selection,
@@ -28006,6 +28885,123 @@ Core::Status UITreeUpdater::scrollVirtualGridViewToIndex(
                : fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
 }
 
+Core::Status UITreeUpdater::setDataGridDataSource(
+    UINodeId dataGrid, UIDataGridDataSource source)
+{
+    return m_context != nullptr
+               ? m_context->setDataGridDataSourceFromUpdater(
+                     m_root, dataGrid, source)
+               : fail(UIErrorCode::WrongContext,
+                      "UI tree updater is not bound to a context");
+}
+
+Core::Status UITreeUpdater::clearDataGridDataSource(UINodeId dataGrid)
+{
+    return m_context != nullptr
+               ? m_context->clearDataGridDataSourceFromUpdater(m_root, dataGrid)
+               : fail(UIErrorCode::WrongContext,
+                      "UI tree updater is not bound to a context");
+}
+
+Core::Status UITreeUpdater::invalidateDataGridItems(UINodeId dataGrid)
+{
+    return m_context != nullptr
+               ? m_context->invalidateDataGridItemsFromUpdater(m_root, dataGrid)
+               : fail(UIErrorCode::WrongContext,
+                      "UI tree updater is not bound to a context");
+}
+
+Core::Status UITreeUpdater::setDataGridStyle(
+    UINodeId dataGrid, const UIDataGridStyle& style)
+{
+    return m_context != nullptr
+               ? m_context->setDataGridStyleFromUpdater(m_root, dataGrid, style)
+               : fail(UIErrorCode::WrongContext,
+                      "UI tree updater is not bound to a context");
+}
+
+Core::Result<UIDataGridStyle>
+UITreeUpdater::dataGridStyle(UINodeId dataGrid) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext,
+                    "UI tree updater is not bound to a context");
+    }
+    return m_context->dataGridStyleFromUpdater(m_root, dataGrid);
+}
+
+Core::Status UITreeUpdater::setDataGridPaint(
+    UINodeId dataGrid, const UIDataGridPaint& paint)
+{
+    return m_context != nullptr
+               ? m_context->setDataGridPaintFromUpdater(m_root, dataGrid, paint)
+               : fail(UIErrorCode::WrongContext,
+                      "UI tree updater is not bound to a context");
+}
+
+Core::Result<UIDataGridPaint>
+UITreeUpdater::dataGridPaint(UINodeId dataGrid) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext,
+                    "UI tree updater is not bound to a context");
+    }
+    return m_context->dataGridPaintFromUpdater(m_root, dataGrid);
+}
+
+Core::Result<UIDataGridMetrics>
+UITreeUpdater::dataGridMetrics(UINodeId dataGrid) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext,
+                    "UI tree updater is not bound to a context");
+    }
+    return m_context->dataGridMetricsFromUpdater(m_root, dataGrid);
+}
+
+Core::Status UITreeUpdater::setDataGridSelectedCell(
+    UINodeId dataGrid, u64 logicalRow, u32 logicalColumn)
+{
+    return m_context != nullptr
+               ? m_context->setDataGridSelectedCellFromUpdater(
+                     m_root, dataGrid, logicalRow, logicalColumn)
+               : fail(UIErrorCode::WrongContext,
+                      "UI tree updater is not bound to a context");
+}
+
+Core::Status UITreeUpdater::clearDataGridSelection(UINodeId dataGrid)
+{
+    return m_context != nullptr
+               ? m_context->clearDataGridSelectionFromUpdater(m_root, dataGrid)
+               : fail(UIErrorCode::WrongContext,
+                      "UI tree updater is not bound to a context");
+}
+
+Core::Result<UIDataGridSelection>
+UITreeUpdater::dataGridSelection(UINodeId dataGrid) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext,
+                    "UI tree updater is not bound to a context");
+    }
+    return m_context->dataGridSelectionFromUpdater(m_root, dataGrid);
+}
+
+Core::Status UITreeUpdater::scrollDataGridToCell(
+    UINodeId dataGrid, u64 logicalRow, u32 logicalColumn,
+    UIDataGridScrollAlignment alignment)
+{
+    return m_context != nullptr
+               ? m_context->scrollDataGridToCellFromUpdater(
+                     m_root, dataGrid, logicalRow, logicalColumn, alignment)
+               : fail(UIErrorCode::WrongContext,
+                      "UI tree updater is not bound to a context");
+}
+
 Core::Status UITreeUpdater::setTreeViewDataSource(UINodeId treeView, UITreeViewDataSource source)
 {
     return m_context != nullptr ? m_context->setTreeViewDataSourceFromUpdater(m_root, treeView, source)
@@ -28728,6 +29724,12 @@ UIContext::routeVirtualGridViewCommand(UIVirtualGridViewCommand command, bool pr
     return m_impl->routeVirtualGridViewCommand(command, pressed);
 }
 
+Core::Result<UIDataGridCommandResult>
+UIContext::routeDataGridCommand(UIDataGridCommand command, bool pressed)
+{
+    return m_impl->routeDataGridCommand(command, pressed);
+}
+
 Core::Result<UITreeViewCommandResult> UIContext::routeTreeViewCommand(UITreeViewCommand command, bool pressed)
 {
     return m_impl->routeTreeViewCommand(command, pressed);
@@ -28985,6 +29987,78 @@ Core::Status UIContext::scrollVirtualGridViewToIndex(
 {
     return m_impl->scrollVirtualGridViewToIndex(
         virtualGridView, logicalIndex, alignment);
+}
+
+Core::Status UIContext::setDataGridDataSource(
+    UINodeId dataGrid, UIDataGridDataSource source)
+{
+    return m_impl->setDataGridDataSource(dataGrid, source);
+}
+
+Core::Status UIContext::clearDataGridDataSource(UINodeId dataGrid)
+{
+    return m_impl->clearDataGridDataSource(dataGrid);
+}
+
+Core::Status UIContext::invalidateDataGridItems(UINodeId dataGrid)
+{
+    return m_impl->invalidateDataGridItems(dataGrid);
+}
+
+Core::Status UIContext::setDataGridStyle(
+    UINodeId dataGrid, const UIDataGridStyle& style)
+{
+    return m_impl->setDataGridStyle(dataGrid, style);
+}
+
+Core::Result<UIDataGridStyle>
+UIContext::dataGridStyle(UINodeId dataGrid) const
+{
+    return m_impl->dataGridStyle(dataGrid);
+}
+
+Core::Status UIContext::setDataGridPaint(
+    UINodeId dataGrid, const UIDataGridPaint& paint)
+{
+    return m_impl->setDataGridPaint(dataGrid, paint);
+}
+
+Core::Result<UIDataGridPaint>
+UIContext::dataGridPaint(UINodeId dataGrid) const
+{
+    return m_impl->dataGridPaint(dataGrid);
+}
+
+Core::Result<UIDataGridMetrics>
+UIContext::dataGridMetrics(UINodeId dataGrid) const
+{
+    return m_impl->dataGridMetrics(dataGrid);
+}
+
+Core::Status UIContext::setDataGridSelectedCell(
+    UINodeId dataGrid, u64 logicalRow, u32 logicalColumn)
+{
+    return m_impl->setDataGridSelectedCell(
+        dataGrid, logicalRow, logicalColumn);
+}
+
+Core::Status UIContext::clearDataGridSelection(UINodeId dataGrid)
+{
+    return m_impl->clearDataGridSelection(dataGrid);
+}
+
+Core::Result<UIDataGridSelection>
+UIContext::dataGridSelection(UINodeId dataGrid) const
+{
+    return m_impl->dataGridSelection(dataGrid);
+}
+
+Core::Status UIContext::scrollDataGridToCell(
+    UINodeId dataGrid, u64 logicalRow, u32 logicalColumn,
+    UIDataGridScrollAlignment alignment)
+{
+    return m_impl->scrollDataGridToCell(
+        dataGrid, logicalRow, logicalColumn, alignment);
 }
 
 Core::Status UIContext::setTooltipAnchor(UINodeId tooltip, UINodeId anchor)
@@ -30024,6 +31098,83 @@ Core::Status UIContext::scrollVirtualGridViewToIndexFromUpdater(
 {
     return m_impl->scrollVirtualGridViewToIndexFromUpdater(
         updaterRoot, virtualGridView, logicalIndex, alignment);
+}
+
+Core::Status UIContext::setDataGridDataSourceFromUpdater(
+    UINodeId updaterRoot, UINodeId dataGrid, UIDataGridDataSource source)
+{
+    return m_impl->setDataGridDataSourceFromUpdater(
+        updaterRoot, dataGrid, source);
+}
+
+Core::Status UIContext::clearDataGridDataSourceFromUpdater(
+    UINodeId updaterRoot, UINodeId dataGrid)
+{
+    return m_impl->clearDataGridDataSourceFromUpdater(updaterRoot, dataGrid);
+}
+
+Core::Status UIContext::invalidateDataGridItemsFromUpdater(
+    UINodeId updaterRoot, UINodeId dataGrid)
+{
+    return m_impl->invalidateDataGridItemsFromUpdater(updaterRoot, dataGrid);
+}
+
+Core::Status UIContext::setDataGridStyleFromUpdater(
+    UINodeId updaterRoot, UINodeId dataGrid, const UIDataGridStyle& style)
+{
+    return m_impl->setDataGridStyleFromUpdater(updaterRoot, dataGrid, style);
+}
+
+Core::Result<UIDataGridStyle> UIContext::dataGridStyleFromUpdater(
+    UINodeId updaterRoot, UINodeId dataGrid) const
+{
+    return m_impl->dataGridStyleFromUpdater(updaterRoot, dataGrid);
+}
+
+Core::Status UIContext::setDataGridPaintFromUpdater(
+    UINodeId updaterRoot, UINodeId dataGrid, const UIDataGridPaint& paint)
+{
+    return m_impl->setDataGridPaintFromUpdater(updaterRoot, dataGrid, paint);
+}
+
+Core::Result<UIDataGridPaint> UIContext::dataGridPaintFromUpdater(
+    UINodeId updaterRoot, UINodeId dataGrid) const
+{
+    return m_impl->dataGridPaintFromUpdater(updaterRoot, dataGrid);
+}
+
+Core::Result<UIDataGridMetrics> UIContext::dataGridMetricsFromUpdater(
+    UINodeId updaterRoot, UINodeId dataGrid) const
+{
+    return m_impl->dataGridMetricsFromUpdater(updaterRoot, dataGrid);
+}
+
+Core::Status UIContext::setDataGridSelectedCellFromUpdater(
+    UINodeId updaterRoot, UINodeId dataGrid, u64 logicalRow,
+    u32 logicalColumn)
+{
+    return m_impl->setDataGridSelectedCellFromUpdater(
+        updaterRoot, dataGrid, logicalRow, logicalColumn);
+}
+
+Core::Status UIContext::clearDataGridSelectionFromUpdater(
+    UINodeId updaterRoot, UINodeId dataGrid)
+{
+    return m_impl->clearDataGridSelectionFromUpdater(updaterRoot, dataGrid);
+}
+
+Core::Result<UIDataGridSelection> UIContext::dataGridSelectionFromUpdater(
+    UINodeId updaterRoot, UINodeId dataGrid) const
+{
+    return m_impl->dataGridSelectionFromUpdater(updaterRoot, dataGrid);
+}
+
+Core::Status UIContext::scrollDataGridToCellFromUpdater(
+    UINodeId updaterRoot, UINodeId dataGrid, u64 logicalRow,
+    u32 logicalColumn, UIDataGridScrollAlignment alignment)
+{
+    return m_impl->scrollDataGridToCellFromUpdater(
+        updaterRoot, dataGrid, logicalRow, logicalColumn, alignment);
 }
 
 Core::Status UIContext::setTreeViewDataSourceFromUpdater(UINodeId updaterRoot, UINodeId treeView,

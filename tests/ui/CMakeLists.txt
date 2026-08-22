@@ -35,6 +35,8 @@ add_executable(tina_ui_tests
     UIScrollViewTests.cpp
     UIScrollViewLayoutTests.cpp
     UIListViewTests.cpp
+    UIVirtualGridViewTests.cpp
+    UIDataGridTests.cpp
     UITreeViewTests.cpp
     UIPopupDropdownTests.cpp
     UIProgressBarTests.cpp

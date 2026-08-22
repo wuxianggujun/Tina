@@ -697,10 +697,25 @@ makeKdialogArguments(DialogKind kind,
                                  "Linux editor folder selection is not an existing directory");
         }
     } else {
+        const std::string fileName = nativePath.filename().generic_string();
+        if (fileName.empty() || fileName == "." || fileName == "..") {
+            return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                                 "Linux editor save-file selection must include a file name");
+        }
+        const bool selectedDirectory = std::filesystem::is_directory(nativePath, error);
+        if (error) {
+            return Core::failure(Core::CoreErrorCode::Io,
+                                 "Linux editor save-file selection could not be inspected");
+        }
+        if (selectedDirectory) {
+            return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                                 "Linux editor save-file selection must not be a directory");
+        }
         std::filesystem::path parent = nativePath.parent_path();
         if (parent.empty()) {
             parent = "/";
         }
+        error.clear();
         const bool directory = std::filesystem::is_directory(parent, error);
         if (error) {
             return Core::failure(Core::CoreErrorCode::Io,
@@ -745,6 +760,11 @@ showLinuxDialog(DialogKind kind,
         auto selectedPath = selectedPathFromOutput(std::move(process->standardOutput));
         if (!selectedPath) {
             return Core::failure(std::move(selectedPath.error()));
+        }
+        // Validate the helper result before adding a default extension. A
+        // directory such as "/" must not become "/.tworld".
+        if (auto status = validateSelectedPath(*selectedPath, kind); !status) {
+            return Core::failure(std::move(status.error()));
         }
         if (kind == DialogKind::SaveFile &&
             appendDefaultExtension(*selectedPath, defaultExtension)) {
@@ -828,6 +848,14 @@ saveFileLinux(const SaveFileDialogRequest& request)
                                        "suggested file name");
             !status) {
             return Core::failure(std::move(status.error()));
+        }
+        if (request.suggestedFileNameUtf8.contains('/') ||
+            request.suggestedFileNameUtf8.contains('\\') ||
+            request.suggestedFileNameUtf8 == "." ||
+            request.suggestedFileNameUtf8 == "..") {
+            return Core::failure(
+                Core::CoreErrorCode::InvalidArgument,
+                "Linux editor save-file suggested name must be a single file name");
         }
         if (auto status = validateText(request.defaultExtensionUtf8,
                                        "default extension");

@@ -510,7 +510,9 @@ auto EditorWorkspaceState::queueAutomaticViewportNavigation() noexcept -> bool{
         });
         const bool zoomQueued = queueViewportNavigationInput({
             .kind = Kind::Zoom2D,
-            .wheelSteps = 1.0F,
+            // Keep the fixed auto-demo TileMap fully inside the viewport while
+            // still exercising the anchored zoom path.
+            .wheelSteps = -1.0F,
             .viewportSizePixels = {
                 .x = viewportLogicalRect_.width,
                 .y = viewportLogicalRect_.height,
@@ -936,7 +938,13 @@ auto EditorWorkspaceState::viewportGridLayout(
     if (!(std::isfinite(length) && length > 1.0e-4F) ||
         !(std::isfinite(viewportWidth) && std::isfinite(viewportHeight)) ||
         viewportWidth <= 0.0F || viewportHeight <= 0.0F) {
-        line = {};
+        // Collapsed nodes still carry a committed paint value. Keep that
+        // value structurally valid even when clipping removes the segment.
+        line = UI::UILineGeometry{
+            .start = UI::UILogicalPoint{.x = 0.0F, .y = 0.5F},
+            .end = UI::UILogicalPoint{.x = 1.0F, .y = 0.5F},
+            .thickness = 1.0F,
+        };
         UI::UILayoutStyle collapsed = fixedSize(1.0F, 1.0F);
         collapsed.placement = UI::UILayoutPlacement::Overlay;
         collapsed.visibility = UI::UIVisibility::Collapsed;

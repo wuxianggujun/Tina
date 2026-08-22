@@ -183,6 +183,218 @@ TEST_F(UIInputRouteProducerTest, TreeViewConsumesHierarchyKeyboardAndGamepadComm
     ASSERT_TRUE(selection.has_value());
     EXPECT_EQ(*selection, (UI::UITreeViewSelection{.key = 10, .logicalIndex = 0, .level = 0}));
 }
+
+TEST_F(UIInputRouteProducerTest,
+       VirtualGridConsumesKeyboardAndGamepadNavigationCommands)
+{
+    auto producer = createProducer();
+    CollectionRouteTree tree = createCollectionRouteTree(window);
+    ASSERT_NE(producer, nullptr);
+    ASSERT_NE(tree.context, nullptr);
+    ASSERT_TRUE(tree.virtualGridView.hasValue());
+    expectOk(tree.context->requestFocus(tree.virtualGridView));
+
+    u64 nextFrame = 160;
+    const auto routeKeyPair = [&](Platform::Key key) -> bool {
+        auto frame = buildFrame(
+            *builder, window,
+            {
+                .frameId = {nextFrame++},
+                .transitions = {keyDown(window, key), keyUp(window, key)},
+            });
+        if (!frame)
+        {
+            ADD_FAILURE() << frame.error().message;
+            return false;
+        }
+        auto output = producer->produce(tree.context.get(), *frame);
+        if (!output)
+        {
+            ADD_FAILURE() << output.error().message;
+            return false;
+        }
+        return output->consumption.isConsumed(0) &&
+               output->consumption.isConsumed(1);
+    };
+    const auto routeGamepadPair = [&](Platform::GamepadButton button) -> bool {
+        const u64 frameId = nextFrame++;
+        auto frame = buildFrame(
+            *builder, window,
+            {
+                .frameId = {frameId},
+                .transitions = {
+                    gamepadButton(window, gamepad, button,
+                                  Platform::DigitalTransition::Down),
+                    gamepadButton(window, gamepad, button,
+                                  Platform::DigitalTransition::Up),
+                },
+                .gamepadSnapshots = {
+                    Platform::GamepadSnapshot{.gamepad = gamepad,
+                                              .revision = frameId}},
+            });
+        if (!frame)
+        {
+            ADD_FAILURE() << frame.error().message;
+            return false;
+        }
+        auto output = producer->produce(tree.context.get(), *frame);
+        if (!output)
+        {
+            ADD_FAILURE() << output.error().message;
+            return false;
+        }
+        return output->consumption.isConsumed(0) &&
+               output->consumption.isConsumed(1);
+    };
+
+    ASSERT_TRUE(routeKeyPair(Platform::Key::Right));
+    ASSERT_TRUE(routeKeyPair(Platform::Key::Right));
+    auto selection = tree.updater.virtualGridViewSelection(tree.virtualGridView);
+    ASSERT_TRUE(selection.has_value())
+        << (selection ? "" : selection.error().message);
+    EXPECT_EQ(*selection,
+              (UI::UIVirtualGridViewSelection{
+                  .key = 22,
+                  .logicalIndex = 2,
+                  .logicalRow = 1,
+                  .logicalColumn = 0,
+              }));
+    ASSERT_TRUE(routeKeyPair(Platform::Key::Down));
+    ASSERT_TRUE(routeKeyPair(Platform::Key::PageDown));
+    ASSERT_TRUE(routeKeyPair(Platform::Key::PageUp));
+    ASSERT_TRUE(routeKeyPair(Platform::Key::Home));
+    ASSERT_TRUE(routeKeyPair(Platform::Key::End));
+    ASSERT_TRUE(routeKeyPair(Platform::Key::Enter));
+    ASSERT_TRUE(routeKeyPair(Platform::Key::KeypadEnter));
+
+    ASSERT_TRUE(routeGamepadPair(Platform::GamepadButton::DpadLeft));
+    ASSERT_TRUE(routeGamepadPair(Platform::GamepadButton::DpadUp));
+    ASSERT_TRUE(routeGamepadPair(Platform::GamepadButton::DpadRight));
+    ASSERT_TRUE(routeGamepadPair(Platform::GamepadButton::DpadDown));
+    ASSERT_TRUE(routeGamepadPair(Platform::GamepadButton::South));
+    selection = tree.updater.virtualGridViewSelection(tree.virtualGridView);
+    ASSERT_TRUE(selection.has_value());
+    EXPECT_EQ(selection->logicalIndex, 7U);
+}
+
+TEST_F(UIInputRouteProducerTest,
+       DataGridConsumesTwoAxisKeyboardAndGamepadCommands)
+{
+    auto producer = createProducer();
+    CollectionRouteTree tree = createCollectionRouteTree(window);
+    ASSERT_NE(producer, nullptr);
+    ASSERT_NE(tree.context, nullptr);
+    ASSERT_TRUE(tree.dataGrid.hasValue());
+    expectOk(tree.context->requestFocus(tree.dataGrid));
+
+    u64 nextFrame = 180;
+    const auto routeKeyPair = [&](Platform::Key key) -> bool {
+        auto frame = buildFrame(
+            *builder, window,
+            {
+                .frameId = {nextFrame++},
+                .transitions = {keyDown(window, key), keyUp(window, key)},
+            });
+        if (!frame)
+        {
+            ADD_FAILURE() << frame.error().message;
+            return false;
+        }
+        auto output = producer->produce(tree.context.get(), *frame);
+        if (!output)
+        {
+            ADD_FAILURE() << output.error().message;
+            return false;
+        }
+        return output->consumption.isConsumed(0) &&
+               output->consumption.isConsumed(1);
+    };
+    const auto routeGamepadPair = [&](Platform::GamepadButton button) -> bool {
+        const u64 frameId = nextFrame++;
+        auto frame = buildFrame(
+            *builder, window,
+            {
+                .frameId = {frameId},
+                .transitions = {
+                    gamepadButton(window, gamepad, button,
+                                  Platform::DigitalTransition::Down),
+                    gamepadButton(window, gamepad, button,
+                                  Platform::DigitalTransition::Up),
+                },
+                .gamepadSnapshots = {
+                    Platform::GamepadSnapshot{.gamepad = gamepad,
+                                              .revision = frameId}},
+            });
+        if (!frame)
+        {
+            ADD_FAILURE() << frame.error().message;
+            return false;
+        }
+        auto output = producer->produce(tree.context.get(), *frame);
+        if (!output)
+        {
+            ADD_FAILURE() << output.error().message;
+            return false;
+        }
+        return output->consumption.isConsumed(0) &&
+               output->consumption.isConsumed(1);
+    };
+
+    ASSERT_TRUE(routeKeyPair(Platform::Key::Down));
+    ASSERT_TRUE(routeKeyPair(Platform::Key::Down));
+    ASSERT_TRUE(routeKeyPair(Platform::Key::Right));
+    auto selection = tree.updater.dataGridSelection(tree.dataGrid);
+    ASSERT_TRUE(selection.has_value())
+        << (selection ? "" : selection.error().message);
+    EXPECT_EQ(*selection,
+              (UI::UIDataGridSelection{
+                  .rowKey = 32,
+                  .columnKey = 41,
+                  .logicalRow = 2,
+                  .logicalColumn = 1,
+              }));
+    ASSERT_TRUE(routeKeyPair(Platform::Key::PageDown));
+    ASSERT_TRUE(routeKeyPair(Platform::Key::PageUp));
+    ASSERT_TRUE(routeKeyPair(Platform::Key::Home));
+    ASSERT_TRUE(routeKeyPair(Platform::Key::End));
+    ASSERT_TRUE(routeKeyPair(Platform::Key::Enter));
+    ASSERT_TRUE(routeKeyPair(Platform::Key::KeypadEnter));
+
+    ASSERT_TRUE(routeGamepadPair(Platform::GamepadButton::DpadUp));
+    ASSERT_TRUE(routeGamepadPair(Platform::GamepadButton::DpadLeft));
+    ASSERT_TRUE(routeGamepadPair(Platform::GamepadButton::DpadDown));
+    ASSERT_TRUE(routeGamepadPair(Platform::GamepadButton::DpadRight));
+    ASSERT_TRUE(routeGamepadPair(Platform::GamepadButton::South));
+    selection = tree.updater.dataGridSelection(tree.dataGrid);
+    ASSERT_TRUE(selection.has_value());
+    EXPECT_EQ(selection->logicalRow, 5U);
+    EXPECT_EQ(selection->logicalColumn, 1U);
+
+    auto down = buildFrame(
+        *builder, window,
+        {
+            .frameId = {nextFrame++},
+            .transitions = {keyDown(window, Platform::Key::Up)},
+            .heldKeys = {Platform::Key::Up},
+        });
+    ASSERT_TRUE(down.has_value()) << down.error().message;
+    auto downOutput = producer->produce(tree.context.get(), *down);
+    ASSERT_TRUE(downOutput.has_value()) << downOutput.error().message;
+    EXPECT_TRUE(downOutput->consumption.isConsumed(0));
+    expectOk(tree.context->requestFocus(tree.other));
+    auto release = buildFrame(
+        *builder, window,
+        {
+            .frameId = {nextFrame++},
+            .transitions = {keyUp(window, Platform::Key::Up)},
+        });
+    ASSERT_TRUE(release.has_value()) << release.error().message;
+    auto releaseOutput = producer->produce(tree.context.get(), *release);
+    ASSERT_TRUE(releaseOutput.has_value()) << releaseOutput.error().message;
+    EXPECT_TRUE(releaseOutput->consumption.isConsumed(0));
+    EXPECT_EQ(tree.context->defaultActionFocus(), tree.other);
+}
+
 TEST_F(UIInputRouteProducerTest, CollectionCommandResetClearsPressedDebounceState)
 {
     auto producer = createProducer();

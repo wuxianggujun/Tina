@@ -1560,6 +1560,120 @@ Core::Status PrimaryWindowUITreeUpdater::scrollVirtualGridViewToIndex(
         m_epoch, m_phase, m_updater, virtualGridView, logicalIndex, alignment);
 }
 
+Core::Status PrimaryWindowUITreeUpdater::setDataGridDataSource(
+    UI::UINodeId dataGrid, UI::UIDataGridDataSource source)
+{
+    if (m_state == nullptr)
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setDataGridDataSource");
+    return m_state->setDataGridDataSource(
+        m_epoch, m_phase, m_updater, dataGrid, source);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::clearDataGridDataSource(
+    UI::UINodeId dataGrid)
+{
+    if (m_state == nullptr)
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::clearDataGridDataSource");
+    return m_state->clearDataGridDataSource(
+        m_epoch, m_phase, m_updater, dataGrid);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::invalidateDataGridItems(
+    UI::UINodeId dataGrid)
+{
+    if (m_state == nullptr)
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::invalidateDataGridItems");
+    return m_state->invalidateDataGridItems(
+        m_epoch, m_phase, m_updater, dataGrid);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setDataGridStyle(
+    UI::UINodeId dataGrid, const UI::UIDataGridStyle& style)
+{
+    if (m_state == nullptr)
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setDataGridStyle");
+    return m_state->setDataGridStyle(
+        m_epoch, m_phase, m_updater, dataGrid, style);
+}
+
+Core::Result<UI::UIDataGridStyle>
+PrimaryWindowUITreeUpdater::dataGridStyle(UI::UINodeId dataGrid) const
+{
+    if (m_state == nullptr)
+        return expiredFacade<UI::UIDataGridStyle>(
+            "PrimaryWindowUITreeUpdater::dataGridStyle");
+    return m_state->dataGridStyle(
+        m_epoch, m_phase, m_updater, dataGrid);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setDataGridPaint(
+    UI::UINodeId dataGrid, const UI::UIDataGridPaint& paint)
+{
+    if (m_state == nullptr)
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setDataGridPaint");
+    return m_state->setDataGridPaint(
+        m_epoch, m_phase, m_updater, dataGrid, paint);
+}
+
+Core::Result<UI::UIDataGridPaint>
+PrimaryWindowUITreeUpdater::dataGridPaint(UI::UINodeId dataGrid) const
+{
+    if (m_state == nullptr)
+        return expiredFacade<UI::UIDataGridPaint>(
+            "PrimaryWindowUITreeUpdater::dataGridPaint");
+    return m_state->dataGridPaint(
+        m_epoch, m_phase, m_updater, dataGrid);
+}
+
+Core::Result<UI::UIDataGridMetrics>
+PrimaryWindowUITreeUpdater::dataGridMetrics(UI::UINodeId dataGrid) const
+{
+    if (m_state == nullptr)
+        return expiredFacade<UI::UIDataGridMetrics>(
+            "PrimaryWindowUITreeUpdater::dataGridMetrics");
+    return m_state->dataGridMetrics(
+        m_epoch, m_phase, m_updater, dataGrid);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::setDataGridSelectedCell(
+    UI::UINodeId dataGrid, u64 logicalRow, u32 logicalColumn)
+{
+    if (m_state == nullptr)
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setDataGridSelectedCell");
+    return m_state->setDataGridSelectedCell(
+        m_epoch, m_phase, m_updater, dataGrid, logicalRow, logicalColumn);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::clearDataGridSelection(
+    UI::UINodeId dataGrid)
+{
+    if (m_state == nullptr)
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::clearDataGridSelection");
+    return m_state->clearDataGridSelection(
+        m_epoch, m_phase, m_updater, dataGrid);
+}
+
+Core::Result<UI::UIDataGridSelection>
+PrimaryWindowUITreeUpdater::dataGridSelection(UI::UINodeId dataGrid) const
+{
+    if (m_state == nullptr)
+        return expiredFacade<UI::UIDataGridSelection>(
+            "PrimaryWindowUITreeUpdater::dataGridSelection");
+    return m_state->dataGridSelection(
+        m_epoch, m_phase, m_updater, dataGrid);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::scrollDataGridToCell(
+    UI::UINodeId dataGrid, u64 logicalRow, u32 logicalColumn,
+    UI::UIDataGridScrollAlignment alignment)
+{
+    if (m_state == nullptr)
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::scrollDataGridToCell");
+    return m_state->scrollDataGridToCell(
+        m_epoch, m_phase, m_updater, dataGrid, logicalRow, logicalColumn,
+        alignment);
+}
+
 Core::Status PrimaryWindowUITreeUpdater::setTreeViewDataSource(UI::UINodeId treeView,
                                                                UI::UITreeViewDataSource source)
 {

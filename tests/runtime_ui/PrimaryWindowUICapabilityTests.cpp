@@ -11,6 +11,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <thread>
 #include <utility>
 
@@ -220,6 +221,87 @@ struct TreeFacadeDataSource final {
         source.expanded = expanded;
         source.lastExpansionKey = key;
         ++source.expansionCallCount;
+        return true;
+    }
+};
+
+struct DataGridFacadeDataSource final {
+    u64 rows = 0;
+    u32 columns = 2;
+    UI::UIDataGridRowKey rowKeyBase = 1;
+    UI::UIDataGridColumnKey columnKeyBase = 1'000;
+
+    [[nodiscard]] UI::UIDataGridDataSource view() const noexcept
+    {
+        return {
+            .state = this,
+            .rowCount = &rowCount,
+            .columnCount = &columnCount,
+            .resolveRow = &resolveRow,
+            .resolveColumn = &resolveColumn,
+            .resolveCell = &resolveCell,
+        };
+    }
+
+    static u64 rowCount(const void* state) noexcept
+    {
+        return static_cast<const DataGridFacadeDataSource*>(state)->rows;
+    }
+
+    static u32 columnCount(const void* state) noexcept
+    {
+        return static_cast<const DataGridFacadeDataSource*>(state)->columns;
+    }
+
+    static bool resolveRow(const void* state, u64 logicalRow,
+                           UI::UIDataGridRowDescriptor& output) noexcept
+    {
+        const auto& source =
+            *static_cast<const DataGridFacadeDataSource*>(state);
+        if (logicalRow >= source.rows)
+        {
+            return false;
+        }
+        output = {
+            .key = source.rowKeyBase + logicalRow,
+            .enabled = true,
+        };
+        return true;
+    }
+
+    static bool resolveColumn(const void* state, u32 logicalColumn,
+                              UI::UIDataGridColumnDescriptor& output) noexcept
+    {
+        const auto& source =
+            *static_cast<const DataGridFacadeDataSource*>(state);
+        constexpr std::array<std::string_view, 2> Headers{"Name", "State"};
+        constexpr std::array<float, 2> Widths{70.0F, 90.0F};
+        if (logicalColumn >= source.columns ||
+            logicalColumn >= Headers.size())
+        {
+            return false;
+        }
+        output = {
+            .key = source.columnKeyBase + logicalColumn,
+            .header = Headers[logicalColumn],
+            .width = Widths[logicalColumn],
+        };
+        return true;
+    }
+
+    static bool resolveCell(const void* state, u64 logicalRow,
+                            u32 logicalColumn,
+                            UI::UIDataGridCellDescriptor& output) noexcept
+    {
+        const auto& source =
+            *static_cast<const DataGridFacadeDataSource*>(state);
+        constexpr std::array<std::string_view, 2> Cells{"Asset", "Ready"};
+        if (logicalRow >= source.rows || logicalColumn >= source.columns ||
+            logicalColumn >= Cells.size())
+        {
+            return false;
+        }
+        output = {.text = Cells[logicalColumn]};
         return true;
     }
 };
@@ -1364,6 +1446,135 @@ TEST_F(PrimaryWindowUICapabilityTest, ListViewFacadeRoundTripsAndExpiresWithPhas
     auto expiredQuery = treeView.listViewMetrics(*listView);
     ASSERT_FALSE(expiredQuery.has_value());
     EXPECT_EQ(expiredQuery.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+}
+
+TEST_F(PrimaryWindowUICapabilityTest,
+       DataGridFacadeRoundTripsAndExpiresWithPhase)
+{
+    constexpr u32 ColumnCapacity = 2;
+    constexpr u32 MaterializedRowCapacity = 12;
+    constexpr UI::UIDataGridStyle GridStyle{
+        .columnHeaderHeight = 20.0F,
+        .rowHeight = 20.0F,
+        .overscanRows = 1,
+        .scrollBarVisibility = UI::UIScrollBarVisibility::Always,
+        .wheelStep = 20.0F,
+    };
+    constexpr UI::UIDataGridPaint GridPaint{
+        .scrollBar =
+            {
+                .trackColor = {.red = 24, .green = 30, .blue = 40, .alpha = 255},
+                .thumbColor = {.red = 80, .green = 100, .blue = 140, .alpha = 255},
+                .draggingThumbColor = {.red = 120, .green = 150, .blue = 220, .alpha = 255},
+                .thickness = 9.0F,
+                .minThumbExtent = 18.0F,
+            },
+        .columnHeaderBackgroundColor = {.red = 28, .green = 36, .blue = 48, .alpha = 255},
+        .selectedRowBackgroundColor = {.red = 36, .green = 92, .blue = 168, .alpha = 220},
+        .hoveredSelectedRowBackgroundColor = {.red = 44, .green = 104, .blue = 184, .alpha = 220},
+        .focusedSelectedRowBackgroundColor = {.red = 52, .green = 116, .blue = 200, .alpha = 220},
+        .gridLineColor = {.red = 72, .green = 82, .blue = 96, .alpha = 255},
+    };
+
+    auto contextResult = UI::UIContext::Create(
+        window,
+        {
+            .nodeCapacity = 192,
+            .rootCapacity = 4,
+            .paintSnapshotCapacity = 256,
+        });
+    ASSERT_TRUE(contextResult.has_value()) << contextResult.error().message;
+    context = std::move(*contextResult);
+
+    DataGridFacadeDataSource source{
+        .rows = 100,
+        .columns = 2,
+        .rowKeyBase = 2'000,
+        .columnKeyBase = 3'000,
+    };
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+    auto dataGrid = tree->createElement(
+        root->rootNodeId(),
+        UI::makeDataGridElement({
+            .columnCapacity = ColumnCapacity,
+            .materializedRowCapacity = MaterializedRowCapacity,
+        }));
+    ASSERT_TRUE(dataGrid.has_value()) << dataGrid.error().message;
+
+    ASSERT_TRUE(tree->setLayoutStyle(
+                        root->rootNodeId(), fixedSize(120.0F, 80.0F))
+                    .has_value());
+    ASSERT_TRUE(tree->setLayoutStyle(*dataGrid, fixedSize(120.0F, 80.0F))
+                    .has_value());
+    ASSERT_TRUE(tree->setDataGridStyle(*dataGrid, GridStyle).has_value());
+    ASSERT_TRUE(tree->setDataGridPaint(*dataGrid, GridPaint).has_value());
+    ASSERT_TRUE(tree->setDataGridDataSource(*dataGrid, source.view()).has_value());
+    ASSERT_TRUE(tree->invalidateDataGridItems(*dataGrid).has_value());
+    ASSERT_TRUE(tree->setDataGridSelectedCell(*dataGrid, 3, 1).has_value());
+    ASSERT_TRUE(tree->scrollDataGridToCell(
+                        *dataGrid, 40, 1,
+                        UI::UIDataGridScrollAlignment::Start)
+                    .has_value());
+    Core::Status initialCommit =
+        context->commitLayout({.width = 120.0F, .height = 80.0F});
+    ASSERT_TRUE(initialCommit.has_value()) << initialCommit.error().message;
+
+    const PrimaryWindowUITreeUpdater& treeView = *tree;
+    EXPECT_EQ(treeView.dataGridStyle(*dataGrid).value(), GridStyle);
+    EXPECT_EQ(treeView.dataGridPaint(*dataGrid).value(), GridPaint);
+    const UI::UIDataGridMetrics metrics =
+        treeView.dataGridMetrics(*dataGrid).value();
+    EXPECT_EQ(metrics.logicalRowCount, 100U);
+    EXPECT_EQ(metrics.logicalColumnCount, ColumnCapacity);
+    EXPECT_EQ(metrics.materializedRowCapacity, MaterializedRowCapacity);
+    EXPECT_EQ(metrics.firstVisibleRow, 40U);
+    EXPECT_EQ(treeView.dataGridSelection(*dataGrid).value(),
+              (UI::UIDataGridSelection{
+                  .rowKey = 2'003,
+                  .columnKey = 3'001,
+                  .logicalRow = 3,
+                  .logicalColumn = 1,
+              }));
+
+    ASSERT_TRUE(tree->clearDataGridSelection(*dataGrid).has_value());
+    EXPECT_FALSE(treeView.dataGridSelection(*dataGrid).value().hasValue());
+    ASSERT_TRUE(tree->clearDataGridDataSource(*dataGrid).has_value());
+    ASSERT_TRUE(context->commitLayout({.width = 120.0F, .height = 80.0F})
+                    .has_value());
+    EXPECT_EQ(treeView.dataGridMetrics(*dataGrid).value().logicalRowCount, 0U);
+    ASSERT_TRUE(tree->setDataGridDataSource(*dataGrid, source.view()).has_value());
+    ASSERT_TRUE(tree->invalidateDataGridItems(*dataGrid).has_value());
+    ASSERT_TRUE(context->commitLayout({.width = 120.0F, .height = 80.0F})
+                    .has_value());
+    EXPECT_EQ(treeView.dataGridMetrics(*dataGrid).value().logicalRowCount, 100U);
+
+    ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter)
+                    .has_value());
+    auto expiredCreate = tree->createElement(
+        root->rootNodeId(),
+        UI::makeDataGridElement({
+            .columnCapacity = 1,
+            .materializedRowCapacity = 2,
+        }));
+    ASSERT_FALSE(expiredCreate.has_value());
+    EXPECT_EQ(expiredCreate.error().code,
+              RuntimeErrorCode::UIPhaseCapabilityExpired);
+    Core::Status expiredSet = tree->clearDataGridDataSource(*dataGrid);
+    ASSERT_FALSE(expiredSet.has_value());
+    EXPECT_EQ(expiredSet.error().code,
+              RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredQuery = treeView.dataGridMetrics(*dataGrid);
+    ASSERT_FALSE(expiredQuery.has_value());
+    EXPECT_EQ(expiredQuery.error().code,
+              RuntimeErrorCode::UIPhaseCapabilityExpired);
 }
 
 TEST_F(PrimaryWindowUICapabilityTest, TreeViewFacadeRoundTripsExpansionAndExpiresWithPhase)

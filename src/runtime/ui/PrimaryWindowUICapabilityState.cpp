@@ -2917,6 +2917,181 @@ Core::Status PrimaryWindowUICapabilityState::scrollVirtualGridViewToIndex(
     return status ? Core::success() : Core::failure(rememberFirstError(std::move(status.error()), Operation));
 }
 
+Core::Status PrimaryWindowUICapabilityState::setDataGridDataSource(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId dataGrid, UI::UIDataGridDataSource source)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::setDataGridDataSource";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+        return status;
+    Core::Status status = updater.setDataGridDataSource(dataGrid, source);
+    return status ? Core::success()
+                  : Core::failure(rememberFirstError(
+                        std::move(status.error()), Operation));
+}
+
+Core::Status PrimaryWindowUICapabilityState::clearDataGridDataSource(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId dataGrid)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::clearDataGridDataSource";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+        return status;
+    Core::Status status = updater.clearDataGridDataSource(dataGrid);
+    return status ? Core::success()
+                  : Core::failure(rememberFirstError(
+                        std::move(status.error()), Operation));
+}
+
+Core::Status PrimaryWindowUICapabilityState::invalidateDataGridItems(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId dataGrid)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::invalidateDataGridItems";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+        return status;
+    Core::Status status = updater.invalidateDataGridItems(dataGrid);
+    return status ? Core::success()
+                  : Core::failure(rememberFirstError(
+                        std::move(status.error()), Operation));
+}
+
+Core::Status PrimaryWindowUICapabilityState::setDataGridStyle(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId dataGrid, const UI::UIDataGridStyle& style)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::setDataGridStyle";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+        return status;
+    Core::Status status = updater.setDataGridStyle(dataGrid, style);
+    return status ? Core::success()
+                  : Core::failure(rememberFirstError(
+                        std::move(status.error()), Operation));
+}
+
+Core::Result<UI::UIDataGridStyle>
+PrimaryWindowUICapabilityState::dataGridStyle(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId dataGrid)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::dataGridStyle";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+        return Core::failure(std::move(status.error()));
+    auto result = updater.dataGridStyle(dataGrid);
+    return result ? Core::Result<UI::UIDataGridStyle>(*result)
+                  : Core::failure(rememberFirstError(
+                        std::move(result.error()), Operation));
+}
+
+Core::Status PrimaryWindowUICapabilityState::setDataGridPaint(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId dataGrid, const UI::UIDataGridPaint& paint)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::setDataGridPaint";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+        return status;
+    Core::Status status = updater.setDataGridPaint(dataGrid, paint);
+    return status ? Core::success()
+                  : Core::failure(rememberFirstError(
+                        std::move(status.error()), Operation));
+}
+
+Core::Result<UI::UIDataGridPaint>
+PrimaryWindowUICapabilityState::dataGridPaint(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId dataGrid)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::dataGridPaint";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+        return Core::failure(std::move(status.error()));
+    auto result = updater.dataGridPaint(dataGrid);
+    return result ? Core::Result<UI::UIDataGridPaint>(*result)
+                  : Core::failure(rememberFirstError(
+                        std::move(result.error()), Operation));
+}
+
+Core::Result<UI::UIDataGridMetrics>
+PrimaryWindowUICapabilityState::dataGridMetrics(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId dataGrid)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::dataGridMetrics";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+        return Core::failure(std::move(status.error()));
+    auto result = updater.dataGridMetrics(dataGrid);
+    return result ? Core::Result<UI::UIDataGridMetrics>(*result)
+                  : Core::failure(rememberFirstError(
+                        std::move(result.error()), Operation));
+}
+
+Core::Status PrimaryWindowUICapabilityState::setDataGridSelectedCell(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId dataGrid, u64 logicalRow, u32 logicalColumn)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::setDataGridSelectedCell";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+        return status;
+    Core::Status status = updater.setDataGridSelectedCell(
+        dataGrid, logicalRow, logicalColumn);
+    return status ? Core::success()
+                  : Core::failure(rememberFirstError(
+                        std::move(status.error()), Operation));
+}
+
+Core::Status PrimaryWindowUICapabilityState::clearDataGridSelection(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId dataGrid)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::clearDataGridSelection";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+        return status;
+    Core::Status status = updater.clearDataGridSelection(dataGrid);
+    return status ? Core::success()
+                  : Core::failure(rememberFirstError(
+                        std::move(status.error()), Operation));
+}
+
+Core::Result<UI::UIDataGridSelection>
+PrimaryWindowUICapabilityState::dataGridSelection(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId dataGrid)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::dataGridSelection";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+        return Core::failure(std::move(status.error()));
+    auto result = updater.dataGridSelection(dataGrid);
+    return result ? Core::Result<UI::UIDataGridSelection>(*result)
+                  : Core::failure(rememberFirstError(
+                        std::move(result.error()), Operation));
+}
+
+Core::Status PrimaryWindowUICapabilityState::scrollDataGridToCell(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId dataGrid, u64 logicalRow, u32 logicalColumn,
+    UI::UIDataGridScrollAlignment alignment)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::scrollDataGridToCell";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+        return status;
+    Core::Status status = updater.scrollDataGridToCell(
+        dataGrid, logicalRow, logicalColumn, alignment);
+    return status ? Core::success()
+                  : Core::failure(rememberFirstError(
+                        std::move(status.error()), Operation));
+}
+
 Core::Status PrimaryWindowUICapabilityState::setTreeViewDataSource(u64 epoch, PrimaryWindowUIPhase phase,
                                                                    UI::UITreeUpdater& updater,
                                                                    UI::UINodeId treeView,

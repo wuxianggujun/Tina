@@ -60,6 +60,27 @@ namespace {
     return Core::success();
 }
 
+// Multiplication sign rather than the letter x. The Button publishes the
+// caller's accessible name instead of this glyph.
+[[nodiscard]] constexpr std::string_view dialogCloseGlyph() noexcept
+{
+    return "\xC3\x97";
+}
+
+[[nodiscard]] Core::Status validateDialogLength(
+    UILayoutLength length, std::string_view message) noexcept
+{
+    if (length.isAuto())
+    {
+        return Core::success();
+    }
+    if (!std::isfinite(length.value) || length.value < 0.0F)
+    {
+        return Core::failure(UIErrorCode::InvalidLayout, message);
+    }
+    return Core::success();
+}
+
 [[nodiscard]] Core::Status validateTooltipProfile(
     std::string_view text, const UITooltipConfig& config,
     std::string_view emptyMessage, std::string_view invalidUtf8Message) noexcept
@@ -434,6 +455,9 @@ buildDialogImpl(Authoring& authoring, UINodeId parent,
     modalDescriptor.visual.styleRole = UIStyleRoleId::ModalScrim;
     modalDescriptor.semantics.name = config.title;
     modalDescriptor.semantics.description = config.body;
+    // Ignore keeps blockedByModal meaningful: an outside press stays a targetless
+    // barrier hit, which is what preserves focus inside the dialog. Scrim-press
+    // dismissal needs its own committed-geometry check rather than a hit target.
     modalDescriptor.pointerHitPolicy = UIPointerHitPolicy::Ignore;
     auto transactionResult = authoring.beginBuildTransaction(
         parent, modalDescriptor, *budget);
@@ -448,18 +472,31 @@ buildDialogImpl(Authoring& authoring, UINodeId parent,
     surfaceLayout.placement = UILayoutPlacement::Overlay;
     surfaceLayout.overlay.horizontal = UIAxisAlignment::Center;
     surfaceLayout.overlay.vertical = UIAxisAlignment::Center;
-    if (surfaceLayout.size.width.isAuto())
+    // dialogMinWidth is a floor, not a fixed width: the Surface sizes to its
+    // content and is then clamped on both axes so long content cannot grow the
+    // dialog past the viewport.
+    if (surfaceLayout.minMax.minWidth.isAuto())
     {
-        surfaceLayout.size.width =
-            UILayoutLength::Px(theme.controls.dialogMinWidth);
+        surfaceLayout.minMax.minWidth =
+            config.style.minWidth.isAuto()
+                ? UILayoutLength::Px(theme.controls.dialogMinWidth)
+                : config.style.minWidth;
     }
     if (surfaceLayout.minMax.maxWidth.isAuto())
     {
-        surfaceLayout.minMax.maxWidth = UILayoutLength::Percent(100.0F);
+        surfaceLayout.minMax.maxWidth = config.style.maxWidth.isAuto()
+                                            ? UILayoutLength::Percent(100.0F)
+                                            : config.style.maxWidth;
+    }
+    if (surfaceLayout.minMax.maxHeight.isAuto())
+    {
+        surfaceLayout.minMax.maxHeight = config.style.maxHeight.isAuto()
+                                             ? UILayoutLength::Percent(100.0F)
+                                             : config.style.maxHeight;
     }
     if (surfaceLayout.margin == UIEdgeSpacing{})
     {
-        surfaceLayout.margin = UIEdgeSpacing::All(config.viewportMargin);
+        surfaceLayout.margin = UIEdgeSpacing::All(config.style.viewportMargin);
     }
     if (surfaceLayout.padding == UIEdgeSpacing{})
     {
@@ -472,7 +509,7 @@ buildDialogImpl(Authoring& authoring, UINodeId parent,
     }
     UIElementDescriptor surfaceDescriptor = makePanelElement(surfaceLayout);
     surfaceDescriptor.visual.styleRole = UIStyleRoleId::ModalSurface;
-    surfaceDescriptor.pointerHitPolicy = UIPointerHitPolicy::Ignore;
+    surfaceDescriptor.pointerHitPolicy = UIPointerHitPolicy::Targetable;
     auto surface = transaction.createElement(parts.modal, surfaceDescriptor);
     if (!surface)
     {
@@ -480,29 +517,130 @@ buildDialogImpl(Authoring& authoring, UINodeId parent,
     }
     parts.surface = *surface;
 
-    UIElementDescriptor titleDescriptor = makeLabelElement(config.title);
+    // Header owns the title and the optional close Button so the title can grow
+    // while the Button stays pinned trailing. It never shrinks under a height
+    // clamp; only the content region does.
+    UILayoutStyle headerLayout{};
+    headerLayout.flexContainer.direction = UIFlexDirection::Row;
+    headerLayout.flexContainer.alignItems = UIAxisAlignment::Center;
+    headerLayout.flexContainer.gap = UILayoutGap::All(theme.spacing.space4);
+    headerLayout.flexItem.shrink = 0.0F;
+    auto header = transaction.createElement(
+        parts.surface, makePanelElement(headerLayout));
+    if (!header)
+    {
+        return Core::failure(header.error());
+    }
+    parts.header = *header;
+
+    UILayoutStyle titleLayout{};
+    titleLayout.flexItem.grow = 1.0F;
+    UIElementDescriptor titleDescriptor =
+        makeLabelElement(config.title, titleLayout);
     titleDescriptor.visual.styleRole = UIStyleRoleId::TextTitle;
-    auto title = transaction.createElement(parts.surface, titleDescriptor);
+    auto title = transaction.createElement(parts.header, titleDescriptor);
     if (!title)
     {
         return Core::failure(title.error());
     }
     parts.title = *title;
 
-    UIElementDescriptor bodyDescriptor = makeLabelElement(config.body);
-    bodyDescriptor.visual.styleRole = UIStyleRoleId::TextBody;
-    auto body = transaction.createElement(parts.surface, bodyDescriptor);
-    if (!body)
+    if (config.closeButtonName.has_value())
     {
-        return Core::failure(body.error());
+        UILayoutStyle closeLayout{};
+        closeLayout.size.width =
+            UILayoutLength::Px(theme.controls.iconButtonExtent);
+        closeLayout.size.height =
+            UILayoutLength::Px(theme.controls.iconButtonExtent);
+        closeLayout.flexItem.shrink = 0.0F;
+        UIElementDescriptor closeDescriptor =
+            makeButtonElement(dialogCloseGlyph(), closeLayout);
+        closeDescriptor.visual.styleRole = UIStyleRoleId::ButtonText;
+        // The glyph is not a usable accessible name, so publish the caller's
+        // name instead of the content.
+        closeDescriptor.semantics.useContentAsName = false;
+        closeDescriptor.semantics.name = *config.closeButtonName;
+        auto closeButton =
+            transaction.createElement(parts.header, closeDescriptor);
+        if (!closeButton)
+        {
+            return Core::failure(closeButton.error());
+        }
+        parts.closeButton = *closeButton;
     }
-    parts.body = *body;
+
+    // Content is created before the action row so caller-authored children
+    // appended to it stay above the actions. The retained tree only appends, so
+    // creation order is the only ordering control the caller has.
+    UILayoutStyle contentLayout = config.contentLayout;
+    if (contentLayout.flexContainer.gap == UILayoutGap{})
+    {
+        contentLayout.flexContainer.gap = UILayoutGap::All(theme.spacing.space4);
+    }
+    // Absorbs the surface height clamp. minHeight 0 lets flex shrink it below
+    // its content height, which is what makes Scroll reachable.
+    contentLayout.flexItem.shrink = 1.0F;
+    if (contentLayout.minMax.minHeight.isAuto())
+    {
+        contentLayout.minMax.minHeight = UILayoutLength::Px(0.0F);
+    }
+    const bool scrollContent =
+        config.style.contentOverflow == UIDialogContentOverflow::Scroll;
+    UIElementDescriptor contentDescriptor =
+        scrollContent ? makeScrollViewElement(contentLayout)
+                      : makePanelElement(contentLayout);
+    auto content = transaction.createElement(parts.surface, contentDescriptor);
+    if (!content)
+    {
+        return Core::failure(content.error());
+    }
+    parts.content = *content;
+
+    if (config.body.has_value())
+    {
+        UIElementDescriptor bodyDescriptor = makeLabelElement(*config.body);
+        bodyDescriptor.visual.styleRole = UIStyleRoleId::TextBody;
+        auto body = transaction.createElement(parts.content, bodyDescriptor);
+        if (!body)
+        {
+            return Core::failure(body.error());
+        }
+        parts.body = *body;
+    }
+
+    if (config.actions.empty())
+    {
+        auto committedWithoutActions = transaction.commit();
+        if (!committedWithoutActions)
+        {
+            return Core::failure(committedWithoutActions.error());
+        }
+        return parts;
+    }
+
+    if (config.style.showActionDivider)
+    {
+        UILayoutStyle dividerLayout{};
+        dividerLayout.size.width = UILayoutLength::Percent(100.0F);
+        dividerLayout.flexItem.shrink = 0.0F;
+        auto divider = transaction.createElement(
+            parts.surface,
+            makeDividerElement(
+                UIDividerConfig{.thickness = theme.controls.panelBorderWidth},
+                dividerLayout));
+        if (!divider)
+        {
+            return Core::failure(divider.error());
+        }
+        parts.actionDivider = *divider;
+    }
 
     UILayoutStyle actionRowLayout{};
     actionRowLayout.flexContainer.direction = UIFlexDirection::Row;
     actionRowLayout.flexContainer.justifyContent = UIJustifyContent::End;
     actionRowLayout.flexContainer.alignItems = UIAxisAlignment::Center;
     actionRowLayout.flexContainer.gap = UILayoutGap::All(theme.spacing.space4);
+    actionRowLayout.flexItem.shrink = 0.0F;
     auto actionRow = transaction.createElement(
         parts.surface, makePanelElement(actionRowLayout));
     if (!actionRow)
@@ -847,22 +985,59 @@ requiredDialogBuildBudget(const UIDialogConfig& config) noexcept
     {
         return Core::failure(valid.error());
     }
-    if (Core::Status valid =
-            validateText(config.body,
-                         "UIDialog body must be strict UTF-8 without NUL");
+    if (Core::Status valid = validateOptionalText(
+            config.body, "UIDialog body must be strict UTF-8 without NUL");
         !valid)
     {
         return Core::failure(valid.error());
+    }
+    if (config.closeButtonName.has_value())
+    {
+        if (Core::Status valid = validateRequiredText(
+                *config.closeButtonName,
+                "UIDialog close Button name must not be empty",
+                "UIDialog close Button name must be strict UTF-8 without NUL");
+            !valid)
+        {
+            return Core::failure(valid.error());
+        }
     }
     if (config.actions.size() > UIDialogMaximumActionCount)
     {
         return Core::failure(UIErrorCode::InvalidElementDescriptor,
                              "UIDialog exceeds its fixed action count");
     }
-    if (!std::isfinite(config.viewportMargin) || config.viewportMargin < 0.0F)
+    if (!isValidDialogContentOverflow(config.style.contentOverflow))
+    {
+        return Core::failure(UIErrorCode::InvalidElementDescriptor,
+                             "UIDialog content overflow mode is invalid");
+    }
+    if (!std::isfinite(config.style.viewportMargin) ||
+        config.style.viewportMargin < 0.0F)
     {
         return Core::failure(UIErrorCode::InvalidLayout,
                              "UIDialog viewport margin must be finite and non-negative");
+    }
+    if (Core::Status valid = validateDialogLength(
+            config.style.minWidth,
+            "UIDialog minimum width must be finite and non-negative");
+        !valid)
+    {
+        return Core::failure(valid.error());
+    }
+    if (Core::Status valid = validateDialogLength(
+            config.style.maxWidth,
+            "UIDialog maximum width must be finite and non-negative");
+        !valid)
+    {
+        return Core::failure(valid.error());
+    }
+    if (Core::Status valid = validateDialogLength(
+            config.style.maxHeight,
+            "UIDialog maximum height must be finite and non-negative");
+        !valid)
+    {
+        return Core::failure(valid.error());
     }
     for (const UIDialogActionConfig& action : config.actions)
     {
@@ -880,13 +1055,58 @@ requiredDialogBuildBudget(const UIDialogConfig& config) noexcept
         }
     }
 
+    // modal, surface, header, title, content are unconditional. The action row
+    // and its Divider only exist when the dialog has actions.
+    const bool hasCloseButton = config.closeButtonName.has_value();
+    const usize actionRowNodes =
+        config.actions.empty()
+            ? 0U
+            : 1U + (config.style.showActionDivider ? 1U : 0U) +
+                  config.actions.size();
     UIComponentBuildBudget budget{
-        .nodes = 5U + config.actions.size(),
-        .behaviors = {.activate = config.actions.size()},
+        .nodes = 5U + (hasCloseButton ? 1U : 0U) +
+                 (config.body.has_value() ? 1U : 0U) + actionRowNodes,
+        .behaviors = {
+            .activate = config.actions.size() + (hasCloseButton ? 1U : 0U),
+            .scroll = config.style.contentOverflow ==
+                              UIDialogContentOverflow::Scroll
+                          ? 1U
+                          : 0U,
+        },
     };
-    for (std::string_view text : {config.title, config.body, config.title, config.body})
+    // The title pays twice: once as the Modal accessible name and once as the
+    // header Label. The body likewise pays as the Modal description and as the
+    // content Label.
+    if (Core::Status status = addTextBytes(budget, config.title); !status)
     {
-        if (Core::Status status = addTextBytes(budget, text); !status)
+        return Core::failure(status.error());
+    }
+    if (Core::Status status = addTextBytes(budget, config.title); !status)
+    {
+        return Core::failure(status.error());
+    }
+    if (config.body.has_value())
+    {
+        if (Core::Status status = addTextBytes(budget, *config.body); !status)
+        {
+            return Core::failure(status.error());
+        }
+        if (Core::Status status = addTextBytes(budget, *config.body); !status)
+        {
+            return Core::failure(status.error());
+        }
+    }
+    if (hasCloseButton)
+    {
+        // Glyph content plus the published accessible name.
+        if (Core::Status status = addTextBytes(budget, dialogCloseGlyph());
+            !status)
+        {
+            return Core::failure(status.error());
+        }
+        if (Core::Status status =
+                addTextBytes(budget, *config.closeButtonName);
+            !status)
         {
             return Core::failure(status.error());
         }

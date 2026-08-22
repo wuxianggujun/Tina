@@ -10,6 +10,7 @@
 #include <tina/ui/UIColorPicker.hpp>
 #include <tina/ui/UIContent.hpp>
 #include <tina/ui/UIContext.hpp>
+#include <tina/ui/UIDataGrid.hpp>
 #include <tina/ui/UIDialog.hpp>
 #include <tina/ui/UIDropdown.hpp>
 #include <tina/ui/UIElement.hpp>
@@ -330,6 +331,29 @@ class PrimaryWindowUITreeUpdater final {
         UI::UINodeId virtualGridView, u64 logicalIndex,
         UI::UIVirtualGridViewScrollAlignment alignment =
             UI::UIVirtualGridViewScrollAlignment::Nearest);
+    [[nodiscard]] Core::Status setDataGridDataSource(
+        UI::UINodeId dataGrid, UI::UIDataGridDataSource source);
+    [[nodiscard]] Core::Status clearDataGridDataSource(UI::UINodeId dataGrid);
+    [[nodiscard]] Core::Status invalidateDataGridItems(UI::UINodeId dataGrid);
+    [[nodiscard]] Core::Status setDataGridStyle(
+        UI::UINodeId dataGrid, const UI::UIDataGridStyle& style);
+    [[nodiscard]] Core::Result<UI::UIDataGridStyle>
+    dataGridStyle(UI::UINodeId dataGrid) const;
+    [[nodiscard]] Core::Status setDataGridPaint(
+        UI::UINodeId dataGrid, const UI::UIDataGridPaint& paint);
+    [[nodiscard]] Core::Result<UI::UIDataGridPaint>
+    dataGridPaint(UI::UINodeId dataGrid) const;
+    [[nodiscard]] Core::Result<UI::UIDataGridMetrics>
+    dataGridMetrics(UI::UINodeId dataGrid) const;
+    [[nodiscard]] Core::Status setDataGridSelectedCell(
+        UI::UINodeId dataGrid, u64 logicalRow, u32 logicalColumn);
+    [[nodiscard]] Core::Status clearDataGridSelection(UI::UINodeId dataGrid);
+    [[nodiscard]] Core::Result<UI::UIDataGridSelection>
+    dataGridSelection(UI::UINodeId dataGrid) const;
+    [[nodiscard]] Core::Status scrollDataGridToCell(
+        UI::UINodeId dataGrid, u64 logicalRow, u32 logicalColumn,
+        UI::UIDataGridScrollAlignment alignment =
+            UI::UIDataGridScrollAlignment::Nearest);
     [[nodiscard]] Core::Status setTreeViewDataSource(UI::UINodeId treeView, UI::UITreeViewDataSource source);
     [[nodiscard]] Core::Status clearTreeViewDataSource(UI::UINodeId treeView);
     [[nodiscard]] Core::Status invalidateTreeViewItems(UI::UINodeId treeView);

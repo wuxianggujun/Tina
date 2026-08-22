@@ -3,6 +3,7 @@
 #include <tina/editor/EditorErrors.hpp>
 
 #include <algorithm>
+#include <array>
 #include <limits>
 #include <new>
 #include <span>
@@ -36,6 +37,36 @@ allocateStableId(std::span<const Item> items, IdResolver&& resolveId,
     return Core::failure(Core::CoreErrorCode::OutOfMemory,
                          "Editor scene operation allocation failed");
 }
+
+// Indexed by the template enumerator, so the enum order is the presentation
+// order. Display names match the hierarchy label vocabulary exactly.
+inline constexpr std::array<EditorNodeTemplateInfo, World2DNodeTemplateCount>
+    World2DNodeTemplateRegistry{{
+        {.displayName = "Entity2D",
+         .description = "Transform only. Start here and add components later."},
+        {.displayName = "Sprite2D",
+         .description = "Draws a sprite. Needs a Sprite asset.",
+         .requiresSpriteAsset = true},
+        {.displayName = "AnimatedSprite2D",
+         .description = "Sprite driven by an animation clip.",
+         .requiresSpriteAsset = true,
+         .requiresAnimationClipAsset = true},
+        {.displayName = "Camera2D",
+         .description = "Defines what the 2D viewport renders."},
+        {.displayName = "PointLight2D",
+         .description = "Emits 2D light within a radius."},
+        {.displayName = "ShadowOccluder2D",
+         .description = "Blocks 2D light along a segment."},
+    }};
+
+inline constexpr std::array<EditorNodeTemplateInfo, World3DNodeTemplateCount>
+    World3DNodeTemplateRegistry{{
+        {.displayName = "Node3D",
+         .description = "Transform only. Start here and add a mesh later."},
+        {.displayName = "Mesh3D",
+         .description = "Renders a mesh. Needs mesh and material assets.",
+         .requiresMeshAssets = true},
+    }};
 
 [[nodiscard]] const AssetFormat::World2DEntityDesc*
 findWorld2DEntity(std::span<const AssetFormat::World2DEntityDesc> entities,
@@ -202,11 +233,69 @@ struct PrefabHierarchyNode final {
 
 } // namespace
 
+std::span<const EditorNodeTemplateInfo> world2DNodeTemplateRegistry() noexcept
+{
+    return World2DNodeTemplateRegistry;
+}
+
+std::span<const EditorNodeTemplateInfo> world3DNodeTemplateRegistry() noexcept
+{
+    return World3DNodeTemplateRegistry;
+}
+
+World2DNodeTemplate classifyWorld2DEntityTemplate(
+    const AssetFormat::World2DEntityDesc& entity) noexcept
+{
+    // Most specific first: an animated sprite also carries a sprite, and a
+    // camera or light is a more useful label than the occluder it may also own.
+    if (entity.spriteAnimation.has_value()) {
+        return World2DNodeTemplate::AnimatedSprite;
+    }
+    if (entity.camera.has_value()) {
+        return World2DNodeTemplate::Camera;
+    }
+    if (entity.pointLight.has_value()) {
+        return World2DNodeTemplate::PointLight;
+    }
+    if (entity.sprite.has_value()) {
+        return World2DNodeTemplate::Sprite;
+    }
+    if (entity.shadowOccluder.has_value()) {
+        return World2DNodeTemplate::ShadowOccluder;
+    }
+    return World2DNodeTemplate::Empty;
+}
+
+World3DNodeTemplate classifyWorld3DNodeTemplate(
+    const AssetFormat::PrefabNodeView& node) noexcept
+{
+    return node.hasMesh ? World3DNodeTemplate::Mesh : World3DNodeTemplate::Empty;
+}
+
 Core::Result<EditorSceneOperationResult>
-addWorld2DEntity(World2DAuthoringDocument& document,
-                 Core::u32 parentStableId)
+addWorld2DEntityOfTemplate(World2DAuthoringDocument& document,
+                           World2DNodeTemplate nodeTemplate,
+                           Core::u32 parentStableId,
+                           const World2DNodeTemplateAssets& assets)
 try
 {
+    if (static_cast<Core::usize>(nodeTemplate) >= World2DNodeTemplateCount) {
+        return Core::failure(EditorErrorCode::InvalidAuthoringOperation,
+                             "Editor scene node template is unknown");
+    }
+    const EditorNodeTemplateInfo& info =
+        World2DNodeTemplateRegistry[static_cast<Core::usize>(nodeTemplate)];
+    if (info.requiresSpriteAsset && !assets.spriteId) {
+        return Core::failure(
+            EditorErrorCode::InvalidAuthoringOperation,
+            "Editor scene node template requires a Sprite asset");
+    }
+    if (info.requiresAnimationClipAsset && !assets.animationClipId) {
+        return Core::failure(
+            EditorErrorCode::InvalidAuthoringOperation,
+            "Editor scene node template requires a SpriteAnimationClip asset");
+    }
+
     std::vector<AssetFormat::World2DEntityDesc> storage;
     auto snapshot = document.parseCurrentSnapshot(storage);
     if (!snapshot) {
@@ -227,10 +316,34 @@ try
     if (!stableId) {
         return Core::failure(std::move(stableId.error()));
     }
-    if (auto status = document.upsertEntity({
-            .stableEntityId = *stableId,
-            .parentStableEntityId = parentStableId,
-        }); !status) {
+
+    // Built as one desc so the whole node, components included, publishes as a
+    // single canonical revision and undoes in one step.
+    AssetFormat::World2DEntityDesc created{
+        .stableEntityId = *stableId,
+        .parentStableEntityId = parentStableId,
+    };
+    switch (nodeTemplate) {
+    case World2DNodeTemplate::Empty:
+        break;
+    case World2DNodeTemplate::Sprite:
+        created.sprite.emplace().spriteId = assets.spriteId;
+        break;
+    case World2DNodeTemplate::AnimatedSprite:
+        created.sprite.emplace().spriteId = assets.spriteId;
+        created.spriteAnimation.emplace().clipId = assets.animationClipId;
+        break;
+    case World2DNodeTemplate::Camera:
+        created.camera.emplace();
+        break;
+    case World2DNodeTemplate::PointLight:
+        created.pointLight.emplace();
+        break;
+    case World2DNodeTemplate::ShadowOccluder:
+        created.shadowOccluder.emplace();
+        break;
+    }
+    if (auto status = document.upsertEntity(created); !status) {
         return Core::failure(std::move(status.error()));
     }
     return EditorSceneOperationResult{
@@ -241,6 +354,14 @@ try
 catch (const std::bad_alloc&)
 {
     return sceneOperationAllocationFailure();
+}
+
+Core::Result<EditorSceneOperationResult>
+addWorld2DEntity(World2DAuthoringDocument& document,
+                 Core::u32 parentStableId)
+{
+    return addWorld2DEntityOfTemplate(document, World2DNodeTemplate::Empty,
+                                      parentStableId);
 }
 
 Core::Result<EditorSceneOperationResult>
@@ -361,6 +482,124 @@ catch (const std::bad_alloc&)
     return sceneOperationAllocationFailure();
 }
 
+Core::Status reorderWorld2DEntity(World2DAuthoringDocument& document,
+                                  Core::u32 stableEntityId,
+                                  Core::u32 beforeSiblingStableId)
+try
+{
+    std::vector<AssetFormat::World2DEntityDesc> storage;
+    auto snapshot = document.parseCurrentSnapshot(storage);
+    if (!snapshot) {
+        return Core::failure(std::move(snapshot.error()));
+    }
+    const auto target = std::find_if(
+        storage.begin(), storage.end(), [stableEntityId](const auto& entity) {
+            return entity.stableEntityId == stableEntityId;
+        });
+    if (target == storage.end()) {
+        return Core::failure(EditorErrorCode::EntityNotFound,
+                             "Editor scene item to reorder was not found");
+    }
+    if (beforeSiblingStableId == stableEntityId) {
+        return Core::success();
+    }
+    const Core::u32 parentStableId = target->parentStableEntityId;
+    if (beforeSiblingStableId != 0) {
+        const auto before = std::find_if(
+            storage.begin(), storage.end(), [beforeSiblingStableId](const auto& entity) {
+                return entity.stableEntityId == beforeSiblingStableId;
+            });
+        if (before == storage.end()) {
+            return Core::failure(EditorErrorCode::EntityNotFound,
+                                 "Editor scene reorder sibling was not found");
+        }
+        if (before->parentStableEntityId != parentStableId) {
+            return Core::failure(EditorErrorCode::InvalidAuthoringOperation,
+                                 "Editor scene reorder requires siblings");
+        }
+    }
+
+    const Core::usize rootIndex = storage.size();
+    std::vector<std::vector<Core::usize>> children(storage.size() + 1U);
+    for (Core::usize index = 0; index < storage.size(); ++index) {
+        Core::usize parentIndex = rootIndex;
+        if (storage[index].parentStableEntityId != 0) {
+            const auto parent = std::find_if(
+                storage.begin(), storage.end(), [&](const auto& entity) {
+                    return entity.stableEntityId == storage[index].parentStableEntityId;
+                });
+            if (parent == storage.end()) {
+                return Core::failure(EditorErrorCode::InvalidAuthoringOperation,
+                                     "Editor scene reorder found a missing parent");
+            }
+            parentIndex = static_cast<Core::usize>(
+                std::distance(storage.begin(), parent));
+        }
+        children[parentIndex].push_back(index);
+    }
+    const Core::usize targetIndex = static_cast<Core::usize>(
+        std::distance(storage.begin(), target));
+    const Core::usize parentIndex = parentStableId == 0
+        ? rootIndex
+        : static_cast<Core::usize>(std::distance(
+              storage.begin(), std::find_if(storage.begin(), storage.end(),
+                  [parentStableId](const auto& entity) {
+                      return entity.stableEntityId == parentStableId;
+                  })));
+    auto& siblings = children[parentIndex];
+    const auto targetSibling = std::find(siblings.begin(), siblings.end(), targetIndex);
+    if (targetSibling == siblings.end()) {
+        return Core::failure(EditorErrorCode::InvalidAuthoringOperation,
+                             "Editor scene reorder lost the target sibling");
+    }
+    siblings.erase(targetSibling);
+    if (beforeSiblingStableId == 0) {
+        siblings.push_back(targetIndex);
+    } else {
+        const auto beforeSibling = std::find_if(
+            siblings.begin(), siblings.end(), [&](Core::usize index) {
+                return storage[index].stableEntityId == beforeSiblingStableId;
+            });
+        if (beforeSibling == siblings.end()) {
+            return Core::failure(EditorErrorCode::InvalidAuthoringOperation,
+                                 "Editor scene reorder target is not a sibling");
+        }
+        siblings.insert(beforeSibling, targetIndex);
+    }
+
+    std::vector<AssetFormat::World2DEntityDesc> ordered;
+    ordered.reserve(storage.size());
+    std::vector<Core::usize> pending;
+    pending.reserve(storage.size());
+    for (auto root = children[rootIndex].rbegin();
+         root != children[rootIndex].rend(); ++root) {
+        pending.push_back(*root);
+    }
+    while (!pending.empty()) {
+        const Core::usize index = pending.back();
+        pending.pop_back();
+        ordered.push_back(storage[index]);
+        for (auto child = children[index].rbegin();
+             child != children[index].rend(); ++child) {
+            pending.push_back(*child);
+        }
+    }
+    if (ordered.size() != storage.size()) {
+        return Core::failure(EditorErrorCode::InvalidAuthoringOperation,
+                             "Editor scene reorder produced an invalid hierarchy");
+    }
+    return document.replace({
+        .entities = ordered,
+        .gameplaySchema = snapshot->gameplaySchema,
+        .gameplayVersion = snapshot->gameplayVersion,
+        .gameplayBytes = snapshot->gameplayBytes,
+    });
+}
+catch (const std::bad_alloc&)
+{
+    return sceneOperationAllocationFailure();
+}
+
 Core::Result<EditorSceneOperationResult>
 deleteWorld2DEntitySubtree(World2DAuthoringDocument& document,
                            Core::u32 stableEntityId)
@@ -396,9 +635,24 @@ catch (const std::bad_alloc&)
 }
 
 Core::Result<EditorSceneOperationResult>
-addWorld3DNode(World3DAuthoringDocument& document, Core::u32 parentStableId)
+addWorld3DNodeOfTemplate(World3DAuthoringDocument& document,
+                         World3DNodeTemplate nodeTemplate,
+                         Core::u32 parentStableId,
+                         const World3DNodeTemplateAssets& assets)
 try
 {
+    if (static_cast<Core::usize>(nodeTemplate) >= World3DNodeTemplateCount) {
+        return Core::failure(EditorErrorCode::InvalidAuthoringOperation,
+                             "Editor scene node template is unknown");
+    }
+    const EditorNodeTemplateInfo& info =
+        World3DNodeTemplateRegistry[static_cast<Core::usize>(nodeTemplate)];
+    if (info.requiresMeshAssets && (!assets.meshId || !assets.materialId)) {
+        return Core::failure(
+            EditorErrorCode::InvalidAuthoringOperation,
+            "Editor scene node template requires paired mesh and material assets");
+    }
+
     std::vector<AssetFormat::PrefabNodeView> storage;
     auto prefab = document.parseCurrentPrefab(storage);
     if (!prefab) {
@@ -421,9 +675,12 @@ try
     if (!stableId) {
         return Core::failure(std::move(stableId.error()));
     }
+    const bool withMesh = nodeTemplate == World3DNodeTemplate::Mesh;
     if (auto status = document.upsertNode({
             .stableNodeId = *stableId,
             .parentIndex = parentIndex,
+            .meshId = withMesh ? assets.meshId : Core::AssetId{},
+            .materialId = withMesh ? assets.materialId : Core::AssetId{},
         }); !status) {
         return Core::failure(std::move(status.error()));
     }
@@ -435,6 +692,13 @@ try
 catch (const std::bad_alloc&)
 {
     return sceneOperationAllocationFailure();
+}
+
+Core::Result<EditorSceneOperationResult>
+addWorld3DNode(World3DAuthoringDocument& document, Core::u32 parentStableId)
+{
+    return addWorld3DNodeOfTemplate(document, World3DNodeTemplate::Empty,
+                                    parentStableId);
 }
 
 Core::Result<EditorSceneOperationResult>
@@ -567,6 +831,109 @@ try
         });
     }
     return publishPrefabHierarchy(document, std::move(nodes));
+}
+catch (const std::bad_alloc&)
+{
+    return sceneOperationAllocationFailure();
+}
+
+Core::Status reorderWorld3DNode(World3DAuthoringDocument& document,
+                                Core::u32 stableNodeId,
+                                Core::u32 beforeSiblingStableId)
+try
+{
+    std::vector<AssetFormat::PrefabNodeView> storage;
+    auto prefab = document.parseCurrentPrefab(storage);
+    if (!prefab) {
+        return Core::failure(std::move(prefab.error()));
+    }
+    const Core::i32 targetIndex = findPrefabNodeIndex(storage, stableNodeId);
+    if (targetIndex < 0 || (beforeSiblingStableId != 0 &&
+                            findPrefabNodeIndex(storage, beforeSiblingStableId) < 0)) {
+        return Core::failure(EditorErrorCode::EntityNotFound,
+                             "Editor scene reorder item or sibling was not found");
+    }
+    if (beforeSiblingStableId == stableNodeId) {
+        return Core::success();
+    }
+    const Core::u32 targetParentStableId = storage[static_cast<Core::usize>(targetIndex)].parentIndex < 0
+        ? 0U
+        : storage[static_cast<Core::usize>(storage[static_cast<Core::usize>(targetIndex)].parentIndex)].stableNodeId;
+    const Core::i32 beforeIndex = beforeSiblingStableId == 0
+        ? -1
+        : findPrefabNodeIndex(storage, beforeSiblingStableId);
+    const Core::u32 beforeParentStableId = beforeIndex < 0
+        ? targetParentStableId
+        : storage[static_cast<Core::usize>(beforeIndex)].parentIndex < 0
+              ? 0U
+              : storage[static_cast<Core::usize>(storage[static_cast<Core::usize>(beforeIndex)].parentIndex)].stableNodeId;
+    if (beforeSiblingStableId != 0 && beforeParentStableId != targetParentStableId) {
+        return Core::failure(EditorErrorCode::InvalidAuthoringOperation,
+                             "Editor scene reorder requires siblings");
+    }
+
+    const Core::usize rootIndex = storage.size();
+    std::vector<std::vector<Core::usize>> children(storage.size() + 1U);
+    for (Core::usize index = 0; index < storage.size(); ++index) {
+        const Core::i32 parent = storage[index].parentIndex;
+        const Core::usize parentIndex = parent < 0
+            ? rootIndex
+            : static_cast<Core::usize>(parent);
+        if (parentIndex >= children.size()) {
+            return Core::failure(EditorErrorCode::InvalidAuthoringOperation,
+                                 "Editor scene reorder found an invalid parent index");
+        }
+        children[parentIndex].push_back(index);
+    }
+    const Core::usize parentIndex = targetParentStableId == 0
+        ? rootIndex
+        : static_cast<Core::usize>(findPrefabNodeIndex(storage, targetParentStableId));
+    auto& siblings = children[parentIndex];
+    const Core::usize targetIndexValue = static_cast<Core::usize>(targetIndex);
+    const auto targetSibling = std::find(siblings.begin(), siblings.end(), targetIndexValue);
+    if (targetSibling == siblings.end()) {
+        return Core::failure(EditorErrorCode::InvalidAuthoringOperation,
+                             "Editor scene reorder lost the target sibling");
+    }
+    siblings.erase(targetSibling);
+    if (beforeSiblingStableId == 0) {
+        siblings.push_back(targetIndexValue);
+    } else {
+        const auto beforeSibling = std::find_if(
+            siblings.begin(), siblings.end(), [&](Core::usize index) {
+                return storage[index].stableNodeId == beforeSiblingStableId;
+            });
+        if (beforeSibling == siblings.end()) {
+            return Core::failure(EditorErrorCode::InvalidAuthoringOperation,
+                                 "Editor scene reorder target is not a sibling");
+        }
+        siblings.insert(beforeSibling, targetIndexValue);
+    }
+
+    std::vector<PrefabHierarchyNode> hierarchy;
+    hierarchy.reserve(storage.size());
+    std::vector<Core::usize> pending;
+    pending.reserve(storage.size());
+    for (auto root = children[rootIndex].rbegin();
+         root != children[rootIndex].rend(); ++root) {
+        pending.push_back(*root);
+    }
+    while (!pending.empty()) {
+        const Core::usize index = pending.back();
+        pending.pop_back();
+        const auto& node = storage[index];
+        hierarchy.push_back({
+            .node = toPrefabNodeDesc(node),
+            .parentStableId = node.parentIndex < 0
+                ? 0U
+                : storage[static_cast<Core::usize>(node.parentIndex)].stableNodeId,
+        });
+        for (auto child = children[index].rbegin();
+             child != children[index].rend(); ++child) {
+            pending.push_back(*child);
+        }
+    }
+    return publishPrefabHierarchy(document, std::move(hierarchy));
 }
 catch (const std::bad_alloc&)
 {

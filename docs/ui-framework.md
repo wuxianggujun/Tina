@@ -243,7 +243,7 @@ timeline 还可在白名单内原子发布 layout/hit/paint。默认行为仍即
 ### 可以
 
 - 在源码树内链接 `Tina::UI`，通过 Runtime phase facade 创建和更新 root；
-- 用 Panel、Label、Button、Checkbox、Slider、ListView、TreeView 等组合自己的业务组件；
+- 用 Panel、Label、Button、Checkbox、Slider、ListView、TreeView、VirtualGridView、DataGrid 等组合自己的业务组件；
 - 定义组件函数并返回一组 `UINodeId`，例如 Inventory slot 的 root/icon/count label；
 - 设置布局、文本、Semantics、命中策略、StyleRole、局部 box/text/control paint；
 - 在 `UIContext` 创建首个节点前注册 StyleClass/ColorToken、安装 literal/token-backed BoxFill stylesheet；
@@ -406,6 +406,8 @@ enum class UIStyleRoleId : u8 {
     PanelSurface,
     // Existing built-in product roles...
     TreeView,
+    VirtualGridView,
+    DataGrid,
 };
 
 struct UIStyleClassId { u32 value{}; };
@@ -442,7 +444,8 @@ capacity/count/high-water、failure 与 revision counter。
 Hovered/Pressed/Focused/Disabled/Checked/Selected/Open/Dragging，按 dirty node 刷新 per-node resolved BoxFill
 cache，再由 committed paint 只读该 cache。优先级为 product chrome < stylesheet < local override；单节点
 paint/state 更新不扫描全树或完整 rule table，并输出 inspected node、resolved node 与 candidate rule counter。
-ListView/TreeView owner 更新时仅额外刷新固定 materialized row pool，防止虚拟行复用残留 Selected 样式。
+ListView/TreeView owner 更新时仅额外刷新固定 materialized row pool；VirtualGridView/DataGrid 分别只刷新固定
+item pool 与 column/row/cell pool，防止虚拟节点复用残留 Selected 样式。
 
 `PrimaryWindowUIRootBuilder` 已在 `GameStateEnter` 暴露同一 startup-only class/ColorToken 注册与
 literal/token-backed sheet 安装契约；`UIContext` 与 phase-scoped `PrimaryWindowUITreeUpdater` 还提供运行期
@@ -904,6 +907,7 @@ Image/Icon/NineSlice 实际展开的 image quad 数，`U` 为本帧唯一 `(reso
 | active Motion | direct transition sample 为 `O(M)`；keyframe timeline 只遍历 compact active-index 的 timeline/track 与实际 segment，分别报告 sampled timeline/track/segment；paint timeline 每帧发布 Paint，layout timeline 每帧以一次事务发布 Layout/Hit/Paint，definition high-water 独立于 active set | 无 active track 仍使 Paint dirty、扫描全部 definition/node 寻找动画、部分发布 layout/hit/paint、白名单外 layout 插值 |
 | Image/Icon/NineSlice | paint 展开为 `O(Q)`，资源工作为 `O(U)`；Image/Icon 均为 1 quad，NineSlice 每个命令最多 9 quad，完整容量预检后一次发布 | UI commit 同步 Asset I/O、每 quad 重复 resolve/pin、未 pin 的 GPU handle、容量不足时截断半个 NineSlice、为 batch 全局重排 paint order |
 | 虚拟 List/Tree | warmup 后按固定 row pool/可见行工作，不按 100k logical item 全量 materialize | 滚动时增长 row storage 或遍历全部 logical item |
+| VirtualGrid/DataGrid | warmup 后分别按固定 item pool 与 column/row/cell pool 工作；DataGrid 的 logical row 虚拟化且只解析固定列集合 | 按 100k logical row 创建节点、滚动时增长 storage、容量失败后发布半份 bindings/layout/semantics |
 
 当前 paint candidate 的线性 publication 是已知事实，不是由 Style/Component 新设计新增的隐藏成本。Motion
 会把原本偶发的 paint commit 变成连续多帧，因此 `ui_motion_v1` / `ui_motion_timeline_v1` /
@@ -1013,7 +1017,12 @@ counter、容量/分配不变量可以立即作为确定性门禁：
   TextEdit-first printable P、P/Gamepad Start 路由、Base Menu 打开 Pause、Pause Menu 恢复，以及
   `ESC / ENTER / P`、`B / A / START` 产品提示；最终切片增加固定 16 槽 `UIFlowLocalUserId`、Primary=1、
   键鼠固定 Primary、完整 generation Gamepad assignment、per-user 设备状态、action event 用户来源、
-  重分配 release latch 保留与断连/reset assignment/latch 清理；Screen 栈与 focus 继续保持窗口级唯一；
+   重分配 release latch 保留与断连/reset assignment/latch 清理；Screen 栈与 focus 继续保持窗口级唯一；
+- `UI-GRID-COLLECTIONS` Done：VirtualGridView 的响应式列/单轴滚动和 DataGrid 的固定列宽/虚拟行/双轴滚动
+  已沿既有 committed transaction、默认输入、Theme、semantics 与 Runtime phase facade 落地；固定 pool、100k logical
+  item/row、overflow、失败原子 publication 与 warmup 后零增长由 UI/Runtime 测试覆盖；2026-08-21 集中 gate 为
+  定向 UI 10/10、Runtime facade 3/3、UI 782/782、Runtime UI 148/148、UI-Render 28/28、EditorApp 20/20，
+  Editor 2D/3D 各 68 帧 exit 0；
 - `UI-BEHAVIOR-SPI-001` 只有标准 Behavior 无法满足有证据的插件场景时才冻结高级 SPI。
 
 详细状态和验收条件只在 [Backlog](backlog.md)维护。

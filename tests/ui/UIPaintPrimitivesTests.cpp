@@ -2,7 +2,9 @@
 
 #include "detail/UIPaintPrimitives.hpp"
 
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <string_view>
 
 namespace Tina::Tests {
@@ -214,6 +216,51 @@ TEST(UIPaintPrimitivesTests, LineEmitsWorldGeometryAndConservativeEnvelope)
                   .height = 4.0F,
               }));
     EXPECT_EQ(ordinal, 9U);
+}
+
+TEST(UIPaintPrimitivesTests, LineEnvelopeRoundsOutwardAfterFloatConversion)
+{
+    const UI::UILineGeometry line{
+        .start = {.x = 300.387054F, .y = 234.961182F},
+        .end = {.x = 299.399994F, .y = 235.048965F},
+        .thickness = 1.0F,
+    };
+
+    const auto geometry =
+        UI::Detail::resolveCommittedLineGeometry(line, {});
+    ASSERT_TRUE(geometry.has_value());
+
+    const double deltaX = static_cast<double>(geometry->worldEnd.x) -
+                          geometry->worldStart.x;
+    const double deltaY = static_cast<double>(geometry->worldEnd.y) -
+                          geometry->worldStart.y;
+    const double length = std::hypot(deltaX, deltaY);
+    const double halfThickness = static_cast<double>(line.thickness) * 0.5;
+    const double extentX = std::abs(deltaY / length) * halfThickness;
+    const double extentY = std::abs(deltaX / length) * halfThickness;
+    const double requiredLeft =
+        (std::min)(static_cast<double>(geometry->worldStart.x),
+                   static_cast<double>(geometry->worldEnd.x)) - extentX;
+    const double requiredTop =
+        (std::min)(static_cast<double>(geometry->worldStart.y),
+                   static_cast<double>(geometry->worldEnd.y)) - extentY;
+    const double requiredRight =
+        (std::max)(static_cast<double>(geometry->worldStart.x),
+                   static_cast<double>(geometry->worldEnd.x)) + extentX;
+    const double requiredBottom =
+        (std::max)(static_cast<double>(geometry->worldStart.y),
+                   static_cast<double>(geometry->worldEnd.y)) + extentY;
+    const double envelopeRight =
+        static_cast<double>(geometry->worldEnvelope.x) +
+        geometry->worldEnvelope.width;
+    const double envelopeBottom =
+        static_cast<double>(geometry->worldEnvelope.y) +
+        geometry->worldEnvelope.height;
+
+    EXPECT_LE(static_cast<double>(geometry->worldEnvelope.x), requiredLeft);
+    EXPECT_LE(static_cast<double>(geometry->worldEnvelope.y), requiredTop);
+    EXPECT_GE(envelopeRight, requiredRight);
+    EXPECT_GE(envelopeBottom, requiredBottom);
 }
 
 TEST(UIPaintPrimitivesTests, DegenerateLineEmitsNothingInsteadOfBoxRectangle)

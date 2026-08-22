@@ -305,7 +305,8 @@ StyleRole/box/Canvas、semantics、enabled、pointer/focus policy 与集合配�
 `makeListViewElement()` 等是内建控件的官方 recipes。旧 `createPanel/createButton/createListView/...`
 成员入口已删除，不提供 compatibility alias。当前内建行为覆盖 Root、Panel、Modal、Label、Button、
 Checkbox、Slider、ProgressBar、RadioButton、TextEdit（默认单行；可选多行）、ScrollView，以及
-Dropdown/Popup/Tooltip/Menu/MenuItem/DropdownItem、ListView/TreeView、SplitView/Splitter、TabView/Tab。
+Dropdown/Popup/Tooltip/Menu/MenuItem/DropdownItem、ListView/TreeView/VirtualGridView/DataGrid、
+SplitView/Splitter、TabView/Tab。
 Button 与 RadioButton descriptor 可直接使用与 text 互斥的 Image intrinsic content；此时控件必须显式发布
 semantics name 并关闭 content-as-name，使图标、control chrome 与交互状态共享同一 retained node。其他带行为
 Element 不接受 Image content。
@@ -316,7 +317,7 @@ alignment + offset，Px offset 可为有限负值，Percent offset 范围为 `-1
 `clipDescendants` 是默认 `false` 的显式 axis-aligned clip-owner 契约：开启后，普通 Flow/Overlay 后代的
 committed `effectiveClip` 与 owner 的 world border-box 求交，但不改后代 `worldRect`，不建立 rounded clip，
 也不额外改变 owner 自身的 paint clip。hit 与 paint 读取同一 committed clip；可见性、tree/semantics 顺序和
-authored semantics `worldRect` 不变。ScrollView/ListView/TreeView viewport clip 复用同一传播机制；Popup
+authored semantics `worldRect` 不变。ScrollView/ListView/TreeView/VirtualGridView/DataGrid viewport clip 复用同一传播机制；Popup
 作为 viewport-level overlay 继续使用专用 anchor/clip policy，不受普通祖先 clip owner 限制。Tooltip 同样
 强制 Overlay，但使用独立的显式 Anchor/placement contract，不复用 Popup 的 focus、input 或 barrier 状态机。
 Menu 也拥有独立 Anchor/placement/state contract，仅在 Context 协调层与 Popup 共享单 Window transient overlay；
@@ -325,8 +326,15 @@ Menu 也拥有独立 Anchor/placement/state contract，仅在 Context 协调层�
 `UICommittedContentPlacement`，paint、caret/selection 与 pointer-to-text mapping 共用该 committed origin。
 `UITextOverflow::{Clip,Ellipsis}` 是独立于 `UITextStyle` 的节点 authoring intent；`Ellipsis` 只在 paint 阶段按
 committed content box 和 UAX #29 grapheme 边界截断单行，intrinsic measure 与 Semantics name 始终保留完整文本。
-虚拟列表通过 `UIListViewStyle::rowTextOverflow` 将相同策略应用到私有 materialized row，不要求 DataSource
-预先截断 label。`UITheme::typography` 是 display/title/section/body/control/caption 六级命名字号 ramp。
+虚拟集合通过 `UIListViewStyle::rowTextOverflow`、`UIVirtualGridViewStyle::itemTextOverflow` 以及
+`UIDataGridStyle::headerTextOverflow/cellTextOverflow` 将相同策略应用到私有 materialized 节点，不要求 DataSource
+预先截断 label/header/cell text。`UITheme::typography` 是 display/title/section/body/control/caption 六级命名字号 ramp。
+
+`UIVirtualGridViewDataSource` 以 stable non-zero item key 暴露 logical item；创建时固定 materialized item pool，
+layout 按 `minimumItemWidth` 响应式计算等宽列，只提供纵向滚动。`UIDataGridDataSource` 分离 row/column/cell descriptor；
+column count 必须落在创建时固定 column pool，列宽是精确 logical width，logical row 由固定 materialized row/cell pool
+虚拟化并支持双轴滚动。两者都提供 metrics、stable selection、scroll-to-item/cell、Pointer 与 Keyboard/Gamepad 命令；
+descriptor 非法、pool 超限或候选提交失败时不发布半份 bindings/layout/paint/semantics，旧 committed snapshot 保持不变。
 
 `UIElementDescriptor::textEditMultiline` 只对带 `TextInput` behavior 的 TextEdit 生效。启用后，
 `UITextEditMultilineConfig` 允许 LF、`UITextEditWrapMode::SoftWrap`、固定 `maximumBytes` 与
@@ -338,8 +346,8 @@ shaping 不在当前契约内。多行配置容量不足或 visual-row 构建失
 
 游戏通过 Runtime phase facade 创建/更新主窗口 root，不获得裸 UIContext。Text 使用 strict UTF-8，
 descriptor 的 `string_view` 在创建时复制到固定容量 storage，失败回滚本次节点；
-`PrimaryWindowUITreeUpdater` 暴露同一组 ScrollView/Dropdown/Popup/Tooltip/Menu/ListView/TreeView/SplitView/TabView phase-scoped
-mutation/query，包括集合 DataSource、metrics、selection、scroll 与 Tree expansion；
+`PrimaryWindowUITreeUpdater` 暴露同一组 ScrollView/Dropdown/Popup/Tooltip/Menu/ListView/TreeView/VirtualGridView/
+DataGrid/SplitView/TabView phase-scoped mutation/query，包括集合 DataSource、style/paint、metrics、selection、scroll 与 Tree expansion；
 `setTextOverflow()/textOverflow()` 也通过相同 phase facade 暴露；
 `setProductTheme()` 可事务式更新既有控件仍继承的产品 chrome；单节点
 paint/text setter 只将对应属性转为局部覆盖，其余属性继续跟随 Theme。Theme metric 非法、owner-thread
@@ -554,7 +562,7 @@ disabled、Hidden/Collapsed、destroy 与 Modal change 会清除或迁移焦点�
 
 `UIRangeInputCommand::{Decrease,Increase}` 与 `UIContext::routeRangeInputCommand()` 提供独立于空间焦点的
 capability-level 调值契约。Runtime 将 Keyboard Left/Down 与 D-pad Left/Down 映射为 Decrease，将
-Right/Up 映射为 Increase；路由优先级位于 Menu/Dropdown/ListView/TreeView/TextEdit 等复合方向控件之后、
+Right/Up 映射为 Increase；路由优先级位于 Menu/Dropdown/ListView/TreeView/VirtualGridView/DataGrid/TextEdit 等复合方向控件之后、
 通用空间焦点之前。focused Slider 复用 Pointer/UIA 已有的 min/max/step/clamp、量化、value storage 与 callback
 路径；`step == 0` 时使用 range 的 1%。`UIRangeInputCommandResult` 分开报告 `consumed`、`changed` 与
 `targeted`：只有成功改变 value 的 Down 才建立 fixed-capacity exact-control latch，匹配 Up 即使焦点或
@@ -571,8 +579,9 @@ disabled > pressed > hover > focus > normal，零 alpha 状态色回退到下一
 `PrimaryWindowUITreeUpdater` 均提供 `setTextEditPaint()` / `textEditPaint()`；setter 只 detach
 `UIStyleOverride::TextEditPaint`，BoxPaint 与 TextStyle 仍可继续继承当前 Theme。TextEdit 的 Pointer
 selection、IME、Value action 和 committed focus 仍使用原路径，没有新增输入状态或 GPU callback。
-UI-005 的 ScrollView、Dropdown/Popup 与固定 row pool ListView/TreeView 已实现。集合控件支持 100k logical
-item 的虚拟化，但完整通用 dirty-range pruning 仍未完成。当前回归覆盖 50,000 节点深树的非递归
+UI-005 的 ScrollView、Dropdown/Popup 与固定 row pool ListView/TreeView 已实现；VirtualGridView/DataGrid 也已分别
+接入固定 item pool 与固定 column/row/cell pool。集合控件支持 100k logical item/row 的虚拟化，但完整通用
+dirty-range pruning 仍未完成。当前回归覆盖 50,000 节点深树的非递归
 structure commit/destroy、layout、hit 与 paint publication；Popup membership 在 layout traversal 中缓存，
 避免 publication 对每个节点重复回溯祖先。
 
@@ -1185,7 +1194,7 @@ Jolt/Physics3D 尚未接入。
 **已存在（勿再文档成“没有”）：** `GameStateStack` 与 structural commands；相位 `blocks*Below` 与
 `blocksGameplayInputBelow` 空 snapshot；`RenderFramePacket` / `FramePin` / present-return CPU
 submission ledger；Focus Scope/Modal/持久 Pointer Capture；ScrollView/Dropdown/Popup/虚拟
-ListView/TreeView；Tooltip、Menu/MenuItem、SplitView/Splitter、TabView/Tab；`UIFlowLayerId`/`UIFlowScreenId`、固定容量 Screen stack、16 槽 `UIFlowLocalUserId` 与 Gamepad assignment；accessibility action seam 与 Windows UIA provider + HWND HostBridge +
+ListView/TreeView/VirtualGridView/DataGrid；Tooltip、Menu/MenuItem、SplitView/Splitter、TabView/Tab；`UIFlowLayerId`/`UIFlowScreenId`、固定容量 Screen stack、16 槽 `UIFlowLocalUserId` 与 Gamepad assignment；accessibility action seam 与 Windows UIA provider + HWND HostBridge +
 Invoke/Toggle/RangeValue/Value patterns；immutable weighted Navigation2D grid、动态 blocker、四向/对角同步与
 分步 A*；allocation-free `CameraFollow2D`；Physics2D ConvexPolygon 与 Revolute/Prismatic joint。
 

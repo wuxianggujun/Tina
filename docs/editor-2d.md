@@ -36,8 +36,8 @@ Play active 时全部组件控件与其它 authoring 控件一同锁定；组件
 preview 从新 canonical bytes 重建。
 
 Editor 默认进入无帧数上限的交互模式，由主窗口关闭结束生命周期；自动演示不再默认执行。只有同时显式传入
-`--auto-demo` 与 `--frames=<N>` 且 `N >= 68` 才运行自动 authoring 流程，重复 `--auto-demo`、缺少 `--frames`
-或帧预算不足都拒绝启动。正式短 smoke 统一使用 68 帧；新增阶段会选择内置 PointLight2D、展开 RGB Color Picker，
+`--auto-demo` 与 `--frames=<N>` 且 `N >= 70` 才运行自动 authoring 流程，重复 `--auto-demo`、缺少 `--frames`
+或帧预算不足都拒绝启动。正式短 smoke 统一使用 70 帧（Create Node picker 的打开与 Confirm 各占一帧）；新增阶段会选择内置 PointLight2D、展开 RGB Color Picker，
 等待 Inspector 自动滚动和目标控件几何 committed 后保留完整绘制帧，最后一帧继续确认最终 Hierarchy selection 已提交。
 单独传 `--frames=<N>` 只运行有限帧普通模式，其退出门禁只检查生命周期、UI、viewport、preview、document 与有限值等
 通用不变量；自动编辑目标与选择都从当前 hierarchy 的 stable ID 动态解析。
@@ -77,7 +77,7 @@ Windows GLFW 将原生 window/Pointer 坐标按 `contentScale` 归一为 logical
 状态不常驻占用画布高度。
 2026-08-20 Tina Studio Compact 集中门禁通过：`tina_ui_tests` 771/771、`tina_ui_uia_tests` 14/14、
 `tina_runtime_ui_tests` 145/145、`tina_editor_tests` 114/114、`tina_editor_app_tests` 13/13；2D/3D workspace
-`--auto-demo --frames=68` 均 exit 0、`automaticAuthoringStage=57`、`selectionVerified=true`，且各自通过
+`--auto-demo --frames=70` 均 exit 0、`automaticAuthoringStage=57`、`selectionVerified=true`，且各自通过
 `capturePrimaryFrameRgba8()` 写出完整 `2560x1600x4` top-left RGBA8 帧并完成像素内容核验。Color Picker
 capture 还确认 Color Field 的单一 swatch/hex summary、R/G/B 通道色和 `0..255` 数值标签均完整可见且无裁剪或重叠。
 Inspector 浮点字段使用 6 位有效数字的 fixed-capacity、locale-independent presentation，不再显示
@@ -179,7 +179,15 @@ Hierarchy 每次在 World2D/World3D document 变化后都从 canonical entity/no
 及其 parent stable ID 重建动态树；document root 使用非持久化的 UI key，实际场景项直接以 stable ID 作为 key。Header 下只常驻
 `Add`、`Duplicate`、`Delete` 与 `Focus`；任意 `Reparent` 和 `To Root` 统一由 Inspector 的 Parent 字段完成。这些操作均同时接入 2D/3D，
 状态操作只发布一个 canonical revision，刷新后按
-stable ID 恢复选择。`Delete` 先打开第一方 `UIDialog`，并固定 active document key、workspace、stable ID 与 document
+stable ID 恢复选择。`Add` 先打开第一方 Create Node picker modal，列出当前 workspace 的 node template：World2D 为
+`Entity2D`、`Sprite2D`、`AnimatedSprite2D`、`Camera2D`、`PointLight2D`、`ShadowOccluder2D`，World3D 为 `Node3D`、`Mesh3D`；
+选中 template 后 Confirm 以一次 canonical revision 直接创建带完整组件的节点，因此选择节点类型只消耗一次 Undo，
+不再需要先建空节点再到 Inspector 转换。picker 固定 active document key、workspace、parent stable ID 与 document
+revision，Confirm 前任一项变化即事务安全取消；Cancel/Escape 不修改 canonical document 或 selection，关闭后 focus
+恢复到 Hierarchy。`Sprite2D` / `AnimatedSprite2D` / `Mesh3D` 所需 AssetId 与 Inspector 的 Add Component 同源解析
+（Project Assets 选中项，否则内建 preview asset），因此没有不可达的 template。node template registry 同时是 Hierarchy
+标签与 Inspector Kind 的唯一词表，创建为 `AnimatedSprite2D` 的节点在两处也读回 `AnimatedSprite2D`。Inspector 的逐组件
+Add/Remove 继续保留，负责在已有节点上增删组件，与创建时选类型互补。`Delete` 先打开第一方 `UIDialog`，并固定 active document key、workspace、stable ID 与 document
 revision；只有 Confirm 执行原有 subtree 删除，Cancel/Escape/关闭不修改 canonical document 或 selection。Confirm 前目标、
 document/session 或 revision 已变化时事务安全取消，重复 Delete/Confirm 不会建立第二条删除流程；Dialog 关闭提交后 focus
 恢复到 Hierarchy。Auto-demo 可通过 `--rgba-output=<path>` 与
@@ -201,8 +209,8 @@ Command Bar 或 Edit menu 的 active-document Undo/Redo。启动时复制当前 
 
 Editor 快捷键使用 frame action mapping：`Ctrl+S` Save、`Ctrl+Shift+S` Save As、`Ctrl+Z` Undo、`Ctrl+Y` Redo、
 `Ctrl+D` Duplicate、`Delete` Delete、`Ctrl+1` / `Ctrl+2` 切换 2D/3D、`Ctrl+0` Frame All、`Ctrl+F` Focus Selection、
-`F6` Play/Resume、`F7` Step、`F8` Stop。`Escape` 优先关闭 scene Delete confirmation，其次关闭 dirty modal，之后才取消
-gizmo、marquee、navigation 或停止 Play。
+`F6` Play/Resume、`F7` Step、`F8` Stop。`Escape` 优先关闭 Create Node picker，其次关闭 scene Delete confirmation，
+再关闭 dirty modal，之后才取消 gizmo、marquee、navigation 或停止 Play。
 不绑定裸 `Q/W/E/R`，避免 Inspector TextEdit 输入期间误触 viewport tool。
 
 2D workspace 通过 Viewport Header 的 `TileMap` context 激活内建 TileMap session 后，开放 viewport `Tile Paint` / `Tile Erase`
@@ -268,16 +276,26 @@ Catalog，commit 后 preview 重建失败则作为结构化致命错误返回，
 
 Editor source import 已完成产品接线。自动化入口使用 strict UTF-8 absolute `--project-root=<path>`，以可重复且可混合的
 `--import-recipe=<path>` / `--import-gltf=<path>` / `--import-texture=<path>` / `--import-audio=<path>` 表达完整 intended unit 集；`--import-on-start` 在安全帧启动导入，
-`--project-root` 与 `--catalog-root` 互斥。Project Assets 的 Import Source 可在 Windows 原生对话框中一次批量选择
-`.recipe` / `.gltf` / `.glb` / `.png` / `.jpg` / `.jpeg` / `.wav` 并加入同一 intended set。左侧 `Source Imports` 在 intended set 非空时显示完整虚拟列表、当前
-数量和选择状态，空集合时整段 `Collapsed`，Import 入口仍保留在 Project Assets 工具行；`Remove` 在 owner thread 生成删除后的候选集合并启动同一 fresh-stage 事务，不会先打开或重新校验
+`--project-root` 与 `--catalog-root` 互斥。Project Assets 标题栏的小 `+`（与 `File > Import Files...` 同一命令）可在 Windows
+原生对话框中一次批量选择 `.recipe` / `.gltf` / `.glb` / `.png` / `.jpg` / `.jpeg` / `.wav` 并加入同一 intended set。
+无项目启动时选择文件后，Editor 自动在系统临时目录创建并持有唯一临时 Project，完成 live Catalog switch 后直接继续导入，
+不会紧接着弹出目录选择器。临时 Project 的 `Save` / `Save As` 才要求选择空目录：Editor 先初始化正式 Project，事务复制
+`Source` 资源并在新根重新 cook，成功切换后清理旧临时目录；取消或失败保留临时 Project，未保存退出时由 Editor 定向清理。
+项目 `Source/` 内文件直接使用；
+外部 PNG/JPEG/WAV 在整批预检成功后分别安全复制到 `Source/Imported/Images/` 与 `Source/Imported/Audio/`。左侧 `Source Imports`
+使用两列 DataGrid 显示完整 intended set：`Kind` 固定 88 logical px，显示 Catalog/glTF/Texture/Audio；`Source`
+固定 240 logical px，显示完整 UTF-8 source path。DataGrid 使用固定 2 列、5 行 materialized pool、双轴滚动和 stable
+row selection；`Remove` 只读取 selected logical row。空集合时整段 `Collapsed`，Import 入口仍保留在 Project Assets
+标题栏的小 `+`；`Remove` 在 owner thread 生成删除后的候选集合并启动同一 fresh-stage 事务，不会先打开或重新校验
 被删除的文件，因此已经从磁盘消失的 stale unit 仍可移除。移除最后一个 unit 会从有效 baseline 增量发布零 entry
 Catalog 和零 unit import state；没有有效 baseline 的首次 full cook 仍拒绝空集合。Import/Remove、项目切换和 Catalog
 refresh 互斥，隔离 PlaySession active 时列表与 authoring command 同步锁定。Editor 以 4096 unit 为产品上限，先在临时候选中完成整批
 扩展名识别、物理路径规范化、containment 与去重校验，任一文件非法、越界或分配失败时都不修改既有 intended set；
-已存在或本批重复选择的 unit 只保留一份，但仍会触发完整 intended set 的 reimport。unit 必须是项目 `Source/` 下既有的
-物理文件；Windows 大小写、分隔符或 `..` 形成的同文件别名按同一物理路径处理。对话框选择 `Source/` 外文件会保留
-当前 Catalog 并给出明确反馈。后台 `EditorSourceImportService` 只调用共享 Asset pipeline，probe 完整 unit 集并生成 fully validated fresh
+外部媒体 ingress 也在任何复制前完成整批预检，后续 intended-set 合并或 importer 启动失败会删除本批新文件与空目录。
+目标同名且内容相同时复用项目文件，内容不同时使用 `_2`、`_3` 等后缀，绝不覆盖；批内同一物理文件只复制一次。
+外部 `.recipe` / `.gltf` / `.glb` 因相对依赖无法靠复制单个主文件保证完整性而明确拒绝，调用方需先把完整依赖集置于
+`Source/`。已存在或本批重复选择的 unit 只保留一份，但仍会触发完整 intended set 的 reimport；Windows 大小写、
+分隔符或 `..` 形成的同文件别名按同一物理路径处理。后台 `EditorSourceImportService` 只调用共享 Asset pipeline，probe 完整 unit 集并生成 fully validated fresh
 stage，不接触 UI、Render 或 `AssetSystem`；owner thread 在下一安全帧携带当前 Sprite/Mesh participant 调用
 `reloadCatalog()`。dirty Catalog document 会在 commit 前保留 Ready stage；`CatalogReloadBusy` 同样保留 stage 并逐安全帧
 重试。fresh stage 在 Ready 前已包含 sibling current import state；Catalog、Browser、documents 与 2D/3D/Animation preview
@@ -297,6 +315,7 @@ Workspace
   Left dock
     Hierarchy (filter/add/duplicate/delete/focus/virtual dynamic TreeView)
     Project Assets (All/2D/3D/Media/compact virtual grid/new/open/import/refresh/collapsed-empty imports)
+    Source Imports (Kind | Source virtual DataGrid/remove; collapsed when empty)
   Active 2D/3D viewport (one Scene-TileMap/transform/snap/marquee/tile/frame/view toolbar + preview canvas)
   Inspector dock (scrollable identity/transform/components/hierarchy/TileMap/document/36px dependency list)
 Collapsible bottom panel (Animation timeline or latest Output; closed by default)
@@ -529,9 +548,9 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_editor_tests.exe `
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
   --target tina_editor_desktop --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\TinaEditor.exe `
-  --frames=68 --frame-delay-ms=0 --workspace=2d --auto-demo
+  --frames=70 --frame-delay-ms=0 --workspace=2d --auto-demo
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\TinaEditor.exe `
-  --frames=68 --frame-delay-ms=0 --workspace=3d --auto-demo
+  --frames=70 --frame-delay-ms=0 --workspace=3d --auto-demo
 ```
 
 Core 另保留 `WriteFileTests.FailedAtomicReplacePreservesExistingTargetDirectory` 回归。由于它目前位于 monolithic
@@ -540,8 +559,11 @@ Core 另保留 `WriteFileTests.FailedAtomicReplacePreservesExistingTargetDirecto
 
 人工操作直接启动 `TinaEditor.exe`，不传 `--frames` 与 `--auto-demo`，由窗口关闭结束；需要有限帧观察时只传较长的
 `--frames=<N>`。两种方式都不会运行自动 authoring 流程，也不会把用户产生的 revision 数量误判为自动 smoke 失败。
-普通无项目启动不会提供任何测试资源；真实资源验收先 New/Open Project，把源文件放入项目 `Source/`，再使用
-Import Source。图片导入应产生 Texture2D + 全幅 Sprite 并用于 2D 预览，glTF/GLB 导入应产生 Mesh/Material/Prefab
+普通无项目启动不会提供任何测试资源；真实资源验收可直接点击 Project Assets 标题栏的小 `+` 选择项目外
+PNG/JPEG/WAV，确认不会追加目录对话框，文件自动进入临时 Project 的 `Source/Imported`，且图片产生 Texture2D +
+全幅 Sprite 并用于 2D 预览。随后点击 `Save` 或 `Save As`，选择空目录并确认资源迁移、重新 cook 和临时目录清理。
+已有永久项目也可通过同一 `+` 直接导入。glTF/GLB 的完整
+主文件与相对依赖仍先放入项目 `Source/` 再选择，导入后应产生 Mesh/Material/Prefab
 并用于 3D 预览；任一路径都不得回退到 auto-demo fixture。
 
 document 与 EditorApp 接线切片关闭需要：canonical preview 与 AssetFormat writer bytes 完全一致；GPU viewport 的 Camera、
@@ -575,7 +597,7 @@ Save/Save As、Windows native dialog、Linux `zenity`/`kdialog` dialog 与 dirty
 Windows Project `New` 也能创建 Source/Catalog、manifest-last 发布空 current-schema package 并 reopen/typed-validate；
 Project `Open` 与 New/Open 的下一安全帧 live project/Catalog switch 也已完成。Editor source import 的完整 intended unit
 probe、后台 fresh-stage cook、主线程 Catalog reload/busy retry、dirty-document commit gate、stage sibling state + 单一 active pointer
-commit 与 reopen 恢复，以及 intended-set 虚拟列表、选择、stale unit 删除和最终空 Catalog 发布也已完成；新增
+commit 与 reopen 恢复，以及 intended-set 两列 DataGrid、选择、stale unit 删除和最终空 Catalog 发布也已完成；新增
 viewport/hierarchy/play 功能的专项测试、产品交互和视觉证据，以及 Linux helper 门禁仍待收口。
 Timeline 提供 6 槽可滚动窗口、Play/Pause、Prev/Next、Add/Duplicate/Delete、Sprite 切换、重排、逐帧时长、
 Once/Loop/PingPong、独立 Undo/Redo 和正式 Cook Preview；2D 中当前可渲染实体直接预览已解析 Sprite frame，3D workspace

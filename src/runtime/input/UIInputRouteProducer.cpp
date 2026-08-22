@@ -369,6 +369,55 @@ virtualGridViewCommandForGamepadButton(Platform::GamepadButton button) noexcept
     }
 }
 
+[[nodiscard]] std::optional<UI::UIDataGridCommand>
+dataGridCommandForKey(Platform::Key key) noexcept
+{
+    switch (key)
+    {
+    case Platform::Key::Left:
+        return UI::UIDataGridCommand::PreviousColumn;
+    case Platform::Key::Right:
+        return UI::UIDataGridCommand::NextColumn;
+    case Platform::Key::Up:
+        return UI::UIDataGridCommand::PreviousRow;
+    case Platform::Key::Down:
+        return UI::UIDataGridCommand::NextRow;
+    case Platform::Key::PageUp:
+        return UI::UIDataGridCommand::PreviousPage;
+    case Platform::Key::PageDown:
+        return UI::UIDataGridCommand::NextPage;
+    case Platform::Key::Home:
+        return UI::UIDataGridCommand::FirstCell;
+    case Platform::Key::End:
+        return UI::UIDataGridCommand::LastCell;
+    case Platform::Key::Enter:
+    case Platform::Key::KeypadEnter:
+        return UI::UIDataGridCommand::Activate;
+    default:
+        return std::nullopt;
+    }
+}
+
+[[nodiscard]] std::optional<UI::UIDataGridCommand>
+dataGridCommandForGamepadButton(Platform::GamepadButton button) noexcept
+{
+    switch (button)
+    {
+    case Platform::GamepadButton::DpadLeft:
+        return UI::UIDataGridCommand::PreviousColumn;
+    case Platform::GamepadButton::DpadRight:
+        return UI::UIDataGridCommand::NextColumn;
+    case Platform::GamepadButton::DpadUp:
+        return UI::UIDataGridCommand::PreviousRow;
+    case Platform::GamepadButton::DpadDown:
+        return UI::UIDataGridCommand::NextRow;
+    case Platform::GamepadButton::South:
+        return UI::UIDataGridCommand::Activate;
+    default:
+        return std::nullopt;
+    }
+}
+
 [[nodiscard]] std::optional<UI::UITreeViewCommand> treeViewCommandForKey(Platform::Key key) noexcept
 {
     switch (key)
@@ -1184,7 +1233,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
 
         // Focused collection controls own their navigation and activation keys
         // before TextEdit/focus traversal/default Accept. Route matching Up to
-        // both command state machines so a focus change cannot strand a pressed
+        // every collection command state machine so a focus change cannot strand a pressed
         // command or expose half of a digital transition to gameplay.
         if (const auto* key = std::get_if<Platform::KeyTransition>(&transitions[ordinal].payload);
             key != nullptr && key->window == context->ownerWindow())
@@ -1220,6 +1269,19 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                 {
                     Core::Error error = std::move(routed.error());
                     error.addContext("UIInputRouteProducer::produce(virtual-grid-key-command)");
+                    return Core::failure(std::move(error));
+                }
+                consumed = consumed || routed->consumed;
+            }
+            if (const auto command = dataGridCommandForKey(key->key);
+                command.has_value())
+            {
+                auto routed = context->routeDataGridCommand(*command, pressed);
+                if (!routed)
+                {
+                    Core::Error error = std::move(routed.error());
+                    error.addContext(
+                        "UIInputRouteProducer::produce(data-grid-key-command)");
                     return Core::failure(std::move(error));
                 }
                 consumed = consumed || routed->consumed;
@@ -1267,6 +1329,20 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                 {
                     Core::Error error = std::move(routed.error());
                     error.addContext("UIInputRouteProducer::produce(virtual-grid-gamepad-command)");
+                    return Core::failure(std::move(error));
+                }
+                consumed = consumed || routed->consumed;
+            }
+            if (const auto command =
+                    dataGridCommandForGamepadButton(gamepad->button);
+                command.has_value())
+            {
+                auto routed = context->routeDataGridCommand(*command, pressed);
+                if (!routed)
+                {
+                    Core::Error error = std::move(routed.error());
+                    error.addContext(
+                        "UIInputRouteProducer::produce(data-grid-gamepad-command)");
                     return Core::failure(std::move(error));
                 }
                 consumed = consumed || routed->consumed;

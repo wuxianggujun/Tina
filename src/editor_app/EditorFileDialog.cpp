@@ -303,14 +303,58 @@ makeNativeFilters(std::span<const EditorFileDialogFilter> filters)
     }
 }
 
+struct DialogOwnerSearch final {
+    DWORD processId = 0;
+    HWND window = nullptr;
+};
+
+BOOL CALLBACK findDialogOwnerWindow(HWND candidate, LPARAM parameter) noexcept
+{
+    auto& search = *reinterpret_cast<DialogOwnerSearch*>(parameter);
+    DWORD candidateProcessId = 0;
+    if (::GetWindowThreadProcessId(candidate, &candidateProcessId) != 0U &&
+        candidateProcessId == search.processId &&
+        ::IsWindowVisible(candidate) != FALSE &&
+        ::GetWindow(candidate, GW_OWNER) == nullptr &&
+        (::GetWindowLongPtrW(candidate, GWL_EXSTYLE) & WS_EX_TOOLWINDOW) == 0) {
+        search.window = candidate;
+        return FALSE;
+    }
+    return TRUE;
+}
+
+[[nodiscard]] HWND resolveDialogOwner(uintptr nativeOwnerWindow) noexcept
+{
+    const HWND explicitOwner = reinterpret_cast<HWND>(nativeOwnerWindow);
+    if (explicitOwner != nullptr && ::IsWindow(explicitOwner) != FALSE) {
+        return explicitOwner;
+    }
+
+    const HWND activeWindow = ::GetActiveWindow();
+    if (activeWindow != nullptr && ::IsWindow(activeWindow) != FALSE &&
+        ::IsWindowVisible(activeWindow) != FALSE) {
+        return activeWindow;
+    }
+
+    const DWORD currentProcessId = ::GetCurrentProcessId();
+    const HWND foregroundWindow = ::GetForegroundWindow();
+    DWORD foregroundProcessId = 0;
+    if (foregroundWindow != nullptr &&
+        ::GetWindowThreadProcessId(foregroundWindow, &foregroundProcessId) != 0U &&
+        foregroundProcessId == currentProcessId) {
+        return foregroundWindow;
+    }
+
+    DialogOwnerSearch search{currentProcessId, nullptr};
+    (void)::EnumWindows(&findDialogOwnerWindow,
+                        reinterpret_cast<LPARAM>(&search));
+    return search.window;
+}
+
 [[nodiscard]] Core::Result<EditorFileDialogResult>
 showDialog(IFileDialog& dialog, uintptr nativeOwnerWindow)
 {
-    HWND ownerWindow = reinterpret_cast<HWND>(nativeOwnerWindow);
-    if (ownerWindow == nullptr) {
-        ownerWindow = ::GetActiveWindow();
-    }
-    const HRESULT showResult = dialog.Show(ownerWindow);
+    const HRESULT showResult = dialog.Show(resolveDialogOwner(nativeOwnerWindow));
     if (showResult == HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
         return EditorFileDialogResult{};
     }
@@ -345,11 +389,7 @@ showOpenFilesDialog(IFileOpenDialog& dialog,
                     uintptr nativeOwnerWindow,
                     u32 maxSelectedPaths)
 {
-    HWND ownerWindow = reinterpret_cast<HWND>(nativeOwnerWindow);
-    if (ownerWindow == nullptr) {
-        ownerWindow = ::GetActiveWindow();
-    }
-    const HRESULT showResult = dialog.Show(ownerWindow);
+    const HRESULT showResult = dialog.Show(resolveDialogOwner(nativeOwnerWindow));
     if (showResult == HRESULT_FROM_WIN32(ERROR_CANCELLED)) {
         return EditorFileDialogResults{};
     }
@@ -452,6 +492,7 @@ EditorFileDialog::openExistingFile(const OpenExistingFileDialogRequest& request)
     if (const HRESULT result = dialog->GetOptions(&options); FAILED(result)) {
         return Core::failure(hresultError("Editor open-file dialog options could not be read", result));
     }
+    options &= ~FOS_PICKFOLDERS;
     options |= FOS_FORCEFILESYSTEM | FOS_FILEMUSTEXIST | FOS_PATHMUSTEXIST | FOS_NOCHANGEDIR;
     if (const HRESULT result = dialog->SetOptions(options); FAILED(result)) {
         return Core::failure(hresultError("Editor open-file dialog options could not be set", result));
@@ -517,6 +558,7 @@ EditorFileDialog::openExistingFiles(const OpenExistingFilesDialogRequest& reques
         return Core::failure(hresultError(
             "Editor open-file dialog options could not be read", result));
     }
+    options &= ~FOS_PICKFOLDERS;
     options |= FOS_FORCEFILESYSTEM | FOS_FILEMUSTEXIST | FOS_PATHMUSTEXIST |
                FOS_NOCHANGEDIR | FOS_ALLOWMULTISELECT;
     if (const HRESULT result = dialog->SetOptions(options); FAILED(result)) {

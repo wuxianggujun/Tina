@@ -484,6 +484,8 @@ run_dialog_case open selected "${OPEN_PATH}" "${OPEN_PATH}" 1
 run_dialog_case save selected "${SAVE_BASE_PATH}" "${SAVE_PATH}" 2
 run_dialog_case folder selected "${FOLDER_PATH}" "${FOLDER_PATH}" 3
 run_dialog_case open cancelled "" "" 4
+run_dialog_case save cancelled "" "" 5
+run_dialog_case folder cancelled "" "" 6
 
 cleanup
 

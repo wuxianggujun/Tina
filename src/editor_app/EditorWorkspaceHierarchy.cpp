@@ -36,6 +36,26 @@ namespace {
     return false;
 }
 
+[[nodiscard]] std::string_view world2DHierarchyKindName(
+    const Tina::AssetFormat::World2DEntityDesc& entity) noexcept
+{
+    const auto registry = Tina::Editor::world2DNodeTemplateRegistry();
+    const auto index = static_cast<Tina::Core::usize>(
+        Tina::Editor::classifyWorld2DEntityTemplate(entity));
+    return index < registry.size() ? registry[index].displayName
+                                   : std::string_view{"Entity2D"};
+}
+
+[[nodiscard]] std::string_view world3DHierarchyKindName(
+    const Tina::AssetFormat::PrefabNodeView& node) noexcept
+{
+    const auto registry = Tina::Editor::world3DNodeTemplateRegistry();
+    const auto index = static_cast<Tina::Core::usize>(
+        Tina::Editor::classifyWorld3DNodeTemplate(node));
+    return index < registry.size() ? registry[index].displayName
+                                   : std::string_view{"Node3D"};
+}
+
 } // namespace
 
 auto EditorWorkspaceState::hierarchyIndexForStableId(
@@ -136,10 +156,17 @@ auto EditorWorkspaceState::hierarchyDisplayLabel(
 
 auto EditorWorkspaceState::hierarchyDisplayKind(
     UI::UITreeViewItemKey key) const noexcept -> std::string_view{
-    if (stableEntityIdForHierarchyItem(key) == 0U) {
+    const u32 stableId = stableEntityIdForHierarchyItem(key);
+    if (stableId == 0U) {
         return workspaceMode_ == WorkspaceMode::World2D
                    ? std::string_view{"World2D document"}
                    : std::string_view{"Prefab v2 document"};
+    }
+    // Reports the node template so the Inspector header agrees with both the
+    // hierarchy label and the kind the user picked at creation time.
+    const EditorHierarchyRow* row = hierarchyRow(stableId);
+    if (row != nullptr && !row->kindName.empty()) {
+        return row->kindName;
     }
     return workspaceMode_ == WorkspaceMode::World2D
                ? std::string_view{"Entity2D"}
@@ -215,25 +242,25 @@ auto EditorWorkspaceState::visibleHierarchyIndex(u32 stableId) const noexcept ->
 }
 
 auto EditorWorkspaceState::hierarchyEntityLabel(
-    WorkspaceMode mode, u32 stableId, bool hasRenderable,
-    bool hasCamera, bool hasLight) -> std::string{
-    std::string label;
-    if (mode == WorkspaceMode::World2D) {
-        if (hasCamera) {
-            label = "Camera2D";
-        } else if (hasLight) {
-            label = "PointLight2D";
-        } else if (hasRenderable) {
-            label = "Sprite2D";
-        } else {
-            label = "Entity2D";
-        }
-    } else {
-        label = hasRenderable ? "Mesh3D" : "Node3D";
-    }
+    std::string_view kindName, u32 stableId) -> std::string{
+    std::string label{kindName};
     label += " #";
     label += std::to_string(stableId);
     return label;
+}
+
+auto EditorWorkspaceState::hierarchyLabelForStableId(
+    std::string_view kindName, u32 stableId) const -> std::string
+{
+    const auto override = std::find_if(
+        hierarchyNameOverrides_.begin(), hierarchyNameOverrides_.end(),
+        [stableId](const EditorHierarchyNameOverride& candidate) {
+            return candidate.stableId == stableId;
+        });
+    if (override != hierarchyNameOverrides_.end() && !override->name.empty()) {
+        return override->name;
+    }
+    return hierarchyEntityLabel(kindName, stableId);
 }
 
 auto EditorWorkspaceState::rebuildHierarchyModel() -> Tina::Core::Status{
@@ -319,16 +346,17 @@ auto EditorWorkspaceState::rebuildHierarchyModel() -> Tina::Core::Status{
                 published[current.index] = 1U;
                 ++publishedCount;
                 const auto& entity = entities[current.index];
+                const std::string_view kindName =
+                    world2DHierarchyKindName(entity);
                 candidate.push_back({
                     .key = entity.stableEntityId,
                     .stableId = entity.stableEntityId,
                     .parentStableId = entity.parentStableEntityId,
                     .level = current.level,
                     .expandable = !children[current.index].empty(),
-                    .label = hierarchyEntityLabel(
-                        WorkspaceMode::World2D, entity.stableEntityId,
-                        entity.sprite.has_value(), entity.camera.has_value(),
-                        entity.pointLight.has_value()),
+                    .label = hierarchyLabelForStableId(kindName,
+                                                       entity.stableEntityId),
+                    .kindName = kindName,
                 });
                 for (auto child = children[current.index].rbegin();
                      child != children[current.index].rend(); ++child) {
@@ -404,15 +432,15 @@ auto EditorWorkspaceState::rebuildHierarchyModel() -> Tina::Core::Status{
                     ? 0U
                     : nodes[static_cast<Tina::Core::usize>(node.parentIndex)]
                           .stableNodeId;
+                const std::string_view kindName = world3DHierarchyKindName(node);
                 candidate.push_back({
                     .key = node.stableNodeId,
                     .stableId = node.stableNodeId,
                     .parentStableId = parentStableId,
                     .level = current.level,
                     .expandable = !children[current.index].empty(),
-                    .label = hierarchyEntityLabel(
-                        WorkspaceMode::World3D, node.stableNodeId,
-                        node.hasMesh, false, false),
+                    .label = hierarchyLabelForStableId(kindName, node.stableNodeId),
+                    .kindName = kindName,
                 });
                 for (auto child = children[current.index].rbegin();
                      child != children[current.index].rend(); ++child) {
@@ -563,6 +591,102 @@ auto EditorWorkspaceState::setHierarchyExpanded(void* state, UI::UITreeViewItemK
         self->collapsedHierarchyIds_.push_back(stableId);
     }
     return true;
+}
+
+auto EditorWorkspaceState::hierarchyStableIdAtPosition(
+    UI::UILogicalPoint position) const noexcept -> std::optional<u32>
+{
+    if (hierarchyTreeRect_.width <= 0.0F || hierarchyTreeRect_.height <= 0.0F ||
+        position.x < hierarchyTreeRect_.x || position.x >= hierarchyTreeRect_.right() ||
+        position.y < hierarchyTreeRect_.y || position.y >= hierarchyTreeRect_.bottom() ||
+        hierarchyTreeRowHeight_ <= 0.0F) {
+        return std::nullopt;
+    }
+    const float localY = position.y - hierarchyTreeRect_.y +
+                         hierarchyTreeMetrics_.scrollOffset;
+    if (localY < 0.0F) {
+        return std::nullopt;
+    }
+    const u64 logicalIndex = static_cast<u64>(localY / hierarchyTreeRowHeight_);
+    if (logicalIndex >= hierarchyTreeMetrics_.logicalItemCount) {
+        return std::nullopt;
+    }
+    UI::UITreeViewItemDescriptor descriptor{};
+    if (!resolveHierarchyItem(this, logicalIndex, descriptor)) {
+        return std::nullopt;
+    }
+    const u32 stableId = stableEntityIdForHierarchyItem(descriptor.key);
+    return stableId == 0U ? std::nullopt : std::optional<u32>{stableId};
+}
+
+void EditorWorkspaceState::handleHierarchyPointerDown(
+    UI::UIRoutedPointerEvent& event) noexcept
+{
+    const auto& input = event.input();
+    if (input.button != Tina::Platform::PointerButton::Primary) {
+        return;
+    }
+    const auto stableId = hierarchyStableIdAtPosition(input.position);
+    if (!stableId.has_value()) {
+        return;
+    }
+    const u64 frame = counters_.frameUpdates;
+    if (*stableId == lastHierarchyPointerDownStableId_ &&
+        frame >= lastHierarchyPointerDownFrame_ &&
+        frame - lastHierarchyPointerDownFrame_ <= 24U) {
+        pendingHierarchyRenameStableId_ = *stableId;
+    }
+    lastHierarchyPointerDownStableId_ = *stableId;
+    lastHierarchyPointerDownFrame_ = frame;
+    hierarchyDragPointer_ = input.pointer;
+    hierarchyDragStableId_ = *stableId;
+    hierarchyDragStartPosition_ = input.position;
+    hierarchyDragActive_ = false;
+    event.capturePointer();
+}
+
+void EditorWorkspaceState::handleHierarchyPointerMove(
+    UI::UIRoutedPointerEvent& event) noexcept
+{
+    if (!hierarchyDragStableId_ || event.input().pointer != hierarchyDragPointer_) {
+        return;
+    }
+    const auto& position = event.input().position;
+    const float dx = position.x - hierarchyDragStartPosition_.x;
+    const float dy = position.y - hierarchyDragStartPosition_.y;
+    if (!hierarchyDragActive_ && (dx * dx + dy * dy) >= 25.0F) {
+        hierarchyDragActive_ = true;
+    }
+    if (hierarchyDragActive_) {
+        event.consumeInputTransition();
+        event.preventDefaultAction();
+    }
+}
+
+void EditorWorkspaceState::handleHierarchyPointerUp(
+    UI::UIRoutedPointerEvent& event) noexcept
+{
+    if (event.input().pointer != hierarchyDragPointer_ ||
+        event.input().button != Tina::Platform::PointerButton::Primary) {
+        return;
+    }
+    if (hierarchyDragActive_) {
+        const auto hovered = hierarchyStableIdAtPosition(event.input().position);
+        if (hovered.has_value() && *hovered != hierarchyDragStableId_) {
+            const EditorHierarchyRow* source = hierarchyRow(hierarchyDragStableId_);
+            const EditorHierarchyRow* destination = hierarchyRow(*hovered);
+            if (source != nullptr && destination != nullptr &&
+                source->parentStableId == destination->parentStableId) {
+                pendingHierarchyReorderStableId_ = hierarchyDragStableId_;
+                pendingHierarchyReorderBeforeStableId_ = *hovered;
+            }
+        }
+        event.consumeInputTransition();
+        event.preventDefaultAction();
+    }
+    event.releasePointerCapture();
+    hierarchyDragStableId_ = 0;
+    hierarchyDragActive_ = false;
 }
 
 } // namespace Tina::EditorApp::WorkspaceInternal

@@ -646,6 +646,7 @@ auto EditorWorkspaceState::buildLeftDockUi(
         !status) {
         return status;
     }
+    hierarchyTreeRowHeight_ = ui.productTheme.controls.treeRowHeight;
     if (auto status = ui.tree.setTreeViewPaint(hierarchyTree_, UI::makeTreeViewPaint(ui.productTheme)); !status) {
         return status;
     }
@@ -653,6 +654,54 @@ auto EditorWorkspaceState::buildLeftDockUi(
         return status;
     }
     if (auto status = ui.tree.setTreeViewSelectedIndex(hierarchyTree_, 0); !status) {
+        return status;
+    }
+    if (auto status = buildSceneAddModalUi(ui, left); !status) {
+        return status;
+    }
+    hierarchyRenameRootLayout_ = hierarchyRenameLayout(UI::UIVisibility::Collapsed);
+    if (auto status = storeNode(
+            ui.createPanel(left, hierarchyRenameRootLayout_), hierarchyRenameRoot_);
+        !status) {
+        return status;
+    }
+    if (auto status = storeNode(
+            ui.createLabel(hierarchyRenameRoot_, "Rename selected node",
+                           fillWidth(18.0F), ui.secondaryText),
+            hierarchyRenameTitle_); !status) {
+        return status;
+    }
+    if (auto status = storeNode(
+            ui.createTextEdit(hierarchyRenameRoot_, {},
+                              fillWidth(ui.productTheme.controls.textEditHeight), true),
+            hierarchyRenameInput_); !status) {
+        return status;
+    }
+    UI::UINodeId renameActions{};
+    UI::UILayoutStyle renameActionsLayout = fillWidth(ui.productTheme.controls.buttonHeight);
+    renameActionsLayout.flexContainer.direction = UI::UIFlexDirection::Row;
+    renameActionsLayout.flexContainer.gap.column = ui.productTheme.spacing.space2;
+    if (auto status = storeNode(ui.createPanel(hierarchyRenameRoot_, renameActionsLayout),
+                                renameActions); !status) {
+        return status;
+    }
+    UI::UILayoutStyle renameButtonLayout = fixedSize(
+        0.0F, ui.productTheme.controls.buttonHeight);
+    renameButtonLayout.size.width = UI::UILayoutLength::Auto();
+    renameButtonLayout.flexItem.grow = 1.0F;
+    renameButtonLayout.flexItem.basis = UI::UILayoutLength::Px(0.0F);
+    if (auto status = storeNode(
+            ui.createButton(renameActions, "Cancel",
+                            renameButtonLayout, true,
+                            UI::UIStyleRoleId::ButtonText),
+            hierarchyRenameCancelButton_); !status) {
+        return status;
+    }
+    if (auto status = storeNode(
+            ui.createButton(renameActions, "Apply",
+                            renameButtonLayout, true,
+                            UI::UIStyleRoleId::ButtonPrimary),
+            hierarchyRenameApplyButton_); !status) {
         return status;
     }
 
@@ -670,6 +719,13 @@ auto EditorWorkspaceState::buildLeftDockUi(
                                     projectHeader->actions, initialProjectCount,
                                     fixedSize(58.0F, 20.0F)),
                                 projectAssetCount_);
+        !status) {
+        return status;
+    }
+    if (auto status = storeNode(ui.createIconButton(
+                                    projectHeader->actions, EditorIcon::Add,
+                                    "Import files", {}, true),
+                                importSourceButton_);
         !status) {
         return status;
     }
@@ -744,7 +800,7 @@ auto EditorWorkspaceState::buildLeftDockUi(
                    ? "No assets match this filter"
                    : (assetResources_.testFixtureCatalog
                           ? "No test assets match this filter"
-                          : "No project assets"));
+                          : "No project open"));
     if (auto status = storeNode(
             ui.createLabel(left, initialProjectAssetSummary,
                            projectAssetSummaryStyle, ui.secondaryText),
@@ -766,7 +822,7 @@ auto EditorWorkspaceState::buildLeftDockUi(
     }
 
     sourceImportSectionLayout_ = fillWidth(
-        ui.productTheme.controls.buttonHeight + ui.productTheme.spacing.space2 + 80.0F);
+        ui.productTheme.controls.buttonHeight + ui.productTheme.spacing.space2 + 128.0F);
     sourceImportSectionLayout_.flexItem.shrink = 0.0F;
     sourceImportSectionLayout_.flexContainer.direction = UI::UIFlexDirection::Column;
     sourceImportSectionLayout_.flexContainer.gap.row = ui.productTheme.spacing.space2;
@@ -804,19 +860,23 @@ auto EditorWorkspaceState::buildLeftDockUi(
         return status;
     }
 
-    UI::UILayoutStyle sourceImportListStyle = fillWidth(80.0F);
-    sourceImportListStyle.minMax.minHeight = UI::UILayoutLength::Px(64.0F);
-    auto sourceImportList = ui.tree.createElement(
-        sourceImportSection_, UI::makeListViewElement(
-                  {.materializedItemCapacity = SourceImportMaterializedCapacity},
-                  sourceImportListStyle));
-    if (!sourceImportList) {
-        return Tina::Core::failure(std::move(sourceImportList.error()));
+    UI::UILayoutStyle sourceImportGridStyle = fillWidth(128.0F);
+    sourceImportGridStyle.minMax.minHeight = UI::UILayoutLength::Px(96.0F);
+    auto sourceImportGrid = ui.tree.createElement(
+        sourceImportSection_, UI::makeDataGridElement(
+                  {
+                      .columnCapacity = SourceImportColumnCapacity,
+                      .materializedRowCapacity = SourceImportMaterializedCapacity,
+                  },
+                  sourceImportGridStyle));
+    if (!sourceImportGrid) {
+        return Tina::Core::failure(std::move(sourceImportGrid.error()));
     }
-    sourceImportList_ = *sourceImportList;
-    if (auto status = ui.tree.setListViewStyle(
-            sourceImportList_,
-            UI::UIListViewStyle{
+    sourceImportGrid_ = *sourceImportGrid;
+    if (auto status = ui.tree.setDataGridStyle(
+            sourceImportGrid_,
+            UI::UIDataGridStyle{
+                .columnHeaderHeight = ui.productTheme.controls.buttonHeight,
                 .rowHeight = ui.productTheme.controls.listRowHeight,
                 .overscanRows = 1,
                 .scrollBarVisibility = UI::UIScrollBarVisibility::Auto,
@@ -825,18 +885,19 @@ auto EditorWorkspaceState::buildLeftDockUi(
         !status) {
         return status;
     }
-    if (auto status = ui.tree.setListViewPaint(
-            sourceImportList_, UI::makeListViewPaint(ui.productTheme));
+    if (auto status = ui.tree.setDataGridPaint(
+            sourceImportGrid_, UI::makeDataGridPaint(ui.productTheme));
         !status) {
         return status;
     }
-    if (auto status = ui.tree.setListViewDataSource(
-            sourceImportList_, sourceImportDataSource());
+    if (auto status = ui.tree.setDataGridDataSource(
+            sourceImportGrid_, sourceImportGridDataSource());
         !status) {
         return status;
     }
     if (!sourceImportUnits_.empty()) {
-        if (auto status = ui.tree.setListViewSelectedIndex(sourceImportList_, 0U);
+        if (auto status = ui.tree.setDataGridSelectedCell(
+                sourceImportGrid_, 0U, 0U);
             !status) {
             return status;
         }
@@ -854,36 +915,45 @@ auto EditorWorkspaceState::buildLeftDockUi(
         !status) {
         return status;
     }
-    if (auto status = storeNode(ui.createIconButton(
-                                    projectActions, EditorIcon::Add,
-                                    "New project"),
+    UI::UILayoutStyle projectLifecycleButtonStyle = fixedSize(
+        0.0F, ui.productTheme.controls.buttonHeight);
+    projectLifecycleButtonStyle.size.width = UI::UILayoutLength::Auto();
+    projectLifecycleButtonStyle.flexItem.grow = 1.0F;
+    projectLifecycleButtonStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
+    if (auto status = storeNode(ui.createButton(
+                                    projectActions, "New Project",
+                                    projectLifecycleButtonStyle),
                                 createProjectButton_);
         !status) {
         return status;
     }
-    if (auto status = storeNode(ui.createIconButton(
-                                    projectActions, EditorIcon::Open,
-                                    "Open project"),
+    if (auto status = storeNode(ui.createButton(
+                                    projectActions, "Open Project",
+                                    projectLifecycleButtonStyle),
                                 openProjectButton_);
         !status) {
         return status;
     }
-    if (auto status = storeNode(ui.createIconButton(
-                                    projectActions, EditorIcon::Import,
-                                    "Import source", {},
-                                    activeProjectWorkspace_.has_value()),
-                                importSourceButton_);
-        !status) {
-        return status;
-    }
 
+    UI::UINodeId projectCatalogActions{};
+    UI::UILayoutStyle projectCatalogActionsStyle = fillWidth(
+        ui.productTheme.controls.buttonHeight);
+    projectCatalogActionsStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+    projectCatalogActionsStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+    projectCatalogActionsStyle.flexContainer.gap.column = ui.productTheme.spacing.space3;
+    if (auto status = storeNode(ui.createPanel(left, projectCatalogActionsStyle),
+                                projectCatalogActions);
+        !status) {
+        return status;
+    }
     if (auto status = appendVerticalDivider(
-            ui.tree, projectActions, ui.productTheme.controls.iconButtonExtent);
+            ui.tree, projectCatalogActions,
+            ui.productTheme.controls.iconButtonExtent);
         !status) {
         return status;
     }
     if (auto status = storeNode(ui.createIconButton(
-                                    projectActions, EditorIcon::MoveRight,
+                                    projectCatalogActions, EditorIcon::MoveRight,
                                     "Open asset", {},
                                              projectAssets_.visibleItemCount() != 0U),
                                 openProjectAssetButton_);
@@ -891,14 +961,14 @@ auto EditorWorkspaceState::buildLeftDockUi(
         return status;
     }
     if (auto status = storeNode(ui.createIconButton(
-                                    projectActions, EditorIcon::Refresh,
+                                    projectCatalogActions, EditorIcon::Refresh,
                                     "Refresh catalog", {},
                                     assetResources_.projectCatalogConfigured),
                                 refreshProjectCatalogButton_);
         !status) {
         return status;
     }
-    if (auto status = storeNode(ui.createLabel(projectActions, "Catalog",
+    if (auto status = storeNode(ui.createLabel(projectCatalogActions, "Catalog",
                                             fixedSize(52.0F, 20.0F), ui.accentText),
                                 projectAssetSource_);
         !status) {
@@ -2484,7 +2554,7 @@ auto EditorWorkspaceState::buildMainMenuOverlaysUi(
         return status;
     }
     if (auto status = createMenuItem(
-            mainMenus_[FileMenu], "Import Source", UI::UIMenuItemKind::Command,
+            mainMenus_[FileMenu], "Import Files...", UI::UIMenuItemKind::Command,
             fileImportSourceMenuItem_);
         !status) {
         return status;
@@ -2609,6 +2679,90 @@ auto EditorWorkspaceState::buildMainMenuOverlaysUi(
     return createMenuItem(
         mainMenus_[HelpMenu], "About Tina Editor",
         UI::UIMenuItemKind::Command, helpAboutMenuItem_);
+}
+
+auto EditorWorkspaceState::buildSceneAddModalUi(
+    UiBuildContext& ui, UI::UINodeId parent) -> Tina::Core::Status
+{
+    if (auto status = storeNode(
+            ui.createPanel(parent, sceneAddModalLayout(UI::UIVisibility::Collapsed)),
+            sceneAddModal_);
+        !status) {
+        return status;
+    }
+    if (auto status = storeNode(
+            ui.createLabel(sceneAddModal_, "Add Node",
+                           fillWidth(28.0F), ui.sectionText),
+            sceneAddTitle_);
+        !status) {
+        return status;
+    }
+    if (auto status = storeNode(
+            ui.createLabel(sceneAddModal_, "Parent: World2D Scene",
+                           fillWidth(20.0F), ui.secondaryText),
+            sceneAddParentLabel_);
+        !status) {
+        return status;
+    }
+    auto search = EditorSearchField::Build(
+        ui.tree, sceneAddModal_, ui.productTheme, {}, "Search node type",
+        fillWidth(ui.productTheme.controls.textEditHeight), true);
+    if (!search) {
+        return Tina::Core::failure(std::move(search.error()));
+    }
+    sceneAddSearchInput_ = search->textEdit;
+    // One row per template slot. Rows past the active workspace's registry are
+    // collapsed at refresh time rather than rebuilt.
+    for (Tina::Core::usize slot = 0; slot < sceneAddTemplateButtons_.size();
+         ++slot) {
+        if (auto status = storeNode(
+                ui.createSegmentedButton(
+                    sceneAddModal_, "",
+                    fillWidth(ui.productTheme.controls.buttonHeight)),
+                sceneAddTemplateButtons_[slot]);
+            !status) {
+            return status;
+        }
+    }
+    if (auto status = storeNode(
+            ui.createLabel(sceneAddModal_, "", fillWidth(30.0F),
+                           ui.secondaryText),
+            sceneAddDescription_);
+        !status) {
+        return status;
+    }
+    return buildSceneAddModalActionsUi(ui);
+}
+
+auto EditorWorkspaceState::buildSceneAddModalActionsUi(UiBuildContext& ui)
+    -> Tina::Core::Status
+{
+    UI::UINodeId actions{};
+    UI::UILayoutStyle actionsStyle =
+        fillWidth(ui.productTheme.controls.buttonHeight);
+    actionsStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+    actionsStyle.flexContainer.justifyContent = UI::UIJustifyContent::End;
+    actionsStyle.flexContainer.gap.column = ui.productTheme.spacing.space4;
+    actionsStyle.flexItem.grow = 1.0F;
+    if (auto status = storeNode(ui.createPanel(sceneAddModal_, actionsStyle),
+                                actions);
+        !status) {
+        return status;
+    }
+    if (auto status = storeNode(
+            ui.createButton(actions, "Close",
+                            fixedSize(86.0F,
+                                      ui.productTheme.controls.buttonHeight),
+                            true, UI::UIStyleRoleId::ButtonText),
+            sceneAddCancelButton_);
+        !status) {
+        return status;
+    }
+    return storeNode(
+        ui.createButton(actions, "Create",
+                        fixedSize(86.0F, ui.productTheme.controls.buttonHeight),
+                        true, UI::UIStyleRoleId::ButtonPrimary),
+        sceneAddCreateButton_);
 }
 
 auto EditorWorkspaceState::buildDirtyCloseModalUi(UiBuildContext& ui, UI::UINodeId parent) -> Tina::Core::Status
@@ -3392,32 +3546,108 @@ auto EditorWorkspaceState::registerUiCallbacks(UiBuildContext& ui) -> Tina::Core
             !status) {
             return status;
         }
-        if (auto status = ui.tree.setButtonAction(
-                pointLightColorField_.swatchButton,
-                UI::UIButtonActionCallback{
-                    [this](const UI::UIButtonActionEvent&) noexcept {
-                        pendingPointLightColorPickerToggle_ = true;
+    }
+    if (auto status = ui.tree.setButtonAction(
+            pointLightColorField_.swatchButton,
+            UI::UIButtonActionCallback{
+                [this](const UI::UIButtonActionEvent&) noexcept {
+                    pendingPointLightColorPickerToggle_ = true;
+                }});
+        !status) {
+        return status;
+    }
+    for (Tina::Core::usize index = 0;
+         index < pointLightColorPicker_.channelCount; ++index) {
+        if (auto status = ui.tree.setSliderChangeCallback(
+                pointLightColorPicker_.channelSliders[index],
+                UI::UISliderChangeCallback{
+                    [this, channel = static_cast<UI::UIColorPickerChannel>(index)](
+                        const UI::UISliderChangeEvent& event) noexcept {
+                        pendingPointLightColorChannel_ =
+                            InspectorPointLightColorChannelRequest{
+                                .channel = channel,
+                                .value = event.value,
+                            };
                     }});
             !status) {
             return status;
         }
-        for (Tina::Core::usize index = 0;
-             index < pointLightColorPicker_.channelCount; ++index) {
-            if (auto status = ui.tree.setSliderChangeCallback(
-                    pointLightColorPicker_.channelSliders[index],
-                    UI::UISliderChangeCallback{
-                        [this, channel = static_cast<UI::UIColorPickerChannel>(index)](
-                            const UI::UISliderChangeEvent& event) noexcept {
-                            pendingPointLightColorChannel_ =
-                                InspectorPointLightColorChannelRequest{
-                                    .channel = channel,
-                                    .value = event.value,
-                                };
-                        }});
-                !status) {
-                return status;
-            }
+    }
+    for (Tina::Core::usize slot = 0; slot < sceneAddTemplateButtons_.size();
+         ++slot) {
+        if (auto status = ui.tree.setButtonAction(
+                sceneAddTemplateButtons_[slot],
+                UI::UIButtonActionCallback{
+                    [this, slot](const UI::UIButtonActionEvent&) noexcept {
+                        // Deferred like pendingMainMenuToggle_ so the callback
+                        // stays allocation-free and side-effect free.
+                        pendingSceneAddTemplateIndex_ = static_cast<u32>(slot);
+                    }});
+            !status) {
+            return status;
         }
+    }
+    if (auto status = ui.tree.setButtonAction(
+            hierarchyRenameApplyButton_,
+            UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                pendingHierarchyRenameStableId_ = hierarchyRenameStableId_;
+                pendingHierarchyRenameCommit_ = true;
+            }});
+        !status) {
+        return status;
+    }
+    if (auto status = ui.tree.setButtonAction(
+            hierarchyRenameCancelButton_,
+            UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                pendingHierarchyRenameCancel_ = true;
+            }});
+        !status) {
+        return status;
+    }
+    constexpr std::array hierarchyPointerKinds{
+        UI::UIRoutedPointerEventKind::ButtonDown,
+        UI::UIRoutedPointerEventKind::Move,
+        UI::UIRoutedPointerEventKind::ButtonUp,
+    };
+    for (Tina::Core::usize index = 0; index < hierarchyPointerKinds.size(); ++index) {
+        auto listener = ui.tree.addRoutedPointerListener(
+            {
+                .node = hierarchyTree_,
+                .kind = hierarchyPointerKinds[index],
+                .phases = UI::UIEventPhaseMask::Bubble,
+            },
+            UI::UIRoutedPointerCallback{
+                [this, index](UI::UIRoutedPointerEvent& event) noexcept {
+                    if (index == 0U) {
+                        handleHierarchyPointerDown(event);
+                    } else if (index == 1U) {
+                        handleHierarchyPointerMove(event);
+                    } else {
+                        handleHierarchyPointerUp(event);
+                    }
+                }});
+        if (!listener) {
+            return Tina::Core::failure(std::move(listener.error()));
+        }
+        hierarchyPointerListeners_[index] = std::move(*listener);
+    }
+    if (auto status = ui.tree.setButtonAction(
+            sceneAddCreateButton_,
+            UI::UIButtonActionCallback{
+                [this](const UI::UIButtonActionEvent&) noexcept {
+                    queueEditorCommand(EditorCommand::SceneAddConfirm);
+                }});
+        !status) {
+        return status;
+    }
+    if (auto status = ui.tree.setButtonAction(
+            sceneAddCancelButton_,
+            UI::UIButtonActionCallback{
+                [this](const UI::UIButtonActionEvent&) noexcept {
+                    queueEditorCommand(EditorCommand::SceneAddCancel);
+                }});
+        !status) {
+        return status;
     }
     if (auto status = ui.tree.setButtonAction(
             sceneDeleteDialog_.actions[SceneDeleteConfirmActionIndex],

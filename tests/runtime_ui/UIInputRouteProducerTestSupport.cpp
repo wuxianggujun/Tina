@@ -90,6 +90,74 @@ UI::UITreeViewDataSource TreeRouteSource::view() noexcept
     };
 }
 
+UI::UIVirtualGridViewDataSource VirtualGridRouteSource::view() const noexcept
+{
+    return {
+        .state = this,
+        .itemCount = [](const void*) noexcept -> u64 { return 8; },
+        .resolveItem = [](const void*, u64 logicalIndex,
+                          UI::UIVirtualGridViewItemDescriptor& output) noexcept {
+            constexpr std::array<std::string_view, 8> Labels{
+                "A", "Disabled", "C", "D", "E", "F", "G", "H"};
+            if (logicalIndex >= Labels.size())
+            {
+                return false;
+            }
+            output = UI::UIVirtualGridViewItemDescriptor{
+                .key = logicalIndex + 20,
+                .label = Labels[logicalIndex],
+                .enabled = logicalIndex != 1,
+            };
+            return true;
+        },
+    };
+}
+
+UI::UIDataGridDataSource DataGridRouteSource::view() const noexcept
+{
+    return {
+        .state = this,
+        .rowCount = [](const void*) noexcept -> u64 { return 6; },
+        .columnCount = [](const void*) noexcept -> u32 { return 2; },
+        .resolveRow = [](const void*, u64 logicalRow,
+                         UI::UIDataGridRowDescriptor& output) noexcept {
+            if (logicalRow >= 6)
+            {
+                return false;
+            }
+            output = UI::UIDataGridRowDescriptor{
+                .key = logicalRow + 30,
+                .enabled = logicalRow != 1,
+            };
+            return true;
+        },
+        .resolveColumn = [](const void*, u32 logicalColumn,
+                            UI::UIDataGridColumnDescriptor& output) noexcept {
+            constexpr std::array<std::string_view, 2> Headers{"Name", "State"};
+            if (logicalColumn >= Headers.size())
+            {
+                return false;
+            }
+            output = UI::UIDataGridColumnDescriptor{
+                .key = logicalColumn + 40,
+                .header = Headers[logicalColumn],
+                .width = 50.0F,
+            };
+            return true;
+        },
+        .resolveCell = [](const void*, u64 logicalRow, u32 logicalColumn,
+                          UI::UIDataGridCellDescriptor& output) noexcept {
+            constexpr std::array<std::string_view, 2> Cells{"Asset", "Ready"};
+            if (logicalRow >= 6 || logicalColumn >= Cells.size())
+            {
+                return false;
+            }
+            output = UI::UIDataGridCellDescriptor{.text = Cells[logicalColumn]};
+            return true;
+        },
+    };
+}
+
 [[nodiscard]] UI::UILayoutStyle fixedSize(float width, float height) noexcept
 {
     UI::UILayoutStyle style;
@@ -461,9 +529,9 @@ addListener(UI::UIContext& context, UI::UIRoutedPointerListenerDesc descriptor, 
 {
     CollectionRouteTree tree;
     auto context = UI::UIContext::Create(window, {
-                                                     .nodeCapacity = 128,
+                                                     .nodeCapacity = 192,
                                                      .rootCapacity = 1,
-                                                     .paintSnapshotCapacity = 128,
+                                                     .paintSnapshotCapacity = 256,
                                                      .routePathCapacity = 16,
                                                  });
     EXPECT_TRUE(context.has_value()) << (context ? "" : context.error().message);
@@ -488,6 +556,8 @@ addListener(UI::UIContext& context, UI::UIRoutedPointerListenerDesc descriptor, 
     tree.updater = std::move(*updater);
     tree.listSource = std::make_unique<ListRouteSource>();
     tree.treeSource = std::make_unique<TreeRouteSource>();
+    tree.virtualGridSource = std::make_unique<VirtualGridRouteSource>();
+    tree.dataGridSource = std::make_unique<DataGridRouteSource>();
 
     auto listView = tree.updater.createElement(
         tree.root.rootNodeId(),
@@ -495,28 +565,68 @@ addListener(UI::UIContext& context, UI::UIRoutedPointerListenerDesc descriptor, 
     auto treeView = tree.updater.createElement(
         tree.root.rootNodeId(),
         UI::makeTreeViewElement({.materializedItemCapacity = 6}));
+    auto virtualGridView = tree.updater.createElement(
+        tree.root.rootNodeId(),
+        UI::makeVirtualGridViewElement({.materializedItemCapacity = 6}));
+    auto dataGrid = tree.updater.createElement(
+        tree.root.rootNodeId(),
+        UI::makeDataGridElement({
+            .columnCapacity = 2,
+            .materializedRowCapacity = 5,
+        }));
     auto other = tree.updater.createElement(
         tree.root.rootNodeId(), UI::makeButtonElement());
     EXPECT_TRUE(listView.has_value()) << (listView ? "" : listView.error().message);
     EXPECT_TRUE(treeView.has_value()) << (treeView ? "" : treeView.error().message);
+    EXPECT_TRUE(virtualGridView.has_value())
+        << (virtualGridView ? "" : virtualGridView.error().message);
+    EXPECT_TRUE(dataGrid.has_value())
+        << (dataGrid ? "" : dataGrid.error().message);
     EXPECT_TRUE(other.has_value()) << (other ? "" : other.error().message);
-    if (!listView || !treeView || !other)
+    if (!listView || !treeView || !virtualGridView || !dataGrid || !other)
     {
         return tree;
     }
     tree.listView = *listView;
     tree.treeView = *treeView;
+    tree.virtualGridView = *virtualGridView;
+    tree.dataGrid = *dataGrid;
     tree.other = *other;
 
-    expectOk(tree.updater.setLayoutStyle(tree.root.rootNodeId(), fixedSize(100.0F, 100.0F)));
+    expectOk(tree.updater.setLayoutStyle(tree.root.rootNodeId(), fixedSize(100.0F, 200.0F)));
     expectOk(tree.updater.setLayoutStyle(tree.listView, fixedSize(100.0F, 40.0F)));
     expectOk(tree.updater.setLayoutStyle(tree.treeView, fixedSize(100.0F, 40.0F)));
+    expectOk(tree.updater.setLayoutStyle(tree.virtualGridView, fixedSize(100.0F, 40.0F)));
+    expectOk(tree.updater.setLayoutStyle(tree.dataGrid, fixedSize(100.0F, 60.0F)));
     expectOk(tree.updater.setLayoutStyle(tree.other, fixedSize(100.0F, 20.0F)));
     expectOk(tree.updater.setListViewStyle(tree.listView, {.rowHeight = 24.0F, .overscanRows = 1}));
     expectOk(tree.updater.setTreeViewStyle(tree.treeView, {.rowHeight = 24.0F, .overscanRows = 1}));
+    expectOk(tree.updater.setVirtualGridViewStyle(
+        tree.virtualGridView,
+        {
+            .minimumItemWidth = 50.0F,
+            .itemHeight = 20.0F,
+            .columnGap = 0.0F,
+            .rowGap = 0.0F,
+            .maximumColumnCount = 2,
+            .overscanRows = 1,
+            .scrollBarVisibility = UI::UIScrollBarVisibility::Hidden,
+        }));
+    expectOk(tree.updater.setDataGridStyle(
+        tree.dataGrid,
+        {
+            .columnHeaderHeight = 15.0F,
+            .rowHeight = 15.0F,
+            .overscanRows = 1,
+            .scrollBarVisibility = UI::UIScrollBarVisibility::Hidden,
+        }));
     expectOk(tree.updater.setListViewDataSource(tree.listView, tree.listSource->view()));
     expectOk(tree.updater.setTreeViewDataSource(tree.treeView, tree.treeSource->view()));
-    expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    expectOk(tree.updater.setVirtualGridViewDataSource(
+        tree.virtualGridView, tree.virtualGridSource->view()));
+    expectOk(tree.updater.setDataGridDataSource(
+        tree.dataGrid, tree.dataGridSource->view()));
+    expectOk(tree.context->commitLayout({.width = 100.0F, .height = 200.0F}));
     return tree;
 }
 

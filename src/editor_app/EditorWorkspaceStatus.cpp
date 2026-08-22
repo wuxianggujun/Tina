@@ -589,11 +589,19 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
         return status;
     }
     const bool documentCanSave = activeDocumentSession() != nullptr;
-    if (auto status = tree.setEnabled(saveAsButton_, documentCanSave); !status) {
+    const bool temporaryProjectCanSave =
+        temporaryProjectActive() && !pendingProjectSwitch_.has_value() &&
+        pendingSourceImportPathsUtf8_.empty() &&
+        sourceImportService_.state() ==
+            Tina::EditorApp::Detail::EditorSourceImportServiceState::Idle;
+    if (auto status = tree.setEnabled(
+            saveAsButton_, documentCanSave || temporaryProjectCanSave);
+        !status) {
         return status;
     }
     if (auto status = tree.setEnabled(
-            saveButton_, documentCanSave && pathConfigured && dirty);
+            saveButton_, temporaryProjectCanSave ||
+                             (documentCanSave && pathConfigured && dirty));
         !status) {
         return status;
     }
@@ -636,7 +644,7 @@ auto EditorWorkspaceState::refreshPlaySessionUi(
         !pendingProjectSwitch_.has_value() && !catalogRefreshPending_ &&
         sourceImportService_.state() ==
             Tina::EditorApp::Detail::EditorSourceImportServiceState::Idle;
-    if (auto status = tree.setEnabled(sourceImportList_,
+    if (auto status = tree.setEnabled(sourceImportGrid_,
                                       sourceImportSelectionEnabled);
         !status) {
         return status;

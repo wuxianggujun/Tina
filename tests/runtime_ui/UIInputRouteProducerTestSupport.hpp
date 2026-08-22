@@ -82,14 +82,26 @@ struct TreeRouteSource final {
     [[nodiscard]] UI::UITreeViewDataSource view() noexcept;
 };
 
+struct VirtualGridRouteSource final {
+    [[nodiscard]] UI::UIVirtualGridViewDataSource view() const noexcept;
+};
+
+struct DataGridRouteSource final {
+    [[nodiscard]] UI::UIDataGridDataSource view() const noexcept;
+};
+
 struct CollectionRouteTree final {
     std::unique_ptr<UI::UIContext> context;
     UI::UIRootOwner root;
     UI::UITreeUpdater updater;
     std::unique_ptr<ListRouteSource> listSource;
     std::unique_ptr<TreeRouteSource> treeSource;
+    std::unique_ptr<VirtualGridRouteSource> virtualGridSource;
+    std::unique_ptr<DataGridRouteSource> dataGridSource;
     UI::UINodeId listView{};
     UI::UINodeId treeView{};
+    UI::UINodeId virtualGridView{};
+    UI::UINodeId dataGrid{};
     UI::UINodeId other{};
 };
 
