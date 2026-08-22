@@ -786,7 +786,20 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
     if (auto status = processPendingHierarchyReorder(*tree); !status) {
         return status;
     }
-    if (pendingSceneAddDialogFocus_) {
+    if (pendingDirtyCloseDialogFocus_) {
+        const WorkspaceSessionState* session =
+            pendingDirtyCloseKey_.has_value()
+                ? findDocumentSession(*pendingDirtyCloseKey_)
+                : nullptr;
+        if (auto status = tree->requestFocus(
+                session != nullptr && session->hasDocumentPath()
+                    ? dirtyCloseDialog_.actions[DirtyCloseSaveActionIndex]
+                    : dirtyClosePathInput_);
+            !status) {
+            return status;
+        }
+        pendingDirtyCloseDialogFocus_ = false;
+    } else if (pendingSceneAddDialogFocus_) {
         if (auto status = tree->requestFocus(sceneAddSearchInput_); !status) {
             return status;
         }

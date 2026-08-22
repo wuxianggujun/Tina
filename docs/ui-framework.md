@@ -115,10 +115,17 @@ indicator，但不复制 RadioButton 的 selection、Focus、Keyboard/Gamepad �
 映射到既有 Checkbox kind、Toggle side store 和 action path，并仅在 theme chrome、track/thumb geometry 与
 Switch semantics role 上区分。它们仍走同一 `createElement()`、固定容量 publication、DisplayList 与 GPU backend。
 
-第一方多节点 profile 也不新增 owner。IconButton、FormField、Dialog 分别组合现有 Button/Icon/Tooltip、
-Label/TextEdit/Button/Tooltip 与 Modal/Panel/Label/Button；`required*BuildBudget()` 先计算精确预算，三个
-`build*()` 入口再经同一 `UIElementBuildTransaction` 原子构建。行为、Focus/Modal、Semantics、Image 和 Render
-继续读取既有状态与 committed snapshot，不为 profile 建立平行 store、事件循环或 GPU pipeline。
+第一方多节点 profile 也不新增行为 owner。IconButton、FormField、Dialog、Snackbar 分别组合现有
+Button/Icon/Tooltip、Label/TextEdit/Button/Tooltip、Modal/Panel/Label/Button 与 Panel/Label/Button；
+`required*BuildBudget()` 先计算精确预算，各 `build*()` 入口再经同一 `UIElementBuildTransaction` 原子构建。
+行为、Focus/Modal、Semantics、Image 和 Render 继续读取既有状态与 committed snapshot，不建立平行事件循环或
+GPU pipeline。
+
+Dialog 只增加 generation-safe `UIDialogStateStorage` 保存 open intent，既有 Modal 仍是唯一 barrier/Focus Scope
+owner。build 后 intent 为 closed；open/dismiss 幂等修改 intent，并由下一次成功 layout/hit/paint/semantics commit
+把 closed 映射为 effective `Collapsed`，同时进入或恢复 focus。一个 Window 只接受一个 open Dialog intent；
+Menu/Tooltip 关闭与 dirty queue 预检属于同一失败原子 mutation，destroy/root release/slot reuse 清理注册关系。
+root-scoped updater 继续执行 root 校验，Runtime facade 继续受当前 phase epoch 约束。
 
 ### Axis-aligned descendant clip
 

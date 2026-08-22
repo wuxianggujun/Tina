@@ -726,6 +726,11 @@ TEST_F(PrimaryWindowUICapabilityTest, BuildTransactionCommitsBoundedComponentDur
 
 TEST_F(PrimaryWindowUICapabilityTest, ComponentProfilesHonorRuntimePhaseLifetime)
 {
+    auto contextResult = UI::UIContext::Create(
+        window, {.nodeCapacity = 18, .rootCapacity = 4});
+    ASSERT_TRUE(contextResult.has_value()) << contextResult.error().message;
+    context = std::move(*contextResult);
+
     CapabilityState state;
     auto epoch = state.beginGameStateEnterPhase(context.get());
     ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
@@ -766,7 +771,7 @@ TEST_F(PrimaryWindowUICapabilityTest, ComponentProfilesHonorRuntimePhaseLifetime
             .actions = actions,
         });
     ASSERT_TRUE(dialog.has_value()) << dialog.error().message;
-    EXPECT_EQ(context->liveNodeCount(), 16U);
+    EXPECT_EQ(context->liveNodeCount(), 18U);
     EXPECT_EQ(context->statistics().activeImageContentCount, 1U);
     EXPECT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
 
@@ -775,7 +780,7 @@ TEST_F(PrimaryWindowUICapabilityTest, ComponentProfilesHonorRuntimePhaseLifetime
         UI::UIFormFieldConfig{.label = "Expired", .value = {}});
     ASSERT_FALSE(expired.has_value());
     EXPECT_EQ(expired.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
-    EXPECT_EQ(context->liveNodeCount(), 16U);
+    EXPECT_EQ(context->liveNodeCount(), 18U);
 }
 
 TEST_F(PrimaryWindowUICapabilityTest, ComponentProfileRejectsConcurrentBuildTransaction)
@@ -1239,6 +1244,52 @@ TEST_F(PrimaryWindowUICapabilityTest, ModalAndFocusFacadesRoundTripAndExpireWith
     auto expiredScope = treeView.focusScopeMode(*panel);
     ASSERT_FALSE(expiredScope.has_value());
     EXPECT_EQ(expiredScope.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+}
+
+TEST_F(PrimaryWindowUICapabilityTest, DialogPresentationFacadeRoundTripsAndExpiresWithPhase)
+{
+    CapabilityState state;
+    auto epoch = state.beginGameStateEnterPhase(context.get());
+    ASSERT_TRUE(epoch.has_value()) << epoch.error().message;
+    auto builder = state.rootBuilder(*epoch);
+    ASSERT_TRUE(builder.has_value()) << builder.error().message;
+    auto root = builder->createRoot();
+    ASSERT_TRUE(root.has_value()) << root.error().message;
+    auto tree = builder->treeUpdater(*root);
+    ASSERT_TRUE(tree.has_value()) << tree.error().message;
+
+    const std::array actions{
+        UI::UIDialogActionConfig{
+            .text = "Close",
+            .variant = UI::UIButtonVariant::Primary,
+        },
+    };
+    auto dialog = tree->buildDialog(
+        root->rootNodeId(),
+        UI::UIDialogConfig{
+            .title = "Runtime dialog",
+            .actions = actions,
+        });
+    ASSERT_TRUE(dialog.has_value()) << dialog.error().message;
+
+    auto initiallyOpen = tree->isDialogOpen(dialog->modal);
+    ASSERT_TRUE(initiallyOpen.has_value()) << initiallyOpen.error().message;
+    EXPECT_FALSE(*initiallyOpen);
+    ASSERT_TRUE(tree->openDialog(dialog->modal).has_value());
+    EXPECT_TRUE(tree->isDialogOpen(dialog->modal).value());
+    ASSERT_TRUE(tree->dismissDialog(dialog->modal).has_value());
+    EXPECT_FALSE(tree->isDialogOpen(dialog->modal).value());
+
+    ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
+    Core::Status expiredOpen = tree->openDialog(dialog->modal);
+    ASSERT_FALSE(expiredOpen.has_value());
+    EXPECT_EQ(expiredOpen.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    Core::Status expiredDismiss = tree->dismissDialog(dialog->modal);
+    ASSERT_FALSE(expiredDismiss.has_value());
+    EXPECT_EQ(expiredDismiss.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredQuery = tree->isDialogOpen(dialog->modal);
+    ASSERT_FALSE(expiredQuery.has_value());
+    EXPECT_EQ(expiredQuery.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
 }
 
 TEST_F(PrimaryWindowUICapabilityTest, ProductThemeFacadeUpdatesExistingControlsAndExpiresWithPhase)

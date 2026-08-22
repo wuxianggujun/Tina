@@ -39,9 +39,7 @@ auto EditorWorkspaceState::showSceneAddModal(
         pendingSceneAddRequest_.reset();
         return status;
     }
-    if (auto status = tree.setLayoutStyle(
-            sceneAddModal_, sceneAddModalLayout(UI::UIVisibility::Visible));
-        !status) {
+    if (auto status = tree.openDialog(sceneAddDialog_.modal); !status) {
         pendingSceneAddRequest_.reset();
         return status;
     }
@@ -57,9 +55,7 @@ auto EditorWorkspaceState::hideSceneAddModal(
     if (!pendingSceneAddRequest_.has_value()) {
         return Tina::Core::success();
     }
-    if (auto status = tree.setLayoutStyle(
-            sceneAddModal_, sceneAddModalLayout(UI::UIVisibility::Collapsed));
-        !status) {
+    if (auto status = tree.dismissDialog(sceneAddDialog_.modal); !status) {
         return status;
     }
     pendingSceneAddRequest_.reset();
@@ -493,10 +489,7 @@ auto EditorWorkspaceState::showSceneDeleteConfirmation(
         .stableId = stableId,
         .documentRevision = activeDocumentRevision(),
     };
-    if (auto status = tree.setLayoutStyle(
-            sceneDeleteDialog_.modal,
-            editorDialogOverlayLayout(UI::UIVisibility::Visible));
-        !status) {
+    if (auto status = tree.openDialog(sceneDeleteDialog_.modal); !status) {
         pendingSceneDeleteConfirmation_.reset();
         return status;
     }
@@ -512,10 +505,7 @@ auto EditorWorkspaceState::hideSceneDeleteConfirmation(
     if (!pendingSceneDeleteConfirmation_.has_value()) {
         return Tina::Core::success();
     }
-    if (auto status = tree.setLayoutStyle(
-            sceneDeleteDialog_.modal,
-            editorDialogOverlayLayout(UI::UIVisibility::Collapsed));
-        !status) {
+    if (auto status = tree.dismissDialog(sceneDeleteDialog_.modal); !status) {
         return status;
     }
     pendingSceneDeleteConfirmation_.reset();
@@ -1662,27 +1652,17 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         status = cancelDirtyClose(tree);
         break;
     case EditorCommand::ShowAbout:
-        if (!aboutDialogVisible_) {
-            status = tree.setLayoutStyle(
-                aboutDialog_.modal,
-                editorDialogOverlayLayout(UI::UIVisibility::Visible));
-            if (status) {
-                aboutDialogVisible_ = true;
-                pendingAboutDialogFocus_ = true;
-                pendingAboutDialogFocusRestore_ = false;
-            }
+        status = tree.openDialog(aboutDialog_.modal);
+        if (status) {
+            pendingAboutDialogFocus_ = true;
+            pendingAboutDialogFocusRestore_ = false;
         }
         break;
     case EditorCommand::HideAbout:
-        if (aboutDialogVisible_) {
-            status = tree.setLayoutStyle(
-                aboutDialog_.modal,
-                editorDialogOverlayLayout(UI::UIVisibility::Collapsed));
-            if (status) {
-                aboutDialogVisible_ = false;
-                pendingAboutDialogFocus_ = false;
-                pendingAboutDialogFocusRestore_ = true;
-            }
+        status = tree.dismissDialog(aboutDialog_.modal);
+        if (status) {
+            pendingAboutDialogFocus_ = false;
+            pendingAboutDialogFocusRestore_ = true;
         }
         break;
     }

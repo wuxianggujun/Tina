@@ -447,6 +447,19 @@ TEST_F(UIComponentProfileTest, DialogReusesModalScopeAndRestoresPriorFocus)
         });
     ASSERT_TRUE(built.has_value()) << built.error().message;
     const UI::UIDialogParts parts = *built;
+    auto initiallyOpen = updater.isDialogOpen(parts.modal);
+    ASSERT_TRUE(initiallyOpen.has_value()) << initiallyOpen.error().message;
+    EXPECT_FALSE(*initiallyOpen);
+    expectSuccess(context->commitLayout({.width = 640.0F, .height = 360.0F}));
+
+    EXPECT_FALSE(context->activeModal().hasValue());
+    EXPECT_EQ(context->defaultActionFocus(), *background);
+    EXPECT_EQ(findSemantics(context->committedSemantics(), parts.modal), nullptr);
+
+    expectSuccess(updater.openDialog(parts.modal));
+    EXPECT_TRUE(updater.isDialogOpen(parts.modal).value());
+    EXPECT_FALSE(context->activeModal().hasValue());
+    EXPECT_EQ(context->defaultActionFocus(), *background);
     expectSuccess(context->commitLayout({.width = 640.0F, .height = 360.0F}));
 
     EXPECT_EQ(context->activeModal(), parts.modal);
@@ -467,10 +480,15 @@ TEST_F(UIComponentProfileTest, DialogReusesModalScopeAndRestoresPriorFocus)
     EXPECT_EQ(cancel->name, "Cancel");
     EXPECT_EQ(destructive->name, "Delete");
 
-    expectSuccess(updater.destroy(parts.modal));
+    expectSuccess(updater.dismissDialog(parts.modal));
+    EXPECT_FALSE(updater.isDialogOpen(parts.modal).value());
+    EXPECT_EQ(context->activeModal(), parts.modal);
+    EXPECT_EQ(context->defaultActionFocus(), parts.actions[0]);
     expectSuccess(context->commitLayout({.width = 640.0F, .height = 360.0F}));
     EXPECT_FALSE(context->activeModal().hasValue());
     EXPECT_EQ(context->defaultActionFocus(), *background);
+
+    expectSuccess(updater.destroy(parts.modal));
 }
 
 TEST_F(UIComponentProfileTest, ImageCapacityFailureRollsBackWholeProfileAndCanRetry)

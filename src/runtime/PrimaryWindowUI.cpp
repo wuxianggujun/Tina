@@ -1841,6 +1841,37 @@ Core::Result<UI::UIPopupMetrics> PrimaryWindowUITreeUpdater::popupMetrics(UI::UI
     return m_state->popupMetrics(m_epoch, m_phase, m_updater, popup);
 }
 
+Core::Status PrimaryWindowUITreeUpdater::openDialog(UI::UINodeId dialog)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>(
+            "PrimaryWindowUITreeUpdater::openDialog");
+    }
+    return m_state->openDialog(m_epoch, m_phase, m_updater, dialog);
+}
+
+Core::Status PrimaryWindowUITreeUpdater::dismissDialog(UI::UINodeId dialog)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>(
+            "PrimaryWindowUITreeUpdater::dismissDialog");
+    }
+    return m_state->dismissDialog(m_epoch, m_phase, m_updater, dialog);
+}
+
+Core::Result<bool>
+PrimaryWindowUITreeUpdater::isDialogOpen(UI::UINodeId dialog) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<bool>(
+            "PrimaryWindowUITreeUpdater::isDialogOpen");
+    }
+    return m_state->isDialogOpen(m_epoch, m_phase, m_updater, dialog);
+}
+
 Core::Status PrimaryWindowUITreeUpdater::setTooltipAnchor(UI::UINodeId tooltip,
                                                           UI::UINodeId anchor)
 {

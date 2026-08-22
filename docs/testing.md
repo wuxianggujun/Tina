@@ -115,6 +115,27 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_bench_tests.exe `
   --gtest_filter='UIBenchmarkWorkloadsTests.*Timeline*'
 ```
 
+### UI-DIALOG-001 集中 gate
+
+Dialog storage/API、Runtime facade、Editor 与 sample consumer、测试和文档全部闭环后，复用常驻
+`windows-msvc-vnext-bgfx-product-2d` tree 一次性增量构建，不在内部迁移切片重复 configure/build/test：
+
+```powershell
+cmake --build --preset windows-vnext-bgfx-product-2d-debug `
+  --target tina_ui_tests tina_runtime_ui_tests tina_editor_app_tests tina_editor_desktop `
+           tina_sample_ui_showcase tina_sample_desktop_shell --parallel 2 -- /nr:false
+
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_ui_tests.exe `
+  --gtest_filter='UIDialogTest.*:UIComponentProfileTest.*Dialog*'
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_runtime_ui_tests.exe `
+  --gtest_filter='PrimaryWindowUICapabilityTest.*Dialog*'
+```
+
+随后直接运行完整 `tina_ui_tests.exe`、`tina_runtime_ui_tests.exe` 与 `tina_editor_app_tests.exe`，再执行
+Showcase、Desktop Shell 以及 Editor 2D/3D 的既有最短 auto-demo smoke。必须分别验证初始 closed、intent/commit
+边界、focus 进入/恢复、幂等、single-open 冲突、wrong-root/stale/generation 清理、dirty capacity 失败原子性、
+Runtime phase expiry，以及三个产品 consumer 的最终 Dialog closed 证据。
+
 ### UI-GRID-COLLECTIONS 集中 gate
 
 VirtualGridView/DataGrid 与 Editor consumer 的源码、测试和文档全部闭环后，复用常驻

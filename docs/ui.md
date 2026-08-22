@@ -143,6 +143,21 @@ Label/TextEdit/Button/Tooltip；Dialog 复用 Modal/Panel/Label/Button；Snackba
 `Polite` live-region 且永不自动改变 Focus。它们不新增 Behavior store、Modal/Focus owner、
 update loop、Semantics pipeline 或 Render pipeline，失败时由同一 build transaction 回滚完整组合树。
 
+### Dialog presentation 契约
+
+`buildDialog()` 只负责原子构建并注册 Dialog，返回时 presentation intent 固定为 closed；Dialog authored
+`UILayoutStyle::visibility` 必须保持 `Visible`，`UIDialogStateStorage` 在 layout candidate 中把 closed intent 解析为
+effective `Collapsed`。调用方使用 `openDialog()/dismissDialog()/isDialogOpen()` 管理 retained intent，不再通过
+`setLayoutStyle()` 维护第二份显隐状态。open/dismiss 均幂等，query 立即返回 intent；真正的 Modal barrier、Hit、
+Paint、Semantics、Focus 进入与 dismiss 后的 focus restore 只在下一次成功 `commitLayout()` 时一起发布。
+
+一个 Window 同时最多有一个 registered Dialog 的 open intent。打开 Dialog 会在同一预检事务中关闭 Menu 并
+hard-dismiss Tooltip；第二个 Dialog 冲突、非 Dialog、stale generation 与 root-scoped updater 的跨 root 访问均明确
+失败。dirty queue 容量预检失败时，Dialog intent、active Modal、focus 与全部 committed snapshot 保持不变；
+destroy、root release 和 generation slot reuse 会清理注册状态。直接 `UIContext`、root-scoped `UITreeUpdater` 与
+phase-scoped `PrimaryWindowUITreeUpdater` 都提供这三个 presentation API；Runtime facade 在 phase epoch 结束后统一
+返回 `UIPhaseCapabilityExpired`。
+
 ### Tooltip 契约
 
 `makeTooltipElement(text, config, layout)` 创建独立 `Tooltip` 内建契约；它不是把 Dropdown Popup 改名或复用
@@ -938,6 +953,7 @@ Back/Confirm/Menu 之外的任意 action-id 仍属于独立后续扩展。
 | `TEXT-001` | InProgress：T1 多行、T2 UAX #29 grapheme 子集、T3 Windows IMM32 placement 的代码/自动 gate 已完成；BiDi/复杂 shaping、Linux 原生 XIM/Wayland 与 Windows 真机 IME 人工证据待补 |
 | `UI-PERF-001` | Done；clean 4096-node、单节点 paint dirty、route、100k 虚拟集合、`ui_image_nineslice_v1`、完整 `ui_component_build_v1`、`ui_style_state_v1` 与 `ui_motion_v1` 已落地；固定机前时间结论只报 provisional |
 | `UI-COMPONENT-001` | Done；Runtime phase-scoped bounded transaction、六类 fixed-capacity Behavior side store、node/text/canvas/各 Behavior pool 统一 reservation/counter 与 `ui_component_build_v1` 已落地 |
+| `UI-DIALOG-001` | Done：generation-safe `UIDialogStateStorage`、build 后默认 closed、`openDialog/dismissDialog/isDialogOpen` Context/Updater/Runtime facade、commit-bound Modal/Focus publication、单 Window 单 open intent、Menu/Tooltip 协调、容量失败原子性与 Editor/Showcase/Desktop Shell consumer 迁移已落地 |
 | `UI-STYLE-001` | Done；强类型 StyleClass/ColorToken、startup registry/value、运行期 reverse-dependency token getter/setter、node-local pseudo-state selector、literal/token-backed BoxFill/imageTint rule、预编译 stylesheet、Runtime facade、固定 workload 与 Integration/Visual 门禁已落地；不做完整 CSS |
 | `UI-MOTION-001` | Done；fixed-capacity paint-only transition、monotonic clock、retarget、reduced-motion、Style BackgroundColor persistent reservation/activation 与 `ui_motion_v1` |
 | `UI-MOTION-002` | Done；bounded layout whitelist、跨 direct/timeline candidate transaction 与两个 timeline workload 已落地；2026-08-16 定向 gate 为 UI 28/28、Runtime facade 1/1、bench unit 10/10，paint/layout seed 0/1/2 均通过且 allocation delta=0；固定机 hard gate 仍由 `PERF-002` 跟踪 |

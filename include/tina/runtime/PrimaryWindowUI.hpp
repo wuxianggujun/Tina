@@ -374,6 +374,9 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Status setPopupOpen(UI::UINodeId popup, bool open);
     [[nodiscard]] Core::Result<bool> isPopupOpen(UI::UINodeId popup) const;
     [[nodiscard]] Core::Result<UI::UIPopupMetrics> popupMetrics(UI::UINodeId popup) const;
+    [[nodiscard]] Core::Status openDialog(UI::UINodeId dialog);
+    [[nodiscard]] Core::Status dismissDialog(UI::UINodeId dialog);
+    [[nodiscard]] Core::Result<bool> isDialogOpen(UI::UINodeId dialog) const;
     [[nodiscard]] Core::Status setTooltipAnchor(UI::UINodeId tooltip, UI::UINodeId anchor);
     [[nodiscard]] Core::Status clearTooltipAnchor(UI::UINodeId tooltip);
     [[nodiscard]] Core::Result<UI::UINodeId> tooltipAnchor(UI::UINodeId tooltip) const;

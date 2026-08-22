@@ -512,6 +512,13 @@ class PrimaryWindowUICapabilityState final {
                                                 const UI::UITreeUpdater& updater, UI::UINodeId popup);
     [[nodiscard]] Core::Result<UI::UIPopupMetrics> popupMetrics(u64 epoch, PrimaryWindowUIPhase phase,
                                                                 const UI::UITreeUpdater& updater, UI::UINodeId popup);
+    [[nodiscard]] Core::Status openDialog(u64 epoch, PrimaryWindowUIPhase phase,
+                                          UI::UITreeUpdater& updater, UI::UINodeId dialog);
+    [[nodiscard]] Core::Status dismissDialog(u64 epoch, PrimaryWindowUIPhase phase,
+                                             UI::UITreeUpdater& updater, UI::UINodeId dialog);
+    [[nodiscard]] Core::Result<bool> isDialogOpen(
+        u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+        UI::UINodeId dialog);
     [[nodiscard]] Core::Status setTooltipAnchor(u64 epoch, PrimaryWindowUIPhase phase,
                                                 UI::UITreeUpdater& updater, UI::UINodeId tooltip,
                                                 UI::UINodeId anchor);

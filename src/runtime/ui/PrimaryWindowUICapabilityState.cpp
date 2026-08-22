@@ -3401,6 +3401,63 @@ Core::Result<UI::UIPopupMetrics> PrimaryWindowUICapabilityState::popupMetrics(u6
     return *metrics;
 }
 
+Core::Status PrimaryWindowUICapabilityState::openDialog(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId dialog)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::openDialog";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.openDialog(dialog);
+    if (!status)
+    {
+        return Core::failure(
+            rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Status PrimaryWindowUICapabilityState::dismissDialog(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId dialog)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::dismissDialog";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.dismissDialog(dialog);
+    if (!status)
+    {
+        return Core::failure(
+            rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<bool> PrimaryWindowUICapabilityState::isDialogOpen(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId dialog)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::isDialogOpen";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto open = updater.isDialogOpen(dialog);
+    if (!open)
+    {
+        return Core::failure(
+            rememberFirstError(std::move(open.error()), Operation));
+    }
+    return *open;
+}
+
 Core::Status PrimaryWindowUICapabilityState::setTooltipAnchor(
     u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
     UI::UINodeId tooltip, UI::UINodeId anchor)

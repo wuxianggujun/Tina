@@ -87,13 +87,12 @@ inline constexpr float CompressedTierMinWidth = 960.0F;
 
 // The Modal barrier must stretch across the viewport to own an area, so the
 // scrim covers the shell and the dialog centres inside it.
-[[nodiscard]] UI::UILayoutStyle modalLayout(UI::UIVisibility visibility) noexcept
+[[nodiscard]] UI::UILayoutStyle modalLayout() noexcept
 {
     UI::UILayoutStyle style = fillStyle();
     style.placement = UI::UILayoutPlacement::Overlay;
     style.overlay.horizontal = UI::UIAxisAlignment::Stretch;
     style.overlay.vertical = UI::UIAxisAlignment::Stretch;
-    style.visibility = visibility;
     return style;
 }
 
@@ -1120,12 +1119,12 @@ Core::Status DesktopShellUI::buildOverlays(PrimaryWindowUITreeUpdater& tree, con
     }
     nodes_.menuToggleInspector = *inspectorItem;
 
-    // Dialog reuses the Modal barrier; it starts collapsed.
+    // buildDialog registers a retained Dialog that starts closed.
     static constexpr std::array DialogActions{
         UI::UIDialogActionConfig{.text = "Cancel", .variant = UI::UIButtonVariant::Text},
         UI::UIDialogActionConfig{.text = "Discard", .variant = UI::UIButtonVariant::Danger},
     };
-    const UI::UILayoutStyle dialogLayout = modalLayout(UI::UIVisibility::Collapsed);
+    const UI::UILayoutStyle dialogLayout = modalLayout();
     auto dialog = tree.buildDialog(
         rootNode,
         UI::UIDialogConfig{
@@ -1562,11 +1561,10 @@ Core::Status DesktopShellUI::update(UIUpdateContext& context)
     }
 
     if (dialogVisibilityDirty_) {
-        if (Core::Status status = tree->setLayoutStyle(
-                nodes_.dialog.modal,
-                modalLayout(state_->dialogOpen ? UI::UIVisibility::Visible
-                                               : UI::UIVisibility::Collapsed));
-            !status) {
+        Core::Status status = state_->dialogOpen
+                                  ? tree->openDialog(nodes_.dialog.modal)
+                                  : tree->dismissDialog(nodes_.dialog.modal);
+        if (!status) {
             return status;
         }
         dialogVisibilityDirty_ = false;

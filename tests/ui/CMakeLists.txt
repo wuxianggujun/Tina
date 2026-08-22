@@ -18,6 +18,7 @@ add_executable(tina_ui_tests
     UIControlValuePrimitivesTests.cpp
     UIContextLifetimeControlTests.cpp
     UIComponentProfileTests.cpp
+    UIDialogTests.cpp
     UIDefaultActionPressStateTests.cpp
     UIElementContractResolverTests.cpp
     UIElementTests.cpp

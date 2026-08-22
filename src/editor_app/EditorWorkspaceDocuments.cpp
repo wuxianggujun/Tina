@@ -519,32 +519,27 @@ auto EditorWorkspaceState::showDirtyCloseModal(
         return status;
     }
     if (auto status = tree.setText(
-            dirtyCloseSaveButton_,
+            dirtyCloseDialog_.actions[DirtyCloseSaveActionIndex],
             session != nullptr && session->hasDocumentPath() ? "Save" : "Save As");
         !status) {
         return status;
     }
     pendingDirtyCloseKey_ = tab->key;
-    if (auto status = tree.setLayoutStyle(
-            dirtyCloseModal_, dirtyCloseModalLayout(UI::UIVisibility::Visible));
-        !status) {
+    if (auto status = tree.openDialog(dirtyCloseDialog_.modal); !status) {
         pendingDirtyCloseKey_.reset();
         return status;
     }
-    return tree.requestFocus(
-        session != nullptr && session->hasDocumentPath()
-            ? dirtyCloseSaveButton_
-            : dirtyClosePathInput_);
+    pendingDirtyCloseDialogFocus_ = true;
+    return Tina::Core::success();
 }
 
 auto EditorWorkspaceState::hideDirtyCloseModal(
     Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status{
-    if (auto status = tree.setLayoutStyle(
-            dirtyCloseModal_, dirtyCloseModalLayout(UI::UIVisibility::Collapsed));
-        !status) {
+    if (auto status = tree.dismissDialog(dirtyCloseDialog_.modal); !status) {
         return status;
     }
     pendingDirtyCloseKey_.reset();
+    pendingDirtyCloseDialogFocus_ = false;
     return Tina::Core::success();
 }
 

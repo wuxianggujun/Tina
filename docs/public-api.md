@@ -410,6 +410,15 @@ action 或更新 TextEdit。`requiredIconButtonBuildBudget()`、`requiredFormFie
 action token 和 `Polite` live-region；它不请求 Focus，也不建立 Tooltip/Popup/Modal barrier。四类 recipe 复用同一
 fixed-capacity transaction，失败不发布半棵组件树。
 
+`buildDialog()` 构建成功后固定为 closed，调用方必须使用
+`openDialog(dialog)/dismissDialog(dialog)/isDialogOpen(dialog)` 管理 presentation intent；不得把 Dialog 的 authored
+visibility 改为 Hidden/Collapsed。intent query 在调用后立即变化，Modal barrier、Hit/Paint/Semantics、focus 进入及
+dismiss 后的 focus restore 则只在下一次成功 `commitLayout()` 一起发布。每个 Window 同时最多一个 registered
+Dialog 为 open intent；冲突、非 Dialog、stale/wrong-root 均失败，dirty queue 预检失败不改变 intent 或 committed
+状态，destroy/root release/generation reuse 会移除注册。三个入口同时存在于 `UIContext`、root-scoped
+`UITreeUpdater` 与 phase-scoped `PrimaryWindowUITreeUpdater`；过期 Runtime facade 返回
+`UIPhaseCapabilityExpired`。打开 Dialog 还会原子关闭当前 Menu 并 hard-dismiss Tooltip。
+
 `UINumberFieldConfig` 通过 `UINumberFieldLabelPlacement::{Above,Leading}` 明确区分表单纵向标签与
 Inspector 两列属性行。`Above` 不创建额外容器，`UINumberFieldParts::content` 等于 `root`；`Leading`
 创建独立、可伸缩的 content column，因此无 helper/error 时精确 node budget 从 6 增加到 7，text 与

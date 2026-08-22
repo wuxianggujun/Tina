@@ -73,6 +73,8 @@ add_library(tina_ui STATIC
     detail/UIDataGridLayout.hpp
     detail/UIDataGridStateStorage.hpp
     detail/UIDataGridStateStorage.cpp
+    detail/UIDialogStateStorage.hpp
+    detail/UIDialogStateStorage.cpp
     detail/UIBehaviorStateStorage.hpp
     detail/UIBehaviorStateStorage.cpp
     detail/UIButtonActionRegistry.hpp

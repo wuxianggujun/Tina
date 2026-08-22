@@ -92,13 +92,12 @@ constexpr std::array<std::string_view, 6> ScrollContentLabels{
     return style;
 }
 
-[[nodiscard]] UI::UILayoutStyle dialogModalLayout(UI::UIVisibility visibility) noexcept
+[[nodiscard]] UI::UILayoutStyle dialogModalLayout() noexcept
 {
     UI::UILayoutStyle style = fillStyle();
     style.placement = UI::UILayoutPlacement::Overlay;
     style.overlay.horizontal = UI::UIAxisAlignment::Stretch;
     style.overlay.vertical = UI::UIAxisAlignment::Stretch;
-    style.visibility = visibility;
     return style;
 }
 
@@ -1345,13 +1344,17 @@ Core::Status ShowcaseUI::build(GameStateEnterContext& context, ShowcaseUIState& 
             .title = "Create desktop profile",
             .body = "The profile will use the current scheme, density, and render quality.",
             .actions = dialogActions,
-            .layout = dialogModalLayout(dialogOpen_ ? UI::UIVisibility::Visible
-                                                    : UI::UIVisibility::Collapsed),
+            .layout = dialogModalLayout(),
         });
     if (!dialog) {
         return Core::failure(std::move(dialog.error()));
     }
     nodes_.dialog = *dialog;
+    if (dialogOpen_) {
+        if (Core::Status status = tree->openDialog(nodes_.dialog.modal); !status) {
+            return status;
+        }
+    }
 
     if (Core::Status status = tree->setButtonAction(
             nodes_.primaryButton, UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
@@ -2013,11 +2016,11 @@ Core::Status ShowcaseUI::update(UIUpdateContext& context)
     }
 
     if (dialogVisibilityDirty_) {
-        if (Core::Status status = tree->setLayoutStyle(
-                nodes_.dialog.modal,
-                dialogModalLayout(dialogOpen_ ? UI::UIVisibility::Visible
-                                              : UI::UIVisibility::Collapsed));
-            !status) {
+        Core::Status status = dialogOpen_
+                                  ? tree->openDialog(nodes_.dialog.modal)
+                                  : tree->dismissDialog(nodes_.dialog.modal);
+        if (!status)
+        {
             return status;
         }
         dialogVisibilityDirty_ = false;

@@ -2180,34 +2180,6 @@ parseInspectorTransformValue(std::string_view text, std::string_view fieldName)
     style.flexItem.basis = UI::UILayoutLength::Px(0.0F);
     return style;
 }
-[[nodiscard]] inline UI::UILayoutStyle dirtyCloseModalLayout(
-    UI::UIVisibility visibility) noexcept
-{
-    constexpr UI::UITheme theme =
-        UI::makeModernDesktopTheme(UI::UIColorScheme::Dark, UI::UIDensity::Compact);
-    UI::UILayoutStyle style = fixedSize(520.0F, 214.0F);
-    style.placement = UI::UILayoutPlacement::Overlay;
-    style.overlay.horizontal = UI::UIAxisAlignment::Center;
-    style.overlay.vertical = UI::UIAxisAlignment::Center;
-    style.visibility = visibility;
-    style.padding = UI::UIEdgeSpacing::All(theme.spacing.space6);
-    style.flexContainer.direction = UI::UIFlexDirection::Column;
-    style.flexContainer.gap.row = theme.spacing.space5;
-    return style;
-}
-[[nodiscard]] inline UI::UILayoutStyle sceneAddModalLayout(
-    UI::UIVisibility visibility) noexcept
-{
-    constexpr UI::UITheme theme =
-        UI::makeModernDesktopTheme(UI::UIColorScheme::Dark, UI::UIDensity::Compact);
-    UI::UILayoutStyle style = fillWidth(246.0F);
-    style.flexItem.shrink = 0.0F;
-    style.visibility = visibility;
-    style.padding = UI::UIEdgeSpacing::All(theme.spacing.space6);
-    style.flexContainer.direction = UI::UIFlexDirection::Column;
-    style.flexContainer.gap.row = theme.spacing.space4;
-    return style;
-}
 [[nodiscard]] inline UI::UILayoutStyle hierarchyRenameLayout(
     UI::UIVisibility visibility) noexcept
 {
@@ -2233,16 +2205,17 @@ parseInspectorTransformValue(std::string_view text, std::string_view fieldName)
 // One row per node template. Sized for the widest registry (World2D).
 inline constexpr Tina::Core::usize SceneAddTemplateSlotCount =
     Tina::Editor::World2DNodeTemplateCount;
-[[nodiscard]] inline UI::UILayoutStyle editorDialogOverlayLayout(
-    UI::UIVisibility visibility) noexcept
+[[nodiscard]] inline UI::UILayoutStyle editorDialogOverlayLayout() noexcept
 {
     UI::UILayoutStyle style = percentSize(100.0F, 100.0F);
     style.placement = UI::UILayoutPlacement::Overlay;
     style.overlay.horizontal = UI::UIAxisAlignment::Stretch;
     style.overlay.vertical = UI::UIAxisAlignment::Stretch;
-    style.visibility = visibility;
     return style;
 }
+inline constexpr u32 DirtyCloseSaveActionIndex = 0U;
+inline constexpr u32 DirtyCloseDiscardActionIndex = 1U;
+inline constexpr u32 DirtyCloseCancelActionIndex = 2U;
 inline constexpr u32 SceneDeleteCancelActionIndex = 0U;
 inline constexpr u32 SceneDeleteConfirmActionIndex = 1U;
 inline constexpr u32 AboutCloseActionIndex = 0U;
@@ -3162,8 +3135,6 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] Tina::Core::Status buildDirtyCloseModalUi(UiBuildContext& ui, UI::UINodeId parent);
     [[nodiscard]] Tina::Core::Status buildSceneAddModalUi(
         UiBuildContext& ui, UI::UINodeId parent);
-    [[nodiscard]] Tina::Core::Status buildSceneAddModalActionsUi(
-        UiBuildContext& ui);
     [[nodiscard]] Tina::Core::Status buildSceneDeleteDialogUi(
         UiBuildContext& ui, UI::UINodeId parent);
     [[nodiscard]] Tina::Core::Status buildAboutDialogUi(
@@ -3786,15 +3757,14 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId statusDocument_{};
     UI::UINodeId statusPreview_{};
     UI::UINodeId statusSelection_{};
-    UI::UINodeId sceneAddModal_{};
-    UI::UINodeId sceneAddTitle_{};
+    UI::UIDialogParts sceneAddDialog_{};
     UI::UINodeId sceneAddParentLabel_{};
     UI::UINodeId sceneAddSearchInput_{};
     UI::UINodeId sceneAddDescription_{};
     std::array<UI::UINodeId, SceneAddTemplateSlotCount> sceneAddTemplateButtons_{};
     UI::UINodeId sceneAddCreateButton_{};
     UI::UINodeId sceneAddCancelButton_{};
-    UI::UINodeId dirtyCloseModal_{};
+    UI::UIDialogParts dirtyCloseDialog_{};
     UI::UINodeId dirtyCloseTitle_{};
     UI::UINodeId dirtyCloseMessage_{};
     UI::UINodeId dirtyClosePathInput_{};
@@ -3896,9 +3866,6 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UILayoutStyle closeDocumentButtonLayout_{};
     UI::UINodeId documentTabsBar_{};
     UI::UILayoutStyle documentTabsBarLayout_{};
-    UI::UINodeId dirtyCloseSaveButton_{};
-    UI::UINodeId dirtyCloseDiscardButton_{};
-    UI::UINodeId dirtyCloseCancelButton_{};
     std::array<UI::UINodeId, 4> projectFilterButtons_{};
     std::array<UI::UINodeId, DocumentTabSlots> documentTabButtons_{};
     UI::UINodeId paintTileButton_{};
@@ -4072,6 +4039,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     std::optional<InspectorTransformStepRequest>
         pendingInspectorTransformStep_{};
     std::optional<Tina::Editor::EditorDocumentKey> pendingDirtyCloseKey_{};
+    bool pendingDirtyCloseDialogFocus_ = false;
     std::optional<SceneDeleteConfirmation> pendingSceneDeleteConfirmation_{};
     bool pendingSceneDeleteDialogFocus_ = false;
     std::optional<SceneAddRequest> pendingSceneAddRequest_{};
@@ -4081,7 +4049,6 @@ class EditorWorkspaceState final : public Tina::IGameState {
     u32 sceneAddTemplateIndex_ = 0;
     std::optional<u32> pendingSceneAddTemplateIndex_{};
     bool pendingHierarchyFocusRestore_ = false;
-    bool aboutDialogVisible_ = false;
     bool pendingAboutDialogFocus_ = false;
     bool pendingAboutDialogFocusRestore_ = false;
     std::optional<ViewportToolMode> pendingViewportToolMode_{};

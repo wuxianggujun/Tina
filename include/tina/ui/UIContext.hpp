@@ -320,6 +320,12 @@ class UITreeUpdater final {
     buildFormField(UINodeId parent, const UIFormFieldConfig& config);
     [[nodiscard]] Core::Result<UIDialogParts>
     buildDialog(UINodeId parent, const UIDialogConfig& config);
+    // Dialog presentation is retained separately from authored visibility.
+    // buildDialog starts closed; open/dismiss publishes through the next
+    // successful commitLayout(). One registered Dialog may be open per Window.
+    [[nodiscard]] Core::Status openDialog(UINodeId dialog);
+    [[nodiscard]] Core::Status dismissDialog(UINodeId dialog);
+    [[nodiscard]] Core::Result<bool> isDialogOpen(UINodeId dialog) const;
     [[nodiscard]] Core::Result<UISnackbarHostParts>
     buildSnackbarHost(UINodeId parent, const UISnackbarHostConfig& config);
     [[nodiscard]] Core::Result<UINumberFieldParts>
@@ -708,6 +714,9 @@ class UIContext final {
     buildFormField(UINodeId parent, const UIFormFieldConfig& config);
     [[nodiscard]] Core::Result<UIDialogParts>
     buildDialog(UINodeId parent, const UIDialogConfig& config);
+    [[nodiscard]] Core::Status openDialog(UINodeId dialog);
+    [[nodiscard]] Core::Status dismissDialog(UINodeId dialog);
+    [[nodiscard]] Core::Result<bool> isDialogOpen(UINodeId dialog) const;
     [[nodiscard]] Core::Result<UISnackbarHostParts>
     buildSnackbarHost(UINodeId parent, const UISnackbarHostConfig& config);
     [[nodiscard]] Core::Result<UINumberFieldParts>
@@ -1179,6 +1188,13 @@ class UIContext final {
     [[nodiscard]] Core::Status setPopupOpenFromUpdater(UINodeId updaterRoot, UINodeId popup, bool open);
     [[nodiscard]] Core::Result<bool> isPopupOpenFromUpdater(UINodeId updaterRoot, UINodeId popup) const;
     [[nodiscard]] Core::Result<UIPopupMetrics> popupMetricsFromUpdater(UINodeId updaterRoot, UINodeId popup) const;
+    void registerDialogFromBuild(const UIDialogParts& parts) noexcept;
+    [[nodiscard]] Core::Status openDialogFromUpdater(UINodeId updaterRoot,
+                                                     UINodeId dialog);
+    [[nodiscard]] Core::Status dismissDialogFromUpdater(UINodeId updaterRoot,
+                                                        UINodeId dialog);
+    [[nodiscard]] Core::Result<bool> isDialogOpenFromUpdater(
+        UINodeId updaterRoot, UINodeId dialog) const;
     [[nodiscard]] Core::Status setTooltipAnchorFromUpdater(UINodeId updaterRoot, UINodeId tooltip,
                                                           UINodeId anchor);
     [[nodiscard]] Core::Status clearTooltipAnchorFromUpdater(UINodeId updaterRoot, UINodeId tooltip);

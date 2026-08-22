@@ -2684,28 +2684,44 @@ auto EditorWorkspaceState::buildMainMenuOverlaysUi(
 auto EditorWorkspaceState::buildSceneAddModalUi(
     UiBuildContext& ui, UI::UINodeId parent) -> Tina::Core::Status
 {
-    if (auto status = storeNode(
-            ui.createPanel(parent, sceneAddModalLayout(UI::UIVisibility::Collapsed)),
-            sceneAddModal_);
-        !status) {
-        return status;
+    constexpr std::array actions{
+        UI::UIDialogActionConfig{
+            .text = "Close",
+            .variant = UI::UIButtonVariant::Text,
+        },
+        UI::UIDialogActionConfig{
+            .text = "Create",
+            .variant = UI::UIButtonVariant::Primary,
+        },
+    };
+    UI::UILayoutStyle surfaceLayout = editorDialogSurfaceLayout(ui.productTheme);
+    surfaceLayout.size.width = UI::UILayoutLength::Px(560.0F);
+    auto dialog = ui.tree.buildDialog(
+        parent,
+        UI::UIDialogConfig{
+            .title = "Add Node",
+            .actions = actions,
+            .style = UI::UIDialogStyle{
+                .contentOverflow = UI::UIDialogContentOverflow::Scroll,
+            },
+            .layout = editorDialogOverlayLayout(),
+            .surfaceLayout = surfaceLayout,
+        });
+    if (!dialog) {
+        return Tina::Core::failure(std::move(dialog.error()));
     }
+    sceneAddDialog_ = *dialog;
+    sceneAddCancelButton_ = sceneAddDialog_.actions[0];
+    sceneAddCreateButton_ = sceneAddDialog_.actions[1];
     if (auto status = storeNode(
-            ui.createLabel(sceneAddModal_, "Add Node",
-                           fillWidth(28.0F), ui.sectionText),
-            sceneAddTitle_);
-        !status) {
-        return status;
-    }
-    if (auto status = storeNode(
-            ui.createLabel(sceneAddModal_, "Parent: World2D Scene",
+            ui.createLabel(sceneAddDialog_.content, "Parent: World2D Scene",
                            fillWidth(20.0F), ui.secondaryText),
             sceneAddParentLabel_);
         !status) {
         return status;
     }
     auto search = EditorSearchField::Build(
-        ui.tree, sceneAddModal_, ui.productTheme, {}, "Search node type",
+        ui.tree, sceneAddDialog_.content, ui.productTheme, {}, "Search node type",
         fillWidth(ui.productTheme.controls.textEditHeight), true);
     if (!search) {
         return Tina::Core::failure(std::move(search.error()));
@@ -2717,7 +2733,7 @@ auto EditorWorkspaceState::buildSceneAddModalUi(
          ++slot) {
         if (auto status = storeNode(
                 ui.createSegmentedButton(
-                    sceneAddModal_, "",
+                    sceneAddDialog_.content, "",
                     fillWidth(ui.productTheme.controls.buttonHeight)),
                 sceneAddTemplateButtons_[slot]);
             !status) {
@@ -2725,66 +2741,48 @@ auto EditorWorkspaceState::buildSceneAddModalUi(
         }
     }
     if (auto status = storeNode(
-            ui.createLabel(sceneAddModal_, "", fillWidth(30.0F),
+            ui.createLabel(sceneAddDialog_.content, "", fillWidth(30.0F),
                            ui.secondaryText),
             sceneAddDescription_);
         !status) {
         return status;
     }
-    return buildSceneAddModalActionsUi(ui);
-}
-
-auto EditorWorkspaceState::buildSceneAddModalActionsUi(UiBuildContext& ui)
-    -> Tina::Core::Status
-{
-    UI::UINodeId actions{};
-    UI::UILayoutStyle actionsStyle =
-        fillWidth(ui.productTheme.controls.buttonHeight);
-    actionsStyle.flexContainer.direction = UI::UIFlexDirection::Row;
-    actionsStyle.flexContainer.justifyContent = UI::UIJustifyContent::End;
-    actionsStyle.flexContainer.gap.column = ui.productTheme.spacing.space4;
-    actionsStyle.flexItem.grow = 1.0F;
-    if (auto status = storeNode(ui.createPanel(sceneAddModal_, actionsStyle),
-                                actions);
-        !status) {
-        return status;
-    }
-    if (auto status = storeNode(
-            ui.createButton(actions, "Close",
-                            fixedSize(86.0F,
-                                      ui.productTheme.controls.buttonHeight),
-                            true, UI::UIStyleRoleId::ButtonText),
-            sceneAddCancelButton_);
-        !status) {
-        return status;
-    }
-    return storeNode(
-        ui.createButton(actions, "Create",
-                        fixedSize(86.0F, ui.productTheme.controls.buttonHeight),
-                        true, UI::UIStyleRoleId::ButtonPrimary),
-        sceneAddCreateButton_);
+    return Tina::Core::success();
 }
 
 auto EditorWorkspaceState::buildDirtyCloseModalUi(UiBuildContext& ui, UI::UINodeId parent) -> Tina::Core::Status
 {
-    if (auto status = storeNode(
-            ui.tree.createElement(
-                parent,
-                UI::makeModalElement(
-                    dirtyCloseModalLayout(UI::UIVisibility::Collapsed))),
-            dirtyCloseModal_);
-        !status) {
-        return status;
+    constexpr std::array actions{
+        UI::UIDialogActionConfig{
+            .text = "Save",
+            .variant = UI::UIButtonVariant::Primary,
+        },
+        UI::UIDialogActionConfig{
+            .text = "Discard",
+            .variant = UI::UIButtonVariant::Danger,
+        },
+        UI::UIDialogActionConfig{
+            .text = "Cancel",
+            .variant = UI::UIButtonVariant::Text,
+        },
+    };
+    UI::UILayoutStyle surfaceLayout = editorDialogSurfaceLayout(ui.productTheme);
+    surfaceLayout.size.width = UI::UILayoutLength::Px(520.0F);
+    auto dialog = ui.tree.buildDialog(
+        parent,
+        UI::UIDialogConfig{
+            .title = "Save changes before closing?",
+            .actions = actions,
+            .layout = editorDialogOverlayLayout(),
+            .surfaceLayout = surfaceLayout,
+        });
+    if (!dialog) {
+        return Tina::Core::failure(std::move(dialog.error()));
     }
+    dirtyCloseDialog_ = *dialog;
+    dirtyCloseTitle_ = dirtyCloseDialog_.title;
     if (auto status = storeNode(
-            ui.createLabel(dirtyCloseModal_, "Save changes before closing?",
-                        fillWidth(28.0F), ui.sectionText),
-            dirtyCloseTitle_);
-        !status) {
-        return status;
-    }
-    if (auto status = storeNode(
-            ui.createLabel(dirtyCloseModal_,
+            ui.createLabel(dirtyCloseDialog_.content,
                         "The current canonical document has unsaved changes.",
                         fillWidth(24.0F), ui.bodyText),
             dirtyCloseMessage_);
@@ -2794,7 +2792,7 @@ auto EditorWorkspaceState::buildDirtyCloseModalUi(UiBuildContext& ui, UI::UINode
     UI::UILayoutStyle dirtyClosePathFieldLayout{};
     dirtyClosePathFieldLayout.size.width = UI::UILayoutLength::Percent(100.0F);
     auto dirtyClosePathField = ui.tree.buildFormField(
-        dirtyCloseModal_,
+        dirtyCloseDialog_.content,
         UI::UIFormFieldConfig{
             .label = "Document path",
             .value = {},
@@ -2807,43 +2805,6 @@ auto EditorWorkspaceState::buildDirtyCloseModalUi(UiBuildContext& ui, UI::UINode
         return Tina::Core::failure(std::move(dirtyClosePathField.error()));
     }
     dirtyClosePathInput_ = dirtyClosePathField->textEdit;
-    UI::UINodeId dirtyCloseActions{};
-    UI::UILayoutStyle dirtyCloseActionsStyle = fillWidth(ui.productTheme.controls.buttonHeight);
-    dirtyCloseActionsStyle.flexContainer.direction = UI::UIFlexDirection::Row;
-    dirtyCloseActionsStyle.flexContainer.justifyContent =
-        UI::UIJustifyContent::End;
-    dirtyCloseActionsStyle.flexContainer.gap.column = ui.productTheme.spacing.space4;
-    if (auto status = storeNode(
-            ui.createPanel(dirtyCloseModal_, dirtyCloseActionsStyle),
-            dirtyCloseActions);
-        !status) {
-        return status;
-    }
-    if (auto status = storeNode(
-            ui.createButton(dirtyCloseActions, "Save",
-                            fixedSize(86.0F, ui.productTheme.controls.buttonHeight), true,
-                            UI::UIStyleRoleId::ButtonPrimary),
-            dirtyCloseSaveButton_);
-        !status) {
-        return status;
-    }
-    if (auto status = storeNode(
-            ui.createButton(dirtyCloseActions, "Discard",
-                            fixedSize(86.0F, ui.productTheme.controls.buttonHeight), true,
-                            UI::UIStyleRoleId::ButtonDanger),
-            dirtyCloseDiscardButton_);
-        !status) {
-        return status;
-    }
-    if (auto status = storeNode(
-            ui.createButton(dirtyCloseActions, "Cancel",
-                            fixedSize(86.0F, ui.productTheme.controls.buttonHeight), true,
-                            UI::UIStyleRoleId::ButtonText),
-            dirtyCloseCancelButton_);
-        !status) {
-        return status;
-    }
-
     return Tina::Core::success();
 }
 
@@ -2866,7 +2827,7 @@ auto EditorWorkspaceState::buildSceneDeleteDialogUi(
             .title = "Delete scene subtree?",
             .body = "The selected item and its descendants will be deleted.\nThis action can be undone.",
             .actions = actions,
-            .layout = editorDialogOverlayLayout(UI::UIVisibility::Collapsed),
+            .layout = editorDialogOverlayLayout(),
             .surfaceLayout = editorDialogSurfaceLayout(ui.productTheme),
         });
     if (!dialog) {
@@ -2891,7 +2852,7 @@ auto EditorWorkspaceState::buildAboutDialogUi(
             .title = "About Tina Editor",
             .body = "Tina Editor\nC++23 game runtime and authoring environment\n2D and 3D scene editing",
             .actions = actions,
-            .layout = editorDialogOverlayLayout(UI::UIVisibility::Collapsed),
+            .layout = editorDialogOverlayLayout(),
             .surfaceLayout = editorDialogSurfaceLayout(ui.productTheme),
         });
     if (!dialog) {
@@ -3532,9 +3493,12 @@ auto EditorWorkspaceState::registerUiCallbacks(UiBuildContext& ui) -> Tina::Core
         return status;
     }
     const std::array dirtyCloseBindings{
-        std::pair{dirtyCloseSaveButton_, EditorCommand::DirtyCloseSave},
-        std::pair{dirtyCloseDiscardButton_, EditorCommand::DirtyCloseDiscard},
-        std::pair{dirtyCloseCancelButton_, EditorCommand::DirtyCloseCancel},
+        std::pair{dirtyCloseDialog_.actions[DirtyCloseSaveActionIndex],
+                  EditorCommand::DirtyCloseSave},
+        std::pair{dirtyCloseDialog_.actions[DirtyCloseDiscardActionIndex],
+                  EditorCommand::DirtyCloseDiscard},
+        std::pair{dirtyCloseDialog_.actions[DirtyCloseCancelActionIndex],
+                  EditorCommand::DirtyCloseCancel},
     };
     for (const auto& [button, command] : dirtyCloseBindings) {
         if (auto status = ui.tree.setButtonAction(

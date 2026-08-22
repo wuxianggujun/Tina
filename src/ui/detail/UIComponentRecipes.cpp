@@ -449,6 +449,7 @@ buildDialogImpl(Authoring& authoring, UINodeId parent,
 
     UILayoutStyle modalLayout = config.layout;
     modalLayout.placement = UILayoutPlacement::Overlay;
+    modalLayout.visibility = UIVisibility::Visible;
     modalLayout.overlay.horizontal = UIAxisAlignment::Stretch;
     modalLayout.overlay.vertical = UIAxisAlignment::Stretch;
     UIElementDescriptor modalDescriptor = makeModalElement(modalLayout);
@@ -1136,7 +1137,12 @@ UIContext::buildFormField(UINodeId parent, const UIFormFieldConfig& config)
 Core::Result<UIDialogParts>
 UIContext::buildDialog(UINodeId parent, const UIDialogConfig& config)
 {
-    return buildDialogImpl(*this, parent, config, productTheme());
+    auto parts = buildDialogImpl(*this, parent, config, productTheme());
+    if (parts)
+    {
+        registerDialogFromBuild(*parts);
+    }
+    return parts;
 }
 
 Core::Result<UISnackbarHostParts>
@@ -1176,7 +1182,12 @@ UITreeUpdater::buildDialog(UINodeId parent, const UIDialogConfig& config)
         return Core::failure(UIErrorCode::WrongContext,
                              "UI tree updater is not bound to a context");
     }
-    return buildDialogImpl(*this, parent, config, m_context->productTheme());
+    auto parts = buildDialogImpl(*this, parent, config, m_context->productTheme());
+    if (parts)
+    {
+        m_context->registerDialogFromBuild(*parts);
+    }
+    return parts;
 }
 
 Core::Result<UISnackbarHostParts>

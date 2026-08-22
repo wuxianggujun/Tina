@@ -79,8 +79,9 @@ struct UIDialogConfig final {
 };
 
 struct UIDialogParts final {
-    // Scrim, ModalBarrier and focus scope. Targetable so a pointer press that
-    // lands outside the surface is reported against this node.
+    // Scrim, ModalBarrier and focus scope. Ignore hit policy keeps the scrim out
+    // of the target path; the committed Modal barrier still consumes backdrop
+    // input before it can reach lower content.
     UINodeId modal{};
     UINodeId surface{};
     UINodeId header{};

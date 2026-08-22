@@ -21,6 +21,7 @@
 #include "detail/UIContextLifetimeControl.hpp"
 #include "detail/UIDataGridLayout.hpp"
 #include "detail/UIDataGridStateStorage.hpp"
+#include "detail/UIDialogStateStorage.hpp"
 #include "detail/UIElementContractResolver.hpp"
 #include "detail/UIFlexLayout.hpp"
 #include "detail/UIFocusNavigation.hpp"
@@ -73,6 +74,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cmath>
 #include <cstring>
 #include <exception>
@@ -807,6 +809,7 @@ struct UIContext::Impl final {
     std::pmr::vector<PopupState> popupStatesByNodeIndex;
     std::pmr::vector<PopupLayoutScratch> popupLayoutScratchByNodeIndex;
     Detail::UITooltipStateStorage tooltipStorage;
+    Detail::UIDialogStateStorage dialogStorage;
     UISplitViewStateStorage splitViewStorage;
     UITabViewStateStorage tabViewStorage;
     UIMenuStateStorage menuStorage;
@@ -1033,6 +1036,7 @@ struct UIContext::Impl final {
           dropdownStatesByNodeIndex(&resource), popupStatesByNodeIndex(&resource),
           popupLayoutScratchByNodeIndex(&resource),
           tooltipStorage(capacities.nodeCapacity, resource),
+          dialogStorage(capacities.nodeCapacity, resource),
           splitViewStorage(capacities.nodeCapacity, resource),
           tabViewStorage(capacities.nodeCapacity, resource),
           menuStorage(capacities.nodeCapacity, resource),
@@ -1443,6 +1447,12 @@ struct UIContext::Impl final {
             }
             if (record->kind == BuiltinElementKind::Tooltip && index < tooltipStorage.capacity() &&
                 !tooltipStorage.stateByIndex(index).open)
+            {
+                ownVisibility = UIVisibility::Collapsed;
+            }
+            if (record->kind == BuiltinElementKind::Modal &&
+                dialogStorage.containsDialog(idForIndex(index)) &&
+                !dialogStorage.isOpen(idForIndex(index)))
             {
                 ownVisibility = UIVisibility::Collapsed;
             }
@@ -6827,6 +6837,7 @@ struct UIContext::Impl final {
             popupLayoutScratchByNodeIndex[index] = {};
         }
         tooltipStorage.resetNode(index);
+        dialogStorage.resetNode(index);
         splitViewStorage.resetNode(index);
         tabViewStorage.resetNode(index);
         menuStorage.resetNode(index);
@@ -11367,6 +11378,7 @@ struct UIContext::Impl final {
             {
                 markTooltipPresentationDirty();
             }
+            static_cast<void>(dialogStorage.releaseNode(node));
             static_cast<void>(splitViewStorage.releaseNode(node));
             static_cast<void>(tabViewStorage.releaseNode(node));
             if (menuStorage.releaseNode(node))
@@ -11618,6 +11630,12 @@ struct UIContext::Impl final {
         }
 
         const NodeRecord* nodeRecord = *nodeResult;
+        if (dialogStorage.containsDialog(node) &&
+            normalizedStyle->visibility != UIVisibility::Visible)
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "Registered UI Dialog visibility is controlled by openDialog and dismissDialog");
+        }
         if ((nodeRecord->kind == BuiltinElementKind::Tooltip ||
              nodeRecord->kind == BuiltinElementKind::Menu) &&
             normalizedStyle->placement != UILayoutPlacement::Overlay)
@@ -16552,6 +16570,206 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::InvalidControlValue, "UI Popup API requires a Popup node");
         }
         return *nodeResult;
+    }
+
+    void registerDialogFromBuild(const UIDialogParts& parts) noexcept
+    {
+        const NodeRecord* record =
+            contains(parts.modal) ? nodes.tryGet(parts.modal.storageId()) : nullptr;
+        assert(record != nullptr && record->kind == BuiltinElementKind::Modal);
+        dialogStorage.initializeDialog(parts);
+    }
+
+    [[nodiscard]] Core::Result<NodeRecord*> resolveDialog(UINodeId dialog)
+    {
+        auto nodeResult = resolveNode(dialog);
+        if (!nodeResult)
+        {
+            return Core::failure(nodeResult.error());
+        }
+        if ((*nodeResult)->kind != BuiltinElementKind::Modal ||
+            !dialogStorage.containsDialog(dialog))
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "UI Dialog API requires a Dialog built by buildDialog");
+        }
+        return *nodeResult;
+    }
+
+    void closeActiveMenuForDialogNoFail(UINodeId menu) noexcept
+    {
+        if (!menu.hasValue())
+        {
+            return;
+        }
+        const UINodeId anchor = menuPlacementAnchor(menu);
+        const bool focusWasInMenu =
+            isNodeWithinActiveMenuBranch(menu, defaultActionFocusButton);
+        UINodeId nextFocus = focusRestoreByNodeIndex[menu.index()];
+        static_cast<void>(menuStorage.close(menu));
+        menuCommandPressLatch.clear();
+        transientOverlayDismissPointerBarrierActive = false;
+        if (!focusWasInMenu)
+        {
+            return;
+        }
+        if (!nextFocus.hasValue() || !contains(nextFocus) ||
+            !isNodeEnabled(nextFocus))
+        {
+            nextFocus = isNodeEnabled(anchor) ? anchor : UINodeId{};
+        }
+        defaultActionPressState.clearAll();
+        clearArmedPrimaryButton();
+        clearArmedSlider();
+        clearArmedTextEdit();
+        capturedPointerNode = {};
+        resetImeCompositionState();
+        textInputFocus = {};
+        defaultActionFocusButton = nextFocus;
+    }
+
+    [[nodiscard]] Core::Status setDialogOpenState(UINodeId dialog, bool open)
+    {
+        auto dialogResult = resolveDialog(dialog);
+        if (!dialogResult)
+        {
+            return Core::failure(dialogResult.error());
+        }
+        const bool wasOpen = dialogStorage.isOpen(dialog);
+        if (wasOpen == open)
+        {
+            return Core::success();
+        }
+        const UINodeId activeDialog = dialogStorage.activeDialog();
+        if (open && activeDialog.hasValue() && activeDialog != dialog)
+        {
+            return fail(UIErrorCode::InvalidControlValue,
+                        "Only one registered UI Dialog may be open per Window");
+        }
+
+        const UINodeId menuToClose = menuStorage.rootMenu();
+        const Core::Status dirty =
+            menuToClose.hasValue()
+                ? markMenuMutationLayoutDirty({dialog}, {menuToClose})
+                : markStylePropertyDirty(dialog,
+                                         UIStylePropertyKind::LayoutStyle);
+        if (!dirty)
+        {
+            return dirty;
+        }
+
+        if (open)
+        {
+            dialogStorage.openValidated(dialog);
+        } else
+        {
+            static_cast<void>(dialogStorage.dismiss(dialog));
+        }
+        closeActiveMenuForDialogNoFail(menuToClose);
+        hardDismissAllTooltipsNoFail(true);
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status openDialog(UINodeId dialog)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        return setDialogOpenState(dialog, true);
+    }
+
+    [[nodiscard]] Core::Status dismissDialog(UINodeId dialog)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        return setDialogOpenState(dialog, false);
+    }
+
+    [[nodiscard]] Core::Result<bool> isDialogOpen(UINodeId dialog) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        auto dialogResult = const_cast<Impl*>(this)->resolveDialog(dialog);
+        if (!dialogResult)
+        {
+            return Core::failure(dialogResult.error());
+        }
+        return dialogStorage.isOpen(dialog);
+    }
+
+    [[nodiscard]] Core::Status validateDialogUpdaterRoot(
+        UINodeId updaterRoot, UINodeId dialog) const
+    {
+        if (!updaterRoot.hasValue() || !contains(updaterRoot))
+        {
+            return fail(UIErrorCode::RootRequired,
+                        "UI tree updater requires a live root owner");
+        }
+        auto dialogResult = const_cast<Impl*>(this)->resolveDialog(dialog);
+        if (!dialogResult)
+        {
+            return Core::failure(dialogResult.error());
+        }
+        if (!isNodeWithinRoot(updaterRoot, dialog))
+        {
+            return fail(UIErrorCode::InvalidNode,
+                        "UI Dialog is not owned by the updater root");
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status openDialogFromUpdater(
+        UINodeId updaterRoot, UINodeId dialog)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateDialogUpdaterRoot(updaterRoot, dialog);
+            !valid)
+        {
+            return valid;
+        }
+        return setDialogOpenState(dialog, true);
+    }
+
+    [[nodiscard]] Core::Status dismissDialogFromUpdater(
+        UINodeId updaterRoot, UINodeId dialog)
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return ownerThread;
+        }
+        drainDeferredRootDestroys();
+        if (Core::Status valid = validateDialogUpdaterRoot(updaterRoot, dialog);
+            !valid)
+        {
+            return valid;
+        }
+        return setDialogOpenState(dialog, false);
+    }
+
+    [[nodiscard]] Core::Result<bool> isDialogOpenFromUpdater(
+        UINodeId updaterRoot, UINodeId dialog) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (Core::Status valid = validateDialogUpdaterRoot(updaterRoot, dialog);
+            !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        return dialogStorage.isOpen(dialog);
     }
 
     [[nodiscard]] Core::Result<NodeRecord*> resolveTooltip(UINodeId tooltip)
@@ -28441,6 +28659,36 @@ Core::Result<UIPopupMetrics> UITreeUpdater::popupMetrics(UINodeId popup) const
     return m_context->popupMetricsFromUpdater(m_root, popup);
 }
 
+Core::Status UITreeUpdater::openDialog(UINodeId dialog)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext,
+                    "UI tree updater is not bound to a context");
+    }
+    return m_context->openDialogFromUpdater(m_root, dialog);
+}
+
+Core::Status UITreeUpdater::dismissDialog(UINodeId dialog)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext,
+                    "UI tree updater is not bound to a context");
+    }
+    return m_context->dismissDialogFromUpdater(m_root, dialog);
+}
+
+Core::Result<bool> UITreeUpdater::isDialogOpen(UINodeId dialog) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext,
+                    "UI tree updater is not bound to a context");
+    }
+    return m_context->isDialogOpenFromUpdater(m_root, dialog);
+}
+
 Core::Status UITreeUpdater::setTooltipAnchor(UINodeId tooltip, UINodeId anchor)
 {
     if (m_context == nullptr)
@@ -30066,6 +30314,21 @@ Core::Status UIContext::setTooltipAnchor(UINodeId tooltip, UINodeId anchor)
     return m_impl->setTooltipAnchor(tooltip, anchor);
 }
 
+Core::Status UIContext::openDialog(UINodeId dialog)
+{
+    return m_impl->openDialog(dialog);
+}
+
+Core::Status UIContext::dismissDialog(UINodeId dialog)
+{
+    return m_impl->dismissDialog(dialog);
+}
+
+Core::Result<bool> UIContext::isDialogOpen(UINodeId dialog) const
+{
+    return m_impl->isDialogOpen(dialog);
+}
+
 Core::Status UIContext::clearTooltipAnchor(UINodeId tooltip)
 {
     return m_impl->clearTooltipAnchor(tooltip);
@@ -30787,6 +31050,29 @@ Core::Result<bool> UIContext::isPopupOpenFromUpdater(UINodeId updaterRoot, UINod
 Core::Result<UIPopupMetrics> UIContext::popupMetricsFromUpdater(UINodeId updaterRoot, UINodeId popup) const
 {
     return m_impl->popupMetricsFromUpdater(updaterRoot, popup);
+}
+
+void UIContext::registerDialogFromBuild(const UIDialogParts& parts) noexcept
+{
+    m_impl->registerDialogFromBuild(parts);
+}
+
+Core::Status UIContext::openDialogFromUpdater(UINodeId updaterRoot,
+                                             UINodeId dialog)
+{
+    return m_impl->openDialogFromUpdater(updaterRoot, dialog);
+}
+
+Core::Status UIContext::dismissDialogFromUpdater(UINodeId updaterRoot,
+                                                UINodeId dialog)
+{
+    return m_impl->dismissDialogFromUpdater(updaterRoot, dialog);
+}
+
+Core::Result<bool> UIContext::isDialogOpenFromUpdater(
+    UINodeId updaterRoot, UINodeId dialog) const
+{
+    return m_impl->isDialogOpenFromUpdater(updaterRoot, dialog);
 }
 
 Core::Status UIContext::setTooltipAnchorFromUpdater(UINodeId updaterRoot,

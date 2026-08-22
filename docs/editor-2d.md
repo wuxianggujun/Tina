@@ -134,8 +134,9 @@ Scene selection 折叠 Asset 专属 metadata/dependency 区域，Asset Inspector
 可见 Inspector 组件的启用状态使用 Compact `UISwitch`，继续复用既有 Toggle storage、`setChecked()`、
 `setCheckboxAction()` 以及 Focus/Keyboard/Gamepad/UIA action；Status Bar 的选择摘要使用 Accent `UIBadge`，仍由
 同一个 `statusSelection_` 节点通过 `setText()` 动态刷新；document/runtime 两段按 0.8/1.2 分配剩余宽度并分别
-ellipsis，不引入 Editor 私有控件状态。dirty-close 保留现有
-Modal barrier 和 Save/Discard/Cancel 状态流，其路径编辑区域改由第一方 `UIFormField` 原子构建；Editor 只持有
+ellipsis，不引入 Editor 私有控件状态。Create Node picker、dirty-close、Scene Delete 和 About Tina 均持有
+`UIDialogParts`，统一通过 `openDialog()/dismissDialog()` 驱动 retained intent，并在后续 UI commit 发布或恢复
+Modal focus；不再保存私有 Modal layout/visibility 状态。dirty-close 保留 Save/Discard/Cancel 状态流，其路径编辑区域改由第一方 `UIFormField` 原子构建；Editor 只持有
 返回的 TextEdit node，并继续通过既有 text/enabled/focus API 驱动唯一 TextInput 状态，不复制表单行为。
 Scene Delete `UIDialog` 使用显式 `560` logical px surface、两行正文与 `Cancel | Delete` action 顺序；scrim 保留
 背景上下文但不再压成近黑，默认焦点仍落在 destructive action，避免排版调整改变键盘确认语义。
@@ -179,7 +180,7 @@ Hierarchy 每次在 World2D/World3D document 变化后都从 canonical entity/no
 及其 parent stable ID 重建动态树；document root 使用非持久化的 UI key，实际场景项直接以 stable ID 作为 key。Header 下只常驻
 `Add`、`Duplicate`、`Delete` 与 `Focus`；任意 `Reparent` 和 `To Root` 统一由 Inspector 的 Parent 字段完成。这些操作均同时接入 2D/3D，
 状态操作只发布一个 canonical revision，刷新后按
-stable ID 恢复选择。`Add` 先打开第一方 Create Node picker modal，列出当前 workspace 的 node template：World2D 为
+stable ID 恢复选择。`Add` 先打开第一方 Create Node picker `UIDialog`，列出当前 workspace 的 node template：World2D 为
 `Entity2D`、`Sprite2D`、`AnimatedSprite2D`、`Camera2D`、`PointLight2D`、`ShadowOccluder2D`，World3D 为 `Node3D`、`Mesh3D`；
 选中 template 后 Confirm 以一次 canonical revision 直接创建带完整组件的节点，因此选择节点类型只消耗一次 Undo，
 不再需要先建空节点再到 Inspector 转换。picker 固定 active document key、workspace、parent stable ID 与 document
@@ -210,7 +211,7 @@ Command Bar 或 Edit menu 的 active-document Undo/Redo。启动时复制当前 
 Editor 快捷键使用 frame action mapping：`Ctrl+S` Save、`Ctrl+Shift+S` Save As、`Ctrl+Z` Undo、`Ctrl+Y` Redo、
 `Ctrl+D` Duplicate、`Delete` Delete、`Ctrl+1` / `Ctrl+2` 切换 2D/3D、`Ctrl+0` Frame All、`Ctrl+F` Focus Selection、
 `F6` Play/Resume、`F7` Step、`F8` Stop。`Escape` 优先关闭 Create Node picker，其次关闭 scene Delete confirmation，
-再关闭 dirty modal，之后才取消 gizmo、marquee、navigation 或停止 Play。
+再关闭 dirty-close Dialog，之后才取消 gizmo、marquee、navigation 或停止 Play。
 不绑定裸 `Q/W/E/R`，避免 Inspector TextEdit 输入期间误触 viewport tool。
 
 2D workspace 通过 Viewport Header 的 `TileMap` context 激活内建 TileMap session 后，开放 viewport `Tile Paint` / `Tile Erase`
@@ -593,7 +594,7 @@ Texture/Mesh upload=`1/1`、Sprite/Mesh/Material binding=`1/1/1`、unresolved=`0
 
 TileMap root+chunk authoring/cook/save、SpriteAnimationClip timeline authoring/cook/save、Catalog-resolved viewport、
 Project Browser、分类过滤、资源 Inspector、Catalog current-schema open/refresh、固定容量 document tabs/session、
-Save/Save As、Windows native dialog、Linux `zenity`/`kdialog` dialog 与 dirty-close Modal 已完成。项目 workspace 与空目录创建的基础 API 已完成，
+Save/Save As、Windows native dialog、Linux `zenity`/`kdialog` dialog 与四类 retained `UIDialog` 已完成。项目 workspace 与空目录创建的基础 API 已完成，
 Windows Project `New` 也能创建 Source/Catalog、manifest-last 发布空 current-schema package 并 reopen/typed-validate；
 Project `Open` 与 New/Open 的下一安全帧 live project/Catalog switch 也已完成。Editor source import 的完整 intended unit
 probe、后台 fresh-stage cook、主线程 Catalog reload/busy retry、dirty-document commit gate、stage sibling state + 单一 active pointer
