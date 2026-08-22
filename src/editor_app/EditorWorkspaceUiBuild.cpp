@@ -1968,7 +1968,7 @@ auto EditorWorkspaceState::buildInspectorUi(
              .valueCount = 1U},
             {.caption = "Order", .accessibleNames = {"Sprite order", ""},
              .valueCount = 1U},
-        };
+        }};
         if (auto status = createNodePropertySection(
                 nodePropertySections_[0], "Rendering", "Visible", spriteFields,
                 true, "Apply Rendering");
