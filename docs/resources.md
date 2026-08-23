@@ -100,20 +100,26 @@ Editor source import 已在同一 Project/Catalog owner 上闭环。launch parse
 `--project-root`，可重复混合的 `--import-recipe` / `--import-gltf` / `--import-texture` / `--import-audio` 按 caller order 保留完整 intended unit 集，
 `--import-on-start` 只负责排队安全帧启动；人工 `Import Files...` 支持 `.recipe`、`.gltf`、`.glb`、`.png`、`.jpg`、`.jpeg`、`.wav` 并复用该集合。
 无项目时，人工导入先创建 Editor 独占的系统临时 Project 并直接 cook，不要求用户提前选择永久目录；用户点击
-`Save` / `Save As` 后才选择空目录。保存路径会初始化新的 Project、把临时 `Source` 资源事务迁移到新根并重新 cook，
+`Save` / `Save As` 后才选择空目录。保存路径会初始化新的 Project，再由同一后台 batch 把临时 `Source` 资源事务迁移到新根并重新 cook，
 不会复制包含绝对路径的 `.tina/cache` active pointer；成功切换后清理旧临时 Project，取消、迁移失败或 cook 失败均保留
 至少一份 Source 数据，未保存退出时只删除 Editor 自己创建且仍持有的临时 Project。
 项目 `Source/` 内文件直接进入 intended set；外部 PNG/JPEG/WAV 会在整批预检后复制到
 `Source/Imported/Images/` 或 `Source/Imported/Audio/`。ingress 不覆盖既有文件：同名同内容复用，同名异内容追加
-`_2`、`_3` 后缀，批内重复物理文件只复制一次；合并或 service 启动失败会回滚本批新文件与空目录。外部 recipe/glTF
+`_2`、`_3` 后缀，批内重复物理文件只复制一次；合并、cook、Catalog commit、取消或 shutdown 失败都会回滚本批新文件与空目录。外部 recipe/glTF
 因可能依赖相对文件而拒绝单文件复制，必须先把完整依赖集置于 `Source/`。
 普通媒体一步导入：Texture importer 把一张图片 cook 成 path-derived Texture2D + 全幅默认 Sprite（Sprite 以 required 依赖引用纹理），
 Audio importer 把 PCM16 WAV cook 成 AudioClip；输出 AssetId 由 source-root 相对路径确定性派生，rename 视为 Removed+Added。后台
-`EditorSourceImportService` 只调用共享 `executeSourceImportPipeline()`，不触碰 UI/Render/AssetSystem；dirty/added unit
-生成此前不存在且 fully validated 的 fresh stage，clean unit 复用 baseline，removed unit 不进入候选。主线程对 Ready stage
-先执行 dirty Catalog document gate，再携带 Sprite/Mesh participant 调用 `reloadCatalog()`；`CatalogReloadBusy` 保留同一 Ready
-stage 在后续安全帧重试。fresh stage 在进入 Ready 前已经拥有 sibling `import-state.tmeta`；Catalog/Browser/documents/preview
-全部成功后只原子发布项目 `.tina/cache/source-import/active-catalog.path` 这一处 commit marker。Project reopen 通过 pointer
+`EditorSourceImportService` 接收 dialog-owned path batch，在同一 `jthread` 中完成物理路径预检、外部文件复制与分块内容校验、
+intended-set merge，再调用共享 `executeSourceImportPipeline()`；UI thread 不再执行文件 IO 或 importer，worker 也不触碰
+UI/Render/AssetSystem。服务公开 `Preparing` / `Copying` / `Cooking` / `ReadyToCommit` / `Failed` 批级 phase；单批最多
+4096 unit，协作取消在文件循环、每个 64 KiB 比较块以及 Asset pipeline 阶段之间检查，不为每个文件创建无界线程。dirty/added unit
+生成此前不存在且 fully validated 的 fresh stage，clean unit 复用 baseline，removed unit 不进入候选；pipeline 同时返回
+与该 stage 精确对应的 owning、完整验证 `CatalogSnapshot`。主线程对 Ready stage 先执行 dirty Catalog document gate，
+再携带 Sprite/Mesh participant 调用 `reloadPreparedCatalog()`，不重新打开或验证 package；`CatalogReloadBusy` 及其他
+commit 前失败保留同一 snapshot/Ready stage 在后续安全帧重试。fresh stage 在进入 Ready 前已经拥有 sibling
+`import-state.tmeta`；Catalog/Browser/documents/preview
+全部成功后只原子发布项目 `.tina/cache/source-import/active-catalog.path` 这一处 commit marker，再原子交换 Editor intended set
+并确认 ingress；Ready 在此之前持续持有 rollback transaction。Project reopen 通过 pointer
 定位 immutable stage，并同时验证 stage state、Catalog revision/output binding 与 physical containment 后恢复完整 intended unit 集。
 Windows 使用原生系统 dialog；Linux 私有 adapter 通过 `zenity`、缺失时回退 `kdialog`，覆盖 open/save/folder。`2D-EDITOR`
 转 Done 前仍需补 Linux 定向编译和真实 helper 产品门禁。
@@ -144,6 +150,10 @@ participant 失败会逆序 abort 已 prepare participant、退休临时 GPU own
 commit 后进入 fixed-capacity pending retirement，backend 暂时拒绝时由 `drainPendingRetirements()` 显式重试。fresh staging
 package 的完整生成/验证、manifest revision caller-driven polling、tool-side source provenance capture、验证后 state commit、
 多 unit clean/dirty fresh-stage executor、all-clean 零改写复用与 manifest OS watcher hint 均已具备。
+
+已经拥有 fully validated immutable snapshot 的 host 可改用 `reloadPreparedCatalog()` 跳过磁盘 package 的再次打开与
+验证；它只在原子 publish 点消费 snapshot，所有 commit 前失败均保留 caller owner。`reloadCatalog(root)` 仍是普通
+path-based 同步消费者入口，并始终自行打开和完整验证候选 package。
 
 `captureCatalogPackageRevision()` 对完整 manifest commit marker 计算 `ContentHash`；
 `pollCatalogPackageChange()` 将当前 candidate 与调用方已接受的 baseline 比较。poll 不自动接受 candidate，
@@ -197,8 +207,9 @@ revision baseline 接受与 reload 调度也仍由 host 显式编排。
 
 `executeSourceImportPipeline(request, stopToken)` 把上述 probe/cook/compose/stage 流程收敛为 Asset 公共工具边界：输入必须是
 完整 intended unit span 和显式 target platform，输出区分 `CleanReuse` / `FullRecook` / `IncrementalRecook`，并报告 unit/object 统计、stage/state
-ownership。它同步执行且不替换 live Catalog、不接触 UI/AssetSystem；取消、验证、容量或 IO 失败不发布部分结果。
-EditorApp worker 只适配该 API，owner thread 独立决定何时 reload 和提交 tool-cache baseline。
+ownership，同时拥有精确的 fully validated `CatalogSnapshot`。它同步执行且不替换 live Catalog、不接触 UI/AssetSystem；
+取消、验证、容量或 IO 失败不发布部分结果。EditorApp worker 只适配该 API，owner thread 通过
+`reloadPreparedCatalog()` 移交同一 snapshot，并独立决定何时提交 tool-cache baseline。
 
 ## 身份、视图与所有权
 

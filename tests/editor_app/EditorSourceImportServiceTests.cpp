@@ -2,28 +2,21 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
+#include <string>
 #include <thread>
 
 namespace Detail = Tina::EditorApp::Detail;
 
 namespace {
 
-Detail::EditorSourceImportRequest makeRequest()
+[[nodiscard]] std::string pathToUtf8(const std::filesystem::path& path)
 {
-    return {
-        .sourceRootUtf8 = "C:/Project/Source",
-        .baselineCatalogRootUtf8 = "C:/Project/Catalog",
-        .baselineStatePathUtf8 = "C:/Project/.tina/cache/source-import/import-state.tmeta",
-        .freshStageRootUtf8 = "C:/Project/.tina/cache/source-import/stages/1/catalog",
-        .freshStageStatePathUtf8 =
-            "C:/Project/.tina/cache/source-import/stages/1/import-state.tmeta",
-        .targetPlatform = Tina::AssetFormat::TargetPlatform::WindowsX64,
-        .units = {{
-            .kind = Detail::EditorSourceImportUnitKind::CatalogRecipe,
-            .sourcePathUtf8 = "C:/Project/Source/game.recipe",
-        }},
-    };
+    const std::u8string encoded = path.u8string();
+    return {reinterpret_cast<const char*>(encoded.data()), encoded.size()};
 }
 
 void pollUntilSettled(Detail::EditorSourceImportService& service)
@@ -38,9 +31,52 @@ void pollUntilSettled(Detail::EditorSourceImportService& service)
     FAIL() << "source import worker did not settle";
 }
 
+class EditorSourceImportServiceTests : public testing::Test {
+protected:
+    void SetUp() override
+    {
+        static std::atomic_uint64_t nextId{0};
+        root_ = std::filesystem::temp_directory_path() /
+                ("tina-editor-source-service-" +
+                 std::to_string(nextId.fetch_add(1, std::memory_order_relaxed)));
+        sourceRoot_ = root_ / "Source";
+        ASSERT_TRUE(std::filesystem::create_directories(sourceRoot_));
+        recipePath_ = sourceRoot_ / "game.recipe";
+        std::ofstream recipe{recipePath_, std::ios::binary | std::ios::trunc};
+        recipe << "fixture";
+        ASSERT_TRUE(recipe.good());
+    }
+
+    void TearDown() override
+    {
+        std::error_code error;
+        std::filesystem::remove_all(root_, error);
+    }
+
+    [[nodiscard]] Detail::EditorSourceImportRequest makeRequest() const
+    {
+        return {
+            .sourceRootUtf8 = pathToUtf8(sourceRoot_),
+            .baselineCatalogRootUtf8 = pathToUtf8(root_ / "Catalog"),
+            .baselineStatePathUtf8 = pathToUtf8(root_ / "baseline.tmeta"),
+            .freshStageRootUtf8 = pathToUtf8(root_ / "stage" / "Catalog"),
+            .freshStageStatePathUtf8 = pathToUtf8(root_ / "stage" / "import-state.tmeta"),
+            .targetPlatform = Tina::AssetFormat::TargetPlatform::WindowsX64,
+            .units = {{
+                .kind = Detail::EditorSourceImportUnitKind::CatalogRecipe,
+                .sourcePathUtf8 = pathToUtf8(recipePath_),
+            }},
+        };
+    }
+
+    std::filesystem::path root_{};
+    std::filesystem::path sourceRoot_{};
+    std::filesystem::path recipePath_{};
+};
+
 } // namespace
 
-TEST(EditorSourceImportServiceTests, ReadyStagePersistsUntilAcknowledged)
+TEST_F(EditorSourceImportServiceTests, ReadyStagePersistsUntilCommitted)
 {
     Detail::EditorSourceImportService service{
         [](const Detail::EditorSourceImportRequest& request, std::stop_token) {
@@ -64,11 +100,11 @@ TEST(EditorSourceImportServiceTests, ReadyStagePersistsUntilAcknowledged)
     EXPECT_EQ(service.readyStage()->statistics.objectsCooked, 2U);
     ASSERT_TRUE(service.poll());
     EXPECT_NE(service.readyStage(), nullptr);
-    ASSERT_TRUE(service.acknowledgeReady());
+    ASSERT_TRUE(service.commitReady());
     EXPECT_EQ(service.state(), Detail::EditorSourceImportServiceState::Idle);
 }
 
-TEST(EditorSourceImportServiceTests, WorkerFailureIsOwnedUntilDismissed)
+TEST_F(EditorSourceImportServiceTests, WorkerFailureIsOwnedUntilDismissed)
 {
     Detail::EditorSourceImportService service{
         [](const Detail::EditorSourceImportRequest&, std::stop_token)

@@ -20,8 +20,23 @@
 namespace Tina::Render {
 
 struct RenderDeviceCreateParams final {
+    static constexpr u32 MinimumDrawCallCapacity = 1024;
+    static constexpr u32 MaximumDrawCallCapacity = 65'535;
+    static constexpr u32 DefaultDrawCallCapacity = MaximumDrawCallCapacity;
+
+    [[nodiscard]] static constexpr bool isSupportedDrawCallCapacity(
+        u32 capacity) noexcept
+    {
+        return capacity == MaximumDrawCallCapacity ||
+               (capacity >= MinimumDrawCallCapacity &&
+                capacity % MinimumDrawCallCapacity == 0U);
+    }
+
     std::optional<RenderSurfaceState> initialPrimaryWindowSurface;
     ShadowMapExtentConfig shadowMapExtents{};
+    // Maximum draw/compute submissions retained per frame. Capacities use
+    // bgfx's 1024-entry blocks, except for the exact 65535 native maximum.
+    u32 drawCallCapacity = DefaultDrawCallCapacity;
     // Backbuffer multisampling: 0 disables MSAA; 2/4/8/16 request that sample
     // count. Anything else fails device creation. Pixel-evidence gates keep 0.
     u8 msaaSamples = 0;

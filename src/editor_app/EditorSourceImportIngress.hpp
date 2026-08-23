@@ -5,11 +5,24 @@
 #include <tina/core/error/Result.hpp>
 
 #include <span>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace Tina::EditorApp::Detail {
+
+struct EditorSourceImportIngressProgress final {
+    void* context = nullptr;
+    void (*copyingStarted)(void* context) noexcept = nullptr;
+
+    void notifyCopyingStarted() const noexcept
+    {
+        if (copyingStarted != nullptr) {
+            copyingStarted(context);
+        }
+    }
+};
 
 class EditorSourceImportIngress final {
 public:
@@ -42,15 +55,20 @@ private:
     prepareEditorSourceImportIngress(
         std::string_view sourceRootUtf8,
         std::span<const std::string> selectedPathsUtf8,
-        Core::u32 maxSelectedPaths);
+        Core::u32 maxSelectedPaths,
+        std::stop_token stopToken,
+        EditorSourceImportIngressProgress progress);
 };
 
-// Resolves files already below Source directly. External PNG/JPEG/WAV files are copied into
-// Source/Imported using a rollback-on-failure transaction before their project paths are returned.
+// Worker-only ingress transaction. Resolves files already below Source directly and copies
+// external PNG/JPEG/WAV files into Source/Imported. Cancellation and progress are explicit so the
+// UI cannot accidentally invoke the former synchronous convenience path.
 [[nodiscard]] Core::Result<EditorSourceImportIngress>
 prepareEditorSourceImportIngress(
     std::string_view sourceRootUtf8,
     std::span<const std::string> selectedPathsUtf8,
-    Core::u32 maxSelectedPaths = EditorSourceImportUnitCapacity);
+    Core::u32 maxSelectedPaths,
+    std::stop_token stopToken,
+    EditorSourceImportIngressProgress progress);
 
 } // namespace Tina::EditorApp::Detail

@@ -21,6 +21,8 @@ enum class EditorPlayState : Core::u8 {
 };
 
 struct EditorPlaySessionConfig final {
+    // Maximum accepted canonical snapshot size. Storage is acquired by start()
+    // for the actual payload and released by stop(); Create() does not reserve it.
     Core::usize canonicalByteCapacity = 16U * 1024U * 1024U;
     double fixedStepSeconds = 1.0 / 60.0;
     double maximumFrameDeltaSeconds = 0.25;
@@ -38,9 +40,10 @@ struct EditorPlaySessionSnapshot final {
     Core::u64 revision = 1;
 };
 
-// Owns an isolated canonical document snapshot and a bounded fixed-step clock.
-// The EditorApp remains responsible for instantiating the corresponding Scene
-// world; authoring documents are never mutated by this session.
+// Owns an isolated canonical document snapshot while active and a bounded
+// fixed-step clock. The EditorApp remains responsible for instantiating the
+// corresponding Scene world; authoring documents are never mutated by this
+// session.
 class EditorPlaySession final {
   public:
     EditorPlaySession(const EditorPlaySession&) = delete;
@@ -78,8 +81,7 @@ class EditorPlaySession final {
     [[nodiscard]] Core::Status stop() noexcept;
 
   private:
-    EditorPlaySession(EditorPlaySessionConfig config,
-                      std::vector<std::byte> canonicalBytes) noexcept;
+    explicit EditorPlaySession(EditorPlaySessionConfig config) noexcept;
     void advanceRevision() noexcept;
 
     EditorPlaySessionConfig m_config{};

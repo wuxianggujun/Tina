@@ -19,6 +19,29 @@ auto EditorWorkspaceState::refreshProjectAssetUi(
         !pendingSourceImportPathsUtf8_.empty() ||
         sourceImportStartPending_ || importState == ImportState::Running ||
         importState == ImportState::Ready;
+    std::string_view importProgressSummary = "Preparing project import...";
+    if (importState == ImportState::Ready) {
+        importProgressSummary = "Import ready; committing Catalog...";
+    } else if (importState == ImportState::Running) {
+        using ImportPhase =
+            Tina::EditorApp::Detail::EditorSourceImportPhase;
+        switch (sourceImportService_.phase()) {
+        case ImportPhase::Preparing:
+            importProgressSummary = "Preparing resource batch...";
+            break;
+        case ImportPhase::Copying:
+            importProgressSummary = "Copying resources in background...";
+            break;
+        case ImportPhase::Cooking:
+            importProgressSummary = "Cooking and validating resources...";
+            break;
+        case ImportPhase::Idle:
+        case ImportPhase::ReadyToCommit:
+        case ImportPhase::Failed:
+            importProgressSummary = "Importing resources...";
+            break;
+        }
+    }
     if (const auto* asset = projectAssets_.selectedItem(); asset != nullptr) {
         selectedAssetSummary.assign(
             Tina::Editor::projectAssetKindLabel(asset->assetKind));
@@ -27,11 +50,7 @@ auto EditorWorkspaceState::refreshProjectAssetUi(
         selectedAssetSummary.append(idText.data(), idText.size());
     } else {
         selectedAssetSummary = importPending
-                                   ? (importState == ImportState::Ready
-                                          ? "Import ready; committing Catalog..."
-                                          : importState == ImportState::Running
-                                                ? "Importing resources..."
-                                                : "Preparing project import...")
+                                   ? importProgressSummary
                                    : sourceImportLastFailed_
                                          ? "Import failed; previous Catalog preserved"
                                          : assetResources_.projectCatalogConfigured
@@ -644,40 +663,18 @@ auto EditorWorkspaceState::saveTemporaryProjectFromDialog() -> Tina::Core::Statu
             temporarySourcePaths.push_back(unit.sourcePathUtf8);
         }
 
-        std::optional<Tina::EditorApp::Detail::EditorSourceImportIngress>
-            sourceIngress{};
-        std::vector<std::string> permanentSourcePaths;
-        if (!temporarySourcePaths.empty()) {
-            auto prepared =
-                Tina::EditorApp::Detail::prepareEditorSourceImportIngress(
-                    workspace->sourceRootUtf8(), temporarySourcePaths);
-            if (!prepared) {
-                return reportAuthoringFailure(
-                    "Project destination was initialized, but resource migration failed; "
-                    "temporary project preserved: ",
-                    prepared.error());
-            }
-            permanentSourcePaths.assign(
-                prepared->projectPathsUtf8().begin(),
-                prepared->projectPathsUtf8().end());
-            sourceIngress.emplace(std::move(*prepared));
-        }
-
         std::string targetRoot{workspace->projectRootUtf8()};
         std::string feedback =
-            permanentSourcePaths.empty()
+            temporarySourcePaths.empty()
                 ? "Temporary project save scheduled: "
-                : "Temporary project save scheduled; resources will recook at: ";
+                : "Temporary project save scheduled; resources will migrate in the background at: ";
         feedback += targetRoot;
 
-        pendingSourceImportPathsUtf8_ = std::move(permanentSourcePaths);
+        pendingSourceImportPathsUtf8_ = std::move(temporarySourcePaths);
         temporaryProjectSaveTargetRootUtf8_ = std::move(targetRoot);
         pendingProjectSwitch_ = std::move(*workspace);
         projectSwitchBlockedByDirty_ = false;
         authoringFeedback_.swap(feedback);
-        if (sourceIngress.has_value()) {
-            sourceIngress->commit();
-        }
     } catch (const std::bad_alloc&) {
         return Tina::Core::failure(
             Tina::Core::CoreErrorCode::OutOfMemory,

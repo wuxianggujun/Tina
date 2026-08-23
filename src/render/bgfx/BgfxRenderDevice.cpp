@@ -233,6 +233,15 @@ constexpr bgfx::ViewId kRetirementMarkerView = 16;
 constexpr u32 kDefaultResetFlags = BGFX_RESET_VSYNC;
 constexpr u32 kClearRgba = 0x102a43ff;
 constexpr usize kIndicesPerSolidQuad = 6;
+#if defined(BGFX_CONFIG_MAX_DRAW_CALLS)
+constexpr u32 kCompiledBgfxMaximumDrawCalls = BGFX_CONFIG_MAX_DRAW_CALLS;
+#else
+constexpr u32 kCompiledBgfxMaximumDrawCalls =
+    RenderDeviceCreateParams::MaximumDrawCallCapacity;
+#endif
+constexpr u64 kShadowSamplerFallbackFlags =
+    BGFX_TEXTURE_RT | BGFX_SAMPLER_COMPARE_LEQUAL |
+    BGFX_SAMPLER_U_CLAMP | BGFX_SAMPLER_V_CLAMP;
 // bgfx shader binary v11 reflects uniform array length as u8. The final joint
 // uses a separate mat4 uniform so the public 256-joint contract stays intact.
 constexpr u16 kOpaque3DSkinPaletteArrayJointCount = 255;
@@ -948,10 +957,11 @@ class BgfxRenderDevice final : public IRenderDevice {
   public:
     BgfxRenderDevice(Detail::RenderSurfaceStateTracker surfaceStateTracker, Integration::NativeWindowSurfaceLease lease,
                      RenderSurfaceState initialSurface, ShadowMapExtentConfig shadowMapExtents,
-                     u32 resetFlags) noexcept
+                     u32 drawCallCapacity, u32 resetFlags) noexcept
         : surfaceStateTracker_(std::move(surfaceStateTracker)), lease_(std::move(lease)),
           ownerThread_(std::this_thread::get_id()), committedSurfaceState_(initialSurface),
-          shadowMapExtents_(shadowMapExtents), resetFlags_(resetFlags)
+          shadowMapExtents_(shadowMapExtents), drawCallCapacity_(drawCallCapacity),
+          resetFlags_(resetFlags)
     {
     }
 
@@ -974,6 +984,13 @@ class BgfxRenderDevice final : public IRenderDevice {
         init.resolution.width = initialBackbuffer.width;
         init.resolution.height = initialBackbuffer.height;
         init.resolution.reset = resetFlags_;
+        // Tina submits from the RenderDevice owner thread only. Explicitly
+        // right-size bgfx's two frame-local render-item arrays and its per-
+        // encoder uniform buffers instead of accepting the 65K/8-encoder
+        // general-purpose defaults.
+        init.limits.maxEncoders = 1;
+        init.limits.numDrawCalls = drawCallCapacity_;
+        init.limits.numDrawCallPeakFrames = 0;
         // M11-D1: required for requestScreenShot / product pixel evidence.
         init.callback = &captureCallback_;
 
@@ -1240,16 +1257,6 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         ++statistics_.liveResources;
 
-        auto cascadedDirectionalShadowResources =
-            createCascadedDirectionalShadowResources(
-                shadowMapExtents_.directionalCascadeTileExtent);
-        if (!cascadedDirectionalShadowResources)
-        {
-            return Core::failure(std::move(cascadedDirectionalShadowResources.error()));
-        }
-        cascadedDirectionalShadowResources_ = *cascadedDirectionalShadowResources;
-        statistics_.liveResources += 2U;
-
         opaque3DSpotShadowMapSampler_ =
             bgfx::createUniform("s_spotShadowMap", bgfx::UniformType::Sampler);
         if (!bgfx::isValid(opaque3DSpotShadowMapSampler_))
@@ -1276,15 +1283,6 @@ class BgfxRenderDevice final : public IRenderDevice {
                                  "bgfx rejected the Opaque3D spot shadow params uniform");
         }
         ++statistics_.liveResources;
-
-        auto spotLightShadowResources =
-            createSpotLightShadowResources(shadowMapExtents_.spotLightMapExtent);
-        if (!spotLightShadowResources)
-        {
-            return Core::failure(std::move(spotLightShadowResources.error()));
-        }
-        spotLightShadowResources_ = *spotLightShadowResources;
-        statistics_.liveResources += 2U;
 
         for (usize faceIndex = 0; faceIndex < opaque3DPointShadowMapSamplers_.size();
              ++faceIndex)
@@ -1319,15 +1317,23 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         ++statistics_.liveResources;
 
-        auto pointLightShadowResources =
-            createPointLightShadowResources(shadowMapExtents_.pointLightFaceExtent);
-        if (!pointLightShadowResources)
+        if (!bgfx::isTextureValid(0, false, 1, bgfx::TextureFormat::D16,
+                                  kShadowSamplerFallbackFlags))
         {
-            return Core::failure(std::move(pointLightShadowResources.error()));
+            return Core::failure(
+                RenderErrorCode::DeviceInitializationFailed,
+                "The active bgfx renderer cannot create the sampled D16 shadow fallback texture");
         }
-        pointLightShadowResources_ = *pointLightShadowResources;
-        statistics_.liveResources +=
-            static_cast<u64>(BgfxPointLightShadowFaceCount * 2U);
+        opaque3DDefaultShadowTexture_ = bgfx::createTexture2D(
+            1, 1, false, 1, bgfx::TextureFormat::D16,
+            kShadowSamplerFallbackFlags, nullptr);
+        if (!bgfx::isValid(opaque3DDefaultShadowTexture_))
+        {
+            return Core::failure(
+                RenderErrorCode::DeviceInitializationFailed,
+                "bgfx rejected the Opaque3D shadow fallback texture");
+        }
+        ++statistics_.liveResources;
 
         opaque3DSampler_ = bgfx::createUniform("s_texColor", bgfx::UniformType::Sampler);
         if (!bgfx::isValid(opaque3DSampler_))
@@ -1725,6 +1731,10 @@ class BgfxRenderDevice final : public IRenderDevice {
             {
                 return Core::failure(std::move(status.error()));
             }
+            if (auto status = ensureShadowResources(preparedOpaque3D); !status)
+            {
+                return Core::failure(std::move(status.error()));
+            }
         }
         if (auto status = surfaceStateTracker_.validateAndCommit(frame.primaryWindowSurface); !status)
         {
@@ -1920,6 +1930,12 @@ class BgfxRenderDevice final : public IRenderDevice {
             }
             destroyPointLightShadowResources(pointLightShadowResources_);
             statistics_.liveResources -= pointLightShadowResourceCount;
+            if (bgfx::isValid(opaque3DDefaultShadowTexture_))
+            {
+                bgfx::destroy(opaque3DDefaultShadowTexture_);
+                opaque3DDefaultShadowTexture_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
             for (bgfx::UniformHandle& sampler : opaque3DPointShadowMapSamplers_)
             {
                 if (bgfx::isValid(sampler))
@@ -2270,7 +2286,8 @@ class BgfxRenderDevice final : public IRenderDevice {
             // sprite2DProgram, base/normal samplers, lighting/normal uniforms,
             // sprite2DDefaultTexture, sprite2DDefaultNormalTexture,
             // opaque3DProgram/shadowProgram, material/shadow/IBL samplers and uniforms,
-            // directional/spot shadow depth textures/framebuffers, opaque3DMrSampler,
+            // the shadow sampler fallback plus any lazily created directional/spot/point
+            // shadow depth textures/framebuffers, opaque3DMrSampler,
             // opaque3D directional/point/spot light arrays + MrParams uniforms, opaque3DDefaultTexture,
             // opaque3DDefaultMr/Normal/IBL textures, opaque3DVertexBuffer, opaque3DIndexBuffer,
             // retirement marker source/readback (+ dynamic mesh/texture/environment slots).
@@ -2534,6 +2551,103 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
     }
 
+    [[nodiscard]] Core::Status ensureShadowResources(
+        const PreparedOpaque3D& prepared)
+    {
+        const bool directionalValid =
+            cascadedDirectionalShadowResources_.valid();
+        const bool directionalHasAnyHandle =
+            bgfx::isValid(cascadedDirectionalShadowResources_.frameBuffer) ||
+            bgfx::isValid(cascadedDirectionalShadowResources_.depthAtlas);
+        const bool spotValid = spotLightShadowResources_.valid();
+        const bool spotHasAnyHandle =
+            bgfx::isValid(spotLightShadowResources_.frameBuffer) ||
+            bgfx::isValid(spotLightShadowResources_.depthMap);
+        bool pointHasAnyHandle = false;
+        for (const bgfx::FrameBufferHandle frameBuffer :
+             pointLightShadowResources_.frameBuffers)
+        {
+            pointHasAnyHandle = pointHasAnyHandle || bgfx::isValid(frameBuffer);
+        }
+        for (const bgfx::TextureHandle depthMap :
+             pointLightShadowResources_.depthMaps)
+        {
+            pointHasAnyHandle = pointHasAnyHandle || bgfx::isValid(depthMap);
+        }
+        const bool pointValid = pointLightShadowResources_.valid();
+        if ((directionalHasAnyHandle && !directionalValid) ||
+            (spotHasAnyHandle && !spotValid) ||
+            (pointHasAnyHandle && !pointValid))
+        {
+            std::terminate();
+        }
+
+        const bool createDirectional =
+            prepared.cascadedDirectionalShadow.has_value() && !directionalValid;
+        const bool createSpot = prepared.spotLightShadow.has_value() && !spotValid;
+        const bool createPoint = prepared.pointLightShadow.has_value() && !pointValid;
+        BgfxCascadedDirectionalShadowResources newDirectional{};
+        BgfxSpotLightShadowResources newSpot{};
+        BgfxPointLightShadowResources newPoint{};
+        const auto rollback = [&]() noexcept {
+            destroyCascadedDirectionalShadowResources(newDirectional);
+            destroySpotLightShadowResources(newSpot);
+            destroyPointLightShadowResources(newPoint);
+        };
+
+        if (createDirectional)
+        {
+            auto resources = createCascadedDirectionalShadowResources(
+                shadowMapExtents_.directionalCascadeTileExtent);
+            if (!resources)
+            {
+                rollback();
+                return Core::failure(std::move(resources.error()));
+            }
+            newDirectional = *resources;
+        }
+        if (createSpot)
+        {
+            auto resources =
+                createSpotLightShadowResources(shadowMapExtents_.spotLightMapExtent);
+            if (!resources)
+            {
+                rollback();
+                return Core::failure(std::move(resources.error()));
+            }
+            newSpot = *resources;
+        }
+        if (createPoint)
+        {
+            auto resources = createPointLightShadowResources(
+                shadowMapExtents_.pointLightFaceExtent);
+            if (!resources)
+            {
+                rollback();
+                return Core::failure(std::move(resources.error()));
+            }
+            newPoint = *resources;
+        }
+
+        if (createDirectional)
+        {
+            cascadedDirectionalShadowResources_ = newDirectional;
+            statistics_.liveResources += 2U;
+        }
+        if (createSpot)
+        {
+            spotLightShadowResources_ = newSpot;
+            statistics_.liveResources += 2U;
+        }
+        if (createPoint)
+        {
+            pointLightShadowResources_ = newPoint;
+            statistics_.liveResources +=
+                static_cast<u64>(BgfxPointLightShadowFaceCount * 2U);
+        }
+        return Core::success();
+    }
+
     void configureSurfaceClearView(const RenderSurfaceState& surface) noexcept
     {
         bgfx::setViewRect(kSurfaceClearView, 0, 0, static_cast<u16>(surface.framebufferExtent.width),
@@ -2548,7 +2662,8 @@ class BgfxRenderDevice final : public IRenderDevice {
         usize cascadeIndex,
         bool clearDepth) noexcept
     {
-        if (cascadeIndex >= BgfxCascadedDirectionalShadowCascadeCount)
+        if (cascadeIndex >= BgfxCascadedDirectionalShadowCascadeCount ||
+            !cascadedDirectionalShadowResources_.valid())
         {
             std::terminate();
         }
@@ -2577,6 +2692,10 @@ class BgfxRenderDevice final : public IRenderDevice {
         const PreparedOpaque3D::SpotLightShadow& shadow,
         bool clearDepth) noexcept
     {
+        if (!spotLightShadowResources_.valid())
+        {
+            std::terminate();
+        }
         bgfx::setViewRect(kSpotLightShadowView, 0, 0,
                           shadowMapExtents_.spotLightMapExtent,
                           shadowMapExtents_.spotLightMapExtent);
@@ -2598,6 +2717,10 @@ class BgfxRenderDevice final : public IRenderDevice {
         bool clearDepth) noexcept
     {
         if (faceIndex >= BgfxPointLightShadowFaceCount)
+        {
+            std::terminate();
+        }
+        if (!pointLightShadowResources_.valid())
         {
             std::terminate();
         }
@@ -3002,6 +3125,10 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             return;
         }
+        if (!bgfx::isValid(opaque3DDefaultShadowTexture_))
+        {
+            std::terminate();
+        }
 
         const Mesh3DDirectionalLightUniformStorage* lightDirections = &mesh3DLightDirections_;
         const Mesh3DDirectionalLightUniformStorage* lightColors = &mesh3DLightColors_;
@@ -3192,19 +3319,29 @@ class BgfxRenderDevice final : public IRenderDevice {
             bgfx::setTexture(0, opaque3DSampler_, materialTexture);
             bgfx::setTexture(1, opaque3DMrSampler_, mrTexture);
             bgfx::setTexture(2, opaque3DNormalSampler_, normalTexture);
-            bgfx::setTexture(3, opaque3DCsmAtlasSampler_,
-                             cascadedDirectionalShadowResources_.depthAtlas);
+            const bgfx::TextureHandle directionalShadowTexture =
+                cascadedDirectionalShadowResources_.valid()
+                    ? cascadedDirectionalShadowResources_.depthAtlas
+                    : opaque3DDefaultShadowTexture_;
+            const bgfx::TextureHandle spotShadowTexture =
+                spotLightShadowResources_.valid()
+                    ? spotLightShadowResources_.depthMap
+                    : opaque3DDefaultShadowTexture_;
+            bgfx::setTexture(3, opaque3DCsmAtlasSampler_, directionalShadowTexture);
             bgfx::setTexture(4, opaque3DIblDiffuseSampler_, iblDiffuse);
             bgfx::setTexture(5, opaque3DIblSpecularSampler_, iblSpecular);
             bgfx::setTexture(6, opaque3DIblBrdfSampler_, iblBrdf);
-            bgfx::setTexture(7, opaque3DSpotShadowMapSampler_,
-                             spotLightShadowResources_.depthMap);
+            bgfx::setTexture(7, opaque3DSpotShadowMapSampler_, spotShadowTexture);
             for (usize faceIndex = 0; faceIndex < opaque3DPointShadowMapSamplers_.size();
                  ++faceIndex)
             {
+                const bgfx::TextureHandle pointShadowTexture =
+                    pointLightShadowResources_.valid()
+                        ? pointLightShadowResources_.depthMaps[faceIndex]
+                        : opaque3DDefaultShadowTexture_;
                 bgfx::setTexture(static_cast<u8>(8U + faceIndex),
                                  opaque3DPointShadowMapSamplers_[faceIndex],
-                                 pointLightShadowResources_.depthMaps[faceIndex]);
+                                 pointShadowTexture);
             }
             bgfx::setUniform(opaque3DLightDirectionsUniform_, lightDirections->data(),
                              static_cast<u16>(Mesh3DLightingDesc::MaximumDirectionalLightCount));
@@ -4808,6 +4945,7 @@ class BgfxRenderDevice final : public IRenderDevice {
     std::thread::id ownerThread_{};
     RenderSurfaceState committedSurfaceState_{};
     ShadowMapExtentConfig shadowMapExtents_{};
+    u32 drawCallCapacity_ = RenderDeviceCreateParams::DefaultDrawCallCapacity;
     u32 resetFlags_ = kDefaultResetFlags;
     RenderSurfaceExtent appliedBackbuffer_ = BgfxSurfaceFramePlanner::BootstrapBackbufferExtent;
     RenderStatistics statistics_{};
@@ -4844,6 +4982,7 @@ class BgfxRenderDevice final : public IRenderDevice {
     BgfxCascadedDirectionalShadowResources cascadedDirectionalShadowResources_{};
     BgfxSpotLightShadowResources spotLightShadowResources_{};
     BgfxPointLightShadowResources pointLightShadowResources_{};
+    bgfx::TextureHandle opaque3DDefaultShadowTexture_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DSampler_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DMrSampler_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DNormalSampler_ = BGFX_INVALID_HANDLE;
@@ -4973,6 +5112,14 @@ Core::Result<std::unique_ptr<IRenderDevice>> createBgfxRenderDevice(const Render
     {
         return Core::failure(std::move(status.error()));
     }
+    if (!RenderDeviceCreateParams::isSupportedDrawCallCapacity(
+            params.drawCallCapacity) ||
+        params.drawCallCapacity > kCompiledBgfxMaximumDrawCalls)
+    {
+        return Core::failure(
+            RenderErrorCode::DeviceInitializationFailed,
+            "The bgfx draw-call capacity must be a 1024-entry block within the compiled backend maximum");
+    }
     u32 resetFlags = kDefaultResetFlags;
     switch (params.msaaSamples)
     {
@@ -5027,7 +5174,8 @@ Core::Result<std::unique_ptr<IRenderDevice>> createBgfxRenderDevice(const Render
     {
         auto renderDevice = std::unique_ptr<BgfxRenderDevice>(
             new BgfxRenderDevice(std::move(*surfaceStateTracker), std::move(lease), initialSurface,
-                                 params.shadowMapExtents, resetFlags));
+                                 params.shadowMapExtents, params.drawCallCapacity,
+                                 resetFlags));
 
         if (auto status = renderDevice->initialize(nativeBinding->platformData); !status)
         {

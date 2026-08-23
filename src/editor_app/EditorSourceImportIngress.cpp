@@ -2,10 +2,10 @@
 
 #include "EditorSourceImportSelection.hpp"
 
+#include <tina/asset/AssetErrors.hpp>
 #include <tina/core/text/Utf8.hpp>
 
 #include <algorithm>
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -14,6 +14,7 @@
 #include <new>
 #include <optional>
 #include <utility>
+#include <vector>
 
 #if defined(_WIN32)
 #ifndef NOMINMAX
@@ -46,6 +47,15 @@ struct ExternalSourceMapping final {
     std::filesystem::path source{};
     std::filesystem::path destination{};
 };
+
+[[nodiscard]] Core::Status checkStopped(const std::stop_token stopToken)
+{
+    if (stopToken.stop_requested()) {
+        return Core::failure(Asset::AssetErrorCode::SourceImportCancelled,
+                             "Editor source import file transaction was cancelled");
+    }
+    return Core::success();
+}
 
 [[nodiscard]] std::string pathToUtf8(const std::filesystem::path& path)
 {
@@ -162,8 +172,12 @@ struct ExternalSourceMapping final {
 
 [[nodiscard]] Core::Result<bool> filesHaveSameContent(
     const std::filesystem::path& left,
-    const std::filesystem::path& right)
+    const std::filesystem::path& right,
+    const std::stop_token stopToken)
 {
+    if (const auto status = checkStopped(stopToken); !status) {
+        return Core::failure(std::move(status.error()));
+    }
     std::error_code sizeError;
     const std::uintmax_t leftSize = std::filesystem::file_size(left, sizeError);
     if (sizeError) {
@@ -190,9 +204,23 @@ struct ExternalSourceMapping final {
             "Editor could not open an import destination file for comparison", right, {}));
     }
 
-    std::array<char, FileComparisonBufferSize> leftBuffer{};
-    std::array<char, FileComparisonBufferSize> rightBuffer{};
+    std::vector<char> comparisonStorage;
+    try {
+        comparisonStorage.resize(FileComparisonBufferSize * 2U);
+    } catch (const std::bad_alloc&) {
+        return Core::failure(
+            Core::CoreErrorCode::OutOfMemory,
+            "Editor could not allocate the import file comparison buffer");
+    }
+    std::span<char> leftBuffer{
+        comparisonStorage.data(), FileComparisonBufferSize};
+    std::span<char> rightBuffer{
+        comparisonStorage.data() + FileComparisonBufferSize,
+        FileComparisonBufferSize};
     for (;;) {
+        if (const auto status = checkStopped(stopToken); !status) {
+            return Core::failure(std::move(status.error()));
+        }
         leftStream.read(leftBuffer.data(), static_cast<std::streamsize>(leftBuffer.size()));
         const std::streamsize leftRead = leftStream.gcount();
         rightStream.read(rightBuffer.data(), static_cast<std::streamsize>(rightBuffer.size()));
@@ -206,7 +234,8 @@ struct ExternalSourceMapping final {
                                          right, {}));
         }
         if (leftRead != rightRead ||
-            !std::equal(leftBuffer.begin(), leftBuffer.begin() + leftRead,
+            !std::equal(leftBuffer.begin(),
+                        leftBuffer.begin() + static_cast<std::ptrdiff_t>(leftRead),
                         rightBuffer.begin())) {
             return false;
         }
@@ -374,7 +403,9 @@ Core::Result<EditorSourceImportIngress>
 prepareEditorSourceImportIngress(
     std::string_view sourceRootUtf8,
     std::span<const std::string> selectedPathsUtf8,
-    Core::u32 maxSelectedPaths)
+    Core::u32 maxSelectedPaths,
+    std::stop_token stopToken,
+    EditorSourceImportIngressProgress progress)
 {
     if (maxSelectedPaths == 0U || maxSelectedPaths > EditorSourceImportUnitCapacity) {
         return Core::failure(Core::CoreErrorCode::InvalidArgument,
@@ -391,6 +422,9 @@ prepareEditorSourceImportIngress(
     if (sourceRootUtf8.empty() || !Core::isStrictUtf8WithoutNul(sourceRootUtf8)) {
         return Core::failure(Core::CoreErrorCode::InvalidArgument,
                              "Editor project Source path must be strict UTF-8 without NUL");
+    }
+    if (const auto status = checkStopped(stopToken); !status) {
+        return Core::failure(std::move(status.error()));
     }
 
     try {
@@ -432,6 +466,9 @@ prepareEditorSourceImportIngress(
         bool requiresImageDirectory = false;
         bool requiresAudioDirectory = false;
         for (const std::string& selectedPathUtf8 : selectedPathsUtf8) {
+            if (const auto status = checkStopped(stopToken); !status) {
+                return Core::failure(std::move(status.error()));
+            }
             if (selectedPathUtf8.empty() ||
                 selectedPathUtf8.size() > AssetFormat::SourceImportWire::MaxPathBytes ||
                 !Core::isStrictUtf8WithoutNul(selectedPathUtf8)) {
@@ -512,7 +549,8 @@ prepareEditorSourceImportIngress(
                         return pathsReferToSameLocation(copy.destination, *candidate);
                     });
                 if (planned != copies.end()) {
-                    auto sameContent = filesHaveSameContent(selected, planned->source);
+                    auto sameContent = filesHaveSameContent(
+                        selected, planned->source, stopToken);
                     if (!sameContent) {
                         return Core::failure(std::move(sameContent.error()));
                     }
@@ -542,7 +580,8 @@ prepareEditorSourceImportIngress(
                     !status) {
                     return Core::failure(std::move(status.error()));
                 }
-                auto sameContent = filesHaveSameContent(selected, *candidate);
+                auto sameContent = filesHaveSameContent(
+                    selected, *candidate, stopToken);
                 if (!sameContent) {
                     return Core::failure(std::move(sameContent.error()));
                 }
@@ -586,6 +625,10 @@ prepareEditorSourceImportIngress(
         std::string imageRootUtf8;
         std::string audioRootUtf8;
         if (!copies.empty()) {
+            progress.notifyCopyingStarted();
+            if (const auto status = checkStopped(stopToken); !status) {
+                return Core::failure(std::move(status.error()));
+            }
             importedRootUtf8 = pathToUtf8(importedRoot);
             if (requiresImageDirectory) {
                 imageRootUtf8 = pathToUtf8(imageRoot);
@@ -622,6 +665,9 @@ prepareEditorSourceImportIngress(
         }
 
         for (auto& copy : copies) {
+            if (const auto status = checkStopped(stopToken); !status) {
+                return Core::failure(std::move(status.error()));
+            }
             if (auto status = validateRegularPhysicalFile(
                     copy.source, "Editor import source changed before it could be copied");
                 !status) {
@@ -649,7 +695,8 @@ prepareEditorSourceImportIngress(
             ingress.createdFilePathsUtf8_.push_back(std::move(copy.destinationUtf8));
             ++ingress.copiedFileCount_;
 
-            auto copiedContentMatches = filesHaveSameContent(copy.source, copy.destination);
+            auto copiedContentMatches = filesHaveSameContent(
+                copy.source, copy.destination, stopToken);
             if (!copiedContentMatches) {
                 return Core::failure(std::move(copiedContentMatches.error()));
             }
@@ -661,6 +708,9 @@ prepareEditorSourceImportIngress(
         }
 
         for (const auto& verification : verifications) {
+            if (const auto status = checkStopped(stopToken); !status) {
+                return Core::failure(std::move(status.error()));
+            }
             if (auto status = validateRegularPhysicalFile(
                     verification.destination,
                     "Editor import destination changed while the selection was being prepared");
@@ -668,7 +718,7 @@ prepareEditorSourceImportIngress(
                 return Core::failure(std::move(status.error()));
             }
             auto sameContent = filesHaveSameContent(
-                verification.source, verification.destination);
+                verification.source, verification.destination, stopToken);
             if (!sameContent) {
                 return Core::failure(std::move(sameContent.error()));
             }

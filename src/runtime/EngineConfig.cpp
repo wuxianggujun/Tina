@@ -180,6 +180,8 @@ EngineConfig EngineConfig::Defaults()
         .primaryWindowUIDisplayListCapacities = PrimaryWindowUIDisplayListCapacityConfig{},
         .renderSceneCapacities = Render::RenderSceneCapacity{},
         .shadowMapExtents = Render::ShadowMapExtentConfig{},
+        .renderDrawCallCapacity =
+            Render::RenderDeviceCreateParams::DefaultDrawCallCapacity,
         .inputActions = InputActionMapConfig{},
         .platformEventSubscriptions = PlatformEventSubscriptionConfig{},
         .fixedSimulation = Core::FixedStepConfig{},
@@ -244,6 +246,12 @@ Core::Status EngineConfig::validate() const
         Core::Error error{ConfigurationErrorCode::InvalidEngineConfig, "shadowMapExtents is invalid"};
         error.addContext("EngineConfig::validate", shadowMapStatus.error().message);
         return Core::failure(std::move(error));
+    }
+    if (!Render::RenderDeviceCreateParams::isSupportedDrawCallCapacity(
+            renderDrawCallCapacity))
+    {
+        return Core::failure(ConfigurationErrorCode::InvalidEngineConfig,
+                             "renderDrawCallCapacity must be a 1024-entry block or the 65535 native maximum");
     }
     if (renderMsaaSamples != 0U && renderMsaaSamples != 2U && renderMsaaSamples != 4U &&
         renderMsaaSamples != 8U && renderMsaaSamples != 16U)

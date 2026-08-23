@@ -61,10 +61,16 @@ namespace {
 } // namespace
 
 auto EditorWorkspaceState::onExit(Tina::GameStateExitContext&) noexcept -> void{
-    if (sourceImportService_.state() ==
-        Tina::EditorApp::Detail::EditorSourceImportServiceState::Running) {
+    using ImportState =
+        Tina::EditorApp::Detail::EditorSourceImportServiceState;
+    if (sourceImportService_.state() == ImportState::Running) {
         (void)sourceImportService_.cancel();
+    } else if (sourceImportService_.state() == ImportState::Ready) {
+        (void)sourceImportService_.discardReady();
+    } else if (sourceImportService_.state() == ImportState::Failed) {
+        (void)sourceImportService_.dismissFailure();
     }
+    cleanupFailedSourceImportStage();
     counters_.sourceImportRunning = false;
     if (playSession_.has_value()) {
         (void)playSession_->stop();
@@ -1933,33 +1939,14 @@ auto EditorWorkspaceState::previewEntityHasSelectedAncestor(
 }
 
 auto EditorWorkspaceState::importSelectedSourceFiles(
-    std::span<const std::string> selectedPathsUtf8) -> Tina::Core::Status
+    std::vector<std::string> selectedPathsUtf8) -> Tina::Core::Status
 {
     if (!activeProjectWorkspace_.has_value()) {
         authoringFeedback_ = "File import requires an open Tina project";
         return Tina::Core::success();
     }
 
-    auto ingress = Tina::EditorApp::Detail::prepareEditorSourceImportIngress(
-        activeProjectWorkspace_->sourceRootUtf8(), selectedPathsUtf8);
-    if (!ingress) {
-        return reportAuthoringFailure("File import preparation rejected: ",
-                                      ingress.error());
-    }
-
-    auto merged = Tina::EditorApp::Detail::mergeEditorSourceImportSelection(
-        activeProjectWorkspace_->sourceRootUtf8(),
-        sourceImportUnits_,
-        ingress->projectPathsUtf8());
-    if (!merged) {
-        return reportAuthoringFailure("File import selection rejected: ",
-                                      merged.error());
-    }
-    if (auto status = startSourceImport(merged->intendedUnits); !status) {
-        return status;
-    }
-    ingress->commit();
-    return Tina::Core::success();
+    return startSourceImport(sourceImportUnits_, std::move(selectedPathsUtf8));
 }
 
 auto EditorWorkspaceState::importSourceFromDialog() -> Tina::Core::Status{
@@ -2009,7 +1996,7 @@ auto EditorWorkspaceState::importSourceFromDialog() -> Tina::Core::Status{
     }
 
     if (activeProjectWorkspace_.has_value()) {
-        return importSelectedSourceFiles(selected->selectedPathsUtf8);
+        return importSelectedSourceFiles(std::move(selected->selectedPathsUtf8));
     }
 
     return createTemporaryProjectForImport(

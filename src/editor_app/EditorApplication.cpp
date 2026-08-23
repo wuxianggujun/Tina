@@ -2,6 +2,8 @@
 
 #include <tina/editor_app/EditorApplication.hpp>
 
+#include <algorithm>
+
 namespace Tina::EditorApp::WorkspaceInternal {
 
 class EditorApplication final : public Tina::IGameApplication {
@@ -70,6 +72,23 @@ class EditorApplication final : public Tina::IGameApplication {
     };
 }
 
+[[nodiscard]] usize effectiveNodeDerivedCapacity(
+    usize nodeCapacity,
+    usize configuredCapacity) noexcept
+{
+    return configuredCapacity == 0U ? nodeCapacity : configuredCapacity;
+}
+
+[[nodiscard]] usize effectiveComponentStateCapacity(
+    usize nodeCapacity,
+    usize configuredCapacity,
+    usize defaultCapacity) noexcept
+{
+    return configuredCapacity == 0U
+               ? (std::min)(nodeCapacity, defaultCapacity)
+               : configuredCapacity;
+}
+
 [[nodiscard]] Tina::EngineConfig createEngineConfig()
 {
     Tina::EngineConfig config = Tina::EngineConfig::Defaults();
@@ -80,21 +99,14 @@ class EditorApplication final : public Tina::IGameApplication {
     config.renderSceneCapacities.spriteCapacity = EditorViewportSpriteCapacity;
     config.renderSceneCapacities.mesh3DItemCapacity = 8;
     config.renderSceneCapacities.mesh3DBatchCapacity = 4;
-    // The editor grid and gizmo overlays use retained Line/Ellipse primitives
-    // on top of the editor chrome, so their fixed UI paint/display-list
-    // capacities are explicitly widened here.
-    config.primaryWindowUICapacities.nodeCapacity = 12U * 1024U;
-    config.primaryWindowUICapacities.paintSnapshotCapacity = 32U * 1024U;
     // Both workspace modes are authored into one retained tree. Their fixed
     // toolbar chrome owns roughly 56 icon tooltips before form/dialog actions,
     // so the general-purpose default of 64 is too small for the Editor.
     config.primaryWindowUICapacities.componentStates.tooltipCapacity = 128U;
-    config.primaryWindowUIDisplayListCapacities.commandCapacity = 16U * 1024U;
-    config.primaryWindowUIDisplayListCapacities.clipCapacity = 16U * 1024U;
-    config.primaryWindowUIDisplayListCapacities.batchCapacity = 16U * 1024U;
-    // Anti-alias the editor world pass (mesh edges, sprites); pixel-evidence
-    // gates and samples keep the engine-wide 0 default.
-    config.renderMsaaSamples = 8;
+    // The Editor submits one bounded world plus one UI pass. Keeping this at
+    // 8K avoids bgfx's 65K fixed draw arrays while retaining headroom above the
+    // configured scene and DisplayList capacities.
+    config.renderDrawCallCapacity = 8U * 1024U;
     using Key = Tina::Platform::Key;
     config.inputActions.bindings = {
         editorShortcutBinding(Key::LeftControl, EditorShortcutActions::Control),
@@ -668,7 +680,8 @@ void writeFrameTimingStatistics(
             renderDeviceAccess.set(device.get());
             return device;
         };
-    auto hostResult = Tina::Desktop::CreateEngine(createEngineConfig(), std::move(desktopOptions));
+    const Tina::EngineConfig engineConfig = createEngineConfig();
+    auto hostResult = Tina::Desktop::CreateEngine(engineConfig, std::move(desktopOptions));
     if (!hostResult) {
         writeError(hostResult.error());
         return 1;
@@ -700,6 +713,11 @@ void writeFrameTimingStatistics(
         return 1;
     }
 
+    const Tina::UI::UIContextCapacityConfig& uiCapacities =
+        engineConfig.primaryWindowUICapacities;
+    const Tina::UI::UIComponentStateCapacityConfig& componentStateCapacities =
+        uiCapacities.componentStates;
+
     std::cout << "{\"status\":\"ok\",\"application\":\"TinaEditor\",\"readOnly\":false"
               << ",\"editorModule\":true,\"supports2D\":true,\"supports3D\":true,\"initialWorkspace\":";
     writeJsonString(std::cout, options.initialWorkspace == WorkspaceMode::World2D ? "2d" : "3d");
@@ -710,6 +728,58 @@ void writeFrameTimingStatistics(
               << ",\"frameDelayMs\":" << options.frameDelayMilliseconds
               << ",\"autoDemo\":" << (options.autoDemo ? "true" : "false")
               << ",\"profileUi\":" << (options.profileUi ? "true" : "false")
+              << ",\"configuredUiNodeCapacity\":"
+              << uiCapacities.nodeCapacity
+              << ",\"configuredUiPaintCapacity\":"
+              << effectiveNodeDerivedCapacity(
+                     uiCapacities.nodeCapacity,
+                     uiCapacities.paintSnapshotCapacity)
+              << ",\"configuredVirtualGridViewStateCapacity\":"
+              << effectiveComponentStateCapacity(
+                     uiCapacities.nodeCapacity,
+                     componentStateCapacities.virtualGridViewCapacity,
+                     Tina::UI::UIComponentStateCapacityConfig::
+                         DefaultVirtualGridViewCapacity)
+              << ",\"configuredVirtualGridItemStateCapacity\":"
+              << effectiveComponentStateCapacity(
+                     uiCapacities.nodeCapacity,
+                     componentStateCapacities.virtualGridItemCapacity,
+                     Tina::UI::UIComponentStateCapacityConfig::
+                         DefaultVirtualGridItemCapacity)
+              << ",\"configuredDataGridStateCapacity\":"
+              << effectiveComponentStateCapacity(
+                     uiCapacities.nodeCapacity,
+                     componentStateCapacities.dataGridCapacity,
+                     Tina::UI::UIComponentStateCapacityConfig::
+                         DefaultDataGridCapacity)
+              << ",\"configuredDataGridColumnStateCapacity\":"
+              << effectiveComponentStateCapacity(
+                     uiCapacities.nodeCapacity,
+                     componentStateCapacities.dataGridColumnCapacity,
+                     Tina::UI::UIComponentStateCapacityConfig::
+                         DefaultDataGridColumnCapacity)
+              << ",\"configuredDataGridRowStateCapacity\":"
+              << effectiveComponentStateCapacity(
+                     uiCapacities.nodeCapacity,
+                     componentStateCapacities.dataGridRowCapacity,
+                     Tina::UI::UIComponentStateCapacityConfig::
+                         DefaultDataGridRowCapacity)
+              << ",\"configuredDataGridCellStateCapacity\":"
+              << effectiveComponentStateCapacity(
+                     uiCapacities.nodeCapacity,
+                     componentStateCapacities.dataGridCellCapacity,
+                     Tina::UI::UIComponentStateCapacityConfig::
+                         DefaultDataGridCellCapacity)
+              << ",\"configuredDisplayListCommandCapacity\":"
+              << engineConfig.primaryWindowUIDisplayListCapacities.commandCapacity
+              << ",\"configuredDisplayListClipCapacity\":"
+              << engineConfig.primaryWindowUIDisplayListCapacities.clipCapacity
+              << ",\"configuredDisplayListBatchCapacity\":"
+              << engineConfig.primaryWindowUIDisplayListCapacities.batchCapacity
+              << ",\"configuredRenderDrawCallCapacity\":"
+              << engineConfig.renderDrawCallCapacity
+              << ",\"configuredRenderMsaaSamples\":"
+              << static_cast<u32>(engineConfig.renderMsaaSamples)
               << ",\"uiStatisticsSamples\":" << counters.uiStatisticsSamples
               << ",\"uiPmrFirstBytes\":" << counters.uiStatisticsFirst.pmrCurrentBytes
               << ",\"uiPmrLastBytes\":" << counters.uiStatisticsLast.pmrCurrentBytes

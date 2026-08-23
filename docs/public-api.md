@@ -154,8 +154,12 @@ backend，也不取得 `IRenderDevice*`。
 TaskSystem 阶段返回 `TaskErrorCode::WaitTimeout`，Host 先写入 `runtime.lifecycle` Diagnostics，再
 `std::terminate()`；不会 reset TaskSystem 或继续析构 Platform、Clock、Diagnostics 等剩余 owner。
 
+`EngineConfig::renderDrawCallCapacity`（1024的整数倍，或精确的 native 上限65535；默认65535）固定每帧
+backend submission storage；`RenderDeviceCreateParams` 暴露相同契约。工具可依据冻结的
+RenderScene/DisplayList 上限显式降低，非法值在 EngineConfig 和 bgfx direct factory 双双 fail closed。
+
 `EngineConfig::renderMsaaSamples`（`0` 默认关闭，或 `2/4/8/16`）在启动时选择 backbuffer MSAA 采样数，
-非法值 fail closed；它是 device-lifetime 配置，不支持热改。像素证据 gate 与 samples 保持 `0`。
+非法值 fail closed；它是 device-lifetime 配置，不支持热改。像素证据 gate、samples 与 Editor 保持 `0`。
 
 ## `IGameApplication` 与 `IGameState`
 
@@ -984,9 +988,10 @@ importer，再通过 incremental stage API 复制 clean object、移除 removed 
 unit span、显式且非 `Invalid` 的 target platform、source/baseline/state 与 fresh-stage 路径；实现统一执行 baseline current-schema validation、batch probe、all-clean
 零改写复用、dirty/added recook、removed output 剔除、candidate compose、fresh package 完整验证和 stage-bound state commit。
 结果明确报告 `CleanReuse|FullRecook|IncrementalRecook`、unit/object 统计、本次 recook 的
-`cookedPayloadBytes` 及 stage/state ownership。该 API 不调用
-`AssetSystem::reloadCatalog()`、不替换 live root，也不取得 UI/Render owner；host 可在后台调用，随后在 owner thread 安全点
-决定是否接受 stage。stop、IO、容量、validation 或 allocation 失败不返回部分 candidate。
+`cookedPayloadBytes` 及 stage/state ownership，并拥有本次已经完整验证的精确 `CatalogSnapshot`；该 snapshot 的
+memory resource 必须覆盖 worker 到 owner-thread handoff。该 API 不调用 AssetSystem、不替换 live root，也不取得
+UI/Render owner；host 可在后台调用，随后在 owner thread 安全点决定是否接受 stage。stop、IO、容量、validation 或
+allocation 失败不返回部分 candidate。
 
 `planCatalogChanges(oldCatalog, newCatalog, config)` 比较两个已验证、immutable `CatalogSnapshot`，返回按
 `AssetId` 排序且每 ID 唯一的 `Added`/`Removed`/`Modified`/`Affected` 行。`Modified` 覆盖 entry metadata
@@ -1005,6 +1010,12 @@ prepare 成功后，才无分配地原子切换 root、immutable Catalog、Asset
 `Replaced|Removed|LoadedDependency` 的新 generation；旧 `AssetLease` 继续读取旧 payload，释放最后一个 lease 后旧
 generation 才物理回收。任一步失败都会卸掉 staged generation、abort replacement GPU owner，并保留旧
 root/Catalog/index/Handle/registry Entry。
+
+`AssetSystem::reloadPreparedCatalog(root, std::move(snapshot), config)` 只接受 caller 已经完整验证且之后不再修改的
+owning `CatalogSnapshot`，跳过 package reopen/validation，并复用相同的 change plan、resident migration、participant
+prepare/abort 与原子 publish 事务。snapshot 只在所有 fallible owner-thread staging 成功后的 commit 点被消费；
+`CatalogReloadBusy` 及其他 commit 前失败仍把有效 snapshot 留给 caller 重试。Editor source import 只把 worker 返回的
+同一 snapshot 移交给该入口；普通路径消费者继续使用 `reloadCatalog(root)` 并由它同步打开和验证磁盘 package。
 
 reload 默认把完整 cooked file validation buffer 放在调用期局部 pool；返回的 Catalog manifest/index 仍由
 `AssetSystem` 长期 memory resource 拥有。调用方显式覆盖 `config.package.validation.file.memoryResource` 时必须自行管理

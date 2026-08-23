@@ -2,53 +2,66 @@
 
 #include <algorithm>
 #include <cmath>
+#include <exception>
 #include <limits>
 #include <utility>
 
 namespace Tina::UI::Detail {
 
 UIDataGridStateStorage::UIDataGridStateStorage(
-    usize nodeCapacity, std::pmr::memory_resource& resource)
-    : gridsByNodeIndex_(&resource), columnsByNodeIndex_(&resource),
-      rowsByNodeIndex_(&resource), cellsByNodeIndex_(&resource),
-      layoutScratchByNodeIndex_(&resource),
-      linkValidationEpochByNodeIndex_(&resource)
+    usize gridCapacity, usize columnCapacity, usize rowCapacity,
+    usize cellCapacity, usize linkValidationCapacity,
+    std::pmr::memory_resource& resource)
+    : grids_(gridCapacity, resource), columns_(columnCapacity, resource),
+      rows_(rowCapacity, resource), cells_(cellCapacity, resource),
+      linkValidationNodeIndices_(&resource)
 {
-    gridsByNodeIndex_.resize(nodeCapacity);
-    columnsByNodeIndex_.resize(nodeCapacity);
-    rowsByNodeIndex_.resize(nodeCapacity);
-    cellsByNodeIndex_.resize(nodeCapacity);
-    layoutScratchByNodeIndex_.resize(nodeCapacity);
-    linkValidationEpochByNodeIndex_.resize(nodeCapacity);
+    linkValidationNodeIndices_.reserve(linkValidationCapacity);
 }
 
 usize UIDataGridStateStorage::capacity() const noexcept
 {
-    return gridsByNodeIndex_.size();
+    return grids_.capacity();
+}
+
+usize UIDataGridStateStorage::availableGridCount() const noexcept
+{
+    return grids_.availableCount();
+}
+
+usize UIDataGridStateStorage::availableColumnCount() const noexcept
+{
+    return columns_.availableCount();
+}
+
+usize UIDataGridStateStorage::availableRowCount() const noexcept
+{
+    return rows_.availableCount();
+}
+
+usize UIDataGridStateStorage::availableCellCount() const noexcept
+{
+    return cells_.availableCount();
 }
 
 bool UIDataGridStateStorage::containsGrid(UINodeId dataGrid) const noexcept
 {
-    return dataGrid.hasValue() && dataGrid.index() < gridsByNodeIndex_.size() &&
-           gridsByNodeIndex_[dataGrid.index()].node == dataGrid;
+    return grids_.contains(dataGrid);
 }
 
 bool UIDataGridStateStorage::containsColumn(UINodeId column) const noexcept
 {
-    return column.hasValue() && column.index() < columnsByNodeIndex_.size() &&
-           columnsByNodeIndex_[column.index()].node == column;
+    return columns_.contains(column);
 }
 
 bool UIDataGridStateStorage::containsRow(UINodeId row) const noexcept
 {
-    return row.hasValue() && row.index() < rowsByNodeIndex_.size() &&
-           rowsByNodeIndex_[row.index()].node == row;
+    return rows_.contains(row);
 }
 
 bool UIDataGridStateStorage::containsCell(UINodeId cell) const noexcept
 {
-    return cell.hasValue() && cell.index() < cellsByNodeIndex_.size() &&
-           cellsByNodeIndex_[cell.index()].node == cell;
+    return cells_.contains(cell);
 }
 
 DataGridState* UIDataGridStateStorage::tryGrid(UINodeId dataGrid) noexcept
@@ -59,8 +72,7 @@ DataGridState* UIDataGridStateStorage::tryGrid(UINodeId dataGrid) noexcept
 const DataGridState* UIDataGridStateStorage::tryGrid(
     UINodeId dataGrid) const noexcept
 {
-    return containsGrid(dataGrid) ? &gridsByNodeIndex_[dataGrid.index()]
-                                  : nullptr;
+    return grids_.tryGet(dataGrid);
 }
 
 DataGridColumnState* UIDataGridStateStorage::tryColumn(UINodeId column) noexcept
@@ -72,8 +84,7 @@ DataGridColumnState* UIDataGridStateStorage::tryColumn(UINodeId column) noexcept
 const DataGridColumnState* UIDataGridStateStorage::tryColumn(
     UINodeId column) const noexcept
 {
-    return containsColumn(column) ? &columnsByNodeIndex_[column.index()]
-                                  : nullptr;
+    return columns_.tryGet(column);
 }
 
 DataGridRowState* UIDataGridStateStorage::tryRow(UINodeId row) noexcept
@@ -83,7 +94,7 @@ DataGridRowState* UIDataGridStateStorage::tryRow(UINodeId row) noexcept
 
 const DataGridRowState* UIDataGridStateStorage::tryRow(UINodeId row) const noexcept
 {
-    return containsRow(row) ? &rowsByNodeIndex_[row.index()] : nullptr;
+    return rows_.tryGet(row);
 }
 
 DataGridCellState* UIDataGridStateStorage::tryCell(UINodeId cell) noexcept
@@ -94,7 +105,7 @@ DataGridCellState* UIDataGridStateStorage::tryCell(UINodeId cell) noexcept
 const DataGridCellState* UIDataGridStateStorage::tryCell(
     UINodeId cell) const noexcept
 {
-    return containsCell(cell) ? &cellsByNodeIndex_[cell.index()] : nullptr;
+    return cells_.tryGet(cell);
 }
 
 DataGridLayoutScratch* UIDataGridStateStorage::tryLayoutScratch(
@@ -107,56 +118,48 @@ DataGridLayoutScratch* UIDataGridStateStorage::tryLayoutScratch(
 const DataGridLayoutScratch* UIDataGridStateStorage::tryLayoutScratch(
     UINodeId dataGrid) const noexcept
 {
-    return containsGrid(dataGrid)
-               ? &layoutScratchByNodeIndex_[dataGrid.index()]
-               : nullptr;
+    const DataGridState* state = tryGrid(dataGrid);
+    return state != nullptr ? &state->layoutScratch : nullptr;
 }
 
-void UIDataGridStateStorage::initializeGrid(
+bool UIDataGridStateStorage::initializeGrid(
     UINodeId dataGrid, const UIDataGridCreateConfig& config) noexcept
 {
-    if (!dataGrid.hasValue() || dataGrid.index() >= gridsByNodeIndex_.size())
+    if (!dataGrid.hasValue())
     {
-        return;
+        return false;
     }
     resetNode(dataGrid.index());
-    gridsByNodeIndex_[dataGrid.index()] = DataGridState{
+    return grids_.insertOrAssign(DataGridState{
         .node = dataGrid,
         .columnCapacity = config.columnCapacity,
         .materializedRowCapacity = config.materializedRowCapacity,
-    };
+    });
 }
 
 bool UIDataGridStateStorage::beginLinkValidation() noexcept
 {
-    if (linkValidationEpochByNodeIndex_.empty())
-    {
-        return false;
-    }
-    if (linkValidationEpoch_ == (std::numeric_limits<u32>::max)())
-    {
-        std::ranges::fill(linkValidationEpochByNodeIndex_, 0U);
-        linkValidationEpoch_ = 1U;
-    }
-    else
-    {
-        ++linkValidationEpoch_;
-    }
+    linkValidationNodeIndices_.clear();
     return true;
 }
 
 bool UIDataGridStateStorage::markLinkNode(UINodeId node) noexcept
 {
-    if (!node.hasValue() || node.index() >= gridsByNodeIndex_.size() ||
-        gridsByNodeIndex_[node.index()].node.hasValue() ||
-        columnsByNodeIndex_[node.index()].node.hasValue() ||
-        rowsByNodeIndex_[node.index()].node.hasValue() ||
-        cellsByNodeIndex_[node.index()].node.hasValue() ||
-        linkValidationEpochByNodeIndex_[node.index()] == linkValidationEpoch_)
+    if (!node.hasValue() || grids_.tryGetByIndex(node.index()) != nullptr ||
+        columns_.tryGetByIndex(node.index()) != nullptr ||
+        rows_.tryGetByIndex(node.index()) != nullptr ||
+        cells_.tryGetByIndex(node.index()) != nullptr)
     {
         return false;
     }
-    linkValidationEpochByNodeIndex_[node.index()] = linkValidationEpoch_;
+    const auto found = std::lower_bound(
+        linkValidationNodeIndices_.begin(), linkValidationNodeIndices_.end(),
+        node.index());
+    if (found != linkValidationNodeIndices_.end() && *found == node.index())
+    {
+        return false;
+    }
+    linkValidationNodeIndices_.insert(found, node.index());
     return true;
 }
 
@@ -179,7 +182,11 @@ bool UIDataGridStateStorage::linkFixedPools(
     const usize expectedCellCount =
         static_cast<usize>(grid->columnCapacity) *
         static_cast<usize>(grid->materializedRowCapacity);
-    if (rowMajorCells.size() != expectedCellCount || !beginLinkValidation())
+    if (rowMajorCells.size() != expectedCellCount ||
+        columns.size() > columns_.availableCount() ||
+        rows.size() > rows_.availableCount() ||
+        rowMajorCells.size() > cells_.availableCount() ||
+        !beginLinkValidation())
     {
         return false;
     }
@@ -215,7 +222,7 @@ bool UIDataGridStateStorage::linkFixedPools(
     for (u32 ordinal = 0; ordinal < grid->linkedColumnCount; ++ordinal)
     {
         const UINodeId column = columns[ordinal];
-        columnsByNodeIndex_[column.index()] = DataGridColumnState{
+        const bool inserted = columns_.insertOrAssign(DataGridColumnState{
             .node = column,
             .dataGrid = dataGrid,
             .previousColumn = ordinal == 0 ? UINodeId{} : columns[ordinal - 1],
@@ -223,7 +230,11 @@ bool UIDataGridStateStorage::linkFixedPools(
                               ? UINodeId{}
                               : columns[ordinal + 1],
             .poolOrdinal = ordinal,
-        };
+        });
+        if (!inserted)
+        {
+            std::terminate();
+        }
     }
     for (u32 rowOrdinal = 0;
          rowOrdinal < grid->linkedMaterializedRowCount; ++rowOrdinal)
@@ -231,7 +242,7 @@ bool UIDataGridStateStorage::linkFixedPools(
         const UINodeId row = rows[rowOrdinal];
         const usize firstCellIndex =
             static_cast<usize>(rowOrdinal) * grid->linkedColumnCount;
-        rowsByNodeIndex_[row.index()] = DataGridRowState{
+        const bool rowInserted = rows_.insertOrAssign(DataGridRowState{
             .node = row,
             .dataGrid = dataGrid,
             .previousRow = rowOrdinal == 0 ? UINodeId{} : rows[rowOrdinal - 1],
@@ -246,13 +257,17 @@ bool UIDataGridStateStorage::linkFixedPools(
                             : rowMajorCells[firstCellIndex +
                                             grid->linkedColumnCount - 1U],
             .poolOrdinal = rowOrdinal,
-        };
+        });
+        if (!rowInserted)
+        {
+            std::terminate();
+        }
         for (u32 columnOrdinal = 0;
              columnOrdinal < grid->linkedColumnCount; ++columnOrdinal)
         {
             const usize cellIndex = firstCellIndex + columnOrdinal;
             const UINodeId cell = rowMajorCells[cellIndex];
-            cellsByNodeIndex_[cell.index()] = DataGridCellState{
+            const bool cellInserted = cells_.insertOrAssign(DataGridCellState{
                 .node = cell,
                 .dataGrid = dataGrid,
                 .row = row,
@@ -267,7 +282,11 @@ bool UIDataGridStateStorage::linkFixedPools(
                 .columnOrdinal = columnOrdinal,
                 .logicalColumn = columnOrdinal,
                 .committedLogicalColumn = columnOrdinal,
-            };
+            });
+            if (!cellInserted)
+            {
+                std::terminate();
+            }
         }
     }
     return true;
@@ -290,7 +309,7 @@ void UIDataGridStateStorage::unlinkFixedPools(UINodeId dataGrid) noexcept
             break;
         }
         const UINodeId next = state->nextColumn;
-        *state = {};
+        static_cast<void>(columns_.erase(column));
         column = next;
     }
 
@@ -316,10 +335,10 @@ void UIDataGridStateStorage::unlinkFixedPools(UINodeId dataGrid) noexcept
                 break;
             }
             const UINodeId nextCell = cellState->nextCell;
-            *cellState = {};
+            static_cast<void>(cells_.erase(cell));
             cell = nextCell;
         }
-        *rowState = {};
+        static_cast<void>(rows_.erase(row));
         row = nextRow;
     }
 
@@ -333,41 +352,41 @@ void UIDataGridStateStorage::unlinkFixedPools(UINodeId dataGrid) noexcept
 
 void UIDataGridStateStorage::resetNode(u32 nodeIndex) noexcept
 {
-    if (nodeIndex >= gridsByNodeIndex_.size())
-    {
-        return;
-    }
     UINodeId owner{};
-    if (gridsByNodeIndex_[nodeIndex].node.hasValue())
+    if (const DataGridState* grid = grids_.tryGetByIndex(nodeIndex);
+        grid != nullptr)
     {
-        owner = gridsByNodeIndex_[nodeIndex].node;
+        owner = grid->node;
     }
-    else if (columnsByNodeIndex_[nodeIndex].node.hasValue())
+    else if (const DataGridColumnState* column =
+                 columns_.tryGetByIndex(nodeIndex);
+             column != nullptr)
     {
-        owner = columnsByNodeIndex_[nodeIndex].dataGrid;
+        owner = column->dataGrid;
     }
-    else if (rowsByNodeIndex_[nodeIndex].node.hasValue())
+    else if (const DataGridRowState* row = rows_.tryGetByIndex(nodeIndex);
+             row != nullptr)
     {
-        owner = rowsByNodeIndex_[nodeIndex].dataGrid;
+        owner = row->dataGrid;
     }
-    else if (cellsByNodeIndex_[nodeIndex].node.hasValue())
+    else if (const DataGridCellState* cell = cells_.tryGetByIndex(nodeIndex);
+             cell != nullptr)
     {
-        owner = cellsByNodeIndex_[nodeIndex].dataGrid;
+        owner = cell->dataGrid;
     }
     if (containsGrid(owner))
     {
         unlinkFixedPools(owner);
     }
-    gridsByNodeIndex_[nodeIndex] = {};
-    columnsByNodeIndex_[nodeIndex] = {};
-    rowsByNodeIndex_[nodeIndex] = {};
-    cellsByNodeIndex_[nodeIndex] = {};
-    layoutScratchByNodeIndex_[nodeIndex] = {};
+    static_cast<void>(grids_.eraseByIndex(nodeIndex));
+    static_cast<void>(columns_.eraseByIndex(nodeIndex));
+    static_cast<void>(rows_.eraseByIndex(nodeIndex));
+    static_cast<void>(cells_.eraseByIndex(nodeIndex));
 }
 
 bool UIDataGridStateStorage::releaseNode(UINodeId node) noexcept
 {
-    if (!node.hasValue() || node.index() >= gridsByNodeIndex_.size())
+    if (!node.hasValue())
     {
         return false;
     }

@@ -212,9 +212,10 @@ scrim、surface、文案与 action，`color-picker` 用于确认 Inspector 的�
 selection revision，活动 gizmo 通过该 revision 检测并安全取消。
 
 `EditorPlaySession` 已接入 Toolbar 的 Play/Pause/Step/Stop。Timeline 不再重复提供专用 Undo/Redo，动画文档统一走
-Command Bar 或 Edit menu 的 active-document Undo/Redo。启动时复制当前 2D snapshot 或 3D Prefab canonical bytes，
-以有界 fixed-step clock 驱动隔离 preview；authoring document 不被 simulation 修改。play session 活跃期间锁定 authoring command
-与 document tab 切换，仍允许 viewport Focus；Stop 后丢弃隔离 snapshot 并从 canonical authoring document 重建 preview。
+Command Bar 或 Edit menu 的 active-document Undo/Redo。按下 Play 时才复制当前 2D snapshot 或 3D Prefab canonical bytes，
+`canonicalByteCapacity` 只限制合法快照大小，不在 Editor 空启动时预留整块容量；复制成功后才原子进入 Playing，
+以有界 fixed-step clock 驱动隔离 preview，authoring document 不被 simulation 修改。play session 活跃期间锁定 authoring command
+与 document tab 切换，仍允许 viewport Focus；Stop 后释放隔离 snapshot 容量并从 canonical authoring document 重建 preview。
 
 普通工作区信息、路径与状态摘要统一使用 Theme primary text；warning/error 只用于真实可恢复异常或失败反馈，
 不再把常规信息染成 warning 黄色。
@@ -291,7 +292,7 @@ Editor source import 已完成产品接线。自动化入口使用 strict UTF-8 
 `--project-root` 与 `--catalog-root` 互斥。Project Assets 标题栏的小 `+`（与 `File > Import Files...` 同一命令）可在 Windows
 原生对话框中一次批量选择 `.recipe` / `.gltf` / `.glb` / `.png` / `.jpg` / `.jpeg` / `.wav` 并加入同一 intended set。
 无项目启动时选择文件后，Editor 自动在系统临时目录创建并持有唯一临时 Project，完成 live Catalog switch 后直接继续导入，
-不会紧接着弹出目录选择器。临时 Project 的 `Save` / `Save As` 才要求选择空目录：Editor 先初始化正式 Project，事务复制
+不会紧接着弹出目录选择器。临时 Project 的 `Save` / `Save As` 才要求选择空目录：Editor 先初始化正式 Project，再通过同一后台事务复制
 `Source` 资源并在新根重新 cook，成功切换后清理旧临时目录；取消或失败保留临时 Project，未保存退出时由 Editor 定向清理。
 项目 `Source/` 内文件直接使用；
 外部 PNG/JPEG/WAV 在整批预检成功后分别安全复制到 `Source/Imported/Images/` 与 `Source/Imported/Audio/`。左侧 `Source Imports`
@@ -301,17 +302,22 @@ row selection；`Remove` 只读取 selected logical row。空集合时整段 `Co
 标题栏的小 `+`；`Remove` 在 owner thread 生成删除后的候选集合并启动同一 fresh-stage 事务，不会先打开或重新校验
 被删除的文件，因此已经从磁盘消失的 stale unit 仍可移除。移除最后一个 unit 会从有效 baseline 增量发布零 entry
 Catalog 和零 unit import state；没有有效 baseline 的首次 full cook 仍拒绝空集合。Import/Remove、项目切换和 Catalog
-refresh 互斥，隔离 PlaySession active 时列表与 authoring command 同步锁定。Editor 以 4096 unit 为产品上限，先在临时候选中完成整批
+refresh 互斥，隔离 PlaySession active 时列表与 authoring command 同步锁定。Editor 以 4096 unit 为产品上限；原生 dialog 关闭后
+UI thread 只把 owned path batch 提交给 `EditorSourceImportService`，后台 worker 在临时候选中完成整批
 扩展名识别、物理路径规范化、containment 与去重校验，任一文件非法、越界或分配失败时都不修改既有 intended set；
-外部媒体 ingress 也在任何复制前完成整批预检，后续 intended-set 合并或 importer 启动失败会删除本批新文件与空目录。
+外部媒体 ingress 也在任何复制前完成整批预检，后续 intended-set 合并、cook、Catalog commit、取消或 shutdown 失败会删除本批新文件与空目录。
 目标同名且内容相同时复用项目文件，内容不同时使用 `_2`、`_3` 等后缀，绝不覆盖；批内同一物理文件只复制一次。
 外部 `.recipe` / `.gltf` / `.glb` 因相对依赖无法靠复制单个主文件保证完整性而明确拒绝，调用方需先把完整依赖集置于
 `Source/`。已存在或本批重复选择的 unit 只保留一份，但仍会触发完整 intended set 的 reimport；Windows 大小写、
-分隔符或 `..` 形成的同文件别名按同一物理路径处理。后台 `EditorSourceImportService` 只调用共享 Asset pipeline，probe 完整 unit 集并生成 fully validated fresh
-stage，不接触 UI、Render 或 `AssetSystem`；owner thread 在下一安全帧携带当前 Sprite/Mesh participant 调用
-`reloadCatalog()`。dirty Catalog document 会在 commit 前保留 Ready stage；`CatalogReloadBusy` 同样保留 stage 并逐安全帧
-重试。fresh stage 在 Ready 前已包含 sibling current import state；Catalog、Browser、documents 与 2D/3D/Animation preview
-全部提交后，Editor 只原子发布项目 `.tina/cache/source-import/active-catalog.path`。再次以 `--project-root` 启动或 Project Open
+分隔符或 `..` 形成的同文件别名按同一物理路径处理。后台 `EditorSourceImportService` 在单个有界 batch 中执行 ingress、merge 和共享 Asset pipeline，
+按 `Preparing` / `Copying` / `Cooking` 发布批级状态，probe 完整 unit 集并生成 fully validated fresh stage；文件比较每 64 KiB
+检查协作取消，不为几十张图片派生无界 per-file 线程，也不接触 UI、Render 或 `AssetSystem`；pipeline 把精确的 fully
+validated owning `CatalogSnapshot` 一并交给 Ready stage。owner thread 在下一安全帧携带当前 Sprite/Mesh participant 调用
+`reloadPreparedCatalog()`，不重新打开或验证 package。dirty Catalog document 会在 commit 前保留 Ready stage；
+`CatalogReloadBusy` 及其他 commit 前失败同样保留 snapshot/stage 并逐安全帧重试。fresh stage 在 Ready 前已包含 sibling
+current import state；Catalog、Browser、documents 与 2D/3D/Animation preview
+全部提交后，Editor 只原子发布项目 `.tina/cache/source-import/active-catalog.path`，交换完整 intended set 并确认 ingress；Ready
+在此之前拥有 rollback transaction。再次以 `--project-root` 启动或 Project Open
 时验证 pointer、stage state、Catalog revision/output binding 与 physical containment，并恢复 Catalog 和完整 intended unit 集；
 有限帧自动导入会直接返回 parser/path/cooker 的真实错误，而不是用 lifecycle 通用错误覆盖首错。
 Windows 使用系统原生 dialog；Linux 私有 adapter 以 `zenity` 为首选、`kdialog` 为缺失回退，覆盖 open/save/folder 且不经过
@@ -385,12 +391,13 @@ mutation；非法配置或容量失败保留上一份 publication。公共头不
   anisotropic 投影；integer envelope 只用于裁剪和剔除。
 - transform gizmo 的轴线和平面边界使用同一 Line 原语；rotation ring 使用单个向内描边的
   `UIBoxPaint::Ellipse`，不再拆成弦段。Ellipse 的填充/向内描边由 coverage shader 完成。
-- 原有 axis-aligned 多段近似及其预算代码已经删除。overlay node 仍为固定容量、
-  `PointerHitPolicy::Ignore`，effective clip 仍是 axis-aligned scissor，几何命中继续由 gizmo backend 负责。
-  世界 pass 的 mesh 边缘继续由 backbuffer 抗锯齿处理：Editor 通过
-  `EngineConfig::renderMsaaSamples = 8` 打开 8× MSAA（见 [rendering.md](rendering.md)），samples 与像素证据
-  gate 保持关闭。2026-08-10 当前 Windows 宿主的 100%/150%/200% DPI 2D/3D 截图已证明 grid、斜向 gizmo 与
-  rotation ring 连续无阶梯；跨 GPU UI-003 golden 仍由 backlog `RENDER-LINES-001` 跟踪。
+- 原有 axis-aligned 多段近似及其 12K node、32K paint、16K DisplayList 预算代码已经删除。固定160个 grid
+  segment 与256个 gizmo overlay 槽均使用单节点 Line/Ellipse，Editor 因而恢复默认 UI/DisplayList 容量；
+  overlay 继续使用 `PointerHitPolicy::Ignore`，effective clip 仍是 axis-aligned scissor，几何命中继续由
+  gizmo backend 负责。Editor 不再为整个 backbuffer 打开 8× MSAA，跨 GPU UI-003 golden 仍由 backlog
+  `RENDER-LINES-001` 跟踪。
+- Editor 将 `EngineConfig::renderDrawCallCapacity` 固定为8192。其 scene 与 DisplayList 都是启动期定容，
+  无需为普通 2D authoring 会话承担 bgfx 的65K通用 draw-call storage。
 - grid、transform gizmo 与 marquee overlay node 在 root 创建期一次性预分配，未使用槽为 `Collapsed`，并保持
   `UIPointerHitPolicy::Ignore`；它们的命中仍由 `viewportPreviewLayer_` 统一路由给 navigation、transform gizmo、
   marquee 与 TileMap brush。
@@ -521,8 +528,9 @@ history vector 在 Create 时一次 reserve 到配置 entry 上限。发布新 r
   shear/零 scale 或 baseline 冲突恢复 canonical preview，不生成 history entry；
 - `EditorMarqueeSelection::Evaluate()`：以固定容量 stable-ID candidate/current selection 计算 Replace/Add/Toggle 结果与
   added/removed diff；非法 rect、重复/零 stable ID 或 union 超限时原子失败；空结果同步 Hierarchy document root；
-- `EditorPlaySession`：复制 current-schema canonical bytes，提供 Playing/Paused、bounded fixed-step advance、single-step 与
-  Stop；session 不持有或修改 authoring document；
+- `EditorPlaySession`：Play 时按实际 payload 事务复制 current-schema canonical bytes，提供 Playing/Paused、bounded
+  fixed-step advance、single-step 与 Stop；空 session 不按容量上限预留，Stop 释放快照，session 不持有或修改
+  authoring document；
 - `undo()` / `redo()`：只移动已发布 revision cursor，不重新解析、不分配。
 
 相同 canonical bytes 是 no-op，不增加 revision 或裁剪 redo。成功 edit/undo/redo 单调推进 document revision；达到
@@ -580,7 +588,8 @@ state storage，不能只看单一容量字段判断泄漏。
 而尚未被场景引用时，完整 Texture2D payload 不属于 resident 数据；worker 和 Catalog validation 的完整文件缓冲
 必须在对应阶段结束时释放。
 普通无项目启动不会提供任何测试资源；真实资源验收可直接点击 Project Assets 标题栏的小 `+` 选择项目外
-PNG/JPEG/WAV，确认不会追加目录对话框，文件自动进入临时 Project 的 `Source/Imported`，且图片产生 Texture2D +
+PNG/JPEG/WAV（可一次选择几十张），确认 dialog 关闭后 Editor 仍可响应，状态依次显示 Preparing/Copying/Cooking/Committing，
+文件自动进入临时 Project 的 `Source/Imported`，且图片产生 Texture2D +
 全幅 Sprite 并用于 2D 预览。随后点击 `Save` 或 `Save As`，选择空目录并确认资源迁移、重新 cook 和临时目录清理。
 已有永久项目也可通过同一 `+` 直接导入。glTF/GLB 的完整
 主文件与相对依赖仍先放入项目 `Source/` 再选择，导入后应产生 Mesh/Material/Prefab
@@ -615,8 +624,8 @@ TileMap root+chunk authoring/cook/save、SpriteAnimationClip timeline authoring/
 Project Browser、分类过滤、资源 Inspector、Catalog current-schema open/refresh、固定容量 document tabs/session、
 Save/Save As、Windows native dialog、Linux `zenity`/`kdialog` dialog 与四类 retained `UIDialog` 已完成。项目 workspace 与空目录创建的基础 API 已完成，
 Windows Project `New` 也能创建 Source/Catalog、manifest-last 发布空 current-schema package 并 reopen/typed-validate；
-Project `Open` 与 New/Open 的下一安全帧 live project/Catalog switch 也已完成。Editor source import 的完整 intended unit
-probe、后台 fresh-stage cook、主线程 Catalog reload/busy retry、dirty-document commit gate、stage sibling state + 单一 active pointer
+Project `Open` 与 New/Open 的下一安全帧 live project/Catalog switch 也已完成。Editor source import 的后台 ingress/分块校验/intended-set merge、完整 intended unit
+probe、fresh-stage cook、主线程 Catalog reload/busy retry、dirty-document commit gate、stage sibling state + 单一 active pointer
 commit 与 reopen 恢复，以及 intended-set 两列 DataGrid、选择、stale unit 删除和最终空 Catalog 发布也已完成；新增
 viewport/hierarchy/play 功能的专项测试、产品交互和视觉证据，以及 Linux helper 门禁仍待收口。
 Timeline 提供 6 槽可滚动窗口、Play/Pause、Prev/Next、Add/Duplicate/Delete、Sprite 切换、重排、逐帧时长、

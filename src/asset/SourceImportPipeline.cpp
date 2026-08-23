@@ -479,6 +479,7 @@ executeSourceImportPipelineImpl(const SourceImportPipelineRequest& request,
             result.catalogEntries = baseline.catalog.entryCount();
             result.catalogDependencies = baseline.catalog.dependencyCount();
             result.importStateCommitted = false;
+            result.catalog = std::move(baseline.catalog);
             return result;
         }
         if (request.stageCatalogRootUtf8.empty())
@@ -574,6 +575,7 @@ executeSourceImportPipelineImpl(const SourceImportPipelineRequest& request,
         result.catalogEntries = staged->entryCount();
         result.catalogDependencies = staged->dependencyCount();
         result.importStateCommitted = true;
+        result.catalog = std::move(*staged);
         return result;
     }
 
@@ -642,6 +644,7 @@ executeSourceImportPipelineImpl(const SourceImportPipelineRequest& request,
     result.catalogEntries = staged->entryCount();
     result.catalogDependencies = staged->dependencyCount();
     result.importStateCommitted = true;
+    result.catalog = std::move(*staged);
     return result;
 }
 

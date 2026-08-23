@@ -1862,6 +1862,7 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
         {
             const Render::RenderDeviceCreateParams renderParams{
                 .shadowMapExtents = ownedConfig.shadowMapExtents,
+                .drawCallCapacity = ownedConfig.renderDrawCallCapacity,
                 .msaaSamples = ownedConfig.renderMsaaSamples,
             };
             auto renderResult = invokeResultBoundary("IndependentPlatformRenderFactories::createRenderDevice",
@@ -1926,6 +1927,7 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
             const Render::RenderDeviceCreateParams renderParams{
                 .initialPrimaryWindowSurface = toRenderSurfaceState(*snapshotResult),
                 .shadowMapExtents = ownedConfig.shadowMapExtents,
+                .drawCallCapacity = ownedConfig.renderDrawCallCapacity,
                 .msaaSamples = ownedConfig.renderMsaaSamples,
             };
             auto renderResult = invokeResultBoundary(

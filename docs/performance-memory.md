@@ -107,7 +107,7 @@ Motion 只遍历 active list，`M == 0` 不产生额外 dirty；Image/Icon/NineS
 ### Editor UI 内存诊断
 
 `TinaEditor --profile-ui --frames=180 --frame-delay-ms=0` 会在每个 UI phase 采样并在末尾输出 JSON。该模式只增加
-诊断账本和进程快照，不修改 Editor 的 node、paint、display-list 或 MSAA 容量：
+诊断账本和进程快照，不额外修改 Editor 的 node、paint、display-list、draw-call 或 MSAA 容量：
 
 - `uiPmrFirstBytes` / `uiPmrLastBytes` / `uiPmrPeakBytes`：UIContext 实际通过其 PMR 请求的字节数；
 - `uiPmrCurrentDeltaBytes`、首末帧 allocation/deallocation count 及 delta：用于识别 warm-up 后是否仍在反复扩容；
@@ -116,6 +116,12 @@ Motion 只遍历 active list，`M == 0` 不产生额外 dirty；Image/Icon/NineS
   分类。尤其 `uiPmrStateStorageBytes` 会量出 Tooltip/Dialog/SplitView/TabView/Menu/VirtualGrid/DataGrid 等
   固定 state storage 构造成本，`uiPmrIndexAlignedStorageBytes` 会量出所有 node-index aligned 通用数组；
 - `uiPmrFailedAllocationCount` / `uiPmrInvalidDeallocationCount`：账本自身的失败和错误释放信号；
+- `configuredUiNodeCapacity`、`configuredUiPaintCapacity`、三类 `configuredDisplayList*Capacity`、
+  `configuredRenderDrawCallCapacity` 与 `configuredRenderMsaaSamples`：本次进程实际生效的启动定容；其中
+  `configuredUiPaintCapacity` 会把公开配置中的派生值 `0` 展开为实际 node capacity，不输出容易误判的原始 `0`；
+- `configuredVirtualGrid*StateCapacity` 与 `configuredDataGrid*StateCapacity`：按
+  `min(nodeCapacity, Default*)` 展开后的六个 bounded sparse pool 实际容量，用于确认可选集合组件不再按全局
+  node capacity 构造 state 数组；这些配置证据共同用于拒绝旧 executable 或错误配置产生的伪对比；
 - `uiNodeCapacity`、`uiLiveNodeCount`、`uiCommittedNodeCount`、dirty/rebuild counters：解释容量与工作量，不能单独当作进程内存；
 - `processMemoryStages`：Windows 上依次记录 options、Catalog、Engine create、first/last UI frame、run teardown 和
   Engine destroy；`processMemoryDeltas` 直接输出相邻阶段的有符号 Working Set / Private Bytes 差值；
@@ -129,7 +135,8 @@ Motion 只遍历 active list，`M == 0` 不产生额外 dirty；Image/Icon/NineS
 判读顺序固定为：
 
 1. `catalog` delta 已经跳升：先检查 source/cooked payload、Catalog 和 AssetSystem，而不是 UI；
-2. `engineCreate` delta 跳升但 UI PMR 尚不存在：先检查窗口/backbuffer、bgfx/driver 和 MSAA；
+2. `engineCreate` delta 跳升但 UI PMR 尚不存在：先检查窗口/backbuffer、bgfx/driver、draw-call/encoder storage、
+   MSAA 与启动期 GPU resource；
 3. `uiStartup` delta 与 UI PMR 接近，且 UI PMR 首帧已经很大、之后稳定：这是固定 UI storage 成本；继续比较
    `uiPmrStateStorageBytes`、`uiPmrIndexAlignedStorageBytes` 和 snapshot 分类，不能把“下调容量”当作泄漏修复；
 4. UI PMR 在首帧后稳定且分配计数不再增加，而进程 Private Bytes 仍持续上升：问题不在 UI PMR，应转向 Render/bgfx/驱动或其他进程 heap；
@@ -138,13 +145,37 @@ Motion 只遍历 active list，`M == 0` 不产生额外 dirty；Image/Icon/NineS
    仍不回落，再区分 allocator 保留页与真实存活 owner，不能只凭 Working Set 判定泄漏；
 7. PMR 和进程内存都稳定但 CPU 仍接近单核：检查 present/vsync 配置与渲染循环，不把 CPU 忙等误判成内存泄漏。
 
-图片 source import 的 payload 校验必须使用单次操作局部 PMR pool。worker、Editor candidate preflight 和
-`AssetSystem::reloadCatalog()` 不得把完整 Texture2D cooked 文件读入长期 pool；Catalog manifest/index 可以使用长期
-owner，但 validation file buffer 在操作返回前必须释放。普通图片 cooker 直接从 `stb_image` RGBA buffer 写
-Texture2D payload，不再额外创建一份等大的 RGBA staging vector。
+图片 source import 的 payload 校验必须使用单次操作局部 PMR pool。worker 完成 fresh stage 的唯一完整 package
+validation 后，返回由独立 owning resource 持有的 `CatalogSnapshot`；validation file buffer 在 worker 返回前释放。
+Editor owner thread 通过 `reloadPreparedCatalog()` 消费同一 snapshot，不再二次打开/验证整份 Texture2D cooked file。
+普通 path-based `AssetSystem::reloadCatalog()` 仍把 validation file buffer 放在调用期局部 pool，不会把完整 payload
+留在长期 Asset pool。普通图片 cooker 直接从 `stb_image` RGBA buffer 写 Texture2D payload，不再额外创建一份等大的
+RGBA staging vector。
 Editor 的 resident `CookedAssetFile` bytes 使用可实际 deallocate 的独立 PMR upstream；固定容量 Store/index 等小对象
 仍使用长期 pool。这样 lease 存活时的 CPU cooked file 会由 `residentCookedFileBytes()` 如实报告，最后一次物理 unload 后不会
 再由 Editor 的长期 pool 保留整张纹理的高水位块。
+
+### Editor 启动基线回归的结构性来源
+
+空 Editor 的高启动基线不是一个12,288字节的小常量，也不能只归因为“UI 很多”。已定位的当前源码来源和修复边界为：
+
+- 旧 axis-aligned stair grid 曾把 Editor 提高到12,288 nodes、32,768 paint entries 和每类16,384个
+  DisplayList entries；真实 Line/Ellipse 已取代该设计，Editor 现恢复默认 UI/DisplayList 容量，不保留旧预算兼容代码；
+- `UIContext::Create()` 现完整转发 normalized `componentStates`。VirtualGrid/DataGrid 的 view/grid/item/column/
+  row/cell state 改为独立 bounded sparse pool，layout scratch 跟随 owner state，避免每一种可选组件都按全局
+  node capacity 构造大型数组；
+- bgfx 通用默认会为65K draw calls 的双帧 render-item arrays 和多个 encoder uniform buffer 定容。
+  Runtime 现显式传播 `renderDrawCallCapacity` 并固定单 owner-thread encoder，Editor 使用8192；
+- Editor 不再开启全 backbuffer 8× MSAA；Directional/Spot/Point shadow atlas/map 也不在空启动时创建，
+  只在首次出现对应 pass 时按需分配，启动只保留1×1 sampled D16 fallback；
+- `EditorWorkspaceState::onEnter()` 会创建 PlaySession，但16 MB `canonicalByteCapacity` 只是运行快照的合法上限。
+  `EditorPlaySession::Create()` 不再按上限预留空 vector；`start()` 只为实际 canonical payload 事务分配，
+  分配失败保留 Editing 状态，`stop()` 归还快照高水位。authoring document 的 `historyByteCapacity` 同样是
+  累计历史字节上限，启动只预留固定数量的 revision entries，不能把这些上限统一下调当作修复。
+
+这些条目解释的是已删除的结构性常驻成本，不冒充最终进程数值。合并后的实际 Working Set/Private Bytes、
+`engineCreate`/`uiStartup` delta 和 UI PMR 分类仍必须由同一 build、同一机器上的 `--profile-ui` 重新采样；
+在没有该运行证据前不写“已回到200 MB”之类结论。
 
 正式性能结论至少固定：
 

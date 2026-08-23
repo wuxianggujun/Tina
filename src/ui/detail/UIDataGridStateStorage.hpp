@@ -4,11 +4,19 @@
 #include <tina/ui/UIDataGrid.hpp>
 #include <tina/ui/UINodeId.hpp>
 
+#include "UIBoundedNodeStateTable.hpp"
+
 #include <memory_resource>
 #include <span>
 #include <vector>
 
 namespace Tina::UI::Detail {
+
+struct DataGridLayoutScratch final {
+    UIDataGridMetrics metrics{};
+    UILogicalRect headerViewportRect{};
+    UILogicalRect bodyViewportRect{};
+};
 
 struct DataGridState final {
     UINodeId node{};
@@ -28,6 +36,7 @@ struct DataGridState final {
     u32 materializedRowCapacity = 0;
     u32 linkedColumnCount = 0;
     u32 linkedMaterializedRowCount = 0;
+    DataGridLayoutScratch layoutScratch{};
 };
 
 struct DataGridColumnState final {
@@ -85,21 +94,22 @@ struct DataGridCellState final {
     bool committedBound = false;
 };
 
-struct DataGridLayoutScratch final {
-    UIDataGridMetrics metrics{};
-    UILogicalRect headerViewportRect{};
-    UILogicalRect bodyViewportRect{};
-};
-
-// Index-aligned state for DataGrid and its fixed column, row, and row-major
-// cell pools. Construction performs all allocation; steady-state binding and
-// publication do not grow storage. UIContext owns topology and text content.
+// Independent fixed-capacity sparse state for DataGrid and its fixed column,
+// row, and row-major cell pools. Construction performs all allocation;
+// steady-state binding and publication do not grow storage. UIContext owns
+// topology and text content.
 class UIDataGridStateStorage final {
   public:
     UIDataGridStateStorage(
-        usize nodeCapacity, std::pmr::memory_resource& resource);
+        usize gridCapacity, usize columnCapacity, usize rowCapacity,
+        usize cellCapacity, usize linkValidationCapacity,
+        std::pmr::memory_resource& resource);
 
     [[nodiscard]] usize capacity() const noexcept;
+    [[nodiscard]] usize availableGridCount() const noexcept;
+    [[nodiscard]] usize availableColumnCount() const noexcept;
+    [[nodiscard]] usize availableRowCount() const noexcept;
+    [[nodiscard]] usize availableCellCount() const noexcept;
     [[nodiscard]] bool containsGrid(UINodeId dataGrid) const noexcept;
     [[nodiscard]] bool containsColumn(UINodeId column) const noexcept;
     [[nodiscard]] bool containsRow(UINodeId row) const noexcept;
@@ -116,7 +126,7 @@ class UIDataGridStateStorage final {
     [[nodiscard]] const DataGridLayoutScratch* tryLayoutScratch(
         UINodeId dataGrid) const noexcept;
 
-    void initializeGrid(
+    [[nodiscard]] bool initializeGrid(
         UINodeId dataGrid, const UIDataGridCreateConfig& config) noexcept;
     [[nodiscard]] bool linkFixedPools(
         UINodeId dataGrid, std::span<const UINodeId> columns,
@@ -159,13 +169,11 @@ class UIDataGridStateStorage final {
     [[nodiscard]] bool beginLinkValidation() noexcept;
     [[nodiscard]] bool markLinkNode(UINodeId node) noexcept;
 
-    std::pmr::vector<DataGridState> gridsByNodeIndex_;
-    std::pmr::vector<DataGridColumnState> columnsByNodeIndex_;
-    std::pmr::vector<DataGridRowState> rowsByNodeIndex_;
-    std::pmr::vector<DataGridCellState> cellsByNodeIndex_;
-    std::pmr::vector<DataGridLayoutScratch> layoutScratchByNodeIndex_;
-    std::pmr::vector<u32> linkValidationEpochByNodeIndex_;
-    u32 linkValidationEpoch_ = 0;
+    UIBoundedNodeStateTable<DataGridState> grids_;
+    UIBoundedNodeStateTable<DataGridColumnState> columns_;
+    UIBoundedNodeStateTable<DataGridRowState> rows_;
+    UIBoundedNodeStateTable<DataGridCellState> cells_;
+    std::pmr::vector<u32> linkValidationNodeIndices_;
 };
 
 } // namespace Tina::UI::Detail

@@ -83,8 +83,8 @@ provider 与 RenderScene 容量消费前剔除；无相机/0x0 surface 保留未
 出光方向与 inner/outer cone cosine。`outerConeHalfAngleDegrees` 的公开合法域保持 `<90°`，backend 不另行
 收紧完整 FOV，也不静默 clamp。一个 directional light 可携带 optional `CascadedDirectionalShadow3D`；
 它以 `maximumDistanceMeters`、`depthBias` 与 `normalBiasMeters` 描述固定4级联阴影。Render snapshot
-映射为 `Mesh3DCascadedDirectionalShadow`，以排序后的 `directionalLightIndex` 关联灯光。bgfx 使用独立
-2×2 D16 `DirectionalShadowAtlas`（默认2048×2048、每 tile 1024×1024），并执行 camera-slice projection
+映射为 `Mesh3DCascadedDirectionalShadow`，以排序后的 `directionalLightIndex` 关联灯光。bgfx 在首次出现对应
+shadow pass 时按需创建独立2×2 D16 `DirectionalShadowAtlas`（默认2048×2048、每 tile 1024×1024），并执行 camera-slice projection
 与每级联3×3 PCF；级联 pass 不消费
 primary-surface clear ownership。最多一个 camera-affecting spot light 可携带 optional `SpotLightShadow3D`；
 它以正且小于 influence radius 的 near plane、depth bias 与 normal bias 描述。Render snapshot 在 spot lights
@@ -94,7 +94,8 @@ receiver 仅对匹配的 spot slot 应用3×3 PCF。最多一个 camera-affectin
 `pointLightIndex`。bgfx 拥有六张相同尺寸的 sampled D16 map（默认512×512），按 `+X/-X/+Y/-Y/+Z/-Z` 提交六个
 depth pass；receiver 以 dominant axis 选择面，只对匹配的 point slot 应用3×3 PCF。固定顺序为
 CSM×4 → Spot×1 → Point×6 → Opaque3D → Transparent3D → Sprite2D → UI，所有 shadow pass 都不消费 primary-surface clear。第二个可见
-point shadow 或非法 near/depth/normal bias 在 Scene publish 前 fail closed。
+point shadow 或非法 near/depth/normal bias 在 Scene publish 前 fail closed。Spot 与 Point 的 D16 map 同样在各自
+pass 首次出现时创建；无任何 shadow pass 的启动期只保留一个1×1 sampled D16 fallback 供 shader sampler 合法绑定。
 
 `Mesh3DAlphaMode` 只有 `Opaque` 与 `Blend`，由 Cooked Material/authoring 显式声明；Runtime 不从
 base-color alpha 或纹理内容推断 pass。Scene extraction 把 material intent 复制到 static/skinned item，
@@ -118,10 +119,15 @@ material binding alpha 一致性与 resource/palette 范围；未注册 material
 EngineHost 在创建任何 module factory 前 fail closed，Null/bgfx 直接 factory 也独立校验。bgfx 的 D16
 资源创建、shadow view rect 与3×3 PCF texel size 使用同一份实际 extent；不支持热改或旧固定尺寸分支。
 
+`EngineConfig::renderDrawCallCapacity` 是每帧 backend submission 的启动定容，合法值为1024的整数倍或
+精确的 native 上限65535，默认65535以保持通用 Runtime 上限。bgfx 将它传给 `Init::limits.numDrawCalls`，并因 Tina
+只允许 RenderDevice owner thread 提交而把 `maxEncoders` 固定为1；工具可依据其冻结的 scene/UI 容量显式降低。
+`TinaEditor` 使用8192，避免空会话承担 bgfx 的65K双帧 render-item arrays 与默认多 encoder uniform buffers。
+
 `EngineConfig::renderMsaaSamples` 同样是 device-lifetime 启动配置：`0`（默认，关闭）或 `2/4/8/16`，
 其余值在 EngineConfig 校验与 bgfx factory 双双 fail closed。它映射为 backbuffer 的
 `BGFX_RESET_MSAA_X*` flag，由 init 与 resize reset 共用。samples 与所有像素证据 gate 保持 `0`
-以免破坏已冻结的视觉金标；`TinaEditor` 以 `8` 启动来抗锯齿 world pass（mesh 边缘与 sprite 采样）。
+以免破坏已冻结的视觉金标；`TinaEditor` 同样使用默认 `0`，不为整个 authoring backbuffer 常驻多采样资源。
 
 Sprite2D lighting（`2D-LIGHT-N5`）只使用 frame-scoped `Sprite2DLightingDesc`：0..8个 committed world-space point
 light、0..32个 world-space shadow segment、正 influence radius、0..influence radius 的 source radius、

@@ -4,11 +4,18 @@
 #include <tina/ui/UINodeId.hpp>
 #include <tina/ui/UIVirtualGridView.hpp>
 
+#include "UIBoundedNodeStateTable.hpp"
+
 #include <memory_resource>
 #include <span>
 #include <vector>
 
 namespace Tina::UI::Detail {
+
+struct VirtualGridViewLayoutScratch final {
+    UIVirtualGridViewMetrics metrics{};
+    UILogicalRect viewportRect{};
+};
 
 struct VirtualGridViewState final {
     UINodeId node{};
@@ -23,6 +30,7 @@ struct VirtualGridViewState final {
     float requestedScrollOffset = 0.0F;
     u32 materializedItemCapacity = 0;
     u32 linkedMaterializedItemCount = 0;
+    VirtualGridViewLayoutScratch layoutScratch{};
 };
 
 struct VirtualGridViewItemState final {
@@ -43,21 +51,20 @@ struct VirtualGridViewItemState final {
     bool committedEnabled = true;
 };
 
-struct VirtualGridViewLayoutScratch final {
-    UIVirtualGridViewMetrics metrics{};
-    UILogicalRect viewportRect{};
-};
-
-// Index-aligned state for VirtualGridView and its fixed materialized item pool.
-// Construction performs all allocation; binding, publication, and generation
-// reuse do not grow storage. UIContext remains responsible for tree topology,
-// text storage, dirty propagation, and descriptor validation.
+// Independent fixed-capacity sparse state for VirtualGridView and its
+// materialized item pool. Construction performs all allocation; binding,
+// publication, and generation reuse do not grow storage. UIContext remains
+// responsible for tree topology, text storage, dirty propagation, and
+// descriptor validation.
 class UIVirtualGridViewStateStorage final {
   public:
     UIVirtualGridViewStateStorage(
-        usize nodeCapacity, std::pmr::memory_resource& resource);
+        usize viewCapacity, usize itemCapacity,
+        std::pmr::memory_resource& resource);
 
     [[nodiscard]] usize capacity() const noexcept;
+    [[nodiscard]] usize availableViewCount() const noexcept;
+    [[nodiscard]] usize availableItemCount() const noexcept;
     [[nodiscard]] bool containsView(UINodeId virtualGridView) const noexcept;
     [[nodiscard]] bool containsItem(UINodeId item) const noexcept;
     [[nodiscard]] VirtualGridViewState* tryView(UINodeId virtualGridView) noexcept;
@@ -71,7 +78,7 @@ class UIVirtualGridViewStateStorage final {
     [[nodiscard]] const VirtualGridViewLayoutScratch* tryLayoutScratch(
         UINodeId virtualGridView) const noexcept;
 
-    void initializeView(
+    [[nodiscard]] bool initializeView(
         UINodeId virtualGridView,
         const UIVirtualGridViewCreateConfig& config) noexcept;
     [[nodiscard]] bool linkMaterializedItems(
@@ -106,11 +113,9 @@ class UIVirtualGridViewStateStorage final {
     [[nodiscard]] bool beginLinkValidation() noexcept;
     [[nodiscard]] bool markLinkNode(UINodeId node) noexcept;
 
-    std::pmr::vector<VirtualGridViewState> viewsByNodeIndex_;
-    std::pmr::vector<VirtualGridViewItemState> itemsByNodeIndex_;
-    std::pmr::vector<VirtualGridViewLayoutScratch> layoutScratchByNodeIndex_;
-    std::pmr::vector<u32> linkValidationEpochByNodeIndex_;
-    u32 linkValidationEpoch_ = 0;
+    UIBoundedNodeStateTable<VirtualGridViewState> views_;
+    UIBoundedNodeStateTable<VirtualGridViewItemState> items_;
+    std::pmr::vector<u32> linkValidationNodeIndices_;
 };
 
 } // namespace Tina::UI::Detail

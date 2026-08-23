@@ -1,40 +1,44 @@
 #include "UIVirtualGridViewStateStorage.hpp"
 
 #include <algorithm>
-#include <limits>
+#include <exception>
 #include <utility>
 
 namespace Tina::UI::Detail {
 
 UIVirtualGridViewStateStorage::UIVirtualGridViewStateStorage(
-    usize nodeCapacity, std::pmr::memory_resource& resource)
-    : viewsByNodeIndex_(&resource), itemsByNodeIndex_(&resource),
-      layoutScratchByNodeIndex_(&resource),
-      linkValidationEpochByNodeIndex_(&resource)
+    usize viewCapacity, usize itemCapacity,
+    std::pmr::memory_resource& resource)
+    : views_(viewCapacity, resource), items_(itemCapacity, resource),
+      linkValidationNodeIndices_(&resource)
 {
-    viewsByNodeIndex_.resize(nodeCapacity);
-    itemsByNodeIndex_.resize(nodeCapacity);
-    layoutScratchByNodeIndex_.resize(nodeCapacity);
-    linkValidationEpochByNodeIndex_.resize(nodeCapacity);
+    linkValidationNodeIndices_.reserve(itemCapacity);
 }
 
 usize UIVirtualGridViewStateStorage::capacity() const noexcept
 {
-    return viewsByNodeIndex_.size();
+    return views_.capacity();
+}
+
+usize UIVirtualGridViewStateStorage::availableViewCount() const noexcept
+{
+    return views_.availableCount();
+}
+
+usize UIVirtualGridViewStateStorage::availableItemCount() const noexcept
+{
+    return items_.availableCount();
 }
 
 bool UIVirtualGridViewStateStorage::containsView(
     UINodeId virtualGridView) const noexcept
 {
-    return virtualGridView.hasValue() &&
-           virtualGridView.index() < viewsByNodeIndex_.size() &&
-           viewsByNodeIndex_[virtualGridView.index()].node == virtualGridView;
+    return views_.contains(virtualGridView);
 }
 
 bool UIVirtualGridViewStateStorage::containsItem(UINodeId item) const noexcept
 {
-    return item.hasValue() && item.index() < itemsByNodeIndex_.size() &&
-           itemsByNodeIndex_[item.index()].node == item;
+    return items_.contains(item);
 }
 
 VirtualGridViewState* UIVirtualGridViewStateStorage::tryView(
@@ -47,9 +51,7 @@ VirtualGridViewState* UIVirtualGridViewStateStorage::tryView(
 const VirtualGridViewState* UIVirtualGridViewStateStorage::tryView(
     UINodeId virtualGridView) const noexcept
 {
-    return containsView(virtualGridView)
-               ? &viewsByNodeIndex_[virtualGridView.index()]
-               : nullptr;
+    return views_.tryGet(virtualGridView);
 }
 
 VirtualGridViewItemState* UIVirtualGridViewStateStorage::tryItem(
@@ -62,7 +64,7 @@ VirtualGridViewItemState* UIVirtualGridViewStateStorage::tryItem(
 const VirtualGridViewItemState* UIVirtualGridViewStateStorage::tryItem(
     UINodeId item) const noexcept
 {
-    return containsItem(item) ? &itemsByNodeIndex_[item.index()] : nullptr;
+    return items_.tryGet(item);
 }
 
 VirtualGridViewLayoutScratch*
@@ -77,55 +79,46 @@ const VirtualGridViewLayoutScratch*
 UIVirtualGridViewStateStorage::tryLayoutScratch(
     UINodeId virtualGridView) const noexcept
 {
-    return containsView(virtualGridView)
-               ? &layoutScratchByNodeIndex_[virtualGridView.index()]
-               : nullptr;
+    const VirtualGridViewState* state = tryView(virtualGridView);
+    return state != nullptr ? &state->layoutScratch : nullptr;
 }
 
-void UIVirtualGridViewStateStorage::initializeView(
+bool UIVirtualGridViewStateStorage::initializeView(
     UINodeId virtualGridView,
     const UIVirtualGridViewCreateConfig& config) noexcept
 {
-    if (!virtualGridView.hasValue() ||
-        virtualGridView.index() >= viewsByNodeIndex_.size())
+    if (!virtualGridView.hasValue())
     {
-        return;
+        return false;
     }
     resetNode(virtualGridView.index());
-    viewsByNodeIndex_[virtualGridView.index()] = VirtualGridViewState{
+    return views_.insertOrAssign(VirtualGridViewState{
         .node = virtualGridView,
         .materializedItemCapacity = config.materializedItemCapacity,
-    };
+    });
 }
 
 bool UIVirtualGridViewStateStorage::beginLinkValidation() noexcept
 {
-    if (linkValidationEpochByNodeIndex_.empty())
-    {
-        return false;
-    }
-    if (linkValidationEpoch_ == (std::numeric_limits<u32>::max)())
-    {
-        std::ranges::fill(linkValidationEpochByNodeIndex_, 0U);
-        linkValidationEpoch_ = 1U;
-    }
-    else
-    {
-        ++linkValidationEpoch_;
-    }
+    linkValidationNodeIndices_.clear();
     return true;
 }
 
 bool UIVirtualGridViewStateStorage::markLinkNode(UINodeId node) noexcept
 {
-    if (!node.hasValue() || node.index() >= itemsByNodeIndex_.size() ||
-        viewsByNodeIndex_[node.index()].node.hasValue() ||
-        itemsByNodeIndex_[node.index()].node.hasValue() ||
-        linkValidationEpochByNodeIndex_[node.index()] == linkValidationEpoch_)
+    if (!node.hasValue() || views_.tryGetByIndex(node.index()) != nullptr ||
+        items_.tryGetByIndex(node.index()) != nullptr)
     {
         return false;
     }
-    linkValidationEpochByNodeIndex_[node.index()] = linkValidationEpoch_;
+    const auto found = std::lower_bound(
+        linkValidationNodeIndices_.begin(), linkValidationNodeIndices_.end(),
+        node.index());
+    if (found != linkValidationNodeIndices_.end() && *found == node.index())
+    {
+        return false;
+    }
+    linkValidationNodeIndices_.insert(found, node.index());
     return true;
 }
 
@@ -135,7 +128,7 @@ bool UIVirtualGridViewStateStorage::linkMaterializedItems(
     VirtualGridViewState* view = tryView(virtualGridView);
     if (view == nullptr || view->linkedMaterializedItemCount != 0 ||
         items.size() != view->materializedItemCapacity ||
-        !beginLinkValidation())
+        items.size() > items_.availableCount() || !beginLinkValidation())
     {
         return false;
     }
@@ -153,7 +146,7 @@ bool UIVirtualGridViewStateStorage::linkMaterializedItems(
     for (u32 ordinal = 0; ordinal < view->linkedMaterializedItemCount; ++ordinal)
     {
         const UINodeId item = items[ordinal];
-        itemsByNodeIndex_[item.index()] = VirtualGridViewItemState{
+        const bool inserted = items_.insertOrAssign(VirtualGridViewItemState{
             .node = item,
             .virtualGridView = virtualGridView,
             .previousItem = ordinal == 0 ? UINodeId{} : items[ordinal - 1],
@@ -161,7 +154,11 @@ bool UIVirtualGridViewStateStorage::linkMaterializedItems(
                             ? UINodeId{}
                             : items[ordinal + 1],
             .poolOrdinal = ordinal,
-        };
+        });
+        if (!inserted)
+        {
+            std::terminate();
+        }
     }
     return true;
 }
@@ -185,7 +182,7 @@ void UIVirtualGridViewStateStorage::unlinkMaterializedItems(
             break;
         }
         const UINodeId next = itemState->nextItem;
-        *itemState = {};
+        static_cast<void>(items_.erase(item));
         item = next;
     }
     view->firstMaterializedItem = {};
@@ -195,30 +192,29 @@ void UIVirtualGridViewStateStorage::unlinkMaterializedItems(
 
 void UIVirtualGridViewStateStorage::resetNode(u32 nodeIndex) noexcept
 {
-    if (nodeIndex >= viewsByNodeIndex_.size())
+    if (VirtualGridViewState* view = views_.tryGetByIndex(nodeIndex);
+        view != nullptr)
     {
-        return;
+        const UINodeId viewNode = view->node;
+        unlinkMaterializedItems(viewNode);
+        static_cast<void>(views_.eraseByIndex(nodeIndex));
     }
-    if (viewsByNodeIndex_[nodeIndex].node.hasValue())
+    if (VirtualGridViewItemState* item = items_.tryGetByIndex(nodeIndex);
+        item != nullptr)
     {
-        unlinkMaterializedItems(viewsByNodeIndex_[nodeIndex].node);
-    }
-    if (itemsByNodeIndex_[nodeIndex].node.hasValue())
-    {
-        const UINodeId owner = itemsByNodeIndex_[nodeIndex].virtualGridView;
+        const UINodeId owner = item->virtualGridView;
         if (containsView(owner))
         {
             unlinkMaterializedItems(owner);
         }
     }
-    viewsByNodeIndex_[nodeIndex] = {};
-    itemsByNodeIndex_[nodeIndex] = {};
-    layoutScratchByNodeIndex_[nodeIndex] = {};
+    static_cast<void>(views_.eraseByIndex(nodeIndex));
+    static_cast<void>(items_.eraseByIndex(nodeIndex));
 }
 
 bool UIVirtualGridViewStateStorage::releaseNode(UINodeId node) noexcept
 {
-    if (!node.hasValue() || node.index() >= viewsByNodeIndex_.size())
+    if (!node.hasValue())
     {
         return false;
     }

@@ -432,11 +432,72 @@ AssetSystem::reloadCatalog(std::string_view catalogRootUtf8, CatalogReloadConfig
             std::move(replacement.error()).withContext("AssetSystem::reloadCatalog", "open"));
     }
 
+    return reloadPreparedCatalog(catalogRootUtf8, std::move(*replacement), config);
+}
+
+Core::Result<CatalogReloadResult>
+AssetSystem::reloadPreparedCatalog(std::string_view catalogRootUtf8,
+                                   CatalogSnapshot&& replacement,
+                                   CatalogReloadConfig config)
+{
+    if (std::this_thread::get_id() != m_ownerThread)
+    {
+        return Core::failure(AssetErrorCode::WrongOwnerThread,
+                             "prepared catalog reload must run on the AssetSystem owner thread");
+    }
+    if (!m_catalog || !replacement)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "prepared catalog reload requires live and replacement snapshots");
+    }
+    if (catalogRootUtf8.empty() || catalogRootUtf8.find('\0') != std::string_view::npos)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "prepared catalog reload root path is invalid");
+    }
+    if (!isCatalogMigrationQuiescent())
+    {
+        return Core::failure(AssetErrorCode::CatalogReloadBusy,
+                             "catalog reload requires quiescent IO, upload, and retirement owners");
+    }
+
+    const auto validateParticipants = [](auto participants, const char* label) -> Core::Status {
+        for (Core::usize left = 0; left < participants.size(); ++left)
+        {
+            if (participants[left] == nullptr)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig, label);
+            }
+            for (Core::usize right = left + 1U; right < participants.size(); ++right)
+            {
+                if (participants[left] == participants[right])
+                {
+                    return Core::failure(AssetErrorCode::InvalidCatalogConfig, label);
+                }
+            }
+        }
+        return Core::success();
+    };
+    if (auto status = validateParticipants(
+            config.bindings.sprite2D,
+            "catalog reload Sprite2D participants contain a null or duplicate registry");
+        !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    if (auto status = validateParticipants(
+            config.bindings.mesh3D,
+            "catalog reload Mesh3D participants contain a null or duplicate registry");
+        !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+
     if (config.changePlan.memoryResource == nullptr)
     {
         config.changePlan.memoryResource = m_memoryResource;
     }
-    auto plan = planCatalogChanges(m_catalog, *replacement, config.changePlan);
+    auto plan = planCatalogChanges(m_catalog, replacement, config.changePlan);
     if (!plan)
     {
         return Core::failure(
@@ -483,7 +544,7 @@ AssetSystem::reloadCatalog(std::string_view catalogRootUtf8, CatalogReloadConfig
         if (!reloadRoots.empty())
         {
             auto loads = planCatalogLoads(
-                *replacement, reloadRoots,
+                replacement, reloadRoots,
                 CatalogLoadPlanConfig{.memoryResource = m_memoryResource});
             if (!loads)
             {
@@ -546,7 +607,7 @@ AssetSystem::reloadCatalog(std::string_view catalogRootUtf8, CatalogReloadConfig
                 continue;
             }
 
-            auto cooked = loadCookedAssetFromCatalog(catalogRootUtf8, *replacement, row.assetId,
+            auto cooked = loadCookedAssetFromCatalog(catalogRootUtf8, replacement, row.assetId,
                                                       m_batch.file);
             if (!cooked)
             {
@@ -708,7 +769,7 @@ AssetSystem::reloadCatalog(std::string_view catalogRootUtf8, CatalogReloadConfig
     }
     m_index.swap(nextIndex);
     m_catalogRoot.swap(nextRoot);
-    m_catalog = std::move(*replacement);
+    m_catalog = std::move(replacement);
     for (const auto& resident : staged)
     {
         noteReadyCpu(resident.handle);

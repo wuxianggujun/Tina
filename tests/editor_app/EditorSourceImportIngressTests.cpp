@@ -79,7 +79,8 @@ TEST_F(EditorSourceImportIngressTests, CopiesExternalImageAndAudioIntoProject)
 
     {
         auto ingress = Detail::prepareEditorSourceImportIngress(
-            pathToUtf8(sourceRoot_), selectedPaths);
+            pathToUtf8(sourceRoot_), selectedPaths,
+            Detail::EditorSourceImportUnitCapacity, {}, {});
 
         ASSERT_TRUE(ingress) << ingress.error().message;
         EXPECT_EQ(ingress->copiedFileCount(), 2U);
@@ -105,7 +106,8 @@ TEST_F(EditorSourceImportIngressTests, RollsBackUncommittedFilesAndDirectories)
 
     {
         auto ingress = Detail::prepareEditorSourceImportIngress(
-            pathToUtf8(sourceRoot_), selectedPaths);
+            pathToUtf8(sourceRoot_), selectedPaths,
+            Detail::EditorSourceImportUnitCapacity, {}, {});
         ASSERT_TRUE(ingress) << ingress.error().message;
         ASSERT_TRUE(std::filesystem::is_regular_file(projectImage));
     }
@@ -121,7 +123,8 @@ TEST_F(EditorSourceImportIngressTests, PreflightRejectsExternalGltfBeforeCopying
     const std::array selectedPaths{pathToUtf8(image), pathToUtf8(gltf)};
 
     auto ingress = Detail::prepareEditorSourceImportIngress(
-        pathToUtf8(sourceRoot_), selectedPaths);
+        pathToUtf8(sourceRoot_), selectedPaths,
+        Detail::EditorSourceImportUnitCapacity, {}, {});
 
     ASSERT_FALSE(ingress);
     EXPECT_EQ(ingress.error().code, Tina::Core::CoreErrorCode::PermissionDenied);
@@ -134,7 +137,8 @@ TEST_F(EditorSourceImportIngressTests, KeepsProjectGltfAtItsExistingSourcePath)
     const std::array selectedPaths{pathToUtf8(gltf)};
 
     auto ingress = Detail::prepareEditorSourceImportIngress(
-        pathToUtf8(sourceRoot_), selectedPaths);
+        pathToUtf8(sourceRoot_), selectedPaths,
+        Detail::EditorSourceImportUnitCapacity, {}, {});
 
     ASSERT_TRUE(ingress) << ingress.error().message;
     EXPECT_EQ(ingress->copiedFileCount(), 0U);
@@ -152,7 +156,8 @@ TEST_F(EditorSourceImportIngressTests, PreservesDifferentExistingFileAndUsesSuff
     const auto suffixed = sourceRoot_ / "Imported" / "Images" / "icon_2.png";
 
     auto ingress = Detail::prepareEditorSourceImportIngress(
-        pathToUtf8(sourceRoot_), selectedPaths);
+        pathToUtf8(sourceRoot_), selectedPaths,
+        Detail::EditorSourceImportUnitCapacity, {}, {});
 
     ASSERT_TRUE(ingress) << ingress.error().message;
     EXPECT_EQ(ingress->copiedFileCount(), 1U);
@@ -171,7 +176,8 @@ TEST_F(EditorSourceImportIngressTests, ReusesSameNameWithIdenticalContent)
     const std::array selectedPaths{pathToUtf8(external)};
 
     auto ingress = Detail::prepareEditorSourceImportIngress(
-        pathToUtf8(sourceRoot_), selectedPaths);
+        pathToUtf8(sourceRoot_), selectedPaths,
+        Detail::EditorSourceImportUnitCapacity, {}, {});
 
     ASSERT_TRUE(ingress) << ingress.error().message;
     EXPECT_EQ(ingress->copiedFileCount(), 0U);
@@ -187,7 +193,8 @@ TEST_F(EditorSourceImportIngressTests, CopiesRepeatedPhysicalSelectionOnlyOnce)
     const std::array selectedPaths{pathToUtf8(external), pathToUtf8(external)};
 
     auto ingress = Detail::prepareEditorSourceImportIngress(
-        pathToUtf8(sourceRoot_), selectedPaths);
+        pathToUtf8(sourceRoot_), selectedPaths,
+        Detail::EditorSourceImportUnitCapacity, {}, {});
 
     ASSERT_TRUE(ingress) << ingress.error().message;
     EXPECT_EQ(ingress->copiedFileCount(), 1U);

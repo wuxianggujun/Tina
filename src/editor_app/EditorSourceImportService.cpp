@@ -1,5 +1,8 @@
 #include "EditorSourceImportService.hpp"
 
+#include "EditorSourceImportSelection.hpp"
+
+#include <tina/asset/AssetErrors.hpp>
 #include <tina/core/memory/CountingMemoryResource.hpp>
 #include <tina/core/memory/MemoryTracker.hpp>
 #include <tina/core/text/Utf8.hpp>
@@ -59,6 +62,11 @@ namespace {
     {
         return Core::failure(Core::CoreErrorCode::CapacityExceeded,
                              "Editor source import intended unit capacity exceeded");
+    }
+    if (request.selectedPathsUtf8.size() > config.maxUnits)
+    {
+        return Core::failure(Core::CoreErrorCode::CapacityExceeded,
+                             "Editor source import selection capacity exceeded");
     }
 
     Core::usize aggregatePathBytes = 0;
@@ -132,6 +140,16 @@ namespace {
             return status;
         }
     }
+    for (const auto& selectedPathUtf8 : request.selectedPathsUtf8)
+    {
+        if (const auto status = acceptPath(
+                selectedPathUtf8, false,
+                "Editor source import selected path is invalid");
+            !status)
+        {
+            return status;
+        }
+    }
     return Core::success();
 }
 
@@ -175,11 +193,11 @@ namespace {
 
 struct EditorSourceImportCompletion final {
     std::optional<Core::Result<EditorSourceImportWorkResult>> result{};
+    std::atomic<EditorSourceImportPhase> phase = EditorSourceImportPhase::Preparing;
     std::atomic<bool> finished = false;
 };
 
-[[nodiscard]] Core::Status validateWorkResult(const EditorSourceImportWorkResult& result,
-                                              Core::u32 intendedUnitCount)
+[[nodiscard]] Core::Status validateWorkResult(const EditorSourceImportWorkResult& result)
 {
     const auto& statistics = result.statistics;
     if (statistics.mode != EditorSourceImportMode::CleanReuse &&
@@ -189,7 +207,8 @@ struct EditorSourceImportCompletion final {
         return Core::failure(Core::CoreErrorCode::Internal,
                              "Editor source import worker returned an invalid mode");
     }
-    if (statistics.unitsTotal != intendedUnitCount ||
+    if (result.intendedUnits.size() > EditorSourceImportUnitCapacity ||
+        statistics.unitsTotal != result.intendedUnits.size() ||
         statistics.unitsRecooked > statistics.unitsTotal)
     {
         return Core::failure(Core::CoreErrorCode::Internal,
@@ -207,7 +226,116 @@ struct EditorSourceImportCompletion final {
         return Core::failure(Core::CoreErrorCode::Internal,
                              "Editor source import recook did not return a fresh stage");
     }
+    const bool hasSelection = result.selectedPathCount != 0U;
+    if (hasSelection != result.ingress.has_value() ||
+        result.addedUnitCount > result.selectedPathCount ||
+        result.copiedFileCount > result.selectedPathCount ||
+        result.reusedFileCount > result.selectedPathCount)
+    {
+        return Core::failure(Core::CoreErrorCode::Internal,
+                             "Editor source import worker returned inconsistent ingress ownership");
+    }
     return Core::success();
+}
+
+[[nodiscard]] Core::Status checkStopped(const std::stop_token stopToken)
+{
+    if (stopToken.stop_requested())
+    {
+        return Core::failure(Asset::AssetErrorCode::SourceImportCancelled,
+                             "Editor source import worker was cancelled");
+    }
+    return Core::success();
+}
+
+void reportIngressCopying(void* context) noexcept
+{
+    auto* phase = static_cast<std::atomic<EditorSourceImportPhase>*>(context);
+    if (phase != nullptr)
+    {
+        phase->store(EditorSourceImportPhase::Copying, std::memory_order_release);
+    }
+}
+
+[[nodiscard]] Core::Result<EditorSourceImportWorkResult> executeImportWork(
+    EditorSourceImportRequest& request,
+    const EditorSourceImportWorker& worker,
+    const EditorSourceImportServiceConfig& config,
+    const std::stop_token stopToken,
+    std::atomic<EditorSourceImportPhase>& phase)
+{
+    if (const auto status = checkStopped(stopToken); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+
+    std::optional<EditorSourceImportIngress> ingress{};
+    Core::u32 selectedPathCount = 0;
+    Core::u32 addedUnitCount = 0;
+    Core::u32 copiedFileCount = 0;
+    Core::u32 reusedFileCount = 0;
+    if (!request.selectedPathsUtf8.empty())
+    {
+        auto prepared = prepareEditorSourceImportIngress(
+            request.sourceRootUtf8, request.selectedPathsUtf8, config.maxUnits, stopToken,
+            EditorSourceImportIngressProgress{
+                .context = &phase,
+                .copyingStarted = &reportIngressCopying,
+            });
+        if (!prepared)
+        {
+            return Core::failure(std::move(prepared.error()));
+        }
+        selectedPathCount = static_cast<Core::u32>(request.selectedPathsUtf8.size());
+        copiedFileCount = prepared->copiedFileCount();
+        reusedFileCount = prepared->reusedFileCount();
+
+        auto merged = mergeEditorSourceImportSelection(
+            request.sourceRootUtf8, request.units, prepared->projectPathsUtf8(), config.maxUnits);
+        if (!merged)
+        {
+            return Core::failure(std::move(merged.error()));
+        }
+        addedUnitCount = merged->addedUnitCount;
+        request.units = std::move(merged->intendedUnits);
+        ingress.emplace(std::move(*prepared));
+    }
+    else
+    {
+        auto validated = validateEditorSourceImportIntendedSet(
+            request.sourceRootUtf8, request.units, config.maxUnits);
+        if (!validated)
+        {
+            return Core::failure(std::move(validated.error()));
+        }
+        request.units = std::move(*validated);
+    }
+
+    if (const auto status = checkStopped(stopToken); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    phase.store(EditorSourceImportPhase::Cooking, std::memory_order_release);
+    auto result = worker(request, stopToken);
+    if (!result)
+    {
+        return Core::failure(std::move(result.error()));
+    }
+    if (const auto status = checkStopped(stopToken); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+
+    result->intendedUnits = std::move(request.units);
+    if (ingress.has_value())
+    {
+        result->ingress.emplace(std::move(*ingress));
+    }
+    result->selectedPathCount = selectedPathCount;
+    result->addedUnitCount = addedUnitCount;
+    result->copiedFileCount = copiedFileCount;
+    result->reusedFileCount = reusedFileCount;
+    return result;
 }
 
 [[nodiscard]] Core::Result<EditorSourceImportMode>
@@ -235,7 +363,9 @@ makeEditorSourceImportStageConfig(std::pmr::memory_resource& transientMemory) no
     config.validation.manifest.catalog.maxEntries = 4096;
     config.validation.manifest.catalog.maxDependencies = 16384;
     config.validation.manifest.catalog.maxDependenciesPerAsset = 4096;
-    config.validation.manifest.catalog.memoryResource = &transientMemory;
+    // The validated snapshot crosses the worker boundary. Its allocations must outlive the
+    // request-local validation pool, while file buffers remain transient and are released here.
+    config.validation.manifest.catalog.memoryResource = std::pmr::new_delete_resource();
     config.validation.validation.file.memoryResource = &transientMemory;
     config.validation.validation.verifyTypedPayload = true;
     return config;
@@ -318,6 +448,7 @@ EditorSourceImportWorker makeEditorSourceImportPipelineWorker()
             return Core::failure(std::move(mode.error()));
         }
         EditorSourceImportWorkResult result{
+            .catalog = std::move(pipeline->catalog),
             .statistics = EditorSourceImportStatistics{
                 .mode = *mode,
                 .unitsTotal = pipeline->unitsTotal,
@@ -377,7 +508,6 @@ public:
     std::string pendingStatePathUtf8{};
     std::string pendingBaselineRootUtf8{};
     std::string pendingBaselineStatePathUtf8{};
-    Core::u32 pendingUnitCount = 0;
     std::optional<EditorSourceImportReadyStage> ready{};
     std::optional<Core::Error> lastFailure{};
 };
@@ -422,19 +552,23 @@ Core::Status EditorSourceImportService::start(EditorSourceImportRequest request)
         impl_->pendingStatePathUtf8 = request.freshStageStatePathUtf8;
         impl_->pendingBaselineRootUtf8 = request.baselineCatalogRootUtf8;
         impl_->pendingBaselineStatePathUtf8 = request.baselineStatePathUtf8;
-        impl_->pendingUnitCount = static_cast<Core::u32>(request.units.size());
         const auto config = impl_->config;
         impl_->workerThread = std::jthread(
             [completion, worker = std::move(worker), request = std::move(request), config](
                 std::stop_token stopToken) mutable {
                 try
                 {
-                    auto result = worker(request, stopToken);
+                    auto result = executeImportWork(
+                        request, worker, config, stopToken, completion->phase);
                     if (!result)
                     {
-                        result = Core::failure(boundedError(std::move(result.error()), config));
+                        completion->result.emplace(Core::failure(
+                            boundedError(std::move(result.error()), config)));
                     }
-                    completion->result.emplace(std::move(result));
+                    else
+                    {
+                        completion->result.emplace(std::move(result));
+                    }
                 }
                 catch (const std::bad_alloc&)
                 {
@@ -466,7 +600,6 @@ Core::Status EditorSourceImportService::start(EditorSourceImportRequest request)
         impl_->pendingStatePathUtf8.clear();
         impl_->pendingBaselineRootUtf8.clear();
         impl_->pendingBaselineStatePathUtf8.clear();
-        impl_->pendingUnitCount = 0;
         return Core::failure(Core::CoreErrorCode::OutOfMemory,
                              "Editor source import worker launch allocation failed");
     }
@@ -476,7 +609,6 @@ Core::Status EditorSourceImportService::start(EditorSourceImportRequest request)
         impl_->pendingStatePathUtf8.clear();
         impl_->pendingBaselineRootUtf8.clear();
         impl_->pendingBaselineStatePathUtf8.clear();
-        impl_->pendingUnitCount = 0;
         Core::Error result{Core::CoreErrorCode::Internal,
                            "Editor source import worker thread launch failed"};
         result.setNativeCode(static_cast<Core::i64>(error.code().value()));
@@ -506,36 +638,40 @@ Core::Status EditorSourceImportService::poll()
         impl_->pendingStatePathUtf8.clear();
         impl_->pendingBaselineRootUtf8.clear();
         impl_->pendingBaselineStatePathUtf8.clear();
-        impl_->pendingUnitCount = 0;
         impl_->currentState = EditorSourceImportServiceState::Failed;
         return Core::success();
     }
 
-    if (const auto status = validateWorkResult(*result, impl_->pendingUnitCount); !status)
+    if (const auto status = validateWorkResult(*result); !status)
     {
         impl_->lastFailure.emplace(status.error());
         impl_->pendingStageRootUtf8.clear();
         impl_->pendingStatePathUtf8.clear();
         impl_->pendingBaselineRootUtf8.clear();
         impl_->pendingBaselineStatePathUtf8.clear();
-        impl_->pendingUnitCount = 0;
         impl_->currentState = EditorSourceImportServiceState::Failed;
         return Core::success();
     }
 
     impl_->ready.emplace(EditorSourceImportReadyStage{
+        .catalog = std::move(result->catalog),
         .stageRootUtf8 = result->stageCreated ? std::move(impl_->pendingStageRootUtf8)
                                               : std::move(impl_->pendingBaselineRootUtf8),
         .statePathUtf8 = result->stageCreated ? std::move(impl_->pendingStatePathUtf8)
                                               : std::move(impl_->pendingBaselineStatePathUtf8),
         .statistics = result->statistics,
         .stageCreated = result->stageCreated,
+        .intendedUnits = std::move(result->intendedUnits),
+        .ingress = std::move(result->ingress),
+        .selectedPathCount = result->selectedPathCount,
+        .addedUnitCount = result->addedUnitCount,
+        .copiedFileCount = result->copiedFileCount,
+        .reusedFileCount = result->reusedFileCount,
     });
     impl_->pendingStageRootUtf8.clear();
     impl_->pendingStatePathUtf8.clear();
     impl_->pendingBaselineRootUtf8.clear();
     impl_->pendingBaselineStatePathUtf8.clear();
-    impl_->pendingUnitCount = 0;
     impl_->currentState = EditorSourceImportServiceState::Ready;
     return Core::success();
 }
@@ -558,12 +694,32 @@ Core::Status EditorSourceImportService::cancel()
     impl_->pendingStatePathUtf8.clear();
     impl_->pendingBaselineRootUtf8.clear();
     impl_->pendingBaselineStatePathUtf8.clear();
-    impl_->pendingUnitCount = 0;
     impl_->currentState = EditorSourceImportServiceState::Idle;
     return Core::success();
 }
 
-Core::Status EditorSourceImportService::acknowledgeReady()
+Core::Result<std::vector<EditorSourceImportUnit>> EditorSourceImportService::commitReady()
+{
+    if (const auto status = impl_->ensureOwnerThread(); !status)
+    {
+        return Core::failure(status.error());
+    }
+    if (impl_->currentState != EditorSourceImportServiceState::Ready)
+    {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                             "Editor source import commit requires Ready state");
+    }
+    if (impl_->ready->ingress.has_value())
+    {
+        impl_->ready->ingress->commit();
+    }
+    auto intendedUnits = std::move(impl_->ready->intendedUnits);
+    impl_->ready.reset();
+    impl_->currentState = EditorSourceImportServiceState::Idle;
+    return intendedUnits;
+}
+
+Core::Status EditorSourceImportService::discardReady()
 {
     if (const auto status = impl_->ensureOwnerThread(); !status)
     {
@@ -571,7 +727,7 @@ Core::Status EditorSourceImportService::acknowledgeReady()
     }
     if (impl_->currentState != EditorSourceImportServiceState::Ready)
     {
-        return invalidState("Editor source import acknowledge requires Ready state");
+        return invalidState("Editor source import discard requires Ready state");
     }
     impl_->ready.reset();
     impl_->currentState = EditorSourceImportServiceState::Idle;
@@ -596,6 +752,29 @@ Core::Status EditorSourceImportService::dismissFailure()
 EditorSourceImportServiceState EditorSourceImportService::state() const noexcept
 {
     return impl_->currentState;
+}
+
+EditorSourceImportPhase EditorSourceImportService::phase() const noexcept
+{
+    switch (impl_->currentState)
+    {
+    case EditorSourceImportServiceState::Idle:
+        return EditorSourceImportPhase::Idle;
+    case EditorSourceImportServiceState::Running:
+        return impl_->completion != nullptr
+                   ? impl_->completion->phase.load(std::memory_order_acquire)
+                   : EditorSourceImportPhase::Preparing;
+    case EditorSourceImportServiceState::Ready:
+        return EditorSourceImportPhase::ReadyToCommit;
+    case EditorSourceImportServiceState::Failed:
+        return EditorSourceImportPhase::Failed;
+    }
+    return EditorSourceImportPhase::Failed;
+}
+
+EditorSourceImportReadyStage* EditorSourceImportService::readyStage() noexcept
+{
+    return impl_->ready ? &*impl_->ready : nullptr;
 }
 
 const EditorSourceImportReadyStage* EditorSourceImportService::readyStage() const noexcept

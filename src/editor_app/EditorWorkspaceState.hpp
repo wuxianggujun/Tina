@@ -6,9 +6,7 @@
 #include "EditorAnimationPreview.hpp"
 #include "EditorFileDialog.hpp"
 #include "EditorIconResources.hpp"
-#include "EditorSourceImportIngress.hpp"
 #include "EditorSourceImportLaunchOptions.hpp"
-#include "EditorSourceImportSelection.hpp"
 #include "EditorSourceImportService.hpp"
 #include "EditorWorkspaceUiRecipes.hpp"
 
@@ -3475,9 +3473,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] Tina::Core::Status createNewProjectFromDialog();
     [[nodiscard]] Tina::Core::Status openProjectFromDialog();
     [[nodiscard]] Tina::Core::Status startSourceImport(
-        std::span<const Tina::EditorApp::Detail::EditorSourceImportUnit> intendedUnits);
+        std::span<const Tina::EditorApp::Detail::EditorSourceImportUnit> intendedUnits,
+        std::vector<std::string> selectedPathsUtf8);
     [[nodiscard]] Tina::Core::Status importSelectedSourceFiles(
-        std::span<const std::string> selectedPathsUtf8);
+        std::vector<std::string> selectedPathsUtf8);
     [[nodiscard]] Tina::Core::Status importSourceFromDialog();
     [[nodiscard]] Tina::Core::Status removeSelectedSourceImport();
     void cleanupOwnedSourceImportStage(std::string_view catalogRootUtf8) noexcept;
@@ -3486,7 +3485,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] Tina::Core::Status publishCommittedSourceImportState(
         const Tina::EditorApp::Detail::EditorSourceImportReadyStage& ready);
     [[nodiscard]] Tina::Core::Status commitSourceImportCatalog(
-        const Tina::EditorApp::Detail::EditorSourceImportReadyStage& ready);
+        Tina::EditorApp::Detail::EditorSourceImportReadyStage& ready);
     [[nodiscard]] Tina::Core::Status updateSourceImport();
     [[nodiscard]] Tina::Core::Status refreshProjectCatalog();
     [[nodiscard]] Tina::Core::Status bakeAndPublishNavigation2D();
@@ -3747,6 +3746,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
     std::string sourceImportSupersededAuthoringCatalogRootUtf8_{};
     bool sourceImportStartPending_ = false;
     bool sourceImportCatalogCommitted_ = false;
+    Tina::EditorApp::Detail::EditorSourceImportPhase sourceImportObservedPhase_ =
+        Tina::EditorApp::Detail::EditorSourceImportPhase::Idle;
     Tina::EditorApp::Detail::EditorFileDialog fileDialog_{};
     EditorIconResources iconResources_{};
     Tina::PrimaryWindowUIImageResolverRegistration iconResolverRegistration_{};

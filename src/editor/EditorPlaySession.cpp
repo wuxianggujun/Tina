@@ -14,6 +14,7 @@ namespace {
 [[nodiscard]] bool validConfig(const EditorPlaySessionConfig& config) noexcept
 {
     return config.canonicalByteCapacity != 0 &&
+           config.canonicalByteCapacity <= std::vector<std::byte>{}.max_size() &&
            std::isfinite(config.fixedStepSeconds) &&
            config.fixedStepSeconds > 0.0 &&
            std::isfinite(config.maximumFrameDeltaSeconds) &&
@@ -38,20 +39,11 @@ EditorPlaySession::Create(EditorPlaySessionConfig config)
         return Core::failure(EditorErrorCode::InvalidConfiguration,
                              "Editor play session configuration is invalid");
     }
-    try {
-        std::vector<std::byte> canonicalBytes;
-        canonicalBytes.reserve(config.canonicalByteCapacity);
-        return EditorPlaySession{config, std::move(canonicalBytes)};
-    } catch (const std::bad_alloc&) {
-        return Core::failure(Core::CoreErrorCode::OutOfMemory,
-                             "Editor play session snapshot allocation failed");
-    }
+    return EditorPlaySession{config};
 }
 
-EditorPlaySession::EditorPlaySession(
-    EditorPlaySessionConfig config,
-    std::vector<std::byte> canonicalBytes) noexcept
-    : m_config(config), m_canonicalBytes(std::move(canonicalBytes))
+EditorPlaySession::EditorPlaySession(EditorPlaySessionConfig config) noexcept
+    : m_config(config)
 {
 }
 
@@ -76,7 +68,16 @@ Core::Status EditorPlaySession::start(
         return Core::failure(EditorErrorCode::DocumentCapacityExceeded,
                              "Editor play session snapshot exceeds fixed capacity");
     }
-    m_canonicalBytes.assign(canonicalBytes.begin(), canonicalBytes.end());
+
+    std::vector<std::byte> stagedCanonicalBytes;
+    try {
+        stagedCanonicalBytes.assign(canonicalBytes.begin(), canonicalBytes.end());
+    } catch (const std::bad_alloc&) {
+        return Core::failure(Core::CoreErrorCode::OutOfMemory,
+                             "Editor play session snapshot allocation failed");
+    }
+
+    m_canonicalBytes.swap(stagedCanonicalBytes);
     m_snapshot.workspace = workspace;
     m_snapshot.state = EditorPlayState::Playing;
     m_snapshot.sourceDocumentRevision = sourceDocumentRevision;
@@ -176,7 +177,7 @@ Core::Status EditorPlaySession::stop() noexcept
     if (!active()) {
         return Core::success();
     }
-    m_canonicalBytes.clear();
+    std::vector<std::byte>{}.swap(m_canonicalBytes);
     m_snapshot.state = EditorPlayState::Editing;
     m_snapshot.sourceDocumentRevision = 0;
     m_snapshot.simulationTickCount = 0;

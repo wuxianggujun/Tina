@@ -47,6 +47,7 @@ struct SourceImportPipelineRequest final {
 };
 
 struct SourceImportPipelineResult final {
+    CatalogSnapshot catalog{};
     SourceImportPipelineMode mode = SourceImportPipelineMode::FullRecook;
     SourceImportProbeState probeState = SourceImportProbeState::NoBaseline;
     SourceImportProbeReason probeReason = SourceImportProbeReason::StateNotFound;
@@ -65,9 +66,9 @@ struct SourceImportPipelineResult final {
 };
 
 // Synchronously probes the complete intended unit set, cooks only dirty units, builds and fully
-// validates an immutable fresh stage, then commits state bound to that stage revision. The function
-// does not replace the live Catalog or touch AssetSystem/UI; hosts may run it on a worker and reload
-// result.catalogRootUtf8 at a later owner-thread safe point.
+// validates an immutable fresh stage, then commits state bound to that stage revision. The returned
+// CatalogSnapshot is the exact fully validated package and can be moved into AssetSystem at an
+// owner-thread safe point without reopening the package. The function does not touch AssetSystem/UI.
 [[nodiscard]] Core::Result<SourceImportPipelineResult>
 executeSourceImportPipeline(const SourceImportPipelineRequest& request,
                             std::stop_token stopToken = {}) noexcept;

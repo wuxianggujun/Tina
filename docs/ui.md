@@ -46,9 +46,11 @@ UTF-8 arena、空闲块复用/合并、bump 回收与 used/high-water 统计；`
 `UIButtonActionRegistry` 与 `UISliderChangeCallbackRegistry` 分别独立拥有 Button/Slider callback 的
 固定容量 slot、stage/commit/rollback、generation-aware capture/invoke 与调用期间延迟回收；Button
 registry 还封装 route clear barrier、registration serial 与 high-water 统计。
-`UIVirtualGridViewStateStorage` 固定持有响应式网格、materialized item pool、selection、layout scratch 与 committed
-metrics；`UIDataGridStateStorage` 独立持有 column、materialized row/cell pool、二维 selection 和双轴 metrics，列数与
-可见行数都必须落在创建时容量内。`UISplitViewStateStorage` 固定按 node index 持有 SplitView/Splitter relationship、requested fraction、layout
+`UIVirtualGridViewStateStorage` 使用独立 bounded sparse pool 持有响应式网格、materialized item、selection、
+layout scratch 与 committed metrics；`UIDataGridStateStorage` 对 Grid/column/materialized row/cell 使用四个独立
+bounded sparse pool，二维 selection、双轴 metrics 与 layout scratch 跟随 Grid state，列数与可见行数都必须
+落在创建时组件容量内。二者的 link/scratch reserve 也按对应组件池定容，不再为每种 state 分配完整 node-index
+数组。`UISplitViewStateStorage` 以独立 bounded pool 持有 SplitView/Splitter relationship、requested fraction、layout
 scratch 与 committed metrics；`UISplitViewLayout` 解析 orientation/minimum/clamp，`UISplitViewInput` 只提供
 splitter pointer fraction/grab 计算。`UITabViewStateStorage` 固定持有 TabView/Tab/Panel relationship、active Tab、
 专属 `UITabPaint` 与 committed metrics；`UITabViewLayout` 和 `UITabViewInput` 分别收口四向 regions 与命令校验。

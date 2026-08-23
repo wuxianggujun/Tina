@@ -128,6 +128,13 @@ class AssetSystem final {
     [[nodiscard]] Core::Result<CatalogReloadResult>
     reloadCatalog(std::string_view catalogRootUtf8, CatalogReloadConfig config = {});
 
+    // Commits a package snapshot that was already fully validated by a cooker/import worker.
+    // The snapshot is consumed only after every fallible owner-thread staging step succeeds, so
+    // callers retain it across CatalogReloadBusy and other pre-commit failures.
+    [[nodiscard]] Core::Result<CatalogReloadResult>
+    reloadPreparedCatalog(std::string_view catalogRootUtf8, CatalogSnapshot&& catalog,
+                          CatalogReloadConfig config = {});
+
     // openCatalogPackage(root, openConfig) then bindCatalog. Uses config.memoryResource for open.
     [[nodiscard]] Core::Status openAndBindCatalog(std::string_view catalogRootUtf8,
                                                   CatalogPackageOpenConfig openConfig = {});

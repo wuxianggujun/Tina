@@ -1104,9 +1104,17 @@ struct UIContext::Impl final {
           menuMutationNodeScratch(&allocationLedger->resource()),
           listViewStatesByNodeIndex(&allocationLedger->resource()),
           listViewLayoutScratchByNodeIndex(&allocationLedger->resource()), listViewItemStatesByNodeIndex(&allocationLedger->resource()),
-          virtualGridViewStorage(capacities.nodeCapacity, allocationLedger->resource()),
+          virtualGridViewStorage(
+              capacities.componentStates.virtualGridViewCapacity,
+              capacities.componentStates.virtualGridItemCapacity,
+              allocationLedger->resource()),
           virtualGridItemLinkScratch(&allocationLedger->resource()),
-          dataGridStorage(capacities.nodeCapacity, allocationLedger->resource()),
+          dataGridStorage(
+              capacities.componentStates.dataGridCapacity,
+              capacities.componentStates.dataGridColumnCapacity,
+              capacities.componentStates.dataGridRowCapacity,
+              capacities.componentStates.dataGridCellCapacity,
+              capacities.nodeCapacity, allocationLedger->resource()),
           dataGridColumnLinkScratch(&allocationLedger->resource()),
           dataGridRowLinkScratch(&allocationLedger->resource()),
           dataGridCellLinkScratch(&allocationLedger->resource()),
@@ -1199,6 +1207,7 @@ struct UIContext::Impl final {
             .activeTimelineCapacity = normalized.activeTimelineCapacity,
             .flowLayerCapacity = normalized.flowLayerCapacity,
             .flowScreenCapacity = normalized.flowScreenCapacity,
+            .componentStates = normalized.componentStates,
             .applyDefaultProductChrome = normalized.applyDefaultProductChrome,
         };
 
@@ -1212,11 +1221,16 @@ struct UIContext::Impl final {
         impl->timelineLayoutNodeScratch.reserve(normalized.timelineTrackCapacity);
         impl->timelinePaintNodeScratch.reserve(normalized.timelineTrackCapacity);
         impl->menuMutationNodeScratch.reserve(normalized.nodeCapacity);
-        impl->virtualGridItemLinkScratch.reserve(normalized.nodeCapacity);
-        impl->dataGridColumnLinkScratch.reserve(normalized.nodeCapacity);
-        impl->dataGridRowLinkScratch.reserve(normalized.nodeCapacity);
-        impl->dataGridCellLinkScratch.reserve(normalized.nodeCapacity);
-        impl->dataGridColumnWidthScratch.reserve(normalized.nodeCapacity);
+        impl->virtualGridItemLinkScratch.reserve(
+            normalized.componentStates.virtualGridItemCapacity);
+        impl->dataGridColumnLinkScratch.reserve(
+            normalized.componentStates.dataGridColumnCapacity);
+        impl->dataGridRowLinkScratch.reserve(
+            normalized.componentStates.dataGridRowCapacity);
+        impl->dataGridCellLinkScratch.reserve(
+            normalized.componentStates.dataGridCellCapacity);
+        impl->dataGridColumnWidthScratch.reserve(
+            normalized.componentStates.dataGridColumnCapacity);
         usize nextAllocationCheckpoint = impl->allocationLedger->statistics().currentBytes;
         impl->pmrScratchReserveBytes =
             allocationIncrease(allocationCheckpoint, nextAllocationCheckpoint);
@@ -10509,6 +10523,13 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::CapacityExceeded,
                         "UI VirtualGridView item pool exceeds the remaining node capacity");
         }
+        if (virtualGridViewStorage.availableViewCount() == 0U ||
+            requirements->items > virtualGridViewStorage.availableItemCount())
+        {
+            return fail(
+                UIErrorCode::CapacityExceeded,
+                "UI VirtualGridView exceeds its reserved component state capacity");
+        }
 
         auto viewResult = createChild(
             parent, BuiltinElementKind::VirtualGridView, std::nullopt,
@@ -10524,7 +10545,12 @@ struct UIContext::Impl final {
                 static_cast<void>(destroySubtree(virtualGridView));
             }
         });
-        virtualGridViewStorage.initializeView(virtualGridView, *normalized);
+        if (!virtualGridViewStorage.initializeView(virtualGridView, *normalized))
+        {
+            return fail(
+                UIErrorCode::CapacityExceeded,
+                "UI VirtualGridView state capacity has been exhausted");
+        }
         VirtualGridViewState* state =
             virtualGridViewStorage.tryView(virtualGridView);
         if (state == nullptr)
@@ -10584,6 +10610,15 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::CapacityExceeded,
                         "UI DataGrid fixed pools exceed the remaining node capacity");
         }
+        if (dataGridStorage.availableGridCount() == 0U ||
+            requirements->columns > dataGridStorage.availableColumnCount() ||
+            requirements->rows > dataGridStorage.availableRowCount() ||
+            requirements->cells > dataGridStorage.availableCellCount())
+        {
+            return fail(
+                UIErrorCode::CapacityExceeded,
+                "UI DataGrid exceeds its reserved component state capacity");
+        }
 
         auto gridResult = createChild(
             parent, BuiltinElementKind::DataGrid, std::nullopt,
@@ -10599,7 +10634,11 @@ struct UIContext::Impl final {
                 static_cast<void>(destroySubtree(dataGrid));
             }
         });
-        dataGridStorage.initializeGrid(dataGrid, *normalized);
+        if (!dataGridStorage.initializeGrid(dataGrid, *normalized))
+        {
+            return fail(UIErrorCode::CapacityExceeded,
+                        "UI DataGrid state capacity has been exhausted");
+        }
         DataGridState* state = dataGridStorage.tryGrid(dataGrid);
         if (state == nullptr)
         {

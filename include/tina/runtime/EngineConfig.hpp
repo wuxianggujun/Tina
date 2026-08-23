@@ -4,8 +4,8 @@
 #include <tina/core/time/FixedStepAccumulator.hpp>
 #include <tina/platform/PlatformFrame.hpp>
 #include <tina/platform/Window.hpp>
+#include <tina/render/RenderDevice.hpp>
 #include <tina/render/RenderScene.hpp>
-#include <tina/render/ShadowMapExtentConfig.hpp>
 #include <tina/runtime/InputActionMap.hpp>
 #include <tina/runtime/PlatformEvents.hpp>
 #include <tina/ui/UIContextConfig.hpp>
@@ -35,6 +35,10 @@ struct EngineConfig final {
     PrimaryWindowUIDisplayListCapacityConfig primaryWindowUIDisplayListCapacities{};
     Render::RenderSceneCapacity renderSceneCapacities{};
     Render::ShadowMapExtentConfig shadowMapExtents{};
+    // Per-frame backend submission storage. Tools with bounded workloads can
+    // lower this without changing RenderScene or UI capacities.
+    Core::u32 renderDrawCallCapacity =
+        Render::RenderDeviceCreateParams::DefaultDrawCallCapacity;
     // Backbuffer MSAA sample count (0 = off, 2/4/8/16). Pixel-evidence gates
     // and samples keep the 0 default; interactive tools may opt in.
     Core::u8 renderMsaaSamples = 0;

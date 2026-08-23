@@ -1,5 +1,6 @@
 #pragma once
 
+#include "EditorSourceImportIngress.hpp"
 #include "EditorSourceImportLimits.hpp"
 
 #include <tina/asset/SourceImportPipeline.hpp>
@@ -10,6 +11,7 @@
 #include <functional>
 #include <memory>
 #include <memory_resource>
+#include <optional>
 #include <stop_token>
 #include <string>
 #include <vector>
@@ -29,8 +31,9 @@ struct EditorSourceImportUnit final {
     Asset::GltfCookIds gltfIds{};
 };
 
-// This request owns the complete intended unit set. The service copies no units from an
-// earlier request and never infers or rewrites any of these paths.
+// units is the currently intended set or an explicit replacement set. selectedPathsUtf8 is an
+// optional user selection which the worker ingresses and merges before cooking. Both collections
+// are owned so no UI or file-dialog storage crosses the worker boundary.
 struct EditorSourceImportRequest final {
     std::string sourceRootUtf8{};
     std::string baselineCatalogRootUtf8{};
@@ -39,6 +42,7 @@ struct EditorSourceImportRequest final {
     std::string freshStageStatePathUtf8{};
     AssetFormat::TargetPlatform targetPlatform = AssetFormat::TargetPlatform::Invalid;
     std::vector<EditorSourceImportUnit> units{};
+    std::vector<std::string> selectedPathsUtf8{};
 };
 
 enum class EditorSourceImportMode : Core::u8 {
@@ -63,16 +67,30 @@ struct EditorSourceImportStatistics final {
 // current-schema package validation. The service publishes their request-owned paths only after
 // the worker has stopped.
 struct EditorSourceImportWorkResult final {
+    Asset::CatalogSnapshot catalog{};
     EditorSourceImportStatistics statistics{};
     bool stageCreated = true;
+    std::vector<EditorSourceImportUnit> intendedUnits{};
+    std::optional<EditorSourceImportIngress> ingress{};
+    Core::u32 selectedPathCount = 0;
+    Core::u32 addedUnitCount = 0;
+    Core::u32 copiedFileCount = 0;
+    Core::u32 reusedFileCount = 0;
 };
 
 struct EditorSourceImportReadyStage final {
+    Asset::CatalogSnapshot catalog{};
     std::string stageRootUtf8{};
     std::string statePathUtf8{};
     EditorSourceImportStatistics statistics{};
     // False means the validated baseline was already current; no Catalog reload is required.
     bool stageCreated = true;
+    std::vector<EditorSourceImportUnit> intendedUnits{};
+    std::optional<EditorSourceImportIngress> ingress{};
+    Core::u32 selectedPathCount = 0;
+    Core::u32 addedUnitCount = 0;
+    Core::u32 copiedFileCount = 0;
+    Core::u32 reusedFileCount = 0;
 };
 
 struct EditorSourceImportServiceConfig final {
@@ -101,9 +119,18 @@ enum class EditorSourceImportServiceState : Core::u8 {
     Failed = 3,
 };
 
+enum class EditorSourceImportPhase : Core::u8 {
+    Idle = 0,
+    Preparing = 1,
+    Copying = 2,
+    Cooking = 3,
+    ReadyToCommit = 4,
+    Failed = 5,
+};
+
 // Owner-thread state machine. The worker receives one immutable owned request and must not touch
-// AssetSystem, Render, or UI. Ready remains stable until acknowledgeReady(), so a
-// CatalogReloadBusy result can be retried against the same stage on a later safe frame.
+// AssetSystem, Render, or UI. Ready retains the ingress rollback transaction until commitReady(),
+// so a CatalogReloadBusy result can be retried against the same stage on a later safe frame.
 class EditorSourceImportService final {
 public:
     EditorSourceImportService(EditorSourceImportWorker worker,
@@ -118,10 +145,13 @@ public:
     [[nodiscard]] Core::Status start(EditorSourceImportRequest request);
     [[nodiscard]] Core::Status poll();
     [[nodiscard]] Core::Status cancel();
-    [[nodiscard]] Core::Status acknowledgeReady();
+    [[nodiscard]] Core::Result<std::vector<EditorSourceImportUnit>> commitReady();
+    [[nodiscard]] Core::Status discardReady();
     [[nodiscard]] Core::Status dismissFailure();
 
     [[nodiscard]] EditorSourceImportServiceState state() const noexcept;
+    [[nodiscard]] EditorSourceImportPhase phase() const noexcept;
+    [[nodiscard]] EditorSourceImportReadyStage* readyStage() noexcept;
     [[nodiscard]] const EditorSourceImportReadyStage* readyStage() const noexcept;
     [[nodiscard]] const Core::Error* failure() const noexcept;
 
