@@ -104,6 +104,48 @@ Motion 只遍历 active list，`M == 0` 不产生额外 dirty；Image/Icon/NineS
 
 ## 测量原则
 
+### Editor UI 内存诊断
+
+`TinaEditor --profile-ui --frames=180 --frame-delay-ms=0` 会在每个 UI phase 采样并在末尾输出 JSON。该模式只增加
+诊断账本和进程快照，不修改 Editor 的 node、paint、display-list 或 MSAA 容量：
+
+- `uiPmrFirstBytes` / `uiPmrLastBytes` / `uiPmrPeakBytes`：UIContext 实际通过其 PMR 请求的字节数；
+- `uiPmrCurrentDeltaBytes`、首末帧 allocation/deallocation count 及 delta：用于识别 warm-up 后是否仍在反复扩容；
+- `uiPmrNodePoolBytes`、`uiPmrStateStorageBytes`、`uiPmrScratchReserveBytes`、
+  `uiPmrIndexAlignedStorageBytes`、`uiPmrSnapshotBufferBytes`、`uiPmrGlyphAtlasBytes`：UIContext 创建期 PMR
+  分类。尤其 `uiPmrStateStorageBytes` 会量出 Tooltip/Dialog/SplitView/TabView/Menu/VirtualGrid/DataGrid 等
+  固定 state storage 构造成本，`uiPmrIndexAlignedStorageBytes` 会量出所有 node-index aligned 通用数组；
+- `uiPmrFailedAllocationCount` / `uiPmrInvalidDeallocationCount`：账本自身的失败和错误释放信号；
+- `uiNodeCapacity`、`uiLiveNodeCount`、`uiCommittedNodeCount`、dirty/rebuild counters：解释容量与工作量，不能单独当作进程内存；
+- `processMemoryStages`：Windows 上依次记录 options、Catalog、Engine create、first/last UI frame、run teardown 和
+  Engine destroy；`processMemoryDeltas` 直接输出相邻阶段的有符号 Working Set / Private Bytes 差值；
+- `sourceImportProfile`：记录导入前、worker 结束、Catalog/preview 提交后和导入期采样峰值；同时输出 cooked payload
+  字节、worker 临时 pool 的精确峰值/销毁后剩余字节、`AssetStore` resident CPU payload 前后值，以及导入前/中/后的
+  平均 FPS、平均帧耗时和最差帧耗时。`transientPoolBytesAfterRelease` 必须为 0；仅导入但未绑定资源时 resident
+  cooked file 不应因为新 Texture2D 增长；Windows `peakWorkingSetBytes` 来自进程高水位，能捕获短于逐帧采样间隔的
+  worker 峰值；
+- `processWorkingSetBytes` / `processPrivateBytes` 及 peak：进程级末次/峰值样本，包含非 Tina PMR、渲染后端和驱动分配。
+
+判读顺序固定为：
+
+1. `catalog` delta 已经跳升：先检查 source/cooked payload、Catalog 和 AssetSystem，而不是 UI；
+2. `engineCreate` delta 跳升但 UI PMR 尚不存在：先检查窗口/backbuffer、bgfx/driver 和 MSAA；
+3. `uiStartup` delta 与 UI PMR 接近，且 UI PMR 首帧已经很大、之后稳定：这是固定 UI storage 成本；继续比较
+   `uiPmrStateStorageBytes`、`uiPmrIndexAlignedStorageBytes` 和 snapshot 分类，不能把“下调容量”当作泄漏修复；
+4. UI PMR 在首帧后稳定且分配计数不再增加，而进程 Private Bytes 仍持续上升：问题不在 UI PMR，应转向 Render/bgfx/驱动或其他进程 heap；
+5. UI PMR 和分配计数随帧持续增加：优先检查每帧 `setText`/数据源刷新/快照或临时容器是否触发未回收扩容；
+6. `runTeardown` / `engineDestroy` 为明显负值：对应 owner 已释放；若 UI PMR 已稳定但销毁后 Private Bytes
+   仍不回落，再区分 allocator 保留页与真实存活 owner，不能只凭 Working Set 判定泄漏；
+7. PMR 和进程内存都稳定但 CPU 仍接近单核：检查 present/vsync 配置与渲染循环，不把 CPU 忙等误判成内存泄漏。
+
+图片 source import 的 payload 校验必须使用单次操作局部 PMR pool。worker、Editor candidate preflight 和
+`AssetSystem::reloadCatalog()` 不得把完整 Texture2D cooked 文件读入长期 pool；Catalog manifest/index 可以使用长期
+owner，但 validation file buffer 在操作返回前必须释放。普通图片 cooker 直接从 `stb_image` RGBA buffer 写
+Texture2D payload，不再额外创建一份等大的 RGBA staging vector。
+Editor 的 resident `CookedAssetFile` bytes 使用可实际 deallocate 的独立 PMR upstream；固定容量 Store/index 等小对象
+仍使用长期 pool。这样 lease 存活时的 CPU cooked file 会由 `residentCookedFileBytes()` 如实报告，最后一次物理 unload 后不会
+再由 Editor 的长期 pool 保留整张纹理的高水位块。
+
 正式性能结论至少固定：
 
 - Git commit/dirty 状态、preset/config/compiler/linker/vcpkg baseline；

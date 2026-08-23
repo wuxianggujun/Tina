@@ -37,6 +37,7 @@ class PrimaryWindowUICapabilityState final {
     // Last committed semantics (after startup/frame commitLayout). Owner-thread, phase-scoped.
     // For accessibility adapters / product evidence; not a platform UIA bridge.
     [[nodiscard]] Core::Result<UI::UICommittedSemanticsView> committedSemantics(u64 epoch, PrimaryWindowUIPhase phase);
+    [[nodiscard]] Core::Result<UI::UIContextStatistics> statistics(u64 epoch, PrimaryWindowUIPhase phase);
     [[nodiscard]] Core::Result<PrimaryWindowUIRootBuilder> rootBuilder(u64 epoch);
     [[nodiscard]] Core::Result<PrimaryWindowUITreeUpdater> treeUpdater(u64 epoch, PrimaryWindowUIPhase phase,
                                                                        UI::UIRootOwner& rootOwner);
@@ -420,6 +421,11 @@ class PrimaryWindowUICapabilityState final {
     virtualGridViewMetrics(u64 epoch, PrimaryWindowUIPhase phase,
                            const UI::UITreeUpdater& updater,
                            UI::UINodeId virtualGridView);
+    [[nodiscard]] Core::Result<UI::UINodeId>
+    virtualGridViewMaterializedItemNode(
+        u64 epoch, PrimaryWindowUIPhase phase,
+        const UI::UITreeUpdater& updater, UI::UINodeId virtualGridView,
+        u64 logicalIndex);
     [[nodiscard]] Core::Status setVirtualGridViewSelectedIndex(
         u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
         UI::UINodeId virtualGridView, u64 logicalIndex);
@@ -488,6 +494,9 @@ class PrimaryWindowUICapabilityState final {
     treeViewPaint(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater, UI::UINodeId treeView);
     [[nodiscard]] Core::Result<UI::UITreeViewMetrics>
     treeViewMetrics(u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater, UI::UINodeId treeView);
+    [[nodiscard]] Core::Result<UI::UINodeId> treeViewMaterializedItemNode(
+        u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+        UI::UINodeId treeView, u64 logicalIndex);
     [[nodiscard]] Core::Status setTreeViewSelectedIndex(u64 epoch, PrimaryWindowUIPhase phase,
                                                         UI::UITreeUpdater& updater, UI::UINodeId treeView,
                                                         u64 logicalIndex);

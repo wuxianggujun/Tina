@@ -13,6 +13,7 @@
 
 #include <cstddef>
 #include <limits>
+#include <memory>
 #include <memory_resource>
 #include <new>
 #include <span>
@@ -173,32 +174,24 @@ try
     int width = 0;
     int height = 0;
     int components = 0;
-    stbi_uc* pixels = stbi_load_from_memory(encoded, encodedSize, &width, &height, &components, 4);
-    if (pixels == nullptr || width != headerWidth || height != headerHeight)
+    std::unique_ptr<stbi_uc, decltype(&stbi_image_free)> pixels{
+        stbi_load_from_memory(encoded, encodedSize, &width, &height, &components, 4),
+        &stbi_image_free};
+    if (!pixels || width != headerWidth || height != headerHeight)
     {
-        stbi_image_free(pixels);
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "image decode failed");
     }
-    std::vector<std::byte> rgba;
-    try
-    {
-        const std::size_t pixelBytes =
-            static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4U;
-        rgba.assign(reinterpret_cast<const std::byte*>(pixels),
-                    reinterpret_cast<const std::byte*>(pixels) + pixelBytes);
-    } catch (const std::bad_alloc&)
-    {
-        stbi_image_free(pixels);
-        return Core::failure(AssetErrorCode::AllocationFailed, "image pixel staging allocation failed");
-    }
-    stbi_image_free(pixels);
+    const std::size_t pixelBytes =
+        static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4U;
 
     auto texturePayload = AssetFormat::writeTexture2DPayloadBytes(AssetFormat::Texture2DPayloadDesc{
         .width = static_cast<Core::u16>(width),
         .height = static_cast<Core::u16>(height),
         .pixelFormat = AssetFormat::Texture2DPixelFormat::Rgba8Unorm,
-        .pixels = rgba,
+        .pixels = std::span<const std::byte>{
+            reinterpret_cast<const std::byte*>(pixels.get()), pixelBytes},
     });
+    pixels.reset();
     if (!texturePayload)
     {
         return Core::failure(std::move(texturePayload.error()).withContext(

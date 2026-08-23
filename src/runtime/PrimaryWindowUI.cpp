@@ -1527,6 +1527,19 @@ PrimaryWindowUITreeUpdater::virtualGridViewMetrics(UI::UINodeId virtualGridView)
     return m_state->virtualGridViewMetrics(m_epoch, m_phase, m_updater, virtualGridView);
 }
 
+Core::Result<UI::UINodeId>
+PrimaryWindowUITreeUpdater::virtualGridViewMaterializedItemNode(
+    UI::UINodeId virtualGridView, u64 logicalIndex) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UINodeId>(
+            "PrimaryWindowUITreeUpdater::virtualGridViewMaterializedItemNode");
+    }
+    return m_state->virtualGridViewMaterializedItemNode(
+        m_epoch, m_phase, m_updater, virtualGridView, logicalIndex);
+}
+
 Core::Status PrimaryWindowUITreeUpdater::setVirtualGridViewSelectedIndex(
     UI::UINodeId virtualGridView, u64 logicalIndex)
 {
@@ -1747,6 +1760,18 @@ Core::Result<UI::UITreeViewMetrics> PrimaryWindowUITreeUpdater::treeViewMetrics(
         return expiredFacade<UI::UITreeViewMetrics>("PrimaryWindowUITreeUpdater::treeViewMetrics");
     }
     return m_state->treeViewMetrics(m_epoch, m_phase, m_updater, treeView);
+}
+
+Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::treeViewMaterializedItemNode(
+    UI::UINodeId treeView, u64 logicalIndex) const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UINodeId>(
+            "PrimaryWindowUITreeUpdater::treeViewMaterializedItemNode");
+    }
+    return m_state->treeViewMaterializedItemNode(
+        m_epoch, m_phase, m_updater, treeView, logicalIndex);
 }
 
 Core::Status PrimaryWindowUITreeUpdater::setTreeViewSelectedIndex(UI::UINodeId treeView, u64 logicalIndex)

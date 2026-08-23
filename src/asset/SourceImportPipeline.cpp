@@ -358,6 +358,21 @@ cookUnit(const SourceImportPipelineUnit& unit, std::string_view sourceRoot,
     return Core::success();
 }
 
+[[nodiscard]] Core::u64 cookedPayloadBytes(const CatalogCookRequest& request) noexcept
+{
+    Core::u64 total = 0;
+    for (const auto& asset : request.assets)
+    {
+        const auto bytes = static_cast<Core::u64>(asset.payload.size());
+        if (bytes > (std::numeric_limits<Core::u64>::max)() - total)
+        {
+            return (std::numeric_limits<Core::u64>::max)();
+        }
+        total += bytes;
+    }
+    return total;
+}
+
 [[nodiscard]] Core::Status commitState(const SourceImportPipelineRequest& request,
                                        std::string_view catalogRoot,
                                        std::string_view statePath,
@@ -538,6 +553,7 @@ executeSourceImportPipelineImpl(const SourceImportPipelineRequest& request,
         result.unitsRemoved = batch->removedUnitCount;
         result.objectsReused = static_cast<Core::u32>(composed->retainedAssetIds.size());
         result.objectsCooked = static_cast<Core::u32>(dirtyRequest.assets.size());
+        result.cookedPayloadBytes = cookedPayloadBytes(dirtyRequest);
         result.stageCreated = true;
         auto staged = cookAndStageIncrementalCatalogPackage(
             request.stageCatalogRootUtf8, request.baselineCatalogRootUtf8, baseline.catalog,
@@ -607,6 +623,7 @@ executeSourceImportPipelineImpl(const SourceImportPipelineRequest& request,
     auto result = makeResultBase(request, SourceImportPipelineMode::FullRecook,
                                  loaded->probeState, loaded->probeReason, targetRoot, targetState);
     result.unitsRecooked = static_cast<Core::u32>(request.units.size());
+    result.cookedPayloadBytes = cookedPayloadBytes(cookRequest);
     result.stageCreated = true;
     auto staged = cookAndStageCatalogPackage(targetRoot, cookRequest, request.stageConfig);
     if (!staged)

@@ -112,8 +112,15 @@ ProductChromeTransition resolveProductChromeTransition(ProductChromeStorage curr
              current.imageTint != nullptr ? *current.imageTint
                                           : UIStraightSrgba8Color{},
              transition.target.imageTint);
-    classify(ThemeBindingTabPaint, current.tab, transition.target.tab);
-    classify(ThemeBindingSplitterPaint, current.splitter, transition.target.splitter);
+    if (current.tab.has_value())
+    {
+        classify(ThemeBindingTabPaint, current.tab->get(), transition.target.tab);
+    }
+    if (current.splitter.has_value())
+    {
+        classify(ThemeBindingSplitterPaint, current.splitter->get(),
+                 transition.target.splitter);
+    }
     if (current.virtualGridView != nullptr)
     {
         classify(ThemeBindingGridPaint, *current.virtualGridView,
@@ -227,13 +234,14 @@ void applyProductChromeTransition(ProductChromeStorage storage, const ProductChr
     {
         *storage.imageTint = transition.target.imageTint;
     }
-    if ((affectedBindings & ThemeBindingTabPaint) != 0)
+    if ((affectedBindings & ThemeBindingTabPaint) != 0 && storage.tab.has_value())
     {
-        storage.tab = transition.target.tab;
+        storage.tab->get() = transition.target.tab;
     }
-    if ((affectedBindings & ThemeBindingSplitterPaint) != 0)
+    if ((affectedBindings & ThemeBindingSplitterPaint) != 0 &&
+        storage.splitter.has_value())
     {
-        storage.splitter = transition.target.splitter;
+        storage.splitter->get() = transition.target.splitter;
     }
     if ((affectedBindings & ThemeBindingGridPaint) != 0)
     {

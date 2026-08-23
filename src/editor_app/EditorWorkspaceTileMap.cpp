@@ -41,8 +41,9 @@ auto EditorWorkspaceState::bakeAndPublishNavigation2D() -> Tina::Core::Status{
     });
     const std::filesystem::path catalogPath = *stageParent / "catalog";
     const std::string catalogRootUtf8 = pathToUtf8(catalogPath);
+    std::pmr::unsynchronized_pool_resource operationMemory{};
     Tina::Asset::CatalogPackageStageConfig stageConfig =
-        createEditorImportStageConfig(&sourceImportMemory_);
+        Tina::EditorApp::Detail::makeEditorSourceImportStageConfig(operationMemory);
     auto staged = navigationDocument_.stageCatalog(
         catalogRootUtf8, assetResources_.catalogRootUtf8,
         *assetResources_.system->catalog(), stageConfig);
@@ -103,7 +104,7 @@ auto EditorWorkspaceState::bakeAndPublishNavigation2D() -> Tina::Core::Status{
         const auto pointerStatus = std::filesystem::symlink_status(authoringPointerPath, pointerError);
         if (!pointerError && std::filesystem::is_regular_file(pointerStatus)) {
             auto bytes = Tina::Core::readFile(pathToUtf8(authoringPointerPath),
-                                              {.maxBytes = 4096, .memoryResource = &sourceImportMemory_});
+                                              {.maxBytes = 4096, .memoryResource = &operationMemory});
             if (!bytes) {
                 if (temporaryOwnerRegistered) {
                     assetResources_.ownedCatalogStageRoots.pop_back();

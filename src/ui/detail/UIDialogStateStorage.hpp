@@ -3,6 +3,8 @@
 #include <tina/core/base/Types.hpp>
 #include <tina/ui/UIDialog.hpp>
 
+#include "UIBoundedNodeStateTable.hpp"
+
 #include <memory_resource>
 #include <vector>
 
@@ -14,19 +16,21 @@ struct DialogState final {
     bool open = false;
 };
 
-// Index-aligned, fixed-capacity presentation state owned by one UIContext.
+// Bounded sparse presentation state owned by one UIContext.
 // UIContext validates root ownership and preflights dirty publication before
 // mutating this storage.
 class UIDialogStateStorage final {
   public:
-    UIDialogStateStorage(usize nodeCapacity, std::pmr::memory_resource& resource);
+    UIDialogStateStorage(usize capacity, std::pmr::memory_resource& resource);
 
     [[nodiscard]] usize capacity() const noexcept;
+    [[nodiscard]] usize activeCount() const noexcept;
+    [[nodiscard]] usize availableCount() const noexcept;
     [[nodiscard]] bool containsDialog(UINodeId dialog) const noexcept;
     [[nodiscard]] DialogState* tryState(UINodeId dialog) noexcept;
     [[nodiscard]] const DialogState* tryState(UINodeId dialog) const noexcept;
 
-    void initializeDialog(const UIDialogParts& parts) noexcept;
+    [[nodiscard]] bool initializeDialog(const UIDialogParts& parts) noexcept;
     void resetNode(u32 nodeIndex) noexcept;
     [[nodiscard]] bool releaseNode(UINodeId node) noexcept;
 
@@ -36,7 +40,7 @@ class UIDialogStateStorage final {
     [[nodiscard]] bool dismiss(UINodeId dialog) noexcept;
 
   private:
-    std::pmr::vector<DialogState> statesByNodeIndex_;
+    UIBoundedNodeStateTable<DialogState> states_;
     UINodeId activeDialog_{};
 };
 

@@ -123,6 +123,30 @@ Core::Status validateUIContextCapacityConfig(const UIContextCapacityConfig& conf
         return invalidContextConfig("UI Flow capacities cannot exceed node capacity");
     }
 
+    const UIComponentStateCapacityConfig& components = config.componentStates;
+    const usize componentCapacities[] = {
+        components.tooltipCapacity,
+        components.dialogCapacity,
+        components.splitViewCapacity,
+        components.splitterCapacity,
+        components.tabViewCapacity,
+        components.tabCapacity,
+        components.menuCapacity,
+        components.menuItemCapacity,
+        components.virtualGridViewCapacity,
+        components.virtualGridItemCapacity,
+        components.dataGridCapacity,
+        components.dataGridColumnCapacity,
+        components.dataGridRowCapacity,
+        components.dataGridCellCapacity,
+    };
+    if (std::any_of(std::begin(componentCapacities), std::end(componentCapacities),
+                    exceedsNodeCapacity))
+    {
+        return invalidContextConfig(
+            "UI component state capacities cannot exceed node capacity");
+    }
+
     return Core::success();
 }
 

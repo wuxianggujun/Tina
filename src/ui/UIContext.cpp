@@ -2,6 +2,8 @@
 
 #include <tina/core/base/ScopeExit.hpp>
 #include <tina/core/id/GenerationPool.hpp>
+#include <tina/core/memory/CountingMemoryResource.hpp>
+#include <tina/core/memory/MemoryTracker.hpp>
 #include <tina/core/text/Utf8.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 #include <tina/ui/UIDirty.hpp>
@@ -95,6 +97,36 @@ namespace Tina::UI {
 namespace {
 
 using NodeStorageId = Core::GenerationId<Detail::UINodeRegistryTag>;
+
+// UIContext uses fixed PMR storage, but the upstream resource is normally the
+// process default heap. Keep the existing Core memory ledger beside the Context
+// so a profile can distinguish retained UI bytes from process-level memory.
+class UIAllocationLedger final {
+  public:
+    explicit UIAllocationLedger(std::pmr::memory_resource& upstream) noexcept
+        : resource_(tracker_, Core::MemoryTag::UI, upstream)
+    {
+    }
+
+    [[nodiscard]] std::pmr::memory_resource& resource() noexcept
+    {
+        return resource_;
+    }
+
+    [[nodiscard]] Core::MemoryStatistics statistics() const noexcept
+    {
+        return tracker_.snapshot(Core::MemoryTag::UI);
+    }
+
+  private:
+    Core::MemoryTracker tracker_{};
+    Core::CountingMemoryResource resource_;
+};
+
+[[nodiscard]] usize allocationIncrease(usize before, usize after) noexcept
+{
+    return after >= before ? after - before : 0U;
+}
 
 inline constexpr u32 InvalidNodeIndex = NodeStorageId::InvalidIndex;
 
@@ -695,6 +727,13 @@ struct UIContext::Impl final {
         }
     };
 
+    std::unique_ptr<UIAllocationLedger> allocationLedger;
+    usize pmrNodePoolBytes = 0;
+    usize pmrStateStorageBytes = 0;
+    usize pmrScratchReserveBytes = 0;
+    usize pmrIndexAlignedStorageBytes = 0;
+    usize pmrSnapshotBufferBytes = 0;
+    usize pmrGlyphAtlasBytes = 0;
     Platform::WindowId ownerWindow{};
     UIContextCapacityConfig capacityConfig{};
     std::thread::id ownerThreadId{};
@@ -989,12 +1028,14 @@ struct UIContext::Impl final {
     Detail::UIImeCompositionState imeComposition;
 
     Impl(Platform::WindowId owner, UIContextCapacityConfig capacities, std::thread::id threadId,
-         std::shared_ptr<Detail::UIContextLifetimeControl> lifetimeControl, NodePool&& nodePool,
-         std::pmr::memory_resource& resource)
-        : ownerWindow(owner), capacityConfig(capacities), ownerThreadId(threadId), lifetime(std::move(lifetimeControl)),
-          nodes(std::move(nodePool)), idsByIndex(&resource), layoutStylesByIndex(&resource),
-          pointerHitPoliciesByIndex(&resource), enabledByNodeIndex(&resource), focusScopeModesByNodeIndex(&resource),
-          focusRestoreByNodeIndex(&resource), flowStatesByNodeIndex(&resource), styleRolesByNodeIndex(&resource),
+         std::shared_ptr<Detail::UIContextLifetimeControl> lifetimeControl,
+         std::unique_ptr<UIAllocationLedger> ownedAllocationLedger, NodePool&& nodePool)
+        : allocationLedger(std::move(ownedAllocationLedger)), ownerWindow(owner), capacityConfig(capacities),
+          ownerThreadId(threadId), lifetime(std::move(lifetimeControl)), nodes(std::move(nodePool)),
+          idsByIndex(&allocationLedger->resource()), layoutStylesByIndex(&allocationLedger->resource()),
+          pointerHitPoliciesByIndex(&allocationLedger->resource()), enabledByNodeIndex(&allocationLedger->resource()),
+          focusScopeModesByNodeIndex(&allocationLedger->resource()), focusRestoreByNodeIndex(&allocationLedger->resource()),
+          flowStatesByNodeIndex(&allocationLedger->resource()), styleRolesByNodeIndex(&allocationLedger->resource()),
           styleSheetStorage({
                                 .classCapacity = capacities.styleClassCapacity,
                                 .tokenCapacity = capacities.styleTokenCapacity,
@@ -1002,91 +1043,105 @@ struct UIContext::Impl final {
                                 .bucketCapacity = capacities.styleBucketCapacity,
                                 .maxRulesPerBucket = capacities.styleRulesPerBucketCapacity,
                             },
-                            resource),
-          motionTrackStorage(capacities.motionTrackCapacity, resource),
+                            allocationLedger->resource()),
+          motionTrackStorage(capacities.motionTrackCapacity, allocationLedger->resource()),
           timelineStorage(capacities.nodeCapacity, capacities.timelineCapacity,
                           capacities.timelineTrackCapacity, capacities.timelineKeyframeCapacity,
-                          capacities.activeTimelineCapacity, resource),
-          timelineLayoutNodeScratch(&resource),
-          timelinePaintNodeScratch(&resource),
-          presentationOpacityByNodeIndex(&resource),
-          presentationOpacityValidByNodeIndex(&resource),
-          presentationOffsetXByNodeIndex(&resource),
-          presentationOffsetYByNodeIndex(&resource),
-          presentationOffsetValidByNodeIndex(&resource),
-          styleClassesByNodeIndex(&resource), styleClassCountsByNodeIndex(&resource),
-          styleStatesByNodeIndex(&resource),
-          resolvedStyleInitializedByNodeIndex(&resource), resolvedBoxFillCacheByNodeIndex(&resource),
-          resolvedStyleColorTokenByNodeIndex(&resource),
-          styleTokenDependencyNextByNodeIndex(&resource),
-          styleTokenDependencyPrevByNodeIndex(&resource),
-          styleTokenDependencyHeadByTokenIndex(&resource),
-          resolvedImageTintTokenByNodeIndex(&resource),
-          imageTintTokenDependencyNextByNodeIndex(&resource),
-          imageTintTokenDependencyPrevByNodeIndex(&resource),
-          imageTintTokenDependencyHeadByTokenIndex(&resource),
-          resolvedImageTintCacheByNodeIndex(&resource),
-          resolvedImageTintValidByNodeIndex(&resource),
-          boxPaintsByIndex(&resource),
-          buttonPaintsByNodeIndex(&resource),
-          themeBindingsByNodeIndex(&resource), styleOverridesByNodeIndex(&resource), themeDirtyScratchByNodeIndex(&resource),
-          themeTextMetricsScratchByNodeIndex(&resource), localSolidFillCacheByIndex(&resource),
-          localTextColorCacheByIndex(&resource), textStatesByIndex(&resource), semanticsStatesByNodeIndex(&resource),
+                          capacities.activeTimelineCapacity, allocationLedger->resource()),
+          timelineLayoutNodeScratch(&allocationLedger->resource()),
+          timelinePaintNodeScratch(&allocationLedger->resource()),
+          presentationOpacityByNodeIndex(&allocationLedger->resource()),
+          presentationOpacityValidByNodeIndex(&allocationLedger->resource()),
+          presentationOffsetXByNodeIndex(&allocationLedger->resource()),
+          presentationOffsetYByNodeIndex(&allocationLedger->resource()),
+          presentationOffsetValidByNodeIndex(&allocationLedger->resource()),
+          styleClassesByNodeIndex(&allocationLedger->resource()), styleClassCountsByNodeIndex(&allocationLedger->resource()),
+          styleStatesByNodeIndex(&allocationLedger->resource()),
+          resolvedStyleInitializedByNodeIndex(&allocationLedger->resource()), resolvedBoxFillCacheByNodeIndex(&allocationLedger->resource()),
+          resolvedStyleColorTokenByNodeIndex(&allocationLedger->resource()),
+          styleTokenDependencyNextByNodeIndex(&allocationLedger->resource()),
+          styleTokenDependencyPrevByNodeIndex(&allocationLedger->resource()),
+          styleTokenDependencyHeadByTokenIndex(&allocationLedger->resource()),
+          resolvedImageTintTokenByNodeIndex(&allocationLedger->resource()),
+          imageTintTokenDependencyNextByNodeIndex(&allocationLedger->resource()),
+          imageTintTokenDependencyPrevByNodeIndex(&allocationLedger->resource()),
+          imageTintTokenDependencyHeadByTokenIndex(&allocationLedger->resource()),
+          resolvedImageTintCacheByNodeIndex(&allocationLedger->resource()),
+          resolvedImageTintValidByNodeIndex(&allocationLedger->resource()),
+          boxPaintsByIndex(&allocationLedger->resource()),
+          buttonPaintsByNodeIndex(&allocationLedger->resource()),
+          themeBindingsByNodeIndex(&allocationLedger->resource()), styleOverridesByNodeIndex(&allocationLedger->resource()),
+          themeDirtyScratchByNodeIndex(&allocationLedger->resource()),
+          themeTextMetricsScratchByNodeIndex(&allocationLedger->resource()), localSolidFillCacheByIndex(&allocationLedger->resource()),
+          localTextColorCacheByIndex(&allocationLedger->resource()), textStatesByIndex(&allocationLedger->resource()),
+          semanticsStatesByNodeIndex(&allocationLedger->resource()),
           paintSnapshotBuilder(capacities.paintSnapshotCapacity),
-          semanticsSnapshotBuilder(capacities.nodeCapacity, capacities.nodeCapacity, resource),
-          canvasCommandStorage(capacities.nodeCapacity, capacities.canvasCommandCapacity, resource),
-          imageContentStorage(capacities.nodeCapacity, capacities.imageContentCapacity, resource),
-           textEditPaintsByNodeIndex(&resource), textEditMultilineByNodeIndex(&resource),
-           textEditVisualLinesByNodeIndex(&resource), textEditVisualLayoutsByNodeIndex(&resource),
-           textEditScrollYByNodeIndex(&resource), candidateTextEditVisualLinesByNodeIndex(&resource),
-           candidateTextEditVisualLayoutsByNodeIndex(&resource), candidateTextEditScrollYByNodeIndex(&resource),
-           textEditPreferredXByNodeIndex(&resource), textEditCaretAffinityByNodeIndex(&resource),
-          progressBarStatesByNodeIndex(&resource), radioButtonStatesByNodeIndex(&resource),
-          scrollViewPaintsByNodeIndex(&resource), scrollViewLayoutScratchByNodeIndex(&resource),
-          dropdownStatesByNodeIndex(&resource), popupStatesByNodeIndex(&resource),
-          popupLayoutScratchByNodeIndex(&resource),
-          tooltipStorage(capacities.nodeCapacity, resource),
-          dialogStorage(capacities.nodeCapacity, resource),
-          splitViewStorage(capacities.nodeCapacity, resource),
-          tabViewStorage(capacities.nodeCapacity, resource),
-          menuStorage(capacities.nodeCapacity, resource),
-          menuMutationNodeScratch(&resource),
-          listViewStatesByNodeIndex(&resource),
-          listViewLayoutScratchByNodeIndex(&resource), listViewItemStatesByNodeIndex(&resource),
-          virtualGridViewStorage(capacities.nodeCapacity, resource),
-          virtualGridItemLinkScratch(&resource),
-          dataGridStorage(capacities.nodeCapacity, resource),
-          dataGridColumnLinkScratch(&resource),
-          dataGridRowLinkScratch(&resource),
-          dataGridCellLinkScratch(&resource),
-          dataGridColumnWidthScratch(&resource),
-          treeViewStatesByNodeIndex(&resource), treeViewLayoutScratchByNodeIndex(&resource),
-          treeViewItemStatesByNodeIndex(&resource),
-          textStorage(capacities.textByteCapacity, capacities.nodeCapacity * 2U, resource),
-          dirtyQueueStorage(capacities.nodeCapacity, capacities.dirtyQueueCapacity, resource),
-          layoutScratchByIndex(&resource),
-          layoutWorkByIndex(&resource), layoutOrderScratch(&resource), hitEntryIndexByNodeIndex(&resource),
-          routedPointerListenerRegistry(capacities.nodeCapacity, capacities.routedPointerListenerCapacity, resource),
-          routePathScratch(&resource), pointerCancelRoutePathScratch(&resource),
-          buttonActionRegistry(capacities.nodeCapacity, capacities.buttonActionCapacity, resource),
+          semanticsSnapshotBuilder(capacities.nodeCapacity, capacities.nodeCapacity, allocationLedger->resource()),
+          canvasCommandStorage(capacities.nodeCapacity, capacities.canvasCommandCapacity, allocationLedger->resource()),
+          imageContentStorage(capacities.nodeCapacity, capacities.imageContentCapacity, allocationLedger->resource()),
+           textEditPaintsByNodeIndex(&allocationLedger->resource()), textEditMultilineByNodeIndex(&allocationLedger->resource()),
+           textEditVisualLinesByNodeIndex(&allocationLedger->resource()), textEditVisualLayoutsByNodeIndex(&allocationLedger->resource()),
+           textEditScrollYByNodeIndex(&allocationLedger->resource()), candidateTextEditVisualLinesByNodeIndex(&allocationLedger->resource()),
+           candidateTextEditVisualLayoutsByNodeIndex(&allocationLedger->resource()), candidateTextEditScrollYByNodeIndex(&allocationLedger->resource()),
+           textEditPreferredXByNodeIndex(&allocationLedger->resource()), textEditCaretAffinityByNodeIndex(&allocationLedger->resource()),
+          progressBarStatesByNodeIndex(&allocationLedger->resource()), radioButtonStatesByNodeIndex(&allocationLedger->resource()),
+          scrollViewPaintsByNodeIndex(&allocationLedger->resource()), scrollViewLayoutScratchByNodeIndex(&allocationLedger->resource()),
+          dropdownStatesByNodeIndex(&allocationLedger->resource()), popupStatesByNodeIndex(&allocationLedger->resource()),
+          popupLayoutScratchByNodeIndex(&allocationLedger->resource()),
+          tooltipStorage(capacities.componentStates.tooltipCapacity,
+                         allocationLedger->resource()),
+          dialogStorage(capacities.componentStates.dialogCapacity,
+                        allocationLedger->resource()),
+          splitViewStorage(capacities.componentStates.splitViewCapacity,
+                           capacities.componentStates.splitterCapacity,
+                           allocationLedger->resource()),
+          tabViewStorage(capacities.componentStates.tabViewCapacity,
+                         capacities.componentStates.tabCapacity,
+                         allocationLedger->resource()),
+          menuStorage(capacities.componentStates.menuCapacity,
+                      capacities.componentStates.menuItemCapacity,
+                      allocationLedger->resource()),
+          menuMutationNodeScratch(&allocationLedger->resource()),
+          listViewStatesByNodeIndex(&allocationLedger->resource()),
+          listViewLayoutScratchByNodeIndex(&allocationLedger->resource()), listViewItemStatesByNodeIndex(&allocationLedger->resource()),
+          virtualGridViewStorage(capacities.nodeCapacity, allocationLedger->resource()),
+          virtualGridItemLinkScratch(&allocationLedger->resource()),
+          dataGridStorage(capacities.nodeCapacity, allocationLedger->resource()),
+          dataGridColumnLinkScratch(&allocationLedger->resource()),
+          dataGridRowLinkScratch(&allocationLedger->resource()),
+          dataGridCellLinkScratch(&allocationLedger->resource()),
+          dataGridColumnWidthScratch(&allocationLedger->resource()),
+          treeViewStatesByNodeIndex(&allocationLedger->resource()), treeViewLayoutScratchByNodeIndex(&allocationLedger->resource()),
+          treeViewItemStatesByNodeIndex(&allocationLedger->resource()),
+          textStorage(capacities.textByteCapacity, capacities.nodeCapacity * 2U, allocationLedger->resource()),
+          dirtyQueueStorage(capacities.nodeCapacity, capacities.dirtyQueueCapacity, allocationLedger->resource()),
+          layoutScratchByIndex(&allocationLedger->resource()),
+          layoutWorkByIndex(&allocationLedger->resource()), layoutOrderScratch(&allocationLedger->resource()),
+          hitEntryIndexByNodeIndex(&allocationLedger->resource()),
+          routedPointerListenerRegistry(capacities.nodeCapacity, capacities.routedPointerListenerCapacity,
+                                        allocationLedger->resource()),
+          routePathScratch(&allocationLedger->resource()), pointerCancelRoutePathScratch(&allocationLedger->resource()),
+          buttonActionRegistry(capacities.nodeCapacity, capacities.buttonActionCapacity, allocationLedger->resource()),
           behaviorStateStorage(capacities.nodeCapacity, capacities.nodeCapacity,
                                capacities.nodeCapacity, capacities.nodeCapacity, capacities.nodeCapacity,
-                               capacities.nodeCapacity, capacities.nodeCapacity, resource),
+                               capacities.nodeCapacity, capacities.nodeCapacity, allocationLedger->resource()),
           defaultActionPressState(owner), flowActionPressState(owner), rangeInputPressLatch(owner),
-          checkboxPaintsByNodeIndex(&resource),
-          sliderPaintsByNodeIndex(&resource), sliderChangeCallbackRegistry(capacities.nodeCapacity, resource),
-          committedBuffers{std::pmr::vector<UICommittedNodeEntry>(&resource),
-                                                                   std::pmr::vector<UICommittedNodeEntry>(&resource)},
-          committedLayoutBuffers{std::pmr::vector<UICommittedLayoutEntry>(&resource),
-                                 std::pmr::vector<UICommittedLayoutEntry>(&resource)},
-          committedHitBuffers{std::pmr::vector<UICommittedHitEntry>(&resource),
-                              std::pmr::vector<UICommittedHitEntry>(&resource)},
-          committedPaintBuffers{std::pmr::vector<UICommittedPaintEntry>(&resource),
-                                std::pmr::vector<UICommittedPaintEntry>(&resource)},
-          committedSemanticsBuffers{std::pmr::vector<UISemanticsEntry>(&resource),
-                                    std::pmr::vector<UISemanticsEntry>(&resource)},
-          committedSemanticsTextBuffers{std::pmr::vector<char>(&resource), std::pmr::vector<char>(&resource)},
-          componentBuildReservationsByNodeIndex(&resource)
+          checkboxPaintsByNodeIndex(&allocationLedger->resource()),
+          sliderPaintsByNodeIndex(&allocationLedger->resource()),
+          sliderChangeCallbackRegistry(capacities.nodeCapacity, allocationLedger->resource()),
+          committedBuffers{std::pmr::vector<UICommittedNodeEntry>(&allocationLedger->resource()),
+                           std::pmr::vector<UICommittedNodeEntry>(&allocationLedger->resource())},
+          committedLayoutBuffers{std::pmr::vector<UICommittedLayoutEntry>(&allocationLedger->resource()),
+                                 std::pmr::vector<UICommittedLayoutEntry>(&allocationLedger->resource())},
+          committedHitBuffers{std::pmr::vector<UICommittedHitEntry>(&allocationLedger->resource()),
+                              std::pmr::vector<UICommittedHitEntry>(&allocationLedger->resource())},
+          committedPaintBuffers{std::pmr::vector<UICommittedPaintEntry>(&allocationLedger->resource()),
+                                std::pmr::vector<UICommittedPaintEntry>(&allocationLedger->resource())},
+          committedSemanticsBuffers{std::pmr::vector<UISemanticsEntry>(&allocationLedger->resource()),
+                                    std::pmr::vector<UISemanticsEntry>(&allocationLedger->resource())},
+          committedSemanticsTextBuffers{std::pmr::vector<char>(&allocationLedger->resource()),
+                                        std::pmr::vector<char>(&allocationLedger->resource())},
+          componentBuildReservationsByNodeIndex(&allocationLedger->resource())
     {
         for (usize index = 0; index < observedFlowInputDevices.size(); ++index)
         {
@@ -1095,11 +1150,17 @@ struct UIContext::Impl final {
         }
     }
 
+    [[nodiscard]] std::pmr::memory_resource& allocationMemoryResource() noexcept
+    {
+        return allocationLedger->resource();
+    }
+
     [[nodiscard]] static Core::Result<std::unique_ptr<Impl>>
     Create(Platform::WindowId ownerWindow, NormalizedUIContextCapacityConfig normalized,
            std::shared_ptr<Detail::UIContextLifetimeControl> lifetimeControl, std::pmr::memory_resource& resource)
     {
-        auto poolResult = NodePool::Create(normalized.nodeCapacity, resource);
+        auto allocationLedger = std::make_unique<UIAllocationLedger>(resource);
+        auto poolResult = NodePool::Create(normalized.nodeCapacity, allocationLedger->resource());
         if (!poolResult)
         {
             const Core::Error& error = poolResult.error();
@@ -1109,6 +1170,7 @@ struct UIContext::Impl final {
             }
             return Core::failure(error);
         }
+        const usize nodePoolBytes = allocationLedger->statistics().currentBytes;
 
         UIContextCapacityConfig capacities{
             .nodeCapacity = normalized.nodeCapacity,
@@ -1141,7 +1203,11 @@ struct UIContext::Impl final {
         };
 
         auto impl = std::unique_ptr<Impl>(new Impl(ownerWindow, capacities, std::this_thread::get_id(),
-                                                   std::move(lifetimeControl), std::move(*poolResult), resource));
+                                                   std::move(lifetimeControl), std::move(allocationLedger),
+                                                   std::move(*poolResult)));
+        impl->pmrNodePoolBytes = nodePoolBytes;
+        usize allocationCheckpoint = impl->allocationLedger->statistics().currentBytes;
+        impl->pmrStateStorageBytes = allocationIncrease(nodePoolBytes, allocationCheckpoint);
         impl->motionClock = &impl->motionDefaultClock;
         impl->timelineLayoutNodeScratch.reserve(normalized.timelineTrackCapacity);
         impl->timelinePaintNodeScratch.reserve(normalized.timelineTrackCapacity);
@@ -1151,6 +1217,10 @@ struct UIContext::Impl final {
         impl->dataGridRowLinkScratch.reserve(normalized.nodeCapacity);
         impl->dataGridCellLinkScratch.reserve(normalized.nodeCapacity);
         impl->dataGridColumnWidthScratch.reserve(normalized.nodeCapacity);
+        usize nextAllocationCheckpoint = impl->allocationLedger->statistics().currentBytes;
+        impl->pmrScratchReserveBytes =
+            allocationIncrease(allocationCheckpoint, nextAllocationCheckpoint);
+        allocationCheckpoint = nextAllocationCheckpoint;
         impl->presentationOpacityByNodeIndex.resize(normalized.nodeCapacity, 1.0F);
         impl->presentationOpacityValidByNodeIndex.resize(normalized.nodeCapacity, 0);
         impl->presentationOffsetXByNodeIndex.resize(normalized.nodeCapacity, 0.0F);
@@ -1222,6 +1292,10 @@ struct UIContext::Impl final {
         impl->pointerCancelRoutePathScratch.reserve(normalized.routePathCapacity);
         impl->checkboxPaintsByNodeIndex.resize(normalized.nodeCapacity);
         impl->sliderPaintsByNodeIndex.resize(normalized.nodeCapacity);
+        nextAllocationCheckpoint = impl->allocationLedger->statistics().currentBytes;
+        impl->pmrIndexAlignedStorageBytes =
+            allocationIncrease(allocationCheckpoint, nextAllocationCheckpoint);
+        allocationCheckpoint = nextAllocationCheckpoint;
         impl->committedBuffers[0].reserve(normalized.nodeCapacity);
         impl->committedBuffers[1].reserve(normalized.nodeCapacity);
         impl->committedLayoutBuffers[0].reserve(normalized.layoutSnapshotCapacity);
@@ -1234,6 +1308,9 @@ struct UIContext::Impl final {
         impl->committedSemanticsBuffers[1].reserve(normalized.nodeCapacity);
         impl->committedSemanticsTextBuffers[0].resize(normalized.textByteCapacity, '\0');
         impl->committedSemanticsTextBuffers[1].resize(normalized.textByteCapacity, '\0');
+        nextAllocationCheckpoint = impl->allocationLedger->statistics().currentBytes;
+        impl->pmrSnapshotBufferBytes =
+            allocationIncrease(allocationCheckpoint, nextAllocationCheckpoint);
         impl->deferredRootDestroyBuffer.reserve(normalized.rootCapacity);
         impl->deferredRoutedPointerListenerReleaseBuffer.reserve(normalized.routedPointerListenerCapacity);
         return impl;
@@ -1455,20 +1532,24 @@ struct UIContext::Impl final {
             {
                 ownVisibility = UIVisibility::Collapsed;
             }
-            if (record->kind == BuiltinElementKind::Tooltip && index < tooltipStorage.capacity() &&
-                !tooltipStorage.stateByIndex(index).open)
+            const UINodeId node = idForIndex(index);
+            const TooltipState* tooltip =
+                record->kind == BuiltinElementKind::Tooltip
+                    ? tooltipStorage.tryState(node)
+                    : nullptr;
+            if (tooltip != nullptr && !tooltip->open)
             {
                 ownVisibility = UIVisibility::Collapsed;
             }
             if (record->kind == BuiltinElementKind::Modal &&
-                dialogStorage.containsDialog(idForIndex(index)) &&
-                !dialogStorage.isOpen(idForIndex(index)))
+                dialogStorage.containsDialog(node) && !dialogStorage.isOpen(node))
             {
                 ownVisibility = UIVisibility::Collapsed;
             }
-            if (record->kind == BuiltinElementKind::Menu && index < menuStorage.capacity())
+            if (record->kind == BuiltinElementKind::Menu &&
+                menuStorage.containsMenu(node))
             {
-                if (!menuStorage.isOpen(idForIndex(index)))
+                if (!menuStorage.isOpen(node))
                 {
                     ownVisibility = UIVisibility::Collapsed;
                 }
@@ -2953,23 +3034,24 @@ struct UIContext::Impl final {
             {
                 popupLayoutScratchByNodeIndex[parentIndex] = {};
             }
+            const UINodeId parentNode = idForIndex(parentIndex);
             if (parentRecord->kind == BuiltinElementKind::Tooltip &&
-                parentIndex < tooltipStorage.capacity())
+                tooltipStorage.containsTooltip(parentNode))
             {
                 tooltipStorage.layoutScratchByIndex(parentIndex) = {};
             }
             if (parentRecord->kind == BuiltinElementKind::Menu &&
-                parentIndex < menuStorage.capacity())
+                menuStorage.containsMenu(parentNode))
             {
                 menuStorage.layoutScratchByIndex(parentIndex) = {};
             }
             if (parentRecord->kind == BuiltinElementKind::SplitView &&
-                parentIndex < splitViewStorage.capacity())
+                splitViewStorage.containsSplitView(parentNode))
             {
                 splitViewStorage.layoutScratchByIndex(parentIndex) = {};
             }
             if (parentRecord->kind == BuiltinElementKind::TabView &&
-                parentIndex < tabViewStorage.capacity())
+                tabViewStorage.containsTabView(parentNode))
             {
                 tabViewStorage.layoutScratchByIndex(parentIndex) = {};
             }
@@ -3290,7 +3372,7 @@ struct UIContext::Impl final {
             {
                 assignLayoutRect(currentChild, layoutContentRect, parentWorldRect, descendantClip);
                 if (childRecord->kind == BuiltinElementKind::Menu &&
-                    currentChild < menuStorage.capacity())
+                    menuStorage.containsMenu(idForIndex(currentChild)))
                 {
                     menuStorage.layoutScratchByIndex(currentChild) = {};
                 }
@@ -3303,11 +3385,11 @@ struct UIContext::Impl final {
                 {
                     arrangePopupChild(currentChild, parentWorldRect, viewportRect, statistics);
                 } else if (childRecord->kind == BuiltinElementKind::Tooltip &&
-                           currentChild < tooltipStorage.capacity())
+                           tooltipStorage.containsTooltip(idForIndex(currentChild)))
                 {
                     arrangeTooltipChild(currentChild, parentWorldRect, viewportRect, statistics);
                 } else if (childRecord->kind == BuiltinElementKind::Menu &&
-                           currentChild < menuStorage.capacity())
+                           menuStorage.containsMenu(idForIndex(currentChild)))
                 {
                     arrangeMenuChild(currentChild, parentWorldRect, viewportRect, statistics);
                 } else
@@ -3752,7 +3834,7 @@ struct UIContext::Impl final {
             return widgetPaintColor(node, color);
         }
         if (record != nullptr && record->kind == BuiltinElementKind::Tab &&
-            nodeIndex < tabViewStorage.capacity())
+            tabViewStorage.containsTab(node))
         {
             const UITabPaint& paint = tabViewStorage.tabPaintByIndex(nodeIndex);
             const UINodeId tabView = tabViewStorage.tabViewForTab(node);
@@ -4347,7 +4429,8 @@ struct UIContext::Impl final {
         }
 
         UIStraightSrgba8Color focusedBorderColor{};
-        if (record->kind == BuiltinElementKind::Tab && nodeIndex < tabViewStorage.capacity())
+        if (record->kind == BuiltinElementKind::Tab &&
+            tabViewStorage.containsTab(node))
         {
             focusedBorderColor = tabViewStorage.tabPaintByIndex(nodeIndex).focusedBorderColor;
         }
@@ -7511,6 +7594,18 @@ struct UIContext::Impl final {
 
     [[nodiscard]] ProductChromeStorage productChromeStorageFor(u32 index) noexcept
     {
+        TabState* tab = tabViewStorage.tryTab(idForIndex(index));
+        SplitterState* splitter = splitViewStorage.trySplitter(idForIndex(index));
+        std::optional<std::reference_wrapper<UITabPaint>> tabPaint;
+        std::optional<std::reference_wrapper<UISplitterPaint>> splitterPaint;
+        if (tab != nullptr)
+        {
+            tabPaint = std::ref(tab->paint);
+        }
+        if (splitter != nullptr)
+        {
+            splitterPaint = std::ref(splitter->paint);
+        }
         return {
             .box = boxPaintsByIndex[index],
             .text = textStatesByIndex[index].style,
@@ -7524,8 +7619,8 @@ struct UIContext::Impl final {
             .listView = listViewStatesByNodeIndex[index].paint,
             .treeView = treeViewStatesByNodeIndex[index].paint,
             .textEdit = textEditPaintsByNodeIndex[index],
-            .tab = tabViewStorage.tabPaintByIndex(index),
-            .splitter = splitViewStorage.splitterPaintByIndex(index),
+            .tab = tabPaint,
+            .splitter = splitterPaint,
             .imageTint = [&]() noexcept -> UIStraightSrgba8Color* {
                 UIImageContent* image = imageContentStorage.getMutable(index);
                 return image == nullptr ? nullptr : &image->tint;
@@ -9581,7 +9676,11 @@ struct UIContext::Impl final {
                 return fail(Core::CoreErrorCode::Internal,
                             "UI Tab is missing its retained configuration");
             }
-            tabViewStorage.initializeTab(node, *descriptor.tab);
+            if (!tabViewStorage.initializeTab(node, *descriptor.tab))
+            {
+                return fail(UIErrorCode::CapacityExceeded,
+                            "UI Tab state capacity has been exhausted");
+            }
         }
         if (kind == BuiltinElementKind::Splitter)
         {
@@ -9590,7 +9689,11 @@ struct UIContext::Impl final {
                 return fail(Core::CoreErrorCode::Internal,
                             "UI Splitter is missing its retained configuration");
             }
-            splitViewStorage.initializeSplitter(node, *descriptor.splitter);
+            if (!splitViewStorage.initializeSplitter(node, *descriptor.splitter))
+            {
+                return fail(UIErrorCode::CapacityExceeded,
+                            "UI Splitter state capacity has been exhausted");
+            }
         }
         const u16 previousBindings = themeBindingsByNodeIndex[node.index()];
         const u16 nextBindings = capacityConfig.applyDefaultProductChrome
@@ -9655,7 +9758,11 @@ struct UIContext::Impl final {
                 return fail(Core::CoreErrorCode::Internal,
                             "UI Tooltip is missing its retained configuration");
             }
-            tooltipStorage.initializeTooltip(node, *descriptor.tooltip);
+            if (!tooltipStorage.initializeTooltip(node, *descriptor.tooltip))
+            {
+                return fail(UIErrorCode::CapacityExceeded,
+                            "UI Tooltip state capacity has been exhausted");
+            }
         }
         if (kind == BuiltinElementKind::SplitView)
         {
@@ -9664,7 +9771,11 @@ struct UIContext::Impl final {
                 return fail(Core::CoreErrorCode::Internal,
                             "UI SplitView is missing its retained configuration");
             }
-            splitViewStorage.initializeSplitView(node, *descriptor.splitView);
+            if (!splitViewStorage.initializeSplitView(node, *descriptor.splitView))
+            {
+                return fail(UIErrorCode::CapacityExceeded,
+                            "UI SplitView state capacity has been exhausted");
+            }
         }
         if (kind == BuiltinElementKind::TabView)
         {
@@ -9673,7 +9784,11 @@ struct UIContext::Impl final {
                 return fail(Core::CoreErrorCode::Internal,
                             "UI TabView is missing its retained configuration");
             }
-            tabViewStorage.initializeTabView(node, *descriptor.tabView);
+            if (!tabViewStorage.initializeTabView(node, *descriptor.tabView))
+            {
+                return fail(UIErrorCode::CapacityExceeded,
+                            "UI TabView state capacity has been exhausted");
+            }
         }
         if (kind == BuiltinElementKind::Menu)
         {
@@ -9682,7 +9797,11 @@ struct UIContext::Impl final {
                 return fail(Core::CoreErrorCode::Internal,
                             "UI Menu is missing its retained configuration");
             }
-            menuStorage.initializeMenu(node, *descriptor.menu);
+            if (!menuStorage.initializeMenu(node, *descriptor.menu))
+            {
+                return fail(UIErrorCode::CapacityExceeded,
+                            "UI Menu state capacity has been exhausted");
+            }
         }
         if (kind == BuiltinElementKind::MenuItem)
         {
@@ -9691,8 +9810,12 @@ struct UIContext::Impl final {
                 return fail(Core::CoreErrorCode::Internal,
                             "UI MenuItem is missing its retained configuration or Menu parent");
             }
-            menuStorage.initializeMenuItem(
-                node, idForIndex(record->parentIndex), *descriptor.menuItem);
+            if (!menuStorage.initializeMenuItem(
+                    node, idForIndex(record->parentIndex), *descriptor.menuItem))
+            {
+                return fail(UIErrorCode::CapacityExceeded,
+                            "UI MenuItem state capacity has been exhausted");
+            }
             if (descriptor.menuItem->kind == UIMenuItemKind::Radio &&
                 descriptor.menuItem->checked &&
                 menuStorage.hasCheckedRadioPeer(node))
@@ -14697,8 +14820,7 @@ struct UIContext::Impl final {
             return fail(UIErrorCode::InvalidControlValue,
                         "UI TabView requires at least one tab item; use clearTabViewItems to clear it");
         }
-        if (items.size() > tabViewStorage.capacity() ||
-            items.size() > static_cast<usize>((std::numeric_limits<u32>::max)()))
+        if (items.size() > static_cast<usize>((std::numeric_limits<u32>::max)()))
         {
             return fail(UIErrorCode::CapacityExceeded,
                         "UI TabView item capacity has been exceeded");
@@ -16658,12 +16780,22 @@ struct UIContext::Impl final {
         return *nodeResult;
     }
 
-    void registerDialogFromBuild(const UIDialogParts& parts) noexcept
+    [[nodiscard]] Core::Status registerDialogFromBuild(const UIDialogParts& parts)
     {
         const NodeRecord* record =
             contains(parts.modal) ? nodes.tryGet(parts.modal.storageId()) : nullptr;
-        assert(record != nullptr && record->kind == BuiltinElementKind::Modal);
-        dialogStorage.initializeDialog(parts);
+        if (record == nullptr || record->kind != BuiltinElementKind::Modal)
+        {
+            return fail(Core::CoreErrorCode::Internal,
+                        "UI Dialog registration requires a live Modal root");
+        }
+        if (!dialogStorage.initializeDialog(parts))
+        {
+            static_cast<void>(destroySubtree(parts.modal));
+            return fail(UIErrorCode::CapacityExceeded,
+                        "UI Dialog state capacity has been exhausted");
+        }
+        return Core::success();
     }
 
     [[nodiscard]] Core::Result<NodeRecord*> resolveDialog(UINodeId dialog)
@@ -20005,6 +20137,51 @@ struct UIContext::Impl final {
             ->committedMetrics;
     }
 
+    [[nodiscard]] Core::Result<UINodeId>
+    virtualGridViewMaterializedItemNodeFromUpdater(
+        UINodeId updaterRoot, UINodeId virtualGridView,
+        u64 logicalIndex) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (Core::Status valid = validateVirtualGridViewUpdater(
+                updaterRoot, virtualGridView); !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        const Detail::VirtualGridViewState* state =
+            virtualGridViewStorage.tryView(virtualGridView);
+        if (state == nullptr)
+        {
+            return UINodeId{};
+        }
+        const UIVirtualGridViewMetrics& metrics = state->committedMetrics;
+        const bool isInCommittedWindow =
+            logicalIndex >= metrics.firstMaterializedIndex &&
+            logicalIndex - metrics.firstMaterializedIndex <
+                static_cast<u64>(metrics.materializedItemCount);
+        if (!isInCommittedWindow)
+        {
+            return UINodeId{};
+        }
+        for (u32 ordinal = 0; ordinal < state->linkedMaterializedItemCount;
+             ++ordinal)
+        {
+            const UINodeId itemNode =
+                virtualGridViewStorage.itemAt(virtualGridView, ordinal);
+            const Detail::VirtualGridViewItemState* item =
+                virtualGridViewStorage.tryItem(itemNode);
+            if (item != nullptr && item->committedBound &&
+                item->committedLogicalIndex == logicalIndex)
+            {
+                return itemNode;
+            }
+        }
+        return UINodeId{};
+    }
+
     [[nodiscard]] Core::Status setVirtualGridViewSelectedIndexFromUpdater(
         UINodeId updaterRoot, UINodeId virtualGridView, u64 logicalIndex)
     {
@@ -20870,6 +21047,50 @@ struct UIContext::Impl final {
             return Core::failure(valid.error());
         }
         return treeViewStatesByNodeIndex[treeView.index()].committedMetrics;
+    }
+
+    [[nodiscard]] Core::Result<UINodeId> treeViewMaterializedItemNodeFromUpdater(
+        UINodeId updaterRoot, UINodeId treeView, u64 logicalIndex) const
+    {
+        if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+        {
+            return Core::failure(ownerThread.error());
+        }
+        if (Core::Status valid = validateTreeViewUpdater(updaterRoot, treeView); !valid)
+        {
+            return Core::failure(valid.error());
+        }
+        const UITreeViewMetrics& metrics =
+            treeViewStatesByNodeIndex[treeView.index()].committedMetrics;
+        const bool isInCommittedWindow =
+            logicalIndex >= metrics.firstMaterializedIndex &&
+            logicalIndex - metrics.firstMaterializedIndex <
+                static_cast<u64>(metrics.materializedItemCount);
+        if (isInCommittedWindow)
+        {
+            const NodeRecord* treeRecord = nodes.tryGet(treeView.storageId());
+            u32 childIndex = treeRecord == nullptr ? InvalidNodeIndex : treeRecord->firstChildIndex;
+            while (childIndex != InvalidNodeIndex)
+            {
+                const NodeRecord* childRecord = recordByIndex(childIndex);
+                if (childRecord == nullptr)
+                {
+                    break;
+                }
+                if (childIndex >= treeViewItemStatesByNodeIndex.size())
+                {
+                    childIndex = childRecord->nextSiblingIndex;
+                    continue;
+                }
+                const TreeViewItemState& item = treeViewItemStatesByNodeIndex[childIndex];
+                if (item.committedBound && item.committedLogicalIndex == logicalIndex)
+                {
+                    return idForIndex(childIndex);
+                }
+                childIndex = childRecord->nextSiblingIndex;
+            }
+        }
+        return UINodeId{};
     }
 
     [[nodiscard]] Core::Status setTreeViewSelectedIndexFromUpdater(UINodeId updaterRoot, UINodeId treeView,
@@ -21918,7 +22139,7 @@ struct UIContext::Impl final {
         {
             const NodeRecord* record = recordByIndex(index);
             if (record == nullptr || record->kind != BuiltinElementKind::Tooltip ||
-                index >= tooltipStorage.capacity())
+                !tooltipStorage.containsTooltip(idForIndex(index)))
             {
                 continue;
             }
@@ -21928,7 +22149,7 @@ struct UIContext::Impl final {
         {
             const NodeRecord* record = recordByIndex(index);
             if (record == nullptr || record->kind != BuiltinElementKind::SplitView ||
-                index >= splitViewStorage.capacity())
+                !splitViewStorage.containsSplitView(idForIndex(index)))
             {
                 continue;
             }
@@ -21938,7 +22159,7 @@ struct UIContext::Impl final {
         {
             const NodeRecord* record = recordByIndex(index);
             if (record == nullptr || record->kind != BuiltinElementKind::TabView ||
-                index >= tabViewStorage.capacity())
+                !tabViewStorage.containsTabView(idForIndex(index)))
             {
                 continue;
             }
@@ -21948,7 +22169,7 @@ struct UIContext::Impl final {
         {
             const NodeRecord* record = recordByIndex(index);
             if (record == nullptr || record->kind != BuiltinElementKind::Menu ||
-                index >= menuStorage.capacity())
+                !menuStorage.containsMenu(idForIndex(index)))
             {
                 continue;
             }
@@ -27288,7 +27509,20 @@ struct UIContext::Impl final {
             behaviorStateStorage.counters();
         const Detail::UIStyleSheetStorageStatistics styleStatistics =
             styleSheetStorage.statistics();
+        const Core::MemoryStatistics memoryStatistics = allocationLedger->statistics();
         return UIContextStatistics{
+            .pmrCurrentBytes = memoryStatistics.currentBytes,
+            .pmrPeakBytes = memoryStatistics.peakBytes,
+            .pmrAllocationCount = memoryStatistics.allocationCount,
+            .pmrDeallocationCount = memoryStatistics.deallocationCount,
+            .pmrFailedAllocationCount = memoryStatistics.failedAllocationCount,
+            .pmrInvalidDeallocationCount = memoryStatistics.invalidDeallocationCount,
+            .pmrNodePoolBytes = pmrNodePoolBytes,
+            .pmrStateStorageBytes = pmrStateStorageBytes,
+            .pmrScratchReserveBytes = pmrScratchReserveBytes,
+            .pmrIndexAlignedStorageBytes = pmrIndexAlignedStorageBytes,
+            .pmrSnapshotBufferBytes = pmrSnapshotBufferBytes,
+            .pmrGlyphAtlasBytes = pmrGlyphAtlasBytes,
             .nodeCapacity = capacityConfig.nodeCapacity,
             .rootCapacity = capacityConfig.rootCapacity,
             .dirtyQueueCapacity = dirtyQueueStorage.queueCapacity(),
@@ -29184,6 +29418,19 @@ UITreeUpdater::virtualGridViewMetrics(UINodeId virtualGridView) const
     return m_context->virtualGridViewMetricsFromUpdater(m_root, virtualGridView);
 }
 
+Core::Result<UINodeId>
+UITreeUpdater::virtualGridViewMaterializedItemNode(
+    UINodeId virtualGridView, u64 logicalIndex) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext,
+                    "UI tree updater is not bound to a context");
+    }
+    return m_context->virtualGridViewMaterializedItemNodeFromUpdater(
+        m_root, virtualGridView, logicalIndex);
+}
+
 Core::Status UITreeUpdater::setVirtualGridViewSelectedIndex(
     UINodeId virtualGridView, u64 logicalIndex)
 {
@@ -29391,6 +29638,18 @@ Core::Result<UITreeViewMetrics> UITreeUpdater::treeViewMetrics(UINodeId treeView
         return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
     }
     return m_context->treeViewMetricsFromUpdater(m_root, treeView);
+}
+
+Core::Result<UINodeId> UITreeUpdater::treeViewMaterializedItemNode(
+    UINodeId treeView, u64 logicalIndex) const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext,
+                    "UI tree updater is not bound to a context");
+    }
+    return m_context->treeViewMaterializedItemNodeFromUpdater(
+        m_root, treeView, logicalIndex);
 }
 
 Core::Status UITreeUpdater::setTreeViewSelectedIndex(UINodeId treeView, u64 logicalIndex)
@@ -29633,17 +29892,23 @@ Core::Result<std::unique_ptr<UIContext>> UIContext::Create(Platform::WindowId ow
         }
         (*implResult)->textRasterizer = std::move(textRasterizer);
 
+        const usize allocationBeforeGlyphAtlas =
+            (*implResult)->allocationLedger->statistics().currentBytes;
         auto atlasResult = UIGlyphAtlas::Create(
             UIGlyphAtlasCapacity{
                 .width = 512,
                 .height = 512,
                 .maxGlyphs = 1024,
             },
-            resource);
+            (*implResult)->allocationMemoryResource());
         if (atlasResult)
         {
             (*implResult)->glyphAtlas = std::move(*atlasResult);
         }
+        const usize allocationAfterGlyphAtlas =
+            (*implResult)->allocationLedger->statistics().currentBytes;
+        (*implResult)->pmrGlyphAtlasBytes =
+            allocationIncrease(allocationBeforeGlyphAtlas, allocationAfterGlyphAtlas);
 
         auto context = std::unique_ptr<UIContext>(new UIContext(std::move(*implResult)));
         lifetime->attach(*context);
@@ -31138,9 +31403,9 @@ Core::Result<UIPopupMetrics> UIContext::popupMetricsFromUpdater(UINodeId updater
     return m_impl->popupMetricsFromUpdater(updaterRoot, popup);
 }
 
-void UIContext::registerDialogFromBuild(const UIDialogParts& parts) noexcept
+Core::Status UIContext::registerDialogFromBuild(const UIDialogParts& parts)
 {
-    m_impl->registerDialogFromBuild(parts);
+    return m_impl->registerDialogFromBuild(parts);
 }
 
 Core::Status UIContext::openDialogFromUpdater(UINodeId updaterRoot,
@@ -31445,6 +31710,15 @@ UIContext::virtualGridViewMetricsFromUpdater(
     return m_impl->virtualGridViewMetricsFromUpdater(updaterRoot, virtualGridView);
 }
 
+Core::Result<UINodeId>
+UIContext::virtualGridViewMaterializedItemNodeFromUpdater(
+    UINodeId updaterRoot, UINodeId virtualGridView,
+    u64 logicalIndex) const
+{
+    return m_impl->virtualGridViewMaterializedItemNodeFromUpdater(
+        updaterRoot, virtualGridView, logicalIndex);
+}
+
 Core::Status UIContext::setVirtualGridViewSelectedIndexFromUpdater(
     UINodeId updaterRoot, UINodeId virtualGridView, u64 logicalIndex)
 {
@@ -31590,6 +31864,13 @@ Core::Result<UITreeViewPaint> UIContext::treeViewPaintFromUpdater(UINodeId updat
 Core::Result<UITreeViewMetrics> UIContext::treeViewMetricsFromUpdater(UINodeId updaterRoot, UINodeId treeView) const
 {
     return m_impl->treeViewMetricsFromUpdater(updaterRoot, treeView);
+}
+
+Core::Result<UINodeId> UIContext::treeViewMaterializedItemNodeFromUpdater(
+    UINodeId updaterRoot, UINodeId treeView, u64 logicalIndex) const
+{
+    return m_impl->treeViewMaterializedItemNodeFromUpdater(
+        updaterRoot, treeView, logicalIndex);
 }
 
 Core::Status UIContext::setTreeViewSelectedIndexFromUpdater(UINodeId updaterRoot, UINodeId treeView, u64 logicalIndex)

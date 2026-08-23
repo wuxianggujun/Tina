@@ -87,6 +87,8 @@ public:
     [[nodiscard]] const ProjectAssetDescriptor* selectedItem() const noexcept;
     [[nodiscard]] const ProjectAssetDescriptor*
     inspectorSnapshot(Core::AssetId assetId) const noexcept;
+    [[nodiscard]] const ProjectAssetDescriptor*
+    spriteAssetForTexture(Core::AssetId textureAssetId) const noexcept;
     [[nodiscard]] const ProjectAssetDescriptor* selectedInspectorSnapshot() const noexcept;
 
     [[nodiscard]] Core::Status setFilter(ProjectAssetFilter filter) noexcept;

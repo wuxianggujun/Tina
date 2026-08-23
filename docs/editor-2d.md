@@ -185,8 +185,13 @@ Hierarchy 每次在 World2D/World3D document 变化后都从 canonical wire item
 document root 使用非持久化的 UI key，实际场景 Node 直接以 stable ID 作为 key。Header 下只常驻 `Add`、`Duplicate`、
 `Delete` 与 `Focus`。拖放到目标行中间 50% 会把源 Node 设为目标子节点，拖到上/下 25% 会在同级执行 before/after
 排序；拖到 document root 会回到场景根。跨父级边缘排序、拖入自身 subtree 与无效目标均 fail-closed，no-op 不发布
-revision；成功操作只发布一个 canonical revision，并按 stable ID 恢复选择、重建 preview 和 Inspector。`Add` 先打开
-第一方 Create Node picker `UIDialog`，列出当前 workspace 的 node template：World2D 为
+revision；成功操作只发布一个 canonical revision，并按 stable ID 恢复选择、重建 preview 和 Inspector。
+主列表支持双击节点进入 inline rename；名称始终按 UTF-8 codepoint 计数，空名、非法 UTF-8、过长文本和 document
+revision 冲突都会 fail-closed，不会销毁当前事件路径。对任意节点右键会打开 Hierarchy context menu，提供 Rename、
+Move Up、Move Down、Move to Root 和 Delete；菜单操作直接绑定 stable ID，右键目标不依赖 Inspector 当前选择。
+Editor 默认 authoring document capacity 为 128 个 entity/node，Hierarchy materialized window 为 64 项，达到真实容量前
+Add 仍保持可用，容量耗尽只拒绝当前创建事务并保留原 hierarchy。
+`Add` 先打开第一方 Create Node picker `UIDialog`，列出当前 workspace 的 node template：World2D 为
 `Node2D`、`Sprite2D`、`AnimatedSprite2D`、`Camera2D`、`PointLight2D`、`ShadowOccluder2D`，World3D 为 `Node3D`、`Mesh3D`；
 选中 template 后 Confirm 以一次 canonical revision 直接创建完整类型节点，因此选择节点类型只消耗一次 Undo，也不存在
 先建空节点再追加组件的转换路径。新 Node 默认成为打开 picker 时当前选中 Node 的子节点；选择 document root 时创建在
@@ -566,6 +571,14 @@ Core 另保留 `WriteFileTests.FailedAtomicReplacePreservesExistingTargetDirecto
 
 人工操作直接启动 `TinaEditor.exe`，不传 `--frames` 与 `--auto-demo`，由窗口关闭结束；需要有限帧观察时只传较长的
 `--frames=<N>`。两种方式都不会运行自动 authoring 流程，也不会把用户产生的 revision 数量误判为自动 smoke 失败。
+需要分析空 Editor 的 UI 内存时追加 `--profile-ui --frames=<N>`；末尾 JSON 会同时输出 UIContext PMR
+创建分类与首末帧增量、dirty/rebuild counters，以及 Catalog/Engine/首帧/末帧/销毁阶段的 Windows Working Set /
+Private Bytes。该诊断不修改产品容量；应先根据阶段 delta 定位 owner，再根据 UI PMR 分类决定是否重构稠密
+state storage，不能只看单一容量字段判断泄漏。
+同一参数也会记录交互式 source import 的 before/worker/commit/peak 内存快照、cooked payload、临时 pool
+峰值和释放后字节、AssetStore resident CPU payload，以及导入前/中/后的 FPS/帧耗时。图片只导入到 Project Assets
+而尚未被场景引用时，完整 Texture2D payload 不属于 resident 数据；worker 和 Catalog validation 的完整文件缓冲
+必须在对应阶段结束时释放。
 普通无项目启动不会提供任何测试资源；真实资源验收可直接点击 Project Assets 标题栏的小 `+` 选择项目外
 PNG/JPEG/WAV，确认不会追加目录对话框，文件自动进入临时 Project 的 `Source/Imported`，且图片产生 Texture2D +
 全幅 Sprite 并用于 2D 预览。随后点击 `Save` 或 `Save As`，选择空目录并确认资源迁移、重新 cook 和临时目录清理。

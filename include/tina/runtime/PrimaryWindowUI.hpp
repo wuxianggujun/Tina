@@ -322,6 +322,9 @@ class PrimaryWindowUITreeUpdater final {
     virtualGridViewPaint(UI::UINodeId virtualGridView) const;
     [[nodiscard]] Core::Result<UI::UIVirtualGridViewMetrics>
     virtualGridViewMetrics(UI::UINodeId virtualGridView) const;
+    [[nodiscard]] Core::Result<UI::UINodeId>
+    virtualGridViewMaterializedItemNode(UI::UINodeId virtualGridView,
+                                        u64 logicalIndex) const;
     [[nodiscard]] Core::Status setVirtualGridViewSelectedIndex(
         UI::UINodeId virtualGridView, u64 logicalIndex);
     [[nodiscard]] Core::Status clearVirtualGridViewSelection(UI::UINodeId virtualGridView);
@@ -362,6 +365,8 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Status setTreeViewPaint(UI::UINodeId treeView, const UI::UITreeViewPaint& paint);
     [[nodiscard]] Core::Result<UI::UITreeViewPaint> treeViewPaint(UI::UINodeId treeView) const;
     [[nodiscard]] Core::Result<UI::UITreeViewMetrics> treeViewMetrics(UI::UINodeId treeView) const;
+    [[nodiscard]] Core::Result<UI::UINodeId>
+    treeViewMaterializedItemNode(UI::UINodeId treeView, u64 logicalIndex) const;
     [[nodiscard]] Core::Status setTreeViewSelectedIndex(UI::UINodeId treeView, u64 logicalIndex);
     [[nodiscard]] Core::Status clearTreeViewSelection(UI::UINodeId treeView);
     [[nodiscard]] Core::Result<UI::UITreeViewSelection> treeViewSelection(UI::UINodeId treeView) const;

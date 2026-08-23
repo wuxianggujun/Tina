@@ -49,6 +49,23 @@ auto EditorWorkspaceState::selectedProjectAssetIdOfKind(Tina::AssetFormat::Asset
     return {};
 }
 
+auto EditorWorkspaceState::selectedProjectSpriteAssetId() const noexcept
+    -> Tina::Core::AssetId
+{
+    const auto* asset = projectAssets_.selectedInspectorSnapshot();
+    if (asset == nullptr) {
+        return {};
+    }
+    if (asset->assetKind == Tina::AssetFormat::AssetKind::Sprite) {
+        return asset->assetId;
+    }
+    if (asset->assetKind != Tina::AssetFormat::AssetKind::Texture2D) {
+        return {};
+    }
+    const auto* sprite = projectAssets_.spriteAssetForTexture(asset->assetId);
+    return sprite != nullptr ? sprite->assetId : Tina::Core::AssetId{};
+}
+
 auto EditorWorkspaceState::runNodePropertyCommand(
     Tina::PrimaryWindowUITreeUpdater& tree, EditorCommand command,
     bool& published) -> Tina::Core::Status{
@@ -73,7 +90,9 @@ auto EditorWorkspaceState::runNodePropertyCommand(
     };
 
     const bool meshCommand = command == EditorCommand::NodeToggleMeshVisible;
-    if (!authoringEnabled() || assetInspectorActive_ || !sceneDocumentActive() ||
+    const bool assignSpriteCommand = command == EditorCommand::NodeAssignSprite;
+    if (!authoringEnabled() || (!assignSpriteCommand && assetInspectorActive_) ||
+        !sceneDocumentActive() ||
         tileMapEditingContext()) {
         return reject(Tina::Core::Error{
             Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
@@ -307,12 +326,11 @@ auto EditorWorkspaceState::runNodePropertyCommand(
         break;
     }
     case EditorCommand::NodeAssignSprite: {
-        const Tina::Core::AssetId spriteId = selectedProjectAssetIdOfKind(
-            Tina::AssetFormat::AssetKind::Sprite);
+        const Tina::Core::AssetId spriteId = selectedProjectSpriteAssetId();
         if (!spriteId) {
             result = Tina::Core::failure(
                 Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
-                "Assign requires a Sprite asset selected in Project Assets");
+                "Assign requires a Sprite or imported Texture2D selected in Project Assets");
             break;
         }
         result = Tina::Editor::applyWorld2DSpriteNodeProperties(document_, ids,
@@ -718,8 +736,11 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                 }
             }
             if (section.assignButton.hasValue()) {
+                const bool spriteSelectionAvailable =
+                    sectionIndex == 0U && selectedProjectSpriteAssetId();
                 if (auto status = tree.setEnabled(section.assignButton,
-                                                  fieldsEditable);
+                                                  fieldsEditable &&
+                                                      spriteSelectionAvailable);
                     !status) {
                     return status;
                 }

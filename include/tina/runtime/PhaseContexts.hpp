@@ -176,6 +176,9 @@ class UIUpdateContext final {
     // Last committed semantics for accessibility rebuild (owner-thread, phase-scoped).
     // Reflects the most recent commitLayout (startup or previous frame), not in-progress edits.
     [[nodiscard]] Core::Result<UI::UICommittedSemanticsView> committedSemantics() const;
+    // Owner-thread diagnostic snapshot for bounded UI storage. The result is
+    // phase-scoped and does not expose the UIContext itself.
+    [[nodiscard]] Core::Result<UI::UIContextStatistics> primaryWindowUIStatistics() const;
 
   private:
     UIUpdateContext(const FrameTiming& frameTiming, Runtime::Detail::PrimaryWindowUICapabilityState& primaryWindowUI,

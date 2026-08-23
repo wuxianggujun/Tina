@@ -238,6 +238,13 @@ normalizeUIContextCapacityConfig(UIContextCapacityConfig config)
                                             usize configuredCapacity) noexcept {
         return configuredCapacity == 0 ? nodeCapacity : configuredCapacity;
     };
+    const auto deriveComponentCapacity = [nodeCapacity = config.nodeCapacity](
+                                             usize configuredCapacity,
+                                             usize defaultCapacity) noexcept {
+        return configuredCapacity == 0
+                   ? (std::min)(nodeCapacity, defaultCapacity)
+                   : configuredCapacity;
+    };
     return NormalizedUIContextCapacityConfig{
         .nodeCapacity = config.nodeCapacity,
         .rootCapacity = config.rootCapacity,
@@ -293,6 +300,50 @@ normalizeUIContextCapacityConfig(UIContextCapacityConfig config)
                                   ? (std::min)(UIContextCapacityConfig::DefaultFlowScreenCapacity,
                                                config.nodeCapacity)
                                   : config.flowScreenCapacity,
+        .componentStates = {
+            .tooltipCapacity = deriveComponentCapacity(
+                config.componentStates.tooltipCapacity,
+                UIComponentStateCapacityConfig::DefaultTooltipCapacity),
+            .dialogCapacity = deriveComponentCapacity(
+                config.componentStates.dialogCapacity,
+                UIComponentStateCapacityConfig::DefaultDialogCapacity),
+            .splitViewCapacity = deriveComponentCapacity(
+                config.componentStates.splitViewCapacity,
+                UIComponentStateCapacityConfig::DefaultSplitViewCapacity),
+            .splitterCapacity = deriveComponentCapacity(
+                config.componentStates.splitterCapacity,
+                UIComponentStateCapacityConfig::DefaultSplitterCapacity),
+            .tabViewCapacity = deriveComponentCapacity(
+                config.componentStates.tabViewCapacity,
+                UIComponentStateCapacityConfig::DefaultTabViewCapacity),
+            .tabCapacity = deriveComponentCapacity(
+                config.componentStates.tabCapacity,
+                UIComponentStateCapacityConfig::DefaultTabCapacity),
+            .menuCapacity = deriveComponentCapacity(
+                config.componentStates.menuCapacity,
+                UIComponentStateCapacityConfig::DefaultMenuCapacity),
+            .menuItemCapacity = deriveComponentCapacity(
+                config.componentStates.menuItemCapacity,
+                UIComponentStateCapacityConfig::DefaultMenuItemCapacity),
+            .virtualGridViewCapacity = deriveComponentCapacity(
+                config.componentStates.virtualGridViewCapacity,
+                UIComponentStateCapacityConfig::DefaultVirtualGridViewCapacity),
+            .virtualGridItemCapacity = deriveComponentCapacity(
+                config.componentStates.virtualGridItemCapacity,
+                UIComponentStateCapacityConfig::DefaultVirtualGridItemCapacity),
+            .dataGridCapacity = deriveComponentCapacity(
+                config.componentStates.dataGridCapacity,
+                UIComponentStateCapacityConfig::DefaultDataGridCapacity),
+            .dataGridColumnCapacity = deriveComponentCapacity(
+                config.componentStates.dataGridColumnCapacity,
+                UIComponentStateCapacityConfig::DefaultDataGridColumnCapacity),
+            .dataGridRowCapacity = deriveComponentCapacity(
+                config.componentStates.dataGridRowCapacity,
+                UIComponentStateCapacityConfig::DefaultDataGridRowCapacity),
+            .dataGridCellCapacity = deriveComponentCapacity(
+                config.componentStates.dataGridCellCapacity,
+                UIComponentStateCapacityConfig::DefaultDataGridCellCapacity),
+        },
         .applyDefaultProductChrome = config.applyDefaultProductChrome,
     };
 }

@@ -86,6 +86,7 @@ class AssetStore final {
     [[nodiscard]] Core::usize capacity() const noexcept;
     [[nodiscard]] Core::usize activeCount() const noexcept;
     [[nodiscard]] Core::usize availableCount() const noexcept;
+    [[nodiscard]] Core::u64 residentCookedFileBytes() const noexcept;
 
     // Immediate ReadyCpu publish (sync path). Empty files are rejected.
     [[nodiscard]] Core::Result<AssetHandle> publish(CookedAssetFile asset);
@@ -133,11 +134,13 @@ class AssetStore final {
     explicit AssetStore(Pool pool) noexcept;
 
     void releaseLease(AssetHandle handle) noexcept;
+    void eraseRecord(AssetHandle handle, const Record& record) noexcept;
     [[nodiscard]] Record* findRecord(AssetHandle handle) noexcept;
     [[nodiscard]] const Record* findRecord(AssetHandle handle) const noexcept;
     [[nodiscard]] static bool stateHasCpuPayload(AssetLogicalState state) noexcept;
 
     Pool m_pool;
+    Core::u64 m_residentCookedFileBytes = 0;
 };
 
 } // namespace Tina::Asset

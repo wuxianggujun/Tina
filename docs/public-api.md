@@ -364,6 +364,11 @@ paint/text setter 只将对应属性转为局部覆盖，其余属性继续跟�
 跨 root、失效或 facade 过期均返回结构化错误。该窄查询用于 Render/Editor 等需要把 retained layout 数值转换为
 下一帧 viewport 的组合层，不暴露裸 `UIContext` 或完整 committed view。
 
+`UIContextStatistics` 的 `pmrCurrentBytes/pmrPeakBytes`、allocation/deallocation/failure counters 只统计显式通过
+该 Context PMR 路由的 CPU storage；创建期另发布 NodePool、控件 state storage、scratch reserve、node-index
+aligned storage、snapshot buffer 与 glyph atlas 分类。它不声称覆盖普通 process heap、Render/backend、GPU 或
+driver allocation。Runtime 只通过 phase-scoped `primaryWindowUIStatistics()` 返回统计值副本，不暴露裸 Context。
+
 `UITreeUpdater` 与 `PrimaryWindowUITreeUpdater` 均提供 `registerFlowLayer()`、`registerFlowScreen()`、
 `pushFlowScreen()`、`popFlowScreen()`、`replaceFlowScreen()`、`activeFlowScreen()` 和
 `isFlowScreenActive()`，并以 `setFlowScreenAction()` / `clearFlowScreenAction()` 为 Screen 注册
@@ -812,7 +817,8 @@ single-component 目录）；它拒绝非物理目录和 symlink/junction/repars
 完整 preview 成功后发布；任何 commit 前失败继续使用旧 Catalog，commit 后失败作为结构化致命错误返回。
 
 Editor source import 同样留在 `Tina::EditorApp` 私有组合层，不扩大 document ABI。launch option parser 消费 absolute
-strict UTF-8 `--project-root`、可重复混合 `--import-recipe` / `--import-gltf` 和 `--import-on-start`，以一个有序 owning
+strict UTF-8 `--project-root`、可重复混合 `--import-recipe` / `--import-gltf` / `--import-texture` /
+`--import-audio` 和 `--import-on-start`，以一个有序 owning
 集合表达完整 intended units。`EditorSourceImportService` 在后台只调用 Asset pipeline；Ready stage 由 owner thread 在安全帧
 携带 Sprite/Mesh participants reload。dirty Catalog document 阻止 commit 但不丢弃 stage；`CatalogReloadBusy` 也保留 stage
 重试。fresh stage 在 Ready 前已拥有 sibling state；Catalog/Browser/documents/preview 成功后只把
@@ -977,7 +983,8 @@ importer，再通过 incremental stage API 复制 clean object、移除 removed 
 `executeSourceImportPipeline(request, stopToken)` 是 recipe/glTF host 共用的同步高层工具 API。request 必须给出完整 intended
 unit span、显式且非 `Invalid` 的 target platform、source/baseline/state 与 fresh-stage 路径；实现统一执行 baseline current-schema validation、batch probe、all-clean
 零改写复用、dirty/added recook、removed output 剔除、candidate compose、fresh package 完整验证和 stage-bound state commit。
-结果明确报告 `CleanReuse|FullRecook|IncrementalRecook`、unit/object 统计及 stage/state ownership。该 API 不调用
+结果明确报告 `CleanReuse|FullRecook|IncrementalRecook`、unit/object 统计、本次 recook 的
+`cookedPayloadBytes` 及 stage/state ownership。该 API 不调用
 `AssetSystem::reloadCatalog()`、不替换 live root，也不取得 UI/Render owner；host 可在后台调用，随后在 owner thread 安全点
 决定是否接受 stage。stop、IO、容量、validation 或 allocation 失败不返回部分 candidate。
 
@@ -998,6 +1005,10 @@ prepare 成功后，才无分配地原子切换 root、immutable Catalog、Asset
 `Replaced|Removed|LoadedDependency` 的新 generation；旧 `AssetLease` 继续读取旧 payload，释放最后一个 lease 后旧
 generation 才物理回收。任一步失败都会卸掉 staged generation、abort replacement GPU owner，并保留旧
 root/Catalog/index/Handle/registry Entry。
+
+reload 默认把完整 cooked file validation buffer 放在调用期局部 pool；返回的 Catalog manifest/index 仍由
+`AssetSystem` 长期 memory resource 拥有。调用方显式覆盖 `config.package.validation.file.memoryResource` 时必须自行管理
+该 scratch resource；默认路径不会因校验大 Texture2D 而把整份 payload 留在长期 Asset pool。
 
 reload 允许 active resident Handle/Lease，但 pending queue、in-flight IO、tracked GPU upload 与 retirement record 必须为空；
 非 owner thread 返回 `WrongOwnerThread`，非 quiescent 工作状态返回 `CatalogReloadBusy`。Store capacity 必须显式保留
@@ -1068,6 +1079,8 @@ StaticMesh/SkinnedMesh 上传到 RenderDevice，并建立 backend key binding；
 `retireGpuMesh` 把 lease 移入 `FramePin`，成功后弱 lookup 立即失效，backend completion 后才释放 payload。
 Texture2D 与 GPU mesh 的 `AssetLease&` + 对应 GPU generation handle ref overload 仅在 backend 接受后
 消费两者；失败完整恢复供重试。`drainGpuRetirements()` 用于 owner-thread teardown。
+`AssetStore::residentCookedFileBytes()` 是 owner 状态的只读字节账本，覆盖 ReadyCpu/UploadQueued/ReadyGpu 及仍被 lease
+保活的 UnloadPending cooked file；publish/complete 增加，物理 erase 才减少，不把 pool 保留页或 GPU allocation 算入其中。
 
 `Sprite2DBindingRegistry::Create(assets, device, config)` 必须在借用 `AssetSystem` 与 RenderDevice 的共享
 owner thread 调用；该线程成为固定容量 registry 的 owner，所有后续操作也必须在同一线程执行。

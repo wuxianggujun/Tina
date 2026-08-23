@@ -218,7 +218,8 @@ class AssetSystem final {
     [[nodiscard]] bool isCatalogReloadIdle() const noexcept;
     [[nodiscard]] bool isCatalogMigrationQuiescent() const noexcept;
     void prepareCatalogOpenConfig(CatalogPackageOpenConfig& config,
-                                  bool requireFullValidation) const noexcept;
+                                  bool requireFullValidation,
+                                  std::pmr::memory_resource& transientValidationMemory) const noexcept;
     [[nodiscard]] Core::Status commitCatalogWhenIdle(std::string_view catalogRootUtf8,
                                                       CatalogSnapshot catalog);
     [[nodiscard]] std::optional<Core::u32> findIndex(Core::AssetId assetId) const noexcept;

@@ -118,6 +118,30 @@ auto EditorWorkspaceState::initialPolicy() const noexcept -> Tina::GameStatePoli
 
 auto EditorWorkspaceState::updateFrame(Tina::FrameUpdateContext& context) -> Tina::Core::Status{
     ++counters_.frameUpdates;
+    if (options_.profileUi) {
+        const double frameSeconds =
+            static_cast<double>(context.frameTiming().updateDelta.count());
+        recordEditorFrameTiming(counters_.frameTimingOverall, frameSeconds);
+        if (sourceImportProfileActive_) {
+            recordEditorFrameTiming(
+                counters_.frameTimingDuringSourceImport, frameSeconds);
+            const EditorProcessMemorySnapshot processMemory =
+                queryEditorProcessMemory();
+            recordEditorProcessMemory(counters_, processMemory);
+            recordEditorProcessMemoryMaximum(
+                counters_.sourceImportProcessPeak, processMemory);
+            if (sourceImportProfileDeactivatePending_) {
+                sourceImportProfileDeactivatePending_ = false;
+                sourceImportProfileActive_ = false;
+            }
+        } else if (sourceImportProfileSeen_) {
+            recordEditorFrameTiming(
+                counters_.frameTimingAfterSourceImport, frameSeconds);
+        } else {
+            recordEditorFrameTiming(
+                counters_.frameTimingBeforeSourceImport, frameSeconds);
+        }
+    }
     if (playSessionActive()) {
         auto steps = playSession_->advance(
             context.frameTiming().updateDelta.count());
@@ -760,6 +784,19 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
     if (!tree) {
         return Tina::Core::failure(std::move(tree.error()));
     }
+    if (auto rect = tree->committedLayoutRect(projectAssetList_); rect) {
+        projectAssetListRect_ = *rect;
+    }
+    if (auto metrics = tree->virtualGridViewMetrics(projectAssetList_); metrics) {
+        projectAssetListMetrics_ = *metrics;
+    } else {
+        return Tina::Core::failure(std::move(metrics.error()));
+    }
+    if (auto style = tree->virtualGridViewStyle(projectAssetList_); style) {
+        projectAssetListStyle_ = *style;
+    } else {
+        return Tina::Core::failure(std::move(style.error()));
+    }
     if (auto status = processPendingMenuToggle(*tree); !status) {
         return status;
     }
@@ -770,6 +807,9 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
         return status;
     }
     if (auto status = updateSceneAddSearch(*tree); !status) {
+        return status;
+    }
+    if (auto status = processPendingProjectAssetDrop(*tree); !status) {
         return status;
     }
     if (!projectBrowserUiRefreshPending_) {
@@ -830,6 +870,21 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
             return status;
         }
         pendingHierarchyFocusRestore_ = false;
+    } else if (pendingHierarchyRenameFocus_) {
+        if (hierarchyRenameFocusDeferralFrames_ != 0U) {
+            --hierarchyRenameFocusDeferralFrames_;
+        } else if (!hierarchyRenameVisible_ || !hierarchyRenameInput_.hasValue()) {
+            pendingHierarchyRenameFocus_ = false;
+        } else if (auto status = tree->requestFocus(hierarchyRenameInput_); !status) {
+            // A layout rebuild can take one additional pass after a document
+            // refresh. Keep the request pending instead of turning a transient
+            // focusability state into an editor-fatal UI error.
+            if (status.error().code != UI::UIErrorCode::InvalidFocusTarget) {
+                return status;
+            }
+        } else {
+            pendingHierarchyRenameFocus_ = false;
+        }
     }
     if (auto status = processPendingInspectorSectionUpdates(*tree); !status) {
         return status;
@@ -1198,11 +1253,36 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
     if (auto rect = tree->committedLayoutRect(hierarchyTree_); rect) {
         hierarchyTreeRect_ = *rect;
     }
+    if (auto status = refreshHierarchyRenameLayout(*tree); !status) {
+        return status;
+    }
     counters_.hierarchyLogicalItems = metrics->logicalItemCount;
     if (auto status = refreshWorkspacePanelsUi(*tree); !status) {
         return status;
     }
-    return updateSnackbarUi(*tree);
+    if (auto status = updateSnackbarUi(*tree); !status) {
+        return status;
+    }
+    if (options_.profileUi) {
+        auto statistics = context.primaryWindowUIStatistics();
+        if (!statistics) {
+            return Tina::Core::failure(std::move(statistics.error()));
+        }
+        if (counters_.uiStatisticsSamples == 0U) {
+            counters_.uiStatisticsFirst = *statistics;
+        }
+        counters_.uiStatisticsLast = *statistics;
+        counters_.uiStatisticsPeakPmrBytes =
+            (std::max)(counters_.uiStatisticsPeakPmrBytes, statistics->pmrPeakBytes);
+        const EditorProcessMemorySnapshot processMemory = queryEditorProcessMemory();
+        if (counters_.uiStatisticsSamples == 0U) {
+            counters_.processFirstUiFrame = processMemory;
+        }
+        counters_.processLastUiFrame = processMemory;
+        recordEditorProcessMemory(counters_, processMemory);
+        ++counters_.uiStatisticsSamples;
+    }
+    return Tina::Core::success();
 }
 
 auto EditorWorkspaceState::captureRequestedRgbaFrame(
@@ -1449,6 +1529,14 @@ auto EditorWorkspaceState::processEditorShortcuts(
     if (pendingDirtyCloseKey_.has_value()) {
         if (editorShortcutStarted(actions, EditorShortcutActions::Escape)) {
             queue(EditorCommand::DirtyCloseCancel);
+        }
+        return Tina::Core::success();
+    }
+    if (hierarchyRenameVisible_) {
+        if (editorShortcutStarted(actions, EditorShortcutActions::Escape)) {
+            pendingHierarchyRenameCancel_ = true;
+        } else if (editorShortcutStarted(actions, EditorShortcutActions::ConfirmRename)) {
+            pendingHierarchyRenameCommit_ = true;
         }
         return Tina::Core::success();
     }

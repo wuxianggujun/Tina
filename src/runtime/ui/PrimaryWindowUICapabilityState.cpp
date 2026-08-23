@@ -133,6 +133,17 @@ PrimaryWindowUICapabilityState::committedSemantics(u64 epoch, PrimaryWindowUIPha
     return context_->committedSemantics();
 }
 
+Core::Result<UI::UIContextStatistics>
+PrimaryWindowUICapabilityState::statistics(u64 epoch, PrimaryWindowUIPhase phase)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUICapabilityState::statistics";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    return context_->statistics();
+}
+
 Core::Status PrimaryWindowUICapabilityState::validate(u64 epoch, PrimaryWindowUIPhase phase, bool requireContext,
                                                       std::string_view operation)
 {
@@ -2873,6 +2884,25 @@ PrimaryWindowUICapabilityState::virtualGridViewMetrics(
                   : Core::failure(rememberFirstError(std::move(result.error()), Operation));
 }
 
+Core::Result<UI::UINodeId>
+PrimaryWindowUICapabilityState::virtualGridViewMaterializedItemNode(
+    u64 epoch, PrimaryWindowUIPhase phase,
+    const UI::UITreeUpdater& updater, UI::UINodeId virtualGridView,
+    u64 logicalIndex)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::virtualGridViewMaterializedItemNode";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto result = updater.virtualGridViewMaterializedItemNode(
+        virtualGridView, logicalIndex);
+    return result ? Core::Result<UI::UINodeId>(*result)
+                  : Core::failure(rememberFirstError(
+                        std::move(result.error()), Operation));
+}
+
 Core::Status PrimaryWindowUICapabilityState::setVirtualGridViewSelectedIndex(
     u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
     UI::UINodeId virtualGridView, u64 logicalIndex)
@@ -3227,6 +3257,25 @@ PrimaryWindowUICapabilityState::treeViewMetrics(u64 epoch, PrimaryWindowUIPhase 
         return Core::failure(rememberFirstError(std::move(metrics.error()), Operation));
     }
     return *metrics;
+}
+
+Core::Result<UI::UINodeId>
+PrimaryWindowUICapabilityState::treeViewMaterializedItemNode(
+    u64 epoch, PrimaryWindowUIPhase phase, const UI::UITreeUpdater& updater,
+    UI::UINodeId treeView, u64 logicalIndex)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::treeViewMaterializedItemNode";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto node = updater.treeViewMaterializedItemNode(treeView, logicalIndex);
+    if (!node)
+    {
+        return Core::failure(rememberFirstError(std::move(node.error()), Operation));
+    }
+    return *node;
 }
 
 Core::Status PrimaryWindowUICapabilityState::setTreeViewSelectedIndex(u64 epoch, PrimaryWindowUIPhase phase,

@@ -6,21 +6,28 @@
 namespace Tina::UI::Detail {
 
 UIDialogStateStorage::UIDialogStateStorage(
-    usize nodeCapacity, std::pmr::memory_resource& resource)
-    : statesByNodeIndex_(&resource)
-{
-    statesByNodeIndex_.resize(nodeCapacity);
-}
+    usize capacity, std::pmr::memory_resource& resource)
+    : states_(capacity, resource)
+{}
 
 usize UIDialogStateStorage::capacity() const noexcept
 {
-    return statesByNodeIndex_.size();
+    return states_.capacity();
+}
+
+usize UIDialogStateStorage::activeCount() const noexcept
+{
+    return states_.size();
+}
+
+usize UIDialogStateStorage::availableCount() const noexcept
+{
+    return states_.availableCount();
 }
 
 bool UIDialogStateStorage::containsDialog(UINodeId dialog) const noexcept
 {
-    return dialog.hasValue() && dialog.index() < statesByNodeIndex_.size() &&
-           statesByNodeIndex_[dialog.index()].node == dialog;
+    return states_.contains(dialog);
 }
 
 DialogState* UIDialogStateStorage::tryState(UINodeId dialog) noexcept
@@ -30,31 +37,31 @@ DialogState* UIDialogStateStorage::tryState(UINodeId dialog) noexcept
 
 const DialogState* UIDialogStateStorage::tryState(UINodeId dialog) const noexcept
 {
-    return containsDialog(dialog) ? &statesByNodeIndex_[dialog.index()] : nullptr;
+    return states_.tryGet(dialog);
 }
 
-void UIDialogStateStorage::initializeDialog(const UIDialogParts& parts) noexcept
+bool UIDialogStateStorage::initializeDialog(const UIDialogParts& parts) noexcept
 {
-    assert(parts.modal.hasValue() &&
-           parts.modal.index() < statesByNodeIndex_.size());
+    assert(parts.modal.hasValue());
     resetNode(parts.modal.index());
-    statesByNodeIndex_[parts.modal.index()] = DialogState{
+    return states_.insertOrAssign(DialogState{
         .node = parts.modal,
         .parts = parts,
-    };
+    });
 }
 
 void UIDialogStateStorage::resetNode(u32 nodeIndex) noexcept
 {
-    if (nodeIndex >= statesByNodeIndex_.size())
+    DialogState* state = states_.tryGetByIndex(nodeIndex);
+    if (state == nullptr)
     {
         return;
     }
-    if (activeDialog_ == statesByNodeIndex_[nodeIndex].node)
+    if (activeDialog_ == state->node)
     {
         activeDialog_ = {};
     }
-    statesByNodeIndex_[nodeIndex] = {};
+    static_cast<void>(states_.eraseByIndex(nodeIndex));
 }
 
 bool UIDialogStateStorage::releaseNode(UINodeId node) noexcept
@@ -83,7 +90,7 @@ void UIDialogStateStorage::openValidated(UINodeId dialog) noexcept
 {
     assert(containsDialog(dialog));
     assert(!activeDialog().hasValue() || activeDialog_ == dialog);
-    statesByNodeIndex_[dialog.index()].open = true;
+    tryState(dialog)->open = true;
     activeDialog_ = dialog;
 }
 

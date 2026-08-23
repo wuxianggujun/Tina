@@ -6,31 +6,35 @@
 namespace Tina::UI::Detail {
 
 UISplitViewStateStorage::UISplitViewStateStorage(
-    usize nodeCapacity, std::pmr::memory_resource& resource)
-    : splitViewsByNodeIndex_(&resource), splittersByNodeIndex_(&resource),
-      layoutScratchByNodeIndex_(&resource), splitViewForPartByNodeIndex_(&resource)
-{
-    splitViewsByNodeIndex_.resize(nodeCapacity);
-    splittersByNodeIndex_.resize(nodeCapacity);
-    layoutScratchByNodeIndex_.resize(nodeCapacity);
-    splitViewForPartByNodeIndex_.resize(nodeCapacity);
-}
+    usize splitViewCapacity, usize splitterCapacity,
+    std::pmr::memory_resource& resource)
+    : splitViews_(splitViewCapacity, resource),
+      splitters_(splitterCapacity, resource)
+{}
 
 usize UISplitViewStateStorage::capacity() const noexcept
 {
-    return splitViewsByNodeIndex_.size();
+    return splitViews_.capacity();
+}
+
+usize UISplitViewStateStorage::availableSplitViewCount() const noexcept
+{
+    return splitViews_.availableCount();
+}
+
+usize UISplitViewStateStorage::availableSplitterCount() const noexcept
+{
+    return splitters_.availableCount();
 }
 
 bool UISplitViewStateStorage::containsSplitView(UINodeId splitView) const noexcept
 {
-    return splitView.hasValue() && splitView.index() < splitViewsByNodeIndex_.size() &&
-           splitViewsByNodeIndex_[splitView.index()].node == splitView;
+    return splitViews_.contains(splitView);
 }
 
 bool UISplitViewStateStorage::containsSplitter(UINodeId splitter) const noexcept
 {
-    return splitter.hasValue() && splitter.index() < splittersByNodeIndex_.size() &&
-           splittersByNodeIndex_[splitter.index()].node == splitter;
+    return splitters_.contains(splitter);
 }
 
 SplitViewState* UISplitViewStateStorage::trySplitView(UINodeId splitView) noexcept
@@ -40,7 +44,7 @@ SplitViewState* UISplitViewStateStorage::trySplitView(UINodeId splitView) noexce
 
 const SplitViewState* UISplitViewStateStorage::trySplitView(UINodeId splitView) const noexcept
 {
-    return containsSplitView(splitView) ? &splitViewsByNodeIndex_[splitView.index()] : nullptr;
+    return splitViews_.tryGet(splitView);
 }
 
 SplitterState* UISplitViewStateStorage::trySplitter(UINodeId splitter) noexcept
@@ -50,48 +54,51 @@ SplitterState* UISplitViewStateStorage::trySplitter(UINodeId splitter) noexcept
 
 const SplitterState* UISplitViewStateStorage::trySplitter(UINodeId splitter) const noexcept
 {
-    return containsSplitter(splitter) ? &splittersByNodeIndex_[splitter.index()] : nullptr;
+    return splitters_.tryGet(splitter);
 }
 
 UISplitterPaint& UISplitViewStateStorage::splitterPaintByIndex(u32 nodeIndex) noexcept
 {
-    assert(nodeIndex < splittersByNodeIndex_.size());
-    return splittersByNodeIndex_[nodeIndex].paint;
+    SplitterState* state = splitters_.tryGetByIndex(nodeIndex);
+    assert(state != nullptr);
+    return state->paint;
 }
 
 const UISplitterPaint& UISplitViewStateStorage::splitterPaintByIndex(u32 nodeIndex) const noexcept
 {
-    assert(nodeIndex < splittersByNodeIndex_.size());
-    return splittersByNodeIndex_[nodeIndex].paint;
+    const SplitterState* state = splitters_.tryGetByIndex(nodeIndex);
+    assert(state != nullptr);
+    return state->paint;
 }
 
 SplitViewLayoutScratch& UISplitViewStateStorage::layoutScratchByIndex(u32 nodeIndex) noexcept
 {
-    assert(nodeIndex < layoutScratchByNodeIndex_.size());
-    return layoutScratchByNodeIndex_[nodeIndex];
+    SplitViewState* state = splitViews_.tryGetByIndex(nodeIndex);
+    assert(state != nullptr);
+    return state->layoutScratch;
 }
 
-void UISplitViewStateStorage::initializeSplitView(
+bool UISplitViewStateStorage::initializeSplitView(
     UINodeId splitView, const UISplitViewConfig& config) noexcept
 {
-    assert(splitView.hasValue() && splitView.index() < splitViewsByNodeIndex_.size());
+    assert(splitView.hasValue());
     resetNode(splitView.index());
-    splitViewsByNodeIndex_[splitView.index()] = SplitViewState{
+    return splitViews_.insertOrAssign(SplitViewState{
         .node = splitView,
         .config = config,
         .requestedFraction = config.initialFraction,
-    };
+    });
 }
 
-void UISplitViewStateStorage::initializeSplitter(
+bool UISplitViewStateStorage::initializeSplitter(
     UINodeId splitter, const UISplitterConfig& config) noexcept
 {
-    assert(splitter.hasValue() && splitter.index() < splittersByNodeIndex_.size());
+    assert(splitter.hasValue());
     resetNode(splitter.index());
-    splittersByNodeIndex_[splitter.index()] = SplitterState{
+    return splitters_.insertOrAssign(SplitterState{
         .node = splitter,
         .config = config,
-    };
+    });
 }
 
 bool UISplitViewStateStorage::relationshipMatches(
@@ -101,12 +108,15 @@ bool UISplitViewStateStorage::relationshipMatches(
     {
         return false;
     }
-    const auto owns = [this, splitView](UINodeId part) noexcept {
-        return part.index() < splitViewForPartByNodeIndex_.size() &&
-               splitViewForPartByNodeIndex_[part.index()] == splitView;
+    const SplitViewState* state = trySplitView(splitView);
+    const auto owns = [state](UINodeId part) noexcept {
+        return state != nullptr &&
+               (state->parts.primaryPane == part || state->parts.splitter == part ||
+                state->parts.secondaryPane == part);
     };
     const SplitterState* splitter = trySplitter(parts.splitter);
-    return owns(parts.primaryPane) && owns(parts.splitter) && owns(parts.secondaryPane) &&
+    return state->parts == parts && owns(parts.primaryPane) && owns(parts.splitter) &&
+           owns(parts.secondaryPane) &&
            splitter != nullptr && splitter->splitView == splitView;
 }
 
@@ -120,20 +130,20 @@ UISplitViewParts UISplitViewStateStorage::parts(UINodeId splitView) const noexce
 
 UINodeId UISplitViewStateStorage::splitViewForPart(UINodeId part) const noexcept
 {
-    if (!part.hasValue() || part.index() >= splitViewForPartByNodeIndex_.size())
+    if (!part.hasValue())
     {
         return {};
     }
-    const UINodeId splitView = splitViewForPartByNodeIndex_[part.index()];
-    const SplitViewState* state = trySplitView(splitView);
-    if (state == nullptr || !relationshipMatches(splitView, state->parts))
+    for (const SplitViewState& state : splitViews_.states())
     {
-        return {};
+        if (relationshipMatches(state.node, state.parts) &&
+            (state.parts.primaryPane == part || state.parts.splitter == part ||
+             state.parts.secondaryPane == part))
+        {
+            return state.node;
+        }
     }
-    return state->parts.primaryPane == part || state->parts.splitter == part ||
-                   state->parts.secondaryPane == part
-               ? splitView
-               : UINodeId{};
+    return {};
 }
 
 UINodeId UISplitViewStateStorage::splitViewForSplitter(UINodeId splitter) const noexcept
@@ -152,12 +162,11 @@ void UISplitViewStateStorage::linkValidated(
     assert(newParts.hasValue());
     static_cast<void>(unlinkSplitView(splitView));
 
-    SplitViewState& state = splitViewsByNodeIndex_[splitView.index()];
-    state.parts = newParts;
-    splitViewForPartByNodeIndex_[newParts.primaryPane.index()] = splitView;
-    splitViewForPartByNodeIndex_[newParts.splitter.index()] = splitView;
-    splitViewForPartByNodeIndex_[newParts.secondaryPane.index()] = splitView;
-    splittersByNodeIndex_[newParts.splitter.index()].splitView = splitView;
+    SplitViewState* state = trySplitView(splitView);
+    SplitterState* splitter = trySplitter(newParts.splitter);
+    assert(state != nullptr && splitter != nullptr);
+    state->parts = newParts;
+    splitter->splitView = splitView;
 }
 
 UISplitViewParts UISplitViewStateStorage::unlinkSplitView(UINodeId splitView) noexcept
@@ -168,14 +177,6 @@ UISplitViewParts UISplitViewStateStorage::unlinkSplitView(UINodeId splitView) no
         return {};
     }
     const UISplitViewParts previous = state->parts;
-    for (const UINodeId part : {previous.primaryPane, previous.splitter, previous.secondaryPane})
-    {
-        if (part.hasValue() && part.index() < splitViewForPartByNodeIndex_.size() &&
-            splitViewForPartByNodeIndex_[part.index()] == splitView)
-        {
-            splitViewForPartByNodeIndex_[part.index()] = {};
-        }
-    }
     if (SplitterState* splitter = trySplitter(previous.splitter);
         splitter != nullptr && splitter->splitView == splitView)
     {
@@ -187,28 +188,32 @@ UISplitViewParts UISplitViewStateStorage::unlinkSplitView(UINodeId splitView) no
 
 void UISplitViewStateStorage::resetNode(u32 nodeIndex) noexcept
 {
-    if (nodeIndex >= splitViewsByNodeIndex_.size())
+    if (SplitViewState* view = splitViews_.tryGetByIndex(nodeIndex); view != nullptr)
     {
-        return;
+        static_cast<void>(unlinkSplitView(view->node));
     }
-    if (splitViewsByNodeIndex_[nodeIndex].node.hasValue())
+    UINodeId owner{};
+    for (const SplitViewState& state : splitViews_.states())
     {
-        static_cast<void>(unlinkSplitView(splitViewsByNodeIndex_[nodeIndex].node));
+        if ((state.parts.primaryPane.hasValue() && state.parts.primaryPane.index() == nodeIndex) ||
+            (state.parts.splitter.hasValue() && state.parts.splitter.index() == nodeIndex) ||
+            (state.parts.secondaryPane.hasValue() && state.parts.secondaryPane.index() == nodeIndex))
+        {
+            owner = state.node;
+            break;
+        }
     }
-    const UINodeId owner = splitViewForPartByNodeIndex_[nodeIndex];
     if (containsSplitView(owner))
     {
         static_cast<void>(unlinkSplitView(owner));
     }
-    splitViewsByNodeIndex_[nodeIndex] = {};
-    splittersByNodeIndex_[nodeIndex] = {};
-    layoutScratchByNodeIndex_[nodeIndex] = {};
-    splitViewForPartByNodeIndex_[nodeIndex] = {};
+    static_cast<void>(splitViews_.eraseByIndex(nodeIndex));
+    static_cast<void>(splitters_.eraseByIndex(nodeIndex));
 }
 
 bool UISplitViewStateStorage::releaseNode(UINodeId node) noexcept
 {
-    if (!node.hasValue() || node.index() >= splitViewsByNodeIndex_.size())
+    if (!node.hasValue())
     {
         return false;
     }
@@ -234,9 +239,9 @@ float UISplitViewStateStorage::requestedFraction(UINodeId splitView) const noexc
 
 void UISplitViewStateStorage::publishMetrics(u32 splitViewIndex) noexcept
 {
-    assert(splitViewIndex < splitViewsByNodeIndex_.size());
-    splitViewsByNodeIndex_[splitViewIndex].committedMetrics =
-        layoutScratchByNodeIndex_[splitViewIndex].metrics;
+    SplitViewState* state = splitViews_.tryGetByIndex(splitViewIndex);
+    assert(state != nullptr);
+    state->committedMetrics = state->layoutScratch.metrics;
 }
 
 UISplitViewMetrics UISplitViewStateStorage::committedMetrics(

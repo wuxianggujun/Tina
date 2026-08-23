@@ -6,31 +6,34 @@
 namespace Tina::UI::Detail {
 
 UITabViewStateStorage::UITabViewStateStorage(
-    usize nodeCapacity, std::pmr::memory_resource& resource)
-    : tabViewsByNodeIndex_(&resource), tabsByNodeIndex_(&resource),
-      tabForPanelByNodeIndex_(&resource), layoutScratchByNodeIndex_(&resource)
-{
-    tabViewsByNodeIndex_.resize(nodeCapacity);
-    tabsByNodeIndex_.resize(nodeCapacity);
-    tabForPanelByNodeIndex_.resize(nodeCapacity);
-    layoutScratchByNodeIndex_.resize(nodeCapacity);
-}
+    usize tabViewCapacity, usize tabCapacity,
+    std::pmr::memory_resource& resource)
+    : tabViews_(tabViewCapacity, resource), tabs_(tabCapacity, resource)
+{}
 
 usize UITabViewStateStorage::capacity() const noexcept
 {
-    return tabViewsByNodeIndex_.size();
+    return tabViews_.capacity();
+}
+
+usize UITabViewStateStorage::availableTabViewCount() const noexcept
+{
+    return tabViews_.availableCount();
+}
+
+usize UITabViewStateStorage::availableTabCount() const noexcept
+{
+    return tabs_.availableCount();
 }
 
 bool UITabViewStateStorage::containsTabView(UINodeId tabView) const noexcept
 {
-    return tabView.hasValue() && tabView.index() < tabViewsByNodeIndex_.size() &&
-           tabViewsByNodeIndex_[tabView.index()].node == tabView;
+    return tabViews_.contains(tabView);
 }
 
 bool UITabViewStateStorage::containsTab(UINodeId tab) const noexcept
 {
-    return tab.hasValue() && tab.index() < tabsByNodeIndex_.size() &&
-           tabsByNodeIndex_[tab.index()].node == tab;
+    return tabs_.contains(tab);
 }
 
 TabViewState* UITabViewStateStorage::tryTabView(UINodeId tabView) noexcept
@@ -40,7 +43,7 @@ TabViewState* UITabViewStateStorage::tryTabView(UINodeId tabView) noexcept
 
 const TabViewState* UITabViewStateStorage::tryTabView(UINodeId tabView) const noexcept
 {
-    return containsTabView(tabView) ? &tabViewsByNodeIndex_[tabView.index()] : nullptr;
+    return tabViews_.tryGet(tabView);
 }
 
 TabState* UITabViewStateStorage::tryTab(UINodeId tab) noexcept
@@ -50,46 +53,49 @@ TabState* UITabViewStateStorage::tryTab(UINodeId tab) noexcept
 
 const TabState* UITabViewStateStorage::tryTab(UINodeId tab) const noexcept
 {
-    return containsTab(tab) ? &tabsByNodeIndex_[tab.index()] : nullptr;
+    return tabs_.tryGet(tab);
 }
 
 UITabPaint& UITabViewStateStorage::tabPaintByIndex(u32 nodeIndex) noexcept
 {
-    assert(nodeIndex < tabsByNodeIndex_.size());
-    return tabsByNodeIndex_[nodeIndex].paint;
+    TabState* state = tabs_.tryGetByIndex(nodeIndex);
+    assert(state != nullptr);
+    return state->paint;
 }
 
 const UITabPaint& UITabViewStateStorage::tabPaintByIndex(u32 nodeIndex) const noexcept
 {
-    assert(nodeIndex < tabsByNodeIndex_.size());
-    return tabsByNodeIndex_[nodeIndex].paint;
+    const TabState* state = tabs_.tryGetByIndex(nodeIndex);
+    assert(state != nullptr);
+    return state->paint;
 }
 
 TabViewLayoutScratch& UITabViewStateStorage::layoutScratchByIndex(u32 nodeIndex) noexcept
 {
-    assert(nodeIndex < layoutScratchByNodeIndex_.size());
-    return layoutScratchByNodeIndex_[nodeIndex];
+    TabViewState* state = tabViews_.tryGetByIndex(nodeIndex);
+    assert(state != nullptr);
+    return state->layoutScratch;
 }
 
-void UITabViewStateStorage::initializeTabView(
+bool UITabViewStateStorage::initializeTabView(
     UINodeId tabView, const UITabViewConfig& config) noexcept
 {
-    assert(tabView.hasValue() && tabView.index() < tabViewsByNodeIndex_.size());
+    assert(tabView.hasValue());
     resetNode(tabView.index());
-    tabViewsByNodeIndex_[tabView.index()] = TabViewState{
+    return tabViews_.insertOrAssign(TabViewState{
         .node = tabView,
         .config = config,
-    };
+    });
 }
 
-void UITabViewStateStorage::initializeTab(UINodeId tab, const UITabConfig& config) noexcept
+bool UITabViewStateStorage::initializeTab(UINodeId tab, const UITabConfig& config) noexcept
 {
-    assert(tab.hasValue() && tab.index() < tabsByNodeIndex_.size());
+    assert(tab.hasValue());
     resetNode(tab.index());
-    tabsByNodeIndex_[tab.index()] = TabState{
+    return tabs_.insertOrAssign(TabState{
         .node = tab,
         .config = config,
-    };
+    });
 }
 
 bool UITabViewStateStorage::relationshipValid(UINodeId tabView) const noexcept
@@ -105,10 +111,15 @@ bool UITabViewStateStorage::relationshipValid(UINodeId tabView) const noexcept
     for (u32 ordinal = 0; ordinal < view->itemCount; ++ordinal)
     {
         const TabState* tab = tryTab(current);
+        const auto panelOwner = std::find_if(
+            tabs_.states().begin(), tabs_.states().end(),
+            [panel = tab != nullptr ? tab->panel : UINodeId{}](
+                const TabState& candidate) noexcept {
+                return panel.hasValue() && candidate.panel == panel;
+            });
         if (tab == nullptr || tab->tabView != tabView || !tab->panel.hasValue() ||
             tab->previousTab != previous || tab->ordinal != ordinal ||
-            tab->panel.index() >= tabForPanelByNodeIndex_.size() ||
-            tabForPanelByNodeIndex_[tab->panel.index()] != current)
+            panelOwner == tabs_.states().end() || panelOwner->node != current)
         {
             return false;
         }
@@ -117,7 +128,7 @@ bool UITabViewStateStorage::relationshipValid(UINodeId tabView) const noexcept
     }
     return previous == view->lastTab && !current.hasValue() &&
            tryTab(view->activeTab) != nullptr &&
-           tabsByNodeIndex_[view->activeTab.index()].tabView == tabView;
+           tryTab(view->activeTab)->tabView == tabView;
 }
 
 void UITabViewStateStorage::linkValidated(
@@ -127,22 +138,23 @@ void UITabViewStateStorage::linkValidated(
     assert(!items.empty() && activeIndex < items.size());
     unlinkTabView(tabView);
 
-    TabViewState& view = tabViewsByNodeIndex_[tabView.index()];
-    view.itemCount = static_cast<u32>(items.size());
-    view.firstTab = items.front().tab;
-    view.lastTab = items.back().tab;
-    view.activeTab = items[activeIndex].tab;
-    for (u32 index = 0; index < view.itemCount; ++index)
+    TabViewState* view = tryTabView(tabView);
+    assert(view != nullptr);
+    view->itemCount = static_cast<u32>(items.size());
+    view->firstTab = items.front().tab;
+    view->lastTab = items.back().tab;
+    view->activeTab = items[activeIndex].tab;
+    for (u32 index = 0; index < view->itemCount; ++index)
     {
         const UITabViewItem item = items[index];
         assert(containsTab(item.tab));
-        TabState& tab = tabsByNodeIndex_[item.tab.index()];
-        tab.tabView = tabView;
-        tab.panel = item.panel;
-        tab.previousTab = index == 0 ? UINodeId{} : items[index - 1].tab;
-        tab.nextTab = index + 1 == view.itemCount ? UINodeId{} : items[index + 1].tab;
-        tab.ordinal = index;
-        tabForPanelByNodeIndex_[item.panel.index()] = item.tab;
+        TabState* tab = tryTab(item.tab);
+        assert(tab != nullptr);
+        tab->tabView = tabView;
+        tab->panel = item.panel;
+        tab->previousTab = index == 0 ? UINodeId{} : items[index - 1].tab;
+        tab->nextTab = index + 1 == view->itemCount ? UINodeId{} : items[index + 1].tab;
+        tab->ordinal = index;
     }
 }
 
@@ -162,11 +174,6 @@ void UITabViewStateStorage::unlinkTabView(UINodeId tabView) noexcept
             break;
         }
         const UINodeId next = tab->nextTab;
-        if (tab->panel.hasValue() && tab->panel.index() < tabForPanelByNodeIndex_.size() &&
-            tabForPanelByNodeIndex_[tab->panel.index()] == current)
-        {
-            tabForPanelByNodeIndex_[tab->panel.index()] = {};
-        }
         tab->tabView = {};
         tab->panel = {};
         tab->previousTab = {};
@@ -188,15 +195,18 @@ UINodeId UITabViewStateStorage::tabViewForTab(UINodeId tab) const noexcept
 
 UINodeId UITabViewStateStorage::tabForPanel(UINodeId panel) const noexcept
 {
-    if (!panel.hasValue() || panel.index() >= tabForPanelByNodeIndex_.size())
+    if (!panel.hasValue())
     {
         return {};
     }
-    const UINodeId tab = tabForPanelByNodeIndex_[panel.index()];
-    const TabState* state = tryTab(tab);
-    return state != nullptr && state->panel == panel && relationshipValid(state->tabView)
-               ? tab
-               : UINodeId{};
+    for (const TabState& state : tabs_.states())
+    {
+        if (state.panel == panel && relationshipValid(state.tabView))
+        {
+            return state.node;
+        }
+    }
+    return {};
 }
 
 UINodeId UITabViewStateStorage::tabViewForPanel(UINodeId panel) const noexcept
@@ -255,37 +265,34 @@ bool UITabViewStateStorage::setActiveTab(UINodeId tabView, UINodeId tab) noexcep
 
 void UITabViewStateStorage::resetNode(u32 nodeIndex) noexcept
 {
-    if (nodeIndex >= tabViewsByNodeIndex_.size())
+    if (TabViewState* view = tabViews_.tryGetByIndex(nodeIndex); view != nullptr)
     {
-        return;
+        unlinkTabView(view->node);
     }
-    if (tabViewsByNodeIndex_[nodeIndex].node.hasValue())
+    if (TabState* tab = tabs_.tryGetByIndex(nodeIndex); tab != nullptr)
     {
-        unlinkTabView(tabViewsByNodeIndex_[nodeIndex].node);
-    }
-    if (tabsByNodeIndex_[nodeIndex].node.hasValue())
-    {
-        const UINodeId owner = tabsByNodeIndex_[nodeIndex].tabView;
+        const UINodeId owner = tab->tabView;
         if (containsTabView(owner))
         {
             unlinkTabView(owner);
         }
     }
-    const UINodeId panelTab = tabForPanelByNodeIndex_[nodeIndex];
-    const TabState* panelTabState = tryTab(panelTab);
-    if (panelTabState != nullptr && containsTabView(panelTabState->tabView))
+    for (const TabState& state : tabs_.states())
     {
-        unlinkTabView(panelTabState->tabView);
+        if (state.panel.hasValue() && state.panel.index() == nodeIndex &&
+            containsTabView(state.tabView))
+        {
+            unlinkTabView(state.tabView);
+            break;
+        }
     }
-    tabViewsByNodeIndex_[nodeIndex] = {};
-    tabsByNodeIndex_[nodeIndex] = {};
-    tabForPanelByNodeIndex_[nodeIndex] = {};
-    layoutScratchByNodeIndex_[nodeIndex] = {};
+    static_cast<void>(tabViews_.eraseByIndex(nodeIndex));
+    static_cast<void>(tabs_.eraseByIndex(nodeIndex));
 }
 
 bool UITabViewStateStorage::releaseNode(UINodeId node) noexcept
 {
-    if (!node.hasValue() || node.index() >= tabViewsByNodeIndex_.size())
+    if (!node.hasValue())
     {
         return false;
     }
@@ -297,9 +304,9 @@ bool UITabViewStateStorage::releaseNode(UINodeId node) noexcept
 
 void UITabViewStateStorage::publishMetrics(u32 tabViewIndex) noexcept
 {
-    assert(tabViewIndex < tabViewsByNodeIndex_.size());
-    tabViewsByNodeIndex_[tabViewIndex].committedMetrics =
-        layoutScratchByNodeIndex_[tabViewIndex].metrics;
+    TabViewState* state = tabViews_.tryGetByIndex(tabViewIndex);
+    assert(state != nullptr);
+    state->committedMetrics = state->layoutScratch.metrics;
 }
 
 UITabViewMetrics UITabViewStateStorage::committedMetrics(UINodeId tabView) const noexcept

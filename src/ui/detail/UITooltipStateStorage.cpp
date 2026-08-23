@@ -7,26 +7,31 @@
 
 namespace Tina::UI::Detail {
 
-UITooltipStateStorage::UITooltipStateStorage(usize nodeCapacity,
+UITooltipStateStorage::UITooltipStateStorage(usize capacity,
                                              std::pmr::memory_resource& resource)
-    : statesByNodeIndex_(&resource), rollbackStatesByNodeIndex_(&resource),
-      layoutScratchByNodeIndex_(&resource), tooltipForAnchorByNodeIndex_(&resource)
+    : states_(capacity, resource), rollbackStates_(&resource)
 {
-    statesByNodeIndex_.resize(nodeCapacity);
-    rollbackStatesByNodeIndex_.resize(nodeCapacity);
-    layoutScratchByNodeIndex_.resize(nodeCapacity);
-    tooltipForAnchorByNodeIndex_.resize(nodeCapacity);
+    rollbackStates_.reserve(capacity);
 }
 
 usize UITooltipStateStorage::capacity() const noexcept
 {
-    return statesByNodeIndex_.size();
+    return states_.capacity();
+}
+
+usize UITooltipStateStorage::activeCount() const noexcept
+{
+    return states_.size();
+}
+
+usize UITooltipStateStorage::availableCount() const noexcept
+{
+    return states_.availableCount();
 }
 
 bool UITooltipStateStorage::containsTooltip(UINodeId tooltip) const noexcept
 {
-    return tooltip.hasValue() && tooltip.index() < statesByNodeIndex_.size() &&
-           statesByNodeIndex_[tooltip.index()].node == tooltip;
+    return states_.contains(tooltip);
 }
 
 TooltipState* UITooltipStateStorage::tryState(UINodeId tooltip) noexcept
@@ -36,52 +41,48 @@ TooltipState* UITooltipStateStorage::tryState(UINodeId tooltip) noexcept
 
 const TooltipState* UITooltipStateStorage::tryState(UINodeId tooltip) const noexcept
 {
-    return containsTooltip(tooltip) ? &statesByNodeIndex_[tooltip.index()] : nullptr;
+    return states_.tryGet(tooltip);
 }
 
 TooltipState& UITooltipStateStorage::stateByIndex(u32 nodeIndex) noexcept
 {
-    assert(nodeIndex < statesByNodeIndex_.size());
-    return statesByNodeIndex_[nodeIndex];
+    TooltipState* state = states_.tryGetByIndex(nodeIndex);
+    assert(state != nullptr);
+    return *state;
 }
 
 const TooltipState& UITooltipStateStorage::stateByIndex(u32 nodeIndex) const noexcept
 {
-    assert(nodeIndex < statesByNodeIndex_.size());
-    return statesByNodeIndex_[nodeIndex];
+    const TooltipState* state = states_.tryGetByIndex(nodeIndex);
+    assert(state != nullptr);
+    return *state;
 }
 
 TooltipLayoutScratch& UITooltipStateStorage::layoutScratchByIndex(u32 nodeIndex) noexcept
 {
-    assert(nodeIndex < layoutScratchByNodeIndex_.size());
-    return layoutScratchByNodeIndex_[nodeIndex];
+    return stateByIndex(nodeIndex).layoutScratch;
 }
 
 const TooltipLayoutScratch& UITooltipStateStorage::layoutScratchByIndex(u32 nodeIndex) const noexcept
 {
-    assert(nodeIndex < layoutScratchByNodeIndex_.size());
-    return layoutScratchByNodeIndex_[nodeIndex];
+    return stateByIndex(nodeIndex).layoutScratch;
 }
 
-void UITooltipStateStorage::initializeTooltip(UINodeId tooltip,
+bool UITooltipStateStorage::initializeTooltip(UINodeId tooltip,
                                               const UITooltipConfig& config) noexcept
 {
-    assert(tooltip.hasValue() && tooltip.index() < statesByNodeIndex_.size());
+    assert(tooltip.hasValue());
     resetNode(tooltip.index());
-    statesByNodeIndex_[tooltip.index()] = TooltipState{
+    return states_.insertOrAssign(TooltipState{
         .node = tooltip,
         .config = config,
-    };
+    });
 }
 
 void UITooltipStateStorage::resetNode(u32 nodeIndex) noexcept
 {
-    if (nodeIndex >= statesByNodeIndex_.size())
-    {
-        return;
-    }
-
-    const UINodeId tooltip = statesByNodeIndex_[nodeIndex].node;
+    TooltipState* nodeState = states_.tryGetByIndex(nodeIndex);
+    const UINodeId tooltip = nodeState != nullptr ? nodeState->node : UINodeId{};
     if (tooltip.hasValue())
     {
         static_cast<void>(unlinkTooltip(tooltip));
@@ -99,25 +100,27 @@ void UITooltipStateStorage::resetNode(u32 nodeIndex) noexcept
         }
     }
 
-    const UINodeId anchoredTooltip = tooltipForAnchorByNodeIndex_[nodeIndex];
-    if (containsTooltip(anchoredTooltip))
+    for (TooltipState& state : states_.states())
     {
-        statesByNodeIndex_[anchoredTooltip.index()].anchor = {};
+        if (state.anchor.hasValue() && state.anchor.index() == nodeIndex)
+        {
+            state.anchor = {};
+            state.suppressedUntilTriggerReset = false;
+            break;
+        }
     }
-    tooltipForAnchorByNodeIndex_[nodeIndex] = {};
     if (presentation_.hoveredAnchor.hasValue() &&
         presentation_.hoveredAnchor.index() == nodeIndex)
     {
         presentation_.hoveredAnchor = {};
     }
-    statesByNodeIndex_[nodeIndex] = {};
-    layoutScratchByNodeIndex_[nodeIndex] = {};
+    static_cast<void>(states_.eraseByIndex(nodeIndex));
 }
 
 bool UITooltipStateStorage::releaseNode(UINodeId node,
                                         Core::MonotonicTimePoint now) noexcept
 {
-    if (!node.hasValue() || node.index() >= statesByNodeIndex_.size())
+    if (!node.hasValue())
     {
         return false;
     }
@@ -141,20 +144,24 @@ bool UITooltipStateStorage::hasRelationship(UINodeId tooltip,
                                             UINodeId anchor) const noexcept
 {
     const TooltipState* state = tryState(tooltip);
-    return state != nullptr && anchor.hasValue() &&
-           anchor.index() < tooltipForAnchorByNodeIndex_.size() &&
-           state->anchor == anchor &&
-           tooltipForAnchorByNodeIndex_[anchor.index()] == tooltip;
+    return state != nullptr && anchor.hasValue() && state->anchor == anchor &&
+           tooltipForAnchor(anchor) == tooltip;
 }
 
 UINodeId UITooltipStateStorage::tooltipForAnchor(UINodeId anchor) const noexcept
 {
-    if (!anchor.hasValue() || anchor.index() >= tooltipForAnchorByNodeIndex_.size())
+    if (!anchor.hasValue())
     {
         return {};
     }
-    const UINodeId tooltip = tooltipForAnchorByNodeIndex_[anchor.index()];
-    return hasRelationship(tooltip, anchor) ? tooltip : UINodeId{};
+    for (const TooltipState& state : states_.states())
+    {
+        if (state.anchor == anchor)
+        {
+            return state.node;
+        }
+    }
+    return {};
 }
 
 UINodeId UITooltipStateStorage::anchorForTooltip(UINodeId tooltip) const noexcept
@@ -168,13 +175,13 @@ UINodeId UITooltipStateStorage::anchorForTooltip(UINodeId tooltip) const noexcep
 void UITooltipStateStorage::linkValidated(UINodeId tooltip, UINodeId anchor) noexcept
 {
     assert(containsTooltip(tooltip));
-    assert(anchor.hasValue() && anchor.index() < tooltipForAnchorByNodeIndex_.size());
+    assert(anchor.hasValue());
     static_cast<void>(unlinkTooltip(tooltip));
     static_cast<void>(unlinkAnchor(anchor));
-    TooltipState& state = statesByNodeIndex_[tooltip.index()];
-    state.anchor = anchor;
-    state.suppressedUntilTriggerReset = false;
-    tooltipForAnchorByNodeIndex_[anchor.index()] = tooltip;
+    TooltipState* state = tryState(tooltip);
+    assert(state != nullptr);
+    state->anchor = anchor;
+    state->suppressedUntilTriggerReset = false;
 }
 
 UINodeId UITooltipStateStorage::unlinkTooltip(UINodeId tooltip) noexcept
@@ -185,11 +192,6 @@ UINodeId UITooltipStateStorage::unlinkTooltip(UINodeId tooltip) noexcept
         return {};
     }
     const UINodeId anchor = state->anchor;
-    if (anchor.hasValue() && anchor.index() < tooltipForAnchorByNodeIndex_.size() &&
-        tooltipForAnchorByNodeIndex_[anchor.index()] == tooltip)
-    {
-        tooltipForAnchorByNodeIndex_[anchor.index()] = {};
-    }
     state->anchor = {};
     state->suppressedUntilTriggerReset = false;
     return anchor;
@@ -197,12 +199,11 @@ UINodeId UITooltipStateStorage::unlinkTooltip(UINodeId tooltip) noexcept
 
 UINodeId UITooltipStateStorage::unlinkAnchor(UINodeId anchor) noexcept
 {
-    if (!anchor.hasValue() || anchor.index() >= tooltipForAnchorByNodeIndex_.size())
+    if (!anchor.hasValue())
     {
         return {};
     }
-    const UINodeId tooltip = tooltipForAnchorByNodeIndex_[anchor.index()];
-    tooltipForAnchorByNodeIndex_[anchor.index()] = {};
+    const UINodeId tooltip = tooltipForAnchor(anchor);
     if (TooltipState* state = tryState(tooltip); state != nullptr && state->anchor == anchor)
     {
         state->anchor = {};
@@ -279,7 +280,7 @@ bool UITooltipStateStorage::rawTriggerActive(const TooltipState& state,
 
 void UITooltipStateStorage::clearResettableSuppression(UINodeId focusedAnchor) noexcept
 {
-    for (TooltipState& state : statesByNodeIndex_)
+    for (TooltipState& state : states_.states())
     {
         if (state.node.hasValue() && state.suppressedUntilTriggerReset &&
             !rawTriggerActive(state, focusedAnchor))
@@ -435,7 +436,7 @@ bool UITooltipStateStorage::hardDismiss(UINodeId focusedAnchor, bool suppressSta
         suppress(tooltipForAnchor(focusedAnchor));
     }
     bool changed = false;
-    for (TooltipState& state : statesByNodeIndex_)
+    for (TooltipState& state : states_.states())
     {
         if (!state.node.hasValue())
         {
@@ -565,9 +566,9 @@ bool UITooltipStateStorage::advance(const UITooltipAdvanceInput& input) noexcept
 
 void UITooltipStateStorage::publishMetrics(u32 tooltipIndex) noexcept
 {
-    assert(tooltipIndex < statesByNodeIndex_.size());
-    statesByNodeIndex_[tooltipIndex].committedMetrics =
-        layoutScratchByNodeIndex_[tooltipIndex].metrics;
+    TooltipState* state = states_.tryGetByIndex(tooltipIndex);
+    assert(state != nullptr);
+    state->committedMetrics = state->layoutScratch.metrics;
 }
 
 UITooltipMetrics UITooltipStateStorage::committedMetrics(UINodeId tooltip) const noexcept
@@ -578,15 +579,14 @@ UITooltipMetrics UITooltipStateStorage::committedMetrics(UINodeId tooltip) const
 
 void UITooltipStateStorage::beginCommitTransaction() noexcept
 {
-    std::copy(statesByNodeIndex_.begin(), statesByNodeIndex_.end(),
-              rollbackStatesByNodeIndex_.begin());
+    rollbackStates_.assign(states_.states().begin(), states_.states().end());
     rollbackPresentation_ = presentation_;
 }
 
 void UITooltipStateStorage::rollbackCommitTransaction() noexcept
 {
-    std::copy(rollbackStatesByNodeIndex_.begin(), rollbackStatesByNodeIndex_.end(),
-              statesByNodeIndex_.begin());
+    assert(rollbackStates_.size() == states_.size());
+    std::copy(rollbackStates_.begin(), rollbackStates_.end(), states_.states().begin());
     presentation_ = rollbackPresentation_;
 }
 

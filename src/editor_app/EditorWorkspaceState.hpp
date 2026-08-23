@@ -123,6 +123,8 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <Windows.h>
+#include <Psapi.h>
+#pragma comment(lib, "Psapi.lib")
 #endif
 
 namespace Tina::EditorApp::WorkspaceInternal {
@@ -138,15 +140,16 @@ inline constexpr u32 WindowLogicalHeight = 800;
 inline constexpr float LeftDockInitialFraction = 0.22F;
 inline constexpr float MainCenterInitialFraction = 0.68F;
 inline constexpr float ViewportInitialFraction = 0.68F;
-inline constexpr u32 HierarchyMaterializedCapacity = 16;
+inline constexpr u32 HierarchyMaterializedCapacity = 64;
 inline constexpr u32 AssetBrowserMaterializedCapacity = 12;
 inline constexpr u32 ProjectAssetCompactIdCharacterCount = 4;
 inline constexpr float ProjectAssetMinimumItemWidth = 120.0F;
-inline constexpr u32 SourceImportColumnCapacity = 2;
+inline constexpr u32 SourceImportColumnCapacity = 3;
 inline constexpr u32 SourceImportMaterializedCapacity = 5;
 inline constexpr float SourceImportKindColumnWidth = 88.0F;
-inline constexpr float SourceImportSourceColumnWidth = 240.0F;
-inline constexpr u32 AuthoringEntityCapacity = 16;
+inline constexpr float SourceImportSourceColumnWidth = 190.0F;
+inline constexpr float SourceImportStatusColumnWidth = 84.0F;
+inline constexpr u32 AuthoringEntityCapacity = 128;
 inline constexpr u32 InitialAuthoringEntityCount = 5;
 inline constexpr u32 AnimationVisibleFrameSlots = 6;
 inline constexpr u32 DocumentTabSlots = 6;
@@ -217,6 +220,7 @@ inline constexpr Tina::InputActionId Play{12};
 inline constexpr Tina::InputActionId Step{13};
 inline constexpr Tina::InputActionId Stop{14};
 inline constexpr Tina::InputActionId Escape{15};
+inline constexpr Tina::InputActionId ConfirmRename{16};
 
 }
 // namespace EditorShortcutActions
@@ -429,6 +433,7 @@ struct EditorLaunchOptions final {
     WorkspaceMode initialWorkspace = WorkspaceMode::World2D;
     RgbaCaptureStage rgbaStage = RgbaCaptureStage::Workspace;
     bool autoDemo = false;
+    bool profileUi = false;
 };
 class EditorRenderDeviceAccess final {
   public:
@@ -1397,6 +1402,12 @@ struct EditorAssetResources final {
     auto system = Tina::Asset::AssetSystem::Create({
         .storeCapacity = 128,
         .memoryResource = &resources.memory,
+        .batch = {
+            .file = {
+                .memoryResource = std::pmr::new_delete_resource(),
+            },
+            .memoryResource = &resources.memory,
+        },
         .requireTyped2dPayloads = true,
     });
     if (!system) {
@@ -1413,8 +1424,36 @@ struct EditorAssetResources final {
     resources.system.emplace(std::move(*system));
     return Tina::Core::success();
 }
+struct EditorProcessMemorySnapshot final {
+    u64 workingSetBytes = 0;
+    u64 peakWorkingSetBytes = 0;
+    u64 privateBytes = 0;
+    bool sampled = false;
+};
+
+struct EditorFrameTimingStatistics final {
+    u64 sampleCount = 0;
+    double totalSeconds = 0.0;
+    double maximumSeconds = 0.0;
+};
+
 struct LifecycleCounters final {
     u64 frameUpdates = 0;
+    u64 uiStatisticsSamples = 0;
+    UI::UIContextStatistics uiStatisticsFirst{};
+    UI::UIContextStatistics uiStatisticsLast{};
+    Tina::Core::usize uiStatisticsPeakPmrBytes = 0;
+    u64 processWorkingSetBytes = 0;
+    u64 processPrivateBytes = 0;
+    u64 processPeakWorkingSetBytes = 0;
+    u64 processPeakPrivateBytes = 0;
+    EditorProcessMemorySnapshot processAfterOptions{};
+    EditorProcessMemorySnapshot processAfterCatalog{};
+    EditorProcessMemorySnapshot processAfterEngineCreate{};
+    EditorProcessMemorySnapshot processFirstUiFrame{};
+    EditorProcessMemorySnapshot processLastUiFrame{};
+    EditorProcessMemorySnapshot processAfterRun{};
+    EditorProcessMemorySnapshot processAfterEngineDestroy{};
     u64 stateEnters = 0;
     u64 stateExits = 0;
     u64 applicationShutdowns = 0;
@@ -1613,12 +1652,89 @@ struct LifecycleCounters final {
     u64 sourceImportUnitsRemoved = 0;
     u64 sourceImportObjectsReused = 0;
     u64 sourceImportObjectsCooked = 0;
+    u64 sourceImportCookedPayloadBytes = 0;
+    u64 sourceImportTransientMemoryPeakBytes = 0;
+    u64 sourceImportTransientMemoryBytesAfterRelease = 0;
+    u64 sourceImportResidentCookedFileBytesBefore = 0;
+    u64 sourceImportResidentCookedFileBytesAfterCommit = 0;
+    EditorProcessMemorySnapshot sourceImportProcessBefore{};
+    EditorProcessMemorySnapshot sourceImportProcessAfterWorker{};
+    EditorProcessMemorySnapshot sourceImportProcessAfterCommit{};
+    EditorProcessMemorySnapshot sourceImportProcessPeak{};
+    EditorFrameTimingStatistics frameTimingOverall{};
+    EditorFrameTimingStatistics frameTimingBeforeSourceImport{};
+    EditorFrameTimingStatistics frameTimingDuringSourceImport{};
+    EditorFrameTimingStatistics frameTimingAfterSourceImport{};
     bool sourceImportRunning = false;
     bool sourceImportReady = false;
     bool sourceImportStateCommitted = false;
     bool navigationBakeReady = false;
     bool navigationBakeDirty = true;
 };
+
+[[nodiscard]] inline EditorProcessMemorySnapshot queryEditorProcessMemory() noexcept
+{
+    EditorProcessMemorySnapshot snapshot{};
+#if defined(_WIN32)
+    PROCESS_MEMORY_COUNTERS_EX processMemory{};
+    processMemory.cb = static_cast<DWORD>(sizeof(processMemory));
+    if (::GetProcessMemoryInfo(::GetCurrentProcess(),
+                               reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&processMemory),
+                               static_cast<DWORD>(sizeof(processMemory))) != FALSE) {
+        snapshot.workingSetBytes = static_cast<u64>(processMemory.WorkingSetSize);
+        snapshot.peakWorkingSetBytes =
+            static_cast<u64>(processMemory.PeakWorkingSetSize);
+        snapshot.privateBytes = static_cast<u64>(processMemory.PrivateUsage);
+        snapshot.sampled = true;
+    }
+#endif
+    return snapshot;
+}
+
+inline void recordEditorProcessMemory(
+    LifecycleCounters& counters,
+    const EditorProcessMemorySnapshot& snapshot) noexcept
+{
+    if (!snapshot.sampled) {
+        return;
+    }
+    counters.processWorkingSetBytes = snapshot.workingSetBytes;
+    counters.processPrivateBytes = snapshot.privateBytes;
+    counters.processPeakWorkingSetBytes =
+        (std::max)(counters.processPeakWorkingSetBytes,
+                   snapshot.peakWorkingSetBytes);
+    counters.processPeakPrivateBytes =
+        (std::max)(counters.processPeakPrivateBytes, snapshot.privateBytes);
+}
+
+inline void recordEditorProcessMemoryMaximum(
+    EditorProcessMemorySnapshot& maximum,
+    const EditorProcessMemorySnapshot& snapshot) noexcept
+{
+    if (!snapshot.sampled) {
+        return;
+    }
+    maximum.sampled = true;
+    maximum.workingSetBytes =
+        (std::max)(maximum.workingSetBytes, snapshot.workingSetBytes);
+    maximum.peakWorkingSetBytes =
+        (std::max)(maximum.peakWorkingSetBytes,
+                   snapshot.peakWorkingSetBytes);
+    maximum.privateBytes =
+        (std::max)(maximum.privateBytes, snapshot.privateBytes);
+}
+
+inline void recordEditorFrameTiming(
+    EditorFrameTimingStatistics& statistics, double frameSeconds) noexcept
+{
+    if (!(frameSeconds > 0.0) || !std::isfinite(frameSeconds)) {
+        return;
+    }
+    ++statistics.sampleCount;
+    statistics.totalSeconds += frameSeconds;
+    statistics.maximumSeconds =
+        (std::max)(statistics.maximumSeconds, frameSeconds);
+}
 enum class EditorCommand : u32 {
     SwitchToWorld2D,
     SwitchToWorld3D,
@@ -1647,6 +1763,11 @@ enum class EditorCommand : u32 {
     SceneDelete,
     SceneDeleteConfirm,
     SceneDeleteCancel,
+    SceneRenameContext,
+    SceneMoveUpContext,
+    SceneMoveDownContext,
+    SceneMoveToRootContext,
+    SceneDeleteContext,
     SceneReparentRoot,
     SceneReparent,
     SceneFocus,
@@ -1901,6 +2022,7 @@ parseInspectorTransformValue(std::string_view text, std::string_view fieldName)
     bool hasRgbaStage = false;
     bool hasWorkspace = false;
     bool hasAutoDemo = false;
+    bool hasProfileUi = false;
     for (int index = 1; index < argumentCount; ++index) {
         const std::string_view argument{arguments[index]};
         auto sourceImportOption =
@@ -2065,6 +2187,16 @@ parseInspectorTransformValue(std::string_view text, std::string_view fieldName)
             hasAutoDemo = true;
             continue;
         }
+        if (argument == "--profile-ui") {
+            if (hasProfileUi) {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::InvalidArgument,
+                    "Duplicate --profile-ui argument");
+            }
+            options.profileUi = true;
+            hasProfileUi = true;
+            continue;
+        }
         return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                    "Unsupported command-line argument");
     }
@@ -2132,16 +2264,16 @@ parseInspectorTransformValue(std::string_view text, std::string_view fieldName)
     return style;
 }
 [[nodiscard]] inline UI::UILayoutStyle hierarchyRenameLayout(
-    UI::UIVisibility visibility) noexcept
+    UI::UIVisibility visibility, float offsetX = 0.0F, float offsetY = 0.0F,
+    float width = 0.0F, float height = 0.0F) noexcept
 {
-    constexpr UI::UITheme theme =
-        UI::makeModernDesktopTheme(UI::UIColorScheme::Dark, UI::UIDensity::Compact);
-    UI::UILayoutStyle style = fillWidth(66.0F);
-    style.flexItem.shrink = 0.0F;
+    UI::UILayoutStyle style = fixedSize(width, height);
+    style.placement = UI::UILayoutPlacement::Overlay;
     style.visibility = visibility;
-    style.padding = UI::UIEdgeSpacing::All(theme.spacing.space3);
-    style.flexContainer.direction = UI::UIFlexDirection::Column;
-    style.flexContainer.gap.row = theme.spacing.space2;
+    style.overlay.horizontal = UI::UIAxisAlignment::Start;
+    style.overlay.vertical = UI::UIAxisAlignment::Start;
+    style.overlay.offset.x = UI::UILayoutLength::Px(offsetX);
+    style.overlay.offset.y = UI::UILayoutLength::Px(offsetY);
     return style;
 }
 [[nodiscard]] inline UI::UILayoutStyle sceneAddTemplateRowLayout(
@@ -2216,6 +2348,10 @@ struct HierarchyDropRequest final {
     u32 sourceStableId = 0;
     u32 targetStableId = 0;
     HierarchyDropIntent intent = HierarchyDropIntent::Reparent;
+};
+struct ProjectAssetDropRequest final {
+    u64 visibleIndex = 0;
+    u32 targetStableId = 0;
 };
 struct SavedTileMapChunkBaseline final {
     Tina::Core::AssetId assetId{};
@@ -2958,19 +3094,6 @@ createEditorDocumentTabs(WorkspaceMode initialWorkspace)
     }
     return tabs;
 }
-[[nodiscard]] inline Tina::Asset::CatalogPackageStageConfig createEditorImportStageConfig(
-    std::pmr::memory_resource* memoryResource) noexcept
-{
-    Tina::Asset::CatalogPackageStageConfig config{};
-    config.validation.manifest.catalog.maxEntries = 4096;
-    config.validation.manifest.catalog.maxDependencies = 16384;
-    config.validation.manifest.catalog.maxDependenciesPerAsset = 4096;
-    config.validation.manifest.catalog.memoryResource = memoryResource;
-    config.validation.validation.file.memoryResource = memoryResource;
-    config.validation.validation.verifyTypedPayload = true;
-    return config;
-}
-
 class EditorWorkspaceState final : public Tina::IGameState {
   public:
     EditorWorkspaceState(EditorLaunchOptions options, LifecycleCounters& counters,
@@ -2993,8 +3116,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
           documentTabs_(std::move(documentTabs)), assetResources_(assetResources),
           renderDeviceAccess_(renderDeviceAccess),
           sourceImportService_(
-              Tina::EditorApp::Detail::makeEditorSourceImportPipelineWorker(
-                  createEditorImportStageConfig(&sourceImportMemory_)))
+              Tina::EditorApp::Detail::makeEditorSourceImportPipelineWorker())
     {
         hierarchyRows_.reserve(AuthoringEntityCapacity + 1U);
         collapsedHierarchyIds_.reserve(AuthoringEntityCapacity + 1U);
@@ -3127,17 +3249,26 @@ class EditorWorkspaceState final : public Tina::IGameState {
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status processPendingHierarchyDrop(
         Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status processPendingProjectAssetDrop(
+        Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status showHierarchyRename(
         Tina::PrimaryWindowUITreeUpdater& tree, u32 stableId);
+    [[nodiscard]] Tina::Core::Status refreshHierarchyRenameLayout(
+        Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status hideHierarchyRename(
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status applyHierarchyRename(
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] std::optional<u32> hierarchyStableIdAtPosition(
         UI::UILogicalPoint position) const noexcept;
+    [[nodiscard]] std::optional<u64> projectAssetVisibleIndexAtPosition(
+        UI::UILogicalPoint position) const noexcept;
     void handleHierarchyPointerDown(UI::UIRoutedPointerEvent& event) noexcept;
     void handleHierarchyPointerMove(UI::UIRoutedPointerEvent& event) noexcept;
     void handleHierarchyPointerUp(UI::UIRoutedPointerEvent& event) noexcept;
+    void handleProjectAssetPointerDown(UI::UIRoutedPointerEvent& event) noexcept;
+    void handleProjectAssetPointerMove(UI::UIRoutedPointerEvent& event) noexcept;
+    void handleProjectAssetPointerUp(UI::UIRoutedPointerEvent& event) noexcept;
     [[nodiscard]] Tina::Core::Status updateSnackbarUi(
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status processPendingMenuToggle(
@@ -3433,7 +3564,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] Tina::Core::Status cancelDirtyClose(
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status showSceneDeleteConfirmation(
-        Tina::PrimaryWindowUITreeUpdater& tree);
+        Tina::PrimaryWindowUITreeUpdater& tree,
+        std::optional<u32> requestedStableId = std::nullopt);
     [[nodiscard]] Tina::Core::Status hideSceneDeleteConfirmation(
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status captureRequestedRgbaFrame(
@@ -3498,6 +3630,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
     nodePropertySelectionStableIds() const;
     [[nodiscard]] Tina::Core::AssetId
     selectedProjectAssetIdOfKind(Tina::AssetFormat::AssetKind kind) const noexcept;
+    [[nodiscard]] Tina::Core::AssetId
+    selectedProjectSpriteAssetId() const noexcept;
     // Runs one Inspector property edit against nodes of the matching kind.
     // Rejections (invalid selection, kind mismatch, invalid values) are
     // reported through authoringFeedback_ and return success; `published` is
@@ -3604,7 +3738,6 @@ class EditorWorkspaceState final : public Tina::IGameState {
     std::string pendingTemporaryProjectCleanupRootUtf8_{};
     EditorAssetResources& assetResources_;
     EditorRenderDeviceAccess& renderDeviceAccess_;
-    std::pmr::unsynchronized_pool_resource sourceImportMemory_{};
     Tina::EditorApp::Detail::EditorSourceImportService sourceImportService_;
     std::vector<Tina::EditorApp::Detail::EditorSourceImportUnit> sourceImportUnits_{};
     std::vector<std::string> pendingSourceImportPathsUtf8_{};
@@ -3622,10 +3755,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId hierarchyCount_{};
     UI::UINodeId hierarchySearchInput_{};
     UI::UINodeId hierarchyRenameRoot_{};
-    UI::UINodeId hierarchyRenameTitle_{};
     UI::UINodeId hierarchyRenameInput_{};
-    UI::UINodeId hierarchyRenameApplyButton_{};
-    UI::UINodeId hierarchyRenameCancelButton_{};
     UI::UILayoutStyle hierarchyRenameRootLayout_{};
     UI::UINodeId projectAssetList_{};
     UI::UINodeId projectAssetCount_{};
@@ -3643,6 +3773,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId inspectorAssetRow_{};
     UI::UILayoutStyle inspectorAssetRowLayout_{};
     UI::UINodeId inspectorAssetPath_{};
+    UI::UINodeId inspectorAssignSpriteButton_{};
     UI::UINodeId inspectorDependencySummary_{};
     UI::UINodeId inspectorDependencyList_{};
     UI::UINodeId viewportPreviewLayer_{};
@@ -3776,6 +3907,12 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId stopButton_{};
     std::array<UI::UINodeId, MainMenuCount> mainMenuAnchors_{};
     std::array<UI::UINodeId, MainMenuCount> mainMenus_{};
+    UI::UINodeId hierarchyContextMenu_{};
+    UI::UINodeId hierarchyContextRenameItem_{};
+    UI::UINodeId hierarchyContextMoveUpItem_{};
+    UI::UINodeId hierarchyContextMoveDownItem_{};
+    UI::UINodeId hierarchyContextMoveToRootItem_{};
+    UI::UINodeId hierarchyContextDeleteItem_{};
     std::array<UI::UINodeId, 2> workspaceModeButtons_{};
     std::array<UI::UINodeId, 2> viewportContextButtons_{};
     std::array<UI::UILayoutStyle, 2> viewportContextButtonLayouts_{};
@@ -3866,6 +4003,9 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UILogicalRect hierarchyTreeRect_{};
     UI::UITreeViewMetrics hierarchyTreeMetrics_{};
     float hierarchyTreeRowHeight_ = 28.0F;
+    UI::UILogicalRect projectAssetListRect_{};
+    UI::UIVirtualGridViewMetrics projectAssetListMetrics_{};
+    UI::UIVirtualGridViewStyle projectAssetListStyle_{};
     u64 lastHierarchyPointerDownFrame_ = 0;
     u32 lastHierarchyPointerDownStableId_ = 0;
     Tina::Platform::PointerId hierarchyDragPointer_ = Tina::Platform::PrimaryPointerId;
@@ -3873,14 +4013,25 @@ class EditorWorkspaceState final : public Tina::IGameState {
     bool hierarchyDragActive_ = false;
     UI::UILogicalPoint hierarchyDragStartPosition_{};
     std::optional<u32> pendingHierarchyRenameStableId_{};
+    u32 hierarchyContextStableId_ = 0;
     bool pendingHierarchyRenameCancel_ = false;
     bool pendingHierarchyRenameCommit_ = false;
+    bool pendingHierarchyRenameFocus_ = false;
+    u8 hierarchyRenameFocusDeferralFrames_ = 0;
     std::optional<HierarchyDropRequest> pendingHierarchyDrop_{};
     u32 hierarchyRenameStableId_ = 0;
     u64 hierarchyRenameDocumentRevision_ = 0;
     bool hierarchyRenameVisible_ = false;
     std::array<UI::UIRoutedPointerListenerToken, 3>
         hierarchyPointerListeners_{};
+    Tina::Platform::PointerId projectAssetDragPointer_ =
+        Tina::Platform::PrimaryPointerId;
+    u64 projectAssetDragVisibleIndex_ = 0;
+    bool projectAssetDragActive_ = false;
+    UI::UILogicalPoint projectAssetDragStartPosition_{};
+    std::optional<ProjectAssetDropRequest> pendingProjectAssetDrop_{};
+    std::array<UI::UIRoutedPointerListenerToken, 3>
+        projectAssetPointerListeners_{};
     ViewportToolMode viewportToolMode_ = ViewportToolMode::Select;
     Tina::Editor::EditorTransformGizmo viewportTransformGizmo_{};
     ViewportTransformTransaction viewportGizmo_{};
@@ -3940,6 +4091,11 @@ class EditorWorkspaceState final : public Tina::IGameState {
     bool projectBrowserUiRefreshPending_ = false;
     bool projectAssetSelectionSyncPending_ = false;
     bool sourceImportUiRefreshPending_ = false;
+    bool sourceImportLastFailed_ = false;
+    bool sourceImportProfileSeen_ = false;
+    bool sourceImportProfileActive_ = false;
+    bool sourceImportProfileWorkerSampled_ = false;
+    bool sourceImportProfileDeactivatePending_ = false;
     bool assetInspectorActive_ = false;
     bool pendingAnimationTimelineRefresh_ = false;
     std::optional<Tina::Editor::EditorViewportNavigation> viewportNavigation_{};

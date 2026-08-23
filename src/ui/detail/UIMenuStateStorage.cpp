@@ -5,32 +5,45 @@
 
 namespace Tina::UI::Detail {
 
-UIMenuStateStorage::UIMenuStateStorage(usize nodeCapacity,
+UIMenuStateStorage::UIMenuStateStorage(usize menuCapacity,
+                                       usize menuItemCapacity,
                                        std::pmr::memory_resource& resource)
-    : menusByNodeIndex_(&resource), itemsByNodeIndex_(&resource),
-      menuForAnchorByNodeIndex_(&resource), layoutScratchByNodeIndex_(&resource)
-{
-    menusByNodeIndex_.resize(nodeCapacity);
-    itemsByNodeIndex_.resize(nodeCapacity);
-    menuForAnchorByNodeIndex_.resize(nodeCapacity);
-    layoutScratchByNodeIndex_.resize(nodeCapacity);
-}
+    : menus_(menuCapacity, resource), items_(menuItemCapacity, resource)
+{}
 
 usize UIMenuStateStorage::capacity() const noexcept
 {
-    return menusByNodeIndex_.size();
+    return menus_.capacity();
+}
+
+usize UIMenuStateStorage::activeMenuCount() const noexcept
+{
+    return menus_.size();
+}
+
+usize UIMenuStateStorage::activeMenuItemCount() const noexcept
+{
+    return items_.size();
+}
+
+usize UIMenuStateStorage::availableMenuCount() const noexcept
+{
+    return menus_.availableCount();
+}
+
+usize UIMenuStateStorage::availableMenuItemCount() const noexcept
+{
+    return items_.availableCount();
 }
 
 bool UIMenuStateStorage::containsMenu(UINodeId menu) const noexcept
 {
-    return menu.hasValue() && menu.index() < menusByNodeIndex_.size() &&
-           menusByNodeIndex_[menu.index()].node == menu;
+    return menus_.contains(menu);
 }
 
 bool UIMenuStateStorage::containsMenuItem(UINodeId item) const noexcept
 {
-    return item.hasValue() && item.index() < itemsByNodeIndex_.size() &&
-           itemsByNodeIndex_[item.index()].node == item;
+    return items_.contains(item);
 }
 
 MenuState* UIMenuStateStorage::tryMenu(UINodeId menu) noexcept
@@ -40,7 +53,7 @@ MenuState* UIMenuStateStorage::tryMenu(UINodeId menu) noexcept
 
 const MenuState* UIMenuStateStorage::tryMenu(UINodeId menu) const noexcept
 {
-    return containsMenu(menu) ? &menusByNodeIndex_[menu.index()] : nullptr;
+    return menus_.tryGet(menu);
 }
 
 MenuItemState* UIMenuStateStorage::tryItem(UINodeId item) noexcept
@@ -50,69 +63,70 @@ MenuItemState* UIMenuStateStorage::tryItem(UINodeId item) noexcept
 
 const MenuItemState* UIMenuStateStorage::tryItem(UINodeId item) const noexcept
 {
-    return containsMenuItem(item) ? &itemsByNodeIndex_[item.index()] : nullptr;
+    return items_.tryGet(item);
 }
 
 MenuLayoutScratch& UIMenuStateStorage::layoutScratchByIndex(u32 nodeIndex) noexcept
 {
-    assert(nodeIndex < layoutScratchByNodeIndex_.size());
-    return layoutScratchByNodeIndex_[nodeIndex];
+    MenuState* state = menus_.tryGetByIndex(nodeIndex);
+    assert(state != nullptr);
+    return state->layoutScratch;
 }
 
-void UIMenuStateStorage::initializeMenu(UINodeId menu,
+bool UIMenuStateStorage::initializeMenu(UINodeId menu,
                                        const UIMenuConfig& config) noexcept
 {
-    assert(menu.hasValue() && menu.index() < menusByNodeIndex_.size());
+    assert(menu.hasValue());
     resetNode(menu.index());
-    menusByNodeIndex_[menu.index()] = MenuState{.node = menu, .config = config};
+    return menus_.insertOrAssign(MenuState{.node = menu, .config = config});
 }
 
-void UIMenuStateStorage::initializeMenuItem(
+bool UIMenuStateStorage::initializeMenuItem(
     UINodeId item, UINodeId menu, const UIMenuItemConfig& config) noexcept
 {
-    assert(item.hasValue() && item.index() < itemsByNodeIndex_.size());
+    assert(item.hasValue());
     assert(containsMenu(menu));
     resetNode(item.index());
-    itemsByNodeIndex_[item.index()] = MenuItemState{
+    return items_.insertOrAssign(MenuItemState{
         .node = item,
         .config = config,
         .menu = menu,
         .checked = config.checked,
-    };
+    });
 }
 
 void UIMenuStateStorage::resetNode(u32 nodeIndex) noexcept
 {
-    if (nodeIndex >= menusByNodeIndex_.size())
-    {
-        return;
-    }
-    const UINodeId menu = menusByNodeIndex_[nodeIndex].node;
+    const MenuState* menuState = menus_.tryGetByIndex(nodeIndex);
+    const UINodeId menu = menuState != nullptr ? menuState->node : UINodeId{};
     if (menu.hasValue())
     {
         static_cast<void>(unlinkMenu(menu));
         static_cast<void>(unlinkSubmenuMenu(menu));
     }
-    const UINodeId item = itemsByNodeIndex_[nodeIndex].node;
+    const MenuItemState* itemState = items_.tryGetByIndex(nodeIndex);
+    const UINodeId item = itemState != nullptr ? itemState->node : UINodeId{};
     if (item.hasValue())
     {
         static_cast<void>(unlinkSubmenuItem(item));
     }
-    const UINodeId anchoredMenu = menuForAnchorByNodeIndex_[nodeIndex];
-    if (containsMenu(anchoredMenu))
+    for (MenuState& candidate : menus_.states())
     {
-        menusByNodeIndex_[anchoredMenu.index()].anchor = {};
-        static_cast<void>(close(anchoredMenu));
+        if (candidate.anchor.hasValue() && candidate.anchor.index() == nodeIndex)
+        {
+            const UINodeId anchoredMenu = candidate.node;
+            candidate.anchor = {};
+            static_cast<void>(close(anchoredMenu));
+            break;
+        }
     }
-    menuForAnchorByNodeIndex_[nodeIndex] = {};
-    menusByNodeIndex_[nodeIndex] = {};
-    itemsByNodeIndex_[nodeIndex] = {};
-    layoutScratchByNodeIndex_[nodeIndex] = {};
+    static_cast<void>(menus_.eraseByIndex(nodeIndex));
+    static_cast<void>(items_.eraseByIndex(nodeIndex));
 }
 
 bool UIMenuStateStorage::releaseNode(UINodeId node) noexcept
 {
-    if (!node.hasValue() || node.index() >= menusByNodeIndex_.size())
+    if (!node.hasValue())
     {
         return false;
     }
@@ -127,20 +141,24 @@ bool UIMenuStateStorage::hasRelationship(UINodeId menu,
                                         UINodeId anchor) const noexcept
 {
     const MenuState* state = tryMenu(menu);
-    return state != nullptr && anchor.hasValue() &&
-           anchor.index() < menuForAnchorByNodeIndex_.size() &&
-           state->anchor == anchor &&
-           menuForAnchorByNodeIndex_[anchor.index()] == menu;
+    return state != nullptr && anchor.hasValue() && state->anchor == anchor &&
+           menuForAnchor(anchor) == menu;
 }
 
 UINodeId UIMenuStateStorage::menuForAnchor(UINodeId anchor) const noexcept
 {
-    if (!anchor.hasValue() || anchor.index() >= menuForAnchorByNodeIndex_.size())
+    if (!anchor.hasValue())
     {
         return {};
     }
-    const UINodeId menu = menuForAnchorByNodeIndex_[anchor.index()];
-    return hasRelationship(menu, anchor) ? menu : UINodeId{};
+    for (const MenuState& state : menus_.states())
+    {
+        if (state.anchor == anchor)
+        {
+            return state.node;
+        }
+    }
+    return {};
 }
 
 UINodeId UIMenuStateStorage::anchorForMenu(UINodeId menu) const noexcept
@@ -156,12 +174,13 @@ void UIMenuStateStorage::linkAnchorValidated(UINodeId menu,
 {
     assert(containsMenu(menu));
     assert(!parentItemForMenu(menu).hasValue());
-    assert(anchor.hasValue() && anchor.index() < menuForAnchorByNodeIndex_.size());
+    assert(anchor.hasValue());
     static_cast<void>(unlinkMenu(menu));
     static_cast<void>(unlinkAnchor(anchor));
-    menusByNodeIndex_[menu.index()].anchor = anchor;
+    MenuState* state = tryMenu(menu);
+    assert(state != nullptr);
+    state->anchor = anchor;
     clearInvocationAnchorRect(menu);
-    menuForAnchorByNodeIndex_[anchor.index()] = menu;
 }
 
 UINodeId UIMenuStateStorage::unlinkMenu(UINodeId menu) noexcept
@@ -172,11 +191,6 @@ UINodeId UIMenuStateStorage::unlinkMenu(UINodeId menu) noexcept
         return {};
     }
     const UINodeId anchor = state->anchor;
-    if (anchor.hasValue() && anchor.index() < menuForAnchorByNodeIndex_.size() &&
-        menuForAnchorByNodeIndex_[anchor.index()] == menu)
-    {
-        menuForAnchorByNodeIndex_[anchor.index()] = {};
-    }
     state->anchor = {};
     static_cast<void>(close(menu));
     return anchor;
@@ -184,12 +198,11 @@ UINodeId UIMenuStateStorage::unlinkMenu(UINodeId menu) noexcept
 
 UINodeId UIMenuStateStorage::unlinkAnchor(UINodeId anchor) noexcept
 {
-    if (!anchor.hasValue() || anchor.index() >= menuForAnchorByNodeIndex_.size())
+    if (!anchor.hasValue())
     {
         return {};
     }
-    const UINodeId menu = menuForAnchorByNodeIndex_[anchor.index()];
-    menuForAnchorByNodeIndex_[anchor.index()] = {};
+    const UINodeId menu = menuForAnchor(anchor);
     if (MenuState* state = tryMenu(menu); state != nullptr && state->anchor == anchor)
     {
         state->anchor = {};
@@ -234,12 +247,15 @@ void UIMenuStateStorage::linkSubmenuValidated(
 {
     assert(containsMenuItem(item));
     assert(containsMenu(submenu));
-    assert(itemsByNodeIndex_[item.index()].config.kind == UIMenuItemKind::Submenu);
+    MenuItemState* itemState = tryItem(item);
+    MenuState* menuState = tryMenu(submenu);
+    assert(itemState != nullptr && menuState != nullptr);
+    assert(itemState->config.kind == UIMenuItemKind::Submenu);
     assert(!anchorForMenu(submenu).hasValue());
     static_cast<void>(unlinkSubmenuItem(item));
     static_cast<void>(unlinkSubmenuMenu(submenu));
-    itemsByNodeIndex_[item.index()].submenu = submenu;
-    menusByNodeIndex_[submenu.index()].parentItem = item;
+    itemState->submenu = submenu;
+    menuState->parentItem = item;
     clearInvocationAnchorRect(submenu);
 }
 
@@ -304,9 +320,10 @@ void UIMenuStateStorage::setInvocationAnchorRectValidated(
 {
     assert(containsMenu(menu));
     assert(!parentItemForMenu(menu).hasValue());
-    MenuState& state = menusByNodeIndex_[menu.index()];
-    state.invocationAnchorRect = rect;
-    state.hasInvocationAnchorRect = true;
+    MenuState* state = tryMenu(menu);
+    assert(state != nullptr);
+    state->invocationAnchorRect = rect;
+    state->hasInvocationAnchorRect = true;
 }
 
 void UIMenuStateStorage::clearInvocationAnchorRect(UINodeId menu) noexcept
@@ -332,7 +349,7 @@ bool UIMenuStateStorage::isInActiveChain(UINodeId menu) const noexcept
     }
     UINodeId current = activeMenu();
     usize visited = 0;
-    while (current.hasValue() && visited++ < menusByNodeIndex_.size())
+    while (current.hasValue() && visited++ < menus_.capacity())
     {
         if (current == menu)
         {
@@ -348,7 +365,7 @@ UINodeId UIMenuStateStorage::rootMenu() const noexcept
     UINodeId current = activeMenu();
     UINodeId root = current;
     usize visited = 0;
-    while (current.hasValue() && visited++ < menusByNodeIndex_.size())
+    while (current.hasValue() && visited++ < menus_.capacity())
     {
         const UINodeId parent = parentMenu(current);
         if (!parent.hasValue())
@@ -377,7 +394,7 @@ UINodeId UIMenuStateStorage::activeChildMenu(UINodeId menu) const noexcept
     UINodeId parent = parentMenu(child);
     usize visited = 0;
     while (parent.hasValue() && parent != menu &&
-           visited++ < menusByNodeIndex_.size())
+           visited++ < menus_.capacity())
     {
         child = parent;
         parent = parentMenu(child);
@@ -398,7 +415,9 @@ UINodeId UIMenuStateStorage::openRootValidated(UINodeId menu) noexcept
     {
         static_cast<void>(close(activeChild));
     }
-    menusByNodeIndex_[menu.index()].open = true;
+    MenuState* state = tryMenu(menu);
+    assert(state != nullptr);
+    state->open = true;
     activeMenu_ = menu;
     return previous != menu ? previous : UINodeId{};
 }
@@ -418,7 +437,9 @@ UINodeId UIMenuStateStorage::openSubmenuValidated(UINodeId menu) noexcept
     {
         static_cast<void>(close(previousChild));
     }
-    menusByNodeIndex_[menu.index()].open = true;
+    MenuState* state = tryMenu(menu);
+    assert(state != nullptr);
+    state->open = true;
     activeMenu_ = menu;
     return previousChild;
 }
@@ -440,7 +461,7 @@ bool UIMenuStateStorage::close(UINodeId menu) noexcept
     UINodeId current = activeMenu();
     UINodeId nextActive{};
     usize visited = 0;
-    while (current.hasValue() && visited++ < menusByNodeIndex_.size())
+    while (current.hasValue() && visited++ < menus_.capacity())
     {
         MenuState* currentState = tryMenu(current);
         if (currentState == nullptr)
@@ -479,7 +500,7 @@ bool UIMenuStateStorage::hasCheckedRadioPeer(UINodeId item) const noexcept
     {
         return false;
     }
-    for (const MenuItemState& peer : itemsByNodeIndex_)
+    for (const MenuItemState& peer : items_.states())
     {
         if (peer.node != item && peer.menu == state->menu && peer.checked &&
             peer.config.kind == UIMenuItemKind::Radio &&
@@ -504,9 +525,9 @@ bool UIMenuStateStorage::setItemChecked(UINodeId item, bool checked) noexcept
 
 void UIMenuStateStorage::publishMetrics(u32 menuIndex) noexcept
 {
-    assert(menuIndex < menusByNodeIndex_.size());
-    menusByNodeIndex_[menuIndex].committedMetrics =
-        layoutScratchByNodeIndex_[menuIndex].metrics;
+    MenuState* state = menus_.tryGetByIndex(menuIndex);
+    assert(state != nullptr);
+    state->committedMetrics = state->layoutScratch.metrics;
 }
 
 UIMenuMetrics UIMenuStateStorage::committedMetrics(UINodeId menu) const noexcept

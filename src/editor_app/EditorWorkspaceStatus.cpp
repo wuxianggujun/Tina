@@ -7,6 +7,20 @@ auto EditorWorkspaceState::reportAuthoringFailure(
     try {
         authoringFeedback_.assign(prefix);
         authoringFeedback_ += error.message;
+        for (const auto& context : error.context) {
+            authoringFeedback_ += " [";
+            authoringFeedback_ += context.operation;
+            if (!context.detail.empty()) {
+                authoringFeedback_ += ": ";
+                authoringFeedback_ += context.detail;
+            }
+            authoringFeedback_ += "]";
+        }
+        if (error.nativeCode.has_value()) {
+            authoringFeedback_ += " (native=";
+            authoringFeedback_ += std::to_string(*error.nativeCode);
+            authoringFeedback_ += ")";
+        }
         return Tina::Core::success();
     } catch (const std::bad_alloc&) {
         return Tina::Core::failure(
@@ -496,8 +510,9 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
     const EditorHierarchyRow* selectedRow = hierarchyRow(selectedStableId);
     const bool sceneEditable = authoringEnabled() && sceneDocumentActive() &&
                                !assetInspectorActive_;
+    const bool sceneAuthoringAvailable = authoringEnabled() && sceneDocumentActive();
     const bool sceneItemSelected = selectedStableId != 0U && selectedRow != nullptr;
-    if (auto status = tree.setEnabled(addEntityButton_, sceneEditable); !status) {
+    if (auto status = tree.setEnabled(addEntityButton_, sceneAuthoringAvailable); !status) {
         return status;
     }
     if (auto status = tree.setEnabled(
@@ -519,6 +534,56 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
             focusEntityButton_, sceneDocumentActive() && sceneItemSelected &&
                                     counters_.runtimePreviewValid);
         !status) {
+        return status;
+    }
+    const EditorHierarchyRow* contextRow = hierarchyRow(hierarchyContextStableId_);
+    const bool contextItemAvailable = sceneAuthoringAvailable &&
+        hierarchyContextStableId_ != 0U && contextRow != nullptr;
+    u32 contextPreviousSibling = 0U;
+    u32 contextNextSibling = 0U;
+    bool contextSourceSeen = false;
+    if (contextItemAvailable) {
+        for (const EditorHierarchyRow& row : hierarchyRows_) {
+            if (row.stableId == hierarchyContextStableId_) {
+                contextSourceSeen = true;
+                continue;
+            }
+            if (row.stableId == 0U || row.parentStableId != contextRow->parentStableId) {
+                continue;
+            }
+            if (!contextSourceSeen) {
+                contextPreviousSibling = row.stableId;
+            } else if (contextNextSibling == 0U) {
+                contextNextSibling = row.stableId;
+            }
+        }
+    }
+    if (auto status = tree.setEnabled(hierarchyContextMenu_, sceneAuthoringAvailable); !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(
+            hierarchyContextRenameItem_, contextItemAvailable); !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(
+            hierarchyContextMoveUpItem_, contextItemAvailable &&
+                contextPreviousSibling != 0U); !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(
+            hierarchyContextMoveDownItem_, contextItemAvailable &&
+                contextNextSibling != 0U); !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(
+            hierarchyContextMoveToRootItem_, contextItemAvailable &&
+                contextRow->parentStableId != 0U); !status) {
+        return status;
+    }
+    const bool contextCanDelete = contextItemAvailable &&
+        (workspaceMode_ == WorkspaceMode::World2D || document3D_.nodeCount() > 1U);
+    if (auto status = tree.setEnabled(
+            hierarchyContextDeleteItem_, contextCanDelete); !status) {
         return status;
     }
     const bool tileMapControlsEnabled = authoringEnabled() && tileMapEditingContext();

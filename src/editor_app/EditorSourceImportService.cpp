@@ -1,10 +1,13 @@
 #include "EditorSourceImportService.hpp"
 
+#include <tina/core/memory/CountingMemoryResource.hpp>
+#include <tina/core/memory/MemoryTracker.hpp>
 #include <tina/core/text/Utf8.hpp>
 
 #include <algorithm>
 #include <atomic>
 #include <exception>
+#include <memory_resource>
 #include <new>
 #include <optional>
 #include <string_view>
@@ -225,11 +228,30 @@ editorImportMode(Asset::SourceImportPipelineMode mode)
 
 } // namespace
 
-EditorSourceImportWorker makeEditorSourceImportPipelineWorker(
-    Asset::CatalogPackageStageConfig stageConfig)
+Asset::CatalogPackageStageConfig
+makeEditorSourceImportStageConfig(std::pmr::memory_resource& transientMemory) noexcept
 {
-    return [stageConfig](const EditorSourceImportRequest& request,
-                         std::stop_token stopToken) -> Core::Result<EditorSourceImportWorkResult> {
+    Asset::CatalogPackageStageConfig config{};
+    config.validation.manifest.catalog.maxEntries = 4096;
+    config.validation.manifest.catalog.maxDependencies = 16384;
+    config.validation.manifest.catalog.maxDependenciesPerAsset = 4096;
+    config.validation.manifest.catalog.memoryResource = &transientMemory;
+    config.validation.validation.file.memoryResource = &transientMemory;
+    config.validation.validation.verifyTypedPayload = true;
+    return config;
+}
+
+EditorSourceImportWorker makeEditorSourceImportPipelineWorker()
+{
+    return [](const EditorSourceImportRequest& request,
+              std::stop_token stopToken) -> Core::Result<EditorSourceImportWorkResult> {
+        Core::MemoryTracker transientTracker{};
+        Core::CountingMemoryResource transientUpstream{
+            transientTracker, Core::MemoryTag::Cooker,
+            *std::pmr::new_delete_resource()};
+        std::pmr::unsynchronized_pool_resource transientMemory{&transientUpstream};
+        const Asset::CatalogPackageStageConfig stageConfig =
+            makeEditorSourceImportStageConfig(transientMemory);
         std::vector<Asset::SourceImportPipelineUnit> units;
         units.reserve(request.units.size());
         for (const auto& unit : request.units)
@@ -295,7 +317,7 @@ EditorSourceImportWorker makeEditorSourceImportPipelineWorker(
         {
             return Core::failure(std::move(mode.error()));
         }
-        return EditorSourceImportWorkResult{
+        EditorSourceImportWorkResult result{
             .statistics = EditorSourceImportStatistics{
                 .mode = *mode,
                 .unitsTotal = pipeline->unitsTotal,
@@ -303,9 +325,20 @@ EditorSourceImportWorker makeEditorSourceImportPipelineWorker(
                 .unitsRemoved = pipeline->unitsRemoved,
                 .objectsReused = pipeline->objectsReused,
                 .objectsCooked = pipeline->objectsCooked,
+                .cookedPayloadBytes = pipeline->cookedPayloadBytes,
             },
             .stageCreated = pipeline->stageCreated,
         };
+        const Core::MemoryStatistics transientPeakStatistics =
+            transientTracker.snapshot(Core::MemoryTag::Cooker);
+        transientMemory.release();
+        const Core::MemoryStatistics transientReleasedStatistics =
+            transientTracker.snapshot(Core::MemoryTag::Cooker);
+        result.statistics.transientMemoryPeakBytes =
+            static_cast<Core::u64>(transientPeakStatistics.peakBytes);
+        result.statistics.transientMemoryBytesAfterRelease =
+            static_cast<Core::u64>(transientReleasedStatistics.currentBytes);
+        return result;
     };
 }
 

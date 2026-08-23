@@ -85,6 +85,10 @@ class EditorApplication final : public Tina::IGameApplication {
     // capacities are explicitly widened here.
     config.primaryWindowUICapacities.nodeCapacity = 12U * 1024U;
     config.primaryWindowUICapacities.paintSnapshotCapacity = 32U * 1024U;
+    // Both workspace modes are authored into one retained tree. Their fixed
+    // toolbar chrome owns roughly 56 icon tooltips before form/dialog actions,
+    // so the general-purpose default of 64 is too small for the Editor.
+    config.primaryWindowUICapacities.componentStates.tooltipCapacity = 128U;
     config.primaryWindowUIDisplayListCapacities.commandCapacity = 16U * 1024U;
     config.primaryWindowUIDisplayListCapacities.clipCapacity = 16U * 1024U;
     config.primaryWindowUIDisplayListCapacities.batchCapacity = 16U * 1024U;
@@ -110,6 +114,8 @@ class EditorApplication final : public Tina::IGameApplication {
         editorShortcutBinding(Key::F7, EditorShortcutActions::Step),
         editorShortcutBinding(Key::F8, EditorShortcutActions::Stop),
         editorShortcutBinding(Key::Escape, EditorShortcutActions::Escape),
+        editorShortcutBinding(Key::Enter, EditorShortcutActions::ConfirmRename),
+        editorShortcutBinding(Key::KeypadEnter, EditorShortcutActions::ConfirmRename),
     };
     return config;
 }
@@ -125,6 +131,65 @@ class EditorApplication final : public Tina::IGameApplication {
         return "GameStateStackBecameEmpty";
     }
     return "Unknown";
+}
+
+void writeUnsignedDelta(std::ostream& output, u64 before, u64 after)
+{
+    if (after >= before) {
+        output << after - before;
+        return;
+    }
+    output << '-' << before - after;
+}
+
+void writeProcessMemorySnapshot(
+    std::ostream& output,
+    const EditorProcessMemorySnapshot& snapshot)
+{
+    output << "{\"sampled\":" << (snapshot.sampled ? "true" : "false")
+           << ",\"workingSetBytes\":" << snapshot.workingSetBytes
+           << ",\"peakWorkingSetBytes\":" << snapshot.peakWorkingSetBytes
+           << ",\"privateBytes\":" << snapshot.privateBytes << '}';
+}
+
+void writeProcessMemoryDelta(
+    std::ostream& output,
+    const EditorProcessMemorySnapshot& before,
+    const EditorProcessMemorySnapshot& after)
+{
+    const bool sampled = before.sampled && after.sampled;
+    output << "{\"sampled\":" << (sampled ? "true" : "false")
+           << ",\"workingSetBytes\":";
+    writeUnsignedDelta(output, before.workingSetBytes, after.workingSetBytes);
+    output << ",\"peakWorkingSetBytes\":";
+    writeUnsignedDelta(output, before.peakWorkingSetBytes,
+                       after.peakWorkingSetBytes);
+    output << ",\"privateBytes\":";
+    writeUnsignedDelta(output, before.privateBytes, after.privateBytes);
+    output << '}';
+}
+
+void writeFrameTimingStatistics(
+    std::ostream& output,
+    const EditorFrameTimingStatistics& statistics)
+{
+    const double averageFrameMilliseconds =
+        statistics.sampleCount != 0U
+            ? statistics.totalSeconds * 1000.0 /
+                  static_cast<double>(statistics.sampleCount)
+            : 0.0;
+    const double averageFramesPerSecond =
+        statistics.totalSeconds > 0.0
+            ? static_cast<double>(statistics.sampleCount) /
+                  statistics.totalSeconds
+            : 0.0;
+    output << "{\"samples\":" << statistics.sampleCount
+           << ",\"averageFrameMilliseconds\":"
+           << averageFrameMilliseconds
+           << ",\"worstFrameMilliseconds\":"
+           << statistics.maximumSeconds * 1000.0
+           << ",\"averageFramesPerSecond\":"
+           << averageFramesPerSecond << '}';
 }
 
 [[nodiscard]] Tina::Core::Status verifyLifecycle(Tina::RunExitReason exitReason, const EditorLaunchOptions& options,
@@ -582,10 +647,18 @@ class EditorApplication final : public Tina::IGameApplication {
     const EditorLaunchOptions options = *optionsResult;
 
     LifecycleCounters counters{};
+    if (options.profileUi) {
+        counters.processAfterOptions = queryEditorProcessMemory();
+        recordEditorProcessMemory(counters, counters.processAfterOptions);
+    }
     EditorAssetResources assetResources{};
     if (auto status = prepareEditorCatalog(options, assetResources); !status) {
         writeError(status.error());
         return 1;
+    }
+    if (options.profileUi) {
+        counters.processAfterCatalog = queryEditorProcessMemory();
+        recordEditorProcessMemory(counters, counters.processAfterCatalog);
     }
     EditorRenderDeviceAccess renderDeviceAccess{};
     Tina::Desktop::CreateEngineOptions desktopOptions{};
@@ -600,12 +673,25 @@ class EditorApplication final : public Tina::IGameApplication {
         writeError(hostResult.error());
         return 1;
     }
+    if (options.profileUi) {
+        counters.processAfterEngineCreate = queryEditorProcessMemory();
+        recordEditorProcessMemory(counters, counters.processAfterEngineCreate);
+    }
 
     EditorApplication application{options, counters, assetResources, renderDeviceAccess};
     auto runResult = (*hostResult)->run(application);
+    if (options.profileUi) {
+        counters.processAfterRun = queryEditorProcessMemory();
+        recordEditorProcessMemory(counters, counters.processAfterRun);
+    }
     if (!runResult) {
         writeError(runResult.error());
         return 1;
+    }
+    if (options.profileUi) {
+        hostResult->reset();
+        counters.processAfterEngineDestroy = queryEditorProcessMemory();
+        recordEditorProcessMemory(counters, counters.processAfterEngineDestroy);
     }
 
     auto lifecycleStatus = verifyLifecycle(*runResult, options, counters);
@@ -622,7 +708,132 @@ class EditorApplication final : public Tina::IGameApplication {
     std::cout << ",\"frames\":" << counters.frameUpdates
               << ",\"targetFrames\":" << options.targetFrameCount
               << ",\"frameDelayMs\":" << options.frameDelayMilliseconds
-              << ",\"autoDemo\":" << (options.autoDemo ? "true" : "false") << ",\"exit\":";
+              << ",\"autoDemo\":" << (options.autoDemo ? "true" : "false")
+              << ",\"profileUi\":" << (options.profileUi ? "true" : "false")
+              << ",\"uiStatisticsSamples\":" << counters.uiStatisticsSamples
+              << ",\"uiPmrFirstBytes\":" << counters.uiStatisticsFirst.pmrCurrentBytes
+              << ",\"uiPmrLastBytes\":" << counters.uiStatisticsLast.pmrCurrentBytes
+              << ",\"uiPmrPeakBytes\":" << counters.uiStatisticsPeakPmrBytes
+              << ",\"uiPmrCurrentDeltaBytes\":";
+    writeUnsignedDelta(std::cout,
+                       static_cast<u64>(counters.uiStatisticsFirst.pmrCurrentBytes),
+                       static_cast<u64>(counters.uiStatisticsLast.pmrCurrentBytes));
+    std::cout << ",\"uiPmrFirstAllocationCount\":"
+              << counters.uiStatisticsFirst.pmrAllocationCount
+              << ",\"uiPmrLastAllocationCount\":"
+              << counters.uiStatisticsLast.pmrAllocationCount
+              << ",\"uiPmrAllocationCountDelta\":";
+    writeUnsignedDelta(std::cout, counters.uiStatisticsFirst.pmrAllocationCount,
+                       counters.uiStatisticsLast.pmrAllocationCount);
+    std::cout << ",\"uiPmrFirstDeallocationCount\":"
+              << counters.uiStatisticsFirst.pmrDeallocationCount
+              << ",\"uiPmrLastDeallocationCount\":"
+              << counters.uiStatisticsLast.pmrDeallocationCount
+              << ",\"uiPmrDeallocationCountDelta\":";
+    writeUnsignedDelta(std::cout, counters.uiStatisticsFirst.pmrDeallocationCount,
+                       counters.uiStatisticsLast.pmrDeallocationCount);
+    std::cout << ",\"uiPmrFailedAllocationCount\":"
+              << counters.uiStatisticsLast.pmrFailedAllocationCount
+              << ",\"uiPmrInvalidDeallocationCount\":"
+              << counters.uiStatisticsLast.pmrInvalidDeallocationCount
+              << ",\"uiPmrNodePoolBytes\":"
+              << counters.uiStatisticsLast.pmrNodePoolBytes
+              << ",\"uiPmrStateStorageBytes\":"
+              << counters.uiStatisticsLast.pmrStateStorageBytes
+              << ",\"uiPmrScratchReserveBytes\":"
+              << counters.uiStatisticsLast.pmrScratchReserveBytes
+              << ",\"uiPmrIndexAlignedStorageBytes\":"
+              << counters.uiStatisticsLast.pmrIndexAlignedStorageBytes
+              << ",\"uiPmrSnapshotBufferBytes\":"
+              << counters.uiStatisticsLast.pmrSnapshotBufferBytes
+              << ",\"uiPmrGlyphAtlasBytes\":"
+              << counters.uiStatisticsLast.pmrGlyphAtlasBytes
+              << ",\"processWorkingSetBytes\":" << counters.processWorkingSetBytes
+              << ",\"processPrivateBytes\":" << counters.processPrivateBytes
+              << ",\"processPeakWorkingSetBytes\":" << counters.processPeakWorkingSetBytes
+              << ",\"processPeakPrivateBytes\":" << counters.processPeakPrivateBytes
+              << ",\"processMemoryStages\":{\"afterOptions\":";
+    writeProcessMemorySnapshot(std::cout, counters.processAfterOptions);
+    std::cout << ",\"afterCatalog\":";
+    writeProcessMemorySnapshot(std::cout, counters.processAfterCatalog);
+    std::cout << ",\"afterEngineCreate\":";
+    writeProcessMemorySnapshot(std::cout, counters.processAfterEngineCreate);
+    std::cout << ",\"firstUiFrame\":";
+    writeProcessMemorySnapshot(std::cout, counters.processFirstUiFrame);
+    std::cout << ",\"lastUiFrame\":";
+    writeProcessMemorySnapshot(std::cout, counters.processLastUiFrame);
+    std::cout << ",\"afterRun\":";
+    writeProcessMemorySnapshot(std::cout, counters.processAfterRun);
+    std::cout << ",\"afterEngineDestroy\":";
+    writeProcessMemorySnapshot(std::cout, counters.processAfterEngineDestroy);
+    std::cout << "},\"processMemoryDeltas\":{\"catalog\":";
+    writeProcessMemoryDelta(std::cout, counters.processAfterOptions,
+                            counters.processAfterCatalog);
+    std::cout << ",\"engineCreate\":";
+    writeProcessMemoryDelta(std::cout, counters.processAfterCatalog,
+                            counters.processAfterEngineCreate);
+    std::cout << ",\"uiStartup\":";
+    writeProcessMemoryDelta(std::cout, counters.processAfterEngineCreate,
+                            counters.processFirstUiFrame);
+    std::cout << ",\"steadyState\":";
+    writeProcessMemoryDelta(std::cout, counters.processFirstUiFrame,
+                            counters.processLastUiFrame);
+    std::cout << ",\"runTeardown\":";
+    writeProcessMemoryDelta(std::cout, counters.processLastUiFrame,
+                            counters.processAfterRun);
+    std::cout << ",\"engineDestroy\":";
+    writeProcessMemoryDelta(std::cout, counters.processAfterRun,
+                            counters.processAfterEngineDestroy);
+    std::cout << "},\"sourceImportProfile\":{\"cookedPayloadBytes\":"
+              << counters.sourceImportCookedPayloadBytes
+              << ",\"transientPoolPeakBytes\":"
+              << counters.sourceImportTransientMemoryPeakBytes
+              << ",\"transientPoolBytesAfterRelease\":"
+              << counters.sourceImportTransientMemoryBytesAfterRelease
+              << ",\"residentCookedFileBytesBefore\":"
+              << counters.sourceImportResidentCookedFileBytesBefore
+              << ",\"residentCookedFileBytesAfterCommit\":"
+              << counters.sourceImportResidentCookedFileBytesAfterCommit
+              << ",\"processStages\":{\"before\":";
+    writeProcessMemorySnapshot(std::cout, counters.sourceImportProcessBefore);
+    std::cout << ",\"afterWorker\":";
+    writeProcessMemorySnapshot(std::cout, counters.sourceImportProcessAfterWorker);
+    std::cout << ",\"afterCommit\":";
+    writeProcessMemorySnapshot(std::cout, counters.sourceImportProcessAfterCommit);
+    std::cout << ",\"sampledPeak\":";
+    writeProcessMemorySnapshot(std::cout, counters.sourceImportProcessPeak);
+    std::cout << "},\"processDeltas\":{\"worker\":";
+    writeProcessMemoryDelta(std::cout, counters.sourceImportProcessBefore,
+                            counters.sourceImportProcessAfterWorker);
+    std::cout << ",\"commit\":";
+    writeProcessMemoryDelta(std::cout, counters.sourceImportProcessAfterWorker,
+                            counters.sourceImportProcessAfterCommit);
+    std::cout << ",\"total\":";
+    writeProcessMemoryDelta(std::cout, counters.sourceImportProcessBefore,
+                            counters.sourceImportProcessAfterCommit);
+    std::cout << ",\"sampledPeak\":";
+    writeProcessMemoryDelta(std::cout, counters.sourceImportProcessBefore,
+                            counters.sourceImportProcessPeak);
+    std::cout << "},\"frameTiming\":{\"overall\":";
+    writeFrameTimingStatistics(std::cout, counters.frameTimingOverall);
+    std::cout << ",\"before\":";
+    writeFrameTimingStatistics(
+        std::cout, counters.frameTimingBeforeSourceImport);
+    std::cout << ",\"during\":";
+    writeFrameTimingStatistics(
+        std::cout, counters.frameTimingDuringSourceImport);
+    std::cout << ",\"after\":";
+    writeFrameTimingStatistics(
+        std::cout, counters.frameTimingAfterSourceImport);
+    std::cout << "}},\"uiNodeCapacity\":" << counters.uiStatisticsLast.nodeCapacity
+              << ",\"uiLiveNodeCount\":" << counters.uiStatisticsLast.liveNodeCount
+              << ",\"uiCommittedNodeCount\":" << counters.uiStatisticsLast.committedNodeCount
+              << ",\"uiLayoutRebuilds\":" << counters.uiStatisticsLast.lastLayoutPassCount
+              << ",\"uiHitRebuilds\":" << counters.uiStatisticsLast.lastHitRebuildCount
+              << ",\"uiPaintCacheRebuilds\":" << counters.uiStatisticsLast.lastPaintCacheRebuildCount
+              << ",\"uiPaintSnapshotRebuilds\":" << counters.uiStatisticsLast.lastPaintSnapshotRebuildCount
+              << ",\"uiDirtyQueuePending\":" << counters.uiStatisticsLast.dirtyQueuePendingCount
+              << ",\"exit\":";
     writeJsonString(std::cout, runExitReasonName(*runResult));
     std::cout << ",\"documentPathConfigured\":"
               << (counters.documentPathConfigured ? "true" : "false")

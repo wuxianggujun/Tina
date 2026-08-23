@@ -635,13 +635,64 @@ auto EditorWorkspaceState::hierarchyStableIdAtPosition(
     return stableEntityIdForHierarchyItem(descriptor.key);
 }
 
+auto EditorWorkspaceState::projectAssetVisibleIndexAtPosition(
+    UI::UILogicalPoint position) const noexcept -> std::optional<u64>
+{
+    const UI::UILogicalRect& rect = projectAssetListRect_;
+    const UI::UIVirtualGridViewMetrics& metrics = projectAssetListMetrics_;
+    const UI::UIVirtualGridViewStyle& style = projectAssetListStyle_;
+    if (rect.width <= 0.0F || rect.height <= 0.0F ||
+        position.x < rect.x || position.x >= rect.right() ||
+        position.y < rect.y || position.y >= rect.bottom() ||
+        metrics.logicalColumnCount == 0U || metrics.itemWidth <= 0.0F ||
+        style.itemHeight <= 0.0F) {
+        return std::nullopt;
+    }
+    const float localX = position.x - rect.x;
+    const float localY = position.y - rect.y + metrics.scrollOffset;
+    const float columnStride = metrics.itemWidth + style.columnGap;
+    const float rowStride = style.itemHeight + style.rowGap;
+    if (localX < 0.0F || localY < 0.0F || columnStride <= 0.0F ||
+        rowStride <= 0.0F) {
+        return std::nullopt;
+    }
+    const u32 column = static_cast<u32>(localX / columnStride);
+    const u64 row = static_cast<u64>(localY / rowStride);
+    if (column >= metrics.logicalColumnCount ||
+        localX - static_cast<float>(column) * columnStride >= metrics.itemWidth ||
+        row > (std::numeric_limits<u64>::max)() /
+                    static_cast<u64>(metrics.logicalColumnCount)) {
+        return std::nullopt;
+    }
+    const u64 logicalIndex =
+        row * static_cast<u64>(metrics.logicalColumnCount) + column;
+    return logicalIndex < metrics.logicalItemCount
+               ? std::optional<u64>{logicalIndex}
+               : std::nullopt;
+}
+
 void EditorWorkspaceState::handleHierarchyPointerDown(
     UI::UIRoutedPointerEvent& event) noexcept
 {
     const auto& input = event.input();
+    if (input.button == Tina::Platform::PointerButton::Secondary) {
+        const auto stableId = hierarchyStableIdAtPosition(input.position);
+        hierarchyContextStableId_ = stableId.value_or(0U);
+        if (stableId.has_value() && *stableId != 0U) {
+            pendingSelectionStableId_ = *stableId;
+        } else {
+            // The context menu belongs to a node, not to empty tree chrome.
+            // Prevent the UI menu fallback from opening a disabled menu for
+            // blank space below the last hierarchy row.
+            event.preventDefaultAction();
+            event.consumeInputTransition();
+        }
+        return;
+    }
     if (input.button != Tina::Platform::PointerButton::Primary) {
         return;
     }
+    hierarchyContextStableId_ = 0U;
     const auto stableId = hierarchyStableIdAtPosition(input.position);
     if (!stableId.has_value() || *stableId == 0U) {
         return;
@@ -672,6 +723,12 @@ void EditorWorkspaceState::handleHierarchyPointerMove(
     const float dy = position.y - hierarchyDragStartPosition_.y;
     if (!hierarchyDragActive_ && (dx * dx + dy * dy) >= 25.0F) {
         hierarchyDragActive_ = true;
+        // A drag is never the second click of a rename gesture.
+        lastHierarchyPointerDownStableId_ = 0U;
+        pendingHierarchyRenameStableId_.reset();
+        if (hierarchyRenameVisible_) {
+            pendingHierarchyRenameCancel_ = true;
+        }
     }
     if (hierarchyDragActive_) {
         event.consumeInputTransition();
@@ -715,6 +772,69 @@ void EditorWorkspaceState::handleHierarchyPointerUp(
     event.releasePointerCapture();
     hierarchyDragStableId_ = 0;
     hierarchyDragActive_ = false;
+}
+
+void EditorWorkspaceState::handleProjectAssetPointerDown(
+    UI::UIRoutedPointerEvent& event) noexcept
+{
+    const auto& input = event.input();
+    if (input.button != Tina::Platform::PointerButton::Primary ||
+        !projectAssets_.visibleItemCount()) {
+        return;
+    }
+    const auto index = projectAssetVisibleIndexAtPosition(input.position);
+    if (!index.has_value()) {
+        return;
+    }
+    projectAssetDragPointer_ = input.pointer;
+    projectAssetDragVisibleIndex_ = *index;
+    projectAssetDragStartPosition_ = input.position;
+    projectAssetDragActive_ = false;
+    event.capturePointer();
+}
+
+void EditorWorkspaceState::handleProjectAssetPointerMove(
+    UI::UIRoutedPointerEvent& event) noexcept
+{
+    if (event.input().pointer != projectAssetDragPointer_ ||
+        projectAssetDragVisibleIndex_ >= projectAssets_.visibleItemCount()) {
+        return;
+    }
+    const float dx = event.input().position.x - projectAssetDragStartPosition_.x;
+    const float dy = event.input().position.y - projectAssetDragStartPosition_.y;
+    if (!projectAssetDragActive_ && (dx * dx + dy * dy) >= 25.0F) {
+        projectAssetDragActive_ = true;
+    }
+    if (projectAssetDragActive_) {
+        event.consumeInputTransition();
+        event.preventDefaultAction();
+    }
+}
+
+void EditorWorkspaceState::handleProjectAssetPointerUp(
+    UI::UIRoutedPointerEvent& event) noexcept
+{
+    if (event.input().pointer != projectAssetDragPointer_ ||
+        event.input().button != Tina::Platform::PointerButton::Primary) {
+        return;
+    }
+    if (projectAssetDragActive_) {
+        const auto target = hierarchyStableIdAtPosition(event.input().position);
+        if (target.has_value() && *target != 0U) {
+            pendingProjectAssetDrop_ = ProjectAssetDropRequest{
+                .visibleIndex = projectAssetDragVisibleIndex_,
+                .targetStableId = *target,
+            };
+        } else {
+            authoringFeedback_ =
+                "Resource drag cancelled: release over a Sprite node in Hierarchy";
+        }
+        event.consumeInputTransition();
+        event.preventDefaultAction();
+    }
+    event.releasePointerCapture();
+    projectAssetDragVisibleIndex_ = 0U;
+    projectAssetDragActive_ = false;
 }
 
 } // namespace Tina::EditorApp::WorkspaceInternal

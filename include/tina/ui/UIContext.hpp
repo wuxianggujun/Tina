@@ -93,6 +93,21 @@ struct UIStyleStatistics final {
 };
 
 struct UIContextStatistics final {
+    // Bytes requested from the Context PMR resource. This is Tina-routed UI
+    // storage only; it intentionally does not claim process RSS/private bytes
+    // or GPU allocations.
+    usize pmrCurrentBytes = 0;
+    usize pmrPeakBytes = 0;
+    u64 pmrAllocationCount = 0;
+    u64 pmrDeallocationCount = 0;
+    u64 pmrFailedAllocationCount = 0;
+    u64 pmrInvalidDeallocationCount = 0;
+    usize pmrNodePoolBytes = 0;
+    usize pmrStateStorageBytes = 0;
+    usize pmrScratchReserveBytes = 0;
+    usize pmrIndexAlignedStorageBytes = 0;
+    usize pmrSnapshotBufferBytes = 0;
+    usize pmrGlyphAtlasBytes = 0;
     usize nodeCapacity = 0;
     usize rootCapacity = 0;
     usize dirtyQueueCapacity = 0;
@@ -523,6 +538,9 @@ class UITreeUpdater final {
     virtualGridViewPaint(UINodeId virtualGridView) const;
     [[nodiscard]] Core::Result<UIVirtualGridViewMetrics>
     virtualGridViewMetrics(UINodeId virtualGridView) const;
+    [[nodiscard]] Core::Result<UINodeId>
+    virtualGridViewMaterializedItemNode(UINodeId virtualGridView,
+                                        u64 logicalIndex) const;
     [[nodiscard]] Core::Status setVirtualGridViewSelectedIndex(
         UINodeId virtualGridView, u64 logicalIndex);
     [[nodiscard]] Core::Status clearVirtualGridViewSelection(UINodeId virtualGridView);
@@ -558,6 +576,12 @@ class UITreeUpdater final {
     [[nodiscard]] Core::Status setTreeViewPaint(UINodeId treeView, const UITreeViewPaint& paint);
     [[nodiscard]] Core::Result<UITreeViewPaint> treeViewPaint(UINodeId treeView) const;
     [[nodiscard]] Core::Result<UITreeViewMetrics> treeViewMetrics(UINodeId treeView) const;
+    // Returns the committed materialized row node for a logical item. The
+    // result is empty when that logical row is outside the current materialized
+    // window; callers can use treeViewMetrics() to decide whether to scroll it
+    // into view first.
+    [[nodiscard]] Core::Result<UINodeId>
+    treeViewMaterializedItemNode(UINodeId treeView, u64 logicalIndex) const;
     [[nodiscard]] Core::Status setTreeViewSelectedIndex(UINodeId treeView, u64 logicalIndex);
     [[nodiscard]] Core::Status clearTreeViewSelection(UINodeId treeView);
     [[nodiscard]] Core::Result<UITreeViewSelection> treeViewSelection(UINodeId treeView) const;
@@ -901,6 +925,9 @@ class UIContext final {
     virtualGridViewPaint(UINodeId virtualGridView) const;
     [[nodiscard]] Core::Result<UIVirtualGridViewMetrics>
     virtualGridViewMetrics(UINodeId virtualGridView) const;
+    [[nodiscard]] Core::Result<UINodeId>
+    virtualGridViewMaterializedItemNode(UINodeId virtualGridView,
+                                        u64 logicalIndex) const;
     [[nodiscard]] Core::Status setVirtualGridViewSelectedIndex(
         UINodeId virtualGridView, u64 logicalIndex);
     [[nodiscard]] Core::Status clearVirtualGridViewSelection(UINodeId virtualGridView);
@@ -1188,7 +1215,7 @@ class UIContext final {
     [[nodiscard]] Core::Status setPopupOpenFromUpdater(UINodeId updaterRoot, UINodeId popup, bool open);
     [[nodiscard]] Core::Result<bool> isPopupOpenFromUpdater(UINodeId updaterRoot, UINodeId popup) const;
     [[nodiscard]] Core::Result<UIPopupMetrics> popupMetricsFromUpdater(UINodeId updaterRoot, UINodeId popup) const;
-    void registerDialogFromBuild(const UIDialogParts& parts) noexcept;
+    [[nodiscard]] Core::Status registerDialogFromBuild(const UIDialogParts& parts);
     [[nodiscard]] Core::Status openDialogFromUpdater(UINodeId updaterRoot,
                                                      UINodeId dialog);
     [[nodiscard]] Core::Status dismissDialogFromUpdater(UINodeId updaterRoot,
@@ -1285,6 +1312,10 @@ class UIContext final {
     [[nodiscard]] Core::Result<UIVirtualGridViewMetrics>
     virtualGridViewMetricsFromUpdater(
         UINodeId updaterRoot, UINodeId virtualGridView) const;
+    [[nodiscard]] Core::Result<UINodeId>
+    virtualGridViewMaterializedItemNodeFromUpdater(
+        UINodeId updaterRoot, UINodeId virtualGridView,
+        u64 logicalIndex) const;
     [[nodiscard]] Core::Status setVirtualGridViewSelectedIndexFromUpdater(
         UINodeId updaterRoot, UINodeId virtualGridView, u64 logicalIndex);
     [[nodiscard]] Core::Status clearVirtualGridViewSelectionFromUpdater(
@@ -1333,6 +1364,8 @@ class UIContext final {
     [[nodiscard]] Core::Result<UITreeViewPaint> treeViewPaintFromUpdater(UINodeId updaterRoot, UINodeId treeView) const;
     [[nodiscard]] Core::Result<UITreeViewMetrics> treeViewMetricsFromUpdater(UINodeId updaterRoot,
                                                                              UINodeId treeView) const;
+    [[nodiscard]] Core::Result<UINodeId> treeViewMaterializedItemNodeFromUpdater(
+        UINodeId updaterRoot, UINodeId treeView, u64 logicalIndex) const;
     [[nodiscard]] Core::Status setTreeViewSelectedIndexFromUpdater(UINodeId updaterRoot, UINodeId treeView,
                                                                    u64 logicalIndex);
     [[nodiscard]] Core::Status clearTreeViewSelectionFromUpdater(UINodeId updaterRoot, UINodeId treeView);

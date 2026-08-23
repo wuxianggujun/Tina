@@ -9,6 +9,7 @@
 
 #include <functional>
 #include <memory>
+#include <memory_resource>
 #include <stop_token>
 #include <string>
 #include <vector>
@@ -53,6 +54,9 @@ struct EditorSourceImportStatistics final {
     Core::u32 unitsRemoved = 0;
     Core::u32 objectsReused = 0;
     Core::u32 objectsCooked = 0;
+    Core::u64 cookedPayloadBytes = 0;
+    Core::u64 transientMemoryPeakBytes = 0;
+    Core::u64 transientMemoryBytesAfterRelease = 0;
 };
 
 // A successful worker result means the requested fresh stage and state file have completed
@@ -83,10 +87,12 @@ struct EditorSourceImportServiceConfig final {
 using EditorSourceImportWorker = std::function<Core::Result<EditorSourceImportWorkResult>(
     const EditorSourceImportRequest&, std::stop_token)>;
 
-// Adapts the shared Asset source-import pipeline without copying its cooking/probe orchestration
-// into EditorApp. Any memory resources referenced by stageConfig must outlive the worker/service.
-[[nodiscard]] EditorSourceImportWorker makeEditorSourceImportPipelineWorker(
-    Asset::CatalogPackageStageConfig stageConfig);
+[[nodiscard]] Asset::CatalogPackageStageConfig
+makeEditorSourceImportStageConfig(std::pmr::memory_resource& transientMemory) noexcept;
+
+// Each request owns a worker-local validation pool. No request-sized block is
+// retained by the service after the worker publishes its value-only result.
+[[nodiscard]] EditorSourceImportWorker makeEditorSourceImportPipelineWorker();
 
 enum class EditorSourceImportServiceState : Core::u8 {
     Idle = 0,

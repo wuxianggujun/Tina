@@ -3,10 +3,15 @@
 #include <tina/core/base/Types.hpp>
 #include <tina/ui/UIMenu.hpp>
 
+#include "UIBoundedNodeStateTable.hpp"
+
 #include <memory_resource>
-#include <vector>
 
 namespace Tina::UI::Detail {
+
+struct MenuLayoutScratch final {
+    UIMenuMetrics metrics{};
+};
 
 struct MenuState final {
     UINodeId node{};
@@ -15,6 +20,7 @@ struct MenuState final {
     UINodeId parentItem{};
     UILogicalRect invocationAnchorRect{};
     UIMenuMetrics committedMetrics{};
+    MenuLayoutScratch layoutScratch{};
     bool hasInvocationAnchorRect = false;
     bool open = false;
 };
@@ -27,17 +33,18 @@ struct MenuItemState final {
     bool checked = false;
 };
 
-struct MenuLayoutScratch final {
-    UIMenuMetrics metrics{};
-};
-
-// Index-aligned, fixed-capacity state owned by one UIContext. UIContext validates
+// Independent bounded sparse state owned by one UIContext. UIContext validates
 // tree topology and coordinates dirty publication before mutating this storage.
 class UIMenuStateStorage final {
   public:
-    UIMenuStateStorage(usize nodeCapacity, std::pmr::memory_resource& resource);
+    UIMenuStateStorage(usize menuCapacity, usize menuItemCapacity,
+                       std::pmr::memory_resource& resource);
 
     [[nodiscard]] usize capacity() const noexcept;
+    [[nodiscard]] usize activeMenuCount() const noexcept;
+    [[nodiscard]] usize activeMenuItemCount() const noexcept;
+    [[nodiscard]] usize availableMenuCount() const noexcept;
+    [[nodiscard]] usize availableMenuItemCount() const noexcept;
     [[nodiscard]] bool containsMenu(UINodeId menu) const noexcept;
     [[nodiscard]] bool containsMenuItem(UINodeId item) const noexcept;
     [[nodiscard]] MenuState* tryMenu(UINodeId menu) noexcept;
@@ -46,9 +53,11 @@ class UIMenuStateStorage final {
     [[nodiscard]] const MenuItemState* tryItem(UINodeId item) const noexcept;
     [[nodiscard]] MenuLayoutScratch& layoutScratchByIndex(u32 nodeIndex) noexcept;
 
-    void initializeMenu(UINodeId menu, const UIMenuConfig& config) noexcept;
-    void initializeMenuItem(UINodeId item, UINodeId menu,
-                            const UIMenuItemConfig& config) noexcept;
+    [[nodiscard]] bool initializeMenu(
+        UINodeId menu, const UIMenuConfig& config) noexcept;
+    [[nodiscard]] bool initializeMenuItem(
+        UINodeId item, UINodeId menu,
+        const UIMenuItemConfig& config) noexcept;
     void resetNode(u32 nodeIndex) noexcept;
     [[nodiscard]] bool releaseNode(UINodeId node) noexcept;
 
@@ -91,10 +100,8 @@ class UIMenuStateStorage final {
     [[nodiscard]] UIMenuMetrics committedMetrics(UINodeId menu) const noexcept;
 
   private:
-    std::pmr::vector<MenuState> menusByNodeIndex_;
-    std::pmr::vector<MenuItemState> itemsByNodeIndex_;
-    std::pmr::vector<UINodeId> menuForAnchorByNodeIndex_;
-    std::pmr::vector<MenuLayoutScratch> layoutScratchByNodeIndex_;
+    UIBoundedNodeStateTable<MenuState> menus_;
+    UIBoundedNodeStateTable<MenuItemState> items_;
     UINodeId activeMenu_{};
 };
 

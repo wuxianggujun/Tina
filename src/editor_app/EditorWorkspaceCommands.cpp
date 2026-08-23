@@ -393,45 +393,114 @@ auto EditorWorkspaceState::showHierarchyRename(
     Tina::PrimaryWindowUITreeUpdater& tree, u32 stableId) -> Tina::Core::Status
 {
     const EditorHierarchyRow* row = hierarchyRow(stableId);
-    if (row == nullptr || stableId == 0U || !sceneDocumentActive()) {
+    if (row == nullptr || stableId == 0U || !sceneDocumentActive() ||
+        !hierarchyRenameRoot_.hasValue() || !hierarchyRenameInput_.hasValue()) {
         return Tina::Core::success();
     }
     hierarchyRenameStableId_ = stableId;
     hierarchyRenameDocumentRevision_ = activeDocumentRevision();
     hierarchyRenameVisible_ = true;
-    if (auto status = tree.setLayoutStyle(
-            hierarchyRenameRoot_, hierarchyRenameLayout(UI::UIVisibility::Visible));
-        !status) {
-        return status;
-    }
     if (auto status = tree.setText(hierarchyRenameInput_, row->label); !status) {
         return status;
     }
     if (auto status = tree.setTextSelection(
-            hierarchyRenameInput_, UI::UITextSelection{
+        hierarchyRenameInput_, UI::UITextSelection{
                 .anchorCodepoint = 0,
-                .caretCodepoint = static_cast<u32>(row->label.size())}); !status) {
+                .caretCodepoint = Tina::Core::countStrictUtf8CodepointsWithoutNul(
+                    row->label).value_or(0U)}); !status) {
         return status;
     }
-    return tree.requestFocus(hierarchyRenameInput_);
+    if (auto status = refreshHierarchyRenameLayout(tree); !status) {
+        return status;
+    }
+    // The visibility mutation becomes a committed layout only after this UI
+    // update returns. Focus is requested by the next update pass, otherwise
+    // the TextEdit is still a collapsed, non-focusable committed node.
+    pendingHierarchyRenameFocus_ = true;
+    hierarchyRenameFocusDeferralFrames_ = 1U;
+    return Tina::Core::success();
+}
+
+auto EditorWorkspaceState::refreshHierarchyRenameLayout(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    if (!hierarchyRenameVisible_ || hierarchyRenameStableId_ == 0U ||
+        !hierarchyRenameRoot_.hasValue() || !hierarchyRenameInput_.hasValue()) {
+        return Tina::Core::success();
+    }
+    const EditorHierarchyRow* row = hierarchyRow(hierarchyRenameStableId_);
+    const auto logicalIndex = visibleHierarchyIndex(hierarchyRenameStableId_);
+    if (row == nullptr || !logicalIndex.has_value()) {
+        return hideHierarchyRename(tree);
+    }
+    auto rowNode = tree.treeViewMaterializedItemNode(hierarchyTree_, *logicalIndex);
+    if (!rowNode) {
+        return Tina::Core::failure(std::move(rowNode.error()));
+    }
+    // A double-click can only target a committed materialized row. If a
+    // filter/scroll change moves it outside the pool, keep the editor state
+    // alive and wait for the next committed materialization pass.
+    if (!rowNode->hasValue()) {
+        return Tina::Core::success();
+    }
+    auto rowRect = tree.committedLayoutRect(*rowNode);
+    if (!rowRect) {
+        return Tina::Core::failure(std::move(rowRect.error()));
+    }
+    auto treeStyle = tree.treeViewStyle(hierarchyTree_);
+    if (!treeStyle) {
+        return Tina::Core::failure(std::move(treeStyle.error()));
+    }
+    auto dockRect = tree.committedLayoutRect(leftDock_);
+    if (!dockRect) {
+        return Tina::Core::failure(std::move(dockRect.error()));
+    }
+    const float labelInset = 8.0F +
+                             static_cast<float>(row->level) * treeStyle->indentation +
+                             treeStyle->disclosureExtent + treeStyle->disclosureGap;
+    const float editorWidth = (std::max)(32.0F, rowRect->width - labelInset - 8.0F);
+    const float contentOriginX = dockRect->x + leftDockLayout_.padding.left;
+    const float contentOriginY = dockRect->y + leftDockLayout_.padding.top;
+    const float offsetX = rowRect->x + labelInset - contentOriginX;
+    const float offsetY = rowRect->y - contentOriginY;
+    hierarchyRenameRootLayout_ = hierarchyRenameLayout(
+        UI::UIVisibility::Visible, offsetX, offsetY,
+        editorWidth, rowRect->height);
+    return tree.setLayoutStyle(hierarchyRenameRoot_, hierarchyRenameRootLayout_);
 }
 
 auto EditorWorkspaceState::hideHierarchyRename(
     Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
 {
+    if (!hierarchyRenameRoot_.hasValue()) {
+        hierarchyRenameVisible_ = false;
+        hierarchyRenameStableId_ = 0U;
+        hierarchyRenameDocumentRevision_ = 0U;
+        pendingHierarchyRenameCancel_ = false;
+        pendingHierarchyRenameCommit_ = false;
+        pendingHierarchyRenameFocus_ = false;
+        hierarchyRenameFocusDeferralFrames_ = 0U;
+        return Tina::Core::success();
+    }
     hierarchyRenameVisible_ = false;
     hierarchyRenameStableId_ = 0;
     hierarchyRenameDocumentRevision_ = 0;
     pendingHierarchyRenameCancel_ = false;
     pendingHierarchyRenameCommit_ = false;
-    return tree.setLayoutStyle(
-        hierarchyRenameRoot_, hierarchyRenameLayout(UI::UIVisibility::Collapsed));
+    pendingHierarchyRenameFocus_ = false;
+    hierarchyRenameFocusDeferralFrames_ = 0U;
+    hierarchyRenameRootLayout_ = hierarchyRenameLayout(UI::UIVisibility::Collapsed);
+    return tree.setLayoutStyle(hierarchyRenameRoot_, hierarchyRenameRootLayout_);
 }
 
 auto EditorWorkspaceState::applyHierarchyRename(
     Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
 {
-    if (!hierarchyRenameVisible_ || hierarchyRenameStableId_ == 0U) {
+    if (!hierarchyRenameVisible_ || hierarchyRenameStableId_ == 0U ||
+        !hierarchyRenameInput_.hasValue()) {
+        if (hierarchyRenameVisible_ && !hierarchyRenameInput_.hasValue()) {
+            return hideHierarchyRename(tree);
+        }
         return Tina::Core::success();
     }
     if (activeDocumentRevision() != hierarchyRenameDocumentRevision_ ||
@@ -595,15 +664,55 @@ auto EditorWorkspaceState::processPendingHierarchyDrop(
     return refreshAuthoringUi(tree);
 }
 
-auto EditorWorkspaceState::showSceneDeleteConfirmation(
+auto EditorWorkspaceState::processPendingProjectAssetDrop(
     Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    if (!pendingProjectAssetDrop_.has_value()) {
+        return Tina::Core::success();
+    }
+    const ProjectAssetDropRequest request = *pendingProjectAssetDrop_;
+    pendingProjectAssetDrop_.reset();
+    const EditorHierarchyRow* target = hierarchyRow(request.targetStableId);
+    if (!sceneDocumentActive() || workspaceMode_ != WorkspaceMode::World2D ||
+        target == nullptr ||
+        (target->kindName != "Sprite2D" &&
+         target->kindName != "AnimatedSprite2D")) {
+        authoringFeedback_ =
+            "Resource drop rejected: drop a Sprite or Texture2D onto Sprite2D/AnimatedSprite2D";
+        return Tina::Core::success();
+    }
+    if (request.visibleIndex >= projectAssets_.visibleItemCount()) {
+        authoringFeedback_ =
+            "Resource drop rejected: the Project Assets item is no longer available";
+        return Tina::Core::success();
+    }
+    if (auto status = projectAssets_.selectVisibleIndex(
+            static_cast<Tina::Core::usize>(request.visibleIndex)); !status) {
+        return reportAuthoringFailure("Resource drop rejected: ", status.error());
+    }
+    assetInspectorActive_ = true;
+    projectAssetSelectionSyncPending_ = true;
+    pendingSelectionStableId_ = request.targetStableId;
+    if (!queueEditorCommand(EditorCommand::NodeAssignSprite)) {
+        authoringFeedback_ =
+            "Resource drop rejected: another editor command is already pending";
+        return Tina::Core::success();
+    }
+    authoringFeedback_ = "Assigning dropped resource to the selected Sprite node";
+    return Tina::Core::success();
+}
+
+auto EditorWorkspaceState::showSceneDeleteConfirmation(
+    Tina::PrimaryWindowUITreeUpdater& tree,
+    std::optional<u32> requestedStableId) -> Tina::Core::Status
 {
     if (pendingSceneDeleteConfirmation_.has_value() ||
         pendingDirtyCloseKey_.has_value() || !sceneDocumentActive()) {
         return Tina::Core::success();
     }
     const auto* activeTab = documentTabs_.activeTab();
-    const u32 stableId = stableEntityIdForHierarchyItem(selectionKey_);
+    const u32 stableId = requestedStableId.value_or(
+        stableEntityIdForHierarchyItem(selectionKey_));
     const EditorHierarchyRow* target = hierarchyRow(stableId);
     if (activeTab == nullptr || stableId == 0U || target == nullptr) {
         return Tina::Core::success();
@@ -1100,6 +1209,110 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
             authoringFeedback_ =
                 "Delete cancelled; scene hierarchy and selection preserved";
             status = hideSceneDeleteConfirmation(tree);
+        }
+        break;
+    case EditorCommand::SceneRenameContext: {
+        const u32 stableId = hierarchyContextStableId_;
+        hierarchyContextStableId_ = 0U;
+        if (sceneDocumentActive() && stableId != 0U && hierarchyRow(stableId) != nullptr) {
+            pendingHierarchyRenameStableId_ = stableId;
+        }
+        break;
+    }
+    case EditorCommand::SceneMoveUpContext:
+    case EditorCommand::SceneMoveDownContext: {
+        const u32 stableId = hierarchyContextStableId_;
+        hierarchyContextStableId_ = 0U;
+        const EditorHierarchyRow* source = hierarchyRow(stableId);
+        if (!sceneDocumentActive() || source == nullptr || stableId == 0U) {
+            break;
+        }
+        u32 previousSibling = 0U;
+        u32 nextSibling = 0U;
+        bool sourceSeen = false;
+        for (const EditorHierarchyRow& row : hierarchyRows_) {
+            if (row.stableId == stableId) {
+                sourceSeen = true;
+                continue;
+            }
+            if (row.stableId == 0U || row.parentStableId != source->parentStableId) {
+                continue;
+            }
+            if (!sourceSeen) {
+                previousSibling = row.stableId;
+                continue;
+            }
+            if (nextSibling == 0U) {
+                nextSibling = row.stableId;
+                break;
+            }
+        }
+        if (command == EditorCommand::SceneMoveUpContext) {
+            if (previousSibling == 0U) {
+                authoringFeedback_ = "Node is already the first sibling";
+                break;
+            }
+            status = workspaceMode_ == WorkspaceMode::World2D
+                ? Tina::Editor::reorderWorld2DNode(document_, stableId, previousSibling)
+                : Tina::Editor::reorderWorld3DNode(document3D_, stableId, previousSibling);
+        } else {
+            if (nextSibling == 0U) {
+                authoringFeedback_ = "Node is already the last sibling";
+                break;
+            }
+            u32 beforeSibling = 0U;
+            bool foundNext = false;
+            for (const EditorHierarchyRow& row : hierarchyRows_) {
+                if (row.stableId == nextSibling) {
+                    foundNext = true;
+                    continue;
+                }
+                if (foundNext && row.stableId != 0U &&
+                    row.parentStableId == source->parentStableId) {
+                    beforeSibling = row.stableId;
+                    break;
+                }
+            }
+            status = workspaceMode_ == WorkspaceMode::World2D
+                ? Tina::Editor::reorderWorld2DNode(document_, stableId, beforeSibling)
+                : Tina::Editor::reorderWorld3DNode(document3D_, stableId, beforeSibling);
+        }
+        if (status) {
+            hierarchyRefreshStableId = stableId;
+            requiresPreviewValidation = true;
+            ++counters_.authoringEdits;
+            authoringFeedback_ = "Sibling order updated as one canonical revision";
+        }
+        break;
+    }
+    case EditorCommand::SceneMoveToRootContext: {
+        const u32 stableId = hierarchyContextStableId_;
+        hierarchyContextStableId_ = 0U;
+        const EditorHierarchyRow* selectedRow = hierarchyRow(stableId);
+        if (!sceneDocumentActive() || stableId == 0U || selectedRow == nullptr) {
+            break;
+        }
+        if (selectedRow->parentStableId == 0U) {
+            authoringFeedback_ = "Node is already at the document root";
+            break;
+        }
+        status = workspaceMode_ == WorkspaceMode::World2D
+            ? Tina::Editor::reparentWorld2DNode(document_, stableId, 0U)
+            : Tina::Editor::reparentWorld3DNode(document3D_, stableId, 0U);
+        if (status) {
+            hierarchyRefreshStableId = stableId;
+            requiresPreviewValidation = true;
+            ++counters_.authoringEdits;
+            ++counters_.sceneReparentRootCommands;
+            authoringFeedback_ = "Node reparented to the document root";
+        }
+        break;
+    }
+    case EditorCommand::SceneDeleteContext:
+        if (hierarchyContextStableId_ != 0U) {
+            const u32 stableId = hierarchyContextStableId_;
+            hierarchyContextStableId_ = 0U;
+            status = showSceneDeleteConfirmation(tree, stableId);
         }
         break;
     case EditorCommand::SceneReparentRoot: {

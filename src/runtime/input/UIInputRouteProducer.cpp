@@ -1524,10 +1524,16 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
         // bindings cannot fire while text/IME input is active. TextInput still
         // carries printable UTF-8; key commands only mutate caret/selection.
         if (const auto* key =
-                std::get_if<Platform::KeyTransition>(&transitions[ordinal].payload);
+            std::get_if<Platform::KeyTransition>(&transitions[ordinal].payload);
             key != nullptr
             && key->window == context->ownerWindow()
             && key->key != Platform::Key::Tab
+            // Enter/Escape are editor-level commit/cancel commands. Keep
+            // them available to the frame action mapper while a TextEdit is
+            // focused; printable and caret-editing keys remain owned here.
+            && key->key != Platform::Key::Enter
+            && key->key != Platform::Key::KeypadEnter
+            && key->key != Platform::Key::Escape
             && context->imeFocus().hasValue())
         {
             if (key->state == Platform::DigitalTransition::Down)
@@ -1641,6 +1647,13 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                 };
             const bool pressed = key->state == Platform::DigitalTransition::Down;
             const bool supportsFlowConfirm = key->key != Platform::Key::Space;
+            if (context->imeFocus().hasValue())
+            {
+                // A focused TextEdit owns neither confirmation nor cancel;
+                // leave these physical transitions unconsumed so the product
+                // action map can implement context-specific commands.
+                continue;
+            }
             if (!pressed && supportsFlowConfirm)
             {
                 auto flowRelease = context->routeFlowAction(

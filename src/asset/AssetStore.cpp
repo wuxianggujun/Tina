@@ -109,11 +109,22 @@ Core::usize AssetStore::availableCount() const noexcept
     return m_pool.availableCount();
 }
 
+Core::u64 AssetStore::residentCookedFileBytes() const noexcept
+{
+    return m_residentCookedFileBytes;
+}
+
 Core::Result<AssetHandle> AssetStore::publish(CookedAssetFile asset)
 {
     if (!asset)
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "cannot publish empty cooked asset");
+    }
+    const auto cookedFileBytes = static_cast<Core::u64>(asset.bytes().size());
+    if (cookedFileBytes > (std::numeric_limits<Core::u64>::max)() - m_residentCookedFileBytes)
+    {
+        return Core::failure(Core::CoreErrorCode::CapacityExceeded,
+                             "asset store resident cooked-file byte count overflowed");
     }
     Record record{
         .assetId = asset.header().assetId,
@@ -131,6 +142,7 @@ Core::Result<AssetHandle> AssetStore::publish(CookedAssetFile asset)
         }
         return Core::failure(std::move(id.error()).withContext("AssetStore::publish", "emplace"));
     }
+    m_residentCookedFileBytes += cookedFileBytes;
     return AssetHandle{.id = *id};
 }
 
@@ -193,8 +205,15 @@ Core::Status AssetStore::complete(AssetHandle handle, CookedAssetFile asset) noe
     {
         return Core::failure(AssetErrorCode::CatalogEntryMismatch, "completed asset id does not match slot");
     }
+    const auto cookedFileBytes = static_cast<Core::u64>(asset.bytes().size());
+    if (cookedFileBytes > (std::numeric_limits<Core::u64>::max)() - m_residentCookedFileBytes)
+    {
+        return Core::failure(Core::CoreErrorCode::CapacityExceeded,
+                             "asset store resident cooked-file byte count overflowed");
+    }
     record->assetKind = asset.header().assetKind;
     record->payload = std::move(asset);
+    m_residentCookedFileBytes += cookedFileBytes;
     record->state = AssetLogicalState::ReadyCpu;
     return Core::success();
 }
@@ -376,7 +395,7 @@ Core::Status AssetStore::unload(AssetHandle handle) noexcept
         {
             return Core::failure(AssetErrorCode::AssetNotReady, "cannot unload in-flight asset with leases");
         }
-        (void)m_pool.erase(handle.id);
+        eraseRecord(handle, *record);
         return Core::success();
     }
     if (record->state == AssetLogicalState::UploadQueued)
@@ -384,13 +403,13 @@ Core::Status AssetStore::unload(AssetHandle handle) noexcept
         // Logical unload while GPU ticket may still be outstanding; caller must retire ticket.
         if (record->leaseCount == 0U)
         {
-            (void)m_pool.erase(handle.id);
+            eraseRecord(handle, *record);
             return Core::success();
         }
     }
     if (record->leaseCount == 0U)
     {
-        (void)m_pool.erase(handle.id);
+        eraseRecord(handle, *record);
         return Core::success();
     }
     record->state = AssetLogicalState::UnloadPending;
@@ -407,8 +426,17 @@ void AssetStore::releaseLease(AssetHandle handle) noexcept
     --record->leaseCount;
     if (record->state == AssetLogicalState::UnloadPending && record->leaseCount == 0U)
     {
-        (void)m_pool.erase(handle.id);
+        eraseRecord(handle, *record);
     }
+}
+
+void AssetStore::eraseRecord(AssetHandle handle, const Record& record) noexcept
+{
+    const auto cookedFileBytes = static_cast<Core::u64>(record.payload.bytes().size());
+    m_residentCookedFileBytes = cookedFileBytes <= m_residentCookedFileBytes
+                                    ? m_residentCookedFileBytes - cookedFileBytes
+                                    : 0U;
+    (void)m_pool.erase(handle.id);
 }
 
 AssetStore::Record* AssetStore::findRecord(AssetHandle handle) noexcept

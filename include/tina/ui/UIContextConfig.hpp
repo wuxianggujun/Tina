@@ -5,6 +5,40 @@
 
 namespace Tina::UI {
 
+struct UIComponentStateCapacityConfig final {
+    static constexpr usize DefaultTooltipCapacity = 64;
+    static constexpr usize DefaultDialogCapacity = 32;
+    static constexpr usize DefaultSplitViewCapacity = 32;
+    static constexpr usize DefaultSplitterCapacity = 32;
+    static constexpr usize DefaultTabViewCapacity = 32;
+    static constexpr usize DefaultTabCapacity = 256;
+    static constexpr usize DefaultMenuCapacity = 64;
+    static constexpr usize DefaultMenuItemCapacity = 512;
+    static constexpr usize DefaultVirtualGridViewCapacity = 32;
+    static constexpr usize DefaultVirtualGridItemCapacity = 2048;
+    static constexpr usize DefaultDataGridCapacity = 16;
+    static constexpr usize DefaultDataGridColumnCapacity = 256;
+    static constexpr usize DefaultDataGridRowCapacity = 512;
+    static constexpr usize DefaultDataGridCellCapacity = 4096;
+
+    // Zero selects min(Default*, UIContext nodeCapacity). Every non-zero value
+    // is an independent fixed pool and may not exceed nodeCapacity.
+    usize tooltipCapacity = 0;
+    usize dialogCapacity = 0;
+    usize splitViewCapacity = 0;
+    usize splitterCapacity = 0;
+    usize tabViewCapacity = 0;
+    usize tabCapacity = 0;
+    usize menuCapacity = 0;
+    usize menuItemCapacity = 0;
+    usize virtualGridViewCapacity = 0;
+    usize virtualGridItemCapacity = 0;
+    usize dataGridCapacity = 0;
+    usize dataGridColumnCapacity = 0;
+    usize dataGridRowCapacity = 0;
+    usize dataGridCellCapacity = 0;
+};
+
 struct UIContextCapacityConfig final {
     static constexpr usize DefaultNodeCapacity = 4096;
     static constexpr usize DefaultRootCapacity = 64;
@@ -99,6 +133,9 @@ struct UIContextCapacityConfig final {
     // capacity from min(DefaultFlow*, nodeCapacity); storage never grows later.
     usize flowLayerCapacity = 0;
     usize flowScreenCapacity = 0;
+    // Optional controls and virtual collection parts do not allocate one state
+    // object per global node. They use independent bounded sparse pools.
+    UIComponentStateCapacityConfig componentStates{};
     // When true (product default), Element StyleRole recipes install productTheme
     // chrome. Local setBoxPaint / set*Paint / setTextStyle calls override only
     // their property; clearOverride restores the current role recipe. Unit tests

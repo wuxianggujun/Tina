@@ -297,7 +297,8 @@ bool AssetSystem::isCatalogMigrationQuiescent() const noexcept
 }
 
 void AssetSystem::prepareCatalogOpenConfig(CatalogPackageOpenConfig& config,
-                                           bool requireFullValidation) const noexcept
+                                           bool requireFullValidation,
+                                           std::pmr::memory_resource& transientValidationMemory) const noexcept
 {
     if (config.manifest.catalog.memoryResource == nullptr)
     {
@@ -317,7 +318,7 @@ void AssetSystem::prepareCatalogOpenConfig(CatalogPackageOpenConfig& config,
     }
     if (config.validation.file.memoryResource == nullptr)
     {
-        config.validation.file.memoryResource = m_memoryResource;
+        config.validation.file.memoryResource = &transientValidationMemory;
     }
     if (requireFullValidation)
     {
@@ -421,7 +422,8 @@ AssetSystem::reloadCatalog(std::string_view catalogRootUtf8, CatalogReloadConfig
         return Core::failure(std::move(status.error()));
     }
 
-    prepareCatalogOpenConfig(config.package, true);
+    std::pmr::unsynchronized_pool_resource validationMemory{};
+    prepareCatalogOpenConfig(config.package, true, validationMemory);
 
     auto replacement = openCatalogPackage(catalogRootUtf8, config.package);
     if (!replacement)
@@ -740,7 +742,8 @@ Core::Status AssetSystem::openAndBindCatalog(std::string_view catalogRootUtf8, C
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "asset system has no memory resource");
     }
-    prepareCatalogOpenConfig(openConfig, false);
+    std::pmr::unsynchronized_pool_resource validationMemory{};
+    prepareCatalogOpenConfig(openConfig, false, validationMemory);
     auto catalog = openCatalogPackage(catalogRootUtf8, openConfig);
     if (!catalog)
     {

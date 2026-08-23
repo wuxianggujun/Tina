@@ -43,6 +43,7 @@ struct NormalizedUIContextCapacityConfig final {
     usize activeTimelineCapacity = 0;
     usize flowLayerCapacity = 0;
     usize flowScreenCapacity = 0;
+    UIComponentStateCapacityConfig componentStates{};
     bool applyDefaultProductChrome = true;
 };
 

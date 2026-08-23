@@ -1140,7 +1140,10 @@ UIContext::buildDialog(UINodeId parent, const UIDialogConfig& config)
     auto parts = buildDialogImpl(*this, parent, config, productTheme());
     if (parts)
     {
-        registerDialogFromBuild(*parts);
+        if (Core::Status registered = registerDialogFromBuild(*parts); !registered)
+        {
+            return Core::failure(registered.error());
+        }
     }
     return parts;
 }
@@ -1185,7 +1188,11 @@ UITreeUpdater::buildDialog(UINodeId parent, const UIDialogConfig& config)
     auto parts = buildDialogImpl(*this, parent, config, m_context->productTheme());
     if (parts)
     {
-        m_context->registerDialogFromBuild(*parts);
+        if (Core::Status registered = m_context->registerDialogFromBuild(*parts);
+            !registered)
+        {
+            return Core::failure(registered.error());
+        }
     }
     return parts;
 }

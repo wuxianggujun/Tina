@@ -11,6 +11,14 @@ auto EditorWorkspaceState::refreshProjectAssetUi(
         return status;
     }
     std::string selectedAssetSummary;
+    using ImportState =
+        Tina::EditorApp::Detail::EditorSourceImportServiceState;
+    const ImportState importState = sourceImportService_.state();
+    const bool importPending =
+        pendingProjectSwitch_.has_value() ||
+        !pendingSourceImportPathsUtf8_.empty() ||
+        sourceImportStartPending_ || importState == ImportState::Running ||
+        importState == ImportState::Ready;
     if (const auto* asset = projectAssets_.selectedItem(); asset != nullptr) {
         selectedAssetSummary.assign(
             Tina::Editor::projectAssetKindLabel(asset->assetKind));
@@ -18,7 +26,15 @@ auto EditorWorkspaceState::refreshProjectAssetUi(
         const auto idText = asset->assetId.canonicalText();
         selectedAssetSummary.append(idText.data(), idText.size());
     } else {
-        selectedAssetSummary = assetResources_.projectCatalogConfigured
+        selectedAssetSummary = importPending
+                                   ? (importState == ImportState::Ready
+                                          ? "Import ready; committing Catalog..."
+                                          : importState == ImportState::Running
+                                                ? "Importing resources..."
+                                                : "Preparing project import...")
+                                   : sourceImportLastFailed_
+                                         ? "Import failed; previous Catalog preserved"
+                                         : assetResources_.projectCatalogConfigured
                                    ? "No assets match this filter"
                                    : (assetResources_.testFixtureCatalog
                                           ? "No test assets match this filter"
@@ -30,7 +46,11 @@ auto EditorWorkspaceState::refreshProjectAssetUi(
     }
     if (auto status = tree.setText(
             projectAssetSource_,
-            temporaryProjectActive()
+            importPending
+                ? "Importing"
+                : sourceImportLastFailed_
+                      ? "Error"
+                      : temporaryProjectActive()
                 ? "Temp"
                 : assetResources_.projectCatalogConfigured
                 ? "Project"

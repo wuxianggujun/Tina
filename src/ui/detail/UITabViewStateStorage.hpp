@@ -3,11 +3,17 @@
 #include <tina/core/base/Types.hpp>
 #include <tina/ui/UITabView.hpp>
 
+#include "UIBoundedNodeStateTable.hpp"
+
 #include <memory_resource>
 #include <span>
 #include <vector>
 
 namespace Tina::UI::Detail {
+
+struct TabViewLayoutScratch final {
+    UITabViewMetrics metrics{};
+};
 
 struct TabViewState final {
     UINodeId node{};
@@ -17,6 +23,7 @@ struct TabViewState final {
     UINodeId activeTab{};
     u32 itemCount = 0;
     UITabViewMetrics committedMetrics{};
+    TabViewLayoutScratch layoutScratch{};
 };
 
 struct TabState final {
@@ -30,17 +37,17 @@ struct TabState final {
     u32 ordinal = 0;
 };
 
-struct TabViewLayoutScratch final {
-    UITabViewMetrics metrics{};
-};
-
-// Index-aligned fixed-capacity relationship storage. UIContext validates tree
-// topology and coordinates dirty publication; this module owns link lifetime.
+// Bounded sparse relationship storage. UIContext validates tree topology and
+// coordinates dirty publication; this module owns link lifetime.
 class UITabViewStateStorage final {
   public:
-    UITabViewStateStorage(usize nodeCapacity, std::pmr::memory_resource& resource);
+    UITabViewStateStorage(
+        usize tabViewCapacity, usize tabCapacity,
+        std::pmr::memory_resource& resource);
 
     [[nodiscard]] usize capacity() const noexcept;
+    [[nodiscard]] usize availableTabViewCount() const noexcept;
+    [[nodiscard]] usize availableTabCount() const noexcept;
     [[nodiscard]] bool containsTabView(UINodeId tabView) const noexcept;
     [[nodiscard]] bool containsTab(UINodeId tab) const noexcept;
     [[nodiscard]] TabViewState* tryTabView(UINodeId tabView) noexcept;
@@ -51,8 +58,10 @@ class UITabViewStateStorage final {
     [[nodiscard]] const UITabPaint& tabPaintByIndex(u32 nodeIndex) const noexcept;
     [[nodiscard]] TabViewLayoutScratch& layoutScratchByIndex(u32 nodeIndex) noexcept;
 
-    void initializeTabView(UINodeId tabView, const UITabViewConfig& config) noexcept;
-    void initializeTab(UINodeId tab, const UITabConfig& config) noexcept;
+    [[nodiscard]] bool initializeTabView(
+        UINodeId tabView, const UITabViewConfig& config) noexcept;
+    [[nodiscard]] bool initializeTab(
+        UINodeId tab, const UITabConfig& config) noexcept;
     void resetNode(u32 nodeIndex) noexcept;
     [[nodiscard]] bool releaseNode(UINodeId node) noexcept;
 
@@ -73,10 +82,8 @@ class UITabViewStateStorage final {
     [[nodiscard]] UITabViewMetrics committedMetrics(UINodeId tabView) const noexcept;
 
   private:
-    std::pmr::vector<TabViewState> tabViewsByNodeIndex_;
-    std::pmr::vector<TabState> tabsByNodeIndex_;
-    std::pmr::vector<UINodeId> tabForPanelByNodeIndex_;
-    std::pmr::vector<TabViewLayoutScratch> layoutScratchByNodeIndex_;
+    UIBoundedNodeStateTable<TabViewState> tabViews_;
+    UIBoundedNodeStateTable<TabState> tabs_;
 };
 
 } // namespace Tina::UI::Detail

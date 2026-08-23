@@ -5,23 +5,26 @@
 #include <tina/ui/UINodeId.hpp>
 #include <tina/ui/UITooltip.hpp>
 
+#include "UIBoundedNodeStateTable.hpp"
+
 #include <memory_resource>
 #include <vector>
 
 namespace Tina::UI::Detail {
+
+struct TooltipLayoutScratch final {
+    UITooltipMetrics metrics{};
+};
 
 struct TooltipState final {
     UINodeId node{};
     UITooltipConfig config{};
     UINodeId anchor{};
     UITooltipMetrics committedMetrics{};
+    TooltipLayoutScratch layoutScratch{};
     bool open = false;
     bool manualRequested = false;
     bool suppressedUntilTriggerReset = false;
-};
-
-struct TooltipLayoutScratch final {
-    UITooltipMetrics metrics{};
 };
 
 struct UITooltipAdvanceCandidate final {
@@ -43,9 +46,11 @@ struct UITooltipAdvanceInput final {
 // relationship or presentation operations.
 class UITooltipStateStorage final {
   public:
-    UITooltipStateStorage(usize nodeCapacity, std::pmr::memory_resource& resource);
+    UITooltipStateStorage(usize capacity, std::pmr::memory_resource& resource);
 
     [[nodiscard]] usize capacity() const noexcept;
+    [[nodiscard]] usize activeCount() const noexcept;
+    [[nodiscard]] usize availableCount() const noexcept;
     [[nodiscard]] bool containsTooltip(UINodeId tooltip) const noexcept;
     [[nodiscard]] TooltipState* tryState(UINodeId tooltip) noexcept;
     [[nodiscard]] const TooltipState* tryState(UINodeId tooltip) const noexcept;
@@ -54,7 +59,8 @@ class UITooltipStateStorage final {
     [[nodiscard]] TooltipLayoutScratch& layoutScratchByIndex(u32 nodeIndex) noexcept;
     [[nodiscard]] const TooltipLayoutScratch& layoutScratchByIndex(u32 nodeIndex) const noexcept;
 
-    void initializeTooltip(UINodeId tooltip, const UITooltipConfig& config) noexcept;
+    [[nodiscard]] bool initializeTooltip(
+        UINodeId tooltip, const UITooltipConfig& config) noexcept;
     void resetNode(u32 nodeIndex) noexcept;
     [[nodiscard]] bool releaseNode(UINodeId node, Core::MonotonicTimePoint now) noexcept;
 
@@ -111,10 +117,8 @@ class UITooltipStateStorage final {
     void suppress(UINodeId tooltip) noexcept;
     [[nodiscard]] UINodeId desiredTooltip(const UITooltipAdvanceInput& input) const noexcept;
 
-    std::pmr::vector<TooltipState> statesByNodeIndex_;
-    std::pmr::vector<TooltipState> rollbackStatesByNodeIndex_;
-    std::pmr::vector<TooltipLayoutScratch> layoutScratchByNodeIndex_;
-    std::pmr::vector<UINodeId> tooltipForAnchorByNodeIndex_;
+    UIBoundedNodeStateTable<TooltipState> states_;
+    std::pmr::vector<TooltipState> rollbackStates_;
     PresentationState presentation_{};
     PresentationState rollbackPresentation_{};
 };

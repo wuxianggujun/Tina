@@ -684,51 +684,17 @@ auto EditorWorkspaceState::buildLeftDockUi(
     if (auto status = ui.tree.setTreeViewSelectedIndex(hierarchyTree_, 0); !status) {
         return status;
     }
+    // Godot-style inline rename editor. It is a sibling overlay of the
+    // virtualized TreeView, so the input covers only the active row label and
+    // never changes the hierarchy panel's flow height.
     hierarchyRenameRootLayout_ = hierarchyRenameLayout(UI::UIVisibility::Collapsed);
     if (auto status = storeNode(
-            ui.createPanel(left, hierarchyRenameRootLayout_), hierarchyRenameRoot_);
+            ui.createTextEdit(left, {}, hierarchyRenameRootLayout_, true),
+            hierarchyRenameRoot_);
         !status) {
         return status;
     }
-    if (auto status = storeNode(
-            ui.createLabel(hierarchyRenameRoot_, "Rename selected node",
-                           fillWidth(18.0F), ui.secondaryText),
-            hierarchyRenameTitle_); !status) {
-        return status;
-    }
-    if (auto status = storeNode(
-            ui.createTextEdit(hierarchyRenameRoot_, {},
-                              fillWidth(ui.productTheme.controls.textEditHeight), true),
-            hierarchyRenameInput_); !status) {
-        return status;
-    }
-    UI::UINodeId renameActions{};
-    UI::UILayoutStyle renameActionsLayout = fillWidth(ui.productTheme.controls.buttonHeight);
-    renameActionsLayout.flexContainer.direction = UI::UIFlexDirection::Row;
-    renameActionsLayout.flexContainer.gap.column = ui.productTheme.spacing.space2;
-    if (auto status = storeNode(ui.createPanel(hierarchyRenameRoot_, renameActionsLayout),
-                                renameActions); !status) {
-        return status;
-    }
-    UI::UILayoutStyle renameButtonLayout = fixedSize(
-        0.0F, ui.productTheme.controls.buttonHeight);
-    renameButtonLayout.size.width = UI::UILayoutLength::Auto();
-    renameButtonLayout.flexItem.grow = 1.0F;
-    renameButtonLayout.flexItem.basis = UI::UILayoutLength::Px(0.0F);
-    if (auto status = storeNode(
-            ui.createButton(renameActions, "Cancel",
-                            renameButtonLayout, true,
-                            UI::UIStyleRoleId::ButtonText),
-            hierarchyRenameCancelButton_); !status) {
-        return status;
-    }
-    if (auto status = storeNode(
-            ui.createButton(renameActions, "Apply",
-                            renameButtonLayout, true,
-                            UI::UIStyleRoleId::ButtonPrimary),
-            hierarchyRenameApplyButton_); !status) {
-        return status;
-    }
+    hierarchyRenameInput_ = hierarchyRenameRoot_;
 
     UI::UILayoutStyle projectHeaderStyle = fillWidth(ui.productTheme.controls.buttonHeight);
     auto projectHeader = EditorPanelHeader::Build(
@@ -1539,6 +1505,17 @@ auto EditorWorkspaceState::buildInspectorUi(
     }
     if (auto status = ui.tree.setTextOverflow(
             inspectorAssetPath_, UI::UITextOverflow::Ellipsis);
+        !status) {
+        return status;
+    }
+    UI::UILayoutStyle inspectorAssetAssignLayout = fillWidth(
+        ui.productTheme.controls.buttonHeight);
+    inspectorAssetAssignLayout.flexItem.shrink = 0.0F;
+    inspectorAssetAssignLayout.visibility = assetRowStyle.visibility;
+    if (auto status = storeNode(
+            ui.createButton(inspectorContent, "Assign to Selected Sprite2D",
+                            inspectorAssetAssignLayout, false),
+            inspectorAssignSpriteButton_);
         !status) {
         return status;
     }
@@ -2778,6 +2755,58 @@ auto EditorWorkspaceState::buildMenuOverlaysUi(
         return status;
     }
 
+    // The hierarchy owns a real context menu, so node operations stay close to
+    // the list item and do not depend on the inspector selection.
+    UI::UILayoutStyle hierarchyContextMenuLayout{};
+    hierarchyContextMenuLayout.size.width = UI::UILayoutLength::Px(210.0F);
+    auto hierarchyContextMenu = ui.tree.createElement(
+        parent,
+        UI::makeMenuElement(
+            {.placement = UI::UIMenuPlacement::Auto,
+             .anchorGap = ui.productTheme.spacing.space1},
+            hierarchyContextMenuLayout));
+    if (!hierarchyContextMenu) {
+        return Tina::Core::failure(std::move(hierarchyContextMenu.error()));
+    }
+    hierarchyContextMenu_ = *hierarchyContextMenu;
+    if (auto status = ui.tree.setMenuAnchor(hierarchyContextMenu_, hierarchyTree_);
+        !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            hierarchyContextMenu_, "Rename", UI::UIMenuItemKind::Command,
+            hierarchyContextRenameItem_);
+        !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            hierarchyContextMenu_, "Move Up", UI::UIMenuItemKind::Command,
+            hierarchyContextMoveUpItem_);
+        !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            hierarchyContextMenu_, "Move Down", UI::UIMenuItemKind::Command,
+            hierarchyContextMoveDownItem_);
+        !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            hierarchyContextMenu_, "Move to Root", UI::UIMenuItemKind::Command,
+            hierarchyContextMoveToRootItem_);
+        !status) {
+        return status;
+    }
+    if (auto status = appendSeparator(hierarchyContextMenu_); !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            hierarchyContextMenu_, "Delete", UI::UIMenuItemKind::Command,
+            hierarchyContextDeleteItem_);
+        !status) {
+        return status;
+    }
+
     return Tina::Core::success();
 }
 
@@ -3118,6 +3147,14 @@ auto EditorWorkspaceState::registerUiCallbacks(UiBuildContext& ui) -> Tina::Core
             !status) {
             return status;
         }
+        if (auto status = ui.tree.setButtonAction(
+                inspectorAssignSpriteButton_,
+                UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                    queueEditorCommand(EditorCommand::NodeAssignSprite);
+                }});
+            !status) {
+            return status;
+        }
     }
     if (auto status = ui.tree.setButtonAction(
             undoButton_, UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
@@ -3228,6 +3265,18 @@ auto EditorWorkspaceState::registerUiCallbacks(UiBuildContext& ui) -> Tina::Core
         std::pair{helpAboutMenuItem_, EditorCommand::ShowAbout},
     };
     for (const auto& [item, command] : menuCommandBindings) {
+        if (auto status = bindEditorCommand(item, command); !status) {
+            return status;
+        }
+    }
+    const std::array hierarchyContextCommandBindings{
+        std::pair{hierarchyContextRenameItem_, EditorCommand::SceneRenameContext},
+        std::pair{hierarchyContextMoveUpItem_, EditorCommand::SceneMoveUpContext},
+        std::pair{hierarchyContextMoveDownItem_, EditorCommand::SceneMoveDownContext},
+        std::pair{hierarchyContextMoveToRootItem_, EditorCommand::SceneMoveToRootContext},
+        std::pair{hierarchyContextDeleteItem_, EditorCommand::SceneDeleteContext},
+    };
+    for (const auto& [item, command] : hierarchyContextCommandBindings) {
         if (auto status = bindEditorCommand(item, command); !status) {
             return status;
         }
@@ -3608,23 +3657,6 @@ auto EditorWorkspaceState::registerUiCallbacks(UiBuildContext& ui) -> Tina::Core
             return status;
         }
     }
-    if (auto status = ui.tree.setButtonAction(
-            hierarchyRenameApplyButton_,
-            UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
-                pendingHierarchyRenameStableId_ = hierarchyRenameStableId_;
-                pendingHierarchyRenameCommit_ = true;
-            }});
-        !status) {
-        return status;
-    }
-    if (auto status = ui.tree.setButtonAction(
-            hierarchyRenameCancelButton_,
-            UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
-                pendingHierarchyRenameCancel_ = true;
-            }});
-        !status) {
-        return status;
-    }
     constexpr std::array hierarchyPointerKinds{
         UI::UIRoutedPointerEventKind::ButtonDown,
         UI::UIRoutedPointerEventKind::Move,
@@ -3635,7 +3667,10 @@ auto EditorWorkspaceState::registerUiCallbacks(UiBuildContext& ui) -> Tina::Core
             {
                 .node = hierarchyTree_,
                 .kind = hierarchyPointerKinds[index],
-                .phases = UI::UIEventPhaseMask::Bubble,
+                // Capture keeps hierarchy interaction ahead of TreeView's
+                // item button default action and preserves pointer capture for
+                // a drag that leaves the original row.
+                .phases = UI::UIEventPhaseMask::Capture,
             },
             UI::UIRoutedPointerCallback{
                 [this, index](UI::UIRoutedPointerEvent& event) noexcept {
@@ -3651,6 +3686,34 @@ auto EditorWorkspaceState::registerUiCallbacks(UiBuildContext& ui) -> Tina::Core
             return Tina::Core::failure(std::move(listener.error()));
         }
         hierarchyPointerListeners_[index] = std::move(*listener);
+    }
+    constexpr std::array projectAssetPointerKinds{
+        UI::UIRoutedPointerEventKind::ButtonDown,
+        UI::UIRoutedPointerEventKind::Move,
+        UI::UIRoutedPointerEventKind::ButtonUp,
+    };
+    for (Tina::Core::usize index = 0;
+         index < projectAssetPointerKinds.size(); ++index) {
+        auto listener = ui.tree.addRoutedPointerListener(
+            {
+                .node = projectAssetList_,
+                .kind = projectAssetPointerKinds[index],
+                .phases = UI::UIEventPhaseMask::Capture,
+            },
+            UI::UIRoutedPointerCallback{
+                [this, index](UI::UIRoutedPointerEvent& event) noexcept {
+                    if (index == 0U) {
+                        handleProjectAssetPointerDown(event);
+                    } else if (index == 1U) {
+                        handleProjectAssetPointerMove(event);
+                    } else {
+                        handleProjectAssetPointerUp(event);
+                    }
+                }});
+        if (!listener) {
+            return Tina::Core::failure(std::move(listener.error()));
+        }
+        projectAssetPointerListeners_[index] = std::move(*listener);
     }
     if (auto status = ui.tree.setButtonAction(
             sceneAddCreateButton_,

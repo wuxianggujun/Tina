@@ -60,10 +60,29 @@ auto EditorWorkspaceState::startSourceImport(
     sourceImportUiRefreshPending_ = true;
     stageReservation.release();
     sourceImportCatalogCommitted_ = false;
+    sourceImportLastFailed_ = false;
     counters_.sourceImportRunning = true;
     counters_.sourceImportReady = false;
     counters_.sourceImportStateCommitted = false;
     ++counters_.sourceImportStarts;
+    if (options_.profileUi) {
+        const EditorProcessMemorySnapshot processMemory =
+            queryEditorProcessMemory();
+        if (!sourceImportProfileSeen_) {
+            counters_.sourceImportProcessBefore = processMemory;
+            counters_.sourceImportResidentCookedFileBytesBefore =
+                assetResources_.system.has_value()
+                    ? assetResources_.system->store().residentCookedFileBytes()
+                    : 0U;
+        }
+        recordEditorProcessMemory(counters_, processMemory);
+        recordEditorProcessMemoryMaximum(
+            counters_.sourceImportProcessPeak, processMemory);
+        sourceImportProfileSeen_ = true;
+        sourceImportProfileActive_ = true;
+        sourceImportProfileWorkerSampled_ = false;
+        sourceImportProfileDeactivatePending_ = false;
+    }
     authoringFeedback_ = "Source import is cooking a fully validated fresh stage";
     return Tina::Core::success();
 }
@@ -273,12 +292,13 @@ auto EditorWorkspaceState::commitSourceImportCatalog(
             "Editor could not stage imported Catalog ownership");
     }
 
+    std::pmr::unsynchronized_pool_resource candidateMemory{};
     Tina::Asset::CatalogPackageOpenConfig candidateConfig{};
     candidateConfig.manifest.catalog.maxEntries = 4096;
     candidateConfig.manifest.catalog.maxDependencies = 16384;
     candidateConfig.manifest.catalog.maxDependenciesPerAsset = 4096;
-    candidateConfig.manifest.catalog.memoryResource = &sourceImportMemory_;
-    candidateConfig.validation.file.memoryResource = &sourceImportMemory_;
+    candidateConfig.manifest.catalog.memoryResource = &candidateMemory;
+    candidateConfig.validation.file.memoryResource = &candidateMemory;
     candidateConfig.validation.verifyTypedPayload = true;
     auto candidateCatalog = Tina::Asset::openCatalogPackage(
         ready.stageRootUtf8, candidateConfig);
@@ -392,6 +412,9 @@ auto EditorWorkspaceState::updateSourceImport() -> Tina::Core::Status{
     }
     using State = Tina::EditorApp::Detail::EditorSourceImportServiceState;
     counters_.sourceImportRunning = sourceImportService_.state() == State::Running;
+    if (sourceImportService_.state() != State::Idle) {
+        sourceImportUiRefreshPending_ = true;
+    }
     if (sourceImportService_.state() == State::Failed) {
         const auto* failure = sourceImportService_.failure();
         if (failure == nullptr) {
@@ -406,6 +429,17 @@ auto EditorWorkspaceState::updateSourceImport() -> Tina::Core::Status{
         ++counters_.sourceImportFailures;
         counters_.sourceImportRunning = false;
         counters_.sourceImportReady = false;
+        sourceImportLastFailed_ = true;
+        sourceImportUiRefreshPending_ = true;
+        if (options_.profileUi) {
+            const EditorProcessMemorySnapshot processMemory =
+                queryEditorProcessMemory();
+            counters_.sourceImportProcessAfterCommit = processMemory;
+            recordEditorProcessMemory(counters_, processMemory);
+            recordEditorProcessMemoryMaximum(
+                counters_.sourceImportProcessPeak, processMemory);
+            sourceImportProfileDeactivatePending_ = true;
+        }
         cleanupFailedSourceImportStage();
         if (options_.sourceImport.importOnStart &&
             options_.targetFrameCount != 0U) {
@@ -425,6 +459,22 @@ auto EditorWorkspaceState::updateSourceImport() -> Tina::Core::Status{
     }
     counters_.sourceImportRunning = false;
     counters_.sourceImportReady = true;
+    if (options_.profileUi && !sourceImportProfileWorkerSampled_) {
+        const EditorProcessMemorySnapshot processMemory =
+            queryEditorProcessMemory();
+        counters_.sourceImportProcessAfterWorker = processMemory;
+        recordEditorProcessMemory(counters_, processMemory);
+        recordEditorProcessMemoryMaximum(
+            counters_.sourceImportProcessPeak, processMemory);
+        counters_.sourceImportCookedPayloadBytes =
+            ready->statistics.cookedPayloadBytes;
+        counters_.sourceImportTransientMemoryPeakBytes =
+            (std::max)(counters_.sourceImportTransientMemoryPeakBytes,
+                       ready->statistics.transientMemoryPeakBytes);
+        counters_.sourceImportTransientMemoryBytesAfterRelease =
+            ready->statistics.transientMemoryBytesAfterRelease;
+        sourceImportProfileWorkerSampled_ = true;
+    }
     if (!sourceImportCatalogCommitted_) {
         if (auto status = commitSourceImportCatalog(*ready); !status) {
             return status;
@@ -445,8 +495,25 @@ auto EditorWorkspaceState::updateSourceImport() -> Tina::Core::Status{
     counters_.sourceImportUnitsRemoved = ready->statistics.unitsRemoved;
     counters_.sourceImportObjectsReused = ready->statistics.objectsReused;
     counters_.sourceImportObjectsCooked = ready->statistics.objectsCooked;
+    counters_.sourceImportCookedPayloadBytes =
+        ready->statistics.cookedPayloadBytes;
     counters_.sourceImportStateCommitted = true;
     counters_.sourceImportReady = false;
+    sourceImportLastFailed_ = false;
+    sourceImportUiRefreshPending_ = true;
+    if (options_.profileUi) {
+        const EditorProcessMemorySnapshot processMemory =
+            queryEditorProcessMemory();
+        counters_.sourceImportProcessAfterCommit = processMemory;
+        counters_.sourceImportResidentCookedFileBytesAfterCommit =
+            assetResources_.system.has_value()
+                ? assetResources_.system->store().residentCookedFileBytes()
+                : 0U;
+        recordEditorProcessMemory(counters_, processMemory);
+        recordEditorProcessMemoryMaximum(
+            counters_.sourceImportProcessPeak, processMemory);
+        sourceImportProfileDeactivatePending_ = true;
+    }
     ++counters_.sourceImportCompletions;
     try {
         authoringFeedback_ = "Source import complete: ";
@@ -499,11 +566,17 @@ auto EditorWorkspaceState::resolveSourceImportColumn(
             .header = "Kind",
             .width = SourceImportKindColumnWidth,
         };
-    } else {
+    } else if (logicalColumn == 1U) {
         output = UI::UIDataGridColumnDescriptor{
             .key = 2U,
             .header = "Source",
             .width = SourceImportSourceColumnWidth,
+        };
+    } else {
+        output = UI::UIDataGridColumnDescriptor{
+            .key = 3U,
+            .header = "Status",
+            .width = SourceImportStatusColumnWidth,
         };
     }
     return true;
@@ -522,6 +595,26 @@ auto EditorWorkspaceState::resolveSourceImportCell(
         static_cast<Tina::Core::usize>(logicalRow)];
     if (logicalColumn == 1U) {
         output = UI::UIDataGridCellDescriptor{.text = unit.sourcePathUtf8};
+        return true;
+    }
+    if (logicalColumn == 2U) {
+        using State = Tina::EditorApp::Detail::EditorSourceImportServiceState;
+        std::string_view statusText = "Imported";
+        if (self->pendingProjectSwitch_.has_value() ||
+            !self->pendingSourceImportPathsUtf8_.empty() ||
+            self->sourceImportStartPending_) {
+            statusText = "Queued";
+        } else if (self->sourceImportService_.state() == State::Running) {
+            statusText = "Importing";
+        } else if (self->sourceImportService_.state() == State::Ready) {
+            statusText = "Committing";
+        } else if (self->sourceImportLastFailed_) {
+            statusText = "Failed";
+        } else if (!self->assetResources_.projectCatalogConfigured &&
+                   !self->temporaryProjectActive()) {
+            statusText = "Waiting";
+        }
+        output = UI::UIDataGridCellDescriptor{.text = statusText};
         return true;
     }
 

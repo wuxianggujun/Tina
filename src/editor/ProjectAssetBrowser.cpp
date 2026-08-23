@@ -283,6 +283,26 @@ const ProjectAssetDescriptor* ProjectAssetBrowserModel::inspectorSnapshot(
     return asset != m_assets.end() && asset->assetId == assetId ? &*asset : nullptr;
 }
 
+const ProjectAssetDescriptor* ProjectAssetBrowserModel::spriteAssetForTexture(
+    Core::AssetId textureAssetId) const noexcept
+{
+    if (!textureAssetId) {
+        return nullptr;
+    }
+    for (const ProjectAssetDescriptor& asset : m_assets) {
+        if (asset.assetKind != AssetFormat::AssetKind::Sprite) {
+            continue;
+        }
+        for (const AssetFormat::AssetDependency& dependency : asset.dependencies) {
+            if (dependency.assetId == textureAssetId &&
+                dependency.expectedKind == AssetFormat::AssetKind::Texture2D) {
+                return &asset;
+            }
+        }
+    }
+    return nullptr;
+}
+
 const ProjectAssetDescriptor*
 ProjectAssetBrowserModel::selectedInspectorSnapshot() const noexcept
 {

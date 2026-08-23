@@ -2,6 +2,9 @@
 
 #include "UIStyleRoleResolver.hpp"
 
+#include <functional>
+#include <optional>
+
 namespace Tina::UI::Detail {
 
 struct ProductChromeStorage final {
@@ -17,8 +20,8 @@ struct ProductChromeStorage final {
     UIListViewPaint& listView;
     UITreeViewPaint& treeView;
     UITextEditPaint& textEdit;
-    UITabPaint& tab;
-    UISplitterPaint& splitter;
+    std::optional<std::reference_wrapper<UITabPaint>> tab{};
+    std::optional<std::reference_wrapper<UISplitterPaint>> splitter{};
     UIStraightSrgba8Color* imageTint = nullptr;
     UIVirtualGridViewPaint* virtualGridView = nullptr;
     UIDataGridPaint* dataGrid = nullptr;

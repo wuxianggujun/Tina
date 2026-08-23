@@ -55,6 +55,7 @@ struct SourceImportPipelineResult final {
     Core::u32 unitsRemoved = 0;
     Core::u32 objectsReused = 0;
     Core::u32 objectsCooked = 0;
+    Core::u64 cookedPayloadBytes = 0;
     Core::u32 catalogEntries = 0;
     Core::u32 catalogDependencies = 0;
     bool importStateCommitted = false;
