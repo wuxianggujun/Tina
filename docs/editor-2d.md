@@ -2,7 +2,7 @@
 
 ## 产品场景
 
-Editor 的当前闭环同时覆盖 schema-v2 World2D snapshot、schema-v2 Prefab、TileMap schema-v3 root +
+Editor 的当前闭环同时覆盖 schema-v4 World2D snapshot (448-byte named entity records)、schema-v4 Prefab (208-byte named node records)、TileMap schema-v3 root +
 TileMapChunk schema-v1 payload family，以及 SpriteAnimationClip schema-v2（含 per-frame notify events 和
 Timeline event marker authoring）。Hierarchy/Inspector/Timeline 把一次
 用户意图提交为一个 authoring revision，Undo/Redo 切换已经验证的 revision，Preview 直接把当前 canonical bytes
@@ -201,7 +201,7 @@ document/session 或 revision 已变化时事务安全取消，重复 Delete/Con
 `--rgba-stage=workspace|color-picker|delete-dialog` 调用
 `IRenderDevice::capturePrimaryFrameRgba8()` 写出指定产品阶段的完整 top-left RGBA8 帧；`delete-dialog` 用于确认
 scrim、surface、文案与 action，`color-picker` 用于确认 Inspector 的真实 Color Field、preview 和 RGB sliders，
-`workspace` 用于确认稳定工作台。结构化结果统一报告 stage、capture 尺寸、字节数和写入状态。Prefab v2 删除最后一个完整 subtree 会在打开确认前拒绝。Select tool 的 marquee 从当前 preview 投影收集候选，
+`workspace` 用于确认稳定工作台。结构化结果统一报告 stage、capture 尺寸、字节数和写入状态。Prefab v4 删除最后一个完整 subtree 会在打开确认前拒绝。Select tool 的 marquee 从当前 preview 投影收集候选，
 以固定 512 项容量发布按 stable ID 排序的 Replace/Add/Toggle 多选及 added/removed diff，primary stable ID 同步回 Hierarchy；
 空结果把 Hierarchy 明确切回 document root，不会用伪造 stable ID 恢复旧 viewport selection。只有 selection 实际变化才推进
 selection revision，活动 gizmo 通过该 revision 检测并安全取消。
@@ -415,7 +415,7 @@ mutation；非法配置或容量失败保留上一份 publication。公共头不
 `MoveFileExW(MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)`，其他平台使用同目录 rename。replace 失败时删除临时
 文件但不先删除旧目标，document、revision 与 undo/redo 也完全不变。
 
-`loadWorld3DAuthoringDocument()` / `saveWorld3DAuthoringDocument()` 对 Prefab v2 提供相同契约：读取上限由
+`loadWorld3DAuthoringDocument()` / `saveWorld3DAuthoringDocument()` 对 Prefab v4 提供相同契约：读取上限由
 document node capacity 和当前 wire size 计算，成功加载建立 clean baseline，保存只发布 `payloadBytes()`，不生成
 Editor 私有格式。2D 与 3D 文件失败都不会改写 active document 或既有目标。
 
@@ -493,7 +493,7 @@ history vector 在 Create 时一次 reserve 到配置 entry 上限。发布新 r
 - `upsertEntity(entity)`：按 stable ID 替换或追加一个 entity，parent 仍必须指向此前 entity；
 - `eraseEntitySubtree(id)`：按 topological authoring order 删除目标及全部后代，避免悬空 parent；
 - `setGameplay(schema, version, bytes)`：游戏自有 blob 仍要求“空 blob ↔ 零 schema/version、非空 blob ↔ 非零”；
-- `World3DAuthoringDocument::replace/loadPayload/upsertNode/eraseNodeSubtree`：在 Prefab v2 上提供相同的
+- `World3DAuthoringDocument::replace/loadPayload/upsertNode/eraseNodeSubtree`：在 Prefab v4 上提供相同的
   canonical publication、subtree 删除、容量与失败原子性；
 - `EditorSceneOperations`：在两种 scene document 上提供 add、duplicate subtree、delete subtree 与 reparent；新 stable ID
   从当前 document 动态派生，成功状态变更只发布一个 canonical revision，no-op reparent 不发布；

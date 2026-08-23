@@ -878,6 +878,10 @@ auto EditorWorkspaceState::extractWorld3DViewport(Tina::RenderSceneExtractionCon
                     .userData = const_cast<EditorWorkspaceState*>(this),
                     .resolve = &EditorWorkspaceState::resolvePreviewMaterial,
                 },
+                .skinnedMesh3DBindingResolver = {
+                    .userData = const_cast<EditorWorkspaceState*>(this),
+                    .resolve = &EditorWorkspaceState::resolvePreviewSkinnedMesh,
+                },
             });
         !status) {
         return status;

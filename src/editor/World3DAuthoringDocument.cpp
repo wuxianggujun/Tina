@@ -52,6 +52,8 @@ inline constexpr Core::usize MinimumPayloadBytes =
     return PrefabNodeDesc{
         .stableNodeId = node.stableNodeId,
         .parentIndex = node.parentIndex,
+        .nodeKind = node.nodeKind,
+        .name = node.name,
         .positionX = node.positionX,
         .positionY = node.positionY,
         .positionZ = node.positionZ,
@@ -65,6 +67,8 @@ inline constexpr Core::usize MinimumPayloadBytes =
         .meshId = node.meshId,
         .materialId = node.materialId,
         .visible = node.visible,
+        .camera = node.camera,
+        .light = node.light,
     };
 }
 

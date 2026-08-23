@@ -26,9 +26,6 @@ struct PrefabMeshBinding final {
     // Optional: return an empty handle to fail instantiate for that node.
     std::function<Asset::AssetHandle(Core::AssetId meshId)> resolveMesh{};
     std::function<Asset::AssetHandle(Core::AssetId materialId)> resolveMaterial{};
-    // Optional: resolve the authored mesh kind. Empty preserves the StaticMesh default.
-    // Only StaticMesh and SkinnedMesh are valid renderer kinds.
-    std::function<AssetFormat::AssetKind(Core::AssetId meshId)> resolveMeshKind{};
     // Optional: override bounds/color per mesh AssetId (empty = use defaults above).
     std::function<Render::RenderBoundingSphereInput(Core::AssetId meshId)> resolveLocalBounds{};
     std::function<Render::RenderLinearColor(Core::AssetId materialId)> resolveBaseColor{};

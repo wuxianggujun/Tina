@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <optional>
 #include <span>
+#include <string>
 #include <vector>
 
 namespace Tina::AssetFormat {
@@ -15,9 +16,12 @@ namespace Tina::AssetFormat {
 // never serialized; stableEntityId and AssetId are the persistence boundary.
 namespace World2DSnapshotWire {
 
-inline constexpr Core::u16 SchemaVersion = 2;
+inline constexpr Core::u16 SchemaVersion = 4;
 inline constexpr Core::u16 HeaderBytes = 32;
-inline constexpr Core::u32 EntityBytes = 256;
+inline constexpr Core::u32 EntityBytes = 448;
+inline constexpr Core::u32 NameOffset = 384;
+inline constexpr Core::u32 NameBytes = 64;
+inline constexpr Core::u32 MaximumNameBytes = NameBytes - 1U;
 inline constexpr Core::u32 MaximumEntities = 4096;
 inline constexpr Core::u32 MaximumGameplayBytes = 4U * 1024U * 1024U;
 
@@ -26,11 +30,38 @@ inline constexpr Core::u32 ComponentCamera = 1U << 1U;
 inline constexpr Core::u32 ComponentPointLight = 1U << 2U;
 inline constexpr Core::u32 ComponentShadowOccluder = 1U << 3U;
 inline constexpr Core::u32 ComponentSpriteAnimation = 1U << 4U;
+inline constexpr Core::u32 PayloadResource = 1U << 5U;
+inline constexpr Core::u32 PayloadPhysicsBody = 1U << 6U;
+inline constexpr Core::u32 PayloadPhysicsShape = 1U << 7U;
 inline constexpr Core::u32 ValidComponentFlags =
     ComponentSprite | ComponentCamera | ComponentPointLight | ComponentShadowOccluder |
-    ComponentSpriteAnimation;
+    ComponentSpriteAnimation | PayloadResource | PayloadPhysicsBody |
+    PayloadPhysicsShape;
 
 } // namespace World2DSnapshotWire
+
+// Current authoring kind. The value is persisted explicitly so transform-only
+// node kinds remain distinguishable after save/load.
+enum class World2DNodeKind : Core::u16 {
+    Node2D = 0,
+    Marker2D = 1,
+    Sprite2D = 2,
+    AnimatedSprite2D = 3,
+    TileMap2D = 4,
+    FxEmitter2D = 5,
+    Camera2D = 6,
+    PointLight2D = 7,
+    ShadowOccluder2D = 8,
+    StaticBody2D = 9,
+    RigidBody2D = 10,
+    CharacterBody2D = 11,
+    Area2D = 12,
+    CollisionShape2D = 13,
+    NavigationRegion2D = 14,
+    AudioPlayer2D = 15,
+};
+
+inline constexpr Core::usize World2DNodeKindCount = 16;
 
 enum class World2DSpriteOverrideFlags : Core::u8 {
     None = 0,
@@ -133,9 +164,68 @@ struct World2DSpriteAnimationDesc final {
     friend bool operator==(const World2DSpriteAnimationDesc&, const World2DSpriteAnimationDesc&) = default;
 };
 
+struct World2DResourceNodeDesc final {
+    Core::AssetId assetId{};
+    bool active = true;
+
+    friend bool operator==(const World2DResourceNodeDesc&,
+                           const World2DResourceNodeDesc&) = default;
+};
+
+struct World2DPhysicsBodyDesc final {
+    float linearVelocityX = 0.0F;
+    float linearVelocityY = 0.0F;
+    float angularVelocityRadiansPerSecond = 0.0F;
+    float linearDamping = 0.0F;
+    float angularDamping = 0.0F;
+    float gravityScale = 1.0F;
+    bool enabled = true;
+    bool enableSleep = true;
+    bool initiallyAwake = true;
+    bool fixedRotation = false;
+    bool continuousCollision = false;
+
+    friend bool operator==(const World2DPhysicsBodyDesc&,
+                           const World2DPhysicsBodyDesc&) = default;
+};
+
+enum class World2DPhysicsShapeKind : Core::u8 {
+    Box = 0,
+    Circle = 1,
+    Capsule = 2,
+};
+
+struct World2DPhysicsShapeDesc final {
+    World2DPhysicsShapeKind kind = World2DPhysicsShapeKind::Box;
+    float halfExtentX = 0.5F;
+    float halfExtentY = 0.5F;
+    float radius = 0.5F;
+    float localCenterX = 0.0F;
+    float localCenterY = 0.0F;
+    float localAngleRadians = 0.0F;
+    float localPointAX = -0.5F;
+    float localPointAY = 0.0F;
+    float localPointBX = 0.5F;
+    float localPointBY = 0.0F;
+    float density = 1.0F;
+    float friction = 0.6F;
+    float restitution = 0.0F;
+    bool enabled = true;
+    bool sensor = false;
+    bool sensorEvents = false;
+    bool contactEvents = true;
+    bool hitEvents = false;
+
+    friend bool operator==(const World2DPhysicsShapeDesc&,
+                           const World2DPhysicsShapeDesc&) = default;
+};
+
 struct World2DEntityDesc final {
     Core::u32 stableEntityId = 0;
     Core::u32 parentStableEntityId = 0;
+    World2DNodeKind nodeKind = World2DNodeKind::Node2D;
+    // Empty uses the Editor's deterministic kind/#id fallback label.
+    std::string name{};
     float positionX = 0.0F;
     float positionY = 0.0F;
     float positionZ = 0.0F;
@@ -151,6 +241,9 @@ struct World2DEntityDesc final {
     std::optional<World2DPointLightDesc> pointLight{};
     std::optional<World2DShadowOccluderDesc> shadowOccluder{};
     std::optional<World2DSpriteAnimationDesc> spriteAnimation{};
+    std::optional<World2DResourceNodeDesc> resource{};
+    std::optional<World2DPhysicsBodyDesc> physicsBody{};
+    std::optional<World2DPhysicsShapeDesc> physicsShape{};
 
     friend bool operator==(const World2DEntityDesc&, const World2DEntityDesc&) = default;
 };

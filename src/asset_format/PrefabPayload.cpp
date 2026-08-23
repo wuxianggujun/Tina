@@ -1,6 +1,7 @@
 #include <tina/asset_format/PrefabPayload.hpp>
 
 #include <tina/asset_format/AssetFormatErrors.hpp>
+#include <tina/core/text/Utf8.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -91,6 +92,15 @@ void writeAssetId(std::vector<std::byte>& bytes, usize offset, Core::AssetId ass
     return Core::AssetId::fromBytes(idBytes).value_or(Core::AssetId{});
 }
 
+[[nodiscard]] bool bytesAreZero(std::span<const std::byte> bytes, usize offset,
+                                usize size) noexcept
+{
+    return std::all_of(
+        bytes.begin() + static_cast<std::ptrdiff_t>(offset),
+        bytes.begin() + static_cast<std::ptrdiff_t>(offset + size),
+        [](std::byte value) { return value == std::byte{0}; });
+}
+
 [[nodiscard]] bool isFiniteVec3(float x, float y, float z) noexcept
 {
     return std::isfinite(x) && std::isfinite(y) && std::isfinite(z);
@@ -106,6 +116,66 @@ void writeAssetId(std::vector<std::byte>& bytes, usize offset, Core::AssetId ass
     const double lengthSquared = static_cast<double>(x) * x + static_cast<double>(y) * y +
                                  static_cast<double>(z) * z + static_cast<double>(w) * w;
     return std::isfinite(lengthSquared) && lengthSquared > 1.0e-12;
+}
+
+[[nodiscard]] Core::Status validateName(std::string_view name) noexcept
+{
+    if (name.size() > PrefabWire::MaximumNameBytes ||
+        (!name.empty() && !Core::isStrictUtf8WithoutNul(name))) {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                             "prefab node name must be valid UTF-8 and fit the wire field");
+    }
+    return Core::success();
+}
+
+[[nodiscard]] Core::Status validateCamera(
+    const PrefabCamera3DDesc& camera) noexcept
+{
+    constexpr float Pi = 3.14159265358979323846F;
+    if (!std::isfinite(camera.verticalFovRadians) ||
+        !(camera.verticalFovRadians > 0.0F) ||
+        !(camera.verticalFovRadians < Pi) ||
+        !std::isfinite(camera.nearPlane) || !(camera.nearPlane > 0.0F) ||
+        !std::isfinite(camera.farPlane) ||
+        !(camera.farPlane > camera.nearPlane))
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                             "prefab Camera3D projection values are invalid");
+    }
+    return Core::success();
+}
+
+[[nodiscard]] Core::Status validateLight(PrefabNodeKind kind,
+                                         const PrefabLight3DDesc& light) noexcept
+{
+    constexpr float HalfPi = 1.57079632679489661923F;
+    if (!std::isfinite(light.colorRed) || light.colorRed < 0.0F ||
+        !std::isfinite(light.colorGreen) || light.colorGreen < 0.0F ||
+        !std::isfinite(light.colorBlue) || light.colorBlue < 0.0F ||
+        !std::isfinite(light.colorAlpha) || light.colorAlpha != 1.0F ||
+        !std::isfinite(light.intensity) || light.intensity < 0.0F)
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                             "prefab 3D light color or intensity is invalid");
+    }
+    if ((kind == PrefabNodeKind::PointLight3D ||
+         kind == PrefabNodeKind::SpotLight3D) &&
+        (!std::isfinite(light.rangeMeters) || !(light.rangeMeters > 0.0F)))
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                             "prefab local 3D light range must be positive");
+    }
+    if (kind == PrefabNodeKind::SpotLight3D &&
+        (!std::isfinite(light.innerConeRadians) ||
+         !std::isfinite(light.outerConeRadians) ||
+         light.innerConeRadians < 0.0F ||
+         !(light.innerConeRadians < light.outerConeRadians) ||
+        !(light.outerConeRadians < HalfPi)))
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                             "prefab SpotLight3D cone angles are invalid");
+    }
+    return Core::success();
 }
 
 [[nodiscard]] Core::Status validatePrefabDesc(const PrefabPayloadDesc& desc) noexcept
@@ -126,6 +196,9 @@ void writeAssetId(std::vector<std::byte>& bytes, usize offset, Core::AssetId ass
             return Core::failure(AssetFormatErrorCode::InvalidIdentity,
                                  "prefab stableNodeId must be non-zero");
         }
+        if (auto status = validateName(node.name); !status) {
+            return status;
+        }
         if (node.parentIndex < -1 || node.parentIndex >= static_cast<i32>(index))
         {
             return Core::failure(AssetFormatErrorCode::InvalidLayout,
@@ -141,10 +214,57 @@ void writeAssetId(std::vector<std::byte>& bytes, usize offset, Core::AssetId ass
         {
             return Core::failure(AssetFormatErrorCode::InvalidLayout, "prefab node rotation must be non-zero");
         }
+        if (static_cast<u16>(node.nodeKind) >= PrefabNodeKindCount)
+        {
+            return Core::failure(AssetFormatErrorCode::UnsupportedValue,
+                                 "prefab node kind is unsupported");
+        }
         if (static_cast<bool>(node.meshId) != static_cast<bool>(node.materialId))
         {
             return Core::failure(AssetFormatErrorCode::InvalidLayout,
                                  "prefab mesh and material AssetIds must both be present or absent");
+        }
+        const bool hasMesh = static_cast<bool>(node.meshId);
+        const bool hasCamera = node.camera.has_value();
+        const bool hasLight = node.light.has_value();
+        bool payloadMatchesKind = false;
+        switch (node.nodeKind)
+        {
+        case PrefabNodeKind::Node3D:
+        case PrefabNodeKind::Marker3D:
+            payloadMatchesKind = !hasMesh && !hasCamera && !hasLight;
+            break;
+        case PrefabNodeKind::Mesh3D:
+        case PrefabNodeKind::SkinnedMesh3D:
+            payloadMatchesKind = hasMesh && !hasCamera && !hasLight;
+            break;
+        case PrefabNodeKind::Camera3D:
+            payloadMatchesKind = !hasMesh && hasCamera && !hasLight;
+            break;
+        case PrefabNodeKind::DirectionalLight3D:
+        case PrefabNodeKind::PointLight3D:
+        case PrefabNodeKind::SpotLight3D:
+            payloadMatchesKind = !hasMesh && !hasCamera && hasLight;
+            break;
+        }
+        if (!payloadMatchesKind)
+        {
+            return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                                 "prefab node kind and typed payload do not match");
+        }
+        if (node.camera)
+        {
+            if (auto status = validateCamera(*node.camera); !status)
+            {
+                return status;
+            }
+        }
+        if (node.light)
+        {
+            if (auto status = validateLight(node.nodeKind, *node.light); !status)
+            {
+                return status;
+            }
         }
         if (node.meshId && node.meshId == node.materialId)
         {
@@ -206,9 +326,32 @@ Core::Result<std::vector<std::byte>> writePrefabPayloadBytes(const PrefabPayload
         writeF32(payload, base + 44, node.scaleZ);
         const u16 flags = node.visible ? 0U : PrefabWire::FlagHidden;
         writeU16(payload, base + 48, flags);
-        writeU16(payload, base + 50, 0);
+        writeU16(payload, base + 50, static_cast<u16>(node.nodeKind));
         writeAssetId(payload, base + 52, node.meshId);
         writeAssetId(payload, base + 68, node.materialId);
+        for (usize nameIndex = 0; nameIndex < node.name.size(); ++nameIndex) {
+            writeU8(payload, base + PrefabWire::NameOffset + nameIndex,
+                    static_cast<u8>(node.name[nameIndex]));
+        }
+        if (node.camera)
+        {
+            writeF32(payload, base + 84, node.camera->verticalFovRadians);
+            writeF32(payload, base + 88, node.camera->nearPlane);
+            writeF32(payload, base + 92, node.camera->farPlane);
+            writeU8(payload, base + 96, node.camera->active ? 1U : 0U);
+        }
+        if (node.light)
+        {
+            writeF32(payload, base + 84, node.light->colorRed);
+            writeF32(payload, base + 88, node.light->colorGreen);
+            writeF32(payload, base + 92, node.light->colorBlue);
+            writeF32(payload, base + 96, node.light->colorAlpha);
+            writeF32(payload, base + 100, node.light->intensity);
+            writeF32(payload, base + 104, node.light->rangeMeters);
+            writeF32(payload, base + 108, node.light->innerConeRadians);
+            writeF32(payload, base + 112, node.light->outerConeRadians);
+            writeU8(payload, base + 116, node.light->active ? 1U : 0U);
+        }
     }
     return payload;
 }
@@ -260,6 +403,12 @@ Core::Result<PrefabPayloadView> parsePrefabPayload(std::span<const std::byte> pa
             {
                 return Core::failure(AssetFormatErrorCode::InvalidLayout, "prefab parentIndex is invalid");
             }
+            node.nodeKind = static_cast<PrefabNodeKind>(readU16(payload, base + 50));
+            if (static_cast<u16>(node.nodeKind) >= PrefabNodeKindCount)
+            {
+                return Core::failure(AssetFormatErrorCode::UnsupportedValue,
+                                     "prefab node kind is unsupported");
+            }
             node.positionX = readF32(payload, base + 8);
             node.positionY = readF32(payload, base + 12);
             node.positionZ = readF32(payload, base + 16);
@@ -270,6 +419,23 @@ Core::Result<PrefabPayloadView> parsePrefabPayload(std::span<const std::byte> pa
             node.scaleX = readF32(payload, base + 36);
             node.scaleY = readF32(payload, base + 40);
             node.scaleZ = readF32(payload, base + 44);
+            usize nameLength = 0U;
+            while (nameLength < PrefabWire::NameBytes &&
+                   payload[base + PrefabWire::NameOffset + nameLength] != std::byte{0}) {
+                ++nameLength;
+            }
+            if (nameLength == PrefabWire::NameBytes ||
+                !bytesAreZero(payload, base + PrefabWire::NameOffset + nameLength + 1U,
+                              PrefabWire::NameBytes - nameLength - 1U)) {
+                return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                                     "prefab node name field is not NUL-terminated or zero-padded");
+            }
+            node.name.assign(
+                reinterpret_cast<const char*>(payload.data() + base + PrefabWire::NameOffset),
+                nameLength);
+            if (auto status = validateName(node.name); !status) {
+                return Core::failure(std::move(status.error()));
+            }
             if (!isFiniteVec3(node.positionX, node.positionY, node.positionZ) ||
                 !isFiniteQuat(node.rotationX, node.rotationY, node.rotationZ, node.rotationW) ||
                 !isFiniteVec3(node.scaleX, node.scaleY, node.scaleZ))
@@ -301,6 +467,88 @@ Core::Result<PrefabPayloadView> parsePrefabPayload(std::span<const std::byte> pa
                 return Core::failure(AssetFormatErrorCode::InvalidLayout,
                                      "prefab mesh and material AssetIds must be distinct");
             }
+            switch (node.nodeKind)
+            {
+            case PrefabNodeKind::Node3D:
+            case PrefabNodeKind::Marker3D:
+            case PrefabNodeKind::Mesh3D:
+            case PrefabNodeKind::SkinnedMesh3D:
+                if (!bytesAreZero(payload, base + 84, PrefabWire::NameOffset - 84U))
+                {
+                    return Core::failure(
+                        AssetFormatErrorCode::InvalidLayout,
+                        "prefab node has a non-canonical absent typed payload");
+                }
+                break;
+            case PrefabNodeKind::Camera3D: {
+                PrefabCamera3DDesc camera{
+                    .verticalFovRadians = readF32(payload, base + 84),
+                    .nearPlane = readF32(payload, base + 88),
+                    .farPlane = readF32(payload, base + 92),
+                };
+                const u8 active = readU8(payload, base + 96);
+                if (active > 1U ||
+                    !bytesAreZero(payload, base + 97,
+                                  PrefabWire::NameOffset - 97U))
+                {
+                    return Core::failure(
+                        AssetFormatErrorCode::InvalidLayout,
+                        "prefab Camera3D active or reserved bytes are invalid");
+                }
+                camera.active = active != 0U;
+                if (auto status = validateCamera(camera); !status)
+                {
+                    return Core::failure(std::move(status.error()));
+                }
+                node.camera = camera;
+                break;
+            }
+            case PrefabNodeKind::DirectionalLight3D:
+            case PrefabNodeKind::PointLight3D:
+            case PrefabNodeKind::SpotLight3D: {
+                PrefabLight3DDesc light{
+                    .colorRed = readF32(payload, base + 84),
+                    .colorGreen = readF32(payload, base + 88),
+                    .colorBlue = readF32(payload, base + 92),
+                    .colorAlpha = readF32(payload, base + 96),
+                    .intensity = readF32(payload, base + 100),
+                    .rangeMeters = readF32(payload, base + 104),
+                    .innerConeRadians = readF32(payload, base + 108),
+                    .outerConeRadians = readF32(payload, base + 112),
+                };
+                const u8 active = readU8(payload, base + 116);
+                if (active > 1U ||
+                    !bytesAreZero(payload, base + 117,
+                                  PrefabWire::NameOffset - 117U))
+                {
+                    return Core::failure(
+                        AssetFormatErrorCode::InvalidLayout,
+                        "prefab 3D light active or reserved bytes are invalid");
+                }
+                light.active = active != 0U;
+                if (auto status = validateLight(node.nodeKind, light); !status)
+                {
+                    return Core::failure(std::move(status.error()));
+                }
+                node.light = light;
+                break;
+            }
+            }
+            const bool payloadMatchesKind =
+                ((node.nodeKind == PrefabNodeKind::Node3D ||
+                  node.nodeKind == PrefabNodeKind::Marker3D) && !node.hasMesh) ||
+                ((node.nodeKind == PrefabNodeKind::Mesh3D ||
+                  node.nodeKind == PrefabNodeKind::SkinnedMesh3D) && node.hasMesh) ||
+                (node.nodeKind == PrefabNodeKind::Camera3D && !node.hasMesh) ||
+                ((node.nodeKind == PrefabNodeKind::DirectionalLight3D ||
+                  node.nodeKind == PrefabNodeKind::PointLight3D ||
+                  node.nodeKind == PrefabNodeKind::SpotLight3D) && !node.hasMesh);
+            if (!payloadMatchesKind)
+            {
+                return Core::failure(
+                    AssetFormatErrorCode::InvalidLayout,
+                    "prefab node kind and asset payload do not match");
+            }
             for (const PrefabNodeView& previous : parsed)
             {
                 if (node.stableNodeId == previous.stableNodeId)
@@ -314,11 +562,6 @@ Core::Result<PrefabPayloadView> parsePrefabPayload(std::span<const std::byte> pa
                     return Core::failure(AssetFormatErrorCode::InvalidLayout,
                                          "prefab AssetId cannot be used as both mesh and material");
                 }
-            }
-            if (readU16(payload, base + 50) != 0)
-            {
-                return Core::failure(AssetFormatErrorCode::InvalidLayout,
-                                     "prefab node reserved fields must be zero");
             }
             parsed.push_back(node);
         }
@@ -351,7 +594,10 @@ Core::Result<std::vector<std::byte>> writeCookedPrefabAsset(Core::AssetId assetI
         {
             deps.push_back(CookedAssetWriteDependency{
                 .assetId = node.meshId,
-                .expectedKind = AssetKind::StaticMesh,
+                .expectedKind =
+                    node.nodeKind == PrefabNodeKind::SkinnedMesh3D
+                        ? AssetKind::SkinnedMesh
+                        : AssetKind::StaticMesh,
                 .flags = DependencyFlags::Required,
             });
         }

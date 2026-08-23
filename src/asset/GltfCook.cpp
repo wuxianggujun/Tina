@@ -1807,6 +1807,9 @@ namespace {
         if (hasMeshRange && range.entryCount == 1U)
         {
             const MeshEntry& entry = meshes[range.firstEntry];
+            desc.nodeKind = entry.meshKind == AssetFormat::AssetKind::SkinnedMesh
+                                ? AssetFormat::PrefabNodeKind::SkinnedMesh3D
+                                : AssetFormat::PrefabNodeKind::Mesh3D;
             desc.meshId = entry.meshId;
             desc.materialId = entry.materialId;
         }
@@ -1819,6 +1822,9 @@ namespace {
                 prefabNodes.push_back(AssetFormat::PrefabNodeDesc{
                     .stableNodeId = static_cast<Core::u32>(prefabNodes.size() + 1U),
                     .parentIndex = selfIndex,
+                    .nodeKind = entry.meshKind == AssetFormat::AssetKind::SkinnedMesh
+                                    ? AssetFormat::PrefabNodeKind::SkinnedMesh3D
+                                    : AssetFormat::PrefabNodeKind::Mesh3D,
                     .meshId = entry.meshId,
                     .materialId = entry.materialId,
                 });
@@ -1838,6 +1844,9 @@ namespace {
         prefabNodes.push_back(AssetFormat::PrefabNodeDesc{
             .stableNodeId = 1,
             .parentIndex = -1,
+            .nodeKind = meshes[0].meshKind == AssetFormat::AssetKind::SkinnedMesh
+                            ? AssetFormat::PrefabNodeKind::SkinnedMesh3D
+                            : AssetFormat::PrefabNodeKind::Mesh3D,
             .meshId = meshes[0].meshId,
             .materialId = meshes[0].materialId,
         });

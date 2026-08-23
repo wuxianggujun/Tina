@@ -93,6 +93,8 @@ auto EditorWorkspaceState::applySelectedTransform(
                 Tina::AssetFormat::PrefabNodeDesc edited{
                     .stableNodeId = node.stableNodeId,
                     .parentIndex = node.parentIndex,
+                    .nodeKind = node.nodeKind,
+                    .name = node.name,
                     .positionX = node.positionX,
                     .positionY = node.positionY,
                     .positionZ = node.positionZ,
@@ -106,6 +108,8 @@ auto EditorWorkspaceState::applySelectedTransform(
                     .meshId = node.meshId,
                     .materialId = node.materialId,
                     .visible = node.visible,
+                    .camera = node.camera,
+                    .light = node.light,
                 };
                 const auto index = selectedIndex(node.stableNodeId);
                 if (index.has_value()) {

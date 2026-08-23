@@ -58,7 +58,7 @@ TEST(EditorNodePropertyOperationsTests, SpritePropertiesPublishWithoutChangingNo
 {
     auto document = createWorld2D();
     auto added = addWorld2DNode(
-        document, World2DNodeTemplate::Sprite, 0U,
+        document, World2DNodeTemplate::Sprite2D, 0U,
         {.spriteId = testAssetId('a')});
     ASSERT_TRUE(added) << added.error().message;
     const std::array ids{added->primaryStableId};
@@ -74,7 +74,7 @@ TEST(EditorNodePropertyOperationsTests, SpritePropertiesPublishWithoutChangingNo
     ASSERT_EQ(entities.size(), 1U);
     auto nodeKind = classifyWorld2DNodeTemplate(entities.front());
     ASSERT_TRUE(nodeKind) << nodeKind.error().message;
-    EXPECT_EQ(*nodeKind, World2DNodeTemplate::Sprite);
+    EXPECT_EQ(*nodeKind, World2DNodeTemplate::Sprite2D);
     ASSERT_TRUE(entities.front().sprite.has_value());
     EXPECT_FLOAT_EQ(entities.front().sprite->sizeX, 3.0F);
     EXPECT_FALSE(entities.front().sprite->visible);
@@ -84,7 +84,7 @@ TEST(EditorNodePropertyOperationsTests, PropertyEditNoOpPublishesNoRevision)
 {
     auto document = createWorld2D();
     auto added = addWorld2DNode(
-        document, World2DNodeTemplate::Camera);
+        document, World2DNodeTemplate::Camera2D);
     ASSERT_TRUE(added);
     const std::array ids{added->primaryStableId};
     const auto entities = world2DEntities(document);
@@ -101,7 +101,7 @@ TEST(EditorNodePropertyOperationsTests, PropertyEditNoOpPublishesNoRevision)
 TEST(EditorNodePropertyOperationsTests, KindMismatchFailsClosed)
 {
     auto document = createWorld2D();
-    auto added = addWorld2DNode(document, World2DNodeTemplate::Empty);
+    auto added = addWorld2DNode(document, World2DNodeTemplate::Node2D);
     ASSERT_TRUE(added);
     const std::array ids{added->primaryStableId};
     const std::vector<std::byte> before(document.snapshotBytes().begin(),
@@ -120,9 +120,9 @@ TEST(EditorNodePropertyOperationsTests, MultiSelectionPublishesOneRevision)
 {
     auto document = createWorld2D();
     auto first = addWorld2DNode(
-        document, World2DNodeTemplate::PointLight);
+        document, World2DNodeTemplate::PointLight2D);
     auto second = addWorld2DNode(
-        document, World2DNodeTemplate::PointLight);
+        document, World2DNodeTemplate::PointLight2D);
     ASSERT_TRUE(first);
     ASSERT_TRUE(second);
     const std::array ids{first->primaryStableId, second->primaryStableId};
@@ -139,7 +139,7 @@ TEST(EditorNodePropertyOperationsTests, AnimatedSpritePropertiesKeepCompleteNode
 {
     auto document = createWorld2D();
     auto added = addWorld2DNode(
-        document, World2DNodeTemplate::AnimatedSprite, 0U,
+        document, World2DNodeTemplate::AnimatedSprite2D, 0U,
         {.spriteId = testAssetId('a'),
          .animationClipId = testAssetId('b')});
     ASSERT_TRUE(added);
@@ -151,7 +151,7 @@ TEST(EditorNodePropertyOperationsTests, AnimatedSpritePropertiesKeepCompleteNode
     const auto entities = world2DEntities(document);
     auto nodeKind = classifyWorld2DNodeTemplate(entities.front());
     ASSERT_TRUE(nodeKind) << nodeKind.error().message;
-    EXPECT_EQ(*nodeKind, World2DNodeTemplate::AnimatedSprite);
+    EXPECT_EQ(*nodeKind, World2DNodeTemplate::AnimatedSprite2D);
     ASSERT_TRUE(entities.front().spriteAnimation.has_value());
     EXPECT_FLOAT_EQ(entities.front().spriteAnimation->playbackSpeed, 1.5F);
 }
@@ -160,7 +160,7 @@ TEST(EditorNodePropertyOperationsTests, MeshPropertiesKeepMeshNodeKind)
 {
     auto document = createWorld3D();
     auto added = addWorld3DNode(
-        document, World3DNodeTemplate::Mesh, 0U,
+        document, World3DNodeTemplate::Mesh3D, 0U,
         {.meshId = testAssetId('c'), .materialId = testAssetId('d')});
     ASSERT_TRUE(added);
     const std::array ids{added->primaryStableId};
@@ -172,7 +172,7 @@ TEST(EditorNodePropertyOperationsTests, MeshPropertiesKeepMeshNodeKind)
     ASSERT_EQ(nodes.size(), 1U);
     auto nodeKind = classifyWorld3DNodeTemplate(nodes.front());
     ASSERT_TRUE(nodeKind) << nodeKind.error().message;
-    EXPECT_EQ(*nodeKind, World3DNodeTemplate::Mesh);
+    EXPECT_EQ(*nodeKind, World3DNodeTemplate::Mesh3D);
     EXPECT_FALSE(nodes.front().visible);
 }
 

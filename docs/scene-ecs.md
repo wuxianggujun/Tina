@@ -14,7 +14,7 @@
 - standalone allocation-free `CameraFollow2D` controller；
 - standalone fixed-capacity `ParticleSystem2D` 与 `Trail2D`；
 - World 到 phase-local `RenderSceneWriter` 的 2D/3D extraction；
-- 2D World 组件与 game-owned gameplay blob 的 current-only schema-v2 快照；
+- 2D World 节点名称、组件与 game-owned gameplay blob 的 current-only schema-v4 快照；
 - Cooked Prefab node 到 World entity hierarchy 的事务式实例化。
 
 它不负责：
@@ -226,7 +226,7 @@ writer、committed view 与其中 span 只在对应 Runtime phase/submit 调用�
 
 ## World2D 快照
 
-`AssetFormat::writeWorld2DSnapshotBytes()` / `parseWorld2DSnapshot()` 定义唯一现行 schema v2；
+`AssetFormat::writeWorld2DSnapshotBytes()` / `parseWorld2DSnapshot()` 定义唯一现行 schema v4（固定容量 UTF-8 节点名）；
 `captureWorld2DSnapshotBytes()` / `instantiateWorld2DSnapshot()` 在该 wire 与 `World` 间转换。持久化边界只包含：
 
 - 调用方提供的非零稳定 entity ID 与 parent stable ID；

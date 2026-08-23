@@ -87,14 +87,14 @@ TEST(EditorSceneOperationsTests, World2DCommandsPublishOneRevisionAndKeepHierarc
     auto document = createWorld2D();
     Core::u64 revision = document.revision();
 
-    auto root = addWorld2DNode(document, World2DNodeTemplate::Empty);
+    auto root = addWorld2DNode(document, World2DNodeTemplate::Node2D);
     ASSERT_TRUE(root);
     EXPECT_EQ(root->primaryStableId, 1U);
     EXPECT_EQ(root->affectedItemCount, 1U);
     EXPECT_EQ(document.revision(), ++revision);
 
     auto child = addWorld2DNode(
-        document, World2DNodeTemplate::Empty, root->primaryStableId);
+        document, World2DNodeTemplate::Node2D, root->primaryStableId);
     ASSERT_TRUE(child);
     EXPECT_EQ(child->primaryStableId, 2U);
     EXPECT_EQ(document.revision(), ++revision);
@@ -135,15 +135,15 @@ TEST(EditorSceneOperationsTests, World2DCommandsPublishOneRevisionAndKeepHierarc
 TEST(EditorSceneOperationsTests, World2DFailuresPreserveCanonicalStateAndHistory)
 {
     auto document = createWorld2D({.entityCapacity = 2});
-    ASSERT_TRUE(addWorld2DNode(document, World2DNodeTemplate::Empty));
-    ASSERT_TRUE(addWorld2DNode(document, World2DNodeTemplate::Empty, 1));
+    ASSERT_TRUE(addWorld2DNode(document, World2DNodeTemplate::Node2D));
+    ASSERT_TRUE(addWorld2DNode(document, World2DNodeTemplate::Node2D, 1));
     const auto beforeBytes = std::vector(document.snapshotBytes().begin(),
                                          document.snapshotBytes().end());
     const Core::u64 beforeRevision = document.revision();
     const Core::usize beforeHistory = document.historyEntryCount();
     const Core::usize beforeUndo = document.undoDepth();
 
-    auto full = addWorld2DNode(document, World2DNodeTemplate::Empty);
+    auto full = addWorld2DNode(document, World2DNodeTemplate::Node2D);
     ASSERT_FALSE(full);
     EXPECT_EQ(full.error().code, EditorErrorCode::DocumentCapacityExceeded);
     auto duplicate = duplicateWorld2DNodeSubtree(document, 1);
@@ -171,11 +171,11 @@ TEST(EditorSceneOperationsTests, World3DCommandsPublishOneRevisionAndKeepHierarc
     Core::u64 revision = document.revision();
 
     auto child = addWorld3DNode(
-        document, World3DNodeTemplate::Empty, 1);
+        document, World3DNodeTemplate::Node3D, 1);
     ASSERT_TRUE(child);
     EXPECT_EQ(child->primaryStableId, 2U);
     EXPECT_EQ(document.revision(), ++revision);
-    auto secondRoot = addWorld3DNode(document, World3DNodeTemplate::Empty);
+    auto secondRoot = addWorld3DNode(document, World3DNodeTemplate::Node3D);
     ASSERT_TRUE(secondRoot);
     EXPECT_EQ(secondRoot->primaryStableId, 3U);
     EXPECT_EQ(document.revision(), ++revision);
@@ -214,7 +214,7 @@ TEST(EditorSceneOperationsTests, World3DCommandsPublishOneRevisionAndKeepHierarc
 TEST(EditorSceneOperationsTests, World3DFailuresAndNoOpPreserveCanonicalState)
 {
     auto document = createWorld3D();
-    ASSERT_TRUE(addWorld3DNode(document, World3DNodeTemplate::Empty, 1));
+    ASSERT_TRUE(addWorld3DNode(document, World3DNodeTemplate::Node3D, 1));
     const auto beforeBytes = std::vector(document.payloadBytes().begin(),
                                          document.payloadBytes().end());
     const Core::u64 beforeRevision = document.revision();
@@ -223,7 +223,7 @@ TEST(EditorSceneOperationsTests, World3DFailuresAndNoOpPreserveCanonicalState)
     ASSERT_TRUE(reparentWorld3DNode(document, 2, 1));
     EXPECT_EQ(document.revision(), beforeRevision);
     EXPECT_FALSE(addWorld3DNode(
-        document, World3DNodeTemplate::Empty, 99));
+        document, World3DNodeTemplate::Node3D, 99));
     EXPECT_FALSE(duplicateWorld3DNodeSubtree(document, 99));
     auto cycle = reparentWorld3DNode(document, 1, 2);
     ASSERT_FALSE(cycle);
@@ -243,7 +243,7 @@ TEST(EditorSceneOperationsTests, World3DFailuresAndNoOpPreserveCanonicalState)
     auto fullDocument = createWorld3D({.nodeCapacity = 1});
     const Core::u64 fullRevision = fullDocument.revision();
     auto full = addWorld3DNode(
-        fullDocument, World3DNodeTemplate::Empty);
+        fullDocument, World3DNodeTemplate::Node3D);
     ASSERT_FALSE(full);
     EXPECT_EQ(full.error().code, EditorErrorCode::DocumentCapacityExceeded);
     EXPECT_EQ(fullDocument.revision(), fullRevision);

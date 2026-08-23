@@ -2736,6 +2736,7 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
                     return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                                          "invalid prefab mesh/material asset id");
                 }
+                node.nodeKind = AssetFormat::PrefabNodeKind::Mesh3D;
                 node.meshId = *meshId;
                 node.materialId = *materialId;
             }

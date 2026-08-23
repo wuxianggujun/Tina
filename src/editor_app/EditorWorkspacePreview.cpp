@@ -102,6 +102,17 @@ auto EditorWorkspaceState::resolvePreviewMesh(void* userData, Tina::Asset::Asset
     return self.mesh3DBindings_->internMeshFrameResource(asset, sink);
 }
 
+auto EditorWorkspaceState::resolvePreviewSkinnedMesh(
+    void* userData, Tina::Asset::AssetHandle asset,
+    Tina::Render::FrameResourceSink& sink) noexcept
+    -> Tina::Core::Result<Tina::Render::FrameResourceRef>{
+    auto& self = *static_cast<EditorWorkspaceState*>(userData);
+    if (!self.mesh3DBindings_.has_value()) {
+        return Tina::Render::FrameResourceRef{};
+    }
+    return self.mesh3DBindings_->internSkinnedMeshFrameResource(asset, sink);
+}
+
 auto EditorWorkspaceState::resolvePreviewMaterial(void* userData, Tina::Asset::AssetHandle asset,
                        Tina::Render::FrameResourceSink& sink) noexcept -> Tina::Core::Result<Tina::Render::FrameResourceRef>{
     auto& self = *static_cast<EditorWorkspaceState*>(userData);
@@ -183,7 +194,11 @@ auto EditorWorkspaceState::preparePreviewAssetBindings() -> Tina::Core::Status{
         if (!node.hasMesh) {
             continue;
         }
-        appendReference(node.meshId, Tina::AssetFormat::AssetKind::StaticMesh);
+        appendReference(
+            node.meshId,
+            node.nodeKind == Tina::AssetFormat::PrefabNodeKind::SkinnedMesh3D
+                ? Tina::AssetFormat::AssetKind::SkinnedMesh
+                : Tina::AssetFormat::AssetKind::StaticMesh);
         appendReference(node.materialId, Tina::AssetFormat::AssetKind::Material);
     }
     appendReference(tileMapDocument_.tilesetId(),
@@ -314,7 +329,8 @@ auto EditorWorkspaceState::preparePreviewAssetBindings() -> Tina::Core::Status{
     std::vector<Tina::Asset::AssetHandle> materialAssets;
     std::vector<Tina::Asset::AssetHandle> materialTextureAssets;
     for (const PreviewAssetReference& reference : references) {
-        if (reference.kind == Tina::AssetFormat::AssetKind::StaticMesh) {
+        if (reference.kind == Tina::AssetFormat::AssetKind::StaticMesh ||
+            reference.kind == Tina::AssetFormat::AssetKind::SkinnedMesh) {
             const Tina::Asset::AssetHandle mesh = loadedAsset(reference.assetId, reference.kind);
             if (mesh && !containsHandle(meshAssets, mesh)) {
                 meshAssets.push_back(mesh);
@@ -397,7 +413,11 @@ auto EditorWorkspaceState::preparePreviewAssetBindings() -> Tina::Core::Status{
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                            "Catalog StaticMesh payload is unavailable");
             }
-            auto mesh = Tina::Asset::uploadStaticMeshFromCooked(*device, *meshFile);
+            const Tina::AssetFormat::AssetKind meshKind =
+                assetResources_.system->store().assetKind(meshAsset);
+            auto mesh = meshKind == Tina::AssetFormat::AssetKind::SkinnedMesh
+                ? Tina::Asset::uploadSkinnedMeshFromCooked(*device, *meshFile)
+                : Tina::Asset::uploadStaticMeshFromCooked(*device, *meshFile);
             if (!mesh) {
                 return Tina::Core::failure(std::move(mesh.error()));
             }
@@ -407,7 +427,9 @@ auto EditorWorkspaceState::preparePreviewAssetBindings() -> Tina::Core::Status{
                     (void)device->destroyGpuMesh(gpuMesh);
                 }
             });
-            auto binding = mesh3DBindings_->registerMeshBinding(meshAsset, gpuMesh);
+            auto binding = meshKind == Tina::AssetFormat::AssetKind::SkinnedMesh
+                ? mesh3DBindings_->registerSkinnedMeshBinding(meshAsset, gpuMesh)
+                : mesh3DBindings_->registerMeshBinding(meshAsset, gpuMesh);
             if (!binding) {
                 return Tina::Core::failure(std::move(binding.error()));
             }
@@ -525,12 +547,14 @@ auto EditorWorkspaceState::validateRuntimePreview() -> Tina::Core::Status{
             // The animation binding targets the sprite; filtering the sprite
             // from the preview must also filter its binding.
             entity.spriteAnimation.reset();
+            entity.nodeKind = Tina::AssetFormat::World2DNodeKind::Node2D;
             continue;
         }
         if (entity.spriteAnimation.has_value() &&
             !loadedAsset(entity.spriteAnimation->clipId,
                          Tina::AssetFormat::AssetKind::SpriteAnimationClip)) {
             entity.spriteAnimation.reset();
+            entity.nodeKind = Tina::AssetFormat::World2DNodeKind::Sprite2D;
         }
         ++resolvedSpriteCount;
     }
@@ -785,7 +809,10 @@ auto EditorWorkspaceState::validateWorld3DRuntimePreview() -> Tina::Core::Status
             continue;
         }
         const Tina::Asset::AssetHandle mesh = loadedAsset(
-            node.meshId, Tina::AssetFormat::AssetKind::StaticMesh);
+            node.meshId,
+            node.nodeKind == Tina::AssetFormat::PrefabNodeKind::SkinnedMesh3D
+                ? Tina::AssetFormat::AssetKind::SkinnedMesh
+                : Tina::AssetFormat::AssetKind::StaticMesh);
         const Tina::Asset::AssetHandle material = loadedAsset(
             node.materialId, Tina::AssetFormat::AssetKind::Material);
         if (!mesh || !material || !containsHandle(boundMeshAssets_, mesh) ||
@@ -794,6 +821,7 @@ auto EditorWorkspaceState::validateWorld3DRuntimePreview() -> Tina::Core::Status
             node.hasMaterial = false;
             node.meshId = {};
             node.materialId = {};
+            node.nodeKind = Tina::AssetFormat::PrefabNodeKind::Node3D;
             continue;
         }
         const Tina::Asset::CookedAssetFile* materialFile =
@@ -812,6 +840,17 @@ auto EditorWorkspaceState::validateWorld3DRuntimePreview() -> Tina::Core::Status
                 : Tina::Render::Mesh3DAlphaMode::Opaque;
         ++resolvedMeshCount;
     }
+
+    // The Editor viewport owns its camera. Keep authored camera payloads typed
+    // and intact, but disable them before instantiation so a prefab containing
+    // multiple active cameras cannot fail the canonical World validation.
+    for (auto& node : nodeStorage) {
+        if (node.nodeKind != Tina::AssetFormat::PrefabNodeKind::Camera3D ||
+            !node.camera.has_value()) {
+            continue;
+        }
+        node.camera->active = false;
+    }
     auto world = Tina::Scene::World::Create({.entityCapacity = AuthoringEntityCapacity + 1U});
     if (!world) {
         return Tina::Core::failure(std::move(world.error()));
@@ -822,8 +861,21 @@ auto EditorWorkspaceState::validateWorld3DRuntimePreview() -> Tina::Core::Status
             .localBounds = {.radius = 1.75F},
             .baseColorFactor = {.red = 0.26F, .green = 0.68F, .blue = 0.92F,
                                 .alpha = 1.0F},
-            .resolveMesh = [this](Tina::Core::AssetId assetId) {
-                return loadedAsset(assetId, Tina::AssetFormat::AssetKind::StaticMesh);
+            .resolveMesh = [this, &nodeStorage](Tina::Core::AssetId assetId) {
+                const auto node = std::find_if(
+                    nodeStorage.begin(), nodeStorage.end(),
+                    [assetId](const auto& candidate) {
+                        return candidate.hasMesh && candidate.meshId == assetId;
+                    });
+                if (node == nodeStorage.end()) {
+                    return Tina::Asset::AssetHandle{};
+                }
+                return loadedAsset(
+                    assetId,
+                    node->nodeKind ==
+                            Tina::AssetFormat::PrefabNodeKind::SkinnedMesh3D
+                        ? Tina::AssetFormat::AssetKind::SkinnedMesh
+                        : Tina::AssetFormat::AssetKind::StaticMesh);
             },
             .resolveMaterial = [this](Tina::Core::AssetId assetId) {
                 return loadedAsset(assetId, Tina::AssetFormat::AssetKind::Material);
@@ -866,7 +918,7 @@ auto EditorWorkspaceState::validateWorld3DRuntimePreview() -> Tina::Core::Status
         const auto& node = nodeStorage[index];
         const Tina::Scene::EntityId entity = (*entities)[index];
         bindings.push_back({.stableNodeId = node.stableNodeId, .entity = entity});
-        if (node.hasMesh) {
+        if (node.nodeKind == Tina::AssetFormat::PrefabNodeKind::Mesh3D) {
             const Tina::Render::RenderLinearColor color =
                 MeshPreviewColors[index % MeshPreviewColors.size()];
             if (auto status = world->setMeshRenderer3D(
@@ -884,6 +936,35 @@ auto EditorWorkspaceState::validateWorld3DRuntimePreview() -> Tina::Core::Status
                 !status) {
                 return status;
             }
+        } else if (node.nodeKind ==
+                   Tina::AssetFormat::PrefabNodeKind::SkinnedMesh3D) {
+            const auto* authored = world->skinnedMeshRenderer3D(entity);
+            if (authored == nullptr) {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::Internal,
+                    "editor World3D preview SkinnedMesh3D component is unavailable");
+            }
+            auto previewMesh = *authored;
+            // The Editor has no authored Animator3D pose in this document. Keep
+            // the real node/component but suppress extraction until a pose owner
+            // is connected instead of reinterpreting it as a static mesh.
+            previewMesh.visible = false;
+            if (auto status = world->setSkinnedMeshRenderer3D(entity, previewMesh);
+                !status) {
+                return status;
+            }
+        }
+    }
+    for (const Tina::Scene::EntityId entity : *entities) {
+        const auto* authoredCamera = world->perspectiveCamera3D(entity);
+        if (authoredCamera == nullptr || !authoredCamera->active) {
+            continue;
+        }
+        auto disabledCamera = *authoredCamera;
+        disabledCamera.active = false;
+        if (auto status = world->setPerspectiveCamera3D(entity, disabledCamera);
+            !status) {
+            return status;
         }
     }
     if (auto status = world->updateWorldTransforms(); !status) {

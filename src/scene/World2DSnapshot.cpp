@@ -544,6 +544,43 @@ Core::Result<std::vector<std::byte>> captureWorld2DSnapshotBytes(const World& wo
                 }
                 entity.spriteAnimation = std::move(*capturedAnimation);
             }
+            const Core::usize payloadCount =
+                static_cast<Core::usize>(entity.sprite.has_value()) +
+                static_cast<Core::usize>(entity.camera.has_value()) +
+                static_cast<Core::usize>(entity.pointLight.has_value()) +
+                static_cast<Core::usize>(entity.shadowOccluder.has_value()) +
+                static_cast<Core::usize>(entity.spriteAnimation.has_value());
+            if (payloadCount == 0U)
+            {
+                entity.nodeKind = AssetFormat::World2DNodeKind::Node2D;
+            }
+            else if (payloadCount == 2U && entity.sprite &&
+                     entity.spriteAnimation)
+            {
+                entity.nodeKind = AssetFormat::World2DNodeKind::AnimatedSprite2D;
+            }
+            else if (payloadCount == 1U && entity.sprite)
+            {
+                entity.nodeKind = AssetFormat::World2DNodeKind::Sprite2D;
+            }
+            else if (payloadCount == 1U && entity.camera)
+            {
+                entity.nodeKind = AssetFormat::World2DNodeKind::Camera2D;
+            }
+            else if (payloadCount == 1U && entity.pointLight)
+            {
+                entity.nodeKind = AssetFormat::World2DNodeKind::PointLight2D;
+            }
+            else if (payloadCount == 1U && entity.shadowOccluder)
+            {
+                entity.nodeKind = AssetFormat::World2DNodeKind::ShadowOccluder2D;
+            }
+            else
+            {
+                return Core::failure(
+                    SceneErrorCode::InvalidComponent,
+                    "World2D capture requires one exact current node kind per entity");
+            }
             entities.push_back(std::move(entity));
         }
 

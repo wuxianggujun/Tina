@@ -2795,7 +2795,7 @@ auto EditorWorkspaceState::buildSceneAddModalUi(
         },
     };
     UI::UILayoutStyle surfaceLayout = editorDialogSurfaceLayout(ui.productTheme);
-    surfaceLayout.size.width = UI::UILayoutLength::Px(560.0F);
+    surfaceLayout.size.width = UI::UILayoutLength::Px(720.0F);
     auto dialog = ui.tree.buildDialog(
         parent,
         UI::UIDialogConfig{
@@ -2827,14 +2827,37 @@ auto EditorWorkspaceState::buildSceneAddModalUi(
         return Tina::Core::failure(std::move(search.error()));
     }
     sceneAddSearchInput_ = search->textEdit;
-    // One row per template slot. Rows past the active workspace's registry are
-    // collapsed at refresh time rather than rebuilt.
+    const float catalogHeight =
+        ui.productTheme.controls.buttonHeight * 8.0F +
+        ui.productTheme.spacing.space2 * 7.0F;
+    UI::UILayoutStyle catalogLayout = fillWidth(catalogHeight);
+    catalogLayout.flexItem.shrink = 0.0F;
+    catalogLayout.containerLayout = UI::UIContainerLayout::Grid;
+    catalogLayout.gridContainer.columns = UI::UIGridTrackList::Of(
+        {UI::UIGridTrack::Fr(), UI::UIGridTrack::Fr()});
+    catalogLayout.gridContainer.rows = UI::UIGridTrackList::Of({
+        UI::UIGridTrack::Px(ui.productTheme.controls.buttonHeight),
+        UI::UIGridTrack::Px(ui.productTheme.controls.buttonHeight),
+        UI::UIGridTrack::Px(ui.productTheme.controls.buttonHeight),
+        UI::UIGridTrack::Px(ui.productTheme.controls.buttonHeight),
+        UI::UIGridTrack::Px(ui.productTheme.controls.buttonHeight),
+        UI::UIGridTrack::Px(ui.productTheme.controls.buttonHeight),
+        UI::UIGridTrack::Px(ui.productTheme.controls.buttonHeight),
+        UI::UIGridTrack::Px(ui.productTheme.controls.buttonHeight),
+    });
+    catalogLayout.gridContainer.gap =
+        UI::UILayoutGap::All(ui.productTheme.spacing.space2);
+    auto catalog = ui.createPanel(sceneAddDialog_.content, catalogLayout);
+    if (!catalog) {
+        return Tina::Core::failure(std::move(catalog.error()));
+    }
+    // Rows past the active workspace registry are collapsed at refresh time.
     for (Tina::Core::usize slot = 0; slot < sceneAddTemplateButtons_.size();
          ++slot) {
         if (auto status = storeNode(
                 ui.createSegmentedButton(
-                    sceneAddDialog_.content, "",
-                    fillWidth(ui.productTheme.controls.buttonHeight)),
+                    *catalog, "",
+                    sceneAddTemplateRowLayout(UI::UIVisibility::Visible, slot)),
                 sceneAddTemplateButtons_[slot]);
             !status) {
             return status;

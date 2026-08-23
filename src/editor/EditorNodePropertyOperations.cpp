@@ -177,6 +177,8 @@ try
         nodes.push_back({
             .stableNodeId = node.stableNodeId,
             .parentIndex = node.parentIndex,
+            .nodeKind = node.nodeKind,
+            .name = node.name,
             .positionX = node.positionX,
             .positionY = node.positionY,
             .positionZ = node.positionZ,
@@ -190,6 +192,8 @@ try
             .meshId = node.meshId,
             .materialId = node.materialId,
             .visible = node.visible,
+            .camera = node.camera,
+            .light = node.light,
         });
     }
 
@@ -255,8 +259,8 @@ applyWorld2DSpriteNodeProperties(World2DAuthoringDocument& document,
         [&](AssetFormat::World2DEntityDesc& entity) -> Core::Status {
             if (auto status = requireWorld2DNodeKind(
                     entity,
-                    {World2DNodeTemplate::Sprite,
-                     World2DNodeTemplate::AnimatedSprite},
+                    {World2DNodeTemplate::Sprite2D,
+                     World2DNodeTemplate::AnimatedSprite2D},
                     "Rendering properties require a Sprite2D or AnimatedSprite2D node");
                 !status) {
                 return status;
@@ -309,7 +313,7 @@ applyWorld2DCameraNodeProperties(World2DAuthoringDocument& document,
         document, stableEntityIds,
         [&](AssetFormat::World2DEntityDesc& entity) -> Core::Status {
             if (auto status = requireWorld2DNodeKind(
-                    entity, {World2DNodeTemplate::Camera},
+                    entity, {World2DNodeTemplate::Camera2D},
                     "Camera properties require a Camera2D node");
                 !status) {
                 return status;
@@ -349,7 +353,7 @@ applyWorld2DPointLightNodeProperties(World2DAuthoringDocument& document,
         document, stableEntityIds,
         [&](AssetFormat::World2DEntityDesc& entity) -> Core::Status {
             if (auto status = requireWorld2DNodeKind(
-                    entity, {World2DNodeTemplate::PointLight},
+                    entity, {World2DNodeTemplate::PointLight2D},
                     "Light properties require a PointLight2D node");
                 !status) {
                 return status;
@@ -384,7 +388,7 @@ applyWorld2DShadowOccluderNodeProperties(World2DAuthoringDocument& document,
         document, stableEntityIds,
         [&](AssetFormat::World2DEntityDesc& entity) -> Core::Status {
             if (auto status = requireWorld2DNodeKind(
-                    entity, {World2DNodeTemplate::ShadowOccluder},
+                    entity, {World2DNodeTemplate::ShadowOccluder2D},
                     "Occlusion properties require a ShadowOccluder2D node");
                 !status) {
                 return status;
@@ -422,7 +426,7 @@ applyWorld2DAnimatedSpriteNodeProperties(World2DAuthoringDocument& document,
         document, stableEntityIds,
         [&](AssetFormat::World2DEntityDesc& entity) -> Core::Status {
             if (auto status = requireWorld2DNodeKind(
-                    entity, {World2DNodeTemplate::AnimatedSprite},
+                    entity, {World2DNodeTemplate::AnimatedSprite2D},
                     "Animation properties require an AnimatedSprite2D node");
                 !status) {
                 return status;

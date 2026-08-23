@@ -76,7 +76,7 @@ public:
     // therefore remain -1 or reference an earlier node. New nodes are appended.
     [[nodiscard]] Core::Status upsertNode(const AssetFormat::PrefabNodeDesc& node);
     // Erases the node and all descendants, then canonicalizes retained parent
-    // indices. Prefab v2 cannot erase the final remaining node.
+    // indices. Prefab v4 cannot erase the final remaining node.
     [[nodiscard]] Core::Status eraseNodeSubtree(Core::u32 stableNodeId);
 
     [[nodiscard]] Core::Status undo() noexcept;

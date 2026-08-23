@@ -1,6 +1,7 @@
 #include <tina/asset_format/World2DSnapshot.hpp>
 
 #include <tina/asset_format/AssetFormatErrors.hpp>
+#include <tina/core/text/Utf8.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -24,6 +25,9 @@ constexpr usize CameraOffset = 136;
 constexpr usize PointLightOffset = 168;
 constexpr usize OccluderOffset = 200;
 constexpr usize SpriteAnimationOffset = 224;
+constexpr usize ResourceOffset = 256;
+constexpr usize PhysicsBodyOffset = 280;
+constexpr usize PhysicsShapeOffset = 328;
 
 [[nodiscard]] u8 readU8(std::span<const std::byte> bytes, usize offset) noexcept
 {
@@ -112,6 +116,16 @@ void writeAssetId(std::vector<std::byte>& bytes, usize offset, Core::AssetId ass
 [[nodiscard]] bool isFinite(float value) noexcept
 {
     return std::isfinite(value);
+}
+
+[[nodiscard]] Core::Status validateName(std::string_view name) noexcept
+{
+    if (name.size() > World2DSnapshotWire::MaximumNameBytes ||
+        (!name.empty() && !Core::isStrictUtf8WithoutNul(name))) {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                             "World2D node name must be valid UTF-8 and fit the wire field");
+    }
+    return Core::success();
 }
 
 [[nodiscard]] bool isFiniteTransform(const World2DEntityDesc& entity) noexcept
@@ -245,15 +259,151 @@ void writeAssetId(std::vector<std::byte>& bytes, usize offset, Core::AssetId ass
     return Core::success();
 }
 
+[[nodiscard]] bool isPhysicsBodyNodeKind(World2DNodeKind kind) noexcept
+{
+    return kind == World2DNodeKind::StaticBody2D ||
+           kind == World2DNodeKind::RigidBody2D ||
+           kind == World2DNodeKind::CharacterBody2D ||
+           kind == World2DNodeKind::Area2D;
+}
+
+[[nodiscard]] Core::Status validateResource(
+    const World2DResourceNodeDesc& resource) noexcept
+{
+    if (!resource.assetId)
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidIdentity,
+                             "World2D resource node requires a non-zero AssetId");
+    }
+    return Core::success();
+}
+
+[[nodiscard]] Core::Status validatePhysicsBody(
+    const World2DPhysicsBodyDesc& body) noexcept
+{
+    if (!isFinite(body.linearVelocityX) || !isFinite(body.linearVelocityY) ||
+        !isFinite(body.angularVelocityRadiansPerSecond) ||
+        !isFinite(body.linearDamping) || body.linearDamping < 0.0F ||
+        !isFinite(body.angularDamping) || body.angularDamping < 0.0F ||
+        !isFinite(body.gravityScale))
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                             "World2D physics body values are invalid");
+    }
+    return Core::success();
+}
+
+[[nodiscard]] Core::Status validatePhysicsShape(
+    const World2DPhysicsShapeDesc& shape) noexcept
+{
+    if (static_cast<u8>(shape.kind) >
+        static_cast<u8>(World2DPhysicsShapeKind::Capsule))
+    {
+        return Core::failure(AssetFormatErrorCode::UnsupportedValue,
+                             "World2D physics shape kind is unsupported");
+    }
+    if (!isFinite(shape.halfExtentX) || !isFinite(shape.halfExtentY) ||
+        !isFinite(shape.radius) || !isFinite(shape.localCenterX) ||
+        !isFinite(shape.localCenterY) || !isFinite(shape.localAngleRadians) ||
+        !isFinite(shape.localPointAX) || !isFinite(shape.localPointAY) ||
+        !isFinite(shape.localPointBX) || !isFinite(shape.localPointBY) ||
+        !isFinite(shape.density) || shape.density < 0.0F ||
+        !isFinite(shape.friction) || shape.friction < 0.0F ||
+        !isFinite(shape.restitution) || shape.restitution < 0.0F ||
+        shape.restitution > 1.0F)
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                             "World2D physics shape values are invalid");
+    }
+    if (shape.kind == World2DPhysicsShapeKind::Box &&
+        (!(shape.halfExtentX > 0.0F) || !(shape.halfExtentY > 0.0F)))
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                             "World2D box shape half extents must be positive");
+    }
+    if ((shape.kind == World2DPhysicsShapeKind::Circle ||
+         shape.kind == World2DPhysicsShapeKind::Capsule) &&
+        !(shape.radius > 0.0F))
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                             "World2D round shape radius must be positive");
+    }
+    if (shape.kind == World2DPhysicsShapeKind::Capsule &&
+        shape.localPointAX == shape.localPointBX &&
+        shape.localPointAY == shape.localPointBY)
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                             "World2D capsule endpoints must be distinct");
+    }
+    return Core::success();
+}
+
+[[nodiscard]] bool nodePayloadMatchesKind(
+    const World2DEntityDesc& entity) noexcept
+{
+    const bool sprite = entity.sprite.has_value();
+    const bool camera = entity.camera.has_value();
+    const bool light = entity.pointLight.has_value();
+    const bool occluder = entity.shadowOccluder.has_value();
+    const bool animation = entity.spriteAnimation.has_value();
+    const bool resource = entity.resource.has_value();
+    const bool body = entity.physicsBody.has_value();
+    const bool shape = entity.physicsShape.has_value();
+    const usize payloadCount = static_cast<usize>(sprite) +
+        static_cast<usize>(camera) + static_cast<usize>(light) +
+        static_cast<usize>(occluder) + static_cast<usize>(animation) +
+        static_cast<usize>(resource) + static_cast<usize>(body) +
+        static_cast<usize>(shape);
+
+    switch (entity.nodeKind)
+    {
+    case World2DNodeKind::Node2D:
+    case World2DNodeKind::Marker2D:
+        return payloadCount == 0U;
+    case World2DNodeKind::Sprite2D:
+        return payloadCount == 1U && sprite;
+    case World2DNodeKind::AnimatedSprite2D:
+        return payloadCount == 2U && sprite && animation;
+    case World2DNodeKind::Camera2D:
+        return payloadCount == 1U && camera;
+    case World2DNodeKind::PointLight2D:
+        return payloadCount == 1U && light;
+    case World2DNodeKind::ShadowOccluder2D:
+        return payloadCount == 1U && occluder;
+    case World2DNodeKind::TileMap2D:
+    case World2DNodeKind::FxEmitter2D:
+    case World2DNodeKind::NavigationRegion2D:
+    case World2DNodeKind::AudioPlayer2D:
+        return payloadCount == 1U && resource;
+    case World2DNodeKind::StaticBody2D:
+    case World2DNodeKind::RigidBody2D:
+    case World2DNodeKind::CharacterBody2D:
+    case World2DNodeKind::Area2D:
+        return payloadCount == 1U && body;
+    case World2DNodeKind::CollisionShape2D:
+        return payloadCount == 1U && shape;
+    }
+    return false;
+}
+
 [[nodiscard]] Core::Status validateEntity(const World2DEntityDesc& entity) noexcept
 {
     if (entity.stableEntityId == 0U || entity.stableEntityId == entity.parentStableEntityId)
     {
         return Core::failure(AssetFormatErrorCode::InvalidIdentity, "World2D entity stable IDs are invalid");
     }
+    if (auto status = validateName(entity.name); !status) {
+        return status;
+    }
     if (!isFiniteTransform(entity) || !isValidRotation(entity))
     {
         return Core::failure(AssetFormatErrorCode::InvalidLayout, "World2D entity transform is invalid");
+    }
+    if (static_cast<u16>(entity.nodeKind) >= World2DNodeKindCount ||
+        !nodePayloadMatchesKind(entity))
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                             "World2D node kind and payload do not match");
     }
     if (entity.sprite)
     {
@@ -295,6 +445,27 @@ void writeAssetId(std::vector<std::byte>& bytes, usize offset, Core::AssetId ass
             return status;
         }
     }
+    if (entity.resource)
+    {
+        if (const Core::Status status = validateResource(*entity.resource); !status)
+        {
+            return status;
+        }
+    }
+    if (entity.physicsBody)
+    {
+        if (const Core::Status status = validatePhysicsBody(*entity.physicsBody); !status)
+        {
+            return status;
+        }
+    }
+    if (entity.physicsShape)
+    {
+        if (const Core::Status status = validatePhysicsShape(*entity.physicsShape); !status)
+        {
+            return status;
+        }
+    }
     return Core::success();
 }
 
@@ -332,6 +503,21 @@ void writeAssetId(std::vector<std::byte>& bytes, usize offset, Core::AssetId ass
         {
             return Core::failure(AssetFormatErrorCode::InvalidLayout,
                                  "World2D parent stable ID must refer to a prior entity");
+        }
+        if (entity.nodeKind == World2DNodeKind::CollisionShape2D)
+        {
+            const auto parent = std::find_if(
+                entities.begin(), entities.begin() + static_cast<std::ptrdiff_t>(index),
+                [&entity](const World2DEntityDesc& candidate) {
+                    return candidate.stableEntityId == entity.parentStableEntityId;
+                });
+            if (parent == entities.begin() + static_cast<std::ptrdiff_t>(index) ||
+                !isPhysicsBodyNodeKind(parent->nodeKind))
+            {
+                return Core::failure(
+                    AssetFormatErrorCode::InvalidLayout,
+                    "World2D CollisionShape2D requires a physics body parent");
+            }
         }
         if (std::any_of(entities.begin(), entities.begin() + static_cast<std::ptrdiff_t>(index),
                         [&entity](const World2DEntityDesc& candidate) {
@@ -438,6 +624,65 @@ void writeSpriteAnimation(std::vector<std::byte>& bytes, usize base, const World
     writeU8(bytes, base + SpriteAnimationOffset + 20U, animation.autoPlay ? 1U : 0U);
 }
 
+void writeResource(std::vector<std::byte>& bytes, usize base,
+                   const World2DResourceNodeDesc& resource)
+{
+    writeAssetId(bytes, base + ResourceOffset, resource.assetId);
+    writeU8(bytes, base + ResourceOffset + 16U, resource.active ? 1U : 0U);
+}
+
+void writePhysicsBody(std::vector<std::byte>& bytes, usize base,
+                      const World2DPhysicsBodyDesc& body)
+{
+    writeF32(bytes, base + PhysicsBodyOffset, body.linearVelocityX);
+    writeF32(bytes, base + PhysicsBodyOffset + 4U, body.linearVelocityY);
+    writeF32(bytes, base + PhysicsBodyOffset + 8U,
+             body.angularVelocityRadiansPerSecond);
+    writeF32(bytes, base + PhysicsBodyOffset + 12U, body.linearDamping);
+    writeF32(bytes, base + PhysicsBodyOffset + 16U, body.angularDamping);
+    writeF32(bytes, base + PhysicsBodyOffset + 20U, body.gravityScale);
+    u8 behavior = body.enabled ? 1U : 0U;
+    behavior |= body.enableSleep ? 2U : 0U;
+    behavior |= body.initiallyAwake ? 4U : 0U;
+    behavior |= body.fixedRotation ? 8U : 0U;
+    behavior |= body.continuousCollision ? 16U : 0U;
+    writeU8(bytes, base + PhysicsBodyOffset + 24U, behavior);
+}
+
+void writePhysicsShape(std::vector<std::byte>& bytes, usize base,
+                       const World2DPhysicsShapeDesc& shape)
+{
+    writeU8(bytes, base + PhysicsShapeOffset, static_cast<u8>(shape.kind));
+    u8 behavior = shape.enabled ? 1U : 0U;
+    behavior |= shape.sensor ? 2U : 0U;
+    behavior |= shape.sensorEvents ? 4U : 0U;
+    behavior |= shape.contactEvents ? 8U : 0U;
+    behavior |= shape.hitEvents ? 16U : 0U;
+    writeU8(bytes, base + PhysicsShapeOffset + 1U, behavior);
+    writeF32(bytes, base + PhysicsShapeOffset + 4U, shape.halfExtentX);
+    writeF32(bytes, base + PhysicsShapeOffset + 8U, shape.halfExtentY);
+    writeF32(bytes, base + PhysicsShapeOffset + 12U, shape.radius);
+    writeF32(bytes, base + PhysicsShapeOffset + 16U, shape.localCenterX);
+    writeF32(bytes, base + PhysicsShapeOffset + 20U, shape.localCenterY);
+    writeF32(bytes, base + PhysicsShapeOffset + 24U,
+             shape.localAngleRadians);
+    writeF32(bytes, base + PhysicsShapeOffset + 28U, shape.localPointAX);
+    writeF32(bytes, base + PhysicsShapeOffset + 32U, shape.localPointAY);
+    writeF32(bytes, base + PhysicsShapeOffset + 36U, shape.localPointBX);
+    writeF32(bytes, base + PhysicsShapeOffset + 40U, shape.localPointBY);
+    writeF32(bytes, base + PhysicsShapeOffset + 44U, shape.density);
+    writeF32(bytes, base + PhysicsShapeOffset + 48U, shape.friction);
+    writeF32(bytes, base + PhysicsShapeOffset + 52U, shape.restitution);
+}
+
+void writeName(std::vector<std::byte>& bytes, usize base, std::string_view name)
+{
+    for (usize index = 0; index < name.size(); ++index) {
+        writeU8(bytes, base + World2DSnapshotWire::NameOffset + index,
+                static_cast<u8>(name[index]));
+    }
+}
+
 } // namespace
 
 Core::Status validateWorld2DSnapshotDesc(const World2DSnapshotDesc& desc) noexcept
@@ -477,6 +722,7 @@ Core::Result<std::vector<std::byte>> writeWorld2DSnapshotBytes(const World2DSnap
             const usize base = World2DSnapshotWire::HeaderBytes + index * World2DSnapshotWire::EntityBytes;
             writeU32(payload, base + 0U, entity.stableEntityId);
             writeU32(payload, base + 4U, entity.parentStableEntityId);
+            writeU16(payload, base + 12U, static_cast<u16>(entity.nodeKind));
             u32 componentFlags = 0U;
             if (entity.sprite)
                 componentFlags |= World2DSnapshotWire::ComponentSprite;
@@ -488,8 +734,15 @@ Core::Result<std::vector<std::byte>> writeWorld2DSnapshotBytes(const World2DSnap
                 componentFlags |= World2DSnapshotWire::ComponentShadowOccluder;
             if (entity.spriteAnimation)
                 componentFlags |= World2DSnapshotWire::ComponentSpriteAnimation;
+            if (entity.resource)
+                componentFlags |= World2DSnapshotWire::PayloadResource;
+            if (entity.physicsBody)
+                componentFlags |= World2DSnapshotWire::PayloadPhysicsBody;
+            if (entity.physicsShape)
+                componentFlags |= World2DSnapshotWire::PayloadPhysicsShape;
             writeU32(payload, base + 8U, componentFlags);
             writeTransform(payload, base, entity);
+            writeName(payload, base, entity.name);
             if (entity.sprite)
                 writeSprite(payload, base, *entity.sprite);
             if (entity.camera)
@@ -500,6 +753,12 @@ Core::Result<std::vector<std::byte>> writeWorld2DSnapshotBytes(const World2DSnap
                 writeOccluder(payload, base, *entity.shadowOccluder);
             if (entity.spriteAnimation)
                 writeSpriteAnimation(payload, base, *entity.spriteAnimation);
+            if (entity.resource)
+                writeResource(payload, base, *entity.resource);
+            if (entity.physicsBody)
+                writePhysicsBody(payload, base, *entity.physicsBody);
+            if (entity.physicsShape)
+                writePhysicsShape(payload, base, *entity.physicsShape);
         }
         std::copy(desc.gameplayBytes.begin(), desc.gameplayBytes.end(),
                   payload.begin() + static_cast<std::ptrdiff_t>(World2DSnapshotWire::HeaderBytes + entityBytes));
@@ -555,7 +814,7 @@ Core::Result<World2DSnapshotView> parseWorld2DSnapshot(std::span<const std::byte
                 World2DSnapshotWire::HeaderBytes + static_cast<usize>(index) * World2DSnapshotWire::EntityBytes;
             const u32 componentFlags = readU32(payload, base + 8U);
             if ((componentFlags & ~World2DSnapshotWire::ValidComponentFlags) != 0U ||
-                readU32(payload, base + 12U) != 0U)
+                readU16(payload, base + 14U) != 0U)
             {
                 return Core::failure(AssetFormatErrorCode::InvalidLayout,
                                      "World2D entity component flags or reserved field is invalid");
@@ -563,6 +822,8 @@ Core::Result<World2DSnapshotView> parseWorld2DSnapshot(std::span<const std::byte
             World2DEntityDesc entity{};
             entity.stableEntityId = readU32(payload, base + 0U);
             entity.parentStableEntityId = readU32(payload, base + 4U);
+            entity.nodeKind = static_cast<World2DNodeKind>(
+                readU16(payload, base + 12U));
             entity.positionX = readF32(payload, base + 16U);
             entity.positionY = readF32(payload, base + 20U);
             entity.positionZ = readF32(payload, base + 24U);
@@ -573,6 +834,24 @@ Core::Result<World2DSnapshotView> parseWorld2DSnapshot(std::span<const std::byte
             entity.scaleX = readF32(payload, base + 44U);
             entity.scaleY = readF32(payload, base + 48U);
             entity.scaleZ = readF32(payload, base + 52U);
+
+            usize nameLength = 0U;
+            while (nameLength < World2DSnapshotWire::NameBytes &&
+                   payload[base + World2DSnapshotWire::NameOffset + nameLength] != std::byte{0}) {
+                ++nameLength;
+            }
+            if (nameLength == World2DSnapshotWire::NameBytes ||
+                !bytesAreZero(payload, base + World2DSnapshotWire::NameOffset + nameLength + 1U,
+                              World2DSnapshotWire::NameBytes - nameLength - 1U)) {
+                return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                                     "World2D node name field is not NUL-terminated or zero-padded");
+            }
+            entity.name.assign(
+                reinterpret_cast<const char*>(payload.data() + base + World2DSnapshotWire::NameOffset),
+                nameLength);
+            if (auto status = validateName(entity.name); !status) {
+                return Core::failure(std::move(status.error()));
+            }
 
             if ((componentFlags & World2DSnapshotWire::ComponentSprite) != 0U)
             {
@@ -722,7 +1001,7 @@ Core::Result<World2DSnapshotView> parseWorld2DSnapshot(std::span<const std::byte
                 const u8 autoPlay = readU8(payload, base + SpriteAnimationOffset + 20U);
                 if (autoPlay > 1U ||
                     !bytesAreZero(payload, base + SpriteAnimationOffset + 21U,
-                                  World2DSnapshotWire::EntityBytes - SpriteAnimationOffset - 21U))
+                                  ResourceOffset - SpriteAnimationOffset - 21U))
                 {
                     return Core::failure(AssetFormatErrorCode::InvalidLayout,
                                          "World2D sprite animation autoPlay or reserved bytes are invalid");
@@ -730,10 +1009,107 @@ Core::Result<World2DSnapshotView> parseWorld2DSnapshot(std::span<const std::byte
                 animation.autoPlay = autoPlay != 0U;
                 entity.spriteAnimation = animation;
             } else if (!bytesAreZero(payload, base + SpriteAnimationOffset,
-                                     World2DSnapshotWire::EntityBytes - SpriteAnimationOffset))
+                                     ResourceOffset - SpriteAnimationOffset))
             {
                 return Core::failure(AssetFormatErrorCode::InvalidLayout,
                                      "World2D absent sprite animation component is not canonical");
+            }
+
+            if ((componentFlags & World2DSnapshotWire::PayloadResource) != 0U)
+            {
+                World2DResourceNodeDesc resource{};
+                resource.assetId = readAssetId(payload, base + ResourceOffset);
+                const u8 active = readU8(payload, base + ResourceOffset + 16U);
+                if (active > 1U ||
+                    !bytesAreZero(payload, base + ResourceOffset + 17U,
+                                  PhysicsBodyOffset - ResourceOffset - 17U))
+                {
+                    return Core::failure(
+                        AssetFormatErrorCode::InvalidLayout,
+                        "World2D resource node active or reserved bytes are invalid");
+                }
+                resource.active = active != 0U;
+                entity.resource = resource;
+            } else if (!bytesAreZero(payload, base + ResourceOffset,
+                                     PhysicsBodyOffset - ResourceOffset))
+            {
+                return Core::failure(
+                    AssetFormatErrorCode::InvalidLayout,
+                    "World2D absent resource node payload is not canonical");
+            }
+
+            if ((componentFlags & World2DSnapshotWire::PayloadPhysicsBody) != 0U)
+            {
+                World2DPhysicsBodyDesc body{};
+                body.linearVelocityX = readF32(payload, base + PhysicsBodyOffset);
+                body.linearVelocityY = readF32(payload, base + PhysicsBodyOffset + 4U);
+                body.angularVelocityRadiansPerSecond =
+                    readF32(payload, base + PhysicsBodyOffset + 8U);
+                body.linearDamping = readF32(payload, base + PhysicsBodyOffset + 12U);
+                body.angularDamping = readF32(payload, base + PhysicsBodyOffset + 16U);
+                body.gravityScale = readF32(payload, base + PhysicsBodyOffset + 20U);
+                const u8 behavior = readU8(payload, base + PhysicsBodyOffset + 24U);
+                if ((behavior & ~u8{31U}) != 0U ||
+                    !bytesAreZero(payload, base + PhysicsBodyOffset + 25U,
+                                  PhysicsShapeOffset - PhysicsBodyOffset - 25U))
+                {
+                    return Core::failure(
+                        AssetFormatErrorCode::InvalidLayout,
+                        "World2D physics body behavior or reserved bytes are invalid");
+                }
+                body.enabled = (behavior & 1U) != 0U;
+                body.enableSleep = (behavior & 2U) != 0U;
+                body.initiallyAwake = (behavior & 4U) != 0U;
+                body.fixedRotation = (behavior & 8U) != 0U;
+                body.continuousCollision = (behavior & 16U) != 0U;
+                entity.physicsBody = body;
+            } else if (!bytesAreZero(payload, base + PhysicsBodyOffset,
+                                     PhysicsShapeOffset - PhysicsBodyOffset))
+            {
+                return Core::failure(
+                    AssetFormatErrorCode::InvalidLayout,
+                    "World2D absent physics body payload is not canonical");
+            }
+
+            if ((componentFlags & World2DSnapshotWire::PayloadPhysicsShape) != 0U)
+            {
+                World2DPhysicsShapeDesc shape{};
+                shape.kind = static_cast<World2DPhysicsShapeKind>(
+                    readU8(payload, base + PhysicsShapeOffset));
+                const u8 behavior = readU8(payload, base + PhysicsShapeOffset + 1U);
+                if ((behavior & ~u8{31U}) != 0U ||
+                    readU16(payload, base + PhysicsShapeOffset + 2U) != 0U)
+                {
+                    return Core::failure(
+                        AssetFormatErrorCode::InvalidLayout,
+                        "World2D physics shape behavior or reserved bytes are invalid");
+                }
+                shape.enabled = (behavior & 1U) != 0U;
+                shape.sensor = (behavior & 2U) != 0U;
+                shape.sensorEvents = (behavior & 4U) != 0U;
+                shape.contactEvents = (behavior & 8U) != 0U;
+                shape.hitEvents = (behavior & 16U) != 0U;
+                shape.halfExtentX = readF32(payload, base + PhysicsShapeOffset + 4U);
+                shape.halfExtentY = readF32(payload, base + PhysicsShapeOffset + 8U);
+                shape.radius = readF32(payload, base + PhysicsShapeOffset + 12U);
+                shape.localCenterX = readF32(payload, base + PhysicsShapeOffset + 16U);
+                shape.localCenterY = readF32(payload, base + PhysicsShapeOffset + 20U);
+                shape.localAngleRadians = readF32(payload, base + PhysicsShapeOffset + 24U);
+                shape.localPointAX = readF32(payload, base + PhysicsShapeOffset + 28U);
+                shape.localPointAY = readF32(payload, base + PhysicsShapeOffset + 32U);
+                shape.localPointBX = readF32(payload, base + PhysicsShapeOffset + 36U);
+                shape.localPointBY = readF32(payload, base + PhysicsShapeOffset + 40U);
+                shape.density = readF32(payload, base + PhysicsShapeOffset + 44U);
+                shape.friction = readF32(payload, base + PhysicsShapeOffset + 48U);
+                shape.restitution = readF32(payload, base + PhysicsShapeOffset + 52U);
+                entity.physicsShape = shape;
+            } else if (!bytesAreZero(
+                           payload, base + PhysicsShapeOffset,
+                           World2DSnapshotWire::NameOffset - PhysicsShapeOffset))
+            {
+                return Core::failure(
+                    AssetFormatErrorCode::InvalidLayout,
+                    "World2D absent physics shape payload is not canonical");
             }
             parsed.push_back(std::move(entity));
         }

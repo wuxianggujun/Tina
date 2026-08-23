@@ -1248,6 +1248,8 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
             rewrittenNodes.push_back(Tina::AssetFormat::PrefabNodeDesc{
                 .stableNodeId = node.stableNodeId,
                 .parentIndex = node.parentIndex,
+                .nodeKind = node.nodeKind,
+                .name = node.name,
                 .positionX = node.positionX,
                 .positionY = node.positionY,
                 .positionZ = node.positionZ,
@@ -1262,6 +1264,8 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
                 .materialId =
                     node.hasMaterial ? rewriteId(node.materialId) : Tina::Core::AssetId{},
                 .visible = node.visible,
+                .camera = node.camera,
+                .light = node.light,
             });
         }
         return Tina::AssetFormat::writePrefabPayloadBytes(
@@ -2114,17 +2118,6 @@ class Product3DState final : public Tina::IGameState {
                             }
                         }
                         return {};
-                    },
-                .resolveMeshKind =
-                    [productResources](Tina::Core::AssetId id) -> Tina::AssetFormat::AssetKind {
-                        for (u32 slot = 0; slot < productResources->meshSlotCount; ++slot)
-                        {
-                            if (productResources->meshes[slot].meshId == id)
-                            {
-                                return productResources->meshes[slot].meshKind;
-                            }
-                        }
-                        return Tina::AssetFormat::AssetKind::Invalid;
                     },
                 .resolveLocalBounds =
                     [productResources](Tina::Core::AssetId id) -> Tina::Render::RenderBoundingSphereInput {

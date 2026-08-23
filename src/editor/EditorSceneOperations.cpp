@@ -1,6 +1,7 @@
 #include <tina/editor/EditorSceneOperations.hpp>
 
 #include <tina/editor/EditorErrors.hpp>
+#include <tina/core/text/Utf8.hpp>
 
 #include <algorithm>
 #include <array>
@@ -43,30 +44,100 @@ allocateStableId(std::span<const Item> items, IdResolver&& resolveId,
 inline constexpr std::array<EditorNodeTemplateInfo, World2DNodeTemplateCount>
     World2DNodeTemplateRegistry{{
         {.displayName = "Node2D",
+         .category = "Core",
          .description = "Transform-only container for organizing child nodes."},
+        {.displayName = "Marker2D",
+         .category = "Core",
+         .description = "Named transform marker for gameplay and authoring anchors."},
         {.displayName = "Sprite2D",
+         .category = "Visual",
          .description = "Draws a sprite. Needs a Sprite asset.",
          .requiresSpriteAsset = true},
         {.displayName = "AnimatedSprite2D",
+         .category = "Visual",
          .description = "Sprite driven by an animation clip.",
          .requiresSpriteAsset = true,
          .requiresAnimationClipAsset = true},
+        {.displayName = "TileMap2D",
+         .category = "Visual",
+         .description = "Instantiates a cooked TileMap asset at this transform.",
+         .requiredResourceAssetKind = AssetFormat::AssetKind::TileMap},
+        {.displayName = "FxEmitter2D",
+         .category = "Visual",
+         .description = "Emits particles and trails from a cooked Fx2D asset.",
+         .requiredResourceAssetKind = AssetFormat::AssetKind::Fx2D},
         {.displayName = "Camera2D",
+         .category = "Camera",
          .description = "Defines what the 2D viewport renders."},
         {.displayName = "PointLight2D",
+         .category = "Lighting",
          .description = "Emits 2D light within a radius."},
         {.displayName = "ShadowOccluder2D",
+         .category = "Lighting",
          .description = "Blocks 2D light along a segment."},
+        {.displayName = "StaticBody2D",
+         .category = "Physics",
+         .description = "Immovable physics body that owns CollisionShape2D children."},
+        {.displayName = "RigidBody2D",
+         .category = "Physics",
+         .description = "Dynamic body driven by the fixed-step physics world."},
+        {.displayName = "CharacterBody2D",
+         .category = "Physics",
+         .description = "Kinematic body controlled by gameplay movement."},
+        {.displayName = "Area2D",
+         .category = "Physics",
+         .description = "Sensor body that reports overlap events from child shapes."},
+        {.displayName = "CollisionShape2D",
+         .category = "Physics",
+         .description = "Box, circle, or capsule shape owned by a physics body parent."},
+        {.displayName = "NavigationRegion2D",
+         .category = "Navigation",
+         .description = "Binds a cooked NavigationGrid2D asset.",
+         .requiredResourceAssetKind = AssetFormat::AssetKind::NavigationGrid2D},
+        {.displayName = "AudioPlayer2D",
+         .category = "Audio",
+         .description = "Spatial playback source backed by an AudioClip asset.",
+         .requiredResourceAssetKind = AssetFormat::AssetKind::AudioClip},
     }};
 
 inline constexpr std::array<EditorNodeTemplateInfo, World3DNodeTemplateCount>
     World3DNodeTemplateRegistry{{
         {.displayName = "Node3D",
+         .category = "Core",
          .description = "3D transform container for organizing child nodes."},
+        {.displayName = "Marker3D",
+         .category = "Core",
+         .description = "Named 3D transform marker for gameplay anchors."},
         {.displayName = "Mesh3D",
+         .category = "Visual",
          .description = "Renders a mesh. Needs mesh and material assets.",
-         .requiresMeshAssets = true},
+         .requiredMeshAssetKind = AssetFormat::AssetKind::StaticMesh},
+        {.displayName = "SkinnedMesh3D",
+         .category = "Visual",
+         .description = "Renders a skinned mesh. Needs skinned mesh and material assets.",
+         .requiredMeshAssetKind = AssetFormat::AssetKind::SkinnedMesh},
+        {.displayName = "Camera3D",
+         .category = "Camera",
+         .description = "Defines a perspective camera in the 3D scene."},
+        {.displayName = "DirectionalLight3D",
+         .category = "Lighting",
+         .description = "Emits parallel light along the node's local -Z axis."},
+        {.displayName = "PointLight3D",
+         .category = "Lighting",
+         .description = "Emits light from the node position within a range."},
+        {.displayName = "SpotLight3D",
+         .category = "Lighting",
+         .description = "Emits cone-shaped light along the node's local -Z axis."},
     }};
+
+[[nodiscard]] bool isWorld2DPhysicsBodyNodeKind(
+    AssetFormat::World2DNodeKind kind) noexcept
+{
+    return kind == AssetFormat::World2DNodeKind::StaticBody2D ||
+           kind == AssetFormat::World2DNodeKind::RigidBody2D ||
+           kind == AssetFormat::World2DNodeKind::CharacterBody2D ||
+           kind == AssetFormat::World2DNodeKind::Area2D;
+}
 
 [[nodiscard]] const AssetFormat::World2DEntityDesc*
 findWorld2DEntity(std::span<const AssetFormat::World2DEntityDesc> entities,
@@ -142,6 +213,8 @@ toPrefabNodeDesc(const AssetFormat::PrefabNodeView& node) noexcept
     return {
         .stableNodeId = node.stableNodeId,
         .parentIndex = node.parentIndex,
+        .nodeKind = node.nodeKind,
+        .name = node.name,
         .positionX = node.positionX,
         .positionY = node.positionY,
         .positionZ = node.positionZ,
@@ -155,6 +228,8 @@ toPrefabNodeDesc(const AssetFormat::PrefabNodeView& node) noexcept
         .meshId = node.meshId,
         .materialId = node.materialId,
         .visible = node.visible,
+        .camera = node.camera,
+        .light = node.light,
     };
 }
 
@@ -246,46 +321,106 @@ std::span<const EditorNodeTemplateInfo> world3DNodeTemplateRegistry() noexcept
 Core::Result<World2DNodeTemplate> classifyWorld2DNodeTemplate(
     const AssetFormat::World2DEntityDesc& entity)
 {
+    const auto slot = static_cast<Core::usize>(entity.nodeKind);
+    if (slot >= World2DNodeTemplateRegistry.size()) {
+        return Core::failure(
+            EditorErrorCode::InvalidAuthoringOperation,
+            "World2D wire item contains an unknown Editor node kind");
+    }
+
     const Core::usize payloadCount =
         static_cast<Core::usize>(entity.sprite.has_value()) +
         static_cast<Core::usize>(entity.camera.has_value()) +
         static_cast<Core::usize>(entity.pointLight.has_value()) +
         static_cast<Core::usize>(entity.shadowOccluder.has_value()) +
-        static_cast<Core::usize>(entity.spriteAnimation.has_value());
-    if (payloadCount == 0U) {
-        return World2DNodeTemplate::Empty;
+        static_cast<Core::usize>(entity.spriteAnimation.has_value()) +
+        static_cast<Core::usize>(entity.resource.has_value()) +
+        static_cast<Core::usize>(entity.physicsBody.has_value()) +
+        static_cast<Core::usize>(entity.physicsShape.has_value());
+    bool matches = false;
+    switch (entity.nodeKind) {
+    case AssetFormat::World2DNodeKind::Node2D:
+    case AssetFormat::World2DNodeKind::Marker2D:
+        matches = payloadCount == 0U;
+        break;
+    case AssetFormat::World2DNodeKind::Sprite2D:
+        matches = payloadCount == 1U && entity.sprite.has_value();
+        break;
+    case AssetFormat::World2DNodeKind::AnimatedSprite2D:
+        matches = payloadCount == 2U && entity.sprite.has_value() &&
+                  entity.spriteAnimation.has_value();
+        break;
+    case AssetFormat::World2DNodeKind::Camera2D:
+        matches = payloadCount == 1U && entity.camera.has_value();
+        break;
+    case AssetFormat::World2DNodeKind::PointLight2D:
+        matches = payloadCount == 1U && entity.pointLight.has_value();
+        break;
+    case AssetFormat::World2DNodeKind::ShadowOccluder2D:
+        matches = payloadCount == 1U && entity.shadowOccluder.has_value();
+        break;
+    case AssetFormat::World2DNodeKind::TileMap2D:
+    case AssetFormat::World2DNodeKind::FxEmitter2D:
+    case AssetFormat::World2DNodeKind::NavigationRegion2D:
+    case AssetFormat::World2DNodeKind::AudioPlayer2D:
+        matches = payloadCount == 1U && entity.resource.has_value();
+        break;
+    case AssetFormat::World2DNodeKind::StaticBody2D:
+    case AssetFormat::World2DNodeKind::RigidBody2D:
+    case AssetFormat::World2DNodeKind::CharacterBody2D:
+    case AssetFormat::World2DNodeKind::Area2D:
+        matches = payloadCount == 1U && entity.physicsBody.has_value();
+        break;
+    case AssetFormat::World2DNodeKind::CollisionShape2D:
+        matches = payloadCount == 1U && entity.physicsShape.has_value();
+        break;
     }
-    if (payloadCount == 2U && entity.sprite.has_value() &&
-        entity.spriteAnimation.has_value()) {
-        return World2DNodeTemplate::AnimatedSprite;
+    if (!matches) {
+        return Core::failure(
+            EditorErrorCode::InvalidAuthoringOperation,
+            "World2D wire item node kind does not match its canonical payload");
     }
-    if (payloadCount == 1U && entity.sprite.has_value()) {
-        return World2DNodeTemplate::Sprite;
-    }
-    if (payloadCount == 1U && entity.camera.has_value()) {
-        return World2DNodeTemplate::Camera;
-    }
-    if (payloadCount == 1U && entity.pointLight.has_value()) {
-        return World2DNodeTemplate::PointLight;
-    }
-    if (payloadCount == 1U && entity.shadowOccluder.has_value()) {
-        return World2DNodeTemplate::ShadowOccluder;
-    }
-    return Core::failure(
-        EditorErrorCode::InvalidAuthoringOperation,
-        "World2D wire item does not represent one supported Editor node kind");
+    return static_cast<World2DNodeTemplate>(slot);
 }
 
 Core::Result<World3DNodeTemplate> classifyWorld3DNodeTemplate(
     const AssetFormat::PrefabNodeView& node)
 {
-    if (node.hasMesh != node.hasMaterial) {
+    const auto slot = static_cast<Core::usize>(node.nodeKind);
+    if (slot >= World3DNodeTemplateRegistry.size() ||
+        node.hasMesh != node.hasMaterial) {
         return Core::failure(
             EditorErrorCode::InvalidAuthoringOperation,
-            "World3D wire item does not represent one supported Editor node kind");
+            "World3D wire item contains an unknown or incomplete Editor node kind");
     }
-    return node.hasMesh ? World3DNodeTemplate::Mesh
-                        : World3DNodeTemplate::Empty;
+    const bool hasMesh = node.hasMesh;
+    const bool hasCamera = node.camera.has_value();
+    const bool hasLight = node.light.has_value();
+    bool matches = false;
+    switch (node.nodeKind) {
+    case AssetFormat::PrefabNodeKind::Node3D:
+    case AssetFormat::PrefabNodeKind::Marker3D:
+        matches = !hasMesh && !hasCamera && !hasLight;
+        break;
+    case AssetFormat::PrefabNodeKind::Mesh3D:
+    case AssetFormat::PrefabNodeKind::SkinnedMesh3D:
+        matches = hasMesh && !hasCamera && !hasLight;
+        break;
+    case AssetFormat::PrefabNodeKind::Camera3D:
+        matches = !hasMesh && hasCamera && !hasLight;
+        break;
+    case AssetFormat::PrefabNodeKind::DirectionalLight3D:
+    case AssetFormat::PrefabNodeKind::PointLight3D:
+    case AssetFormat::PrefabNodeKind::SpotLight3D:
+        matches = !hasMesh && !hasCamera && hasLight;
+        break;
+    }
+    if (!matches) {
+        return Core::failure(
+            EditorErrorCode::InvalidAuthoringOperation,
+            "World3D wire item node kind does not match its canonical payload");
+    }
+    return static_cast<World3DNodeTemplate>(slot);
 }
 
 Core::Result<EditorSceneOperationResult>
@@ -311,16 +446,41 @@ try
             EditorErrorCode::InvalidAuthoringOperation,
             "Editor scene node template requires a SpriteAnimationClip asset");
     }
+    if (info.requiredResourceAssetKind != AssetFormat::AssetKind::Invalid &&
+        !assets.resourceId) {
+        return Core::failure(
+            EditorErrorCode::InvalidAuthoringOperation,
+            "Editor scene resource node template requires an asset");
+    }
 
     std::vector<AssetFormat::World2DEntityDesc> storage;
     auto snapshot = document.parseCurrentSnapshot(storage);
     if (!snapshot) {
         return Core::failure(std::move(snapshot.error()));
     }
-    if (parentStableId != 0 &&
-        findWorld2DEntity(storage, parentStableId) == nullptr) {
+    const AssetFormat::World2DEntityDesc* parent =
+        parentStableId != 0 ? findWorld2DEntity(storage, parentStableId) : nullptr;
+    if (parentStableId != 0 && parent == nullptr) {
         return Core::failure(EditorErrorCode::EntityNotFound,
                              "Editor scene parent node was not found");
+    }
+    if (nodeTemplate == World2DNodeTemplate::CollisionShape2D) {
+        if (parent == nullptr) {
+            return Core::failure(
+                EditorErrorCode::InvalidAuthoringOperation,
+                "CollisionShape2D requires a physics body parent");
+        }
+        auto parentTemplate = classifyWorld2DNodeTemplate(*parent);
+        const bool acceptsShape = parentTemplate &&
+            (*parentTemplate == World2DNodeTemplate::StaticBody2D ||
+             *parentTemplate == World2DNodeTemplate::RigidBody2D ||
+             *parentTemplate == World2DNodeTemplate::CharacterBody2D ||
+             *parentTemplate == World2DNodeTemplate::Area2D);
+        if (!acceptsShape) {
+            return Core::failure(
+                EditorErrorCode::InvalidAuthoringOperation,
+                "CollisionShape2D parent must be StaticBody2D, RigidBody2D, CharacterBody2D, or Area2D");
+        }
     }
     if (storage.size() >= document.config().entityCapacity) {
         return Core::failure(EditorErrorCode::DocumentCapacityExceeded,
@@ -338,25 +498,42 @@ try
     AssetFormat::World2DEntityDesc created{
         .stableEntityId = *stableId,
         .parentStableEntityId = parentStableId,
+        .nodeKind = static_cast<AssetFormat::World2DNodeKind>(nodeTemplate),
     };
     switch (nodeTemplate) {
-    case World2DNodeTemplate::Empty:
+    case World2DNodeTemplate::Node2D:
+    case World2DNodeTemplate::Marker2D:
         break;
-    case World2DNodeTemplate::Sprite:
+    case World2DNodeTemplate::Sprite2D:
         created.sprite.emplace().spriteId = assets.spriteId;
         break;
-    case World2DNodeTemplate::AnimatedSprite:
+    case World2DNodeTemplate::AnimatedSprite2D:
         created.sprite.emplace().spriteId = assets.spriteId;
         created.spriteAnimation.emplace().clipId = assets.animationClipId;
         break;
-    case World2DNodeTemplate::Camera:
+    case World2DNodeTemplate::TileMap2D:
+    case World2DNodeTemplate::FxEmitter2D:
+    case World2DNodeTemplate::NavigationRegion2D:
+    case World2DNodeTemplate::AudioPlayer2D:
+        created.resource.emplace().assetId = assets.resourceId;
+        break;
+    case World2DNodeTemplate::Camera2D:
         created.camera.emplace();
         break;
-    case World2DNodeTemplate::PointLight:
+    case World2DNodeTemplate::PointLight2D:
         created.pointLight.emplace();
         break;
-    case World2DNodeTemplate::ShadowOccluder:
+    case World2DNodeTemplate::ShadowOccluder2D:
         created.shadowOccluder.emplace();
+        break;
+    case World2DNodeTemplate::StaticBody2D:
+    case World2DNodeTemplate::RigidBody2D:
+    case World2DNodeTemplate::CharacterBody2D:
+    case World2DNodeTemplate::Area2D:
+        created.physicsBody.emplace();
+        break;
+    case World2DNodeTemplate::CollisionShape2D:
+        created.physicsShape.emplace();
         break;
     }
     if (auto status = document.upsertEntity(created); !status) {
@@ -366,6 +543,45 @@ try
         .primaryStableId = *stableId,
         .affectedItemCount = 1,
     };
+}
+catch (const std::bad_alloc&)
+{
+    return sceneOperationAllocationFailure();
+}
+
+Core::Status renameWorld2DNode(World2DAuthoringDocument& document,
+                               Core::u32 stableEntityId,
+                               std::string_view name)
+try
+{
+    if (name.empty() || name.size() > AssetFormat::World2DSnapshotWire::MaximumNameBytes ||
+        !Core::isStrictUtf8WithoutNul(name)) {
+        return Core::failure(EditorErrorCode::InvalidAuthoringOperation,
+                             "World2D node name must be non-empty valid UTF-8");
+    }
+    std::vector<AssetFormat::World2DEntityDesc> storage;
+    auto snapshot = document.parseCurrentSnapshot(storage);
+    if (!snapshot) {
+        return Core::failure(std::move(snapshot.error()));
+    }
+    const auto target = std::find_if(
+        storage.begin(), storage.end(), [stableEntityId](const auto& entity) {
+            return entity.stableEntityId == stableEntityId;
+        });
+    if (target == storage.end()) {
+        return Core::failure(EditorErrorCode::EntityNotFound,
+                             "Editor scene node to rename was not found");
+    }
+    if (target->name == name) {
+        return Core::success();
+    }
+    target->name.assign(name.data(), name.size());
+    return document.replace({
+        .entities = storage,
+        .gameplaySchema = snapshot->gameplaySchema,
+        .gameplayVersion = snapshot->gameplayVersion,
+        .gameplayBytes = snapshot->gameplayBytes,
+    });
 }
 catch (const std::bad_alloc&)
 {
@@ -452,6 +668,48 @@ catch (const std::bad_alloc&)
     return sceneOperationAllocationFailure();
 }
 
+Core::Status renameWorld3DNode(World3DAuthoringDocument& document,
+                               Core::u32 stableNodeId,
+                               std::string_view name)
+try
+{
+    if (name.empty() || name.size() > AssetFormat::PrefabWire::MaximumNameBytes ||
+        !Core::isStrictUtf8WithoutNul(name)) {
+        return Core::failure(EditorErrorCode::InvalidAuthoringOperation,
+                             "World3D node name must be non-empty valid UTF-8");
+    }
+    std::vector<AssetFormat::PrefabNodeView> storage;
+    auto prefab = document.parseCurrentPrefab(storage);
+    if (!prefab) {
+        return Core::failure(std::move(prefab.error()));
+    }
+    const auto target = std::find_if(
+        storage.begin(), storage.end(), [stableNodeId](const auto& node) {
+            return node.stableNodeId == stableNodeId;
+        });
+    if (target == storage.end()) {
+        return Core::failure(EditorErrorCode::EntityNotFound,
+                             "Editor scene node to rename was not found");
+    }
+    if (target->name == name) {
+        return Core::success();
+    }
+    std::vector<AssetFormat::PrefabNodeDesc> nodes;
+    nodes.reserve(storage.size());
+    for (const auto& node : storage) {
+        auto desc = toPrefabNodeDesc(node);
+        if (desc.stableNodeId == stableNodeId) {
+            desc.name.assign(name.data(), name.size());
+        }
+        nodes.push_back(std::move(desc));
+    }
+    return document.replace({.nodes = nodes});
+}
+catch (const std::bad_alloc&)
+{
+    return sceneOperationAllocationFailure();
+}
+
 Core::Status reparentWorld2DNode(World2DAuthoringDocument& document,
                                    Core::u32 stableEntityId,
                                    Core::u32 newParentStableId)
@@ -466,9 +724,12 @@ try
                                [stableEntityId](const auto& entity) {
                                    return entity.stableEntityId == stableEntityId;
                                });
+    const AssetFormat::World2DEntityDesc* newParent =
+        newParentStableId != 0
+            ? findWorld2DEntity(storage, newParentStableId)
+            : nullptr;
     if (target == storage.end() ||
-        (newParentStableId != 0 &&
-         findWorld2DEntity(storage, newParentStableId) == nullptr)) {
+        (newParentStableId != 0 && newParent == nullptr)) {
         return Core::failure(EditorErrorCode::EntityNotFound,
                              "Editor scene reparent item or parent was not found");
     }
@@ -481,6 +742,13 @@ try
     }
     if (target->parentStableEntityId == newParentStableId) {
         return Core::success();
+    }
+    if (target->nodeKind == AssetFormat::World2DNodeKind::CollisionShape2D &&
+        (newParent == nullptr ||
+         !isWorld2DPhysicsBodyNodeKind(newParent->nodeKind))) {
+        return Core::failure(
+            EditorErrorCode::InvalidAuthoringOperation,
+            "CollisionShape2D parent must be StaticBody2D, RigidBody2D, CharacterBody2D, or Area2D");
     }
     target->parentStableEntityId = newParentStableId;
     return publishWorld2DHierarchy(document, std::move(storage), *snapshot);
@@ -655,7 +923,8 @@ try
     }
     const EditorNodeTemplateInfo& info =
         World3DNodeTemplateRegistry[static_cast<Core::usize>(nodeTemplate)];
-    if (info.requiresMeshAssets && (!assets.meshId || !assets.materialId)) {
+    if (info.requiredMeshAssetKind != AssetFormat::AssetKind::Invalid &&
+        (!assets.meshId || !assets.materialId)) {
         return Core::failure(
             EditorErrorCode::InvalidAuthoringOperation,
             "Editor scene node template requires paired mesh and material assets");
@@ -683,13 +952,30 @@ try
     if (!stableId) {
         return Core::failure(std::move(stableId.error()));
     }
-    const bool withMesh = nodeTemplate == World3DNodeTemplate::Mesh;
-    if (auto status = document.upsertNode({
-            .stableNodeId = *stableId,
-            .parentIndex = parentIndex,
-            .meshId = withMesh ? assets.meshId : Core::AssetId{},
-            .materialId = withMesh ? assets.materialId : Core::AssetId{},
-        }); !status) {
+    AssetFormat::PrefabNodeDesc created{
+        .stableNodeId = *stableId,
+        .parentIndex = parentIndex,
+        .nodeKind = static_cast<AssetFormat::PrefabNodeKind>(nodeTemplate),
+    };
+    switch (nodeTemplate) {
+    case World3DNodeTemplate::Node3D:
+    case World3DNodeTemplate::Marker3D:
+        break;
+    case World3DNodeTemplate::Mesh3D:
+    case World3DNodeTemplate::SkinnedMesh3D:
+        created.meshId = assets.meshId;
+        created.materialId = assets.materialId;
+        break;
+    case World3DNodeTemplate::Camera3D:
+        created.camera.emplace();
+        break;
+    case World3DNodeTemplate::DirectionalLight3D:
+    case World3DNodeTemplate::PointLight3D:
+    case World3DNodeTemplate::SpotLight3D:
+        created.light.emplace();
+        break;
+    }
+    if (auto status = document.upsertNode(created); !status) {
         return Core::failure(std::move(status.error()));
     }
     return EditorSceneOperationResult{

@@ -121,6 +121,31 @@ auto EditorWorkspaceState::createNodeFromSceneAddRequest(
                 assets.animationClipId = editorAssetId(0x10U);
             }
         }
+        if (info.requiredResourceAssetKind !=
+            Tina::AssetFormat::AssetKind::Invalid) {
+            assets.resourceId = selectedProjectAssetIdOfKind(
+                info.requiredResourceAssetKind);
+            if (!assets.resourceId) {
+                switch (info.requiredResourceAssetKind) {
+                case Tina::AssetFormat::AssetKind::TileMap:
+                    assets.resourceId = editorAssetId(0x42U);
+                    break;
+                case Tina::AssetFormat::AssetKind::NavigationGrid2D:
+                    assets.resourceId = editorAssetId(0x61U);
+                    break;
+                case Tina::AssetFormat::AssetKind::Fx2D:
+                    assets.resourceId = editorAssetId(0x62U);
+                    break;
+                case Tina::AssetFormat::AssetKind::AudioClip:
+                    assets.resourceId = editorAssetId(0x63U);
+                    break;
+                default:
+                    return Tina::Core::failure(
+                        Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                        "Create Node resource kind has no preview fallback");
+                }
+            }
+        }
         added = Tina::Editor::addWorld2DNode(
             document_,
             static_cast<Tina::Editor::World2DNodeTemplate>(slot),
@@ -130,11 +155,16 @@ auto EditorWorkspaceState::createNodeFromSceneAddRequest(
         const auto& info = registry[slot];
         createdKind = info.displayName;
         Tina::Editor::World3DNodeTemplateAssets assets{};
-        if (info.requiresMeshAssets) {
+        if (info.requiredMeshAssetKind !=
+            Tina::AssetFormat::AssetKind::Invalid) {
             assets.meshId = selectedProjectAssetIdOfKind(
-                Tina::AssetFormat::AssetKind::StaticMesh);
+                info.requiredMeshAssetKind);
             if (!assets.meshId) {
-                assets.meshId = editorAssetId(0x31U);
+                assets.meshId = editorAssetId(
+                    info.requiredMeshAssetKind ==
+                            Tina::AssetFormat::AssetKind::SkinnedMesh
+                        ? 0x34U
+                        : 0x31U);
             }
             assets.materialId = selectedProjectAssetIdOfKind(
                 Tina::AssetFormat::AssetKind::Material);
@@ -233,6 +263,7 @@ auto EditorWorkspaceState::refreshSceneAddModalUi(
     for (Tina::Core::usize slot = 0; slot < registry.size(); ++slot) {
         visibleTemplates[slot] =
             matchesFilter(registry[slot].displayName) ||
+            matchesFilter(registry[slot].category) ||
             matchesFilter(registry[slot].description);
         if (visibleTemplates[slot] && !firstVisibleSlot.has_value()) {
             firstVisibleSlot = slot;
@@ -248,6 +279,7 @@ auto EditorWorkspaceState::refreshSceneAddModalUi(
     }
     sceneAddTemplateIndex_ = static_cast<u32>(selected);
 
+    Tina::Core::usize visibleIndex = 0U;
     for (Tina::Core::usize slot = 0; slot < sceneAddTemplateButtons_.size();
          ++slot) {
         const UI::UINodeId button = sceneAddTemplateButtons_[slot];
@@ -256,21 +288,36 @@ auto EditorWorkspaceState::refreshSceneAddModalUi(
         if (slot >= registry.size()) {
             if (auto status = tree.setLayoutStyle(
                     button,
-                    sceneAddTemplateRowLayout(UI::UIVisibility::Collapsed));
+                    sceneAddTemplateRowLayout(UI::UIVisibility::Collapsed, 0U));
                 !status) {
                 return status;
             }
             continue;
         }
+        const Tina::Core::usize compactIndex = visibleTemplates[slot]
+            ? visibleIndex++ : 0U;
         if (auto status = tree.setLayoutStyle(
-                button, sceneAddTemplateRowLayout(visibleTemplates[slot]
-                    ? UI::UIVisibility::Visible : UI::UIVisibility::Collapsed));
+                button, sceneAddTemplateRowLayout(
+                    visibleTemplates[slot] ? UI::UIVisibility::Visible
+                                           : UI::UIVisibility::Collapsed,
+                    compactIndex));
             !status) {
             return status;
         }
-        if (auto status = tree.setText(button, registry[slot].displayName);
-            !status) {
-            return status;
+        try {
+            std::string label;
+            label.reserve(registry[slot].category.size() +
+                          registry[slot].displayName.size() + 5U);
+            label += registry[slot].category;
+            label += "  /  ";
+            label += registry[slot].displayName;
+            if (auto status = tree.setText(button, label); !status) {
+                return status;
+            }
+        } catch (const std::bad_alloc&) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::OutOfMemory,
+                "Create Node catalog label allocation failed");
         }
         if (auto status = tree.setRadioButtonSelected(
                 button, slot == selected);
@@ -281,8 +328,22 @@ auto EditorWorkspaceState::refreshSceneAddModalUi(
 
     // Asset-backed node kinds use the Project Assets selection, then the
     // built-in preview asset, so every creation row remains reachable.
+    bool selectedParentAcceptsCreation = firstVisibleSlot.has_value();
+    if (selectedParentAcceptsCreation && world2D &&
+        selected == static_cast<Tina::Core::usize>(
+                        Tina::Editor::World2DNodeTemplate::CollisionShape2D)) {
+        const u32 parentStableId = pendingSceneAddRequest_.has_value()
+                                       ? pendingSceneAddRequest_->parentStableId
+                                       : 0U;
+        const EditorHierarchyRow* parentRow = hierarchyRow(parentStableId);
+        selectedParentAcceptsCreation = parentRow != nullptr &&
+            (parentRow->kindName == "StaticBody2D" ||
+             parentRow->kindName == "RigidBody2D" ||
+             parentRow->kindName == "CharacterBody2D" ||
+             parentRow->kindName == "Area2D");
+    }
     if (auto status = tree.setEnabled(sceneAddCreateButton_,
-                                      firstVisibleSlot.has_value());
+                                      selectedParentAcceptsCreation);
         !status) {
         return status;
     }
@@ -387,37 +448,34 @@ auto EditorWorkspaceState::applyHierarchyRename(
         authoringFeedback_ = "Rename rejected: enter a non-empty UTF-8 name";
         return Tina::Core::success();
     }
-    try {
-        const auto existing = std::find_if(
-            hierarchyNameOverrides_.begin(), hierarchyNameOverrides_.end(),
-            [this](const EditorHierarchyNameOverride& candidate) {
-                return candidate.stableId == hierarchyRenameStableId_;
-            });
-        if (existing != hierarchyNameOverrides_.end()) {
-            existing->name.assign(text->data(), text->size());
-        } else {
-            hierarchyNameOverrides_.push_back({
-                .stableId = hierarchyRenameStableId_,
-                .name = std::string{text->data(), text->size()},
-            });
+    const u64 revisionBefore = activeDocumentRevision();
+    const Tina::Core::Status renameStatus = workspaceMode_ == WorkspaceMode::World2D
+        ? Tina::Editor::renameWorld2DNode(
+              document_, hierarchyRenameStableId_, *text)
+        : Tina::Editor::renameWorld3DNode(
+              document3D_, hierarchyRenameStableId_, *text);
+    if (!renameStatus) {
+        if (renameStatus.error().code ==
+                Tina::Editor::EditorErrorCode::InvalidAuthoringOperation ||
+            renameStatus.error().code == Tina::Editor::EditorErrorCode::EntityNotFound) {
+            authoringFeedback_ = "Rename rejected: ";
+            authoringFeedback_ += renameStatus.error().message;
+            return Tina::Core::success();
         }
-    } catch (const std::bad_alloc&) {
-        return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
-                                   "Hierarchy rename allocation failed");
+        return renameStatus;
     }
     const u32 renamedStableId = hierarchyRenameStableId_;
-    if (auto status = rebuildHierarchyModel(); !status) {
-        return status;
+    if (activeDocumentRevision() != revisionBefore) {
+        ++counters_.authoringEdits;
+        if (auto previewStatus = validateRuntimePreview(); !previewStatus) {
+            return previewStatus;
+        }
+        authoringFeedback_ = "Scene node renamed as one canonical revision";
     }
-    if (auto status = tree.invalidateTreeViewItems(hierarchyTree_); !status) {
-        return status;
-    }
-    authoringFeedback_ = "Scene node renamed for this Editor session";
     if (auto status = hideHierarchyRename(tree); !status) {
         return status;
     }
-    return tree.setTreeViewSelectedIndex(
-        hierarchyTree_, visibleHierarchyIndex(renamedStableId).value_or(0U));
+    return refreshHierarchyTree(tree, renamedStableId);
 }
 
 auto EditorWorkspaceState::processPendingHierarchyRename(
@@ -921,7 +979,7 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
             authoringFeedback_ = "Canonical World2D document saved atomically";
             break;
         case Tina::Editor::EditorDocumentKind::World3D:
-            authoringFeedback_ = "Canonical Prefab v2 document saved atomically";
+            authoringFeedback_ = "Canonical Prefab v4 document saved atomically";
             break;
         case Tina::Editor::EditorDocumentKind::TileMap2D:
             authoringFeedback_ = "Canonical TileMap root and chunks saved root-last";
@@ -1791,6 +1849,8 @@ auto EditorWorkspaceState::moveSelectedPositiveX() -> Tina::Core::Status{
         Tina::AssetFormat::PrefabNodeDesc edited{
             .stableNodeId = node->stableNodeId,
             .parentIndex = node->parentIndex,
+            .nodeKind = node->nodeKind,
+            .name = node->name,
             .positionX = node->positionX + 1.0F,
             .positionY = node->positionY,
             .positionZ = node->positionZ,
@@ -1804,6 +1864,8 @@ auto EditorWorkspaceState::moveSelectedPositiveX() -> Tina::Core::Status{
             .meshId = node->meshId,
             .materialId = node->materialId,
             .visible = node->visible,
+            .camera = node->camera,
+            .light = node->light,
         };
         return document3D_.upsertNode(edited);
     }

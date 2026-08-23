@@ -328,7 +328,7 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
             documentItemLabel = "entities";
             break;
         case Tina::Editor::EditorDocumentKind::World3D:
-            documentKindLabel = "Prefab v2";
+        documentKindLabel = "Prefab v4";
             documentItemLabel = "nodes";
             break;
         case Tina::Editor::EditorDocumentKind::TileMap2D:

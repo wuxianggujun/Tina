@@ -660,18 +660,28 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
             [nodeTemplate = *primaryTemplate](
                 World2DNodePropertyGroup group) noexcept {
                 switch (nodeTemplate) {
-                case Tina::Editor::World2DNodeTemplate::Sprite:
+                case Tina::Editor::World2DNodeTemplate::Sprite2D:
                     return group == World2DNodePropertyGroup::Rendering;
-                case Tina::Editor::World2DNodeTemplate::AnimatedSprite:
+                case Tina::Editor::World2DNodeTemplate::AnimatedSprite2D:
                     return group == World2DNodePropertyGroup::Rendering ||
                            group == World2DNodePropertyGroup::Animation;
-                case Tina::Editor::World2DNodeTemplate::Camera:
+                case Tina::Editor::World2DNodeTemplate::Camera2D:
                     return group == World2DNodePropertyGroup::Camera;
-                case Tina::Editor::World2DNodeTemplate::PointLight:
+                case Tina::Editor::World2DNodeTemplate::PointLight2D:
                     return group == World2DNodePropertyGroup::Light;
-                case Tina::Editor::World2DNodeTemplate::ShadowOccluder:
+                case Tina::Editor::World2DNodeTemplate::ShadowOccluder2D:
                     return group == World2DNodePropertyGroup::Occlusion;
-                case Tina::Editor::World2DNodeTemplate::Empty:
+                case Tina::Editor::World2DNodeTemplate::Node2D:
+                case Tina::Editor::World2DNodeTemplate::Marker2D:
+                case Tina::Editor::World2DNodeTemplate::TileMap2D:
+                case Tina::Editor::World2DNodeTemplate::FxEmitter2D:
+                case Tina::Editor::World2DNodeTemplate::StaticBody2D:
+                case Tina::Editor::World2DNodeTemplate::RigidBody2D:
+                case Tina::Editor::World2DNodeTemplate::CharacterBody2D:
+                case Tina::Editor::World2DNodeTemplate::Area2D:
+                case Tina::Editor::World2DNodeTemplate::CollisionShape2D:
+                case Tina::Editor::World2DNodeTemplate::NavigationRegion2D:
+                case Tina::Editor::World2DNodeTemplate::AudioPlayer2D:
                     return false;
                 }
                 return false;
@@ -1041,7 +1051,7 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
         return Tina::Core::failure(std::move(primaryTemplate.error()));
     }
     bool uniformMeshNodes =
-        *primaryTemplate == Tina::Editor::World3DNodeTemplate::Mesh;
+        *primaryTemplate == Tina::Editor::World3DNodeTemplate::Mesh3D;
     bool visibilityMixed = false;
     bool meshMixed = false;
     bool materialMixed = false;
@@ -1062,7 +1072,7 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
             return Tina::Core::failure(std::move(nodeTemplate.error()));
         }
         uniformMeshNodes =
-            *nodeTemplate == Tina::Editor::World3DNodeTemplate::Mesh;
+            *nodeTemplate == Tina::Editor::World3DNodeTemplate::Mesh3D;
         if (uniformMeshNodes) {
             visibilityMixed = visibilityMixed ||
                               selectedNode->visible != primaryNode->visible;

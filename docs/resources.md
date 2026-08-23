@@ -419,7 +419,7 @@ joint target 的 LINEAR/STEP track。glTF authored `TANGENT`
 优先，具备 NORMAL+UV 但缺 tangent 时由 PRIVATE MikkTSpace 生成，缺 NORMAL/UV 的 primitive 显式失败。
 Material v2（40B）为 `UnlitBaseColor`，携带 `baseColor` RGBA、`metallicFactor`/`roughnessFactor`、
 `doubleSided` 与显式 `Opaque`/`Blend` alpha mode，以及可选 Texture2D dependency 标志
-（baseColor / metallicRoughness / normal，AssetId 在 Cooked deps 中按 flag 顺序）；Prefab v2 在每个 node
+（baseColor / metallicRoughness / normal，AssetId 在 Cooked deps 中按 flag 顺序）；Prefab v4 在每个 node
 payload 中直接保存 Mesh/Material `AssetId`，Cooked dependency 只保存按 `AssetId` 排序去重的完整引用集合，
 不再通过 dependency 位置推断 node identity。alpha mode 是唯一 pass intent；baseColor alpha 与纹理 alpha
 只参与着色/混合，不切换 pass。当前 Opaque3D/Transparent3D 已采样 baseColor/MR/normal、

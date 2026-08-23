@@ -704,6 +704,8 @@ auto EditorWorkspaceState::commitViewportGizmoTransform(const ViewportTransformT
                 Tina::AssetFormat::PrefabNodeDesc candidate{
                     .stableNodeId = node.stableNodeId,
                     .parentIndex = node.parentIndex,
+                    .nodeKind = node.nodeKind,
+                    .name = node.name,
                     .positionX = node.positionX,
                     .positionY = node.positionY,
                     .positionZ = node.positionZ,
@@ -717,6 +719,8 @@ auto EditorWorkspaceState::commitViewportGizmoTransform(const ViewportTransformT
                     .meshId = node.meshId,
                     .materialId = node.materialId,
                     .visible = node.visible,
+                    .camera = node.camera,
+                    .light = node.light,
                 };
                 const auto target = std::find_if(
                     targets.begin(), targets.end(),

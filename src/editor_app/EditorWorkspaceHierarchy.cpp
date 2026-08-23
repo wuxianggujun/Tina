@@ -174,7 +174,7 @@ auto EditorWorkspaceState::hierarchyDisplayKind(
     if (stableId == 0U) {
         return workspaceMode_ == WorkspaceMode::World2D
                    ? std::string_view{"World2D document"}
-                   : std::string_view{"Prefab v2 document"};
+                   : std::string_view{"Prefab v4 document"};
     }
     // Reports the node template so the Inspector header agrees with both the
     // hierarchy label and the kind the user picked at creation time.
@@ -192,7 +192,7 @@ auto EditorWorkspaceState::hierarchyDisplayNote(
     if (stableEntityIdForHierarchyItem(key) == 0U) {
         return workspaceMode_ == WorkspaceMode::World2D
                    ? std::string_view{"Canonical World2D scene root."}
-                   : std::string_view{"Canonical Prefab v2 scene root."};
+                   : std::string_view{"Canonical Prefab v4 scene root."};
     }
         return workspaceMode_ == WorkspaceMode::World2D
                ? std::string_view{"Stable Node2D identity in the scene hierarchy."}
@@ -264,15 +264,11 @@ auto EditorWorkspaceState::hierarchyEntityLabel(
 }
 
 auto EditorWorkspaceState::hierarchyLabelForStableId(
-    std::string_view kindName, u32 stableId) const -> std::string
+    std::string_view kindName, u32 stableId,
+    std::string_view authoredName) const -> std::string
 {
-    const auto override = std::find_if(
-        hierarchyNameOverrides_.begin(), hierarchyNameOverrides_.end(),
-        [stableId](const EditorHierarchyNameOverride& candidate) {
-            return candidate.stableId == stableId;
-        });
-    if (override != hierarchyNameOverrides_.end() && !override->name.empty()) {
-        return override->name;
+    if (!authoredName.empty()) {
+        return std::string{authoredName};
     }
     return hierarchyEntityLabel(kindName, stableId);
 }
@@ -371,7 +367,8 @@ auto EditorWorkspaceState::rebuildHierarchyModel() -> Tina::Core::Status{
                     .level = current.level,
                     .expandable = !children[current.index].empty(),
                     .label = hierarchyLabelForStableId(*kindName,
-                                                       entity.stableEntityId),
+                                                       entity.stableEntityId,
+                                                       entity.name),
                     .kindName = *kindName,
                 });
                 for (auto child = children[current.index].rbegin();
@@ -458,7 +455,8 @@ auto EditorWorkspaceState::rebuildHierarchyModel() -> Tina::Core::Status{
                     .parentStableId = parentStableId,
                     .level = current.level,
                     .expandable = !children[current.index].empty(),
-                    .label = hierarchyLabelForStableId(*kindName, node.stableNodeId),
+                    .label = hierarchyLabelForStableId(*kindName, node.stableNodeId,
+                                                       node.name),
                     .kindName = *kindName,
                 });
                 for (auto child = children[current.index].rbegin();

@@ -646,8 +646,8 @@ hidden component 不调用任何 resolver/provider。Scene 同步把 palette 交
 hierarchy global pose 与 `globalPose * inverseBind` skinning matrices。Once/Loop/PingPong、play/pause/restart/stop、
 finite playback speed 均为显式状态；`setClip()` 事务替换同 skeleton joint count 的 clip，失败保留旧 clip/pose。
 
-`captureWorld2DSnapshotBytes()` 将 owner-thread World 的 LocalTransform 与五类2D组件（含 SpriteAnimation
-绑定）写入唯一现行 schema-v2 snapshot；调用方 callback 提供稳定 entity ID，并把 Sprite/normal Texture weak handle 映射为
+`captureWorld2DSnapshotBytes()` 将 owner-thread World 的节点名称、LocalTransform 与五类2D组件（含 SpriteAnimation
+绑定）写入唯一现行 schema-v4 snapshot（448-byte named entity record）；调用方 callback 提供稳定 entity ID，并把 Sprite/normal Texture weak handle 映射为
 稳定 `AssetId`。capture 按 hierarchy depth、stable ID 确定性排序，拒绝重复/零 ID、损坏层级和任何3D组件，
 不会静默丢字段。`instantiateWorld2DSnapshot()` 在修改目标 World 前预检容量、全部组件与 AssetId→weak handle
 解析；失败销毁本次创建的完整集合并保留既有实体。Runtime `EntityId`/generation、AssetHandle、Lease、Render
@@ -846,7 +846,7 @@ parent、非有限 node payload、旧 schema、document 容量或 history byte �
 `AssetFormat::parseWorld2DSnapshot()`，随后由 `Scene::instantiateWorld2DSnapshot()` 消费。借用 bytes 在下一次成功
 edit/undo/redo 后失效。完整场景、容量和失败契约见 [Editor 2D / 3D](editor-2d.md)。
 
-`World3DAuthoringDocument::Create(config)` 以当前 Prefab v2 创建 move-only canonical owner，提供
+`World3DAuthoringDocument::Create(config)` 以当前 Prefab v4 创建 move-only canonical owner，提供
 `replace()`、`loadPayload()`、`upsertNode()`、`eraseNodeSubtree()` 与相同的 bounded undo/redo 原子性。
 `payloadBytes()` 是唯一 3D preview/cook 输入；stable node ID、topological parent index、完整 TRS、Mesh/Material
 `AssetId` 与 visibility 都由当前 Prefab writer/parser 验证。EditorApp 的 3D Inspector 编辑完整 TRS XYZ，提交时一次
@@ -887,7 +887,7 @@ EditorApp 把该 document 接入独立 Timeline，并在 Asset/Scene 边界解�
 自动创建父目录。失败返回底层 Core IO error + `saveWorld2DAuthoringDocument=replace` context，不改变 document、
 revision/history 或已存在的目标文件；该 API 不引入 editor-only wire format。
 
-`loadWorld3DAuthoringDocument()` / `saveWorld3DAuthoringDocument()` 对 Prefab v2 提供同一读取上限、clean baseline、
+`loadWorld3DAuthoringDocument()` / `saveWorld3DAuthoringDocument()` 对 Prefab v4 提供同一读取上限、clean baseline、
 atomic sibling replace 与失败不变契约。
 
 `saveSpriteAnimationAuthoringDocument(utf8Path, document, platform)` 把当前 `cookPreview(platform)` 的唯一 canonical
@@ -903,7 +903,7 @@ glTF/WAV/image；cgltf/stb_image 与源文件解析只在 Cooker/tool。SkinnedM
 4 influences、最多 256 joints；AnimationClip3D v1 冻结为最多 768 tracks、4096 keys/track、262144 total keys、
 1048576 value floats、3600 秒，只有 LINEAR/STEP。
 
-Prefab 当前唯一 schema 为 v2：node payload 自带 Mesh/Material `AssetId`；Cooked dependency 是按 `AssetId`
+Prefab 当前唯一 schema 为 v4：208-byte named node payload 自带 Mesh/Material `AssetId`；Cooked dependency 是按 `AssetId`
 排序去重的 required 引用集合，mesh dependency 可明确声明 `StaticMesh` 或 `SkinnedMesh`；typed parser 对 payload
 与 dependency 完整对账，不按 dependency 位置恢复 node identity。
 

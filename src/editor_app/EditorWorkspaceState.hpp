@@ -2145,12 +2145,15 @@ parseInspectorTransformValue(std::string_view text, std::string_view fieldName)
     return style;
 }
 [[nodiscard]] inline UI::UILayoutStyle sceneAddTemplateRowLayout(
-    UI::UIVisibility visibility) noexcept
+    UI::UIVisibility visibility, Tina::Core::usize visibleIndex = 0U) noexcept
 {
     constexpr UI::UITheme theme =
         UI::makeModernDesktopTheme(UI::UIColorScheme::Dark, UI::UIDensity::Compact);
     UI::UILayoutStyle style = fillWidth(theme.controls.buttonHeight);
     style.visibility = visibility;
+    style.gridItem.row = static_cast<u8>(visibleIndex / 2U);
+    style.gridItem.column = static_cast<u8>(visibleIndex % 2U);
+    style.gridItem.alignSelf = UI::UIAlignSelf::Stretch;
     return style;
 }
 // One row per node template. Sized for the widest registry (World2D).
@@ -2187,10 +2190,6 @@ struct EditorHierarchyRow final {
     // Node template display name, shared with the creation picker so the
     // hierarchy and the Inspector report the same kind vocabulary.
     std::string_view kindName{};
-};
-struct EditorHierarchyNameOverride final {
-    u32 stableId = 0;
-    std::string name{};
 };
 struct SceneDeleteConfirmation final {
     Tina::Editor::EditorDocumentKey documentKey{};
@@ -2607,6 +2606,7 @@ createAuthoringDocuments(const EditorLaunchOptions& options)
         Tina::AssetFormat::World2DEntityDesc{
             .stableEntityId = 2,
             .parentStableEntityId = 1,
+            .nodeKind = Tina::AssetFormat::World2DNodeKind::Camera2D,
             .positionY = 4.0F,
             .camera = Tina::AssetFormat::World2DCameraDesc{
                 .fixedWorldHeightMeters = PreviewWorldHeight,
@@ -2615,6 +2615,7 @@ createAuthoringDocuments(const EditorLaunchOptions& options)
         Tina::AssetFormat::World2DEntityDesc{
             .stableEntityId = 3,
             .parentStableEntityId = 1,
+            .nodeKind = Tina::AssetFormat::World2DNodeKind::Sprite2D,
             .sprite = Tina::AssetFormat::World2DSpriteDesc{
                 .spriteId = editorAssetId(0x22U),
                 .overrides = Tina::AssetFormat::World2DSpriteOverrideFlags::Size,
@@ -2628,6 +2629,7 @@ createAuthoringDocuments(const EditorLaunchOptions& options)
         Tina::AssetFormat::World2DEntityDesc{
             .stableEntityId = 6,
             .parentStableEntityId = 1,
+            .nodeKind = Tina::AssetFormat::World2DNodeKind::PointLight2D,
             .positionX = 2.0F,
             .positionY = 2.0F,
             .pointLight = Tina::AssetFormat::World2DPointLightDesc{},
@@ -2683,6 +2685,7 @@ createAuthoringDocuments(const EditorLaunchOptions& options)
         Tina::AssetFormat::PrefabNodeDesc{
             .stableNodeId = 3,
             .parentIndex = 0,
+            .nodeKind = Tina::AssetFormat::PrefabNodeKind::Mesh3D,
             .positionZ = -1.0F,
             .scaleX = 1.15F,
             .scaleY = 1.15F,
@@ -2693,6 +2696,7 @@ createAuthoringDocuments(const EditorLaunchOptions& options)
         Tina::AssetFormat::PrefabNodeDesc{
             .stableNodeId = 6,
             .parentIndex = 0,
+            .nodeKind = Tina::AssetFormat::PrefabNodeKind::Mesh3D,
             .positionX = -2.3F,
             .positionZ = -0.4F,
             .scaleX = 0.9F,
@@ -2704,6 +2708,7 @@ createAuthoringDocuments(const EditorLaunchOptions& options)
         Tina::AssetFormat::PrefabNodeDesc{
             .stableNodeId = 7,
             .parentIndex = 0,
+            .nodeKind = Tina::AssetFormat::PrefabNodeKind::Mesh3D,
             .positionX = 2.3F,
             .positionZ = -1.6F,
             .scaleX = 0.8F,
@@ -2992,7 +2997,6 @@ class EditorWorkspaceState final : public Tina::IGameState {
                   createEditorImportStageConfig(&sourceImportMemory_)))
     {
         hierarchyRows_.reserve(AuthoringEntityCapacity + 1U);
-        hierarchyNameOverrides_.reserve(AuthoringEntityCapacity);
         collapsedHierarchyIds_.reserve(AuthoringEntityCapacity + 1U);
         activeProjectWorkspace_ = std::move(assetResources_.initialProjectWorkspace);
         sourceImportStartPending_ = options_.sourceImport.importOnStart;
@@ -3261,6 +3265,9 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] static Tina::Core::Result<Tina::Render::FrameResourceRef>
     resolvePreviewMesh(void* userData, Tina::Asset::AssetHandle asset,
                        Tina::Render::FrameResourceSink& sink) noexcept;
+    [[nodiscard]] static Tina::Core::Result<Tina::Render::FrameResourceRef>
+    resolvePreviewSkinnedMesh(void* userData, Tina::Asset::AssetHandle asset,
+                               Tina::Render::FrameResourceSink& sink) noexcept;
     [[nodiscard]] static Tina::Core::Result<Tina::Render::FrameResourceRef>
     resolvePreviewMaterial(void* userData, Tina::Asset::AssetHandle asset,
                            Tina::Render::FrameResourceSink& sink) noexcept;
@@ -3556,7 +3563,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] static std::string hierarchyEntityLabel(
         std::string_view kindName, u32 stableId);
     [[nodiscard]] std::string hierarchyLabelForStableId(
-        std::string_view kindName, u32 stableId) const;
+        std::string_view kindName, u32 stableId,
+        std::string_view authoredName) const;
     [[nodiscard]] Tina::Core::Status rebuildHierarchyModel();
     [[nodiscard]] Tina::Core::Status refreshHierarchyTree(
         Tina::PrimaryWindowUITreeUpdater& tree, u32 preferredStableId);
@@ -3852,7 +3860,6 @@ class EditorWorkspaceState final : public Tina::IGameState {
     std::array<UI::UINodeId, AnimationVisibleFrameSlots> animationFrameButtons_{};
     UI::UITreeViewItemKey selectionKey_ = UI::InvalidUITreeViewItemKey;
     std::vector<EditorHierarchyRow> hierarchyRows_{};
-    std::vector<EditorHierarchyNameOverride> hierarchyNameOverrides_{};
     std::vector<u32> collapsedHierarchyIds_{};
     std::string hierarchyFilterUtf8_{};
     std::string sceneAddFilterUtf8_{};
