@@ -6,6 +6,7 @@ add_library(tina_core STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/core/base/SourceLocation.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/base/Types.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/diagnostics/Assert.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/diagnostics/CrashHandler.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/diagnostics/DiagnosticChannel.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/diagnostics/Diagnostics.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/diagnostics/LogLevel.hpp
@@ -30,6 +31,7 @@ add_library(tina_core STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/core/text/Utf8.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/trace/Trace.hpp
     diagnostics/Assert.cpp
+    diagnostics/CrashHandler.cpp
     diagnostics/Diagnostics.cpp
     hash/ContentHashDigest.cpp
     io/ReadFile.cpp
@@ -56,6 +58,10 @@ target_link_libraries(tina_core
         "$<BUILD_INTERFACE:Tina::ProjectOptions>"
         xxHash::xxhash
 )
+if (WIN32)
+    # CrashHandler resolves backtrace symbols through DbgHelp.
+    target_link_libraries(tina_core PRIVATE dbghelp)
+endif ()
 if (TINA_TRACE_BACKEND STREQUAL "tracy")
     target_link_libraries(tina_core PUBLIC Tina::TraceTracy)
     target_compile_definitions(tina_core

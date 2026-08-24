@@ -1,5 +1,6 @@
 ﻿#include "EditorWorkspaceState.hpp"
 
+#include <tina/core/diagnostics/CrashHandler.hpp>
 #include <tina/editor_app/EditorApplication.hpp>
 
 #include <algorithm>
@@ -1194,6 +1195,26 @@ using namespace Tina::EditorApp::WorkspaceInternal;
 
 int runEditorApplication(int argumentCount, char** arguments)
 {
+    // Installed before any other work: the try/catch below only sees exceptions,
+    // while std::terminate (the engine calls it in many invariant checks), an
+    // access violation, or a stack overflow would otherwise kill the process
+    // without printing anything at all.
+    //
+    // TinaEditor is a GUI subsystem binary, so stderr is usually not visible.
+    // The report file is what the user can actually read after a crash.
+    static std::string crashReportPath = [] {
+        std::error_code error;
+        const std::filesystem::path temp = std::filesystem::temp_directory_path(error);
+        const std::filesystem::path target =
+            (error ? std::filesystem::path{"."} : temp) / "tina_editor_crash.txt";
+        return pathToUtf8(target);
+    }();
+    (void)Tina::Core::Diagnostics::installCrashHandler(
+        Tina::Core::Diagnostics::CrashHandlerConfig{
+            .applicationName = "TinaEditor",
+            .reportPathUtf8 = crashReportPath,
+            .captureBacktrace = true,
+        });
     try {
         return runEditor(argumentCount, arguments);
     } catch (const std::bad_alloc&) {
