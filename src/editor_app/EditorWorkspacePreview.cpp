@@ -152,6 +152,15 @@ auto EditorWorkspaceState::preparePreviewAssetBindings() -> Tina::Core::Status{
         return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                    "Tina Editor Catalog or RenderDevice is unavailable");
     }
+    // Both registry destructors call std::terminate() when a binding is still
+    // live, so emplacing over a surviving registry would abort the process
+    // instead of surfacing an error. A prior release that failed to retire
+    // leaves the optional engaged; fail closed here and let the caller retry.
+    if (spriteBindings_.has_value() || mesh3DBindings_.has_value()) {
+        return Tina::Core::failure(
+            Tina::Asset::AssetErrorCode::CatalogReloadBusy,
+            "Preview binding rebuild requires the previous registries to be retired");
+    }
     imageResolver_.clearCatalogTextureResolver();
 
     counters_.catalogAssetsLoaded = 0;
@@ -631,6 +640,26 @@ auto EditorWorkspaceState::releasePreviewAssetBindings() noexcept -> Tina::Core:
         return Tina::Core::failure(std::move(*firstFailure));
     }
     return Tina::Core::success();
+}
+
+auto EditorWorkspaceState::releasePreviewAssetBindingsDraining() noexcept
+    -> Tina::Core::Status{
+    auto released = releasePreviewAssetBindings();
+    if (released) {
+        return Tina::Core::success();
+    }
+    Tina::Core::Error firstFailure = std::move(released.error());
+    if (Tina::Render::IRenderDevice* device = renderDeviceAccess_.get();
+        device != nullptr) {
+        (void)device->drainGpuRetirements();
+    }
+    if (assetResources_.system.has_value()) {
+        (void)assetResources_.system->drainGpuRetirements();
+    }
+    if (auto retry = releasePreviewAssetBindings(); retry) {
+        return Tina::Core::success();
+    }
+    return Tina::Core::failure(std::move(firstFailure));
 }
 
 auto EditorWorkspaceState::validateRuntimePreview() -> Tina::Core::Status{

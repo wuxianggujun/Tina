@@ -3792,6 +3792,12 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] Tina::Core::Status preparePreviewAssetBindings();
     [[nodiscard]] bool previewAssetBindingsHaveActiveFrameBorrows() const noexcept;
     [[nodiscard]] Tina::Core::Status releasePreviewAssetBindings() noexcept;
+    // Releases the preview registries, draining GPU retirements and retrying
+    // once when the first attempt fails. Retirement is asynchronous, so a
+    // single failed release does not mean the bindings are unrecoverable.
+    // Returns the first failure only if the registries are still engaged, in
+    // which case the next rebuild must not emplace over them.
+    [[nodiscard]] Tina::Core::Status releasePreviewAssetBindingsDraining() noexcept;
     [[nodiscard]] Tina::Core::Status validateRuntimePreview();
     [[nodiscard]] Tina::Core::Status validateWorld3DRuntimePreview();
     [[nodiscard]] Tina::Core::Status publishRuntimePreviewStatus(

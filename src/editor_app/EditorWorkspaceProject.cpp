@@ -626,12 +626,12 @@ auto EditorWorkspaceState::rebuildLiveCatalogPreview(
     counters_.runtimePreviewValid = false;
     counters_.catalogReady = false;
     animationPreview_.resetAnimator();
-    if (auto status = releasePreviewAssetBindings(); !status) {
+    if (auto status = releasePreviewAssetBindingsDraining(); !status) {
         return status;
     }
     if (auto status = preparePreviewAssetBindings(); !status) {
         auto error = std::move(status.error());
-        (void)releasePreviewAssetBindings();
+        (void)releasePreviewAssetBindingsDraining();
         if (auto feedback = reportAuthoringFailure(
                 "Catalog committed, but runtime preview binding rebuild failed: ",
                 error);
@@ -642,7 +642,7 @@ auto EditorWorkspaceState::rebuildLiveCatalogPreview(
     }
     if (auto status = rebuildAnimationAnimator(); !status) {
         auto error = std::move(status.error());
-        (void)releasePreviewAssetBindings();
+        (void)releasePreviewAssetBindingsDraining();
         counters_.runtimePreviewValid = false;
         if (auto feedback = reportAuthoringFailure(
                 "Catalog committed, but animation preview rebuild failed: ",
@@ -654,7 +654,7 @@ auto EditorWorkspaceState::rebuildLiveCatalogPreview(
     }
     if (auto status = validateRuntimePreview(); !status) {
         auto error = std::move(status.error());
-        (void)releasePreviewAssetBindings();
+        (void)releasePreviewAssetBindingsDraining();
         counters_.runtimePreviewValid = false;
         if (auto feedback = reportAuthoringFailure(
                 "Catalog committed, but runtime preview validation failed: ",

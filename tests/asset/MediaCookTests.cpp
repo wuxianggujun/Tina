@@ -7,12 +7,14 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstring>
 #include <filesystem>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Tina::Asset {
@@ -153,6 +155,36 @@ TEST_F(MediaCookTests, PngCooksOneTextureWithStableId)
     ASSERT_EQ(unit.outputs.size(), 1U);
     ASSERT_EQ(first->sourceImports.sources.size(), 1U);
     EXPECT_EQ(first->sourceImports.sources.front().path, "textures/albedo.png");
+}
+
+// A per-position XOR digest overwrote byte 0 with the media tag, so equal-length
+// locators differing only in their first character produced one AssetId. Two such
+// images in a single batch were then rejected as "output has multiple owners".
+TEST_F(MediaCookTests, DistinctImagePathsNeverShareAnAssetId)
+{
+    cacheRootUtf8();
+    const auto png = tinyPngBytes();
+    const std::array locators{
+        "a.png", "b.png",                        // differ only at index 0
+        "textures/a.png", "textures/b.png",      // same, behind a directory
+        "ab.png", "ba.png",                      // transposed characters
+        "textures/albedo.png", "textures/albedq.png",
+    };
+
+    std::vector<Core::AssetId> seen;
+    for (const std::string_view locator : locators) {
+        const auto path = writeSource(locator, png);
+        auto cooked = cookTextureFileToCatalogSourceResult(
+            path, AssetFormat::TargetPlatform::WindowsX64, captureConfig());
+        ASSERT_TRUE(cooked) << locator << ": " << cooked.error().message;
+        ASSERT_EQ(cooked->request.assets.size(), 1U) << locator;
+        const Core::AssetId assetId = cooked->request.assets.front().assetId;
+        ASSERT_TRUE(assetId) << locator;
+        EXPECT_EQ(std::find(seen.begin(), seen.end(), assetId), seen.end())
+            << "AssetId collision for " << locator;
+        seen.push_back(assetId);
+    }
+    EXPECT_EQ(seen.size(), locators.size());
 }
 
 TEST_F(MediaCookTests, WavCooksAudioClipAndRejectsNonWavBytes)

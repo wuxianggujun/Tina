@@ -29,17 +29,46 @@ inline constexpr Core::u64 MaxWavSourceFileBytes = 32ULL * 1024ULL * 1024ULL;
 inline constexpr Core::u8 TextureMediaIdTag = 0x75;
 inline constexpr Core::u8 AudioMediaIdTag = 0x77;
 
-// Same path-stable derivation scheme as the glTF importer, seeded with the
-// canonical source-root-relative locator so identities survive project moves.
+// Path-stable derivation seeded with the canonical source-root-relative locator
+// so identities survive project moves.
+//
+// Two FNV-1a passes over the seed fill bytes[1..15]; every input character
+// therefore affects every derived byte. A per-position XOR would not: bytes[0]
+// is overwritten by the tag, so seeds differing only in their first character
+// (`a.png` vs `b.png`) collided into one AssetId and the import rejected the
+// batch with "source import output has multiple owners".
 [[nodiscard]] Core::AssetId deriveMediaAssetId(std::string_view seed, Core::u8 tag)
 {
-    Core::AssetId::Bytes bytes{};
-    for (std::size_t index = 0; index < seed.size(); ++index)
+    constexpr Core::u64 FnvOffset = 14695981039346656037ULL;
+    constexpr Core::u64 FnvPrime = 1099511628211ULL;
+
+    Core::u64 low = FnvOffset ^ static_cast<Core::u64>(tag);
+    for (const char character : seed)
     {
-        bytes[index % 16] = static_cast<std::byte>(
-            static_cast<Core::u8>(bytes[index % 16]) ^ static_cast<Core::u8>(seed[index]) ^ tag);
+        low ^= static_cast<Core::u64>(static_cast<unsigned char>(character));
+        low *= FnvPrime;
     }
+    // A second pass with a distinct starting state keeps the two halves from
+    // being trivially correlated.
+    Core::u64 high = FnvOffset ^ (static_cast<Core::u64>(tag) << 32U) ^ low;
+    for (const char character : seed)
+    {
+        high ^= static_cast<Core::u64>(static_cast<unsigned char>(character)) << 8U;
+        high *= FnvPrime;
+    }
+
+    Core::AssetId::Bytes bytes{};
     bytes[0] = static_cast<std::byte>(tag);
+    for (std::size_t index = 0; index < 8U; ++index)
+    {
+        bytes[1U + index] =
+            static_cast<std::byte>(static_cast<Core::u8>((low >> (index * 8U)) & 0xFFU));
+    }
+    for (std::size_t index = 0; index < 7U; ++index)
+    {
+        bytes[9U + index] =
+            static_cast<std::byte>(static_cast<Core::u8>((high >> (index * 8U)) & 0xFFU));
+    }
     return *Core::AssetId::fromBytes(bytes);
 }
 
