@@ -43,7 +43,7 @@ Catalog package
 | 身份与摘要 | 128-bit `AssetId` 与 `ContentHash` 强类型分离；XXH3-128 v1 校验 payload；非密码学签名 |
 | Catalog | owning immutable `CatalogSnapshot`、AssetId binary search、依赖解析、完整 DAG cycle 校验；old/new snapshot 确定性 change plan |
 | Package | 确定性 object path、manifest revision polling、metadata/full 校验、load plan、依赖序批量加载、失败不发布部分批 |
-| Cooker | recipe、writer、fresh staging root cook + 强制完整验证；TileMap v3 root + `TileMapChunk` v1 会校验 Tileset、deferred chunk dependency、parent/layer/coord/extent/localId；glTF Cooker 支持 multi-mesh、relative-file/bufferView baseColor/metallicRoughness/normal 贴图 cook、Material v2 factors 与显式 OPAQUE/BLEND（MASK 与未知 alpha mode fail closed），以及 A1 skin（JOINTS_0/WEIGHTS_0/inverseBindMatrices）和 LINEAR/STEP animation sampler；CUBICSPLINE、非法 target/权重/形状与超限均 fail closed。 |
+| Cooker | recipe、writer、fresh staging root cook + 强制完整验证；普通图片一步 cook 为单一 Texture2D，PCM16 WAV cook 为 AudioClip；TileMap v3 root + `TileMapChunk` v1 会校验 Tileset、deferred chunk dependency、parent/layer/coord/extent/localId；glTF Cooker 支持 multi-mesh、relative-file/bufferView baseColor/metallicRoughness/normal 贴图 cook、Material v2 factors 与显式 OPAQUE/BLEND（MASK 与未知 alpha mode fail closed），以及 A1 skin（JOINTS_0/WEIGHTS_0/inverseBindMatrices）和 LINEAR/STEP animation sampler；CUBICSPLINE、非法 target/权重/形状与超限均 fail closed。 |
 | Registry | generation `AssetHandle`、move-only `AssetLease`；fixed-capacity owner-thread Sprite2D/Mesh3D registry 校验 live Handle/dependency，唯一拥有 resident Lease/GPU/binding，把 Material alpha intent 原子写入 binding，并把 packet-local ref 借给 extraction |
 | 异步加载 | 有界 request queue；IO Task 读取；owner-thread Main completion 解析并发布 |
 | GPU 生命周期 | Null `UploadTicket` 状态机；Texture/Mesh/EnvironmentMap backend retirement marker；AssetLease pin 与 retirement ledger |
@@ -56,8 +56,9 @@ Catalog package
 `AssetHandle.hpp` 被拆为窄 `Tina::AssetTypes` 公共面。2D World 的 `SpriteRenderer2D`、standalone
 `ParticleSystem2D`/`Trail2D` 与 3D `MeshRenderer3D` 复制 weak handle，并在 extraction 时显式借用产品 resolver；A2
 产品 resolver 薄调用 Asset-owned API surface 的
-`Sprite2DBindingRegistry`，后者按当前 Store owner/generation、Sprite/Tileset kind、唯一 required Texture2D cooked dependency
-与 live binding intern 当前 packet ref。Scene 不因此依赖完整 AssetSystem，也不取得 Lease/payload/GPU owner。
+`Sprite2DBindingRegistry`。Sprite 路径接受当前 Store 中 live imported Texture2D 直接解析，也接受 authored Sprite 的唯一
+required Texture2D cooked dependency；Tileset 仍严格要求唯一 required Texture2D dependency。两者都在 live binding
+验证后 intern 当前 packet ref。Scene 不因此依赖完整 AssetSystem，也不取得 Lease/payload/GPU owner。
 Particle/Trail 不缓存解析结果或 resolver：空 FX 不解析，Trail 每次非空 extract 解析一次，Particle 按 live
 item 解析。TileMap emit 保存 weak Tileset Handle，不缓存 key/resolver；hidden/off-camera/empty 跳过解析，
 非空可见集合每次调用只解析一次，失败清空输出。3D Prefab 先把 AssetId 解析为 weak StaticMesh/SkinnedMesh/Material
@@ -107,8 +108,10 @@ Editor source import 已在同一 Project/Catalog owner 上闭环。launch parse
 `Source/Imported/Images/` 或 `Source/Imported/Audio/`。ingress 不覆盖既有文件：同名同内容复用，同名异内容追加
 `_2`、`_3` 后缀，批内重复物理文件只复制一次；合并、cook、Catalog commit、取消或 shutdown 失败都会回滚本批新文件与空目录。外部 recipe/glTF
 因可能依赖相对文件而拒绝单文件复制，必须先把完整依赖集置于 `Source/`。
-普通媒体一步导入：Texture importer 把一张图片 cook 成 path-derived Texture2D + 全幅默认 Sprite（Sprite 以 required 依赖引用纹理），
-Audio importer 把 PCM16 WAV cook 成 AudioClip；输出 AssetId 由 source-root 相对路径确定性派生，rename 视为 Removed+Added。后台
+普通媒体一步导入：Texture importer 把一张图片 cook 成一个 path-derived Texture2D；Sprite2D 节点可直接引用该
+Texture2D，不再额外生成全幅默认 Sprite wrapper。显式 recipe authoring 的 Sprite 资产及其 required Texture2D dependency
+继续支持。Audio importer 把 PCM16 WAV cook 成 AudioClip；media 输出 AssetId 由 canonical source-root 相对路径经两轮
+FNV-1a 派生，rename 视为 Removed+Added；Catalog/output ownership 仍负责检测任何重复 ID 并原子拒绝候选。后台
 `EditorSourceImportService` 接收 dialog-owned path batch，在同一 `jthread` 中完成物理路径预检、外部文件复制与分块内容校验、
 intended-set merge，再调用共享 `executeSourceImportPipeline()`；UI thread 不再执行文件 IO 或 importer，worker 也不触碰
 UI/Render/AssetSystem。服务公开 `Preparing` / `Copying` / `Cooking` / `ReadyToCommit` / `Failed` 批级 phase；单批最多
@@ -121,6 +124,8 @@ commit 前失败保留同一 snapshot/Ready stage 在后续安全帧重试。fre
 全部成功后只原子发布项目 `.tina/cache/source-import/active-catalog.path` 这一处 commit marker，再原子交换 Editor intended set
 并确认 ingress；Ready 在此之前持续持有 rollback transaction。Project reopen 通过 pointer
 定位 immutable stage，并同时验证 stage state、Catalog revision/output binding 与 physical containment 后恢复完整 intended unit 集。
+post-commit preview rebuild 退休旧 Sprite/Mesh registry 时，首次失败会 drain Render/Asset GPU retirement 后重试一次；仍未
+释放的 registry 保持 engaged，后续 prepare 以 `CatalogReloadBusy` 失败，不覆盖仍拥有 live binding 的对象。
 Windows 使用原生系统 dialog；Linux 私有 adapter 通过 `zenity`、缺失时回退 `kdialog`，覆盖 open/save/folder。`2D-EDITOR`
 转 Done 前仍需补 Linux 定向编译和真实 helper 产品门禁。
 
@@ -213,10 +218,16 @@ ownership，同时拥有精确的 fully validated `CatalogSnapshot`。它同步�
 
 ## 身份、视图与所有权
 
-`AssetId` 是 Catalog 内的逻辑身份，不等于文件路径或 `ContentHash`。recipe 使用显式 canonical ID；
-glTF Cooker 接受显式首 mesh/material/prefab ID，未提供时按输入路径确定性派生。Importer provenance 与 state
-提交已经接入，但 stable `ImportUnitId` 和默认 glTF 派生 ID 仍基于 canonical source path；当前没有 rename map，
-因此重命名会表现为旧 unit Removed + 新 unit Added，并可能改变默认派生 AssetId。
+`AssetId` 是 Catalog 内的逻辑身份，不等于文件路径或 `ContentHash`。recipe 使用显式 canonical ID；media importer
+从 canonical source-root 相对 locator 派生默认 ID。glTF Cooker 只允许显式指定首 mesh/material/prefab ID，其他输出及
+空 ID 仍从调用方传入的 `gltfUtf8Path` 原字符串派生。Importer provenance/state 的 stable `ImportUnitId` 使用 canonical
+root-relative path，但它不会改写 glTF output ID seed。当前没有 rename map：重命名表现为旧 unit Removed + 新 unit
+Added；移动工程根、改变绝对路径拼写也可能改变默认 glTF AssetId。
+
+当前 glTF 默认 ID 还保留旧 per-position XOR 派生：byte 0 最终被 kind tag 覆盖，因此某些仅首字符不同的等长路径可
+构造出同一 output ID。Catalog/source-import output ownership 会原子拒绝重复 owner，不会静默覆盖，但这仍会让合法的
+双文件导入失败。该兼容性与迁移问题由 `ASSET-ID-001` 跟踪；在完成 versioned 派生前，单 mesh 的首组输出应优先使用
+显式 `GltfCookIds`，multi-output 仍无法完全规避旧派生。
 
 `ContentHash` 用于确定性产物校验与非对抗性损坏检测。Hash 匹配后仍必须执行 wire bounds、schema、
 kind/type 与 Catalog entry 对齐检查；它不替代包签名或信任策略。
@@ -267,9 +278,9 @@ direct `setTexture2DBinding()` 的 caller-chosen key 与 allocator-managed key �
 allocator 不追踪 direct key。registry 管理期间不得混用两种写入方式，否则 direct binding 可能被后续
 allocator candidate 覆盖。
 
-Sprite/Tileset resolve 不缓存 Cooked payload 指针：每次验证 live handle 与 expected kind，读取恰好一个
-expected kind 为 Texture2D、flags 为 `Required` 的 cooked dependency，再验证 registry 中对应 Texture
-handle/payload/binding。低层 `resolve*()` 返回 key/0；产品 extraction 使用 `intern*FrameResource()` 把同一
+Sprite/Tileset resolve 不缓存 Cooked payload 指针：Sprite 输入若自身是 live Texture2D，直接查对应 Entry；若是
+authored Sprite，则读取恰好一个 expected kind 为 Texture2D、flags 为 `Required` 的 cooked dependency。Tileset 只走
+后一条严格 dependency 路径。随后统一验证 registry 中对应 Texture handle/payload/binding。低层 `resolve*()` 返回 key/0；产品 extraction 使用 `intern*FrameResource()` 把同一
 binding intern 到当前 packet，首次登记保留 entry borrow pin，同帧重复登记去重并释放重复 pin。
 `retireTextureBinding()` 使用原 exact handle，因此 Store weak handle 已 stale 时仍能把 Entry 的 Lease/GPU
 交给 `AssetSystem::retireTexture2D()`；active borrow、PMR/ledger 或 backend failure 都保留完整 Entry 供重试。
@@ -476,6 +487,8 @@ Opaque3D→Transparent3D→Sprite2D→UI 的确定性 pass scheduler 已完成�
   current-only source import metadata/planner、真实 importer provenance capture、validated state commit、多 unit mixed
   fresh-stage executor 与 all-clean 零改写复用。watcher/revision/reload/baseline acceptance 仍由 host 显式编排；通用
   Asset cache/LRU、Bundle/Patch 与 network Asset 是独立后续项；
+- media 默认 ID 已改为 canonical root-relative locator 的双 FNV-1a 派生；glTF 默认 output ID 仍使用传入路径字符串的
+  legacy XOR 派生，存在工程移动 identity 变化与可构造碰撞，见 `ASSET-ID-001` / `R-ASSET-ID-01`；
 - UI Image/Icon/NineSlice 已接入资源链：retained tree 只保存 AssetId/图片元数据，Runtime 使用
   move-only root-scoped resolver registration，在当前 frame packet 中按 `(root, AssetId)` 去重
   resolve/pin，并复用 Sprite/UI 共用 `Texture2D` kind/binding；Canvas NineSlice 展开后的1..9个 quad

@@ -12,6 +12,8 @@
 | R-TEXT-01 | P1 | CJK 缺字、IME composition/selection 跨平台差异 | UTF-8 校验、可选 FreeType、Windows TextInput/IME 首切片 | Windows/Linux 支持矩阵与候选窗、shaping 测试明确 | TEXT-001 |
 | R-VIS-01 | P1 | GPU、driver、DPI、字体或 SDF 圆角边缘变化造成截图误报 | 结构化逻辑测试优先；初始化白帧过滤；圆角半径先投影/夹紧并由同一 shader 计算 coverage | 固定 profile、字体 fingerprint、区域/感知阈值噪声校准 | UI-003 |
 | R-PERF-01 | P0 | benchmark 跨 build/host/workload 比较或 MAD 过高 | ADR 0018 + `tina_bench` schema v1/fingerprint；共享机结论只标 provisional | 固定机 hard gate 与多进程 MAD 协议落地 | PERF-002 |
+| R-DIAG-01 | P1 | GUI 进程 crash/fatal exit 无可见 stderr，或 handler 在损坏进程/非 ASCII 路径/非 Windows 平台丢失报告 | Core opt-in CrashHandler、固定存储、Windows 预打开 report file/DbgHelp、Editor 统一 `%TEMP%/tina_editor_crash.txt` 与机器可读 trailer | Windows fatal matrix + 非 ASCII report path + Linux terminate/abort artifact；明确哪些 hook/file failure 会使 install 失败；不把文本报告冒充 minidump/recovery | CORE-DIAG-001 |
+| R-ASSET-ID-01 | P1 | glTF 默认 output ID 随传入路径/工程根变化，legacy XOR 可让不同文件产生同一 ID并使合法 batch 整体失败 | duplicate output ownership fail closed；首 mesh/material/prefab 可显式传 `GltfCookIds`；media 已改用 root-relative 双 FNV-1a | versioned glTF default derivation、importer-version recook/migration、构造碰撞回归与 project move/reopen 身份门禁完成 | ASSET-ID-001 |
 
 ## Mitigated
 
@@ -20,7 +22,7 @@
 | R-DEP-01 | P0 | bgfx/GLFW/miniaudio/FreeType/cgltf/xxHash 类型泄漏公共 API | adapter PRIVATE link、header-isolation 与 token scan | 新模块/安装树需持续扫描 |
 | R-INPUT-01 | P1 | UI 点击穿透 Gameplay 或 held input 卡住 | consumption + continuous claims 在 ActionMapper 前；Modal barrier、持久 Capture、空间方向 focus release latch、reset/cancel 与 Gamepad default-action 测试 | 更广的多 Pointer/设备矩阵仍后置 |
 | R-FIXED-01 | P1 | 0/多 substep 丢失或重复输入边沿 | ordered transition + simulation latch + world pick、State stack policy tests | 完整 replay 与多 World orchestration 仍需扩展 |
-| R-ASSET-01 | P0 | Catalog cycle、损坏或半发布 | borrowed parser、owning snapshot、迭代 DAG、transaction rollback、外部 URI containment/size policy | hot reload、增量 Cooker 与多文件增量 publish 原子性仍后置 |
+| R-ASSET-01 | P0 | Catalog cycle、损坏或半发布 | borrowed parser、owning snapshot、迭代 DAG、fresh-stage/full validation、resident reload participant transaction、外部 URI containment/size policy | Bundle/Patch/network publish 与跨版本迁移仍后置；默认 glTF identity 另由 R-ASSET-ID-01 跟踪 |
 | R-AUDIO-01 | P0 | logical cancel 后 PCM/staging UAF 或 callback 违反实时约束 | command/completion 队列、Lease、null-device tests | 真设备 callback p99 与 shutdown race 证据不足 |
 | R-BACKEND-01 | P1 | D3D11 Debug `RefCount` 提示掩盖 Tina 泄漏 | Tina resource ledger 与 Release 结果单独判断 | backend/driver 升级后需复验 |
 

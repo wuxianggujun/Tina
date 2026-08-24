@@ -502,6 +502,14 @@ auto EditorWorkspaceState::publishInspector(Tina::PrimaryWindowUITreeUpdater& tr
         }
         std::string path = "Cooked: ";
         path += asset->canonicalRelativeCookedPath;
+        if (!asset->sourcePathUtf8.empty()) {
+            path += " | Source: ";
+            path += asset->sourcePathUtf8;
+        }
+        if (!asset->folderPathUtf8.empty()) {
+            path += " | Folder: ";
+            path += asset->folderPathUtf8;
+        }
         if (auto status = tree.setText(inspectorAssetPath_, path); !status) {
             return status;
         }

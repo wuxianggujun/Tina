@@ -9,6 +9,8 @@ Tina 是一个以 C++23 为基线的 2D/3D 游戏 Runtime。当前产品路径�
 ## 当前能力
 
 - `EngineHost` 是唯一非全局组合根，`IGameApplication` 管程序生命周期，`IGameState` 承担帧行为；
+- Core 提供 opt-in 的进程级最后故障报告；`TinaEditor.exe` 在启动最早期安装，并把 crash 或顶层 fatal
+  error 写入 `%TEMP%/tina_editor_crash.txt`，避免 GUI 进程无声消失；
 - Platform/Input 使用 Tina 公共契约与私有 GLFW adapter；
 - Render 使用后端无关 `RenderFrame`/`RenderScene`，bgfx 只存在于私有 backend；
 - Scene 支持 generation `EntityId`、Transform 层级、2D/3D extraction 与 backend-neutral `CameraFollow2D`；

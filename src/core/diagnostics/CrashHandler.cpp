@@ -34,6 +34,13 @@ struct HandlerState final {
     char reportPathUtf8[MaxPathBytes]{};
     bool captureBacktrace = true;
     bool installed = false;
+#if defined(_WIN32)
+    // Opened at install time, not at crash time. Reaching a crash through a
+    // corrupt heap or a stack-overflow guard page can make fopen() itself fail,
+    // which previously meant the report was silently lost — the worst possible
+    // outcome for a diagnostic.
+    HANDLE reportFile = INVALID_HANDLE_VALUE;
+#endif
 };
 
 HandlerState g_state{};
@@ -41,6 +48,9 @@ std::atomic<unsigned long long> g_reportCount{0};
 // Serialises concurrent crashes so two threads cannot interleave one report.
 std::atomic_flag g_reporting = ATOMIC_FLAG_INIT;
 std::terminate_handler g_previousTerminate = nullptr;
+#if defined(_WIN32)
+void* g_vectoredHandle = nullptr;
+#endif
 
 void copyBounded(char* destination, std::size_t capacity, std::string_view source) noexcept
 {
@@ -52,7 +62,7 @@ void copyBounded(char* destination, std::size_t capacity, std::string_view sourc
     destination[count] = '\0';
 }
 
-// Writes to stderr and, when configured, appends to the report file. Both use
+// Writes to stderr and, when configured, to the pre-opened report file. Both use
 // unbuffered primitives so a report survives an immediate process death.
 void emit(const char* text) noexcept
 {
@@ -62,6 +72,16 @@ void emit(const char* text) noexcept
     }
     std::fputs(text, stderr);
     std::fflush(stderr);
+#if defined(_WIN32)
+    if (g_state.reportFile != INVALID_HANDLE_VALUE)
+    {
+        // WriteFile, not fputs: the CRT may be unusable by the time we get here.
+        DWORD written = 0;
+        (void)::WriteFile(g_state.reportFile, text,
+                          static_cast<DWORD>(std::strlen(text)), &written, nullptr);
+        (void)::FlushFileBuffers(g_state.reportFile);
+    }
+#else
     if (g_state.reportPathUtf8[0] != '\0')
     {
         if (std::FILE* file = std::fopen(g_state.reportPathUtf8, "ab"))
@@ -71,6 +91,7 @@ void emit(const char* text) noexcept
             (void)std::fclose(file);
         }
     }
+#endif
 }
 
 void emitLine(const char* prefix, const char* value) noexcept
@@ -346,6 +367,38 @@ LONG WINAPI onUnhandledSeh(EXCEPTION_POINTERS* pointers) noexcept
     return EXCEPTION_EXECUTE_HANDLER;
 }
 
+// Second line of defence. SetUnhandledExceptionFilter is skipped when a debugger
+// is attached, when another module installs its own filter after ours (bgfx and
+// GPU drivers do), and for some fatal codes the CRT converts before it reaches
+// the filter. A vectored handler sees the exception first, so it catches the
+// cases the filter misses.
+LONG CALLBACK onVectoredException(EXCEPTION_POINTERS* pointers) noexcept
+{
+    if (pointers == nullptr || pointers->ExceptionRecord == nullptr)
+    {
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+    const DWORD code = pointers->ExceptionRecord->ExceptionCode;
+    // Only act on codes that are always fatal. C++ exceptions (0xE06D7363),
+    // debugger notifications and first-chance recoverable faults must fall
+    // through, or we would report normal control flow as a crash.
+    const bool fatal = code == EXCEPTION_ACCESS_VIOLATION ||
+                       code == EXCEPTION_STACK_OVERFLOW ||
+                       code == EXCEPTION_ILLEGAL_INSTRUCTION ||
+                       code == EXCEPTION_PRIV_INSTRUCTION ||
+                       code == EXCEPTION_IN_PAGE_ERROR ||
+                       code == EXCEPTION_INT_DIVIDE_BY_ZERO;
+    if (!fatal)
+    {
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+    char detail[256]{};
+    std::snprintf(detail, sizeof(detail), "vectored, code 0x%08lX",
+                  static_cast<unsigned long>(code));
+    writeReport(describeSehCode(code), detail, pointers->ContextRecord);
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
 // A pure-virtual call and a CRT invalid parameter both bypass terminate.
 void onPureVirtualCall() noexcept
 {
@@ -369,12 +422,50 @@ bool installCrashHandler(const CrashHandlerConfig& config) noexcept
     copyBounded(g_state.reportPathUtf8, MaxPathBytes, config.reportPathUtf8);
     g_state.captureBacktrace = config.captureBacktrace;
 
+#if defined(_WIN32)
+    if (g_state.reportFile != INVALID_HANDLE_VALUE)
+    {
+        (void)::CloseHandle(g_state.reportFile);
+        g_state.reportFile = INVALID_HANDLE_VALUE;
+    }
+    if (g_state.reportPathUtf8[0] != '\0')
+    {
+        // Truncating: each run owns its report, so a stale one cannot be mistaken
+        // for the current crash. FILE_SHARE_WRITE matters as much as SHARE_READ:
+        // the application appends non-crash fatal errors to this same file
+        // through ordinary file APIs, and withholding write sharing would make
+        // those opens fail silently while this handle is alive.
+        g_state.reportFile = ::CreateFileA(
+            g_state.reportPathUtf8, FILE_APPEND_DATA,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, CREATE_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (g_state.reportFile != INVALID_HANDLE_VALUE)
+        {
+            // A run marker proves the handler was installed. If a crash leaves
+            // only this line, the process died in a way no handler can observe
+            // (see the notes in the header) rather than the handler being absent.
+            char marker[MaxNameBytes + 128]{};
+            std::snprintf(marker, sizeof(marker),
+                          "Tina crash handler armed for %s (pid %lu)\n",
+                          g_state.applicationName[0] != '\0' ? g_state.applicationName
+                                                             : "(unknown)",
+                          static_cast<unsigned long>(::GetCurrentProcessId()));
+            DWORD written = 0;
+            (void)::WriteFile(g_state.reportFile, marker,
+                              static_cast<DWORD>(std::strlen(marker)), &written, nullptr);
+            (void)::FlushFileBuffers(g_state.reportFile);
+        }
+    }
+#endif
+
     if (!g_state.installed)
     {
         g_previousTerminate = std::set_terminate(&onTerminate);
         (void)std::signal(SIGABRT, &onAbortSignal);
 #if defined(_WIN32)
         ::SetUnhandledExceptionFilter(&onUnhandledSeh);
+        // First argument 1 = call ours before any previously registered handler.
+        g_vectoredHandle = ::AddVectoredExceptionHandler(1U, &onVectoredException);
         _set_purecall_handler(&onPureVirtualCall);
         _set_invalid_parameter_handler(&onInvalidParameter);
         // Without this the CRT pops a modal dialog on abort, which hangs
@@ -400,6 +491,16 @@ void uninstallCrashHandler() noexcept
     (void)std::signal(SIGABRT, SIG_DFL);
 #if defined(_WIN32)
     ::SetUnhandledExceptionFilter(nullptr);
+    if (g_vectoredHandle != nullptr)
+    {
+        (void)::RemoveVectoredExceptionHandler(g_vectoredHandle);
+        g_vectoredHandle = nullptr;
+    }
+    if (g_state.reportFile != INVALID_HANDLE_VALUE)
+    {
+        (void)::CloseHandle(g_state.reportFile);
+        g_state.reportFile = INVALID_HANDLE_VALUE;
+    }
 #endif
     g_previousTerminate = nullptr;
     g_state.installed = false;

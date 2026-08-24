@@ -953,21 +953,21 @@ auto EditorWorkspaceState::buildLeftDockUi(
         !status) {
         return status;
     }
-    UI::UIElementDescriptor recentProjects = UI::makeLabelElement(
-        "Recent Projects\nNo recent projects", fillWidth(40.0F));
-    recentProjects.textStyle = ui.compactText;
-    recentProjects.semantics.name = "Recent Projects";
-    recentProjects.semantics.description = "No recent projects are available";
+    UI::UILayoutStyle recentProjectsLayout = growingRegion();
+    recentProjectsLayout.flexContainer.direction = UI::UIFlexDirection::Column;
+    recentProjectsLayout.flexContainer.gap.row = ui.productTheme.spacing.space1;
     if (auto status = storeNode(
-            ui.tree.createElement(projectAssetStartCenter_, recentProjects),
+            ui.createPanel(projectAssetStartCenter_, recentProjectsLayout),
             projectAssetStartCenterRecent_);
         !status) {
         return status;
     }
-    if (auto status = ui.tree.setTextOverflow(
-            projectAssetStartCenterRecent_, UI::UITextOverflow::Ellipsis);
-        !status) {
-        return status;
+    for (u32 index = 0; index < RecentProjectCapacity; ++index) {
+        if (auto status = storeNode(
+                ui.createButton(projectAssetStartCenterRecent_, "", fillWidth(ui.productTheme.controls.buttonHeight)),
+                recentProjectButtons_[index]); !status) {
+            return status;
+        }
     }
 
     UI::UILayoutStyle projectListStyle = growingRegion();
@@ -984,10 +984,10 @@ auto EditorWorkspaceState::buildLeftDockUi(
     projectAssetListStyle_ = UI::UIVirtualGridViewStyle{
                 .minimumItemWidth = projectAssetViewMode_ == ProjectAssetViewMode::Grid
                                         ? ProjectAssetMinimumItemWidth + 12.0F
-                                        : 280.0F,
+                                        : 320.0F,
                 .itemHeight = projectAssetViewMode_ == ProjectAssetViewMode::Grid
-                                  ? 72.0F
-                                  : ui.productTheme.controls.listRowHeight,
+                                  ? 96.0F
+                                  : 68.0F,
                 .overscanRows = 1,
                 .scrollBarVisibility = UI::UIScrollBarVisibility::Auto,
                 .wheelStep = ui.productTheme.controls.listRowHeight,
@@ -2639,6 +2639,36 @@ auto EditorWorkspaceState::buildInspectorUi(
         return status;
     }
     inspectorTileMapStatusUi_.root = tileMapStatus_;
+    tilePaletteGridLayout_ = growingRegion();
+    tilePaletteGridLayout_.minMax.minHeight = UI::UILayoutLength::Px(96.0F);
+    auto tilePalette = ui.tree.createElement(
+        inspectorContent,
+        UI::makeVirtualGridViewElement(
+            {.materializedItemCapacity = TilePaletteMaterializedCapacity},
+            tilePaletteGridLayout_));
+    if (!tilePalette) {
+        return Tina::Core::failure(std::move(tilePalette.error()));
+    }
+    tilePaletteGrid_ = *tilePalette;
+    if (auto status = ui.tree.setVirtualGridViewStyle(
+            tilePaletteGrid_, UI::UIVirtualGridViewStyle{
+                .minimumItemWidth = TilePaletteMinimumItemWidth,
+                .itemHeight = TilePaletteItemHeight,
+                .overscanRows = 1,
+                .scrollBarVisibility = UI::UIScrollBarVisibility::Auto,
+                .wheelStep = TilePaletteItemHeight,
+                .itemTextOverflow = UI::UITextOverflow::Ellipsis,
+            }); !status) {
+        return status;
+    }
+    if (auto status = ui.tree.setVirtualGridViewPaint(
+            tilePaletteGrid_, UI::makeVirtualGridViewPaint(ui.productTheme)); !status) {
+        return status;
+    }
+    if (auto status = ui.tree.setVirtualGridViewDataSource(
+            tilePaletteGrid_, tilePaletteDataSource()); !status) {
+        return status;
+    }
     const auto createTileMapActionRow = [&](InspectorLayoutNodeUi& row)
         -> Tina::Core::Status {
         row.layout = fillWidth(ui.productTheme.controls.buttonHeight);
@@ -3411,6 +3441,33 @@ auto EditorWorkspaceState::buildMenuOverlaysUi(
         !status) {
         return status;
     }
+    UI::UINodeId openRecentItem{};
+    if (auto status = createMenuItem(
+            mainMenus_[FileMenu], "Open Recent", UI::UIMenuItemKind::Submenu,
+            openRecentItem);
+        !status) {
+        return status;
+    }
+    UI::UILayoutStyle recentMenuLayout{};
+    recentMenuLayout.size.width = UI::UILayoutLength::Px(300.0F);
+    auto recentMenu = ui.tree.createElement(
+        parent, UI::makeMenuElement(
+                    {.placement = UI::UIMenuPlacement::Below,
+                     .anchorGap = ui.productTheme.spacing.space1},
+                    recentMenuLayout));
+    if (!recentMenu) {
+        return Tina::Core::failure(std::move(recentMenu.error()));
+    }
+    fileOpenRecentSubmenu_ = *recentMenu;
+    if (auto status = ui.tree.setMenuItemSubmenu(openRecentItem, fileOpenRecentSubmenu_); !status) {
+        return status;
+    }
+    for (u32 index = 0; index < RecentProjectCapacity; ++index) {
+        if (auto status = createMenuItem(fileOpenRecentSubmenu_, "", UI::UIMenuItemKind::Command,
+                                         recentProjectMenuItems_[index], false); !status) {
+            return status;
+        }
+    }
     if (auto status = createMenuItem(
             mainMenus_[FileMenu], "Import Files...", UI::UIMenuItemKind::Command,
             fileImportSourceMenuItem_);
@@ -3613,14 +3670,18 @@ auto EditorWorkspaceState::buildMenuOverlaysUi(
         return status;
     }
     if (auto status = createMenuItem(
-            projectAssetContextMenu_, "Open", UI::UIMenuItemKind::Command,
+            projectAssetContextMenu_, "Select in Inspector", UI::UIMenuItemKind::Command,
             projectAssetContextOpenItem_); !status) {
         return status;
     }
     if (auto status = createMenuItem(
-            projectAssetContextMenu_, "Open in Inspector",
-            UI::UIMenuItemKind::Command, projectAssetContextInspectItem_);
-        !status) {
+            projectAssetContextMenu_, "Rename", UI::UIMenuItemKind::Command,
+            projectAssetContextRenameItem_); !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            projectAssetContextMenu_, "New Folder", UI::UIMenuItemKind::Command,
+            projectAssetContextNewFolderItem_); !status) {
         return status;
     }
     if (auto status = appendSeparator(projectAssetContextMenu_); !status) {
@@ -3873,6 +3934,90 @@ auto EditorWorkspaceState::buildProjectAssetRemoveDialogUi(
         return Tina::Core::failure(std::move(dialog.error()));
     }
     projectAssetRemoveDialog_ = *dialog;
+    return Tina::Core::success();
+}
+
+auto EditorWorkspaceState::buildProjectAssetRenameDialogUi(
+    UiBuildContext& ui, UI::UINodeId parent) -> Tina::Core::Status
+{
+    constexpr std::array actions{
+        UI::UIDialogActionConfig{
+            .text = "Cancel",
+            .variant = UI::UIButtonVariant::Text,
+        },
+        UI::UIDialogActionConfig{
+            .text = "Rename",
+            .variant = UI::UIButtonVariant::Primary,
+        },
+    };
+    auto dialog = ui.tree.buildDialog(
+        parent,
+        UI::UIDialogConfig{
+            .title = "Rename Project Asset",
+            .body = "Rename the Editor display label. The source path and AssetId remain unchanged.",
+            .actions = actions,
+            .layout = editorDialogOverlayLayout(),
+            .surfaceLayout = editorDialogSurfaceLayout(ui.productTheme),
+        });
+    if (!dialog) {
+        return Tina::Core::failure(std::move(dialog.error()));
+    }
+    projectAssetRenameDialog_ = *dialog;
+    auto field = ui.tree.buildFormField(
+        projectAssetRenameDialog_.content,
+        UI::UIFormFieldConfig{
+            .label = "Display name",
+            .value = {},
+            .layout = fillWidth(48.0F),
+            .textEditLayout = fillWidth(ui.productTheme.controls.textEditHeight),
+            .enabled = true,
+        });
+    if (!field) {
+        return Tina::Core::failure(std::move(field.error()));
+    }
+    projectAssetRenameInput_ = field->textEdit;
+    return Tina::Core::success();
+}
+
+auto EditorWorkspaceState::buildProjectAssetFolderDialogUi(
+    UiBuildContext& ui, UI::UINodeId parent) -> Tina::Core::Status
+{
+    constexpr std::array actions{
+        UI::UIDialogActionConfig{
+            .text = "Cancel",
+            .variant = UI::UIButtonVariant::Text,
+        },
+        UI::UIDialogActionConfig{
+            .text = "Create Folder",
+            .variant = UI::UIButtonVariant::Primary,
+        },
+    };
+    auto dialog = ui.tree.buildDialog(
+        parent,
+        UI::UIDialogConfig{
+            .title = "New Project Folder",
+            .body = "Create one folder under the active project's Source directory.",
+            .actions = actions,
+            .layout = editorDialogOverlayLayout(),
+            .surfaceLayout = editorDialogSurfaceLayout(ui.productTheme),
+        });
+    if (!dialog) {
+        return Tina::Core::failure(std::move(dialog.error()));
+    }
+    projectAssetFolderDialog_ = *dialog;
+    auto field = ui.tree.buildFormField(
+        projectAssetFolderDialog_.content,
+        UI::UIFormFieldConfig{
+            .label = "Folder name",
+            .value = {},
+            .layout = fillWidth(48.0F),
+            .textEditLayout = fillWidth(ui.productTheme.controls.textEditHeight),
+            .enabled = true,
+        });
+    if (!field) {
+        return Tina::Core::failure(std::move(field.error()));
+    }
+    projectAssetFolderInput_ = field->textEdit;
     return Tina::Core::success();
 }
 
@@ -4681,7 +4826,8 @@ auto EditorWorkspaceState::registerUiCallbacks(
     }
     const std::array projectAssetContextBindings{
         std::pair{projectAssetContextOpenItem_, EditorCommand::OpenSelectedProjectAsset},
-        std::pair{projectAssetContextInspectItem_, EditorCommand::InspectSelectedProjectAsset},
+        std::pair{projectAssetContextRenameItem_, EditorCommand::RenameSelectedProjectAsset},
+        std::pair{projectAssetContextNewFolderItem_, EditorCommand::NewProjectAssetFolder},
         std::pair{projectAssetContextReimportItem_, EditorCommand::ReimportSelectedProjectAsset},
         std::pair{projectAssetContextLocateSourceItem_, EditorCommand::LocateProjectAssetSource},
         std::pair{projectAssetContextCopyAssetIdItem_, EditorCommand::CopyProjectAssetId},
@@ -4734,6 +4880,28 @@ auto EditorWorkspaceState::registerUiCallbacks(
     };
     for (const auto& [button, command] : startCenterCommandBindings) {
         if (auto status = bindEditorCommand(button, command); !status) {
+            return status;
+        }
+    }
+    for (u32 index = 0; index < RecentProjectCapacity; ++index) {
+        if (auto status = ui.tree.setButtonAction(
+                recentProjectButtons_[index],
+                UI::UIButtonActionCallback{[this, index](const UI::UIButtonActionEvent&) noexcept {
+                    if (index < editorSettings_.recentProjectCount) {
+                        pendingRecentProjectIndex_ = index;
+                    }
+                }}); !status) {
+            return status;
+        }
+    }
+    for (u32 index = 0; index < RecentProjectCapacity; ++index) {
+        if (auto status = ui.tree.setButtonAction(
+                recentProjectMenuItems_[index],
+                UI::UIButtonActionCallback{[this, index](const UI::UIButtonActionEvent&) noexcept {
+                    if (index < editorSettings_.recentProjectCount) {
+                        pendingRecentProjectIndex_ = index;
+                    }
+                }}); !status) {
             return status;
         }
     }
@@ -4956,6 +5124,38 @@ auto EditorWorkspaceState::registerUiCallbacks(
         return status;
     }
     if (auto status = ui.tree.setButtonAction(
+            projectAssetRenameDialog_.actions[ProjectAssetDialogConfirmActionIndex],
+            UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                queueEditorCommand(EditorCommand::ProjectAssetRenameConfirm);
+            }});
+        !status) {
+        return status;
+    }
+    if (auto status = ui.tree.setButtonAction(
+            projectAssetRenameDialog_.actions[ProjectAssetDialogCancelActionIndex],
+            UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                queueEditorCommand(EditorCommand::ProjectAssetRenameCancel);
+            }});
+        !status) {
+        return status;
+    }
+    if (auto status = ui.tree.setButtonAction(
+            projectAssetFolderDialog_.actions[ProjectAssetDialogConfirmActionIndex],
+            UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                queueEditorCommand(EditorCommand::ProjectAssetFolderConfirm);
+            }});
+        !status) {
+        return status;
+    }
+    if (auto status = ui.tree.setButtonAction(
+            projectAssetFolderDialog_.actions[ProjectAssetDialogCancelActionIndex],
+            UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                queueEditorCommand(EditorCommand::ProjectAssetFolderCancel);
+            }});
+        !status) {
+        return status;
+    }
+    if (auto status = ui.tree.setButtonAction(
             aboutDialog_.actions[AboutCloseActionIndex],
             UI::UIButtonActionCallback{
                 [this](const UI::UIButtonActionEvent&) noexcept {
@@ -5004,6 +5204,16 @@ auto EditorWorkspaceState::registerUiCallbacks(
 
 auto EditorWorkspaceState::onEnter(Tina::GameStateEnterContext& context) -> Tina::Core::Status{
     ++counters_.stateEnters;
+    editorSettings_ = loadEditorSettings();
+    leftDockVisibleFraction_ = editorSettings_.leftDockFraction;
+    inspectorVisibleFraction_ = editorSettings_.inspectorFraction;
+    bottomPanelVisibleFraction_ = editorSettings_.bottomPanelFraction;
+    leftDockVisible_ = editorSettings_.leftDockVisible;
+    inspectorVisible_ = editorSettings_.inspectorVisible;
+    bottomPanel_ = editorSettings_.bottomPanel;
+    auto initialSnap = viewportTransformGizmo_.snap();
+    initialSnap.enabled = editorSettings_.snapEnabled;
+    (void)viewportTransformGizmo_.setSnap(initialSnap);
     auto fileDropSubscription = context.platformEventSubscriptions().subscribe(
         [this](const Tina::PlatformEventNotification& notification) {
             const auto* fileDrop = std::get_if<Tina::Platform::FileDropEvent>(
@@ -5162,6 +5372,12 @@ auto EditorWorkspaceState::onEnter(Tina::GameStateEnterContext& context) -> Tina
         return status;
     }
     if (auto status = buildProjectAssetRemoveDialogUi(ui, rootNode); !status) {
+        return status;
+    }
+    if (auto status = buildProjectAssetRenameDialogUi(ui, rootNode); !status) {
+        return status;
+    }
+    if (auto status = buildProjectAssetFolderDialogUi(ui, rootNode); !status) {
         return status;
     }
     if (auto status = buildAboutDialogUi(ui, rootNode); !status) {

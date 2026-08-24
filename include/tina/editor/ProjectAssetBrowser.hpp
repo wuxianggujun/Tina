@@ -34,6 +34,11 @@ struct ProjectAssetDescriptor final {
     Core::u32 dependencyCount = 0;
     Core::u64 cookedFileBytes = 0;
     std::string displayName{};
+    // Source and folder paths are Editor-facing UTF-8 metadata. They are not
+    // part of the Runtime Catalog identity and may be empty for generated
+    // assets that have no source-import owner.
+    std::string sourcePathUtf8{};
+    std::string folderPathUtf8{};
     std::string canonicalRelativeCookedPath{};
     std::vector<AssetFormat::AssetDependency> dependencies{};
 
@@ -73,6 +78,10 @@ public:
         return m_config;
     }
     [[nodiscard]] Core::usize itemCount() const noexcept { return m_assets.size(); }
+    [[nodiscard]] std::span<const ProjectAssetDescriptor> items() const noexcept
+    {
+        return m_assets;
+    }
     [[nodiscard]] Core::usize visibleItemCount() const noexcept
     {
         return m_visibleIndices.size();
@@ -110,6 +119,10 @@ public:
     // Restore a Catalog selection without requiring it to be visible under the
     // current filter/search query.
     [[nodiscard]] Core::Status restoreAssetSelection(Core::AssetId assetId) noexcept;
+    [[nodiscard]] Core::Status renameAsset(Core::AssetId assetId,
+                                            std::string_view displayName) noexcept;
+    [[nodiscard]] Core::Status setAssetFolder(Core::AssetId assetId,
+                                               std::string_view folderPathUtf8) noexcept;
 
 private:
     ProjectAssetBrowserModel(ProjectAssetBrowserConfig config,

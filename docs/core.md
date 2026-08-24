@@ -10,7 +10,7 @@ xxHash、EASTL、spdlog 或平台 SDK 类型。
 | Base | 固定宽度类型、Platform/Compiler、SourceLocation、EnumFlags、`ScopeExit` |
 | Error | C++23 `std::expected` 的 `Result<T>`/`Status`、稳定 domain/code、origin、native code、UTF-8 context chain |
 | Time | `Duration`、`MonotonicTimePoint`、`IMonotonicClock`、`SteadyMonotonicClock`、`FixedStepAccumulator` |
-| Diagnostics | `TINA_ASSERT`、`LogLevel/LogRecord`、`DiagnosticChannel`、Engine-owned `Diagnostics` 与私有 console sink |
+| Diagnostics | `TINA_ASSERT`、`LogLevel/LogRecord`、Engine-owned `Diagnostics`/console sink，以及 opt-in `CrashHandler` 最后故障报告 |
 | Trace | backend-neutral `TINA_TRACE_ZONE(nameLiteral)` 编译期 frontend；None + 可选 Tracy Profile backend |
 | Memory | `MemoryTag`、`MemoryTracker`、`CountingMemoryResource`、owning `FrameArena` |
 | ID | `GenerationId/GenerationPool`、`AssetId` |
@@ -18,7 +18,7 @@ xxHash、EASTL、spdlog 或平台 SDK 类型。
 | IO/Text | strict UTF-8 helpers、有界 `readFile`、`createParentDirectories`、`writeFile` 与 atomic sibling replace |
 
 不在当前 Core 的能力：通用线程池、Asset job、Runtime event queue、全局 allocator 替换、MetricsRegistry、
-Trace session/capture 控制面、CrashContext、callstack 符号化和通用 Tina STL。
+Trace session/capture 控制面、minidump/CrashContext、可移植 callstack 符号化、崩溃恢复和通用 Tina STL。
 
 ## Result 与失败边界
 
@@ -84,8 +84,22 @@ ContentHash。
 `DiagnosticChannel`。当前默认 sink 同步输出到 console；级别短路不写 sink，sink 失败计数且不递归，
 shutdown 后 channel 写入为 no-op。
 
-当前没有 file sink、异步日志队列、MetricsRegistry、Trace session/capture 控制面或 CrashContext。日志不得
+普通 `Diagnostics` 当前没有 file sink、异步日志队列、MetricsRegistry 或 Trace session/capture 控制面。日志不得
 包含 token、密钥、用户正文和不必要的绝对路径；Audio callback/异常信号路径不调用普通日志。
+
+`<tina/core/diagnostics/CrashHandler.hpp>` 是与上述日志 owner 分离的进程级最后兜底。应用应在任何 factory、线程或
+窗口创建前显式调用 `installCrashHandler()`；`EngineHost`/Desktop 不自动安装。handler 覆盖
+`std::terminate()` 与 `SIGABRT`，Windows 还覆盖选定 fatal SEH、pure virtual call 和 CRT invalid parameter。
+配置字符串在安装时复制到固定存储；Windows report file 在安装时预打开并截断，先写 armed marker，故障时写
+application/reason/pid/tid、best-effort DbgHelp backtrace 和 `{"status":"crash"...}`。非 Windows 当前只提供
+terminate/abort 文本报告，backtrace 明确记为 unavailable。
+
+只有第一份并发或级联故障会完整输出；`reportFatalAndTerminate()` 走同一漏斗并以非零状态结束进程。
+`crashReportCount()` 是进程生命周期累计值，不在重复 install 时清零。该路径避免动态分配和 C++ iostream，
+但仍依赖平台/CRT/符号服务，因此不是损坏堆栈下必然成功的 crash-safe dump 协议。当前 `TinaEditor.exe` 在最早期
+安装，并将 crash 与顶层 fatal `Core::Error` 统一写入 `%TEMP%/tina_editor_crash.txt`；后者额外保留
+domain/code、origin 与 context chain。若 `std::filesystem::temp_directory_path()` 不可用，Editor 回退到当前工作目录下的
+同名文件；该回退不改变 CrashHandler 本身的 best-effort 边界。
 
 ## Trace
 
@@ -122,6 +136,6 @@ out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
 ```
 
-测试覆盖 Result、ScopeExit、time、UTF-8、Read/WriteFile、hash、memory、generation、assert/diagnostics 与
-header isolation。Linux sanitizer 与正式 benchmark 见 [测试说明](testing.md)和
+测试覆盖 Result、ScopeExit、time、UTF-8、Read/WriteFile、hash、memory、generation、assert/diagnostics、
+CrashHandler death/report-file/backtrace/idempotent install 与 header isolation。Linux sanitizer 与正式 benchmark 见 [测试说明](testing.md)和
 `TEST-001`/`PERF-001`/`PERF-002`。

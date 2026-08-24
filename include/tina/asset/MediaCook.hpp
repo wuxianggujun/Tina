@@ -10,9 +10,10 @@ namespace Tina::Asset {
 // One-step media importers for the source import pipeline.
 //
 // cookTextureFileToCatalogSourceResult: one PNG/JPEG image file cooks into one
-// Rgba8Unorm Texture2D plus one full-rect default Sprite referencing it. Both
-// AssetIds are derived deterministically from the source path, so renaming the
-// file changes the output identities (same policy as the glTF importer).
+// Rgba8Unorm Texture2D. Sprite2D resolution accepts this imported Texture2D
+// directly; explicitly authored Sprite assets remain supported as wrappers.
+// The AssetId is derived deterministically from the canonical source-root-
+// relative path, so renaming the file changes its output identity.
 //
 // cookAudioFileToCatalogSourceResult: one PCM16 RIFF/WAVE file cooks into one
 // AudioClip with a path-derived AssetId. Other codecs fail closed.

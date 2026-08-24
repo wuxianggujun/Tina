@@ -451,12 +451,14 @@ auto EditorWorkspaceState::commitSourceImportCatalog(
     std::string nextStatePath;
     std::string previousSourceImportCatalogRoot;
     std::string previousAuthoringCatalogRoot;
+    std::vector<Tina::Asset::SourceImportPipelineUnitOutput> nextUnitOutputs;
     try {
         nextCatalogRoot = ready.stageRootUtf8;
         nextSourceImportCatalogRoot = ready.stageRootUtf8;
         nextStatePath = ready.statePathUtf8;
         previousSourceImportCatalogRoot = assetResources_.sourceImportCatalogRootUtf8;
         previousAuthoringCatalogRoot = assetResources_.authoringCatalogRootUtf8;
+        nextUnitOutputs = ready.unitOutputs;
     } catch (const std::bad_alloc&) {
         return Tina::Core::failure(
             Tina::Core::CoreErrorCode::OutOfMemory,
@@ -469,7 +471,11 @@ auto EditorWorkspaceState::commitSourceImportCatalog(
             "Source import worker did not retain its validated Catalog snapshot");
     }
     auto browser = prepareProjectBrowserForSnapshot(
-        ready.catalog, previousFilter, previousSelection, previousSearchQuery);
+        ready.catalog, previousFilter, previousSelection, previousSearchQuery,
+        nextUnitOutputs, assetMetadata_,
+        activeProjectWorkspace_.has_value()
+            ? activeProjectWorkspace_->sourceRootUtf8()
+            : std::string_view{});
     if (!browser) {
         return Tina::Core::failure(std::move(browser.error()));
     }
@@ -543,6 +549,7 @@ auto EditorWorkspaceState::commitSourceImportCatalog(
         return status;
     }
     projectAssets_ = std::move(*browser);
+    sourceImportUnitOutputs_ = std::move(nextUnitOutputs);
     commitProjectSwitchDocumentTabs(std::move(*candidateTabs));
     observedProjectAssetSelectionIndex_.reset();
     projectBrowserUiRefreshPending_ = true;

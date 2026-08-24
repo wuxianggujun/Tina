@@ -197,6 +197,8 @@ Core::Result<ProjectAssetBrowserModel> ProjectAssetBrowserModel::Create(
                 asset.assetTypeVersion == 0U || asset.cookedFileBytes == 0U ||
                 asset.cookedFileBytes > AssetFormat::Wire::MaxCookedFileBytes ||
                 asset.displayName.empty() || !Core::isStrictUtf8WithoutNul(asset.displayName) ||
+                !Core::isStrictUtf8WithoutNul(asset.sourcePathUtf8) ||
+                !Core::isStrictUtf8WithoutNul(asset.folderPathUtf8) ||
                 asset.dependencyCount != asset.dependencies.size())
             {
                 return Core::failure(
@@ -445,6 +447,58 @@ Core::Status ProjectAssetBrowserModel::restoreAssetSelection(Core::AssetId asset
     return Core::success();
 }
 
+Core::Status ProjectAssetBrowserModel::renameAsset(
+    Core::AssetId assetId, std::string_view displayName) noexcept
+{
+    if (displayName.empty() || !Core::isStrictUtf8WithoutNul(displayName)) {
+        return Core::failure(EditorErrorCode::InvalidConfiguration,
+                             "Project asset display name must be non-empty strict UTF-8");
+    }
+    const auto asset = std::lower_bound(
+        m_assets.begin(), m_assets.end(), assetId,
+        [](const auto& candidate, Core::AssetId requestedAssetId) {
+            return candidate.assetId < requestedAssetId;
+        });
+    if (asset == m_assets.end() || asset->assetId != assetId) {
+        return Core::failure(EditorErrorCode::ProjectAssetNotFound,
+                             "Project asset is not in the Catalog snapshot");
+    }
+    try {
+        asset->displayName.assign(displayName);
+    } catch (const std::bad_alloc&) {
+        return Core::failure(Core::CoreErrorCode::OutOfMemory,
+                             "Project asset display name allocation failed");
+    }
+    rebuildVisibleIndices();
+    return Core::success();
+}
+
+Core::Status ProjectAssetBrowserModel::setAssetFolder(
+    Core::AssetId assetId, std::string_view folderPathUtf8) noexcept
+{
+    if (!Core::isStrictUtf8WithoutNul(folderPathUtf8)) {
+        return Core::failure(EditorErrorCode::InvalidConfiguration,
+                             "Project asset folder must be strict UTF-8");
+    }
+    const auto asset = std::lower_bound(
+        m_assets.begin(), m_assets.end(), assetId,
+        [](const auto& candidate, Core::AssetId requestedAssetId) {
+            return candidate.assetId < requestedAssetId;
+        });
+    if (asset == m_assets.end() || asset->assetId != assetId) {
+        return Core::failure(EditorErrorCode::ProjectAssetNotFound,
+                             "Project asset is not in the Catalog snapshot");
+    }
+    try {
+        asset->folderPathUtf8.assign(folderPathUtf8);
+    } catch (const std::bad_alloc&) {
+        return Core::failure(Core::CoreErrorCode::OutOfMemory,
+                             "Project asset folder allocation failed");
+    }
+    rebuildVisibleIndices();
+    return Core::success();
+}
+
 void ProjectAssetBrowserModel::rebuildVisibleIndices() noexcept
 {
     m_visibleIndices.clear();
@@ -456,6 +510,8 @@ void ProjectAssetBrowserModel::rebuildVisibleIndices() noexcept
             continue;
         }
         if (!containsAsciiInsensitive(m_assets[index].displayName, m_searchQueryUtf8) &&
+            !containsAsciiInsensitive(m_assets[index].sourcePathUtf8, m_searchQueryUtf8) &&
+            !containsAsciiInsensitive(m_assets[index].folderPathUtf8, m_searchQueryUtf8) &&
             !containsAsciiInsensitive(projectAssetKindLabel(m_assets[index].assetKind),
                                       m_searchQueryUtf8))
         {

@@ -116,8 +116,9 @@ currentCatalogRecipeSourceImportContract(
 currentGltfSourceImportContract(std::string_view normalizedPrimarySourcePath,
                                 const GltfCookIds& ids);
 
-// Plain media importers: one image file (Texture2D + full-rect Sprite) or one
-// PCM WAV file (AudioClip) with deterministic path-derived output AssetIds.
+// Plain media importers: one image file (Texture2D, directly usable by Sprite2D)
+// or one PCM WAV file (AudioClip), with deterministic path-derived output
+// AssetIds.
 [[nodiscard]] Core::Result<SourceImportUnitContract>
 currentTextureSourceImportContract(std::string_view normalizedPrimarySourcePath);
 

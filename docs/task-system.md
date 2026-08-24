@@ -127,7 +127,8 @@ RenderDevice 或整个 Host shutdown 的总耗时。
 
 TaskSystem timeout 后 `EngineHost` 先通过仍存活的 Diagnostics 写入 `runtime.lifecycle` 错误，再
 `std::terminate()`；不会 reset TaskSystem，也不会继续析构 Platform、Clock、Diagnostics 等剩余 owner。
-当前仍无通用 State TaskGroup soft deadline 或 CrashContext/dump protocol。
+产品入口若已显式安装 Core CrashHandler，该分支会补充首份 best-effort 文本报告；`EngineHost` 不负责安装。
+当前仍无通用 State TaskGroup soft deadline、CrashContext 或 minidump protocol。
 
 ## 测试
 

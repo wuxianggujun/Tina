@@ -221,7 +221,8 @@ AudioEngine
 `TaskSystem::shutdownAndJoinFor()` 后的 Worker-exit/join 阶段。此前的 AudioEngine/RenderDevice shutdown
 不计入该值，因此它不是整个 Host shutdown 的总耗时上限。TaskSystem 在 deadline 内 join 成功后才 reset
 并继续逆序析构。若返回 timeout，Host 先通过仍存活的 Diagnostics 写入 `runtime.lifecycle` 错误，再调用
-`std::terminate()`；TaskSystem、Worker、Platform、Clock 与 Diagnostics ownership 均不会沿超时分支继续
+`std::terminate()`；若产品入口已显式安装 Core CrashHandler，该终止会生成首份 best-effort fatal report；
+`EngineHost` 本身不隐式安装进程 handler。TaskSystem、Worker、Platform、Clock 与 Diagnostics ownership 均不会沿超时分支继续
 析构。该路径不 detach、不强杀 Worker，也不把 timeout 当成可恢复的 Host shutdown 结果。
 
 ## 已落地 vs 后置

@@ -87,6 +87,7 @@
 #include <tina/ui/UIStyle.hpp>
 #include <tina/ui/UITheme.hpp>
 #include <tina/ui/UITreeView.hpp>
+#include <tina/ui/UIVirtualGridView.hpp>
 
 #include <algorithm>
 #include <array>
@@ -101,6 +102,7 @@
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <iostream>
 #include <limits>
@@ -145,7 +147,7 @@ inline constexpr float ViewportInitialFraction = 0.68F;
 inline constexpr u32 HierarchyMaterializedCapacity = 64;
 inline constexpr u32 AssetBrowserMaterializedCapacity = 12;
 inline constexpr u32 ProjectAssetCompactIdCharacterCount = 4;
-inline constexpr float ProjectAssetMinimumItemWidth = 120.0F;
+inline constexpr float ProjectAssetMinimumItemWidth = 144.0F;
 inline constexpr u32 SourceImportColumnCapacity = 3;
 inline constexpr u32 SourceImportMaterializedCapacity = 5;
 inline constexpr float SourceImportKindColumnWidth = 88.0F;
@@ -160,6 +162,10 @@ inline constexpr u32 AuthoringEntityCapacity = 128;
 inline constexpr u32 InitialAuthoringEntityCount = 5;
 inline constexpr u32 AnimationVisibleFrameSlots = 6;
 inline constexpr u32 DocumentTabSlots = 6;
+inline constexpr u32 RecentProjectCapacity = 10;
+inline constexpr u32 TilePaletteMaterializedCapacity = 64;
+inline constexpr float TilePaletteMinimumItemWidth = 72.0F;
+inline constexpr float TilePaletteItemHeight = 64.0F;
 inline constexpr u32 MainMenuCount = 4;
 inline constexpr u32 AutomaticColorPickerVisibleStage = 52;
 inline constexpr u32 AutomaticFinalSelectionCommitStage = 56;
@@ -279,6 +285,222 @@ enum class WorkspacePanelKind : u8 {
     LeftDock,
     Inspector,
 };
+
+[[nodiscard]] inline std::string pathToUtf8(const std::filesystem::path& path);
+
+struct EditorAssetMetadataRecord final {
+    Tina::Core::AssetId assetId{};
+    std::string displayName{};
+    std::string folderPathUtf8{};
+};
+
+inline constexpr Tina::Core::u32 EditorAssetMetadataCapacity = 4096U;
+
+[[nodiscard]] inline std::filesystem::path editorAssetMetadataPath(
+    const Tina::Editor::EditorProjectWorkspace& workspace)
+{
+    return std::filesystem::u8path(
+               workspace.projectRootUtf8().begin(), workspace.projectRootUtf8().end()) /
+           ".tina" / "editor-assets.tmeta";
+}
+
+[[nodiscard]] inline Tina::Core::Result<std::vector<EditorAssetMetadataRecord>>
+loadEditorAssetMetadata(const Tina::Editor::EditorProjectWorkspace& workspace) noexcept
+{
+    try {
+        const auto path = editorAssetMetadataPath(workspace);
+        auto bytes = Tina::Core::readFile(
+            pathToUtf8(path), {.maxBytes = 2U * 1024U * 1024U});
+        if (!bytes) {
+            return std::vector<EditorAssetMetadataRecord>{};
+        }
+        const std::string text(reinterpret_cast<const char*>(bytes->data()), bytes->size());
+        if (!Tina::Core::isStrictUtf8WithoutNul(text)) {
+            return std::vector<EditorAssetMetadataRecord>{};
+        }
+        std::vector<EditorAssetMetadataRecord> records;
+        records.reserve(EditorAssetMetadataCapacity);
+        std::size_t cursor = 0U;
+        while (cursor < text.size() && records.size() < EditorAssetMetadataCapacity) {
+            const std::size_t lineEnd = text.find('\n', cursor);
+            const std::size_t end = lineEnd == std::string::npos ? text.size() : lineEnd;
+            const std::string_view line{text.data() + cursor, end - cursor};
+            cursor = lineEnd == std::string::npos ? text.size() : lineEnd + 1U;
+            if (line.empty() || line == "version=1") {
+                continue;
+            }
+            const std::size_t first = line.find('\t');
+            const std::size_t second = first == std::string_view::npos
+                                            ? std::string_view::npos
+                                            : line.find('\t', first + 1U);
+            if (first == std::string_view::npos || second == std::string_view::npos ||
+                second <= first + 1U) {
+                continue;
+            }
+            const auto id = Tina::Core::AssetId::parseCanonical(line.substr(0U, first));
+            const std::string_view display = line.substr(first + 1U, second - first - 1U);
+            const std::string_view folder = line.substr(second + 1U);
+            if (!id || display.empty() || !Tina::Core::isStrictUtf8WithoutNul(display) ||
+                !Tina::Core::isStrictUtf8WithoutNul(folder)) {
+                continue;
+            }
+            records.push_back({
+                .assetId = *id,
+                .displayName = std::string(display),
+                .folderPathUtf8 = std::string(folder),
+            });
+        }
+        return records;
+    } catch (const std::bad_alloc&) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::OutOfMemory,
+            "Editor asset metadata allocation failed");
+    } catch (...) {
+        return std::vector<EditorAssetMetadataRecord>{};
+    }
+}
+
+[[nodiscard]] inline Tina::Core::Status saveEditorAssetMetadata(
+    const Tina::Editor::EditorProjectWorkspace& workspace,
+    std::span<const Tina::Editor::ProjectAssetDescriptor> assets) noexcept
+{
+    try {
+        std::string text = "version=1\n";
+        for (const auto& asset : assets) {
+            if (asset.displayName.empty() ||
+                !Tina::Core::isStrictUtf8WithoutNul(asset.displayName) ||
+                asset.displayName.find_first_of("\t\r\n") != std::string::npos ||
+                asset.folderPathUtf8.find_first_of("\t\r\n") != std::string::npos) {
+                continue;
+            }
+            const auto id = asset.assetId.canonicalText();
+            text.append(id.data(), id.size());
+            text.push_back('\t');
+            text += asset.displayName;
+            text.push_back('\t');
+            text += asset.folderPathUtf8;
+            text.push_back('\n');
+        }
+        return Tina::Core::writeFile(
+            pathToUtf8(editorAssetMetadataPath(workspace)),
+            std::as_bytes(std::span{text.data(), text.size()}));
+    } catch (const std::bad_alloc&) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::OutOfMemory,
+            "Editor asset metadata serialization allocation failed");
+    } catch (...) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::Io,
+            "Editor asset metadata serialization failed");
+    }
+}
+
+struct EditorSettings final {
+    static constexpr u32 SchemaVersion = 1;
+    float leftDockFraction = LeftDockInitialFraction;
+    float inspectorFraction = MainCenterInitialFraction;
+    float bottomPanelFraction = ViewportInitialFraction;
+    bool leftDockVisible = true;
+    bool inspectorVisible = true;
+    BottomPanelKind bottomPanel = BottomPanelKind::None;
+    bool snapEnabled = false;
+    std::array<std::string, RecentProjectCapacity> recentProjects{};
+    u32 recentProjectCount = 0;
+};
+
+[[nodiscard]] inline std::filesystem::path editorSettingsPath()
+{
+    const char* appData = std::getenv("APPDATA");
+    if (appData != nullptr && *appData != '\0') {
+        return std::filesystem::u8path(appData) / "TinaEditor" / "settings";
+    }
+    const char* xdg = std::getenv("XDG_CONFIG_HOME");
+    if (xdg != nullptr && *xdg != '\0') {
+        return std::filesystem::u8path(xdg) / "TinaEditor" / "settings";
+    }
+    const char* home = std::getenv("HOME");
+    if (home != nullptr && *home != '\0') {
+        return std::filesystem::u8path(home) / ".config" / "TinaEditor" / "settings";
+    }
+    return std::filesystem::path{};
+}
+
+[[nodiscard]] inline EditorSettings loadEditorSettings() noexcept
+{
+    EditorSettings settings{};
+    try {
+        const auto path = editorSettingsPath();
+        if (path.empty()) {
+            return settings;
+        }
+        auto bytes = Tina::Core::readFile(pathToUtf8(path), {.maxBytes = 128U * 1024U});
+        if (!bytes) {
+            return settings;
+        }
+        const std::string text(reinterpret_cast<const char*>(bytes->data()), bytes->size());
+        if (!Tina::Core::isStrictUtf8WithoutNul(text)) {
+            return settings;
+        }
+        const auto value = [&text](std::string_view key) -> std::string_view {
+            const std::string prefix = std::string(key) + "=";
+            const auto begin = text.find(prefix);
+            if (begin == std::string::npos) return {};
+            const auto start = begin + prefix.size();
+            const auto end = text.find('\n', start);
+            return std::string_view{text}.substr(start, end == std::string::npos ? text.size() - start : end - start);
+        };
+        if (value("version") != "1") return settings;
+        const auto parseFloat = [&value](std::string_view key, float fallback) {
+            const auto raw = value(key);
+            if (raw.empty()) return fallback;
+            char* end = nullptr;
+            const std::string copy(raw);
+            const float parsed = std::strtof(copy.c_str(), &end);
+            return end != copy.c_str() && std::isfinite(parsed) ? parsed : fallback;
+        };
+        settings.leftDockFraction = std::clamp(parseFloat("leftDock", settings.leftDockFraction), 0.1F, 0.8F);
+        settings.inspectorFraction = std::clamp(parseFloat("inspector", settings.inspectorFraction), 0.2F, 0.95F);
+        settings.bottomPanelFraction = std::clamp(parseFloat("bottom", settings.bottomPanelFraction), 0.2F, 0.95F);
+        settings.leftDockVisible = value("leftVisible") != "0";
+        settings.inspectorVisible = value("inspectorVisible") != "0";
+        settings.snapEnabled = value("snap") == "1";
+        const auto panel = value("bottomPanel");
+        settings.bottomPanel = panel == "animation" ? BottomPanelKind::Animation : panel == "output" ? BottomPanelKind::Output : BottomPanelKind::None;
+        for (u32 index = 0; index < RecentProjectCapacity; ++index) {
+            const std::string key = "recent" + std::to_string(index);
+            const auto recent = value(key);
+            if (!recent.empty() && Tina::Core::isStrictUtf8WithoutNul(recent)) {
+                settings.recentProjects[settings.recentProjectCount++] = std::string(recent);
+            }
+        }
+    } catch (...) {
+        return EditorSettings{};
+    }
+    return settings;
+}
+
+[[nodiscard]] inline Tina::Core::Status saveEditorSettings(const EditorSettings& settings) noexcept
+{
+    try {
+        const auto path = editorSettingsPath();
+        if (path.empty()) return Tina::Core::success();
+        std::string text = "version=1\nleftDock=" + std::to_string(settings.leftDockFraction) +
+            "\ninspector=" + std::to_string(settings.inspectorFraction) +
+            "\nbottom=" + std::to_string(settings.bottomPanelFraction) +
+            "\nleftVisible=" + std::to_string(settings.leftDockVisible ? 1 : 0) +
+            "\ninspectorVisible=" + std::to_string(settings.inspectorVisible ? 1 : 0) +
+            "\nsnap=" + std::to_string(settings.snapEnabled ? 1 : 0) + "\nbottomPanel=" +
+            std::string(settings.bottomPanel == BottomPanelKind::Animation ? "animation" : settings.bottomPanel == BottomPanelKind::Output ? "output" : "none") + "\n";
+        for (u32 index = 0; index < settings.recentProjectCount && index < RecentProjectCapacity; ++index) {
+            text += "recent" + std::to_string(index) + "=" + settings.recentProjects[index] + "\n";
+        }
+        return Tina::Core::writeFile(pathToUtf8(path), std::as_bytes(std::span{text.data(), text.size()}));
+    } catch (const std::bad_alloc&) {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory, "Editor settings serialization allocation failed");
+    } catch (...) {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::Io, "Editor settings serialization failed");
+    }
+}
 [[nodiscard]] inline bool isWorkspaceContextDocumentTab(
     const Tina::Editor::EditorDocumentTabDesc& tab) noexcept
 {
@@ -659,6 +881,8 @@ struct ResolvedEditorProjectCatalog final {
     std::string sourceImportStatePathUtf8{};
     std::string authoringCatalogRootUtf8{};
     std::vector<Tina::EditorApp::Detail::EditorSourceImportUnit> sourceImportUnits{};
+    std::vector<Tina::Asset::SourceImportPipelineUnitOutput> sourceImportUnitOutputs{};
+    std::vector<EditorAssetMetadataRecord> assetMetadata{};
 };
 [[nodiscard]] inline EditorSourceImportCachePaths sourceImportCachePaths(
     const Tina::Editor::EditorProjectWorkspace& workspace)
@@ -965,6 +1189,75 @@ restoreSourceImportUnits(
     }
     return units;
 }
+[[nodiscard]] inline Tina::Core::Result<std::vector<Tina::Asset::SourceImportPipelineUnitOutput>>
+restoreSourceImportUnitOutputs(
+    const Tina::Editor::EditorProjectWorkspace& workspace,
+    const Tina::AssetFormat::SourceImportMetadataView& metadata)
+{
+    try {
+        std::vector<Tina::Asset::SourceImportPipelineUnitOutput> outputs;
+        outputs.reserve(metadata.header().unitCount);
+        const auto sourceRoot = std::filesystem::u8path(
+            workspace.sourceRootUtf8().begin(), workspace.sourceRootUtf8().end())
+                                    .lexically_normal();
+        for (u32 unitIndex = 0; unitIndex < metadata.header().unitCount; ++unitIndex) {
+            const auto metadataUnit = metadata.unit(unitIndex);
+            if (!metadataUnit) {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::Internal,
+                    "Editor source-import output unit disappeared after validation");
+            }
+            std::optional<std::string_view> primaryPath{};
+            for (u32 inputIndex = 0; inputIndex < metadataUnit->inputCount; ++inputIndex) {
+                const auto input = metadata.unitInputForUnit(unitIndex, inputIndex);
+                if (!input || !Tina::AssetFormat::hasSourceImportInputFlag(
+                                   input->flags,
+                                   Tina::AssetFormat::SourceImportInputFlags::Primary)) {
+                    continue;
+                }
+                primaryPath = metadata.sourcePath(input->sourceIndex);
+                break;
+            }
+            if (!primaryPath.has_value()) {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::InvalidArgument,
+                    "Editor source-import output unit has no primary input");
+            }
+            const auto relativePath = std::filesystem::u8path(
+                primaryPath->begin(), primaryPath->end());
+            const auto absolutePath = (sourceRoot / relativePath).lexically_normal();
+            if (relativePath.is_absolute() || !pathIsSameOrDescendant(absolutePath, sourceRoot) ||
+                absolutePath == sourceRoot) {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::PermissionDenied,
+                    "Editor source-import output path escaped the Source root");
+            }
+            Tina::Asset::SourceImportPipelineUnitOutput mapping{
+                .unitId = metadataUnit->unitId,
+                .sourceUtf8Path = pathToUtf8(absolutePath),
+            };
+            mapping.outputs.reserve(metadataUnit->outputCount);
+            for (u32 outputIndex = 0; outputIndex < metadataUnit->outputCount; ++outputIndex) {
+                const auto output = metadata.outputForUnit(unitIndex, outputIndex);
+                if (!output) {
+                    return Tina::Core::failure(
+                        Tina::Core::CoreErrorCode::Internal,
+                        "Editor source-import output disappeared after validation");
+                }
+                mapping.outputs.push_back({
+                    .assetId = output->assetId,
+                    .assetKind = output->assetKind,
+                });
+            }
+            outputs.push_back(std::move(mapping));
+        }
+        return outputs;
+    } catch (const std::bad_alloc&) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::OutOfMemory,
+            "Editor source-import output mapping allocation failed");
+    }
+}
 [[nodiscard]] inline Tina::Core::Result<ResolvedEditorProjectCatalog> resolveSourceImportCatalog(
     const Tina::Editor::EditorProjectWorkspace& workspace)
 {
@@ -1140,11 +1433,21 @@ restoreSourceImportUnits(
         if (!units) {
             return Tina::Core::failure(std::move(units.error()));
         }
+        auto unitOutputs = restoreSourceImportUnitOutputs(workspace, *metadata);
+        if (!unitOutputs) {
+            return Tina::Core::failure(std::move(unitOutputs.error()));
+        }
+        auto assetMetadata = loadEditorAssetMetadata(workspace);
+        if (!assetMetadata) {
+            return Tina::Core::failure(std::move(assetMetadata.error()));
+        }
         return ResolvedEditorProjectCatalog{
             .catalogRootUtf8 = pathToUtf8(catalogRoot.lexically_normal()),
             .sourceImportCatalogRootUtf8 = pathToUtf8(catalogRoot.lexically_normal()),
             .sourceImportStatePathUtf8 = pathToUtf8(statePath.lexically_normal()),
             .sourceImportUnits = std::move(*units),
+            .sourceImportUnitOutputs = std::move(*unitOutputs),
+            .assetMetadata = std::move(*assetMetadata),
         };
     } catch (const std::bad_alloc&) {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
@@ -1358,6 +1661,8 @@ struct EditorAssetResources final {
     std::string sourceImportStatePathUtf8{};
     std::string authoringCatalogRootUtf8{};
     std::vector<Tina::EditorApp::Detail::EditorSourceImportUnit> initialSourceImportUnits{};
+    std::vector<Tina::Asset::SourceImportPipelineUnitOutput> initialSourceImportUnitOutputs{};
+    std::vector<EditorAssetMetadataRecord> initialAssetMetadata{};
     std::optional<Tina::Editor::EditorProjectWorkspace> initialProjectWorkspace{};
     u32 catalogEntryCount = 0;
     bool projectCatalogConfigured = false;
@@ -1405,6 +1710,9 @@ struct EditorAssetResources final {
             std::move(resolvedCatalog->authoringCatalogRootUtf8);
         resources.initialSourceImportUnits =
             std::move(resolvedCatalog->sourceImportUnits);
+        resources.initialSourceImportUnitOutputs =
+            std::move(resolvedCatalog->sourceImportUnitOutputs);
+        resources.initialAssetMetadata = std::move(resolvedCatalog->assetMetadata);
         resources.initialProjectWorkspace.emplace(std::move(*workspace));
     } else if (resources.projectCatalogConfigured) {
         resources.catalogRootUtf8 = options.catalogRootUtf8;
@@ -1858,6 +2166,12 @@ enum class EditorCommand : u32 {
     CopyProjectAssetId,
     CopyProjectAssetSourcePath,
     RevealProjectAssetDependencies,
+    RenameSelectedProjectAsset,
+    NewProjectAssetFolder,
+    ProjectAssetRenameConfirm,
+    ProjectAssetRenameCancel,
+    ProjectAssetFolderConfirm,
+    ProjectAssetFolderCancel,
     RemoveSelectedProjectAsset,
     ProjectAssetRemoveConfirm,
     ProjectAssetRemoveCancel,
@@ -1919,6 +2233,20 @@ inline void writeJsonString(std::ostream& output, std::string_view value)
     }
     output.put('"');
 }
+// Absolute path of the diagnostic report shared with the crash handler. A single
+// file keeps "the window vanished" answerable regardless of which of the two
+// paths ended the process.
+[[nodiscard]] inline const std::string& editorDiagnosticReportPathUtf8()
+{
+    static const std::string path = [] {
+        std::error_code error;
+        const std::filesystem::path temp = std::filesystem::temp_directory_path(error);
+        return pathToUtf8((error ? std::filesystem::path{"."} : temp) /
+                          "tina_editor_crash.txt");
+    }();
+    return path;
+}
+
 inline void writeError(const Tina::Core::Error& error)
 {
     std::cerr << "{\"status\":\"error\",\"application\":\"TinaEditor\",\"domain\":"
@@ -1926,6 +2254,37 @@ inline void writeError(const Tina::Core::Error& error)
               << ",\"message\":";
     writeJsonString(std::cerr, error.message);
     std::cerr << "}\n";
+
+    // TinaEditor is a GUI-subsystem binary, so the stderr line above is invisible
+    // in normal use: a fatal error looked exactly like a crash or a clean exit.
+    // Append the same failure to the report file, including the origin and the
+    // full context chain, which is what actually locates the fault.
+    std::ofstream report{editorDiagnosticReportPathUtf8(), std::ios::app | std::ios::binary};
+    if (!report) {
+        return;
+    }
+    report << "\n==== Tina fatal error ====\n"
+           << "  application: TinaEditor\n"
+           << "  reason: the Editor exited with a fatal error\n"
+           << "  domain: " << static_cast<std::uint16_t>(error.code.domain)
+           << "  code: " << error.code.value << '\n'
+           << "  message: " << error.message << '\n'
+           << "  origin: " << error.origin.file_name() << '(' << error.origin.line() << ") in "
+           << error.origin.function_name() << '\n';
+    if (error.nativeCode.has_value()) {
+        report << "  nativeCode: " << *error.nativeCode << '\n';
+    }
+    for (std::size_t index = 0; index < error.context.size(); ++index) {
+        const Tina::Core::ErrorContext& entry = error.context[index];
+        report << "  context[" << index << "]: " << entry.operation;
+        if (!entry.detail.empty()) {
+            report << " — " << entry.detail;
+        }
+        report << "\n    at " << entry.location.file_name() << '(' << entry.location.line()
+               << ") in " << entry.location.function_name() << '\n';
+    }
+    report << "{\"status\":\"fatal\",\"code\":" << error.code.value << "}\n"
+           << "==== end Tina fatal error ====\n";
 }
 template <typename Value>
 [[nodiscard]] bool parseUnsigned(std::string_view text, Value& value) noexcept
@@ -2350,6 +2709,8 @@ inline constexpr u32 DirtyCloseCancelActionIndex = 2U;
 inline constexpr u32 SceneDeleteCancelActionIndex = 0U;
 inline constexpr u32 SceneDeleteConfirmActionIndex = 1U;
 inline constexpr u32 AboutCloseActionIndex = 0U;
+inline constexpr u32 ProjectAssetDialogCancelActionIndex = 0U;
+inline constexpr u32 ProjectAssetDialogConfirmActionIndex = 1U;
 inline constexpr u32 HelpMainMenuIndex = 3U;
 [[nodiscard]] inline u32 stableEntityIdForHierarchyItem(UI::UITreeViewItemKey key) noexcept
 {
@@ -3081,7 +3442,11 @@ createAuthoringDocuments(const EditorLaunchOptions& options)
     };
 }
 [[nodiscard]] inline Tina::Core::Result<Tina::Editor::ProjectAssetBrowserModel>
-createProjectAssetBrowser(const Tina::Asset::CatalogSnapshot& catalog)
+createProjectAssetBrowser(
+    const Tina::Asset::CatalogSnapshot& catalog,
+    std::span<const Tina::Asset::SourceImportPipelineUnitOutput> sourceMappings = {},
+    std::span<const EditorAssetMetadataRecord> metadata = {},
+    std::string_view sourceRootUtf8 = {})
 {
     try {
         std::vector<Tina::Editor::ProjectAssetDescriptor> assets;
@@ -3092,10 +3457,47 @@ createProjectAssetBrowser(const Tina::Asset::CatalogSnapshot& catalog)
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                            "Tina Editor Catalog entry disappeared");
             }
-            const auto idText = entry->assetId.canonicalText();
             std::string displayName{Tina::Editor::projectAssetKindLabel(entry->assetKind)};
-            displayName += "  #";
-            displayName.append(idText.data(), ProjectAssetCompactIdCharacterCount);
+            std::string sourcePathUtf8;
+            std::string folderPathUtf8;
+            for (const auto& mapping : sourceMappings) {
+                const auto output = std::find_if(
+                    mapping.outputs.begin(), mapping.outputs.end(),
+                    [entry](const auto& candidate) {
+                        return candidate.assetId == entry->assetId;
+                    });
+                if (output == mapping.outputs.end()) {
+                    continue;
+                }
+                sourcePathUtf8 = mapping.sourceUtf8Path;
+                if (!sourceRootUtf8.empty()) {
+                    const auto root = std::filesystem::u8path(
+                        sourceRootUtf8.begin(), sourceRootUtf8.end());
+                    const auto absolute = std::filesystem::u8path(
+                        sourcePathUtf8.begin(), sourcePathUtf8.end());
+                    const auto relative = absolute.lexically_relative(root);
+                    if (!relative.empty() && relative != "." &&
+                        !relative.has_root_path() && relative.parent_path() != ".") {
+                        folderPathUtf8 = pathToUtf8(relative.parent_path());
+                    }
+                }
+                const auto filename = std::filesystem::u8path(
+                    sourcePathUtf8.begin(), sourcePathUtf8.end()).filename();
+                if (!filename.empty()) {
+                    displayName = pathToUtf8(filename);
+                }
+                break;
+            }
+            for (const auto& record : metadata) {
+                if (record.assetId != entry->assetId) {
+                    continue;
+                }
+                if (!record.displayName.empty()) {
+                    displayName = record.displayName;
+                }
+                folderPathUtf8 = record.folderPathUtf8;
+                break;
+            }
             std::vector<Tina::AssetFormat::AssetDependency> dependencies;
             dependencies.reserve(entry->dependencyCount);
             for (u32 dependencyIndex = 0;
@@ -3120,6 +3522,8 @@ createProjectAssetBrowser(const Tina::Asset::CatalogSnapshot& catalog)
                 .dependencyCount = entry->dependencyCount,
                 .cookedFileBytes = entry->cookedFileBytes,
                 .displayName = std::move(displayName),
+                .sourcePathUtf8 = std::move(sourcePathUtf8),
+                .folderPathUtf8 = std::move(folderPathUtf8),
                 .dependencies = std::move(dependencies),
             });
         }
@@ -3143,7 +3547,12 @@ createProjectAssetBrowser(const EditorAssetResources& resources)
         return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                    "Tina Editor Project browser requires an open Catalog");
     }
-    return createProjectAssetBrowser(*resources.system->catalog());
+    return createProjectAssetBrowser(
+        *resources.system->catalog(), resources.initialSourceImportUnitOutputs,
+        resources.initialAssetMetadata,
+        resources.initialProjectWorkspace.has_value()
+            ? resources.initialProjectWorkspace->sourceRootUtf8()
+            : std::string_view{});
 }
 [[nodiscard]] inline Tina::Core::Result<Tina::Editor::EditorDocumentTabs>
 createEditorDocumentTabs(WorkspaceMode initialWorkspace)
@@ -3215,6 +3624,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
         assetImportHistory_.reserve(4096U);
         activeAssetImportIds_.reserve(4096U);
         activeProjectWorkspace_ = std::move(assetResources_.initialProjectWorkspace);
+        assetMetadata_ = std::move(assetResources_.initialAssetMetadata);
+        sourceImportUnitOutputs_ = std::move(assetResources_.initialSourceImportUnitOutputs);
         sourceImportStartPending_ = options_.sourceImport.importOnStart;
         if (options_.sourceImport.intendedUnits.empty()) {
             sourceImportUnits_ = std::move(assetResources_.initialSourceImportUnits);
@@ -3320,6 +3731,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
         UiBuildContext& ui, UI::UINodeId parent);
     [[nodiscard]] Tina::Core::Status buildProjectAssetRemoveDialogUi(
         UiBuildContext& ui, UI::UINodeId parent);
+    [[nodiscard]] Tina::Core::Status buildProjectAssetRenameDialogUi(
+        UiBuildContext& ui, UI::UINodeId parent);
+    [[nodiscard]] Tina::Core::Status buildProjectAssetFolderDialogUi(
+        UiBuildContext& ui, UI::UINodeId parent);
     [[nodiscard]] Tina::Core::Status buildAboutDialogUi(
         UiBuildContext& ui, UI::UINodeId parent);
     [[nodiscard]] Tina::Core::Status buildFileDropFeedbackUi(
@@ -3396,6 +3811,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] bool playSessionActive() const noexcept;
     [[nodiscard]] bool authoringEnabled() const noexcept;
     [[nodiscard]] bool playStartReady() const noexcept;
+    [[nodiscard]] UI::UIVirtualGridViewDataSource tilePaletteDataSource() const noexcept;
+    static u64 tilePaletteItemCount(const void* state) noexcept;
+    static bool resolveTilePaletteItem(const void* state, u64 logicalIndex,
+                                       UI::UIVirtualGridViewItemDescriptor& output) noexcept;
     [[nodiscard]] bool sceneDocumentActive() const noexcept;
     [[nodiscard]] static std::string_view
     animationModeLabel(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcept;
@@ -3565,6 +3984,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
     addTileMapLayer(Tina::AssetFormat::TileMapLayerKind kind);
     [[nodiscard]] Tina::Core::Status refreshProjectAssetUi(
         Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status refreshRecentProjectsUi(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status processPendingRecentProject();
+    void rememberRecentProject(std::string_view projectRootUtf8) noexcept;
     [[nodiscard]] Tina::Core::Status reportAuthoringFailure(
         std::string_view prefix, const Tina::Core::Error& error);
     [[nodiscard]] Tina::Core::Result<Tina::Editor::ProjectAssetBrowserModel>
@@ -3572,7 +3995,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
         const Tina::Asset::CatalogSnapshot& catalog,
         Tina::Editor::ProjectAssetFilter filter,
         std::optional<Tina::Core::AssetId> selectedAsset,
-        std::string_view searchQuery = {});
+        std::string_view searchQuery = {},
+        std::span<const Tina::Asset::SourceImportPipelineUnitOutput> sourceMappings = {},
+        std::span<const EditorAssetMetadataRecord> metadata = {},
+        std::string_view sourceRootUtf8 = {});
     [[nodiscard]] Tina::Core::Result<Tina::Editor::EditorDocumentTabs>
     prepareProjectSwitchDocumentTabs();
     [[nodiscard]] Tina::Core::Status switchCatalogAuthoringOwnersToPinnedTabs();
@@ -3711,6 +4137,18 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] Tina::Core::Status showProjectAssetRemoveConfirmation(
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status hideProjectAssetRemoveConfirmation(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status showProjectAssetRenameDialog(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status hideProjectAssetRenameDialog(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status confirmProjectAssetRename(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status showProjectAssetFolderDialog(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status hideProjectAssetFolderDialog(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status confirmProjectAssetFolder(
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status captureRequestedRgbaFrame(
         Tina::PrimaryWindowUITreeUpdater& tree);
@@ -3901,10 +4339,13 @@ class EditorWorkspaceState final : public Tina::IGameState {
     WorkspaceMode workspaceMode_ = WorkspaceMode::World2D;
     EditorDocumentSessionStore documentSessions_;
     Tina::Editor::ProjectAssetBrowserModel projectAssets_;
+    std::vector<EditorAssetMetadataRecord> assetMetadata_{};
     Tina::Editor::EditorDocumentTabs documentTabs_;
     std::optional<Tina::Editor::EditorProjectWorkspace> pendingProjectSwitch_{};
     bool projectSwitchBlockedByDirty_ = false;
     std::optional<Tina::Editor::EditorProjectWorkspace> activeProjectWorkspace_{};
+    EditorSettings editorSettings_{};
+    std::optional<u32> pendingRecentProjectIndex_{};
     std::string temporaryProjectRootUtf8_{};
     std::string temporaryProjectSaveTargetRootUtf8_{};
     std::string pendingTemporaryProjectCleanupRootUtf8_{};
@@ -3954,6 +4395,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId hierarchyPreselectionNode_{};
     UI::UILayoutStyle hierarchyDropIndicatorLayout_{};
     UI::UINodeId projectAssetList_{};
+    UI::UINodeId tilePaletteGrid_{};
+    UI::UILayoutStyle tilePaletteGridLayout_{};
     UI::UINodeId projectAssetTools_{};
     UI::UINodeId projectAssetFilters_{};
     UI::UINodeId projectCatalogActions_{};
@@ -3977,6 +4420,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId projectAssetStartCenterOpenButton_{};
     UI::UINodeId projectAssetStartCenterImportButton_{};
     UI::UINodeId projectAssetStartCenterRecent_{};
+    std::array<UI::UINodeId, RecentProjectCapacity> recentProjectButtons_{};
     UI::UINodeId fileDropFeedbackRoot_{};
     UI::UILayoutStyle fileDropFeedbackRootLayout_{};
     UI::UINodeId fileDropFeedbackSurface_{};
@@ -4135,6 +4579,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId dirtyClosePathInput_{};
     UI::UIDialogParts sceneDeleteDialog_{};
     UI::UIDialogParts projectAssetRemoveDialog_{};
+    UI::UIDialogParts projectAssetRenameDialog_{};
+    UI::UINodeId projectAssetRenameInput_{};
+    UI::UIDialogParts projectAssetFolderDialog_{};
+    UI::UINodeId projectAssetFolderInput_{};
     UI::UIDialogParts aboutDialog_{};
     UI::UISnackbarHostParts snackbarParts_{};
     UI::UILayoutStyle snackbarRootLayout_{};
@@ -4187,6 +4635,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId projectAssetContextMenu_{};
     UI::UINodeId projectAssetContextOpenItem_{};
     UI::UINodeId projectAssetContextInspectItem_{};
+    UI::UINodeId projectAssetContextRenameItem_{};
+    UI::UINodeId projectAssetContextNewFolderItem_{};
     UI::UINodeId projectAssetContextReimportItem_{};
     UI::UINodeId projectAssetContextLocateSourceItem_{};
     UI::UINodeId projectAssetContextCopyAssetIdItem_{};
@@ -4198,6 +4648,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
     std::array<UI::UILayoutStyle, 2> viewportContextButtonLayouts_{};
     UI::UINodeId fileCreateProjectMenuItem_{};
     UI::UINodeId fileOpenProjectMenuItem_{};
+    UI::UINodeId fileOpenRecentSubmenu_{};
+    std::array<UI::UINodeId, RecentProjectCapacity> recentProjectMenuItems_{};
     UI::UINodeId fileImportSourceMenuItem_{};
     UI::UINodeId fileSaveMenuItem_{};
     UI::UINodeId fileSaveAsMenuItem_{};
@@ -4333,6 +4785,9 @@ class EditorWorkspaceState final : public Tina::IGameState {
     std::optional<ProjectAssetRemoveConfirmation>
         pendingProjectAssetRemoveConfirmation_{};
     bool pendingProjectAssetRemoveDialogFocus_ = false;
+    std::optional<Tina::Core::AssetId> pendingProjectAssetRenameAssetId_{};
+    bool pendingProjectAssetRenameDialogFocus_ = false;
+    bool pendingProjectAssetFolderDialogFocus_ = false;
     std::array<UI::UIRoutedPointerListenerToken, 4>
         projectAssetPointerListeners_{};
     ViewportToolMode viewportToolMode_ = ViewportToolMode::Select;
@@ -4372,6 +4827,11 @@ class EditorWorkspaceState final : public Tina::IGameState {
     u32 tileBrushX_ = 2;
     u32 tileBrushY_ = 2;
     Tina::Core::u16 selectedTileId_ = 1;
+    std::array<Tina::AssetFormat::TilesetTileView, Tina::AssetFormat::TilesetWire::MaxTiles>
+        tilePaletteTiles_{};
+    std::array<std::string, Tina::AssetFormat::TilesetWire::MaxTiles> tilePaletteLabels_{};
+    u32 tilePaletteTileCount_ = 0;
+    std::optional<u64> observedTilePaletteSelection_{};
     std::optional<Tina::Editor::TileMapAuthoringCellEdit> lastPaintedTile_{};
     std::optional<Tina::Editor::TileMapAuthoringCellEdit> pendingTileCellEdit_{};
     Tina::AssetFormat::TileMapLayerId pendingTileLayerId_ = 0;

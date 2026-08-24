@@ -133,6 +133,38 @@ namespace {
 
 } // namespace
 
+auto EditorWorkspaceState::tilePaletteDataSource() const noexcept
+    -> UI::UIVirtualGridViewDataSource
+{
+    return {.state = this,
+            .itemCount = &EditorWorkspaceState::tilePaletteItemCount,
+            .resolveItem = &EditorWorkspaceState::resolveTilePaletteItem};
+}
+
+auto EditorWorkspaceState::tilePaletteItemCount(const void* state) noexcept -> u64
+{
+    const auto* self = static_cast<const EditorWorkspaceState*>(state);
+    return self != nullptr ? self->tilePaletteTileCount_ : 0U;
+}
+
+bool EditorWorkspaceState::resolveTilePaletteItem(
+    const void* state, u64 logicalIndex,
+    UI::UIVirtualGridViewItemDescriptor& output) noexcept
+{
+    const auto* self = static_cast<const EditorWorkspaceState*>(state);
+    if (self == nullptr || logicalIndex >= self->tilePaletteTileCount_) {
+        return false;
+    }
+    const auto& tile = self->tilePaletteTiles_[logicalIndex];
+    output.key = static_cast<UI::UIVirtualGridViewItemKey>(tile.localId) + 1U;
+    output.enabled = self->tileMapEditingContext();
+    output.label = self->tilePaletteLabels_[logicalIndex];
+    output.presentation.secondaryLabel =
+        (tile.materialFlags & Tina::AssetFormat::TilesetWire::MaterialSolid) != 0U
+            ? "Solid" : "Tile";
+    return true;
+}
+
 auto EditorWorkspaceState::reportAuthoringFailure(
     std::string_view prefix, const Tina::Core::Error& error) -> Tina::Core::Status{
     try {
@@ -1074,6 +1106,11 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
     }
     const u32 selectedStableId = stableEntityIdForHierarchyItem(selectionKey_);
     const bool tileMapContextVisible = tileMapEditingContext();
+    tilePaletteGridLayout_.visibility = tileMapContextVisible
+        ? UI::UIVisibility::Visible : UI::UIVisibility::Collapsed;
+    if (auto status = tree.setLayoutStyle(tilePaletteGrid_, tilePaletteGridLayout_); !status) {
+        return status;
+    }
     const bool entityContextVisible = !assetInspectorActive_ &&
                                       !tileMapContextVisible &&
                                       selectedStableId != 0U;
@@ -1298,7 +1335,13 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
         return status;
     }
     if (auto status = tree.setEnabled(
-            projectAssetContextInspectItem_, projectAssetContextAvailable); !status) {
+            projectAssetContextRenameItem_, projectAssetMutationAvailable); !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(
+            projectAssetContextNewFolderItem_,
+            activeProjectWorkspace_.has_value() && contextSourceImportIdle &&
+                !pendingProjectSwitch_.has_value()); !status) {
         return status;
     }
     if (auto status = tree.setEnabled(
@@ -1331,7 +1374,8 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
         return status;
     }
     const bool tileMapControlsEnabled = authoringEnabled() && tileMapEditingContext();
-    if (auto status = tree.setEnabled(paintTileButton_, tileMapControlsEnabled); !status) {
+    const bool tilePaletteAvailable = tileMapControlsEnabled && tilePaletteTileCount_ != 0U;
+    if (auto status = tree.setEnabled(paintTileButton_, tilePaletteAvailable); !status) {
         return status;
     }
     if (auto status = tree.setEnabled(eraseTileButton_, tileMapControlsEnabled); !status) {

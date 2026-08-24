@@ -206,6 +206,14 @@ auto EditorWorkspaceState::refreshFileDropFeedbackUi(
 }
 
 auto EditorWorkspaceState::onExit(Tina::GameStateExitContext&) noexcept -> void{
+    editorSettings_.leftDockFraction = leftDockVisibleFraction_;
+    editorSettings_.inspectorFraction = inspectorVisibleFraction_;
+    editorSettings_.bottomPanelFraction = bottomPanelVisibleFraction_;
+    editorSettings_.leftDockVisible = leftDockVisible_;
+    editorSettings_.inspectorVisible = inspectorVisible_;
+    editorSettings_.bottomPanel = bottomPanel_;
+    editorSettings_.snapEnabled = viewportTransformGizmo_.snap().enabled;
+    (void)saveEditorSettings(editorSettings_);
     platformEventSubscription_.reset();
     pendingFileDrops_.clear();
     cancelSourceImportPending_ = false;
@@ -336,6 +344,9 @@ auto EditorWorkspaceState::updateFrame(Tina::FrameUpdateContext& context) -> Tin
             playSession_->snapshot().simulationTickCount);
     }
     if (auto status = processEditorShortcuts(context.frameActions()); !status) {
+        return status;
+    }
+    if (auto status = processPendingRecentProject(); !status) {
         return status;
     }
     if (pendingProjectSwitch_.has_value() && !projectSwitchBlockedByDirty_) {
@@ -978,6 +989,49 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
     if (!tree) {
         return Tina::Core::failure(std::move(tree.error()));
     }
+    tilePaletteTileCount_ = 0U;
+    if (previewTilesetAsset_ && assetResources_.system.has_value()) {
+        if (const auto* file = assetResources_.system->tryGet(previewTilesetAsset_);
+            file != nullptr) {
+            auto payload = Tina::AssetFormat::parseTilesetPayload(file->payload());
+            if (payload) {
+                const u32 count = (std::min)(payload->tileCount,
+                    static_cast<u32>(tilePaletteTiles_.size()));
+                for (u32 index = 0; index < count; ++index) {
+                    const auto tile = payload->tile(index);
+                    if (!tile.has_value()) continue;
+                    tilePaletteTiles_[tilePaletteTileCount_] = *tile;
+                    tilePaletteLabels_[tilePaletteTileCount_] =
+                        "Tile " + std::to_string(tile->localId);
+                    ++tilePaletteTileCount_;
+                }
+            }
+        }
+    }
+    if (auto status = tree->setVirtualGridViewDataSource(
+            tilePaletteGrid_, tilePaletteDataSource()); !status) {
+        return status;
+    }
+    if (auto status = tree->invalidateVirtualGridViewItems(tilePaletteGrid_); !status) {
+        return status;
+    }
+    if (auto selection = tree->virtualGridViewSelection(tilePaletteGrid_); selection) {
+        if (selection->hasValue() && observedTilePaletteSelection_ != selection->logicalIndex &&
+            selection->logicalIndex < tilePaletteTileCount_) {
+            selectedTileId_ = tilePaletteTiles_[selection->logicalIndex].localId;
+            observedTilePaletteSelection_ = selection->logicalIndex;
+        }
+        if (!selection->hasValue() && tilePaletteTileCount_ != 0U) {
+            for (u32 index = 0; index < tilePaletteTileCount_; ++index) {
+                if (tilePaletteTiles_[index].localId == selectedTileId_) {
+                    if (auto status = tree->setVirtualGridViewSelectedIndex(tilePaletteGrid_, index);
+                        !status) return status;
+                    observedTilePaletteSelection_ = index;
+                    break;
+                }
+            }
+        }
+    }
     if (auto rect = tree->committedLayoutRect(projectAssetList_); rect) {
         projectAssetListRect_ = *rect;
     }
@@ -1068,6 +1122,16 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
             return status;
         }
         pendingProjectAssetRemoveDialogFocus_ = false;
+    } else if (pendingProjectAssetRenameDialogFocus_) {
+        if (auto status = tree->requestFocus(projectAssetRenameInput_); !status) {
+            return status;
+        }
+        pendingProjectAssetRenameDialogFocus_ = false;
+    } else if (pendingProjectAssetFolderDialogFocus_) {
+        if (auto status = tree->requestFocus(projectAssetFolderInput_); !status) {
+            return status;
+        }
+        pendingProjectAssetFolderDialogFocus_ = false;
     } else if (pendingAboutDialogFocus_) {
         if (auto status = tree->requestFocus(
                 aboutDialog_.actions[AboutCloseActionIndex]);

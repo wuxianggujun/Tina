@@ -56,7 +56,11 @@ auto EditorWorkspaceState::bakeAndPublishNavigation2D() -> Tina::Core::Status{
     previousSelection = projectAssets_.selectedAssetId();
     const std::string_view previousSearchQuery = projectAssets_.searchQuery();
     auto browser = prepareProjectBrowserForSnapshot(
-        *staged, previousFilter, previousSelection, previousSearchQuery);
+        *staged, previousFilter, previousSelection, previousSearchQuery,
+        sourceImportUnitOutputs_, assetMetadata_,
+        activeProjectWorkspace_.has_value()
+            ? activeProjectWorkspace_->sourceRootUtf8()
+            : std::string_view{});
     if (!browser) {
         return Tina::Core::failure(std::move(browser.error()));
     }
@@ -246,7 +250,7 @@ auto EditorWorkspaceState::processPendingTileBrush(Tina::PrimaryWindowUITreeUpda
     }
     if (edit.localTileId != 0U) {
         lastPaintedTile_ = edit;
-        selectedTileId_ = static_cast<Tina::Core::u16>(edit.localTileId % 4U + 1U);
+        selectedTileId_ = edit.localTileId;
     } else {
         lastPaintedTile_.reset();
     }
@@ -337,9 +341,6 @@ auto EditorWorkspaceState::editTileMapBrushCell(bool erase) -> Tina::Core::Statu
     }
 
     Tina::Core::u16 tileId = erase ? 0U : selectedTileId_;
-    if (!erase && authoredCellAt(x, y) == tileId) {
-        tileId = static_cast<Tina::Core::u16>(tileId % 4U + 1U);
-    }
     const auto revisionBefore = tileMapDocument_.revision();
     if (auto status = tileMapDocument_.paintCell(layer->stableLayerId, x, y, tileId);
         !status) {
@@ -358,7 +359,7 @@ auto EditorWorkspaceState::editTileMapBrushCell(bool erase) -> Tina::Core::Statu
             .y = y,
             .localTileId = tileId,
         };
-        selectedTileId_ = static_cast<Tina::Core::u16>(tileId % 4U + 1U);
+        selectedTileId_ = tileId;
         tileBrushX_ = (x + 1U) % authored->widthCells;
         tileBrushY_ = y + (tileBrushX_ == 0U ? 1U : 0U);
         tileBrushY_ %= authored->heightCells;

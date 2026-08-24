@@ -21,7 +21,7 @@
 | 迁移 | 完整目标、小步垂直切片、持续可运行 | [0001](adr/0001-vnext-vertical-slices.md) | Implemented |
 | Profiling | Tina Trace/Metrics；Tracy 用于定位，bench 用于回归 | [0002](adr/0002-tracy-and-benchmark.md) | Partial：None frontend、Tracy 0.13.1 64-byte opaque zone adapter、Runtime phase consumer 与 `tina_bench` schema v1 已落地；Metrics 与 session/capture 控制面仍后置，Metrics 契约提案见 Proposed [0027](adr/0027-runtime-metrics-registry.md) |
 | 组合 | backend factory + 非全局 `EngineHost` | [0003](adr/0003-backend-factories.md) | Implemented |
-| 错误 | 内部可用 exception，模块边界转 `Result`/`Status` | [0004](adr/0004-exceptions-and-errors.md) | Implemented |
+| 错误 | 内部可用 exception，模块边界转 `Result`/`Status` | [0004](adr/0004-exceptions-and-errors.md) | Implemented；Core 另提供应用显式安装的最后故障文本报告，`EngineHost` 不隐式取得进程 handler owner |
 | Platform | GLFW + 窄原生适配，不引入 SDL/SDL3 | [0005](adr/0005-glfw-without-sdl.md) | Implemented |
 | 测试 | 直接运行 GoogleTest，不用 CTest 调度 | [0006](adr/0006-direct-googletest.md) | Implemented |
 | 容器/Hash | 标准库/PMR，不使用 EASTL；xxHash 私有 | [0007](adr/0007-standard-containers-and-hash.md) | Implemented |

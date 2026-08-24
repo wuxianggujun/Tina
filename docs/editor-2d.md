@@ -51,6 +51,16 @@ GoogleTest、sample、smoke、Visual 或平台 gate。大功能的交互、状�
 smoke。统一 gate 的失败集中修复后只重跑失败或直接受影响项，不按每个小修复重复整套验证。详细命令与证据边界
 见[测试与验证](testing.md#editor-开发与验证节奏)。
 
+### 第一批 E1/E2/E3 状态
+
+TileMap Inspector 已提供固定容量 Tile Palette：数据来自当前 resident Tileset 的 cooked payload，选择 tile 不产生
+document revision，且无 Tileset 时 Paint 控件禁用。Editor 私有 settings carrier 已接入启动读取和退出原子写入，保存
+SplitView fraction/可见性、Bottom Panel 与 snap enabled；主题和 snap 步长 Preferences UI 尚未承诺完成。Recent Projects
+在统一 Catalog switch 提交点记录最近 10 个 project root，并在 Start Center 以固定按钮行呈现；无效路径从列表移除。
+上述能力没有新增自动测试；本批统一证据已完成：`tina_editor_tests` 112/112、`tina_editor_app_tests` 23/23，
+`tina_sample_2d --frames=300 --frame-delay-ms=0` 与 `tina_sample_3d --frames=30 --frame-delay-ms=0` 均
+`status=ok`。跨重启 settings、TileMap 多次选择/绘制、Recent Projects 失效移除及文件对话框重复打开仍需人工验收。
+
 当前 Editor application 的 retained UI 布局已完整铺开：带 `File/Edit/View/Help` 的 Command Bar、按需出现的 Document Tab strip、
 Hierarchy/Project Assets Left Dock、active Viewport、可滚动 Inspector
 （Identity/Transform/节点专属属性/Hierarchy/TileMap）、可折叠底部面板和 Status Bar。
@@ -315,6 +325,8 @@ UI thread 只把 owned path batch 提交给 `EditorSourceImportService`，后台
 扩展名识别、物理路径规范化、containment 与去重校验，任一文件非法、越界或分配失败时都不修改既有 intended set；
 外部媒体 ingress 也在任何复制前完成整批预检，后续 intended-set 合并、cook、Catalog commit、取消或 shutdown 失败会删除本批新文件与空目录。
 目标同名且内容相同时复用项目文件，内容不同时使用 `_2`、`_3` 等后缀，绝不覆盖；批内同一物理文件只复制一次。
+每张图片只生成一个 Texture2D；创建或编辑 Sprite2D Node 时可直接选择该 AssetId，不再等待或查找自动生成的
+全幅 Sprite wrapper。显式 recipe 中 authored Sprite 的 wrapper/dependency 路径继续可用。
 外部 `.recipe` / `.gltf` / `.glb` 因相对依赖无法靠复制单个主文件保证完整性而明确拒绝，调用方需先把完整依赖集置于
 `Source/`。已存在或本批重复选择的 unit 只保留一份，但仍会触发完整 intended set 的 reimport；Windows 大小写、
 分隔符或 `..` 形成的同文件别名按同一物理路径处理。后台 `EditorSourceImportService` 在单个有界 batch 中执行 ingress、merge 和共享 Asset pipeline，
@@ -334,8 +346,14 @@ Editor owner thread 复制为有界 UTF-8 path batch：释放到 Project Assets 
 HDROP、X11 XDND 与 Wayland `wl_data_device`；标准 callback 只有最终 release/drop，不提供 drag-enter/drag-over，因此当前不宣称真正
 的系统拖动 hover 高亮。Editor 私有 DropOverlay 仅在 release 后显示 accepted/processing/committed/rejected/failed 状态，并自动复用
 Source Import phase 与 Catalog commit 结果。失败 Retry 保存完整 intended units 和原始外部 path batch；Running Cancel 在 owner thread 停止并 join worker，清理 fresh stage、drop intent、retry snapshot 和未提交资源历史，同时保留旧 Catalog/selection。Linux X11/Wayland 构建、运行和产品拖放证据，以及 Explorer 人工拖放证据，尚未完成。
+Catalog commit 后重建 preview binding 时，Editor 先退休旧 Sprite/Mesh registry；首次释放失败会 drain
+`IRenderDevice` 与 `AssetSystem` 的 GPU retirement 并重试一次。若 registry 仍处于 engaged 状态，下一次 prepare 返回
+`CatalogReloadBusy`，不会用 `optional::emplace` 覆盖仍持有 live binding 的 registry 而触发析构期 `std::terminate`。
 Windows 使用系统原生 dialog；Linux 私有 adapter 以 `zenity` 为首选、`kdialog` 为缺失回退，覆盖 open/save/folder 且不经过
-shell。Linux 定向编译和真实 helper 产品门禁仍是平台证据，但不是 Editor 完成度的唯一剩余项；视口导航、gizmo、
+shell。Windows COM guard 按平台契约为每次成功的 `CoInitializeEx()`（包括 `S_FALSE`）配对一次
+`CoUninitialize()`。`EditorProjectWorkspace` 的 canonical generic UTF-8 路径在进入 Windows Shell 前通过
+`std::filesystem::path::make_preferred()` 转为原生分隔符，避免第二次 Import Files 将 `C:/.../Source` 交给
+`SHCreateItemFromParsingName()` 后得到 `E_INVALIDARG`。连续两次真实系统 dialog 仍属于人工产品证据。Linux 定向编译和真实 helper 产品门禁仍是平台证据，但不是 Editor 完成度的唯一剩余项；视口导航、gizmo、
 场景操作与可视化门禁必须分别按当前源码状态记录。
 
 ## Editor application layout
@@ -564,6 +582,13 @@ history 可撤销性检查。以下失败均保留 current bytes、revision、un
 
 Undo/Redo 无对应 revision 时分别返回 `UndoUnavailable` / `RedoUnavailable`，不改变 cursor。
 
+进程级不可恢复故障与普通 document transaction failure 分账。`TinaEditor.exe` 在任何 Editor/Runtime 创建前安装
+Core CrashHandler；每次启动在 `%TEMP%/tina_editor_crash.txt` 建立 armed marker；系统临时目录查询失败时回退当前工作目录的
+同名文件。`std::terminate`、abort 或 Windows
+fatal exception 写 `status=crash`、reason 与 best-effort backtrace；穿过顶层 application boundary 的可表示
+`Core::Error` 写 `status=fatal`、domain/code、origin 与完整 context chain。该文件用于回答“窗口为何消失”，不代表
+Editor 能从损坏进程恢复；导入/保存等可恢复错误仍应留在 UI feedback/Output 并保持旧 Catalog/document。
+
 ## 验收
 
 Editor application 切片使用正式 `tina_editor_desktop` target；只有明确授权自动验收 gate 时才运行
@@ -603,8 +628,9 @@ state storage，不能只看单一容量字段判断泄漏。
 必须在对应阶段结束时释放。
 普通无项目启动不会提供任何测试资源；真实资源验收可直接点击 Project Assets 标题栏的小 `+` 选择项目外
 PNG/JPEG/WAV（可一次选择几十张），确认 dialog 关闭后 Editor 仍可响应，状态依次显示 Preparing/Copying/Cooking/Committing，
-文件自动进入临时 Project 的 `Source/Imported`，且图片产生 Texture2D +
-全幅 Sprite 并用于 2D 预览。随后点击 `Save` 或 `Save As`，选择空目录并确认资源迁移、重新 cook 和临时目录清理。
+文件自动进入临时 Project 的 `Source/Imported`，且每张图片只产生 Texture2D；把该 Texture2D AssetId 直接用于
+Sprite2D Node 后可进入 2D 预览。关闭后再次打开 `Import Files...`，确认第二次系统 dialog 仍能解析初始目录。
+随后点击 `Save` 或 `Save As`，选择空目录并确认资源迁移、重新 cook 和临时目录清理。
 已有永久项目也可通过同一 `+` 直接导入。glTF/GLB 的完整
 主文件与相对依赖仍先放入项目 `Source/` 再选择，导入后应产生 Mesh/Material/Prefab
 并用于 3D 预览；任一路径都不得回退到 auto-demo fixture。

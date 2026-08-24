@@ -251,6 +251,9 @@ auto EditorWorkspaceState::refreshProjectAssetUi(
         !status) {
         return status;
     }
+    if (auto status = refreshRecentProjectsUi(tree); !status) {
+        return status;
+    }
     projectAssetListLayout_.visibility =
         showProjectAssets ? UI::UIVisibility::Visible : UI::UIVisibility::Collapsed;
     if (auto status = tree.setLayoutStyle(
@@ -435,13 +438,103 @@ auto EditorWorkspaceState::refreshProjectAssetUi(
     return Tina::Core::success();
 }
 
+auto EditorWorkspaceState::refreshRecentProjectsUi(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    for (u32 index = 0; index < RecentProjectCapacity; ++index) {
+        UI::UILayoutStyle layout{};
+        layout.size.width = UI::UILayoutLength::Percent(100.0F);
+        layout.size.height = UI::UILayoutLength::Px(28.0F);
+        layout.visibility = index < editorSettings_.recentProjectCount
+            ? UI::UIVisibility::Visible : UI::UIVisibility::Collapsed;
+        if (auto status = tree.setLayoutStyle(recentProjectButtons_[index], layout); !status) {
+            return status;
+        }
+        if (index < editorSettings_.recentProjectCount) {
+            if (auto status = tree.setText(
+                    recentProjectButtons_[index], editorSettings_.recentProjects[index]); !status) {
+                return status;
+            }
+        }
+        if (auto status = tree.setEnabled(
+                recentProjectMenuItems_[index], index < editorSettings_.recentProjectCount); !status) {
+            return status;
+        }
+        if (index < editorSettings_.recentProjectCount) {
+            if (auto status = tree.setText(
+                    recentProjectMenuItems_[index], editorSettings_.recentProjects[index]); !status) {
+                return status;
+            }
+        }
+    }
+    return Tina::Core::success();
+}
+
+void EditorWorkspaceState::rememberRecentProject(std::string_view projectRootUtf8) noexcept
+{
+    if (projectRootUtf8.empty() || !Tina::Core::isStrictUtf8WithoutNul(projectRootUtf8)) {
+        return;
+    }
+    try {
+        u32 existing = editorSettings_.recentProjectCount;
+        for (u32 index = 0; index < existing; ++index) {
+            if (editorSettings_.recentProjects[index] == projectRootUtf8) {
+                existing = index;
+                break;
+            }
+        }
+        const u32 limit = (std::min)(editorSettings_.recentProjectCount, RecentProjectCapacity - 1U);
+        const u32 shiftStart = existing < editorSettings_.recentProjectCount ? existing : limit;
+        for (u32 index = shiftStart; index > 0U; --index) {
+            editorSettings_.recentProjects[index] = std::move(editorSettings_.recentProjects[index - 1U]);
+        }
+        editorSettings_.recentProjects[0] = std::string(projectRootUtf8);
+        editorSettings_.recentProjectCount = (std::min)(limit + 1U, RecentProjectCapacity);
+        (void)saveEditorSettings(editorSettings_);
+    } catch (...) {
+    }
+}
+
+auto EditorWorkspaceState::processPendingRecentProject() -> Tina::Core::Status
+{
+    if (!pendingRecentProjectIndex_.has_value()) {
+        return Tina::Core::success();
+    }
+    const u32 index = *pendingRecentProjectIndex_;
+    pendingRecentProjectIndex_.reset();
+    if (index >= editorSettings_.recentProjectCount) {
+        return Tina::Core::success();
+    }
+    auto workspace = openExistingEditorProjectWorkspace(editorSettings_.recentProjects[index]);
+    if (!workspace) {
+        editorSettings_.recentProjects[index].clear();
+        for (u32 cursor = index; cursor + 1U < editorSettings_.recentProjectCount; ++cursor) {
+            editorSettings_.recentProjects[cursor] = std::move(editorSettings_.recentProjects[cursor + 1U]);
+        }
+        if (editorSettings_.recentProjectCount > 0U) --editorSettings_.recentProjectCount;
+        (void)saveEditorSettings(editorSettings_);
+        return reportAuthoringFailure("Recent project is unavailable: ", workspace.error());
+    }
+    pendingProjectSwitch_ = std::move(*workspace);
+    projectSwitchBlockedByDirty_ = false;
+    authoringFeedback_ = "Recent project open scheduled";
+    return Tina::Core::success();
+}
+
 auto EditorWorkspaceState::prepareProjectBrowserForSnapshot(
     const Tina::Asset::CatalogSnapshot& catalog,
     Tina::Editor::ProjectAssetFilter filter,
     std::optional<Tina::Core::AssetId> selectedAsset,
-    std::string_view searchQuery)
+    std::string_view searchQuery,
+    std::span<const Tina::Asset::SourceImportPipelineUnitOutput> sourceMappings,
+    std::span<const EditorAssetMetadataRecord> metadata,
+    std::string_view sourceRootUtf8)
     -> Tina::Core::Result<Tina::Editor::ProjectAssetBrowserModel>{
-    auto browser = createProjectAssetBrowser(catalog);
+    if (sourceRootUtf8.empty() && activeProjectWorkspace_.has_value()) {
+        sourceRootUtf8 = activeProjectWorkspace_->sourceRootUtf8();
+    }
+    auto browser = createProjectAssetBrowser(
+        catalog, sourceMappings, metadata, sourceRootUtf8);
     if (!browser) {
         return Tina::Core::failure(std::move(browser.error()));
     }
@@ -771,7 +864,9 @@ auto EditorWorkspaceState::switchLiveProjectCatalog(
             "Project switch committed without an AssetSystem Catalog snapshot");
     }
     auto candidateBrowser = prepareProjectBrowserForSnapshot(
-        *committedCatalog, previousFilter, previousSelection, previousSearchQuery);
+        *committedCatalog, previousFilter, previousSelection, previousSearchQuery,
+        resolvedCatalog->sourceImportUnitOutputs, resolvedCatalog->assetMetadata,
+        workspace.sourceRootUtf8());
     if (!candidateBrowser) {
         auto error = std::move(candidateBrowser.error());
         if (auto feedback = reportAuthoringFailure(
@@ -812,8 +907,10 @@ auto EditorWorkspaceState::switchLiveProjectCatalog(
     pendingProjectAssetDrop_.reset();
     commitProjectSwitchDocumentTabs(std::move(*candidateTabs));
     activeProjectWorkspace_ = std::move(workspace);
+    rememberRecentProject(activeProjectWorkspace_->projectRootUtf8());
     sourceImportUnits_ = std::move(resolvedCatalog->sourceImportUnits);
-    sourceImportUnitOutputs_.clear();
+    sourceImportUnitOutputs_ = std::move(resolvedCatalog->sourceImportUnitOutputs);
+    assetMetadata_ = std::move(resolvedCatalog->assetMetadata);
     clearAssetImportHistory();
     sourceImportRetryUnits_.clear();
     sourceImportRetryPathsUtf8_.clear();
@@ -1173,7 +1270,11 @@ auto EditorWorkspaceState::refreshProjectCatalog() -> Tina::Core::Status{
             "Catalog refresh committed without an AssetSystem Catalog snapshot");
     }
     auto refreshedBrowser = prepareProjectBrowserForSnapshot(
-        *committedCatalog, previousFilter, previousSelection, previousSearchQuery);
+        *committedCatalog, previousFilter, previousSelection, previousSearchQuery,
+        sourceImportUnitOutputs_, assetMetadata_,
+        activeProjectWorkspace_.has_value()
+            ? activeProjectWorkspace_->sourceRootUtf8()
+            : std::string_view{});
     if (!refreshedBrowser) {
         auto error = std::move(refreshedBrowser.error());
         if (auto feedback = reportAuthoringFailure(
@@ -1256,9 +1357,9 @@ auto EditorWorkspaceState::applyProjectAssetViewMode(
     lastProjectAssetPointerDownAssetId_ = {};
     pendingProjectAssetOpen_.reset();
     projectAssetListStyle_.minimumItemWidth =
-        mode == ProjectAssetViewMode::Grid ? 132.0F : 280.0F;
+        mode == ProjectAssetViewMode::Grid ? ProjectAssetMinimumItemWidth + 12.0F : 320.0F;
     projectAssetListStyle_.itemHeight =
-        mode == ProjectAssetViewMode::Grid ? 72.0F : 30.0F;
+        mode == ProjectAssetViewMode::Grid ? 96.0F : 68.0F;
     if (auto status = tree.setVirtualGridViewStyle(
             projectAssetList_, projectAssetListStyle_); !status) {
         return status;
@@ -1275,12 +1376,6 @@ auto EditorWorkspaceState::applyProjectAssetViewMode(
 }
 
 auto EditorWorkspaceState::inspectedProjectAsset() const noexcept -> const Tina::Editor::ProjectAssetDescriptor*{
-    const auto* activeTab = documentTabs_.activeTab();
-    if (activeTab != nullptr &&
-        activeTab->key.kind == Tina::Editor::EditorDocumentKind::AssetInspector &&
-        activeTab->key.assetId) {
-        return projectAssets_.inspectorSnapshot(activeTab->key.assetId);
-    }
     return projectAssets_.selectedInspectorSnapshot();
 }
 

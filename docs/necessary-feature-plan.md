@@ -415,6 +415,8 @@ N8 不包含 Cooked FX asset schema、effect graph/editor、GPU particle simulat
   Diagnostics 等剩余 owner。
 - 关闭路径不 detach、不强杀 Worker；deadline 是进程级 hard failure boundary，不是忽略活跃线程后继续
   析构的许可。
+- `EngineHost` 只负责上述 Diagnostics + terminate 边界，不自动安装进程级 CrashHandler；只有入口在 Host 创建前显式
+  安装 handler 时，该 terminate 才会额外尝试写文本 crash report。
 
 ### 完成结果
 

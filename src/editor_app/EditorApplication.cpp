@@ -1201,18 +1201,12 @@ int runEditorApplication(int argumentCount, char** arguments)
     // without printing anything at all.
     //
     // TinaEditor is a GUI subsystem binary, so stderr is usually not visible.
-    // The report file is what the user can actually read after a crash.
-    static std::string crashReportPath = [] {
-        std::error_code error;
-        const std::filesystem::path temp = std::filesystem::temp_directory_path(error);
-        const std::filesystem::path target =
-            (error ? std::filesystem::path{"."} : temp) / "tina_editor_crash.txt";
-        return pathToUtf8(target);
-    }();
+    // The report file is what the user can actually read afterwards; writeError()
+    // appends fatal non-crash exits to the same file.
     (void)Tina::Core::Diagnostics::installCrashHandler(
         Tina::Core::Diagnostics::CrashHandlerConfig{
             .applicationName = "TinaEditor",
-            .reportPathUtf8 = crashReportPath,
+            .reportPathUtf8 = editorDiagnosticReportPathUtf8(),
             .captureBacktrace = true,
         });
     try {

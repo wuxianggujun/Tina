@@ -20,6 +20,7 @@
 #include <ShObjIdl.h>
 #include <objbase.h>
 
+#include <filesystem>
 #include <limits>
 #include <vector>
 #endif
@@ -112,7 +113,10 @@ public:
 
     ~ComApartment() noexcept
     {
-        if (SUCCEEDED(result_)) {
+        // This helper only owns the apartment when it performed the initial
+        // initialization. S_FALSE means another subsystem already owns it;
+        // uninitializing that apartment here breaks the next Shell dialog.
+        if (result_ == S_OK) {
             ::CoUninitialize();
         }
     }
@@ -239,12 +243,17 @@ private:
     if (directoryUtf8.empty()) {
         return Core::success();
     }
-    auto directory = wideFromUtf8(directoryUtf8);
-    if (!directory) {
-        return Core::failure(std::move(directory.error()));
+    auto directoryWide = wideFromUtf8(directoryUtf8);
+    if (!directoryWide) {
+        return Core::failure(std::move(directoryWide.error()));
     }
+    // EditorProjectWorkspace publishes canonical generic UTF-8 paths with '/'.
+    // The Windows Shell parser rejects that form with E_INVALIDARG even though
+    // Win32 filesystem APIs accept it, so convert at the native Shell boundary.
+    std::filesystem::path directoryPath{std::move(*directoryWide)};
+    directoryPath.make_preferred();
     ComPtr<IShellItem> folder;
-    const HRESULT createResult = ::SHCreateItemFromParsingName(directory->c_str(), nullptr,
+    const HRESULT createResult = ::SHCreateItemFromParsingName(directoryPath.c_str(), nullptr,
                                                                IID_PPV_ARGS(folder.put()));
     if (FAILED(createResult)) {
         return Core::failure(hresultError(

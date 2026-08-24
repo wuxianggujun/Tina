@@ -701,6 +701,28 @@ out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe --gtest_color=yes
 仅观察进程终止不够：death test 同时匹配 `ShutdownDeadlineExceeded` Diagnostics 输出，并以析构哨兵证明
 超时后没有 Task owner teardown。本轮 shutdown deadline 聚焦门禁和完整 `tina_tests` 均已直接执行通过。
 
+## Crash 与 Editor fatal report
+
+Core 最后故障报告归属 `tina_tests`：
+
+- `CrashHandlerDeathTest` 覆盖显式 fatal reason、`std::terminate`、in-flight `std::exception::what()` 与
+  `{"status":"crash"}` 非零退出；
+- `CrashHandlerTest` 覆盖 GUI report file、Windows DbgHelp 至少解析出调用函数、重复 install 不自递归，以及
+  uninstall 恢复 captured `std::terminate` handler；
+- `CrashHandler.hpp` 由独立 header-isolation TU 编译，公开面不得泄漏 Windows/DbgHelp/CRT token。
+
+```powershell
+cmake --build --preset windows-vnext-debug --target tina_tests --parallel 1 -- /nr:false
+out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe --gtest_color=yes `
+  --gtest_filter="CrashHandlerDeathTest.*:CrashHandlerTest.*"
+```
+
+这些 death tests 不等于真实 access violation、stack overflow、GPU driver fault 或损坏堆的产品证据。
+`TinaEditor.exe` 人工故障排查先检查 `%TEMP%/tina_editor_crash.txt`：正常启动至少有 armed marker；handler crash
+应以 `status=crash` 结束，顶层可表示 `Core::Error` 应以 `status=fatal` 结束并含 origin/context。系统临时目录查询失败时应改查
+当前工作目录的同名文件。report file 的非 ASCII Windows 路径验收、Linux terminate/abort artifact，以及 Windows fatal
+SEH 矩阵由 `CORE-DIAG-001` 收口。
+
 ## Scene Sprite AssetHandle A1
 
 `ASSET-HANDLE-SCENE-2D-A1` 的自动门禁归属 `tina_scene_tests` 与 2D product gate：
@@ -1296,8 +1318,10 @@ intended/total unit=`2/2`、`sourceImportStateCommitted=true`、Running/Ready=fa
 同名同内容复用、同名异内容后缀和重复物理选择单次复制；另需覆盖外部 recipe/glTF、缺失物理文件和 cooker 首错，确认均保留旧
 Catalog，且有限帧 JSON 返回真实错误而不是 lifecycle 通用失败。
 真实资源人工验收必须从普通模式 New/Open Project 开始，不使用 `--auto-demo`：用 `Import Files...` 直接选择项目外
-`.png`/`.jpg`/`.jpeg`，确认源文件复制到 `Source/Imported/Images/`，Catalog 出现 Texture2D + Sprite，并可把 Sprite 用于
-2D 文档预览；再把 `.gltf`/`.glb` 及其相对依赖完整放入项目 `Source/` 后选择，确认 Mesh/Material/Prefab 出现在 Browser
+`.png`/`.jpg`/`.jpeg`，确认源文件复制到 `Source/Imported/Images/`，Catalog 每张图只出现一个 Texture2D，并可把该
+Texture2D AssetId 直接用于 Sprite2D 文档预览；关闭后第二次打开 `Import Files...`，确认 Windows dialog 仍能解析
+项目初始目录（workspace 的 canonical `C:/.../Source` 必须先转换为 Windows native path，Shell 不得返回
+`E_INVALIDARG`）。再把 `.gltf`/`.glb` 及其相对依赖完整放入项目 `Source/` 后选择，确认 Mesh/Material/Prefab 出现在 Browser
 且 3D 文档能解析并绘制对应资源。导入失败时旧 Catalog、
 Browser 和 preview 必须保持不变，且不能显示 test fixture 的纹理或 Cube 作为回退。
 Core 的目录替换失败回归保留在 `WriteFileTests.FailedAtomicReplacePreservesExistingTargetDirectory`；当前

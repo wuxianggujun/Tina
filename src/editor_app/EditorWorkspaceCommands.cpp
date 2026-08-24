@@ -813,6 +813,177 @@ auto EditorWorkspaceState::hideProjectAssetRemoveConfirmation(
     return Tina::Core::success();
 }
 
+auto EditorWorkspaceState::showProjectAssetRenameDialog(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    const Tina::Core::AssetId assetId = projectAssetContextAssetId_
+        ? projectAssetContextAssetId_
+        : projectAssets_.selectedAssetId().value_or(Tina::Core::AssetId{});
+    const auto* asset = projectAssets_.inspectorSnapshot(assetId);
+    if (asset == nullptr || !activeProjectWorkspace_.has_value()) {
+        authoringFeedback_ = "Rename unavailable: select a Project Asset first";
+        return Tina::Core::success();
+    }
+    pendingProjectAssetRenameAssetId_ = assetId;
+    if (auto status = tree.setText(projectAssetRenameInput_, asset->displayName); !status) {
+        pendingProjectAssetRenameAssetId_.reset();
+        return status;
+    }
+    if (auto status = tree.openDialog(projectAssetRenameDialog_.modal); !status) {
+        pendingProjectAssetRenameAssetId_.reset();
+        return status;
+    }
+    pendingProjectAssetRenameDialogFocus_ = true;
+    return Tina::Core::success();
+}
+
+auto EditorWorkspaceState::hideProjectAssetRenameDialog(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    if (auto status = tree.dismissDialog(projectAssetRenameDialog_.modal); !status) {
+        return status;
+    }
+    pendingProjectAssetRenameAssetId_.reset();
+    pendingProjectAssetRenameDialogFocus_ = false;
+    return Tina::Core::success();
+}
+
+auto EditorWorkspaceState::confirmProjectAssetRename(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    if (!pendingProjectAssetRenameAssetId_.has_value() ||
+        !activeProjectWorkspace_.has_value()) {
+        return hideProjectAssetRenameDialog(tree);
+    }
+    auto text = tree.text(projectAssetRenameInput_);
+    if (!text) {
+        return Tina::Core::failure(std::move(text.error()));
+    }
+    if (text->empty() || text->size() > 256U ||
+        text->find_first_of("\t\r\n") != std::string::npos ||
+        !Tina::Core::isStrictUtf8WithoutNul(*text)) {
+        authoringFeedback_ = "Rename rejected: use a non-empty UTF-8 name without line breaks";
+        return tree.setText(projectAssetRenameInput_, *text);
+    }
+    if (auto status = projectAssets_.renameAsset(*pendingProjectAssetRenameAssetId_, *text);
+        !status) {
+        return status;
+    }
+    bool replaced = false;
+    for (auto& record : assetMetadata_) {
+        if (record.assetId == *pendingProjectAssetRenameAssetId_) {
+            record.displayName = *text;
+            replaced = true;
+            break;
+        }
+    }
+    if (!replaced) {
+        assetMetadata_.push_back({
+            .assetId = *pendingProjectAssetRenameAssetId_,
+            .displayName = std::string(*text),
+            .folderPathUtf8 = std::string(projectAssets_.inspectorSnapshot(
+                                  *pendingProjectAssetRenameAssetId_)
+                                  ->folderPathUtf8),
+        });
+    }
+    const auto saveStatus = saveEditorAssetMetadata(
+        *activeProjectWorkspace_, projectAssets_.items());
+    if (!saveStatus) {
+        authoringFeedback_ = "Renamed in memory, but metadata could not be saved";
+    } else {
+        authoringFeedback_ = "Project Asset renamed";
+    }
+    if (auto status = hideProjectAssetRenameDialog(tree); !status) {
+        return status;
+    }
+    if (auto status = refreshProjectAssetUi(tree); !status) {
+        return status;
+    }
+    return refreshAuthoringUi(tree);
+}
+
+auto EditorWorkspaceState::showProjectAssetFolderDialog(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    if (!activeProjectWorkspace_.has_value()) {
+        authoringFeedback_ = "New Folder unavailable: open a project first";
+        return Tina::Core::success();
+    }
+    if (auto status = tree.setText(projectAssetFolderInput_, {}); !status) {
+        return status;
+    }
+    if (auto status = tree.openDialog(projectAssetFolderDialog_.modal); !status) {
+        return status;
+    }
+    pendingProjectAssetFolderDialogFocus_ = true;
+    return Tina::Core::success();
+}
+
+auto EditorWorkspaceState::hideProjectAssetFolderDialog(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    if (auto status = tree.dismissDialog(projectAssetFolderDialog_.modal); !status) {
+        return status;
+    }
+    pendingProjectAssetFolderDialogFocus_ = false;
+    return Tina::Core::success();
+}
+
+auto EditorWorkspaceState::confirmProjectAssetFolder(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    if (!activeProjectWorkspace_.has_value()) {
+        return hideProjectAssetFolderDialog(tree);
+    }
+    auto text = tree.text(projectAssetFolderInput_);
+    if (!text) {
+        return Tina::Core::failure(std::move(text.error()));
+    }
+    const bool validComponent = !text->empty() && text->size() <= 128U &&
+        Tina::Core::isStrictUtf8WithoutNul(*text) &&
+        text->find_first_of("\\/:\t\r\n") == std::string::npos &&
+        *text != "." && *text != "..";
+    if (!validComponent) {
+        authoringFeedback_ = "Folder rejected: use one relative UTF-8 folder name";
+        return tree.setText(projectAssetFolderInput_, *text);
+    }
+    try {
+        const auto sourceRoot = std::filesystem::u8path(
+            activeProjectWorkspace_->sourceRootUtf8().begin(),
+            activeProjectWorkspace_->sourceRootUtf8().end()).lexically_normal();
+        const auto candidate = (sourceRoot / std::filesystem::u8path(
+            text->begin(), text->end())).lexically_normal();
+        if (!pathIsSameOrDescendant(candidate, sourceRoot) || candidate == sourceRoot) {
+            authoringFeedback_ = "Folder rejected: path escaped the Source root";
+            return tree.setText(projectAssetFolderInput_, *text);
+        }
+        std::error_code error;
+        const auto status = std::filesystem::symlink_status(candidate, error);
+        if (error && error != std::errc::no_such_file_or_directory) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Io,
+                                       "Editor could not inspect the new folder path");
+        }
+        if (!error && std::filesystem::exists(status) && !std::filesystem::is_directory(status)) {
+            authoringFeedback_ = "Folder rejected: a file already uses that name";
+            return tree.setText(projectAssetFolderInput_, *text);
+        }
+        error.clear();
+        if (!std::filesystem::create_directories(candidate, error) && error) {
+            Tina::Core::Error failure{Tina::Core::CoreErrorCode::Io,
+                                      "Editor could not create the Source folder"};
+            failure.setNativeCode(error.value());
+            return Tina::Core::failure(std::move(failure));
+        }
+    } catch (const std::filesystem::filesystem_error& exception) {
+        Tina::Core::Error failure{Tina::Core::CoreErrorCode::Io,
+                                  "Editor could not create the Source folder"};
+        failure.setNativeCode(exception.code().value());
+        return Tina::Core::failure(std::move(failure));
+    }
+    authoringFeedback_ = "Project Source folder created";
+    return hideProjectAssetFolderDialog(tree);
+}
+
 auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status{
     const EditorCommand command = *pendingEditorCommand_;
     pendingEditorCommand_.reset();
@@ -2087,6 +2258,24 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         authoringFeedback_ = "Project Asset selected in Inspector";
         break;
     }
+    case EditorCommand::RenameSelectedProjectAsset:
+        status = showProjectAssetRenameDialog(tree);
+        break;
+    case EditorCommand::NewProjectAssetFolder:
+        status = showProjectAssetFolderDialog(tree);
+        break;
+    case EditorCommand::ProjectAssetRenameConfirm:
+        status = confirmProjectAssetRename(tree);
+        break;
+    case EditorCommand::ProjectAssetRenameCancel:
+        status = hideProjectAssetRenameDialog(tree);
+        break;
+    case EditorCommand::ProjectAssetFolderConfirm:
+        status = confirmProjectAssetFolder(tree);
+        break;
+    case EditorCommand::ProjectAssetFolderCancel:
+        status = hideProjectAssetFolderDialog(tree);
+        break;
     case EditorCommand::ReimportSelectedProjectAsset:
         if (!activeProjectWorkspace_.has_value() ||
             sourceImportService_.state() !=

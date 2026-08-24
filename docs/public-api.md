@@ -99,6 +99,30 @@ include。启用 Profile backend 时，公共头只实例化具有 64-byte opaqu
 第三方对象由 `Tina::TraceTracy` adapter 在该 storage 内构造和销毁；None 仍完全编译消失。zone name 必须是
 string literal，宏传递静态长度与 call-site `SourceLocation`。首切片没有公共 session/capture API。
 
+### 进程级最后故障报告
+
+`<tina/core/diagnostics/CrashHandler.hpp>` 提供 opt-in 进程策略：
+
+```cpp
+Core::Diagnostics::CrashHandlerConfig crashConfig{
+    .applicationName = "MyGame",
+    .reportPathUtf8 = "my_game_crash.txt",
+    .captureBacktrace = true,
+};
+(void)Core::Diagnostics::installCrashHandler(crashConfig);
+```
+
+调用方必须在 `main()` / `wWinMain()` 最早期安装；`EngineHost` 与 `Desktop::CreateEngine()` 不会隐式修改
+process-wide terminate/signal/SEH policy。重复 install 只替换固定存储中的配置；install/uninstall 不得互相或与
+crash 并发。`uninstallCrashHandler()` 主要服务隔离测试，不是通用 signal/filter chaining API。
+`crashReportCount()` 返回进程生命周期累计报告数；`reportFatalAndTerminate(reason)` 写同格式报告并立即以
+非零状态结束进程。
+
+当前 portable 基线覆盖 `std::terminate`/`SIGABRT`；Windows 额外覆盖选定 fatal SEH、purecall 与 CRT invalid
+parameter，并以 PRIVATE DbgHelp 尽力解析符号。配置的文件路径和平台附加 hook 都是 best effort；Windows 在
+install 时截断并预打开 report file，非 Windows 在报告时打开。只有首份并发/级联故障完整输出，且该 API 不提供
+minidump、CrashContext、POSIX fatal-signal 栈回溯、恢复执行或损坏进程中的成功保证。
+
 ## Engine 与游戏入口
 
 ### 正确姿势（普通桌面游戏）
@@ -928,6 +952,18 @@ without NUL，目标平台必须显式给出且不能为 `Invalid`。它从已�
 symlink/junction 保持可用，逃逸、读取期间身份/size/time 变化或任一 file/count/range/parser/decode/output
 预算失败都返回 `Core::Error`，不返回部分 `CatalogCookRequest`。调用方随后仍须经 `cookCatalogPackage` 与
 package publication；该 API 不让 Runtime 直接消费 source URI，也不暴露 cgltf/stb/native handle。
+
+`GltfCookIds` 只固定首 mesh/material/prefab；multi-mesh、纹理与动画等其他输出仍需派生。当前默认派生直接使用调用方
+传入的 `gltfUtf8Path` 字符串，并保留 legacy per-position XOR 算法；Source Import 的 root-relative provenance
+normalization 不会改变该 seed。因此工程根移动/路径拼写变化可改变默认 ID，某些等长路径还可构造碰撞；重复 output
+owner 会使整个候选 fail closed，不会覆盖已有 asset。`ASSET-ID-001` 负责 versioned replacement 与 recook/migration
+契约，完成前不能把“同一输入字符串结果确定”扩大为“跨工程位置稳定”或“无碰撞”。
+
+`cookTextureFileToCatalogSourceResult()` 把一张 PNG/JPEG cook 为单一 RGBA8 Texture2D；它不再生成默认 Sprite
+wrapper。`Sprite2DBindingRegistry::resolveSprite()` / `internSpriteFrameResource()` 接受该 Texture2D 直接作为
+Sprite2D source，同时保留 authored Sprite→唯一 required Texture2D dependency 路径。media AssetId 使用 canonical
+source-root 相对 locator 派生；rename 是 Removed+Added。PCM16 RIFF/WAVE 仍由
+`cookAudioFileToCatalogSourceResult()` 生成单一 AudioClip，其他 codec fail closed。
 
 `cookAndStageCatalogPackage(stagingRoot, request, config)` 先完成内存 cook，再原子取得一个调用方指定且此前
 不存在的 staging root，只在该私有目录写 object/manifest，并强制完整 on-disk/content validation。成功返回

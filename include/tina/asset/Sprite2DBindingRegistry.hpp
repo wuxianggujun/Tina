@@ -78,13 +78,15 @@ class Sprite2DBindingRegistry final {
     [[nodiscard]] Core::Status retireAllTextureBindings() noexcept;
 
     [[nodiscard]] Core::u32 bindingKey(AssetHandle textureAsset) const noexcept;
-    // Fail-closed Sprite -> unique Texture2D dependency -> live binding lookup.
+    // Fail-closed lookup. Imported Texture2D assets resolve directly; authored
+    // Sprite assets resolve through their unique required Texture2D dependency.
     [[nodiscard]] Core::u32 resolveSprite(AssetHandle spriteAsset) const noexcept;
     // Fail-closed Tileset -> unique Texture2D dependency -> live binding lookup.
     [[nodiscard]] Core::u32 resolveTileset(AssetHandle tilesetAsset) const noexcept;
 
-    // Resolves the asset's unique Texture2D dependency and interns its current
-    // backend binding into a frame-local resource table. The retained FramePin
+    // Resolves an imported Texture2D directly or an authored asset's unique
+    // Texture2D dependency, then interns its current backend binding into a
+    // frame-local resource table. The retained FramePin
     // prevents this binding entry from being retired until the sink releases it.
     // An unresolved asset returns a successful empty ref without invoking the sink.
     [[nodiscard]] Core::Result<Render::FrameResourceRef>

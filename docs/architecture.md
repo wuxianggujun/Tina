@@ -81,7 +81,7 @@ flowchart TD
 
 | Target | 职责 | 关键边界 |
 | --- | --- | --- |
-| `tina_core` | Result/Status、ID、时间、文件与基础工具 | xxHash 仅 PRIVATE |
+| `tina_core` | Result/Status、ID、时间、文件、日志/Trace 与 opt-in 最后故障报告 | xxHash、Windows DbgHelp 仅 PRIVATE；`EngineHost` 不隐式安装进程 handler |
 | `tina_platform` | 窗口/输入/生命周期的 backend-neutral 契约 | 不含 GLFW 类型 |
 | `tina_task` | 有界 IO/CPU/Main 执行域与 `TaskGroup` | 禁止 detach/强杀 |
 | `tina_render` | RenderDevice SPI、RenderScene、UI DisplayList、GPU 资源句柄 | 不含 bgfx 类型 |
@@ -149,6 +149,19 @@ IGameApplication::createInitialState
 任何步骤失败都不能发布半初始化 Host、State 或 UI snapshot。模块关闭顺序为 UI/Runtime 私有状态先退场，
 再关闭 Audio、Render、Task、Platform 与 diagnostics；Task 必须 join 后才能释放其访问的 owner。
 
+## 故障诊断边界
+
+`Tina::Core::Diagnostics::installCrashHandler()` 是进程级、opt-in 的最后兜底，不属于 Engine-owned
+`Diagnostics` channel，也不把 fatal failure 变成可恢复错误。调用方应在 `main()` / `wWinMain()` 最早期安装；
+`EngineHost` 与 `Desktop::CreateEngine()` 不替应用决定进程策略。当前 `TinaEditor.exe` 已安装该 handler，并把
+`std::terminate`、`SIGABRT` 以及 Windows fatal SEH/purecall/invalid-parameter 的首份 best-effort 报告写到
+stderr 和 `%TEMP%/tina_editor_crash.txt`。顶层可表示的 fatal `Core::Error` 也追加到同一文件；机器可读尾部分别使用
+`status=crash` 与 `status=fatal`。
+
+handler 使用固定存储并只完整报告第一次并发/级联故障；Windows backtrace 通过私有 DbgHelp 尽力解析，其他平台
+当前不提供符号栈。它不是 minidump、CrashContext、跨平台 signal recovery 或“崩溃后继续运行”协议，进程损坏时
+报告本身仍可能不完整。
+
 ## 每帧数据流
 
 ```text
@@ -193,6 +206,7 @@ source asset
   -> typed payload parse
   -> GPU upload
   -> fixed-capacity Sprite2D/Mesh3D registry validates Handle + GPU resource/dependency bundle
+       Sprite2D: imported Texture2D resolves directly; authored Sprite resolves its required Texture2D
   -> RenderDevice instance allocator binds and returns monotonic non-reused keys
   -> Scene World/Particle/Trail/TileMap/3D MeshRenderer weak AssetHandle
   -> borrowed resolver asks registry for the current binding
@@ -230,7 +244,8 @@ standalone `ParticleSystem2D`/`Trail2D` 只保存 weak Sprite `AssetHandle`；Ti
 Material handle。通用 allocation-free `AssetFrameResourceResolver` 位于窄 `AssetTypes` 边界；2D Scene
 与3D mesh/material extraction 都直接使用该通用类型；所有路径都只在当前调用借用 resolver 与
 `FrameResourceSink`，不再保留按渲染用途重命名的迁移 alias。
-产品 2D base resolver 薄调用 `Sprite2DBindingRegistry::internSpriteFrameResource()/internTilesetFrameResource()`，
+产品 2D base resolver 薄调用 `Sprite2DBindingRegistry::internSpriteFrameResource()/internTilesetFrameResource()`；
+前者允许一步导入的 Texture2D 直接作为 Sprite2D source，也保留 authored Sprite→required Texture2D wrapper 路径，
 normal resolver 则用同一 registry 的 Texture2D frame-resource seam 独立 intern normal binding；
 3D resolver 调用 `Mesh3DBindingRegistry::internMeshFrameResource()/internMaterialFrameResource()`。registry
 在 Asset owner thread 验证 Handle kind、CPU payload、Cooked Texture2D dependency 与 live binding，再把
