@@ -56,25 +56,149 @@ constexpr float ImportReadyToCommitProgress = 1.0F;
 
 } // namespace
 
-auto EditorWorkspaceState::updateProjectAssetSearch(
-    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+auto EditorWorkspaceState::projectAssetFolderDataSource() noexcept
+    -> UI::UITreeViewDataSource
 {
-    auto text = tree.text(projectAssetSearchInput_);
-    if (!text) {
-        return Tina::Core::failure(std::move(text.error()));
+    return UI::UITreeViewDataSource{
+        .state = this,
+        .itemCount = &EditorWorkspaceState::projectAssetFolderItemCount,
+        .resolveItem = &EditorWorkspaceState::resolveProjectAssetFolderItem,
+        .setItemExpanded = &EditorWorkspaceState::setProjectAssetFolderExpanded,
+    };
+}
+
+auto EditorWorkspaceState::projectAssetFolderVisible(
+    const Tina::Editor::ProjectAssetFolderDescriptor& folder) const noexcept -> bool
+{
+    for (const u64 collapsedKey : collapsedProjectAssetFolderKeys_) {
+        if (collapsedKey == 0U) {
+            continue;
+        }
+        const auto* collapsed = projectAssets_.folder(
+            static_cast<Tina::Core::usize>(collapsedKey - 1U));
+        if (collapsed == nullptr || folder.pathUtf8 == collapsed->pathUtf8) {
+            continue;
+        }
+        if (collapsed->pathUtf8.empty() ||
+            (folder.pathUtf8.size() > collapsed->pathUtf8.size() &&
+             folder.pathUtf8.compare(
+                 0U, collapsed->pathUtf8.size(), collapsed->pathUtf8) == 0 &&
+             folder.pathUtf8[collapsed->pathUtf8.size()] == '/')) {
+            return false;
+        }
     }
-    if (*text == projectAssets_.searchQuery()) {
-        return Tina::Core::success();
+    return true;
+}
+
+auto EditorWorkspaceState::projectAssetFolderItemCount(
+    const void* state) noexcept -> u64
+{
+    const auto* self = static_cast<const EditorWorkspaceState*>(state);
+    if (self == nullptr) {
+        return 0U;
     }
-    if (auto status = projectAssets_.setSearchQuery(*text); !status) {
-        return status;
+    u64 count = 0U;
+    for (Tina::Core::usize index = 0U;
+         index < self->projectAssets_.folderCount(); ++index) {
+        const auto* folder = self->projectAssets_.folder(index);
+        if (folder != nullptr && self->projectAssetFolderVisible(*folder)) {
+            ++count;
+        }
     }
+    return count;
+}
+
+auto EditorWorkspaceState::resolveProjectAssetFolderItem(
+    const void* state, u64 logicalIndex,
+    UI::UITreeViewItemDescriptor& output) noexcept -> bool
+{
+    const auto* self = static_cast<const EditorWorkspaceState*>(state);
+    if (self == nullptr) {
+        return false;
+    }
+    u64 visibleIndex = 0U;
+    for (Tina::Core::usize index = 0U;
+         index < self->projectAssets_.folderCount(); ++index) {
+        const auto* folder = self->projectAssets_.folder(index);
+        if (folder == nullptr || !self->projectAssetFolderVisible(*folder)) {
+            continue;
+        }
+        if (visibleIndex++ != logicalIndex) {
+            continue;
+        }
+        const u64 key = self->projectAssets_.folderStableKey(index);
+        output = UI::UITreeViewItemDescriptor{
+            .key = key,
+            .label = folder->displayName,
+            .level = folder->level,
+            .enabled = true,
+            .expandable = folder->expandable,
+            .expanded = folder->expandable &&
+                std::find(self->collapsedProjectAssetFolderKeys_.begin(),
+                          self->collapsedProjectAssetFolderKeys_.end(), key) ==
+                    self->collapsedProjectAssetFolderKeys_.end(),
+        };
+        return true;
+    }
+    return false;
+}
+
+auto EditorWorkspaceState::setProjectAssetFolderExpanded(
+    void* state, UI::UITreeViewItemKey key, bool expanded) noexcept -> bool
+{
+    auto* self = static_cast<EditorWorkspaceState*>(state);
+    if (self == nullptr || key == UI::InvalidUITreeViewItemKey || key == 0U) {
+        return false;
+    }
+    const auto* folder = self->projectAssets_.folder(
+        static_cast<Tina::Core::usize>(key - 1U));
+    if (folder == nullptr || !folder->expandable) {
+        return false;
+    }
+    const auto collapsed = std::find(
+        self->collapsedProjectAssetFolderKeys_.begin(),
+        self->collapsedProjectAssetFolderKeys_.end(), key);
+    if (expanded) {
+        if (collapsed != self->collapsedProjectAssetFolderKeys_.end()) {
+            self->collapsedProjectAssetFolderKeys_.erase(collapsed);
+        }
+    } else if (collapsed == self->collapsedProjectAssetFolderKeys_.end()) {
+        if (self->collapsedProjectAssetFolderKeys_.size() >=
+            self->collapsedProjectAssetFolderKeys_.capacity()) {
+            return false;
+        }
+        self->collapsedProjectAssetFolderKeys_.push_back(key);
+    }
+    return true;
+}
+
+auto EditorWorkspaceState::visibleProjectAssetFolderIndex(
+    std::string_view folderPathUtf8) const noexcept -> std::optional<u64>
+{
+    u64 visibleIndex = 0U;
+    for (Tina::Core::usize index = 0U;
+         index < projectAssets_.folderCount(); ++index) {
+        const auto* folder = projectAssets_.folder(index);
+        if (folder == nullptr || !projectAssetFolderVisible(*folder)) {
+            continue;
+        }
+        if (folder->pathUtf8 == folderPathUtf8) {
+            return visibleIndex;
+        }
+        ++visibleIndex;
+    }
+    return std::nullopt;
+}
+
+auto EditorWorkspaceState::refreshProjectAssetCollection(
+    Tina::PrimaryWindowUITreeUpdater& tree, std::string_view feedback)
+    -> Tina::Core::Status
+{
     lastProjectAssetPointerDownAssetId_ = {};
     pendingProjectAssetOpen_.reset();
     observedProjectAssetSelectionIndex_.reset();
     if (auto status = tree.setVirtualGridViewDataSource(
-            projectAssetList_, projectAssetDataSource());
-        !status) {
+            projectAssetList_, projectAssetDataSource()); !status) {
         return status;
     }
     if (auto status = tree.invalidateVirtualGridViewItems(projectAssetList_); !status) {
@@ -91,10 +215,30 @@ auto EditorWorkspaceState::updateProjectAssetSearch(
             return status;
         }
     }
+    synchronizeViewportSelectionFromHierarchy();
+    if (!feedback.empty()) {
+        authoringFeedback_.assign(feedback);
+    }
     if (auto status = refreshProjectAssetUi(tree); !status) {
         return status;
     }
     return refreshAuthoringUi(tree);
+}
+
+auto EditorWorkspaceState::updateProjectAssetSearch(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    auto text = tree.text(projectAssetSearchInput_);
+    if (!text) {
+        return Tina::Core::failure(std::move(text.error()));
+    }
+    if (*text == projectAssets_.searchQuery()) {
+        return Tina::Core::success();
+    }
+    if (auto status = projectAssets_.setSearchQuery(*text); !status) {
+        return status;
+    }
+    return refreshProjectAssetCollection(tree, {});
 }
 
 auto EditorWorkspaceState::refreshProjectAssetUi(
@@ -173,7 +317,7 @@ auto EditorWorkspaceState::refreshProjectAssetUi(
     } else if (projectAssets_.selectedAssetId().has_value() &&
                projectAssets_.selectedItem() == nullptr) {
         selectedAssetSummary =
-            "Selected asset is hidden by current search/filter";
+            "Selected asset is outside the current folder or type filter";
     } else if (projectAssets_.visibleItemCount() == 0U) {
         if (!projectAssets_.searchQuery().empty()) {
             selectedAssetSummary = "No assets match this search";
@@ -183,7 +327,7 @@ auto EditorWorkspaceState::refreshProjectAssetUi(
             selectedAssetSummary = "Catalog is empty; import files to add resources";
         } else if (assetResources_.projectCatalogConfigured ||
                    assetResources_.testFixtureCatalog) {
-            selectedAssetSummary = "No assets match this filter";
+            selectedAssetSummary = "No assets match this folder and type filter";
         } else {
             selectedAssetSummary = "No project open";
         }
@@ -191,9 +335,7 @@ auto EditorWorkspaceState::refreshProjectAssetUi(
         selectedAssetSummary = asset->displayName;
         selectedAssetSummary += "  |  ";
         selectedAssetSummary += Tina::Editor::projectAssetKindLabel(asset->assetKind);
-        selectedAssetSummary += "  |  Ready  |  ";
-        const auto idText = asset->assetId.canonicalText();
-        selectedAssetSummary.append(idText.data(), idText.size());
+        selectedAssetSummary += "  |  Ready";
     } else {
         selectedAssetSummary = "Select an asset to inspect it";
     }
@@ -220,13 +362,22 @@ auto EditorWorkspaceState::refreshProjectAssetUi(
         !status) {
         return status;
     }
-    const std::string_view projectBreadcrumb =
-        temporaryProjectActive()
-            ? "Temporary Project / Assets"
-            : assetResources_.projectCatalogConfigured
-                  ? "Project / Assets"
-                  : assetResources_.testFixtureCatalog ? "Test Data / Assets"
-                                                       : "Project / Assets";
+    std::string projectBreadcrumb = temporaryProjectActive()
+        ? "Temporary Project / Assets"
+        : assetResources_.projectCatalogConfigured
+              ? "Project / Assets"
+              : assetResources_.testFixtureCatalog ? "Test Data / Assets"
+                                                   : "Project / Assets";
+    if (!projectAssets_.currentFolderPath().empty()) {
+        projectBreadcrumb += " / ";
+    }
+    for (const char character : projectAssets_.currentFolderPath()) {
+        if (character == '/') {
+            projectBreadcrumb += " / ";
+        } else {
+            projectBreadcrumb.push_back(character);
+        }
+    }
     if (auto status = tree.setText(projectAssetBreadcrumb_, projectBreadcrumb);
         !status) {
         return status;
@@ -259,6 +410,12 @@ auto EditorWorkspaceState::refreshProjectAssetUi(
     if (auto status = tree.setLayoutStyle(
             projectAssetList_, projectAssetListLayout_);
         !status) {
+        return status;
+    }
+    projectAssetFolderTreeLayout_.visibility =
+        showProjectAssets ? UI::UIVisibility::Visible : UI::UIVisibility::Collapsed;
+    if (auto status = tree.setLayoutStyle(
+            projectAssetFolderTree_, projectAssetFolderTreeLayout_); !status) {
         return status;
     }
     projectAssetEmptyStateLayout_.visibility =
@@ -360,15 +517,28 @@ auto EditorWorkspaceState::refreshProjectAssetUi(
         !status) {
         return status;
     }
-    const u32 activeFilter = static_cast<u32>(projectAssets_.filter());
-    for (u32 index = 0; index < projectFilterButtons_.size(); ++index) {
-        if (auto status = tree.setRadioButtonSelected(projectFilterButtons_[index], index == activeFilter);
-            !status) {
-            return status;
-        }
-        if (auto status = tree.setEnabled(projectFilterButtons_[index], true); !status) {
-            return status;
-        }
+    const u32 activeFilter = static_cast<u32>(projectAssets_.typeFilter());
+    if (activeFilter >= projectAssetTypeDropdownItems_.size()) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::Internal,
+            "Editor Project Asset type filter is outside the Dropdown model");
+    }
+    if (auto status = tree.setDropdownSelectedItem(
+            projectAssetTypeDropdown_, projectAssetTypeDropdownItems_[activeFilter]);
+        !status) {
+        return status;
+    }
+    if (auto status = tree.setText(
+            projectAssetTypeDropdown_,
+            Tina::Editor::projectAssetTypeFilterLabel(projectAssets_.typeFilter()));
+        !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(projectAssetTypeDropdown_, true); !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(projectAssetFolderTree_, true); !status) {
+        return status;
     }
     if (auto status = tree.setEnabled(openProjectAssetButton_,
                                       projectAssets_.selectedItem() != nullptr);
@@ -547,9 +717,10 @@ auto EditorWorkspaceState::processPendingRecentProject() -> Tina::Core::Status
 
 auto EditorWorkspaceState::prepareProjectBrowserForSnapshot(
     const Tina::Asset::CatalogSnapshot& catalog,
-    Tina::Editor::ProjectAssetFilter filter,
+    Tina::Editor::ProjectAssetTypeFilter filter,
     std::optional<Tina::Core::AssetId> selectedAsset,
     std::string_view searchQuery,
+    std::string_view currentFolderPathUtf8,
     std::span<const Tina::Asset::SourceImportPipelineUnitOutput> sourceMappings,
     std::span<const EditorAssetMetadataRecord> metadata,
     std::string_view sourceRootUtf8)
@@ -562,11 +733,20 @@ auto EditorWorkspaceState::prepareProjectBrowserForSnapshot(
     if (!browser) {
         return Tina::Core::failure(std::move(browser.error()));
     }
-    if (auto status = browser->setFilter(filter); !status) {
+    if (auto status = browser->setTypeFilter(filter); !status) {
         return Tina::Core::failure(std::move(status.error()));
     }
     if (auto status = browser->setSearchQuery(searchQuery); !status) {
         return Tina::Core::failure(std::move(status.error()));
+    }
+    if (!currentFolderPathUtf8.empty()) {
+        // A folder can disappear after an import or project switch. In that
+        // case the new snapshot deliberately falls back to the Source root.
+        if (auto status = browser->setCurrentFolder(currentFolderPathUtf8);
+            !status && status.error().code !=
+                Tina::Editor::EditorErrorCode::ProjectAssetNotFound) {
+            return Tina::Core::failure(std::move(status.error()));
+        }
     }
     bool restoredSelection = false;
     if (selectedAsset.has_value()) {
@@ -811,7 +991,8 @@ auto EditorWorkspaceState::switchLiveProjectCatalog(
 
     std::optional<Tina::Core::AssetId> previousSelection{};
     previousSelection = projectAssets_.selectedAssetId();
-    const Tina::Editor::ProjectAssetFilter previousFilter = projectAssets_.filter();
+    const Tina::Editor::ProjectAssetTypeFilter previousFilter =
+        projectAssets_.typeFilter();
     const std::string_view previousSearchQuery = projectAssets_.searchQuery();
 
     if (previewAssetBindingsHaveActiveFrameBorrows()) {
@@ -889,6 +1070,7 @@ auto EditorWorkspaceState::switchLiveProjectCatalog(
     }
     auto candidateBrowser = prepareProjectBrowserForSnapshot(
         *committedCatalog, previousFilter, previousSelection, previousSearchQuery,
+        projectAssets_.currentFolderPath(),
         resolvedCatalog->sourceImportUnitOutputs, resolvedCatalog->assetMetadata,
         workspace.sourceRootUtf8());
     if (!candidateBrowser) {
@@ -1258,8 +1440,8 @@ auto EditorWorkspaceState::refreshProjectCatalog() -> Tina::Core::Status{
             candidateTabs.error());
     }
 
-    const Tina::Editor::ProjectAssetFilter previousFilter =
-        projectAssets_.filter();
+    const Tina::Editor::ProjectAssetTypeFilter previousFilter =
+        projectAssets_.typeFilter();
     const std::string_view previousSearchQuery = projectAssets_.searchQuery();
     std::optional<Tina::Core::AssetId> previousSelection{};
     previousSelection = projectAssets_.selectedAssetId();
@@ -1297,6 +1479,7 @@ auto EditorWorkspaceState::refreshProjectCatalog() -> Tina::Core::Status{
     }
     auto refreshedBrowser = prepareProjectBrowserForSnapshot(
         *committedCatalog, previousFilter, previousSelection, previousSearchQuery,
+        projectAssets_.currentFolderPath(),
         sourceImportUnitOutputs_, assetMetadata_,
         activeProjectWorkspace_.has_value()
             ? activeProjectWorkspace_->sourceRootUtf8()
@@ -1340,37 +1523,41 @@ auto EditorWorkspaceState::refreshProjectCatalog() -> Tina::Core::Status{
     return Tina::Core::success();
 }
 
-auto EditorWorkspaceState::applyProjectAssetFilter(
+auto EditorWorkspaceState::applyProjectAssetTypeFilter(
     Tina::PrimaryWindowUITreeUpdater& tree,
-    Tina::Editor::ProjectAssetFilter filter) -> Tina::Core::Status{
-    if (auto status = projectAssets_.setFilter(filter); !status) {
+    Tina::Editor::ProjectAssetTypeFilter filter) -> Tina::Core::Status{
+    if (auto status = projectAssets_.setTypeFilter(filter); !status) {
         return status;
     }
-    lastProjectAssetPointerDownAssetId_ = {};
-    pendingProjectAssetOpen_.reset();
-    observedProjectAssetSelectionIndex_.reset();
-    if (auto status = tree.setVirtualGridViewDataSource(projectAssetList_,
-                                                 projectAssetDataSource());
+    if (auto status = tree.setDropdownOpen(projectAssetTypeDropdown_, false);
         !status) {
         return status;
     }
-    if (projectAssets_.visibleItemCount() != 0U) {
-        projectAssetSelectionSyncPending_ = true;
-        assetInspectorActive_ = true;
-    } else {
-        projectAssetSelectionSyncPending_ = false;
-        if (auto status = tree.clearVirtualGridViewSelection(projectAssetList_);
-            !status) {
-            return status;
-        }
-        assetInspectorActive_ = false;
-    }
-    synchronizeViewportSelectionFromHierarchy();
-    authoringFeedback_ = "Project Asset Browser filter changed";
-    if (auto status = refreshProjectAssetUi(tree); !status) {
+    return refreshProjectAssetCollection(
+        tree, "Project Asset type filter changed");
+}
+
+auto EditorWorkspaceState::applyProjectAssetFolder(
+    Tina::PrimaryWindowUITreeUpdater& tree,
+    std::string_view folderPathUtf8) -> Tina::Core::Status
+{
+    if (auto status = projectAssets_.setCurrentFolder(folderPathUtf8); !status) {
         return status;
     }
-    return refreshAuthoringUi(tree);
+    const auto selectedIndex = visibleProjectAssetFolderIndex(
+        projectAssets_.currentFolderPath());
+    if (!selectedIndex.has_value()) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::Internal,
+            "Editor current Project Asset folder is not visible in its tree");
+    }
+    projectAssetFolderSelectionKey_ = UI::InvalidUITreeViewItemKey;
+    UI::UITreeViewItemDescriptor selected{};
+    if (resolveProjectAssetFolderItem(this, *selectedIndex, selected)) {
+        projectAssetFolderSelectionKey_ = selected.key;
+    }
+    return refreshProjectAssetCollection(
+        tree, "Project Asset folder changed");
 }
 
 auto EditorWorkspaceState::applyProjectAssetViewMode(
@@ -1411,6 +1598,22 @@ auto EditorWorkspaceState::sourceImportUnitForAsset(
     Tina::Core::AssetId assetId) const noexcept
     -> const Tina::EditorApp::Detail::EditorSourceImportUnit*
 {
+    const auto* mapping = sourceImportMappingForAsset(assetId);
+    if (mapping == nullptr) {
+        return nullptr;
+    }
+    const auto unit = std::find_if(
+        sourceImportUnits_.begin(), sourceImportUnits_.end(),
+        [mapping](const auto& candidate) {
+            return candidate.sourcePathUtf8 == mapping->sourceUtf8Path;
+        });
+    return unit != sourceImportUnits_.end() ? &*unit : nullptr;
+}
+
+auto EditorWorkspaceState::sourceImportMappingForAsset(
+    Tina::Core::AssetId assetId) const noexcept
+    -> const Tina::Asset::SourceImportPipelineUnitOutput*
+{
     if (!assetId) {
         return nullptr;
     }
@@ -1420,17 +1623,33 @@ auto EditorWorkspaceState::sourceImportUnitForAsset(
             [assetId](const Tina::Asset::SourceImportPipelineOutput& output) {
                 return output.assetId == assetId;
             });
-        if (!ownsAsset) {
-            continue;
+        if (ownsAsset) {
+            return &mapping;
         }
-        const auto unit = std::find_if(
-            sourceImportUnits_.begin(), sourceImportUnits_.end(),
-            [&mapping](const auto& candidate) {
-                return candidate.sourcePathUtf8 == mapping.sourceUtf8Path;
-            });
-        return unit != sourceImportUnits_.end() ? &*unit : nullptr;
     }
     return nullptr;
+}
+
+auto EditorWorkspaceState::projectAssetSupportsSourceRename(
+    Tina::Core::AssetId assetId) const noexcept -> bool
+{
+    const auto* unit = sourceImportUnitForAsset(assetId);
+    const auto* mapping = sourceImportMappingForAsset(assetId);
+    if (unit == nullptr || mapping == nullptr || mapping->outputs.size() != 1U ||
+        mapping->outputs.front().assetId != assetId) {
+        return false;
+    }
+    if (unit->kind ==
+        Tina::EditorApp::Detail::EditorSourceImportUnitKind::Texture) {
+        return mapping->outputs.front().assetKind ==
+            Tina::AssetFormat::AssetKind::Texture2D;
+    }
+    if (unit->kind ==
+        Tina::EditorApp::Detail::EditorSourceImportUnitKind::Audio) {
+        return mapping->outputs.front().assetKind ==
+            Tina::AssetFormat::AssetKind::AudioClip;
+    }
+    return false;
 }
 
 auto EditorWorkspaceState::resolveProjectAssetItem(const void* state, u64 logicalIndex,

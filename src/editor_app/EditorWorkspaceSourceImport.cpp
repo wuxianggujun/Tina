@@ -371,6 +371,19 @@ auto EditorWorkspaceState::cleanupFailedSourceImportStage() noexcept -> void{
     sourceImportPendingStageRootUtf8_.clear();
 }
 
+auto EditorWorkspaceState::rollbackProjectAssetSourceRename() noexcept
+    -> Tina::Core::Status
+{
+    if (!pendingProjectAssetSourceRename_.has_value()) {
+        return Tina::Core::success();
+    }
+    if (auto status = pendingProjectAssetSourceRename_->rollback(); !status) {
+        return status;
+    }
+    pendingProjectAssetSourceRename_.reset();
+    return Tina::Core::success();
+}
+
 auto EditorWorkspaceState::publishCommittedSourceImportState(
     const Tina::EditorApp::Detail::EditorSourceImportReadyStage& ready) -> Tina::Core::Status{
     if (!ready.stageCreated) {
@@ -442,7 +455,7 @@ auto EditorWorkspaceState::commitSourceImportCatalog(
         return Tina::Core::failure(std::move(candidateTabs.error()));
     }
 
-    const auto previousFilter = projectAssets_.filter();
+    const auto previousFilter = projectAssets_.typeFilter();
     const std::string_view previousSearchQuery = projectAssets_.searchQuery();
     std::optional<Tina::Core::AssetId> previousSelection{};
     previousSelection = projectAssets_.selectedAssetId();
@@ -472,6 +485,7 @@ auto EditorWorkspaceState::commitSourceImportCatalog(
     }
     auto browser = prepareProjectBrowserForSnapshot(
         ready.catalog, previousFilter, previousSelection, previousSearchQuery,
+        projectAssets_.currentFolderPath(),
         nextUnitOutputs, assetMetadata_,
         activeProjectWorkspace_.has_value()
             ? activeProjectWorkspace_->sourceRootUtf8()
@@ -515,6 +529,11 @@ auto EditorWorkspaceState::commitSourceImportCatalog(
             return discard;
         }
         cleanupFailedSourceImportStage();
+        if (auto rollback = rollbackProjectAssetSourceRename(); !rollback) {
+            return rollback;
+        }
+        sourceImportRetryUnits_.clear();
+        sourceImportRetryPathsUtf8_.clear();
         return Tina::Core::success();
     }
     sourceImportCatalogCommitted_ = true;
@@ -572,6 +591,9 @@ auto EditorWorkspaceState::updateSourceImport() -> Tina::Core::Status{
             cleanupOwnedSourceImportStage(sourceImportPendingStageRootUtf8_);
             sourceImportPendingStageRootUtf8_.clear();
             sourceImportPointerPathUtf8_.clear();
+            if (auto rollback = rollbackProjectAssetSourceRename(); !rollback) {
+                return rollback;
+            }
             setCurrentImportAssetHistory(EditorAssetImportStatus::Committed);
             activeAssetImportIds_.clear();
             pruneAssetImportHistoryToCatalog();
@@ -710,6 +732,11 @@ auto EditorWorkspaceState::updateSourceImport() -> Tina::Core::Status{
             sourceImportProfileDeactivatePending_ = true;
         }
         cleanupFailedSourceImportStage();
+        if (auto rollback = rollbackProjectAssetSourceRename(); !rollback) {
+            return rollback;
+        }
+        sourceImportRetryUnits_.clear();
+        sourceImportRetryPathsUtf8_.clear();
         if (options_.sourceImport.importOnStart &&
             options_.targetFrameCount != 0U) {
             return Tina::Core::failure(*failure);
@@ -860,6 +887,10 @@ auto EditorWorkspaceState::updateSourceImport() -> Tina::Core::Status{
         return Tina::Core::failure(std::move(committedUnits.error()));
     }
     sourceImportUnits_.swap(*committedUnits);
+    if (pendingProjectAssetSourceRename_.has_value()) {
+        pendingProjectAssetSourceRename_->commit();
+        pendingProjectAssetSourceRename_.reset();
+    }
     counters_.sourceImportIntendedUnits = sourceImportUnits_.size();
     observedSourceImportSelectionIndex_.reset();
     sourceImportObservedPhase_ =

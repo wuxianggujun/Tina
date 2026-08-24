@@ -95,6 +95,13 @@ validateUnit(std::string_view sourceRootUtf8, const EditorSourceImportUnit& unit
         return Core::failure(Core::CoreErrorCode::InvalidArgument,
                              "Editor source import unit kind is invalid");
     }
+    if (unit.mediaAssetId &&
+        unit.kind != EditorSourceImportUnitKind::Texture &&
+        unit.kind != EditorSourceImportUnitKind::Audio) {
+        return Core::failure(
+            Core::CoreErrorCode::InvalidArgument,
+            "Editor source import media AssetId requires a Texture or Audio unit");
+    }
 
     try {
         const auto sourceRoot =

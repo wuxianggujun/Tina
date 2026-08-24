@@ -29,6 +29,9 @@ struct EditorSourceImportUnit final {
     EditorSourceImportUnitKind kind = EditorSourceImportUnitKind::CatalogRecipe;
     std::string sourcePathUtf8{};
     Asset::GltfCookIds gltfIds{};
+    // Set only when a renamed one-output media source must retain its existing
+    // Catalog identity. Invalid keeps the normal path-derived identity.
+    Core::AssetId mediaAssetId{};
 };
 
 // units is the currently intended set or an explicit replacement set. selectedPathsUtf8 is an

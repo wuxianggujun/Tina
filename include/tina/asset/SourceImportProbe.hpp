@@ -117,13 +117,15 @@ currentGltfSourceImportContract(std::string_view normalizedPrimarySourcePath,
                                 const GltfCookIds& ids);
 
 // Plain media importers: one image file (Texture2D, directly usable by Sprite2D)
-// or one PCM WAV file (AudioClip), with deterministic path-derived output
-// AssetIds.
+// or one PCM WAV file (AudioClip). A valid stableAssetId participates in the
+// settings hash so changing an explicit output identity cannot be CleanReuse.
 [[nodiscard]] Core::Result<SourceImportUnitContract>
-currentTextureSourceImportContract(std::string_view normalizedPrimarySourcePath);
+currentTextureSourceImportContract(std::string_view normalizedPrimarySourcePath,
+                                   Core::AssetId stableAssetId = {});
 
 [[nodiscard]] Core::Result<SourceImportUnitContract>
-currentAudioSourceImportContract(std::string_view normalizedPrimarySourcePath);
+currentAudioSourceImportContract(std::string_view normalizedPrimarySourcePath,
+                                 Core::AssetId stableAssetId = {});
 
 [[nodiscard]] Core::Result<SourceImportUnitProbeDesc>
 makeCatalogRecipeSourceImportProbeDesc(
@@ -138,11 +140,13 @@ makeGltfSourceImportProbeDesc(std::string_view sourceRootUtf8,
 
 [[nodiscard]] Core::Result<SourceImportUnitProbeDesc>
 makeTextureSourceImportProbeDesc(std::string_view sourceRootUtf8,
-                                 std::string_view primarySourceUtf8Path);
+                                 std::string_view primarySourceUtf8Path,
+                                 Core::AssetId stableAssetId = {});
 
 [[nodiscard]] Core::Result<SourceImportUnitProbeDesc>
 makeAudioSourceImportProbeDesc(std::string_view sourceRootUtf8,
-                               std::string_view primarySourceUtf8Path);
+                               std::string_view primarySourceUtf8Path,
+                               Core::AssetId stableAssetId = {});
 
 // Contract mismatches and source fingerprint changes are normal Dirty results. Invalid input,
 // unsafe final paths, source IO failures, and replacement during a snapshot are structured errors.

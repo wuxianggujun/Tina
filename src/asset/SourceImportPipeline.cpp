@@ -139,6 +139,14 @@ struct BaselineLoadResult final {
             return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                                  "source import unit kind is invalid");
         }
+        if (unit.mediaAssetId &&
+            unit.kind != SourceImportPipelineUnitKind::Texture &&
+            unit.kind != SourceImportPipelineUnitKind::Audio)
+        {
+            return Core::failure(
+                AssetErrorCode::InvalidCatalogConfig,
+                "source import media AssetId override requires a Texture or Audio unit");
+        }
     }
 
     auto baselineRoot = resolvePipelinePath(request.baselineCatalogRootUtf8);
@@ -307,9 +315,11 @@ makeProbeDesc(const SourceImportPipelineUnit& unit, std::string_view sourceRoot,
     case SourceImportPipelineUnitKind::Gltf:
         return makeGltfSourceImportProbeDesc(sourceRoot, unit.sourceUtf8Path, unit.gltfIds);
     case SourceImportPipelineUnitKind::Texture:
-        return makeTextureSourceImportProbeDesc(sourceRoot, unit.sourceUtf8Path);
+        return makeTextureSourceImportProbeDesc(
+            sourceRoot, unit.sourceUtf8Path, unit.mediaAssetId);
     case SourceImportPipelineUnitKind::Audio:
-        return makeAudioSourceImportProbeDesc(sourceRoot, unit.sourceUtf8Path);
+        return makeAudioSourceImportProbeDesc(
+            sourceRoot, unit.sourceUtf8Path, unit.mediaAssetId);
     }
     return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                          "source import unit kind is unsupported");
@@ -329,10 +339,10 @@ cookUnit(const SourceImportPipelineUnit& unit, std::string_view sourceRoot,
                                                  capture, unit.gltfIds);
     case SourceImportPipelineUnitKind::Texture:
         return cookTextureFileToCatalogSourceResult(unit.sourceUtf8Path, targetPlatform,
-                                                    capture);
+                                                    capture, unit.mediaAssetId);
     case SourceImportPipelineUnitKind::Audio:
         return cookAudioFileToCatalogSourceResult(unit.sourceUtf8Path, targetPlatform,
-                                                  capture);
+                                                  capture, unit.mediaAssetId);
     }
     return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                          "source import unit kind is unsupported");

@@ -375,9 +375,12 @@ auto EditorWorkspaceState::processPendingOutputLocate(
         return Tina::Core::success();
     }
     if (target->targetKind == EditorOutputTargetKind::Asset) {
-        if (auto status = projectAssets_.setFilter(
-                Tina::Editor::ProjectAssetFilter::All);
+        if (auto status = projectAssets_.setTypeFilter(
+                Tina::Editor::ProjectAssetTypeFilter::All);
             !status) {
+            return status;
+        }
+        if (auto status = projectAssets_.setCurrentFolder({}); !status) {
             return status;
         }
         if (auto status = projectAssets_.setSearchQuery({}); !status) {
@@ -1335,7 +1338,8 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
         return status;
     }
     if (auto status = tree.setEnabled(
-            projectAssetContextRenameItem_, projectAssetMutationAvailable); !status) {
+            projectAssetContextRenameItem_, projectAssetMutationAvailable &&
+                projectAssetSupportsSourceRename(projectAssetContextAssetId_)); !status) {
         return status;
     }
     if (auto status = tree.setEnabled(
@@ -1497,10 +1501,11 @@ auto EditorWorkspaceState::refreshPlaySessionUi(
             return status;
         }
     }
-    for (const UI::UINodeId button : projectFilterButtons_) {
-        if (auto status = tree.setEnabled(button, false); !status) {
-            return status;
-        }
+    if (auto status = tree.setEnabled(projectAssetTypeDropdown_, false); !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(projectAssetFolderTree_, false); !status) {
+        return status;
     }
     for (const UI::UINodeId button : projectAssetViewButtons_) {
         if (auto status = tree.setEnabled(button, false); !status) {

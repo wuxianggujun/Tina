@@ -42,7 +42,7 @@ namespace {
 TEST(ProjectAssetBrowserTests, OwnsSortedCatalogIndexAndFiltersByWorkspace)
 {
     const std::array assets{
-        asset(0x40U, AssetFormat::AssetKind::AudioClip),
+        asset(0x40U, AssetFormat::AssetKind::StaticMesh),
         asset(0x10U, AssetFormat::AssetKind::Sprite),
         asset(0x30U, AssetFormat::AssetKind::Prefab),
         asset(0x20U, AssetFormat::AssetKind::TileMap),
@@ -55,14 +55,14 @@ TEST(ProjectAssetBrowserTests, OwnsSortedCatalogIndexAndFiltersByWorkspace)
     EXPECT_EQ(browser->selectedItem()->assetId, assetId(0x10U));
 
     ASSERT_TRUE(browser->selectAsset(assetId(0x20U)));
-    ASSERT_TRUE(browser->setFilter(ProjectAssetFilter::TwoD));
+    ASSERT_TRUE(browser->setTypeFilter(ProjectAssetTypeFilter::Scenes));
     ASSERT_EQ(browser->visibleItemCount(), 2U);
     ASSERT_TRUE(browser->selectedVisibleIndex());
     EXPECT_EQ(browser->selectedItem()->assetId, assetId(0x20U));
     EXPECT_EQ(projectAssetOpenKind(browser->selectedItem()->assetKind),
               ProjectAssetOpenKind::TileMap2D);
 
-    ASSERT_TRUE(browser->setFilter(ProjectAssetFilter::ThreeD));
+    ASSERT_TRUE(browser->setTypeFilter(ProjectAssetTypeFilter::Models));
     ASSERT_EQ(browser->visibleItemCount(), 1U);
     EXPECT_EQ(browser->selectedItem(), nullptr);
     ASSERT_NE(browser->selectedInspectorSnapshot(), nullptr);
@@ -105,14 +105,15 @@ TEST(ProjectAssetBrowserTests, SearchesNameAndKindWithStableKeys)
     EXPECT_EQ(browser->visibleItem(0U)->assetId, assetId(0x30U));
     EXPECT_EQ(browser->visibleItemStableKey(0U), 3U);
 
-    ASSERT_TRUE(browser->setFilter(ProjectAssetFilter::TwoD));
+    ASSERT_TRUE(browser->setTypeFilter(ProjectAssetTypeFilter::Images));
     ASSERT_EQ(browser->visibleItemCount(), 0U);
     EXPECT_EQ(browser->selectedItem(), nullptr);
 
-    ASSERT_TRUE(browser->setFilter(ProjectAssetFilter::Media));
+    ASSERT_TRUE(browser->setTypeFilter(ProjectAssetTypeFilter::Audio));
     ASSERT_EQ(browser->visibleItemCount(), 1U);
     EXPECT_EQ(browser->visibleItem(0U)->assetId, assetId(0x30U));
     EXPECT_EQ(browser->selectedItem(), nullptr);
+    ASSERT_TRUE(browser->setTypeFilter(ProjectAssetTypeFilter::Images));
     ASSERT_TRUE(browser->setSearchQuery("diff"));
     ASSERT_EQ(browser->visibleItemCount(), 1U);
     EXPECT_EQ(browser->visibleItem(0U)->assetId, assetId(0x10U));
@@ -122,9 +123,9 @@ TEST(ProjectAssetBrowserTests, SearchesNameAndKindWithStableKeys)
     ASSERT_TRUE(browser->setSearchQuery(""));
     ASSERT_EQ(browser->visibleItemCount(), 2U);
     EXPECT_EQ(browser->visibleItemStableKey(0U), 1U);
-    EXPECT_EQ(browser->visibleItemStableKey(1U), 3U);
+    EXPECT_EQ(browser->visibleItemStableKey(1U), 2U);
 
-    ASSERT_TRUE(browser->setFilter(ProjectAssetFilter::All));
+    ASSERT_TRUE(browser->setTypeFilter(ProjectAssetTypeFilter::All));
     ASSERT_TRUE(browser->setSearchQuery(""));
     ASSERT_NE(browser->selectedItem(), nullptr);
     EXPECT_EQ(browser->selectedItem()->assetId, assetId(0x40U));
@@ -172,7 +173,7 @@ TEST(ProjectAssetBrowserTests, RestoresHiddenSelectionAcrossCatalogRebuild)
 
     auto browser = ProjectAssetBrowserModel::Create(assets);
     ASSERT_TRUE(browser);
-    ASSERT_TRUE(browser->setFilter(ProjectAssetFilter::TwoD));
+    ASSERT_TRUE(browser->setTypeFilter(ProjectAssetTypeFilter::Images));
     ASSERT_TRUE(browser->restoreAssetSelection(assetId(0x20U)));
     EXPECT_EQ(browser->selectedItem(), nullptr);
     ASSERT_TRUE(browser->selectedAssetId());
@@ -181,7 +182,7 @@ TEST(ProjectAssetBrowserTests, RestoresHiddenSelectionAcrossCatalogRebuild)
     EXPECT_EQ(browser->selectedInspectorSnapshot()->assetKind,
               AssetFormat::AssetKind::StaticMesh);
 
-    ASSERT_TRUE(browser->setFilter(ProjectAssetFilter::ThreeD));
+    ASSERT_TRUE(browser->setTypeFilter(ProjectAssetTypeFilter::Models));
     ASSERT_NE(browser->selectedItem(), nullptr);
     EXPECT_EQ(browser->selectedItem()->assetId, assetId(0x20U));
 
@@ -213,7 +214,7 @@ TEST(ProjectAssetBrowserTests, RejectsCapacityDuplicatesAndInvisibleSelectionAto
 
     auto browser = ProjectAssetBrowserModel::Create(assets);
     ASSERT_TRUE(browser);
-    ASSERT_TRUE(browser->setFilter(ProjectAssetFilter::TwoD));
+    ASSERT_TRUE(browser->setTypeFilter(ProjectAssetTypeFilter::Images));
     const auto before = browser->selectedItem()->assetId;
     const auto missing = browser->selectAsset(assetId(0x20U));
     ASSERT_FALSE(missing);
@@ -225,9 +226,9 @@ TEST(ProjectAssetBrowserTests, RejectsCapacityDuplicatesAndInvisibleSelectionAto
     EXPECT_EQ(browser->selectedItem()->assetId, before);
 
     const auto invalidFilter =
-        browser->setFilter(static_cast<ProjectAssetFilter>(0xffU));
+        browser->setTypeFilter(static_cast<ProjectAssetTypeFilter>(0xffU));
     ASSERT_FALSE(invalidFilter);
-    EXPECT_EQ(browser->filter(), ProjectAssetFilter::TwoD);
+    EXPECT_EQ(browser->typeFilter(), ProjectAssetTypeFilter::Images);
     EXPECT_EQ(browser->selectedItem()->assetId, before);
 }
 
@@ -267,7 +268,7 @@ TEST(ProjectAssetBrowserTests, OwnsCanonicalInspectorMetadataAndSortedDependenci
 
     ASSERT_TRUE(browser->selectAsset(assetId(0x30U)));
     EXPECT_EQ(browser->selectedInspectorSnapshot(), snapshot);
-    ASSERT_TRUE(browser->setFilter(ProjectAssetFilter::ThreeD));
+    ASSERT_TRUE(browser->setTypeFilter(ProjectAssetTypeFilter::Models));
     EXPECT_EQ(browser->inspectorSnapshot(assetId(0x30U)), snapshot);
     EXPECT_EQ(browser->selectedInspectorSnapshot()->assetKind,
               AssetFormat::AssetKind::Sprite);

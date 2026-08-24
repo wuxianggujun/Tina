@@ -265,7 +265,7 @@ Lease/GPU/binding；Scene extraction 只取得 packet-local `FrameResourceRef`�
 只从本次 preview 过滤，authoring document 与 history 保持不变，不回退到固定 binding key 或彩色 proxy。
 
 Project Browser 直接拥有 Catalog descriptor 的确定性 AssetId 排序索引，并提供 ASCII case-insensitive name/kind 搜索、
-All/2D/3D/Media 组合过滤、stable item key、按 AssetId 恢复的稳定选择，以及 Grid/List 两种固定 metrics 的
+All/Images/Models/Scenes/Audio/Animation/Other 类型过滤、stable item key、按 AssetId 恢复的稳定选择，以及 Grid/List 两种固定 metrics 的
 `UIVirtualGridView` presentation。Grid 使用 116 logical px 最小 item 宽度与 84 logical px 高度，并保持按 viewport
 计算出的响应式列数；即使末行只有一个资源也不再把 item 拉伸到整行。List 使用 320 logical px 最小 item 宽度与
 60 logical px 高度；两档只改变 presentation/metrics，不改变 logical order、key 或 selection。
@@ -317,9 +317,10 @@ Editor source import 已完成产品接线。自动化入口使用 strict UTF-8 
 外部 PNG/JPEG/WAV 在整批预检成功后分别安全复制到 `Source/Imported/Images/` 与 `Source/Imported/Audio/`。左侧 `Source Imports`
 使用三列 DataGrid 显示完整 intended set：`Kind` 固定 88 logical px，显示 Catalog/glTF/Texture/Audio；`Source`
 当前约 190 logical px，显示完整 UTF-8 source path；`Status` 显示 Queued/Preparing/Copying/Cooking/Committing/Imported/Failed。
-DataGrid 使用固定 3 列、5 行 materialized pool、双轴滚动和 stable
+DataGrid 使用固定 3 列、5 行 materialized pool、128 logical px bounded viewport、双轴滚动和 stable
 row selection；`Remove` 只读取 selected logical row。非空集合只常驻显示带数量 Badge 的标题栏，记录表默认
-`Collapsed`，用户通过 ChevronRight/ChevronDown 手动展开或收起，收起时 `Remove` 禁用，切换项目后恢复默认收起；
+`Collapsed`，用户通过 ChevronRight/ChevronDown 手动展开或收起，收起时 `Remove` 禁用，切换项目后恢复默认收起；百分比高度
+不再向 Auto 父节点传播，避免展开后 DataGrid viewport 超出 materialized row pool 而触发 UI fatal；
 空集合时整段 `Collapsed`，Import 入口仍保留在 Project Assets
 标题栏的小 `+`；`Remove` 在 owner thread 生成删除后的候选集合并启动同一 fresh-stage 事务，不会先打开或重新校验
 被删除的文件，因此已经从磁盘消失的 stale unit 仍可移除。移除最后一个 unit 会从有效 baseline 增量发布零 entry
@@ -329,7 +330,11 @@ UI thread 只把 owned path batch 提交给 `EditorSourceImportService`，后台
 扩展名识别、物理路径规范化、containment 与去重校验，任一文件非法、越界或分配失败时都不修改既有 intended set；
 外部媒体 ingress 也在任何复制前完成整批预检，后续 intended-set 合并、cook、Catalog commit、取消或 shutdown 失败会删除本批新文件与空目录。
 目标同名且内容相同时复用项目文件，内容不同时使用 `_2`、`_3` 等后缀，绝不覆盖；批内同一物理文件只复制一次。
-每张图片只生成一个 Texture2D；创建或编辑 Sprite2D Node 时可直接选择该 AssetId，不再等待或查找自动生成的
+Project Assets 的 Source-backed Texture/Audio 资源显示真实文件名，而不是 metadata 中的 `#id` 或可漂移别名；右键
+`Rename Source File` 只对单输出 Texture2D/AudioClip 开放，输入限制为同目录、原扩展名不变的 UTF-8 文件名。
+Editor 先执行物理文件 rename，再以原 AssetId 作为 stable media override 重建完整 intended set；导入失败、取消、shutdown
+或 stage 丢失都会回滚文件，只有 Catalog、Browser、preview 与 import state 全部提交后才确认 rename。recipe、glTF 与多输出
+资源保持只读并通过禁用的 Rename 菜单明确提示不支持。每张图片只生成一个 Texture2D；创建或编辑 Sprite2D Node 时可直接选择该 AssetId，不再等待或查找自动生成的
 全幅 Sprite wrapper。显式 recipe 中 authored Sprite 的 wrapper/dependency 路径继续可用。
 外部 `.recipe` / `.gltf` / `.glb` 因相对依赖无法靠复制单个主文件保证完整性而明确拒绝，调用方需先把完整依赖集置于
 `Source/`。已存在或本批重复选择的 unit 只保留一份，但仍会触发完整 intended set 的 reimport；Windows 大小写、
@@ -354,7 +359,7 @@ Catalog commit 后重建 preview binding 时，Editor 先退休旧 Sprite/Mesh r
 `IRenderDevice` 与 `AssetSystem` 的 GPU retirement 并重试一次。若 registry 仍处于 engaged 状态，下一次 prepare 返回
 `CatalogReloadBusy`，不会用 `optional::emplace` 覆盖仍持有 live binding 的 registry 而触发析构期 `std::terminate`。
 Windows 使用系统原生 dialog；Linux 私有 adapter 以 `zenity` 为首选、`kdialog` 为缺失回退，覆盖 open/save/folder 且不经过
-shell。Windows COM guard 按平台契约为每次成功的 `CoInitializeEx()`（包括 `S_FALSE`）配对一次
+shell。Windows COM guard 只在 `CoInitializeEx()` 返回 `S_OK` 时调用一次
 `CoUninitialize()`。`EditorProjectWorkspace` 的 canonical generic UTF-8 路径在进入 Windows Shell 前通过
 `std::filesystem::path::make_preferred()` 转为原生分隔符，避免第二次 Import Files 将 `C:/.../Source` 交给
 `SHCreateItemFromParsingName()` 后得到 `E_INVALIDARG`。连续两次真实系统 dialog 仍属于人工产品证据。Linux 定向编译和真实 helper 产品门禁仍是平台证据，但不是 Editor 完成度的唯一剩余项；视口导航、gizmo、

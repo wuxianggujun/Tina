@@ -231,6 +231,7 @@ auto EditorWorkspaceState::onExit(Tina::GameStateExitContext&) noexcept -> void{
         (void)sourceImportService_.dismissFailure();
     }
     cleanupFailedSourceImportStage();
+    (void)rollbackProjectAssetSourceRename();
     counters_.sourceImportRunning = false;
     if (playSession_.has_value()) {
         (void)playSession_->stop();
@@ -1258,6 +1259,26 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
     }
     if (projectBrowserUiRefreshPending_) {
         projectBrowserUiRefreshPending_ = false;
+        collapsedProjectAssetFolderKeys_.clear();
+        if (auto status = tree->setTreeViewDataSource(
+                projectAssetFolderTree_, projectAssetFolderDataSource()); !status) {
+            return status;
+        }
+        if (auto status = tree->invalidateTreeViewItems(projectAssetFolderTree_);
+            !status) {
+            return status;
+        }
+        const u64 folderIndex = visibleProjectAssetFolderIndex(
+            projectAssets_.currentFolderPath()).value_or(0U);
+        if (auto status = tree->setTreeViewSelectedIndex(
+                projectAssetFolderTree_, folderIndex); !status) {
+            return status;
+        }
+        UI::UITreeViewItemDescriptor folderSelection{};
+        projectAssetFolderSelectionKey_ =
+            resolveProjectAssetFolderItem(this, folderIndex, folderSelection)
+                ? folderSelection.key
+                : UI::InvalidUITreeViewItemKey;
         if (auto status = tree->setVirtualGridViewDataSource(
                 projectAssetList_, projectAssetDataSource());
             !status) {
@@ -1320,6 +1341,31 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
         }
     }
     preserveViewportSelectionOnHierarchyPublish_ = false;
+    auto projectFolderSelection = tree->treeViewSelection(
+        projectAssetFolderTree_);
+    if (!projectFolderSelection) {
+        return Tina::Core::failure(std::move(projectFolderSelection.error()));
+    }
+    if (projectFolderSelection->key != projectAssetFolderSelectionKey_) {
+        UI::UITreeViewItemDescriptor selectedFolder{};
+        if (!resolveProjectAssetFolderItem(
+                this, projectFolderSelection->logicalIndex, selectedFolder)) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::Internal,
+                "Editor Project Asset folder selection could not be resolved");
+        }
+        const auto* folder = projectAssets_.folder(
+            static_cast<Tina::Core::usize>(selectedFolder.key - 1U));
+        if (folder == nullptr) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::Internal,
+                "Editor Project Asset folder selection key is stale");
+        }
+        projectAssetFolderSelectionKey_ = selectedFolder.key;
+        if (auto status = applyProjectAssetFolder(*tree, folder->pathUtf8); !status) {
+            return status;
+        }
+    }
     if (!projectAssetSelectionSyncPending_) {
         auto projectSelection = tree->virtualGridViewSelection(projectAssetList_);
         if (!projectSelection) {

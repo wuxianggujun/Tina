@@ -25,6 +25,9 @@ struct SourceImportPipelineUnit final {
     SourceImportPipelineUnitKind kind = SourceImportPipelineUnitKind::CatalogRecipe;
     std::string_view sourceUtf8Path{};
     GltfCookIds gltfIds{};
+    // Optional stable output identity for one-output Texture/Audio importers.
+    // Invalid keeps the default source-relative-path-derived identity.
+    Core::AssetId mediaAssetId{};
 };
 
 struct SourceImportPipelineOutput final {

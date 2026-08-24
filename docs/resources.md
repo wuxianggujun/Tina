@@ -49,7 +49,7 @@ Catalog package
 | GPU 生命周期 | Null `UploadTicket` 状态机；Texture/Mesh/EnvironmentMap backend retirement marker；AssetLease pin 与 retirement ledger |
 | 产品路径 | Texture2D/Sprite/SpriteAnimationClip/TileMap root/TileMapChunk/NavigationGrid2D/Fx2D 2D、StaticMesh/SkinnedMesh/AnimationClip3D/Material/Prefab/EnvironmentMap 3D、AudioClip 均有 Cooked typed validation；`SkinnedMeshRenderer3D`/`Animator3D` CPU pose、packet-local palette 与 bgfx GPU skinning 已于2026-08-14通过 schema 15 集中产品 gate；独立 Blend Material + 双 static witness 的 Transparent3D 已于2026-08-15通过 schema 16 集中 gate，并证明第4个 Material 在透明 on/off 下均完成 load/bind/retire |
 | Editor viewport | `TinaEditor.exe --catalog-root=<UTF-8 path>` 通过真实 AssetSystem + Sprite/Tileset/Mesh registry 解析同一 World2D/TileMap/Prefab/SpriteAnimationClip 文档中的 AssetId；普通无项目启动使用零 entry session Catalog，只有 `--auto-demo` 使用明确标记的 test fixture Catalog |
-| Editor Project Browser | 拥有 Catalog metadata、canonical cooked 相对路径与完整 dependency records 的 AssetId 排序索引，All/2D/3D/Media 过滤并按 current schema 打开 Prefab/TileMap/SpriteAnimationClip；其他 kind 进入资源 Inspector |
+| Editor Project Browser | 拥有 Catalog metadata、Source 文件名/文件夹、canonical cooked 相对路径与完整 dependency records 的 AssetId 排序索引，All/Images/Models/Scenes/Audio/Animation/Other 类型过滤并按 current schema 打开 Prefab/TileMap/SpriteAnimationClip；其他 kind 进入资源 Inspector |
 | Editor source import | `--project-root` + 可重复混合 `--import-recipe`/`--import-gltf`/`--import-texture`/`--import-audio` 保留完整 intended unit 集；后台共享 pipeline 生成 fully validated fresh stage + sibling state，主线程安全帧 reload 后只提交 active pointer，reopen 验证并恢复 Catalog 与 unit 集 |
 | TileMap 导航派生 | `buildTileMapNavigation2DData()` 从 resident solid tile layer、exact material-cost rule 与 property-tagged visible Rectangle 原子生成 immutable `NavigationGrid2DData`；`NavigationGrid2D` v1 可作为独立 Cooked AssetKind 保存同一 flags/cost 数据 |
 
@@ -78,7 +78,7 @@ canonical World2D/TileMap/Prefab/SpriteAnimationClip 收集并去重 Sprite、Ti
 history 与持久化 AssetId 不变。普通无项目启动发布零 entry session Catalog；只有显式 `--auto-demo` 创建测试资源
 fixture，退出时连同临时 package 一并释放。真实用户资源只能通过项目 Source Import 或显式项目 Catalog 进入 preview，
 不能从测试 fixture 回退或混入。
-Project Browser 复制 Catalog identity/kind/version/dependency count/file size/display label、由 kind+AssetId 派生的 canonical
+Project Browser 复制 Catalog identity/kind/version/dependency count/file size/display label、Source 文件名/文件夹、由 kind+AssetId 派生的 canonical
 cooked 相对路径和全部 dependency records，不借用 CatalogSnapshot entry。Project Asset 虚拟列表使用固定 32 px 行高；
 Asset Inspector 按 active Inspector tab 的 AssetId 取得 owning snapshot，并用固定 36 px 行高虚拟 dependency list 显示 kind、
 AssetId 与 flags，不因 browser 的临时 selection 改变已打开 Inspector 内容；
@@ -110,8 +110,10 @@ Editor source import 已在同一 Project/Catalog owner 上闭环。launch parse
 因可能依赖相对文件而拒绝单文件复制，必须先把完整依赖集置于 `Source/`。
 普通媒体一步导入：Texture importer 把一张图片 cook 成一个 path-derived Texture2D；Sprite2D 节点可直接引用该
 Texture2D，不再额外生成全幅默认 Sprite wrapper。显式 recipe authoring 的 Sprite 资产及其 required Texture2D dependency
-继续支持。Audio importer 把 PCM16 WAV cook 成 AudioClip；media 输出 AssetId 由 canonical source-root 相对路径经两轮
-FNV-1a 派生，rename 视为 Removed+Added；Catalog/output ownership 仍负责检测任何重复 ID 并原子拒绝候选。后台
+继续支持。Audio importer 把 PCM16 WAV cook 成 AudioClip；media 输出 AssetId 默认由 canonical source-root 相对路径经两轮
+FNV-1a 派生，但 Editor 对单输出 Texture2D/AudioClip 的真实文件重命名会把原 AssetId 作为 stable override 写入
+import settings，避免 rename 造成引用断裂。重命名事务先物理 rename，只有完整 Catalog/Browser/preview/import-state commit
+后确认；失败、取消或 shutdown 自动 rollback。recipe、glTF 与多输出 unit 不开放 Source rename。Catalog/output ownership 仍负责检测任何重复 ID 并原子拒绝候选。后台
 `EditorSourceImportService` 接收 dialog-owned path batch，在同一 `jthread` 中完成物理路径预检、外部文件复制与分块内容校验、
 intended-set merge，再调用共享 `executeSourceImportPipeline()`；UI thread 不再执行文件 IO 或 importer，worker 也不触碰
 UI/Render/AssetSystem。服务公开 `Preparing` / `Copying` / `Cooking` / `ReadyToCommit` / `Failed` 批级 phase；单批最多
@@ -219,9 +221,9 @@ ownership，同时拥有精确的 fully validated `CatalogSnapshot`。它同步�
 ## 身份、视图与所有权
 
 `AssetId` 是 Catalog 内的逻辑身份，不等于文件路径或 `ContentHash`。recipe 使用显式 canonical ID；media importer
-从 canonical source-root 相对 locator 派生默认 ID。glTF Cooker 只允许显式指定首 mesh/material/prefab ID，其他输出及
+从 canonical source-root 相对 locator 派生默认 ID，Editor rename 可为单输出媒体保留既有 ID。glTF Cooker 只允许显式指定首 mesh/material/prefab ID，其他输出及
 空 ID 仍从调用方传入的 `gltfUtf8Path` 原字符串派生。Importer provenance/state 的 stable `ImportUnitId` 使用 canonical
-root-relative path，但它不会改写 glTF output ID seed。当前没有 rename map：重命名表现为旧 unit Removed + 新 unit
+root-relative path，但它不会改写 glTF output ID seed。glTF、recipe 和多输出 unit 当前没有 rename map：重命名表现为旧 unit Removed + 新 unit
 Added；移动工程根、改变绝对路径拼写也可能改变默认 glTF AssetId。
 
 当前 glTF 默认 ID 还保留旧 per-position XOR 派生：byte 0 最终被 kind tag 覆盖，因此某些仅首字符不同的等长路径可

@@ -51,12 +51,13 @@ auto EditorWorkspaceState::bakeAndPublishNavigation2D() -> Tina::Core::Status{
         return Tina::Core::failure(std::move(staged.error()));
     }
 
-    const auto previousFilter = projectAssets_.filter();
+    const auto previousFilter = projectAssets_.typeFilter();
     std::optional<Tina::Core::AssetId> previousSelection{};
     previousSelection = projectAssets_.selectedAssetId();
     const std::string_view previousSearchQuery = projectAssets_.searchQuery();
     auto browser = prepareProjectBrowserForSnapshot(
         *staged, previousFilter, previousSelection, previousSearchQuery,
+        projectAssets_.currentFolderPath(),
         sourceImportUnitOutputs_, assetMetadata_,
         activeProjectWorkspace_.has_value()
             ? activeProjectWorkspace_->sourceRootUtf8()

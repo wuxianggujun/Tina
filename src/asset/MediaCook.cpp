@@ -37,7 +37,7 @@ inline constexpr Core::u8 AudioMediaIdTag = 0x77;
 // is overwritten by the tag, so seeds differing only in their first character
 // (`a.png` vs `b.png`) collided into one AssetId and the import rejected the
 // batch with "source import output has multiple owners".
-[[nodiscard]] Core::AssetId deriveMediaAssetId(std::string_view seed, Core::u8 tag)
+[[nodiscard]] Core::AssetId deriveMediaAssetIdUnchecked(std::string_view seed, Core::u8 tag)
 {
     constexpr Core::u64 FnvOffset = 14695981039346656037ULL;
     constexpr Core::u64 FnvPrime = 1099511628211ULL;
@@ -166,10 +166,35 @@ catch (const std::bad_alloc&)
 
 } // namespace
 
+Core::Result<Core::AssetId>
+deriveTextureMediaAssetId(std::string_view normalizedSourcePath) noexcept
+{
+    if (normalizedSourcePath.empty() ||
+        !Core::isStrictUtf8WithoutNul(normalizedSourcePath))
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "texture media identity path must be strict UTF-8 without NUL");
+    }
+    return deriveMediaAssetIdUnchecked(normalizedSourcePath, TextureMediaIdTag);
+}
+
+Core::Result<Core::AssetId>
+deriveAudioMediaAssetId(std::string_view normalizedSourcePath) noexcept
+{
+    if (normalizedSourcePath.empty() ||
+        !Core::isStrictUtf8WithoutNul(normalizedSourcePath))
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "audio media identity path must be strict UTF-8 without NUL");
+    }
+    return deriveMediaAssetIdUnchecked(normalizedSourcePath, AudioMediaIdTag);
+}
+
 Core::Result<CatalogCookSourceResult>
 cookTextureFileToCatalogSourceResult(std::string_view imageUtf8Path,
                                      AssetFormat::TargetPlatform targetPlatform,
-                                     SourceImportCaptureConfig captureConfig) noexcept
+                                     SourceImportCaptureConfig captureConfig,
+                                     Core::AssetId stableAssetId) noexcept
 try
 {
     auto capture = captureMediaPrimarySource(imageUtf8Path, targetPlatform, captureConfig,
@@ -227,7 +252,12 @@ try
 
     const std::string_view idSeed =
         capture->result.sourceImports.sources[capture->primarySourceIndex].path;
-    const Core::AssetId textureId = deriveMediaAssetId(idSeed, TextureMediaIdTag);
+    auto derivedTextureId = deriveTextureMediaAssetId(idSeed);
+    if (!derivedTextureId)
+    {
+        return Core::failure(std::move(derivedTextureId.error()));
+    }
+    const Core::AssetId textureId = stableAssetId ? stableAssetId : *derivedTextureId;
 
     capture->result.request.targetPlatform = targetPlatform;
     capture->result.request.assets.push_back(CatalogCookAssetSpec{
@@ -236,7 +266,7 @@ try
         .payload = std::move(*texturePayload),
     });
 
-    auto contract = currentTextureSourceImportContract(idSeed);
+    auto contract = currentTextureSourceImportContract(idSeed, stableAssetId);
     if (!contract)
     {
         return Core::failure(std::move(contract.error()).withContext(
@@ -258,7 +288,8 @@ catch (const std::bad_alloc&)
 Core::Result<CatalogCookSourceResult>
 cookAudioFileToCatalogSourceResult(std::string_view wavUtf8Path,
                                    AssetFormat::TargetPlatform targetPlatform,
-                                   SourceImportCaptureConfig captureConfig) noexcept
+                                   SourceImportCaptureConfig captureConfig,
+                                   Core::AssetId stableAssetId) noexcept
 try
 {
     auto capture = captureMediaPrimarySource(wavUtf8Path, targetPlatform, captureConfig,
@@ -284,14 +315,19 @@ try
 
     const std::string_view idSeed =
         capture->result.sourceImports.sources[capture->primarySourceIndex].path;
+    auto derivedAudioId = deriveAudioMediaAssetId(idSeed);
+    if (!derivedAudioId)
+    {
+        return Core::failure(std::move(derivedAudioId.error()));
+    }
     capture->result.request.targetPlatform = targetPlatform;
     capture->result.request.assets.push_back(CatalogCookAssetSpec{
         .assetKind = AssetFormat::AssetKind::AudioClip,
-        .assetId = deriveMediaAssetId(idSeed, AudioMediaIdTag),
+        .assetId = stableAssetId ? stableAssetId : *derivedAudioId,
         .payload = std::move(*clipPayload),
     });
 
-    auto contract = currentAudioSourceImportContract(idSeed);
+    auto contract = currentAudioSourceImportContract(idSeed, stableAssetId);
     if (!contract)
     {
         return Core::failure(std::move(contract.error()).withContext(

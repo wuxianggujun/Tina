@@ -173,6 +173,14 @@ namespace {
             return Core::failure(Core::CoreErrorCode::InvalidArgument,
                                  "Editor source import unit kind is invalid");
         }
+        if (unit.mediaAssetId &&
+            unit.kind != EditorSourceImportUnitKind::Texture &&
+            unit.kind != EditorSourceImportUnitKind::Audio)
+        {
+            return Core::failure(
+                Core::CoreErrorCode::InvalidArgument,
+                "Editor source import media AssetId requires a Texture or Audio unit");
+        }
         if (const auto status = acceptPath(unit.sourcePathUtf8, false,
                                            "Editor source import unit path is invalid");
             !status)
@@ -474,6 +482,7 @@ EditorSourceImportWorker makeEditorSourceImportPipelineWorker()
                 .kind = pipelineKind,
                 .sourceUtf8Path = unit.sourcePathUtf8,
                 .gltfIds = unit.gltfIds,
+                .mediaAssetId = unit.mediaAssetId,
             });
         }
 

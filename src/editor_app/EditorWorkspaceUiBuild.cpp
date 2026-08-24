@@ -808,6 +808,101 @@ auto EditorWorkspaceState::buildLeftDockUi(
     }
     projectAssetSearchInput_ = projectSearch->textEdit;
 
+    UI::UILayoutStyle typeFilterLayout = fixedSize(
+        122.0F, ui.productTheme.controls.textEditHeight);
+    typeFilterLayout.flexItem.shrink = 0.0F;
+    typeFilterLayout.padding = UI::UIEdgeSpacing::HorizontalVertical(
+        ui.productTheme.spacing.space3, ui.productTheme.spacing.space2);
+    auto typeFilter = ui.tree.createElement(
+        projectAssetTools,
+        UI::makeDropdownElement(
+            Tina::Editor::projectAssetTypeFilterLabel(projectAssets_.typeFilter()),
+            typeFilterLayout));
+    if (!typeFilter) {
+        return Tina::Core::failure(std::move(typeFilter.error()));
+    }
+    projectAssetTypeDropdown_ = *typeFilter;
+    UI::UILayoutStyle typeFilterPopupLayout = fixedSize(
+        122.0F,
+        ui.productTheme.controls.menuItemHeight *
+            static_cast<float>(ProjectAssetTypeFilterCount));
+    typeFilterPopupLayout.placement = UI::UILayoutPlacement::Overlay;
+    auto typeFilterPopup = ui.tree.createElement(
+        projectAssetTypeDropdown_, UI::makePopupElement(typeFilterPopupLayout));
+    if (!typeFilterPopup) {
+        return Tina::Core::failure(std::move(typeFilterPopup.error()));
+    }
+    projectAssetTypeDropdownPopup_ = *typeFilterPopup;
+    if (auto status = ui.tree.setPopupStyle(
+            projectAssetTypeDropdownPopup_,
+            UI::UIPopupStyle{
+                .placement = UI::UIPopupPlacement::Below,
+                .anchorGap = ui.productTheme.spacing.space1,
+                .matchAnchorWidth = true,
+            }); !status) {
+        return status;
+    }
+    for (u32 index = 0U; index < projectAssetTypeDropdownItems_.size(); ++index) {
+        const auto filter = static_cast<Tina::Editor::ProjectAssetTypeFilter>(index);
+        auto item = ui.tree.createElement(
+            projectAssetTypeDropdownPopup_,
+            UI::makeDropdownItemElement(
+                Tina::Editor::projectAssetTypeFilterLabel(filter),
+                fixedSize(122.0F, ui.productTheme.controls.menuItemHeight)));
+        if (!item) {
+            return Tina::Core::failure(std::move(item.error()));
+        }
+        projectAssetTypeDropdownItems_[index] = *item;
+    }
+    if (auto status = ui.tree.setDropdownSelectedItem(
+            projectAssetTypeDropdown_,
+            projectAssetTypeDropdownItems_[static_cast<u32>(
+                projectAssets_.typeFilter())]); !status) {
+        return status;
+    }
+    if (auto status = ui.tree.setDropdownOpen(projectAssetTypeDropdown_, false);
+        !status) {
+        return status;
+    }
+    const UI::UIDropdownChrome dropdownChrome =
+        UI::makeDropdownChrome(ui.productTheme);
+    if (auto status = ui.tree.setBoxPaint(
+            projectAssetTypeDropdown_, dropdownChrome.box); !status) {
+        return status;
+    }
+    if (auto status = ui.tree.setButtonPaint(
+            projectAssetTypeDropdown_, dropdownChrome.states); !status) {
+        return status;
+    }
+    if (auto status = ui.tree.setDropdownPaint(
+            projectAssetTypeDropdown_, dropdownChrome.dropdown); !status) {
+        return status;
+    }
+    if (auto status = ui.tree.setTextStyle(
+            projectAssetTypeDropdown_, dropdownChrome.label); !status) {
+        return status;
+    }
+    if (auto status = ui.tree.setBoxPaint(
+            projectAssetTypeDropdownPopup_,
+            UI::makePopupBoxPaint(ui.productTheme)); !status) {
+        return status;
+    }
+    const UI::UIButtonChrome dropdownItemChrome =
+        UI::makeDropdownItemChrome(ui.productTheme);
+    for (const UI::UINodeId item : projectAssetTypeDropdownItems_) {
+        if (auto status = ui.tree.setBoxPaint(item, dropdownItemChrome.box); !status) {
+            return status;
+        }
+        if (auto status = ui.tree.setButtonPaint(
+                item, dropdownItemChrome.states); !status) {
+            return status;
+        }
+        if (auto status = ui.tree.setTextStyle(
+                item, dropdownItemChrome.label); !status) {
+            return status;
+        }
+    }
+
     const std::array<std::string_view, 2> projectAssetViewLabels{"Grid", "List"};
     for (u32 index = 0; index < projectAssetViewButtons_.size(); ++index) {
         if (auto status = storeNode(
@@ -821,30 +916,6 @@ auto EditorWorkspaceState::buildLeftDockUi(
         if (auto status = ui.tree.setRadioButtonSelected(
                 projectAssetViewButtons_[index],
                 index == static_cast<u32>(projectAssetViewMode_));
-            !status) {
-            return status;
-        }
-    }
-
-    UI::UINodeId projectFilters{};
-    UI::UILayoutStyle projectFiltersStyle = fillWidth(ui.productTheme.controls.buttonHeight);
-    projectFiltersStyle.flexContainer.direction = UI::UIFlexDirection::Row;
-    projectFiltersStyle.flexContainer.gap.column = ui.productTheme.spacing.space2;
-    if (auto status = storeNode(ui.createPanel(left, projectFiltersStyle),
-                                projectFilters);
-        !status) {
-        return status;
-    }
-    const std::array<std::string_view, 4> projectFilterLabels{"All", "2D", "3D", "Media"};
-    for (u32 index = 0; index < projectFilterLabels.size(); ++index) {
-        UI::UILayoutStyle filterStyle = fixedSize(
-            0.0F, ui.productTheme.controls.buttonHeight);
-        filterStyle.size.width = UI::UILayoutLength::Auto();
-        filterStyle.flexItem.grow = 1.0F;
-        filterStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
-        if (auto status = storeNode(ui.createSegmentedButton(projectFilters, projectFilterLabels[index],
-                                                          filterStyle),
-                                    projectFilterButtons_[index]);
             !status) {
             return status;
         }
@@ -866,6 +937,48 @@ auto EditorWorkspaceState::buildLeftDockUi(
         !status) {
         return status;
     }
+
+    projectAssetFolderTreeLayout_ = fillWidth(112.0F);
+    projectAssetFolderTreeLayout_.flexItem.shrink = 0.0F;
+    auto projectFolderTree = ui.tree.createElement(
+        left, UI::makeTreeViewElement(
+                  {.materializedItemCapacity =
+                       ProjectAssetFolderMaterializedCapacity},
+                  projectAssetFolderTreeLayout_));
+    if (!projectFolderTree) {
+        return Tina::Core::failure(std::move(projectFolderTree.error()));
+    }
+    projectAssetFolderTree_ = *projectFolderTree;
+    if (auto status = ui.tree.setTreeViewStyle(
+            projectAssetFolderTree_,
+            UI::UITreeViewStyle{
+                .rowHeight = ui.productTheme.controls.treeRowHeight,
+                .overscanRows = 1,
+                .scrollBarVisibility = UI::UIScrollBarVisibility::Auto,
+                .wheelStep = ui.productTheme.controls.treeRowHeight,
+                .indentation = ui.productTheme.spacing.space5,
+                .disclosureExtent = 10.0F,
+                .disclosureGap = ui.productTheme.spacing.space2,
+            }); !status) {
+        return status;
+    }
+    if (auto status = ui.tree.setTreeViewPaint(
+            projectAssetFolderTree_, UI::makeTreeViewPaint(ui.productTheme));
+        !status) {
+        return status;
+    }
+    if (auto status = ui.tree.setTreeViewDataSource(
+            projectAssetFolderTree_, projectAssetFolderDataSource()); !status) {
+        return status;
+    }
+    const auto initialFolderIndex = visibleProjectAssetFolderIndex(
+        projectAssets_.currentFolderPath()).value_or(0U);
+    if (auto status = ui.tree.setTreeViewSelectedIndex(
+            projectAssetFolderTree_, initialFolderIndex); !status) {
+        return status;
+    }
+    projectAssetFolderSelectionKey_ =
+        projectAssets_.folderStableKey(initialFolderIndex);
 
     projectAssetStartCenterLayout_ = fillWidth(0.0F);
     projectAssetStartCenterLayout_.size.height = UI::UILayoutLength::Auto();
@@ -1317,7 +1430,10 @@ auto EditorWorkspaceState::buildLeftDockUi(
         return status;
     }
 
-    UI::UILayoutStyle sourceImportGridStyle = percentSize(100.0F, 100.0F);
+    // Keep the records viewport bounded. A percentage-height DataGrid inside
+    // the Auto-sized import section can resolve against the whole left dock,
+    // exceeding the fixed materialized-row pool when the section is expanded.
+    UI::UILayoutStyle sourceImportGridStyle = fillWidth(128.0F);
     sourceImportGridStyle.minMax.minHeight = UI::UILayoutLength::Px(96.0F);
     auto sourceImportGrid = ui.tree.createElement(
         sourceImportDetails_, UI::makeDataGridElement(
@@ -3716,7 +3832,7 @@ auto EditorWorkspaceState::buildMenuOverlaysUi(
         return status;
     }
     if (auto status = createMenuItem(
-            projectAssetContextMenu_, "Rename", UI::UIMenuItemKind::Command,
+            projectAssetContextMenu_, "Rename Source File", UI::UIMenuItemKind::Command,
             projectAssetContextRenameItem_); !status) {
         return status;
     }
@@ -3994,8 +4110,8 @@ auto EditorWorkspaceState::buildProjectAssetRenameDialogUi(
     auto dialog = ui.tree.buildDialog(
         parent,
         UI::UIDialogConfig{
-            .title = "Rename Project Asset",
-            .body = "Rename the Editor display label. The source path and AssetId remain unchanged.",
+            .title = "Rename Source File",
+            .body = "Rename the imported file and rebuild its Project Asset records. AssetId remains stable when the importer supports it.",
             .actions = actions,
             .layout = editorDialogOverlayLayout(),
             .surfaceLayout = editorDialogSurfaceLayout(ui.productTheme),
@@ -4007,7 +4123,7 @@ auto EditorWorkspaceState::buildProjectAssetRenameDialogUi(
     auto field = ui.tree.buildFormField(
         projectAssetRenameDialog_.content,
         UI::UIFormFieldConfig{
-            .label = "Display name",
+            .label = "File name",
             .value = {},
             .layout = fillWidth(48.0F),
             .textEditLayout = fillWidth(ui.productTheme.controls.textEditHeight),
@@ -4037,7 +4153,7 @@ auto EditorWorkspaceState::buildProjectAssetFolderDialogUi(
         parent,
         UI::UIDialogConfig{
             .title = "New Project Folder",
-            .body = "Create one folder under the active project's Source directory.",
+            .body = "Create one folder inside the current Project Assets folder.",
             .actions = actions,
             .layout = editorDialogOverlayLayout(),
             .surfaceLayout = editorDialogSurfaceLayout(ui.productTheme),
@@ -4823,17 +4939,20 @@ auto EditorWorkspaceState::registerUiCallbacks(
             return status;
         }
     }
-    const std::array projectFilterCommands{
-        EditorCommand::ProjectFilterAll,
-        EditorCommand::ProjectFilter2D,
-        EditorCommand::ProjectFilter3D,
-        EditorCommand::ProjectFilterMedia,
+    const std::array projectTypeFilterCommands{
+        EditorCommand::ProjectTypeFilterAll,
+        EditorCommand::ProjectTypeFilterImages,
+        EditorCommand::ProjectTypeFilterModels,
+        EditorCommand::ProjectTypeFilterScenes,
+        EditorCommand::ProjectTypeFilterAudio,
+        EditorCommand::ProjectTypeFilterAnimation,
+        EditorCommand::ProjectTypeFilterOther,
     };
-    for (u32 index = 0; index < projectFilterButtons_.size(); ++index) {
+    for (u32 index = 0; index < projectAssetTypeDropdownItems_.size(); ++index) {
         if (auto status = ui.tree.setButtonAction(
-                projectFilterButtons_[index],
+                projectAssetTypeDropdownItems_[index],
                 UI::UIButtonActionCallback{
-                    [this, command = projectFilterCommands[index]](
+                    [this, command = projectTypeFilterCommands[index]](
                         const UI::UIButtonActionEvent&) noexcept {
                         queueEditorCommand(command);
                     }});

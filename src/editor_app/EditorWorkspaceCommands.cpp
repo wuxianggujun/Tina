@@ -1,5 +1,9 @@
 ﻿#include "EditorWorkspaceState.hpp"
 
+#include <algorithm>
+#include <cctype>
+#include <filesystem>
+
 namespace Tina::EditorApp::WorkspaceInternal {
 
 auto EditorWorkspaceState::sceneAddTemplateCount() const noexcept
@@ -820,12 +824,23 @@ auto EditorWorkspaceState::showProjectAssetRenameDialog(
         ? projectAssetContextAssetId_
         : projectAssets_.selectedAssetId().value_or(Tina::Core::AssetId{});
     const auto* asset = projectAssets_.inspectorSnapshot(assetId);
-    if (asset == nullptr || !activeProjectWorkspace_.has_value()) {
-        authoringFeedback_ = "Rename unavailable: select a Project Asset first";
+    const auto* sourceUnit = sourceImportUnitForAsset(assetId);
+    if (asset == nullptr || sourceUnit == nullptr ||
+        !projectAssetSupportsSourceRename(assetId) ||
+        !activeProjectWorkspace_.has_value()) {
+        authoringFeedback_ =
+            "Rename unavailable: only single-output Texture or Audio source files can be renamed";
+        return Tina::Core::success();
+    }
+    const auto sourcePath = std::filesystem::u8path(
+        sourceUnit->sourcePathUtf8.begin(), sourceUnit->sourcePathUtf8.end());
+    const auto filename = sourcePath.filename();
+    if (filename.empty()) {
+        authoringFeedback_ = "Rename unavailable: the source file name is invalid";
         return Tina::Core::success();
     }
     pendingProjectAssetRenameAssetId_ = assetId;
-    if (auto status = tree.setText(projectAssetRenameInput_, asset->displayName); !status) {
+    if (auto status = tree.setText(projectAssetRenameInput_, pathToUtf8(filename)); !status) {
         pendingProjectAssetRenameAssetId_.reset();
         return status;
     }
@@ -859,47 +874,103 @@ auto EditorWorkspaceState::confirmProjectAssetRename(
     if (!text) {
         return Tina::Core::failure(std::move(text.error()));
     }
-    if (text->empty() || text->size() > 256U ||
-        text->find_first_of("\t\r\n") != std::string::npos ||
+    const Tina::Core::AssetId assetId = *pendingProjectAssetRenameAssetId_;
+    const auto* sourceUnit = sourceImportUnitForAsset(assetId);
+    const auto* mapping = sourceImportMappingForAsset(assetId);
+    if (sourceUnit == nullptr || mapping == nullptr ||
+        !projectAssetSupportsSourceRename(assetId) ||
+        pendingProjectAssetSourceRename_.has_value()) {
+        authoringFeedback_ = "Rename cancelled: the source mapping is no longer available";
+        return hideProjectAssetRenameDialog(tree);
+    }
+    if (text->empty() || text->size() > 255U ||
+        text->find_first_of("\\/:\t\r\n") != std::string::npos ||
+        std::any_of(text->begin(), text->end(), [](unsigned char value) {
+            return value < 0x20U || value == 0x7fU;
+        }) ||
+        *text == "." || *text == ".." ||
         !Tina::Core::isStrictUtf8WithoutNul(*text)) {
-        authoringFeedback_ = "Rename rejected: use a non-empty UTF-8 name without line breaks";
+        authoringFeedback_ =
+            "Rename rejected: enter one file name without path separators or control characters";
         return tree.setText(projectAssetRenameInput_, *text);
     }
-    if (auto status = projectAssets_.renameAsset(*pendingProjectAssetRenameAssetId_, *text);
-        !status) {
-        return status;
-    }
-    bool replaced = false;
-    for (auto& record : assetMetadata_) {
-        if (record.assetId == *pendingProjectAssetRenameAssetId_) {
-            record.displayName = *text;
-            replaced = true;
-            break;
+    try {
+        const auto previousPath = std::filesystem::u8path(
+            sourceUnit->sourcePathUtf8.begin(), sourceUnit->sourcePathUtf8.end())
+            .lexically_normal();
+        const auto renamedFilename = std::filesystem::u8path(
+            text->begin(), text->end());
+        const auto renamedPath =
+            (previousPath.parent_path() / renamedFilename).lexically_normal();
+        const auto sourceRoot = std::filesystem::u8path(
+            activeProjectWorkspace_->sourceRootUtf8().begin(),
+            activeProjectWorkspace_->sourceRootUtf8().end()).lexically_normal();
+        if (previousPath.empty() || !previousPath.is_absolute() ||
+            previousPath == sourceRoot ||
+            !pathIsSameOrDescendant(previousPath, sourceRoot) ||
+            renamedPath == sourceRoot ||
+            !pathIsSameOrDescendant(renamedPath, sourceRoot)) {
+            authoringFeedback_ = "Rename rejected: source path is outside the Source root";
+            return tree.setText(projectAssetRenameInput_, *text);
         }
+        std::string previousExtension = pathToUtf8(previousPath.extension());
+        std::string renamedExtension = pathToUtf8(renamedPath.extension());
+        std::transform(previousExtension.begin(), previousExtension.end(),
+                       previousExtension.begin(), [](unsigned char value) {
+                           return static_cast<char>(std::tolower(value));
+                       });
+        std::transform(renamedExtension.begin(), renamedExtension.end(),
+                       renamedExtension.begin(), [](unsigned char value) {
+                           return static_cast<char>(std::tolower(value));
+                       });
+        if (previousExtension.empty() || previousExtension != renamedExtension) {
+            authoringFeedback_ =
+                "Rename rejected: the original file extension must remain unchanged";
+            return tree.setText(projectAssetRenameInput_, *text);
+        }
+
+        auto rename = Tina::EditorApp::Detail::EditorSourceFileRename::Begin(
+            pathToUtf8(previousPath), pathToUtf8(renamedPath));
+        if (!rename) {
+            return reportAuthoringFailure("Rename failed: ", rename.error());
+        }
+        std::vector<Tina::EditorApp::Detail::EditorSourceImportUnit> intendedUnits =
+            sourceImportUnits_;
+        const auto unitIt = std::find_if(
+            intendedUnits.begin(), intendedUnits.end(),
+            [&sourceUnit](const auto& candidate) {
+                return candidate.sourcePathUtf8 == sourceUnit->sourcePathUtf8;
+            });
+        if (unitIt == intendedUnits.end()) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::Internal,
+                "Editor could not find the source-import unit selected for rename");
+        }
+        unitIt->sourcePathUtf8 = pathToUtf8(renamedPath);
+        unitIt->mediaAssetId = assetId;
+        pendingProjectAssetSourceRename_ = std::move(*rename);
+        if (auto status = startSourceImport(intendedUnits, {}); !status) {
+            if (auto rollback = rollbackProjectAssetSourceRename(); !rollback) {
+                return rollback;
+            }
+            return status;
+        }
+        authoringFeedback_ = "Renaming source file and rebuilding its Project Asset";
+        if (auto status = hideProjectAssetRenameDialog(tree); !status) {
+            return status;
+        }
+        return refreshAuthoringUi(tree);
+    } catch (const std::bad_alloc&) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::OutOfMemory,
+            "Editor could not stage the source-file rename");
+    } catch (const std::filesystem::filesystem_error& exception) {
+        Tina::Core::Error error{
+            Tina::Core::CoreErrorCode::Io,
+            "Editor could not prepare the source-file rename"};
+        error.setNativeCode(exception.code().value());
+        return Tina::Core::failure(std::move(error));
     }
-    if (!replaced) {
-        assetMetadata_.push_back({
-            .assetId = *pendingProjectAssetRenameAssetId_,
-            .displayName = std::string(*text),
-            .folderPathUtf8 = std::string(projectAssets_.inspectorSnapshot(
-                                  *pendingProjectAssetRenameAssetId_)
-                                  ->folderPathUtf8),
-        });
-    }
-    const auto saveStatus = saveEditorAssetMetadata(
-        *activeProjectWorkspace_, projectAssets_.items());
-    if (!saveStatus) {
-        authoringFeedback_ = "Renamed in memory, but metadata could not be saved";
-    } else {
-        authoringFeedback_ = "Project Asset renamed";
-    }
-    if (auto status = hideProjectAssetRenameDialog(tree); !status) {
-        return status;
-    }
-    if (auto status = refreshProjectAssetUi(tree); !status) {
-        return status;
-    }
-    return refreshAuthoringUi(tree);
 }
 
 auto EditorWorkspaceState::showProjectAssetFolderDialog(
@@ -951,8 +1022,11 @@ auto EditorWorkspaceState::confirmProjectAssetFolder(
         const auto sourceRoot = std::filesystem::u8path(
             activeProjectWorkspace_->sourceRootUtf8().begin(),
             activeProjectWorkspace_->sourceRootUtf8().end()).lexically_normal();
-        const auto candidate = (sourceRoot / std::filesystem::u8path(
-            text->begin(), text->end())).lexically_normal();
+        const auto currentFolder = std::filesystem::u8path(
+            projectAssets_.currentFolderPath().begin(),
+            projectAssets_.currentFolderPath().end());
+        const auto candidate = (sourceRoot / currentFolder /
+            std::filesystem::u8path(text->begin(), text->end())).lexically_normal();
         if (!pathIsSameOrDescendant(candidate, sourceRoot) || candidate == sourceRoot) {
             authoringFeedback_ = "Folder rejected: path escaped the Source root";
             return tree.setText(projectAssetFolderInput_, *text);
@@ -968,7 +1042,7 @@ auto EditorWorkspaceState::confirmProjectAssetFolder(
             return tree.setText(projectAssetFolderInput_, *text);
         }
         error.clear();
-        if (!std::filesystem::create_directories(candidate, error) && error) {
+        if (!std::filesystem::create_directory(candidate, error) && error) {
             Tina::Core::Error failure{Tina::Core::CoreErrorCode::Io,
                                       "Editor could not create the Source folder"};
             failure.setNativeCode(error.value());
@@ -980,8 +1054,63 @@ auto EditorWorkspaceState::confirmProjectAssetFolder(
         failure.setNativeCode(exception.code().value());
         return Tina::Core::failure(std::move(failure));
     }
-    authoringFeedback_ = "Project Source folder created";
-    return hideProjectAssetFolderDialog(tree);
+    auto folders = scanProjectAssetFolders(
+        activeProjectWorkspace_->sourceRootUtf8());
+    if (!folders) {
+        if (auto status = reportAuthoringFailure(
+                "Folder was created, but Project Assets could not refresh: ",
+                folders.error()); !status) {
+            return status;
+        }
+        return hideProjectAssetFolderDialog(tree);
+    }
+    if (auto status = projectAssets_.replaceFolders(*folders); !status) {
+        if (auto feedback = reportAuthoringFailure(
+                "Folder was created, but Project Assets could not publish it: ",
+                status.error()); !feedback) {
+            return feedback;
+        }
+        return hideProjectAssetFolderDialog(tree);
+    }
+    std::string createdFolderPath;
+    try {
+        createdFolderPath.assign(projectAssets_.currentFolderPath());
+        if (!createdFolderPath.empty()) {
+            createdFolderPath.push_back('/');
+        }
+        createdFolderPath.append(*text);
+    } catch (const std::bad_alloc&) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::OutOfMemory,
+            "Editor could not retain the new Project Source folder path");
+    }
+    if (auto status = projectAssets_.setCurrentFolder(createdFolderPath); !status) {
+        return status;
+    }
+    collapsedProjectAssetFolderKeys_.clear();
+    if (auto status = tree.setTreeViewDataSource(
+            projectAssetFolderTree_, projectAssetFolderDataSource()); !status) {
+        return status;
+    }
+    if (auto status = tree.invalidateTreeViewItems(projectAssetFolderTree_); !status) {
+        return status;
+    }
+    const u64 selectedIndex = visibleProjectAssetFolderIndex(
+        createdFolderPath).value_or(0U);
+    if (auto status = tree.setTreeViewSelectedIndex(
+            projectAssetFolderTree_, selectedIndex); !status) {
+        return status;
+    }
+    UI::UITreeViewItemDescriptor selected{};
+    projectAssetFolderSelectionKey_ =
+        resolveProjectAssetFolderItem(this, selectedIndex, selected)
+            ? selected.key
+            : UI::InvalidUITreeViewItemKey;
+    if (auto status = hideProjectAssetFolderDialog(tree); !status) {
+        return status;
+    }
+    return refreshProjectAssetCollection(
+        tree, "Project Source folder created");
 }
 
 auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status{
@@ -2192,17 +2321,33 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
             authoringFeedback_ = "Viewport framed to the authored content";
         }
         break;
-    case EditorCommand::ProjectFilterAll:
-        status = applyProjectAssetFilter(tree, Tina::Editor::ProjectAssetFilter::All);
+    case EditorCommand::ProjectTypeFilterAll:
+        status = applyProjectAssetTypeFilter(
+            tree, Tina::Editor::ProjectAssetTypeFilter::All);
         break;
-    case EditorCommand::ProjectFilter2D:
-        status = applyProjectAssetFilter(tree, Tina::Editor::ProjectAssetFilter::TwoD);
+    case EditorCommand::ProjectTypeFilterImages:
+        status = applyProjectAssetTypeFilter(
+            tree, Tina::Editor::ProjectAssetTypeFilter::Images);
         break;
-    case EditorCommand::ProjectFilter3D:
-        status = applyProjectAssetFilter(tree, Tina::Editor::ProjectAssetFilter::ThreeD);
+    case EditorCommand::ProjectTypeFilterModels:
+        status = applyProjectAssetTypeFilter(
+            tree, Tina::Editor::ProjectAssetTypeFilter::Models);
         break;
-    case EditorCommand::ProjectFilterMedia:
-        status = applyProjectAssetFilter(tree, Tina::Editor::ProjectAssetFilter::Media);
+    case EditorCommand::ProjectTypeFilterScenes:
+        status = applyProjectAssetTypeFilter(
+            tree, Tina::Editor::ProjectAssetTypeFilter::Scenes);
+        break;
+    case EditorCommand::ProjectTypeFilterAudio:
+        status = applyProjectAssetTypeFilter(
+            tree, Tina::Editor::ProjectAssetTypeFilter::Audio);
+        break;
+    case EditorCommand::ProjectTypeFilterAnimation:
+        status = applyProjectAssetTypeFilter(
+            tree, Tina::Editor::ProjectAssetTypeFilter::Animation);
+        break;
+    case EditorCommand::ProjectTypeFilterOther:
+        status = applyProjectAssetTypeFilter(
+            tree, Tina::Editor::ProjectAssetTypeFilter::Other);
         break;
     case EditorCommand::RefreshProjectCatalog:
         catalogRefreshPending_ = true;

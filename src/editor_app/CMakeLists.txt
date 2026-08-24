@@ -35,6 +35,8 @@ add_library(tina_editor_app STATIC
     EditorSourceImportIngress.cpp
     EditorSourceImportIngress.hpp
     EditorSourceImportLimits.hpp
+    EditorSourceFileRename.cpp
+    EditorSourceFileRename.hpp
     EditorSourceImportSelection.cpp
     EditorSourceImportSelection.hpp
     EditorSourceImportService.cpp

@@ -13,11 +13,14 @@
 
 namespace Tina::Editor {
 
-enum class ProjectAssetFilter : Core::u8 {
+enum class ProjectAssetTypeFilter : Core::u8 {
     All = 0,
-    TwoD = 1,
-    ThreeD = 2,
-    Media = 3,
+    Images = 1,
+    Models = 2,
+    Scenes = 3,
+    Audio = 4,
+    Animation = 5,
+    Other = 6,
 };
 
 enum class ProjectAssetOpenKind : Core::u8 {
@@ -46,8 +49,21 @@ struct ProjectAssetDescriptor final {
                            const ProjectAssetDescriptor&) = default;
 };
 
+struct ProjectAssetFolderDescriptor final {
+    // Empty path identifies the Source root presented as "Assets". All other
+    // paths are normalized, source-root-relative UTF-8 with '/' separators.
+    std::string pathUtf8{};
+    std::string displayName{};
+    Core::u32 level = 0;
+    bool expandable = false;
+
+    friend bool operator==(const ProjectAssetFolderDescriptor&,
+                           const ProjectAssetFolderDescriptor&) = default;
+};
+
 struct ProjectAssetBrowserConfig final {
     Core::usize itemCapacity = 4096;
+    Core::usize folderCapacity = 4096;
     Core::usize dependencyCapacity = AssetFormat::Wire::MaxManifestDependencies;
     Core::usize dependencyCapacityPerAsset = AssetFormat::Wire::MaxDependenciesPerAsset;
 };
@@ -56,8 +72,10 @@ struct ProjectAssetBrowserConfig final {
     AssetFormat::AssetKind kind) noexcept;
 [[nodiscard]] ProjectAssetOpenKind projectAssetOpenKind(
     AssetFormat::AssetKind kind) noexcept;
-[[nodiscard]] bool projectAssetMatchesFilter(
-    AssetFormat::AssetKind kind, ProjectAssetFilter filter) noexcept;
+[[nodiscard]] std::string_view projectAssetTypeFilterLabel(
+    ProjectAssetTypeFilter filter) noexcept;
+[[nodiscard]] bool projectAssetMatchesTypeFilter(
+    AssetFormat::AssetKind kind, ProjectAssetTypeFilter filter) noexcept;
 
 // Owning, deterministic project asset index for Editor UI. Input entries are
 // copied and sorted by AssetId. visibleItem() and Inspector snapshot views expire
@@ -86,7 +104,21 @@ public:
     {
         return m_visibleIndices.size();
     }
-    [[nodiscard]] ProjectAssetFilter filter() const noexcept { return m_filter; }
+    [[nodiscard]] ProjectAssetTypeFilter typeFilter() const noexcept
+    {
+        return m_typeFilter;
+    }
+    [[nodiscard]] Core::usize folderCount() const noexcept
+    {
+        return m_folders.size();
+    }
+    [[nodiscard]] const ProjectAssetFolderDescriptor*
+    folder(Core::usize index) const noexcept;
+    [[nodiscard]] Core::u64 folderStableKey(Core::usize index) const noexcept;
+    [[nodiscard]] std::string_view currentFolderPath() const noexcept
+    {
+        return m_currentFolderPathUtf8;
+    }
     [[nodiscard]] std::string_view searchQuery() const noexcept
     {
         return m_searchQueryUtf8;
@@ -112,7 +144,14 @@ public:
     spriteAssetForTexture(Core::AssetId textureAssetId) const noexcept;
     [[nodiscard]] const ProjectAssetDescriptor* selectedInspectorSnapshot() const noexcept;
 
-    [[nodiscard]] Core::Status setFilter(ProjectAssetFilter filter) noexcept;
+    [[nodiscard]] Core::Status setTypeFilter(ProjectAssetTypeFilter filter) noexcept;
+    // Replaces the physical Source directory snapshot. Asset-owned folders and
+    // all required parents are always retained, while empty scanned folders are
+    // added transactionally up to folderCapacity.
+    [[nodiscard]] Core::Status replaceFolders(
+        std::span<const std::string> folderPathsUtf8) noexcept;
+    [[nodiscard]] Core::Status setCurrentFolder(
+        std::string_view folderPathUtf8) noexcept;
     [[nodiscard]] Core::Status setSearchQuery(std::string_view queryUtf8) noexcept;
     [[nodiscard]] Core::Status selectVisibleIndex(Core::usize visibleIndex) noexcept;
     [[nodiscard]] Core::Status selectAsset(Core::AssetId assetId) noexcept;
@@ -121,20 +160,21 @@ public:
     [[nodiscard]] Core::Status restoreAssetSelection(Core::AssetId assetId) noexcept;
     [[nodiscard]] Core::Status renameAsset(Core::AssetId assetId,
                                             std::string_view displayName) noexcept;
-    [[nodiscard]] Core::Status setAssetFolder(Core::AssetId assetId,
-                                               std::string_view folderPathUtf8) noexcept;
 
 private:
     ProjectAssetBrowserModel(ProjectAssetBrowserConfig config,
                              std::vector<ProjectAssetDescriptor> assets,
+                             std::vector<ProjectAssetFolderDescriptor> folders,
                              std::vector<Core::usize> visibleIndices) noexcept;
 
     void rebuildVisibleIndices() noexcept;
 
     ProjectAssetBrowserConfig m_config{};
     std::vector<ProjectAssetDescriptor> m_assets{};
+    std::vector<ProjectAssetFolderDescriptor> m_folders{};
     std::vector<Core::usize> m_visibleIndices{};
-    ProjectAssetFilter m_filter = ProjectAssetFilter::All;
+    ProjectAssetTypeFilter m_typeFilter = ProjectAssetTypeFilter::All;
+    std::string m_currentFolderPathUtf8{};
     std::string m_searchQueryUtf8{};
     std::optional<Core::AssetId> m_selectedAssetId{};
     std::optional<Core::usize> m_selectedVisibleIndex{};

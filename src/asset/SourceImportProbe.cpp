@@ -21,6 +21,7 @@
 #include <span>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 namespace Tina::Asset {
 namespace {
@@ -73,7 +74,8 @@ makeProbeDesc(std::string_view sourceRootUtf8,
               std::string_view primarySourceUtf8Path,
               SourceImporterKind importerKind,
               AssetFormat::TargetPlatform targetPlatform,
-              const GltfCookIds* gltfIds)
+              const GltfCookIds* gltfIds,
+              Core::AssetId stableMediaAssetId)
 {
     SourceImportCaptureConfig captureConfig{.sourceRootUtf8 = sourceRootUtf8};
     auto normalized = normalizeSourceImportPath(captureConfig, primarySourceUtf8Path);
@@ -94,10 +96,10 @@ makeProbeDesc(std::string_view sourceRootUtf8,
         contract = currentGltfSourceImportContract(*normalized, *gltfIds);
     } else if (importerKind == SourceImporterKind::Texture)
     {
-        contract = currentTextureSourceImportContract(*normalized);
+        contract = currentTextureSourceImportContract(*normalized, stableMediaAssetId);
     } else if (importerKind == SourceImporterKind::Audio)
     {
-        contract = currentAudioSourceImportContract(*normalized);
+        contract = currentAudioSourceImportContract(*normalized, stableMediaAssetId);
     }
     if (!contract)
     {
@@ -382,7 +384,7 @@ Core::Result<SourceImportUnitProbeDesc> makeCatalogRecipeSourceImportProbeDesc(
     AssetFormat::TargetPlatform targetPlatform)
 {
     return makeProbeDesc(sourceRootUtf8, primarySourceUtf8Path,
-                         SourceImporterKind::CatalogRecipe, targetPlatform, nullptr);
+                         SourceImporterKind::CatalogRecipe, targetPlatform, nullptr, {});
 }
 
 Core::Result<SourceImportUnitProbeDesc>
@@ -392,7 +394,7 @@ makeGltfSourceImportProbeDesc(std::string_view sourceRootUtf8,
 {
     return makeProbeDesc(sourceRootUtf8, primarySourceUtf8Path,
                          SourceImporterKind::Gltf,
-                         AssetFormat::TargetPlatform::Invalid, &ids);
+                         AssetFormat::TargetPlatform::Invalid, &ids, {});
 }
 
 namespace {
@@ -401,11 +403,25 @@ namespace {
 currentMediaSourceImportContract(SourceImporterKind importerKind,
                                  Core::u32 importerVersion,
                                  std::string_view canonicalSettingsTag,
-                                 std::string_view normalizedPrimarySourcePath)
+                                 std::string_view normalizedPrimarySourcePath,
+                                 Core::AssetId stableAssetId)
 {
     auto unitId = deriveSourceImportUnitId(importerKind, normalizedPrimarySourcePath);
-    auto settingsHash = digestSourceImportSettings(
+    Core::Result<Core::ContentHash> settingsHash = digestSourceImportSettings(
         std::as_bytes(std::span{canonicalSettingsTag.data(), canonicalSettingsTag.size()}));
+    if (stableAssetId)
+    {
+        std::vector<std::byte> canonical;
+        canonical.reserve(canonicalSettingsTag.size() + 1U +
+                          Core::AssetId::Bytes{}.size());
+        const auto tagBytes = std::as_bytes(std::span{
+            canonicalSettingsTag.data(), canonicalSettingsTag.size()});
+        canonical.insert(canonical.end(), tagBytes.begin(), tagBytes.end());
+        canonical.push_back(std::byte{1});
+        const auto idBytes = stableAssetId.bytes();
+        canonical.insert(canonical.end(), idBytes.begin(), idBytes.end());
+        settingsHash = digestSourceImportSettings(canonical);
+    }
     if (!unitId)
     {
         return Core::failure(std::move(unitId.error()));
@@ -425,39 +441,47 @@ currentMediaSourceImportContract(SourceImporterKind importerKind,
 } // namespace
 
 Core::Result<SourceImportUnitContract>
-currentTextureSourceImportContract(std::string_view normalizedPrimarySourcePath)
+currentTextureSourceImportContract(std::string_view normalizedPrimarySourcePath,
+                                   Core::AssetId stableAssetId)
 {
     return currentMediaSourceImportContract(SourceImporterKind::Texture,
                                             TextureImporterVersion,
                                             "tina.import.texture.v1",
-                                            normalizedPrimarySourcePath);
+                                            normalizedPrimarySourcePath,
+                                            stableAssetId);
 }
 
 Core::Result<SourceImportUnitContract>
-currentAudioSourceImportContract(std::string_view normalizedPrimarySourcePath)
+currentAudioSourceImportContract(std::string_view normalizedPrimarySourcePath,
+                                 Core::AssetId stableAssetId)
 {
     return currentMediaSourceImportContract(SourceImporterKind::Audio,
                                             AudioImporterVersion,
                                             "tina.import.audio.v1",
-                                            normalizedPrimarySourcePath);
+                                            normalizedPrimarySourcePath,
+                                            stableAssetId);
 }
 
 Core::Result<SourceImportUnitProbeDesc>
 makeTextureSourceImportProbeDesc(std::string_view sourceRootUtf8,
-                                 std::string_view primarySourceUtf8Path)
+                                 std::string_view primarySourceUtf8Path,
+                                 Core::AssetId stableAssetId)
 {
     return makeProbeDesc(sourceRootUtf8, primarySourceUtf8Path,
                          SourceImporterKind::Texture,
-                         AssetFormat::TargetPlatform::Invalid, nullptr);
+                         AssetFormat::TargetPlatform::Invalid, nullptr,
+                         stableAssetId);
 }
 
 Core::Result<SourceImportUnitProbeDesc>
 makeAudioSourceImportProbeDesc(std::string_view sourceRootUtf8,
-                               std::string_view primarySourceUtf8Path)
+                               std::string_view primarySourceUtf8Path,
+                               Core::AssetId stableAssetId)
 {
     return makeProbeDesc(sourceRootUtf8, primarySourceUtf8Path,
                          SourceImporterKind::Audio,
-                         AssetFormat::TargetPlatform::Invalid, nullptr);
+                         AssetFormat::TargetPlatform::Invalid, nullptr,
+                         stableAssetId);
 }
 
 Core::Result<SourceImportProbeResult>
