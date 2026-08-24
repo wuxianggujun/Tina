@@ -64,8 +64,132 @@ TEST(ProjectAssetBrowserTests, OwnsSortedCatalogIndexAndFiltersByWorkspace)
 
     ASSERT_TRUE(browser->setFilter(ProjectAssetFilter::ThreeD));
     ASSERT_EQ(browser->visibleItemCount(), 1U);
-    EXPECT_EQ(browser->selectedItem()->assetKind, AssetFormat::AssetKind::Prefab);
-    EXPECT_EQ(projectAssetKindLabel(browser->selectedItem()->assetKind), "Prefab");
+    EXPECT_EQ(browser->selectedItem(), nullptr);
+    ASSERT_NE(browser->selectedInspectorSnapshot(), nullptr);
+    EXPECT_EQ(browser->selectedInspectorSnapshot()->assetKind,
+              AssetFormat::AssetKind::TileMap);
+}
+
+TEST(ProjectAssetBrowserTests, SearchesNameAndKindWithStableKeys)
+{
+    auto texture = asset(0x10U, AssetFormat::AssetKind::Texture2D);
+    texture.displayName = "Hero Diffuse";
+    auto sprite = asset(0x20U, AssetFormat::AssetKind::Sprite);
+    sprite.displayName = "Player Sprite";
+    auto audio = asset(0x30U, AssetFormat::AssetKind::AudioClip);
+    audio.displayName = "Music Theme";
+    auto prefab = asset(0x40U, AssetFormat::AssetKind::Prefab);
+    prefab.displayName = "World Root";
+    const std::array assets{audio, prefab, sprite, texture};
+
+    auto browser = ProjectAssetBrowserModel::Create(assets);
+    ASSERT_TRUE(browser);
+    ASSERT_EQ(browser->visibleItemCount(), 4U);
+    EXPECT_EQ(browser->visibleItemStableKey(0U), 1U);
+    EXPECT_EQ(browser->visibleItemStableKey(1U), 2U);
+    EXPECT_EQ(browser->visibleItemStableKey(2U), 3U);
+    EXPECT_EQ(browser->visibleItemStableKey(3U), 4U);
+    EXPECT_EQ(browser->visibleItemStableKey(4U), 0U);
+
+    ASSERT_TRUE(browser->selectAsset(assetId(0x40U)));
+    ASSERT_TRUE(browser->setSearchQuery("hero"));
+    ASSERT_EQ(browser->visibleItemCount(), 1U);
+    EXPECT_EQ(browser->visibleItem(0U)->assetId, assetId(0x10U));
+    EXPECT_EQ(browser->visibleItemStableKey(0U), 1U);
+    EXPECT_EQ(browser->selectedItem(), nullptr);
+    ASSERT_NE(browser->selectedInspectorSnapshot(), nullptr);
+    EXPECT_EQ(browser->selectedInspectorSnapshot()->assetId, assetId(0x40U));
+
+    ASSERT_TRUE(browser->setSearchQuery("AUDIO"));
+    ASSERT_EQ(browser->visibleItemCount(), 1U);
+    EXPECT_EQ(browser->visibleItem(0U)->assetId, assetId(0x30U));
+    EXPECT_EQ(browser->visibleItemStableKey(0U), 3U);
+
+    ASSERT_TRUE(browser->setFilter(ProjectAssetFilter::TwoD));
+    ASSERT_EQ(browser->visibleItemCount(), 0U);
+    EXPECT_EQ(browser->selectedItem(), nullptr);
+
+    ASSERT_TRUE(browser->setFilter(ProjectAssetFilter::Media));
+    ASSERT_EQ(browser->visibleItemCount(), 1U);
+    EXPECT_EQ(browser->visibleItem(0U)->assetId, assetId(0x30U));
+    EXPECT_EQ(browser->selectedItem(), nullptr);
+    ASSERT_TRUE(browser->setSearchQuery("diff"));
+    ASSERT_EQ(browser->visibleItemCount(), 1U);
+    EXPECT_EQ(browser->visibleItem(0U)->assetId, assetId(0x10U));
+    EXPECT_EQ(browser->visibleItemStableKey(0U), 1U);
+    EXPECT_EQ(browser->selectedItem(), nullptr);
+
+    ASSERT_TRUE(browser->setSearchQuery(""));
+    ASSERT_EQ(browser->visibleItemCount(), 2U);
+    EXPECT_EQ(browser->visibleItemStableKey(0U), 1U);
+    EXPECT_EQ(browser->visibleItemStableKey(1U), 3U);
+
+    ASSERT_TRUE(browser->setFilter(ProjectAssetFilter::All));
+    ASSERT_TRUE(browser->setSearchQuery(""));
+    ASSERT_NE(browser->selectedItem(), nullptr);
+    EXPECT_EQ(browser->selectedItem()->assetId, assetId(0x40U));
+}
+
+TEST(ProjectAssetBrowserTests, RejectsInvalidSearchUtf8AtomicallyAndRestoresSelection)
+{
+    auto sprite = asset(0x10U, AssetFormat::AssetKind::Sprite);
+    sprite.displayName = "Player";
+    auto texture = asset(0x20U, AssetFormat::AssetKind::Texture2D);
+    texture.displayName = "Texture";
+    const std::array assets{sprite, texture};
+
+    auto browser = ProjectAssetBrowserModel::Create(assets);
+    ASSERT_TRUE(browser);
+    ASSERT_TRUE(browser->selectAsset(assetId(0x20U)));
+    ASSERT_TRUE(browser->setSearchQuery("player"));
+    ASSERT_EQ(browser->visibleItemCount(), 1U);
+    EXPECT_EQ(browser->selectedItem(), nullptr);
+    ASSERT_NE(browser->selectedInspectorSnapshot(), nullptr);
+    EXPECT_EQ(browser->selectedInspectorSnapshot()->assetId, assetId(0x20U));
+
+    const std::array<char, 2> invalidUtf8{static_cast<char>(0xc3), '('};
+    const auto beforeQuery = std::string(browser->searchQuery());
+    const auto invalid = browser->setSearchQuery(
+        std::string_view(invalidUtf8.data(), invalidUtf8.size()));
+    ASSERT_FALSE(invalid);
+    EXPECT_EQ(invalid.error().code, EditorErrorCode::InvalidConfiguration);
+    EXPECT_EQ(browser->searchQuery(), beforeQuery);
+    ASSERT_EQ(browser->visibleItemCount(), 1U);
+    EXPECT_EQ(browser->visibleItem(0U)->assetId, assetId(0x10U));
+    EXPECT_EQ(browser->selectedItem(), nullptr);
+
+    ASSERT_TRUE(browser->setSearchQuery(""));
+    ASSERT_EQ(browser->visibleItemCount(), 2U);
+    EXPECT_EQ(browser->selectedItem()->assetId, assetId(0x20U));
+}
+
+TEST(ProjectAssetBrowserTests, RestoresHiddenSelectionAcrossCatalogRebuild)
+{
+    const std::array assets{
+        asset(0x10U, AssetFormat::AssetKind::Sprite),
+        asset(0x20U, AssetFormat::AssetKind::StaticMesh),
+    };
+
+    auto browser = ProjectAssetBrowserModel::Create(assets);
+    ASSERT_TRUE(browser);
+    ASSERT_TRUE(browser->setFilter(ProjectAssetFilter::TwoD));
+    ASSERT_TRUE(browser->restoreAssetSelection(assetId(0x20U)));
+    EXPECT_EQ(browser->selectedItem(), nullptr);
+    ASSERT_TRUE(browser->selectedAssetId());
+    EXPECT_EQ(*browser->selectedAssetId(), assetId(0x20U));
+    ASSERT_NE(browser->selectedInspectorSnapshot(), nullptr);
+    EXPECT_EQ(browser->selectedInspectorSnapshot()->assetKind,
+              AssetFormat::AssetKind::StaticMesh);
+
+    ASSERT_TRUE(browser->setFilter(ProjectAssetFilter::ThreeD));
+    ASSERT_NE(browser->selectedItem(), nullptr);
+    EXPECT_EQ(browser->selectedItem()->assetId, assetId(0x20U));
+
+    const auto missing = browser->restoreAssetSelection(assetId(0x30U));
+    ASSERT_FALSE(missing);
+    EXPECT_EQ(missing.error().code, EditorErrorCode::ProjectAssetNotFound);
+    ASSERT_TRUE(browser->selectedAssetId());
+    EXPECT_EQ(*browser->selectedAssetId(), assetId(0x20U));
 }
 
 TEST(ProjectAssetBrowserTests, RejectsCapacityDuplicatesAndInvisibleSelectionAtomically)
@@ -146,7 +270,7 @@ TEST(ProjectAssetBrowserTests, OwnsCanonicalInspectorMetadataAndSortedDependenci
     ASSERT_TRUE(browser->setFilter(ProjectAssetFilter::ThreeD));
     EXPECT_EQ(browser->inspectorSnapshot(assetId(0x30U)), snapshot);
     EXPECT_EQ(browser->selectedInspectorSnapshot()->assetKind,
-              AssetFormat::AssetKind::Material);
+              AssetFormat::AssetKind::Sprite);
 }
 
 TEST(ProjectAssetBrowserTests, RejectsInvalidInspectorMetadataAndDependencyGraph)

@@ -28,6 +28,7 @@
 #include <atomic>
 #include <bitset>
 #include <cmath>
+#include <cstring>
 #include <exception>
 #include <limits>
 #include <memory>
@@ -307,13 +308,14 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
                         std::shared_ptr<Integration::Detail::NativeWindowSurfaceLeaseControl> surfaceLeaseControl,
                         GLFWwindow* window, PlatformFrameBuilder frameBuilder, WindowMetricsSnapshot metrics,
                         WindowInputSnapshot input, bool initiallyVisible,
-                        bool publishSystemColorSchemeEvents) noexcept
+                        bool publishSystemColorSchemeEvents, bool acceptFileDropEvents) noexcept
         : windows_(std::move(windows)), windowId_(windowId), surfaces_(std::move(surfaces)), surfaceId_(surfaceId),
           surfaceLeaseControl_(std::move(surfaceLeaseControl)), window_(window), frameBuilder_(std::move(frameBuilder)),
           metrics_(metrics), input_(input), pointerContentScaleX_(metrics.contentScale.x),
           pointerContentScaleY_(metrics.contentScale.y),
           systemColorSchemeObserver_(publishSystemColorSchemeEvents), ownerThread_(std::this_thread::get_id()),
-          surfaceSnapshot_(makeSurfaceSnapshot(surfaceId_, metrics_, 1)), initiallyVisible_(initiallyVisible)
+          surfaceSnapshot_(makeSurfaceSnapshot(surfaceId_, metrics_, 1)), initiallyVisible_(initiallyVisible),
+          acceptFileDropEvents_(acceptFileDropEvents)
     {
     }
 
@@ -434,6 +436,7 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         }
 #if defined(TINA_PLATFORM_GLFW_ENABLE_TEST_ACCESS)
         emitQueuedPointerEventsForTest();
+        emitQueuedFileDropForTest();
 #endif
         collectingFrame_ = false;
 
@@ -644,6 +647,10 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         glfwSetWindowContentScaleCallback(window_, &GlfwPlatformBackend::contentScaleCallback);
         glfwSetWindowIconifyCallback(window_, &GlfwPlatformBackend::iconifyCallback);
         glfwSetWindowCloseCallback(window_, &GlfwPlatformBackend::closeCallback);
+        if (acceptFileDropEvents_)
+        {
+            glfwSetDropCallback(window_, &GlfwPlatformBackend::dropCallback);
+        }
     }
 
     [[nodiscard]] Core::Status finishCreation(bool publishDuringCreation)
@@ -1025,6 +1032,66 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         return Core::success();
     }
 
+    [[nodiscard]] Core::Status queueFileDropForNextPollForTest(Detail::GlfwFileDropInjection injection) noexcept
+    {
+        if (stopped_ || !hasLiveWindow())
+        {
+            return Core::failure(PlatformErrorCode::BackendStopped, "The GLFW test backend is stopped");
+        }
+        if (std::this_thread::get_id() != ownerThread_)
+        {
+            return Core::failure(PlatformErrorCode::WrongOwnerThread,
+                                 "The GLFW test operation must run on the creating thread");
+        }
+        if (queuedFileDropForTest_)
+        {
+            return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                                 "The GLFW file-drop test queue is unavailable");
+        }
+        if (injection.paths.size() > MaximumQueuedFileDropPathsForTest)
+        {
+            return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                                 "The GLFW file-drop test path queue is too large");
+        }
+
+        usize bytesUsed = 0;
+        for (const char* path : injection.paths)
+        {
+            if (path == nullptr)
+            {
+                continue;
+            }
+            const usize length = std::strlen(path);
+            if (bytesUsed >= MaximumQueuedFileDropBytesForTest ||
+                length >= MaximumQueuedFileDropBytesForTest - bytesUsed)
+            {
+                return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                                     "The GLFW file-drop test paths exceed the fixed test arena");
+            }
+            bytesUsed += length + 1;
+        }
+
+        queuedFileDropPathCountForTest_ = injection.paths.size();
+        queuedFileDropPathBytesUsedForTest_ = 0;
+        queuedFileDropNullArrayForTest_ = injection.nullPathArray;
+        for (usize index = 0; index < queuedFileDropPathCountForTest_; ++index)
+        {
+            const char* path = injection.paths[index];
+            if (path == nullptr)
+            {
+                queuedFileDropPathsForTest_[index] = nullptr;
+                continue;
+            }
+            const usize length = std::strlen(path);
+            char* destination = queuedFileDropPathBytesForTest_.data() + queuedFileDropPathBytesUsedForTest_;
+            std::memcpy(destination, path, length + 1);
+            queuedFileDropPathsForTest_[index] = destination;
+            queuedFileDropPathBytesUsedForTest_ += length + 1;
+        }
+        queuedFileDropForTest_ = true;
+        return Core::success();
+    }
+
     [[nodiscard]] Core::Result<Detail::GlfwEventPumpStats> eventPumpStatsForTest() const noexcept
     {
         if (stopped_ || !hasLiveWindow())
@@ -1098,6 +1165,7 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         case FrameBatchAppendResult::Coalesced:
         case FrameBatchAppendResult::ResetInserted:
         case FrameBatchAppendResult::IgnoredAfterReset:
+        case FrameBatchAppendResult::RejectedCapacity:
             return;
         case FrameBatchAppendResult::SequenceExhausted:
             callbackFailure_ = CallbackAssemblyFailure::SequenceExhausted;
@@ -1257,6 +1325,64 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         }));
     }
 
+    void onFileDrop(int pathCount, const char** paths) noexcept
+    {
+        if (!collectingFrame_ || !acceptFileDropEvents_)
+        {
+            return;
+        }
+        if (pathCount <= 0 || paths == nullptr)
+        {
+            callbackFailure_ = CallbackAssemblyFailure::InvalidPayload;
+            return;
+        }
+
+        const auto capacities = frameBuilder_.capacities();
+        if (static_cast<usize>(pathCount) > capacities.fileDropPathCapacity)
+        {
+            recordAppend(frameBuilder_.rejectFileDropCapacity());
+            return;
+        }
+
+        std::array<std::string_view, PlatformFrameCapacityConfig::MaximumFileDropPathCapacity> pathViews{};
+        for (int index = 0; index < pathCount; ++index)
+        {
+            if (paths[index] == nullptr)
+            {
+                if (callbackFailure_ == CallbackAssemblyFailure::None)
+                {
+                    callbackFailure_ = CallbackAssemblyFailure::InvalidPayload;
+                }
+                return;
+            }
+            pathViews[static_cast<usize>(index)] = std::string_view(paths[index]);
+            if (pathViews[static_cast<usize>(index)].empty() ||
+                !Core::isStrictUtf8WithoutNul(pathViews[static_cast<usize>(index)]))
+            {
+                if (callbackFailure_ == CallbackAssemblyFailure::None)
+                {
+                    callbackFailure_ = CallbackAssemblyFailure::InvalidPayload;
+                }
+                return;
+            }
+        }
+
+        double nativeX = 0.0;
+        double nativeY = 0.0;
+        clearGlfwErrors();
+        glfwGetCursorPos(window_, &nativeX, &nativeY);
+        if (auto status = checkGlfwOperation("glfwGetCursorPos(file drop)"); !status ||
+            !std::isfinite(nativeX) || !std::isfinite(nativeY))
+        {
+            callbackFailure_ = CallbackAssemblyFailure::InvalidPayload;
+            return;
+        }
+        recordAppend(frameBuilder_.appendFileDropEvent(
+            windowId_, logicalPointerCoordinate(nativeX, pointerContentScaleX_),
+            logicalPointerCoordinate(nativeY, pointerContentScaleY_),
+            std::span<const std::string_view>(pathViews.data(), static_cast<usize>(pathCount))));
+    }
+
 #if defined(TINA_PLATFORM_GLFW_ENABLE_TEST_ACCESS)
     [[nodiscard]] static bool isValidPointerInjectionForTest(const Detail::GlfwPointerInjection& event) noexcept
     {
@@ -1297,6 +1423,25 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
                 break;
             }
         }
+    }
+
+    void emitQueuedFileDropForTest() noexcept
+    {
+        if (!queuedFileDropForTest_)
+        {
+            return;
+        }
+        queuedFileDropForTest_ = false;
+        if (queuedFileDropNullArrayForTest_)
+        {
+            onFileDrop(static_cast<int>(queuedFileDropPathCountForTest_), nullptr);
+            queuedFileDropPathCountForTest_ = 0;
+            queuedFileDropPathBytesUsedForTest_ = 0;
+            return;
+        }
+        onFileDrop(static_cast<int>(queuedFileDropPathCountForTest_), queuedFileDropPathsForTest_.data());
+        queuedFileDropPathCountForTest_ = 0;
+        queuedFileDropPathBytesUsedForTest_ = 0;
     }
 #endif
 
@@ -1552,6 +1697,7 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         glfwSetWindowContentScaleCallback(window_, nullptr);
         glfwSetWindowIconifyCallback(window_, nullptr);
         glfwSetWindowCloseCallback(window_, nullptr);
+        glfwSetDropCallback(window_, nullptr);
     }
 
     static void keyCallback(GLFWwindow* window, int key, int, int action, int) noexcept
@@ -1650,6 +1796,14 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         }
     }
 
+    static void dropCallback(GLFWwindow* window, int pathCount, const char** paths) noexcept
+    {
+        if (auto* backend = fromWindow(window); backend != nullptr)
+        {
+            backend->onFileDrop(pathCount, paths);
+        }
+    }
+
     struct GamepadSlotState final {
         GamepadId id{};
         u64 revision = 0;
@@ -1692,15 +1846,26 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
 #endif
 #if defined(TINA_PLATFORM_GLFW_ENABLE_TEST_ACCESS)
     static constexpr usize MaximumQueuedPointerEventsForTest = 16;
+    static constexpr usize MaximumQueuedFileDropPathsForTest =
+        PlatformFrameCapacityConfig::MaximumFileDropPathCapacity;
+    static constexpr usize MaximumQueuedFileDropBytesForTest =
+        PlatformFrameCapacityConfig::MaximumFileDropByteCapacity + MaximumQueuedFileDropPathsForTest;
     bool failNextPollForTest_ = false;
     bool forceSuspendedWaitPathForTest_ = false;
     double suspendedWaitTimeoutForTest_ = SuspendedEventWaitTimeoutSeconds;
     std::array<Detail::GlfwPointerInjection, MaximumQueuedPointerEventsForTest> queuedPointerEventsForTest_{};
     usize queuedPointerEventCountForTest_ = 0;
+    std::array<const char*, MaximumQueuedFileDropPathsForTest> queuedFileDropPathsForTest_{};
+    std::array<char, MaximumQueuedFileDropBytesForTest> queuedFileDropPathBytesForTest_{};
+    usize queuedFileDropPathCountForTest_ = 0;
+    usize queuedFileDropPathBytesUsedForTest_ = 0;
+    bool queuedFileDropForTest_ = false;
+    bool queuedFileDropNullArrayForTest_ = false;
     Detail::GlfwEventPumpStats eventPumpStatsForTest_{};
 #endif
     bool stopped_ = false;
     bool initiallyVisible_ = true;
+    bool acceptFileDropEvents_ = false;
     bool windowPublished_ = false;
     bool surfaceLeaseAcquired_ = false;
 };
@@ -1858,7 +2023,7 @@ createBackendUnchecked(const PlatformBackendCreateParams& params, bool publishDu
     auto* concreteBackend = new (std::nothrow) GlfwPlatformBackend(
         std::move(*windowPool), *windowId, std::move(*surfacePool), *surfaceId, std::move(surfaceLeaseControl),
         nativeWindow, std::move(*frameBuilder), *initialMetrics, initialInput, params.primaryWindow.initiallyVisible,
-        params.publishSystemColorSchemeEvents);
+        params.publishSystemColorSchemeEvents, params.acceptFileDropEvents);
     if (concreteBackend == nullptr)
     {
         return Core::failure(Core::CoreErrorCode::OutOfMemory, "The GLFW platform backend allocation failed");
@@ -1962,6 +2127,17 @@ Core::Status queueGlfwPointerEventsForNextPollForTest(IPlatformBackend& backend,
         return Core::failure(Core::CoreErrorCode::InvalidArgument, "The backend is not a GLFW platform backend");
     }
     return glfwBackend->queuePointerEventsForNextPollForTest(events);
+}
+
+Core::Status queueGlfwFileDropForNextPollForTest(IPlatformBackend& backend,
+                                                 GlfwFileDropInjection injection) noexcept
+{
+    auto* glfwBackend = glfwBackendForTest(backend);
+    if (glfwBackend == nullptr)
+    {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument, "The backend is not a GLFW platform backend");
+    }
+    return glfwBackend->queueFileDropForNextPollForTest(injection);
 }
 
 Core::Result<GlfwEventPumpStats> glfwEventPumpStatsForTest(IPlatformBackend& backend) noexcept

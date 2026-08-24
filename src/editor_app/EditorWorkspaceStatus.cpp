@@ -1,6 +1,137 @@
 ﻿#include "EditorWorkspaceState.hpp"
 
 namespace Tina::EditorApp::WorkspaceInternal {
+namespace {
+
+[[nodiscard]] bool containsAsciiInsensitive(std::string_view text,
+                                             std::string_view needle) noexcept
+{
+    if (needle.empty() || needle.size() > text.size()) {
+        return needle.empty();
+    }
+    for (Tina::Core::usize offset = 0;
+         offset + needle.size() <= text.size(); ++offset) {
+        bool matches = true;
+        for (Tina::Core::usize index = 0; index < needle.size(); ++index) {
+            const auto lower = [](char value) noexcept {
+                return value >= 'A' && value <= 'Z'
+                           ? static_cast<char>(value + ('a' - 'A'))
+                           : value;
+            };
+            if (lower(text[offset + index]) != lower(needle[index])) {
+                matches = false;
+                break;
+            }
+        }
+        if (matches) {
+            return true;
+        }
+    }
+    return false;
+}
+
+[[nodiscard]] OutputFilter outputFilterFor(std::string_view feedback) noexcept
+{
+    for (const std::string_view word : {"failed", "rejected", "error", "invalid", "cannot"}) {
+        if (containsAsciiInsensitive(feedback, word)) {
+            return OutputFilter::Error;
+        }
+    }
+    for (const std::string_view word : {"cancel", "unchanged", "preserved", "retry", "stop"}) {
+        if (containsAsciiInsensitive(feedback, word)) {
+            return OutputFilter::Warning;
+        }
+    }
+    return OutputFilter::Info;
+}
+
+[[nodiscard]] bool outputFilterMatches(OutputFilter selected,
+                                       OutputFilter message) noexcept
+{
+    return selected == OutputFilter::All || selected == message;
+}
+
+[[nodiscard]] std::string_view outputSeverityLabel(OutputFilter filter) noexcept
+{
+    switch (filter) {
+    case OutputFilter::Info:
+        return "[i] Info";
+    case OutputFilter::Warning:
+        return "[!] Warn";
+    case OutputFilter::Error:
+        return "[x] Error";
+    case OutputFilter::All:
+        break;
+    }
+    return "[i] Info";
+}
+
+[[nodiscard]] std::string_view outputContextFor(std::string_view feedback) noexcept
+{
+    if (containsAsciiInsensitive(feedback, "source import") ||
+        containsAsciiInsensitive(feedback, "file drop") ||
+        containsAsciiInsensitive(feedback, "dropped file") ||
+        containsAsciiInsensitive(feedback, "image import")) {
+        return "Source Import";
+    }
+    if (containsAsciiInsensitive(feedback, "catalog")) {
+        return "Catalog";
+    }
+    if (containsAsciiInsensitive(feedback, "project asset") ||
+        containsAsciiInsensitive(feedback, "resource drop") ||
+        containsAsciiInsensitive(feedback, "asset inspector")) {
+        return "Project Assets";
+    }
+    if (containsAsciiInsensitive(feedback, "animation") ||
+        containsAsciiInsensitive(feedback, "clip") ||
+        containsAsciiInsensitive(feedback, "notify")) {
+        return "Animation";
+    }
+    if (containsAsciiInsensitive(feedback, "tile")) {
+        return "TileMap";
+    }
+    if (containsAsciiInsensitive(feedback, "transform") ||
+        containsAsciiInsensitive(feedback, "inspector")) {
+        return "Inspector";
+    }
+    if (containsAsciiInsensitive(feedback, "viewport") ||
+        containsAsciiInsensitive(feedback, "gizmo") ||
+        containsAsciiInsensitive(feedback, "marquee")) {
+        return "Viewport";
+    }
+    if (containsAsciiInsensitive(feedback, "hierarchy") ||
+        containsAsciiInsensitive(feedback, "scene node") ||
+        containsAsciiInsensitive(feedback, "scene item") ||
+        containsAsciiInsensitive(feedback, "subtree") ||
+        containsAsciiInsensitive(feedback, "sibling") ||
+        containsAsciiInsensitive(feedback, "reparent") ||
+        containsAsciiInsensitive(feedback, "rename")) {
+        return "Hierarchy";
+    }
+    if (containsAsciiInsensitive(feedback, "document") ||
+        containsAsciiInsensitive(feedback, "save") ||
+        containsAsciiInsensitive(feedback, "prefab") ||
+        containsAsciiInsensitive(feedback, "world2d") ||
+        containsAsciiInsensitive(feedback, "world3d")) {
+        return "Document";
+    }
+    return "Editor";
+}
+
+[[nodiscard]] bool outputContextTargetsDocument(std::string_view context) noexcept
+{
+    return context == "Animation" || context == "TileMap" ||
+           context == "Inspector" || context == "Viewport" ||
+           context == "Hierarchy" || context == "Document";
+}
+
+[[nodiscard]] bool outputContextTargetsSceneNode(std::string_view context) noexcept
+{
+    return context == "Inspector" || context == "Viewport" ||
+           context == "Hierarchy";
+}
+
+} // namespace
 
 auto EditorWorkspaceState::reportAuthoringFailure(
     std::string_view prefix, const Tina::Core::Error& error) -> Tina::Core::Status{
@@ -29,8 +160,519 @@ auto EditorWorkspaceState::reportAuthoringFailure(
     }
 }
 
+auto EditorWorkspaceState::outputGridDataSource() const noexcept
+    -> UI::UIDataGridDataSource
+{
+    return UI::UIDataGridDataSource{
+        .state = this,
+        .rowCount = &EditorWorkspaceState::outputRowCount,
+        .columnCount = &EditorWorkspaceState::outputColumnCount,
+        .resolveRow = &EditorWorkspaceState::resolveOutputRow,
+        .resolveColumn = &EditorWorkspaceState::resolveOutputColumn,
+        .resolveCell = &EditorWorkspaceState::resolveOutputCell,
+    };
+}
+
+auto EditorWorkspaceState::outputRowCount(const void* state) noexcept -> u64
+{
+    const auto* self = static_cast<const EditorWorkspaceState*>(state);
+    return self != nullptr ? self->outputVisibleHistoryCount_ : 0U;
+}
+
+auto EditorWorkspaceState::outputColumnCount(const void* state) noexcept -> u32
+{
+    return state != nullptr ? OutputColumnCapacity : 0U;
+}
+
+auto EditorWorkspaceState::resolveOutputRow(
+    const void* state, u64 logicalRow,
+    UI::UIDataGridRowDescriptor& output) noexcept -> bool
+{
+    const auto* self = static_cast<const EditorWorkspaceState*>(state);
+    if (self == nullptr || logicalRow >= self->outputVisibleHistoryCount_) {
+        return false;
+    }
+    const u32 historyIndex = self->outputVisibleHistoryIndices_[logicalRow];
+    if (historyIndex >= self->outputHistoryCount_) {
+        return false;
+    }
+    output = UI::UIDataGridRowDescriptor{
+        .key = self->outputHistory_[historyIndex].sequence,
+        .enabled = true,
+    };
+    return output.key != UI::InvalidUIDataGridRowKey;
+}
+
+auto EditorWorkspaceState::resolveOutputColumn(
+    const void* state, u32 logicalColumn,
+    UI::UIDataGridColumnDescriptor& output) noexcept -> bool
+{
+    if (state == nullptr || logicalColumn >= OutputColumnCapacity) {
+        return false;
+    }
+    if (logicalColumn == 0U) {
+        output = UI::UIDataGridColumnDescriptor{
+            .key = 1U,
+            .header = "Level",
+            .width = OutputSeverityColumnWidth,
+        };
+    } else if (logicalColumn == 1U) {
+        output = UI::UIDataGridColumnDescriptor{
+            .key = 2U,
+            .header = "Context",
+            .width = OutputContextColumnWidth,
+        };
+    } else {
+        output = UI::UIDataGridColumnDescriptor{
+            .key = 3U,
+            .header = "Message",
+            .width = OutputMessageColumnWidth,
+        };
+    }
+    return true;
+}
+
+auto EditorWorkspaceState::resolveOutputCell(
+    const void* state, u64 logicalRow, u32 logicalColumn,
+    UI::UIDataGridCellDescriptor& output) noexcept -> bool
+{
+    const auto* self = static_cast<const EditorWorkspaceState*>(state);
+    if (self == nullptr || logicalRow >= self->outputVisibleHistoryCount_ ||
+        logicalColumn >= OutputColumnCapacity) {
+        return false;
+    }
+    const u32 historyIndex = self->outputVisibleHistoryIndices_[logicalRow];
+    if (historyIndex >= self->outputHistoryCount_) {
+        return false;
+    }
+    const EditorOutputHistoryEntry& entry = self->outputHistory_[historyIndex];
+    output.text = logicalColumn == 0U
+                      ? outputSeverityLabel(entry.filter)
+                      : logicalColumn == 1U ? std::string_view{entry.context}
+                                            : std::string_view{entry.message};
+    return true;
+}
+
+auto EditorWorkspaceState::selectedOutputEntry() const noexcept
+    -> const EditorOutputHistoryEntry*
+{
+    if (!outputSelectedSequence_.has_value()) {
+        return nullptr;
+    }
+    for (Tina::Core::usize index = 0U; index < outputHistoryCount_; ++index) {
+        if (outputHistory_[index].sequence == *outputSelectedSequence_) {
+            return &outputHistory_[index];
+        }
+    }
+    return nullptr;
+}
+
+auto EditorWorkspaceState::outputTargetAvailable(
+    const EditorOutputHistoryEntry& entry) const noexcept -> bool
+{
+    if (entry.targetKind == EditorOutputTargetKind::Asset) {
+        return entry.targetAssetId.hasValue() &&
+               projectAssets_.inspectorSnapshot(entry.targetAssetId) != nullptr;
+    }
+    if (entry.targetKind == EditorOutputTargetKind::Document ||
+        entry.targetKind == EditorOutputTargetKind::SceneNode) {
+        return documentTabs_.find(entry.targetDocumentKey).has_value();
+    }
+    return false;
+}
+
+void EditorWorkspaceState::handleOutputPointerDown(
+    UI::UIRoutedPointerEvent& event) noexcept
+{
+    const UI::UIPointerInputEvent& input = event.input();
+    if (input.button != Tina::Platform::PointerButton::Primary ||
+        outputGridRect_.width <= 0.0F || outputGridRect_.height <= 0.0F ||
+        outputGridStyle_.rowHeight <= 0.0F ||
+        input.position.x < outputGridRect_.x ||
+        input.position.x >= outputGridRect_.right() ||
+        input.position.y < outputGridRect_.y +
+                               outputGridStyle_.columnHeaderHeight ||
+        input.position.y >= outputGridRect_.bottom()) {
+        return;
+    }
+    const float contentY =
+        input.position.y - outputGridRect_.y -
+        outputGridStyle_.columnHeaderHeight + outputGridMetrics_.scrollOffset.y;
+    if (!std::isfinite(contentY) || contentY < 0.0F) {
+        return;
+    }
+    const u64 logicalRow = static_cast<u64>(
+        std::floor(contentY / outputGridStyle_.rowHeight));
+    if (logicalRow >= outputVisibleHistoryCount_) {
+        return;
+    }
+    const u32 historyIndex = outputVisibleHistoryIndices_[logicalRow];
+    if (historyIndex >= outputHistoryCount_) {
+        return;
+    }
+    const EditorOutputHistoryEntry& entry = outputHistory_[historyIndex];
+    const u64 frame = counters_.frameUpdates;
+    if (entry.sequence == lastOutputPointerDownSequence_ &&
+        frame >= lastOutputPointerDownFrame_ &&
+        frame - lastOutputPointerDownFrame_ <= 24U &&
+        outputTargetAvailable(entry)) {
+        pendingOutputLocateSequence_ = entry.sequence;
+    }
+    lastOutputPointerDownSequence_ = entry.sequence;
+    lastOutputPointerDownFrame_ = frame;
+}
+
+auto EditorWorkspaceState::processPendingOutputLocate(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    if (!pendingOutputLocateSequence_.has_value()) {
+        return Tina::Core::success();
+    }
+    const u64 sequence = *pendingOutputLocateSequence_;
+    pendingOutputLocateSequence_.reset();
+    const EditorOutputHistoryEntry* target = nullptr;
+    for (Tina::Core::usize index = 0U; index < outputHistoryCount_; ++index) {
+        if (outputHistory_[index].sequence == sequence) {
+            target = &outputHistory_[index];
+            break;
+        }
+    }
+    if (target == nullptr || !outputTargetAvailable(*target)) {
+        authoringFeedback_ =
+            "Output target is no longer available; no selection changed";
+        return Tina::Core::success();
+    }
+    if (target->targetKind == EditorOutputTargetKind::Asset) {
+        if (auto status = projectAssets_.setFilter(
+                Tina::Editor::ProjectAssetFilter::All);
+            !status) {
+            return status;
+        }
+        if (auto status = projectAssets_.setSearchQuery({}); !status) {
+            return status;
+        }
+        if (auto status = projectAssets_.selectAsset(target->targetAssetId);
+            !status) {
+            return status;
+        }
+        projectBrowserUiRefreshPending_ = true;
+        assetInspectorActive_ = true;
+        authoringFeedback_ = "Output target located in Project Assets";
+        return Tina::Core::success();
+    }
+
+    const auto tabIndex = documentTabs_.find(target->targetDocumentKey);
+    if (!tabIndex.has_value()) {
+        authoringFeedback_ =
+            "Output document target is no longer open; no selection changed";
+        return Tina::Core::success();
+    }
+    if (playSessionActive() && *tabIndex != documentTabs_.activeIndex()) {
+        authoringFeedback_ =
+            "Stop the isolated play session before locating another document";
+        return Tina::Core::success();
+    }
+    if (auto status = activateDocumentTab(tree, static_cast<u32>(*tabIndex));
+        !status) {
+        return status;
+    }
+    if (target->targetKind == EditorOutputTargetKind::SceneNode) {
+        if (visibleHierarchyIndex(target->targetStableId).has_value()) {
+            pendingSelectionStableId_ = target->targetStableId;
+            authoringFeedback_ = "Output target located in the active document";
+        } else {
+            authoringFeedback_ =
+                "Output document located, but its original scene object is unavailable";
+        }
+    } else {
+        authoringFeedback_ = "Output target document activated";
+    }
+    return Tina::Core::success();
+}
+
 auto EditorWorkspaceState::refreshWorkspaceChrome(Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status{
-    return refreshViewportViewModeUi(tree);
+    if (auto status = refreshViewportViewModeUi(tree); !status) {
+        return status;
+    }
+    return refreshOutputAndStatusUi(tree);
+}
+
+auto EditorWorkspaceState::refreshOutputAndStatusUi(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    bool historyChanged = false;
+    try {
+        if (!authoringFeedback_.empty() &&
+            authoringFeedback_ != outputHistoryObservedFeedback_) {
+            if (outputHistoryCount_ == EditorOutputHistoryCapacity) {
+                for (Tina::Core::usize index = 1U;
+                     index < outputHistoryCount_; ++index) {
+                    outputHistory_[index - 1U] = std::move(outputHistory_[index]);
+                }
+                --outputHistoryCount_;
+            }
+            EditorOutputHistoryEntry& entry =
+                outputHistory_[outputHistoryCount_];
+            entry = EditorOutputHistoryEntry{};
+            entry.sequence = outputNextSequence_++;
+            entry.filter = outputFilterFor(authoringFeedback_);
+            entry.context.assign(outputContextFor(authoringFeedback_));
+            entry.message = authoringFeedback_;
+            if (entry.context == "Project Assets") {
+                if (const auto assetId = projectAssets_.selectedAssetId();
+                    assetId.has_value()) {
+                    entry.targetKind = EditorOutputTargetKind::Asset;
+                    entry.targetAssetId = *assetId;
+                }
+            } else if (outputContextTargetsDocument(entry.context)) {
+                if (const auto* activeTab = documentTabs_.activeTab();
+                    activeTab != nullptr) {
+                    entry.targetKind = EditorOutputTargetKind::Document;
+                    entry.targetDocumentKey = activeTab->key;
+                    const u32 stableId =
+                        stableEntityIdForHierarchyItem(selectionKey_);
+                    if (stableId != 0U &&
+                        outputContextTargetsSceneNode(entry.context)) {
+                        entry.targetKind = EditorOutputTargetKind::SceneNode;
+                        entry.targetStableId = stableId;
+                    }
+                }
+            }
+            ++outputHistoryCount_;
+            outputHistoryObservedFeedback_ = authoringFeedback_;
+            historyChanged = true;
+        }
+    } catch (const std::bad_alloc&) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::OutOfMemory,
+            "Editor Output history allocation failed");
+    }
+
+    outputVisibleHistoryCount_ = 0U;
+    for (Tina::Core::usize reverse = outputHistoryCount_; reverse != 0U;
+         --reverse) {
+        const u32 historyIndex = static_cast<u32>(reverse - 1U);
+        if (outputFilterMatches(outputFilter_,
+                                outputHistory_[historyIndex].filter)) {
+            outputVisibleHistoryIndices_[outputVisibleHistoryCount_++] =
+                historyIndex;
+        }
+    }
+    outputGridRefreshPending_ = outputGridRefreshPending_ || historyChanged;
+
+    std::array<u32, 4> counts{};
+    for (Tina::Core::usize index = 0U; index < outputHistoryCount_; ++index) {
+        ++counts[0];
+        const auto filterIndex = static_cast<Tina::Core::usize>(
+            outputHistory_[index].filter);
+        if (filterIndex < counts.size()) {
+            ++counts[filterIndex];
+        }
+    }
+    const std::array<std::string_view, 4> labels{"All", "Info", "Warn", "Error"};
+    for (u32 index = 0; index < outputFilterButtons_.size(); ++index) {
+        std::string label{labels[index]};
+        label += " ";
+        label += std::to_string(counts[index]);
+        if (auto status = tree.setText(outputFilterButtons_[index], label); !status) {
+            return status;
+        }
+        if (auto status = tree.setRadioButtonSelected(
+                outputFilterButtons_[index],
+                static_cast<OutputFilter>(index) == outputFilter_);
+            !status) {
+            return status;
+        }
+    }
+    if (outputGridRefreshPending_) {
+        if (auto status = tree.setDataGridDataSource(
+                outputGrid_, outputGridDataSource());
+            !status) {
+            return status;
+        }
+        if (auto status = tree.invalidateDataGridItems(outputGrid_); !status) {
+            return status;
+        }
+        if (outputVisibleHistoryCount_ == 0U) {
+            if (auto status = tree.clearDataGridSelection(outputGrid_); !status) {
+                return status;
+            }
+            outputSelectedSequence_.reset();
+        } else {
+            u64 selectedRow = 0U;
+            if (outputSelectedSequence_.has_value()) {
+                for (Tina::Core::usize row = 0U;
+                     row < outputVisibleHistoryCount_; ++row) {
+                    const auto& entry = outputHistory_[
+                        outputVisibleHistoryIndices_[row]];
+                    if (entry.sequence == *outputSelectedSequence_) {
+                        selectedRow = row;
+                        break;
+                    }
+                }
+            }
+            if (auto status = tree.setDataGridSelectedCell(
+                    outputGrid_, selectedRow, 0U);
+                !status) {
+                return status;
+            }
+            outputSelectedSequence_ = outputHistory_[
+                outputVisibleHistoryIndices_[selectedRow]].sequence;
+        }
+        outputGridRefreshPending_ = false;
+    } else {
+        auto selection = tree.dataGridSelection(outputGrid_);
+        if (!selection) {
+            return Tina::Core::failure(std::move(selection.error()));
+        }
+        if (selection->hasValue() &&
+            selection->logicalRow < outputVisibleHistoryCount_) {
+            outputSelectedSequence_ = outputHistory_[
+                outputVisibleHistoryIndices_[selection->logicalRow]].sequence;
+        } else {
+            outputSelectedSequence_.reset();
+        }
+    }
+    auto outputGridRect = tree.committedLayoutRect(outputGrid_);
+    if (!outputGridRect) {
+        return Tina::Core::failure(std::move(outputGridRect.error()));
+    }
+    outputGridRect_ = *outputGridRect;
+    auto outputGridMetrics = tree.dataGridMetrics(outputGrid_);
+    if (!outputGridMetrics) {
+        return Tina::Core::failure(std::move(outputGridMetrics.error()));
+    }
+    outputGridMetrics_ = *outputGridMetrics;
+    std::string outputSummary = outputHistoryCount_ == 0U
+                                    ? "Output is clear"
+                                    : std::to_string(outputHistoryCount_) +
+                                          " messages | Showing " +
+                                          std::to_string(outputVisibleHistoryCount_);
+    if (auto status = tree.setText(outputSummary_, outputSummary);
+        !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(outputClearButton_, outputHistoryCount_ != 0U); !status) {
+        return status;
+    }
+    const EditorOutputHistoryEntry* selectedEntry = selectedOutputEntry();
+    if (auto status = tree.setEnabled(outputDetailsToggleButton_,
+                                      selectedEntry != nullptr);
+        !status) {
+        return status;
+    }
+    if (auto status = tree.setText(
+            outputDetailsToggleButton_,
+            outputDetailsExpanded_ ? "Hide" : "Details");
+        !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(
+            outputLocateButton_,
+            selectedEntry != nullptr && outputTargetAvailable(*selectedEntry));
+        !status) {
+        return status;
+    }
+    UI::UILayoutStyle detailsLayout = outputDetailsLayout_;
+    detailsLayout.visibility = selectedEntry != nullptr && outputDetailsExpanded_
+                                   ? UI::UIVisibility::Visible
+                                   : UI::UIVisibility::Collapsed;
+    if (auto status = tree.setLayoutStyle(outputDetails_, detailsLayout); !status) {
+        return status;
+    }
+    if (selectedEntry != nullptr) {
+        std::string details{outputSeverityLabel(selectedEntry->filter)};
+        details += " | ";
+        details += selectedEntry->context;
+        details += " | #";
+        details += std::to_string(selectedEntry->sequence);
+        details += "\n";
+        details += selectedEntry->message;
+        if (selectedEntry->targetKind == EditorOutputTargetKind::Asset) {
+            const auto targetText = selectedEntry->targetAssetId.canonicalText();
+            details += "\nTarget AssetId: ";
+            details.append(targetText.data(), targetText.size());
+        } else if (selectedEntry->targetKind ==
+                   EditorOutputTargetKind::SceneNode) {
+            details += "\nTarget stable ID: ";
+            details += std::to_string(selectedEntry->targetStableId);
+        } else if (selectedEntry->targetKind ==
+                   EditorOutputTargetKind::Document) {
+            details += "\nTarget: document";
+        }
+        if (auto status = tree.setText(outputDetails_, details); !status) {
+            return status;
+        }
+    }
+
+    using ImportState = Tina::EditorApp::Detail::EditorSourceImportServiceState;
+    using ImportPhase = Tina::EditorApp::Detail::EditorSourceImportPhase;
+    std::string taskText = "Tasks: idle";
+    if (sourceImportService_.state() == ImportState::Running) {
+        switch (sourceImportService_.phase()) {
+        case ImportPhase::Preparing:
+            taskText = "Import: preparing";
+            break;
+        case ImportPhase::Copying:
+            taskText = "Import: copying";
+            break;
+        case ImportPhase::Cooking:
+            taskText = "Import: cooking";
+            break;
+        case ImportPhase::Idle:
+        case ImportPhase::ReadyToCommit:
+        case ImportPhase::Failed:
+            taskText = "Import: running";
+            break;
+        }
+    } else if (sourceImportService_.state() == ImportState::Ready) {
+        taskText = "Import: ready to commit";
+    } else if (sourceImportLastFailed_) {
+        taskText = "Import: failed";
+    } else if (sourceImportStartPending_ || retrySourceImportPending_ ||
+               !pendingSourceImportPathsUtf8_.empty()) {
+        taskText = "Import: queued";
+    }
+    if (auto status = tree.setText(statusTask_, taskText); !status) {
+        return status;
+    }
+    const auto formatMetric = [](double value) {
+        std::string text = std::to_string(value);
+        while (text.size() > 1U && text.back() == '0') {
+            text.pop_back();
+        }
+        if (!text.empty() && text.back() == '.') {
+            text.pop_back();
+        }
+        return text;
+    };
+    std::string activityText = taskText;
+    const double frameSeconds = counters_.lastFrameSeconds;
+    if (frameSeconds > 0.0 && std::isfinite(frameSeconds)) {
+        activityText += "  |  ";
+        activityText += formatMetric(1.0 / frameSeconds);
+        activityText += " FPS  |  ";
+        activityText += formatMetric(frameSeconds * 1000.0);
+        activityText += " ms";
+    }
+    if (statusActivity_.hasValue()) {
+        if (auto status = tree.setText(statusActivity_, activityText); !status) {
+            return status;
+        }
+    }
+    std::string catalogText;
+    if (catalogRefreshPending_) {
+        catalogText = "Catalog: updating";
+    } else if (sourceImportCatalogCommitted_) {
+        catalogText = "Catalog: staged";
+    } else if (sourceImportLastFailed_) {
+        catalogText = "Catalog: previous preserved";
+    } else if (assetResources_.projectCatalogConfigured) {
+        catalogText = "Catalog: current";
+    } else {
+        catalogText = "Catalog: not configured";
+    }
+    return tree.setText(statusCatalog_, catalogText);
 }
 
 auto EditorWorkspaceState::refreshInspectorGridLayout(
@@ -126,11 +768,17 @@ auto EditorWorkspaceState::refreshWorkspacePanelsUi(
         pendingWorkspacePanelToggle_.reset();
     }
 
-    if (pendingBottomPanelToggle_.has_value()) {
-        const BottomPanelKind requested = *pendingBottomPanelToggle_;
-        const BottomPanelKind next = requested == bottomPanel_
-                                         ? BottomPanelKind::None
-                                         : requested;
+    if (pendingBottomPanelOpen_.has_value() ||
+        pendingBottomPanelToggle_.has_value()) {
+        const bool explicitOpen = pendingBottomPanelOpen_.has_value();
+        const BottomPanelKind requested = explicitOpen
+                                              ? *pendingBottomPanelOpen_
+                                              : *pendingBottomPanelToggle_;
+        const BottomPanelKind next = explicitOpen
+                                         ? requested
+                                         : (requested == bottomPanel_
+                                                ? BottomPanelKind::None
+                                                : requested);
         const bool panelVisible = next != BottomPanelKind::None;
         const bool panelWasVisible = bottomPanel_ != BottomPanelKind::None;
 
@@ -198,13 +846,14 @@ auto EditorWorkspaceState::refreshWorkspacePanelsUi(
         animationPanelLayout_ = animationLayout;
         outputPanelLayout_ = outputLayout;
         bottomPanel_ = next;
+        pendingBottomPanelOpen_.reset();
         pendingBottomPanelToggle_.reset();
     }
 
     if (auto status = refreshInspectorGridLayout(tree); !status) {
         return status;
     }
-    return tree.setText(outputMessage_, authoringFeedback_);
+    return Tina::Core::success();
 }
 
 auto EditorWorkspaceState::refreshMainMenuUi(
@@ -311,6 +960,16 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
     const bool selectionEditable = authoringEnabled() && !assetInspectorActive_ &&
                                    stableEntityIdForHierarchyItem(selectionKey_) != 0U &&
                                    !tileMapEditingContext();
+    inspectorDirtyBadgeLayout_.visibility =
+        dirty && selectionKey_ != UI::InvalidUITreeViewItemKey &&
+                !assetInspectorActive_
+            ? UI::UIVisibility::Visible
+            : UI::UIVisibility::Collapsed;
+    if (auto status = tree.setLayoutStyle(
+            inspectorDirtyBadge_, inspectorDirtyBadgeLayout_);
+        !status) {
+        return status;
+    }
 
     if (auto status = refreshWorkspaceChrome(tree); !status) {
         return status;
@@ -377,6 +1036,8 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
     if (assetInspectorActive_) {
         const auto* asset = inspectedProjectAsset();
         statusSelection += asset != nullptr ? asset->displayName : "Unavailable Catalog asset";
+    } else if (selectionKey_ == UI::InvalidUITreeViewItemKey) {
+        statusSelection += "None";
     } else {
         statusSelection += hierarchyDisplayLabel(selectionKey_);
         if (viewportSelectedEntityCount_ > 1U) {
@@ -469,6 +1130,29 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
         !status) {
         return status;
     }
+    if (inspectorTransformErrorStableId_ != 0U &&
+        inspectorTransformErrorStableId_ != selectedStableId) {
+        inspectorTransformErrorUtf8_.clear();
+        inspectorTransformErrorStableId_ = 0U;
+    }
+    const bool transformErrorVisible = transformVisible &&
+        inspectorTransformErrorStableId_ == selectedStableId &&
+        !inspectorTransformErrorUtf8_.empty();
+    inspectorTransformErrorLayout_.visibility = transformErrorVisible
+                                                    ? UI::UIVisibility::Visible
+                                                    : UI::UIVisibility::Collapsed;
+    if (auto status = tree.setLayoutStyle(
+            inspectorTransformError_, inspectorTransformErrorLayout_);
+        !status) {
+        return status;
+    }
+    if (auto status = tree.setText(
+            inspectorTransformError_,
+            transformErrorVisible ? std::string_view{inspectorTransformErrorUtf8_}
+                                  : std::string_view{});
+        !status) {
+        return status;
+    }
     for (Tina::Core::usize index = 0;
          index < inspectorTransformAxisFields_.size(); ++index) {
         const auto field = static_cast<InspectorTransformField>(index);
@@ -505,6 +1189,10 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
         return status;
     }
     if (auto status = tree.setEnabled(applyTransformButton_, selectionEditable); !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(resetTransformButton_, selectionEditable);
+        !status) {
         return status;
     }
     const EditorHierarchyRow* selectedRow = hierarchyRow(selectedStableId);
@@ -584,6 +1272,62 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
         (workspaceMode_ == WorkspaceMode::World2D || document3D_.nodeCount() > 1U);
     if (auto status = tree.setEnabled(
             hierarchyContextDeleteItem_, contextCanDelete); !status) {
+        return status;
+    }
+    const Tina::Editor::ProjectAssetDescriptor* contextAsset =
+        projectAssets_.inspectorSnapshot(projectAssetContextAssetId_);
+    const bool projectAssetContextAvailable =
+        contextAsset != nullptr && projectAssetContextAssetId_;
+    const bool contextSourceImportIdle =
+        sourceImportService_.state() ==
+        Tina::EditorApp::Detail::EditorSourceImportServiceState::Idle;
+    const bool mappedSourceAsset =
+        projectAssetContextAvailable &&
+        sourceImportUnitForAsset(projectAssetContextAssetId_) != nullptr;
+    const bool projectAssetMutationAvailable =
+        projectAssetContextAvailable && activeProjectWorkspace_.has_value() &&
+        contextSourceImportIdle && !pendingProjectSwitch_.has_value() &&
+        pendingSourceImportPathsUtf8_.empty() && !sourceImportStartPending_ &&
+        !retrySourceImportPending_;
+    if (auto status = tree.setEnabled(
+            projectAssetContextMenu_, projectAssetContextAvailable); !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(
+            projectAssetContextOpenItem_, projectAssetContextAvailable); !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(
+            projectAssetContextInspectItem_, projectAssetContextAvailable); !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(
+            projectAssetContextReimportItem_,
+            projectAssetMutationAvailable && mappedSourceAsset); !status) {
+        return status;
+    }
+    // No platform clipboard or shell reveal adapter is exposed by Tina yet.
+    // Keep these commands visible for discoverability but fail closed.
+    if (auto status = tree.setEnabled(
+            projectAssetContextLocateSourceItem_, false); !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(
+            projectAssetContextCopyAssetIdItem_, false); !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(
+            projectAssetContextCopySourcePathItem_, false); !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(
+            projectAssetContextRevealDependenciesItem_, projectAssetContextAvailable);
+        !status) {
+        return status;
+    }
+    if (auto status = tree.setEnabled(
+            projectAssetContextRemoveItem_, projectAssetMutationAvailable && mappedSourceAsset);
+        !status) {
         return status;
     }
     const bool tileMapControlsEnabled = authoringEnabled() && tileMapEditingContext();
@@ -710,6 +1454,11 @@ auto EditorWorkspaceState::refreshPlaySessionUi(
         }
     }
     for (const UI::UINodeId button : projectFilterButtons_) {
+        if (auto status = tree.setEnabled(button, false); !status) {
+            return status;
+        }
+    }
+    for (const UI::UINodeId button : projectAssetViewButtons_) {
         if (auto status = tree.setEnabled(button, false); !status) {
             return status;
         }

@@ -8,6 +8,7 @@
 #include <limits>
 #include <memory>
 #include <memory_resource>
+#include <optional>
 #include <string>
 
 namespace Tina::Tests {
@@ -50,6 +51,10 @@ struct VirtualGridDataSource final {
     u64 failingIndex = (std::numeric_limits<u64>::max)();
     UI::UIVirtualGridViewItemKey keyBase = 0;
     std::string label = "Grid item";
+    std::string secondary = "Texture2D";
+    std::string status = "Ready";
+    std::optional<UI::UIImageSource> preview{};
+    std::optional<UI::UIImageSource> icon{};
     std::array<u64, 4> disabledIndices{
         (std::numeric_limits<u64>::max)(),
         (std::numeric_limits<u64>::max)(),
@@ -83,12 +88,36 @@ struct VirtualGridDataSource final {
                     .key = source.keyBase + logicalIndex + 1,
                     .label = source.label,
                     .enabled = !source.isDisabled(logicalIndex),
+                    .presentation = {
+                        .secondaryLabel = source.secondary,
+                        .statusLabel = source.status,
+                        .status = UI::UIVirtualGridViewItemStatus::Ready,
+                        .preview = source.preview,
+                        .icon = source.icon,
+                    },
                 };
                 return true;
             },
         };
     }
 };
+
+[[nodiscard]] Core::AssetId imageAssetId(u8 discriminator) noexcept
+{
+    Core::AssetId::Bytes bytes{};
+    bytes[0] = static_cast<std::byte>(discriminator);
+    return *Core::AssetId::fromBytes(bytes);
+}
+
+[[nodiscard]] UI::UIImageSource imageSource(u8 discriminator) noexcept
+{
+    return {
+        .texture = imageAssetId(discriminator),
+        .sourcePixels = {.width = 16, .height = 16},
+        .texturePixelExtent = {.width = 16, .height = 16},
+        .intrinsicLogicalSize = {.width = 16.0F, .height = 16.0F},
+    };
+}
 
 [[nodiscard]] std::unique_ptr<UI::UIContext> createContext(
     Platform::WindowId window, usize nodeCapacity,
@@ -154,6 +183,20 @@ void assertOk(Core::Status status)
     {
         if (entry.role == UI::UISemanticsRole::ListItem &&
             entry.virtualItemIndex == logicalIndex)
+        {
+            return &entry;
+        }
+    }
+    return nullptr;
+}
+
+[[nodiscard]] const UI::UICommittedPaintEntry* findImagePaint(
+    UI::UICommittedPaintView view, UI::UINodeId node) noexcept
+{
+    for (const UI::UICommittedPaintEntry& entry : view.entries())
+    {
+        if (entry.node == node &&
+            entry.kind == UI::UICommittedPaintKind::Image)
         {
             return &entry;
         }
@@ -237,6 +280,8 @@ TEST_F(UIVirtualGridViewTest,
     ASSERT_NE(item, nullptr);
     EXPECT_EQ(item->virtualItemKey, 51'001U);
     EXPECT_EQ(item->name, "Grid item");
+    EXPECT_EQ(item->valueText, "Texture2D");
+    EXPECT_EQ(item->description, "Ready");
 
     const Core::Status rejected = updater->destroy(item->node);
     ASSERT_FALSE(rejected.has_value());
@@ -524,6 +569,130 @@ TEST_F(UIVirtualGridViewTest,
     EXPECT_EQ(poolOverflow.error().code, UI::UIErrorCode::CapacityExceeded);
     EXPECT_EQ(context->committedLayout().layoutRevision(), recoveredRevision);
     EXPECT_EQ(updater.virtualGridViewMetrics(grid).value(), recoveredMetrics);
+}
+
+TEST_F(UIVirtualGridViewTest,
+       PreviewWinsIconAndFailedCandidatePreservesCommittedPresentation)
+{
+    VirtualGridDataSource source{
+        .count = 4,
+        .label = "Old item",
+        .secondary = "Old type",
+        .status = "Old status",
+        .preview = imageSource(0x11),
+        .icon = imageSource(0x22),
+    };
+    auto context = createContext(window, ContextNodeCapacity);
+    ASSERT_NE(context, nullptr);
+    auto root = context->rootBuilder().createRoot().value();
+    auto updater = context->treeUpdater(root).value();
+    const UI::UINodeId grid = *updater.createElement(
+        root.rootNodeId(), UI::makeVirtualGridViewElement(
+                               {.materializedItemCapacity = 4}));
+    assertOk(updater.setLayoutStyle(root.rootNodeId(),
+                                    fixedSize(220.0F, 60.0F)));
+    assertOk(updater.setLayoutStyle(grid, fixedSize(220.0F, 60.0F)));
+    assertOk(updater.setVirtualGridViewStyle(
+        grid,
+        {
+            .minimumItemWidth = 100.0F,
+            .itemHeight = 20.0F,
+            .columnGap = 10.0F,
+            .scrollBarVisibility = UI::UIScrollBarVisibility::Hidden,
+        }));
+    assertOk(updater.setVirtualGridViewDataSource(grid, source.view()));
+    assertOk(context->commitLayout({.width = 220.0F, .height = 60.0F}));
+
+    const UI::UISemanticsEntry* first =
+        findVirtualItem(context->committedSemantics(), 0);
+    ASSERT_NE(first, nullptr);
+    const UI::UINodeId firstNode = first->node;
+    const UI::UICommittedPaintEntry* firstImage =
+        findImagePaint(context->committedPaint(), firstNode);
+    ASSERT_NE(firstImage, nullptr);
+    EXPECT_EQ(firstImage->imageSource.texture, imageAssetId(0x11));
+    EXPECT_EQ(first->name, "Old item");
+    EXPECT_EQ(first->valueText, "Old type");
+    EXPECT_EQ(first->description, "Old status");
+    const u64 committedLayoutRevision =
+        context->committedLayout().layoutRevision();
+    const u64 committedPaintRevision =
+        context->committedPaint().paintRevision();
+    const u64 committedSemanticsRevision =
+        context->committedSemantics().semanticsRevision();
+
+    source.label = "Candidate item";
+    source.secondary = "Candidate type";
+    source.status = "Candidate status";
+    source.preview = imageSource(0x33);
+    source.failingIndex = 1;
+    assertOk(updater.invalidateVirtualGridViewItems(grid));
+    const Core::Status rejected =
+        context->commitLayout({.width = 220.0F, .height = 60.0F});
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidControlValue);
+    EXPECT_EQ(context->committedLayout().layoutRevision(),
+              committedLayoutRevision);
+    EXPECT_EQ(context->committedPaint().paintRevision(),
+              committedPaintRevision);
+    EXPECT_EQ(context->committedSemantics().semanticsRevision(),
+              committedSemanticsRevision);
+    first = findVirtualItem(context->committedSemantics(), 0);
+    ASSERT_NE(first, nullptr);
+    EXPECT_EQ(first->node, firstNode);
+    EXPECT_EQ(first->name, "Old item");
+    EXPECT_EQ(first->valueText, "Old type");
+    EXPECT_EQ(first->description, "Old status");
+    firstImage = findImagePaint(context->committedPaint(), firstNode);
+    ASSERT_NE(firstImage, nullptr);
+    EXPECT_EQ(firstImage->imageSource.texture, imageAssetId(0x11));
+
+    source.failingIndex = (std::numeric_limits<u64>::max)();
+    source.preview.reset();
+    assertOk(context->commitLayout({.width = 220.0F, .height = 60.0F}));
+    first = findVirtualItem(context->committedSemantics(), 0);
+    ASSERT_NE(first, nullptr);
+    EXPECT_EQ(first->name, "Candidate item");
+    EXPECT_EQ(first->valueText, "Candidate type");
+    EXPECT_EQ(first->description, "Candidate status");
+    firstImage = findImagePaint(context->committedPaint(), first->node);
+    ASSERT_NE(firstImage, nullptr);
+    EXPECT_EQ(firstImage->imageSource.texture, imageAssetId(0x22));
+
+    source.preview = imageSource(0x44);
+    assertOk(updater.invalidateVirtualGridViewItems(grid));
+    assertOk(context->commitLayout({.width = 220.0F, .height = 60.0F}));
+    first = findVirtualItem(context->committedSemantics(), 0);
+    ASSERT_NE(first, nullptr);
+    firstImage = findImagePaint(context->committedPaint(), first->node);
+    ASSERT_NE(firstImage, nullptr);
+    EXPECT_EQ(firstImage->imageSource.texture, imageAssetId(0x44));
+}
+
+TEST_F(UIVirtualGridViewTest, PresentationRejectsInvalidUtf8WithoutPublishing)
+{
+    VirtualGridDataSource source{.count = 4};
+    auto context = createContext(window, ContextNodeCapacity);
+    ASSERT_NE(context, nullptr);
+    auto root = context->rootBuilder().createRoot().value();
+    auto updater = context->treeUpdater(root).value();
+    const UI::UINodeId grid = *updater.createElement(
+        root.rootNodeId(), UI::makeVirtualGridViewElement({.materializedItemCapacity = 4}));
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(220.0F, 60.0F)));
+    assertOk(updater.setLayoutStyle(grid, fixedSize(220.0F, 60.0F)));
+    assertOk(updater.setVirtualGridViewStyle(
+        grid, {.minimumItemWidth = 100.0F, .itemHeight = 20.0F,
+               .scrollBarVisibility = UI::UIScrollBarVisibility::Hidden}));
+    assertOk(updater.setVirtualGridViewDataSource(grid, source.view()));
+    assertOk(context->commitLayout({.width = 220.0F, .height = 60.0F}));
+    const u64 revision = context->committedSemantics().semanticsRevision();
+
+    source.secondary.assign("\xFF", 1);
+    assertOk(updater.invalidateVirtualGridViewItems(grid));
+    const Core::Status rejected = context->commitLayout({.width = 220.0F, .height = 60.0F});
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidText);
+    EXPECT_EQ(context->committedSemantics().semanticsRevision(), revision);
 }
 
 TEST_F(UIVirtualGridViewTest,

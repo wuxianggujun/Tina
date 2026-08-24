@@ -6,6 +6,9 @@ static_assert(!std::is_copy_constructible_v<Tina::Platform::PlatformFrameBuilder
 static_assert(Tina::Platform::PlatformFrameCapacityConfig::MaximumInputTransitionCapacity == 4096);
 static_assert(Tina::Platform::PlatformFrameCapacityConfig::DefaultInputTextByteCapacity == 16384);
 static_assert(Tina::Platform::PlatformFrameCapacityConfig::MaximumInputTextByteCapacity == 1048576);
+static_assert(Tina::Platform::PlatformFrameCapacityConfig::DefaultFileDropPathCapacity == 64);
+static_assert(Tina::Platform::PlatformFrameCapacityConfig::MaximumFileDropByteCapacity == 1048576);
+static_assert(std::is_standard_layout_v<Tina::Platform::FileDropEvent>);
 static_assert(Tina::Platform::FrameBatchAppendResult::InvalidPayload !=
               Tina::Platform::FrameBatchAppendResult::Appended);
 static_assert(Tina::Platform::PlatformFrameBuilder::MaximumGamepadSlots == 16);

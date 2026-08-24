@@ -13,6 +13,19 @@ namespace {
 
 using AssetFormat::SourceImportUnitId;
 
+[[nodiscard]] constexpr bool isSupportedSourceImporterKind(const Core::u32 value) noexcept
+{
+    switch (static_cast<SourceImporterKind>(value))
+    {
+    case SourceImporterKind::CatalogRecipe:
+    case SourceImporterKind::Gltf:
+    case SourceImporterKind::Texture:
+    case SourceImporterKind::Audio:
+        return true;
+    }
+    return false;
+}
+
 struct CandidateBuilder final {
     SourceImportCandidate candidate{};
     std::map<std::string, Core::u32, std::less<>> sourceIndexes{};
@@ -174,8 +187,7 @@ findUnitIndex(const AssetFormat::SourceImportMetadataView& baseline,
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "retained source import unit is missing");
     }
-    if (sourceUnit->importerKind < static_cast<Core::u32>(SourceImporterKind::CatalogRecipe) ||
-        sourceUnit->importerKind > static_cast<Core::u32>(SourceImporterKind::Gltf))
+    if (!isSupportedSourceImporterKind(sourceUnit->importerKind))
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "retained source import unit has unsupported importer kind");

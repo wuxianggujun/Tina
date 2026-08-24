@@ -201,12 +201,13 @@ struct UIUiaMappedNode final {
     }
 
     if (source.role == UISemanticsRole::TextEdit || source.role == UISemanticsRole::Label ||
-        source.role == UISemanticsRole::ComboBox)
+        source.role == UISemanticsRole::ComboBox || source.role == UISemanticsRole::ListItem)
     {
         std::string valueText = source.valueText.empty() ? std::string(source.name) : std::string(source.valueText);
         mapped.value = UIUiaValuePattern{
             .value = std::move(valueText),
             .isReadOnly = source.role == UISemanticsRole::Label || source.role == UISemanticsRole::ComboBox ||
+                          source.role == UISemanticsRole::ListItem ||
                           hasState(source.states, UIAccessibilityState::ReadOnly),
         };
     }

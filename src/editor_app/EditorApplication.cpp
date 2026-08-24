@@ -674,6 +674,7 @@ void writeFrameTimingStatistics(
     }
     EditorRenderDeviceAccess renderDeviceAccess{};
     Tina::Desktop::CreateEngineOptions desktopOptions{};
+    desktopOptions.acceptFileDropEvents = true;
     desktopOptions.wrapWindowSurfaceRenderDevice =
         [&renderDeviceAccess](std::unique_ptr<Tina::Render::IRenderDevice> device)
             -> Tina::Core::Result<std::unique_ptr<Tina::Render::IRenderDevice>> {

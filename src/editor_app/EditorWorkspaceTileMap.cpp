@@ -53,11 +53,10 @@ auto EditorWorkspaceState::bakeAndPublishNavigation2D() -> Tina::Core::Status{
 
     const auto previousFilter = projectAssets_.filter();
     std::optional<Tina::Core::AssetId> previousSelection{};
-    if (const auto* selected = projectAssets_.selectedItem(); selected != nullptr) {
-        previousSelection = selected->assetId;
-    }
+    previousSelection = projectAssets_.selectedAssetId();
+    const std::string_view previousSearchQuery = projectAssets_.searchQuery();
     auto browser = prepareProjectBrowserForSnapshot(
-        *staged, previousFilter, previousSelection);
+        *staged, previousFilter, previousSelection, previousSearchQuery);
     if (!browser) {
         return Tina::Core::failure(std::move(browser.error()));
     }

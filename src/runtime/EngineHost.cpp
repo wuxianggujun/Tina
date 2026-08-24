@@ -257,8 +257,46 @@ template <typename Transition, typename IsReset>
         inputTextByteCount += transitionTextByteCount;
     }
 
+    const auto platformEvents = frame.platformEvents();
+    usize fileDropPathCount = 0;
+    usize fileDropByteCount = 0;
+    for (const Platform::PlatformEvent& event : platformEvents)
+    {
+        const auto* fileDrop = std::get_if<Platform::FileDropEvent>(&event.payload);
+        if (fileDrop == nullptr)
+        {
+            continue;
+        }
+        const Platform::WindowFrameSnapshot* primaryWindow = frame.primaryWindow();
+        if (primaryWindow == nullptr || frame.windows().size() != 1 ||
+            fileDrop->window != primaryWindow->metrics.window || !std::isfinite(fileDrop->logicalX) ||
+            !std::isfinite(fileDrop->logicalY) || fileDrop->paths.empty())
+        {
+            return Core::failure(RuntimeErrorCode::LifecycleInvariantViolation,
+                                 "A file-drop event is not routed to the committed primary window");
+        }
+        if (fileDropPathCount > static_cast<usize>(frameCapacities.fileDropPathCapacity) ||
+            fileDrop->paths.size() > static_cast<usize>(frameCapacities.fileDropPathCapacity) - fileDropPathCount)
+        {
+            return Core::failure(RuntimeErrorCode::LifecycleInvariantViolation,
+                                 "Platform file-drop paths exceeded their configured frame capacity");
+        }
+        fileDropPathCount += fileDrop->paths.size();
+        for (const std::string_view path : fileDrop->paths)
+        {
+            if (path.empty() || !Core::isStrictUtf8WithoutNul(path) ||
+                fileDropByteCount > static_cast<usize>(frameCapacities.fileDropByteCapacity) ||
+                path.size() > static_cast<usize>(frameCapacities.fileDropByteCapacity) - fileDropByteCount)
+            {
+                return Core::failure(RuntimeErrorCode::LifecycleInvariantViolation,
+                                     "Platform file-drop text exceeded its configured frame byte capacity");
+            }
+            fileDropByteCount += path.size();
+        }
+    }
+
     return validateBoundedBatchShape(
-        frame.platformEvents(), frameCapacities.platformEventCapacity,
+        platformEvents, frameCapacities.platformEventCapacity,
         [](const Platform::PlatformEvent& event) noexcept {
             return std::holds_alternative<Platform::PlatformEventStreamReset>(event.payload);
         },

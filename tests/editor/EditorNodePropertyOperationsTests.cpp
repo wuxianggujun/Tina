@@ -4,6 +4,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <string_view>
@@ -169,11 +170,16 @@ TEST(EditorNodePropertyOperationsTests, MeshPropertiesKeepMeshNodeKind)
         document, ids, {.visible = false});
     ASSERT_TRUE(edited) << edited.error().message;
     const auto nodes = world3DNodes(document);
-    ASSERT_EQ(nodes.size(), 1U);
-    auto nodeKind = classifyWorld3DNodeTemplate(nodes.front());
+    ASSERT_EQ(nodes.size(), 2U);
+    const auto node = std::find_if(
+        nodes.begin(), nodes.end(), [&](const auto& candidate) {
+            return candidate.stableNodeId == added->primaryStableId;
+        });
+    ASSERT_NE(node, nodes.end());
+    auto nodeKind = classifyWorld3DNodeTemplate(*node);
     ASSERT_TRUE(nodeKind) << nodeKind.error().message;
     EXPECT_EQ(*nodeKind, World3DNodeTemplate::Mesh3D);
-    EXPECT_FALSE(nodes.front().visible);
+    EXPECT_FALSE(node->visible);
 }
 
 } // namespace

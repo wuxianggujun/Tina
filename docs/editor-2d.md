@@ -16,7 +16,7 @@ schema 兼容格式。
 调用应用模块。2D Inspector 编辑 Position X/Y、Rotation Z（度）与 Scale X/Y；3D Inspector 编辑完整
 Position/Rotation/Scale XYZ。viewport 多选时各字段独立显示 `Mixed`，显式 Apply 只解析用户给出具体数值的字段，
 `Mixed` 字段按 `std::nullopt` 保留每个对象自己的 canonical 值。一次多对象 Apply 只调用一次 active document
-`replace()`，no-op 不发布 revision、command counter 或 dirty 状态。`Apply Transform`、`Move X +1`、viewport transform
+`replace()`，no-op 不发布 revision、command counter 或 dirty 状态。Transform Header 的 Reset 对 2D/3D 使用对应 identity TRS 并复用同一提交路径；Inspector Header 的 Modified Badge 读取真实 document dirty，校验错误在下一行绑定当前 stable ID，切换对象后清除。`Apply Transform`、`Move X +1`、viewport transform
 gizmo、Undo、Redo 都接到 active document，每次成功 canonical command 后从同一份 bytes 实例化新的 `Scene::World`。
 2D Camera/Sprite 与 3D PerspectiveCamera/Mesh preview 都由同一个
 World/binding 驱动，不维护平行的 UI 模拟状态，也不把默认 proxy 冒充已解析的 Catalog 产品资源。
@@ -59,7 +59,7 @@ Command Bar 中央的 `2D/3D` 是 workspace selector，`View > Workspace` 提供
 session 都是 workspace/context 的内部状态，不再重复显示成顶层文档标签；没有可关闭的项目文档时关闭按钮也折叠。
 2D Viewport Header 以 `Scene/TileMap` 切换当前 authoring context。底部面板默认收起，Status Bar 的
 `Animation` / `Output` 按钮用于打开或切换面板，再次点击当前按钮会收起；Animation authoring 位于
-Animation 面板，Output 显示最新 authoring feedback。Hierarchy 与 Inspector Header 分别提供向外收起按钮，
+Animation 面板，Output 以有界三列 DataGrid 显示 `Level | Context | Message` 历史。Hierarchy 与 Inspector Header 分别提供向外收起按钮，
 `View` 菜单中的 `Left Dock` / `Inspector` Check 项用于恢复或再次隐藏；收起前保存用户最后拖拽比例。
 根使用四个连续 band；Workspace 由三个嵌套 `SplitView` 组成：`Left Dock | Main`、`Center | Inspector`、
 `Viewport | Bottom Panel Host`。三个 splitter 都使用第一方 Pointer Capture/RangeInput 状态机，可直接拖动调整 Left Dock、
@@ -151,7 +151,7 @@ Editor 的 authoring feedback 通过公共 `UISnackbarHost` 发布，并同步�
 warning/error 使用独立 tone bar；入退场只用 opacity 与 8 px visual offset，不请求 Focus。Snackbar 在普通 workspace
 之后、Modal/Dialog 之前创建，确保 modal z-order 与 barrier 仍优先；message 在固定 surface 内使用 ellipsis，完整
 UTF-8 文本仍保留在 polite live-region semantics。Inspector 不再保留 `Authoring` 提示段或
-`Move X +1` 调试按钮；Snackbar 负责短时反馈，Output 只镜像最新状态而不维护第二份 authoring 状态。Panel/Toolbar/Header/Search/Floating/Dialog 使用
+`Move X +1` 调试按钮；Snackbar 负责短时反馈，Output 只保留最多 64 条 presentation history，不成为第二份业务状态。Output 支持 All/Info/Warning/Error 过滤、计数、Clear、选中详情，以及只对真实 AssetId/DocumentKey/scene stable ID 开放的 Locate/双击定位；过滤使用稳定 sequence row key，不从消息字符串解析目标。Panel/Toolbar/Header/Search/Floating/Dialog 使用
 6 px 以内圆角和 Raised/Floating/Modal 无模糊 shadow；rounded/stencil descendant clip 与 backdrop/blur 仍不在本轮范围。
 `--world2d-path=<UTF-8 path>` 与 `--world3d-path=<UTF-8 path>` 分别配置两个内部 workspace session；已有文件按各自
 schema 原子加载为 clean baseline，不存在的路径保留为该 workspace 的新文档 Save target。每个 pinned/Catalog tab
@@ -235,7 +235,7 @@ preview 按 root authoring order 提取全部可见 Tile layer，而不是只渲
 派生 `NavigationGrid2D` v1 canonical payload 和 Cooked artifact；TileMap revision 变化会把 bake 标为 dirty，成功发布通过
 fresh authoring overlay 更新项目 active Catalog pointer，不会覆写 Source Import baseline。
 
-SpriteAnimationClip Timeline 在选中帧内显示 event marker，并提供 Prev/Next、Add/Apply/Remove。tag 接受 `0x`
+SpriteAnimationClip Timeline 在选中帧内显示 event marker，并提供 Prev/Next、Add/Apply/Remove。Timeline 同时发布时间刻度、playhead、只命中 committed frame button 的 hover time 和固定槽 event marker row；切换 panel/workspace 会清理 hover。tag 接受 `0x`
 十六进制或标识符，offset 接受 `[0,1]` 小数或百分比；提交统一调用 `setFrameEvents()`，按 offset 稳定排序并作为
 一次 canonical revision 参与 Undo/Redo/Cook Preview。tag=0、非有限/越界 offset、每帧64上限或 stale selection
 均 fail closed。6 个可见帧槽保持固定 `44 logical px` 宽度，只显示稳定帧号；选中帧的 Sprite、毫秒时长和事件数集中放在
@@ -254,10 +254,17 @@ Lease/GPU/binding，3D 由 `Mesh3DBindingRegistry` 持有 StaticMesh、Material 
 Lease/GPU/binding；Scene extraction 只取得 packet-local `FrameResourceRef`。项目 Catalog 中缺失或 kind 不匹配的引用
 只从本次 preview 过滤，authoring document 与 history 保持不变，不回退到固定 binding key 或彩色 proxy。
 
-Project Browser 直接拥有 Catalog descriptor 的确定性 AssetId 排序索引，并提供 All/2D/3D/Media 过滤、稳定选择和
-固定 compact 行高的响应式 virtual grid。格子以 `AssetKind #abcd` 显示类型优先的短标签，120 logical px 的最小宽度在
-默认 Left Dock 中保持双列；网格下固定高度的 selected-asset summary 保存完整 canonical AssetId，空间不足时仅在绘制阶段以
-ellipsis 截断。Project Open 保留 FolderOpen，打开当前 Asset 使用 divider 后的 ArrowRight，两个命令不再共享图形。
+Project Browser 直接拥有 Catalog descriptor 的确定性 AssetId 排序索引，并提供 ASCII case-insensitive name/kind 搜索、
+All/2D/3D/Media 组合过滤、stable item key、按 AssetId 恢复的稳定选择，以及 Grid/List 两种固定 metrics 的
+`UIVirtualGridView` presentation。Grid 使用约 132 logical px 最小 item 宽度与 72 logical px 高度，List 使用约
+280 logical px 最小 item 宽度与 30 logical px 高度；两档只改变 presentation/metrics，不改变 logical order、key 或 selection。
+每个 materialized item 现在同时发布 primary label、kind secondary label、status label/status，以及 preview/icon metadata；Texture/Sprite 使用
+真实 cooked 缩略图，Mesh/Audio/World/Prefab/TileMap/Animation 使用稳定类型 icon fallback。缩略图 resolve 失败只把本项标为
+`Missing`，不改变 Catalog 或 authoring bytes；Importing/Ready/Error 状态现在按稳定 AssetId 保留导入历史：已知 source mapping 的资源逐项显示
+`Queued`、`Preparing`、`Copying`、`Cooking`、`Ready`、`Imported` 或 `Error`，新输出在 validated stage 返回后补入历史；未受当前批次影响的资源保持 Ready。
+网格下固定高度的 selected-asset summary 保存完整 canonical AssetId，空间不足时仅在绘制阶段以 ellipsis 截断。Project Open 保留
+FolderOpen，打开当前 Asset 使用 divider 后的 ArrowRight，两个命令不再共享图形。Project Assets 同时提供 Breadcrumb、Start Center、
+无资源 EmptyState、导入 Activity 文本、失败 InlineCallout、Retry/Open Output；Project Assets anchored 右键菜单和按 AssetId 双击打开均已接线，Locate/Copy 类平台能力在当前平台层缺失时显式禁用。
 每个 owned descriptor 还保存由 `AssetKind + AssetId` 重新派生的 canonical cooked 相对路径与
 完整、按 AssetId 排序的 dependency records，不借用 Catalog snapshot。只读 Asset Inspector 按 active Inspector tab 的
 `AssetId` 取得对应 snapshot，以固定 36 px 行高虚拟化显示 dependency kind、AssetId 与 flags，而不是继续跟随 Project
@@ -296,8 +303,9 @@ Editor source import 已完成产品接线。自动化入口使用 strict UTF-8 
 `Source` 资源并在新根重新 cook，成功切换后清理旧临时目录；取消或失败保留临时 Project，未保存退出时由 Editor 定向清理。
 项目 `Source/` 内文件直接使用；
 外部 PNG/JPEG/WAV 在整批预检成功后分别安全复制到 `Source/Imported/Images/` 与 `Source/Imported/Audio/`。左侧 `Source Imports`
-使用两列 DataGrid 显示完整 intended set：`Kind` 固定 88 logical px，显示 Catalog/glTF/Texture/Audio；`Source`
-固定 240 logical px，显示完整 UTF-8 source path。DataGrid 使用固定 2 列、5 行 materialized pool、双轴滚动和 stable
+使用三列 DataGrid 显示完整 intended set：`Kind` 固定 88 logical px，显示 Catalog/glTF/Texture/Audio；`Source`
+当前约 190 logical px，显示完整 UTF-8 source path；`Status` 显示 Queued/Preparing/Copying/Cooking/Committing/Imported/Failed。
+DataGrid 使用固定 3 列、5 行 materialized pool、双轴滚动和 stable
 row selection；`Remove` 只读取 selected logical row。空集合时整段 `Collapsed`，Import 入口仍保留在 Project Assets
 标题栏的小 `+`；`Remove` 在 owner thread 生成删除后的候选集合并启动同一 fresh-stage 事务，不会先打开或重新校验
 被删除的文件，因此已经从磁盘消失的 stale unit 仍可移除。移除最后一个 unit 会从有效 baseline 增量发布零 entry
@@ -319,7 +327,13 @@ current import state；Catalog、Browser、documents 与 2D/3D/Animation preview
 全部提交后，Editor 只原子发布项目 `.tina/cache/source-import/active-catalog.path`，交换完整 intended set 并确认 ingress；Ready
 在此之前拥有 rollback transaction。再次以 `--project-root` 启动或 Project Open
 时验证 pointer、stage state、Catalog revision/output binding 与 physical containment，并恢复 Catalog 和完整 intended unit 集；
-有限帧自动导入会直接返回 parser/path/cooker 的真实错误，而不是用 lifecycle 通用错误覆盖首错。
+有限帧自动导入会直接返回 parser/path/cooker 的真实错误，而不是用 lifecycle 通用错误覆盖首错。Windows/GLFW 文件释放事件会在
+Editor owner thread 复制为有界 UTF-8 path batch：释放到 Project Assets committed rect 或 active viewport 都会自动走同一 Source Import
+事务；两种入口都只把资源导入 Project Assets/Catalog，不创建或修改场景节点。导入期间的 Play、modal、项目切换或另一批 import
+会保留队列并在 Editor 空闲后继续处理，不会改变既有 scene document。GLFW 3.4 已通过统一的 `glfwSetDropCallback` ingress 覆盖 Windows
+HDROP、X11 XDND 与 Wayland `wl_data_device`；标准 callback 只有最终 release/drop，不提供 drag-enter/drag-over，因此当前不宣称真正
+的系统拖动 hover 高亮。Editor 私有 DropOverlay 仅在 release 后显示 accepted/processing/committed/rejected/failed 状态，并自动复用
+Source Import phase 与 Catalog commit 结果。失败 Retry 保存完整 intended units 和原始外部 path batch；Running Cancel 在 owner thread 停止并 join worker，清理 fresh stage、drop intent、retry snapshot 和未提交资源历史，同时保留旧 Catalog/selection。Linux X11/Wayland 构建、运行和产品拖放证据，以及 Explorer 人工拖放证据，尚未完成。
 Windows 使用系统原生 dialog；Linux 私有 adapter 以 `zenity` 为首选、`kdialog` 为缺失回退，覆盖 open/save/folder 且不经过
 shell。Linux 定向编译和真实 helper 产品门禁仍是平台证据，但不是 Editor 完成度的唯一剩余项；视口导航、gizmo、
 场景操作与可视化门禁必须分别按当前源码状态记录。
@@ -332,11 +346,11 @@ Conditional document tab strip (external scene/Catalog tabs/close; hidden when e
 Workspace
   Left dock
     Hierarchy (filter/add/duplicate/delete/focus/virtual dynamic TreeView)
-    Project Assets (All/2D/3D/Media/compact virtual grid/import/refresh/collapsed-empty imports)
-    Source Imports (Kind | Source virtual DataGrid/remove; collapsed when empty)
+    Project Assets (Search + All/2D/3D/Media/Grid-List/import/refresh/collapsed-empty imports)
+    Source Imports (Kind | Source | Status virtual DataGrid/remove; collapsed when empty)
   Active 2D/3D viewport (one Scene-TileMap/transform/snap/marquee/tile/frame/view toolbar + preview canvas)
   Inspector dock (scrollable identity/transform/node properties/hierarchy/TileMap/document/36px dependency list)
-Collapsible bottom panel (Animation timeline or latest Output; closed by default)
+Collapsible bottom panel (Animation timeline or structured Output history; closed by default)
 Status bar (schema/entities/revision/preview/selection)
 Dirty-close modal (save/save-as/discard/cancel)
 Snackbar host (feedback/optional undo/polite live region)
@@ -626,8 +640,8 @@ Save/Save As、Windows native dialog、Linux `zenity`/`kdialog` dialog 与四类
 Windows Project `New` 也能创建 Source/Catalog、manifest-last 发布空 current-schema package 并 reopen/typed-validate；
 Project `Open` 与 New/Open 的下一安全帧 live project/Catalog switch 也已完成。Editor source import 的后台 ingress/分块校验/intended-set merge、完整 intended unit
 probe、fresh-stage cook、主线程 Catalog reload/busy retry、dirty-document commit gate、stage sibling state + 单一 active pointer
-commit 与 reopen 恢复，以及 intended-set 两列 DataGrid、选择、stale unit 删除和最终空 Catalog 发布也已完成；新增
-viewport/hierarchy/play 功能的专项测试、产品交互和视觉证据，以及 Linux helper 门禁仍待收口。
+commit 与 reopen 恢复，以及 intended-set 三列 `Kind | Source | Status` DataGrid、选择、stale unit 删除和最终空 Catalog 发布也已完成；新增
+viewport/hierarchy/play 功能的专项测试、Windows 产品交互和 2D/3D 70 帧 smoke 已在本轮统一门禁收口：`tina_editor_tests` 112/112、`tina_editor_app_tests` 23/23、`tina_tests` 377/377，三类 executable 均 exit 0。跨 DPI/GPU 视觉证据，以及 Linux helper 门禁仍待收口。
 Timeline 提供 6 槽可滚动窗口、Play/Pause、Prev/Next、Add/Duplicate/Delete、Sprite 切换、重排、逐帧时长、
 Once/Loop/PingPong、独立 Undo/Redo 和正式 Cook Preview；2D 中当前可渲染实体直接预览已解析 Sprite frame，3D workspace
 保留该 dock 但禁用 2D 编辑。2D smoke 固定验证 TileMap layers/chunks/cells/artifacts/emitted sprites=`2/2/12/3/12`、

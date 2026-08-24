@@ -76,6 +76,7 @@ struct EditorSourceImportWorkResult final {
     Core::u32 addedUnitCount = 0;
     Core::u32 copiedFileCount = 0;
     Core::u32 reusedFileCount = 0;
+    std::vector<Asset::SourceImportPipelineUnitOutput> unitOutputs{};
 };
 
 struct EditorSourceImportReadyStage final {
@@ -91,6 +92,7 @@ struct EditorSourceImportReadyStage final {
     Core::u32 addedUnitCount = 0;
     Core::u32 copiedFileCount = 0;
     Core::u32 reusedFileCount = 0;
+    std::vector<Asset::SourceImportPipelineUnitOutput> unitOutputs{};
 };
 
 struct EditorSourceImportServiceConfig final {

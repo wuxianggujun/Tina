@@ -26,6 +26,8 @@ struct CreateEngineOptions final {
     // Tina-owned preference events; Runtime applies them on its owner thread
     // while preserving the active UI density. Disabled keeps explicit themes.
     bool followSystemColorScheme = false;
+    // Opt-in OS file-drop publication as backend-neutral Platform events.
+    bool acceptFileDropEvents = false;
     WindowSurfaceRenderDeviceWrap wrapWindowSurfaceRenderDevice{};
 };
 

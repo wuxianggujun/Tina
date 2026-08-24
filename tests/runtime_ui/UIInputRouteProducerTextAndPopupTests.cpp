@@ -5,7 +5,7 @@
 namespace Tina::Tests {
 namespace {
 
-TEST_F(UIInputRouteProducerTest, FocusedTextEditConsumesTabCommandsTextAndAcceptKeys)
+TEST_F(UIInputRouteProducerTest, FocusedTextEditConsumesEditingKeysButYieldsEnter)
 {
     constexpr std::string_view InitialUtf8 = "A" "\xE4\xBD\xA0" "B";
     auto producer = createProducer();
@@ -124,7 +124,7 @@ TEST_F(UIInputRouteProducerTest, FocusedTextEditConsumesTabCommandsTextAndAccept
     auto acceptOutput = producer->produce(tree.context.get(), *acceptFrame);
     ASSERT_TRUE(acceptOutput.has_value())
         << (acceptOutput ? "" : acceptOutput.error().message);
-    EXPECT_TRUE(acceptOutput->consumption.isConsumed(0));
+    EXPECT_FALSE(acceptOutput->consumption.isConsumed(0));
     EXPECT_TRUE(acceptOutput->consumption.isConsumed(1));
     text = tree.updater.text(tree.target);
     ASSERT_TRUE(text.has_value());

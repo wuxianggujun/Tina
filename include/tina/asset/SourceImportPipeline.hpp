@@ -4,11 +4,13 @@
 #include <tina/asset/GltfCook.hpp>
 #include <tina/asset/SourceImportProbe.hpp>
 #include <tina/core/error/Result.hpp>
+#include <tina/core/id/AssetId.hpp>
 
 #include <span>
 #include <stop_token>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace Tina::Asset {
 
@@ -23,6 +25,21 @@ struct SourceImportPipelineUnit final {
     SourceImportPipelineUnitKind kind = SourceImportPipelineUnitKind::CatalogRecipe;
     std::string_view sourceUtf8Path{};
     GltfCookIds gltfIds{};
+};
+
+struct SourceImportPipelineOutput final {
+    Core::AssetId assetId{};
+    AssetFormat::AssetKind assetKind = AssetFormat::AssetKind::Invalid;
+};
+
+// Value-owned mapping for one intended source-import unit. The source path is the exact path
+// supplied in SourceImportPipelineUnit (typically an absolute authoring path), while outputs are
+// the committed Catalog objects owned by this unit. This mapping is returned for clean reuse as
+// well as recook modes so callers never need to derive AssetIds or reopen import-state metadata.
+struct SourceImportPipelineUnitOutput final {
+    AssetFormat::SourceImportUnitId unitId{};
+    std::string sourceUtf8Path{};
+    std::vector<SourceImportPipelineOutput> outputs{};
 };
 
 enum class SourceImportPipelineMode : Core::u8 {
@@ -63,6 +80,7 @@ struct SourceImportPipelineResult final {
     bool stageCreated = false;
     std::string catalogRootUtf8{};
     std::string stateUtf8Path{};
+    std::vector<SourceImportPipelineUnitOutput> unitOutputs{};
 };
 
 // Synchronously probes the complete intended unit set, cooks only dirty units, builds and fully

@@ -204,6 +204,35 @@ auto EditorWorkspaceState::readAnimationEventInput(
     };
 }
 
+void EditorWorkspaceState::handleAnimationTimelinePointerMove(
+    UI::UIRoutedPointerEvent& event) noexcept
+{
+    std::optional<u32> hoveredFrameSlot{};
+    if (workspaceMode_ == WorkspaceMode::World2D && authoringEnabled() &&
+        bottomPanel_ == BottomPanelKind::Animation)
+    {
+        for (u32 slot = 0; slot < animationFrameButtons_.size(); ++slot)
+        {
+            if (event.targetNode() != animationFrameButtons_[slot])
+            {
+                continue;
+            }
+            if (animationPreview_.visibleFrameStart() + slot <
+                spriteAnimationDocument_.frameCount())
+            {
+                hoveredFrameSlot = slot;
+            }
+            break;
+        }
+    }
+    if (animationHoveredFrameSlot_ == hoveredFrameSlot)
+    {
+        return;
+    }
+    animationHoveredFrameSlot_ = hoveredFrameSlot;
+    pendingAnimationTimelineRefresh_ = true;
+}
+
 auto EditorWorkspaceState::processPendingAnimationFrameSelection(
     Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status{
     const auto pendingSlot = animationPreview_.takePendingFrameSelection();
@@ -287,6 +316,37 @@ auto EditorWorkspaceState::refreshAnimationTimelineUi(
         return status;
     }
 
+    double selectedStartSeconds = 0.0;
+    for (u32 index = 0; index < animationPreview_.selectedFrameIndex(); ++index) {
+        const auto frame = spriteAnimationDocument_.frameAt(index);
+        if (frame) {
+            selectedStartSeconds += static_cast<double>(frame->durationSeconds);
+        }
+    }
+    const double totalDurationSeconds =
+        spriteAnimationDocument_.totalDurationSeconds();
+    const auto milliseconds = [](double seconds) -> u64 {
+        const auto rounded = std::llround(seconds * 1000.0);
+        return rounded > 0 ? static_cast<u64>(rounded) : 0U;
+    };
+    std::string timelineScale = "0 ms  |  ";
+    timelineScale += std::to_string(milliseconds(totalDurationSeconds * 0.5));
+    timelineScale += " ms  |  ";
+    timelineScale += std::to_string(milliseconds(totalDurationSeconds));
+    timelineScale += " ms";
+    if (auto status = tree.setText(animationTimelineScale_, timelineScale); !status) {
+        return status;
+    }
+    std::string playheadText = "Playhead ";
+    playheadText += std::to_string(milliseconds(selectedStartSeconds));
+    playheadText += " ms  |  ";
+    playheadText += std::to_string(animationPreview_.selectedFrameIndex() + 1U);
+    playheadText += "/";
+    playheadText += std::to_string(frameCount);
+    if (auto status = tree.setText(animationPlayhead_, playheadText); !status) {
+        return status;
+    }
+
     animationPreview_.setVisibleFrameStart(0);
     if (frameCount > AnimationVisibleFrameSlots &&
         animationPreview_.selectedFrameIndex() >= AnimationVisibleFrameSlots) {
@@ -294,11 +354,56 @@ auto EditorWorkspaceState::refreshAnimationTimelineUi(
             animationPreview_.selectedFrameIndex() - AnimationVisibleFrameSlots + 1U,
             frameCount - AnimationVisibleFrameSlots));
     }
+    const std::optional<u32> hoveredFrameIndex =
+        animationHoveredFrameSlot_.has_value()
+            ? std::optional<u32>{animationPreview_.visibleFrameStart() +
+                                 *animationHoveredFrameSlot_}
+            : std::nullopt;
+    const bool hoverVisible = editable && bottomPanel_ == BottomPanelKind::Animation &&
+                              animationHoveredFrameSlot_.has_value() &&
+                              *animationHoveredFrameSlot_ <
+                                  animationFrameButtons_.size() &&
+                              hoveredFrameIndex.has_value() &&
+                              *hoveredFrameIndex < frameCount;
+    if (!hoverVisible)
+    {
+        animationHoveredFrameSlot_.reset();
+    }
+    UI::UILayoutStyle hoverTimeLayout = animationHoverTimeLayout_;
+    hoverTimeLayout.visibility = hoverVisible ? UI::UIVisibility::Visible
+                                              : UI::UIVisibility::Collapsed;
+    if (auto status = tree.setLayoutStyle(animationHoverTime_, hoverTimeLayout);
+        !status)
+    {
+        return status;
+    }
+    if (hoverVisible)
+    {
+        double hoverStartSeconds = 0.0;
+        for (u32 index = 0; index < *hoveredFrameIndex; ++index)
+        {
+            const auto frame = spriteAnimationDocument_.frameAt(index);
+            if (frame)
+            {
+                hoverStartSeconds += static_cast<double>(frame->durationSeconds);
+            }
+        }
+        std::string hoverText = "Hover ";
+        hoverText += std::to_string(milliseconds(hoverStartSeconds));
+        hoverText += " ms | Frame ";
+        hoverText += std::to_string(*hoveredFrameIndex + 1U);
+        if (auto status = tree.setText(animationHoverTime_, hoverText); !status)
+        {
+            return status;
+        }
+    }
     for (u32 slot = 0; slot < animationFrameButtons_.size(); ++slot) {
         const u32 frameIndex = animationPreview_.visibleFrameStart() + slot;
         const bool materialized = frameIndex < frameCount;
         const bool selected = materialized &&
                               frameIndex == animationPreview_.selectedFrameIndex();
+        const bool hovered = materialized && hoverVisible &&
+                             slot == *animationHoveredFrameSlot_;
         std::string label = "--";
         if (materialized) {
             label = std::to_string(frameIndex + 1U);
@@ -309,11 +414,28 @@ auto EditorWorkspaceState::refreshAnimationTimelineUi(
         if (auto status = tree.setStyleRole(
                 animationFrameButtons_[slot],
                 selected ? UI::UIStyleRoleId::ButtonPrimary
+                         : hovered ? UI::UIStyleRoleId::ButtonTonal
                          : UI::UIStyleRoleId::ButtonOutlined);
             !status) {
             return status;
         }
         if (auto status = tree.setEnabled(animationFrameButtons_[slot], editable && materialized);
+            !status) {
+            return status;
+        }
+        std::string markerText = "-";
+        if (materialized) {
+            const auto frame = spriteAnimationDocument_.frameAt(frameIndex);
+            if (frame && !frame->events.empty()) {
+                markerText = "E";
+                markerText += std::to_string(frame->events.size());
+            }
+            if (selected && markerText == "-") {
+                markerText = ">";
+            }
+        }
+        if (auto status = tree.setText(
+                animationEventMarkerButtons_[slot], markerText);
             !status) {
             return status;
         }

@@ -24,6 +24,41 @@ namespace {
     return (value & Required) != 0U && (value & ~(Required | Deferred)) == 0U;
 }
 
+[[nodiscard]] char asciiFold(char value) noexcept
+{
+    return value >= 'A' && value <= 'Z' ? static_cast<char>(value - 'A' + 'a') : value;
+}
+
+[[nodiscard]] bool containsAsciiInsensitive(std::string_view text,
+                                            std::string_view query) noexcept
+{
+    if (query.empty())
+    {
+        return true;
+    }
+    if (query.size() > text.size())
+    {
+        return false;
+    }
+    for (Core::usize start = 0; start + query.size() <= text.size(); ++start)
+    {
+        bool match = true;
+        for (Core::usize offset = 0; offset < query.size(); ++offset)
+        {
+            if (asciiFold(text[start + offset]) != asciiFold(query[offset]))
+            {
+                match = false;
+                break;
+            }
+        }
+        if (match)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 std::string_view projectAssetKindLabel(AssetFormat::AssetKind kind) noexcept
@@ -267,6 +302,16 @@ const ProjectAssetDescriptor* ProjectAssetBrowserModel::visibleItem(
     return &m_assets[m_visibleIndices[visibleIndex]];
 }
 
+Core::u64 ProjectAssetBrowserModel::visibleItemStableKey(
+    Core::usize visibleIndex) const noexcept
+{
+    if (visibleIndex >= m_visibleIndices.size())
+    {
+        return 0U;
+    }
+    return static_cast<Core::u64>(m_visibleIndices[visibleIndex]) + 1U;
+}
+
 const ProjectAssetDescriptor* ProjectAssetBrowserModel::selectedItem() const noexcept
 {
     return m_selectedVisibleIndex ? visibleItem(*m_selectedVisibleIndex) : nullptr;
@@ -306,7 +351,7 @@ const ProjectAssetDescriptor* ProjectAssetBrowserModel::spriteAssetForTexture(
 const ProjectAssetDescriptor*
 ProjectAssetBrowserModel::selectedInspectorSnapshot() const noexcept
 {
-    return selectedItem();
+    return m_selectedAssetId ? inspectorSnapshot(*m_selectedAssetId) : nullptr;
 }
 
 Core::Status ProjectAssetBrowserModel::setFilter(ProjectAssetFilter filter) noexcept
@@ -321,6 +366,31 @@ Core::Status ProjectAssetBrowserModel::setFilter(ProjectAssetFilter filter) noex
         m_filter = filter;
         rebuildVisibleIndices();
     }
+    return Core::success();
+}
+
+Core::Status ProjectAssetBrowserModel::setSearchQuery(std::string_view queryUtf8) noexcept
+{
+    if (!Core::isStrictUtf8WithoutNul(queryUtf8))
+    {
+        return Core::failure(EditorErrorCode::InvalidConfiguration,
+                             "Project asset browser search query is not strict UTF-8");
+    }
+    if (m_searchQueryUtf8 == queryUtf8)
+    {
+        return Core::success();
+    }
+    try
+    {
+        std::string nextQuery(queryUtf8);
+        m_searchQueryUtf8.swap(nextQuery);
+    }
+    catch (const std::bad_alloc&)
+    {
+        return Core::failure(Core::CoreErrorCode::OutOfMemory,
+                             "Project asset browser search query allocation failed");
+    }
+    rebuildVisibleIndices();
     return Core::success();
 }
 
@@ -353,6 +423,28 @@ Core::Status ProjectAssetBrowserModel::selectAsset(Core::AssetId assetId) noexce
                          "Project asset is not visible in the current filter");
 }
 
+Core::Status ProjectAssetBrowserModel::restoreAssetSelection(Core::AssetId assetId) noexcept
+{
+    const auto asset = std::lower_bound(
+        m_assets.begin(), m_assets.end(), assetId,
+        [](const auto& candidate, Core::AssetId requestedAssetId) {
+            return candidate.assetId < requestedAssetId;
+        });
+    if (asset == m_assets.end() || asset->assetId != assetId) {
+        return Core::failure(EditorErrorCode::ProjectAssetNotFound,
+                             "Project asset browser selection is not in the Catalog snapshot");
+    }
+    m_selectedAssetId = assetId;
+    m_selectedVisibleIndex.reset();
+    for (Core::usize index = 0; index < m_visibleIndices.size(); ++index) {
+        if (m_assets[m_visibleIndices[index]].assetId == assetId) {
+            m_selectedVisibleIndex = index;
+            break;
+        }
+    }
+    return Core::success();
+}
+
 void ProjectAssetBrowserModel::rebuildVisibleIndices() noexcept
 {
     m_visibleIndices.clear();
@@ -363,20 +455,25 @@ void ProjectAssetBrowserModel::rebuildVisibleIndices() noexcept
         {
             continue;
         }
+        if (!containsAsciiInsensitive(m_assets[index].displayName, m_searchQueryUtf8) &&
+            !containsAsciiInsensitive(projectAssetKindLabel(m_assets[index].assetKind),
+                                      m_searchQueryUtf8))
+        {
+            continue;
+        }
         if (m_selectedAssetId && m_assets[index].assetId == *m_selectedAssetId)
         {
             m_selectedVisibleIndex = m_visibleIndices.size();
         }
         m_visibleIndices.push_back(index);
     }
-    if (!m_selectedVisibleIndex && !m_visibleIndices.empty())
+    if (!m_selectedVisibleIndex && !m_selectedAssetId && !m_visibleIndices.empty())
     {
         m_selectedVisibleIndex = 0U;
-        m_selectedAssetId = m_assets[m_visibleIndices.front()].assetId;
-    }
-    if (m_visibleIndices.empty())
-    {
-        m_selectedAssetId.reset();
+        if (!m_selectedAssetId)
+        {
+            m_selectedAssetId = m_assets[m_visibleIndices.front()].assetId;
+        }
     }
 }
 

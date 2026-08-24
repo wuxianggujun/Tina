@@ -147,6 +147,7 @@ auto EditorWorkspaceState::preparePreviewAssetBindings() -> Tina::Core::Status{
         return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                    "Tina Editor Catalog or RenderDevice is unavailable");
     }
+    imageResolver_.clearCatalogTextureResolver();
 
     counters_.catalogAssetsLoaded = 0;
     counters_.catalogGpuTextures = 0;
@@ -212,9 +213,18 @@ auto EditorWorkspaceState::preparePreviewAssetBindings() -> Tina::Core::Status{
         appendReference(frame->spriteId, Tina::AssetFormat::AssetKind::Sprite);
     }
 
+    // Scene references are mandatory for the runtime preview. Project Assets thumbnails are
+    // best-effort and are appended below in stable Catalog order so a full Store never blocks
+    // the scene itself from being previewed.
+    const std::vector<PreviewAssetReference> requiredReferences = references;
+    const auto isRequiredReference = [&requiredReferences](
+                                         const PreviewAssetReference& reference) noexcept {
+        return std::find(requiredReferences.begin(), requiredReferences.end(), reference) !=
+               requiredReferences.end();
+    };
     std::vector<Tina::Core::AssetId> loadIds;
     const Tina::Asset::CatalogSnapshot& catalog = *assetResources_.system->catalog();
-    for (const PreviewAssetReference& reference : references) {
+    for (const PreviewAssetReference& reference : requiredReferences) {
         const auto entryIndex = catalog.find(reference.assetId);
         const auto entry = entryIndex.has_value() ? catalog.entry(*entryIndex) : std::nullopt;
         if (!entry.has_value() || entry->assetKind != reference.kind) {
@@ -234,14 +244,88 @@ auto EditorWorkspaceState::preparePreviewAssetBindings() -> Tina::Core::Status{
         counters_.catalogAssetsLoaded = loaded->size();
     }
 
+    std::vector<PreviewAssetReference> optionalReferences;
+    optionalReferences.reserve(catalog.entryCount());
+    for (u32 entryIndex = 0; entryIndex < catalog.entryCount(); ++entryIndex) {
+        const auto entry = catalog.entry(entryIndex);
+        if (!entry || (entry->assetKind != Tina::AssetFormat::AssetKind::Texture2D &&
+                       entry->assetKind != Tina::AssetFormat::AssetKind::Sprite)) {
+            continue;
+        }
+        const PreviewAssetReference reference{
+            .assetId = entry->assetId,
+            .kind = entry->assetKind,
+        };
+        if (isRequiredReference(reference) ||
+            std::find(optionalReferences.begin(), optionalReferences.end(), reference) !=
+                optionalReferences.end()) {
+            continue;
+        }
+        optionalReferences.push_back(reference);
+        references.push_back(reference);
+    }
+    for (const PreviewAssetReference& reference : optionalReferences) {
+        const auto entryIndex = catalog.find(reference.assetId);
+        const auto entry = entryIndex.has_value() ? catalog.entry(*entryIndex) : std::nullopt;
+        if (!entry || entry->assetKind != reference.kind) {
+            continue;
+        }
+        Tina::Core::usize requiredSlots =
+            assetResources_.system->find(reference.assetId).has_value() ? 0U : 1U;
+        std::vector<Tina::Core::AssetId> unloadedDependencies;
+        unloadedDependencies.reserve(entry->dependencyCount);
+        bool dependenciesValid = true;
+        for (u32 dependencyIndex = 0; dependencyIndex < entry->dependencyCount;
+             ++dependencyIndex) {
+            const auto dependency = catalog.dependency(*entryIndex, dependencyIndex);
+            if (!dependency ||
+                (reference.kind == Tina::AssetFormat::AssetKind::Sprite &&
+                 dependency->expectedKind != Tina::AssetFormat::AssetKind::Texture2D)) {
+                dependenciesValid = false;
+                break;
+            }
+            if (!assetResources_.system->find(dependency->assetId).has_value() &&
+                std::find(unloadedDependencies.begin(), unloadedDependencies.end(),
+                          dependency->assetId) == unloadedDependencies.end()) {
+                unloadedDependencies.push_back(dependency->assetId);
+                ++requiredSlots;
+            }
+        }
+        if (!dependenciesValid ||
+            requiredSlots > assetResources_.system->store().availableCount()) {
+            continue;
+        }
+        const bool wasLoaded = assetResources_.system->find(reference.assetId).has_value();
+        const auto loaded = assetResources_.system->load(
+            std::span<const Tina::Core::AssetId>(&reference.assetId, 1U));
+        if (!loaded) {
+            // Optional Project Assets intentionally fall back to their kind icon when the
+            // fixed-capacity Store or the source artifact cannot provide a preview.
+            continue;
+        }
+        for (const Tina::Asset::AssetHandle handle : *loaded) {
+            if (!containsHandle(loadedPreviewHandles_, handle)) {
+                loadedPreviewHandles_.push_back(handle);
+            }
+        }
+        if (!wasLoaded) {
+            counters_.catalogAssetsLoaded += loaded->size();
+        }
+    }
+
     std::vector<Tina::Asset::AssetHandle> spriteAssets;
     std::vector<Tina::Asset::AssetHandle> tilesetAssets;
     std::vector<Tina::Asset::AssetHandle> spriteTextureAssets;
+    std::vector<Tina::Asset::AssetHandle> requiredSpriteTextureAssets;
     for (const PreviewAssetReference& reference : references) {
         if (reference.kind == Tina::AssetFormat::AssetKind::Texture2D) {
             const Tina::Asset::AssetHandle texture = loadedAsset(reference.assetId, reference.kind);
             if (texture && !containsHandle(spriteTextureAssets, texture)) {
                 spriteTextureAssets.push_back(texture);
+            }
+            if (texture && isRequiredReference(reference) &&
+                !containsHandle(requiredSpriteTextureAssets, texture)) {
+                requiredSpriteTextureAssets.push_back(texture);
             }
             continue;
         }
@@ -257,12 +341,18 @@ auto EditorWorkspaceState::preparePreviewAssetBindings() -> Tina::Core::Status{
         const auto textureDependency = file != nullptr ? file->dependency(0) : std::nullopt;
         if (!textureDependency.has_value() ||
             textureDependency->expectedKind != Tina::AssetFormat::AssetKind::Texture2D) {
+            if (!isRequiredReference(reference)) {
+                continue;
+            }
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                        "Catalog 2D asset has no required Texture2D dependency");
         }
         const Tina::Asset::AssetHandle texture = loadedAsset(
             textureDependency->assetId, Tina::AssetFormat::AssetKind::Texture2D);
         if (!texture) {
+            if (!isRequiredReference(reference)) {
+                continue;
+            }
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                        "Catalog 2D Texture2D dependency was not loaded");
         }
@@ -276,6 +366,10 @@ auto EditorWorkspaceState::preparePreviewAssetBindings() -> Tina::Core::Status{
         if (!containsHandle(spriteTextureAssets, texture)) {
             spriteTextureAssets.push_back(texture);
         }
+        if (isRequiredReference(reference) &&
+            !containsHandle(requiredSpriteTextureAssets, texture)) {
+            requiredSpriteTextureAssets.push_back(texture);
+        }
     }
     if (!spriteTextureAssets.empty()) {
         auto registry = Tina::Asset::Sprite2DBindingRegistry::Create(
@@ -285,42 +379,58 @@ auto EditorWorkspaceState::preparePreviewAssetBindings() -> Tina::Core::Status{
                 .memoryResource = &assetResources_.memory,
             });
         if (!registry) {
-            return Tina::Core::failure(std::move(registry.error()));
-        }
-        spriteBindings_.emplace(std::move(*registry));
-        for (const Tina::Asset::AssetHandle textureAsset : spriteTextureAssets) {
-            const Tina::Asset::CookedAssetFile* textureFile =
-                assetResources_.system->tryGet(textureAsset);
-            if (textureFile == nullptr) {
-                return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                           "Catalog Texture2D payload is unavailable");
+            if (!requiredSpriteTextureAssets.empty()) {
+                return Tina::Core::failure(std::move(registry.error()));
             }
-            auto texture = Tina::Asset::uploadTexture2DFromCooked(*device, *textureFile);
-            if (!texture) {
-                return Tina::Core::failure(std::move(texture.error()));
-            }
-            Tina::Render::GpuTextureId gpuTexture = *texture;
-            auto textureCleanup = Tina::Core::makeScopeExit([device, &gpuTexture]() noexcept {
-                if (gpuTexture) {
-                    (void)device->destroyTexture2D(gpuTexture);
+        } else {
+            spriteBindings_.emplace(std::move(*registry));
+            for (const Tina::Asset::AssetHandle textureAsset : spriteTextureAssets) {
+                const bool requiredTexture =
+                    containsHandle(requiredSpriteTextureAssets, textureAsset);
+                const Tina::Asset::CookedAssetFile* textureFile =
+                    assetResources_.system->tryGet(textureAsset);
+                if (textureFile == nullptr) {
+                    if (!requiredTexture) {
+                        continue;
+                    }
+                    return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                               "Catalog Texture2D payload is unavailable");
                 }
-            });
-            auto binding = spriteBindings_->registerTextureBinding(textureAsset, gpuTexture);
-            if (!binding) {
-                return Tina::Core::failure(std::move(binding.error()));
+                auto texture = Tina::Asset::uploadTexture2DFromCooked(*device, *textureFile);
+                if (!texture) {
+                    if (!requiredTexture) {
+                        continue;
+                    }
+                    return Tina::Core::failure(std::move(texture.error()));
+                }
+                Tina::Render::GpuTextureId gpuTexture = *texture;
+                auto textureCleanup = Tina::Core::makeScopeExit([device, &gpuTexture]() noexcept {
+                    if (gpuTexture) {
+                        (void)device->destroyTexture2D(gpuTexture);
+                    }
+                });
+                auto binding = spriteBindings_->registerTextureBinding(textureAsset, gpuTexture);
+                if (!binding) {
+                    if (!requiredTexture) {
+                        continue;
+                    }
+                    return Tina::Core::failure(std::move(binding.error()));
+                }
+                textureCleanup.release();
+                ++counters_.catalogGpuTextures;
+                ++counters_.catalogSpriteBindings;
             }
-            textureCleanup.release();
-            ++counters_.catalogGpuTextures;
-            ++counters_.catalogSpriteBindings;
-        }
-        for (const Tina::Asset::AssetHandle sprite : spriteAssets) {
-            if (spriteBindings_->resolveSprite(sprite) != 0) {
-                boundSpriteAssets_.push_back(sprite);
+            imageResolver_.setCatalogTextureResolver(
+                spriteBindings_->texture2DFrameResourceResolver());
+            for (const Tina::Asset::AssetHandle sprite : spriteAssets) {
+                if (spriteBindings_->resolveSprite(sprite) != 0) {
+                    boundSpriteAssets_.push_back(sprite);
+                }
             }
-        }
-        for (const Tina::Asset::AssetHandle tileset : tilesetAssets) {
-            if (spriteBindings_->resolveTileset(tileset) != 0) {
-                boundTilesetAssets_.push_back(tileset);
+            for (const Tina::Asset::AssetHandle tileset : tilesetAssets) {
+                if (spriteBindings_->resolveTileset(tileset) != 0) {
+                    boundTilesetAssets_.push_back(tileset);
+                }
             }
         }
     }
@@ -455,28 +565,49 @@ auto EditorWorkspaceState::preparePreviewAssetBindings() -> Tina::Core::Status{
     return Tina::Core::success();
 }
 
-auto EditorWorkspaceState::releasePreviewAssetBindings() noexcept -> void{
+auto EditorWorkspaceState::previewAssetBindingsHaveActiveFrameBorrows() const noexcept -> bool{
+    return (mesh3DBindings_.has_value() &&
+            mesh3DBindings_->hasActiveFrameBorrows()) ||
+           (spriteBindings_.has_value() &&
+            spriteBindings_->hasActiveFrameBorrows());
+}
+
+auto EditorWorkspaceState::releasePreviewAssetBindings() noexcept -> Tina::Core::Status{
     previewWorld_.reset();
     previewTileMap_.reset();
     previewTileMapLayerIds_.clear();
     previewTilesetAsset_ = {};
+
+    std::optional<Tina::Core::Error> firstFailure;
     if (mesh3DBindings_.has_value()) {
         if (auto status = mesh3DBindings_->retireAllBindings(); !status) {
-            std::terminate();
+            firstFailure.emplace(std::move(status.error()));
+        } else {
+            mesh3DBindings_.reset();
         }
-        mesh3DBindings_.reset();
     }
     if (spriteBindings_.has_value()) {
         if (auto status = spriteBindings_->retireAllTextureBindings(); !status) {
-            std::terminate();
+            if (!firstFailure.has_value()) {
+                firstFailure.emplace(std::move(status.error()));
+            }
+        } else {
+            spriteBindings_.reset();
+            imageResolver_.clearCatalogTextureResolver();
         }
-        spriteBindings_.reset();
+    }
+    if (!spriteBindings_.has_value()) {
+        imageResolver_.clearCatalogTextureResolver();
     }
     loadedPreviewHandles_.clear();
     boundSpriteAssets_.clear();
     boundTilesetAssets_.clear();
     boundMeshAssets_.clear();
     boundMaterialAssets_.clear();
+    if (firstFailure.has_value()) {
+        return Tina::Core::failure(std::move(*firstFailure));
+    }
+    return Tina::Core::success();
 }
 
 auto EditorWorkspaceState::validateRuntimePreview() -> Tina::Core::Status{

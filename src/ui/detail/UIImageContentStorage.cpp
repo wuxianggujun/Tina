@@ -3,16 +3,20 @@
 #include <tina/ui/UIErrors.hpp>
 
 #include <algorithm>
+#include <cassert>
 #include <utility>
 
 namespace Tina::UI::Detail {
 
 UIImageContentStorage::UIImageContentStorage(usize nodeCapacity, usize imageCapacity,
                                              std::pmr::memory_resource& resource)
-    : slotByNodeIndex_(&resource), slots_(&resource)
+    : slotByNodeIndex_(&resource), slots_(&resource),
+      rollbackSlotByNodeIndex_(&resource), rollbackSlots_(&resource)
 {
     slotByNodeIndex_.resize(nodeCapacity, InvalidSlot);
     slots_.resize(imageCapacity);
+    rollbackSlotByNodeIndex_.resize(nodeCapacity, InvalidSlot);
+    rollbackSlots_.resize(imageCapacity);
     for (usize index = 0; index < imageCapacity; ++index)
     {
         slots_[index].next = index + 1U < imageCapacity ? static_cast<u32>(index + 1U) : InvalidSlot;
@@ -47,6 +51,27 @@ Core::Status UIImageContentStorage::assign(u32 nodeIndex, const UIImageContent& 
     slotByNodeIndex_[nodeIndex] = slotIndex;
     ++activeCount_;
     highWater_ = (std::max)(highWater_, activeCount_);
+    return Core::success();
+}
+
+Core::Status UIImageContentStorage::replace(u32 nodeIndex, const UIImageContent& content)
+{
+    if (nodeIndex >= slotByNodeIndex_.size())
+    {
+        return Core::failure(Core::CoreErrorCode::Internal,
+                             "UI image content state index is out of range");
+    }
+    const u32 slotIndex = slotByNodeIndex_[nodeIndex];
+    if (slotIndex == InvalidSlot)
+    {
+        return assign(nodeIndex, content);
+    }
+    if (slotIndex >= slots_.size() || !slots_[slotIndex].active)
+    {
+        return Core::failure(Core::CoreErrorCode::Internal,
+                             "UI image content storage slot ownership is invalid");
+    }
+    slots_[slotIndex].content = content;
     return Core::success();
 }
 
@@ -89,6 +114,40 @@ void UIImageContentStorage::release(u32 nodeIndex) noexcept
         --activeCount_;
     }
     slotByNodeIndex_[nodeIndex] = InvalidSlot;
+}
+
+void UIImageContentStorage::beginCandidateTransaction() noexcept
+{
+    assert(!candidateTransactionActive_);
+    std::copy(slotByNodeIndex_.begin(), slotByNodeIndex_.end(),
+              rollbackSlotByNodeIndex_.begin());
+    std::copy(slots_.begin(), slots_.end(), rollbackSlots_.begin());
+    rollbackFreeHead_ = freeHead_;
+    rollbackActiveCount_ = activeCount_;
+    rollbackHighWater_ = highWater_;
+    candidateTransactionActive_ = true;
+}
+
+void UIImageContentStorage::commitCandidateTransaction() noexcept
+{
+    candidateTransactionActive_ = false;
+}
+
+void UIImageContentStorage::rollbackCandidateTransaction() noexcept
+{
+    if (!candidateTransactionActive_)
+    {
+        return;
+    }
+    assert(slotByNodeIndex_.size() == rollbackSlotByNodeIndex_.size());
+    assert(slots_.size() == rollbackSlots_.size());
+    std::copy(rollbackSlotByNodeIndex_.begin(), rollbackSlotByNodeIndex_.end(),
+              slotByNodeIndex_.begin());
+    std::copy(rollbackSlots_.begin(), rollbackSlots_.end(), slots_.begin());
+    freeHead_ = rollbackFreeHead_;
+    activeCount_ = rollbackActiveCount_;
+    highWater_ = rollbackHighWater_;
+    candidateTransactionActive_ = false;
 }
 
 const UIImageContent* UIImageContentStorage::get(u32 nodeIndex) const noexcept

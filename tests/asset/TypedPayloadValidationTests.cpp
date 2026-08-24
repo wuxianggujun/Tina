@@ -174,6 +174,7 @@ TEST(TypedPayloadValidationTests, RejectsPrefabDependencySetMissingPayloadRefere
     const auto materialId = *Core::AssetId::fromBytes(idBytes(3U));
     const std::array nodes{AssetFormat::PrefabNodeDesc{
         .stableNodeId = 1,
+        .nodeKind = AssetFormat::PrefabNodeKind::Mesh3D,
         .meshId = meshId,
         .materialId = materialId,
     }};

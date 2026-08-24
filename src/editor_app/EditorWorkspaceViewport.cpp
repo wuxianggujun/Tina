@@ -13,6 +13,7 @@ auto EditorWorkspaceState::resetViewportInteractionState() noexcept -> void{
         ++viewportSelectionRevision_;
     }
     viewportSelectedEntityCount_ = 0;
+    viewportPreselectionStableId_ = 0U;
     preserveViewportSelectionOnHierarchyPublish_ = false;
     pendingViewportNavigationCount_ = 0;
     viewportNavigationQueueOverflowed_ = false;
@@ -578,7 +579,10 @@ auto EditorWorkspaceState::updateViewportNavigation(
 
 auto EditorWorkspaceState::handleViewportPointerDown(UI::UIRoutedPointerEvent& event) noexcept -> void{
     const UI::UIPointerInputEvent& input = event.input();
+    viewportPreselectionStableId_ =
+        viewportStableIdAtPosition(input.position).value_or(0U);
     if (input.button != Tina::Platform::PointerButton::Primary) {
+        viewportPreselectionStableId_ = 0U;
         if (!beginViewportNavigation(input.pointer, input.button)) {
             return;
         }
@@ -589,6 +593,7 @@ auto EditorWorkspaceState::handleViewportPointerDown(UI::UIRoutedPointerEvent& e
         return;
     }
     if (queueViewportTileBrush(input.position)) {
+        viewportPreselectionStableId_ = 0U;
         (void)event.claimPointerButton(Tina::Platform::PointerButton::Primary);
         event.consumeInputTransition();
         event.preventDefaultAction();
@@ -603,6 +608,7 @@ auto EditorWorkspaceState::handleViewportPointerDown(UI::UIRoutedPointerEvent& e
         return;
     }
     if (began || marqueeBegan) {
+        viewportPreselectionStableId_ = 0U;
         event.capturePointer();
     }
     (void)event.claimPointerButton(Tina::Platform::PointerButton::Primary);
@@ -613,6 +619,7 @@ auto EditorWorkspaceState::handleViewportPointerDown(UI::UIRoutedPointerEvent& e
 auto EditorWorkspaceState::handleViewportPointerMove(UI::UIRoutedPointerEvent& event) noexcept -> void{
     const UI::UIPointerInputEvent& input = event.input();
     if (viewportNavigationDrag_.captured) {
+        viewportPreselectionStableId_ = 0U;
         if (!updateViewportNavigation(input)) {
             return;
         }
@@ -622,12 +629,14 @@ auto EditorWorkspaceState::handleViewportPointerMove(UI::UIRoutedPointerEvent& e
         return;
     }
     if (updateViewportGizmo(input.pointer, input.position)) {
+        viewportPreselectionStableId_ = 0U;
         (void)event.claimPointerButton(Tina::Platform::PointerButton::Primary);
         event.consumeInputTransition();
         event.preventDefaultAction();
         return;
     }
     if (updateViewportMarquee(input.pointer, input.position)) {
+        viewportPreselectionStableId_ = 0U;
         (void)event.claimPointerButton(Tina::Platform::PointerButton::Primary);
         event.consumeInputTransition();
         event.preventDefaultAction();
@@ -639,6 +648,10 @@ auto EditorWorkspaceState::handleViewportPointerMove(UI::UIRoutedPointerEvent& e
         (void)viewportTransformGizmo_.updateHover(
             {.x = input.position.x, .y = input.position.y});
     }
+    if (!viewportGizmo_.captured && !viewportMarquee_.captured) {
+        viewportPreselectionStableId_ =
+            viewportStableIdAtPosition(input.position).value_or(0U);
+    }
 }
 
 auto EditorWorkspaceState::handleViewportPointerUp(UI::UIRoutedPointerEvent& event) noexcept -> void{
@@ -647,6 +660,7 @@ auto EditorWorkspaceState::handleViewportPointerUp(UI::UIRoutedPointerEvent& eve
         input.pointer == viewportNavigationDrag_.pointer &&
         input.button == viewportNavigationDrag_.button) {
         viewportNavigationDrag_ = {};
+        viewportPreselectionStableId_ = 0U;
         event.releasePointerCapture();
         event.consumeInputTransition();
         event.preventDefaultAction();
@@ -661,8 +675,12 @@ auto EditorWorkspaceState::handleViewportPointerUp(UI::UIRoutedPointerEvent& eve
         handled = true;
     }
     if (!handled) {
+        viewportPreselectionStableId_ =
+            viewportStableIdAtPosition(input.position).value_or(0U);
         return;
     }
+    viewportPreselectionStableId_ =
+        viewportStableIdAtPosition(input.position).value_or(0U);
     event.releasePointerCapture();
     event.consumeInputTransition();
     event.preventDefaultAction();
@@ -685,6 +703,7 @@ auto EditorWorkspaceState::handleViewportPointerCancel(UI::UIRoutedPointerEvent&
         viewportMarquee_.cancelRequested = true;
         handled = true;
     }
+    viewportPreselectionStableId_ = 0U;
     if (!handled) {
         return;
     }
@@ -1349,7 +1368,30 @@ auto EditorWorkspaceState::refreshViewportViewModeUi(Tina::PrimaryWindowUITreeUp
     }
     viewportModeLayout_.visibility = world2D ? UI::UIVisibility::Collapsed
                                              : UI::UIVisibility::Visible;
-    return tree.setLayoutStyle(viewportMode_, viewportModeLayout_);
+    if (auto status = tree.setLayoutStyle(viewportMode_, viewportModeLayout_);
+        !status) {
+        return status;
+    }
+    if (!viewportStatusText_.hasValue()) {
+        return Tina::Core::success();
+    }
+    std::string statusText = world2D ? "World2D | Camera2D | Zoom "
+                                     : "World3D | ";
+    if (!world2D) {
+        statusText += viewport3DViewPreset_.has_value()
+                          ? std::string{viewportViewPresetName(*viewport3DViewPreset_)}
+                          : "Custom";
+        statusText += " | Zoom ";
+    }
+    statusText += std::to_string(static_cast<u32>(std::round(viewportZoomPercent_)));
+    statusText += "% | Grid ";
+    statusText += viewportGridVisibleNodeCount_ != 0U ? "On" : "Off";
+    statusText += " | Snap ";
+    statusText += viewportTransformGizmo_.snap().enabled ? "On" : "Off";
+    statusText += " | ";
+    statusText += std::to_string(viewportSelectedEntityCount_);
+    statusText += " selected";
+    return tree.setText(viewportStatusText_, statusText);
 }
 
 } // namespace Tina::EditorApp::WorkspaceInternal

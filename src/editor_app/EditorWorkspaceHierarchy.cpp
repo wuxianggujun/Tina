@@ -635,6 +635,163 @@ auto EditorWorkspaceState::hierarchyStableIdAtPosition(
     return stableEntityIdForHierarchyItem(descriptor.key);
 }
 
+auto EditorWorkspaceState::hierarchyDropRequestAtPosition(
+    UI::UILogicalPoint position) const noexcept
+    -> std::optional<HierarchyDropRequest>
+{
+    if (hierarchyDragStableId_ == 0U) {
+        return std::nullopt;
+    }
+    const auto targetStableId = hierarchyStableIdAtPosition(position);
+    if (!targetStableId.has_value() || *targetStableId == hierarchyDragStableId_) {
+        return std::nullopt;
+    }
+    const float localY = position.y - hierarchyTreeRect_.y +
+                         hierarchyTreeMetrics_.scrollOffset;
+    const float rowOffset = std::fmod(localY, hierarchyTreeRowHeight_);
+    const float rowFraction = hierarchyTreeRowHeight_ > 0.0F
+                                  ? rowOffset / hierarchyTreeRowHeight_
+                                  : 0.5F;
+    HierarchyDropIntent intent = HierarchyDropIntent::Reparent;
+    if (*targetStableId != 0U && rowFraction < 0.25F) {
+        intent = HierarchyDropIntent::ReorderBefore;
+    } else if (*targetStableId != 0U && rowFraction > 0.75F) {
+        intent = HierarchyDropIntent::ReorderAfter;
+    }
+    return HierarchyDropRequest{
+        .sourceStableId = hierarchyDragStableId_,
+        .targetStableId = *targetStableId,
+        .intent = intent,
+    };
+}
+
+auto EditorWorkspaceState::refreshHierarchyDropIndicator(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    const auto hideIndicator = [&]() -> Tina::Core::Status {
+        hierarchyDropIndicatorStableId_ = 0U;
+        hierarchyPublishedDrop_.reset();
+        hierarchyDropIndicatorIntent_ = HierarchyDropIntent::Reparent;
+        hierarchyDropIndicatorLayout_ =
+            hierarchyRenameLayout(UI::UIVisibility::Collapsed);
+        return hierarchyDropIndicator_.hasValue()
+                   ? tree.setLayoutStyle(
+                         hierarchyDropIndicator_, hierarchyDropIndicatorLayout_)
+                   : Tina::Core::success();
+    };
+    if (!hierarchyDropIndicator_.hasValue() || !hierarchyDragActive_ ||
+        hierarchyDragStableId_ == 0U) {
+        return hideIndicator();
+    }
+
+    const auto dropRequest =
+        hierarchyDropRequestAtPosition(hierarchyDragCurrentPosition_);
+    if (!dropRequest.has_value()) {
+        return hideIndicator();
+    }
+    const u32 targetStableId = dropRequest->targetStableId;
+    const auto logicalIndex = visibleHierarchyIndex(targetStableId);
+    if (!logicalIndex.has_value()) {
+        return hideIndicator();
+    }
+    auto rowNode = tree.treeViewMaterializedItemNode(
+        hierarchyTree_, *logicalIndex);
+    if (!rowNode) {
+        return Tina::Core::failure(std::move(rowNode.error()));
+    }
+    if (!rowNode->hasValue()) {
+        return hideIndicator();
+    }
+    auto rowRect = tree.committedLayoutRect(*rowNode);
+    if (!rowRect) {
+        return Tina::Core::failure(std::move(rowRect.error()));
+    }
+    auto dockRect = tree.committedLayoutRect(leftDock_);
+    if (!dockRect) {
+        return Tina::Core::failure(std::move(dockRect.error()));
+    }
+
+    const HierarchyDropIntent intent = dropRequest->intent;
+    std::string_view indicatorText = "[Inside]";
+    if (intent == HierarchyDropIntent::ReorderBefore) {
+        indicatorText = "[Before]";
+    } else if (intent == HierarchyDropIntent::ReorderAfter) {
+        indicatorText = "[After]";
+    }
+
+    constexpr float IndicatorWidth = 96.0F;
+    constexpr float IndicatorHeight = 22.0F;
+    constexpr float IndicatorInset = 6.0F;
+    const float contentOriginX = dockRect->x + leftDockLayout_.padding.left;
+    const float contentOriginY = dockRect->y + leftDockLayout_.padding.top;
+    const float offsetX =
+        (std::max)(rowRect->x + IndicatorInset,
+                   rowRect->right() - IndicatorWidth - IndicatorInset) -
+        contentOriginX;
+    float indicatorY = rowRect->y +
+                       (rowRect->height - IndicatorHeight) * 0.5F;
+    if (intent == HierarchyDropIntent::ReorderBefore) {
+        indicatorY = rowRect->y;
+    } else if (intent == HierarchyDropIntent::ReorderAfter) {
+        indicatorY = rowRect->bottom() - IndicatorHeight;
+    }
+    hierarchyDropIndicatorStableId_ = targetStableId;
+    hierarchyDropIndicatorIntent_ = intent;
+    hierarchyPublishedDrop_ = *dropRequest;
+    hierarchyDropIndicatorLayout_ = hierarchyRenameLayout(
+        UI::UIVisibility::Visible, offsetX, indicatorY - contentOriginY,
+        IndicatorWidth, IndicatorHeight);
+    if (auto status = tree.setText(hierarchyDropIndicator_, indicatorText);
+        !status) {
+        return status;
+    }
+    return tree.setLayoutStyle(
+        hierarchyDropIndicator_, hierarchyDropIndicatorLayout_);
+}
+
+auto EditorWorkspaceState::updateHierarchyPreselectionVisual(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    UI::UILayoutStyle collapsed =
+        hierarchyRenameLayout(UI::UIVisibility::Collapsed);
+    if (!hierarchyPreselectionNode_.hasValue() ||
+        hierarchyPreselectionStableId_ == 0U || hierarchyDragActive_) {
+        return tree.setLayoutStyle(hierarchyPreselectionNode_, collapsed);
+    }
+    const auto logicalIndex =
+        visibleHierarchyIndex(hierarchyPreselectionStableId_);
+    if (!logicalIndex.has_value()) {
+        hierarchyPreselectionStableId_ = 0U;
+        return tree.setLayoutStyle(hierarchyPreselectionNode_, collapsed);
+    }
+    auto rowNode = tree.treeViewMaterializedItemNode(
+        hierarchyTree_, *logicalIndex);
+    if (!rowNode) {
+        return Tina::Core::failure(std::move(rowNode.error()));
+    }
+    if (!rowNode->hasValue()) {
+        return tree.setLayoutStyle(hierarchyPreselectionNode_, collapsed);
+    }
+    auto rowRect = tree.committedLayoutRect(*rowNode);
+    if (!rowRect) {
+        return Tina::Core::failure(std::move(rowRect.error()));
+    }
+    auto dockRect = tree.committedLayoutRect(leftDock_);
+    if (!dockRect) {
+        return Tina::Core::failure(std::move(dockRect.error()));
+    }
+    const float contentOriginX = dockRect->x + leftDockLayout_.padding.left;
+    const float contentOriginY = dockRect->y + leftDockLayout_.padding.top;
+    constexpr float PreselectionInset = 1.0F;
+    const float offsetX = rowRect->x - contentOriginX + PreselectionInset;
+    const float offsetY = rowRect->y - contentOriginY + PreselectionInset;
+    const float width = (std::max)(1.0F, rowRect->width - PreselectionInset * 2.0F);
+    const float height = (std::max)(1.0F, rowRect->height - PreselectionInset * 2.0F);
+    UI::UILayoutStyle layout = hierarchyRenameLayout(
+        UI::UIVisibility::Visible, offsetX, offsetY, width, height);
+    return tree.setLayoutStyle(hierarchyPreselectionNode_, layout);
+}
+
 auto EditorWorkspaceState::projectAssetVisibleIndexAtPosition(
     UI::UILogicalPoint position) const noexcept -> std::optional<u64>
 {
@@ -675,6 +832,8 @@ void EditorWorkspaceState::handleHierarchyPointerDown(
     UI::UIRoutedPointerEvent& event) noexcept
 {
     const auto& input = event.input();
+    hierarchyPreselectionStableId_ =
+        hierarchyStableIdAtPosition(input.position).value_or(0U);
     if (input.button == Tina::Platform::PointerButton::Secondary) {
         const auto stableId = hierarchyStableIdAtPosition(input.position);
         hierarchyContextStableId_ = stableId.value_or(0U);
@@ -708,6 +867,7 @@ void EditorWorkspaceState::handleHierarchyPointerDown(
     hierarchyDragPointer_ = input.pointer;
     hierarchyDragStableId_ = *stableId;
     hierarchyDragStartPosition_ = input.position;
+    hierarchyDragCurrentPosition_ = input.position;
     hierarchyDragActive_ = false;
     event.capturePointer();
 }
@@ -715,10 +875,13 @@ void EditorWorkspaceState::handleHierarchyPointerDown(
 void EditorWorkspaceState::handleHierarchyPointerMove(
     UI::UIRoutedPointerEvent& event) noexcept
 {
+    hierarchyPreselectionStableId_ =
+        hierarchyStableIdAtPosition(event.input().position).value_or(0U);
     if (!hierarchyDragStableId_ || event.input().pointer != hierarchyDragPointer_) {
         return;
     }
     const auto& position = event.input().position;
+    hierarchyDragCurrentPosition_ = position;
     const float dx = position.x - hierarchyDragStartPosition_.x;
     const float dy = position.y - hierarchyDragStartPosition_.y;
     if (!hierarchyDragActive_ && (dx * dx + dy * dy) >= 25.0F) {
@@ -731,6 +894,7 @@ void EditorWorkspaceState::handleHierarchyPointerMove(
         }
     }
     if (hierarchyDragActive_) {
+        hierarchyPublishedDrop_ = hierarchyDropRequestAtPosition(position);
         event.consumeInputTransition();
         event.preventDefaultAction();
     }
@@ -739,32 +903,18 @@ void EditorWorkspaceState::handleHierarchyPointerMove(
 void EditorWorkspaceState::handleHierarchyPointerUp(
     UI::UIRoutedPointerEvent& event) noexcept
 {
+    hierarchyPreselectionStableId_ =
+        hierarchyStableIdAtPosition(event.input().position).value_or(0U);
     if (event.input().pointer != hierarchyDragPointer_ ||
         event.input().button != Tina::Platform::PointerButton::Primary) {
         return;
     }
     if (hierarchyDragActive_) {
-        const auto hovered = hierarchyStableIdAtPosition(event.input().position);
-        if (hovered.has_value() && *hovered != hierarchyDragStableId_) {
-            const EditorHierarchyRow* source = hierarchyRow(hierarchyDragStableId_);
-            const EditorHierarchyRow* destination = hierarchyRow(*hovered);
-            if (source != nullptr && destination != nullptr) {
-                const float localY = event.input().position.y - hierarchyTreeRect_.y +
-                                     hierarchyTreeMetrics_.scrollOffset;
-                const float rowOffset = std::fmod(localY, hierarchyTreeRowHeight_);
-                const float rowFraction = rowOffset / hierarchyTreeRowHeight_;
-                HierarchyDropIntent intent = HierarchyDropIntent::Reparent;
-                if (*hovered != 0U && rowFraction < 0.25F) {
-                    intent = HierarchyDropIntent::ReorderBefore;
-                } else if (*hovered != 0U && rowFraction > 0.75F) {
-                    intent = HierarchyDropIntent::ReorderAfter;
-                }
-                pendingHierarchyDrop_ = HierarchyDropRequest{
-                    .sourceStableId = hierarchyDragStableId_,
-                    .targetStableId = *hovered,
-                    .intent = intent,
-                };
-            }
+        if (hierarchyPublishedDrop_.has_value() &&
+            hierarchyPublishedDrop_->sourceStableId == hierarchyDragStableId_ &&
+            hierarchyPublishedDrop_->sourceStableId !=
+                hierarchyPublishedDrop_->targetStableId) {
+            pendingHierarchyDrop_ = *hierarchyPublishedDrop_;
         }
         event.consumeInputTransition();
         event.preventDefaultAction();
@@ -772,22 +922,84 @@ void EditorWorkspaceState::handleHierarchyPointerUp(
     event.releasePointerCapture();
     hierarchyDragStableId_ = 0;
     hierarchyDragActive_ = false;
+    hierarchyDropIndicatorStableId_ = 0U;
+    hierarchyPublishedDrop_.reset();
+    hierarchyDropIndicatorIntent_ = HierarchyDropIntent::Reparent;
+}
+
+void EditorWorkspaceState::handleHierarchyPointerCancel(
+    UI::UIRoutedPointerEvent& event) noexcept
+{
+    if (hierarchyDragStableId_ == 0U ||
+        event.input().pointer != hierarchyDragPointer_) {
+        return;
+    }
+    event.releasePointerCapture();
+    event.consumeInputTransition();
+    event.preventDefaultAction();
+    hierarchyDragStableId_ = 0U;
+    hierarchyDragActive_ = false;
+    hierarchyPreselectionStableId_ = 0U;
+    hierarchyDragCurrentPosition_ = {};
+    hierarchyDropIndicatorStableId_ = 0U;
+    hierarchyDropIndicatorIntent_ = HierarchyDropIntent::Reparent;
+    hierarchyPublishedDrop_.reset();
+    lastHierarchyPointerDownStableId_ = 0U;
+    pendingHierarchyRenameStableId_.reset();
 }
 
 void EditorWorkspaceState::handleProjectAssetPointerDown(
     UI::UIRoutedPointerEvent& event) noexcept
 {
     const auto& input = event.input();
-    if (input.button != Tina::Platform::PointerButton::Primary ||
-        !projectAssets_.visibleItemCount()) {
+    if (input.button != Tina::Platform::PointerButton::Primary &&
+        input.button != Tina::Platform::PointerButton::Secondary) {
+        return;
+    }
+    if (!projectAssets_.visibleItemCount()) {
+        if (input.button == Tina::Platform::PointerButton::Secondary) {
+            event.preventDefaultAction();
+            event.consumeInputTransition();
+        }
         return;
     }
     const auto index = projectAssetVisibleIndexAtPosition(input.position);
     if (!index.has_value()) {
+        if (input.button == Tina::Platform::PointerButton::Secondary) {
+            event.preventDefaultAction();
+            event.consumeInputTransition();
+        }
         return;
     }
+    const auto* asset = projectAssets_.visibleItem(
+        static_cast<Tina::Core::usize>(*index));
+    if (asset == nullptr) {
+        if (input.button == Tina::Platform::PointerButton::Secondary) {
+            event.preventDefaultAction();
+            event.consumeInputTransition();
+        }
+        return;
+    }
+    projectAssetContextAssetId_ = asset->assetId;
+    if (input.button == Tina::Platform::PointerButton::Secondary) {
+        // The retained Menu opens from the anchored list through its default
+        // secondary-button behavior. Empty chrome is handled below without
+        // opening a disabled menu.
+        return;
+    }
+    const u64 frame = counters_.frameUpdates;
+    if (asset->assetId == lastProjectAssetPointerDownAssetId_ &&
+        frame >= lastProjectAssetPointerDownFrame_ &&
+        frame - lastProjectAssetPointerDownFrame_ <= 24U) {
+        pendingProjectAssetOpen_ = asset->assetId;
+        if (!queueEditorCommand(EditorCommand::OpenSelectedProjectAsset)) {
+            pendingProjectAssetOpen_.reset();
+        }
+    }
+    lastProjectAssetPointerDownAssetId_ = asset->assetId;
+    lastProjectAssetPointerDownFrame_ = frame;
     projectAssetDragPointer_ = input.pointer;
-    projectAssetDragVisibleIndex_ = *index;
+    projectAssetDragAssetId_ = asset->assetId;
     projectAssetDragStartPosition_ = input.position;
     projectAssetDragActive_ = false;
     event.capturePointer();
@@ -797,7 +1009,7 @@ void EditorWorkspaceState::handleProjectAssetPointerMove(
     UI::UIRoutedPointerEvent& event) noexcept
 {
     if (event.input().pointer != projectAssetDragPointer_ ||
-        projectAssetDragVisibleIndex_ >= projectAssets_.visibleItemCount()) {
+        !projectAssetDragAssetId_) {
         return;
     }
     const float dx = event.input().position.x - projectAssetDragStartPosition_.x;
@@ -822,7 +1034,7 @@ void EditorWorkspaceState::handleProjectAssetPointerUp(
         const auto target = hierarchyStableIdAtPosition(event.input().position);
         if (target.has_value() && *target != 0U) {
             pendingProjectAssetDrop_ = ProjectAssetDropRequest{
-                .visibleIndex = projectAssetDragVisibleIndex_,
+                .assetId = projectAssetDragAssetId_,
                 .targetStableId = *target,
             };
         } else {
@@ -833,8 +1045,24 @@ void EditorWorkspaceState::handleProjectAssetPointerUp(
         event.preventDefaultAction();
     }
     event.releasePointerCapture();
-    projectAssetDragVisibleIndex_ = 0U;
+    projectAssetDragAssetId_ = {};
     projectAssetDragActive_ = false;
+}
+
+void EditorWorkspaceState::handleProjectAssetPointerCancel(
+    UI::UIRoutedPointerEvent& event) noexcept
+{
+    if (!projectAssetDragAssetId_ ||
+        event.input().pointer != projectAssetDragPointer_) {
+        return;
+    }
+    event.releasePointerCapture();
+    event.consumeInputTransition();
+    event.preventDefaultAction();
+    projectAssetDragAssetId_ = {};
+    projectAssetDragActive_ = false;
+    lastProjectAssetPointerDownAssetId_ = {};
+    pendingProjectAssetOpen_.reset();
 }
 
 } // namespace Tina::EditorApp::WorkspaceInternal

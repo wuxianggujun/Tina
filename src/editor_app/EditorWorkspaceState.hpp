@@ -4,9 +4,11 @@
 // validated World2D and World3D authoring documents and Scene GPU previews.
 
 #include "EditorAnimationPreview.hpp"
+#include "EditorCompositeImageResolver.hpp"
 #include "EditorFileDialog.hpp"
 #include "EditorIconResources.hpp"
 #include "EditorSourceImportLaunchOptions.hpp"
+#include "EditorSourceImportSelection.hpp"
 #include "EditorSourceImportService.hpp"
 #include "EditorWorkspaceUiRecipes.hpp"
 
@@ -20,6 +22,7 @@
 #include <tina/asset/CatalogPackagePublish.hpp>
 #include <tina/asset/Mesh3DBindingRegistry.hpp>
 #include <tina/asset/SourceImportCapture.hpp>
+#include <tina/asset/SourceImportPipeline.hpp>
 #include <tina/asset/SourceImportPlan.hpp>
 #include <tina/asset/Sprite2DBindingRegistry.hpp>
 #include <tina/asset/TileChunkRender.hpp>
@@ -60,6 +63,7 @@
 #include <tina/render/RenderScene.hpp>
 #include <tina/runtime/GameApplication.hpp>
 #include <tina/runtime/GameState.hpp>
+#include <tina/runtime/PlatformEvents.hpp>
 #include <tina/runtime/PrimaryWindowUI.hpp>
 #include <tina/runtime/RunExitReason.hpp>
 #include <tina/scene/Camera2D.hpp>
@@ -147,6 +151,11 @@ inline constexpr u32 SourceImportMaterializedCapacity = 5;
 inline constexpr float SourceImportKindColumnWidth = 88.0F;
 inline constexpr float SourceImportSourceColumnWidth = 190.0F;
 inline constexpr float SourceImportStatusColumnWidth = 84.0F;
+inline constexpr u32 OutputColumnCapacity = 3;
+inline constexpr u32 OutputMaterializedCapacity = 8;
+inline constexpr float OutputSeverityColumnWidth = 76.0F;
+inline constexpr float OutputContextColumnWidth = 132.0F;
+inline constexpr float OutputMessageColumnWidth = 720.0F;
 inline constexpr u32 AuthoringEntityCapacity = 128;
 inline constexpr u32 InitialAuthoringEntityCount = 5;
 inline constexpr u32 AnimationVisibleFrameSlots = 6;
@@ -188,6 +197,7 @@ inline constexpr float RadiansToDegrees = 57.295779513082320876F;
 inline constexpr Tina::Core::usize ViewportGridVisualNodeCapacity =
     Tina::Editor::EditorViewportGridSegmentCapacity;
 inline constexpr Tina::Core::usize ViewportGizmoVisualNodeCapacity = 256;
+inline constexpr Tina::Core::usize ViewportPreselectionVisualNodeCapacity = 1;
 inline constexpr Tina::Core::usize ViewportOrientationAxisCount = 3;
 inline constexpr float ViewportOrientationCompassExtent = 82.0F;
 inline constexpr float ViewportOrientationCompass2DExtent = 58.0F;
@@ -433,6 +443,32 @@ struct EditorLaunchOptions final {
     bool autoDemo = false;
     bool profileUi = false;
 };
+enum class OutputFilter : u8 {
+    All,
+    Info,
+    Warning,
+    Error,
+};
+
+enum class EditorOutputTargetKind : u8 {
+    None,
+    Asset,
+    Document,
+    SceneNode,
+};
+
+struct EditorOutputHistoryEntry final {
+    u64 sequence = 0U;
+    OutputFilter filter = OutputFilter::Info;
+    std::string context{};
+    std::string message{};
+    EditorOutputTargetKind targetKind = EditorOutputTargetKind::None;
+    Tina::Core::AssetId targetAssetId{};
+    Tina::Editor::EditorDocumentKey targetDocumentKey{};
+    u32 targetStableId = 0U;
+};
+
+inline constexpr Tina::Core::usize EditorOutputHistoryCapacity = 64U;
 class EditorRenderDeviceAccess final {
   public:
     void set(Tina::Render::IRenderDevice* device) noexcept { device_ = device; }
@@ -1437,6 +1473,7 @@ struct EditorFrameTimingStatistics final {
 
 struct LifecycleCounters final {
     u64 frameUpdates = 0;
+    double lastFrameSeconds = 0.0;
     u64 uiStatisticsSamples = 0;
     UI::UIContextStatistics uiStatisticsFirst{};
     UI::UIContextStatistics uiStatisticsLast{};
@@ -1738,6 +1775,7 @@ enum class EditorCommand : u32 {
     SwitchToWorld3D,
     MoveSelectedPositiveX,
     ApplyTransform,
+    ResetTransform,
     NodeApplySprite,
     NodeApplyCamera,
     NodeApplyPointLight,
@@ -1814,6 +1852,15 @@ enum class EditorCommand : u32 {
     ImportSource,
     RemoveSelectedSourceImport,
     OpenSelectedProjectAsset,
+    InspectSelectedProjectAsset,
+    ReimportSelectedProjectAsset,
+    LocateProjectAssetSource,
+    CopyProjectAssetId,
+    CopyProjectAssetSourcePath,
+    RevealProjectAssetDependencies,
+    RemoveSelectedProjectAsset,
+    ProjectAssetRemoveConfirm,
+    ProjectAssetRemoveCancel,
     CloseActiveDocument,
     DirtyCloseSave,
     DirtyCloseDiscard,
@@ -2337,6 +2384,11 @@ struct SceneAddRequest final {
     u64 documentRevision = 0;
     bool creating = false;
 };
+
+enum class ProjectAssetViewMode : u8 {
+    Grid = 0,
+    List = 1,
+};
 enum class HierarchyDropIntent : u8 {
     Reparent,
     ReorderBefore,
@@ -2348,9 +2400,51 @@ struct HierarchyDropRequest final {
     HierarchyDropIntent intent = HierarchyDropIntent::Reparent;
 };
 struct ProjectAssetDropRequest final {
-    u64 visibleIndex = 0;
+    Tina::Core::AssetId assetId{};
     u32 targetStableId = 0;
 };
+
+struct ProjectAssetRemoveConfirmation final {
+    Tina::Core::AssetId assetId{};
+    std::string sourcePathUtf8{};
+    bool confirming = false;
+};
+
+enum class FileDropFeedbackState : u8 {
+    Hidden,
+    Accepted,
+    Processing,
+    Committed,
+    Rejected,
+    Failed,
+};
+
+// Per-AssetId import history kept by the active Editor project. The source
+// import worker still owns all phase transitions; this is only the owner-thread
+// projection used by Project Assets and the source-import grid.
+enum class EditorAssetImportStatus : u8 {
+    Ready = 0,
+    Queued = 1,
+    Preparing = 2,
+    Copying = 3,
+    Cooking = 4,
+    ReadyToCommit = 5,
+    Committed = 6,
+    Error = 7,
+};
+
+struct EditorAssetImportHistoryEntry final {
+    Tina::Core::AssetId assetId{};
+    EditorAssetImportStatus status = EditorAssetImportStatus::Ready;
+};
+
+struct PendingFileDrop final {
+    Tina::Platform::WindowId window{};
+    double logicalX = 0.0;
+    double logicalY = 0.0;
+    std::vector<std::string> pathsUtf8{};
+};
+
 struct SavedTileMapChunkBaseline final {
     Tina::Core::AssetId assetId{};
     std::vector<std::byte> payloadBytes{};
@@ -3118,6 +3212,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
     {
         hierarchyRows_.reserve(AuthoringEntityCapacity + 1U);
         collapsedHierarchyIds_.reserve(AuthoringEntityCapacity + 1U);
+        assetImportHistory_.reserve(4096U);
+        activeAssetImportIds_.reserve(4096U);
         activeProjectWorkspace_ = std::move(assetResources_.initialProjectWorkspace);
         sourceImportStartPending_ = options_.sourceImport.importOnStart;
         if (options_.sourceImport.intendedUnits.empty()) {
@@ -3222,11 +3318,16 @@ class EditorWorkspaceState final : public Tina::IGameState {
         UiBuildContext& ui, UI::UINodeId parent);
     [[nodiscard]] Tina::Core::Status buildSceneDeleteDialogUi(
         UiBuildContext& ui, UI::UINodeId parent);
+    [[nodiscard]] Tina::Core::Status buildProjectAssetRemoveDialogUi(
+        UiBuildContext& ui, UI::UINodeId parent);
     [[nodiscard]] Tina::Core::Status buildAboutDialogUi(
+        UiBuildContext& ui, UI::UINodeId parent);
+    [[nodiscard]] Tina::Core::Status buildFileDropFeedbackUi(
         UiBuildContext& ui, UI::UINodeId parent);
     [[nodiscard]] Tina::Core::Status buildSnackbarUi(
         UiBuildContext& ui, UI::UINodeId parent);
-    [[nodiscard]] Tina::Core::Status registerUiCallbacks(UiBuildContext& ui);
+    [[nodiscard]] Tina::Core::Status registerUiCallbacks(
+        UiBuildContext& ui, UI::UINodeId rootNode);
 
     void onExit(Tina::GameStateExitContext&) noexcept override;
     [[nodiscard]] Tina::GameStatePolicy initialPolicy() const noexcept override;
@@ -3241,6 +3342,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status updateHierarchySearch(
         Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status updateProjectAssetSearch(
+        Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status updateSceneAddSearch(
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status processPendingHierarchyRename(
@@ -3253,25 +3356,39 @@ class EditorWorkspaceState final : public Tina::IGameState {
         Tina::PrimaryWindowUITreeUpdater& tree, u32 stableId);
     [[nodiscard]] Tina::Core::Status refreshHierarchyRenameLayout(
         Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status refreshHierarchyDropIndicator(
+        Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status hideHierarchyRename(
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status applyHierarchyRename(
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] std::optional<u32> hierarchyStableIdAtPosition(
         UI::UILogicalPoint position) const noexcept;
+    [[nodiscard]] std::optional<HierarchyDropRequest>
+    hierarchyDropRequestAtPosition(UI::UILogicalPoint position) const noexcept;
     [[nodiscard]] std::optional<u64> projectAssetVisibleIndexAtPosition(
+        UI::UILogicalPoint position) const noexcept;
+    [[nodiscard]] std::optional<u32> viewportStableIdAtPosition(
         UI::UILogicalPoint position) const noexcept;
     void handleHierarchyPointerDown(UI::UIRoutedPointerEvent& event) noexcept;
     void handleHierarchyPointerMove(UI::UIRoutedPointerEvent& event) noexcept;
     void handleHierarchyPointerUp(UI::UIRoutedPointerEvent& event) noexcept;
+    void handleHierarchyPointerCancel(UI::UIRoutedPointerEvent& event) noexcept;
     void handleProjectAssetPointerDown(UI::UIRoutedPointerEvent& event) noexcept;
     void handleProjectAssetPointerMove(UI::UIRoutedPointerEvent& event) noexcept;
     void handleProjectAssetPointerUp(UI::UIRoutedPointerEvent& event) noexcept;
+    void handleProjectAssetPointerCancel(UI::UIRoutedPointerEvent& event) noexcept;
+    void setFileDropFeedback(
+        FileDropFeedbackState state, std::string_view message) noexcept;
+    [[nodiscard]] Tina::Core::Status refreshFileDropFeedbackUi(
+        Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status updateSnackbarUi(
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status processPendingMenuToggle(
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status refreshMainMenuUi(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status refreshOutputAndStatusUi(
         Tina::PrimaryWindowUITreeUpdater& tree);
     bool queueEditorCommand(EditorCommand command) noexcept;
     void queueViewportToolMode(ViewportToolMode mode) noexcept;
@@ -3286,6 +3403,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] Tina::Core::Status rebuildAnimationAnimator();
     [[nodiscard]] Tina::Core::Result<Tina::AssetFormat::SpriteAnimationEventDesc>
     readAnimationEventInput(Tina::PrimaryWindowUITreeUpdater& tree) const;
+    void handleAnimationTimelinePointerMove(
+        UI::UIRoutedPointerEvent& event) noexcept;
     [[nodiscard]] Tina::Core::Status processPendingAnimationFrameSelection(
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status refreshAnimationTimelineUi(
@@ -3413,6 +3532,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status updateViewportMarqueeVisual(
         Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status updateViewportPreselectionVisual(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status updateHierarchyPreselectionVisual(
+        Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] std::optional<u64> hierarchyIndexForStableId(
         u64 stableId) const noexcept;
     [[nodiscard]] std::optional<u32> automaticHierarchyStableId(
@@ -3448,7 +3571,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
     prepareProjectBrowserForSnapshot(
         const Tina::Asset::CatalogSnapshot& catalog,
         Tina::Editor::ProjectAssetFilter filter,
-        std::optional<Tina::Core::AssetId> selectedAsset);
+        std::optional<Tina::Core::AssetId> selectedAsset,
+        std::string_view searchQuery = {});
     [[nodiscard]] Tina::Core::Result<Tina::Editor::EditorDocumentTabs>
     prepareProjectSwitchDocumentTabs();
     [[nodiscard]] Tina::Core::Status switchCatalogAuthoringOwnersToPinnedTabs();
@@ -3458,8 +3582,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
         Tina::Editor::EditorDocumentTabs candidateTabs) noexcept;
     [[nodiscard]] Tina::Core::Status rebuildLiveCatalogPreview(
         std::string successFeedback);
-    [[nodiscard]] Tina::Core::Status switchLiveProjectCatalog(
-        Tina::Editor::EditorProjectWorkspace workspace);
+    [[nodiscard]] Tina::Core::Result<bool> switchLiveProjectCatalog(
+        Tina::Editor::EditorProjectWorkspace& workspace);
     [[nodiscard]] Tina::Core::Result<Tina::Editor::EditorProjectWorkspace>
     initializeNewProjectAt(std::string_view projectRootUtf8);
     [[nodiscard]] Tina::Core::Status scheduleNewProjectAt(
@@ -3479,6 +3603,19 @@ class EditorWorkspaceState final : public Tina::IGameState {
         std::vector<std::string> selectedPathsUtf8);
     [[nodiscard]] Tina::Core::Status importSourceFromDialog();
     [[nodiscard]] Tina::Core::Status removeSelectedSourceImport();
+    [[nodiscard]] static EditorAssetImportStatus
+    assetImportStatusForPhase(
+        Tina::EditorApp::Detail::EditorSourceImportPhase phase) noexcept;
+    [[nodiscard]] EditorAssetImportStatus
+    projectAssetImportStatus(Tina::Core::AssetId assetId) const noexcept;
+    [[nodiscard]] std::string_view
+    projectAssetImportStatusLabel(Tina::Core::AssetId assetId) const noexcept;
+    void setAssetImportHistory(
+        std::span<const Tina::Asset::SourceImportPipelineUnitOutput> outputs,
+        EditorAssetImportStatus status) noexcept;
+    void setCurrentImportAssetHistory(EditorAssetImportStatus status) noexcept;
+    void pruneAssetImportHistoryToCatalog() noexcept;
+    void clearAssetImportHistory() noexcept;
     void cleanupOwnedSourceImportStage(std::string_view catalogRootUtf8) noexcept;
     void cleanupOwnedAuthoringStage(std::string_view catalogRootUtf8) noexcept;
     void cleanupFailedSourceImportStage() noexcept;
@@ -3487,6 +3624,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] Tina::Core::Status commitSourceImportCatalog(
         Tina::EditorApp::Detail::EditorSourceImportReadyStage& ready);
     [[nodiscard]] Tina::Core::Status updateSourceImport();
+    [[nodiscard]] Tina::Core::Status processPendingFileDrops(
+        Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status refreshProjectCatalog();
     [[nodiscard]] Tina::Core::Status bakeAndPublishNavigation2D();
     [[nodiscard]] Tina::Core::Status refreshDocumentTabsUi(
@@ -3494,6 +3633,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] Tina::Core::Status applyProjectAssetFilter(
         Tina::PrimaryWindowUITreeUpdater& tree,
         Tina::Editor::ProjectAssetFilter filter);
+    [[nodiscard]] Tina::Core::Status applyProjectAssetViewMode(
+        Tina::PrimaryWindowUITreeUpdater& tree, ProjectAssetViewMode mode);
     [[nodiscard]] Tina::Core::Status synchronizePendingProjectAssetSelection(
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] WorkspaceSessionState*
@@ -3566,6 +3707,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
         Tina::PrimaryWindowUITreeUpdater& tree,
         std::optional<u32> requestedStableId = std::nullopt);
     [[nodiscard]] Tina::Core::Status hideSceneDeleteConfirmation(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status showProjectAssetRemoveConfirmation(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status hideProjectAssetRemoveConfirmation(
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status captureRequestedRgbaFrame(
         Tina::PrimaryWindowUITreeUpdater& tree);
@@ -3645,7 +3790,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] static bool containsHandle(std::span<const Tina::Asset::AssetHandle> handles,
                                              Tina::Asset::AssetHandle handle) noexcept;
     [[nodiscard]] Tina::Core::Status preparePreviewAssetBindings();
-    void releasePreviewAssetBindings() noexcept;
+    [[nodiscard]] bool previewAssetBindingsHaveActiveFrameBorrows() const noexcept;
+    [[nodiscard]] Tina::Core::Status releasePreviewAssetBindings() noexcept;
     [[nodiscard]] Tina::Core::Status validateRuntimePreview();
     [[nodiscard]] Tina::Core::Status validateWorld3DRuntimePreview();
     [[nodiscard]] Tina::Core::Status publishRuntimePreviewStatus(
@@ -3655,6 +3801,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] const Tina::Editor::ProjectAssetDescriptor*
     inspectedProjectAsset() const noexcept;
+    [[nodiscard]] const Tina::EditorApp::Detail::EditorSourceImportUnit*
+    sourceImportUnitForAsset(Tina::Core::AssetId assetId) const noexcept;
     [[nodiscard]] Tina::Core::Result<InspectorMixedTransformFlags>
     inspectorMixedTransformFlags(u32 primaryStableId) const;
     [[nodiscard]] Tina::Core::Status publishInspector(Tina::PrimaryWindowUITreeUpdater& tree,
@@ -3664,6 +3812,25 @@ class EditorWorkspaceState final : public Tina::IGameState {
     static bool resolveInspectorDependencyItem(
         const void* state, u64 logicalIndex,
         UI::UIListViewItemDescriptor& output) noexcept;
+    [[nodiscard]] UI::UIDataGridDataSource outputGridDataSource() const noexcept;
+    [[nodiscard]] static u64 outputRowCount(const void* state) noexcept;
+    [[nodiscard]] static u32 outputColumnCount(const void* state) noexcept;
+    static bool resolveOutputRow(
+        const void* state, u64 logicalRow,
+        UI::UIDataGridRowDescriptor& output) noexcept;
+    static bool resolveOutputColumn(
+        const void* state, u32 logicalColumn,
+        UI::UIDataGridColumnDescriptor& output) noexcept;
+    static bool resolveOutputCell(
+        const void* state, u64 logicalRow, u32 logicalColumn,
+        UI::UIDataGridCellDescriptor& output) noexcept;
+    [[nodiscard]] const EditorOutputHistoryEntry*
+    selectedOutputEntry() const noexcept;
+    [[nodiscard]] bool outputTargetAvailable(
+        const EditorOutputHistoryEntry& entry) const noexcept;
+    void handleOutputPointerDown(UI::UIRoutedPointerEvent& event) noexcept;
+    [[nodiscard]] Tina::Core::Status processPendingOutputLocate(
+        Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] UI::UIDataGridDataSource sourceImportGridDataSource() const noexcept;
     [[nodiscard]] static u64 sourceImportRowCount(const void* state) noexcept;
     [[nodiscard]] static u32 sourceImportColumnCount(const void* state) noexcept;
@@ -3738,19 +3905,38 @@ class EditorWorkspaceState final : public Tina::IGameState {
     EditorAssetResources& assetResources_;
     EditorRenderDeviceAccess& renderDeviceAccess_;
     Tina::EditorApp::Detail::EditorSourceImportService sourceImportService_;
+    std::optional<Tina::PlatformEventSubscription> platformEventSubscription_{};
+    std::vector<PendingFileDrop> pendingFileDrops_{};
+    bool fileDropQueueOverflowed_ = false;
+    FileDropFeedbackState fileDropFeedbackState_ =
+        FileDropFeedbackState::Hidden;
+    std::string fileDropFeedbackDetail_{};
+    Tina::Core::SteadyMonotonicClock fileDropFeedbackClock_{};
+    Tina::Core::MonotonicTimePoint fileDropFeedbackStarted_{};
+    bool hierarchyRefreshPending_ = false;
     std::vector<Tina::EditorApp::Detail::EditorSourceImportUnit> sourceImportUnits_{};
+    std::vector<Tina::Asset::SourceImportPipelineUnitOutput>
+        sourceImportUnitOutputs_{};
+    std::vector<EditorAssetImportHistoryEntry> assetImportHistory_{};
+    std::vector<Tina::Core::AssetId> activeAssetImportIds_{};
+    std::vector<Tina::EditorApp::Detail::EditorSourceImportUnit>
+        sourceImportRetryUnits_{};
+    std::vector<std::string> sourceImportRetryPathsUtf8_{};
     std::vector<std::string> pendingSourceImportPathsUtf8_{};
     std::string sourceImportPointerPathUtf8_{};
     std::string sourceImportPendingStageRootUtf8_{};
     std::string sourceImportSupersededCatalogRootUtf8_{};
     std::string sourceImportSupersededAuthoringCatalogRootUtf8_{};
     bool sourceImportStartPending_ = false;
+    bool retrySourceImportPending_ = false;
+    bool cancelSourceImportPending_ = false;
     bool sourceImportCatalogCommitted_ = false;
     Tina::EditorApp::Detail::EditorSourceImportPhase sourceImportObservedPhase_ =
         Tina::EditorApp::Detail::EditorSourceImportPhase::Idle;
     Tina::EditorApp::Detail::EditorFileDialog fileDialog_{};
     EditorIconResources iconResources_{};
-    Tina::PrimaryWindowUIImageResolverRegistration iconResolverRegistration_{};
+    EditorCompositeImageResolver imageResolver_{};
+    Tina::PrimaryWindowUIImageResolverRegistration imageResolverRegistration_{};
     Tina::UI::UIRootOwner uiRoot_{};
     UI::UINodeId hierarchyTree_{};
     UI::UINodeId hierarchyCount_{};
@@ -3758,16 +3944,66 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId hierarchyRenameRoot_{};
     UI::UINodeId hierarchyRenameInput_{};
     UI::UILayoutStyle hierarchyRenameRootLayout_{};
+    UI::UINodeId hierarchyDropIndicator_{};
+    UI::UINodeId hierarchyPreselectionNode_{};
+    UI::UILayoutStyle hierarchyDropIndicatorLayout_{};
     UI::UINodeId projectAssetList_{};
+    UI::UINodeId projectAssetTools_{};
+    UI::UINodeId projectAssetFilters_{};
+    UI::UINodeId projectCatalogActions_{};
     UI::UINodeId projectAssetCount_{};
+    UI::UINodeId projectAssetBreadcrumb_{};
     UI::UINodeId projectAssetSummary_{};
     UI::UINodeId projectAssetSource_{};
+    UI::UINodeId projectAssetSearchInput_{};
+    UI::UINodeId projectAssetEmptyState_{};
+    UI::UILayoutStyle projectAssetEmptyStateLayout_{};
+    UI::UINodeId projectAssetEmptyStateText_{};
+    UI::UINodeId projectAssetEmptyStateImportButton_{};
+    UI::UINodeId projectAssetDropHint_{};
+    UI::UILayoutStyle projectAssetDropHintLayout_{};
+    UI::UINodeId projectAssetStartCenter_{};
+    UI::UILayoutStyle projectAssetStartCenterLayout_{};
+    UI::UINodeId projectAssetStartCenterTitle_{};
+    UI::UINodeId projectAssetStartCenterSubtitle_{};
+    UI::UINodeId projectAssetStartCenterActions_{};
+    UI::UINodeId projectAssetStartCenterNewButton_{};
+    UI::UINodeId projectAssetStartCenterOpenButton_{};
+    UI::UINodeId projectAssetStartCenterImportButton_{};
+    UI::UINodeId projectAssetStartCenterRecent_{};
+    UI::UINodeId fileDropFeedbackRoot_{};
+    UI::UILayoutStyle fileDropFeedbackRootLayout_{};
+    UI::UINodeId fileDropFeedbackSurface_{};
+    UI::UILayoutStyle fileDropFeedbackSurfaceLayout_{};
+    UI::UINodeId fileDropFeedbackStateText_{};
+    UI::UINodeId fileDropFeedbackMessage_{};
+    std::array<UI::UIStraightSrgba8Color, 6> fileDropFeedbackToneColors_{};
+    UI::UILayoutStyle fileDropFeedbackProgressLayout_{};
+    UI::UINodeId fileDropFeedbackProgress_{};
+    UI::UINodeId projectAssetActivity_{};
+    UI::UILayoutStyle projectAssetActivityLayout_{};
+    UI::UINodeId projectAssetActivityText_{};
+    UI::UINodeId projectAssetActivityProgress_{};
+    UI::UINodeId cancelSourceImportButton_{};
+    UI::UINodeId projectAssetImportCallout_{};
+    UI::UILayoutStyle projectAssetImportCalloutLayout_{};
+    UI::UINodeId projectAssetImportFailureText_{};
+    UI::UINodeId retrySourceImportButton_{};
+    UI::UINodeId openImportOutputButton_{};
     UI::UINodeId sourceImportSection_{};
     UI::UILayoutStyle sourceImportSectionLayout_{};
     UI::UINodeId sourceImportGrid_{};
     UI::UINodeId sourceImportCount_{};
     UI::UINodeId inspectorScroll_{};
+    UI::UINodeId inspectorContent_{};
+    UI::UILayoutStyle inspectorContentLayout_{};
+    UI::UINodeId inspectorEmptyState_{};
+    UI::UILayoutStyle inspectorEmptyStateLayout_{};
+    UI::UINodeId inspectorEmptyStateTitle_{};
+    UI::UINodeId inspectorEmptyStateText_{};
     UI::UINodeId inspectorMode_{};
+    UI::UINodeId inspectorDirtyBadge_{};
+    UI::UILayoutStyle inspectorDirtyBadgeLayout_{};
     UI::UINodeId inspectorName_{};
     UI::UINodeId inspectorKind_{};
     UI::UINodeId inspectorNote_{};
@@ -3778,10 +4014,15 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId inspectorDependencySummary_{};
     UI::UINodeId inspectorDependencyList_{};
     UI::UINodeId viewportPreviewLayer_{};
+    UI::UINodeId viewportStatusOverlay_{};
+    UI::UILayoutStyle viewportStatusOverlayLayout_{};
+    UI::UINodeId viewportStatusText_{};
     std::array<UI::UINodeId, ViewportGridVisualNodeCapacity>
         viewportGridNodes_{};
     std::array<UI::UINodeId, ViewportGizmoVisualNodeCapacity>
         viewportGizmoVisualNodes_{};
+    std::array<UI::UINodeId, ViewportPreselectionVisualNodeCapacity>
+        viewportPreselectionVisualNodes_{};
     UI::UINodeId viewportOrientationCompass_{};
     std::array<UI::UINodeId, ViewportOrientationOrbLayerCount>
         viewportOrientationOrbLayers_{};
@@ -3812,6 +4053,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
     };
     UI::UINodeId inspectorTransformFields_{};
     UI::UILayoutStyle inspectorTransformFieldsLayout_{};
+    UI::UINodeId inspectorTransformError_{};
+    UI::UILayoutStyle inspectorTransformErrorLayout_{};
+    std::string inspectorTransformErrorUtf8_{};
+    u32 inspectorTransformErrorStableId_ = 0U;
     std::array<InspectorLayoutNodeUi, 3> inspectorTransformValueGrids_{};
     WorkspaceMode inspectorTransformGridWorkspace_ = WorkspaceMode::World2D;
     std::array<InspectorLayoutNodeUi, 9> inspectorTransformAxisFields_{};
@@ -3837,7 +4082,18 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId bottomPanelHost_{};
     UI::UINodeId animationPanel_{};
     UI::UINodeId outputPanel_{};
-    UI::UINodeId outputMessage_{};
+    UI::UINodeId outputGrid_{};
+    std::array<UI::UINodeId, 4> outputFilterButtons_{};
+    UI::UINodeId outputClearButton_{};
+    UI::UINodeId outputDetailsToggleButton_{};
+    UI::UINodeId outputLocateButton_{};
+    UI::UINodeId outputSummary_{};
+    UI::UINodeId outputDetails_{};
+    UI::UILayoutStyle outputDetailsLayout_{};
+    UI::UILogicalRect outputGridRect_{};
+    UI::UIDataGridMetrics outputGridMetrics_{};
+    UI::UIDataGridStyle outputGridStyle_{};
+    UI::UIRoutedPointerListenerToken outputPointerListener_{};
     UI::UILayoutStyle bottomPanelSplitterLayout_{};
     UI::UILayoutStyle bottomPanelHostLayout_{};
     UI::UILayoutStyle animationPanelLayout_{};
@@ -3849,10 +4105,17 @@ class EditorWorkspaceState final : public Tina::IGameState {
     std::array<UI::UINodeId, 2> bottomPanelButtons_{};
     UI::UINodeId animationStatus_{};
     UI::UINodeId animationSelection_{};
+    UI::UINodeId animationTimelineScale_{};
+    UI::UINodeId animationHoverTime_{};
+    UI::UILayoutStyle animationHoverTimeLayout_{};
+    UI::UINodeId animationPlayhead_{};
     UI::UINodeId animationEventPosition_{};
     UI::UINodeId statusDocument_{};
     UI::UINodeId statusPreview_{};
     UI::UINodeId statusSelection_{};
+    UI::UINodeId statusTask_{};
+    UI::UINodeId statusCatalog_{};
+    UI::UINodeId statusActivity_{};
     UI::UIDialogParts sceneAddDialog_{};
     UI::UINodeId sceneAddParentLabel_{};
     UI::UINodeId sceneAddSearchInput_{};
@@ -3865,6 +4128,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId dirtyCloseMessage_{};
     UI::UINodeId dirtyClosePathInput_{};
     UI::UIDialogParts sceneDeleteDialog_{};
+    UI::UIDialogParts projectAssetRemoveDialog_{};
     UI::UIDialogParts aboutDialog_{};
     UI::UISnackbarHostParts snackbarParts_{};
     UI::UILayoutStyle snackbarRootLayout_{};
@@ -3914,6 +4178,15 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId hierarchyContextMoveDownItem_{};
     UI::UINodeId hierarchyContextMoveToRootItem_{};
     UI::UINodeId hierarchyContextDeleteItem_{};
+    UI::UINodeId projectAssetContextMenu_{};
+    UI::UINodeId projectAssetContextOpenItem_{};
+    UI::UINodeId projectAssetContextInspectItem_{};
+    UI::UINodeId projectAssetContextReimportItem_{};
+    UI::UINodeId projectAssetContextLocateSourceItem_{};
+    UI::UINodeId projectAssetContextCopyAssetIdItem_{};
+    UI::UINodeId projectAssetContextCopySourcePathItem_{};
+    UI::UINodeId projectAssetContextRevealDependenciesItem_{};
+    UI::UINodeId projectAssetContextRemoveItem_{};
     std::array<UI::UINodeId, 2> workspaceModeButtons_{};
     std::array<UI::UINodeId, 2> viewportContextButtons_{};
     std::array<UI::UILayoutStyle, 2> viewportContextButtonLayouts_{};
@@ -3948,6 +4221,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId tilePaintToolButton_{};
     UI::UINodeId tileEraseToolButton_{};
     UI::UINodeId applyTransformButton_{};
+    UI::UINodeId resetTransformButton_{};
     UI::UINodeId undoButton_{};
     UI::UINodeId redoButton_{};
     UI::UINodeId saveButton_{};
@@ -3962,6 +4236,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId documentTabsBar_{};
     UI::UILayoutStyle documentTabsBarLayout_{};
     std::array<UI::UINodeId, 4> projectFilterButtons_{};
+    std::array<UI::UINodeId, 2> projectAssetViewButtons_{};
     std::array<UI::UINodeId, DocumentTabSlots> documentTabButtons_{};
     UI::UINodeId paintTileButton_{};
     UI::UINodeId eraseTileButton_{};
@@ -3995,17 +4270,24 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId animationEventAddButton_{};
     UI::UINodeId animationEventApplyButton_{};
     UI::UINodeId animationEventRemoveButton_{};
+    UI::UINodeId animationEventMarkerLabel_{};
     std::array<UI::UINodeId, AnimationVisibleFrameSlots> animationFrameButtons_{};
+    std::array<UI::UINodeId, AnimationVisibleFrameSlots> animationEventMarkerButtons_{};
+    std::optional<u32> animationHoveredFrameSlot_{};
+    UI::UIRoutedPointerListenerToken animationTimelinePointerListener_{};
     UI::UITreeViewItemKey selectionKey_ = UI::InvalidUITreeViewItemKey;
     std::vector<EditorHierarchyRow> hierarchyRows_{};
     std::vector<u32> collapsedHierarchyIds_{};
     std::string hierarchyFilterUtf8_{};
+    ProjectAssetViewMode projectAssetViewMode_ = ProjectAssetViewMode::Grid;
+    std::optional<ProjectAssetViewMode> pendingProjectAssetViewMode_{};
     std::string sceneAddFilterUtf8_{};
     UI::UILogicalRect hierarchyTreeRect_{};
     UI::UITreeViewMetrics hierarchyTreeMetrics_{};
     float hierarchyTreeRowHeight_ = 28.0F;
     UI::UILogicalRect projectAssetListRect_{};
     UI::UIVirtualGridViewMetrics projectAssetListMetrics_{};
+    UI::UILayoutStyle projectAssetListLayout_{};
     UI::UIVirtualGridViewStyle projectAssetListStyle_{};
     u64 lastHierarchyPointerDownFrame_ = 0;
     u32 lastHierarchyPointerDownStableId_ = 0;
@@ -4013,6 +4295,13 @@ class EditorWorkspaceState final : public Tina::IGameState {
     u32 hierarchyDragStableId_ = 0;
     bool hierarchyDragActive_ = false;
     UI::UILogicalPoint hierarchyDragStartPosition_{};
+    UI::UILogicalPoint hierarchyDragCurrentPosition_{};
+    u32 hierarchyDropIndicatorStableId_ = 0U;
+    HierarchyDropIntent hierarchyDropIndicatorIntent_ = HierarchyDropIntent::Reparent;
+    // Last intent published from the committed hierarchy snapshot. Pointer-up
+    // consumes this value instead of re-deriving insertion semantics from a
+    // potentially different layout/position.
+    std::optional<HierarchyDropRequest> hierarchyPublishedDrop_{};
     std::optional<u32> pendingHierarchyRenameStableId_{};
     u32 hierarchyContextStableId_ = 0;
     bool pendingHierarchyRenameCancel_ = false;
@@ -4023,17 +4312,26 @@ class EditorWorkspaceState final : public Tina::IGameState {
     u32 hierarchyRenameStableId_ = 0;
     u64 hierarchyRenameDocumentRevision_ = 0;
     bool hierarchyRenameVisible_ = false;
-    std::array<UI::UIRoutedPointerListenerToken, 3>
+    std::array<UI::UIRoutedPointerListenerToken, 4>
         hierarchyPointerListeners_{};
     Tina::Platform::PointerId projectAssetDragPointer_ =
         Tina::Platform::PrimaryPointerId;
-    u64 projectAssetDragVisibleIndex_ = 0;
+    u64 lastProjectAssetPointerDownFrame_ = 0;
+    Tina::Core::AssetId lastProjectAssetPointerDownAssetId_{};
+    Tina::Core::AssetId projectAssetDragAssetId_{};
+    Tina::Core::AssetId projectAssetContextAssetId_{};
     bool projectAssetDragActive_ = false;
     UI::UILogicalPoint projectAssetDragStartPosition_{};
+    std::optional<Tina::Core::AssetId> pendingProjectAssetOpen_{};
     std::optional<ProjectAssetDropRequest> pendingProjectAssetDrop_{};
-    std::array<UI::UIRoutedPointerListenerToken, 3>
+    std::optional<ProjectAssetRemoveConfirmation>
+        pendingProjectAssetRemoveConfirmation_{};
+    bool pendingProjectAssetRemoveDialogFocus_ = false;
+    std::array<UI::UIRoutedPointerListenerToken, 4>
         projectAssetPointerListeners_{};
     ViewportToolMode viewportToolMode_ = ViewportToolMode::Select;
+    u32 hierarchyPreselectionStableId_ = 0U;
+    u32 viewportPreselectionStableId_ = 0U;
     Tina::Editor::EditorTransformGizmo viewportTransformGizmo_{};
     ViewportTransformTransaction viewportGizmo_{};
     Tina::Core::usize viewportGizmoVisibleNodeCount_ = 0;
@@ -4093,6 +4391,9 @@ class EditorWorkspaceState final : public Tina::IGameState {
     bool projectAssetSelectionSyncPending_ = false;
     bool sourceImportUiRefreshPending_ = false;
     bool sourceImportLastFailed_ = false;
+    // Retains the bounded worker error for the persistent Project Assets
+    // import callout. The previous Catalog remains the active data source.
+    std::string sourceImportFailureMessageUtf8_{};
     bool sourceImportProfileSeen_ = false;
     bool sourceImportProfileActive_ = false;
     bool sourceImportProfileWorkerSampled_ = false;
@@ -4135,6 +4436,19 @@ class EditorWorkspaceState final : public Tina::IGameState {
     u32 surfacePixelWidth_ = WindowLogicalWidth;
     u32 surfacePixelHeight_ = WindowLogicalHeight;
     std::string authoringFeedback_ = "One validated revision per command";
+    std::array<EditorOutputHistoryEntry, EditorOutputHistoryCapacity>
+        outputHistory_{};
+    Tina::Core::usize outputHistoryCount_ = 0U;
+    std::array<u32, EditorOutputHistoryCapacity> outputVisibleHistoryIndices_{};
+    Tina::Core::usize outputVisibleHistoryCount_ = 0U;
+    u64 outputNextSequence_ = 1U;
+    std::optional<u64> outputSelectedSequence_{};
+    std::optional<u64> pendingOutputLocateSequence_{};
+    u64 lastOutputPointerDownSequence_ = 0U;
+    u64 lastOutputPointerDownFrame_ = 0U;
+    std::string outputHistoryObservedFeedback_{};
+    bool outputGridRefreshPending_ = true;
+    bool outputDetailsExpanded_ = false;
     std::optional<UI::UISnackbarHost> snackbarHost_{};
     Tina::Core::SteadyMonotonicClock snackbarClock_{};
     std::string lastSnackbarFeedback_{};
@@ -4147,6 +4461,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
     std::optional<u32> pendingMainMenuToggle_{};
     std::optional<WorkspacePanelKind> pendingWorkspacePanelToggle_{};
     std::optional<BottomPanelKind> pendingBottomPanelToggle_{};
+    std::optional<BottomPanelKind> pendingBottomPanelOpen_{};
+    OutputFilter outputFilter_ = OutputFilter::All;
     std::optional<EditorCommand> pendingEditorCommand_{};
     std::optional<Tina::Editor::EditorDocumentKey> pendingDirtyCloseKey_{};
     bool pendingDirtyCloseDialogFocus_ = false;

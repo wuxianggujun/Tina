@@ -36,7 +36,9 @@ namespace {
 
 [[nodiscard]] SourceImportCandidate makeCandidate(Core::u8 unitSeed,
                                                   Core::u8 outputSeed,
-                                                  std::string path)
+                                                  std::string path,
+                                                  SourceImporterKind importerKind =
+                                                      SourceImporterKind::CatalogRecipe)
 {
     SourceImportCandidate candidate{};
     candidate.sources.push_back(SourceImportCapturedSource{
@@ -47,7 +49,7 @@ namespace {
     });
     candidate.units.push_back(SourceImportCapturedUnit{
         .unitId = unitId(unitSeed),
-        .importerKind = SourceImporterKind::CatalogRecipe,
+        .importerKind = importerKind,
         .importerVersion = 1U,
         .settingsHash = hash(static_cast<Core::u8>(unitSeed + 10U)),
         .inputs = {{.sourceIndex = 0U, .flags = AssetFormat::SourceImportInputFlags::Primary}},
@@ -98,6 +100,35 @@ TEST(SourceImportExecutorTests, RejectsDuplicateOutputOwners)
         SourceImportCandidateComposeDesc{.recookedCandidates = candidates});
     ASSERT_FALSE(composed.has_value());
     EXPECT_EQ(composed.error().code, AssetErrorCode::InvalidCatalogConfig);
+}
+
+TEST(SourceImportExecutorTests, RetainsTextureAndAudioUnits)
+{
+    const auto texture = makeCandidate(1U, 1U, "image.png", SourceImporterKind::Texture);
+    const auto audio = makeCandidate(2U, 2U, "sound.wav", SourceImporterKind::Audio);
+    const std::array baselineParts{texture, audio};
+    auto baselineCandidate = composeSourceImportCandidate(
+        SourceImportCandidateComposeDesc{.recookedCandidates = baselineParts});
+    ASSERT_TRUE(baselineCandidate.has_value()) << baselineCandidate.error().message;
+
+    auto bytes = writeSourceImportCandidateBytes(
+        baselineCandidate->candidate,
+        AssetFormat::SourceImportManifestRevision{.manifestDigest = hash(90U),
+                                                   .manifestBytes = 128U});
+    ASSERT_TRUE(bytes.has_value()) << bytes.error().message;
+    auto baseline = AssetFormat::parseSourceImportMetadataView(*bytes);
+    ASSERT_TRUE(baseline.has_value()) << baseline.error().message;
+
+    const std::array retained{unitId(1U), unitId(2U)};
+    auto composed = composeSourceImportCandidate(SourceImportCandidateComposeDesc{
+        .baseline = &*baseline,
+        .retainedUnitIds = retained,
+    });
+    ASSERT_TRUE(composed.has_value()) << composed.error().message;
+    ASSERT_EQ(composed->candidate.units.size(), 2U);
+    EXPECT_EQ(composed->candidate.units[0].importerKind, SourceImporterKind::Texture);
+    EXPECT_EQ(composed->candidate.units[1].importerKind, SourceImporterKind::Audio);
+    EXPECT_EQ(composed->retainedAssetIds.size(), 2U);
 }
 
 } // namespace

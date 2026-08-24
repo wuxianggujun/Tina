@@ -58,9 +58,161 @@ namespace {
     return UI::UISnackbarTone::Success;
 }
 
+[[nodiscard]] bool logicalPointInRect(const UI::UILogicalRect& rect,
+                                      double x, double y) noexcept
+{
+    return std::isfinite(x) && std::isfinite(y) &&
+           x >= static_cast<double>(rect.x) &&
+           y >= static_cast<double>(rect.y) &&
+           x < static_cast<double>(rect.x + rect.width) &&
+           y < static_cast<double>(rect.y + rect.height);
+}
+
+inline constexpr double FileDropFeedbackDismissSeconds = 4.0;
+
 } // namespace
 
+void EditorWorkspaceState::setFileDropFeedback(
+    FileDropFeedbackState state, std::string_view message) noexcept
+{
+    fileDropFeedbackState_ = state;
+    fileDropFeedbackStarted_ = fileDropFeedbackClock_.now();
+    try {
+        fileDropFeedbackDetail_.assign(message);
+    } catch (const std::bad_alloc&) {
+        fileDropFeedbackDetail_.clear();
+    }
+}
+
+auto EditorWorkspaceState::refreshFileDropFeedbackUi(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    if (!fileDropFeedbackRoot_.hasValue()) {
+        return Tina::Core::success();
+    }
+    const Tina::Core::MonotonicTimePoint now = fileDropFeedbackClock_.now();
+    const bool terminal =
+        fileDropFeedbackState_ == FileDropFeedbackState::Committed ||
+        fileDropFeedbackState_ == FileDropFeedbackState::Rejected ||
+        fileDropFeedbackState_ == FileDropFeedbackState::Failed;
+    if (terminal &&
+        Tina::Core::durationBetween(fileDropFeedbackStarted_, now).count() >=
+            FileDropFeedbackDismissSeconds) {
+        fileDropFeedbackState_ = FileDropFeedbackState::Hidden;
+        fileDropFeedbackDetail_.clear();
+    }
+
+    UI::UILayoutStyle rootLayout = fileDropFeedbackRootLayout_;
+    rootLayout.visibility = fileDropFeedbackState_ == FileDropFeedbackState::Hidden
+                                ? UI::UIVisibility::Collapsed
+                                : UI::UIVisibility::Visible;
+    if (auto status = tree.setLayoutStyle(fileDropFeedbackRoot_, rootLayout);
+        !status) {
+        return status;
+    }
+    if (fileDropFeedbackState_ == FileDropFeedbackState::Hidden) {
+        return Tina::Core::success();
+    }
+
+    std::string_view stateText = "Drop accepted";
+    float progress = 0.0F;
+    UI::UILayoutStyle progressLayout = fileDropFeedbackProgressLayout_;
+    progressLayout.visibility = UI::UIVisibility::Collapsed;
+    switch (fileDropFeedbackState_) {
+    case FileDropFeedbackState::Accepted:
+        stateText = "Drop accepted";
+        progress = 0.08F;
+        break;
+    case FileDropFeedbackState::Processing: {
+        stateText = "Drop processing";
+        progressLayout.visibility = UI::UIVisibility::Visible;
+        progress = 0.35F;
+        using ImportState =
+            Tina::EditorApp::Detail::EditorSourceImportServiceState;
+        if (sourceImportService_.state() == ImportState::Ready) {
+            progress = 0.95F;
+        } else if (sourceImportService_.state() == ImportState::Running) {
+            using ImportPhase =
+                Tina::EditorApp::Detail::EditorSourceImportPhase;
+            switch (sourceImportService_.phase()) {
+            case ImportPhase::Preparing:
+                progress = 0.20F;
+                break;
+            case ImportPhase::Copying:
+                progress = 0.50F;
+                break;
+            case ImportPhase::Cooking:
+                progress = 0.75F;
+                break;
+            case ImportPhase::ReadyToCommit:
+                progress = 0.95F;
+                break;
+            case ImportPhase::Idle:
+            case ImportPhase::Failed:
+                break;
+            }
+        }
+        break;
+    }
+    case FileDropFeedbackState::Committed:
+        stateText = "Drop committed";
+        progress = 1.0F;
+        break;
+    case FileDropFeedbackState::Rejected:
+        stateText = "Drop rejected";
+        break;
+    case FileDropFeedbackState::Failed:
+        stateText = "Drop failed";
+        break;
+    case FileDropFeedbackState::Hidden:
+        break;
+    }
+
+    const auto toneIndex = static_cast<Tina::Core::usize>(
+        fileDropFeedbackState_);
+    if (toneIndex >= fileDropFeedbackToneColors_.size()) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::Internal,
+            "Editor file drop feedback resolved an invalid tone");
+    }
+    if (auto status = tree.setBoxPaint(
+            fileDropFeedbackSurface_,
+            UI::makeSolidBox(fileDropFeedbackToneColors_[toneIndex]));
+        !status) {
+        return status;
+    }
+    if (auto status = tree.setText(fileDropFeedbackStateText_, stateText);
+        !status) {
+        return status;
+    }
+    if (auto status = tree.setText(
+            fileDropFeedbackMessage_, fileDropFeedbackDetail_);
+        !status) {
+        return status;
+    }
+    if (auto status = tree.setLayoutStyle(
+            fileDropFeedbackProgress_, progressLayout);
+        !status) {
+        return status;
+    }
+    if (progressLayout.visibility == UI::UIVisibility::Visible) {
+        if (auto status = tree.setProgressBarValue(
+                fileDropFeedbackProgress_, progress);
+            !status) {
+            return status;
+        }
+    }
+    return Tina::Core::success();
+}
+
 auto EditorWorkspaceState::onExit(Tina::GameStateExitContext&) noexcept -> void{
+    platformEventSubscription_.reset();
+    pendingFileDrops_.clear();
+    cancelSourceImportPending_ = false;
+    sourceImportRetryUnits_.clear();
+    sourceImportRetryPathsUtf8_.clear();
+    fileDropFeedbackState_ = FileDropFeedbackState::Hidden;
+    fileDropFeedbackDetail_.clear();
     using ImportState =
         Tina::EditorApp::Detail::EditorSourceImportServiceState;
     if (sourceImportService_.state() == ImportState::Running) {
@@ -96,8 +248,30 @@ auto EditorWorkspaceState::onExit(Tina::GameStateExitContext&) noexcept -> void{
     previewTileMap_.reset();
     previewWorld_.reset();
     animationPreview_.resetAnimator();
-    releasePreviewAssetBindings();
-    iconResolverRegistration_.reset();
+    auto previewRelease = releasePreviewAssetBindings();
+    if (!previewRelease) {
+        Tina::Core::Error firstFailure = std::move(previewRelease.error());
+        if (Tina::Render::IRenderDevice* device = renderDeviceAccess_.get();
+            device != nullptr) {
+            (void)device->drainGpuRetirements();
+        }
+        if (assetResources_.system.has_value()) {
+            (void)assetResources_.system->drainGpuRetirements();
+        }
+        previewRelease = releasePreviewAssetBindings();
+        if (!previewRelease) {
+            writeError(firstFailure);
+            writeError(previewRelease.error());
+            std::terminate();
+        }
+    }
+    if (assetResources_.system.has_value()) {
+        if (auto status = assetResources_.system->drainGpuRetirements(); !status) {
+            writeError(status.error());
+            std::terminate();
+        }
+    }
+    imageResolverRegistration_.reset();
     if (uiRoot_) {
         uiRoot_.reset();
         ++counters_.uiRootsReleased;
@@ -124,6 +298,8 @@ auto EditorWorkspaceState::initialPolicy() const noexcept -> Tina::GameStatePoli
 
 auto EditorWorkspaceState::updateFrame(Tina::FrameUpdateContext& context) -> Tina::Core::Status{
     ++counters_.frameUpdates;
+    counters_.lastFrameSeconds =
+        static_cast<double>(context.frameTiming().updateDelta.count());
     if (options_.profileUi) {
         const double frameSeconds =
             static_cast<double>(context.frameTiming().updateDelta.count());
@@ -163,10 +339,12 @@ auto EditorWorkspaceState::updateFrame(Tina::FrameUpdateContext& context) -> Tin
         return status;
     }
     if (pendingProjectSwitch_.has_value() && !projectSwitchBlockedByDirty_) {
-        auto workspace = std::move(*pendingProjectSwitch_);
-        pendingProjectSwitch_.reset();
-        if (auto status = switchLiveProjectCatalog(std::move(workspace)); !status) {
-            return status;
+        auto switched = switchLiveProjectCatalog(*pendingProjectSwitch_);
+        if (!switched) {
+            return Tina::Core::failure(std::move(switched.error()));
+        }
+        if (*switched) {
+            pendingProjectSwitch_.reset();
         }
     }
     if (auto status = updateSourceImport(); !status) {
@@ -184,6 +362,10 @@ auto EditorWorkspaceState::updateFrame(Tina::FrameUpdateContext& context) -> Tin
         if (auto status = rebuildLiveCatalogPreview(
                 "Catalog preview bindings refreshed at the frame boundary");
             !status) {
+            if (status.error().code ==
+                Tina::Asset::AssetErrorCode::CatalogReloadBusy) {
+                return Tina::Core::success();
+            }
             return status;
         }
         previewAssetBindingsRefreshPending_ = false;
@@ -676,6 +858,12 @@ auto EditorWorkspaceState::extractRenderScene(Tina::RenderSceneExtractionContext
     ++counters_.renderExtractions;
     counters_.gpuViewportSprites = 0;
     counters_.gpuViewportMeshes = 0;
+    if (pendingProjectSwitch_.has_value() ||
+        previewAssetBindingsRefreshPending_ ||
+        sourceImportService_.state() ==
+            Tina::EditorApp::Detail::EditorSourceImportServiceState::Ready) {
+        return Tina::Core::success();
+    }
     if (!viewportNormalized_.has_value()) {
         return Tina::Core::success();
     }
@@ -793,6 +981,9 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
     if (auto rect = tree->committedLayoutRect(projectAssetList_); rect) {
         projectAssetListRect_ = *rect;
     }
+    if (auto rect = tree->committedLayoutRect(viewportPreviewLayer_); rect) {
+        viewportLogicalRect_ = *rect;
+    }
     if (auto metrics = tree->virtualGridViewMetrics(projectAssetList_); metrics) {
         projectAssetListMetrics_ = *metrics;
     } else {
@@ -812,7 +1003,20 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
     if (auto status = updateHierarchySearch(*tree); !status) {
         return status;
     }
+    if (auto status = updateProjectAssetSearch(*tree); !status) {
+        return status;
+    }
+    if (pendingProjectAssetViewMode_.has_value()) {
+        const ProjectAssetViewMode mode = *pendingProjectAssetViewMode_;
+        pendingProjectAssetViewMode_.reset();
+        if (auto status = applyProjectAssetViewMode(*tree, mode); !status) {
+            return status;
+        }
+    }
     if (auto status = updateSceneAddSearch(*tree); !status) {
+        return status;
+    }
+    if (auto status = processPendingFileDrops(*tree); !status) {
         return status;
     }
     if (auto status = processPendingProjectAssetDrop(*tree); !status) {
@@ -857,6 +1061,13 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
             return status;
         }
         pendingSceneDeleteDialogFocus_ = false;
+    } else if (pendingProjectAssetRemoveDialogFocus_) {
+        if (auto status = tree->requestFocus(
+                projectAssetRemoveDialog_.actions[SceneDeleteConfirmActionIndex]);
+            !status) {
+            return status;
+        }
+        pendingProjectAssetRemoveDialogFocus_ = false;
     } else if (pendingAboutDialogFocus_) {
         if (auto status = tree->requestFocus(
                 aboutDialog_.actions[AboutCloseActionIndex]);
@@ -928,6 +1139,9 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
     if (auto status = updateViewportMarqueeVisual(*tree); !status) {
         return status;
     }
+    if (auto status = updateViewportPreselectionVisual(*tree); !status) {
+        return status;
+    }
     if (pendingAnimationTimelineRefresh_) {
         pendingAnimationTimelineRefresh_ = false;
         if (auto status = refreshAnimationTimelineUi(*tree); !status) {
@@ -960,6 +1174,17 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
             }
             observedSourceImportSelectionIndex_ = selectedIndex;
         }
+        // SourceImport phase changes are published by the worker without a
+        // Catalog snapshot change. Refresh the Project Assets activity row as
+        // part of the same bounded UI transaction so Preparing/Copying/
+        // Cooking/Ready and queued file-drop feedback never lags a frame.
+        if (auto status = refreshProjectAssetUi(*tree); !status) {
+            return status;
+        }
+        if (auto status = tree->invalidateVirtualGridViewItems(projectAssetList_);
+            !status) {
+            return status;
+        }
     }
     if (projectBrowserUiRefreshPending_) {
         projectBrowserUiRefreshPending_ = false;
@@ -991,6 +1216,9 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
         return status;
     }
     if (auto status = processViewportMarquee(*tree); !status) {
+        return status;
+    }
+    if (auto status = processPendingOutputLocate(*tree); !status) {
         return status;
     }
     if (pendingSelectionStableId_.has_value()) {
@@ -1259,14 +1487,23 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
     if (auto rect = tree->committedLayoutRect(hierarchyTree_); rect) {
         hierarchyTreeRect_ = *rect;
     }
+    if (auto status = updateHierarchyPreselectionVisual(*tree); !status) {
+        return status;
+    }
     if (auto status = refreshHierarchyRenameLayout(*tree); !status) {
         return status;
     }
     counters_.hierarchyLogicalItems = metrics->logicalItemCount;
+    if (auto status = refreshOutputAndStatusUi(*tree); !status) {
+        return status;
+    }
     if (auto status = refreshWorkspacePanelsUi(*tree); !status) {
         return status;
     }
     if (auto status = updateSnackbarUi(*tree); !status) {
+        return status;
+    }
+    if (auto status = refreshFileDropFeedbackUi(*tree); !status) {
         return status;
     }
     if (options_.profileUi) {
@@ -1529,6 +1766,12 @@ auto EditorWorkspaceState::processEditorShortcuts(
     if (pendingSceneDeleteConfirmation_.has_value()) {
         if (editorShortcutStarted(actions, EditorShortcutActions::Escape)) {
             queue(EditorCommand::SceneDeleteCancel);
+        }
+        return Tina::Core::success();
+    }
+    if (pendingProjectAssetRemoveConfirmation_.has_value()) {
+        if (editorShortcutStarted(actions, EditorShortcutActions::Escape)) {
+            queue(EditorCommand::ProjectAssetRemoveCancel);
         }
         return Tina::Core::success();
     }
@@ -1936,6 +2179,82 @@ auto EditorWorkspaceState::previewEntityHasSelectedAncestor(
         entity,
         std::span<const u64>{viewportSelectedEntityIds_.data(),
                              viewportSelectedEntityCount_});
+}
+
+auto EditorWorkspaceState::processPendingFileDrops(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    if (fileDropQueueOverflowed_) {
+        fileDropQueueOverflowed_ = false;
+        authoringFeedback_ =
+            "File drop rejected: the queue is full and excess files were not accepted";
+        setFileDropFeedback(
+            FileDropFeedbackState::Rejected,
+            "The drop queue is full; excess files were not accepted");
+        sourceImportUiRefreshPending_ = true;
+    }
+    if (pendingFileDrops_.empty()) {
+        if (hierarchyRefreshPending_) {
+            hierarchyRefreshPending_ = false;
+            if (auto status = refreshHierarchyTree(
+                    tree, pendingSelectionStableId_.value_or(0U)); !status) {
+                return status;
+            }
+        }
+        return Tina::Core::success();
+    }
+    PendingFileDrop request = std::move(pendingFileDrops_.front());
+    pendingFileDrops_.erase(pendingFileDrops_.begin());
+
+    using ImportState = Tina::EditorApp::Detail::EditorSourceImportServiceState;
+    if (!activeProjectWorkspace_.has_value()) {
+        authoringFeedback_ = "File drop rejected: open a Tina project first";
+        setFileDropFeedback(
+            FileDropFeedbackState::Rejected,
+            "Open a Tina project before releasing files");
+        return Tina::Core::success();
+    }
+    if (pendingProjectSwitch_.has_value() || playSessionActive() ||
+        pendingSceneAddRequest_.has_value() || pendingDirtyCloseKey_.has_value() ||
+        pendingSceneDeleteConfirmation_.has_value() ||
+        sourceImportService_.state() != ImportState::Idle ||
+        !authoringEnabled()) {
+        authoringFeedback_ = "File drop queued; it will retry when the Editor is idle";
+        setFileDropFeedback(
+            FileDropFeedbackState::Accepted,
+            "Drop accepted; processing will resume when the Editor is idle");
+        sourceImportUiRefreshPending_ = true;
+        try {
+            pendingFileDrops_.insert(pendingFileDrops_.begin(), std::move(request));
+        } catch (const std::bad_alloc&) {
+            fileDropQueueOverflowed_ = true;
+        }
+        return Tina::Core::success();
+    }
+
+    const bool droppedOnProjectAssets = logicalPointInRect(
+        projectAssetListRect_, request.logicalX, request.logicalY);
+    const bool droppedOnViewport = logicalPointInRect(
+        viewportLogicalRect_, request.logicalX, request.logicalY);
+    if (droppedOnProjectAssets || droppedOnViewport) {
+        if (auto status = importSelectedSourceFiles(std::move(request.pathsUtf8)); !status) {
+            setFileDropFeedback(
+                FileDropFeedbackState::Failed,
+                status.error().message);
+            return reportAuthoringFailure("File drop rejected: ", status.error());
+        }
+        authoringFeedback_ = "Dropped files are importing into Project Assets";
+        setFileDropFeedback(
+            FileDropFeedbackState::Processing,
+            "Dropped files are validating and cooking into Project Assets");
+        return Tina::Core::success();
+    }
+
+    authoringFeedback_ = "File drop rejected: use Project Assets or the active viewport";
+    setFileDropFeedback(
+        FileDropFeedbackState::Rejected,
+        "Release files over Project Assets or the active viewport");
+    return Tina::Core::success();
 }
 
 auto EditorWorkspaceState::importSelectedSourceFiles(

@@ -377,6 +377,21 @@ auto EditorWorkspaceState::inspectorMixedTransformFlags(u32 primaryStableId) con
 
 auto EditorWorkspaceState::publishInspector(Tina::PrimaryWindowUITreeUpdater& tree,
                                                   UI::UITreeViewItemKey key) -> Tina::Core::Status{
+    const auto setInspectorSelectionVisibility =
+        [&](bool hasSelection) -> Tina::Core::Status {
+        inspectorContentLayout_.visibility = hasSelection
+                                             ? UI::UIVisibility::Visible
+                                             : UI::UIVisibility::Collapsed;
+        inspectorEmptyStateLayout_.visibility = hasSelection
+                                                    ? UI::UIVisibility::Collapsed
+                                                    : UI::UIVisibility::Visible;
+        if (auto status = tree.setLayoutStyle(
+                inspectorContent_, inspectorContentLayout_);
+            !status) {
+            return status;
+        }
+        return tree.setLayoutStyle(inspectorEmptyState_, inspectorEmptyStateLayout_);
+    };
     const auto setAssetMetadataVisibility =
         [&](UI::UIVisibility visibility) -> Tina::Core::Status {
         UI::UILayoutStyle assetRowStyle = inspectorAssetRowLayout_;
@@ -405,6 +420,9 @@ auto EditorWorkspaceState::publishInspector(Tina::PrimaryWindowUITreeUpdater& tr
         return tree.setLayoutStyle(inspectorDependencyList_, listStyle);
     };
     if (assetInspectorActive_) {
+        if (auto status = setInspectorSelectionVisibility(true); !status) {
+            return status;
+        }
         if (auto status = setAssetMetadataVisibility(UI::UIVisibility::Visible);
             !status) {
             return status;
@@ -555,6 +573,40 @@ auto EditorWorkspaceState::publishInspector(Tina::PrimaryWindowUITreeUpdater& tr
         return status;
     }
     if (auto status = tree.invalidateListViewItems(inspectorDependencyList_); !status) {
+        return status;
+    }
+    if (key == UI::InvalidUITreeViewItemKey) {
+        if (auto status = setInspectorSelectionVisibility(false); !status) {
+            return status;
+        }
+        if (auto status = tree.setText(inspectorMode_, "No selection"); !status) {
+            return status;
+        }
+        if (auto status = tree.setText(inspectorName_, "Select an item in Hierarchy");
+            !status) {
+            return status;
+        }
+        if (auto status = tree.setText(inspectorKind_, "No item selected"); !status) {
+            return status;
+        }
+        if (auto status = tree.setText(
+                inspectorNote_,
+                "Choose a scene node or asset to inspect its properties.");
+            !status) {
+            return status;
+        }
+        for (const UI::UINodeId field : {
+                 inspectorParentStableId_,
+                 inspectorPositionX_, inspectorPositionY_, inspectorPositionZ_,
+                 inspectorRotationX_, inspectorRotationY_, inspectorRotationZ_,
+                 inspectorScaleX_, inspectorScaleY_, inspectorScaleZ_}) {
+            if (auto status = tree.setText(field, "n/a"); !status) {
+                return status;
+            }
+        }
+        return Tina::Core::success();
+    }
+    if (auto status = setInspectorSelectionVisibility(true); !status) {
         return status;
     }
     const bool mixedSelection = !tileMapEditingContext() &&

@@ -1,4 +1,5 @@
 add_executable(tina_editor_app_tests
+    EditorCompositeImageResolverTests.cpp
     EditorSourceImportLaunchOptionsTests.cpp
     EditorSourceImportIngressTests.cpp
     EditorSourceImportSelectionTests.cpp

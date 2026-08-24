@@ -56,6 +56,7 @@ class Sprite2DBindingRegistry final {
     [[nodiscard]] explicit operator bool() const noexcept;
     [[nodiscard]] Core::usize capacity() const noexcept;
     [[nodiscard]] Core::usize bindingCount() const noexcept;
+    [[nodiscard]] bool hasActiveFrameBorrows() const noexcept;
     // Old owners replaced by AssetSystem::reloadCatalog() remain retryable until
     // backend retirement succeeds.
     [[nodiscard]] Core::usize pendingRetirementCount() const noexcept;

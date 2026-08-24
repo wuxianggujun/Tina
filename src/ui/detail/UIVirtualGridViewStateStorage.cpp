@@ -326,7 +326,7 @@ bool UIVirtualGridViewStateStorage::clearSelection(
 
 bool UIVirtualGridViewStateStorage::bindItem(
     UINodeId item, UIVirtualGridViewItemKey key, u64 logicalIndex,
-    bool enabled) noexcept
+    bool enabled, UIVirtualGridViewItemPresentation presentation) noexcept
 {
     VirtualGridViewItemState* state = tryItem(item);
     if (state == nullptr || key == InvalidUIVirtualGridViewItemKey)
@@ -337,6 +337,7 @@ bool UIVirtualGridViewStateStorage::bindItem(
     state->logicalIndex = logicalIndex;
     state->bound = true;
     state->enabled = enabled;
+    state->presentation = presentation;
     return true;
 }
 
@@ -351,6 +352,7 @@ void UIVirtualGridViewStateStorage::clearItemBinding(UINodeId item) noexcept
     state->logicalIndex = 0;
     state->bound = false;
     state->enabled = true;
+    state->presentation = {};
 }
 
 void UIVirtualGridViewStateStorage::clearItemBindings(
@@ -399,6 +401,7 @@ void UIVirtualGridViewStateStorage::publishItemBindings(
         state->committedLogicalIndex = state->logicalIndex;
         state->committedBound = state->bound;
         state->committedEnabled = state->enabled;
+        state->committedPresentation = state->presentation;
         item = state->nextItem;
     }
 }

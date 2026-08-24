@@ -78,12 +78,24 @@ public:
         return m_visibleIndices.size();
     }
     [[nodiscard]] ProjectAssetFilter filter() const noexcept { return m_filter; }
+    [[nodiscard]] std::string_view searchQuery() const noexcept
+    {
+        return m_searchQueryUtf8;
+    }
     [[nodiscard]] std::optional<Core::usize> selectedVisibleIndex() const noexcept
     {
         return m_selectedVisibleIndex;
     }
+    // Logical selection survives a filter/search that hides its row.
+    [[nodiscard]] std::optional<Core::AssetId> selectedAssetId() const noexcept
+    {
+        return m_selectedAssetId;
+    }
     [[nodiscard]] const ProjectAssetDescriptor*
     visibleItem(Core::usize visibleIndex) const noexcept;
+    // Stable within one sorted Catalog snapshot. Returns zero for an invalid
+    // visible index; valid keys are the owned sorted asset index plus one.
+    [[nodiscard]] Core::u64 visibleItemStableKey(Core::usize visibleIndex) const noexcept;
     [[nodiscard]] const ProjectAssetDescriptor* selectedItem() const noexcept;
     [[nodiscard]] const ProjectAssetDescriptor*
     inspectorSnapshot(Core::AssetId assetId) const noexcept;
@@ -92,8 +104,12 @@ public:
     [[nodiscard]] const ProjectAssetDescriptor* selectedInspectorSnapshot() const noexcept;
 
     [[nodiscard]] Core::Status setFilter(ProjectAssetFilter filter) noexcept;
+    [[nodiscard]] Core::Status setSearchQuery(std::string_view queryUtf8) noexcept;
     [[nodiscard]] Core::Status selectVisibleIndex(Core::usize visibleIndex) noexcept;
     [[nodiscard]] Core::Status selectAsset(Core::AssetId assetId) noexcept;
+    // Restore a Catalog selection without requiring it to be visible under the
+    // current filter/search query.
+    [[nodiscard]] Core::Status restoreAssetSelection(Core::AssetId assetId) noexcept;
 
 private:
     ProjectAssetBrowserModel(ProjectAssetBrowserConfig config,
@@ -106,6 +122,7 @@ private:
     std::vector<ProjectAssetDescriptor> m_assets{};
     std::vector<Core::usize> m_visibleIndices{};
     ProjectAssetFilter m_filter = ProjectAssetFilter::All;
+    std::string m_searchQueryUtf8{};
     std::optional<Core::AssetId> m_selectedAssetId{};
     std::optional<Core::usize> m_selectedVisibleIndex{};
 };

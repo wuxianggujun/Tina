@@ -1431,6 +1431,115 @@ auto EditorWorkspaceState::updateViewportMarqueeVisual(
     return tree.setLayoutStyle(viewportMarqueeNode_, style);
 }
 
+auto EditorWorkspaceState::viewportStableIdAtPosition(
+    UI::UILogicalPoint position) const noexcept -> std::optional<u32>
+{
+    if (viewportLogicalRect_.width <= 0.0F ||
+        viewportLogicalRect_.height <= 0.0F ||
+        position.x < viewportLogicalRect_.x ||
+        position.x >= viewportLogicalRect_.right() ||
+        position.y < viewportLogicalRect_.y ||
+        position.y >= viewportLogicalRect_.bottom()) {
+        return std::nullopt;
+    }
+    std::array<Tina::Editor::EditorMarqueeCandidate,
+               ViewportMarqueeCandidateCapacity>
+        candidates{};
+    const Tina::Core::usize candidateCount =
+        collectViewportMarqueeCandidates(candidates);
+    std::optional<u32> hit{};
+    float smallestArea = (std::numeric_limits<float>::max)();
+    for (Tina::Core::usize index = 0; index < candidateCount; ++index) {
+        const auto& bounds = candidates[index].screenBounds;
+        const float left = (std::min)(bounds.x0, bounds.x1);
+        const float right = (std::max)(bounds.x0, bounds.x1);
+        const float top = (std::min)(bounds.y0, bounds.y1);
+        const float bottom = (std::max)(bounds.y0, bounds.y1);
+        if (position.x < left || position.x > right || position.y < top ||
+            position.y > bottom) {
+            continue;
+        }
+        const float area = (std::max)(1.0F, (right - left) * (bottom - top));
+        // Prefer the smallest visible bounds so a small child remains
+        // discoverable when it overlaps a larger parent preview.
+        if (!hit.has_value() || area <= smallestArea) {
+            hit = static_cast<u32>(candidates[index].stableId);
+            smallestArea = area;
+        }
+    }
+    return hit;
+}
+
+auto EditorWorkspaceState::updateViewportPreselectionVisual(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    const UI::UINodeId node = viewportPreselectionVisualNodes_[0];
+    UI::UILayoutStyle collapsed = fixedSize(1.0F, 1.0F);
+    collapsed.placement = UI::UILayoutPlacement::Overlay;
+    collapsed.visibility = UI::UIVisibility::Collapsed;
+    if (!node.hasValue() || viewportPreselectionStableId_ == 0U ||
+        viewportGizmo_.captured || viewportMarquee_.captured ||
+        viewportNavigationDrag_.captured) {
+        return tree.setLayoutStyle(node, collapsed);
+    }
+    std::array<Tina::Editor::EditorMarqueeCandidate,
+               ViewportMarqueeCandidateCapacity>
+        candidates{};
+    const Tina::Core::usize candidateCount =
+        collectViewportMarqueeCandidates(candidates);
+    const auto candidate = std::find_if(
+        candidates.begin(), candidates.begin() +
+                              static_cast<std::ptrdiff_t>(candidateCount),
+        [this](const Tina::Editor::EditorMarqueeCandidate& item) {
+            return item.stableId == viewportPreselectionStableId_;
+        });
+    if (candidate == candidates.begin() +
+                         static_cast<std::ptrdiff_t>(candidateCount)) {
+        viewportPreselectionStableId_ = 0U;
+        return tree.setLayoutStyle(node, collapsed);
+    }
+    const float left = (std::min)(candidate->screenBounds.x0,
+                                  candidate->screenBounds.x1) - 2.0F;
+    const float top = (std::min)(candidate->screenBounds.y0,
+                                 candidate->screenBounds.y1) - 2.0F;
+    const float right = (std::max)(candidate->screenBounds.x0,
+                                   candidate->screenBounds.x1) + 2.0F;
+    const float bottom = (std::max)(candidate->screenBounds.y0,
+                                    candidate->screenBounds.y1) + 2.0F;
+    const float clippedLeft = std::clamp(
+        left - viewportLogicalRect_.x, 0.0F, viewportLogicalRect_.width);
+    const float clippedTop = std::clamp(
+        top - viewportLogicalRect_.y, 0.0F, viewportLogicalRect_.height);
+    const float clippedRight = std::clamp(
+        right - viewportLogicalRect_.x, 0.0F, viewportLogicalRect_.width);
+    const float clippedBottom = std::clamp(
+        bottom - viewportLogicalRect_.y, 0.0F, viewportLogicalRect_.height);
+    if (!(clippedRight > clippedLeft) || !(clippedBottom > clippedTop)) {
+        return tree.setLayoutStyle(node, collapsed);
+    }
+    UI::UILayoutStyle style = fixedSize(
+        clippedRight - clippedLeft, clippedBottom - clippedTop);
+    style.placement = UI::UILayoutPlacement::Overlay;
+    style.overlay.horizontal = UI::UIAxisAlignment::Start;
+    style.overlay.vertical = UI::UIAxisAlignment::Start;
+    style.overlay.offset.x = UI::UILayoutLength::Px(clippedLeft);
+    style.overlay.offset.y = UI::UILayoutLength::Px(clippedTop);
+    UI::UIBoxPaint paint = UI::makeSolidBox(UI::rgb(0x000000, 0));
+    const UI::UIStraightSrgba8Color color =
+        viewportSelectionContains(viewportPreselectionStableId_)
+            ? UI::rgb(0x8BE8CC, 245)
+            : UI::rgb(0x64D8B4, 238);
+    paint.borderLight = color;
+    paint.borderDark = color;
+    paint.borderWidth = viewportSelectionContains(viewportPreselectionStableId_)
+                            ? 2.0F
+                            : 1.5F;
+    if (auto status = tree.setBoxPaint(node, paint); !status) {
+        return status;
+    }
+    return tree.setLayoutStyle(node, style);
+}
+
 auto EditorWorkspaceState::collectViewportMarqueeCandidates(
     std::span<Tina::Editor::EditorMarqueeCandidate> output) const noexcept -> Tina::Core::usize{
     if (!previewWorld_.has_value()) {

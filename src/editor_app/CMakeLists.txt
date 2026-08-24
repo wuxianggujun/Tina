@@ -23,6 +23,8 @@ add_library(tina_editor_app STATIC
     EditorWorkspaceViewport.cpp
     EditorFileDialog.cpp
     EditorFileDialog.hpp
+    EditorCompositeImageResolver.cpp
+    EditorCompositeImageResolver.hpp
     EditorIconAtlas.hpp
     EditorIconAtlas.generated.hpp
     EditorIconAtlas.generated.inc

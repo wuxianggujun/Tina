@@ -424,6 +424,9 @@ auto EditorWorkspaceState::showHierarchyRename(
 auto EditorWorkspaceState::refreshHierarchyRenameLayout(
     Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
 {
+    if (auto status = refreshHierarchyDropIndicator(tree); !status) {
+        return status;
+    }
     if (!hierarchyRenameVisible_ || hierarchyRenameStableId_ == 0U ||
         !hierarchyRenameRoot_.hasValue() || !hierarchyRenameInput_.hasValue()) {
         return Tina::Core::success();
@@ -681,13 +684,13 @@ auto EditorWorkspaceState::processPendingProjectAssetDrop(
             "Resource drop rejected: drop a Sprite or Texture2D onto Sprite2D/AnimatedSprite2D";
         return Tina::Core::success();
     }
-    if (request.visibleIndex >= projectAssets_.visibleItemCount()) {
+    if (!request.assetId ||
+        projectAssets_.inspectorSnapshot(request.assetId) == nullptr) {
         authoringFeedback_ =
             "Resource drop rejected: the Project Assets item is no longer available";
         return Tina::Core::success();
     }
-    if (auto status = projectAssets_.selectVisibleIndex(
-            static_cast<Tina::Core::usize>(request.visibleIndex)); !status) {
+    if (auto status = projectAssets_.selectAsset(request.assetId); !status) {
         return reportAuthoringFailure("Resource drop rejected: ", status.error());
     }
     assetInspectorActive_ = true;
@@ -763,6 +766,54 @@ auto EditorWorkspaceState::hideSceneDeleteConfirmation(
     return Tina::Core::success();
 }
 
+auto EditorWorkspaceState::showProjectAssetRemoveConfirmation(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    if (pendingProjectAssetRemoveConfirmation_.has_value() ||
+        !activeProjectWorkspace_.has_value() ||
+        sourceImportService_.state() !=
+            Tina::EditorApp::Detail::EditorSourceImportServiceState::Idle) {
+        return Tina::Core::success();
+    }
+    const Tina::Core::AssetId assetId = projectAssetContextAssetId_;
+    const auto* sourceUnit = sourceImportUnitForAsset(assetId);
+    if (!assetId || sourceUnit == nullptr) {
+        authoringFeedback_ =
+            "Remove unavailable: this Catalog asset has no retained source-import mapping";
+        return Tina::Core::success();
+    }
+    try {
+        pendingProjectAssetRemoveConfirmation_ = ProjectAssetRemoveConfirmation{
+            .assetId = assetId,
+            .sourcePathUtf8 = sourceUnit->sourcePathUtf8,
+        };
+    } catch (const std::bad_alloc&) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::OutOfMemory,
+            "Editor could not stage the Project Asset removal confirmation");
+    }
+    if (auto status = tree.openDialog(projectAssetRemoveDialog_.modal); !status) {
+        pendingProjectAssetRemoveConfirmation_.reset();
+        return status;
+    }
+    pendingProjectAssetRemoveDialogFocus_ = true;
+    return Tina::Core::success();
+}
+
+auto EditorWorkspaceState::hideProjectAssetRemoveConfirmation(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
+{
+    if (!pendingProjectAssetRemoveConfirmation_.has_value()) {
+        return Tina::Core::success();
+    }
+    if (auto status = tree.dismissDialog(projectAssetRemoveDialog_.modal); !status) {
+        return status;
+    }
+    pendingProjectAssetRemoveConfirmation_.reset();
+    pendingProjectAssetRemoveDialogFocus_ = false;
+    return Tina::Core::success();
+}
+
 auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status{
     const EditorCommand command = *pendingEditorCommand_;
     pendingEditorCommand_.reset();
@@ -811,7 +862,11 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
             authoringFeedback_ = "Move X +1 applied as one document revision";
         }
         break;
-    case EditorCommand::ApplyTransform: {
+    case EditorCommand::ApplyTransform:
+    case EditorCommand::ResetTransform: {
+        const bool resetTransform = command == EditorCommand::ResetTransform;
+        inspectorTransformErrorUtf8_.clear();
+        inspectorTransformErrorStableId_ = 0U;
         InspectorTransformInput input{};
         const auto parseField = [&](UI::UINodeId field,
                                     std::string_view fieldName)
@@ -838,7 +893,12 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
             try {
                 authoringFeedback_ = "Transform rejected: ";
                 authoringFeedback_ += error.message;
+                inspectorTransformErrorUtf8_ = error.message;
+                inspectorTransformErrorStableId_ =
+                    stableEntityIdForHierarchyItem(selectionKey_);
             } catch (const std::bad_alloc&) {
+                inspectorTransformErrorUtf8_.clear();
+                inspectorTransformErrorStableId_ = 0U;
                 return Tina::Core::failure(
                     Tina::Core::CoreErrorCode::OutOfMemory,
                     "Inspector rejection feedback allocation failed");
@@ -847,36 +907,50 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
             return refreshAuthoringUi(tree);
         };
 
-        status = parseInto(inspectorPositionX_, "Position X",
-                           input.positionX);
-        if (status) {
-            status = parseInto(inspectorPositionY_, "Position Y",
-                               input.positionY);
-        }
-        if (status && workspaceMode_ == WorkspaceMode::World3D) {
-            status = parseInto(inspectorPositionZ_, "Position Z",
-                               input.positionZ);
-        }
-        if (status && workspaceMode_ == WorkspaceMode::World3D) {
-            status = parseInto(inspectorRotationX_, "Rotation X",
-                               input.rotationX);
-        }
-        if (status && workspaceMode_ == WorkspaceMode::World3D) {
-            status = parseInto(inspectorRotationY_, "Rotation Y",
-                               input.rotationY);
-        }
-        if (status) {
-            status = parseInto(inspectorRotationZ_, "Rotation Z",
-                               input.rotationZ);
-        }
-        if (status) {
-            status = parseInto(inspectorScaleX_, "Scale X", input.scaleX);
-        }
-        if (status) {
-            status = parseInto(inspectorScaleY_, "Scale Y", input.scaleY);
-        }
-        if (status && workspaceMode_ == WorkspaceMode::World3D) {
-            status = parseInto(inspectorScaleZ_, "Scale Z", input.scaleZ);
+        if (resetTransform) {
+            input.positionX = 0.0F;
+            input.positionY = 0.0F;
+            input.rotationZ = 0.0F;
+            input.scaleX = 1.0F;
+            input.scaleY = 1.0F;
+            if (workspaceMode_ == WorkspaceMode::World3D) {
+                input.positionZ = 0.0F;
+                input.rotationX = 0.0F;
+                input.rotationY = 0.0F;
+                input.scaleZ = 1.0F;
+            }
+        } else {
+            status = parseInto(inspectorPositionX_, "Position X",
+                               input.positionX);
+            if (status) {
+                status = parseInto(inspectorPositionY_, "Position Y",
+                                   input.positionY);
+            }
+            if (status && workspaceMode_ == WorkspaceMode::World3D) {
+                status = parseInto(inspectorPositionZ_, "Position Z",
+                                   input.positionZ);
+            }
+            if (status && workspaceMode_ == WorkspaceMode::World3D) {
+                status = parseInto(inspectorRotationX_, "Rotation X",
+                                   input.rotationX);
+            }
+            if (status && workspaceMode_ == WorkspaceMode::World3D) {
+                status = parseInto(inspectorRotationY_, "Rotation Y",
+                                   input.rotationY);
+            }
+            if (status) {
+                status = parseInto(inspectorRotationZ_, "Rotation Z",
+                                   input.rotationZ);
+            }
+            if (status) {
+                status = parseInto(inspectorScaleX_, "Scale X", input.scaleX);
+            }
+            if (status) {
+                status = parseInto(inspectorScaleY_, "Scale Y", input.scaleY);
+            }
+            if (status && workspaceMode_ == WorkspaceMode::World3D) {
+                status = parseInto(inspectorScaleZ_, "Scale Z", input.scaleZ);
+            }
         }
         if (!status) {
             if (status.error().code ==
@@ -899,8 +973,9 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         }
         const u64 revisionAfter = activeDocumentRevision();
         if (revisionAfter == revisionBefore) {
-            authoringFeedback_ =
-                "Transform unchanged; no document revision published";
+            authoringFeedback_ = resetTransform
+                ? "Transform already has identity values; no document revision published"
+                : "Transform unchanged; no document revision published";
             break;
         }
         if (revisionAfter < revisionBefore ||
@@ -914,7 +989,9 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         requiresPreviewValidation = true;
         if (viewportSelectedEntityCount_ > 1U) {
             try {
-                authoringFeedback_ = "Transform applied to ";
+                authoringFeedback_ = resetTransform
+                    ? "Transform reset for "
+                    : "Transform applied to ";
                 authoringFeedback_ +=
                     std::to_string(viewportSelectedEntityCount_);
                 authoringFeedback_ +=
@@ -925,8 +1002,9 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
                     "Inspector transaction feedback allocation failed");
             }
         } else {
-            authoringFeedback_ =
-                "Transform applied as one document revision";
+            authoringFeedback_ = resetTransform
+                ? "Transform reset as one document revision"
+                : "Transform applied as one document revision";
         }
         break;
     }
@@ -1973,7 +2051,153 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         status = removeSelectedSourceImport();
         break;
     case EditorCommand::OpenSelectedProjectAsset:
+        if (pendingProjectAssetOpen_.has_value()) {
+            const Tina::Core::AssetId requestedAssetId = *pendingProjectAssetOpen_;
+            pendingProjectAssetOpen_.reset();
+            if (projectAssets_.inspectorSnapshot(requestedAssetId) == nullptr) {
+                authoringFeedback_ =
+                    "Open cancelled: the Project Assets item is no longer available";
+                break;
+            }
+            if (auto selectStatus = projectAssets_.selectAsset(requestedAssetId);
+                !selectStatus) {
+                authoringFeedback_ =
+                    "Open cancelled: the Project Assets item is no longer visible";
+                break;
+            }
+            projectAssetSelectionSyncPending_ = true;
+            assetInspectorActive_ = true;
+        }
         status = openSelectedProjectAsset(tree);
+        break;
+    case EditorCommand::InspectSelectedProjectAsset: {
+        const Tina::Core::AssetId requestedAssetId = projectAssetContextAssetId_;
+        if (projectAssets_.inspectorSnapshot(requestedAssetId) == nullptr) {
+            authoringFeedback_ =
+                "Inspector cancelled: the Project Assets item is no longer available";
+            break;
+        }
+        if (auto selectStatus = projectAssets_.selectAsset(requestedAssetId);
+            !selectStatus) {
+            authoringFeedback_ =
+                "Inspector cancelled: the Project Assets item is no longer visible";
+            break;
+        }
+        projectAssetSelectionSyncPending_ = true;
+        assetInspectorActive_ = true;
+        authoringFeedback_ = "Project Asset selected in Inspector";
+        break;
+    }
+    case EditorCommand::ReimportSelectedProjectAsset:
+        if (!activeProjectWorkspace_.has_value() ||
+            sourceImportService_.state() !=
+                Tina::EditorApp::Detail::EditorSourceImportServiceState::Idle) {
+            authoringFeedback_ = "Reimport unavailable while source import is busy";
+            break;
+        }
+        if (const auto* sourceUnit =
+                sourceImportUnitForAsset(projectAssetContextAssetId_);
+            sourceUnit == nullptr) {
+            authoringFeedback_ =
+                "Reimport unavailable: the Catalog asset has no source-import mapping";
+            break;
+        } else {
+            try {
+                std::vector<std::string> selectedPaths;
+                selectedPaths.push_back(sourceUnit->sourcePathUtf8);
+                status = startSourceImport(
+                    sourceImportUnits_, std::move(selectedPaths));
+            } catch (const std::bad_alloc&) {
+                status = Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::OutOfMemory,
+                    "Editor could not stage the selected Project Asset for reimport");
+            }
+            if (status) {
+                authoringFeedback_ = "Reimporting the selected Project Asset";
+            }
+        }
+        break;
+    case EditorCommand::LocateProjectAssetSource:
+        authoringFeedback_ =
+            "Locate Source is unavailable: no platform file-reveal adapter is registered";
+        break;
+    case EditorCommand::CopyProjectAssetId:
+        authoringFeedback_ =
+            "Copy AssetId is unavailable: no platform clipboard adapter is registered";
+        break;
+    case EditorCommand::CopyProjectAssetSourcePath:
+        authoringFeedback_ =
+            "Copy Source Path is unavailable: no platform clipboard adapter is registered";
+        break;
+    case EditorCommand::RevealProjectAssetDependencies: {
+        const Tina::Core::AssetId requestedAssetId = projectAssetContextAssetId_;
+        const auto* asset = projectAssets_.inspectorSnapshot(requestedAssetId);
+        if (asset == nullptr) {
+            authoringFeedback_ = "Dependencies unavailable: Catalog asset no longer exists";
+            break;
+        }
+        if (auto selectStatus = projectAssets_.selectAsset(requestedAssetId);
+            !selectStatus) {
+            authoringFeedback_ = "Dependencies unavailable: Catalog asset is hidden";
+            break;
+        }
+        projectAssetSelectionSyncPending_ = true;
+        assetInspectorActive_ = true;
+        authoringFeedback_ = "Project Asset dependencies revealed in Inspector";
+        break;
+    }
+    case EditorCommand::RemoveSelectedProjectAsset:
+        status = showProjectAssetRemoveConfirmation(tree);
+        break;
+    case EditorCommand::ProjectAssetRemoveConfirm: {
+        if (!pendingProjectAssetRemoveConfirmation_.has_value() ||
+            pendingProjectAssetRemoveConfirmation_->confirming) {
+            break;
+        }
+        pendingProjectAssetRemoveConfirmation_->confirming = true;
+        const ProjectAssetRemoveConfirmation confirmation =
+            *pendingProjectAssetRemoveConfirmation_;
+        const auto* sourceUnit = sourceImportUnitForAsset(confirmation.assetId);
+        if (sourceUnit == nullptr ||
+            sourceUnit->sourcePathUtf8 != confirmation.sourcePathUtf8) {
+            authoringFeedback_ =
+                "Remove cancelled: the source-import mapping changed before confirmation";
+            status = hideProjectAssetRemoveConfirmation(tree);
+            break;
+        }
+        const auto unitIndex = std::distance(
+            sourceImportUnits_.begin(),
+            std::find_if(sourceImportUnits_.begin(), sourceImportUnits_.end(),
+                         [&confirmation](const auto& unit) {
+                             return unit.sourcePathUtf8 == confirmation.sourcePathUtf8;
+                         }));
+        if (unitIndex < 0 || static_cast<Tina::Core::usize>(unitIndex) >= sourceImportUnits_.size()) {
+            authoringFeedback_ = "Remove cancelled: source-import unit is no longer present";
+            status = hideProjectAssetRemoveConfirmation(tree);
+            break;
+        }
+        auto intendedUnits = Tina::EditorApp::Detail::removeEditorSourceImportUnit(
+            sourceImportUnits_, static_cast<Tina::Core::usize>(unitIndex));
+        if (!intendedUnits) {
+            status = reportAuthoringFailure(
+                "Project Asset removal rejected: ", intendedUnits.error());
+            if (status) {
+                status = hideProjectAssetRemoveConfirmation(tree);
+            }
+            break;
+        }
+        status = startSourceImport(*intendedUnits, {});
+        if (status) {
+            authoringFeedback_ = "Removing the selected source-import unit";
+            status = hideProjectAssetRemoveConfirmation(tree);
+        }
+        break;
+    }
+    case EditorCommand::ProjectAssetRemoveCancel:
+        if (pendingProjectAssetRemoveConfirmation_.has_value()) {
+            authoringFeedback_ = "Project Asset removal cancelled";
+            status = hideProjectAssetRemoveConfirmation(tree);
+        }
         break;
     case EditorCommand::CloseActiveDocument:
         status = closeActiveDocument(tree);

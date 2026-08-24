@@ -57,6 +57,7 @@ class Mesh3DBindingRegistry final {
     [[nodiscard]] Core::usize meshBindingCount() const noexcept;
     [[nodiscard]] Core::usize materialBindingCount() const noexcept;
     [[nodiscard]] Core::usize textureOwnerCount() const noexcept;
+    [[nodiscard]] bool hasActiveFrameBorrows() const noexcept;
 
     // Old owners replaced by AssetSystem::reloadCatalog() remain retryable until
     // backend retirement succeeds.

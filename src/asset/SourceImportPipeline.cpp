@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <limits>
 #include <memory_resource>
+#include <map>
 #include <new>
 #include <optional>
 #include <utility>
@@ -409,6 +410,109 @@ makeResultBase(const SourceImportPipelineRequest& request,
     };
 }
 
+[[nodiscard]] Core::Result<std::vector<SourceImportPipelineUnitOutput>>
+collectUnitOutputsFromCandidate(const SourceImportPipelineRequest& request,
+                                const SourceImportCandidate& candidate)
+{
+    std::map<AssetFormat::SourceImportUnitId, const SourceImportCapturedUnit*> candidateUnits;
+    for (const auto& unit : candidate.units)
+    {
+        candidateUnits.emplace(unit.unitId, &unit);
+    }
+    std::vector<SourceImportPipelineUnitOutput> outputs;
+    outputs.reserve(request.units.size());
+    for (const auto& requestedUnit : request.units)
+    {
+        auto description = makeProbeDesc(requestedUnit, request.sourceRootUtf8,
+                                         request.targetPlatform);
+        if (!description)
+        {
+            return Core::failure(std::move(description.error()));
+        }
+        const auto candidateUnit = candidateUnits.find(description->expected.unitId);
+        if (candidateUnit == candidateUnits.end())
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "source import output mapping is missing an intended unit");
+        }
+
+        SourceImportPipelineUnitOutput mapping{
+            .unitId = candidateUnit->second->unitId,
+            .sourceUtf8Path = std::string(requestedUnit.sourceUtf8Path),
+        };
+        mapping.outputs.reserve(candidateUnit->second->outputs.size());
+        for (const auto& output : candidateUnit->second->outputs)
+        {
+            mapping.outputs.push_back(SourceImportPipelineOutput{
+                .assetId = output.assetId,
+                .assetKind = output.assetKind,
+            });
+        }
+        outputs.push_back(std::move(mapping));
+    }
+    return outputs;
+}
+
+[[nodiscard]] Core::Result<std::vector<SourceImportPipelineUnitOutput>>
+collectUnitOutputsFromBaseline(const SourceImportPipelineRequest& request,
+                               std::span<const SourceImportUnitProbeDesc> descriptions,
+                               const AssetFormat::SourceImportMetadataView& baseline)
+{
+    if (descriptions.size() != request.units.size())
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                             "source import output mapping descriptions are inconsistent");
+    }
+    std::vector<SourceImportPipelineUnitOutput> outputs;
+    outputs.reserve(request.units.size());
+    for (Core::usize requestIndex = 0; requestIndex < request.units.size(); ++requestIndex)
+    {
+        const auto& expected = descriptions[requestIndex].expected;
+        std::optional<Core::u32> unitIndex{};
+        for (Core::u32 index = 0; index < baseline.header().unitCount; ++index)
+        {
+            const auto unit = baseline.unit(index);
+            if (unit && unit->unitId == expected.unitId)
+            {
+                unitIndex = index;
+                break;
+            }
+        }
+        if (!unitIndex)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "source import output mapping baseline unit is missing");
+        }
+        const auto unit = baseline.unit(*unitIndex);
+        if (!unit)
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "source import output mapping baseline unit is invalid");
+        }
+
+        SourceImportPipelineUnitOutput mapping{
+            .unitId = unit->unitId,
+            .sourceUtf8Path = std::string(request.units[requestIndex].sourceUtf8Path),
+        };
+        mapping.outputs.reserve(unit->outputCount);
+        for (Core::u32 outputIndex = 0; outputIndex < unit->outputCount; ++outputIndex)
+        {
+            const auto output = baseline.outputForUnit(*unitIndex, outputIndex);
+            if (!output)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "source import output mapping baseline output is missing");
+            }
+            mapping.outputs.push_back(SourceImportPipelineOutput{
+                .assetId = output->assetId,
+                .assetKind = output->assetKind,
+            });
+        }
+        outputs.push_back(std::move(mapping));
+    }
+    return outputs;
+}
+
 [[nodiscard]] Core::Result<SourceImportPipelineResult>
 executeSourceImportPipelineImpl(const SourceImportPipelineRequest& request,
                                 const std::stop_token stopToken)
@@ -475,6 +579,13 @@ executeSourceImportPipelineImpl(const SourceImportPipelineRequest& request,
                                          SourceImportProbeReason::None,
                                          request.baselineCatalogRootUtf8,
                                          request.baselineStateUtf8Path);
+            auto unitOutputs = collectUnitOutputsFromBaseline(request, descriptions,
+                                                              baseline.metadata);
+            if (!unitOutputs)
+            {
+                return Core::failure(std::move(unitOutputs.error()));
+            }
+            result.unitOutputs = std::move(*unitOutputs);
             result.objectsReused = baseline.catalog.entryCount();
             result.catalogEntries = baseline.catalog.entryCount();
             result.catalogDependencies = baseline.catalog.dependencyCount();
@@ -539,6 +650,11 @@ executeSourceImportPipelineImpl(const SourceImportPipelineRequest& request,
         {
             return Core::failure(std::move(composed.error()));
         }
+        auto unitOutputs = collectUnitOutputsFromCandidate(request, composed->candidate);
+        if (!unitOutputs)
+        {
+            return Core::failure(std::move(unitOutputs.error()));
+        }
         if (const auto status = checkStopped(stopToken); !status)
         {
             return Core::failure(std::move(status.error()));
@@ -575,6 +691,7 @@ executeSourceImportPipelineImpl(const SourceImportPipelineRequest& request,
         result.catalogEntries = staged->entryCount();
         result.catalogDependencies = staged->dependencyCount();
         result.importStateCommitted = true;
+        result.unitOutputs = std::move(*unitOutputs);
         result.catalog = std::move(*staged);
         return result;
     }
@@ -618,6 +735,11 @@ executeSourceImportPipelineImpl(const SourceImportPipelineRequest& request,
     {
         return Core::failure(std::move(composed.error()));
     }
+    auto unitOutputs = collectUnitOutputsFromCandidate(request, composed->candidate);
+    if (!unitOutputs)
+    {
+        return Core::failure(std::move(unitOutputs.error()));
+    }
     if (const auto status = checkStopped(stopToken); !status)
     {
         return Core::failure(std::move(status.error()));
@@ -644,6 +766,7 @@ executeSourceImportPipelineImpl(const SourceImportPipelineRequest& request,
     result.catalogEntries = staged->entryCount();
     result.catalogDependencies = staged->dependencyCount();
     result.importStateCommitted = true;
+    result.unitOutputs = std::move(*unitOutputs);
     result.catalog = std::move(*staged);
     return result;
 }

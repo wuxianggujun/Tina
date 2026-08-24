@@ -183,6 +183,18 @@ Core::usize Mesh3DBindingRegistry::meshBindingCount() const noexcept { return m_
 Core::usize Mesh3DBindingRegistry::materialBindingCount() const noexcept { return m_materialBindingCount; }
 Core::usize Mesh3DBindingRegistry::textureOwnerCount() const noexcept { return m_textureOwnerCount; }
 
+bool Mesh3DBindingRegistry::hasActiveFrameBorrows() const noexcept
+{
+    return std::any_of(m_meshEntries.begin(), m_meshEntries.end(),
+                       [](const MeshEntry& entry) {
+                           return entry.frameBorrowCount != 0;
+                       }) ||
+           std::any_of(m_materialEntries.begin(), m_materialEntries.end(),
+                       [](const MaterialEntry& entry) {
+                           return entry.frameBorrowCount != 0;
+                       });
+}
+
 Core::usize Mesh3DBindingRegistry::pendingRetirementCount() const noexcept
 {
     return m_pendingMeshCount + m_pendingMaterialCount + m_pendingTextureCount;

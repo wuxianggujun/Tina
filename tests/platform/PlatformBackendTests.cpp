@@ -6,9 +6,11 @@
 #include <tina/platform/headless/HeadlessPlatformFactory.hpp>
 
 #include <limits>
+#include <array>
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <vector>
 
@@ -844,6 +846,63 @@ TEST(PlatformFrameBuilderTest, RejectsInvalidPlatformEventPayloads)
     expectInvalidPlatformEvent(Platform::PlatformEventStreamReset{
         .reason = static_cast<Platform::PlatformEventResetReason>(255),
     });
+    expectInvalidPlatformEvent(Platform::FileDropEvent{
+        .window = window,
+        .logicalX = 10.0,
+        .logicalY = 20.0,
+        .paths = std::span<const std::string_view>{},
+    });
+}
+
+TEST(PlatformFrameBuilderTest, CopiesValidFileDropPathsIntoBorrowedFrameArena)
+{
+    auto windowPoolResult = TestWindowPool::Create(1);
+    ASSERT_TRUE(windowPoolResult.has_value());
+    const Platform::WindowId window = createWindowId(*windowPoolResult);
+    auto builderResult = Platform::PlatformFrameBuilder::Create({
+        .fileDropPathCapacity = 2,
+        .fileDropByteCapacity = 32,
+    });
+    ASSERT_TRUE(builderResult.has_value());
+    auto& builder = *builderResult;
+    ASSERT_TRUE(builder.beginFrame({1}).has_value());
+    const std::array<std::string_view, 2> paths{"C:/Assets/a.png", "C:/Assets/b.wav"};
+    EXPECT_EQ(builder.appendFileDropEvent(window, 12.5, 20.0, paths),
+              Platform::FrameBatchAppendResult::Appended);
+    EXPECT_TRUE(builder.setPrimaryWindowSnapshot(validWindowMetrics(window), validWindowInput(window)));
+    auto frame = builder.finishFrame();
+    ASSERT_TRUE(frame.has_value());
+    ASSERT_EQ(frame->platformEvents().size(), 1U);
+    const auto* drop = std::get_if<Platform::FileDropEvent>(&frame->platformEvents().front().payload);
+    ASSERT_NE(drop, nullptr);
+    EXPECT_EQ(drop->window, window);
+    EXPECT_DOUBLE_EQ(drop->logicalX, 12.5);
+    EXPECT_DOUBLE_EQ(drop->logicalY, 20.0);
+    ASSERT_EQ(drop->paths.size(), 2U);
+    EXPECT_EQ(drop->paths[0], paths[0]);
+    EXPECT_EQ(drop->paths[1], paths[1]);
+}
+
+TEST(PlatformFrameBuilderTest, RejectsFileDropCapacityWithoutResettingTheEventStream)
+{
+    auto windowPoolResult = TestWindowPool::Create(1);
+    ASSERT_TRUE(windowPoolResult.has_value());
+    const Platform::WindowId window = createWindowId(*windowPoolResult);
+    auto builderResult = Platform::PlatformFrameBuilder::Create({
+        .fileDropPathCapacity = 1,
+        .fileDropByteCapacity = 4,
+    });
+    ASSERT_TRUE(builderResult.has_value());
+    auto& builder = *builderResult;
+    ASSERT_TRUE(builder.beginFrame({1}).has_value());
+    const std::array<std::string_view, 1> paths{"abcde"};
+    EXPECT_EQ(builder.appendFileDropEvent(window, 1.0, 2.0, paths),
+              Platform::FrameBatchAppendResult::RejectedCapacity);
+    EXPECT_EQ(builder.diagnostics().fileDropOverflowCount, 1U);
+    EXPECT_TRUE(builder.setPrimaryWindowSnapshot(validWindowMetrics(window), validWindowInput(window)));
+    auto frame = builder.finishFrame();
+    ASSERT_TRUE(frame.has_value());
+    EXPECT_TRUE(frame->platformEvents().empty());
 }
 
 TEST(PlatformFrameBuilderTest, RejectsInputOutsideFinalPrimaryWindow)

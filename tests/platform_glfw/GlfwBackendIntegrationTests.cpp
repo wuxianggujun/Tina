@@ -1,4 +1,5 @@
 #include <tina/platform/PlatformErrors.hpp>
+#include <tina/platform/PlatformFrame.hpp>
 #include <tina/platform/glfw/GlfwPlatformFactory.hpp>
 
 #include <gtest/gtest.h>
@@ -7,8 +8,10 @@
 #include "WindowSurfaceLeaseAccess.hpp"
 
 #include <array>
+#include <cmath>
 #include <chrono>
 #include <cstdlib>
+#include <span>
 #include <string_view>
 #include <thread>
 
@@ -22,6 +25,35 @@ namespace {
     params.primaryWindow.initialLogicalExtent = {320, 180};
     params.primaryWindow.initiallyVisible = false;
     return params;
+}
+
+[[nodiscard]] const FileDropEvent* findFileDrop(const PlatformFrameView& frame) noexcept
+{
+    for (const PlatformEvent& event : frame.platformEvents())
+    {
+        if (const auto* drop = std::get_if<FileDropEvent>(&event.payload); drop != nullptr)
+        {
+            return drop;
+        }
+    }
+    return nullptr;
+}
+
+void expectInvalidFileDropPayload(PlatformBackendCreateParams params,
+                                  Detail::GlfwFileDropInjection injection)
+{
+    params.acceptFileDropEvents = true;
+    auto backend = createGlfwPlatformBackend(params);
+    ASSERT_TRUE(backend.has_value()) << backend.error().message;
+    ASSERT_TRUE(Detail::queueGlfwFileDropForNextPollForTest(**backend, injection).has_value());
+
+    auto poll = (*backend)->pollFrame();
+    ASSERT_FALSE(poll.has_value());
+    EXPECT_EQ(poll.error().code, PlatformErrorCode::CallbackFrameAssemblyFailed);
+    ASSERT_TRUE(poll.error().nativeCode.has_value());
+    EXPECT_EQ(*poll.error().nativeCode,
+              static_cast<i64>(Detail::GlfwCallbackAssemblyFailure::InvalidPayload));
+    (*backend)->shutdown();
 }
 
 TEST(GlfwBackendIntegrationTests, InitialPrimaryWindowMetricsDoesNotPumpAndPublishesMatchingFirstFrameEvent)
@@ -79,6 +111,111 @@ TEST(GlfwBackendIntegrationTests, InitialPrimaryWindowMetricsDoesNotPumpAndPubli
     EXPECT_EQ(metricsEvent->metricsRevision, primary->metrics.revision);
 
     (*backend)->shutdown();
+}
+
+TEST(GlfwBackendIntegrationTests, FileDropIsNotPublishedWhenTheBackendDoesNotAcceptDrops)
+{
+    auto backend = createGlfwPlatformBackend(hiddenWindowParams());
+    ASSERT_TRUE(backend.has_value()) << backend.error().message;
+    const char* paths[] = {"C:/Assets/ignored.png"};
+    ASSERT_TRUE(Detail::queueGlfwFileDropForNextPollForTest(
+                    **backend,
+                    Detail::GlfwFileDropInjection{.paths = std::span<const char* const>{paths}})
+                    .has_value());
+
+    auto poll = (*backend)->pollFrame();
+    ASSERT_TRUE(poll.has_value()) << poll.error().message;
+    ASSERT_TRUE(poll->isContinueFrame());
+    ASSERT_NE(poll->frame(), nullptr);
+    EXPECT_EQ(findFileDrop(*poll->frame()), nullptr);
+    (*backend)->shutdown();
+}
+
+TEST(GlfwBackendIntegrationTests, FileDropCopiesValidUtf8BatchIntoThePublishedFrame)
+{
+    auto params = hiddenWindowParams();
+    params.acceptFileDropEvents = true;
+    auto backend = createGlfwPlatformBackend(params);
+    ASSERT_TRUE(backend.has_value()) << backend.error().message;
+    const char* paths[] = {"C:/Assets/a.png", "C:/Assets/b.wav"};
+    ASSERT_TRUE(Detail::queueGlfwFileDropForNextPollForTest(
+                    **backend,
+                    Detail::GlfwFileDropInjection{.paths = std::span<const char* const>{paths}})
+                    .has_value());
+
+    auto poll = (*backend)->pollFrame();
+    ASSERT_TRUE(poll.has_value()) << poll.error().message;
+    ASSERT_TRUE(poll->isContinueFrame());
+    ASSERT_NE(poll->frame(), nullptr);
+    const FileDropEvent* drop = findFileDrop(*poll->frame());
+    ASSERT_NE(drop, nullptr);
+    ASSERT_EQ(drop->paths.size(), 2U);
+    EXPECT_EQ(drop->paths[0], paths[0]);
+    EXPECT_EQ(drop->paths[1], paths[1]);
+    EXPECT_TRUE(std::isfinite(drop->logicalX));
+    EXPECT_TRUE(std::isfinite(drop->logicalY));
+    (*backend)->shutdown();
+}
+
+TEST(GlfwBackendIntegrationTests, FileDropRejectsCapacityWithoutFailingTheFrameAndRecovers)
+{
+    auto params = hiddenWindowParams();
+    params.acceptFileDropEvents = true;
+    params.frameCapacities.fileDropPathCapacity = 1;
+    params.frameCapacities.fileDropByteCapacity = 64;
+    auto backend = createGlfwPlatformBackend(params);
+    ASSERT_TRUE(backend.has_value()) << backend.error().message;
+
+    const char* overCapacity[] = {"C:/Assets/a.png", "C:/Assets/b.png"};
+    ASSERT_TRUE(Detail::queueGlfwFileDropForNextPollForTest(
+                    **backend,
+                    Detail::GlfwFileDropInjection{.paths = std::span<const char* const>{overCapacity}})
+                    .has_value());
+    auto rejected = (*backend)->pollFrame();
+    ASSERT_TRUE(rejected.has_value()) << rejected.error().message;
+    ASSERT_TRUE(rejected->isContinueFrame());
+    EXPECT_EQ(findFileDrop(*rejected->frame()), nullptr);
+
+    const char* accepted[] = {"C:/Assets/recovered.png"};
+    ASSERT_TRUE(Detail::queueGlfwFileDropForNextPollForTest(
+                    **backend,
+                    Detail::GlfwFileDropInjection{.paths = std::span<const char* const>{accepted}})
+                    .has_value());
+    auto recovered = (*backend)->pollFrame();
+    ASSERT_TRUE(recovered.has_value()) << recovered.error().message;
+    ASSERT_TRUE(recovered->isContinueFrame());
+    const FileDropEvent* drop = findFileDrop(*recovered->frame());
+    ASSERT_NE(drop, nullptr);
+    ASSERT_EQ(drop->paths.size(), 1U);
+    EXPECT_EQ(drop->paths.front(), accepted[0]);
+    (*backend)->shutdown();
+}
+
+TEST(GlfwBackendIntegrationTests, FileDropRejectsNullPathArrayAsInvalidPayload)
+{
+    expectInvalidFileDropPayload(hiddenWindowParams(), Detail::GlfwFileDropInjection{.nullPathArray = true});
+}
+
+TEST(GlfwBackendIntegrationTests, FileDropRejectsNullPathEntryAsInvalidPayload)
+{
+    const char* paths[] = {"C:/Assets/valid.png", nullptr};
+    expectInvalidFileDropPayload(
+        hiddenWindowParams(), Detail::GlfwFileDropInjection{.paths = std::span<const char* const>{paths}});
+}
+
+TEST(GlfwBackendIntegrationTests, FileDropRejectsEmptyPathAsInvalidPayload)
+{
+    const char* paths[] = {""};
+    expectInvalidFileDropPayload(
+        hiddenWindowParams(), Detail::GlfwFileDropInjection{.paths = std::span<const char* const>{paths}});
+}
+
+TEST(GlfwBackendIntegrationTests, FileDropRejectsInvalidUtf8PathAsInvalidPayload)
+{
+    const char invalidUtf8[] = {'C', ':', '/', static_cast<char>(0xC0), static_cast<char>(0xAF), '\0'};
+    const char* paths[] = {invalidUtf8};
+    expectInvalidFileDropPayload(
+        hiddenWindowParams(), Detail::GlfwFileDropInjection{.paths = std::span<const char* const>{paths}});
 }
 
 TEST(GlfwBackendIntegrationTests, HiddenWindowPublishesCoherentPrimarySnapshot)

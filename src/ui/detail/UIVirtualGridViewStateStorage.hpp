@@ -44,11 +44,13 @@ struct VirtualGridViewItemState final {
     u64 logicalIndex = 0;
     bool bound = false;
     bool enabled = true;
+    UIVirtualGridViewItemPresentation presentation{};
 
     UIVirtualGridViewItemKey committedKey = InvalidUIVirtualGridViewItemKey;
     u64 committedLogicalIndex = 0;
     bool committedBound = false;
     bool committedEnabled = true;
+    UIVirtualGridViewItemPresentation committedPresentation{};
 };
 
 // Independent fixed-capacity sparse state for VirtualGridView and its
@@ -103,7 +105,7 @@ class UIVirtualGridViewStateStorage final {
 
     [[nodiscard]] bool bindItem(
         UINodeId item, UIVirtualGridViewItemKey key, u64 logicalIndex,
-        bool enabled) noexcept;
+        bool enabled, UIVirtualGridViewItemPresentation presentation = {}) noexcept;
     void clearItemBinding(UINodeId item) noexcept;
     void clearItemBindings(UINodeId virtualGridView) noexcept;
     void publishItemBindings(UINodeId virtualGridView) noexcept;

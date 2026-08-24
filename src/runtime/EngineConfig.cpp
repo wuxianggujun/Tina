@@ -66,6 +66,16 @@ namespace {
     {
         return invalidConfig("platform event capacity is outside the supported range");
     }
+    if (capacities.fileDropPathCapacity == 0 ||
+        capacities.fileDropPathCapacity > Platform::PlatformFrameCapacityConfig::MaximumFileDropPathCapacity)
+    {
+        return invalidConfig("file-drop path capacity is outside the supported range");
+    }
+    if (capacities.fileDropByteCapacity == 0 ||
+        capacities.fileDropByteCapacity > Platform::PlatformFrameCapacityConfig::MaximumFileDropByteCapacity)
+    {
+        return invalidConfig("file-drop byte capacity is outside the supported range");
+    }
     return Core::success();
 }
 

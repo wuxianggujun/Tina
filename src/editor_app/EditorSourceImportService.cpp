@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <atomic>
 #include <exception>
+#include <filesystem>
 #include <memory_resource>
 #include <new>
 #include <optional>
@@ -48,6 +49,45 @@ namespace {
                              "Editor source import service limits must be non-zero and coherent");
     }
     return Core::success();
+}
+
+[[nodiscard]] Core::Result<std::string> canonicalSourceRootUtf8(
+    std::string_view sourceRootUtf8)
+{
+    try
+    {
+        const auto sourceRoot = std::filesystem::u8path(sourceRootUtf8.begin(),
+                                                         sourceRootUtf8.end());
+        std::error_code errorCode;
+        const auto canonical = std::filesystem::weakly_canonical(sourceRoot, errorCode);
+        if (errorCode)
+        {
+            Core::Error error{Core::CoreErrorCode::Io,
+                              "Editor could not resolve the project Source directory"};
+            error.setNativeCode(errorCode.value());
+            return Core::failure(std::move(error));
+        }
+        const std::u8string encoded = canonical.lexically_normal().u8string();
+        std::string result(reinterpret_cast<const char*>(encoded.data()), encoded.size());
+        if (result.empty() || !Core::isStrictUtf8WithoutNul(result))
+        {
+            return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                                 "Editor project Source directory resolved to invalid UTF-8");
+        }
+        return result;
+    }
+    catch (const std::bad_alloc&)
+    {
+        return Core::failure(Core::CoreErrorCode::OutOfMemory,
+                             "Editor project Source directory canonicalization allocation failed");
+    }
+    catch (const std::filesystem::filesystem_error& exception)
+    {
+        Core::Error error{Core::CoreErrorCode::Io,
+                          "Editor project Source directory canonicalization failed"};
+        error.setNativeCode(exception.code().value());
+        return Core::failure(std::move(error));
+    }
 }
 
 [[nodiscard]] Core::Status validateRequest(const EditorSourceImportRequest& request,
@@ -209,10 +249,28 @@ struct EditorSourceImportCompletion final {
     }
     if (result.intendedUnits.size() > EditorSourceImportUnitCapacity ||
         statistics.unitsTotal != result.intendedUnits.size() ||
+        result.unitOutputs.size() != result.intendedUnits.size() ||
         statistics.unitsRecooked > statistics.unitsTotal)
     {
         return Core::failure(Core::CoreErrorCode::Internal,
                              "Editor source import worker returned inconsistent unit statistics");
+    }
+    for (Core::usize index = 0; index < result.unitOutputs.size(); ++index)
+    {
+        const auto& mapping = result.unitOutputs[index];
+        if (!mapping.unitId || mapping.sourceUtf8Path != result.intendedUnits[index].sourcePathUtf8)
+        {
+            return Core::failure(Core::CoreErrorCode::Internal,
+                                 "Editor source import worker returned inconsistent unit outputs");
+        }
+        for (const auto& output : mapping.outputs)
+        {
+            if (!output.assetId || output.assetKind == AssetFormat::AssetKind::Invalid)
+            {
+                return Core::failure(Core::CoreErrorCode::Internal,
+                                     "Editor source import worker returned an invalid asset output");
+            }
+        }
     }
     if (statistics.mode == EditorSourceImportMode::CleanReuse &&
         (statistics.unitsRecooked != 0U || statistics.objectsCooked != 0U ||
@@ -268,6 +326,15 @@ void reportIngressCopying(void* context) noexcept
     {
         return Core::failure(std::move(status.error()));
     }
+
+    // Keep ingress, selection validation, and the cooker on one physical root. Windows may
+    // spell the same directory with an 8.3 component after canonicalization.
+    auto canonicalSourceRoot = canonicalSourceRootUtf8(request.sourceRootUtf8);
+    if (!canonicalSourceRoot)
+    {
+        return Core::failure(std::move(canonicalSourceRoot.error()));
+    }
+    request.sourceRootUtf8 = std::move(*canonicalSourceRoot);
 
     std::optional<EditorSourceImportIngress> ingress{};
     Core::u32 selectedPathCount = 0;
@@ -459,6 +526,7 @@ EditorSourceImportWorker makeEditorSourceImportPipelineWorker()
                 .cookedPayloadBytes = pipeline->cookedPayloadBytes,
             },
             .stageCreated = pipeline->stageCreated,
+            .unitOutputs = std::move(pipeline->unitOutputs),
         };
         const Core::MemoryStatistics transientPeakStatistics =
             transientTracker.snapshot(Core::MemoryTag::Cooker);
@@ -667,6 +735,7 @@ Core::Status EditorSourceImportService::poll()
         .addedUnitCount = result->addedUnitCount,
         .copiedFileCount = result->copiedFileCount,
         .reusedFileCount = result->reusedFileCount,
+        .unitOutputs = std::move(result->unitOutputs),
     });
     impl_->pendingStageRootUtf8.clear();
     impl_->pendingStatePathUtf8.clear();

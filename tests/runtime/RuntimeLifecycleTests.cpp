@@ -17,6 +17,7 @@
 #include "support/ManualMonotonicClock.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstddef>
 #include <cstdlib>
@@ -514,6 +515,14 @@ enum class CommittedFailurePoint {
     RenderPresent,
 };
 
+enum class ScriptedFileDropMode : u8 {
+    None,
+    Valid,
+    WrongWindow,
+    NaNCoordinates,
+    EmptyPath,
+};
+
 enum class InjectedOutcome {
     ReturnError,
     Throw,
@@ -555,6 +564,7 @@ struct RuntimeProbe final {
     bool omitInitialPrimaryWindowMetrics = false;
     bool emitPlatformEvent = false;
     bool emitPlatformEventOnEveryFrame = false;
+    ScriptedFileDropMode fileDropMode = ScriptedFileDropMode::None;
     bool emitUnrepresentableUiPointerMove = false;
     std::optional<std::size_t> replacePrimaryWindowOnFrame;
     std::vector<u64> platformFrameIds;
@@ -773,6 +783,22 @@ class AdvancingPlatform final : public Platform::IPlatformBackend {
         {
             return Core::failure(Core::CoreErrorCode::Internal, "scripted primary Window snapshot was rejected");
         }
+        if (frameIndex == 0 && probe_->fileDropMode != ScriptedFileDropMode::None)
+        {
+            // The builder must copy borrowed source strings before this local
+            // storage is changed, which mirrors a backend callback's lifetime.
+            std::string firstPath = "C:/Assets/a.png";
+            std::string secondPath = "C:/Assets/b.wav";
+            const std::array<std::string_view, 2> sourcePaths{firstPath, secondPath};
+            const auto appendResult = frameBuilder_.appendFileDropEvent(primaryWindow_, 12.5, 20.0, sourcePaths);
+            if (appendResult != Platform::FrameBatchAppendResult::Appended)
+            {
+                return Core::failure(Core::CoreErrorCode::Internal,
+                                     "scripted file-drop event was not appended");
+            }
+            firstPath = "C:/Assets/mutated-after-append.png";
+            secondPath = "C:/Assets/mutated-after-append.wav";
+        }
         if ((probe_->emitPlatformEvent && frameIndex == 0) || probe_->emitPlatformEventOnEveryFrame)
         {
             const auto appendResult = frameBuilder_.appendPlatformEvent(Platform::PlatformEventStreamReset{
@@ -840,6 +866,48 @@ class AdvancingPlatform final : public Platform::IPlatformBackend {
         if (!frame)
         {
             return Core::failure(std::move(frame.error()));
+        }
+        if (frameIndex == 0 && probe_->fileDropMode != ScriptedFileDropMode::None &&
+            probe_->fileDropMode != ScriptedFileDropMode::Valid)
+        {
+            // Test-only hostile-backend injection. The frame builder has
+            // already published a valid payload; mutate its backing storage
+            // before returning it to exercise EngineHost's defensive checks.
+            auto* mutableEvent = const_cast<Platform::PlatformEvent*>(&frame->platformEvents().front());
+            auto* fileDrop = std::get_if<Platform::FileDropEvent>(&mutableEvent->payload);
+            if (fileDrop == nullptr)
+            {
+                return Core::failure(Core::CoreErrorCode::Internal,
+                                     "scripted file-drop event disappeared before hostile mutation");
+            }
+            switch (probe_->fileDropMode)
+            {
+            case ScriptedFileDropMode::WrongWindow: {
+                auto otherWindowPoolResult = RuntimeWindowPool::Create(1);
+                if (!otherWindowPoolResult)
+                {
+                    return Core::failure(std::move(otherWindowPoolResult.error()));
+                }
+                auto otherWindow = otherWindowPoolResult->tryEmplace(0);
+                if (!otherWindow)
+                {
+                    return Core::failure(std::move(otherWindow.error()));
+                }
+                fileDrop->window = *otherWindow;
+                break;
+            }
+            case ScriptedFileDropMode::NaNCoordinates:
+                fileDrop->logicalX = (std::numeric_limits<double>::quiet_NaN)();
+                break;
+            case ScriptedFileDropMode::EmptyPath: {
+                auto* mutablePaths = const_cast<std::string_view*>(fileDrop->paths.data());
+                mutablePaths[0] = {};
+                break;
+            }
+            case ScriptedFileDropMode::None:
+            case ScriptedFileDropMode::Valid:
+                break;
+            }
         }
         return Platform::PlatformPollResult::Continue(*frame);
     }
@@ -1421,6 +1489,13 @@ struct GameProbe final {
     bool subscribeToPlatformEvents = false;
     bool throwFromPlatformEvent = false;
     u32 platformEventCount = 0;
+    u32 fileDropEventCount = 0;
+    u64 fileDropSequence = 0;
+    std::optional<Platform::WindowId> fileDropWindow;
+    bool fileDropMatchesPrimaryWindow = false;
+    double fileDropLogicalX = 0.0;
+    double fileDropLogicalY = 0.0;
+    std::vector<std::string> fileDropPaths;
     std::optional<PlatformEventSubscription> platformEventSubscription;
     std::vector<FixedObservation> fixedObservations;
     std::vector<u32> fixedCountsByFrame;
@@ -1612,14 +1687,34 @@ class ScriptedGameState final : public IGameState {
         if (probe_->subscribeToPlatformEvents)
         {
             auto subscription =
-                context.platformEventSubscriptions().subscribe([probe = probe_](const PlatformEventNotification&) {
-                    probe->runtime->events.emplace_back("platform.event");
-                    ++probe->platformEventCount;
-                    if (probe->throwFromPlatformEvent)
-                    {
-                        throw std::runtime_error("platform event callback exception");
-                    }
-                });
+                context.platformEventSubscriptions().subscribe(
+                    [probe = probe_](const PlatformEventNotification& notification) {
+                        probe->runtime->events.emplace_back("platform.event");
+                        ++probe->platformEventCount;
+                        const Platform::PlatformEvent& event = notification.event();
+                        if (const auto* fileDrop = std::get_if<Platform::FileDropEvent>(&event.payload);
+                            fileDrop != nullptr)
+                        {
+                            ++probe->fileDropEventCount;
+                            probe->fileDropSequence = event.sequence;
+                            probe->fileDropWindow = fileDrop->window;
+                            const Platform::WindowMetricsSnapshot* primary = notification.primaryWindowMetrics();
+                            probe->fileDropMatchesPrimaryWindow =
+                                primary != nullptr && fileDrop->window == primary->window;
+                            probe->fileDropLogicalX = fileDrop->logicalX;
+                            probe->fileDropLogicalY = fileDrop->logicalY;
+                            probe->fileDropPaths.clear();
+                            for (const std::string_view path : fileDrop->paths)
+                            {
+                                probe->fileDropPaths.emplace_back(path);
+                            }
+                            probe->runtime->events.emplace_back("platform.file-drop");
+                        }
+                        if (probe->throwFromPlatformEvent)
+                        {
+                            throw std::runtime_error("platform event callback exception");
+                        }
+                    });
             if (!subscription)
             {
                 return Core::failure(std::move(subscription.error()));
@@ -2447,6 +2542,28 @@ TEST(EngineConfigTest, RejectsInvalidWindowInputAndPlatformEventConfiguration)
     for (const EngineConfig& config : invalidConfigs)
     {
         auto result = config.validate();
+        ASSERT_FALSE(result.has_value());
+        EXPECT_EQ(result.error().code, ConfigurationErrorCode::InvalidEngineConfig);
+    }
+}
+
+TEST(EngineConfigTest, RejectsInvalidFileDropPathAndByteCapacities)
+{
+    auto zeroPathCapacity = EngineConfig::Defaults();
+    zeroPathCapacity.platformFrameCapacities.fileDropPathCapacity = 0;
+    auto excessivePathCapacity = EngineConfig::Defaults();
+    excessivePathCapacity.platformFrameCapacities.fileDropPathCapacity =
+        Platform::PlatformFrameCapacityConfig::MaximumFileDropPathCapacity + 1;
+    auto zeroByteCapacity = EngineConfig::Defaults();
+    zeroByteCapacity.platformFrameCapacities.fileDropByteCapacity = 0;
+    auto excessiveByteCapacity = EngineConfig::Defaults();
+    excessiveByteCapacity.platformFrameCapacities.fileDropByteCapacity =
+        Platform::PlatformFrameCapacityConfig::MaximumFileDropByteCapacity + 1;
+
+    for (const EngineConfig* config : {&zeroPathCapacity, &excessivePathCapacity, &zeroByteCapacity,
+                                       &excessiveByteCapacity})
+    {
+        const Core::Status result = config->validate();
         ASSERT_FALSE(result.has_value());
         EXPECT_EQ(result.error().code, ConfigurationErrorCode::InvalidEngineConfig);
     }
@@ -3604,6 +3721,99 @@ TEST(EngineHostRunTest, DispatchesPlatformLifecycleEventsBeforeFrameCallbacks)
     ASSERT_NE(updatePosition, runtime.events.end());
     EXPECT_LT(eventPosition, updatePosition);
 }
+
+TEST(EngineHostRunTest, DispatchesPrimaryWindowFileDropBeforeFrameCallbacksAndCopiesBorrowedPaths)
+{
+    RuntimeProbe runtime;
+    runtime.frameDeltas = {Core::Duration::zero()};
+    runtime.fileDropMode = ScriptedFileDropMode::Valid;
+    GameProbe game;
+    game.runtime = &runtime;
+    game.subscribeToPlatformEvents = true;
+    game.exitOnFrame = 0;
+    ScriptedGameApplication application(game);
+    auto hostResult = createRuntimeHost(runtime);
+    ASSERT_TRUE(hostResult.has_value()) << hostResult.error().message;
+
+    auto runResult = (*hostResult)->run(application);
+
+    ASSERT_TRUE(runResult.has_value()) << runResult.error().message;
+    EXPECT_EQ(game.fileDropEventCount, 1U);
+    ASSERT_TRUE(game.fileDropWindow.has_value());
+    EXPECT_TRUE(game.fileDropMatchesPrimaryWindow);
+    EXPECT_EQ(game.fileDropPaths, (std::vector<std::string>{"C:/Assets/a.png", "C:/Assets/b.wav"}));
+    EXPECT_DOUBLE_EQ(game.fileDropLogicalX, 12.5);
+    EXPECT_DOUBLE_EQ(game.fileDropLogicalY, 20.0);
+    EXPECT_EQ(game.fileDropSequence, 1U);
+    const auto dropPosition = std::ranges::find(runtime.events, "platform.file-drop");
+    const auto updatePosition = std::ranges::find(runtime.events, "state.update.0");
+    ASSERT_NE(dropPosition, runtime.events.end());
+    ASSERT_NE(updatePosition, runtime.events.end());
+    EXPECT_LT(dropPosition, updatePosition);
+}
+
+class HostileFileDropBackendTest : public testing::TestWithParam<ScriptedFileDropMode> {};
+
+TEST_P(HostileFileDropBackendTest, RejectsMalformedFileDropBeforeDispatchAndGameFramePhases)
+{
+    RuntimeProbe runtime;
+    runtime.frameDeltas = {Core::Duration::zero()};
+    runtime.fileDropMode = GetParam();
+    GameProbe game;
+    game.runtime = &runtime;
+    game.subscribeToPlatformEvents = true;
+    game.exitOnFrame = 0;
+    ScriptedGameApplication application(game);
+    auto hostResult = createRuntimeHost(runtime);
+    ASSERT_TRUE(hostResult.has_value()) << hostResult.error().message;
+
+    auto runResult = (*hostResult)->run(application);
+
+    ASSERT_FALSE(runResult.has_value());
+    EXPECT_EQ(runResult.error().code, RuntimeErrorCode::LifecycleInvariantViolation);
+    switch (GetParam())
+    {
+    case ScriptedFileDropMode::WrongWindow:
+        EXPECT_EQ(runResult.error().message, "A file-drop event is not routed to the committed primary window");
+        break;
+    case ScriptedFileDropMode::NaNCoordinates:
+        EXPECT_EQ(runResult.error().message, "A file-drop event is not routed to the committed primary window");
+        break;
+    case ScriptedFileDropMode::EmptyPath:
+        EXPECT_EQ(runResult.error().message, "Platform file-drop text exceeded its configured frame byte capacity");
+        break;
+    case ScriptedFileDropMode::None:
+    case ScriptedFileDropMode::Valid:
+        ADD_FAILURE() << "Unexpected valid file-drop mode in hostile backend test";
+        break;
+    }
+    EXPECT_EQ(game.fileDropEventCount, 0U);
+    EXPECT_EQ(game.platformEventCount, 0U);
+    EXPECT_FALSE(containsEventPrefix(runtime.events, "state.fixed."));
+    EXPECT_FALSE(containsEventPrefix(runtime.events, "state.update."));
+    EXPECT_EQ(runtime.submitCalls, 0U);
+    EXPECT_EQ(runtime.presentCalls, 0U);
+}
+
+INSTANTIATE_TEST_SUITE_P(UntrustedBackends, HostileFileDropBackendTest,
+                         testing::Values(ScriptedFileDropMode::WrongWindow,
+                                         ScriptedFileDropMode::NaNCoordinates,
+                                         ScriptedFileDropMode::EmptyPath),
+                         [](const testing::TestParamInfo<ScriptedFileDropMode>& info) {
+                             switch (info.param)
+                             {
+                             case ScriptedFileDropMode::WrongWindow:
+                                 return std::string("WrongWindow");
+                             case ScriptedFileDropMode::NaNCoordinates:
+                                 return std::string("NaNCoordinates");
+                             case ScriptedFileDropMode::EmptyPath:
+                                 return std::string("EmptyPath");
+                             case ScriptedFileDropMode::None:
+                             case ScriptedFileDropMode::Valid:
+                                 return std::string("Unexpected");
+                             }
+                             return std::string("Unknown");
+                         });
 
 TEST(EngineHostRunTest, UiInputRouteValidationRunsAfterPlatformDispatchAndBeforeGameFramePhases)
 {

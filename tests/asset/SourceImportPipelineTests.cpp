@@ -3,9 +3,11 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <memory_resource>
+#include <set>
 #include <string>
 
 namespace Tina::Asset {
@@ -15,6 +17,26 @@ namespace {
 {
     const auto text = path.generic_u8string();
     return {text.begin(), text.end()};
+}
+
+void writePngFixture(const std::filesystem::path& path)
+{
+    constexpr std::array<std::uint8_t, 120> bytes{
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+        0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+        0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00,
+        0x01, 0x73, 0x52, 0x47, 0x42, 0x00, 0xae, 0xce, 0x1c, 0xe9, 0x00, 0x00,
+        0x00, 0x04, 0x67, 0x41, 0x4d, 0x41, 0x00, 0x00, 0xb1, 0x8f, 0x0b, 0xfc,
+        0x61, 0x05, 0x00, 0x00, 0x00, 0x09, 0x70, 0x48, 0x59, 0x73, 0x00, 0x00,
+        0x0e, 0xc3, 0x00, 0x00, 0x0e, 0xc3, 0x01, 0xc7, 0x6f, 0xa8, 0x64, 0x00,
+        0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x18, 0x57, 0x63, 0xf8, 0xff,
+        0xff, 0xff, 0x7f, 0x00, 0x09, 0xfb, 0x03, 0xfd, 0x05, 0x43, 0x45, 0xca,
+        0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    };
+    std::ofstream output(path, std::ios::binary | std::ios::trunc);
+    output.write(reinterpret_cast<const char*>(bytes.data()),
+                 static_cast<std::streamsize>(bytes.size()));
+    ASSERT_TRUE(output.good());
 }
 
 TEST(SourceImportPipelineTests, LinuxRecipeRecooksThenReusesCommittedBaseline)
@@ -69,6 +91,11 @@ TEST(SourceImportPipelineTests, LinuxRecipeRecooksThenReusesCommittedBaseline)
     EXPECT_EQ(first->objectsCooked, 1U);
     EXPECT_TRUE(first->stageCreated);
     EXPECT_TRUE(first->importStateCommitted);
+    ASSERT_EQ(first->unitOutputs.size(), 1U);
+    EXPECT_EQ(first->unitOutputs.front().sourceUtf8Path, recipePathUtf8);
+    ASSERT_EQ(first->unitOutputs.front().outputs.size(), 1U);
+    EXPECT_EQ(first->unitOutputs.front().outputs.front().assetKind,
+              AssetFormat::AssetKind::Texture2D);
 
     auto second = executeSourceImportPipeline(request);
     ASSERT_TRUE(second.has_value()) << (second ? "" : second.error().message);
@@ -77,6 +104,115 @@ TEST(SourceImportPipelineTests, LinuxRecipeRecooksThenReusesCommittedBaseline)
     EXPECT_EQ(second->objectsReused, 1U);
     EXPECT_FALSE(second->stageCreated);
     EXPECT_FALSE(second->importStateCommitted);
+    ASSERT_EQ(second->unitOutputs.size(), 1U);
+    ASSERT_EQ(second->unitOutputs.front().outputs.size(), 1U);
+    EXPECT_EQ(second->unitOutputs.front().outputs.front().assetId,
+              first->unitOutputs.front().outputs.front().assetId);
+    EXPECT_EQ(second->unitOutputs.front().outputs.front().assetKind,
+              first->unitOutputs.front().outputs.front().assetKind);
+
+    std::filesystem::remove_all(workRoot, error);
+}
+
+TEST(SourceImportPipelineTests, IncrementalTextureImportRetainsPriorPngAndMapsOutputs)
+{
+    const auto workRoot = std::filesystem::temp_directory_path() /
+                          "tina_source_import_pipeline_texture_incremental";
+    std::error_code error;
+    std::filesystem::remove_all(workRoot, error);
+    ASSERT_TRUE(std::filesystem::create_directories(workRoot / "Source", error));
+    ASSERT_FALSE(error);
+    const auto firstPath = workRoot / "Source" / "first.png";
+    const auto secondPath = workRoot / "Source" / "second.png";
+    writePngFixture(firstPath);
+    writePngFixture(secondPath);
+
+    std::pmr::unsynchronized_pool_resource memory;
+    CatalogPackageStageConfig stageConfig{};
+    stageConfig.validation.manifest.catalog.maxEntries = 16;
+    stageConfig.validation.manifest.catalog.maxDependencies = 16;
+    stageConfig.validation.manifest.catalog.maxDependenciesPerAsset = 4;
+    stageConfig.validation.manifest.catalog.memoryResource = &memory;
+    stageConfig.validation.validation.file.memoryResource = &memory;
+    stageConfig.validation.validation.verifyTypedPayload = true;
+
+    const std::string sourceRoot = toUtf8(workRoot / "Source");
+    const std::string catalogRoot = toUtf8(workRoot / "Catalog");
+    const std::string statePath = toUtf8(workRoot / "import-state.tmeta");
+    const std::string firstPathUtf8 = toUtf8(firstPath);
+    const std::string secondPathUtf8 = toUtf8(secondPath);
+    const std::array firstUnits{SourceImportPipelineUnit{
+        .kind = SourceImportPipelineUnitKind::Texture,
+        .sourceUtf8Path = firstPathUtf8,
+    }};
+    auto first = executeSourceImportPipeline(SourceImportPipelineRequest{
+        .sourceRootUtf8 = sourceRoot,
+        .targetPlatform = AssetFormat::TargetPlatform::WindowsX64,
+        .units = firstUnits,
+        .baselineCatalogRootUtf8 = catalogRoot,
+        .baselineStateUtf8Path = statePath,
+        .stageConfig = stageConfig,
+    });
+    ASSERT_TRUE(first) << (first ? "" : first.error().message);
+    ASSERT_EQ(first->unitOutputs.size(), 1U);
+    ASSERT_EQ(first->unitOutputs.front().outputs.size(), 2U);
+
+    ASSERT_TRUE(std::filesystem::create_directories(workRoot / "stage", error));
+    ASSERT_FALSE(error);
+    const std::array secondUnits{
+        firstUnits.front(),
+        SourceImportPipelineUnit{
+            .kind = SourceImportPipelineUnitKind::Texture,
+            .sourceUtf8Path = secondPathUtf8,
+        },
+    };
+    auto second = executeSourceImportPipeline(SourceImportPipelineRequest{
+        .sourceRootUtf8 = sourceRoot,
+        .targetPlatform = AssetFormat::TargetPlatform::WindowsX64,
+        .units = secondUnits,
+        .baselineCatalogRootUtf8 = catalogRoot,
+        .baselineStateUtf8Path = statePath,
+        .stageCatalogRootUtf8 = toUtf8(workRoot / "stage" / "Catalog"),
+        .stageStateUtf8Path = toUtf8(workRoot / "stage" / "import-state.tmeta"),
+        .stageConfig = stageConfig,
+    });
+    ASSERT_TRUE(second) << (second ? "" : second.error().message);
+    EXPECT_EQ(second->mode, SourceImportPipelineMode::IncrementalRecook);
+    EXPECT_EQ(second->objectsReused, 2U);
+    EXPECT_EQ(second->objectsCooked, 2U);
+    ASSERT_EQ(second->unitOutputs.size(), 2U);
+
+    std::set<Core::AssetId> assetIds;
+    for (const auto& unit : second->unitOutputs)
+    {
+        ASSERT_EQ(unit.outputs.size(), 2U);
+        std::set<AssetFormat::AssetKind> kinds;
+        for (const auto& output : unit.outputs)
+        {
+            EXPECT_TRUE(assetIds.insert(output.assetId).second);
+            kinds.insert(output.assetKind);
+        }
+        EXPECT_TRUE(kinds.contains(AssetFormat::AssetKind::Texture2D));
+        EXPECT_TRUE(kinds.contains(AssetFormat::AssetKind::Sprite));
+    }
+
+    ASSERT_TRUE(std::filesystem::create_directories(workRoot / "empty-stage", error));
+    ASSERT_FALSE(error);
+    const std::array<SourceImportPipelineUnit, 0> noUnits{};
+    auto empty = executeSourceImportPipeline(SourceImportPipelineRequest{
+        .sourceRootUtf8 = sourceRoot,
+        .targetPlatform = AssetFormat::TargetPlatform::WindowsX64,
+        .units = noUnits,
+        .baselineCatalogRootUtf8 = second->catalogRootUtf8,
+        .baselineStateUtf8Path = second->stateUtf8Path,
+        .stageCatalogRootUtf8 = toUtf8(workRoot / "empty-stage" / "Catalog"),
+        .stageStateUtf8Path = toUtf8(workRoot / "empty-stage" / "import-state.tmeta"),
+        .stageConfig = stageConfig,
+    });
+    ASSERT_TRUE(empty) << (empty ? "" : empty.error().message);
+    EXPECT_TRUE(empty->unitOutputs.empty());
+    EXPECT_EQ(empty->unitsRemoved, 2U);
+    EXPECT_EQ(empty->catalogEntries, 0U);
 
     std::filesystem::remove_all(workRoot, error);
 }

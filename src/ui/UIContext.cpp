@@ -2237,15 +2237,26 @@ struct UIContext::Impl final {
                         "UI VirtualGridView item side state is out of range");
         }
         if (descriptor.key == InvalidUIVirtualGridViewItemKey ||
-            containsLineBreak(descriptor.label))
+            containsLineBreak(descriptor.label) ||
+            containsLineBreak(descriptor.presentation.secondaryLabel) ||
+            containsLineBreak(descriptor.presentation.statusLabel))
         {
             return fail(UIErrorCode::InvalidControlValue,
-                        "UI VirtualGridView item requires a non-zero key and a single-line label");
+                        "UI VirtualGridView item requires non-zero key and single-line UTF-8 labels");
         }
-        if (descriptor.label.size() > (std::numeric_limits<u32>::max)())
+        if (descriptor.label.size() > (std::numeric_limits<u32>::max)() ||
+            descriptor.presentation.secondaryLabel.size() > (std::numeric_limits<u32>::max)() ||
+            descriptor.presentation.statusLabel.size() > (std::numeric_limits<u32>::max)())
         {
             return fail(UIErrorCode::CapacityExceeded,
-                        "UI VirtualGridView item label is too large");
+                        "UI VirtualGridView item labels are too large");
+        }
+        if (!Core::isStrictUtf8WithoutNul(descriptor.label) ||
+            !Core::isStrictUtf8WithoutNul(descriptor.presentation.secondaryLabel) ||
+            !Core::isStrictUtf8WithoutNul(descriptor.presentation.statusLabel))
+        {
+            return fail(UIErrorCode::InvalidText,
+                        "UI VirtualGridView item labels must be strict UTF-8 without NUL");
         }
 
         WidgetTextState& text = textStatesByIndex[item.index()];
@@ -2293,10 +2304,45 @@ struct UIContext::Impl final {
             text.hasContent ? premultiply(text.style.color)
                             : UIPremultipliedRgba8Color{};
         if (!virtualGridViewStorage.bindItem(
-                item, descriptor.key, logicalIndex, descriptor.enabled))
+                item, descriptor.key, logicalIndex, descriptor.enabled,
+                descriptor.presentation))
         {
             return fail(Core::CoreErrorCode::Internal,
                         "UI VirtualGridView item binding failed");
+        }
+
+        // Preview/icon metadata reuses the existing retained Image content
+        // slot. Normalize before mutating storage, then replace in place so a
+        // later candidate failure can roll back to the previous image.
+        const std::optional<UIImageSource>& source =
+            descriptor.presentation.preview.has_value()
+                ? descriptor.presentation.preview
+                : descriptor.presentation.icon;
+        if (source.has_value())
+        {
+            const UIImageContent image{
+                .source = *source,
+                .fit = UIImageFit::Contain,
+                .alignment = {
+                    .horizontal = UIAxisAlignment::Center,
+                    .vertical = UIAxisAlignment::Center,
+                },
+                .tint = rgba8(255, 255, 255),
+                .sampling = UIImageSampling::Linear,
+            };
+            auto normalized = normalizeImageContent(image);
+            if (!normalized)
+            {
+                return Core::failure(normalized.error());
+            }
+            if (Core::Status assigned = imageContentStorage.replace(item.index(), *normalized); !assigned)
+            {
+                return assigned;
+            }
+        }
+        else
+        {
+            imageContentStorage.release(item.index());
         }
         return Core::success();
     }
@@ -5808,7 +5854,9 @@ struct UIContext::Impl final {
             output, layoutEntries, &source, paintSnapshotSourceAdapter());
     }
 
-    [[nodiscard]] bool resolveSemanticsSnapshotSource(UINodeId node, Detail::UISemanticsSnapshotSource& source) noexcept
+    [[nodiscard]] bool resolveSemanticsSnapshotSource(
+        UINodeId node, Detail::UISemanticsSnapshotSource& source,
+        bool useCandidateVirtualGridPresentation) noexcept
     {
         const u32 nodeIndex = node.index();
         const NodeRecord* record = recordByIndex(nodeIndex);
@@ -5998,6 +6046,26 @@ struct UIContext::Impl final {
                 source.description = textViewFor(tooltip.index());
             }
         }
+        if (record->kind == BuiltinElementKind::VirtualGridViewItem)
+        {
+            const VirtualGridViewItemState* item =
+                virtualGridViewStorage.tryItem(node);
+            if (item != nullptr)
+            {
+                const UIVirtualGridViewItemPresentation& presentation =
+                    useCandidateVirtualGridPresentation
+                        ? item->presentation
+                        : item->committedPresentation;
+                if (!presentation.statusLabel.empty())
+                {
+                    source.description = presentation.statusLabel;
+                }
+                if (!presentation.secondaryLabel.empty())
+                {
+                    source.valueText = presentation.secondaryLabel;
+                }
+            }
+        }
         if (record->kind == BuiltinElementKind::Dropdown && nodeIndex < dropdownStatesByNodeIndex.size())
         {
             const Detail::UISelectBehaviorState* select = behaviorStateStorage.trySelectState(nodeIndex);
@@ -6012,15 +6080,27 @@ struct UIContext::Impl final {
 
     [[nodiscard]] Core::Status buildCommittedSemantics(std::pmr::vector<UISemanticsEntry>& output,
                                                        std::pmr::vector<char>& textOutput,
-                                                       std::span<const UICommittedLayoutEntry> layoutEntries)
+                                                       std::span<const UICommittedLayoutEntry> layoutEntries,
+                                                       bool useCandidateVirtualGridPresentation)
     {
+        struct SourceContext final {
+            Impl* impl = nullptr;
+            bool useCandidateVirtualGridPresentation = false;
+        } sourceContext{
+            .impl = this,
+            .useCandidateVirtualGridPresentation =
+                useCandidateVirtualGridPresentation,
+        };
         return semanticsSnapshotBuilder.build(
             output, textOutput, layoutEntries,
             Detail::UISemanticsSnapshotSourceAdapter{
-                .context = this,
+                .context = &sourceContext,
                 .resolve = [](void* context, UINodeId node,
                               Detail::UISemanticsSnapshotSource& source) noexcept {
-                    return static_cast<Impl*>(context)->resolveSemanticsSnapshotSource(node, source);
+                    auto& snapshot = *static_cast<SourceContext*>(context);
+                    return snapshot.impl->resolveSemanticsSnapshotSource(
+                        node, source,
+                        snapshot.useCandidateVirtualGridPresentation);
                 },
             });
     }
@@ -19936,10 +20016,19 @@ struct UIContext::Impl final {
                         "UI VirtualGridView data source failed to resolve an item");
         }
         if (descriptor.key == InvalidUIVirtualGridViewItemKey ||
-            containsLineBreak(descriptor.label))
+            containsLineBreak(descriptor.label) ||
+            containsLineBreak(descriptor.presentation.secondaryLabel) ||
+            containsLineBreak(descriptor.presentation.statusLabel))
         {
             return fail(UIErrorCode::InvalidControlValue,
-                        "UI VirtualGridView item requires a non-zero key and a single-line label");
+                        "UI VirtualGridView item requires non-zero key and single-line labels");
+        }
+        if (!Core::isStrictUtf8WithoutNul(descriptor.label) ||
+            !Core::isStrictUtf8WithoutNul(descriptor.presentation.secondaryLabel) ||
+            !Core::isStrictUtf8WithoutNul(descriptor.presentation.statusLabel))
+        {
+            return fail(UIErrorCode::InvalidText,
+                        "UI VirtualGridView item labels must be strict UTF-8 without NUL");
         }
         return descriptor;
     }
@@ -22368,8 +22457,17 @@ struct UIContext::Impl final {
         usize writeLayoutBufferIndex = publishedLayoutBufferIndex;
         LayoutPassStatistics pass{};
         std::span<const UICommittedLayoutEntry> candidateLayoutEntries{};
+        bool imageCandidateTransactionActive = false;
+        auto imageCandidateRollback = Core::makeScopeExit([&]() noexcept {
+            if (imageCandidateTransactionActive)
+            {
+                imageContentStorage.rollbackCandidateTransaction();
+            }
+        });
         if (layoutNeedsCommit)
         {
+            imageContentStorage.beginCandidateTransaction();
+            imageCandidateTransactionActive = true;
             const bool allowLayoutReuse = !structureNeedsCommit && !viewportChanged && layoutReuseCacheValid;
             layoutReuseCacheValid = false;
             layoutReuseInProgress = allowLayoutReuse;
@@ -22673,7 +22771,8 @@ struct UIContext::Impl final {
             writeSemanticsBufferIndex = 1 - publishedSemanticsBufferIndex;
             if (Core::Status status = buildCommittedSemantics(committedSemanticsBuffers[writeSemanticsBufferIndex],
                                                               committedSemanticsTextBuffers[writeSemanticsBufferIndex],
-                                                              candidateLayoutEntries);
+                                                              candidateLayoutEntries,
+                                                              layoutNeedsCommit);
                 !status)
             {
                 return status;
@@ -22702,6 +22801,12 @@ struct UIContext::Impl final {
             }
         }
         timelineSampleRollback.release();
+
+        if (imageCandidateTransactionActive)
+        {
+            imageContentStorage.commitCandidateTransaction();
+            imageCandidateTransactionActive = false;
+        }
 
         if (previousTextInputFocus != textInputFocus)
         {

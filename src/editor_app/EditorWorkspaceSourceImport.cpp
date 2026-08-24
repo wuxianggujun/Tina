@@ -4,6 +4,137 @@
 
 namespace Tina::EditorApp::WorkspaceInternal {
 
+EditorAssetImportStatus EditorWorkspaceState::assetImportStatusForPhase(
+    Tina::EditorApp::Detail::EditorSourceImportPhase phase) noexcept
+{
+    using Phase = Tina::EditorApp::Detail::EditorSourceImportPhase;
+    switch (phase) {
+    case Phase::Preparing:
+        return EditorAssetImportStatus::Preparing;
+    case Phase::Copying:
+        return EditorAssetImportStatus::Copying;
+    case Phase::Cooking:
+        return EditorAssetImportStatus::Cooking;
+    case Phase::ReadyToCommit:
+        return EditorAssetImportStatus::ReadyToCommit;
+    case Phase::Failed:
+        return EditorAssetImportStatus::Error;
+    case Phase::Idle:
+    default:
+        return EditorAssetImportStatus::Ready;
+    }
+}
+
+EditorAssetImportStatus EditorWorkspaceState::projectAssetImportStatus(
+    Tina::Core::AssetId assetId) const noexcept
+{
+    if (!assetId) {
+        return EditorAssetImportStatus::Ready;
+    }
+    const auto found = std::find_if(
+        assetImportHistory_.begin(), assetImportHistory_.end(),
+        [assetId](const EditorAssetImportHistoryEntry& entry) {
+            return entry.assetId == assetId;
+        });
+    return found != assetImportHistory_.end()
+               ? found->status
+               : EditorAssetImportStatus::Ready;
+}
+
+std::string_view EditorWorkspaceState::projectAssetImportStatusLabel(
+    Tina::Core::AssetId assetId) const noexcept
+{
+    switch (projectAssetImportStatus(assetId)) {
+    case EditorAssetImportStatus::Queued:
+        return "Queued";
+    case EditorAssetImportStatus::Preparing:
+        return "Preparing";
+    case EditorAssetImportStatus::Copying:
+        return "Copying";
+    case EditorAssetImportStatus::Cooking:
+        return "Cooking";
+    case EditorAssetImportStatus::ReadyToCommit:
+        return "Ready";
+    case EditorAssetImportStatus::Committed:
+        return "Ready";
+    case EditorAssetImportStatus::Error:
+        return "Error";
+    case EditorAssetImportStatus::Ready:
+    default:
+        return "Ready";
+    }
+}
+
+void EditorWorkspaceState::setAssetImportHistory(
+    std::span<const Tina::Asset::SourceImportPipelineUnitOutput> outputs,
+    EditorAssetImportStatus status) noexcept
+{
+    try {
+        for (const auto& unitOutput : outputs) {
+            for (const auto& output : unitOutput.outputs) {
+                if (!output.assetId) {
+                    continue;
+                }
+                const auto found = std::find_if(
+                    assetImportHistory_.begin(), assetImportHistory_.end(),
+                    [&output](const EditorAssetImportHistoryEntry& entry) {
+                        return entry.assetId == output.assetId;
+                    });
+                if (found != assetImportHistory_.end()) {
+                    found->status = status;
+                } else {
+                    assetImportHistory_.push_back({
+                        .assetId = output.assetId,
+                        .status = status,
+                    });
+                }
+            }
+        }
+    } catch (const std::bad_alloc&) {
+        // History is a UI projection. A failed best-effort update must not
+        // interrupt the transactional import that owns the Catalog snapshot.
+    }
+}
+
+void EditorWorkspaceState::setCurrentImportAssetHistory(
+    EditorAssetImportStatus status) noexcept
+{
+    for (const Tina::Core::AssetId assetId : activeAssetImportIds_) {
+        const auto found = std::find_if(
+            assetImportHistory_.begin(), assetImportHistory_.end(),
+            [assetId](const EditorAssetImportHistoryEntry& entry) {
+                return entry.assetId == assetId;
+            });
+        if (found != assetImportHistory_.end()) {
+            found->status = status;
+        }
+    }
+}
+
+void EditorWorkspaceState::clearAssetImportHistory() noexcept
+{
+    assetImportHistory_.clear();
+    activeAssetImportIds_.clear();
+}
+
+void EditorWorkspaceState::pruneAssetImportHistoryToCatalog() noexcept
+{
+    if (!assetResources_.system.has_value() ||
+        assetResources_.system->catalog() == nullptr) {
+        clearAssetImportHistory();
+        return;
+    }
+    const Tina::Asset::CatalogSnapshot& catalog =
+        *assetResources_.system->catalog();
+    assetImportHistory_.erase(
+        std::remove_if(
+            assetImportHistory_.begin(), assetImportHistory_.end(),
+            [&catalog](const EditorAssetImportHistoryEntry& entry) {
+                return !catalog.find(entry.assetId).has_value();
+            }),
+        assetImportHistory_.end());
+}
+
 auto EditorWorkspaceState::startSourceImport(
     std::span<const Tina::EditorApp::Detail::EditorSourceImportUnit> intendedUnits,
     std::vector<std::string> selectedPathsUtf8) -> Tina::Core::Status{
@@ -33,6 +164,8 @@ auto EditorWorkspaceState::startSourceImport(
     }
 
     Tina::EditorApp::Detail::EditorSourceImportRequest request{};
+    std::vector<Tina::EditorApp::Detail::EditorSourceImportUnit> retryUnits;
+    std::vector<std::string> retryPathsUtf8;
     try {
         request.sourceRootUtf8.assign(activeProjectWorkspace_->sourceRootUtf8());
         request.baselineCatalogRootUtf8 = assetResources_.sourceImportCatalogRootUtf8;
@@ -42,26 +175,59 @@ auto EditorWorkspaceState::startSourceImport(
         request.targetPlatform = activeProjectWorkspace_->targetPlatform();
         request.units.assign(intendedUnits.begin(), intendedUnits.end());
         request.selectedPathsUtf8 = std::move(selectedPathsUtf8);
+        retryUnits = request.units;
+        retryPathsUtf8 = request.selectedPathsUtf8;
         sourceImportPointerPathUtf8_ = pathToUtf8(cache->activeCatalogPointer);
         sourceImportPendingStageRootUtf8_ = request.freshStageRootUtf8;
+
+        // Existing unit mappings are the only authoritative way to know which
+        // AssetIds a reimport will touch before the worker returns. New output
+        // ids are added from the validated stage in updateSourceImport().
+        activeAssetImportIds_.clear();
+        for (const auto& intendedUnit : intendedUnits) {
+            for (const auto& mapping : sourceImportUnitOutputs_) {
+                if (mapping.sourceUtf8Path != intendedUnit.sourcePathUtf8) {
+                    continue;
+                }
+                setAssetImportHistory(
+                    std::span<const Tina::Asset::SourceImportPipelineUnitOutput>{
+                        &mapping, 1U},
+                    EditorAssetImportStatus::Queued);
+                for (const auto& output : mapping.outputs) {
+                    if (!output.assetId ||
+                        std::find(activeAssetImportIds_.begin(),
+                                  activeAssetImportIds_.end(), output.assetId) !=
+                            activeAssetImportIds_.end()) {
+                        continue;
+                    }
+                    activeAssetImportIds_.push_back(output.assetId);
+                }
+            }
+        }
     } catch (const std::bad_alloc&) {
+        activeAssetImportIds_.clear();
         return Tina::Core::failure(
             Tina::Core::CoreErrorCode::OutOfMemory,
             "Editor could not retain the source-import request");
     }
 
     if (auto status = sourceImportService_.start(std::move(request)); !status) {
+        activeAssetImportIds_.clear();
         return status;
     }
+    sourceImportRetryUnits_.swap(retryUnits);
+    sourceImportRetryPathsUtf8_.swap(retryPathsUtf8);
     sourceImportUiRefreshPending_ = true;
     stageReservation.release();
     sourceImportCatalogCommitted_ = false;
     sourceImportLastFailed_ = false;
+    sourceImportFailureMessageUtf8_.clear();
     counters_.sourceImportRunning = true;
     counters_.sourceImportReady = false;
     counters_.sourceImportStateCommitted = false;
     sourceImportObservedPhase_ =
         Tina::EditorApp::Detail::EditorSourceImportPhase::Preparing;
+    setCurrentImportAssetHistory(EditorAssetImportStatus::Preparing);
     ++counters_.sourceImportStarts;
     if (options_.profileUi) {
         const EditorProcessMemorySnapshot processMemory =
@@ -259,6 +425,12 @@ auto EditorWorkspaceState::commitSourceImportCatalog(
     if (!ready.stageCreated) {
         return Tina::Core::success();
     }
+    if (previewAssetBindingsHaveActiveFrameBorrows()) {
+        ++counters_.sourceImportBusyRetries;
+        authoringFeedback_ =
+            "Source import is ready; waiting for the previous preview frame to finish";
+        return Tina::Core::success();
+    }
     auto candidateTabs = prepareProjectSwitchDocumentTabs();
     if (!candidateTabs) {
         if (candidateTabs.error().code ==
@@ -271,10 +443,9 @@ auto EditorWorkspaceState::commitSourceImportCatalog(
     }
 
     const auto previousFilter = projectAssets_.filter();
+    const std::string_view previousSearchQuery = projectAssets_.searchQuery();
     std::optional<Tina::Core::AssetId> previousSelection{};
-    if (const auto* selected = projectAssets_.selectedItem(); selected != nullptr) {
-        previousSelection = selected->assetId;
-    }
+    previousSelection = projectAssets_.selectedAssetId();
     std::string nextCatalogRoot;
     std::string nextSourceImportCatalogRoot;
     std::string nextStatePath;
@@ -298,7 +469,7 @@ auto EditorWorkspaceState::commitSourceImportCatalog(
             "Source import worker did not retain its validated Catalog snapshot");
     }
     auto browser = prepareProjectBrowserForSnapshot(
-        ready.catalog, previousFilter, previousSelection);
+        ready.catalog, previousFilter, previousSelection, previousSearchQuery);
     if (!browser) {
         return Tina::Core::failure(std::move(browser.error()));
     }
@@ -333,6 +504,7 @@ auto EditorWorkspaceState::commitSourceImportCatalog(
         ++counters_.sourceImportFailures;
         counters_.sourceImportRunning = false;
         counters_.sourceImportReady = false;
+        setCurrentImportAssetHistory(EditorAssetImportStatus::Error);
         if (auto discard = sourceImportService_.discardReady(); !discard) {
             return discard;
         }
@@ -382,13 +554,71 @@ auto EditorWorkspaceState::updateSourceImport() -> Tina::Core::Status{
     if (pendingProjectSwitch_.has_value()) {
         return Tina::Core::success();
     }
+    if (cancelSourceImportPending_) {
+        cancelSourceImportPending_ = false;
+        using State =
+            Tina::EditorApp::Detail::EditorSourceImportServiceState;
+        if (sourceImportService_.state() == State::Running) {
+            if (auto status = sourceImportService_.cancel(); !status) {
+                return status;
+            }
+            cleanupOwnedSourceImportStage(sourceImportPendingStageRootUtf8_);
+            sourceImportPendingStageRootUtf8_.clear();
+            sourceImportPointerPathUtf8_.clear();
+            setCurrentImportAssetHistory(EditorAssetImportStatus::Committed);
+            activeAssetImportIds_.clear();
+            pruneAssetImportHistoryToCatalog();
+            sourceImportRetryUnits_.clear();
+            sourceImportRetryPathsUtf8_.clear();
+            sourceImportObservedPhase_ =
+                Tina::EditorApp::Detail::EditorSourceImportPhase::Idle;
+            sourceImportCatalogCommitted_ = false;
+            sourceImportLastFailed_ = false;
+            sourceImportFailureMessageUtf8_.clear();
+            counters_.sourceImportRunning = false;
+            counters_.sourceImportReady = false;
+            sourceImportUiRefreshPending_ = true;
+            authoringFeedback_ =
+                "Source import cancelled; previous Catalog preserved";
+            if (fileDropFeedbackState_ ==
+                FileDropFeedbackState::Processing) {
+                setFileDropFeedback(
+                    FileDropFeedbackState::Rejected,
+                    "Import cancelled; previous Catalog preserved");
+            }
+        }
+    }
     if (!pendingSourceImportPathsUtf8_.empty()) {
+        retrySourceImportPending_ = false;
         if (auto status = importSelectedSourceFiles(
                 std::move(pendingSourceImportPathsUtf8_));
             !status) {
             return status;
         }
         pendingSourceImportPathsUtf8_.clear();
+    }
+    if (retrySourceImportPending_) {
+        retrySourceImportPending_ = false;
+        if (sourceImportLastFailed_ &&
+            (!sourceImportRetryUnits_.empty() ||
+             !sourceImportRetryPathsUtf8_.empty())) {
+            std::vector<Tina::EditorApp::Detail::EditorSourceImportUnit>
+                retryUnits;
+            std::vector<std::string> retryPathsUtf8;
+            try {
+                retryUnits = sourceImportRetryUnits_;
+                retryPathsUtf8 = sourceImportRetryPathsUtf8_;
+            } catch (const std::bad_alloc&) {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::OutOfMemory,
+                    "Editor could not retain the source-import retry request");
+            }
+            if (auto status = startSourceImport(
+                    retryUnits, std::move(retryPathsUtf8));
+                !status) {
+                return status;
+            }
+        }
     }
     if (sourceImportStartPending_) {
         sourceImportStartPending_ = false;
@@ -406,6 +636,7 @@ auto EditorWorkspaceState::updateSourceImport() -> Tina::Core::Status{
         const Phase phase = sourceImportService_.phase();
         if (phase != sourceImportObservedPhase_) {
             sourceImportObservedPhase_ = phase;
+            setCurrentImportAssetHistory(assetImportStatusForPhase(phase));
             switch (phase) {
             case Phase::Preparing:
                 authoringFeedback_ =
@@ -430,6 +661,7 @@ auto EditorWorkspaceState::updateSourceImport() -> Tina::Core::Status{
         sourceImportUiRefreshPending_ = true;
     }
     if (sourceImportService_.state() == State::Failed) {
+        setCurrentImportAssetHistory(EditorAssetImportStatus::Error);
         const auto* failure = sourceImportService_.failure();
         if (failure == nullptr) {
             return Tina::Core::failure(
@@ -446,6 +678,20 @@ auto EditorWorkspaceState::updateSourceImport() -> Tina::Core::Status{
         sourceImportObservedPhase_ =
             Tina::EditorApp::Detail::EditorSourceImportPhase::Failed;
         sourceImportLastFailed_ = true;
+        try {
+            sourceImportFailureMessageUtf8_ = failure->message;
+        } catch (const std::bad_alloc&) {
+            // Failure cleanup and service dismissal must still complete. The
+            // persistent callout falls back to its generic rollback text.
+            sourceImportFailureMessageUtf8_.clear();
+        }
+        if (fileDropFeedbackState_ == FileDropFeedbackState::Processing) {
+            setFileDropFeedback(
+                FileDropFeedbackState::Failed,
+                sourceImportFailureMessageUtf8_.empty()
+                    ? std::string_view{"Source import failed; the previous Catalog was preserved"}
+                    : std::string_view{sourceImportFailureMessageUtf8_});
+        }
         sourceImportUiRefreshPending_ = true;
         if (options_.profileUi) {
             const EditorProcessMemorySnapshot processMemory =
@@ -477,6 +723,10 @@ auto EditorWorkspaceState::updateSourceImport() -> Tina::Core::Status{
     counters_.sourceImportReady = true;
     sourceImportObservedPhase_ =
         Tina::EditorApp::Detail::EditorSourceImportPhase::ReadyToCommit;
+    setAssetImportHistory(
+        std::span<const Tina::Asset::SourceImportPipelineUnitOutput>{
+            ready->unitOutputs.data(), ready->unitOutputs.size()},
+        EditorAssetImportStatus::ReadyToCommit);
     if (options_.profileUi && !sourceImportProfileWorkerSampled_) {
         const EditorProcessMemorySnapshot processMemory =
             queryEditorProcessMemory();
@@ -495,6 +745,11 @@ auto EditorWorkspaceState::updateSourceImport() -> Tina::Core::Status{
     }
     if (!sourceImportCatalogCommitted_) {
         if (auto status = commitSourceImportCatalog(*ready); !status) {
+            setCurrentImportAssetHistory(EditorAssetImportStatus::Error);
+            setAssetImportHistory(
+                std::span<const Tina::Asset::SourceImportPipelineUnitOutput>{
+                    ready->unitOutputs.data(), ready->unitOutputs.size()},
+                EditorAssetImportStatus::Error);
             return status;
         }
         if (sourceImportService_.state() != State::Ready ||
@@ -520,6 +775,16 @@ auto EditorWorkspaceState::updateSourceImport() -> Tina::Core::Status{
     }
 
     if (auto status = publishCommittedSourceImportState(*ready); !status) {
+        setCurrentImportAssetHistory(EditorAssetImportStatus::Error);
+        setAssetImportHistory(
+            std::span<const Tina::Asset::SourceImportPipelineUnitOutput>{
+                ready->unitOutputs.data(), ready->unitOutputs.size()},
+            EditorAssetImportStatus::Error);
+        if (fileDropFeedbackState_ == FileDropFeedbackState::Processing) {
+            setFileDropFeedback(
+                FileDropFeedbackState::Failed,
+                status.error().message);
+        }
         return reportAuthoringFailure(
             "Imported Catalog is live; import state commit will retry: ",
             status.error());
@@ -535,6 +800,7 @@ auto EditorWorkspaceState::updateSourceImport() -> Tina::Core::Status{
     counters_.sourceImportStateCommitted = true;
     counters_.sourceImportReady = false;
     sourceImportLastFailed_ = false;
+    sourceImportFailureMessageUtf8_.clear();
     sourceImportUiRefreshPending_ = true;
     if (options_.profileUi) {
         const EditorProcessMemorySnapshot processMemory =
@@ -550,12 +816,40 @@ auto EditorWorkspaceState::updateSourceImport() -> Tina::Core::Status{
         sourceImportProfileDeactivatePending_ = true;
     }
     ++counters_.sourceImportCompletions;
+    if (fileDropFeedbackState_ == FileDropFeedbackState::Processing) {
+        setFileDropFeedback(
+            FileDropFeedbackState::Committed,
+            completionFeedback);
+    }
     authoringFeedback_.swap(completionFeedback);
     if (!ready->stageCreated) {
         cleanupOwnedSourceImportStage(sourceImportPendingStageRootUtf8_);
     }
+    try {
+        sourceImportUnitOutputs_ = ready->unitOutputs;
+    } catch (const std::bad_alloc&) {
+        if (fileDropFeedbackState_ != FileDropFeedbackState::Hidden) {
+            setFileDropFeedback(
+                FileDropFeedbackState::Failed,
+                "Catalog committed, but the Editor could not retain output mappings");
+        }
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::OutOfMemory,
+            "Editor could not retain source import output mappings");
+    }
+    setCurrentImportAssetHistory(EditorAssetImportStatus::Committed);
+    setAssetImportHistory(
+        std::span<const Tina::Asset::SourceImportPipelineUnitOutput>{
+            ready->unitOutputs.data(), ready->unitOutputs.size()},
+        EditorAssetImportStatus::Committed);
     auto committedUnits = sourceImportService_.commitReady();
     if (!committedUnits) {
+        setCurrentImportAssetHistory(EditorAssetImportStatus::Error);
+        if (fileDropFeedbackState_ == FileDropFeedbackState::Processing) {
+            setFileDropFeedback(
+                FileDropFeedbackState::Failed,
+                committedUnits.error().message);
+        }
         return Tina::Core::failure(std::move(committedUnits.error()));
     }
     sourceImportUnits_.swap(*committedUnits);
@@ -563,6 +857,9 @@ auto EditorWorkspaceState::updateSourceImport() -> Tina::Core::Status{
     observedSourceImportSelectionIndex_.reset();
     sourceImportObservedPhase_ =
         Tina::EditorApp::Detail::EditorSourceImportPhase::Idle;
+    activeAssetImportIds_.clear();
+    sourceImportRetryUnits_.clear();
+    sourceImportRetryPathsUtf8_.clear();
     sourceImportCatalogCommitted_ = false;
     sourceImportPendingStageRootUtf8_.clear();
     cleanupOwnedTemporaryProject(pendingTemporaryProjectCleanupRootUtf8_);
@@ -629,6 +926,26 @@ auto EditorWorkspaceState::resolveSourceImportCell(
         return true;
     }
     if (logicalColumn == 2U) {
+        for (const auto& mapping : self->sourceImportUnitOutputs_) {
+            if (mapping.sourceUtf8Path != unit.sourcePathUtf8) {
+                continue;
+            }
+            for (const auto& imported : mapping.outputs) {
+                const EditorAssetImportStatus assetStatus =
+                    self->projectAssetImportStatus(imported.assetId);
+                if (assetStatus == EditorAssetImportStatus::Committed) {
+                    output = UI::UIDataGridCellDescriptor{.text = "Imported"};
+                    return true;
+                }
+                if (assetStatus != EditorAssetImportStatus::Ready) {
+                    output = UI::UIDataGridCellDescriptor{
+                        .text = self->projectAssetImportStatusLabel(
+                            imported.assetId)};
+                    return true;
+                }
+            }
+            break;
+        }
         using State = Tina::EditorApp::Detail::EditorSourceImportServiceState;
         std::string_view statusText = "Imported";
         if (self->pendingProjectSwitch_.has_value() ||

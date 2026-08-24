@@ -88,9 +88,11 @@ namespace {
             .platformRender =
                 WindowSurfacePlatformRenderFactories{
                     .createWindowSurfacePlatformBackend =
-                        [followSystemColorScheme](const Platform::PlatformBackendCreateParams& params) {
+                        [followSystemColorScheme, acceptFileDropEvents = options.acceptFileDropEvents](
+                            const Platform::PlatformBackendCreateParams& params) {
                             Platform::PlatformBackendCreateParams desktopParams = params;
                             desktopParams.publishSystemColorSchemeEvents = followSystemColorScheme;
+                            desktopParams.acceptFileDropEvents = acceptFileDropEvents;
                             return Platform::createGlfwWindowSurfacePlatformBackend(desktopParams);
                         },
                     .createWindowSurfaceRenderDevice =

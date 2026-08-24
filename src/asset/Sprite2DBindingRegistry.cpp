@@ -111,6 +111,13 @@ Core::usize Sprite2DBindingRegistry::bindingCount() const noexcept
     return m_bindingCount;
 }
 
+bool Sprite2DBindingRegistry::hasActiveFrameBorrows() const noexcept
+{
+    return std::any_of(m_entries.begin(), m_entries.end(), [](const Entry& entry) {
+        return entry.frameBorrowCount != 0;
+    });
+}
+
 Core::usize Sprite2DBindingRegistry::pendingRetirementCount() const noexcept
 {
     return m_pendingRetirementCount;

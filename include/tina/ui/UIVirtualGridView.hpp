@@ -1,11 +1,13 @@
 #pragma once
 
 #include <tina/core/base/Types.hpp>
+#include <tina/ui/UIImageSource.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UIScrollView.hpp>
 #include <tina/ui/UIText.hpp>
 
 #include <compare>
+#include <optional>
 #include <string_view>
 
 namespace Tina::UI {
@@ -13,10 +15,34 @@ namespace Tina::UI {
 using UIVirtualGridViewItemKey = u64;
 inline constexpr UIVirtualGridViewItemKey InvalidUIVirtualGridViewItemKey = 0;
 
+// Backend-neutral status intent for a materialized item. The UI does not
+// infer status from label text; product code supplies the semantic state.
+enum class UIVirtualGridViewItemStatus : u8 {
+    None = 0,
+    Importing,
+    Ready,
+    Warning,
+    Error,
+    Missing,
+};
+
+struct UIVirtualGridViewItemPresentation final {
+    // Borrowed UTF-8 views. The data source owns them until replacement/clear.
+    std::string_view secondaryLabel{};
+    std::string_view statusLabel{};
+    UIVirtualGridViewItemStatus status = UIVirtualGridViewItemStatus::None;
+    // One committed Image slot is used per item: preview wins, icon fallback.
+    std::optional<UIImageSource> preview{};
+    std::optional<UIImageSource> icon{};
+
+    auto operator<=>(const UIVirtualGridViewItemPresentation&) const = default;
+};
+
 struct UIVirtualGridViewItemDescriptor final {
     UIVirtualGridViewItemKey key = InvalidUIVirtualGridViewItemKey;
     std::string_view label{};
     bool enabled = true;
+    UIVirtualGridViewItemPresentation presentation{};
 };
 
 // Owner-thread data source borrowed by a VirtualGridView. The source and every

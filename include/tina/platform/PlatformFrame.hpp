@@ -16,6 +16,7 @@
 #include <new>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -63,6 +64,16 @@ struct GamepadDisconnectedEvent final {
     GamepadId gamepad{};
 };
 
+// Borrowed paths are copied into PlatformFrameBuilder's fixed UTF-8 arenas
+// before the event is published. Both the span and every string_view become
+// invalid when the backend starts its next poll.
+struct FileDropEvent final {
+    WindowId window{};
+    double logicalX = 0.0;
+    double logicalY = 0.0;
+    std::span<const std::string_view> paths{};
+};
+
 enum class PlatformEventResetReason : u8 {
     CapacityExceeded,
     BackendRecovery,
@@ -74,7 +85,7 @@ struct PlatformEventStreamReset final {
 
 using PlatformEventPayload =
     std::variant<WindowMetricsChangedEvent, SystemColorSchemeChangedEvent, GamepadConnectedEvent,
-                 GamepadDisconnectedEvent, PlatformEventStreamReset>;
+                 GamepadDisconnectedEvent, FileDropEvent, PlatformEventStreamReset>;
 
 struct PlatformEvent final {
     u64 sequence = 0;
@@ -87,6 +98,7 @@ struct PlatformFrameDiagnostics final {
     u32 inputOverflowCount = 0;
     u32 inputTextOverflowCount = 0;
     u32 platformEventOverflowCount = 0;
+    u32 fileDropOverflowCount = 0;
 };
 
 class PlatformFrameBuilder;
@@ -203,10 +215,16 @@ struct PlatformFrameCapacityConfig final {
     static constexpr u32 MaximumInputTextByteCapacity = 1024U * 1024U;
     static constexpr u32 DefaultPlatformEventCapacity = 64;
     static constexpr u32 MaximumPlatformEventCapacity = 1024;
+    static constexpr u32 DefaultFileDropPathCapacity = 64;
+    static constexpr u32 MaximumFileDropPathCapacity = 1024;
+    static constexpr u32 DefaultFileDropByteCapacity = 64U * 1024U;
+    static constexpr u32 MaximumFileDropByteCapacity = 1024U * 1024U;
 
     u32 inputTransitionCapacity = DefaultInputTransitionCapacity;
     u32 inputTextByteCapacity = DefaultInputTextByteCapacity;
     u32 platformEventCapacity = DefaultPlatformEventCapacity;
+    u32 fileDropPathCapacity = DefaultFileDropPathCapacity;
+    u32 fileDropByteCapacity = DefaultFileDropByteCapacity;
 };
 
 enum class FrameBatchAppendResult : u8 {
@@ -214,6 +232,7 @@ enum class FrameBatchAppendResult : u8 {
     Coalesced,
     ResetInserted,
     IgnoredAfterReset,
+    RejectedCapacity,
     FrameNotOpen,
     SequenceExhausted,
     InvalidPayload,
@@ -239,7 +258,11 @@ class PlatformFrameBuilder final {
             capacities.inputTextByteCapacity == 0 ||
             capacities.inputTextByteCapacity > PlatformFrameCapacityConfig::MaximumInputTextByteCapacity ||
             capacities.platformEventCapacity == 0 ||
-            capacities.platformEventCapacity > PlatformFrameCapacityConfig::MaximumPlatformEventCapacity)
+            capacities.platformEventCapacity > PlatformFrameCapacityConfig::MaximumPlatformEventCapacity ||
+            capacities.fileDropPathCapacity == 0 ||
+            capacities.fileDropPathCapacity > PlatformFrameCapacityConfig::MaximumFileDropPathCapacity ||
+            capacities.fileDropByteCapacity == 0 ||
+            capacities.fileDropByteCapacity > PlatformFrameCapacityConfig::MaximumFileDropByteCapacity)
         {
             return Core::failure(PlatformErrorCode::InvalidFrameCapacity,
                                  "Platform frame capacity is outside the supported range");
@@ -250,19 +273,29 @@ class PlatformFrameBuilder final {
         auto eventStorage = std::unique_ptr<PlatformEvent[]>(
             new (std::nothrow) PlatformEvent[static_cast<usize>(capacities.platformEventCapacity) + 1]);
         auto inputTextStorage = std::unique_ptr<char[]>(new (std::nothrow) char[capacities.inputTextByteCapacity]);
-        if (inputStorage == nullptr || eventStorage == nullptr || inputTextStorage == nullptr)
+        auto fileDropPathStorage = std::unique_ptr<std::string_view[]>(
+            new (std::nothrow) std::string_view[capacities.fileDropPathCapacity]);
+        auto fileDropByteStorage = std::unique_ptr<char[]>(new (std::nothrow) char[capacities.fileDropByteCapacity]);
+        if (inputStorage == nullptr || eventStorage == nullptr || inputTextStorage == nullptr ||
+            fileDropPathStorage == nullptr || fileDropByteStorage == nullptr)
         {
             return Core::failure(Core::CoreErrorCode::OutOfMemory, "Platform frame storage allocation failed");
         }
 
         return PlatformFrameBuilder(capacities, std::move(inputStorage), std::move(eventStorage),
-                                    std::move(inputTextStorage));
+                                    std::move(inputTextStorage), std::move(fileDropPathStorage),
+                                    std::move(fileDropByteStorage));
     }
 
     PlatformFrameBuilder(const PlatformFrameBuilder&) = delete;
     PlatformFrameBuilder& operator=(const PlatformFrameBuilder&) = delete;
     PlatformFrameBuilder(PlatformFrameBuilder&&) noexcept = default;
     PlatformFrameBuilder& operator=(PlatformFrameBuilder&&) noexcept = default;
+
+    [[nodiscard]] const PlatformFrameDiagnostics& diagnostics() const noexcept
+    {
+        return diagnostics_;
+    }
 
     [[nodiscard]] Core::Status beginFrame(PlatformFrameId id)
     {
@@ -287,6 +320,8 @@ class PlatformFrameBuilder final {
         inputCount_ = 0;
         eventCount_ = 0;
         inputTextByteCount_ = 0;
+        fileDropPathCount_ = 0;
+        fileDropByteCount_ = 0;
         inputResetWritten_ = false;
         eventResetWritten_ = false;
         invalidInputPayload_ = false;
@@ -430,6 +465,12 @@ class PlatformFrameBuilder final {
             return FrameBatchAppendResult::ResetInserted;
         }
 
+        const FrameBatchAppendResult fileDropResult = copyFileDropPathsIntoArena(payload);
+        if (fileDropResult != FrameBatchAppendResult::Appended)
+        {
+            return fileDropResult;
+        }
+
         if (const auto* metrics = std::get_if<WindowMetricsChangedEvent>(&payload); metrics != nullptr)
         {
             for (usize index = 0; index < eventCount_; ++index)
@@ -477,6 +518,27 @@ class PlatformFrameBuilder final {
                                                .reason = PlatformEventResetReason::CapacityExceeded,
                                            });
         return FrameBatchAppendResult::ResetInserted;
+    }
+
+    [[nodiscard]] FrameBatchAppendResult appendFileDropEvent(
+        WindowId window, double logicalX, double logicalY, std::span<const std::string_view> paths) noexcept
+    {
+        return appendPlatformEvent(FileDropEvent{
+            .window = window,
+            .logicalX = logicalX,
+            .logicalY = logicalY,
+            .paths = paths,
+        });
+    }
+
+    [[nodiscard]] FrameBatchAppendResult rejectFileDropCapacity() noexcept
+    {
+        if (!frameOpen_)
+        {
+            return FrameBatchAppendResult::FrameNotOpen;
+        }
+        ++diagnostics_.fileDropOverflowCount;
+        return FrameBatchAppendResult::RejectedCapacity;
     }
 
     [[nodiscard]] Core::Result<PlatformFrameView> finishFrame()
@@ -565,6 +627,8 @@ class PlatformFrameBuilder final {
         inputCount_ = 0;
         eventCount_ = 0;
         inputTextByteCount_ = 0;
+        fileDropPathCount_ = 0;
+        fileDropByteCount_ = 0;
         inputResetWritten_ = false;
         eventResetWritten_ = false;
         invalidInputPayload_ = false;
@@ -582,9 +646,12 @@ class PlatformFrameBuilder final {
   private:
     PlatformFrameBuilder(PlatformFrameCapacityConfig capacities, std::unique_ptr<InputTransition[]> inputStorage,
                          std::unique_ptr<PlatformEvent[]> eventStorage,
-                         std::unique_ptr<char[]> inputTextStorage) noexcept
+                         std::unique_ptr<char[]> inputTextStorage,
+                         std::unique_ptr<std::string_view[]> fileDropPathStorage,
+                         std::unique_ptr<char[]> fileDropByteStorage) noexcept
         : capacities_(capacities), inputStorage_(std::move(inputStorage)), eventStorage_(std::move(eventStorage)),
-          inputTextStorage_(std::move(inputTextStorage))
+          inputTextStorage_(std::move(inputTextStorage)), fileDropPathStorage_(std::move(fileDropPathStorage)),
+          fileDropByteStorage_(std::move(fileDropByteStorage))
     {
     }
 
@@ -802,6 +869,17 @@ class PlatformFrameBuilder final {
         if (const auto* value = std::get_if<GamepadDisconnectedEvent>(&payload); value != nullptr)
         {
             return isValidGamepadId(value->gamepad);
+        }
+        if (const auto* value = std::get_if<FileDropEvent>(&payload); value != nullptr)
+        {
+            if (!value->window.hasValue() || !isFinite(value->logicalX) || !isFinite(value->logicalY) ||
+                value->paths.empty())
+            {
+                return false;
+            }
+            return std::ranges::all_of(value->paths, [](std::string_view path) noexcept {
+                return !path.empty() && Core::isStrictUtf8WithoutNul(path);
+            });
         }
         if (const auto* value = std::get_if<PlatformEventStreamReset>(&payload); value != nullptr)
         {
@@ -1319,6 +1397,14 @@ class PlatformFrameBuilder final {
                 {
                     return false;
                 }
+                continue;
+            }
+            if (const auto* fileDrop = std::get_if<FileDropEvent>(&event.payload); fileDrop != nullptr)
+            {
+                if (!matchesPrimaryWindow(fileDrop->window))
+                {
+                    return false;
+                }
             }
         }
         return true;
@@ -1347,10 +1433,55 @@ class PlatformFrameBuilder final {
         eventResetWritten_ = true;
     }
 
+    [[nodiscard]] FrameBatchAppendResult copyFileDropPathsIntoArena(PlatformEventPayload& payload) noexcept
+    {
+        auto* fileDrop = std::get_if<FileDropEvent>(&payload);
+        if (fileDrop == nullptr)
+        {
+            return FrameBatchAppendResult::Appended;
+        }
+
+        const usize pathCount = fileDrop->paths.size();
+        if (pathCount > static_cast<usize>(capacities_.fileDropPathCapacity) ||
+            pathCount > static_cast<usize>(capacities_.fileDropPathCapacity) - fileDropPathCount_)
+        {
+            ++diagnostics_.fileDropOverflowCount;
+            return FrameBatchAppendResult::RejectedCapacity;
+        }
+
+        usize totalBytes = 0;
+        for (const std::string_view path : fileDrop->paths)
+        {
+            if (path.size() > static_cast<usize>(capacities_.fileDropByteCapacity) - fileDropByteCount_ - totalBytes)
+            {
+                ++diagnostics_.fileDropOverflowCount;
+                return FrameBatchAppendResult::RejectedCapacity;
+            }
+            totalBytes += path.size();
+        }
+
+        const usize firstPath = fileDropPathCount_;
+        usize byteOffset = fileDropByteCount_;
+        for (usize index = 0; index < pathCount; ++index)
+        {
+            const std::string_view source = fileDrop->paths[index];
+            char* target = fileDropByteStorage_.get() + byteOffset;
+            std::memcpy(target, source.data(), source.size());
+            fileDropPathStorage_[firstPath + index] = std::string_view(target, source.size());
+            byteOffset += source.size();
+        }
+        fileDropPathCount_ += pathCount;
+        fileDropByteCount_ += totalBytes;
+        fileDrop->paths = std::span<const std::string_view>(fileDropPathStorage_.get() + firstPath, pathCount);
+        return FrameBatchAppendResult::Appended;
+    }
+
     PlatformFrameCapacityConfig capacities_{};
     std::unique_ptr<InputTransition[]> inputStorage_;
     std::unique_ptr<PlatformEvent[]> eventStorage_;
     std::unique_ptr<char[]> inputTextStorage_;
+    std::unique_ptr<std::string_view[]> fileDropPathStorage_;
+    std::unique_ptr<char[]> fileDropByteStorage_;
     std::array<WindowFrameSnapshot, 1> windows_{};
     std::array<GamepadSnapshot, MaximumGamepadSlots> gamepads_{};
     usize windowCount_ = 0;
@@ -1358,6 +1489,8 @@ class PlatformFrameBuilder final {
     usize inputCount_ = 0;
     usize eventCount_ = 0;
     usize inputTextByteCount_ = 0;
+    usize fileDropPathCount_ = 0;
+    usize fileDropByteCount_ = 0;
     u64 nextSequence_ = 1;
     PlatformFrameId frameId_{};
     PlatformFrameDiagnostics diagnostics_{};
