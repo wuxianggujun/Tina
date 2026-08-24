@@ -31,7 +31,9 @@ class UITextPaintEmitter final {
     static void append(std::pmr::vector<UICommittedPaintEntry>& output,
                        const UICommittedLayoutEntry& layoutEntry, u32& nextPaintOrdinal, std::string_view utf8,
                        const UITextStyle& style, UIPremultipliedRgba8Color color, float startX, float startY,
-                       const UITextPaintRasterSource& rasterSource, UITextPaintCursor* outCursor) noexcept;
+                       const UITextPaintRasterSource& rasterSource, UITextPaintCursor* outCursor,
+                       float maximumWidth = 0.0F,
+                       UITextWrapMode wrapMode = UITextWrapMode::NoWrap) noexcept;
 };
 
 } // namespace Tina::UI::Detail

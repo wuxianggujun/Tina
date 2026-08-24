@@ -819,6 +819,28 @@ Core::Status PrimaryWindowUITreeUpdater::setTextStyle(UI::UINodeId node, const U
     return m_state->setTextStyle(m_epoch, m_phase, m_updater, node, style);
 }
 
+Core::Status PrimaryWindowUITreeUpdater::setTextWrapMode(
+    UI::UINodeId node, UI::UITextWrapMode wrapMode)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>("PrimaryWindowUITreeUpdater::setTextWrapMode");
+    }
+    return m_state->setTextWrapMode(
+        m_epoch, m_phase, m_updater, node, wrapMode);
+}
+
+Core::Result<UI::UITextWrapMode> PrimaryWindowUITreeUpdater::textWrapMode(
+    UI::UINodeId node)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UITextWrapMode>(
+            "PrimaryWindowUITreeUpdater::textWrapMode");
+    }
+    return m_state->textWrapMode(m_epoch, m_phase, m_updater, node);
+}
+
 Core::Status PrimaryWindowUITreeUpdater::setTextOverflow(UI::UINodeId node,
                                                          UI::UITextOverflow overflow)
 {

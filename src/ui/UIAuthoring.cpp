@@ -652,6 +652,24 @@ Core::Result<UITextOverflow> UITreeUpdater::textOverflow(UINodeId node)
     return m_context->m_impl->textOverflowFromUpdater(m_root, node);
 }
 
+Core::Status UITreeUpdater::setTextWrapMode(UINodeId node, UITextWrapMode wrapMode)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->m_impl->setTextWrapModeFromUpdater(m_root, node, wrapMode);
+}
+
+Core::Result<UITextWrapMode> UITreeUpdater::textWrapMode(UINodeId node)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->m_impl->textWrapModeFromUpdater(m_root, node);
+}
+
 Core::Result<std::string_view> UITreeUpdater::text(UINodeId node)
 {
     if (m_context == nullptr)

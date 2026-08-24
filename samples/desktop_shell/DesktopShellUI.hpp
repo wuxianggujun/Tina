@@ -19,17 +19,6 @@ enum class ShellTheme : Core::u8 {
     Light,
 };
 
-// Which workspace panes the responsive rules keep visible. The shell never
-// scales typography to fit; it collapses whole panes instead.
-enum class ShellResponsiveTier : Core::u8 {
-    // >= 1280 logical px: left dock, viewport, inspector and timeline.
-    Full = 0,
-    // 960..1279: docks clamp to their minimums, timeline collapses.
-    Compressed,
-    // < 960: inspector is opt-in through an explicit command.
-    Minimal,
-};
-
 enum class ShellDocument : Core::u8 {
     Scene = 0,
     Material,
@@ -47,8 +36,7 @@ struct DesktopShellState final {
     bool timelineHideRequested = false;
     bool inspectorHideRequested = false;
 
-    // Resolved pane visibility = responsive tier OR user intent. These are
-    // outputs of the responsive pass, not inputs.
+    // Resolved pane visibility is mirrored from committed responsive layout.
     bool timelineCollapsed = false;
     bool inspectorVisible = true;
 
@@ -71,7 +59,6 @@ struct DesktopShellState final {
 struct DesktopShellSnapshot final {
     ShellTheme theme = ShellTheme::Dark;
     UI::UIDensity density = UI::UIDensity::Compact;
-    ShellResponsiveTier tier = ShellResponsiveTier::Full;
     ShellDocument activeDocument = ShellDocument::Scene;
 
     u32 splitViewCount = 0;
@@ -138,10 +125,6 @@ class DesktopShellUI final {
                                      Render::Texture2DFrameResourceResolver iconResolver);
     [[nodiscard]] Core::Status update(UIUpdateContext& context);
     void release() noexcept;
-
-    // Logical width of the last committed publication, used by the responsive
-    // rules. Supplied by the host from primary-window metrics.
-    void setLogicalWidth(float logicalWidth) noexcept;
 
     // Scripted workflow for the headless gate. It drives the same durable state
     // the command callbacks write, then update() verifies the committed effect.
@@ -233,7 +216,8 @@ class DesktopShellUI final {
     // Reads committed SplitView metrics into the snapshot and checks that the
     // viewport keeps its minimum unobstructed area.
     [[nodiscard]] Core::Status refreshCommittedGeometry(PrimaryWindowUITreeUpdater& tree);
-    [[nodiscard]] Core::Status applyResponsiveTier(PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Core::Status applyPaneVisibilityIntent(
+        PrimaryWindowUITreeUpdater& tree);
 
     // Borrowed collection projections. The shell owns the backing arrays, so
     // labels outlive every binding.
@@ -255,7 +239,6 @@ class DesktopShellUI final {
     ShellTheme currentTheme_ = ShellTheme::Dark;
     UI::UIDensity density_ = UI::UIDensity::Compact;
     UI::UIDensity initialDensity_ = UI::UIDensity::Compact;
-    ShellResponsiveTier tier_ = ShellResponsiveTier::Full;
 
     u32 splitViewCount_ = 0;
     u32 commandCount_ = 0;
@@ -268,7 +251,6 @@ class DesktopShellUI final {
     u64 commandActivations_ = 0;
 
     // Committed geometry mirrored from the last successful publication.
-    float logicalWidth_ = 0.0F;
     float leftDockWidth_ = 0.0F;
     float viewportWidth_ = 0.0F;
     float viewportHeight_ = 0.0F;
@@ -280,7 +262,6 @@ class DesktopShellUI final {
     // Latest status message, published on the next update.
     std::string_view pendingStatus_{};
     bool statusDirty_ = false;
-    bool layoutDirty_ = false;
     bool dialogVisibilityDirty_ = false;
     bool menuStateDirty_ = false;
     // Initial focus waits for the first committed publication.
@@ -311,12 +292,11 @@ class DesktopShellUI final {
     bool tooltipRequested_ = false;
     bool tooltipStateDirty_ = false;
     UI::UINodeId focusedNode_{};
-    // Set when a command changed pane visibility intent, so the responsive
-    // pass re-resolves fractions without waiting for a resize.
+    // User commands can still explicitly hide panes; width policy stays in the
+    // authored responsive rules and is never recomputed here.
     bool paneIntentDirty_ = false;
 
-    // Base layouts are retained so responsive visibility changes do not erase
-    // pane padding, flex direction, or surface sizing.
+    // Base layouts are retained only for explicit command visibility intent.
     UI::UILayoutStyle inspectorLayout_{};
     UI::UILayoutStyle timelineLayout_{};
 };

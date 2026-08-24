@@ -225,6 +225,12 @@ class PrimaryWindowUICapabilityState final {
                                        UI::UINodeId node, std::string_view utf8);
     [[nodiscard]] Core::Status setTextStyle(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                             UI::UINodeId node, const UI::UITextStyle& style);
+    [[nodiscard]] Core::Status setTextWrapMode(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+        UI::UINodeId node, UI::UITextWrapMode wrapMode);
+    [[nodiscard]] Core::Result<UI::UITextWrapMode> textWrapMode(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+        UI::UINodeId node);
     [[nodiscard]] Core::Status setTextOverflow(u64 epoch, PrimaryWindowUIPhase phase,
                                                UI::UITreeUpdater& updater, UI::UINodeId node,
                                                UI::UITextOverflow overflow);

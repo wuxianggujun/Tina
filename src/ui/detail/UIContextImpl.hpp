@@ -378,6 +378,11 @@ struct UIContext::Impl final {
 
     void prepareLayoutState(UILogicalSize viewportSize, const std::pmr::vector<u32>& order, bool allowReuse) noexcept;
 
+    [[nodiscard]] const UILayoutStyle& resolvedLayoutStyle(u32 nodeIndex) const noexcept;
+
+    [[nodiscard]] Core::Result<bool> refreshResolvedLayoutAfterArrange(
+        const std::pmr::vector<u32>& order);
+
 
     void measureLayout(UILogicalSize viewportSize, const std::pmr::vector<u32>& order,
                        LayoutPassStatistics& statistics) noexcept;
@@ -904,6 +909,9 @@ struct UIContext::Impl final {
 
 
     [[nodiscard]] Core::Result<UITextMetrics> measureWidgetText(std::string_view utf8, const UITextStyle& style);
+
+    [[nodiscard]] Core::Result<UITextMetrics> measureWrappedWidgetText(
+        u32 index, float maximumWidth);
 
 
     void releaseFlowNode(u32 index) noexcept;
@@ -1465,6 +1473,12 @@ struct UIContext::Impl final {
 
 
     [[nodiscard]] Core::Result<UITextOverflow> textOverflowFromUpdater(
+        UINodeId updaterRoot, UINodeId node);
+
+    [[nodiscard]] Core::Status setTextWrapModeFromUpdater(
+        UINodeId updaterRoot, UINodeId node, UITextWrapMode wrapMode);
+
+    [[nodiscard]] Core::Result<UITextWrapMode> textWrapModeFromUpdater(
         UINodeId updaterRoot, UINodeId node);
 
 

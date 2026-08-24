@@ -203,7 +203,47 @@ void UIContext::Impl::prepareLayoutState(UILogicalSize viewportSize, const std::
         {
             continue;
         }
-        const UILayoutStyle style = presentationLayoutStyle(index);
+        LayoutScratchState& scratch = layoutScratchByIndex[index];
+        const LayoutPreparedInputs previous = scratch.preparedInputs;
+        if (!allowReuse)
+        {
+            scratch = {};
+        }
+        if (record->parentIndex == InvalidNodeIndex)
+        {
+            scratch.inPopupSubtree = record->kind == BuiltinElementKind::Popup ||
+                                     record->kind == BuiltinElementKind::Menu;
+            scratch.inTooltipSubtree = record->kind == BuiltinElementKind::Tooltip;
+            scratch.parentContentWidthDefinite = true;
+            scratch.parentContentHeightDefinite = true;
+            scratch.parentContentWidth = viewportSize.width;
+            scratch.parentContentHeight = viewportSize.height;
+        } else
+        {
+            const LayoutScratchState& parentScratch =
+                layoutScratchByIndex[record->parentIndex];
+            scratch.inPopupSubtree =
+                record->kind == BuiltinElementKind::Popup ||
+                record->kind == BuiltinElementKind::Menu ||
+                parentScratch.inPopupSubtree;
+            scratch.inTooltipSubtree =
+                record->kind == BuiltinElementKind::Tooltip ||
+                parentScratch.inTooltipSubtree;
+            scratch.parentContentWidthDefinite =
+                parentScratch.contentWidthDefinite;
+            scratch.parentContentHeightDefinite =
+                parentScratch.contentHeightDefinite;
+            scratch.parentContentWidth = parentScratch.contentWidth;
+            scratch.parentContentHeight = parentScratch.contentHeight;
+        }
+        const UILayoutStyle authoredStyle = presentationLayoutStyle(index);
+        scratch.resolvedStyle = scratch.parentContentWidthDefinite
+                                    ? resolveResponsiveLayoutStyle(
+                                          authoredStyle,
+                                          scratch.parentContentWidth)
+                                    : resolveResponsiveLayoutStyle(
+                                          authoredStyle, -1.0F);
+        const UILayoutStyle& style = scratch.resolvedStyle;
         UIVisibility ownVisibility = style.visibility;
         if (record->kind == BuiltinElementKind::Popup && index < popupStatesByNodeIndex.size() &&
             !popupStatesByNodeIndex[index].open)
@@ -248,37 +288,13 @@ void UIContext::Impl::prepareLayoutState(UILogicalSize viewportSize, const std::
                 ownVisibility = UIVisibility::Collapsed;
             }
         }
-        LayoutScratchState& scratch = layoutScratchByIndex[index];
-        const LayoutPreparedInputs previous = scratch.preparedInputs;
-        if (!allowReuse)
-        {
-            scratch = {};
-        }
-
         if (record->parentIndex == InvalidNodeIndex)
         {
             scratch.effectiveVisibility = ownVisibility;
-            scratch.inPopupSubtree = record->kind == BuiltinElementKind::Popup ||
-                                     record->kind == BuiltinElementKind::Menu;
-            scratch.inTooltipSubtree = record->kind == BuiltinElementKind::Tooltip;
-            scratch.parentContentWidthDefinite = true;
-            scratch.parentContentHeightDefinite = true;
-            scratch.parentContentWidth = viewportSize.width;
-            scratch.parentContentHeight = viewportSize.height;
         } else
         {
             const LayoutScratchState& parentScratch = layoutScratchByIndex[record->parentIndex];
             scratch.effectiveVisibility = combineVisibility(parentScratch.effectiveVisibility, ownVisibility);
-            scratch.inPopupSubtree =
-                record->kind == BuiltinElementKind::Popup ||
-                record->kind == BuiltinElementKind::Menu ||
-                parentScratch.inPopupSubtree;
-            scratch.inTooltipSubtree =
-                record->kind == BuiltinElementKind::Tooltip || parentScratch.inTooltipSubtree;
-            scratch.parentContentWidthDefinite = parentScratch.contentWidthDefinite;
-            scratch.parentContentHeightDefinite = parentScratch.contentHeightDefinite;
-            scratch.parentContentWidth = parentScratch.contentWidth;
-            scratch.parentContentHeight = parentScratch.contentHeight;
         }
 
         const ResolvedLength width = resolveLengthNoFallbackCount(
@@ -294,6 +310,7 @@ void UIContext::Impl::prepareLayoutState(UILogicalSize viewportSize, const std::
             scratch.contentWidthDefinite ? (std::max)(0.0F, outerWidth - horizontalMargin(style.padding)) : 0.0F;
         scratch.contentHeight =
             scratch.contentHeightDefinite ? (std::max)(0.0F, outerHeight - verticalMargin(style.padding)) : 0.0F;
+        scratch.hasResolvedTextMetrics = false;
 
         const LayoutPreparedInputs currentInputs{
             .effectiveVisibility = scratch.effectiveVisibility,
@@ -319,6 +336,127 @@ void UIContext::Impl::prepareLayoutState(UILogicalSize viewportSize, const std::
     }
 }
 
+const UILayoutStyle& UIContext::Impl::resolvedLayoutStyle(
+    u32 nodeIndex) const noexcept
+{
+    return layoutScratchByIndex[nodeIndex].resolvedStyle;
+}
+
+Core::Result<bool> UIContext::Impl::refreshResolvedLayoutAfterArrange(
+    const std::pmr::vector<u32>& order)
+{
+    bool changed = false;
+    for (const u32 index : order)
+    {
+        const NodeRecord* record = recordByIndex(index);
+        if (record == nullptr)
+        {
+            continue;
+        }
+        LayoutScratchState& scratch = layoutScratchByIndex[index];
+        const float parentWidth = record->parentIndex == InvalidNodeIndex
+                                      ? scratch.parentContentWidth
+                                      : layoutScratchByIndex[record->parentIndex].contentWidth;
+        const UILayoutStyle responsive = resolveResponsiveLayoutStyle(
+            presentationLayoutStyle(index), parentWidth);
+        if (scratch.resolvedStyle != responsive)
+        {
+            scratch.resolvedStyle = responsive;
+            changed = true;
+        }
+
+        UIVisibility ownVisibility = responsive.visibility;
+        if (record->kind == BuiltinElementKind::Popup &&
+            index < popupStatesByNodeIndex.size() &&
+            !popupStatesByNodeIndex[index].open)
+        {
+            ownVisibility = UIVisibility::Collapsed;
+        }
+        const UINodeId node = idForIndex(index);
+        const TooltipState* tooltip =
+            record->kind == BuiltinElementKind::Tooltip
+                ? tooltipStorage.tryState(node)
+                : nullptr;
+        if (tooltip != nullptr && !tooltip->open)
+        {
+            ownVisibility = UIVisibility::Collapsed;
+        }
+        if (record->kind == BuiltinElementKind::Modal &&
+            dialogStorage.containsDialog(node) && !dialogStorage.isOpen(node))
+        {
+            ownVisibility = UIVisibility::Collapsed;
+        }
+        if (record->kind == BuiltinElementKind::Menu &&
+            menuStorage.containsMenu(node) && !menuStorage.isOpen(node))
+        {
+            ownVisibility = UIVisibility::Collapsed;
+        }
+        if (index < flowStatesByNodeIndex.size() &&
+            flowStatesByNodeIndex[index].kind == UIFlowNodeKind::Screen &&
+            !isActiveFlowScreenIndex(index))
+        {
+            ownVisibility = UIVisibility::Collapsed;
+        }
+        if (record->kind != BuiltinElementKind::TabView &&
+            record->kind != BuiltinElementKind::Tab)
+        {
+            const UINodeId tabView = tabViewStorage.tabViewForPanel(node);
+            if (tabView.hasValue() &&
+                tabViewStorage.activePanel(tabView) != node)
+            {
+                ownVisibility = UIVisibility::Collapsed;
+            }
+        }
+        const UIVisibility effective =
+            record->parentIndex == InvalidNodeIndex
+                ? ownVisibility
+                : combineVisibility(
+                      layoutScratchByIndex[record->parentIndex].effectiveVisibility,
+                      ownVisibility);
+        if (scratch.effectiveVisibility != effective)
+        {
+            scratch.effectiveVisibility = effective;
+            changed = true;
+        }
+
+        if (responsive.containerLayout == UIContainerLayout::Flex &&
+            responsive.flexContainer.wrap == UIFlexWrap::Wrap &&
+            scratch.hasMeasuredFlexWrapConstraint &&
+            scratch.hasArrangedFlexWrapConstraint &&
+            (scratch.measuredFlexWrapDirection !=
+                 scratch.arrangedFlexWrapDirection ||
+             scratch.measuredFlexWrapMain != scratch.arrangedFlexWrapMain))
+        {
+            changed = true;
+        }
+
+        const WidgetTextState& text = textStatesByIndex[index];
+        if (text.hasContent && text.wrapMode == UITextWrapMode::Words)
+        {
+            const float contentWidth =
+                contentPlacementFor(index).contentBox.width;
+            auto metrics = measureWrappedWidgetText(index, contentWidth);
+            if (!metrics)
+            {
+                return Core::failure(metrics.error());
+            }
+            if (!scratch.hasResolvedTextMetrics ||
+                scratch.resolvedTextMetrics != *metrics)
+            {
+                scratch.resolvedTextMetrics = *metrics;
+                scratch.hasResolvedTextMetrics = true;
+                changed = true;
+            }
+        }
+        else if (scratch.hasResolvedTextMetrics)
+        {
+            scratch.hasResolvedTextMetrics = false;
+            changed = true;
+        }
+    }
+    return changed;
+}
+
 void UIContext::Impl::measureLayout(UILogicalSize viewportSize, const std::pmr::vector<u32>& order,
                    LayoutPassStatistics& statistics) noexcept
 {
@@ -334,9 +472,10 @@ void UIContext::Impl::measureLayout(UILogicalSize viewportSize, const std::pmr::
         {
             continue;
         }
-        const UILayoutStyle style = presentationLayoutStyle(index);
+        const UILayoutStyle style = resolvedLayoutStyle(index);
         LayoutScratchState& scratch = layoutScratchByIndex[index];
         const UILogicalSize previousMeasuredSize = scratch.measuredSize;
+        scratch.hasMeasuredFlexWrapConstraint = false;
         ++statistics.measuredNodeCount;
 
         if (scratch.effectiveVisibility == UIVisibility::Collapsed)
@@ -350,6 +489,7 @@ void UIContext::Impl::measureLayout(UILogicalSize viewportSize, const std::pmr::
         }
 
         LayoutFlowMeasurement flowMeasurement{};
+        FlexWrapMeasurement flexWrapMeasurement{};
         GridMeasurement gridMeasurement =
             beginGridMeasurement(style.gridContainer);
 
@@ -361,7 +501,7 @@ void UIContext::Impl::measureLayout(UILogicalSize viewportSize, const std::pmr::
             {
                 break;
             }
-            const UILayoutStyle childStyle = presentationLayoutStyle(childIndex);
+            const UILayoutStyle childStyle = resolvedLayoutStyle(childIndex);
             const LayoutScratchState& childScratch = layoutScratchByIndex[childIndex];
             if (childScratch.effectiveVisibility != UIVisibility::Collapsed &&
                 childStyle.placement == UILayoutPlacement::Flow)
@@ -374,30 +514,85 @@ void UIContext::Impl::measureLayout(UILogicalSize viewportSize, const std::pmr::
                 }
                 else
                 {
-                    const float gap =
-                        style.flexContainer.direction == UIFlexDirection::Row
-                            ? style.flexContainer.gap.column
-                            : style.flexContainer.gap.row;
-                    appendFlowMeasuredChild(
-                        flowMeasurement,
-                        style.flexContainer.direction,
-                        gap,
-                        childStyle,
-                        childScratch.measuredSize);
+                    const bool row = style.flexContainer.direction ==
+                                     UIFlexDirection::Row;
+                    const float mainGap = row
+                                              ? style.flexContainer.gap.column
+                                              : style.flexContainer.gap.row;
+                    const float crossGap = row
+                                               ? style.flexContainer.gap.row
+                                               : style.flexContainer.gap.column;
+                    if (style.flexContainer.wrap == UIFlexWrap::Wrap)
+                    {
+                        const float availableMain =
+                            row ? (scratch.contentWidthDefinite
+                                       ? scratch.contentWidth : -1.0F)
+                                : (scratch.contentHeightDefinite
+                                       ? scratch.contentHeight : -1.0F);
+                        appendFlexMeasuredItem(
+                            flexWrapMeasurement,
+                            style.flexContainer.direction,
+                            style.flexContainer.wrap, availableMain,
+                            mainGap, crossGap, childStyle, childScratch,
+                            statistics);
+                    }
+                    else
+                    {
+                        appendFlowMeasuredChild(
+                            flowMeasurement,
+                            style.flexContainer.direction,
+                            mainGap,
+                            childStyle,
+                            childScratch.measuredSize);
+                    }
                 }
             }
             childIndex = childRecord->nextSiblingIndex;
         }
 
+        if (style.containerLayout == UIContainerLayout::Flex &&
+            style.flexContainer.wrap == UIFlexWrap::Wrap)
+        {
+            finishFlexMeasurement(
+                flexWrapMeasurement,
+                style.flexContainer.direction == UIFlexDirection::Row
+                    ? style.flexContainer.gap.row
+                    : style.flexContainer.gap.column);
+            if (flexWrapMeasurement.itemCount != 0U)
+            {
+                const bool row = style.flexContainer.direction ==
+                                 UIFlexDirection::Row;
+                float measuredMain =
+                    row ? (scratch.contentWidthDefinite
+                               ? scratch.contentWidth : -1.0F)
+                        : (scratch.contentHeightDefinite
+                               ? scratch.contentHeight : -1.0F);
+                if (scratch.hasArrangedFlexWrapConstraint &&
+                    scratch.arrangedFlexWrapDirection ==
+                        style.flexContainer.direction)
+                {
+                    measuredMain = scratch.arrangedFlexWrapMain;
+                }
+                scratch.measuredFlexWrapDirection =
+                    style.flexContainer.direction;
+                scratch.measuredFlexWrapMain = measuredMain;
+                scratch.hasMeasuredFlexWrapConstraint = true;
+            }
+        }
         usize layoutChildCount =
             style.containerLayout == UIContainerLayout::Grid
                 ? gridMeasurement.childCount
-                : flowMeasurement.childCount;
+                : style.flexContainer.wrap == UIFlexWrap::Wrap
+                      ? flexWrapMeasurement.itemCount
+                      : flowMeasurement.childCount;
         UILogicalSize layoutContentSize =
             style.containerLayout == UIContainerLayout::Grid
                 ? gridMeasuredContentSize(
                       gridMeasurement, style.gridContainer)
-                : flowMeasurement.contentSize;
+                : style.flexContainer.wrap == UIFlexWrap::Wrap
+                      ? flexWrapMeasurement.contentSize(
+                            style.flexContainer.direction)
+                      : flowMeasurement.contentSize;
         std::optional<UILogicalSize> tabViewContentSize;
         if (record->kind == BuiltinElementKind::TabView &&
             tabViewStorage.relationshipValid(idForIndex(index)))
@@ -515,7 +710,7 @@ void UIContext::Impl::assignLayoutRect(u32 index, UILogicalRect worldRect, UILog
                       UILogicalRect descendantClip) noexcept
 {
     LayoutScratchState& scratch = layoutScratchByIndex[index];
-    const UILayoutStyle style = presentationLayoutStyle(index);
+    const UILayoutStyle style = resolvedLayoutStyle(index);
     const UILogicalRect previousWorldRect = scratch.worldRect;
     const UILogicalRect previousLocalRect = scratch.localRect;
     const UILogicalRect previousEffectiveClip = scratch.effectiveClip;
@@ -553,7 +748,7 @@ void UIContext::Impl::assignLayoutRect(u32 index, UILogicalRect worldRect, UILog
 void UIContext::Impl::refreshMeasuredSizeForParentContent(u32 childIndex, UILogicalRect parentContentRect,
                                          LayoutPassStatistics& statistics) noexcept
 {
-    const UILayoutStyle childStyle = presentationLayoutStyle(childIndex);
+    const UILayoutStyle childStyle = resolvedLayoutStyle(childIndex);
     LayoutScratchState& childScratch = layoutScratchByIndex[childIndex];
     const UILogicalSize previousMeasuredSize = childScratch.measuredSize;
     childScratch.parentContentWidthDefinite = true;
@@ -580,7 +775,7 @@ void UIContext::Impl::arrangeOverlayChild(u32 childIndex, UILogicalRect parentCo
 {
     refreshMeasuredSizeForParentContent(childIndex, parentContentRect, statistics);
     assignLayoutRect(childIndex,
-                     resolveOverlayRect(presentationLayoutStyle(childIndex),
+                     resolveOverlayRect(resolvedLayoutStyle(childIndex),
                                         layoutScratchByIndex[childIndex],
                                         parentContentRect, statistics),
                      parentWorldRect, descendantClip);
@@ -589,7 +784,7 @@ void UIContext::Impl::arrangeOverlayChild(u32 childIndex, UILogicalRect parentCo
 void UIContext::Impl::arrangePopupChild(u32 popupIndex, UILogicalRect anchorRect, UILogicalRect viewportRect,
                        LayoutPassStatistics& statistics) noexcept
 {
-    const UILayoutStyle popupLayoutStyle = presentationLayoutStyle(popupIndex);
+    const UILayoutStyle popupLayoutStyle = resolvedLayoutStyle(popupIndex);
     LayoutScratchState& popupScratch = layoutScratchByIndex[popupIndex];
     PopupState& popup = popupStatesByNodeIndex[popupIndex];
     refreshMeasuredSizeForParentContent(popupIndex, viewportRect, statistics);
@@ -642,7 +837,7 @@ void UIContext::Impl::arrangeTooltipChild(u32 tooltipIndex, UILogicalRect parent
 
     refreshMeasuredSizeForParentContent(tooltipIndex, viewportRect, statistics);
     const auto resolved = resolveTooltipPlacement(
-        presentationLayoutStyle(tooltipIndex), tooltipScratch, tooltip.config,
+        resolvedLayoutStyle(tooltipIndex), tooltipScratch, tooltip.config,
         anchorEntry->worldRect, viewportRect, statistics);
     assignLayoutRect(tooltipIndex, resolved.rect, parentWorldRect, viewportRect);
     tooltipStorage.layoutScratchByIndex(tooltipIndex).metrics = UITooltipMetrics{
@@ -687,7 +882,7 @@ void UIContext::Impl::arrangeMenuChild(u32 menuIndex, UILogicalRect parentWorldR
         placementConfig.placement = UIMenuPlacement::Right;
     }
     const auto resolved = resolveMenuPlacement(
-        presentationLayoutStyle(menuIndex), menuScratch, placementConfig,
+        resolvedLayoutStyle(menuIndex), menuScratch, placementConfig,
         placementAnchorRect, viewportRect, statistics);
     assignLayoutRect(menuIndex, resolved.rect, parentWorldRect, viewportRect);
     menuStorage.layoutScratchByIndex(menuIndex).metrics = UIMenuMetrics{
@@ -1729,8 +1924,8 @@ void UIContext::Impl::collapseTreeViewItems(u32 treeViewIndex, UILogicalRect con
     {
         return Core::success();
     }
-    const UILayoutStyle parentStyle = presentationLayoutStyle(parentIndex);
-    const LayoutScratchState& parentScratch = layoutScratchByIndex[parentIndex];
+    const UILayoutStyle parentStyle = resolvedLayoutStyle(parentIndex);
+    LayoutScratchState& parentScratch = layoutScratchByIndex[parentIndex];
     const UILogicalRect parentWorldRect = parentScratch.worldRect;
     const UILogicalRect unscrolledContentRect{
         .x = normalizeFloat(parentWorldRect.x + parentStyle.padding.left),
@@ -1953,17 +2148,30 @@ void UIContext::Impl::collapseTreeViewItems(u32 treeViewIndex, UILogicalRect con
             // contract rather than only in paint/hit filtering. Hidden
             // parts keep their extent; Collapsed parts release it.
             UISplitViewConfig layoutConfig = resolvedSplitViewConfig(state->config);
+            float requestedFraction = state->requestedFraction;
+            bool primaryCollapsed = false;
+            bool secondaryCollapsed = false;
             if (parts.primaryPane.index() < layoutScratchByIndex.size() &&
                 layoutScratchByIndex[parts.primaryPane.index()].effectiveVisibility ==
                     UIVisibility::Collapsed)
             {
+                primaryCollapsed = true;
                 layoutConfig.minPrimarySize = 0.0F;
             }
             if (parts.secondaryPane.index() < layoutScratchByIndex.size() &&
                 layoutScratchByIndex[parts.secondaryPane.index()].effectiveVisibility ==
                     UIVisibility::Collapsed)
             {
+                secondaryCollapsed = true;
                 layoutConfig.minSecondarySize = 0.0F;
+            }
+            if (primaryCollapsed && !secondaryCollapsed)
+            {
+                requestedFraction = 0.0F;
+            }
+            else if (secondaryCollapsed)
+            {
+                requestedFraction = 1.0F;
             }
             if (parts.splitter.index() < layoutScratchByIndex.size() &&
                 layoutScratchByIndex[parts.splitter.index()].effectiveVisibility ==
@@ -1972,7 +2180,7 @@ void UIContext::Impl::collapseTreeViewItems(u32 treeViewIndex, UILogicalRect con
                 layoutConfig.splitterExtent = 0.0F;
             }
             const auto plan = resolveSplitViewLayout(
-                unscrolledContentRect, layoutConfig, state->requestedFraction);
+                unscrolledContentRect, layoutConfig, requestedFraction);
             splitViewStorage.layoutScratchByIndex(parentIndex).metrics = plan.metrics;
             assignLayoutRect(parts.primaryPane.index(), plan.metrics.primaryRect,
                              parentWorldRect, descendantClip);
@@ -1990,8 +2198,9 @@ void UIContext::Impl::collapseTreeViewItems(u32 treeViewIndex, UILogicalRect con
 
     const bool row = parentStyle.flexContainer.direction == UIFlexDirection::Row;
     const float configuredGap = row ? parentStyle.flexContainer.gap.column : parentStyle.flexContainer.gap.row;
+    const float configuredCrossGap = row ? parentStyle.flexContainer.gap.row : parentStyle.flexContainer.gap.column;
 
-    FlexLineSummary flexSummary{};
+    FlexWrapMeasurement flexMeasurement{};
     GridMeasurement gridMeasurement =
         beginGridMeasurement(parentStyle.gridContainer);
     const float initialContentMain = row ? unscrolledContentRect.width : unscrolledContentRect.height;
@@ -2003,7 +2212,7 @@ void UIContext::Impl::collapseTreeViewItems(u32 treeViewIndex, UILogicalRect con
         {
             break;
         }
-        const UILayoutStyle childStyle = presentationLayoutStyle(childIndex);
+        const UILayoutStyle childStyle = resolvedLayoutStyle(childIndex);
         LayoutScratchState& childScratch = layoutScratchByIndex[childIndex];
         if (childScratch.effectiveVisibility != UIVisibility::Collapsed &&
             childStyle.placement == UILayoutPlacement::Flow)
@@ -2017,11 +2226,13 @@ void UIContext::Impl::collapseTreeViewItems(u32 treeViewIndex, UILogicalRect con
             }
             else
             {
-                appendFlexLineItem(
-                    flexSummary,
+                appendFlexMeasuredItem(
+                    flexMeasurement,
                     parentStyle.flexContainer.direction,
-                    configuredGap,
+                    parentStyle.flexContainer.wrap,
                     initialContentMain,
+                    configuredGap,
+                    configuredCrossGap,
                     childStyle,
                     childScratch,
                     statistics);
@@ -2029,12 +2240,13 @@ void UIContext::Impl::collapseTreeViewItems(u32 treeViewIndex, UILogicalRect con
         }
         childIndex = childRecord->nextSiblingIndex;
     }
+    finishFlexMeasurement(flexMeasurement, configuredCrossGap);
 
     if ((parentStyle.containerLayout == UIContainerLayout::Grid &&
          !isValidGridMeasurement(
              gridMeasurement, parentStyle.gridContainer)) ||
         (parentStyle.containerLayout == UIContainerLayout::Flex &&
-         !isValidFlexLineSummary(flexSummary)))
+         !isValidFlexWrapMeasurement(flexMeasurement)))
     {
         return fail(
             UIErrorCode::InvalidLayout,
@@ -2056,7 +2268,7 @@ void UIContext::Impl::collapseTreeViewItems(u32 treeViewIndex, UILogicalRect con
                 parentStyle.containerLayout == UIContainerLayout::Grid
                     ? gridMeasuredContentSize(
                           gridMeasurement, parentStyle.gridContainer)
-                    : flexSummary.contentSize(
+                    : flexMeasurement.contentSize(
                           parentStyle.flexContainer.direction),
             .style = state->style,
             .scrollBarThickness = paint.thickness,
@@ -2070,7 +2282,18 @@ void UIContext::Impl::collapseTreeViewItems(u32 treeViewIndex, UILogicalRect con
         descendantClip = intersectRects(descendantClip, plan.viewportRect);
     }
 
-    auto flexPlan = resolveFlexLinePlan(parentStyle, layoutContentRect, flexSummary);
+    parentScratch.hasArrangedFlexWrapConstraint =
+        parentStyle.containerLayout == UIContainerLayout::Flex &&
+        parentStyle.flexContainer.wrap == UIFlexWrap::Wrap &&
+        flexMeasurement.itemCount != 0U;
+    if (parentScratch.hasArrangedFlexWrapConstraint)
+    {
+        parentScratch.arrangedFlexWrapDirection =
+            parentStyle.flexContainer.direction;
+        parentScratch.arrangedFlexWrapMain =
+            row ? layoutContentRect.width : layoutContentRect.height;
+    }
+
     auto gridPlan = resolveGridLayout(
         parentStyle.gridContainer, layoutContentRect, gridMeasurement);
     if (parentStyle.containerLayout == UIContainerLayout::Grid &&
@@ -2079,6 +2302,52 @@ void UIContext::Impl::collapseTreeViewItems(u32 treeViewIndex, UILogicalRect con
         return fail(UIErrorCode::InvalidLayout,
                     "UI Grid track resolution produced invalid geometry");
     }
+
+    const float arrangedContentMain = row
+                                          ? layoutContentRect.width
+                                          : layoutContentRect.height;
+    const auto summarizeFlexLine = [&](u32 first) noexcept {
+        FlexLineSummary summary{};
+        u32 candidate = first;
+        while (candidate != InvalidNodeIndex)
+        {
+            const NodeRecord* candidateRecord = recordByIndex(candidate);
+            if (candidateRecord == nullptr)
+            {
+                break;
+            }
+            const UILayoutStyle& candidateStyle =
+                resolvedLayoutStyle(candidate);
+            const LayoutScratchState& candidateScratch =
+                layoutScratchByIndex[candidate];
+            if (candidateScratch.effectiveVisibility !=
+                    UIVisibility::Collapsed &&
+                candidateStyle.placement == UILayoutPlacement::Flow)
+            {
+                const Detail::FlexItemMeasurement item =
+                    Detail::measureFlexItem(
+                        parentStyle.flexContainer.direction,
+                        arrangedContentMain, candidateStyle,
+                        candidateScratch, statistics);
+                if (Detail::flexItemStartsNewLine(
+                        summary, parentStyle.flexContainer.wrap,
+                        arrangedContentMain, configuredGap, item))
+                {
+                    break;
+                }
+                appendFlexLineItem(
+                    summary, parentStyle.flexContainer.direction,
+                    configuredGap, arrangedContentMain, candidateStyle,
+                    candidateScratch, statistics);
+            }
+            candidate = candidateRecord->nextSiblingIndex;
+        }
+        return summary;
+    };
+    FlexLineSummary activeFlexLine{};
+    FlexLinePlan flexPlan{};
+    usize remainingFlexItems = 0U;
+    float flexCrossOffset = 0.0F;
 
     childIndex = parentRecord->firstChildIndex;
     while (childIndex != InvalidNodeIndex)
@@ -2090,7 +2359,7 @@ void UIContext::Impl::collapseTreeViewItems(u32 treeViewIndex, UILogicalRect con
         }
         const u32 currentChild = childIndex;
         childIndex = childRecord->nextSiblingIndex;
-        const UILayoutStyle childStyle = presentationLayoutStyle(currentChild);
+        const UILayoutStyle childStyle = resolvedLayoutStyle(currentChild);
         LayoutScratchState& childScratch = layoutScratchByIndex[currentChild];
 
         if (childScratch.effectiveVisibility == UIVisibility::Collapsed)
@@ -2146,11 +2415,49 @@ void UIContext::Impl::collapseTreeViewItems(u32 treeViewIndex, UILogicalRect con
         }
         else
         {
+            if (remainingFlexItems == 0U)
+            {
+                activeFlexLine = summarizeFlexLine(currentChild);
+                if (!isValidFlexLineSummary(activeFlexLine) ||
+                    activeFlexLine.itemCount == 0U)
+                {
+                    return fail(
+                        UIErrorCode::InvalidLayout,
+                        "UI Flex line resolution produced invalid geometry");
+                }
+                UILogicalRect lineRect = layoutContentRect;
+                if (parentStyle.flexContainer.wrap == UIFlexWrap::Wrap)
+                {
+                    if (row)
+                    {
+                        lineRect.y = normalizeFloat(
+                            lineRect.y + flexCrossOffset);
+                        lineRect.height = activeFlexLine.totalCross;
+                    }
+                    else
+                    {
+                        lineRect.x = normalizeFloat(
+                            lineRect.x + flexCrossOffset);
+                        lineRect.width = activeFlexLine.totalCross;
+                    }
+                }
+                flexPlan = resolveFlexLinePlan(
+                    parentStyle, lineRect, activeFlexLine);
+                remainingFlexItems = activeFlexLine.itemCount;
+            }
             assignLayoutRect(
                 currentChild,
                 resolveFlexItemRect(
                     flexPlan, childStyle, childScratch, statistics),
                 parentWorldRect, descendantClip);
+            --remainingFlexItems;
+            if (remainingFlexItems == 0U &&
+                parentStyle.flexContainer.wrap == UIFlexWrap::Wrap)
+            {
+                flexCrossOffset = normalizeFloat(
+                    flexCrossOffset + activeFlexLine.totalCross +
+                    configuredCrossGap);
+            }
         }
     }
     return Core::success();
@@ -2205,7 +2512,7 @@ void UIContext::Impl::collapseTreeViewItems(u32 treeViewIndex, UILogicalRect con
 [[nodiscard]] UICommittedContentPlacement UIContext::Impl::contentPlacementFor(u32 index) const noexcept
 {
     const LayoutScratchState& scratch = layoutScratchByIndex[index];
-    const UILayoutStyle layout = presentationLayoutStyle(index);
+    const UILayoutStyle layout = resolvedLayoutStyle(index);
     const NodeRecord* record = recordByIndex(index);
     float leadingReservedWidth = 0.0F;
     float trailingReservedWidth = 0.0F;

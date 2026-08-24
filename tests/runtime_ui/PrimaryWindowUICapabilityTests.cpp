@@ -1145,7 +1145,7 @@ TEST_F(PrimaryWindowUICapabilityTest, TextEditSelectionFacadeRoundTripsAndExpire
     EXPECT_EQ(expiredPaintQuery.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
 }
 
-TEST_F(PrimaryWindowUICapabilityTest, TextOverflowFacadeRoundTripsAndExpiresWithPhase)
+TEST_F(PrimaryWindowUICapabilityTest, TextPresentationFacadeRoundTripsAndExpiresWithPhase)
 {
     CapabilityState state;
     auto epoch = state.beginGameStateEnterPhase(context.get());
@@ -1159,6 +1159,10 @@ TEST_F(PrimaryWindowUICapabilityTest, TextOverflowFacadeRoundTripsAndExpiresWith
     auto label = tree->createElement(root->rootNodeId(), UI::makeLabelElement("A long label"));
     ASSERT_TRUE(label.has_value()) << label.error().message;
 
+    auto wrapMode = tree->textWrapMode(*label);
+    ASSERT_TRUE(wrapMode.has_value()) << wrapMode.error().message;
+    EXPECT_EQ(*wrapMode, UI::UITextWrapMode::Words);
+    ASSERT_TRUE(tree->setTextWrapMode(*label, UI::UITextWrapMode::NoWrap).has_value());
     ASSERT_TRUE(tree->setTextOverflow(*label, UI::UITextOverflow::Ellipsis).has_value());
     auto overflow = tree->textOverflow(*label);
     ASSERT_TRUE(overflow.has_value()) << overflow.error().message;
@@ -1171,6 +1175,15 @@ TEST_F(PrimaryWindowUICapabilityTest, TextOverflowFacadeRoundTripsAndExpiresWith
     auto expiredGet = tree->textOverflow(*label);
     ASSERT_FALSE(expiredGet.has_value());
     EXPECT_EQ(expiredGet.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    Core::Status expiredWrapSet =
+        tree->setTextWrapMode(*label, UI::UITextWrapMode::Words);
+    ASSERT_FALSE(expiredWrapSet.has_value());
+    EXPECT_EQ(expiredWrapSet.error().code,
+              RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredWrapGet = tree->textWrapMode(*label);
+    ASSERT_FALSE(expiredWrapGet.has_value());
+    EXPECT_EQ(expiredWrapGet.error().code,
+              RuntimeErrorCode::UIPhaseCapabilityExpired);
 }
 
 TEST_F(PrimaryWindowUICapabilityTest, EnabledFacadeRoundTripsAndExpiresWithPhase)

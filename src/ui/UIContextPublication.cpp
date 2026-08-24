@@ -275,12 +275,45 @@ void UIContext::Impl::publishControlLayoutState(const std::pmr::vector<u32>& ord
         writeLayout.clear();
 
         buildLayoutOrder(layoutOrderScratch);
-        pass.passCount = layoutOrderScratch.empty() ? 0 : 1;
+        pass.passCount = 0U;
         prepareLayoutState(viewportSize, layoutOrderScratch, allowLayoutReuse);
-        measureLayout(viewportSize, layoutOrderScratch, pass);
-        if (Core::Status arranged = arrangeLayout(viewportSize, layoutOrderScratch, pass); !arranged)
+        constexpr usize MaximumResolvedLayoutPasses = 3U;
+        bool layoutStabilized = layoutOrderScratch.empty();
+        for (usize resolvedPass = 0U;
+             resolvedPass < MaximumResolvedLayoutPasses && !layoutStabilized;
+             ++resolvedPass)
         {
-            return arranged;
+            if (resolvedPass != 0U)
+            {
+                for (const u32 index : layoutOrderScratch)
+                {
+                    layoutWorkByIndex[index] =
+                        LayoutWorkMeasure | LayoutWorkArrange;
+                }
+            }
+            ++pass.passCount;
+            measureLayout(viewportSize, layoutOrderScratch, pass);
+            if (Core::Status arranged =
+                    arrangeLayout(viewportSize, layoutOrderScratch, pass);
+                !arranged)
+            {
+                return arranged;
+            }
+            auto changed = refreshResolvedLayoutAfterArrange(layoutOrderScratch);
+            if (!changed)
+            {
+                return Core::failure(changed.error());
+            }
+            if (!*changed)
+            {
+                layoutStabilized = true;
+            }
+        }
+        if (!layoutStabilized)
+        {
+            return fail(
+                UIErrorCode::InvalidLayout,
+                "UI responsive/text/flex layout did not stabilize within the bounded pass count");
         }
         if (Core::Status candidateStatus = validateLayoutCandidate(layoutOrderScratch); !candidateStatus)
         {

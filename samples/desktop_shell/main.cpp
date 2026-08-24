@@ -325,19 +325,6 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
     return density == Tina::UI::UIDensity::Compact ? "compact" : "comfortable";
 }
 
-[[nodiscard]] std::string_view tierName(Tina::SampleUI::ShellResponsiveTier tier) noexcept
-{
-    switch (tier) {
-    case Tina::SampleUI::ShellResponsiveTier::Full:
-        return "full";
-    case Tina::SampleUI::ShellResponsiveTier::Compressed:
-        return "compressed";
-    case Tina::SampleUI::ShellResponsiveTier::Minimal:
-        return "minimal";
-    }
-    return "unknown";
-}
-
 [[nodiscard]] std::string_view exitReasonName(Tina::RunExitReason reason) noexcept
 {
     switch (reason) {
@@ -370,7 +357,6 @@ class ShellState final : public Tina::IGameState {
             iconResources_.release();
             return status;
         }
-        ui_.setLogicalWidth(static_cast<float>(counters_.logicalPixelWidth));
         ++counters_.uiRootsCreated;
         return Tina::Core::success();
     }
@@ -392,7 +378,6 @@ class ShellState final : public Tina::IGameState {
     Tina::Core::Status updateFrame(Tina::FrameUpdateContext& context) override
     {
         ++counters_.frameUpdates;
-        ui_.setLogicalWidth(static_cast<float>(counters_.logicalPixelWidth));
         if (options_.autoDemo) {
             ui_.requestAutomatedStep(counters_.frameUpdates);
         }
@@ -554,23 +539,7 @@ class ShellApplication final : public Tina::IGameApplication {
                                        std::to_string(ui.leftDockWidth) + " status=" +
                                        std::to_string(ui.statusBarHeight));
     }
-    // Responsive tier must match the committed logical width, and the panes it
-    // governs must agree with it.
-    const auto width = static_cast<float>(counters.logicalPixelWidth);
-    const bool expectFull = width >= 1280.0F;
-    const bool expectMinimal = width < 960.0F;
-    if (expectFull && (ui.tier != Tina::SampleUI::ShellResponsiveTier::Full ||
-                       ui.timelineCollapsed || !ui.inspectorVisible)) {
-        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                   "Desktop shell full-tier responsive verification failed");
-    }
-    if (!expectFull && !expectMinimal &&
-        (ui.tier != Tina::SampleUI::ShellResponsiveTier::Compressed || !ui.timelineCollapsed ||
-         !ui.inspectorVisible)) {
-        return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                   "Desktop shell compressed-tier responsive verification failed");
-    }
-    if (ui.tier == Tina::SampleUI::ShellResponsiveTier::Full && ui.timelineHeight < 160.0F) {
+    if (!ui.timelineCollapsed && ui.timelineHeight < 160.0F) {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                    "Desktop shell timeline minimum verification failed: height=" +
                                        std::to_string(ui.timelineHeight));
@@ -609,18 +578,12 @@ class ShellApplication final : public Tina::IGameApplication {
                     std::string(ui.timelineHideObserved ? "true" : "false") + " inspector=" +
                     std::string(ui.inspectorHideObserved ? "true" : "false"));
         }
-        // Overlays closed and command intent cleared. Resolved pane visibility is
-        // then governed by the width tier alone, not by leftover intent.
+        // Overlays closed and command intent cleared. Width-based visibility is
+        // then governed only by authored responsive rules.
         if (ui.menuOpen || ui.dialogOpen || ui.timelineHideRequested ||
             ui.inspectorHideRequested) {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                        "Desktop shell automated restore verification failed");
-        }
-        const bool tierCollapsesTimeline = ui.tier != Tina::SampleUI::ShellResponsiveTier::Full;
-        if (ui.timelineCollapsed != tierCollapsesTimeline || !ui.inspectorVisible) {
-            return Tina::Core::failure(
-                Tina::Core::CoreErrorCode::Internal,
-                "Desktop shell tier-resolved pane visibility verification failed");
         }
         // Tooltip anchored overlay: opened, bounded by the density maximum width,
         // and dismissed without ever taking focus away from the command bar.
@@ -713,8 +676,6 @@ class ShellApplication final : public Tina::IGameApplication {
     writeJsonString(std::cout, themeName(ui.theme));
     std::cout << ",\"density\":";
     writeJsonString(std::cout, densityName(ui.density));
-    std::cout << ",\"tier\":";
-    writeJsonString(std::cout, tierName(ui.tier));
     std::cout << ",\"splitViews\":" << ui.splitViewCount << ",\"bands\":" << ui.bandCount
               << ",\"commands\":" << ui.commandCount
               << ",\"inspectorRows\":" << ui.inspectorRowCount

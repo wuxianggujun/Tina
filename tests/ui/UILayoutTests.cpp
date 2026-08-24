@@ -766,6 +766,144 @@ TEST_F(UILayoutTest, GrowStretchAndOverlayResultsRemainClampedByMinMax)
         {.x = 10.0F, .y = 8.0F, .width = 35.0F, .height = 6.0F});
 }
 
+TEST_F(UILayoutTest, FlexWrapUsesFinalMainConstraintAndAutoCrossSize)
+{
+    auto context = makeContext({.nodeCapacity = 5, .rootCapacity = 1});
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root);
+    const UI::UINodeId wrap = createPanel(*context, root.rootNodeId());
+    const UI::UINodeId first = createPanel(*context, wrap);
+    const UI::UINodeId second = createPanel(*context, wrap);
+    const UI::UINodeId third = createPanel(*context, wrap);
+
+    auto updater = createUpdater(*context, root);
+    UI::UILayoutStyle rootStyle{};
+    rootStyle.flexContainer.alignItems = UI::UIAxisAlignment::Start;
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), rootStyle));
+    UI::UILayoutStyle wrapStyle{};
+    wrapStyle.size.width = UI::UILayoutLength::Px(100.0F);
+    wrapStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+    wrapStyle.flexContainer.wrap = UI::UIFlexWrap::Wrap;
+    wrapStyle.flexContainer.alignItems = UI::UIAxisAlignment::Start;
+    wrapStyle.flexContainer.gap = {.row = 7.0F, .column = 5.0F};
+    assertOk(updater.setLayoutStyle(wrap, wrapStyle));
+    assertOk(updater.setLayoutStyle(first, fixedSize(40.0F, 10.0F)));
+    assertOk(updater.setLayoutStyle(second, fixedSize(40.0F, 20.0F)));
+    assertOk(updater.setLayoutStyle(third, fixedSize(40.0F, 30.0F)));
+
+    assertOk(context->publication().commitLayout(
+        {.width = 100.0F, .height = 100.0F}));
+    const auto layout = context->publication().committedLayout();
+    expectRectNear(requireLayoutEntry(layout, wrap).worldRect,
+                   {.x = 0.0F, .y = 0.0F, .width = 100.0F, .height = 57.0F});
+    expectRectNear(requireLayoutEntry(layout, first).worldRect,
+                   {.x = 0.0F, .y = 0.0F, .width = 40.0F, .height = 10.0F});
+    expectRectNear(requireLayoutEntry(layout, second).worldRect,
+                   {.x = 45.0F, .y = 0.0F, .width = 40.0F, .height = 20.0F});
+    expectRectNear(requireLayoutEntry(layout, third).worldRect,
+                   {.x = 0.0F, .y = 27.0F, .width = 40.0F, .height = 30.0F});
+}
+
+TEST_F(UILayoutTest, ResponsiveRulesResolveAgainstDirectParentContentWidth)
+{
+    auto context = makeContext({.nodeCapacity = 8, .rootCapacity = 1});
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root);
+    const UI::UINodeId directionContainer =
+        createPanel(*context, root.rootNodeId());
+    const UI::UINodeId first = createPanel(*context, directionContainer);
+    const UI::UINodeId second = createPanel(*context, directionContainer);
+
+    auto updater = createUpdater(*context, root);
+    UI::UILayoutStyle directionStyle{};
+    directionStyle.size.width = UI::UILayoutLength::Percent(100.0F);
+    directionStyle.size.height = UI::UILayoutLength::Px(100.0F);
+    directionStyle.flexContainer.alignItems = UI::UIAxisAlignment::Start;
+    directionStyle.responsiveRules = UI::UIResponsiveLayoutRuleList::Of({
+        {
+            .minParentWidth = 0.0F,
+            .maxParentWidth = 300.0F,
+            .overrides = {.flexDirection = UI::UIFlexDirection::Row},
+        },
+    });
+    assertOk(updater.setLayoutStyle(directionContainer, directionStyle));
+    assertOk(updater.setLayoutStyle(first, fixedSize(40.0F, 20.0F)));
+    assertOk(updater.setLayoutStyle(second, fixedSize(40.0F, 20.0F)));
+
+    assertOk(context->publication().commitLayout(
+        {.width = 250.0F, .height = 100.0F}));
+    auto layout = context->publication().committedLayout();
+    expectRectNear(requireLayoutEntry(layout, first).worldRect,
+                   {.x = 0.0F, .y = 0.0F, .width = 40.0F, .height = 20.0F});
+    expectRectNear(requireLayoutEntry(layout, second).worldRect,
+                   {.x = 40.0F, .y = 0.0F, .width = 40.0F, .height = 20.0F});
+
+    assertOk(context->publication().commitLayout(
+        {.width = 400.0F, .height = 100.0F}));
+    layout = context->publication().committedLayout();
+    expectRectNear(requireLayoutEntry(layout, first).worldRect,
+                   {.x = 0.0F, .y = 0.0F, .width = 40.0F, .height = 20.0F});
+    expectRectNear(requireLayoutEntry(layout, second).worldRect,
+                   {.x = 0.0F, .y = 20.0F, .width = 40.0F, .height = 20.0F});
+}
+
+TEST_F(UILayoutTest, ResponsiveRulesSwitchGridTracksAndVisibility)
+{
+    auto context = makeContext({.nodeCapacity = 8, .rootCapacity = 1});
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root);
+    const UI::UINodeId grid = createPanel(*context, root.rootNodeId());
+    const UI::UINodeId first = createPanel(*context, grid);
+    const UI::UINodeId optional = createPanel(*context, grid);
+
+    auto updater = createUpdater(*context, root);
+    UI::UILayoutStyle gridStyle{};
+    gridStyle.size.width = UI::UILayoutLength::Percent(100.0F);
+    gridStyle.size.height = UI::UILayoutLength::Px(100.0F);
+    gridStyle.containerLayout = UI::UIContainerLayout::Grid;
+    gridStyle.gridContainer.columns =
+        UI::UIGridTrackList::Of({UI::UIGridTrack::Fr(1.0F)});
+    gridStyle.responsiveRules = UI::UIResponsiveLayoutRuleList::Of({
+        {
+            .minParentWidth = 0.0F,
+            .maxParentWidth = 200.0F,
+            .overrides = {
+                .gridColumns = UI::UIGridTrackList::Of({
+                    UI::UIGridTrack::Fr(1.0F),
+                    UI::UIGridTrack::Fr(1.0F),
+                }),
+            },
+        },
+    });
+    assertOk(updater.setLayoutStyle(grid, gridStyle));
+    assertOk(updater.setLayoutStyle(first, fixedSize(10.0F, 10.0F)));
+    UI::UILayoutStyle optionalStyle = fixedSize(10.0F, 10.0F);
+    optionalStyle.responsiveRules = UI::UIResponsiveLayoutRuleList::Of({
+        {
+            .minParentWidth = 200.0F,
+            .maxParentWidth = 400.0F,
+            .overrides = {.visibility = UI::UIVisibility::Collapsed},
+        },
+    });
+    assertOk(updater.setLayoutStyle(optional, optionalStyle));
+
+    assertOk(context->publication().commitLayout(
+        {.width = 100.0F, .height = 100.0F}));
+    auto layout = context->publication().committedLayout();
+    expectRectNear(requireLayoutEntry(layout, optional).worldRect,
+                   {.x = 50.0F, .y = 0.0F, .width = 10.0F, .height = 10.0F});
+
+    assertOk(context->publication().commitLayout(
+        {.width = 300.0F, .height = 100.0F}));
+    layout = context->publication().committedLayout();
+    const auto& collapsed = requireLayoutEntry(layout, optional);
+    EXPECT_EQ(collapsed.effectiveVisibility, UI::UIVisibility::Collapsed);
+    expectRectNear(collapsed.worldRect, {});
+}
+
 
 } // namespace
 } // namespace Tina::Tests

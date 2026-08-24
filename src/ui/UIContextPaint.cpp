@@ -513,7 +513,7 @@ UIContext::Impl::resolveControlPaintBatch(const UICommittedLayoutEntry& layoutEn
         {
             constexpr usize StripeCount = 3;
             const UILayoutStyle itemLayout =
-                presentationLayoutStyle(nodeIndex);
+                resolvedLayoutStyle(nodeIndex);
             const float extent = (std::min)(
                 productTheme.controls.menuItemIndicatorExtent,
                 layoutEntry.worldRect.height);
@@ -755,6 +755,9 @@ UIContext::Impl::resolveControlPaintBatch(const UICommittedLayoutEntry& layoutEn
                 .atlas = glyphAtlas.get(),
             },
         .overflow = textState != nullptr ? textState->overflow : UITextOverflow::Clip,
+        .textWrapMode = textState != nullptr
+                            ? textState->wrapMode
+                            : UITextWrapMode::NoWrap,
         .multilineEnabled = multilineEnabled,
         .wrapMode = nodeIndex < textEditMultilineByNodeIndex.size()
                         ? textEditMultilineByNodeIndex[nodeIndex].wrapMode

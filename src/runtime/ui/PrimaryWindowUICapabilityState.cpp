@@ -1641,6 +1641,45 @@ Core::Status PrimaryWindowUICapabilityState::setTextStyle(u64 epoch, PrimaryWind
     return Core::success();
 }
 
+Core::Status PrimaryWindowUICapabilityState::setTextWrapMode(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId node, UI::UITextWrapMode wrapMode)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::setTextWrapMode";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setTextWrapMode(node, wrapMode);
+    if (!status)
+    {
+        return Core::failure(
+            rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UITextWrapMode>
+PrimaryWindowUICapabilityState::textWrapMode(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId node)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::textWrapMode";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(status.error());
+    }
+    auto result = updater.textWrapMode(node);
+    if (!result)
+    {
+        return Core::failure(
+            rememberFirstError(std::move(result.error()), Operation));
+    }
+    return *result;
+}
+
 Core::Status PrimaryWindowUICapabilityState::setTextOverflow(
     u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater, UI::UINodeId node,
     UI::UITextOverflow overflow)

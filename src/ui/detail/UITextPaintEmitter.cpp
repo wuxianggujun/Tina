@@ -1,6 +1,7 @@
 #include "UITextPaintEmitter.hpp"
 
 #include "UILayoutPrimitives.hpp"
+#include "UITextWrapping.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -33,7 +34,8 @@ void UITextPaintEmitter::append(std::pmr::vector<UICommittedPaintEntry>& output,
                                 const UICommittedLayoutEntry& layoutEntry, u32& nextPaintOrdinal,
                                 std::string_view utf8, const UITextStyle& style,
                                 UIPremultipliedRgba8Color color, float startX, float startY,
-                                const UITextPaintRasterSource& rasterSource, UITextPaintCursor* outCursor) noexcept
+                                const UITextPaintRasterSource& rasterSource, UITextPaintCursor* outCursor,
+                                float maximumWidth, UITextWrapMode wrapMode) noexcept
 {
     const float lineStartX = outCursor != nullptr ? outCursor->baseX : startX;
     if (outCursor != nullptr)
@@ -61,6 +63,182 @@ void UITextPaintEmitter::append(std::pmr::vector<UICommittedPaintEntry>& output,
     const double clampedPixelSize = (std::min)(
         (std::max)(1.0, flooredSize), static_cast<double>((std::numeric_limits<u32>::max)()));
     const u32 pixelSize = static_cast<u32>(clampedPixelSize);
+
+    if (wrapMode == UITextWrapMode::Words)
+    {
+        const usize outputBase = output.size();
+        const u32 ordinalBase = nextPaintOrdinal;
+        bool usedAtlasPath = false;
+        std::span<const UITextGlyphRaster> wrappingGlyphs{};
+        if (rasterSource.rasterizer != nullptr && rasterSource.face.hasValue() &&
+            rasterSource.atlas != nullptr)
+        {
+            auto batch = rasterSource.rasterizer->raster(
+                rasterSource.face, utf8, style);
+            if (batch)
+            {
+                wrappingGlyphs = batch->glyphs;
+                float baselineFromLineTop = batch->baselineFromLineTop;
+                if (!(std::isfinite(baselineFromLineTop) &&
+                      baselineFromLineTop >= 0.0F &&
+                      baselineFromLineTop <= lineHeight))
+                {
+                    baselineFromLineTop = lineHeight;
+                }
+                UITextLineCursor lineCursor{};
+                UITextVisualLine line{};
+                float cursorY = startY;
+                float finalX = lineStartX;
+                usedAtlasPath = true;
+                while (nextWrappedTextLine(
+                    utf8, maximumWidth, wrapMode, fallbackAdvance,
+                    batch->glyphs, lineCursor, line))
+                {
+                    float cursorX = lineStartX;
+                    usize byte = line.byteBegin;
+                    usize glyphIndex = line.glyphBegin;
+                    while (byte < line.byteEnd)
+                    {
+                        const auto first = static_cast<unsigned char>(utf8[byte]);
+                        const usize unitLength = utf8UnitLength(first);
+                        if (unitLength > line.byteEnd - byte ||
+                            glyphIndex >= batch->glyphs.size())
+                        {
+                            usedAtlasPath = false;
+                            break;
+                        }
+                        const UITextGlyphRaster& glyph = batch->glyphs[glyphIndex++];
+                        float advance = glyph.advance;
+                        if (!(std::isfinite(advance) && advance >= 0.0F))
+                        {
+                            advance = fallbackAdvance;
+                        }
+                        if (glyph.width != 0U && glyph.height != 0U)
+                        {
+                            const usize coverageBytes =
+                                static_cast<usize>(glyph.width) * glyph.height;
+                            if (glyph.coverageOffset + coverageBytes >
+                                batch->coverage.size())
+                            {
+                                usedAtlasPath = false;
+                                break;
+                            }
+                            const std::span<const u8> coverage(
+                                batch->coverage.data() + glyph.coverageOffset,
+                                coverageBytes);
+                            auto placed = rasterSource.atlas->insert(
+                                UIGlyphKey{
+                                    .face = rasterSource.face,
+                                    .codepoint = glyph.codepoint,
+                                    .pixelSize = pixelSize,
+                                },
+                                glyph, coverage);
+                            if (!placed)
+                            {
+                                usedAtlasPath = false;
+                                break;
+                            }
+                            output.push_back(UICommittedPaintEntry{
+                                .node = layoutEntry.node,
+                                .worldRect = {
+                                    .x = normalizeFloat(cursorX + glyph.bearingX),
+                                    .y = normalizeFloat(
+                                        cursorY + baselineFromLineTop - glyph.bearingY),
+                                    .width = static_cast<float>(placed->width),
+                                    .height = static_cast<float>(placed->height),
+                                },
+                                .effectiveClip = layoutEntry.effectiveClip,
+                                .paintOrdinal = nextPaintOrdinal++,
+                                .solidFill = color,
+                                .kind = UICommittedPaintKind::Glyph,
+                                .atlasX = placed->atlasX,
+                                .atlasY = placed->atlasY,
+                                .atlasWidth = placed->width,
+                                .atlasHeight = placed->height,
+                                .atlasPage = 0,
+                            });
+                        }
+                        cursorX = normalizeFloat(cursorX + advance);
+                        byte += unitLength;
+                    }
+                    if (!usedAtlasPath)
+                    {
+                        break;
+                    }
+                    finalX = cursorX;
+                    cursorY = normalizeFloat(cursorY + lineHeight);
+                }
+                if (usedAtlasPath)
+                {
+                    if (outCursor != nullptr)
+                    {
+                        outCursor->x = finalX;
+                        outCursor->y = normalizeFloat(cursorY - lineHeight);
+                        outCursor->lineHeight = lineHeight;
+                        outCursor->baseX = lineStartX;
+                    }
+                    return;
+                }
+                output.resize(outputBase);
+                nextPaintOrdinal = ordinalBase;
+            }
+        }
+
+        UITextLineCursor lineCursor{};
+        UITextVisualLine line{};
+        float cursorY = startY;
+        float finalX = lineStartX;
+        while (nextWrappedTextLine(
+            utf8, maximumWidth, wrapMode, fallbackAdvance, wrappingGlyphs,
+            lineCursor, line))
+        {
+            float cursorX = lineStartX;
+            usize byte = line.byteBegin;
+            usize glyphIndex = line.glyphBegin;
+            while (byte < line.byteEnd)
+            {
+                const auto first = static_cast<unsigned char>(utf8[byte]);
+                const usize unitLength = utf8UnitLength(first);
+                if (unitLength > line.byteEnd - byte)
+                {
+                    break;
+                }
+                const float rasterAdvance = glyphIndex < wrappingGlyphs.size()
+                                                ? wrappingGlyphs[glyphIndex].advance
+                                                : fallbackAdvance;
+                const float advance =
+                    std::isfinite(rasterAdvance) && rasterAdvance >= 0.0F
+                        ? rasterAdvance
+                        : fallbackAdvance;
+                output.push_back(UICommittedPaintEntry{
+                    .node = layoutEntry.node,
+                    .worldRect = {
+                        .x = normalizeFloat(cursorX),
+                        .y = normalizeFloat(cursorY),
+                        .width = normalizeFloat(advance),
+                        .height = normalizeFloat(lineHeight),
+                    },
+                    .effectiveClip = layoutEntry.effectiveClip,
+                    .paintOrdinal = nextPaintOrdinal++,
+                    .solidFill = color,
+                    .kind = UICommittedPaintKind::SolidQuad,
+                });
+                cursorX = normalizeFloat(cursorX + advance);
+                byte += unitLength;
+                ++glyphIndex;
+            }
+            finalX = cursorX;
+            cursorY = normalizeFloat(cursorY + lineHeight);
+        }
+        if (outCursor != nullptr)
+        {
+            outCursor->x = finalX;
+            outCursor->y = normalizeFloat(cursorY - lineHeight);
+            outCursor->lineHeight = lineHeight;
+            outCursor->baseX = lineStartX;
+        }
+        return;
+    }
 
     if (rasterSource.rasterizer != nullptr && rasterSource.face.hasValue() && rasterSource.atlas != nullptr)
     {

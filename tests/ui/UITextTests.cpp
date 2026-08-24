@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include "detail/UITextWrapping.hpp"
+
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/ui/UI.hpp>
 
@@ -144,6 +146,108 @@ TEST(UITextTests, LabelAutoSizeUsesPlaceholderMetricsAndStoresUtf8)
     EXPECT_EQ(stats.textByteCapacity, 128U);
     EXPECT_GE(stats.textByteUsed, 6U);
     EXPECT_GE(stats.textByteHighWater, stats.textByteUsed);
+}
+
+TEST(UITextTests, LabelWrapsAgainstFinalContentWidthAndRemeasuresHeight)
+{
+    auto windowsResult = WindowPool::Create(1);
+    ASSERT_TRUE(windowsResult.has_value());
+    WindowPool windows = std::move(*windowsResult);
+    auto windowResult = windows.tryEmplace(1);
+    ASSERT_TRUE(windowResult.has_value());
+
+    auto context = createContext(
+        *windowResult,
+        {.nodeCapacity = 3, .rootCapacity = 1, .textByteCapacity = 64});
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    auto updater = createUpdater(*context, root);
+    UI::UILayoutStyle rootStyle{};
+    rootStyle.flexContainer.alignItems = UI::UIAxisAlignment::Start;
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), rootStyle));
+    UI::UILayoutStyle labelStyle{};
+    labelStyle.size.width = UI::UILayoutLength::Px(50.0F);
+    auto label = updater.createElement(
+        root.rootNodeId(), UI::makeLabelElement("AA AA AA", labelStyle));
+    ASSERT_TRUE(label.has_value()) << label.error().message;
+
+    auto wrapMode = updater.textWrapMode(*label);
+    ASSERT_TRUE(wrapMode.has_value()) << wrapMode.error().message;
+    EXPECT_EQ(*wrapMode, UI::UITextWrapMode::Words);
+    assertOk(context->publication().commitLayout(
+        {.width = 200.0F, .height = 100.0F}));
+
+    const auto layout = context->publication().committedLayout();
+    const auto found = std::ranges::find_if(
+        layout, [label](const UI::UICommittedLayoutEntry& entry) {
+            return entry.node == *label;
+        });
+    ASSERT_NE(found, layout.end());
+    EXPECT_FLOAT_EQ(found->worldRect.width, 50.0F);
+    EXPECT_FLOAT_EQ(found->worldRect.height, 38.4F);
+    EXPECT_FLOAT_EQ(found->contentPlacement.intrinsicSize.width, 48.0F);
+    EXPECT_FLOAT_EQ(found->contentPlacement.intrinsicSize.height, 38.4F);
+    EXPECT_EQ(context->statistics().lastLayoutPassCount, 2U);
+
+    const auto paint = context->publication().committedPaint();
+    ASSERT_EQ(paint.size(), 6U);
+    EXPECT_FLOAT_EQ(paint.entries()[0].worldRect.y, 0.0F);
+    EXPECT_FLOAT_EQ(paint.entries()[2].worldRect.y, 19.2F);
+}
+
+TEST(UITextTests, WrappedLineCursorHandlesWhitespaceCjkAndLongWords)
+{
+    const UI::UITextStyle style{};
+    const auto trailingSpaces = UI::Detail::measureWrappedText(
+        "AA   ", style, 20.0F, UI::UITextWrapMode::Words, {}, 5U);
+    EXPECT_EQ(trailingSpaces.lineCount, 1U);
+    EXPECT_FLOAT_EQ(trailingSpaces.measuredSize.width, 19.2F);
+
+    const auto hardWord = UI::Detail::measureWrappedText(
+        "ABCD", style, 20.0F, UI::UITextWrapMode::Words, {}, 4U);
+    EXPECT_EQ(hardWord.lineCount, 2U);
+    EXPECT_FLOAT_EQ(hardWord.measuredSize.width, 19.2F);
+
+    const auto cjk = UI::Detail::measureWrappedText(
+        "中文中文", style, 20.0F, UI::UITextWrapMode::Words, {}, 4U);
+    EXPECT_EQ(cjk.lineCount, 2U);
+    EXPECT_FLOAT_EQ(cjk.measuredSize.width, 19.2F);
+
+    const auto explicitLines = UI::Detail::measureWrappedText(
+        "A\n", style, 100.0F, UI::UITextWrapMode::Words, {}, 2U);
+    EXPECT_EQ(explicitLines.lineCount, 2U);
+    EXPECT_FLOAT_EQ(explicitLines.measuredSize.height, 38.4F);
+}
+
+TEST(UITextTests, TextEditRejectsOrdinaryWrapModeAndEllipsisRequiresNoWrap)
+{
+    auto windowsResult = WindowPool::Create(1);
+    ASSERT_TRUE(windowsResult.has_value());
+    WindowPool windows = std::move(*windowsResult);
+    auto windowResult = windows.tryEmplace(1);
+    ASSERT_TRUE(windowResult.has_value());
+    auto context = createContext(*windowResult, {.nodeCapacity = 4, .rootCapacity = 1});
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    auto updater = createUpdater(*context, root);
+
+    auto label = updater.createElement(
+        root.rootNodeId(), UI::makeLabelElement("long label"));
+    ASSERT_TRUE(label.has_value());
+    Core::Status ellipsis =
+        updater.setTextOverflow(*label, UI::UITextOverflow::Ellipsis);
+    ASSERT_FALSE(ellipsis.has_value());
+    EXPECT_EQ(ellipsis.error().code, UI::UIErrorCode::InvalidText);
+    assertOk(updater.setTextWrapMode(*label, UI::UITextWrapMode::NoWrap));
+    assertOk(updater.setTextOverflow(*label, UI::UITextOverflow::Ellipsis));
+
+    auto edit = updater.createElement(
+        root.rootNodeId(), UI::makeTextEditElement("editable"));
+    ASSERT_TRUE(edit.has_value());
+    Core::Status editWrap =
+        updater.setTextWrapMode(*edit, UI::UITextWrapMode::Words);
+    ASSERT_FALSE(editWrap.has_value());
+    EXPECT_EQ(editWrap.error().code, UI::UIErrorCode::InvalidText);
 }
 
 TEST(UITextTests, ButtonContentAlignmentPublishesOnePlacementForLayoutPaintAndPointerConsumers)

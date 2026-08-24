@@ -1,4 +1,5 @@
 #include "detail/UIContextImpl.hpp"
+#include "detail/UITextWrapping.hpp"
 
 namespace Tina::UI {
 
@@ -147,6 +148,11 @@ void UIContext::Impl::clearTextState(u32 index) noexcept
 
 [[nodiscard]] const UITextMetrics* UIContext::Impl::presentationTextMetricsFor(u32 index) const noexcept
 {
+    if (index < layoutScratchByIndex.size() &&
+        layoutScratchByIndex[index].hasResolvedTextMetrics)
+    {
+        return &layoutScratchByIndex[index].resolvedTextMetrics;
+    }
     const NodeRecord* record = recordByIndex(index);
     if (record != nullptr && record->kind == BuiltinElementKind::Dropdown && index < dropdownStatesByNodeIndex.size())
     {
@@ -161,6 +167,35 @@ void UIContext::Impl::clearTextState(u32 index) noexcept
     return index < textStatesByIndex.size() && textStatesByIndex[index].hasContent
                ? &textStatesByIndex[index].metrics
                : nullptr;
+}
+
+Core::Result<UITextMetrics> UIContext::Impl::measureWrappedWidgetText(
+    u32 index, float maximumWidth)
+{
+    if (index >= textStatesByIndex.size())
+    {
+        return fail(UIErrorCode::InvalidText,
+                    "UI wrapped text state is out of range");
+    }
+    const WidgetTextState& state = textStatesByIndex[index];
+    if (!state.hasContent || state.wrapMode == UITextWrapMode::NoWrap)
+    {
+        return state.metrics;
+    }
+    std::span<const UITextGlyphRaster> glyphs{};
+    if (textRasterizer != nullptr && textFace.hasValue())
+    {
+        auto raster = textRasterizer->raster(
+            textFace, textViewFor(index), state.style);
+        if (!raster)
+        {
+            return Core::failure(raster.error());
+        }
+        glyphs = raster->glyphs;
+    }
+    return Detail::measureWrappedText(
+        textViewFor(index), state.style, maximumWidth, state.wrapMode,
+        glyphs, state.metrics.codepointCount);
 }
 
 [[nodiscard]] Core::Result<UITextMetrics> UIContext::Impl::measureWidgetText(std::string_view utf8, const UITextStyle& style)
@@ -490,6 +525,12 @@ void UIContext::Impl::clearTextState(u32 index) noexcept
     }
 
     WidgetTextState& state = textStatesByIndex[node.index()];
+    if (overflow == UITextOverflow::Ellipsis &&
+        state.wrapMode != UITextWrapMode::NoWrap)
+    {
+        return fail(UIErrorCode::InvalidText,
+                    "UI wrapped text cannot use single-line Ellipsis overflow");
+    }
     if (state.overflow == overflow)
     {
         return Core::success();
@@ -533,6 +574,101 @@ void UIContext::Impl::clearTextState(u32 index) noexcept
         return fail(UIErrorCode::InvalidText, "UI text overflow requires an element with intrinsic text");
     }
     return textStatesByIndex[node.index()].overflow;
+}
+
+[[nodiscard]] Core::Status UIContext::Impl::setTextWrapModeFromUpdater(
+    UINodeId updaterRoot, UINodeId node, UITextWrapMode wrapMode)
+{
+    if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+    {
+        return ownerThread;
+    }
+    drainDeferredRootDestroys();
+    if (!updaterRoot.hasValue() || !contains(updaterRoot))
+    {
+        return fail(UIErrorCode::RootRequired,
+                    "UI tree updater requires a live root owner");
+    }
+    auto nodeResult = resolveNode(node);
+    if (!nodeResult)
+    {
+        return Core::failure(nodeResult.error());
+    }
+    if (!isNodeWithinRoot(updaterRoot, node))
+    {
+        return fail(UIErrorCode::InvalidNode,
+                    "UI node is not owned by the updater root");
+    }
+    const NodeRecord* record = nodes.tryGet(node.storageId());
+    if (record == nullptr || !supportsWidgetText(record->kind))
+    {
+        return fail(UIErrorCode::InvalidText,
+                    "UI text wrapping requires an element with intrinsic text");
+    }
+    if (record->kind == BuiltinElementKind::TextEdit &&
+        wrapMode != UITextWrapMode::NoWrap)
+    {
+        return fail(
+            UIErrorCode::InvalidText,
+            "UI TextEdit wrapping is controlled by UITextEditMultilineConfig");
+    }
+    if (wrapMode != UITextWrapMode::NoWrap && wrapMode != UITextWrapMode::Words)
+    {
+        return fail(UIErrorCode::InvalidText,
+                    "UI text wrap mode must be NoWrap or Words");
+    }
+
+    WidgetTextState& state = textStatesByIndex[node.index()];
+    if (wrapMode == UITextWrapMode::Words &&
+        state.overflow == UITextOverflow::Ellipsis)
+    {
+        return fail(UIErrorCode::InvalidText,
+                    "UI wrapped text cannot use single-line Ellipsis overflow");
+    }
+    if (state.wrapMode == wrapMode)
+    {
+        return Core::success();
+    }
+    if (Core::Status dirty =
+            markStylePropertyDirty(node, UIStylePropertyKind::TextWrap);
+        !dirty)
+    {
+        return dirty;
+    }
+    state.wrapMode = wrapMode;
+    return Core::success();
+}
+
+[[nodiscard]] Core::Result<UITextWrapMode>
+UIContext::Impl::textWrapModeFromUpdater(UINodeId updaterRoot, UINodeId node)
+{
+    if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+    {
+        return Core::failure(ownerThread.error());
+    }
+    drainDeferredRootDestroys();
+    if (!updaterRoot.hasValue() || !contains(updaterRoot))
+    {
+        return fail(UIErrorCode::RootRequired,
+                    "UI tree updater requires a live root owner");
+    }
+    auto nodeResult = resolveNode(node);
+    if (!nodeResult)
+    {
+        return Core::failure(nodeResult.error());
+    }
+    if (!isNodeWithinRoot(updaterRoot, node))
+    {
+        return fail(UIErrorCode::InvalidNode,
+                    "UI node is not owned by the updater root");
+    }
+    const NodeRecord* record = nodes.tryGet(node.storageId());
+    if (record == nullptr || !supportsWidgetText(record->kind))
+    {
+        return fail(UIErrorCode::InvalidText,
+                    "UI text wrapping requires an element with intrinsic text");
+    }
+    return textStatesByIndex[node.index()].wrapMode;
 }
 
 [[nodiscard]] Core::Result<std::string_view> UIContext::Impl::textFromUpdater(UINodeId updaterRoot, UINodeId node)

@@ -227,6 +227,8 @@ enum class UIStylePropertyKind : u8 {
     // committed content box, so intrinsic measure is unchanged and only the
     // glyph run is rebuilt.
     TextOverflow = 6,
+    // Width-constrained ordinary text changes intrinsic height and paint.
+    TextWrap = 7,
 };
 
 [[nodiscard]] constexpr UIDirty dirtyFlagsForStyleProperty(UIStylePropertyKind kind) noexcept
@@ -238,6 +240,7 @@ enum class UIStylePropertyKind : u8 {
     case UIStylePropertyKind::ColorToken:
         return UIDirty::Paint;
     case UIStylePropertyKind::TextStyle:
+    case UIStylePropertyKind::TextWrap:
         return UIDirty::Style | UIDirty::Measure | UIDirty::Arrange | UIDirty::Composite |
                UIDirty::HitTest | UIDirty::Paint | UIDirty::Semantics;
     case UIStylePropertyKind::ContentAlignment:

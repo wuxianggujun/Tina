@@ -23,6 +23,33 @@ struct FlexLineSummary final {
     }
 };
 
+struct FlexItemMeasurement final {
+    float outerMain = 0.0F;
+    float outerCross = 0.0F;
+    float baseMain = 0.0F;
+};
+
+[[nodiscard]] inline FlexItemMeasurement measureFlexItem(
+    UIFlexDirection direction, float initialContentMain,
+    const UILayoutStyle& childStyle,
+    const LayoutScratchState& childScratch,
+    LayoutPassStatistics& statistics) noexcept
+{
+    const bool row = direction == UIFlexDirection::Row;
+    const float baseMain = flexBaseMainSize(
+        childStyle, childScratch, row, initialContentMain, statistics);
+    return FlexItemMeasurement{
+        .outerMain = (row ? baseMain : childScratch.measuredSize.height) +
+                     (row ? horizontalMargin(childStyle.margin)
+                          : verticalMargin(childStyle.margin)),
+        .outerCross = (row ? childScratch.measuredSize.height
+                           : childScratch.measuredSize.width) +
+                      (row ? verticalMargin(childStyle.margin)
+                           : horizontalMargin(childStyle.margin)),
+        .baseMain = baseMain,
+    };
+}
+
 inline void appendFlexLineItem(
     FlexLineSummary& summary,
     UIFlexDirection direction,
@@ -32,27 +59,111 @@ inline void appendFlexLineItem(
     const LayoutScratchState& childScratch,
     LayoutPassStatistics& statistics) noexcept
 {
-    const bool row = direction == UIFlexDirection::Row;
+    const FlexItemMeasurement item = measureFlexItem(
+        direction, initialContentMain, childStyle, childScratch, statistics);
     if (summary.itemCount > 0)
     {
         summary.totalMain += configuredGap;
     }
-    const float baseMain = flexBaseMainSize(
-        childStyle, childScratch, row, initialContentMain, statistics);
-    const float childOuterWidth =
-        (row ? baseMain : childScratch.measuredSize.width) +
-        horizontalMargin(childStyle.margin);
-    const float childOuterHeight =
-        (row ? childScratch.measuredSize.height : baseMain) +
-        verticalMargin(childStyle.margin);
-    summary.totalMain += row ? childOuterWidth : childOuterHeight;
-    summary.totalCross = (std::max)(
-        summary.totalCross, row ? childOuterHeight : childOuterWidth);
+    summary.totalMain += item.outerMain;
+    summary.totalCross = (std::max)(summary.totalCross, item.outerCross);
     summary.totalGrow += static_cast<double>(childStyle.flexItem.grow);
     summary.totalShrinkWeight +=
         static_cast<double>(childStyle.flexItem.shrink) *
-        static_cast<double>((std::max)(0.0F, baseMain));
+        static_cast<double>((std::max)(0.0F, item.baseMain));
     ++summary.itemCount;
+}
+
+[[nodiscard]] inline bool flexItemStartsNewLine(
+    const FlexLineSummary& line, UIFlexWrap wrap, float availableMain,
+    float configuredGap, const FlexItemMeasurement& item) noexcept
+{
+    return wrap == UIFlexWrap::Wrap && line.itemCount != 0U &&
+           isFiniteNonNegative(availableMain) &&
+           line.totalMain + configuredGap + item.outerMain > availableMain;
+}
+
+struct FlexWrapMeasurement final {
+    FlexLineSummary currentLine{};
+    usize itemCount = 0U;
+    usize lineCount = 0U;
+    float maximumMain = 0.0F;
+    float totalCross = 0.0F;
+
+    [[nodiscard]] constexpr UILogicalSize contentSize(
+        UIFlexDirection direction) const noexcept
+    {
+        return direction == UIFlexDirection::Row
+                   ? UILogicalSize{.width = maximumMain, .height = totalCross}
+                   : UILogicalSize{.width = totalCross, .height = maximumMain};
+    }
+};
+
+inline void finishFlexMeasuredLine(
+    FlexWrapMeasurement& measurement, float crossGap) noexcept
+{
+    if (measurement.currentLine.itemCount == 0U)
+    {
+        return;
+    }
+    measurement.maximumMain = (std::max)(
+        measurement.maximumMain, measurement.currentLine.totalMain);
+    if (measurement.lineCount != 0U)
+    {
+        measurement.totalCross += crossGap;
+    }
+    measurement.totalCross += measurement.currentLine.totalCross;
+    ++measurement.lineCount;
+    measurement.currentLine = {};
+}
+
+inline void appendFlexMeasuredItem(
+    FlexWrapMeasurement& measurement, UIFlexDirection direction,
+    UIFlexWrap wrap, float availableMain, float mainGap, float crossGap,
+    const UILayoutStyle& childStyle,
+    const LayoutScratchState& childScratch,
+    LayoutPassStatistics& statistics) noexcept
+{
+    const FlexItemMeasurement item = measureFlexItem(
+        direction, availableMain, childStyle, childScratch, statistics);
+    if (flexItemStartsNewLine(
+            measurement.currentLine, wrap, availableMain, mainGap, item))
+    {
+        finishFlexMeasuredLine(measurement, crossGap);
+    }
+    if (measurement.currentLine.itemCount != 0U)
+    {
+        measurement.currentLine.totalMain += mainGap;
+    }
+    measurement.currentLine.totalMain += item.outerMain;
+    measurement.currentLine.totalCross = (std::max)(
+        measurement.currentLine.totalCross, item.outerCross);
+    measurement.currentLine.totalGrow +=
+        static_cast<double>(childStyle.flexItem.grow);
+    measurement.currentLine.totalShrinkWeight +=
+        static_cast<double>(childStyle.flexItem.shrink) *
+        static_cast<double>((std::max)(0.0F, item.baseMain));
+    ++measurement.currentLine.itemCount;
+    ++measurement.itemCount;
+}
+
+inline void finishFlexMeasurement(
+    FlexWrapMeasurement& measurement, float crossGap) noexcept
+{
+    finishFlexMeasuredLine(measurement, crossGap);
+}
+
+[[nodiscard]] inline bool isValidFlexWrapMeasurement(
+    const FlexWrapMeasurement& measurement) noexcept
+{
+    const FlexLineSummary& line = measurement.currentLine;
+    return isFiniteNonNegative(measurement.maximumMain) &&
+           isFiniteNonNegative(measurement.totalCross) &&
+           isFiniteNonNegative(line.totalMain) &&
+           isFiniteNonNegative(line.totalCross) &&
+           std::isfinite(line.totalGrow) && line.totalGrow >= 0.0 &&
+           std::isfinite(line.totalShrinkWeight) &&
+           line.totalShrinkWeight >= 0.0;
 }
 
 [[nodiscard]] inline bool isValidFlexLineSummary(

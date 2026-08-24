@@ -147,5 +147,31 @@ TEST(UIFlexLayoutTests, AlignSelfOverridesContainerAndStretchUsesAvailableCrossA
               (UI::UILogicalRect{.x = 0.0F, .y = 2.0F, .width = 20.0F, .height = 35.0F}));
 }
 
+TEST(UIFlexLayoutTests, WrapBuildsBoundedLinesWithIndependentCrossExtentAndGap)
+{
+    UI::UILayoutStyle child{};
+    UI::Detail::LayoutPassStatistics statistics{};
+    UI::Detail::FlexWrapMeasurement measurement{};
+
+    UI::Detail::appendFlexMeasuredItem(
+        measurement, UI::UIFlexDirection::Row, UI::UIFlexWrap::Wrap,
+        90.0F, 10.0F, 5.0F, child, measured(40.0F, 10.0F), statistics);
+    UI::Detail::appendFlexMeasuredItem(
+        measurement, UI::UIFlexDirection::Row, UI::UIFlexWrap::Wrap,
+        90.0F, 10.0F, 5.0F, child, measured(40.0F, 20.0F), statistics);
+    UI::Detail::appendFlexMeasuredItem(
+        measurement, UI::UIFlexDirection::Row, UI::UIFlexWrap::Wrap,
+        90.0F, 10.0F, 5.0F, child, measured(40.0F, 30.0F), statistics);
+    UI::Detail::finishFlexMeasurement(measurement, 5.0F);
+
+    EXPECT_EQ(measurement.itemCount, 3U);
+    EXPECT_EQ(measurement.lineCount, 2U);
+    EXPECT_FLOAT_EQ(measurement.maximumMain, 90.0F);
+    EXPECT_FLOAT_EQ(measurement.totalCross, 55.0F);
+    EXPECT_EQ(measurement.contentSize(UI::UIFlexDirection::Row),
+              (UI::UILogicalSize{.width = 90.0F, .height = 55.0F}));
+    EXPECT_TRUE(UI::Detail::isValidFlexWrapMeasurement(measurement));
+}
+
 } // namespace
 } // namespace Tina::Tests

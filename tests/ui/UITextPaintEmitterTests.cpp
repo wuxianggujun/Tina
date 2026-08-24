@@ -99,6 +99,71 @@ class BaselineRasterizer final : public UI::IUITextRasterizer {
     std::array<u8, 40> m_coverage{};
 };
 
+class WideAdvanceRasterizer final : public UI::IUITextRasterizer {
+  public:
+    [[nodiscard]] Core::Result<UI::UIFontFaceId> openFace(
+        std::span<const std::byte>, i32) override
+    {
+        return UI::UIFontFaceId{.index = 0, .generation = 1};
+    }
+
+    [[nodiscard]] Core::Status closeFace(UI::UIFontFaceId) noexcept override
+    {
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<UI::UITextMetrics> measure(
+        UI::UIFontFaceId, std::string_view utf8, UI::UITextStyle style) override
+    {
+        return UI::UITextMetrics{
+            .measuredSize = {
+                .width = static_cast<float>(utf8.size()) * 8.0F,
+                .height = style.logicalSize * style.lineHeightScale,
+            },
+            .codepointCount = static_cast<u32>(utf8.size()),
+            .lineCount = utf8.empty() ? 0U : 1U,
+        };
+    }
+
+    [[nodiscard]] Core::Result<UI::UITextRasterBatch> raster(
+        UI::UIFontFaceId face, std::string_view utf8, UI::UITextStyle style) override
+    {
+        if (utf8 != "AB")
+        {
+            return Core::failure(UI::UIErrorCode::InvalidText,
+                                 "Wide advance rasterizer accepts only AB");
+        }
+        auto metrics = measure(face, utf8, style);
+        return UI::UITextRasterBatch{
+            .metrics = *metrics,
+            .baselineFromLineTop = 10.0F,
+            .glyphs = m_glyphs,
+            .coverage = m_coverage,
+        };
+    }
+
+    [[nodiscard]] UI::UITextRasterizerCapacity capacity() const noexcept override
+    {
+        return {.faceCapacity = 1, .maxGlyphsPerRaster = 2,
+                .coverageByteCapacity = 2};
+    }
+
+  private:
+    std::array<UI::UITextGlyphRaster, 2> m_glyphs{
+        UI::UITextGlyphRaster{
+            .codepoint = static_cast<u32>('A'), .advance = 8.0F,
+            .bearingY = 1.0F, .width = 1, .height = 1,
+            .coverageOffset = 0, .coveragePitch = 1,
+        },
+        UI::UITextGlyphRaster{
+            .codepoint = static_cast<u32>('B'), .advance = 8.0F,
+            .bearingY = 1.0F, .width = 1, .height = 1,
+            .coverageOffset = 1, .coveragePitch = 1,
+        },
+    };
+    std::array<u8, 2> m_coverage{255U, 255U};
+};
+
 TEST(UITextPaintEmitterTests, EmitsDeterministicFallbackAndRestoresBaseXAcrossChainedLines)
 {
     std::pmr::vector<UI::UICommittedPaintEntry> output;
@@ -247,6 +312,40 @@ TEST(UITextPaintEmitterTests, RollsBackPartialAtlasOutputAndOrdinalsBeforeFallba
     EXPECT_EQ(nextPaintOrdinal, 13U);
     EXPECT_EQ(atlas->statistics().glyphCount, 1U);
     EXPECT_FLOAT_EQ(cursor.x, 12.0F);
+}
+
+TEST(UITextPaintEmitterTests, WrappedAtlasFallbackKeepsRasterAdvancesAndLines)
+{
+    WideAdvanceRasterizer rasterizer;
+    auto face = rasterizer.openFace({}, 0);
+    ASSERT_TRUE(face.has_value());
+    auto atlasResult = UI::UIGlyphAtlas::Create(UI::UIGlyphAtlasCapacity{
+        .width = 16,
+        .height = 16,
+        .maxGlyphs = 1,
+    });
+    ASSERT_TRUE(atlasResult.has_value());
+    std::unique_ptr<UI::UIGlyphAtlas> atlas = std::move(*atlasResult);
+    std::pmr::vector<UI::UICommittedPaintEntry> output;
+    u32 nextPaintOrdinal = 4U;
+    UI::Detail::UITextPaintCursor cursor{.x = 3.0F, .y = 7.0F, .baseX = 3.0F};
+
+    UI::Detail::UITextPaintEmitter::append(
+        output, {}, nextPaintOrdinal, "AB", testStyle(), testColor(),
+        cursor.x, cursor.y,
+        {.rasterizer = &rasterizer, .face = *face, .atlas = atlas.get()},
+        &cursor, 10.0F, UI::UITextWrapMode::Words);
+
+    ASSERT_EQ(output.size(), 2U);
+    EXPECT_EQ(output[0].kind, UI::UICommittedPaintKind::SolidQuad);
+    EXPECT_EQ(output[1].kind, UI::UICommittedPaintKind::SolidQuad);
+    EXPECT_FLOAT_EQ(output[0].worldRect.width, 8.0F);
+    EXPECT_FLOAT_EQ(output[1].worldRect.width, 8.0F);
+    EXPECT_FLOAT_EQ(output[0].worldRect.y, 7.0F);
+    EXPECT_FLOAT_EQ(output[1].worldRect.y, 22.0F);
+    EXPECT_FLOAT_EQ(cursor.x, 11.0F);
+    EXPECT_FLOAT_EQ(cursor.y, 22.0F);
+    EXPECT_EQ(nextPaintOrdinal, 6U);
 }
 
 } // namespace

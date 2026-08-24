@@ -43,6 +43,14 @@ enum class UITextOverflow : u8 {
     Ellipsis = 1,
 };
 
+// Ordinary intrinsic text either preserves authored lines or wraps against the
+// final committed content width. Words prefers ASCII whitespace boundaries and
+// hard-wraps long words/CJK without splitting UTF-8 codepoints.
+enum class UITextWrapMode : u8 {
+    NoWrap = 0,
+    Words = 1,
+};
+
 // U+2026 HORIZONTAL ELLIPSIS. A face without a visible glyph for it emits no
 // paint entry, so truncation degrades to an unmarked hard cut rather than a
 // fallback box; the reserved entry count stays a safe over-estimate.
@@ -63,8 +71,8 @@ struct UITextMetrics final {
     auto operator<=>(const UITextMetrics&) const = default;
 };
 
-// Measures a single logical line. Explicit '\n' is allowed and advances the
-// line count, but wrapping against a max width is deferred.
+// Measures intrinsic text without a width constraint. Explicit '\n' advances
+// the line count; constrained Label wrapping is resolved by UIContext layout.
 [[nodiscard]] Core::Result<UITextMetrics> measurePlaceholderText(
     std::string_view utf8,
     UITextStyle style) noexcept;

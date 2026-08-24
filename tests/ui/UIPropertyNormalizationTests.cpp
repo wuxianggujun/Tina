@@ -432,5 +432,73 @@ TEST(UIPropertyNormalizationTests, ThemeRejectsInvalidGeometryAndEnumValues)
     }));
 }
 
+TEST(UIPropertyNormalizationTests, ResponsiveLayoutRulesAreBoundedOrderedAndNormalized)
+{
+    UI::UILayoutStyle style{};
+    style.responsiveRules = UI::UIResponsiveLayoutRuleList::Of({
+        {
+            .minParentWidth = 0.0F,
+            .maxParentWidth = 320.0F,
+            .overrides = {
+                .containerLayout = UI::UIContainerLayout::Grid,
+                .gridColumns = UI::UIGridTrackList::Of({
+                    UI::UIGridTrack::Fr(1.0F),
+                    UI::UIGridTrack::Px(80.0F),
+                }),
+                .visibility = UI::UIVisibility::Hidden,
+            },
+        },
+        {
+            .minParentWidth = 320.0F,
+            .maxParentWidth = 640.0F,
+            .overrides = {
+                .flexDirection = UI::UIFlexDirection::Row,
+            },
+        },
+    });
+
+    auto normalized = UI::Detail::normalizeLayoutStyle(style);
+    ASSERT_TRUE(normalized.has_value()) << normalized.error().message;
+    ASSERT_EQ(normalized->responsiveRules.count, 2U);
+    const auto& columns =
+        *normalized->responsiveRules.rules[0].overrides.gridColumns;
+    ASSERT_EQ(columns.count, 2U);
+    EXPECT_EQ(columns.tracks[0], UI::UIGridTrack::Fr(1.0F));
+    EXPECT_EQ(columns.tracks[1], UI::UIGridTrack::Px(80.0F));
+    EXPECT_EQ(columns.tracks[2], UI::UIGridTrack::Auto());
+
+    const auto rejects = [](UI::UILayoutStyle candidate) {
+        auto result = UI::Detail::normalizeLayoutStyle(candidate);
+        return !result.has_value() &&
+               result.error().code == UI::UIErrorCode::InvalidLayout;
+    };
+
+    UI::UILayoutStyle tooMany{};
+    tooMany.responsiveRules = UI::UIResponsiveLayoutRuleList::Of({
+        {0.0F, 1.0F, {}}, {1.0F, 2.0F, {}}, {2.0F, 3.0F, {}},
+        {3.0F, 4.0F, {}}, {4.0F, 5.0F, {}},
+    });
+    EXPECT_TRUE(rejects(tooMany));
+
+    UI::UILayoutStyle overlap = style;
+    overlap.responsiveRules.rules[1].minParentWidth = 300.0F;
+    EXPECT_TRUE(rejects(overlap));
+
+    UI::UILayoutStyle nonFinite = style;
+    nonFinite.responsiveRules.rules[0].maxParentWidth =
+        (std::numeric_limits<float>::infinity)();
+    EXPECT_TRUE(rejects(nonFinite));
+
+    UI::UILayoutStyle invalidEnum = style;
+    invalidEnum.responsiveRules.rules[0].overrides.visibility =
+        static_cast<UI::UIVisibility>(255);
+    EXPECT_TRUE(rejects(invalidEnum));
+
+    UI::UILayoutStyle invalidTracks = style;
+    invalidTracks.responsiveRules.rules[0].overrides.gridColumns =
+        UI::UIGridTrackList::Of({UI::UIGridTrack::Fr(0.0F)});
+    EXPECT_TRUE(rejects(invalidTracks));
+}
+
 } // namespace
 } // namespace Tina::Tests

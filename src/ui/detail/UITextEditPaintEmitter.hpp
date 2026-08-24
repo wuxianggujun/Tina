@@ -36,6 +36,7 @@ struct UITextEditPaintState final {
     // on Clip behaviour; a positive intrinsicWidth that already fits skips the
     // measure work entirely.
     UITextOverflow overflow = UITextOverflow::Clip;
+    UITextWrapMode textWrapMode = UITextWrapMode::NoWrap;
     float availableWidth = 0.0F;
     float intrinsicWidth = 0.0F;
     bool multilineEnabled = false;

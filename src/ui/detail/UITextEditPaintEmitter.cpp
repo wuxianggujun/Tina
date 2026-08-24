@@ -567,7 +567,8 @@ UITextEditPaintEmitter::append(std::pmr::vector<UICommittedPaintEntry>& output,
     };
     const auto appendText = [&](std::string_view text, UIPremultipliedRgba8Color color) noexcept {
         UITextPaintEmitter::append(output, textLayoutEntry, nextPaintOrdinal, text, state.style, color,
-                                   cursor.x, cursor.y, state.rasterSource, &cursor);
+                                   cursor.x, cursor.y, state.rasterSource, &cursor,
+                                   state.availableWidth, state.textWrapMode);
     };
 
     if (!state.focused)

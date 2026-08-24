@@ -11,19 +11,16 @@ namespace Tina::SampleUI {
 namespace {
 
 // Frozen shell defaults from docs/ui-modern-desktop.md "默认尺寸".
-inline constexpr float LeftDockDefaultWidth = 272.0F;
 inline constexpr float LeftDockMinWidth = 200.0F;
-inline constexpr float InspectorDefaultWidth = 320.0F;
 inline constexpr float InspectorMinWidth = 240.0F;
-inline constexpr float TimelineDefaultHeight = 220.0F;
 inline constexpr float TimelineMinHeight = 160.0F;
 inline constexpr float ViewportMinWidth = 480.0F;
 inline constexpr float ViewportMinHeight = 320.0F;
 
-// Responsive breakpoints. Below these the shell collapses panes instead of
-// shrinking type or letting panes overlap.
-inline constexpr float FullTierMinWidth = 1280.0F;
-inline constexpr float CompressedTierMinWidth = 960.0F;
+// Rules use the immediate parent content width and preserve the viewport
+// minimum before optional panes participate.
+inline constexpr float InspectorParentMinWidth = 800.0F;
+inline constexpr float TimelineParentMinWidth = 800.0F;
 
 [[nodiscard]] UI::UILayoutStyle fillStyle() noexcept
 {
@@ -118,33 +115,16 @@ inline constexpr float CompressedTierMinWidth = 960.0F;
                : UI::makeModernDesktopTheme(UI::UIColorScheme::Light, density);
 }
 
-[[nodiscard]] ShellResponsiveTier tierForWidth(float logicalWidth) noexcept
+[[nodiscard]] UI::UIResponsiveLayoutRule collapseBelow(
+    float parentWidth) noexcept
 {
-    if (logicalWidth >= FullTierMinWidth) {
-        return ShellResponsiveTier::Full;
-    }
-    if (logicalWidth >= CompressedTierMinWidth) {
-        return ShellResponsiveTier::Compressed;
-    }
-    return ShellResponsiveTier::Minimal;
-}
-
-// Converts an absolute pane size into the SplitView primary fraction. The
-// SplitView still clamps against its own minimums; this only expresses intent.
-[[nodiscard]] float fractionForPrimary(float primarySize, float totalSize) noexcept
-{
-    if (!std::isfinite(primarySize) || !std::isfinite(totalSize) || totalSize <= 0.0F) {
-        return 0.5F;
-    }
-    return std::clamp(primarySize / totalSize, 0.05F, 0.95F);
-}
-
-[[nodiscard]] float fractionForSecondary(float secondarySize, float totalSize) noexcept
-{
-    if (!std::isfinite(secondarySize) || !std::isfinite(totalSize) || totalSize <= 0.0F) {
-        return 0.5F;
-    }
-    return std::clamp(1.0F - (secondarySize / totalSize), 0.05F, 0.95F);
+    return UI::UIResponsiveLayoutRule{
+        .minParentWidth = 0.0F,
+        .maxParentWidth = parentWidth,
+        .overrides = {
+            .visibility = UI::UIVisibility::Collapsed,
+        },
+    };
 }
 
 struct ShellCommand final {
@@ -321,7 +301,7 @@ Core::Status DesktopShellUI::build(GameStateEnterContext& context, DesktopShellS
 
     imageResolver_ = std::move(*imageResolver);
 
-    layoutDirty_ = true;
+    paneIntentDirty_ = true;
     statusDirty_ = true;
     menuStateDirty_ = true;
     dialogVisibilityDirty_ = true;
@@ -804,8 +784,16 @@ Core::Status DesktopShellUI::buildWorkspace(PrimaryWindowUITreeUpdater& tree, co
         !status) {
         return status;
     }
+    UI::UILayoutStyle inspectorSplitterLayout{};
+    inspectorSplitterLayout.responsiveRules =
+        UI::UIResponsiveLayoutRuleList::Of({
+            collapseBelow(InspectorParentMinWidth),
+        });
     if (Core::Status status = storeNode(
-            tree.createElement(nodes_.splitB, UI::makeSplitterElement({})), nodes_.splitterB);
+            tree.createElement(
+                nodes_.splitB,
+                UI::makeSplitterElement({}, inspectorSplitterLayout)),
+            nodes_.splitterB);
         !status) {
         return status;
     }
@@ -813,6 +801,10 @@ Core::Status DesktopShellUI::buildWorkspace(PrimaryWindowUITreeUpdater& tree, co
     inspectorLayout.flexContainer.direction = UI::UIFlexDirection::Column;
     inspectorLayout.padding = UI::UIEdgeSpacing::All(theme.spacing.space4);
     inspectorLayout.flexContainer.gap.row = theme.spacing.space3;
+    inspectorLayout.responsiveRules =
+        UI::UIResponsiveLayoutRuleList::Of({
+            collapseBelow(InspectorParentMinWidth),
+        });
     inspectorLayout_ = inspectorLayout;
     if (Core::Status status = storeNode(
             createSurface(tree, nodes_.splitB, inspectorLayout, UI::UISurfaceVariant::Filled),
@@ -853,8 +845,16 @@ Core::Status DesktopShellUI::buildWorkspace(PrimaryWindowUITreeUpdater& tree, co
         !status) {
         return status;
     }
+    UI::UILayoutStyle timelineSplitterLayout{};
+    timelineSplitterLayout.responsiveRules =
+        UI::UIResponsiveLayoutRuleList::Of({
+            collapseBelow(TimelineParentMinWidth),
+        });
     if (Core::Status status = storeNode(
-            tree.createElement(nodes_.splitC, UI::makeSplitterElement({})), nodes_.splitterC);
+            tree.createElement(
+                nodes_.splitC,
+                UI::makeSplitterElement({}, timelineSplitterLayout)),
+            nodes_.splitterC);
         !status) {
         return status;
     }
@@ -862,6 +862,10 @@ Core::Status DesktopShellUI::buildWorkspace(PrimaryWindowUITreeUpdater& tree, co
     timelineLayout.flexContainer.direction = UI::UIFlexDirection::Column;
     timelineLayout.padding = UI::UIEdgeSpacing::All(theme.spacing.space4);
     timelineLayout.flexContainer.gap.row = theme.spacing.space2;
+    timelineLayout.responsiveRules =
+        UI::UIResponsiveLayoutRuleList::Of({
+            collapseBelow(TimelineParentMinWidth),
+        });
     timelineLayout_ = timelineLayout;
     if (Core::Status status = storeNode(
             createSurface(tree, nodes_.splitC, timelineLayout, UI::UISurfaceVariant::Filled),
@@ -1340,6 +1344,14 @@ Core::Status DesktopShellUI::refreshCommittedGeometry(PrimaryWindowUITreeUpdater
     viewportWidth_ = metricsC->primaryRect.width;
     viewportHeight_ = metricsC->primaryRect.height;
     timelineHeight_ = metricsC->secondaryRect.height;
+    state_->timelineCollapsed = timelineHeight_ <= 0.0F;
+    state_->inspectorVisible = inspectorWidth_ > 0.0F;
+    if (state_->timelineHideRequested && state_->timelineCollapsed) {
+        timelineHideObserved_ = true;
+    }
+    if (state_->inspectorHideRequested && !state_->inspectorVisible) {
+        inspectorHideObserved_ = true;
+    }
 
     auto statusRect = tree.committedLayoutRect(nodes_.statusBar);
     if (!statusRect) {
@@ -1356,101 +1368,44 @@ Core::Status DesktopShellUI::refreshCommittedGeometry(PrimaryWindowUITreeUpdater
     return Core::success();
 }
 
-// Responsive rules: collapse whole panes, never scale type. Timeline collapses
-// first, then the inspector becomes command-driven below 960.
-Core::Status DesktopShellUI::applyResponsiveTier(PrimaryWindowUITreeUpdater& tree)
+Core::Status DesktopShellUI::applyPaneVisibilityIntent(
+    PrimaryWindowUITreeUpdater& tree)
 {
-    const ShellResponsiveTier tier = tierForWidth(logicalWidth_);
-    tier_ = tier;
-
-    // Resolved visibility combines the width tier with explicit user intent, so
-    // a command can hide a pane the tier would otherwise show.
-    const bool timelineCollapsed =
-        tier != ShellResponsiveTier::Full || state_->timelineHideRequested;
-    const bool inspectorVisible =
-        tier != ShellResponsiveTier::Minimal && !state_->inspectorHideRequested;
-    state_->timelineCollapsed = timelineCollapsed;
-    state_->inspectorVisible = inspectorVisible;
-    // Latch that an explicit command actually took effect, independent of tier.
-    if (state_->timelineHideRequested) {
-        timelineHideObserved_ = true;
-    }
-    if (state_->inspectorHideRequested && !inspectorVisible) {
-        inspectorHideObserved_ = true;
-    }
-
-    // Timeline: collapse by giving the viewport the whole vertical extent.
-    auto metricsC = tree.splitViewMetrics(nodes_.splitC);
-    if (!metricsC) {
-        return Core::failure(std::move(metricsC.error()));
-    }
-    const float verticalTotal =
-        metricsC->primaryRect.height + metricsC->splitterRect.height +
-        metricsC->secondaryRect.height;
-    const float timelineFraction =
-        timelineCollapsed ? 1.0F : fractionForSecondary(TimelineDefaultHeight, verticalTotal);
-    if (Core::Status status = tree.setSplitViewFraction(nodes_.splitC, timelineFraction); !status) {
-        return status;
-    }
-    if (Core::Status status = tree.setLayoutStyle(
-            nodes_.splitterC,
-            timelineCollapsed ? UI::UILayoutStyle{.visibility = UI::UIVisibility::Collapsed}
-                              : UI::UILayoutStyle{});
+    UI::UILayoutStyle timeline = timelineLayout_;
+    timeline.visibility = state_->timelineHideRequested
+                              ? UI::UIVisibility::Collapsed
+                              : UI::UIVisibility::Visible;
+    if (Core::Status status = tree.setLayoutStyle(nodes_.timeline, timeline);
         !status) {
         return status;
     }
-    {
-        UI::UILayoutStyle timelinePaneLayout = timelineLayout_;
-        timelinePaneLayout.visibility = timelineCollapsed ? UI::UIVisibility::Collapsed
-                                                           : UI::UIVisibility::Visible;
-        if (Core::Status status = tree.setLayoutStyle(nodes_.timeline, timelinePaneLayout); !status) {
-            return status;
-        }
-    }
-
-    auto metricsB = tree.splitViewMetrics(nodes_.splitB);
-    if (!metricsB) {
-        return Core::failure(std::move(metricsB.error()));
-    }
-    const float horizontalTotal =
-        metricsB->primaryRect.width + metricsB->splitterRect.width +
-        metricsB->secondaryRect.width;
-    const float inspectorFraction =
-        inspectorVisible ? fractionForSecondary(InspectorDefaultWidth, horizontalTotal) : 1.0F;
-    if (Core::Status status = tree.setSplitViewFraction(nodes_.splitB, inspectorFraction); !status) {
-        return status;
-    }
-    {
-        UI::UILayoutStyle inspectorPaneLayout = inspectorLayout_;
-        inspectorPaneLayout.visibility = inspectorVisible ? UI::UIVisibility::Visible
-                                                          : UI::UIVisibility::Collapsed;
-        if (Core::Status status = tree.setLayoutStyle(nodes_.inspector, inspectorPaneLayout); !status) {
-            return status;
-        }
-        if (Core::Status status = tree.setLayoutStyle(
-                nodes_.splitterB,
-                inspectorVisible ? UI::UILayoutStyle{}
-                                 : UI::UILayoutStyle{.visibility = UI::UIVisibility::Collapsed});
-            !status) {
-            return status;
-        }
-    }
-
-    auto metricsA = tree.splitViewMetrics(nodes_.splitA);
-    if (!metricsA) {
-        return Core::failure(std::move(metricsA.error()));
-    }
-    const float dockTotal = metricsA->primaryRect.width +
-                            metricsA->splitterRect.width +
-                            metricsA->secondaryRect.width;
-    const float dockTarget =
-        tier == ShellResponsiveTier::Full ? LeftDockDefaultWidth : LeftDockMinWidth;
+    UI::UILayoutStyle timelineSplitter{};
+    timelineSplitter.visibility = timeline.visibility;
+    timelineSplitter.responsiveRules =
+        UI::UIResponsiveLayoutRuleList::Of({
+            collapseBelow(TimelineParentMinWidth),
+        });
     if (Core::Status status =
-            tree.setSplitViewFraction(nodes_.splitA, fractionForPrimary(dockTarget, dockTotal));
+            tree.setLayoutStyle(nodes_.splitterC, timelineSplitter);
         !status) {
         return status;
     }
-    return Core::success();
+
+    UI::UILayoutStyle inspector = inspectorLayout_;
+    inspector.visibility = state_->inspectorHideRequested
+                               ? UI::UIVisibility::Collapsed
+                               : UI::UIVisibility::Visible;
+    if (Core::Status status = tree.setLayoutStyle(nodes_.inspector, inspector);
+        !status) {
+        return status;
+    }
+    UI::UILayoutStyle inspectorSplitter{};
+    inspectorSplitter.visibility = inspector.visibility;
+    inspectorSplitter.responsiveRules =
+        UI::UIResponsiveLayoutRuleList::Of({
+            collapseBelow(InspectorParentMinWidth),
+        });
+    return tree.setLayoutStyle(nodes_.splitterB, inspectorSplitter);
 }
 
 Core::Status DesktopShellUI::update(UIUpdateContext& context)
@@ -1463,11 +1418,10 @@ Core::Status DesktopShellUI::update(UIUpdateContext& context)
         return Core::failure(std::move(tree.error()));
     }
 
-    if (layoutDirty_ || paneIntentDirty_) {
-        if (Core::Status status = applyResponsiveTier(*tree); !status) {
+    if (paneIntentDirty_) {
+        if (Core::Status status = applyPaneVisibilityIntent(*tree); !status) {
             return status;
         }
-        layoutDirty_ = false;
         paneIntentDirty_ = false;
         statusDirty_ = true;
         menuStateDirty_ = true;
@@ -1615,10 +1569,7 @@ Core::Status DesktopShellUI::update(UIUpdateContext& context)
     if (statusDirty_) {
         const std::string_view message =
             !pendingStatus_.empty() ? pendingStatus_
-            : tier_ == ShellResponsiveTier::Full ? "Ready — full workspace"
-            : tier_ == ShellResponsiveTier::Compressed
-                ? "Ready — timeline collapsed"
-                : "Ready — inspector on demand";
+                                     : "Ready";
         if (Core::Status status = tree->setText(nodes_.statusLabel, message); !status) {
             return status;
         }
@@ -1626,18 +1577,6 @@ Core::Status DesktopShellUI::update(UIUpdateContext& context)
         statusDirty_ = false;
     }
     return Core::success();
-}
-
-void DesktopShellUI::setLogicalWidth(float logicalWidth) noexcept
-{
-    if (!std::isfinite(logicalWidth) || logicalWidth <= 0.0F) {
-        return;
-    }
-    if (logicalWidth == logicalWidth_) {
-        return;
-    }
-    logicalWidth_ = logicalWidth;
-    layoutDirty_ = true;
 }
 
 void DesktopShellUI::release() noexcept
@@ -1709,7 +1648,6 @@ DesktopShellSnapshot DesktopShellUI::snapshot() const noexcept
     return DesktopShellSnapshot{
         .theme = currentTheme_,
         .density = density_,
-        .tier = tier_,
         .activeDocument = state_ == nullptr ? ShellDocument::Scene : state_->activeDocument,
         .splitViewCount = splitViewCount_,
         .commandCount = commandCount_,

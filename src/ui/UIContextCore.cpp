@@ -1360,6 +1360,8 @@ void UIContext::Impl::releaseRouteDirtyQueueReservations() noexcept
     static_assert(stylePropertyDirtiesPaint(UIStylePropertyKind::ColorToken));
     static_assert(stylePropertyDirtiesLayout(UIStylePropertyKind::TextStyle));
     static_assert(stylePropertyDirtiesPaint(UIStylePropertyKind::TextStyle));
+    static_assert(stylePropertyDirtiesLayout(UIStylePropertyKind::TextWrap));
+    static_assert(stylePropertyDirtiesPaint(UIStylePropertyKind::TextWrap));
     static_assert(stylePropertyDirtiesHit(UIStylePropertyKind::PointerHitPolicy));
     static_assert(!stylePropertyDirtiesPaint(UIStylePropertyKind::PointerHitPolicy));
     static_assert(stylePropertyDirtiesLayout(UIStylePropertyKind::LayoutStyle));
@@ -1394,6 +1396,7 @@ void UIContext::Impl::releaseRouteDirtyQueueReservations() noexcept
         return Core::success();
     }
     case UIStylePropertyKind::TextStyle:
+    case UIStylePropertyKind::TextWrap:
     case UIStylePropertyKind::ContentAlignment: {
         if (Core::Status layout = markLayoutStyleDirty(node); !layout) {
             return layout;

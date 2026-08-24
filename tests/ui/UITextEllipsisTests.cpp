@@ -254,8 +254,10 @@ void withLabel(float width, float height, Body&& body)
 
     withContext(createContext(*windowResult),
                 [&](UI::UIContext& context, UI::UITreeUpdater& updater, UI::UIRootOwner& root) {
+                    UI::UIElementDescriptor descriptor = UI::makeLabelElement();
+                    descriptor.textWrapMode = UI::UITextWrapMode::NoWrap;
                     auto labelResult =
-                        updater.createElement(root.rootNodeId(), UI::makeLabelElement());
+                        updater.createElement(root.rootNodeId(), descriptor);
                     ASSERT_TRUE(labelResult.has_value())
                         << (labelResult ? "" : labelResult.error().message);
                     const UI::UINodeId label = *labelResult;

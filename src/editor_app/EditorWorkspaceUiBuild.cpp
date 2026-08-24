@@ -111,6 +111,17 @@ template <typename NodeResult>
     return Tina::Core::success();
 }
 
+[[nodiscard]] Tina::Core::Status setSingleLineEllipsis(
+    Tina::PrimaryWindowUITreeUpdater& tree, UI::UINodeId node)
+{
+    if (auto status = tree.setTextWrapMode(node, UI::UITextWrapMode::NoWrap);
+        !status)
+    {
+        return status;
+    }
+    return tree.setTextOverflow(node, UI::UITextOverflow::Ellipsis);
+}
+
 [[nodiscard]] Tina::Core::Status appendVerticalDivider(
     Tina::PrimaryWindowUITreeUpdater& tree, UI::UINodeId parent,
     float height)
@@ -417,8 +428,7 @@ auto EditorWorkspaceState::buildDocumentTabsUi(UiBuildContext& ui, UI::UINodeId 
             !status) {
             return status;
         }
-        if (auto status = ui.tree.setTextOverflow(documentTabButtons_[index],
-                                                  UI::UITextOverflow::Ellipsis);
+        if (auto status = setSingleLineEllipsis(ui.tree, documentTabButtons_[index]);
             !status) {
             return status;
         }
@@ -699,8 +709,7 @@ auto EditorWorkspaceState::buildLeftDockUi(
         !status) {
         return status;
     }
-    if (auto status = ui.tree.setTextOverflow(
-            hierarchyDropIndicator_, UI::UITextOverflow::Ellipsis);
+    if (auto status = setSingleLineEllipsis(ui.tree, hierarchyDropIndicator_);
         !status) {
         return status;
     }
@@ -777,8 +786,7 @@ auto EditorWorkspaceState::buildLeftDockUi(
         !status) {
         return status;
     }
-    if (auto status = ui.tree.setTextOverflow(
-            projectAssetBreadcrumb_, UI::UITextOverflow::Ellipsis);
+    if (auto status = setSingleLineEllipsis(ui.tree, projectAssetBreadcrumb_);
         !status) {
         return status;
     }
@@ -1027,8 +1035,7 @@ auto EditorWorkspaceState::buildLeftDockUi(
         !status) {
         return status;
     }
-    if (auto status = ui.tree.setTextOverflow(
-            projectAssetStartCenterSubtitle_, UI::UITextOverflow::Ellipsis);
+    if (auto status = setSingleLineEllipsis(ui.tree, projectAssetStartCenterSubtitle_);
         !status) {
         return status;
     }
@@ -1154,8 +1161,7 @@ auto EditorWorkspaceState::buildLeftDockUi(
         !status) {
         return status;
     }
-    if (auto status = ui.tree.setTextOverflow(
-            projectAssetEmptyStateText_, UI::UITextOverflow::Ellipsis);
+    if (auto status = setSingleLineEllipsis(ui.tree, projectAssetEmptyStateText_);
         !status) {
         return status;
     }
@@ -1221,8 +1227,7 @@ auto EditorWorkspaceState::buildLeftDockUi(
         !status) {
         return status;
     }
-    if (auto status = ui.tree.setTextOverflow(
-            projectAssetActivityText_, UI::UITextOverflow::Ellipsis);
+    if (auto status = setSingleLineEllipsis(ui.tree, projectAssetActivityText_);
         !status) {
         return status;
     }
@@ -1286,8 +1291,7 @@ auto EditorWorkspaceState::buildLeftDockUi(
         !status) {
         return status;
     }
-    if (auto status = ui.tree.setTextOverflow(
-            projectAssetImportFailureText_, UI::UITextOverflow::Ellipsis);
+    if (auto status = setSingleLineEllipsis(ui.tree, projectAssetImportFailureText_);
         !status) {
         return status;
     }
@@ -1345,8 +1349,7 @@ auto EditorWorkspaceState::buildLeftDockUi(
         !status) {
         return status;
     }
-    if (auto status = ui.tree.setTextOverflow(
-            projectAssetSummary_, UI::UITextOverflow::Ellipsis);
+    if (auto status = setSingleLineEllipsis(ui.tree, projectAssetSummary_);
         !status) {
         return status;
     }
@@ -1976,8 +1979,7 @@ auto EditorWorkspaceState::buildViewportUi(
         !status) {
         return status;
     }
-    if (auto status = ui.tree.setTextOverflow(
-            viewportStatusText_, UI::UITextOverflow::Ellipsis);
+    if (auto status = setSingleLineEllipsis(ui.tree, viewportStatusText_);
         !status) {
         return status;
     }
@@ -2102,8 +2104,7 @@ auto EditorWorkspaceState::buildInspectorUi(
         !status) {
         return status;
     }
-    if (auto status = ui.tree.setTextOverflow(
-            inspectorEmptyStateText_, UI::UITextOverflow::Ellipsis);
+    if (auto status = setSingleLineEllipsis(ui.tree, inspectorEmptyStateText_);
         !status) {
         return status;
     }
@@ -2154,8 +2155,7 @@ auto EditorWorkspaceState::buildInspectorUi(
         !status) {
         return status;
     }
-    if (auto status = ui.tree.setTextOverflow(
-            inspectorName_, UI::UITextOverflow::Ellipsis);
+    if (auto status = setSingleLineEllipsis(ui.tree, inspectorName_);
         !status) {
         return status;
     }
@@ -2170,8 +2170,7 @@ auto EditorWorkspaceState::buildInspectorUi(
         !status) {
         return status;
     }
-    if (auto status = ui.tree.setTextOverflow(
-            inspectorKind_, UI::UITextOverflow::Ellipsis);
+    if (auto status = setSingleLineEllipsis(ui.tree, inspectorKind_);
         !status) {
         return status;
     }
@@ -2180,8 +2179,7 @@ auto EditorWorkspaceState::buildInspectorUi(
         !status) {
         return status;
     }
-    if (auto status = ui.tree.setTextOverflow(
-            inspectorNote_, UI::UITextOverflow::Ellipsis);
+    if (auto status = setSingleLineEllipsis(ui.tree, inspectorNote_);
         !status) {
         return status;
     }
@@ -2202,8 +2200,7 @@ auto EditorWorkspaceState::buildInspectorUi(
         !status) {
         return status;
     }
-    if (auto status = ui.tree.setTextOverflow(
-            inspectorAssetPath_, UI::UITextOverflow::Ellipsis);
+    if (auto status = setSingleLineEllipsis(ui.tree, inspectorAssetPath_);
         !status) {
         return status;
     }
@@ -2942,8 +2939,7 @@ auto EditorWorkspaceState::buildTimelineUi(
         !status) {
         return status;
     }
-    if (auto status = ui.tree.setTextOverflow(
-            animationStatus_, UI::UITextOverflow::Ellipsis);
+    if (auto status = setSingleLineEllipsis(ui.tree, animationStatus_);
         !status) {
         return status;
     }
@@ -3107,8 +3103,7 @@ auto EditorWorkspaceState::buildTimelineUi(
         !status) {
         return status;
     }
-    if (auto status = ui.tree.setTextOverflow(
-            animationTimelineScale_, UI::UITextOverflow::Ellipsis);
+    if (auto status = setSingleLineEllipsis(ui.tree, animationTimelineScale_);
         !status) {
         return status;
     }
@@ -3122,8 +3117,7 @@ auto EditorWorkspaceState::buildTimelineUi(
         !status) {
         return status;
     }
-    if (auto status = ui.tree.setTextOverflow(
-            animationHoverTime_, UI::UITextOverflow::Ellipsis);
+    if (auto status = setSingleLineEllipsis(ui.tree, animationHoverTime_);
         !status) {
         return status;
     }
@@ -3156,8 +3150,7 @@ auto EditorWorkspaceState::buildTimelineUi(
         !status) {
         return status;
     }
-    if (auto status = ui.tree.setTextOverflow(
-            animationSelection_, UI::UITextOverflow::Ellipsis);
+    if (auto status = setSingleLineEllipsis(ui.tree, animationSelection_);
         !status) {
         return status;
     }
@@ -3336,7 +3329,7 @@ auto EditorWorkspaceState::buildOutputPanelUi(
         !status) {
         return status;
     }
-    if (auto status = ui.tree.setTextOverflow(outputSummary_, UI::UITextOverflow::Ellipsis);
+    if (auto status = setSingleLineEllipsis(ui.tree, outputSummary_);
         !status) {
         return status;
     }
@@ -3413,7 +3406,7 @@ auto EditorWorkspaceState::buildOutputPanelUi(
         !status) {
         return status;
     }
-    return ui.tree.setTextOverflow(outputDetails_, UI::UITextOverflow::Ellipsis);
+    return setSingleLineEllipsis(ui.tree, outputDetails_);
 }
 
 auto EditorWorkspaceState::buildStatusBarUi(UiBuildContext& ui, UI::UINodeId parent) -> Tina::Core::Status
@@ -3441,7 +3434,7 @@ auto EditorWorkspaceState::buildStatusBarUi(UiBuildContext& ui, UI::UINodeId par
         !status) {
         return status;
     }
-    if (auto status = ui.tree.setTextOverflow(statusDocument_, UI::UITextOverflow::Ellipsis);
+    if (auto status = setSingleLineEllipsis(ui.tree, statusDocument_);
         !status) {
         return status;
     }
@@ -3459,7 +3452,7 @@ auto EditorWorkspaceState::buildStatusBarUi(UiBuildContext& ui, UI::UINodeId par
         !status) {
         return status;
     }
-    if (auto status = ui.tree.setTextOverflow(statusTask_, UI::UITextOverflow::Ellipsis);
+    if (auto status = setSingleLineEllipsis(ui.tree, statusTask_);
         !status) {
         return status;
     }
@@ -3470,12 +3463,11 @@ auto EditorWorkspaceState::buildStatusBarUi(UiBuildContext& ui, UI::UINodeId par
         !status) {
         return status;
     }
-    if (auto status = ui.tree.setTextOverflow(statusCatalog_, UI::UITextOverflow::Ellipsis);
+    if (auto status = setSingleLineEllipsis(ui.tree, statusCatalog_);
         !status) {
         return status;
     }
-    if (auto status = ui.tree.setTextOverflow(
-            statusPreview_, UI::UITextOverflow::Ellipsis);
+    if (auto status = setSingleLineEllipsis(ui.tree, statusPreview_);
         !status) {
         return status;
     }
@@ -3488,8 +3480,7 @@ auto EditorWorkspaceState::buildStatusBarUi(UiBuildContext& ui, UI::UINodeId par
         !status) {
         return status;
     }
-    if (auto status = ui.tree.setTextOverflow(
-            statusActivity_, UI::UITextOverflow::Ellipsis);
+    if (auto status = setSingleLineEllipsis(ui.tree, statusActivity_);
         !status) {
         return status;
     }
@@ -3527,8 +3518,7 @@ auto EditorWorkspaceState::buildStatusBarUi(UiBuildContext& ui, UI::UINodeId par
         !status) {
         return status;
     }
-    if (auto status = ui.tree.setTextOverflow(
-            statusSelection_, UI::UITextOverflow::Ellipsis);
+    if (auto status = setSingleLineEllipsis(ui.tree, statusSelection_);
         !status) {
         return status;
     }
@@ -4272,8 +4262,7 @@ auto EditorWorkspaceState::buildFileDropFeedbackUi(
         !status) {
         return status;
     }
-    if (auto status = ui.tree.setTextOverflow(
-            fileDropFeedbackMessage_, UI::UITextOverflow::Ellipsis);
+    if (auto status = setSingleLineEllipsis(ui.tree, fileDropFeedbackMessage_);
         !status) {
         return status;
     }
@@ -4329,8 +4318,7 @@ auto EditorWorkspaceState::buildSnackbarUi(
     if (!parts) {
         return Tina::Core::failure(std::move(parts.error()));
     }
-    if (auto status = ui.tree.setTextOverflow(
-            parts->message, UI::UITextOverflow::Ellipsis);
+    if (auto status = setSingleLineEllipsis(ui.tree, parts->message);
         !status) {
         return status;
     }

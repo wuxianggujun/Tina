@@ -172,6 +172,11 @@ namespace {
            value == UIFlexDirection::Column;
 }
 
+[[nodiscard]] bool isValidFlexWrap(UIFlexWrap value) noexcept
+{
+    return value == UIFlexWrap::NoWrap || value == UIFlexWrap::Wrap;
+}
+
 [[nodiscard]] bool isValidContainerLayout(UIContainerLayout value) noexcept
 {
     return value == UIContainerLayout::Flex ||
@@ -975,6 +980,62 @@ Core::Result<UILayoutStyle> normalizeLayoutStyle(UILayoutStyle style)
     {
         return Core::failure(status.error());
     }
+    if (style.responsiveRules.count > UIResponsiveLayoutRuleCapacity)
+    {
+        return Core::failure(
+            UIErrorCode::InvalidLayout,
+            "UI responsive layout rule count exceeds the fixed capacity");
+    }
+    float previousMaximum = 0.0F;
+    for (usize index = 0; index < style.responsiveRules.count; ++index)
+    {
+        UIResponsiveLayoutRule& rule = style.responsiveRules.rules[index];
+        if (!std::isfinite(rule.minParentWidth) ||
+            !std::isfinite(rule.maxParentWidth) ||
+            rule.minParentWidth < 0.0F ||
+            rule.maxParentWidth <= rule.minParentWidth ||
+            (index != 0 && rule.minParentWidth < previousMaximum))
+        {
+            return Core::failure(
+                UIErrorCode::InvalidLayout,
+                "UI responsive layout intervals must be finite, non-negative, ordered and non-overlapping");
+        }
+        rule.minParentWidth = normalizeFloat(rule.minParentWidth);
+        rule.maxParentWidth = normalizeFloat(rule.maxParentWidth);
+        previousMaximum = rule.maxParentWidth;
+        if ((rule.overrides.containerLayout.has_value() &&
+             !isValidContainerLayout(*rule.overrides.containerLayout)) ||
+            (rule.overrides.flexDirection.has_value() &&
+             !isValidFlexDirection(*rule.overrides.flexDirection)) ||
+            (rule.overrides.visibility.has_value() &&
+             !isValidVisibility(*rule.overrides.visibility)))
+        {
+            return Core::failure(
+                UIErrorCode::InvalidLayout,
+                "UI responsive layout override enum value is invalid");
+        }
+        if (rule.overrides.gridColumns.has_value())
+        {
+            if (Core::Status status = normalizeGridTracks(*rule.overrides.gridColumns);
+                !status)
+            {
+                return Core::failure(status.error());
+            }
+        }
+        if (rule.overrides.gridRows.has_value())
+        {
+            if (Core::Status status = normalizeGridTracks(*rule.overrides.gridRows);
+                !status)
+            {
+                return Core::failure(status.error());
+            }
+        }
+    }
+    for (usize index = style.responsiveRules.count;
+         index < style.responsiveRules.rules.size(); ++index)
+    {
+        style.responsiveRules.rules[index] = {};
+    }
     const auto validGridIndexAndSpan = [](u8 index, u8 span) noexcept {
         if (span == 0U || span > UIGridTrackCapacity)
         {
@@ -1005,6 +1066,7 @@ Core::Result<UILayoutStyle> normalizeLayoutStyle(UILayoutStyle style)
     }
     if (!isValidContainerLayout(style.containerLayout) ||
         !isValidFlexDirection(style.flexContainer.direction) ||
+        !isValidFlexWrap(style.flexContainer.wrap) ||
         !isValidJustifyContent(style.flexContainer.justifyContent) ||
         !isValidAxisAlignment(style.flexContainer.alignItems) ||
         !isValidAlignSelf(style.flexItem.alignSelf) ||

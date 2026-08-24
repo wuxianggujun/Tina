@@ -574,6 +574,7 @@ UIContext::Impl::findComponentBuildReservation(UINodeId componentRoot) const noe
         return Core::success();
     }
     WidgetTextState& state = textStatesByIndex[node.index()];
+    state.wrapMode = descriptor.textWrapMode;
     if (descriptor.textStyle.has_value())
     {
         state.style = *descriptor.textStyle;
@@ -722,6 +723,21 @@ UIContext::Impl::findComponentBuildReservation(UINodeId componentRoot) const noe
     {
         return fail(UIErrorCode::InvalidElementDescriptor,
                     "UI element text style requires intrinsic text content");
+    }
+    if ((descriptor.textWrapMode != UITextWrapMode::NoWrap &&
+         descriptor.textWrapMode != UITextWrapMode::Words) ||
+        (!descriptor.text.has_value() &&
+         descriptor.textWrapMode != UITextWrapMode::NoWrap))
+    {
+        return fail(UIErrorCode::InvalidElementDescriptor,
+                    "UI text wrap mode requires intrinsic text and must be NoWrap or Words");
+    }
+    if (kind == BuiltinElementKind::TextEdit &&
+        descriptor.textWrapMode != UITextWrapMode::NoWrap)
+    {
+        return fail(
+            UIErrorCode::InvalidElementDescriptor,
+            "UI TextEdit wrapping is controlled by UITextEditMultilineConfig");
     }
     if (descriptor.text.has_value() && descriptor.image.has_value())
     {

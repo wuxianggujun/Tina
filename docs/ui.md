@@ -14,12 +14,12 @@
 | 所有权 | per-window `UIContext`、generation/owner-aware `UINodeId`、move-only `UIRootOwner` |
 | Authoring | `UIElementDescriptor` + `make*Element` recipes、组合 Semantics、StyleRole/override reset、固定预算 build transaction；Surface/Divider/Badge/Switch 是强类型第一方 profile；IconButton/FormField/Dialog 是固定预算多节点 composition profile；旧 create-by-kind 与公开 `UIWidgetKind` 已删除 |
 | Tree | Root/Panel/Modal/Label/Button/Checkbox/Slider/ProgressBar/RadioButton/TextEdit/ScrollView/Dropdown/Popup/Tooltip/Menu/MenuItem/DropdownItem/ListView/TreeView/VirtualGridView/DataGrid/SplitView/Splitter/TabView/Tab，固定容量 mutation |
-| Layout/Content | Flex/Grid container 与 item 分离、固定8x8 `Px/Auto/Fr` Grid track、Flow/Overlay placement、logical pixel、可选 axis-aligned border-box descendant clip、committed content placement、Tooltip/Menu 基于上一份成功 Anchor geometry 的 flip/clamp、SplitView 与 TabView committed geometry、事务 commit、clean-subtree reuse |
+| Layout/Content | Flex/Grid container 与 item 分离、Flex 子项 `NoWrap/Wrap`、固定8x8 `Px/Auto/Fr` Grid track、基于直接父 content width 的 bounded responsive rules、Flow/Overlay placement、logical pixel、可选 axis-aligned border-box descendant clip、committed content placement、Tooltip/Menu 基于上一份成功 Anchor geometry 的 flip/clamp、SplitView 与 TabView committed geometry、事务 commit、clean-subtree reuse |
 | Hit/route | committed hit snapshot、Capture→Target→Bubble、持久 Pointer Capture、Modal/Popup/Menu transient barrier、Tooltip Ignore/click-through、listener token、consume/prevent/claim |
 | Paint | `UIBoxPaint` Rectangle/Ellipse/Line、box/text/control paint、第一类 Image/Icon content、固定容量 backend-neutral `SolidRect`/`SolidEllipse`/`SolidLine`/`Image`/`NineSlice` Canvas、axis-aligned clip、PaintCache、committed paint snapshot；NineSlice 在 commit 时原子展开为1..9个 Image entry |
 | Theme/Style（A/B/C1 + UI-STYLE-001 slice） | `UITheme` token + `UIStyleRoleId` recipe + 属性 override mask/reset；默认 Button 为 Tonal，显式提供 Primary/Danger/Outlined/Text，并以 RadioButton/Checkbox 状态机分别提供 SegmentedButton/Switch；Surface、Divider 与 Badge 复用 Box/Text chrome；强类型 StyleClass/ColorToken、node-local pseudo-state、literal/token-backed BoxFill stylesheet 与运行期 ColorToken getter/setter 已落地；token 更新经固定 reverse-dependency 链为 `O(affected links)`，**无**圆角子树 clip/毛玻璃/完整 CSS |
 | Motion | direct/Style transition 仍为 fixed-capacity paint-only；typed keyframe timeline 已支持 paint 属性及 bounded `LayoutWidth`/`LayoutHeight`/`LayoutOffset` 白名单，并沿唯一 commit pipeline 原子发布；`ui_motion_v1`、`ui_motion_timeline_v1` 与 `ui_motion_layout_v1` 均已有确定性 gate，墙钟结论保持 provisional |
-| Text | strict UTF-8、可选 FreeType rasterizer、R8 Glyph atlas、DisplayList Glyph |
+| Text | strict UTF-8、普通 Label 按最终 content width 自动换行、可选 FreeType rasterizer、R8 Glyph atlas、DisplayList Glyph |
 | Input | Focus Scope/显式 focus、Pointer capture/cancel、Tab 与 committed 几何空间焦点、Keyboard/Gamepad activation、Menu/Dropdown/List/Tree/VirtualGrid/DataGrid/TabView navigation、TextEdit edit/selection/IME、Tooltip PointerHover/KeyboardFocus/Manual 与 monotonic delay、Splitter Pointer drag/RangeInput keyboard；UI Flow 固定 16 槽本地用户、Gamepad assignment 与 per-user 设备 revision |
 | Semantics | Automatic/Publish/MergeDescendants/Exclude、显式 role/name/description/actions、Tooltip 文本作为 Anchor description/HelpText fallback、Menu/MenuItem 与 checked state、Splitter Slider range/value、TabList/Tab/TabPanel selected state，以及 List/Tree/VirtualGrid/DataGrid materialized item 的 stable row 元数据与 selected/focused state |
 | Runtime | startup root builder、phase-scoped tree updater、Tooltip/Menu/SplitView/TabView facade 与 bounded component transaction（含 List/Tree/VirtualGrid/DataGrid 的 DataSource/metrics/selection/scroll，及 Tree expansion）、DisplayList/Glyph atlas handoff |
@@ -114,8 +114,10 @@ text/text style、visual box/Canvas、enabled、pointer hit policy 与 focus sco
 
 布局属性按解释方拆分：
 
-- `containerLayout=Flex` 时，`flexContainer`（direction/justifyContent/alignItems/gap）由父节点解释，
+- `containerLayout=Flex` 时，`flexContainer`（direction/wrap/justifyContent/alignItems/gap）由父节点解释，
   `flexItem`（grow/shrink/basis/alignSelf）由该父容器为当前子节点解释；
+  `wrap=Wrap` 按最终主轴 content extent 分行，每行独立计算 grow/shrink/justify，cross-axis 行尺寸和 row/column
+  gap 参与容器 auto-size；最终约束在 Arrange 才确定时，提交在最多三次完整 Measure/Arrange 内稳定，否则 fail closed；
 - `containerLayout=Grid` 时，`gridContainer` 提供每轴最多8条 `Px/Auto/Fr` track、row/column gap 和
   `justifyItems/alignItems`；`gridItem` 提供 zero-based row/column、span 与 self alignment。空 track list 按
   source-order row-major 自动放置生成隐式 `Auto` track；显式与隐式 track 共用8条容量，超限 fail closed。
@@ -129,6 +131,10 @@ text/text style、visual box/Canvas、enabled、pointer hit policy 与 focus sco
   tree/semantics 顺序不变，committed `effectiveClip` 统一供 hit/paint 使用；viewport-level Popup 继续走专用
   anchor/clip policy；这不是 rounded clip，也不额外改变 owner 自身的 paint clip；
 - tree 顺序同时决定 layout、paint、focus 与 semantics 顺序，没有 CSS `order` 双轨。
+- `responsiveRules` 是最多4条按顺序、互不重叠的半开区间 `[minParentWidth,maxParentWidth)`；匹配直接父节点
+  最终 content width，可覆盖 Flex/Grid 容器类型、Flex direction、Grid rows/columns 与 visibility。解析只写 layout
+  scratch，不回写 authored style；无匹配区间继续使用 base style。Desktop Shell 的 Inspector/Timeline pane 与
+  splitter 已直接消费该契约，不再从 resize callback 计算宽度档位或改写 fraction。
 
 控件内部文字使用独立的 `UIContentAlignment`，不再借用父容器的 child alignment。layout 将
 `contentBox/origin/intrinsicSize` 作为 `UICommittedContentPlacement` 随 snapshot 一次发布；文字绘制、
@@ -501,6 +507,13 @@ hit-test、Up/Down/Home/End、垂直滚动与边界 wheel 透传。CR 仍拒绝�
 维护，不把 UTF-8 byte offset 暴露给游戏；编辑、删除、导航和替换位置会对齐无第三方依赖的 UAX #29
 grapheme 子集。BiDi/复杂 shaping 仍后置。
 
+普通 intrinsic text 通过 `UITextWrapMode::{NoWrap,Words}` 表达换行；`makeLabelElement()` 默认 `Words`，按最终
+committed content width 优先在 ASCII 空格/Tab 边界断行，长词和 CJK 按 UTF-8 codepoint 硬折行，显式 LF 保留。
+Measure 与 Paint 共享同一 line cursor，并在 Flex grow/shrink、Grid area、ScrollView viewport 或 responsive rule
+改变最终宽度后重新测量高度。`UITextWrapMode` 不控制 TextEdit；TextEdit 仍只通过
+`UITextEditMultilineConfig`/`UITextEditWrapMode` 管理编辑 visual rows。Runtime facade 对应暴露
+`setTextWrapMode()/textWrapMode()`。
+
 ### 单行溢出与 typography
 
 `setTextOverflow(node, UITextOverflow)` 控制单行文本超出 content box 时的行为。默认 `Clip` 保留全部
@@ -510,6 +523,7 @@ run 定位 caret/selection，多行 box 换行而不省略）；含显式 `\n` �
 时不截断。截断在 paint 阶段按已提交 content placement 解析，所以属性只标 Paint dirty，intrinsic measure
 与 accessibility name 继续发布完整文本；布局提交必然重建 paint snapshot，宽度变化会自动重算截断点。
 若字体缺少 U+2026 的可见字形，省略号不产生 paint entry，退化为无标记硬截断。
+`Words` 与单行 `Ellipsis` 是显式互斥契约；需要省略的 Label 必须先选择 `NoWrap`，setter 不隐式更改另一项作者意图。
 Runtime 产品通过 `PrimaryWindowUITreeUpdater::setTextOverflow()/textOverflow()` 使用相同契约与 phase
 capability 校验。
 
@@ -984,7 +998,7 @@ Back/Confirm/Menu 之外的任意 action-id 仍属于独立后续扩展。
 
 | ID | 范围 |
 | --- | --- |
-| `UI-MODERN-DESKTOP-001` | InProgress：TMD-00..07 已完成并通过集中 UI/Runtime/UI-Render/UIA 门禁；TMD-08 Desktop Shell reference 已完成结构、嵌套 SplitView、正式 TabView、Menu/Dialog/Tooltip、Splitter、产品 icon atlas 与响应式档位，真实 DPI 专用门禁已就绪。TMD-09 Editor/2D/3D 迁移与 TMD-10 OS scheme 已通过 2026-08-19 集中 build、定向测试、产品 smoke 和 installed DesktopBootstrap consumer gate。TMD-11 已通过 `tina_bench_tests` 10/10 与 Static/Component/Style/Motion 冻结 workload 确定性 gate，开发机墙钟仍为 provisional，固定机 hard gate 继续由 PERF-002 跟踪。当前宿主固定 200%，仍待 Desktop Shell 100%/150% 配对视觉报告及最终文档收口；完整规范见 [Tina Modern Desktop UI](ui-modern-desktop.md) |
+| `UI-MODERN-DESKTOP-001` | InProgress：TMD-00..07 已完成并通过集中 UI/Runtime/UI-Render/UIA 门禁；TMD-08 Desktop Shell reference 已完成结构、嵌套 SplitView、正式 TabView、Menu/Dialog/Tooltip、Splitter、产品 icon atlas，并已迁移到父容器宽度驱动的 bounded responsive rules，删除 resize callback 的手工宽度档位。TMD-09 Editor/2D/3D 迁移与 TMD-10 OS scheme 已通过 2026-08-19 集中 build、定向测试、产品 smoke 和 installed DesktopBootstrap consumer gate。TMD-11 已通过 `tina_bench_tests` 10/10 与 Static/Component/Style/Motion 冻结 workload 确定性 gate，开发机墙钟仍为 provisional，固定机 hard gate 继续由 PERF-002 跟踪。当前宿主固定 200%，仍待 Desktop Shell 100%/150% 配对视觉报告及最终文档收口；完整规范见 [Tina Modern Desktop UI](ui-modern-desktop.md) |
 | `UI-002` | Windows UIA：tip 跨进程 gate 证据已固化（2026-08-03）；待 Narrator/Inspect 人工金标 |
 | `UI-003` | 跨 DPI/GPU 容差视觉门禁（映射单测 + 单机 ROI/baseline + content-scale-like 逻辑尺寸矩阵 + sample contentScale JSON + 字体 identity fingerprint 已有；2026-08-10 当前 Windows 宿主 100%/150%/200% raster baseline 已分别通过独立复跑；多显示器混合 DPI 与跨 GPU 像素金标后置） |
 | `TEXT-001` | InProgress：T1 多行、T2 UAX #29 grapheme 子集、T3 Windows IMM32 placement 的代码/自动 gate 已完成；BiDi/复杂 shaping、Linux 原生 XIM/Wayland 与 Windows 真机 IME 人工证据待补 |

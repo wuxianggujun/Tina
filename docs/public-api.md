@@ -347,10 +347,13 @@ semantics name 并关闭 content-as-name，使图标、control chrome 与交互�
 Element 不接受 Image content。
 
 `UILayoutStyle::containerLayout` 为 direct `Flow` child 选择 Flex 或固定容量 Grid。Flex 使用父级
-`flexContainer` 与子项 `flexItem`；Grid 使用父级 `gridContainer` 和子项 `gridItem`，每轴最多8条显式或
+`flexContainer` 与子项 `flexItem`，并可用 `UIFlexWrap::Wrap` 按最终主轴约束分行；Grid 使用父级 `gridContainer` 和子项 `gridItem`，每轴最多8条显式或
 隐式 `Px/Auto/Fr` track，支持 gap、zero-based row/column、span、row-major auto placement 和 per-item alignment。
 容量、非有限 track、非法 index/span 或自动放置溢出均 fail closed；Grid 与 `UIVirtualGridView` / `UIDataGrid`
-的数据虚拟化契约彼此独立。
+的数据虚拟化契约彼此独立。`UILayoutStyle::responsiveRules` 固定最多4个有序、互不重叠的半开父
+content-width 区间，可覆盖 `containerLayout`、Flex direction、Grid rows/columns 和 visibility。规则针对直接
+父容器最终 content width 解析到 layout scratch，不修改 authored style；宽度依赖的 Measure/Arrange 最多三轮稳定，
+超限则不发布候选快照。
 `Flow/Overlay` placement 继续与容器类型正交；Overlay 使用
 alignment + offset，Px offset 可为有限负值，Percent offset 范围为 `-100..100`，以表达受父级 clip 的
 部分越界图元；Stretch 的边距用 margin 表达，Popup、Tooltip 与 Menu recipe 强制 Overlay。
@@ -366,6 +369,9 @@ Menu 也拥有独立 Anchor/placement/state contract，仅在 Context 协调层�
 `UICommittedContentPlacement`，paint、caret/selection 与 pointer-to-text mapping 共用该 committed origin。
 `UITextOverflow::{Clip,Ellipsis}` 是独立于 `UITextStyle` 的节点 authoring intent；`Ellipsis` 只在 paint 阶段按
 committed content box 和 UAX #29 grapheme 边界截断单行，intrinsic measure 与 Semantics name 始终保留完整文本。
+`UITextWrapMode::{NoWrap,Words}` 控制普通 intrinsic text；Label recipe 默认 `Words`，按最终 content width 在
+ASCII whitespace 边界或 UTF-8 codepoint 边界换行并重新测量高度。`Words` 与 `Ellipsis` 互斥，TextEdit 不消费
+该属性，其 multiline/soft-wrap 继续由 `UITextEditMultilineConfig` 独立定义。
 虚拟集合通过 `UIListViewStyle::rowTextOverflow`、`UIVirtualGridViewStyle::itemTextOverflow` 以及
 `UIDataGridStyle::headerTextOverflow/cellTextOverflow` 将相同策略应用到私有 materialized 节点，不要求 DataSource
 预先截断 label/header/cell text。`UITheme::typography` 是 display/title/section/body/control/caption 六级命名字号 ramp。
@@ -388,7 +394,7 @@ shaping 不在当前契约内。多行配置容量不足或 visual-row 构建失
 descriptor 的 `string_view` 在创建时复制到固定容量 storage，失败回滚本次节点；
 `PrimaryWindowUITreeUpdater` 暴露同一组 ScrollView/Dropdown/Popup/Tooltip/Menu/ListView/TreeView/VirtualGridView/
 DataGrid/SplitView/TabView phase-scoped mutation/query，包括集合 DataSource、style/paint、metrics、selection、scroll 与 Tree expansion；
-`setTextOverflow()/textOverflow()` 也通过相同 phase facade 暴露；
+`setTextWrapMode()/textWrapMode()` 与 `setTextOverflow()/textOverflow()` 也通过相同 phase facade 暴露；
 `setProductTheme()` 可事务式更新既有控件仍继承的产品 chrome；单节点
 paint/text setter 只将对应属性转为局部覆盖，其余属性继续跟随 Theme。Theme metric 非法、owner-thread
 错误或 dirty queue 容量不足均零发布。

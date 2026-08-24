@@ -59,6 +59,7 @@ struct UIElementDescriptor final {
     std::optional<UIMenuConfig> menu{};
     std::optional<UIMenuItemConfig> menuItem{};
     std::optional<UITextStyle> textStyle{};
+    UITextWrapMode textWrapMode = UITextWrapMode::NoWrap;
     UIContentAlignment contentAlignment{};
     UIElementVisual visual{};
     UIElementBehavior behaviors = UIElementBehavior::None;
@@ -460,6 +461,7 @@ struct UIElementDescriptor final {
     return UIElementDescriptor{
         .layout = layout,
         .text = text,
+        .textWrapMode = UITextWrapMode::Words,
         .visual = {.styleRole = UIStyleRoleId::TextBody},
         .semantics = {
             .mode = UISemanticsMode::Publish,

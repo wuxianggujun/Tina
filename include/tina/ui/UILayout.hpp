@@ -5,6 +5,7 @@
 #include <array>
 #include <compare>
 #include <initializer_list>
+#include <optional>
 
 namespace Tina::UI {
 
@@ -163,6 +164,11 @@ enum class UIFlexDirection : u8 {
     Column,
 };
 
+enum class UIFlexWrap : u8 {
+    NoWrap,
+    Wrap,
+};
+
 enum class UIContainerLayout : u8 {
     Flex,
     Grid,
@@ -207,6 +213,7 @@ enum class UIVisibility : u8 {
 // Properties interpreted by an element while arranging its children.
 struct UIFlexContainerStyle final {
     UIFlexDirection direction = UIFlexDirection::Column;
+    UIFlexWrap wrap = UIFlexWrap::NoWrap;
     UIJustifyContent justifyContent = UIJustifyContent::Start;
     UIAxisAlignment alignItems = UIAxisAlignment::Stretch;
     UILayoutGap gap{};
@@ -335,6 +342,60 @@ struct UIOverlayStyle final {
     auto operator<=>(const UIOverlayStyle&) const = default;
 };
 
+inline constexpr usize UIResponsiveLayoutRuleCapacity = 4U;
+
+// Responsive overrides deliberately cover only structural layout decisions.
+// Sizes, spacing, placement and item participation remain in the base style so
+// a bounded rule cannot silently replace the element's full authored contract.
+struct UIResponsiveLayoutOverrides final {
+    std::optional<UIContainerLayout> containerLayout{};
+    std::optional<UIFlexDirection> flexDirection{};
+    std::optional<UIGridTrackList> gridColumns{};
+    std::optional<UIGridTrackList> gridRows{};
+    std::optional<UIVisibility> visibility{};
+
+    auto operator<=>(const UIResponsiveLayoutOverrides&) const = default;
+};
+
+// Half-open parent-content-width interval [minParentWidth, maxParentWidth).
+// Normalization requires finite, non-negative, ordered and non-overlapping
+// intervals. No matching interval leaves the base UILayoutStyle unchanged.
+struct UIResponsiveLayoutRule final {
+    float minParentWidth = 0.0F;
+    float maxParentWidth = 0.0F;
+    UIResponsiveLayoutOverrides overrides{};
+
+    auto operator<=>(const UIResponsiveLayoutRule&) const = default;
+};
+
+struct UIResponsiveLayoutRuleList final {
+    std::array<UIResponsiveLayoutRule, UIResponsiveLayoutRuleCapacity> rules{};
+    u8 count = 0U;
+
+    [[nodiscard]] static constexpr UIResponsiveLayoutRuleList Of(
+        std::initializer_list<UIResponsiveLayoutRule> values) noexcept
+    {
+        UIResponsiveLayoutRuleList result{};
+        if (values.size() > result.rules.size())
+        {
+            result.count = UIGridAutoIndex;
+            return result;
+        }
+        for (const UIResponsiveLayoutRule value : values)
+        {
+            result.rules[result.count++] = value;
+        }
+        return result;
+    }
+
+    [[nodiscard]] constexpr bool empty() const noexcept
+    {
+        return count == 0U;
+    }
+
+    auto operator<=>(const UIResponsiveLayoutRuleList&) const = default;
+};
+
 struct UILayoutStyle final {
     UILayoutSizeSpec size{};
     UILayoutMinMaxSpec minMax{};
@@ -345,6 +406,7 @@ struct UILayoutStyle final {
     UIGridContainerStyle gridContainer{};
     UIGridItemStyle gridItem{};
     UIOverlayStyle overlay{};
+    UIResponsiveLayoutRuleList responsiveRules{};
     UIContainerLayout containerLayout = UIContainerLayout::Flex;
     UILayoutPlacement placement = UILayoutPlacement::Flow;
     UIVisibility visibility = UIVisibility::Visible;

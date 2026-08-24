@@ -3,6 +3,7 @@
 #include <tina/ui/UIContent.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UIPopup.hpp>
+#include <tina/ui/UIText.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -31,6 +32,8 @@ struct LayoutPreparedInputs final {
 };
 
 struct LayoutScratchState final {
+    UILayoutStyle resolvedStyle{};
+    UITextMetrics resolvedTextMetrics{};
     UILogicalSize measuredSize{};
     UILogicalRect localRect{};
     UILogicalRect worldRect{};
@@ -54,6 +57,13 @@ struct LayoutScratchState final {
     // Prepare inputs remain stable after Arrange. The corresponding working
     // fields above are intentionally updated to final geometry during Arrange.
     LayoutPreparedInputs preparedInputs{};
+    UIFlexDirection measuredFlexWrapDirection = UIFlexDirection::Column;
+    UIFlexDirection arrangedFlexWrapDirection = UIFlexDirection::Column;
+    float measuredFlexWrapMain = 0.0F;
+    float arrangedFlexWrapMain = 0.0F;
+    bool hasMeasuredFlexWrapConstraint = false;
+    bool hasArrangedFlexWrapConstraint = false;
+    bool hasResolvedTextMetrics = false;
 };
 
 inline constexpr u8 LayoutWorkMeasure = 1U << 0U;
@@ -93,6 +103,48 @@ struct ResolvedLength final {
 [[nodiscard]] inline bool isFiniteNonNegative(float value) noexcept
 {
     return std::isfinite(value) && value >= 0.0F;
+}
+
+[[nodiscard]] inline UILayoutStyle resolveResponsiveLayoutStyle(
+    const UILayoutStyle& authored, float parentContentWidth) noexcept
+{
+    UILayoutStyle resolved = authored;
+    resolved.responsiveRules = {};
+    if (!isFiniteNonNegative(parentContentWidth))
+    {
+        return resolved;
+    }
+    for (usize index = 0; index < authored.responsiveRules.count; ++index)
+    {
+        const UIResponsiveLayoutRule& rule = authored.responsiveRules.rules[index];
+        if (parentContentWidth < rule.minParentWidth ||
+            parentContentWidth >= rule.maxParentWidth)
+        {
+            continue;
+        }
+        if (rule.overrides.containerLayout.has_value())
+        {
+            resolved.containerLayout = *rule.overrides.containerLayout;
+        }
+        if (rule.overrides.flexDirection.has_value())
+        {
+            resolved.flexContainer.direction = *rule.overrides.flexDirection;
+        }
+        if (rule.overrides.gridColumns.has_value())
+        {
+            resolved.gridContainer.columns = *rule.overrides.gridColumns;
+        }
+        if (rule.overrides.gridRows.has_value())
+        {
+            resolved.gridContainer.rows = *rule.overrides.gridRows;
+        }
+        if (rule.overrides.visibility.has_value())
+        {
+            resolved.visibility = *rule.overrides.visibility;
+        }
+        break;
+    }
+    return resolved;
 }
 
 [[nodiscard]] inline bool isFiniteLayoutRect(UILogicalRect rect) noexcept

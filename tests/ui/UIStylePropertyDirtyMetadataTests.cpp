@@ -34,11 +34,15 @@ TEST(UIStylePropertyDirtyMetadataTests, ColorTokenIsPaintOnlyWithoutSemantics)
     EXPECT_EQ(flags, UIDirty::Paint);
 }
 
-TEST(UIStylePropertyDirtyMetadataTests, TextStyleAndAlignmentDirtyLayoutAndPaint)
+TEST(UIStylePropertyDirtyMetadataTests, TextPropertiesDirtyLayoutAndPaint)
 {
     EXPECT_TRUE(UI::stylePropertyDirtiesLayout(UIStylePropertyKind::TextStyle));
     EXPECT_TRUE(UI::stylePropertyDirtiesPaint(UIStylePropertyKind::TextStyle));
     EXPECT_TRUE(UI::stylePropertyDirtiesHit(UIStylePropertyKind::TextStyle));
+    EXPECT_TRUE(UI::stylePropertyDirtiesLayout(UIStylePropertyKind::TextWrap));
+    EXPECT_TRUE(UI::stylePropertyDirtiesPaint(UIStylePropertyKind::TextWrap));
+    EXPECT_TRUE(UI::stylePropertyDirtiesHit(UIStylePropertyKind::TextWrap));
+    EXPECT_TRUE(UI::stylePropertyDirtiesSemantics(UIStylePropertyKind::TextWrap));
     EXPECT_TRUE(UI::stylePropertyDirtiesLayout(UIStylePropertyKind::ContentAlignment));
     EXPECT_TRUE(UI::stylePropertyDirtiesPaint(UIStylePropertyKind::ContentAlignment));
 }
