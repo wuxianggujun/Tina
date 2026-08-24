@@ -6,7 +6,6 @@
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/SourceImportProbe.hpp>
 #include <tina/asset_format/AudioClipPayload.hpp>
-#include <tina/asset_format/SpritePayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
 #include <tina/core/io/ReadFile.hpp>
 #include <tina/core/text/Utf8.hpp>
@@ -28,7 +27,6 @@ inline constexpr Core::u64 MaxImageSourceFileBytes = 64ULL * 1024ULL * 1024ULL;
 inline constexpr Core::u64 MaxWavSourceFileBytes = 32ULL * 1024ULL * 1024ULL;
 
 inline constexpr Core::u8 TextureMediaIdTag = 0x75;
-inline constexpr Core::u8 SpriteMediaIdTag = 0x76;
 inline constexpr Core::u8 AudioMediaIdTag = 0x77;
 
 // Same path-stable derivation scheme as the glTF importer, seeded with the
@@ -201,31 +199,12 @@ try
     const std::string_view idSeed =
         capture->result.sourceImports.sources[capture->primarySourceIndex].path;
     const Core::AssetId textureId = deriveMediaAssetId(idSeed, TextureMediaIdTag);
-    const Core::AssetId spriteId = deriveMediaAssetId(idSeed, SpriteMediaIdTag);
-    auto spritePayload = AssetFormat::writeSpritePayloadBytes(AssetFormat::SpritePayloadDesc{
-        .textureId = textureId,
-    });
-    if (!spritePayload)
-    {
-        return Core::failure(std::move(spritePayload.error()).withContext(
-            "cookTextureFileToCatalogSourceResult", "spritePayload"));
-    }
 
     capture->result.request.targetPlatform = targetPlatform;
     capture->result.request.assets.push_back(CatalogCookAssetSpec{
         .assetKind = AssetFormat::AssetKind::Texture2D,
         .assetId = textureId,
         .payload = std::move(*texturePayload),
-    });
-    capture->result.request.assets.push_back(CatalogCookAssetSpec{
-        .assetKind = AssetFormat::AssetKind::Sprite,
-        .assetId = spriteId,
-        .payload = std::move(*spritePayload),
-        .dependencies = {AssetFormat::CookedAssetWriteDependency{
-            .assetId = textureId,
-            .expectedKind = AssetFormat::AssetKind::Texture2D,
-            .flags = AssetFormat::DependencyFlags::Required,
-        }},
     });
 
     auto contract = currentTextureSourceImportContract(idSeed);

@@ -2770,6 +2770,11 @@ TEST_F(SceneMeshAssetTest, CullsStaticAndSkinnedMeshesBeforeResolvingFrameResour
     EXPECT_EQ(poses.lastEntity, visibleSkinned);
 }
 
+// A suspended surface (0x0) makes extract skip setPerspectiveCamera, so every
+// visible mesh survives frustum culling and still resolves its bindings. The
+// frame cannot commit in that state because RenderScene requires a camera
+// whenever meshes are present, so callers must skip the world extract entirely
+// while suspended (see the 2D/3D samples) rather than commit a camera-less frame.
 TEST_F(SceneMeshAssetTest, SuspendedSurfaceKeepsVisibleMeshesUnculled)
 {
     World world = makeWorld();
@@ -2794,11 +2799,13 @@ TEST_F(SceneMeshAssetTest, SuspendedSurfaceKeepsVisibleMeshesUnculled)
             .material3DBindingResolver = bindings.materialResolver(),
         }));
 
-    auto view = builder->commit();
-    ASSERT_TRUE(view.has_value()) << (view ? "" : view.error().message);
-    EXPECT_EQ(view->meshes3D().size(), 1U);
+    // The mesh was accepted unculled: both bindings were resolved exactly once.
     EXPECT_EQ(bindings.meshResolveCalls, 1U);
     EXPECT_EQ(bindings.materialResolveCalls, 1U);
+
+    auto view = builder->commit();
+    ASSERT_FALSE(view.has_value());
+    EXPECT_EQ(view.error().code, Render::RenderErrorCode::RenderSceneMissingCamera);
 }
 
 TEST_F(SceneMeshAssetTest, MissingResolverRejectsVisibleMesh)
@@ -3145,18 +3152,24 @@ TEST_F(SceneMeshAssetTest, InstantiatesHierarchyAndMeshes)
         AssetFormat::PrefabNodeView{
             .stableNodeId = 1,
             .parentIndex = -1,
+            .nodeKind = AssetFormat::PrefabNodeKind::Mesh3D,
             .positionY = 0.25F,
             .hasMesh = true,
             .hasMaterial = true,
             .visible = true,
+            .meshId = fixtureAssetId(1),
+            .materialId = fixtureAssetId(3),
         },
         AssetFormat::PrefabNodeView{
             .stableNodeId = 2,
             .parentIndex = 0,
+            .nodeKind = AssetFormat::PrefabNodeKind::Mesh3D,
             .positionX = 1.0F,
             .hasMesh = true,
             .hasMaterial = true,
             .visible = true,
+            .meshId = fixtureAssetId(2),
+            .materialId = fixtureAssetId(3),
         },
     };
     AssetFormat::PrefabPayloadView prefab{.schemaVersion = AssetFormat::PrefabWire::SchemaVersion, .nodes = nodes};
@@ -3231,6 +3244,7 @@ TEST_F(SceneMeshAssetTest, ResolvesPerNodeMeshHandlesFromAssetIds)
         AssetFormat::PrefabNodeView{
             .stableNodeId = 1,
             .parentIndex = -1,
+            .nodeKind = AssetFormat::PrefabNodeKind::Mesh3D,
             .hasMesh = true,
             .hasMaterial = true,
             .visible = true,
@@ -3240,6 +3254,7 @@ TEST_F(SceneMeshAssetTest, ResolvesPerNodeMeshHandlesFromAssetIds)
         AssetFormat::PrefabNodeView{
             .stableNodeId = 2,
             .parentIndex = -1,
+            .nodeKind = AssetFormat::PrefabNodeKind::Mesh3D,
             .positionX = 1.0F,
             .hasMesh = true,
             .hasMaterial = true,
@@ -3300,6 +3315,7 @@ TEST_F(SceneMeshAssetTest, InstantiatesKindSpecificStaticAndSkinnedRenderers)
         AssetFormat::PrefabNodeView{
             .stableNodeId = 1,
             .parentIndex = -1,
+            .nodeKind = AssetFormat::PrefabNodeKind::Mesh3D,
             .hasMesh = true,
             .hasMaterial = true,
             .visible = true,
@@ -3309,6 +3325,7 @@ TEST_F(SceneMeshAssetTest, InstantiatesKindSpecificStaticAndSkinnedRenderers)
         AssetFormat::PrefabNodeView{
             .stableNodeId = 2,
             .parentIndex = -1,
+            .nodeKind = AssetFormat::PrefabNodeKind::SkinnedMesh3D,
             .hasMesh = true,
             .hasMaterial = true,
             .visible = true,
@@ -3328,10 +3345,6 @@ TEST_F(SceneMeshAssetTest, InstantiatesKindSpecificStaticAndSkinnedRenderers)
             .resolveMesh = [=, staticMesh = meshA_, skinnedMesh = skinnedMesh_](Core::AssetId id) {
                 return id == staticId ? staticMesh : (id == skinnedId ? skinnedMesh : Asset::AssetHandle{});
             },
-            .resolveMeshKind = [=](Core::AssetId id) {
-                return id == skinnedId ? AssetFormat::AssetKind::SkinnedMesh
-                                       : AssetFormat::AssetKind::StaticMesh;
-            },
         });
     ASSERT_TRUE(created.has_value()) << (created ? "" : created.error().message);
     ASSERT_EQ(created->size(), 2U);
@@ -3341,13 +3354,16 @@ TEST_F(SceneMeshAssetTest, InstantiatesKindSpecificStaticAndSkinnedRenderers)
     EXPECT_NE(world.skinnedMeshRenderer3D((*created)[1]), nullptr);
 }
 
-TEST_F(SceneMeshAssetTest, PrefabUnknownMeshKindRollsBackTheWholeHierarchy)
+// The authored mesh kind now travels on the wire as PrefabNodeKind, so a node
+// whose kind disagrees with its mesh flags must fail before any entity sticks.
+TEST_F(SceneMeshAssetTest, PrefabNodeKindMismatchedWithMeshFlagsRollsBackTheWholeHierarchy)
 {
     World world = makeWorld();
     const std::array nodes{
         AssetFormat::PrefabNodeView{
             .stableNodeId = 1,
             .parentIndex = -1,
+            .nodeKind = AssetFormat::PrefabNodeKind::Mesh3D,
             .hasMesh = true,
             .hasMaterial = true,
             .visible = true,
@@ -3357,6 +3373,8 @@ TEST_F(SceneMeshAssetTest, PrefabUnknownMeshKindRollsBackTheWholeHierarchy)
         AssetFormat::PrefabNodeView{
             .stableNodeId = 2,
             .parentIndex = 0,
+            // Node3D must not carry a mesh pair.
+            .nodeKind = AssetFormat::PrefabNodeKind::Node3D,
             .hasMesh = true,
             .hasMaterial = true,
             .visible = true,
@@ -3374,10 +3392,6 @@ TEST_F(SceneMeshAssetTest, PrefabUnknownMeshKindRollsBackTheWholeHierarchy)
         PrefabMeshBinding{
             .mesh = meshA_,
             .material = materialA_,
-            .resolveMeshKind = [firstId = fixtureAssetId(1)](Core::AssetId id) {
-                return id == firstId ? AssetFormat::AssetKind::StaticMesh
-                                     : AssetFormat::AssetKind::Texture2D;
-            },
         });
     ASSERT_FALSE(created.has_value());
     EXPECT_EQ(created.error().code, SceneErrorCode::InvalidComponent);
@@ -3391,6 +3405,7 @@ TEST_F(SceneMeshAssetTest, RollsBackWhenAssetIdResolverReturnsEmptyHandle)
         AssetFormat::PrefabNodeView{
             .stableNodeId = 1,
             .parentIndex = -1,
+            .nodeKind = AssetFormat::PrefabNodeKind::Mesh3D,
             .hasMesh = true,
             .hasMaterial = true,
             .visible = true,
@@ -3418,6 +3433,7 @@ TEST_F(SceneMeshAssetTest, RollsBackEarlierNodesWhenLaterAssetResolverReturnsEmp
         AssetFormat::PrefabNodeView{
             .stableNodeId = 1,
             .parentIndex = -1,
+            .nodeKind = AssetFormat::PrefabNodeKind::Mesh3D,
             .hasMesh = true,
             .hasMaterial = true,
             .visible = true,
@@ -3427,6 +3443,7 @@ TEST_F(SceneMeshAssetTest, RollsBackEarlierNodesWhenLaterAssetResolverReturnsEmp
         AssetFormat::PrefabNodeView{
             .stableNodeId = 2,
             .parentIndex = 0,
+            .nodeKind = AssetFormat::PrefabNodeKind::Mesh3D,
             .hasMesh = true,
             .hasMaterial = true,
             .visible = true,

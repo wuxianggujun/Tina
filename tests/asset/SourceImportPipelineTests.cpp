@@ -155,7 +155,7 @@ TEST(SourceImportPipelineTests, IncrementalTextureImportRetainsPriorPngAndMapsOu
     });
     ASSERT_TRUE(first) << (first ? "" : first.error().message);
     ASSERT_EQ(first->unitOutputs.size(), 1U);
-    ASSERT_EQ(first->unitOutputs.front().outputs.size(), 2U);
+    ASSERT_EQ(first->unitOutputs.front().outputs.size(), 1U);
 
     ASSERT_TRUE(std::filesystem::create_directories(workRoot / "stage", error));
     ASSERT_FALSE(error);
@@ -178,14 +178,14 @@ TEST(SourceImportPipelineTests, IncrementalTextureImportRetainsPriorPngAndMapsOu
     });
     ASSERT_TRUE(second) << (second ? "" : second.error().message);
     EXPECT_EQ(second->mode, SourceImportPipelineMode::IncrementalRecook);
-    EXPECT_EQ(second->objectsReused, 2U);
-    EXPECT_EQ(second->objectsCooked, 2U);
+    EXPECT_EQ(second->objectsReused, 1U);
+    EXPECT_EQ(second->objectsCooked, 1U);
     ASSERT_EQ(second->unitOutputs.size(), 2U);
 
     std::set<Core::AssetId> assetIds;
     for (const auto& unit : second->unitOutputs)
     {
-        ASSERT_EQ(unit.outputs.size(), 2U);
+        ASSERT_EQ(unit.outputs.size(), 1U);
         std::set<AssetFormat::AssetKind> kinds;
         for (const auto& output : unit.outputs)
         {
@@ -193,7 +193,6 @@ TEST(SourceImportPipelineTests, IncrementalTextureImportRetainsPriorPngAndMapsOu
             kinds.insert(output.assetKind);
         }
         EXPECT_TRUE(kinds.contains(AssetFormat::AssetKind::Texture2D));
-        EXPECT_TRUE(kinds.contains(AssetFormat::AssetKind::Sprite));
     }
 
     ASSERT_TRUE(std::filesystem::create_directories(workRoot / "empty-stage", error));

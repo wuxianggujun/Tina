@@ -721,13 +721,16 @@ TEST(Sprite2DBindingRegistryTests, UnresolvedFrameResourcesReturnEmptyWithoutTou
         EXPECT_FALSE(static_cast<bool>(*resource));
     };
     expectUnresolved(registry->internSpriteFrameResource({}, sink));
-    expectUnresolved(registry->internSpriteFrameResource(*texture, sink));
+    auto directTextureResource = registry->internSpriteFrameResource(*texture, sink);
+    ASSERT_FALSE(directTextureResource.has_value());
+    EXPECT_EQ(directTextureResource.error().code,
+              Render::RenderErrorCode::InvalidFrameResource);
     expectUnresolved(registry->internSpriteFrameResource(*unboundSprite, sink));
     expectUnresolved(registry->internSpriteFrameResource(*queuedSprite, sink));
     expectUnresolved(registry->internSpriteFrameResource(*staleSprite, sink));
     expectUnresolved(registry->internSpriteFrameResource(*noDependencySprite, sink));
     expectUnresolved(registry->internTilesetFrameResource(*noDependencyTileset, sink));
-    EXPECT_EQ(sink.callCount(), 0U);
+    EXPECT_EQ(sink.callCount(), 1U);
 }
 
 TEST(Sprite2DBindingRegistryTests, SinkFailuresReleaseBorrowAndLeaveBindingRetirable)
@@ -1280,7 +1283,7 @@ TEST(Sprite2DBindingRegistryTests, ResolveSpriteFailsClosedForMalformedUnboundAn
     ASSERT_TRUE(textureBinding.has_value());
 
     EXPECT_EQ(registry->resolveSprite({}), 0U);
-    EXPECT_EQ(registry->resolveSprite(*texture), 0U);
+    EXPECT_EQ(registry->resolveSprite(*texture), *textureBinding);
     EXPECT_EQ(registry->resolveSprite(*unboundSprite), 0U);
     EXPECT_EQ(registry->resolveSprite(*queuedSprite), 0U);
     EXPECT_EQ(registry->resolveSprite(*staleSprite), 0U);

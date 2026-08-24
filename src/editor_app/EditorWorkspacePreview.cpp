@@ -127,9 +127,14 @@ auto EditorWorkspaceState::loadedAsset(Tina::Core::AssetId assetId, Tina::AssetF
         return {};
     }
     const auto handle = assetResources_.system->find(assetId);
-    if (!handle.has_value() ||
-        assetResources_.system->store().assetKind(*handle) != expectedKind ||
-        assetResources_.system->tryGet(*handle) == nullptr) {
+    if (!handle.has_value() || assetResources_.system->tryGet(*handle) == nullptr) {
+        return {};
+    }
+    const Tina::AssetFormat::AssetKind actualKind =
+        assetResources_.system->store().assetKind(*handle);
+    if (actualKind != expectedKind &&
+        !(expectedKind == Tina::AssetFormat::AssetKind::Sprite &&
+          actualKind == Tina::AssetFormat::AssetKind::Texture2D)) {
         return {};
     }
     return *handle;
@@ -172,6 +177,7 @@ auto EditorWorkspaceState::preparePreviewAssetBindings() -> Tina::Core::Status{
         return Tina::Core::failure(std::move(world3D.error()));
     }
 
+    const Tina::Asset::CatalogSnapshot& catalog = *assetResources_.system->catalog();
     std::vector<PreviewAssetReference> references;
     const auto appendReference = [&references](Tina::Core::AssetId assetId,
                                                Tina::AssetFormat::AssetKind kind) {
@@ -183,11 +189,24 @@ auto EditorWorkspaceState::preparePreviewAssetBindings() -> Tina::Core::Status{
             references.push_back(reference);
         }
     };
+    const auto appendSpriteReference = [&](Tina::Core::AssetId assetId) {
+        if (!assetId.hasValue()) {
+            return;
+        }
+        const auto entryIndex = catalog.find(assetId);
+        const auto entry = entryIndex.has_value() ? catalog.entry(*entryIndex) : std::nullopt;
+        appendReference(
+            assetId,
+            entry.has_value() &&
+                    entry->assetKind == Tina::AssetFormat::AssetKind::Texture2D
+                ? Tina::AssetFormat::AssetKind::Texture2D
+                : Tina::AssetFormat::AssetKind::Sprite);
+    };
     for (const auto& entity : world2DStorage) {
         if (!entity.sprite.has_value()) {
             continue;
         }
-        appendReference(entity.sprite->spriteId, Tina::AssetFormat::AssetKind::Sprite);
+        appendSpriteReference(entity.sprite->spriteId);
         appendReference(entity.sprite->normalTextureId,
                         Tina::AssetFormat::AssetKind::Texture2D);
     }
@@ -210,7 +229,7 @@ auto EditorWorkspaceState::preparePreviewAssetBindings() -> Tina::Core::Status{
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                        "Animation frame disappeared while collecting Catalog references");
         }
-        appendReference(frame->spriteId, Tina::AssetFormat::AssetKind::Sprite);
+        appendSpriteReference(frame->spriteId);
     }
 
     // Scene references are mandatory for the runtime preview. Project Assets thumbnails are
@@ -223,7 +242,6 @@ auto EditorWorkspaceState::preparePreviewAssetBindings() -> Tina::Core::Status{
                requiredReferences.end();
     };
     std::vector<Tina::Core::AssetId> loadIds;
-    const Tina::Asset::CatalogSnapshot& catalog = *assetResources_.system->catalog();
     for (const PreviewAssetReference& reference : requiredReferences) {
         const auto entryIndex = catalog.find(reference.assetId);
         const auto entry = entryIndex.has_value() ? catalog.entry(*entryIndex) : std::nullopt;
@@ -322,6 +340,11 @@ auto EditorWorkspaceState::preparePreviewAssetBindings() -> Tina::Core::Status{
             const Tina::Asset::AssetHandle texture = loadedAsset(reference.assetId, reference.kind);
             if (texture && !containsHandle(spriteTextureAssets, texture)) {
                 spriteTextureAssets.push_back(texture);
+            }
+            if (texture && !containsHandle(spriteAssets, texture)) {
+                // A direct Texture2D is also a valid Sprite2D source for the
+                // editor preview and runtime binding resolver.
+                spriteAssets.push_back(texture);
             }
             if (texture && isRequiredReference(reference) &&
                 !containsHandle(requiredSpriteTextureAssets, texture)) {

@@ -187,13 +187,9 @@ TEST_F(EditorSourceImportServiceTests, RealPngIngressCooksValidatedReadyCatalog)
     ASSERT_EQ(ready->unitOutputs.size(), 1U);
     EXPECT_EQ(ready->unitOutputs.front().sourceUtf8Path,
               ready->intendedUnits.front().sourcePathUtf8);
-    ASSERT_EQ(ready->unitOutputs.front().outputs.size(), 2U);
-    const auto sprite = std::find_if(
-        ready->unitOutputs.front().outputs.begin(), ready->unitOutputs.front().outputs.end(),
-        [](const Tina::Asset::SourceImportPipelineOutput& output) {
-            return output.assetKind == Tina::AssetFormat::AssetKind::Sprite;
-        });
-    EXPECT_NE(sprite, ready->unitOutputs.front().outputs.end());
+    ASSERT_EQ(ready->unitOutputs.front().outputs.size(), 1U);
+    EXPECT_EQ(ready->unitOutputs.front().outputs.front().assetKind,
+              Tina::AssetFormat::AssetKind::Texture2D);
 
     auto committedUnits = service.commitReady();
     ASSERT_TRUE(committedUnits);

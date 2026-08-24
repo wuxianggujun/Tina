@@ -547,8 +547,21 @@ const Sprite2DBindingRegistry::Entry* Sprite2DBindingRegistry::resolveSingleText
     AssetHandle asset,
     AssetFormat::AssetKind expectedKind) const noexcept
 {
-    if (!isOwnerThread() || !asset || m_store->assetKind(asset) != expectedKind ||
-        !hasRenderableCpuPayload(*m_store, asset))
+    if (!isOwnerThread() || !asset || !hasRenderableCpuPayload(*m_store, asset))
+    {
+        return nullptr;
+    }
+    const AssetFormat::AssetKind actualKind = m_store->assetKind(asset);
+    // Imported images are first-class Texture2D assets. A Sprite2D node may
+    // reference that texture directly; authored Sprite wrappers remain
+    // supported through the dependency path below.
+    if (expectedKind == AssetFormat::AssetKind::Sprite &&
+        actualKind == AssetFormat::AssetKind::Texture2D)
+    {
+        const Entry* entry = findExact(asset);
+        return entry != nullptr && isLiveTextureEntry(*entry) ? entry : nullptr;
+    }
+    if (actualKind != expectedKind)
     {
         return nullptr;
     }

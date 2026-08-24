@@ -108,8 +108,7 @@ auto EditorWorkspaceState::createNodeFromSceneAddRequest(
         createdKind = info.displayName;
         Tina::Editor::World2DNodeTemplateAssets assets{};
         if (info.requiresSpriteAsset) {
-            assets.spriteId = selectedProjectAssetIdOfKind(
-                Tina::AssetFormat::AssetKind::Sprite);
+            assets.spriteId = selectedProjectSpriteAssetId();
             if (!assets.spriteId) {
                 assets.spriteId = editorAssetId(0x22U);
             }

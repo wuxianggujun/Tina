@@ -19,10 +19,13 @@ namespace {
     return *Core::AssetId::fromBytes(bytes);
 }
 
-[[nodiscard]] World2DEntityDesc fullyAuthoredEntity()
+// Schema v4 pins one typed payload set per authoring kind, so each non-default
+// component is authored on its own entity instead of stacked on a single one.
+[[nodiscard]] World2DEntityDesc authoredAnimatedSpriteEntity()
 {
     return World2DEntityDesc{
         .stableEntityId = 10,
+        .nodeKind = World2DNodeKind::AnimatedSprite2D,
         .positionX = 1.25F,
         .positionY = -2.5F,
         .positionZ = 0.5F,
@@ -53,6 +56,21 @@ namespace {
                 .flipX = true,
                 .visible = false,
             },
+        .spriteAnimation =
+            World2DSpriteAnimationDesc{
+                .clipId = assetId(9),
+                .playbackSpeed = 1.5F,
+                .autoPlay = false,
+            },
+    };
+}
+
+[[nodiscard]] World2DEntityDesc authoredCameraEntity()
+{
+    return World2DEntityDesc{
+        .stableEntityId = 11,
+        .parentStableEntityId = 10,
+        .nodeKind = World2DNodeKind::Camera2D,
         .camera =
             World2DCameraDesc{
                 .projection = World2DCameraProjectionKind::PixelPerfect,
@@ -65,6 +83,15 @@ namespace {
                 .referenceHeightPixels = 360,
                 .active = false,
             },
+    };
+}
+
+[[nodiscard]] World2DEntityDesc authoredPointLightEntity()
+{
+    return World2DEntityDesc{
+        .stableEntityId = 12,
+        .parentStableEntityId = 10,
+        .nodeKind = World2DNodeKind::PointLight2D,
         .pointLight =
             World2DPointLightDesc{
                 .colorRed = 0.25F,
@@ -75,6 +102,15 @@ namespace {
                 .sourceRadiusMeters = 2.0F,
                 .active = false,
             },
+    };
+}
+
+[[nodiscard]] World2DEntityDesc authoredShadowOccluderEntity()
+{
+    return World2DEntityDesc{
+        .stableEntityId = 13,
+        .parentStableEntityId = 10,
+        .nodeKind = World2DNodeKind::ShadowOccluder2D,
         .shadowOccluder =
             World2DShadowOccluderDesc{
                 .localStartX = -2.0F,
@@ -83,18 +119,15 @@ namespace {
                 .localEndY = 4.0F,
                 .active = false,
             },
-        .spriteAnimation =
-            World2DSpriteAnimationDesc{
-                .clipId = assetId(9),
-                .playbackSpeed = 1.5F,
-                .autoPlay = false,
-            },
     };
 }
 
 TEST(World2DSnapshotTests, SpriteAnimationRequiresClipSpriteAndPositiveSpeed)
 {
-    World2DEntityDesc entity{.stableEntityId = 1};
+    World2DEntityDesc entity{
+        .stableEntityId = 1,
+        .nodeKind = World2DNodeKind::AnimatedSprite2D,
+    };
     entity.spriteAnimation = World2DSpriteAnimationDesc{.clipId = assetId(9)};
 
     // Animation without a sprite on the same entity is rejected.
@@ -118,7 +151,10 @@ TEST(World2DSnapshotTests, SpriteAnimationRequiresClipSpriteAndPositiveSpeed)
 TEST(World2DSnapshotTests, RoundTripsAllComponentsAndGameplayDeterministically)
 {
     const std::array entities{
-        fullyAuthoredEntity(),
+        authoredAnimatedSpriteEntity(),
+        authoredCameraEntity(),
+        authoredPointLightEntity(),
+        authoredShadowOccluderEntity(),
         World2DEntityDesc{
             .stableEntityId = 20,
             .parentStableEntityId = 10,
@@ -149,8 +185,9 @@ TEST(World2DSnapshotTests, RoundTripsAllComponentsAndGameplayDeterministically)
     ASSERT_TRUE(parsed) << (parsed ? "" : parsed.error().message);
     EXPECT_EQ(parsed->schemaVersion, World2DSnapshotWire::SchemaVersion);
     ASSERT_EQ(storage.size(), entities.size());
-    EXPECT_EQ(storage[0], entities[0]);
-    EXPECT_EQ(storage[1], entities[1]);
+    for (Core::usize index = 0; index < entities.size(); ++index) {
+        EXPECT_EQ(storage[index], entities[index]) << "entity index " << index;
+    }
     EXPECT_EQ(parsed->gameplaySchema, 77U);
     EXPECT_EQ(parsed->gameplayVersion, 3U);
     ASSERT_EQ(parsed->gameplayBytes.size(), gameplay.size());

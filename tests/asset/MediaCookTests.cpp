@@ -2,7 +2,6 @@
 
 #include <tina/asset/SourceImportCapture.hpp>
 #include <tina/asset_format/AudioClipPayload.hpp>
-#include <tina/asset_format/SpritePayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
 #include <tina/core/io/WriteFile.hpp>
 
@@ -120,7 +119,7 @@ class MediaCookTests : public ::testing::Test {
     std::string rootUtf8_{};
 };
 
-TEST_F(MediaCookTests, PngCooksTextureAndDefaultSpriteWithStableIds)
+TEST_F(MediaCookTests, PngCooksOneTextureWithStableId)
 {
     cacheRootUtf8();
     const auto png = tinyPngBytes();
@@ -133,16 +132,11 @@ TEST_F(MediaCookTests, PngCooksTextureAndDefaultSpriteWithStableIds)
         path, AssetFormat::TargetPlatform::WindowsX64, captureConfig());
     ASSERT_TRUE(second) << second.error().message;
 
-    ASSERT_EQ(first->request.assets.size(), 2U);
+    ASSERT_EQ(first->request.assets.size(), 1U);
     const auto& texture = first->request.assets[0];
-    const auto& sprite = first->request.assets[1];
     EXPECT_EQ(texture.assetKind, AssetFormat::AssetKind::Texture2D);
-    EXPECT_EQ(sprite.assetKind, AssetFormat::AssetKind::Sprite);
     EXPECT_TRUE(texture.assetId);
-    EXPECT_TRUE(sprite.assetId);
-    EXPECT_NE(texture.assetId, sprite.assetId);
     EXPECT_EQ(texture.assetId, second->request.assets[0].assetId);
-    EXPECT_EQ(sprite.assetId, second->request.assets[1].assetId);
 
     auto texturePayload = AssetFormat::parseTexture2DPayload(texture.payload);
     ASSERT_TRUE(texturePayload) << texturePayload.error().message;
@@ -153,16 +147,10 @@ TEST_F(MediaCookTests, PngCooksTextureAndDefaultSpriteWithStableIds)
     EXPECT_EQ(std::to_integer<Core::u8>(texturePayload->pixels[0]), 255U);
     EXPECT_EQ(std::to_integer<Core::u8>(texturePayload->pixels[5]), 255U);
 
-    auto spritePayload = AssetFormat::parseSpritePayload(sprite.payload);
-    ASSERT_TRUE(spritePayload) << spritePayload.error().message;
-    ASSERT_EQ(sprite.dependencies.size(), 1U);
-    EXPECT_EQ(sprite.dependencies[0].assetId, texture.assetId);
-    EXPECT_EQ(sprite.dependencies[0].expectedKind, AssetFormat::AssetKind::Texture2D);
-
     ASSERT_EQ(first->sourceImports.units.size(), 1U);
     const auto& unit = first->sourceImports.units.front();
     EXPECT_EQ(unit.importerKind, SourceImporterKind::Texture);
-    ASSERT_EQ(unit.outputs.size(), 2U);
+    ASSERT_EQ(unit.outputs.size(), 1U);
     ASSERT_EQ(first->sourceImports.sources.size(), 1U);
     EXPECT_EQ(first->sourceImports.sources.front().path, "textures/albedo.png");
 }

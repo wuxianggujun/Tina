@@ -112,6 +112,9 @@ auto EditorWorkspaceState::refreshProjectAssetUi(
     const bool fileDropPending = !pendingFileDrops_.empty();
     const bool importPending =
         pendingProjectSwitch_.has_value() ||
+        sourceImportCatalogCommitted_ ||
+        projectBrowserUiRefreshPending_ ||
+        previewAssetBindingsRefreshPending_ ||
         !pendingSourceImportPathsUtf8_.empty() ||
         sourceImportStartPending_ || retrySourceImportPending_ ||
         fileDropPending ||
@@ -350,6 +353,8 @@ auto EditorWorkspaceState::refreshProjectAssetUi(
         Tina::EditorApp::Detail::EditorSourceImportServiceState::Idle;
     const bool sourceImportAvailable =
         !pendingProjectSwitch_.has_value() && !catalogRefreshPending_ &&
+        !sourceImportCatalogCommitted_ && !projectBrowserUiRefreshPending_ &&
+        !previewAssetBindingsRefreshPending_ &&
         pendingSourceImportPathsUtf8_.empty() &&
         !sourceImportStartPending_ && !retrySourceImportPending_ && sourceImportIdle;
     const bool sourceImportEditable =

@@ -98,6 +98,8 @@ class World2DSnapshotSceneTests : public testing::Test {
     Asset::AssetHandle clip_{};
 };
 
+// Capture derives exactly one authoring node kind per entity, so every typed 2D
+// component lives on its own entity rather than stacked onto the root.
 TEST_F(World2DSnapshotSceneTests, CapturesRestoresAndRecapturesIdenticalBytes)
 {
     World source = makeWorld();
@@ -109,6 +111,10 @@ TEST_F(World2DSnapshotSceneTests, CapturesRestoresAndRecapturesIdenticalBytes)
     childLocal.rotation = {0.0F, 0.0F, 0.5F, 0.8660254F};
     const EntityId child = source.createEntity(childLocal).value();
     ASSERT_TRUE(source.setParent(child, root, ReparentMode::KeepLocal));
+    const EntityId light = source.createEntity().value();
+    ASSERT_TRUE(source.setParent(light, root, ReparentMode::KeepLocal));
+    const EntityId occluder = source.createEntity().value();
+    ASSERT_TRUE(source.setParent(occluder, root, ReparentMode::KeepLocal));
     ASSERT_TRUE(source.setCamera2D(root, Camera2D{
                                              .projection =
                                                  Render::PixelPerfect2D{
@@ -117,13 +123,13 @@ TEST_F(World2DSnapshotSceneTests, CapturesRestoresAndRecapturesIdenticalBytes)
                                                  },
                                              .pixelSnap = Render::RenderPixelSnapPolicy::CameraAndSprites,
                                          }));
-    ASSERT_TRUE(source.setPointLight2D(root, PointLight2D{
+    ASSERT_TRUE(source.setPointLight2D(light, PointLight2D{
                                                  .color = {.red = 0.25F, .green = 0.5F, .blue = 0.75F, .alpha = 1.0F},
                                                  .intensity = 2.0F,
                                                  .radiusMeters = 6.0F,
                                                  .sourceRadiusMeters = 1.0F,
                                              }));
-    ASSERT_TRUE(source.setShadowOccluder2D(root, ShadowOccluder2D{
+    ASSERT_TRUE(source.setShadowOccluder2D(occluder, ShadowOccluder2D{
                                                      .localStartX = -2.0F,
                                                      .localEndX = 2.0F,
                                                  }));
@@ -149,11 +155,15 @@ TEST_F(World2DSnapshotSceneTests, CapturesRestoresAndRecapturesIdenticalBytes)
 
     const std::array gameplay{std::byte{7}, std::byte{8}, std::byte{9}};
     auto bytes = captureWorld2DSnapshotBytes(source, captureConfig(
-                                                         [root, child](EntityId entity) {
+                                                         [root, child, light, occluder](EntityId entity) {
                                                              if (entity == root)
                                                                  return 100U;
                                                              if (entity == child)
                                                                  return 200U;
+                                                             if (entity == light)
+                                                                 return 300U;
+                                                             if (entity == occluder)
+                                                                 return 400U;
                                                              return 0U;
                                                          },
                                                          gameplay));
@@ -162,15 +172,21 @@ TEST_F(World2DSnapshotSceneTests, CapturesRestoresAndRecapturesIdenticalBytes)
     std::vector<AssetFormat::World2DEntityDesc> storage;
     auto snapshot = AssetFormat::parseWorld2DSnapshot(*bytes, storage);
     ASSERT_TRUE(snapshot) << (snapshot ? "" : snapshot.error().message);
-    ASSERT_EQ(snapshot->entities.size(), 2U);
+    ASSERT_EQ(snapshot->entities.size(), 4U);
     EXPECT_EQ(snapshot->entities[0].stableEntityId, 100U);
+    EXPECT_EQ(snapshot->entities[0].nodeKind, AssetFormat::World2DNodeKind::Camera2D);
     EXPECT_EQ(snapshot->entities[1].stableEntityId, 200U);
     EXPECT_EQ(snapshot->entities[1].parentStableEntityId, 100U);
+    EXPECT_EQ(snapshot->entities[1].nodeKind, AssetFormat::World2DNodeKind::AnimatedSprite2D);
+    EXPECT_EQ(snapshot->entities[2].stableEntityId, 300U);
+    EXPECT_EQ(snapshot->entities[2].nodeKind, AssetFormat::World2DNodeKind::PointLight2D);
+    EXPECT_EQ(snapshot->entities[3].stableEntityId, 400U);
+    EXPECT_EQ(snapshot->entities[3].nodeKind, AssetFormat::World2DNodeKind::ShadowOccluder2D);
 
     World restored = makeWorld();
     auto bindings = instantiateWorld2DSnapshot(restored, *snapshot, resolver());
     ASSERT_TRUE(bindings) << (bindings ? "" : bindings.error().message);
-    ASSERT_EQ(bindings->size(), 2U);
+    ASSERT_EQ(bindings->size(), 4U);
     EXPECT_NE((*bindings)[0].entity.owner(), root.owner());
     EXPECT_EQ(restored.parent((*bindings)[1].entity), (*bindings)[0].entity);
     ASSERT_NE(restored.spriteRenderer2D((*bindings)[1].entity), nullptr);
@@ -194,6 +210,7 @@ TEST_F(World2DSnapshotSceneTests, UnresolvedAnimationClipFailsClosedBeforeMutati
     const std::array entities{
         AssetFormat::World2DEntityDesc{
             .stableEntityId = 1,
+            .nodeKind = AssetFormat::World2DNodeKind::AnimatedSprite2D,
             .sprite = AssetFormat::World2DSpriteDesc{.spriteId = spriteId_},
             .spriteAnimation =
                 AssetFormat::World2DSpriteAnimationDesc{.clipId = assetId(99)},
@@ -217,6 +234,7 @@ TEST_F(World2DSnapshotSceneTests, UnresolvedAnimationClipFailsClosedBeforeMutati
     const std::array plainEntities{
         AssetFormat::World2DEntityDesc{
             .stableEntityId = 1,
+            .nodeKind = AssetFormat::World2DNodeKind::Sprite2D,
             .sprite = AssetFormat::World2DSpriteDesc{.spriteId = spriteId_},
         },
     };
@@ -263,6 +281,7 @@ TEST_F(World2DSnapshotSceneTests, PreflightFailuresPreserveExistingWorld)
     const std::array entities{
         AssetFormat::World2DEntityDesc{
             .stableEntityId = 1,
+            .nodeKind = AssetFormat::World2DNodeKind::Sprite2D,
             .sprite = AssetFormat::World2DSpriteDesc{.spriteId = spriteId_},
         },
     };

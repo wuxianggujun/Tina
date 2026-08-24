@@ -62,8 +62,7 @@ auto EditorWorkspaceState::selectedProjectSpriteAssetId() const noexcept
     if (asset->assetKind != Tina::AssetFormat::AssetKind::Texture2D) {
         return {};
     }
-    const auto* sprite = projectAssets_.spriteAssetForTexture(asset->assetId);
-    return sprite != nullptr ? sprite->assetId : Tina::Core::AssetId{};
+    return asset->assetId;
 }
 
 auto EditorWorkspaceState::runNodePropertyCommand(

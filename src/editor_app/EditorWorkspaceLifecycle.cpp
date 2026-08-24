@@ -2269,10 +2269,18 @@ auto EditorWorkspaceState::importSelectedSourceFiles(
 }
 
 auto EditorWorkspaceState::importSourceFromDialog() -> Tina::Core::Status{
-    if (sourceImportService_.state() !=
-        Tina::EditorApp::Detail::EditorSourceImportServiceState::Idle) {
+    using ImportState =
+        Tina::EditorApp::Detail::EditorSourceImportServiceState;
+    const bool importBusy =
+        pendingProjectSwitch_.has_value() || catalogRefreshPending_ ||
+        sourceImportCatalogCommitted_ || projectBrowserUiRefreshPending_ ||
+        previewAssetBindingsRefreshPending_ ||
+        !pendingSourceImportPathsUtf8_.empty() || sourceImportStartPending_ ||
+        retrySourceImportPending_ ||
+        sourceImportService_.state() != ImportState::Idle;
+    if (importBusy) {
         authoringFeedback_ =
-            "Finish or dismiss the current source import before selecting more files";
+            "Finish the current resource import and refresh before selecting more files";
         return Tina::Core::success();
     }
     constexpr std::array filters{

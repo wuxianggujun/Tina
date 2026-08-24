@@ -26,6 +26,7 @@ TEST(PrefabPayloadTests, RoundTripsSingleRootMeshNode)
         PrefabNodeDesc{
             .stableNodeId = 7,
             .parentIndex = -1,
+            .nodeKind = PrefabNodeKind::Mesh3D,
             .positionY = 0.5F,
             .meshId = meshId,
             .materialId = materialId,
