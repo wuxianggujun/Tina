@@ -121,10 +121,13 @@ add_executable(tina_ui_tests
     header_isolation/UITabViewHeader.cpp
     header_isolation/UIMenuHeader.cpp
     header_isolation/UIStyleHeader.cpp
+    header_isolation/UIStyleControllerHeader.cpp
     header_isolation/UIMotionHeader.cpp
+    header_isolation/UIMotionControllerHeader.cpp
     header_isolation/UINumberFieldHeader.cpp
     header_isolation/UISemanticsHeader.cpp
     header_isolation/UIAccessibilityHeader.cpp
+    header_isolation/UIAuthoringHeader.cpp
     header_isolation/UIDirtyHeader.cpp
     header_isolation/UICommittedHitHeader.cpp
     header_isolation/UICommittedLayoutHeader.cpp
@@ -134,6 +137,7 @@ add_executable(tina_ui_tests
     header_isolation/UIContentHeader.cpp
     header_isolation/UIContextHeader.cpp
     header_isolation/UIContextConfigHeader.cpp
+    header_isolation/UIContextStatisticsHeader.cpp
     header_isolation/UIElementHeader.cpp
     header_isolation/UIErrorsHeader.cpp
     header_isolation/UIEventRoutingHeader.cpp
@@ -141,16 +145,20 @@ add_executable(tina_ui_tests
     header_isolation/UIFlowHeader.cpp
     header_isolation/UIFormFieldHeader.cpp
     header_isolation/UIHitTestHeader.cpp
+    header_isolation/UIInputRouterHeader.cpp
     header_isolation/UIIconHeader.cpp
     header_isolation/UIIconButtonHeader.cpp
     header_isolation/UIImageHeader.cpp
     header_isolation/UIImageSourceHeader.cpp
     header_isolation/UILayoutHeader.cpp
     header_isolation/UIPaintHeader.cpp
+    header_isolation/UIPublicationPipelineHeader.cpp
+    header_isolation/UIRoutedPointerListenerTokenHeader.cpp
     header_isolation/UIThemeHeader.cpp
     header_isolation/UITooltipHeader.cpp
     header_isolation/UITextHeader.cpp
     header_isolation/UITextEditHeader.cpp
+    header_isolation/UITextSystemHeader.cpp
     header_isolation/UITextRasterizerHeader.cpp
     header_isolation/UIGlyphAtlasHeader.cpp
     header_isolation/UINodeIdHeader.cpp

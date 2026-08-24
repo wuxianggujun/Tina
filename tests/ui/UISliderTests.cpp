@@ -34,28 +34,28 @@ using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
 
 [[nodiscard]] UI::UIRootOwner createRoot(UI::UIContext& context)
 {
-    auto result = context.rootBuilder().createRoot();
+    auto result = context.authoring().rootBuilder().createRoot();
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UIRootOwner{};
 }
 
 [[nodiscard]] UI::UINodeId createSlider(UI::UIContext& context, UI::UINodeId parent)
 {
-    auto result = context.rootBuilder().createElement(parent, UI::makeSliderElement());
+    auto result = context.authoring().rootBuilder().createElement(parent, UI::makeSliderElement());
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? *result : UI::UINodeId{};
 }
 
 [[nodiscard]] UI::UINodeId createRadioButton(UI::UIContext& context, UI::UINodeId parent)
 {
-    auto result = context.rootBuilder().createElement(parent, UI::makeRadioButtonElement());
+    auto result = context.authoring().rootBuilder().createElement(parent, UI::makeRadioButtonElement());
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? *result : UI::UINodeId{};
 }
 
 [[nodiscard]] UI::UITreeUpdater createUpdater(UI::UIContext& context, UI::UIRootOwner& root)
 {
-    auto result = context.treeUpdater(root);
+    auto result = context.authoring().treeUpdater(root);
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UITreeUpdater{};
 }
@@ -170,7 +170,7 @@ TEST(UISliderTest, DefaultsAndSetValue)
     ASSERT_TRUE(value.has_value());
     EXPECT_FLOAT_EQ(*value, 0.5F); // quantized to step 0.25 from min
 
-    auto button = context->rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement());
+    auto button = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(button.has_value());
     EXPECT_FALSE(updater.setSliderValue(*button, 0.1F).has_value());
 }
@@ -200,11 +200,11 @@ TEST(UISliderTest, PointerDragMapsXToValueAndFiresChange)
             ++changes;
             lastValue = event.value;
         }}));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 40.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 40.0F}));
 
     // Down at left edge -> ~0
     {
-        auto down = context->routePointerInput(
+        auto down = context->input().routePointerInput(
             makePointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 1, {.x = 0.0F, .y = 10.0F}));
         ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
         EXPECT_TRUE(down->consumed);
@@ -215,7 +215,7 @@ TEST(UISliderTest, PointerDragMapsXToValueAndFiresChange)
 
     // Drag to mid (~50)
     {
-        auto move = context->routePointerInput(
+        auto move = context->input().routePointerInput(
             makePointerInput(window, UI::UIRoutedPointerEventKind::Move, 2, {.x = 50.0F, .y = 10.0F}));
         ASSERT_TRUE(move.has_value()) << (move ? "" : move.error().message);
     }
@@ -230,7 +230,7 @@ TEST(UISliderTest, PointerDragMapsXToValueAndFiresChange)
     EXPECT_TRUE(*dragging);
 
     {
-        auto up = context->routePointerInput(
+        auto up = context->input().routePointerInput(
             makePointerInput(window, UI::UIRoutedPointerEventKind::ButtonUp, 3, {.x = 100.0F, .y = 10.0F}));
         ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
     }
@@ -269,11 +269,11 @@ TEST(UISliderTest, PointerMappingUsesThePaintTrackAndThumbCenter)
         }));
     assertOk(updater.setSliderRange(slider, 0.0F, 100.0F, 1.0F));
     assertOk(updater.setSliderValue(slider, 25.0F));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 40.0F}));
 
     // The committed thumb is x=23..31, so its center is x=27. Mapping must
     // use the same inset/center span and keep the value at 25.
-    auto down = context->routePointerInput(makePointerInput(
+    auto down = context->input().routePointerInput(makePointerInput(
         window,
         UI::UIRoutedPointerEventKind::ButtonDown,
         1,
@@ -284,7 +284,7 @@ TEST(UISliderTest, PointerMappingUsesThePaintTrackAndThumbCenter)
     ASSERT_TRUE(value.has_value());
     EXPECT_FLOAT_EQ(*value, 25.0F);
 
-    auto up = context->routePointerInput(makePointerInput(
+    auto up = context->input().routePointerInput(makePointerInput(
         window,
         UI::UIRoutedPointerEventKind::ButtonUp,
         2,
@@ -326,9 +326,9 @@ TEST(UISliderTest, PaintPublishesTrackFillThumbAndPressedResetState)
     auto roundTrip = updater.sliderPaint(slider);
     ASSERT_TRUE(roundTrip.has_value()) << (roundTrip ? "" : roundTrip.error().message);
     EXPECT_EQ(*roundTrip, expectedPaint);
-    assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 40.0F}));
 
-    UI::UICommittedPaintView paint = context->committedPaint();
+    UI::UICommittedPaintView paint = context->publication().committedPaint();
     ASSERT_EQ(paint.size(), 4U);
     EXPECT_EQ(paint.entries()[0].worldRect, (UI::UILogicalRect{.x = 0.0F, .y = 0.0F, .width = 100.0F, .height = 20.0F}));
     EXPECT_EQ(paint.entries()[1].worldRect, (UI::UILogicalRect{.x = 4.0F, .y = 8.0F, .width = 92.0F, .height = 4.0F}));
@@ -342,16 +342,16 @@ TEST(UISliderTest, PaintPublishesTrackFillThumbAndPressedResetState)
     EXPECT_EQ(paint.entries()[2].solidFill, (UI::UIPremultipliedRgba8Color{.red = 40, .green = 160, .blue = 220, .alpha = 255}));
     EXPECT_EQ(paint.entries()[3].solidFill, (UI::UIPremultipliedRgba8Color{.red = 235, .green = 240, .blue = 245, .alpha = 255}));
 
-    auto down = context->routePointerInput(makePointerInput(
+    auto down = context->input().routePointerInput(makePointerInput(
         window,
         UI::UIRoutedPointerEventKind::ButtonDown,
         1,
         {.x = 75.0F, .y = 10.0F}));
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
     EXPECT_TRUE(down->consumed);
-    EXPECT_EQ(context->defaultActionFocus(), slider);
-    assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
-    paint = context->committedPaint();
+    EXPECT_EQ(context->input().defaultActionFocus(), slider);
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 40.0F}));
+    paint = context->publication().committedPaint();
     ASSERT_EQ(paint.size(), 4U);
     EXPECT_NEAR(paint.entries()[3].worldRect.x, 70.84F, 0.001F);
     EXPECT_FLOAT_EQ(paint.entries()[3].worldRect.y, 6.0F);
@@ -365,14 +365,14 @@ TEST(UISliderTest, PaintPublishesTrackFillThumbAndPressedResetState)
     ASSERT_TRUE(dragging.has_value());
     EXPECT_TRUE(*dragging);
 
-    auto up = context->routePointerInput(makePointerInput(
+    auto up = context->input().routePointerInput(makePointerInput(
         window,
         UI::UIRoutedPointerEventKind::ButtonUp,
         2,
         {.x = 75.0F, .y = 10.0F}));
     ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
-    assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
-    paint = context->committedPaint();
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 40.0F}));
+    paint = context->publication().committedPaint();
     ASSERT_EQ(paint.size(), 4U);
     EXPECT_EQ(
         paint.entries()[3].solidFill,
@@ -382,8 +382,8 @@ TEST(UISliderTest, PaintPublishesTrackFillThumbAndPressedResetState)
     EXPECT_FALSE(*dragging);
 
     assertOk(updater.setEnabled(slider, false));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
-    paint = context->committedPaint();
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 40.0F}));
+    paint = context->publication().committedPaint();
     ASSERT_EQ(paint.size(), 4U);
     EXPECT_EQ(paint.entries()[2].solidFill, (UI::UIPremultipliedRgba8Color{.red = 22, .green = 88, .blue = 121, .alpha = 140}));
     EXPECT_EQ(paint.entries()[3].solidFill, (UI::UIPremultipliedRgba8Color{.red = 129, .green = 132, .blue = 135, .alpha = 140}));
@@ -415,27 +415,27 @@ TEST(UISliderTest, ExplicitFocusPublishesFocusSemanticsAndFocusedThumb)
             .contentInset = 4.0F,
             .thumbExtent = 8.0F,
         }));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 40.0F}));
 
-    auto tabFocus = context->routeDefaultActionFocusStep(false);
+    auto tabFocus = context->input().routeDefaultActionFocusStep(false);
     ASSERT_TRUE(tabFocus.has_value()) << (tabFocus ? "" : tabFocus.error().message);
     EXPECT_TRUE(tabFocus->consumed);
     EXPECT_EQ(tabFocus->focus, slider);
-    EXPECT_EQ(context->defaultActionFocus(), slider);
-    assertOk(context->clearFocus());
+    EXPECT_EQ(context->input().defaultActionFocus(), slider);
+    assertOk(context->input().clearFocus());
 
-    assertOk(context->requestFocus(slider));
-    EXPECT_EQ(context->defaultActionFocus(), slider);
-    assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
+    assertOk(context->input().requestFocus(slider));
+    EXPECT_EQ(context->input().defaultActionFocus(), slider);
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 40.0F}));
 
-    const UI::UICommittedPaintView paint = context->committedPaint();
+    const UI::UICommittedPaintView paint = context->publication().committedPaint();
     ASSERT_EQ(paint.size(), 2U);
     EXPECT_EQ(
         paint.entries()[1].solidFill,
         (UI::UIPremultipliedRgba8Color{.red = 80, .green = 180, .blue = 250, .alpha = 255}));
 
     bool sawFocusedSlider = false;
-    const UI::UICommittedSemanticsView semantics = context->committedSemantics();
+    const UI::UICommittedSemanticsView semantics = context->publication().committedSemantics();
     for (const UI::UISemanticsEntry& entry : semantics.entries())
     {
         if (entry.node == slider)
@@ -463,27 +463,27 @@ TEST(UISliderTest, HiddenAndDestroyClearFocusWithoutLeavingStaleState)
     auto updater = createUpdater(*context, root);
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(100.0F, 40.0F)));
     assertOk(updater.setLayoutStyle(slider, fixedSize(100.0F, 20.0F)));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
-    assertOk(context->requestFocus(slider));
-    EXPECT_EQ(context->defaultActionFocus(), slider);
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 40.0F}));
+    assertOk(context->input().requestFocus(slider));
+    EXPECT_EQ(context->input().defaultActionFocus(), slider);
 
     UI::UILayoutStyle hidden = fixedSize(100.0F, 20.0F);
     hidden.visibility = UI::UIVisibility::Hidden;
     assertOk(updater.setLayoutStyle(slider, hidden));
-    EXPECT_EQ(context->defaultActionFocus(), slider);
-    assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
-    EXPECT_FALSE(context->defaultActionFocus().hasValue());
+    EXPECT_EQ(context->input().defaultActionFocus(), slider);
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 40.0F}));
+    EXPECT_FALSE(context->input().defaultActionFocus().hasValue());
 
     assertOk(updater.setLayoutStyle(slider, fixedSize(100.0F, 20.0F)));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
-    assertOk(context->requestFocus(slider));
-    EXPECT_EQ(context->defaultActionFocus(), slider);
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 40.0F}));
+    assertOk(context->input().requestFocus(slider));
+    EXPECT_EQ(context->input().defaultActionFocus(), slider);
 
     assertOk(updater.destroy(slider));
     EXPECT_FALSE(context->contains(slider));
-    EXPECT_FALSE(context->defaultActionFocus().hasValue());
-    assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
-    EXPECT_FALSE(context->defaultActionFocus().hasValue());
+    EXPECT_FALSE(context->input().defaultActionFocus().hasValue());
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 40.0F}));
+    EXPECT_FALSE(context->input().defaultActionFocus().hasValue());
 }
 
 TEST(UISliderTest, PaintCapacityFailurePreservesPublishedSnapshotAtomically)
@@ -516,25 +516,25 @@ TEST(UISliderTest, PaintCapacityFailurePreservesPublishedSnapshotAtomically)
             .contentInset = 3.0F,
             .thumbExtent = 6.0F,
         }));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
-    const UI::UICommittedPaintView oldPaint = context->committedPaint();
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 40.0F}));
+    const UI::UICommittedPaintView oldPaint = context->publication().committedPaint();
     ASSERT_EQ(oldPaint.size(), 2U);
     const auto* const oldEntries = oldPaint.entries().data();
     const u64 oldRevision = oldPaint.paintRevision();
 
     assertOk(updater.setSliderValue(slider, 0.5F));
-    const Core::Status rejected = context->commitLayout({.width = 100.0F, .height = 40.0F});
+    const Core::Status rejected = context->publication().commitLayout({.width = 100.0F, .height = 40.0F});
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::CapacityExceeded);
-    EXPECT_EQ(context->committedPaint().entries().data(), oldEntries);
-    EXPECT_EQ(context->committedPaint().paintRevision(), oldRevision);
+    EXPECT_EQ(context->publication().committedPaint().entries().data(), oldEntries);
+    EXPECT_EQ(context->publication().committedPaint().paintRevision(), oldRevision);
     auto value = updater.sliderValue(slider);
     ASSERT_TRUE(value.has_value());
     EXPECT_FLOAT_EQ(*value, 0.5F);
 
     assertOk(updater.setSliderValue(slider, 0.0F));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
-    EXPECT_EQ(context->committedPaint().size(), 2U);
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 40.0F}));
+    EXPECT_EQ(context->publication().committedPaint().size(), 2U);
 }
 
 TEST(UISliderTest, PaintRejectsInvalidMetricsAndWrongKindsWithoutMutation)
@@ -548,7 +548,7 @@ TEST(UISliderTest, PaintRejectsInvalidMetricsAndWrongKindsWithoutMutation)
     ASSERT_TRUE(root.hasValue());
     const UI::UINodeId slider = createSlider(*context, root.rootNodeId());
     ASSERT_TRUE(slider.hasValue());
-    auto button = context->rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement());
+    auto button = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(button.has_value());
     auto updater = createUpdater(*context, root);
     const UI::UISliderPaint expected{
@@ -606,15 +606,15 @@ TEST(UISliderTest, CancelClearsDraggingWhenDirtyQueueIsFull)
             .contentInset = 4.0F,
             .thumbExtent = 8.0F,
         }));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 40.0F}));
 
-    auto down = context->routePointerInput(makePointerInput(
+    auto down = context->input().routePointerInput(makePointerInput(
         window,
         UI::UIRoutedPointerEventKind::ButtonDown,
         1,
         {.x = 25.0F, .y = 10.0F}));
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
-    assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 40.0F}));
     auto dragging = updater.isSliderDragging(slider);
     ASSERT_TRUE(dragging.has_value());
     EXPECT_TRUE(*dragging);
@@ -627,11 +627,11 @@ TEST(UISliderTest, CancelClearsDraggingWhenDirtyQueueIsFull)
     assertOk(updater.setBoxPaint(*secondBlocker, solidFill(4, 5, 6)));
     ASSERT_EQ(context->statistics().dirtyQueuePendingCount, 2U);
 
-    assertOk(context->cancelPointerInteraction(window));
+    assertOk(context->input().cancelPointerInteraction(window));
     dragging = updater.isSliderDragging(slider);
     ASSERT_TRUE(dragging.has_value());
     EXPECT_FALSE(*dragging);
-    assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 40.0F}));
 }
 
 TEST(UISliderTest, ExtremeFiniteRangeAndOversizedInsetRemainStable)
@@ -661,9 +661,9 @@ TEST(UISliderTest, ExtremeFiniteRangeAndOversizedInsetRemainStable)
     const float maximum = (std::numeric_limits<float>::max)();
     assertOk(updater.setSliderRange(slider, -maximum, maximum, 0.0F));
     assertOk(updater.setSliderValue(slider, 0.0F));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 40.0F}));
 
-    auto down = context->routePointerInput(makePointerInput(
+    auto down = context->input().routePointerInput(makePointerInput(
         window,
         UI::UIRoutedPointerEventKind::ButtonDown,
         1,
@@ -673,7 +673,7 @@ TEST(UISliderTest, ExtremeFiniteRangeAndOversizedInsetRemainStable)
     ASSERT_TRUE(value.has_value());
     EXPECT_TRUE(std::isfinite(*value));
     EXPECT_FLOAT_EQ(*value, -maximum);
-    auto move = context->routePointerInput(makePointerInput(
+    auto move = context->input().routePointerInput(makePointerInput(
         window,
         UI::UIRoutedPointerEventKind::Move,
         2,
@@ -683,7 +683,7 @@ TEST(UISliderTest, ExtremeFiniteRangeAndOversizedInsetRemainStable)
     ASSERT_TRUE(value.has_value());
     EXPECT_TRUE(std::isfinite(*value));
     EXPECT_FLOAT_EQ(*value, 0.0F);
-    auto up = context->routePointerInput(makePointerInput(
+    auto up = context->input().routePointerInput(makePointerInput(
         window,
         UI::UIRoutedPointerEventKind::ButtonUp,
         3,
@@ -704,8 +704,8 @@ TEST(UISliderTest, ExtremeFiniteRangeAndOversizedInsetRemainStable)
             .contentInset = 100.0F,
             .thumbExtent = 8.0F,
         }));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
-    const UI::UICommittedPaintView paint = context->committedPaint();
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 40.0F}));
+    const UI::UICommittedPaintView paint = context->publication().committedPaint();
     ASSERT_EQ(paint.size(), 2U);
     EXPECT_EQ(paint.entries()[1].worldRect, (UI::UILogicalRect{
         .x = 6.0F,
@@ -715,7 +715,7 @@ TEST(UISliderTest, ExtremeFiniteRangeAndOversizedInsetRemainStable)
     }));
     EXPECT_TRUE(std::isfinite(paint.entries()[1].worldRect.x));
 
-    down = context->routePointerInput(makePointerInput(
+    down = context->input().routePointerInput(makePointerInput(
         window,
         UI::UIRoutedPointerEventKind::ButtonDown,
         4,
@@ -798,7 +798,7 @@ TEST(UISliderTest, SetValueDirtyQueueFailurePreservesStateAndSkipsCallback)
         UI::UISliderChangeCallback{[&changes](const UI::UISliderChangeEvent&) noexcept {
             ++changes;
         }}));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     assertOk(updater.setSliderValue(blocker, 0.5F));
     ASSERT_EQ(context->statistics().dirtyQueuePendingCount, 1U);
 
@@ -844,22 +844,22 @@ TEST(UISliderTest, PointerDirtyQueueFailurePreservesStateAndSkipsCallback)
         UI::UISliderChangeCallback{[&changes](const UI::UISliderChangeEvent&) noexcept {
             ++changes;
         }}));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
-    auto down = context->routePointerInput(makePointerInput(
+    auto down = context->input().routePointerInput(makePointerInput(
         window,
         UI::UIRoutedPointerEventKind::ButtonDown,
         1,
         {.x = 0.0F, .y = 4.0F}));
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
     auto dragging = updater.isSliderDragging(slider);
     ASSERT_TRUE(dragging.has_value());
     ASSERT_TRUE(*dragging);
     assertOk(updater.setSliderValue(blocker, 0.5F));
     ASSERT_EQ(context->statistics().dirtyQueuePendingCount, 1U);
-    auto move = context->routePointerInput(makePointerInput(
+    auto move = context->input().routePointerInput(makePointerInput(
         window,
         UI::UIRoutedPointerEventKind::Move,
         2,

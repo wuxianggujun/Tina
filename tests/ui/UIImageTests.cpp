@@ -83,10 +83,10 @@ TEST_F(UIImageTest, ImageRecipePublishesIntrinsicLayoutPaintAndSemantics)
 {
     auto context = createContext();
     ASSERT_NE(context, nullptr);
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
@@ -95,10 +95,10 @@ TEST_F(UIImageTest, ImageRecipePublishesIntrinsicLayoutPaintAndSemantics)
     ASSERT_TRUE(imageResult.has_value()) << imageResult.error().message;
     const UI::UINodeId imageNode = *imageResult;
 
-    const Core::Status committed = context->commitLayout({.width = 320.0F, .height = 200.0F});
+    const Core::Status committed = context->publication().commitLayout({.width = 320.0F, .height = 200.0F});
     ASSERT_TRUE(committed.has_value()) << committed.error().message;
 
-    const UI::UICommittedPaintView paint = context->committedPaint();
+    const UI::UICommittedPaintView paint = context->publication().committedPaint();
     const auto paintEntry = std::ranges::find_if(
         paint, [imageNode](const UI::UICommittedPaintEntry& entry) {
             return entry.node == imageNode;
@@ -112,7 +112,7 @@ TEST_F(UIImageTest, ImageRecipePublishesIntrinsicLayoutPaintAndSemantics)
     EXPECT_FLOAT_EQ(paintEntry->worldRect.height, 50.0F);
     EXPECT_FLOAT_EQ(paintEntry->worldRect.y, 25.0F);
 
-    const UI::UICommittedSemanticsView semantics = context->committedSemantics();
+    const UI::UICommittedSemanticsView semantics = context->publication().committedSemantics();
     const auto semanticsEntry = std::ranges::find_if(
         semantics, [imageNode](const UI::UISemanticsEntry& entry) {
             return entry.node == imageNode;
@@ -143,10 +143,10 @@ TEST_F(UIImageTest, ImageButtonsOwnControlBehaviorPaintAndSemanticsOnOneNode)
 {
     auto context = createContext();
     ASSERT_NE(context, nullptr);
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
@@ -177,9 +177,9 @@ TEST_F(UIImageTest, ImageButtonsOwnControlBehaviorPaintAndSemanticsOnOneNode)
     const auto radio = updater.createElement(root.rootNodeId(), radioDescriptor);
     ASSERT_TRUE(radio.has_value()) << radio.error().message;
 
-    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
-    const UI::UICommittedPaintView paint = context->committedPaint();
-    const UI::UICommittedLayoutView layout = context->committedLayout();
+    ASSERT_TRUE(context->publication().commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
+    const UI::UICommittedPaintView paint = context->publication().committedPaint();
+    const UI::UICommittedLayoutView layout = context->publication().committedLayout();
     for (const UI::UINodeId node : {*button, *radio})
     {
         const auto image = std::ranges::find_if(
@@ -206,7 +206,7 @@ TEST_F(UIImageTest, ImageButtonsOwnControlBehaviorPaintAndSemanticsOnOneNode)
                         contentBox.y + contentBox.height * 0.5F);
     }
 
-    const UI::UICommittedSemanticsView semantics = context->committedSemantics();
+    const UI::UICommittedSemanticsView semantics = context->publication().committedSemantics();
     const auto buttonSemantics = std::ranges::find_if(
         semantics, [button](const UI::UISemanticsEntry& entry) {
             return entry.node == *button;
@@ -228,10 +228,10 @@ TEST_F(UIImageTest, IconRecipeReusesImageStorageAndPaintResourceChain)
 {
     auto context = createContext();
     ASSERT_NE(context, nullptr);
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
@@ -247,9 +247,9 @@ TEST_F(UIImageTest, IconRecipeReusesImageStorageAndPaintResourceChain)
     const auto icon = updater.createElement(
         root.rootNodeId(), UI::makeIconElement(content, fixedSize(100.0F, 100.0F)));
     ASSERT_TRUE(icon.has_value()) << icon.error().message;
-    ASSERT_TRUE(context->commitLayout({.width = 320.0F, .height = 200.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 320.0F, .height = 200.0F}).has_value());
 
-    const UI::UICommittedPaintView paint = context->committedPaint();
+    const UI::UICommittedPaintView paint = context->publication().committedPaint();
     const auto entry = std::ranges::find_if(
         paint, [icon](const UI::UICommittedPaintEntry& candidate) {
             return candidate.node == *icon;
@@ -264,7 +264,7 @@ TEST_F(UIImageTest, IconRecipeReusesImageStorageAndPaintResourceChain)
     EXPECT_FLOAT_EQ(entry->worldRect.width, 100.0F);
     EXPECT_FLOAT_EQ(entry->worldRect.height, 50.0F);
 
-    const UI::UICommittedLayoutView layout = context->committedLayout();
+    const UI::UICommittedLayoutView layout = context->publication().committedLayout();
     const auto layoutEntry = std::ranges::find_if(
         layout, [icon](const UI::UICommittedLayoutEntry& candidate) {
             return candidate.node == *icon;
@@ -280,7 +280,7 @@ TEST_F(UIImageTest, IconRecipeReusesImageStorageAndPaintResourceChain)
     EXPECT_EQ(statistics.activeImageContentCount, 1U);
     EXPECT_EQ(statistics.imageContentHighWater, 1U);
 
-    const UI::UICommittedSemanticsView semantics = context->committedSemantics();
+    const UI::UICommittedSemanticsView semantics = context->publication().committedSemantics();
     EXPECT_EQ(std::ranges::find_if(
                   semantics, [icon](const UI::UISemanticsEntry& candidate) {
                       return candidate.node == *icon;
@@ -292,10 +292,10 @@ TEST_F(UIImageTest, InvalidImageAndMixedTextFailWithoutPublishingNodes)
 {
     auto context = createContext();
     ASSERT_NE(context, nullptr);
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
     const usize baseline = context->liveNodeCount();
@@ -320,17 +320,17 @@ TEST_F(UIImageTest, RuntimeImageTintIsPaintOnlyAndNoOpPreservesDirty)
 {
     auto context = createContext();
     ASSERT_NE(context, nullptr);
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
     const auto image = updater.createElement(
         root.rootNodeId(), UI::makeImageElement(imageContent(), "Tinted", fixedSize(80.0F, 40.0F)));
     ASSERT_TRUE(image.has_value()) << image.error().message;
-    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
     const UI::UIContextStatistics afterCommit = context->statistics();
     EXPECT_FALSE(afterCommit.layoutDirty);
     EXPECT_FALSE(afterCommit.hitDirty);
@@ -354,8 +354,8 @@ TEST_F(UIImageTest, RuntimeImageTintIsPaintOnlyAndNoOpPreservesDirty)
     EXPECT_TRUE(afterTint.paintDirty);
     // markPaintDirty also dirties Semantics phase (shared paint invalidation path).
 
-    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
-    const UI::UICommittedPaintView paint = context->committedPaint();
+    ASSERT_TRUE(context->publication().commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
+    const UI::UICommittedPaintView paint = context->publication().committedPaint();
     const auto paintEntry = std::ranges::find_if(
         paint, [image](const UI::UICommittedPaintEntry& entry) { return entry.node == *image; });
     ASSERT_NE(paintEntry, paint.end());
@@ -375,10 +375,10 @@ TEST_F(UIImageTest, CapacityFailureRollsBackNodeAndStorage)
 {
     auto context = createContext(1);
     ASSERT_NE(context, nullptr);
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
 

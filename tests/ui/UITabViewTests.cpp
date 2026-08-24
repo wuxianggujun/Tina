@@ -162,7 +162,7 @@ class UITabViewTest : public testing::Test {
 
     [[nodiscard]] static UI::UIRootOwner createRoot(UI::UIContext& context)
     {
-        auto result = context.rootBuilder().createRoot();
+        auto result = context.authoring().rootBuilder().createRoot();
         EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
         return result ? std::move(*result) : UI::UIRootOwner{};
     }
@@ -170,7 +170,7 @@ class UITabViewTest : public testing::Test {
     [[nodiscard]] static UI::UITreeUpdater createUpdater(
         UI::UIContext& context, UI::UIRootOwner& root)
     {
-        auto result = context.treeUpdater(root);
+        auto result = context.authoring().treeUpdater(root);
         EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
         return result ? std::move(*result) : UI::UITreeUpdater{};
     }
@@ -247,9 +247,9 @@ TEST_F(UITabViewTest, RelationshipsRejectDuplicatesNonChildrenAndCrossRootWithou
     const std::array crossRoot{
         UI::UITabViewItem{.tab = local.firstTab, .panel = foreign.firstPanel},
     };
-    rejected = context->setTabViewItems(local.tabView, crossRoot);
+    rejected = first.setTabViewItems(local.tabView, crossRoot);
     ASSERT_FALSE(rejected.has_value());
-    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::WrongContext);
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidNode);
 
     const std::array localItems{
         UI::UITabViewItem{.tab = local.firstTab, .panel = local.firstPanel},
@@ -279,7 +279,7 @@ TEST_F(UITabViewTest, LayoutPublishesPlacementMetricsAndOnlyActivePanel)
         fixedSize(240.0F, 120.0F));
     ASSERT_TRUE(nodes.tabView.hasValue());
 
-    assertOk(context->commitLayout({.width = 240.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 240.0F, .height = 120.0F}));
     const UI::UITabViewMetrics metrics = updater.tabViewMetrics(nodes.tabView).value();
     EXPECT_EQ(metrics.placement, UI::UITabViewPlacement::Top);
     EXPECT_EQ(metrics.activeTab, nodes.firstTab);
@@ -289,7 +289,7 @@ TEST_F(UITabViewTest, LayoutPublishesPlacementMetricsAndOnlyActivePanel)
     EXPECT_FLOAT_EQ(metrics.tabStripRect.height, 24.0F);
     EXPECT_FLOAT_EQ(metrics.activePanelRect.height, 90.0F);
 
-    const auto layout = context->committedLayout();
+    const auto layout = context->publication().committedLayout();
     const UI::UICommittedLayoutEntry* firstPanel = findLayout(layout, nodes.firstPanel);
     const UI::UICommittedLayoutEntry* secondPanel = findLayout(layout, nodes.secondPanel);
     ASSERT_NE(firstPanel, nullptr);
@@ -298,10 +298,10 @@ TEST_F(UITabViewTest, LayoutPublishesPlacementMetricsAndOnlyActivePanel)
     EXPECT_EQ(secondPanel->effectiveVisibility, UI::UIVisibility::Collapsed);
 
     assertOk(updater.setTabViewActiveTab(nodes.tabView, nodes.secondTab));
-    assertOk(context->commitLayout({.width = 240.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 240.0F, .height = 120.0F}));
     EXPECT_EQ(updater.tabViewMetrics(nodes.tabView).value().activePanel, nodes.secondPanel);
-    firstPanel = findLayout(context->committedLayout(), nodes.firstPanel);
-    secondPanel = findLayout(context->committedLayout(), nodes.secondPanel);
+    firstPanel = findLayout(context->publication().committedLayout(), nodes.firstPanel);
+    secondPanel = findLayout(context->publication().committedLayout(), nodes.secondPanel);
     ASSERT_NE(firstPanel, nullptr);
     ASSERT_NE(secondPanel, nullptr);
     EXPECT_EQ(firstPanel->effectiveVisibility, UI::UIVisibility::Collapsed);
@@ -349,7 +349,7 @@ TEST_F(UITabViewTest, BottomLeftAndRightPlacementsPublishExpectedRegions)
             },
             fixedSize(240.0F, 120.0F));
         ASSERT_TRUE(nodes.tabView.hasValue());
-        assertOk(context->commitLayout({.width = 240.0F, .height = 120.0F}));
+        assertOk(context->publication().commitLayout({.width = 240.0F, .height = 120.0F}));
 
         const UI::UITabViewMetrics metrics = updater.tabViewMetrics(nodes.tabView).value();
         EXPECT_EQ(metrics.placement, testCase.placement);
@@ -366,14 +366,14 @@ TEST_F(UITabViewTest, AutomaticAndManualCommandsShareFocusButDifferInSelection)
     auto automaticUpdater = createUpdater(*automaticContext, automaticRoot);
     const TabViewNodes automatic = createTabView(
         automaticUpdater, automaticRoot.rootNodeId(), {}, fixedSize(240.0F, 120.0F));
-    assertOk(automaticContext->commitLayout({.width = 240.0F, .height = 120.0F}));
-    assertOk(automaticContext->requestFocus(automatic.firstTab));
+    assertOk(automaticContext->publication().commitLayout({.width = 240.0F, .height = 120.0F}));
+    assertOk(automaticContext->input().requestFocus(automatic.firstTab));
     auto automaticResult = automaticUpdater.routeTabViewCommand(
         automatic.tabView, UI::UITabViewCommand::Next);
     ASSERT_TRUE(automaticResult.has_value()) << automaticResult.error().message;
     EXPECT_TRUE(automaticResult->focusChanged);
     EXPECT_TRUE(automaticResult->selectionChanged);
-    EXPECT_EQ(automaticContext->defaultActionFocus(), automatic.secondTab);
+    EXPECT_EQ(automaticContext->input().defaultActionFocus(), automatic.secondTab);
     EXPECT_EQ(automaticUpdater.tabViewActiveTab(automatic.tabView).value(), automatic.secondTab);
 
     auto manualContext = createContext();
@@ -384,20 +384,20 @@ TEST_F(UITabViewTest, AutomaticAndManualCommandsShareFocusButDifferInSelection)
         manualUpdater, manualRoot.rootNodeId(),
         UI::UITabViewConfig{.activationMode = UI::UITabActivationMode::Manual},
         fixedSize(240.0F, 120.0F));
-    assertOk(manualContext->commitLayout({.width = 240.0F, .height = 120.0F}));
-    assertOk(manualContext->requestFocus(manual.firstTab));
+    assertOk(manualContext->publication().commitLayout({.width = 240.0F, .height = 120.0F}));
+    assertOk(manualContext->input().requestFocus(manual.firstTab));
     auto manualResult = manualUpdater.routeTabViewCommand(
         manual.tabView, UI::UITabViewCommand::Next);
     ASSERT_TRUE(manualResult.has_value()) << manualResult.error().message;
     EXPECT_TRUE(manualResult->focusChanged);
     EXPECT_FALSE(manualResult->selectionChanged);
-    EXPECT_EQ(manualContext->defaultActionFocus(), manual.secondTab);
+    EXPECT_EQ(manualContext->input().defaultActionFocus(), manual.secondTab);
     EXPECT_EQ(manualUpdater.tabViewActiveTab(manual.tabView).value(), manual.firstTab);
 
     manualResult = manualUpdater.routeTabViewCommand(
         manual.tabView, UI::UITabViewCommand::Next);
     ASSERT_TRUE(manualResult.has_value());
-    EXPECT_EQ(manualContext->defaultActionFocus(), manual.firstTab);
+    EXPECT_EQ(manualContext->input().defaultActionFocus(), manual.firstTab);
 }
 
 TEST_F(UITabViewTest, CommandsHonorNonWrappingEdgesAndSkipDisabledTabs)
@@ -410,25 +410,25 @@ TEST_F(UITabViewTest, CommandsHonorNonWrappingEdgesAndSkipDisabledTabs)
         boundedUpdater, boundedRoot.rootNodeId(),
         UI::UITabViewConfig{.wrapKeyboardNavigation = false},
         fixedSize(240.0F, 120.0F));
-    assertOk(boundedContext->commitLayout({.width = 240.0F, .height = 120.0F}));
+    assertOk(boundedContext->publication().commitLayout({.width = 240.0F, .height = 120.0F}));
 
-    assertOk(boundedContext->requestFocus(bounded.secondTab));
+    assertOk(boundedContext->input().requestFocus(bounded.secondTab));
     auto atEnd = boundedUpdater.routeTabViewCommand(
         bounded.tabView, UI::UITabViewCommand::Next);
     ASSERT_TRUE(atEnd.has_value()) << atEnd.error().message;
     EXPECT_FALSE(atEnd->focusChanged);
     EXPECT_FALSE(atEnd->selectionChanged);
     EXPECT_EQ(atEnd->tab, bounded.secondTab);
-    EXPECT_EQ(boundedContext->defaultActionFocus(), bounded.secondTab);
+    EXPECT_EQ(boundedContext->input().defaultActionFocus(), bounded.secondTab);
 
-    assertOk(boundedContext->requestFocus(bounded.firstTab));
+    assertOk(boundedContext->input().requestFocus(bounded.firstTab));
     auto atStart = boundedUpdater.routeTabViewCommand(
         bounded.tabView, UI::UITabViewCommand::Previous);
     ASSERT_TRUE(atStart.has_value()) << atStart.error().message;
     EXPECT_FALSE(atStart->focusChanged);
     EXPECT_FALSE(atStart->selectionChanged);
     EXPECT_EQ(atStart->tab, bounded.firstTab);
-    EXPECT_EQ(boundedContext->defaultActionFocus(), bounded.firstTab);
+    EXPECT_EQ(boundedContext->input().defaultActionFocus(), bounded.firstTab);
 
     auto skippingContext = createContext();
     ASSERT_NE(skippingContext, nullptr);
@@ -447,10 +447,10 @@ TEST_F(UITabViewTest, CommandsHonorNonWrappingEdgesAndSkipDisabledTabs)
         UI::UITabViewItem{.tab = *thirdTab, .panel = *thirdPanel},
     };
     assertOk(skippingUpdater.setTabViewItems(skipping.tabView, items));
-    assertOk(skippingContext->commitLayout({.width = 240.0F, .height = 120.0F}));
-    assertOk(skippingContext->requestFocus(skipping.firstTab));
+    assertOk(skippingContext->publication().commitLayout({.width = 240.0F, .height = 120.0F}));
+    assertOk(skippingContext->input().requestFocus(skipping.firstTab));
     assertOk(skippingUpdater.setEnabled(skipping.secondTab, false));
-    assertOk(skippingContext->commitLayout({.width = 240.0F, .height = 120.0F}));
+    assertOk(skippingContext->publication().commitLayout({.width = 240.0F, .height = 120.0F}));
 
     auto skipped = skippingUpdater.routeTabViewCommand(
         skipping.tabView, UI::UITabViewCommand::Next);
@@ -458,7 +458,7 @@ TEST_F(UITabViewTest, CommandsHonorNonWrappingEdgesAndSkipDisabledTabs)
     EXPECT_EQ(skipped->tab, *thirdTab);
     EXPECT_TRUE(skipped->focusChanged);
     EXPECT_TRUE(skipped->selectionChanged);
-    EXPECT_EQ(skippingContext->defaultActionFocus(), *thirdTab);
+    EXPECT_EQ(skippingContext->input().defaultActionFocus(), *thirdTab);
     EXPECT_EQ(skippingUpdater.tabViewActiveTab(skipping.tabView).value(), *thirdTab);
 }
 
@@ -471,25 +471,25 @@ TEST_F(UITabViewTest, PointerAndAccessibilityActivationUseTheSharedSelectionPath
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(240.0F, 120.0F)));
     const TabViewNodes nodes = createTabView(
         updater, root.rootNodeId(), {}, fixedSize(240.0F, 120.0F));
-    assertOk(context->commitLayout({.width = 240.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 240.0F, .height = 120.0F}));
 
-    const UI::UICommittedLayoutEntry* second = findLayout(context->committedLayout(), nodes.secondTab);
+    const UI::UICommittedLayoutEntry* second = findLayout(context->publication().committedLayout(), nodes.secondTab);
     ASSERT_NE(second, nullptr);
     const UI::UILogicalPoint point{
         .x = second->worldRect.x + second->worldRect.width * 0.5F,
         .y = second->worldRect.y + second->worldRect.height * 0.5F,
     };
-    auto down = context->routePointerInput(pointerInput(
+    auto down = context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::ButtonDown, 1, point));
-    auto up = context->routePointerInput(pointerInput(
+    auto up = context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::ButtonUp, 2, point));
     ASSERT_TRUE(down.has_value()) << down.error().message;
     ASSERT_TRUE(up.has_value()) << up.error().message;
     EXPECT_EQ(updater.tabViewActiveTab(nodes.tabView).value(), nodes.secondTab);
-    EXPECT_EQ(context->defaultActionFocus(), nodes.secondTab);
+    EXPECT_EQ(context->input().defaultActionFocus(), nodes.secondTab);
 
-    assertOk(context->commitLayout({.width = 240.0F, .height = 120.0F}));
-    assertOk(context->performAccessibilityAction({
+    assertOk(context->publication().commitLayout({.width = 240.0F, .height = 120.0F}));
+    assertOk(context->input().performAccessibilityAction({
         .kind = UI::UIAccessibilityActionKind::Invoke,
         .node = nodes.firstTab,
     }));
@@ -504,12 +504,12 @@ TEST_F(UITabViewTest, SemanticsPublishTabListTabsSelectedStateAndActiveTabPanel)
     auto updater = createUpdater(*context, root);
     const TabViewNodes nodes = createTabView(
         updater, root.rootNodeId(), {}, fixedSize(240.0F, 120.0F), true);
-    assertOk(context->commitLayout({.width = 240.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 240.0F, .height = 120.0F}));
 
-    const UI::UISemanticsEntry* view = findSemantics(context->committedSemantics(), nodes.tabView);
-    const UI::UISemanticsEntry* firstTab = findSemantics(context->committedSemantics(), nodes.firstTab);
-    const UI::UISemanticsEntry* secondTab = findSemantics(context->committedSemantics(), nodes.secondTab);
-    const UI::UISemanticsEntry* firstPanel = findSemantics(context->committedSemantics(), nodes.firstPanel);
+    const UI::UISemanticsEntry* view = findSemantics(context->publication().committedSemantics(), nodes.tabView);
+    const UI::UISemanticsEntry* firstTab = findSemantics(context->publication().committedSemantics(), nodes.firstTab);
+    const UI::UISemanticsEntry* secondTab = findSemantics(context->publication().committedSemantics(), nodes.secondTab);
+    const UI::UISemanticsEntry* firstPanel = findSemantics(context->publication().committedSemantics(), nodes.firstPanel);
     ASSERT_NE(view, nullptr);
     ASSERT_NE(firstTab, nullptr);
     ASSERT_NE(secondTab, nullptr);
@@ -519,7 +519,7 @@ TEST_F(UITabViewTest, SemanticsPublishTabListTabsSelectedStateAndActiveTabPanel)
     EXPECT_TRUE(firstTab->selected);
     EXPECT_FALSE(secondTab->selected);
     EXPECT_EQ(firstPanel->role, UI::UISemanticsRole::TabPanel);
-    EXPECT_EQ(findSemantics(context->committedSemantics(), nodes.secondPanel), nullptr);
+    EXPECT_EQ(findSemantics(context->publication().committedSemantics(), nodes.secondPanel), nullptr);
 }
 
 TEST_F(UITabViewTest, DedicatedTabPaintPublishesSelectedChromeAndLinkedViewRejectsExtraChildren)
@@ -544,10 +544,10 @@ TEST_F(UITabViewTest, DedicatedTabPaintPublishesSelectedChromeAndLinkedViewRejec
     assertOk(updater.setBoxPaint(nodes.secondTab, UI::makeSolidBox(UI::rgb(0x010203))));
     assertOk(updater.setTabPaint(nodes.firstTab, tabPaint));
     assertOk(updater.setTabPaint(nodes.secondTab, tabPaint));
-    assertOk(context->commitLayout({.width = 240.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 240.0F, .height = 120.0F}));
 
     bool selectedFillFound = false;
-    for (const UI::UICommittedPaintEntry& entry : context->committedPaint().entries())
+    for (const UI::UICommittedPaintEntry& entry : context->publication().committedPaint().entries())
     {
         if (entry.node == nodes.firstTab && entry.kind != UI::UICommittedPaintKind::Glyph &&
             entry.solidFill == UI::premultiply(tabPaint.selectedBackgroundColor))
@@ -576,21 +576,21 @@ TEST_F(UITabViewTest, DestroyGenerationReuseAndFailedCommitDoNotLeakRelationship
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(240.0F, 120.0F)));
     const TabViewNodes nodes = createTabView(
         updater, root.rootNodeId(), {}, fixedSize(240.0F, 120.0F));
-    assertOk(context->commitLayout({.width = 240.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 240.0F, .height = 120.0F}));
     const UI::UITabViewMetrics published = updater.tabViewMetrics(nodes.tabView).value();
 
     assertOk(updater.setTabViewActiveTab(nodes.tabView, nodes.secondTab));
     auto overflow = updater.createElement(
         root.rootNodeId(), UI::makePanelElement(fixedSize(10.0F, 10.0F)));
     ASSERT_TRUE(overflow.has_value());
-    Core::Status failed = context->commitLayout({.width = 240.0F, .height = 120.0F});
+    Core::Status failed = context->publication().commitLayout({.width = 240.0F, .height = 120.0F});
     ASSERT_FALSE(failed.has_value());
     EXPECT_EQ(failed.error().code, UI::UIErrorCode::CapacityExceeded);
     EXPECT_EQ(updater.tabViewMetrics(nodes.tabView).value(), published);
     EXPECT_EQ(updater.tabViewActiveTab(nodes.tabView).value(), nodes.secondTab);
 
     assertOk(updater.destroy(*overflow));
-    assertOk(context->commitLayout({.width = 240.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 240.0F, .height = 120.0F}));
     EXPECT_EQ(updater.tabViewMetrics(nodes.tabView).value().activeTab, nodes.secondTab);
 
     const UI::UINodeId destroyedPanel = nodes.secondPanel;
@@ -617,11 +617,11 @@ TEST_F(UITabViewTest, ClearPublishesEmptyMetricsWithoutReusingOldGeometry)
             .contentGap = 6.0F,
         },
         fixedSize(240.0F, 120.0F));
-    assertOk(context->commitLayout({.width = 240.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 240.0F, .height = 120.0F}));
     ASSERT_EQ(updater.tabViewMetrics(nodes.tabView).value().itemCount, 2U);
 
     assertOk(updater.clearTabViewItems(nodes.tabView));
-    assertOk(context->commitLayout({.width = 240.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 240.0F, .height = 120.0F}));
     const UI::UITabViewMetrics cleared = updater.tabViewMetrics(nodes.tabView).value();
     EXPECT_EQ(cleared.placement, UI::UITabViewPlacement::Right);
     EXPECT_EQ(cleared.itemCount, 0U);
@@ -645,7 +645,7 @@ TEST_F(UITabViewTest, RelationshipAndCommandCapacityFailuresPreserveStateAtomica
     const TabViewNodes relationship = createTabView(
         relationshipUpdater, relationshipRoot.rootNodeId(), {}, fixedSize(240.0F, 120.0F));
     ASSERT_TRUE(relationship.tabView.hasValue());
-    assertOk(relationshipContext->commitLayout({.width = 240.0F, .height = 120.0F}));
+    assertOk(relationshipContext->publication().commitLayout({.width = 240.0F, .height = 120.0F}));
     assertOk(relationshipUpdater.setBoxPaint(
         relationship.firstPanel, UI::makeSolidBox(UI::rgb(0x123456))));
     const std::array relationshipItems{
@@ -676,15 +676,15 @@ TEST_F(UITabViewTest, RelationshipAndCommandCapacityFailuresPreserveStateAtomica
     const TabViewNodes command = createTabView(
         commandUpdater, commandRoot.rootNodeId(), {}, fixedSize(240.0F, 120.0F));
     ASSERT_TRUE(command.tabView.hasValue());
-    assertOk(commandContext->commitLayout({.width = 240.0F, .height = 120.0F}));
-    assertOk(commandContext->requestFocus(command.firstTab));
-    assertOk(commandContext->commitLayout({.width = 240.0F, .height = 120.0F}));
+    assertOk(commandContext->publication().commitLayout({.width = 240.0F, .height = 120.0F}));
+    assertOk(commandContext->input().requestFocus(command.firstTab));
+    assertOk(commandContext->publication().commitLayout({.width = 240.0F, .height = 120.0F}));
 
     auto commandRejected = commandUpdater.routeTabViewCommand(
         command.tabView, UI::UITabViewCommand::Next);
     ASSERT_FALSE(commandRejected.has_value());
     EXPECT_EQ(commandRejected.error().code, UI::UIErrorCode::CapacityExceeded);
-    EXPECT_EQ(commandContext->defaultActionFocus(), command.firstTab);
+    EXPECT_EQ(commandContext->input().defaultActionFocus(), command.firstTab);
     EXPECT_EQ(commandUpdater.tabViewActiveTab(command.tabView).value(), command.firstTab);
 }
 

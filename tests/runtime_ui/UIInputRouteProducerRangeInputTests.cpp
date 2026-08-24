@@ -25,8 +25,8 @@ TEST_F(UIInputRouteProducerTest, KeyboardRangeInputSuppressesGameplayThroughMatc
     expectOk(tree.updater.setLayoutStyle(*slider, fixedSize(40.0F, 24.0F)));
     expectOk(tree.updater.setSliderRange(*slider, 0.0F, 100.0F, 5.0F));
     expectOk(tree.updater.setSliderValue(*slider, 25.0F));
-    expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
-    expectOk(tree.context->requestFocus(*slider));
+    expectOk(tree.context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
+    expectOk(tree.context->input().requestFocus(*slider));
 
     auto producer = createProducer();
     auto mapper = createKeyMapper(Platform::Key::Right);
@@ -54,7 +54,7 @@ TEST_F(UIInputRouteProducerTest, KeyboardRangeInputSuppressesGameplayThroughMatc
     EXPECT_FALSE(suppressed->isActive(NavigationAction));
     ASSERT_TRUE(mapper->completeSimulationTick(0).has_value());
 
-    expectOk(tree.context->requestFocus(tree.target));
+    expectOk(tree.context->input().requestFocus(tree.target));
     auto up = buildFrame(*builder, window, {
                                                    .frameId = {401},
                                                    .transitions = {keyUp(window, Platform::Key::Right)},
@@ -71,7 +71,7 @@ TEST_F(UIInputRouteProducerTest, KeyboardRangeInputSuppressesGameplayThroughMatc
     EXPECT_TRUE(released->transitions.empty());
     ASSERT_TRUE(mapper->completeSimulationTick(1).has_value());
 
-    expectOk(tree.context->clearFocus());
+    expectOk(tree.context->input().clearFocus());
     auto gameplayDown = buildFrame(*builder, window, {
                                                              .frameId = {402},
                                                              .transitions = {keyDown(window, Platform::Key::Right)},
@@ -100,8 +100,8 @@ TEST_F(UIInputRouteProducerTest, GamepadRangeInputPrecedesSpatialFocusAndLatches
     expectOk(tree.updater.setLayoutStyle(*slider, fixedSize(40.0F, 24.0F)));
     expectOk(tree.updater.setSliderRange(*slider, 0.0F, 100.0F, 5.0F));
     expectOk(tree.updater.setSliderValue(*slider, 25.0F));
-    expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
-    expectOk(tree.context->requestFocus(*slider));
+    expectOk(tree.context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
+    expectOk(tree.context->input().requestFocus(*slider));
 
     Platform::GamepadSnapshot held{
         .gamepad = gamepad,
@@ -121,7 +121,7 @@ TEST_F(UIInputRouteProducerTest, GamepadRangeInputPrecedesSpatialFocusAndLatches
     auto downOutput = producer->produce(tree.context.get(), *down);
     ASSERT_TRUE(downOutput.has_value()) << (downOutput ? "" : downOutput.error().message);
     EXPECT_TRUE(downOutput->consumption.isConsumed(0));
-    EXPECT_EQ(tree.context->defaultActionFocus(), *slider);
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), *slider);
     auto value = tree.updater.sliderValue(*slider);
     ASSERT_TRUE(value.has_value());
     EXPECT_FLOAT_EQ(*value, 30.0F);
@@ -153,8 +153,8 @@ TEST_F(UIInputRouteProducerTest, ReadOnlyRangeInputLeavesArrowGameplayVisibleWit
     expectOk(tree.updater.setLayoutStyle(*slider, fixedSize(40.0F, 24.0F)));
     expectOk(tree.updater.setSliderRange(*slider, 0.0F, 100.0F, 5.0F));
     expectOk(tree.updater.setSliderValue(*slider, 25.0F));
-    expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
-    expectOk(tree.context->requestFocus(*slider));
+    expectOk(tree.context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
+    expectOk(tree.context->input().requestFocus(*slider));
 
     auto frame = buildFrame(*builder, window, {
                                                       .frameId = {420},
@@ -169,7 +169,7 @@ TEST_F(UIInputRouteProducerTest, ReadOnlyRangeInputLeavesArrowGameplayVisibleWit
     auto output = producer->produce(tree.context.get(), *frame);
     ASSERT_TRUE(output.has_value()) << (output ? "" : output.error().message);
     EXPECT_FALSE(output->consumption.isConsumed(0));
-    EXPECT_EQ(tree.context->defaultActionFocus(), *slider);
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), *slider);
     ASSERT_TRUE(mapper->mapFrame(*frame, output->consumption, output->claims, 0, 0,
                                  &lastPresentedCamera2D)
                     .has_value());

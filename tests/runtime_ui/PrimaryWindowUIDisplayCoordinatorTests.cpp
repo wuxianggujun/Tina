@@ -5,7 +5,9 @@
 #include <tina/render/RenderFramePacket.hpp>
 #include <tina/render/RenderErrors.hpp>
 #include <tina/runtime/RuntimeErrors.hpp>
+#include <tina/ui/UIAuthoring.hpp>
 #include <tina/ui/UIContext.hpp>
+#include <tina/ui/UIPublicationPipeline.hpp>
 
 #include "../../src/runtime/ui/PrimaryWindowUIDisplayCoordinator.hpp"
 #include "../../src/runtime/ui/PrimaryWindowUICapabilityState.hpp"
@@ -147,10 +149,10 @@ class PrimaryWindowUIDisplayCoordinatorTest : public testing::Test {
         ASSERT_TRUE(contextResult.has_value());
         context = std::move(*contextResult);
 
-        auto rootResult = context->rootBuilder().createRoot();
+        auto rootResult = context->authoring().rootBuilder().createRoot();
         ASSERT_TRUE(rootResult.has_value());
         root = std::move(*rootResult);
-        auto updaterResult = context->treeUpdater(root);
+        auto updaterResult = context->authoring().treeUpdater(root);
         ASSERT_TRUE(updaterResult.has_value());
         auto& updater = *updaterResult;
         auto panelResult = updater.createElement(root.rootNodeId(), UI::makePanelElement());
@@ -166,7 +168,7 @@ class PrimaryWindowUIDisplayCoordinatorTest : public testing::Test {
         panelStyle.size.height = UI::UILayoutLength::Px(50.0F);
         ASSERT_TRUE(updater.setLayoutStyle(panel, panelStyle).has_value());
         ASSERT_TRUE(updater.setBoxPaint(panel, solidFill(20, 40, 80)).has_value());
-        ASSERT_TRUE(context->commitLayout({.width = 200.0F, .height = 100.0F}).has_value());
+        ASSERT_TRUE(context->publication().commitLayout({.width = 200.0F, .height = 100.0F}).has_value());
     }
 
     [[nodiscard]] PrimaryWindowUIDisplayCoordinator createCoordinator(
@@ -180,7 +182,7 @@ class PrimaryWindowUIDisplayCoordinatorTest : public testing::Test {
 
     [[nodiscard]] Core::Status addSecondPaintedPanel()
     {
-        auto updaterResult = context->treeUpdater(root);
+        auto updaterResult = context->authoring().treeUpdater(root);
         if (!updaterResult)
         {
             return Core::failure(std::move(updaterResult.error()));
@@ -201,7 +203,7 @@ class PrimaryWindowUIDisplayCoordinatorTest : public testing::Test {
         {
             return status;
         }
-        return context->commitLayout({.width = 200.0F, .height = 100.0F});
+        return context->publication().commitLayout({.width = 200.0F, .height = 100.0F});
     }
 
     std::unique_ptr<WindowPool> windows;

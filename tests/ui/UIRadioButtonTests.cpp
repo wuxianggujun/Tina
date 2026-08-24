@@ -33,7 +33,7 @@ using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
 
 [[nodiscard]] UI::UIRootOwner createRoot(UI::UIContext& context)
 {
-    auto result = context.rootBuilder().createRoot();
+    auto result = context.authoring().rootBuilder().createRoot();
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UIRootOwner{};
 }
@@ -42,7 +42,7 @@ using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
     UI::UIContext& context,
     UI::UIRootOwner& root)
 {
-    auto result = context.treeUpdater(root);
+    auto result = context.authoring().treeUpdater(root);
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UITreeUpdater{};
 }
@@ -211,7 +211,7 @@ protected:
 
     void publishLayout()
     {
-        assertOk(context->commitLayout({.width = 160.0F, .height = 120.0F}));
+        assertOk(context->publication().commitLayout({.width = 160.0F, .height = 120.0F}));
     }
 
     std::unique_ptr<WindowPool> windows;
@@ -252,7 +252,7 @@ TEST_F(UIRadioButtonTest, DefaultsExposeTextPaintCapabilitiesAndSemantics)
     publishLayout();
 
     const UI::UICommittedHitEntry* const hitEntry =
-        findHitEntry(context->committedHit(), radioButton);
+        findHitEntry(context->publication().committedHit(), radioButton);
     ASSERT_NE(hitEntry, nullptr);
     EXPECT_EQ(hitEntry->policy, UI::UIPointerHitPolicy::Targetable);
     EXPECT_TRUE(UI::hasBehavior(hitEntry->behaviors, UI::UIElementBehavior::Focusable));
@@ -260,7 +260,7 @@ TEST_F(UIRadioButtonTest, DefaultsExposeTextPaintCapabilitiesAndSemantics)
     EXPECT_TRUE(UI::hasBehavior(hitEntry->behaviors, UI::UIElementBehavior::ExclusiveChoice));
 
     const UI::UISemanticsEntry* const semantics =
-        findSemanticsEntry(context->committedSemantics(), radioButton);
+        findSemanticsEntry(context->publication().committedSemantics(), radioButton);
     ASSERT_NE(semantics, nullptr);
     EXPECT_EQ(semantics->role, UI::UISemanticsRole::RadioButton);
     EXPECT_TRUE(UI::hasSemanticsAction(semantics->actions, UI::UISemanticsAction::Toggle));
@@ -331,7 +331,7 @@ TEST_F(UIRadioButtonTest, IndicatorPaintPublishesDeterministicGeometry)
     assertOk(updater.setRadioButtonSelected(radioButton, true));
 
     publishLayout();
-    const UI::UICommittedPaintView paint = context->committedPaint();
+    const UI::UICommittedPaintView paint = context->publication().committedPaint();
     ASSERT_EQ(paint.size(), 2U);
     const UI::UICommittedPaintEntry& track = paint.entries()[0];
     const UI::UICommittedPaintEntry& indicator = paint.entries()[1];
@@ -381,27 +381,27 @@ TEST_F(UIRadioButtonTest, HoveredFocusedPressedAndDisabledStatesResolveCommitted
         }));
 
     publishLayout();
-    ASSERT_EQ(context->committedPaint().size(), 1U);
+    ASSERT_EQ(context->publication().committedPaint().size(), 1U);
     EXPECT_EQ(
-        context->committedPaint().entries()[0].solidFill,
+        context->publication().committedPaint().entries()[0].solidFill,
         (UI::UIPremultipliedRgba8Color{10, 20, 30, 255}));
 
-    assertOk(context->requestFocus(radioButton));
+    assertOk(context->input().requestFocus(radioButton));
     publishLayout();
     EXPECT_EQ(
-        context->committedPaint().entries()[0].solidFill,
+        context->publication().committedPaint().entries()[0].solidFill,
         (UI::UIPremultipliedRgba8Color{10, 20, 30, 255}));
 
-    auto keyboardNavigation = context->routeFocusNavigation(
+    auto keyboardNavigation = context->input().routeFocusNavigation(
         UI::UIFocusNavigationDirection::Right, true,
         UI::UIInputModality::Keyboard);
     ASSERT_TRUE(keyboardNavigation.has_value()) << keyboardNavigation.error().message;
     publishLayout();
     EXPECT_EQ(
-        context->committedPaint().entries()[0].solidFill,
+        context->publication().committedPaint().entries()[0].solidFill,
         (UI::UIPremultipliedRgba8Color{40, 50, 60, 255}));
 
-    auto movedInside = context->routePointerInput(makePointerInput(
+    auto movedInside = context->input().routePointerInput(makePointerInput(
         window,
         UI::UIRoutedPointerEventKind::Move,
         1,
@@ -409,10 +409,10 @@ TEST_F(UIRadioButtonTest, HoveredFocusedPressedAndDisabledStatesResolveCommitted
     ASSERT_TRUE(movedInside.has_value()) << (movedInside ? "" : movedInside.error().message);
     publishLayout();
     EXPECT_EQ(
-        context->committedPaint().entries()[0].solidFill,
+        context->publication().committedPaint().entries()[0].solidFill,
         (UI::UIPremultipliedRgba8Color{100, 110, 120, 255}));
 
-    auto down = context->routePointerInput(makePointerInput(
+    auto down = context->input().routePointerInput(makePointerInput(
         window,
         UI::UIRoutedPointerEventKind::ButtonDown,
         2,
@@ -420,14 +420,14 @@ TEST_F(UIRadioButtonTest, HoveredFocusedPressedAndDisabledStatesResolveCommitted
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
     EXPECT_TRUE(down->consumed);
     EXPECT_TRUE(isPressed(updater, radioButton));
-    EXPECT_EQ(context->defaultActionFocus(), radioButton);
+    EXPECT_EQ(context->input().defaultActionFocus(), radioButton);
     publishLayout();
-    ASSERT_EQ(context->committedPaint().size(), 1U);
+    ASSERT_EQ(context->publication().committedPaint().size(), 1U);
     EXPECT_EQ(
-        context->committedPaint().entries()[0].solidFill,
+        context->publication().committedPaint().entries()[0].solidFill,
         (UI::UIPremultipliedRgba8Color{70, 80, 90, 255}));
 
-    auto up = context->routePointerInput(makePointerInput(
+    auto up = context->input().routePointerInput(makePointerInput(
         window,
         UI::UIRoutedPointerEventKind::ButtonUp,
         3,
@@ -435,14 +435,14 @@ TEST_F(UIRadioButtonTest, HoveredFocusedPressedAndDisabledStatesResolveCommitted
     ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
     EXPECT_TRUE(up->consumed);
     EXPECT_FALSE(isPressed(updater, radioButton));
-    EXPECT_EQ(context->defaultActionFocus(), radioButton);
+    EXPECT_EQ(context->input().defaultActionFocus(), radioButton);
     publishLayout();
-    ASSERT_EQ(context->committedPaint().size(), 1U);
+    ASSERT_EQ(context->publication().committedPaint().size(), 1U);
     EXPECT_EQ(
-        context->committedPaint().entries()[0].solidFill,
+        context->publication().committedPaint().entries()[0].solidFill,
         (UI::UIPremultipliedRgba8Color{100, 110, 120, 255}));
 
-    auto movedOutside = context->routePointerInput(makePointerInput(
+    auto movedOutside = context->input().routePointerInput(makePointerInput(
         window,
         UI::UIRoutedPointerEventKind::Move,
         4,
@@ -450,15 +450,15 @@ TEST_F(UIRadioButtonTest, HoveredFocusedPressedAndDisabledStatesResolveCommitted
     ASSERT_TRUE(movedOutside.has_value()) << (movedOutside ? "" : movedOutside.error().message);
     publishLayout();
     EXPECT_EQ(
-        context->committedPaint().entries()[0].solidFill,
+        context->publication().committedPaint().entries()[0].solidFill,
         (UI::UIPremultipliedRgba8Color{10, 20, 30, 255}));
 
     assertOk(updater.setEnabled(radioButton, false));
-    EXPECT_FALSE(context->defaultActionFocus().hasValue());
+    EXPECT_FALSE(context->input().defaultActionFocus().hasValue());
     publishLayout();
-    ASSERT_EQ(context->committedPaint().size(), 1U);
+    ASSERT_EQ(context->publication().committedPaint().size(), 1U);
     EXPECT_EQ(
-        context->committedPaint().entries()[0].solidFill,
+        context->publication().committedPaint().entries()[0].solidFill,
         (UI::UIPremultipliedRgba8Color{5, 11, 16, 140}));
 }
 
@@ -481,7 +481,7 @@ TEST_F(UIRadioButtonTest, AutoWidthUsesIndicatorExtentAndTracksLabelGap)
     publishLayout();
 
     const UI::UICommittedLayoutEntry* firstLayout =
-        findLayoutEntry(context->committedLayout(), radioButton);
+        findLayoutEntry(context->publication().committedLayout(), radioButton);
     ASSERT_NE(firstLayout, nullptr);
     const float firstWidth = firstLayout->worldRect.width;
     EXPECT_FLOAT_EQ(firstWidth, 45.2F);
@@ -493,7 +493,7 @@ TEST_F(UIRadioButtonTest, AutoWidthUsesIndicatorExtentAndTracksLabelGap)
     EXPECT_TRUE(context->statistics().layoutDirty);
     publishLayout();
     const UI::UICommittedLayoutEntry* secondLayout =
-        findLayoutEntry(context->committedLayout(), radioButton);
+        findLayoutEntry(context->publication().committedLayout(), radioButton);
     ASSERT_NE(secondLayout, nullptr);
     EXPECT_FLOAT_EQ(secondLayout->worldRect.width, firstWidth + 10.0F);
     EXPECT_FLOAT_EQ(secondLayout->worldRect.height, 40.0F);
@@ -515,7 +515,7 @@ TEST_F(UIRadioButtonTest, IndicatorlessAutoWidthDoesNotReserveLeadingSpace)
     publishLayout();
 
     const UI::UICommittedLayoutEntry* withIndicator =
-        findLayoutEntry(context->committedLayout(), radioButton);
+        findLayoutEntry(context->publication().committedLayout(), radioButton);
     ASSERT_NE(withIndicator, nullptr);
     const float widthWithIndicator = withIndicator->worldRect.width;
 
@@ -529,7 +529,7 @@ TEST_F(UIRadioButtonTest, IndicatorlessAutoWidthDoesNotReserveLeadingSpace)
     publishLayout();
 
     const UI::UICommittedLayoutEntry* withoutIndicator =
-        findLayoutEntry(context->committedLayout(), radioButton);
+        findLayoutEntry(context->publication().committedLayout(), radioButton);
     ASSERT_NE(withoutIndicator, nullptr);
     EXPECT_FLOAT_EQ(withoutIndicator->worldRect.width + 26.0F, widthWithIndicator);
     EXPECT_FLOAT_EQ(withoutIndicator->worldRect.height, 40.0F);
@@ -553,7 +553,7 @@ TEST_F(UIRadioButtonTest, IndicatorlessSelectionPaintsTheFullControlWithoutIndic
     assertOk(updater.setRadioButtonSelected(radioButton, true));
 
     publishLayout();
-    const UI::UICommittedPaintView paint = context->committedPaint();
+    const UI::UICommittedPaintView paint = context->publication().committedPaint();
     ASSERT_EQ(paint.size(), 1U);
     EXPECT_EQ(paint.entries()[0].node, radioButton);
     EXPECT_EQ(
@@ -577,13 +577,13 @@ TEST_F(UIRadioButtonTest, EmptyLabelAutoSizeKeepsIndicatorVisible)
     publishLayout();
 
     const UI::UICommittedLayoutEntry* layout =
-        findLayoutEntry(context->committedLayout(), radioButton);
+        findLayoutEntry(context->publication().committedLayout(), radioButton);
     ASSERT_NE(layout, nullptr);
     EXPECT_GT(layout->worldRect.width, 0.0F);
     EXPECT_GT(layout->worldRect.height, 0.0F);
     EXPECT_FLOAT_EQ(layout->worldRect.width, layout->worldRect.height);
 
-    const UI::UICommittedPaintView paint = context->committedPaint();
+    const UI::UICommittedPaintView paint = context->publication().committedPaint();
     ASSERT_EQ(paint.size(), 1U);
     EXPECT_EQ(paint.entries()[0].node, radioButton);
     EXPECT_GT(paint.entries()[0].worldRect.width, 0.0F);
@@ -612,10 +612,10 @@ TEST_F(UIRadioButtonTest, GroupDirtyCapacityFailurePreservesSelectionAtomically)
     ASSERT_TRUE(secondResult.has_value());
     const UI::UINodeId first = *firstResult;
     const UI::UINodeId second = *secondResult;
-    assertOk(limitedContext->commitLayout({.width = 160.0F, .height = 120.0F}));
+    assertOk(limitedContext->publication().commitLayout({.width = 160.0F, .height = 120.0F}));
 
     assertOk(limitedUpdater.setRadioButtonSelected(first, true));
-    assertOk(limitedContext->commitLayout({.width = 160.0F, .height = 120.0F}));
+    assertOk(limitedContext->publication().commitLayout({.width = 160.0F, .height = 120.0F}));
     const Core::Status rejected = limitedUpdater.setRadioButtonSelected(second, true);
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::CapacityExceeded);
@@ -654,23 +654,23 @@ TEST_F(UIRadioButtonTest, PaintCapacityCountsSelectedIndicatorAtomically)
             .selectedIndicatorInset = 4.0F,
             .labelGap = 8.0F,
         }));
-    assertOk(limitedContext->commitLayout({.width = 40.0F, .height = 24.0F}));
-    ASSERT_EQ(limitedContext->committedPaint().size(), 1U);
-    const u64 publishedRevision = limitedContext->committedPaint().paintRevision();
+    assertOk(limitedContext->publication().commitLayout({.width = 40.0F, .height = 24.0F}));
+    ASSERT_EQ(limitedContext->publication().committedPaint().size(), 1U);
+    const u64 publishedRevision = limitedContext->publication().committedPaint().paintRevision();
 
     assertOk(limitedUpdater.setRadioButtonSelected(radioButton, true));
     const Core::Status overflow =
-        limitedContext->commitLayout({.width = 40.0F, .height = 24.0F});
+        limitedContext->publication().commitLayout({.width = 40.0F, .height = 24.0F});
     ASSERT_FALSE(overflow.has_value());
     EXPECT_EQ(overflow.error().code, UI::UIErrorCode::CapacityExceeded);
-    EXPECT_EQ(limitedContext->committedPaint().paintRevision(), publishedRevision);
-    ASSERT_EQ(limitedContext->committedPaint().size(), 1U);
-    EXPECT_EQ(limitedContext->committedPaint().entries()[0].node, radioButton);
+    EXPECT_EQ(limitedContext->publication().committedPaint().paintRevision(), publishedRevision);
+    ASSERT_EQ(limitedContext->publication().committedPaint().size(), 1U);
+    EXPECT_EQ(limitedContext->publication().committedPaint().entries()[0].node, radioButton);
     EXPECT_TRUE(limitedContext->statistics().paintDirty);
 
     assertOk(limitedUpdater.setRadioButtonSelected(radioButton, false));
-    assertOk(limitedContext->commitLayout({.width = 40.0F, .height = 24.0F}));
-    EXPECT_EQ(limitedContext->committedPaint().size(), 1U);
+    assertOk(limitedContext->publication().commitLayout({.width = 40.0F, .height = 24.0F}));
+    EXPECT_EQ(limitedContext->publication().committedPaint().size(), 1U);
 }
 
 TEST_F(UIRadioButtonTest, FocusedOverrideIsIncludedInPaintCapacityPreflight)
@@ -708,21 +708,21 @@ TEST_F(UIRadioButtonTest, FocusedOverrideIsIncludedInPaintCapacityPreflight)
         .alpha = 255,
     };
     assertOk(limitedUpdater.setRadioButtonPaint(radioButton, radioPaint));
-    assertOk(limitedContext->commitLayout({.width = 40.0F, .height = 24.0F}));
-    ASSERT_EQ(limitedContext->committedPaint().size(), 1U);
-    const u64 publishedRevision = limitedContext->committedPaint().paintRevision();
+    assertOk(limitedContext->publication().commitLayout({.width = 40.0F, .height = 24.0F}));
+    ASSERT_EQ(limitedContext->publication().committedPaint().size(), 1U);
+    const u64 publishedRevision = limitedContext->publication().committedPaint().paintRevision();
 
-    auto focus = limitedContext->routeDefaultActionFocusStep(false);
+    auto focus = limitedContext->input().routeDefaultActionFocusStep(false);
     ASSERT_TRUE(focus.has_value()) << (focus ? "" : focus.error().message);
     EXPECT_TRUE(focus->consumed);
     EXPECT_EQ(focus->focus, radioButton);
     const Core::Status overflow =
-        limitedContext->commitLayout({.width = 40.0F, .height = 24.0F});
+        limitedContext->publication().commitLayout({.width = 40.0F, .height = 24.0F});
     ASSERT_FALSE(overflow.has_value());
     EXPECT_EQ(overflow.error().code, UI::UIErrorCode::CapacityExceeded);
-    EXPECT_EQ(limitedContext->committedPaint().paintRevision(), publishedRevision);
-    ASSERT_EQ(limitedContext->committedPaint().size(), 1U);
-    EXPECT_EQ(limitedContext->committedPaint().entries()[0].node, limitedRoot.rootNodeId());
+    EXPECT_EQ(limitedContext->publication().committedPaint().paintRevision(), publishedRevision);
+    ASSERT_EQ(limitedContext->publication().committedPaint().size(), 1U);
+    EXPECT_EQ(limitedContext->publication().committedPaint().entries()[0].node, limitedRoot.rootNodeId());
     EXPECT_TRUE(limitedContext->statistics().paintDirty);
 }
 
@@ -739,9 +739,9 @@ TEST_F(UIRadioButtonTest, PointerAndKeyboardActivationSelectWithoutTogglingOff)
     ActivationLog secondLog{};
     assertOk(updater.setRadioButtonAction(first, actionFor(firstLog)));
     assertOk(updater.setRadioButtonAction(second, actionFor(secondLog)));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 80.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 80.0F}));
 
-    auto down = context->routePointerInput(makePointerInput(
+    auto down = context->input().routePointerInput(makePointerInput(
         window,
         UI::UIRoutedPointerEventKind::ButtonDown,
         1,
@@ -751,7 +751,7 @@ TEST_F(UIRadioButtonTest, PointerAndKeyboardActivationSelectWithoutTogglingOff)
     EXPECT_EQ(down->pointQuery.target.node, first);
     EXPECT_TRUE(isPressed(updater, first));
 
-    auto up = context->routePointerInput(makePointerInput(
+    auto up = context->input().routePointerInput(makePointerInput(
         window,
         UI::UIRoutedPointerEventKind::ButtonUp,
         2,
@@ -766,13 +766,13 @@ TEST_F(UIRadioButtonTest, PointerAndKeyboardActivationSelectWithoutTogglingOff)
     EXPECT_EQ(firstLog.source, UI::UIButtonActivationSource::PrimaryPointer);
     EXPECT_EQ(firstLog.platformFrame, Platform::PlatformFrameId{2});
     EXPECT_EQ(firstLog.sourceSequence, 2U);
-    EXPECT_EQ(context->defaultActionFocus(), first);
+    EXPECT_EQ(context->input().defaultActionFocus(), first);
 
-    auto focus = context->routeDefaultActionFocusStep(false);
+    auto focus = context->input().routeDefaultActionFocusStep(false);
     ASSERT_TRUE(focus.has_value()) << (focus ? "" : focus.error().message);
     EXPECT_TRUE(focus->consumed);
     EXPECT_EQ(focus->focus, second);
-    auto activation = context->routeDefaultActionActivate(
+    auto activation = context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{3},
         3,
         UI::UIButtonActivationSource::Keyboard);
@@ -788,11 +788,11 @@ TEST_F(UIRadioButtonTest, PointerAndKeyboardActivationSelectWithoutTogglingOff)
     EXPECT_EQ(secondLog.platformFrame, Platform::PlatformFrameId{3});
     EXPECT_EQ(secondLog.sourceSequence, 3U);
 
-    assertOk(context->commitLayout({.width = 100.0F, .height = 80.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 80.0F}));
     const UI::UISemanticsEntry* const firstSemantics =
-        findSemanticsEntry(context->committedSemantics(), first);
+        findSemanticsEntry(context->publication().committedSemantics(), first);
     const UI::UISemanticsEntry* const secondSemantics =
-        findSemanticsEntry(context->committedSemantics(), second);
+        findSemanticsEntry(context->publication().committedSemantics(), second);
     ASSERT_NE(firstSemantics, nullptr);
     ASSERT_NE(secondSemantics, nullptr);
     EXPECT_FALSE(firstSemantics->checked);
@@ -800,7 +800,7 @@ TEST_F(UIRadioButtonTest, PointerAndKeyboardActivationSelectWithoutTogglingOff)
     EXPECT_TRUE(secondSemantics->checked);
     EXPECT_TRUE(secondSemantics->focused);
 
-    auto repeat = context->routeDefaultActionActivate(
+    auto repeat = context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{4},
         4,
         UI::UIButtonActivationSource::Keyboard);
@@ -809,7 +809,7 @@ TEST_F(UIRadioButtonTest, PointerAndKeyboardActivationSelectWithoutTogglingOff)
     EXPECT_TRUE(isSelected(updater, second));
     EXPECT_EQ(secondLog.count, 2);
 
-    auto gamepad = context->routeDefaultActionActivate(
+    auto gamepad = context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{5},
         5,
         UI::UIButtonActivationSource::Gamepad);
@@ -869,7 +869,7 @@ TEST_F(UIRadioButtonTest, PointerRouteReservationSurvivesListenerSiblingMutation
     ActivationLog thirdLog{};
     assertOk(limitedUpdater.setRadioButtonAction(first, actionFor(firstLog)));
     assertOk(limitedUpdater.setRadioButtonAction(third, actionFor(thirdLog)));
-    assertOk(limitedContext->commitLayout({.width = 100.0F, .height = 80.0F}));
+    assertOk(limitedContext->publication().commitLayout({.width = 100.0F, .height = 80.0F}));
 
     struct ListenerState final {
         UI::UIContext* context = nullptr;
@@ -889,7 +889,7 @@ TEST_F(UIRadioButtonTest, PointerRouteReservationSurvivesListenerSiblingMutation
         .firstBlocker = firstBlocker,
         .secondBlocker = secondBlocker,
     };
-    auto listenerResult = limitedContext->addRoutedPointerListener(
+    auto listenerResult = limitedContext->input().addRoutedPointerListener(
         {
             .node = first,
             .kind = UI::UIRoutedPointerEventKind::ButtonUp,
@@ -908,7 +908,7 @@ TEST_F(UIRadioButtonTest, PointerRouteReservationSurvivesListenerSiblingMutation
                     return;
                 }
                 const Core::Status listenerCommit =
-                    listenerState.context->commitLayout(
+                    listenerState.context->publication().commitLayout(
                     {.width = 100.0F, .height = 80.0F});
                 listenerState.commitRejected = !listenerCommit
                     && listenerCommit.error().code
@@ -935,7 +935,7 @@ TEST_F(UIRadioButtonTest, PointerRouteReservationSurvivesListenerSiblingMutation
         << (listenerResult ? "" : listenerResult.error().message);
     auto listenerToken = std::move(*listenerResult);
 
-    auto down = limitedContext->routePointerInput(makePointerInput(
+    auto down = limitedContext->input().routePointerInput(makePointerInput(
         window,
         UI::UIRoutedPointerEventKind::ButtonDown,
         1,
@@ -943,9 +943,9 @@ TEST_F(UIRadioButtonTest, PointerRouteReservationSurvivesListenerSiblingMutation
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
     EXPECT_TRUE(down->consumed);
     EXPECT_TRUE(isPressed(limitedUpdater, first));
-    assertOk(limitedContext->commitLayout({.width = 100.0F, .height = 80.0F}));
+    assertOk(limitedContext->publication().commitLayout({.width = 100.0F, .height = 80.0F}));
 
-    auto up = limitedContext->routePointerInput(makePointerInput(
+    auto up = limitedContext->input().routePointerInput(makePointerInput(
         window,
         UI::UIRoutedPointerEventKind::ButtonUp,
         2,
@@ -968,13 +968,13 @@ TEST_F(UIRadioButtonTest, PointerRouteReservationSurvivesListenerSiblingMutation
     // The listener's re-entrant commit is rejected; the initial committed
     // selection remains published until the route's pending action commits.
     const UI::UISemanticsEntry* committedFirst = findSemanticsEntry(
-        limitedContext->committedSemantics(),
+        limitedContext->publication().committedSemantics(),
         first);
     const UI::UISemanticsEntry* committedSecond = findSemanticsEntry(
-        limitedContext->committedSemantics(),
+        limitedContext->publication().committedSemantics(),
         second);
     const UI::UISemanticsEntry* committedThird = findSemanticsEntry(
-        limitedContext->committedSemantics(),
+        limitedContext->publication().committedSemantics(),
         third);
     ASSERT_NE(committedFirst, nullptr);
     ASSERT_NE(committedSecond, nullptr);
@@ -983,10 +983,10 @@ TEST_F(UIRadioButtonTest, PointerRouteReservationSurvivesListenerSiblingMutation
     EXPECT_TRUE(committedSecond->checked);
     EXPECT_FALSE(committedThird->checked);
 
-    assertOk(limitedContext->commitLayout({.width = 100.0F, .height = 80.0F}));
-    committedFirst = findSemanticsEntry(limitedContext->committedSemantics(), first);
-    committedSecond = findSemanticsEntry(limitedContext->committedSemantics(), second);
-    committedThird = findSemanticsEntry(limitedContext->committedSemantics(), third);
+    assertOk(limitedContext->publication().commitLayout({.width = 100.0F, .height = 80.0F}));
+    committedFirst = findSemanticsEntry(limitedContext->publication().committedSemantics(), first);
+    committedSecond = findSemanticsEntry(limitedContext->publication().committedSemantics(), second);
+    committedThird = findSemanticsEntry(limitedContext->publication().committedSemantics(), third);
     ASSERT_NE(committedFirst, nullptr);
     ASSERT_NE(committedSecond, nullptr);
     ASSERT_NE(committedThird, nullptr);

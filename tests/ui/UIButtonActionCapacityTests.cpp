@@ -52,7 +52,7 @@ TEST_F(
     assertOk(updater.setLayoutStyle(root.rootNodeId(), row));
     assertOk(updater.setLayoutStyle(first, fixedSize(40.0F, 40.0F)));
     assertOk(updater.setLayoutStyle(second, fixedSize(40.0F, 40.0F)));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
     assertOk(updater.setButtonAction(first, makeAction(recorder, 1)));
     const Core::Status capacity =
@@ -152,14 +152,14 @@ TEST_F(UIButtonActionTest, KeyboardAndGamepadAcceptUpAreReleaseBarriersWhenDirty
     ActionRecorder recorder;
     assertOk(tree.updater.setButtonAction(tree.button, makeAction(recorder, 9)));
 
-    auto focus = tree.context->routeDefaultActionFocusStep(false);
+    auto focus = tree.context->input().routeDefaultActionFocusStep(false);
     ASSERT_TRUE(focus.has_value()) << (focus ? "" : focus.error().message);
     ASSERT_EQ(focus->focus, tree.button);
-    assertOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(tree.context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
     const Platform::DigitalControlIdentity enter =
         Platform::KeyControlIdentity{firstWindow, Platform::Key::Enter};
-    auto down = tree.context->routeDefaultActionActivate(
+    auto down = tree.context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{1},
         10,
         UI::UIButtonActivationSource::Keyboard,
@@ -171,7 +171,7 @@ TEST_F(UIButtonActionTest, KeyboardAndGamepadAcceptUpAreReleaseBarriersWhenDirty
     EXPECT_EQ(recorder.size, 1U);
 
     // Publish the pressed state before filling every remaining dirty slot.
-    assertOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(tree.context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     const UI::UIBoxPaint blockerPaint{
         .solidFill = UI::UISolidFill{
             .color = {.red = 1, .green = 2, .blue = 3, .alpha = 255},
@@ -182,7 +182,7 @@ TEST_F(UIButtonActionTest, KeyboardAndGamepadAcceptUpAreReleaseBarriersWhenDirty
     assertOk(tree.updater.setBoxPaint(blocker, blockerPaint));
     ASSERT_EQ(tree.context->statistics().dirtyQueuePendingCount, 3U);
 
-    auto up = tree.context->routeDefaultActionRelease(
+    auto up = tree.context->input().routeDefaultActionRelease(
         Platform::PlatformFrameId{2},
         20,
         UI::UIButtonActivationSource::Keyboard,
@@ -195,9 +195,9 @@ TEST_F(UIButtonActionTest, KeyboardAndGamepadAcceptUpAreReleaseBarriersWhenDirty
     expectButtonPressed(tree.updater, tree.button, false);
     EXPECT_EQ(recorder.size, 1U);
 
-    assertOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
-    EXPECT_EQ(tree.context->defaultActionFocus(), tree.button);
-    auto idleUp = tree.context->routeDefaultActionRelease(
+    assertOk(tree.context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.button);
+    auto idleUp = tree.context->input().routeDefaultActionRelease(
         Platform::PlatformFrameId{3},
         30,
         UI::UIButtonActivationSource::Keyboard,
@@ -217,7 +217,7 @@ TEST_F(UIButtonActionTest, KeyboardAndGamepadAcceptUpAreReleaseBarriersWhenDirty
             .gamepad = *gamepadResult,
             .button = Platform::GamepadButton::South,
         };
-    auto gamepadDown = tree.context->routeDefaultActionActivate(
+    auto gamepadDown = tree.context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{4},
         40,
         UI::UIButtonActivationSource::Gamepad,
@@ -228,7 +228,7 @@ TEST_F(UIButtonActionTest, KeyboardAndGamepadAcceptUpAreReleaseBarriersWhenDirty
     EXPECT_TRUE(gamepadDown->activated);
     expectButtonPressed(tree.updater, tree.button, true);
     EXPECT_EQ(recorder.size, 2U);
-    assertOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(tree.context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
     const UI::UIBoxPaint secondBlockerPaint{
         .solidFill = UI::UISolidFill{
@@ -242,7 +242,7 @@ TEST_F(UIButtonActionTest, KeyboardAndGamepadAcceptUpAreReleaseBarriersWhenDirty
     assertOk(tree.updater.setBoxPaint(blocker, secondBlockerPaint));
     ASSERT_EQ(tree.context->statistics().dirtyQueuePendingCount, 3U);
 
-    auto gamepadUp = tree.context->routeDefaultActionRelease(
+    auto gamepadUp = tree.context->input().routeDefaultActionRelease(
         Platform::PlatformFrameId{5},
         50,
         UI::UIButtonActivationSource::Gamepad,
@@ -254,8 +254,8 @@ TEST_F(UIButtonActionTest, KeyboardAndGamepadAcceptUpAreReleaseBarriersWhenDirty
     expectButtonPressed(tree.updater, tree.button, false);
     EXPECT_EQ(recorder.size, 2U);
 
-    assertOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
-    auto idleGamepadUp = tree.context->routeDefaultActionRelease(
+    assertOk(tree.context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
+    auto idleGamepadUp = tree.context->input().routeDefaultActionRelease(
         Platform::PlatformFrameId{6},
         60,
         UI::UIButtonActivationSource::Gamepad,
@@ -284,12 +284,12 @@ TEST_F(UIButtonActionTest, KeyboardAcceptDownDirtyFailurePrecedesCallbackAndPres
     const UI::UINodeId blocker =
         createPanel(*tree.context, tree.root.rootNodeId());
     ASSERT_TRUE(blocker.hasValue());
-    assertOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(tree.context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
-    auto focus = tree.context->routeDefaultActionFocusStep(false);
+    auto focus = tree.context->input().routeDefaultActionFocusStep(false);
     ASSERT_TRUE(focus.has_value()) << (focus ? "" : focus.error().message);
     ASSERT_EQ(focus->focus, tree.button);
-    assertOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(tree.context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     const UI::UIBoxPaint blockerPaint{
         .solidFill = UI::UISolidFill{
             .color = {.red = 1, .green = 2, .blue = 3, .alpha = 255},
@@ -302,7 +302,7 @@ TEST_F(UIButtonActionTest, KeyboardAcceptDownDirtyFailurePrecedesCallbackAndPres
 
     const Platform::DigitalControlIdentity enter =
         Platform::KeyControlIdentity{firstWindow, Platform::Key::Enter};
-    auto rejected = tree.context->routeDefaultActionActivate(
+    auto rejected = tree.context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{3}, 30, UI::UIButtonActivationSource::Keyboard, enter);
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::CapacityExceeded);
@@ -330,37 +330,37 @@ TEST_F(UIButtonActionTest, FocusStepDirtyQueueFailurePreservesPreviousFocus)
         root.rootNodeId(),
         fixedSize(200.0F, 80.0F)));
     assertOk(updater.setLayoutStyle(first, fixedSize(40.0F, 20.0F)));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 80.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 80.0F}));
     assertOk(updater.setLayoutStyle(second, fixedSize(40.0F, 20.0F)));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 80.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 80.0F}));
 
-    auto initialFocus = context->routeDefaultActionFocusStep(false);
+    auto initialFocus = context->input().routeDefaultActionFocusStep(false);
     ASSERT_TRUE(initialFocus.has_value())
         << (initialFocus ? "" : initialFocus.error().message);
     ASSERT_EQ(initialFocus->focus, first);
-    EXPECT_EQ(context->defaultActionFocus(), first);
-    EXPECT_FALSE(context->imeFocus().hasValue());
-    assertOk(context->commitLayout({.width = 200.0F, .height = 80.0F}));
+    EXPECT_EQ(context->input().defaultActionFocus(), first);
+    EXPECT_FALSE(context->text().imeFocus().hasValue());
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 80.0F}));
 
     assertOk(updater.setPointerHitPolicy(
         blocker,
         UI::UIPointerHitPolicy::Targetable));
     EXPECT_EQ(context->statistics().dirtyQueuePendingCount, 1U);
 
-    auto rejected = context->routeDefaultActionFocusStep(false);
+    auto rejected = context->input().routeDefaultActionFocusStep(false);
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::CapacityExceeded);
-    EXPECT_EQ(context->defaultActionFocus(), first);
-    EXPECT_FALSE(context->imeFocus().hasValue());
+    EXPECT_EQ(context->input().defaultActionFocus(), first);
+    EXPECT_FALSE(context->text().imeFocus().hasValue());
     EXPECT_EQ(context->statistics().dirtyQueuePendingCount, 1U);
 
-    assertOk(context->commitLayout({.width = 200.0F, .height = 80.0F}));
-    auto retried = context->routeDefaultActionFocusStep(false);
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 80.0F}));
+    auto retried = context->input().routeDefaultActionFocusStep(false);
     ASSERT_TRUE(retried.has_value()) << (retried ? "" : retried.error().message);
     EXPECT_TRUE(retried->consumed);
     EXPECT_TRUE(retried->moved);
     EXPECT_EQ(retried->focus, second);
-    EXPECT_EQ(context->defaultActionFocus(), second);
+    EXPECT_EQ(context->input().defaultActionFocus(), second);
 }
 
 } // namespace

@@ -73,7 +73,7 @@ TEST_F(UIInputRouteTest, RoutesCaptureTargetAndBubbleInStableOrder)
         }});
     ASSERT_TRUE(rootToken && panelToken && firstTargetToken && secondTargetToken);
 
-    auto routed = tree.context->routePointerInput(input);
+    auto routed = tree.context->input().routePointerInput(input);
     ASSERT_TRUE(routed.has_value()) << (routed ? "" : routed.error().message);
     EXPECT_TRUE(state.identityValid);
     ASSERT_EQ(state.trace.size, 6U);
@@ -146,7 +146,7 @@ TEST_F(UIInputRouteTest, PointerButtonClaimsMergeAcrossPhasesAndDuplicates)
         rootCaptureToken && targetToken && panelBubbleToken
         && skippedRootBubbleToken);
 
-    auto routed = tree.context->routePointerInput(makePointerInput(window));
+    auto routed = tree.context->input().routePointerInput(makePointerInput(window));
     ASSERT_TRUE(routed.has_value()) << (routed ? "" : routed.error().message);
 
     ASSERT_EQ(trace.size, 3U);
@@ -188,7 +188,7 @@ TEST_F(UIInputRouteTest, PointerButtonClaimRejectsInvalidButton)
             }});
     ASSERT_TRUE(token);
 
-    auto routed = tree.context->routePointerInput(makePointerInput(window));
+    auto routed = tree.context->input().routePointerInput(makePointerInput(window));
     ASSERT_TRUE(routed.has_value()) << (routed ? "" : routed.error().message);
     EXPECT_TRUE(rejectedInvalidButton);
     EXPECT_FALSE(routed->claimedPointerButtons.test(
@@ -219,7 +219,7 @@ TEST_F(UIInputRouteTest, PointerButtonClaimResultIsEmptyWhenNoHit)
     UI::UIPointerInputEvent input = makePointerInput(window);
     input.position = {.x = 90.0F, .y = 90.0F};
 
-    auto routed = tree.context->routePointerInput(input);
+    auto routed = tree.context->input().routePointerInput(input);
     ASSERT_TRUE(routed.has_value()) << (routed ? "" : routed.error().message);
     EXPECT_FALSE(routed->pointQuery.hasTarget());
     EXPECT_EQ(callbackCount, 0U);
@@ -261,7 +261,7 @@ TEST_F(UIInputRouteTest, StopPropagationFinishesCurrentNodeAndSkipsLaterNodes)
         }});
     ASSERT_TRUE(firstRootToken && secondRootToken && panelToken);
 
-    auto routed = tree.context->routePointerInput(makePointerInput(window));
+    auto routed = tree.context->input().routePointerInput(makePointerInput(window));
     ASSERT_TRUE(routed.has_value());
     ASSERT_EQ(trace.size, 2U);
     EXPECT_EQ(trace.entries[0].marker, 1);
@@ -303,7 +303,7 @@ TEST_F(UIInputRouteTest, StopImmediatePropagationSkipsSameNodeRemainderAndBubble
         }});
     ASSERT_TRUE(firstTargetToken && secondTargetToken && bubbleToken);
 
-    auto routed = tree.context->routePointerInput(makePointerInput(window));
+    auto routed = tree.context->input().routePointerInput(makePointerInput(window));
     ASSERT_TRUE(routed.has_value());
     ASSERT_EQ(trace.size, 1U);
     EXPECT_EQ(trace.entries[0].marker, 1);
@@ -339,7 +339,7 @@ TEST_F(UIInputRouteTest, ResettingLaterListenerDuringDispatchSkipsItImmediately)
         }});
     ASSERT_TRUE(firstToken && secondToken);
 
-    auto firstRoute = tree.context->routePointerInput(makePointerInput(window, 1));
+    auto firstRoute = tree.context->input().routePointerInput(makePointerInput(window, 1));
     ASSERT_TRUE(firstRoute.has_value());
     EXPECT_EQ(firstRoute->listenerInvocationCount, 1U);
     EXPECT_EQ(firstCount, 1U);
@@ -347,7 +347,7 @@ TEST_F(UIInputRouteTest, ResettingLaterListenerDuringDispatchSkipsItImmediately)
     EXPECT_FALSE(secondToken);
     EXPECT_EQ(tree.context->statistics().activeRoutedPointerListenerCount, 1U);
 
-    auto secondRoute = tree.context->routePointerInput(makePointerInput(window, 2));
+    auto secondRoute = tree.context->input().routePointerInput(makePointerInput(window, 2));
     ASSERT_TRUE(secondRoute.has_value());
     EXPECT_EQ(secondRoute->listenerInvocationCount, 1U);
     EXPECT_EQ(firstCount, 2U);
@@ -384,7 +384,7 @@ TEST_F(UIInputRouteTest, ListenerAddedDuringDispatchStartsWithNextTransition)
                 return;
             }
             state.attempted = true;
-            auto added = state.context->addRoutedPointerListener(
+            auto added = state.context->input().addRoutedPointerListener(
                 {.node = state.target,
                  .kind = UI::UIRoutedPointerEventKind::ButtonDown,
                  .phases = UI::UIEventPhaseMask::Target},
@@ -399,7 +399,7 @@ TEST_F(UIInputRouteTest, ListenerAddedDuringDispatchStartsWithNextTransition)
         }});
     ASSERT_TRUE(firstToken);
 
-    auto firstRoute = tree.context->routePointerInput(makePointerInput(window, 1));
+    auto firstRoute = tree.context->input().routePointerInput(makePointerInput(window, 1));
     ASSERT_TRUE(firstRoute.has_value());
     EXPECT_TRUE(state.addSucceeded);
     EXPECT_TRUE(state.addedToken);
@@ -407,7 +407,7 @@ TEST_F(UIInputRouteTest, ListenerAddedDuringDispatchStartsWithNextTransition)
     EXPECT_EQ(state.firstCount, 1U);
     EXPECT_EQ(state.addedCount, 0U);
 
-    auto secondRoute = tree.context->routePointerInput(makePointerInput(window, 2));
+    auto secondRoute = tree.context->input().routePointerInput(makePointerInput(window, 2));
     ASSERT_TRUE(secondRoute.has_value());
     EXPECT_EQ(secondRoute->listenerInvocationCount, 2U);
     EXPECT_EQ(state.firstCount, 2U);
@@ -463,13 +463,13 @@ TEST_F(UIInputRouteTest, DestroyingTargetDuringCaptureDoesNotRouteToReusedGenera
             if (!destroyed) {
                 return;
             }
-            auto replacement = state.context->rootBuilder().createElement(state.panel, UI::makeButtonElement());
+            auto replacement = state.context->authoring().rootBuilder().createElement(state.panel, UI::makeButtonElement());
             state.createSucceeded = replacement.has_value();
             if (!replacement) {
                 return;
             }
             state.replacement = *replacement;
-            auto listener = state.context->addRoutedPointerListener(
+            auto listener = state.context->input().addRoutedPointerListener(
                 {.node = state.replacement,
                  .kind = UI::UIRoutedPointerEventKind::ButtonDown,
                  .phases = UI::UIEventPhaseMask::Target},
@@ -484,7 +484,7 @@ TEST_F(UIInputRouteTest, DestroyingTargetDuringCaptureDoesNotRouteToReusedGenera
         }});
     ASSERT_TRUE(oldTargetToken && rootToken);
 
-    auto firstRoute = tree.context->routePointerInput(makePointerInput(window, 1));
+    auto firstRoute = tree.context->input().routePointerInput(makePointerInput(window, 1));
     ASSERT_TRUE(firstRoute.has_value())
         << (firstRoute ? "" : firstRoute.error().message);
     EXPECT_TRUE(state.destroySucceeded);
@@ -505,9 +505,9 @@ TEST_F(UIInputRouteTest, DestroyingTargetDuringCaptureDoesNotRouteToReusedGenera
     expectOk(tree.updater.setPointerHitPolicy(
         state.replacement,
         UI::UIPointerHitPolicy::Targetable));
-    expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    expectOk(tree.context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
-    auto secondRoute = tree.context->routePointerInput(makePointerInput(window, 2));
+    auto secondRoute = tree.context->input().routePointerInput(makePointerInput(window, 2));
     ASSERT_TRUE(secondRoute.has_value());
     EXPECT_FALSE(secondRoute->targetInvalidated);
     EXPECT_EQ(secondRoute->pointQuery.target.node, state.replacement);

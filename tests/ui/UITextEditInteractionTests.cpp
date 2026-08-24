@@ -12,17 +12,17 @@ TEST_F(UITextEditTest, CancelPointerInteractionClearsTextEditFocusAndAccept)
     assertOk(updater.setText(textEdit, "ABC"));
     publishLayout();
 
-    auto down = context->routePointerInput(makePrimaryPointerDown(window, 1));
+    auto down = context->input().routePointerInput(makePrimaryPointerDown(window, 1));
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
     EXPECT_TRUE(down->consumed);
-    EXPECT_EQ(context->defaultActionFocus(), textEdit);
-    EXPECT_EQ(context->imeFocus(), textEdit);
+    EXPECT_EQ(context->input().defaultActionFocus(), textEdit);
+    EXPECT_EQ(context->text().imeFocus(), textEdit);
 
-    assertOk(context->cancelPointerInteraction(window));
-    EXPECT_FALSE(context->defaultActionFocus().hasValue());
-    EXPECT_FALSE(context->imeFocus().hasValue());
+    assertOk(context->input().cancelPointerInteraction(window));
+    EXPECT_FALSE(context->input().defaultActionFocus().hasValue());
+    EXPECT_FALSE(context->text().imeFocus().hasValue());
 
-    auto accept = context->routeDefaultActionActivate(
+    auto accept = context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{2},
         2,
         UI::UIButtonActivationSource::Keyboard);
@@ -42,10 +42,10 @@ TEST_F(UITextEditTest, CommitClearsTextEditFocusWhenCollapsedOrIgnored)
     collapsedStyle.visibility = UI::UIVisibility::Collapsed;
     assertOk(updater.setLayoutStyle(textEdit, collapsedStyle));
     publishLayout();
-    EXPECT_FALSE(context->defaultActionFocus().hasValue());
-    EXPECT_FALSE(context->imeFocus().hasValue());
+    EXPECT_FALSE(context->input().defaultActionFocus().hasValue());
+    EXPECT_FALSE(context->text().imeFocus().hasValue());
 
-    auto inputAfterCollapse = context->routeTextInput(
+    auto inputAfterCollapse = context->text().routeTextInput(
         window,
         Platform::PlatformFrameId{1},
         1,
@@ -64,10 +64,10 @@ TEST_F(UITextEditTest, CommitClearsTextEditFocusWhenCollapsedOrIgnored)
 
     assertOk(updater.setPointerHitPolicy(textEdit, UI::UIPointerHitPolicy::Ignore));
     publishLayout();
-    EXPECT_FALSE(context->defaultActionFocus().hasValue());
-    EXPECT_FALSE(context->imeFocus().hasValue());
+    EXPECT_FALSE(context->input().defaultActionFocus().hasValue());
+    EXPECT_FALSE(context->text().imeFocus().hasValue());
 
-    auto inputAfterIgnore = context->routeTextInput(
+    auto inputAfterIgnore = context->text().routeTextInput(
         window,
         Platform::PlatformFrameId{2},
         2,
@@ -102,20 +102,20 @@ TEST_F(UITextEditTest, NestedInButtonPrimaryUpAndStrayUpDoNotActivateParent)
             }}));
     publishLayout();
 
-    auto down = context->routePointerInput(makePrimaryPointerInput(
+    auto down = context->input().routePointerInput(makePrimaryPointerInput(
         window,
         UI::UIRoutedPointerEventKind::ButtonDown,
         1));
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
     EXPECT_EQ(down->pointQuery.target.node, textEdit);
     EXPECT_TRUE(down->consumed);
-    EXPECT_EQ(context->defaultActionFocus(), textEdit);
-    EXPECT_EQ(context->imeFocus(), textEdit);
+    EXPECT_EQ(context->input().defaultActionFocus(), textEdit);
+    EXPECT_EQ(context->text().imeFocus(), textEdit);
     auto pressed = updater.isButtonPressed(button);
     ASSERT_TRUE(pressed.has_value()) << (pressed ? "" : pressed.error().message);
     EXPECT_FALSE(*pressed);
 
-    auto up = context->routePointerInput(makePrimaryPointerInput(
+    auto up = context->input().routePointerInput(makePrimaryPointerInput(
         window,
         UI::UIRoutedPointerEventKind::ButtonUp,
         2));
@@ -127,7 +127,7 @@ TEST_F(UITextEditTest, NestedInButtonPrimaryUpAndStrayUpDoNotActivateParent)
     EXPECT_FALSE(*pressed);
     EXPECT_EQ(activations, 0);
 
-    auto strayUp = context->routePointerInput(makePrimaryPointerInput(
+    auto strayUp = context->input().routePointerInput(makePrimaryPointerInput(
         window,
         UI::UIRoutedPointerEventKind::ButtonUp,
         3));
@@ -135,8 +135,8 @@ TEST_F(UITextEditTest, NestedInButtonPrimaryUpAndStrayUpDoNotActivateParent)
     EXPECT_EQ(strayUp->pointQuery.target.node, textEdit);
     EXPECT_FALSE(strayUp->consumed);
     EXPECT_EQ(activations, 0);
-    EXPECT_EQ(context->defaultActionFocus(), textEdit);
-    EXPECT_EQ(context->imeFocus(), textEdit);
+    EXPECT_EQ(context->input().defaultActionFocus(), textEdit);
+    EXPECT_EQ(context->text().imeFocus(), textEdit);
 }
 
 TEST_F(UITextEditTest, NestedInSliderPrimaryUpAndStrayUpDoNotDragParent)
@@ -162,7 +162,7 @@ TEST_F(UITextEditTest, NestedInSliderPrimaryUpAndStrayUpDoNotDragParent)
             }}));
     publishLayout();
 
-    auto down = context->routePointerInput(makePrimaryPointerInput(
+    auto down = context->input().routePointerInput(makePrimaryPointerInput(
         window,
         UI::UIRoutedPointerEventKind::ButtonDown,
         1,
@@ -171,8 +171,8 @@ TEST_F(UITextEditTest, NestedInSliderPrimaryUpAndStrayUpDoNotDragParent)
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
     EXPECT_EQ(down->pointQuery.target.node, textEdit);
     EXPECT_TRUE(down->consumed);
-    EXPECT_EQ(context->defaultActionFocus(), textEdit);
-    EXPECT_EQ(context->imeFocus(), textEdit);
+    EXPECT_EQ(context->input().defaultActionFocus(), textEdit);
+    EXPECT_EQ(context->text().imeFocus(), textEdit);
     auto dragging = updater.isSliderDragging(slider);
     ASSERT_TRUE(dragging.has_value()) << (dragging ? "" : dragging.error().message);
     EXPECT_FALSE(*dragging);
@@ -181,7 +181,7 @@ TEST_F(UITextEditTest, NestedInSliderPrimaryUpAndStrayUpDoNotDragParent)
     EXPECT_FLOAT_EQ(*value, 25.0F);
     EXPECT_EQ(changes, 0);
 
-    auto up = context->routePointerInput(makePrimaryPointerInput(
+    auto up = context->input().routePointerInput(makePrimaryPointerInput(
         window,
         UI::UIRoutedPointerEventKind::ButtonUp,
         2,
@@ -198,7 +198,7 @@ TEST_F(UITextEditTest, NestedInSliderPrimaryUpAndStrayUpDoNotDragParent)
     EXPECT_FLOAT_EQ(*value, 25.0F);
     EXPECT_EQ(changes, 0);
 
-    auto strayUp = context->routePointerInput(makePrimaryPointerInput(
+    auto strayUp = context->input().routePointerInput(makePrimaryPointerInput(
         window,
         UI::UIRoutedPointerEventKind::ButtonUp,
         3,
@@ -211,8 +211,8 @@ TEST_F(UITextEditTest, NestedInSliderPrimaryUpAndStrayUpDoNotDragParent)
     ASSERT_TRUE(value.has_value());
     EXPECT_FLOAT_EQ(*value, 25.0F);
     EXPECT_EQ(changes, 0);
-    EXPECT_EQ(context->defaultActionFocus(), textEdit);
-    EXPECT_EQ(context->imeFocus(), textEdit);
+    EXPECT_EQ(context->input().defaultActionFocus(), textEdit);
+    EXPECT_EQ(context->text().imeFocus(), textEdit);
 }
 
 } // namespace

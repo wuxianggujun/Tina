@@ -44,7 +44,7 @@ protected:
 
     [[nodiscard]] UI::UIRootOwner createRoot(UI::UIContext& context)
     {
-        auto rootResult = context.rootBuilder().createRoot();
+        auto rootResult = context.authoring().rootBuilder().createRoot();
         EXPECT_TRUE(rootResult.has_value())
             << (rootResult ? "" : rootResult.error().message);
         return rootResult ? std::move(*rootResult) : UI::UIRootOwner{};
@@ -54,7 +54,7 @@ protected:
         UI::UIContext& context,
         UI::UINodeId rootNode)
     {
-        UI::UIRootBuilder builder = context.rootBuilder();
+        UI::UIRootBuilder builder = context.authoring().rootBuilder();
         UI::UINodeId parent = rootNode;
         UI::UINodeId firstChild;
         for (usize nodeIndex = 1; nodeIndex < DeepNodeCount; ++nodeIndex)
@@ -96,20 +96,20 @@ TEST_F(UIDeepTreeStressTest, StructureCommitAndDestroyAreNonRecursive)
     const auto nodes = buildDeepTree(*context, root.rootNodeId());
     ASSERT_TRUE(nodes.has_value());
 
-    assertOk(context->commitStructure());
-    const UI::UICommittedStructureView committed = context->committedStructure();
+    assertOk(context->publication().commitStructure());
+    const UI::UICommittedStructureView committed = context->publication().committedStructure();
     ASSERT_EQ(committed.size(), DeepNodeCount);
     EXPECT_EQ(committed.entries().back().node, nodes->leaf);
     EXPECT_EQ(committed.entries().back().depth, DeepNodeCount - 1);
 
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     assertOk(updaterResult->destroy(nodes->firstChild));
     EXPECT_EQ(context->liveNodeCount(), 1U);
     EXPECT_FALSE(context->contains(nodes->leaf));
 
-    assertOk(context->commitStructure());
-    EXPECT_EQ(context->committedStructure().size(), 1U);
+    assertOk(context->publication().commitStructure());
+    EXPECT_EQ(context->publication().committedStructure().size(), 1U);
     root.reset();
     EXPECT_EQ(context->liveNodeCount(), 0U);
 }
@@ -128,9 +128,9 @@ TEST_F(UIDeepTreeStressTest, LayoutSnapshotBuildIsNonRecursive)
     const auto nodes = buildDeepTree(*context, root.rootNodeId());
     ASSERT_TRUE(nodes.has_value());
 
-    assertOk(context->commitStructure());
-    assertOk(context->commitLayout({.width = 1.0F, .height = 1.0F}));
-    const UI::UICommittedLayoutView layout = context->committedLayout();
+    assertOk(context->publication().commitStructure());
+    assertOk(context->publication().commitLayout({.width = 1.0F, .height = 1.0F}));
+    const UI::UICommittedLayoutView layout = context->publication().committedLayout();
     ASSERT_EQ(layout.size(), DeepNodeCount);
     EXPECT_EQ(layout.entries().back().node, nodes->leaf);
     EXPECT_EQ(layout.entries().back().layoutOrdinal, DeepNodeCount - 1);
@@ -153,14 +153,14 @@ TEST_F(UIDeepTreeStressTest, HitSnapshotBuildIsNonRecursive)
     const auto nodes = buildDeepTree(*context, root.rootNodeId());
     ASSERT_TRUE(nodes.has_value());
 
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     assertOk(updaterResult->setPointerHitPolicy(
         nodes->leaf,
         UI::UIPointerHitPolicy::Targetable));
-    assertOk(context->commitLayout({.width = 1.0F, .height = 1.0F}));
+    assertOk(context->publication().commitLayout({.width = 1.0F, .height = 1.0F}));
 
-    const UI::UICommittedHitView hit = context->committedHit();
+    const UI::UICommittedHitView hit = context->publication().committedHit();
     ASSERT_EQ(hit.size(), DeepNodeCount);
     EXPECT_EQ(hit.entries().back().node, nodes->leaf);
     EXPECT_EQ(hit.entries().back().parentEntryIndex, DeepNodeCount - 2U);
@@ -184,16 +184,16 @@ TEST_F(UIDeepTreeStressTest, PaintSnapshotBuildIsNonRecursive)
     const auto nodes = buildDeepTree(*context, root.rootNodeId());
     ASSERT_TRUE(nodes.has_value());
 
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     assertOk(updaterResult->setBoxPaint(
         nodes->leaf,
         UI::UIBoxPaint{
             .solidFill = UI::UISolidFill{.color = UI::rgba8(1, 2, 3, 4)},
         }));
-    assertOk(context->commitLayout({.width = 1.0F, .height = 1.0F}));
+    assertOk(context->publication().commitLayout({.width = 1.0F, .height = 1.0F}));
 
-    const UI::UICommittedPaintView paint = context->committedPaint();
+    const UI::UICommittedPaintView paint = context->publication().committedPaint();
     ASSERT_EQ(paint.size(), 1U);
     EXPECT_EQ(paint.entries().front().node, nodes->leaf);
     EXPECT_EQ(context->statistics().lastPaintCacheRebuildCount, 1U);

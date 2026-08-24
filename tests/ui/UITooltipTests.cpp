@@ -149,7 +149,7 @@ class UITooltipTest : public testing::Test {
 
     [[nodiscard]] static UI::UIRootOwner createRoot(UI::UIContext& context)
     {
-        auto result = context.rootBuilder().createRoot();
+        auto result = context.authoring().rootBuilder().createRoot();
         EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
         return result ? std::move(*result) : UI::UIRootOwner{};
     }
@@ -157,7 +157,7 @@ class UITooltipTest : public testing::Test {
     [[nodiscard]] static UI::UITreeUpdater createUpdater(
         UI::UIContext& context, UI::UIRootOwner& root)
     {
-        auto result = context.treeUpdater(root);
+        auto result = context.authoring().treeUpdater(root);
         EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
         return result ? std::move(*result) : UI::UITreeUpdater{};
     }
@@ -249,9 +249,6 @@ TEST_F(UITooltipTest, AnchorRelationsRejectCyclesCrossRootStaleAndIncompatibleNo
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidParent);
 
-    rejected = context->setTooltipAnchor(*tooltip, *foreignAnchor);
-    ASSERT_FALSE(rejected.has_value());
-    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidParent);
     rejected = first.setTooltipAnchor(*tooltip, *foreignAnchor);
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidNode);
@@ -295,7 +292,7 @@ TEST_F(UITooltipTest, HoverUsesInitialDismissAndReshowDelaysFromInjectedClock)
     auto context = createContext();
     ASSERT_NE(context, nullptr);
     FakeTooltipClock clock;
-    assertOk(context->setMotionClock(&clock));
+    assertOk(context->motion().setMotionClock(&clock));
     auto root = createRoot(*context);
     auto updater = createUpdater(*context, root);
     const UI::UITooltipConfig config{
@@ -309,35 +306,35 @@ TEST_F(UITooltipTest, HoverUsesInitialDismissAndReshowDelaysFromInjectedClock)
     const TooltipPair second = createPair(
         updater, root.rootNodeId(), config, overlay(100, 20, 40, 24));
     ASSERT_TRUE(first.anchor.hasValue() && second.anchor.hasValue());
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
 
-    ASSERT_TRUE(context->routePointerInput(pointerInput(
+    ASSERT_TRUE(context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::Move, 1, {.x = 30, .y = 30})).has_value());
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
     EXPECT_FALSE(updater.isTooltipOpen(first.tooltip).value());
     clock.advance(Core::Duration{0.999});
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
     EXPECT_FALSE(updater.isTooltipOpen(first.tooltip).value());
     clock.advance(Core::Duration{0.001});
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
     EXPECT_TRUE(updater.isTooltipOpen(first.tooltip).value());
 
-    ASSERT_TRUE(context->routePointerInput(pointerInput(
+    ASSERT_TRUE(context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::Move, 2, {.x = 120, .y = 30})).has_value());
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
     clock.advance(Core::Duration{0.199});
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
     EXPECT_TRUE(updater.isTooltipOpen(first.tooltip).value());
     EXPECT_FALSE(updater.isTooltipOpen(second.tooltip).value());
     clock.advance(Core::Duration{0.001});
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
     EXPECT_FALSE(updater.isTooltipOpen(first.tooltip).value());
     EXPECT_FALSE(updater.isTooltipOpen(second.tooltip).value());
     clock.advance(Core::Duration{0.099});
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
     EXPECT_FALSE(updater.isTooltipOpen(second.tooltip).value());
     clock.advance(Core::Duration{0.001});
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
     EXPECT_TRUE(updater.isTooltipOpen(second.tooltip).value());
 }
 
@@ -346,7 +343,7 @@ TEST_F(UITooltipTest, HugeFiniteDelaySaturatesWithoutWrappingTheClockDeadline)
     auto context = createContext();
     ASSERT_NE(context, nullptr);
     FakeTooltipClock clock;
-    assertOk(context->setMotionClock(&clock));
+    assertOk(context->motion().setMotionClock(&clock));
     auto root = createRoot(*context);
     auto updater = createUpdater(*context, root);
     const TooltipPair pair = createPair(
@@ -358,14 +355,14 @@ TEST_F(UITooltipTest, HugeFiniteDelaySaturatesWithoutWrappingTheClockDeadline)
             .triggers = UI::UITooltipTrigger::PointerHover,
         });
     ASSERT_TRUE(pair.tooltip.hasValue());
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
 
-    ASSERT_TRUE(context->routePointerInput(pointerInput(
+    ASSERT_TRUE(context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::Move, 1,
         {.x = 30.0F, .y = 30.0F})).has_value());
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
     clock.advance(Core::Duration{3600.0});
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
     EXPECT_FALSE(updater.isTooltipOpen(pair.tooltip).value());
 }
 
@@ -374,7 +371,7 @@ TEST_F(UITooltipTest, KeyboardFocusAndManualTriggersUseTheirOwnPolicies)
     auto context = createContext();
     ASSERT_NE(context, nullptr);
     FakeTooltipClock clock;
-    assertOk(context->setMotionClock(&clock));
+    assertOk(context->motion().setMotionClock(&clock));
     auto root = createRoot(*context);
     auto updater = createUpdater(*context, root);
 
@@ -396,31 +393,31 @@ TEST_F(UITooltipTest, KeyboardFocusAndManualTriggersUseTheirOwnPolicies)
         },
         overlay(100, 10, 50, 24));
     ASSERT_TRUE(focusPair.anchor.hasValue() && manualPair.anchor.hasValue());
-    assertOk(context->commitLayout({.width = 240.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 240.0F, .height = 120.0F}));
 
-    assertOk(context->requestFocus(focusPair.anchor));
-    assertOk(context->commitLayout({.width = 240.0F, .height = 120.0F}));
+    assertOk(context->input().requestFocus(focusPair.anchor));
+    assertOk(context->publication().commitLayout({.width = 240.0F, .height = 120.0F}));
     clock.advance(Core::Duration{0.25});
-    assertOk(context->commitLayout({.width = 240.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 240.0F, .height = 120.0F}));
     EXPECT_TRUE(updater.isTooltipOpen(focusPair.tooltip).value());
 
-    assertOk(context->requestFocus(manualPair.anchor));
-    assertOk(context->commitLayout({.width = 240.0F, .height = 120.0F}));
+    assertOk(context->input().requestFocus(manualPair.anchor));
+    assertOk(context->publication().commitLayout({.width = 240.0F, .height = 120.0F}));
     clock.advance(Core::Duration{0.099});
-    assertOk(context->commitLayout({.width = 240.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 240.0F, .height = 120.0F}));
     EXPECT_TRUE(updater.isTooltipOpen(focusPair.tooltip).value());
     clock.advance(Core::Duration{0.001});
-    assertOk(context->commitLayout({.width = 240.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 240.0F, .height = 120.0F}));
     EXPECT_FALSE(updater.isTooltipOpen(focusPair.tooltip).value());
 
     assertOk(updater.showTooltip(manualPair.tooltip));
     EXPECT_FALSE(updater.isTooltipOpen(manualPair.tooltip).value());
-    assertOk(context->commitLayout({.width = 240.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 240.0F, .height = 120.0F}));
     EXPECT_TRUE(updater.isTooltipOpen(manualPair.tooltip).value());
-    EXPECT_EQ(context->defaultActionFocus(), manualPair.anchor);
+    EXPECT_EQ(context->input().defaultActionFocus(), manualPair.anchor);
     assertOk(updater.dismissTooltip(manualPair.tooltip));
     EXPECT_TRUE(updater.isTooltipOpen(manualPair.tooltip).value());
-    assertOk(context->commitLayout({.width = 240.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 240.0F, .height = 120.0F}));
     EXPECT_FALSE(updater.isTooltipOpen(manualPair.tooltip).value());
 
     Core::Status rejected = updater.showTooltip(focusPair.tooltip);
@@ -472,13 +469,13 @@ TEST_F(UITooltipTest, PlacementSupportsFourDirectionsAutoFlipAndViewportClamp)
                 left.tooltip.hasValue() && right.tooltip.hasValue() &&
                 autoFlip.tooltip.hasValue() && explicitFlip.tooltip.hasValue() &&
                 clamped.tooltip.hasValue());
-    assertOk(context->commitLayout({.width = 200.0F, .height = 160.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 160.0F}));
 
     const auto expectPlacement = [&](TooltipPair pair,
                                      UI::UITooltipPlacement placement,
                                      float x, float y) {
         assertOk(updater.showTooltip(pair.tooltip));
-        assertOk(context->commitLayout({.width = 200.0F, .height = 160.0F}));
+        assertOk(context->publication().commitLayout({.width = 200.0F, .height = 160.0F}));
         const UI::UITooltipMetrics metrics = updater.tooltipMetrics(pair.tooltip).value();
         EXPECT_TRUE(metrics.open);
         EXPECT_EQ(metrics.resolvedPlacement, placement);
@@ -517,36 +514,36 @@ TEST_F(UITooltipTest, OnlyOneTooltipIsPublishedAndItDoesNotOwnFocusHitOrBarrier)
     auto underlay = updater.createElement(
         root.rootNodeId(), UI::makeButtonElement("Underlay", overlay(20, 30, 40, 20)));
     ASSERT_TRUE(underlay.has_value());
-    assertOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
-    assertOk(context->requestFocus(first.anchor));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
+    assertOk(context->input().requestFocus(first.anchor));
 
     assertOk(updater.showTooltip(first.tooltip));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
     EXPECT_TRUE(updater.isTooltipOpen(first.tooltip).value());
-    EXPECT_EQ(context->defaultActionFocus(), first.anchor);
-    EXPECT_FALSE(context->pointerCapture().hasValue());
+    EXPECT_EQ(context->input().defaultActionFocus(), first.anchor);
+    EXPECT_FALSE(context->input().pointerCapture().hasValue());
 
     const UI::UIPointerHitQueryResult query =
-        context->queryPointerHit({.x = 40.0F, .y = 40.0F});
+        context->input().queryPointerHit({.x = 40.0F, .y = 40.0F});
     EXPECT_FALSE(query.modalBarrierActive);
     ASSERT_TRUE(query.hasTarget());
     EXPECT_EQ(query.target.node, *underlay);
 
     assertOk(updater.showTooltip(second.tooltip));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
     EXPECT_FALSE(updater.isTooltipOpen(first.tooltip).value());
     EXPECT_TRUE(updater.isTooltipOpen(second.tooltip).value());
 
     assertOk(updater.showTooltip(first.tooltip));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
-    auto down = context->routePointerInput(pointerInput(
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
+    auto down = context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::ButtonDown, 1,
         {.x = 40.0F, .y = 40.0F}));
     ASSERT_TRUE(down.has_value()) << down.error().message;
     ASSERT_TRUE(down->hasRoutedTarget());
     EXPECT_EQ(down->routedTarget.node, *underlay);
-    EXPECT_EQ(context->pointerCapture(), *underlay);
-    assertOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
+    EXPECT_EQ(context->input().pointerCapture(), *underlay);
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
     EXPECT_FALSE(updater.isTooltipOpen(first.tooltip).value());
 }
 
@@ -560,25 +557,25 @@ TEST_F(UITooltipTest, InputVisibilityEnableDestroyAndModalBarriersDismiss)
         updater, root.rootNodeId(),
         UI::UITooltipConfig{.triggers = UI::UITooltipTrigger::Manual});
     ASSERT_TRUE(pair.tooltip.hasValue());
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
     const auto show = [&] {
         assertOk(updater.showTooltip(pair.tooltip));
-        assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+        assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
         EXPECT_TRUE(updater.isTooltipOpen(pair.tooltip).value());
     };
     const auto expectClosed = [&] {
-        assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+        assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
         EXPECT_FALSE(updater.isTooltipOpen(pair.tooltip).value());
     };
 
     show();
-    ASSERT_TRUE(context->routePointerInput(pointerInput(
+    ASSERT_TRUE(context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::Wheel, 1,
         {.x = 180, .y = 100})).has_value());
     expectClosed();
 
     show();
-    auto text = context->routeTextInput(
+    auto text = context->text().routeTextInput(
         window, Platform::PlatformFrameId{2}, 2, "x");
     ASSERT_TRUE(text.has_value());
     expectClosed();
@@ -594,7 +591,7 @@ TEST_F(UITooltipTest, InputVisibilityEnableDestroyAndModalBarriersDismiss)
     assertOk(updater.setLayoutStyle(pair.anchor, hidden));
     expectClosed();
     assertOk(updater.setLayoutStyle(pair.anchor, overlay(20, 20, 40, 24)));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
 
     show();
     UI::UILayoutStyle collapsed = overlay(20, 20, 40, 24);
@@ -602,17 +599,17 @@ TEST_F(UITooltipTest, InputVisibilityEnableDestroyAndModalBarriersDismiss)
     assertOk(updater.setLayoutStyle(pair.anchor, collapsed));
     expectClosed();
     assertOk(updater.setLayoutStyle(pair.anchor, overlay(20, 20, 40, 24)));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
 
     show();
     auto modal = updater.createElement(
         root.rootNodeId(), UI::makeModalElement(overlay(80, 40, 80, 60)));
     ASSERT_TRUE(modal.has_value());
     expectClosed();
-    EXPECT_EQ(context->activeModal(), *modal);
+    EXPECT_EQ(context->input().activeModal(), *modal);
 
     assertOk(updater.destroy(*modal));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
     show();
     assertOk(updater.destroy(pair.anchor));
     expectClosed();
@@ -640,18 +637,18 @@ TEST_F(UITooltipTest, AccessibilityUsesTooltipTextOnlyAsAnchorDescriptionFallbac
     ASSERT_TRUE(implicitAnchor && explicitAnchor && implicitTooltip && explicitTooltip);
     assertOk(updater.setTooltipAnchor(*implicitTooltip, *implicitAnchor));
     assertOk(updater.setTooltipAnchor(*explicitTooltip, *explicitAnchor));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
 
     const UI::UISemanticsEntry* implicitEntry =
-        findSemantics(context->committedSemantics(), *implicitAnchor);
+        findSemantics(context->publication().committedSemantics(), *implicitAnchor);
     const UI::UISemanticsEntry* explicitEntry =
-        findSemantics(context->committedSemantics(), *explicitAnchor);
+        findSemantics(context->publication().committedSemantics(), *explicitAnchor);
     ASSERT_NE(implicitEntry, nullptr);
     ASSERT_NE(explicitEntry, nullptr);
     EXPECT_EQ(implicitEntry->description, "Fallback help");
     EXPECT_EQ(explicitEntry->description, "Authored description");
-    EXPECT_EQ(findSemantics(context->committedSemantics(), *implicitTooltip), nullptr);
-    EXPECT_EQ(findSemantics(context->committedSemantics(), *explicitTooltip), nullptr);
+    EXPECT_EQ(findSemantics(context->publication().committedSemantics(), *implicitTooltip), nullptr);
+    EXPECT_EQ(findSemantics(context->publication().committedSemantics(), *explicitTooltip), nullptr);
 }
 
 TEST_F(UITooltipTest, FailedCommitKeepsLastPublishedMetricsAndSnapshots)
@@ -673,30 +670,30 @@ TEST_F(UITooltipTest, FailedCommitKeepsLastPublishedMetricsAndSnapshots)
             .triggers = UI::UITooltipTrigger::Manual,
         });
     ASSERT_TRUE(pair.tooltip.hasValue());
-    assertOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
     assertOk(updater.showTooltip(pair.tooltip));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
     const UI::UITooltipMetrics published = updater.tooltipMetrics(pair.tooltip).value();
     ASSERT_TRUE(published.open);
-    const u64 layoutRevision = context->committedLayout().layoutRevision();
-    const u64 paintRevision = context->committedPaint().paintRevision();
-    const u64 semanticsRevision = context->committedSemantics().semanticsRevision();
+    const u64 layoutRevision = context->publication().committedLayout().layoutRevision();
+    const u64 paintRevision = context->publication().committedPaint().paintRevision();
+    const u64 semanticsRevision = context->publication().committedSemantics().semanticsRevision();
 
     assertOk(updater.dismissTooltip(pair.tooltip));
     auto overflow = updater.createElement(
         root.rootNodeId(), UI::makePanelElement(fixedSize(10, 10)));
     ASSERT_TRUE(overflow.has_value());
     Core::Status failed =
-        context->commitLayout({.width = 200.0F, .height = 100.0F});
+        context->publication().commitLayout({.width = 200.0F, .height = 100.0F});
     ASSERT_FALSE(failed.has_value());
     EXPECT_EQ(failed.error().code, UI::UIErrorCode::CapacityExceeded);
     EXPECT_EQ(updater.tooltipMetrics(pair.tooltip).value(), published);
-    EXPECT_EQ(context->committedLayout().layoutRevision(), layoutRevision);
-    EXPECT_EQ(context->committedPaint().paintRevision(), paintRevision);
-    EXPECT_EQ(context->committedSemantics().semanticsRevision(), semanticsRevision);
+    EXPECT_EQ(context->publication().committedLayout().layoutRevision(), layoutRevision);
+    EXPECT_EQ(context->publication().committedPaint().paintRevision(), paintRevision);
+    EXPECT_EQ(context->publication().committedSemantics().semanticsRevision(), semanticsRevision);
 
     assertOk(updater.destroy(*overflow));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
     EXPECT_FALSE(updater.isTooltipOpen(pair.tooltip).value());
 }
 
@@ -709,7 +706,7 @@ TEST_F(UITooltipTest, FailedCommitRollsBackClockDrivenReshowState)
     });
     ASSERT_NE(context, nullptr);
     FakeTooltipClock clock;
-    assertOk(context->setMotionClock(&clock));
+    assertOk(context->motion().setMotionClock(&clock));
     auto root = createRoot(*context);
     auto updater = createUpdater(*context, root);
     const UI::UITooltipConfig config{
@@ -723,22 +720,22 @@ TEST_F(UITooltipTest, FailedCommitRollsBackClockDrivenReshowState)
     const TooltipPair second = createPair(
         updater, root.rootNodeId(), config, overlay(100, 20, 40, 24));
     ASSERT_TRUE(first.tooltip.hasValue() && second.tooltip.hasValue());
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
 
-    ASSERT_TRUE(context->routePointerInput(pointerInput(
+    ASSERT_TRUE(context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::Move, 1,
         {.x = 30.0F, .y = 30.0F})).has_value());
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
     ASSERT_TRUE(updater.isTooltipOpen(first.tooltip).value());
 
-    ASSERT_TRUE(context->routePointerInput(pointerInput(
+    ASSERT_TRUE(context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::Move, 2,
         {.x = 120.0F, .y = 30.0F})).has_value());
     auto overflow = updater.createElement(
         root.rootNodeId(), UI::makePanelElement(fixedSize(10.0F, 10.0F)));
     ASSERT_TRUE(overflow.has_value());
     Core::Status failed =
-        context->commitLayout({.width = 200.0F, .height = 120.0F});
+        context->publication().commitLayout({.width = 200.0F, .height = 120.0F});
     ASSERT_FALSE(failed.has_value());
     EXPECT_EQ(failed.error().code, UI::UIErrorCode::CapacityExceeded);
     EXPECT_TRUE(updater.isTooltipOpen(first.tooltip).value());
@@ -746,15 +743,15 @@ TEST_F(UITooltipTest, FailedCommitRollsBackClockDrivenReshowState)
 
     clock.advance(Core::Duration{1.0});
     assertOk(updater.destroy(*overflow));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
     EXPECT_FALSE(updater.isTooltipOpen(first.tooltip).value());
     EXPECT_FALSE(updater.isTooltipOpen(second.tooltip).value());
 
     clock.advance(Core::Duration{0.999});
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
     EXPECT_FALSE(updater.isTooltipOpen(second.tooltip).value());
     clock.advance(Core::Duration{0.001});
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
     EXPECT_TRUE(updater.isTooltipOpen(second.tooltip).value());
 }
 
@@ -768,9 +765,9 @@ TEST_F(UITooltipTest, DestroyGenerationReuseAndRootReleaseLeaveNoAnchorEdges)
         updater, root.rootNodeId(),
         UI::UITooltipConfig{.triggers = UI::UITooltipTrigger::Manual});
     ASSERT_TRUE(pair.tooltip.hasValue());
-    assertOk(context->commitLayout({.width = 160.0F, .height = 90.0F}));
+    assertOk(context->publication().commitLayout({.width = 160.0F, .height = 90.0F}));
     assertOk(updater.showTooltip(pair.tooltip));
-    assertOk(context->commitLayout({.width = 160.0F, .height = 90.0F}));
+    assertOk(context->publication().commitLayout({.width = 160.0F, .height = 90.0F}));
 
     const UI::UINodeId destroyedAnchor = pair.anchor;
     assertOk(updater.destroy(pair.anchor));
@@ -794,9 +791,9 @@ TEST_F(UITooltipTest, DestroyGenerationReuseAndRootReleaseLeaveNoAnchorEdges)
 
     root.reset();
     EXPECT_EQ(context->liveNodeCount(), 0U);
-    auto stale = context->tooltipAnchor(*replacementTooltip);
+    auto stale = updater.tooltipAnchor(*replacementTooltip);
     ASSERT_FALSE(stale.has_value());
-    EXPECT_EQ(stale.error().code, UI::UIErrorCode::InvalidNode);
+    EXPECT_EQ(stale.error().code, UI::UIErrorCode::RootRequired);
 
     auto newRoot = createRoot(*context);
     auto newUpdater = createUpdater(*context, newRoot);
@@ -804,9 +801,9 @@ TEST_F(UITooltipTest, DestroyGenerationReuseAndRootReleaseLeaveNoAnchorEdges)
         newUpdater, newRoot.rootNodeId(),
         UI::UITooltipConfig{.triggers = UI::UITooltipTrigger::Manual});
     ASSERT_TRUE(newPair.tooltip.hasValue());
-    assertOk(context->commitLayout({.width = 160.0F, .height = 90.0F}));
+    assertOk(context->publication().commitLayout({.width = 160.0F, .height = 90.0F}));
     assertOk(newUpdater.showTooltip(newPair.tooltip));
-    assertOk(context->commitLayout({.width = 160.0F, .height = 90.0F}));
+    assertOk(context->publication().commitLayout({.width = 160.0F, .height = 90.0F}));
     EXPECT_TRUE(newUpdater.isTooltipOpen(newPair.tooltip).value());
 }
 

@@ -77,10 +77,10 @@ TEST(PrimaryWindowTextInputPlacementCoordinatorTests, MapsCommittedCaretAndPubli
     ASSERT_TRUE(contextResult.has_value())
         << (contextResult ? "" : contextResult.error().message);
     std::unique_ptr<UI::UIContext> context = std::move(*contextResult);
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
     ASSERT_TRUE(updater.setLayoutStyle(root.rootNodeId(), fixedSize(120.0F, 40.0F)).has_value());
@@ -89,12 +89,12 @@ TEST(PrimaryWindowTextInputPlacementCoordinatorTests, MapsCommittedCaretAndPubli
     const UI::UINodeId textEdit = *textEditResult;
     ASSERT_TRUE(updater.setLayoutStyle(textEdit, fixedSize(100.0F, 24.0F)).has_value());
     ASSERT_TRUE(updater.setText(textEdit, "AB").has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 120.0F, .height = 40.0F}).has_value());
-    ASSERT_TRUE(context->requestFocus(textEdit).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 120.0F, .height = 40.0F}).has_value());
+    ASSERT_TRUE(context->input().requestFocus(textEdit).has_value());
     ASSERT_TRUE(updater.setTextSelection(
         textEdit, {.anchorCodepoint = 2, .caretCodepoint = 2}).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 120.0F, .height = 40.0F}).has_value());
-    const std::optional<UI::UILogicalRect> caret = context->committedTextInputCaretRect();
+    ASSERT_TRUE(context->publication().commitLayout({.width = 120.0F, .height = 40.0F}).has_value());
+    const std::optional<UI::UILogicalRect> caret = context->publication().committedTextInputCaretRect();
     ASSERT_TRUE(caret.has_value());
 
     Coordinator coordinator;
@@ -108,8 +108,8 @@ TEST(PrimaryWindowTextInputPlacementCoordinatorTests, MapsCommittedCaretAndPubli
     EXPECT_DOUBLE_EQ(backend.lastPlacement->caret.width, static_cast<double>(caret->width));
     EXPECT_DOUBLE_EQ(backend.lastPlacement->caret.height, static_cast<double>(caret->height));
 
-    ASSERT_TRUE(context->clearFocus().has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 120.0F, .height = 40.0F}).has_value());
+    ASSERT_TRUE(context->input().clearFocus().has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 120.0F, .height = 40.0F}).has_value());
     ASSERT_TRUE(coordinator.publish(context.get(), backend).has_value());
     EXPECT_EQ(backend.publishCount, 2U);
     EXPECT_FALSE(backend.lastPlacement.has_value());

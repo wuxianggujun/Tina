@@ -201,7 +201,7 @@ struct ContextReentryProbe final {
             return;
         }
         ++state->destructionCount;
-        auto registration = state->context->addRoutedPointerListener(
+        auto registration = state->context->input().addRoutedPointerListener(
             UI::UIRoutedPointerListenerDesc{
                 .node = state->node,
                 .kind = UI::UIRoutedPointerEventKind::ButtonDown,
@@ -241,17 +241,17 @@ protected:
             << (contextResult ? "" : contextResult.error().message);
         context_ = std::move(*contextResult);
 
-        auto rootResult = context_->rootBuilder().createRoot();
+        auto rootResult = context_->authoring().rootBuilder().createRoot();
         ASSERT_TRUE(rootResult.has_value()) << (rootResult ? "" : rootResult.error().message);
         root_ = std::move(*rootResult);
 
-        auto firstNodeResult = context_->rootBuilder().createElement(
+        auto firstNodeResult = context_->authoring().rootBuilder().createElement(
             root_.rootNodeId(), UI::makePanelElement());
         ASSERT_TRUE(firstNodeResult.has_value())
             << (firstNodeResult ? "" : firstNodeResult.error().message);
         firstNode_ = *firstNodeResult;
 
-        auto secondNodeResult = context_->rootBuilder().createElement(
+        auto secondNodeResult = context_->authoring().rootBuilder().createElement(
             root_.rootNodeId(), UI::makePanelElement());
         ASSERT_TRUE(secondNodeResult.has_value())
             << (secondNodeResult ? "" : secondNodeResult.error().message);
@@ -551,13 +551,13 @@ TEST_F(UIRoutedPointerListenerRegistryTests, CallbackDestructionCanReenterRegist
 TEST_F(UIRoutedPointerListenerRegistryTests, NodeDestroyMakesCallbackDestructorReentryStale)
 {
     ContextReentryState state{.context = context_.get(), .node = firstNode_};
-    auto listener = context_->addRoutedPointerListener(
+    auto listener = context_->input().addRoutedPointerListener(
         descriptor(firstNode_),
         UI::UIRoutedPointerCallback{
             [probe = ContextReentryProbe{state}](UI::UIRoutedPointerEvent&) mutable noexcept {}});
     ASSERT_TRUE(listener.has_value()) << (listener ? "" : listener.error().message);
 
-    auto updaterResult = context_->treeUpdater(root_);
+    auto updaterResult = context_->authoring().treeUpdater(root_);
     ASSERT_TRUE(updaterResult.has_value()) << (updaterResult ? "" : updaterResult.error().message);
     UI::UITreeUpdater updater = std::move(*updaterResult);
     ASSERT_TRUE(updater.destroy(firstNode_).has_value());

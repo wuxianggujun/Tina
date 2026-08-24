@@ -1,9 +1,13 @@
 #include <gtest/gtest.h>
 
 #include <tina/core/id/GenerationPool.hpp>
+#include <tina/ui/UIAuthoring.hpp>
 #include <tina/ui/UIContext.hpp>
 #include <tina/ui/UIElement.hpp>
 #include <tina/ui/UIErrors.hpp>
+#include <tina/ui/UIInputRouter.hpp>
+#include <tina/ui/UIPublicationPipeline.hpp>
+#include <tina/ui/UIStyleController.hpp>
 #include <tina/ui/UITheme.hpp>
 
 #include "detail/UIElementContractResolver.hpp"
@@ -124,14 +128,14 @@ TEST(UISwitchTests, TrackThumbCheckedStateAndSemanticsCommitTogether)
     const Platform::WindowId window = makeWindow();
     auto context = createContext(window);
     ASSERT_NE(context, nullptr);
-    auto root = context->rootBuilder().createRoot();
+    auto root = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(root);
-    auto switchElement = context->rootBuilder().createElement(
+    auto switchElement = context->authoring().rootBuilder().createElement(
         root->rootNodeId(), UI::makeSwitchElement({
                                 .accessibleName = "Snap to grid",
                             }));
     ASSERT_TRUE(switchElement);
-    auto updater = context->treeUpdater(*root);
+    auto updater = context->authoring().treeUpdater(*root);
     ASSERT_TRUE(updater);
     ASSERT_TRUE(updater->setLayoutStyle(root->rootNodeId(), fixedSize(100.0F, 60.0F)));
 
@@ -142,14 +146,14 @@ TEST(UISwitchTests, TrackThumbCheckedStateAndSemanticsCommitTogether)
             [&activations](const UI::UIButtonActionEvent&) noexcept {
                 ++activations;
             }}));
-    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 60.0F}));
+    ASSERT_TRUE(context->publication().commitLayout({.width = 100.0F, .height = 60.0F}));
 
     const UI::UITheme dark = UI::makeModernDesktopTheme();
     const UI::UICheckboxChrome expected = UI::makeSwitchChrome(dark);
     EXPECT_EQ(updater->checkboxPaint(*switchElement).value(), expected.indicator);
     EXPECT_FALSE(updater->isChecked(*switchElement).value());
 
-    auto paint = paintsFor(context->committedPaint(), *switchElement);
+    auto paint = paintsFor(context->publication().committedPaint(), *switchElement);
     ASSERT_EQ(paint.size(), 2U);
     EXPECT_EQ(paint[0].solidFill,
               UI::premultiply(UI::scaleColorAlpha(dark.colors.surfaceContainer, 245)));
@@ -162,28 +166,28 @@ TEST(UISwitchTests, TrackThumbCheckedStateAndSemanticsCommitTogether)
     EXPECT_EQ(paint[1].solidFill, UI::premultiply(dark.colors.onSurfaceVariant));
 
     const UI::UISemanticsEntry* semantics =
-        semanticsFor(context->committedSemantics(), *switchElement);
+        semanticsFor(context->publication().committedSemantics(), *switchElement);
     ASSERT_NE(semantics, nullptr);
     EXPECT_EQ(semantics->role, UI::UISemanticsRole::Switch);
     EXPECT_EQ(semantics->name, "Snap to grid");
     EXPECT_FALSE(semantics->checked);
 
     ASSERT_TRUE(updater->setChecked(*switchElement, true));
-    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 60.0F}));
-    paint = paintsFor(context->committedPaint(), *switchElement);
+    ASSERT_TRUE(context->publication().commitLayout({.width = 100.0F, .height = 60.0F}));
+    paint = paintsFor(context->publication().committedPaint(), *switchElement);
     ASSERT_EQ(paint.size(), 2U);
     EXPECT_EQ(paint[0].solidFill, UI::premultiply(dark.colors.primary));
     EXPECT_EQ(paint[1].worldRect,
               (UI::UILogicalRect{.x = 23.0F, .y = 3.0F,
                                  .width = 18.0F, .height = 18.0F}));
     EXPECT_EQ(paint[1].solidFill, UI::premultiply(dark.colors.onPrimary));
-    semantics = semanticsFor(context->committedSemantics(), *switchElement);
+    semantics = semanticsFor(context->publication().committedSemantics(), *switchElement);
     ASSERT_NE(semantics, nullptr);
     EXPECT_TRUE(semantics->checked);
 
-    auto down = context->routePointerInput(pointerEvent(
+    auto down = context->input().routePointerInput(pointerEvent(
         window, UI::UIRoutedPointerEventKind::ButtonDown, 1));
-    auto up = context->routePointerInput(pointerEvent(
+    auto up = context->input().routePointerInput(pointerEvent(
         window, UI::UIRoutedPointerEventKind::ButtonUp, 2));
     ASSERT_TRUE(down && up);
     EXPECT_TRUE(down->consumed);
@@ -196,18 +200,18 @@ TEST(UISwitchTests, ThemeAndInvalidChromeUpdatesRemainTransactional)
 {
     auto context = createContext(makeWindow());
     ASSERT_NE(context, nullptr);
-    auto root = context->rootBuilder().createRoot();
+    auto root = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(root);
-    auto switchElement = context->rootBuilder().createElement(
+    auto switchElement = context->authoring().rootBuilder().createElement(
         root->rootNodeId(), UI::makeSwitchElement({
                                 .accessibleName = "Live preview",
                             }));
     ASSERT_TRUE(switchElement);
-    auto updater = context->treeUpdater(*root);
+    auto updater = context->authoring().treeUpdater(*root);
     ASSERT_TRUE(updater);
 
     const UI::UITheme light = UI::makeModernDesktopTheme(UI::UIColorScheme::Light);
-    ASSERT_TRUE(context->setProductTheme(light));
+    ASSERT_TRUE(context->style().setProductTheme(light));
     EXPECT_EQ(updater->checkboxPaint(*switchElement).value(),
               UI::makeSwitchChrome(light).indicator);
 
@@ -219,7 +223,7 @@ TEST(UISwitchTests, ThemeAndInvalidChromeUpdatesRemainTransactional)
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidControlValue);
     EXPECT_EQ(updater->checkboxPaint(*switchElement).value(), before);
 
-    const auto invalidRecipe = context->rootBuilder().createElement(
+    const auto invalidRecipe = context->authoring().rootBuilder().createElement(
         root->rootNodeId(), UI::makeSwitchElement({
                                 .accessibleName = "Invalid",
                                 .size = static_cast<UI::UISwitchSize>(255),

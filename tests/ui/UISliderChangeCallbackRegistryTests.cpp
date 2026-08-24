@@ -166,16 +166,16 @@ protected:
             << (contextResult ? "" : contextResult.error().message);
         context_ = std::move(*contextResult);
 
-        auto rootResult = context_->rootBuilder().createRoot();
+        auto rootResult = context_->authoring().rootBuilder().createRoot();
         ASSERT_TRUE(rootResult.has_value()) << (rootResult ? "" : rootResult.error().message);
         root_ = std::move(*rootResult);
 
-        auto firstSliderResult = context_->rootBuilder().createElement(root_.rootNodeId(), UI::makeSliderElement());
+        auto firstSliderResult = context_->authoring().rootBuilder().createElement(root_.rootNodeId(), UI::makeSliderElement());
         ASSERT_TRUE(firstSliderResult.has_value())
             << (firstSliderResult ? "" : firstSliderResult.error().message);
         firstSlider_ = *firstSliderResult;
 
-        auto secondSliderResult = context_->rootBuilder().createElement(root_.rootNodeId(), UI::makeSliderElement());
+        auto secondSliderResult = context_->authoring().rootBuilder().createElement(root_.rootNodeId(), UI::makeSliderElement());
         ASSERT_TRUE(secondSliderResult.has_value())
             << (secondSliderResult ? "" : secondSliderResult.error().message);
         secondSlider_ = *secondSliderResult;
@@ -432,13 +432,13 @@ TEST_F(UISliderChangeCallbackRegistryTests, RollbackAfterCommitDoesNotClearCommi
 
 TEST_F(UISliderChangeCallbackRegistryTests, StaleNodeIdCannotClearReusedNodeCallback)
 {
-    auto updaterResult = context_->treeUpdater(root_);
+    auto updaterResult = context_->authoring().treeUpdater(root_);
     ASSERT_TRUE(updaterResult.has_value())
         << (updaterResult ? "" : updaterResult.error().message);
     UI::UITreeUpdater updater = std::move(*updaterResult);
     ASSERT_TRUE(updater.destroy(firstSlider_).has_value());
 
-    auto replacementSliderResult = context_->rootBuilder().createElement(root_.rootNodeId(), UI::makeSliderElement());
+    auto replacementSliderResult = context_->authoring().rootBuilder().createElement(root_.rootNodeId(), UI::makeSliderElement());
     ASSERT_TRUE(replacementSliderResult.has_value())
         << (replacementSliderResult ? "" : replacementSliderResult.error().message);
     const UI::UINodeId replacementSlider = *replacementSliderResult;
@@ -557,7 +557,7 @@ TEST_F(UISliderChangeCallbackRegistryTests, FullCapacityReplacementUsesTransacti
         registry.commit(*registration, false);
     }
 
-    auto thirdSliderResult = context_->rootBuilder().createElement(root_.rootNodeId(), UI::makeSliderElement());
+    auto thirdSliderResult = context_->authoring().rootBuilder().createElement(root_.rootNodeId(), UI::makeSliderElement());
     ASSERT_TRUE(thirdSliderResult.has_value())
         << (thirdSliderResult ? "" : thirdSliderResult.error().message);
     auto fourthRegistration = registry.stage(

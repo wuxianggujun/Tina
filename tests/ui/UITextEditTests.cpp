@@ -29,7 +29,7 @@ TEST_F(UITextEditTest, DefaultsTargetableWhileLabelRemainsReadOnly)
 
     bool sawLabelHit = false;
     bool sawTextEditHit = false;
-    const UI::UICommittedHitView hit = context->committedHit();
+    const UI::UICommittedHitView hit = context->publication().committedHit();
     for (const UI::UICommittedHitEntry& entry : hit.entries()) {
         if (entry.node == label) {
             sawLabelHit = true;
@@ -43,12 +43,12 @@ TEST_F(UITextEditTest, DefaultsTargetableWhileLabelRemainsReadOnly)
     EXPECT_TRUE(sawLabelHit);
     EXPECT_TRUE(sawTextEditHit);
 
-    auto focus = context->routeDefaultActionFocusStep(false);
+    auto focus = context->input().routeDefaultActionFocusStep(false);
     ASSERT_TRUE(focus.has_value()) << (focus ? "" : focus.error().message);
     EXPECT_TRUE(focus->consumed);
     EXPECT_EQ(focus->focus, textEdit);
-    EXPECT_EQ(context->defaultActionFocus(), textEdit);
-    EXPECT_EQ(context->imeFocus(), textEdit);
+    EXPECT_EQ(context->input().defaultActionFocus(), textEdit);
+    EXPECT_EQ(context->text().imeFocus(), textEdit);
 
     auto selection = updater.textSelection(textEdit);
     ASSERT_TRUE(selection.has_value()) << (selection ? "" : selection.error().message);
@@ -74,7 +74,7 @@ TEST_F(UITextEditTest, PaintStatesReuseHoverArmAndFocusWithoutStalePressedFeedba
 
     const auto expectBackground = [&](UI::UIPremultipliedRgba8Color expected) {
         const UI::UICommittedPaintEntry* background = nullptr;
-        const UI::UICommittedPaintView paint = context->committedPaint();
+        const UI::UICommittedPaintView paint = context->publication().committedPaint();
         for (const UI::UICommittedPaintEntry& entry : paint.entries()) {
             if (entry.node == textEdit && entry.kind != UI::UICommittedPaintKind::Glyph && entry.worldRect.width == 240.0F &&
                 entry.worldRect.height == 32.0F) {
@@ -89,44 +89,44 @@ TEST_F(UITextEditTest, PaintStatesReuseHoverArmAndFocusWithoutStalePressedFeedba
     publishLayout();
     expectBackground(UI::premultiply(Normal));
 
-    auto hovered = context->routePointerInput(makePrimaryPointerInput(
+    auto hovered = context->input().routePointerInput(makePrimaryPointerInput(
         window, UI::UIRoutedPointerEventKind::Move, 1));
     ASSERT_TRUE(hovered.has_value()) << (hovered ? "" : hovered.error().message);
     publishLayout();
     expectBackground(UI::premultiply(Paint.hoveredBackgroundColor));
 
-    auto down = context->routePointerInput(makePrimaryPointerInput(
+    auto down = context->input().routePointerInput(makePrimaryPointerInput(
         window, UI::UIRoutedPointerEventKind::ButtonDown, 2));
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
     publishLayout();
     expectBackground(UI::premultiply(Paint.pressedBackgroundColor));
 
-    assertOk(context->cancelPointerInteraction(window));
+    assertOk(context->input().cancelPointerInteraction(window));
     publishLayout();
     expectBackground(UI::premultiply(Normal));
 
-    hovered = context->routePointerInput(makePrimaryPointerInput(
+    hovered = context->input().routePointerInput(makePrimaryPointerInput(
         window, UI::UIRoutedPointerEventKind::Move, 3));
     ASSERT_TRUE(hovered.has_value()) << (hovered ? "" : hovered.error().message);
-    down = context->routePointerInput(makePrimaryPointerInput(
+    down = context->input().routePointerInput(makePrimaryPointerInput(
         window, UI::UIRoutedPointerEventKind::ButtonDown, 4));
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
     publishLayout();
     expectBackground(UI::premultiply(Paint.pressedBackgroundColor));
 
-    auto up = context->routePointerInput(makePrimaryPointerInput(
+    auto up = context->input().routePointerInput(makePrimaryPointerInput(
         window, UI::UIRoutedPointerEventKind::ButtonUp, 5));
     ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
     publishLayout();
     expectBackground(UI::premultiply(Paint.hoveredBackgroundColor));
 
-    auto outside = context->routePointerInput(makePrimaryPointerInput(
+    auto outside = context->input().routePointerInput(makePrimaryPointerInput(
         window, UI::UIRoutedPointerEventKind::Move, 6, 300.0F, 10.0F));
     ASSERT_TRUE(outside.has_value()) << (outside ? "" : outside.error().message);
     publishLayout();
     expectBackground(UI::premultiply(Normal));
 
-    auto keyboardNavigation = context->routeFocusNavigation(
+    auto keyboardNavigation = context->input().routeFocusNavigation(
         UI::UIFocusNavigationDirection::Right, true,
         UI::UIInputModality::Keyboard);
     ASSERT_TRUE(keyboardNavigation.has_value()) << keyboardNavigation.error().message;
@@ -136,8 +136,8 @@ TEST_F(UITextEditTest, PaintStatesReuseHoverArmAndFocusWithoutStalePressedFeedba
     assertOk(updater.setEnabled(textEdit, false));
     publishLayout();
     expectBackground(UI::UIPremultipliedRgba8Color{.alpha = 140});
-    EXPECT_FALSE(context->defaultActionFocus().hasValue());
-    EXPECT_FALSE(context->imeFocus().hasValue());
+    EXPECT_FALSE(context->input().defaultActionFocus().hasValue());
+    EXPECT_FALSE(context->text().imeFocus().hasValue());
 }
 
 TEST_F(UITextEditTest, MultilineConfigAcceptsLfRejectsCrAndEnforcesByteLimit)
@@ -156,7 +156,7 @@ TEST_F(UITextEditTest, MultilineConfigAcceptsLfRejectsCrAndEnforcesByteLimit)
 
     assertOk(updater.setText(textEdit, "A\nB"));
     publishLayout();
-    EXPECT_FALSE(context->committedPaint().entries().empty());
+    EXPECT_FALSE(context->publication().committedPaint().entries().empty());
     auto text = updater.text(textEdit);
     ASSERT_TRUE(text.has_value());
     EXPECT_EQ(*text, "A\nB");
@@ -191,7 +191,7 @@ TEST_F(UITextEditTest, MultilineTextInputCommitsLfThroughFocusedImeRoute)
     assertOk(updater.setTextSelection(textEdit, {.anchorCodepoint = 1, .caretCodepoint = 1}));
     focusWithTab(textEdit);
 
-    auto input = context->routeTextInput(window, Platform::PlatformFrameId{1}, 1, "\nB");
+    auto input = context->text().routeTextInput(window, Platform::PlatformFrameId{1}, 1, "\nB");
     ASSERT_TRUE(input.has_value()) << (input ? "" : input.error().message);
     EXPECT_TRUE(input->consumed);
     EXPECT_TRUE(input->applied);
@@ -220,7 +220,7 @@ TEST_F(UITextEditTest, SoftWrapVerticalNavigationPreservesCaretRowAndPreferredCo
     focusWithTab(textEdit);
 
     auto route = [&](u64 sequence, UI::UITextEditCommand command) {
-        auto routed = context->routeTextEditCommand(
+        auto routed = context->text().routeTextEditCommand(
             window, Platform::PlatformFrameId{sequence}, sequence, command, false);
         EXPECT_TRUE(routed.has_value()) << (routed ? "" : routed.error().message);
         if (routed)
@@ -234,7 +234,7 @@ TEST_F(UITextEditTest, SoftWrapVerticalNavigationPreservesCaretRowAndPreferredCo
     ASSERT_TRUE(end.has_value());
     EXPECT_TRUE(end->applied);
     publishLayout();
-    const auto firstCaret = context->committedTextInputCaretRect();
+    const auto firstCaret = context->publication().committedTextInputCaretRect();
     ASSERT_TRUE(firstCaret.has_value());
     auto selection = updater.textSelection(textEdit);
     ASSERT_TRUE(selection.has_value());
@@ -244,7 +244,7 @@ TEST_F(UITextEditTest, SoftWrapVerticalNavigationPreservesCaretRowAndPreferredCo
     ASSERT_TRUE(down.has_value());
     EXPECT_TRUE(down->applied);
     publishLayout();
-    const auto secondCaret = context->committedTextInputCaretRect();
+    const auto secondCaret = context->publication().committedTextInputCaretRect();
     ASSERT_TRUE(secondCaret.has_value());
     selection = updater.textSelection(textEdit);
     ASSERT_TRUE(selection.has_value());
@@ -255,7 +255,7 @@ TEST_F(UITextEditTest, SoftWrapVerticalNavigationPreservesCaretRowAndPreferredCo
     ASSERT_TRUE(down.has_value());
     EXPECT_TRUE(down->applied);
     publishLayout();
-    const auto thirdCaret = context->committedTextInputCaretRect();
+    const auto thirdCaret = context->publication().committedTextInputCaretRect();
     ASSERT_TRUE(thirdCaret.has_value());
     selection = updater.textSelection(textEdit);
     ASSERT_TRUE(selection.has_value());
@@ -282,28 +282,28 @@ TEST_F(UITextEditTest, SoftWrapPointerHitKeepsSharedBoundaryOnClickedRow)
     assertOk(updater.setLayoutStyle(textEdit, fixedSize(20.0F, 60.0F)));
     publishLayout();
 
-    auto first = context->routePointerInput(
+    auto first = context->input().routePointerInput(
         makePrimaryPointerDown(window, 1U, 19.0F, 1.0F));
     ASSERT_TRUE(first.has_value()) << (first ? "" : first.error().message);
     EXPECT_TRUE(first->consumed);
     publishLayout();
-    const auto upstreamCaret = context->committedTextInputCaretRect();
+    const auto upstreamCaret = context->publication().committedTextInputCaretRect();
     ASSERT_TRUE(upstreamCaret.has_value());
     auto selection = updater.textSelection(textEdit);
     ASSERT_TRUE(selection.has_value());
     EXPECT_EQ(*selection, (UI::UITextSelection{.anchorCodepoint = 2U, .caretCodepoint = 2U}));
 
-    auto release = context->routePointerInput(
+    auto release = context->input().routePointerInput(
         makePrimaryPointerInput(window, UI::UIRoutedPointerEventKind::ButtonUp, 2U, 19.0F, 1.0F));
     ASSERT_TRUE(release.has_value()) << (release ? "" : release.error().message);
     EXPECT_TRUE(release->consumed);
 
-    auto second = context->routePointerInput(
+    auto second = context->input().routePointerInput(
         makePrimaryPointerDown(window, 3U, 0.0F, 19.5F));
     ASSERT_TRUE(second.has_value()) << (second ? "" : second.error().message);
     EXPECT_TRUE(second->consumed);
     publishLayout();
-    const auto downstreamCaret = context->committedTextInputCaretRect();
+    const auto downstreamCaret = context->publication().committedTextInputCaretRect();
     ASSERT_TRUE(downstreamCaret.has_value());
     selection = updater.textSelection(textEdit);
     ASSERT_TRUE(selection.has_value());
@@ -329,12 +329,12 @@ TEST_F(UITextEditTest, SoftWrapHorizontalNavigationPublishesBothBoundarySides)
     const UI::UINodeId textEdit = *result;
     assertOk(updater.setLayoutStyle(textEdit, fixedSize(20.0F, 60.0F)));
     publishLayout();
-    assertOk(context->requestFocus(textEdit));
+    assertOk(context->input().requestFocus(textEdit));
     assertOk(updater.setTextSelection(
         textEdit, {.anchorCodepoint = 1U, .caretCodepoint = 1U}));
 
     const auto route = [&](u64 sequence, UI::UITextEditCommand command) {
-        auto routed = context->routeTextEditCommand(
+        auto routed = context->text().routeTextEditCommand(
             window, Platform::PlatformFrameId{sequence}, sequence, command, false);
         EXPECT_TRUE(routed.has_value()) << (routed ? "" : routed.error().message);
         if (routed)
@@ -347,7 +347,7 @@ TEST_F(UITextEditTest, SoftWrapHorizontalNavigationPublishesBothBoundarySides)
 
     ASSERT_TRUE(route(1U, UI::UITextEditCommand::MoveRight).has_value());
     publishLayout();
-    const auto upstreamCaret = context->committedTextInputCaretRect();
+    const auto upstreamCaret = context->publication().committedTextInputCaretRect();
     ASSERT_TRUE(upstreamCaret.has_value());
     auto selection = updater.textSelection(textEdit);
     ASSERT_TRUE(selection.has_value());
@@ -356,7 +356,7 @@ TEST_F(UITextEditTest, SoftWrapHorizontalNavigationPublishesBothBoundarySides)
 
     ASSERT_TRUE(route(2U, UI::UITextEditCommand::MoveRight).has_value());
     publishLayout();
-    const auto downstreamCaret = context->committedTextInputCaretRect();
+    const auto downstreamCaret = context->publication().committedTextInputCaretRect();
     ASSERT_TRUE(downstreamCaret.has_value());
     selection = updater.textSelection(textEdit);
     ASSERT_TRUE(selection.has_value());
@@ -366,7 +366,7 @@ TEST_F(UITextEditTest, SoftWrapHorizontalNavigationPublishesBothBoundarySides)
 
     ASSERT_TRUE(route(3U, UI::UITextEditCommand::MoveLeft).has_value());
     publishLayout();
-    const auto returnedUpstreamCaret = context->committedTextInputCaretRect();
+    const auto returnedUpstreamCaret = context->publication().committedTextInputCaretRect();
     ASSERT_TRUE(returnedUpstreamCaret.has_value());
     EXPECT_FLOAT_EQ(returnedUpstreamCaret->y, upstreamCaret->y);
 
@@ -415,34 +415,34 @@ TEST_F(UITextEditTest, FailedPaintCommitKeepsCommittedVisualRowsLayoutAndScroll)
         << (textEditResult ? "" : textEditResult.error().message);
     const UI::UINodeId textEdit = *textEditResult;
     assertOk(localUpdater.setLayoutStyle(textEdit, fixedSize(20.0F, 20.0F)));
-    assertOk(localContext->commitLayout({.width = 100.0F, .height = 40.0F}));
-    assertOk(localContext->requestFocus(textEdit));
-    assertOk(localContext->commitLayout({.width = 100.0F, .height = 40.0F}));
+    assertOk(localContext->publication().commitLayout({.width = 100.0F, .height = 40.0F}));
+    assertOk(localContext->input().requestFocus(textEdit));
+    assertOk(localContext->publication().commitLayout({.width = 100.0F, .height = 40.0F}));
 
     UI::UIPointerInputEvent scrollDown = makePrimaryPointerInput(
         window, UI::UIRoutedPointerEventKind::Wheel, 1, 5.0F, 5.0F);
     scrollDown.delta.y = -1.0F;
-    auto scrolled = localContext->routePointerInput(scrollDown);
+    auto scrolled = localContext->input().routePointerInput(scrollDown);
     ASSERT_TRUE(scrolled.has_value())
         << (scrolled ? "" : scrolled.error().message);
     ASSERT_TRUE(scrolled->consumed);
 
     const u64 committedLayoutRevision =
-        localContext->committedLayout().layoutRevision();
+        localContext->publication().committedLayout().layoutRevision();
     assertOk(localUpdater.setLayoutStyle(textEdit, fixedSize(80.0F, 20.0F)));
     assertOk(localUpdater.setBoxPaint(
         textEdit, UI::makeSolidBox(UI::rgb(0x102030))));
 
     const Core::Status failedCommit =
-        localContext->commitLayout({.width = 100.0F, .height = 40.0F});
+        localContext->publication().commitLayout({.width = 100.0F, .height = 40.0F});
     ASSERT_FALSE(failedCommit.has_value());
     EXPECT_EQ(failedCommit.error().code, UI::UIErrorCode::CapacityExceeded);
     EXPECT_EQ(
-        localContext->committedLayout().layoutRevision(), committedLayoutRevision);
+        localContext->publication().committedLayout().layoutRevision(), committedLayoutRevision);
 
     const UI::UICommittedLayoutEntry* committedTextEditLayout = nullptr;
     for (const UI::UICommittedLayoutEntry& entry :
-         localContext->committedLayout().entries())
+         localContext->publication().committedLayout().entries())
     {
         if (entry.node == textEdit)
         {
@@ -456,12 +456,12 @@ TEST_F(UITextEditTest, FailedPaintCommitKeepsCommittedVisualRowsLayoutAndScroll)
     UI::UIPointerInputEvent scrollUp = makePrimaryPointerInput(
         window, UI::UIRoutedPointerEventKind::Wheel, 2, 5.0F, 5.0F);
     scrollUp.delta.y = 1.0F;
-    auto restoredScroll = localContext->routePointerInput(scrollUp);
+    auto restoredScroll = localContext->input().routePointerInput(scrollUp);
     ASSERT_TRUE(restoredScroll.has_value())
         << (restoredScroll ? "" : restoredScroll.error().message);
     EXPECT_TRUE(restoredScroll->consumed);
 
-    auto selectSecondCommittedRow = localContext->routePointerInput(
+    auto selectSecondCommittedRow = localContext->input().routePointerInput(
         makePrimaryPointerDown(window, 3, 1.0F, 19.5F));
     ASSERT_TRUE(selectSecondCommittedRow.has_value())
         << (selectSecondCommittedRow ? ""
@@ -523,7 +523,7 @@ TEST_F(UITextEditTest, InvalidTextInputAndCompositionLeaveActivePreeditUnchanged
     assertOk(updater.setText(textEdit, "AB"));
     focusWithTab(textEdit);
 
-    auto started = context->routeTextComposition(
+    auto started = context->text().routeTextComposition(
         window,
         Platform::PlatformFrameId{1},
         1,
@@ -534,15 +534,15 @@ TEST_F(UITextEditTest, InvalidTextInputAndCompositionLeaveActivePreeditUnchanged
         << (started ? "" : started.error().message);
 
     const auto expectCompositionStateUnchanged = [&] {
-        EXPECT_TRUE(context->imeCompositionActive());
-        EXPECT_EQ(context->imePreeditUtf8(), "old");
-        EXPECT_EQ(context->imePreeditCursorCodepoint(), 2U);
+        EXPECT_TRUE(context->text().imeCompositionActive());
+        EXPECT_EQ(context->text().imePreeditUtf8(), "old");
+        EXPECT_EQ(context->text().imePreeditCursorCodepoint(), 2U);
     };
     const auto expectInvalidComposition = [&](u64 sequence,
                                               std::string_view preedit,
                                               Platform::TextCompositionStage stage,
                                               Core::ErrorCode expectedError) {
-        auto result = context->routeTextComposition(
+        auto result = context->text().routeTextComposition(
             window,
             Platform::PlatformFrameId{sequence},
             sequence,
@@ -581,7 +581,7 @@ TEST_F(UITextEditTest, InvalidTextInputAndCompositionLeaveActivePreeditUnchanged
              std::pair{6ULL, std::string_view{"\xE2\x82", 2}},
              std::pair{7ULL, std::string_view{"A\0B", 3}},
          }) {
-        auto input = context->routeTextInput(
+        auto input = context->text().routeTextInput(
             window,
             Platform::PlatformFrameId{sequence},
             sequence,
@@ -604,7 +604,7 @@ TEST_F(UITextEditTest, CompositionByteLimitAndProgrammaticTextClampState)
     focusWithTab(textEdit);
 
     const std::string maximumPreedit(512, 'x');
-    auto composition = context->routeTextComposition(
+    auto composition = context->text().routeTextComposition(
         window,
         Platform::PlatformFrameId{1},
         1,
@@ -615,21 +615,21 @@ TEST_F(UITextEditTest, CompositionByteLimitAndProgrammaticTextClampState)
         << (composition ? "" : composition.error().message);
     EXPECT_TRUE(composition->consumed);
     EXPECT_TRUE(composition->applied);
-    EXPECT_EQ(context->imePreeditUtf8(), maximumPreedit);
-    EXPECT_EQ(context->imePreeditCursorCodepoint(), 512U);
+    EXPECT_EQ(context->text().imePreeditUtf8(), maximumPreedit);
+    EXPECT_EQ(context->text().imePreeditCursorCodepoint(), 512U);
 
     const Core::Status invalidReplacement = updater.setText(
         textEdit,
         std::string_view{"\xED\xA0\x80", 3});
     ASSERT_FALSE(invalidReplacement.has_value());
     EXPECT_EQ(invalidReplacement.error().code, UI::UIErrorCode::InvalidText);
-    EXPECT_TRUE(context->imeCompositionActive());
-    EXPECT_EQ(context->imePreeditUtf8(), maximumPreedit);
+    EXPECT_TRUE(context->text().imeCompositionActive());
+    EXPECT_EQ(context->text().imePreeditUtf8(), maximumPreedit);
 
     assertOk(updater.setText(textEdit, "X"));
-    EXPECT_FALSE(context->imeCompositionActive());
-    EXPECT_TRUE(context->imePreeditUtf8().empty());
-    EXPECT_EQ(context->imePreeditCursorCodepoint(), 0U);
+    EXPECT_FALSE(context->text().imeCompositionActive());
+    EXPECT_TRUE(context->text().imePreeditUtf8().empty());
+    EXPECT_EQ(context->text().imePreeditCursorCodepoint(), 0U);
     auto selection = updater.textSelection(textEdit);
     ASSERT_TRUE(selection.has_value())
         << (selection ? "" : selection.error().message);
@@ -637,7 +637,7 @@ TEST_F(UITextEditTest, CompositionByteLimitAndProgrammaticTextClampState)
         *selection,
         (UI::UITextSelection{.anchorCodepoint = 1, .caretCodepoint = 1}));
 
-    composition = context->routeTextComposition(
+    composition = context->text().routeTextComposition(
         window,
         Platform::PlatformFrameId{2},
         2,
@@ -646,12 +646,12 @@ TEST_F(UITextEditTest, CompositionByteLimitAndProgrammaticTextClampState)
         Platform::TextCompositionStage::Started);
     ASSERT_TRUE(composition.has_value())
         << (composition ? "" : composition.error().message);
-    ASSERT_TRUE(context->imeCompositionActive());
+    ASSERT_TRUE(context->text().imeCompositionActive());
 
     assertOk(updater.setText(textEdit, "X"));
-    EXPECT_FALSE(context->imeCompositionActive());
-    EXPECT_TRUE(context->imePreeditUtf8().empty());
-    EXPECT_EQ(context->imePreeditCursorCodepoint(), 0U);
+    EXPECT_FALSE(context->text().imeCompositionActive());
+    EXPECT_TRUE(context->text().imePreeditUtf8().empty());
+    EXPECT_EQ(context->text().imePreeditCursorCodepoint(), 0U);
 }
 
 TEST_F(UITextEditTest, TextInputAndImeCommitReplaceUnicodeSelection)
@@ -666,7 +666,7 @@ TEST_F(UITextEditTest, TextInputAndImeCommitReplaceUnicodeSelection)
         textEdit,
         {.anchorCodepoint = 1, .caretCodepoint = 2}));
 
-    auto composition = context->routeTextComposition(
+    auto composition = context->text().routeTextComposition(
         window,
         Platform::PlatformFrameId{1},
         1,
@@ -676,15 +676,15 @@ TEST_F(UITextEditTest, TextInputAndImeCommitReplaceUnicodeSelection)
     ASSERT_TRUE(composition.has_value()) << (composition ? "" : composition.error().message);
     EXPECT_TRUE(composition->consumed);
     EXPECT_TRUE(composition->applied);
-    EXPECT_TRUE(context->imeCompositionActive());
-    EXPECT_EQ(context->imePreeditUtf8(), "ni");
-    EXPECT_EQ(context->imePreeditCursorCodepoint(), 1U);
+    EXPECT_TRUE(context->text().imeCompositionActive());
+    EXPECT_EQ(context->text().imePreeditUtf8(), "ni");
+    EXPECT_EQ(context->text().imePreeditCursorCodepoint(), 1U);
 
     auto beforeCommit = updater.text(textEdit);
     ASSERT_TRUE(beforeCommit.has_value());
     EXPECT_EQ(*beforeCommit, InitialUtf8);
 
-    auto commit = context->routeTextInput(
+    auto commit = context->text().routeTextInput(
         window,
         Platform::PlatformFrameId{2},
         2,
@@ -692,7 +692,7 @@ TEST_F(UITextEditTest, TextInputAndImeCommitReplaceUnicodeSelection)
     ASSERT_TRUE(commit.has_value()) << (commit ? "" : commit.error().message);
     EXPECT_TRUE(commit->consumed);
     EXPECT_TRUE(commit->applied);
-    EXPECT_FALSE(context->imeCompositionActive());
+    EXPECT_FALSE(context->text().imeCompositionActive());
 
     auto text = updater.text(textEdit);
     ASSERT_TRUE(text.has_value());
@@ -703,7 +703,7 @@ TEST_F(UITextEditTest, TextInputAndImeCommitReplaceUnicodeSelection)
         *selection,
         (UI::UITextSelection{.anchorCodepoint = 2, .caretCodepoint = 2}));
 
-    auto lineBreak = context->routeTextInput(
+    auto lineBreak = context->text().routeTextInput(
         window,
         Platform::PlatformFrameId{3},
         3,
@@ -727,7 +727,7 @@ TEST_F(UITextEditTest, SameTextReplacementCollapsesSelectionAndRepublishesPaint)
         {.anchorCodepoint = 1, .caretCodepoint = 2}));
     publishLayout();
 
-    const UI::UICommittedPaintView selectedPaint = context->committedPaint();
+    const UI::UICommittedPaintView selectedPaint = context->publication().committedPaint();
     const u64 selectedPaintRevision = selectedPaint.paintRevision();
     const UI::UICommittedPaintEntry* selectionHighlight = nullptr;
     const UI::UICommittedPaintEntry* selectedCaret = nullptr;
@@ -748,7 +748,7 @@ TEST_F(UITextEditTest, SameTextReplacementCollapsesSelectionAndRepublishesPaint)
         selectionHighlight->worldRect.x + selectionHighlight->worldRect.width);
     const float expectedCaretX = selectedCaret->worldRect.x;
 
-    auto replacement = context->routeTextInput(
+    auto replacement = context->text().routeTextInput(
         window,
         Platform::PlatformFrameId{1},
         1,
@@ -769,7 +769,7 @@ TEST_F(UITextEditTest, SameTextReplacementCollapsesSelectionAndRepublishesPaint)
         (UI::UITextSelection{.anchorCodepoint = 2, .caretCodepoint = 2}));
 
     publishLayout();
-    const UI::UICommittedPaintView collapsedPaint = context->committedPaint();
+    const UI::UICommittedPaintView collapsedPaint = context->publication().committedPaint();
     EXPECT_EQ(collapsedPaint.paintRevision(), selectedPaintRevision + 1U);
     const UI::UICommittedPaintEntry* collapsedCaret = nullptr;
     for (const UI::UICommittedPaintEntry& entry : collapsedPaint.entries()) {
@@ -826,7 +826,7 @@ TEST_F(UITextEditTest, CommandsNavigateAndDeleteWholeGraphemeClusters)
         textEdit, {.anchorCodepoint = 7U, .caretCodepoint = 7U}));
 
     const auto routeCommand = [&](u64 sequence, UI::UITextEditCommand command) {
-        auto result = context->routeTextEditCommand(
+        auto result = context->text().routeTextEditCommand(
             window, Platform::PlatformFrameId{sequence}, sequence, command, false);
         EXPECT_TRUE(result.has_value())
             << (result ? "" : result.error().message);
@@ -877,7 +877,7 @@ TEST_F(UITextEditTest, CommandsNavigateAndDeleteWholeGraphemeClusters)
     EXPECT_EQ(*selection,
               (UI::UITextSelection{.anchorCodepoint = 0U, .caretCodepoint = 2U}));
 
-    auto replaceAll = context->routeTextInput(
+    auto replaceAll = context->text().routeTextInput(
         window, Platform::PlatformFrameId{5U}, 5U, "Z");
     ASSERT_TRUE(replaceAll.has_value());
     EXPECT_TRUE(replaceAll->consumed);
@@ -909,7 +909,7 @@ TEST_F(UITextEditTest, PaintPublishesSelectionPreeditAndCaretAtTheEditPosition)
         {.anchorCodepoint = 1, .caretCodepoint = 2}));
     publishLayout();
 
-    const UI::UICommittedPaintView selectedPaint = context->committedPaint();
+    const UI::UICommittedPaintView selectedPaint = context->publication().committedPaint();
     ASSERT_EQ(selectedPaint.size(), 5U);
     const UI::UICommittedPaintEntry* selectionPaint = nullptr;
     const UI::UICommittedPaintEntry* selectedCaret = nullptr;
@@ -927,10 +927,10 @@ TEST_F(UITextEditTest, PaintPublishesSelectionPreeditAndCaretAtTheEditPosition)
     ASSERT_NE(selectedCaret, nullptr);
     EXPECT_FLOAT_EQ(selectedCaret->worldRect.width, 2.0F);
     EXPECT_GT(selectedCaret->worldRect.x, selectionPaint->worldRect.x);
-    ASSERT_TRUE(context->committedTextInputCaretRect().has_value());
-    EXPECT_EQ(*context->committedTextInputCaretRect(), selectedCaret->worldRect);
+    ASSERT_TRUE(context->publication().committedTextInputCaretRect().has_value());
+    EXPECT_EQ(*context->publication().committedTextInputCaretRect(), selectedCaret->worldRect);
 
-    auto composition = context->routeTextComposition(
+    auto composition = context->text().routeTextComposition(
         window,
         Platform::PlatformFrameId{1},
         1,
@@ -940,7 +940,7 @@ TEST_F(UITextEditTest, PaintPublishesSelectionPreeditAndCaretAtTheEditPosition)
     ASSERT_TRUE(composition.has_value());
     publishLayout();
 
-    const UI::UICommittedPaintView preeditPaint = context->committedPaint();
+    const UI::UICommittedPaintView preeditPaint = context->publication().committedPaint();
     ASSERT_EQ(preeditPaint.size(), 5U);
     usize preeditGlyphCount = 0;
     float firstPreeditX = 0.0F;
@@ -965,8 +965,8 @@ TEST_F(UITextEditTest, PaintPublishesSelectionPreeditAndCaretAtTheEditPosition)
     EXPECT_GT(secondPreeditX, firstPreeditX);
     ASSERT_NE(preeditCaret, nullptr);
     EXPECT_FLOAT_EQ(preeditCaret->worldRect.x, secondPreeditX);
-    ASSERT_TRUE(context->committedTextInputCaretRect().has_value());
-    EXPECT_EQ(*context->committedTextInputCaretRect(), preeditCaret->worldRect);
+    ASSERT_TRUE(context->publication().committedTextInputCaretRect().has_value());
+    EXPECT_EQ(*context->publication().committedTextInputCaretRect(), preeditCaret->worldRect);
 }
 
 TEST_F(UITextEditTest, CommittedCaretClearsForFocusVisibilityCollapseAndFullClip)
@@ -977,33 +977,33 @@ TEST_F(UITextEditTest, CommittedCaretClearsForFocusVisibilityCollapseAndFullClip
     focusWithTab(textEdit);
     assertOk(updater.setTextSelection(textEdit, {.anchorCodepoint = 2, .caretCodepoint = 2}));
     publishLayout();
-    ASSERT_TRUE(context->committedTextInputCaretRect().has_value());
+    ASSERT_TRUE(context->publication().committedTextInputCaretRect().has_value());
 
-    assertOk(context->clearFocus());
+    assertOk(context->input().clearFocus());
     publishLayout();
-    EXPECT_FALSE(context->committedTextInputCaretRect().has_value());
+    EXPECT_FALSE(context->publication().committedTextInputCaretRect().has_value());
 
-    assertOk(context->requestFocus(textEdit));
+    assertOk(context->input().requestFocus(textEdit));
     publishLayout();
-    ASSERT_TRUE(context->committedTextInputCaretRect().has_value());
+    ASSERT_TRUE(context->publication().committedTextInputCaretRect().has_value());
 
     UI::UILayoutStyle textEditStyle = fixedSize(80.0F, 24.0F);
     textEditStyle.visibility = UI::UIVisibility::Hidden;
     assertOk(updater.setLayoutStyle(textEdit, textEditStyle));
     publishLayout();
-    EXPECT_FALSE(context->committedTextInputCaretRect().has_value());
+    EXPECT_FALSE(context->publication().committedTextInputCaretRect().has_value());
 
     textEditStyle.visibility = UI::UIVisibility::Visible;
     assertOk(updater.setLayoutStyle(textEdit, textEditStyle));
     publishLayout();
-    assertOk(context->requestFocus(textEdit));
+    assertOk(context->input().requestFocus(textEdit));
     publishLayout();
-    ASSERT_TRUE(context->committedTextInputCaretRect().has_value());
+    ASSERT_TRUE(context->publication().committedTextInputCaretRect().has_value());
 
     textEditStyle.visibility = UI::UIVisibility::Collapsed;
     assertOk(updater.setLayoutStyle(textEdit, textEditStyle));
     publishLayout();
-    EXPECT_FALSE(context->committedTextInputCaretRect().has_value());
+    EXPECT_FALSE(context->publication().committedTextInputCaretRect().has_value());
 
     textEditStyle.visibility = UI::UIVisibility::Visible;
     assertOk(updater.setLayoutStyle(textEdit, textEditStyle));
@@ -1011,15 +1011,15 @@ TEST_F(UITextEditTest, CommittedCaretClearsForFocusVisibilityCollapseAndFullClip
     rootStyle.clipDescendants = true;
     assertOk(updater.setLayoutStyle(root.rootNodeId(), rootStyle));
     publishLayout();
-    assertOk(context->requestFocus(textEdit));
+    assertOk(context->input().requestFocus(textEdit));
     publishLayout();
-    ASSERT_TRUE(context->committedTextInputCaretRect().has_value());
+    ASSERT_TRUE(context->publication().committedTextInputCaretRect().has_value());
 
     textEditStyle.placement = UI::UILayoutPlacement::Overlay;
     textEditStyle.overlay.offset.x = UI::UILayoutLength::Px(200.0F);
     assertOk(updater.setLayoutStyle(textEdit, textEditStyle));
     publishLayout();
-    EXPECT_FALSE(context->committedTextInputCaretRect().has_value());
+    EXPECT_FALSE(context->publication().committedTextInputCaretRect().has_value());
 }
 
 TEST_F(UITextEditTest, PointerSelectionUsesRasterizedVariableGlyphAdvances)
@@ -1051,9 +1051,9 @@ TEST_F(UITextEditTest, PointerSelectionUsesRasterizedVariableGlyphAdvances)
     textEditStyle.padding.left = 12.0F;
     assertOk(localUpdater.setLayoutStyle(textEdit, textEditStyle));
     assertOk(localUpdater.setText(textEdit, "Wi"));
-    assertOk(localContext->commitLayout({.width = 120.0F, .height = 40.0F}));
+    assertOk(localContext->publication().commitLayout({.width = 120.0F, .height = 40.0F}));
 
-    auto down = localContext->routePointerInput(
+    auto down = localContext->input().routePointerInput(
         makePrimaryPointerDown(window, 1, 30.0F, 10.0F));
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
     EXPECT_TRUE(down->consumed);
@@ -1070,7 +1070,7 @@ TEST_F(UITextEditTest, RejectsUnknownCommandWithoutClearingComposition)
     ASSERT_TRUE(textEdit.hasValue());
     assertOk(updater.setText(textEdit, "AB"));
     focusWithTab(textEdit);
-    auto composition = context->routeTextComposition(
+    auto composition = context->text().routeTextComposition(
         window,
         Platform::PlatformFrameId{1},
         1,
@@ -1079,9 +1079,9 @@ TEST_F(UITextEditTest, RejectsUnknownCommandWithoutClearingComposition)
         Platform::TextCompositionStage::Started);
     ASSERT_TRUE(composition.has_value())
         << (composition ? "" : composition.error().message);
-    ASSERT_TRUE(context->imeCompositionActive());
+    ASSERT_TRUE(context->text().imeCompositionActive());
 
-    auto command = context->routeTextEditCommand(
+    auto command = context->text().routeTextEditCommand(
         window,
         Platform::PlatformFrameId{2},
         2,
@@ -1089,8 +1089,8 @@ TEST_F(UITextEditTest, RejectsUnknownCommandWithoutClearingComposition)
         false);
     ASSERT_FALSE(command.has_value());
     EXPECT_EQ(command.error().code, UI::UIErrorCode::InvalidText);
-    EXPECT_TRUE(context->imeCompositionActive());
-    EXPECT_EQ(context->imePreeditUtf8(), "x");
+    EXPECT_TRUE(context->text().imeCompositionActive());
+    EXPECT_EQ(context->text().imePreeditUtf8(), "x");
 }
 
 } // namespace

@@ -1,5 +1,7 @@
 ﻿#include "EditorWorkspaceState.hpp"
 
+#include <tina/ui/UIErrors.hpp>
+
 namespace Tina::EditorApp::WorkspaceInternal {
 namespace {
 
@@ -1023,12 +1025,22 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
             observedTilePaletteSelection_ = selection->logicalIndex;
         }
         if (!selection->hasValue() && tilePaletteTileCount_ != 0U) {
-            for (u32 index = 0; index < tilePaletteTileCount_; ++index) {
-                if (tilePaletteTiles_[index].localId == selectedTileId_) {
-                    if (auto status = tree->setVirtualGridViewSelectedIndex(tilePaletteGrid_, index);
-                        !status) return status;
-                    observedTilePaletteSelection_ = index;
-                    break;
+            auto metrics = tree->virtualGridViewMetrics(tilePaletteGrid_);
+            if (!metrics) {
+                return Tina::Core::failure(std::move(metrics.error()));
+            }
+            if (metrics->logicalColumnCount != 0U &&
+                metrics->logicalItemCount == static_cast<u64>(tilePaletteTileCount_)) {
+                for (u32 index = 0; index < tilePaletteTileCount_; ++index) {
+                    if (tilePaletteTiles_[index].localId == selectedTileId_) {
+                        if (auto status = tree->setVirtualGridViewSelectedIndex(
+                                tilePaletteGrid_, index);
+                            !status) {
+                            return status;
+                        }
+                        observedTilePaletteSelection_ = index;
+                        break;
+                    }
                 }
             }
         }

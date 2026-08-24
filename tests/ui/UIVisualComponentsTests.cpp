@@ -1,9 +1,12 @@
 #include <gtest/gtest.h>
 
 #include <tina/core/id/GenerationPool.hpp>
+#include <tina/ui/UIAuthoring.hpp>
 #include <tina/ui/UIContext.hpp>
 #include <tina/ui/UIElement.hpp>
 #include <tina/ui/UIErrors.hpp>
+#include <tina/ui/UIPublicationPipeline.hpp>
+#include <tina/ui/UIStyleController.hpp>
 #include <tina/ui/UITheme.hpp>
 
 #include "detail/UIElementContractResolver.hpp"
@@ -121,36 +124,36 @@ TEST(UIVisualComponentsTests, InvalidProfilesAndThicknessFailClosedAtCreate)
 {
     auto context = createContext(makeWindow());
     ASSERT_NE(context, nullptr);
-    auto root = context->rootBuilder().createRoot();
+    auto root = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(root);
 
-    const auto invalidSurface = context->rootBuilder().createElement(
+    const auto invalidSurface = context->authoring().rootBuilder().createElement(
         root->rootNodeId(), UI::makeSurfaceElement({
                                 .variant = static_cast<UI::UISurfaceVariant>(255),
                             }));
     EXPECT_FALSE(invalidSurface);
     EXPECT_EQ(invalidSurface.error().code, UI::UIErrorCode::InvalidElementDescriptor);
 
-    const auto invalidOrientation = context->rootBuilder().createElement(
+    const auto invalidOrientation = context->authoring().rootBuilder().createElement(
         root->rootNodeId(), UI::makeDividerElement({
                                 .orientation = static_cast<UI::UIDividerOrientation>(255),
                             }));
     EXPECT_FALSE(invalidOrientation);
 
-    const auto invalidTone = context->rootBuilder().createElement(
+    const auto invalidTone = context->authoring().rootBuilder().createElement(
         root->rootNodeId(), UI::makeBadgeElement(
                                 "Badge",
                                 {.tone = static_cast<UI::UIBadgeTone>(255)}));
     EXPECT_FALSE(invalidTone);
 
-    const auto negativeThickness = context->rootBuilder().createElement(
+    const auto negativeThickness = context->authoring().rootBuilder().createElement(
         root->rootNodeId(), UI::makeDividerElement({
                                 .thickness = -1.0F,
                             }));
     EXPECT_FALSE(negativeThickness);
     EXPECT_EQ(negativeThickness.error().code, UI::UIErrorCode::InvalidLayout);
 
-    const auto explicitSizeNegativeThickness = context->rootBuilder().createElement(
+    const auto explicitSizeNegativeThickness = context->authoring().rootBuilder().createElement(
         root->rootNodeId(), UI::makeDividerElement(
                                 {.thickness = -1.0F}, fixedSize(80.0F, 4.0F)));
     EXPECT_FALSE(explicitSizeNegativeThickness);
@@ -161,34 +164,34 @@ TEST(UIVisualComponentsTests, ThemeChromePaintAndSemanticsRemainUnified)
 {
     auto context = createContext(makeWindow());
     ASSERT_NE(context, nullptr);
-    auto root = context->rootBuilder().createRoot();
+    auto root = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(root);
 
-    auto surface = context->rootBuilder().createElement(
+    auto surface = context->authoring().rootBuilder().createElement(
         root->rootNodeId(), UI::makeSurfaceElement({}, fixedSize(120.0F, 30.0F)));
-    auto divider = context->rootBuilder().createElement(
+    auto divider = context->authoring().rootBuilder().createElement(
         root->rootNodeId(),
         UI::makeDividerElement(
             {.tone = UI::UIDividerTone::Accent, .thickness = 2.0F},
             fixedSize(120.0F, 2.0F)));
-    auto badge = context->rootBuilder().createElement(
+    auto badge = context->authoring().rootBuilder().createElement(
         root->rootNodeId(),
         UI::makeBadgeElement("Ready", {.tone = UI::UIBadgeTone::Accent},
                              fixedSize(72.0F, 24.0F)));
     ASSERT_TRUE(surface && divider && badge);
 
-    auto updater = context->treeUpdater(*root);
+    auto updater = context->authoring().treeUpdater(*root);
     ASSERT_TRUE(updater);
     ASSERT_TRUE(updater->setLayoutStyle(root->rootNodeId(), fixedSize(160.0F, 100.0F)));
-    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 100.0F}));
+    ASSERT_TRUE(context->publication().commitLayout({.width = 160.0F, .height = 100.0F}));
 
     const UI::UITheme dark = UI::makeModernDesktopTheme();
     const UI::UICommittedPaintEntry* surfacePaint =
-        firstSolidQuad(context->committedPaint(), *surface);
+        firstSolidQuad(context->publication().committedPaint(), *surface);
     const UI::UICommittedPaintEntry* dividerPaint =
-        firstSolidQuad(context->committedPaint(), *divider);
+        firstSolidQuad(context->publication().committedPaint(), *divider);
     const UI::UICommittedPaintEntry* badgePaint =
-        firstSolidQuad(context->committedPaint(), *badge);
+        firstSolidQuad(context->publication().committedPaint(), *badge);
     ASSERT_NE(surfacePaint, nullptr);
     ASSERT_NE(dividerPaint, nullptr);
     ASSERT_NE(badgePaint, nullptr);
@@ -200,27 +203,27 @@ TEST(UIVisualComponentsTests, ThemeChromePaintAndSemanticsRemainUnified)
     EXPECT_EQ(updater->textStyle(*badge).value(),
               UI::makeBadgeChrome(dark, UI::UIBadgeTone::Accent).label);
 
-    EXPECT_EQ(semanticsFor(context->committedSemantics(), *surface), nullptr);
-    EXPECT_EQ(semanticsFor(context->committedSemantics(), *divider), nullptr);
+    EXPECT_EQ(semanticsFor(context->publication().committedSemantics(), *surface), nullptr);
+    EXPECT_EQ(semanticsFor(context->publication().committedSemantics(), *divider), nullptr);
     const UI::UISemanticsEntry* badgeSemantics =
-        semanticsFor(context->committedSemantics(), *badge);
+        semanticsFor(context->publication().committedSemantics(), *badge);
     ASSERT_NE(badgeSemantics, nullptr);
     EXPECT_EQ(badgeSemantics->role, UI::UISemanticsRole::Label);
     EXPECT_EQ(badgeSemantics->name, "Ready");
 
     const auto dividerHit = std::ranges::find_if(
-        context->committedHit().entries(),
+        context->publication().committedHit().entries(),
         [divider](const UI::UICommittedHitEntry& entry) {
             return entry.node == *divider;
         });
-    ASSERT_NE(dividerHit, context->committedHit().entries().end());
+    ASSERT_NE(dividerHit, context->publication().committedHit().entries().end());
     EXPECT_EQ(dividerHit->policy, UI::UIPointerHitPolicy::Ignore);
 
     const UI::UITheme light = UI::makeModernDesktopTheme(UI::UIColorScheme::Light);
-    ASSERT_TRUE(context->setProductTheme(light));
-    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 100.0F}));
-    dividerPaint = firstSolidQuad(context->committedPaint(), *divider);
-    badgePaint = firstSolidQuad(context->committedPaint(), *badge);
+    ASSERT_TRUE(context->style().setProductTheme(light));
+    ASSERT_TRUE(context->publication().commitLayout({.width = 160.0F, .height = 100.0F}));
+    dividerPaint = firstSolidQuad(context->publication().committedPaint(), *divider);
+    badgePaint = firstSolidQuad(context->publication().committedPaint(), *badge);
     ASSERT_NE(dividerPaint, nullptr);
     ASSERT_NE(badgePaint, nullptr);
     EXPECT_EQ(dividerPaint->solidFill,

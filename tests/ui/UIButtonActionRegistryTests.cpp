@@ -121,16 +121,16 @@ protected:
             << (contextResult ? "" : contextResult.error().message);
         context_ = std::move(*contextResult);
 
-        auto rootResult = context_->rootBuilder().createRoot();
+        auto rootResult = context_->authoring().rootBuilder().createRoot();
         ASSERT_TRUE(rootResult.has_value()) << (rootResult ? "" : rootResult.error().message);
         root_ = std::move(*rootResult);
 
-        auto firstButtonResult = context_->rootBuilder().createElement(root_.rootNodeId(), UI::makeButtonElement());
+        auto firstButtonResult = context_->authoring().rootBuilder().createElement(root_.rootNodeId(), UI::makeButtonElement());
         ASSERT_TRUE(firstButtonResult.has_value())
             << (firstButtonResult ? "" : firstButtonResult.error().message);
         firstButton_ = *firstButtonResult;
 
-        auto secondButtonResult = context_->rootBuilder().createElement(root_.rootNodeId(), UI::makeButtonElement());
+        auto secondButtonResult = context_->authoring().rootBuilder().createElement(root_.rootNodeId(), UI::makeButtonElement());
         ASSERT_TRUE(secondButtonResult.has_value())
             << (secondButtonResult ? "" : secondButtonResult.error().message);
         secondButton_ = *secondButtonResult;
@@ -311,11 +311,11 @@ TEST_F(UIButtonActionRegistryTests, RollbackAfterCommitDoesNotClearCommittedActi
 
 TEST_F(UIButtonActionRegistryTests, StaleNodeIdCannotClearReusedNodeAction)
 {
-    auto updaterResult = context_->treeUpdater(root_);
+    auto updaterResult = context_->authoring().treeUpdater(root_);
     ASSERT_TRUE(updaterResult.has_value()) << (updaterResult ? "" : updaterResult.error().message);
     UI::UITreeUpdater updater = std::move(*updaterResult);
     ASSERT_TRUE(updater.destroy(firstButton_).has_value());
-    auto replacementButtonResult = context_->rootBuilder().createElement(root_.rootNodeId(), UI::makeButtonElement());
+    auto replacementButtonResult = context_->authoring().rootBuilder().createElement(root_.rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(replacementButtonResult.has_value())
         << (replacementButtonResult ? "" : replacementButtonResult.error().message);
     const UI::UINodeId replacementButton = *replacementButtonResult;

@@ -37,7 +37,7 @@ protected:
         ASSERT_TRUE(contextResult.has_value())
             << (contextResult ? "" : contextResult.error().message);
         context_ = std::move(*contextResult);
-        auto rootResult = context_->rootBuilder().createRoot();
+        auto rootResult = context_->authoring().rootBuilder().createRoot();
         ASSERT_TRUE(rootResult.has_value())
             << (rootResult ? "" : rootResult.error().message);
         root_ = std::move(*rootResult);

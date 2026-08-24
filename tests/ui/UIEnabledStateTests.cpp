@@ -33,7 +33,7 @@ using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
 
 [[nodiscard]] UI::UIRootOwner createRoot(UI::UIContext& context)
 {
-    auto result = context.rootBuilder().createRoot();
+    auto result = context.authoring().rootBuilder().createRoot();
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UIRootOwner{};
 }
@@ -42,7 +42,7 @@ using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
     UI::UIContext& context,
     UI::UIRootOwner& root)
 {
-    auto result = context.treeUpdater(root);
+    auto result = context.authoring().treeUpdater(root);
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UITreeUpdater{};
 }
@@ -259,7 +259,7 @@ protected:
 
     void publishLayout()
     {
-        assertOk(context->commitLayout({.width = 320.0F, .height = 240.0F}));
+        assertOk(context->publication().commitLayout({.width = 320.0F, .height = 240.0F}));
     }
 
     std::unique_ptr<WindowPool> windows;
@@ -289,7 +289,7 @@ TEST_F(UIEnabledStateTest, PublishedWidgetsDefaultEnabledAndPublishDisabledSeman
     }
 
     publishLayout();
-    const UI::UICommittedSemanticsView semantics = context->committedSemantics();
+    const UI::UICommittedSemanticsView semantics = context->publication().committedSemantics();
     ASSERT_EQ(semantics.size(), widgets.size());
     for (const UI::UINodeId widget : widgets) {
         const UI::UISemanticsEntry* const entry = findSemanticsEntry(semantics, widget);
@@ -298,15 +298,15 @@ TEST_F(UIEnabledStateTest, PublishedWidgetsDefaultEnabledAndPublishDisabledSeman
         EXPECT_FALSE(entry->focused);
     }
 
-    const u64 paintRevision = context->committedPaint().paintRevision();
+    const u64 paintRevision = context->publication().committedPaint().paintRevision();
     const u64 semanticsRevision = semantics.semanticsRevision();
     assertOk(updater.setEnabled(widgets[1], false));
     EXPECT_EQ(context->statistics().dirtyQueuePendingCount, 0U);
     EXPECT_FALSE(context->statistics().paintDirty);
     EXPECT_FALSE(context->statistics().semanticsDirty);
     publishLayout();
-    EXPECT_EQ(context->committedPaint().paintRevision(), paintRevision);
-    EXPECT_EQ(context->committedSemantics().semanticsRevision(), semanticsRevision);
+    EXPECT_EQ(context->publication().committedPaint().paintRevision(), paintRevision);
+    EXPECT_EQ(context->publication().committedSemantics().semanticsRevision(), semanticsRevision);
 }
 
 TEST_F(UIEnabledStateTest, RejectsDecorativeForeignContextForeignRootAndStaleNodes)
@@ -322,7 +322,7 @@ TEST_F(UIEnabledStateTest, RejectsDecorativeForeignContextForeignRootAndStaleNod
     auto firstUpdater = createUpdater(*localContext, firstRoot);
     auto panel = firstUpdater.createElement(firstRoot.rootNodeId(), UI::makePanelElement());
     auto stale = firstUpdater.createElement(firstRoot.rootNodeId(), UI::makeLabelElement());
-    auto foreignRootButton = localContext->rootBuilder().createElement(
+    auto foreignRootButton = localContext->authoring().rootBuilder().createElement(
         secondRoot.rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(panel.has_value());
     ASSERT_TRUE(stale.has_value());
@@ -345,7 +345,7 @@ TEST_F(UIEnabledStateTest, RejectsDecorativeForeignContextForeignRootAndStaleNod
     ASSERT_NE(sameWindowContext, nullptr);
     auto sameWindowRoot = createRoot(*sameWindowContext);
     ASSERT_TRUE(sameWindowRoot);
-    auto foreignContextButton = sameWindowContext->rootBuilder().createElement(
+    auto foreignContextButton = sameWindowContext->authoring().rootBuilder().createElement(
         sameWindowRoot.rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(foreignContextButton.has_value());
     const Core::Status wrongContext =
@@ -403,15 +403,15 @@ TEST_F(UIEnabledStateTest, TabSkipsDisabledWidgetsAndDisablingFocusClearsActivat
     assertOk(updater.setEnabled(disabledButton, false));
     publishLayout();
 
-    auto focus = context->routeDefaultActionFocusStep(false);
+    auto focus = context->input().routeDefaultActionFocusStep(false);
     ASSERT_TRUE(focus.has_value()) << (focus ? "" : focus.error().message);
     EXPECT_TRUE(focus->consumed);
     EXPECT_TRUE(focus->moved);
     EXPECT_EQ(focus->focus, checkbox);
 
     assertOk(updater.setEnabled(checkbox, false));
-    EXPECT_FALSE(context->defaultActionFocus().hasValue());
-    auto activation = context->routeDefaultActionActivate(
+    EXPECT_FALSE(context->input().defaultActionFocus().hasValue());
+    auto activation = context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{1},
         1,
         UI::UIButtonActivationSource::Keyboard);
@@ -435,7 +435,7 @@ TEST_F(UIEnabledStateTest, DisablingArmedButtonClearsPressedAndPreventsAction)
             }}));
     publishLayout();
 
-    auto down = context->routePointerInput(makePointerInput(
+    auto down = context->input().routePointerInput(makePointerInput(
         firstWindow,
         UI::UIRoutedPointerEventKind::ButtonDown,
         1,
@@ -446,22 +446,22 @@ TEST_F(UIEnabledStateTest, DisablingArmedButtonClearsPressedAndPreventsAction)
     auto pressed = updater.isButtonPressed(button);
     ASSERT_TRUE(pressed.has_value());
     EXPECT_TRUE(*pressed);
-    EXPECT_EQ(context->defaultActionFocus(), button);
+    EXPECT_EQ(context->input().defaultActionFocus(), button);
 
     assertOk(updater.setEnabled(button, false));
     pressed = updater.isButtonPressed(button);
     ASSERT_TRUE(pressed.has_value());
     EXPECT_FALSE(*pressed);
-    EXPECT_FALSE(context->defaultActionFocus().hasValue());
+    EXPECT_FALSE(context->input().defaultActionFocus().hasValue());
 
-    auto activation = context->routeDefaultActionActivate(
+    auto activation = context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{2},
         2,
         UI::UIButtonActivationSource::Gamepad);
     ASSERT_TRUE(activation.has_value());
     EXPECT_FALSE(activation->consumed);
     EXPECT_FALSE(activation->activated);
-    auto up = context->routePointerInput(makePointerInput(
+    auto up = context->input().routePointerInput(makePointerInput(
         firstWindow,
         UI::UIRoutedPointerEventKind::ButtonUp,
         3,
@@ -498,7 +498,7 @@ TEST_F(UIEnabledStateTest, EnablingFromPointerListenerTakesEffectOnNextRoute)
     ASSERT_TRUE(listener.has_value())
         << (listener ? "" : listener.error().message);
 
-    auto firstDown = context->routePointerInput(makePointerInput(
+    auto firstDown = context->input().routePointerInput(makePointerInput(
         firstWindow,
         UI::UIRoutedPointerEventKind::ButtonDown,
         1,
@@ -511,7 +511,7 @@ TEST_F(UIEnabledStateTest, EnablingFromPointerListenerTakesEffectOnNextRoute)
     ASSERT_TRUE(pressed.has_value());
     EXPECT_FALSE(*pressed);
 
-    auto firstUp = context->routePointerInput(makePointerInput(
+    auto firstUp = context->input().routePointerInput(makePointerInput(
         firstWindow,
         UI::UIRoutedPointerEventKind::ButtonUp,
         2,
@@ -521,12 +521,12 @@ TEST_F(UIEnabledStateTest, EnablingFromPointerListenerTakesEffectOnNextRoute)
     EXPECT_FALSE(firstUp->consumed);
     EXPECT_EQ(activations, 0);
 
-    auto secondDown = context->routePointerInput(makePointerInput(
+    auto secondDown = context->input().routePointerInput(makePointerInput(
         firstWindow,
         UI::UIRoutedPointerEventKind::ButtonDown,
         3,
         {.x = 10.0F, .y = 10.0F}));
-    auto secondUp = context->routePointerInput(makePointerInput(
+    auto secondUp = context->input().routePointerInput(makePointerInput(
         firstWindow,
         UI::UIRoutedPointerEventKind::ButtonUp,
         4,
@@ -564,7 +564,7 @@ TEST_F(UIEnabledStateTest, DisablingFromPointerListenerBlocksCurrentDefaultActio
     ASSERT_TRUE(listener.has_value())
         << (listener ? "" : listener.error().message);
 
-    auto down = context->routePointerInput(makePointerInput(
+    auto down = context->input().routePointerInput(makePointerInput(
         firstWindow,
         UI::UIRoutedPointerEventKind::ButtonDown,
         1,
@@ -576,7 +576,7 @@ TEST_F(UIEnabledStateTest, DisablingFromPointerListenerBlocksCurrentDefaultActio
     ASSERT_TRUE(pressed.has_value());
     EXPECT_FALSE(*pressed);
 
-    auto up = context->routePointerInput(makePointerInput(
+    auto up = context->input().routePointerInput(makePointerInput(
         firstWindow,
         UI::UIRoutedPointerEventKind::ButtonUp,
         2,
@@ -615,14 +615,14 @@ TEST_F(UIEnabledStateTest, DisabledCheckboxAndRadioIgnorePointerAndKeyboard)
              UI::UILogicalPoint{.x = 10.0F, .y = 10.0F},
              UI::UILogicalPoint{.x = 10.0F, .y = 30.0F},
          }) {
-        auto down = context->routePointerInput(makePointerInput(
+        auto down = context->input().routePointerInput(makePointerInput(
             firstWindow,
             UI::UIRoutedPointerEventKind::ButtonDown,
             sequence++,
             position));
         ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
         EXPECT_FALSE(down->consumed);
-        auto up = context->routePointerInput(makePointerInput(
+        auto up = context->input().routePointerInput(makePointerInput(
             firstWindow,
             UI::UIRoutedPointerEventKind::ButtonUp,
             sequence++,
@@ -646,11 +646,11 @@ TEST_F(UIEnabledStateTest, DisabledCheckboxAndRadioIgnorePointerAndKeyboard)
     EXPECT_EQ(checkboxActions, 0);
     EXPECT_EQ(radioActions, 0);
 
-    auto focus = context->routeDefaultActionFocusStep(false);
+    auto focus = context->input().routeDefaultActionFocusStep(false);
     ASSERT_TRUE(focus.has_value()) << (focus ? "" : focus.error().message);
     EXPECT_FALSE(focus->consumed);
     EXPECT_FALSE(focus->focus.hasValue());
-    auto activation = context->routeDefaultActionActivate(
+    auto activation = context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{5},
         5,
         UI::UIButtonActivationSource::Keyboard);
@@ -673,11 +673,11 @@ TEST_F(UIEnabledStateTest, DisabledSliderDoesNotDragChangeOrInvokeCallback)
                 ++changes;
             }}));
     publishLayout();
-    assertOk(context->requestFocus(slider));
-    EXPECT_EQ(context->defaultActionFocus(), slider);
+    assertOk(context->input().requestFocus(slider));
+    EXPECT_EQ(context->input().defaultActionFocus(), slider);
 
     assertOk(updater.setEnabled(slider, false));
-    EXPECT_FALSE(context->defaultActionFocus().hasValue());
+    EXPECT_FALSE(context->input().defaultActionFocus().hasValue());
     publishLayout();
 
     for (const auto& [kind, sequence, x] : {
@@ -685,7 +685,7 @@ TEST_F(UIEnabledStateTest, DisabledSliderDoesNotDragChangeOrInvokeCallback)
              std::tuple{UI::UIRoutedPointerEventKind::Move, u64{2}, 110.0F},
              std::tuple{UI::UIRoutedPointerEventKind::ButtonUp, u64{3}, 119.0F},
          }) {
-        auto routed = context->routePointerInput(makePointerInput(
+        auto routed = context->input().routePointerInput(makePointerInput(
             firstWindow,
             kind,
             sequence,
@@ -711,10 +711,10 @@ TEST_F(UIEnabledStateTest, DisablingTextEditClearsImeAndRejectsFurtherInput)
     assertOk(updater.setText(textEdit, "Stable"));
     publishLayout();
 
-    auto focus = context->routeDefaultActionFocusStep(false);
+    auto focus = context->input().routeDefaultActionFocusStep(false);
     ASSERT_TRUE(focus.has_value()) << (focus ? "" : focus.error().message);
     ASSERT_EQ(focus->focus, textEdit);
-    auto composition = context->routeTextComposition(
+    auto composition = context->text().routeTextComposition(
         firstWindow,
         Platform::PlatformFrameId{1},
         1,
@@ -723,27 +723,27 @@ TEST_F(UIEnabledStateTest, DisablingTextEditClearsImeAndRejectsFurtherInput)
         Platform::TextCompositionStage::Started);
     ASSERT_TRUE(composition.has_value())
         << (composition ? "" : composition.error().message);
-    ASSERT_TRUE(context->imeCompositionActive());
+    ASSERT_TRUE(context->text().imeCompositionActive());
 
     assertOk(updater.setEnabled(textEdit, false));
-    EXPECT_FALSE(context->defaultActionFocus().hasValue());
-    EXPECT_FALSE(context->imeFocus().hasValue());
-    EXPECT_FALSE(context->imeCompositionActive());
-    EXPECT_TRUE(context->imePreeditUtf8().empty());
+    EXPECT_FALSE(context->input().defaultActionFocus().hasValue());
+    EXPECT_FALSE(context->text().imeFocus().hasValue());
+    EXPECT_FALSE(context->text().imeCompositionActive());
+    EXPECT_TRUE(context->text().imePreeditUtf8().empty());
 
-    auto input = context->routeTextInput(
+    auto input = context->text().routeTextInput(
         firstWindow,
         Platform::PlatformFrameId{2},
         2,
         "X");
-    auto ignoredComposition = context->routeTextComposition(
+    auto ignoredComposition = context->text().routeTextComposition(
         firstWindow,
         Platform::PlatformFrameId{3},
         3,
         "new",
         1,
         Platform::TextCompositionStage::Started);
-    auto command = context->routeTextEditCommand(
+    auto command = context->text().routeTextEditCommand(
         firstWindow,
         Platform::PlatformFrameId{4},
         4,
@@ -759,15 +759,15 @@ TEST_F(UIEnabledStateTest, DisablingTextEditClearsImeAndRejectsFurtherInput)
     EXPECT_FALSE(command->consumed);
     EXPECT_FALSE(command->applied);
 
-    auto down = context->routePointerInput(makePointerInput(
+    auto down = context->input().routePointerInput(makePointerInput(
         firstWindow,
         UI::UIRoutedPointerEventKind::ButtonDown,
         5,
         {.x = 10.0F, .y = 10.0F}));
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
     EXPECT_FALSE(down->consumed);
-    EXPECT_FALSE(context->defaultActionFocus().hasValue());
-    EXPECT_FALSE(context->imeFocus().hasValue());
+    EXPECT_FALSE(context->input().defaultActionFocus().hasValue());
+    EXPECT_FALSE(context->text().imeFocus().hasValue());
     auto text = updater.text(textEdit);
     ASSERT_TRUE(text.has_value());
     EXPECT_EQ(*text, "Stable");
@@ -796,16 +796,16 @@ TEST_F(UIEnabledStateTest, DirtyQueueFailurePreservesEnabledFocusAndArmAtomicall
         localRoot.rootNodeId(),
         fixedSize(100.0F, 80.0F)));
     assertOk(localUpdater.setLayoutStyle(button, fixedSize(40.0F, 30.0F)));
-    assertOk(localContext->commitLayout({.width = 100.0F, .height = 80.0F}));
+    assertOk(localContext->publication().commitLayout({.width = 100.0F, .height = 80.0F}));
 
-    auto down = localContext->routePointerInput(makePointerInput(
+    auto down = localContext->input().routePointerInput(makePointerInput(
         firstWindow,
         UI::UIRoutedPointerEventKind::ButtonDown,
         1,
         {.x = 10.0F, .y = 10.0F}));
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
     ASSERT_TRUE(down->consumed);
-    assertOk(localContext->commitLayout({.width = 100.0F, .height = 80.0F}));
+    assertOk(localContext->publication().commitLayout({.width = 100.0F, .height = 80.0F}));
 
     auto firstBlocker = localUpdater.createElement(localRoot.rootNodeId(), UI::makePanelElement());
     auto secondBlocker = localUpdater.createElement(localRoot.rootNodeId(), UI::makePanelElement());
@@ -823,7 +823,7 @@ TEST_F(UIEnabledStateTest, DirtyQueueFailurePreservesEnabledFocusAndArmAtomicall
     auto pressed = localUpdater.isButtonPressed(button);
     ASSERT_TRUE(pressed.has_value());
     EXPECT_TRUE(*pressed);
-    EXPECT_EQ(localContext->defaultActionFocus(), button);
+    EXPECT_EQ(localContext->input().defaultActionFocus(), button);
     EXPECT_EQ(localContext->statistics().dirtyQueuePendingCount, 2U);
 }
 
@@ -839,7 +839,7 @@ TEST_F(UIEnabledStateTest, DisabledPaintAppliesDeterministicOpacityWithoutChangi
     assertOk(updater.setTextStyle(button, textStyle));
     publishLayout();
 
-    const UI::UICommittedPaintView enabledPaint = context->committedPaint();
+    const UI::UICommittedPaintView enabledPaint = context->publication().committedPaint();
     ASSERT_EQ(enabledPaint.size(), 2U);
     ASSERT_EQ(enabledPaint.entries()[0].node, button);
     ASSERT_EQ(enabledPaint.entries()[1].node, button);
@@ -854,7 +854,7 @@ TEST_F(UIEnabledStateTest, DisabledPaintAppliesDeterministicOpacityWithoutChangi
 
     assertOk(updater.setEnabled(button, false));
     publishLayout();
-    const UI::UICommittedPaintView disabledPaint = context->committedPaint();
+    const UI::UICommittedPaintView disabledPaint = context->publication().committedPaint();
     ASSERT_EQ(disabledPaint.size(), enabledColors.size());
     for (usize index = 0; index < disabledPaint.size(); ++index) {
         EXPECT_EQ(disabledPaint.entries()[index].node, button);

@@ -3,7 +3,9 @@
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/platform/PlatformFrame.hpp>
 #include <tina/runtime/RuntimeErrors.hpp>
+#include <tina/ui/UIAuthoring.hpp>
 #include <tina/ui/UIContext.hpp>
+#include <tina/ui/UIPublicationPipeline.hpp>
 
 #include "../../src/runtime/ui/PrimaryWindowUIContextOwner.hpp"
 #include "../../src/runtime/ui/PrimaryWindowUILayoutCoordinator.hpp"
@@ -458,10 +460,10 @@ TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorStartupPublishesInitial
         UI::UIContext::Create(window, UI::UIContextCapacityConfig{.nodeCapacity = 8, .rootCapacity = 1});
     ASSERT_TRUE(contextResult.has_value()) << (contextResult ? "" : contextResult.error().message);
     auto context = std::move(*contextResult);
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value()) << (rootResult ? "" : rootResult.error().message);
     auto root = std::move(*rootResult);
-    ASSERT_TRUE(context->rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement()).has_value());
+    ASSERT_TRUE(context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement()).has_value());
 
     PrimaryWindowUILayoutCoordinator coordinator;
     ASSERT_TRUE(coordinator
@@ -471,9 +473,9 @@ TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorStartupPublishesInitial
                                                      }))
                     .has_value());
 
-    EXPECT_EQ(context->committedStructure().size(), 2U);
-    EXPECT_EQ(context->committedLayout().size(), 2U);
-    EXPECT_EQ(context->committedHit().size(), 2U);
+    EXPECT_EQ(context->publication().committedStructure().size(), 2U);
+    EXPECT_EQ(context->publication().committedLayout().size(), 2U);
+    EXPECT_EQ(context->publication().committedHit().size(), 2U);
     EXPECT_EQ(context->statistics().layoutRevision, 1U);
     EXPECT_EQ(context->statistics().hitRevision, 1U);
 }
@@ -653,10 +655,10 @@ TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorCapacityFailureIsAtomic
                                                        });
     ASSERT_TRUE(contextResult.has_value()) << (contextResult ? "" : contextResult.error().message);
     auto context = std::move(*contextResult);
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value()) << (rootResult ? "" : rootResult.error().message);
     auto root = std::move(*rootResult);
-    ASSERT_TRUE(context->rootBuilder().createElement(root.rootNodeId(), UI::makePanelElement()).has_value());
+    ASSERT_TRUE(context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makePanelElement()).has_value());
     PrimaryWindowUILayoutCoordinator coordinator;
     ASSERT_TRUE(coordinator
                     .commitForStartup(context.get(), windowMetrics(WindowFrameSpec{
@@ -664,9 +666,9 @@ TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorCapacityFailureIsAtomic
                                                          .logicalExtent = {100, 100},
                                                      }))
                     .has_value());
-    const UI::UICommittedStructureView oldStructure = context->committedStructure();
-    const UI::UICommittedLayoutView oldLayout = context->committedLayout();
-    const UI::UICommittedHitView oldHit = context->committedHit();
+    const UI::UICommittedStructureView oldStructure = context->publication().committedStructure();
+    const UI::UICommittedLayoutView oldLayout = context->publication().committedLayout();
+    const UI::UICommittedHitView oldHit = context->publication().committedHit();
     const UI::UIContextStatistics oldStatistics = context->statistics();
     const u64 oldStructureRevision = oldStructure.revision();
     const u64 oldLayoutRevision = oldLayout.layoutRevision();
@@ -679,18 +681,18 @@ TEST_F(PrimaryWindowUIContextOwnerTest, LayoutCoordinatorCapacityFailureIsAtomic
     const usize oldHitSize = oldHit.size();
     const usize oldHitTargetCount = oldStatistics.committedHitTargetCount;
 
-    ASSERT_TRUE(context->rootBuilder().createElement(root.rootNodeId(), UI::makePanelElement()).has_value());
+    ASSERT_TRUE(context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makePanelElement()).has_value());
     auto frame = buildFrame(*builder, 1, WindowFrameSpec{.window = window});
     ASSERT_TRUE(frame.has_value()) << (frame ? "" : frame.error().message);
 
     const Core::Status failedCommit = coordinator.commitForFrame(context.get(), *frame);
     ASSERT_FALSE(failedCommit.has_value());
     EXPECT_EQ(failedCommit.error().code, UI::UIErrorCode::CapacityExceeded);
-    EXPECT_EQ(context->committedStructure().revision(), oldStructureRevision);
-    EXPECT_EQ(context->committedStructure().size(), oldStructureSize);
-    EXPECT_EQ(context->committedLayout().layoutRevision(), oldLayoutRevision);
-    EXPECT_EQ(context->committedLayout().size(), oldLayoutSize);
-    const UI::UICommittedHitView hitAfterFailure = context->committedHit();
+    EXPECT_EQ(context->publication().committedStructure().revision(), oldStructureRevision);
+    EXPECT_EQ(context->publication().committedStructure().size(), oldStructureSize);
+    EXPECT_EQ(context->publication().committedLayout().layoutRevision(), oldLayoutRevision);
+    EXPECT_EQ(context->publication().committedLayout().size(), oldLayoutSize);
+    const UI::UICommittedHitView hitAfterFailure = context->publication().committedHit();
     EXPECT_EQ(hitAfterFailure.hitRevision(), oldHitRevision);
     EXPECT_EQ(hitAfterFailure.structureRevision(), oldHitStructureRevision);
     EXPECT_EQ(hitAfterFailure.layoutRevision(), oldHitLayoutRevision);

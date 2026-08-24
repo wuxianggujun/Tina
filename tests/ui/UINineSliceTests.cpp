@@ -103,10 +103,10 @@ TEST_F(UINineSliceTest, CanvasImagePublishesThroughTheCommittedImagePath)
 {
     auto context = createContext();
     ASSERT_NE(context, nullptr);
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
@@ -121,9 +121,9 @@ TEST_F(UINineSliceTest, CanvasImagePublishesThroughTheCommittedImagePath)
     descriptor.visual.canvas = std::span(&image, 1);
     auto element = updater.createElement(root.rootNodeId(), descriptor);
     ASSERT_TRUE(element.has_value()) << element.error().message;
-    ASSERT_TRUE(context->commitLayout({100.0F, 100.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({100.0F, 100.0F}).has_value());
 
-    const auto entries = paintsFor(context->committedPaint(), *element);
+    const auto entries = paintsFor(context->publication().committedPaint(), *element);
     ASSERT_EQ(entries.size(), 1U);
     EXPECT_EQ(entries[0]->kind, UI::UICommittedPaintKind::Image);
     EXPECT_EQ(entries[0]->root, root.rootNodeId());
@@ -139,10 +139,10 @@ TEST_F(UINineSliceTest, FullNineSliceExpandsToNineCommittedImagesInRowMajorOrder
 {
     auto context = createContext();
     ASSERT_NE(context, nullptr);
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
@@ -151,9 +151,9 @@ TEST_F(UINineSliceTest, FullNineSliceExpandsToNineCommittedImagesInRowMajorOrder
     descriptor.visual.canvas = std::span(&command, 1);
     auto element = updater.createElement(root.rootNodeId(), descriptor);
     ASSERT_TRUE(element.has_value()) << element.error().message;
-    ASSERT_TRUE(context->commitLayout({100.0F, 100.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({100.0F, 100.0F}).has_value());
 
-    const auto entries = paintsFor(context->committedPaint(), *element);
+    const auto entries = paintsFor(context->publication().committedPaint(), *element);
     ASSERT_EQ(entries.size(), 9U);
     constexpr std::array<float, 4> DestinationX{10.0F, 20.0F, 56.0F, 70.0F};
     constexpr std::array<float, 4> DestinationY{20.0F, 32.0F, 44.0F, 60.0F};
@@ -208,10 +208,10 @@ TEST_F(UINineSliceTest, ZeroAreaSourceRowsAndColumnsAreEliminated)
 {
     auto context = createContext();
     ASSERT_NE(context, nullptr);
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
@@ -224,9 +224,9 @@ TEST_F(UINineSliceTest, ZeroAreaSourceRowsAndColumnsAreEliminated)
     descriptor.visual.canvas = std::span(&command, 1);
     auto element = updater.createElement(root.rootNodeId(), descriptor);
     ASSERT_TRUE(element.has_value()) << element.error().message;
-    ASSERT_TRUE(context->commitLayout({40.0F, 40.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({40.0F, 40.0F}).has_value());
 
-    const auto entries = paintsFor(context->committedPaint(), *element);
+    const auto entries = paintsFor(context->publication().committedPaint(), *element);
     ASSERT_EQ(entries.size(), 4U);
     for (const UI::UICommittedPaintEntry* entry : entries)
     {
@@ -241,10 +241,10 @@ TEST_F(UINineSliceTest, SmallDestinationCompressesFixedEdgesProportionallyAndDro
 {
     auto context = createContext();
     ASSERT_NE(context, nullptr);
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
@@ -256,9 +256,9 @@ TEST_F(UINineSliceTest, SmallDestinationCompressesFixedEdgesProportionallyAndDro
     descriptor.visual.canvas = std::span(&command, 1);
     auto element = updater.createElement(root.rootNodeId(), descriptor);
     ASSERT_TRUE(element.has_value()) << element.error().message;
-    ASSERT_TRUE(context->commitLayout({40.0F, 50.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({40.0F, 50.0F}).has_value());
 
-    const auto entries = paintsFor(context->committedPaint(), *element);
+    const auto entries = paintsFor(context->publication().committedPaint(), *element);
     ASSERT_EQ(entries.size(), 6U);
     for (usize row = 0; row < 3; ++row)
     {
@@ -283,10 +283,10 @@ TEST_F(UINineSliceTest, TransparentTintAndZeroDestinationPublishNoPatches)
         .canvasCommandCapacity = 2,
     });
     ASSERT_NE(context, nullptr);
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
@@ -298,8 +298,8 @@ TEST_F(UINineSliceTest, TransparentTintAndZeroDestinationPublishNoPatches)
     UI::UIElementDescriptor descriptor = UI::makePanelElement(fixedSize(80.0F, 70.0F));
     descriptor.visual.canvas = commands;
     ASSERT_TRUE(updater.createElement(root.rootNodeId(), descriptor).has_value());
-    ASSERT_TRUE(context->commitLayout({100.0F, 100.0F}).has_value());
-    EXPECT_TRUE(context->committedPaint().empty());
+    ASSERT_TRUE(context->publication().commitLayout({100.0F, 100.0F}).has_value());
+    EXPECT_TRUE(context->publication().committedPaint().empty());
 }
 
 TEST_F(UINineSliceTest, PaintCapacityFailurePreservesTheOldCommittedSnapshot)
@@ -311,10 +311,10 @@ TEST_F(UINineSliceTest, PaintCapacityFailurePreservesTheOldCommittedSnapshot)
         .canvasCommandCapacity = 2,
     });
     ASSERT_NE(context, nullptr);
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
@@ -326,8 +326,8 @@ TEST_F(UINineSliceTest, PaintCapacityFailurePreservesTheOldCommittedSnapshot)
     firstDescriptor.visual.canvas = std::span(&solid, 1);
     auto first = updater.createElement(root.rootNodeId(), firstDescriptor);
     ASSERT_TRUE(first.has_value());
-    ASSERT_TRUE(context->commitLayout({100.0F, 100.0F}).has_value());
-    const UI::UICommittedPaintView oldPaint = context->committedPaint();
+    ASSERT_TRUE(context->publication().commitLayout({100.0F, 100.0F}).has_value());
+    const UI::UICommittedPaintView oldPaint = context->publication().committedPaint();
     ASSERT_EQ(oldPaint.size(), 1U);
     const UI::UICommittedPaintEntry* oldData = oldPaint.entries().data();
 
@@ -335,13 +335,13 @@ TEST_F(UINineSliceTest, PaintCapacityFailurePreservesTheOldCommittedSnapshot)
     UI::UIElementDescriptor secondDescriptor = UI::makePanelElement(fixedSize(80.0F, 70.0F));
     secondDescriptor.visual.canvas = std::span(&nineSlice, 1);
     ASSERT_TRUE(updater.createElement(root.rootNodeId(), secondDescriptor).has_value());
-    const Core::Status rejected = context->commitLayout({100.0F, 100.0F});
+    const Core::Status rejected = context->publication().commitLayout({100.0F, 100.0F});
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::CapacityExceeded);
-    EXPECT_EQ(context->committedPaint().entries().data(), oldData);
-    EXPECT_EQ(context->committedPaint().paintRevision(), oldPaint.paintRevision());
-    ASSERT_EQ(context->committedPaint().size(), 1U);
-    EXPECT_EQ(context->committedPaint().entries().front().node, *first);
+    EXPECT_EQ(context->publication().committedPaint().entries().data(), oldData);
+    EXPECT_EQ(context->publication().committedPaint().paintRevision(), oldPaint.paintRevision());
+    ASSERT_EQ(context->publication().committedPaint().size(), 1U);
+    EXPECT_EQ(context->publication().committedPaint().entries().front().node, *first);
 }
 
 TEST_F(UINineSliceTest, DestroyAndBuildRollbackRecycleTheRetainedCommandSlot)
@@ -353,10 +353,10 @@ TEST_F(UINineSliceTest, DestroyAndBuildRollbackRecycleTheRetainedCommandSlot)
         .canvasCommandCapacity = 1,
     });
     ASSERT_NE(context, nullptr);
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
 

@@ -66,14 +66,14 @@ createContext(Platform::WindowId window, UI::UIContextCapacityConfig capacities 
 
 [[nodiscard]] UI::UIRootOwner createRoot(UI::UIContext& context)
 {
-    auto result = context.rootBuilder().createRoot();
+    auto result = context.authoring().rootBuilder().createRoot();
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UIRootOwner{};
 }
 
 [[nodiscard]] UI::UITreeUpdater createUpdater(UI::UIContext& context, UI::UIRootOwner& root)
 {
-    auto result = context.treeUpdater(root);
+    auto result = context.authoring().treeUpdater(root);
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UITreeUpdater{};
 }
@@ -244,7 +244,7 @@ TEST_F(UIPopupDropdownTest, EnforcesCompositeOwnershipAndRoundTripsState)
     EXPECT_EQ(updater.focusScopeMode(*popup).value(), UI::UIFocusScopeMode::Contain);
     EXPECT_FALSE(updater.isPopupOpen(*popup).value());
     EXPECT_FALSE(updater.isDropdownOpen(*dropdown).value());
-    EXPECT_FALSE(context->activePopup().hasValue());
+    EXPECT_FALSE(context->input().activePopup().hasValue());
     EXPECT_FALSE(updater.dropdownSelectedItem(*dropdown).value().hasValue());
 
     const UI::UIPopupStyle expected{
@@ -285,7 +285,7 @@ TEST_F(UIPopupDropdownTest, LayoutPublishesPopupSubtreesAfterNormalContentInStab
     ASSERT_TRUE(first.after.hasValue());
     ASSERT_TRUE(second.after.hasValue());
 
-    assertOk(localContext->commitLayout({.width = 320.0F, .height = 240.0F}));
+    assertOk(localContext->publication().commitLayout({.width = 320.0F, .height = 240.0F}));
     const std::array expectedOrder{
         firstRoot.rootNodeId(),
         first.before,
@@ -305,7 +305,7 @@ TEST_F(UIPopupDropdownTest, LayoutPublishesPopupSubtreesAfterNormalContentInStab
     const std::array expectedLayoutOrdinals{
         0U, 1U, 2U, 6U, 7U, 8U, 9U, 13U, 3U, 4U, 5U, 10U, 11U, 12U,
     };
-    const UI::UICommittedLayoutView layout = localContext->committedLayout();
+    const UI::UICommittedLayoutView layout = localContext->publication().committedLayout();
     ASSERT_EQ(layout.size(), expectedOrder.size());
     for (usize index = 0; index < expectedOrder.size(); ++index)
     {
@@ -332,7 +332,7 @@ TEST_F(UIPopupDropdownTest, AutoPlacementMatchesAnchorAndClampsToViewport)
     assertOk(updater.setLayoutStyle(*popup, popupSize(120.0F, 40.0F)));
     assertOk(updater.setLayoutStyle(*item, fixedSize(120.0F, 40.0F)));
     assertOk(updater.setPopupOpen(*popup, true));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
 
     const UI::UIPopupMetrics metrics = updater.popupMetrics(*popup).value();
     EXPECT_TRUE(metrics.open);
@@ -345,9 +345,9 @@ TEST_F(UIPopupDropdownTest, AutoPlacementMatchesAnchorAndClampsToViewport)
     EXPECT_FLOAT_EQ(metrics.popupRect.height, 40.0F);
 
     assertOk(updater.setPopupOpen(*popup, false));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
     EXPECT_FALSE(updater.popupMetrics(*popup).value().open);
-    const auto* collapsedPopup = findLayoutEntry(context->committedLayout(), *popup);
+    const auto* collapsedPopup = findLayoutEntry(context->publication().committedLayout(), *popup);
     ASSERT_NE(collapsedPopup, nullptr);
     EXPECT_EQ(collapsedPopup->effectiveVisibility, UI::UIVisibility::Collapsed);
 }
@@ -356,127 +356,127 @@ TEST_F(UIPopupDropdownTest, PointerTogglesSelectsAndDismissesWithoutClickThrough
 {
     const DropdownTree tree = createDropdownTree(updater, root.rootNodeId());
     ASSERT_TRUE(tree.after.hasValue());
-    assertOk(context->commitLayout({.width = 180.0F, .height = 180.0F}));
+    assertOk(context->publication().commitLayout({.width = 180.0F, .height = 180.0F}));
 
-    const auto* dropdownLayout = findLayoutEntry(context->committedLayout(), tree.dropdown);
+    const auto* dropdownLayout = findLayoutEntry(context->publication().committedLayout(), tree.dropdown);
     ASSERT_NE(dropdownLayout, nullptr);
     const UI::UILogicalPoint dropdownCenter = centerOf(*dropdownLayout);
-    auto down = context->routePointerInput(
+    auto down = context->input().routePointerInput(
         pointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 1, dropdownCenter));
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
     EXPECT_TRUE(down->consumed);
     EXPECT_TRUE(updater.isButtonPressed(tree.dropdown).value());
-    auto up = context->routePointerInput(
+    auto up = context->input().routePointerInput(
         pointerInput(window, UI::UIRoutedPointerEventKind::ButtonUp, 2, dropdownCenter));
     ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
     EXPECT_TRUE(up->consumed);
     EXPECT_TRUE(updater.isDropdownOpen(tree.dropdown).value());
-    EXPECT_EQ(context->activePopup(), tree.popup);
+    EXPECT_EQ(context->input().activePopup(), tree.popup);
 
-    assertOk(context->commitLayout({.width = 180.0F, .height = 180.0F}));
-    const auto* secondLayout = findLayoutEntry(context->committedLayout(), tree.secondItem);
+    assertOk(context->publication().commitLayout({.width = 180.0F, .height = 180.0F}));
+    const auto* secondLayout = findLayoutEntry(context->publication().committedLayout(), tree.secondItem);
     ASSERT_NE(secondLayout, nullptr);
     const UI::UILogicalPoint secondCenter = centerOf(*secondLayout);
-    down = context->routePointerInput(
+    down = context->input().routePointerInput(
         pointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 3, secondCenter));
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
     EXPECT_TRUE(down->consumed);
-    up = context->routePointerInput(
+    up = context->input().routePointerInput(
         pointerInput(window, UI::UIRoutedPointerEventKind::ButtonUp, 4, secondCenter));
     ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
     EXPECT_TRUE(up->consumed);
     EXPECT_EQ(updater.dropdownSelectedItem(tree.dropdown).value(), tree.secondItem);
     EXPECT_FALSE(updater.isDropdownOpen(tree.dropdown).value());
-    EXPECT_EQ(context->defaultActionFocus(), tree.dropdown);
+    EXPECT_EQ(context->input().defaultActionFocus(), tree.dropdown);
 
-    assertOk(context->commitLayout({.width = 180.0F, .height = 180.0F}));
+    assertOk(context->publication().commitLayout({.width = 180.0F, .height = 180.0F}));
     assertOk(updater.setDropdownOpen(tree.dropdown, true));
-    assertOk(context->commitLayout({.width = 180.0F, .height = 180.0F}));
-    const auto* beforeLayout = findLayoutEntry(context->committedLayout(), tree.before);
+    assertOk(context->publication().commitLayout({.width = 180.0F, .height = 180.0F}));
+    const auto* beforeLayout = findLayoutEntry(context->publication().committedLayout(), tree.before);
     ASSERT_NE(beforeLayout, nullptr);
     const UI::UILogicalPoint outside = centerOf(*beforeLayout);
-    down = context->routePointerInput(
+    down = context->input().routePointerInput(
         pointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 5, outside));
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
     EXPECT_TRUE(down->consumed);
     EXPECT_FALSE(updater.isDropdownOpen(tree.dropdown).value());
-    EXPECT_FALSE(context->pointerCapture().hasValue());
-    up = context->routePointerInput(
+    EXPECT_FALSE(context->input().pointerCapture().hasValue());
+    up = context->input().routePointerInput(
         pointerInput(window, UI::UIRoutedPointerEventKind::ButtonUp, 6, outside));
     ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
     EXPECT_TRUE(up->consumed);
     EXPECT_FALSE(updater.isButtonPressed(tree.before).value());
-    EXPECT_EQ(context->defaultActionFocus(), tree.dropdown);
+    EXPECT_EQ(context->input().defaultActionFocus(), tree.dropdown);
 }
 
 TEST_F(UIPopupDropdownTest, AcceptArrowEscapeAndTabExitShareOneStateMachine)
 {
     const DropdownTree tree = createDropdownTree(updater, root.rootNodeId());
     ASSERT_TRUE(tree.after.hasValue());
-    assertOk(context->commitLayout({.width = 180.0F, .height = 180.0F}));
-    assertOk(context->requestFocus(tree.dropdown));
+    assertOk(context->publication().commitLayout({.width = 180.0F, .height = 180.0F}));
+    assertOk(context->input().requestFocus(tree.dropdown));
 
-    auto accept = context->routeDefaultActionActivate(
+    auto accept = context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{1}, 1, UI::UIButtonActivationSource::Keyboard);
     ASSERT_TRUE(accept.has_value()) << (accept ? "" : accept.error().message);
     EXPECT_TRUE(accept->consumed);
     EXPECT_TRUE(accept->activated);
-    EXPECT_EQ(context->activePopup(), tree.popup);
-    assertOk(context->commitLayout({.width = 180.0F, .height = 180.0F}));
+    EXPECT_EQ(context->input().activePopup(), tree.popup);
+    assertOk(context->publication().commitLayout({.width = 180.0F, .height = 180.0F}));
 
-    auto next = context->routeDropdownCommand(UI::UIDropdownCommand::NextItem, true);
+    auto next = context->input().routeDropdownCommand(UI::UIDropdownCommand::NextItem, true);
     ASSERT_TRUE(next.has_value()) << (next ? "" : next.error().message);
     EXPECT_TRUE(next->consumed);
     EXPECT_TRUE(next->changed);
     EXPECT_EQ(next->focus, tree.firstItem);
-    EXPECT_TRUE(context->routeDropdownCommand(UI::UIDropdownCommand::NextItem, false)->consumed);
-    next = context->routeDropdownCommand(UI::UIDropdownCommand::NextItem, true);
+    EXPECT_TRUE(context->input().routeDropdownCommand(UI::UIDropdownCommand::NextItem, false)->consumed);
+    next = context->input().routeDropdownCommand(UI::UIDropdownCommand::NextItem, true);
     ASSERT_TRUE(next.has_value()) << (next ? "" : next.error().message);
     EXPECT_EQ(next->focus, tree.secondItem);
-    EXPECT_TRUE(context->routeDropdownCommand(UI::UIDropdownCommand::NextItem, false)->consumed);
+    EXPECT_TRUE(context->input().routeDropdownCommand(UI::UIDropdownCommand::NextItem, false)->consumed);
 
-    auto dismiss = context->routeDropdownCommand(UI::UIDropdownCommand::Dismiss, true);
+    auto dismiss = context->input().routeDropdownCommand(UI::UIDropdownCommand::Dismiss, true);
     ASSERT_TRUE(dismiss.has_value()) << (dismiss ? "" : dismiss.error().message);
     EXPECT_TRUE(dismiss->consumed);
     EXPECT_TRUE(dismiss->changed);
     EXPECT_EQ(dismiss->focus, tree.dropdown);
-    EXPECT_FALSE(context->activePopup().hasValue());
-    auto dismissRelease = context->routeDropdownCommand(UI::UIDropdownCommand::Dismiss, false);
+    EXPECT_FALSE(context->input().activePopup().hasValue());
+    auto dismissRelease = context->input().routeDropdownCommand(UI::UIDropdownCommand::Dismiss, false);
     ASSERT_TRUE(dismissRelease.has_value());
     EXPECT_TRUE(dismissRelease->consumed);
 
-    accept = context->routeDefaultActionActivate(
+    accept = context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{2}, 2, UI::UIButtonActivationSource::Gamepad);
     ASSERT_TRUE(accept.has_value()) << (accept ? "" : accept.error().message);
-    assertOk(context->commitLayout({.width = 180.0F, .height = 180.0F}));
-    next = context->routeDropdownCommand(UI::UIDropdownCommand::NextItem, true);
+    assertOk(context->publication().commitLayout({.width = 180.0F, .height = 180.0F}));
+    next = context->input().routeDropdownCommand(UI::UIDropdownCommand::NextItem, true);
     ASSERT_TRUE(next.has_value()) << (next ? "" : next.error().message);
     EXPECT_EQ(next->focus, tree.firstItem);
-    EXPECT_TRUE(context->routeDropdownCommand(UI::UIDropdownCommand::NextItem, false)->consumed);
-    accept = context->routeDefaultActionActivate(
+    EXPECT_TRUE(context->input().routeDropdownCommand(UI::UIDropdownCommand::NextItem, false)->consumed);
+    accept = context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{3}, 3, UI::UIButtonActivationSource::Keyboard);
     ASSERT_TRUE(accept.has_value()) << (accept ? "" : accept.error().message);
     EXPECT_TRUE(accept->activated);
     EXPECT_EQ(updater.dropdownSelectedItem(tree.dropdown).value(), tree.firstItem);
-    EXPECT_FALSE(context->activePopup().hasValue());
-    EXPECT_EQ(context->defaultActionFocus(), tree.dropdown);
+    EXPECT_FALSE(context->input().activePopup().hasValue());
+    EXPECT_EQ(context->input().defaultActionFocus(), tree.dropdown);
 
-    assertOk(context->commitLayout({.width = 180.0F, .height = 180.0F}));
-    accept = context->routeDefaultActionActivate(
+    assertOk(context->publication().commitLayout({.width = 180.0F, .height = 180.0F}));
+    accept = context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{4}, 4, UI::UIButtonActivationSource::Keyboard);
     ASSERT_TRUE(accept.has_value()) << (accept ? "" : accept.error().message);
-    assertOk(context->commitLayout({.width = 180.0F, .height = 180.0F}));
-    next = context->routeDropdownCommand(UI::UIDropdownCommand::NextItem, true);
+    assertOk(context->publication().commitLayout({.width = 180.0F, .height = 180.0F}));
+    next = context->input().routeDropdownCommand(UI::UIDropdownCommand::NextItem, true);
     ASSERT_TRUE(next.has_value()) << (next ? "" : next.error().message);
     EXPECT_EQ(next->focus, tree.firstItem);
-    EXPECT_TRUE(context->routeDropdownCommand(UI::UIDropdownCommand::NextItem, false)->consumed);
-    auto exit = context->routeDropdownCommand(UI::UIDropdownCommand::ExitNext, true);
+    EXPECT_TRUE(context->input().routeDropdownCommand(UI::UIDropdownCommand::NextItem, false)->consumed);
+    auto exit = context->input().routeDropdownCommand(UI::UIDropdownCommand::ExitNext, true);
     ASSERT_TRUE(exit.has_value()) << (exit ? "" : exit.error().message);
     EXPECT_TRUE(exit->consumed);
     EXPECT_TRUE(exit->changed);
     EXPECT_EQ(exit->focus, tree.after);
-    EXPECT_FALSE(context->activePopup().hasValue());
-    EXPECT_TRUE(context->routeDropdownCommand(UI::UIDropdownCommand::ExitNext, false)->consumed);
+    EXPECT_FALSE(context->input().activePopup().hasValue());
+    EXPECT_TRUE(context->input().routeDropdownCommand(UI::UIDropdownCommand::ExitNext, false)->consumed);
 }
 
 TEST_F(UIPopupDropdownTest, DisableAndDestroyClosePopupAndCleanSelection)
@@ -484,11 +484,11 @@ TEST_F(UIPopupDropdownTest, DisableAndDestroyClosePopupAndCleanSelection)
     const DropdownTree tree = createDropdownTree(updater, root.rootNodeId());
     assertOk(updater.setDropdownSelectedItem(tree.dropdown, tree.firstItem));
     assertOk(updater.setDropdownOpen(tree.dropdown, true));
-    EXPECT_EQ(context->activePopup(), tree.popup);
+    EXPECT_EQ(context->input().activePopup(), tree.popup);
 
     assertOk(updater.setEnabled(tree.dropdown, false));
     EXPECT_FALSE(updater.isDropdownOpen(tree.dropdown).value());
-    EXPECT_FALSE(context->activePopup().hasValue());
+    EXPECT_FALSE(context->input().activePopup().hasValue());
     assertOk(updater.setEnabled(tree.dropdown, true));
     assertOk(updater.setEnabled(tree.popup, false));
     const Core::Status disabledOpen = updater.setDropdownOpen(tree.dropdown, true);
@@ -500,7 +500,7 @@ TEST_F(UIPopupDropdownTest, DisableAndDestroyClosePopupAndCleanSelection)
     EXPECT_FALSE(updater.dropdownSelectedItem(tree.dropdown).value().hasValue());
     assertOk(updater.setDropdownOpen(tree.dropdown, true));
     assertOk(updater.destroy(tree.popup));
-    EXPECT_FALSE(context->activePopup().hasValue());
+    EXPECT_FALSE(context->input().activePopup().hasValue());
     EXPECT_FALSE(updater.isDropdownOpen(tree.dropdown).value());
 }
 
@@ -509,12 +509,12 @@ TEST_F(UIPopupDropdownTest, ThemeAndSemanticsExposeComboListValueAndSelection)
     const DropdownTree tree = createDropdownTree(updater, root.rootNodeId());
     assertOk(updater.setDropdownSelectedItem(tree.dropdown, tree.secondItem));
     assertOk(updater.setDropdownOpen(tree.dropdown, true));
-    assertOk(context->commitLayout({.width = 180.0F, .height = 180.0F}));
+    assertOk(context->publication().commitLayout({.width = 180.0F, .height = 180.0F}));
 
-    const auto* dropdownSemantics = findSemanticsEntry(context->committedSemantics(), tree.dropdown);
-    const auto* popupSemantics = findSemanticsEntry(context->committedSemantics(), tree.popup);
-    const auto* firstSemantics = findSemanticsEntry(context->committedSemantics(), tree.firstItem);
-    const auto* secondSemantics = findSemanticsEntry(context->committedSemantics(), tree.secondItem);
+    const auto* dropdownSemantics = findSemanticsEntry(context->publication().committedSemantics(), tree.dropdown);
+    const auto* popupSemantics = findSemanticsEntry(context->publication().committedSemantics(), tree.popup);
+    const auto* firstSemantics = findSemanticsEntry(context->publication().committedSemantics(), tree.firstItem);
+    const auto* secondSemantics = findSemanticsEntry(context->publication().committedSemantics(), tree.secondItem);
     ASSERT_NE(dropdownSemantics, nullptr);
     ASSERT_NE(popupSemantics, nullptr);
     ASSERT_NE(firstSemantics, nullptr);
@@ -527,12 +527,12 @@ TEST_F(UIPopupDropdownTest, ThemeAndSemanticsExposeComboListValueAndSelection)
     EXPECT_TRUE(secondSemantics->selected);
 
     const UI::UITheme light = UI::makeModernDesktopTheme(UI::UIColorScheme::Light);
-    assertOk(context->setProductTheme(light));
+    assertOk(context->style().setProductTheme(light));
     EXPECT_EQ(updater.buttonPaint(tree.dropdown).value(), UI::makeDropdownChrome(light).states);
     EXPECT_EQ(updater.dropdownPaint(tree.dropdown).value(), UI::makeDropdownChrome(light).dropdown);
     EXPECT_EQ(updater.buttonPaint(tree.firstItem).value(), UI::makeDropdownItemChrome(light).states);
-    assertOk(context->commitLayout({.width = 180.0F, .height = 180.0F}));
-    EXPECT_GT(context->committedPaint().paintRevision(), 0U);
+    assertOk(context->publication().commitLayout({.width = 180.0F, .height = 180.0F}));
+    EXPECT_GT(context->publication().committedPaint().paintRevision(), 0U);
 }
 
 TEST(UIPopupDropdownCapacityTest, ActivationFailureIsAtomicAndSteadyStateDoesNotAllocate)
@@ -560,9 +560,9 @@ TEST(UIPopupDropdownCapacityTest, ActivationFailureIsAtomicAndSteadyStateDoesNot
     auto extraTwo = updater.createElement(root.rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(extraOne.has_value()) << (extraOne ? "" : extraOne.error().message);
     ASSERT_TRUE(extraTwo.has_value()) << (extraTwo ? "" : extraTwo.error().message);
-    assertOk(context->commitLayout({.width = 180.0F, .height = 180.0F}));
-    assertOk(context->requestFocus(tree.dropdown));
-    assertOk(context->commitLayout({.width = 180.0F, .height = 180.0F}));
+    assertOk(context->publication().commitLayout({.width = 180.0F, .height = 180.0F}));
+    assertOk(context->input().requestFocus(tree.dropdown));
+    assertOk(context->publication().commitLayout({.width = 180.0F, .height = 180.0F}));
 
     const UI::UIBoxPaint blockerPaint = UI::makeSolidBox(UI::rgb(0x123456));
     assertOk(updater.setBoxPaint(tree.before, blockerPaint));
@@ -571,35 +571,35 @@ TEST(UIPopupDropdownCapacityTest, ActivationFailureIsAtomicAndSteadyStateDoesNot
     assertOk(updater.setBoxPaint(tree.after, blockerPaint));
     assertOk(updater.setBoxPaint(*extraOne, blockerPaint));
     assertOk(updater.setBoxPaint(*extraTwo, blockerPaint));
-    const auto rejected = context->routeDefaultActionActivate(
+    const auto rejected = context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{1}, 1, UI::UIButtonActivationSource::Keyboard);
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::CapacityExceeded);
     EXPECT_FALSE(updater.isDropdownOpen(tree.dropdown).value());
-    EXPECT_FALSE(context->activePopup().hasValue());
-    EXPECT_EQ(context->defaultActionFocus(), tree.dropdown);
+    EXPECT_FALSE(context->input().activePopup().hasValue());
+    EXPECT_EQ(context->input().defaultActionFocus(), tree.dropdown);
 
-    assertOk(context->commitLayout({.width = 180.0F, .height = 180.0F}));
-    auto opened = context->routeDefaultActionActivate(
+    assertOk(context->publication().commitLayout({.width = 180.0F, .height = 180.0F}));
+    auto opened = context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{2}, 2, UI::UIButtonActivationSource::Keyboard);
     ASSERT_TRUE(opened.has_value()) << (opened ? "" : opened.error().message);
-    assertOk(context->commitLayout({.width = 180.0F, .height = 180.0F}));
+    assertOk(context->publication().commitLayout({.width = 180.0F, .height = 180.0F}));
     const usize allocationCount = resource.allocationCount();
     for (u64 sequence = 3; sequence < 35; ++sequence)
     {
-        auto next = context->routeDropdownCommand(UI::UIDropdownCommand::NextItem, true);
+        auto next = context->input().routeDropdownCommand(UI::UIDropdownCommand::NextItem, true);
         ASSERT_TRUE(next.has_value()) << (next ? "" : next.error().message);
-        auto release = context->routeDropdownCommand(UI::UIDropdownCommand::NextItem, false);
+        auto release = context->input().routeDropdownCommand(UI::UIDropdownCommand::NextItem, false);
         ASSERT_TRUE(release.has_value()) << (release ? "" : release.error().message);
-        auto dismiss = context->routeDropdownCommand(UI::UIDropdownCommand::Dismiss, true);
+        auto dismiss = context->input().routeDropdownCommand(UI::UIDropdownCommand::Dismiss, true);
         ASSERT_TRUE(dismiss.has_value()) << (dismiss ? "" : dismiss.error().message);
-        release = context->routeDropdownCommand(UI::UIDropdownCommand::Dismiss, false);
+        release = context->input().routeDropdownCommand(UI::UIDropdownCommand::Dismiss, false);
         ASSERT_TRUE(release.has_value()) << (release ? "" : release.error().message);
-        assertOk(context->commitLayout({.width = 180.0F, .height = 180.0F}));
-        opened = context->routeDefaultActionActivate(
+        assertOk(context->publication().commitLayout({.width = 180.0F, .height = 180.0F}));
+        opened = context->input().routeDefaultActionActivate(
             Platform::PlatformFrameId{sequence}, sequence, UI::UIButtonActivationSource::Keyboard);
         ASSERT_TRUE(opened.has_value()) << (opened ? "" : opened.error().message);
-        assertOk(context->commitLayout({.width = 180.0F, .height = 180.0F}));
+        assertOk(context->publication().commitLayout({.width = 180.0F, .height = 180.0F}));
     }
     EXPECT_EQ(resource.allocationCount(), allocationCount);
 }

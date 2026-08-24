@@ -1,8 +1,12 @@
 #include <gtest/gtest.h>
 
 #include <tina/core/id/GenerationPool.hpp>
+#include <tina/ui/UIAuthoring.hpp>
 #include <tina/ui/UIContext.hpp>
 #include <tina/ui/UIElement.hpp>
+#include <tina/ui/UIInputRouter.hpp>
+#include <tina/ui/UIPublicationPipeline.hpp>
+#include <tina/ui/UIStyleController.hpp>
 
 #include <array>
 #include <memory>
@@ -39,7 +43,7 @@ using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
 
 [[nodiscard]] UI::UIRootOwner createStyleRoot(UI::UIContext& context)
 {
-    auto root = context.rootBuilder().createRoot();
+    auto root = context.authoring().rootBuilder().createRoot();
     EXPECT_TRUE(root.has_value()) << (root ? "" : root.error().message);
     return root ? std::move(*root) : UI::UIRootOwner{};
 }
@@ -141,9 +145,9 @@ TEST(UIStyleContextTests, RegistersAndAtomicallyInstallsOnlyBeforeFirstNode)
     auto context = createStyleContext(config);
     ASSERT_NE(context, nullptr);
 
-    const auto accent = context->registerStyleClass();
-    const auto compact = context->registerStyleClass();
-    const auto exhausted = context->registerStyleClass();
+    const auto accent = context->style().registerStyleClass();
+    const auto compact = context->style().registerStyleClass();
+    const auto exhausted = context->style().registerStyleClass();
     ASSERT_TRUE(accent.has_value());
     ASSERT_TRUE(compact.has_value());
     ASSERT_FALSE(exhausted.has_value());
@@ -161,7 +165,7 @@ TEST(UIStyleContextTests, RegistersAndAtomicallyInstallsOnlyBeforeFirstNode)
             .color = UI::rgb(0x3366FF),
         },
     };
-    ASSERT_TRUE(context->installStyleSheet(rules).has_value());
+    ASSERT_TRUE(context->style().installStyleSheet(rules).has_value());
 
     const auto beforeRoot = context->statistics().style;
     EXPECT_EQ(beforeRoot.registeredClassCount, 2U);
@@ -172,10 +176,10 @@ TEST(UIStyleContextTests, RegistersAndAtomicallyInstallsOnlyBeforeFirstNode)
 
     auto root = createStyleRoot(*context);
     ASSERT_TRUE(root);
-    const auto lateClass = context->registerStyleClass();
+    const auto lateClass = context->style().registerStyleClass();
     ASSERT_FALSE(lateClass.has_value());
     EXPECT_EQ(lateClass.error().code, UI::UIErrorCode::InvalidStyle);
-    const Core::Status lateSheet = context->installStyleSheet(
+    const Core::Status lateSheet = context->style().installStyleSheet(
         std::span<const UI::UIStyleBoxFillRule>{});
     ASSERT_FALSE(lateSheet.has_value());
     EXPECT_EQ(lateSheet.error().code, UI::UIErrorCode::InvalidStyle);
@@ -188,9 +192,9 @@ TEST(UIStyleContextTests, RegisteredColorTokenDrivesCommittedBoxFill)
     config.styleTokenCapacity = 1;
     auto context = createStyleContext(config);
     ASSERT_NE(context, nullptr);
-    const auto token = context->registerStyleColorToken(UI::rgb(0x2463A5));
+    const auto token = context->style().registerStyleColorToken(UI::rgb(0x2463A5));
     ASSERT_TRUE(token.has_value()) << token.error().message;
-    const auto exhausted = context->registerStyleColorToken(UI::rgb(0xFFFFFF));
+    const auto exhausted = context->style().registerStyleColorToken(UI::rgb(0xFFFFFF));
     ASSERT_FALSE(exhausted.has_value());
     EXPECT_EQ(exhausted.error().code, UI::UIErrorCode::CapacityExceeded);
     const std::array rules{
@@ -199,17 +203,17 @@ TEST(UIStyleContextTests, RegisteredColorTokenDrivesCommittedBoxFill)
             .colorToken = *token,
         },
     };
-    assertOk(context->installStyleSheet(rules));
+    assertOk(context->style().installStyleSheet(rules));
 
     auto root = createStyleRoot(*context);
     ASSERT_TRUE(root);
     UI::UIElementDescriptor descriptor =
         UI::makePanelElement(fixedSize(40.0F, 30.0F));
     descriptor.visual.styleRole = UI::UIStyleRoleId::PanelSurface;
-    const auto panel = context->rootBuilder().createElement(root.rootNodeId(), descriptor);
+    const auto panel = context->authoring().rootBuilder().createElement(root.rootNodeId(), descriptor);
     ASSERT_TRUE(panel.has_value()) << panel.error().message;
-    assertOk(context->commitLayout({.width = 80.0F, .height = 60.0F}));
-    EXPECT_TRUE(hasPaintFill(context->committedPaint(), *panel,
+    assertOk(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}));
+    EXPECT_TRUE(hasPaintFill(context->publication().committedPaint(), *panel,
                              UI::premultiply(UI::rgb(0x2463A5))));
 
     const auto statistics = context->statistics().style;
@@ -217,7 +221,7 @@ TEST(UIStyleContextTests, RegisteredColorTokenDrivesCommittedBoxFill)
     EXPECT_EQ(statistics.registeredTokenCount, 1U);
     EXPECT_EQ(statistics.tokenHighWater, 1U);
     EXPECT_EQ(statistics.capacityFailureCount, 1U);
-    const auto lateToken = context->registerStyleColorToken(UI::rgb(0x111111));
+    const auto lateToken = context->style().registerStyleColorToken(UI::rgb(0x111111));
     ASSERT_FALSE(lateToken.has_value());
     EXPECT_EQ(lateToken.error().code, UI::UIErrorCode::InvalidStyle);
 }
@@ -240,26 +244,26 @@ TEST(UIStyleContextTests, FocusVisibleIsDerivedFromFocusAndNonPointerModality)
             .color = focusVisibleColor,
         },
     };
-    assertOk(context->installStyleSheet(rules));
+    assertOk(context->style().installStyleSheet(rules));
 
     auto root = createStyleRoot(*context);
     ASSERT_TRUE(root);
-    auto button = context->rootBuilder().createElement(
+    auto button = context->authoring().rootBuilder().createElement(
         root.rootNodeId(), UI::makeButtonElement("", fixedSize(60.0F, 30.0F)));
     ASSERT_TRUE(button.has_value()) << button.error().message;
-    assertOk(context->commitLayout({.width = 100.0F, .height = 60.0F}));
-    assertOk(context->requestFocus(*button));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 60.0F}));
-    EXPECT_TRUE(hasPaintFill(context->committedPaint(), *button,
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 60.0F}));
+    assertOk(context->input().requestFocus(*button));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 60.0F}));
+    EXPECT_TRUE(hasPaintFill(context->publication().committedPaint(), *button,
                              UI::premultiply(focusedColor)));
-    EXPECT_FALSE(hasPaintFill(context->committedPaint(), *button,
+    EXPECT_FALSE(hasPaintFill(context->publication().committedPaint(), *button,
                               UI::premultiply(focusVisibleColor)));
 
-    auto navigation = context->routeFocusNavigation(
+    auto navigation = context->input().routeFocusNavigation(
         UI::UIFocusNavigationDirection::Right, true, UI::UIInputModality::Keyboard);
     ASSERT_TRUE(navigation.has_value()) << navigation.error().message;
-    assertOk(context->commitLayout({.width = 100.0F, .height = 60.0F}));
-    EXPECT_TRUE(hasPaintFill(context->committedPaint(), *button,
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 60.0F}));
+    EXPECT_TRUE(hasPaintFill(context->publication().committedPaint(), *button,
                              UI::premultiply(focusVisibleColor)));
 }
 
@@ -268,9 +272,9 @@ TEST(UIStyleContextTests, RuntimeColorTokenUpdateDirtiesOnlyWinningDependencies)
     auto context = createStyleContext(styleTestCapacity());
     ASSERT_NE(context, nullptr);
     const UI::UIStyleTokenId primaryToken =
-        *context->registerStyleColorToken(UI::rgb(0x2463A5));
+        *context->style().registerStyleColorToken(UI::rgb(0x2463A5));
     const UI::UIStyleTokenId secondaryToken =
-        *context->registerStyleColorToken(UI::rgb(0xBA4A35));
+        *context->style().registerStyleColorToken(UI::rgb(0xBA4A35));
     const std::array rules{
         UI::UIStyleBoxFillRule{
             .role = UI::UIStyleRoleId::PanelSurface,
@@ -285,7 +289,7 @@ TEST(UIStyleContextTests, RuntimeColorTokenUpdateDirtiesOnlyWinningDependencies)
             .color = UI::rgb(0x667788),
         },
     };
-    assertOk(context->installStyleSheet(rules));
+    assertOk(context->style().installStyleSheet(rules));
 
     auto root = createStyleRoot(*context);
     ASSERT_TRUE(root);
@@ -300,7 +304,7 @@ TEST(UIStyleContextTests, RuntimeColorTokenUpdateDirtiesOnlyWinningDependencies)
                 .solidFill = UI::UISolidFill{.color = *localFill},
             };
         }
-        return context->rootBuilder().createElement(root.rootNodeId(), descriptor);
+        return context->authoring().rootBuilder().createElement(root.rootNodeId(), descriptor);
     };
     const auto primaryPanel = createPanel(UI::UIStyleRoleId::PanelSurface);
     const auto secondaryPanel = createPanel(UI::UIStyleRoleId::ButtonTonal);
@@ -308,12 +312,12 @@ TEST(UIStyleContextTests, RuntimeColorTokenUpdateDirtiesOnlyWinningDependencies)
     const auto localPanel = createPanel(UI::UIStyleRoleId::PanelSurface,
                                         UI::rgb(0x22AA55));
     ASSERT_TRUE(primaryPanel && secondaryPanel && literalPanel && localPanel);
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
 
-    const auto initialValue = context->styleColorToken(primaryToken);
+    const auto initialValue = context->style().styleColorToken(primaryToken);
     ASSERT_TRUE(initialValue.has_value()) << initialValue.error().message;
     EXPECT_EQ(*initialValue, UI::rgb(0x2463A5));
-    assertOk(context->setStyleColorToken(primaryToken, UI::rgb(0x3978C5)));
+    assertOk(context->style().setStyleColorToken(primaryToken, UI::rgb(0x3978C5)));
 
     const UI::UIContextStatistics updateStatistics = context->statistics();
     // Reverse-dependency index walks only nodes whose winning BoxFill is this token.
@@ -326,21 +330,21 @@ TEST(UIStyleContextTests, RuntimeColorTokenUpdateDirtiesOnlyWinningDependencies)
     EXPECT_FALSE(updateStatistics.hitDirty);
     EXPECT_TRUE(updateStatistics.paintDirty);
     EXPECT_FALSE(updateStatistics.semanticsDirty);
-    EXPECT_TRUE(hasPaintFill(context->committedPaint(), *primaryPanel,
+    EXPECT_TRUE(hasPaintFill(context->publication().committedPaint(), *primaryPanel,
                              UI::premultiply(UI::rgb(0x2463A5))));
 
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
-    EXPECT_TRUE(hasPaintFill(context->committedPaint(), *primaryPanel,
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
+    EXPECT_TRUE(hasPaintFill(context->publication().committedPaint(), *primaryPanel,
                              UI::premultiply(UI::rgb(0x3978C5))));
-    EXPECT_TRUE(hasPaintFill(context->committedPaint(), *secondaryPanel,
+    EXPECT_TRUE(hasPaintFill(context->publication().committedPaint(), *secondaryPanel,
                              UI::premultiply(UI::rgb(0xBA4A35))));
-    EXPECT_TRUE(hasPaintFill(context->committedPaint(), *literalPanel,
+    EXPECT_TRUE(hasPaintFill(context->publication().committedPaint(), *literalPanel,
                              UI::premultiply(UI::rgb(0x667788))));
-    EXPECT_TRUE(hasPaintFill(context->committedPaint(), *localPanel,
+    EXPECT_TRUE(hasPaintFill(context->publication().committedPaint(), *localPanel,
                              UI::premultiply(UI::rgb(0x22AA55))));
 
     const UI::UIContextStatistics beforeNoOp = context->statistics();
-    assertOk(context->setStyleColorToken(primaryToken, UI::rgb(0x3978C5)));
+    assertOk(context->style().setStyleColorToken(primaryToken, UI::rgb(0x3978C5)));
     const UI::UIContextStatistics afterNoOp = context->statistics();
     EXPECT_EQ(afterNoOp.lastStyleTokenUpdateInspectedNodeCount, 0U);
     EXPECT_EQ(afterNoOp.lastStyleTokenUpdateResolvedNodeCount, 0U);
@@ -356,12 +360,12 @@ TEST(UIStyleContextTests, RuntimeColorTokenUpdateIsOwnerThreadValidated)
     auto context = createStyleContext(styleTestCapacity());
     ASSERT_NE(context, nullptr);
     const UI::UIStyleTokenId token =
-        *context->registerStyleColorToken(UI::rgb(0x2463A5));
+        *context->style().registerStyleColorToken(UI::rgb(0x2463A5));
 
-    const auto invalidQuery = context->styleColorToken(UI::UIStyleTokenId{});
+    const auto invalidQuery = context->style().styleColorToken(UI::UIStyleTokenId{});
     ASSERT_FALSE(invalidQuery.has_value());
     EXPECT_EQ(invalidQuery.error().code, UI::UIErrorCode::InvalidStyle);
-    const Core::Status invalidSet = context->setStyleColorToken(
+    const Core::Status invalidSet = context->style().setStyleColorToken(
         UI::UIStyleTokenId{.value = token.value + 1U}, UI::rgb(0x3978C5));
     ASSERT_FALSE(invalidSet.has_value());
     EXPECT_EQ(invalidSet.error().code, UI::UIErrorCode::InvalidStyle);
@@ -369,8 +373,8 @@ TEST(UIStyleContextTests, RuntimeColorTokenUpdateIsOwnerThreadValidated)
     std::optional<Core::Result<UI::UIStraightSrgba8Color>> threadedQuery;
     Core::Status threadedSet = Core::success();
     std::thread worker([&] {
-        threadedQuery.emplace(context->styleColorToken(token));
-        threadedSet = context->setStyleColorToken(token, UI::rgb(0x3978C5));
+        threadedQuery.emplace(context->style().styleColorToken(token));
+        threadedSet = context->style().setStyleColorToken(token, UI::rgb(0x3978C5));
     });
     worker.join();
     ASSERT_TRUE(threadedQuery.has_value());
@@ -378,7 +382,7 @@ TEST(UIStyleContextTests, RuntimeColorTokenUpdateIsOwnerThreadValidated)
     EXPECT_EQ(threadedQuery->error().code, UI::UIErrorCode::WrongOwnerThread);
     ASSERT_FALSE(threadedSet.has_value());
     EXPECT_EQ(threadedSet.error().code, UI::UIErrorCode::WrongOwnerThread);
-    EXPECT_EQ(*context->styleColorToken(token), UI::rgb(0x2463A5));
+    EXPECT_EQ(*context->style().styleColorToken(token), UI::rgb(0x2463A5));
 }
 
 TEST(UIStyleContextTests, RuntimeColorTokenCapacityFailureIsAtomic)
@@ -390,31 +394,31 @@ TEST(UIStyleContextTests, RuntimeColorTokenCapacityFailureIsAtomic)
     auto context = createStyleContext(config);
     ASSERT_NE(context, nullptr);
     const UI::UIStyleTokenId token =
-        *context->registerStyleColorToken(UI::rgb(0x2463A5));
+        *context->style().registerStyleColorToken(UI::rgb(0x2463A5));
     const std::array rules{
         UI::UIStyleBoxFillRule{
             .role = UI::UIStyleRoleId::PanelSurface,
             .colorToken = token,
         },
     };
-    assertOk(context->installStyleSheet(rules));
+    assertOk(context->style().installStyleSheet(rules));
 
     auto root = createStyleRoot(*context);
     ASSERT_TRUE(root);
     UI::UIElementDescriptor descriptor =
         UI::makePanelElement(fixedSize(40.0F, 20.0F));
     descriptor.visual.styleRole = UI::UIStyleRoleId::PanelSurface;
-    const auto first = context->rootBuilder().createElement(root.rootNodeId(), descriptor);
-    const auto second = context->rootBuilder().createElement(root.rootNodeId(), descriptor);
+    const auto first = context->authoring().rootBuilder().createElement(root.rootNodeId(), descriptor);
+    const auto second = context->authoring().rootBuilder().createElement(root.rootNodeId(), descriptor);
     ASSERT_TRUE(first && second);
-    assertOk(context->commitLayout({.width = 120.0F, .height = 80.0F}));
+    assertOk(context->publication().commitLayout({.width = 120.0F, .height = 80.0F}));
     const UI::UIContextStatistics before = context->statistics();
 
     const Core::Status rejected =
-        context->setStyleColorToken(token, UI::rgb(0x3978C5));
+        context->style().setStyleColorToken(token, UI::rgb(0x3978C5));
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::CapacityExceeded);
-    EXPECT_EQ(*context->styleColorToken(token), UI::rgb(0x2463A5));
+    EXPECT_EQ(*context->style().styleColorToken(token), UI::rgb(0x2463A5));
 
     const UI::UIContextStatistics after = context->statistics();
     EXPECT_EQ(after.lastStyleTokenUpdateInspectedNodeCount, 2U);
@@ -425,9 +429,9 @@ TEST(UIStyleContextTests, RuntimeColorTokenCapacityFailureIsAtomic)
     EXPECT_EQ(after.paintRevision, before.paintRevision);
     EXPECT_EQ(after.paintDirty, before.paintDirty);
     EXPECT_EQ(after.semanticsDirty, before.semanticsDirty);
-    EXPECT_TRUE(hasPaintFill(context->committedPaint(), *first,
+    EXPECT_TRUE(hasPaintFill(context->publication().committedPaint(), *first,
                              UI::premultiply(UI::rgb(0x2463A5))));
-    EXPECT_TRUE(hasPaintFill(context->committedPaint(), *second,
+    EXPECT_TRUE(hasPaintFill(context->publication().committedPaint(), *second,
                              UI::premultiply(UI::rgb(0x2463A5))));
 }
 
@@ -437,21 +441,21 @@ TEST(UIStyleContextTests, NodeClassLinksReleaseOnDestroyAndReuse)
     config.nodeStyleClassLinkCapacity = 2;
     auto context = createStyleContext(config);
     ASSERT_NE(context, nullptr);
-    const UI::UIStyleClassId accent = *context->registerStyleClass();
-    const UI::UIStyleClassId compact = *context->registerStyleClass();
+    const UI::UIStyleClassId accent = *context->style().registerStyleClass();
+    const UI::UIStyleClassId compact = *context->style().registerStyleClass();
 
     auto root = createStyleRoot(*context);
     ASSERT_TRUE(root);
     const std::array bothClasses{accent, compact};
     UI::UIElementDescriptor styled = UI::makePanelElement();
     styled.visual.styleClasses = bothClasses;
-    ASSERT_TRUE(context->rootBuilder().createElement(root.rootNodeId(), styled).has_value());
+    ASSERT_TRUE(context->authoring().rootBuilder().createElement(root.rootNodeId(), styled).has_value());
     EXPECT_EQ(context->statistics().style.activeNodeClassLinkCount, 2U);
 
     const std::array oneClass{accent};
     UI::UIElementDescriptor overflow = UI::makePanelElement();
     overflow.visual.styleClasses = oneClass;
-    const auto rejected = context->rootBuilder().createElement(root.rootNodeId(), overflow);
+    const auto rejected = context->authoring().rootBuilder().createElement(root.rootNodeId(), overflow);
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::CapacityExceeded);
     EXPECT_EQ(context->liveNodeCount(), 2U);
@@ -461,7 +465,7 @@ TEST(UIStyleContextTests, NodeClassLinksReleaseOnDestroyAndReuse)
     EXPECT_EQ(context->statistics().style.activeNodeClassLinkCount, 0U);
     auto reusedRoot = createStyleRoot(*context);
     ASSERT_TRUE(reusedRoot);
-    ASSERT_TRUE(context->rootBuilder()
+    ASSERT_TRUE(context->authoring().rootBuilder()
                     .createElement(reusedRoot.rootNodeId(), overflow)
                     .has_value());
     const auto stats = context->statistics().style;
@@ -473,14 +477,14 @@ TEST(UIStyleContextTests, RejectsInvalidClassSetsBeforePublishingANode)
 {
     auto context = createStyleContext(styleTestCapacity());
     ASSERT_NE(context, nullptr);
-    const UI::UIStyleClassId registered = *context->registerStyleClass();
+    const UI::UIStyleClassId registered = *context->style().registerStyleClass();
     auto root = createStyleRoot(*context);
     ASSERT_TRUE(root);
 
     const auto expectInvalid = [&](std::span<const UI::UIStyleClassId> classes) {
         UI::UIElementDescriptor descriptor = UI::makePanelElement();
         descriptor.visual.styleClasses = classes;
-        const auto result = context->rootBuilder().createElement(
+        const auto result = context->authoring().rootBuilder().createElement(
             root.rootNodeId(), descriptor);
         ASSERT_FALSE(result.has_value());
         EXPECT_EQ(result.error().code, UI::UIErrorCode::InvalidStyle);
@@ -514,27 +518,27 @@ TEST(UIStyleContextTests, ResolvesRetainedStateIntoCommittedBoxFillCache)
             .color = UI::rgb(0xABCDEF),
         },
     };
-    assertOk(context->installStyleSheet(rules));
+    assertOk(context->style().installStyleSheet(rules));
 
     auto root = createStyleRoot(*context);
     ASSERT_TRUE(root);
     UI::UIElementDescriptor descriptor = UI::makeButtonElement({}, fixedSize(40.0F, 30.0F));
     descriptor.visual.styleRole = UI::UIStyleRoleId::PanelSurface;
-    auto panelResult = context->rootBuilder().createElement(root.rootNodeId(), descriptor);
+    auto panelResult = context->authoring().rootBuilder().createElement(root.rootNodeId(), descriptor);
     ASSERT_TRUE(panelResult.has_value()) << (panelResult ? "" : panelResult.error().message);
     const UI::UINodeId panel = *panelResult;
 
-    assertOk(context->commitLayout({.width = 80.0F, .height = 60.0F}));
-    const UI::UICommittedPaintEntry* paint = findPaintEntry(context->committedPaint(), panel);
+    assertOk(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}));
+    const UI::UICommittedPaintEntry* paint = findPaintEntry(context->publication().committedPaint(), panel);
     ASSERT_NE(paint, nullptr);
     EXPECT_EQ(paint->solidFill, UI::premultiply(UI::rgb(0x112233)));
 
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     auto updater = std::move(*updaterResult);
     assertOk(updater.setEnabled(panel, false));
-    assertOk(context->commitLayout({.width = 80.0F, .height = 60.0F}));
-    paint = findPaintEntry(context->committedPaint(), panel);
+    assertOk(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}));
+    paint = findPaintEntry(context->publication().committedPaint(), panel);
     ASSERT_NE(paint, nullptr);
     EXPECT_EQ(paint->solidFill, UI::premultiply(UI::rgb(0xABCDEF)));
 
@@ -544,7 +548,7 @@ TEST(UIStyleContextTests, ResolvesRetainedStateIntoCommittedBoxFillCache)
     EXPECT_EQ(statistics.lastStyleCandidateRuleCount, 2U);
     EXPECT_EQ(statistics.lastPaintCacheRebuildCount, 1U);
 
-    assertOk(context->commitLayout({.width = 80.0F, .height = 60.0F}));
+    assertOk(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}));
     const UI::UIContextStatistics cleanStatistics = context->statistics();
     EXPECT_EQ(cleanStatistics.lastStyleInspectedNodeCount, 0U);
     EXPECT_EQ(cleanStatistics.lastStyleResolvedNodeCount, 0U);
@@ -555,7 +559,7 @@ TEST(UIStyleContextTests, StylesheetOverridesDefaultProductChromeForClasslessAnd
 {
     auto context = createStyleContext(styleTestCapacity(), true);
     ASSERT_NE(context, nullptr);
-    const UI::UIStyleClassId accent = *context->registerStyleClass();
+    const UI::UIStyleClassId accent = *context->style().registerStyleClass();
     const std::array rules{
         UI::UIStyleBoxFillRule{
             .role = UI::UIStyleRoleId::PanelSurface,
@@ -567,14 +571,14 @@ TEST(UIStyleContextTests, StylesheetOverridesDefaultProductChromeForClasslessAnd
             .color = UI::rgb(0xF4A261),
         },
     };
-    assertOk(context->installStyleSheet(rules));
+    assertOk(context->style().installStyleSheet(rules));
 
     auto root = createStyleRoot(*context);
     ASSERT_TRUE(root);
     UI::UIElementDescriptor classlessDescriptor =
         UI::makeButtonElement({}, fixedSize(40.0F, 30.0F));
     classlessDescriptor.visual.styleRole = UI::UIStyleRoleId::PanelSurface;
-    const auto classlessSurface = context->rootBuilder().createElement(
+    const auto classlessSurface = context->authoring().rootBuilder().createElement(
         root.rootNodeId(), classlessDescriptor);
     ASSERT_TRUE(classlessSurface.has_value()) << classlessSurface.error().message;
 
@@ -582,25 +586,25 @@ TEST(UIStyleContextTests, StylesheetOverridesDefaultProductChromeForClasslessAnd
     UI::UIElementDescriptor buttonDescriptor =
         UI::makeButtonElement({}, fixedSize(40.0F, 30.0F));
     buttonDescriptor.visual.styleClasses = buttonClasses;
-    const auto button = context->rootBuilder().createElement(
+    const auto button = context->authoring().rootBuilder().createElement(
         root.rootNodeId(), buttonDescriptor);
     ASSERT_TRUE(button.has_value()) << button.error().message;
 
-    assertOk(context->commitLayout({.width = 100.0F, .height = 80.0F}));
-    EXPECT_TRUE(hasPaintFill(context->committedPaint(), *classlessSurface,
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 80.0F}));
+    EXPECT_TRUE(hasPaintFill(context->publication().committedPaint(), *classlessSurface,
                              UI::premultiply(UI::rgb(0x184E77))));
-    EXPECT_TRUE(hasPaintFill(context->committedPaint(), *button,
+    EXPECT_TRUE(hasPaintFill(context->publication().committedPaint(), *button,
                              UI::premultiply(UI::rgb(0xF4A261))));
 
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value()) << updaterResult.error().message;
     auto updater = std::move(*updaterResult);
     assertOk(updater.setEnabled(*classlessSurface, false));
     assertOk(updater.setEnabled(*button, false));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 80.0F}));
-    EXPECT_TRUE(hasPaintFill(context->committedPaint(), *classlessSurface,
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 80.0F}));
+    EXPECT_TRUE(hasPaintFill(context->publication().committedPaint(), *classlessSurface,
                              UI::premultiply(UI::rgb(0x184E77))));
-    EXPECT_TRUE(hasPaintFill(context->committedPaint(), *button,
+    EXPECT_TRUE(hasPaintFill(context->publication().committedPaint(), *button,
                              UI::premultiply(UI::rgb(0xF4A261))));
     const UI::UIContextStatistics statistics = context->statistics();
     EXPECT_EQ(statistics.lastStyleInspectedNodeCount, 2U);
@@ -618,7 +622,7 @@ TEST(UIStyleContextTests, LocalBoxPaintOverrideWinsOverStylesheet)
             .color = UI::rgb(0xAA0000),
         },
     };
-    assertOk(context->installStyleSheet(rules));
+    assertOk(context->style().installStyleSheet(rules));
 
     auto root = createStyleRoot(*context);
     ASSERT_TRUE(root);
@@ -627,11 +631,11 @@ TEST(UIStyleContextTests, LocalBoxPaintOverrideWinsOverStylesheet)
     descriptor.visual.boxPaint = UI::UIBoxPaint{
         .solidFill = UI::UISolidFill{.color = UI::rgb(0x00AA44)},
     };
-    const auto panel = context->rootBuilder().createElement(root.rootNodeId(), descriptor);
+    const auto panel = context->authoring().rootBuilder().createElement(root.rootNodeId(), descriptor);
     ASSERT_TRUE(panel.has_value());
 
-    assertOk(context->commitLayout({.width = 80.0F, .height = 60.0F}));
-    const UI::UICommittedPaintEntry* paint = findPaintEntry(context->committedPaint(), *panel);
+    assertOk(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}));
+    const UI::UICommittedPaintEntry* paint = findPaintEntry(context->publication().committedPaint(), *panel);
     ASSERT_NE(paint, nullptr);
     EXPECT_EQ(paint->solidFill, UI::premultiply(UI::rgb(0x00AA44)));
 }
@@ -647,22 +651,22 @@ TEST(UIStyleContextTests, CheckedStateUsesExistingToggleStorage)
             .color = UI::rgb(0x22CC55),
         },
     };
-    assertOk(context->installStyleSheet(rules));
+    assertOk(context->style().installStyleSheet(rules));
 
     auto root = createStyleRoot(*context);
     ASSERT_TRUE(root);
-    const auto checkbox = context->rootBuilder().createElement(
+    const auto checkbox = context->authoring().rootBuilder().createElement(
         root.rootNodeId(), UI::makeCheckboxElement(fixedSize(30.0F, 30.0F)));
     ASSERT_TRUE(checkbox.has_value());
-    assertOk(context->commitLayout({.width = 60.0F, .height = 60.0F}));
-    EXPECT_EQ(findPaintEntry(context->committedPaint(), *checkbox), nullptr);
+    assertOk(context->publication().commitLayout({.width = 60.0F, .height = 60.0F}));
+    EXPECT_EQ(findPaintEntry(context->publication().committedPaint(), *checkbox), nullptr);
 
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     auto updater = std::move(*updaterResult);
     assertOk(updater.setChecked(*checkbox, true));
-    assertOk(context->commitLayout({.width = 60.0F, .height = 60.0F}));
-    const UI::UICommittedPaintEntry* paint = findPaintEntry(context->committedPaint(), *checkbox);
+    assertOk(context->publication().commitLayout({.width = 60.0F, .height = 60.0F}));
+    const UI::UICommittedPaintEntry* paint = findPaintEntry(context->publication().committedPaint(), *checkbox);
     ASSERT_NE(paint, nullptr);
     EXPECT_EQ(paint->solidFill, UI::premultiply(UI::rgb(0x22CC55)));
 }
@@ -681,37 +685,37 @@ TEST(UIStyleContextTests, RuntimeRoleAndClearOverrideRepublishResolvedFill)
             .color = UI::rgb(0xCC4422),
         },
     };
-    assertOk(context->installStyleSheet(rules));
+    assertOk(context->style().installStyleSheet(rules));
 
     auto root = createStyleRoot(*context);
     ASSERT_TRUE(root);
     UI::UIElementDescriptor descriptor = UI::makePanelElement(fixedSize(40.0F, 30.0F));
     descriptor.visual.styleRole = UI::UIStyleRoleId::PanelSurface;
-    const auto panel = context->rootBuilder().createElement(root.rootNodeId(), descriptor);
+    const auto panel = context->authoring().rootBuilder().createElement(root.rootNodeId(), descriptor);
     ASSERT_TRUE(panel.has_value());
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     auto updater = std::move(*updaterResult);
 
-    assertOk(context->commitLayout({.width = 80.0F, .height = 60.0F}));
-    ASSERT_NE(findPaintEntry(context->committedPaint(), *panel), nullptr);
-    EXPECT_EQ(findPaintEntry(context->committedPaint(), *panel)->solidFill,
+    assertOk(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}));
+    ASSERT_NE(findPaintEntry(context->publication().committedPaint(), *panel), nullptr);
+    EXPECT_EQ(findPaintEntry(context->publication().committedPaint(), *panel)->solidFill,
               UI::premultiply(UI::rgb(0x118844)));
 
     assertOk(updater.setStyleRole(*panel, UI::UIStyleRoleId::PanelElevated));
-    assertOk(context->commitLayout({.width = 80.0F, .height = 60.0F}));
-    ASSERT_NE(findPaintEntry(context->committedPaint(), *panel), nullptr);
-    EXPECT_EQ(findPaintEntry(context->committedPaint(), *panel)->solidFill,
+    assertOk(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}));
+    ASSERT_NE(findPaintEntry(context->publication().committedPaint(), *panel), nullptr);
+    EXPECT_EQ(findPaintEntry(context->publication().committedPaint(), *panel)->solidFill,
               UI::premultiply(UI::rgb(0xCC4422)));
 
     assertOk(updater.setBoxPaint(*panel, {}));
-    assertOk(context->commitLayout({.width = 80.0F, .height = 60.0F}));
-    EXPECT_EQ(findPaintEntry(context->committedPaint(), *panel), nullptr);
+    assertOk(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}));
+    EXPECT_EQ(findPaintEntry(context->publication().committedPaint(), *panel), nullptr);
 
     assertOk(updater.clearOverride(*panel, UI::UIStyleOverride::BoxPaint));
-    assertOk(context->commitLayout({.width = 80.0F, .height = 60.0F}));
-    ASSERT_NE(findPaintEntry(context->committedPaint(), *panel), nullptr);
-    EXPECT_EQ(findPaintEntry(context->committedPaint(), *panel)->solidFill,
+    assertOk(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}));
+    ASSERT_NE(findPaintEntry(context->publication().committedPaint(), *panel), nullptr);
+    EXPECT_EQ(findPaintEntry(context->publication().committedPaint(), *panel)->solidFill,
               UI::premultiply(UI::rgb(0xCC4422)));
 }
 
@@ -733,35 +737,35 @@ TEST(UIStyleContextTests, ControlPaintOverridesSuppressStylesheetEvenAtExistingV
             .color = UI::rgb(0x3355CC),
         },
     };
-    assertOk(context->installStyleSheet(rules));
+    assertOk(context->style().installStyleSheet(rules));
 
     auto root = createStyleRoot(*context);
     ASSERT_TRUE(root);
-    const auto button = context->rootBuilder().createElement(
+    const auto button = context->authoring().rootBuilder().createElement(
         root.rootNodeId(), UI::makeButtonElement({}, fixedSize(30.0F, 20.0F)));
-    const auto checkbox = context->rootBuilder().createElement(
+    const auto checkbox = context->authoring().rootBuilder().createElement(
         root.rootNodeId(), UI::makeCheckboxElement(fixedSize(30.0F, 20.0F)));
-    const auto textEdit = context->rootBuilder().createElement(
+    const auto textEdit = context->authoring().rootBuilder().createElement(
         root.rootNodeId(), UI::makeTextEditElement({}, fixedSize(30.0F, 20.0F)));
     ASSERT_TRUE(button.has_value());
     ASSERT_TRUE(checkbox.has_value());
     ASSERT_TRUE(textEdit.has_value());
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     auto updater = std::move(*updaterResult);
 
-    assertOk(context->commitLayout({.width = 100.0F, .height = 80.0F}));
-    EXPECT_NE(findPaintEntry(context->committedPaint(), *button), nullptr);
-    EXPECT_NE(findPaintEntry(context->committedPaint(), *checkbox), nullptr);
-    EXPECT_NE(findPaintEntry(context->committedPaint(), *textEdit), nullptr);
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 80.0F}));
+    EXPECT_NE(findPaintEntry(context->publication().committedPaint(), *button), nullptr);
+    EXPECT_NE(findPaintEntry(context->publication().committedPaint(), *checkbox), nullptr);
+    EXPECT_NE(findPaintEntry(context->publication().committedPaint(), *textEdit), nullptr);
 
     assertOk(updater.setButtonPaint(*button, {}));
     assertOk(updater.setCheckboxPaint(*checkbox, {}));
     assertOk(updater.setTextEditPaint(*textEdit, {}));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 80.0F}));
-    EXPECT_EQ(findPaintEntry(context->committedPaint(), *button), nullptr);
-    EXPECT_EQ(findPaintEntry(context->committedPaint(), *checkbox), nullptr);
-    EXPECT_EQ(findPaintEntry(context->committedPaint(), *textEdit), nullptr);
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 80.0F}));
+    EXPECT_EQ(findPaintEntry(context->publication().committedPaint(), *button), nullptr);
+    EXPECT_EQ(findPaintEntry(context->publication().committedPaint(), *checkbox), nullptr);
+    EXPECT_EQ(findPaintEntry(context->publication().committedPaint(), *textEdit), nullptr);
 }
 
 TEST(UIStyleContextTests, StylesheetImageTintTokenDrivesPaintAndLocalOverride)
@@ -771,9 +775,9 @@ TEST(UIStyleContextTests, StylesheetImageTintTokenDrivesPaintAndLocalOverride)
     auto context = createStyleContext(capacities);
     ASSERT_NE(context, nullptr);
 
-    auto styleClass = context->registerStyleClass();
+    auto styleClass = context->style().registerStyleClass();
     ASSERT_TRUE(styleClass.has_value()) << styleClass.error().message;
-    auto tintToken = context->registerStyleColorToken(UI::rgba8(16, 32, 48, 255));
+    auto tintToken = context->style().registerStyleColorToken(UI::rgba8(16, 32, 48, 255));
     ASSERT_TRUE(tintToken.has_value()) << tintToken.error().message;
     const std::array rules{
         UI::UIStyleBoxFillRule{
@@ -782,7 +786,7 @@ TEST(UIStyleContextTests, StylesheetImageTintTokenDrivesPaintAndLocalOverride)
             .imageTintToken = *tintToken,
         },
     };
-    assertOk(context->installStyleSheet(rules));
+    assertOk(context->style().installStyleSheet(rules));
 
     auto root = createStyleRoot(*context);
     ASSERT_TRUE(root);
@@ -792,46 +796,46 @@ TEST(UIStyleContextTests, StylesheetImageTintTokenDrivesPaintAndLocalOverride)
                              fixedSize(32.0F, 32.0F));
     imageDesc.visual.styleRole = UI::UIStyleRoleId::PanelSurface;
     imageDesc.visual.styleClasses = std::span(&classId, 1);
-    const auto image = context->rootBuilder().createElement(root.rootNodeId(), imageDesc);
+    const auto image = context->authoring().rootBuilder().createElement(root.rootNodeId(), imageDesc);
     ASSERT_TRUE(image.has_value()) << image.error().message;
 
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     auto updater = std::move(*updaterResult);
 
-    assertOk(context->commitLayout({.width = 64.0F, .height = 64.0F}));
-    const auto* paint = findImagePaintEntry(context->committedPaint(), *image);
+    assertOk(context->publication().commitLayout({.width = 64.0F, .height = 64.0F}));
+    const auto* paint = findImagePaintEntry(context->publication().committedPaint(), *image);
     ASSERT_NE(paint, nullptr);
     EXPECT_EQ(paint->solidFill, UI::premultiply(UI::rgba8(16, 32, 48, 255)));
     EXPECT_EQ(*updater.imageTint(*image), UI::rgba8(16, 32, 48, 255));
 
-    assertOk(context->setStyleColorToken(*tintToken, UI::rgba8(200, 100, 50, 180)));
+    assertOk(context->style().setStyleColorToken(*tintToken, UI::rgba8(200, 100, 50, 180)));
     const UI::UIContextStatistics afterToken = context->statistics();
     EXPECT_EQ(afterToken.lastStyleTokenUpdateAffectedNodeCount, 1U);
     EXPECT_TRUE(afterToken.paintDirty);
     EXPECT_FALSE(afterToken.layoutDirty);
-    assertOk(context->commitLayout({.width = 64.0F, .height = 64.0F}));
-    paint = findImagePaintEntry(context->committedPaint(), *image);
+    assertOk(context->publication().commitLayout({.width = 64.0F, .height = 64.0F}));
+    paint = findImagePaintEntry(context->publication().committedPaint(), *image);
     ASSERT_NE(paint, nullptr);
     EXPECT_EQ(paint->solidFill, UI::premultiply(UI::rgba8(200, 100, 50, 180)));
 
     assertOk(updater.setImageTint(*image, UI::rgba8(1, 2, 3, 255)));
-    assertOk(context->commitLayout({.width = 64.0F, .height = 64.0F}));
-    paint = findImagePaintEntry(context->committedPaint(), *image);
+    assertOk(context->publication().commitLayout({.width = 64.0F, .height = 64.0F}));
+    paint = findImagePaintEntry(context->publication().committedPaint(), *image);
     ASSERT_NE(paint, nullptr);
     EXPECT_EQ(paint->solidFill, UI::premultiply(UI::rgba8(1, 2, 3, 255)));
 
     // Local override suppresses stylesheet token updates.
-    assertOk(context->setStyleColorToken(*tintToken, UI::rgba8(9, 9, 9, 255)));
+    assertOk(context->style().setStyleColorToken(*tintToken, UI::rgba8(9, 9, 9, 255)));
     EXPECT_EQ(context->statistics().lastStyleTokenUpdateAffectedNodeCount, 0U);
-    assertOk(context->commitLayout({.width = 64.0F, .height = 64.0F}));
-    paint = findImagePaintEntry(context->committedPaint(), *image);
+    assertOk(context->publication().commitLayout({.width = 64.0F, .height = 64.0F}));
+    paint = findImagePaintEntry(context->publication().committedPaint(), *image);
     ASSERT_NE(paint, nullptr);
     EXPECT_EQ(paint->solidFill, UI::premultiply(UI::rgba8(1, 2, 3, 255)));
 
     assertOk(updater.clearOverride(*image, UI::UIStyleOverride::ImageTint));
-    assertOk(context->commitLayout({.width = 64.0F, .height = 64.0F}));
-    paint = findImagePaintEntry(context->committedPaint(), *image);
+    assertOk(context->publication().commitLayout({.width = 64.0F, .height = 64.0F}));
+    paint = findImagePaintEntry(context->publication().committedPaint(), *image);
     ASSERT_NE(paint, nullptr);
     EXPECT_EQ(paint->solidFill, UI::premultiply(UI::rgba8(9, 9, 9, 255)));
 }

@@ -62,35 +62,35 @@ class ObservingMemoryResource final : public std::pmr::memory_resource {
 
 [[nodiscard]] inline UI::UIRootOwner createRoot(UI::UIContext& context)
 {
-    auto rootResult = context.rootBuilder().createRoot();
+    auto rootResult = context.authoring().rootBuilder().createRoot();
     EXPECT_TRUE(rootResult.has_value()) << (rootResult ? "" : rootResult.error().message);
     return rootResult ? std::move(*rootResult) : UI::UIRootOwner{};
 }
 
 [[nodiscard]] inline UI::UINodeId createPanel(UI::UIContext& context, UI::UINodeId parent)
 {
-    auto panelResult = context.rootBuilder().createElement(parent, UI::makePanelElement());
+    auto panelResult = context.authoring().rootBuilder().createElement(parent, UI::makePanelElement());
     EXPECT_TRUE(panelResult.has_value()) << (panelResult ? "" : panelResult.error().message);
     return panelResult ? *panelResult : UI::UINodeId{};
 }
 
 [[nodiscard]] inline UI::UINodeId createLabel(UI::UIContext& context, UI::UINodeId parent)
 {
-    auto labelResult = context.rootBuilder().createElement(parent, UI::makeLabelElement());
+    auto labelResult = context.authoring().rootBuilder().createElement(parent, UI::makeLabelElement());
     EXPECT_TRUE(labelResult.has_value()) << (labelResult ? "" : labelResult.error().message);
     return labelResult ? *labelResult : UI::UINodeId{};
 }
 
 [[nodiscard]] inline UI::UINodeId createButton(UI::UIContext& context, UI::UINodeId parent)
 {
-    auto buttonResult = context.rootBuilder().createElement(parent, UI::makeButtonElement());
+    auto buttonResult = context.authoring().rootBuilder().createElement(parent, UI::makeButtonElement());
     EXPECT_TRUE(buttonResult.has_value()) << (buttonResult ? "" : buttonResult.error().message);
     return buttonResult ? *buttonResult : UI::UINodeId{};
 }
 
 [[nodiscard]] inline UI::UITreeUpdater createUpdater(UI::UIContext& context, UI::UIRootOwner& root)
 {
-    auto updaterResult = context.treeUpdater(root);
+    auto updaterResult = context.authoring().treeUpdater(root);
     EXPECT_TRUE(updaterResult.has_value()) << (updaterResult ? "" : updaterResult.error().message);
     return updaterResult ? std::move(*updaterResult) : UI::UITreeUpdater{};
 }

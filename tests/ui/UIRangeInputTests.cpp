@@ -44,10 +44,10 @@ class UIRangeInputTest : public testing::Test {
                                                            });
         ASSERT_TRUE(contextResult.has_value()) << (contextResult ? "" : contextResult.error().message);
         context = std::move(*contextResult);
-        auto rootResult = context->rootBuilder().createRoot();
+        auto rootResult = context->authoring().rootBuilder().createRoot();
         ASSERT_TRUE(rootResult.has_value());
         root = std::move(*rootResult);
-        auto updaterResult = context->treeUpdater(root);
+        auto updaterResult = context->authoring().treeUpdater(root);
         ASSERT_TRUE(updaterResult.has_value());
         updater = std::move(*updaterResult);
         expectOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(160.0F, 120.0F)));
@@ -81,7 +81,7 @@ class UIRangeInputTest : public testing::Test {
 
     void commit()
     {
-        expectOk(context->commitLayout({.width = 160.0F, .height = 120.0F}));
+        expectOk(context->publication().commitLayout({.width = 160.0F, .height = 120.0F}));
     }
 
     [[nodiscard]] Platform::DigitalControlIdentity key(Platform::Key value) const noexcept
@@ -126,9 +126,9 @@ TEST_F(UIRangeInputTest, StepAdjustmentUsesCallbackPathAndExactControlLatch)
             lastEvent = event;
         }}));
     commit();
-    expectOk(context->requestFocus(slider));
+    expectOk(context->input().requestFocus(slider));
 
-    auto leftDown = context->routeRangeInputCommand({7}, 11, UI::UIRangeInputCommand::Decrease, true,
+    auto leftDown = context->input().routeRangeInputCommand({7}, 11, UI::UIRangeInputCommand::Decrease, true,
                                                     key(Platform::Key::Left));
     ASSERT_TRUE(leftDown.has_value()) << (leftDown ? "" : leftDown.error().message);
     EXPECT_TRUE(leftDown->consumed);
@@ -139,17 +139,17 @@ TEST_F(UIRangeInputTest, StepAdjustmentUsesCallbackPathAndExactControlLatch)
     EXPECT_EQ(lastEvent.platformFrame, Platform::PlatformFrameId{7});
     EXPECT_EQ(lastEvent.sourceSequence, 11U);
 
-    auto downDown = context->routeRangeInputCommand({8}, 12, UI::UIRangeInputCommand::Decrease, true,
+    auto downDown = context->input().routeRangeInputCommand({8}, 12, UI::UIRangeInputCommand::Decrease, true,
                                                     key(Platform::Key::Down));
     ASSERT_TRUE(downDown.has_value()) << (downDown ? "" : downDown.error().message);
     EXPECT_TRUE(downDown->consumed);
     EXPECT_TRUE(downDown->changed);
     EXPECT_EQ(callbackCount, 2U);
 
-    expectOk(context->requestFocus(other));
-    auto downUp = context->routeRangeInputCommand({9}, 13, UI::UIRangeInputCommand::Decrease, false,
+    expectOk(context->input().requestFocus(other));
+    auto downUp = context->input().routeRangeInputCommand({9}, 13, UI::UIRangeInputCommand::Decrease, false,
                                                   key(Platform::Key::Down));
-    auto leftUp = context->routeRangeInputCommand({10}, 14, UI::UIRangeInputCommand::Decrease, false,
+    auto leftUp = context->input().routeRangeInputCommand({10}, 14, UI::UIRangeInputCommand::Decrease, false,
                                                   key(Platform::Key::Left));
     ASSERT_TRUE(downUp.has_value() && leftUp.has_value());
     EXPECT_TRUE(downUp->consumed);
@@ -168,30 +168,30 @@ TEST_F(UIRangeInputTest, DeclinesNoFocusIncompatibleReadOnlyDisabledAndClampedIn
     commit();
 
     const auto routeDecrease = [&](u64 sequence, bool pressed = true) {
-        return context->routeRangeInputCommand({20 + sequence}, sequence, UI::UIRangeInputCommand::Decrease,
+        return context->input().routeRangeInputCommand({20 + sequence}, sequence, UI::UIRangeInputCommand::Decrease,
                                                pressed, key(Platform::Key::Left));
     };
     auto noFocus = routeDecrease(1);
     ASSERT_TRUE(noFocus.has_value());
     EXPECT_FALSE(noFocus->consumed);
 
-    expectOk(context->requestFocus(button));
+    expectOk(context->input().requestFocus(button));
     auto incompatible = routeDecrease(2);
     ASSERT_TRUE(incompatible.has_value());
     EXPECT_FALSE(incompatible->consumed);
 
-    expectOk(context->requestFocus(readOnlySlider));
+    expectOk(context->input().requestFocus(readOnlySlider));
     auto readOnly = routeDecrease(3);
     ASSERT_TRUE(readOnly.has_value());
     EXPECT_FALSE(readOnly->consumed);
     EXPECT_TRUE(readOnly->targeted);
-    auto pointer = context->routePointerInput(pointerDown(30, {.x = 110.0F, .y = 36.0F}));
+    auto pointer = context->input().routePointerInput(pointerDown(30, {.x = 110.0F, .y = 36.0F}));
     ASSERT_TRUE(pointer.has_value()) << (pointer ? "" : pointer.error().message);
     auto readOnlyValue = updater.sliderValue(readOnlySlider);
     ASSERT_TRUE(readOnlyValue.has_value());
     EXPECT_FLOAT_EQ(*readOnlyValue, 0.0F);
 
-    expectOk(context->requestFocus(slider));
+    expectOk(context->input().requestFocus(slider));
     auto clamped = routeDecrease(4);
     ASSERT_TRUE(clamped.has_value());
     EXPECT_FALSE(clamped->consumed);
@@ -201,7 +201,7 @@ TEST_F(UIRangeInputTest, DeclinesNoFocusIncompatibleReadOnlyDisabledAndClampedIn
     EXPECT_FALSE(clampedUp->consumed);
 
     expectOk(updater.setSliderValue(slider, 0.5F));
-    expectOk(context->requestFocus(slider));
+    expectOk(context->input().requestFocus(slider));
     expectOk(updater.setEnabled(slider, false));
     auto disabled = routeDecrease(6);
     ASSERT_TRUE(disabled.has_value());
@@ -221,9 +221,9 @@ TEST_F(UIRangeInputTest, StepZeroUsesRangePercentAndAccessibilitySharesQuantized
     expectOk(updater.setSliderChangeCallback(
         slider, UI::UISliderChangeCallback{[&](const UI::UISliderChangeEvent&) noexcept { ++callbackCount; }}));
     commit();
-    expectOk(context->requestFocus(slider));
+    expectOk(context->input().requestFocus(slider));
 
-    auto increased = context->routeRangeInputCommand({40}, 1, UI::UIRangeInputCommand::Increase, true,
+    auto increased = context->input().routeRangeInputCommand({40}, 1, UI::UIRangeInputCommand::Increase, true,
                                                      key(Platform::Key::Right));
     ASSERT_TRUE(increased.has_value());
     EXPECT_TRUE(increased->changed);
@@ -233,7 +233,7 @@ TEST_F(UIRangeInputTest, StepZeroUsesRangePercentAndAccessibilitySharesQuantized
     EXPECT_EQ(callbackCount, 1U);
 
     expectOk(updater.setSliderRange(slider, 0.0F, 1.0F, 0.25F));
-    expectOk(context->performAccessibilityAction({
+    expectOk(context->input().performAccessibilityAction({
         .kind = UI::UIAccessibilityActionKind::SetRangeValue,
         .node = slider,
         .rangeValue = 0.61,
@@ -246,7 +246,7 @@ TEST_F(UIRangeInputTest, StepZeroUsesRangePercentAndAccessibilitySharesQuantized
     const UI::UINodeId readOnlySlider = addSlider(true);
     ASSERT_TRUE(readOnlySlider.hasValue());
     commit();
-    auto rejected = context->performAccessibilityAction({
+    auto rejected = context->input().performAccessibilityAction({
         .kind = UI::UIAccessibilityActionKind::SetRangeValue,
         .node = readOnlySlider,
         .rangeValue = 0.5,

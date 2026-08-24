@@ -16,8 +16,8 @@ TEST_F(UILayoutTest, RejectsNonFiniteAndNegativeStylesWithoutDirtyingLayout)
     ASSERT_TRUE(root);
     const UI::UINodeId panel = createPanel(*context, root.rootNodeId());
     ASSERT_TRUE(panel.hasValue());
-    assertOk(context->commitStructure());
-    assertOk(context->commitLayout({.width = 100.0F, .height = 50.0F}));
+    assertOk(context->publication().commitStructure());
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 50.0F}));
     const UI::UIContextStatistics before = context->statistics();
 
     auto updater = createUpdater(*context, root);
@@ -55,7 +55,7 @@ TEST_F(UILayoutTest, RejectsNonFiniteAndNegativeStylesWithoutDirtyingLayout)
     style.flexContainer.gap.row = -2.0F;
     expectInvalid(style);
 
-    assertOk(context->commitLayout({.width = 100.0F, .height = 50.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 50.0F}));
     const UI::UIContextStatistics afterCommit = context->statistics();
     EXPECT_EQ(afterCommit.layoutRevision, before.layoutRevision);
     EXPECT_EQ(afterCommit.lastLayoutPassCount, 0U);
@@ -72,11 +72,11 @@ TEST_F(UILayoutTest, InvalidPercentEnumAndViewportPreserveCommittedStateAndPendi
 
     auto updater = createUpdater(*context, root);
     assertOk(updater.setLayoutStyle(panel, fixedSize(20.0F, 10.0F)));
-    assertOk(context->commitStructure());
-    assertOk(context->commitLayout({.width = 100.0F, .height = 50.0F}));
+    assertOk(context->publication().commitStructure());
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 50.0F}));
 
-    const UI::UICommittedStructureView baselineStructure = context->committedStructure();
-    const UI::UICommittedLayoutView baselineLayout = context->committedLayout();
+    const UI::UICommittedStructureView baselineStructure = context->publication().committedStructure();
+    const UI::UICommittedLayoutView baselineLayout = context->publication().committedLayout();
     const u64 structureRevision = baselineStructure.revision();
     const u64 layoutRevision = baselineLayout.layoutRevision();
     const usize structureSize = baselineStructure.size();
@@ -85,8 +85,8 @@ TEST_F(UILayoutTest, InvalidPercentEnumAndViewportPreserveCommittedStateAndPendi
         requireLayoutEntry(baselineLayout, panel).worldRect;
 
     const auto expectCommittedSnapshotUnchanged = [&] {
-        const UI::UICommittedStructureView structure = context->committedStructure();
-        const UI::UICommittedLayoutView layout = context->committedLayout();
+        const UI::UICommittedStructureView structure = context->publication().committedStructure();
+        const UI::UICommittedLayoutView layout = context->publication().committedLayout();
         EXPECT_EQ(structure.revision(), structureRevision);
         EXPECT_EQ(structure.size(), structureSize);
         EXPECT_EQ(layout.structureRevision(), structureRevision);
@@ -122,7 +122,7 @@ TEST_F(UILayoutTest, InvalidPercentEnumAndViewportPreserveCommittedStateAndPendi
     ASSERT_EQ(pending.dirtyQueuePendingCount, 2U);
 
     const auto expectInvalidViewport = [&](UI::UILogicalSize viewport) {
-        const Core::Status status = context->commitLayout(viewport);
+        const Core::Status status = context->publication().commitLayout(viewport);
         ASSERT_FALSE(status.has_value());
         EXPECT_EQ(status.error().code, UI::UIErrorCode::InvalidLayout);
         expectCommittedSnapshotUnchanged();
@@ -139,10 +139,10 @@ TEST_F(UILayoutTest, InvalidPercentEnumAndViewportPreserveCommittedStateAndPendi
     });
     expectInvalidViewport({.width = std::nanf(""), .height = 50.0F});
 
-    assertOk(context->commitLayout({.width = 100.0F, .height = 50.0F}));
-    EXPECT_EQ(context->committedLayout().layoutRevision(), layoutRevision + 1);
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 50.0F}));
+    EXPECT_EQ(context->publication().committedLayout().layoutRevision(), layoutRevision + 1);
     expectRectNear(
-        requireLayoutEntry(context->committedLayout(), panel).worldRect,
+        requireLayoutEntry(context->publication().committedLayout(), panel).worldRect,
         {.x = 0.0F, .y = 0.0F, .width = 30.0F, .height = 15.0F});
 }
 
@@ -160,12 +160,12 @@ TEST_F(UILayoutTest, FiniteInputOverflowCannotPublishNonFiniteGeometry)
     rowStyle.flexContainer.direction = UI::UIFlexDirection::Row;
     assertOk(updater.setLayoutStyle(row, rowStyle));
     assertOk(updater.setLayoutStyle(child, fixedSize(10.0F, 10.0F)));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 20.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 20.0F}));
 
-    const u64 oldStructureRevision = context->committedStructure().revision();
-    const u64 oldLayoutRevision = context->committedLayout().layoutRevision();
+    const u64 oldStructureRevision = context->publication().committedStructure().revision();
+    const u64 oldLayoutRevision = context->publication().committedLayout().layoutRevision();
     const UI::UILogicalRect oldChildRect =
-        requireLayoutEntry(context->committedLayout(), child).worldRect;
+        requireLayoutEntry(context->publication().committedLayout(), child).worldRect;
 
     UI::UILayoutStyle overflowingStyle = fixedSize(
         (std::numeric_limits<float>::max)(),
@@ -174,22 +174,22 @@ TEST_F(UILayoutTest, FiniteInputOverflowCannotPublishNonFiniteGeometry)
     assertOk(updater.setLayoutStyle(child, overflowingStyle));
 
     const Core::Status rejected =
-        context->commitLayout({.width = 100.0F, .height = 20.0F});
+        context->publication().commitLayout({.width = 100.0F, .height = 20.0F});
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidLayout);
-    EXPECT_EQ(context->committedStructure().revision(), oldStructureRevision);
-    EXPECT_EQ(context->committedLayout().layoutRevision(), oldLayoutRevision);
+    EXPECT_EQ(context->publication().committedStructure().revision(), oldStructureRevision);
+    EXPECT_EQ(context->publication().committedLayout().layoutRevision(), oldLayoutRevision);
     expectRectNear(
-        requireLayoutEntry(context->committedLayout(), child).worldRect,
+        requireLayoutEntry(context->publication().committedLayout(), child).worldRect,
         oldChildRect);
     EXPECT_TRUE(context->statistics().layoutDirty);
     EXPECT_GT(context->statistics().dirtyQueuePendingCount, 0U);
 
     assertOk(updater.setLayoutStyle(child, fixedSize(20.0F, 10.0F)));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 20.0F}));
-    EXPECT_EQ(context->committedLayout().layoutRevision(), oldLayoutRevision + 1);
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 20.0F}));
+    EXPECT_EQ(context->publication().committedLayout().layoutRevision(), oldLayoutRevision + 1);
     expectRectNear(
-        requireLayoutEntry(context->committedLayout(), child).worldRect,
+        requireLayoutEntry(context->publication().committedLayout(), child).worldRect,
         {.x = 0.0F, .y = 0.0F, .width = 20.0F, .height = 10.0F});
 }
 
@@ -209,9 +209,9 @@ TEST_F(UILayoutTest, PercentLengthsResolveAgainstFinalClampedParentContentBox)
     assertOk(updater.setLayoutStyle(panel, panelStyle));
     assertOk(updater.setLayoutStyle(child, percentSize(50.0F, 50.0F)));
 
-    assertOk(context->commitStructure());
-    assertOk(context->commitLayout({.width = 100.0F, .height = 80.0F}));
-    const UI::UICommittedLayoutView layout = context->committedLayout();
+    assertOk(context->publication().commitStructure());
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 80.0F}));
+    const UI::UICommittedLayoutView layout = context->publication().committedLayout();
 
     expectRectNear(
         requireLayoutEntry(layout, root.rootNodeId()).worldRect,
@@ -235,10 +235,10 @@ TEST_F(UILayoutTest, DefaultAutoRootUsesViewportContentBoxForDirectPercentChild)
 
     auto updater = createUpdater(*context, root);
     assertOk(updater.setLayoutStyle(child, percentSize(50.0F, 25.0F)));
-    assertOk(context->commitStructure());
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    assertOk(context->publication().commitStructure());
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
 
-    const UI::UICommittedLayoutView layout = context->committedLayout();
+    const UI::UICommittedLayoutView layout = context->publication().committedLayout();
     expectRectNear(
         requireLayoutEntry(layout, root.rootNodeId()).worldRect,
         {.x = 0.0F, .y = 0.0F, .width = 200.0F, .height = 120.0F});
@@ -259,20 +259,20 @@ TEST_F(UILayoutTest, ViewportChangeRelayoutsWithoutMutationAndSameViewportIsNoOp
 
     auto updater = createUpdater(*context, root);
     assertOk(updater.setLayoutStyle(child, percentSize(50.0F, 50.0F)));
-    assertOk(context->commitStructure());
-    assertOk(context->commitLayout({.width = 100.0F, .height = 60.0F}));
-    const u64 structureRevision = context->committedStructure().revision();
-    const u64 firstLayoutRevision = context->committedLayout().layoutRevision();
+    assertOk(context->publication().commitStructure());
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 60.0F}));
+    const u64 structureRevision = context->publication().committedStructure().revision();
+    const u64 firstLayoutRevision = context->publication().committedLayout().layoutRevision();
 
-    assertOk(context->commitLayout({.width = 100.0F, .height = 60.0F}));
-    EXPECT_EQ(context->committedLayout().layoutRevision(), firstLayoutRevision);
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 60.0F}));
+    EXPECT_EQ(context->publication().committedLayout().layoutRevision(), firstLayoutRevision);
     EXPECT_EQ(context->statistics().lastLayoutPassCount, 0U);
 
-    assertOk(context->commitLayout({.width = 200.0F, .height = 80.0F}));
-    const UI::UICommittedLayoutView resizedLayout = context->committedLayout();
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 80.0F}));
+    const UI::UICommittedLayoutView resizedLayout = context->publication().committedLayout();
     EXPECT_EQ(resizedLayout.layoutRevision(), firstLayoutRevision + 1);
     EXPECT_EQ(resizedLayout.structureRevision(), structureRevision);
-    EXPECT_EQ(context->committedStructure().revision(), structureRevision);
+    EXPECT_EQ(context->publication().committedStructure().revision(), structureRevision);
     EXPECT_EQ(context->statistics().lastLayoutPassCount, 1U);
     EXPECT_FALSE(context->statistics().layoutDirty);
     expectRectNear(
@@ -311,9 +311,9 @@ TEST_F(UILayoutTest, AutoColumnContainerIncludesChildMarginPaddingAndGap)
     secondStyle.margin = UI::UIEdgeSpacing{.left = 1.0F, .top = 2.0F, .right = 1.0F, .bottom = 3.0F};
     assertOk(updater.setLayoutStyle(second, secondStyle));
 
-    assertOk(context->commitStructure());
-    assertOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
-    const UI::UICommittedLayoutView layout = context->committedLayout();
+    assertOk(context->publication().commitStructure());
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
+    const UI::UICommittedLayoutView layout = context->publication().committedLayout();
 
     expectRectNear(
         requireLayoutEntry(layout, container).worldRect,
@@ -360,9 +360,9 @@ TEST_F(UILayoutTest, RowAndColumnGrowDistributeRemainingMainAxisSpace)
     assertOk(updater.setLayoutStyle(growColumnChild, growColumnStyle));
     assertOk(updater.setLayoutStyle(percentColumnGrandchild, percentSize(25.0F, 50.0F)));
 
-    assertOk(context->commitStructure());
-    assertOk(context->commitLayout({.width = 200.0F, .height = 200.0F}));
-    const UI::UICommittedLayoutView layout = context->committedLayout();
+    assertOk(context->publication().commitStructure());
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 200.0F}));
+    const UI::UICommittedLayoutView layout = context->publication().committedLayout();
 
     expectRectNear(
         requireLayoutEntry(layout, fixedRowChild).worldRect,
@@ -403,9 +403,9 @@ TEST_F(UILayoutTest, JustifyAndAlignPlaceChildrenDeterministically)
     assertOk(updater.setLayoutStyle(first, fixedSize(10.0F, 10.0F)));
     assertOk(updater.setLayoutStyle(second, fixedSize(20.0F, 20.0F)));
 
-    assertOk(context->commitStructure());
-    assertOk(context->commitLayout({.width = 120.0F, .height = 80.0F}));
-    const UI::UICommittedLayoutView layout = context->committedLayout();
+    assertOk(context->publication().commitStructure());
+    assertOk(context->publication().commitLayout({.width = 120.0F, .height = 80.0F}));
+    const UI::UICommittedLayoutView layout = context->publication().committedLayout();
 
     expectRectNear(
         requireLayoutEntry(layout, first).worldRect,
@@ -441,8 +441,8 @@ TEST_F(UILayoutTest, FlexItemBasisShrinkAndAlignSelfOverrideParentPolicy)
     endedStyle.flexItem.shrink = 1.0F;
     assertOk(updater.setLayoutStyle(ended, endedStyle));
 
-    assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
-    const UI::UICommittedLayoutView layout = context->committedLayout();
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 40.0F}));
+    const UI::UICommittedLayoutView layout = context->publication().committedLayout();
     expectRectNear(
         requireLayoutEntry(layout, centered).worldRect,
         {.x = 0.0F, .y = 15.0F, .width = 50.0F, .height = 10.0F});
@@ -470,10 +470,10 @@ TEST_F(UILayoutTest, AlignStretchUsesContainerCrossAxisWhenChildCrossSizeIsAuto)
     childStyle.size.height = UI::UILayoutLength::Auto();
     assertOk(updater.setLayoutStyle(child, childStyle));
 
-    assertOk(context->commitStructure());
-    assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
+    assertOk(context->publication().commitStructure());
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 40.0F}));
     expectRectNear(
-        requireLayoutEntry(context->committedLayout(), child).worldRect,
+        requireLayoutEntry(context->publication().committedLayout(), child).worldRect,
         {.x = 0.0F, .y = 0.0F, .width = 25.0F, .height = 40.0F});
 }
 
@@ -521,9 +521,9 @@ TEST_F(UILayoutTest, GridTracksSpanAndPerItemAlignmentPublishDeterministicRects)
     spanningStyle.gridItem.alignSelf = UI::UIAlignSelf::Center;
     assertOk(updater.setLayoutStyle(spanning, spanningStyle));
 
-    assertOk(context->commitStructure());
-    assertOk(context->commitLayout({.width = 240.0F, .height = 100.0F}));
-    const UI::UICommittedLayoutView layout = context->committedLayout();
+    assertOk(context->publication().commitStructure());
+    assertOk(context->publication().commitLayout({.width = 240.0F, .height = 100.0F}));
+    const UI::UICommittedLayoutView layout = context->publication().committedLayout();
     expectRectNear(requireLayoutEntry(layout, label).worldRect,
                    {.x = 5.0F, .y = 5.0F, .width = 30.0F, .height = 10.0F});
     expectRectNear(requireLayoutEntry(layout, input).worldRect,
@@ -557,9 +557,9 @@ TEST_F(UILayoutTest, OverlayDoesNotParticipateInFlowAndKeepsSnapshotOrder)
     };
     assertOk(updater.setLayoutStyle(overlay, overlayStyle));
 
-    assertOk(context->commitStructure());
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
-    const UI::UICommittedLayoutView layout = context->committedLayout();
+    assertOk(context->publication().commitStructure());
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
+    const UI::UICommittedLayoutView layout = context->publication().committedLayout();
 
     ASSERT_EQ(layout.size(), 4U);
     EXPECT_EQ(layout.entries()[0].node, root.rootNodeId());
@@ -595,18 +595,18 @@ TEST_F(UILayoutTest, PanelDescendantClipIsOptInAndKeepsNegativeOverlayGeometry)
     overlayStyle.overlay.offset.x = UI::UILayoutLength::Px(-10.0F);
     overlayStyle.overlay.offset.y = UI::UILayoutLength::Px(-5.0F);
     assertOk(updater.setLayoutStyle(overlay, overlayStyle));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
 
     constexpr UI::UILogicalRect PanelRect{.x = 40.0F, .y = 30.0F, .width = 50.0F, .height = 40.0F};
     constexpr UI::UILogicalRect OverlayRect{.x = 30.0F, .y = 25.0F, .width = 70.0F, .height = 60.0F};
     const UI::UICommittedLayoutEntry& defaultOverlay =
-        requireLayoutEntry(context->committedLayout(), overlay);
+        requireLayoutEntry(context->publication().committedLayout(), overlay);
     expectRectNear(defaultOverlay.worldRect, OverlayRect);
     expectRectNear(defaultOverlay.effectiveClip, OverlayRect);
-    const u64 defaultLayoutRevision = context->committedLayout().layoutRevision();
-    const u64 defaultHitRevision = context->committedHit().hitRevision();
-    const u64 defaultPaintRevision = context->committedPaint().paintRevision();
-    const u64 defaultSemanticsRevision = context->committedSemantics().semanticsRevision();
+    const u64 defaultLayoutRevision = context->publication().committedLayout().layoutRevision();
+    const u64 defaultHitRevision = context->publication().committedHit().hitRevision();
+    const u64 defaultPaintRevision = context->publication().committedPaint().paintRevision();
+    const u64 defaultSemanticsRevision = context->publication().committedSemantics().semanticsRevision();
 
     panelStyle.clipDescendants = true;
     assertOk(updater.setLayoutStyle(panel, panelStyle));
@@ -614,20 +614,20 @@ TEST_F(UILayoutTest, PanelDescendantClipIsOptInAndKeepsNegativeOverlayGeometry)
     overflowingOverlay.size.width = UI::UILayoutLength::Px((std::numeric_limits<float>::max)());
     overflowingOverlay.margin.left = (std::numeric_limits<float>::max)();
     assertOk(updater.setLayoutStyle(overlay, overflowingOverlay));
-    const Core::Status rejected = context->commitLayout({.width = 200.0F, .height = 120.0F});
+    const Core::Status rejected = context->publication().commitLayout({.width = 200.0F, .height = 120.0F});
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidLayout);
-    EXPECT_EQ(context->committedLayout().layoutRevision(), defaultLayoutRevision);
-    EXPECT_EQ(context->committedHit().hitRevision(), defaultHitRevision);
-    EXPECT_EQ(context->committedPaint().paintRevision(), defaultPaintRevision);
-    EXPECT_EQ(context->committedSemantics().semanticsRevision(), defaultSemanticsRevision);
-    expectRectNear(requireLayoutEntry(context->committedLayout(), overlay).effectiveClip, OverlayRect);
+    EXPECT_EQ(context->publication().committedLayout().layoutRevision(), defaultLayoutRevision);
+    EXPECT_EQ(context->publication().committedHit().hitRevision(), defaultHitRevision);
+    EXPECT_EQ(context->publication().committedPaint().paintRevision(), defaultPaintRevision);
+    EXPECT_EQ(context->publication().committedSemantics().semanticsRevision(), defaultSemanticsRevision);
+    expectRectNear(requireLayoutEntry(context->publication().committedLayout(), overlay).effectiveClip, OverlayRect);
 
     assertOk(updater.setLayoutStyle(overlay, overlayStyle));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
     const UI::UICommittedLayoutEntry& clippedOverlay =
-        requireLayoutEntry(context->committedLayout(), overlay);
-    expectRectNear(requireLayoutEntry(context->committedLayout(), panel).worldRect, PanelRect);
+        requireLayoutEntry(context->publication().committedLayout(), overlay);
+    expectRectNear(requireLayoutEntry(context->publication().committedLayout(), panel).worldRect, PanelRect);
     expectRectNear(clippedOverlay.worldRect, OverlayRect);
     expectRectNear(clippedOverlay.effectiveClip, PanelRect);
 }
@@ -660,9 +660,9 @@ TEST_F(UILayoutTest, HiddenParticipatesInLayoutButCollapsedIsExcludedFromFlow)
     collapsedStyle.visibility = UI::UIVisibility::Collapsed;
     assertOk(updater.setLayoutStyle(collapsed, collapsedStyle));
 
-    assertOk(context->commitStructure());
-    assertOk(context->commitLayout({.width = 100.0F, .height = 50.0F}));
-    const UI::UICommittedLayoutView layout = context->committedLayout();
+    assertOk(context->publication().commitStructure());
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 50.0F}));
+    const UI::UICommittedLayoutView layout = context->publication().committedLayout();
 
     expectRectNear(
         requireLayoutEntry(layout, row).worldRect,
@@ -694,10 +694,10 @@ TEST_F(UILayoutTest, MinConstraintWinsWhenMinAndMaxConflict)
     style.minMax.maxHeight = UI::UILayoutLength::Px(10.0F);
     assertOk(updater.setLayoutStyle(panel, style));
 
-    assertOk(context->commitStructure());
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitStructure());
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     expectRectNear(
-        requireLayoutEntry(context->committedLayout(), panel).worldRect,
+        requireLayoutEntry(context->publication().committedLayout(), panel).worldRect,
         {.x = 0.0F, .y = 0.0F, .width = 80.0F, .height = 30.0F});
 }
 
@@ -746,9 +746,9 @@ TEST_F(UILayoutTest, GrowStretchAndOverlayResultsRemainClampedByMinMax)
     assertOk(updater.setLayoutStyle(stretchPercentChild, percentSize(50.0F, 50.0F)));
     assertOk(updater.setLayoutStyle(overlayPercentChild, percentSize(50.0F, 50.0F)));
 
-    assertOk(context->commitStructure());
-    assertOk(context->commitLayout({.width = 300.0F, .height = 20.0F}));
-    const UI::UICommittedLayoutView layout = context->committedLayout();
+    assertOk(context->publication().commitStructure());
+    assertOk(context->publication().commitLayout({.width = 300.0F, .height = 20.0F}));
+    const UI::UICommittedLayoutView layout = context->publication().committedLayout();
     expectRectNear(
         requireLayoutEntry(layout, grow).worldRect,
         {.x = 0.0F, .y = 0.0F, .width = 80.0F, .height = 10.0F});

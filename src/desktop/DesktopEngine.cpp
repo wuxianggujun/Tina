@@ -7,6 +7,7 @@
 #include <tina/runtime/spi/EngineCompositionFactories.hpp>
 #include <tina/task/bounded/BoundedTaskSystemFactory.hpp>
 #include <tina/ui/UIContext.hpp>
+#include <tina/ui/UITextSystem.hpp>
 
 #if defined(TINA_HAS_UI_FREETYPE)
 #include <tina/ui/text/FreeTypeTextRasterizerFactory.hpp>
@@ -157,7 +158,7 @@ namespace {
                     {
                         return Core::failure(std::move(context.error()));
                     }
-                    const auto open = (*context)->openTextFont(
+                    const auto open = (*context)->text().openTextFont(
                         std::span<const std::byte>(fontBytes->data(), fontBytes->size()));
                     if (!open)
                     {

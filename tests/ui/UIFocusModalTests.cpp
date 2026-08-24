@@ -63,14 +63,14 @@ void expectOk(Core::Status status)
 
 [[nodiscard]] UI::UIRootOwner createRoot(UI::UIContext& context)
 {
-    auto result = context.rootBuilder().createRoot();
+    auto result = context.authoring().rootBuilder().createRoot();
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UIRootOwner{};
 }
 
 [[nodiscard]] UI::UITreeUpdater createUpdater(UI::UIContext& context, UI::UIRootOwner& root)
 {
-    auto result = context.treeUpdater(root);
+    auto result = context.authoring().treeUpdater(root);
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UITreeUpdater{};
 }
@@ -166,10 +166,10 @@ TEST_F(UIFocusModalTest, ModalPublishesAtomicallyBlocksOutsideAndPreservesFocus)
     ASSERT_TRUE(background.hasValue());
     expectOk(updater.setLayoutStyle(rootNode, fixedSize(200.0F, 200.0F)));
     expectOk(updater.setLayoutStyle(background, overlay(0.0F, 0.0F, 40.0F, 40.0F)));
-    expectOk(context->commitLayout({.width = 200.0F, .height = 200.0F}));
-    expectOk(context->requestFocus(background));
+    expectOk(context->publication().commitLayout({.width = 200.0F, .height = 200.0F}));
+    expectOk(context->input().requestFocus(background));
 
-    auto modalResult = context->rootBuilder().createElement(rootNode, UI::makeModalElement());
+    auto modalResult = context->authoring().rootBuilder().createElement(rootNode, UI::makeModalElement());
     ASSERT_TRUE(modalResult.has_value()) << (modalResult ? "" : modalResult.error().message);
     const UI::UINodeId modal = *modalResult;
     const UI::UINodeId modalSlider = createSlider(updater, modal);
@@ -177,44 +177,44 @@ TEST_F(UIFocusModalTest, ModalPublishesAtomicallyBlocksOutsideAndPreservesFocus)
     expectOk(updater.setLayoutStyle(modal, overlay(80.0F, 80.0F, 100.0F, 100.0F)));
     expectOk(updater.setLayoutStyle(modalSlider, fixedSize(60.0F, 24.0F)));
 
-    EXPECT_FALSE(context->activeModal().hasValue());
-    EXPECT_EQ(context->defaultActionFocus(), background);
-    EXPECT_EQ(context->queryPointerHit({.x = 10.0F, .y = 10.0F}).target.node, background);
+    EXPECT_FALSE(context->input().activeModal().hasValue());
+    EXPECT_EQ(context->input().defaultActionFocus(), background);
+    EXPECT_EQ(context->input().queryPointerHit({.x = 10.0F, .y = 10.0F}).target.node, background);
 
-    expectOk(context->commitLayout({.width = 200.0F, .height = 200.0F}));
-    EXPECT_EQ(context->activeModal(), modal);
-    EXPECT_EQ(context->committedHit().activeModalNode(), modal);
-    EXPECT_EQ(context->defaultActionFocus(), modalSlider);
-    EXPECT_EQ(context->activeFocusScope(), modal);
+    expectOk(context->publication().commitLayout({.width = 200.0F, .height = 200.0F}));
+    EXPECT_EQ(context->input().activeModal(), modal);
+    EXPECT_EQ(context->publication().committedHit().activeModalNode(), modal);
+    EXPECT_EQ(context->input().defaultActionFocus(), modalSlider);
+    EXPECT_EQ(context->input().activeFocusScope(), modal);
     auto modalScopeMode = updater.focusScopeMode(modal);
     ASSERT_TRUE(modalScopeMode.has_value());
     EXPECT_EQ(*modalScopeMode, UI::UIFocusScopeMode::Contain);
 
-    const UI::UIPointerHitQueryResult blockedQuery = context->queryPointerHit({.x = 10.0F, .y = 10.0F});
+    const UI::UIPointerHitQueryResult blockedQuery = context->input().queryPointerHit({.x = 10.0F, .y = 10.0F});
     EXPECT_TRUE(blockedQuery.modalBarrierActive);
     EXPECT_FALSE(blockedQuery.hasTarget());
 
-    auto blockedRoute = context->routePointerInput(pointerDown(window, 10.0F, 10.0F));
+    auto blockedRoute = context->input().routePointerInput(pointerDown(window, 10.0F, 10.0F));
     ASSERT_TRUE(blockedRoute.has_value()) << (blockedRoute ? "" : blockedRoute.error().message);
     EXPECT_TRUE(blockedRoute->blockedByModal);
     EXPECT_TRUE(blockedRoute->consumed);
     EXPECT_FALSE(blockedRoute->hasRoutedTarget());
     EXPECT_TRUE(blockedRoute->claimedPointerButtons.test(static_cast<usize>(Platform::PointerButton::Primary)));
-    EXPECT_EQ(context->defaultActionFocus(), modalSlider);
+    EXPECT_EQ(context->input().defaultActionFocus(), modalSlider);
 
-    const UI::UISemanticsEntry* modalSemantics = findSemanticsEntry(context->committedSemantics(), modal);
+    const UI::UISemanticsEntry* modalSemantics = findSemanticsEntry(context->publication().committedSemantics(), modal);
     ASSERT_NE(modalSemantics, nullptr);
     EXPECT_EQ(modalSemantics->role, UI::UISemanticsRole::Dialog);
 
     UI::UILayoutStyle hiddenModal = overlay(80.0F, 80.0F, 100.0F, 100.0F);
     hiddenModal.visibility = UI::UIVisibility::Hidden;
     expectOk(updater.setLayoutStyle(modal, hiddenModal));
-    EXPECT_EQ(context->activeModal(), modal);
-    EXPECT_TRUE(context->queryPointerHit({.x = 10.0F, .y = 10.0F}).modalBarrierActive);
-    expectOk(context->commitLayout({.width = 200.0F, .height = 200.0F}));
-    EXPECT_FALSE(context->activeModal().hasValue());
-    EXPECT_EQ(context->defaultActionFocus(), background);
-    EXPECT_EQ(context->queryPointerHit({.x = 10.0F, .y = 10.0F}).target.node, background);
+    EXPECT_EQ(context->input().activeModal(), modal);
+    EXPECT_TRUE(context->input().queryPointerHit({.x = 10.0F, .y = 10.0F}).modalBarrierActive);
+    expectOk(context->publication().commitLayout({.width = 200.0F, .height = 200.0F}));
+    EXPECT_FALSE(context->input().activeModal().hasValue());
+    EXPECT_EQ(context->input().defaultActionFocus(), background);
+    EXPECT_EQ(context->input().queryPointerHit({.x = 10.0F, .y = 10.0F}).target.node, background);
 }
 
 TEST_F(UIFocusModalTest, NestedModalTraversalRestoresEachFocusLayer)
@@ -227,8 +227,8 @@ TEST_F(UIFocusModalTest, NestedModalTraversalRestoresEachFocusLayer)
     const UI::UINodeId background = createButton(updater, rootNode);
     expectOk(updater.setLayoutStyle(rootNode, fixedSize(300.0F, 240.0F)));
     expectOk(updater.setLayoutStyle(background, overlay(0.0F, 0.0F, 40.0F, 24.0F)));
-    expectOk(context->commitLayout({.width = 300.0F, .height = 240.0F}));
-    expectOk(context->requestFocus(background));
+    expectOk(context->publication().commitLayout({.width = 300.0F, .height = 240.0F}));
+    expectOk(context->input().requestFocus(background));
 
     const UI::UINodeId outerModal = createModal(updater, rootNode);
     const UI::UINodeId outerFirst = createButton(updater, outerModal);
@@ -240,11 +240,11 @@ TEST_F(UIFocusModalTest, NestedModalTraversalRestoresEachFocusLayer)
         expectOk(updater.setLayoutStyle(node, fixedSize(80.0F, 24.0F)));
     }
     expectOk(updater.setLayoutStyle(nestedHost, fixedSize(180.0F, 100.0F)));
-    expectOk(context->commitLayout({.width = 300.0F, .height = 240.0F}));
-    EXPECT_EQ(context->activeModal(), outerModal);
-    EXPECT_EQ(context->defaultActionFocus(), outerFirst);
+    expectOk(context->publication().commitLayout({.width = 300.0F, .height = 240.0F}));
+    EXPECT_EQ(context->input().activeModal(), outerModal);
+    EXPECT_EQ(context->input().defaultActionFocus(), outerFirst);
 
-    auto outerStep = context->routeDefaultActionFocusStep(false);
+    auto outerStep = context->input().routeDefaultActionFocusStep(false);
     ASSERT_TRUE(outerStep.has_value());
     EXPECT_EQ(outerStep->focus, outerSecond);
 
@@ -260,33 +260,33 @@ TEST_F(UIFocusModalTest, NestedModalTraversalRestoresEachFocusLayer)
     UI::UILayoutStyle hiddenSibling = overlay(0.0F, 0.0F, 20.0F, 20.0F);
     hiddenSibling.visibility = UI::UIVisibility::Hidden;
     expectOk(updater.setLayoutStyle(hiddenSiblingModal, hiddenSibling));
-    expectOk(context->commitLayout({.width = 300.0F, .height = 240.0F}));
-    EXPECT_EQ(context->activeModal(), innerModal);
-    EXPECT_EQ(context->activeFocusScope(), innerModal);
-    EXPECT_EQ(context->defaultActionFocus(), innerFirst);
+    expectOk(context->publication().commitLayout({.width = 300.0F, .height = 240.0F}));
+    EXPECT_EQ(context->input().activeModal(), innerModal);
+    EXPECT_EQ(context->input().activeFocusScope(), innerModal);
+    EXPECT_EQ(context->input().defaultActionFocus(), innerFirst);
 
-    auto innerStep = context->routeDefaultActionFocusStep(false);
+    auto innerStep = context->input().routeDefaultActionFocusStep(false);
     ASSERT_TRUE(innerStep.has_value());
     EXPECT_EQ(innerStep->focus, innerSecond);
-    auto wrappedStep = context->routeDefaultActionFocusStep(false);
+    auto wrappedStep = context->input().routeDefaultActionFocusStep(false);
     ASSERT_TRUE(wrappedStep.has_value());
     EXPECT_EQ(wrappedStep->focus, innerFirst);
-    auto reverseStep = context->routeDefaultActionFocusStep(true);
+    auto reverseStep = context->input().routeDefaultActionFocusStep(true);
     ASSERT_TRUE(reverseStep.has_value());
     EXPECT_EQ(reverseStep->focus, innerSecond);
 
     expectOk(updater.destroy(nestedHost));
-    expectOk(context->commitLayout({.width = 300.0F, .height = 240.0F}));
-    EXPECT_EQ(context->activeModal(), outerModal);
-    EXPECT_EQ(context->activeFocusScope(), outerModal);
-    EXPECT_EQ(context->defaultActionFocus(), outerSecond);
+    expectOk(context->publication().commitLayout({.width = 300.0F, .height = 240.0F}));
+    EXPECT_EQ(context->input().activeModal(), outerModal);
+    EXPECT_EQ(context->input().activeFocusScope(), outerModal);
+    EXPECT_EQ(context->input().defaultActionFocus(), outerSecond);
 
     UI::UILayoutStyle hiddenOuter = overlay(40.0F, 30.0F, 220.0F, 180.0F);
     hiddenOuter.visibility = UI::UIVisibility::Collapsed;
     expectOk(updater.setLayoutStyle(outerModal, hiddenOuter));
-    expectOk(context->commitLayout({.width = 300.0F, .height = 240.0F}));
-    EXPECT_FALSE(context->activeModal().hasValue());
-    EXPECT_EQ(context->defaultActionFocus(), background);
+    expectOk(context->publication().commitLayout({.width = 300.0F, .height = 240.0F}));
+    EXPECT_FALSE(context->input().activeModal().hasValue());
+    EXPECT_EQ(context->input().defaultActionFocus(), background);
 }
 
 TEST_F(UIFocusModalTest, ReleasingModalRootRestoresFocusToAnotherRoot)
@@ -298,8 +298,8 @@ TEST_F(UIFocusModalTest, ReleasingModalRootRestoresFocusToAnotherRoot)
     const UI::UINodeId background = createButton(backgroundUpdater, backgroundRoot.rootNodeId());
     expectOk(backgroundUpdater.setLayoutStyle(backgroundRoot.rootNodeId(), fixedSize(200.0F, 120.0F)));
     expectOk(backgroundUpdater.setLayoutStyle(background, overlay(0.0F, 0.0F, 40.0F, 30.0F)));
-    expectOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
-    expectOk(context->requestFocus(background));
+    expectOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
+    expectOk(context->input().requestFocus(background));
 
     auto modalRoot = createRoot(*context);
     auto modalUpdater = createUpdater(*context, modalRoot);
@@ -308,16 +308,16 @@ TEST_F(UIFocusModalTest, ReleasingModalRootRestoresFocusToAnotherRoot)
     expectOk(modalUpdater.setLayoutStyle(modalRoot.rootNodeId(), fixedSize(200.0F, 120.0F)));
     expectOk(modalUpdater.setLayoutStyle(modal, overlay(40.0F, 20.0F, 120.0F, 80.0F)));
     expectOk(modalUpdater.setLayoutStyle(modalButton, fixedSize(60.0F, 24.0F)));
-    expectOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
-    EXPECT_EQ(context->activeModal(), modal);
-    EXPECT_EQ(context->defaultActionFocus(), modalButton);
+    expectOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
+    EXPECT_EQ(context->input().activeModal(), modal);
+    EXPECT_EQ(context->input().defaultActionFocus(), modalButton);
 
     modalRoot.reset();
     EXPECT_FALSE(context->contains(modal));
-    EXPECT_EQ(context->committedHit().activeModalNode(), modal);
-    expectOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
-    EXPECT_FALSE(context->activeModal().hasValue());
-    EXPECT_EQ(context->defaultActionFocus(), background);
+    EXPECT_EQ(context->publication().committedHit().activeModalNode(), modal);
+    expectOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
+    EXPECT_FALSE(context->input().activeModal().hasValue());
+    EXPECT_EQ(context->input().defaultActionFocus(), background);
     EXPECT_EQ(context->liveRootCount(), 1U);
 }
 
@@ -348,25 +348,25 @@ TEST_F(UIFocusModalTest, ContainScopeCyclesWithoutDependingOnRouteDepthCapacity)
     {
         expectOk(updater.setLayoutStyle(node, fixedSize(40.0F, 20.0F)));
     }
-    expectOk(context->commitLayout({.width = 200.0F, .height = 200.0F}));
+    expectOk(context->publication().commitLayout({.width = 200.0F, .height = 200.0F}));
     expectOk(updater.requestFocus(first));
-    EXPECT_EQ(context->activeFocusScope(), scope);
+    EXPECT_EQ(context->input().activeFocusScope(), scope);
 
-    auto step = context->routeDefaultActionFocusStep(false);
+    auto step = context->input().routeDefaultActionFocusStep(false);
     ASSERT_TRUE(step.has_value());
     EXPECT_EQ(step->focus, second);
-    step = context->routeDefaultActionFocusStep(false);
+    step = context->input().routeDefaultActionFocusStep(false);
     ASSERT_TRUE(step.has_value());
     EXPECT_EQ(step->focus, third);
-    step = context->routeDefaultActionFocusStep(false);
+    step = context->input().routeDefaultActionFocusStep(false);
     ASSERT_TRUE(step.has_value());
     EXPECT_EQ(step->focus, first);
-    step = context->routeDefaultActionFocusStep(true);
+    step = context->input().routeDefaultActionFocusStep(true);
     ASSERT_TRUE(step.has_value());
     EXPECT_EQ(step->focus, third);
 
     expectOk(updater.requestFocus(outside));
-    EXPECT_FALSE(context->activeFocusScope().hasValue());
+    EXPECT_FALSE(context->input().activeFocusScope().hasValue());
 }
 
 TEST_F(UIFocusModalTest, ExplicitFocusRejectsUncommittedHiddenDisabledAndModalOutsideTargets)
@@ -386,11 +386,11 @@ TEST_F(UIFocusModalTest, ExplicitFocusRejectsUncommittedHiddenDisabledAndModalOu
     expectOk(updater.setLayoutStyle(rootNode, fixedSize(200.0F, 200.0F)));
 
     const UI::UINodeId uncommitted = createButton(updater, rootNode);
-    Core::Status rejected = context->requestFocus(uncommitted);
+    Core::Status rejected = context->input().requestFocus(uncommitted);
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidFocusTarget);
 
-    expectOk(context->commitLayout({.width = 200.0F, .height = 200.0F}));
+    expectOk(context->publication().commitLayout({.width = 200.0F, .height = 200.0F}));
     for (const UI::UINodeId invalidTarget : {label, hidden})
     {
         rejected = updater.requestFocus(invalidTarget);
@@ -414,15 +414,15 @@ TEST_F(UIFocusModalTest, ExplicitFocusRejectsUncommittedHiddenDisabledAndModalOu
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidFocusScope);
 
-    expectOk(context->commitLayout({.width = 200.0F, .height = 200.0F}));
-    EXPECT_EQ(context->defaultActionFocus(), modalButton);
-    rejected = context->requestFocus(background);
+    expectOk(context->publication().commitLayout({.width = 200.0F, .height = 200.0F}));
+    EXPECT_EQ(context->input().defaultActionFocus(), modalButton);
+    rejected = context->input().requestFocus(background);
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidFocusTarget);
-    expectOk(context->clearFocus());
-    expectOk(context->clearFocus());
-    EXPECT_FALSE(context->defaultActionFocus().hasValue());
-    EXPECT_EQ(context->activeFocusScope(), modal);
+    expectOk(context->input().clearFocus());
+    expectOk(context->input().clearFocus());
+    EXPECT_FALSE(context->input().defaultActionFocus().hasValue());
+    EXPECT_EQ(context->input().activeFocusScope(), modal);
 }
 
 TEST_F(UIFocusModalTest, FailedPaintCommitDoesNotPublishModalFocusOrCapture)
@@ -449,14 +449,14 @@ TEST_F(UIFocusModalTest, FailedPaintCommitDoesNotPublishModalFocusOrCapture)
     expectOk(updater.setBoxPaint(background, solidFill()));
     expectOk(updater.setBoxPaint(firstDecorator, solidFill()));
     expectOk(updater.setBoxPaint(secondDecorator, solidFill()));
-    expectOk(context->commitLayout({.width = 200.0F, .height = 200.0F}));
+    expectOk(context->publication().commitLayout({.width = 200.0F, .height = 200.0F}));
 
-    auto armed = context->routePointerInput(pointerDown(window, 10.0F, 10.0F));
+    auto armed = context->input().routePointerInput(pointerDown(window, 10.0F, 10.0F));
     ASSERT_TRUE(armed.has_value()) << (armed ? "" : armed.error().message);
-    EXPECT_EQ(context->defaultActionFocus(), background);
-    EXPECT_EQ(context->pointerCapture(), background);
+    EXPECT_EQ(context->input().defaultActionFocus(), background);
+    EXPECT_EQ(context->input().pointerCapture(), background);
     usize pointerCancelCount = 0;
-    auto pointerCancelListener = context->addRoutedPointerListener(
+    auto pointerCancelListener = context->input().addRoutedPointerListener(
         {
             .node = background,
             .kind = UI::UIRoutedPointerEventKind::PointerCancel,
@@ -468,7 +468,7 @@ TEST_F(UIFocusModalTest, FailedPaintCommitDoesNotPublishModalFocusOrCapture)
         << (pointerCancelListener ? "" : pointerCancelListener.error().message);
     auto pointerCancelToken = std::move(*pointerCancelListener);
     ASSERT_TRUE(pointerCancelToken);
-    const u64 hitRevision = context->committedHit().hitRevision();
+    const u64 hitRevision = context->publication().committedHit().hitRevision();
 
     const UI::UINodeId modal = createModal(updater, rootNode);
     const UI::UINodeId modalButton = createButton(updater, modal);
@@ -476,20 +476,20 @@ TEST_F(UIFocusModalTest, FailedPaintCommitDoesNotPublishModalFocusOrCapture)
     expectOk(updater.setLayoutStyle(modalButton, fixedSize(50.0F, 20.0F)));
     expectOk(updater.setBoxPaint(modal, solidFill()));
 
-    const Core::Status failed = context->commitLayout({.width = 200.0F, .height = 200.0F});
+    const Core::Status failed = context->publication().commitLayout({.width = 200.0F, .height = 200.0F});
     ASSERT_FALSE(failed.has_value());
     EXPECT_EQ(failed.error().code, UI::UIErrorCode::CapacityExceeded);
-    EXPECT_EQ(context->committedHit().hitRevision(), hitRevision);
-    EXPECT_FALSE(context->activeModal().hasValue());
-    EXPECT_EQ(context->defaultActionFocus(), background);
-    EXPECT_EQ(context->pointerCapture(), background);
+    EXPECT_EQ(context->publication().committedHit().hitRevision(), hitRevision);
+    EXPECT_FALSE(context->input().activeModal().hasValue());
+    EXPECT_EQ(context->input().defaultActionFocus(), background);
+    EXPECT_EQ(context->input().pointerCapture(), background);
     EXPECT_EQ(pointerCancelCount, 0);
 
     expectOk(updater.setBoxPaint(modal, UI::UIBoxPaint{}));
-    expectOk(context->commitLayout({.width = 200.0F, .height = 200.0F}));
-    EXPECT_EQ(context->activeModal(), modal);
-    EXPECT_EQ(context->defaultActionFocus(), modalButton);
-    EXPECT_FALSE(context->pointerCapture().hasValue());
+    expectOk(context->publication().commitLayout({.width = 200.0F, .height = 200.0F}));
+    EXPECT_EQ(context->input().activeModal(), modal);
+    EXPECT_EQ(context->input().defaultActionFocus(), modalButton);
+    EXPECT_FALSE(context->input().pointerCapture().hasValue());
     EXPECT_EQ(pointerCancelCount, 1);
 }
 
@@ -511,14 +511,14 @@ TEST_F(UIFocusModalTest, FailedSemanticsCommitDoesNotPublishModalFocusOrCapture)
     const UI::UINodeId background = createButton(updater, rootNode);
     expectOk(updater.setLayoutStyle(rootNode, fixedSize(200.0F, 200.0F)));
     expectOk(updater.setLayoutStyle(background, overlay(0.0F, 0.0F, 40.0F, 40.0F)));
-    expectOk(context->commitLayout({.width = 200.0F, .height = 200.0F}));
+    expectOk(context->publication().commitLayout({.width = 200.0F, .height = 200.0F}));
 
-    auto armed = context->routePointerInput(pointerDown(window, 10.0F, 10.0F));
+    auto armed = context->input().routePointerInput(pointerDown(window, 10.0F, 10.0F));
     ASSERT_TRUE(armed.has_value()) << (armed ? "" : armed.error().message);
-    EXPECT_EQ(context->defaultActionFocus(), background);
-    EXPECT_EQ(context->pointerCapture(), background);
+    EXPECT_EQ(context->input().defaultActionFocus(), background);
+    EXPECT_EQ(context->input().pointerCapture(), background);
     usize pointerCancelCount = 0;
-    auto pointerCancelListener = context->addRoutedPointerListener(
+    auto pointerCancelListener = context->input().addRoutedPointerListener(
         {
             .node = background,
             .kind = UI::UIRoutedPointerEventKind::PointerCancel,
@@ -530,7 +530,7 @@ TEST_F(UIFocusModalTest, FailedSemanticsCommitDoesNotPublishModalFocusOrCapture)
         << (pointerCancelListener ? "" : pointerCancelListener.error().message);
     auto pointerCancelToken = std::move(*pointerCancelListener);
     ASSERT_TRUE(pointerCancelToken);
-    const u64 semanticsRevision = context->committedSemantics().semanticsRevision();
+    const u64 semanticsRevision = context->publication().committedSemantics().semanticsRevision();
 
     UI::UIElementDescriptor modalDescriptor = UI::makeModalElement();
     modalDescriptor.semantics.mode = UI::UISemanticsMode::MergeDescendants;
@@ -543,20 +543,20 @@ TEST_F(UIFocusModalTest, FailedSemanticsCommitDoesNotPublishModalFocusOrCapture)
     expectOk(updater.setLayoutStyle(modal, overlay(70.0F, 70.0F, 100.0F, 80.0F)));
     expectOk(updater.setLayoutStyle(modalButton, fixedSize(50.0F, 20.0F)));
 
-    const Core::Status failed = context->commitLayout({.width = 200.0F, .height = 200.0F});
+    const Core::Status failed = context->publication().commitLayout({.width = 200.0F, .height = 200.0F});
     ASSERT_FALSE(failed.has_value());
     EXPECT_EQ(failed.error().code, UI::UIErrorCode::CapacityExceeded);
-    EXPECT_EQ(context->committedSemantics().semanticsRevision(), semanticsRevision);
-    EXPECT_FALSE(context->activeModal().hasValue());
-    EXPECT_EQ(context->defaultActionFocus(), background);
-    EXPECT_EQ(context->pointerCapture(), background);
+    EXPECT_EQ(context->publication().committedSemantics().semanticsRevision(), semanticsRevision);
+    EXPECT_FALSE(context->input().activeModal().hasValue());
+    EXPECT_EQ(context->input().defaultActionFocus(), background);
+    EXPECT_EQ(context->input().pointerCapture(), background);
     EXPECT_EQ(pointerCancelCount, 0);
 
     expectOk(updater.setText(modalButton, ""));
-    expectOk(context->commitLayout({.width = 200.0F, .height = 200.0F}));
-    EXPECT_EQ(context->activeModal(), modal);
-    EXPECT_EQ(context->defaultActionFocus(), modalButton);
-    EXPECT_FALSE(context->pointerCapture().hasValue());
+    expectOk(context->publication().commitLayout({.width = 200.0F, .height = 200.0F}));
+    EXPECT_EQ(context->input().activeModal(), modal);
+    EXPECT_EQ(context->input().defaultActionFocus(), modalButton);
+    EXPECT_FALSE(context->input().pointerCapture().hasValue());
     EXPECT_EQ(pointerCancelCount, 1);
 }
 
@@ -569,17 +569,17 @@ TEST_F(UIFocusModalTest, FocusTraversalIsRejectedDuringPointerDispatch)
     const UI::UINodeId button = createButton(updater, root.rootNodeId());
     expectOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(100.0F, 100.0F)));
     expectOk(updater.setLayoutStyle(button, fixedSize(40.0F, 40.0F)));
-    expectOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    expectOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
     Core::ErrorCode nestedError{};
-    auto tokenResult = context->addRoutedPointerListener(
+    auto tokenResult = context->input().addRoutedPointerListener(
         {
             .node = button,
             .kind = UI::UIRoutedPointerEventKind::ButtonDown,
             .phases = UI::UIEventPhaseMask::Target,
         },
         UI::UIRoutedPointerCallback{[&context, &nestedError](UI::UIRoutedPointerEvent&) noexcept {
-            auto nested = context->routeDefaultActionFocusStep(false);
+            auto nested = context->input().routeDefaultActionFocusStep(false);
             if (!nested)
             {
                 nestedError = nested.error().code;
@@ -588,7 +588,7 @@ TEST_F(UIFocusModalTest, FocusTraversalIsRejectedDuringPointerDispatch)
     ASSERT_TRUE(tokenResult.has_value()) << (tokenResult ? "" : tokenResult.error().message);
     auto token = std::move(*tokenResult);
 
-    auto routed = context->routePointerInput(pointerDown(window, 10.0F, 10.0F));
+    auto routed = context->input().routePointerInput(pointerDown(window, 10.0F, 10.0F));
     ASSERT_TRUE(routed.has_value()) << (routed ? "" : routed.error().message);
     EXPECT_TRUE(token.isActive());
     EXPECT_EQ(nestedError, UI::UIErrorCode::PointerRouteAlreadyInProgress);

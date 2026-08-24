@@ -11,7 +11,7 @@ TEST_F(UIInputRouteProducerTest, ListViewNavigationConsumptionSuppressesGameplay
     ASSERT_NE(producer, nullptr);
     ASSERT_NE(mapper, nullptr);
     ASSERT_NE(tree.context, nullptr);
-    expectOk(tree.context->requestFocus(tree.listView));
+    expectOk(tree.context->input().requestFocus(tree.listView));
 
     auto down = buildFrame(
         *builder,
@@ -53,7 +53,7 @@ TEST_F(UIInputRouteProducerTest, ListViewNavigationConsumptionSuppressesGameplay
     EXPECT_TRUE(released->transitions.empty());
     ASSERT_TRUE(mapper->completeSimulationTick(1).has_value());
 
-    expectOk(tree.context->clearFocus());
+    expectOk(tree.context->input().clearFocus());
     auto gameplayDown = buildFrame(
         *builder,
         window,

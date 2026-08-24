@@ -14,7 +14,7 @@ TEST_F(UIInputRouteProducerTest, FocusedTextEditConsumesEditingKeysButYieldsEnte
     ASSERT_NE(tree.context, nullptr);
     ASSERT_TRUE(tree.target.hasValue());
     expectOk(tree.updater.setText(tree.target, InitialUtf8));
-    expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    expectOk(tree.context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
     auto tabFrame = buildFrame(
         *builder,
@@ -28,8 +28,8 @@ TEST_F(UIInputRouteProducerTest, FocusedTextEditConsumesEditingKeysButYieldsEnte
     auto tabOutput = producer->produce(tree.context.get(), *tabFrame);
     ASSERT_TRUE(tabOutput.has_value()) << (tabOutput ? "" : tabOutput.error().message);
     EXPECT_TRUE(tabOutput->consumption.isConsumed(0));
-    EXPECT_EQ(tree.context->defaultActionFocus(), tree.target);
-    EXPECT_EQ(tree.context->imeFocus(), tree.target);
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.target);
+    EXPECT_EQ(tree.context->text().imeFocus(), tree.target);
 
     auto compositionFrame = buildFrame(
         *builder,
@@ -49,8 +49,8 @@ TEST_F(UIInputRouteProducerTest, FocusedTextEditConsumesEditingKeysButYieldsEnte
     ASSERT_TRUE(compositionOutput.has_value())
         << (compositionOutput ? "" : compositionOutput.error().message);
     EXPECT_TRUE(compositionOutput->consumption.isConsumed(0));
-    EXPECT_TRUE(tree.context->imeCompositionActive());
-    EXPECT_EQ(tree.context->imePreeditUtf8(), "ni");
+    EXPECT_TRUE(tree.context->text().imeCompositionActive());
+    EXPECT_EQ(tree.context->text().imePreeditUtf8(), "ni");
 
     auto selectAllFrame = buildFrame(
         *builder,
@@ -71,7 +71,7 @@ TEST_F(UIInputRouteProducerTest, FocusedTextEditConsumesEditingKeysButYieldsEnte
     EXPECT_EQ(
         *selection,
         (UI::UITextSelection{.anchorCodepoint = 0, .caretCodepoint = 3}));
-    EXPECT_FALSE(tree.context->imeCompositionActive());
+    EXPECT_FALSE(tree.context->text().imeCompositionActive());
 
     auto textFrame = buildFrame(
         *builder,
@@ -141,8 +141,8 @@ TEST_F(UIInputRouteProducerTest, FocusedSingleLineTextEditConsumesVerticalComman
     expectOk(tree.updater.setText(tree.target, "ABC"));
     expectOk(tree.updater.setTextSelection(
         tree.target, {.anchorCodepoint = 1U, .caretCodepoint = 1U}));
-    expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
-    expectOk(tree.context->requestFocus(tree.target));
+    expectOk(tree.context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
+    expectOk(tree.context->input().requestFocus(tree.target));
 
     u64 nextFrame = 16;
     for (const Platform::Key key : {Platform::Key::Up, Platform::Key::Down})
@@ -159,8 +159,8 @@ TEST_F(UIInputRouteProducerTest, FocusedSingleLineTextEditConsumesVerticalComman
         ASSERT_TRUE(output.has_value()) << (output ? "" : output.error().message);
         EXPECT_TRUE(output->consumption.isConsumed(0));
         EXPECT_TRUE(output->consumption.isConsumed(1));
-        EXPECT_EQ(tree.context->defaultActionFocus(), tree.target);
-        EXPECT_EQ(tree.context->imeFocus(), tree.target);
+        EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.target);
+        EXPECT_EQ(tree.context->text().imeFocus(), tree.target);
 
         const auto selection = tree.updater.textSelection(tree.target);
         ASSERT_TRUE(selection.has_value())
@@ -203,10 +203,10 @@ TEST_F(UIInputRouteProducerTest, FocusedMultilineTextEditRoutesVerticalCommandsB
     expectOk(tree.updater.setText(tree.target, MultilineText));
     expectOk(tree.updater.setTextSelection(
         tree.target, {.anchorCodepoint = 2U, .caretCodepoint = 2U}));
-    expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
-    expectOk(tree.context->requestFocus(tree.target));
-    ASSERT_EQ(tree.context->defaultActionFocus(), tree.target);
-    ASSERT_EQ(tree.context->imeFocus(), tree.target);
+    expectOk(tree.context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
+    expectOk(tree.context->input().requestFocus(tree.target));
+    ASSERT_EQ(tree.context->input().defaultActionFocus(), tree.target);
+    ASSERT_EQ(tree.context->text().imeFocus(), tree.target);
 
     u64 nextFrame = 20;
     const auto routeKeyPair = [&](Platform::Key key) -> bool {
@@ -237,8 +237,8 @@ TEST_F(UIInputRouteProducerTest, FocusedMultilineTextEditRoutesVerticalCommandsB
     };
 
     ASSERT_TRUE(routeKeyPair(Platform::Key::Down));
-    EXPECT_EQ(tree.context->defaultActionFocus(), tree.target);
-    EXPECT_EQ(tree.context->imeFocus(), tree.target);
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.target);
+    EXPECT_EQ(tree.context->text().imeFocus(), tree.target);
     auto selection = tree.updater.textSelection(tree.target);
     ASSERT_TRUE(selection.has_value()) << (selection ? "" : selection.error().message);
     EXPECT_EQ(
@@ -246,8 +246,8 @@ TEST_F(UIInputRouteProducerTest, FocusedMultilineTextEditRoutesVerticalCommandsB
         (UI::UITextSelection{.anchorCodepoint = 4U, .caretCodepoint = 4U}));
 
     ASSERT_TRUE(routeKeyPair(Platform::Key::Up));
-    EXPECT_EQ(tree.context->defaultActionFocus(), tree.target);
-    EXPECT_EQ(tree.context->imeFocus(), tree.target);
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.target);
+    EXPECT_EQ(tree.context->text().imeFocus(), tree.target);
     selection = tree.updater.textSelection(tree.target);
     ASSERT_TRUE(selection.has_value()) << (selection ? "" : selection.error().message);
     EXPECT_EQ(
@@ -262,7 +262,7 @@ TEST_F(UIInputRouteProducerTest, DropdownConsumesArrowEscapeAndTabDownUpPairs)
     ASSERT_NE(producer, nullptr);
     ASSERT_NE(tree.context, nullptr);
     ASSERT_TRUE(tree.dropdown.hasValue());
-    ASSERT_EQ(tree.context->activePopup(), tree.popup);
+    ASSERT_EQ(tree.context->input().activePopup(), tree.popup);
 
     auto down = buildFrame(*builder, window,
                            {
@@ -274,7 +274,7 @@ TEST_F(UIInputRouteProducerTest, DropdownConsumesArrowEscapeAndTabDownUpPairs)
     auto downOutput = producer->produce(tree.context.get(), *down);
     ASSERT_TRUE(downOutput.has_value()) << (downOutput ? "" : downOutput.error().message);
     EXPECT_TRUE(downOutput->consumption.isConsumed(0));
-    EXPECT_EQ(tree.context->defaultActionFocus(), tree.firstItem);
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.firstItem);
 
     auto downRelease = buildFrame(*builder, window,
                                   {
@@ -297,7 +297,7 @@ TEST_F(UIInputRouteProducerTest, DropdownConsumesArrowEscapeAndTabDownUpPairs)
     auto upOutput = producer->produce(tree.context.get(), *up);
     ASSERT_TRUE(upOutput.has_value()) << (upOutput ? "" : upOutput.error().message);
     EXPECT_TRUE(upOutput->consumption.isConsumed(0));
-    EXPECT_EQ(tree.context->defaultActionFocus(), tree.firstItem);
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.firstItem);
 
     auto upRelease = buildFrame(*builder, window,
                                 {
@@ -319,8 +319,8 @@ TEST_F(UIInputRouteProducerTest, DropdownConsumesArrowEscapeAndTabDownUpPairs)
     auto tabOutput = producer->produce(tree.context.get(), *tab);
     ASSERT_TRUE(tabOutput.has_value()) << (tabOutput ? "" : tabOutput.error().message);
     EXPECT_TRUE(tabOutput->consumption.isConsumed(0));
-    EXPECT_FALSE(tree.context->activePopup().hasValue());
-    EXPECT_EQ(tree.context->defaultActionFocus(), tree.after);
+    EXPECT_FALSE(tree.context->input().activePopup().hasValue());
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.after);
 
     auto tabRelease = buildFrame(*builder, window,
                                  {
@@ -333,7 +333,7 @@ TEST_F(UIInputRouteProducerTest, DropdownConsumesArrowEscapeAndTabDownUpPairs)
     EXPECT_TRUE(tabReleaseOutput->consumption.isConsumed(0));
 
     expectOk(tree.updater.setDropdownOpen(tree.dropdown, true));
-    expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    expectOk(tree.context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     auto escape = buildFrame(*builder, window,
                              {
                                  .frameId = {66},
@@ -344,7 +344,7 @@ TEST_F(UIInputRouteProducerTest, DropdownConsumesArrowEscapeAndTabDownUpPairs)
     auto escapeOutput = producer->produce(tree.context.get(), *escape);
     ASSERT_TRUE(escapeOutput.has_value()) << (escapeOutput ? "" : escapeOutput.error().message);
     EXPECT_TRUE(escapeOutput->consumption.isConsumed(0));
-    EXPECT_FALSE(tree.context->activePopup().hasValue());
+    EXPECT_FALSE(tree.context->input().activePopup().hasValue());
 
     auto escapeRelease = buildFrame(*builder, window,
                                     {
@@ -374,8 +374,8 @@ TEST_F(UIInputRouteProducerTest, DropdownCommandsTakePriorityThenClosedStateUses
     auto shiftTabOutput = producer->produce(tree.context.get(), *shiftTab);
     ASSERT_TRUE(shiftTabOutput.has_value()) << (shiftTabOutput ? "" : shiftTabOutput.error().message);
     EXPECT_TRUE(shiftTabOutput->consumption.isConsumed(0));
-    EXPECT_EQ(tree.context->defaultActionFocus(), tree.before);
-    EXPECT_FALSE(tree.context->activePopup().hasValue());
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.before);
+    EXPECT_FALSE(tree.context->input().activePopup().hasValue());
 
     // Shift is already released in this snapshot. Tab Up must still release the
     // ExitPrevious command selected by the original key-down.
@@ -392,7 +392,7 @@ TEST_F(UIInputRouteProducerTest, DropdownCommandsTakePriorityThenClosedStateUses
     EXPECT_TRUE(shiftTabReleaseOutput->consumption.isConsumed(0));
 
     expectOk(tree.updater.setDropdownOpen(tree.dropdown, true));
-    expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    expectOk(tree.context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     Platform::GamepadSnapshot dpadHeld{
         .gamepad = gamepad,
         .revision = 82,
@@ -415,7 +415,7 @@ TEST_F(UIInputRouteProducerTest, DropdownCommandsTakePriorityThenClosedStateUses
     auto dpadDownOutput = producer->produce(tree.context.get(), *dpadDown);
     ASSERT_TRUE(dpadDownOutput.has_value()) << (dpadDownOutput ? "" : dpadDownOutput.error().message);
     EXPECT_TRUE(dpadDownOutput->consumption.isConsumed(0));
-    EXPECT_EQ(tree.context->defaultActionFocus(), tree.firstItem);
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.firstItem);
 
     auto dpadRelease = buildFrame(
         *builder, window,
@@ -458,7 +458,7 @@ TEST_F(UIInputRouteProducerTest, DropdownCommandsTakePriorityThenClosedStateUses
     auto cancelOutput = producer->produce(tree.context.get(), *cancel);
     ASSERT_TRUE(cancelOutput.has_value()) << (cancelOutput ? "" : cancelOutput.error().message);
     EXPECT_TRUE(cancelOutput->consumption.isConsumed(0));
-    EXPECT_FALSE(tree.context->activePopup().hasValue());
+    EXPECT_FALSE(tree.context->input().activePopup().hasValue());
 
     auto cancelRelease = buildFrame(
         *builder, window,
@@ -490,7 +490,7 @@ TEST_F(UIInputRouteProducerTest, DropdownCommandsTakePriorityThenClosedStateUses
     ASSERT_TRUE(closedArrowOutput.has_value())
         << (closedArrowOutput ? "" : closedArrowOutput.error().message);
     EXPECT_TRUE(closedArrowOutput->consumption.isConsumed(0));
-    EXPECT_EQ(tree.context->defaultActionFocus(), tree.dropdown);
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.dropdown);
 }
 
 TEST_F(UIInputRouteProducerTest, MenuConsumesKeyboardNavigationAndDismissalDownUpPairs)
@@ -499,8 +499,8 @@ TEST_F(UIInputRouteProducerTest, MenuConsumesKeyboardNavigationAndDismissalDownU
     MenuRouteTree tree = createMenuRouteTree(window);
     ASSERT_NE(producer, nullptr);
     ASSERT_NE(tree.context, nullptr);
-    ASSERT_EQ(tree.context->activeMenu(), tree.menu);
-    ASSERT_EQ(tree.context->defaultActionFocus(), tree.anchor);
+    ASSERT_EQ(tree.context->input().activeMenu(), tree.menu);
+    ASSERT_EQ(tree.context->input().defaultActionFocus(), tree.anchor);
 
     Platform::PlatformFrameId frameId{100};
     const auto routeKeyPair = [&](Platform::Key key) {
@@ -547,16 +547,16 @@ TEST_F(UIInputRouteProducerTest, MenuConsumesKeyboardNavigationAndDismissalDownU
     };
 
     ASSERT_TRUE(routeKeyPair(Platform::Key::Down));
-    EXPECT_EQ(tree.context->defaultActionFocus(), tree.firstItem);
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.firstItem);
     ASSERT_TRUE(routeKeyPair(Platform::Key::End));
-    EXPECT_EQ(tree.context->defaultActionFocus(), tree.secondItem);
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.secondItem);
     ASSERT_TRUE(routeKeyPair(Platform::Key::Home));
-    EXPECT_EQ(tree.context->defaultActionFocus(), tree.firstItem);
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.firstItem);
     ASSERT_TRUE(routeKeyPair(Platform::Key::Up));
-    EXPECT_EQ(tree.context->defaultActionFocus(), tree.secondItem);
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.secondItem);
     ASSERT_TRUE(routeKeyPair(Platform::Key::Escape));
-    EXPECT_FALSE(tree.context->activeMenu().hasValue());
-    EXPECT_EQ(tree.context->defaultActionFocus(), tree.anchor);
+    EXPECT_FALSE(tree.context->input().activeMenu().hasValue());
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.anchor);
 }
 
 TEST_F(UIInputRouteProducerTest, MenuConsumesGamepadDpadAndEastBeforeUnderlyingNavigation)
@@ -620,12 +620,12 @@ TEST_F(UIInputRouteProducerTest, MenuConsumesGamepadDpadAndEastBeforeUnderlyingN
     };
 
     ASSERT_TRUE(routeGamepadPair(Platform::GamepadButton::DpadDown));
-    EXPECT_EQ(tree.context->defaultActionFocus(), tree.firstItem);
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.firstItem);
     ASSERT_TRUE(routeGamepadPair(Platform::GamepadButton::DpadUp));
-    EXPECT_EQ(tree.context->defaultActionFocus(), tree.secondItem);
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.secondItem);
     ASSERT_TRUE(routeGamepadPair(Platform::GamepadButton::East));
-    EXPECT_FALSE(tree.context->activeMenu().hasValue());
-    EXPECT_EQ(tree.context->defaultActionFocus(), tree.anchor);
+    EXPECT_FALSE(tree.context->input().activeMenu().hasValue());
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.anchor);
 }
 
 } // namespace

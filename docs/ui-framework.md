@@ -47,12 +47,13 @@ Runtime phase capability
         |
         v
 per-window UIContext, owner-thread
+  authoring / style / motion / text / publication / input capabilities
   Element tree + generation UINodeId
   fixed-capacity text/canvas/control side storage
   routed input + focus/modal/pointer capture + Tooltip triggers + Menu commands
   theme role + local property override
         |
-        v commitLayout(logical viewport)
+        v UIPublicationPipeline::commitLayout(logical viewport)
 Candidate compiler
   Structure -> Measure/Arrange -> ContentPlacement
   -> Hit/Focus/Modal -> Paint -> Semantics
@@ -75,7 +76,11 @@ private Render backend, currently bgfx
 | 层 | 当前入口 |
 | --- | --- |
 | Element 描述 | `include/tina/ui/UIElement.hpp` 的 `UIElementDescriptor` 与 `make*Element()` |
-| Tree/事务/快照 | `include/tina/ui/UIContext.hpp` 的 builder、updater、`UIElementBuildTransaction` 与 committed views |
+| Context/生命周期 | `include/tina/ui/UIContext.hpp` 的 Create、Window/节点归属、统计与六个 capability accessor；该头只 forward declare capability |
+| Tree/事务 | `include/tina/ui/UIAuthoring.hpp` 的 `UIRootBuilder`、root-scoped `UITreeUpdater` 与 `UIElementBuildTransaction` |
+| Style/Motion | `include/tina/ui/UIStyleController.hpp` 与 `UIMotionController.hpp` 的 Context-wide Theme/stylesheet/token 与动画能力；节点 mutation 仍走 updater |
+| Text/Input | `include/tina/ui/UITextSystem.hpp` 与 `UIInputRouter.hpp` 的 IME/text route、pointer/focus/flow/accessibility route |
+| Publication/快照 | `include/tina/ui/UIPublicationPipeline.hpp` 的原子 commit、committed views、caret 与 Glyph atlas publication |
 | Behavior | `include/tina/ui/UIBehavior.hpp`；Activate/Toggle/RangeInput/TextInput/Scroll/Select 使用私有 fixed-capacity side store，输入与具体视觉仍由 resolver 约束到私有 kind |
 | Style/Theme | `include/tina/ui/UIStyle.hpp`、`UITheme.hpp` 与属性 override/reset |
 | Visual profiles | `UISurface.hpp`、`UIDivider.hpp`、`UIBadge.hpp`、`UISwitch.hpp` + 对应 recipes；前三者复用普通 Element chrome，Switch 复用 Checkbox Toggle 状态机 |
@@ -169,7 +174,7 @@ scalar presentation owner 时才有无歧义起点；否则返回 `InvalidStyle`
   -> 更新 retained interaction/control state 并标 dirty
   -> Gameplay 只接收未被 UI consume/claim 的输入
   -> IGameState::updateUI 修改业务 UI
-  -> UIContext commit 一次候选 snapshots
+  -> UIPublicationPipeline commit 一次候选 snapshots
   -> 全部成功后原子替换 committed views
   -> UI-Render bridge 构建本帧 DisplayList
   -> 下一帧输入开始使用新 committed Hit
@@ -184,7 +189,7 @@ TextEdit 默认是单行；在 `UIElementDescriptor::textEditMultiline` 设置
 `UITextEditMultilineConfig::enabled` 后，LF、soft-wrap、固定容量 visual rows、垂直滚动、二维
 hit-test 以及 Up/Down/Home/End 共享同一份 committed layout。selection/caret 的存储仍使用 Unicode
 scalar offset，但编辑、删除、导航和替换位置会对齐无第三方依赖的 UAX #29 grapheme 子集；BiDi 与复杂
-shaping 暂不进入契约。`UIContext::committedTextInputCaretRect()` 复制最后一次成功 paint publication
+shaping 暂不进入契约。`context.publication().committedTextInputCaretRect()` 复制最后一次成功 paint publication
 中的 logical caret，Runtime coordinator 再交给 Platform backend。
 
 Windows GLFW adapter 将该 geometry 按当前 DPI 转成 IMM32 所需的 client pixels，并在 composition/candidate
@@ -455,7 +460,7 @@ ListView/TreeView owner 更新时仅额外刷新固定 materialized row pool；V
 item pool 与 column/row/cell pool，防止虚拟节点复用残留 Selected 样式。
 
 `PrimaryWindowUIRootBuilder` 已在 `GameStateEnter` 暴露同一 startup-only class/ColorToken 注册与
-literal/token-backed sheet 安装契约；`UIContext` 与 phase-scoped `PrimaryWindowUITreeUpdater` 还提供运行期
+literal/token-backed sheet 安装契约；`context.style()` 与 phase-scoped `PrimaryWindowUITreeUpdater` 还提供运行期
 `styleColorToken()` / `setStyleColorToken()`。运行期 token 更新使用固定容量 reverse-dependency 链：resolve
 cache 在每节点记录 winning ColorToken，destroy/local override 时 unlink，token setter 只遍历依赖节点做
 dirty-queue 预检与 Paint dirty，不再对 live tree 做两遍 `O(N)` resolve。`ui_style_state_v1` 已补齐
@@ -535,8 +540,8 @@ Anchor 至多一个 Tooltip，Context/per-Window 全局只允许一个 active To
 
 状态流固定为 `trigger intent -> pending deadline -> active -> dismiss deadline -> reshow window`。Hover 读取最后
 committed physical hit ancestry而不是 capture target；Focus 读取 committed keyboard focus；Manual 由
-`showTooltip()` 显式请求且立即替换同 Window 的 active Tooltip。`Core::IMonotonicClock` 通过 Context 既有
-`setMotionClock()` 注入，`commitLayout()` 在原帧阶段推进；超出 native steady-clock 范围的有限 delay 饱和而不
+`showTooltip()` 显式请求且立即替换同 Window 的 active Tooltip。`Core::IMonotonicClock` 通过
+`context.motion().setMotionClock()` 注入，`context.publication().commitLayout()` 在原帧阶段推进；超出 native steady-clock 范围的有限 delay 饱和而不
 wrap。Pointer Down、wheel、text/composition、anchor disable/visibility/destroy 与 Modal scope change 是 hard
 dismiss barrier。
 
@@ -547,9 +552,10 @@ commit rollback scratch；任何后续 candidate/capacity failure 都恢复 cloc
 metrics，不 heap fallback。Anchor 已有显式 semantics description 时保持作者值；否则 Tooltip text 复制为
 Anchor description/Windows HelpText，Tooltip 本身不发布 Focus/Activate 等 action。
 
-`UIContext`、`UITreeUpdater` 与 Runtime `PrimaryWindowUITreeUpdater` 共享
-`setTooltipAnchor/clearTooltipAnchor/tooltipAnchor/showTooltip/dismissTooltip/isTooltipOpen/tooltipMetrics`；Runtime
-版本继续受 phase epoch/lifetime 与 sticky error 约束。
+节点级 Tooltip mutation/query 只由 root-scoped `UITreeUpdater` 与 Runtime
+`PrimaryWindowUITreeUpdater` 暴露：`setTooltipAnchor/clearTooltipAnchor/tooltipAnchor/showTooltip/dismissTooltip/
+isTooltipOpen/tooltipMetrics`。`UIContext` 只拥有其固定容量状态，不再提供同名直连入口；Runtime 版本继续受
+phase epoch/lifetime 与 sticky error 约束。
 
 ### Menu / MenuItem：独立 transient overlay contract
 
@@ -589,8 +595,8 @@ SplitView 是独立的 retained built-in contract，但仍由现有 `UIContext` 
 恰好三个不同 direct Flow child，并且中间 child 必须是 `Splitter`；清理、destroy、generation reuse、root release 与
 commit capacity failure 保留旧关系/旧 metrics 或原子释放全部反向边。
 
-`Splitter` 复用 `Focusable | RangeInput`、现有 `armedSlider`/Pointer Capture、`routeRangeInputCommand()` 与
-`performAccessibilityAction(SetRangeValue)`，仅在 authoring/semantics 层区别于 Slider。它不拥有第二套 input/update loop、
+`Splitter` 复用 `Focusable | RangeInput`、现有 `armedSlider`/Pointer Capture、
+`context.input().routeRangeInputCommand()` 与 `context.input().performAccessibilityAction(SetRangeValue)`，仅在 authoring/semantics 层区别于 Slider。它不拥有第二套 input/update loop、
 focus/capture store、Icon/Image pipeline 或 GPU shader；SplitView 本身默认 Ignore hit，Splitter 才是 targetable。
 
 ### TabView / Tab：完整 pair relationship 与专属 Tab chrome
@@ -906,7 +912,7 @@ Image/Icon/NineSlice 实际展开的 image quad 数，`U` 为本帧唯一 `(reso
 
 | 场景 | 当前或目标工作量 | 明确禁止 |
 | --- | --- | --- |
-| clean `UIContext` commit | 当前只检查 dirty phase/viewport 后直接返回，UI commit 近似 `O(1)`；Render bridge 仍需按帧消费 committed paint，不能把整个 UI render 误写成 `O(1)` | clean frame 重新 Measure/Arrange、Hit、Paint snapshot 或 Style resolve |
+| clean `UIPublicationPipeline` commit | 当前只检查 dirty phase/viewport 后直接返回，UI commit 近似 `O(1)`；Render bridge 仍需按帧消费 committed paint，不能把整个 UI render 误写成 `O(1)` | clean frame 重新 Measure/Arrange、Hit、Paint snapshot 或 Style resolve |
 | 单节点 hover/pressed/focus paint 变化 | 当前不会触发 Layout/Hit；dirty paint cache 只重算变化节点，但 candidate 容量校验与 committed paint 组装仍线性遍历，整体按 `O(N + P)` 记录 | 将局部 paint 状态扩大为 Structure/Measure/Arrange dirty，或声称当前完整 publication 是 `O(D)` |
 | Component build | 目标为创建期 `O(C)`；node/text/canvas/behavior reservation 分别计数，commit 后只留下 Element 与 side-state slot | retained wrapper object、每节点 heap/vtable、每帧重放 recipe |
 | 单节点 Style resolve / ColorToken update | node-local state resolve 为 `O(R)` 的 `role + fixed class set + state mask` bucket lookup；token update 经固定 reverse-dependency 链为 `O(affected links)`，并以四个 `lastStyleTokenUpdate*` counter 记录依赖链工作量 | descendant/ancestor selector、运行时字符串 CSS、局部 state 扫描整棵树 |
@@ -926,7 +932,7 @@ Layout/Hit/Paint publication；
 
 即使 UI tree 是 clean，Image 的 packet-local ref/pin 也不能跨帧缓存，因此 Render bridge 每帧仍支付
 `O(Q + U + B)` 的投影/命令、唯一资源 lookup/pin 与 batch 成本；这与现有 Render bridge 每帧消费 committed
-paint 的事实一致，不会把 clean `UIContext` commit 变成 Layout/Paint rebuild。性能目标是同 scope 资源去重、
+paint 的事实一致，不会把 clean publication commit 变成 Layout/Paint rebuild。性能目标是同 scope 资源去重、
 固定容量零隐式分配和相邻 batch 合并，而不是宣称图片渲染零成本或把 FrameResourceRef 留到下一帧。
 
 ### 实现约束

@@ -27,14 +27,14 @@ using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
 
 [[nodiscard]] UI::UIRootOwner createRoot(UI::UIContext& context)
 {
-    auto rootResult = context.rootBuilder().createRoot();
+    auto rootResult = context.authoring().rootBuilder().createRoot();
     EXPECT_TRUE(rootResult.has_value()) << (rootResult ? "" : rootResult.error().message);
     return rootResult ? std::move(*rootResult) : UI::UIRootOwner{};
 }
 
 [[nodiscard]] UI::UITreeUpdater createUpdater(UI::UIContext& context, UI::UIRootOwner& root)
 {
-    auto updaterResult = context.treeUpdater(root);
+    auto updaterResult = context.authoring().treeUpdater(root);
     EXPECT_TRUE(updaterResult.has_value()) << (updaterResult ? "" : updaterResult.error().message);
     return updaterResult ? std::move(*updaterResult) : UI::UITreeUpdater{};
 }
@@ -162,9 +162,9 @@ TEST_F(UIElementTest, DescriptorInitializesLayoutTextStyleAndAlignmentBeforeFirs
     ASSERT_TRUE(enabled.has_value()) << enabled.error().message;
     EXPECT_FALSE(*enabled);
 
-    const Core::Status commit = context->commitLayout({.width = 320.0F, .height = 200.0F});
+    const Core::Status commit = context->publication().commitLayout({.width = 320.0F, .height = 200.0F});
     ASSERT_TRUE(commit.has_value()) << commit.error().message;
-    const UI::UICommittedLayoutEntry* entry = findLayoutEntry(context->committedLayout(), button);
+    const UI::UICommittedLayoutEntry* entry = findLayoutEntry(context->publication().committedLayout(), button);
     ASSERT_NE(entry, nullptr);
     EXPECT_FLOAT_EQ(entry->worldRect.width, 120.0F);
     EXPECT_FLOAT_EQ(entry->worldRect.height, 40.0F);
@@ -291,8 +291,8 @@ TEST_F(UIElementTest, DescriptorPublishesExplicitSemanticsThroughAutomaticAncest
     auto explicitlyUnnamed = updater.createElement(*automatic, emptyNameDescriptor);
     ASSERT_TRUE(explicitlyUnnamed.has_value()) << explicitlyUnnamed.error().message;
 
-    assertOk(context->commitLayout({.width = 480.0F, .height = 240.0F}));
-    const UI::UICommittedSemanticsView semantics = context->committedSemantics();
+    assertOk(context->publication().commitLayout({.width = 480.0F, .height = 240.0F}));
+    const UI::UICommittedSemanticsView semantics = context->publication().committedSemantics();
     ASSERT_EQ(semantics.size(), 3U);
 
     const UI::UISemanticsEntry* groupEntry = findSemanticsEntry(semantics, *group);
@@ -359,8 +359,8 @@ TEST_F(UIElementTest, MergeDescendantsCombinesEligibleNamesAndExcludeRemovesItsS
     auto hidden = updater.createElement(*excluded, UI::makeLabelElement("Hidden"));
     ASSERT_TRUE(hidden.has_value()) << hidden.error().message;
 
-    assertOk(context->commitLayout({.width = 320.0F, .height = 180.0F}));
-    const UI::UICommittedSemanticsView semantics = context->committedSemantics();
+    assertOk(context->publication().commitLayout({.width = 320.0F, .height = 180.0F}));
+    const UI::UICommittedSemanticsView semantics = context->publication().committedSemantics();
     ASSERT_EQ(semantics.size(), 1U);
     EXPECT_EQ(semantics.entries().front().node, *merged);
     EXPECT_EQ(semantics.entries().front().role, UI::UISemanticsRole::Group);
@@ -440,7 +440,7 @@ TEST_F(UIElementTest, StyleRoleAndPropertyOverridesTrackTheActiveThemeIndependen
     ASSERT_EQ(updater.styleRole(*button).value(), UI::UIStyleRoleId::ButtonDanger);
     EXPECT_EQ(
         updater.buttonPaint(*button).value(),
-        UI::makeButtonChrome(context->productTheme(), context->productTheme().colors.error).states);
+        UI::makeButtonChrome(context->style().productTheme(), context->style().productTheme().colors.error).states);
 
     const UI::UIButtonPaint localStates{
         .hoveredBackgroundColor = UI::rgb(0xAA2200),
@@ -450,14 +450,14 @@ TEST_F(UIElementTest, StyleRoleAndPropertyOverridesTrackTheActiveThemeIndependen
         .focusedBorderColor = UI::rgb(0xFFFFFF),
     };
     assertOk(updater.setButtonPaint(*button, localStates));
-    assertOk(context->setProductTheme(UI::makeModernDesktopTheme(UI::UIColorScheme::Light)));
+    assertOk(context->style().setProductTheme(UI::makeModernDesktopTheme(UI::UIColorScheme::Light)));
     EXPECT_EQ(updater.buttonPaint(*button).value(), localStates);
 
     assertOk(updater.clearOverride(*button, UI::UIStyleOverride::ButtonPaint));
     EXPECT_EQ(updater.styleRole(*button).value(), UI::UIStyleRoleId::ButtonDanger);
     EXPECT_EQ(
         updater.buttonPaint(*button).value(),
-        UI::makeButtonChrome(context->productTheme(), context->productTheme().colors.error).states);
+        UI::makeButtonChrome(context->style().productTheme(), context->style().productTheme().colors.error).states);
 }
 
 TEST_F(UIElementTest, StyleRoleCapacityFailureLeavesRoleAndChromeUntouched)
@@ -478,7 +478,7 @@ TEST_F(UIElementTest, StyleRoleCapacityFailureLeavesRoleAndChromeUntouched)
     auto second = updater.createElement(root.rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(first.has_value()) << first.error().message;
     ASSERT_TRUE(second.has_value()) << second.error().message;
-    assertOk(context->commitLayout({.width = 240.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 240.0F, .height = 120.0F}));
 
     const UI::UIButtonPaint originalSecondPaint = updater.buttonPaint(*second).value();
     UI::UIButtonPaint firstOverride = updater.buttonPaint(*first).value();
@@ -518,13 +518,13 @@ TEST_F(UIElementTest, BuildTransactionPublishesOnlyAfterSuccessfulBoundedConstru
               (UI::UIComponentBuildBudget{
                   .nodes = 2, .textBytes = 10, .behaviors = {.activate = 1}}));
 
-    const Core::Status structureWhileActive = context->commitStructure();
+    const Core::Status structureWhileActive = context->publication().commitStructure();
     ASSERT_FALSE(structureWhileActive.has_value());
     EXPECT_EQ(structureWhileActive.error().code, UI::UIErrorCode::BuildTransactionInProgress);
-    const Core::Status layoutWhileActive = context->commitLayout({.width = 320.0F, .height = 180.0F});
+    const Core::Status layoutWhileActive = context->publication().commitLayout({.width = 320.0F, .height = 180.0F});
     ASSERT_FALSE(layoutWhileActive.has_value());
     EXPECT_EQ(layoutWhileActive.error().code, UI::UIErrorCode::BuildTransactionInProgress);
-    EXPECT_TRUE(context->committedStructure().empty());
+    EXPECT_TRUE(context->publication().committedStructure().empty());
 
     auto label = transaction.createElement(transaction.rootNodeId(), UI::makeLabelElement("Title"));
     ASSERT_TRUE(label.has_value()) << label.error().message;
@@ -535,11 +535,11 @@ TEST_F(UIElementTest, BuildTransactionPublishesOnlyAfterSuccessfulBoundedConstru
     auto committedComponent = transaction.commit();
     ASSERT_TRUE(committedComponent.has_value()) << committedComponent.error().message;
     EXPECT_FALSE(transaction.isActive());
-    assertOk(context->commitLayout({.width = 320.0F, .height = 180.0F}));
-    EXPECT_EQ(context->committedStructure().size(), 4U);
-    EXPECT_NE(findLayoutEntry(context->committedLayout(), *committedComponent), nullptr);
-    EXPECT_NE(findLayoutEntry(context->committedLayout(), *label), nullptr);
-    EXPECT_NE(findHitEntry(context->committedHit(), *button), nullptr);
+    assertOk(context->publication().commitLayout({.width = 320.0F, .height = 180.0F}));
+    EXPECT_EQ(context->publication().committedStructure().size(), 4U);
+    EXPECT_NE(findLayoutEntry(context->publication().committedLayout(), *committedComponent), nullptr);
+    EXPECT_NE(findLayoutEntry(context->publication().committedLayout(), *label), nullptr);
+    EXPECT_NE(findHitEntry(context->publication().committedHit(), *button), nullptr);
 }
 
 TEST_F(UIElementTest, BuildTransactionFailureAndDestructionRollbackTheWholeSubtree)
@@ -621,8 +621,8 @@ TEST_F(UIElementTest, BuildTransactionFailureAndDestructionRollbackTheWholeSubtr
     EXPECT_EQ(context->statistics().rangeInputBehaviorHighWater, 1U);
     assertOk(updater.destroy(reusedRange));
     EXPECT_EQ(context->statistics().activeRangeInputBehaviorCount, 0U);
-    assertOk(context->commitLayout({.width = 160.0F, .height = 90.0F}));
-    EXPECT_EQ(context->committedStructure().size(), baselineNodes);
+    assertOk(context->publication().commitLayout({.width = 160.0F, .height = 90.0F}));
+    EXPECT_EQ(context->publication().committedStructure().size(), baselineNodes);
 }
 
 TEST_F(UIElementTest, BuildTransactionBudgetIncludesVirtualCollectionRowPools)
@@ -855,15 +855,15 @@ TEST_F(UIElementTest, CanvasCommandsAreCopiedAndPaintAfterTheElementBoxInLocalOr
         .bounds = {.x = 100.0F, .y = 100.0F, .width = 1.0F, .height = 1.0F},
         .color = UI::rgb(0x000000),
     };
-    assertOk(context->commitLayout({.width = 80.0F, .height = 60.0F}));
+    assertOk(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}));
 
-    const UI::UICommittedLayoutEntry* layout = findLayoutEntry(context->committedLayout(), *element);
+    const UI::UICommittedLayoutEntry* layout = findLayoutEntry(context->publication().committedLayout(), *element);
     ASSERT_NE(layout, nullptr);
     EXPECT_EQ(layout->worldRect, (UI::UILogicalRect{.x = 10.0F, .y = 15.0F, .width = 40.0F, .height = 30.0F}));
 
     std::array<const UI::UICommittedPaintEntry*, 3> elementPaints{};
     usize paintCount = 0;
-    for (const UI::UICommittedPaintEntry& entry : context->committedPaint())
+    for (const UI::UICommittedPaintEntry& entry : context->publication().committedPaint())
     {
         if (entry.node == *element && paintCount < elementPaints.size())
         {

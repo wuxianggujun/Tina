@@ -59,14 +59,14 @@ createContext(Platform::WindowId window,
 
 [[nodiscard]] UI::UIRootOwner createRoot(UI::UIContext& context)
 {
-    auto result = context.rootBuilder().createRoot();
+    auto result = context.authoring().rootBuilder().createRoot();
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UIRootOwner{};
 }
 
 [[nodiscard]] UI::UITreeUpdater createUpdater(UI::UIContext& context, UI::UIRootOwner& root)
 {
-    auto result = context.treeUpdater(root);
+    auto result = context.authoring().treeUpdater(root);
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UITreeUpdater{};
 }
@@ -299,7 +299,7 @@ TEST_F(UIScrollViewTest, AxesAndVisibilityResolveDeterministicViewportMetrics)
     ASSERT_TRUE(vertical.hasValue() && horizontal.hasValue() && both.hasValue() && hidden.hasValue() &&
                 always.hasValue());
 
-    assertOk(context->commitLayout({.width = 100.0F, .height = 500.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 500.0F}));
     const UI::UIScrollViewMetrics verticalMetrics = updater.scrollViewMetrics(vertical).value();
     EXPECT_EQ(verticalMetrics.viewportSize, (UI::UILogicalSize{.width = 90.0F, .height = 100.0F}));
     EXPECT_EQ(verticalMetrics.contentSize, (UI::UILogicalSize{.width = 90.0F, .height = 200.0F}));
@@ -339,24 +339,24 @@ TEST_F(UIScrollViewTest, OffsetClampsAndDescendantsUseTheCommittedViewportClip)
     ASSERT_TRUE(tree.scrollView.hasValue());
     assertOk(updater.setPointerHitPolicy(tree.content, UI::UIPointerHitPolicy::Targetable));
     assertOk(updater.setScrollViewOffset(tree.scrollView, {.x = 40.0F, .y = 60.0F}));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 200.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 200.0F}));
 
     const UI::UIScrollViewMetrics metrics = updater.scrollViewMetrics(tree.scrollView).value();
     EXPECT_EQ(metrics.offset, (UI::UIScrollOffset{.x = 0.0F, .y = 60.0F}));
-    const UI::UICommittedLayoutEntry* const content = findLayoutEntry(context->committedLayout(), tree.content);
+    const UI::UICommittedLayoutEntry* const content = findLayoutEntry(context->publication().committedLayout(), tree.content);
     ASSERT_NE(content, nullptr);
     EXPECT_EQ(content->worldRect, (UI::UILogicalRect{.x = 0.0F, .y = -60.0F, .width = 100.0F, .height = 200.0F}));
     EXPECT_EQ(content->effectiveClip, (UI::UILogicalRect{.x = 0.0F, .y = 0.0F, .width = 100.0F, .height = 100.0F}));
-    EXPECT_EQ(context->queryPointerHit({.x = 50.0F, .y = 50.0F}).target.node, tree.content);
-    EXPECT_FALSE(context->queryPointerHit({.x = 50.0F, .y = 110.0F}).hasTarget());
+    EXPECT_EQ(context->input().queryPointerHit({.x = 50.0F, .y = 50.0F}).target.node, tree.content);
+    EXPECT_FALSE(context->input().queryPointerHit({.x = 50.0F, .y = 110.0F}).hasTarget());
 
     assertOk(updater.setScrollViewOffset(tree.scrollView, {.x = 0.0F, .y = 1'000.0F}));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 200.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 200.0F}));
     EXPECT_EQ(updater.scrollViewMetrics(tree.scrollView).value().offset, (UI::UIScrollOffset{.x = 0.0F, .y = 100.0F}));
     EXPECT_EQ(updater.scrollViewOffset(tree.scrollView).value(), (UI::UIScrollOffset{.x = 0.0F, .y = 100.0F}));
 
     assertOk(updater.setLayoutStyle(tree.content, fixedSize(100.0F, 50.0F)));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 200.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 200.0F}));
     EXPECT_EQ(updater.scrollViewMetrics(tree.scrollView).value().offset, UI::UIScrollOffset{});
     EXPECT_EQ(updater.scrollViewOffset(tree.scrollView).value(), UI::UIScrollOffset{});
 }
@@ -385,9 +385,9 @@ TEST_F(UIScrollViewTest, WheelConsumesOnlyTheNearestScrollableAncestorThatCanMov
     };
     assertOk(updater.setScrollViewStyle(outer, hiddenVertical));
     assertOk(updater.setScrollViewStyle(inner, hiddenVertical));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
-    auto innerWheel = context->routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::Wheel, 1,
+    auto innerWheel = context->input().routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::Wheel, 1,
                                                               {.x = 20.0F, .y = 20.0F}, {.x = 0.0F, .y = -1.0F}));
     ASSERT_TRUE(innerWheel.has_value()) << (innerWheel ? "" : innerWheel.error().message);
     EXPECT_TRUE(innerWheel->consumed);
@@ -395,12 +395,12 @@ TEST_F(UIScrollViewTest, WheelConsumesOnlyTheNearestScrollableAncestorThatCanMov
     EXPECT_EQ(updater.scrollViewOffset(outer).value(), UI::UIScrollOffset{});
 
     assertOk(updater.setScrollViewOffset(inner, {.x = 0.0F, .y = 10'000.0F}));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     const float innerMaximum = updater.scrollViewMetrics(inner).value().maxOffsetY();
     ASSERT_GT(innerMaximum, 0.0F);
     EXPECT_FLOAT_EQ(updater.scrollViewOffset(inner).value().y, innerMaximum);
 
-    auto outerWheel = context->routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::Wheel, 2,
+    auto outerWheel = context->input().routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::Wheel, 2,
                                                               {.x = 20.0F, .y = 20.0F}, {.x = 0.0F, .y = -1.0F}));
     ASSERT_TRUE(outerWheel.has_value()) << (outerWheel ? "" : outerWheel.error().message);
     EXPECT_TRUE(outerWheel->consumed);
@@ -415,42 +415,42 @@ TEST_F(UIScrollViewTest, ThumbDragCapturesPointerPublishesActivePaintAndReleases
     ASSERT_TRUE(tree.scrollView.hasValue());
     const UI::UIScrollViewPaint paint = visibleScrollPaint();
     assertOk(updater.setScrollViewPaint(tree.scrollView, paint));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
-    ASSERT_EQ(context->committedPaint().size(), 2U);
-    EXPECT_EQ(context->committedPaint().entries()[0].worldRect,
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
+    ASSERT_EQ(context->publication().committedPaint().size(), 2U);
+    EXPECT_EQ(context->publication().committedPaint().entries()[0].worldRect,
               (UI::UILogicalRect{.x = 90.0F, .y = 0.0F, .width = 10.0F, .height = 100.0F}));
-    EXPECT_EQ(context->committedPaint().entries()[1].worldRect,
+    EXPECT_EQ(context->publication().committedPaint().entries()[1].worldRect,
               (UI::UILogicalRect{.x = 90.0F, .y = 0.0F, .width = 10.0F, .height = 50.0F}));
 
-    auto down = context->routePointerInput(
+    auto down = context->input().routePointerInput(
         pointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 1, {.x = 95.0F, .y = 20.0F}));
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
     EXPECT_TRUE(down->consumed);
-    EXPECT_EQ(context->pointerCapture(), tree.scrollView);
+    EXPECT_EQ(context->input().pointerCapture(), tree.scrollView);
     EXPECT_TRUE(updater.isScrollViewDragging(tree.scrollView).value());
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
-    ASSERT_EQ(context->committedPaint().size(), 2U);
-    EXPECT_EQ(context->committedPaint().entries()[1].solidFill,
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
+    ASSERT_EQ(context->publication().committedPaint().size(), 2U);
+    EXPECT_EQ(context->publication().committedPaint().entries()[1].solidFill,
               (UI::UIPremultipliedRgba8Color{.red = 240, .green = 180, .blue = 40, .alpha = 255}));
-    const UI::UISemanticsEntry* draggingSemantics = findSemanticsEntry(context->committedSemantics(), tree.scrollView);
+    const UI::UISemanticsEntry* draggingSemantics = findSemanticsEntry(context->publication().committedSemantics(), tree.scrollView);
     ASSERT_NE(draggingSemantics, nullptr);
     EXPECT_TRUE(draggingSemantics->focused);
 
-    auto move = context->routePointerInput(
+    auto move = context->input().routePointerInput(
         pointerInput(window, UI::UIRoutedPointerEventKind::Move, 2, {.x = 95.0F, .y = 75.0F}));
     ASSERT_TRUE(move.has_value()) << (move ? "" : move.error().message);
     EXPECT_FLOAT_EQ(updater.scrollViewOffset(tree.scrollView).value().y, 100.0F);
 
-    auto up = context->routePointerInput(
+    auto up = context->input().routePointerInput(
         pointerInput(window, UI::UIRoutedPointerEventKind::ButtonUp, 3, {.x = 95.0F, .y = 75.0F}));
     ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
     EXPECT_TRUE(up->consumed);
-    EXPECT_FALSE(context->pointerCapture().hasValue());
+    EXPECT_FALSE(context->input().pointerCapture().hasValue());
     EXPECT_FALSE(updater.isScrollViewDragging(tree.scrollView).value());
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
-    EXPECT_EQ(context->committedPaint().entries()[1].solidFill,
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
+    EXPECT_EQ(context->publication().committedPaint().entries()[1].solidFill,
               (UI::UIPremultipliedRgba8Color{.red = 80, .green = 100, .blue = 120, .alpha = 255}));
-    const UI::UISemanticsEntry* releasedSemantics = findSemanticsEntry(context->committedSemantics(), tree.scrollView);
+    const UI::UISemanticsEntry* releasedSemantics = findSemanticsEntry(context->publication().committedSemantics(), tree.scrollView);
     ASSERT_NE(releasedSemantics, nullptr);
     EXPECT_EQ(releasedSemantics->role, UI::UISemanticsRole::ScrollView);
     EXPECT_TRUE(releasedSemantics->hasRange);
@@ -466,21 +466,21 @@ TEST_F(UIScrollViewTest, TrackPressPagesByOneViewportAndCapturesUntilUp)
     const VerticalScrollTree tree = createVerticalScrollTree(updater, root.rootNodeId());
     ASSERT_TRUE(tree.scrollView.hasValue());
     assertOk(updater.setScrollViewPaint(tree.scrollView, visibleScrollPaint()));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
-    auto down = context->routePointerInput(
+    auto down = context->input().routePointerInput(
         pointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 1, {.x = 95.0F, .y = 75.0F}));
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
     EXPECT_TRUE(down->consumed);
-    EXPECT_EQ(context->pointerCapture(), tree.scrollView);
+    EXPECT_EQ(context->input().pointerCapture(), tree.scrollView);
     EXPECT_FALSE(updater.isScrollViewDragging(tree.scrollView).value());
     EXPECT_FLOAT_EQ(updater.scrollViewOffset(tree.scrollView).value().y, 100.0F);
 
-    auto up = context->routePointerInput(
+    auto up = context->input().routePointerInput(
         pointerInput(window, UI::UIRoutedPointerEventKind::ButtonUp, 2, {.x = 95.0F, .y = 75.0F}));
     ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
     EXPECT_TRUE(up->consumed);
-    EXPECT_FALSE(context->pointerCapture().hasValue());
+    EXPECT_FALSE(context->input().pointerCapture().hasValue());
 }
 
 TEST_F(UIScrollViewTest, CancelDisableModalAndDestroyClearThumbCapture)
@@ -489,42 +489,42 @@ TEST_F(UIScrollViewTest, CancelDisableModalAndDestroyClearThumbCapture)
     const VerticalScrollTree tree = createVerticalScrollTree(updater, root.rootNodeId());
     ASSERT_TRUE(tree.scrollView.hasValue());
     assertOk(updater.setScrollViewPaint(tree.scrollView, visibleScrollPaint()));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
     const auto arm = [&](u64 sequence) {
-        auto down = context->routePointerInput(
+        auto down = context->input().routePointerInput(
             pointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, sequence, {.x = 95.0F, .y = 20.0F}));
         EXPECT_TRUE(down.has_value()) << (down ? "" : down.error().message);
-        EXPECT_EQ(context->pointerCapture(), tree.scrollView);
+        EXPECT_EQ(context->input().pointerCapture(), tree.scrollView);
         EXPECT_TRUE(updater.isScrollViewDragging(tree.scrollView).value());
     };
 
     arm(1);
-    assertOk(context->cancelPointerInteraction(window));
-    EXPECT_FALSE(context->pointerCapture().hasValue());
+    assertOk(context->input().cancelPointerInteraction(window));
+    EXPECT_FALSE(context->input().pointerCapture().hasValue());
     EXPECT_FALSE(updater.isScrollViewDragging(tree.scrollView).value());
 
     arm(2);
     assertOk(updater.setEnabled(tree.scrollView, false));
-    EXPECT_FALSE(context->pointerCapture().hasValue());
+    EXPECT_FALSE(context->input().pointerCapture().hasValue());
     EXPECT_FALSE(updater.isScrollViewDragging(tree.scrollView).value());
     assertOk(updater.setEnabled(tree.scrollView, true));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
     arm(3);
     auto modalResult = updater.createElement(root.rootNodeId(), UI::makeModalElement());
     ASSERT_TRUE(modalResult.has_value()) << modalResult.error().message;
     assertOk(updater.setLayoutStyle(*modalResult, fixedSize(100.0F, 100.0F)));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
-    EXPECT_EQ(context->activeModal(), *modalResult);
-    EXPECT_FALSE(context->pointerCapture().hasValue());
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
+    EXPECT_EQ(context->input().activeModal(), *modalResult);
+    EXPECT_FALSE(context->input().pointerCapture().hasValue());
     EXPECT_FALSE(updater.isScrollViewDragging(tree.scrollView).value());
 
     assertOk(updater.destroy(*modalResult));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     arm(4);
     assertOk(updater.destroy(tree.scrollView));
-    EXPECT_FALSE(context->pointerCapture().hasValue());
+    EXPECT_FALSE(context->input().pointerCapture().hasValue());
     EXPECT_FALSE(updater.isAlive(tree.scrollView));
 }
 
@@ -545,10 +545,10 @@ TEST_F(UIScrollViewTest, PaintCapacityFailurePreservesPublishedMetricsAtomically
     ASSERT_TRUE(tree.scrollView.hasValue());
     assertOk(limitedUpdater.setBoxPaint(tree.scrollView, solidFill(1, 2, 3)));
     assertOk(limitedUpdater.setScrollViewPaint(tree.scrollView, visibleScrollPaint()));
-    assertOk(limitedContext->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(limitedContext->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     const UI::UIScrollViewMetrics oldMetrics = limitedUpdater.scrollViewMetrics(tree.scrollView).value();
-    const u64 oldLayoutRevision = limitedContext->committedLayout().layoutRevision();
-    ASSERT_EQ(limitedContext->committedPaint().size(), 1U);
+    const u64 oldLayoutRevision = limitedContext->publication().committedLayout().layoutRevision();
+    ASSERT_EQ(limitedContext->publication().committedPaint().size(), 1U);
 
     assertOk(limitedUpdater.setScrollViewOffset(tree.scrollView, {.x = 0.0F, .y = 50.0F}));
     assertOk(
@@ -557,10 +557,10 @@ TEST_F(UIScrollViewTest, PaintCapacityFailurePreservesPublishedMetricsAtomically
                                                                .scrollBarVisibility = UI::UIScrollBarVisibility::Auto,
                                                                .wheelStep = 20.0F,
                                                            }));
-    const Core::Status overflow = limitedContext->commitLayout({.width = 100.0F, .height = 100.0F});
+    const Core::Status overflow = limitedContext->publication().commitLayout({.width = 100.0F, .height = 100.0F});
     ASSERT_FALSE(overflow.has_value());
     EXPECT_EQ(overflow.error().code, UI::UIErrorCode::CapacityExceeded);
-    EXPECT_EQ(limitedContext->committedLayout().layoutRevision(), oldLayoutRevision);
+    EXPECT_EQ(limitedContext->publication().committedLayout().layoutRevision(), oldLayoutRevision);
     EXPECT_EQ(limitedUpdater.scrollViewMetrics(tree.scrollView).value(), oldMetrics);
     EXPECT_EQ(limitedUpdater.scrollViewOffset(tree.scrollView).value(), (UI::UIScrollOffset{.x = 0.0F, .y = 50.0F}));
     EXPECT_TRUE(limitedContext->statistics().layoutDirty);
@@ -571,7 +571,7 @@ TEST_F(UIScrollViewTest, PaintCapacityFailurePreservesPublishedMetricsAtomically
                                                                .scrollBarVisibility = UI::UIScrollBarVisibility::Hidden,
                                                                .wheelStep = 20.0F,
                                                            }));
-    assertOk(limitedContext->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(limitedContext->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     EXPECT_EQ(limitedUpdater.scrollViewMetrics(tree.scrollView).value().offset,
               (UI::UIScrollOffset{.x = 0.0F, .y = 50.0F}));
 }
@@ -608,22 +608,22 @@ TEST_F(UIScrollViewTest, SemanticsTextCapacityFailurePreservesPublishedMetricsAt
                                                                     .scrollBarVisibility = UI::UIScrollBarVisibility::Hidden,
                                                                     .wheelStep = 20.0F,
                                                                 }));
-    assertOk(limitedContext->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(limitedContext->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     const UI::UIScrollViewMetrics oldMetrics = limitedUpdater.scrollViewMetrics(tree.scrollView).value();
-    const u64 oldSemanticsRevision = limitedContext->committedSemantics().semanticsRevision();
+    const u64 oldSemanticsRevision = limitedContext->publication().committedSemantics().semanticsRevision();
 
     assertOk(limitedUpdater.setScrollViewOffset(tree.scrollView, {.x = 0.0F, .y = 50.0F}));
     auto labelResult = limitedUpdater.createElement(tree.content, UI::makeLabelElement("b"));
     ASSERT_TRUE(labelResult.has_value()) << labelResult.error().message;
     assertOk(limitedUpdater.setLayoutStyle(*labelResult, fixedSize(10.0F, 10.0F)));
-    const Core::Status overflow = limitedContext->commitLayout({.width = 100.0F, .height = 100.0F});
+    const Core::Status overflow = limitedContext->publication().commitLayout({.width = 100.0F, .height = 100.0F});
     ASSERT_FALSE(overflow.has_value());
     EXPECT_EQ(overflow.error().code, UI::UIErrorCode::CapacityExceeded);
-    EXPECT_EQ(limitedContext->committedSemantics().semanticsRevision(), oldSemanticsRevision);
+    EXPECT_EQ(limitedContext->publication().committedSemantics().semanticsRevision(), oldSemanticsRevision);
     EXPECT_EQ(limitedUpdater.scrollViewMetrics(tree.scrollView).value(), oldMetrics);
 
     assertOk(limitedUpdater.destroy(*labelResult));
-    assertOk(limitedContext->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(limitedContext->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     EXPECT_EQ(limitedUpdater.scrollViewMetrics(tree.scrollView).value().offset,
               (UI::UIScrollOffset{.x = 0.0F, .y = 50.0F}));
 }
@@ -644,12 +644,12 @@ TEST(UIScrollViewStandaloneTest, ThemeInheritanceAndLocalPaintOverrideRemainInde
     ASSERT_TRUE(scrollResult.has_value()) << scrollResult.error().message;
 
     EXPECT_EQ(updater.scrollViewPaint(*scrollResult).value(), UI::makeScrollViewPaint(UI::makeModernDesktopTheme()));
-    assertOk(context->setProductTheme(UI::makeModernDesktopTheme(UI::UIColorScheme::Light)));
+    assertOk(context->style().setProductTheme(UI::makeModernDesktopTheme(UI::UIColorScheme::Light)));
     EXPECT_EQ(updater.scrollViewPaint(*scrollResult).value(), UI::makeScrollViewPaint(UI::makeModernDesktopTheme(UI::UIColorScheme::Light)));
 
     const UI::UIScrollViewPaint localPaint = visibleScrollPaint();
     assertOk(updater.setScrollViewPaint(*scrollResult, localPaint));
-    assertOk(context->setProductTheme(UI::makeModernDesktopTheme()));
+    assertOk(context->style().setProductTheme(UI::makeModernDesktopTheme()));
     EXPECT_EQ(updater.scrollViewPaint(*scrollResult).value(), localPaint);
 }
 
@@ -676,18 +676,18 @@ TEST(UIScrollViewStandaloneTest, WheelAndCommitRemainAllocationFreeAfterWarmup)
         createVerticalScrollTree(updater, root.rootNodeId(), UI::UIScrollBarVisibility::Hidden);
     ASSERT_TRUE(tree.scrollView.hasValue());
     assertOk(updater.setScrollViewOffset(tree.scrollView, {.x = 0.0F, .y = 50.0F}));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     const usize allocationCount = resource.allocationCount();
 
     for (u64 routeIndex = 0; routeIndex < 200; ++routeIndex)
     {
         const float wheelDelta = routeIndex % 2 == 0 ? -1.0F : 1.0F;
         auto routed =
-            context->routePointerInput(pointerInput(*windowResult, UI::UIRoutedPointerEventKind::Wheel, routeIndex + 1,
+            context->input().routePointerInput(pointerInput(*windowResult, UI::UIRoutedPointerEventKind::Wheel, routeIndex + 1,
                                                     {.x = 50.0F, .y = 50.0F}, {.x = 0.0F, .y = wheelDelta}));
         ASSERT_TRUE(routed.has_value()) << (routed ? "" : routed.error().message);
         EXPECT_TRUE(routed->consumed);
-        assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+        assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     }
     EXPECT_EQ(resource.allocationCount(), allocationCount);
 }

@@ -36,28 +36,28 @@ using GamepadPool = Core::GenerationPool<int, Platform::GamepadRegistryTag>;
 
 [[nodiscard]] UI::UIRootOwner createRoot(UI::UIContext& context)
 {
-    auto result = context.rootBuilder().createRoot();
+    auto result = context.authoring().rootBuilder().createRoot();
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UIRootOwner{};
 }
 
 [[nodiscard]] UI::UINodeId createCheckbox(UI::UIContext& context, UI::UINodeId parent)
 {
-    auto result = context.rootBuilder().createElement(parent, UI::makeCheckboxElement());
+    auto result = context.authoring().rootBuilder().createElement(parent, UI::makeCheckboxElement());
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? *result : UI::UINodeId{};
 }
 
 [[nodiscard]] UI::UINodeId createRadioButton(UI::UIContext& context, UI::UINodeId parent)
 {
-    auto result = context.rootBuilder().createElement(parent, UI::makeRadioButtonElement());
+    auto result = context.authoring().rootBuilder().createElement(parent, UI::makeRadioButtonElement());
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? *result : UI::UINodeId{};
 }
 
 [[nodiscard]] UI::UITreeUpdater createUpdater(UI::UIContext& context, UI::UIRootOwner& root)
 {
-    auto result = context.treeUpdater(root);
+    auto result = context.authoring().treeUpdater(root);
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UITreeUpdater{};
 }
@@ -128,7 +128,7 @@ void assertOk(Core::Status status)
 
 void publishLayout(UI::UIContext& context, float width = 100.0F, float height = 100.0F)
 {
-    assertOk(context.commitLayout(UI::UILogicalSize{.width = width, .height = height}));
+    assertOk(context.publication().commitLayout(UI::UILogicalSize{.width = width, .height = height}));
 }
 
 TEST(UICheckboxTest, CapabilitiesAreTargetableAndDefaultUnchecked)
@@ -148,8 +148,8 @@ TEST(UICheckboxTest, CapabilitiesAreTargetableAndDefaultUnchecked)
     ASSERT_TRUE(checked.has_value()) << (checked ? "" : checked.error().message);
     EXPECT_FALSE(*checked);
 
-    assertOk(context->commitLayout({.width = 160.0F, .height = 80.0F}));
-    const auto hit = context->committedHit();
+    assertOk(context->publication().commitLayout({.width = 160.0F, .height = 80.0F}));
+    const auto hit = context->publication().committedHit();
     const auto entry = std::ranges::find_if(
         hit, [checkbox](const UI::UICommittedHitEntry& candidate) { return candidate.node == checkbox; });
     ASSERT_NE(entry, hit.end());
@@ -175,7 +175,7 @@ TEST(UICheckboxTest, HoverDirtyCapacityFailurePreservesStateAtomically)
     ASSERT_TRUE(root.hasValue());
     const UI::UINodeId checkbox =
         createCheckbox(*context, root.rootNodeId());
-    auto blocker = context->rootBuilder().createElement(root.rootNodeId(), UI::makePanelElement());
+    auto blocker = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(checkbox.hasValue());
     ASSERT_TRUE(blocker.has_value());
     auto updater = createUpdater(*context, root);
@@ -187,16 +187,16 @@ TEST(UICheckboxTest, HoverDirtyCapacityFailurePreservesStateAtomically)
             .hoveredIndicatorColor = {.red = 40, .green = 50, .blue = 60, .alpha = 255},
         }));
     publishLayout(*context);
-    ASSERT_EQ(context->committedPaint().size(), 1U);
+    ASSERT_EQ(context->publication().committedPaint().size(), 1U);
     EXPECT_EQ(
-        context->committedPaint().entries()[0].solidFill,
+        context->publication().committedPaint().entries()[0].solidFill,
         (UI::UIPremultipliedRgba8Color{10, 20, 30, 255}));
 
     assertOk(updater.setBoxPaint(root.rootNodeId(), solidFill(1, 2, 3)));
     assertOk(updater.setBoxPaint(*blocker, solidFill(4, 5, 6)));
     ASSERT_EQ(context->statistics().dirtyQueuePendingCount, 2U);
 
-    auto moved = context->routePointerInput(makePointerInput(
+    auto moved = context->input().routePointerInput(makePointerInput(
         window,
         UI::UIRoutedPointerEventKind::Move,
         1));
@@ -205,8 +205,8 @@ TEST(UICheckboxTest, HoverDirtyCapacityFailurePreservesStateAtomically)
     EXPECT_EQ(context->statistics().dirtyQueuePendingCount, 2U);
 
     publishLayout(*context);
-    ASSERT_EQ(context->committedPaint().size(), 3U);
-    const UI::UICommittedPaintView committedPaint = context->committedPaint();
+    ASSERT_EQ(context->publication().committedPaint().size(), 3U);
+    const UI::UICommittedPaintView committedPaint = context->publication().committedPaint();
     const auto checkboxPaint = std::ranges::find_if(
         committedPaint.entries(),
         [checkbox](const UI::UICommittedPaintEntry& entry) { return entry.node == checkbox; });
@@ -243,27 +243,27 @@ TEST(UICheckboxTest, HoveredFocusedPressedAndDisabledStatesResolveCommittedOuter
         }));
 
     publishLayout(*context);
-    ASSERT_EQ(context->committedPaint().size(), 1U);
+    ASSERT_EQ(context->publication().committedPaint().size(), 1U);
     EXPECT_EQ(
-        context->committedPaint().entries()[0].solidFill,
+        context->publication().committedPaint().entries()[0].solidFill,
         (UI::UIPremultipliedRgba8Color{10, 20, 30, 255}));
 
-    assertOk(context->requestFocus(checkbox));
+    assertOk(context->input().requestFocus(checkbox));
     publishLayout(*context);
     EXPECT_EQ(
-        context->committedPaint().entries()[0].solidFill,
+        context->publication().committedPaint().entries()[0].solidFill,
         (UI::UIPremultipliedRgba8Color{10, 20, 30, 255}));
 
-    auto keyboardNavigation = context->routeFocusNavigation(
+    auto keyboardNavigation = context->input().routeFocusNavigation(
         UI::UIFocusNavigationDirection::Right, true,
         UI::UIInputModality::Keyboard);
     ASSERT_TRUE(keyboardNavigation.has_value()) << keyboardNavigation.error().message;
     publishLayout(*context);
     EXPECT_EQ(
-        context->committedPaint().entries()[0].solidFill,
+        context->publication().committedPaint().entries()[0].solidFill,
         (UI::UIPremultipliedRgba8Color{70, 80, 90, 255}));
 
-    auto movedInside = context->routePointerInput(makePointerInput(
+    auto movedInside = context->input().routePointerInput(makePointerInput(
         window,
         UI::UIRoutedPointerEventKind::Move,
         1,
@@ -271,10 +271,10 @@ TEST(UICheckboxTest, HoveredFocusedPressedAndDisabledStatesResolveCommittedOuter
     ASSERT_TRUE(movedInside.has_value()) << (movedInside ? "" : movedInside.error().message);
     publishLayout(*context);
     EXPECT_EQ(
-        context->committedPaint().entries()[0].solidFill,
+        context->publication().committedPaint().entries()[0].solidFill,
         (UI::UIPremultipliedRgba8Color{40, 50, 60, 255}));
 
-    auto down = context->routePointerInput(makePointerInput(
+    auto down = context->input().routePointerInput(makePointerInput(
         window,
         UI::UIRoutedPointerEventKind::ButtonDown,
         2,
@@ -282,38 +282,38 @@ TEST(UICheckboxTest, HoveredFocusedPressedAndDisabledStatesResolveCommittedOuter
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
     publishLayout(*context);
     EXPECT_EQ(
-        context->committedPaint().entries()[0].solidFill,
+        context->publication().committedPaint().entries()[0].solidFill,
         (UI::UIPremultipliedRgba8Color{100, 110, 120, 255}));
 
-    auto up = context->routePointerInput(makePointerInput(
+    auto up = context->input().routePointerInput(makePointerInput(
         window,
         UI::UIRoutedPointerEventKind::ButtonUp,
         3,
         {.x = 10.0F, .y = 10.0F}));
     ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
     publishLayout(*context);
-    ASSERT_EQ(context->committedPaint().size(), 1U);
+    ASSERT_EQ(context->publication().committedPaint().size(), 1U);
     EXPECT_EQ(
-        context->committedPaint().entries()[0].solidFill,
+        context->publication().committedPaint().entries()[0].solidFill,
         (UI::UIPremultipliedRgba8Color{40, 50, 60, 255}));
 
-    auto movedOutside = context->routePointerInput(makePointerInput(
+    auto movedOutside = context->input().routePointerInput(makePointerInput(
         window,
         UI::UIRoutedPointerEventKind::Move,
         4,
         {.x = 80.0F, .y = 80.0F}));
     ASSERT_TRUE(movedOutside.has_value()) << (movedOutside ? "" : movedOutside.error().message);
     publishLayout(*context);
-    EXPECT_EQ(context->defaultActionFocus(), checkbox);
+    EXPECT_EQ(context->input().defaultActionFocus(), checkbox);
     EXPECT_EQ(
-        context->committedPaint().entries()[0].solidFill,
+        context->publication().committedPaint().entries()[0].solidFill,
         (UI::UIPremultipliedRgba8Color{10, 20, 30, 255}));
 
     assertOk(updater.setEnabled(checkbox, false));
-    EXPECT_FALSE(context->defaultActionFocus().hasValue());
+    EXPECT_FALSE(context->input().defaultActionFocus().hasValue());
     publishLayout(*context);
     EXPECT_EQ(
-        context->committedPaint().entries()[0].solidFill,
+        context->publication().committedPaint().entries()[0].solidFill,
         (UI::UIPremultipliedRgba8Color{5, 11, 16, 140}));
 }
 
@@ -340,10 +340,10 @@ TEST(UICheckboxTest, PrimaryClickTogglesAndFiresAction)
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(100.0F, 100.0F)));
     publishLayout(*context);
 
-    auto down = context->routePointerInput(
+    auto down = context->input().routePointerInput(
         makePointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 1, {.x = 10.0F, .y = 10.0F}));
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
-    auto up = context->routePointerInput(
+    auto up = context->input().routePointerInput(
         makePointerInput(window, UI::UIRoutedPointerEventKind::ButtonUp, 2, {.x = 10.0F, .y = 10.0F}));
     ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
 
@@ -352,10 +352,10 @@ TEST(UICheckboxTest, PrimaryClickTogglesAndFiresAction)
     ASSERT_TRUE(checked.has_value());
     EXPECT_TRUE(*checked);
 
-    auto down2 = context->routePointerInput(
+    auto down2 = context->input().routePointerInput(
         makePointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 3, {.x = 10.0F, .y = 10.0F}));
     ASSERT_TRUE(down2.has_value());
-    auto up2 = context->routePointerInput(
+    auto up2 = context->input().routePointerInput(
         makePointerInput(window, UI::UIRoutedPointerEventKind::ButtonUp, 4, {.x = 10.0F, .y = 10.0F}));
     ASSERT_TRUE(up2.has_value());
     EXPECT_EQ(activations, 2);
@@ -400,22 +400,22 @@ TEST(UICheckboxTest, CheckedIndicatorFollowsPointerStateAndSemantics)
             }}));
     publishLayout(*context);
 
-    const UI::UICommittedPaintView uncheckedPaint = context->committedPaint();
+    const UI::UICommittedPaintView uncheckedPaint = context->publication().committedPaint();
     ASSERT_EQ(uncheckedPaint.size(), 1U);
     EXPECT_EQ(uncheckedPaint.entries()[0].node, checkbox);
     const u64 uncheckedPaintRevision = uncheckedPaint.paintRevision();
     const UI::UISemanticsEntry* uncheckedSemantics =
-        findSemanticsEntry(context->committedSemantics(), checkbox);
+        findSemanticsEntry(context->publication().committedSemantics(), checkbox);
     ASSERT_NE(uncheckedSemantics, nullptr);
     EXPECT_FALSE(uncheckedSemantics->checked);
 
-    auto down = context->routePointerInput(makePointerInput(
+    auto down = context->input().routePointerInput(makePointerInput(
         window,
         UI::UIRoutedPointerEventKind::ButtonDown,
         1));
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
     EXPECT_TRUE(down->consumed);
-    auto up = context->routePointerInput(makePointerInput(
+    auto up = context->input().routePointerInput(makePointerInput(
         window,
         UI::UIRoutedPointerEventKind::ButtonUp,
         2));
@@ -425,11 +425,11 @@ TEST(UICheckboxTest, CheckedIndicatorFollowsPointerStateAndSemantics)
     auto checked = updater.isChecked(checkbox);
     ASSERT_TRUE(checked.has_value());
     EXPECT_TRUE(*checked);
-    EXPECT_EQ(context->committedPaint().paintRevision(), uncheckedPaintRevision);
-    ASSERT_EQ(context->committedPaint().size(), 1U);
+    EXPECT_EQ(context->publication().committedPaint().paintRevision(), uncheckedPaintRevision);
+    ASSERT_EQ(context->publication().committedPaint().size(), 1U);
 
     publishLayout(*context);
-    const UI::UICommittedPaintView checkedPaint = context->committedPaint();
+    const UI::UICommittedPaintView checkedPaint = context->publication().committedPaint();
     ASSERT_EQ(checkedPaint.size(), 2U);
     EXPECT_EQ(checkedPaint.paintRevision(), uncheckedPaintRevision + 1U);
     const UI::UICommittedPaintEntry& track = checkedPaint.entries()[0];
@@ -456,26 +456,26 @@ TEST(UICheckboxTest, CheckedIndicatorFollowsPointerStateAndSemantics)
             .alpha = 128,
         }));
     const UI::UISemanticsEntry* checkedSemantics =
-        findSemanticsEntry(context->committedSemantics(), checkbox);
+        findSemanticsEntry(context->publication().committedSemantics(), checkbox);
     ASSERT_NE(checkedSemantics, nullptr);
     EXPECT_TRUE(checkedSemantics->checked);
     EXPECT_TRUE(checkedSemantics->focused);
 
-    down = context->routePointerInput(makePointerInput(
+    down = context->input().routePointerInput(makePointerInput(
         window,
         UI::UIRoutedPointerEventKind::ButtonDown,
         3));
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
-    up = context->routePointerInput(makePointerInput(
+    up = context->input().routePointerInput(makePointerInput(
         window,
         UI::UIRoutedPointerEventKind::ButtonUp,
         4));
     ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
     EXPECT_EQ(activations, 2);
     publishLayout(*context);
-    ASSERT_EQ(context->committedPaint().size(), 1U);
+    ASSERT_EQ(context->publication().committedPaint().size(), 1U);
     const UI::UISemanticsEntry* toggledOffSemantics =
-        findSemanticsEntry(context->committedSemantics(), checkbox);
+        findSemanticsEntry(context->publication().committedSemantics(), checkbox);
     ASSERT_NE(toggledOffSemantics, nullptr);
     EXPECT_FALSE(toggledOffSemantics->checked);
 }
@@ -504,13 +504,13 @@ TEST(UICheckboxTest, PrimaryUpOutsideDoesNotToggle)
     publishLayout(*context);
 
     {
-        auto down = context->routePointerInput(
+        auto down = context->input().routePointerInput(
             makePointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 1, {.x = 10.0F, .y = 10.0F}));
         ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
     }
     // Up far outside.
     {
-        auto up = context->routePointerInput(
+        auto up = context->input().routePointerInput(
             makePointerInput(window, UI::UIRoutedPointerEventKind::ButtonUp, 2, {.x = 90.0F, .y = 90.0F}));
         ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
     }
@@ -530,7 +530,7 @@ TEST(UICheckboxTest, SetCheckedSilentAndRejectsWrongKind)
     auto root = createRoot(*context);
     ASSERT_TRUE(root.hasValue());
     auto checkbox = createCheckbox(*context, root.rootNodeId());
-    auto button = context->rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement());
+    auto button = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(checkbox.hasValue());
     ASSERT_TRUE(button.has_value());
 
@@ -621,9 +621,9 @@ TEST(UICheckboxTest, PaintCapacityFailurePreservesPublishedSnapshotsAtomically)
         }));
     publishLayout(*context, 40.0F, 40.0F);
 
-    const UI::UICommittedPaintView oldPaint = context->committedPaint();
+    const UI::UICommittedPaintView oldPaint = context->publication().committedPaint();
     const UI::UICommittedSemanticsView oldSemantics =
-        context->committedSemantics();
+        context->publication().committedSemantics();
     ASSERT_EQ(oldPaint.size(), 1U);
     ASSERT_EQ(oldSemantics.size(), 1U);
     const UI::UISemanticsEntry* oldCheckboxSemantics =
@@ -635,21 +635,21 @@ TEST(UICheckboxTest, PaintCapacityFailurePreservesPublishedSnapshotsAtomically)
 
     assertOk(updater.setChecked(checkbox, true));
     const Core::Status rejected =
-        context->commitLayout({.width = 40.0F, .height = 40.0F});
+        context->publication().commitLayout({.width = 40.0F, .height = 40.0F});
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::CapacityExceeded);
 
     auto checked = updater.isChecked(checkbox);
     ASSERT_TRUE(checked.has_value());
     EXPECT_TRUE(*checked);
-    EXPECT_EQ(context->committedPaint().entries().data(), oldPaintData);
-    EXPECT_EQ(context->committedPaint().paintRevision(), oldPaint.paintRevision());
-    EXPECT_EQ(context->committedSemantics().entries().data(), oldSemanticsData);
+    EXPECT_EQ(context->publication().committedPaint().entries().data(), oldPaintData);
+    EXPECT_EQ(context->publication().committedPaint().paintRevision(), oldPaint.paintRevision());
+    EXPECT_EQ(context->publication().committedSemantics().entries().data(), oldSemanticsData);
     EXPECT_EQ(
-        context->committedSemantics().semanticsRevision(),
+        context->publication().committedSemantics().semanticsRevision(),
         oldSemantics.semanticsRevision());
     const UI::UISemanticsEntry* stillUnchecked =
-        findSemanticsEntry(context->committedSemantics(), checkbox);
+        findSemanticsEntry(context->publication().committedSemantics(), checkbox);
     ASSERT_NE(stillUnchecked, nullptr);
     EXPECT_FALSE(stillUnchecked->checked);
     EXPECT_TRUE(context->statistics().paintDirty);
@@ -657,9 +657,9 @@ TEST(UICheckboxTest, PaintCapacityFailurePreservesPublishedSnapshotsAtomically)
 
     assertOk(updater.setChecked(checkbox, false));
     publishLayout(*context, 40.0F, 40.0F);
-    ASSERT_EQ(context->committedPaint().size(), 1U);
+    ASSERT_EQ(context->publication().committedPaint().size(), 1U);
     const UI::UISemanticsEntry* recoveredSemantics =
-        findSemanticsEntry(context->committedSemantics(), checkbox);
+        findSemanticsEntry(context->publication().committedSemantics(), checkbox);
     ASSERT_NE(recoveredSemantics, nullptr);
     EXPECT_FALSE(recoveredSemantics->checked);
 }
@@ -683,10 +683,10 @@ TEST(UICheckboxTest, KeyboardAcceptTogglesDefaultFocusedCheckbox)
 
     // Arm via pointer to set default-action focus, then keyboard Accept.
     {
-        auto down = context->routePointerInput(
+        auto down = context->input().routePointerInput(
             makePointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 1, {.x = 10.0F, .y = 10.0F}));
         ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
-        auto up = context->routePointerInput(
+        auto up = context->input().routePointerInput(
             makePointerInput(window, UI::UIRoutedPointerEventKind::ButtonUp, 2, {.x = 10.0F, .y = 10.0F}));
         ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
     }
@@ -694,7 +694,7 @@ TEST(UICheckboxTest, KeyboardAcceptTogglesDefaultFocusedCheckbox)
     ASSERT_TRUE(checkedAfterClick.has_value());
     EXPECT_TRUE(*checkedAfterClick);
 
-    auto activate = context->routeDefaultActionActivate(
+    auto activate = context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{3}, 3, UI::UIButtonActivationSource::Keyboard);
     ASSERT_TRUE(activate.has_value()) << (activate ? "" : activate.error().message);
     EXPECT_TRUE(activate->consumed);
@@ -736,12 +736,12 @@ TEST(UICheckboxTest, GamepadSouthDownTogglesAndUpOnlyReleasesPressedState)
             }}));
     publishLayout(*context);
 
-    auto focus = context->routeDefaultActionFocusStep(false);
+    auto focus = context->input().routeDefaultActionFocusStep(false);
     ASSERT_TRUE(focus.has_value()) << (focus ? "" : focus.error().message);
     EXPECT_TRUE(focus->consumed);
     EXPECT_TRUE(focus->moved);
     ASSERT_EQ(focus->focus, checkbox);
-    EXPECT_EQ(context->defaultActionFocus(), checkbox);
+    EXPECT_EQ(context->input().defaultActionFocus(), checkbox);
 
     const Platform::DigitalControlIdentity south =
         Platform::GamepadButtonControlIdentity{
@@ -749,7 +749,7 @@ TEST(UICheckboxTest, GamepadSouthDownTogglesAndUpOnlyReleasesPressedState)
             .gamepad = gamepad,
             .button = Platform::GamepadButton::South,
         };
-    auto down = context->routeDefaultActionActivate(
+    auto down = context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{10},
         100,
         UI::UIButtonActivationSource::Gamepad,
@@ -770,7 +770,7 @@ TEST(UICheckboxTest, GamepadSouthDownTogglesAndUpOnlyReleasesPressedState)
     EXPECT_EQ(activation.platformFrame, Platform::PlatformFrameId{10});
     EXPECT_EQ(activation.sourceSequence, 100U);
 
-    auto up = context->routeDefaultActionRelease(
+    auto up = context->input().routeDefaultActionRelease(
         Platform::PlatformFrameId{11},
         101,
         UI::UIButtonActivationSource::Gamepad,
@@ -786,7 +786,7 @@ TEST(UICheckboxTest, GamepadSouthDownTogglesAndUpOnlyReleasesPressedState)
     EXPECT_TRUE(*checked);
     EXPECT_EQ(activationCount, 1U);
 
-    auto duplicateUp = context->routeDefaultActionRelease(
+    auto duplicateUp = context->input().routeDefaultActionRelease(
         Platform::PlatformFrameId{12},
         102,
         UI::UIButtonActivationSource::Gamepad,
@@ -828,11 +828,11 @@ TEST(UICheckboxTest, DisabledCheckboxRejectsGamepadSouthWithoutSideEffects)
             }}));
     publishLayout(*context);
 
-    auto focus = context->routeDefaultActionFocusStep(false);
+    auto focus = context->input().routeDefaultActionFocusStep(false);
     ASSERT_TRUE(focus.has_value()) << (focus ? "" : focus.error().message);
     ASSERT_EQ(focus->focus, checkbox);
     assertOk(updater.setEnabled(checkbox, false));
-    EXPECT_FALSE(context->defaultActionFocus().hasValue());
+    EXPECT_FALSE(context->input().defaultActionFocus().hasValue());
 
     const Platform::DigitalControlIdentity south =
         Platform::GamepadButtonControlIdentity{
@@ -840,7 +840,7 @@ TEST(UICheckboxTest, DisabledCheckboxRejectsGamepadSouthWithoutSideEffects)
             .gamepad = gamepad,
             .button = Platform::GamepadButton::South,
         };
-    auto down = context->routeDefaultActionActivate(
+    auto down = context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{20},
         200,
         UI::UIButtonActivationSource::Gamepad,
@@ -857,7 +857,7 @@ TEST(UICheckboxTest, DisabledCheckboxRejectsGamepadSouthWithoutSideEffects)
     EXPECT_FALSE(*pressed);
     EXPECT_EQ(activationCount, 0U);
 
-    auto up = context->routeDefaultActionRelease(
+    auto up = context->input().routeDefaultActionRelease(
         Platform::PlatformFrameId{21},
         201,
         UI::UIButtonActivationSource::Gamepad,
@@ -936,7 +936,7 @@ TEST(UICheckboxTest, PointerActivationDirtyQueueFailurePreservesStateAndAction)
         }}));
     publishLayout(*context);
 
-    auto down = context->routePointerInput(makePointerInput(
+    auto down = context->input().routePointerInput(makePointerInput(
         window,
         UI::UIRoutedPointerEventKind::ButtonDown,
         1,
@@ -947,7 +947,7 @@ TEST(UICheckboxTest, PointerActivationDirtyQueueFailurePreservesStateAndAction)
 
     assertOk(updater.setChecked(blocker, true));
     ASSERT_EQ(context->statistics().dirtyQueuePendingCount, 1U);
-    auto up = context->routePointerInput(makePointerInput(
+    auto up = context->input().routePointerInput(makePointerInput(
         window,
         UI::UIRoutedPointerEventKind::ButtonUp,
         2,
@@ -989,7 +989,7 @@ TEST(UICheckboxTest, KeyboardActivationDirtyQueueFailurePreservesStateAndAction)
             ++activations;
         }}));
     publishLayout(*context);
-    auto focus = context->routeDefaultActionFocusStep(false);
+    auto focus = context->input().routeDefaultActionFocusStep(false);
     ASSERT_TRUE(focus.has_value()) << (focus ? "" : focus.error().message);
     ASSERT_TRUE(focus->moved);
     ASSERT_EQ(focus->focus, checkbox);
@@ -997,7 +997,7 @@ TEST(UICheckboxTest, KeyboardActivationDirtyQueueFailurePreservesStateAndAction)
 
     assertOk(updater.setChecked(blocker, true));
     ASSERT_EQ(context->statistics().dirtyQueuePendingCount, 1U);
-    auto activate = context->routeDefaultActionActivate(
+    auto activate = context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{1},
         1,
         UI::UIButtonActivationSource::Keyboard);

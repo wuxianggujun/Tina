@@ -145,7 +145,7 @@ class UIMenuTest : public testing::Test {
 
     [[nodiscard]] static UI::UIRootOwner createRoot(UI::UIContext& context)
     {
-        auto result = context.rootBuilder().createRoot();
+        auto result = context.authoring().rootBuilder().createRoot();
         EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
         return result ? std::move(*result) : UI::UIRootOwner{};
     }
@@ -153,7 +153,7 @@ class UIMenuTest : public testing::Test {
     [[nodiscard]] static UI::UITreeUpdater createUpdater(
         UI::UIContext& context, UI::UIRootOwner& root)
     {
-        auto result = context.treeUpdater(root);
+        auto result = context.authoring().treeUpdater(root);
         EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
         return result ? std::move(*result) : UI::UITreeUpdater{};
     }
@@ -277,18 +277,18 @@ TEST_F(UIMenuTest, AnchorRelationsRejectCyclesCrossRootStaleAndIncompatibleNodes
     EXPECT_EQ(first.menuAnchor(*menu).value(), *anchor);
     assertOk(first.setMenuAnchor(*menu, *anchor));
 
-    Core::Status rejected = context->setMenuAnchor(*menu, *menu);
+    Core::Status rejected = first.setMenuAnchor(*menu, *menu);
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidParent);
-    rejected = context->setMenuAnchor(*menu, *container);
+    rejected = first.setMenuAnchor(*menu, *container);
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidParent);
-    rejected = context->setMenuAnchor(*menu, *item);
+    rejected = first.setMenuAnchor(*menu, *item);
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidParent);
-    rejected = context->setMenuAnchor(*menu, *foreignAnchor);
+    rejected = first.setMenuAnchor(*menu, *foreignAnchor);
     ASSERT_FALSE(rejected.has_value());
-    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidParent);
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidNode);
     rejected = first.setMenuAnchor(*secondMenu, *anchor);
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidParent);
@@ -296,7 +296,7 @@ TEST_F(UIMenuTest, AnchorRelationsRejectCyclesCrossRootStaleAndIncompatibleNodes
     const UI::UINodeId staleAnchor = *anchor;
     assertOk(first.destroy(*anchor));
     EXPECT_FALSE(first.menuAnchor(*menu).value().hasValue());
-    rejected = context->setMenuAnchor(*menu, staleAnchor);
+    rejected = first.setMenuAnchor(*menu, staleAnchor);
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidNode);
     rejected = first.setMenuOpen(*menu, true);
@@ -348,12 +348,12 @@ TEST_F(UIMenuTest, PlacementSupportsFourDirectionsAutoFlipClampAndAnchorWidth)
                 right.menu.hasValue() && automatic.menu.hasValue() &&
                 explicitFlip.menu.hasValue() && clamped.menu.hasValue() &&
                 matched.menu.hasValue());
-    assertOk(context->commitLayout({.width = 200.0F, .height = 160.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 160.0F}));
 
     const auto expectPlacement = [&](MenuPair pair, UI::UIMenuPlacement placement,
                                      float x, float y, float width) {
         assertOk(updater.setMenuOpen(pair.menu, true));
-        assertOk(context->commitLayout({.width = 200.0F, .height = 160.0F}));
+        assertOk(context->publication().commitLayout({.width = 200.0F, .height = 160.0F}));
         const UI::UIMenuMetrics metrics = updater.menuMetrics(pair.menu).value();
         EXPECT_TRUE(metrics.open);
         EXPECT_EQ(metrics.resolvedPlacement, placement);
@@ -371,9 +371,9 @@ TEST_F(UIMenuTest, PlacementSupportsFourDirectionsAutoFlipClampAndAnchorWidth)
     expectPlacement(matched, UI::UIMenuPlacement::Below, 120.0F, 55.0F, 30.0F);
 
     assertOk(updater.setMenuOpen(matched.menu, false));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 160.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 160.0F}));
     EXPECT_FALSE(updater.menuMetrics(matched.menu).value().open);
-    const auto* collapsed = findLayout(context->committedLayout(), matched.menu);
+    const auto* collapsed = findLayout(context->publication().committedLayout(), matched.menu);
     ASSERT_NE(collapsed, nullptr);
     EXPECT_EQ(collapsed->effectiveVisibility, UI::UIVisibility::Collapsed);
 }
@@ -422,15 +422,15 @@ TEST_F(UIMenuTest, CommandsSkipUnavailableItemsWrapAndShareActivationState)
         *command, UI::UIButtonActionCallback(
                       [&](const UI::UIButtonActionEvent&) noexcept { ++commandActivations; })));
 
-    assertOk(context->commitLayout({.width = 220.0F, .height = 180.0F}));
+    assertOk(context->publication().commitLayout({.width = 220.0F, .height = 180.0F}));
     assertOk(updater.setMenuOpen(pair.menu, true));
-    assertOk(context->commitLayout({.width = 220.0F, .height = 180.0F}));
+    assertOk(context->publication().commitLayout({.width = 220.0F, .height = 180.0F}));
 
     auto first = updater.routeMenuCommand(pair.menu, UI::UIMenuCommand::First);
     ASSERT_TRUE(first.has_value()) << first.error().message;
     EXPECT_TRUE(first->consumed);
     EXPECT_EQ(first->focus, *command);
-    auto activated = context->routeDefaultActionActivate(
+    auto activated = context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{1}, 1, UI::UIButtonActivationSource::Keyboard);
     ASSERT_TRUE(activated.has_value()) << activated.error().message;
     EXPECT_TRUE(activated->activated);
@@ -440,16 +440,16 @@ TEST_F(UIMenuTest, CommandsSkipUnavailableItemsWrapAndShareActivationState)
     auto next = updater.routeMenuCommand(pair.menu, UI::UIMenuCommand::Next);
     ASSERT_TRUE(next.has_value()) << next.error().message;
     EXPECT_EQ(next->focus, *check);
-    activated = context->routeDefaultActionActivate(
+    activated = context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{2}, 2, UI::UIButtonActivationSource::Gamepad);
     ASSERT_TRUE(activated.has_value()) << activated.error().message;
     EXPECT_TRUE(updater.isMenuItemChecked(*check).value());
 
-    assertOk(context->commitLayout({.width = 220.0F, .height = 180.0F}));
+    assertOk(context->publication().commitLayout({.width = 220.0F, .height = 180.0F}));
     const UI::UISemanticsEntry* commandSemantics =
-        findSemantics(context->committedSemantics(), *command);
+        findSemantics(context->publication().committedSemantics(), *command);
     const UI::UISemanticsEntry* checkSemantics =
-        findSemantics(context->committedSemantics(), *check);
+        findSemantics(context->publication().committedSemantics(), *check);
     ASSERT_NE(commandSemantics, nullptr);
     ASSERT_NE(checkSemantics, nullptr);
     EXPECT_EQ(commandSemantics->role, UI::UISemanticsRole::MenuItem);
@@ -458,16 +458,16 @@ TEST_F(UIMenuTest, CommandsSkipUnavailableItemsWrapAndShareActivationState)
     EXPECT_TRUE(UI::hasSemanticsAction(checkSemantics->actions,
                                        UI::UISemanticsAction::Toggle));
     EXPECT_TRUE(checkSemantics->checked);
-    EXPECT_EQ(findSemantics(context->committedSemantics(), *separator), nullptr);
+    EXPECT_EQ(findSemantics(context->publication().committedSemantics(), *separator), nullptr);
 
-    assertOk(context->performAccessibilityAction({
+    assertOk(context->input().performAccessibilityAction({
         .kind = UI::UIAccessibilityActionKind::Toggle,
         .node = *check,
     }));
     EXPECT_FALSE(updater.isMenuItemChecked(*check).value());
 
-    assertOk(context->requestFocus(*secondRadio));
-    activated = context->routeDefaultActionActivate(
+    assertOk(context->input().requestFocus(*secondRadio));
+    activated = context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{3}, 3, UI::UIButtonActivationSource::Keyboard);
     ASSERT_TRUE(activated.has_value()) << activated.error().message;
     EXPECT_FALSE(updater.isMenuItemChecked(*firstRadio).value());
@@ -486,24 +486,24 @@ TEST_F(UIMenuTest, CommandsSkipUnavailableItemsWrapAndShareActivationState)
     ASSERT_TRUE(dismissed.has_value());
     EXPECT_TRUE(dismissed->dismissed);
     EXPECT_FALSE(updater.isMenuOpen(pair.menu).value());
-    EXPECT_EQ(context->defaultActionFocus(), pair.anchor);
+    EXPECT_EQ(context->input().defaultActionFocus(), pair.anchor);
 
     const MenuPair closingPair = createPair(
         updater, root.rootNodeId(), {}, overlay(140, 10, 60, 24), fixedSize(80, 32));
     auto closingCommand = updater.createElement(
         closingPair.menu, UI::makeMenuItemElement("Close", {}, fixedSize(72, 24)));
     ASSERT_TRUE(closingCommand.has_value());
-    assertOk(context->commitLayout({.width = 240.0F, .height = 180.0F}));
-    assertOk(context->requestFocus(closingPair.anchor));
+    assertOk(context->publication().commitLayout({.width = 240.0F, .height = 180.0F}));
+    assertOk(context->input().requestFocus(closingPair.anchor));
     assertOk(updater.setMenuOpen(closingPair.menu, true));
-    assertOk(context->commitLayout({.width = 240.0F, .height = 180.0F}));
-    assertOk(context->requestFocus(*closingCommand));
-    activated = context->routeDefaultActionActivate(
+    assertOk(context->publication().commitLayout({.width = 240.0F, .height = 180.0F}));
+    assertOk(context->input().requestFocus(*closingCommand));
+    activated = context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{4}, 4, UI::UIButtonActivationSource::Keyboard);
     ASSERT_TRUE(activated.has_value()) << activated.error().message;
     EXPECT_TRUE(activated->activated);
     EXPECT_FALSE(updater.isMenuOpen(closingPair.menu).value());
-    EXPECT_EQ(context->defaultActionFocus(), closingPair.anchor);
+    EXPECT_EQ(context->input().defaultActionFocus(), closingPair.anchor);
 }
 
 TEST_F(UIMenuTest, PointerBarrierBlocksChromeAndOutsideClickThroughButItemsActivate)
@@ -535,59 +535,59 @@ TEST_F(UIMenuTest, PointerBarrierBlocksChromeAndOutsideClickThroughButItemsActiv
         *outside, UI::UIButtonActionCallback(
                       [&](const UI::UIButtonActionEvent&) noexcept { ++outsideActivations; })));
 
-    assertOk(context->commitLayout({.width = 220.0F, .height = 140.0F}));
+    assertOk(context->publication().commitLayout({.width = 220.0F, .height = 140.0F}));
     assertOk(updater.setMenuOpen(pair.menu, true));
-    assertOk(context->commitLayout({.width = 220.0F, .height = 140.0F}));
-    EXPECT_EQ(context->activeMenu(), pair.menu);
+    assertOk(context->publication().commitLayout({.width = 220.0F, .height = 140.0F}));
+    EXPECT_EQ(context->input().activeMenu(), pair.menu);
     const UI::UIPointerHitQueryResult blankHit =
-        context->queryPointerHit({.x = 11.0F, .y = 35.0F});
+        context->input().queryPointerHit({.x = 11.0F, .y = 35.0F});
     ASSERT_TRUE(blankHit.hasTarget());
     EXPECT_EQ(blankHit.target.node, *underlay);
     EXPECT_FALSE(blankHit.modalBarrierActive);
 
-    auto down = context->routePointerInput(pointerInput(
+    auto down = context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::ButtonDown, 1, {.x = 11, .y = 35}));
     ASSERT_TRUE(down.has_value()) << down.error().message;
     EXPECT_TRUE(down->consumed);
     EXPECT_TRUE(updater.isMenuOpen(pair.menu).value());
-    EXPECT_FALSE(context->pointerCapture().hasValue());
+    EXPECT_FALSE(context->input().pointerCapture().hasValue());
     EXPECT_FALSE(updater.isButtonPressed(*underlay).value());
-    auto up = context->routePointerInput(pointerInput(
+    auto up = context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::ButtonUp, 2, {.x = 11, .y = 35}));
     ASSERT_TRUE(up.has_value()) << up.error().message;
     EXPECT_TRUE(up->consumed);
     EXPECT_EQ(underlayActivations, 0U);
 
-    down = context->routePointerInput(pointerInput(
+    down = context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::ButtonDown, 3, {.x = 30, .y = 20}));
     ASSERT_TRUE(down.has_value()) << down.error().message;
     EXPECT_TRUE(updater.isMenuOpen(pair.menu).value());
-    up = context->routePointerInput(pointerInput(
+    up = context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::ButtonUp, 4, {.x = 30, .y = 20}));
     ASSERT_TRUE(up.has_value()) << up.error().message;
     EXPECT_TRUE(updater.isMenuOpen(pair.menu).value());
 
-    down = context->routePointerInput(pointerInput(
+    down = context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::ButtonDown, 5, {.x = 170, .y = 20}));
     ASSERT_TRUE(down.has_value()) << down.error().message;
     EXPECT_TRUE(down->consumed);
     EXPECT_FALSE(updater.isMenuOpen(pair.menu).value());
-    up = context->routePointerInput(pointerInput(
+    up = context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::ButtonUp, 6, {.x = 170, .y = 20}));
     ASSERT_TRUE(up.has_value()) << up.error().message;
     EXPECT_TRUE(up->consumed);
     EXPECT_EQ(outsideActivations, 0U);
 
-    assertOk(context->commitLayout({.width = 220.0F, .height = 140.0F}));
+    assertOk(context->publication().commitLayout({.width = 220.0F, .height = 140.0F}));
     assertOk(updater.setMenuOpen(pair.menu, true));
-    assertOk(context->commitLayout({.width = 220.0F, .height = 140.0F}));
-    const auto* itemLayout = findLayout(context->committedLayout(), *item);
+    assertOk(context->publication().commitLayout({.width = 220.0F, .height = 140.0F}));
+    const auto* itemLayout = findLayout(context->publication().committedLayout(), *item);
     ASSERT_NE(itemLayout, nullptr);
     const UI::UILogicalPoint itemCenter = centerOf(*itemLayout);
-    down = context->routePointerInput(pointerInput(
+    down = context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::ButtonDown, 7, itemCenter));
     ASSERT_TRUE(down.has_value()) << down.error().message;
-    up = context->routePointerInput(pointerInput(
+    up = context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::ButtonUp, 8, itemCenter));
     ASSERT_TRUE(up.has_value()) << up.error().message;
     EXPECT_TRUE(up->consumed);
@@ -615,21 +615,21 @@ TEST_F(UIMenuTest, MenuAndPopupShareOneTransientOverlaySlot)
     Core::Status rejected = updater.setMenuAnchor(first.menu, *popupItem);
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidParent);
-    assertOk(context->commitLayout({.width = 240.0F, .height = 140.0F}));
+    assertOk(context->publication().commitLayout({.width = 240.0F, .height = 140.0F}));
 
     assertOk(updater.setMenuOpen(first.menu, true));
-    EXPECT_EQ(context->activeMenu(), first.menu);
+    EXPECT_EQ(context->input().activeMenu(), first.menu);
     assertOk(updater.setMenuOpen(second.menu, true));
     EXPECT_FALSE(updater.isMenuOpen(first.menu).value());
     EXPECT_TRUE(updater.isMenuOpen(second.menu).value());
-    EXPECT_EQ(context->activeMenu(), second.menu);
+    EXPECT_EQ(context->input().activeMenu(), second.menu);
 
     assertOk(updater.setPopupOpen(*popup, true));
-    EXPECT_FALSE(context->activeMenu().hasValue());
-    EXPECT_EQ(context->activePopup(), *popup);
+    EXPECT_FALSE(context->input().activeMenu().hasValue());
+    EXPECT_EQ(context->input().activePopup(), *popup);
     assertOk(updater.setMenuOpen(first.menu, true));
-    EXPECT_FALSE(context->activePopup().hasValue());
-    EXPECT_EQ(context->activeMenu(), first.menu);
+    EXPECT_FALSE(context->input().activePopup().hasValue());
+    EXPECT_EQ(context->input().activeMenu(), first.menu);
 }
 
 TEST_F(UIMenuTest, InputVisibilityDisableDestroyAndModalChangesDismiss)
@@ -644,22 +644,22 @@ TEST_F(UIMenuTest, InputVisibilityDisableDestroyAndModalChangesDismiss)
     const MenuPair pair = createPair(
         updater, root.rootNodeId(), {}, anchorLayout, menuLayout);
     ASSERT_TRUE(pair.menu.hasValue());
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
     const auto open = [&] {
         assertOk(updater.setMenuOpen(pair.menu, true));
-        assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+        assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
         EXPECT_TRUE(updater.isMenuOpen(pair.menu).value());
     };
 
     open();
-    auto wheel = context->routePointerInput(pointerInput(
+    auto wheel = context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::Wheel, 1, {.x = 180, .y = 100}));
     ASSERT_TRUE(wheel.has_value()) << wheel.error().message;
     EXPECT_TRUE(wheel->consumed);
     EXPECT_FALSE(updater.isMenuOpen(pair.menu).value());
 
     open();
-    auto text = context->routeTextInput(
+    auto text = context->text().routeTextInput(
         window, Platform::PlatformFrameId{2}, 2, "x");
     ASSERT_TRUE(text.has_value()) << text.error().message;
     EXPECT_FALSE(updater.isMenuOpen(pair.menu).value());
@@ -676,7 +676,7 @@ TEST_F(UIMenuTest, InputVisibilityDisableDestroyAndModalChangesDismiss)
     assertOk(updater.setLayoutStyle(pair.menu, hiddenMenu));
     EXPECT_FALSE(updater.isMenuOpen(pair.menu).value());
     assertOk(updater.setLayoutStyle(pair.menu, menuLayout));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
 
     open();
     UI::UILayoutStyle collapsedAnchor = anchorLayout;
@@ -684,17 +684,17 @@ TEST_F(UIMenuTest, InputVisibilityDisableDestroyAndModalChangesDismiss)
     assertOk(updater.setLayoutStyle(pair.anchor, collapsedAnchor));
     EXPECT_FALSE(updater.isMenuOpen(pair.menu).value());
     assertOk(updater.setLayoutStyle(pair.anchor, anchorLayout));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
 
     open();
     auto modal = updater.createElement(
         root.rootNodeId(), UI::makeModalElement(overlay(100, 40, 80, 60)));
     ASSERT_TRUE(modal.has_value());
     EXPECT_FALSE(updater.isMenuOpen(pair.menu).value());
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
-    EXPECT_EQ(context->activeModal(), *modal);
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
+    EXPECT_EQ(context->input().activeModal(), *modal);
     assertOk(updater.destroy(*modal));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
 
     open();
     assertOk(updater.destroy(pair.anchor));
@@ -714,30 +714,30 @@ TEST_F(UIMenuTest, FailedCommitPreservesCommittedMetricsAndSnapshots)
     auto updater = createUpdater(*context, root);
     const MenuPair pair = createPair(updater, root.rootNodeId());
     ASSERT_TRUE(pair.menu.hasValue());
-    assertOk(context->commitLayout({.width = 180.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 180.0F, .height = 100.0F}));
     assertOk(updater.setMenuOpen(pair.menu, true));
-    assertOk(context->commitLayout({.width = 180.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 180.0F, .height = 100.0F}));
     const UI::UIMenuMetrics published = updater.menuMetrics(pair.menu).value();
     ASSERT_TRUE(published.open);
-    const u64 layoutRevision = context->committedLayout().layoutRevision();
-    const u64 paintRevision = context->committedPaint().paintRevision();
-    const u64 semanticsRevision = context->committedSemantics().semanticsRevision();
+    const u64 layoutRevision = context->publication().committedLayout().layoutRevision();
+    const u64 paintRevision = context->publication().committedPaint().paintRevision();
+    const u64 semanticsRevision = context->publication().committedSemantics().semanticsRevision();
 
     assertOk(updater.setMenuOpen(pair.menu, false));
     auto overflow = updater.createElement(
         root.rootNodeId(), UI::makePanelElement(fixedSize(10, 10)));
     ASSERT_TRUE(overflow.has_value());
     Core::Status failed =
-        context->commitLayout({.width = 180.0F, .height = 100.0F});
+        context->publication().commitLayout({.width = 180.0F, .height = 100.0F});
     ASSERT_FALSE(failed.has_value());
     EXPECT_EQ(failed.error().code, UI::UIErrorCode::CapacityExceeded);
     EXPECT_EQ(updater.menuMetrics(pair.menu).value(), published);
-    EXPECT_EQ(context->committedLayout().layoutRevision(), layoutRevision);
-    EXPECT_EQ(context->committedPaint().paintRevision(), paintRevision);
-    EXPECT_EQ(context->committedSemantics().semanticsRevision(), semanticsRevision);
+    EXPECT_EQ(context->publication().committedLayout().layoutRevision(), layoutRevision);
+    EXPECT_EQ(context->publication().committedPaint().paintRevision(), paintRevision);
+    EXPECT_EQ(context->publication().committedSemantics().semanticsRevision(), semanticsRevision);
 
     assertOk(updater.destroy(*overflow));
-    assertOk(context->commitLayout({.width = 180.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 180.0F, .height = 100.0F}));
     EXPECT_FALSE(updater.menuMetrics(pair.menu).value().open);
 }
 
@@ -765,27 +765,27 @@ TEST_F(UIMenuTest, ActivationCapacityFailureLeavesCheckedOpenAndFocusStateAtomic
         ASSERT_TRUE(created.has_value()) << created.error().message;
         blocker = *created;
     }
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
     assertOk(updater.setMenuOpen(pair.menu, true));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
-    assertOk(context->requestFocus(*check));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
+    assertOk(context->input().requestFocus(*check));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
 
     const UI::UIBoxPaint blockerPaint = UI::makeSolidBox(UI::rgb(0x123456));
     for (UI::UINodeId blocker : blockers)
     {
         assertOk(updater.setBoxPaint(blocker, blockerPaint));
     }
-    auto rejected = context->routeDefaultActionActivate(
+    auto rejected = context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{1}, 1, UI::UIButtonActivationSource::Keyboard);
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::CapacityExceeded);
     EXPECT_FALSE(updater.isMenuItemChecked(*check).value());
     EXPECT_TRUE(updater.isMenuOpen(pair.menu).value());
-    EXPECT_EQ(context->defaultActionFocus(), *check);
+    EXPECT_EQ(context->input().defaultActionFocus(), *check);
 
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
-    auto activated = context->routeDefaultActionActivate(
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
+    auto activated = context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{2}, 2, UI::UIButtonActivationSource::Keyboard);
     ASSERT_TRUE(activated.has_value()) << activated.error().message;
     EXPECT_TRUE(activated->activated);
@@ -801,9 +801,9 @@ TEST_F(UIMenuTest, DestroyGenerationReuseAndRootReleaseLeaveNoRelationships)
     auto updater = createUpdater(*context, root);
     MenuPair pair = createPair(updater, root.rootNodeId());
     ASSERT_TRUE(pair.menu.hasValue());
-    assertOk(context->commitLayout({.width = 160.0F, .height = 90.0F}));
+    assertOk(context->publication().commitLayout({.width = 160.0F, .height = 90.0F}));
     assertOk(updater.setMenuOpen(pair.menu, true));
-    assertOk(context->commitLayout({.width = 160.0F, .height = 90.0F}));
+    assertOk(context->publication().commitLayout({.width = 160.0F, .height = 90.0F}));
 
     const UI::UINodeId destroyedAnchor = pair.anchor;
     assertOk(updater.destroy(pair.anchor));
@@ -824,17 +824,17 @@ TEST_F(UIMenuTest, DestroyGenerationReuseAndRootReleaseLeaveNoRelationships)
 
     root.reset();
     EXPECT_EQ(context->liveNodeCount(), 0U);
-    auto stale = context->menuAnchor(*replacementMenu);
+    auto stale = updater.menuAnchor(*replacementMenu);
     ASSERT_FALSE(stale.has_value());
-    EXPECT_EQ(stale.error().code, UI::UIErrorCode::InvalidNode);
+    EXPECT_EQ(stale.error().code, UI::UIErrorCode::RootRequired);
 
     auto newRoot = createRoot(*context);
     auto newUpdater = createUpdater(*context, newRoot);
     const MenuPair newPair = createPair(newUpdater, newRoot.rootNodeId());
     ASSERT_TRUE(newPair.menu.hasValue());
-    assertOk(context->commitLayout({.width = 160.0F, .height = 90.0F}));
+    assertOk(context->publication().commitLayout({.width = 160.0F, .height = 90.0F}));
     assertOk(newUpdater.setMenuOpen(newPair.menu, true));
-    assertOk(context->commitLayout({.width = 160.0F, .height = 90.0F}));
+    assertOk(context->publication().commitLayout({.width = 160.0F, .height = 90.0F}));
     EXPECT_TRUE(newUpdater.isMenuOpen(newPair.menu).value());
 }
 

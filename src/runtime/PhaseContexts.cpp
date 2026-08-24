@@ -285,7 +285,8 @@ Core::Result<UI::UICommittedSemanticsView> UIUpdateContext::committedSemantics()
         return Core::failure(RuntimeErrorCode::PrimaryWindowUIUnavailable,
                              "The active Runtime phase has no primary-window UI");
     }
-    return m_primaryWindowUI->committedSemantics(m_uiEpoch, Runtime::Detail::PrimaryWindowUIPhase::UIUpdate);
+    return m_primaryWindowUI->committedSemantics(
+        m_uiEpoch, Runtime::Detail::PrimaryWindowUIPhase::UIUpdate);
 }
 
 Core::Result<UI::UIContextStatistics> UIUpdateContext::primaryWindowUIStatistics() const

@@ -10,7 +10,7 @@ TEST_F(UIInputRouteProducerTest, ListViewConsumesKeyboardNavigationActivationAnd
     ASSERT_NE(producer, nullptr);
     ASSERT_NE(tree.context, nullptr);
     ASSERT_TRUE(tree.listView.hasValue());
-    expectOk(tree.context->requestFocus(tree.listView));
+    expectOk(tree.context->input().requestFocus(tree.listView));
 
     u64 nextFrame = 100;
     const auto routeKeyPair = [&](Platform::Key key) -> bool {
@@ -69,7 +69,7 @@ TEST_F(UIInputRouteProducerTest, ListViewConsumesKeyboardNavigationActivationAnd
     auto downOutput = producer->produce(tree.context.get(), *down);
     ASSERT_TRUE(downOutput.has_value()) << (downOutput ? "" : downOutput.error().message);
     EXPECT_TRUE(downOutput->consumption.isConsumed(0));
-    expectOk(tree.context->requestFocus(tree.other));
+    expectOk(tree.context->input().requestFocus(tree.other));
 
     auto release = buildFrame(
         *builder,
@@ -82,7 +82,7 @@ TEST_F(UIInputRouteProducerTest, ListViewConsumesKeyboardNavigationActivationAnd
     auto releaseOutput = producer->produce(tree.context.get(), *release);
     ASSERT_TRUE(releaseOutput.has_value()) << (releaseOutput ? "" : releaseOutput.error().message);
     EXPECT_TRUE(releaseOutput->consumption.isConsumed(0));
-    EXPECT_EQ(tree.context->defaultActionFocus(), tree.other);
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.other);
 
     auto unrelatedDown = buildFrame(
         *builder,
@@ -104,7 +104,7 @@ TEST_F(UIInputRouteProducerTest, TreeViewConsumesHierarchyKeyboardAndGamepadComm
     ASSERT_NE(producer, nullptr);
     ASSERT_NE(tree.context, nullptr);
     ASSERT_TRUE(tree.treeView.hasValue());
-    expectOk(tree.context->requestFocus(tree.treeView));
+    expectOk(tree.context->input().requestFocus(tree.treeView));
 
     u64 nextFrame = 120;
     const auto routeKeyPair = [&](Platform::Key key) -> bool {
@@ -192,7 +192,7 @@ TEST_F(UIInputRouteProducerTest,
     ASSERT_NE(producer, nullptr);
     ASSERT_NE(tree.context, nullptr);
     ASSERT_TRUE(tree.virtualGridView.hasValue());
-    expectOk(tree.context->requestFocus(tree.virtualGridView));
+    expectOk(tree.context->input().requestFocus(tree.virtualGridView));
 
     u64 nextFrame = 160;
     const auto routeKeyPair = [&](Platform::Key key) -> bool {
@@ -285,7 +285,7 @@ TEST_F(UIInputRouteProducerTest,
     ASSERT_NE(producer, nullptr);
     ASSERT_NE(tree.context, nullptr);
     ASSERT_TRUE(tree.dataGrid.hasValue());
-    expectOk(tree.context->requestFocus(tree.dataGrid));
+    expectOk(tree.context->input().requestFocus(tree.dataGrid));
 
     u64 nextFrame = 180;
     const auto routeKeyPair = [&](Platform::Key key) -> bool {
@@ -381,7 +381,7 @@ TEST_F(UIInputRouteProducerTest,
     auto downOutput = producer->produce(tree.context.get(), *down);
     ASSERT_TRUE(downOutput.has_value()) << downOutput.error().message;
     EXPECT_TRUE(downOutput->consumption.isConsumed(0));
-    expectOk(tree.context->requestFocus(tree.other));
+    expectOk(tree.context->input().requestFocus(tree.other));
     auto release = buildFrame(
         *builder, window,
         {
@@ -392,7 +392,7 @@ TEST_F(UIInputRouteProducerTest,
     auto releaseOutput = producer->produce(tree.context.get(), *release);
     ASSERT_TRUE(releaseOutput.has_value()) << releaseOutput.error().message;
     EXPECT_TRUE(releaseOutput->consumption.isConsumed(0));
-    EXPECT_EQ(tree.context->defaultActionFocus(), tree.other);
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.other);
 }
 
 TEST_F(UIInputRouteProducerTest, CollectionCommandResetClearsPressedDebounceState)
@@ -401,7 +401,7 @@ TEST_F(UIInputRouteProducerTest, CollectionCommandResetClearsPressedDebounceStat
     CollectionRouteTree tree = createCollectionRouteTree(window);
     ASSERT_NE(producer, nullptr);
     ASSERT_NE(tree.context, nullptr);
-    expectOk(tree.context->requestFocus(tree.listView));
+    expectOk(tree.context->input().requestFocus(tree.listView));
 
     auto down = buildFrame(
         *builder,
@@ -427,7 +427,7 @@ TEST_F(UIInputRouteProducerTest, CollectionCommandResetClearsPressedDebounceStat
     auto resetOutput = producer->produce(tree.context.get(), *reset);
     ASSERT_TRUE(resetOutput.has_value()) << (resetOutput ? "" : resetOutput.error().message);
     EXPECT_FALSE(resetOutput->consumption.isConsumed(0));
-    expectOk(tree.context->requestFocus(tree.listView));
+    expectOk(tree.context->input().requestFocus(tree.listView));
 
     auto staleRelease = buildFrame(
         *builder,

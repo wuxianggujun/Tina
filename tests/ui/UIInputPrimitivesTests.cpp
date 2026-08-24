@@ -63,13 +63,13 @@ TEST(UIInputPrimitivesTests, QueriesHitIdentityAncestryCyclesAndModalScope)
          .applyDefaultProductChrome = false});
     ASSERT_TRUE(contextResult.has_value());
     auto context = std::move(*contextResult);
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     auto root = std::move(*rootResult);
-    auto panelResult = context->rootBuilder().createElement(
+    auto panelResult = context->authoring().rootBuilder().createElement(
         root.rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(panelResult.has_value());
-    auto buttonResult = context->rootBuilder().createElement(
+    auto buttonResult = context->authoring().rootBuilder().createElement(
         *panelResult, UI::makeButtonElement());
     ASSERT_TRUE(buttonResult.has_value());
 
@@ -140,13 +140,13 @@ TEST(UIInputPrimitivesTests, QueriesCommittedHitInFrontToBackOrderWithClipModalA
          .applyDefaultProductChrome = false});
     ASSERT_TRUE(contextResult.has_value());
     auto context = std::move(*contextResult);
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     auto root = std::move(*rootResult);
-    auto panelResult = context->rootBuilder().createElement(
+    auto panelResult = context->authoring().rootBuilder().createElement(
         root.rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(panelResult.has_value());
-    auto buttonResult = context->rootBuilder().createElement(
+    auto buttonResult = context->authoring().rootBuilder().createElement(
         *panelResult, UI::makeButtonElement());
     ASSERT_TRUE(buttonResult.has_value());
 

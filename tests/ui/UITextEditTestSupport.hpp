@@ -155,7 +155,7 @@ private:
 
 [[nodiscard]] inline UI::UIRootOwner createRoot(UI::UIContext& context)
 {
-    auto result = context.rootBuilder().createRoot();
+    auto result = context.authoring().rootBuilder().createRoot();
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UIRootOwner{};
 }
@@ -164,7 +164,7 @@ private:
     UI::UIContext& context,
     UI::UIRootOwner& root)
 {
-    auto result = context.treeUpdater(root);
+    auto result = context.authoring().treeUpdater(root);
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UITreeUpdater{};
 }
@@ -252,17 +252,17 @@ protected:
 
     void publishLayout()
     {
-        assertOk(context->commitLayout({.width = 320.0F, .height = 120.0F}));
+        assertOk(context->publication().commitLayout({.width = 320.0F, .height = 120.0F}));
     }
 
     void focusWithTab(UI::UINodeId expectedFocus)
     {
         publishLayout();
-        auto result = context->routeDefaultActionFocusStep(false);
+        auto result = context->input().routeDefaultActionFocusStep(false);
         ASSERT_TRUE(result.has_value()) << (result ? "" : result.error().message);
         EXPECT_TRUE(result->consumed);
         EXPECT_EQ(result->focus, expectedFocus);
-        EXPECT_EQ(context->imeFocus(), expectedFocus);
+        EXPECT_EQ(context->text().imeFocus(), expectedFocus);
     }
 
     std::optional<WindowPool> windows;

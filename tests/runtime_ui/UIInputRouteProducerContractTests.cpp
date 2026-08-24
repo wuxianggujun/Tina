@@ -97,7 +97,7 @@ TEST_F(UIInputRouteProducerTest, RouteFailureDoesNotPublishOrReplayEarlierListen
     ASSERT_NE(failingTree.context, nullptr);
     expectOk(
         failingTree.updater.setPointerHitPolicy(failingTree.root.rootNodeId(), UI::UIPointerHitPolicy::Targetable));
-    expectOk(failingTree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    expectOk(failingTree.context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
     auto consumeToken = addListener(
         *goodTree.context,

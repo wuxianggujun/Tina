@@ -244,7 +244,7 @@ Gamepad snapshot、ordered lifecycle/input transition、strict UTF-8 text/compos
 固定容量；view 到下一次 poll/build 失效。
 
 `TextInputCaretRect`/`TextInputPlacement` 是 backend-neutral 的 owner-window logical client geometry；
-Runtime 在成功 UI paint publication 后把 `UIContext::committedTextInputCaretRect()` 交给
+Runtime 在成功 UI paint publication 后把 `context.publication().committedTextInputCaretRect()` 交给
 `IPlatformBackend::updateTextInputPlacement()`。`nullopt` 清除当前 IME hint。实现不得把 HWND/POINT/RECT、
 GLFW 或 X11/Wayland 类型带过公开边界；Windows GLFW 私有 adapter 将 geometry 转为 DPI-scaled client
 pixels 并驱动 IMM32 composition/candidate placement，Headless 的非空 placement 明确返回不支持错误。
@@ -327,7 +327,14 @@ backend 验证其有限性、凸性、bounds 覆盖与最大半径/描边宽度�
 
 ## UI
 
-`UIContext`、`UINodeId`、`UIRootOwner` 与 builder/updater 提供 retained tree。公开 authoring 统一为
+`UIContext` 是 per-window retained UI 的组合根与生命周期 owner，只直接提供创建、Window/节点归属、统计和
+`authoring()/style()/motion()/text()/publication()/input()` 六个 capability accessor。公开头按职责拆为
+`UIAuthoring.hpp`、`UIStyleController.hpp`、`UIMotionController.hpp`、`UITextSystem.hpp`、
+`UIPublicationPipeline.hpp` 与 `UIInputRouter.hpp`；`UIContext.hpp` 只 forward declare capability，不提供旧成员
+compatibility alias。capability 是按值返回的 non-owning owner-thread view，最晚在所属 Context 析构时失效。
+
+`context.authoring()` 只产生 `UIRootBuilder` 和 root-scoped `UITreeUpdater`；`UINodeId`、`UIRootOwner` 与这两个 view
+提供 retained tree。公开 authoring 统一为
 `createElement(parent, descriptor)`；`UIElementDescriptor` 一次给出 layout、behavior、text/image content、visual
 StyleRole/box/Canvas、semantics、enabled、pointer/focus policy 与集合配置，`makeButtonElement()`、
 `makeListViewElement()` 等是内建控件的官方 recipes。旧 `createPanel/createButton/createListView/...`
@@ -403,7 +410,7 @@ driver allocation。Runtime 只通过 phase-scoped `primaryWindowUIStatistics()`
 `UIFlowAction::Back/Confirm/Menu` fixed-inline callback。Layer/Screen 复用现有 retained node 与 root ownership，不增加平行 UI ABI；非栈顶
 Screen 在 publication 中视为 `Collapsed`，作者样式保持不变。`UIContextCapacityConfig` 的
 `flowLayerCapacity/flowScreenCapacity` 固定注册上限，`UIContextStatistics::flow` 发布 capacity/count/high-water
-与失败/action 计数；callback 注册总量同样受 `flowScreenCapacity` 限制。`UIContext::routeFlowAction()` 供
+与失败/action 计数；callback 注册总量同样受 `flowScreenCapacity` 限制。`context.input().routeFlowAction()` 供
 Runtime 将 Escape/Gamepad East 的 Back，以及未被聚焦控件默认 Activate 消费的 Enter/Keypad Enter/Gamepad
 South Confirm，以及 TextEdit 未优先消费的 P/Gamepad Start Menu，路由到 topmost committed active Screen；
 处理过的 Down/Up 不再进入 gameplay。`UIFlowActionEvent::localUser` 报告实际来源用户。
@@ -412,7 +419,7 @@ South Confirm，以及 TextEdit 未优先消费的 P/Gamepad Start Menu，路由
 `UIFlowPrimaryLocalUser=1`、`UIFlowLocalUserCapacity=16`。Keyboard/Pointer/Text/IME 固定属于 Primary；Gamepad
 可通过 `assignFlowGamepad(gamepad, localUser)` / `clearFlowGamepadAssignment(gamepad)` 显式分配，
 `flowLocalUserForGamepad(gamepad)` 对未分配身份返回 Primary。assignment 保存完整 generation `GamepadId`，
-不因 Platform 槽复用继承旧用户。`UIContext`、`UITreeUpdater` 与 `PrimaryWindowUITreeUpdater` 均提供对应入口，
+不因 Platform 槽复用继承旧用户。`context.input()`、`UITreeUpdater` 与 `PrimaryWindowUITreeUpdater` 均提供对应入口，
 Runtime facade 继续受 phase epoch 限制。
 
 `UIFlowInputDeviceState` 与 `flowInputDeviceState(localUser)` 按用户暴露 `KeyboardMouse/Gamepad` 类别、active
@@ -440,8 +447,8 @@ Neutral/Accent/Danger。它们是普通 Panel/Label 的强类型 StyleRole/Layou
 `UIIconButtonConfig`、`UIFormFieldConfig`、`UIDialogConfig` 与 `UISnackbarHostConfig` 是第一方多节点 composition
 profile；对应 `UIIconButtonParts`、`UIFormFieldParts`、`UIDialogParts`、`UISnackbarHostParts` 返回实际 retained node id，供调用者注册既有 Button
 action 或更新 TextEdit。`requiredIconButtonBuildBudget()`、`requiredFormFieldBuildBudget()`、
-`requiredDialogBuildBudget()`、`requiredSnackbarHostBuildBudget()` 在 mutation 前给出精确 node/text/Behavior reservation；`UIContext`、
-`UITreeUpdater` 和 phase-scoped `PrimaryWindowUITreeUpdater` 均提供
+`requiredDialogBuildBudget()`、`requiredSnackbarHostBuildBudget()` 在 mutation 前给出精确 node/text/Behavior reservation；
+root-scoped `UITreeUpdater` 和 phase-scoped `PrimaryWindowUITreeUpdater` 均提供
 `buildIconButton()/buildFormField()/buildDialog()/buildSnackbarHost()`。IconButton 的 Button 是唯一 behavior/semantics root，Icon
 默认 Exclude semantics，Tooltip 保持独立 Anchor；FormField 只有一个 TextInput owner；Dialog 的既有 Modal
 是唯一 barrier/Focus Scope owner。Snackbar 使用调用方持有的最大 4 条 inline queue、显式 monotonic clock、可选
@@ -451,10 +458,10 @@ fixed-capacity transaction，失败不发布半棵组件树。
 `buildDialog()` 构建成功后固定为 closed，调用方必须使用
 `openDialog(dialog)/dismissDialog(dialog)/isDialogOpen(dialog)` 管理 presentation intent；不得把 Dialog 的 authored
 visibility 改为 Hidden/Collapsed。intent query 在调用后立即变化，Modal barrier、Hit/Paint/Semantics、focus 进入及
-dismiss 后的 focus restore 则只在下一次成功 `commitLayout()` 一起发布。每个 Window 同时最多一个 registered
+dismiss 后的 focus restore 则只在下一次成功 `context.publication().commitLayout()` 一起发布。每个 Window 同时最多一个 registered
 Dialog 为 open intent；冲突、非 Dialog、stale/wrong-root 均失败，dirty queue 预检失败不改变 intent 或 committed
-状态，destroy/root release/generation reuse 会移除注册。三个入口同时存在于 `UIContext`、root-scoped
-`UITreeUpdater` 与 phase-scoped `PrimaryWindowUITreeUpdater`；过期 Runtime facade 返回
+状态，destroy/root release/generation reuse 会移除注册。三个入口同时存在于 root-scoped `UITreeUpdater` 与
+phase-scoped `PrimaryWindowUITreeUpdater`；过期 Runtime facade 返回
 `UIPhaseCapabilityExpired`。打开 Dialog 还会原子关闭当前 Menu 并 hard-dismiss Tooltip。
 
 `UINumberFieldConfig` 通过 `UINumberFieldLabelPlacement::{Above,Leading}` 明确区分表单纵向标签与
@@ -480,7 +487,7 @@ Tooltip authoring 使用 `UITooltipConfig` 与 `makeTooltipElement(text, config,
 兼容 Anchor；Tooltip 自身永远 Ignore hit、不可聚焦、Exclude semantics、无 Popup/Modal barrier。它读取最后一次
 成功提交的 Anchor geometry 做 Auto/flip/clamp，并以 `UITooltipMetrics` 发布 committed anchor/tooltip rect、方向和
 open 状态；失败 commit 回滚 clock-driven transient state 并保留旧 snapshot/metrics。Tooltip 文本只在 Anchor
-没有显式 description 时作为 accessible description/HelpText fallback。`UIContext`、`UITreeUpdater` 和 Runtime
+没有显式 description 时作为 accessible description/HelpText fallback。`UITreeUpdater` 和 Runtime
 phase facade 均提供 `setTooltipAnchor/clearTooltipAnchor/tooltipAnchor/showTooltip/dismissTooltip/isTooltipOpen/tooltipMetrics`。
 
 Menu authoring 使用 `UIMenuConfig`、`UIMenuItemConfig` 与
@@ -501,7 +508,7 @@ Menu surface 固定 Ignore hit，但其 chrome/outside Pointer Down 使用 trans
 Menu/MenuItem；Command 发布 Invoke 且无 TogglePattern，Check/Radio 发布 Invoke、checked 与 TogglePattern。
 当前契约不包含 MenuBar 或 submenu。
 
-`UIContext`、`UITreeUpdater` 与 `PrimaryWindowUITreeUpdater` 均提供
+`UITreeUpdater` 与 `PrimaryWindowUITreeUpdater` 均提供
 `setMenuAnchor/clearMenuAnchor/menuAnchor/setMenuOpen/isMenuOpen/menuMetrics/setMenuItemChecked/`
 `isMenuItemChecked/routeMenuCommand`；Runtime facade 继续受 phase epoch/lifetime 约束。
 
@@ -525,7 +532,7 @@ Top/Bottom 使用水平 strip，Left/Right 使用垂直 strip；只有 active Pa
 Pointer、Keyboard Arrow/Home/End、Gamepad D-pad 与 accessibility Activate 复用相同路径。`UITabViewMetrics` 发布最后
 成功 commit 的 strip/active Panel geometry、active Tab/Panel/index、item count 与 placement。`UITabPaint` 是
 `UIStyleRoleId::Tab` 的专属 interaction chrome，可由 `setTabPaint()/tabPaint()` 局部覆盖，不复用
-`UIRadioButtonPaint`。`UIContext`、`UITreeUpdater` 与 `PrimaryWindowUITreeUpdater` 均暴露 items、active state、
+`UIRadioButtonPaint`。`UITreeUpdater` 与 `PrimaryWindowUITreeUpdater` 均暴露 items、active state、
 metrics、command 和 paint API；Runtime facade 继续受 phase epoch/lifetime 约束。
 
 `UISemanticsDescriptor` 支持 Automatic/Publish/MergeDescendants/Exclude、显式 role/name/description/actions；
@@ -572,13 +579,13 @@ callback，直接 `UITreeUpdater` 还可用固定预算 transaction 构建多节
 setter/query 与 Scroll style/offset/metrics 按 capability 校验，Select pool 持有 Dropdown 当前选项；Slider paint/change callback/Pointer drag geometry、TextEdit paint、
 ScrollView paint/thumb geometry 与 Dropdown selection API/popup/paint/input routing 仍是 kind-specific。TextInput/Scroll/Select 输入与视觉路由仍由私有
 resolver 选择 TextEdit/ScrollView/Dropdown，并要求匹配现有 `BuiltinElementKind` contract；不受支持的混合组合返回
-`InvalidElementDescriptor`。当前可在首个 retained node 前通过 `UIContext` 或 `GameStateEnter` 的
+`InvalidElementDescriptor`。当前可在首个 retained node 前通过 `context.style()` 或 `GameStateEnter` 的
 `PrimaryWindowUIRootBuilder` 注册 StyleClass/ColorToken 并安装 node-local literal/token-backed BoxFill rules；
 `PrimaryWindowUIRootBuilder` 另提供 `productTheme()` / `setProductTheme()`，用于在 `createRoot()` 之前确立
 density —— density 是 root 构建期属性，`setProductTheme()` 只在零 live root 时接受 density 变化，因此
 密度切换必须重建 root，而 color scheme 仍可在 live root 上经 `PrimaryWindowUITreeUpdater` 事务切换；
-`UIContext` 与 phase-scoped `PrimaryWindowUITreeUpdater` 提供 `styleColorToken()` / `setStyleColorToken()`；
-setter 先预检 dirty queue，失败时保持 token/dirty/committed 不变。`UIContext` 与 phase-scoped facade
+`context.style()` 与 phase-scoped `PrimaryWindowUITreeUpdater` 提供 `styleColorToken()` / `setStyleColorToken()`；
+setter 先预检 dirty queue，失败时保持 token/dirty/committed 不变。`context.motion()` 与 phase-scoped facade
 已提供 fixed-capacity paint-only Motion、reduced-motion、stylesheet `BackgroundColor` transition，以及
 `UITimelineId` + `create/replace/play/cancel/destroy/isActive` 的 typed keyframe timeline。Timeline descriptor
 按 Context 固定的 definition/track/keyframe/active-index 四类容量复制，支持 paint color/scalar/offset 以及
@@ -607,7 +614,7 @@ Keyboard Arrow 与 Gamepad D-pad 通过 Runtime 复用该路由，复合控件�
 disabled、Hidden/Collapsed、destroy 与 Modal change 会清除或迁移焦点。`UISliderPaint::focusedThumbColor`
 只表达该焦点的 paint feedback，dragging 仍优先。
 
-`UIRangeInputCommand::{Decrease,Increase}` 与 `UIContext::routeRangeInputCommand()` 提供独立于空间焦点的
+`UIRangeInputCommand::{Decrease,Increase}` 与 `context.input().routeRangeInputCommand()` 提供独立于空间焦点的
 capability-level 调值契约。Runtime 将 Keyboard Left/Down 与 D-pad Left/Down 映射为 Decrease，将
 Right/Up 映射为 Increase；路由优先级位于 Menu/Dropdown/ListView/TreeView/VirtualGridView/DataGrid/TextEdit 等复合方向控件之后、
 通用空间焦点之前。focused Slider 复用 Pointer/UIA 已有的 min/max/step/clamp、量化、value storage 与 callback
@@ -1266,7 +1273,7 @@ Jolt/Physics3D 尚未接入。
 | `GpuTextureId/GpuMeshId/GpuEnvironmentMapId` | RenderDevice | retire/destroy 时逻辑失效；有外部 pin 时由 completion marker（或 shutdown hard drain）证明完成，无 pin fallback 交给 backend deferred destroy |
 | PlatformFrame view | Platform | 下一次 poll/build |
 | Phase context/writer | Runtime callback | callback 返回 |
-| committed UI view | UIContext | 下一次对应 commit/context destroy |
+| committed UI view | `UIPublicationPipeline` / `UIContext` | 下一次对应成功 publication 或 Context destroy |
 | RenderFrame view | Runtime builder | `submitFrame()` 返回 |
 | `AudioPcmClipView` | non-owning | 调用方 payload 释放；必须晚于 voice completion |
 | `AudioPcmStreamChunkView` | 调用期 non-owning | `submitPcmStreamFrames()` 返回；成功数据已复制到 Tina-owned ring，失败零发布 |

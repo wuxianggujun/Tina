@@ -38,7 +38,7 @@ TEST_F(UIInputRouteProducerTest, FocusedButtonConsumesKeyboardAndGamepadAcceptWi
     auto tabOutput = producer->produce(tree.context.get(), *tabFrame);
     ASSERT_TRUE(tabOutput.has_value()) << (tabOutput ? "" : tabOutput.error().message);
     EXPECT_TRUE(tabOutput->consumption.isConsumed(0));
-    EXPECT_EQ(tree.context->defaultActionFocus(), tree.target);
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.target);
     EXPECT_EQ(activationCount, 0U);
 
     auto keyboardFrame = buildFrame(
@@ -234,7 +234,7 @@ TEST_F(UIInputRouteProducerTest, DisabledButtonDoesNotConsumeAcceptOrInvokeActio
                 ++activationCount;
             }}));
     expectOk(tree.updater.setEnabled(tree.target, false));
-    expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    expectOk(tree.context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
     auto frame = buildFrame(
         *builder,
@@ -264,7 +264,7 @@ TEST_F(UIInputRouteProducerTest, DisabledButtonDoesNotConsumeAcceptOrInvokeActio
     {
         EXPECT_FALSE(output->consumption.isConsumed(ordinal));
     }
-    EXPECT_FALSE(tree.context->defaultActionFocus().hasValue());
+    EXPECT_FALSE(tree.context->input().defaultActionFocus().hasValue());
     EXPECT_EQ(activationCount, 0U);
 }
 TEST_F(UIInputRouteProducerTest, CancelAndCoveringResetClearButtonStateWithoutActivation)

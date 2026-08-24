@@ -285,7 +285,7 @@ void expectOk(Core::Status status)
 [[nodiscard]] UI::UIRoutedPointerListenerToken
 addListener(UI::UIContext& context, UI::UIRoutedPointerListenerDesc descriptor, UI::UIRoutedPointerCallback callback)
 {
-    auto result = context.addRoutedPointerListener(descriptor, std::move(callback));
+    auto result = context.input().addRoutedPointerListener(descriptor, std::move(callback));
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UIRoutedPointerListenerToken{};
 }
@@ -303,21 +303,21 @@ addListener(UI::UIContext& context, UI::UIRoutedPointerListenerDesc descriptor, 
     }
     tree.context = std::move(*context);
 
-    auto root = tree.context->rootBuilder().createRoot();
+    auto root = tree.context->authoring().rootBuilder().createRoot();
     EXPECT_TRUE(root.has_value()) << (root ? "" : root.error().message);
     if (!root)
     {
         return tree;
     }
     tree.root = std::move(*root);
-    auto panel = tree.context->rootBuilder().createElement(
+    auto panel = tree.context->authoring().rootBuilder().createElement(
         tree.root.rootNodeId(), UI::makePanelElement());
     EXPECT_TRUE(panel.has_value()) << (panel ? "" : panel.error().message);
     if (!panel)
     {
         return tree;
     }
-    auto target = tree.context->rootBuilder().createElement(
+    auto target = tree.context->authoring().rootBuilder().createElement(
         *panel, UI::makeButtonElement());
     EXPECT_TRUE(target.has_value()) << (target ? "" : target.error().message);
     if (!target)
@@ -327,7 +327,7 @@ addListener(UI::UIContext& context, UI::UIRoutedPointerListenerDesc descriptor, 
     tree.panel = *panel;
     tree.target = *target;
 
-    auto updater = tree.context->treeUpdater(tree.root);
+    auto updater = tree.context->authoring().treeUpdater(tree.root);
     EXPECT_TRUE(updater.has_value()) << (updater ? "" : updater.error().message);
     if (!updater)
     {
@@ -338,7 +338,7 @@ addListener(UI::UIContext& context, UI::UIRoutedPointerListenerDesc descriptor, 
     expectOk(tree.updater.setLayoutStyle(tree.panel, fixedSize(80.0F, 80.0F)));
     expectOk(tree.updater.setLayoutStyle(tree.target, fixedSize(40.0F, 40.0F)));
     expectOk(tree.updater.setPointerHitPolicy(tree.target, UI::UIPointerHitPolicy::Targetable));
-    expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    expectOk(tree.context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     return tree;
 }
 
@@ -368,7 +368,7 @@ addListener(UI::UIContext& context, UI::UIRoutedPointerListenerDesc descriptor, 
     }
     tree.target = *textEdit;
     expectOk(tree.updater.setLayoutStyle(tree.target, fixedSize(80.0F, 32.0F)));
-    expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    expectOk(tree.context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     return tree;
 }
 
@@ -387,14 +387,14 @@ addListener(UI::UIContext& context, UI::UIRoutedPointerListenerDesc descriptor, 
         return tree;
     }
     tree.context = std::move(*context);
-    auto root = tree.context->rootBuilder().createRoot();
+    auto root = tree.context->authoring().rootBuilder().createRoot();
     EXPECT_TRUE(root.has_value()) << (root ? "" : root.error().message);
     if (!root)
     {
         return tree;
     }
     tree.root = std::move(*root);
-    auto updater = tree.context->treeUpdater(tree.root);
+    auto updater = tree.context->authoring().treeUpdater(tree.root);
     EXPECT_TRUE(updater.has_value()) << (updater ? "" : updater.error().message);
     if (!updater)
     {
@@ -449,7 +449,7 @@ addListener(UI::UIContext& context, UI::UIRoutedPointerListenerDesc descriptor, 
     expectOk(tree.updater.setLayoutStyle(tree.secondItem, fixedSize(80.0F, 20.0F)));
     expectOk(tree.updater.setLayoutStyle(tree.after, fixedSize(80.0F, 20.0F)));
     expectOk(tree.updater.setDropdownOpen(tree.dropdown, true));
-    expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    expectOk(tree.context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     return tree;
 }
 
@@ -468,14 +468,14 @@ addListener(UI::UIContext& context, UI::UIRoutedPointerListenerDesc descriptor, 
         return tree;
     }
     tree.context = std::move(*context);
-    auto root = tree.context->rootBuilder().createRoot();
+    auto root = tree.context->authoring().rootBuilder().createRoot();
     EXPECT_TRUE(root.has_value()) << (root ? "" : root.error().message);
     if (!root)
     {
         return tree;
     }
     tree.root = std::move(*root);
-    auto updater = tree.context->treeUpdater(tree.root);
+    auto updater = tree.context->authoring().treeUpdater(tree.root);
     EXPECT_TRUE(updater.has_value()) << (updater ? "" : updater.error().message);
     if (!updater)
     {
@@ -518,10 +518,10 @@ addListener(UI::UIContext& context, UI::UIRoutedPointerListenerDesc descriptor, 
     tree.after = *after;
     expectOk(tree.updater.setLayoutStyle(tree.root.rootNodeId(), fixedSize(120.0F, 120.0F)));
     expectOk(tree.updater.setMenuAnchor(tree.menu, tree.anchor));
-    expectOk(tree.context->commitLayout({.width = 120.0F, .height = 120.0F}));
-    expectOk(tree.context->requestFocus(tree.anchor));
+    expectOk(tree.context->publication().commitLayout({.width = 120.0F, .height = 120.0F}));
+    expectOk(tree.context->input().requestFocus(tree.anchor));
     expectOk(tree.updater.setMenuOpen(tree.menu, true));
-    expectOk(tree.context->commitLayout({.width = 120.0F, .height = 120.0F}));
+    expectOk(tree.context->publication().commitLayout({.width = 120.0F, .height = 120.0F}));
     return tree;
 }
 
@@ -540,14 +540,14 @@ addListener(UI::UIContext& context, UI::UIRoutedPointerListenerDesc descriptor, 
         return tree;
     }
     tree.context = std::move(*context);
-    auto root = tree.context->rootBuilder().createRoot();
+    auto root = tree.context->authoring().rootBuilder().createRoot();
     EXPECT_TRUE(root.has_value()) << (root ? "" : root.error().message);
     if (!root)
     {
         return tree;
     }
     tree.root = std::move(*root);
-    auto updater = tree.context->treeUpdater(tree.root);
+    auto updater = tree.context->authoring().treeUpdater(tree.root);
     EXPECT_TRUE(updater.has_value()) << (updater ? "" : updater.error().message);
     if (!updater)
     {
@@ -626,7 +626,7 @@ addListener(UI::UIContext& context, UI::UIRoutedPointerListenerDesc descriptor, 
         tree.virtualGridView, tree.virtualGridSource->view()));
     expectOk(tree.updater.setDataGridDataSource(
         tree.dataGrid, tree.dataGridSource->view()));
-    expectOk(tree.context->commitLayout({.width = 100.0F, .height = 200.0F}));
+    expectOk(tree.context->publication().commitLayout({.width = 100.0F, .height = 200.0F}));
     return tree;
 }
 

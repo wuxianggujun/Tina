@@ -62,7 +62,7 @@ Windows 还接入 `Imm32CompositionHostWin32`：窗口 subclass 把 IMM32 preedi
 不会让旧 progress 晚于 Cancel 发布；FIFO 元素和返回的 optional 每次 move 都会把 composition 的 borrowed
 `string_view` 重绑到目标 `Pending` 自有 UTF-8 storage，包含 SSO 的短中文 preedit/commit 也不会悬空。commit 由
 IMM32 result 路径唯一发布，不再用跨 poll 的“吞下一字符”标记去重。UI commit 后，
-Runtime 从 `UIContext::committedTextInputCaretRect()` 发布 owner-window logical caret geometry；GLFW
+Runtime 从 `context.publication().committedTextInputCaretRect()` 发布 owner-window logical caret geometry；GLFW
 adapter 按当前 content scale 转为 native client pixels，并更新 IMM32 composition/candidate placement。
 placement 为空、caret 与 clip 无正面积交集、窗口 hidden/minimized 或几何无效时会清除旧 hint 并恢复
 IMM32 默认候选窗策略。对应 session 测试覆盖 started/updated/ended、focus-lost cancel、非法 UTF-8 与

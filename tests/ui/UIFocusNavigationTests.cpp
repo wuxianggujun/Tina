@@ -53,10 +53,10 @@ class UIFocusNavigationTest : public testing::Test {
         ASSERT_TRUE(contextResult.has_value()) << (contextResult ? "" : contextResult.error().message);
         context = std::move(*contextResult);
 
-        auto rootResult = context->rootBuilder().createRoot();
+        auto rootResult = context->authoring().rootBuilder().createRoot();
         ASSERT_TRUE(rootResult.has_value()) << (rootResult ? "" : rootResult.error().message);
         root = std::move(*rootResult);
-        auto updaterResult = context->treeUpdater(root);
+        auto updaterResult = context->authoring().treeUpdater(root);
         ASSERT_TRUE(updaterResult.has_value()) << (updaterResult ? "" : updaterResult.error().message);
         updater = std::move(*updaterResult);
         expectOk(updater.setLayoutStyle(root.rootNodeId(), overlay(0.0F, 0.0F, 240.0F, 180.0F)));
@@ -90,7 +90,7 @@ class UIFocusNavigationTest : public testing::Test {
 
     void commit()
     {
-        expectOk(context->commitLayout({.width = 240.0F, .height = 180.0F}));
+        expectOk(context->publication().commitLayout({.width = 240.0F, .height = 180.0F}));
     }
 
     std::unique_ptr<WindowPool> windows;
@@ -109,44 +109,44 @@ TEST_F(UIFocusNavigationTest, MovesAcrossGridWithoutWrappingAndConsumesRelease)
     ASSERT_TRUE(topLeft.hasValue() && topRight.hasValue() && bottomLeft.hasValue() && bottomRight.hasValue());
     commit();
 
-    auto unfocused = context->routeFocusNavigation(UI::UIFocusNavigationDirection::Right);
+    auto unfocused = context->input().routeFocusNavigation(UI::UIFocusNavigationDirection::Right);
     ASSERT_TRUE(unfocused.has_value()) << (unfocused ? "" : unfocused.error().message);
     EXPECT_FALSE(unfocused->consumed);
     EXPECT_FALSE(unfocused->moved);
-    EXPECT_FALSE(context->defaultActionFocus().hasValue());
-    expectOk(context->requestFocus(topLeft));
+    EXPECT_FALSE(context->input().defaultActionFocus().hasValue());
+    expectOk(context->input().requestFocus(topLeft));
 
-    auto right = context->routeFocusNavigation(UI::UIFocusNavigationDirection::Right);
+    auto right = context->input().routeFocusNavigation(UI::UIFocusNavigationDirection::Right);
     ASSERT_TRUE(right.has_value()) << (right ? "" : right.error().message);
     EXPECT_TRUE(right->moved);
     EXPECT_EQ(right->focus, topRight);
-    auto release = context->routeFocusNavigation(UI::UIFocusNavigationDirection::Right, false);
+    auto release = context->input().routeFocusNavigation(UI::UIFocusNavigationDirection::Right, false);
     ASSERT_TRUE(release.has_value()) << (release ? "" : release.error().message);
     EXPECT_TRUE(release->consumed);
 
-    auto down = context->routeFocusNavigation(UI::UIFocusNavigationDirection::Down);
+    auto down = context->input().routeFocusNavigation(UI::UIFocusNavigationDirection::Down);
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
     EXPECT_TRUE(down->moved);
     EXPECT_EQ(down->focus, bottomRight);
-    release = context->routeFocusNavigation(UI::UIFocusNavigationDirection::Down, false);
+    release = context->input().routeFocusNavigation(UI::UIFocusNavigationDirection::Down, false);
     ASSERT_TRUE(release.has_value()) << (release ? "" : release.error().message);
     EXPECT_TRUE(release->consumed);
 
-    auto left = context->routeFocusNavigation(UI::UIFocusNavigationDirection::Left);
+    auto left = context->input().routeFocusNavigation(UI::UIFocusNavigationDirection::Left);
     ASSERT_TRUE(left.has_value()) << (left ? "" : left.error().message);
     EXPECT_TRUE(left->moved);
     EXPECT_EQ(left->focus, bottomLeft);
-    release = context->routeFocusNavigation(UI::UIFocusNavigationDirection::Left, false);
+    release = context->input().routeFocusNavigation(UI::UIFocusNavigationDirection::Left, false);
     ASSERT_TRUE(release.has_value()) << (release ? "" : release.error().message);
     EXPECT_TRUE(release->consumed);
 
-    auto edge = context->routeFocusNavigation(UI::UIFocusNavigationDirection::Down);
+    auto edge = context->input().routeFocusNavigation(UI::UIFocusNavigationDirection::Down);
     ASSERT_TRUE(edge.has_value()) << (edge ? "" : edge.error().message);
     EXPECT_FALSE(edge->consumed);
     EXPECT_FALSE(edge->moved);
     EXPECT_EQ(edge->focus, bottomLeft);
 
-    release = context->routeFocusNavigation(UI::UIFocusNavigationDirection::Down, false);
+    release = context->input().routeFocusNavigation(UI::UIFocusNavigationDirection::Down, false);
     ASSERT_TRUE(release.has_value()) << (release ? "" : release.error().message);
     EXPECT_FALSE(release->consumed);
     EXPECT_FALSE(release->moved);
@@ -162,9 +162,9 @@ TEST_F(UIFocusNavigationTest, PrefersAlignedCandidateAndSkipsDisabledControl)
     ASSERT_TRUE(origin.hasValue() && disabled.hasValue() && aligned.hasValue() && closerDiagonal.hasValue());
     expectOk(updater.setEnabled(disabled, false));
     commit();
-    expectOk(context->requestFocus(origin));
+    expectOk(context->input().requestFocus(origin));
 
-    auto right = context->routeFocusNavigation(UI::UIFocusNavigationDirection::Right);
+    auto right = context->input().routeFocusNavigation(UI::UIFocusNavigationDirection::Right);
     ASSERT_TRUE(right.has_value()) << (right ? "" : right.error().message);
     EXPECT_TRUE(right->moved);
     EXPECT_EQ(right->focus, aligned);
@@ -176,20 +176,20 @@ TEST_F(UIFocusNavigationTest, SliderParticipatesInSpatialNavigation)
     const UI::UINodeId slider = addSlider(root.rootNodeId(), 110.0F, 10.0F);
     ASSERT_TRUE(origin.hasValue() && slider.hasValue());
     commit();
-    expectOk(context->requestFocus(origin));
+    expectOk(context->input().requestFocus(origin));
 
-    auto right = context->routeFocusNavigation(UI::UIFocusNavigationDirection::Right);
+    auto right = context->input().routeFocusNavigation(UI::UIFocusNavigationDirection::Right);
     ASSERT_TRUE(right.has_value()) << (right ? "" : right.error().message);
     EXPECT_TRUE(right->consumed);
     EXPECT_TRUE(right->moved);
     EXPECT_EQ(right->focus, slider);
-    EXPECT_EQ(context->defaultActionFocus(), slider);
+    EXPECT_EQ(context->input().defaultActionFocus(), slider);
 
-    auto release = context->routeFocusNavigation(UI::UIFocusNavigationDirection::Right, false);
+    auto release = context->input().routeFocusNavigation(UI::UIFocusNavigationDirection::Right, false);
     ASSERT_TRUE(release.has_value()) << (release ? "" : release.error().message);
     EXPECT_TRUE(release->consumed);
 
-    auto left = context->routeFocusNavigation(UI::UIFocusNavigationDirection::Left);
+    auto left = context->input().routeFocusNavigation(UI::UIFocusNavigationDirection::Left);
     ASSERT_TRUE(left.has_value()) << (left ? "" : left.error().message);
     EXPECT_TRUE(left->moved);
     EXPECT_EQ(left->focus, origin);
@@ -208,17 +208,17 @@ TEST_F(UIFocusNavigationTest, ContainScopeRejectsGeometricallyCloserOutsideCandi
     const UI::UINodeId outside = addButton(root.rootNodeId(), 80.0F, 30.0F);
     ASSERT_TRUE(insideLeft.hasValue() && insideRight.hasValue() && outside.hasValue());
     commit();
-    expectOk(context->requestFocus(insideLeft));
+    expectOk(context->input().requestFocus(insideLeft));
 
-    auto right = context->routeFocusNavigation(UI::UIFocusNavigationDirection::Right);
+    auto right = context->input().routeFocusNavigation(UI::UIFocusNavigationDirection::Right);
     ASSERT_TRUE(right.has_value()) << (right ? "" : right.error().message);
     EXPECT_TRUE(right->moved);
     EXPECT_EQ(right->focus, insideRight);
-    auto release = context->routeFocusNavigation(UI::UIFocusNavigationDirection::Right, false);
+    auto release = context->input().routeFocusNavigation(UI::UIFocusNavigationDirection::Right, false);
     ASSERT_TRUE(release.has_value()) << (release ? "" : release.error().message);
     EXPECT_TRUE(release->consumed);
 
-    right = context->routeFocusNavigation(UI::UIFocusNavigationDirection::Right);
+    right = context->input().routeFocusNavigation(UI::UIFocusNavigationDirection::Right);
     ASSERT_TRUE(right.has_value()) << (right ? "" : right.error().message);
     EXPECT_FALSE(right->consumed);
     EXPECT_FALSE(right->moved);
@@ -230,12 +230,12 @@ TEST_F(UIFocusNavigationTest, InvalidDirectionFailsWithoutChangingFocus)
     const UI::UINodeId button = addButton(root.rootNodeId(), 10.0F, 10.0F);
     ASSERT_TRUE(button.hasValue());
     commit();
-    expectOk(context->requestFocus(button));
+    expectOk(context->input().requestFocus(button));
 
-    auto result = context->routeFocusNavigation(static_cast<UI::UIFocusNavigationDirection>(255));
+    auto result = context->input().routeFocusNavigation(static_cast<UI::UIFocusNavigationDirection>(255));
     ASSERT_FALSE(result.has_value());
     EXPECT_EQ(result.error().code, UI::UIErrorCode::InvalidFocusTarget);
-    EXPECT_EQ(context->defaultActionFocus(), button);
+    EXPECT_EQ(context->input().defaultActionFocus(), button);
 }
 
 } // namespace

@@ -14,6 +14,7 @@
 #include <tina/runtime/spi/PlatformEventDispatcher.hpp>
 #include <tina/task/TaskErrors.hpp>
 #include <tina/task/TaskSystem.hpp>
+#include <tina/ui/UIPublicationPipeline.hpp>
 
 #include <tina/core/base/ScopeExit.hpp>
 #include <tina/core/diagnostics/Diagnostics.hpp>
@@ -1187,13 +1188,13 @@ class EngineHostImplementation final {
             if (*uiContextResult != nullptr)
             {
                 UI::UIContext& uiContext = **uiContextResult;
-                const auto pixels = uiContext.glyphAtlasPixels();
-                if (!pixels.empty() && uiContext.glyphAtlasWidth() > 0
-                    && uiContext.glyphAtlasHeight() > 0)
+                const auto pixels = uiContext.publication().glyphAtlasPixels();
+                if (!pixels.empty() && uiContext.publication().glyphAtlasWidth() > 0
+                    && uiContext.publication().glyphAtlasHeight() > 0)
                 {
                     glyphAtlasPage = Render::UIGlyphAtlasPageView{
-                        .width = uiContext.glyphAtlasWidth(),
-                        .height = uiContext.glyphAtlasHeight(),
+                        .width = uiContext.publication().glyphAtlasWidth(),
+                        .height = uiContext.publication().glyphAtlasHeight(),
                         .pixels = pixels,
                     };
                 }
@@ -1667,7 +1668,7 @@ class EngineHostImplementation final {
         {
             return Core::success();
         }
-        const UI::UICommittedSemanticsView semantics = context->committedSemantics();
+        const UI::UICommittedSemanticsView semantics = context->publication().committedSemantics();
         if (m_uiaHostBridge->hasPublishedTree() && m_uiaTree.matchesRevision(semantics.semanticsRevision()) &&
             m_uiaTree.structureRevision() == semantics.structureRevision() &&
             m_uiaTree.layoutRevision() == semantics.layoutRevision())

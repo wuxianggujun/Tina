@@ -3,6 +3,7 @@
 #include <tina/core/error/Result.hpp>
 #include <tina/platform/PlatformFrame.hpp>
 #include <tina/ui/UIContext.hpp>
+#include <tina/ui/UITheme.hpp>
 
 #include <optional>
 #include <span>

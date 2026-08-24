@@ -108,15 +108,15 @@ TEST_F(UITextEditTest, ImePreeditDirtyQueueFailureLeavesPreviousComposition)
     ASSERT_TRUE(blockerResult.has_value())
         << (blockerResult ? "" : blockerResult.error().message);
     const UI::UINodeId blocker = *blockerResult;
-    assertOk(localContext->commitLayout({.width = 320.0F, .height = 120.0F}));
+    assertOk(localContext->publication().commitLayout({.width = 320.0F, .height = 120.0F}));
 
-    auto focus = localContext->routeDefaultActionFocusStep(false);
+    auto focus = localContext->input().routeDefaultActionFocusStep(false);
     ASSERT_TRUE(focus.has_value()) << (focus ? "" : focus.error().message);
     EXPECT_TRUE(focus->consumed);
     EXPECT_EQ(focus->focus, textEdit);
-    EXPECT_EQ(localContext->imeFocus(), textEdit);
+    EXPECT_EQ(localContext->text().imeFocus(), textEdit);
 
-    auto started = localContext->routeTextComposition(
+    auto started = localContext->text().routeTextComposition(
         window,
         Platform::PlatformFrameId{1},
         1,
@@ -126,17 +126,17 @@ TEST_F(UITextEditTest, ImePreeditDirtyQueueFailureLeavesPreviousComposition)
     ASSERT_TRUE(started.has_value()) << (started ? "" : started.error().message);
     EXPECT_TRUE(started->consumed);
     EXPECT_TRUE(started->applied);
-    EXPECT_TRUE(localContext->imeCompositionActive());
-    EXPECT_EQ(localContext->imePreeditUtf8(), "old");
-    EXPECT_EQ(localContext->imePreeditCursorCodepoint(), 2U);
-    assertOk(localContext->commitLayout({.width = 320.0F, .height = 120.0F}));
+    EXPECT_TRUE(localContext->text().imeCompositionActive());
+    EXPECT_EQ(localContext->text().imePreeditUtf8(), "old");
+    EXPECT_EQ(localContext->text().imePreeditCursorCodepoint(), 2U);
+    assertOk(localContext->publication().commitLayout({.width = 320.0F, .height = 120.0F}));
 
     assertOk(localUpdater.setPointerHitPolicy(
         blocker,
         UI::UIPointerHitPolicy::Targetable));
     EXPECT_EQ(localContext->statistics().dirtyQueuePendingCount, 1U);
 
-    auto rejected = localContext->routeTextComposition(
+    auto rejected = localContext->text().routeTextComposition(
         window,
         Platform::PlatformFrameId{2},
         2,
@@ -145,9 +145,9 @@ TEST_F(UITextEditTest, ImePreeditDirtyQueueFailureLeavesPreviousComposition)
         Platform::TextCompositionStage::Updated);
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::CapacityExceeded);
-    EXPECT_TRUE(localContext->imeCompositionActive());
-    EXPECT_EQ(localContext->imePreeditUtf8(), "old");
-    EXPECT_EQ(localContext->imePreeditCursorCodepoint(), 2U);
+    EXPECT_TRUE(localContext->text().imeCompositionActive());
+    EXPECT_EQ(localContext->text().imePreeditUtf8(), "old");
+    EXPECT_EQ(localContext->text().imePreeditCursorCodepoint(), 2U);
 }
 
 TEST_F(UITextEditTest, PointerSelectionDirtyQueueFailurePreservesSelectionAndFocus)
@@ -183,9 +183,9 @@ TEST_F(UITextEditTest, PointerSelectionDirtyQueueFailurePreservesSelectionAndFoc
         fixedSize(320.0F, 120.0F)));
     assertOk(localUpdater.setLayoutStyle(textEdit, fixedSize(240.0F, 32.0F)));
     assertOk(localUpdater.setText(textEdit, "ABCD"));
-    assertOk(localContext->commitLayout({.width = 320.0F, .height = 120.0F}));
+    assertOk(localContext->publication().commitLayout({.width = 320.0F, .height = 120.0F}));
 
-    auto down = localContext->routePointerInput(makePrimaryPointerInput(
+    auto down = localContext->input().routePointerInput(makePrimaryPointerInput(
         window,
         UI::UIRoutedPointerEventKind::ButtonDown,
         1,
@@ -193,13 +193,13 @@ TEST_F(UITextEditTest, PointerSelectionDirtyQueueFailurePreservesSelectionAndFoc
         10.0F));
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
     EXPECT_TRUE(down->consumed);
-    EXPECT_EQ(localContext->defaultActionFocus(), textEdit);
-    EXPECT_EQ(localContext->imeFocus(), textEdit);
+    EXPECT_EQ(localContext->input().defaultActionFocus(), textEdit);
+    EXPECT_EQ(localContext->text().imeFocus(), textEdit);
     auto selection = localUpdater.textSelection(textEdit);
     ASSERT_TRUE(selection.has_value())
         << (selection ? "" : selection.error().message);
     EXPECT_EQ(*selection, (UI::UITextSelection{}));
-    assertOk(localContext->commitLayout({.width = 320.0F, .height = 120.0F}));
+    assertOk(localContext->publication().commitLayout({.width = 320.0F, .height = 120.0F}));
 
     assertOk(localUpdater.setPointerHitPolicy(
         firstBlocker,
@@ -209,7 +209,7 @@ TEST_F(UITextEditTest, PointerSelectionDirtyQueueFailurePreservesSelectionAndFoc
         UI::UIPointerHitPolicy::Targetable));
     EXPECT_EQ(localContext->statistics().dirtyQueuePendingCount, 2U);
 
-    auto rejected = localContext->routePointerInput(makePrimaryPointerInput(
+    auto rejected = localContext->input().routePointerInput(makePrimaryPointerInput(
         window,
         UI::UIRoutedPointerEventKind::Move,
         2,
@@ -221,8 +221,8 @@ TEST_F(UITextEditTest, PointerSelectionDirtyQueueFailurePreservesSelectionAndFoc
     ASSERT_TRUE(selection.has_value())
         << (selection ? "" : selection.error().message);
     EXPECT_EQ(*selection, (UI::UITextSelection{}));
-    EXPECT_EQ(localContext->defaultActionFocus(), textEdit);
-    EXPECT_EQ(localContext->imeFocus(), textEdit);
+    EXPECT_EQ(localContext->input().defaultActionFocus(), textEdit);
+    EXPECT_EQ(localContext->text().imeFocus(), textEdit);
     EXPECT_EQ(localContext->statistics().dirtyQueuePendingCount, 2U);
 }
 
@@ -250,9 +250,9 @@ TEST_F(UITextEditTest, PaintSnapshotCapacityFiveAcceptsSelectionAndPreedit)
     const UI::UINodeId textEdit = *textEditResult;
     assertOk(localUpdater.setLayoutStyle(textEdit, fixedSize(120.0F, 32.0F)));
     assertOk(localUpdater.setText(textEdit, "ABCD"));
-    assertOk(localContext->commitLayout({.width = 200.0F, .height = 40.0F}));
+    assertOk(localContext->publication().commitLayout({.width = 200.0F, .height = 40.0F}));
 
-    auto focus = localContext->routeDefaultActionFocusStep(false);
+    auto focus = localContext->input().routeDefaultActionFocusStep(false);
     ASSERT_TRUE(focus.has_value()) << (focus ? "" : focus.error().message);
     EXPECT_EQ(focus->focus, textEdit);
 
@@ -260,7 +260,7 @@ TEST_F(UITextEditTest, PaintSnapshotCapacityFiveAcceptsSelectionAndPreedit)
         textEdit,
         {.anchorCodepoint = 1, .caretCodepoint = 3}));
 
-    auto composition = localContext->routeTextComposition(
+    auto composition = localContext->text().routeTextComposition(
         window,
         Platform::PlatformFrameId{1},
         1,
@@ -271,17 +271,17 @@ TEST_F(UITextEditTest, PaintSnapshotCapacityFiveAcceptsSelectionAndPreedit)
         << (composition ? "" : composition.error().message);
     EXPECT_TRUE(composition->consumed);
     EXPECT_TRUE(composition->applied);
-    assertOk(localContext->commitLayout({.width = 200.0F, .height = 40.0F}));
+    assertOk(localContext->publication().commitLayout({.width = 200.0F, .height = 40.0F}));
 
-    const UI::UICommittedPaintView paint = localContext->committedPaint();
+    const UI::UICommittedPaintView paint = localContext->publication().committedPaint();
     ASSERT_EQ(paint.size(), 5U);
     EXPECT_EQ(paint.entries()[0].node, textEdit);
     EXPECT_EQ(paint.entries()[1].node, textEdit);
     EXPECT_EQ(paint.entries()[2].node, textEdit);
     EXPECT_EQ(paint.entries()[3].node, textEdit);
     EXPECT_EQ(paint.entries()[4].node, textEdit);
-    EXPECT_TRUE(localContext->imeCompositionActive());
-    EXPECT_EQ(localContext->imePreeditUtf8(), "XY");
+    EXPECT_TRUE(localContext->text().imeCompositionActive());
+    EXPECT_EQ(localContext->text().imePreeditUtf8(), "XY");
 }
 
 TEST_F(UITextEditTest, FailedPaintCommitPreservesPublishedCaretGeometry)
@@ -305,21 +305,21 @@ TEST_F(UITextEditTest, FailedPaintCommitPreservesPublishedCaretGeometry)
     const UI::UINodeId textEdit = *textEditResult;
     assertOk(localUpdater.setLayoutStyle(textEdit, fixedSize(100.0F, 24.0F)));
     assertOk(localUpdater.setText(textEdit, "A"));
-    assertOk(localContext->commitLayout({.width = 120.0F, .height = 40.0F}));
-    assertOk(localContext->requestFocus(textEdit));
+    assertOk(localContext->publication().commitLayout({.width = 120.0F, .height = 40.0F}));
+    assertOk(localContext->input().requestFocus(textEdit));
     assertOk(localUpdater.setTextSelection(textEdit, {.anchorCodepoint = 1, .caretCodepoint = 1}));
-    assertOk(localContext->commitLayout({.width = 120.0F, .height = 40.0F}));
+    assertOk(localContext->publication().commitLayout({.width = 120.0F, .height = 40.0F}));
     const std::optional<UI::UILogicalRect> published =
-        localContext->committedTextInputCaretRect();
+        localContext->publication().committedTextInputCaretRect();
     ASSERT_TRUE(published.has_value());
 
     assertOk(localUpdater.setText(textEdit, "AB"));
     assertOk(localUpdater.setTextSelection(textEdit, {.anchorCodepoint = 2, .caretCodepoint = 2}));
     const Core::Status rejected =
-        localContext->commitLayout({.width = 120.0F, .height = 40.0F});
+        localContext->publication().commitLayout({.width = 120.0F, .height = 40.0F});
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::CapacityExceeded);
-    EXPECT_EQ(localContext->committedTextInputCaretRect(), published);
+    EXPECT_EQ(localContext->publication().committedTextInputCaretRect(), published);
 }
 
 } // namespace

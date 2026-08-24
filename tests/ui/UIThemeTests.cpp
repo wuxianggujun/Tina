@@ -1,7 +1,10 @@
 #include <gtest/gtest.h>
 
 #include <tina/core/id/GenerationPool.hpp>
+#include <tina/ui/UIAuthoring.hpp>
 #include <tina/ui/UIContext.hpp>
+#include <tina/ui/UIPublicationPipeline.hpp>
+#include <tina/ui/UIStyleController.hpp>
 #include <tina/ui/UITheme.hpp>
 
 #include <array>
@@ -122,7 +125,7 @@ TEST(UIThemeTest, CanvasLineAndEllipsePublishCommittedGeometry)
     auto context = std::move(*contextResult);
     ASSERT_NE(context, nullptr);
 
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value())
         << (rootResult ? "" : rootResult.error().message);
     UI::UIRootOwner root = std::move(*rootResult);
@@ -142,16 +145,16 @@ TEST(UIThemeTest, CanvasLineAndEllipsePublishCommittedGeometry)
     };
     UI::UIElementDescriptor descriptor = UI::makePanelElement(layout);
     descriptor.visual.canvas = commands;
-    auto element = context->rootBuilder().createElement(
+    auto element = context->authoring().rootBuilder().createElement(
         root.rootNodeId(), descriptor);
     ASSERT_TRUE(element.has_value())
         << (element ? "" : element.error().message);
-    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 80.0F})
+    ASSERT_TRUE(context->publication().commitLayout({.width = 100.0F, .height = 80.0F})
                     .has_value());
 
     std::array<const UI::UICommittedPaintEntry*, 2> paints{};
     usize paintCount = 0;
-    for (const UI::UICommittedPaintEntry& entry : context->committedPaint())
+    for (const UI::UICommittedPaintEntry& entry : context->publication().committedPaint())
     {
         if (entry.node == *element)
         {
@@ -328,19 +331,19 @@ TEST(UIThemeTest, CreateAppliesDefaultButtonChrome)
     ASSERT_TRUE(window.hasValue());
     auto context = createProductContext(window);
     ASSERT_NE(context, nullptr);
-    EXPECT_TRUE(context->productTheme() == UI::makeModernDesktopTheme());
+    EXPECT_TRUE(context->style().productTheme() == UI::makeModernDesktopTheme());
 
-    auto root = context->rootBuilder().createRoot();
+    auto root = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(root.has_value()) << (root ? "" : root.error().message);
-    auto button = context->rootBuilder().createElement(root->rootNodeId(), UI::makeButtonElement());
+    auto button = context->authoring().rootBuilder().createElement(root->rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(button.has_value()) << (button ? "" : button.error().message);
 
-    auto updater = context->treeUpdater(*root);
+    auto updater = context->authoring().treeUpdater(*root);
     ASSERT_TRUE(updater.has_value()) << (updater ? "" : updater.error().message);
     auto buttonPaint = updater->buttonPaint(*button);
     ASSERT_TRUE(buttonPaint.has_value()) << (buttonPaint ? "" : buttonPaint.error().message);
 
-    const UI::UIButtonChrome expected = UI::makeTonalButtonChrome(context->productTheme());
+    const UI::UIButtonChrome expected = UI::makeTonalButtonChrome(context->style().productTheme());
     EXPECT_EQ(*buttonPaint, expected.states);
 
     auto textStyle = updater->textStyle(*button);
@@ -355,18 +358,18 @@ TEST(UIThemeTest, SetProductThemeUpdatesExistingAndSubsequentControls)
     auto context = createProductContext(window);
     ASSERT_NE(context, nullptr);
 
-    auto root = context->rootBuilder().createRoot();
+    auto root = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(root.has_value());
-    auto darkButton = context->rootBuilder().createElement(root->rootNodeId(), UI::makeButtonElement());
+    auto darkButton = context->authoring().rootBuilder().createElement(root->rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(darkButton.has_value());
 
-    ASSERT_TRUE(context->setProductTheme(UI::makeModernDesktopTheme(UI::UIColorScheme::Light)).has_value());
-    EXPECT_TRUE(context->productTheme() == UI::makeModernDesktopTheme(UI::UIColorScheme::Light));
+    ASSERT_TRUE(context->style().setProductTheme(UI::makeModernDesktopTheme(UI::UIColorScheme::Light)).has_value());
+    EXPECT_TRUE(context->style().productTheme() == UI::makeModernDesktopTheme(UI::UIColorScheme::Light));
 
-    auto lightButton = context->rootBuilder().createElement(root->rootNodeId(), UI::makeButtonElement());
+    auto lightButton = context->authoring().rootBuilder().createElement(root->rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(lightButton.has_value());
 
-    auto updater = context->treeUpdater(*root);
+    auto updater = context->authoring().treeUpdater(*root);
     ASSERT_TRUE(updater.has_value());
     auto darkPaint = updater->buttonPaint(*darkButton);
     auto lightPaint = updater->buttonPaint(*lightButton);
@@ -383,12 +386,12 @@ TEST(UIThemeTest, LocalPaintOverrideDoesNotClearButtonStateChrome)
     ASSERT_TRUE(window.hasValue());
     auto context = createProductContext(window);
     ASSERT_NE(context, nullptr);
-    auto root = context->rootBuilder().createRoot();
+    auto root = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(root.has_value());
-    auto button = context->rootBuilder().createElement(root->rootNodeId(), UI::makeButtonElement());
+    auto button = context->authoring().rootBuilder().createElement(root->rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(button.has_value());
 
-    auto updater = context->treeUpdater(*root);
+    auto updater = context->authoring().treeUpdater(*root);
     ASSERT_TRUE(updater.has_value());
     const UI::UIBoxPaint overridePaint = UI::makeSolidBox(UI::rgb(0xFF0000, 255));
     ASSERT_TRUE(updater->setBoxPaint(*button, overridePaint).has_value());
@@ -403,11 +406,11 @@ TEST(UIThemeTest, LocalOverridesDetachOnlyTheirCorrespondingThemeProperties)
     const Platform::WindowId window = makeTestWindow();
     auto context = createProductContext(window);
     ASSERT_NE(context, nullptr);
-    auto root = context->rootBuilder().createRoot();
+    auto root = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(root.has_value());
-    auto button = context->rootBuilder().createElement(root->rootNodeId(), UI::makeButtonElement());
+    auto button = context->authoring().rootBuilder().createElement(root->rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(button.has_value());
-    auto updater = context->treeUpdater(*root);
+    auto updater = context->authoring().treeUpdater(*root);
     ASSERT_TRUE(updater.has_value());
 
     const UI::UIButtonPaint localStates{
@@ -418,7 +421,7 @@ TEST(UIThemeTest, LocalOverridesDetachOnlyTheirCorrespondingThemeProperties)
         .focusedBorderColor = UI::rgb(0xFFFFFF),
     };
     ASSERT_TRUE(updater->setButtonPaint(*button, localStates).has_value());
-    ASSERT_TRUE(context->setProductTheme(UI::makeModernDesktopTheme(UI::UIColorScheme::Light)).has_value());
+    ASSERT_TRUE(context->style().setProductTheme(UI::makeModernDesktopTheme(UI::UIColorScheme::Light)).has_value());
 
     auto states = updater->buttonPaint(*button);
     auto textStyle = updater->textStyle(*button);
@@ -433,16 +436,16 @@ TEST(UIThemeTest, ExplicitSameValueSetterStillDetachesThatProperty)
     const Platform::WindowId window = makeTestWindow();
     auto context = createProductContext(window);
     ASSERT_NE(context, nullptr);
-    auto root = context->rootBuilder().createRoot();
+    auto root = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(root.has_value());
-    auto button = context->rootBuilder().createElement(root->rootNodeId(), UI::makeButtonElement());
+    auto button = context->authoring().rootBuilder().createElement(root->rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(button.has_value());
-    auto updater = context->treeUpdater(*root);
+    auto updater = context->authoring().treeUpdater(*root);
     ASSERT_TRUE(updater.has_value());
 
     const UI::UIButtonPaint darkStates = updater->buttonPaint(*button).value();
     ASSERT_TRUE(updater->setButtonPaint(*button, darkStates).has_value());
-    ASSERT_TRUE(context->setProductTheme(UI::makeModernDesktopTheme(UI::UIColorScheme::Light)).has_value());
+    ASSERT_TRUE(context->style().setProductTheme(UI::makeModernDesktopTheme(UI::UIColorScheme::Light)).has_value());
     EXPECT_EQ(updater->buttonPaint(*button).value(), darkStates);
 }
 
@@ -451,11 +454,11 @@ TEST(UIThemeTest, TextEditPaintOverrideDetachesOnlyPaintAndCanRestoreThemeRecipe
     const Platform::WindowId window = makeTestWindow();
     auto context = createProductContext(window);
     ASSERT_NE(context, nullptr);
-    auto root = context->rootBuilder().createRoot();
+    auto root = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(root.has_value());
-    auto textEdit = context->rootBuilder().createElement(root->rootNodeId(), UI::makeTextEditElement());
+    auto textEdit = context->authoring().rootBuilder().createElement(root->rootNodeId(), UI::makeTextEditElement());
     ASSERT_TRUE(textEdit.has_value());
-    auto updater = context->treeUpdater(*root);
+    auto updater = context->authoring().treeUpdater(*root);
     ASSERT_TRUE(updater.has_value());
 
     UI::UITextEditPaint localPaint = updater->textEditPaint(*textEdit).value();
@@ -463,7 +466,7 @@ TEST(UIThemeTest, TextEditPaintOverrideDetachesOnlyPaintAndCanRestoreThemeRecipe
     ASSERT_TRUE(updater->setTextEditPaint(*textEdit, localPaint).has_value());
 
     const UI::UITheme light = UI::makeModernDesktopTheme(UI::UIColorScheme::Light);
-    ASSERT_TRUE(context->setProductTheme(light).has_value());
+    ASSERT_TRUE(context->style().setProductTheme(light).has_value());
     const UI::UITextEditChrome lightChrome = UI::makeTextEditChrome(light);
     EXPECT_EQ(updater->textEditPaint(*textEdit).value(), localPaint);
     EXPECT_EQ(updater->textStyle(*textEdit).value(), lightChrome.text);
@@ -477,9 +480,9 @@ TEST(UIThemeTest, SetProductThemeUpdatesEveryManagedControlProperty)
     const Platform::WindowId window = makeTestWindow();
     auto context = createProductContext(window);
     ASSERT_NE(context, nullptr);
-    auto root = context->rootBuilder().createRoot();
+    auto root = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(root.has_value());
-    auto builder = context->rootBuilder();
+    auto builder = context->authoring().rootBuilder();
     auto label = builder.createElement(root->rootNodeId(), UI::makeLabelElement());
     auto checkbox = builder.createElement(root->rootNodeId(), UI::makeCheckboxElement());
     auto switchElement = builder.createElement(
@@ -493,9 +496,9 @@ TEST(UIThemeTest, SetProductThemeUpdatesEveryManagedControlProperty)
     ASSERT_TRUE(tabView);
     auto tab = builder.createElement(*tabView, UI::makeTabElement("Tab"));
     ASSERT_TRUE(label && checkbox && switchElement && slider && textEdit && progress && radio && tab);
-    auto updater = context->treeUpdater(*root);
+    auto updater = context->authoring().treeUpdater(*root);
     ASSERT_TRUE(updater.has_value());
-    ASSERT_TRUE(context->setProductTheme(UI::makeModernDesktopTheme(UI::UIColorScheme::Light)).has_value());
+    ASSERT_TRUE(context->style().setProductTheme(UI::makeModernDesktopTheme(UI::UIColorScheme::Light)).has_value());
 
     const UI::UITheme light = UI::makeModernDesktopTheme(UI::UIColorScheme::Light);
     EXPECT_EQ(updater->textStyle(*label).value(), UI::makeBodyTextStyle(light));
@@ -537,20 +540,20 @@ TEST(UIThemeTest, LiveRootRejectsDensityChangeAndPreservesCurrentTheme)
 {
     auto context = createProductContext(makeTestWindow());
     ASSERT_NE(context, nullptr);
-    auto root = context->rootBuilder().createRoot();
+    auto root = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(root.has_value()) << root.error().message;
-    const UI::UITheme original = context->productTheme();
+    const UI::UITheme original = context->style().productTheme();
 
-    Core::Status status = context->setProductTheme(UI::makeModernDesktopTheme(
+    Core::Status status = context->style().setProductTheme(UI::makeModernDesktopTheme(
         UI::UIColorScheme::Dark, UI::UIDensity::Comfortable));
     ASSERT_FALSE(status.has_value());
     EXPECT_EQ(status.error().code, UI::UIErrorCode::InvalidTheme);
-    EXPECT_EQ(context->productTheme(), original);
+    EXPECT_EQ(context->style().productTheme(), original);
 
     root->reset();
-    ASSERT_TRUE(context->setProductTheme(UI::makeModernDesktopTheme(
+    ASSERT_TRUE(context->style().setProductTheme(UI::makeModernDesktopTheme(
         UI::UIColorScheme::Dark, UI::UIDensity::Comfortable)));
-    EXPECT_EQ(context->productTheme().density, UI::UIDensity::Comfortable);
+    EXPECT_EQ(context->style().productTheme().density, UI::UIDensity::Comfortable);
 }
 
 // A density rebuild releases the outgoing populated root before the replacement
@@ -562,48 +565,48 @@ TEST(UIThemeTest, DensityRebuildStagesThemeBeforeCreatingTheReplacementRoot)
     auto context = createProductContext(makeTestWindow());
     ASSERT_NE(context, nullptr);
 
-    ASSERT_TRUE(context->setProductTheme(
+    ASSERT_TRUE(context->style().setProductTheme(
         UI::makeModernDesktopTheme(UI::UIColorScheme::Dark, UI::UIDensity::Compact)));
-    auto outgoing = context->rootBuilder().createRoot();
+    auto outgoing = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(outgoing.has_value()) << (outgoing ? "" : outgoing.error().message);
     auto populated =
-        context->rootBuilder().createElement(outgoing->rootNodeId(), UI::makeButtonElement());
+        context->authoring().rootBuilder().createElement(outgoing->rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(populated.has_value()) << (populated ? "" : populated.error().message);
 
-    const UI::UITheme compact = context->productTheme();
+    const UI::UITheme compact = context->style().productTheme();
     const UI::UITheme comfortable =
         UI::makeModernDesktopTheme(UI::UIColorScheme::Dark, UI::UIDensity::Comfortable);
 
     // Populated outgoing root still blocks the density change.
-    Core::Status blocked = context->setProductTheme(comfortable);
+    Core::Status blocked = context->style().setProductTheme(comfortable);
     ASSERT_FALSE(blocked.has_value());
     EXPECT_EQ(blocked.error().code, UI::UIErrorCode::InvalidTheme);
-    EXPECT_EQ(context->productTheme(), compact);
+    EXPECT_EQ(context->style().productTheme(), compact);
 
     // Release the outgoing root, then stage the new density before the
     // replacement root exists.
     outgoing->reset();
-    ASSERT_TRUE(context->setProductTheme(comfortable));
-    EXPECT_EQ(context->productTheme().density, UI::UIDensity::Comfortable);
+    ASSERT_TRUE(context->style().setProductTheme(comfortable));
+    EXPECT_EQ(context->style().productTheme().density, UI::UIDensity::Comfortable);
 
-    auto replacement = context->rootBuilder().createRoot();
+    auto replacement = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(replacement.has_value()) << (replacement ? "" : replacement.error().message);
     auto rebuilt =
-        context->rootBuilder().createElement(replacement->rootNodeId(), UI::makeButtonElement());
+        context->authoring().rootBuilder().createElement(replacement->rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(rebuilt.has_value()) << (rebuilt ? "" : rebuilt.error().message);
 
     // The replacement tree resolved its chrome from the Comfortable metrics.
-    auto replacementTree = context->treeUpdater(*replacement);
+    auto replacementTree = context->authoring().treeUpdater(*replacement);
     ASSERT_TRUE(replacementTree.has_value()) << (replacementTree ? "" : replacementTree.error().message);
     auto rebuiltPaint = replacementTree->buttonPaint(*rebuilt);
     ASSERT_TRUE(rebuiltPaint.has_value()) << (rebuiltPaint ? "" : rebuiltPaint.error().message);
     EXPECT_EQ(*rebuiltPaint, UI::makeTonalButtonChrome(comfortable).states);
 
     // Staging a density after the replacement root exists stays rejected.
-    Core::Status late = context->setProductTheme(compact);
+    Core::Status late = context->style().setProductTheme(compact);
     ASSERT_FALSE(late.has_value());
     EXPECT_EQ(late.error().code, UI::UIErrorCode::InvalidTheme);
-    EXPECT_EQ(context->productTheme().density, UI::UIDensity::Comfortable);
+    EXPECT_EQ(context->style().productTheme().density, UI::UIDensity::Comfortable);
 }
 
 TEST(UIThemeTest, InvalidThemeAndWrongThreadAreRejectedWithoutMutation)
@@ -611,23 +614,23 @@ TEST(UIThemeTest, InvalidThemeAndWrongThreadAreRejectedWithoutMutation)
     const Platform::WindowId window = makeTestWindow();
     auto context = createProductContext(window);
     ASSERT_NE(context, nullptr);
-    const UI::UITheme original = context->productTheme();
+    const UI::UITheme original = context->style().productTheme();
 
     UI::UITheme invalid = UI::makeModernDesktopTheme(UI::UIColorScheme::Light);
     invalid.typography.control = (std::numeric_limits<float>::quiet_NaN)();
-    Core::Status invalidStatus = context->setProductTheme(invalid);
+    Core::Status invalidStatus = context->style().setProductTheme(invalid);
     ASSERT_FALSE(invalidStatus.has_value());
     EXPECT_EQ(invalidStatus.error().code, UI::UIErrorCode::InvalidTheme);
-    EXPECT_EQ(context->productTheme(), original);
+    EXPECT_EQ(context->style().productTheme(), original);
 
     Core::Status threadedStatus = Core::success();
     std::thread worker([&] {
-        threadedStatus = context->setProductTheme(UI::makeModernDesktopTheme(UI::UIColorScheme::Light));
+        threadedStatus = context->style().setProductTheme(UI::makeModernDesktopTheme(UI::UIColorScheme::Light));
     });
     worker.join();
     ASSERT_FALSE(threadedStatus.has_value());
     EXPECT_EQ(threadedStatus.error().code, UI::UIErrorCode::WrongOwnerThread);
-    EXPECT_EQ(context->productTheme(), original);
+    EXPECT_EQ(context->style().productTheme(), original);
 }
 
 TEST(UIThemeTest, DirtyCapacityFailureLeavesThemeAndManagedPropertiesUntouched)
@@ -643,19 +646,19 @@ TEST(UIThemeTest, DirtyCapacityFailureLeavesThemeAndManagedPropertiesUntouched)
         });
     ASSERT_TRUE(contextResult.has_value());
     auto& context = *contextResult;
-    auto root = context->rootBuilder().createRoot();
+    auto root = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(root.has_value());
-    auto first = context->rootBuilder().createElement(root->rootNodeId(), UI::makeButtonElement());
-    auto second = context->rootBuilder().createElement(root->rootNodeId(), UI::makeButtonElement());
+    auto first = context->authoring().rootBuilder().createElement(root->rootNodeId(), UI::makeButtonElement());
+    auto second = context->authoring().rootBuilder().createElement(root->rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(first && second);
-    auto updater = context->treeUpdater(*root);
+    auto updater = context->authoring().treeUpdater(*root);
     ASSERT_TRUE(updater.has_value());
     const UI::UIButtonPaint original = updater->buttonPaint(*first).value();
 
-    Core::Status status = context->setProductTheme(UI::makeModernDesktopTheme(UI::UIColorScheme::Light));
+    Core::Status status = context->style().setProductTheme(UI::makeModernDesktopTheme(UI::UIColorScheme::Light));
     ASSERT_FALSE(status.has_value());
     EXPECT_EQ(status.error().code, UI::UIErrorCode::CapacityExceeded);
-    EXPECT_EQ(context->productTheme(), UI::makeModernDesktopTheme());
+    EXPECT_EQ(context->style().productTheme(), UI::makeModernDesktopTheme());
     EXPECT_EQ(updater->buttonPaint(*first).value(), original);
     EXPECT_EQ(updater->buttonPaint(*second).value(), original);
 }
@@ -666,7 +669,7 @@ TEST(UIThemeTest, ReapplyingCurrentThemeIsANoOp)
     auto context = createProductContext(window);
     ASSERT_NE(context, nullptr);
     const UI::UIContextStatistics before = context->statistics();
-    ASSERT_TRUE(context->setProductTheme(context->productTheme()).has_value());
+    ASSERT_TRUE(context->style().setProductTheme(context->style().productTheme()).has_value());
     const UI::UIContextStatistics after = context->statistics();
     EXPECT_EQ(after.dirtyQueuePendingCount, before.dirtyQueuePendingCount);
     EXPECT_EQ(after.paintRevision, before.paintRevision);
@@ -679,15 +682,15 @@ TEST(UIThemeTest, CreateAppliesDefaultSliderAndProgressChrome)
     ASSERT_TRUE(window.hasValue());
     auto context = createProductContext(window);
     ASSERT_NE(context, nullptr);
-    auto root = context->rootBuilder().createRoot();
+    auto root = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(root.has_value());
 
-    auto slider = context->rootBuilder().createElement(root->rootNodeId(), UI::makeSliderElement());
-    auto progress = context->rootBuilder().createElement(root->rootNodeId(), UI::makeProgressBarElement());
+    auto slider = context->authoring().rootBuilder().createElement(root->rootNodeId(), UI::makeSliderElement());
+    auto progress = context->authoring().rootBuilder().createElement(root->rootNodeId(), UI::makeProgressBarElement());
     ASSERT_TRUE(slider.has_value());
     ASSERT_TRUE(progress.has_value());
 
-    auto updater = context->treeUpdater(*root);
+    auto updater = context->authoring().treeUpdater(*root);
     ASSERT_TRUE(updater.has_value());
     auto sliderPaint = updater->sliderPaint(*slider);
     auto progressPaint = updater->progressBarPaint(*progress);
@@ -706,11 +709,11 @@ TEST(UIThemeTest, ConfigCanDisableDefaultChromeForTests)
     auto contextResult = UI::UIContext::Create(window, capacities);
     ASSERT_TRUE(contextResult.has_value());
     auto& context = *contextResult;
-    auto root = context->rootBuilder().createRoot();
+    auto root = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(root.has_value());
-    auto button = context->rootBuilder().createElement(root->rootNodeId(), UI::makeButtonElement());
+    auto button = context->authoring().rootBuilder().createElement(root->rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(button.has_value());
-    auto updater = context->treeUpdater(*root);
+    auto updater = context->authoring().treeUpdater(*root);
     ASSERT_TRUE(updater.has_value());
     auto buttonPaint = updater->buttonPaint(*button);
     ASSERT_TRUE(buttonPaint.has_value());

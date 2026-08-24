@@ -411,16 +411,75 @@ auto EditorWorkspaceState::loadProjectAssetDocument(
 
 auto EditorWorkspaceState::openSelectedProjectAsset(
     Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status{
+    if (auto status = synchronizeActiveTabDirty(); !status) {
+        return status;
+    }
     const auto* asset = projectAssets_.selectedItem();
     if (asset == nullptr) {
         return Tina::Core::failure(Tina::Editor::EditorErrorCode::ProjectAssetNotFound,
                                    "Project Asset Browser has no selected asset");
     }
-    ++counters_.projectAssetOpenCount;
+    const Tina::Editor::EditorDocumentKind documentKind =
+        Tina::Editor::editorDocumentKindForAsset(asset->assetKind);
+    const Tina::Editor::EditorDocumentKey documentKey{
+        .kind = documentKind,
+        .assetId = asset->assetId,
+    };
     projectAssetSelectionSyncPending_ = true;
     assetInspectorActive_ = true;
-    authoringFeedback_ = "Project Asset selected in Inspector";
-    return refreshAuthoringUi(tree);
+    if (const auto existing = documentTabs_.find(documentKey); existing.has_value()) {
+        ++counters_.projectAssetOpenCount;
+        authoringFeedback_ = "Catalog asset tab activated";
+        return activateDocumentTab(tree, static_cast<u32>(*existing));
+    }
+    if (documentTabs_.tabCount() >= documentTabs_.config().tabCapacity) {
+        return Tina::Core::failure(
+            Tina::Editor::EditorErrorCode::DocumentTabCapacityExceeded,
+            "Close a document before opening another Catalog asset");
+    }
+    auto loadedDocument = loadProjectAssetDocument(*asset);
+    if (!loadedDocument) {
+        return Tina::Core::failure(std::move(loadedDocument.error()));
+    }
+    std::optional<WorkspaceSessionState> preparedSession{};
+    if (loadedDocument->document.has_value()) {
+        auto session = makeProjectAssetSession(
+            documentKey, *loadedDocument->document,
+            loadedDocument->targetPlatform);
+        if (!session) {
+            return Tina::Core::failure(std::move(session.error()));
+        }
+        preparedSession.emplace(std::move(*session));
+    }
+    const Tina::Core::usize previousActiveIndex = documentTabs_.activeIndex();
+    auto opened = documentTabs_.open(Tina::Editor::EditorDocumentTabDesc{
+        .key = documentKey,
+        .title = asset->displayName,
+    });
+    if (!opened) {
+        return Tina::Core::failure(std::move(opened.error()));
+    }
+    if (preparedSession.has_value()) {
+        if (auto status = installDocumentSession(std::move(*preparedSession)); !status) {
+            (void)documentTabs_.close(*opened, true);
+            (void)documentTabs_.activate(previousActiveIndex);
+            return status;
+        }
+    }
+    if (loadedDocument->document.has_value()) {
+        if (auto status = installNewAuthoringDocument(
+                documentKey, std::move(*loadedDocument->document));
+            !status) {
+            discardDocumentSession(documentKey);
+            (void)documentTabs_.close(*opened, true);
+            (void)documentTabs_.activate(previousActiveIndex);
+            return status;
+        }
+        ++counters_.tabOwnedDocumentLoads;
+    }
+    ++counters_.projectAssetOpenCount;
+    authoringFeedback_ = "Catalog asset opened in a document tab";
+    return activateDocumentTab(tree, static_cast<u32>(*opened));
 }
 
 auto EditorWorkspaceState::showDirtyCloseModal(

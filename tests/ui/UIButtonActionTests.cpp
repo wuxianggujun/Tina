@@ -12,7 +12,7 @@ TEST_F(UIButtonActionTest, ElementRecipesPublishExpectedDefaultHitPolicies)
     const UI::UINodeId panel = createPanel(*context, root.rootNodeId());
     const UI::UINodeId label = createLabel(*context, panel);
     const UI::UINodeId button = createButton(*context, panel);
-    auto textEditResult = context->rootBuilder().createElement(panel, UI::makeTextEditElement());
+    auto textEditResult = context->authoring().rootBuilder().createElement(panel, UI::makeTextEditElement());
     ASSERT_TRUE(textEditResult.has_value());
     const UI::UINodeId textEdit = *textEditResult;
     auto updater = createUpdater(*context, root);
@@ -22,9 +22,9 @@ TEST_F(UIButtonActionTest, ElementRecipesPublishExpectedDefaultHitPolicies)
     assertOk(updater.setLayoutStyle(label, fixedSize(20.0F, 10.0F)));
     assertOk(updater.setLayoutStyle(button, fixedSize(30.0F, 10.0F)));
     assertOk(updater.setLayoutStyle(textEdit, fixedSize(40.0F, 10.0F)));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
-    const UI::UICommittedHitView hit = context->committedHit();
+    const UI::UICommittedHitView hit = context->publication().committedHit();
     ASSERT_EQ(hit.size(), 5U);
     EXPECT_EQ(hit.entries()[0].node, root.rootNodeId());
     EXPECT_EQ(hit.entries()[0].policy, UI::UIPointerHitPolicy::Ignore);
@@ -139,7 +139,7 @@ TEST_F(UIButtonActionTest, TargetableChildActivatesNearestButtonAncestor)
     assertOk(updater.setLayoutStyle(child, fixedSize(20.0F, 20.0F)));
     assertOk(updater.setPointerHitPolicy(child, UI::UIPointerHitPolicy::Targetable));
     assertOk(updater.setButtonAction(button, makeAction(recorder, 1)));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
     const UI::UIPointerRouteResult down = route(
         *context,
@@ -268,7 +268,7 @@ TEST_F(UIButtonActionTest, CancelOrResetClearsPressedWithoutActivation)
         *tree.context,
         makePointerInput(firstWindow, UI::UIRoutedPointerEventKind::ButtonDown, 1));
     expectButtonPressed(tree.updater, tree.button, true);
-    assertOk(tree.context->cancelPointerInteraction(firstWindow));
+    assertOk(tree.context->input().cancelPointerInteraction(firstWindow));
     expectButtonPressed(tree.updater, tree.button, false);
 
     const UI::UIPointerRouteResult up = route(
@@ -281,7 +281,7 @@ TEST_F(UIButtonActionTest, CancelOrResetClearsPressedWithoutActivation)
         *tree.context,
         makePointerInput(firstWindow, UI::UIRoutedPointerEventKind::ButtonDown, 3));
     expectButtonPressed(tree.updater, tree.button, true);
-    assertOk(tree.context->cancelPointerInteraction(firstWindow));
+    assertOk(tree.context->input().cancelPointerInteraction(firstWindow));
     expectButtonPressed(tree.updater, tree.button, false);
     EXPECT_EQ(recorder.size, 0U);
 }

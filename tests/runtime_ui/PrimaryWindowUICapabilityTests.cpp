@@ -2,7 +2,12 @@
 
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/runtime/RuntimeErrors.hpp>
+#include <tina/ui/UIAuthoring.hpp>
 #include <tina/ui/UIContext.hpp>
+#include <tina/ui/UIInputRouter.hpp>
+#include <tina/ui/UIMotionController.hpp>
+#include <tina/ui/UIPublicationPipeline.hpp>
+#include <tina/ui/UIStyleController.hpp>
 #include <tina/ui/UITheme.hpp>
 
 #include "../../src/runtime/ui/PrimaryWindowUICapabilityState.hpp"
@@ -387,10 +392,10 @@ TEST_F(PrimaryWindowUICapabilityTest, StyleSheetFacadeRegistersClassTokenAndInst
     EXPECT_EQ(context->statistics().style.activeNodeClassLinkCount, 1U);
 
     ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
-    EXPECT_TRUE(hasPaintFill(context->committedPaint(), *panel,
+    ASSERT_TRUE(context->publication().commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
+    EXPECT_TRUE(hasPaintFill(context->publication().committedPaint(), *panel,
                              UI::premultiply(UI::rgb(0x2357A6))));
-    EXPECT_FALSE(hasPaintFill(context->committedPaint(), *panel,
+    EXPECT_FALSE(hasPaintFill(context->publication().committedPaint(), *panel,
                               UI::premultiply(UI::rgb(0xB42318))));
 
     auto expiredClass = builder->registerStyleClass();
@@ -524,7 +529,7 @@ TEST_F(PrimaryWindowUICapabilityTest, MotionFacadeBeginsBackgroundTransitionAndE
     ASSERT_TRUE(configuredStyleTransition.has_value()) << configuredStyleTransition.error().message;
     EXPECT_EQ(configuredStyleTransition->duration, spec.duration);
     EXPECT_EQ(configuredStyleTransition->easing, spec.easing);
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
     ASSERT_TRUE(tree->beginBackgroundColorTransition(*node, UI::rgba8(100, 0, 0, 255), spec).has_value());
     EXPECT_EQ(context->statistics().motion.activeTrackCount, 1U);
     EXPECT_TRUE(context->statistics().paintDirty);
@@ -1224,12 +1229,12 @@ TEST_F(PrimaryWindowUICapabilityTest, ModalAndFocusFacadesRoundTripAndExpireWith
     ASSERT_TRUE(modal.has_value()) << modal.error().message;
     auto modalButton = tree->createElement(*modal, UI::makeButtonElement());
     ASSERT_TRUE(modalButton.has_value()) << modalButton.error().message;
-    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 90.0F}).has_value());
-    EXPECT_EQ(context->activeModal(), *modal);
-    EXPECT_EQ(context->defaultActionFocus(), *modalButton);
+    ASSERT_TRUE(context->publication().commitLayout({.width = 160.0F, .height = 90.0F}).has_value());
+    EXPECT_EQ(context->input().activeModal(), *modal);
+    EXPECT_EQ(context->input().defaultActionFocus(), *modalButton);
     ASSERT_TRUE(tree->requestFocus(*modalButton).has_value());
     ASSERT_TRUE(tree->clearFocus().has_value());
-    EXPECT_FALSE(context->defaultActionFocus().hasValue());
+    EXPECT_FALSE(context->input().defaultActionFocus().hasValue());
 
     ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
     auto expiredModal = tree->createElement(root->rootNodeId(), UI::makeModalElement());
@@ -1380,7 +1385,7 @@ TEST_F(PrimaryWindowUICapabilityTest, ScrollViewFacadeRoundTripsMetricsAndExpire
     ASSERT_TRUE(tree->setScrollViewStyle(*scrollView, ScrollStyle).has_value());
     ASSERT_TRUE(tree->setScrollViewPaint(*scrollView, ScrollPaint).has_value());
     ASSERT_TRUE(tree->setScrollViewOffset(*scrollView, {.x = 0.0F, .y = 40.0F}).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 100.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}).has_value());
 
     const PrimaryWindowUITreeUpdater& treeView = *tree;
     auto style = treeView.scrollViewStyle(*scrollView);
@@ -1464,7 +1469,7 @@ TEST_F(PrimaryWindowUICapabilityTest, ListViewFacadeRoundTripsAndExpiresWithPhas
     ASSERT_TRUE(tree->invalidateListViewItems(*listView).has_value());
     ASSERT_TRUE(tree->setListViewSelectedIndex(*listView, 3).has_value());
     ASSERT_TRUE(tree->scrollListViewToIndex(*listView, 40, UI::UIListViewScrollAlignment::Start).has_value());
-    Core::Status initialCommit = context->commitLayout({.width = 120.0F, .height = 80.0F});
+    Core::Status initialCommit = context->publication().commitLayout({.width = 120.0F, .height = 80.0F});
     ASSERT_TRUE(initialCommit.has_value()) << initialCommit.error().message;
 
     const PrimaryWindowUITreeUpdater& treeView = *tree;
@@ -1480,11 +1485,11 @@ TEST_F(PrimaryWindowUICapabilityTest, ListViewFacadeRoundTripsAndExpiresWithPhas
     ASSERT_TRUE(tree->clearListViewSelection(*listView).has_value());
     EXPECT_FALSE(treeView.listViewSelection(*listView).value().hasValue());
     ASSERT_TRUE(tree->clearListViewDataSource(*listView).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 120.0F, .height = 80.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 120.0F, .height = 80.0F}).has_value());
     EXPECT_EQ(treeView.listViewMetrics(*listView).value().logicalItemCount, 0U);
     ASSERT_TRUE(tree->setListViewDataSource(*listView, source.view()).has_value());
     ASSERT_TRUE(tree->invalidateListViewItems(*listView).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 120.0F, .height = 80.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 120.0F, .height = 80.0F}).has_value());
     EXPECT_EQ(treeView.listViewMetrics(*listView).value().logicalItemCount, 100U);
 
     ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
@@ -1575,7 +1580,7 @@ TEST_F(PrimaryWindowUICapabilityTest,
                         UI::UIDataGridScrollAlignment::Start)
                     .has_value());
     Core::Status initialCommit =
-        context->commitLayout({.width = 120.0F, .height = 80.0F});
+        context->publication().commitLayout({.width = 120.0F, .height = 80.0F});
     ASSERT_TRUE(initialCommit.has_value()) << initialCommit.error().message;
 
     const PrimaryWindowUITreeUpdater& treeView = *tree;
@@ -1598,12 +1603,12 @@ TEST_F(PrimaryWindowUICapabilityTest,
     ASSERT_TRUE(tree->clearDataGridSelection(*dataGrid).has_value());
     EXPECT_FALSE(treeView.dataGridSelection(*dataGrid).value().hasValue());
     ASSERT_TRUE(tree->clearDataGridDataSource(*dataGrid).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 120.0F, .height = 80.0F})
+    ASSERT_TRUE(context->publication().commitLayout({.width = 120.0F, .height = 80.0F})
                     .has_value());
     EXPECT_EQ(treeView.dataGridMetrics(*dataGrid).value().logicalRowCount, 0U);
     ASSERT_TRUE(tree->setDataGridDataSource(*dataGrid, source.view()).has_value());
     ASSERT_TRUE(tree->invalidateDataGridItems(*dataGrid).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 120.0F, .height = 80.0F})
+    ASSERT_TRUE(context->publication().commitLayout({.width = 120.0F, .height = 80.0F})
                     .has_value());
     EXPECT_EQ(treeView.dataGridMetrics(*dataGrid).value().logicalRowCount, 100U);
 
@@ -1683,7 +1688,7 @@ TEST_F(PrimaryWindowUICapabilityTest, TreeViewFacadeRoundTripsExpansionAndExpire
     ASSERT_TRUE(tree->setTreeViewDataSource(*treeViewNode, source.view()).has_value());
     ASSERT_TRUE(tree->invalidateTreeViewItems(*treeViewNode).has_value());
     ASSERT_TRUE(tree->setTreeViewSelectedIndex(*treeViewNode, 0).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
 
     const PrimaryWindowUITreeUpdater& treeView = *tree;
     EXPECT_EQ(treeView.treeViewStyle(*treeViewNode).value(), TreeStyle);
@@ -1700,7 +1705,7 @@ TEST_F(PrimaryWindowUICapabilityTest, TreeViewFacadeRoundTripsExpansionAndExpire
     EXPECT_EQ(source.lastExpansionKey, 1U);
     ASSERT_TRUE(tree->setTreeViewSelectedIndex(*treeViewNode, 3).has_value());
     ASSERT_TRUE(tree->scrollTreeViewToIndex(*treeViewNode, 15, UI::UITreeViewScrollAlignment::Start).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
     const UI::UITreeViewMetrics expandedMetrics = treeView.treeViewMetrics(*treeViewNode).value();
     EXPECT_EQ(expandedMetrics.logicalItemCount, TreeFacadeDataSource::CollapsedItemCount + 2);
     EXPECT_EQ(expandedMetrics.firstVisibleIndex, 15U);
@@ -1710,11 +1715,11 @@ TEST_F(PrimaryWindowUICapabilityTest, TreeViewFacadeRoundTripsExpansionAndExpire
     ASSERT_TRUE(tree->clearTreeViewSelection(*treeViewNode).has_value());
     EXPECT_FALSE(treeView.treeViewSelection(*treeViewNode).value().hasValue());
     ASSERT_TRUE(tree->clearTreeViewDataSource(*treeViewNode).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
     EXPECT_EQ(treeView.treeViewMetrics(*treeViewNode).value().logicalItemCount, 0U);
     ASSERT_TRUE(tree->setTreeViewDataSource(*treeViewNode, source.view()).has_value());
     ASSERT_TRUE(tree->invalidateTreeViewItems(*treeViewNode).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
     EXPECT_EQ(treeView.treeViewMetrics(*treeViewNode).value().logicalItemCount,
               TreeFacadeDataSource::CollapsedItemCount + 2);
 
@@ -1779,7 +1784,7 @@ TEST_F(PrimaryWindowUICapabilityTest, DropdownPopupFacadeRoundTripsAndExpiresWit
     ASSERT_TRUE(tree->setDropdownPaint(*dropdown, DropdownPaint).has_value());
     ASSERT_TRUE(tree->setDropdownSelectedItem(*dropdown, *secondItem).has_value());
     ASSERT_TRUE(tree->setDropdownOpen(*dropdown, true).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 200.0F, .height = 120.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}).has_value());
 
     const PrimaryWindowUITreeUpdater& treeView = *tree;
     EXPECT_EQ(treeView.popupStyle(*popup).value(), PopupStyle);
@@ -1854,10 +1859,10 @@ TEST_F(PrimaryWindowUICapabilityTest, MenuFacadeRoundTripsCommandsMetricsAndExpi
     EXPECT_EQ(tree->menuAnchor(*menu).value(), *anchor);
     ASSERT_TRUE(tree->setMenuItemChecked(*checkItem, true).has_value());
     EXPECT_TRUE(tree->isMenuItemChecked(*checkItem).value());
-    auto anchorCommitted = context->commitLayout({.width = 240.0F, .height = 140.0F});
+    auto anchorCommitted = context->publication().commitLayout({.width = 240.0F, .height = 140.0F});
     ASSERT_TRUE(anchorCommitted.has_value()) << anchorCommitted.error().message;
     ASSERT_TRUE(tree->setMenuOpen(*menu, true).has_value());
-    auto committed = context->commitLayout({.width = 240.0F, .height = 140.0F});
+    auto committed = context->publication().commitLayout({.width = 240.0F, .height = 140.0F});
     ASSERT_TRUE(committed.has_value()) << committed.error().message;
 
     const PrimaryWindowUITreeUpdater& treeView = *tree;
@@ -1939,12 +1944,12 @@ TEST_F(PrimaryWindowUICapabilityTest, TooltipFacadeRoundTripsAndExpiresWithPhase
     ASSERT_EQ(tree->tooltipAnchor(*tooltip).value(), *anchor);
 
     ASSERT_TRUE(tree->setLayoutStyle(root->rootNodeId(), fixedSize(240.0F, 140.0F)).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 240.0F, .height = 140.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 240.0F, .height = 140.0F}).has_value());
     ASSERT_FALSE(tree->isTooltipOpen(*tooltip).value());
 
     ASSERT_TRUE(tree->showTooltip(*tooltip).has_value());
     ASSERT_FALSE(tree->isTooltipOpen(*tooltip).value());
-    ASSERT_TRUE(context->commitLayout({.width = 240.0F, .height = 140.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 240.0F, .height = 140.0F}).has_value());
     EXPECT_TRUE(tree->isTooltipOpen(*tooltip).value());
     const UI::UITooltipMetrics metrics = tree->tooltipMetrics(*tooltip).value();
     EXPECT_TRUE(metrics.open);
@@ -1953,7 +1958,7 @@ TEST_F(PrimaryWindowUICapabilityTest, TooltipFacadeRoundTripsAndExpiresWithPhase
 
     ASSERT_TRUE(tree->dismissTooltip(*tooltip).has_value());
     EXPECT_TRUE(tree->isTooltipOpen(*tooltip).value());
-    ASSERT_TRUE(context->commitLayout({.width = 240.0F, .height = 140.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 240.0F, .height = 140.0F}).has_value());
     EXPECT_FALSE(tree->isTooltipOpen(*tooltip).value());
     ASSERT_TRUE(tree->clearTooltipAnchor(*tooltip).has_value());
     EXPECT_FALSE(tree->tooltipAnchor(*tooltip).value().hasValue());
@@ -2019,7 +2024,7 @@ TEST_F(PrimaryWindowUICapabilityTest, SplitViewFacadeRoundTripsAndExpiresWithPha
     ASSERT_TRUE(tree->setSplitViewFraction(*splitView, 0.6F).has_value());
     EXPECT_FLOAT_EQ(tree->splitViewFraction(*splitView).value(), 0.6F);
 
-    ASSERT_TRUE(context->commitLayout({.width = 240.0F, .height = 120.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 240.0F, .height = 120.0F}).has_value());
     const UI::UISplitViewMetrics metrics = tree->splitViewMetrics(*splitView).value();
     EXPECT_EQ(metrics.orientation, UI::UISplitViewOrientation::Horizontal);
     EXPECT_FLOAT_EQ(metrics.splitterRect.width, 8.0F);
@@ -2087,13 +2092,13 @@ TEST_F(PrimaryWindowUICapabilityTest, TabViewFacadeRoundTripsCommandsMetricsAndE
     EXPECT_EQ(tree->tabViewActiveTab(*tabView).value(), *firstTab);
     EXPECT_EQ(tree->tabViewActivePanel(*tabView).value(), *firstPanel);
 
-    ASSERT_TRUE(context->commitLayout({.width = 240.0F, .height = 120.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 240.0F, .height = 120.0F}).has_value());
     auto command = tree->routeTabViewCommand(*tabView, UI::UITabViewCommand::Next);
     ASSERT_TRUE(command.has_value()) << command.error().message;
     EXPECT_TRUE(command->targeted);
     EXPECT_TRUE(command->selectionChanged);
     EXPECT_EQ(tree->tabViewActiveTab(*tabView).value(), *secondTab);
-    ASSERT_TRUE(context->commitLayout({.width = 240.0F, .height = 120.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 240.0F, .height = 120.0F}).has_value());
     const UI::UITabViewMetrics metrics = tree->tabViewMetrics(*tabView).value();
     EXPECT_EQ(metrics.activeTab, *secondTab);
     EXPECT_EQ(metrics.activePanel, *secondPanel);
@@ -2258,7 +2263,7 @@ TEST_F(PrimaryWindowUICapabilityTest, ButtonPaintFacadeRoundTripsAndExpiresWithP
     const PrimaryWindowUITreeUpdater& treeView = *tree;
     auto initialPaint = treeView.buttonPaint(*button);
     ASSERT_TRUE(initialPaint.has_value()) << initialPaint.error().message;
-    EXPECT_EQ(*initialPaint, UI::makeTonalButtonChrome(context->productTheme()).states);
+    EXPECT_EQ(*initialPaint, UI::makeTonalButtonChrome(context->style().productTheme()).states);
 
     ASSERT_TRUE(tree->setButtonPaint(*button, ButtonPaint).has_value());
     auto configuredPaint = treeView.buttonPaint(*button);
@@ -2311,11 +2316,11 @@ TEST_F(PrimaryWindowUICapabilityTest, ButtonPaintWrongKindFailureIsStickyAndPrev
     ASSERT_FALSE(finish.has_value());
     EXPECT_EQ(finish.error().code, wrongKind.error().code);
 
-    auto directUpdater = context->treeUpdater(*root);
+    auto directUpdater = context->authoring().treeUpdater(*root);
     ASSERT_TRUE(directUpdater.has_value()) << directUpdater.error().message;
     auto unmodifiedPaint = directUpdater->buttonPaint(*button);
     ASSERT_TRUE(unmodifiedPaint.has_value()) << unmodifiedPaint.error().message;
-    EXPECT_EQ(*unmodifiedPaint, UI::makeTonalButtonChrome(context->productTheme()).states);
+    EXPECT_EQ(*unmodifiedPaint, UI::makeTonalButtonChrome(context->style().productTheme()).states);
 }
 
 TEST_F(PrimaryWindowUICapabilityTest, ButtonActionFacadeSetsReplacesClearsAndQueriesInitialPressedState)
@@ -2483,8 +2488,8 @@ TEST_F(PrimaryWindowUICapabilityTest, RoutedPointerListenerSurvivesItsRegistrati
     ASSERT_FALSE(expiredRegistration.has_value());
     EXPECT_EQ(expiredRegistration.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
 
-    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 100.0F}).has_value());
-    auto routed = context->routePointerInput(UI::UIPointerInputEvent{
+    ASSERT_TRUE(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}).has_value());
+    auto routed = context->input().routePointerInput(UI::UIPointerInputEvent{
         .platformFrame = Platform::PlatformFrameId{1},
         .transitionOrdinal = 0,
         .sourceSequence = 1,
@@ -2650,8 +2655,8 @@ TEST_F(PrimaryWindowUICapabilityTest, UpdateCapabilityMutatesOwnedTreeThenExpire
     ASSERT_TRUE(alive.has_value()) << alive.error().message;
     EXPECT_TRUE(*alive);
     ASSERT_TRUE(state.finishPhase(*updateEpoch, CapabilityPhase::UIUpdate).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 640.0F, .height = 360.0F}).has_value());
-    const UI::UICommittedPaintView paint = context->committedPaint();
+    ASSERT_TRUE(context->publication().commitLayout({.width = 640.0F, .height = 360.0F}).has_value());
+    const UI::UICommittedPaintView paint = context->publication().committedPaint();
     ASSERT_EQ(paint.size(), 1U);
     EXPECT_EQ(paint.entries().front().node, *panel);
     EXPECT_EQ(paint.entries().front().solidFill,
@@ -2678,7 +2683,7 @@ TEST_F(PrimaryWindowUICapabilityTest, CommittedLayoutRectCopiesPreviousPublished
     auto panel = enterTree->createElement(root->rootNodeId(), UI::makePanelElement(fixedSize(80.0F, 40.0F)));
     ASSERT_TRUE(panel.has_value()) << panel.error().message;
     ASSERT_TRUE(state.finishPhase(*enterEpoch, CapabilityPhase::GameStateEnter).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 90.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 160.0F, .height = 90.0F}).has_value());
 
     auto updateEpoch = state.beginUIUpdatePhase(context.get());
     ASSERT_TRUE(updateEpoch.has_value()) << updateEpoch.error().message;
@@ -2703,9 +2708,9 @@ TEST_F(PrimaryWindowUICapabilityTest, SetBoxPaintFailureIsStickyAcrossContextAnd
     auto foreignContextResult = UI::UIContext::Create(window, {.nodeCapacity = 4, .rootCapacity = 1});
     ASSERT_TRUE(foreignContextResult.has_value()) << foreignContextResult.error().message;
     std::unique_ptr<UI::UIContext> foreignContext = std::move(*foreignContextResult);
-    auto foreignRoot = foreignContext->rootBuilder().createRoot();
+    auto foreignRoot = foreignContext->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(foreignRoot.has_value()) << foreignRoot.error().message;
-    auto foreignPanel = foreignContext->rootBuilder().createElement(foreignRoot->rootNodeId(), UI::makePanelElement());
+    auto foreignPanel = foreignContext->authoring().rootBuilder().createElement(foreignRoot->rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(foreignPanel.has_value()) << foreignPanel.error().message;
 
     CapabilityState state;
@@ -2734,8 +2739,8 @@ TEST_F(PrimaryWindowUICapabilityTest, SetBoxPaintFailureIsStickyAcrossContextAnd
     auto finish = state.finishPhase(*epoch, CapabilityPhase::GameStateEnter);
     ASSERT_FALSE(finish.has_value());
     EXPECT_EQ(finish.error().code, UI::UIErrorCode::WrongContext);
-    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 50.0F}).has_value());
-    EXPECT_TRUE(context->committedPaint().empty());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 100.0F, .height = 50.0F}).has_value());
+    EXPECT_TRUE(context->publication().committedPaint().empty());
 }
 
 TEST_F(PrimaryWindowUICapabilityTest, SetBoxPaintRejectsStaleGenerationAndSticksTheError)

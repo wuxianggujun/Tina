@@ -1,5 +1,7 @@
 #include "PrimaryWindowUIColorSchemeCoordinator.hpp"
 
+#include <tina/ui/UIStyleController.hpp>
+
 #include <utility>
 #include <variant>
 
@@ -44,7 +46,7 @@ Core::Status PrimaryWindowUIColorSchemeCoordinator::apply(UI::UIContext* context
         return Core::success();
     }
 
-    const UI::UITheme& activeTheme = context->productTheme();
+    const UI::UITheme& activeTheme = context->style().productTheme();
     if (activeTheme.colorScheme == *pendingColorScheme_)
     {
         pendingColorScheme_.reset();
@@ -53,7 +55,7 @@ Core::Status PrimaryWindowUIColorSchemeCoordinator::apply(UI::UIContext* context
 
     const UI::UITheme candidate =
         UI::makeModernDesktopTheme(*pendingColorScheme_, activeTheme.density);
-    if (Core::Status status = context->setProductTheme(candidate); !status)
+    if (Core::Status status = context->style().setProductTheme(candidate); !status)
     {
         auto error = std::move(status.error());
         error.addContext("PrimaryWindowUIColorSchemeCoordinator::apply");

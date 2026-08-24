@@ -75,8 +75,8 @@ TEST_F(UIInputRouteProducerTest, KeyboardArrowsMoveSpatialFocusAndConsumeMatchin
     expectOk(tree.updater.setLayoutStyle(*second, fixedSize(40.0F, 40.0F)));
     expectOk(tree.updater.setSliderRange(*second, 0.0F, 100.0F, 1.0F));
     expectOk(tree.updater.setSliderValue(*second, 25.0F));
-    expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
-    expectOk(tree.context->requestFocus(tree.target));
+    expectOk(tree.context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
+    expectOk(tree.context->input().requestFocus(tree.target));
 
     auto producer = createProducer();
     ASSERT_NE(producer, nullptr);
@@ -89,7 +89,7 @@ TEST_F(UIInputRouteProducerTest, KeyboardArrowsMoveSpatialFocusAndConsumeMatchin
     auto downOutput = producer->produce(tree.context.get(), *down);
     ASSERT_TRUE(downOutput.has_value()) << (downOutput ? "" : downOutput.error().message);
     EXPECT_TRUE(downOutput->consumption.isConsumed(0));
-    EXPECT_EQ(tree.context->defaultActionFocus(), *second);
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), *second);
 
     auto up = buildFrame(*builder, window, {
                                                    .frameId = {301},
@@ -99,7 +99,7 @@ TEST_F(UIInputRouteProducerTest, KeyboardArrowsMoveSpatialFocusAndConsumeMatchin
     auto upOutput = producer->produce(tree.context.get(), *up);
     ASSERT_TRUE(upOutput.has_value()) << (upOutput ? "" : upOutput.error().message);
     EXPECT_TRUE(upOutput->consumption.isConsumed(0));
-    EXPECT_EQ(tree.context->defaultActionFocus(), *second);
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), *second);
     auto sliderValue = tree.updater.sliderValue(*second);
     ASSERT_TRUE(sliderValue.has_value()) << (sliderValue ? "" : sliderValue.error().message);
     EXPECT_FLOAT_EQ(*sliderValue, 25.0F);
@@ -114,8 +114,8 @@ TEST_F(UIInputRouteProducerTest, GamepadDpadUsesTheSameSpatialFocusRoute)
     expectOk(tree.updater.setLayoutStyle(*second, fixedSize(40.0F, 40.0F)));
     expectOk(tree.updater.setSliderRange(*second, 0.0F, 100.0F, 1.0F));
     expectOk(tree.updater.setSliderValue(*second, 25.0F));
-    expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
-    expectOk(tree.context->requestFocus(tree.target));
+    expectOk(tree.context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
+    expectOk(tree.context->input().requestFocus(tree.target));
 
     auto producer = createProducer();
     ASSERT_NE(producer, nullptr);
@@ -137,7 +137,7 @@ TEST_F(UIInputRouteProducerTest, GamepadDpadUsesTheSameSpatialFocusRoute)
     auto output = producer->produce(tree.context.get(), *frame);
     ASSERT_TRUE(output.has_value()) << (output ? "" : output.error().message);
     EXPECT_TRUE(output->consumption.isConsumed(0));
-    EXPECT_EQ(tree.context->defaultActionFocus(), *second);
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), *second);
     auto sliderValue = tree.updater.sliderValue(*second);
     ASSERT_TRUE(sliderValue.has_value()) << (sliderValue ? "" : sliderValue.error().message);
     EXPECT_FLOAT_EQ(*sliderValue, 25.0F);
@@ -149,8 +149,8 @@ TEST_F(UIInputRouteProducerTest, HorizontalTabViewOwnsArrowAndHomeEndBeforeSpati
     ASSERT_NE(tree.context, nullptr);
     const TabRouteNodes tabs = createTabRouteTree(tree);
     ASSERT_TRUE(tabs.tabView.hasValue());
-    expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
-    expectOk(tree.context->requestFocus(tabs.firstTab));
+    expectOk(tree.context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
+    expectOk(tree.context->input().requestFocus(tabs.firstTab));
 
     auto producer = createProducer();
     ASSERT_NE(producer, nullptr);
@@ -163,7 +163,7 @@ TEST_F(UIInputRouteProducerTest, HorizontalTabViewOwnsArrowAndHomeEndBeforeSpati
     auto nextOutput = producer->produce(tree.context.get(), *nextDown);
     ASSERT_TRUE(nextOutput.has_value()) << (nextOutput ? "" : nextOutput.error().message);
     EXPECT_TRUE(nextOutput->consumption.isConsumed(0));
-    EXPECT_EQ(tree.context->defaultActionFocus(), tabs.secondTab);
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), tabs.secondTab);
     EXPECT_EQ(tree.updater.tabViewActiveTab(tabs.tabView).value(), tabs.secondTab);
 
     auto nextUp = buildFrame(*builder, window, {
@@ -184,7 +184,7 @@ TEST_F(UIInputRouteProducerTest, HorizontalTabViewOwnsArrowAndHomeEndBeforeSpati
     auto firstOutput = producer->produce(tree.context.get(), *firstDown);
     ASSERT_TRUE(firstOutput.has_value()) << (firstOutput ? "" : firstOutput.error().message);
     EXPECT_TRUE(firstOutput->consumption.isConsumed(0));
-    EXPECT_EQ(tree.context->defaultActionFocus(), tabs.firstTab);
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), tabs.firstTab);
     EXPECT_EQ(tree.updater.tabViewActiveTab(tabs.tabView).value(), tabs.firstTab);
 }
 
@@ -195,8 +195,8 @@ TEST_F(UIInputRouteProducerTest, ManualTabViewMovesFocusWithoutSelectionUntilAcc
     const TabRouteNodes tabs = createTabRouteTree(
         tree, UI::UITabViewConfig{.activationMode = UI::UITabActivationMode::Manual});
     ASSERT_TRUE(tabs.tabView.hasValue());
-    expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
-    expectOk(tree.context->requestFocus(tabs.firstTab));
+    expectOk(tree.context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
+    expectOk(tree.context->input().requestFocus(tabs.firstTab));
 
     auto producer = createProducer();
     ASSERT_NE(producer, nullptr);
@@ -209,7 +209,7 @@ TEST_F(UIInputRouteProducerTest, ManualTabViewMovesFocusWithoutSelectionUntilAcc
     auto moveOutput = producer->produce(tree.context.get(), *move);
     ASSERT_TRUE(moveOutput.has_value()) << (moveOutput ? "" : moveOutput.error().message);
     EXPECT_TRUE(moveOutput->consumption.isConsumed(0));
-    EXPECT_EQ(tree.context->defaultActionFocus(), tabs.secondTab);
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), tabs.secondTab);
     EXPECT_EQ(tree.updater.tabViewActiveTab(tabs.tabView).value(), tabs.firstTab);
 
     auto activate = buildFrame(*builder, window, {
@@ -231,8 +231,8 @@ TEST_F(UIInputRouteProducerTest, VerticalTabViewUsesGamepadDpadAndConsumesReleas
     const TabRouteNodes tabs = createTabRouteTree(
         tree, UI::UITabViewConfig{.placement = UI::UITabViewPlacement::Left});
     ASSERT_TRUE(tabs.tabView.hasValue());
-    expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
-    expectOk(tree.context->requestFocus(tabs.firstTab));
+    expectOk(tree.context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
+    expectOk(tree.context->input().requestFocus(tabs.firstTab));
 
     auto producer = createProducer();
     ASSERT_NE(producer, nullptr);
@@ -252,7 +252,7 @@ TEST_F(UIInputRouteProducerTest, VerticalTabViewUsesGamepadDpadAndConsumesReleas
     auto downOutput = producer->produce(tree.context.get(), *down);
     ASSERT_TRUE(downOutput.has_value()) << (downOutput ? "" : downOutput.error().message);
     EXPECT_TRUE(downOutput->consumption.isConsumed(0));
-    EXPECT_EQ(tree.context->defaultActionFocus(), tabs.secondTab);
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), tabs.secondTab);
     EXPECT_EQ(tree.updater.tabViewActiveTab(tabs.tabView).value(), tabs.secondTab);
 
     auto up = buildFrame(*builder, window, {

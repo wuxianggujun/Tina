@@ -42,14 +42,14 @@ createContext(Platform::WindowId window,
 
 [[nodiscard]] UI::UIRootOwner createRoot(UI::UIContext& context)
 {
-    auto result = context.rootBuilder().createRoot();
+    auto result = context.authoring().rootBuilder().createRoot();
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UIRootOwner{};
 }
 
 [[nodiscard]] UI::UITreeUpdater createUpdater(UI::UIContext& context, UI::UIRootOwner& root)
 {
-    auto result = context.treeUpdater(root);
+    auto result = context.authoring().treeUpdater(root);
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UITreeUpdater{};
 }
@@ -214,10 +214,10 @@ TEST(WindowsUiaProviderTest, PublishesDropdownValueAndSelectedItem)
     assertOk(updater.setText(*secondItem, "High"));
     assertOk(updater.setDropdownSelectedItem(*dropdown, *secondItem));
     assertOk(updater.setDropdownOpen(*dropdown, true));
-    assertOk(context->commitLayout({.width = 400.0F, .height = 300.0F}));
+    assertOk(context->publication().commitLayout({.width = 400.0F, .height = 300.0F}));
 
     UI::UIAccessibilityTree tree;
-    assertOk(tree.rebuildFrom(context->committedSemantics()));
+    assertOk(tree.rebuildFrom(context->publication().committedSemantics()));
     assertOk(provider->publish(tree));
 
     auto* uia = dynamic_cast<UI::WindowsUiaAccessibilityProvider*>(provider.get());
@@ -257,12 +257,12 @@ TEST(WindowsUiaProviderTest, FactoryAvailableAndPublishMapsWidgetProperties)
     auto root = createRoot(*context);
     ASSERT_TRUE(root.hasValue());
 
-    auto button = context->rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement());
-    auto checkbox = context->rootBuilder().createElement(root.rootNodeId(), UI::makeCheckboxElement());
-    auto slider = context->rootBuilder().createElement(root.rootNodeId(), UI::makeSliderElement());
-    auto progress = context->rootBuilder().createElement(root.rootNodeId(), UI::makeProgressBarElement());
-    auto radio = context->rootBuilder().createElement(root.rootNodeId(), UI::makeRadioButtonElement());
-    auto textEdit = context->rootBuilder().createElement(root.rootNodeId(), UI::makeTextEditElement());
+    auto button = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement());
+    auto checkbox = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeCheckboxElement());
+    auto slider = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeSliderElement());
+    auto progress = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeProgressBarElement());
+    auto radio = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeRadioButtonElement());
+    auto textEdit = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeTextEditElement());
     ASSERT_TRUE(button.has_value());
     ASSERT_TRUE(checkbox.has_value());
     ASSERT_TRUE(slider.has_value());
@@ -287,10 +287,10 @@ TEST(WindowsUiaProviderTest, FactoryAvailableAndPublishMapsWidgetProperties)
     assertOk(updater.setText(*radio, "Windowed"));
     assertOk(updater.setRadioButtonSelected(*radio, true));
     assertOk(updater.setText(*textEdit, "Player"));
-    assertOk(context->commitLayout({.width = 400.0F, .height = 300.0F}));
+    assertOk(context->publication().commitLayout({.width = 400.0F, .height = 300.0F}));
 
     UI::UIAccessibilityTree tree;
-    assertOk(tree.rebuildFrom(context->committedSemantics()));
+    assertOk(tree.rebuildFrom(context->publication().committedSemantics()));
     assertOk(provider->publish(tree));
     EXPECT_TRUE(provider->hasPublishedTree());
 
@@ -355,25 +355,25 @@ TEST(WindowsUiaProviderTest, StaleNodeAfterDestroyIsRejected)
     auto root = createRoot(*context);
     ASSERT_TRUE(root.hasValue());
 
-    auto button = context->rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement());
+    auto button = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(button.has_value());
     auto updater = createUpdater(*context, root);
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(200.0F, 100.0F)));
     assertOk(updater.setLayoutStyle(*button, fixedSize(80.0F, 32.0F)));
     assertOk(updater.setText(*button, "Doomed"));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
 
     UI::UIAccessibilityTree tree;
-    assertOk(tree.rebuildFrom(context->committedSemantics()));
+    assertOk(tree.rebuildFrom(context->publication().committedSemantics()));
     assertOk(provider->publish(tree));
     const UI::UINodeId staleId = *button;
     ASSERT_TRUE(uia->readMappedNode(staleId).has_value());
 
     assertOk(updater.destroy(*button));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
 
     UI::UIAccessibilityTree fresh;
-    assertOk(fresh.rebuildFrom(context->committedSemantics()));
+    assertOk(fresh.rebuildFrom(context->publication().committedSemantics()));
     EXPECT_EQ(fresh.findNode(staleId), nullptr);
     assertOk(provider->publish(fresh));
     auto read = uia->readMappedNode(staleId);
@@ -432,16 +432,16 @@ TEST(WindowsUiaHostBridgeTest, AttachPublishExposesRootProviderAndChildren)
     ASSERT_NE(context, nullptr);
     auto root = createRoot(*context);
     ASSERT_TRUE(root.hasValue());
-    auto button = context->rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement());
+    auto button = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(button.has_value());
     auto updater = createUpdater(*context, root);
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(200.0F, 100.0F)));
     assertOk(updater.setLayoutStyle(*button, fixedSize(80.0F, 32.0F)));
     assertOk(updater.setText(*button, "Bridge"));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
 
     UI::UIAccessibilityTree tree;
-    assertOk(tree.rebuildFrom(context->committedSemantics()));
+    assertOk(tree.rebuildFrom(context->publication().committedSemantics()));
     assertOk(bridge->publish(tree, *context));
     EXPECT_TRUE(bridge->hasPublishedTree());
     EXPECT_GE(bridge->publishCount(), 1U);
@@ -548,10 +548,10 @@ TEST(WindowsUiaHostBridgeTest, PatternsMarshalActionsAndPreserveControlBehavior)
             EXPECT_EQ(event.source, UI::UIButtonActivationSource::Accessibility);
             ++checkboxActivations;
         })));
-    assertOk(context->commitLayout({.width = 360.0F, .height = 220.0F}));
+    assertOk(context->publication().commitLayout({.width = 360.0F, .height = 220.0F}));
 
     UI::UIAccessibilityTree tree;
-    assertOk(tree.rebuildFrom(context->committedSemantics()));
+    assertOk(tree.rebuildFrom(context->publication().committedSemantics()));
     assertOk(bridge->publish(tree, *context));
 
     ComPtr<IRawElementProviderSimple> rootSimple;
@@ -573,7 +573,7 @@ TEST(WindowsUiaHostBridgeTest, PatternsMarshalActionsAndPreserveControlBehavior)
     EXPECT_HRESULT_SUCCEEDED(invoke->Invoke());
     EXPECT_EQ(buttonActivations, 1U);
     EXPECT_HRESULT_SUCCEEDED(buttonFragment->SetFocus());
-    EXPECT_EQ(context->defaultActionFocus(), *button);
+    EXPECT_EQ(context->input().defaultActionFocus(), *button);
 
     ComPtr<IRawElementProviderFragment> checkboxFragment;
     ASSERT_HRESULT_SUCCEEDED(buttonFragment->Navigate(NavigateDirection_NextSibling, &checkboxFragment));
@@ -690,12 +690,12 @@ TEST(WindowsUiaHostBridgeTest, MenuItemsExposeControlTypesAndTypedPatterns)
 
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(360.0F, 220.0F)));
     assertOk(updater.setMenuAnchor(*menu, *anchor));
-    assertOk(context->commitLayout({.width = 360.0F, .height = 220.0F}));
+    assertOk(context->publication().commitLayout({.width = 360.0F, .height = 220.0F}));
     assertOk(updater.setMenuOpen(*menu, true));
-    assertOk(context->commitLayout({.width = 360.0F, .height = 220.0F}));
+    assertOk(context->publication().commitLayout({.width = 360.0F, .height = 220.0F}));
 
     UI::UIAccessibilityTree tree;
-    assertOk(tree.rebuildFrom(context->committedSemantics()));
+    assertOk(tree.rebuildFrom(context->publication().committedSemantics()));
     assertOk(bridge->publish(tree, *context));
 
     ComPtr<IRawElementProviderSimple> rootSimple;
@@ -833,10 +833,10 @@ TEST(WindowsUiaHostBridgeTest, FragmentHierarchyAndOldSnapshotSurviveRepublishAn
     assertOk(updater.setLayoutStyle(*modal, fixedSize(240.0F, 120.0F)));
     assertOk(updater.setLayoutStyle(*button, fixedSize(100.0F, 32.0F)));
     assertOk(updater.setText(*button, "Before"));
-    assertOk(context->commitLayout({.width = 280.0F, .height = 160.0F}));
+    assertOk(context->publication().commitLayout({.width = 280.0F, .height = 160.0F}));
 
     UI::UIAccessibilityTree tree;
-    assertOk(tree.rebuildFrom(context->committedSemantics()));
+    assertOk(tree.rebuildFrom(context->publication().committedSemantics()));
     assertOk(bridge->publish(tree, *context));
     ComPtr<IRawElementProviderSimple> rootSimple;
     rootSimple.Attach(bridge->acquireRootProvider());
@@ -853,9 +853,9 @@ TEST(WindowsUiaHostBridgeTest, FragmentHierarchyAndOldSnapshotSurviveRepublishAn
     ASSERT_NE(parentFragment.Get(), nullptr);
 
     assertOk(updater.setText(*button, "After"));
-    assertOk(context->commitLayout({.width = 280.0F, .height = 160.0F}));
+    assertOk(context->publication().commitLayout({.width = 280.0F, .height = 160.0F}));
     UI::UIAccessibilityTree fresh;
-    assertOk(fresh.rebuildFrom(context->committedSemantics()));
+    assertOk(fresh.rebuildFrom(context->publication().committedSemantics()));
     assertOk(bridge->publish(fresh, *context));
     bridge->clear();
 

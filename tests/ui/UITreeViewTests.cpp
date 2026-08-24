@@ -210,14 +210,14 @@ struct MutableTreeDataSource final {
 
 [[nodiscard]] UI::UIRootOwner createRoot(UI::UIContext& context)
 {
-    auto result = context.rootBuilder().createRoot();
+    auto result = context.authoring().rootBuilder().createRoot();
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UIRootOwner{};
 }
 
 [[nodiscard]] UI::UITreeUpdater createUpdater(UI::UIContext& context, UI::UIRootOwner& root)
 {
-    auto result = context.treeUpdater(root);
+    auto result = context.authoring().treeUpdater(root);
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UITreeUpdater{};
 }
@@ -337,7 +337,7 @@ TEST_F(UITreeViewTest, VirtualizesOneHundredThousandItemsWithFixedNodePool)
     assertOk(updater.setTreeViewDataSource(treeView, source.view()));
     EXPECT_EQ(context->liveNodeCount(), RowCapacity + 2U);
 
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     UI::UITreeViewMetrics metrics = updater.treeViewMetrics(treeView).value();
     EXPECT_EQ(metrics.logicalItemCount, 100'000U);
     EXPECT_EQ(metrics.visibleItemCount, 5U);
@@ -347,14 +347,14 @@ TEST_F(UITreeViewTest, VirtualizesOneHundredThousandItemsWithFixedNodePool)
     EXPECT_TRUE(metrics.verticalScrollBarVisible);
 
     assertOk(updater.scrollTreeViewToIndex(treeView, 50'000, UI::UITreeViewScrollAlignment::Start));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     metrics = updater.treeViewMetrics(treeView).value();
     EXPECT_EQ(metrics.firstVisibleIndex, 50'000U);
     EXPECT_EQ(metrics.firstMaterializedIndex, 49'998U);
     EXPECT_EQ(metrics.materializedItemCount, 9U);
     EXPECT_EQ(context->liveNodeCount(), RowCapacity + 2U);
 
-    const UI::UISemanticsEntry* row = findVirtualItem(context->committedSemantics(), 50'000);
+    const UI::UISemanticsEntry* row = findVirtualItem(context->publication().committedSemantics(), 50'000);
     ASSERT_NE(row, nullptr);
     EXPECT_EQ(row->virtualItemKey, 51'001U);
     EXPECT_EQ(row->role, UI::UISemanticsRole::TreeItem);
@@ -362,7 +362,7 @@ TEST_F(UITreeViewTest, VirtualizesOneHundredThousandItemsWithFixedNodePool)
     EXPECT_FALSE(row->expandable);
 
     UI::UIAccessibilityTree accessibility;
-    assertOk(accessibility.rebuildFrom(context->committedSemantics()));
+    assertOk(accessibility.rebuildFrom(context->publication().committedSemantics()));
     const UI::UIAccessibilityNode* accessibleRow = accessibility.findNode(row->node);
     ASSERT_NE(accessibleRow, nullptr);
     EXPECT_EQ(accessibleRow->virtualItemKey, row->virtualItemKey);
@@ -390,19 +390,19 @@ TEST_F(UITreeViewTest, ProgrammaticSelectionPublishesSelectedAccessibleVirtualIt
                                                     .scrollBarVisibility = UI::UIScrollBarVisibility::Auto,
                                                 }));
     assertOk(updater.setTreeViewDataSource(treeView, source.view()));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
     assertOk(updater.setTreeViewSelectedIndex(treeView, SelectedIndex));
     assertOk(updater.scrollTreeViewToIndex(treeView, SelectedIndex, UI::UITreeViewScrollAlignment::End));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
-    const UI::UISemanticsEntry* selected = findVirtualItem(context->committedSemantics(), SelectedIndex);
+    const UI::UISemanticsEntry* selected = findVirtualItem(context->publication().committedSemantics(), SelectedIndex);
     ASSERT_NE(selected, nullptr);
     EXPECT_EQ(selected->virtualItemKey, 413U);
     EXPECT_TRUE(selected->selected);
 
     UI::UIAccessibilityTree accessibility;
-    assertOk(accessibility.rebuildFrom(context->committedSemantics()));
+    assertOk(accessibility.rebuildFrom(context->publication().committedSemantics()));
     const UI::UIAccessibilityNode* accessible = accessibility.findNode(selected->node);
     ASSERT_NE(accessible, nullptr);
     EXPECT_EQ(accessible->virtualItemKey, selected->virtualItemKey);
@@ -437,9 +437,9 @@ TEST_F(UITreeViewTest, PointerSelectsRowsAndDisclosureTogglesCommittedStableKey)
                                                     .disclosureColor = UI::rgb(0xE0A030),
                                                 }));
     assertOk(updater.setTreeViewDataSource(treeView, source.view()));
-    assertOk(context->commitLayout({.width = 160.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 160.0F, .height = 120.0F}));
 
-    const UI::UISemanticsEntry* workspace = findVirtualItem(context->committedSemantics(), 0);
+    const UI::UISemanticsEntry* workspace = findVirtualItem(context->publication().committedSemantics(), 0);
     ASSERT_NE(workspace, nullptr);
     EXPECT_TRUE(workspace->expandable);
     EXPECT_TRUE(workspace->expanded);
@@ -448,54 +448,54 @@ TEST_F(UITreeViewTest, PointerSelectsRowsAndDisclosureTogglesCommittedStableKey)
         .y = workspace->worldRect.y + workspace->worldRect.height * 0.5F,
     };
     auto rowDown =
-        context->routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 1, rowBody));
+        context->input().routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 1, rowBody));
     ASSERT_TRUE(rowDown.has_value()) << rowDown.error().message;
     EXPECT_TRUE(rowDown->consumed);
-    assertOk(context->commitLayout({.width = 160.0F, .height = 120.0F}));
-    const UI::UISemanticsEntry* focusedTree = findSemanticsNode(context->committedSemantics(), treeView);
+    assertOk(context->publication().commitLayout({.width = 160.0F, .height = 120.0F}));
+    const UI::UISemanticsEntry* focusedTree = findSemanticsNode(context->publication().committedSemantics(), treeView);
     ASSERT_NE(focusedTree, nullptr);
     EXPECT_TRUE(focusedTree->focused);
     ASSERT_TRUE(
-        context->routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::ButtonUp, 2, rowBody))->consumed);
-    EXPECT_EQ(context->defaultActionFocus(), treeView);
+        context->input().routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::ButtonUp, 2, rowBody))->consumed);
+    EXPECT_EQ(context->input().defaultActionFocus(), treeView);
     EXPECT_EQ(updater.treeViewSelection(treeView).value(),
               (UI::UITreeViewSelection{.key = 1, .logicalIndex = 0, .level = 0}));
 
-    workspace = findVirtualItem(context->committedSemantics(), 0);
+    workspace = findVirtualItem(context->publication().committedSemantics(), 0);
     ASSERT_NE(workspace, nullptr);
     const UI::UILogicalPoint disclosure{
         .x = workspace->worldRect.x + 14.0F,
         .y = workspace->worldRect.y + workspace->worldRect.height * 0.5F,
     };
     ASSERT_TRUE(
-        context->routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 3, disclosure))
+        context->input().routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 3, disclosure))
             ->consumed);
-    ASSERT_TRUE(context->routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::ButtonUp, 4, disclosure))
+    ASSERT_TRUE(context->input().routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::ButtonUp, 4, disclosure))
                     ->consumed);
     EXPECT_EQ(source.expansionCallCount, 1U);
     EXPECT_EQ(source.lastExpansionKey, 1U);
     EXPECT_FALSE(source.nodes[0].expanded);
     EXPECT_EQ(updater.treeViewSelection(treeView).value().key, 1U);
-    assertOk(context->commitLayout({.width = 160.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 160.0F, .height = 120.0F}));
     EXPECT_EQ(updater.treeViewMetrics(treeView).value().logicalItemCount, 2U);
 
-    workspace = findVirtualItem(context->committedSemantics(), 0);
+    workspace = findVirtualItem(context->publication().committedSemantics(), 0);
     ASSERT_NE(workspace, nullptr);
     ASSERT_TRUE(
-        context->routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 5, disclosure))
+        context->input().routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 5, disclosure))
             ->consumed);
-    ASSERT_TRUE(context->routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::ButtonUp, 6, disclosure))
+    ASSERT_TRUE(context->input().routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::ButtonUp, 6, disclosure))
                     ->consumed);
     EXPECT_TRUE(source.nodes[0].expanded);
-    assertOk(context->commitLayout({.width = 160.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 160.0F, .height = 120.0F}));
     EXPECT_EQ(updater.treeViewMetrics(treeView).value().logicalItemCount, 6U);
 
-    const UI::UISemanticsEntry* selected = findVirtualItem(context->committedSemantics(), 0);
+    const UI::UISemanticsEntry* selected = findVirtualItem(context->publication().committedSemantics(), 0);
     ASSERT_NE(selected, nullptr);
     EXPECT_TRUE(selected->selected);
     EXPECT_TRUE(selected->focused);
     bool foundSelectionPaint = false;
-    const UI::UICommittedPaintView paint = context->committedPaint();
+    const UI::UICommittedPaintView paint = context->publication().committedPaint();
     for (const UI::UICommittedPaintEntry& entry : paint.entries())
     {
         foundSelectionPaint = foundSelectionPaint ||
@@ -504,11 +504,11 @@ TEST_F(UITreeViewTest, PointerSelectsRowsAndDisclosureTogglesCommittedStableKey)
     }
     EXPECT_TRUE(foundSelectionPaint);
 
-    auto wheel = context->routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::Wheel, 7,
+    auto wheel = context->input().routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::Wheel, 7,
                                                          {.x = 80.0F, .y = 60.0F}, {.x = 0.0F, .y = -1.0F}));
     ASSERT_TRUE(wheel.has_value()) << wheel.error().message;
     EXPECT_TRUE(wheel->consumed);
-    assertOk(context->commitLayout({.width = 160.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 160.0F, .height = 120.0F}));
     EXPECT_FLOAT_EQ(updater.treeViewMetrics(treeView).value().scrollOffset, 24.0F);
 }
 
@@ -526,65 +526,65 @@ TEST_F(UITreeViewTest, KeyboardCommandsNavigateHierarchySkipDisabledRowsAndDebou
     assertOk(updater.setLayoutStyle(treeView, fixedSize(160.0F, 120.0F)));
     assertOk(updater.setTreeViewStyle(treeView, {.rowHeight = 24.0F, .overscanRows = 1}));
     assertOk(updater.setTreeViewDataSource(treeView, source.view()));
-    assertOk(context->commitLayout({.width = 160.0F, .height = 120.0F}));
-    assertOk(context->requestFocus(treeView));
+    assertOk(context->publication().commitLayout({.width = 160.0F, .height = 120.0F}));
+    assertOk(context->input().requestFocus(treeView));
 
-    auto first = context->routeTreeViewCommand(UI::UITreeViewCommand::NextItem, true);
+    auto first = context->input().routeTreeViewCommand(UI::UITreeViewCommand::NextItem, true);
     ASSERT_TRUE(first.has_value()) << first.error().message;
     EXPECT_TRUE(first->consumed);
     EXPECT_TRUE(first->changed);
     EXPECT_EQ(first->selection, (UI::UITreeViewSelection{.key = 1, .logicalIndex = 0, .level = 0}));
-    auto repeated = context->routeTreeViewCommand(UI::UITreeViewCommand::NextItem, true);
+    auto repeated = context->input().routeTreeViewCommand(UI::UITreeViewCommand::NextItem, true);
     ASSERT_TRUE(repeated.has_value());
     EXPECT_TRUE(repeated->consumed);
     EXPECT_FALSE(repeated->changed);
-    EXPECT_TRUE(context->routeTreeViewCommand(UI::UITreeViewCommand::NextItem, false)->consumed);
+    EXPECT_TRUE(context->input().routeTreeViewCommand(UI::UITreeViewCommand::NextItem, false)->consumed);
 
-    auto sourceFolder = context->routeTreeViewCommand(UI::UITreeViewCommand::ExpandOrFirstChild, true);
+    auto sourceFolder = context->input().routeTreeViewCommand(UI::UITreeViewCommand::ExpandOrFirstChild, true);
     ASSERT_TRUE(sourceFolder.has_value()) << sourceFolder.error().message;
     EXPECT_EQ(sourceFolder->selection, (UI::UITreeViewSelection{.key = 2, .logicalIndex = 1, .level = 1}));
-    EXPECT_TRUE(context->routeTreeViewCommand(UI::UITreeViewCommand::ExpandOrFirstChild, false)->consumed);
+    EXPECT_TRUE(context->input().routeTreeViewCommand(UI::UITreeViewCommand::ExpandOrFirstChild, false)->consumed);
 
-    auto mainFile = context->routeTreeViewCommand(UI::UITreeViewCommand::ExpandOrFirstChild, true);
+    auto mainFile = context->input().routeTreeViewCommand(UI::UITreeViewCommand::ExpandOrFirstChild, true);
     ASSERT_TRUE(mainFile.has_value()) << mainFile.error().message;
     EXPECT_EQ(mainFile->selection, (UI::UITreeViewSelection{.key = 3, .logicalIndex = 2, .level = 2}));
-    EXPECT_TRUE(context->routeTreeViewCommand(UI::UITreeViewCommand::ExpandOrFirstChild, false)->consumed);
+    EXPECT_TRUE(context->input().routeTreeViewCommand(UI::UITreeViewCommand::ExpandOrFirstChild, false)->consumed);
 
-    auto testsFolder = context->routeTreeViewCommand(UI::UITreeViewCommand::NextItem, true);
+    auto testsFolder = context->input().routeTreeViewCommand(UI::UITreeViewCommand::NextItem, true);
     ASSERT_TRUE(testsFolder.has_value()) << testsFolder.error().message;
     EXPECT_EQ(testsFolder->selection, (UI::UITreeViewSelection{.key = 5, .logicalIndex = 4, .level = 1}));
-    EXPECT_TRUE(context->routeTreeViewCommand(UI::UITreeViewCommand::NextItem, false)->consumed);
+    EXPECT_TRUE(context->input().routeTreeViewCommand(UI::UITreeViewCommand::NextItem, false)->consumed);
 
-    auto expanded = context->routeTreeViewCommand(UI::UITreeViewCommand::ExpandOrFirstChild, true);
+    auto expanded = context->input().routeTreeViewCommand(UI::UITreeViewCommand::ExpandOrFirstChild, true);
     ASSERT_TRUE(expanded.has_value()) << expanded.error().message;
     EXPECT_TRUE(expanded->consumed);
     EXPECT_TRUE(expanded->changed);
     EXPECT_TRUE(expanded->expansionChanged);
     EXPECT_TRUE(source.nodes[4].expanded);
-    EXPECT_TRUE(context->routeTreeViewCommand(UI::UITreeViewCommand::ExpandOrFirstChild, false)->consumed);
+    EXPECT_TRUE(context->input().routeTreeViewCommand(UI::UITreeViewCommand::ExpandOrFirstChild, false)->consumed);
 
-    auto firstChild = context->routeTreeViewCommand(UI::UITreeViewCommand::ExpandOrFirstChild, true);
+    auto firstChild = context->input().routeTreeViewCommand(UI::UITreeViewCommand::ExpandOrFirstChild, true);
     ASSERT_TRUE(firstChild.has_value()) << firstChild.error().message;
     EXPECT_EQ(firstChild->selection, (UI::UITreeViewSelection{.key = 6, .logicalIndex = 5, .level = 2}));
-    EXPECT_TRUE(context->routeTreeViewCommand(UI::UITreeViewCommand::ExpandOrFirstChild, false)->consumed);
+    EXPECT_TRUE(context->input().routeTreeViewCommand(UI::UITreeViewCommand::ExpandOrFirstChild, false)->consumed);
 
-    auto parent = context->routeTreeViewCommand(UI::UITreeViewCommand::CollapseOrParent, true);
+    auto parent = context->input().routeTreeViewCommand(UI::UITreeViewCommand::CollapseOrParent, true);
     ASSERT_TRUE(parent.has_value()) << parent.error().message;
     EXPECT_EQ(parent->selection, (UI::UITreeViewSelection{.key = 5, .logicalIndex = 4, .level = 1}));
-    EXPECT_TRUE(context->routeTreeViewCommand(UI::UITreeViewCommand::CollapseOrParent, false)->consumed);
+    EXPECT_TRUE(context->input().routeTreeViewCommand(UI::UITreeViewCommand::CollapseOrParent, false)->consumed);
 
-    auto collapsed = context->routeTreeViewCommand(UI::UITreeViewCommand::ToggleExpanded, true);
+    auto collapsed = context->input().routeTreeViewCommand(UI::UITreeViewCommand::ToggleExpanded, true);
     ASSERT_TRUE(collapsed.has_value()) << collapsed.error().message;
     EXPECT_TRUE(collapsed->expansionChanged);
     EXPECT_FALSE(source.nodes[4].expanded);
-    EXPECT_TRUE(context->routeTreeViewCommand(UI::UITreeViewCommand::ToggleExpanded, false)->consumed);
+    EXPECT_TRUE(context->input().routeTreeViewCommand(UI::UITreeViewCommand::ToggleExpanded, false)->consumed);
 
-    auto activated = context->routeTreeViewCommand(UI::UITreeViewCommand::Activate, true);
+    auto activated = context->input().routeTreeViewCommand(UI::UITreeViewCommand::Activate, true);
     ASSERT_TRUE(activated.has_value()) << activated.error().message;
     EXPECT_TRUE(activated->consumed);
     EXPECT_TRUE(activated->activated);
     EXPECT_EQ(activated->selection.key, 5U);
-    EXPECT_TRUE(context->routeTreeViewCommand(UI::UITreeViewCommand::Activate, false)->consumed);
+    EXPECT_TRUE(context->input().routeTreeViewCommand(UI::UITreeViewCommand::Activate, false)->consumed);
 }
 
 TEST_F(UITreeViewTest, RejectedExpansionAndFailedCommitPreservePublishedState)
@@ -605,43 +605,43 @@ TEST_F(UITreeViewTest, RejectedExpansionAndFailedCommitPreservePublishedState)
                                                     .wheelStep = 20.0F,
                                                 }));
     assertOk(updater.setTreeViewDataSource(treeView, source.view()));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 60.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 60.0F}));
 
     const UI::UITreeViewMetrics committedMetrics = updater.treeViewMetrics(treeView).value();
-    const u64 committedLayoutRevision = context->committedLayout().layoutRevision();
-    const u64 committedSemanticsRevision = context->committedSemantics().semanticsRevision();
-    const UI::UISemanticsEntry* committedFirst = findVirtualItem(context->committedSemantics(), 0);
+    const u64 committedLayoutRevision = context->publication().committedLayout().layoutRevision();
+    const u64 committedSemanticsRevision = context->publication().committedSemantics().semanticsRevision();
+    const UI::UISemanticsEntry* committedFirst = findVirtualItem(context->publication().committedSemantics(), 0);
     ASSERT_NE(committedFirst, nullptr);
     EXPECT_EQ(committedFirst->name, "Old");
 
     source.label = "New";
     source.failingIndex = 2;
     assertOk(updater.invalidateTreeViewItems(treeView));
-    const Core::Status sourceFailure = context->commitLayout({.width = 100.0F, .height = 60.0F});
+    const Core::Status sourceFailure = context->publication().commitLayout({.width = 100.0F, .height = 60.0F});
     ASSERT_FALSE(sourceFailure.has_value());
     EXPECT_EQ(sourceFailure.error().code, UI::UIErrorCode::InvalidControlValue);
-    EXPECT_EQ(context->committedLayout().layoutRevision(), committedLayoutRevision);
-    EXPECT_EQ(context->committedSemantics().semanticsRevision(), committedSemanticsRevision);
+    EXPECT_EQ(context->publication().committedLayout().layoutRevision(), committedLayoutRevision);
+    EXPECT_EQ(context->publication().committedSemantics().semanticsRevision(), committedSemanticsRevision);
     EXPECT_EQ(updater.treeViewMetrics(treeView).value(), committedMetrics);
-    committedFirst = findVirtualItem(context->committedSemantics(), 0);
+    committedFirst = findVirtualItem(context->publication().committedSemantics(), 0);
     ASSERT_NE(committedFirst, nullptr);
     EXPECT_EQ(committedFirst->name, "Old");
 
     source.failingIndex = (std::numeric_limits<u64>::max)();
-    assertOk(context->commitLayout({.width = 100.0F, .height = 60.0F}));
-    EXPECT_EQ(findVirtualItem(context->committedSemantics(), 0)->name, "New");
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 60.0F}));
+    EXPECT_EQ(findVirtualItem(context->publication().committedSemantics(), 0)->name, "New");
     const UI::UITreeViewMetrics recoveredMetrics = updater.treeViewMetrics(treeView).value();
-    const u64 recoveredRevision = context->committedLayout().layoutRevision();
+    const u64 recoveredRevision = context->publication().committedLayout().layoutRevision();
 
     assertOk(updater.setTreeViewStyle(treeView, {
                                                     .rowHeight = 20.0F,
                                                     .overscanRows = 2,
                                                     .wheelStep = 20.0F,
                                                 }));
-    const Core::Status poolOverflow = context->commitLayout({.width = 100.0F, .height = 100.0F});
+    const Core::Status poolOverflow = context->publication().commitLayout({.width = 100.0F, .height = 100.0F});
     ASSERT_FALSE(poolOverflow.has_value());
     EXPECT_EQ(poolOverflow.error().code, UI::UIErrorCode::CapacityExceeded);
-    EXPECT_EQ(context->committedLayout().layoutRevision(), recoveredRevision);
+    EXPECT_EQ(context->publication().committedLayout().layoutRevision(), recoveredRevision);
     EXPECT_EQ(updater.treeViewMetrics(treeView).value(), recoveredMetrics);
 }
 
@@ -658,17 +658,17 @@ TEST_F(UITreeViewTest, ExpansionRejectionLeavesVisibleProjectionUnchanged)
     assertOk(updater.setLayoutStyle(treeView, fixedSize(160.0F, 120.0F)));
     assertOk(updater.setTreeViewStyle(treeView, {.rowHeight = 24.0F, .overscanRows = 1}));
     assertOk(updater.setTreeViewDataSource(treeView, source.view()));
-    assertOk(context->commitLayout({.width = 160.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 160.0F, .height = 120.0F}));
     assertOk(updater.setTreeViewSelectedIndex(treeView, 0));
-    assertOk(context->requestFocus(treeView));
+    assertOk(context->input().requestFocus(treeView));
     source.rejectExpansion = true;
 
-    auto rejected = context->routeTreeViewCommand(UI::UITreeViewCommand::ToggleExpanded, true);
+    auto rejected = context->input().routeTreeViewCommand(UI::UITreeViewCommand::ToggleExpanded, true);
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidControlValue);
     EXPECT_TRUE(source.nodes[0].expanded);
     EXPECT_EQ(source.visibleCount, 6U);
-    assertOk(context->commitLayout({.width = 160.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 160.0F, .height = 120.0F}));
     EXPECT_EQ(updater.treeViewMetrics(treeView).value().logicalItemCount, 6U);
     EXPECT_EQ(updater.treeViewSelection(treeView).value().key, 1U);
 }
@@ -687,8 +687,8 @@ TEST_F(UITreeViewTest, InternalRowsCannotBeDestroyedIndependently)
     assertOk(updater.setLayoutStyle(treeView, fixedSize(100.0F, 60.0F)));
     assertOk(updater.setTreeViewStyle(treeView, {.rowHeight = 20.0F, .overscanRows = 1}));
     assertOk(updater.setTreeViewDataSource(treeView, source.view()));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 60.0F}));
-    const UI::UISemanticsEntry* row = findVirtualItem(context->committedSemantics(), 0);
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 60.0F}));
+    const UI::UISemanticsEntry* row = findVirtualItem(context->publication().committedSemantics(), 0);
     ASSERT_NE(row, nullptr);
 
     const Core::Status rejected = updater.destroy(row->node);
@@ -721,18 +721,18 @@ TEST_F(UITreeViewTest, WheelAndCommitRemainAllocationFreeAfterWarmup)
                                                 }));
     assertOk(updater.setTreeViewDataSource(treeView, source.view()));
     assertOk(updater.scrollTreeViewToIndex(treeView, 10, UI::UITreeViewScrollAlignment::Start));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     const usize allocationCount = resource.allocationCount();
 
     for (u64 routeIndex = 0; routeIndex < 200; ++routeIndex)
     {
         const float wheelDelta = routeIndex % 2 == 0 ? -1.0F : 1.0F;
         auto routed =
-            context->routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::Wheel, routeIndex + 1,
+            context->input().routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::Wheel, routeIndex + 1,
                                                     {.x = 50.0F, .y = 50.0F}, {.x = 0.0F, .y = wheelDelta}));
         ASSERT_TRUE(routed.has_value()) << (routed ? "" : routed.error().message);
         EXPECT_TRUE(routed->consumed);
-        assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+        assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     }
     EXPECT_EQ(resource.allocationCount(), allocationCount);
 }
@@ -760,16 +760,16 @@ TEST_F(UITreeViewTest, ProductChromeKeepsConsecutiveRowTextInsideRequestedBounds
             .wheelStep = 24.0F,
         }));
     assertOk(updater.setTreeViewDataSource(treeView, source.view()));
-    assertOk(context->commitLayout({.width = 180.0F, .height = 80.0F}));
+    assertOk(context->publication().commitLayout({.width = 180.0F, .height = 80.0F}));
 
-    const UI::UISemanticsEntry* firstRow = findVirtualItem(context->committedSemantics(), 0);
-    const UI::UISemanticsEntry* secondRow = findVirtualItem(context->committedSemantics(), 1);
+    const UI::UISemanticsEntry* firstRow = findVirtualItem(context->publication().committedSemantics(), 0);
+    const UI::UISemanticsEntry* secondRow = findVirtualItem(context->publication().committedSemantics(), 1);
     ASSERT_NE(firstRow, nullptr);
     ASSERT_NE(secondRow, nullptr);
     EXPECT_LE(firstRow->worldRect.bottom(), secondRow->worldRect.y);
 
-    const UI::UICommittedLayoutEntry* firstLayout = findLayoutEntry(context->committedLayout(), firstRow->node);
-    const UI::UICommittedLayoutEntry* secondLayout = findLayoutEntry(context->committedLayout(), secondRow->node);
+    const UI::UICommittedLayoutEntry* firstLayout = findLayoutEntry(context->publication().committedLayout(), firstRow->node);
+    const UI::UICommittedLayoutEntry* secondLayout = findLayoutEntry(context->publication().committedLayout(), secondRow->node);
     ASSERT_NE(firstLayout, nullptr);
     ASSERT_NE(secondLayout, nullptr);
     for (const UI::UICommittedLayoutEntry* rowLayout : {firstLayout, secondLayout})
@@ -790,7 +790,7 @@ TEST_F(UITreeViewTest, ProductChromeKeepsConsecutiveRowTextInsideRequestedBounds
         UI::premultiply(UI::makeModernDesktopTheme().colors.onSurface);
     usize firstRowTextPaintCount = 0;
     usize secondRowTextPaintCount = 0;
-    for (const UI::UICommittedPaintEntry& paint : context->committedPaint().entries())
+    for (const UI::UICommittedPaintEntry& paint : context->publication().committedPaint().entries())
     {
         if (paint.solidFill != textColor || (paint.node != firstRow->node && paint.node != secondRow->node))
         {

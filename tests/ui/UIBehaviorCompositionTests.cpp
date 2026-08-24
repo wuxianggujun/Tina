@@ -34,7 +34,7 @@ TEST(UIBehaviorCompositionTests, NonFocusableActivatePanelRoutesPointerWithoutTa
         .role = UI::UISemanticsRole::Button,
         .actions = UI::UISemanticsAction::Activate,
     };
-    auto nodeResult = context->rootBuilder().createElement(root.rootNodeId(), descriptor);
+    auto nodeResult = context->authoring().rootBuilder().createElement(root.rootNodeId(), descriptor);
     ASSERT_TRUE(nodeResult) << (nodeResult ? "" : nodeResult.error().message);
     const UI::UINodeId node = *nodeResult;
     auto updater = createUpdater(*context, root);
@@ -43,13 +43,13 @@ TEST(UIBehaviorCompositionTests, NonFocusableActivatePanelRoutesPointerWithoutTa
 
     ActionRecorder recorder;
     assertOk(updater.setButtonAction(node, makeAction(recorder, 7)));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
     const UI::UIPointerRouteResult down =
         route(*context, makePointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 1));
     EXPECT_TRUE(down.consumed);
     EXPECT_TRUE(buttonPressed(updater, node));
-    EXPECT_FALSE(context->defaultActionFocus().hasValue());
+    EXPECT_FALSE(context->input().defaultActionFocus().hasValue());
 
     const UI::UIPointerRouteResult up =
         route(*context, makePointerInput(window, UI::UIRoutedPointerEventKind::ButtonUp, 2));
@@ -58,13 +58,13 @@ TEST(UIBehaviorCompositionTests, NonFocusableActivatePanelRoutesPointerWithoutTa
     ASSERT_EQ(recorder.size, 1U);
     EXPECT_EQ(recorder.entries[0].button, node);
     EXPECT_EQ(recorder.entries[0].source, UI::UIButtonActivationSource::PrimaryPointer);
-    assertOk(context->performAccessibilityAction({
+    assertOk(context->input().performAccessibilityAction({
         .kind = UI::UIAccessibilityActionKind::Invoke,
         .node = node,
     }));
     ASSERT_EQ(recorder.size, 2U);
     EXPECT_EQ(recorder.entries[1].source, UI::UIButtonActivationSource::Accessibility);
-    EXPECT_FALSE(context->defaultActionFocus().hasValue());
+    EXPECT_FALSE(context->input().defaultActionFocus().hasValue());
     EXPECT_FALSE(updater.setChecked(node, true));
 
     const UI::UIContextStatistics statistics = context->statistics();
@@ -98,7 +98,7 @@ TEST(UIBehaviorCompositionTests, FocusableTextToggleComposesPointerKeyboardAndSe
         .actions = UI::UISemanticsAction::Focus | UI::UISemanticsAction::Activate | UI::UISemanticsAction::Toggle,
         .useContentAsName = true,
     };
-    auto nodeResult = context->rootBuilder().createElement(root.rootNodeId(), descriptor);
+    auto nodeResult = context->authoring().rootBuilder().createElement(root.rootNodeId(), descriptor);
     ASSERT_TRUE(nodeResult) << (nodeResult ? "" : nodeResult.error().message);
     const UI::UINodeId node = *nodeResult;
     auto updater = createUpdater(*context, root);
@@ -107,18 +107,18 @@ TEST(UIBehaviorCompositionTests, FocusableTextToggleComposesPointerKeyboardAndSe
 
     ActionRecorder recorder;
     assertOk(updater.setButtonAction(node, makeAction(recorder, 9)));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
     route(*context, makePointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 1));
     route(*context, makePointerInput(window, UI::UIRoutedPointerEventKind::ButtonUp, 2));
-    EXPECT_EQ(context->defaultActionFocus(), node);
+    EXPECT_EQ(context->input().defaultActionFocus(), node);
     auto checked = updater.isChecked(node);
     ASSERT_TRUE(checked);
     EXPECT_TRUE(*checked);
     ASSERT_EQ(recorder.size, 1U);
 
     auto keyboard =
-        context->routeDefaultActionActivate(Platform::PlatformFrameId{3}, 3, UI::UIButtonActivationSource::Keyboard);
+        context->input().routeDefaultActionActivate(Platform::PlatformFrameId{3}, 3, UI::UIButtonActivationSource::Keyboard);
     ASSERT_TRUE(keyboard) << (keyboard ? "" : keyboard.error().message);
     EXPECT_TRUE(keyboard->consumed);
     EXPECT_TRUE(keyboard->activated);
@@ -128,8 +128,8 @@ TEST(UIBehaviorCompositionTests, FocusableTextToggleComposesPointerKeyboardAndSe
     ASSERT_EQ(recorder.size, 2U);
     EXPECT_EQ(recorder.entries[1].source, UI::UIButtonActivationSource::Keyboard);
 
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
-    const UI::UISemanticsEntry* semantics = findSemanticsEntry(context->committedSemantics(), node);
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
+    const UI::UISemanticsEntry* semantics = findSemanticsEntry(context->publication().committedSemantics(), node);
     ASSERT_NE(semantics, nullptr);
     EXPECT_FALSE(semantics->checked);
     EXPECT_TRUE(semantics->focused);
@@ -157,7 +157,7 @@ TEST(UIBehaviorCompositionTests, ToggleOnlyPanelSupportsStateAndAccessibilityWit
         .role = UI::UISemanticsRole::Checkbox,
         .actions = UI::UISemanticsAction::Toggle,
     };
-    auto nodeResult = context->rootBuilder().createElement(root.rootNodeId(), descriptor);
+    auto nodeResult = context->authoring().rootBuilder().createElement(root.rootNodeId(), descriptor);
     ASSERT_TRUE(nodeResult) << (nodeResult ? "" : nodeResult.error().message);
     const UI::UINodeId node = *nodeResult;
     auto updater = createUpdater(*context, root);
@@ -166,19 +166,19 @@ TEST(UIBehaviorCompositionTests, ToggleOnlyPanelSupportsStateAndAccessibilityWit
     assertOk(updater.setChecked(node, true));
     EXPECT_FALSE(
         updater.setButtonAction(node, UI::UIButtonActionCallback([](const UI::UIButtonActionEvent&) noexcept {})));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
-    assertOk(context->performAccessibilityAction({
+    assertOk(context->input().performAccessibilityAction({
         .kind = UI::UIAccessibilityActionKind::Toggle,
         .node = node,
     }));
     auto checked = updater.isChecked(node);
     ASSERT_TRUE(checked);
     EXPECT_FALSE(*checked);
-    EXPECT_FALSE(context->defaultActionFocus().hasValue());
+    EXPECT_FALSE(context->input().defaultActionFocus().hasValue());
 
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
-    const UI::UISemanticsEntry* semantics = findSemanticsEntry(context->committedSemantics(), node);
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
+    const UI::UISemanticsEntry* semantics = findSemanticsEntry(context->publication().committedSemantics(), node);
     ASSERT_NE(semantics, nullptr);
     EXPECT_FALSE(semantics->checked);
 }
@@ -207,7 +207,7 @@ TEST(UIBehaviorCompositionTests, TextRangeInputUsesCapabilityStateForKeyboardAcc
             UI::UISemanticsAction::Focus | UI::UISemanticsAction::Activate | UI::UISemanticsAction::SetRangeValue,
         .useContentAsName = true,
     };
-    auto nodeResult = context->rootBuilder().createElement(root.rootNodeId(), descriptor);
+    auto nodeResult = context->authoring().rootBuilder().createElement(root.rootNodeId(), descriptor);
     ASSERT_TRUE(nodeResult) << (nodeResult ? "" : nodeResult.error().message);
     const UI::UINodeId node = *nodeResult;
     auto updater = createUpdater(*context, root);
@@ -220,7 +220,7 @@ TEST(UIBehaviorCompositionTests, TextRangeInputUsesCapabilityStateForKeyboardAcc
     EXPECT_FALSE(updater.setSliderPaint(node, {}));
     EXPECT_FALSE(updater.setSliderChangeCallback(
         node, UI::UISliderChangeCallback([](const UI::UISliderChangeEvent&) noexcept {})));
-    assertOk(context->commitLayout({.width = 120.0F, .height = 80.0F}));
+    assertOk(context->publication().commitLayout({.width = 120.0F, .height = 80.0F}));
     const UI::UIPointerRouteResult down =
         route(*context, makePointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 1));
     const UI::UIPointerRouteResult up =
@@ -230,10 +230,10 @@ TEST(UIBehaviorCompositionTests, TextRangeInputUsesCapabilityStateForKeyboardAcc
     ASSERT_EQ(recorder.size, 1U);
     EXPECT_EQ(recorder.entries[0].button, node);
     EXPECT_EQ(recorder.entries[0].source, UI::UIButtonActivationSource::PrimaryPointer);
-    EXPECT_EQ(context->defaultActionFocus(), node);
+    EXPECT_EQ(context->input().defaultActionFocus(), node);
 
     auto increased =
-        context->routeRangeInputCommand(Platform::PlatformFrameId{4}, 4, UI::UIRangeInputCommand::Increase, true,
+        context->input().routeRangeInputCommand(Platform::PlatformFrameId{4}, 4, UI::UIRangeInputCommand::Increase, true,
                                         Platform::KeyControlIdentity{.window = window, .key = Platform::Key::Right});
     ASSERT_TRUE(increased) << (increased ? "" : increased.error().message);
     EXPECT_TRUE(increased->targeted);
@@ -243,7 +243,7 @@ TEST(UIBehaviorCompositionTests, TextRangeInputUsesCapabilityStateForKeyboardAcc
     ASSERT_TRUE(value);
     EXPECT_FLOAT_EQ(*value, 6.0F);
 
-    assertOk(context->performAccessibilityAction({
+    assertOk(context->input().performAccessibilityAction({
         .kind = UI::UIAccessibilityActionKind::SetRangeValue,
         .node = node,
         .rangeValue = 7.1,
@@ -251,8 +251,8 @@ TEST(UIBehaviorCompositionTests, TextRangeInputUsesCapabilityStateForKeyboardAcc
     value = updater.sliderValue(node);
     ASSERT_TRUE(value);
     EXPECT_FLOAT_EQ(*value, 8.0F);
-    assertOk(context->commitLayout({.width = 120.0F, .height = 80.0F}));
-    const UI::UISemanticsEntry* semantics = findSemanticsEntry(context->committedSemantics(), node);
+    assertOk(context->publication().commitLayout({.width = 120.0F, .height = 80.0F}));
+    const UI::UISemanticsEntry* semantics = findSemanticsEntry(context->publication().committedSemantics(), node);
     ASSERT_NE(semantics, nullptr);
     EXPECT_TRUE(semantics->hasRange);
     EXPECT_FLOAT_EQ(semantics->minValue, 0.0F);
@@ -281,7 +281,7 @@ TEST(UIBehaviorCompositionTests, GenericRangeInputDoesNotEnterSliderPointerDragP
 
     UI::UIElementDescriptor descriptor = UI::makeLabelElement("Volume");
     descriptor.behaviors = UI::UIElementBehavior::Focusable | UI::UIElementBehavior::RangeInput;
-    auto nodeResult = context->rootBuilder().createElement(root.rootNodeId(), descriptor);
+    auto nodeResult = context->authoring().rootBuilder().createElement(root.rootNodeId(), descriptor);
     ASSERT_TRUE(nodeResult) << (nodeResult ? "" : nodeResult.error().message);
     const UI::UINodeId node = *nodeResult;
     auto updater = createUpdater(*context, root);
@@ -289,13 +289,13 @@ TEST(UIBehaviorCompositionTests, GenericRangeInputDoesNotEnterSliderPointerDragP
     assertOk(updater.setLayoutStyle(node, fixedSize(80.0F, 24.0F)));
     assertOk(updater.setSliderRange(node, 0.0F, 10.0F, 1.0F));
     assertOk(updater.setSliderValue(node, 4.0F));
-    assertOk(context->commitLayout({.width = 120.0F, .height = 80.0F}));
+    assertOk(context->publication().commitLayout({.width = 120.0F, .height = 80.0F}));
 
     const UI::UIPointerRouteResult down =
         route(*context, makePointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 1));
     EXPECT_FALSE(down.consumed);
-    EXPECT_FALSE(context->pointerCapture().hasValue());
-    EXPECT_FALSE(context->defaultActionFocus().hasValue());
+    EXPECT_FALSE(context->input().pointerCapture().hasValue());
+    EXPECT_FALSE(context->input().defaultActionFocus().hasValue());
     auto value = updater.sliderValue(node);
     ASSERT_TRUE(value);
     EXPECT_FLOAT_EQ(*value, 4.0F);
@@ -322,7 +322,7 @@ TEST(UIBehaviorCompositionTests, FailedCreateAndNodeReuseReleaseBehaviorSlotsWit
     UI::UIElementDescriptor invalid = UI::makeLabelElement("too long");
     invalid.behaviors =
         UI::UIElementBehavior::Activate | UI::UIElementBehavior::Toggle | UI::UIElementBehavior::RangeInput;
-    const auto failed = context->rootBuilder().createElement(root.rootNodeId(), invalid);
+    const auto failed = context->authoring().rootBuilder().createElement(root.rootNodeId(), invalid);
     ASSERT_FALSE(failed);
     EXPECT_EQ(failed.error().code, UI::UIErrorCode::CapacityExceeded);
     EXPECT_EQ(context->statistics().activeActivateBehaviorCount, 0U);
@@ -333,7 +333,7 @@ TEST(UIBehaviorCompositionTests, FailedCreateAndNodeReuseReleaseBehaviorSlotsWit
     UI::UIElementDescriptor descriptor = UI::makePanelElement();
     descriptor.behaviors =
         UI::UIElementBehavior::Activate | UI::UIElementBehavior::Toggle | UI::UIElementBehavior::RangeInput;
-    auto first = context->rootBuilder().createElement(root.rootNodeId(), descriptor);
+    auto first = context->authoring().rootBuilder().createElement(root.rootNodeId(), descriptor);
     ASSERT_TRUE(first);
     auto updater = createUpdater(*context, root);
     assertOk(updater.setChecked(*first, true));
@@ -345,7 +345,7 @@ TEST(UIBehaviorCompositionTests, FailedCreateAndNodeReuseReleaseBehaviorSlotsWit
     EXPECT_EQ(context->statistics().activeToggleBehaviorCount, 0U);
     EXPECT_EQ(context->statistics().activeRangeInputBehaviorCount, 0U);
 
-    auto second = context->rootBuilder().createElement(root.rootNodeId(), descriptor);
+    auto second = context->authoring().rootBuilder().createElement(root.rootNodeId(), descriptor);
     ASSERT_TRUE(second);
     auto checked = updater.isChecked(*second);
     ASSERT_TRUE(checked);
@@ -375,28 +375,28 @@ TEST(UIBehaviorCompositionTests, TextInputPublicationRollbackStatisticsAndReuseA
     auto root = createRoot(*context);
 
     auto failed =
-        context->rootBuilder().createElement(root.rootNodeId(), UI::makeTextEditElement("this is too long"));
+        context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeTextEditElement("this is too long"));
     ASSERT_FALSE(failed);
     EXPECT_EQ(failed.error().code, UI::UIErrorCode::CapacityExceeded);
     EXPECT_EQ(context->statistics().activeTextInputBehaviorCount, 0U);
     EXPECT_EQ(context->statistics().liveNodeCount, 1U);
 
-    auto first = context->rootBuilder().createElement(root.rootNodeId(), UI::makeTextEditElement("first"));
+    auto first = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeTextEditElement("first"));
     ASSERT_TRUE(first);
     EXPECT_EQ(context->statistics().activeTextInputBehaviorCount, 1U);
     EXPECT_EQ(context->statistics().textInputBehaviorCapacity, 4U);
 
-    auto second = context->rootBuilder().createElement(root.rootNodeId(), UI::makeTextEditElement("second"));
+    auto second = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeTextEditElement("second"));
     ASSERT_TRUE(second);
     EXPECT_EQ(context->statistics().activeTextInputBehaviorCount, 2U);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult);
     auto updater = std::move(*updaterResult);
     assertOk(updater.setTextSelection(*first, {.anchorCodepoint = 1, .caretCodepoint = 4}));
     const usize allocationCount = resource.allocationCount();
     assertOk(updater.destroy(*first));
     EXPECT_EQ(context->statistics().activeTextInputBehaviorCount, 1U);
-    auto reused = context->rootBuilder().createElement(root.rootNodeId(), UI::makeTextEditElement("again"));
+    auto reused = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeTextEditElement("again"));
     ASSERT_TRUE(reused);
     auto selection = updater.textSelection(*reused);
     ASSERT_TRUE(selection);
@@ -422,16 +422,16 @@ TEST(UIBehaviorCompositionTests, ScrollPublicationRollbackStatisticsAndReuseAreA
 
     UI::UIElementDescriptor invalid = UI::makeScrollViewElement();
     invalid.semantics.name = "too long";
-    auto failed = context->rootBuilder().createElement(root.rootNodeId(), invalid);
+    auto failed = context->authoring().rootBuilder().createElement(root.rootNodeId(), invalid);
     ASSERT_FALSE(failed);
     EXPECT_EQ(failed.error().code, UI::UIErrorCode::CapacityExceeded);
     EXPECT_EQ(context->statistics().activeScrollBehaviorCount, 0U);
     EXPECT_EQ(context->statistics().scrollBehaviorHighWater, 1U);
     EXPECT_EQ(context->statistics().liveNodeCount, 1U);
 
-    auto first = context->rootBuilder().createElement(root.rootNodeId(), UI::makeScrollViewElement());
+    auto first = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeScrollViewElement());
     ASSERT_TRUE(first);
-    auto second = context->rootBuilder().createElement(root.rootNodeId(), UI::makeScrollViewElement());
+    auto second = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeScrollViewElement());
     ASSERT_TRUE(second);
     auto updater = createUpdater(*context, root);
     UI::UIScrollViewStyle style{};
@@ -445,7 +445,7 @@ TEST(UIBehaviorCompositionTests, ScrollPublicationRollbackStatisticsAndReuseAreA
     const usize allocationCount = resource.allocationCount();
     assertOk(updater.destroy(*first));
     EXPECT_EQ(context->statistics().activeScrollBehaviorCount, 1U);
-    auto reused = context->rootBuilder().createElement(root.rootNodeId(), UI::makeScrollViewElement());
+    auto reused = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeScrollViewElement());
     ASSERT_TRUE(reused);
     auto reusedStyle = updater.scrollViewStyle(*reused);
     ASSERT_TRUE(reusedStyle);
@@ -476,14 +476,14 @@ TEST(UIBehaviorCompositionTests, SelectPublicationRollbackStatisticsAndReuseAreA
     auto root = createRoot(*context);
 
     auto failed =
-        context->rootBuilder().createElement(root.rootNodeId(), UI::makeDropdownElement("this is too long"));
+        context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeDropdownElement("this is too long"));
     ASSERT_FALSE(failed);
     EXPECT_EQ(failed.error().code, UI::UIErrorCode::CapacityExceeded);
     EXPECT_EQ(context->statistics().activeSelectBehaviorCount, 0U);
     EXPECT_EQ(context->statistics().selectBehaviorHighWater, 1U);
     EXPECT_EQ(context->statistics().liveNodeCount, 1U);
 
-    auto first = context->rootBuilder().createElement(root.rootNodeId(), UI::makeDropdownElement("first"));
+    auto first = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeDropdownElement("first"));
     ASSERT_TRUE(first);
     auto updater = createUpdater(*context, root);
     auto popup = updater.createElement(*first, UI::makePopupElement());
@@ -498,7 +498,7 @@ TEST(UIBehaviorCompositionTests, SelectPublicationRollbackStatisticsAndReuseAreA
     const usize allocationCount = resource.allocationCount();
     assertOk(updater.destroy(*first));
     EXPECT_EQ(context->statistics().activeSelectBehaviorCount, 0U);
-    auto reused = context->rootBuilder().createElement(root.rootNodeId(), UI::makeDropdownElement("again"));
+    auto reused = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeDropdownElement("again"));
     ASSERT_TRUE(reused);
     auto selected = updater.dropdownSelectedItem(*reused);
     ASSERT_TRUE(selected);

@@ -182,14 +182,14 @@ TEST(FreeTypeTextRasterizerTests, ContextSkipsZeroCoverageSpacePaintAndKeepsAtla
     ASSERT_TRUE(contextResult.has_value())
         << (contextResult ? "" : contextResult.error().message);
     std::unique_ptr<UI::UIContext> context = std::move(*contextResult);
-    ASSERT_TRUE(context->openTextFont(
+    ASSERT_TRUE(context->text().openTextFont(
         std::span<const std::byte>(fontBytes.data(), fontBytes.size())));
 
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value())
         << (rootResult ? "" : rootResult.error().message);
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value())
         << (updaterResult ? "" : updaterResult.error().message);
     UI::UITreeUpdater updater = std::move(*updaterResult);
@@ -205,9 +205,9 @@ TEST(FreeTypeTextRasterizerTests, ContextSkipsZeroCoverageSpacePaintAndKeepsAtla
     textStyle.logicalSize = 24.0F;
     ASSERT_TRUE(updater.setTextStyle(label, textStyle));
     ASSERT_TRUE(updater.setText(label, "A A"));
-    ASSERT_TRUE(context->commitLayout({.width = 200.0F, .height = 80.0F}));
+    ASSERT_TRUE(context->publication().commitLayout({.width = 200.0F, .height = 80.0F}));
 
-    const UI::UICommittedPaintView paint = context->committedPaint();
+    const UI::UICommittedPaintView paint = context->publication().committedPaint();
     ASSERT_EQ(paint.size(), 2U);
     for (const UI::UICommittedPaintEntry& entry : paint.entries()) {
         EXPECT_EQ(entry.node, label);
@@ -228,9 +228,9 @@ TEST(FreeTypeTextRasterizerTests, ContextSkipsZeroCoverageSpacePaintAndKeepsAtla
     EXPECT_EQ(paint.entries()[0].atlasWidth, paint.entries()[1].atlasWidth);
     EXPECT_EQ(paint.entries()[0].atlasHeight, paint.entries()[1].atlasHeight);
 
-    const std::span<const u8> atlas = context->glyphAtlasPixels();
+    const std::span<const u8> atlas = context->publication().glyphAtlasPixels();
     ASSERT_FALSE(atlas.empty());
-    const u32 atlasWidth = context->glyphAtlasWidth();
+    const u32 atlasWidth = context->publication().glyphAtlasWidth();
     ASSERT_GT(atlasWidth, 0U);
     bool hasInk = false;
     for (u32 row = 0; row < paint.entries()[0].atlasHeight && !hasInk; ++row) {

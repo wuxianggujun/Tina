@@ -1,4 +1,4 @@
-#include <tina/ui/UIContext.hpp>
+#include "UIContextImpl.hpp"
 
 #include <tina/core/text/Utf8.hpp>
 #include <tina/ui/UICollapsibleSection.hpp>
@@ -1144,51 +1144,6 @@ requiredColorPickerBuildBudget(const UIColorPickerConfig& config) noexcept
 }
 
 Core::Result<UINumberFieldParts>
-UIContext::buildNumberField(UINodeId parent,
-                            const UINumberFieldConfig& config)
-{
-    return buildNumberFieldImpl(*this, parent, config, productTheme());
-}
-
-Core::Result<UICollapsibleSectionParts>
-UIContext::buildCollapsibleSection(
-    UINodeId parent, const UICollapsibleSectionConfig& config)
-{
-    const auto initializeToggle =
-        [this](UIElementBuildTransaction& transaction, UINodeId header,
-               bool expanded) -> Core::Status {
-        return setCheckedFromUpdater(transaction.m_updaterRoot, header, expanded);
-    };
-    return buildCollapsibleSectionImpl(*this, parent, config, productTheme(),
-                                       initializeToggle);
-}
-
-Core::Result<UIColorFieldParts>
-UIContext::buildColorField(UINodeId parent, const UIColorFieldConfig& config)
-{
-    return buildColorFieldImpl(*this, parent, config, productTheme());
-}
-
-Core::Result<UIColorPickerParts>
-UIContext::buildColorPicker(UINodeId parent, const UIColorPickerConfig& config)
-{
-    const auto initializeRange =
-        [this](UIElementBuildTransaction& transaction, UINodeId slider,
-               float value) -> Core::Status {
-        if (Core::Status range = setSliderRangeFromUpdater(
-                transaction.m_updaterRoot, slider, 0.0F, 255.0F, 1.0F);
-            !range)
-        {
-            return range;
-        }
-        return setSliderValueFromUpdater(transaction.m_updaterRoot, slider,
-                                         value);
-    };
-    return buildColorPickerImpl(*this, parent, config, productTheme(),
-                                initializeRange);
-}
-
-Core::Result<UINumberFieldParts>
 UITreeUpdater::buildNumberField(UINodeId parent,
                                 const UINumberFieldConfig& config)
 {
@@ -1197,7 +1152,7 @@ UITreeUpdater::buildNumberField(UINodeId parent,
         return Core::failure(UIErrorCode::WrongContext,
                              "UI tree updater is not bound to a context");
     }
-    return buildNumberFieldImpl(*this, parent, config, m_context->productTheme());
+    return buildNumberFieldImpl(*this, parent, config, m_context->m_impl->productTheme);
 }
 
 Core::Result<UICollapsibleSectionParts>
@@ -1215,7 +1170,7 @@ UITreeUpdater::buildCollapsibleSection(
         return setChecked(header, expanded);
     };
     return buildCollapsibleSectionImpl(*this, parent, config,
-                                       m_context->productTheme(),
+                                       m_context->m_impl->productTheme,
                                        initializeToggle);
 }
 
@@ -1228,7 +1183,7 @@ UITreeUpdater::buildColorField(UINodeId parent,
         return Core::failure(UIErrorCode::WrongContext,
                              "UI tree updater is not bound to a context");
     }
-    return buildColorFieldImpl(*this, parent, config, m_context->productTheme());
+    return buildColorFieldImpl(*this, parent, config, m_context->m_impl->productTheme);
 }
 
 Core::Result<UIColorPickerParts>
@@ -1252,7 +1207,7 @@ UITreeUpdater::buildColorPicker(UINodeId parent,
         return setSliderValue(slider, value);
     };
     return buildColorPickerImpl(*this, parent, config,
-                                m_context->productTheme(), initializeRange);
+                                m_context->m_impl->productTheme, initializeRange);
 }
 
 } // namespace Tina::UI

@@ -11,6 +11,7 @@
 #include <tina/runtime/PlatformEvents.hpp>
 #include <tina/runtime/PrimaryWindowUI.hpp>
 #include <tina/runtime/RunExitReason.hpp>
+#include <tina/ui/UIContextStatistics.hpp>
 
 #include <memory>
 

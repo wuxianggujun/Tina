@@ -237,8 +237,8 @@ TEST_F(UIDataGridTest,
         1U + ColumnCapacity + RowCapacity + ColumnCapacity * RowCapacity;
     auto context = createContext(window, ContextNodeCapacity);
     ASSERT_NE(context, nullptr);
-    auto root = context->rootBuilder().createRoot().value();
-    auto updater = context->treeUpdater(root).value();
+    auto root = context->authoring().rootBuilder().createRoot().value();
+    auto updater = context->authoring().treeUpdater(root).value();
     DataGridSource source{.rows = 100'000, .rowKeyBase = 1'000};
     const UI::UINodeId grid = *updater.createElement(
         root.rootNodeId(),
@@ -259,7 +259,7 @@ TEST_F(UIDataGridTest,
     assertOk(updater.setDataGridDataSource(grid, source.view()));
     EXPECT_EQ(context->liveNodeCount(), FixedPoolNodeCount + 1U);
 
-    assertOk(context->commitLayout({.width = 180.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 180.0F, .height = 100.0F}));
     UI::UIDataGridMetrics metrics = updater.dataGridMetrics(grid).value();
     EXPECT_EQ(metrics.logicalRowCount, 100'000U);
     EXPECT_EQ(metrics.logicalColumnCount, 3U);
@@ -274,7 +274,7 @@ TEST_F(UIDataGridTest,
 
     assertOk(updater.scrollDataGridToCell(
         grid, 50'000, 2, UI::UIDataGridScrollAlignment::Start));
-    assertOk(context->commitLayout({.width = 180.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 180.0F, .height = 100.0F}));
     metrics = updater.dataGridMetrics(grid).value();
     EXPECT_EQ(metrics.firstVisibleRow, 50'000U);
     EXPECT_EQ(metrics.firstMaterializedRow, 49'999U);
@@ -284,10 +284,10 @@ TEST_F(UIDataGridTest,
     EXPECT_EQ(context->liveNodeCount(), FixedPoolNodeCount + 1U);
 
     const UI::UISemanticsEntry* cell =
-        findCell(context->committedSemantics(), 50'000, "Ready");
+        findCell(context->publication().committedSemantics(), 50'000, "Ready");
     ASSERT_NE(cell, nullptr);
     EXPECT_EQ(cell->virtualItemKey, 51'001U);
-    EXPECT_NE(findHeader(context->committedSemantics(), "Status"), nullptr);
+    EXPECT_NE(findHeader(context->publication().committedSemantics(), "Status"), nullptr);
 
     const Core::Status rejected = updater.destroy(cell->node);
     ASSERT_FALSE(rejected.has_value());
@@ -304,8 +304,8 @@ TEST_F(UIDataGridTest,
     constexpr u32 RowCapacity = 8;
     auto context = createContext(window, ContextNodeCapacity);
     ASSERT_NE(context, nullptr);
-    auto root = context->rootBuilder().createRoot().value();
-    auto updater = context->treeUpdater(root).value();
+    auto root = context->authoring().rootBuilder().createRoot().value();
+    auto updater = context->authoring().treeUpdater(root).value();
     DataGridSource source{.rows = 100};
     const UI::UINodeId grid = *updater.createElement(
         root.rootNodeId(),
@@ -347,24 +347,24 @@ TEST_F(UIDataGridTest,
             .gridLineColor = gridLineColor,
         }));
     assertOk(updater.setDataGridDataSource(grid, source.view()));
-    assertOk(context->commitLayout({.width = 180.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 180.0F, .height = 120.0F}));
 
     const UI::UISemanticsEntry* cell =
-        findCell(context->committedSemantics(), 1, "Asset path");
+        findCell(context->publication().committedSemantics(), 1, "Asset path");
     ASSERT_NE(cell, nullptr);
     const UI::UILogicalPoint center{
         .x = cell->worldRect.x + cell->worldRect.width * 0.5F,
         .y = cell->worldRect.y + cell->worldRect.height * 0.5F,
     };
-    auto down = context->routePointerInput(pointerInput(
+    auto down = context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::ButtonDown, 1, center));
     ASSERT_TRUE(down.has_value()) << down.error().message;
     EXPECT_TRUE(down->consumed);
-    auto up = context->routePointerInput(pointerInput(
+    auto up = context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::ButtonUp, 2, center));
     ASSERT_TRUE(up.has_value()) << up.error().message;
     EXPECT_TRUE(up->consumed);
-    EXPECT_EQ(context->defaultActionFocus(), grid);
+    EXPECT_EQ(context->input().defaultActionFocus(), grid);
     EXPECT_EQ(updater.dataGridSelection(grid).value(),
               (UI::UIDataGridSelection{
                   .rowKey = 2,
@@ -373,8 +373,8 @@ TEST_F(UIDataGridTest,
                   .logicalColumn = 1,
               }));
 
-    assertOk(context->commitLayout({.width = 180.0F, .height = 120.0F}));
-    cell = findCell(context->committedSemantics(), 1, "Asset path");
+    assertOk(context->publication().commitLayout({.width = 180.0F, .height = 120.0F}));
+    cell = findCell(context->publication().committedSemantics(), 1, "Asset path");
     ASSERT_NE(cell, nullptr);
     EXPECT_TRUE(cell->selected);
     EXPECT_TRUE(cell->focused);
@@ -382,10 +382,10 @@ TEST_F(UIDataGridTest,
     bool foundHeaderPaint = false;
     bool foundGridLinePaint = false;
     const UI::UISemanticsEntry* header =
-        findHeader(context->committedSemantics(), "Kind");
+        findHeader(context->publication().committedSemantics(), "Kind");
     ASSERT_NE(header, nullptr);
     for (const UI::UICommittedPaintEntry& entry :
-         context->committedPaint().entries())
+         context->publication().committedPaint().entries())
     {
         foundSelectionPaint = foundSelectionPaint ||
                               (entry.node == cell->node &&
@@ -401,54 +401,54 @@ TEST_F(UIDataGridTest,
     EXPECT_TRUE(foundHeaderPaint);
     EXPECT_TRUE(foundGridLinePaint);
 
-    auto horizontalWheel = context->routePointerInput(pointerInput(
+    auto horizontalWheel = context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::Wheel, 3,
         {.x = 100.0F, .y = 60.0F}, {.x = -1.0F, .y = 0.0F}));
     ASSERT_TRUE(horizontalWheel.has_value()) << horizontalWheel.error().message;
     EXPECT_TRUE(horizontalWheel->consumed);
-    auto verticalWheel = context->routePointerInput(pointerInput(
+    auto verticalWheel = context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::Wheel, 4,
         {.x = 100.0F, .y = 60.0F}, {.x = 0.0F, .y = -1.0F}));
     ASSERT_TRUE(verticalWheel.has_value()) << verticalWheel.error().message;
     EXPECT_TRUE(verticalWheel->consumed);
-    assertOk(context->commitLayout({.width = 180.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 180.0F, .height = 120.0F}));
     UI::UIDataGridMetrics metrics = updater.dataGridMetrics(grid).value();
     EXPECT_FLOAT_EQ(metrics.scrollOffset.x, 20.0F);
     EXPECT_FLOAT_EQ(metrics.scrollOffset.y, 20.0F);
 
     assertOk(updater.scrollDataGridToCell(
         grid, 0, 0, UI::UIDataGridScrollAlignment::Start));
-    assertOk(context->commitLayout({.width = 180.0F, .height = 120.0F}));
-    auto horizontalTrack = context->routePointerInput(pointerInput(
+    assertOk(context->publication().commitLayout({.width = 180.0F, .height = 120.0F}));
+    auto horizontalTrack = context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::ButtonDown, 5,
         {.x = 140.0F, .y = 115.0F}));
     ASSERT_TRUE(horizontalTrack.has_value()) << horizontalTrack.error().message;
     EXPECT_TRUE(horizontalTrack->consumed);
-    static_cast<void>(context->routePointerInput(pointerInput(
+    static_cast<void>(context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::ButtonUp, 6,
         {.x = 140.0F, .y = 115.0F})));
-    assertOk(context->commitLayout({.width = 180.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 180.0F, .height = 120.0F}));
     EXPECT_GT(updater.dataGridMetrics(grid).value().scrollOffset.x, 0.0F);
 
     assertOk(updater.scrollDataGridToCell(
         grid, 0, 0, UI::UIDataGridScrollAlignment::Start));
-    assertOk(context->commitLayout({.width = 180.0F, .height = 120.0F}));
-    auto verticalThumb = context->routePointerInput(pointerInput(
+    assertOk(context->publication().commitLayout({.width = 180.0F, .height = 120.0F}));
+    auto verticalThumb = context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::ButtonDown, 7,
         {.x = 175.0F, .y = 32.0F}));
     ASSERT_TRUE(verticalThumb.has_value()) << verticalThumb.error().message;
     EXPECT_TRUE(verticalThumb->consumed);
-    EXPECT_EQ(context->pointerCapture(), grid);
-    ASSERT_TRUE(context->routePointerInput(pointerInput(
+    EXPECT_EQ(context->input().pointerCapture(), grid);
+    ASSERT_TRUE(context->input().routePointerInput(pointerInput(
                     window, UI::UIRoutedPointerEventKind::Move, 8,
                     {.x = 175.0F, .y = 90.0F}))
                     .has_value());
-    ASSERT_TRUE(context->routePointerInput(pointerInput(
+    ASSERT_TRUE(context->input().routePointerInput(pointerInput(
                     window, UI::UIRoutedPointerEventKind::ButtonUp, 9,
                     {.x = 175.0F, .y = 90.0F}))
                     .has_value());
-    EXPECT_FALSE(context->pointerCapture().hasValue());
-    assertOk(context->commitLayout({.width = 180.0F, .height = 120.0F}));
+    EXPECT_FALSE(context->input().pointerCapture().hasValue());
+    assertOk(context->publication().commitLayout({.width = 180.0F, .height = 120.0F}));
     EXPECT_GT(updater.dataGridMetrics(grid).value().scrollOffset.y, 0.0F);
 }
 
@@ -459,8 +459,8 @@ TEST_F(UIDataGridTest,
     constexpr u32 RowCapacity = 6;
     auto context = createContext(window, ContextNodeCapacity);
     ASSERT_NE(context, nullptr);
-    auto root = context->rootBuilder().createRoot().value();
-    auto updater = context->treeUpdater(root).value();
+    auto root = context->authoring().rootBuilder().createRoot().value();
+    auto updater = context->authoring().treeUpdater(root).value();
     DataGridSource source{.rows = 30, .rowKeyBase = 100};
     source.disabledRows[0] = 1;
     source.disabledRows[1] = 4;
@@ -481,65 +481,65 @@ TEST_F(UIDataGridTest,
             .scrollBarVisibility = UI::UIScrollBarVisibility::Hidden,
         }));
     assertOk(updater.setDataGridDataSource(grid, source.view()));
-    assertOk(context->commitLayout({.width = 300.0F, .height = 100.0F}));
-    assertOk(context->requestFocus(grid));
+    assertOk(context->publication().commitLayout({.width = 300.0F, .height = 100.0F}));
+    assertOk(context->input().requestFocus(grid));
 
-    auto first = context->routeDataGridCommand(
+    auto first = context->input().routeDataGridCommand(
         UI::UIDataGridCommand::NextRow, true);
     ASSERT_TRUE(first.has_value()) << first.error().message;
     EXPECT_TRUE(first->changed);
     EXPECT_EQ(first->selection.logicalRow, 0U);
-    auto repeated = context->routeDataGridCommand(
+    auto repeated = context->input().routeDataGridCommand(
         UI::UIDataGridCommand::NextRow, true);
     ASSERT_TRUE(repeated.has_value());
     EXPECT_TRUE(repeated->consumed);
     EXPECT_FALSE(repeated->changed);
-    EXPECT_TRUE(context->routeDataGridCommand(
+    EXPECT_TRUE(context->input().routeDataGridCommand(
                     UI::UIDataGridCommand::NextRow, false)
                     ->consumed);
 
-    auto nextRow = context->routeDataGridCommand(
+    auto nextRow = context->input().routeDataGridCommand(
         UI::UIDataGridCommand::NextRow, true);
     ASSERT_TRUE(nextRow.has_value()) << nextRow.error().message;
     EXPECT_EQ(nextRow->selection.logicalRow, 2U);
     EXPECT_EQ(nextRow->selection.logicalColumn, 0U);
-    EXPECT_TRUE(context->routeDataGridCommand(
+    EXPECT_TRUE(context->input().routeDataGridCommand(
                     UI::UIDataGridCommand::NextRow, false)
                     ->consumed);
 
-    auto nextColumn = context->routeDataGridCommand(
+    auto nextColumn = context->input().routeDataGridCommand(
         UI::UIDataGridCommand::NextColumn, true);
     ASSERT_TRUE(nextColumn.has_value()) << nextColumn.error().message;
     EXPECT_EQ(nextColumn->selection.logicalRow, 2U);
     EXPECT_EQ(nextColumn->selection.logicalColumn, 1U);
-    EXPECT_TRUE(context->routeDataGridCommand(
+    EXPECT_TRUE(context->input().routeDataGridCommand(
                     UI::UIDataGridCommand::NextColumn, false)
                     ->consumed);
 
-    auto nextPage = context->routeDataGridCommand(
+    auto nextPage = context->input().routeDataGridCommand(
         UI::UIDataGridCommand::NextPage, true);
     ASSERT_TRUE(nextPage.has_value()) << nextPage.error().message;
     EXPECT_EQ(nextPage->selection.logicalRow, 6U);
     EXPECT_EQ(nextPage->selection.logicalColumn, 1U);
-    EXPECT_TRUE(context->routeDataGridCommand(
+    EXPECT_TRUE(context->input().routeDataGridCommand(
                     UI::UIDataGridCommand::NextPage, false)
                     ->consumed);
 
-    auto activate = context->routeDataGridCommand(
+    auto activate = context->input().routeDataGridCommand(
         UI::UIDataGridCommand::Activate, true);
     ASSERT_TRUE(activate.has_value()) << activate.error().message;
     EXPECT_TRUE(activate->activated);
-    EXPECT_TRUE(context->routeDataGridCommand(
+    EXPECT_TRUE(context->input().routeDataGridCommand(
                     UI::UIDataGridCommand::Activate, false)
                     ->consumed);
 
     source.disabledRows[2] = 6;
     assertOk(updater.invalidateDataGridItems(grid));
-    activate = context->routeDataGridCommand(
+    activate = context->input().routeDataGridCommand(
         UI::UIDataGridCommand::Activate, true);
     ASSERT_TRUE(activate.has_value()) << activate.error().message;
     EXPECT_FALSE(activate->activated);
-    EXPECT_TRUE(context->routeDataGridCommand(
+    EXPECT_TRUE(context->input().routeDataGridCommand(
                     UI::UIDataGridCommand::Activate, false)
                     ->consumed);
 }
@@ -551,8 +551,8 @@ TEST_F(UIDataGridTest,
     constexpr u32 RowCapacity = 6;
     auto context = createContext(window, ContextNodeCapacity);
     ASSERT_NE(context, nullptr);
-    auto root = context->rootBuilder().createRoot().value();
-    auto updater = context->treeUpdater(root).value();
+    auto root = context->authoring().rootBuilder().createRoot().value();
+    auto updater = context->authoring().treeUpdater(root).value();
     DataGridSource source{.rows = 40, .columns = 2};
     source.cells[0] = "Old";
     const UI::UINodeId grid = *updater.createElement(
@@ -572,46 +572,46 @@ TEST_F(UIDataGridTest,
             .scrollBarVisibility = UI::UIScrollBarVisibility::Hidden,
         }));
     assertOk(updater.setDataGridDataSource(grid, source.view()));
-    assertOk(context->commitLayout({.width = 180.0F, .height = 80.0F}));
+    assertOk(context->publication().commitLayout({.width = 180.0F, .height = 80.0F}));
 
     const UI::UIDataGridMetrics committedMetrics =
         updater.dataGridMetrics(grid).value();
     const u64 committedLayoutRevision =
-        context->committedLayout().layoutRevision();
+        context->publication().committedLayout().layoutRevision();
     const u64 committedSemanticsRevision =
-        context->committedSemantics().semanticsRevision();
-    ASSERT_NE(findCell(context->committedSemantics(), 0, "Old"), nullptr);
+        context->publication().committedSemantics().semanticsRevision();
+    ASSERT_NE(findCell(context->publication().committedSemantics(), 0, "Old"), nullptr);
 
     source.cells[0] = "New";
     source.failingCellRow = 1;
     source.failingCellColumn = 1;
     assertOk(updater.invalidateDataGridItems(grid));
     const Core::Status sourceFailure =
-        context->commitLayout({.width = 180.0F, .height = 80.0F});
+        context->publication().commitLayout({.width = 180.0F, .height = 80.0F});
     ASSERT_FALSE(sourceFailure.has_value());
     EXPECT_EQ(sourceFailure.error().code, UI::UIErrorCode::InvalidControlValue);
-    EXPECT_EQ(context->committedLayout().layoutRevision(),
+    EXPECT_EQ(context->publication().committedLayout().layoutRevision(),
               committedLayoutRevision);
-    EXPECT_EQ(context->committedSemantics().semanticsRevision(),
+    EXPECT_EQ(context->publication().committedSemantics().semanticsRevision(),
               committedSemanticsRevision);
     EXPECT_EQ(updater.dataGridMetrics(grid).value(), committedMetrics);
-    EXPECT_NE(findCell(context->committedSemantics(), 0, "Old"), nullptr);
+    EXPECT_NE(findCell(context->publication().committedSemantics(), 0, "Old"), nullptr);
 
     source.failingCellRow = (std::numeric_limits<u64>::max)();
     source.failingCellColumn = (std::numeric_limits<u32>::max)();
-    assertOk(context->commitLayout({.width = 180.0F, .height = 80.0F}));
-    EXPECT_NE(findCell(context->committedSemantics(), 0, "New"), nullptr);
+    assertOk(context->publication().commitLayout({.width = 180.0F, .height = 80.0F}));
+    EXPECT_NE(findCell(context->publication().committedSemantics(), 0, "New"), nullptr);
     const UI::UIDataGridMetrics recoveredMetrics =
         updater.dataGridMetrics(grid).value();
-    const u64 recoveredRevision = context->committedLayout().layoutRevision();
+    const u64 recoveredRevision = context->publication().committedLayout().layoutRevision();
 
     source.columns = 3;
     assertOk(updater.invalidateDataGridItems(grid));
     const Core::Status columnOverflow =
-        context->commitLayout({.width = 180.0F, .height = 80.0F});
+        context->publication().commitLayout({.width = 180.0F, .height = 80.0F});
     ASSERT_FALSE(columnOverflow.has_value());
     EXPECT_EQ(columnOverflow.error().code, UI::UIErrorCode::CapacityExceeded);
-    EXPECT_EQ(context->committedLayout().layoutRevision(), recoveredRevision);
+    EXPECT_EQ(context->publication().committedLayout().layoutRevision(), recoveredRevision);
     EXPECT_EQ(updater.dataGridMetrics(grid).value(), recoveredMetrics);
 }
 
@@ -622,8 +622,8 @@ TEST_F(UIDataGridTest, WheelAndCommitDoNotGrowContextStorageAfterWarmup)
     ObservingMemoryResource resource;
     auto context = createContext(window, ContextNodeCapacity, resource);
     ASSERT_NE(context, nullptr);
-    auto root = context->rootBuilder().createRoot().value();
-    auto updater = context->treeUpdater(root).value();
+    auto root = context->authoring().rootBuilder().createRoot().value();
+    auto updater = context->authoring().treeUpdater(root).value();
     DataGridSource source{.rows = 1'000, .columns = 2};
     source.widths[0] = 140.0F;
     source.widths[1] = 140.0F;
@@ -647,7 +647,7 @@ TEST_F(UIDataGridTest, WheelAndCommitDoNotGrowContextStorageAfterWarmup)
     assertOk(updater.setDataGridDataSource(grid, source.view()));
     assertOk(updater.scrollDataGridToCell(
         grid, 10, 1, UI::UIDataGridScrollAlignment::Start));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
     const UI::UIDataGridMetrics warmupMetrics =
         updater.dataGridMetrics(grid).value();
     EXPECT_EQ(warmupMetrics.firstVisibleRow, 10U);
@@ -658,12 +658,12 @@ TEST_F(UIDataGridTest, WheelAndCommitDoNotGrowContextStorageAfterWarmup)
     for (u64 routeIndex = 0; routeIndex < 100; ++routeIndex)
     {
         const float wheelDelta = routeIndex % 2 == 0 ? -1.0F : 1.0F;
-        auto routed = context->routePointerInput(pointerInput(
+        auto routed = context->input().routePointerInput(pointerInput(
             window, UI::UIRoutedPointerEventKind::Wheel, routeIndex + 1,
             {.x = 100.0F, .y = 60.0F}, {.x = 0.0F, .y = wheelDelta}));
         ASSERT_TRUE(routed.has_value()) << routed.error().message;
         EXPECT_TRUE(routed->consumed);
-        assertOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
+        assertOk(context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
     }
     EXPECT_EQ(resource.allocationCount(), allocationCount);
 }

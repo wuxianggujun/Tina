@@ -4,6 +4,7 @@
 
 #include <tina/runtime/RuntimeErrors.hpp>
 #include <tina/ui/UIContext.hpp>
+#include <tina/ui/UIPublicationPipeline.hpp>
 
 #include <string_view>
 #include <new>
@@ -149,7 +150,7 @@ Core::Result<PrimaryWindowUIDisplayBuild> PrimaryWindowUIDisplayCoordinator::bui
     }
     lastMetricsRevision_ = primaryWindow->metrics.revision;
 
-    const UI::UICommittedPaintView paintView = context->committedPaint();
+    const UI::UICommittedPaintView paintView = context->publication().committedPaint();
     const UI::UILogicalSize expectedLogicalViewport{
         .width = static_cast<float>(primaryWindow->metrics.logicalExtent.width),
         .height = static_cast<float>(primaryWindow->metrics.logicalExtent.height),

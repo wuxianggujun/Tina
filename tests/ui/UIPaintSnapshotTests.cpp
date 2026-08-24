@@ -59,7 +59,7 @@ private:
 
 [[nodiscard]] UI::UIRootOwner createRoot(UI::UIContext& context)
 {
-    auto result = context.rootBuilder().createRoot();
+    auto result = context.authoring().rootBuilder().createRoot();
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UIRootOwner{};
 }
@@ -68,7 +68,7 @@ private:
     UI::UIContext& context,
     UI::UINodeId parent)
 {
-    auto result = context.rootBuilder().createElement(parent, UI::makePanelElement());
+    auto result = context.authoring().rootBuilder().createElement(parent, UI::makePanelElement());
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? *result : UI::UINodeId{};
 }
@@ -77,7 +77,7 @@ private:
     UI::UIContext& context,
     UI::UIRootOwner& root)
 {
-    auto result = context.treeUpdater(root);
+    auto result = context.authoring().treeUpdater(root);
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UITreeUpdater{};
 }
@@ -178,7 +178,7 @@ TEST_F(UIPaintSnapshotTest, IntegerColorPremultiplicationAndDerivedCapacityAreDe
     EXPECT_EQ(context->statistics().paintSnapshotCapacity, 4U);
     EXPECT_EQ(context->statistics().committedPaintNodeCount, 0U);
     EXPECT_EQ(context->statistics().paintRevision, 0U);
-    const UI::UICommittedPaintView empty = context->committedPaint();
+    const UI::UICommittedPaintView empty = context->publication().committedPaint();
     EXPECT_TRUE(empty.empty());
     EXPECT_EQ(empty.viewportSize(), UI::UILogicalSize{});
     EXPECT_EQ(empty.structureRevision(), 0U);
@@ -222,14 +222,14 @@ TEST_F(UIPaintSnapshotTest, PublishesOnlyVisibleNonTransparentSolidFillsInPaintO
     expectOk(updater.setBoxPaint(transparent, solidFill(255, 1, 1, 0)));
     expectOk(updater.setBoxPaint(hidden, solidFill(1, 2, 3)));
     expectOk(updater.setBoxPaint(collapsed, solidFill(4, 5, 6)));
-    expectOk(context->commitLayout({.width = 100.0F, .height = 80.0F}));
+    expectOk(context->publication().commitLayout({.width = 100.0F, .height = 80.0F}));
 
-    const UI::UICommittedPaintView paint = context->committedPaint();
+    const UI::UICommittedPaintView paint = context->publication().committedPaint();
     ASSERT_EQ(paint.size(), 1U);
     const UI::UICommittedPaintEntry& entry = paint.entries().front();
     EXPECT_EQ(entry.node, painted);
-    EXPECT_EQ(entry.worldRect, context->committedLayout().entries()[1].worldRect);
-    EXPECT_EQ(entry.effectiveClip, context->committedLayout().entries()[1].effectiveClip);
+    EXPECT_EQ(entry.worldRect, context->publication().committedLayout().entries()[1].worldRect);
+    EXPECT_EQ(entry.effectiveClip, context->publication().committedLayout().entries()[1].effectiveClip);
     // Paint ordinals are unique within the paint snapshot. They track paint
     // emission order (box fill then optional text fallback quads) and no longer
     // need to equal layout paint ordinals once a node can emit multiple quads.
@@ -243,9 +243,9 @@ TEST_F(UIPaintSnapshotTest, PublishesOnlyVisibleNonTransparentSolidFillsInPaintO
             .alpha = 128,
         }));
     EXPECT_EQ(paint.viewportSize(), (UI::UILogicalSize{100.0F, 80.0F}));
-    EXPECT_EQ(paint.structureRevision(), context->committedStructure().revision());
-    EXPECT_EQ(paint.layoutRevision(), context->committedLayout().layoutRevision());
-    EXPECT_EQ(paint.paintOrderRevision(), context->committedHit().paintOrderRevision());
+    EXPECT_EQ(paint.structureRevision(), context->publication().committedStructure().revision());
+    EXPECT_EQ(paint.layoutRevision(), context->publication().committedLayout().layoutRevision());
+    EXPECT_EQ(paint.paintOrderRevision(), context->publication().committedHit().paintOrderRevision());
     // The explicit transparent paint still rebuilds once: it is a local
     // override that must be able to suppress a stylesheet fill.
     EXPECT_EQ(context->statistics().lastPaintCacheRebuildCount, 4U);
@@ -279,9 +279,9 @@ TEST_F(UIPaintSnapshotTest, DescendantClipPreservesOverlayPaintGeometryAndClipsA
     overlayStyle.overlay.offset.y = UI::UILayoutLength::Px(-5.0F);
     expectOk(updater.setLayoutStyle(paintedOverlay, overlayStyle));
     expectOk(updater.setBoxPaint(paintedOverlay, solidFill(80, 120, 160)));
-    expectOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    expectOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
 
-    const UI::UICommittedPaintEntry* paint = findPaintEntry(context->committedPaint(), paintedOverlay);
+    const UI::UICommittedPaintEntry* paint = findPaintEntry(context->publication().committedPaint(), paintedOverlay);
     ASSERT_NE(paint, nullptr);
     EXPECT_EQ(paint->worldRect,
               (UI::UILogicalRect{.x = 30.0F, .y = 25.0F, .width = 70.0F, .height = 60.0F}));
@@ -316,12 +316,12 @@ TEST_F(UIPaintSnapshotTest, MultipleRootsAndSiblingsPublishUniqueStrictPaintOrdi
     expectOk(firstUpdater.setBoxPaint(secondSibling, solidFill(40, 50, 60)));
     expectOk(firstUpdater.setBoxPaint(nested, solidFill(70, 80, 90)));
     expectOk(secondUpdater.setBoxPaint(secondRootChild, solidFill(100, 110, 120)));
-    expectOk(context->commitLayout({.width = 100.0F, .height = 80.0F}));
+    expectOk(context->publication().commitLayout({.width = 100.0F, .height = 80.0F}));
 
-    const UI::UICommittedPaintView paint = context->committedPaint();
-    const UI::UICommittedLayoutView layout = context->committedLayout();
+    const UI::UICommittedPaintView paint = context->publication().committedPaint();
+    const UI::UICommittedLayoutView layout = context->publication().committedLayout();
     ASSERT_EQ(paint.size(), 4U);
-    EXPECT_EQ(paint.paintOrderRevision(), context->committedHit().paintOrderRevision());
+    EXPECT_EQ(paint.paintOrderRevision(), context->publication().committedHit().paintOrderRevision());
     EXPECT_EQ(paint.structureRevision(), layout.structureRevision());
     EXPECT_EQ(paint.layoutRevision(), layout.layoutRevision());
 
@@ -349,21 +349,21 @@ TEST_F(UIPaintSnapshotTest, PaintOnlyCommitDoesNotRelayoutOrRebuildHitAndSameVal
     auto updater = createUpdater(*context, root);
     expectOk(updater.setLayoutStyle(panel, fixedSize(40.0F, 20.0F)));
     expectOk(updater.setBoxPaint(panel, solidFill(10, 20, 30)));
-    expectOk(context->commitLayout({.width = 100.0F, .height = 50.0F}));
+    expectOk(context->publication().commitLayout({.width = 100.0F, .height = 50.0F}));
 
-    const u64 structureRevision = context->committedStructure().revision();
-    const u64 layoutRevision = context->committedLayout().layoutRevision();
-    const u64 hitRevision = context->committedHit().hitRevision();
-    const u64 paintRevision = context->committedPaint().paintRevision();
+    const u64 structureRevision = context->publication().committedStructure().revision();
+    const u64 layoutRevision = context->publication().committedLayout().layoutRevision();
+    const u64 hitRevision = context->publication().committedHit().hitRevision();
+    const u64 paintRevision = context->publication().committedPaint().paintRevision();
     const UI::UIBoxPaint changed = solidFill(80, 40, 20, 128);
     expectOk(updater.setBoxPaint(panel, changed));
     EXPECT_TRUE(context->statistics().paintDirty);
-    expectOk(context->commitLayout({.width = 100.0F, .height = 50.0F}));
+    expectOk(context->publication().commitLayout({.width = 100.0F, .height = 50.0F}));
 
-    EXPECT_EQ(context->committedStructure().revision(), structureRevision);
-    EXPECT_EQ(context->committedLayout().layoutRevision(), layoutRevision);
-    EXPECT_EQ(context->committedHit().hitRevision(), hitRevision);
-    EXPECT_EQ(context->committedPaint().paintRevision(), paintRevision + 1U);
+    EXPECT_EQ(context->publication().committedStructure().revision(), structureRevision);
+    EXPECT_EQ(context->publication().committedLayout().layoutRevision(), layoutRevision);
+    EXPECT_EQ(context->publication().committedHit().hitRevision(), hitRevision);
+    EXPECT_EQ(context->publication().committedPaint().paintRevision(), paintRevision + 1U);
     EXPECT_EQ(context->statistics().lastLayoutPassCount, 0U);
     EXPECT_EQ(context->statistics().lastHitRebuildCount, 0U);
     EXPECT_EQ(context->statistics().lastPaintCacheRebuildCount, 1U);
@@ -372,17 +372,17 @@ TEST_F(UIPaintSnapshotTest, PaintOnlyCommitDoesNotRelayoutOrRebuildHitAndSameVal
     expectOk(updater.setBoxPaint(panel, changed));
     EXPECT_FALSE(context->statistics().paintDirty);
     const UI::UICommittedPaintEntry* const data =
-        context->committedPaint().entries().data();
-    expectOk(context->commitLayout({.width = 100.0F, .height = 50.0F}));
-    EXPECT_EQ(context->committedPaint().paintRevision(), paintRevision + 1U);
-    EXPECT_EQ(context->committedPaint().entries().data(), data);
+        context->publication().committedPaint().entries().data();
+    expectOk(context->publication().commitLayout({.width = 100.0F, .height = 50.0F}));
+    EXPECT_EQ(context->publication().committedPaint().paintRevision(), paintRevision + 1U);
+    EXPECT_EQ(context->publication().committedPaint().entries().data(), data);
     EXPECT_EQ(context->statistics().lastPaintCacheRebuildCount, 0U);
     EXPECT_EQ(context->statistics().lastPaintSnapshotRebuildCount, 0U);
 
     expectOk(updater.setBoxPaint(panel, solidFill(255, 255, 255, 0)));
-    expectOk(context->commitLayout({.width = 100.0F, .height = 50.0F}));
-    EXPECT_TRUE(context->committedPaint().empty());
-    EXPECT_EQ(context->committedHit().hitRevision(), hitRevision);
+    expectOk(context->publication().commitLayout({.width = 100.0F, .height = 50.0F}));
+    EXPECT_TRUE(context->publication().committedPaint().empty());
+    EXPECT_EQ(context->publication().committedHit().hitRevision(), hitRevision);
 }
 
 TEST_F(UIPaintSnapshotTest, InvalidCornerRadiusSetterPreservesRetainedAndCommittedPaint)
@@ -402,9 +402,9 @@ TEST_F(UIPaintSnapshotTest, InvalidCornerRadiusSetterPreservesRetainedAndCommitt
         .bottomLeft = 2.0F,
     };
     expectOk(updater.setBoxPaint(panel, authored));
-    expectOk(context->commitLayout({.width = 100.0F, .height = 50.0F}));
+    expectOk(context->publication().commitLayout({.width = 100.0F, .height = 50.0F}));
 
-    const UI::UICommittedPaintView baseline = context->committedPaint();
+    const UI::UICommittedPaintView baseline = context->publication().committedPaint();
     ASSERT_EQ(baseline.size(), 1U);
     const u64 paintRevision = baseline.paintRevision();
     const UI::UILogicalCornerRadii committedRadii =
@@ -419,13 +419,13 @@ TEST_F(UIPaintSnapshotTest, InvalidCornerRadiusSetterPreservesRetainedAndCommitt
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidStyle);
     EXPECT_EQ(context->statistics().dirtyQueuePendingCount,
               before.dirtyQueuePendingCount);
-    EXPECT_EQ(context->committedPaint().paintRevision(), paintRevision);
-    EXPECT_EQ(context->committedPaint().entries().front().cornerRadii,
+    EXPECT_EQ(context->publication().committedPaint().paintRevision(), paintRevision);
+    EXPECT_EQ(context->publication().committedPaint().entries().front().cornerRadii,
               committedRadii);
 
-    expectOk(context->commitLayout({.width = 120.0F, .height = 60.0F}));
-    ASSERT_EQ(context->committedPaint().size(), 1U);
-    EXPECT_EQ(context->committedPaint().entries().front().cornerRadii,
+    expectOk(context->publication().commitLayout({.width = 120.0F, .height = 60.0F}));
+    ASSERT_EQ(context->publication().committedPaint().size(), 1U);
+    EXPECT_EQ(context->publication().committedPaint().entries().front().cornerRadii,
               committedRadii);
 }
 
@@ -438,27 +438,27 @@ TEST_F(UIPaintSnapshotTest, CommitStructureDoesNotPublishPendingPaintMutation)
     const UI::UINodeId panel = createPanel(*context, root.rootNodeId());
     auto updater = createUpdater(*context, root);
     expectOk(updater.setBoxPaint(panel, solidFill(10, 20, 30)));
-    expectOk(context->commitLayout({.width = 100.0F, .height = 50.0F}));
+    expectOk(context->publication().commitLayout({.width = 100.0F, .height = 50.0F}));
 
-    const UI::UICommittedPaintView baseline = context->committedPaint();
+    const UI::UICommittedPaintView baseline = context->publication().committedPaint();
     const auto* const baselineData = baseline.entries().data();
     ASSERT_EQ(baseline.size(), 1U);
     const UI::UIPremultipliedRgba8Color baselineColor =
         baseline.entries().front().solidFill;
 
     expectOk(updater.setBoxPaint(panel, solidFill(80, 40, 20, 128)));
-    expectOk(context->commitStructure());
-    EXPECT_EQ(context->committedPaint().entries().data(), baselineData);
-    EXPECT_EQ(context->committedPaint().paintRevision(), baseline.paintRevision());
-    ASSERT_EQ(context->committedPaint().size(), 1U);
-    EXPECT_EQ(context->committedPaint().entries().front().solidFill, baselineColor);
+    expectOk(context->publication().commitStructure());
+    EXPECT_EQ(context->publication().committedPaint().entries().data(), baselineData);
+    EXPECT_EQ(context->publication().committedPaint().paintRevision(), baseline.paintRevision());
+    ASSERT_EQ(context->publication().committedPaint().size(), 1U);
+    EXPECT_EQ(context->publication().committedPaint().entries().front().solidFill, baselineColor);
     EXPECT_TRUE(context->statistics().paintDirty);
 
-    expectOk(context->commitLayout({.width = 100.0F, .height = 50.0F}));
-    EXPECT_EQ(context->committedPaint().paintRevision(), baseline.paintRevision() + 1U);
-    ASSERT_EQ(context->committedPaint().size(), 1U);
+    expectOk(context->publication().commitLayout({.width = 100.0F, .height = 50.0F}));
+    EXPECT_EQ(context->publication().committedPaint().paintRevision(), baseline.paintRevision() + 1U);
+    ASSERT_EQ(context->publication().committedPaint().size(), 1U);
     EXPECT_EQ(
-        context->committedPaint().entries().front().solidFill,
+        context->publication().committedPaint().entries().front().solidFill,
         (UI::UIPremultipliedRgba8Color{
             .red = 40,
             .green = 20,
@@ -480,11 +480,11 @@ TEST_F(UIPaintSnapshotTest, ViewportRelayoutRebuildsCompositeSnapshotWithoutLoca
     percentStyle.size.height = UI::UILayoutLength::Percent(50.0F);
     expectOk(updater.setLayoutStyle(panel, percentStyle));
     expectOk(updater.setBoxPaint(panel, solidFill(20, 30, 40)));
-    expectOk(context->commitLayout({.width = 100.0F, .height = 60.0F}));
-    const u64 paintRevision = context->committedPaint().paintRevision();
+    expectOk(context->publication().commitLayout({.width = 100.0F, .height = 60.0F}));
+    const u64 paintRevision = context->publication().committedPaint().paintRevision();
 
-    expectOk(context->commitLayout({.width = 200.0F, .height = 80.0F}));
-    const UI::UICommittedPaintView paint = context->committedPaint();
+    expectOk(context->publication().commitLayout({.width = 200.0F, .height = 80.0F}));
+    const UI::UICommittedPaintView paint = context->publication().committedPaint();
     ASSERT_EQ(paint.size(), 1U);
     EXPECT_EQ(paint.viewportSize(), (UI::UILogicalSize{200.0F, 80.0F}));
     EXPECT_EQ(
@@ -511,12 +511,12 @@ TEST_F(UIPaintSnapshotTest, CapacityFailurePreservesAllFourPublishedSnapshotsAnd
     const UI::UINodeId first = createPanel(*context, root.rootNodeId());
     auto updater = createUpdater(*context, root);
     expectOk(updater.setBoxPaint(first, solidFill(1, 2, 3)));
-    expectOk(context->commitLayout({.width = 100.0F, .height = 50.0F}));
+    expectOk(context->publication().commitLayout({.width = 100.0F, .height = 50.0F}));
 
-    const UI::UICommittedStructureView oldStructure = context->committedStructure();
-    const UI::UICommittedLayoutView oldLayout = context->committedLayout();
-    const UI::UICommittedHitView oldHit = context->committedHit();
-    const UI::UICommittedPaintView oldPaint = context->committedPaint();
+    const UI::UICommittedStructureView oldStructure = context->publication().committedStructure();
+    const UI::UICommittedLayoutView oldLayout = context->publication().committedLayout();
+    const UI::UICommittedHitView oldHit = context->publication().committedHit();
+    const UI::UICommittedPaintView oldPaint = context->publication().committedPaint();
     const auto* const oldStructureData = oldStructure.entries().data();
     const auto* const oldLayoutData = oldLayout.entries().data();
     const auto* const oldHitData = oldHit.entries().data();
@@ -526,31 +526,31 @@ TEST_F(UIPaintSnapshotTest, CapacityFailurePreservesAllFourPublishedSnapshotsAnd
     const UI::UINodeId second = createPanel(*context, root.rootNodeId());
     expectOk(updater.setBoxPaint(second, solidFill(4, 5, 6)));
     const Core::Status rejected =
-        context->commitLayout({.width = 100.0F, .height = 50.0F});
+        context->publication().commitLayout({.width = 100.0F, .height = 50.0F});
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::CapacityExceeded);
 
-    EXPECT_EQ(context->committedStructure().entries().data(), oldStructureData);
-    EXPECT_EQ(context->committedStructure().revision(), oldStructure.revision());
-    EXPECT_EQ(context->committedLayout().entries().data(), oldLayoutData);
-    EXPECT_EQ(context->committedLayout().layoutRevision(), oldLayout.layoutRevision());
-    EXPECT_EQ(context->committedHit().entries().data(), oldHitData);
-    EXPECT_EQ(context->committedHit().hitRevision(), oldHit.hitRevision());
-    EXPECT_EQ(context->committedPaint().entries().data(), oldPaintData);
-    EXPECT_EQ(context->committedPaint().paintRevision(), oldPaint.paintRevision());
-    EXPECT_EQ(context->committedPaint().viewportSize(), oldPaint.viewportSize());
+    EXPECT_EQ(context->publication().committedStructure().entries().data(), oldStructureData);
+    EXPECT_EQ(context->publication().committedStructure().revision(), oldStructure.revision());
+    EXPECT_EQ(context->publication().committedLayout().entries().data(), oldLayoutData);
+    EXPECT_EQ(context->publication().committedLayout().layoutRevision(), oldLayout.layoutRevision());
+    EXPECT_EQ(context->publication().committedHit().entries().data(), oldHitData);
+    EXPECT_EQ(context->publication().committedHit().hitRevision(), oldHit.hitRevision());
+    EXPECT_EQ(context->publication().committedPaint().entries().data(), oldPaintData);
+    EXPECT_EQ(context->publication().committedPaint().paintRevision(), oldPaint.paintRevision());
+    EXPECT_EQ(context->publication().committedPaint().viewportSize(), oldPaint.viewportSize());
     EXPECT_EQ(oldPaint.entries().front().node, first);
-    EXPECT_EQ(context->committedPaint().entries().front().node, first);
+    EXPECT_EQ(context->publication().committedPaint().entries().front().node, first);
     EXPECT_TRUE(context->statistics().structureDirty);
     EXPECT_TRUE(context->statistics().layoutDirty);
     EXPECT_TRUE(context->statistics().hitDirty);
     EXPECT_TRUE(context->statistics().paintDirty);
 
     expectOk(updater.setBoxPaint(second, {}));
-    expectOk(context->commitLayout({.width = 100.0F, .height = 50.0F}));
-    EXPECT_EQ(context->committedStructure().size(), 3U);
-    ASSERT_EQ(context->committedPaint().size(), 1U);
-    EXPECT_EQ(context->committedPaint().entries().front().node, first);
+    expectOk(context->publication().commitLayout({.width = 100.0F, .height = 50.0F}));
+    EXPECT_EQ(context->publication().committedStructure().size(), 3U);
+    ASSERT_EQ(context->publication().committedPaint().size(), 1U);
+    EXPECT_EQ(context->publication().committedPaint().entries().front().node, first);
 }
 
 TEST_F(UIPaintSnapshotTest, RootScopeAndDirtyCapacityFailuresDoNotMutateRejectedPaint)
@@ -571,7 +571,7 @@ TEST_F(UIPaintSnapshotTest, RootScopeAndDirtyCapacityFailuresDoNotMutateRejected
     const UI::UINodeId second = createPanel(*context, firstRoot.rootNodeId());
     const UI::UINodeId foreign = createPanel(*context, secondRoot.rootNodeId());
     auto updater = createUpdater(*context, firstRoot);
-    expectOk(context->commitLayout({.width = 100.0F, .height = 50.0F}));
+    expectOk(context->publication().commitLayout({.width = 100.0F, .height = 50.0F}));
 
     const Core::Status wrongRoot = updater.setBoxPaint(foreign, solidFill(1, 1, 1));
     ASSERT_FALSE(wrongRoot.has_value());
@@ -580,12 +580,12 @@ TEST_F(UIPaintSnapshotTest, RootScopeAndDirtyCapacityFailuresDoNotMutateRejected
     const Core::Status exhausted = updater.setBoxPaint(second, solidFill(3, 3, 3));
     ASSERT_FALSE(exhausted.has_value());
     EXPECT_EQ(exhausted.error().code, UI::UIErrorCode::CapacityExceeded);
-    expectOk(context->commitLayout({.width = 100.0F, .height = 50.0F}));
+    expectOk(context->publication().commitLayout({.width = 100.0F, .height = 50.0F}));
 
-    ASSERT_EQ(context->committedPaint().size(), 1U);
-    EXPECT_EQ(context->committedPaint().entries().front().node, first);
-    EXPECT_EQ(findPaintEntry(context->committedPaint(), second), nullptr);
-    EXPECT_EQ(findPaintEntry(context->committedPaint(), foreign), nullptr);
+    ASSERT_EQ(context->publication().committedPaint().size(), 1U);
+    EXPECT_EQ(context->publication().committedPaint().entries().front().node, first);
+    EXPECT_EQ(findPaintEntry(context->publication().committedPaint(), second), nullptr);
+    EXPECT_EQ(findPaintEntry(context->publication().committedPaint(), foreign), nullptr);
 }
 
 TEST_F(UIPaintSnapshotTest, RejectsForeignContextAndStaleGenerationWithoutPaintPollution)
@@ -606,9 +606,9 @@ TEST_F(UIPaintSnapshotTest, RejectsForeignContextAndStaleGenerationWithoutPaintP
         createPanel(*foreignContext, foreignRoot.rootNodeId());
     auto updater = createUpdater(*context, root);
     expectOk(updater.setBoxPaint(stable, solidFill(1, 2, 3)));
-    expectOk(context->commitLayout({.width = 100.0F, .height = 50.0F}));
+    expectOk(context->publication().commitLayout({.width = 100.0F, .height = 50.0F}));
 
-    const UI::UICommittedPaintView baseline = context->committedPaint();
+    const UI::UICommittedPaintView baseline = context->publication().committedPaint();
     ASSERT_EQ(baseline.size(), 1U);
     const Core::Status wrongContext =
         updater.setBoxPaint(foreign, solidFill(4, 5, 6));
@@ -620,15 +620,15 @@ TEST_F(UIPaintSnapshotTest, RejectsForeignContextAndStaleGenerationWithoutPaintP
         updater.setBoxPaint(stale, solidFill(7, 8, 9));
     ASSERT_FALSE(staleStatus.has_value());
     EXPECT_EQ(staleStatus.error().code, UI::UIErrorCode::InvalidNode);
-    EXPECT_EQ(context->committedPaint().paintRevision(), baseline.paintRevision());
-    ASSERT_EQ(context->committedPaint().size(), 1U);
-    EXPECT_EQ(context->committedPaint().entries().front().node, stable);
+    EXPECT_EQ(context->publication().committedPaint().paintRevision(), baseline.paintRevision());
+    ASSERT_EQ(context->publication().committedPaint().size(), 1U);
+    EXPECT_EQ(context->publication().committedPaint().entries().front().node, stable);
 
-    expectOk(context->commitLayout({.width = 100.0F, .height = 50.0F}));
-    ASSERT_EQ(context->committedPaint().size(), 1U);
-    EXPECT_EQ(context->committedPaint().entries().front().node, stable);
-    EXPECT_EQ(findPaintEntry(context->committedPaint(), foreign), nullptr);
-    EXPECT_EQ(findPaintEntry(context->committedPaint(), stale), nullptr);
+    expectOk(context->publication().commitLayout({.width = 100.0F, .height = 50.0F}));
+    ASSERT_EQ(context->publication().committedPaint().size(), 1U);
+    EXPECT_EQ(context->publication().committedPaint().entries().front().node, stable);
+    EXPECT_EQ(findPaintEntry(context->publication().committedPaint(), foreign), nullptr);
+    EXPECT_EQ(findPaintEntry(context->publication().committedPaint(), stale), nullptr);
 }
 
 TEST_F(UIPaintSnapshotTest, NoChangeAndViewportCommitsUseFixedPmrStorage)
@@ -645,19 +645,19 @@ TEST_F(UIPaintSnapshotTest, NoChangeAndViewportCommitsUseFixedPmrStorage)
         const UI::UINodeId panel = createPanel(*context, root.rootNodeId());
         auto updater = createUpdater(*context, root);
         expectOk(updater.setBoxPaint(panel, solidFill(40, 80, 120, 200)));
-        expectOk(context->commitLayout({.width = 100.0F, .height = 50.0F}));
+        expectOk(context->publication().commitLayout({.width = 100.0F, .height = 50.0F}));
 
-        const u64 paintRevision = context->committedPaint().paintRevision();
+        const u64 paintRevision = context->publication().committedPaint().paintRevision();
         const usize allocationCount = resource.allocationCount();
         for (usize frame = 0; frame < 300; ++frame) {
-            expectOk(context->commitLayout({.width = 100.0F, .height = 50.0F}));
-            EXPECT_EQ(context->committedPaint().paintRevision(), paintRevision);
+            expectOk(context->publication().commitLayout({.width = 100.0F, .height = 50.0F}));
+            EXPECT_EQ(context->publication().committedPaint().paintRevision(), paintRevision);
             EXPECT_EQ(context->statistics().lastPaintCacheRebuildCount, 0U);
             EXPECT_EQ(context->statistics().lastPaintSnapshotRebuildCount, 0U);
         }
         EXPECT_EQ(resource.allocationCount(), allocationCount);
 
-        expectOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
+        expectOk(context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
         EXPECT_EQ(resource.allocationCount(), allocationCount);
         EXPECT_EQ(context->statistics().lastPaintCacheRebuildCount, 0U);
         EXPECT_EQ(context->statistics().lastPaintSnapshotRebuildCount, 1U);

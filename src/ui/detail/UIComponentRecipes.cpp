@@ -1,4 +1,4 @@
-#include <tina/ui/UIContext.hpp>
+#include "UIContextImpl.hpp"
 
 #include "UIElementContractResolver.hpp"
 
@@ -1123,39 +1123,6 @@ requiredDialogBuildBudget(const UIDialogConfig& config) noexcept
 }
 
 Core::Result<UIIconButtonParts>
-UIContext::buildIconButton(UINodeId parent, const UIIconButtonConfig& config)
-{
-    return buildIconButtonImpl(*this, parent, config, productTheme());
-}
-
-Core::Result<UIFormFieldParts>
-UIContext::buildFormField(UINodeId parent, const UIFormFieldConfig& config)
-{
-    return buildFormFieldImpl(*this, parent, config, productTheme());
-}
-
-Core::Result<UIDialogParts>
-UIContext::buildDialog(UINodeId parent, const UIDialogConfig& config)
-{
-    auto parts = buildDialogImpl(*this, parent, config, productTheme());
-    if (parts)
-    {
-        if (Core::Status registered = registerDialogFromBuild(*parts); !registered)
-        {
-            return Core::failure(registered.error());
-        }
-    }
-    return parts;
-}
-
-Core::Result<UISnackbarHostParts>
-UIContext::buildSnackbarHost(UINodeId parent,
-                             const UISnackbarHostConfig& config)
-{
-    return buildSnackbarHostImpl(*this, parent, config, productTheme());
-}
-
-Core::Result<UIIconButtonParts>
 UITreeUpdater::buildIconButton(UINodeId parent, const UIIconButtonConfig& config)
 {
     if (m_context == nullptr)
@@ -1163,7 +1130,7 @@ UITreeUpdater::buildIconButton(UINodeId parent, const UIIconButtonConfig& config
         return Core::failure(UIErrorCode::WrongContext,
                              "UI tree updater is not bound to a context");
     }
-    return buildIconButtonImpl(*this, parent, config, m_context->productTheme());
+    return buildIconButtonImpl(*this, parent, config, m_context->m_impl->productTheme);
 }
 
 Core::Result<UIFormFieldParts>
@@ -1174,7 +1141,7 @@ UITreeUpdater::buildFormField(UINodeId parent, const UIFormFieldConfig& config)
         return Core::failure(UIErrorCode::WrongContext,
                              "UI tree updater is not bound to a context");
     }
-    return buildFormFieldImpl(*this, parent, config, m_context->productTheme());
+    return buildFormFieldImpl(*this, parent, config, m_context->m_impl->productTheme);
 }
 
 Core::Result<UIDialogParts>
@@ -1185,10 +1152,10 @@ UITreeUpdater::buildDialog(UINodeId parent, const UIDialogConfig& config)
         return Core::failure(UIErrorCode::WrongContext,
                              "UI tree updater is not bound to a context");
     }
-    auto parts = buildDialogImpl(*this, parent, config, m_context->productTheme());
+    auto parts = buildDialogImpl(*this, parent, config, m_context->m_impl->productTheme);
     if (parts)
     {
-        if (Core::Status registered = m_context->registerDialogFromBuild(*parts);
+        if (Core::Status registered = m_context->m_impl->registerDialogFromBuild(*parts);
             !registered)
         {
             return Core::failure(registered.error());
@@ -1206,7 +1173,7 @@ UITreeUpdater::buildSnackbarHost(UINodeId parent,
                              "UI tree updater is not bound to a context");
     }
     return buildSnackbarHostImpl(*this, parent, config,
-                                 m_context->productTheme());
+                                 m_context->m_impl->productTheme);
 }
 
 } // namespace Tina::UI

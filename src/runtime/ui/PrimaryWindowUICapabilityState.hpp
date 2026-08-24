@@ -1,6 +1,8 @@
 #pragma once
 
 #include <tina/runtime/PrimaryWindowUI.hpp>
+#include <tina/ui/UIContextConfig.hpp>
+#include <tina/ui/UIContextStatistics.hpp>
 
 #include <optional>
 #include <string_view>

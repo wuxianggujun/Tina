@@ -20,10 +20,10 @@ using PrimaryWindowIsEnabledResult = decltype(
     std::declval<const Tina::PrimaryWindowUITreeUpdater&>().isEnabled(
         std::declval<Tina::UI::UINodeId>()));
 using PrimaryWindowSetStyleTransitionResult = decltype(
-    std::declval<Tina::PrimaryWindowUITreeUpdater&>().setStyleBackgroundColorTransition(
+    std::declval<Tina::PrimaryWindowUITreeUpdater&>().motion().setStyleBackgroundColorTransition(
         std::declval<const Tina::UI::UITransitionSpec&>()));
 using PrimaryWindowStyleTransitionResult = decltype(
-    std::declval<const Tina::PrimaryWindowUITreeUpdater&>().styleBackgroundColorTransition());
+    std::declval<const Tina::PrimaryWindowUITreeUpdater&>().motion().styleBackgroundColorTransition());
 static_assert(std::is_same_v<PrimaryWindowSetEnabledResult, Tina::Core::Status>);
 static_assert(std::is_same_v<PrimaryWindowIsEnabledResult, Tina::Core::Result<bool>>);
 static_assert(std::is_same_v<PrimaryWindowSetStyleTransitionResult, Tina::Core::Status>);

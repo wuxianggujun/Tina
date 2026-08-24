@@ -14,7 +14,7 @@ namespace Tina::Runtime::Detail {
 
 // Runtime-private phase boundary that publishes primary-window UI layout once
 // for each accepted PlatformFrameId. A valid new id consumes the attempt even
-// when identity validation or UIContext::commitLayout subsequently fails, so
+// when identity validation or UIPublicationPipeline::commitLayout subsequently fails, so
 // routed callbacks and retained mutations cannot be replayed in the same frame.
 class PrimaryWindowUILayoutCoordinator final {
   public:

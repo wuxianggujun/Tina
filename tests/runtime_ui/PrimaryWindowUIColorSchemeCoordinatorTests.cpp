@@ -43,9 +43,9 @@ TEST(PrimaryWindowUIColorSchemeCoordinatorTests, AppliesLatestPreferenceAndPrese
 {
     std::unique_ptr<UI::UIContext> context = createContext();
     ASSERT_NE(context, nullptr);
-    ASSERT_TRUE(context->setProductTheme(UI::makeModernDesktopTheme(
+    ASSERT_TRUE(context->style().setProductTheme(UI::makeModernDesktopTheme(
         UI::UIColorScheme::Dark, UI::UIDensity::Comfortable)));
-    auto root = context->rootBuilder().createRoot();
+    auto root = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(root.has_value());
 
     Coordinator coordinator;
@@ -55,8 +55,8 @@ TEST(PrimaryWindowUIColorSchemeCoordinatorTests, AppliesLatestPreferenceAndPrese
     };
     coordinator.observe(events);
     ASSERT_TRUE(coordinator.apply(context.get()));
-    EXPECT_EQ(context->productTheme().colorScheme, UI::UIColorScheme::Light);
-    EXPECT_EQ(context->productTheme().density, UI::UIDensity::Comfortable);
+    EXPECT_EQ(context->style().productTheme().colorScheme, UI::UIColorScheme::Light);
+    EXPECT_EQ(context->style().productTheme().density, UI::UIDensity::Comfortable);
 }
 
 TEST(PrimaryWindowUIColorSchemeCoordinatorTests, IgnoresIncompleteResetBatch)
@@ -76,12 +76,12 @@ TEST(PrimaryWindowUIColorSchemeCoordinatorTests, IgnoresIncompleteResetBatch)
     };
     coordinator.observe(resetBatch);
     ASSERT_TRUE(coordinator.apply(context.get()));
-    EXPECT_EQ(context->productTheme().colorScheme, UI::UIColorScheme::Dark);
+    EXPECT_EQ(context->style().productTheme().colorScheme, UI::UIColorScheme::Dark);
 
     const std::array retry{colorSchemeEvent(3, Platform::SystemColorScheme::Light)};
     coordinator.observe(retry);
     ASSERT_TRUE(coordinator.apply(context.get()));
-    EXPECT_EQ(context->productTheme().colorScheme, UI::UIColorScheme::Light);
+    EXPECT_EQ(context->style().productTheme().colorScheme, UI::UIColorScheme::Light);
 }
 
 TEST(PrimaryWindowUIColorSchemeCoordinatorTests, DefersUntilAWindowContextExists)
@@ -94,7 +94,7 @@ TEST(PrimaryWindowUIColorSchemeCoordinatorTests, DefersUntilAWindowContextExists
     std::unique_ptr<UI::UIContext> context = createContext();
     ASSERT_NE(context, nullptr);
     ASSERT_TRUE(coordinator.apply(context.get()));
-    EXPECT_EQ(context->productTheme().colorScheme, UI::UIColorScheme::Light);
+    EXPECT_EQ(context->style().productTheme().colorScheme, UI::UIColorScheme::Light);
 }
 
 } // namespace

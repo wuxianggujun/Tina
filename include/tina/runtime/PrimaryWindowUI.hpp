@@ -3,13 +3,13 @@
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/render/Texture2DFrameResourceResolver.hpp>
+#include <tina/ui/UIAuthoring.hpp>
 #include <tina/ui/UIButton.hpp>
 #include <tina/ui/UICheckbox.hpp>
 #include <tina/ui/UICollapsibleSection.hpp>
 #include <tina/ui/UIColorField.hpp>
 #include <tina/ui/UIColorPicker.hpp>
 #include <tina/ui/UIContent.hpp>
-#include <tina/ui/UIContext.hpp>
 #include <tina/ui/UIDataGrid.hpp>
 #include <tina/ui/UIDialog.hpp>
 #include <tina/ui/UIDropdown.hpp>
@@ -26,8 +26,10 @@
 #include <tina/ui/UIScrollView.hpp>
 #include <tina/ui/UISemantics.hpp>
 #include <tina/ui/UISlider.hpp>
+#include <tina/ui/UISnackbar.hpp>
 #include <tina/ui/UISplitView.hpp>
 #include <tina/ui/UIStyle.hpp>
+#include <tina/ui/UITheme.hpp>
 #include <tina/ui/UIText.hpp>
 #include <tina/ui/UITextEdit.hpp>
 #include <tina/ui/UITooltip.hpp>

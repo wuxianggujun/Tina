@@ -2,6 +2,7 @@
 
 #include <tina/runtime/RuntimeErrors.hpp>
 #include <tina/ui/UIContext.hpp>
+#include <tina/ui/UIPublicationPipeline.hpp>
 
 #include <cmath>
 #include <optional>
@@ -38,7 +39,7 @@ Core::Status PrimaryWindowTextInputPlacementCoordinator::publish(
     std::optional<Platform::TextInputPlacement> placement;
     if (context != nullptr)
     {
-        const std::optional<UI::UILogicalRect> caret = context->committedTextInputCaretRect();
+        const std::optional<UI::UILogicalRect> caret = context->publication().committedTextInputCaretRect();
         if (caret.has_value())
         {
             if (!std::isfinite(caret->x) || !std::isfinite(caret->y) ||

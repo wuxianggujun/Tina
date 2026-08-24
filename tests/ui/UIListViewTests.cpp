@@ -107,14 +107,14 @@ createContext(Platform::WindowId window, usize nodeCapacity, std::pmr::memory_re
 
 [[nodiscard]] UI::UIRootOwner createRoot(UI::UIContext& context)
 {
-    auto result = context.rootBuilder().createRoot();
+    auto result = context.authoring().rootBuilder().createRoot();
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UIRootOwner{};
 }
 
 [[nodiscard]] UI::UITreeUpdater createUpdater(UI::UIContext& context, UI::UIRootOwner& root)
 {
-    auto result = context.treeUpdater(root);
+    auto result = context.authoring().treeUpdater(root);
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UITreeUpdater{};
 }
@@ -222,7 +222,7 @@ TEST_F(UIListViewTest, VirtualizesOneHundredThousandItemsWithFixedNodePool)
     assertOk(updater.setListViewDataSource(listView, source.view()));
     ASSERT_EQ(context->liveNodeCount(), RowCapacity + 2U);
 
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     UI::UIListViewMetrics metrics = updater.listViewMetrics(listView).value();
     EXPECT_EQ(metrics.logicalItemCount, 100'000U);
     EXPECT_EQ(metrics.firstVisibleIndex, 0U);
@@ -236,20 +236,20 @@ TEST_F(UIListViewTest, VirtualizesOneHundredThousandItemsWithFixedNodePool)
     EXPECT_TRUE(metrics.verticalScrollBarVisible);
 
     assertOk(updater.scrollListViewToIndex(listView, 50'000, UI::UIListViewScrollAlignment::Start));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     metrics = updater.listViewMetrics(listView).value();
     EXPECT_EQ(metrics.firstVisibleIndex, 50'000U);
     EXPECT_EQ(metrics.firstMaterializedIndex, 49'998U);
     EXPECT_EQ(metrics.materializedItemCount, 9U);
     EXPECT_EQ(context->liveNodeCount(), RowCapacity + 2U);
 
-    const UI::UISemanticsEntry* row = findVirtualItem(context->committedSemantics(), 50'000);
+    const UI::UISemanticsEntry* row = findVirtualItem(context->publication().committedSemantics(), 50'000);
     ASSERT_NE(row, nullptr);
     EXPECT_EQ(row->virtualItemKey, 51'001U);
     EXPECT_EQ(row->role, UI::UISemanticsRole::ListItem);
 
     UI::UIAccessibilityTree accessibility;
-    assertOk(accessibility.rebuildFrom(context->committedSemantics()));
+    assertOk(accessibility.rebuildFrom(context->publication().committedSemantics()));
     const UI::UIAccessibilityNode* accessibleRow = accessibility.findNode(row->node);
     ASSERT_NE(accessibleRow, nullptr);
     EXPECT_EQ(accessibleRow->virtualItemKey, row->virtualItemKey);
@@ -295,35 +295,35 @@ TEST_F(UIListViewTest, PointerSelectionWheelAndScrollbarUseCommittedVirtualRows)
                                                         .pressedSelectedItemBackgroundColor = pressedSelectionColor,
                                                     }));
     assertOk(updater.setListViewDataSource(listView, source.view()));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
-    const UI::UISemanticsEntry* thirdRow = findVirtualItem(context->committedSemantics(), 2);
+    const UI::UISemanticsEntry* thirdRow = findVirtualItem(context->publication().committedSemantics(), 2);
     ASSERT_NE(thirdRow, nullptr);
     const UI::UILogicalPoint rowCenter{
         .x = thirdRow->worldRect.x + thirdRow->worldRect.width * 0.5F,
         .y = thirdRow->worldRect.y + thirdRow->worldRect.height * 0.5F,
     };
-    auto down = context->routePointerInput(
+    auto down = context->input().routePointerInput(
         pointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 1, rowCenter));
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
     EXPECT_TRUE(down->consumed);
-    EXPECT_EQ(context->pointerCapture(), thirdRow->node);
-    auto up = context->routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::ButtonUp, 2, rowCenter));
+    EXPECT_EQ(context->input().pointerCapture(), thirdRow->node);
+    auto up = context->input().routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::ButtonUp, 2, rowCenter));
     ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
     EXPECT_TRUE(up->consumed);
-    EXPECT_EQ(context->defaultActionFocus(), listView);
+    EXPECT_EQ(context->input().defaultActionFocus(), listView);
     EXPECT_EQ(updater.listViewSelection(listView).value(),
               (UI::UIListViewSelection{.key = 3, .logicalIndex = 2}));
 
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
-    const UI::UISemanticsEntry* selectedRow = findVirtualItem(context->committedSemantics(), 2);
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
+    const UI::UISemanticsEntry* selectedRow = findVirtualItem(context->publication().committedSemantics(), 2);
     ASSERT_NE(selectedRow, nullptr);
     EXPECT_TRUE(selectedRow->selected);
     EXPECT_TRUE(selectedRow->focused);
     const UI::UINodeId selectedRowNode = selectedRow->node;
     const auto expectSelectedRowColor = [&](UI::UIStraightSrgba8Color expected) {
         bool found = false;
-        const UI::UICommittedPaintView paint = context->committedPaint();
+        const UI::UICommittedPaintView paint = context->publication().committedPaint();
         for (const UI::UICommittedPaintEntry& entry : paint.entries())
         {
             found = found || (entry.node == selectedRowNode && entry.solidFill == UI::premultiply(expected));
@@ -332,36 +332,36 @@ TEST_F(UIListViewTest, PointerSelectionWheelAndScrollbarUseCommittedVirtualRows)
     };
     expectSelectedRowColor(hoveredSelectionColor);
 
-    auto movedOutside = context->routePointerInput(pointerInput(
+    auto movedOutside = context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::Move, 3, {.x = 120.0F, .y = 50.0F}));
     ASSERT_TRUE(movedOutside.has_value()) << (movedOutside ? "" : movedOutside.error().message);
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     expectSelectedRowColor(selectionColor);
 
-    assertOk(context->clearFocus());
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->input().clearFocus());
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     expectSelectedRowColor(selectionColor);
 
-    auto movedInside = context->routePointerInput(pointerInput(
+    auto movedInside = context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::Move, 4, rowCenter));
     ASSERT_TRUE(movedInside.has_value()) << (movedInside ? "" : movedInside.error().message);
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     expectSelectedRowColor(hoveredSelectionColor);
 
-    auto selectedDown = context->routePointerInput(pointerInput(
+    auto selectedDown = context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::ButtonDown, 5, rowCenter));
     ASSERT_TRUE(selectedDown.has_value()) << (selectedDown ? "" : selectedDown.error().message);
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     expectSelectedRowColor(pressedSelectionColor);
-    auto selectedUp = context->routePointerInput(pointerInput(
+    auto selectedUp = context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::ButtonUp, 6, rowCenter));
     ASSERT_TRUE(selectedUp.has_value()) << (selectedUp ? "" : selectedUp.error().message);
 
     assertOk(updater.setEnabled(listView, false));
-    EXPECT_FALSE(context->defaultActionFocus().hasValue());
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    EXPECT_FALSE(context->input().defaultActionFocus().hasValue());
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     bool foundDisabledSelection = false;
-    const UI::UICommittedPaintView disabledPaint = context->committedPaint();
+    const UI::UICommittedPaintView disabledPaint = context->publication().committedPaint();
     for (const UI::UICommittedPaintEntry& entry : disabledPaint.entries())
     {
         foundDisabledSelection =
@@ -371,30 +371,30 @@ TEST_F(UIListViewTest, PointerSelectionWheelAndScrollbarUseCommittedVirtualRows)
     }
     EXPECT_TRUE(foundDisabledSelection);
     assertOk(updater.setEnabled(listView, true));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
-    auto wheel = context->routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::Wheel, 7,
+    auto wheel = context->input().routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::Wheel, 7,
                                                          {.x = 50.0F, .y = 50.0F}, {.x = 0.0F, .y = -1.0F}));
     ASSERT_TRUE(wheel.has_value()) << (wheel ? "" : wheel.error().message);
     EXPECT_TRUE(wheel->consumed);
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     EXPECT_FLOAT_EQ(updater.listViewMetrics(listView).value().scrollOffset, 20.0F);
 
     assertOk(updater.scrollListViewToIndex(listView, 0, UI::UIListViewScrollAlignment::Start));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
-    auto thumbDown = context->routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 8,
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
+    auto thumbDown = context->input().routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 8,
                                                              {.x = 95.0F, .y = 12.0F}));
     ASSERT_TRUE(thumbDown.has_value()) << (thumbDown ? "" : thumbDown.error().message);
     EXPECT_TRUE(thumbDown->consumed);
-    EXPECT_EQ(context->pointerCapture(), listView);
-    auto thumbMove = context->routePointerInput(
+    EXPECT_EQ(context->input().pointerCapture(), listView);
+    auto thumbMove = context->input().routePointerInput(
         pointerInput(window, UI::UIRoutedPointerEventKind::Move, 9, {.x = 95.0F, .y = 80.0F}));
     ASSERT_TRUE(thumbMove.has_value()) << (thumbMove ? "" : thumbMove.error().message);
-    auto thumbUp = context->routePointerInput(
+    auto thumbUp = context->input().routePointerInput(
         pointerInput(window, UI::UIRoutedPointerEventKind::ButtonUp, 10, {.x = 95.0F, .y = 80.0F}));
     ASSERT_TRUE(thumbUp.has_value()) << (thumbUp ? "" : thumbUp.error().message);
-    EXPECT_FALSE(context->pointerCapture().hasValue());
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    EXPECT_FALSE(context->input().pointerCapture().hasValue());
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     EXPECT_GT(updater.listViewMetrics(listView).value().scrollOffset, 0.0F);
 }
 
@@ -412,38 +412,38 @@ TEST_F(UIListViewTest, KeyboardCommandsSkipDisabledRowsDebounceAndActivate)
     assertOk(updater.setLayoutStyle(listView, fixedSize(120.0F, 100.0F)));
     assertOk(updater.setListViewStyle(listView, {.rowHeight = 20.0F, .overscanRows = 1}));
     assertOk(updater.setListViewDataSource(listView, source.view()));
-    assertOk(context->commitLayout({.width = 120.0F, .height = 100.0F}));
-    assertOk(context->requestFocus(listView));
+    assertOk(context->publication().commitLayout({.width = 120.0F, .height = 100.0F}));
+    assertOk(context->input().requestFocus(listView));
 
-    auto first = context->routeListViewCommand(UI::UIListViewCommand::NextItem, true);
+    auto first = context->input().routeListViewCommand(UI::UIListViewCommand::NextItem, true);
     ASSERT_TRUE(first.has_value()) << first.error().message;
     EXPECT_TRUE(first->consumed);
     EXPECT_TRUE(first->changed);
     EXPECT_EQ(first->selection, (UI::UIListViewSelection{.key = 101, .logicalIndex = 0}));
-    auto repeated = context->routeListViewCommand(UI::UIListViewCommand::NextItem, true);
+    auto repeated = context->input().routeListViewCommand(UI::UIListViewCommand::NextItem, true);
     ASSERT_TRUE(repeated.has_value());
     EXPECT_TRUE(repeated->consumed);
     EXPECT_FALSE(repeated->changed);
-    EXPECT_TRUE(context->routeListViewCommand(UI::UIListViewCommand::NextItem, false)->consumed);
+    EXPECT_TRUE(context->input().routeListViewCommand(UI::UIListViewCommand::NextItem, false)->consumed);
 
-    auto next = context->routeListViewCommand(UI::UIListViewCommand::NextItem, true);
+    auto next = context->input().routeListViewCommand(UI::UIListViewCommand::NextItem, true);
     ASSERT_TRUE(next.has_value()) << next.error().message;
     EXPECT_EQ(next->selection, (UI::UIListViewSelection{.key = 103, .logicalIndex = 2}));
-    EXPECT_TRUE(context->routeListViewCommand(UI::UIListViewCommand::NextItem, false)->consumed);
+    EXPECT_TRUE(context->input().routeListViewCommand(UI::UIListViewCommand::NextItem, false)->consumed);
 
-    auto page = context->routeListViewCommand(UI::UIListViewCommand::NextPage, true);
+    auto page = context->input().routeListViewCommand(UI::UIListViewCommand::NextPage, true);
     ASSERT_TRUE(page.has_value()) << page.error().message;
     EXPECT_EQ(page->selection.logicalIndex, 7U);
-    EXPECT_TRUE(context->routeListViewCommand(UI::UIListViewCommand::NextPage, false)->consumed);
-    assertOk(context->commitLayout({.width = 120.0F, .height = 100.0F}));
+    EXPECT_TRUE(context->input().routeListViewCommand(UI::UIListViewCommand::NextPage, false)->consumed);
+    assertOk(context->publication().commitLayout({.width = 120.0F, .height = 100.0F}));
     EXPECT_GE(updater.listViewMetrics(listView).value().firstVisibleIndex, 3U);
 
-    auto activate = context->routeListViewCommand(UI::UIListViewCommand::Activate, true);
+    auto activate = context->input().routeListViewCommand(UI::UIListViewCommand::Activate, true);
     ASSERT_TRUE(activate.has_value()) << activate.error().message;
     EXPECT_TRUE(activate->consumed);
     EXPECT_TRUE(activate->activated);
     EXPECT_EQ(activate->selection.logicalIndex, 7U);
-    EXPECT_TRUE(context->routeListViewCommand(UI::UIListViewCommand::Activate, false)->consumed);
+    EXPECT_TRUE(context->input().routeListViewCommand(UI::UIListViewCommand::Activate, false)->consumed);
 }
 
 TEST_F(UIListViewTest, FailedSourceAndRowPoolOverflowPreserveCommittedSnapshots)
@@ -465,33 +465,33 @@ TEST_F(UIListViewTest, FailedSourceAndRowPoolOverflowPreserveCommittedSnapshots)
                                                         .wheelStep = 20.0F,
                                                     }));
     assertOk(updater.setListViewDataSource(listView, source.view()));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 60.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 60.0F}));
 
     const UI::UIListViewMetrics committedMetrics = updater.listViewMetrics(listView).value();
-    const u64 committedLayoutRevision = context->committedLayout().layoutRevision();
-    const u64 committedSemanticsRevision = context->committedSemantics().semanticsRevision();
-    const UI::UISemanticsEntry* committedFirst = findVirtualItem(context->committedSemantics(), 0);
+    const u64 committedLayoutRevision = context->publication().committedLayout().layoutRevision();
+    const u64 committedSemanticsRevision = context->publication().committedSemantics().semanticsRevision();
+    const UI::UISemanticsEntry* committedFirst = findVirtualItem(context->publication().committedSemantics(), 0);
     ASSERT_NE(committedFirst, nullptr);
     EXPECT_EQ(committedFirst->name, "Old");
 
     source.label = "New";
     source.failingIndex = 2;
     assertOk(updater.invalidateListViewItems(listView));
-    const Core::Status sourceFailure = context->commitLayout({.width = 100.0F, .height = 60.0F});
+    const Core::Status sourceFailure = context->publication().commitLayout({.width = 100.0F, .height = 60.0F});
     ASSERT_FALSE(sourceFailure.has_value());
     EXPECT_EQ(sourceFailure.error().code, UI::UIErrorCode::InvalidControlValue);
-    EXPECT_EQ(context->committedLayout().layoutRevision(), committedLayoutRevision);
-    EXPECT_EQ(context->committedSemantics().semanticsRevision(), committedSemanticsRevision);
+    EXPECT_EQ(context->publication().committedLayout().layoutRevision(), committedLayoutRevision);
+    EXPECT_EQ(context->publication().committedSemantics().semanticsRevision(), committedSemanticsRevision);
     EXPECT_EQ(updater.listViewMetrics(listView).value(), committedMetrics);
-    committedFirst = findVirtualItem(context->committedSemantics(), 0);
+    committedFirst = findVirtualItem(context->publication().committedSemantics(), 0);
     ASSERT_NE(committedFirst, nullptr);
     EXPECT_EQ(committedFirst->name, "Old");
 
     source.failingIndex = (std::numeric_limits<u64>::max)();
-    assertOk(context->commitLayout({.width = 100.0F, .height = 60.0F}));
-    EXPECT_EQ(findVirtualItem(context->committedSemantics(), 0)->name, "New");
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 60.0F}));
+    EXPECT_EQ(findVirtualItem(context->publication().committedSemantics(), 0)->name, "New");
     const UI::UIListViewMetrics recoveredMetrics = updater.listViewMetrics(listView).value();
-    const u64 recoveredRevision = context->committedLayout().layoutRevision();
+    const u64 recoveredRevision = context->publication().committedLayout().layoutRevision();
 
     assertOk(updater.setListViewStyle(listView, {
                                                         .rowHeight = 20.0F,
@@ -499,10 +499,10 @@ TEST_F(UIListViewTest, FailedSourceAndRowPoolOverflowPreserveCommittedSnapshots)
                                                         .scrollBarVisibility = UI::UIScrollBarVisibility::Auto,
                                                         .wheelStep = 20.0F,
                                                     }));
-    const Core::Status poolOverflow = context->commitLayout({.width = 100.0F, .height = 100.0F});
+    const Core::Status poolOverflow = context->publication().commitLayout({.width = 100.0F, .height = 100.0F});
     ASSERT_FALSE(poolOverflow.has_value());
     EXPECT_EQ(poolOverflow.error().code, UI::UIErrorCode::CapacityExceeded);
-    EXPECT_EQ(context->committedLayout().layoutRevision(), recoveredRevision);
+    EXPECT_EQ(context->publication().committedLayout().layoutRevision(), recoveredRevision);
     EXPECT_EQ(updater.listViewMetrics(listView).value(), recoveredMetrics);
 }
 
@@ -520,8 +520,8 @@ TEST_F(UIListViewTest, InternalRowsCannotBeDestroyedIndependently)
     assertOk(updater.setLayoutStyle(listView, fixedSize(100.0F, 60.0F)));
     assertOk(updater.setListViewStyle(listView, {.rowHeight = 20.0F, .overscanRows = 1}));
     assertOk(updater.setListViewDataSource(listView, source.view()));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 60.0F}));
-    const UI::UISemanticsEntry* row = findVirtualItem(context->committedSemantics(), 0);
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 60.0F}));
+    const UI::UISemanticsEntry* row = findVirtualItem(context->publication().committedSemantics(), 0);
     ASSERT_NE(row, nullptr);
 
     const Core::Status rejected = updater.destroy(row->node);
@@ -554,18 +554,18 @@ TEST_F(UIListViewTest, WheelAndCommitRemainAllocationFreeAfterWarmup)
                                                     }));
     assertOk(updater.setListViewDataSource(listView, source.view()));
     assertOk(updater.scrollListViewToIndex(listView, 10, UI::UIListViewScrollAlignment::Start));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     const usize allocationCount = resource.allocationCount();
 
     for (u64 routeIndex = 0; routeIndex < 200; ++routeIndex)
     {
         const float wheelDelta = routeIndex % 2 == 0 ? -1.0F : 1.0F;
-        auto routed = context->routePointerInput(
+        auto routed = context->input().routePointerInput(
             pointerInput(window, UI::UIRoutedPointerEventKind::Wheel, routeIndex + 1, {.x = 50.0F, .y = 50.0F},
                          {.x = 0.0F, .y = wheelDelta}));
         ASSERT_TRUE(routed.has_value()) << (routed ? "" : routed.error().message);
         EXPECT_TRUE(routed->consumed);
-        assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+        assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     }
     EXPECT_EQ(resource.allocationCount(), allocationCount);
 }
@@ -582,7 +582,7 @@ TEST_F(UIListViewTest, StylesheetSelectionCacheClearsWhenMaterializedRowIsReboun
             .color = UI::rgb(0x26C281),
         },
     };
-    assertOk(context->installStyleSheet(rules));
+    assertOk(context->style().installStyleSheet(rules));
 
     auto root = createRoot(*context);
     auto updater = createUpdater(*context, root);
@@ -600,13 +600,13 @@ TEST_F(UIListViewTest, StylesheetSelectionCacheClearsWhenMaterializedRowIsReboun
             .scrollBarVisibility = UI::UIScrollBarVisibility::Hidden,
         }));
     assertOk(updater.setListViewDataSource(listView, source.view()));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 60.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 60.0F}));
 
     assertOk(updater.setListViewSelectedIndex(listView, 0));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 60.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 60.0F}));
     const auto selectedColor = UI::premultiply(UI::rgb(0x26C281));
     EXPECT_EQ(std::ranges::count_if(
-                  context->committedPaint().entries(),
+                  context->publication().committedPaint().entries(),
                   [&](const UI::UICommittedPaintEntry& entry) noexcept {
                       return entry.solidFill == selectedColor;
                   }),
@@ -614,9 +614,9 @@ TEST_F(UIListViewTest, StylesheetSelectionCacheClearsWhenMaterializedRowIsReboun
 
     assertOk(updater.scrollListViewToIndex(
         listView, 20, UI::UIListViewScrollAlignment::Start));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 60.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 60.0F}));
     EXPECT_EQ(std::ranges::count_if(
-                  context->committedPaint().entries(),
+                  context->publication().committedPaint().entries(),
                   [&](const UI::UICommittedPaintEntry& entry) noexcept {
                       return entry.solidFill == selectedColor;
                   }),
@@ -646,16 +646,16 @@ TEST_F(UIListViewTest, ProductChromeKeepsConsecutiveRowTextInsideRequestedBounds
             .wheelStep = 27.0F,
         }));
     assertOk(updater.setListViewDataSource(listView, source.view()));
-    assertOk(context->commitLayout({.width = 180.0F, .height = 80.0F}));
+    assertOk(context->publication().commitLayout({.width = 180.0F, .height = 80.0F}));
 
-    const UI::UISemanticsEntry* firstRow = findVirtualItem(context->committedSemantics(), 0);
-    const UI::UISemanticsEntry* secondRow = findVirtualItem(context->committedSemantics(), 1);
+    const UI::UISemanticsEntry* firstRow = findVirtualItem(context->publication().committedSemantics(), 0);
+    const UI::UISemanticsEntry* secondRow = findVirtualItem(context->publication().committedSemantics(), 1);
     ASSERT_NE(firstRow, nullptr);
     ASSERT_NE(secondRow, nullptr);
     EXPECT_LE(firstRow->worldRect.bottom(), secondRow->worldRect.y);
 
-    const UI::UICommittedLayoutEntry* firstLayout = findLayoutEntry(context->committedLayout(), firstRow->node);
-    const UI::UICommittedLayoutEntry* secondLayout = findLayoutEntry(context->committedLayout(), secondRow->node);
+    const UI::UICommittedLayoutEntry* firstLayout = findLayoutEntry(context->publication().committedLayout(), firstRow->node);
+    const UI::UICommittedLayoutEntry* secondLayout = findLayoutEntry(context->publication().committedLayout(), secondRow->node);
     ASSERT_NE(firstLayout, nullptr);
     ASSERT_NE(secondLayout, nullptr);
     for (const UI::UICommittedLayoutEntry* rowLayout : {firstLayout, secondLayout})
@@ -676,7 +676,7 @@ TEST_F(UIListViewTest, ProductChromeKeepsConsecutiveRowTextInsideRequestedBounds
         UI::premultiply(UI::makeModernDesktopTheme().colors.onSurface);
     usize firstRowTextPaintCount = 0;
     usize secondRowTextPaintCount = 0;
-    for (const UI::UICommittedPaintEntry& paint : context->committedPaint().entries())
+    for (const UI::UICommittedPaintEntry& paint : context->publication().committedPaint().entries())
     {
         if (paint.solidFill != textColor || (paint.node != firstRow->node && paint.node != secondRow->node))
         {
@@ -722,9 +722,9 @@ TEST_F(UIListViewTest, RowEllipsisTruncatesPaintButKeepsTheFullAccessibleLabel)
             .rowTextOverflow = UI::UITextOverflow::Ellipsis,
         }));
     assertOk(updater.setListViewDataSource(listView, source.view()));
-    assertOk(context->commitLayout({.width = 50.0F, .height = 40.0F}));
+    assertOk(context->publication().commitLayout({.width = 50.0F, .height = 40.0F}));
 
-    const UI::UISemanticsEntry* row = findVirtualItem(context->committedSemantics(), 0);
+    const UI::UISemanticsEntry* row = findVirtualItem(context->publication().committedSemantics(), 0);
     ASSERT_NE(row, nullptr);
     EXPECT_EQ(row->name, source.label);
     const auto rowOverflow = updater.textOverflow(row->node);
@@ -740,7 +740,7 @@ TEST_F(UIListViewTest, RowEllipsisTruncatesPaintButKeepsTheFullAccessibleLabel)
     const UI::UIPremultipliedRgba8Color textColor =
         UI::premultiply(UI::UITextStyle{}.color);
     const usize textPaintCount = static_cast<usize>(std::ranges::count_if(
-        context->committedPaint().entries(),
+        context->publication().committedPaint().entries(),
         [&](const UI::UICommittedPaintEntry& entry) noexcept {
             return entry.node == row->node && entry.solidFill == textColor;
         }));

@@ -128,10 +128,10 @@ TEST(UISnackbarTests, RecipePublishesPoliteLiveRegionWithoutMovingFocus)
             .textByteCapacity = 64,
         });
     ASSERT_TRUE(context.has_value());
-    auto rootResult = (*context)->rootBuilder().createRoot();
+    auto rootResult = (*context)->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = (*context)->treeUpdater(root);
+    auto updaterResult = (*context)->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
     auto parts = updater.buildSnackbarHost(root.rootNodeId(), {});
@@ -142,13 +142,13 @@ TEST(UISnackbarTests, RecipePublishesPoliteLiveRegionWithoutMovingFocus)
     visibleHost.overlay.vertical = UI::UIAxisAlignment::Stretch;
     visibleHost.visibility = UI::UIVisibility::Visible;
     ASSERT_TRUE(updater.setLayoutStyle(parts->root, visibleHost));
-    ASSERT_TRUE((*context)->commitLayout({.width = 640.0F, .height = 360.0F}));
+    ASSERT_TRUE((*context)->publication().commitLayout({.width = 640.0F, .height = 360.0F}));
 
     const UI::UISemanticsEntry* message =
-        findSemantics((*context)->committedSemantics(), parts->message);
+        findSemantics((*context)->publication().committedSemantics(), parts->message);
     ASSERT_NE(message, nullptr);
     EXPECT_EQ(message->liveSetting, UI::UISemanticsLiveSetting::Polite);
-    EXPECT_EQ((*context)->defaultActionFocus(), UI::UINodeId{});
+    EXPECT_EQ((*context)->input().defaultActionFocus(), UI::UINodeId{});
 }
 
 TEST(UISnackbarTests, RecipePreflightFailureLeavesExistingTreeUntouched)
@@ -168,10 +168,10 @@ TEST(UISnackbarTests, RecipePreflightFailureLeavesExistingTreeUntouched)
             .textByteCapacity = 5,
         });
     ASSERT_TRUE(context.has_value());
-    auto rootResult = (*context)->rootBuilder().createRoot();
+    auto rootResult = (*context)->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = (*context)->treeUpdater(root);
+    auto updaterResult = (*context)->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     const usize baselineNodes = (*context)->liveNodeCount();
     const auto rejected =

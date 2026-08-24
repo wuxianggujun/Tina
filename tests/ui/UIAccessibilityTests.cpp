@@ -33,14 +33,14 @@ using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
 
 [[nodiscard]] UI::UIRootOwner createRoot(UI::UIContext& context)
 {
-    auto result = context.rootBuilder().createRoot();
+    auto result = context.authoring().rootBuilder().createRoot();
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UIRootOwner{};
 }
 
 [[nodiscard]] UI::UITreeUpdater createUpdater(UI::UIContext& context, UI::UIRootOwner& root)
 {
-    auto result = context.treeUpdater(root);
+    auto result = context.authoring().treeUpdater(root);
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UITreeUpdater{};
 }
@@ -68,12 +68,12 @@ TEST(UIAccessibilityTest, ProbeReadsRolesNamesAndStatesFromCommittedSemantics)
     auto root = createRoot(*context);
     ASSERT_TRUE(root.hasValue());
 
-    auto button = context->rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement());
-    auto checkbox = context->rootBuilder().createElement(root.rootNodeId(), UI::makeCheckboxElement());
-    auto slider = context->rootBuilder().createElement(root.rootNodeId(), UI::makeSliderElement());
-    auto progress = context->rootBuilder().createElement(root.rootNodeId(), UI::makeProgressBarElement());
-    auto radio = context->rootBuilder().createElement(root.rootNodeId(), UI::makeRadioButtonElement());
-    auto textEdit = context->rootBuilder().createElement(root.rootNodeId(), UI::makeTextEditElement());
+    auto button = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement());
+    auto checkbox = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeCheckboxElement());
+    auto slider = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeSliderElement());
+    auto progress = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeProgressBarElement());
+    auto radio = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeRadioButtonElement());
+    auto textEdit = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeTextEditElement());
     ASSERT_TRUE(button.has_value());
     ASSERT_TRUE(checkbox.has_value());
     ASSERT_TRUE(slider.has_value());
@@ -98,12 +98,12 @@ TEST(UIAccessibilityTest, ProbeReadsRolesNamesAndStatesFromCommittedSemantics)
     assertOk(updater.setText(*radio, "Windowed"));
     assertOk(updater.setRadioButtonSelected(*radio, true));
     assertOk(updater.setText(*textEdit, "Player"));
-    assertOk(context->commitLayout({.width = 400.0F, .height = 300.0F}));
+    assertOk(context->publication().commitLayout({.width = 400.0F, .height = 300.0F}));
 
     UI::UIAccessibilityTree tree;
-    assertOk(tree.rebuildFrom(context->committedSemantics()));
+    assertOk(tree.rebuildFrom(context->publication().committedSemantics()));
     EXPECT_FALSE(tree.empty());
-    EXPECT_EQ(tree.semanticsRevision(), context->committedSemantics().semanticsRevision());
+    EXPECT_EQ(tree.semanticsRevision(), context->publication().committedSemantics().semanticsRevision());
 
     UI::UIAccessibilityProbeProvider probe;
     assertOk(probe.publish(tree));
@@ -161,27 +161,27 @@ TEST(UIAccessibilityTest, StaleNodeAfterDestroyIsRejected)
     auto root = createRoot(*context);
     ASSERT_TRUE(root.hasValue());
 
-    auto button = context->rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement());
+    auto button = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(button.has_value());
     auto updater = createUpdater(*context, root);
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(200.0F, 100.0F)));
     assertOk(updater.setLayoutStyle(*button, fixedSize(80.0F, 32.0F)));
     assertOk(updater.setText(*button, "Doomed"));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
 
     UI::UIAccessibilityTree tree;
-    assertOk(tree.rebuildFrom(context->committedSemantics()));
+    assertOk(tree.rebuildFrom(context->publication().committedSemantics()));
     UI::UIAccessibilityProbeProvider probe;
     assertOk(probe.publish(tree));
     const UI::UINodeId staleId = *button;
     ASSERT_TRUE(probe.readNode(staleId).has_value());
 
     assertOk(updater.destroy(*button));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
 
     // Stale tree still held by probe must not claim live access without rebuild.
     UI::UIAccessibilityTree fresh;
-    assertOk(fresh.rebuildFrom(context->committedSemantics()));
+    assertOk(fresh.rebuildFrom(context->publication().committedSemantics()));
     EXPECT_EQ(fresh.findNode(staleId), nullptr);
     assertOk(probe.publish(fresh));
     auto read = probe.readNode(staleId);
@@ -212,17 +212,17 @@ TEST(UIAccessibilityTest, DisabledStateMapsToDisabledFlag)
     ASSERT_NE(context, nullptr);
     auto root = createRoot(*context);
     ASSERT_TRUE(root.hasValue());
-    auto button = context->rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement());
+    auto button = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement());
     ASSERT_TRUE(button.has_value());
     auto updater = createUpdater(*context, root);
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(200.0F, 100.0F)));
     assertOk(updater.setLayoutStyle(*button, fixedSize(80.0F, 32.0F)));
     assertOk(updater.setText(*button, "Off"));
     assertOk(updater.setEnabled(*button, false));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
 
     UI::UIAccessibilityTree tree;
-    assertOk(tree.rebuildFrom(context->committedSemantics()));
+    assertOk(tree.rebuildFrom(context->publication().committedSemantics()));
     const UI::UIAccessibilityNode* node = tree.findNode(*button);
     ASSERT_NE(node, nullptr);
     EXPECT_TRUE(UI::hasState(node->states, UI::UIAccessibilityState::Disabled));
@@ -239,15 +239,15 @@ TEST(UIAccessibilityTest, ActionsPreserveControlCallbacksAndRejectIncompatibleTa
     auto root = createRoot(*context);
     ASSERT_TRUE(root.hasValue());
 
-    auto button = context->rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement());
-    auto checkbox = context->rootBuilder().createElement(root.rootNodeId(), UI::makeCheckboxElement());
-    auto slider = context->rootBuilder().createElement(root.rootNodeId(), UI::makeSliderElement());
-    auto progress = context->rootBuilder().createElement(root.rootNodeId(), UI::makeProgressBarElement());
-    auto textEdit = context->rootBuilder().createElement(root.rootNodeId(), UI::makeTextEditElement());
+    auto button = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement());
+    auto checkbox = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeCheckboxElement());
+    auto slider = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeSliderElement());
+    auto progress = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeProgressBarElement());
+    auto textEdit = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeTextEditElement());
     UI::UIElementDescriptor unpublishedInvokeDescriptor = UI::makeButtonElement("Not invokable");
     unpublishedInvokeDescriptor.semantics.actions = UI::UISemanticsAction::Focus;
     auto unpublishedInvoke =
-        context->rootBuilder().createElement(root.rootNodeId(), unpublishedInvokeDescriptor);
+        context->authoring().rootBuilder().createElement(root.rootNodeId(), unpublishedInvokeDescriptor);
     ASSERT_TRUE(button.has_value());
     ASSERT_TRUE(checkbox.has_value());
     ASSERT_TRUE(slider.has_value());
@@ -294,16 +294,16 @@ TEST(UIAccessibilityTest, ActionsPreserveControlCallbacksAndRejectIncompatibleTa
         UI::UIButtonActionCallback([&](const UI::UIButtonActionEvent&) noexcept {
             ++unpublishedActivations;
         })));
-    assertOk(context->commitLayout({.width = 400.0F, .height = 300.0F}));
+    assertOk(context->publication().commitLayout({.width = 400.0F, .height = 300.0F}));
 
-    assertOk(context->performAccessibilityAction({
+    assertOk(context->input().performAccessibilityAction({
         .kind = UI::UIAccessibilityActionKind::Invoke,
         .node = *button,
     }));
     EXPECT_EQ(buttonActivations, 1U);
     EXPECT_EQ(lastSource, UI::UIButtonActivationSource::Accessibility);
 
-    assertOk(context->performAccessibilityAction({
+    assertOk(context->input().performAccessibilityAction({
         .kind = UI::UIAccessibilityActionKind::Toggle,
         .node = *checkbox,
     }));
@@ -313,7 +313,7 @@ TEST(UIAccessibilityTest, ActionsPreserveControlCallbacksAndRejectIncompatibleTa
     ASSERT_TRUE(checked.has_value());
     EXPECT_TRUE(*checked);
 
-    assertOk(context->performAccessibilityAction({
+    assertOk(context->input().performAccessibilityAction({
         .kind = UI::UIAccessibilityActionKind::SetRangeValue,
         .node = *slider,
         .rangeValue = 72.0,
@@ -325,7 +325,7 @@ TEST(UIAccessibilityTest, ActionsPreserveControlCallbacksAndRejectIncompatibleTa
     EXPECT_EQ(lastSliderChange.sliderNode, *slider);
     EXPECT_FLOAT_EQ(lastSliderChange.value, 72.0F);
 
-    assertOk(context->performAccessibilityAction({
+    assertOk(context->input().performAccessibilityAction({
         .kind = UI::UIAccessibilityActionKind::SetTextValue,
         .node = *textEdit,
         .textValue = "Accessible Player",
@@ -334,7 +334,7 @@ TEST(UIAccessibilityTest, ActionsPreserveControlCallbacksAndRejectIncompatibleTa
     ASSERT_TRUE(text.has_value());
     EXPECT_EQ(*text, "Accessible Player");
 
-    auto readOnly = context->performAccessibilityAction({
+    auto readOnly = context->input().performAccessibilityAction({
         .kind = UI::UIAccessibilityActionKind::SetRangeValue,
         .node = *progress,
         .rangeValue = 50.0,
@@ -342,7 +342,7 @@ TEST(UIAccessibilityTest, ActionsPreserveControlCallbacksAndRejectIncompatibleTa
     ASSERT_FALSE(readOnly.has_value());
     EXPECT_EQ(readOnly.error().code, UI::UIErrorCode::InvalidAccessibilityAction);
 
-    auto unpublished = context->performAccessibilityAction({
+    auto unpublished = context->input().performAccessibilityAction({
         .kind = UI::UIAccessibilityActionKind::Invoke,
         .node = *unpublishedInvoke,
     });

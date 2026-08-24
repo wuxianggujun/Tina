@@ -56,7 +56,7 @@ void assertOk(Core::Status status)
 
 [[nodiscard]] UI::UIRootOwner createRoot(UI::UIContext& context)
 {
-    auto result = context.rootBuilder().createRoot();
+    auto result = context.authoring().rootBuilder().createRoot();
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UIRootOwner{};
 }
@@ -64,7 +64,7 @@ void assertOk(Core::Status status)
 [[nodiscard]] UI::UITreeUpdater createUpdater(
     UI::UIContext& context, UI::UIRootOwner& root)
 {
-    auto result = context.treeUpdater(root);
+    auto result = context.authoring().treeUpdater(root);
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UITreeUpdater{};
 }
@@ -116,31 +116,31 @@ TEST_F(UIDialogTest, PresentationIntentIsIdempotentAndPublishesAtCommit)
     ASSERT_TRUE(background.has_value()) << background.error().message;
     const UI::UIDialogParts dialog = buildDialog(updater, root.rootNodeId());
 
-    assertOk(context->commitLayout({.width = 640.0F, .height = 360.0F}));
-    assertOk(context->requestFocus(*background));
+    assertOk(context->publication().commitLayout({.width = 640.0F, .height = 360.0F}));
+    assertOk(context->input().requestFocus(*background));
     EXPECT_FALSE(updater.isDialogOpen(dialog.modal).value());
-    EXPECT_FALSE(context->activeModal().hasValue());
+    EXPECT_FALSE(context->input().activeModal().hasValue());
 
     assertOk(updater.openDialog(dialog.modal));
     assertOk(updater.openDialog(dialog.modal));
     EXPECT_TRUE(updater.isDialogOpen(dialog.modal).value());
-    EXPECT_FALSE(context->activeModal().hasValue());
-    EXPECT_EQ(context->defaultActionFocus(), *background);
+    EXPECT_FALSE(context->input().activeModal().hasValue());
+    EXPECT_EQ(context->input().defaultActionFocus(), *background);
 
-    assertOk(context->commitLayout({.width = 640.0F, .height = 360.0F}));
-    EXPECT_EQ(context->activeModal(), dialog.modal);
-    EXPECT_EQ(context->activeFocusScope(), dialog.modal);
-    EXPECT_EQ(context->defaultActionFocus(), dialog.actions[0]);
+    assertOk(context->publication().commitLayout({.width = 640.0F, .height = 360.0F}));
+    EXPECT_EQ(context->input().activeModal(), dialog.modal);
+    EXPECT_EQ(context->input().activeFocusScope(), dialog.modal);
+    EXPECT_EQ(context->input().defaultActionFocus(), dialog.actions[0]);
 
     assertOk(updater.dismissDialog(dialog.modal));
     assertOk(updater.dismissDialog(dialog.modal));
     EXPECT_FALSE(updater.isDialogOpen(dialog.modal).value());
-    EXPECT_EQ(context->activeModal(), dialog.modal);
-    EXPECT_EQ(context->defaultActionFocus(), dialog.actions[0]);
+    EXPECT_EQ(context->input().activeModal(), dialog.modal);
+    EXPECT_EQ(context->input().defaultActionFocus(), dialog.actions[0]);
 
-    assertOk(context->commitLayout({.width = 640.0F, .height = 360.0F}));
-    EXPECT_FALSE(context->activeModal().hasValue());
-    EXPECT_EQ(context->defaultActionFocus(), *background);
+    assertOk(context->publication().commitLayout({.width = 640.0F, .height = 360.0F}));
+    EXPECT_FALSE(context->input().activeModal().hasValue());
+    EXPECT_EQ(context->input().defaultActionFocus(), *background);
 
     UI::UILayoutStyle hidden = fixedSize(100.0F, 80.0F);
     hidden.visibility = UI::UIVisibility::Collapsed;
@@ -192,7 +192,7 @@ TEST_F(UIDialogTest, DestroyAndGenerationReuseClearRegisteredState)
     assertOk(updater.openDialog(original.modal));
     assertOk(updater.destroy(original.modal));
 
-    auto stale = context->isDialogOpen(original.modal);
+    auto stale = updater.isDialogOpen(original.modal);
     ASSERT_FALSE(stale.has_value());
     EXPECT_EQ(stale.error().code, UI::UIErrorCode::InvalidNode);
 
@@ -216,9 +216,9 @@ TEST_F(UIDialogTest, RootReleaseClearsRegisteredState)
 
     root.reset();
     EXPECT_FALSE(context->contains(dialog.modal));
-    auto released = context->isDialogOpen(dialog.modal);
+    auto released = updater.isDialogOpen(dialog.modal);
     ASSERT_FALSE(released.has_value());
-    EXPECT_EQ(released.error().code, UI::UIErrorCode::InvalidNode);
+    EXPECT_EQ(released.error().code, UI::UIErrorCode::RootRequired);
 }
 
 TEST_F(UIDialogTest, OpeningDialogDismissesWindowTransientOverlays)
@@ -248,27 +248,27 @@ TEST_F(UIDialogTest, OpeningDialogDismissesWindowTransientOverlays)
     ASSERT_TRUE(tooltip.has_value()) << tooltip.error().message;
     assertOk(updater.setMenuAnchor(*menu, *menuAnchor));
     assertOk(updater.setTooltipAnchor(*tooltip, *tooltipAnchor));
-    assertOk(context->commitLayout({.width = 640.0F, .height = 360.0F}));
+    assertOk(context->publication().commitLayout({.width = 640.0F, .height = 360.0F}));
 
     assertOk(updater.setMenuOpen(*menu, true));
-    assertOk(context->commitLayout({.width = 640.0F, .height = 360.0F}));
+    assertOk(context->publication().commitLayout({.width = 640.0F, .height = 360.0F}));
     EXPECT_TRUE(updater.isMenuOpen(*menu).value());
 
-    assertOk(context->openDialog(dialog.modal));
-    EXPECT_TRUE(context->isDialogOpen(dialog.modal).value());
+    assertOk(updater.openDialog(dialog.modal));
+    EXPECT_TRUE(updater.isDialogOpen(dialog.modal).value());
     EXPECT_FALSE(updater.isMenuOpen(*menu).value());
-    assertOk(context->commitLayout({.width = 640.0F, .height = 360.0F}));
-    EXPECT_EQ(context->activeModal(), dialog.modal);
+    assertOk(context->publication().commitLayout({.width = 640.0F, .height = 360.0F}));
+    EXPECT_EQ(context->input().activeModal(), dialog.modal);
 
-    assertOk(context->dismissDialog(dialog.modal));
-    assertOk(context->commitLayout({.width = 640.0F, .height = 360.0F}));
+    assertOk(updater.dismissDialog(dialog.modal));
+    assertOk(context->publication().commitLayout({.width = 640.0F, .height = 360.0F}));
     assertOk(updater.showTooltip(*tooltip));
-    assertOk(context->commitLayout({.width = 640.0F, .height = 360.0F}));
+    assertOk(context->publication().commitLayout({.width = 640.0F, .height = 360.0F}));
     EXPECT_TRUE(updater.isTooltipOpen(*tooltip).value());
 
-    assertOk(context->openDialog(dialog.modal));
+    assertOk(updater.openDialog(dialog.modal));
     EXPECT_TRUE(updater.isTooltipOpen(*tooltip).value());
-    assertOk(context->commitLayout({.width = 640.0F, .height = 360.0F}));
+    assertOk(context->publication().commitLayout({.width = 640.0F, .height = 360.0F}));
     EXPECT_FALSE(updater.isTooltipOpen(*tooltip).value());
 }
 
@@ -289,8 +289,8 @@ TEST_F(UIDialogTest, DirtyCapacityFailurePreservesIntentAndCommittedModal)
     auto root = createRoot(*context);
     auto updater = createUpdater(*context, root);
     const UI::UIDialogParts dialog = buildDialog(updater, root.rootNodeId());
-    assertOk(context->commitLayout({.width = 320.0F, .height = 180.0F}));
-    const u64 committedHitRevision = context->committedHit().hitRevision();
+    assertOk(context->publication().commitLayout({.width = 320.0F, .height = 180.0F}));
+    const u64 committedHitRevision = context->publication().committedHit().hitRevision();
 
     assertOk(updater.setLayoutStyle(
         root.rootNodeId(), fixedSize(300.0F, 160.0F)));
@@ -299,11 +299,11 @@ TEST_F(UIDialogTest, DirtyCapacityFailurePreservesIntentAndCommittedModal)
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::CapacityExceeded);
     EXPECT_FALSE(updater.isDialogOpen(dialog.modal).value());
-    EXPECT_FALSE(context->activeModal().hasValue());
-    EXPECT_EQ(context->committedHit().hitRevision(), committedHitRevision);
+    EXPECT_FALSE(context->input().activeModal().hasValue());
+    EXPECT_EQ(context->publication().committedHit().hitRevision(), committedHitRevision);
 
-    assertOk(context->commitLayout({.width = 320.0F, .height = 180.0F}));
-    EXPECT_FALSE(context->activeModal().hasValue());
+    assertOk(context->publication().commitLayout({.width = 320.0F, .height = 180.0F}));
+    EXPECT_FALSE(context->input().activeModal().hasValue());
     EXPECT_FALSE(updater.isDialogOpen(dialog.modal).value());
 }
 

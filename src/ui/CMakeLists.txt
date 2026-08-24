@@ -37,8 +37,10 @@ set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIContent.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UISemantics.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIAccessibility.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UIAuthoring.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIContext.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIContextConfig.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UIContextStatistics.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIFlow.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIFormField.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIElement.hpp
@@ -46,15 +48,21 @@ set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIEventRouting.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIFocus.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIHitTest.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UIInputRouter.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIIcon.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIIconButton.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIImage.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIImageSource.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UILayout.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIPaint.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UIPublicationPipeline.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UIRoutedPointerListenerToken.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UITheme.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIText.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UITextEdit.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UITextSystem.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UIStyleController.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UIMotionController.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UISwitch.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UITooltip.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/text/UIGlyphAtlas.hpp
@@ -65,7 +73,29 @@ set(TINA_UI_PUBLIC_HEADERS
 
 add_library(tina_ui STATIC
     ${TINA_UI_PUBLIC_HEADERS}
+    UIAuthoring.cpp
     UIContext.cpp
+    UIContextApi.cpp
+    UIContextCollections.cpp
+    UIContextControls.cpp
+    UIContextCore.cpp
+    UIContextInput.cpp
+    UIContextLayout.cpp
+    UIContextMotion.cpp
+    UIContextNavigation.cpp
+    UIContextOverlays.cpp
+    UIContextPaint.cpp
+    UIContextPointerInput.cpp
+    UIContextPublication.cpp
+    UIContextSemantics.cpp
+    UIContextStyle.cpp
+    UIContextText.cpp
+    UIContextTree.cpp
+    UIInputRouter.cpp
+    UIMotionController.cpp
+    UIPublicationPipeline.cpp
+    UIStyleController.cpp
+    UITextSystem.cpp
     UIContextConfig.cpp
     UISnackbar.cpp
     detail/UIComponentRecipes.cpp
@@ -99,6 +129,8 @@ add_library(tina_ui STATIC
     detail/UIControlValuePrimitives.hpp
     detail/UIContextLifetimeControl.hpp
     detail/UIContextLifetimeControl.cpp
+    detail/UIContextImpl.hpp
+    detail/UIContextPrivateTypes.hpp
     detail/UIElementContractResolver.hpp
     detail/UIElementContractResolver.cpp
     detail/UIFlexLayout.hpp

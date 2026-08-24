@@ -150,7 +150,7 @@ TEST_F(UIInputRouteTest, ListenerCapacityFailureIsAtomicAndFreedSlotIsReusable)
             ++firstCount;
         }});
     ASSERT_TRUE(firstToken);
-    auto rejected = tree.context->addRoutedPointerListener(
+    auto rejected = tree.context->input().addRoutedPointerListener(
         {.node = tree.target,
          .kind = UI::UIRoutedPointerEventKind::ButtonDown,
          .phases = UI::UIEventPhaseMask::Target},
@@ -163,7 +163,7 @@ TEST_F(UIInputRouteTest, ListenerCapacityFailureIsAtomicAndFreedSlotIsReusable)
     EXPECT_EQ(statistics.activeRoutedPointerListenerCount, 1U);
     EXPECT_EQ(statistics.routedPointerListenerHighWater, 1U);
 
-    auto firstRoute = tree.context->routePointerInput(makePointerInput(window, 1));
+    auto firstRoute = tree.context->input().routePointerInput(makePointerInput(window, 1));
     ASSERT_TRUE(firstRoute.has_value());
     EXPECT_EQ(firstRoute->listenerInvocationCount, 1U);
     EXPECT_EQ(firstCount, 1U);
@@ -182,7 +182,7 @@ TEST_F(UIInputRouteTest, ListenerCapacityFailureIsAtomicAndFreedSlotIsReusable)
         }});
     ASSERT_TRUE(replacementToken);
 
-    auto secondRoute = tree.context->routePointerInput(makePointerInput(window, 2));
+    auto secondRoute = tree.context->input().routePointerInput(makePointerInput(window, 2));
     ASSERT_TRUE(secondRoute.has_value());
     EXPECT_EQ(secondRoute->listenerInvocationCount, 1U);
     EXPECT_EQ(firstCount, 1U);
@@ -220,22 +220,22 @@ TEST_F(UIInputRouteTest, RouteDepthCapacityFailureInvokesNoPartialCallbacks)
         }});
     ASSERT_TRUE(rootToken && targetToken);
 
-    const UI::UICommittedStructureView structure = tree.context->committedStructure();
-    const UI::UICommittedLayoutView layout = tree.context->committedLayout();
-    const UI::UICommittedHitView hit = tree.context->committedHit();
+    const UI::UICommittedStructureView structure = tree.context->publication().committedStructure();
+    const UI::UICommittedLayoutView layout = tree.context->publication().committedLayout();
+    const UI::UICommittedHitView hit = tree.context->publication().committedHit();
     const UI::UIContextStatistics before = tree.context->statistics();
-    auto routed = tree.context->routePointerInput(makePointerInput(window));
+    auto routed = tree.context->input().routePointerInput(makePointerInput(window));
     ASSERT_FALSE(routed.has_value());
     EXPECT_EQ(routed.error().code, UI::UIErrorCode::CapacityExceeded);
     EXPECT_EQ(callbackCount, 0U);
-    EXPECT_EQ(tree.context->committedStructure().revision(), structure.revision());
-    EXPECT_EQ(tree.context->committedLayout().layoutRevision(), layout.layoutRevision());
-    EXPECT_EQ(tree.context->committedHit().hitRevision(), hit.hitRevision());
+    EXPECT_EQ(tree.context->publication().committedStructure().revision(), structure.revision());
+    EXPECT_EQ(tree.context->publication().committedLayout().layoutRevision(), layout.layoutRevision());
+    EXPECT_EQ(tree.context->publication().committedHit().hitRevision(), hit.hitRevision());
     EXPECT_EQ(
         tree.context->statistics().activeRoutedPointerListenerCount,
         before.activeRoutedPointerListenerCount);
     const UI::UIPointerHitQueryResult query =
-        tree.context->queryPointerHit({.x = 10.0F, .y = 10.0F});
+        tree.context->input().queryPointerHit({.x = 10.0F, .y = 10.0F});
     EXPECT_TRUE(query.hasTarget());
     EXPECT_EQ(query.target.node, tree.target);
 }
@@ -285,7 +285,7 @@ TEST_F(UIInputRouteTest, DirtyQueueCapacityFailureInvokesNoCallbacks)
         {.red = 7, .green = 8, .blue = 9, .alpha = 255});
     ASSERT_EQ(tree.context->statistics().dirtyQueuePendingCount, 3U);
 
-    auto routed = tree.context->routePointerInput(makePointerInput(window));
+    auto routed = tree.context->input().routePointerInput(makePointerInput(window));
     ASSERT_FALSE(routed.has_value());
     EXPECT_EQ(routed.error().code, UI::UIErrorCode::CapacityExceeded);
     EXPECT_EQ(callbackCount, 0U);
@@ -361,7 +361,7 @@ TEST_F(UIInputRouteTest, ListenerCannotStealReservedPointerRouteDirtySlot)
             }});
     ASSERT_TRUE(token);
 
-    auto routed = tree.context->routePointerInput(makePointerInput(window));
+    auto routed = tree.context->input().routePointerInput(makePointerInput(window));
     ASSERT_TRUE(routed.has_value()) << (routed ? "" : routed.error().message);
     EXPECT_TRUE(listenerInvoked);
     EXPECT_TRUE(unrelatedMutationRejected);
@@ -387,12 +387,12 @@ TEST_F(UIInputRouteTest, GenericRangeInputReservesActivatableAncestorDirtySlot)
 
     UI::UIElementDescriptor ancestorDescriptor = UI::makePanelElement();
     ancestorDescriptor.behaviors = UI::UIElementBehavior::Focusable | UI::UIElementBehavior::Activate;
-    auto ancestorResult = context->rootBuilder().createElement(root.rootNodeId(), ancestorDescriptor);
+    auto ancestorResult = context->authoring().rootBuilder().createElement(root.rootNodeId(), ancestorDescriptor);
     ASSERT_TRUE(ancestorResult) << (ancestorResult ? "" : ancestorResult.error().message);
     const UI::UINodeId ancestor = *ancestorResult;
     UI::UIElementDescriptor rangeDescriptor = UI::makeLabelElement("Range");
     rangeDescriptor.behaviors = UI::UIElementBehavior::RangeInput;
-    auto rangeResult = context->rootBuilder().createElement(ancestor, rangeDescriptor);
+    auto rangeResult = context->authoring().rootBuilder().createElement(ancestor, rangeDescriptor);
     ASSERT_TRUE(rangeResult) << (rangeResult ? "" : rangeResult.error().message);
     const UI::UINodeId range = *rangeResult;
     const UI::UINodeId blocker = createPanel(*context, root.rootNodeId());
@@ -409,13 +409,13 @@ TEST_F(UIInputRouteTest, GenericRangeInputReservesActivatableAncestorDirtySlot)
     expectOk(updater.setLayoutStyle(ancestor, fixedSize(80.0F, 80.0F)));
     expectOk(updater.setLayoutStyle(range, fixedSize(40.0F, 40.0F)));
     expectOk(updater.setPointerHitPolicy(range, UI::UIPointerHitPolicy::Targetable));
-    expectOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    expectOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
     UI::UIPointerInputEvent hover = makePointerInput(window, 1);
     hover.kind = UI::UIRoutedPointerEventKind::Move;
-    auto hovered = context->routePointerInput(hover);
+    auto hovered = context->input().routePointerInput(hover);
     ASSERT_TRUE(hovered) << (hovered ? "" : hovered.error().message);
-    expectOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    expectOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
     const auto fillDirtySlot = [&updater](UI::UINodeId node, UI::UIStraightSrgba8Color color) {
         expectOk(updater.setBoxPaint(node, UI::UIBoxPaint{.solidFill = UI::UISolidFill{.color = color}}));
@@ -444,12 +444,12 @@ TEST_F(UIInputRouteTest, GenericRangeInputReservesActivatableAncestorDirtySlot)
         }});
     ASSERT_TRUE(token);
 
-    auto routed = context->routePointerInput(makePointerInput(window, 2));
+    auto routed = context->input().routePointerInput(makePointerInput(window, 2));
     ASSERT_TRUE(routed) << (routed ? "" : routed.error().message);
     EXPECT_TRUE(listenerInvoked);
     EXPECT_TRUE(unrelatedMutationRejected);
     EXPECT_TRUE(routed->consumed);
-    EXPECT_EQ(context->defaultActionFocus(), ancestor);
+    EXPECT_EQ(context->input().defaultActionFocus(), ancestor);
     EXPECT_EQ(context->statistics().dirtyQueuePendingCount, 4U);
 }
 
@@ -499,7 +499,7 @@ TEST_F(UIInputRouteTest, OffThreadListenerResetIsAppliedBeforeTheNextRoute)
     });
     releaseThread.join();
 
-    auto routed = tree.context->routePointerInput(makePointerInput(window));
+    auto routed = tree.context->input().routePointerInput(makePointerInput(window));
     ASSERT_TRUE(routed.has_value()) << (routed ? "" : routed.error().message);
     EXPECT_EQ(callbackCount, 0U);
     EXPECT_EQ(routed->listenerInvocationCount, 0U);
@@ -525,7 +525,7 @@ TEST_F(UIInputRouteTest, ReentrantCallableDestructionSafelyReleasesItsOwnedRoot)
             }});
     ASSERT_TRUE(token);
 
-    auto routed = tree.context->routePointerInput(makePointerInput(window));
+    auto routed = tree.context->input().routePointerInput(makePointerInput(window));
     ASSERT_TRUE(routed.has_value()) << (routed ? "" : routed.error().message);
     EXPECT_EQ(routed->listenerInvocationCount, 1U);
     EXPECT_EQ(tree.context->liveRootCount(), 0U);
@@ -551,8 +551,8 @@ TEST_F(UIInputRouteTest, CommitAttemptsDuringRouteAreRejectedAndOuterRouteComple
          .kind = UI::UIRoutedPointerEventKind::ButtonDown,
          .phases = UI::UIEventPhaseMask::Target},
         UI::UIRoutedPointerCallback{[&state](UI::UIRoutedPointerEvent&) noexcept {
-            Core::Status structure = state.context->commitStructure();
-            Core::Status layout = state.context->commitLayout(
+            Core::Status structure = state.context->publication().commitStructure();
+            Core::Status layout = state.context->publication().commitLayout(
                 {.width = 100.0F, .height = 100.0F});
             if (!structure) {
                 state.structureError = structure.error().code;
@@ -571,7 +571,7 @@ TEST_F(UIInputRouteTest, CommitAttemptsDuringRouteAreRejectedAndOuterRouteComple
         }});
     ASSERT_TRUE(guardToken && laterToken);
 
-    auto routed = tree.context->routePointerInput(makePointerInput(window));
+    auto routed = tree.context->input().routePointerInput(makePointerInput(window));
     ASSERT_TRUE(routed.has_value()) << (routed ? "" : routed.error().message);
     EXPECT_EQ(state.structureError, UI::UIErrorCode::PointerRouteAlreadyInProgress);
     EXPECT_EQ(state.layoutError, UI::UIErrorCode::PointerRouteAlreadyInProgress);
@@ -599,11 +599,11 @@ TEST_F(UIInputRouteTest, DefaultActionActivationFromListenerRetainsRouteGuard)
         }});
     ASSERT_TRUE(action.has_value()) << (action ? "" : action.error().message);
 
-    auto focus = tree.context->routeDefaultActionFocusStep(false);
+    auto focus = tree.context->input().routeDefaultActionFocusStep(false);
     ASSERT_TRUE(focus.has_value()) << (focus ? "" : focus.error().message);
     ASSERT_EQ(focus->focus, tree.target);
-    ASSERT_EQ(tree.context->defaultActionFocus(), tree.target);
-    expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    ASSERT_EQ(tree.context->input().defaultActionFocus(), tree.target);
+    expectOk(tree.context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
     expectOk(tree.updater.setBoxPaint(
         tree.panel,
@@ -620,7 +620,7 @@ TEST_F(UIInputRouteTest, DefaultActionActivationFromListenerRetainsRouteGuard)
          .kind = UI::UIRoutedPointerEventKind::ButtonDown,
          .phases = UI::UIEventPhaseMask::Target},
         UI::UIRoutedPointerCallback{[&state](UI::UIRoutedPointerEvent&) noexcept {
-            auto nested = state.context->routeDefaultActionActivate(
+            auto nested = state.context->input().routeDefaultActionActivate(
                 Platform::PlatformFrameId{2},
                 20,
                 UI::UIButtonActivationSource::Keyboard);
@@ -628,7 +628,7 @@ TEST_F(UIInputRouteTest, DefaultActionActivationFromListenerRetainsRouteGuard)
             if (!nested) {
                 state.nestedError = nested.error().code;
             }
-            const Core::Status commit = state.context->commitLayout(
+            const Core::Status commit = state.context->publication().commitLayout(
                 {.width = 100.0F, .height = 100.0F});
             if (!commit) {
                 state.commitError = commit.error().code;
@@ -636,13 +636,13 @@ TEST_F(UIInputRouteTest, DefaultActionActivationFromListenerRetainsRouteGuard)
         }});
     ASSERT_TRUE(token);
 
-    auto routed = tree.context->routePointerInput(makePointerInput(window));
+    auto routed = tree.context->input().routePointerInput(makePointerInput(window));
     ASSERT_TRUE(routed.has_value()) << (routed ? "" : routed.error().message);
     EXPECT_TRUE(state.nestedRejected);
     EXPECT_EQ(state.nestedError, UI::UIErrorCode::PointerRouteAlreadyInProgress);
     EXPECT_EQ(state.commitError, UI::UIErrorCode::PointerRouteAlreadyInProgress);
     EXPECT_EQ(state.callbackCount, 0U);
-    EXPECT_EQ(tree.context->defaultActionFocus(), tree.target);
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.target);
     EXPECT_EQ(tree.context->statistics().paintRevision, paintRevisionBefore);
     EXPECT_EQ(routed->listenerInvocationCount, 1U);
     EXPECT_FALSE(routed->targetInvalidated);
@@ -675,7 +675,7 @@ TEST_F(UIInputRouteTest, DestroyingContextFromItsCallbackTerminates)
                 std::abort();
             }
             UI::UIContext* context = tree.context.get();
-            (void)context->routePointerInput(makePointerInput(window));
+            (void)context->input().routePointerInput(makePointerInput(window));
         },
         ::testing::ExitedWithCode(86),
         ".*");
@@ -727,7 +727,7 @@ TEST_F(UIInputRouteTest, DestroyingContextFromListenerCallbackMoveTerminates)
                 }
             } releaseContext(context);
 
-            (void)context->addRoutedPointerListener(
+            (void)context->input().addRoutedPointerListener(
                 {.node = button,
                  .kind = UI::UIRoutedPointerEventKind::ButtonDown,
                  .phases = UI::UIEventPhaseMask::Target},
@@ -783,9 +783,9 @@ TEST_F(UIInputRouteTest, ThreeHundredRoutesDoNotAllocateOrMutateCommittedState)
         }});
     ASSERT_TRUE(token);
 
-    const UI::UICommittedStructureView structure = tree.context->committedStructure();
-    const UI::UICommittedLayoutView layout = tree.context->committedLayout();
-    const UI::UICommittedHitView hit = tree.context->committedHit();
+    const UI::UICommittedStructureView structure = tree.context->publication().committedStructure();
+    const UI::UICommittedLayoutView layout = tree.context->publication().committedLayout();
+    const UI::UICommittedHitView hit = tree.context->publication().committedHit();
     const UI::UIContextStatistics before = tree.context->statistics();
     const usize allocationCount = resource.allocationCount();
     const UI::UICommittedNodeEntry* const structureData = structure.entries().data();
@@ -793,7 +793,7 @@ TEST_F(UIInputRouteTest, ThreeHundredRoutesDoNotAllocateOrMutateCommittedState)
     const UI::UICommittedHitEntry* const hitData = hit.entries().data();
 
     for (u64 frame = 1; frame <= 300; ++frame) {
-        auto routed = tree.context->routePointerInput(makePointerInput(window, frame));
+        auto routed = tree.context->input().routePointerInput(makePointerInput(window, frame));
         ASSERT_TRUE(routed.has_value())
             << (routed ? "" : routed.error().message);
         EXPECT_EQ(routed->listenerInvocationCount, 1U);
@@ -802,9 +802,9 @@ TEST_F(UIInputRouteTest, ThreeHundredRoutesDoNotAllocateOrMutateCommittedState)
 
     EXPECT_EQ(callbackCount, 300U);
     EXPECT_EQ(resource.allocationCount(), allocationCount);
-    EXPECT_EQ(tree.context->committedStructure().entries().data(), structureData);
-    EXPECT_EQ(tree.context->committedLayout().entries().data(), layoutData);
-    EXPECT_EQ(tree.context->committedHit().entries().data(), hitData);
+    EXPECT_EQ(tree.context->publication().committedStructure().entries().data(), structureData);
+    EXPECT_EQ(tree.context->publication().committedLayout().entries().data(), layoutData);
+    EXPECT_EQ(tree.context->publication().committedHit().entries().data(), hitData);
     const UI::UIContextStatistics after = tree.context->statistics();
     EXPECT_EQ(after.committedRevision, before.committedRevision);
     EXPECT_EQ(after.layoutRevision, before.layoutRevision);
@@ -838,7 +838,7 @@ TEST_F(UIInputRouteTest, RecursiveRouteIsRejectedWhileOuterDispatchCompletes)
          .phases = UI::UIEventPhaseMask::Target},
         UI::UIRoutedPointerCallback{[&state](UI::UIRoutedPointerEvent&) noexcept {
             ++state.firstCount;
-            auto nested = state.context->routePointerInput(state.input);
+            auto nested = state.context->input().routePointerInput(state.input);
             state.nestedReturned = true;
             state.nestedRejected = !nested.has_value();
             if (!nested) {
@@ -855,7 +855,7 @@ TEST_F(UIInputRouteTest, RecursiveRouteIsRejectedWhileOuterDispatchCompletes)
         }});
     ASSERT_TRUE(firstToken && secondToken);
 
-    auto outer = tree.context->routePointerInput(state.input);
+    auto outer = tree.context->input().routePointerInput(state.input);
     ASSERT_TRUE(outer.has_value()) << (outer ? "" : outer.error().message);
     EXPECT_TRUE(state.nestedReturned);
     EXPECT_TRUE(state.nestedRejected);

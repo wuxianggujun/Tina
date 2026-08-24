@@ -4,6 +4,8 @@
 
 #include <tina/core/base/ScopeExit.hpp>
 #include <tina/runtime/RuntimeErrors.hpp>
+#include <tina/ui/UIInputRouter.hpp>
+#include <tina/ui/UITextSystem.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -71,7 +73,7 @@ flowInputDeviceObservation(const Platform::InputTransitionPayload& payload,
         button != nullptr && button->routedWindow == ownerWindow &&
         button->state == Platform::DigitalTransition::Down)
     {
-        auto localUser = context.flowLocalUserForGamepad(button->gamepad);
+        auto localUser = context.input().flowLocalUserForGamepad(button->gamepad);
         if (!localUser)
         {
             return Core::failure(std::move(localUser.error()));
@@ -102,12 +104,12 @@ flowInputDeviceObservation(const Platform::InputTransitionPayload& payload,
     const Platform::GamepadButtonTransition& transition,
     const Platform::DigitalControlIdentity& control)
 {
-    auto localUser = context.flowLocalUserForGamepad(transition.gamepad);
+    auto localUser = context.input().flowLocalUserForGamepad(transition.gamepad);
     if (!localUser)
     {
         return Core::failure(std::move(localUser.error()));
     }
-    return context.routeFlowAction(
+    return context.input().routeFlowAction(
         platformFrame, sourceSequence, *localUser, action,
         UI::UIFlowActionSource::Gamepad,
         transition.state == Platform::DigitalTransition::Down, control);
@@ -761,7 +763,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
         }
         if (observation->has_value())
         {
-            Core::Status observed = context->observeFlowInputDevice(
+            Core::Status observed = context->input().observeFlowInputDevice(
                 platformFrame.id(), transitions[ordinal].sequence,
                 (**observation).localUser, (**observation).device,
                 (**observation).gamepad);
@@ -779,7 +781,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             if (!cancel->gamepad.has_value()
                 && cancel->routedWindow == context->ownerWindow()) {
                 Core::Status cancelStatus =
-                    context->cancelPointerInteraction(cancel->routedWindow);
+                    context->input().cancelPointerInteraction(cancel->routedWindow);
                 if (!cancelStatus) {
                     Core::Error error = std::move(cancelStatus.error());
                     error.addContext("UIInputRouteProducer::produce(cancel)");
@@ -788,7 +790,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             } else if (cancel->gamepad.has_value()
                        && cancel->routedWindow == context->ownerWindow()) {
                 auto localUser =
-                    context->flowLocalUserForGamepad(*cancel->gamepad);
+                    context->input().flowLocalUserForGamepad(*cancel->gamepad);
                 if (!localUser)
                 {
                     Core::Error error = std::move(localUser.error());
@@ -796,7 +798,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                         "UIInputRouteProducer::produce(cancel-flow-local-user)");
                     return Core::failure(std::move(error));
                 }
-                auto inputDevice = context->flowInputDeviceState(*localUser);
+                auto inputDevice = context->input().flowInputDeviceState(*localUser);
                 if (!inputDevice)
                 {
                     Core::Error error = std::move(inputDevice.error());
@@ -807,7 +809,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                 if (inputDevice->device == UI::UIFlowInputDevice::Gamepad &&
                     inputDevice->gamepad == cancel->gamepad)
                 {
-                    Core::Status observed = context->observeFlowInputDevice(
+                    Core::Status observed = context->input().observeFlowInputDevice(
                         platformFrame.id(), transitions[ordinal].sequence,
                         *localUser, UI::UIFlowInputDevice::KeyboardMouse);
                     if (!observed)
@@ -819,7 +821,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                     }
                 }
                 Core::Status cancelStatus =
-                    context->cancelDefaultActionInteraction(
+                    context->input().cancelDefaultActionInteraction(
                         cancel->routedWindow,
                         cancel->gamepad);
                 if (!cancelStatus) {
@@ -841,7 +843,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                 {
                     const UI::UIFlowLocalUserId localUser{
                         static_cast<u32>(userIndex + 1U)};
-                    auto inputDevice = context->flowInputDeviceState(localUser);
+                    auto inputDevice = context->input().flowInputDeviceState(localUser);
                     if (!inputDevice)
                     {
                         Core::Error error = std::move(inputDevice.error());
@@ -853,7 +855,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                     {
                         continue;
                     }
-                    Core::Status observed = context->observeFlowInputDevice(
+                    Core::Status observed = context->input().observeFlowInputDevice(
                         platformFrame.id(), transitions[ordinal].sequence,
                         localUser, UI::UIFlowInputDevice::KeyboardMouse);
                     if (!observed)
@@ -865,13 +867,13 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                     }
                 }
                 Core::Status cancelStatus =
-                    context->cancelPointerInteraction(context->ownerWindow());
+                    context->input().cancelPointerInteraction(context->ownerWindow());
                 if (!cancelStatus) {
                     Core::Error error = std::move(cancelStatus.error());
                     error.addContext("UIInputRouteProducer::produce(reset)");
                     return Core::failure(std::move(error));
                 }
-                cancelStatus = context->cancelDefaultActionInteraction(
+                cancelStatus = context->input().cancelDefaultActionInteraction(
                     context->ownerWindow());
                 if (!cancelStatus)
                 {
@@ -891,7 +893,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             composition != nullptr
             && composition->window == context->ownerWindow())
         {
-            auto routed = context->routeTextComposition(
+            auto routed = context->text().routeTextComposition(
                 composition->window,
                 platformFrame.id(),
                 transitions[ordinal].sequence,
@@ -918,7 +920,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             text != nullptr
             && text->window == context->ownerWindow())
         {
-            auto routed = context->routeTextInput(
+            auto routed = context->text().routeTextInput(
                 text->window,
                 platformFrame.id(),
                 transitions[ordinal].sequence,
@@ -962,7 +964,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             }
             if (command.has_value())
             {
-                auto routed = context->routeMenuInvocation(*command, pressed);
+                auto routed = context->input().routeMenuInvocation(*command, pressed);
                 if (!routed)
                 {
                     Core::Error error = std::move(routed.error());
@@ -987,7 +989,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
         {
             if (const auto command = menuCommandForKey(key->key); command.has_value())
             {
-                auto routed = context->routeMenuCommand(
+                auto routed = context->input().routeMenuCommand(
                     *command, key->state == Platform::DigitalTransition::Down);
                 if (!routed)
                 {
@@ -1010,7 +1012,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
         {
             if (const auto command = menuCommandForGamepadButton(gamepad->button); command.has_value())
             {
-                auto routed = context->routeMenuCommand(
+                auto routed = context->input().routeMenuCommand(
                     *command, gamepad->state == Platform::DigitalTransition::Down);
                 if (!routed)
                 {
@@ -1043,14 +1045,14 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             if (key->key == Platform::Key::Tab && key->state == Platform::DigitalTransition::Up)
             {
                 auto previousRelease =
-                    context->routeDropdownCommand(UI::UIDropdownCommand::ExitPrevious, false);
+                    context->input().routeDropdownCommand(UI::UIDropdownCommand::ExitPrevious, false);
                 if (!previousRelease)
                 {
                     Core::Error error = std::move(previousRelease.error());
                     error.addContext("UIInputRouteProducer::produce(dropdown-tab-release)");
                     return Core::failure(std::move(error));
                 }
-                auto nextRelease = context->routeDropdownCommand(UI::UIDropdownCommand::ExitNext, false);
+                auto nextRelease = context->input().routeDropdownCommand(UI::UIDropdownCommand::ExitNext, false);
                 if (!nextRelease)
                 {
                     Core::Error error = std::move(nextRelease.error());
@@ -1067,7 +1069,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             }
             if (const auto command = dropdownCommandForKey(key->key, shiftHeld); command.has_value())
             {
-                auto routed = context->routeDropdownCommand(
+                auto routed = context->input().routeDropdownCommand(
                     *command, key->state == Platform::DigitalTransition::Down);
                 if (!routed)
                 {
@@ -1090,7 +1092,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
         {
             if (const auto command = dropdownCommandForGamepadButton(gamepad->button); command.has_value())
             {
-                auto routed = context->routeDropdownCommand(
+                auto routed = context->input().routeDropdownCommand(
                     *command, gamepad->state == Platform::DigitalTransition::Down);
                 if (!routed)
                 {
@@ -1119,7 +1121,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                 .window = key->window,
                 .key = key->key,
             };
-            auto routed = context->routeFlowAction(
+            auto routed = context->input().routeFlowAction(
                 platformFrame.id(), transitions[ordinal].sequence,
                 UI::UIFlowPrimaryLocalUser, UI::UIFlowAction::Back,
                 UI::UIFlowActionSource::Keyboard,
@@ -1177,13 +1179,13 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             key->key == Platform::Key::P)
         {
             const bool pressed = key->state == Platform::DigitalTransition::Down;
-            if (!pressed || !context->imeFocus().hasValue())
+            if (!pressed || !context->text().imeFocus().hasValue())
             {
                 const Platform::DigitalControlIdentity control = Platform::KeyControlIdentity{
                     .window = key->window,
                     .key = key->key,
                 };
-                auto routed = context->routeFlowAction(
+                auto routed = context->input().routeFlowAction(
                     platformFrame.id(), transitions[ordinal].sequence,
                     UI::UIFlowPrimaryLocalUser, UI::UIFlowAction::Menu,
                     UI::UIFlowActionSource::Keyboard, pressed, control);
@@ -1242,7 +1244,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             bool consumed = false;
             if (const auto command = treeViewCommandForKey(key->key); command.has_value())
             {
-                auto routed = context->routeTreeViewCommand(*command, pressed);
+                auto routed = context->input().routeTreeViewCommand(*command, pressed);
                 if (!routed)
                 {
                     Core::Error error = std::move(routed.error());
@@ -1253,7 +1255,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             }
             if (const auto command = listViewCommandForKey(key->key); command.has_value())
             {
-                auto routed = context->routeListViewCommand(*command, pressed);
+                auto routed = context->input().routeListViewCommand(*command, pressed);
                 if (!routed)
                 {
                     Core::Error error = std::move(routed.error());
@@ -1264,7 +1266,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             }
             if (const auto command = virtualGridViewCommandForKey(key->key); command.has_value())
             {
-                auto routed = context->routeVirtualGridViewCommand(*command, pressed);
+                auto routed = context->input().routeVirtualGridViewCommand(*command, pressed);
                 if (!routed)
                 {
                     Core::Error error = std::move(routed.error());
@@ -1276,7 +1278,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             if (const auto command = dataGridCommandForKey(key->key);
                 command.has_value())
             {
-                auto routed = context->routeDataGridCommand(*command, pressed);
+                auto routed = context->input().routeDataGridCommand(*command, pressed);
                 if (!routed)
                 {
                     Core::Error error = std::move(routed.error());
@@ -1302,7 +1304,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             bool consumed = false;
             if (const auto command = treeViewCommandForGamepadButton(gamepad->button); command.has_value())
             {
-                auto routed = context->routeTreeViewCommand(*command, pressed);
+                auto routed = context->input().routeTreeViewCommand(*command, pressed);
                 if (!routed)
                 {
                     Core::Error error = std::move(routed.error());
@@ -1313,7 +1315,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             }
             if (const auto command = listViewCommandForGamepadButton(gamepad->button); command.has_value())
             {
-                auto routed = context->routeListViewCommand(*command, pressed);
+                auto routed = context->input().routeListViewCommand(*command, pressed);
                 if (!routed)
                 {
                     Core::Error error = std::move(routed.error());
@@ -1324,7 +1326,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             }
             if (const auto command = virtualGridViewCommandForGamepadButton(gamepad->button); command.has_value())
             {
-                auto routed = context->routeVirtualGridViewCommand(*command, pressed);
+                auto routed = context->input().routeVirtualGridViewCommand(*command, pressed);
                 if (!routed)
                 {
                     Core::Error error = std::move(routed.error());
@@ -1337,7 +1339,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                     dataGridCommandForGamepadButton(gamepad->button);
                 command.has_value())
             {
-                auto routed = context->routeDataGridCommand(*command, pressed);
+                auto routed = context->input().routeDataGridCommand(*command, pressed);
                 if (!routed)
                 {
                     Core::Error error = std::move(routed.error());
@@ -1365,7 +1367,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             const bool pressed = key->state == Platform::DigitalTransition::Down;
             if (const auto direction = focusNavigationDirectionForKey(key->key); direction.has_value())
             {
-                auto routed = context->routeFocusedTabViewDirection(*direction, pressed);
+                auto routed = context->input().routeFocusedTabViewDirection(*direction, pressed);
                 if (!routed)
                 {
                     Core::Error error = std::move(routed.error());
@@ -1382,7 +1384,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             }
             if (const auto command = tabViewBoundaryCommandForKey(key->key); command.has_value())
             {
-                auto routed = context->routeFocusedTabViewCommand(*command, pressed);
+                auto routed = context->input().routeFocusedTabViewCommand(*command, pressed);
                 if (!routed)
                 {
                     Core::Error error = std::move(routed.error());
@@ -1405,7 +1407,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             if (const auto direction = focusNavigationDirectionForGamepadButton(gamepad->button);
                 direction.has_value())
             {
-                auto routed = context->routeFocusedTabViewDirection(
+                auto routed = context->input().routeFocusedTabViewDirection(
                     *direction, gamepad->state == Platform::DigitalTransition::Down);
                 if (!routed)
                 {
@@ -1436,7 +1438,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                     .window = key->window,
                     .key = key->key,
                 };
-                auto routed = context->routeRangeInputCommand(
+                auto routed = context->input().routeRangeInputCommand(
                     platformFrame.id(), transitions[ordinal].sequence, *command,
                     key->state == Platform::DigitalTransition::Down, control);
                 if (!routed)
@@ -1469,7 +1471,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                     .gamepad = gamepad->gamepad,
                     .button = gamepad->button,
                 };
-                auto routed = context->routeRangeInputCommand(
+                auto routed = context->input().routeRangeInputCommand(
                     platformFrame.id(), transitions[ordinal].sequence, *command,
                     gamepad->state == Platform::DigitalTransition::Down, control);
                 if (!routed)
@@ -1501,7 +1503,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             if (const auto direction = focusNavigationDirectionForGamepadButton(gamepad->button);
                 direction.has_value())
             {
-                auto routed = context->routeFocusNavigation(
+                auto routed = context->input().routeFocusNavigation(
                     *direction, gamepad->state == Platform::DigitalTransition::Down,
                     UI::UIInputModality::Gamepad);
                 if (!routed)
@@ -1534,7 +1536,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             && key->key != Platform::Key::Enter
             && key->key != Platform::Key::KeypadEnter
             && key->key != Platform::Key::Escape
-            && context->imeFocus().hasValue())
+            && context->text().imeFocus().hasValue())
         {
             if (key->state == Platform::DigitalTransition::Down)
             {
@@ -1550,7 +1552,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                 if (const auto command = textEditCommandForKey(key->key, controlHeld);
                     command.has_value())
                 {
-                    auto routed = context->routeTextEditCommand(
+                    auto routed = context->text().routeTextEditCommand(
                         key->window,
                         platformFrame.id(),
                         transitions[ordinal].sequence,
@@ -1577,7 +1579,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             if (const auto direction = focusNavigationDirectionForKey(key->key); direction.has_value())
             {
                 auto routed =
-                    context->routeFocusNavigation(*direction,
+                    context->input().routeFocusNavigation(*direction,
                                                    key->state == Platform::DigitalTransition::Down,
                                                    UI::UIInputModality::Keyboard);
                 if (!routed)
@@ -1604,7 +1606,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             && key->window == context->ownerWindow()
             && key->key == Platform::Key::Tab)
         {
-            bool consumed = context->defaultActionFocus().hasValue();
+            bool consumed = context->input().defaultActionFocus().hasValue();
             if (key->state == Platform::DigitalTransition::Down) {
                 bool reverse = false;
                 if (primaryWindow != nullptr)
@@ -1612,7 +1614,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                     reverse = primaryWindow->input.isHeld(Platform::Key::LeftShift)
                         || primaryWindow->input.isHeld(Platform::Key::RightShift);
                 }
-                auto step = context->routeDefaultActionFocusStep(reverse);
+                auto step = context->input().routeDefaultActionFocusStep(reverse);
                 if (!step)
                 {
                     Core::Error error = std::move(step.error());
@@ -1647,7 +1649,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                 };
             const bool pressed = key->state == Platform::DigitalTransition::Down;
             const bool supportsFlowConfirm = key->key != Platform::Key::Space;
-            if (context->imeFocus().hasValue())
+            if (context->text().imeFocus().hasValue())
             {
                 // A focused TextEdit owns neither confirmation nor cancel;
                 // leave these physical transitions unconsumed so the product
@@ -1656,7 +1658,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             }
             if (!pressed && supportsFlowConfirm)
             {
-                auto flowRelease = context->routeFlowAction(
+                auto flowRelease = context->input().routeFlowAction(
                     platformFrame.id(), transitions[ordinal].sequence,
                     UI::UIFlowPrimaryLocalUser, UI::UIFlowAction::Confirm,
                     UI::UIFlowActionSource::Keyboard, false, control);
@@ -1676,12 +1678,12 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             }
 
             auto routed = pressed
-                ? context->routeDefaultActionActivate(
+                ? context->input().routeDefaultActionActivate(
                     platformFrame.id(),
                     transitions[ordinal].sequence,
                     UI::UIButtonActivationSource::Keyboard,
                     control)
-                : context->routeDefaultActionRelease(
+                : context->input().routeDefaultActionRelease(
                     platformFrame.id(),
                     transitions[ordinal].sequence,
                     UI::UIButtonActivationSource::Keyboard,
@@ -1701,7 +1703,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             }
             if (pressed && supportsFlowConfirm)
             {
-                auto flow = context->routeFlowAction(
+                auto flow = context->input().routeFlowAction(
                     platformFrame.id(), transitions[ordinal].sequence,
                     UI::UIFlowPrimaryLocalUser, UI::UIFlowAction::Confirm,
                     UI::UIFlowActionSource::Keyboard, true, control);
@@ -1754,12 +1756,12 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             }
 
             auto routed = pressed
-                ? context->routeDefaultActionActivate(
+                ? context->input().routeDefaultActionActivate(
                     platformFrame.id(),
                     transitions[ordinal].sequence,
                     UI::UIButtonActivationSource::Gamepad,
                     control)
-                : context->routeDefaultActionRelease(
+                : context->input().routeDefaultActionRelease(
                     platformFrame.id(),
                     transitions[ordinal].sequence,
                     UI::UIButtonActivationSource::Gamepad,
@@ -1805,7 +1807,7 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             continue;
         }
 
-        auto routeResult = context->routePointerInput(*input);
+        auto routeResult = context->input().routePointerInput(*input);
         if (!routeResult)
         {
             Core::Error error = std::move(routeResult.error());

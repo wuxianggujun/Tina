@@ -56,7 +56,7 @@ private:
 
 [[nodiscard]] UI::UIRootOwner createRoot(UI::UIContext& context)
 {
-    auto rootResult = context.rootBuilder().createRoot();
+    auto rootResult = context.authoring().rootBuilder().createRoot();
     EXPECT_TRUE(rootResult.has_value())
         << (rootResult ? "" : rootResult.error().message);
     return rootResult ? std::move(*rootResult) : UI::UIRootOwner{};
@@ -64,7 +64,7 @@ private:
 
 [[nodiscard]] UI::UINodeId createPanel(UI::UIContext& context, UI::UINodeId parent)
 {
-    auto panelResult = context.rootBuilder().createElement(parent, UI::makePanelElement());
+    auto panelResult = context.authoring().rootBuilder().createElement(parent, UI::makePanelElement());
     EXPECT_TRUE(panelResult.has_value())
         << (panelResult ? "" : panelResult.error().message);
     return panelResult ? *panelResult : UI::UINodeId{};
@@ -72,7 +72,7 @@ private:
 
 [[nodiscard]] UI::UINodeId createButton(UI::UIContext& context, UI::UINodeId parent)
 {
-    auto buttonResult = context.rootBuilder().createElement(parent, UI::makeButtonElement());
+    auto buttonResult = context.authoring().rootBuilder().createElement(parent, UI::makeButtonElement());
     EXPECT_TRUE(buttonResult.has_value())
         << (buttonResult ? "" : buttonResult.error().message);
     return buttonResult ? *buttonResult : UI::UINodeId{};
@@ -82,7 +82,7 @@ private:
     UI::UIContext& context,
     UI::UIRootOwner& root)
 {
-    auto updaterResult = context.treeUpdater(root);
+    auto updaterResult = context.authoring().treeUpdater(root);
     EXPECT_TRUE(updaterResult.has_value())
         << (updaterResult ? "" : updaterResult.error().message);
     return updaterResult ? std::move(*updaterResult) : UI::UITreeUpdater{};
@@ -146,7 +146,7 @@ TEST_F(UIHitSnapshotTest, DerivesHitCapacityAndStartsWithAnEmptyRevisionZeroView
     EXPECT_EQ(statistics.hitRevision, 0U);
     EXPECT_FALSE(statistics.hitDirty);
 
-    const UI::UICommittedHitView hit = context->committedHit();
+    const UI::UICommittedHitView hit = context->publication().committedHit();
     EXPECT_TRUE(hit.empty());
     EXPECT_EQ(hit.structureRevision(), 0U);
     EXPECT_EQ(hit.layoutRevision(), 0U);
@@ -180,9 +180,9 @@ TEST_F(UIHitSnapshotTest, PublishesStableSelfContainedAncestryAndTargetPolicy)
     assertOk(updater.setLayoutStyle(panel, fixedSize(150.0F, 80.0F)));
     assertOk(updater.setLayoutStyle(button, fixedSize(60.0F, 24.0F)));
     assertOk(updater.setPointerHitPolicy(button, UI::UIPointerHitPolicy::Targetable));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
 
-    const UI::UICommittedHitView hit = context->committedHit();
+    const UI::UICommittedHitView hit = context->publication().committedHit();
     ASSERT_EQ(hit.size(), 3U);
     EXPECT_EQ(hit.entries()[0].node, root.rootNodeId());
     EXPECT_EQ(hit.entries()[0].parentEntryIndex, UI::InvalidUIHitEntryIndex);
@@ -199,7 +199,7 @@ TEST_F(UIHitSnapshotTest, PublishesStableSelfContainedAncestryAndTargetPolicy)
     EXPECT_EQ(hit.entries()[1].policy, UI::UIPointerHitPolicy::Ignore);
     EXPECT_EQ(hit.entries()[2].policy, UI::UIPointerHitPolicy::Targetable);
 
-    const UI::UICommittedLayoutView layout = context->committedLayout();
+    const UI::UICommittedLayoutView layout = context->publication().committedLayout();
     EXPECT_EQ(hit.structureRevision(), layout.structureRevision());
     EXPECT_EQ(hit.layoutRevision(), layout.layoutRevision());
     EXPECT_EQ(hit.paintOrderRevision(), hit.structureRevision());
@@ -233,9 +233,9 @@ TEST_F(UIHitSnapshotTest, PublishesOneStrictGlobalPaintOrderAcrossSiblingsAndRoo
     assertOk(secondUpdater.setPointerHitPolicy(
         topRootChild,
         UI::UIPointerHitPolicy::Targetable));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
-    const UI::UICommittedHitView hit = context->committedHit();
+    const UI::UICommittedHitView hit = context->publication().committedHit();
     ASSERT_EQ(hit.size(), 5U);
     for (usize index = 1; index < hit.size(); ++index) {
         EXPECT_LT(hit.entries()[index - 1].paintOrdinal, hit.entries()[index].paintOrdinal);
@@ -277,9 +277,9 @@ TEST_F(UIHitSnapshotTest, OmitsHiddenAndCollapsedSubtreesButKeepsIgnoredVisibleA
     UI::UILayoutStyle collapsedStyle = fixedSize(20.0F, 20.0F);
     collapsedStyle.visibility = UI::UIVisibility::Collapsed;
     assertOk(updater.setLayoutStyle(collapsed, collapsedStyle));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
-    const UI::UICommittedHitView hit = context->committedHit();
+    const UI::UICommittedHitView hit = context->publication().committedHit();
     ASSERT_EQ(hit.size(), 2U);
     EXPECT_NE(findHitEntry(hit, root.rootNodeId()), nullptr);
     EXPECT_NE(findHitEntry(hit, visible), nullptr);
@@ -299,21 +299,21 @@ TEST_F(UIHitSnapshotTest, HitOnlyCommitPreservesStructureAndLayoutRevisions)
     const UI::UINodeId panel = createPanel(*context, root.rootNodeId());
     auto updater = createUpdater(*context, root);
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(100.0F, 50.0F)));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 50.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 50.0F}));
 
-    const u64 structureRevision = context->committedStructure().revision();
-    const u64 layoutRevision = context->committedLayout().layoutRevision();
-    const u64 paintOrderRevision = context->committedHit().paintOrderRevision();
-    const u64 hitRevision = context->committedHit().hitRevision();
+    const u64 structureRevision = context->publication().committedStructure().revision();
+    const u64 layoutRevision = context->publication().committedLayout().layoutRevision();
+    const u64 paintOrderRevision = context->publication().committedHit().paintOrderRevision();
+    const u64 hitRevision = context->publication().committedHit().hitRevision();
 
     assertOk(updater.setPointerHitPolicy(panel, UI::UIPointerHitPolicy::Targetable));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 50.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 50.0F}));
 
     const UI::UIContextStatistics statistics = context->statistics();
-    EXPECT_EQ(context->committedStructure().revision(), structureRevision);
-    EXPECT_EQ(context->committedLayout().layoutRevision(), layoutRevision);
-    EXPECT_EQ(context->committedHit().paintOrderRevision(), paintOrderRevision);
-    EXPECT_EQ(context->committedHit().hitRevision(), hitRevision + 1U);
+    EXPECT_EQ(context->publication().committedStructure().revision(), structureRevision);
+    EXPECT_EQ(context->publication().committedLayout().layoutRevision(), layoutRevision);
+    EXPECT_EQ(context->publication().committedHit().paintOrderRevision(), paintOrderRevision);
+    EXPECT_EQ(context->publication().committedHit().hitRevision(), hitRevision + 1U);
     EXPECT_EQ(statistics.lastLayoutPassCount, 0U);
     EXPECT_EQ(statistics.lastLayoutMeasuredNodeCount, 0U);
     EXPECT_EQ(statistics.lastLayoutArrangedNodeCount, 0U);
@@ -334,14 +334,14 @@ TEST_F(UIHitSnapshotTest, SamePolicyAndThreeHundredNoChangeCommitsDoNoWorkOrUiAl
     const UI::UINodeId panel = createPanel(*context, root.rootNodeId());
     auto updater = createUpdater(*context, root);
     assertOk(updater.setPointerHitPolicy(panel, UI::UIPointerHitPolicy::Targetable));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 50.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 50.0F}));
 
     const usize allocationCount = resource.allocationCount();
-    u64 hitRevision = context->committedHit().hitRevision();
+    u64 hitRevision = context->publication().committedHit().hitRevision();
     assertOk(updater.setPointerHitPolicy(panel, UI::UIPointerHitPolicy::Targetable));
     for (usize frame = 0; frame < 300; ++frame) {
-        assertOk(context->commitLayout({.width = 100.0F, .height = 50.0F}));
-        EXPECT_EQ(context->committedHit().hitRevision(), hitRevision);
+        assertOk(context->publication().commitLayout({.width = 100.0F, .height = 50.0F}));
+        EXPECT_EQ(context->publication().committedHit().hitRevision(), hitRevision);
         EXPECT_EQ(context->statistics().lastHitRebuildCount, 0U);
     }
 
@@ -350,9 +350,9 @@ TEST_F(UIHitSnapshotTest, SamePolicyAndThreeHundredNoChangeCommitsDoNoWorkOrUiAl
             ? UI::UIPointerHitPolicy::Ignore
             : UI::UIPointerHitPolicy::Targetable;
         assertOk(updater.setPointerHitPolicy(panel, policy));
-        assertOk(context->commitLayout({.width = 100.0F, .height = 50.0F}));
+        assertOk(context->publication().commitLayout({.width = 100.0F, .height = 50.0F}));
         ++hitRevision;
-        EXPECT_EQ(context->committedHit().hitRevision(), hitRevision);
+        EXPECT_EQ(context->publication().committedHit().hitRevision(), hitRevision);
         EXPECT_EQ(context->statistics().lastLayoutPassCount, 0U);
         EXPECT_EQ(context->statistics().lastHitRebuildCount, 1U);
     }
@@ -365,29 +365,29 @@ TEST_F(UIHitSnapshotTest, DiagnosticStructureCommitKeepsOldHitUntilLayoutBarrier
     ASSERT_NE(context, nullptr);
     auto root = createRoot(*context);
     ASSERT_TRUE(root);
-    assertOk(context->commitLayout({.width = 100.0F, .height = 50.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 50.0F}));
 
-    const u64 oldStructureRevision = context->committedStructure().revision();
-    const u64 oldLayoutRevision = context->committedLayout().layoutRevision();
-    const u64 oldHitRevision = context->committedHit().hitRevision();
-    const u64 oldHitStructureRevision = context->committedHit().structureRevision();
+    const u64 oldStructureRevision = context->publication().committedStructure().revision();
+    const u64 oldLayoutRevision = context->publication().committedLayout().layoutRevision();
+    const u64 oldHitRevision = context->publication().committedHit().hitRevision();
+    const u64 oldHitStructureRevision = context->publication().committedHit().structureRevision();
     const UI::UINodeId panel = createPanel(*context, root.rootNodeId());
 
-    assertOk(context->commitStructure());
-    EXPECT_EQ(context->committedStructure().revision(), oldStructureRevision + 1U);
-    EXPECT_EQ(context->committedLayout().layoutRevision(), oldLayoutRevision);
-    EXPECT_EQ(context->committedHit().hitRevision(), oldHitRevision);
-    EXPECT_EQ(context->committedHit().structureRevision(), oldHitStructureRevision);
-    EXPECT_EQ(findHitEntry(context->committedHit(), panel), nullptr);
+    assertOk(context->publication().commitStructure());
+    EXPECT_EQ(context->publication().committedStructure().revision(), oldStructureRevision + 1U);
+    EXPECT_EQ(context->publication().committedLayout().layoutRevision(), oldLayoutRevision);
+    EXPECT_EQ(context->publication().committedHit().hitRevision(), oldHitRevision);
+    EXPECT_EQ(context->publication().committedHit().structureRevision(), oldHitStructureRevision);
+    EXPECT_EQ(findHitEntry(context->publication().committedHit(), panel), nullptr);
     EXPECT_FALSE(context->statistics().structureDirty);
     EXPECT_TRUE(context->statistics().layoutDirty);
     EXPECT_TRUE(context->statistics().hitDirty);
 
-    assertOk(context->commitLayout({.width = 100.0F, .height = 50.0F}));
-    EXPECT_EQ(context->committedLayout().structureRevision(), oldStructureRevision + 1U);
-    EXPECT_EQ(context->committedHit().structureRevision(), oldStructureRevision + 1U);
-    EXPECT_EQ(context->committedHit().paintOrderRevision(), oldStructureRevision + 1U);
-    EXPECT_NE(findHitEntry(context->committedHit(), panel), nullptr);
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 50.0F}));
+    EXPECT_EQ(context->publication().committedLayout().structureRevision(), oldStructureRevision + 1U);
+    EXPECT_EQ(context->publication().committedHit().structureRevision(), oldStructureRevision + 1U);
+    EXPECT_EQ(context->publication().committedHit().paintOrderRevision(), oldStructureRevision + 1U);
+    EXPECT_NE(findHitEntry(context->publication().committedHit(), panel), nullptr);
 }
 
 TEST_F(UIHitSnapshotTest, HitCapacityFailureKeepsAllPublishedSnapshotsAndPendingDirty)
@@ -404,25 +404,25 @@ TEST_F(UIHitSnapshotTest, HitCapacityFailureKeepsAllPublishedSnapshotsAndPending
     auto root = createRoot(*context);
     ASSERT_TRUE(root);
     auto updater = createUpdater(*context, root);
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
-    const UI::UICommittedStructureView oldStructure = context->committedStructure();
-    const UI::UICommittedLayoutView oldLayout = context->committedLayout();
-    const UI::UICommittedHitView oldHit = context->committedHit();
+    const UI::UICommittedStructureView oldStructure = context->publication().committedStructure();
+    const UI::UICommittedLayoutView oldLayout = context->publication().committedLayout();
+    const UI::UICommittedHitView oldHit = context->publication().committedHit();
     ASSERT_EQ(oldHit.size(), 1U);
     const UI::UINodeId oldHitNode = oldHit.entries().front().node;
     const UI::UINodeId panel = createPanel(*context, root.rootNodeId());
 
     const Core::Status overflow =
-        context->commitLayout({.width = 100.0F, .height = 100.0F});
+        context->publication().commitLayout({.width = 100.0F, .height = 100.0F});
     ASSERT_FALSE(overflow.has_value());
     EXPECT_EQ(overflow.error().code, UI::UIErrorCode::CapacityExceeded);
-    EXPECT_EQ(context->committedStructure().revision(), oldStructure.revision());
-    EXPECT_EQ(context->committedLayout().layoutRevision(), oldLayout.layoutRevision());
-    EXPECT_EQ(context->committedHit().hitRevision(), oldHit.hitRevision());
-    EXPECT_EQ(context->committedHit().size(), oldHit.size());
+    EXPECT_EQ(context->publication().committedStructure().revision(), oldStructure.revision());
+    EXPECT_EQ(context->publication().committedLayout().layoutRevision(), oldLayout.layoutRevision());
+    EXPECT_EQ(context->publication().committedHit().hitRevision(), oldHit.hitRevision());
+    EXPECT_EQ(context->publication().committedHit().size(), oldHit.size());
     EXPECT_EQ(oldHit.entries().front().node, oldHitNode);
-    EXPECT_EQ(context->committedHit().entries().front().node, oldHitNode);
+    EXPECT_EQ(context->publication().committedHit().entries().front().node, oldHitNode);
     EXPECT_TRUE(context->statistics().structureDirty);
     EXPECT_TRUE(context->statistics().layoutDirty);
     EXPECT_TRUE(context->statistics().hitDirty);
@@ -430,10 +430,10 @@ TEST_F(UIHitSnapshotTest, HitCapacityFailureKeepsAllPublishedSnapshotsAndPending
     UI::UILayoutStyle collapsedStyle;
     collapsedStyle.visibility = UI::UIVisibility::Collapsed;
     assertOk(updater.setLayoutStyle(panel, collapsedStyle));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
-    EXPECT_EQ(context->committedStructure().size(), 2U);
-    EXPECT_EQ(context->committedLayout().size(), 2U);
-    EXPECT_EQ(context->committedHit().size(), 1U);
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
+    EXPECT_EQ(context->publication().committedStructure().size(), 2U);
+    EXPECT_EQ(context->publication().committedLayout().size(), 2U);
+    EXPECT_EQ(context->publication().committedHit().size(), 1U);
 }
 
 TEST_F(UIHitSnapshotTest, RejectsInvalidPolicyWithoutChangingDirtyState)
@@ -444,8 +444,8 @@ TEST_F(UIHitSnapshotTest, RejectsInvalidPolicyWithoutChangingDirtyState)
     ASSERT_TRUE(root);
     const UI::UINodeId panel = createPanel(*context, root.rootNodeId());
     auto updater = createUpdater(*context, root);
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
-    const u64 hitRevision = context->committedHit().hitRevision();
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
+    const u64 hitRevision = context->publication().committedHit().hitRevision();
 
     const Core::Status invalid = updater.setPointerHitPolicy(
         panel,
@@ -454,8 +454,8 @@ TEST_F(UIHitSnapshotTest, RejectsInvalidPolicyWithoutChangingDirtyState)
     EXPECT_EQ(invalid.error().code, UI::UIErrorCode::InvalidPointerPolicy);
     EXPECT_FALSE(context->statistics().hitDirty);
     EXPECT_EQ(context->statistics().dirtyQueuePendingCount, 0U);
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
-    EXPECT_EQ(context->committedHit().hitRevision(), hitRevision);
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
+    EXPECT_EQ(context->publication().committedHit().hitRevision(), hitRevision);
 }
 
 TEST_F(UIHitSnapshotTest, PointerPolicyDirtyQueueFailureIsAtomic)
@@ -473,8 +473,8 @@ TEST_F(UIHitSnapshotTest, PointerPolicyDirtyQueueFailureIsAtomic)
     const UI::UINodeId acceptedNode = createPanel(*context, root.rootNodeId());
     const UI::UINodeId rejectedNode = createPanel(*context, root.rootNodeId());
     auto updater = createUpdater(*context, root);
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
-    const u64 oldHitRevision = context->committedHit().hitRevision();
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
+    const u64 oldHitRevision = context->publication().committedHit().hitRevision();
 
     assertOk(updater.setPointerHitPolicy(
         acceptedNode,
@@ -484,14 +484,14 @@ TEST_F(UIHitSnapshotTest, PointerPolicyDirtyQueueFailureIsAtomic)
         UI::UIPointerHitPolicy::Targetable);
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::CapacityExceeded);
-    EXPECT_EQ(context->committedHit().hitRevision(), oldHitRevision);
+    EXPECT_EQ(context->publication().committedHit().hitRevision(), oldHitRevision);
     EXPECT_EQ(context->statistics().dirtyQueuePendingCount, 1U);
 
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     const UI::UICommittedHitEntry* acceptedEntry =
-        findHitEntry(context->committedHit(), acceptedNode);
+        findHitEntry(context->publication().committedHit(), acceptedNode);
     const UI::UICommittedHitEntry* rejectedEntry =
-        findHitEntry(context->committedHit(), rejectedNode);
+        findHitEntry(context->publication().committedHit(), rejectedNode);
     ASSERT_NE(acceptedEntry, nullptr);
     ASSERT_NE(rejectedEntry, nullptr);
     EXPECT_EQ(acceptedEntry->policy, UI::UIPointerHitPolicy::Targetable);
@@ -546,7 +546,7 @@ TEST_F(UIHitSnapshotTest, ReusedSlotStartsIgnoredAndRejectsTheStaleIdentity)
     const UI::UINodeId oldPanel = createPanel(*context, root.rootNodeId());
     auto updater = createUpdater(*context, root);
     assertOk(updater.setPointerHitPolicy(oldPanel, UI::UIPointerHitPolicy::Targetable));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     assertOk(updater.destroy(oldPanel));
 
     const UI::UINodeId replacement = createPanel(*context, root.rootNodeId());
@@ -558,9 +558,9 @@ TEST_F(UIHitSnapshotTest, ReusedSlotStartsIgnoredAndRejectsTheStaleIdentity)
     ASSERT_FALSE(staleStatus.has_value());
     EXPECT_EQ(staleStatus.error().code, UI::UIErrorCode::InvalidNode);
 
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     const UI::UICommittedHitEntry* replacementEntry =
-        findHitEntry(context->committedHit(), replacement);
+        findHitEntry(context->publication().committedHit(), replacement);
     ASSERT_NE(replacementEntry, nullptr);
     EXPECT_EQ(replacementEntry->policy, UI::UIPointerHitPolicy::Ignore);
     EXPECT_EQ(context->statistics().committedHitTargetCount, 0U);
@@ -574,7 +574,7 @@ TEST_F(UIHitSnapshotTest, StaleQueuedGenerationCannotClearReusedSlotPolicy)
     ASSERT_TRUE(root);
     const UI::UINodeId oldPanel = createPanel(*context, root.rootNodeId());
     auto updater = createUpdater(*context, root);
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
     assertOk(updater.setPointerHitPolicy(oldPanel, UI::UIPointerHitPolicy::Targetable));
     assertOk(updater.destroy(oldPanel));
@@ -582,10 +582,10 @@ TEST_F(UIHitSnapshotTest, StaleQueuedGenerationCannotClearReusedSlotPolicy)
     ASSERT_EQ(replacement.index(), oldPanel.index());
     ASSERT_NE(replacement.generation(), oldPanel.generation());
     assertOk(updater.setPointerHitPolicy(replacement, UI::UIPointerHitPolicy::Targetable));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
     const UI::UICommittedHitEntry* replacementEntry =
-        findHitEntry(context->committedHit(), replacement);
+        findHitEntry(context->publication().committedHit(), replacement);
     ASSERT_NE(replacementEntry, nullptr);
     EXPECT_EQ(replacementEntry->policy, UI::UIPointerHitPolicy::Targetable);
     EXPECT_EQ(context->statistics().committedHitTargetCount, 1U);
@@ -609,15 +609,15 @@ TEST_F(UIHitSnapshotTest, QueryPointerHitSelectsTheTopmostTargetAndBindsItsSnaps
     assertOk(updater.setLayoutStyle(upper, overlap));
     assertOk(updater.setPointerHitPolicy(lower, UI::UIPointerHitPolicy::Targetable));
     assertOk(updater.setPointerHitPolicy(upper, UI::UIPointerHitPolicy::Targetable));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
-    const UI::UIPointerHitQueryResult result = context->queryPointerHit({10.0F, 10.0F});
+    const UI::UIPointerHitQueryResult result = context->input().queryPointerHit({10.0F, 10.0F});
     ASSERT_TRUE(result.hasTarget());
     EXPECT_EQ(result.target.node, upper);
     EXPECT_EQ(result.target.rootNode, root.rootNodeId());
     EXPECT_EQ(result.visitedEntryCount, 1U);
 
-    const UI::UICommittedHitView hit = context->committedHit();
+    const UI::UICommittedHitView hit = context->publication().committedHit();
     ASSERT_LT(result.target.hitEntryIndex, hit.size());
     ASSERT_LT(result.target.rootEntryIndex, hit.size());
     const UI::UICommittedHitEntry& targetEntry = hit.entries()[result.target.hitEntryIndex];
@@ -649,9 +649,9 @@ TEST_F(UIHitSnapshotTest, QueryPointerHitSkipsAnIgnoredFrontmostEntry)
     assertOk(updater.setLayoutStyle(ignoredUpper, overlap));
     assertOk(updater.setPointerHitPolicy(lower, UI::UIPointerHitPolicy::Targetable));
     assertOk(updater.setPointerHitPolicy(ignoredUpper, UI::UIPointerHitPolicy::Ignore));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
-    const UI::UIPointerHitQueryResult result = context->queryPointerHit({10.0F, 10.0F});
+    const UI::UIPointerHitQueryResult result = context->input().queryPointerHit({10.0F, 10.0F});
     ASSERT_TRUE(result.hasTarget());
     EXPECT_EQ(result.target.node, lower);
     EXPECT_EQ(result.visitedEntryCount, 2U);
@@ -673,18 +673,18 @@ TEST_F(UIHitSnapshotTest, QueryPointerHitUsesWorldAndClipHalfOpenBounds)
     clipped.overlay.offset.y = UI::UILayoutLength::Px(10.0F);
     assertOk(updater.setLayoutStyle(button, clipped));
     assertOk(updater.setPointerHitPolicy(button, UI::UIPointerHitPolicy::Targetable));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
-    EXPECT_TRUE(context->queryPointerHit({80.0F, 10.0F}).hasTarget());
-    EXPECT_TRUE(context->queryPointerHit({99.0F, 29.0F}).hasTarget());
+    EXPECT_TRUE(context->input().queryPointerHit({80.0F, 10.0F}).hasTarget());
+    EXPECT_TRUE(context->input().queryPointerHit({99.0F, 29.0F}).hasTarget());
     const UI::UIPointerHitQueryResult clipRightEdge =
-        context->queryPointerHit({100.0F, 10.0F});
+        context->input().queryPointerHit({100.0F, 10.0F});
     const UI::UIPointerHitQueryResult worldBottomEdge =
-        context->queryPointerHit({80.0F, 30.0F});
+        context->input().queryPointerHit({80.0F, 30.0F});
     EXPECT_FALSE(clipRightEdge.hasTarget());
     EXPECT_FALSE(worldBottomEdge.hasTarget());
-    EXPECT_EQ(clipRightEdge.visitedEntryCount, context->committedHit().size());
-    EXPECT_EQ(worldBottomEdge.visitedEntryCount, context->committedHit().size());
+    EXPECT_EQ(clipRightEdge.visitedEntryCount, context->publication().committedHit().size());
+    EXPECT_EQ(worldBottomEdge.visitedEntryCount, context->publication().committedHit().size());
 }
 
 TEST_F(UIHitSnapshotTest, DescendantClipRejectsThePortionOfANegativeOverlayOutsideItsPanel)
@@ -710,16 +710,16 @@ TEST_F(UIHitSnapshotTest, DescendantClipRejectsThePortionOfANegativeOverlayOutsi
     buttonStyle.overlay.offset.y = UI::UILayoutLength::Px(-5.0F);
     assertOk(updater.setLayoutStyle(button, buttonStyle));
     assertOk(updater.setPointerHitPolicy(button, UI::UIPointerHitPolicy::Targetable));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 120.0F}));
 
-    const UI::UICommittedHitEntry* buttonHit = findHitEntry(context->committedHit(), button);
+    const UI::UICommittedHitEntry* buttonHit = findHitEntry(context->publication().committedHit(), button);
     ASSERT_NE(buttonHit, nullptr);
     EXPECT_EQ(buttonHit->worldRect,
               (UI::UILogicalRect{.x = 30.0F, .y = 25.0F, .width = 70.0F, .height = 60.0F}));
     EXPECT_EQ(buttonHit->effectiveClip,
               (UI::UILogicalRect{.x = 40.0F, .y = 30.0F, .width = 50.0F, .height = 40.0F}));
-    EXPECT_FALSE(context->queryPointerHit({35.0F, 27.0F}).hasTarget());
-    const UI::UIPointerHitQueryResult inside = context->queryPointerHit({40.0F, 30.0F});
+    EXPECT_FALSE(context->input().queryPointerHit({35.0F, 27.0F}).hasTarget());
+    const UI::UIPointerHitQueryResult inside = context->input().queryPointerHit({40.0F, 30.0F});
     ASSERT_TRUE(inside.hasTarget());
     EXPECT_EQ(inside.target.node, button);
 }
@@ -730,18 +730,18 @@ TEST_F(UIHitSnapshotTest, QueryPointerHitTreatsNonFiniteCoordinatesAsAnUnscanned
     ASSERT_NE(context, nullptr);
     auto root = createRoot(*context);
     ASSERT_TRUE(root);
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
-    const UI::UIPointerHitQueryResult nanResult = context->queryPointerHit(
+    const UI::UIPointerHitQueryResult nanResult = context->input().queryPointerHit(
         {.x = (std::numeric_limits<float>::quiet_NaN)(), .y = 0.0F});
-    const UI::UIPointerHitQueryResult infinityResult = context->queryPointerHit(
+    const UI::UIPointerHitQueryResult infinityResult = context->input().queryPointerHit(
         {.x = 0.0F, .y = (std::numeric_limits<float>::infinity)()});
     EXPECT_FALSE(nanResult.hasTarget());
     EXPECT_FALSE(infinityResult.hasTarget());
     EXPECT_EQ(nanResult.visitedEntryCount, 0U);
     EXPECT_EQ(infinityResult.visitedEntryCount, 0U);
-    EXPECT_EQ(nanResult.hitRevision, context->committedHit().hitRevision());
-    EXPECT_EQ(infinityResult.hitRevision, context->committedHit().hitRevision());
+    EXPECT_EQ(nanResult.hitRevision, context->publication().committedHit().hitRevision());
+    EXPECT_EQ(infinityResult.hitRevision, context->publication().committedHit().hitRevision());
 }
 
 TEST_F(UIHitSnapshotTest, ThreeHundredPointerQueriesDoNotAllocateOrMutateUiState)
@@ -759,12 +759,12 @@ TEST_F(UIHitSnapshotTest, ThreeHundredPointerQueriesDoNotAllocateOrMutateUiState
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(100.0F, 100.0F)));
     assertOk(updater.setLayoutStyle(button, fixedSize(40.0F, 20.0F)));
     assertOk(updater.setPointerHitPolicy(button, UI::UIPointerHitPolicy::Targetable));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
     const usize allocationCount = resource.allocationCount();
     const UI::UIContextStatistics before = context->statistics();
     for (usize queryIndex = 0; queryIndex < 300; ++queryIndex) {
-        const UI::UIPointerHitQueryResult result = context->queryPointerHit({10.0F, 10.0F});
+        const UI::UIPointerHitQueryResult result = context->input().queryPointerHit({10.0F, 10.0F});
         ASSERT_TRUE(result.hasTarget());
         EXPECT_EQ(result.target.node, button);
     }
@@ -799,7 +799,7 @@ TEST_F(UIHitSnapshotTest, ReleasesAllSuppliedPmrStorage)
         const UI::UINodeId button = createButton(*context, root.rootNodeId());
         auto updater = createUpdater(*context, root);
         assertOk(updater.setPointerHitPolicy(button, UI::UIPointerHitPolicy::Targetable));
-        assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+        assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
         EXPECT_GT(resource.currentBytes(), 0U);
 
         root.reset();

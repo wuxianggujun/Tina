@@ -219,10 +219,10 @@ TEST_F(UIComponentProfileTest, NumberFieldLeadingLabelOwnsHorizontalContentColum
 {
     auto context = createContext();
     ASSERT_NE(context, nullptr);
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value()) << rootResult.error().message;
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value()) << updaterResult.error().message;
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
@@ -249,14 +249,14 @@ TEST_F(UIComponentProfileTest, NumberFieldLeadingLabelOwnsHorizontalContentColum
         });
     ASSERT_TRUE(built.has_value()) << built.error().message;
     const UI::UINumberFieldParts parts = *built;
-    expectSuccess(context->commitLayout({.width = 480.0F, .height = 120.0F}));
+    expectSuccess(context->publication().commitLayout({.width = 480.0F, .height = 120.0F}));
 
     const UI::UICommittedNodeEntry* labelStructure =
-        findStructure(context->committedStructure(), parts.label);
+        findStructure(context->publication().committedStructure(), parts.label);
     const UI::UICommittedNodeEntry* contentStructure =
-        findStructure(context->committedStructure(), parts.content);
+        findStructure(context->publication().committedStructure(), parts.content);
     const UI::UICommittedNodeEntry* inputStructure =
-        findStructure(context->committedStructure(), parts.inputRow);
+        findStructure(context->publication().committedStructure(), parts.inputRow);
     ASSERT_NE(labelStructure, nullptr);
     ASSERT_NE(contentStructure, nullptr);
     ASSERT_NE(inputStructure, nullptr);
@@ -265,11 +265,11 @@ TEST_F(UIComponentProfileTest, NumberFieldLeadingLabelOwnsHorizontalContentColum
     EXPECT_EQ(inputStructure->parent, parts.content);
 
     const UI::UICommittedLayoutEntry* label =
-        findLayout(context->committedLayout(), parts.label);
+        findLayout(context->publication().committedLayout(), parts.label);
     const UI::UICommittedLayoutEntry* content =
-        findLayout(context->committedLayout(), parts.content);
+        findLayout(context->publication().committedLayout(), parts.content);
     const UI::UICommittedLayoutEntry* input =
-        findLayout(context->committedLayout(), parts.inputRow);
+        findLayout(context->publication().committedLayout(), parts.inputRow);
     ASSERT_NE(label, nullptr);
     ASSERT_NE(content, nullptr);
     ASSERT_NE(input, nullptr);
@@ -282,10 +282,10 @@ TEST_F(UIComponentProfileTest, IconButtonPublishesSiblingTooltipAndSingleAccessi
 {
     auto context = createContext();
     ASSERT_NE(context, nullptr);
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value()) << rootResult.error().message;
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value()) << updaterResult.error().message;
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
@@ -298,14 +298,14 @@ TEST_F(UIComponentProfileTest, IconButtonPublishesSiblingTooltipAndSingleAccessi
     auto built = updater.buildIconButton(root.rootNodeId(), config);
     ASSERT_TRUE(built.has_value()) << built.error().message;
     const UI::UIIconButtonParts parts = *built;
-    expectSuccess(context->commitLayout({.width = 320.0F, .height = 180.0F}));
+    expectSuccess(context->publication().commitLayout({.width = 320.0F, .height = 180.0F}));
 
     const UI::UICommittedNodeEntry* button =
-        findStructure(context->committedStructure(), parts.button);
+        findStructure(context->publication().committedStructure(), parts.button);
     const UI::UICommittedNodeEntry* icon =
-        findStructure(context->committedStructure(), parts.icon);
+        findStructure(context->publication().committedStructure(), parts.icon);
     const UI::UICommittedNodeEntry* tooltip =
-        findStructure(context->committedStructure(), parts.tooltip);
+        findStructure(context->publication().committedStructure(), parts.tooltip);
     ASSERT_NE(button, nullptr);
     ASSERT_NE(icon, nullptr);
     ASSERT_NE(tooltip, nullptr);
@@ -315,31 +315,31 @@ TEST_F(UIComponentProfileTest, IconButtonPublishesSiblingTooltipAndSingleAccessi
     EXPECT_EQ(updater.tooltipAnchor(parts.tooltip).value(), parts.button);
 
     const UI::UISemanticsEntry* accessibleButton =
-        findSemantics(context->committedSemantics(), parts.button);
+        findSemantics(context->publication().committedSemantics(), parts.button);
     ASSERT_NE(accessibleButton, nullptr);
     EXPECT_EQ(accessibleButton->role, UI::UISemanticsRole::Button);
     EXPECT_EQ(accessibleButton->name, "Refresh");
     EXPECT_EQ(accessibleButton->description, "Reload data");
-    EXPECT_EQ(findSemantics(context->committedSemantics(), parts.root), nullptr);
-    EXPECT_EQ(findSemantics(context->committedSemantics(), parts.icon), nullptr);
-    EXPECT_EQ(findSemantics(context->committedSemantics(), parts.tooltip), nullptr);
+    EXPECT_EQ(findSemantics(context->publication().committedSemantics(), parts.root), nullptr);
+    EXPECT_EQ(findSemantics(context->publication().committedSemantics(), parts.icon), nullptr);
+    EXPECT_EQ(findSemantics(context->publication().committedSemantics(), parts.tooltip), nullptr);
     EXPECT_EQ(context->statistics().activeImageContentCount, 1U);
 
     EXPECT_EQ(updater.styleRole(parts.icon).value(),
               UI::UIStyleRoleId::IconOnPrimary);
     EXPECT_EQ(updater.imageTint(parts.icon).value(),
-              context->productTheme().colors.onPrimary);
+              context->style().productTheme().colors.onPrimary);
 
     const UI::UITheme light =
         UI::makeModernDesktopTheme(UI::UIColorScheme::Light);
-    expectSuccess(context->setProductTheme(light));
+    expectSuccess(context->style().setProductTheme(light));
     EXPECT_EQ(updater.imageTint(parts.icon).value(), light.colors.onPrimary);
 
     const UI::UIStraightSrgba8Color localTint = UI::rgba8(1, 2, 3, 255);
     expectSuccess(updater.setImageTint(parts.icon, localTint));
     const UI::UITheme dark =
         UI::makeModernDesktopTheme(UI::UIColorScheme::Dark);
-    expectSuccess(context->setProductTheme(dark));
+    expectSuccess(context->style().setProductTheme(dark));
     EXPECT_EQ(updater.imageTint(parts.icon).value(), localTint);
     expectSuccess(updater.clearOverride(parts.icon, UI::UIStyleOverride::ImageTint));
     EXPECT_EQ(updater.imageTint(parts.icon).value(), dark.colors.onPrimary);
@@ -349,10 +349,10 @@ TEST_F(UIComponentProfileTest, FormFieldOwnsOneTextEditAndExplicitAccessibleDesc
 {
     auto context = createContext();
     ASSERT_NE(context, nullptr);
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value()) << rootResult.error().message;
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value()) << updaterResult.error().message;
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
@@ -376,10 +376,10 @@ TEST_F(UIComponentProfileTest, FormFieldOwnsOneTextEditAndExplicitAccessibleDesc
     auto built = updater.buildFormField(root.rootNodeId(), config);
     ASSERT_TRUE(built.has_value()) << built.error().message;
     const UI::UIFormFieldParts parts = *built;
-    expectSuccess(context->commitLayout({.width = 480.0F, .height = 240.0F}));
+    expectSuccess(context->publication().commitLayout({.width = 480.0F, .height = 240.0F}));
 
     const UI::UISemanticsEntry* textEdit =
-        findSemantics(context->committedSemantics(), parts.textEdit);
+        findSemantics(context->publication().committedSemantics(), parts.textEdit);
     ASSERT_NE(textEdit, nullptr);
     EXPECT_EQ(textEdit->role, UI::UISemanticsRole::TextEdit);
     EXPECT_EQ(textEdit->name, "Project name");
@@ -387,20 +387,20 @@ TEST_F(UIComponentProfileTest, FormFieldOwnsOneTextEditAndExplicitAccessibleDesc
     EXPECT_EQ(updater.styleRole(parts.textEdit).value(),
               UI::UIStyleRoleId::TextInputInvalid);
     EXPECT_EQ(updater.textEditPaint(parts.textEdit).value(),
-              UI::makeInvalidTextEditChrome(context->productTheme()).paint);
+              UI::makeInvalidTextEditChrome(context->style().productTheme()).paint);
 
     const UI::UISemanticsEntry* leading = findSemantics(
-        context->committedSemantics(), parts.leadingAction.button);
+        context->publication().committedSemantics(), parts.leadingAction.button);
     const UI::UISemanticsEntry* trailing = findSemantics(
-        context->committedSemantics(), parts.trailingAction.button);
+        context->publication().committedSemantics(), parts.trailingAction.button);
     ASSERT_NE(leading, nullptr);
     ASSERT_NE(trailing, nullptr);
     EXPECT_EQ(leading->name, "Browse projects");
     EXPECT_EQ(trailing->name, "Clear project name");
-    EXPECT_EQ(findSemantics(context->committedSemantics(),
+    EXPECT_EQ(findSemantics(context->publication().committedSemantics(),
                             parts.leadingAction.icon),
               nullptr);
-    EXPECT_EQ(findSemantics(context->committedSemantics(),
+    EXPECT_EQ(findSemantics(context->publication().committedSemantics(),
                             parts.trailingAction.icon),
               nullptr);
     EXPECT_EQ(updater.tooltipAnchor(parts.leadingAction.tooltip).value(),
@@ -420,18 +420,18 @@ TEST_F(UIComponentProfileTest, DialogReusesModalScopeAndRestoresPriorFocus)
 {
     auto context = createContext();
     ASSERT_NE(context, nullptr);
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value()) << rootResult.error().message;
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value()) << updaterResult.error().message;
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
     auto background = updater.createElement(
         root.rootNodeId(), UI::makeButtonElement("Background"));
     ASSERT_TRUE(background.has_value()) << background.error().message;
-    expectSuccess(context->commitLayout({.width = 640.0F, .height = 360.0F}));
-    expectSuccess(context->requestFocus(*background));
+    expectSuccess(context->publication().commitLayout({.width = 640.0F, .height = 360.0F}));
+    expectSuccess(context->input().requestFocus(*background));
 
     const std::array actions{
         UI::UIDialogActionConfig{.text = "Cancel"},
@@ -450,31 +450,31 @@ TEST_F(UIComponentProfileTest, DialogReusesModalScopeAndRestoresPriorFocus)
     auto initiallyOpen = updater.isDialogOpen(parts.modal);
     ASSERT_TRUE(initiallyOpen.has_value()) << initiallyOpen.error().message;
     EXPECT_FALSE(*initiallyOpen);
-    expectSuccess(context->commitLayout({.width = 640.0F, .height = 360.0F}));
+    expectSuccess(context->publication().commitLayout({.width = 640.0F, .height = 360.0F}));
 
-    EXPECT_FALSE(context->activeModal().hasValue());
-    EXPECT_EQ(context->defaultActionFocus(), *background);
-    EXPECT_EQ(findSemantics(context->committedSemantics(), parts.modal), nullptr);
+    EXPECT_FALSE(context->input().activeModal().hasValue());
+    EXPECT_EQ(context->input().defaultActionFocus(), *background);
+    EXPECT_EQ(findSemantics(context->publication().committedSemantics(), parts.modal), nullptr);
 
     expectSuccess(updater.openDialog(parts.modal));
     EXPECT_TRUE(updater.isDialogOpen(parts.modal).value());
-    EXPECT_FALSE(context->activeModal().hasValue());
-    EXPECT_EQ(context->defaultActionFocus(), *background);
-    expectSuccess(context->commitLayout({.width = 640.0F, .height = 360.0F}));
+    EXPECT_FALSE(context->input().activeModal().hasValue());
+    EXPECT_EQ(context->input().defaultActionFocus(), *background);
+    expectSuccess(context->publication().commitLayout({.width = 640.0F, .height = 360.0F}));
 
-    EXPECT_EQ(context->activeModal(), parts.modal);
-    EXPECT_EQ(context->activeFocusScope(), parts.modal);
-    EXPECT_EQ(context->defaultActionFocus(), parts.actions[0]);
+    EXPECT_EQ(context->input().activeModal(), parts.modal);
+    EXPECT_EQ(context->input().activeFocusScope(), parts.modal);
+    EXPECT_EQ(context->input().defaultActionFocus(), parts.actions[0]);
     const UI::UISemanticsEntry* dialog =
-        findSemantics(context->committedSemantics(), parts.modal);
+        findSemantics(context->publication().committedSemantics(), parts.modal);
     ASSERT_NE(dialog, nullptr);
     EXPECT_EQ(dialog->role, UI::UISemanticsRole::Dialog);
     EXPECT_EQ(dialog->name, "Delete project");
     EXPECT_EQ(dialog->description, "This operation cannot be undone.");
     const UI::UISemanticsEntry* cancel =
-        findSemantics(context->committedSemantics(), parts.actions[0]);
+        findSemantics(context->publication().committedSemantics(), parts.actions[0]);
     const UI::UISemanticsEntry* destructive =
-        findSemantics(context->committedSemantics(), parts.actions[1]);
+        findSemantics(context->publication().committedSemantics(), parts.actions[1]);
     ASSERT_NE(cancel, nullptr);
     ASSERT_NE(destructive, nullptr);
     EXPECT_EQ(cancel->name, "Cancel");
@@ -482,11 +482,11 @@ TEST_F(UIComponentProfileTest, DialogReusesModalScopeAndRestoresPriorFocus)
 
     expectSuccess(updater.dismissDialog(parts.modal));
     EXPECT_FALSE(updater.isDialogOpen(parts.modal).value());
-    EXPECT_EQ(context->activeModal(), parts.modal);
-    EXPECT_EQ(context->defaultActionFocus(), parts.actions[0]);
-    expectSuccess(context->commitLayout({.width = 640.0F, .height = 360.0F}));
-    EXPECT_FALSE(context->activeModal().hasValue());
-    EXPECT_EQ(context->defaultActionFocus(), *background);
+    EXPECT_EQ(context->input().activeModal(), parts.modal);
+    EXPECT_EQ(context->input().defaultActionFocus(), parts.actions[0]);
+    expectSuccess(context->publication().commitLayout({.width = 640.0F, .height = 360.0F}));
+    EXPECT_FALSE(context->input().activeModal().hasValue());
+    EXPECT_EQ(context->input().defaultActionFocus(), *background);
 
     expectSuccess(updater.destroy(parts.modal));
 }
@@ -495,10 +495,10 @@ TEST_F(UIComponentProfileTest, ImageCapacityFailureRollsBackWholeProfileAndCanRe
 {
     auto context = createContext(1);
     ASSERT_NE(context, nullptr);
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value()) << rootResult.error().message;
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value()) << updaterResult.error().message;
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
@@ -513,7 +513,7 @@ TEST_F(UIComponentProfileTest, ImageCapacityFailureRollsBackWholeProfileAndCanRe
         .accessibleName = "Refresh",
         .tooltipText = "Reload",
     };
-    const auto rejected = context->buildIconButton(root.rootNodeId(), config);
+    const auto rejected = updater.buildIconButton(root.rootNodeId(), config);
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::CapacityExceeded);
     EXPECT_EQ(context->liveNodeCount(), baselineNodes);
@@ -523,11 +523,11 @@ TEST_F(UIComponentProfileTest, ImageCapacityFailureRollsBackWholeProfileAndCanRe
     EXPECT_EQ(context->statistics().componentBuild.activeTransactionCount, 0U);
 
     expectSuccess(updater.destroy(*occupied));
-    auto retried = context->buildIconButton(root.rootNodeId(), config);
+    auto retried = updater.buildIconButton(root.rootNodeId(), config);
     ASSERT_TRUE(retried.has_value()) << retried.error().message;
     EXPECT_EQ(context->statistics().activeImageContentCount, 1U);
     EXPECT_EQ(context->statistics().activeActivateBehaviorCount, 1U);
-    expectSuccess(context->commitLayout({.width = 240.0F, .height = 120.0F}));
+    expectSuccess(context->publication().commitLayout({.width = 240.0F, .height = 120.0F}));
     EXPECT_EQ(updater.tooltipAnchor(retried->tooltip).value(), retried->button);
 }
 

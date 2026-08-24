@@ -122,7 +122,7 @@ class UISplitViewTest : public testing::Test {
 
     [[nodiscard]] static UI::UIRootOwner createRoot(UI::UIContext& context)
     {
-        auto result = context.rootBuilder().createRoot();
+        auto result = context.authoring().rootBuilder().createRoot();
         EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
         return result ? std::move(*result) : UI::UIRootOwner{};
     }
@@ -130,7 +130,7 @@ class UISplitViewTest : public testing::Test {
     [[nodiscard]] static UI::UITreeUpdater createUpdater(
         UI::UIContext& context, UI::UIRootOwner& root)
     {
-        auto result = context.treeUpdater(root);
+        auto result = context.authoring().treeUpdater(root);
         EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
         return result ? std::move(*result) : UI::UITreeUpdater{};
     }
@@ -188,7 +188,7 @@ TEST_F(UISplitViewTest, RecipesPublishDedicatedContractsAndRejectMalformedDescri
 
     auto splitter = updater.createElement(*splitView, splitterRecipe);
     ASSERT_TRUE(splitter.has_value());
-    EXPECT_FALSE(context->isSplitterDragging(*splitter).value());
+    EXPECT_FALSE(updater.isSplitterDragging(*splitter).value());
 }
 
 TEST_F(UISplitViewTest, SplitterPaintRoundTripsAndRejectsInvalidOrForeignNodesAtomically)
@@ -212,7 +212,6 @@ TEST_F(UISplitViewTest, SplitterPaintRoundTripsAndRejectsInvalidOrForeignNodesAt
     };
     assertOk(first.setSplitterPaint(nodes.splitter, expected));
     EXPECT_EQ(first.splitterPaint(nodes.splitter).value(), expected);
-    EXPECT_EQ(context->splitterPaint(nodes.splitter).value(), expected);
 
     UI::UISplitterPaint invalid = expected;
     invalid.lineThickness = 0.0F;
@@ -270,10 +269,10 @@ TEST_F(UISplitViewTest, PartsRequireDistinctDirectChildrenAndOneSameRootSplitter
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidParent);
 
-    rejected = context->setSplitViewParts(
+    rejected = first.setSplitViewParts(
         local.splitView, foreign.primaryPane, local.splitter, local.secondaryPane);
     ASSERT_FALSE(rejected.has_value());
-    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::WrongContext);
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidNode);
     EXPECT_EQ(first.splitViewParts(local.splitView).value(), published);
 
     assertOk(first.clearSplitViewParts(local.splitView));
@@ -317,7 +316,7 @@ TEST_F(UISplitViewTest, LayoutResolvesHorizontalVerticalMinimumsAndCommittedMetr
         }, {}, fixedSize(160.0F, 200.0F));
     ASSERT_TRUE(horizontal.splitView.hasValue() && vertical.splitView.hasValue());
 
-    assertOk(context->commitLayout({.width = 400.0F, .height = 300.0F}));
+    assertOk(context->publication().commitLayout({.width = 400.0F, .height = 300.0F}));
     const UI::UISplitViewMetrics horizontalMetrics =
         horizontalUpdater.splitViewMetrics(horizontal.splitView).value();
     EXPECT_EQ(horizontalMetrics.orientation, UI::UISplitViewOrientation::Horizontal);
@@ -334,7 +333,7 @@ TEST_F(UISplitViewTest, LayoutResolvesHorizontalVerticalMinimumsAndCommittedMetr
     EXPECT_FLOAT_EQ(verticalMetrics.secondaryRect.height, 80.0F);
     EXPECT_NEAR(verticalMetrics.fraction, 112.0F / 192.0F, 0.0001F);
 
-    const auto layout = context->committedLayout();
+    const auto layout = context->publication().committedLayout();
     const auto splitterEntry = std::ranges::find_if(
         layout, [horizontal](const UI::UICommittedLayoutEntry& entry) {
             return entry.node == horizontal.splitter;
@@ -361,14 +360,14 @@ TEST_F(UISplitViewTest, CollapsedPartsReleaseSplitViewExtent)
         },
         {}, fixedSize(300.0F, 100.0F));
     ASSERT_TRUE(nodes.secondaryPane.hasValue());
-    assertOk(context->commitLayout({.width = 300.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 300.0F, .height = 100.0F}));
 
     UI::UILayoutStyle collapsed{};
     collapsed.visibility = UI::UIVisibility::Collapsed;
     assertOk(updater.setLayoutStyle(nodes.secondaryPane, collapsed));
     assertOk(updater.setLayoutStyle(nodes.splitter, collapsed));
     assertOk(updater.setSplitViewFraction(nodes.splitView, 1.0F));
-    assertOk(context->commitLayout({.width = 300.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 300.0F, .height = 100.0F}));
 
     const UI::UISplitViewMetrics collapsedMetrics = updater.splitViewMetrics(nodes.splitView).value();
     EXPECT_FLOAT_EQ(collapsedMetrics.primaryRect.width, 300.0F);
@@ -378,7 +377,7 @@ TEST_F(UISplitViewTest, CollapsedPartsReleaseSplitViewExtent)
     assertOk(updater.setLayoutStyle(nodes.secondaryPane, {}));
     assertOk(updater.setLayoutStyle(nodes.splitter, {}));
     assertOk(updater.setSplitViewFraction(nodes.splitView, 0.5F));
-    assertOk(context->commitLayout({.width = 300.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 300.0F, .height = 100.0F}));
     const UI::UISplitViewMetrics restoredMetrics = updater.splitViewMetrics(nodes.splitView).value();
     EXPECT_FLOAT_EQ(restoredMetrics.splitterRect.width, 10.0F);
     EXPECT_GE(restoredMetrics.secondaryRect.width, 80.0F);
@@ -396,19 +395,19 @@ TEST_F(UISplitViewTest, PointerDragCapturesSplitterAndKeyboardRangeInputUpdatesF
         UI::UISplitViewConfig{.initialFraction = 0.5F, .splitterExtent = 10.0F},
         UI::UISplitterConfig{.keyboardStep = 0.1F}, fixedSize(300.0F, 100.0F));
     ASSERT_TRUE(nodes.splitter.hasValue());
-    assertOk(context->commitLayout({.width = 300.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 300.0F, .height = 100.0F}));
 
     const UI::UISplitViewMetrics before = updater.splitViewMetrics(nodes.splitView).value();
     const float grabX = before.splitterRect.x + 3.0F;
-    auto down = context->routePointerInput(pointerInput(
+    auto down = context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::ButtonDown, 1,
         {.x = grabX, .y = 50.0F}));
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
     EXPECT_TRUE(down->consumed);
-    EXPECT_EQ(context->pointerCapture(), nodes.splitter);
+    EXPECT_EQ(context->input().pointerCapture(), nodes.splitter);
     EXPECT_TRUE(updater.isSplitterDragging(nodes.splitter).value());
 
-    auto move = context->routePointerInput(pointerInput(
+    auto move = context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::Move, 2,
         {.x = 220.0F, .y = 50.0F}));
     ASSERT_TRUE(move.has_value()) << (move ? "" : move.error().message);
@@ -417,17 +416,17 @@ TEST_F(UISplitViewTest, PointerDragCapturesSplitterAndKeyboardRangeInputUpdatesF
     EXPECT_NEAR(updater.splitViewFraction(nodes.splitView).value(), 217.0F / 290.0F,
                 0.0001F);
 
-    auto up = context->routePointerInput(pointerInput(
+    auto up = context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::ButtonUp, 3,
         {.x = 220.0F, .y = 50.0F}));
     ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
     EXPECT_FALSE(updater.isSplitterDragging(nodes.splitter).value());
-    EXPECT_FALSE(context->pointerCapture().hasValue());
+    EXPECT_FALSE(context->input().pointerCapture().hasValue());
 
     assertOk(updater.setSplitViewFraction(nodes.splitView, 0.5F));
-    assertOk(context->commitLayout({.width = 300.0F, .height = 100.0F}));
-    assertOk(context->requestFocus(nodes.splitter));
-    auto increased = context->routeRangeInputCommand(
+    assertOk(context->publication().commitLayout({.width = 300.0F, .height = 100.0F}));
+    assertOk(context->input().requestFocus(nodes.splitter));
+    auto increased = context->input().routeRangeInputCommand(
         Platform::PlatformFrameId{4}, 4, UI::UIRangeInputCommand::Increase, true,
         Platform::KeyControlIdentity{.window = window, .key = Platform::Key::Right});
     ASSERT_TRUE(increased.has_value()) << (increased ? "" : increased.error().message);
@@ -451,23 +450,23 @@ TEST_F(UISplitViewTest, FailedCommitKeepsPublishedMetricsUntilACommitSucceeds)
     const SplitViewNodes nodes = createSplitView(
         updater, root.rootNodeId(), {}, {}, fixedSize(200.0F, 100.0F));
     ASSERT_TRUE(nodes.splitView.hasValue());
-    assertOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
     const UI::UISplitViewMetrics published = updater.splitViewMetrics(nodes.splitView).value();
-    const u64 layoutRevision = context->committedLayout().layoutRevision();
+    const u64 layoutRevision = context->publication().committedLayout().layoutRevision();
 
     assertOk(updater.setSplitViewFraction(nodes.splitView, 0.75F));
     auto overflow = updater.createElement(
         root.rootNodeId(), UI::makePanelElement(fixedSize(10.0F, 10.0F)));
     ASSERT_TRUE(overflow.has_value());
-    Core::Status failed = context->commitLayout({.width = 200.0F, .height = 100.0F});
+    Core::Status failed = context->publication().commitLayout({.width = 200.0F, .height = 100.0F});
     ASSERT_FALSE(failed.has_value());
     EXPECT_EQ(failed.error().code, UI::UIErrorCode::CapacityExceeded);
     EXPECT_EQ(updater.splitViewMetrics(nodes.splitView).value(), published);
     EXPECT_FLOAT_EQ(updater.splitViewFraction(nodes.splitView).value(), 0.75F);
-    EXPECT_EQ(context->committedLayout().layoutRevision(), layoutRevision);
+    EXPECT_EQ(context->publication().committedLayout().layoutRevision(), layoutRevision);
 
     assertOk(updater.destroy(*overflow));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
     EXPECT_NEAR(updater.splitViewMetrics(nodes.splitView).value().fraction, 0.75F,
                 0.0001F);
 }
@@ -490,12 +489,12 @@ TEST_F(UISplitViewTest, SplitterPublishesFocusedRangeSemanticsAndAccessibilityUs
     auto secondary = updater.createElement(*splitView, UI::makePanelElement());
     ASSERT_TRUE(primary && splitter && secondary);
     assertOk(updater.setSplitViewParts(*splitView, *primary, *splitter, *secondary));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
-    assertOk(context->requestFocus(*splitter));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
+    assertOk(context->input().requestFocus(*splitter));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
 
     const UI::UISemanticsEntry* entry =
-        findSemantics(context->committedSemantics(), *splitter);
+        findSemantics(context->publication().committedSemantics(), *splitter);
     ASSERT_NE(entry, nullptr);
     EXPECT_EQ(entry->role, UI::UISemanticsRole::Slider);
     EXPECT_EQ(entry->name, "Resize panels");
@@ -506,9 +505,9 @@ TEST_F(UISplitViewTest, SplitterPublishesFocusedRangeSemanticsAndAccessibilityUs
     EXPECT_FLOAT_EQ(entry->value, 0.5F);
     EXPECT_EQ(entry->actions, UI::UISemanticsAction::Focus |
                                   UI::UISemanticsAction::SetRangeValue);
-    EXPECT_EQ(findSemantics(context->committedSemantics(), *splitView), nullptr);
+    EXPECT_EQ(findSemantics(context->publication().committedSemantics(), *splitView), nullptr);
 
-    assertOk(context->performAccessibilityAction({
+    assertOk(context->input().performAccessibilityAction({
         .kind = UI::UIAccessibilityActionKind::SetRangeValue,
         .node = *splitter,
         .rangeValue = 0.8,
@@ -548,11 +547,11 @@ TEST_F(UISplitViewTest, DestroyGenerationReuseAndRootReleaseClearEveryPartsRelat
     const UI::UINodeId staleSplitter = *replacementSplitter;
     root.reset();
     EXPECT_EQ(context->liveNodeCount(), 0U);
-    auto staleParts = context->splitViewParts(staleSplitView);
+    auto staleParts = updater.splitViewParts(staleSplitView);
     ASSERT_FALSE(staleParts.has_value());
     EXPECT_TRUE(staleParts.error().code == UI::UIErrorCode::InvalidNode ||
                 staleParts.error().code == UI::UIErrorCode::RootRequired);
-    auto staleDragging = context->isSplitterDragging(staleSplitter);
+    auto staleDragging = updater.isSplitterDragging(staleSplitter);
     ASSERT_FALSE(staleDragging.has_value());
     EXPECT_TRUE(staleDragging.error().code == UI::UIErrorCode::InvalidNode ||
                 staleDragging.error().code == UI::UIErrorCode::RootRequired);

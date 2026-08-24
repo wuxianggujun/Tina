@@ -30,7 +30,7 @@ using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
 
 [[nodiscard]] UI::UIRootOwner createRoot(UI::UIContext& context)
 {
-    auto result = context.rootBuilder().createRoot();
+    auto result = context.authoring().rootBuilder().createRoot();
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UIRootOwner{};
 }
@@ -39,7 +39,7 @@ using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
     UI::UIContext& context,
     UI::UIRootOwner& root)
 {
-    auto result = context.treeUpdater(root);
+    auto result = context.authoring().treeUpdater(root);
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UITreeUpdater{};
 }
@@ -141,7 +141,7 @@ protected:
 
     void publishLayout()
     {
-        assertOk(context->commitLayout({.width = 200.0F, .height = 60.0F}));
+        assertOk(context->publication().commitLayout({.width = 200.0F, .height = 60.0F}));
     }
 
     std::unique_ptr<WindowPool> windows;
@@ -165,11 +165,11 @@ TEST_F(UIProgressBarTest, DefaultsToZeroAndIgnoredPointerPolicy)
 
     publishLayout();
     const UI::UICommittedHitEntry* const hitEntry =
-        findHitEntry(context->committedHit(), progressBar);
+        findHitEntry(context->publication().committedHit(), progressBar);
     ASSERT_NE(hitEntry, nullptr);
     EXPECT_EQ(hitEntry->policy, UI::UIPointerHitPolicy::Ignore);
     EXPECT_TRUE(UI::hasBehavior(hitEntry->behaviors, UI::UIElementBehavior::ProgressValue));
-    EXPECT_FALSE(context->queryPointerHit({10.0F, 10.0F}).hasTarget());
+    EXPECT_FALSE(context->input().queryPointerHit({10.0F, 10.0F}).hasTarget());
 }
 
 TEST_F(UIProgressBarTest, RangeAndValueClampAndPublishSemantics)
@@ -198,7 +198,7 @@ TEST_F(UIProgressBarTest, RangeAndValueClampAndPublishSemantics)
 
     publishLayout();
     const UI::UISemanticsEntry* const semantics =
-        findSemanticsEntry(context->committedSemantics(), progressBar);
+        findSemanticsEntry(context->publication().committedSemantics(), progressBar);
     ASSERT_NE(semantics, nullptr);
     EXPECT_EQ(semantics->role, UI::UISemanticsRole::ProgressBar);
     EXPECT_EQ(semantics->actions, UI::UISemanticsAction::None);
@@ -216,7 +216,7 @@ TEST_F(UIProgressBarTest, RangeAndValueChangesPublishUpdatedSemanticsRevision)
     ASSERT_TRUE(progressBar.hasValue());
     publishLayout();
 
-    const UI::UICommittedSemanticsView initialView = context->committedSemantics();
+    const UI::UICommittedSemanticsView initialView = context->publication().committedSemantics();
     const u64 initialRevision = initialView.semanticsRevision();
     const u64 initialLayoutRevision = initialView.layoutRevision();
     const UI::UISemanticsEntry* initial = findSemanticsEntry(initialView, progressBar);
@@ -227,7 +227,7 @@ TEST_F(UIProgressBarTest, RangeAndValueChangesPublishUpdatedSemanticsRevision)
 
     assertOk(updater.setProgressBarRange(progressBar, 10.0F, 30.0F));
     publishLayout();
-    const UI::UICommittedSemanticsView rangedView = context->committedSemantics();
+    const UI::UICommittedSemanticsView rangedView = context->publication().committedSemantics();
     EXPECT_EQ(rangedView.semanticsRevision(), initialRevision + 1U);
     EXPECT_EQ(rangedView.layoutRevision(), initialLayoutRevision);
     const UI::UISemanticsEntry* ranged = findSemanticsEntry(rangedView, progressBar);
@@ -238,7 +238,7 @@ TEST_F(UIProgressBarTest, RangeAndValueChangesPublishUpdatedSemanticsRevision)
 
     assertOk(updater.setProgressBarValue(progressBar, 20.0F));
     publishLayout();
-    const UI::UICommittedSemanticsView valuedView = context->committedSemantics();
+    const UI::UICommittedSemanticsView valuedView = context->publication().committedSemantics();
     EXPECT_EQ(valuedView.semanticsRevision(), initialRevision + 2U);
     EXPECT_EQ(valuedView.layoutRevision(), initialLayoutRevision);
     const UI::UISemanticsEntry* valued = findSemanticsEntry(valuedView, progressBar);
@@ -250,7 +250,7 @@ TEST_F(UIProgressBarTest, RangeAndValueChangesPublishUpdatedSemanticsRevision)
     assertOk(updater.setProgressBarValue(progressBar, 20.0F));
     publishLayout();
     EXPECT_EQ(
-        context->committedSemantics().semanticsRevision(),
+        context->publication().committedSemantics().semanticsRevision(),
         valuedView.semanticsRevision());
 }
 
@@ -266,7 +266,7 @@ TEST_F(UIProgressBarTest, TrackAndFillPublishDeterministicGeometry)
         {.fillColor = {.red = 200, .green = 100, .blue = 50, .alpha = 128}}));
 
     publishLayout();
-    const UI::UICommittedPaintView paint = context->committedPaint();
+    const UI::UICommittedPaintView paint = context->publication().committedPaint();
     ASSERT_EQ(paint.size(), 2U);
     const UI::UICommittedPaintEntry& track = paint.entries()[0];
     const UI::UICommittedPaintEntry& fill = paint.entries()[1];
@@ -315,7 +315,7 @@ TEST_F(UIProgressBarTest, ClampedEndpointsPublishNoZeroWidthFillAndExactFullWidt
     EXPECT_FLOAT_EQ(*value, 10.0F);
     publishLayout();
 
-    const UI::UICommittedPaintView emptyFillPaint = context->committedPaint();
+    const UI::UICommittedPaintView emptyFillPaint = context->publication().committedPaint();
     ASSERT_EQ(emptyFillPaint.size(), 1U);
     EXPECT_EQ(emptyFillPaint.entries().front().node, progressBar);
     EXPECT_EQ(
@@ -328,7 +328,7 @@ TEST_F(UIProgressBarTest, ClampedEndpointsPublishNoZeroWidthFillAndExactFullWidt
     EXPECT_FLOAT_EQ(*value, 30.0F);
     publishLayout();
 
-    const UI::UICommittedPaintView fullFillPaint = context->committedPaint();
+    const UI::UICommittedPaintView fullFillPaint = context->publication().committedPaint();
     ASSERT_EQ(fullFillPaint.size(), 2U);
     const UI::UICommittedPaintEntry& fill = fullFillPaint.entries()[1];
     EXPECT_EQ(fill.node, progressBar);
@@ -349,7 +349,7 @@ TEST_F(UIProgressBarTest, ExtremeFiniteRangePublishesFiniteHalfWidthFill)
         {.fillColor = {.red = 40, .green = 80, .blue = 120, .alpha = 255}}));
 
     publishLayout();
-    const UI::UICommittedPaintView paint = context->committedPaint();
+    const UI::UICommittedPaintView paint = context->publication().committedPaint();
     ASSERT_EQ(paint.size(), 1U);
     const UI::UICommittedPaintEntry& fill = paint.entries().front();
     EXPECT_EQ(fill.node, progressBar);
@@ -357,7 +357,7 @@ TEST_F(UIProgressBarTest, ExtremeFiniteRangePublishesFiniteHalfWidthFill)
     EXPECT_FLOAT_EQ(fill.worldRect.width, 60.0F);
 
     const UI::UISemanticsEntry* semantics =
-        findSemanticsEntry(context->committedSemantics(), progressBar);
+        findSemanticsEntry(context->publication().committedSemantics(), progressBar);
     ASSERT_NE(semantics, nullptr);
     EXPECT_TRUE(std::isfinite(semantics->minValue));
     EXPECT_TRUE(std::isfinite(semantics->maxValue));
@@ -392,23 +392,23 @@ TEST_F(UIProgressBarTest, PaintCapacityCountsValueDerivedFillAtomically)
     assertOk(limitedUpdater.setProgressBarPaint(
         progressBar,
         {.fillColor = {.red = 4, .green = 5, .blue = 6, .alpha = 255}}));
-    assertOk(limitedContext->commitLayout({.width = 100.0F, .height = 20.0F}));
-    ASSERT_EQ(limitedContext->committedPaint().size(), 1U);
-    const u64 publishedRevision = limitedContext->committedPaint().paintRevision();
+    assertOk(limitedContext->publication().commitLayout({.width = 100.0F, .height = 20.0F}));
+    ASSERT_EQ(limitedContext->publication().committedPaint().size(), 1U);
+    const u64 publishedRevision = limitedContext->publication().committedPaint().paintRevision();
 
     assertOk(limitedUpdater.setProgressBarValue(progressBar, 0.5F));
     const Core::Status overflow =
-        limitedContext->commitLayout({.width = 100.0F, .height = 20.0F});
+        limitedContext->publication().commitLayout({.width = 100.0F, .height = 20.0F});
     ASSERT_FALSE(overflow.has_value());
     EXPECT_EQ(overflow.error().code, UI::UIErrorCode::CapacityExceeded);
-    EXPECT_EQ(limitedContext->committedPaint().paintRevision(), publishedRevision);
-    ASSERT_EQ(limitedContext->committedPaint().size(), 1U);
-    EXPECT_EQ(limitedContext->committedPaint().entries()[0].node, progressBar);
+    EXPECT_EQ(limitedContext->publication().committedPaint().paintRevision(), publishedRevision);
+    ASSERT_EQ(limitedContext->publication().committedPaint().size(), 1U);
+    EXPECT_EQ(limitedContext->publication().committedPaint().entries()[0].node, progressBar);
     EXPECT_TRUE(limitedContext->statistics().paintDirty);
 
     assertOk(limitedUpdater.setProgressBarValue(progressBar, 0.0F));
-    assertOk(limitedContext->commitLayout({.width = 100.0F, .height = 20.0F}));
-    EXPECT_EQ(limitedContext->committedPaint().size(), 1U);
+    assertOk(limitedContext->publication().commitLayout({.width = 100.0F, .height = 20.0F}));
+    EXPECT_EQ(limitedContext->publication().committedPaint().size(), 1U);
 }
 
 TEST_F(UIProgressBarTest, RejectsInvalidInputsAndWrongKindsWithoutMutation)
@@ -454,7 +454,7 @@ TEST_F(UIProgressBarTest, RejectsInvalidInputsAndWrongKindsWithoutMutation)
 
     publishLayout();
     const UI::UISemanticsEntry* const semantics =
-        findSemanticsEntry(context->committedSemantics(), progressBar);
+        findSemanticsEntry(context->publication().committedSemantics(), progressBar);
     ASSERT_NE(semantics, nullptr);
     EXPECT_FLOAT_EQ(semantics->minValue, 5.0F);
     EXPECT_FLOAT_EQ(semantics->maxValue, 10.0F);

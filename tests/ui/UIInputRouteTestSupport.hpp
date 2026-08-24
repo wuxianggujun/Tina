@@ -64,7 +64,7 @@ private:
 
 [[nodiscard]] inline UI::UIRootOwner createRoot(UI::UIContext& context)
 {
-    auto result = context.rootBuilder().createRoot();
+    auto result = context.authoring().rootBuilder().createRoot();
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UIRootOwner{};
 }
@@ -73,7 +73,7 @@ private:
     UI::UIContext& context,
     UI::UINodeId parent)
 {
-    auto result = context.rootBuilder().createElement(parent, UI::makePanelElement());
+    auto result = context.authoring().rootBuilder().createElement(parent, UI::makePanelElement());
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? *result : UI::UINodeId{};
 }
@@ -82,7 +82,7 @@ private:
     UI::UIContext& context,
     UI::UINodeId parent)
 {
-    auto result = context.rootBuilder().createElement(parent, UI::makeButtonElement());
+    auto result = context.authoring().rootBuilder().createElement(parent, UI::makeButtonElement());
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? *result : UI::UINodeId{};
 }
@@ -91,7 +91,7 @@ private:
     UI::UIContext& context,
     UI::UIRootOwner& root)
 {
-    auto result = context.treeUpdater(root);
+    auto result = context.authoring().treeUpdater(root);
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UITreeUpdater{};
 }
@@ -106,7 +106,7 @@ inline void expectOk(Core::Status status)
     UI::UIRoutedPointerListenerDesc descriptor,
     UI::UIRoutedPointerCallback callback)
 {
-    auto result = context.addRoutedPointerListener(
+    auto result = context.input().addRoutedPointerListener(
         descriptor,
         std::move(callback));
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
@@ -153,7 +153,7 @@ struct RouteTree final {
     expectOk(tree.updater.setPointerHitPolicy(
         tree.target,
         UI::UIPointerHitPolicy::Targetable));
-    expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    expectOk(tree.context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     return tree;
 }
 

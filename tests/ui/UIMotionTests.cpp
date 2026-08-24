@@ -173,12 +173,12 @@ TEST(UIMotionTests, BackgroundColorTransitionSamplesWithoutLayoutDirty)
     auto context = createMotionContext();
     ASSERT_NE(context, nullptr);
     FakeMotionClock clock;
-    ASSERT_TRUE(context->setMotionClock(&clock).has_value());
+    ASSERT_TRUE(context->motion().setMotionClock(&clock).has_value());
 
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
@@ -186,9 +186,9 @@ TEST(UIMotionTests, BackgroundColorTransitionSamplesWithoutLayoutDirty)
     panel.visual.boxPaint = UI::makeSolidBox(UI::rgba8(0, 0, 0, 255));
     const auto node = updater.createElement(root.rootNodeId(), panel);
     ASSERT_TRUE(node.has_value()) << node.error().message;
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
-    ASSERT_NE(findSolidPaint(context->committedPaint(), *node), nullptr);
-    EXPECT_EQ(findSolidPaint(context->committedPaint(), *node)->solidFill,
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    ASSERT_NE(findSolidPaint(context->publication().committedPaint(), *node), nullptr);
+    EXPECT_EQ(findSolidPaint(context->publication().committedPaint(), *node)->solidFill,
               UI::premultiply(UI::rgba8(0, 0, 0, 255)));
 
     UI::UITransitionSpec spec{
@@ -198,24 +198,24 @@ TEST(UIMotionTests, BackgroundColorTransitionSamplesWithoutLayoutDirty)
         .easing = UI::UIEasing::Linear,
     };
     ASSERT_TRUE(
-        context->beginBackgroundColorTransition(*node, UI::rgba8(100, 0, 0, 255), spec).has_value());
+        context->motion().beginBackgroundColorTransition(*node, UI::rgba8(100, 0, 0, 255), spec).has_value());
     EXPECT_EQ(context->statistics().motion.activeTrackCount, 1U);
     EXPECT_TRUE(context->statistics().paintDirty);
     EXPECT_FALSE(context->statistics().layoutDirty);
 
     clock.advance(Core::Duration{0.050});
-    ASSERT_TRUE(context->sampleMotion(clock.now()).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
-    const auto* midPaint = findSolidPaint(context->committedPaint(), *node);
+    ASSERT_TRUE(context->motion().sampleMotion(clock.now()).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    const auto* midPaint = findSolidPaint(context->publication().committedPaint(), *node);
     ASSERT_NE(midPaint, nullptr);
     EXPECT_EQ(midPaint->solidFill, UI::premultiply(UI::rgba8(50, 0, 0, 255)));
     EXPECT_EQ(context->statistics().motion.lastSampledTrackCount, 1U);
     EXPECT_FALSE(context->statistics().layoutDirty);
 
     clock.advance(Core::Duration{0.050});
-    ASSERT_TRUE(context->sampleMotion(clock.now()).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
-    const auto* endPaint = findSolidPaint(context->committedPaint(), *node);
+    ASSERT_TRUE(context->motion().sampleMotion(clock.now()).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    const auto* endPaint = findSolidPaint(context->publication().committedPaint(), *node);
     ASSERT_NE(endPaint, nullptr);
     EXPECT_EQ(endPaint->solidFill, UI::premultiply(UI::rgba8(100, 0, 0, 255)));
     EXPECT_EQ(context->statistics().motion.activeTrackCount, 0U);
@@ -226,13 +226,13 @@ TEST(UIMotionTests, ZeroActiveTracksDoNotForcePaintDirty)
     auto context = createMotionContext();
     ASSERT_NE(context, nullptr);
     FakeMotionClock clock;
-    ASSERT_TRUE(context->setMotionClock(&clock).has_value());
-    auto rootResult = context->rootBuilder().createRoot();
+    ASSERT_TRUE(context->motion().setMotionClock(&clock).has_value());
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
     EXPECT_FALSE(context->statistics().paintDirty);
-    ASSERT_TRUE(context->sampleMotion(clock.now()).has_value());
+    ASSERT_TRUE(context->motion().sampleMotion(clock.now()).has_value());
     EXPECT_FALSE(context->statistics().paintDirty);
     EXPECT_EQ(context->statistics().motion.lastSampledTrackCount, 0U);
 }
@@ -242,30 +242,30 @@ TEST(UIMotionTests, ReducedMotionSnapsWithoutActiveTrack)
     auto context = createMotionContext();
     ASSERT_NE(context, nullptr);
     FakeMotionClock clock;
-    ASSERT_TRUE(context->setMotionClock(&clock).has_value());
-    auto rootResult = context->rootBuilder().createRoot();
+    ASSERT_TRUE(context->motion().setMotionClock(&clock).has_value());
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
     UI::UIElementDescriptor panel = UI::makePanelElement(fixedSize(20.0F, 20.0F));
     panel.visual.boxPaint = UI::makeSolidBox(UI::rgba8(10, 20, 30, 255));
     const auto node = updater.createElement(root.rootNodeId(), panel);
     ASSERT_TRUE(node.has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 40.0F, .height = 40.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 40.0F, .height = 40.0F}).has_value());
 
-    ASSERT_TRUE(context->setReducedMotion(true).has_value());
+    ASSERT_TRUE(context->motion().setReducedMotion(true).has_value());
     UI::UITransitionSpec spec{
         .property = UI::UIAnimatableProperty::BackgroundColor,
         .duration = Core::Duration{1.0},
         .easing = UI::UIEasing::EaseInOut,
     };
     ASSERT_TRUE(
-        context->beginBackgroundColorTransition(*node, UI::rgba8(200, 100, 50, 255), spec).has_value());
+        context->motion().beginBackgroundColorTransition(*node, UI::rgba8(200, 100, 50, 255), spec).has_value());
     EXPECT_EQ(context->statistics().motion.activeTrackCount, 0U);
-    ASSERT_TRUE(context->commitLayout({.width = 40.0F, .height = 40.0F}).has_value());
-    const auto* paint = findSolidPaint(context->committedPaint(), *node);
+    ASSERT_TRUE(context->publication().commitLayout({.width = 40.0F, .height = 40.0F}).has_value());
+    const auto* paint = findSolidPaint(context->publication().committedPaint(), *node);
     ASSERT_NE(paint, nullptr);
     EXPECT_EQ(paint->solidFill, UI::premultiply(UI::rgba8(200, 100, 50, 255)));
 }
@@ -275,12 +275,12 @@ TEST(UIMotionTests, DirectSnapPathsRejectInvalidSpecsAtomically)
     auto context = createMotionContext(16);
     ASSERT_NE(context, nullptr);
     FakeMotionClock clock;
-    ASSERT_TRUE(context->setMotionClock(&clock).has_value());
+    ASSERT_TRUE(context->motion().setMotionClock(&clock).has_value());
 
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
@@ -291,9 +291,9 @@ TEST(UIMotionTests, DirectSnapPathsRejectInvalidSpecsAtomically)
         updater.createElement(root.rootNodeId(), UI::makeLabelElement("Motion"));
     ASSERT_TRUE(panelNode.has_value());
     ASSERT_TRUE(textNode.has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
 
-    u64 paintRevision = context->committedPaint().paintRevision();
+    u64 paintRevision = context->publication().committedPaint().paintRevision();
     const auto expectRejectedAtomically = [&](Core::Status status) {
         EXPECT_FALSE(status.has_value());
         if (!status)
@@ -302,42 +302,42 @@ TEST(UIMotionTests, DirectSnapPathsRejectInvalidSpecsAtomically)
         }
         EXPECT_EQ(context->statistics().motion.activeTrackCount, 0U);
         EXPECT_FALSE(context->statistics().paintDirty);
-        EXPECT_EQ(context->committedPaint().paintRevision(), paintRevision);
+        EXPECT_EQ(context->publication().committedPaint().paintRevision(), paintRevision);
     };
     const auto exerciseInvalidSnapCalls = [&](Core::Duration snapDuration) {
-        expectRejectedAtomically(context->beginBackgroundColorTransition(
+        expectRejectedAtomically(context->motion().beginBackgroundColorTransition(
             *panelNode, UI::rgba8(200, 0, 0, 255),
             UI::UITransitionSpec{
                 .property = UI::UIAnimatableProperty::BorderColor,
                 .duration = snapDuration,
             }));
-        expectRejectedAtomically(context->beginBorderColorTransition(
+        expectRejectedAtomically(context->motion().beginBorderColorTransition(
             *panelNode, UI::rgba8(0, 200, 0, 255),
             UI::UITransitionSpec{
                 .property = UI::UIAnimatableProperty::BorderColor,
                 .duration = Core::Duration{-0.001},
             }));
-        expectRejectedAtomically(context->beginTextColorTransition(
+        expectRejectedAtomically(context->motion().beginTextColorTransition(
             *textNode, UI::rgba8(0, 0, 200, 255),
             UI::UITransitionSpec{
                 .property = UI::UIAnimatableProperty::TextColor,
                 .duration = snapDuration,
                 .delay = Core::Duration{-0.001},
             }));
-        expectRejectedAtomically(context->beginOpacityTransition(
+        expectRejectedAtomically(context->motion().beginOpacityTransition(
             *panelNode, 0.25F,
             UI::UITransitionSpec{
                 .property = UI::UIAnimatableProperty::Opacity,
                 .duration = snapDuration,
                 .easing = static_cast<UI::UIEasing>(255),
             }));
-        expectRejectedAtomically(context->beginCornerRadiusTransition(
+        expectRejectedAtomically(context->motion().beginCornerRadiusTransition(
             *panelNode, 12.0F,
             UI::UITransitionSpec{
                 .property = UI::UIAnimatableProperty::Opacity,
                 .duration = snapDuration,
             }));
-        expectRejectedAtomically(context->beginVisualOffsetTransition(
+        expectRejectedAtomically(context->motion().beginVisualOffsetTransition(
             *panelNode, 8.0F, 4.0F,
             UI::UITransitionSpec{
                 .property = UI::UIAnimatableProperty::VisualOffset,
@@ -346,12 +346,12 @@ TEST(UIMotionTests, DirectSnapPathsRejectInvalidSpecsAtomically)
     };
 
     exerciseInvalidSnapCalls(Core::Duration{0.0});
-    ASSERT_TRUE(context->setReducedMotion(true).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
-    paintRevision = context->committedPaint().paintRevision();
+    ASSERT_TRUE(context->motion().setReducedMotion(true).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    paintRevision = context->publication().committedPaint().paintRevision();
     exerciseInvalidSnapCalls(Core::Duration{1.0});
 
-    const auto* paint = findSolidPaint(context->committedPaint(), *panelNode);
+    const auto* paint = findSolidPaint(context->publication().committedPaint(), *panelNode);
     ASSERT_NE(paint, nullptr);
     EXPECT_EQ(paint->solidFill, UI::premultiply(UI::rgba8(10, 20, 30, 255)));
     EXPECT_EQ(paint->cornerRadii, UI::UILogicalCornerRadii::uniform(2.0F));
@@ -362,12 +362,12 @@ TEST(UIMotionTests, InvalidDirectRetargetPreservesActiveSchedule)
     auto context = createMotionContext();
     ASSERT_NE(context, nullptr);
     FakeMotionClock clock;
-    ASSERT_TRUE(context->setMotionClock(&clock).has_value());
+    ASSERT_TRUE(context->motion().setMotionClock(&clock).has_value());
 
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
@@ -375,7 +375,7 @@ TEST(UIMotionTests, InvalidDirectRetargetPreservesActiveSchedule)
     panel.visual.boxPaint = UI::makeSolidBox(UI::rgba8(0, 0, 0, 255));
     const auto node = updater.createElement(root.rootNodeId(), panel);
     ASSERT_TRUE(node.has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
 
     const UI::UITransitionSpec validSpec{
         .property = UI::UIAnimatableProperty::BackgroundColor,
@@ -383,19 +383,19 @@ TEST(UIMotionTests, InvalidDirectRetargetPreservesActiveSchedule)
         .easing = UI::UIEasing::Linear,
     };
     ASSERT_TRUE(context
-                    ->beginBackgroundColorTransition(
+                    ->motion().beginBackgroundColorTransition(
                         *node, UI::rgba8(100, 0, 0, 255), validSpec)
                     .has_value());
     clock.advance(Core::Duration{0.25});
-    ASSERT_TRUE(context->sampleMotion(clock.now()).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
-    const auto* firstQuarter = findSolidPaint(context->committedPaint(), *node);
+    ASSERT_TRUE(context->motion().sampleMotion(clock.now()).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    const auto* firstQuarter = findSolidPaint(context->publication().committedPaint(), *node);
     ASSERT_NE(firstQuarter, nullptr);
     ASSERT_EQ(firstQuarter->solidFill.red, 25);
     ASSERT_EQ(context->statistics().motion.activeTrackCount, 1U);
-    const u64 paintRevision = context->committedPaint().paintRevision();
+    const u64 paintRevision = context->publication().committedPaint().paintRevision();
 
-    const Core::Status rejected = context->beginBackgroundColorTransition(
+    const Core::Status rejected = context->motion().beginBackgroundColorTransition(
         *node, UI::rgba8(0, 100, 0, 255),
         UI::UITransitionSpec{
             .property = UI::UIAnimatableProperty::BackgroundColor,
@@ -405,12 +405,12 @@ TEST(UIMotionTests, InvalidDirectRetargetPreservesActiveSchedule)
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidStyle);
     EXPECT_EQ(context->statistics().motion.activeTrackCount, 1U);
     EXPECT_FALSE(context->statistics().paintDirty);
-    EXPECT_EQ(context->committedPaint().paintRevision(), paintRevision);
+    EXPECT_EQ(context->publication().committedPaint().paintRevision(), paintRevision);
 
     clock.advance(Core::Duration{0.25});
-    ASSERT_TRUE(context->sampleMotion(clock.now()).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
-    const auto* halfway = findSolidPaint(context->committedPaint(), *node);
+    ASSERT_TRUE(context->motion().sampleMotion(clock.now()).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    const auto* halfway = findSolidPaint(context->publication().committedPaint(), *node);
     ASSERT_NE(halfway, nullptr);
     EXPECT_EQ(halfway->solidFill, UI::premultiply(UI::rgba8(50, 0, 0, 255)));
     EXPECT_EQ(context->statistics().motion.activeTrackCount, 1U);
@@ -421,11 +421,11 @@ TEST(UIMotionTests, CapacityFailureLeavesExistingTracksIntact)
     auto context = createMotionContext(1);
     ASSERT_NE(context, nullptr);
     FakeMotionClock clock;
-    ASSERT_TRUE(context->setMotionClock(&clock).has_value());
-    auto rootResult = context->rootBuilder().createRoot();
+    ASSERT_TRUE(context->motion().setMotionClock(&clock).has_value());
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
@@ -443,10 +443,10 @@ TEST(UIMotionTests, CapacityFailureLeavesExistingTracksIntact)
         .duration = Core::Duration{1.0},
     };
     ASSERT_TRUE(
-        context->beginBackgroundColorTransition(*nodeA, UI::rgba8(255, 0, 0, 255), spec).has_value());
+        context->motion().beginBackgroundColorTransition(*nodeA, UI::rgba8(255, 0, 0, 255), spec).has_value());
     EXPECT_EQ(context->statistics().motion.activeTrackCount, 1U);
     const Core::Status overflow =
-        context->beginBackgroundColorTransition(*nodeB, UI::rgba8(0, 255, 0, 255), spec);
+        context->motion().beginBackgroundColorTransition(*nodeB, UI::rgba8(0, 255, 0, 255), spec);
     ASSERT_FALSE(overflow.has_value());
     EXPECT_EQ(overflow.error().code, UI::UIErrorCode::CapacityExceeded);
     EXPECT_EQ(context->statistics().motion.activeTrackCount, 1U);
@@ -466,12 +466,12 @@ TEST(UIMotionTests, DirectMotionCompletionDoesNotConsumeDirtyQueueCapacity)
     ASSERT_TRUE(contextResult.has_value()) << contextResult.error().message;
     auto context = std::move(*contextResult);
     FakeMotionClock clock;
-    ASSERT_TRUE(context->setMotionClock(&clock).has_value());
+    ASSERT_TRUE(context->motion().setMotionClock(&clock).has_value());
 
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
@@ -479,36 +479,36 @@ TEST(UIMotionTests, DirectMotionCompletionDoesNotConsumeDirtyQueueCapacity)
     childPanel.visual.boxPaint = UI::makeSolidBox(UI::rgba8(0, 0, 0, 255));
     const auto child = updater.createElement(root.rootNodeId(), childPanel);
     ASSERT_TRUE(child.has_value()) << child.error().message;
-    ASSERT_TRUE(context->commitLayout({.width = 40.0F, .height = 40.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 40.0F, .height = 40.0F}).has_value());
     ASSERT_TRUE(updater
                     .setBoxPaint(root.rootNodeId(),
                                  UI::makeSolidBox(UI::rgba8(0, 0, 0, 255)))
                     .has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 40.0F, .height = 40.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 40.0F, .height = 40.0F}).has_value());
 
     const UI::UITransitionSpec spec{
         .property = UI::UIAnimatableProperty::BackgroundColor,
         .duration = Core::Duration{0.100},
     };
     ASSERT_TRUE(context
-                    ->beginBackgroundColorTransition(
+                    ->motion().beginBackgroundColorTransition(
                         root.rootNodeId(), UI::rgba8(100, 0, 0, 255), spec)
                     .has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 40.0F, .height = 40.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 40.0F, .height = 40.0F}).has_value());
     ASSERT_TRUE(context
-                    ->beginBackgroundColorTransition(
+                    ->motion().beginBackgroundColorTransition(
                         *child, UI::rgba8(0, 100, 0, 255), spec)
                     .has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 40.0F, .height = 40.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 40.0F, .height = 40.0F}).has_value());
     ASSERT_EQ(context->statistics().motion.activeTrackCount, 2U);
     ASSERT_EQ(context->statistics().dirtyQueuePendingCount, 0U);
 
     clock.advance(Core::Duration{0.100});
-    ASSERT_TRUE(context->commitLayout({.width = 40.0F, .height = 40.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 40.0F, .height = 40.0F}).has_value());
     EXPECT_EQ(context->statistics().motion.activeTrackCount, 0U);
     EXPECT_EQ(context->statistics().dirtyQueuePendingCount, 0U);
-    const auto* rootPaint = findSolidPaint(context->committedPaint(), root.rootNodeId());
-    const auto* childPaint = findSolidPaint(context->committedPaint(), *child);
+    const auto* rootPaint = findSolidPaint(context->publication().committedPaint(), root.rootNodeId());
+    const auto* childPaint = findSolidPaint(context->publication().committedPaint(), *child);
     ASSERT_NE(rootPaint, nullptr);
     ASSERT_NE(childPaint, nullptr);
     EXPECT_EQ(rootPaint->solidFill, UI::premultiply(UI::rgba8(100, 0, 0, 255)));
@@ -520,11 +520,11 @@ TEST(UIMotionTests, CornerRadiusAndOpacityTransitionsArePaintOnly)
     auto context = createMotionContext(8);
     ASSERT_NE(context, nullptr);
     FakeMotionClock clock;
-    ASSERT_TRUE(context->setMotionClock(&clock).has_value());
-    auto rootResult = context->rootBuilder().createRoot();
+    ASSERT_TRUE(context->motion().setMotionClock(&clock).has_value());
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
@@ -532,7 +532,7 @@ TEST(UIMotionTests, CornerRadiusAndOpacityTransitionsArePaintOnly)
     panel.visual.boxPaint = UI::makeSolidBox(UI::rgba8(40, 40, 40, 255), 0.0F);
     const auto node = updater.createElement(root.rootNodeId(), panel);
     ASSERT_TRUE(node.has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
 
     UI::UITransitionSpec radiusSpec{
         .property = UI::UIAnimatableProperty::CornerRadius,
@@ -544,25 +544,25 @@ TEST(UIMotionTests, CornerRadiusAndOpacityTransitionsArePaintOnly)
         .duration = Core::Duration{0.100},
         .easing = UI::UIEasing::Linear,
     };
-    ASSERT_TRUE(context->beginCornerRadiusTransition(*node, 8.0F, radiusSpec).has_value());
-    ASSERT_TRUE(context->beginOpacityTransition(*node, 0.0F, opacitySpec).has_value());
+    ASSERT_TRUE(context->motion().beginCornerRadiusTransition(*node, 8.0F, radiusSpec).has_value());
+    ASSERT_TRUE(context->motion().beginOpacityTransition(*node, 0.0F, opacitySpec).has_value());
     EXPECT_EQ(context->statistics().motion.activeTrackCount, 2U);
     EXPECT_FALSE(context->statistics().layoutDirty);
 
     clock.advance(Core::Duration{0.050});
-    ASSERT_TRUE(context->sampleMotion(clock.now()).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
-    const auto* mid = findSolidPaint(context->committedPaint(), *node);
+    ASSERT_TRUE(context->motion().sampleMotion(clock.now()).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    const auto* mid = findSolidPaint(context->publication().committedPaint(), *node);
     ASSERT_NE(mid, nullptr);
     // Opacity 0.5 on (40,40,40,255) -> premultiplied ~ (20,20,20,128)
     EXPECT_EQ(mid->solidFill.alpha, 128);
     EXPECT_FALSE(context->statistics().layoutDirty);
 
     clock.advance(Core::Duration{0.050});
-    ASSERT_TRUE(context->sampleMotion(clock.now()).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    ASSERT_TRUE(context->motion().sampleMotion(clock.now()).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
     EXPECT_EQ(context->statistics().motion.activeTrackCount, 0U);
-    const auto* end = findSolidPaint(context->committedPaint(), *node);
+    const auto* end = findSolidPaint(context->publication().committedPaint(), *node);
     // Opacity 0 -> transparent fill may omit solid entry or alpha 0.
     if (end != nullptr)
     {
@@ -575,11 +575,11 @@ TEST(UIMotionTests, CornerRadiusTransitionRejectsAsymmetricAuthoredRadiiAtomical
     auto context = createMotionContext(8);
     ASSERT_NE(context, nullptr);
     FakeMotionClock clock;
-    ASSERT_TRUE(context->setMotionClock(&clock).has_value());
-    auto rootResult = context->rootBuilder().createRoot();
+    ASSERT_TRUE(context->motion().setMotionClock(&clock).has_value());
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
@@ -593,12 +593,12 @@ TEST(UIMotionTests, CornerRadiusTransitionRejectsAsymmetricAuthoredRadiiAtomical
     };
     const auto node = updater.createElement(root.rootNodeId(), panel);
     ASSERT_TRUE(node.has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
 
-    const auto* before = findSolidPaint(context->committedPaint(), *node);
+    const auto* before = findSolidPaint(context->publication().committedPaint(), *node);
     ASSERT_NE(before, nullptr);
     const UI::UILogicalCornerRadii committedRadii = before->cornerRadii;
-    const u64 paintRevision = context->committedPaint().paintRevision();
+    const u64 paintRevision = context->publication().committedPaint().paintRevision();
     const usize activeTrackCount = context->statistics().motion.activeTrackCount;
     const UI::UITransitionSpec spec{
         .property = UI::UIAnimatableProperty::CornerRadius,
@@ -607,12 +607,12 @@ TEST(UIMotionTests, CornerRadiusTransitionRejectsAsymmetricAuthoredRadiiAtomical
     };
 
     const Core::Status rejected =
-        context->beginCornerRadiusTransition(*node, 12.0F, spec);
+        context->motion().beginCornerRadiusTransition(*node, 12.0F, spec);
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidStyle);
     EXPECT_EQ(context->statistics().motion.activeTrackCount, activeTrackCount);
-    EXPECT_EQ(context->committedPaint().paintRevision(), paintRevision);
-    const auto* after = findSolidPaint(context->committedPaint(), *node);
+    EXPECT_EQ(context->publication().committedPaint().paintRevision(), paintRevision);
+    const auto* after = findSolidPaint(context->publication().committedPaint(), *node);
     ASSERT_NE(after, nullptr);
     EXPECT_EQ(after->cornerRadii, committedRadii);
 }
@@ -622,11 +622,11 @@ TEST(UIMotionTests, CornerRadiusTimelineUsesExplicitUniformKeyframeFromAsymmetri
     auto context = createMotionContext(8);
     ASSERT_NE(context, nullptr);
     FakeMotionClock clock;
-    ASSERT_TRUE(context->setMotionClock(&clock).has_value());
-    auto rootResult = context->rootBuilder().createRoot();
+    ASSERT_TRUE(context->motion().setMotionClock(&clock).has_value());
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
@@ -640,8 +640,8 @@ TEST(UIMotionTests, CornerRadiusTimelineUsesExplicitUniformKeyframeFromAsymmetri
     };
     const auto node = updater.createElement(root.rootNodeId(), panel);
     ASSERT_TRUE(node.has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
-    const auto* authored = findSolidPaint(context->committedPaint(), *node);
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    const auto* authored = findSolidPaint(context->publication().committedPaint(), *node);
     ASSERT_NE(authored, nullptr);
     EXPECT_EQ(authored->cornerRadii, panel.visual.boxPaint->cornerRadii);
 
@@ -656,19 +656,19 @@ TEST(UIMotionTests, CornerRadiusTimelineUsesExplicitUniformKeyframeFromAsymmetri
                                 .property = UI::UIAnimatableProperty::CornerRadius,
                                 .keyframes = frames},
     };
-    auto timeline = context->createTimeline(
+    auto timeline = context->motion().createTimeline(
         UI::UITimelineDesc{.duration = Core::Duration{0.100}, .tracks = tracks});
     ASSERT_TRUE(timeline.has_value()) << timeline.error().message;
-    ASSERT_TRUE(context->playTimeline(*timeline).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    ASSERT_TRUE(context->motion().playTimeline(*timeline).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
 
-    const auto* firstFrame = findSolidPaint(context->committedPaint(), *node);
+    const auto* firstFrame = findSolidPaint(context->publication().committedPaint(), *node);
     ASSERT_NE(firstFrame, nullptr);
     EXPECT_EQ(firstFrame->cornerRadii, UI::UILogicalCornerRadii::uniform(3.0F));
 
-    ASSERT_TRUE(context->cancelTimeline(*timeline).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
-    const auto* finalTarget = findSolidPaint(context->committedPaint(), *node);
+    ASSERT_TRUE(context->motion().cancelTimeline(*timeline).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    const auto* finalTarget = findSolidPaint(context->publication().committedPaint(), *node);
     ASSERT_NE(finalTarget, nullptr);
     EXPECT_EQ(finalTarget->cornerRadii, UI::UILogicalCornerRadii::uniform(11.0F));
 }
@@ -678,12 +678,12 @@ TEST(UIMotionTests, CornerRadiusMotionChecksPrimitiveAtPlaybackTime)
     auto context = createMotionContext(8);
     ASSERT_NE(context, nullptr);
     FakeMotionClock clock;
-    ASSERT_TRUE(context->setMotionClock(&clock).has_value());
+    ASSERT_TRUE(context->motion().setMotionClock(&clock).has_value());
 
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
@@ -691,7 +691,7 @@ TEST(UIMotionTests, CornerRadiusMotionChecksPrimitiveAtPlaybackTime)
     shape.visual.boxPaint = UI::makeSolidEllipse(UI::rgba8(40, 40, 40, 255));
     const auto node = updater.createElement(root.rootNodeId(), shape);
     ASSERT_TRUE(node.has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
 
     const UI::UITransitionSpec radiusSpec{
         .property = UI::UIAnimatableProperty::CornerRadius,
@@ -699,7 +699,7 @@ TEST(UIMotionTests, CornerRadiusMotionChecksPrimitiveAtPlaybackTime)
         .easing = UI::UIEasing::Linear,
     };
     const Core::Status ellipseDirect =
-        context->beginCornerRadiusTransition(*node, 8.0F, radiusSpec);
+        context->motion().beginCornerRadiusTransition(*node, 8.0F, radiusSpec);
     ASSERT_FALSE(ellipseDirect.has_value());
     EXPECT_EQ(ellipseDirect.error().code, UI::UIErrorCode::InvalidStyle);
     EXPECT_EQ(context->statistics().motion.activeTrackCount, 0U);
@@ -715,7 +715,7 @@ TEST(UIMotionTests, CornerRadiusMotionChecksPrimitiveAtPlaybackTime)
                                 .property = UI::UIAnimatableProperty::CornerRadius,
                                 .keyframes = initialFrames},
     };
-    auto timeline = context->createTimeline(
+    auto timeline = context->motion().createTimeline(
         UI::UITimelineDesc{.duration = Core::Duration{0.100}, .tracks = initialTracks});
     ASSERT_TRUE(timeline.has_value()) << timeline.error().message;
 
@@ -731,7 +731,7 @@ TEST(UIMotionTests, CornerRadiusMotionChecksPrimitiveAtPlaybackTime)
                                 .keyframes = replacementFrames},
     };
     ASSERT_TRUE(context
-                    ->replaceTimeline(
+                    ->motion().replaceTimeline(
                         *timeline,
                         UI::UITimelineDesc{
                             .duration = Core::Duration{0.100},
@@ -739,7 +739,7 @@ TEST(UIMotionTests, CornerRadiusMotionChecksPrimitiveAtPlaybackTime)
                         })
                     .has_value());
 
-    const Core::Status ellipsePlay = context->playTimeline(*timeline);
+    const Core::Status ellipsePlay = context->motion().playTimeline(*timeline);
     ASSERT_FALSE(ellipsePlay.has_value());
     EXPECT_EQ(ellipsePlay.error().code, UI::UIErrorCode::InvalidStyle);
     EXPECT_EQ(context->statistics().motion.activeTimelineCount, 0U);
@@ -748,12 +748,12 @@ TEST(UIMotionTests, CornerRadiusMotionChecksPrimitiveAtPlaybackTime)
         UI::rgba8(40, 40, 40, 255), {.x = 0.0F, .y = 0.0F},
         {.x = 30.0F, .y = 20.0F}, 2.0F);
     ASSERT_TRUE(updater.setBoxPaint(*node, linePaint).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
     const Core::Status lineDirect =
-        context->beginCornerRadiusTransition(*node, 8.0F, radiusSpec);
+        context->motion().beginCornerRadiusTransition(*node, 8.0F, radiusSpec);
     ASSERT_FALSE(lineDirect.has_value());
     EXPECT_EQ(lineDirect.error().code, UI::UIErrorCode::InvalidStyle);
-    const Core::Status linePlay = context->playTimeline(*timeline);
+    const Core::Status linePlay = context->motion().playTimeline(*timeline);
     ASSERT_FALSE(linePlay.has_value());
     EXPECT_EQ(linePlay.error().code, UI::UIErrorCode::InvalidStyle);
     EXPECT_EQ(context->statistics().motion.activeTimelineCount, 0U);
@@ -762,10 +762,10 @@ TEST(UIMotionTests, CornerRadiusMotionChecksPrimitiveAtPlaybackTime)
         updater
             .setBoxPaint(*node, UI::makeSolidBox(UI::rgba8(40, 40, 40, 255), 3.0F))
             .has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
-    ASSERT_TRUE(context->playTimeline(*timeline).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    ASSERT_TRUE(context->motion().playTimeline(*timeline).has_value());
     EXPECT_EQ(context->statistics().motion.activeTimelineCount, 1U);
-    ASSERT_TRUE(context->cancelTimeline(*timeline).has_value());
+    ASSERT_TRUE(context->motion().cancelTimeline(*timeline).has_value());
 }
 
 TEST(UIMotionTests, BoxPaintSetterPreservesDirectOwnersWhenDirtyQueueIsFull)
@@ -782,12 +782,12 @@ TEST(UIMotionTests, BoxPaintSetterPreservesDirectOwnersWhenDirtyQueueIsFull)
     ASSERT_TRUE(contextResult.has_value()) << contextResult.error().message;
     auto context = std::move(*contextResult);
     FakeMotionClock clock;
-    ASSERT_TRUE(context->setMotionClock(&clock).has_value());
+    ASSERT_TRUE(context->motion().setMotionClock(&clock).has_value());
 
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
@@ -803,10 +803,10 @@ TEST(UIMotionTests, BoxPaintSetterPreservesDirectOwnersWhenDirtyQueueIsFull)
     const auto blocker = updater.createElement(root.rootNodeId(), blockerDescriptor);
     ASSERT_TRUE(target.has_value());
     ASSERT_TRUE(blocker.has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 60.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 100.0F, .height = 60.0F}).has_value());
 
     ASSERT_TRUE(context
-                    ->beginBackgroundColorTransition(
+                    ->motion().beginBackgroundColorTransition(
                         *target, UI::rgba8(100, 0, 0, 255),
                         UI::UITransitionSpec{
                             .property = UI::UIAnimatableProperty::BackgroundColor,
@@ -814,7 +814,7 @@ TEST(UIMotionTests, BoxPaintSetterPreservesDirectOwnersWhenDirtyQueueIsFull)
                         })
                     .has_value());
     ASSERT_TRUE(context
-                    ->beginBorderColorTransition(
+                    ->motion().beginBorderColorTransition(
                         *target, UI::rgba8(0, 100, 0, 255),
                         UI::UITransitionSpec{
                             .property = UI::UIAnimatableProperty::BorderColor,
@@ -822,7 +822,7 @@ TEST(UIMotionTests, BoxPaintSetterPreservesDirectOwnersWhenDirtyQueueIsFull)
                         })
                     .has_value());
     ASSERT_TRUE(context
-                    ->beginCornerRadiusTransition(
+                    ->motion().beginCornerRadiusTransition(
                         *target, 12.0F,
                         UI::UITransitionSpec{
                             .property = UI::UIAnimatableProperty::CornerRadius,
@@ -830,7 +830,7 @@ TEST(UIMotionTests, BoxPaintSetterPreservesDirectOwnersWhenDirtyQueueIsFull)
                         })
                     .has_value());
     ASSERT_EQ(context->statistics().motion.activeTrackCount, 3U);
-    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 60.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 100.0F, .height = 60.0F}).has_value());
 
     ASSERT_TRUE(
         updater
@@ -843,12 +843,12 @@ TEST(UIMotionTests, BoxPaintSetterPreservesDirectOwnersWhenDirtyQueueIsFull)
     EXPECT_EQ(context->statistics().motion.activeTrackCount, 3U);
     EXPECT_EQ(context->statistics().dirtyQueuePendingCount, 1U);
 
-    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 60.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 100.0F, .height = 60.0F}).has_value());
     ASSERT_EQ(context->statistics().motion.activeTrackCount, 3U);
     ASSERT_TRUE(updater.setBoxPaint(*target, targetPaint).has_value());
     EXPECT_EQ(context->statistics().motion.activeTrackCount, 0U);
-    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 60.0F}).has_value());
-    const auto* finalPaint = findSolidPaint(context->committedPaint(), *target);
+    ASSERT_TRUE(context->publication().commitLayout({.width = 100.0F, .height = 60.0F}).has_value());
+    const auto* finalPaint = findSolidPaint(context->publication().committedPaint(), *target);
     ASSERT_NE(finalPaint, nullptr);
     EXPECT_EQ(finalPaint->solidFill,
               UI::premultiply(UI::rgba8(10, 20, 30, 255)));
@@ -860,12 +860,12 @@ TEST(UIMotionTests, BoxPaintSetterRequiresExplicitTimelineCancel)
     auto context = createMotionContext(8);
     ASSERT_NE(context, nullptr);
     FakeMotionClock clock;
-    ASSERT_TRUE(context->setMotionClock(&clock).has_value());
+    ASSERT_TRUE(context->motion().setMotionClock(&clock).has_value());
 
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
@@ -873,7 +873,7 @@ TEST(UIMotionTests, BoxPaintSetterRequiresExplicitTimelineCancel)
     panel.visual.boxPaint = UI::makeSolidBox(UI::rgba8(10, 20, 30, 255), 2.0F);
     const auto node = updater.createElement(root.rootNodeId(), panel);
     ASSERT_TRUE(node.has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
 
     const std::array radiusFrames{
         UI::UIKeyframe{.normalizedTime = 0.0F,
@@ -897,40 +897,40 @@ TEST(UIMotionTests, BoxPaintSetterRequiresExplicitTimelineCancel)
                                 .property = UI::UIAnimatableProperty::VisualOffset,
                                 .keyframes = offsetFrames},
     };
-    auto radiusTimeline = context->createTimeline(
+    auto radiusTimeline = context->motion().createTimeline(
         UI::UITimelineDesc{.duration = Core::Duration{1.0}, .tracks = radiusTracks});
-    auto offsetTimeline = context->createTimeline(
+    auto offsetTimeline = context->motion().createTimeline(
         UI::UITimelineDesc{.duration = Core::Duration{1.0}, .tracks = offsetTracks});
     ASSERT_TRUE(radiusTimeline.has_value());
     ASSERT_TRUE(offsetTimeline.has_value());
-    ASSERT_TRUE(context->playTimeline(*radiusTimeline).has_value());
-    ASSERT_TRUE(context->playTimeline(*offsetTimeline).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    ASSERT_TRUE(context->motion().playTimeline(*radiusTimeline).has_value());
+    ASSERT_TRUE(context->motion().playTimeline(*offsetTimeline).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
     ASSERT_EQ(context->statistics().motion.activeTimelineCount, 2U);
 
     const UI::UIBoxPaint replacement =
         UI::makeSolidBox(UI::rgba8(0, 80, 0, 255), 4.0F);
-    const u64 paintRevision = context->committedPaint().paintRevision();
+    const u64 paintRevision = context->publication().committedPaint().paintRevision();
     const Core::Status rejected = updater.setBoxPaint(*node, replacement);
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidStyle);
     EXPECT_EQ(context->statistics().motion.activeTimelineCount, 2U);
-    EXPECT_EQ(context->committedPaint().paintRevision(), paintRevision);
+    EXPECT_EQ(context->publication().committedPaint().paintRevision(), paintRevision);
     EXPECT_FALSE(context->statistics().paintDirty);
 
-    ASSERT_TRUE(context->cancelTimeline(*radiusTimeline).has_value());
+    ASSERT_TRUE(context->motion().cancelTimeline(*radiusTimeline).has_value());
     ASSERT_EQ(context->statistics().motion.activeTimelineCount, 1U);
     ASSERT_TRUE(updater.setBoxPaint(*node, replacement).has_value());
     EXPECT_EQ(context->statistics().motion.activeTimelineCount, 1U);
-    auto offsetActive = context->isTimelineActive(*offsetTimeline);
+    auto offsetActive = context->motion().isTimelineActive(*offsetTimeline);
     ASSERT_TRUE(offsetActive.has_value());
     EXPECT_TRUE(*offsetActive);
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
-    const auto* finalPaint = findSolidPaint(context->committedPaint(), *node);
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    const auto* finalPaint = findSolidPaint(context->publication().committedPaint(), *node);
     ASSERT_NE(finalPaint, nullptr);
     EXPECT_EQ(finalPaint->solidFill, UI::premultiply(UI::rgba8(0, 80, 0, 255)));
     EXPECT_EQ(finalPaint->cornerRadii, UI::UILogicalCornerRadii::uniform(4.0F));
-    ASSERT_TRUE(context->cancelTimeline(*offsetTimeline).has_value());
+    ASSERT_TRUE(context->motion().cancelTimeline(*offsetTimeline).has_value());
 }
 
 TEST(UIMotionTests, VisualOffsetShiftsPaintWorldRectNotLayout)
@@ -938,11 +938,11 @@ TEST(UIMotionTests, VisualOffsetShiftsPaintWorldRectNotLayout)
     auto context = createMotionContext();
     ASSERT_NE(context, nullptr);
     FakeMotionClock clock;
-    ASSERT_TRUE(context->setMotionClock(&clock).has_value());
-    auto rootResult = context->rootBuilder().createRoot();
+    ASSERT_TRUE(context->motion().setMotionClock(&clock).has_value());
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
@@ -950,8 +950,8 @@ TEST(UIMotionTests, VisualOffsetShiftsPaintWorldRectNotLayout)
     panel.visual.boxPaint = UI::makeSolidBox(UI::rgba8(10, 20, 30, 255));
     const auto node = updater.createElement(root.rootNodeId(), panel);
     ASSERT_TRUE(node.has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 100.0F}).has_value());
-    const auto* before = findSolidPaint(context->committedPaint(), *node);
+    ASSERT_TRUE(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}).has_value());
+    const auto* before = findSolidPaint(context->publication().committedPaint(), *node);
     ASSERT_NE(before, nullptr);
     const float beforeX = before->worldRect.x;
     const float beforeY = before->worldRect.y;
@@ -960,9 +960,9 @@ TEST(UIMotionTests, VisualOffsetShiftsPaintWorldRectNotLayout)
         .property = UI::UIAnimatableProperty::VisualOffset,
         .duration = Core::Duration{0.0},
     };
-    ASSERT_TRUE(context->beginVisualOffsetTransition(*node, 12.0F, 8.0F, spec).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 100.0F}).has_value());
-    const auto* after = findSolidPaint(context->committedPaint(), *node);
+    ASSERT_TRUE(context->motion().beginVisualOffsetTransition(*node, 12.0F, 8.0F, spec).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}).has_value());
+    const auto* after = findSolidPaint(context->publication().committedPaint(), *node);
     ASSERT_NE(after, nullptr);
     EXPECT_FLOAT_EQ(after->worldRect.x, beforeX + 12.0F);
     EXPECT_FLOAT_EQ(after->worldRect.y, beforeY + 8.0F);
@@ -987,9 +987,9 @@ TEST(UIMotionTests, StyleStateChangeCanDriveBackgroundColorTransition)
     ASSERT_TRUE(contextResult.has_value()) << contextResult.error().message;
     auto context = std::move(*contextResult);
     FakeMotionClock clock;
-    ASSERT_TRUE(context->setMotionClock(&clock).has_value());
+    ASSERT_TRUE(context->motion().setMotionClock(&clock).has_value());
 
-    auto styleClass = context->registerStyleClass();
+    auto styleClass = context->style().registerStyleClass();
     ASSERT_TRUE(styleClass.has_value()) << styleClass.error().message;
     const std::array rules{
         UI::UIStyleBoxFillRule{
@@ -1004,19 +1004,19 @@ TEST(UIMotionTests, StyleStateChangeCanDriveBackgroundColorTransition)
             .color = UI::rgba8(100, 0, 0, 255),
         },
     };
-    ASSERT_TRUE(context->installStyleSheet(rules).has_value());
+    ASSERT_TRUE(context->style().installStyleSheet(rules).has_value());
     ASSERT_TRUE(context
-                    ->setStyleBackgroundColorTransition(UI::UITransitionSpec{
+                    ->motion().setStyleBackgroundColorTransition(UI::UITransitionSpec{
                         .property = UI::UIAnimatableProperty::BackgroundColor,
                         .duration = Core::Duration{0.100},
                         .easing = UI::UIEasing::Linear,
                     })
                     .has_value());
 
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
@@ -1026,9 +1026,9 @@ TEST(UIMotionTests, StyleStateChangeCanDriveBackgroundColorTransition)
     button.visual.styleClasses = std::span(&classId, 1);
     const auto node = updater.createElement(root.rootNodeId(), button);
     ASSERT_TRUE(node.has_value()) << node.error().message;
-    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
-    ASSERT_NE(findSolidPaint(context->committedPaint(), *node), nullptr);
-    EXPECT_EQ(findSolidPaint(context->committedPaint(), *node)->solidFill, UI::premultiply(UI::rgba8(0, 0, 0, 255)));
+    ASSERT_TRUE(context->publication().commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
+    ASSERT_NE(findSolidPaint(context->publication().committedPaint(), *node), nullptr);
+    EXPECT_EQ(findSolidPaint(context->publication().committedPaint(), *node)->solidFill, UI::premultiply(UI::rgba8(0, 0, 0, 255)));
     EXPECT_EQ(context->statistics().motion.activeTrackCount, 0U);
     EXPECT_EQ(context->statistics().motion.reservedTrackCount, 1U);
 
@@ -1043,25 +1043,25 @@ TEST(UIMotionTests, StyleStateChangeCanDriveBackgroundColorTransition)
         .delta = {.x = 1.0F, .y = 0.0F},
         .button = Platform::PointerButton::Primary,
     };
-    auto route = context->routePointerInput(hoverInput);
+    auto route = context->input().routePointerInput(hoverInput);
     ASSERT_TRUE(route.has_value()) << route.error().message;
     // Style→motion retarget runs during paint rebuild on commitLayout.
-    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
     EXPECT_EQ(context->statistics().motion.activeTrackCount, 1U);
     EXPECT_EQ(context->statistics().motion.reservedTrackCount, 1U);
     EXPECT_FALSE(context->statistics().layoutDirty);
 
     clock.advance(Core::Duration{0.050});
-    ASSERT_TRUE(context->sampleMotion(clock.now()).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
-    const auto* mid = findSolidPaint(context->committedPaint(), *node);
+    ASSERT_TRUE(context->motion().sampleMotion(clock.now()).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
+    const auto* mid = findSolidPaint(context->publication().committedPaint(), *node);
     ASSERT_NE(mid, nullptr);
     EXPECT_EQ(mid->solidFill, UI::premultiply(UI::rgba8(50, 0, 0, 255)));
 
     clock.advance(Core::Duration{0.050});
-    ASSERT_TRUE(context->sampleMotion(clock.now()).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
-    const auto* completed = findSolidPaint(context->committedPaint(), *node);
+    ASSERT_TRUE(context->motion().sampleMotion(clock.now()).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
+    const auto* completed = findSolidPaint(context->publication().committedPaint(), *node);
     ASSERT_NE(completed, nullptr);
     EXPECT_EQ(completed->solidFill, UI::premultiply(UI::rgba8(100, 0, 0, 255)));
     EXPECT_EQ(context->statistics().motion.activeTrackCount, 0U);
@@ -1078,16 +1078,16 @@ TEST(UIMotionTests, StyleStateChangeCanDriveBackgroundColorTransition)
         .delta = {.x = 100.0F, .y = 50.0F},
         .button = Platform::PointerButton::Primary,
     };
-    route = context->routePointerInput(leaveInput);
+    route = context->input().routePointerInput(leaveInput);
     ASSERT_TRUE(route.has_value()) << route.error().message;
-    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
     EXPECT_EQ(context->statistics().motion.activeTrackCount, 1U);
 
     ASSERT_TRUE(updater.setBoxPaint(*node, UI::makeSolidBox(UI::rgba8(0, 80, 0, 255))).has_value());
     EXPECT_EQ(context->statistics().motion.activeTrackCount, 0U);
     EXPECT_EQ(context->statistics().motion.reservedTrackCount, 1U);
-    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
-    const auto* overridden = findSolidPaint(context->committedPaint(), *node);
+    ASSERT_TRUE(context->publication().commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
+    const auto* overridden = findSolidPaint(context->publication().committedPaint(), *node);
     ASSERT_NE(overridden, nullptr);
     EXPECT_EQ(overridden->solidFill, UI::premultiply(UI::rgba8(0, 80, 0, 255)));
 }
@@ -1119,19 +1119,19 @@ TEST(UIMotionTests, ElementCreationReservesAgainstAuthoredStyleBinding)
             .color = UI::rgba8(100, 0, 0, 255),
         },
     };
-    ASSERT_TRUE(context->installStyleSheet(rules).has_value());
+    ASSERT_TRUE(context->style().installStyleSheet(rules).has_value());
     ASSERT_TRUE(context
-                    ->setStyleBackgroundColorTransition(UI::UITransitionSpec{
+                    ->motion().setStyleBackgroundColorTransition(UI::UITransitionSpec{
                         .property = UI::UIAnimatableProperty::BackgroundColor,
                         .duration = Core::Duration{0.100},
                         .easing = UI::UIEasing::Linear,
                     })
                     .has_value());
 
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
@@ -1141,7 +1141,7 @@ TEST(UIMotionTests, ElementCreationReservesAgainstAuthoredStyleBinding)
     ASSERT_TRUE(unbound.has_value()) << unbound.error().message;
     EXPECT_EQ(context->statistics().motion.reservedTrackCount, 0U);
 
-    const Core::Status initialCommit = context->commitLayout({.width = 160.0F, .height = 80.0F});
+    const Core::Status initialCommit = context->publication().commitLayout({.width = 160.0F, .height = 80.0F});
     ASSERT_TRUE(initialCommit.has_value()) << initialCommit.error().message;
     const UI::UIPointerInputEvent hoverUnbound{
         .platformFrame = Platform::PlatformFrameId{1},
@@ -1154,8 +1154,8 @@ TEST(UIMotionTests, ElementCreationReservesAgainstAuthoredStyleBinding)
         .delta = {.x = 1.0F, .y = 0.0F},
         .button = Platform::PointerButton::Primary,
     };
-    ASSERT_TRUE(context->routePointerInput(hoverUnbound).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
+    ASSERT_TRUE(context->input().routePointerInput(hoverUnbound).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 160.0F, .height = 80.0F}).has_value());
     EXPECT_EQ(context->statistics().motion.reservedTrackCount, 0U);
     EXPECT_EQ(context->statistics().motion.activeTrackCount, 0U);
 
@@ -1201,7 +1201,7 @@ TEST(UIMotionTests, StyleTransitionEnablePreflightsReservationsAtomically)
     ASSERT_TRUE(contextResult.has_value()) << contextResult.error().message;
     auto context = std::move(*contextResult);
 
-    auto styleClass = context->registerStyleClass();
+    auto styleClass = context->style().registerStyleClass();
     ASSERT_TRUE(styleClass.has_value()) << styleClass.error().message;
     const std::array rules{
         UI::UIStyleBoxFillRule{
@@ -1216,12 +1216,12 @@ TEST(UIMotionTests, StyleTransitionEnablePreflightsReservationsAtomically)
             .color = UI::rgba8(100, 0, 0, 255),
         },
     };
-    ASSERT_TRUE(context->installStyleSheet(rules).has_value());
+    ASSERT_TRUE(context->style().installStyleSheet(rules).has_value());
 
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
     const UI::UIStyleClassId classId = *styleClass;
@@ -1237,10 +1237,10 @@ TEST(UIMotionTests, StyleTransitionEnablePreflightsReservationsAtomically)
         .duration = Core::Duration{0.100},
         .easing = UI::UIEasing::Linear,
     };
-    const Core::Status enable = context->setStyleBackgroundColorTransition(transition);
+    const Core::Status enable = context->motion().setStyleBackgroundColorTransition(transition);
     ASSERT_FALSE(enable.has_value());
     EXPECT_EQ(enable.error().code, UI::UIErrorCode::CapacityExceeded);
-    EXPECT_EQ(context->styleBackgroundColorTransition().duration.count(), 0.0);
+    EXPECT_EQ(context->motion().styleBackgroundColorTransition().duration.count(), 0.0);
     EXPECT_EQ(context->statistics().motion.reservedTrackCount, 0U);
     EXPECT_EQ(context->statistics().motion.activeTrackCount, 0U);
 }
@@ -1271,10 +1271,10 @@ TEST(UIMotionTests, StyleTransitionEnableDrainsDeferredRootsBeforeCapacityPrefli
             .color = UI::rgba8(100, 0, 0, 255),
         },
     };
-    ASSERT_TRUE(context->installStyleSheet(rules).has_value());
+    ASSERT_TRUE(context->style().installStyleSheet(rules).has_value());
 
-    auto firstRootResult = context->rootBuilder().createRoot();
-    auto deferredRootResult = context->rootBuilder().createRoot();
+    auto firstRootResult = context->authoring().rootBuilder().createRoot();
+    auto deferredRootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(firstRootResult.has_value());
     ASSERT_TRUE(deferredRootResult.has_value());
     UI::UIRootOwner firstRoot = std::move(*firstRootResult);
@@ -1282,8 +1282,8 @@ TEST(UIMotionTests, StyleTransitionEnableDrainsDeferredRootsBeforeCapacityPrefli
 
     UI::UIElementDescriptor button = UI::makeButtonElement("Bound", fixedSize(80.0F, 40.0F));
     button.visual.styleRole = UI::UIStyleRoleId::ButtonPrimary;
-    auto firstUpdaterResult = context->treeUpdater(firstRoot);
-    auto deferredUpdaterResult = context->treeUpdater(deferredRoot);
+    auto firstUpdaterResult = context->authoring().treeUpdater(firstRoot);
+    auto deferredUpdaterResult = context->authoring().treeUpdater(deferredRoot);
     ASSERT_TRUE(firstUpdaterResult.has_value());
     ASSERT_TRUE(deferredUpdaterResult.has_value());
     const auto firstNode = firstUpdaterResult->createElement(firstRoot.rootNodeId(), button);
@@ -1297,7 +1297,7 @@ TEST(UIMotionTests, StyleTransitionEnableDrainsDeferredRootsBeforeCapacityPrefli
     releaseThread.join();
 
     ASSERT_TRUE(context
-                    ->setStyleBackgroundColorTransition(UI::UITransitionSpec{
+                    ->motion().setStyleBackgroundColorTransition(UI::UITransitionSpec{
                         .property = UI::UIAnimatableProperty::BackgroundColor,
                         .duration = Core::Duration{0.100},
                         .easing = UI::UIEasing::Linear,
@@ -1324,12 +1324,12 @@ TEST(UIMotionTests, TimelineSamplesTypedTracksWithoutLayoutOrHitRebuild)
     ASSERT_TRUE(contextResult.has_value()) << contextResult.error().message;
     auto context = std::move(*contextResult);
     FakeMotionClock clock;
-    ASSERT_TRUE(context->setMotionClock(&clock).has_value());
+    ASSERT_TRUE(context->motion().setMotionClock(&clock).has_value());
 
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
@@ -1337,7 +1337,7 @@ TEST(UIMotionTests, TimelineSamplesTypedTracksWithoutLayoutOrHitRebuild)
     panel.visual.boxPaint = UI::makeSolidBox(UI::rgba8(0, 0, 0, 255));
     const auto node = updater.createElement(root.rootNodeId(), panel);
     ASSERT_TRUE(node.has_value()) << node.error().message;
-    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 80.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 100.0F, .height = 80.0F}).has_value());
 
     const std::array colorFrames{
         UI::UIKeyframe{.normalizedTime = 0.0F, .value = UI::UIKeyframeValue::Color(UI::rgba8(0, 0, 0, 255))},
@@ -1365,7 +1365,7 @@ TEST(UIMotionTests, TimelineSamplesTypedTracksWithoutLayoutOrHitRebuild)
         UI::UITimelineTrackDesc{.node = *node, .property = UI::UIAnimatableProperty::VisualOffset,
                                 .keyframes = offsetFrames},
     };
-    auto timeline = context->createTimeline(UI::UITimelineDesc{
+    auto timeline = context->motion().createTimeline(UI::UITimelineDesc{
         .duration = Core::Duration{0.100},
         .delay = Core::Duration{0.0},
         .tracks = tracks,
@@ -1375,16 +1375,16 @@ TEST(UIMotionTests, TimelineSamplesTypedTracksWithoutLayoutOrHitRebuild)
     EXPECT_EQ(context->statistics().motion.timelineTrackCount, 4U);
     EXPECT_EQ(context->statistics().motion.keyframeCount, 8U);
 
-    ASSERT_TRUE(context->playTimeline(*timeline).has_value());
+    ASSERT_TRUE(context->motion().playTimeline(*timeline).has_value());
     EXPECT_EQ(context->statistics().motion.activeTimelineCount, 1U);
-    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 80.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 100.0F, .height = 80.0F}).has_value());
     EXPECT_FALSE(context->statistics().layoutDirty);
     EXPECT_FALSE(context->statistics().hitDirty);
 
     clock.advance(Core::Duration{0.050});
-    ASSERT_TRUE(context->sampleMotion(clock.now()).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 80.0F}).has_value());
-    const auto* middle = findSolidPaint(context->committedPaint(), *node);
+    ASSERT_TRUE(context->motion().sampleMotion(clock.now()).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 100.0F, .height = 80.0F}).has_value());
+    const auto* middle = findSolidPaint(context->publication().committedPaint(), *node);
     ASSERT_NE(middle, nullptr);
     // Background 50 with opacity 0.75 is premultiplied with integer truncation.
     EXPECT_EQ(middle->solidFill.red, 37);
@@ -1395,18 +1395,18 @@ TEST(UIMotionTests, TimelineSamplesTypedTracksWithoutLayoutOrHitRebuild)
     EXPECT_FALSE(context->statistics().hitDirty);
 
     clock.advance(Core::Duration{0.050});
-    ASSERT_TRUE(context->sampleMotion(clock.now()).has_value());
+    ASSERT_TRUE(context->motion().sampleMotion(clock.now()).has_value());
     EXPECT_EQ(context->statistics().motion.lastSampledTimelineCount, 1U);
     EXPECT_EQ(context->statistics().motion.lastSampledTimelineTrackCount, 4U);
-    ASSERT_TRUE(context->sampleMotion(clock.now()).has_value());
+    ASSERT_TRUE(context->motion().sampleMotion(clock.now()).has_value());
     EXPECT_EQ(context->statistics().motion.lastSampledTimelineCount, 0U);
     EXPECT_EQ(context->statistics().motion.lastSampledTimelineTrackCount, 0U);
     EXPECT_EQ(context->statistics().motion.lastSampledTimelineLayoutTrackCount, 0U);
     EXPECT_EQ(context->statistics().motion.lastSampledKeyframeSegmentCount, 0U);
-    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 80.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 100.0F, .height = 80.0F}).has_value());
     EXPECT_EQ(context->statistics().motion.activeTimelineCount, 0U);
     EXPECT_EQ(context->statistics().motion.timelineTrackCount, 4U);
-    const auto* finalPaint = findSolidPaint(context->committedPaint(), *node);
+    const auto* finalPaint = findSolidPaint(context->publication().committedPaint(), *node);
     ASSERT_NE(finalPaint, nullptr);
     EXPECT_EQ(finalPaint->solidFill.red, 50);
 }
@@ -1427,12 +1427,12 @@ TEST(UIMotionTests, LayoutTimelinePublishesLayoutHitAndPaintFromOneSample)
     ASSERT_TRUE(contextResult.has_value()) << contextResult.error().message;
     auto context = std::move(*contextResult);
     FakeMotionClock clock;
-    ASSERT_TRUE(context->setMotionClock(&clock).has_value());
+    ASSERT_TRUE(context->motion().setMotionClock(&clock).has_value());
 
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
@@ -1441,7 +1441,7 @@ TEST(UIMotionTests, LayoutTimelinePublishesLayoutHitAndPaintFromOneSample)
     const auto node = updater.createElement(root.rootNodeId(), panel);
     ASSERT_TRUE(node.has_value()) << node.error().message;
     ASSERT_TRUE(updater.setPointerHitPolicy(*node, UI::UIPointerHitPolicy::Targetable).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 120.0F, .height = 80.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 120.0F, .height = 80.0F}).has_value());
 
     const std::array widthFrames{
         UI::UIKeyframe{.normalizedTime = 0.0F, .value = UI::UIKeyframeValue::Scalar(20.0F)},
@@ -1471,21 +1471,21 @@ TEST(UIMotionTests, LayoutTimelinePublishesLayoutHitAndPaintFromOneSample)
         UI::UITimelineTrackDesc{.node = *node, .property = UI::UIAnimatableProperty::BackgroundColor,
                                 .keyframes = colorFrames},
     };
-    auto timeline = context->createTimeline(UI::UITimelineDesc{
+    auto timeline = context->motion().createTimeline(UI::UITimelineDesc{
         .duration = Core::Duration{0.100},
         .tracks = tracks,
     });
     ASSERT_TRUE(timeline.has_value()) << timeline.error().message;
-    ASSERT_TRUE(context->playTimeline(*timeline).has_value());
-    const u64 layoutRevision = context->committedLayout().layoutRevision();
-    const u64 hitRevision = context->committedHit().hitRevision();
-    const u64 paintRevision = context->committedPaint().paintRevision();
+    ASSERT_TRUE(context->motion().playTimeline(*timeline).has_value());
+    const u64 layoutRevision = context->publication().committedLayout().layoutRevision();
+    const u64 hitRevision = context->publication().committedHit().hitRevision();
+    const u64 paintRevision = context->publication().committedPaint().paintRevision();
 
     clock.advance(Core::Duration{0.050});
-    ASSERT_TRUE(context->commitLayout({.width = 120.0F, .height = 80.0F}).has_value());
-    const auto* layout = findLayoutEntry(context->committedLayout(), *node);
-    const auto* hit = findHitEntry(context->committedHit(), *node);
-    const auto* paint = findSolidPaint(context->committedPaint(), *node);
+    ASSERT_TRUE(context->publication().commitLayout({.width = 120.0F, .height = 80.0F}).has_value());
+    const auto* layout = findLayoutEntry(context->publication().committedLayout(), *node);
+    const auto* hit = findHitEntry(context->publication().committedHit(), *node);
+    const auto* paint = findSolidPaint(context->publication().committedPaint(), *node);
     ASSERT_NE(layout, nullptr);
     ASSERT_NE(hit, nullptr);
     ASSERT_NE(paint, nullptr);
@@ -1499,13 +1499,13 @@ TEST(UIMotionTests, LayoutTimelinePublishesLayoutHitAndPaintFromOneSample)
     EXPECT_EQ(hit->worldRect, expected);
     EXPECT_EQ(paint->worldRect, expected);
     EXPECT_EQ(paint->solidFill, UI::premultiply(UI::rgba8(50, 0, 0, 255)));
-    const UI::UIPointerHitQueryResult movedHit = context->queryPointerHit({50.0F, 30.0F});
+    const UI::UIPointerHitQueryResult movedHit = context->input().queryPointerHit({50.0F, 30.0F});
     ASSERT_TRUE(movedHit.hasTarget());
     EXPECT_EQ(movedHit.target.node, *node);
-    EXPECT_FALSE(context->queryPointerHit({15.0F, 15.0F}).hasTarget());
-    EXPECT_EQ(context->committedLayout().layoutRevision(), layoutRevision + 1U);
-    EXPECT_EQ(context->committedHit().hitRevision(), hitRevision + 1U);
-    EXPECT_EQ(context->committedPaint().paintRevision(), paintRevision + 1U);
+    EXPECT_FALSE(context->input().queryPointerHit({15.0F, 15.0F}).hasTarget());
+    EXPECT_EQ(context->publication().committedLayout().layoutRevision(), layoutRevision + 1U);
+    EXPECT_EQ(context->publication().committedHit().hitRevision(), hitRevision + 1U);
+    EXPECT_EQ(context->publication().committedPaint().paintRevision(), paintRevision + 1U);
 
     const UI::UIContextStatistics statistics = context->statistics();
     EXPECT_EQ(statistics.motion.lastSampledTimelineCount, 1U);
@@ -1536,12 +1536,12 @@ TEST(UIMotionTests, MixedLayoutTimelineFailureKeepsPublishedSampleAndRetriesAtAb
     ASSERT_TRUE(contextResult.has_value()) << contextResult.error().message;
     auto context = std::move(*contextResult);
     FakeMotionClock clock;
-    ASSERT_TRUE(context->setMotionClock(&clock).has_value());
+    ASSERT_TRUE(context->motion().setMotionClock(&clock).has_value());
 
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
     UI::UIElementDescriptor panel = UI::makePanelElement(overlayStyle(10.0F, 12.0F, 20.0F, 10.0F));
@@ -1549,7 +1549,7 @@ TEST(UIMotionTests, MixedLayoutTimelineFailureKeepsPublishedSampleAndRetriesAtAb
     const auto node = updater.createElement(root.rootNodeId(), panel);
     ASSERT_TRUE(node.has_value()) << node.error().message;
     ASSERT_TRUE(updater.setPointerHitPolicy(*node, UI::UIPointerHitPolicy::Targetable).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 120.0F, .height = 80.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 120.0F, .height = 80.0F}).has_value());
 
     const std::array widthFrames{
         UI::UIKeyframe{.normalizedTime = 0.0F, .value = UI::UIKeyframeValue::Scalar(20.0F)},
@@ -1567,48 +1567,48 @@ TEST(UIMotionTests, MixedLayoutTimelineFailureKeepsPublishedSampleAndRetriesAtAb
         UI::UITimelineTrackDesc{.node = *node, .property = UI::UIAnimatableProperty::BackgroundColor,
                                 .keyframes = colorFrames},
     };
-    auto timeline = context->createTimeline(UI::UITimelineDesc{
+    auto timeline = context->motion().createTimeline(UI::UITimelineDesc{
         .duration = Core::Duration{0.100},
         .tracks = tracks,
     });
     ASSERT_TRUE(timeline.has_value()) << timeline.error().message;
-    ASSERT_TRUE(context->playTimeline(*timeline).has_value());
+    ASSERT_TRUE(context->motion().playTimeline(*timeline).has_value());
     ASSERT_TRUE(updater
                     .setBoxPaint(root.rootNodeId(), UI::makeSolidBox(UI::rgba8(1, 2, 3, 255)))
                     .has_value());
 
-    const u64 layoutRevision = context->committedLayout().layoutRevision();
-    const u64 hitRevision = context->committedHit().hitRevision();
-    const u64 paintRevision = context->committedPaint().paintRevision();
-    const auto* publishedLayout = findLayoutEntry(context->committedLayout(), *node);
-    const auto* publishedPaint = findSolidPaint(context->committedPaint(), *node);
+    const u64 layoutRevision = context->publication().committedLayout().layoutRevision();
+    const u64 hitRevision = context->publication().committedHit().hitRevision();
+    const u64 paintRevision = context->publication().committedPaint().paintRevision();
+    const auto* publishedLayout = findLayoutEntry(context->publication().committedLayout(), *node);
+    const auto* publishedPaint = findSolidPaint(context->publication().committedPaint(), *node);
     ASSERT_NE(publishedLayout, nullptr);
     ASSERT_NE(publishedPaint, nullptr);
     const UI::UILogicalRect publishedRect = publishedLayout->worldRect;
     const UI::UIPremultipliedRgba8Color publishedFill = publishedPaint->solidFill;
 
     clock.advance(Core::Duration{0.050});
-    const Core::Status rejected = context->commitLayout({.width = 120.0F, .height = 80.0F});
+    const Core::Status rejected = context->publication().commitLayout({.width = 120.0F, .height = 80.0F});
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::CapacityExceeded);
-    EXPECT_EQ(context->committedLayout().layoutRevision(), layoutRevision);
-    EXPECT_EQ(context->committedHit().hitRevision(), hitRevision);
-    EXPECT_EQ(context->committedPaint().paintRevision(), paintRevision);
-    EXPECT_EQ(findLayoutEntry(context->committedLayout(), *node)->worldRect, publishedRect);
-    EXPECT_EQ(findHitEntry(context->committedHit(), *node)->worldRect, publishedRect);
-    EXPECT_EQ(findSolidPaint(context->committedPaint(), *node)->worldRect, publishedRect);
-    EXPECT_EQ(findSolidPaint(context->committedPaint(), *node)->solidFill, publishedFill);
+    EXPECT_EQ(context->publication().committedLayout().layoutRevision(), layoutRevision);
+    EXPECT_EQ(context->publication().committedHit().hitRevision(), hitRevision);
+    EXPECT_EQ(context->publication().committedPaint().paintRevision(), paintRevision);
+    EXPECT_EQ(findLayoutEntry(context->publication().committedLayout(), *node)->worldRect, publishedRect);
+    EXPECT_EQ(findHitEntry(context->publication().committedHit(), *node)->worldRect, publishedRect);
+    EXPECT_EQ(findSolidPaint(context->publication().committedPaint(), *node)->worldRect, publishedRect);
+    EXPECT_EQ(findSolidPaint(context->publication().committedPaint(), *node)->solidFill, publishedFill);
     EXPECT_EQ(context->statistics().motion.layoutTimelineCommitFailureCount, 1U);
     EXPECT_EQ(context->statistics().motion.activeTimelineCount, 1U);
-    ASSERT_TRUE(context->isTimelineActive(*timeline).has_value());
-    EXPECT_TRUE(*context->isTimelineActive(*timeline));
+    ASSERT_TRUE(context->motion().isTimelineActive(*timeline).has_value());
+    EXPECT_TRUE(*context->motion().isTimelineActive(*timeline));
 
     ASSERT_TRUE(updater.setBoxPaint(root.rootNodeId(), {}).has_value());
     clock.advance(Core::Duration{0.025});
-    ASSERT_TRUE(context->commitLayout({.width = 120.0F, .height = 80.0F}).has_value());
-    const auto* recoveredLayout = findLayoutEntry(context->committedLayout(), *node);
-    const auto* recoveredHit = findHitEntry(context->committedHit(), *node);
-    const auto* recoveredPaint = findSolidPaint(context->committedPaint(), *node);
+    ASSERT_TRUE(context->publication().commitLayout({.width = 120.0F, .height = 80.0F}).has_value());
+    const auto* recoveredLayout = findLayoutEntry(context->publication().committedLayout(), *node);
+    const auto* recoveredHit = findHitEntry(context->publication().committedHit(), *node);
+    const auto* recoveredPaint = findSolidPaint(context->publication().committedPaint(), *node);
     ASSERT_NE(recoveredLayout, nullptr);
     ASSERT_NE(recoveredHit, nullptr);
     ASSERT_NE(recoveredPaint, nullptr);
@@ -1616,9 +1616,9 @@ TEST(UIMotionTests, MixedLayoutTimelineFailureKeepsPublishedSampleAndRetriesAtAb
     EXPECT_EQ(recoveredHit->worldRect, recoveredLayout->worldRect);
     EXPECT_EQ(recoveredPaint->worldRect, recoveredLayout->worldRect);
     EXPECT_EQ(recoveredPaint->solidFill, UI::premultiply(UI::rgba8(75, 0, 0, 255)));
-    EXPECT_EQ(context->committedLayout().layoutRevision(), layoutRevision + 1U);
-    EXPECT_EQ(context->committedHit().hitRevision(), hitRevision + 1U);
-    EXPECT_EQ(context->committedPaint().paintRevision(), paintRevision + 1U);
+    EXPECT_EQ(context->publication().committedLayout().layoutRevision(), layoutRevision + 1U);
+    EXPECT_EQ(context->publication().committedHit().hitRevision(), hitRevision + 1U);
+    EXPECT_EQ(context->publication().committedPaint().paintRevision(), paintRevision + 1U);
     EXPECT_EQ(context->statistics().motion.layoutTimelineCommitFailureCount, 1U);
 }
 
@@ -1639,12 +1639,12 @@ TEST(UIMotionTests, LayoutTimelineLateFailureRollsBackDirectMotionCandidates)
     ASSERT_TRUE(contextResult.has_value()) << contextResult.error().message;
     auto context = std::move(*contextResult);
     FakeMotionClock clock;
-    ASSERT_TRUE(context->setMotionClock(&clock).has_value());
+    ASSERT_TRUE(context->motion().setMotionClock(&clock).has_value());
 
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
     const auto createPaintedPanel = [&](float y) {
@@ -1659,7 +1659,7 @@ TEST(UIMotionTests, LayoutTimelineLateFailureRollsBackDirectMotionCandidates)
     ASSERT_TRUE(layoutNode.has_value()) << layoutNode.error().message;
     ASSERT_TRUE(unfinishedDirectNode.has_value()) << unfinishedDirectNode.error().message;
     ASSERT_TRUE(completingDirectNode.has_value()) << completingDirectNode.error().message;
-    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 80.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 100.0F, .height = 80.0F}).has_value());
 
     const std::array widthFrames{
         UI::UIKeyframe{.normalizedTime = 0.0F,
@@ -1672,12 +1672,12 @@ TEST(UIMotionTests, LayoutTimelineLateFailureRollsBackDirectMotionCandidates)
                                 .property = UI::UIAnimatableProperty::LayoutWidth,
                                 .keyframes = widthFrames},
     };
-    auto timeline = context->createTimeline(UI::UITimelineDesc{
+    auto timeline = context->motion().createTimeline(UI::UITimelineDesc{
         .duration = Core::Duration{0.100},
         .tracks = layoutTracks,
     });
     ASSERT_TRUE(timeline.has_value()) << timeline.error().message;
-    ASSERT_TRUE(context->playTimeline(*timeline).has_value());
+    ASSERT_TRUE(context->motion().playTimeline(*timeline).has_value());
 
     const UI::UITransitionSpec unfinishedSpec{
         .property = UI::UIAnimatableProperty::BackgroundColor,
@@ -1688,11 +1688,11 @@ TEST(UIMotionTests, LayoutTimelineLateFailureRollsBackDirectMotionCandidates)
         .duration = Core::Duration{0.050},
     };
     ASSERT_TRUE(context
-                    ->beginBackgroundColorTransition(
+                    ->motion().beginBackgroundColorTransition(
                         *unfinishedDirectNode, UI::rgba8(200, 0, 0, 255), unfinishedSpec)
                     .has_value());
     ASSERT_TRUE(context
-                    ->beginBackgroundColorTransition(
+                    ->motion().beginBackgroundColorTransition(
                         *completingDirectNode, UI::rgba8(0, 100, 0, 255), completingSpec)
                     .has_value());
     ASSERT_TRUE(updater
@@ -1700,23 +1700,23 @@ TEST(UIMotionTests, LayoutTimelineLateFailureRollsBackDirectMotionCandidates)
                                  UI::makeSolidBox(UI::rgba8(1, 2, 3, 255)))
                     .has_value());
 
-    const u64 layoutRevision = context->committedLayout().layoutRevision();
-    const u64 hitRevision = context->committedHit().hitRevision();
-    const u64 paintRevision = context->committedPaint().paintRevision();
+    const u64 layoutRevision = context->publication().committedLayout().layoutRevision();
+    const u64 hitRevision = context->publication().committedHit().hitRevision();
+    const u64 paintRevision = context->publication().committedPaint().paintRevision();
     clock.advance(Core::Duration{0.050});
-    const Core::Status rejected = context->commitLayout({.width = 100.0F, .height = 80.0F});
+    const Core::Status rejected = context->publication().commitLayout({.width = 100.0F, .height = 80.0F});
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::CapacityExceeded);
     EXPECT_EQ(context->statistics().motion.activeTrackCount, 2U);
     EXPECT_EQ(context->statistics().motion.activeTimelineCount, 1U);
     EXPECT_EQ(context->statistics().motion.layoutTimelineCommitFailureCount, 1U);
-    EXPECT_EQ(context->committedLayout().layoutRevision(), layoutRevision);
-    EXPECT_EQ(context->committedHit().hitRevision(), hitRevision);
-    EXPECT_EQ(context->committedPaint().paintRevision(), paintRevision);
+    EXPECT_EQ(context->publication().committedLayout().layoutRevision(), layoutRevision);
+    EXPECT_EQ(context->publication().committedHit().hitRevision(), hitRevision);
+    EXPECT_EQ(context->publication().committedPaint().paintRevision(), paintRevision);
     const auto* rejectedUnfinishedPaint =
-        findSolidPaint(context->committedPaint(), *unfinishedDirectNode);
+        findSolidPaint(context->publication().committedPaint(), *unfinishedDirectNode);
     const auto* rejectedCompletingPaint =
-        findSolidPaint(context->committedPaint(), *completingDirectNode);
+        findSolidPaint(context->publication().committedPaint(), *completingDirectNode);
     ASSERT_NE(rejectedUnfinishedPaint, nullptr);
     ASSERT_NE(rejectedCompletingPaint, nullptr);
     EXPECT_EQ(rejectedUnfinishedPaint->solidFill,
@@ -1727,18 +1727,18 @@ TEST(UIMotionTests, LayoutTimelineLateFailureRollsBackDirectMotionCandidates)
     // A failed candidate must not become the retarget start. At the next
     // half-sample this is 100 from the last committed 0, not 150 from 100.
     ASSERT_TRUE(context
-                    ->beginBackgroundColorTransition(
+                    ->motion().beginBackgroundColorTransition(
                         *unfinishedDirectNode, UI::rgba8(200, 0, 0, 255), unfinishedSpec)
                     .has_value());
     ASSERT_TRUE(updater.setBoxPaint(root.rootNodeId(), {}).has_value());
     clock.advance(Core::Duration{0.050});
-    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 80.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 100.0F, .height = 80.0F}).has_value());
 
-    const auto* recoveredLayout = findLayoutEntry(context->committedLayout(), *layoutNode);
+    const auto* recoveredLayout = findLayoutEntry(context->publication().committedLayout(), *layoutNode);
     const auto* unfinishedPaint =
-        findSolidPaint(context->committedPaint(), *unfinishedDirectNode);
+        findSolidPaint(context->publication().committedPaint(), *unfinishedDirectNode);
     const auto* completedPaint =
-        findSolidPaint(context->committedPaint(), *completingDirectNode);
+        findSolidPaint(context->publication().committedPaint(), *completingDirectNode);
     ASSERT_NE(recoveredLayout, nullptr);
     ASSERT_NE(unfinishedPaint, nullptr);
     ASSERT_NE(completedPaint, nullptr);
@@ -1750,9 +1750,9 @@ TEST(UIMotionTests, LayoutTimelineLateFailureRollsBackDirectMotionCandidates)
     EXPECT_EQ(context->statistics().motion.activeTrackCount, 1U);
     EXPECT_EQ(context->statistics().motion.activeTimelineCount, 0U);
     EXPECT_EQ(context->statistics().motion.layoutTimelineCommitFailureCount, 1U);
-    EXPECT_EQ(context->committedLayout().layoutRevision(), layoutRevision + 1U);
-    EXPECT_EQ(context->committedHit().hitRevision(), hitRevision + 1U);
-    EXPECT_EQ(context->committedPaint().paintRevision(), paintRevision + 1U);
+    EXPECT_EQ(context->publication().committedLayout().layoutRevision(), layoutRevision + 1U);
+    EXPECT_EQ(context->publication().committedHit().hitRevision(), hitRevision + 1U);
+    EXPECT_EQ(context->publication().committedPaint().paintRevision(), paintRevision + 1U);
 }
 
 TEST(UIMotionTests, LayoutTimelineLateFailureDefersStyleActivationAndKeepsDirectSample)
@@ -1775,7 +1775,7 @@ TEST(UIMotionTests, LayoutTimelineLateFailureDefersStyleActivationAndKeepsDirect
     ASSERT_TRUE(contextResult.has_value()) << contextResult.error().message;
     auto context = std::move(*contextResult);
     FakeMotionClock clock;
-    ASSERT_TRUE(context->setMotionClock(&clock).has_value());
+    ASSERT_TRUE(context->motion().setMotionClock(&clock).has_value());
 
     const std::array rules{
         UI::UIStyleBoxFillRule{
@@ -1788,19 +1788,19 @@ TEST(UIMotionTests, LayoutTimelineLateFailureDefersStyleActivationAndKeepsDirect
             .color = UI::rgba8(100, 0, 0, 255),
         },
     };
-    ASSERT_TRUE(context->installStyleSheet(rules).has_value());
+    ASSERT_TRUE(context->style().installStyleSheet(rules).has_value());
     ASSERT_TRUE(context
-                    ->setStyleBackgroundColorTransition(UI::UITransitionSpec{
+                    ->motion().setStyleBackgroundColorTransition(UI::UITransitionSpec{
                         .property = UI::UIAnimatableProperty::BackgroundColor,
                         .duration = Core::Duration{0.100},
                         .easing = UI::UIEasing::Linear,
                     })
                     .has_value());
 
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
@@ -1815,9 +1815,9 @@ TEST(UIMotionTests, LayoutTimelineLateFailureDefersStyleActivationAndKeepsDirect
     directPanel.visual.boxPaint = UI::makeSolidBox(UI::rgba8(0, 0, 0, 255));
     const auto directNode = updater.createElement(root.rootNodeId(), directPanel);
     ASSERT_TRUE(directNode.has_value()) << directNode.error().message;
-    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 60.0F}).has_value());
-    ASSERT_NE(findSolidPaint(context->committedPaint(), *styleNode), nullptr);
-    ASSERT_NE(findSolidPaint(context->committedPaint(), *directNode), nullptr);
+    ASSERT_TRUE(context->publication().commitLayout({.width = 100.0F, .height = 60.0F}).has_value());
+    ASSERT_NE(findSolidPaint(context->publication().committedPaint(), *styleNode), nullptr);
+    ASSERT_NE(findSolidPaint(context->publication().committedPaint(), *directNode), nullptr);
     EXPECT_EQ(context->statistics().motion.reservedTrackCount, 1U);
 
     const std::array widthFrames{
@@ -1831,14 +1831,14 @@ TEST(UIMotionTests, LayoutTimelineLateFailureDefersStyleActivationAndKeepsDirect
                                 .property = UI::UIAnimatableProperty::LayoutWidth,
                                 .keyframes = widthFrames},
     };
-    auto timeline = context->createTimeline(UI::UITimelineDesc{
+    auto timeline = context->motion().createTimeline(UI::UITimelineDesc{
         .duration = Core::Duration{0.100},
         .tracks = layoutTracks,
     });
     ASSERT_TRUE(timeline.has_value()) << timeline.error().message;
-    ASSERT_TRUE(context->playTimeline(*timeline).has_value());
+    ASSERT_TRUE(context->motion().playTimeline(*timeline).has_value());
     ASSERT_TRUE(context
-                    ->beginBackgroundColorTransition(
+                    ->motion().beginBackgroundColorTransition(
                         *directNode, UI::rgba8(200, 0, 0, 255),
                         UI::UITransitionSpec{
                             .property = UI::UIAnimatableProperty::BackgroundColor,
@@ -1853,13 +1853,13 @@ TEST(UIMotionTests, LayoutTimelineLateFailureDefersStyleActivationAndKeepsDirect
                     .has_value());
 
     clock.advance(Core::Duration{0.050});
-    const Core::Status rejected = context->commitLayout({.width = 100.0F, .height = 60.0F});
+    const Core::Status rejected = context->publication().commitLayout({.width = 100.0F, .height = 60.0F});
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::CapacityExceeded);
     EXPECT_EQ(context->statistics().motion.activeTrackCount, 1U);
     EXPECT_EQ(context->statistics().motion.reservedTrackCount, 1U);
-    const auto* rejectedStyle = findSolidPaint(context->committedPaint(), *styleNode);
-    const auto* rejectedDirect = findSolidPaint(context->committedPaint(), *directNode);
+    const auto* rejectedStyle = findSolidPaint(context->publication().committedPaint(), *styleNode);
+    const auto* rejectedDirect = findSolidPaint(context->publication().committedPaint(), *directNode);
     ASSERT_NE(rejectedStyle, nullptr);
     ASSERT_NE(rejectedDirect, nullptr);
     EXPECT_EQ(rejectedStyle->solidFill, UI::premultiply(UI::rgba8(0, 0, 0, 255)));
@@ -1867,10 +1867,10 @@ TEST(UIMotionTests, LayoutTimelineLateFailureDefersStyleActivationAndKeepsDirect
 
     ASSERT_TRUE(updater.setBoxPaint(root.rootNodeId(), {}).has_value());
     clock.advance(Core::Duration{0.025});
-    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 60.0F}).has_value());
-    const auto* recoveredLayout = findLayoutEntry(context->committedLayout(), *styleNode);
-    const auto* recoveredStyle = findSolidPaint(context->committedPaint(), *styleNode);
-    const auto* recoveredDirect = findSolidPaint(context->committedPaint(), *directNode);
+    ASSERT_TRUE(context->publication().commitLayout({.width = 100.0F, .height = 60.0F}).has_value());
+    const auto* recoveredLayout = findLayoutEntry(context->publication().committedLayout(), *styleNode);
+    const auto* recoveredStyle = findSolidPaint(context->publication().committedPaint(), *styleNode);
+    const auto* recoveredDirect = findSolidPaint(context->publication().committedPaint(), *directNode);
     ASSERT_NE(recoveredLayout, nullptr);
     ASSERT_NE(recoveredStyle, nullptr);
     ASSERT_NE(recoveredDirect, nullptr);
@@ -1880,10 +1880,10 @@ TEST(UIMotionTests, LayoutTimelineLateFailureDefersStyleActivationAndKeepsDirect
     EXPECT_EQ(context->statistics().motion.activeTrackCount, 2U);
 
     clock.advance(Core::Duration{0.050});
-    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 60.0F}).has_value());
-    const auto* finalLayout = findLayoutEntry(context->committedLayout(), *styleNode);
-    const auto* styleMiddle = findSolidPaint(context->committedPaint(), *styleNode);
-    const auto* directFinal = findSolidPaint(context->committedPaint(), *directNode);
+    ASSERT_TRUE(context->publication().commitLayout({.width = 100.0F, .height = 60.0F}).has_value());
+    const auto* finalLayout = findLayoutEntry(context->publication().committedLayout(), *styleNode);
+    const auto* styleMiddle = findSolidPaint(context->publication().committedPaint(), *styleNode);
+    const auto* directFinal = findSolidPaint(context->publication().committedPaint(), *directNode);
     ASSERT_NE(finalLayout, nullptr);
     ASSERT_NE(styleMiddle, nullptr);
     ASSERT_NE(directFinal, nullptr);
@@ -1910,11 +1910,11 @@ TEST(UIMotionTests, ReducedMotionSnapsActiveLayoutTimelineThroughOneAtomicCommit
     ASSERT_TRUE(contextResult.has_value()) << contextResult.error().message;
     auto context = std::move(*contextResult);
     FakeMotionClock clock;
-    ASSERT_TRUE(context->setMotionClock(&clock).has_value());
-    auto rootResult = context->rootBuilder().createRoot();
+    ASSERT_TRUE(context->motion().setMotionClock(&clock).has_value());
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
     UI::UIElementDescriptor panel =
@@ -1923,7 +1923,7 @@ TEST(UIMotionTests, ReducedMotionSnapsActiveLayoutTimelineThroughOneAtomicCommit
     const auto node = updater.createElement(root.rootNodeId(), panel);
     ASSERT_TRUE(node.has_value()) << node.error().message;
     ASSERT_TRUE(updater.setPointerHitPolicy(*node, UI::UIPointerHitPolicy::Targetable).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 60.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 100.0F, .height = 60.0F}).has_value());
 
     const std::array widthFrames{
         UI::UIKeyframe{.normalizedTime = 0.0F, .value = UI::UIKeyframeValue::Scalar(20.0F)},
@@ -1945,45 +1945,45 @@ TEST(UIMotionTests, ReducedMotionSnapsActiveLayoutTimelineThroughOneAtomicCommit
         UI::UITimelineTrackDesc{.node = *node, .property = UI::UIAnimatableProperty::LayoutOffset,
                                 .keyframes = offsetFrames},
     };
-    auto timeline = context->createTimeline(UI::UITimelineDesc{
+    auto timeline = context->motion().createTimeline(UI::UITimelineDesc{
         .duration = Core::Duration{1.0},
         .tracks = tracks,
     });
     ASSERT_TRUE(timeline.has_value()) << timeline.error().message;
-    ASSERT_TRUE(context->playTimeline(*timeline).has_value());
+    ASSERT_TRUE(context->motion().playTimeline(*timeline).has_value());
     clock.advance(Core::Duration{0.5});
-    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 60.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 100.0F, .height = 60.0F}).has_value());
     const UI::UILogicalRect middle{
         .x = 12.0F,
         .y = 9.0F,
         .width = 45.0F,
         .height = 22.5F,
     };
-    ASSERT_NE(findLayoutEntry(context->committedLayout(), *node), nullptr);
-    ASSERT_NE(findHitEntry(context->committedHit(), *node), nullptr);
-    ASSERT_NE(findSolidPaint(context->committedPaint(), *node), nullptr);
-    EXPECT_EQ(findLayoutEntry(context->committedLayout(), *node)->worldRect, middle);
-    EXPECT_EQ(findHitEntry(context->committedHit(), *node)->worldRect, middle);
-    EXPECT_EQ(findSolidPaint(context->committedPaint(), *node)->worldRect, middle);
+    ASSERT_NE(findLayoutEntry(context->publication().committedLayout(), *node), nullptr);
+    ASSERT_NE(findHitEntry(context->publication().committedHit(), *node), nullptr);
+    ASSERT_NE(findSolidPaint(context->publication().committedPaint(), *node), nullptr);
+    EXPECT_EQ(findLayoutEntry(context->publication().committedLayout(), *node)->worldRect, middle);
+    EXPECT_EQ(findHitEntry(context->publication().committedHit(), *node)->worldRect, middle);
+    EXPECT_EQ(findSolidPaint(context->publication().committedPaint(), *node)->worldRect, middle);
     EXPECT_EQ(context->statistics().motion.activeTimelineCount, 1U);
 
-    const u64 layoutRevision = context->committedLayout().layoutRevision();
-    const u64 hitRevision = context->committedHit().hitRevision();
-    const u64 paintRevision = context->committedPaint().paintRevision();
-    ASSERT_TRUE(context->setReducedMotion(true).has_value());
-    EXPECT_TRUE(context->reducedMotion());
+    const u64 layoutRevision = context->publication().committedLayout().layoutRevision();
+    const u64 hitRevision = context->publication().committedHit().hitRevision();
+    const u64 paintRevision = context->publication().committedPaint().paintRevision();
+    ASSERT_TRUE(context->motion().setReducedMotion(true).has_value());
+    EXPECT_TRUE(context->motion().reducedMotion());
     EXPECT_EQ(context->statistics().motion.activeTimelineCount, 0U);
-    EXPECT_EQ(context->committedLayout().layoutRevision(), layoutRevision);
-    EXPECT_EQ(context->committedHit().hitRevision(), hitRevision);
-    EXPECT_EQ(context->committedPaint().paintRevision(), paintRevision);
-    EXPECT_EQ(findLayoutEntry(context->committedLayout(), *node)->worldRect, middle);
-    EXPECT_EQ(findHitEntry(context->committedHit(), *node)->worldRect, middle);
-    EXPECT_EQ(findSolidPaint(context->committedPaint(), *node)->worldRect, middle);
+    EXPECT_EQ(context->publication().committedLayout().layoutRevision(), layoutRevision);
+    EXPECT_EQ(context->publication().committedHit().hitRevision(), hitRevision);
+    EXPECT_EQ(context->publication().committedPaint().paintRevision(), paintRevision);
+    EXPECT_EQ(findLayoutEntry(context->publication().committedLayout(), *node)->worldRect, middle);
+    EXPECT_EQ(findHitEntry(context->publication().committedHit(), *node)->worldRect, middle);
+    EXPECT_EQ(findSolidPaint(context->publication().committedPaint(), *node)->worldRect, middle);
 
-    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 60.0F}).has_value());
-    const auto* finalLayout = findLayoutEntry(context->committedLayout(), *node);
-    const auto* finalHit = findHitEntry(context->committedHit(), *node);
-    const auto* finalPaint = findSolidPaint(context->committedPaint(), *node);
+    ASSERT_TRUE(context->publication().commitLayout({.width = 100.0F, .height = 60.0F}).has_value());
+    const auto* finalLayout = findLayoutEntry(context->publication().committedLayout(), *node);
+    const auto* finalHit = findHitEntry(context->publication().committedHit(), *node);
+    const auto* finalPaint = findSolidPaint(context->publication().committedPaint(), *node);
     ASSERT_NE(finalLayout, nullptr);
     ASSERT_NE(finalHit, nullptr);
     ASSERT_NE(finalPaint, nullptr);
@@ -1996,17 +1996,17 @@ TEST(UIMotionTests, ReducedMotionSnapsActiveLayoutTimelineThroughOneAtomicCommit
     EXPECT_EQ(finalLayout->worldRect, final);
     EXPECT_EQ(finalHit->worldRect, final);
     EXPECT_EQ(finalPaint->worldRect, final);
-    EXPECT_EQ(context->committedLayout().layoutRevision(), layoutRevision + 1U);
-    EXPECT_EQ(context->committedHit().hitRevision(), hitRevision + 1U);
-    EXPECT_EQ(context->committedPaint().paintRevision(), paintRevision + 1U);
+    EXPECT_EQ(context->publication().committedLayout().layoutRevision(), layoutRevision + 1U);
+    EXPECT_EQ(context->publication().committedHit().hitRevision(), hitRevision + 1U);
+    EXPECT_EQ(context->publication().committedPaint().paintRevision(), paintRevision + 1U);
 
-    const u64 finalLayoutRevision = context->committedLayout().layoutRevision();
-    const u64 finalHitRevision = context->committedHit().hitRevision();
-    const u64 finalPaintRevision = context->committedPaint().paintRevision();
-    ASSERT_TRUE(context->commitLayout({.width = 100.0F, .height = 60.0F}).has_value());
-    EXPECT_EQ(context->committedLayout().layoutRevision(), finalLayoutRevision);
-    EXPECT_EQ(context->committedHit().hitRevision(), finalHitRevision);
-    EXPECT_EQ(context->committedPaint().paintRevision(), finalPaintRevision);
+    const u64 finalLayoutRevision = context->publication().committedLayout().layoutRevision();
+    const u64 finalHitRevision = context->publication().committedHit().hitRevision();
+    const u64 finalPaintRevision = context->publication().committedPaint().paintRevision();
+    ASSERT_TRUE(context->publication().commitLayout({.width = 100.0F, .height = 60.0F}).has_value());
+    EXPECT_EQ(context->publication().committedLayout().layoutRevision(), finalLayoutRevision);
+    EXPECT_EQ(context->publication().committedHit().hitRevision(), finalHitRevision);
+    EXPECT_EQ(context->publication().committedPaint().paintRevision(), finalPaintRevision);
     EXPECT_EQ(context->statistics().lastLayoutPassCount, 0U);
 }
 
@@ -2026,15 +2026,15 @@ TEST(UIMotionTests, TimelinePlayFailsClosedWhenPaintTargetsCannotReserveDirtyQue
     auto contextResult = UI::UIContext::Create(makeMotionWindow(), config);
     ASSERT_TRUE(contextResult.has_value()) << contextResult.error().message;
     auto context = std::move(*contextResult);
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
     const auto child = updater.createElement(root.rootNodeId(), UI::makePanelElement(fixedSize(20.0F, 10.0F)));
     ASSERT_TRUE(child.has_value()) << child.error().message;
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
 
     const std::array rootFrames{
         UI::UIKeyframe{.normalizedTime = 0.0F,
@@ -2056,22 +2056,22 @@ TEST(UIMotionTests, TimelinePlayFailsClosedWhenPaintTargetsCannotReserveDirtyQue
                                 .property = UI::UIAnimatableProperty::BackgroundColor,
                                 .keyframes = childFrames},
     };
-    auto timeline = context->createTimeline(UI::UITimelineDesc{
+    auto timeline = context->motion().createTimeline(UI::UITimelineDesc{
         .duration = Core::Duration{0.100},
         .tracks = tracks,
     });
     ASSERT_TRUE(timeline.has_value()) << timeline.error().message;
 
-    const Core::Status play = context->playTimeline(*timeline);
+    const Core::Status play = context->motion().playTimeline(*timeline);
     ASSERT_FALSE(play.has_value());
     EXPECT_EQ(play.error().code, UI::UIErrorCode::CapacityExceeded);
-    ASSERT_TRUE(context->isTimelineActive(*timeline).has_value());
-    EXPECT_FALSE(*context->isTimelineActive(*timeline));
+    ASSERT_TRUE(context->motion().isTimelineActive(*timeline).has_value());
+    EXPECT_FALSE(*context->motion().isTimelineActive(*timeline));
     const UI::UIContextStatistics statistics = context->statistics();
     EXPECT_EQ(statistics.dirtyQueuePendingCount, 0U);
     EXPECT_FALSE(statistics.layoutDirty);
     EXPECT_FALSE(statistics.paintDirty);
-    EXPECT_TRUE(context->committedPaint().empty());
+    EXPECT_TRUE(context->publication().committedPaint().empty());
 }
 
 TEST(UIMotionTests, TimelineActiveCapacityFailurePreservesExistingPlayback)
@@ -2090,12 +2090,12 @@ TEST(UIMotionTests, TimelineActiveCapacityFailurePreservesExistingPlayback)
     ASSERT_TRUE(contextResult.has_value()) << contextResult.error().message;
     auto context = std::move(*contextResult);
     FakeMotionClock clock;
-    ASSERT_TRUE(context->setMotionClock(&clock).has_value());
+    ASSERT_TRUE(context->motion().setMotionClock(&clock).has_value());
 
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
     UI::UIElementDescriptor panel = UI::makePanelElement(fixedSize(20.0F, 20.0F));
@@ -2104,7 +2104,7 @@ TEST(UIMotionTests, TimelineActiveCapacityFailurePreservesExistingPlayback)
     const auto secondNode = updater.createElement(root.rootNodeId(), panel);
     ASSERT_TRUE(firstNode.has_value());
     ASSERT_TRUE(secondNode.has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
 
     const std::array firstFrames{
         UI::UIKeyframe{.normalizedTime = 0.0F,
@@ -2128,25 +2128,25 @@ TEST(UIMotionTests, TimelineActiveCapacityFailurePreservesExistingPlayback)
                                 .property = UI::UIAnimatableProperty::CornerRadius,
                                 .keyframes = secondFrames},
     };
-    auto firstTimeline = context->createTimeline(
+    auto firstTimeline = context->motion().createTimeline(
         UI::UITimelineDesc{.duration = Core::Duration{0.1}, .tracks = firstTracks});
-    auto secondTimeline = context->createTimeline(
+    auto secondTimeline = context->motion().createTimeline(
         UI::UITimelineDesc{.duration = Core::Duration{0.1}, .tracks = secondTracks});
     ASSERT_TRUE(firstTimeline.has_value());
     ASSERT_TRUE(secondTimeline.has_value());
 
-    ASSERT_TRUE(context->playTimeline(*firstTimeline).has_value());
-    const Core::Status secondPlay = context->playTimeline(*secondTimeline);
+    ASSERT_TRUE(context->motion().playTimeline(*firstTimeline).has_value());
+    const Core::Status secondPlay = context->motion().playTimeline(*secondTimeline);
     ASSERT_FALSE(secondPlay.has_value());
     EXPECT_EQ(secondPlay.error().code, UI::UIErrorCode::CapacityExceeded);
-    ASSERT_TRUE(context->isTimelineActive(*firstTimeline).has_value());
-    EXPECT_TRUE(*context->isTimelineActive(*firstTimeline));
-    ASSERT_TRUE(context->isTimelineActive(*secondTimeline).has_value());
-    EXPECT_FALSE(*context->isTimelineActive(*secondTimeline));
+    ASSERT_TRUE(context->motion().isTimelineActive(*firstTimeline).has_value());
+    EXPECT_TRUE(*context->motion().isTimelineActive(*firstTimeline));
+    ASSERT_TRUE(context->motion().isTimelineActive(*secondTimeline).has_value());
+    EXPECT_FALSE(*context->motion().isTimelineActive(*secondTimeline));
     EXPECT_EQ(context->statistics().motion.activeTimelineCount, 1U);
 
     clock.advance(Core::Duration{0.1});
-    ASSERT_TRUE(context->sampleMotion(clock.now()).has_value());
+    ASSERT_TRUE(context->motion().sampleMotion(clock.now()).has_value());
     EXPECT_EQ(context->statistics().motion.activeTimelineCount, 0U);
 }
 
@@ -2166,19 +2166,19 @@ TEST(UIMotionTests, TimelineReplaceCapacityFailurePreservesActiveDefinitionAtomi
     ASSERT_TRUE(contextResult.has_value()) << contextResult.error().message;
     auto context = std::move(*contextResult);
     FakeMotionClock clock;
-    ASSERT_TRUE(context->setMotionClock(&clock).has_value());
+    ASSERT_TRUE(context->motion().setMotionClock(&clock).has_value());
 
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
     UI::UIElementDescriptor panel = UI::makePanelElement(fixedSize(20.0F, 20.0F));
     panel.visual.boxPaint = UI::makeSolidBox(UI::rgba8(0, 0, 0, 255));
     const auto node = updater.createElement(root.rootNodeId(), panel);
     ASSERT_TRUE(node.has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
 
     const std::array originalFrames{
         UI::UIKeyframe{.normalizedTime = 0.0F,
@@ -2191,15 +2191,15 @@ TEST(UIMotionTests, TimelineReplaceCapacityFailurePreservesActiveDefinitionAtomi
                                 .property = UI::UIAnimatableProperty::BackgroundColor,
                                 .keyframes = originalFrames},
     };
-    auto timeline = context->createTimeline(
+    auto timeline = context->motion().createTimeline(
         UI::UITimelineDesc{.duration = Core::Duration{0.1}, .tracks = originalTracks});
     ASSERT_TRUE(timeline.has_value());
-    ASSERT_TRUE(context->playTimeline(*timeline).has_value());
+    ASSERT_TRUE(context->motion().playTimeline(*timeline).has_value());
 
     clock.advance(Core::Duration{0.025});
-    ASSERT_TRUE(context->sampleMotion(clock.now()).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
-    const auto* beforeFailure = findSolidPaint(context->committedPaint(), *node);
+    ASSERT_TRUE(context->motion().sampleMotion(clock.now()).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    const auto* beforeFailure = findSolidPaint(context->publication().committedPaint(), *node);
     ASSERT_NE(beforeFailure, nullptr);
     EXPECT_EQ(beforeFailure->solidFill.red, 20);
     const usize cancelCount = context->statistics().motion.timelineCancelCount;
@@ -2217,21 +2217,21 @@ TEST(UIMotionTests, TimelineReplaceCapacityFailurePreservesActiveDefinitionAtomi
                                 .property = UI::UIAnimatableProperty::BackgroundColor,
                                 .keyframes = oversizedFrames},
     };
-    const Core::Status replace = context->replaceTimeline(
+    const Core::Status replace = context->motion().replaceTimeline(
         *timeline,
         UI::UITimelineDesc{.duration = Core::Duration{0.2}, .tracks = oversizedTracks});
     ASSERT_FALSE(replace.has_value());
     EXPECT_EQ(replace.error().code, UI::UIErrorCode::CapacityExceeded);
-    ASSERT_TRUE(context->isTimelineActive(*timeline).has_value());
-    EXPECT_TRUE(*context->isTimelineActive(*timeline));
+    ASSERT_TRUE(context->motion().isTimelineActive(*timeline).has_value());
+    EXPECT_TRUE(*context->motion().isTimelineActive(*timeline));
     EXPECT_EQ(context->statistics().motion.timelineTrackCount, 1U);
     EXPECT_EQ(context->statistics().motion.keyframeCount, 2U);
     EXPECT_EQ(context->statistics().motion.timelineCancelCount, cancelCount);
 
     clock.advance(Core::Duration{0.075});
-    ASSERT_TRUE(context->sampleMotion(clock.now()).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
-    const auto* completed = findSolidPaint(context->committedPaint(), *node);
+    ASSERT_TRUE(context->motion().sampleMotion(clock.now()).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    const auto* completed = findSolidPaint(context->publication().committedPaint(), *node);
     ASSERT_NE(completed, nullptr);
     EXPECT_EQ(completed->solidFill.red, 80);
 }
@@ -2241,18 +2241,18 @@ TEST(UIMotionTests, TimelineRetargetUsesCurrentPresentationAsEffectiveFirstKeyfr
     auto context = createMotionContext();
     ASSERT_NE(context, nullptr);
     FakeMotionClock clock;
-    ASSERT_TRUE(context->setMotionClock(&clock).has_value());
-    auto rootResult = context->rootBuilder().createRoot();
+    ASSERT_TRUE(context->motion().setMotionClock(&clock).has_value());
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
     UI::UIElementDescriptor panel = UI::makePanelElement(fixedSize(20.0F, 20.0F));
     panel.visual.boxPaint = UI::makeSolidBox(UI::rgba8(0, 0, 0, 255));
     const auto node = updater.createElement(root.rootNodeId(), panel);
     ASSERT_TRUE(node.has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
 
     const std::array frames{
         UI::UIKeyframe{.normalizedTime = 0.0F,
@@ -2267,24 +2267,24 @@ TEST(UIMotionTests, TimelineRetargetUsesCurrentPresentationAsEffectiveFirstKeyfr
                                 .property = UI::UIAnimatableProperty::BackgroundColor,
                                 .keyframes = frames},
     };
-    auto timeline = context->createTimeline(
+    auto timeline = context->motion().createTimeline(
         UI::UITimelineDesc{.duration = Core::Duration{0.1}, .tracks = tracks});
     ASSERT_TRUE(timeline.has_value());
-    ASSERT_TRUE(context->playTimeline(*timeline).has_value());
+    ASSERT_TRUE(context->motion().playTimeline(*timeline).has_value());
 
     clock.advance(Core::Duration{0.025});
-    ASSERT_TRUE(context->sampleMotion(clock.now()).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
-    const auto* firstQuarter = findSolidPaint(context->committedPaint(), *node);
+    ASSERT_TRUE(context->motion().sampleMotion(clock.now()).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    const auto* firstQuarter = findSolidPaint(context->publication().committedPaint(), *node);
     ASSERT_NE(firstQuarter, nullptr);
     EXPECT_EQ(firstQuarter->solidFill.red, 50);
 
-    ASSERT_TRUE(context->playTimeline(*timeline).has_value());
+    ASSERT_TRUE(context->motion().playTimeline(*timeline).has_value());
     EXPECT_EQ(context->statistics().motion.timelineRetargetCount, 1U);
     clock.advance(Core::Duration{0.025});
-    ASSERT_TRUE(context->sampleMotion(clock.now()).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
-    const auto* retargetedQuarter = findSolidPaint(context->committedPaint(), *node);
+    ASSERT_TRUE(context->motion().sampleMotion(clock.now()).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    const auto* retargetedQuarter = findSolidPaint(context->publication().committedPaint(), *node);
     ASSERT_NE(retargetedQuarter, nullptr);
     EXPECT_EQ(retargetedQuarter->solidFill.red, 75);
 }
@@ -2296,14 +2296,14 @@ TEST(UIMotionTests, TimelineIdentityRejectsStaleGenerationAndForeignContext)
     ASSERT_NE(firstContext, nullptr);
     ASSERT_NE(secondContext, nullptr);
 
-    auto firstRootResult = firstContext->rootBuilder().createRoot();
-    auto secondRootResult = secondContext->rootBuilder().createRoot();
+    auto firstRootResult = firstContext->authoring().rootBuilder().createRoot();
+    auto secondRootResult = secondContext->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(firstRootResult.has_value());
     ASSERT_TRUE(secondRootResult.has_value());
     UI::UIRootOwner firstRoot = std::move(*firstRootResult);
     UI::UIRootOwner secondRoot = std::move(*secondRootResult);
-    auto firstUpdaterResult = firstContext->treeUpdater(firstRoot);
-    auto secondUpdaterResult = secondContext->treeUpdater(secondRoot);
+    auto firstUpdaterResult = firstContext->authoring().treeUpdater(firstRoot);
+    auto secondUpdaterResult = secondContext->authoring().treeUpdater(secondRoot);
     ASSERT_TRUE(firstUpdaterResult.has_value());
     ASSERT_TRUE(secondUpdaterResult.has_value());
     UI::UITreeUpdater firstUpdater = std::move(*firstUpdaterResult);
@@ -2331,37 +2331,37 @@ TEST(UIMotionTests, TimelineIdentityRejectsStaleGenerationAndForeignContext)
                                 .property = UI::UIAnimatableProperty::CornerRadius,
                                 .keyframes = frames},
     };
-    auto stale = firstContext->createTimeline(
+    auto stale = firstContext->motion().createTimeline(
         UI::UITimelineDesc{.duration = Core::Duration{0.1}, .tracks = firstTracks});
-    auto foreignPeer = secondContext->createTimeline(
+    auto foreignPeer = secondContext->motion().createTimeline(
         UI::UITimelineDesc{.duration = Core::Duration{0.1}, .tracks = secondTracks});
     ASSERT_TRUE(stale.has_value());
     ASSERT_TRUE(foreignPeer.has_value());
     EXPECT_EQ(stale->index(), foreignPeer->index());
     EXPECT_EQ(stale->generation(), foreignPeer->generation());
     EXPECT_NE(*stale, *foreignPeer);
-    EXPECT_FALSE(secondContext->isTimelineActive(*stale).has_value());
-    EXPECT_FALSE(secondContext->playTimeline(*stale).has_value());
+    EXPECT_FALSE(secondContext->motion().isTimelineActive(*stale).has_value());
+    EXPECT_FALSE(secondContext->motion().playTimeline(*stale).has_value());
 
-    ASSERT_TRUE(firstContext->destroyTimeline(*stale).has_value());
-    auto replacement = firstContext->createTimeline(
+    ASSERT_TRUE(firstContext->motion().destroyTimeline(*stale).has_value());
+    auto replacement = firstContext->motion().createTimeline(
         UI::UITimelineDesc{.duration = Core::Duration{0.1}, .tracks = firstTracks});
     ASSERT_TRUE(replacement.has_value());
     EXPECT_EQ(stale->index(), replacement->index());
     EXPECT_NE(stale->generation(), replacement->generation());
-    EXPECT_FALSE(firstContext->isTimelineActive(*stale).has_value());
-    EXPECT_FALSE(firstContext->playTimeline(*stale).has_value());
-    ASSERT_TRUE(firstContext->playTimeline(*replacement).has_value());
+    EXPECT_FALSE(firstContext->motion().isTimelineActive(*stale).has_value());
+    EXPECT_FALSE(firstContext->motion().playTimeline(*stale).has_value());
+    ASSERT_TRUE(firstContext->motion().playTimeline(*replacement).has_value());
 }
 
 TEST(UIMotionTests, InactiveTimelineCancelAndDestroyDoNotApplyAuthoredTarget)
 {
     auto context = createMotionContext();
     ASSERT_NE(context, nullptr);
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
@@ -2369,7 +2369,7 @@ TEST(UIMotionTests, InactiveTimelineCancelAndDestroyDoNotApplyAuthoredTarget)
     panel.visual.boxPaint = UI::makeSolidBox(UI::rgba8(10, 0, 0, 255));
     const auto node = updater.createElement(root.rootNodeId(), panel);
     ASSERT_TRUE(node.has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
 
     const std::array frames{
         UI::UIKeyframe{.normalizedTime = 0.0F,
@@ -2382,32 +2382,32 @@ TEST(UIMotionTests, InactiveTimelineCancelAndDestroyDoNotApplyAuthoredTarget)
                                 .property = UI::UIAnimatableProperty::BackgroundColor,
                                 .keyframes = frames},
     };
-    auto timeline = context->createTimeline(
+    auto timeline = context->motion().createTimeline(
         UI::UITimelineDesc{.duration = Core::Duration{0.1}, .tracks = tracks});
     ASSERT_TRUE(timeline.has_value());
 
-    ASSERT_TRUE(context->cancelTimeline(*timeline).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
-    const auto* afterCancel = findSolidPaint(context->committedPaint(), *node);
+    ASSERT_TRUE(context->motion().cancelTimeline(*timeline).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    const auto* afterCancel = findSolidPaint(context->publication().committedPaint(), *node);
     ASSERT_NE(afterCancel, nullptr);
     EXPECT_EQ(afterCancel->solidFill.red, 10);
 
-    ASSERT_TRUE(context->destroyTimeline(*timeline).has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
-    const auto* afterDestroy = findSolidPaint(context->committedPaint(), *node);
+    ASSERT_TRUE(context->motion().destroyTimeline(*timeline).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    const auto* afterDestroy = findSolidPaint(context->publication().committedPaint(), *node);
     ASSERT_NE(afterDestroy, nullptr);
     EXPECT_EQ(afterDestroy->solidFill.red, 10);
-    EXPECT_FALSE(context->isTimelineActive(*timeline).has_value());
+    EXPECT_FALSE(context->motion().isTimelineActive(*timeline).has_value());
 }
 
 TEST(UIMotionTests, TimelineActivityQueryRejectsWrongOwnerThread)
 {
     auto context = createMotionContext();
     ASSERT_NE(context, nullptr);
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
     const auto node = updater.createElement(
@@ -2424,14 +2424,14 @@ TEST(UIMotionTests, TimelineActivityQueryRejectsWrongOwnerThread)
                                 .property = UI::UIAnimatableProperty::CornerRadius,
                                 .keyframes = frames},
     };
-    auto timeline = context->createTimeline(
+    auto timeline = context->motion().createTimeline(
         UI::UITimelineDesc{.duration = Core::Duration{0.1}, .tracks = tracks});
     ASSERT_TRUE(timeline.has_value());
 
     bool queryHasValue = true;
     Core::ErrorCode queryError{};
     std::thread worker([&] {
-        const Core::Result<bool> query = context->isTimelineActive(*timeline);
+        const Core::Result<bool> query = context->motion().isTimelineActive(*timeline);
         queryHasValue = query.has_value();
         if (!query)
         {
@@ -2461,18 +2461,18 @@ TEST(UIMotionTests, TimelineWarmPlaybackDoesNotAllocateFromContextResource)
     ASSERT_TRUE(contextResult.has_value()) << contextResult.error().message;
     auto context = std::move(*contextResult);
     FakeMotionClock clock;
-    ASSERT_TRUE(context->setMotionClock(&clock).has_value());
-    auto rootResult = context->rootBuilder().createRoot();
+    ASSERT_TRUE(context->motion().setMotionClock(&clock).has_value());
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
     UI::UIElementDescriptor panel = UI::makePanelElement(fixedSize(20.0F, 20.0F));
     panel.visual.boxPaint = UI::makeSolidBox(UI::rgba8(0, 0, 0, 255));
     const auto node = updater.createElement(root.rootNodeId(), panel);
     ASSERT_TRUE(node.has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
 
     const std::array frames{
         UI::UIKeyframe{.normalizedTime = 0.0F,
@@ -2487,16 +2487,16 @@ TEST(UIMotionTests, TimelineWarmPlaybackDoesNotAllocateFromContextResource)
                                 .property = UI::UIAnimatableProperty::BackgroundColor,
                                 .keyframes = frames},
     };
-    auto timeline = context->createTimeline(
+    auto timeline = context->motion().createTimeline(
         UI::UITimelineDesc{.duration = Core::Duration{0.1}, .tracks = tracks});
     ASSERT_TRUE(timeline.has_value());
 
     const auto runPlayback = [&] {
-        EXPECT_TRUE(context->playTimeline(*timeline).has_value());
+        EXPECT_TRUE(context->motion().playTimeline(*timeline).has_value());
         clock.advance(Core::Duration{0.05});
-        EXPECT_TRUE(context->sampleMotion(clock.now()).has_value());
+        EXPECT_TRUE(context->motion().sampleMotion(clock.now()).has_value());
         clock.advance(Core::Duration{0.05});
-        EXPECT_TRUE(context->sampleMotion(clock.now()).has_value());
+        EXPECT_TRUE(context->motion().sampleMotion(clock.now()).has_value());
         EXPECT_EQ(context->statistics().motion.activeTimelineCount, 0U);
     };
     runPlayback();
@@ -2511,18 +2511,18 @@ TEST(UIMotionTests, TimelineValidationConflictAndReducedMotionAreFailClosed)
     auto context = createMotionContext();
     ASSERT_NE(context, nullptr);
     FakeMotionClock clock;
-    ASSERT_TRUE(context->setMotionClock(&clock).has_value());
-    auto rootResult = context->rootBuilder().createRoot();
+    ASSERT_TRUE(context->motion().setMotionClock(&clock).has_value());
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
     UI::UIElementDescriptor panel = UI::makePanelElement(fixedSize(20.0F, 20.0F));
     panel.visual.boxPaint = UI::makeSolidBox(UI::rgba8(0, 0, 0, 255));
     const auto node = updater.createElement(root.rootNodeId(), panel);
     ASSERT_TRUE(node.has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
 
     const std::array frames{
         UI::UIKeyframe{.normalizedTime = 0.0F, .value = UI::UIKeyframeValue::Color(UI::rgba8(0, 0, 0, 255))},
@@ -2534,7 +2534,7 @@ TEST(UIMotionTests, TimelineValidationConflictAndReducedMotionAreFailClosed)
         UI::UITimelineTrackDesc{.node = *node, .property = UI::UIAnimatableProperty::BackgroundColor,
                                 .keyframes = frames},
     };
-    const auto invalid = context->createTimeline(UI::UITimelineDesc{
+    const auto invalid = context->motion().createTimeline(UI::UITimelineDesc{
         .duration = Core::Duration{0.1}, .tracks = duplicateTracks});
     ASSERT_FALSE(invalid.has_value());
     EXPECT_EQ(context->statistics().motion.timelineCount, 0U);
@@ -2543,22 +2543,22 @@ TEST(UIMotionTests, TimelineValidationConflictAndReducedMotionAreFailClosed)
         UI::UITimelineTrackDesc{.node = *node, .property = UI::UIAnimatableProperty::BackgroundColor,
                                 .keyframes = frames},
     };
-    auto timeline = context->createTimeline(UI::UITimelineDesc{
+    auto timeline = context->motion().createTimeline(UI::UITimelineDesc{
         .duration = Core::Duration{0.1}, .tracks = validTracks});
     ASSERT_TRUE(timeline.has_value());
-    ASSERT_TRUE(context->playTimeline(*timeline).has_value());
+    ASSERT_TRUE(context->motion().playTimeline(*timeline).has_value());
     UI::UITransitionSpec direct{
         .property = UI::UIAnimatableProperty::BackgroundColor,
         .duration = Core::Duration{0.1},
     };
-    EXPECT_FALSE(context->beginBackgroundColorTransition(*node, UI::rgba8(0, 80, 0, 255), direct));
+    EXPECT_FALSE(context->motion().beginBackgroundColorTransition(*node, UI::rgba8(0, 80, 0, 255), direct));
 
-    ASSERT_TRUE(context->setReducedMotion(true).has_value());
+    ASSERT_TRUE(context->motion().setReducedMotion(true).has_value());
     EXPECT_EQ(context->statistics().motion.activeTimelineCount, 0U);
-    EXPECT_TRUE(context->isTimelineActive(*timeline).has_value());
-    EXPECT_FALSE(*context->isTimelineActive(*timeline));
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
-    const auto* snapped = findSolidPaint(context->committedPaint(), *node);
+    EXPECT_TRUE(context->motion().isTimelineActive(*timeline).has_value());
+    EXPECT_FALSE(*context->motion().isTimelineActive(*timeline));
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    const auto* snapped = findSolidPaint(context->publication().committedPaint(), *node);
     ASSERT_NE(snapped, nullptr);
     EXPECT_EQ(snapped->solidFill.red, 80);
 }
@@ -2567,16 +2567,16 @@ TEST(UIMotionTests, DestroyingBoundNodeCancelsTimelineAndStaleDefinitionFails)
 {
     auto context = createMotionContext();
     ASSERT_NE(context, nullptr);
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value());
     UI::UIRootOwner root = std::move(*rootResult);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
     UI::UIElementDescriptor panel = UI::makePanelElement(fixedSize(20.0F, 20.0F));
     const auto node = updater.createElement(root.rootNodeId(), panel);
     ASSERT_TRUE(node.has_value());
-    ASSERT_TRUE(context->commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({.width = 80.0F, .height = 60.0F}).has_value());
     const std::array frames{
         UI::UIKeyframe{.normalizedTime = 0.0F, .value = UI::UIKeyframeValue::Scalar(0.0F)},
         UI::UIKeyframe{.normalizedTime = 1.0F, .value = UI::UIKeyframeValue::Scalar(4.0F)},
@@ -2585,14 +2585,14 @@ TEST(UIMotionTests, DestroyingBoundNodeCancelsTimelineAndStaleDefinitionFails)
         UI::UITimelineTrackDesc{.node = *node, .property = UI::UIAnimatableProperty::CornerRadius,
                                 .keyframes = frames},
     };
-    auto timeline = context->createTimeline(UI::UITimelineDesc{
+    auto timeline = context->motion().createTimeline(UI::UITimelineDesc{
         .duration = Core::Duration{0.1}, .tracks = tracks});
     ASSERT_TRUE(timeline.has_value());
-    ASSERT_TRUE(context->playTimeline(*timeline).has_value());
+    ASSERT_TRUE(context->motion().playTimeline(*timeline).has_value());
     ASSERT_TRUE(updater.destroy(*node).has_value());
     EXPECT_EQ(context->statistics().motion.activeTimelineCount, 0U);
-    ASSERT_TRUE(context->destroyTimeline(*timeline).has_value());
-    EXPECT_FALSE(context->cancelTimeline(*timeline));
+    ASSERT_TRUE(context->motion().destroyTimeline(*timeline).has_value());
+    EXPECT_FALSE(context->motion().cancelTimeline(*timeline));
 }
 
 } // namespace

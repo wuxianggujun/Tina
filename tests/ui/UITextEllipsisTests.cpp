@@ -200,7 +200,7 @@ void assertOk(Core::Status status)
 void commit(UI::UIContext& context)
 {
     const Core::Status status =
-        context.commitLayout(UI::UILogicalSize{.width = 320.0F, .height = 180.0F});
+        context.publication().commitLayout(UI::UILogicalSize{.width = 320.0F, .height = 180.0F});
     ASSERT_TRUE(status.has_value()) << (status ? "" : status.error().message);
 }
 
@@ -210,7 +210,7 @@ void commit(UI::UIContext& context)
     UI::UIContext& context, UI::UINodeId node)
 {
     std::vector<UI::UICommittedPaintEntry> entries;
-    for (const UI::UICommittedPaintEntry& entry : context.committedPaint().entries())
+    for (const UI::UICommittedPaintEntry& entry : context.publication().committedPaint().entries())
     {
         if (entry.node == node)
         {
@@ -232,11 +232,11 @@ template <typename Body>
 void withContext(std::unique_ptr<UI::UIContext> context, Body&& body)
 {
     ASSERT_NE(context, nullptr);
-    auto rootResult = context->rootBuilder().createRoot();
+    auto rootResult = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(rootResult.has_value()) << (rootResult ? "" : rootResult.error().message);
     UI::UIRootOwner root = std::move(*rootResult);
 
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value()) << (updaterResult ? "" : updaterResult.error().message);
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
@@ -438,14 +438,14 @@ TEST(UITextEllipsisTest, AutoWidthIntrinsicSizeIgnoresTruncation)
         commit(context);
 
         const auto findLabel = [&](UI::UINodeId node) {
-            const UI::UICommittedLayoutView layout = context.committedLayout();
+            const UI::UICommittedLayoutView layout = context.publication().committedLayout();
             return std::ranges::find_if(
                 layout.entries(),
                 [node](const UI::UICommittedLayoutEntry& entry) { return entry.node == node; });
         };
 
         auto before = findLabel(label);
-        ASSERT_NE(before, context.committedLayout().entries().end());
+        ASSERT_NE(before, context.publication().committedLayout().entries().end());
         const float intrinsicWidth = before->contentPlacement.intrinsicSize.width;
         EXPECT_FLOAT_EQ(intrinsicWidth, GlyphAdvance * 8.0F);
 
@@ -453,7 +453,7 @@ TEST(UITextEllipsisTest, AutoWidthIntrinsicSizeIgnoresTruncation)
         commit(context);
 
         auto after = findLabel(label);
-        ASSERT_NE(after, context.committedLayout().entries().end());
+        ASSERT_NE(after, context.publication().committedLayout().entries().end());
         // Intrinsic measure keeps describing the untruncated text, so an
         // Auto-sized element never shrinks itself into its own ellipsis.
         EXPECT_FLOAT_EQ(after->contentPlacement.intrinsicSize.width, intrinsicWidth);
@@ -482,7 +482,7 @@ TEST(UITextEllipsisTest, AccessibilityNamePublishesTheFullTextWhilePaintIsTrunca
         EXPECT_EQ(glyphEntryCount(context, *button), 4U + 1U);
 
         UI::UIAccessibilityTree tree;
-        assertOk(tree.rebuildFrom(context.committedSemantics()));
+        assertOk(tree.rebuildFrom(context.publication().committedSemantics()));
         UI::UIAccessibilityProbeProvider probe;
         assertOk(probe.publish(tree));
         auto node = probe.readNode(*button);

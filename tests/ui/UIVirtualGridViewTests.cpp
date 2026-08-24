@@ -226,9 +226,9 @@ TEST_F(UIVirtualGridViewTest,
     constexpr u32 ItemCapacity = 10;
     auto context = createContext(window, ContextNodeCapacity);
     ASSERT_NE(context, nullptr);
-    auto root = context->rootBuilder().createRoot();
+    auto root = context->authoring().rootBuilder().createRoot();
     ASSERT_TRUE(root.has_value()) << root.error().message;
-    auto updater = context->treeUpdater(*root);
+    auto updater = context->authoring().treeUpdater(*root);
     ASSERT_TRUE(updater.has_value()) << updater.error().message;
     VirtualGridDataSource source{.count = 100'000, .keyBase = 1'000};
 
@@ -252,7 +252,7 @@ TEST_F(UIVirtualGridViewTest,
     assertOk(updater->setVirtualGridViewDataSource(grid, source.view()));
     EXPECT_EQ(context->liveNodeCount(), ItemCapacity + 2U);
 
-    assertOk(context->commitLayout({.width = 250.0F, .height = 130.0F}));
+    assertOk(context->publication().commitLayout({.width = 250.0F, .height = 130.0F}));
     UI::UIVirtualGridViewMetrics metrics =
         updater->virtualGridViewMetrics(grid).value();
     EXPECT_EQ(metrics.logicalItemCount, 100'000U);
@@ -267,7 +267,7 @@ TEST_F(UIVirtualGridViewTest,
 
     assertOk(updater->scrollVirtualGridViewToIndex(
         grid, 50'000, UI::UIVirtualGridViewScrollAlignment::Start));
-    assertOk(context->commitLayout({.width = 250.0F, .height = 130.0F}));
+    assertOk(context->publication().commitLayout({.width = 250.0F, .height = 130.0F}));
     metrics = updater->virtualGridViewMetrics(grid).value();
     EXPECT_EQ(metrics.firstVisibleRow, 25'000U);
     EXPECT_EQ(metrics.firstMaterializedRow, 24'999U);
@@ -276,7 +276,7 @@ TEST_F(UIVirtualGridViewTest,
     EXPECT_EQ(context->liveNodeCount(), ItemCapacity + 2U);
 
     const UI::UISemanticsEntry* item =
-        findVirtualItem(context->committedSemantics(), 50'000);
+        findVirtualItem(context->publication().committedSemantics(), 50'000);
     ASSERT_NE(item, nullptr);
     EXPECT_EQ(item->virtualItemKey, 51'001U);
     EXPECT_EQ(item->name, "Grid item");
@@ -296,8 +296,8 @@ TEST_F(UIVirtualGridViewTest,
 {
     auto context = createContext(window, ContextNodeCapacity);
     ASSERT_NE(context, nullptr);
-    auto root = context->rootBuilder().createRoot().value();
-    auto updater = context->treeUpdater(root).value();
+    auto root = context->authoring().rootBuilder().createRoot().value();
+    auto updater = context->authoring().treeUpdater(root).value();
     VirtualGridDataSource source{.count = 1};
     const UI::UINodeId grid = *updater.createElement(
         root.rootNodeId(), UI::makeVirtualGridViewElement(
@@ -317,7 +317,7 @@ TEST_F(UIVirtualGridViewTest,
         }));
     assertOk(updater.setVirtualGridViewDataSource(grid, source.view()));
 
-    assertOk(context->commitLayout({.width = 500.0F, .height = 60.0F}));
+    assertOk(context->publication().commitLayout({.width = 500.0F, .height = 60.0F}));
     const UI::UIVirtualGridViewMetrics metrics =
         updater.virtualGridViewMetrics(grid).value();
     EXPECT_EQ(metrics.logicalItemCount, 1U);
@@ -327,7 +327,7 @@ TEST_F(UIVirtualGridViewTest,
     EXPECT_FLOAT_EQ(metrics.itemWidth, 117.5F);
 
     const UI::UISemanticsEntry* item =
-        findVirtualItem(context->committedSemantics(), 0);
+        findVirtualItem(context->publication().committedSemantics(), 0);
     ASSERT_NE(item, nullptr);
     EXPECT_FLOAT_EQ(item->worldRect.width, 117.5F);
 }
@@ -338,8 +338,8 @@ TEST_F(UIVirtualGridViewTest,
     constexpr u32 ItemCapacity = 12;
     auto context = createContext(window, ContextNodeCapacity);
     ASSERT_NE(context, nullptr);
-    auto root = context->rootBuilder().createRoot().value();
-    auto updater = context->treeUpdater(root).value();
+    auto root = context->authoring().rootBuilder().createRoot().value();
+    auto updater = context->authoring().treeUpdater(root).value();
     VirtualGridDataSource source{.count = 100};
     const UI::UINodeId grid = *updater.createElement(
         root.rootNodeId(), UI::makeVirtualGridViewElement(
@@ -375,24 +375,24 @@ TEST_F(UIVirtualGridViewTest,
             .pressedSelectedItemBackgroundColor = selectionColor,
         }));
     assertOk(updater.setVirtualGridViewDataSource(grid, source.view()));
-    assertOk(context->commitLayout({.width = 220.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 220.0F, .height = 120.0F}));
 
     const UI::UISemanticsEntry* fourth =
-        findVirtualItem(context->committedSemantics(), 3);
+        findVirtualItem(context->publication().committedSemantics(), 3);
     ASSERT_NE(fourth, nullptr);
     const UI::UILogicalPoint center{
         .x = fourth->worldRect.x + fourth->worldRect.width * 0.5F,
         .y = fourth->worldRect.y + fourth->worldRect.height * 0.5F,
     };
-    auto down = context->routePointerInput(pointerInput(
+    auto down = context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::ButtonDown, 1, center));
     ASSERT_TRUE(down.has_value()) << down.error().message;
     EXPECT_TRUE(down->consumed);
-    auto up = context->routePointerInput(pointerInput(
+    auto up = context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::ButtonUp, 2, center));
     ASSERT_TRUE(up.has_value()) << up.error().message;
     EXPECT_TRUE(up->consumed);
-    EXPECT_EQ(context->defaultActionFocus(), grid);
+    EXPECT_EQ(context->input().defaultActionFocus(), grid);
     EXPECT_EQ(updater.virtualGridViewSelection(grid).value(),
               (UI::UIVirtualGridViewSelection{
                   .key = 4,
@@ -401,15 +401,15 @@ TEST_F(UIVirtualGridViewTest,
                   .logicalColumn = 1,
               }));
 
-    assertOk(context->commitLayout({.width = 220.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 220.0F, .height = 120.0F}));
     const UI::UISemanticsEntry* selected =
-        findVirtualItem(context->committedSemantics(), 3);
+        findVirtualItem(context->publication().committedSemantics(), 3);
     ASSERT_NE(selected, nullptr);
     EXPECT_TRUE(selected->selected);
     EXPECT_TRUE(selected->focused);
     bool foundSelectionPaint = false;
     for (const UI::UICommittedPaintEntry& entry :
-         context->committedPaint().entries())
+         context->publication().committedPaint().entries())
     {
         foundSelectionPaint = foundSelectionPaint ||
                               (entry.node == selected->node &&
@@ -417,48 +417,48 @@ TEST_F(UIVirtualGridViewTest,
     }
     EXPECT_TRUE(foundSelectionPaint);
 
-    auto wheel = context->routePointerInput(pointerInput(
+    auto wheel = context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::Wheel, 3,
         {.x = 100.0F, .y = 60.0F}, {.x = 0.0F, .y = -1.0F}));
     ASSERT_TRUE(wheel.has_value()) << wheel.error().message;
     EXPECT_TRUE(wheel->consumed);
-    assertOk(context->commitLayout({.width = 220.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 220.0F, .height = 120.0F}));
     EXPECT_FLOAT_EQ(
         updater.virtualGridViewMetrics(grid).value().scrollOffset, 40.0F);
 
     assertOk(updater.scrollVirtualGridViewToIndex(
         grid, 0, UI::UIVirtualGridViewScrollAlignment::Start));
-    assertOk(context->commitLayout({.width = 220.0F, .height = 120.0F}));
-    auto trackDown = context->routePointerInput(pointerInput(
+    assertOk(context->publication().commitLayout({.width = 220.0F, .height = 120.0F}));
+    auto trackDown = context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::ButtonDown, 4,
         {.x = 215.0F, .y = 80.0F}));
     ASSERT_TRUE(trackDown.has_value()) << trackDown.error().message;
     EXPECT_TRUE(trackDown->consumed);
-    static_cast<void>(context->routePointerInput(pointerInput(
+    static_cast<void>(context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::ButtonUp, 5,
         {.x = 215.0F, .y = 80.0F})));
-    assertOk(context->commitLayout({.width = 220.0F, .height = 120.0F}));
+    assertOk(context->publication().commitLayout({.width = 220.0F, .height = 120.0F}));
     EXPECT_GT(updater.virtualGridViewMetrics(grid).value().scrollOffset, 0.0F);
 
     assertOk(updater.scrollVirtualGridViewToIndex(
         grid, 0, UI::UIVirtualGridViewScrollAlignment::Start));
-    assertOk(context->commitLayout({.width = 220.0F, .height = 120.0F}));
-    auto thumbDown = context->routePointerInput(pointerInput(
+    assertOk(context->publication().commitLayout({.width = 220.0F, .height = 120.0F}));
+    auto thumbDown = context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::ButtonDown, 6,
         {.x = 215.0F, .y = 12.0F}));
     ASSERT_TRUE(thumbDown.has_value()) << thumbDown.error().message;
     EXPECT_TRUE(thumbDown->consumed);
-    EXPECT_EQ(context->pointerCapture(), grid);
-    ASSERT_TRUE(context->routePointerInput(pointerInput(
+    EXPECT_EQ(context->input().pointerCapture(), grid);
+    ASSERT_TRUE(context->input().routePointerInput(pointerInput(
                     window, UI::UIRoutedPointerEventKind::Move, 7,
                     {.x = 215.0F, .y = 90.0F}))
                     .has_value());
-    ASSERT_TRUE(context->routePointerInput(pointerInput(
+    ASSERT_TRUE(context->input().routePointerInput(pointerInput(
                     window, UI::UIRoutedPointerEventKind::ButtonUp, 8,
                     {.x = 215.0F, .y = 90.0F}))
                     .has_value());
-    EXPECT_FALSE(context->pointerCapture().hasValue());
-    assertOk(context->commitLayout({.width = 220.0F, .height = 120.0F}));
+    EXPECT_FALSE(context->input().pointerCapture().hasValue());
+    assertOk(context->publication().commitLayout({.width = 220.0F, .height = 120.0F}));
     EXPECT_GT(updater.virtualGridViewMetrics(grid).value().scrollOffset, 0.0F);
 }
 
@@ -468,8 +468,8 @@ TEST_F(UIVirtualGridViewTest,
     constexpr u32 ItemCapacity = 15;
     auto context = createContext(window, ContextNodeCapacity);
     ASSERT_NE(context, nullptr);
-    auto root = context->rootBuilder().createRoot().value();
-    auto updater = context->treeUpdater(root).value();
+    auto root = context->authoring().rootBuilder().createRoot().value();
+    auto updater = context->authoring().treeUpdater(root).value();
     VirtualGridDataSource source{.count = 30, .keyBase = 100};
     source.disabledIndices[0] = 1;
     source.disabledIndices[1] = 5;
@@ -489,56 +489,56 @@ TEST_F(UIVirtualGridViewTest,
             .scrollBarVisibility = UI::UIScrollBarVisibility::Hidden,
         }));
     assertOk(updater.setVirtualGridViewDataSource(grid, source.view()));
-    assertOk(context->commitLayout({.width = 320.0F, .height = 100.0F}));
-    assertOk(context->requestFocus(grid));
+    assertOk(context->publication().commitLayout({.width = 320.0F, .height = 100.0F}));
+    assertOk(context->input().requestFocus(grid));
 
-    auto first = context->routeVirtualGridViewCommand(
+    auto first = context->input().routeVirtualGridViewCommand(
         UI::UIVirtualGridViewCommand::NextItem, true);
     ASSERT_TRUE(first.has_value()) << first.error().message;
     EXPECT_TRUE(first->changed);
     EXPECT_EQ(first->selection.logicalIndex, 0U);
-    auto repeated = context->routeVirtualGridViewCommand(
+    auto repeated = context->input().routeVirtualGridViewCommand(
         UI::UIVirtualGridViewCommand::NextItem, true);
     ASSERT_TRUE(repeated.has_value());
     EXPECT_TRUE(repeated->consumed);
     EXPECT_FALSE(repeated->changed);
-    EXPECT_TRUE(context->routeVirtualGridViewCommand(
+    EXPECT_TRUE(context->input().routeVirtualGridViewCommand(
                     UI::UIVirtualGridViewCommand::NextItem, false)
                     ->consumed);
 
-    auto next = context->routeVirtualGridViewCommand(
+    auto next = context->input().routeVirtualGridViewCommand(
         UI::UIVirtualGridViewCommand::NextItem, true);
     ASSERT_TRUE(next.has_value()) << next.error().message;
     EXPECT_EQ(next->selection.logicalIndex, 2U);
-    EXPECT_TRUE(context->routeVirtualGridViewCommand(
+    EXPECT_TRUE(context->input().routeVirtualGridViewCommand(
                     UI::UIVirtualGridViewCommand::NextItem, false)
                     ->consumed);
 
-    auto nextRow = context->routeVirtualGridViewCommand(
+    auto nextRow = context->input().routeVirtualGridViewCommand(
         UI::UIVirtualGridViewCommand::NextRow, true);
     ASSERT_TRUE(nextRow.has_value()) << nextRow.error().message;
     EXPECT_EQ(nextRow->selection.logicalIndex, 8U);
     EXPECT_EQ(nextRow->selection.logicalRow, 2U);
     EXPECT_EQ(nextRow->selection.logicalColumn, 2U);
-    EXPECT_TRUE(context->routeVirtualGridViewCommand(
+    EXPECT_TRUE(context->input().routeVirtualGridViewCommand(
                     UI::UIVirtualGridViewCommand::NextRow, false)
                     ->consumed);
 
-    auto activate = context->routeVirtualGridViewCommand(
+    auto activate = context->input().routeVirtualGridViewCommand(
         UI::UIVirtualGridViewCommand::Activate, true);
     ASSERT_TRUE(activate.has_value()) << activate.error().message;
     EXPECT_TRUE(activate->activated);
-    EXPECT_TRUE(context->routeVirtualGridViewCommand(
+    EXPECT_TRUE(context->input().routeVirtualGridViewCommand(
                     UI::UIVirtualGridViewCommand::Activate, false)
                     ->consumed);
 
     source.disabledIndices[2] = 8;
     assertOk(updater.invalidateVirtualGridViewItems(grid));
-    activate = context->routeVirtualGridViewCommand(
+    activate = context->input().routeVirtualGridViewCommand(
         UI::UIVirtualGridViewCommand::Activate, true);
     ASSERT_TRUE(activate.has_value()) << activate.error().message;
     EXPECT_FALSE(activate->activated);
-    EXPECT_TRUE(context->routeVirtualGridViewCommand(
+    EXPECT_TRUE(context->input().routeVirtualGridViewCommand(
                     UI::UIVirtualGridViewCommand::Activate, false)
                     ->consumed);
 }
@@ -549,8 +549,8 @@ TEST_F(UIVirtualGridViewTest,
     constexpr u32 ItemCapacity = 12;
     auto context = createContext(window, ContextNodeCapacity);
     ASSERT_NE(context, nullptr);
-    auto root = context->rootBuilder().createRoot().value();
-    auto updater = context->treeUpdater(root).value();
+    auto root = context->authoring().rootBuilder().createRoot().value();
+    auto updater = context->authoring().treeUpdater(root).value();
     VirtualGridDataSource source{.count = 40, .label = "Old"};
     const UI::UINodeId grid = *updater.createElement(
         root.rootNodeId(), UI::makeVirtualGridViewElement(
@@ -568,47 +568,47 @@ TEST_F(UIVirtualGridViewTest,
             .scrollBarVisibility = UI::UIScrollBarVisibility::Hidden,
         }));
     assertOk(updater.setVirtualGridViewDataSource(grid, source.view()));
-    assertOk(context->commitLayout({.width = 220.0F, .height = 60.0F}));
+    assertOk(context->publication().commitLayout({.width = 220.0F, .height = 60.0F}));
 
     const UI::UIVirtualGridViewMetrics committedMetrics =
         updater.virtualGridViewMetrics(grid).value();
     const u64 committedLayoutRevision =
-        context->committedLayout().layoutRevision();
+        context->publication().committedLayout().layoutRevision();
     const u64 committedSemanticsRevision =
-        context->committedSemantics().semanticsRevision();
-    ASSERT_NE(findVirtualItem(context->committedSemantics(), 0), nullptr);
-    EXPECT_EQ(findVirtualItem(context->committedSemantics(), 0)->name, "Old");
+        context->publication().committedSemantics().semanticsRevision();
+    ASSERT_NE(findVirtualItem(context->publication().committedSemantics(), 0), nullptr);
+    EXPECT_EQ(findVirtualItem(context->publication().committedSemantics(), 0)->name, "Old");
 
     source.label = "New";
     source.failingIndex = 2;
     assertOk(updater.invalidateVirtualGridViewItems(grid));
     const Core::Status sourceFailure =
-        context->commitLayout({.width = 220.0F, .height = 60.0F});
+        context->publication().commitLayout({.width = 220.0F, .height = 60.0F});
     ASSERT_FALSE(sourceFailure.has_value());
     EXPECT_EQ(sourceFailure.error().code, UI::UIErrorCode::InvalidControlValue);
-    EXPECT_EQ(context->committedLayout().layoutRevision(),
+    EXPECT_EQ(context->publication().committedLayout().layoutRevision(),
               committedLayoutRevision);
-    EXPECT_EQ(context->committedSemantics().semanticsRevision(),
+    EXPECT_EQ(context->publication().committedSemantics().semanticsRevision(),
               committedSemanticsRevision);
     EXPECT_EQ(updater.virtualGridViewMetrics(grid).value(), committedMetrics);
-    EXPECT_EQ(findVirtualItem(context->committedSemantics(), 0)->name, "Old");
+    EXPECT_EQ(findVirtualItem(context->publication().committedSemantics(), 0)->name, "Old");
 
     source.failingIndex = (std::numeric_limits<u64>::max)();
-    assertOk(context->commitLayout({.width = 220.0F, .height = 60.0F}));
-    EXPECT_EQ(findVirtualItem(context->committedSemantics(), 0)->name, "New");
+    assertOk(context->publication().commitLayout({.width = 220.0F, .height = 60.0F}));
+    EXPECT_EQ(findVirtualItem(context->publication().committedSemantics(), 0)->name, "New");
     const UI::UIVirtualGridViewMetrics recoveredMetrics =
         updater.virtualGridViewMetrics(grid).value();
-    const u64 recoveredRevision = context->committedLayout().layoutRevision();
+    const u64 recoveredRevision = context->publication().committedLayout().layoutRevision();
 
     UI::UIVirtualGridViewStyle overflowStyle =
         updater.virtualGridViewStyle(grid).value();
     overflowStyle.overscanRows = 4;
     assertOk(updater.setVirtualGridViewStyle(grid, overflowStyle));
     const Core::Status poolOverflow =
-        context->commitLayout({.width = 220.0F, .height = 60.0F});
+        context->publication().commitLayout({.width = 220.0F, .height = 60.0F});
     ASSERT_FALSE(poolOverflow.has_value());
     EXPECT_EQ(poolOverflow.error().code, UI::UIErrorCode::CapacityExceeded);
-    EXPECT_EQ(context->committedLayout().layoutRevision(), recoveredRevision);
+    EXPECT_EQ(context->publication().committedLayout().layoutRevision(), recoveredRevision);
     EXPECT_EQ(updater.virtualGridViewMetrics(grid).value(), recoveredMetrics);
 }
 
@@ -625,8 +625,8 @@ TEST_F(UIVirtualGridViewTest,
     };
     auto context = createContext(window, ContextNodeCapacity);
     ASSERT_NE(context, nullptr);
-    auto root = context->rootBuilder().createRoot().value();
-    auto updater = context->treeUpdater(root).value();
+    auto root = context->authoring().rootBuilder().createRoot().value();
+    auto updater = context->authoring().treeUpdater(root).value();
     const UI::UINodeId grid = *updater.createElement(
         root.rootNodeId(), UI::makeVirtualGridViewElement(
                                {.materializedItemCapacity = 4}));
@@ -652,34 +652,34 @@ TEST_F(UIVirtualGridViewTest,
             .pressedSelectedItemBackgroundColor = selectionColor,
         }));
     assertOk(updater.setVirtualGridViewDataSource(grid, source.view()));
-    assertOk(context->commitLayout({.width = 220.0F, .height = 60.0F}));
+    assertOk(context->publication().commitLayout({.width = 220.0F, .height = 60.0F}));
 
     const UI::UISemanticsEntry* first =
-        findVirtualItem(context->committedSemantics(), 0);
+        findVirtualItem(context->publication().committedSemantics(), 0);
     ASSERT_NE(first, nullptr);
     const UI::UILogicalPoint firstCenter{
         .x = first->worldRect.x + first->worldRect.width * 0.5F,
         .y = first->worldRect.y + first->worldRect.height * 0.5F,
     };
-    ASSERT_TRUE(context->routePointerInput(pointerInput(
+    ASSERT_TRUE(context->input().routePointerInput(pointerInput(
                     window, UI::UIRoutedPointerEventKind::ButtonDown, 1,
                     firstCenter))
                     .has_value());
-    ASSERT_TRUE(context->routePointerInput(pointerInput(
+    ASSERT_TRUE(context->input().routePointerInput(pointerInput(
                     window, UI::UIRoutedPointerEventKind::ButtonUp, 2,
                     firstCenter))
                     .has_value());
-    assertOk(context->commitLayout({.width = 220.0F, .height = 60.0F}));
-    first = findVirtualItem(context->committedSemantics(), 0);
+    assertOk(context->publication().commitLayout({.width = 220.0F, .height = 60.0F}));
+    first = findVirtualItem(context->publication().committedSemantics(), 0);
     ASSERT_NE(first, nullptr);
     const UI::UINodeId firstNode = first->node;
     const UI::UICommittedPaintEntry* firstImage =
-        findImagePaint(context->committedPaint(), firstNode);
+        findImagePaint(context->publication().committedPaint(), firstNode);
     ASSERT_NE(firstImage, nullptr);
     EXPECT_EQ(firstImage->imageSource.texture, imageAssetId(0x11));
     const UI::UICommittedPaintEntry* selectionPaint = nullptr;
     for (const UI::UICommittedPaintEntry& entry :
-         context->committedPaint().entries())
+         context->publication().committedPaint().entries())
     {
         if (entry.node == firstNode &&
             entry.solidFill == UI::premultiply(selectionColor))
@@ -694,11 +694,11 @@ TEST_F(UIVirtualGridViewTest,
     EXPECT_EQ(first->valueText, "Old type");
     EXPECT_EQ(first->description, "Old status");
     const u64 committedLayoutRevision =
-        context->committedLayout().layoutRevision();
+        context->publication().committedLayout().layoutRevision();
     const u64 committedPaintRevision =
-        context->committedPaint().paintRevision();
+        context->publication().committedPaint().paintRevision();
     const u64 committedSemanticsRevision =
-        context->committedSemantics().semanticsRevision();
+        context->publication().committedSemantics().semanticsRevision();
 
     source.label = "Candidate item";
     source.secondary = "Candidate type";
@@ -707,43 +707,43 @@ TEST_F(UIVirtualGridViewTest,
     source.failingIndex = 1;
     assertOk(updater.invalidateVirtualGridViewItems(grid));
     const Core::Status rejected =
-        context->commitLayout({.width = 220.0F, .height = 60.0F});
+        context->publication().commitLayout({.width = 220.0F, .height = 60.0F});
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidControlValue);
-    EXPECT_EQ(context->committedLayout().layoutRevision(),
+    EXPECT_EQ(context->publication().committedLayout().layoutRevision(),
               committedLayoutRevision);
-    EXPECT_EQ(context->committedPaint().paintRevision(),
+    EXPECT_EQ(context->publication().committedPaint().paintRevision(),
               committedPaintRevision);
-    EXPECT_EQ(context->committedSemantics().semanticsRevision(),
+    EXPECT_EQ(context->publication().committedSemantics().semanticsRevision(),
               committedSemanticsRevision);
-    first = findVirtualItem(context->committedSemantics(), 0);
+    first = findVirtualItem(context->publication().committedSemantics(), 0);
     ASSERT_NE(first, nullptr);
     EXPECT_EQ(first->node, firstNode);
     EXPECT_EQ(first->name, "Old item");
     EXPECT_EQ(first->valueText, "Old type");
     EXPECT_EQ(first->description, "Old status");
-    firstImage = findImagePaint(context->committedPaint(), firstNode);
+    firstImage = findImagePaint(context->publication().committedPaint(), firstNode);
     ASSERT_NE(firstImage, nullptr);
     EXPECT_EQ(firstImage->imageSource.texture, imageAssetId(0x11));
 
     source.failingIndex = (std::numeric_limits<u64>::max)();
     source.preview.reset();
-    assertOk(context->commitLayout({.width = 220.0F, .height = 60.0F}));
-    first = findVirtualItem(context->committedSemantics(), 0);
+    assertOk(context->publication().commitLayout({.width = 220.0F, .height = 60.0F}));
+    first = findVirtualItem(context->publication().committedSemantics(), 0);
     ASSERT_NE(first, nullptr);
     EXPECT_EQ(first->name, "Candidate item");
     EXPECT_EQ(first->valueText, "Candidate type");
     EXPECT_EQ(first->description, "Candidate status");
-    firstImage = findImagePaint(context->committedPaint(), first->node);
+    firstImage = findImagePaint(context->publication().committedPaint(), first->node);
     ASSERT_NE(firstImage, nullptr);
     EXPECT_EQ(firstImage->imageSource.texture, imageAssetId(0x22));
 
     source.preview = imageSource(0x44);
     assertOk(updater.invalidateVirtualGridViewItems(grid));
-    assertOk(context->commitLayout({.width = 220.0F, .height = 60.0F}));
-    first = findVirtualItem(context->committedSemantics(), 0);
+    assertOk(context->publication().commitLayout({.width = 220.0F, .height = 60.0F}));
+    first = findVirtualItem(context->publication().committedSemantics(), 0);
     ASSERT_NE(first, nullptr);
-    firstImage = findImagePaint(context->committedPaint(), first->node);
+    firstImage = findImagePaint(context->publication().committedPaint(), first->node);
     ASSERT_NE(firstImage, nullptr);
     EXPECT_EQ(firstImage->imageSource.texture, imageAssetId(0x44));
 }
@@ -753,8 +753,8 @@ TEST_F(UIVirtualGridViewTest, PresentationRejectsInvalidUtf8WithoutPublishing)
     VirtualGridDataSource source{.count = 4};
     auto context = createContext(window, ContextNodeCapacity);
     ASSERT_NE(context, nullptr);
-    auto root = context->rootBuilder().createRoot().value();
-    auto updater = context->treeUpdater(root).value();
+    auto root = context->authoring().rootBuilder().createRoot().value();
+    auto updater = context->authoring().treeUpdater(root).value();
     const UI::UINodeId grid = *updater.createElement(
         root.rootNodeId(), UI::makeVirtualGridViewElement({.materializedItemCapacity = 4}));
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(220.0F, 60.0F)));
@@ -763,15 +763,15 @@ TEST_F(UIVirtualGridViewTest, PresentationRejectsInvalidUtf8WithoutPublishing)
         grid, {.minimumItemWidth = 100.0F, .itemHeight = 20.0F,
                .scrollBarVisibility = UI::UIScrollBarVisibility::Hidden}));
     assertOk(updater.setVirtualGridViewDataSource(grid, source.view()));
-    assertOk(context->commitLayout({.width = 220.0F, .height = 60.0F}));
-    const u64 revision = context->committedSemantics().semanticsRevision();
+    assertOk(context->publication().commitLayout({.width = 220.0F, .height = 60.0F}));
+    const u64 revision = context->publication().committedSemantics().semanticsRevision();
 
     source.secondary.assign("\xFF", 1);
     assertOk(updater.invalidateVirtualGridViewItems(grid));
-    const Core::Status rejected = context->commitLayout({.width = 220.0F, .height = 60.0F});
+    const Core::Status rejected = context->publication().commitLayout({.width = 220.0F, .height = 60.0F});
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidText);
-    EXPECT_EQ(context->committedSemantics().semanticsRevision(), revision);
+    EXPECT_EQ(context->publication().committedSemantics().semanticsRevision(), revision);
 }
 
 TEST_F(UIVirtualGridViewTest,
@@ -781,8 +781,8 @@ TEST_F(UIVirtualGridViewTest,
     ObservingMemoryResource resource;
     auto context = createContext(window, ContextNodeCapacity, resource);
     ASSERT_NE(context, nullptr);
-    auto root = context->rootBuilder().createRoot().value();
-    auto updater = context->treeUpdater(root).value();
+    auto root = context->authoring().rootBuilder().createRoot().value();
+    auto updater = context->authoring().treeUpdater(root).value();
     VirtualGridDataSource source{.count = 1'000};
     const UI::UINodeId grid = *updater.createElement(
         root.rootNodeId(), UI::makeVirtualGridViewElement(
@@ -801,21 +801,21 @@ TEST_F(UIVirtualGridViewTest,
             .wheelStep = 40.0F,
     }));
     assertOk(updater.setVirtualGridViewDataSource(grid, source.view()));
-    assertOk(context->commitLayout({.width = 220.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 220.0F, .height = 100.0F}));
     assertOk(updater.scrollVirtualGridViewToIndex(
         grid, 20, UI::UIVirtualGridViewScrollAlignment::Start));
-    assertOk(context->commitLayout({.width = 220.0F, .height = 100.0F}));
+    assertOk(context->publication().commitLayout({.width = 220.0F, .height = 100.0F}));
     const usize allocationCount = resource.allocationCount();
 
     for (u64 routeIndex = 0; routeIndex < 100; ++routeIndex)
     {
         const float wheelDelta = routeIndex % 2 == 0 ? -1.0F : 1.0F;
-        auto routed = context->routePointerInput(pointerInput(
+        auto routed = context->input().routePointerInput(pointerInput(
             window, UI::UIRoutedPointerEventKind::Wheel, routeIndex + 1,
             {.x = 100.0F, .y = 50.0F}, {.x = 0.0F, .y = wheelDelta}));
         ASSERT_TRUE(routed.has_value()) << routed.error().message;
         EXPECT_TRUE(routed->consumed);
-        assertOk(context->commitLayout({.width = 220.0F, .height = 100.0F}));
+        assertOk(context->publication().commitLayout({.width = 220.0F, .height = 100.0F}));
     }
     EXPECT_EQ(resource.allocationCount(), allocationCount);
 }

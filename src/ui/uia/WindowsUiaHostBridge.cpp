@@ -6,6 +6,7 @@
 #include <tina/core/error/Error.hpp>
 #include <tina/ui/UIContext.hpp>
 #include <tina/ui/UIErrors.hpp>
+#include <tina/ui/UIInputRouter.hpp>
 
 #include <UIAutomation.h>
 #include <commctrl.h>
@@ -172,7 +173,7 @@ HRESULT WindowsUiaHostBridge::dispatchAccessibilityAction(const UIAccessibilityA
     if (action.kind == UIAccessibilityActionKind::Focus && m_hwnd != nullptr) {
         (void)::SetFocus(m_hwnd);
     }
-    const Core::Status status = m_actionContext->performAccessibilityAction(action);
+    const Core::Status status = m_actionContext->input().performAccessibilityAction(action);
     if (status) {
         return S_OK;
     }

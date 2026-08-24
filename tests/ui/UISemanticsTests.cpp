@@ -32,14 +32,14 @@ using WindowPool = Core::GenerationPool<int, Platform::WindowRegistryTag>;
 
 [[nodiscard]] UI::UIRootOwner createRoot(UI::UIContext& context)
 {
-    auto result = context.rootBuilder().createRoot();
+    auto result = context.authoring().rootBuilder().createRoot();
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UIRootOwner{};
 }
 
 [[nodiscard]] UI::UITreeUpdater createUpdater(UI::UIContext& context, UI::UIRootOwner& root)
 {
-    auto result = context.treeUpdater(root);
+    auto result = context.authoring().treeUpdater(root);
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UITreeUpdater{};
 }
@@ -67,12 +67,12 @@ TEST(UISemanticsTest, PublishesInteractiveKindsAndOmitsDecorators)
     auto root = createRoot(*context);
     ASSERT_TRUE(root.hasValue());
 
-    auto panel = context->rootBuilder().createElement(root.rootNodeId(), UI::makePanelElement());
-    auto label = context->rootBuilder().createElement(root.rootNodeId(), UI::makeLabelElement());
-    auto button = context->rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement());
-    auto checkbox = context->rootBuilder().createElement(root.rootNodeId(), UI::makeCheckboxElement());
-    auto slider = context->rootBuilder().createElement(root.rootNodeId(), UI::makeSliderElement());
-    auto textEdit = context->rootBuilder().createElement(root.rootNodeId(), UI::makeTextEditElement());
+    auto panel = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makePanelElement());
+    auto label = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeLabelElement());
+    auto button = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeButtonElement());
+    auto checkbox = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeCheckboxElement());
+    auto slider = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeSliderElement());
+    auto textEdit = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeTextEditElement());
     ASSERT_TRUE(panel.has_value());
     ASSERT_TRUE(label.has_value());
     ASSERT_TRUE(button.has_value());
@@ -94,20 +94,20 @@ TEST(UISemanticsTest, PublishesInteractiveKindsAndOmitsDecorators)
     assertOk(updater.setSliderRange(*slider, 0.0F, 1.0F, 0.1F));
     assertOk(updater.setSliderValue(*slider, 0.4F));
     assertOk(updater.setText(*textEdit, "Player One"));
-    assertOk(context->commitLayout({.width = 400.0F, .height = 200.0F}));
+    assertOk(context->publication().commitLayout({.width = 400.0F, .height = 200.0F}));
 
     // Cycle the keyboard focus ring to the TextEdit, then republish focused semantics.
     UI::UINodeId focused{};
     for (usize step = 0; step < 4 && focused != *textEdit; ++step) {
-        auto focus = context->routeDefaultActionFocusStep(false);
+        auto focus = context->input().routeDefaultActionFocusStep(false);
         ASSERT_TRUE(focus.has_value()) << (focus ? "" : focus.error().message);
         EXPECT_TRUE(focus->consumed);
         focused = focus->focus;
     }
     ASSERT_EQ(focused, *textEdit);
-    assertOk(context->commitLayout({.width = 400.0F, .height = 200.0F}));
+    assertOk(context->publication().commitLayout({.width = 400.0F, .height = 200.0F}));
 
-    const auto semantics = context->committedSemantics();
+    const auto semantics = context->publication().committedSemantics();
     EXPECT_FALSE(semantics.empty());
     EXPECT_GT(semantics.semanticsRevision(), 0U);
 
@@ -173,18 +173,18 @@ TEST(UISemanticsTest, CheckboxToggleAdvancesSemanticsRevision)
     ASSERT_NE(context, nullptr);
     auto root = createRoot(*context);
     ASSERT_TRUE(root.hasValue());
-    auto checkbox = context->rootBuilder().createElement(root.rootNodeId(), UI::makeCheckboxElement());
+    auto checkbox = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeCheckboxElement());
     ASSERT_TRUE(checkbox.has_value());
 
     auto updater = createUpdater(*context, root);
     assertOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(100.0F, 100.0F)));
     assertOk(updater.setLayoutStyle(*checkbox, fixedSize(40.0F, 40.0F)));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
-    const u64 firstRevision = context->committedSemantics().semanticsRevision();
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
+    const u64 firstRevision = context->publication().committedSemantics().semanticsRevision();
 
     assertOk(updater.setChecked(*checkbox, true));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
-    const auto semantics = context->committedSemantics();
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
+    const auto semantics = context->publication().committedSemantics();
     EXPECT_GT(semantics.semanticsRevision(), firstRevision);
     ASSERT_EQ(semantics.size(), 1U);
     EXPECT_TRUE(semantics.entries()[0].checked);
@@ -199,8 +199,8 @@ TEST(UISemanticsTest, PublishedTextRemainsStableUntilTheNextCommit)
     ASSERT_NE(context, nullptr);
     auto root = createRoot(*context);
     ASSERT_TRUE(root.hasValue());
-    auto label = context->rootBuilder().createElement(root.rootNodeId(), UI::makeLabelElement());
-    auto textEdit = context->rootBuilder().createElement(root.rootNodeId(), UI::makeTextEditElement());
+    auto label = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeLabelElement());
+    auto textEdit = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makeTextEditElement());
     ASSERT_TRUE(label.has_value());
     ASSERT_TRUE(textEdit.has_value());
 
@@ -210,9 +210,9 @@ TEST(UISemanticsTest, PublishedTextRemainsStableUntilTheNextCommit)
     assertOk(updater.setLayoutStyle(*textEdit, fixedSize(120.0F, 32.0F)));
     assertOk(updater.setText(*label, "Label A"));
     assertOk(updater.setText(*textEdit, "Value A"));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 80.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 80.0F}));
 
-    const auto published = context->committedSemantics();
+    const auto published = context->publication().committedSemantics();
     const u64 publishedRevision = published.semanticsRevision();
     ASSERT_EQ(published.size(), 2U);
 
@@ -234,10 +234,10 @@ TEST(UISemanticsTest, PublishedTextRemainsStableUntilTheNextCommit)
     }
     EXPECT_TRUE(sawOldLabel);
     EXPECT_TRUE(sawOldValue);
-    EXPECT_EQ(context->committedSemantics().semanticsRevision(), publishedRevision);
+    EXPECT_EQ(context->publication().committedSemantics().semanticsRevision(), publishedRevision);
 
-    assertOk(context->commitLayout({.width = 200.0F, .height = 80.0F}));
-    const auto updated = context->committedSemantics();
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 80.0F}));
+    const auto updated = context->publication().committedSemantics();
     EXPECT_GT(updated.semanticsRevision(), publishedRevision);
     for (const UI::UISemanticsEntry& entry : updated.entries()) {
         if (entry.node == *label) {

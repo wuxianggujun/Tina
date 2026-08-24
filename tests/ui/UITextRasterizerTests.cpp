@@ -1,8 +1,10 @@
 #include <gtest/gtest.h>
 
 #include <tina/core/id/GenerationPool.hpp>
+#include <tina/ui/UIAuthoring.hpp>
 #include <tina/ui/UIContext.hpp>
 #include <tina/ui/UIErrors.hpp>
+#include <tina/ui/UIPublicationPipeline.hpp>
 #include <tina/ui/text/UITextRasterizer.hpp>
 
 #include <memory>
@@ -115,16 +117,16 @@ TEST(UITextRasterizerTests, ContextCreateWiresPlaceholderRasterizerForTextMeasur
     ASSERT_TRUE(contextResult.has_value())
         << (contextResult ? "" : contextResult.error().message);
     auto& context = **contextResult;
-    auto root = *context.rootBuilder().createRoot();
-    auto updater = *context.treeUpdater(root);
+    auto root = *context.authoring().rootBuilder().createRoot();
+    auto updater = *context.authoring().treeUpdater(root);
     auto label = *updater.createElement(root.rootNodeId(), UI::makeLabelElement());
 
     assertOk(updater.setText(label, "Hi"));
     auto text = updater.text(label);
     ASSERT_TRUE(text.has_value());
     EXPECT_EQ(*text, "Hi");
-    assertOk(context.commitLayout(UI::UILogicalSize{.width = 200.0F, .height = 100.0F}));
-    EXPECT_FALSE(context.committedLayout().empty());
+    assertOk(context.publication().commitLayout(UI::UILogicalSize{.width = 200.0F, .height = 100.0F}));
+    EXPECT_FALSE(context.publication().committedLayout().empty());
 }
 
 TEST(UITextRasterizerTests, ContextCreateRejectsNullRasterizer)

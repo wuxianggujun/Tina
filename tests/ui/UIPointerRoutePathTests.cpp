@@ -30,14 +30,14 @@ class UIPointerRoutePathTests : public ::testing::Test {
              .applyDefaultProductChrome = false});
         ASSERT_TRUE(contextResult.has_value());
         context = std::move(*contextResult);
-        auto rootResult = context->rootBuilder().createRoot();
+        auto rootResult = context->authoring().rootBuilder().createRoot();
         ASSERT_TRUE(rootResult.has_value());
         root = std::move(*rootResult);
-        auto panelResult = context->rootBuilder().createElement(
+        auto panelResult = context->authoring().rootBuilder().createElement(
             root.rootNodeId(), UI::makePanelElement());
         ASSERT_TRUE(panelResult.has_value());
         panel = *panelResult;
-        auto buttonResult = context->rootBuilder().createElement(
+        auto buttonResult = context->authoring().rootBuilder().createElement(
             panel, UI::makeButtonElement());
         ASSERT_TRUE(buttonResult.has_value());
         button = *buttonResult;

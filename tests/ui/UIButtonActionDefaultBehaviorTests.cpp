@@ -25,7 +25,7 @@ TEST_F(UIButtonActionTest, ReentrantDefaultActionActivationIsRejectedAndGuardSur
             if (state.callbackCount != 1U) {
                 return;
             }
-            auto nested = state.context->routeDefaultActionActivate(
+            auto nested = state.context->input().routeDefaultActionActivate(
                 Platform::PlatformFrameId{2},
                 20,
                 UI::UIButtonActivationSource::Keyboard);
@@ -33,18 +33,18 @@ TEST_F(UIButtonActionTest, ReentrantDefaultActionActivationIsRejectedAndGuardSur
             if (!nested) {
                 state.nestedError = nested.error().code;
             }
-            const Core::Status commit = state.context->commitLayout(
+            const Core::Status commit = state.context->publication().commitLayout(
                 {.width = 100.0F, .height = 100.0F});
             if (!commit) {
                 state.commitError = commit.error().code;
             }
         }}));
 
-    auto focus = tree.context->routeDefaultActionFocusStep(false);
+    auto focus = tree.context->input().routeDefaultActionFocusStep(false);
     ASSERT_TRUE(focus.has_value()) << (focus ? "" : focus.error().message);
     ASSERT_EQ(focus->focus, tree.button);
-    ASSERT_EQ(tree.context->defaultActionFocus(), tree.button);
-    assertOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    ASSERT_EQ(tree.context->input().defaultActionFocus(), tree.button);
+    assertOk(tree.context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
     assertOk(tree.updater.setBoxPaint(
         tree.button,
@@ -55,7 +55,7 @@ TEST_F(UIButtonActionTest, ReentrantDefaultActionActivationIsRejectedAndGuardSur
         }));
     const u64 paintRevisionBefore = tree.context->statistics().paintRevision;
 
-    auto outer = tree.context->routeDefaultActionActivate(
+    auto outer = tree.context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{1},
         10,
         UI::UIButtonActivationSource::Keyboard);
@@ -66,7 +66,7 @@ TEST_F(UIButtonActionTest, ReentrantDefaultActionActivationIsRejectedAndGuardSur
     EXPECT_EQ(state.nestedError, UI::UIErrorCode::PointerRouteAlreadyInProgress);
     EXPECT_EQ(state.commitError, UI::UIErrorCode::PointerRouteAlreadyInProgress);
     EXPECT_EQ(state.callbackCount, 1U);
-    EXPECT_EQ(tree.context->defaultActionFocus(), tree.button);
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.button);
     EXPECT_FALSE(buttonPressed(tree.updater, tree.button));
     EXPECT_EQ(tree.context->statistics().paintRevision, paintRevisionBefore);
 }
@@ -79,7 +79,7 @@ TEST_F(UIButtonActionTest, KeyboardAndGamepadAcceptActivateDefaultFocusedButton)
     assertOk(tree.updater.setButtonAction(tree.button, makeAction(recorder, 7)));
 
     // Without pointer arm, Accept does nothing and is not consumed.
-    auto idle = tree.context->routeDefaultActionActivate(
+    auto idle = tree.context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{1},
         10,
         UI::UIButtonActivationSource::Keyboard);
@@ -96,7 +96,7 @@ TEST_F(UIButtonActionTest, KeyboardAndGamepadAcceptActivateDefaultFocusedButton)
     expectButtonPressed(tree.updater, tree.button, true);
 
     // Keyboard Accept activates once and does not require pointer Up.
-    auto keyboard = tree.context->routeDefaultActionActivate(
+    auto keyboard = tree.context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{2},
         20,
         UI::UIButtonActivationSource::Keyboard);
@@ -108,7 +108,7 @@ TEST_F(UIButtonActionTest, KeyboardAndGamepadAcceptActivateDefaultFocusedButton)
     EXPECT_EQ(recorder.entries[0].sourceSequence, 20U);
     EXPECT_EQ(recorder.entries[0].marker, 7);
 
-    auto gamepad = tree.context->routeDefaultActionActivate(
+    auto gamepad = tree.context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{3},
         30,
         UI::UIButtonActivationSource::Gamepad);
@@ -136,15 +136,15 @@ TEST_F(UIButtonActionTest, DisablingUnrelatedButtonPreservesDefaultActionPress)
     assertOk(updater.setLayoutStyle(firstPanel, fixedSize(50.0F, 40.0F)));
     assertOk(updater.setLayoutStyle(firstButton, fixedSize(40.0F, 40.0F)));
     assertOk(updater.setLayoutStyle(unrelatedButton, fixedSize(50.0F, 40.0F)));
-    assertOk(context->commitLayout({.width = 100.0F, .height = 40.0F}));
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 40.0F}));
 
-    auto focus = context->routeDefaultActionFocusStep(false);
+    auto focus = context->input().routeDefaultActionFocusStep(false);
     ASSERT_TRUE(focus.has_value()) << (focus ? "" : focus.error().message);
     ASSERT_EQ(focus->focus, firstButton);
 
     const Platform::DigitalControlIdentity enter =
         Platform::KeyControlIdentity{firstWindow, Platform::Key::Enter};
-    auto down = context->routeDefaultActionActivate(
+    auto down = context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{1},
         10,
         UI::UIButtonActivationSource::Keyboard,
@@ -154,10 +154,10 @@ TEST_F(UIButtonActionTest, DisablingUnrelatedButtonPreservesDefaultActionPress)
     expectButtonPressed(updater, firstButton, true);
 
     assertOk(updater.setEnabled(unrelatedButton, false));
-    EXPECT_EQ(context->defaultActionFocus(), firstButton);
+    EXPECT_EQ(context->input().defaultActionFocus(), firstButton);
     expectButtonPressed(updater, firstButton, true);
 
-    auto up = context->routeDefaultActionRelease(
+    auto up = context->input().routeDefaultActionRelease(
         Platform::PlatformFrameId{2},
         20,
         UI::UIButtonActivationSource::Keyboard,
@@ -172,14 +172,14 @@ TEST_F(UIButtonActionTest, DisablingPressedButtonClearsPressAndQueuesDirtyState)
     ButtonTree tree = createButtonTree(firstWindow);
     ASSERT_NE(tree.context, nullptr);
 
-    auto focus = tree.context->routeDefaultActionFocusStep(false);
+    auto focus = tree.context->input().routeDefaultActionFocusStep(false);
     ASSERT_TRUE(focus.has_value()) << (focus ? "" : focus.error().message);
     ASSERT_EQ(focus->focus, tree.button);
-    assertOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(tree.context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
     const Platform::DigitalControlIdentity enter =
         Platform::KeyControlIdentity{firstWindow, Platform::Key::Enter};
-    auto down = tree.context->routeDefaultActionActivate(
+    auto down = tree.context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{1},
         10,
         UI::UIButtonActivationSource::Keyboard,
@@ -187,11 +187,11 @@ TEST_F(UIButtonActionTest, DisablingPressedButtonClearsPressAndQueuesDirtyState)
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
     EXPECT_TRUE(down->consumed);
     expectButtonPressed(tree.updater, tree.button, true);
-    assertOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(tree.context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     EXPECT_EQ(tree.context->statistics().dirtyQueuePendingCount, 0U);
 
     assertOk(tree.updater.setEnabled(tree.button, false));
-    EXPECT_FALSE(tree.context->defaultActionFocus().hasValue());
+    EXPECT_FALSE(tree.context->input().defaultActionFocus().hasValue());
     expectButtonPressed(tree.updater, tree.button, false);
     EXPECT_EQ(tree.context->statistics().dirtyQueuePendingCount, 1U);
 }
@@ -203,7 +203,7 @@ TEST_F(UIButtonActionTest, KeyboardAcceptPressTracksEachKeyUntilItsMatchingUp)
     ActionRecorder recorder;
     assertOk(tree.updater.setButtonAction(tree.button, makeAction(recorder, 1)));
 
-    auto focus = tree.context->routeDefaultActionFocusStep(false);
+    auto focus = tree.context->input().routeDefaultActionFocusStep(false);
     ASSERT_TRUE(focus.has_value()) << (focus ? "" : focus.error().message);
     ASSERT_EQ(focus->focus, tree.button);
 
@@ -211,26 +211,26 @@ TEST_F(UIButtonActionTest, KeyboardAcceptPressTracksEachKeyUntilItsMatchingUp)
         Platform::KeyControlIdentity{firstWindow, Platform::Key::Enter};
     const Platform::DigitalControlIdentity space =
         Platform::KeyControlIdentity{firstWindow, Platform::Key::Space};
-    auto enterDown = tree.context->routeDefaultActionActivate(
+    auto enterDown = tree.context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{3}, 30, UI::UIButtonActivationSource::Keyboard, enter);
     ASSERT_TRUE(enterDown.has_value()) << (enterDown ? "" : enterDown.error().message);
     EXPECT_TRUE(enterDown->consumed);
     EXPECT_TRUE(enterDown->activated);
     expectButtonPressed(tree.updater, tree.button, true);
 
-    auto spaceDown = tree.context->routeDefaultActionActivate(
+    auto spaceDown = tree.context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{4}, 40, UI::UIButtonActivationSource::Keyboard, space);
     ASSERT_TRUE(spaceDown.has_value()) << (spaceDown ? "" : spaceDown.error().message);
     EXPECT_TRUE(spaceDown->consumed);
     expectButtonPressed(tree.updater, tree.button, true);
 
-    auto enterUp = tree.context->routeDefaultActionRelease(
+    auto enterUp = tree.context->input().routeDefaultActionRelease(
         Platform::PlatformFrameId{5}, 50, UI::UIButtonActivationSource::Keyboard, enter);
     ASSERT_TRUE(enterUp.has_value()) << (enterUp ? "" : enterUp.error().message);
     EXPECT_TRUE(enterUp->consumed);
     expectButtonPressed(tree.updater, tree.button, true);
 
-    auto spaceUp = tree.context->routeDefaultActionRelease(
+    auto spaceUp = tree.context->input().routeDefaultActionRelease(
         Platform::PlatformFrameId{6}, 60, UI::UIButtonActivationSource::Keyboard, space);
     ASSERT_TRUE(spaceUp.has_value()) << (spaceUp ? "" : spaceUp.error().message);
     EXPECT_TRUE(spaceUp->consumed);
@@ -248,7 +248,7 @@ TEST_F(UIButtonActionTest, DefaultActionWithoutRegisteredCallbackConsumesButDoes
         makePointerInput(firstWindow, UI::UIRoutedPointerEventKind::ButtonDown, 1));
     ASSERT_TRUE(down.consumed);
 
-    auto result = tree.context->routeDefaultActionActivate(
+    auto result = tree.context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{4},
         40,
         UI::UIButtonActivationSource::Keyboard);
@@ -271,31 +271,31 @@ TEST_F(UIButtonActionTest, TabCyclesDefaultActionFocusAmongButtons)
     assertOk(updater.setLayoutStyle(first, fixedSize(40.0F, 20.0F)));
     assertOk(updater.setLayoutStyle(second, fixedSize(40.0F, 20.0F)));
     assertOk(updater.setLayoutStyle(third, fixedSize(40.0F, 20.0F)));
-    assertOk(context->commitLayout({.width = 200.0F, .height = 40.0F}));
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 40.0F}));
 
-    EXPECT_FALSE(context->defaultActionFocus().hasValue());
+    EXPECT_FALSE(context->input().defaultActionFocus().hasValue());
 
-    auto step1 = context->routeDefaultActionFocusStep(false);
+    auto step1 = context->input().routeDefaultActionFocusStep(false);
     ASSERT_TRUE(step1.has_value()) << (step1 ? "" : step1.error().message);
     EXPECT_TRUE(step1->consumed);
     EXPECT_TRUE(step1->moved);
     EXPECT_EQ(step1->focus, first);
-    EXPECT_EQ(context->defaultActionFocus(), first);
+    EXPECT_EQ(context->input().defaultActionFocus(), first);
 
-    auto step2 = context->routeDefaultActionFocusStep(false);
+    auto step2 = context->input().routeDefaultActionFocusStep(false);
     ASSERT_TRUE(step2.has_value());
     EXPECT_TRUE(step2->consumed);
     EXPECT_EQ(step2->focus, second);
 
-    auto step3 = context->routeDefaultActionFocusStep(false);
+    auto step3 = context->input().routeDefaultActionFocusStep(false);
     ASSERT_TRUE(step3.has_value());
     EXPECT_EQ(step3->focus, third);
 
-    auto wrap = context->routeDefaultActionFocusStep(false);
+    auto wrap = context->input().routeDefaultActionFocusStep(false);
     ASSERT_TRUE(wrap.has_value());
     EXPECT_EQ(wrap->focus, first);
 
-    auto reverse = context->routeDefaultActionFocusStep(true);
+    auto reverse = context->input().routeDefaultActionFocusStep(true);
     ASSERT_TRUE(reverse.has_value());
     EXPECT_EQ(reverse->focus, third);
 }

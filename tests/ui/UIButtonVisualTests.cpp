@@ -67,7 +67,7 @@ constexpr UI::UIButtonPaint StatePaint{
 
 [[nodiscard]] UI::UIRootOwner createRoot(UI::UIContext& context)
 {
-    auto result = context.rootBuilder().createRoot();
+    auto result = context.authoring().rootBuilder().createRoot();
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UIRootOwner{};
 }
@@ -76,7 +76,7 @@ constexpr UI::UIButtonPaint StatePaint{
     UI::UIContext& context,
     UI::UINodeId parent)
 {
-    auto result = context.rootBuilder().createElement(parent, UI::makeButtonElement());
+    auto result = context.authoring().rootBuilder().createElement(parent, UI::makeButtonElement());
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? *result : UI::UINodeId{};
 }
@@ -85,7 +85,7 @@ constexpr UI::UIButtonPaint StatePaint{
     UI::UIContext& context,
     UI::UINodeId parent)
 {
-    auto result = context.rootBuilder().createElement(parent, UI::makePanelElement());
+    auto result = context.authoring().rootBuilder().createElement(parent, UI::makePanelElement());
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? *result : UI::UINodeId{};
 }
@@ -94,7 +94,7 @@ constexpr UI::UIButtonPaint StatePaint{
     UI::UIContext& context,
     UI::UIRootOwner& root)
 {
-    auto result = context.treeUpdater(root);
+    auto result = context.authoring().treeUpdater(root);
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UITreeUpdater{};
 }
@@ -123,7 +123,7 @@ void publishLayout(
     float width = 100.0F,
     float height = 100.0F)
 {
-    assertOk(context.commitLayout({.width = width, .height = height}));
+    assertOk(context.publication().commitLayout({.width = width, .height = height}));
 }
 
 [[nodiscard]] UI::UIPointerInputEvent makePointerInput(
@@ -151,7 +151,7 @@ void publishLayout(
     UI::UIContext& context,
     const UI::UIPointerInputEvent& input)
 {
-    auto result = context.routePointerInput(input);
+    auto result = context.input().routePointerInput(input);
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? *result : UI::UIPointerRouteResult{};
 }
@@ -220,18 +220,18 @@ void publishLayout(
 }
 
 void expectButtonFill(
-    const UI::UIContext& context,
+    UI::UIContext& context,
     UI::UINodeId button,
     UI::UIPremultipliedRgba8Color expected)
 {
     const UI::UICommittedPaintEntry* entry =
-        findPaintEntry(context.committedPaint(), button);
+        findPaintEntry(context.publication().committedPaint(), button);
     ASSERT_NE(entry, nullptr);
     EXPECT_EQ(entry->solidFill, expected);
 }
 
 void expectButtonFill(
-    const UI::UIContext& context,
+    UI::UIContext& context,
     UI::UINodeId button,
     UI::UIStraightSrgba8Color expected)
 {
@@ -276,7 +276,7 @@ TEST(UIButtonVisualTest, PaintTracksHoverPressMoveReleaseAndFocus)
     publishLayout(*context);
 
     expectButtonFill(*context, button, NormalColor);
-    EXPECT_FALSE(context->defaultActionFocus().hasValue());
+    EXPECT_FALSE(context->input().defaultActionFocus().hasValue());
 
     const UI::UIPointerRouteResult hover = route(
         *context,
@@ -299,11 +299,11 @@ TEST(UIButtonVisualTest, PaintTracksHoverPressMoveReleaseAndFocus)
             {.x = 10.0F, .y = 10.0F}));
     EXPECT_TRUE(down.consumed);
     EXPECT_TRUE(isButtonPressed(updater, button));
-    EXPECT_EQ(context->defaultActionFocus(), button);
+    EXPECT_EQ(context->input().defaultActionFocus(), button);
     publishLayout(*context);
     expectButtonFill(*context, button, PressedColor);
     const UI::UISemanticsEntry* semantics =
-        findSemanticsEntry(context->committedSemantics(), button);
+        findSemanticsEntry(context->publication().committedSemantics(), button);
     ASSERT_NE(semantics, nullptr);
     EXPECT_TRUE(semantics->focused);
 
@@ -351,7 +351,7 @@ TEST(UIButtonVisualTest, PaintTracksHoverPressMoveReleaseAndFocus)
             {.x = 90.0F, .y = 90.0F}));
     publishLayout(*context);
     expectButtonFill(*context, button, NormalColor);
-    semantics = findSemanticsEntry(context->committedSemantics(), button);
+    semantics = findSemanticsEntry(context->publication().committedSemantics(), button);
     ASSERT_NE(semantics, nullptr);
     EXPECT_TRUE(semantics->focused);
 }
@@ -384,9 +384,9 @@ TEST(UIButtonVisualTest, ProductChromeUsesSemanticElevationAndPublishesFocusBord
             [](const UI::UIButtonActionEvent&) noexcept {}}));
     publishLayout(*context);
 
-    const UI::UIButtonChrome chrome = UI::makeTonalButtonChrome(context->productTheme());
-    EXPECT_EQ(countSolidEntries(context->committedPaint(), button), 2U);
-    EXPECT_TRUE(hasSolidColor(context->committedPaint(), button, chrome.box.shadow));
+    const UI::UIButtonChrome chrome = UI::makeTonalButtonChrome(context->style().productTheme());
+    EXPECT_EQ(countSolidEntries(context->publication().committedPaint(), button), 2U);
+    EXPECT_TRUE(hasSolidColor(context->publication().committedPaint(), button, chrome.box.shadow));
 
     const UI::UIPointerRouteResult downRoute = route(
         *context,
@@ -397,10 +397,10 @@ TEST(UIButtonVisualTest, ProductChromeUsesSemanticElevationAndPublishesFocusBord
             {.x = 10.0F, .y = 10.0F}));
     EXPECT_TRUE(downRoute.consumed);
     publishLayout(*context);
-    EXPECT_EQ(countSolidEntries(context->committedPaint(), button), 1U);
-    EXPECT_FALSE(hasSolidColor(context->committedPaint(), button, chrome.box.shadow));
+    EXPECT_EQ(countSolidEntries(context->publication().committedPaint(), button), 1U);
+    EXPECT_FALSE(hasSolidColor(context->publication().committedPaint(), button, chrome.box.shadow));
     EXPECT_TRUE(hasSolidColor(
-        context->committedPaint(),
+        context->publication().committedPaint(),
         button,
         chrome.states.pressedBackgroundColor));
 
@@ -413,23 +413,23 @@ TEST(UIButtonVisualTest, ProductChromeUsesSemanticElevationAndPublishesFocusBord
             {.x = 10.0F, .y = 10.0F}));
     EXPECT_TRUE(upRoute.consumed);
     publishLayout(*context);
-    EXPECT_EQ(countSolidEntries(context->committedPaint(), button), 2U);
+    EXPECT_EQ(countSolidEntries(context->publication().committedPaint(), button), 2U);
     EXPECT_FALSE(hasSolidColor(
-        context->committedPaint(),
+        context->publication().committedPaint(),
         button,
         chrome.states.focusedBorderColor));
 
     const UI::UISemanticsEntry* semantics =
-        findSemanticsEntry(context->committedSemantics(), button);
+        findSemanticsEntry(context->publication().committedSemantics(), button);
     ASSERT_NE(semantics, nullptr);
     EXPECT_TRUE(semantics->focused);
 
-    auto navigation = context->routeFocusNavigation(
+    auto navigation = context->input().routeFocusNavigation(
         UI::UIFocusNavigationDirection::Right, true, UI::UIInputModality::Keyboard);
     ASSERT_TRUE(navigation.has_value()) << navigation.error().message;
     publishLayout(*context);
     EXPECT_TRUE(hasSolidColor(
-        context->committedPaint(),
+        context->publication().committedPaint(),
         button,
         chrome.states.focusedBorderColor));
 }
@@ -455,7 +455,7 @@ TEST(UIButtonVisualTest, KeyboardAcceptDownAndUpCommitPressedAndFocusedPaint)
     assertOk(updater.setButtonPaint(button, StatePaint));
     publishLayout(*context);
 
-    auto focus = context->routeDefaultActionFocusStep(false);
+    auto focus = context->input().routeDefaultActionFocusStep(false);
     ASSERT_TRUE(focus.has_value()) << (focus ? "" : focus.error().message);
     ASSERT_TRUE(focus->moved);
     ASSERT_EQ(focus->focus, button);
@@ -464,7 +464,7 @@ TEST(UIButtonVisualTest, KeyboardAcceptDownAndUpCommitPressedAndFocusedPaint)
 
     const Platform::DigitalControlIdentity enter =
         Platform::KeyControlIdentity{window, Platform::Key::Enter};
-    auto down = context->routeDefaultActionActivate(
+    auto down = context->input().routeDefaultActionActivate(
         Platform::PlatformFrameId{1},
         10,
         UI::UIButtonActivationSource::Keyboard,
@@ -475,7 +475,7 @@ TEST(UIButtonVisualTest, KeyboardAcceptDownAndUpCommitPressedAndFocusedPaint)
     publishLayout(*context);
     expectButtonFill(*context, button, PressedColor);
 
-    auto up = context->routeDefaultActionRelease(
+    auto up = context->input().routeDefaultActionRelease(
         Platform::PlatformFrameId{2},
         20,
         UI::UIButtonActivationSource::Keyboard,
@@ -521,10 +521,10 @@ TEST(UIButtonVisualTest, DisabledPaintWinsAndDisabledButtonDoesNotInteract)
             1,
             {.x = 10.0F, .y = 10.0F}));
     ASSERT_TRUE(isButtonPressed(updater, button));
-    ASSERT_EQ(context->defaultActionFocus(), button);
+    ASSERT_EQ(context->input().defaultActionFocus(), button);
     assertOk(updater.setEnabled(button, false));
     EXPECT_FALSE(isButtonPressed(updater, button));
-    EXPECT_FALSE(context->defaultActionFocus().hasValue());
+    EXPECT_FALSE(context->input().defaultActionFocus().hasValue());
     publishLayout(*context);
 
     expectButtonFill(
@@ -537,7 +537,7 @@ TEST(UIButtonVisualTest, DisabledPaintWinsAndDisabledButtonDoesNotInteract)
             .alpha = 140,
         });
     const UI::UISemanticsEntry* semantics =
-        findSemanticsEntry(context->committedSemantics(), button);
+        findSemanticsEntry(context->publication().committedSemantics(), button);
     ASSERT_NE(semantics, nullptr);
     EXPECT_FALSE(semantics->enabled);
     EXPECT_FALSE(semantics->focused);
@@ -567,7 +567,7 @@ TEST(UIButtonVisualTest, DisabledPaintWinsAndDisabledButtonDoesNotInteract)
             {.x = 10.0F, .y = 10.0F}));
     EXPECT_FALSE(up.consumed);
     EXPECT_FALSE(isButtonPressed(updater, button));
-    EXPECT_FALSE(context->defaultActionFocus().hasValue());
+    EXPECT_FALSE(context->input().defaultActionFocus().hasValue());
     EXPECT_EQ(activations, 0);
     publishLayout(*context);
     expectButtonFill(
@@ -628,7 +628,7 @@ TEST(UIButtonVisualTest, CancelClearsPressedHoverFocusAndDoesNotSynthesizeUp)
     publishLayout(*context);
     expectButtonFill(*context, button, PressedColor);
     ASSERT_TRUE(isButtonPressed(updater, button));
-    ASSERT_EQ(context->defaultActionFocus(), button);
+    ASSERT_EQ(context->input().defaultActionFocus(), button);
 
     assertOk(updater.setBoxPaint(
         firstBlocker,
@@ -637,9 +637,9 @@ TEST(UIButtonVisualTest, CancelClearsPressedHoverFocusAndDoesNotSynthesizeUp)
         secondBlocker,
         solidFill({.red = 4, .green = 5, .blue = 6, .alpha = 255})));
     ASSERT_EQ(context->statistics().dirtyQueuePendingCount, 2U);
-    assertOk(context->cancelPointerInteraction(window));
+    assertOk(context->input().cancelPointerInteraction(window));
     EXPECT_FALSE(isButtonPressed(updater, button));
-    EXPECT_FALSE(context->defaultActionFocus().hasValue());
+    EXPECT_FALSE(context->input().defaultActionFocus().hasValue());
     EXPECT_EQ(activations, 0);
     EXPECT_EQ(context->statistics().dirtyQueuePendingCount, 2U);
     publishLayout(*context);
@@ -655,10 +655,10 @@ TEST(UIButtonVisualTest, CancelClearsPressedHoverFocusAndDoesNotSynthesizeUp)
     EXPECT_FALSE(up.consumed);
     EXPECT_EQ(activations, 0);
 
-    const u64 paintRevision = context->committedPaint().paintRevision();
-    assertOk(context->cancelPointerInteraction(window));
+    const u64 paintRevision = context->publication().committedPaint().paintRevision();
+    assertOk(context->input().cancelPointerInteraction(window));
     publishLayout(*context);
-    EXPECT_EQ(context->committedPaint().paintRevision(), paintRevision);
+    EXPECT_EQ(context->publication().committedPaint().paintRevision(), paintRevision);
     expectButtonFill(*context, button, NormalColor);
 }
 
@@ -702,7 +702,7 @@ TEST(UIButtonVisualTest, HiddenOrCollapsedSelfClearsInteractionBeforeRestore)
                 sequence++,
                 {.x = 10.0F, .y = 10.0F}));
         ASSERT_TRUE(isButtonPressed(updater, button));
-        ASSERT_EQ(context->defaultActionFocus(), button);
+        ASSERT_EQ(context->input().defaultActionFocus(), button);
         publishLayout(*context);
         expectButtonFill(*context, button, PressedColor);
 
@@ -711,11 +711,11 @@ TEST(UIButtonVisualTest, HiddenOrCollapsedSelfClearsInteractionBeforeRestore)
         assertOk(updater.setLayoutStyle(button, unavailable));
         publishLayout(*context);
         EXPECT_FALSE(isButtonPressed(updater, button));
-        EXPECT_FALSE(context->defaultActionFocus().hasValue());
-        EXPECT_EQ(findPaintEntry(context->committedPaint(), button), nullptr);
-        EXPECT_EQ(findSemanticsEntry(context->committedSemantics(), button), nullptr);
+        EXPECT_FALSE(context->input().defaultActionFocus().hasValue());
+        EXPECT_EQ(findPaintEntry(context->publication().committedPaint(), button), nullptr);
+        EXPECT_EQ(findSemanticsEntry(context->publication().committedSemantics(), button), nullptr);
         const UI::UICommittedLayoutEntry* layout =
-            findLayoutEntry(context->committedLayout(), button);
+            findLayoutEntry(context->publication().committedLayout(), button);
         ASSERT_NE(layout, nullptr);
         EXPECT_EQ(layout->effectiveVisibility, visibility);
 
@@ -732,10 +732,10 @@ TEST(UIButtonVisualTest, HiddenOrCollapsedSelfClearsInteractionBeforeRestore)
         assertOk(updater.setLayoutStyle(button, visible));
         publishLayout(*context);
         EXPECT_FALSE(isButtonPressed(updater, button));
-        EXPECT_FALSE(context->defaultActionFocus().hasValue());
+        EXPECT_FALSE(context->input().defaultActionFocus().hasValue());
         expectButtonFill(*context, button, NormalColor);
         const UI::UISemanticsEntry* semantics =
-            findSemanticsEntry(context->committedSemantics(), button);
+            findSemanticsEntry(context->publication().committedSemantics(), button);
         ASSERT_NE(semantics, nullptr);
         EXPECT_FALSE(semantics->focused);
     }
@@ -776,7 +776,7 @@ TEST(UIButtonVisualTest, HiddenOrCollapsedAncestorClearsInteractionBeforeRestore
                 sequence++,
                 {.x = 10.0F, .y = 10.0F}));
         ASSERT_TRUE(isButtonPressed(updater, button));
-        ASSERT_EQ(context->defaultActionFocus(), button);
+        ASSERT_EQ(context->input().defaultActionFocus(), button);
         publishLayout(*context);
 
         UI::UILayoutStyle unavailable = visiblePanel;
@@ -784,21 +784,21 @@ TEST(UIButtonVisualTest, HiddenOrCollapsedAncestorClearsInteractionBeforeRestore
         assertOk(updater.setLayoutStyle(panel, unavailable));
         publishLayout(*context);
         EXPECT_FALSE(isButtonPressed(updater, button));
-        EXPECT_FALSE(context->defaultActionFocus().hasValue());
-        EXPECT_EQ(findPaintEntry(context->committedPaint(), button), nullptr);
-        EXPECT_EQ(findSemanticsEntry(context->committedSemantics(), button), nullptr);
+        EXPECT_FALSE(context->input().defaultActionFocus().hasValue());
+        EXPECT_EQ(findPaintEntry(context->publication().committedPaint(), button), nullptr);
+        EXPECT_EQ(findSemanticsEntry(context->publication().committedSemantics(), button), nullptr);
         const UI::UICommittedLayoutEntry* layout =
-            findLayoutEntry(context->committedLayout(), button);
+            findLayoutEntry(context->publication().committedLayout(), button);
         ASSERT_NE(layout, nullptr);
         EXPECT_EQ(layout->effectiveVisibility, visibility);
 
         assertOk(updater.setLayoutStyle(panel, visiblePanel));
         publishLayout(*context);
         EXPECT_FALSE(isButtonPressed(updater, button));
-        EXPECT_FALSE(context->defaultActionFocus().hasValue());
+        EXPECT_FALSE(context->input().defaultActionFocus().hasValue());
         expectButtonFill(*context, button, NormalColor);
         const UI::UISemanticsEntry* semantics =
-            findSemanticsEntry(context->committedSemantics(), button);
+            findSemanticsEntry(context->publication().committedSemantics(), button);
         ASSERT_NE(semantics, nullptr);
         EXPECT_FALSE(semantics->focused);
     }
@@ -991,7 +991,7 @@ TEST(UIButtonVisualTest, ButtonUpDirtyQueueFailureStillReleasesPressedState)
         solidFill({.red = 4, .green = 5, .blue = 6, .alpha = 255})));
     ASSERT_EQ(context->statistics().dirtyQueuePendingCount, 2U);
 
-    auto rejected = context->routePointerInput(makePointerInput(
+    auto rejected = context->input().routePointerInput(makePointerInput(
         window,
         UI::UIRoutedPointerEventKind::ButtonUp,
         2,
@@ -999,7 +999,7 @@ TEST(UIButtonVisualTest, ButtonUpDirtyQueueFailureStillReleasesPressedState)
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::CapacityExceeded);
     EXPECT_FALSE(isButtonPressed(updater, button));
-    EXPECT_EQ(context->defaultActionFocus(), button);
+    EXPECT_EQ(context->input().defaultActionFocus(), button);
     EXPECT_EQ(activations, 0);
     EXPECT_EQ(context->statistics().dirtyQueuePendingCount, 2U);
 
@@ -1048,7 +1048,7 @@ TEST(UIButtonVisualTest, StateOverrideParticipatesInPaintCapacityPreflight)
         solidFill({.red = 7, .green = 8, .blue = 9, .alpha = 255})));
     publishLayout(*context);
 
-    const UI::UICommittedPaintView baseline = context->committedPaint();
+    const UI::UICommittedPaintView baseline = context->publication().committedPaint();
     ASSERT_EQ(baseline.size(), 1U);
     ASSERT_EQ(baseline.entries()[0].node, panel);
     const UI::UICommittedPaintEntry* const oldEntries = baseline.entries().data();
@@ -1061,19 +1061,19 @@ TEST(UIButtonVisualTest, StateOverrideParticipatesInPaintCapacityPreflight)
             UI::UIRoutedPointerEventKind::Move,
             1,
             {.x = 10.0F, .y = 10.0F}));
-    const Core::Status overflow = context->commitLayout(
+    const Core::Status overflow = context->publication().commitLayout(
         {.width = 100.0F, .height = 100.0F});
     ASSERT_FALSE(overflow.has_value());
     EXPECT_EQ(overflow.error().code, UI::UIErrorCode::CapacityExceeded);
-    EXPECT_EQ(context->committedPaint().entries().data(), oldEntries);
-    EXPECT_EQ(context->committedPaint().paintRevision(), oldRevision);
-    ASSERT_EQ(context->committedPaint().size(), 1U);
-    EXPECT_EQ(context->committedPaint().entries()[0].node, panel);
+    EXPECT_EQ(context->publication().committedPaint().entries().data(), oldEntries);
+    EXPECT_EQ(context->publication().committedPaint().paintRevision(), oldRevision);
+    ASSERT_EQ(context->publication().committedPaint().size(), 1U);
+    EXPECT_EQ(context->publication().committedPaint().entries()[0].node, panel);
 
     assertOk(updater.setBoxPaint(panel, {}));
     publishLayout(*context);
-    ASSERT_EQ(context->committedPaint().size(), 1U);
-    EXPECT_EQ(context->committedPaint().entries()[0].node, button);
+    ASSERT_EQ(context->publication().committedPaint().size(), 1U);
+    EXPECT_EQ(context->publication().committedPaint().entries()[0].node, button);
     expectButtonFill(*context, button, HoveredColor);
 }
 

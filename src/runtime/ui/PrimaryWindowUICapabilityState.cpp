@@ -1,7 +1,12 @@
 #include "PrimaryWindowUICapabilityState.hpp"
 
 #include <tina/runtime/RuntimeErrors.hpp>
+#include <tina/ui/UIAuthoring.hpp>
+#include <tina/ui/UIContext.hpp>
 #include <tina/ui/UIErrors.hpp>
+#include <tina/ui/UIMotionController.hpp>
+#include <tina/ui/UIPublicationPipeline.hpp>
+#include <tina/ui/UIStyleController.hpp>
 
 #include <limits>
 #include <exception>
@@ -130,7 +135,7 @@ PrimaryWindowUICapabilityState::committedSemantics(u64 epoch, PrimaryWindowUIPha
     {
         return Core::failure(std::move(status.error()));
     }
-    return context_->committedSemantics();
+    return context_->publication().committedSemantics();
 }
 
 Core::Result<UI::UIContextStatistics>
@@ -198,7 +203,7 @@ PrimaryWindowUICapabilityState::treeUpdater(u64 epoch, PrimaryWindowUIPhase phas
     {
         return Core::failure(std::move(status.error()));
     }
-    auto updater = context_->treeUpdater(rootOwner);
+    auto updater = context_->authoring().treeUpdater(rootOwner);
     if (!updater)
     {
         return Core::failure(rememberFirstError(std::move(updater.error()), Operation));
@@ -224,7 +229,7 @@ PrimaryWindowUICapabilityState::bindImageResolver(
             Operation));
     }
 
-    auto updater = context_->treeUpdater(rootOwner);
+    auto updater = context_->authoring().treeUpdater(rootOwner);
     if (!updater)
     {
         return Core::failure(rememberFirstError(std::move(updater.error()), Operation));
@@ -322,7 +327,7 @@ PrimaryWindowUICapabilityState::registerStyleClass(u64 epoch)
     {
         return Core::failure(std::move(status.error()));
     }
-    auto styleClass = context_->registerStyleClass();
+    auto styleClass = context_->style().registerStyleClass();
     if (!styleClass)
     {
         return Core::failure(
@@ -343,7 +348,7 @@ PrimaryWindowUICapabilityState::registerStyleColorToken(
     {
         return Core::failure(std::move(status.error()));
     }
-    auto token = context_->registerStyleColorToken(value);
+    auto token = context_->style().registerStyleColorToken(value);
     if (!token)
     {
         return Core::failure(rememberFirstError(std::move(token.error()), Operation));
@@ -362,7 +367,7 @@ Core::Status PrimaryWindowUICapabilityState::installStyleSheet(
     {
         return status;
     }
-    Core::Status status = context_->installStyleSheet(rules);
+    Core::Status status = context_->style().installStyleSheet(rules);
     if (!status)
     {
         return Core::failure(rememberFirstError(std::move(status.error()), Operation));
@@ -377,7 +382,7 @@ Core::Result<UI::UIRootOwner> PrimaryWindowUICapabilityState::createRoot(u64 epo
     {
         return Core::failure(std::move(status.error()));
     }
-    auto root = context_->rootBuilder().createRoot();
+    auto root = context_->authoring().rootBuilder().createRoot();
     if (!root)
     {
         return Core::failure(rememberFirstError(std::move(root.error()), Operation));
@@ -1172,7 +1177,7 @@ PrimaryWindowUICapabilityState::styleColorToken(
     {
         return Core::failure(std::move(status.error()));
     }
-    auto value = context_->styleColorToken(token);
+    auto value = context_->style().styleColorToken(token);
     if (!value)
     {
         return Core::failure(rememberFirstError(std::move(value.error()), Operation));
@@ -1190,7 +1195,7 @@ Core::Status PrimaryWindowUICapabilityState::setStyleColorToken(
     {
         return status;
     }
-    Core::Status status = context_->setStyleColorToken(token, value);
+    Core::Status status = context_->style().setStyleColorToken(token, value);
     if (!status)
     {
         return Core::failure(rememberFirstError(std::move(status.error()), Operation));
@@ -1222,7 +1227,7 @@ Core::Result<UI::UITheme> PrimaryWindowUICapabilityState::rootBuilderProductThem
     {
         return Core::failure(std::move(status.error()));
     }
-    return context_->productTheme();
+    return context_->style().productTheme();
 }
 
 Core::Status PrimaryWindowUICapabilityState::setRootBuilderProductTheme(u64 epoch, const UI::UITheme& theme)
@@ -1232,7 +1237,7 @@ Core::Status PrimaryWindowUICapabilityState::setRootBuilderProductTheme(u64 epoc
     {
         return status;
     }
-    Core::Status status = context_->setProductTheme(theme);
+    Core::Status status = context_->style().setProductTheme(theme);
     if (!status)
     {
         return Core::failure(rememberFirstError(std::move(status.error()), Operation));
@@ -1247,7 +1252,7 @@ Core::Result<UI::UITheme> PrimaryWindowUICapabilityState::productTheme(u64 epoch
     {
         return Core::failure(std::move(status.error()));
     }
-    return context_->productTheme();
+    return context_->style().productTheme();
 }
 
 Core::Status PrimaryWindowUICapabilityState::setProductTheme(u64 epoch, PrimaryWindowUIPhase phase,
@@ -1258,7 +1263,7 @@ Core::Status PrimaryWindowUICapabilityState::setProductTheme(u64 epoch, PrimaryW
     {
         return status;
     }
-    Core::Status status = context_->setProductTheme(theme);
+    Core::Status status = context_->style().setProductTheme(theme);
     if (!status)
     {
         return Core::failure(rememberFirstError(std::move(status.error()), Operation));
@@ -1324,7 +1329,7 @@ Core::Status PrimaryWindowUICapabilityState::setReducedMotion(u64 epoch, Primary
     {
         return status;
     }
-    Core::Status status = context_->setReducedMotion(enabled);
+    Core::Status status = context_->motion().setReducedMotion(enabled);
     if (!status)
     {
         return Core::failure(rememberFirstError(std::move(status.error()), Operation));
@@ -1339,7 +1344,7 @@ Core::Result<bool> PrimaryWindowUICapabilityState::reducedMotion(u64 epoch, Prim
     {
         return Core::failure(std::move(status.error()));
     }
-    return context_->reducedMotion();
+    return context_->motion().reducedMotion();
 }
 
 Core::Status PrimaryWindowUICapabilityState::setStyleBackgroundColorTransition(u64 epoch, PrimaryWindowUIPhase phase,
@@ -1350,7 +1355,7 @@ Core::Status PrimaryWindowUICapabilityState::setStyleBackgroundColorTransition(u
     {
         return status;
     }
-    Core::Status status = context_->setStyleBackgroundColorTransition(spec);
+    Core::Status status = context_->motion().setStyleBackgroundColorTransition(spec);
     if (!status)
     {
         return Core::failure(rememberFirstError(std::move(status.error()), Operation));
@@ -1366,7 +1371,7 @@ PrimaryWindowUICapabilityState::styleBackgroundColorTransition(u64 epoch, Primar
     {
         return Core::failure(std::move(status.error()));
     }
-    return context_->styleBackgroundColorTransition();
+    return context_->motion().styleBackgroundColorTransition();
 }
 
 Core::Status PrimaryWindowUICapabilityState::beginBackgroundColorTransition(
@@ -1378,7 +1383,7 @@ Core::Status PrimaryWindowUICapabilityState::beginBackgroundColorTransition(
     {
         return status;
     }
-    Core::Status status = context_->beginBackgroundColorTransition(node, target, spec);
+    Core::Status status = context_->motion().beginBackgroundColorTransition(node, target, spec);
     if (!status)
     {
         return Core::failure(rememberFirstError(std::move(status.error()), Operation));
@@ -1395,7 +1400,7 @@ Core::Status PrimaryWindowUICapabilityState::beginBorderColorTransition(
     {
         return status;
     }
-    Core::Status status = context_->beginBorderColorTransition(node, target, spec);
+    Core::Status status = context_->motion().beginBorderColorTransition(node, target, spec);
     if (!status)
     {
         return Core::failure(rememberFirstError(std::move(status.error()), Operation));
@@ -1412,7 +1417,7 @@ Core::Status PrimaryWindowUICapabilityState::beginTextColorTransition(
     {
         return status;
     }
-    Core::Status status = context_->beginTextColorTransition(node, target, spec);
+    Core::Status status = context_->motion().beginTextColorTransition(node, target, spec);
     if (!status)
     {
         return Core::failure(rememberFirstError(std::move(status.error()), Operation));
@@ -1429,7 +1434,7 @@ Core::Status PrimaryWindowUICapabilityState::beginOpacityTransition(
     {
         return status;
     }
-    Core::Status status = context_->beginOpacityTransition(node, targetOpacity, spec);
+    Core::Status status = context_->motion().beginOpacityTransition(node, targetOpacity, spec);
     if (!status)
     {
         return Core::failure(rememberFirstError(std::move(status.error()), Operation));
@@ -1446,7 +1451,7 @@ Core::Status PrimaryWindowUICapabilityState::beginCornerRadiusTransition(
     {
         return status;
     }
-    Core::Status status = context_->beginCornerRadiusTransition(node, targetRadius, spec);
+    Core::Status status = context_->motion().beginCornerRadiusTransition(node, targetRadius, spec);
     if (!status)
     {
         return Core::failure(rememberFirstError(std::move(status.error()), Operation));
@@ -1464,7 +1469,7 @@ Core::Status PrimaryWindowUICapabilityState::beginVisualOffsetTransition(
         return status;
     }
     Core::Status status =
-        context_->beginVisualOffsetTransition(node, targetOffsetX, targetOffsetY, spec);
+        context_->motion().beginVisualOffsetTransition(node, targetOffsetX, targetOffsetY, spec);
     if (!status)
     {
         return Core::failure(rememberFirstError(std::move(status.error()), Operation));
@@ -1480,7 +1485,7 @@ Core::Result<UI::UITimelineId> PrimaryWindowUICapabilityState::createTimeline(
     {
         return Core::failure(status.error());
     }
-    auto result = context_->createTimeline(desc);
+    auto result = context_->motion().createTimeline(desc);
     if (!result)
     {
         return Core::failure(rememberFirstError(std::move(result.error()), Operation));
@@ -1497,7 +1502,7 @@ Core::Status PrimaryWindowUICapabilityState::replaceTimeline(
     {
         return status;
     }
-    Core::Status status = context_->replaceTimeline(timeline, desc);
+    Core::Status status = context_->motion().replaceTimeline(timeline, desc);
     if (!status)
     {
         return Core::failure(rememberFirstError(std::move(status.error()), Operation));
@@ -1513,7 +1518,7 @@ Core::Status PrimaryWindowUICapabilityState::playTimeline(
     {
         return status;
     }
-    Core::Status status = context_->playTimeline(timeline);
+    Core::Status status = context_->motion().playTimeline(timeline);
     if (!status)
     {
         return Core::failure(rememberFirstError(std::move(status.error()), Operation));
@@ -1529,7 +1534,7 @@ Core::Status PrimaryWindowUICapabilityState::cancelTimeline(
     {
         return status;
     }
-    Core::Status status = context_->cancelTimeline(timeline);
+    Core::Status status = context_->motion().cancelTimeline(timeline);
     if (!status)
     {
         return Core::failure(rememberFirstError(std::move(status.error()), Operation));
@@ -1545,7 +1550,7 @@ Core::Status PrimaryWindowUICapabilityState::destroyTimeline(
     {
         return status;
     }
-    Core::Status status = context_->destroyTimeline(timeline);
+    Core::Status status = context_->motion().destroyTimeline(timeline);
     if (!status)
     {
         return Core::failure(rememberFirstError(std::move(status.error()), Operation));
@@ -1561,7 +1566,7 @@ Core::Result<bool> PrimaryWindowUICapabilityState::isTimelineActive(
     {
         return Core::failure(status.error());
     }
-    auto result = context_->isTimelineActive(timeline);
+    auto result = context_->motion().isTimelineActive(timeline);
     if (!result)
     {
         return Core::failure(rememberFirstError(std::move(result.error()), Operation));

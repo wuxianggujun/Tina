@@ -40,15 +40,15 @@ protected:
             << (contextResult ? "" : contextResult.error().message);
         context_ = std::move(*contextResult);
 
-        auto rootResult = context_->rootBuilder().createRoot();
+        auto rootResult = context_->authoring().rootBuilder().createRoot();
         ASSERT_TRUE(rootResult.has_value())
             << (rootResult ? "" : rootResult.error().message);
         root_ = std::move(*rootResult);
         auto firstNodeResult =
-            context_->rootBuilder().createElement(
+            context_->authoring().rootBuilder().createElement(
                 root_.rootNodeId(), UI::makeButtonElement());
         auto secondNodeResult =
-            context_->rootBuilder().createElement(
+            context_->authoring().rootBuilder().createElement(
                 root_.rootNodeId(), UI::makeButtonElement());
         ASSERT_TRUE(firstNodeResult.has_value());
         ASSERT_TRUE(secondNodeResult.has_value());

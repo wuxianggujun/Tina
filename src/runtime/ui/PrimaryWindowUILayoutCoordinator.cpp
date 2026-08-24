@@ -2,6 +2,7 @@
 
 #include <tina/runtime/RuntimeErrors.hpp>
 #include <tina/ui/UIContext.hpp>
+#include <tina/ui/UIPublicationPipeline.hpp>
 
 #include <string_view>
 #include <utility>
@@ -20,14 +21,14 @@ namespace {
 [[nodiscard]] Core::Status commitLayout(UI::UIContext& context, Platform::LogicalExtent logicalExtent,
                                         std::string_view operation)
 {
-    Core::Status commitStatus = context.commitLayout({
+    Core::Status commitStatus = context.publication().commitLayout({
         .width = static_cast<float>(logicalExtent.width),
         .height = static_cast<float>(logicalExtent.height),
     });
     if (!commitStatus)
     {
         Core::Error error = std::move(commitStatus.error());
-        error.addContext(operation, "UIContext::commitLayout");
+        error.addContext(operation, "UIPublicationPipeline::commitLayout");
         return Core::failure(std::move(error));
     }
     return Core::success();

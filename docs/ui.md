@@ -39,8 +39,30 @@ root。产品 State 在退出时应先 reset listener，再 reset root。Context
 
 ### 私有实现职责边界
 
-公开 `UIContext` 继续作为每窗口唯一的生命周期、owner-thread、capacity 与提交门面，不新增第二套 UI
-ABI。大体量私有实现按可独立验证的职责逐步下沉到 `src/ui/detail`：`UITextStorage` 已独立拥有固定容量
+公开 `UIContext` 只作为每窗口唯一的组合根和生命周期边界：它负责 `Create()`、owner Window、节点归属检查、
+统计，以及六个显式 capability accessor；不再直接暴露节点创建/修改、Theme、Motion、Text、提交或输入 API，
+也不保留旧成员函数的 compatibility alias。调用方按职责包含对应公开头：
+
+| Capability | 公开入口 | 职责 |
+| --- | --- | --- |
+| Authoring | `context.authoring()` | 只创建 `UIRootBuilder` 和 root-scoped `UITreeUpdater`；节点 mutation、组件 transaction 与控件 retained state 都由 updater 承担 |
+| Style | `context.style()` | 产品 Theme、StyleClass、ColorToken 与 stylesheet registry |
+| Motion | `context.motion()` | 可注入时钟、reduced-motion、direct transition 与 timeline |
+| Text | `context.text()` | 字体注入、IME 状态与 composition/input/edit-command routing |
+| Publication | `context.publication()` | structure/layout transaction、committed views、caret rect 与 Glyph atlas publication |
+| Input | `context.input()` | Pointer/Focus/Flow/控件命令/accessibility action routing 及窗口级输入状态 |
+
+这些 capability 都是按值返回的 non-owning owner-thread view，不得晚于所属 `UIContext` 使用；
+`UIRootBuilder` 同样只借用 Context，`UITreeUpdater` 还绑定创建时的 root identity，并在每次操作校验
+root/child generation。某类 committed view 在下一次该类成功 publication 或 Context 析构时失效；失败提交继续保留
+最后一份成功 snapshot，调用方仍应在后续成功提交后重新取得 view。Runtime phase facade 另有更短的 epoch 生命周期。
+直接消费者应显式包含 `UIAuthoring.hpp`、`UIStyleController.hpp`、`UIMotionController.hpp`、
+`UITextSystem.hpp`、`UIPublicationPipeline.hpp` 或 `UIInputRouter.hpp`；`UIContext.hpp` 只 forward declare
+capability，`UI.hpp` 才是有意提供完整表面的 umbrella header。
+
+这仍是同一套 UI ABI 和同一个固定容量事务 owner，不新增第二套 UI。大体量私有实现按 Tree、Layout、Paint、
+Semantics、Input、Controls、Collections、Overlays、Style、Motion 与 Text 等职责拆到独立 translation unit；
+共享 `UIContext::Impl` 保留完成原子 publication/rollback 所需的集中状态。`UITextStorage` 已独立拥有固定容量
 UTF-8 arena、空闲块复用/合并、bump 回收与 used/high-water 统计；`UIImeCompositionState` 独立拥有
 固定 preedit buffer、active/cursor 状态、容量契约和可复制的事务快照；
 `UIButtonActionRegistry` 与 `UISliderChangeCallbackRegistry` 分别独立拥有 Button/Slider callback 的
@@ -59,7 +81,7 @@ splitter pointer fraction/grab 计算。`UITabViewStateStorage` 固定持有 Tab
 `UIGridLayout` 使用局部固定数组与64-bit occupancy 完成普通 Element 子树的 intrinsic measurement、row-major
 auto placement、span demand、`Px/Auto/Fr` track resolution 和 item alignment；它不持有 Context side state，
 也不替代带 DataSource/materialized pool 的 VirtualGridView/DataGrid。
-`UIContext::Impl` 只保留
+`UIContext::Impl` 统一执行
 owner/root/kind 校验并编排 UTF-8 语义校验、测量、dirty transaction、焦点和控件行为。私有组件不得反向持有
 `UIContext`，也不得绕开 committed snapshot、owner-thread 或 PMR 固定容量约束。
 
@@ -146,7 +168,7 @@ dirty transaction 与 UIA TogglePattern，只通过 `UIStyleRoleId::Switch`、
 
 `UIIconButtonConfig`、`UIFormFieldConfig`、`UIDialogConfig`、`UISnackbarHostConfig` 及对应 `Parts` 返回值提供第一方桌面组合入口。
 `requiredIconButtonBuildBudget()/requiredFormFieldBuildBudget()/requiredDialogBuildBudget()/requiredSnackbarHostBuildBudget()` 在 mutation 前计算精确
-node/text/Behavior 预算，`UIContext`、`UITreeUpdater` 与 `PrimaryWindowUITreeUpdater` 均提供
+node/text/Behavior 预算，root-scoped `UITreeUpdater` 与 `PrimaryWindowUITreeUpdater` 均提供
 `buildIconButton()/buildFormField()/buildDialog()/buildSnackbarHost()`。IconButton 复用 Button + Icon + 独立 Tooltip；FormField 复用
 Label/TextEdit/Button/Tooltip；Dialog 复用 Modal/Panel/Label/Button；Snackbar 复用 Panel/Label/Button 与
 `FloatingSurface` elevation。Snackbar 状态使用调用方 fixed-capacity inline queue 和显式 monotonic sample，消息发布
@@ -164,8 +186,8 @@ Paint、Semantics、Focus 进入与 dismiss 后的 focus restore 只在下一次
 一个 Window 同时最多有一个 registered Dialog 的 open intent。打开 Dialog 会在同一预检事务中关闭 Menu 并
 hard-dismiss Tooltip；第二个 Dialog 冲突、非 Dialog、stale generation 与 root-scoped updater 的跨 root 访问均明确
 失败。dirty queue 容量预检失败时，Dialog intent、active Modal、focus 与全部 committed snapshot 保持不变；
-destroy、root release 和 generation slot reuse 会清理注册状态。直接 `UIContext`、root-scoped `UITreeUpdater` 与
-phase-scoped `PrimaryWindowUITreeUpdater` 都提供这三个 presentation API；Runtime facade 在 phase epoch 结束后统一
+destroy、root release 和 generation slot reuse 会清理注册状态。root-scoped `UITreeUpdater` 与 phase-scoped
+`PrimaryWindowUITreeUpdater` 都提供这三个 presentation API；Runtime facade 在 phase epoch 结束后统一
 返回 `UIPhaseCapabilityExpired`。
 
 ### Tooltip 契约
@@ -177,7 +199,7 @@ Popup 的 focus/input barrier。`UITooltipConfig` 提供 `Auto/Above/Below/Left/
 自身锚定、祖先/后代循环、跨 root、stale generation、Tooltip/Popup/Modal/虚拟 row 等不稳定 Anchor 均拒绝。
 一个 Anchor 至多关联一个 Tooltip，一个 Window 同时最多发布一个 Tooltip。
 
-延迟由 `Core::IMonotonicClock`/`MonotonicTimePoint` 推进并复用 `UIContext::setMotionClock()` 的可注入时钟；
+延迟由 `Core::IMonotonicClock`/`MonotonicTimePoint` 推进并复用 `context.motion().setMotionClock()` 的可注入时钟；
 没有第二条 update loop，现有 `commitLayout()` 帧阶段只推进 fixed-capacity 状态。Tooltip 读取**最后一次成功
 提交**的 Anchor `worldRect`：Auto 按可用空间选方向，显式方向空间不足时 flip，最终在 `viewportMargin` 内
 clamp。`UITooltipMetrics` 只报告最后成功 publication 的 `anchorRect/tooltipRect/resolvedPlacement/open`；
@@ -188,7 +210,7 @@ Tooltip 固定 Ignore hit、Exclude semantics、不可聚焦、不捕获 Pointer
 wheel、文本输入、Anchor disable/Hidden/Collapsed/destroy、Modal scope 改变会关闭，hover/focus 离开应用
 `dismissDelay`，快速切换 Anchor 再应用 `reshowDelay`。Tooltip 文本只作为 Anchor 缺少显式 description 时的
 accessible description/Windows HelpText fallback；不会覆盖作者 description，也不发布 Activate/Focus 等 action。
-直接 `UIContext`、root-scoped `UITreeUpdater` 与 phase-scoped `PrimaryWindowUITreeUpdater` 都提供
+root-scoped `UITreeUpdater` 与 phase-scoped `PrimaryWindowUITreeUpdater` 都提供
 `setTooltipAnchor/clearTooltipAnchor/tooltipAnchor/showTooltip/dismissTooltip/isTooltipOpen/tooltipMetrics`。
 
 ### Menu / MenuItem 契约
@@ -218,7 +240,7 @@ Pointer、Keyboard/Gamepad Accept 与 accessibility Invoke/Toggle 共用 MenuIte
 发布对应 semantics role；Command 无 TogglePattern，Check/Radio 发布 checked state 与 TogglePattern，
 Separator 排除 semantics。当前不提供 MenuBar、submenu 或第二套 popup/runtime/update loop。
 
-`UIContext`、`UITreeUpdater` 与 Runtime facade 均提供
+root-scoped `UITreeUpdater` 与 Runtime facade 均提供
 `setMenuAnchor/clearMenuAnchor/menuAnchor/setMenuOpen/isMenuOpen/menuMetrics/setMenuItemChecked/`
 `isMenuItemChecked/routeMenuCommand`。
 
@@ -266,7 +288,7 @@ Pointer、Activate accessibility action、Keyboard Arrow/Home/End 与 Gamepad D-
 Automatic 模式随方向焦点同步选择，Manual 模式只移动焦点，Activate 才选择；方向输入只在 placement 对应轴上
 优先于通用空间焦点。一个 handled Down 使用既有 fixed-capacity latch 消费匹配 Up。`UITabPaint` 是 Tab 专属
 selected/hover/focus/pressed/disabled chrome，由 `UIStyleRoleId::Tab`、`makeTabChrome()`、Theme transition 与
-属性级 `TabPaint` override 管理，不复用 RadioButton paint。`UIContext`、`UITreeUpdater` 与 Runtime phase facade
+属性级 `TabPaint` override 管理，不复用 RadioButton paint。root-scoped `UITreeUpdater` 与 Runtime phase facade
 提供 items、active Tab/Panel、metrics、command 以及 `setTabPaint()/tabPaint()`。
 
 多节点业务组件可通过 `UIElementBuildTransaction` 或 Runtime 的 `PrimaryWindowUIBuildTransaction` 声明完整
@@ -284,7 +306,7 @@ Line 使用 Element-local 起止点与 logical thickness。Canvas 命令复制�
 `UI-PAINT-002-A` 已把两条 authoring 路径收敛为 canonical 四角 logical radii。圆角子树 clip、
 backdrop/blur 与 BoxFill 之外的属性面仍属后续扩展。
 
-`UIContext::styleColorToken()` / `setStyleColorToken()` 以及 phase-scoped
+`context.style().styleColorToken()` / `setStyleColorToken()` 以及 phase-scoped
 `PrimaryWindowUITreeUpdater` 对应入口提供运行期 ColorToken 读取和更新。相同值 no-op 的四个
 `lastStyleTokenUpdate*` counter 均为0；非 no-op 只遍历 reverse-dependency 链上的节点并预检 dirty queue，
 成功后再沿同一依赖链发布 Paint dirty。inspected/resolved/affected 均按依赖节点计，reverse path 上
@@ -550,7 +572,7 @@ Exclude 删除自身和完整语义子树。entry parent 始终是最近 publish
 Probe 可验证 stale node 拒绝。
 
 平台无关 action seam 使用 `UIAccessibilityAction` 表达 Focus、Invoke、Toggle、SetRangeValue 与
-SetTextValue；`UIContext::performAccessibilityAction()` 在 owner thread 验证 generation、控件 kind、
+SetTextValue；`context.input().performAccessibilityAction()` 在 owner thread 验证 generation、控件 kind、
 enabled/read-only/range 与 UTF-8，再复用控件默认行为。平台 adapter 只负责线程 marshal 和平台协议映射，
 不能直接修改 retained storage。
 
@@ -617,7 +639,7 @@ UI 是 Retained UI：游戏代码先创建节点并修改属性，Runtime 在一
 ```text
 IGameState::onEnter / updateUI
   -> UIRootOwner + UITreeUpdater 修改节点树
-  -> UIContext::commitLayout(logical extent)
+  -> context.publication().commitLayout(logical extent)
   -> Measure / Arrange
   -> committed layout + hit + paint + semantics snapshots
   -> UICommittedPaintView
@@ -629,7 +651,7 @@ IGameState::onEnter / updateUI
   -> RenderDevice::submitFrame 后显示
 ```
 
-`UIContext::buildCommittedPaint()` 按 paint order 遍历可见节点。`UIBoxPaint::Rectangle` 生成矩形 entry；圆角且
+`UIPublicationPipeline::commitLayout()` 的私有 paint 阶段按 paint order 遍历可见节点。`UIBoxPaint::Rectangle` 生成矩形 entry；圆角且
 同时有 fill/border 时以外层统一 border + inset fill 两条 entry 表达，shadow 继承外层半径。
 `UIBoxPaint::Ellipse` 生成一个 SolidEllipse entry，`UIBoxPaint::Line` 将 Element-local 端点提交为 world-space
 端点，并保存覆盖线宽的 conservative envelope。Canvas `SolidRect`/`SolidEllipse`/`SolidLine`/`Image` 从
@@ -691,7 +713,7 @@ retained 状态并标记必要的 dirty 类别。
 
 **产品 Theme（默认皮肤 + 全局换肤 + 局部覆盖）：**
 
-- `UIContext` 持有 `productTheme()`，默认 `makeDefaultProductTheme()`；
+- `UIContext` 持有产品 Theme 状态，通过 `context.style().productTheme()` 读取，默认 `makeDefaultProductTheme()`；
 - `createElement(..., make*Element(...))` 按 descriptor 的 `UIStyleRoleId` 创建 Button/Checkbox/Slider/TextEdit/ProgressBar/RadioButton/
   ScrollView/Dropdown/Popup/Menu/MenuItem/DropdownItem/ListView/TreeView/VirtualGridView/DataGrid/Tab 与 Label 文本样式在创建时 **自动 apply** 对应
   `make*Chrome` / text style；Root/Panel 默认无底色（容器），需背景时用
@@ -942,7 +964,7 @@ intent。被处理 Down 的精确 control 会锁存，匹配 Up 在 Screen pop/d
 
 多本地用户继续复用同一窗口 UI 树，而不是建立 per-user Screen 栈或 focus。`UIFlowLocalUserId` 的有效值固定为
 `1..16`，`UIFlowPrimaryLocalUser=1`；Keyboard、Pointer、Text/IME 设备观察固定属于 Primary。Gamepad 使用完整
-generation `GamepadId` 作为 assignment identity，可由 `UIContext`、`UITreeUpdater` 或 Runtime phase facade 的
+generation `GamepadId` 作为 assignment identity，可由 `context.input()`、`UITreeUpdater` 或 Runtime phase facade 的
 `assignFlowGamepad()` / `clearFlowGamepadAssignment()` 管理；未分配 Gamepad 由
 `flowLocalUserForGamepad()` 解析为 Primary。`UIFlowActionEvent::localUser` 报告实际路由用户。
 

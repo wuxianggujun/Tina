@@ -18,7 +18,7 @@ TEST_F(UIInputRouteTest, InspectsNearestEnabledTargetsAcrossPhysicalAndCapturedR
 {
     auto tree = createRouteTree(window);
     ASSERT_NE(tree.context, nullptr);
-    const UI::UICommittedHitView hit = tree.context->committedHit();
+    const UI::UICommittedHitView hit = tree.context->publication().committedHit();
     std::vector<UI::UICommittedHitEntry> entries(
         hit.entries().begin(), hit.entries().end());
     const auto physicalTarget = UI::Detail::pointerHitTargetForEntry(
@@ -55,7 +55,7 @@ TEST_F(UIInputRouteTest, ReportsPhysicalCyclesAndInvalidRouteIndices)
 {
     auto tree = createRouteTree(window);
     ASSERT_NE(tree.context, nullptr);
-    const UI::UICommittedHitView hit = tree.context->committedHit();
+    const UI::UICommittedHitView hit = tree.context->publication().committedHit();
     std::vector<UI::UICommittedHitEntry> entries(
         hit.entries().begin(), hit.entries().end());
     const u32 targetIndex = UI::Detail::findHitEntryIndex(tree.target, entries);

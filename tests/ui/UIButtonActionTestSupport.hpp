@@ -67,7 +67,7 @@ private:
 
 [[nodiscard]] inline UI::UIRootOwner createRoot(UI::UIContext& context)
 {
-    auto result = context.rootBuilder().createRoot();
+    auto result = context.authoring().rootBuilder().createRoot();
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UIRootOwner{};
 }
@@ -76,7 +76,7 @@ private:
     UI::UIContext& context,
     UI::UINodeId parent)
 {
-    auto result = context.rootBuilder().createElement(parent, UI::makePanelElement());
+    auto result = context.authoring().rootBuilder().createElement(parent, UI::makePanelElement());
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? *result : UI::UINodeId{};
 }
@@ -85,7 +85,7 @@ private:
     UI::UIContext& context,
     UI::UINodeId parent)
 {
-    auto result = context.rootBuilder().createElement(parent, UI::makeLabelElement());
+    auto result = context.authoring().rootBuilder().createElement(parent, UI::makeLabelElement());
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? *result : UI::UINodeId{};
 }
@@ -94,7 +94,7 @@ private:
     UI::UIContext& context,
     UI::UINodeId parent)
 {
-    auto result = context.rootBuilder().createElement(parent, UI::makeButtonElement());
+    auto result = context.authoring().rootBuilder().createElement(parent, UI::makeButtonElement());
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? *result : UI::UINodeId{};
 }
@@ -103,7 +103,7 @@ private:
     UI::UIContext& context,
     UI::UIRootOwner& root)
 {
-    auto result = context.treeUpdater(root);
+    auto result = context.authoring().treeUpdater(root);
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UITreeUpdater{};
 }
@@ -151,7 +151,7 @@ inline UI::UIPointerRouteResult route(
     UI::UIContext& context,
     const UI::UIPointerInputEvent& input)
 {
-    auto result = context.routePointerInput(input);
+    auto result = context.input().routePointerInput(input);
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? *result : UI::UIPointerRouteResult{};
 }
@@ -221,7 +221,7 @@ struct ActionRecorder final {
     UI::UIRoutedPointerListenerDesc descriptor,
     UI::UIRoutedPointerCallback callback)
 {
-    auto result = context.addRoutedPointerListener(
+    auto result = context.input().addRoutedPointerListener(
         descriptor,
         std::move(callback));
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
@@ -265,7 +265,7 @@ struct ButtonTree final {
         fixedSize(100.0F, 100.0F)));
     expectOk(tree.updater.setLayoutStyle(tree.panel, fixedSize(80.0F, 80.0F)));
     expectOk(tree.updater.setLayoutStyle(tree.button, fixedSize(40.0F, 40.0F)));
-    expectOk(tree.context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    expectOk(tree.context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     return tree;
 }
 

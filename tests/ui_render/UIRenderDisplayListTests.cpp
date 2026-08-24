@@ -238,7 +238,7 @@ class RejectingFrameResourceSink final : public Render::FrameResourceSink {
 
 [[nodiscard]] UI::UIRootOwner createRoot(UI::UIContext& context)
 {
-    auto result = context.rootBuilder().createRoot();
+    auto result = context.authoring().rootBuilder().createRoot();
     EXPECT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     return result ? std::move(*result) : UI::UIRootOwner{};
 }
@@ -265,9 +265,9 @@ TEST_F(UIRenderDisplayListTest, ConvertsCommittedUISolidFillAndIntegerPremultipl
     ASSERT_NE(context, nullptr);
     auto root = createRoot(*context);
     ASSERT_TRUE(root);
-    auto panelResult = context->rootBuilder().createElement(root.rootNodeId(), UI::makePanelElement());
+    auto panelResult = context->authoring().rootBuilder().createElement(root.rootNodeId(), UI::makePanelElement());
     ASSERT_TRUE(panelResult.has_value()) << panelResult.error().message;
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value()) << updaterResult.error().message;
 
     UI::UILayoutStyle style;
@@ -279,12 +279,12 @@ TEST_F(UIRenderDisplayListTest, ConvertsCommittedUISolidFillAndIntegerPremultipl
         .color = {.red = 200, .green = 100, .blue = 50, .alpha = 128},
     };
     ASSERT_TRUE(updaterResult->setBoxPaint(*panelResult, paint).has_value());
-    ASSERT_TRUE(context->commitLayout({100.0F, 50.0F}).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({100.0F, 50.0F}).has_value());
 
     auto builder = createBuilder({.commandCount = 4, .clipCount = 4, .batchCount = 4});
     auto result = Integration::buildUIDisplayList(
         builder,
-        context->committedPaint(),
+        context->publication().committedPaint(),
         {.framebufferViewport = {0, 0, 200, 100}});
     ASSERT_TRUE(result.has_value()) << (result ? "" : result.error().message);
     ASSERT_EQ(result->displayList.commands().size(), 1U);
@@ -1083,7 +1083,7 @@ TEST_F(UIRenderDisplayListTest, NineSliceUsesSharedFractionalBoundariesOneResolv
     auto context = std::move(*contextResult);
     auto root = createRoot(*context);
     ASSERT_TRUE(root);
-    auto updaterResult = context->treeUpdater(root);
+    auto updaterResult = context->authoring().treeUpdater(root);
     ASSERT_TRUE(updaterResult.has_value()) << updaterResult.error().message;
 
     UI::UILayoutStyle layout{};
@@ -1109,9 +1109,9 @@ TEST_F(UIRenderDisplayListTest, NineSliceUsesSharedFractionalBoundariesOneResolv
     descriptor.visual.canvas = std::span(&nineSlice, 1);
     auto element = updaterResult->createElement(root.rootNodeId(), descriptor);
     ASSERT_TRUE(element.has_value()) << element.error().message;
-    ASSERT_TRUE(context->commitLayout({100.0F, 100.0F}).has_value());
-    ASSERT_EQ(context->committedPaint().size(), 9U);
-    for (const UI::UICommittedPaintEntry& entry : context->committedPaint())
+    ASSERT_TRUE(context->publication().commitLayout({100.0F, 100.0F}).has_value());
+    ASSERT_EQ(context->publication().committedPaint().size(), 9U);
+    for (const UI::UICommittedPaintEntry& entry : context->publication().committedPaint())
     {
         EXPECT_EQ(entry.imageBoundsProjection, UI::UICommittedImageBoundsProjection::SharedBoundary);
     }
@@ -1129,7 +1129,7 @@ TEST_F(UIRenderDisplayListTest, NineSliceUsesSharedFractionalBoundariesOneResolv
     auto builder = createBuilder({.commandCount = 9, .clipCount = 0, .batchCount = 1});
 
     auto result = Integration::buildUIDisplayList(
-        builder, context->committedPaint(), {.framebufferViewport = {0, 0, 150, 150}},
+        builder, context->publication().committedPaint(), {.framebufferViewport = {0, 0, 150, 150}},
         {
             .resourceSink = &packet.resourceSink(),
             .resolverLookup = {.userData = &resolverState, .find = &findImageResolver},
@@ -1170,7 +1170,7 @@ TEST_F(UIRenderDisplayListTest, NineSliceUsesSharedFractionalBoundariesOneResolv
 
     auto limitedBuilder = createBuilder({.commandCount = 8, .clipCount = 0, .batchCount = 1});
     auto rejected = Integration::buildUIDisplayList(
-        limitedBuilder, context->committedPaint(), {.framebufferViewport = {0, 0, 150, 150}},
+        limitedBuilder, context->publication().committedPaint(), {.framebufferViewport = {0, 0, 150, 150}},
         {
             .resourceSink = &packet.resourceSink(),
             .resolverLookup = {.userData = &resolverState, .find = &findImageResolver},

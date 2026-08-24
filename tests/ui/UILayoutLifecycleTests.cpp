@@ -16,17 +16,17 @@ TEST_F(UILayoutTest, SettingTheSameNormalizedStyleIsANoOp)
     auto updater = createUpdater(*context, root);
     const UI::UILayoutStyle style = fixedSize(40.0F, 20.0F);
     assertOk(updater.setLayoutStyle(panel, style));
-    assertOk(context->commitStructure());
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
-    const u64 layoutRevision = context->committedLayout().layoutRevision();
+    assertOk(context->publication().commitStructure());
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
+    const u64 layoutRevision = context->publication().committedLayout().layoutRevision();
     const UI::UIContextStatistics before = context->statistics();
 
     assertOk(updater.setLayoutStyle(panel, style));
     const UI::UIContextStatistics afterSet = context->statistics();
     EXPECT_EQ(afterSet.dirtyQueuePendingCount, before.dirtyQueuePendingCount);
     EXPECT_FALSE(afterSet.layoutDirty);
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
-    EXPECT_EQ(context->committedLayout().layoutRevision(), layoutRevision);
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
+    EXPECT_EQ(context->publication().committedLayout().layoutRevision(), layoutRevision);
     EXPECT_EQ(context->statistics().lastLayoutPassCount, 0U);
 }
 
@@ -48,8 +48,8 @@ TEST_F(UILayoutTest, MultipleMutationsAreCommittedByASingleLayoutPass)
     EXPECT_TRUE(beforeLayout.layoutDirty);
     EXPECT_EQ(beforeLayout.dirtyQueuePendingCount, 4U);
 
-    assertOk(context->commitStructure());
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitStructure());
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     const UI::UIContextStatistics afterLayout = context->statistics();
     EXPECT_FALSE(afterLayout.layoutDirty);
     EXPECT_EQ(afterLayout.dirtyQueuePendingCount, 0U);
@@ -68,15 +68,15 @@ TEST_F(UILayoutTest, UnchangedLayoutCommitForThreeHundredFramesDoesNoWorkAndAllo
     const UI::UINodeId panel = createPanel(*context, root.rootNodeId());
     auto updater = createUpdater(*context, root);
     assertOk(updater.setLayoutStyle(panel, fixedSize(40.0F, 20.0F)));
-    assertOk(context->commitStructure());
-    assertOk(context->commitLayout({.width = 100.0F, .height = 50.0F}));
+    assertOk(context->publication().commitStructure());
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 50.0F}));
 
-    const u64 layoutRevision = context->committedLayout().layoutRevision();
+    const u64 layoutRevision = context->publication().committedLayout().layoutRevision();
     const usize allocationCount = resource.allocationCount();
     for (usize frame = 0; frame < 300; ++frame)
     {
-        assertOk(context->commitLayout({.width = 100.0F, .height = 50.0F}));
-        EXPECT_EQ(context->committedLayout().layoutRevision(), layoutRevision);
+        assertOk(context->publication().commitLayout({.width = 100.0F, .height = 50.0F}));
+        EXPECT_EQ(context->publication().committedLayout().layoutRevision(), layoutRevision);
         EXPECT_EQ(context->statistics().lastLayoutPassCount, 0U);
     }
     EXPECT_EQ(resource.allocationCount(), allocationCount);
@@ -110,13 +110,13 @@ TEST_F(UILayoutTest, PercentInAutoAxisFallsBackDeterministicallyAndReportsDiagno
     childStyle.flexItem.shrink = 0.0F;
     assertOk(updater.setLayoutStyle(percentChild, childStyle));
 
-    assertOk(context->commitStructure());
-    assertOk(context->commitLayout({.width = 200.0F, .height = 50.0F}));
+    assertOk(context->publication().commitStructure());
+    assertOk(context->publication().commitLayout({.width = 200.0F, .height = 50.0F}));
     const UI::UIContextStatistics stats = context->statistics();
     EXPECT_GT(stats.lastLayoutPercentMeasureFallbackCount, 0U);
-    expectRectNear(requireLayoutEntry(context->committedLayout(), autoPanel).worldRect,
+    expectRectNear(requireLayoutEntry(context->publication().committedLayout(), autoPanel).worldRect,
                    {.x = 0.0F, .y = 0.0F, .width = 100.0F, .height = 10.0F});
-    expectRectNear(requireLayoutEntry(context->committedLayout(), percentChild).worldRect,
+    expectRectNear(requireLayoutEntry(context->publication().committedLayout(), percentChild).worldRect,
                    {.x = 100.0F, .y = 0.0F, .width = 50.0F, .height = 10.0F});
 }
 
@@ -135,10 +135,10 @@ TEST_F(UILayoutTest, LayoutSnapshotCapacityFailurePreservesOldCommittedLayoutAnd
 
     auto updater = createUpdater(*context, root);
     assertOk(updater.setLayoutStyle(first, fixedSize(10.0F, 10.0F)));
-    assertOk(context->commitStructure());
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
-    const UI::UICommittedLayoutView oldLayout = context->committedLayout();
-    const UI::UICommittedStructureView oldStructure = context->committedStructure();
+    assertOk(context->publication().commitStructure());
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
+    const UI::UICommittedLayoutView oldLayout = context->publication().committedLayout();
+    const UI::UICommittedStructureView oldStructure = context->publication().committedStructure();
     ASSERT_EQ(oldLayout.size(), 2U);
     ASSERT_EQ(oldStructure.size(), 2U);
     const u64 oldLayoutRevision = oldLayout.layoutRevision();
@@ -148,14 +148,14 @@ TEST_F(UILayoutTest, LayoutSnapshotCapacityFailurePreservesOldCommittedLayoutAnd
     const UI::UINodeId second = createPanel(*context, root.rootNodeId());
     assertOk(updater.setLayoutStyle(second, fixedSize(20.0F, 20.0F)));
 
-    const Core::Status status = context->commitLayout({.width = 100.0F, .height = 100.0F});
+    const Core::Status status = context->publication().commitLayout({.width = 100.0F, .height = 100.0F});
     ASSERT_FALSE(status.has_value());
     EXPECT_EQ(status.error().code, UI::UIErrorCode::CapacityExceeded);
-    const UI::UICommittedLayoutView afterFailure = context->committedLayout();
+    const UI::UICommittedLayoutView afterFailure = context->publication().committedLayout();
     EXPECT_EQ(afterFailure.layoutRevision(), oldLayoutRevision);
     EXPECT_EQ(afterFailure.structureRevision(), oldStructureRevisionInLayout);
     EXPECT_EQ(afterFailure.size(), oldLayout.size());
-    const UI::UICommittedStructureView structureAfterFailure = context->committedStructure();
+    const UI::UICommittedStructureView structureAfterFailure = context->publication().committedStructure();
     EXPECT_EQ(structureAfterFailure.revision(), oldStructureRevision);
     EXPECT_EQ(structureAfterFailure.size(), oldStructure.size());
     EXPECT_TRUE(std::none_of(structureAfterFailure.begin(), structureAfterFailure.end(),
@@ -177,8 +177,8 @@ TEST_F(UILayoutTest, DirtyQueueCapacityFailureIsAtomicForTheRejectedMutation)
     ASSERT_TRUE(root);
     const UI::UINodeId first = createPanel(*context, root.rootNodeId());
     const UI::UINodeId second = createPanel(*context, root.rootNodeId());
-    assertOk(context->commitStructure());
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitStructure());
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
     auto updater = createUpdater(*context, root);
     assertOk(updater.setLayoutStyle(first, fixedSize(10.0F, 10.0F)));
@@ -187,8 +187,8 @@ TEST_F(UILayoutTest, DirtyQueueCapacityFailureIsAtomicForTheRejectedMutation)
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::CapacityExceeded);
     EXPECT_EQ(context->statistics().dirtyQueuePendingCount, 2U);
 
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
-    const UI::UICommittedLayoutView layout = context->committedLayout();
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
+    const UI::UICommittedLayoutView layout = context->publication().committedLayout();
     expectRectNear(requireLayoutEntry(layout, first).worldRect,
                    {.x = 0.0F, .y = 0.0F, .width = 10.0F, .height = 10.0F});
     expectRectNear(requireLayoutEntry(layout, second).worldRect,
@@ -208,8 +208,8 @@ TEST_F(UILayoutTest, StaleDirtyEntryCannotClearReusedGenerationDirtyState)
     ASSERT_TRUE(root);
     const UI::UINodeId staleNode = createPanel(*context, root.rootNodeId());
     const UI::UINodeId sibling = createPanel(*context, root.rootNodeId());
-    assertOk(context->commitStructure());
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+    assertOk(context->publication().commitStructure());
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
 
     auto updater = createUpdater(*context, root);
     assertOk(updater.setLayoutStyle(staleNode, fixedSize(5.0F, 5.0F)));
@@ -223,8 +223,8 @@ TEST_F(UILayoutTest, StaleDirtyEntryCannotClearReusedGenerationDirtyState)
     assertOk(updater.setLayoutStyle(sibling, fixedSize(40.0F, 10.0F)));
     EXPECT_EQ(context->statistics().dirtyQueuePendingCount, 3U);
 
-    assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
-    const UI::UICommittedLayoutView layout = context->committedLayout();
+    assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
+    const UI::UICommittedLayoutView layout = context->publication().committedLayout();
     expectRectNear(requireLayoutEntry(layout, sibling).worldRect,
                    {.x = 0.0F, .y = 0.0F, .width = 40.0F, .height = 10.0F});
     expectRectNear(requireLayoutEntry(layout, reused).worldRect,
@@ -249,8 +249,8 @@ TEST_F(UILayoutTest, LayoutStorageMemoryReturnsToZeroAfterContextRelease)
         const UI::UINodeId panel = createPanel(*context, root.rootNodeId());
         auto updater = createUpdater(*context, root);
         assertOk(updater.setLayoutStyle(panel, fixedSize(25.0F, 25.0F)));
-        assertOk(context->commitStructure());
-        assertOk(context->commitLayout({.width = 100.0F, .height = 100.0F}));
+        assertOk(context->publication().commitStructure());
+        assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
         EXPECT_GT(resource.currentBytes(), 0U);
         EXPECT_GT(resource.peakBytes(), 0U);
     }

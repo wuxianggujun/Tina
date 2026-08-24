@@ -89,7 +89,7 @@ void assertOk(Core::Status status)
     }
     fixture.context = std::move(*contextResult);
 
-    auto rootResult = fixture.context->rootBuilder().createRoot();
+    auto rootResult = fixture.context->authoring().rootBuilder().createRoot();
     EXPECT_TRUE(rootResult.has_value())
         << (rootResult ? "" : rootResult.error().message);
     if (!rootResult) {
@@ -97,7 +97,7 @@ void assertOk(Core::Status status)
     }
     fixture.root = std::move(*rootResult);
 
-    auto updaterResult = fixture.context->treeUpdater(fixture.root);
+    auto updaterResult = fixture.context->authoring().treeUpdater(fixture.root);
     EXPECT_TRUE(updaterResult.has_value())
         << (updaterResult ? "" : updaterResult.error().message);
     if (!updaterResult) {
@@ -144,7 +144,7 @@ void assertOk(Core::Status status)
         rightStyle.visibility = rightVisibility;
         assertOk(updater.setLayoutStyle(fixture.right, rightStyle));
     }
-    assertOk(fixture.context->commitLayout({.width = 200.0F, .height = 100.0F}));
+    assertOk(fixture.context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
     return fixture;
 }
 
@@ -172,7 +172,7 @@ TEST(UIDirtySubtreeTest, ReusesCleanSiblingSubtreeAfterLeafStyleMutation)
     ASSERT_TRUE(fixture.root);
     ASSERT_TRUE(oracle.root);
 
-    const UI::UICommittedLayoutView before = fixture.context->committedLayout();
+    const UI::UICommittedLayoutView before = fixture.context->publication().committedLayout();
     ASSERT_EQ(before.entries().size(), 5U);
     const UI::UICommittedLayoutEntry* rightBefore = findEntry(before, fixture.right);
     const UI::UICommittedLayoutEntry* rightLeafBefore =
@@ -184,18 +184,18 @@ TEST(UIDirtySubtreeTest, ReusesCleanSiblingSubtreeAfterLeafStyleMutation)
     const UI::UILogicalRect rightLeafWorldBefore = rightLeafBefore->worldRect;
     const UI::UILogicalRect rightLeafClipBefore = rightLeafBefore->effectiveClip;
 
-    auto updaterResult = fixture.context->treeUpdater(fixture.root);
+    auto updaterResult = fixture.context->authoring().treeUpdater(fixture.root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
     assertOk(updater.setLayoutStyle(fixture.leftLeaf, fixedSize(36.0F, 10.0F)));
-    assertOk(fixture.context->commitLayout({.width = 200.0F, .height = 100.0F}));
+    assertOk(fixture.context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
 
     const UI::UIContextStatistics statistics = fixture.context->statistics();
     EXPECT_EQ(statistics.lastLayoutPassCount, 1U);
     EXPECT_EQ(statistics.lastLayoutMeasuredNodeCount, 3U);
     EXPECT_EQ(statistics.lastLayoutArrangedNodeCount, 3U);
 
-    const UI::UICommittedLayoutView after = fixture.context->committedLayout();
+    const UI::UICommittedLayoutView after = fixture.context->publication().committedLayout();
     const UI::UICommittedLayoutEntry* rightAfter = findEntry(after, fixture.right);
     const UI::UICommittedLayoutEntry* rightLeafAfter =
         findEntry(after, fixture.rightLeaf);
@@ -206,7 +206,7 @@ TEST(UIDirtySubtreeTest, ReusesCleanSiblingSubtreeAfterLeafStyleMutation)
     EXPECT_EQ(rightLeafAfter->worldRect, rightLeafWorldBefore);
     EXPECT_EQ(rightLeafAfter->effectiveClip, rightLeafClipBefore);
 
-    const UI::UICommittedLayoutView oracleLayout = oracle.context->committedLayout();
+    const UI::UICommittedLayoutView oracleLayout = oracle.context->publication().committedLayout();
     ASSERT_EQ(after.entries().size(), oracleLayout.entries().size());
     for (usize index = 0; index < after.entries().size(); ++index) {
         const UI::UICommittedLayoutEntry& actual = after.entries()[index];
@@ -226,13 +226,13 @@ TEST(UIDirtySubtreeTest, ViewportConstraintChangeForcesCompleteLayoutPass)
     ASSERT_NE(fixture.context, nullptr);
     ASSERT_TRUE(fixture.root);
 
-    auto updaterResult = fixture.context->treeUpdater(fixture.root);
+    auto updaterResult = fixture.context->authoring().treeUpdater(fixture.root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
     UI::UILayoutStyle rootStyle = fixedSize(240.0F, 100.0F);
     rootStyle.flexContainer.direction = UI::UIFlexDirection::Column;
     assertOk(updater.setLayoutStyle(fixture.root.rootNodeId(), rootStyle));
-    assertOk(fixture.context->commitLayout({.width = 240.0F, .height = 100.0F}));
+    assertOk(fixture.context->publication().commitLayout({.width = 240.0F, .height = 100.0F}));
 
     const UI::UIContextStatistics statistics = fixture.context->statistics();
     EXPECT_EQ(statistics.lastLayoutPassCount, 1U);
@@ -253,7 +253,7 @@ TEST(UIDirtySubtreeTest, ParentStyleConstraintChangeForcesCompleteLayoutPass)
     ASSERT_TRUE(fixture.root);
     ASSERT_TRUE(oracle.root);
 
-    auto updaterResult = fixture.context->treeUpdater(fixture.root);
+    auto updaterResult = fixture.context->authoring().treeUpdater(fixture.root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
     UI::UILayoutStyle rootStyle = fixedSize(240.0F, 100.0F);
@@ -262,15 +262,15 @@ TEST(UIDirtySubtreeTest, ParentStyleConstraintChangeForcesCompleteLayoutPass)
 
     // Keep the viewport unchanged so this exercises the parent-style dirty
     // path rather than the independent viewport-change full rebuild gate.
-    assertOk(fixture.context->commitLayout({.width = 200.0F, .height = 100.0F}));
+    assertOk(fixture.context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
 
     const UI::UIContextStatistics statistics = fixture.context->statistics();
     EXPECT_EQ(statistics.lastLayoutPassCount, 1U);
     EXPECT_EQ(statistics.lastLayoutMeasuredNodeCount, 5U);
     EXPECT_EQ(statistics.lastLayoutArrangedNodeCount, 5U);
 
-    const UI::UICommittedLayoutView actual = fixture.context->committedLayout();
-    const UI::UICommittedLayoutView expected = oracle.context->committedLayout();
+    const UI::UICommittedLayoutView actual = fixture.context->publication().committedLayout();
+    const UI::UICommittedLayoutView expected = oracle.context->publication().committedLayout();
     ASSERT_EQ(actual.entries().size(), expected.entries().size());
     for (usize index = 0; index < actual.entries().size(); ++index) {
         EXPECT_EQ(actual.entries()[index].localRect, expected.entries()[index].localRect);
@@ -286,7 +286,7 @@ TEST(UIDirtySubtreeTest, RecomputesAutoAncestorAfterLeafStyleMutation)
     ASSERT_NE(fixture.context, nullptr);
     ASSERT_TRUE(fixture.root);
 
-    auto updaterResult = fixture.context->treeUpdater(fixture.root);
+    auto updaterResult = fixture.context->authoring().treeUpdater(fixture.root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
@@ -296,12 +296,12 @@ TEST(UIDirtySubtreeTest, RecomputesAutoAncestorAfterLeafStyleMutation)
     UI::UILayoutStyle autoBranchStyle;
     assertOk(updater.setLayoutStyle(fixture.root.rootNodeId(), rootStyle));
     assertOk(updater.setLayoutStyle(fixture.left, autoBranchStyle));
-    assertOk(fixture.context->commitLayout({.width = 200.0F, .height = 100.0F}));
+    assertOk(fixture.context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
 
     const UI::UICommittedLayoutEntry* initialBranch =
-        findEntry(fixture.context->committedLayout(), fixture.left);
+        findEntry(fixture.context->publication().committedLayout(), fixture.left);
     const UI::UICommittedLayoutEntry* initialFollowingBranch =
-        findEntry(fixture.context->committedLayout(), fixture.right);
+        findEntry(fixture.context->publication().committedLayout(), fixture.right);
     ASSERT_NE(initialBranch, nullptr);
     ASSERT_NE(initialFollowingBranch, nullptr);
     EXPECT_EQ(initialBranch->worldRect.width, 20.0F);
@@ -309,7 +309,7 @@ TEST(UIDirtySubtreeTest, RecomputesAutoAncestorAfterLeafStyleMutation)
     const float initialFollowingBranchY = initialFollowingBranch->worldRect.y;
 
     assertOk(updater.setLayoutStyle(fixture.leftLeaf, fixedSize(36.0F, 24.0F)));
-    assertOk(fixture.context->commitLayout({.width = 200.0F, .height = 100.0F}));
+    assertOk(fixture.context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
 
     const UI::UIContextStatistics statistics = fixture.context->statistics();
     EXPECT_EQ(statistics.lastLayoutPassCount, 1U);
@@ -319,9 +319,9 @@ TEST(UIDirtySubtreeTest, RecomputesAutoAncestorAfterLeafStyleMutation)
     EXPECT_EQ(statistics.lastLayoutArrangedNodeCount, 5U);
 
     const UI::UICommittedLayoutEntry* branch =
-        findEntry(fixture.context->committedLayout(), fixture.left);
+        findEntry(fixture.context->publication().committedLayout(), fixture.left);
     const UI::UICommittedLayoutEntry* followingBranch =
-        findEntry(fixture.context->committedLayout(), fixture.right);
+        findEntry(fixture.context->publication().committedLayout(), fixture.right);
     ASSERT_NE(branch, nullptr);
     ASSERT_NE(followingBranch, nullptr);
     EXPECT_EQ(branch->worldRect.width, 36.0F);
@@ -341,21 +341,21 @@ TEST(UIDirtySubtreeTest, CollapsingSubtreeMatchesFullRebuildAndKeepsSiblingClean
     ASSERT_TRUE(fixture.root);
     ASSERT_TRUE(oracle.root);
 
-    auto updaterResult = fixture.context->treeUpdater(fixture.root);
+    auto updaterResult = fixture.context->authoring().treeUpdater(fixture.root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
     UI::UILayoutStyle collapsedStyle;
     collapsedStyle.visibility = UI::UIVisibility::Collapsed;
     assertOk(updater.setLayoutStyle(fixture.right, collapsedStyle));
-    assertOk(fixture.context->commitLayout({.width = 200.0F, .height = 100.0F}));
+    assertOk(fixture.context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
 
     const UI::UIContextStatistics statistics = fixture.context->statistics();
     EXPECT_EQ(statistics.lastLayoutPassCount, 1U);
     EXPECT_EQ(statistics.lastLayoutMeasuredNodeCount, 3U);
     EXPECT_EQ(statistics.lastLayoutArrangedNodeCount, 3U);
 
-    const UI::UICommittedLayoutView actual = fixture.context->committedLayout();
-    const UI::UICommittedLayoutView expected = oracle.context->committedLayout();
+    const UI::UICommittedLayoutView actual = fixture.context->publication().committedLayout();
+    const UI::UICommittedLayoutView expected = oracle.context->publication().committedLayout();
     ASSERT_EQ(actual.entries().size(), expected.entries().size());
     for (usize index = 0; index < actual.entries().size(); ++index) {
         EXPECT_EQ(actual.entries()[index].localRect, expected.entries()[index].localRect);
@@ -373,24 +373,24 @@ TEST(UIDirtySubtreeTest, FailedPaintCandidateDisablesReuseForNextLayout)
     ASSERT_NE(fixture.context, nullptr);
     ASSERT_TRUE(fixture.root);
 
-    auto updaterResult = fixture.context->treeUpdater(fixture.root);
+    auto updaterResult = fixture.context->authoring().treeUpdater(fixture.root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
     assertOk(updater.setLayoutStyle(fixture.leftLeaf, fixedSize(36.0F, 10.0F)));
     assertOk(updater.setBoxPaint(fixture.left, solidFill(10, 20, 30)));
     assertOk(updater.setBoxPaint(fixture.right, solidFill(40, 50, 60)));
 
-    const u64 publishedLayoutRevision = fixture.context->committedLayout().layoutRevision();
+    const u64 publishedLayoutRevision = fixture.context->publication().committedLayout().layoutRevision();
     const Core::Status rejected =
-        fixture.context->commitLayout({.width = 200.0F, .height = 100.0F});
+        fixture.context->publication().commitLayout({.width = 200.0F, .height = 100.0F});
     ASSERT_FALSE(rejected.has_value());
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::CapacityExceeded);
     EXPECT_EQ(
-        fixture.context->committedLayout().layoutRevision(),
+        fixture.context->publication().committedLayout().layoutRevision(),
         publishedLayoutRevision);
 
     assertOk(updater.setBoxPaint(fixture.right, {}));
-    assertOk(fixture.context->commitLayout({.width = 200.0F, .height = 100.0F}));
+    assertOk(fixture.context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
 
     const UI::UIContextStatistics statistics = fixture.context->statistics();
     EXPECT_EQ(statistics.lastLayoutPassCount, 1U);
@@ -412,7 +412,7 @@ TEST(UIDirtySubtreeTest, PhaseDirtyStatsTrackStructureLayoutHitPaintAndSemantics
     EXPECT_FALSE(clean.semanticsDirty);
     EXPECT_EQ(clean.dirtyQueuePendingCount, 0U);
 
-    auto updaterResult = fixture.context->treeUpdater(fixture.root);
+    auto updaterResult = fixture.context->authoring().treeUpdater(fixture.root);
     ASSERT_TRUE(updaterResult.has_value());
     UI::UITreeUpdater updater = std::move(*updaterResult);
 
@@ -443,7 +443,7 @@ TEST(UIDirtySubtreeTest, PhaseDirtyStatsTrackStructureLayoutHitPaintAndSemantics
     EXPECT_TRUE(afterStructure.semanticsDirty);
     static_cast<void>(*panelResult);
 
-    assertOk(fixture.context->commitStructure());
+    assertOk(fixture.context->publication().commitStructure());
     UI::UIContextStatistics afterStructureCommit = fixture.context->statistics();
     EXPECT_FALSE(afterStructureCommit.structureDirty);
     EXPECT_TRUE(afterStructureCommit.layoutDirty);
@@ -451,7 +451,7 @@ TEST(UIDirtySubtreeTest, PhaseDirtyStatsTrackStructureLayoutHitPaintAndSemantics
     EXPECT_TRUE(afterStructureCommit.paintDirty);
     EXPECT_TRUE(afterStructureCommit.semanticsDirty);
 
-    assertOk(fixture.context->commitLayout({.width = 200.0F, .height = 100.0F}));
+    assertOk(fixture.context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
     UI::UIContextStatistics afterLayoutCommit = fixture.context->statistics();
     EXPECT_FALSE(afterLayoutCommit.structureDirty);
     EXPECT_FALSE(afterLayoutCommit.layoutDirty);
