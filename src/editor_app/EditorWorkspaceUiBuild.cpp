@@ -983,11 +983,12 @@ auto EditorWorkspaceState::buildLeftDockUi(
     projectAssetList_ = *projectList;
     projectAssetListStyle_ = UI::UIVirtualGridViewStyle{
                 .minimumItemWidth = projectAssetViewMode_ == ProjectAssetViewMode::Grid
-                                        ? ProjectAssetMinimumItemWidth + 12.0F
+                                        ? ProjectAssetMinimumItemWidth
                                         : 320.0F,
                 .itemHeight = projectAssetViewMode_ == ProjectAssetViewMode::Grid
-                                  ? 96.0F
-                                  : 68.0F,
+                                  ? 84.0F
+                                  : 60.0F,
+                .stretchLastRow = projectAssetViewMode_ != ProjectAssetViewMode::Grid,
                 .overscanRows = 1,
                 .scrollBarVisibility = UI::UIScrollBarVisibility::Auto,
                 .wheelStep = ui.productTheme.controls.listRowHeight,
@@ -1237,8 +1238,8 @@ auto EditorWorkspaceState::buildLeftDockUi(
         return status;
     }
 
-    sourceImportSectionLayout_ = fillWidth(
-        ui.productTheme.controls.buttonHeight + ui.productTheme.spacing.space2 + 128.0F);
+    sourceImportSectionLayout_ = fillWidth(ui.productTheme.controls.buttonHeight);
+    sourceImportSectionLayout_.size.height = UI::UILayoutLength::Auto();
     sourceImportSectionLayout_.flexItem.shrink = 0.0F;
     sourceImportSectionLayout_.flexContainer.direction = UI::UIFlexDirection::Column;
     sourceImportSectionLayout_.flexContainer.gap.row = ui.productTheme.spacing.space2;
@@ -1266,6 +1267,35 @@ auto EditorWorkspaceState::buildLeftDockUi(
         !status) {
         return status;
     }
+    sourceImportExpandButtonRootLayout_ = fixedSize(
+        ui.productTheme.controls.iconButtonExtent,
+        ui.productTheme.controls.iconButtonExtent);
+    sourceImportExpandButtonRootLayout_.visibility =
+        sourceImportExpanded_ ? UI::UIVisibility::Collapsed
+                              : UI::UIVisibility::Visible;
+    auto sourceImportExpandButton = EditorIconButton::Build(
+        ui.tree, sourceImportHeader->actions, ui.productTheme,
+        EditorIcon::ChevronRight, "Show source import records",
+        sourceImportExpandButtonRootLayout_, true);
+    if (!sourceImportExpandButton) {
+        return Tina::Core::failure(std::move(sourceImportExpandButton.error()));
+    }
+    sourceImportExpandButtonRoot_ = sourceImportExpandButton->root;
+    sourceImportExpandButton_ = sourceImportExpandButton->button;
+
+    sourceImportCollapseButtonRootLayout_ = sourceImportExpandButtonRootLayout_;
+    sourceImportCollapseButtonRootLayout_.visibility =
+        sourceImportExpanded_ ? UI::UIVisibility::Visible
+                              : UI::UIVisibility::Collapsed;
+    auto sourceImportCollapseButton = EditorIconButton::Build(
+        ui.tree, sourceImportHeader->actions, ui.productTheme,
+        EditorIcon::ChevronDown, "Hide source import records",
+        sourceImportCollapseButtonRootLayout_, true);
+    if (!sourceImportCollapseButton) {
+        return Tina::Core::failure(std::move(sourceImportCollapseButton.error()));
+    }
+    sourceImportCollapseButtonRoot_ = sourceImportCollapseButton->root;
+    sourceImportCollapseButton_ = sourceImportCollapseButton->button;
     if (auto status = storeNode(ui.createIconButton(
                                     sourceImportHeader->actions, EditorIcon::Delete,
                                     "Remove source import", {},
@@ -1276,10 +1306,21 @@ auto EditorWorkspaceState::buildLeftDockUi(
         return status;
     }
 
-    UI::UILayoutStyle sourceImportGridStyle = fillWidth(128.0F);
+    sourceImportDetailsLayout_ = fillWidth(128.0F);
+    sourceImportDetailsLayout_.visibility =
+        sourceImportExpanded_ ? UI::UIVisibility::Visible
+                              : UI::UIVisibility::Collapsed;
+    if (auto status = storeNode(
+            ui.createPanel(sourceImportSection_, sourceImportDetailsLayout_),
+            sourceImportDetails_);
+        !status) {
+        return status;
+    }
+
+    UI::UILayoutStyle sourceImportGridStyle = percentSize(100.0F, 100.0F);
     sourceImportGridStyle.minMax.minHeight = UI::UILayoutLength::Px(96.0F);
     auto sourceImportGrid = ui.tree.createElement(
-        sourceImportSection_, UI::makeDataGridElement(
+        sourceImportDetails_, UI::makeDataGridElement(
                   {
                       .columnCapacity = SourceImportColumnCapacity,
                       .materializedRowCapacity = SourceImportMaterializedCapacity,
@@ -4928,6 +4969,24 @@ auto EditorWorkspaceState::registerUiCallbacks(
                 pendingBottomPanelOpen_ = BottomPanelKind::Output;
                 animationHoveredFrameSlot_.reset();
                 pendingAnimationTimelineRefresh_ = true;
+            }});
+        !status) {
+        return status;
+    }
+    if (auto status = ui.tree.setButtonAction(
+            sourceImportExpandButton_,
+            UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                sourceImportExpanded_ = true;
+                sourceImportVisibilityRefreshPending_ = true;
+            }});
+        !status) {
+        return status;
+    }
+    if (auto status = ui.tree.setButtonAction(
+            sourceImportCollapseButton_,
+            UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                sourceImportExpanded_ = false;
+                sourceImportVisibilityRefreshPending_ = true;
             }});
         !status) {
         return status;

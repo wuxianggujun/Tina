@@ -334,6 +334,10 @@ inline constexpr u8 ThemeDirtyLayoutSelf = 1U << 1U;
 inline constexpr u8 ThemeDirtyLayoutAncestor = 1U << 2U;
 inline constexpr float CollectionRowHorizontalPadding = 8.0F;
 inline constexpr float CollectionRowTextFitTolerance = 0.001F;
+inline constexpr float VirtualGridPreviewMaxExtent = 48.0F;
+inline constexpr float VirtualGridListPreviewExtent = 40.0F;
+inline constexpr float VirtualGridListItemHeightThreshold = 72.0F;
+inline constexpr float VirtualGridPreviewGap = 4.0F;
 
 void configureCollectionRowLayout(UILayoutStyle& layout, float rowHeight,
                                   float leftPadding = CollectionRowHorizontalPadding) noexcept
@@ -2410,6 +2414,7 @@ struct UIContext::Impl final {
             .columnGap = state->style.columnGap,
             .rowGap = state->style.rowGap,
             .maximumColumnCount = state->style.maximumColumnCount,
+            .stretchLastRow = state->style.stretchLastRow,
             .overscanRows = state->style.overscanRows,
             .scrollBarVisibility = state->style.scrollBarVisibility,
             .scrollBarThickness = state->paint.scrollBar.thickness,
@@ -3603,6 +3608,114 @@ struct UIContext::Impl final {
         return resolveContentPlacement(
             scratch.worldRect, layout.padding, leadingReservedWidth,
             trailingReservedWidth, alignment, intrinsicSize);
+    }
+
+    [[nodiscard]] bool hasVirtualGridPreview(u32 index) const noexcept
+    {
+        const NodeRecord* record = recordByIndex(index);
+        if (record == nullptr || record->kind != BuiltinElementKind::VirtualGridViewItem)
+        {
+            return false;
+        }
+        const UIImageContent* image = imageContentStorage.get(index);
+        const WidgetTextState* text = index < textStatesByIndex.size()
+                                          ? &textStatesByIndex[index]
+                                          : nullptr;
+        return image != nullptr && text != nullptr && text->hasContent;
+    }
+
+    [[nodiscard]] UICommittedContentPlacement virtualGridImagePlacement(
+        const UICommittedLayoutEntry& layoutEntry) const noexcept
+    {
+        UICommittedContentPlacement placement = layoutEntry.contentPlacement;
+        if (!hasVirtualGridPreview(layoutEntry.node.index()))
+        {
+            return placement;
+        }
+        if (layoutEntry.worldRect.height <= VirtualGridListItemHeightThreshold)
+        {
+            placement.contentBox.width = (std::min)(
+                VirtualGridListPreviewExtent,
+                (std::max)(0.0F, placement.contentBox.width));
+            placement.origin = placement.contentBox.origin();
+            return placement;
+        }
+        const float thumbnailHeight = (std::min)(
+            VirtualGridPreviewMaxExtent,
+            (std::max)(0.0F, placement.contentBox.height));
+        placement.contentBox.height = thumbnailHeight;
+        placement.origin = placement.contentBox.origin();
+        return placement;
+    }
+
+    [[nodiscard]] UICommittedContentPlacement virtualGridTextPlacement(
+        const UICommittedLayoutEntry& layoutEntry) const noexcept
+    {
+        UICommittedContentPlacement placement = layoutEntry.contentPlacement;
+        if (!hasVirtualGridPreview(layoutEntry.node.index()))
+        {
+            return placement;
+        }
+        const u32 index = layoutEntry.node.index();
+        if (layoutEntry.worldRect.height <= VirtualGridListItemHeightThreshold)
+        {
+            const float thumbnailWidth = (std::min)(
+                VirtualGridListPreviewExtent,
+                (std::max)(0.0F, placement.contentBox.width));
+            placement.contentBox.x = normalizeFloat(
+                placement.contentBox.x + thumbnailWidth + VirtualGridPreviewGap);
+            placement.contentBox.width = (std::max)(
+                0.0F,
+                placement.contentBox.width - thumbnailWidth - VirtualGridPreviewGap);
+        }
+        else
+        {
+            const float thumbnailHeight = (std::min)(
+                VirtualGridPreviewMaxExtent,
+                (std::max)(0.0F, placement.contentBox.height));
+            const float availableHeight = (std::max)(
+                0.0F,
+                placement.contentBox.height - thumbnailHeight - VirtualGridPreviewGap);
+            placement.contentBox.y = normalizeFloat(
+                placement.contentBox.y + thumbnailHeight + VirtualGridPreviewGap);
+            placement.contentBox.height = availableHeight;
+        }
+        const UITextMetrics* metrics =
+            index < textStatesByIndex.size() ? presentationTextMetricsFor(index) : nullptr;
+        if (metrics == nullptr)
+        {
+            placement.origin = placement.contentBox.origin();
+            placement.hasIntrinsicContent = false;
+            placement.intrinsicSize = {};
+            return placement;
+        }
+        const UIContentAlignment alignment = textStatesByIndex[index].alignment;
+        const float horizontalFree = (std::max)(
+            0.0F, placement.contentBox.width - metrics->measuredSize.width);
+        const float verticalFree = (std::max)(
+            0.0F, placement.contentBox.height - metrics->measuredSize.height);
+        const auto alignedOffset = [](UIAxisAlignment axis, float freeSpace) noexcept {
+            switch (axis)
+            {
+            case UIAxisAlignment::Center:
+                return freeSpace * 0.5F;
+            case UIAxisAlignment::End:
+                return freeSpace;
+            case UIAxisAlignment::Start:
+            case UIAxisAlignment::Stretch:
+                return 0.0F;
+            }
+            return 0.0F;
+        };
+        placement.origin = UILogicalPoint{
+            .x = normalizeFloat(placement.contentBox.x +
+                                alignedOffset(alignment.horizontal, horizontalFree)),
+            .y = normalizeFloat(placement.contentBox.y +
+                                alignedOffset(alignment.vertical, verticalFree)),
+        };
+        placement.intrinsicSize = metrics->measuredSize;
+        placement.hasIntrinsicContent = true;
+        return placement;
     }
 
     void buildCommittedLayout(std::pmr::vector<UICommittedLayoutEntry>& output,
@@ -5570,9 +5683,11 @@ struct UIContext::Impl final {
             return Core::failure(controlPaintBatch.error());
         }
         paintEntryCount += controlPaintBatch->size();
+        UICommittedLayoutEntry textLayoutEntry = layoutEntry;
+        textLayoutEntry.contentPlacement = virtualGridTextPlacement(layoutEntry);
         paintEntryCount += Detail::UITextEditPaintEmitter::countEntries(
             resolveTextEditPaintStateFor(
-                layoutEntry, false, useCandidateTextEditVisualState));
+                textLayoutEntry, false, useCandidateTextEditVisualState));
         return paintEntryCount;
     }
 
@@ -5684,10 +5799,12 @@ struct UIContext::Impl final {
                                const UICommittedLayoutEntry& layoutEntry, u32& nextPaintOrdinal,
                                bool useCandidateTextEditVisualState) noexcept
     {
+        UICommittedLayoutEntry textLayoutEntry = layoutEntry;
+        textLayoutEntry.contentPlacement = virtualGridTextPlacement(layoutEntry);
         const auto caretGeometry = Detail::UITextEditPaintEmitter::append(
-            output, layoutEntry, nextPaintOrdinal,
+            output, textLayoutEntry, nextPaintOrdinal,
             resolveTextEditPaintStateFor(
-                layoutEntry, true, useCandidateTextEditVisualState));
+                textLayoutEntry, true, useCandidateTextEditVisualState));
         if (caretGeometry.has_value() && caretGeometry->effectiveClip.width > 0.0F &&
             caretGeometry->effectiveClip.height > 0.0F &&
             caretGeometry->worldRect.x < caretGeometry->effectiveClip.right() &&
@@ -5761,7 +5878,9 @@ struct UIContext::Impl final {
         {
             return;
         }
-        const UILogicalRect destination = resolveImageDestination(layoutEntry.contentPlacement, *image);
+        const UICommittedContentPlacement imagePlacement =
+            virtualGridImagePlacement(layoutEntry);
+        const UILogicalRect destination = resolveImageDestination(imagePlacement, *image);
         if (destination.width <= 0.0F || destination.height <= 0.0F)
         {
             return;
@@ -5771,7 +5890,7 @@ struct UIContext::Impl final {
             .root = idForIndex(record->rootIndex),
             .worldRect = destination,
             .effectiveClip = intersectRects(layoutEntry.effectiveClip,
-                                            layoutEntry.contentPlacement.contentBox),
+                                            imagePlacement.contentBox),
             .paintOrdinal = nextPaintOrdinal,
             .solidFill = premultiply(tint),
             .kind = UICommittedPaintKind::Image,
@@ -5794,13 +5913,31 @@ struct UIContext::Impl final {
         appendBoxChromePaints(output, layoutEntry.node, paintWorld, layoutEntry.effectiveClip,
                               nextPaintOrdinal, boxPaint, fill);
         appendCanvasPaints(output, layoutEntry, nextPaintOrdinal);
-        appendImagePaint(output, layoutEntry, nextPaintOrdinal);
         auto controlPaintBatch = resolveControlPaintBatch(layoutEntry, true);
         if (!controlPaintBatch)
         {
             return Core::failure(controlPaintBatch.error());
         }
-        controlPaintBatch->appendTo(output, layoutEntry.node, layoutEntry.effectiveClip, nextPaintOrdinal);
+        const NodeRecord* record = recordByIndex(nodeIndex);
+        const bool virtualGridItem =
+            record != nullptr &&
+            record->kind == BuiltinElementKind::VirtualGridViewItem;
+        if (virtualGridItem)
+        {
+            // The item batch contains the opaque selected-card background. It
+            // must sit behind the thumbnail instead of covering it.
+            controlPaintBatch->appendTo(
+                output, layoutEntry.node, layoutEntry.effectiveClip,
+                nextPaintOrdinal);
+            appendImagePaint(output, layoutEntry, nextPaintOrdinal);
+        }
+        else
+        {
+            appendImagePaint(output, layoutEntry, nextPaintOrdinal);
+            controlPaintBatch->appendTo(
+                output, layoutEntry.node, layoutEntry.effectiveClip,
+                nextPaintOrdinal);
+        }
         appendTextGlyphPaints(
             output, layoutEntry, nextPaintOrdinal, useCandidateTextEditVisualState);
         return Core::success();

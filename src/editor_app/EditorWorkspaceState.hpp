@@ -145,9 +145,9 @@ inline constexpr float LeftDockInitialFraction = 0.22F;
 inline constexpr float MainCenterInitialFraction = 0.68F;
 inline constexpr float ViewportInitialFraction = 0.68F;
 inline constexpr u32 HierarchyMaterializedCapacity = 64;
-inline constexpr u32 AssetBrowserMaterializedCapacity = 12;
+inline constexpr u32 AssetBrowserMaterializedCapacity = 24;
 inline constexpr u32 ProjectAssetCompactIdCharacterCount = 4;
-inline constexpr float ProjectAssetMinimumItemWidth = 144.0F;
+inline constexpr float ProjectAssetMinimumItemWidth = 116.0F;
 inline constexpr u32 SourceImportColumnCapacity = 3;
 inline constexpr u32 SourceImportMaterializedCapacity = 5;
 inline constexpr float SourceImportKindColumnWidth = 88.0F;
@@ -4442,6 +4442,14 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId openImportOutputButton_{};
     UI::UINodeId sourceImportSection_{};
     UI::UILayoutStyle sourceImportSectionLayout_{};
+    UI::UINodeId sourceImportDetails_{};
+    UI::UILayoutStyle sourceImportDetailsLayout_{};
+    UI::UINodeId sourceImportExpandButtonRoot_{};
+    UI::UILayoutStyle sourceImportExpandButtonRootLayout_{};
+    UI::UINodeId sourceImportExpandButton_{};
+    UI::UINodeId sourceImportCollapseButtonRoot_{};
+    UI::UILayoutStyle sourceImportCollapseButtonRootLayout_{};
+    UI::UINodeId sourceImportCollapseButton_{};
     UI::UINodeId sourceImportGrid_{};
     UI::UINodeId sourceImportCount_{};
     UI::UINodeId inspectorScroll_{};
@@ -4856,6 +4864,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
     bool projectBrowserUiRefreshPending_ = false;
     bool projectAssetSelectionSyncPending_ = false;
     bool sourceImportUiRefreshPending_ = false;
+    bool sourceImportVisibilityRefreshPending_ = false;
+    bool sourceImportExpanded_ = false;
     bool sourceImportLastFailed_ = false;
     // Retains the bounded worker error for the persistent Project Assets
     // import callout. The previous Catalog remains the active data source.

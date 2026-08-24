@@ -266,10 +266,12 @@ Lease/GPU/binding；Scene extraction 只取得 packet-local `FrameResourceRef`�
 
 Project Browser 直接拥有 Catalog descriptor 的确定性 AssetId 排序索引，并提供 ASCII case-insensitive name/kind 搜索、
 All/2D/3D/Media 组合过滤、stable item key、按 AssetId 恢复的稳定选择，以及 Grid/List 两种固定 metrics 的
-`UIVirtualGridView` presentation。Grid 使用约 132 logical px 最小 item 宽度与 72 logical px 高度，List 使用约
-280 logical px 最小 item 宽度与 30 logical px 高度；两档只改变 presentation/metrics，不改变 logical order、key 或 selection。
+`UIVirtualGridView` presentation。Grid 使用 116 logical px 最小 item 宽度与 84 logical px 高度，并保持按 viewport
+计算出的响应式列数；即使末行只有一个资源也不再把 item 拉伸到整行。List 使用 320 logical px 最小 item 宽度与
+60 logical px 高度；两档只改变 presentation/metrics，不改变 logical order、key 或 selection。
 每个 materialized item 现在同时发布 primary label、kind secondary label、status label/status，以及 preview/icon metadata；Texture/Sprite 使用
-真实 cooked 缩略图，Mesh/Audio/World/Prefab/TileMap/Animation 使用稳定类型 icon fallback。缩略图 resolve 失败只把本项标为
+真实 cooked 缩略图，Grid 把 48 logical px 预览放在名称上方，List 把 40 logical px 预览放在名称左侧；选中背景先于
+图片绘制，不会再遮住预览。Mesh/Audio/World/Prefab/TileMap/Animation 使用稳定类型 icon fallback。缩略图 resolve 失败只把本项标为
 `Missing`，不改变 Catalog 或 authoring bytes；Importing/Ready/Error 状态现在按稳定 AssetId 保留导入历史：已知 source mapping 的资源逐项显示
 `Queued`、`Preparing`、`Copying`、`Cooking`、`Ready`、`Imported` 或 `Error`，新输出在 validated stage 返回后补入历史；未受当前批次影响的资源保持 Ready。
 网格下固定高度的 selected-asset summary 保存完整 canonical AssetId，空间不足时仅在绘制阶段以 ellipsis 截断。Project Open 保留
@@ -316,7 +318,9 @@ Editor source import 已完成产品接线。自动化入口使用 strict UTF-8 
 使用三列 DataGrid 显示完整 intended set：`Kind` 固定 88 logical px，显示 Catalog/glTF/Texture/Audio；`Source`
 当前约 190 logical px，显示完整 UTF-8 source path；`Status` 显示 Queued/Preparing/Copying/Cooking/Committing/Imported/Failed。
 DataGrid 使用固定 3 列、5 行 materialized pool、双轴滚动和 stable
-row selection；`Remove` 只读取 selected logical row。空集合时整段 `Collapsed`，Import 入口仍保留在 Project Assets
+row selection；`Remove` 只读取 selected logical row。非空集合只常驻显示带数量 Badge 的标题栏，记录表默认
+`Collapsed`，用户通过 ChevronRight/ChevronDown 手动展开或收起，收起时 `Remove` 禁用，切换项目后恢复默认收起；
+空集合时整段 `Collapsed`，Import 入口仍保留在 Project Assets
 标题栏的小 `+`；`Remove` 在 owner thread 生成删除后的候选集合并启动同一 fresh-stage 事务，不会先打开或重新校验
 被删除的文件，因此已经从磁盘消失的 stale unit 仍可移除。移除最后一个 unit 会从有效 baseline 增量发布零 entry
 Catalog 和零 unit import state；没有有效 baseline 的首次 full cook 仍拒绝空集合。Import/Remove、项目切换和 Catalog
@@ -364,8 +368,8 @@ Conditional document tab strip (external scene/Catalog tabs/close; hidden when e
 Workspace
   Left dock
     Hierarchy (filter/add/duplicate/delete/focus/virtual dynamic TreeView)
-    Project Assets (Search + All/2D/3D/Media/Grid-List/import/refresh/collapsed-empty imports)
-    Source Imports (Kind | Source | Status virtual DataGrid/remove; collapsed when empty)
+    Project Assets (Search + All/2D/3D/Media/compact Grid-List/import/refresh/collapsed-empty imports)
+    Source Imports (default-collapsed Kind | Source | Status virtual DataGrid/remove; toggle in header)
   Active 2D/3D viewport (one Scene-TileMap/transform/snap/marquee/tile/frame/view toolbar + preview canvas)
   Inspector dock (scrollable identity/transform/node properties/hierarchy/TileMap/document/36px dependency list)
 Collapsible bottom panel (Animation timeline or structured Output history; closed by default)

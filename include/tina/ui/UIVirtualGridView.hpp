@@ -85,6 +85,10 @@ struct UIVirtualGridViewStyle final {
     float rowGap = 8.0F;
     // Zero leaves the responsive column count uncapped.
     u32 maximumColumnCount = 0;
+    // When false, the planner keeps the fitted column count even when the
+    // final row is sparse. This is useful for asset browsers where one item
+    // must remain a compact card instead of stretching across the viewport.
+    bool stretchLastRow = true;
     u32 overscanRows = 2;
     UIScrollBarVisibility scrollBarVisibility = UIScrollBarVisibility::Auto;
     float wheelStep = 48.0F;

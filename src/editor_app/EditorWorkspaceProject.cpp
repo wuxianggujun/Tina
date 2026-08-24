@@ -336,6 +336,30 @@ auto EditorWorkspaceState::refreshProjectAssetUi(
         !status) {
         return status;
     }
+    sourceImportDetailsLayout_.visibility =
+        sourceImportExpanded_ ? UI::UIVisibility::Visible
+                              : UI::UIVisibility::Collapsed;
+    if (auto status = tree.setLayoutStyle(
+            sourceImportDetails_, sourceImportDetailsLayout_);
+        !status) {
+        return status;
+    }
+    sourceImportExpandButtonRootLayout_.visibility =
+        sourceImportExpanded_ ? UI::UIVisibility::Collapsed
+                              : UI::UIVisibility::Visible;
+    if (auto status = tree.setLayoutStyle(
+            sourceImportExpandButtonRoot_, sourceImportExpandButtonRootLayout_);
+        !status) {
+        return status;
+    }
+    sourceImportCollapseButtonRootLayout_.visibility =
+        sourceImportExpanded_ ? UI::UIVisibility::Visible
+                              : UI::UIVisibility::Collapsed;
+    if (auto status = tree.setLayoutStyle(
+            sourceImportCollapseButtonRoot_, sourceImportCollapseButtonRootLayout_);
+        !status) {
+        return status;
+    }
     const u32 activeFilter = static_cast<u32>(projectAssets_.filter());
     for (u32 index = 0; index < projectFilterButtons_.size(); ++index) {
         if (auto status = tree.setRadioButtonSelected(projectFilterButtons_[index], index == activeFilter);
@@ -368,7 +392,7 @@ auto EditorWorkspaceState::refreshProjectAssetUi(
     }
     if (auto status = tree.setEnabled(
             removeSourceImportButton_,
-            sourceImportEditable &&
+            sourceImportExpanded_ && sourceImportEditable &&
                 observedSourceImportSelectionIndex_.has_value() &&
                 *observedSourceImportSelectionIndex_ < sourceImportUnits_.size());
         !status) {
@@ -911,6 +935,8 @@ auto EditorWorkspaceState::switchLiveProjectCatalog(
     sourceImportUnits_ = std::move(resolvedCatalog->sourceImportUnits);
     sourceImportUnitOutputs_ = std::move(resolvedCatalog->sourceImportUnitOutputs);
     assetMetadata_ = std::move(resolvedCatalog->assetMetadata);
+    sourceImportExpanded_ = false;
+    sourceImportVisibilityRefreshPending_ = false;
     clearAssetImportHistory();
     sourceImportRetryUnits_.clear();
     sourceImportRetryPathsUtf8_.clear();
@@ -1357,9 +1383,11 @@ auto EditorWorkspaceState::applyProjectAssetViewMode(
     lastProjectAssetPointerDownAssetId_ = {};
     pendingProjectAssetOpen_.reset();
     projectAssetListStyle_.minimumItemWidth =
-        mode == ProjectAssetViewMode::Grid ? ProjectAssetMinimumItemWidth + 12.0F : 320.0F;
+        mode == ProjectAssetViewMode::Grid ? ProjectAssetMinimumItemWidth : 320.0F;
     projectAssetListStyle_.itemHeight =
-        mode == ProjectAssetViewMode::Grid ? 96.0F : 68.0F;
+        mode == ProjectAssetViewMode::Grid ? 84.0F : 60.0F;
+    projectAssetListStyle_.stretchLastRow =
+        mode != ProjectAssetViewMode::Grid;
     if (auto status = tree.setVirtualGridViewStyle(
             projectAssetList_, projectAssetListStyle_); !status) {
         return status;

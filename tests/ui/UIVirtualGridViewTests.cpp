@@ -292,6 +292,47 @@ TEST_F(UIVirtualGridViewTest,
 }
 
 TEST_F(UIVirtualGridViewTest,
+       SparseLastRowCanKeepResponsiveColumnWidthWithoutStretching)
+{
+    auto context = createContext(window, ContextNodeCapacity);
+    ASSERT_NE(context, nullptr);
+    auto root = context->rootBuilder().createRoot().value();
+    auto updater = context->treeUpdater(root).value();
+    VirtualGridDataSource source{.count = 1};
+    const UI::UINodeId grid = *updater.createElement(
+        root.rootNodeId(), UI::makeVirtualGridViewElement(
+                               {.materializedItemCapacity = 4}));
+    assertOk(updater.setLayoutStyle(root.rootNodeId(),
+                                    fixedSize(500.0F, 60.0F)));
+    assertOk(updater.setLayoutStyle(grid, fixedSize(500.0F, 60.0F)));
+    assertOk(updater.setVirtualGridViewStyle(
+        grid,
+        {
+            .minimumItemWidth = 100.0F,
+            .itemHeight = 40.0F,
+            .columnGap = 10.0F,
+            .stretchLastRow = false,
+            .overscanRows = 0,
+            .scrollBarVisibility = UI::UIScrollBarVisibility::Hidden,
+        }));
+    assertOk(updater.setVirtualGridViewDataSource(grid, source.view()));
+
+    assertOk(context->commitLayout({.width = 500.0F, .height = 60.0F}));
+    const UI::UIVirtualGridViewMetrics metrics =
+        updater.virtualGridViewMetrics(grid).value();
+    EXPECT_EQ(metrics.logicalItemCount, 1U);
+    EXPECT_EQ(metrics.logicalColumnCount, 4U);
+    EXPECT_EQ(metrics.logicalRowCount, 1U);
+    EXPECT_EQ(metrics.materializedItemCount, 1U);
+    EXPECT_FLOAT_EQ(metrics.itemWidth, 117.5F);
+
+    const UI::UISemanticsEntry* item =
+        findVirtualItem(context->committedSemantics(), 0);
+    ASSERT_NE(item, nullptr);
+    EXPECT_FLOAT_EQ(item->worldRect.width, 117.5F);
+}
+
+TEST_F(UIVirtualGridViewTest,
        PointerWheelThumbAndTrackUseCommittedGridGeometry)
 {
     constexpr u32 ItemCapacity = 12;
@@ -600,17 +641,55 @@ TEST_F(UIVirtualGridViewTest,
             .columnGap = 10.0F,
             .scrollBarVisibility = UI::UIScrollBarVisibility::Hidden,
         }));
+    const UI::UIStraightSrgba8Color selectionColor{
+        .red = 17, .green = 91, .blue = 63, .alpha = 255};
+    assertOk(updater.setVirtualGridViewPaint(
+        grid,
+        {
+            .selectedItemBackgroundColor = selectionColor,
+            .hoveredSelectedItemBackgroundColor = selectionColor,
+            .focusedSelectedItemBackgroundColor = selectionColor,
+            .pressedSelectedItemBackgroundColor = selectionColor,
+        }));
     assertOk(updater.setVirtualGridViewDataSource(grid, source.view()));
     assertOk(context->commitLayout({.width = 220.0F, .height = 60.0F}));
 
     const UI::UISemanticsEntry* first =
         findVirtualItem(context->committedSemantics(), 0);
     ASSERT_NE(first, nullptr);
+    const UI::UILogicalPoint firstCenter{
+        .x = first->worldRect.x + first->worldRect.width * 0.5F,
+        .y = first->worldRect.y + first->worldRect.height * 0.5F,
+    };
+    ASSERT_TRUE(context->routePointerInput(pointerInput(
+                    window, UI::UIRoutedPointerEventKind::ButtonDown, 1,
+                    firstCenter))
+                    .has_value());
+    ASSERT_TRUE(context->routePointerInput(pointerInput(
+                    window, UI::UIRoutedPointerEventKind::ButtonUp, 2,
+                    firstCenter))
+                    .has_value());
+    assertOk(context->commitLayout({.width = 220.0F, .height = 60.0F}));
+    first = findVirtualItem(context->committedSemantics(), 0);
+    ASSERT_NE(first, nullptr);
     const UI::UINodeId firstNode = first->node;
     const UI::UICommittedPaintEntry* firstImage =
         findImagePaint(context->committedPaint(), firstNode);
     ASSERT_NE(firstImage, nullptr);
     EXPECT_EQ(firstImage->imageSource.texture, imageAssetId(0x11));
+    const UI::UICommittedPaintEntry* selectionPaint = nullptr;
+    for (const UI::UICommittedPaintEntry& entry :
+         context->committedPaint().entries())
+    {
+        if (entry.node == firstNode &&
+            entry.solidFill == UI::premultiply(selectionColor))
+        {
+            selectionPaint = &entry;
+            break;
+        }
+    }
+    ASSERT_NE(selectionPaint, nullptr);
+    EXPECT_LT(selectionPaint->paintOrdinal, firstImage->paintOrdinal);
     EXPECT_EQ(first->name, "Old item");
     EXPECT_EQ(first->valueText, "Old type");
     EXPECT_EQ(first->description, "Old status");

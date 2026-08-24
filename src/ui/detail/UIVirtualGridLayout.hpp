@@ -19,6 +19,7 @@ struct VirtualGridLayoutInput final {
     float columnGap = 0.0F;
     float rowGap = 0.0F;
     u32 maximumColumnCount = 0;
+    bool stretchLastRow = true;
     u32 overscanRows = 0;
     UIScrollBarVisibility scrollBarVisibility = UIScrollBarVisibility::Auto;
     float scrollBarThickness = 0.0F;
@@ -61,7 +62,7 @@ namespace VirtualGridLayoutDetail {
 
 [[nodiscard]] inline u32 resolveColumnCount(
     u64 logicalItemCount, float viewportWidth, float minimumItemWidth,
-    float columnGap, u32 maximumColumnCount) noexcept
+    float columnGap, u32 maximumColumnCount, bool stretchLastRow) noexcept
 {
     if (logicalItemCount == 0)
     {
@@ -83,7 +84,7 @@ namespace VirtualGridLayoutDetail {
     {
         fitted = (std::min)(fitted, maximumColumnCount);
     }
-    if (logicalItemCount < fitted)
+    if (stretchLastRow && logicalItemCount < fitted)
     {
         fitted = static_cast<u32>(logicalItemCount);
     }
@@ -154,7 +155,7 @@ resolveVirtualGridLayout(const VirtualGridLayoutInput& input) noexcept
             availableWidth - (verticalBar ? input.scrollBarThickness : 0.0F));
         columnCount = VirtualGridLayoutDetail::resolveColumnCount(
             input.logicalItemCount, viewportWidth, input.minimumItemWidth,
-            input.columnGap, input.maximumColumnCount);
+            input.columnGap, input.maximumColumnCount, input.stretchLastRow);
         rowCount = columnCount == 0
                        ? 0
                        : VirtualGridLayoutDetail::divideRoundUp(

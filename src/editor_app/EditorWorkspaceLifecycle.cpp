@@ -1212,6 +1212,12 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
             return status;
         }
     }
+    if (sourceImportVisibilityRefreshPending_) {
+        sourceImportVisibilityRefreshPending_ = false;
+        if (auto status = refreshProjectAssetUi(*tree); !status) {
+            return status;
+        }
+    }
     if (sourceImportUiRefreshPending_) {
         sourceImportUiRefreshPending_ = false;
         if (auto status = tree->setDataGridDataSource(
