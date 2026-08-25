@@ -304,6 +304,7 @@ normalizeUIContextCapacityConfig(UIContextCapacityConfig config)
         .canvasCommandCapacity = deriveFromNodeCapacity(config.canvasCommandCapacity),
         .imageContentCapacity = deriveFromNodeCapacity(config.imageContentCapacity),
         .routePathCapacity = deriveFromNodeCapacity(config.routePathCapacity),
+        .layoutDebuggerSnapshotCapacity = config.layoutDebuggerSnapshotCapacity,
         .routedPointerListenerCapacity =
             deriveFromNodeCapacity(config.routedPointerListenerCapacity),
         .buttonActionCapacity = deriveFromNodeCapacity(config.buttonActionCapacity),

@@ -4,7 +4,8 @@
 正式实现，不得作为 Legacy 残留移除。架构决策见 [ADR 0011](adr/0011-retained-ui.md)、
 [ADR 0021](adr/0021-runtime-ui-startup-capability.md)和
 [ADR 0022](adr/0022-ui-element-authoring-and-layout.md)和
-[ADR 0028](adr/0028-ui-fixed-capacity-grid-layout.md)。当前实现与下一阶段框架演进的分界见
+[ADR 0028](adr/0028-ui-fixed-capacity-grid-layout.md)以及
+[ADR 0029](adr/0029-ui-layout-debugger.md)。当前实现与下一阶段框架演进的分界见
 [UI 框架设计](ui-framework.md)和 Accepted [ADR 0023](adr/0023-ui-extensibility-style-paint-motion.md)。
 
 ## 当前能力
@@ -29,7 +30,9 @@
 ## 所有权与句柄
 
 `UIContext::Create(window, capacities, resource)` 在创建时固定 node/root/listener/layout/paint/text/semantics
-等 storage 容量。`paintSnapshotCapacity` 为0时从 node 数派生，非0时可独立提高到8,388,608，以容纳
+等 storage 容量。`layoutDebuggerSnapshotCapacity` 默认为0，此时不保留诊断双缓冲，也不在 layout commit
+构建诊断快照；设置为非零值后容量不得超过 node capacity。该能力始终编译进产品，不依赖 Debug 构建。
+`paintSnapshotCapacity` 为0时从 node 数派生，非0时可独立提高到8,388,608，以容纳
 单节点的 glyph/control/Canvas/NineSlice 多 entry 展开；Semantics entry/scratch 仍严格按 node 数分配。
 `UINodeId` 同时校验语义 owner WindowId、registry owner、slot 与 generation；stale、
 cross-context、cross-window ID 必须失败。
@@ -40,7 +43,7 @@ root。产品 State 在退出时应先 reset listener，再 reset root。Context
 ### 私有实现职责边界
 
 公开 `UIContext` 只作为每窗口唯一的组合根和生命周期边界：它负责 `Create()`、owner Window、节点归属检查、
-统计，以及六个显式 capability accessor；不再直接暴露节点创建/修改、Theme、Motion、Text、提交或输入 API，
+统计，以及七个显式 capability accessor；不再直接暴露节点创建/修改、Theme、Motion、Text、提交或输入 API，
 也不保留旧成员函数的 compatibility alias。调用方按职责包含对应公开头：
 
 | Capability | 公开入口 | 职责 |
@@ -50,6 +53,7 @@ root。产品 State 在退出时应先 reset listener，再 reset root。Context
 | Motion | `context.motion()` | 可注入时钟、reduced-motion、direct transition 与 timeline |
 | Text | `context.text()` | 字体注入、IME 状态与 composition/input/edit-command routing |
 | Publication | `context.publication()` | structure/layout transaction、committed views、caret rect 与 Glyph atlas publication |
+| Layout Debugger | `context.layoutDebugger()` | owner-thread layout 诊断快照及 overlay 选择/排除状态；不触发布局 mutation 或 commit |
 | Input | `context.input()` | Pointer/Focus/Flow/控件命令/accessibility action routing 及窗口级输入状态 |
 
 这些 capability 都是按值返回的 non-owning owner-thread view，不得晚于所属 `UIContext` 使用；
@@ -57,8 +61,15 @@ root。产品 State 在退出时应先 reset listener，再 reset root。Context
 root/child generation。某类 committed view 在下一次该类成功 publication 或 Context 析构时失效；失败提交继续保留
 最后一份成功 snapshot，调用方仍应在后续成功提交后重新取得 view。Runtime phase facade 另有更短的 epoch 生命周期。
 直接消费者应显式包含 `UIAuthoring.hpp`、`UIStyleController.hpp`、`UIMotionController.hpp`、
-`UITextSystem.hpp`、`UIPublicationPipeline.hpp` 或 `UIInputRouter.hpp`；`UIContext.hpp` 只 forward declare
+`UITextSystem.hpp`、`UIPublicationPipeline.hpp`、`UILayoutDebugger.hpp` 或 `UIInputRouter.hpp`；`UIContext.hpp` 只 forward declare
 capability，`UI.hpp` 才是有意提供完整表面的 umbrella header。
+
+`UILayoutDebugSnapshotView` 是下一次成功 layout publication 前有效的 owner-thread borrowed view，包含每个
+committed node 的 authored/resolved style、父/当前 content basis、测量与 min/max-content 尺寸、local/world rect、
+effective clip/content placement、visibility、hit policy、behavior、style role 和稳定的公共元素类型。layout commit
+任一步失败时继续保留上一份成功快照。`UILayoutDebugOptions` 只控制 overlay 的 enabled、全节点边界、选择节点和
+调试器自身排除子树；启用时非空 node 必须属于同一 Context 且仍存活，禁用状态允许保留 stale handle 以便调用方
+先清空或重配。启用但 Context 未配置诊断容量会返回 `CapacityExceeded`。
 
 这仍是同一套 UI ABI 和同一个固定容量事务 owner，不新增第二套 UI。大体量私有实现按 Tree、Layout、Paint、
 Semantics、Input、Controls、Collections、Overlays、Style、Motion 与 Text 等职责拆到独立 translation unit；
@@ -118,8 +129,10 @@ text/text style、visual box/Canvas、enabled、pointer hit policy 与 focus sco
   `flexItem`（grow/shrink/basis/alignSelf）由该父容器为当前子节点解释；
   `wrap=Wrap` 按最终主轴 content extent 分行，每行独立计算 grow/shrink/justify，cross-axis 行尺寸和 row/column
   gap 参与容器 auto-size；`alignContent` 再把完整行集合按 Start/Center/End/SpaceBetween/Stretch 分布到最终
-  cross-axis content extent，`NoWrap` 不消费该属性。最终约束在 Arrange 才确定时，提交在最多三次完整
-  Measure/Arrange 内稳定，否则 fail closed；
+  cross-axis content extent，`NoWrap` 不消费该属性。最终约束在 Arrange 才确定时，提交使用最多八轮 bounded
+  convergence：每轮分别记录 `ResponsiveStyle`、`Visibility`、`FlexConstraint`、`TextMetrics` 反馈，并对字段级
+  resolved state 生成双 `u64` 指纹；稳定时发布，no-progress、cycle 或 pass-budget-exhausted 时携带分类节点上下文
+  fail closed，保留上一份 committed snapshot 与待处理 dirty state；
 - `containerLayout=Grid` 时，`gridContainer` 提供每轴最多8条 `Px/Auto/Fr` track、row/column gap 和
   `justifyItems/alignItems`；`gridItem` 提供 zero-based row/column、span 与 self alignment。空 track list 按
   source-order row-major 自动放置生成隐式 `Auto` track；显式与隐式 track 共用8条容量，超限 fail closed。
@@ -142,7 +155,8 @@ text/text style、visual box/Canvas、enabled、pointer hit policy 与 focus sco
 - `responsiveRules` 是最多4条按顺序、互不重叠的半开区间 `[minParentWidth,maxParentWidth)`；匹配直接父节点
   最终 content width，可覆盖 Flex/Grid 容器类型、Flex direction、Grid rows/columns、visibility、当前激活容器的
   gap、节点 padding 与 min/max constraint。解析只写 layout scratch，不回写 authored style；无匹配区间继续使用
-  base style。Desktop Shell 的 Inspector/Timeline pane 与 splitter 已直接消费该契约，不再从 resize callback
+  base style。父容器最终 content width 驱动的动态切换是 bounded convergence 的核心输入，不会因周期诊断而降级成
+  外部手工布局。Desktop Shell 的 Inspector/Timeline pane 与 splitter 已直接消费该契约，不再从 resize callback
   计算宽度档位或改写 fraction。
 
 控件内部文字使用独立的 `UIContentAlignment`，不再借用父容器的 child alignment。layout 将

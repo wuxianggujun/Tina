@@ -382,14 +382,6 @@ auto EditorWorkspaceState::refreshProjectAssetUi(
         !status) {
         return status;
     }
-    if (auto status = tree.setText(
-            projectAssetDropHint_,
-            activeProjectWorkspace_.has_value()
-                ? "Drop files here or onto the viewport to import resources"
-                : "Open or create a project before dropping files");
-        !status) {
-        return status;
-    }
     // Auto-demo uses an in-memory fixture Catalog without a project workspace;
     // keep its authored asset surface available while real sessions use the
     // Start Center until a project is opened or created.
@@ -405,32 +397,50 @@ auto EditorWorkspaceState::refreshProjectAssetUi(
     if (auto status = refreshRecentProjectsUi(tree); !status) {
         return status;
     }
+    const bool showProjectAssetEmptyState =
+        showProjectAssets && projectAssets_.visibleItemCount() == 0U &&
+        !importPending && !sourceImportLastFailed_;
     projectAssetListLayout_.visibility =
-        showProjectAssets ? UI::UIVisibility::Visible : UI::UIVisibility::Collapsed;
+        showProjectAssets && !showProjectAssetEmptyState
+            ? UI::UIVisibility::Visible
+            : UI::UIVisibility::Collapsed;
     if (auto status = tree.setLayoutStyle(
             projectAssetList_, projectAssetListLayout_);
         !status) {
         return status;
     }
+    // The model always retains an "Assets" Source root so callers can select
+    // the whole Catalog. Do not spend a tree row on that implementation detail
+    // unless at least one real Source-relative folder is available.
     projectAssetFolderTreeLayout_.visibility =
-        showProjectAssets ? UI::UIVisibility::Visible : UI::UIVisibility::Collapsed;
+        showProjectAssets && projectAssets_.folderCount() > 1U
+            ? UI::UIVisibility::Visible
+            : UI::UIVisibility::Collapsed;
     if (auto status = tree.setLayoutStyle(
             projectAssetFolderTree_, projectAssetFolderTreeLayout_); !status) {
         return status;
     }
-    projectAssetEmptyStateLayout_.visibility =
-        showProjectAssets && projectAssets_.itemCount() == 0U && !importPending &&
-                !sourceImportLastFailed_
-            ? UI::UIVisibility::Visible
-            : UI::UIVisibility::Collapsed;
+    projectAssetEmptyStateLayout_.visibility = showProjectAssetEmptyState
+        ? UI::UIVisibility::Visible
+        : UI::UIVisibility::Collapsed;
     if (auto status = tree.setLayoutStyle(
             projectAssetEmptyState_, projectAssetEmptyStateLayout_);
         !status) {
         return status;
     }
-    const std::string_view emptyStateText = activeProjectWorkspace_.has_value()
-                                                ? "Catalog is empty. Import files to add resources."
-                                                : "Open or create a project to import resources.";
+    std::string_view emptyStateTitle = "No resources yet";
+    std::string_view emptyStateText = "Import files to add resources.";
+    if (!projectAssets_.searchQuery().empty()) {
+        emptyStateTitle = "No matching resources";
+        emptyStateText = "Try another search or change the current filters.";
+    } else if (projectAssets_.itemCount() != 0U) {
+        emptyStateTitle = "No resources in this view";
+        emptyStateText = "Choose another folder or type filter.";
+    }
+    if (auto status = tree.setText(projectAssetEmptyStateTitle_, emptyStateTitle);
+        !status) {
+        return status;
+    }
     if (auto status = tree.setText(projectAssetEmptyStateText_, emptyStateText);
         !status) {
         return status;

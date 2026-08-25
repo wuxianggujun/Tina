@@ -165,7 +165,8 @@ Editor 的 resident `CookedAssetFile` bytes 使用可实际 deallocate 的独立
   row/cell state 改为独立 bounded sparse pool，layout scratch 跟随 owner state，避免每一种可选组件都按全局
   node capacity 构造大型数组；
 - bgfx 通用默认会为65K draw calls 的双帧 render-item arrays 和多个 encoder uniform buffer 定容。
-  Runtime 现显式传播 `renderDrawCallCapacity` 并固定单 owner-thread encoder，Editor 使用8192；
+  Runtime 现显式传播 `renderDrawCallCapacity` 并固定单 owner-thread encoder；Editor 为32K UI DisplayList
+  加1K scene headroom，使用33792；
 - Editor 不再开启全 backbuffer 8× MSAA；Directional/Spot/Point shadow atlas/map 也不在空启动时创建，
   只在首次出现对应 pass 时按需分配，启动只保留1×1 sampled D16 fallback；
 - `EditorWorkspaceState::onEnter()` 会创建 PlaySession，但16 MB `canonicalByteCapacity` 只是运行快照的合法上限。

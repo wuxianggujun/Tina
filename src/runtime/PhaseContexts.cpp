@@ -299,6 +299,51 @@ Core::Result<UI::UIContextStatistics> UIUpdateContext::primaryWindowUIStatistics
     return m_primaryWindowUI->statistics(m_uiEpoch, Runtime::Detail::PrimaryWindowUIPhase::UIUpdate);
 }
 
+Core::Result<UI::UILayoutDebugOptions> UIUpdateContext::primaryWindowUILayoutDebugOptions() const
+{
+    if (m_primaryWindowUI == nullptr)
+    {
+        return Core::failure(RuntimeErrorCode::PrimaryWindowUIUnavailable,
+                             "The active Runtime phase has no primary-window UI");
+    }
+    return m_primaryWindowUI->layoutDebugOptions(
+        m_uiEpoch, Runtime::Detail::PrimaryWindowUIPhase::UIUpdate);
+}
+
+Core::Status UIUpdateContext::setPrimaryWindowUILayoutDebugOptions(UI::UILayoutDebugOptions options)
+{
+    if (m_primaryWindowUI == nullptr)
+    {
+        return Core::failure(RuntimeErrorCode::PrimaryWindowUIUnavailable,
+                             "The active Runtime phase has no primary-window UI");
+    }
+    return m_primaryWindowUI->setLayoutDebugOptions(
+        m_uiEpoch, Runtime::Detail::PrimaryWindowUIPhase::UIUpdate, options);
+}
+
+Core::Result<UI::UILayoutDebugSnapshotView> UIUpdateContext::committedLayoutDebugSnapshot() const
+{
+    if (m_primaryWindowUI == nullptr)
+    {
+        return Core::failure(RuntimeErrorCode::PrimaryWindowUIUnavailable,
+                             "The active Runtime phase has no primary-window UI");
+    }
+    return m_primaryWindowUI->committedLayoutDebugSnapshot(
+        m_uiEpoch, Runtime::Detail::PrimaryWindowUIPhase::UIUpdate);
+}
+
+Core::Result<UI::UIPointerHitQueryResult>
+UIUpdateContext::queryCommittedPrimaryWindowUIPointerHit(UI::UILogicalPoint point) const
+{
+    if (m_primaryWindowUI == nullptr)
+    {
+        return Core::failure(RuntimeErrorCode::PrimaryWindowUIUnavailable,
+                             "The active Runtime phase has no primary-window UI");
+    }
+    return m_primaryWindowUI->queryCommittedPointerHit(
+        m_uiEpoch, Runtime::Detail::PrimaryWindowUIPhase::UIUpdate, point);
+}
+
 GameStateExitContext::GameStateExitContext(RunStopCause stopCause, const Core::Error* runtimeFailure) noexcept
     : m_stopCause(stopCause), m_runtimeFailure(runtimeFailure)
 {

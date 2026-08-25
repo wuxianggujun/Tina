@@ -84,6 +84,7 @@
 #include <tina/ui/UIDialog.hpp>
 #include <tina/ui/UIListView.hpp>
 #include <tina/ui/UILayout.hpp>
+#include <tina/ui/UILayoutDebugger.hpp>
 #include <tina/ui/UIPaint.hpp>
 #include <tina/ui/UISnackbar.hpp>
 #include <tina/ui/UIStyle.hpp>
@@ -159,6 +160,21 @@ inline constexpr float SourceImportSourceColumnWidth = 190.0F;
 inline constexpr float SourceImportStatusColumnWidth = 84.0F;
 inline constexpr u32 OutputColumnCapacity = 3;
 inline constexpr u32 OutputMaterializedCapacity = 8;
+inline constexpr u32 LayoutDebugProjectionCapacity = 4096;
+inline constexpr u32 LayoutDebugTreeMaterializedCapacity = 96;
+inline constexpr u32 LayoutDebugDetailRowCount = 25;
+inline constexpr u32 LayoutDebugOverlayCommandsPerNode = 4;
+inline constexpr u32 LayoutDebugSelectedOverlayCommandCapacity = 12;
+inline constexpr u32 LayoutDebugDisplayListEntryCapacity = 32U * 1024U;
+inline constexpr u32 EditorRenderDrawCallHeadroom = 1024U;
+inline constexpr u32 EditorRenderDrawCallCapacity =
+    LayoutDebugDisplayListEntryCapacity + EditorRenderDrawCallHeadroom;
+static_assert(
+    LayoutDebugDisplayListEntryCapacity >=
+    LayoutDebugProjectionCapacity * LayoutDebugOverlayCommandsPerNode +
+        LayoutDebugSelectedOverlayCommandCapacity + 8192U);
+static_assert(EditorRenderDrawCallCapacity % 1024U == 0U);
+static_assert(EditorRenderDrawCallCapacity < 65535U);
 inline constexpr float OutputSeverityColumnWidth = 76.0F;
 inline constexpr float OutputContextColumnWidth = 132.0F;
 inline constexpr float OutputMessageColumnWidth = 720.0F;
@@ -284,6 +300,7 @@ enum class BottomPanelKind : u8 {
     None,
     Animation,
     Output,
+    Layout,
 };
 enum class WorkspacePanelKind : u8 {
     LeftDock,
@@ -469,7 +486,7 @@ struct EditorSettings final {
         settings.inspectorVisible = value("inspectorVisible") != "0";
         settings.snapEnabled = value("snap") == "1";
         const auto panel = value("bottomPanel");
-        settings.bottomPanel = panel == "animation" ? BottomPanelKind::Animation : panel == "output" ? BottomPanelKind::Output : BottomPanelKind::None;
+        settings.bottomPanel = panel == "animation" ? BottomPanelKind::Animation : panel == "output" ? BottomPanelKind::Output : panel == "layout" ? BottomPanelKind::Layout : BottomPanelKind::None;
         for (u32 index = 0; index < RecentProjectCapacity; ++index) {
             const std::string key = "recent" + std::to_string(index);
             const auto recent = value(key);
@@ -494,7 +511,7 @@ struct EditorSettings final {
             "\nleftVisible=" + std::to_string(settings.leftDockVisible ? 1 : 0) +
             "\ninspectorVisible=" + std::to_string(settings.inspectorVisible ? 1 : 0) +
             "\nsnap=" + std::to_string(settings.snapEnabled ? 1 : 0) + "\nbottomPanel=" +
-            std::string(settings.bottomPanel == BottomPanelKind::Animation ? "animation" : settings.bottomPanel == BottomPanelKind::Output ? "output" : "none") + "\n";
+            std::string(settings.bottomPanel == BottomPanelKind::Animation ? "animation" : settings.bottomPanel == BottomPanelKind::Output ? "output" : settings.bottomPanel == BottomPanelKind::Layout ? "layout" : "none") + "\n";
         for (u32 index = 0; index < settings.recentProjectCount && index < RecentProjectCapacity; ++index) {
             text += "recent" + std::to_string(index) + "=" + settings.recentProjects[index] + "\n";
         }
@@ -3863,6 +3880,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
         UiBuildContext& ui, UI::UINodeId parent, UI::UINodeId& timeline);
     [[nodiscard]] Tina::Core::Status buildOutputPanelUi(
         UiBuildContext& ui, UI::UINodeId parent, UI::UINodeId& outputPanel);
+    [[nodiscard]] Tina::Core::Status buildLayoutDebuggerUi(
+        UiBuildContext& ui, UI::UINodeId parent, UI::UINodeId& layoutPanel);
     [[nodiscard]] Tina::Core::Status buildStatusBarUi(UiBuildContext& ui, UI::UINodeId parent);
     [[nodiscard]] Tina::Core::Status buildDirtyCloseModalUi(UiBuildContext& ui, UI::UINodeId parent);
     [[nodiscard]] Tina::Core::Status buildSceneAddModalUi(
@@ -3944,6 +3963,9 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] Tina::Core::Status refreshMainMenuUi(
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status refreshOutputAndStatusUi(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status refreshLayoutDebuggerUi(
+        Tina::UIUpdateContext& context,
         Tina::PrimaryWindowUITreeUpdater& tree);
     bool queueEditorCommand(EditorCommand command) noexcept;
     void queueViewportToolMode(ViewportToolMode mode) noexcept;
@@ -4419,6 +4441,13 @@ class EditorWorkspaceState final : public Tina::IGameState {
     static bool resolveOutputCell(
         const void* state, u64 logicalRow, u32 logicalColumn,
         UI::UIDataGridCellDescriptor& output) noexcept;
+    [[nodiscard]] UI::UITreeViewDataSource layoutDebugTreeDataSource() noexcept;
+    [[nodiscard]] static u64 layoutDebugTreeItemCount(const void* state) noexcept;
+    static bool resolveLayoutDebugTreeItem(
+        const void* state, u64 logicalIndex,
+        UI::UITreeViewItemDescriptor& output) noexcept;
+    void handleLayoutDebugPickPointerDown(
+        UI::UIRoutedPointerEvent& event) noexcept;
     [[nodiscard]] const EditorOutputHistoryEntry*
     selectedOutputEntry() const noexcept;
     [[nodiscard]] bool outputTargetAvailable(
@@ -4572,10 +4601,9 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId projectAssetTypeDropdownPopup_{};
     UI::UINodeId projectAssetEmptyState_{};
     UI::UILayoutStyle projectAssetEmptyStateLayout_{};
+    UI::UINodeId projectAssetEmptyStateTitle_{};
     UI::UINodeId projectAssetEmptyStateText_{};
     UI::UINodeId projectAssetEmptyStateImportButton_{};
-    UI::UINodeId projectAssetDropHint_{};
-    UI::UILayoutStyle projectAssetDropHintLayout_{};
     UI::UINodeId projectAssetStartCenter_{};
     UI::UILayoutStyle projectAssetStartCenterLayout_{};
     UI::UINodeId projectAssetStartCenterTitle_{};
@@ -4705,6 +4733,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId bottomPanelHost_{};
     UI::UINodeId animationPanel_{};
     UI::UINodeId outputPanel_{};
+    UI::UINodeId layoutDebugPanel_{};
     UI::UINodeId outputGrid_{};
     std::array<UI::UINodeId, 4> outputFilterButtons_{};
     UI::UINodeId outputClearButton_{};
@@ -4721,11 +4750,20 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UILayoutStyle bottomPanelHostLayout_{};
     UI::UILayoutStyle animationPanelLayout_{};
     UI::UILayoutStyle outputPanelLayout_{};
+    UI::UILayoutStyle layoutDebugPanelLayout_{};
     UI::UINodeId leftDockCollapseButton_{};
     UI::UINodeId inspectorCollapseButton_{};
     UI::UINodeId animationCollapseButton_{};
     UI::UINodeId outputCollapseButton_{};
-    std::array<UI::UINodeId, 2> bottomPanelButtons_{};
+    UI::UINodeId layoutDebugCollapseButton_{};
+    std::array<UI::UINodeId, 3> bottomPanelButtons_{};
+    UI::UINodeId layoutDebugShowAllButton_{};
+    UI::UINodeId layoutDebugPickButton_{};
+    UI::UINodeId layoutDebugSummary_{};
+    UI::UINodeId layoutDebugTree_{};
+    std::array<UI::UINodeId, LayoutDebugDetailRowCount>
+        layoutDebugDetailLabels_{};
+    UI::UIRoutedPointerListenerToken layoutDebugPickPointerListener_{};
     UI::UINodeId animationStatus_{};
     UI::UINodeId animationSelection_{};
     UI::UINodeId animationTimelineScale_{};
@@ -4834,6 +4872,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId viewWorkspaceSubmenu_{};
     std::array<UI::UINodeId, 2> viewWorkspaceMenuItems_{};
     std::array<UI::UINodeId, 2> viewPanelMenuItems_{};
+    UI::UINodeId viewLayoutDebuggerMenuItem_{};
     UI::UINodeId viewFrameAllMenuItem_{};
     UI::UINodeId viewFocusSelectionMenuItem_{};
     UI::UINodeId helpAboutMenuItem_{};
@@ -5107,6 +5146,38 @@ class EditorWorkspaceState final : public Tina::IGameState {
     std::optional<WorkspacePanelKind> pendingWorkspacePanelToggle_{};
     std::optional<BottomPanelKind> pendingBottomPanelToggle_{};
     std::optional<BottomPanelKind> pendingBottomPanelOpen_{};
+    struct LayoutDebugProjectionRow final {
+        UI::UINodeId node{};
+        UI::UITreeViewItemKey key = UI::InvalidUITreeViewItemKey;
+        u32 depth = 0U;
+        u32 preorder = 0U;
+        std::array<char, 80> label{};
+        u32 labelLength = 0U;
+
+        bool operator==(const LayoutDebugProjectionRow&) const = default;
+    };
+    std::array<LayoutDebugProjectionRow, LayoutDebugProjectionCapacity>
+        layoutDebugProjection_{};
+    std::array<UI::UINodeId, LayoutDebugProjectionCapacity>
+        layoutDebugPanelSubtreeNodes_{};
+    std::optional<UI::UILayoutDebugEntry> layoutDebugSelectedEntry_{};
+    Tina::Core::usize layoutDebugSnapshotEntryCount_ = 0U;
+    Tina::Core::usize layoutDebugProjectionCount_ = 0U;
+    Tina::Core::usize layoutDebugPanelSubtreeNodeCount_ = 0U;
+    u64 layoutDebugStructureRevision_ = 0U;
+    u64 layoutDebugLayoutRevision_ = 0U;
+    u32 layoutDebugPanelPreorderBegin_ = 0U;
+    u32 layoutDebugPanelPreorderEnd_ = 0U;
+    UI::UITreeViewItemKey layoutDebugSelectionKey_ =
+        UI::InvalidUITreeViewItemKey;
+    UI::UINodeId layoutDebugSelectedNode_{};
+    bool layoutDebugShowAllVisibleBounds_ = true;
+    bool layoutDebugPickArmed_ = false;
+    bool layoutDebugSnapshotInitialized_ = false;
+    bool layoutDebugPanelProjectionRangeValid_ = false;
+    bool layoutDebugDetailsRefreshPending_ = true;
+    std::optional<UI::UILogicalPoint> pendingLayoutDebugPickPoint_{};
+    std::string layoutDebugPickFeedback_{};
     OutputFilter outputFilter_ = OutputFilter::All;
     std::optional<EditorCommand> pendingEditorCommand_{};
     std::optional<Tina::Editor::EditorDocumentKey> pendingDirtyCloseKey_{};

@@ -116,7 +116,7 @@ Core::Result<PrimaryWindowUIDisplayBuild> PrimaryWindowUIDisplayCoordinator::bui
             .resourceSink = &resourceSink,
             .resolverLookup = {.userData = &capabilityState, .find = &findImageResolver},
             .cache = imageResolutionCache_,
-        });
+        }, {});
         if (!build)
         {
             auto error = std::move(build.error());
@@ -205,6 +205,9 @@ Core::Result<PrimaryWindowUIDisplayBuild> PrimaryWindowUIDisplayCoordinator::bui
             .resourceSink = &resourceSink,
             .resolverLookup = {.userData = &capabilityState, .find = &findImageResolver},
             .cache = imageResolutionCache_,
+        }, Integration::UIRenderLayoutDebugOverlay{
+            .options = context->layoutDebugger().options(),
+            .snapshot = context->publication().committedLayoutDebugSnapshot(),
         });
     if (!build)
     {

@@ -208,6 +208,72 @@ class UIScrollViewTest : public testing::Test {
     UI::UITreeUpdater updater;
 };
 
+TEST_F(UIScrollViewTest, AutoScrollbarWidthConvergesWrappedLabelLayout)
+{
+    assertOk(updater.setLayoutStyle(
+        root.rootNodeId(), fixedSize(100.0F, 30.0F)));
+
+    auto scrollResult = updater.createElement(
+        root.rootNodeId(), UI::makeScrollViewElement());
+    ASSERT_TRUE(scrollResult.has_value()) << scrollResult.error().message;
+    auto contentResult = updater.createElement(
+        *scrollResult, UI::makePanelElement());
+    ASSERT_TRUE(contentResult.has_value()) << contentResult.error().message;
+    auto labelResult = updater.createElement(
+        *contentResult, UI::makeLabelElement());
+    ASSERT_TRUE(labelResult.has_value()) << labelResult.error().message;
+
+    assertOk(updater.setLayoutStyle(
+        *scrollResult, fixedSize(100.0F, 30.0F)));
+    UI::UILayoutStyle contentStyle{};
+    contentStyle.size.width = UI::UILayoutLength::Percent(100.0F);
+    assertOk(updater.setLayoutStyle(*contentResult, contentStyle));
+    UI::UILayoutStyle labelStyle{};
+    labelStyle.size.width = UI::UILayoutLength::Percent(100.0F);
+    assertOk(updater.setLayoutStyle(*labelResult, labelStyle));
+    assertOk(updater.setText(*labelResult, "AAAAA AAAA AAAAA"));
+    UI::UITextStyle textStyle{};
+    textStyle.color.alpha = 0;
+    assertOk(updater.setTextStyle(*labelResult, textStyle));
+    assertOk(updater.setTextWrapMode(
+        *labelResult, UI::UITextWrapMode::Words));
+    assertOk(updater.setScrollViewStyle(
+        *scrollResult,
+        {
+            .axes = UI::UIScrollAxes::Vertical,
+            .scrollBarVisibility = UI::UIScrollBarVisibility::Auto,
+            .wheelStep = 20.0F,
+        }));
+    assertOk(updater.setScrollViewPaint(
+        *scrollResult, visibleScrollPaint()));
+
+    assertOk(context->publication().commitLayout(
+        {.width = 100.0F, .height = 30.0F}));
+
+    const UI::UIScrollViewMetrics metrics =
+        updater.scrollViewMetrics(*scrollResult).value();
+    EXPECT_TRUE(metrics.verticalScrollBarVisible);
+    EXPECT_FALSE(metrics.horizontalScrollBarVisible);
+    EXPECT_FLOAT_EQ(metrics.viewportSize.width, 90.0F);
+    EXPECT_FLOAT_EQ(metrics.viewportSize.height, 30.0F);
+    EXPECT_NEAR(metrics.contentSize.height, 57.6F, 0.001F);
+
+    const UI::UICommittedLayoutView layout =
+        context->publication().committedLayout();
+    const UI::UICommittedLayoutEntry* content =
+        findLayoutEntry(layout, *contentResult);
+    const UI::UICommittedLayoutEntry* label =
+        findLayoutEntry(layout, *labelResult);
+    ASSERT_NE(content, nullptr);
+    ASSERT_NE(label, nullptr);
+    EXPECT_FLOAT_EQ(content->worldRect.width, 90.0F);
+    EXPECT_NEAR(content->worldRect.height, 57.6F, 0.001F);
+    EXPECT_FLOAT_EQ(label->worldRect.width, 90.0F);
+    EXPECT_NEAR(label->worldRect.height, 57.6F, 0.001F);
+    EXPECT_GE(context->statistics().lastLayoutPassCount, 2U);
+    EXPECT_LE(context->statistics().lastLayoutPassCount, 3U);
+}
+
 TEST_F(UIScrollViewTest, DefaultsRoundTripAndInvalidValuesDoNotMutate)
 {
     auto scrollResult = updater.createElement(root.rootNodeId(), UI::makeScrollViewElement());

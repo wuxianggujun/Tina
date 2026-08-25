@@ -1628,6 +1628,9 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
     if (auto status = refreshWorkspacePanelsUi(*tree); !status) {
         return status;
     }
+    if (auto status = refreshLayoutDebuggerUi(context, *tree); !status) {
+        return status;
+    }
     if (auto status = updateSnackbarUi(*tree); !status) {
         return status;
     }

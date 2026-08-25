@@ -26,6 +26,7 @@ struct NormalizedUIContextCapacityConfig final {
     usize canvasCommandCapacity = 0;
     usize imageContentCapacity = 0;
     usize routePathCapacity = 0;
+    usize layoutDebuggerSnapshotCapacity = 0;
     usize routedPointerListenerCapacity = 0;
     usize buttonActionCapacity = 0;
     usize textByteCapacity = 0;

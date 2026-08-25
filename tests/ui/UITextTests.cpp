@@ -158,7 +158,10 @@ TEST(UITextTests, LabelWrapsAgainstFinalContentWidthAndRemeasuresHeight)
 
     auto context = createContext(
         *windowResult,
-        {.nodeCapacity = 3, .rootCapacity = 1, .textByteCapacity = 64});
+        {.nodeCapacity = 3,
+         .rootCapacity = 1,
+         .paintSnapshotCapacity = 8,
+         .textByteCapacity = 64});
     ASSERT_NE(context, nullptr);
     auto root = createRoot(*context);
     auto updater = createUpdater(*context, root);
@@ -190,9 +193,16 @@ TEST(UITextTests, LabelWrapsAgainstFinalContentWidthAndRemeasuresHeight)
     EXPECT_EQ(context->statistics().lastLayoutPassCount, 2U);
 
     const auto paint = context->publication().committedPaint();
-    ASSERT_EQ(paint.size(), 6U);
+    // The break separator after the first "AA" is discarded, while the
+    // internal separator in the second visual line "AA AA" remains part of
+    // the emitted text run: 2 entries on line one plus 5 on line two.
+    ASSERT_EQ(paint.size(), 7U);
     EXPECT_FLOAT_EQ(paint.entries()[0].worldRect.y, 0.0F);
-    EXPECT_FLOAT_EQ(paint.entries()[2].worldRect.y, 19.2F);
+    const auto secondLine = std::ranges::find_if(
+        paint.entries(), [](const UI::UICommittedPaintEntry& entry) {
+            return entry.worldRect.y == 19.2F;
+        });
+    ASSERT_NE(secondLine, paint.entries().end());
 }
 
 TEST(UITextTests, WrappedLineCursorHandlesWhitespaceCjkAndLongWords)

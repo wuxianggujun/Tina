@@ -59,6 +59,7 @@ struct UIContextStatistics final {
     usize activeImageContentCount = 0;
     usize imageContentHighWater = 0;
     usize routePathCapacity = 0;
+    usize layoutDebuggerSnapshotCapacity = 0;
     usize routedPointerListenerCapacity = 0;
     usize activeRoutedPointerListenerCount = 0;
     usize routedPointerListenerHighWater = 0;
@@ -91,6 +92,7 @@ struct UIContextStatistics final {
     usize committedNodeCount = 0;
     u64 committedRevision = 0;
     usize committedLayoutNodeCount = 0;
+    usize committedLayoutDebugNodeCount = 0;
     u64 layoutRevision = 0;
     usize committedHitNodeCount = 0;
     usize committedHitTargetCount = 0;

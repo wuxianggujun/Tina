@@ -24,6 +24,11 @@ UICommittedLayoutView UIPublicationPipeline::committedLayout() const noexcept
     return m_context->m_impl->committedLayout();
 }
 
+UILayoutDebugSnapshotView UIPublicationPipeline::committedLayoutDebugSnapshot() const noexcept
+{
+    return m_context->m_impl->committedLayoutDebugSnapshot();
+}
+
 UICommittedHitView UIPublicationPipeline::committedHit() const noexcept
 {
     return m_context->m_impl->committedHit();

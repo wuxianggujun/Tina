@@ -579,6 +579,10 @@ auto EditorWorkspaceState::buildWorkspaceUi(UiBuildContext& ui, UI::UINodeId par
     if (auto status = buildOutputPanelUi(ui, bottomPanelHost_, outputPanel_); !status) {
         return status;
     }
+    if (auto status = buildLayoutDebuggerUi(
+            ui, bottomPanelHost_, layoutDebugPanel_); !status) {
+        return status;
+    }
     return ui.tree.setSplitViewParts(
         bottomPanelSplitView_, viewport, bottomPanelSplitter_, bottomPanelHost_);
 }
@@ -929,23 +933,6 @@ auto EditorWorkspaceState::buildLeftDockUi(
         }
     }
 
-    projectAssetDropHintLayout_ = fillWidth(22.0F);
-    projectAssetDropHintLayout_.flexItem.shrink = 0.0F;
-    UI::UIElementDescriptor dropHintDescriptor = UI::makeLabelElement(
-        "Drop files here or onto the viewport to import resources",
-        projectAssetDropHintLayout_);
-    dropHintDescriptor.textStyle = ui.compactText;
-    dropHintDescriptor.semantics.name = "Project Assets drop target";
-    dropHintDescriptor.semantics.description =
-        "Release files here or on the active viewport to import them into the active Project";
-    dropHintDescriptor.pointerHitPolicy = UI::UIPointerHitPolicy::Ignore;
-    if (auto status = storeNode(
-            ui.tree.createElement(left, dropHintDescriptor),
-            projectAssetDropHint_);
-        !status) {
-        return status;
-    }
-
     projectAssetFolderTreeLayout_ = fillWidth(112.0F);
     projectAssetFolderTreeLayout_.flexItem.shrink = 0.0F;
     auto projectFolderTree = ui.tree.createElement(
@@ -1133,30 +1120,52 @@ auto EditorWorkspaceState::buildLeftDockUi(
     projectAssetSelectionSyncPending_ =
         projectAssets_.visibleItemCount() != 0U;
 
-    projectAssetEmptyStateLayout_ =
-        fillWidth(ui.productTheme.controls.buttonHeight);
-    projectAssetEmptyStateLayout_.flexItem.shrink = 0.0F;
+    projectAssetEmptyStateLayout_ = growingRegion();
+    projectAssetEmptyStateLayout_.minMax.minHeight =
+        UI::UILayoutLength::Px(96.0F);
     projectAssetEmptyStateLayout_.flexContainer.direction =
-        UI::UIFlexDirection::Row;
+        UI::UIFlexDirection::Column;
     projectAssetEmptyStateLayout_.flexContainer.alignItems =
         UI::UIAxisAlignment::Center;
-    projectAssetEmptyStateLayout_.flexContainer.gap.column =
+    projectAssetEmptyStateLayout_.flexContainer.justifyContent =
+        UI::UIJustifyContent::Center;
+    projectAssetEmptyStateLayout_.flexContainer.gap.row =
         ui.productTheme.spacing.space3;
+    projectAssetEmptyStateLayout_.padding =
+        UI::UIEdgeSpacing::All(ui.productTheme.spacing.space5);
     projectAssetEmptyStateLayout_.visibility = UI::UIVisibility::Collapsed;
-    if (auto status = storeNode(
-            ui.createPanel(left, projectAssetEmptyStateLayout_),
-            projectAssetEmptyState_);
+    UI::UIElementDescriptor emptyStateDescriptor =
+        UI::makePanelElement(projectAssetEmptyStateLayout_);
+    emptyStateDescriptor.semantics.mode = UI::UISemanticsMode::Publish;
+    emptyStateDescriptor.semantics.role = UI::UISemanticsRole::Group;
+    emptyStateDescriptor.semantics.name = "Project Assets empty state";
+    if (auto status = storeNode(ui.tree.createElement(left, emptyStateDescriptor),
+                                projectAssetEmptyState_);
         !status) {
         return status;
     }
-    UI::UILayoutStyle emptyStateTextStyle = fillWidth(22.0F);
-    emptyStateTextStyle.flexItem.grow = 1.0F;
-    emptyStateTextStyle.flexItem.shrink = 1.0F;
-    emptyStateTextStyle.flexItem.basis = UI::UILayoutLength::Px(0.0F);
+    UI::UIElementDescriptor emptyStateTitleDescriptor = UI::makeLabelElement(
+        "No resources yet", fillWidth(24.0F));
+    emptyStateTitleDescriptor.textStyle = ui.sectionText;
+    emptyStateTitleDescriptor.contentAlignment.horizontal =
+        UI::UIAxisAlignment::Center;
     if (auto status = storeNode(
-            ui.createLabel(projectAssetEmptyState_,
-                           "Catalog is empty. Import files to add resources.",
-                           emptyStateTextStyle, ui.secondaryText),
+            ui.tree.createElement(projectAssetEmptyState_, emptyStateTitleDescriptor),
+            projectAssetEmptyStateTitle_);
+        !status) {
+        return status;
+    }
+    if (auto status = setSingleLineEllipsis(ui.tree, projectAssetEmptyStateTitle_);
+        !status) {
+        return status;
+    }
+    UI::UIElementDescriptor emptyStateTextDescriptor = UI::makeLabelElement(
+        "Import files to add resources.", fillWidth(22.0F));
+    emptyStateTextDescriptor.textStyle = ui.secondaryText;
+    emptyStateTextDescriptor.contentAlignment.horizontal =
+        UI::UIAxisAlignment::Center;
+    if (auto status = storeNode(
+            ui.tree.createElement(projectAssetEmptyState_, emptyStateTextDescriptor),
             projectAssetEmptyStateText_);
         !status) {
         return status;
@@ -3409,6 +3418,190 @@ auto EditorWorkspaceState::buildOutputPanelUi(
     return setSingleLineEllipsis(ui.tree, outputDetails_);
 }
 
+auto EditorWorkspaceState::buildLayoutDebuggerUi(
+    UiBuildContext& ui, UI::UINodeId parent, UI::UINodeId& layoutPanel)
+    -> Tina::Core::Status
+{
+    layoutDebugPanelLayout_ = growingRegion();
+    layoutDebugPanelLayout_.flexContainer.direction = UI::UIFlexDirection::Column;
+    layoutDebugPanelLayout_.flexContainer.gap.row = ui.productTheme.spacing.space3;
+    layoutDebugPanelLayout_.padding =
+        UI::UIEdgeSpacing::All(ui.productTheme.spacing.space4);
+    layoutDebugPanelLayout_.visibility = UI::UIVisibility::Collapsed;
+    if (auto status = storeNode(
+            ui.createSurface(parent, layoutDebugPanelLayout_,
+                             UI::UISurfaceVariant::Filled),
+            layoutPanel);
+        !status) {
+        return status;
+    }
+
+    auto header = EditorPanelHeader::Build(
+        ui.tree, layoutPanel, ui.productTheme, "Layout Debugger", ui.sectionText,
+        fillWidth(ui.productTheme.controls.buttonHeight));
+    if (!header) {
+        return Tina::Core::failure(std::move(header.error()));
+    }
+    UI::UILayoutStyle summaryLayout = growingRegion();
+    summaryLayout.size.height = UI::UILayoutLength::Px(22.0F);
+    if (auto status = storeNode(
+            ui.createLabel(header->actions, "Waiting for committed layout",
+                           summaryLayout, ui.secondaryText),
+            layoutDebugSummary_);
+        !status) {
+        return status;
+    }
+    if (auto status = setSingleLineEllipsis(ui.tree, layoutDebugSummary_);
+        !status) {
+        return status;
+    }
+    if (auto status = storeNode(
+            ui.createButton(header->actions, "All Bounds",
+                            fixedSize(92.0F, 24.0F), true,
+                            UI::UIStyleRoleId::ButtonOutlined),
+            layoutDebugShowAllButton_);
+        !status) {
+        return status;
+    }
+    if (auto status = storeNode(
+            ui.createButton(header->actions, "Pick", fixedSize(72.0F, 24.0F),
+                            true, UI::UIStyleRoleId::ButtonOutlined),
+            layoutDebugPickButton_);
+        !status) {
+        return status;
+    }
+    if (auto status = storeNode(
+            ui.createIconButton(header->actions, EditorIcon::ChevronDown,
+                                "Hide Layout Debugger panel"),
+            layoutDebugCollapseButton_);
+        !status) {
+        return status;
+    }
+
+    UI::UINodeId content{};
+    UI::UILayoutStyle contentLayout = growingRegion();
+    contentLayout.minMax.minHeight = UI::UILayoutLength::Px(96.0F);
+    contentLayout.containerLayout = UI::UIContainerLayout::Grid;
+    contentLayout.gridContainer.columns = UI::UIGridTrackList::Of({
+        UI::UIGridTrack::Fr(1.05F), UI::UIGridTrack::Fr(1.95F)});
+    contentLayout.gridContainer.rows =
+        UI::UIGridTrackList::Of({UI::UIGridTrack::Fr()});
+    contentLayout.gridContainer.gap.column = ui.productTheme.spacing.space4;
+    if (auto status = storeNode(ui.createPanel(layoutPanel, contentLayout), content);
+        !status) {
+        return status;
+    }
+
+    UI::UILayoutStyle treeLayout = growingRegion();
+    treeLayout.gridItem.row = 0U;
+    treeLayout.gridItem.column = 0U;
+    auto tree = ui.tree.createElement(
+        content,
+        UI::makeTreeViewElement(
+            {.materializedItemCapacity = LayoutDebugTreeMaterializedCapacity},
+            treeLayout));
+    if (!tree) {
+        return Tina::Core::failure(std::move(tree.error()));
+    }
+    layoutDebugTree_ = *tree;
+    if (auto status = ui.tree.setTreeViewStyle(
+            layoutDebugTree_, UI::UITreeViewStyle{
+                .rowHeight = ui.productTheme.controls.listRowHeight,
+                .overscanRows = 3U,
+                .scrollBarVisibility = UI::UIScrollBarVisibility::Auto,
+                .wheelStep = ui.productTheme.controls.listRowHeight * 2.0F,
+                .indentation = 16.0F,
+                .disclosureExtent = 0.0F,
+                .disclosureGap = 0.0F,
+            });
+        !status) {
+        return status;
+    }
+    if (auto status = ui.tree.setTreeViewPaint(
+            layoutDebugTree_, UI::makeTreeViewPaint(ui.productTheme));
+        !status) {
+        return status;
+    }
+    if (auto status = ui.tree.setTreeViewDataSource(
+            layoutDebugTree_, layoutDebugTreeDataSource());
+        !status) {
+        return status;
+    }
+
+    UI::UINodeId detailsScroll{};
+    UI::UILayoutStyle detailsScrollLayout = growingRegion();
+    detailsScrollLayout.gridItem.row = 0U;
+    detailsScrollLayout.gridItem.column = 1U;
+    if (auto status = storeNode(
+            ui.tree.createElement(
+                content, UI::makeScrollViewElement(detailsScrollLayout)),
+            detailsScroll);
+        !status) {
+        return status;
+    }
+    if (auto status = ui.tree.setScrollViewStyle(
+            detailsScroll, UI::UIScrollViewStyle{
+                .axes = UI::UIScrollAxes::Vertical,
+                .scrollBarVisibility = UI::UIScrollBarVisibility::Auto,
+                .wheelStep = ui.productTheme.controls.listRowHeight,
+            });
+        !status) {
+        return status;
+    }
+    UI::UINodeId details{};
+    UI::UILayoutStyle detailsLayout{};
+    detailsLayout.size.width = UI::UILayoutLength::Percent(100.0F);
+    detailsLayout.flexItem.shrink = 0.0F;
+    detailsLayout.flexContainer.direction = UI::UIFlexDirection::Column;
+    detailsLayout.flexContainer.gap.row = ui.productTheme.spacing.space2;
+    if (auto status = storeNode(ui.createPanel(detailsScroll, detailsLayout), details);
+        !status) {
+        return status;
+    }
+    constexpr std::array<std::string_view, LayoutDebugDetailRowCount>
+        InitialDetails{
+        "Select a committed node",
+        "Local geometry",
+        "World geometry",
+        "Effective clip",
+        "Content box",
+        "Content intrinsic",
+        "Measured size",
+        "Intrinsic limits",
+        "Parent basis",
+        "Content basis",
+        "Authored sizing",
+        "Authored box",
+        "Authored flex container",
+        "Authored flex item",
+        "Authored grid container",
+        "Authored grid item",
+        "Authored overlay",
+        "Resolved sizing",
+        "Resolved box",
+        "Resolved flex container",
+        "Resolved flex item",
+        "Resolved grid container",
+        "Resolved grid item",
+        "Resolved overlay",
+        "State",
+    };
+    for (u32 index = 0U; index < layoutDebugDetailLabels_.size(); ++index) {
+        if (auto status = storeNode(
+                ui.createLabel(details, InitialDetails[index], fillWidth(22.0F),
+                               index == 0U ? ui.accentText : ui.compactText),
+                layoutDebugDetailLabels_[index]);
+            !status) {
+            return status;
+        }
+        if (auto status = setSingleLineEllipsis(
+                ui.tree, layoutDebugDetailLabels_[index]); !status) {
+            return status;
+        }
+    }
+    return Tina::Core::success();
+}
+
 auto EditorWorkspaceState::buildStatusBarUi(UiBuildContext& ui, UI::UINodeId parent) -> Tina::Core::Status
 {
     UI::UINodeId statusBar{};
@@ -3497,13 +3690,13 @@ auto EditorWorkspaceState::buildStatusBarUi(UiBuildContext& ui, UI::UINodeId par
         !status) {
         return status;
     }
-    constexpr std::array<std::string_view, 2> BottomPanelLabels{
-        "Animation", "Output"};
+    constexpr std::array<std::string_view, 3> BottomPanelLabels{
+        "Animation", "Output", "Layout"};
     for (u32 index = 0; index < bottomPanelButtons_.size(); ++index) {
         if (auto status = storeNode(
                 ui.createSegmentedButton(
                     bottomPanelControls, BottomPanelLabels[index],
-                    fixedSize(82.0F, 24.0F)),
+                    fixedSize(index == 0U ? 82.0F : 72.0F, 24.0F)),
                 bottomPanelButtons_[index]);
             !status) {
             return status;
@@ -3719,6 +3912,12 @@ auto EditorWorkspaceState::buildMenuOverlaysUi(
     if (auto status = createMenuItem(
             mainMenus_[ViewMenu], "Inspector", UI::UIMenuItemKind::Check,
             viewPanelMenuItems_[1]);
+        !status) {
+        return status;
+    }
+    if (auto status = createMenuItem(
+            mainMenus_[ViewMenu], "Layout Debugger", UI::UIMenuItemKind::Check,
+            viewLayoutDebuggerMenuItem_);
         !status) {
         return status;
     }
@@ -4526,6 +4725,15 @@ auto EditorWorkspaceState::registerUiCallbacks(
             return status;
         }
     }
+    if (auto status = ui.tree.setButtonAction(
+            viewLayoutDebuggerMenuItem_,
+            UI::UIButtonActionCallback{
+                [this](const UI::UIButtonActionEvent&) noexcept {
+                    pendingBottomPanelToggle_ = BottomPanelKind::Layout;
+                }});
+        !status) {
+        return status;
+    }
     if (auto status = bindEditorCommand(
             viewportContextButtons_[0], EditorCommand::SwitchToWorld2D);
         !status) {
@@ -4659,6 +4867,7 @@ auto EditorWorkspaceState::registerUiCallbacks(
     constexpr std::array BottomPanels{
         BottomPanelKind::Animation,
         BottomPanelKind::Output,
+        BottomPanelKind::Layout,
     };
     for (u32 index = 0; index < bottomPanelButtons_.size(); ++index) {
         if (auto status = ui.tree.setButtonAction(
@@ -4677,6 +4886,7 @@ auto EditorWorkspaceState::registerUiCallbacks(
     const std::array bottomPanelCollapseBindings{
         std::pair{animationCollapseButton_, BottomPanelKind::Animation},
         std::pair{outputCollapseButton_, BottomPanelKind::Output},
+        std::pair{layoutDebugCollapseButton_, BottomPanelKind::Layout},
     };
     for (const auto& [button, panel] : bottomPanelCollapseBindings) {
         if (auto status = ui.tree.setButtonAction(
@@ -4691,6 +4901,43 @@ auto EditorWorkspaceState::registerUiCallbacks(
             return status;
         }
     }
+    if (auto status = ui.tree.setButtonAction(
+            layoutDebugShowAllButton_,
+            UI::UIButtonActionCallback{
+                [this](const UI::UIButtonActionEvent&) noexcept {
+                    layoutDebugShowAllVisibleBounds_ =
+                        !layoutDebugShowAllVisibleBounds_;
+                    layoutDebugDetailsRefreshPending_ = true;
+                }});
+        !status) {
+        return status;
+    }
+    if (auto status = ui.tree.setButtonAction(
+            layoutDebugPickButton_,
+            UI::UIButtonActionCallback{
+                [this](const UI::UIButtonActionEvent&) noexcept {
+                    layoutDebugPickArmed_ = !layoutDebugPickArmed_;
+                    layoutDebugDetailsRefreshPending_ = true;
+                }});
+        !status) {
+        return status;
+    }
+    auto layoutDebugPickPointerListener = ui.tree.addRoutedPointerListener(
+        {
+            .node = rootNode,
+            .kind = UI::UIRoutedPointerEventKind::ButtonDown,
+            .phases = UI::UIEventPhaseMask::Capture,
+        },
+        UI::UIRoutedPointerCallback{
+            [this](UI::UIRoutedPointerEvent& event) noexcept {
+                handleLayoutDebugPickPointerDown(event);
+            }});
+    if (!layoutDebugPickPointerListener) {
+        return Tina::Core::failure(
+            std::move(layoutDebugPickPointerListener.error()));
+    }
+    layoutDebugPickPointerListener_ =
+        std::move(*layoutDebugPickPointerListener);
     constexpr std::array outputFilters{
         OutputFilter::All,
         OutputFilter::Info,
@@ -5376,7 +5623,11 @@ auto EditorWorkspaceState::onEnter(Tina::GameStateEnterContext& context) -> Tina
     bottomPanelVisibleFraction_ = editorSettings_.bottomPanelFraction;
     leftDockVisible_ = editorSettings_.leftDockVisible;
     inspectorVisible_ = editorSettings_.inspectorVisible;
-    bottomPanel_ = editorSettings_.bottomPanel;
+    bottomPanel_ = BottomPanelKind::None;
+    pendingBottomPanelOpen_.reset();
+    if (editorSettings_.bottomPanel != BottomPanelKind::None) {
+        pendingBottomPanelOpen_ = editorSettings_.bottomPanel;
+    }
     auto initialSnap = viewportTransformGizmo_.snap();
     initialSnap.enabled = editorSettings_.snapEnabled;
     (void)viewportTransformGizmo_.setSnap(initialSnap);

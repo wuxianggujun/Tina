@@ -8,6 +8,7 @@
 #include <tina/ui/UICommittedPaint.hpp>
 #include <tina/ui/UICommittedStructure.hpp>
 #include <tina/ui/UILayout.hpp>
+#include <tina/ui/UILayoutDebugger.hpp>
 
 #include <optional>
 #include <span>
@@ -22,6 +23,7 @@ class UIPublicationPipeline final {
     [[nodiscard]] UICommittedStructureView committedStructure() const noexcept;
     [[nodiscard]] Core::Status commitLayout(UILogicalSize viewportSize);
     [[nodiscard]] UICommittedLayoutView committedLayout() const noexcept;
+    [[nodiscard]] UILayoutDebugSnapshotView committedLayoutDebugSnapshot() const noexcept;
     [[nodiscard]] UICommittedHitView committedHit() const noexcept;
     [[nodiscard]] UICommittedPaintView committedPaint() const noexcept;
     [[nodiscard]] std::optional<UILogicalRect>

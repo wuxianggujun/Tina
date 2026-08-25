@@ -841,6 +841,10 @@ auto EditorWorkspaceState::refreshWorkspacePanelsUi(
         outputLayout.visibility = next == BottomPanelKind::Output
                                       ? UI::UIVisibility::Visible
                                       : UI::UIVisibility::Collapsed;
+        UI::UILayoutStyle layoutDebugLayout = layoutDebugPanelLayout_;
+        layoutDebugLayout.visibility = next == BottomPanelKind::Layout
+                                           ? UI::UIVisibility::Visible
+                                           : UI::UIVisibility::Collapsed;
 
         if (auto status = tree.setLayoutStyle(
                 bottomPanelSplitter_, splitterLayout);
@@ -859,27 +863,55 @@ auto EditorWorkspaceState::refreshWorkspacePanelsUi(
             !status) {
             return status;
         }
+        if (auto status = tree.setLayoutStyle(
+                layoutDebugPanel_, layoutDebugLayout);
+            !status) {
+            return status;
+        }
         if (auto status = tree.setSplitViewFraction(
                 bottomPanelSplitView_,
                 panelVisible ? bottomPanelVisibleFraction_ : 1.0F);
             !status) {
             return status;
         }
+        constexpr std::array BottomPanels{
+            BottomPanelKind::Animation,
+            BottomPanelKind::Output,
+            BottomPanelKind::Layout,
+        };
         for (u32 index = 0; index < bottomPanelButtons_.size(); ++index) {
-            const BottomPanelKind buttonPanel = index == 0U
-                                                    ? BottomPanelKind::Animation
-                                                    : BottomPanelKind::Output;
             if (auto status = tree.setRadioButtonSelected(
-                    bottomPanelButtons_[index], next == buttonPanel);
+                    bottomPanelButtons_[index], next == BottomPanels[index]);
                 !status) {
                 return status;
             }
+        }
+        if (auto status = tree.setMenuItemChecked(
+                viewLayoutDebuggerMenuItem_, next == BottomPanelKind::Layout);
+            !status) {
+            return status;
         }
 
         bottomPanelSplitterLayout_ = splitterLayout;
         bottomPanelHostLayout_ = hostLayout;
         animationPanelLayout_ = animationLayout;
         outputPanelLayout_ = outputLayout;
+        layoutDebugPanelLayout_ = layoutDebugLayout;
+        if (bottomPanel_ != next) {
+            layoutDebugDetailsRefreshPending_ = true;
+        }
+        if (next != BottomPanelKind::Layout) {
+            layoutDebugPickArmed_ = false;
+            pendingLayoutDebugPickPoint_.reset();
+            layoutDebugSelectedNode_ = {};
+            layoutDebugSelectedEntry_.reset();
+            layoutDebugSelectionKey_ = UI::InvalidUITreeViewItemKey;
+            layoutDebugPickFeedback_.clear();
+            if (auto status = tree.clearTreeViewSelection(layoutDebugTree_);
+                !status) {
+                return status;
+            }
+        }
         bottomPanel_ = next;
         pendingBottomPanelOpen_.reset();
         pendingBottomPanelToggle_.reset();
@@ -925,6 +957,12 @@ auto EditorWorkspaceState::refreshMainMenuUi(
     }
     if (auto status = tree.setMenuItemChecked(
             viewPanelMenuItems_[1], inspectorVisible_);
+        !status) {
+        return status;
+    }
+    if (auto status = tree.setMenuItemChecked(
+            viewLayoutDebuggerMenuItem_,
+            bottomPanel_ == BottomPanelKind::Layout);
         !status) {
         return status;
     }

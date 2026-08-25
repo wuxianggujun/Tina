@@ -572,6 +572,7 @@ TEST(UITextEllipsisTest, TruncationSearchesRealPrefixWidthsNotAUniformAdvance)
         ASSERT_TRUE(labelResult.has_value()) << (labelResult ? "" : labelResult.error().message);
         const UI::UINodeId label = *labelResult;
         assertOk(updater.setLayoutStyle(label, fixedSize(40.0F, 40.0F)));
+        assertOk(updater.setTextWrapMode(label, UI::UITextWrapMode::NoWrap));
         // Advances are 24, 24, 4, 4, 4, 4 -> the full run is 64 wide.
         assertOk(updater.setText(label, "WWAAAA"));
         assertOk(updater.setTextOverflow(label, UI::UITextOverflow::Ellipsis));

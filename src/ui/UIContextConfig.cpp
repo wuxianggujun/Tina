@@ -36,7 +36,8 @@ Core::Status validateUIContextCapacityConfig(const UIContextCapacityConfig& conf
     };
     if (exceedsNodeCapacity(config.dirtyQueueCapacity) || exceedsNodeCapacity(config.layoutSnapshotCapacity) ||
         exceedsNodeCapacity(config.hitSnapshotCapacity) || exceedsNodeCapacity(config.routePathCapacity) ||
-        exceedsNodeCapacity(config.imageContentCapacity))
+        exceedsNodeCapacity(config.imageContentCapacity) ||
+        exceedsNodeCapacity(config.layoutDebuggerSnapshotCapacity))
     {
         return invalidContextConfig("UI derived capacities cannot exceed node capacity");
     }

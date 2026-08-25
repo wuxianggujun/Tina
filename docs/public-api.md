@@ -71,7 +71,7 @@ Vorbis/Opus 的安装图还分别解析 `Vorbis`、`Opus`、`OpusFile`。未请�
 | `Tina::AssetFormat` | versioned Cooked payload/manifest types |
 | `Tina::Editor` | 工具侧 validated World2D/World3D/TileMap/SpriteAnimationClip/Navigation2D/Fx2D authoring document、Project Asset index、project workspace/空目录创建、document-tab navigation、bounded revision history、文件加载/原子保存与 runtime/cook preview；不由 `Tina::GameSDK` 聚合链接 |
 | `Tina::Asset` | Catalog、AssetSystem、Handle/Lease、Cooker helpers、typed parse/upload、Sprite2D/Mesh3D binding registry |
-| `Tina::UI` | retained Element tree、layout/input/paint、text、semantics |
+| `Tina::UI` | retained Element tree、layout/input/paint、text、semantics 与固定容量 layout diagnostics |
 | `Tina::UIFreetype` | optional installed FreeType text rasterizer adapter；需 `COMPONENTS UIFreetype` |
 | `Tina::Audio` | backend-neutral AudioEngine/PCM、voice gain/pitch/pan/fade |
 | `Tina::AudioMiniaudio` | optional installed miniaudio device/decode adapter；需 `COMPONENTS AudioMiniaudio` |
@@ -231,7 +231,7 @@ Runtime 私有持有 `GameStateStack`（定容 8）。`FrameUpdateContext` 提�
 | `FixedUpdateContext` | frame/fixed timing、Simulation Action、可选 Audio | `fixedUpdate()` 回调 |
 | `FrameUpdateContext` | timing、Frame Action、可选 Audio、exit-after-frame；仅栈顶可借用 `InputActionRebinding` | `updateFrame()` 回调 |
 | `RenderSceneExtractionContext` | phase-local `RenderSceneWriter` | extraction 回调 |
-| `UIUpdateContext` | root-scoped UI updater | `updateUI()` 回调 |
+| `UIUpdateContext` | root-scoped UI updater、主窗口 layout debugger snapshot/options 与 committed pointer-hit query | `updateUI()` 回调 |
 | Exit/Shutdown Context | stop cause、只借用 failure Error | 对应 callback |
 
 这些 Context 不可复制/移动，地址、内部 view、writer 和模块 pointer 都不得保存。可以保存的 owner 是明确
@@ -328,9 +328,9 @@ backend 验证其有限性、凸性、bounds 覆盖与最大半径/描边宽度�
 ## UI
 
 `UIContext` 是 per-window retained UI 的组合根与生命周期 owner，只直接提供创建、Window/节点归属、统计和
-`authoring()/style()/motion()/text()/publication()/input()` 六个 capability accessor。公开头按职责拆为
+`authoring()/style()/motion()/text()/publication()/layoutDebugger()/input()` 七个 capability accessor。公开头按职责拆为
 `UIAuthoring.hpp`、`UIStyleController.hpp`、`UIMotionController.hpp`、`UITextSystem.hpp`、
-`UIPublicationPipeline.hpp` 与 `UIInputRouter.hpp`；`UIContext.hpp` 只 forward declare capability，不提供旧成员
+`UIPublicationPipeline.hpp`、`UILayoutDebugger.hpp` 与 `UIInputRouter.hpp`；`UIContext.hpp` 只 forward declare capability，不提供旧成员
 compatibility alias。capability 是按值返回的 non-owning owner-thread view，最晚在所属 Context 析构时失效。
 
 `context.authoring()` 只产生 `UIRootBuilder` 和 root-scoped `UITreeUpdater`；`UINodeId`、`UIRootOwner` 与这两个 view
@@ -415,6 +415,20 @@ paint/text setter 只将对应属性转为局部覆盖，其余属性继续跟�
 查询只接受当前 updater root 内仍存活且存在于 committed snapshot 的节点；返回值不借用 snapshot，节点未提交、
 跨 root、失效或 facade 过期均返回结构化错误。该窄查询用于 Render/Editor 等需要把 retained layout 数值转换为
 下一帧 viewport 的组合层，不暴露裸 `UIContext` 或完整 committed view。
+
+`UIContextCapacityConfig::layoutDebuggerSnapshotCapacity` 为零时不分配或构建诊断快照；非零时固定预留
+`UILayoutDebugEntry` 双缓冲，且不得超过 node capacity。`context.layoutDebugger()` 可设置 enabled、
+show-all、selected node 与 excluded subtree，并读取下一次成功 layout publication 前有效的
+`UILayoutDebugSnapshotView`。entry 包含 authored/resolved style、content basis、测量/min/max-content 尺寸、
+local/world/content/clip geometry、visibility、hit policy、behavior、style role 和 layout/paint ordinal。
+该能力在 Debug/Release 中始终编译，options 更新不触发布局；启用但容量为零返回 `CapacityExceeded`。
+
+游戏侧在 `UIUpdateContext` 使用 `primaryWindowUILayoutDebugOptions()`、
+`setPrimaryWindowUILayoutDebugOptions()`、`committedLayoutDebugSnapshot()` 和
+`queryCommittedPrimaryWindowUIPointerHit()`，继续受 owner-thread 与 phase epoch 限制。Runtime/Integration
+只在当帧 DisplayList build 末尾追加 outline SolidQuad，并校验 snapshot 与 committed paint 的 viewport、
+structure/layout revision；overlay 不进入 retained tree、hit、Semantics 或 committed paint。selected 节点的
+world rect、content box 与 effective clip 可分别显示，`excludedSubtreeRoot` 用于排除 DevTools 自身。
 
 `UIContextStatistics` 的 `pmrCurrentBytes/pmrPeakBytes`、allocation/deallocation/failure counters 只统计显式通过
 该 Context PMR 路由的 CPU storage；创建期另发布 NodePool、控件 state storage、scratch reserve、node-index

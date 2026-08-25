@@ -33,6 +33,7 @@ ADR 记录处于提议、接受、被替代或拒绝状态的架构决定。主�
 | [0026](0026-ui-keyframe-timeline-and-layout-animation.md) | Accepted | 每窗口 fixed-capacity keyframe timeline 与 Layout/Hit/Paint 原子动画边界 |
 | [0027](0027-runtime-metrics-registry.md) | Proposed | Runtime Metrics 固定容量 counter registry：Core 类型、EngineHost 唯一产品 owner、u64 counter 首切片 |
 | [0028](0028-ui-fixed-capacity-grid-layout.md) | Accepted | Flex/Grid 并存的固定8x8 `Px/Auto/Fr` 普通容器布局 |
+| [0029](0029-ui-layout-debugger.md) | Accepted | Release 可用的固定容量 UI layout snapshot、精确拾取与 frame-local overlay |
 
 新增 ADR 从 [模板](0000-template.md) 复制。替代旧决定时新建 ADR，并把旧记录状态改为
 Superseded 和链接新编号；不要改写历史理由。

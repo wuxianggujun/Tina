@@ -15,7 +15,10 @@ class UIIntrinsicSizingTests : public UILayoutTest {};
 TEST_F(UIIntrinsicSizingTests, WordsTextResolvesMinAndMaxContentWidths)
 {
     auto context = makeContext(
-        {.nodeCapacity = 4, .rootCapacity = 1, .textByteCapacity = 64});
+        {.nodeCapacity = 4,
+         .rootCapacity = 1,
+         .paintSnapshotCapacity = 16,
+         .textByteCapacity = 64});
     ASSERT_NE(context, nullptr);
     auto root = createRoot(*context);
     auto updater = createUpdater(*context, root);
@@ -51,7 +54,10 @@ TEST_F(UIIntrinsicSizingTests, WordsTextResolvesMinAndMaxContentWidths)
 TEST_F(UIIntrinsicSizingTests, FlexBasisAcceptsMinAndMaxContent)
 {
     auto context = makeContext(
-        {.nodeCapacity = 4, .rootCapacity = 1, .textByteCapacity = 64});
+        {.nodeCapacity = 4,
+         .rootCapacity = 1,
+         .paintSnapshotCapacity = 16,
+         .textByteCapacity = 64});
     ASSERT_NE(context, nullptr);
     auto root = createRoot(*context);
     auto updater = createUpdater(*context, root);
@@ -166,7 +172,10 @@ TEST_F(UIIntrinsicSizingTests, FlexArrangePreservesAspectRatio)
 TEST_F(UIIntrinsicSizingTests, FlexShrinkUsesMinContentFloor)
 {
     auto context = makeContext(
-        {.nodeCapacity = 4, .rootCapacity = 1, .textByteCapacity = 64});
+        {.nodeCapacity = 4,
+         .rootCapacity = 1,
+         .paintSnapshotCapacity = 8,
+         .textByteCapacity = 64});
     ASSERT_NE(context, nullptr);
     auto root = createRoot(*context);
     auto updater = createUpdater(*context, root);

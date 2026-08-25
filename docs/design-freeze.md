@@ -45,6 +45,7 @@
 | UI 绘制图元 | Line 使用 exact 四顶点投影，Ellipse 使用解析 coverage；不保留阶梯折线、弦环或 rotated-quad 兼容 API | [0025](adr/0025-ui-line-and-ellipse-primitives.md) | 代码已实现：Box/Canvas authoring、committed paint、DisplayList、bgfx 与 Editor grid/gizmo 已贯通；100%/150%/200% Editor/UI-003 视觉证据已完成，`RENDER-LINES-001` 在跨 GPU UI-003 证据完成前保持 InProgress |
 | UI Keyframe | 每窗口 fixed-capacity timeline、唯一 monotonic clock、presentation owner，以及 Layout/Hit/Paint 原子 layout-animation 边界 | [0026](adr/0026-ui-keyframe-timeline-and-layout-animation.md) | Accepted/Implemented：paint 与 bounded `LayoutWidth`/`LayoutHeight`/`LayoutOffset` timeline、跨 motion candidate transaction、Runtime facade 与两个 workload 均已落地；UI/Runtime/bench unit 及 seed 0/1/2 确定性 gate 已通过 |
 | UI Grid | Flex/Grid 并存；普通 Flow child 使用固定8x8 `Px/Auto/Fr` track、span、row-major auto placement 与 per-item alignment | [0028](adr/0028-ui-fixed-capacity-grid-layout.md) | Implemented：公开 layout 契约、normalization、私有 Measure/Arrange、header isolation 与 Editor Inspector consumer 已落地；不替代 VirtualGridView/DataGrid |
+| UI Layout Debugger | 始终编译的 fixed-capacity committed layout snapshot、Runtime 精确拾取与 frame-local Render overlay | [0029](adr/0029-ui-layout-debugger.md) | Implemented：UI capability、双缓冲原子 publication、phase facade、pointer-hit query、subtree exclusion、DisplayList overlay 与 Editor DevTools consumer 已落地；容量默认关闭，产品显式启用 |
 
 ## Proposed
 

@@ -136,6 +136,17 @@ struct UIWidgetTraits final {
     return widgetTraits(kind).supportsText;
 }
 
+[[nodiscard]] constexpr bool hasCompositeManagedLayoutVisibility(
+    BuiltinElementKind kind) noexcept
+{
+    return kind == BuiltinElementKind::ListViewItem ||
+           kind == BuiltinElementKind::TreeViewItem ||
+           kind == BuiltinElementKind::VirtualGridViewItem ||
+           kind == BuiltinElementKind::DataGridRow ||
+           kind == BuiltinElementKind::DataGridCell ||
+           kind == BuiltinElementKind::DataGridColumnHeader;
+}
+
 [[nodiscard]] constexpr UIContentAlignment
 defaultContentAlignment(BuiltinElementKind kind) noexcept
 {

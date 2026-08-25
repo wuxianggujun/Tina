@@ -4,6 +4,7 @@
 #include <tina/ui/UIAuthoring.hpp>
 #include <tina/ui/UIContext.hpp>
 #include <tina/ui/UIErrors.hpp>
+#include <tina/ui/UIInputRouter.hpp>
 #include <tina/ui/UIMotionController.hpp>
 #include <tina/ui/UIPublicationPipeline.hpp>
 #include <tina/ui/UIStyleController.hpp>
@@ -147,6 +148,57 @@ PrimaryWindowUICapabilityState::statistics(u64 epoch, PrimaryWindowUIPhase phase
         return Core::failure(std::move(status.error()));
     }
     return context_->statistics();
+}
+
+Core::Result<UI::UILayoutDebugOptions>
+PrimaryWindowUICapabilityState::layoutDebugOptions(u64 epoch, PrimaryWindowUIPhase phase)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUICapabilityState::layoutDebugOptions";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    return context_->layoutDebugger().options();
+}
+
+Core::Status PrimaryWindowUICapabilityState::setLayoutDebugOptions(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UILayoutDebugOptions options)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUICapabilityState::setLayoutDebugOptions";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = context_->layoutDebugger().setOptions(options);
+    if (!status)
+    {
+        return Core::failure(rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UILayoutDebugSnapshotView>
+PrimaryWindowUICapabilityState::committedLayoutDebugSnapshot(u64 epoch, PrimaryWindowUIPhase phase)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUICapabilityState::committedLayoutDebugSnapshot";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    return context_->publication().committedLayoutDebugSnapshot();
+}
+
+Core::Result<UI::UIPointerHitQueryResult>
+PrimaryWindowUICapabilityState::queryCommittedPointerHit(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UILogicalPoint point)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUICapabilityState::queryCommittedPointerHit";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    return context_->input().queryPointerHit(point);
 }
 
 Core::Status PrimaryWindowUICapabilityState::validate(u64 epoch, PrimaryWindowUIPhase phase, bool requireContext,

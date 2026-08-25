@@ -100,6 +100,10 @@ struct UIContextCapacityConfig final {
     // Zero derives from nodeCapacity. The listener capacity may be configured
     // independently because one node can own listeners for several events.
     usize routePathCapacity = 0;
+    // Optional fixed-capacity double buffer containing authored/resolved styles,
+    // measurement inputs, geometry and interaction metadata for every committed
+    // layout node. Zero disables the diagnostic snapshot with no runtime work.
+    usize layoutDebuggerSnapshotCapacity = 0;
     usize routedPointerListenerCapacity = 0;
     // Zero derives from nodeCapacity. One additional internal transaction slot
     // is reserved so an action can be replaced while this published capacity

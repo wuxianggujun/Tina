@@ -68,8 +68,10 @@ Command Bar 中央的 `2D/3D` 是 workspace selector，`View > Workspace` 提供
 只呈现从 Project Assets 实际打开的 scene/Catalog document，Undo/Redo/Save 已并入 Command Bar。内建 World2D/World3D/TileMap/Animation
 session 都是 workspace/context 的内部状态，不再重复显示成顶层文档标签；没有可关闭的项目文档时关闭按钮也折叠。
 2D Viewport Header 以 `Scene/TileMap` 切换当前 authoring context。底部面板默认收起，Status Bar 的
-`Animation` / `Output` 按钮用于打开或切换面板，再次点击当前按钮会收起；Animation authoring 位于
-Animation 面板，Output 以有界三列 DataGrid 显示 `Level | Context | Message` 历史。Hierarchy 与 Inspector Header 分别提供向外收起按钮，
+`Animation` / `Output` / `Layout` 按钮用于打开或切换面板，再次点击当前按钮会收起；Animation authoring 位于
+Animation 面板，Output 以有界三列 DataGrid 显示 `Level | Context | Message` 历史；Layout Debugger 使用 committed
+layout snapshot 提供节点树、authored/resolved 布局参数、几何与 basis 详情、界面拾取和非侵入式 bounds overlay，
+并在所有构建配置中可用。Hierarchy 与 Inspector Header 分别提供向外收起按钮，
 `View` 菜单中的 `Left Dock` / `Inspector` Check 项用于恢复或再次隐藏；收起前保存用户最后拖拽比例。
 根使用四个连续 band；Workspace 由三个嵌套 `SplitView` 组成：`Left Dock | Main`、`Center | Inspector`、
 `Viewport | Bottom Panel Host`。三个 splitter 都使用第一方 Pointer Capture/RangeInput 状态机，可直接拖动调整 Left Dock、
@@ -437,8 +439,9 @@ mutation；非法配置或容量失败保留上一份 publication。公共头不
   overlay 继续使用 `PointerHitPolicy::Ignore`，effective clip 仍是 axis-aligned scissor，几何命中继续由
   gizmo backend 负责。Editor 不再为整个 backbuffer 打开 8× MSAA，跨 GPU UI-003 golden 仍由 backlog
   `RENDER-LINES-001` 跟踪。
-- Editor 将 `EngineConfig::renderDrawCallCapacity` 固定为8192。其 scene 与 DisplayList 都是启动期定容，
-  无需为普通 2D authoring 会话承担 bgfx 的65K通用 draw-call storage。
+- Layout Debugger 把 Editor 的 UI DisplayList 上限固定为32768，并为 scene submission 额外预留1024，
+  因此 `EngineConfig::renderDrawCallCapacity` 为33792。它仍低于 bgfx 的65K通用上限，同时不会让满载
+  layout overlay 与 world pass 争用同一份32K ceiling。
 - grid、transform gizmo 与 marquee overlay node 在 root 创建期一次性预分配，未使用槽为 `Collapsed`，并保持
   `UIPointerHitPolicy::Ignore`；它们的命中仍由 `viewportPreviewLayer_` 统一路由给 navigation、transform gizmo、
   marquee 与 TileMap brush。

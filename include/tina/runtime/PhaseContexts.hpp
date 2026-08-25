@@ -12,6 +12,8 @@
 #include <tina/runtime/PrimaryWindowUI.hpp>
 #include <tina/runtime/RunExitReason.hpp>
 #include <tina/ui/UIContextStatistics.hpp>
+#include <tina/ui/UIHitTest.hpp>
+#include <tina/ui/UILayoutDebugger.hpp>
 
 #include <memory>
 
@@ -180,6 +182,11 @@ class UIUpdateContext final {
     // Owner-thread diagnostic snapshot for bounded UI storage. The result is
     // phase-scoped and does not expose the UIContext itself.
     [[nodiscard]] Core::Result<UI::UIContextStatistics> primaryWindowUIStatistics() const;
+    [[nodiscard]] Core::Result<UI::UILayoutDebugOptions> primaryWindowUILayoutDebugOptions() const;
+    [[nodiscard]] Core::Status setPrimaryWindowUILayoutDebugOptions(UI::UILayoutDebugOptions options);
+    [[nodiscard]] Core::Result<UI::UILayoutDebugSnapshotView> committedLayoutDebugSnapshot() const;
+    [[nodiscard]] Core::Result<UI::UIPointerHitQueryResult>
+    queryCommittedPrimaryWindowUIPointerHit(UI::UILogicalPoint point) const;
 
   private:
     UIUpdateContext(const FrameTiming& frameTiming, Runtime::Detail::PrimaryWindowUICapabilityState& primaryWindowUI,

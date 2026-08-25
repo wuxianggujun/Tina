@@ -323,6 +323,12 @@ BiDi/复杂 shaping、Linux 原生 XIM/Wayland preedit/candidate placement，以
 Popup 子树归属在 layout traversal 中缓存，避免 publication 逐节点回溯祖先，使该发布步骤保持线性。
 这项事实不等同于完整 dirty-range pruning 或固定机性能 hard gate。
 
+UI Layout Debugger 是同一 `UIContext` 的可选 fixed-capacity diagnostics capability，在 Debug/Release 中始终
+编译。成功 layout publication 原子替换 authored/resolved style、测量、geometry、clip、interaction metadata
+双缓冲；失败保留上一份 snapshot。Runtime 只通过 `UIUpdateContext` phase facade 读取/设置 options、借用
+snapshot，并复用 committed pointer-hit query。可视 outline 在 UI→Render integration 中 frame-local 追加，
+不进入 retained tree、hit、Semantics 或 committed paint；Editor 通过 excluded subtree 排除 DevTools 自身。
+
 ## Legacy 与剩余扫尾
 
 产品级 Legacy 删除与 CLEAN-001～004 扫尾已完成：

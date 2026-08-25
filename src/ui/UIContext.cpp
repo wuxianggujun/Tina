@@ -116,6 +116,8 @@ UIContext::Impl::Impl(Platform::WindowId owner, UIContextCapacityConfig capaciti
                        std::pmr::vector<UICommittedNodeEntry>(&allocationLedger->resource())},
       committedLayoutBuffers{std::pmr::vector<UICommittedLayoutEntry>(&allocationLedger->resource()),
                              std::pmr::vector<UICommittedLayoutEntry>(&allocationLedger->resource())},
+      committedLayoutDebugBuffers{std::pmr::vector<UILayoutDebugEntry>(&allocationLedger->resource()),
+                                  std::pmr::vector<UILayoutDebugEntry>(&allocationLedger->resource())},
       committedHitBuffers{std::pmr::vector<UICommittedHitEntry>(&allocationLedger->resource()),
                           std::pmr::vector<UICommittedHitEntry>(&allocationLedger->resource())},
       committedPaintBuffers{std::pmr::vector<UICommittedPaintEntry>(&allocationLedger->resource()),
@@ -165,6 +167,7 @@ UIContext::Impl::Create(Platform::WindowId ownerWindow, NormalizedUIContextCapac
         .canvasCommandCapacity = normalized.canvasCommandCapacity,
         .imageContentCapacity = normalized.imageContentCapacity,
         .routePathCapacity = normalized.routePathCapacity,
+        .layoutDebuggerSnapshotCapacity = normalized.layoutDebuggerSnapshotCapacity,
         .routedPointerListenerCapacity = normalized.routedPointerListenerCapacity,
         .buttonActionCapacity = normalized.buttonActionCapacity,
         .textByteCapacity = normalized.textByteCapacity,
@@ -289,6 +292,8 @@ UIContext::Impl::Create(Platform::WindowId ownerWindow, NormalizedUIContextCapac
     impl->committedBuffers[1].reserve(normalized.nodeCapacity);
     impl->committedLayoutBuffers[0].reserve(normalized.layoutSnapshotCapacity);
     impl->committedLayoutBuffers[1].reserve(normalized.layoutSnapshotCapacity);
+    impl->committedLayoutDebugBuffers[0].reserve(normalized.layoutDebuggerSnapshotCapacity);
+    impl->committedLayoutDebugBuffers[1].reserve(normalized.layoutDebuggerSnapshotCapacity);
     impl->committedHitBuffers[0].reserve(normalized.hitSnapshotCapacity);
     impl->committedHitBuffers[1].reserve(normalized.hitSnapshotCapacity);
     impl->committedPaintBuffers[0].reserve(normalized.paintSnapshotCapacity);
@@ -346,6 +351,7 @@ void UIContext::Impl::detachLifetime(UIContext* context) noexcept
         .activeImageContentCount = imageContentStorage.activeCount(),
         .imageContentHighWater = imageContentStorage.highWater(),
         .routePathCapacity = capacityConfig.routePathCapacity,
+        .layoutDebuggerSnapshotCapacity = capacityConfig.layoutDebuggerSnapshotCapacity,
         .routedPointerListenerCapacity = capacityConfig.routedPointerListenerCapacity,
         .activeRoutedPointerListenerCount = routedPointerListenerRegistry.activeCount(),
         .routedPointerListenerHighWater = routedPointerListenerRegistry.highWater(),
@@ -378,6 +384,8 @@ void UIContext::Impl::detachLifetime(UIContext* context) noexcept
         .committedNodeCount = committedBuffers[publishedBufferIndex].size(),
         .committedRevision = committedRevision,
         .committedLayoutNodeCount = committedLayoutBuffers[publishedLayoutBufferIndex].size(),
+        .committedLayoutDebugNodeCount =
+            committedLayoutDebugBuffers[publishedLayoutDebugBufferIndex].size(),
         .layoutRevision = committedLayoutRevision,
         .committedHitNodeCount = committedHitBuffers[publishedHitBufferIndex].size(),
         .committedHitTargetCount = committedHitTargetCount,

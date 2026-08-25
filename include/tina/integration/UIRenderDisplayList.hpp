@@ -4,6 +4,7 @@
 #include <tina/render/UIDisplayList.hpp>
 #include <tina/render/Texture2DFrameResourceResolver.hpp>
 #include <tina/ui/UICommittedPaint.hpp>
+#include <tina/ui/UILayoutDebugger.hpp>
 
 namespace Tina::Integration {
 
@@ -16,6 +17,7 @@ struct UIRenderViewportMapping final {
 
 struct UIRenderDisplayListBuildStatistics final {
     usize sourcePaintEntryCount = 0;
+    usize sourceLayoutDebugEntryCount = 0;
     usize submittedSolidQuadCount = 0;
     usize submittedSolidEllipseCount = 0;
     usize submittedSolidLineCount = 0;
@@ -26,6 +28,8 @@ struct UIRenderDisplayListBuildStatistics final {
     usize skippedImageUnavailableCount = 0;
     usize skippedImageExtentMismatchCount = 0;
     usize redundantClipElisionCount = 0;
+    usize submittedLayoutDebugQuadCount = 0;
+    usize layoutDebugSelectedEntryCount = 0;
 };
 
 enum class UIRenderImageResolutionState : u8 {
@@ -58,6 +62,14 @@ struct UIRenderImageBuildContext final {
     std::span<UIRenderImageResolutionCacheEntry> cache{};
 };
 
+// Frame-local diagnostic overlay input. The snapshot and selected node remain
+// ordinary borrowed UI identities; conversion only appends Render commands and
+// never inserts nodes into retained structure, hit testing, or semantics.
+struct UIRenderLayoutDebugOverlay final {
+    UI::UILayoutDebugOptions options{};
+    UI::UILayoutDebugSnapshotView snapshot{};
+};
+
 // The DisplayList view borrows the builder's fixed storage and follows its
 // single-buffer invalidation contract. A subsequent beginFrame() invalidates
 // it immediately, including when that replacement is later rolled back.
@@ -75,6 +87,7 @@ struct UIRenderDisplayListBuild final {
     Render::UIDisplayListBuilder& builder,
     UI::UICommittedPaintView paintView,
     UIRenderViewportMapping mapping,
-    UIRenderImageBuildContext imageContext = {});
+    UIRenderImageBuildContext imageContext = {},
+    UIRenderLayoutDebugOverlay layoutDebugOverlay = {});
 
 } // namespace Tina::Integration

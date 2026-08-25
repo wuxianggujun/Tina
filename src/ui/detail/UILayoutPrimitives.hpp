@@ -17,6 +17,59 @@ struct LayoutPassStatistics final {
     usize percentMeasureFallbackCount = 0;
 };
 
+enum class ResolvedLayoutDeltaCategory : u8 {
+    ResponsiveStyle,
+    Visibility,
+    FlexConstraint,
+    TextMetrics,
+    Count,
+};
+
+struct ResolvedLayoutDeltaSummary final {
+    usize count = 0;
+    u32 firstNodeIndex = 0;
+};
+
+struct ResolvedLayoutDelta final {
+    static constexpr usize CategoryCount =
+        static_cast<usize>(ResolvedLayoutDeltaCategory::Count);
+
+    std::array<ResolvedLayoutDeltaSummary, CategoryCount> summaries{};
+
+    void record(ResolvedLayoutDeltaCategory category, u32 nodeIndex) noexcept
+    {
+        ResolvedLayoutDeltaSummary& summary =
+            summaries[static_cast<usize>(category)];
+        if (summary.count == 0)
+        {
+            summary.firstNodeIndex = nodeIndex;
+        }
+        ++summary.count;
+    }
+
+    [[nodiscard]] bool changed() const noexcept
+    {
+        return std::any_of(
+            summaries.begin(), summaries.end(),
+            [](const ResolvedLayoutDeltaSummary& summary) noexcept {
+                return summary.count != 0;
+            });
+    }
+
+    [[nodiscard]] const ResolvedLayoutDeltaSummary& summary(
+        ResolvedLayoutDeltaCategory category) const noexcept
+    {
+        return summaries[static_cast<usize>(category)];
+    }
+};
+
+struct ResolvedLayoutStateFingerprint final {
+    u64 first = 0;
+    u64 second = 0;
+
+    bool operator==(const ResolvedLayoutStateFingerprint&) const = default;
+};
+
 struct LayoutPreparedInputs final {
     UIVisibility effectiveVisibility = UIVisibility::Visible;
     bool parentContentWidthDefinite = false;

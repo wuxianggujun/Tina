@@ -215,6 +215,7 @@ struct UIContext::Impl final {
     Detail::UISliderChangeCallbackRegistry sliderChangeCallbackRegistry;
     std::array<std::pmr::vector<UICommittedNodeEntry>, 2> committedBuffers;
     std::array<std::pmr::vector<UICommittedLayoutEntry>, 2> committedLayoutBuffers;
+    std::array<std::pmr::vector<UILayoutDebugEntry>, 2> committedLayoutDebugBuffers;
     std::array<std::pmr::vector<UICommittedHitEntry>, 2> committedHitBuffers;
     std::array<std::pmr::vector<UICommittedPaintEntry>, 2> committedPaintBuffers;
     std::array<std::pmr::vector<UISemanticsEntry>, 2> committedSemanticsBuffers;
@@ -225,10 +226,13 @@ struct UIContext::Impl final {
     std::vector<Detail::DeferredRoutedPointerListenerRelease> deferredRoutedPointerListenerReleaseBuffer;
     usize publishedBufferIndex = 0;
     usize publishedLayoutBufferIndex = 0;
+    usize publishedLayoutDebugBufferIndex = 0;
     usize publishedHitBufferIndex = 0;
     usize publishedPaintBufferIndex = 0;
     u64 committedRevision = 0;
     u64 committedLayoutRevision = 0;
+    u64 committedLayoutDebugStructureRevision = 0;
+    u64 committedLayoutDebugLayoutRevision = 0;
     u64 committedLayoutStructureRevision = 0;
     u64 committedHitRevision = 0;
     u64 committedHitStructureRevision = 0;
@@ -247,6 +251,7 @@ struct UIContext::Impl final {
     UILogicalSize committedSemanticsViewportSize{};
     usize publishedSemanticsBufferIndex = 0;
     UILogicalSize committedViewportSize{};
+    UILayoutDebugOptions layoutDebugOptions{};
     bool hasCommittedViewport = false;
     usize liveRootCount = 0;
     usize activeBuildTransactionCount = 0;
@@ -381,7 +386,12 @@ struct UIContext::Impl final {
 
     [[nodiscard]] const UILayoutStyle& resolvedLayoutStyle(u32 nodeIndex) const noexcept;
 
-    [[nodiscard]] Core::Result<bool> refreshResolvedLayoutAfterArrange(
+    [[nodiscard]] Detail::ResolvedLayoutStateFingerprint
+    resolvedLayoutStateFingerprint(
+        const std::pmr::vector<u32>& order) const noexcept;
+
+    [[nodiscard]] Core::Result<Detail::ResolvedLayoutDelta>
+    refreshResolvedLayoutAfterArrange(
         const std::pmr::vector<u32>& order);
 
 
@@ -495,7 +505,10 @@ struct UIContext::Impl final {
 
 
     void buildCommittedLayout(std::pmr::vector<UICommittedLayoutEntry>& output,
-                              const std::pmr::vector<u32>& order) const noexcept;
+                          const std::pmr::vector<u32>& order) const noexcept;
+
+    void buildCommittedLayoutDebug(std::pmr::vector<UILayoutDebugEntry>& output,
+                                   std::span<const UICommittedLayoutEntry> layoutEntries) const noexcept;
 
 
     [[nodiscard]] Core::Result<CommittedHitBuildResult>
@@ -2707,6 +2720,12 @@ struct UIContext::Impl final {
 
 
     [[nodiscard]] UICommittedLayoutView committedLayout() const noexcept;
+
+    [[nodiscard]] UILayoutDebugSnapshotView committedLayoutDebugSnapshot() const noexcept;
+
+    [[nodiscard]] Core::Status setLayoutDebugOptions(UILayoutDebugOptions options);
+
+    [[nodiscard]] UILayoutDebugOptions layoutDebugOptionsValue() const noexcept;
 
 
     [[nodiscard]] UICommittedHitView committedHit() const noexcept;

@@ -104,10 +104,15 @@ class EditorApplication final : public Tina::IGameApplication {
     // toolbar chrome owns roughly 56 icon tooltips before form/dialog actions,
     // so the general-purpose default of 64 is too small for the Editor.
     config.primaryWindowUICapacities.componentStates.tooltipCapacity = 128U;
-    // The Editor submits one bounded world plus one UI pass. Keeping this at
-    // 8K avoids bgfx's 65K fixed draw arrays while retaining headroom above the
-    // configured scene and DisplayList capacities.
-    config.renderDrawCallCapacity = 8U * 1024U;
+    config.primaryWindowUICapacities.layoutDebuggerSnapshotCapacity =
+        LayoutDebugProjectionCapacity;
+    config.primaryWindowUIDisplayListCapacities.commandCapacity =
+        LayoutDebugDisplayListEntryCapacity;
+    config.primaryWindowUIDisplayListCapacities.batchCapacity =
+        LayoutDebugDisplayListEntryCapacity;
+    // The UI DisplayList may consume its full 32K budget. Keep one additional
+    // 1K block for the bounded scene pass instead of sharing the same ceiling.
+    config.renderDrawCallCapacity = EditorRenderDrawCallCapacity;
     using Key = Tina::Platform::Key;
     config.inputActions.bindings = {
         editorShortcutBinding(Key::LeftControl, EditorShortcutActions::Control),

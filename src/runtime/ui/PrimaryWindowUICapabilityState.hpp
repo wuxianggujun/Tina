@@ -3,6 +3,7 @@
 #include <tina/runtime/PrimaryWindowUI.hpp>
 #include <tina/ui/UIContextConfig.hpp>
 #include <tina/ui/UIContextStatistics.hpp>
+#include <tina/ui/UILayoutDebugger.hpp>
 
 #include <optional>
 #include <string_view>
@@ -40,6 +41,15 @@ class PrimaryWindowUICapabilityState final {
     // For accessibility adapters / product evidence; not a platform UIA bridge.
     [[nodiscard]] Core::Result<UI::UICommittedSemanticsView> committedSemantics(u64 epoch, PrimaryWindowUIPhase phase);
     [[nodiscard]] Core::Result<UI::UIContextStatistics> statistics(u64 epoch, PrimaryWindowUIPhase phase);
+    [[nodiscard]] Core::Result<UI::UILayoutDebugOptions>
+    layoutDebugOptions(u64 epoch, PrimaryWindowUIPhase phase);
+    [[nodiscard]] Core::Status setLayoutDebugOptions(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UILayoutDebugOptions options);
+    [[nodiscard]] Core::Result<UI::UILayoutDebugSnapshotView>
+    committedLayoutDebugSnapshot(u64 epoch, PrimaryWindowUIPhase phase);
+    [[nodiscard]] Core::Result<UI::UIPointerHitQueryResult>
+    queryCommittedPointerHit(u64 epoch, PrimaryWindowUIPhase phase,
+                             UI::UILogicalPoint point);
     [[nodiscard]] Core::Result<PrimaryWindowUIRootBuilder> rootBuilder(u64 epoch);
     [[nodiscard]] Core::Result<PrimaryWindowUITreeUpdater> treeUpdater(u64 epoch, PrimaryWindowUIPhase phase,
                                                                        UI::UIRootOwner& rootOwner);

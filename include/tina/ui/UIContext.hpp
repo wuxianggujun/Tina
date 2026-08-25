@@ -16,6 +16,7 @@ class IUITextRasterizer;
 class UIAuthoring;
 class UIElementBuildTransaction;
 class UIInputRouter;
+class UILayoutDebugger;
 class UIMotionController;
 class UIPublicationPipeline;
 class UIRootBuilder;
@@ -57,6 +58,7 @@ class UIContext final {
     [[nodiscard]] UIMotionController motion() noexcept;
     [[nodiscard]] UITextSystem text() noexcept;
     [[nodiscard]] UIPublicationPipeline publication() noexcept;
+    [[nodiscard]] UILayoutDebugger layoutDebugger() noexcept;
     [[nodiscard]] UIInputRouter input() noexcept;
 
     [[nodiscard]] UIContextStatistics statistics() const noexcept;
@@ -69,6 +71,7 @@ class UIContext final {
     friend class UIInputRouter;
     friend class UIMotionController;
     friend class UIPublicationPipeline;
+    friend class UILayoutDebugger;
     friend class UIRootBuilder;
     friend class UIRootOwner;
     friend class UIRoutedPointerListenerToken;

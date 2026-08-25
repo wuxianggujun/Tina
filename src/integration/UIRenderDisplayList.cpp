@@ -678,13 +678,221 @@ struct ProjectedQuad final {
     return (std::min)(static_cast<float>(projected), maximum);
 }
 
+[[nodiscard]] Core::Status addDebugOutline(
+    Render::UIDisplayListBuilder& builder,
+    const UI::UILogicalRect& logicalRect,
+    const PixelProjection& projection,
+    Render::UIPremultipliedRgba8 color,
+    float logicalThickness,
+    u64& nextPaintOrdinal,
+    UIRenderDisplayListBuildStatistics& statistics)
+{
+    if (!validLogicalRect(logicalRect) || logicalRect.width <= 0.0F || logicalRect.height <= 0.0F)
+    {
+        return Core::success();
+    }
+    auto projected = projectRect(logicalRect, projection);
+    if (!projected || projected->empty())
+    {
+        return projected ? Core::success() : Core::failure(std::move(projected.error()));
+    }
+
+    const Render::UIPixelRect outer = *projected;
+    const auto addPart = [&](const Render::UIPixelRect& part) -> Core::Status {
+        if (part.empty())
+        {
+            return Core::success();
+        }
+        if (nextPaintOrdinal > (std::numeric_limits<u32>::max)())
+        {
+            return Core::failure(Core::CoreErrorCode::CapacityExceeded,
+                                 "UI layout debug overlay paint ordinal capacity was exceeded");
+        }
+        Core::Status status = builder.addSolidQuad({
+            .paintOrdinal = static_cast<u32>(nextPaintOrdinal++),
+            .bounds = part,
+            .color = color,
+        });
+        if (status)
+        {
+            ++statistics.submittedLayoutDebugQuadCount;
+        }
+        return status;
+    };
+    const double projectedThickness = static_cast<double>(logicalThickness) *
+                                      (std::min)(projection.scaleX, projection.scaleY);
+    const double maximumThickness = static_cast<double>((std::min)(outer.width, outer.height));
+    const u32 thickness = static_cast<u32>(
+        (std::min)(maximumThickness, (std::max)(1.0, std::ceil(projectedThickness))));
+    if (static_cast<u64>(outer.width) <= static_cast<u64>(thickness) * 2U ||
+        static_cast<u64>(outer.height) <= static_cast<u64>(thickness) * 2U)
+    {
+        return addPart(outer);
+    }
+
+    const Render::UIPixelRect innerRect{
+        .x = static_cast<i32>(static_cast<i64>(outer.x) + thickness),
+        .y = static_cast<i32>(static_cast<i64>(outer.y) + thickness),
+        .width = outer.width - thickness * 2U,
+        .height = outer.height - thickness * 2U,
+    };
+    const i64 outerRight = static_cast<i64>(outer.x) + outer.width;
+    const i64 outerBottom = static_cast<i64>(outer.y) + outer.height;
+    const i64 innerRight = static_cast<i64>(innerRect.x) + innerRect.width;
+    const i64 innerBottom = static_cast<i64>(innerRect.y) + innerRect.height;
+    const std::array<Render::UIPixelRect, 4> parts{
+        Render::UIPixelRect{.x = outer.x, .y = outer.y, .width = outer.width,
+                            .height = static_cast<u32>((std::max)(i64{0},
+                                static_cast<i64>(innerRect.y) - static_cast<i64>(outer.y)))},
+        Render::UIPixelRect{.x = outer.x, .y = static_cast<i32>(innerBottom),
+                            .width = outer.width,
+                            .height = static_cast<u32>((std::max)(i64{0}, outerBottom - innerBottom))},
+        Render::UIPixelRect{.x = outer.x, .y = innerRect.y,
+                            .width = static_cast<u32>((std::max)(i64{0},
+                                static_cast<i64>(innerRect.x) - static_cast<i64>(outer.x))),
+                            .height = innerRect.height},
+        Render::UIPixelRect{.x = static_cast<i32>(innerRight), .y = innerRect.y,
+                            .width = static_cast<u32>((std::max)(i64{0}, outerRight - innerRight)),
+                            .height = innerRect.height},
+    };
+    for (const Render::UIPixelRect& part : parts)
+    {
+        Core::Status status = addPart(part);
+        if (!status)
+        {
+            return status;
+        }
+    }
+    return Core::success();
+}
+
+[[nodiscard]] Core::Status validateLayoutDebugOverlay(
+    UI::UICommittedPaintView paintView,
+    const UIRenderLayoutDebugOverlay& overlay)
+{
+    if (!overlay.options.enabled)
+    {
+        return Core::success();
+    }
+    if (overlay.snapshot.viewportSize() != paintView.viewportSize() ||
+        overlay.snapshot.structureRevision() != paintView.structureRevision() ||
+        overlay.snapshot.layoutRevision() != paintView.layoutRevision())
+    {
+        return invalidInput(
+            "The UI layout debug snapshot must match the committed paint revision and viewport");
+    }
+    for (const UI::UILayoutDebugEntry& entry : overlay.snapshot.entries())
+    {
+        if (!entry.node.hasValue() || !validLogicalRect(entry.localRect) ||
+            !validLogicalRect(entry.worldRect) || !validLogicalRect(entry.effectiveClip) ||
+            !validLogicalRect(entry.contentPlacement.contentBox))
+        {
+            return invalidInput(
+                "UI layout debug entries require valid node identities and finite non-negative geometry");
+        }
+    }
+    return Core::success();
+}
+
+[[nodiscard]] Core::Status appendLayoutDebugOverlay(
+    Render::UIDisplayListBuilder& builder,
+    const PixelProjection& projection,
+    const UIRenderLayoutDebugOverlay& overlay,
+    u64& nextPaintOrdinal,
+    UIRenderDisplayListBuildStatistics& statistics)
+{
+    if (!overlay.options.enabled || overlay.snapshot.empty())
+    {
+        return Core::success();
+    }
+
+    const UI::UILayoutDebugEntry* selected = nullptr;
+    const UI::UILayoutDebugEntry* excludedRoot = nullptr;
+    for (const UI::UILayoutDebugEntry& entry : overlay.snapshot.entries())
+    {
+        if (overlay.options.excludedSubtreeRoot.hasValue() &&
+            entry.node == overlay.options.excludedSubtreeRoot)
+        {
+            excludedRoot = &entry;
+            break;
+        }
+    }
+    u32 excludedEndPreorder = (std::numeric_limits<u32>::max)();
+    if (excludedRoot != nullptr)
+    {
+        for (const UI::UILayoutDebugEntry& entry : overlay.snapshot.entries())
+        {
+            if (entry.preorder > excludedRoot->preorder && entry.depth <= excludedRoot->depth)
+            {
+                excludedEndPreorder = (std::min)(excludedEndPreorder, entry.preorder);
+            }
+        }
+    }
+    for (const UI::UILayoutDebugEntry& entry : overlay.snapshot.entries())
+    {
+        if (excludedRoot != nullptr && entry.preorder >= excludedRoot->preorder &&
+            entry.preorder < excludedEndPreorder)
+        {
+            // Snapshot preorder/depth makes subtree exclusion frame-local and
+            // avoids retaining a second tree traversal or parent map here.
+            continue;
+        }
+        if (overlay.options.selectedNode.hasValue() && entry.node == overlay.options.selectedNode)
+        {
+            selected = &entry;
+        }
+        if (entry.effectiveVisibility != UI::UIVisibility::Visible)
+        {
+            continue;
+        }
+        if (overlay.options.showAllVisibleBounds)
+        {
+            Core::Status status = addDebugOutline(
+                builder, entry.worldRect, projection,
+                Render::UIPremultipliedRgba8{.red = 29, .green = 54, .blue = 92, .alpha = 92},
+                1.0F, nextPaintOrdinal, statistics);
+            if (!status)
+            {
+                return status;
+            }
+        }
+    }
+    if (selected == nullptr)
+    {
+        return Core::success();
+    }
+    ++statistics.layoutDebugSelectedEntryCount;
+
+    Core::Status status = addDebugOutline(
+        builder, selected->worldRect, projection,
+        Render::UIPremultipliedRgba8{.red = 40, .green = 235, .blue = 255, .alpha = 255},
+        2.0F, nextPaintOrdinal, statistics);
+    if (!status)
+    {
+        return status;
+    }
+    status = addDebugOutline(
+        builder, selected->contentPlacement.contentBox, projection,
+        Render::UIPremultipliedRgba8{.red = 63, .green = 216, .blue = 108, .alpha = 230},
+        1.0F, nextPaintOrdinal, statistics);
+    if (!status)
+    {
+        return status;
+    }
+    return addDebugOutline(
+        builder, selected->effectiveClip, projection,
+        Render::UIPremultipliedRgba8{.red = 230, .green = 171, .blue = 45, .alpha = 230},
+        1.0F, nextPaintOrdinal, statistics);
+}
+
 } // namespace
 
 Core::Result<UIRenderDisplayListBuild> buildUIDisplayList(
     Render::UIDisplayListBuilder& builder,
     UI::UICommittedPaintView paintView,
     UIRenderViewportMapping mapping,
-    UIRenderImageBuildContext imageContext)
+    UIRenderImageBuildContext imageContext,
+    UIRenderLayoutDebugOverlay layoutDebugOverlay)
 {
     Core::Status beginStatus = builder.beginFrame();
     if (!beginStatus)
@@ -705,9 +913,15 @@ Core::Result<UIRenderDisplayListBuild> buildUIDisplayList(
     {
         return Core::failure(std::move(framebufferStatus.error()));
     }
+    Core::Status layoutDebugStatus = validateLayoutDebugOverlay(paintView, layoutDebugOverlay);
+    if (!layoutDebugStatus)
+    {
+        return Core::failure(std::move(layoutDebugStatus.error()));
+    }
 
     UIRenderDisplayListBuildStatistics statistics{
         .sourcePaintEntryCount = paintView.size(),
+        .sourceLayoutDebugEntryCount = layoutDebugOverlay.snapshot.size(),
     };
     for (UIRenderImageResolutionCacheEntry& entry : imageContext.cache)
     {
@@ -736,8 +950,18 @@ Core::Result<UIRenderDisplayListBuild> buildUIDisplayList(
         return Core::failure(std::move(projection.error()));
     }
 
+    u64 nextDebugPaintOrdinal = 0;
     for (const UI::UICommittedPaintEntry& entry : paintView.entries())
     {
+        if (entry.paintOrdinal == (std::numeric_limits<u32>::max)())
+        {
+            nextDebugPaintOrdinal = static_cast<u64>((std::numeric_limits<u32>::max)()) + 1U;
+        }
+        else
+        {
+            nextDebugPaintOrdinal =
+                (std::max)(nextDebugPaintOrdinal, static_cast<u64>(entry.paintOrdinal) + 1U);
+        }
         const std::optional<UI::UILogicalPoint> sharedBoundsEnd =
             entry.kind == UI::UICommittedPaintKind::Image &&
                     entry.imageBoundsProjection == UI::UICommittedImageBoundsProjection::SharedBoundary
@@ -892,6 +1116,13 @@ Core::Result<UIRenderDisplayListBuild> buildUIDisplayList(
                 ++statistics.submittedSolidQuadCount;
             }
         }
+    }
+
+    Core::Status debugStatus = appendLayoutDebugOverlay(
+        builder, *projection, layoutDebugOverlay, nextDebugPaintOrdinal, statistics);
+    if (!debugStatus)
+    {
+        return Core::failure(std::move(debugStatus.error()));
     }
 
     auto committed = builder.commit();

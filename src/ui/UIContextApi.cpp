@@ -2,6 +2,7 @@
 
 #include <tina/ui/UIAuthoring.hpp>
 #include <tina/ui/UIInputRouter.hpp>
+#include <tina/ui/UILayoutDebugger.hpp>
 #include <tina/ui/UIMotionController.hpp>
 #include <tina/ui/UIPublicationPipeline.hpp>
 #include <tina/ui/UIStyleController.hpp>
@@ -173,6 +174,11 @@ UITextSystem UIContext::text() noexcept
 UIPublicationPipeline UIContext::publication() noexcept
 {
     return UIPublicationPipeline(*this);
+}
+
+UILayoutDebugger UIContext::layoutDebugger() noexcept
+{
+    return UILayoutDebugger(*this);
 }
 
 UIInputRouter UIContext::input() noexcept

@@ -54,6 +54,7 @@ set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIImage.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIImageSource.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UILayout.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UILayoutDebugger.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIPaint.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIPublicationPipeline.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIRoutedPointerListenerToken.hpp
@@ -92,6 +93,7 @@ add_library(tina_ui STATIC
     UIContextText.cpp
     UIContextTree.cpp
     UIInputRouter.cpp
+    UILayoutDebugger.cpp
     UIMotionController.cpp
     UIPublicationPipeline.cpp
     UIStyleController.cpp

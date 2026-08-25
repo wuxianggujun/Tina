@@ -122,7 +122,8 @@ EngineHost 在创建任何 module factory 前 fail closed，Null/bgfx 直接 fac
 `EngineConfig::renderDrawCallCapacity` 是每帧 backend submission 的启动定容，合法值为1024的整数倍或
 精确的 native 上限65535，默认65535以保持通用 Runtime 上限。bgfx 将它传给 `Init::limits.numDrawCalls`，并因 Tina
 只允许 RenderDevice owner thread 提交而把 `maxEncoders` 固定为1；工具可依据其冻结的 scene/UI 容量显式降低。
-`TinaEditor` 使用8192，避免空会话承担 bgfx 的65K双帧 render-item arrays 与默认多 encoder uniform buffers。
+`TinaEditor` 使用33792：32K 对应 Layout Debugger 可占满的 UI DisplayList，额外1K留给有界 scene pass；
+这仍避免空会话承担 bgfx 的65K双帧 render-item arrays 与默认多 encoder uniform buffers。
 
 `EngineConfig::renderMsaaSamples` 同样是 device-lifetime 启动配置：`0`（默认，关闭）或 `2/4/8/16`，
 其余值在 EngineConfig 校验与 bgfx factory 双双 fail closed。它映射为 backbuffer 的

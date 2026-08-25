@@ -11,6 +11,7 @@ add_library(tina_editor_app STATIC
     EditorWorkspaceGizmo.cpp
     EditorWorkspaceHierarchy.cpp
     EditorWorkspaceInspector.cpp
+    EditorWorkspaceLayoutDebugger.cpp
     EditorWorkspaceLifecycle.cpp
     EditorWorkspacePreview.cpp
     EditorWorkspaceProject.cpp

@@ -979,6 +979,96 @@ TEST_F(UILayoutTest, ResponsiveRulesSwitchGridTracksAndVisibility)
     expectRectNear(collapsed.worldRect, {});
 }
 
+TEST_F(UILayoutTest, ResponsiveWidthCycleFailsWithCategoryAndPreservesPublishedState)
+{
+    auto context = makeContext({.nodeCapacity = 3, .rootCapacity = 1});
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root);
+    const UI::UINodeId parent =
+        createPanel(*context, root.rootNodeId());
+    const UI::UINodeId child = createPanel(*context, parent);
+
+    auto updater = createUpdater(*context, root);
+    UI::UILayoutStyle rootStyle{};
+    rootStyle.flexContainer.alignItems = UI::UIAxisAlignment::Start;
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), rootStyle));
+    UI::UILayoutStyle parentStyle{};
+    parentStyle.flexContainer.alignItems = UI::UIAxisAlignment::Start;
+    assertOk(updater.setLayoutStyle(parent, parentStyle));
+    assertOk(updater.setLayoutStyle(child, fixedSize(60.0F, 10.0F)));
+    assertOk(context->publication().commitLayout(
+        {.width = 300.0F, .height = 100.0F}));
+
+    const u64 structureRevision =
+        context->publication().committedStructure().revision();
+    const u64 layoutRevision =
+        context->publication().committedLayout().layoutRevision();
+    const u64 hitRevision =
+        context->publication().committedHit().hitRevision();
+    const u64 paintRevision =
+        context->publication().committedPaint().paintRevision();
+    const u64 semanticsRevision =
+        context->publication().committedSemantics().semanticsRevision();
+    const UI::UILogicalRect oldChildRect =
+        requireLayoutEntry(
+            context->publication().committedLayout(), child).worldRect;
+
+    UI::UILayoutStyle cyclingStyle = fixedSize(60.0F, 10.0F);
+    cyclingStyle.responsiveRules = UI::UIResponsiveLayoutRuleList::Of({
+        {
+            .minParentWidth = 0.0F,
+            .maxParentWidth = 100.0F,
+            .overrides = {
+                .minMax = UI::UILayoutMinMaxSpec{
+                    .minWidth = UI::UILayoutLength::Px(200.0F),
+                },
+            },
+        },
+    });
+    assertOk(updater.setLayoutStyle(child, cyclingStyle));
+    const UI::UIContextStatistics pending = context->statistics();
+    ASSERT_TRUE(pending.layoutDirty);
+    ASSERT_GT(pending.dirtyQueuePendingCount, 0U);
+
+    const Core::Status rejected = context->publication().commitLayout(
+        {.width = 300.0F, .height = 100.0F});
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidLayout);
+    EXPECT_NE(rejected.error().message.find("cycle"), std::string::npos);
+    bool hasResponsiveStyleContext = false;
+    for (const Core::ErrorContext& contextEntry : rejected.error().context)
+    {
+        hasResponsiveStyleContext =
+            hasResponsiveStyleContext ||
+            contextEntry.operation == "ResponsiveStyle";
+    }
+    EXPECT_TRUE(hasResponsiveStyleContext);
+
+    EXPECT_EQ(
+        context->publication().committedStructure().revision(),
+        structureRevision);
+    EXPECT_EQ(
+        context->publication().committedLayout().layoutRevision(),
+        layoutRevision);
+    EXPECT_EQ(
+        context->publication().committedHit().hitRevision(), hitRevision);
+    EXPECT_EQ(
+        context->publication().committedPaint().paintRevision(), paintRevision);
+    EXPECT_EQ(
+        context->publication().committedSemantics().semanticsRevision(),
+        semanticsRevision);
+    expectRectNear(
+        requireLayoutEntry(
+            context->publication().committedLayout(), child).worldRect,
+        oldChildRect);
+    const UI::UIContextStatistics afterFailure = context->statistics();
+    EXPECT_TRUE(afterFailure.layoutDirty);
+    EXPECT_EQ(
+        afterFailure.dirtyQueuePendingCount,
+        pending.dirtyQueuePendingCount);
+}
+
 
 } // namespace
 } // namespace Tina::Tests

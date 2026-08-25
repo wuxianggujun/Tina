@@ -39,7 +39,7 @@ struct FlexItemMeasurement final {
     const float baseMain = flexBaseMainSize(
         childStyle, childScratch, row, initialContentMain, statistics);
     return FlexItemMeasurement{
-        .outerMain = (row ? baseMain : childScratch.measuredSize.height) +
+        .outerMain = baseMain +
                      (row ? horizontalMargin(childStyle.margin)
                           : verticalMargin(childStyle.margin)),
         .outerCross = (row ? childScratch.measuredSize.height

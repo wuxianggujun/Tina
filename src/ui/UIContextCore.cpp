@@ -36,6 +36,66 @@ namespace Tina::UI {
     return Core::success();
 }
 
+[[nodiscard]] Core::Status UIContext::Impl::setLayoutDebugOptions(
+    UILayoutDebugOptions options)
+{
+    if (Core::Status ownerThreadStatus = ensureOwnerThread(); !ownerThreadStatus)
+    {
+        return ownerThreadStatus;
+    }
+    if (options.enabled && capacityConfig.layoutDebuggerSnapshotCapacity == 0)
+    {
+        return fail(UIErrorCode::CapacityExceeded,
+                    "UI layout debugger requires a non-zero snapshot capacity");
+    }
+    const auto validateNode = [this, options](UINodeId node, std::string_view name) -> Core::Status {
+        if (!node.hasValue())
+        {
+            return Core::success();
+        }
+        if (node.ownerWindow() != ownerWindow)
+        {
+            return fail(UIErrorCode::WrongOwnerWindow,
+                        name);
+        }
+        if (node.storageId().owner() != nodes.owner())
+        {
+            return fail(UIErrorCode::WrongContext,
+                        name);
+        }
+        // Disabled overlays may retain a stale selection/exclusion handle so a
+        // caller can clear or reconfigure state before the next publication.
+        // Enabling the overlay requires both handles, when present, to resolve
+        // to live nodes in this Context.
+        if (options.enabled && !contains(node))
+        {
+            return fail(UIErrorCode::InvalidNode,
+                        name);
+        }
+        return Core::success();
+    };
+    if (Core::Status selectedStatus =
+            validateNode(options.selectedNode, "UI layout debugger selected node is not live in this context");
+        !selectedStatus)
+    {
+        return selectedStatus;
+    }
+    if (Core::Status excludedStatus = validateNode(
+            options.excludedSubtreeRoot,
+            "UI layout debugger excluded subtree root is not live in this context");
+        !excludedStatus)
+    {
+        return excludedStatus;
+    }
+    layoutDebugOptions = options;
+    return Core::success();
+}
+
+[[nodiscard]] UILayoutDebugOptions UIContext::Impl::layoutDebugOptionsValue() const noexcept
+{
+    return layoutDebugOptions;
+}
+
 void UIContext::Impl::publishRoutedPointerListenerTokenState(u32 slot, u32 generation, bool active) noexcept
 {
     if (lifetime)

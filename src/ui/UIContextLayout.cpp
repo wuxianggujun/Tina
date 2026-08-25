@@ -1,6 +1,95 @@
 #include "detail/UIContextImpl.hpp"
 
+#include <bit>
+
 namespace Tina::UI {
+
+namespace {
+
+class ResolvedLayoutFingerprintBuilder final {
+  public:
+    void add(u64 value) noexcept
+    {
+        m_first ^= value + 0x9e3779b97f4a7c15ULL +
+                   (m_first << 6U) + (m_first >> 2U);
+        m_second ^= value;
+        m_second *= 1099511628211ULL;
+        m_second ^= m_second >> 32U;
+    }
+
+    void addFloat(float value) noexcept
+    {
+        add(static_cast<u64>(
+            std::bit_cast<u32>(Detail::normalizeFloat(value))));
+    }
+
+    template <typename Enum>
+    void addEnum(Enum value) noexcept
+    {
+        add(static_cast<u64>(value));
+    }
+
+    [[nodiscard]] Detail::ResolvedLayoutStateFingerprint finish() const noexcept
+    {
+        return {.first = m_first, .second = m_second};
+    }
+
+  private:
+    u64 m_first = 0xcbf29ce484222325ULL;
+    u64 m_second = 0x84222325cbf29ce4ULL;
+};
+
+void addLayoutLength(
+    ResolvedLayoutFingerprintBuilder& builder,
+    UILayoutLength length) noexcept
+{
+    builder.addEnum(length.unit);
+    builder.addFloat(length.value);
+}
+
+void addLayoutGap(
+    ResolvedLayoutFingerprintBuilder& builder,
+    UILayoutGap gap) noexcept
+{
+    builder.addFloat(gap.row);
+    builder.addFloat(gap.column);
+}
+
+void addEdgeSpacing(
+    ResolvedLayoutFingerprintBuilder& builder,
+    UIEdgeSpacing spacing) noexcept
+{
+    builder.addFloat(spacing.left);
+    builder.addFloat(spacing.top);
+    builder.addFloat(spacing.right);
+    builder.addFloat(spacing.bottom);
+}
+
+void addMinMaxSpec(
+    ResolvedLayoutFingerprintBuilder& builder,
+    const UILayoutMinMaxSpec& minMax) noexcept
+{
+    addLayoutLength(builder, minMax.minWidth);
+    addLayoutLength(builder, minMax.minHeight);
+    addLayoutLength(builder, minMax.maxWidth);
+    addLayoutLength(builder, minMax.maxHeight);
+}
+
+void addGridTrackList(
+    ResolvedLayoutFingerprintBuilder& builder,
+    const UIGridTrackList& tracks) noexcept
+{
+    builder.add(tracks.count);
+    const usize trackCount =
+        (std::min)(static_cast<usize>(tracks.count), tracks.tracks.size());
+    for (usize index = 0; index < trackCount; ++index)
+    {
+        builder.addEnum(tracks.tracks[index].unit);
+        builder.addFloat(tracks.tracks[index].value);
+    }
+}
+
+} // namespace
 
 void UIContext::Impl::buildCommittedStructure(std::pmr::vector<UICommittedNodeEntry>& output) const noexcept
 {
@@ -312,6 +401,18 @@ void UIContext::Impl::prepareLayoutState(UILogicalSize viewportSize, const std::
             scratch.contentHeightDefinite ? (std::max)(0.0F, outerHeight - verticalMargin(style.padding)) : 0.0F;
         scratch.hasResolvedTextMetrics = false;
         scratch.hasResolvedTextIntrinsicWidths = false;
+        const WidgetTextState& textState = textStatesByIndex[index];
+        if (textState.hasContent &&
+            textState.wrapMode == UITextWrapMode::Words)
+        {
+            const Detail::UITextIntrinsicWidths intrinsicWidths =
+                Detail::measureTextIntrinsicWidths(
+                    presentationTextViewFor(index), textState.style,
+                    textState.wrapMode, {});
+            scratch.resolvedTextMinContentWidth = intrinsicWidths.minContent;
+            scratch.resolvedTextMaxContentWidth = intrinsicWidths.maxContent;
+            scratch.hasResolvedTextIntrinsicWidths = true;
+        }
 
         const LayoutPreparedInputs currentInputs{
             .effectiveVisibility = scratch.effectiveVisibility,
@@ -343,10 +444,65 @@ const UILayoutStyle& UIContext::Impl::resolvedLayoutStyle(
     return layoutScratchByIndex[nodeIndex].resolvedStyle;
 }
 
-Core::Result<bool> UIContext::Impl::refreshResolvedLayoutAfterArrange(
+Detail::ResolvedLayoutStateFingerprint
+UIContext::Impl::resolvedLayoutStateFingerprint(
+    const std::pmr::vector<u32>& order) const noexcept
+{
+    ResolvedLayoutFingerprintBuilder builder;
+    builder.add(order.size());
+    for (const u32 index : order)
+    {
+        builder.add(index);
+        const LayoutScratchState& scratch = layoutScratchByIndex[index];
+        const UILayoutStyle& style = scratch.resolvedStyle;
+
+        builder.addEnum(style.containerLayout);
+        builder.addEnum(style.flexContainer.direction);
+        addGridTrackList(builder, style.gridContainer.columns);
+        addGridTrackList(builder, style.gridContainer.rows);
+        builder.addEnum(style.visibility);
+        addLayoutGap(builder, style.flexContainer.gap);
+        addLayoutGap(builder, style.gridContainer.gap);
+        addEdgeSpacing(builder, style.padding);
+        addMinMaxSpec(builder, style.minMax);
+        builder.addEnum(scratch.effectiveVisibility);
+
+        builder.add(scratch.hasMeasuredFlexWrapConstraint ? 1U : 0U);
+        if (scratch.hasMeasuredFlexWrapConstraint)
+        {
+            builder.addEnum(scratch.measuredFlexWrapDirection);
+            builder.addFloat(scratch.measuredFlexWrapMain);
+        }
+        builder.add(scratch.hasArrangedFlexWrapConstraint ? 1U : 0U);
+        if (scratch.hasArrangedFlexWrapConstraint)
+        {
+            builder.addEnum(scratch.arrangedFlexWrapDirection);
+            builder.addFloat(scratch.arrangedFlexWrapMain);
+        }
+
+        builder.add(scratch.hasResolvedTextIntrinsicWidths ? 1U : 0U);
+        if (scratch.hasResolvedTextIntrinsicWidths)
+        {
+            builder.addFloat(scratch.resolvedTextMinContentWidth);
+            builder.addFloat(scratch.resolvedTextMaxContentWidth);
+        }
+        builder.add(scratch.hasResolvedTextMetrics ? 1U : 0U);
+        if (scratch.hasResolvedTextMetrics)
+        {
+            builder.addFloat(scratch.resolvedTextMetrics.measuredSize.width);
+            builder.addFloat(scratch.resolvedTextMetrics.measuredSize.height);
+            builder.add(scratch.resolvedTextMetrics.codepointCount);
+            builder.add(scratch.resolvedTextMetrics.lineCount);
+        }
+    }
+    return builder.finish();
+}
+
+Core::Result<Detail::ResolvedLayoutDelta>
+UIContext::Impl::refreshResolvedLayoutAfterArrange(
     const std::pmr::vector<u32>& order)
 {
-    bool changed = false;
+    Detail::ResolvedLayoutDelta delta{};
     for (const u32 index : order)
     {
         const NodeRecord* record = recordByIndex(index);
@@ -363,61 +519,68 @@ Core::Result<bool> UIContext::Impl::refreshResolvedLayoutAfterArrange(
         if (scratch.resolvedStyle != responsive)
         {
             scratch.resolvedStyle = responsive;
-            changed = true;
+            delta.record(
+                Detail::ResolvedLayoutDeltaCategory::ResponsiveStyle, index);
         }
 
-        UIVisibility ownVisibility = responsive.visibility;
-        if (record->kind == BuiltinElementKind::Popup &&
-            index < popupStatesByNodeIndex.size() &&
-            !popupStatesByNodeIndex[index].open)
+        if (!Detail::hasCompositeManagedLayoutVisibility(record->kind))
         {
-            ownVisibility = UIVisibility::Collapsed;
-        }
-        const UINodeId node = idForIndex(index);
-        const TooltipState* tooltip =
-            record->kind == BuiltinElementKind::Tooltip
-                ? tooltipStorage.tryState(node)
-                : nullptr;
-        if (tooltip != nullptr && !tooltip->open)
-        {
-            ownVisibility = UIVisibility::Collapsed;
-        }
-        if (record->kind == BuiltinElementKind::Modal &&
-            dialogStorage.containsDialog(node) && !dialogStorage.isOpen(node))
-        {
-            ownVisibility = UIVisibility::Collapsed;
-        }
-        if (record->kind == BuiltinElementKind::Menu &&
-            menuStorage.containsMenu(node) && !menuStorage.isOpen(node))
-        {
-            ownVisibility = UIVisibility::Collapsed;
-        }
-        if (index < flowStatesByNodeIndex.size() &&
-            flowStatesByNodeIndex[index].kind == UIFlowNodeKind::Screen &&
-            !isActiveFlowScreenIndex(index))
-        {
-            ownVisibility = UIVisibility::Collapsed;
-        }
-        if (record->kind != BuiltinElementKind::TabView &&
-            record->kind != BuiltinElementKind::Tab)
-        {
-            const UINodeId tabView = tabViewStorage.tabViewForPanel(node);
-            if (tabView.hasValue() &&
-                tabViewStorage.activePanel(tabView) != node)
+            UIVisibility ownVisibility = responsive.visibility;
+            if (record->kind == BuiltinElementKind::Popup &&
+                index < popupStatesByNodeIndex.size() &&
+                !popupStatesByNodeIndex[index].open)
             {
                 ownVisibility = UIVisibility::Collapsed;
             }
-        }
-        const UIVisibility effective =
-            record->parentIndex == InvalidNodeIndex
-                ? ownVisibility
-                : combineVisibility(
-                      layoutScratchByIndex[record->parentIndex].effectiveVisibility,
-                      ownVisibility);
-        if (scratch.effectiveVisibility != effective)
-        {
-            scratch.effectiveVisibility = effective;
-            changed = true;
+            const UINodeId node = idForIndex(index);
+            const TooltipState* tooltip =
+                record->kind == BuiltinElementKind::Tooltip
+                    ? tooltipStorage.tryState(node)
+                    : nullptr;
+            if (tooltip != nullptr && !tooltip->open)
+            {
+                ownVisibility = UIVisibility::Collapsed;
+            }
+            if (record->kind == BuiltinElementKind::Modal &&
+                dialogStorage.containsDialog(node) &&
+                !dialogStorage.isOpen(node))
+            {
+                ownVisibility = UIVisibility::Collapsed;
+            }
+            if (record->kind == BuiltinElementKind::Menu &&
+                menuStorage.containsMenu(node) && !menuStorage.isOpen(node))
+            {
+                ownVisibility = UIVisibility::Collapsed;
+            }
+            if (index < flowStatesByNodeIndex.size() &&
+                flowStatesByNodeIndex[index].kind == UIFlowNodeKind::Screen &&
+                !isActiveFlowScreenIndex(index))
+            {
+                ownVisibility = UIVisibility::Collapsed;
+            }
+            if (record->kind != BuiltinElementKind::TabView &&
+                record->kind != BuiltinElementKind::Tab)
+            {
+                const UINodeId tabView = tabViewStorage.tabViewForPanel(node);
+                if (tabView.hasValue() &&
+                    tabViewStorage.activePanel(tabView) != node)
+                {
+                    ownVisibility = UIVisibility::Collapsed;
+                }
+            }
+            const UIVisibility effective =
+                record->parentIndex == InvalidNodeIndex
+                    ? ownVisibility
+                    : combineVisibility(
+                          layoutScratchByIndex[record->parentIndex]
+                              .effectiveVisibility,
+                          ownVisibility);
+            if (scratch.effectiveVisibility != effective)
+            {
+                scratch.effectiveVisibility = effective;
+                delta.record(
+                    Detail::ResolvedLayoutDeltaCategory::Visibility, index);
+            }
         }
 
         if (responsive.containerLayout == UIContainerLayout::Flex &&
@@ -428,12 +591,22 @@ Core::Result<bool> UIContext::Impl::refreshResolvedLayoutAfterArrange(
                  scratch.arrangedFlexWrapDirection ||
              scratch.measuredFlexWrapMain != scratch.arrangedFlexWrapMain))
         {
-            changed = true;
+            delta.record(
+                Detail::ResolvedLayoutDeltaCategory::FlexConstraint, index);
+            // Arrange resolves the definitive available main-axis constraint.
+            // Feed it back into the working measure state so the next bounded
+            // pass starts from the same constraint instead of re-reporting a
+            // stale mismatch and being diagnosed as no-progress.
+            scratch.measuredFlexWrapDirection =
+                scratch.arrangedFlexWrapDirection;
+            scratch.measuredFlexWrapMain = scratch.arrangedFlexWrapMain;
+            scratch.hasMeasuredFlexWrapConstraint = true;
         }
 
         const WidgetTextState& text = textStatesByIndex[index];
         if (text.hasContent && text.wrapMode == UITextWrapMode::Words)
         {
+            bool textChanged = false;
             const float contentWidth =
                 contentPlacementFor(index).contentBox.width;
             Detail::UITextIntrinsicWidths intrinsicWidths{};
@@ -454,23 +627,29 @@ Core::Result<bool> UIContext::Impl::refreshResolvedLayoutAfterArrange(
                 scratch.resolvedTextMaxContentWidth =
                     intrinsicWidths.maxContent;
                 scratch.hasResolvedTextIntrinsicWidths = true;
-                changed = true;
+                textChanged = true;
             }
             if (!scratch.hasResolvedTextMetrics ||
                 scratch.resolvedTextMetrics != *metrics)
             {
                 scratch.resolvedTextMetrics = *metrics;
                 scratch.hasResolvedTextMetrics = true;
-                changed = true;
+                textChanged = true;
+            }
+            if (textChanged)
+            {
+                delta.record(
+                    Detail::ResolvedLayoutDeltaCategory::TextMetrics, index);
             }
         }
         else if (scratch.hasResolvedTextMetrics)
         {
             scratch.hasResolvedTextMetrics = false;
-            changed = true;
+            delta.record(
+                Detail::ResolvedLayoutDeltaCategory::TextMetrics, index);
         }
     }
-    return changed;
+    return delta;
 }
 
 void UIContext::Impl::measureLayout(UILogicalSize viewportSize, const std::pmr::vector<u32>& order,
@@ -516,6 +695,22 @@ void UIContext::Impl::measureLayout(UILogicalSize viewportSize, const std::pmr::
             beginGridMeasurement(style.gridContainer);
         GridMeasurement maxContentGridMeasurement =
             beginGridMeasurement(style.gridContainer);
+
+        const bool wrappedFlexContainer =
+            style.containerLayout == UIContainerLayout::Flex &&
+            style.flexContainer.wrap == UIFlexWrap::Wrap;
+        const bool flexDirectionIsRow =
+            style.flexContainer.direction == UIFlexDirection::Row;
+        float flexMeasurementMain =
+            flexDirectionIsRow
+                ? (scratch.contentWidthDefinite ? scratch.contentWidth : -1.0F)
+                : (scratch.contentHeightDefinite ? scratch.contentHeight : -1.0F);
+        if (wrappedFlexContainer &&
+            scratch.hasArrangedFlexWrapConstraint &&
+            scratch.arrangedFlexWrapDirection == style.flexContainer.direction)
+        {
+            flexMeasurementMain = scratch.arrangedFlexWrapMain;
+        }
 
         u32 childIndex = record->firstChildIndex;
         while (childIndex != InvalidNodeIndex)
@@ -580,15 +775,10 @@ void UIContext::Impl::measureLayout(UILogicalSize viewportSize, const std::pmr::
                         childMaxContentContribution);
                     if (style.flexContainer.wrap == UIFlexWrap::Wrap)
                     {
-                        const float availableMain =
-                            row ? (scratch.contentWidthDefinite
-                                       ? scratch.contentWidth : -1.0F)
-                                : (scratch.contentHeightDefinite
-                                       ? scratch.contentHeight : -1.0F);
                         appendFlexMeasuredItem(
                             flexWrapMeasurement,
                             style.flexContainer.direction,
-                            style.flexContainer.wrap, availableMain,
+                            style.flexContainer.wrap, flexMeasurementMain,
                             mainGap, crossGap, childStyle, childScratch,
                             statistics);
                     }
@@ -616,22 +806,9 @@ void UIContext::Impl::measureLayout(UILogicalSize viewportSize, const std::pmr::
                     : style.flexContainer.gap.column);
             if (flexWrapMeasurement.itemCount != 0U)
             {
-                const bool row = style.flexContainer.direction ==
-                                 UIFlexDirection::Row;
-                float measuredMain =
-                    row ? (scratch.contentWidthDefinite
-                               ? scratch.contentWidth : -1.0F)
-                        : (scratch.contentHeightDefinite
-                               ? scratch.contentHeight : -1.0F);
-                if (scratch.hasArrangedFlexWrapConstraint &&
-                    scratch.arrangedFlexWrapDirection ==
-                        style.flexContainer.direction)
-                {
-                    measuredMain = scratch.arrangedFlexWrapMain;
-                }
                 scratch.measuredFlexWrapDirection =
                     style.flexContainer.direction;
-                scratch.measuredFlexWrapMain = measuredMain;
+                scratch.measuredFlexWrapMain = flexMeasurementMain;
                 scratch.hasMeasuredFlexWrapConstraint = true;
             }
         }
@@ -2418,6 +2595,35 @@ void UIContext::Impl::collapseTreeViewItems(u32 treeViewIndex, UILogicalRect con
             .viewportRect = plan.viewportRect,
         };
         layoutContentRect = plan.contentRect;
+        // A ScrollView's final content basis is the resolved scroll content
+        // rect, not the pre-scroll border box. Feed that basis back into the
+        // direct flow children immediately so percentage widths and wrapped
+        // text are measured against the scrollbar-reduced viewport on the
+        // next bounded convergence pass.
+        parentScratch.contentWidthDefinite = true;
+        parentScratch.contentHeightDefinite = true;
+        parentScratch.contentWidth = layoutContentRect.width;
+        parentScratch.contentHeight = layoutContentRect.height;
+        u32 scrollChildIndex = parentRecord->firstChildIndex;
+        while (scrollChildIndex != InvalidNodeIndex)
+        {
+            const NodeRecord* scrollChildRecord =
+                recordByIndex(scrollChildIndex);
+            if (scrollChildRecord == nullptr)
+            {
+                break;
+            }
+            const UILayoutStyle& scrollChildStyle =
+                resolvedLayoutStyle(scrollChildIndex);
+            if (layoutScratchByIndex[scrollChildIndex].effectiveVisibility !=
+                    UIVisibility::Collapsed &&
+                scrollChildStyle.placement == UILayoutPlacement::Flow)
+            {
+                refreshMeasuredSizeForParentContent(
+                    scrollChildIndex, layoutContentRect, statistics);
+            }
+            scrollChildIndex = scrollChildRecord->nextSiblingIndex;
+        }
         descendantClip = intersectRects(descendantClip, plan.viewportRect);
     }
 
@@ -2951,6 +3157,137 @@ void UIContext::Impl::buildCommittedLayout(std::pmr::vector<UICommittedLayoutEnt
     }
     appendPass(false, true);
     appendPass(true, true);
+}
+
+namespace {
+
+[[nodiscard]] constexpr UILayoutDebugElementType toLayoutDebugElementType(BuiltinElementKind kind) noexcept
+{
+    switch (kind)
+    {
+    case BuiltinElementKind::Root:
+        return UILayoutDebugElementType::Root;
+    case BuiltinElementKind::Panel:
+        return UILayoutDebugElementType::Panel;
+    case BuiltinElementKind::Label:
+        return UILayoutDebugElementType::Label;
+    case BuiltinElementKind::Button:
+        return UILayoutDebugElementType::Button;
+    case BuiltinElementKind::Checkbox:
+        return UILayoutDebugElementType::Checkbox;
+    case BuiltinElementKind::Slider:
+        return UILayoutDebugElementType::Slider;
+    case BuiltinElementKind::TextEdit:
+        return UILayoutDebugElementType::TextEdit;
+    case BuiltinElementKind::ProgressBar:
+        return UILayoutDebugElementType::ProgressBar;
+    case BuiltinElementKind::RadioButton:
+        return UILayoutDebugElementType::RadioButton;
+    case BuiltinElementKind::Modal:
+        return UILayoutDebugElementType::Modal;
+    case BuiltinElementKind::ScrollView:
+        return UILayoutDebugElementType::ScrollView;
+    case BuiltinElementKind::Dropdown:
+        return UILayoutDebugElementType::Dropdown;
+    case BuiltinElementKind::Popup:
+        return UILayoutDebugElementType::Popup;
+    case BuiltinElementKind::DropdownItem:
+        return UILayoutDebugElementType::DropdownItem;
+    case BuiltinElementKind::ListView:
+        return UILayoutDebugElementType::ListView;
+    case BuiltinElementKind::ListViewItem:
+        return UILayoutDebugElementType::ListViewItem;
+    case BuiltinElementKind::TreeView:
+        return UILayoutDebugElementType::TreeView;
+    case BuiltinElementKind::TreeViewItem:
+        return UILayoutDebugElementType::TreeViewItem;
+    case BuiltinElementKind::VirtualGridView:
+        return UILayoutDebugElementType::VirtualGridView;
+    case BuiltinElementKind::VirtualGridViewItem:
+        return UILayoutDebugElementType::VirtualGridViewItem;
+    case BuiltinElementKind::DataGrid:
+        return UILayoutDebugElementType::DataGrid;
+    case BuiltinElementKind::DataGridRow:
+        return UILayoutDebugElementType::DataGridRow;
+    case BuiltinElementKind::DataGridCell:
+        return UILayoutDebugElementType::DataGridCell;
+    case BuiltinElementKind::DataGridColumnHeader:
+        return UILayoutDebugElementType::DataGridColumnHeader;
+    case BuiltinElementKind::Tooltip:
+        return UILayoutDebugElementType::Tooltip;
+    case BuiltinElementKind::SplitView:
+        return UILayoutDebugElementType::SplitView;
+    case BuiltinElementKind::Splitter:
+        return UILayoutDebugElementType::Splitter;
+    case BuiltinElementKind::TabView:
+        return UILayoutDebugElementType::TabView;
+    case BuiltinElementKind::Tab:
+        return UILayoutDebugElementType::Tab;
+    case BuiltinElementKind::Menu:
+        return UILayoutDebugElementType::Menu;
+    case BuiltinElementKind::MenuItem:
+        return UILayoutDebugElementType::MenuItem;
+    }
+    return UILayoutDebugElementType::Unknown;
+}
+
+} // namespace
+
+void UIContext::Impl::buildCommittedLayoutDebug(
+    std::pmr::vector<UILayoutDebugEntry>& output,
+    std::span<const UICommittedLayoutEntry> layoutEntries) const noexcept
+{
+    output.clear();
+    if (capacityConfig.layoutDebuggerSnapshotCapacity == 0)
+    {
+        return;
+    }
+    for (const UICommittedLayoutEntry& layoutEntry : layoutEntries)
+    {
+        const u32 index = layoutEntry.node.index();
+        const NodeRecord* record = recordByIndex(index);
+        if (record == nullptr || index >= layoutScratchByIndex.size())
+        {
+            continue;
+        }
+        const LayoutScratchState& scratch = layoutScratchByIndex[index];
+        UILayoutDebugEntry entry{
+            .node = layoutEntry.node,
+            .parent = record->parentIndex == InvalidNodeIndex ? UINodeId{} : idForIndex(record->parentIndex),
+            .elementType = toLayoutDebugElementType(record->kind),
+            .depth = record->depth,
+            .preorder = layoutEntry.layoutOrdinal,
+            .layoutOrdinal = layoutEntry.layoutOrdinal,
+            .paintOrdinal = layoutEntry.paintOrdinal,
+            .authoredStyle = index < layoutStylesByIndex.size() ? layoutStylesByIndex[index] : UILayoutStyle{},
+            .resolvedStyle = scratch.resolvedStyle,
+            .basis = {
+                .parentContentWidthDefinite = scratch.preparedInputs.parentContentWidthDefinite,
+                .parentContentHeightDefinite = scratch.preparedInputs.parentContentHeightDefinite,
+                .parentContentWidth = scratch.preparedInputs.parentContentWidth,
+                .parentContentHeight = scratch.preparedInputs.parentContentHeight,
+                .contentWidthDefinite = scratch.preparedInputs.contentWidthDefinite,
+                .contentHeightDefinite = scratch.preparedInputs.contentHeightDefinite,
+                .contentWidth = scratch.preparedInputs.contentWidth,
+                .contentHeight = scratch.preparedInputs.contentHeight,
+            },
+            .measuredSize = scratch.measuredSize,
+            .minContentSize = scratch.minContentSize,
+            .maxContentSize = scratch.maxContentSize,
+            .localRect = layoutEntry.localRect,
+            .worldRect = layoutEntry.worldRect,
+            .effectiveClip = layoutEntry.effectiveClip,
+            .contentPlacement = layoutEntry.contentPlacement,
+            .effectiveVisibility = layoutEntry.effectiveVisibility,
+            .pointerHitPolicy = index < pointerHitPoliciesByIndex.size() ? pointerHitPoliciesByIndex[index]
+                                                                        : UIPointerHitPolicy::Ignore,
+            .behaviors = record->behaviors,
+            .styleRole = index < styleRolesByNodeIndex.size() ? styleRolesByNodeIndex[index]
+                                                               : UIStyleRoleId::None,
+            .enabled = index < enabledByNodeIndex.size() && enabledByNodeIndex[index] != 0,
+        };
+        output.push_back(entry);
+    }
 }
 
 [[nodiscard]] Core::Result<CommittedHitBuildResult>

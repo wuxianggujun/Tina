@@ -37,6 +37,7 @@
 #include <tina/ui/UIImage.hpp>
 #include <tina/ui/UIImageSource.hpp>
 #include <tina/ui/UILayout.hpp>
+#include <tina/ui/UILayoutDebugger.hpp>
 #include <tina/ui/UIListView.hpp>
 #include <tina/ui/UIMenu.hpp>
 #include <tina/ui/UIMotion.hpp>

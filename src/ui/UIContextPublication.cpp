@@ -2,6 +2,76 @@
 
 namespace Tina::UI {
 
+namespace {
+
+[[nodiscard]] constexpr std::string_view resolvedLayoutDeltaOperation(
+    Detail::ResolvedLayoutDeltaCategory category) noexcept
+{
+    switch (category)
+    {
+    case Detail::ResolvedLayoutDeltaCategory::ResponsiveStyle:
+        return "ResponsiveStyle";
+    case Detail::ResolvedLayoutDeltaCategory::Visibility:
+        return "Visibility";
+    case Detail::ResolvedLayoutDeltaCategory::FlexConstraint:
+        return "FlexConstraint";
+    case Detail::ResolvedLayoutDeltaCategory::TextMetrics:
+        return "TextMetrics";
+    case Detail::ResolvedLayoutDeltaCategory::Count:
+        break;
+    }
+    return "ResolvedLayout";
+}
+
+[[nodiscard]] Core::Status resolvedLayoutConvergenceFailure(
+    std::string_view message,
+    const Detail::ResolvedLayoutDelta& delta)
+{
+    std::string diagnostic(message);
+    for (usize categoryIndex = 0;
+         categoryIndex < Detail::ResolvedLayoutDelta::CategoryCount;
+         ++categoryIndex)
+    {
+        const auto category =
+            static_cast<Detail::ResolvedLayoutDeltaCategory>(categoryIndex);
+        const Detail::ResolvedLayoutDeltaSummary& summary =
+            delta.summary(category);
+        if (summary.count == 0)
+        {
+            continue;
+        }
+        diagnostic += " [";
+        diagnostic += resolvedLayoutDeltaOperation(category);
+        diagnostic += " count=";
+        diagnostic += std::to_string(summary.count);
+        diagnostic += ", firstNodeIndex=";
+        diagnostic += std::to_string(summary.firstNodeIndex);
+        diagnostic += "]";
+    }
+    Core::Error error{UIErrorCode::InvalidLayout, diagnostic};
+    for (usize categoryIndex = 0;
+         categoryIndex < Detail::ResolvedLayoutDelta::CategoryCount;
+         ++categoryIndex)
+    {
+        const auto category =
+            static_cast<Detail::ResolvedLayoutDeltaCategory>(categoryIndex);
+        const Detail::ResolvedLayoutDeltaSummary& summary =
+            delta.summary(category);
+        if (summary.count == 0)
+        {
+            continue;
+        }
+        error.addContext(
+            resolvedLayoutDeltaOperation(category),
+            "count=" + std::to_string(summary.count) +
+                ", firstNodeIndex=" +
+                std::to_string(summary.firstNodeIndex));
+    }
+    return Core::failure(std::move(error));
+}
+
+} // namespace
+
 [[nodiscard]] Core::Status UIContext::Impl::commitStructure()
 {
     if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
@@ -245,6 +315,12 @@ void UIContext::Impl::publishControlLayoutState(const std::pmr::vector<u32>& ord
     {
         return fail(UIErrorCode::CapacityExceeded, "UI committed layout snapshot capacity has been exhausted");
     }
+    if (layoutNeedsCommit && capacityConfig.layoutDebuggerSnapshotCapacity != 0 &&
+        nodes.activeCount() > capacityConfig.layoutDebuggerSnapshotCapacity)
+    {
+        return fail(UIErrorCode::CapacityExceeded,
+                    "UI layout debugger snapshot capacity has been exhausted");
+    }
 
     const usize writeStructureBufferIndex = 1 - publishedBufferIndex;
     if (structureNeedsCommit)
@@ -253,6 +329,7 @@ void UIContext::Impl::publishControlLayoutState(const std::pmr::vector<u32>& ord
     }
 
     usize writeLayoutBufferIndex = publishedLayoutBufferIndex;
+    usize writeLayoutDebugBufferIndex = publishedLayoutDebugBufferIndex;
     LayoutPassStatistics pass{};
     std::span<const UICommittedLayoutEntry> candidateLayoutEntries{};
     bool imageCandidateTransactionActive = false;
@@ -277,7 +354,14 @@ void UIContext::Impl::publishControlLayoutState(const std::pmr::vector<u32>& ord
         buildLayoutOrder(layoutOrderScratch);
         pass.passCount = 0U;
         prepareLayoutState(viewportSize, layoutOrderScratch, allowLayoutReuse);
-        constexpr usize MaximumResolvedLayoutPasses = 3U;
+        constexpr usize MaximumResolvedLayoutPasses = 8U;
+        std::array<Detail::ResolvedLayoutStateFingerprint,
+                   MaximumResolvedLayoutPasses + 1U>
+            resolvedStateHistory{};
+        usize resolvedStateHistoryCount = 1U;
+        resolvedStateHistory[0] =
+            resolvedLayoutStateFingerprint(layoutOrderScratch);
+        Detail::ResolvedLayoutDelta lastResolvedDelta{};
         bool layoutStabilized = layoutOrderScratch.empty();
         for (usize resolvedPass = 0U;
              resolvedPass < MaximumResolvedLayoutPasses && !layoutStabilized;
@@ -299,21 +383,48 @@ void UIContext::Impl::publishControlLayoutState(const std::pmr::vector<u32>& ord
             {
                 return arranged;
             }
-            auto changed = refreshResolvedLayoutAfterArrange(layoutOrderScratch);
-            if (!changed)
+            auto delta = refreshResolvedLayoutAfterArrange(layoutOrderScratch);
+            if (!delta)
             {
-                return Core::failure(changed.error());
+                return Core::failure(delta.error());
             }
-            if (!*changed)
+            lastResolvedDelta = *delta;
+            if (!delta->changed())
             {
                 layoutStabilized = true;
+                continue;
             }
+
+            const Detail::ResolvedLayoutStateFingerprint fingerprint =
+                resolvedLayoutStateFingerprint(layoutOrderScratch);
+            usize repeatedStateIndex = resolvedStateHistoryCount;
+            for (usize historyIndex = 0;
+                 historyIndex < resolvedStateHistoryCount;
+                 ++historyIndex)
+            {
+                if (resolvedStateHistory[historyIndex] == fingerprint)
+                {
+                    repeatedStateIndex = historyIndex;
+                    break;
+                }
+            }
+            if (repeatedStateIndex != resolvedStateHistoryCount)
+            {
+                const bool noProgress =
+                    repeatedStateIndex + 1U == resolvedStateHistoryCount;
+                return resolvedLayoutConvergenceFailure(
+                    noProgress
+                        ? "UI resolved layout convergence made no progress"
+                        : "UI resolved layout convergence cycle detected",
+                    *delta);
+            }
+            resolvedStateHistory[resolvedStateHistoryCount++] = fingerprint;
         }
         if (!layoutStabilized)
         {
-            return fail(
-                UIErrorCode::InvalidLayout,
-                "UI responsive/text/flex layout did not stabilize within the bounded pass count");
+            return resolvedLayoutConvergenceFailure(
+                "UI resolved layout convergence pass budget exhausted",
+                lastResolvedDelta);
         }
         if (Core::Status candidateStatus = validateLayoutCandidate(layoutOrderScratch); !candidateStatus)
         {
@@ -321,6 +432,12 @@ void UIContext::Impl::publishControlLayoutState(const std::pmr::vector<u32>& ord
         }
         buildCommittedLayout(writeLayout, layoutOrderScratch);
         candidateLayoutEntries = std::span<const UICommittedLayoutEntry>(writeLayout.data(), writeLayout.size());
+        if (capacityConfig.layoutDebuggerSnapshotCapacity != 0)
+        {
+            writeLayoutDebugBufferIndex = 1 - publishedLayoutDebugBufferIndex;
+            buildCommittedLayoutDebug(committedLayoutDebugBuffers[writeLayoutDebugBufferIndex],
+                                      candidateLayoutEntries);
+        }
     } else
     {
         const std::pmr::vector<UICommittedLayoutEntry>& currentLayout =
@@ -663,6 +780,12 @@ void UIContext::Impl::publishControlLayoutState(const std::pmr::vector<u32>& ord
         committedLayoutStructureRevision = candidateStructureRevision;
         committedViewportSize = viewportSize;
         hasCommittedViewport = true;
+        if (capacityConfig.layoutDebuggerSnapshotCapacity != 0)
+        {
+            publishedLayoutDebugBufferIndex = writeLayoutDebugBufferIndex;
+            committedLayoutDebugStructureRevision = candidateStructureRevision;
+            committedLayoutDebugLayoutRevision = candidateLayoutRevision;
+        }
     }
     if (hitNeedsCommit)
     {
@@ -737,6 +860,19 @@ void UIContext::Impl::publishControlLayoutState(const std::pmr::vector<u32>& ord
         std::span<const UICommittedLayoutEntry>(entries.data(), entries.size()),
         committedLayoutStructureRevision,
         committedLayoutRevision,
+    };
+}
+
+[[nodiscard]] UILayoutDebugSnapshotView
+UIContext::Impl::committedLayoutDebugSnapshot() const noexcept
+{
+    const std::pmr::vector<UILayoutDebugEntry>& entries =
+        committedLayoutDebugBuffers[publishedLayoutDebugBufferIndex];
+    return UILayoutDebugSnapshotView{
+        std::span<const UILayoutDebugEntry>(entries.data(), entries.size()),
+        committedLayoutDebugStructureRevision,
+        committedLayoutDebugLayoutRevision,
+        committedViewportSize,
     };
 }
 
