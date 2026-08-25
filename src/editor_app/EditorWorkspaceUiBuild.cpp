@@ -3511,7 +3511,9 @@ auto EditorWorkspaceState::buildLayoutDebuggerUi(
                 .scrollBarVisibility = UI::UIScrollBarVisibility::Auto,
                 .wheelStep = ui.productTheme.controls.listRowHeight * 2.0F,
                 .indentation = 16.0F,
-                .disclosureExtent = 0.0F,
+                // TreeView metrics require a positive disclosure extent even
+                // when this flat inspection projection has no expandable rows.
+                .disclosureExtent = 10.0F,
                 .disclosureGap = 0.0F,
             });
         !status) {
