@@ -239,6 +239,10 @@ class UITreeUpdater final {
     [[nodiscard]] Core::Result<UITextOverflow> textOverflow(UINodeId node);
     [[nodiscard]] Core::Status setTextWrapMode(UINodeId node, UITextWrapMode wrapMode);
     [[nodiscard]] Core::Result<UITextWrapMode> textWrapMode(UINodeId node);
+    // Zero restores unlimited wrapped lines. A positive limit requires Words
+    // wrapping and clamps the last visible line with an ellipsis.
+    [[nodiscard]] Core::Status setTextLineClamp(UINodeId node, UITextLineClamp lineClamp);
+    [[nodiscard]] Core::Result<UITextLineClamp> textLineClamp(UINodeId node);
     [[nodiscard]] Core::Status setContentAlignment(UINodeId node, UIContentAlignment alignment);
     [[nodiscard]] Core::Result<std::string_view> text(UINodeId node);
     [[nodiscard]] Core::Result<UITextStyle> textStyle(UINodeId node);

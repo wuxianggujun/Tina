@@ -43,6 +43,10 @@ TEST(UIStylePropertyDirtyMetadataTests, TextPropertiesDirtyLayoutAndPaint)
     EXPECT_TRUE(UI::stylePropertyDirtiesPaint(UIStylePropertyKind::TextWrap));
     EXPECT_TRUE(UI::stylePropertyDirtiesHit(UIStylePropertyKind::TextWrap));
     EXPECT_TRUE(UI::stylePropertyDirtiesSemantics(UIStylePropertyKind::TextWrap));
+    EXPECT_TRUE(UI::stylePropertyDirtiesLayout(UIStylePropertyKind::TextLineClamp));
+    EXPECT_TRUE(UI::stylePropertyDirtiesPaint(UIStylePropertyKind::TextLineClamp));
+    EXPECT_TRUE(UI::stylePropertyDirtiesHit(UIStylePropertyKind::TextLineClamp));
+    EXPECT_TRUE(UI::stylePropertyDirtiesSemantics(UIStylePropertyKind::TextLineClamp));
     EXPECT_TRUE(UI::stylePropertyDirtiesLayout(UIStylePropertyKind::ContentAlignment));
     EXPECT_TRUE(UI::stylePropertyDirtiesPaint(UIStylePropertyKind::ContentAlignment));
 }

@@ -13,6 +13,8 @@ enum class UILayoutLengthUnit : u8 {
     Px,
     Percent,
     Auto,
+    MinContent,
+    MaxContent,
 };
 
 struct UILayoutLength final {
@@ -37,6 +39,16 @@ struct UILayoutLength final {
         return UILayoutLength{};
     }
 
+    [[nodiscard]] static constexpr UILayoutLength MinContent() noexcept
+    {
+        return UILayoutLength{.unit = UILayoutLengthUnit::MinContent};
+    }
+
+    [[nodiscard]] static constexpr UILayoutLength MaxContent() noexcept
+    {
+        return UILayoutLength{.unit = UILayoutLengthUnit::MaxContent};
+    }
+
     [[nodiscard]] constexpr bool isAuto() const noexcept
     {
         return unit == UILayoutLengthUnit::Auto;
@@ -50,6 +62,16 @@ struct UILayoutLength final {
     [[nodiscard]] constexpr bool isPercent() const noexcept
     {
         return unit == UILayoutLengthUnit::Percent;
+    }
+
+    [[nodiscard]] constexpr bool isMinContent() const noexcept
+    {
+        return unit == UILayoutLengthUnit::MinContent;
+    }
+
+    [[nodiscard]] constexpr bool isMaxContent() const noexcept
+    {
+        return unit == UILayoutLengthUnit::MaxContent;
     }
 
     auto operator<=>(const UILayoutLength&) const = default;
@@ -181,6 +203,14 @@ enum class UIJustifyContent : u8 {
     SpaceBetween,
 };
 
+enum class UIAlignContent : u8 {
+    Start,
+    Center,
+    End,
+    SpaceBetween,
+    Stretch,
+};
+
 // Shared physical-axis alignment used by Flex containers, overlay placement,
 // and retained content placement. Content alignment rejects Stretch because
 // text and other intrinsic content cannot be stretched without a new measure.
@@ -215,6 +245,7 @@ struct UIFlexContainerStyle final {
     UIFlexDirection direction = UIFlexDirection::Column;
     UIFlexWrap wrap = UIFlexWrap::NoWrap;
     UIJustifyContent justifyContent = UIJustifyContent::Start;
+    UIAlignContent alignContent = UIAlignContent::Stretch;
     UIAxisAlignment alignItems = UIAxisAlignment::Stretch;
     UILayoutGap gap{};
 
@@ -344,15 +375,18 @@ struct UIOverlayStyle final {
 
 inline constexpr usize UIResponsiveLayoutRuleCapacity = 4U;
 
-// Responsive overrides deliberately cover only structural layout decisions.
-// Sizes, spacing, placement and item participation remain in the base style so
-// a bounded rule cannot silently replace the element's full authored contract.
+// Responsive overrides deliberately cover a bounded structural subset plus the
+// container spacing/min-max values commonly needed at width breakpoints. Item
+// placement and participation remain in the base authored style.
 struct UIResponsiveLayoutOverrides final {
     std::optional<UIContainerLayout> containerLayout{};
     std::optional<UIFlexDirection> flexDirection{};
     std::optional<UIGridTrackList> gridColumns{};
     std::optional<UIGridTrackList> gridRows{};
     std::optional<UIVisibility> visibility{};
+    std::optional<UILayoutGap> gap{};
+    std::optional<UIEdgeSpacing> padding{};
+    std::optional<UILayoutMinMaxSpec> minMax{};
 
     auto operator<=>(const UIResponsiveLayoutOverrides&) const = default;
 };
@@ -410,6 +444,9 @@ struct UILayoutStyle final {
     UIContainerLayout containerLayout = UIContainerLayout::Flex;
     UILayoutPlacement placement = UILayoutPlacement::Flow;
     UIVisibility visibility = UIVisibility::Visible;
+    // Width divided by height. When exactly one size axis is Auto, layout
+    // derives that axis from the resolved opposite axis before min/max clamp.
+    std::optional<float> aspectRatio{};
     // Clips ordinary in-tree descendants to this element's axis-aligned border
     // box. Viewport-level Popup placement keeps its dedicated clip policy. This
     // does not create a rounded clip or alter this element's own paint clip.

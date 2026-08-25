@@ -170,7 +170,8 @@ void UIContext::Impl::clearTextState(u32 index) noexcept
 }
 
 Core::Result<UITextMetrics> UIContext::Impl::measureWrappedWidgetText(
-    u32 index, float maximumWidth)
+    u32 index, float maximumWidth,
+    Detail::UITextIntrinsicWidths* intrinsicWidths)
 {
     if (index >= textStatesByIndex.size())
     {
@@ -180,9 +181,24 @@ Core::Result<UITextMetrics> UIContext::Impl::measureWrappedWidgetText(
     const WidgetTextState& state = textStatesByIndex[index];
     if (!state.hasContent || state.wrapMode == UITextWrapMode::NoWrap)
     {
+        if (intrinsicWidths != nullptr)
+        {
+            intrinsicWidths->minContent = state.metrics.measuredSize.width;
+            intrinsicWidths->maxContent = state.metrics.measuredSize.width;
+        }
         return state.metrics;
     }
-    std::span<const UITextGlyphRaster> glyphs{};
+    float ellipsisAdvance = state.style.logicalSize * state.style.advanceScale;
+    if (state.lineClamp.enabled())
+    {
+        auto ellipsisMetrics = measureWidgetText(UITextEllipsisUtf8, state.style);
+        if (ellipsisMetrics &&
+            std::isfinite(ellipsisMetrics->measuredSize.width) &&
+            ellipsisMetrics->measuredSize.width >= 0.0F)
+        {
+            ellipsisAdvance = ellipsisMetrics->measuredSize.width;
+        }
+    }
     if (textRasterizer != nullptr && textFace.hasValue())
     {
         auto raster = textRasterizer->raster(
@@ -191,11 +207,25 @@ Core::Result<UITextMetrics> UIContext::Impl::measureWrappedWidgetText(
         {
             return Core::failure(raster.error());
         }
-        glyphs = raster->glyphs;
+        if (intrinsicWidths != nullptr)
+        {
+            *intrinsicWidths = Detail::measureTextIntrinsicWidths(
+                textViewFor(index), state.style, state.wrapMode,
+                raster->glyphs);
+        }
+        return Detail::measureWrappedText(
+            textViewFor(index), state.style, maximumWidth, state.wrapMode,
+            raster->glyphs, state.metrics.codepointCount, state.lineClamp,
+            ellipsisAdvance);
+    }
+    if (intrinsicWidths != nullptr)
+    {
+        *intrinsicWidths = Detail::measureTextIntrinsicWidths(
+            textViewFor(index), state.style, state.wrapMode, {});
     }
     return Detail::measureWrappedText(
         textViewFor(index), state.style, maximumWidth, state.wrapMode,
-        glyphs, state.metrics.codepointCount);
+        {}, state.metrics.codepointCount, state.lineClamp, ellipsisAdvance);
 }
 
 [[nodiscard]] Core::Result<UITextMetrics> UIContext::Impl::measureWidgetText(std::string_view utf8, const UITextStyle& style)
@@ -625,6 +655,11 @@ Core::Result<UITextMetrics> UIContext::Impl::measureWrappedWidgetText(
         return fail(UIErrorCode::InvalidText,
                     "UI wrapped text cannot use single-line Ellipsis overflow");
     }
+    if (wrapMode != UITextWrapMode::Words && state.lineClamp.enabled())
+    {
+        return fail(UIErrorCode::InvalidText,
+                    "UI text line clamp requires Words wrapping");
+    }
     if (state.wrapMode == wrapMode)
     {
         return Core::success();
@@ -669,6 +704,92 @@ UIContext::Impl::textWrapModeFromUpdater(UINodeId updaterRoot, UINodeId node)
                     "UI text wrapping requires an element with intrinsic text");
     }
     return textStatesByIndex[node.index()].wrapMode;
+}
+
+[[nodiscard]] Core::Status UIContext::Impl::setTextLineClampFromUpdater(
+    UINodeId updaterRoot, UINodeId node, UITextLineClamp lineClamp)
+{
+    if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+    {
+        return ownerThread;
+    }
+    drainDeferredRootDestroys();
+    if (!updaterRoot.hasValue() || !contains(updaterRoot))
+    {
+        return fail(UIErrorCode::RootRequired,
+                    "UI tree updater requires a live root owner");
+    }
+    auto nodeResult = resolveNode(node);
+    if (!nodeResult)
+    {
+        return Core::failure(nodeResult.error());
+    }
+    if (!isNodeWithinRoot(updaterRoot, node))
+    {
+        return fail(UIErrorCode::InvalidNode,
+                    "UI node is not owned by the updater root");
+    }
+    const NodeRecord* record = nodes.tryGet(node.storageId());
+    if (record == nullptr || !supportsWidgetText(record->kind))
+    {
+        return fail(UIErrorCode::InvalidText,
+                    "UI text line clamp requires an element with intrinsic text");
+    }
+
+    WidgetTextState& state = textStatesByIndex[node.index()];
+    if (lineClamp.enabled() &&
+        (record->kind == BuiltinElementKind::TextEdit ||
+         state.wrapMode != UITextWrapMode::Words))
+    {
+        return fail(
+            UIErrorCode::InvalidText,
+            "UI text line clamp requires ordinary intrinsic text with Words wrapping");
+    }
+    if (state.lineClamp == lineClamp)
+    {
+        return Core::success();
+    }
+    if (Core::Status dirty =
+            markStylePropertyDirty(node, UIStylePropertyKind::TextLineClamp);
+        !dirty)
+    {
+        return dirty;
+    }
+    state.lineClamp = lineClamp;
+    return Core::success();
+}
+
+[[nodiscard]] Core::Result<UITextLineClamp>
+UIContext::Impl::textLineClampFromUpdater(
+    UINodeId updaterRoot, UINodeId node)
+{
+    if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+    {
+        return Core::failure(ownerThread.error());
+    }
+    drainDeferredRootDestroys();
+    if (!updaterRoot.hasValue() || !contains(updaterRoot))
+    {
+        return fail(UIErrorCode::RootRequired,
+                    "UI tree updater requires a live root owner");
+    }
+    auto nodeResult = resolveNode(node);
+    if (!nodeResult)
+    {
+        return Core::failure(nodeResult.error());
+    }
+    if (!isNodeWithinRoot(updaterRoot, node))
+    {
+        return fail(UIErrorCode::InvalidNode,
+                    "UI node is not owned by the updater root");
+    }
+    const NodeRecord* record = nodes.tryGet(node.storageId());
+    if (record == nullptr || !supportsWidgetText(record->kind))
+    {
+        return fail(UIErrorCode::InvalidText,
+                    "UI text line clamp requires an element with intrinsic text");
+    }
+    return textStatesByIndex[node.index()].lineClamp;
 }
 
 [[nodiscard]] Core::Result<std::string_view> UIContext::Impl::textFromUpdater(UINodeId updaterRoot, UINodeId node)

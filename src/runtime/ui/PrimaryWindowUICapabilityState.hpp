@@ -231,6 +231,12 @@ class PrimaryWindowUICapabilityState final {
     [[nodiscard]] Core::Result<UI::UITextWrapMode> textWrapMode(
         u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
         UI::UINodeId node);
+    [[nodiscard]] Core::Status setTextLineClamp(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+        UI::UINodeId node, UI::UITextLineClamp lineClamp);
+    [[nodiscard]] Core::Result<UI::UITextLineClamp> textLineClamp(
+        u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+        UI::UINodeId node);
     [[nodiscard]] Core::Status setTextOverflow(u64 epoch, PrimaryWindowUIPhase phase,
                                                UI::UITreeUpdater& updater, UI::UINodeId node,
                                                UI::UITextOverflow overflow);

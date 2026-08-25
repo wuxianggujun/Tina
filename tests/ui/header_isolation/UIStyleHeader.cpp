@@ -27,6 +27,8 @@ static_assert(Tina::UI::stylePropertyDirtiesPaint(Tina::UI::UIStylePropertyKind:
 static_assert(Tina::UI::stylePropertyDirtiesLayout(Tina::UI::UIStylePropertyKind::TextStyle));
 static_assert(Tina::UI::stylePropertyDirtiesLayout(Tina::UI::UIStylePropertyKind::TextWrap));
 static_assert(Tina::UI::stylePropertyDirtiesPaint(Tina::UI::UIStylePropertyKind::TextWrap));
+static_assert(Tina::UI::stylePropertyDirtiesLayout(Tina::UI::UIStylePropertyKind::TextLineClamp));
+static_assert(Tina::UI::stylePropertyDirtiesPaint(Tina::UI::UIStylePropertyKind::TextLineClamp));
 static_assert(Tina::UI::stylePropertyDirtiesHit(Tina::UI::UIStylePropertyKind::PointerHitPolicy));
 static_assert(!Tina::UI::stylePropertyDirtiesPaint(Tina::UI::UIStylePropertyKind::PointerHitPolicy));
 static_assert(Tina::UI::stylePropertyDirtiesLayout(Tina::UI::UIStylePropertyKind::LayoutStyle));

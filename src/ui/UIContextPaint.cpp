@@ -758,6 +758,9 @@ UIContext::Impl::resolveControlPaintBatch(const UICommittedLayoutEntry& layoutEn
         .textWrapMode = textState != nullptr
                             ? textState->wrapMode
                             : UITextWrapMode::NoWrap,
+        .textLineClamp = textState != nullptr
+                             ? textState->lineClamp
+                             : UITextLineClamp{},
         .multilineEnabled = multilineEnabled,
         .wrapMode = nodeIndex < textEditMultilineByNodeIndex.size()
                         ? textEditMultilineByNodeIndex[nodeIndex].wrapMode

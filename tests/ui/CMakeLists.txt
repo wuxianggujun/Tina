@@ -24,6 +24,7 @@ add_executable(tina_ui_tests
     UIElementTests.cpp
     UIEnabledStateTests.cpp
     UIFlexLayoutTests.cpp
+    UIIntrinsicSizingTests.cpp
     UIGridLayoutTests.cpp
     UIInputPrimitivesTests.cpp
     UIImageTests.cpp

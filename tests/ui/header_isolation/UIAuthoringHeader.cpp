@@ -10,3 +10,7 @@ static_assert(std::is_nothrow_move_constructible_v<Tina::UI::UITreeUpdater>);
 using SetEnabledResult = decltype(std::declval<Tina::UI::UITreeUpdater&>().setEnabled(
     std::declval<Tina::UI::UINodeId>(), true));
 static_assert(std::is_same_v<SetEnabledResult, Tina::Core::Status>);
+using SetTextLineClampResult = decltype(
+    std::declval<Tina::UI::UITreeUpdater&>().setTextLineClamp(
+        std::declval<Tina::UI::UINodeId>(), {}));
+static_assert(std::is_same_v<SetTextLineClampResult, Tina::Core::Status>);

@@ -1162,6 +1162,12 @@ TEST_F(PrimaryWindowUICapabilityTest, TextPresentationFacadeRoundTripsAndExpires
     auto wrapMode = tree->textWrapMode(*label);
     ASSERT_TRUE(wrapMode.has_value()) << wrapMode.error().message;
     EXPECT_EQ(*wrapMode, UI::UITextWrapMode::Words);
+    ASSERT_TRUE(tree->setTextLineClamp(
+        *label, {.maximumLines = 2}).has_value());
+    auto lineClamp = tree->textLineClamp(*label);
+    ASSERT_TRUE(lineClamp.has_value()) << lineClamp.error().message;
+    EXPECT_EQ(lineClamp->maximumLines, 2U);
+    ASSERT_TRUE(tree->setTextLineClamp(*label, {}).has_value());
     ASSERT_TRUE(tree->setTextWrapMode(*label, UI::UITextWrapMode::NoWrap).has_value());
     ASSERT_TRUE(tree->setTextOverflow(*label, UI::UITextOverflow::Ellipsis).has_value());
     auto overflow = tree->textOverflow(*label);
@@ -1183,6 +1189,15 @@ TEST_F(PrimaryWindowUICapabilityTest, TextPresentationFacadeRoundTripsAndExpires
     auto expiredWrapGet = tree->textWrapMode(*label);
     ASSERT_FALSE(expiredWrapGet.has_value());
     EXPECT_EQ(expiredWrapGet.error().code,
+              RuntimeErrorCode::UIPhaseCapabilityExpired);
+    Core::Status expiredClampSet =
+        tree->setTextLineClamp(*label, {.maximumLines = 1});
+    ASSERT_FALSE(expiredClampSet.has_value());
+    EXPECT_EQ(expiredClampSet.error().code,
+              RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredClampGet = tree->textLineClamp(*label);
+    ASSERT_FALSE(expiredClampGet.has_value());
+    EXPECT_EQ(expiredClampGet.error().code,
               RuntimeErrorCode::UIPhaseCapabilityExpired);
 }
 

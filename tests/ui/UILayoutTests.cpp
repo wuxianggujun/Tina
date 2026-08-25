@@ -805,6 +805,72 @@ TEST_F(UILayoutTest, FlexWrapUsesFinalMainConstraintAndAutoCrossSize)
                    {.x = 0.0F, .y = 27.0F, .width = 40.0F, .height = 30.0F});
 }
 
+TEST_F(UILayoutTest, FlexAlignContentDistributesWrappedRowsAndColumns)
+{
+    auto context = makeContext({.nodeCapacity = 9, .rootCapacity = 1});
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root);
+    const UI::UINodeId row = createPanel(*context, root.rootNodeId());
+    const UI::UINodeId rowFirst = createPanel(*context, row);
+    const UI::UINodeId rowSecond = createPanel(*context, row);
+    const UI::UINodeId rowThird = createPanel(*context, row);
+    const UI::UINodeId column = createPanel(*context, root.rootNodeId());
+    const UI::UINodeId columnFirst = createPanel(*context, column);
+    const UI::UINodeId columnSecond = createPanel(*context, column);
+    const UI::UINodeId columnThird = createPanel(*context, column);
+
+    auto updater = createUpdater(*context, root);
+    UI::UILayoutStyle rootStyle{};
+    rootStyle.flexContainer.alignItems = UI::UIAxisAlignment::Start;
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), rootStyle));
+
+    UI::UILayoutStyle rowStyle = fixedSize(100.0F, 100.0F);
+    rowStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+    rowStyle.flexContainer.wrap = UI::UIFlexWrap::Wrap;
+    rowStyle.flexContainer.alignContent = UI::UIAlignContent::Center;
+    rowStyle.flexContainer.alignItems = UI::UIAxisAlignment::Start;
+    rowStyle.flexContainer.gap = {.row = 10.0F, .column = 5.0F};
+    assertOk(updater.setLayoutStyle(row, rowStyle));
+    assertOk(updater.setLayoutStyle(rowFirst, fixedSize(40.0F, 10.0F)));
+    assertOk(updater.setLayoutStyle(rowSecond, fixedSize(40.0F, 10.0F)));
+    assertOk(updater.setLayoutStyle(rowThird, fixedSize(40.0F, 10.0F)));
+
+    UI::UILayoutStyle columnStyle = fixedSize(100.0F, 100.0F);
+    columnStyle.flexContainer.direction = UI::UIFlexDirection::Column;
+    columnStyle.flexContainer.wrap = UI::UIFlexWrap::Wrap;
+    columnStyle.flexContainer.alignContent = UI::UIAlignContent::End;
+    columnStyle.flexContainer.alignItems = UI::UIAxisAlignment::Start;
+    columnStyle.flexContainer.gap = {.row = 5.0F, .column = 10.0F};
+    assertOk(updater.setLayoutStyle(column, columnStyle));
+    assertOk(updater.setLayoutStyle(columnFirst, fixedSize(10.0F, 40.0F)));
+    assertOk(updater.setLayoutStyle(columnSecond, fixedSize(10.0F, 40.0F)));
+    assertOk(updater.setLayoutStyle(columnThird, fixedSize(10.0F, 40.0F)));
+
+    assertOk(context->publication().commitLayout(
+        {.width = 200.0F, .height = 220.0F}));
+    const auto centeredAndEnded = context->publication().committedLayout();
+    expectRectNear(requireLayoutEntry(centeredAndEnded, rowFirst).worldRect,
+                   {.x = 0.0F, .y = 35.0F, .width = 40.0F, .height = 10.0F});
+    expectRectNear(requireLayoutEntry(centeredAndEnded, rowThird).worldRect,
+                   {.x = 0.0F, .y = 55.0F, .width = 40.0F, .height = 10.0F});
+    expectRectNear(requireLayoutEntry(centeredAndEnded, columnFirst).worldRect,
+                   {.x = 70.0F, .y = 100.0F, .width = 10.0F, .height = 40.0F});
+    expectRectNear(requireLayoutEntry(centeredAndEnded, columnThird).worldRect,
+                   {.x = 90.0F, .y = 100.0F, .width = 10.0F, .height = 40.0F});
+
+    rowStyle.flexContainer.alignContent = UI::UIAlignContent::Stretch;
+    rowStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+    assertOk(updater.setLayoutStyle(row, rowStyle));
+    assertOk(context->publication().commitLayout(
+        {.width = 200.0F, .height = 220.0F}));
+    const auto stretched = context->publication().committedLayout();
+    expectRectNear(requireLayoutEntry(stretched, rowFirst).worldRect,
+                   {.x = 0.0F, .y = 17.5F, .width = 40.0F, .height = 10.0F});
+    expectRectNear(requireLayoutEntry(stretched, rowThird).worldRect,
+                   {.x = 0.0F, .y = 72.5F, .width = 40.0F, .height = 10.0F});
+}
+
 TEST_F(UILayoutTest, ResponsiveRulesResolveAgainstDirectParentContentWidth)
 {
     auto context = makeContext({.nodeCapacity = 8, .rootCapacity = 1});
@@ -825,7 +891,14 @@ TEST_F(UILayoutTest, ResponsiveRulesResolveAgainstDirectParentContentWidth)
         {
             .minParentWidth = 0.0F,
             .maxParentWidth = 300.0F,
-            .overrides = {.flexDirection = UI::UIFlexDirection::Row},
+            .overrides = {
+                .flexDirection = UI::UIFlexDirection::Row,
+                .gap = UI::UILayoutGap::All(5.0F),
+                .padding = UI::UIEdgeSpacing::All(10.0F),
+                .minMax = UI::UILayoutMinMaxSpec{
+                    .maxWidth = UI::UILayoutLength::Px(180.0F),
+                },
+            },
         },
     });
     assertOk(updater.setLayoutStyle(directionContainer, directionStyle));
@@ -835,10 +908,12 @@ TEST_F(UILayoutTest, ResponsiveRulesResolveAgainstDirectParentContentWidth)
     assertOk(context->publication().commitLayout(
         {.width = 250.0F, .height = 100.0F}));
     auto layout = context->publication().committedLayout();
+    expectRectNear(requireLayoutEntry(layout, directionContainer).worldRect,
+                   {.x = 0.0F, .y = 0.0F, .width = 180.0F, .height = 100.0F});
     expectRectNear(requireLayoutEntry(layout, first).worldRect,
-                   {.x = 0.0F, .y = 0.0F, .width = 40.0F, .height = 20.0F});
+                   {.x = 10.0F, .y = 10.0F, .width = 40.0F, .height = 20.0F});
     expectRectNear(requireLayoutEntry(layout, second).worldRect,
-                   {.x = 40.0F, .y = 0.0F, .width = 40.0F, .height = 20.0F});
+                   {.x = 55.0F, .y = 10.0F, .width = 40.0F, .height = 20.0F});
 
     assertOk(context->publication().commitLayout(
         {.width = 400.0F, .height = 100.0F}));

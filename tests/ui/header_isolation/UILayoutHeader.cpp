@@ -8,6 +8,8 @@ static_assert(std::is_trivially_copyable_v<Tina::UI::UILayoutStyle>);
 static_assert(Tina::UI::UILayoutLength::Auto().isAuto());
 static_assert(Tina::UI::UILayoutLength::Px(24.0F).isPx());
 static_assert(Tina::UI::UILayoutLength::Percent(50.0F).isPercent());
+static_assert(Tina::UI::UILayoutLength::MinContent().isMinContent());
+static_assert(Tina::UI::UILayoutLength::MaxContent().isMaxContent());
 
 constexpr Tina::UI::UIEdgeSpacing Spacing =
     Tina::UI::UIEdgeSpacing::HorizontalVertical(8.0F, 4.0F);
@@ -28,6 +30,7 @@ constexpr Tina::UI::UILayoutStyle OverlayStyle{
     .padding = Tina::UI::UIEdgeSpacing::HorizontalVertical(12.0F, 8.0F),
     .flexContainer = {.direction = Tina::UI::UIFlexDirection::Row,
                       .justifyContent = Tina::UI::UIJustifyContent::SpaceBetween,
+                      .alignContent = Tina::UI::UIAlignContent::Center,
                       .alignItems = Tina::UI::UIAxisAlignment::Center},
     .flexItem = {.grow = 1.0F,
                  .shrink = 1.0F,
@@ -38,9 +41,25 @@ constexpr Tina::UI::UILayoutStyle OverlayStyle{
                 .offset = Offset},
     .placement = Tina::UI::UILayoutPlacement::Overlay,
     .visibility = Tina::UI::UIVisibility::Visible,
+    .aspectRatio = 16.0F / 9.0F,
 };
 static_assert(OverlayStyle.placement == Tina::UI::UILayoutPlacement::Overlay);
 static_assert(OverlayStyle.flexContainer.direction == Tina::UI::UIFlexDirection::Row);
+static_assert(OverlayStyle.flexContainer.alignContent ==
+              Tina::UI::UIAlignContent::Center);
+static_assert(*OverlayStyle.aspectRatio == 16.0F / 9.0F);
+
+constexpr Tina::UI::UIResponsiveLayoutOverrides ResponsiveOverrides{
+    .gap = Tina::UI::UILayoutGap::All(6.0F),
+    .padding = Tina::UI::UIEdgeSpacing::All(8.0F),
+    .minMax = Tina::UI::UILayoutMinMaxSpec{
+        .minWidth = Tina::UI::UILayoutLength::MinContent(),
+        .maxWidth = Tina::UI::UILayoutLength::Px(640.0F),
+    },
+};
+static_assert(ResponsiveOverrides.gap->row == 6.0F);
+static_assert(ResponsiveOverrides.padding->left == 8.0F);
+static_assert(ResponsiveOverrides.minMax->minWidth.isMinContent());
 
 constexpr Tina::UI::UIGridTrackList GridColumns =
     Tina::UI::UIGridTrackList::Of({

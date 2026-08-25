@@ -347,13 +347,21 @@ semantics name 并关闭 content-as-name，使图标、control chrome 与交互�
 Element 不接受 Image content。
 
 `UILayoutStyle::containerLayout` 为 direct `Flow` child 选择 Flex 或固定容量 Grid。Flex 使用父级
-`flexContainer` 与子项 `flexItem`，并可用 `UIFlexWrap::Wrap` 按最终主轴约束分行；Grid 使用父级 `gridContainer` 和子项 `gridItem`，每轴最多8条显式或
+`flexContainer` 与子项 `flexItem`，并可用 `UIFlexWrap::Wrap` 按最终主轴约束分行；
+`UIAlignContent::{Start,Center,End,SpaceBetween,Stretch}` 在最终 cross-axis extent 内分布 wrapped 行集合，
+不改变 `NoWrap`。Grid 使用父级 `gridContainer` 和子项 `gridItem`，每轴最多8条显式或
 隐式 `Px/Auto/Fr` track，支持 gap、zero-based row/column、span、row-major auto placement 和 per-item alignment。
 容量、非有限 track、非法 index/span 或自动放置溢出均 fail closed；Grid 与 `UIVirtualGridView` / `UIDataGrid`
 的数据虚拟化契约彼此独立。`UILayoutStyle::responsiveRules` 固定最多4个有序、互不重叠的半开父
-content-width 区间，可覆盖 `containerLayout`、Flex direction、Grid rows/columns 和 visibility。规则针对直接
+content-width 区间，可覆盖 `containerLayout`、Flex direction、Grid rows/columns、visibility、gap、padding 与
+min/max constraint；gap 写入规则匹配后激活的 Flex 或 Grid 容器。规则针对直接
 父容器最终 content width 解析到 layout scratch，不修改 authored style；宽度依赖的 Measure/Arrange 最多三轮稳定，
 超限则不发布候选快照。
+`UILayoutLength::{MinContent,MaxContent}` 可用于 size、Flex basis 与 min/max constraint：普通 `Words` 文本使用
+最长不可断词/最长 authored line，Image 使用 intrinsic logical size，Flex/Grid 容器继续聚合后代及 spacing、
+显式 size 和 constraint；无确定 basis 的 Percent 回退自然 contribution。Flex shrink 默认保留 min-content floor。
+`UILayoutStyle::aspectRatio` 是有限正 width/height 比值；恰好一个 size 轴为 `Auto` 时在 min/max clamp 前派生该轴，
+两个轴都显式或都为 Auto 时不改写尺寸。
 `Flow/Overlay` placement 继续与容器类型正交；Overlay 使用
 alignment + offset，Px offset 可为有限负值，Percent offset 范围为 `-100..100`，以表达受父级 clip 的
 部分越界图元；Stretch 的边距用 margin 表达，Popup、Tooltip 与 Menu recipe 强制 Overlay。
@@ -372,6 +380,9 @@ committed content box 和 UAX #29 grapheme 边界截断单行，intrinsic measur
 `UITextWrapMode::{NoWrap,Words}` 控制普通 intrinsic text；Label recipe 默认 `Words`，按最终 content width 在
 ASCII whitespace 边界或 UTF-8 codepoint 边界换行并重新测量高度。`Words` 与 `Ellipsis` 互斥，TextEdit 不消费
 该属性，其 multiline/soft-wrap 继续由 `UITextEditMultilineConfig` 独立定义。
+`UITextLineClamp::maximumLines` 只约束普通 `Words` 文本；零表示无限，正值在存在隐藏行时按 grapheme cluster
+缩短最后可见行并追加 U+2026。它会重算 intrinsic height 和 paint run，但 Semantics name 保留完整 authored text；
+TextEdit 与 `NoWrap` 明确拒绝非零 clamp。Runtime updater 对应提供 set/query facade。
 虚拟集合通过 `UIListViewStyle::rowTextOverflow`、`UIVirtualGridViewStyle::itemTextOverflow` 以及
 `UIDataGridStyle::headerTextOverflow/cellTextOverflow` 将相同策略应用到私有 materialized 节点，不要求 DataSource
 预先截断 label/header/cell text。`UITheme::typography` 是 display/title/section/body/control/caption 六级命名字号 ramp。

@@ -348,5 +348,68 @@ TEST(UITextPaintEmitterTests, WrappedAtlasFallbackKeepsRasterAdvancesAndLines)
     EXPECT_EQ(nextPaintOrdinal, 6U);
 }
 
+TEST(UITextPaintEmitterTests, LineClampCountsAndPaintsOnlyTheVisiblePrefixAndEllipsis)
+{
+    const UI::UITextStyle style = testStyle();
+    const UI::Detail::UITextPaintRasterSource rasterSource{};
+    EXPECT_EQ(UI::Detail::UITextPaintEmitter::countEntries(
+                  "ABCD", style, rasterSource, 10.0F,
+                  UI::UITextWrapMode::Words, {.maximumLines = 1}),
+              2U);
+
+    std::pmr::vector<UI::UICommittedPaintEntry> output;
+    u32 nextPaintOrdinal = 3U;
+    UI::Detail::UITextPaintCursor cursor{
+        .x = 2.0F,
+        .y = 4.0F,
+        .baseX = 2.0F,
+    };
+    UI::Detail::UITextPaintEmitter::append(
+        output, {}, nextPaintOrdinal, "ABCD", style, testColor(),
+        cursor.x, cursor.y, rasterSource, &cursor, 10.0F,
+        UI::UITextWrapMode::Words, {.maximumLines = 1});
+
+    ASSERT_EQ(output.size(), 2U);
+    EXPECT_FLOAT_EQ(output[0].worldRect.x, 2.0F);
+    EXPECT_FLOAT_EQ(output[1].worldRect.x, 7.0F);
+    EXPECT_FLOAT_EQ(output[0].worldRect.y, 4.0F);
+    EXPECT_FLOAT_EQ(output[1].worldRect.y, 4.0F);
+    EXPECT_EQ(output[0].paintOrdinal, 3U);
+    EXPECT_EQ(output[1].paintOrdinal, 4U);
+    EXPECT_FLOAT_EQ(cursor.x, 12.0F);
+    EXPECT_FLOAT_EQ(cursor.y, 4.0F);
+    EXPECT_EQ(nextPaintOrdinal, 5U);
+}
+
+TEST(UITextPaintEmitterTests, LineClampCountMatchesFallbackWhenRasterizerHasNoAtlas)
+{
+    WideAdvanceRasterizer rasterizer;
+    auto face = rasterizer.openFace({}, 0);
+    ASSERT_TRUE(face.has_value());
+    const UI::Detail::UITextPaintRasterSource rasterSource{
+        .rasterizer = &rasterizer,
+        .face = *face,
+        .atlas = nullptr,
+    };
+    const usize count = UI::Detail::UITextPaintEmitter::countEntries(
+        "ABC", testStyle(), rasterSource, 10.0F,
+        UI::UITextWrapMode::Words, {.maximumLines = 1});
+
+    std::pmr::vector<UI::UICommittedPaintEntry> output;
+    u32 nextPaintOrdinal = 1U;
+    UI::Detail::UITextPaintCursor cursor{};
+    UI::Detail::UITextPaintEmitter::append(
+        output, {}, nextPaintOrdinal, "ABC", testStyle(), testColor(),
+        0.0F, 0.0F, rasterSource, &cursor, 10.0F,
+        UI::UITextWrapMode::Words, {.maximumLines = 1});
+
+    EXPECT_EQ(count, output.size());
+    ASSERT_EQ(output.size(), 2U);
+    EXPECT_FLOAT_EQ(output[0].worldRect.width, 5.0F);
+    EXPECT_FLOAT_EQ(output[1].worldRect.x, 5.0F);
+    EXPECT_FLOAT_EQ(output[1].worldRect.width, 5.0F);
+    EXPECT_FLOAT_EQ(cursor.x, 10.0F);
+}
+
 } // namespace
 } // namespace Tina::Tests

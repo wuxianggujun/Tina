@@ -27,10 +27,12 @@ namespace {
     switch (length.unit)
     {
     case UILayoutLengthUnit::Auto:
+    case UILayoutLengthUnit::MinContent:
+    case UILayoutLengthUnit::MaxContent:
         if (!allowAuto)
         {
             return Core::failure(UIErrorCode::InvalidLayout,
-                                 "UI layout length cannot be Auto here");
+                                 "UI intrinsic layout length is not allowed here");
         }
         length.value = 0.0F;
         return Core::success();
@@ -85,6 +87,11 @@ namespace {
         }
         length.value = normalizeFloat(length.value);
         return Core::success();
+    case UILayoutLengthUnit::MinContent:
+    case UILayoutLengthUnit::MaxContent:
+        return Core::failure(
+            UIErrorCode::InvalidLayout,
+            "UI overlay offset cannot use an intrinsic content length");
     }
 
     return Core::failure(UIErrorCode::InvalidLayout,
@@ -118,6 +125,35 @@ namespace {
         return status;
     }
     return normalizeSpacing(spacing.bottom);
+}
+
+[[nodiscard]] Core::Status normalizeGap(UILayoutGap& gap)
+{
+    if (Core::Status status = normalizeSpacing(gap.row); !status)
+    {
+        return status;
+    }
+    return normalizeSpacing(gap.column);
+}
+
+[[nodiscard]] Core::Status normalizeMinMaxSpec(UILayoutMinMaxSpec& minMax)
+{
+    if (Core::Status status = normalizeLayoutLength(minMax.minWidth, true);
+        !status)
+    {
+        return status;
+    }
+    if (Core::Status status = normalizeLayoutLength(minMax.minHeight, true);
+        !status)
+    {
+        return status;
+    }
+    if (Core::Status status = normalizeLayoutLength(minMax.maxWidth, true);
+        !status)
+    {
+        return status;
+    }
+    return normalizeLayoutLength(minMax.maxHeight, true);
 }
 
 [[nodiscard]] Core::Status normalizeGridTracks(UIGridTrackList& tracks)
@@ -189,6 +225,14 @@ namespace {
            value == UIJustifyContent::Center ||
            value == UIJustifyContent::End ||
            value == UIJustifyContent::SpaceBetween;
+}
+
+[[nodiscard]] bool isValidAlignContent(UIAlignContent value) noexcept
+{
+    return value == UIAlignContent::Start || value == UIAlignContent::Center ||
+           value == UIAlignContent::End ||
+           value == UIAlignContent::SpaceBetween ||
+           value == UIAlignContent::Stretch;
 }
 
 [[nodiscard]] bool isValidAxisAlignment(UIAxisAlignment value) noexcept
@@ -905,27 +949,7 @@ Core::Result<UILayoutStyle> normalizeLayoutStyle(UILayoutStyle style)
     {
         return Core::failure(status.error());
     }
-    if (Core::Status status = normalizeLayoutLength(
-            style.minMax.minWidth, true);
-        !status)
-    {
-        return Core::failure(status.error());
-    }
-    if (Core::Status status = normalizeLayoutLength(
-            style.minMax.minHeight, true);
-        !status)
-    {
-        return Core::failure(status.error());
-    }
-    if (Core::Status status = normalizeLayoutLength(
-            style.minMax.maxWidth, true);
-        !status)
-    {
-        return Core::failure(status.error());
-    }
-    if (Core::Status status = normalizeLayoutLength(
-            style.minMax.maxHeight, true);
-        !status)
+    if (Core::Status status = normalizeMinMaxSpec(style.minMax); !status)
     {
         return Core::failure(status.error());
     }
@@ -950,13 +974,7 @@ Core::Result<UILayoutStyle> normalizeLayoutStyle(UILayoutStyle style)
     {
         return Core::failure(status.error());
     }
-    if (Core::Status status = normalizeSpacing(style.flexContainer.gap.row);
-        !status)
-    {
-        return Core::failure(status.error());
-    }
-    if (Core::Status status = normalizeSpacing(style.flexContainer.gap.column);
-        !status)
+    if (Core::Status status = normalizeGap(style.flexContainer.gap); !status)
     {
         return Core::failure(status.error());
     }
@@ -970,15 +988,19 @@ Core::Result<UILayoutStyle> normalizeLayoutStyle(UILayoutStyle style)
     {
         return Core::failure(status.error());
     }
-    if (Core::Status status = normalizeSpacing(style.gridContainer.gap.row);
-        !status)
+    if (Core::Status status = normalizeGap(style.gridContainer.gap); !status)
     {
         return Core::failure(status.error());
     }
-    if (Core::Status status = normalizeSpacing(style.gridContainer.gap.column);
-        !status)
+    if (style.aspectRatio.has_value())
     {
-        return Core::failure(status.error());
+        if (!std::isfinite(*style.aspectRatio) || *style.aspectRatio <= 0.0F)
+        {
+            return Core::failure(
+                UIErrorCode::InvalidLayout,
+                "UI aspect ratio must be finite and positive");
+        }
+        *style.aspectRatio = normalizeFloat(*style.aspectRatio);
     }
     if (style.responsiveRules.count > UIResponsiveLayoutRuleCapacity)
     {
@@ -1030,6 +1052,31 @@ Core::Result<UILayoutStyle> normalizeLayoutStyle(UILayoutStyle style)
                 return Core::failure(status.error());
             }
         }
+        if (rule.overrides.gap.has_value())
+        {
+            if (Core::Status status = normalizeGap(*rule.overrides.gap); !status)
+            {
+                return Core::failure(status.error());
+            }
+        }
+        if (rule.overrides.padding.has_value())
+        {
+            if (Core::Status status =
+                    normalizeEdgeSpacing(*rule.overrides.padding);
+                !status)
+            {
+                return Core::failure(status.error());
+            }
+        }
+        if (rule.overrides.minMax.has_value())
+        {
+            if (Core::Status status =
+                    normalizeMinMaxSpec(*rule.overrides.minMax);
+                !status)
+            {
+                return Core::failure(status.error());
+            }
+        }
     }
     for (usize index = style.responsiveRules.count;
          index < style.responsiveRules.rules.size(); ++index)
@@ -1068,6 +1115,7 @@ Core::Result<UILayoutStyle> normalizeLayoutStyle(UILayoutStyle style)
         !isValidFlexDirection(style.flexContainer.direction) ||
         !isValidFlexWrap(style.flexContainer.wrap) ||
         !isValidJustifyContent(style.flexContainer.justifyContent) ||
+        !isValidAlignContent(style.flexContainer.alignContent) ||
         !isValidAxisAlignment(style.flexContainer.alignItems) ||
         !isValidAlignSelf(style.flexItem.alignSelf) ||
         !isValidAxisAlignment(style.gridContainer.justifyItems) ||

@@ -841,6 +841,29 @@ Core::Result<UI::UITextWrapMode> PrimaryWindowUITreeUpdater::textWrapMode(
     return m_state->textWrapMode(m_epoch, m_phase, m_updater, node);
 }
 
+Core::Status PrimaryWindowUITreeUpdater::setTextLineClamp(
+    UI::UINodeId node, UI::UITextLineClamp lineClamp)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<void>(
+            "PrimaryWindowUITreeUpdater::setTextLineClamp");
+    }
+    return m_state->setTextLineClamp(
+        m_epoch, m_phase, m_updater, node, lineClamp);
+}
+
+Core::Result<UI::UITextLineClamp>
+PrimaryWindowUITreeUpdater::textLineClamp(UI::UINodeId node)
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UITextLineClamp>(
+            "PrimaryWindowUITreeUpdater::textLineClamp");
+    }
+    return m_state->textLineClamp(m_epoch, m_phase, m_updater, node);
+}
+
 Core::Status PrimaryWindowUITreeUpdater::setTextOverflow(UI::UINodeId node,
                                                          UI::UITextOverflow overflow)
 {

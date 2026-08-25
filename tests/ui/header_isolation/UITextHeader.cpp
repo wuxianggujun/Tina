@@ -4,6 +4,9 @@
 
 static_assert(std::is_aggregate_v<Tina::UI::UITextStyle>);
 static_assert(std::is_aggregate_v<Tina::UI::UITextMetrics>);
+static_assert(std::is_aggregate_v<Tina::UI::UITextLineClamp>);
+static_assert(!Tina::UI::UITextLineClamp{}.enabled());
+static_assert(Tina::UI::UITextLineClamp{.maximumLines = 2}.enabled());
 
 // Overflow is a plain authoring enum; the ellipsis run must stay a compile-time
 // UTF-8 constant so truncation never allocates or scans for it at paint time.

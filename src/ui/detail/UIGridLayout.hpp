@@ -432,6 +432,7 @@ struct GridLayoutPlan final {
     {
         height = availableHeight;
     }
+    applyAspectRatio(childStyle, width, height);
     width = clampWidth(width, childStyle, childScratch, statistics);
     height = clampHeight(height, childStyle, childScratch, statistics);
 

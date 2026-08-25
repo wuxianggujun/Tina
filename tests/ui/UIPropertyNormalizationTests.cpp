@@ -244,6 +244,41 @@ TEST(UIPropertyNormalizationTests, LayoutCanonicalizesNegativeZeroAndRejectsInva
     EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidLayout);
 }
 
+TEST(UIPropertyNormalizationTests, IntrinsicLengthsAspectRatioAndAlignContentAreValidated)
+{
+    UI::UILayoutStyle style{};
+    style.size.width = UI::UILayoutLength::MinContent();
+    style.size.height = UI::UILayoutLength::MaxContent();
+    style.flexItem.basis = UI::UILayoutLength::MinContent();
+    style.aspectRatio = 16.0F / 9.0F;
+
+    auto normalized = UI::Detail::normalizeLayoutStyle(style);
+    ASSERT_TRUE(normalized.has_value()) << normalized.error().message;
+    EXPECT_TRUE(normalized->size.width.isMinContent());
+    EXPECT_TRUE(normalized->size.height.isMaxContent());
+    EXPECT_TRUE(normalized->flexItem.basis.isMinContent());
+    ASSERT_TRUE(normalized->aspectRatio.has_value());
+    EXPECT_FLOAT_EQ(*normalized->aspectRatio, 16.0F / 9.0F);
+
+    const auto rejects = [](UI::UILayoutStyle candidate) {
+        auto result = UI::Detail::normalizeLayoutStyle(candidate);
+        return !result.has_value() &&
+               result.error().code == UI::UIErrorCode::InvalidLayout;
+    };
+
+    style.aspectRatio = 0.0F;
+    EXPECT_TRUE(rejects(style));
+    style.aspectRatio = (std::numeric_limits<float>::infinity)();
+    EXPECT_TRUE(rejects(style));
+    style.aspectRatio = 1.0F;
+    style.flexContainer.alignContent = static_cast<UI::UIAlignContent>(255);
+    EXPECT_TRUE(rejects(style));
+
+    style.flexContainer.alignContent = UI::UIAlignContent::Stretch;
+    style.overlay.offset.x = UI::UILayoutLength::MinContent();
+    EXPECT_TRUE(rejects(style));
+}
+
 TEST(UIPropertyNormalizationTests, LayoutAllowsSignedOverlayOffsetsWithoutAllowingNegativeSizes)
 {
     UI::UILayoutStyle style{};
@@ -446,6 +481,12 @@ TEST(UIPropertyNormalizationTests, ResponsiveLayoutRulesAreBoundedOrderedAndNorm
                     UI::UIGridTrack::Px(80.0F),
                 }),
                 .visibility = UI::UIVisibility::Hidden,
+                .gap = UI::UILayoutGap{.row = -0.0F, .column = 6.0F},
+                .padding = UI::UIEdgeSpacing::HorizontalVertical(12.0F, 8.0F),
+                .minMax = UI::UILayoutMinMaxSpec{
+                    .minWidth = UI::UILayoutLength::MinContent(),
+                    .maxWidth = UI::UILayoutLength::Px(300.0F),
+                },
             },
         },
         {
@@ -466,6 +507,15 @@ TEST(UIPropertyNormalizationTests, ResponsiveLayoutRulesAreBoundedOrderedAndNorm
     EXPECT_EQ(columns.tracks[0], UI::UIGridTrack::Fr(1.0F));
     EXPECT_EQ(columns.tracks[1], UI::UIGridTrack::Px(80.0F));
     EXPECT_EQ(columns.tracks[2], UI::UIGridTrack::Auto());
+    const auto& firstOverrides =
+        normalized->responsiveRules.rules[0].overrides;
+    ASSERT_TRUE(firstOverrides.gap.has_value());
+    EXPECT_FALSE(std::signbit(firstOverrides.gap->row));
+    EXPECT_FLOAT_EQ(firstOverrides.gap->column, 6.0F);
+    ASSERT_TRUE(firstOverrides.padding.has_value());
+    EXPECT_FLOAT_EQ(firstOverrides.padding->left, 12.0F);
+    ASSERT_TRUE(firstOverrides.minMax.has_value());
+    EXPECT_TRUE(firstOverrides.minMax->minWidth.isMinContent());
 
     const auto rejects = [](UI::UILayoutStyle candidate) {
         auto result = UI::Detail::normalizeLayoutStyle(candidate);
@@ -498,6 +548,20 @@ TEST(UIPropertyNormalizationTests, ResponsiveLayoutRulesAreBoundedOrderedAndNorm
     invalidTracks.responsiveRules.rules[0].overrides.gridColumns =
         UI::UIGridTrackList::Of({UI::UIGridTrack::Fr(0.0F)});
     EXPECT_TRUE(rejects(invalidTracks));
+
+    UI::UILayoutStyle invalidGap = style;
+    invalidGap.responsiveRules.rules[0].overrides.gap->column = -1.0F;
+    EXPECT_TRUE(rejects(invalidGap));
+
+    UI::UILayoutStyle invalidPadding = style;
+    invalidPadding.responsiveRules.rules[0].overrides.padding->top =
+        (std::numeric_limits<float>::quiet_NaN)();
+    EXPECT_TRUE(rejects(invalidPadding));
+
+    UI::UILayoutStyle invalidMinMax = style;
+    invalidMinMax.responsiveRules.rules[0].overrides.minMax->maxWidth =
+        UI::UILayoutLength::Px(-1.0F);
+    EXPECT_TRUE(rejects(invalidMinMax));
 }
 
 } // namespace

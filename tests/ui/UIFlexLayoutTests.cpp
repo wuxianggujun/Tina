@@ -173,5 +173,56 @@ TEST(UIFlexLayoutTests, WrapBuildsBoundedLinesWithIndependentCrossExtentAndGap)
     EXPECT_TRUE(UI::Detail::isValidFlexWrapMeasurement(measurement));
 }
 
+TEST(UIFlexLayoutTests, AlignContentDistributesPositiveCrossAxisFreeSpace)
+{
+    UI::Detail::FlexWrapMeasurement measurement{};
+    measurement.lineCount = 3U;
+    measurement.totalCross = 70.0F;
+
+    const auto start = UI::Detail::resolveFlexContentPlan(
+        UI::UIAlignContent::Start, 130.0F, 5.0F, measurement);
+    EXPECT_FLOAT_EQ(start.nextCrossOffset, 0.0F);
+    EXPECT_FLOAT_EQ(start.lineCrossGrowth, 0.0F);
+    EXPECT_FLOAT_EQ(start.crossGap, 5.0F);
+
+    const auto center = UI::Detail::resolveFlexContentPlan(
+        UI::UIAlignContent::Center, 130.0F, 5.0F, measurement);
+    EXPECT_FLOAT_EQ(center.nextCrossOffset, 30.0F);
+    EXPECT_FLOAT_EQ(center.lineCrossGrowth, 0.0F);
+    EXPECT_FLOAT_EQ(center.crossGap, 5.0F);
+
+    const auto end = UI::Detail::resolveFlexContentPlan(
+        UI::UIAlignContent::End, 130.0F, 5.0F, measurement);
+    EXPECT_FLOAT_EQ(end.nextCrossOffset, 60.0F);
+    EXPECT_FLOAT_EQ(end.lineCrossGrowth, 0.0F);
+    EXPECT_FLOAT_EQ(end.crossGap, 5.0F);
+
+    const auto spaceBetween = UI::Detail::resolveFlexContentPlan(
+        UI::UIAlignContent::SpaceBetween, 130.0F, 5.0F, measurement);
+    EXPECT_FLOAT_EQ(spaceBetween.nextCrossOffset, 0.0F);
+    EXPECT_FLOAT_EQ(spaceBetween.lineCrossGrowth, 0.0F);
+    EXPECT_FLOAT_EQ(spaceBetween.crossGap, 35.0F);
+
+    const auto stretch = UI::Detail::resolveFlexContentPlan(
+        UI::UIAlignContent::Stretch, 130.0F, 5.0F, measurement);
+    EXPECT_FLOAT_EQ(stretch.nextCrossOffset, 0.0F);
+    EXPECT_FLOAT_EQ(stretch.lineCrossGrowth, 20.0F);
+    EXPECT_FLOAT_EQ(stretch.crossGap, 5.0F);
+}
+
+TEST(UIFlexLayoutTests, AlignContentDoesNotCreateSpaceBetweenForOneLine)
+{
+    UI::Detail::FlexWrapMeasurement measurement{};
+    measurement.lineCount = 1U;
+    measurement.totalCross = 20.0F;
+
+    const auto plan = UI::Detail::resolveFlexContentPlan(
+        UI::UIAlignContent::SpaceBetween, 80.0F, 7.0F, measurement);
+
+    EXPECT_FLOAT_EQ(plan.nextCrossOffset, 0.0F);
+    EXPECT_FLOAT_EQ(plan.lineCrossGrowth, 0.0F);
+    EXPECT_FLOAT_EQ(plan.crossGap, 7.0F);
+}
+
 } // namespace
 } // namespace Tina::Tests

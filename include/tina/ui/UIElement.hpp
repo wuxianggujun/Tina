@@ -60,6 +60,7 @@ struct UIElementDescriptor final {
     std::optional<UIMenuItemConfig> menuItem{};
     std::optional<UITextStyle> textStyle{};
     UITextWrapMode textWrapMode = UITextWrapMode::NoWrap;
+    UITextLineClamp textLineClamp{};
     UIContentAlignment contentAlignment{};
     UIElementVisual visual{};
     UIElementBehavior behaviors = UIElementBehavior::None;

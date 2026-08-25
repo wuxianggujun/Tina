@@ -230,6 +230,9 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Status setTextStyle(UI::UINodeId node, const UI::UITextStyle& style);
     [[nodiscard]] Core::Status setTextWrapMode(UI::UINodeId node, UI::UITextWrapMode wrapMode);
     [[nodiscard]] Core::Result<UI::UITextWrapMode> textWrapMode(UI::UINodeId node);
+    [[nodiscard]] Core::Status setTextLineClamp(
+        UI::UINodeId node, UI::UITextLineClamp lineClamp);
+    [[nodiscard]] Core::Result<UI::UITextLineClamp> textLineClamp(UI::UINodeId node);
     [[nodiscard]] Core::Status setTextOverflow(UI::UINodeId node, UI::UITextOverflow overflow);
     [[nodiscard]] Core::Result<UI::UITextOverflow> textOverflow(UI::UINodeId node);
     [[nodiscard]] Core::Status setContentAlignment(UI::UINodeId node, UI::UIContentAlignment alignment);

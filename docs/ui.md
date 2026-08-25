@@ -114,10 +114,12 @@ text/text style、visual box/Canvas、enabled、pointer hit policy 与 focus sco
 
 布局属性按解释方拆分：
 
-- `containerLayout=Flex` 时，`flexContainer`（direction/wrap/justifyContent/alignItems/gap）由父节点解释，
+- `containerLayout=Flex` 时，`flexContainer`（direction/wrap/justifyContent/alignItems/alignContent/gap）由父节点解释，
   `flexItem`（grow/shrink/basis/alignSelf）由该父容器为当前子节点解释；
   `wrap=Wrap` 按最终主轴 content extent 分行，每行独立计算 grow/shrink/justify，cross-axis 行尺寸和 row/column
-  gap 参与容器 auto-size；最终约束在 Arrange 才确定时，提交在最多三次完整 Measure/Arrange 内稳定，否则 fail closed；
+  gap 参与容器 auto-size；`alignContent` 再把完整行集合按 Start/Center/End/SpaceBetween/Stretch 分布到最终
+  cross-axis content extent，`NoWrap` 不消费该属性。最终约束在 Arrange 才确定时，提交在最多三次完整
+  Measure/Arrange 内稳定，否则 fail closed；
 - `containerLayout=Grid` 时，`gridContainer` 提供每轴最多8条 `Px/Auto/Fr` track、row/column gap 和
   `justifyItems/alignItems`；`gridItem` 提供 zero-based row/column、span 与 self alignment。空 track list 按
   source-order row-major 自动放置生成隐式 `Auto` track；显式与隐式 track 共用8条容量，超限 fail closed。
@@ -131,10 +133,17 @@ text/text style、visual box/Canvas、enabled、pointer hit policy 与 focus sco
   tree/semantics 顺序不变，committed `effectiveClip` 统一供 hit/paint 使用；viewport-level Popup 继续走专用
   anchor/clip policy；这不是 rounded clip，也不额外改变 owner 自身的 paint clip；
 - tree 顺序同时决定 layout、paint、focus 与 semantics 顺序，没有 CSS `order` 双轨。
+- `UILayoutLength::{MinContent,MaxContent}` 可用于 width/height、Flex basis 与 min/max constraint。文本叶子分别取
+  最长不可断词宽和最长 authored line 宽；Image 取 intrinsic logical size；Flex/Grid 容器继续聚合后代、padding、
+  gap、margin、显式 size 与 min/max constraint。无确定 basis 的 Percent 不参与 intrinsic contribution；wrapped
+  Flex 的 min-content 按每项独占一行/列计算。Flex shrink 在没有显式 min constraint 时不会压过 min-content floor；
+- `aspectRatio` 表达 width/height，仅当 width/height 中恰好一个轴为 `Auto` 时从另一轴派生，并在 min/max clamp
+  之前应用；两个轴都显式或都为 Auto 时不覆盖既有尺寸意图；
 - `responsiveRules` 是最多4条按顺序、互不重叠的半开区间 `[minParentWidth,maxParentWidth)`；匹配直接父节点
-  最终 content width，可覆盖 Flex/Grid 容器类型、Flex direction、Grid rows/columns 与 visibility。解析只写 layout
-  scratch，不回写 authored style；无匹配区间继续使用 base style。Desktop Shell 的 Inspector/Timeline pane 与
-  splitter 已直接消费该契约，不再从 resize callback 计算宽度档位或改写 fraction。
+  最终 content width，可覆盖 Flex/Grid 容器类型、Flex direction、Grid rows/columns、visibility、当前激活容器的
+  gap、节点 padding 与 min/max constraint。解析只写 layout scratch，不回写 authored style；无匹配区间继续使用
+  base style。Desktop Shell 的 Inspector/Timeline pane 与 splitter 已直接消费该契约，不再从 resize callback
+  计算宽度档位或改写 fraction。
 
 控件内部文字使用独立的 `UIContentAlignment`，不再借用父容器的 child alignment。layout 将
 `contentBox/origin/intrinsicSize` 作为 `UICommittedContentPlacement` 随 snapshot 一次发布；文字绘制、
@@ -513,6 +522,12 @@ Measure 与 Paint 共享同一 line cursor，并在 Flex grow/shrink、Grid area
 改变最终宽度后重新测量高度。`UITextWrapMode` 不控制 TextEdit；TextEdit 仍只通过
 `UITextEditMultilineConfig`/`UITextEditWrapMode` 管理编辑 visual rows。Runtime facade 对应暴露
 `setTextWrapMode()/textWrapMode()`。
+
+`UITextLineClamp::maximumLines` 为普通 `Words` 文本提供有界 visual-line 数；零表示不限制，正值在仍有隐藏文本时
+把最后一条可见行按 grapheme cluster 缩短并追加 U+2026。Measure 与 Paint 共享 clamp cursor，所以 layout 高度、
+固定 paint 容量预留与最终 glyph run 一致；Semantics/UIA 始终发布完整 authored text。它不复用单行
+`UITextOverflow::Ellipsis`，也不允许用于 TextEdit 或 `NoWrap` 文本；Runtime facade 暴露
+`setTextLineClamp()/textLineClamp()`。
 
 ### 单行溢出与 typography
 

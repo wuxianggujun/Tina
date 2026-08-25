@@ -1680,6 +1680,45 @@ PrimaryWindowUICapabilityState::textWrapMode(
     return *result;
 }
 
+Core::Status PrimaryWindowUICapabilityState::setTextLineClamp(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId node, UI::UITextLineClamp lineClamp)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::setTextLineClamp";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return status;
+    }
+    Core::Status status = updater.setTextLineClamp(node, lineClamp);
+    if (!status)
+    {
+        return Core::failure(
+            rememberFirstError(std::move(status.error()), Operation));
+    }
+    return Core::success();
+}
+
+Core::Result<UI::UITextLineClamp>
+PrimaryWindowUICapabilityState::textLineClamp(
+    u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
+    UI::UINodeId node)
+{
+    constexpr std::string_view Operation =
+        "PrimaryWindowUITreeUpdater::textLineClamp";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(status.error());
+    }
+    auto result = updater.textLineClamp(node);
+    if (!result)
+    {
+        return Core::failure(
+            rememberFirstError(std::move(result.error()), Operation));
+    }
+    return *result;
+}
+
 Core::Status PrimaryWindowUICapabilityState::setTextOverflow(
     u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater, UI::UINodeId node,
     UI::UITextOverflow overflow)

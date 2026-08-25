@@ -37,6 +37,7 @@ struct UITextEditPaintState final {
     // measure work entirely.
     UITextOverflow overflow = UITextOverflow::Clip;
     UITextWrapMode textWrapMode = UITextWrapMode::NoWrap;
+    UITextLineClamp textLineClamp{};
     float availableWidth = 0.0F;
     float intrinsicWidth = 0.0F;
     bool multilineEnabled = false;

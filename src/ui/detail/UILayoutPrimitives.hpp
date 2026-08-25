@@ -35,6 +35,10 @@ struct LayoutScratchState final {
     UILayoutStyle resolvedStyle{};
     UITextMetrics resolvedTextMetrics{};
     UILogicalSize measuredSize{};
+    // Natural border-box contributions, including this node's padding but not
+    // its margin. Parents add margins while aggregating intrinsic content.
+    UILogicalSize minContentSize{};
+    UILogicalSize maxContentSize{};
     UILogicalRect localRect{};
     UILogicalRect worldRect{};
     UILogicalRect effectiveClip{};
@@ -64,6 +68,9 @@ struct LayoutScratchState final {
     bool hasMeasuredFlexWrapConstraint = false;
     bool hasArrangedFlexWrapConstraint = false;
     bool hasResolvedTextMetrics = false;
+    bool hasResolvedTextIntrinsicWidths = false;
+    float resolvedTextMinContentWidth = 0.0F;
+    float resolvedTextMaxContentWidth = 0.0F;
 };
 
 inline constexpr u8 LayoutWorkMeasure = 1U << 0U;
@@ -142,6 +149,25 @@ struct ResolvedLength final {
         {
             resolved.visibility = *rule.overrides.visibility;
         }
+        if (rule.overrides.gap.has_value())
+        {
+            if (resolved.containerLayout == UIContainerLayout::Grid)
+            {
+                resolved.gridContainer.gap = *rule.overrides.gap;
+            }
+            else
+            {
+                resolved.flexContainer.gap = *rule.overrides.gap;
+            }
+        }
+        if (rule.overrides.padding.has_value())
+        {
+            resolved.padding = *rule.overrides.padding;
+        }
+        if (rule.overrides.minMax.has_value())
+        {
+            resolved.minMax = *rule.overrides.minMax;
+        }
         break;
     }
     return resolved;
@@ -194,15 +220,63 @@ struct ResolvedLength final {
     return {};
 }
 
+[[nodiscard]] inline ResolvedLength resolveIntrinsicLength(
+    UILayoutLength length, bool basisDefinite, float basis,
+    float minContent, float maxContent,
+    LayoutPassStatistics& statistics) noexcept
+{
+    if (length.isMinContent())
+    {
+        return ResolvedLength{
+            .hasValue = true,
+            .value = normalizeFloat((std::max)(0.0F, minContent)),
+        };
+    }
+    if (length.isMaxContent())
+    {
+        return ResolvedLength{
+            .hasValue = true,
+            .value = normalizeFloat((std::max)(0.0F, maxContent)),
+        };
+    }
+    return resolveLength(length, basisDefinite, basis, statistics);
+}
+
+[[nodiscard]] inline ResolvedLength resolveIntrinsicLengthNoFallbackCount(
+    UILayoutLength length, bool basisDefinite, float basis,
+    float minContent, float maxContent) noexcept
+{
+    if (length.isMinContent())
+    {
+        return ResolvedLength{
+            .hasValue = true,
+            .value = normalizeFloat((std::max)(0.0F, minContent)),
+        };
+    }
+    if (length.isMaxContent())
+    {
+        return ResolvedLength{
+            .hasValue = true,
+            .value = normalizeFloat((std::max)(0.0F, maxContent)),
+        };
+    }
+    return resolveLengthNoFallbackCount(length, basisDefinite, basis);
+}
+
 [[nodiscard]] inline float clampWithMinMax(
     float value, UILayoutLength minLength, UILayoutLength maxLength,
     bool basisDefinite, float basis,
-    LayoutPassStatistics& statistics) noexcept
+    LayoutPassStatistics& statistics, float minContent = 0.0F,
+    float maxContent = 0.0F) noexcept
 {
     const ResolvedLength minValue =
-        resolveLength(minLength, basisDefinite, basis, statistics);
+        resolveIntrinsicLength(
+            minLength, basisDefinite, basis, minContent, maxContent,
+            statistics);
     ResolvedLength maxValue =
-        resolveLength(maxLength, basisDefinite, basis, statistics);
+        resolveIntrinsicLength(
+            maxLength, basisDefinite, basis, minContent, maxContent,
+            statistics);
     if (minValue.hasValue && maxValue.hasValue && maxValue.value < minValue.value)
     {
         maxValue.value = minValue.value;
@@ -225,6 +299,14 @@ struct ResolvedLength final {
     const ResolvedLength value = resolveLength(
         style.size.width, scratch.parentContentWidthDefinite,
         scratch.parentContentWidth, statistics);
+    if (style.size.width.isMinContent())
+    {
+        return scratch.minContentSize.width;
+    }
+    if (style.size.width.isMaxContent())
+    {
+        return scratch.maxContentSize.width;
+    }
     return value.hasValue ? value.value : -1.0F;
 }
 
@@ -235,6 +317,14 @@ struct ResolvedLength final {
     const ResolvedLength value = resolveLength(
         style.size.height, scratch.parentContentHeightDefinite,
         scratch.parentContentHeight, statistics);
+    if (style.size.height.isMinContent())
+    {
+        return scratch.minContentSize.height;
+    }
+    if (style.size.height.isMaxContent())
+    {
+        return scratch.maxContentSize.height;
+    }
     return value.hasValue ? value.value : -1.0F;
 }
 
@@ -245,7 +335,8 @@ struct ResolvedLength final {
     return clampWithMinMax(
         value, style.minMax.minWidth, style.minMax.maxWidth,
         scratch.parentContentWidthDefinite, scratch.parentContentWidth,
-        statistics);
+        statistics, scratch.minContentSize.width,
+        scratch.maxContentSize.width);
 }
 
 [[nodiscard]] inline float clampHeight(
@@ -255,7 +346,77 @@ struct ResolvedLength final {
     return clampWithMinMax(
         value, style.minMax.minHeight, style.minMax.maxHeight,
         scratch.parentContentHeightDefinite, scratch.parentContentHeight,
-        statistics);
+        statistics, scratch.minContentSize.height,
+        scratch.maxContentSize.height);
+}
+
+
+inline void applyAspectRatio(
+    const UILayoutStyle& style, float& width, float& height) noexcept
+{
+    if (!style.aspectRatio.has_value() ||
+        !std::isfinite(*style.aspectRatio) || *style.aspectRatio <= 0.0F ||
+        style.size.width.isAuto() == style.size.height.isAuto())
+    {
+        return;
+    }
+    if (style.size.width.isAuto())
+    {
+        width = normalizeFloat((std::max)(0.0F, height * *style.aspectRatio));
+    }
+    else
+    {
+        height = normalizeFloat((std::max)(0.0F, width / *style.aspectRatio));
+    }
+}
+
+[[nodiscard]] inline UILogicalSize resolveIntrinsicContribution(
+    const UILayoutStyle& style, UILogicalSize naturalMinContent,
+    UILogicalSize naturalMaxContent, bool maximumContribution) noexcept
+{
+    const UILogicalSize natural =
+        maximumContribution ? naturalMaxContent : naturalMinContent;
+    const ResolvedLength authoredWidth = resolveIntrinsicLengthNoFallbackCount(
+        style.size.width, false, 0.0F, naturalMinContent.width,
+        naturalMaxContent.width);
+    const ResolvedLength authoredHeight = resolveIntrinsicLengthNoFallbackCount(
+        style.size.height, false, 0.0F, naturalMinContent.height,
+        naturalMaxContent.height);
+    float width = authoredWidth.hasValue ? authoredWidth.value : natural.width;
+    float height = authoredHeight.hasValue ? authoredHeight.value : natural.height;
+    applyAspectRatio(style, width, height);
+
+    const auto clampAxis = [](float value, UILayoutLength minLength,
+                              UILayoutLength maxLength, float minContent,
+                              float maxContent) noexcept {
+        const ResolvedLength minimum = resolveIntrinsicLengthNoFallbackCount(
+            minLength, false, 0.0F, minContent, maxContent);
+        ResolvedLength maximum = resolveIntrinsicLengthNoFallbackCount(
+            maxLength, false, 0.0F, minContent, maxContent);
+        if (minimum.hasValue && maximum.hasValue &&
+            maximum.value < minimum.value)
+        {
+            maximum.value = minimum.value;
+        }
+        if (maximum.hasValue)
+        {
+            value = (std::min)(value, maximum.value);
+        }
+        if (minimum.hasValue)
+        {
+            value = (std::max)(value, minimum.value);
+        }
+        return normalizeFloat((std::max)(0.0F, value));
+    };
+
+    return UILogicalSize{
+        .width = clampAxis(
+            width, style.minMax.minWidth, style.minMax.maxWidth,
+            naturalMinContent.width, naturalMaxContent.width),
+        .height = clampAxis(
+            height, style.minMax.minHeight, style.minMax.maxHeight,
+            naturalMinContent.height, naturalMaxContent.height),
+    };
 }
 
 
@@ -265,8 +426,11 @@ struct ResolvedLength final {
     LayoutPassStatistics& statistics) noexcept
 {
     float base = row ? scratch.measuredSize.width : scratch.measuredSize.height;
-    const ResolvedLength basis =
-        resolveLength(style.flexItem.basis, true, contentMain, statistics);
+    const ResolvedLength basis = resolveIntrinsicLength(
+        style.flexItem.basis, true, contentMain,
+        row ? scratch.minContentSize.width : scratch.minContentSize.height,
+        row ? scratch.maxContentSize.width : scratch.maxContentSize.height,
+        statistics);
     if (basis.hasValue)
     {
         base = basis.value;
@@ -340,6 +504,7 @@ struct ResolvedLength final {
         height = (std::max)(0.0F, parentContentRect.height -
                                      verticalMargin(style.margin));
     }
+    applyAspectRatio(style, width, height);
     width = clampWidth(width, style, scratch, statistics);
     height = clampHeight(height, style, scratch, statistics);
 
@@ -407,6 +572,7 @@ struct ResolvedPopupPlacement final {
     {
         width = anchorRect.width;
     }
+    applyAspectRatio(layoutStyle, width, height);
     width = (std::min)(clampWidth(width, layoutStyle, scratch, statistics),
                        viewportRect.width);
     height = (std::min)(clampHeight(height, layoutStyle, scratch, statistics),

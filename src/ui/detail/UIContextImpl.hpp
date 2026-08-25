@@ -1,6 +1,7 @@
 #pragma once
 
 #include "UIContextPrivateTypes.hpp"
+#include "UITextWrapping.hpp"
 
 namespace Tina::UI {
 
@@ -911,7 +912,8 @@ struct UIContext::Impl final {
     [[nodiscard]] Core::Result<UITextMetrics> measureWidgetText(std::string_view utf8, const UITextStyle& style);
 
     [[nodiscard]] Core::Result<UITextMetrics> measureWrappedWidgetText(
-        u32 index, float maximumWidth);
+        u32 index, float maximumWidth,
+        Detail::UITextIntrinsicWidths* intrinsicWidths = nullptr);
 
 
     void releaseFlowNode(u32 index) noexcept;
@@ -1479,6 +1481,12 @@ struct UIContext::Impl final {
         UINodeId updaterRoot, UINodeId node, UITextWrapMode wrapMode);
 
     [[nodiscard]] Core::Result<UITextWrapMode> textWrapModeFromUpdater(
+        UINodeId updaterRoot, UINodeId node);
+
+    [[nodiscard]] Core::Status setTextLineClampFromUpdater(
+        UINodeId updaterRoot, UINodeId node, UITextLineClamp lineClamp);
+
+    [[nodiscard]] Core::Result<UITextLineClamp> textLineClampFromUpdater(
         UINodeId updaterRoot, UINodeId node);
 
 

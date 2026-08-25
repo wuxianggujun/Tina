@@ -427,7 +427,9 @@ usize UITextEditPaintEmitter::countEntries(const UITextEditPaintState& state) no
             return 0;
         }
         const UITextTruncationPlan plan = committedTextPlan(state);
-        usize count = countDrawableTextCodepoints(plan.visibleText);
+        usize count = UITextPaintEmitter::countEntries(
+            plan.visibleText, state.style, state.rasterSource,
+            state.availableWidth, state.textWrapMode, state.textLineClamp);
         if (plan.showEllipsis)
         {
             count += countDrawableTextCodepoints(UITextEllipsisUtf8);
@@ -568,7 +570,8 @@ UITextEditPaintEmitter::append(std::pmr::vector<UICommittedPaintEntry>& output,
     const auto appendText = [&](std::string_view text, UIPremultipliedRgba8Color color) noexcept {
         UITextPaintEmitter::append(output, textLayoutEntry, nextPaintOrdinal, text, state.style, color,
                                    cursor.x, cursor.y, state.rasterSource, &cursor,
-                                   state.availableWidth, state.textWrapMode);
+                                   state.availableWidth, state.textWrapMode,
+                                   state.textLineClamp);
     };
 
     if (!state.focused)

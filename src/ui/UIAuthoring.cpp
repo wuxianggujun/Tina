@@ -670,6 +670,26 @@ Core::Result<UITextWrapMode> UITreeUpdater::textWrapMode(UINodeId node)
     return m_context->m_impl->textWrapModeFromUpdater(m_root, node);
 }
 
+Core::Status UITreeUpdater::setTextLineClamp(
+    UINodeId node, UITextLineClamp lineClamp)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->m_impl->setTextLineClampFromUpdater(
+        m_root, node, lineClamp);
+}
+
+Core::Result<UITextLineClamp> UITreeUpdater::textLineClamp(UINodeId node)
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->m_impl->textLineClampFromUpdater(m_root, node);
+}
+
 Core::Result<std::string_view> UITreeUpdater::text(UINodeId node)
 {
     if (m_context == nullptr)

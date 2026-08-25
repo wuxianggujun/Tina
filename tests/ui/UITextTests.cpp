@@ -219,6 +219,159 @@ TEST(UITextTests, WrappedLineCursorHandlesWhitespaceCjkAndLongWords)
     EXPECT_FLOAT_EQ(explicitLines.measuredSize.height, 38.4F);
 }
 
+TEST(UITextTests, LineClampLimitsMetricsAndPreservesGraphemeBoundaries)
+{
+    const UI::UITextStyle style{};
+    const auto clamped = UI::Detail::measureWrappedText(
+        "ABCD", style, 20.0F, UI::UITextWrapMode::Words, {}, 4U,
+        {.maximumLines = 1});
+    EXPECT_EQ(clamped.codepointCount, 4U);
+    EXPECT_EQ(clamped.lineCount, 1U);
+    EXPECT_FLOAT_EQ(clamped.measuredSize.width, 19.2F);
+    EXPECT_FLOAT_EQ(clamped.measuredSize.height, 19.2F);
+
+    const std::string_view combining = "A\xCC\x81" "BCD";
+    UI::Detail::UITextClampedLineCursor cursor{};
+    UI::Detail::UITextVisualLine line{};
+    ASSERT_TRUE(UI::Detail::nextClampedTextLine(
+        combining, 20.0F, UI::UITextWrapMode::Words,
+        {.maximumLines = 1}, 9.6F, 9.6F, {}, cursor, line));
+    EXPECT_EQ(line.byteBegin, 0U);
+    EXPECT_EQ(line.byteEnd, 0U);
+    EXPECT_EQ(line.glyphBegin, 0U);
+    EXPECT_EQ(line.glyphEnd, 0U);
+    EXPECT_TRUE(line.showEllipsis);
+    EXPECT_FALSE(UI::Detail::nextClampedTextLine(
+        combining, 20.0F, UI::UITextWrapMode::Words,
+        {.maximumLines = 1}, 9.6F, 9.6F, {}, cursor, line));
+}
+
+TEST(UITextTests, NarrowWrappedClampNeverSplitsCombiningOrZwjClusters)
+{
+    const auto expectLeadingClusterPreserved = [](
+        std::string_view text, usize clusterByteCount,
+        usize clusterCodepointCount)
+    {
+        UI::Detail::UITextClampedLineCursor cursor{};
+        UI::Detail::UITextVisualLine line{};
+        ASSERT_TRUE(UI::Detail::nextClampedTextLine(
+            text, 10.0F, UI::UITextWrapMode::Words,
+            {.maximumLines = 2}, 9.6F, 9.6F, {}, cursor, line));
+        EXPECT_EQ(line.byteBegin, 0U);
+        EXPECT_EQ(line.byteEnd, clusterByteCount);
+        EXPECT_EQ(line.glyphBegin, 0U);
+        EXPECT_EQ(line.glyphEnd, clusterCodepointCount);
+        EXPECT_FALSE(line.showEllipsis);
+
+        ASSERT_TRUE(UI::Detail::nextClampedTextLine(
+            text, 10.0F, UI::UITextWrapMode::Words,
+            {.maximumLines = 2}, 9.6F, 9.6F, {}, cursor, line));
+        EXPECT_EQ(line.byteBegin, clusterByteCount);
+        EXPECT_EQ(line.byteEnd, clusterByteCount);
+        EXPECT_EQ(line.glyphBegin, clusterCodepointCount);
+        EXPECT_EQ(line.glyphEnd, clusterCodepointCount);
+        EXPECT_TRUE(line.showEllipsis);
+    };
+
+    expectLeadingClusterPreserved("A\xCC\x81" "BC", 3U, 2U);
+    expectLeadingClusterPreserved("\xF0\x9F\x91\xA9\xE2\x80\x8D"
+                                  "\xF0\x9F\x92\xBB" "BC",
+                                  11U, 3U);
+}
+
+TEST(UITextTests, LabelLineClampRemeasuresHeightAndKeepsFullSemanticsName)
+{
+    auto windowsResult = WindowPool::Create(1);
+    ASSERT_TRUE(windowsResult.has_value());
+    WindowPool windows = std::move(*windowsResult);
+    auto windowResult = windows.tryEmplace(1);
+    ASSERT_TRUE(windowResult.has_value());
+    auto context = createContext(
+        *windowResult,
+        {.nodeCapacity = 3, .rootCapacity = 1, .textByteCapacity = 32});
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    auto updater = createUpdater(*context, root);
+    UI::UILayoutStyle rootStyle{};
+    rootStyle.flexContainer.alignItems = UI::UIAxisAlignment::Start;
+    assertOk(updater.setLayoutStyle(root.rootNodeId(), rootStyle));
+
+    UI::UILayoutStyle labelStyle{};
+    labelStyle.size.width = UI::UILayoutLength::Px(20.0F);
+    UI::UIElementDescriptor descriptor =
+        UI::makeLabelElement("ABCD", labelStyle);
+    descriptor.textLineClamp = {.maximumLines = 1};
+    auto label = updater.createElement(root.rootNodeId(), descriptor);
+    ASSERT_TRUE(label.has_value()) << label.error().message;
+    assertOk(context->publication().commitLayout(
+        {.width = 100.0F, .height = 100.0F}));
+
+    const auto layout = context->publication().committedLayout();
+    const auto layoutEntry = std::ranges::find_if(
+        layout, [label](const UI::UICommittedLayoutEntry& entry) {
+            return entry.node == *label;
+        });
+    ASSERT_NE(layoutEntry, layout.end());
+    EXPECT_FLOAT_EQ(layoutEntry->worldRect.height, 19.2F);
+    EXPECT_FLOAT_EQ(layoutEntry->contentPlacement.intrinsicSize.height, 19.2F);
+
+    const auto semantics = context->publication().committedSemantics();
+    const auto semanticsEntry = std::ranges::find_if(
+        semantics, [label](const UI::UISemanticsEntry& entry) {
+            return entry.node == *label;
+        });
+    ASSERT_NE(semanticsEntry, semantics.end());
+    EXPECT_EQ(semanticsEntry->name, "ABCD");
+}
+
+TEST(UITextTests, LineClampAuthoringRequiresWordsAndRejectsTextEdit)
+{
+    auto windowsResult = WindowPool::Create(1);
+    ASSERT_TRUE(windowsResult.has_value());
+    WindowPool windows = std::move(*windowsResult);
+    auto windowResult = windows.tryEmplace(1);
+    ASSERT_TRUE(windowResult.has_value());
+    auto context = createContext(
+        *windowResult, {.nodeCapacity = 5, .rootCapacity = 1});
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    auto updater = createUpdater(*context, root);
+
+    auto label = updater.createElement(
+        root.rootNodeId(), UI::makeLabelElement("ABCD"));
+    ASSERT_TRUE(label.has_value());
+    assertOk(updater.setTextLineClamp(*label, {.maximumLines = 2}));
+    auto lineClamp = updater.textLineClamp(*label);
+    ASSERT_TRUE(lineClamp.has_value());
+    EXPECT_EQ(lineClamp->maximumLines, 2U);
+
+    Core::Status noWrap =
+        updater.setTextWrapMode(*label, UI::UITextWrapMode::NoWrap);
+    ASSERT_FALSE(noWrap.has_value());
+    EXPECT_EQ(noWrap.error().code, UI::UIErrorCode::InvalidText);
+    assertOk(updater.setTextLineClamp(*label, {}));
+    assertOk(updater.setTextWrapMode(*label, UI::UITextWrapMode::NoWrap));
+    Core::Status clampWithoutWrap =
+        updater.setTextLineClamp(*label, {.maximumLines = 1});
+    ASSERT_FALSE(clampWithoutWrap.has_value());
+    EXPECT_EQ(clampWithoutWrap.error().code, UI::UIErrorCode::InvalidText);
+
+    auto edit = updater.createElement(
+        root.rootNodeId(), UI::makeTextEditElement("editable"));
+    ASSERT_TRUE(edit.has_value());
+    Core::Status editClamp =
+        updater.setTextLineClamp(*edit, {.maximumLines = 1});
+    ASSERT_FALSE(editClamp.has_value());
+    EXPECT_EQ(editClamp.error().code, UI::UIErrorCode::InvalidText);
+
+    UI::UIElementDescriptor invalid = UI::makeLabelElement("invalid");
+    invalid.textWrapMode = UI::UITextWrapMode::NoWrap;
+    invalid.textLineClamp = {.maximumLines = 1};
+    auto rejected = updater.createElement(root.rootNodeId(), invalid);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, UI::UIErrorCode::InvalidElementDescriptor);
+}
+
 TEST(UITextTests, TextEditRejectsOrdinaryWrapModeAndEllipsisRequiresNoWrap)
 {
     auto windowsResult = WindowPool::Create(1);

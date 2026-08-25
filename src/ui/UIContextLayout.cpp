@@ -311,6 +311,7 @@ void UIContext::Impl::prepareLayoutState(UILogicalSize viewportSize, const std::
         scratch.contentHeight =
             scratch.contentHeightDefinite ? (std::max)(0.0F, outerHeight - verticalMargin(style.padding)) : 0.0F;
         scratch.hasResolvedTextMetrics = false;
+        scratch.hasResolvedTextIntrinsicWidths = false;
 
         const LayoutPreparedInputs currentInputs{
             .effectiveVisibility = scratch.effectiveVisibility,
@@ -435,10 +436,25 @@ Core::Result<bool> UIContext::Impl::refreshResolvedLayoutAfterArrange(
         {
             const float contentWidth =
                 contentPlacementFor(index).contentBox.width;
-            auto metrics = measureWrappedWidgetText(index, contentWidth);
+            Detail::UITextIntrinsicWidths intrinsicWidths{};
+            auto metrics = measureWrappedWidgetText(
+                index, contentWidth, &intrinsicWidths);
             if (!metrics)
             {
                 return Core::failure(metrics.error());
+            }
+            if (!scratch.hasResolvedTextIntrinsicWidths ||
+                scratch.resolvedTextMinContentWidth !=
+                    intrinsicWidths.minContent ||
+                scratch.resolvedTextMaxContentWidth !=
+                    intrinsicWidths.maxContent)
+            {
+                scratch.resolvedTextMinContentWidth =
+                    intrinsicWidths.minContent;
+                scratch.resolvedTextMaxContentWidth =
+                    intrinsicWidths.maxContent;
+                scratch.hasResolvedTextIntrinsicWidths = true;
+                changed = true;
             }
             if (!scratch.hasResolvedTextMetrics ||
                 scratch.resolvedTextMetrics != *metrics)
@@ -481,6 +497,8 @@ void UIContext::Impl::measureLayout(UILogicalSize viewportSize, const std::pmr::
         if (scratch.effectiveVisibility == UIVisibility::Collapsed)
         {
             scratch.measuredSize = {};
+            scratch.minContentSize = {};
+            scratch.maxContentSize = {};
             if (scratch.measuredSize != previousMeasuredSize)
             {
                 ensureLayoutSubtreeWork(index, LayoutWorkArrange);
@@ -489,8 +507,14 @@ void UIContext::Impl::measureLayout(UILogicalSize viewportSize, const std::pmr::
         }
 
         LayoutFlowMeasurement flowMeasurement{};
+        LayoutFlowMeasurement minContentFlowMeasurement{};
+        LayoutFlowMeasurement maxContentFlowMeasurement{};
         FlexWrapMeasurement flexWrapMeasurement{};
         GridMeasurement gridMeasurement =
+            beginGridMeasurement(style.gridContainer);
+        GridMeasurement minContentGridMeasurement =
+            beginGridMeasurement(style.gridContainer);
+        GridMeasurement maxContentGridMeasurement =
             beginGridMeasurement(style.gridContainer);
 
         u32 childIndex = record->firstChildIndex;
@@ -506,11 +530,25 @@ void UIContext::Impl::measureLayout(UILogicalSize viewportSize, const std::pmr::
             if (childScratch.effectiveVisibility != UIVisibility::Collapsed &&
                 childStyle.placement == UILayoutPlacement::Flow)
             {
+                const UILogicalSize childMinContentContribution =
+                    Detail::resolveIntrinsicContribution(
+                        childStyle, childScratch.minContentSize,
+                        childScratch.maxContentSize, false);
+                const UILogicalSize childMaxContentContribution =
+                    Detail::resolveIntrinsicContribution(
+                        childStyle, childScratch.minContentSize,
+                        childScratch.maxContentSize, true);
                 if (style.containerLayout == UIContainerLayout::Grid)
                 {
                     (void)appendGridMeasuredChild(
                         gridMeasurement, style.gridContainer, childStyle,
                         childScratch.measuredSize);
+                    (void)appendGridMeasuredChild(
+                        minContentGridMeasurement, style.gridContainer,
+                        childStyle, childMinContentContribution);
+                    (void)appendGridMeasuredChild(
+                        maxContentGridMeasurement, style.gridContainer,
+                        childStyle, childMaxContentContribution);
                 }
                 else
                 {
@@ -522,6 +560,24 @@ void UIContext::Impl::measureLayout(UILogicalSize viewportSize, const std::pmr::
                     const float crossGap = row
                                                ? style.flexContainer.gap.row
                                                : style.flexContainer.gap.column;
+                    if (style.flexContainer.wrap == UIFlexWrap::Wrap)
+                    {
+                        appendWrappedMinContentChild(
+                            minContentFlowMeasurement,
+                            style.flexContainer.direction, crossGap, childStyle,
+                            childMinContentContribution);
+                    }
+                    else
+                    {
+                        appendFlowMeasuredChild(
+                            minContentFlowMeasurement,
+                            style.flexContainer.direction, mainGap, childStyle,
+                            childMinContentContribution);
+                    }
+                    appendFlowMeasuredChild(
+                        maxContentFlowMeasurement,
+                        style.flexContainer.direction, mainGap, childStyle,
+                        childMaxContentContribution);
                     if (style.flexContainer.wrap == UIFlexWrap::Wrap)
                     {
                         const float availableMain =
@@ -593,6 +649,16 @@ void UIContext::Impl::measureLayout(UILogicalSize viewportSize, const std::pmr::
                       ? flexWrapMeasurement.contentSize(
                             style.flexContainer.direction)
                       : flowMeasurement.contentSize;
+        const UILogicalSize minContentLayoutSize =
+            style.containerLayout == UIContainerLayout::Grid
+                ? gridMeasuredContentSize(
+                      minContentGridMeasurement, style.gridContainer)
+                : minContentFlowMeasurement.contentSize;
+        const UILogicalSize maxContentLayoutSize =
+            style.containerLayout == UIContainerLayout::Grid
+                ? gridMeasuredContentSize(
+                      maxContentGridMeasurement, style.gridContainer)
+                : maxContentFlowMeasurement.contentSize;
         std::optional<UILogicalSize> tabViewContentSize;
         if (record->kind == BuiltinElementKind::TabView &&
             tabViewStorage.relationshipValid(idForIndex(index)))
@@ -649,15 +715,25 @@ void UIContext::Impl::measureLayout(UILogicalSize viewportSize, const std::pmr::
         }
 
         LayoutNodeMeasureContent content{.size = layoutContentSize};
+        LayoutNodeMeasureContent minContent{
+            .size = minContentLayoutSize,
+        };
+        LayoutNodeMeasureContent maxContent{
+            .size = maxContentLayoutSize,
+        };
         if (tabViewContentSize.has_value())
         {
             content.size = *tabViewContentSize;
+            minContent.size = *tabViewContentSize;
+            maxContent.size = *tabViewContentSize;
         }
         if (layoutChildCount == 0)
         {
             if (const UIImageContent* image = imageContentStorage.get(index); image != nullptr)
             {
                 content.size = image->source.intrinsicLogicalSize;
+                minContent.size = image->source.intrinsicLogicalSize;
+                maxContent.size = image->source.intrinsicLogicalSize;
             }
         }
         if (layoutChildCount == 0 && supportsWidgetText(record->kind))
@@ -666,12 +742,50 @@ void UIContext::Impl::measureLayout(UILogicalSize viewportSize, const std::pmr::
             {
                 const UILogicalSize textSize = metrics->measuredSize;
                 content.size = textSize;
+                const WidgetTextState& textState = textStatesByIndex[index];
+                const UILogicalSize unwrappedTextSize =
+                    textState.hasContent
+                        ? textState.metrics.measuredSize
+                        : textSize;
+                Detail::UITextIntrinsicWidths textIntrinsicWidths{
+                    .minContent = unwrappedTextSize.width,
+                    .maxContent = unwrappedTextSize.width,
+                };
+                if (textState.hasContent &&
+                    textState.wrapMode == UITextWrapMode::Words)
+                {
+                    textIntrinsicWidths =
+                        scratch.hasResolvedTextIntrinsicWidths
+                            ? Detail::UITextIntrinsicWidths{
+                                  .minContent =
+                                      scratch.resolvedTextMinContentWidth,
+                                  .maxContent =
+                                      scratch.resolvedTextMaxContentWidth,
+                              }
+                            : Detail::measureTextIntrinsicWidths(
+                                  presentationTextViewFor(index),
+                                  textState.style, textState.wrapMode, {});
+                }
+                minContent.size = UILogicalSize{
+                    .width = textIntrinsicWidths.minContent,
+                    .height = unwrappedTextSize.height,
+                };
+                maxContent.size = UILogicalSize{
+                    .width = textIntrinsicWidths.maxContent,
+                    .height = unwrappedTextSize.height,
+                };
                 if (record->kind == BuiltinElementKind::RadioButton &&
                     index < radioButtonStatesByNodeIndex.size() &&
                     radioButtonStatesByNodeIndex[index].paint.indicatorVisible)
                 {
                     content.indicatorLabelWidth = textSize.width;
                     content.hasIndicatorLabel = true;
+                    minContent.indicatorLabelWidth =
+                        minContent.size.width;
+                    minContent.hasIndicatorLabel = true;
+                    maxContent.indicatorLabelWidth =
+                        maxContent.size.width;
+                    maxContent.hasIndicatorLabel = true;
                 }
             }
         }
@@ -681,6 +795,14 @@ void UIContext::Impl::measureLayout(UILogicalSize viewportSize, const std::pmr::
             const UIDropdownPaint& dropdownPaint = dropdownStatesByNodeIndex[index].paint;
             content.size.width += dropdownPaint.indicatorWidth + dropdownPaint.indicatorInset * 2.0F;
             content.size.height = (std::max)(content.size.height, dropdownPaint.indicatorHeight);
+            minContent.size.width +=
+                dropdownPaint.indicatorWidth + dropdownPaint.indicatorInset * 2.0F;
+            minContent.size.height = (std::max)(
+                minContent.size.height, dropdownPaint.indicatorHeight);
+            maxContent.size.width +=
+                dropdownPaint.indicatorWidth + dropdownPaint.indicatorInset * 2.0F;
+            maxContent.size.height = (std::max)(
+                maxContent.size.height, dropdownPaint.indicatorHeight);
         }
 
         if (layoutChildCount == 0 && record->kind == BuiltinElementKind::RadioButton &&
@@ -690,8 +812,20 @@ void UIContext::Impl::measureLayout(UILogicalSize viewportSize, const std::pmr::
             content.leadingIndicatorExtent =
                 radioButtonStatesByNodeIndex[index].paint.indicatorExtent;
             content.indicatorLabelGap = radioButtonStatesByNodeIndex[index].paint.labelGap;
+            minContent.leadingIndicatorExtent =
+                content.leadingIndicatorExtent;
+            minContent.indicatorLabelGap = content.indicatorLabelGap;
+            maxContent.leadingIndicatorExtent =
+                content.leadingIndicatorExtent;
+            maxContent.indicatorLabelGap = content.indicatorLabelGap;
         }
 
+        const UILogicalSize naturalMinContent =
+            Detail::intrinsicOuterSize(minContent, style.padding);
+        const UILogicalSize naturalMaxContent =
+            Detail::intrinsicOuterSize(maxContent, style.padding);
+        scratch.minContentSize = naturalMinContent;
+        scratch.maxContentSize = naturalMaxContent;
         scratch.measuredSize = resolveMeasuredLayoutSize(
             style,
             scratch,
@@ -758,8 +892,13 @@ void UIContext::Impl::refreshMeasuredSizeForParentContent(u32 childIndex, UILogi
 
     const float resolvedOuterWidth = resolvedWidth(childStyle, childScratch, statistics);
     const float resolvedOuterHeight = resolvedHeight(childStyle, childScratch, statistics);
-    const float outerWidth = resolvedOuterWidth >= 0.0F ? resolvedOuterWidth : childScratch.measuredSize.width;
-    const float outerHeight = resolvedOuterHeight >= 0.0F ? resolvedOuterHeight : childScratch.measuredSize.height;
+    float outerWidth = resolvedOuterWidth >= 0.0F
+                           ? resolvedOuterWidth
+                           : childScratch.measuredSize.width;
+    float outerHeight = resolvedOuterHeight >= 0.0F
+                            ? resolvedOuterHeight
+                            : childScratch.measuredSize.height;
+    Detail::applyAspectRatio(childStyle, outerWidth, outerHeight);
     childScratch.measuredSize = UILogicalSize{
         .width = clampWidth(outerWidth, childStyle, childScratch, statistics),
         .height = clampHeight(outerHeight, childStyle, childScratch, statistics),
@@ -2306,6 +2445,51 @@ void UIContext::Impl::collapseTreeViewItems(u32 treeViewIndex, UILogicalRect con
     const float arrangedContentMain = row
                                           ? layoutContentRect.width
                                           : layoutContentRect.height;
+    FlexWrapMeasurement arrangedFlexMeasurement{};
+    if (parentStyle.containerLayout == UIContainerLayout::Flex &&
+        parentStyle.flexContainer.wrap == UIFlexWrap::Wrap)
+    {
+        u32 arrangedChildIndex = parentRecord->firstChildIndex;
+        while (arrangedChildIndex != InvalidNodeIndex)
+        {
+            const NodeRecord* arrangedChildRecord =
+                recordByIndex(arrangedChildIndex);
+            if (arrangedChildRecord == nullptr)
+            {
+                break;
+            }
+            const UILayoutStyle& arrangedChildStyle =
+                resolvedLayoutStyle(arrangedChildIndex);
+            const LayoutScratchState& arrangedChildScratch =
+                layoutScratchByIndex[arrangedChildIndex];
+            if (arrangedChildScratch.effectiveVisibility !=
+                    UIVisibility::Collapsed &&
+                arrangedChildStyle.placement == UILayoutPlacement::Flow)
+            {
+                appendFlexMeasuredItem(
+                    arrangedFlexMeasurement,
+                    parentStyle.flexContainer.direction,
+                    parentStyle.flexContainer.wrap, arrangedContentMain,
+                    configuredGap, configuredCrossGap, arrangedChildStyle,
+                    arrangedChildScratch, statistics);
+            }
+            arrangedChildIndex = arrangedChildRecord->nextSiblingIndex;
+        }
+        finishFlexMeasurement(
+            arrangedFlexMeasurement, configuredCrossGap);
+        if (!isValidFlexWrapMeasurement(arrangedFlexMeasurement))
+        {
+            return fail(
+                UIErrorCode::InvalidLayout,
+                "UI arranged Flex line accumulation produced invalid geometry");
+        }
+    }
+    const float arrangedContentCross =
+        row ? layoutContentRect.height : layoutContentRect.width;
+    const Detail::FlexContentPlan flexContentPlan =
+        Detail::resolveFlexContentPlan(
+            parentStyle.flexContainer.alignContent, arrangedContentCross,
+            configuredCrossGap, arrangedFlexMeasurement);
     const auto summarizeFlexLine = [&](u32 first) noexcept {
         FlexLineSummary summary{};
         u32 candidate = first;
@@ -2347,7 +2531,7 @@ void UIContext::Impl::collapseTreeViewItems(u32 treeViewIndex, UILogicalRect con
     FlexLineSummary activeFlexLine{};
     FlexLinePlan flexPlan{};
     usize remainingFlexItems = 0U;
-    float flexCrossOffset = 0.0F;
+    float flexCrossOffset = flexContentPlan.nextCrossOffset;
 
     childIndex = parentRecord->firstChildIndex;
     while (childIndex != InvalidNodeIndex)
@@ -2432,13 +2616,17 @@ void UIContext::Impl::collapseTreeViewItems(u32 treeViewIndex, UILogicalRect con
                     {
                         lineRect.y = normalizeFloat(
                             lineRect.y + flexCrossOffset);
-                        lineRect.height = activeFlexLine.totalCross;
+                        lineRect.height = normalizeFloat(
+                            activeFlexLine.totalCross +
+                            flexContentPlan.lineCrossGrowth);
                     }
                     else
                     {
                         lineRect.x = normalizeFloat(
                             lineRect.x + flexCrossOffset);
-                        lineRect.width = activeFlexLine.totalCross;
+                        lineRect.width = normalizeFloat(
+                            activeFlexLine.totalCross +
+                            flexContentPlan.lineCrossGrowth);
                     }
                 }
                 flexPlan = resolveFlexLinePlan(
@@ -2456,7 +2644,8 @@ void UIContext::Impl::collapseTreeViewItems(u32 treeViewIndex, UILogicalRect con
             {
                 flexCrossOffset = normalizeFloat(
                     flexCrossOffset + activeFlexLine.totalCross +
-                    configuredCrossGap);
+                    flexContentPlan.lineCrossGrowth +
+                    flexContentPlan.crossGap);
             }
         }
     }

@@ -25,6 +25,7 @@ struct WidgetTextState final {
     // a Theme rebind never resets it and metrics stay untruncated.
     UITextOverflow overflow = UITextOverflow::Clip;
     UITextWrapMode wrapMode = UITextWrapMode::NoWrap;
+    UITextLineClamp lineClamp{};
     bool hasContent = false;
 };
 

@@ -28,12 +28,18 @@ struct UITextPaintRasterSource final {
 
 class UITextPaintEmitter final {
   public:
+    [[nodiscard]] static usize countEntries(
+        std::string_view utf8, const UITextStyle& style,
+        const UITextPaintRasterSource& rasterSource, float maximumWidth,
+        UITextWrapMode wrapMode, UITextLineClamp lineClamp) noexcept;
+
     static void append(std::pmr::vector<UICommittedPaintEntry>& output,
                        const UICommittedLayoutEntry& layoutEntry, u32& nextPaintOrdinal, std::string_view utf8,
                        const UITextStyle& style, UIPremultipliedRgba8Color color, float startX, float startY,
                        const UITextPaintRasterSource& rasterSource, UITextPaintCursor* outCursor,
                        float maximumWidth = 0.0F,
-                       UITextWrapMode wrapMode = UITextWrapMode::NoWrap) noexcept;
+                       UITextWrapMode wrapMode = UITextWrapMode::NoWrap,
+                       UITextLineClamp lineClamp = {}) noexcept;
 };
 
 } // namespace Tina::UI::Detail

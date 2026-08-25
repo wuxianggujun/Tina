@@ -176,6 +176,49 @@ inline void finishFlexMeasurement(
            summary.totalShrinkWeight >= 0.0;
 }
 
+struct FlexContentPlan final {
+    float nextCrossOffset = 0.0F;
+    float lineCrossGrowth = 0.0F;
+    float crossGap = 0.0F;
+};
+
+[[nodiscard]] inline FlexContentPlan resolveFlexContentPlan(
+    UIAlignContent alignment, float contentCross, float configuredCrossGap,
+    const FlexWrapMeasurement& measurement) noexcept
+{
+    FlexContentPlan plan{.crossGap = configuredCrossGap};
+    if (measurement.lineCount == 0U)
+    {
+        return plan;
+    }
+
+    const float freeSpace =
+        (std::max)(0.0F, contentCross - measurement.totalCross);
+    switch (alignment)
+    {
+    case UIAlignContent::Center:
+        plan.nextCrossOffset = freeSpace * 0.5F;
+        break;
+    case UIAlignContent::End:
+        plan.nextCrossOffset = freeSpace;
+        break;
+    case UIAlignContent::SpaceBetween:
+        if (measurement.lineCount > 1U)
+        {
+            plan.crossGap +=
+                freeSpace / static_cast<float>(measurement.lineCount - 1U);
+        }
+        break;
+    case UIAlignContent::Stretch:
+        plan.lineCrossGrowth =
+            freeSpace / static_cast<float>(measurement.lineCount);
+        break;
+    case UIAlignContent::Start:
+        break;
+    }
+    return plan;
+}
+
 struct FlexLinePlan final {
     UIFlexDirection direction = UIFlexDirection::Column;
     UIAxisAlignment alignItems = UIAxisAlignment::Stretch;
@@ -283,9 +326,17 @@ struct FlexLinePlan final {
         if (row)
         {
             width = (std::max)(0.0F, width - reduction);
+            if (childStyle.minMax.minWidth.isAuto())
+            {
+                width = (std::max)(width, childScratch.minContentSize.width);
+            }
         } else
         {
             height = (std::max)(0.0F, height - reduction);
+            if (childStyle.minMax.minHeight.isAuto())
+            {
+                height = (std::max)(height, childScratch.minContentSize.height);
+            }
         }
     }
 
@@ -307,6 +358,7 @@ struct FlexLinePlan final {
             width = crossAvailable;
         }
     }
+    applyAspectRatio(childStyle, width, height);
     width = clampWidth(width, childStyle, childScratch, statistics);
     height = clampHeight(height, childStyle, childScratch, statistics);
 

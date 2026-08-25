@@ -1,6 +1,7 @@
 #include "UITextPaintEmitter.hpp"
 
 #include "UILayoutPrimitives.hpp"
+#include "UIPaintPrimitives.hpp"
 #include "UITextWrapping.hpp"
 
 #include <algorithm>
@@ -28,14 +29,82 @@ namespace {
     return 4;
 }
 
+[[nodiscard]] float resolvedEllipsisAdvance(
+    const UITextPaintRasterSource& rasterSource,
+    const UITextStyle& style, float fallbackAdvance) noexcept
+{
+    if (rasterSource.rasterizer != nullptr && rasterSource.face.hasValue() &&
+        rasterSource.atlas != nullptr)
+    {
+        auto metrics = rasterSource.rasterizer->measure(
+            rasterSource.face, UITextEllipsisUtf8, style);
+        if (metrics && std::isfinite(metrics->measuredSize.width) &&
+            metrics->measuredSize.width >= 0.0F)
+        {
+            return metrics->measuredSize.width;
+        }
+    }
+    return fallbackAdvance;
+}
+
 } // namespace
+
+usize UITextPaintEmitter::countEntries(
+    std::string_view utf8, const UITextStyle& style,
+    const UITextPaintRasterSource& rasterSource, float maximumWidth,
+    UITextWrapMode wrapMode, UITextLineClamp lineClamp) noexcept
+{
+    if (utf8.empty() || wrapMode != UITextWrapMode::Words ||
+        !lineClamp.enabled())
+    {
+        return countDrawableTextCodepoints(utf8);
+    }
+
+    const float fallbackAdvance = style.logicalSize * style.advanceScale;
+    const float ellipsisAdvance = resolvedEllipsisAdvance(
+        rasterSource, style, fallbackAdvance);
+    const auto countWithGlyphs = [&](
+        std::span<const UITextGlyphRaster> glyphs) noexcept
+    {
+        usize count = 0;
+        UITextClampedLineCursor cursor{};
+        UITextVisualLine line{};
+        while (nextClampedTextLine(
+            utf8, maximumWidth, wrapMode, lineClamp, fallbackAdvance,
+            ellipsisAdvance, glyphs, cursor, line))
+        {
+            count += line.glyphEnd - line.glyphBegin;
+            if (line.showEllipsis)
+            {
+                count += countDrawableTextCodepoints(UITextEllipsisUtf8);
+            }
+        }
+        return count;
+    };
+
+    // append() only preserves raster advances for wrapping when an atlas is
+    // present. Keep capacity counting on the identical path; otherwise a wide
+    // raster run could count fewer entries than the fallback run appends.
+    if (rasterSource.rasterizer != nullptr && rasterSource.face.hasValue() &&
+        rasterSource.atlas != nullptr)
+    {
+        auto batch = rasterSource.rasterizer->raster(
+            rasterSource.face, utf8, style);
+        if (batch)
+        {
+            return countWithGlyphs(batch->glyphs);
+        }
+    }
+    return countWithGlyphs({});
+}
 
 void UITextPaintEmitter::append(std::pmr::vector<UICommittedPaintEntry>& output,
                                 const UICommittedLayoutEntry& layoutEntry, u32& nextPaintOrdinal,
                                 std::string_view utf8, const UITextStyle& style,
                                 UIPremultipliedRgba8Color color, float startX, float startY,
                                 const UITextPaintRasterSource& rasterSource, UITextPaintCursor* outCursor,
-                                float maximumWidth, UITextWrapMode wrapMode) noexcept
+                                float maximumWidth, UITextWrapMode wrapMode,
+                                UITextLineClamp lineClamp) noexcept
 {
     const float lineStartX = outCursor != nullptr ? outCursor->baseX : startX;
     if (outCursor != nullptr)
@@ -59,6 +128,10 @@ void UITextPaintEmitter::append(std::pmr::vector<UICommittedPaintEntry>& output,
     {
         return;
     }
+    const float ellipsisAdvance = lineClamp.enabled()
+                                      ? resolvedEllipsisAdvance(
+                                            rasterSource, style, fallbackAdvance)
+                                      : fallbackAdvance;
     const double flooredSize = std::floor(static_cast<double>(style.logicalSize));
     const double clampedPixelSize = (std::min)(
         (std::max)(1.0, flooredSize), static_cast<double>((std::numeric_limits<u32>::max)()));
@@ -85,14 +158,14 @@ void UITextPaintEmitter::append(std::pmr::vector<UICommittedPaintEntry>& output,
                 {
                     baselineFromLineTop = lineHeight;
                 }
-                UITextLineCursor lineCursor{};
+                UITextClampedLineCursor lineCursor{};
                 UITextVisualLine line{};
                 float cursorY = startY;
                 float finalX = lineStartX;
                 usedAtlasPath = true;
-                while (nextWrappedTextLine(
-                    utf8, maximumWidth, wrapMode, fallbackAdvance,
-                    batch->glyphs, lineCursor, line))
+                while (nextClampedTextLine(
+                    utf8, maximumWidth, wrapMode, lineClamp, fallbackAdvance,
+                    ellipsisAdvance, batch->glyphs, lineCursor, line))
                 {
                     float cursorX = lineStartX;
                     usize byte = line.byteBegin;
@@ -165,6 +238,20 @@ void UITextPaintEmitter::append(std::pmr::vector<UICommittedPaintEntry>& output,
                     {
                         break;
                     }
+                    if (line.showEllipsis)
+                    {
+                        UITextPaintCursor markerCursor{
+                            .x = cursorX,
+                            .y = cursorY,
+                            .lineHeight = lineHeight,
+                            .baseX = cursorX,
+                        };
+                        append(
+                            output, layoutEntry, nextPaintOrdinal,
+                            UITextEllipsisUtf8, style, color, cursorX, cursorY,
+                            rasterSource, &markerCursor);
+                        cursorX = markerCursor.x;
+                    }
                     finalX = cursorX;
                     cursorY = normalizeFloat(cursorY + lineHeight);
                 }
@@ -184,13 +271,13 @@ void UITextPaintEmitter::append(std::pmr::vector<UICommittedPaintEntry>& output,
             }
         }
 
-        UITextLineCursor lineCursor{};
+        UITextClampedLineCursor lineCursor{};
         UITextVisualLine line{};
         float cursorY = startY;
         float finalX = lineStartX;
-        while (nextWrappedTextLine(
-            utf8, maximumWidth, wrapMode, fallbackAdvance, wrappingGlyphs,
-            lineCursor, line))
+        while (nextClampedTextLine(
+            utf8, maximumWidth, wrapMode, lineClamp, fallbackAdvance,
+            ellipsisAdvance, wrappingGlyphs, lineCursor, line))
         {
             float cursorX = lineStartX;
             usize byte = line.byteBegin;
@@ -226,6 +313,20 @@ void UITextPaintEmitter::append(std::pmr::vector<UICommittedPaintEntry>& output,
                 cursorX = normalizeFloat(cursorX + advance);
                 byte += unitLength;
                 ++glyphIndex;
+            }
+            if (line.showEllipsis)
+            {
+                UITextPaintCursor markerCursor{
+                    .x = cursorX,
+                    .y = cursorY,
+                    .lineHeight = lineHeight,
+                    .baseX = cursorX,
+                };
+                append(
+                    output, layoutEntry, nextPaintOrdinal,
+                    UITextEllipsisUtf8, style, color, cursorX, cursorY,
+                    rasterSource, &markerCursor);
+                cursorX = markerCursor.x;
             }
             finalX = cursorX;
             cursorY = normalizeFloat(cursorY + lineHeight);

@@ -575,6 +575,7 @@ UIContext::Impl::findComponentBuildReservation(UINodeId componentRoot) const noe
     }
     WidgetTextState& state = textStatesByIndex[node.index()];
     state.wrapMode = descriptor.textWrapMode;
+    state.lineClamp = descriptor.textLineClamp;
     if (descriptor.textStyle.has_value())
     {
         state.style = *descriptor.textStyle;
@@ -738,6 +739,15 @@ UIContext::Impl::findComponentBuildReservation(UINodeId componentRoot) const noe
         return fail(
             UIErrorCode::InvalidElementDescriptor,
             "UI TextEdit wrapping is controlled by UITextEditMultilineConfig");
+    }
+    if (descriptor.textLineClamp.enabled() &&
+        (!descriptor.text.has_value() ||
+         descriptor.textWrapMode != UITextWrapMode::Words ||
+         kind == BuiltinElementKind::TextEdit))
+    {
+        return fail(
+            UIErrorCode::InvalidElementDescriptor,
+            "UI text line clamp requires ordinary intrinsic text with Words wrapping");
     }
     if (descriptor.text.has_value() && descriptor.image.has_value())
     {

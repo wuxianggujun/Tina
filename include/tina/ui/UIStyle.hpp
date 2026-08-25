@@ -229,6 +229,9 @@ enum class UIStylePropertyKind : u8 {
     TextOverflow = 6,
     // Width-constrained ordinary text changes intrinsic height and paint.
     TextWrap = 7,
+    // A bounded wrapped-line count changes intrinsic height and the final
+    // visible glyph run while preserving the full semantic text.
+    TextLineClamp = 8,
 };
 
 [[nodiscard]] constexpr UIDirty dirtyFlagsForStyleProperty(UIStylePropertyKind kind) noexcept
@@ -241,6 +244,7 @@ enum class UIStylePropertyKind : u8 {
         return UIDirty::Paint;
     case UIStylePropertyKind::TextStyle:
     case UIStylePropertyKind::TextWrap:
+    case UIStylePropertyKind::TextLineClamp:
         return UIDirty::Style | UIDirty::Measure | UIDirty::Arrange | UIDirty::Composite |
                UIDirty::HitTest | UIDirty::Paint | UIDirty::Semantics;
     case UIStylePropertyKind::ContentAlignment:

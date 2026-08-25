@@ -44,6 +44,38 @@ inline void appendFlowMeasuredChild(
     ++measurement.childCount;
 }
 
+inline void appendWrappedMinContentChild(
+    LayoutFlowMeasurement& measurement, UIFlexDirection direction,
+    float crossGap, const UILayoutStyle& childStyle,
+    UILogicalSize childMinContentSize) noexcept
+{
+    const float childOuterWidth =
+        childMinContentSize.width + horizontalMargin(childStyle.margin);
+    const float childOuterHeight =
+        childMinContentSize.height + verticalMargin(childStyle.margin);
+    if (direction == UIFlexDirection::Row)
+    {
+        measurement.contentSize.width =
+            (std::max)(measurement.contentSize.width, childOuterWidth);
+        if (measurement.childCount > 0)
+        {
+            measurement.contentSize.height += crossGap;
+        }
+        measurement.contentSize.height += childOuterHeight;
+    }
+    else
+    {
+        if (measurement.childCount > 0)
+        {
+            measurement.contentSize.width += crossGap;
+        }
+        measurement.contentSize.width += childOuterWidth;
+        measurement.contentSize.height =
+            (std::max)(measurement.contentSize.height, childOuterHeight);
+    }
+    ++measurement.childCount;
+}
+
 struct LayoutNodeMeasureContent final {
     UILogicalSize size{};
     float indicatorLabelWidth = 0.0F;
@@ -51,6 +83,29 @@ struct LayoutNodeMeasureContent final {
     float leadingIndicatorExtent = 0.0F;
     bool hasIndicatorLabel = false;
 };
+
+[[nodiscard]] inline UILogicalSize intrinsicOuterSize(
+    LayoutNodeMeasureContent content,
+    const UIEdgeSpacing& padding) noexcept
+{
+    if (content.leadingIndicatorExtent > 0.0F)
+    {
+        content.size.height =
+            (std::max)(content.size.height, content.leadingIndicatorExtent);
+        content.size.width = content.leadingIndicatorExtent;
+        if (content.hasIndicatorLabel)
+        {
+            content.size.width +=
+                content.indicatorLabelWidth + content.indicatorLabelGap;
+        }
+    }
+    return UILogicalSize{
+        .width = normalizeFloat(
+            content.size.width + horizontalMargin(padding)),
+        .height = normalizeFloat(
+            content.size.height + verticalMargin(padding)),
+    };
+}
 
 [[nodiscard]] inline UILogicalSize resolveMeasuredLayoutSize(
     const UILayoutStyle& style,
@@ -74,8 +129,6 @@ struct LayoutNodeMeasureContent final {
                           ? (std::max)(intrinsicHeight, viewportSize.height)
                           : intrinsicHeight;
     }
-    outerHeight = clampHeight(outerHeight, style, scratch, statistics);
-
     if (content.leadingIndicatorExtent > 0.0F)
     {
         content.size.width = content.leadingIndicatorExtent;
@@ -95,6 +148,8 @@ struct LayoutNodeMeasureContent final {
                          ? (std::max)(intrinsicWidth, viewportSize.width)
                          : intrinsicWidth;
     }
+    applyAspectRatio(style, outerWidth, outerHeight);
+    outerHeight = clampHeight(outerHeight, style, scratch, statistics);
     outerWidth = clampWidth(outerWidth, style, scratch, statistics);
 
     return UILogicalSize{

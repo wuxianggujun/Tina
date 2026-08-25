@@ -51,6 +51,22 @@ enum class UITextWrapMode : u8 {
     Words = 1,
 };
 
+// Optional visual-line limit for ordinary wrapped text. Zero keeps every
+// visual line. A positive limit requires UITextWrapMode::Words; when more text
+// remains, the final visible line is shortened on a grapheme boundary and
+// ends with UITextEllipsisUtf8. Accessibility continues to expose the full
+// authored text.
+struct UITextLineClamp final {
+    u32 maximumLines = 0;
+
+    [[nodiscard]] constexpr bool enabled() const noexcept
+    {
+        return maximumLines != 0;
+    }
+
+    auto operator<=>(const UITextLineClamp&) const = default;
+};
+
 // U+2026 HORIZONTAL ELLIPSIS. A face without a visible glyph for it emits no
 // paint entry, so truncation degrades to an unmarked hard cut rather than a
 // fallback box; the reserved entry count stays a safe over-estimate.
