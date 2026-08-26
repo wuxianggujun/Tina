@@ -32,7 +32,10 @@ Rendering，`Camera2D` 发布 Camera，`PointLight2D` 发布 Light，`ShadowOccl
 `visible/active/autoPlay` Compact switch，不存在 Components Header、Add Component、Remove Component 或兼容菜单。
 同类型多选时属性按一致性显示 `Mixed`，未明确填写的字段保留每个节点自己的 canonical 值；一次 Apply 最多发布一条
 revision，非法值、未知 stable ID 或类型不匹配保持 document/history 字节不变，no-op 不发布 revision。
-`Assign Sprite From Selection` 只更新 `Sprite2D`/`AnimatedSprite2D` 的 Sprite AssetId。Play active 时全部节点属性控件
+Rendering 区的 `Texture` resource slot 显示当前 Sprite AssetId 对应的 Project Asset 名称或缺失状态；`Assign selected Project Asset`
+使用同一 `NodeAssignSprite` canonical command 更新 `Sprite2D`/`AnimatedSprite2D` 的 Sprite AssetId。Project Assets 中的 Sprite/Texture2D
+可直接拖到该 resource slot，也可拖到 Hierarchy 中的目标 Sprite 节点；拖放期间 slot 使用 primary container 高亮，释放后保持节点 Inspector 上下文。
+Sprite 资源是节点的必需 payload，因此不提供伪造的 Clear 操作。Play active 时全部节点属性控件
 与其它 authoring 控件一同锁定；成功编辑后 runtime preview 从新的 canonical bytes 重建。
 
 Editor 默认进入无帧数上限的交互模式，由主窗口关闭结束生命周期；自动演示不再默认执行。只有同时显式传入
@@ -55,7 +58,7 @@ smoke。统一 gate 的失败集中修复后只重跑失败或直接受影响项
 
 TileMap Inspector 已提供固定容量 Tile Palette：数据来自当前 resident Tileset 的 cooked payload，选择 tile 不产生
 document revision，且无 Tileset 时 Paint 控件禁用。Editor 私有 settings carrier 已接入启动读取和退出原子写入，保存
-SplitView fraction/可见性、Bottom Panel 与 snap enabled；主题和 snap 步长 Preferences UI 尚未承诺完成。Recent Projects
+SplitView fraction/可见性、Bottom Panel、Layout Debugger 可见性与 snap enabled；主题和 snap 步长 Preferences UI 尚未承诺完成。Recent Projects
 在统一 Catalog switch 提交点记录最近 10 个 project root，并在 Start Center 以固定按钮行呈现；无效路径从列表移除。
 上述能力没有新增自动测试；本批统一证据已完成：`tina_editor_tests` 112/112、`tina_editor_app_tests` 23/23，
 `tina_sample_2d --frames=300 --frame-delay-ms=0` 与 `tina_sample_3d --frames=30 --frame-delay-ms=0` 均
@@ -68,14 +71,20 @@ Command Bar 中央的 `2D/3D` 是 workspace selector，`View > Workspace` 提供
 只呈现从 Project Assets 实际打开的 scene/Catalog document，Undo/Redo/Save 已并入 Command Bar。内建 World2D/World3D/TileMap/Animation
 session 都是 workspace/context 的内部状态，不再重复显示成顶层文档标签；没有可关闭的项目文档时关闭按钮也折叠。
 2D Viewport Header 以 `Scene/TileMap` 切换当前 authoring context。底部面板默认收起，Status Bar 的
-`Animation` / `Output` / `Layout` 按钮用于打开或切换面板，再次点击当前按钮会收起；Animation authoring 位于
+`Animation` / `Output` 按钮用于打开或切换底部面板，再次点击当前按钮会收起；Animation authoring 位于
 Animation 面板，Output 以有界三列 DataGrid 显示 `Level | Context | Message` 历史；Layout Debugger 使用 committed
 layout snapshot 提供节点树、authored/resolved 布局参数、几何与 basis 详情、界面拾取和非侵入式 bounds overlay，
-并在所有构建配置中可用。Hierarchy 与 Inspector Header 分别提供向外收起按钮，
+并在所有构建配置中可用。Layout Debugger 使用 Root 级悬浮面板，不再占用底部面板空间。可通过
+`View -> Layout Debugger` 或 Status Bar 的 `Layout` 打开；`All Bounds`
+在全部可见节点与当前选择之间切换，`Pick` 从真实 committed hit 结果选中、展开并滚动到布局树节点。
+`%APPDATA%\\TinaEditor\\settings` 中的 `layoutDebugger=1` 会在下次启动恢复悬浮面板。Hierarchy 与 Inspector Header 分别提供向外收起按钮，
 `View` 菜单中的 `Left Dock` / `Inspector` Check 项用于恢复或再次隐藏；收起前保存用户最后拖拽比例。
+Project Assets 中的 `Sprite` 或 `Texture2D` 可直接拖入 2D Viewport；释放后会在指针对应的世界坐标创建一个
+`Sprite2D` canonical node，自动选中并切换到 Translate gizmo。拖入 Hierarchy 的已有 `Sprite2D`/
+`AnimatedSprite2D` 或 Inspector 的 Sprite resource slot 则执行资源赋值；单击资源只改变检查选择，不修改场景。
 根使用四个连续 band；Workspace 由三个嵌套 `SplitView` 组成：`Left Dock | Main`、`Center | Inspector`、
 `Viewport | Bottom Panel Host`。三个 splitter 都使用第一方 Pointer Capture/RangeInput 状态机，可直接拖动调整 Left Dock、
-Inspector 与已打开的底部面板；Editor Theme 让 10 logical px 命中区本身完整绘制为分隔条，不再在热区两侧保留
+Inspector 与已打开的底部面板；Layout Debugger 为独立 Root Overlay，不参与 Bottom Panel Host；Editor Theme 让 10 logical px 命中区本身完整绘制为分隔条，不再在热区两侧保留
 透明边距。任一 pane 收起时，其 splitter 同步 `Collapsed`，SplitView fraction 同步落到 `0` 或 `1`，中央 Viewport
 立即获得全部释放空间；重新打开时恢复先前 fraction，pane 最小尺寸仍由 SplitView
 约束。Button、TextEdit、Tab、
@@ -380,6 +389,7 @@ Workspace
   Active 2D/3D viewport (one Scene-TileMap/transform/snap/marquee/tile/frame/view toolbar + preview canvas)
   Inspector dock (scrollable identity/transform/node properties/hierarchy/TileMap/document/36px dependency list)
 Collapsible bottom panel (Animation timeline or structured Output history; closed by default)
+Root floating Layout Debugger overlay (hidden by default; independent of the bottom panel host)
 Status bar (schema/entities/revision/preview/selection)
 Dirty-close modal (save/save-as/discard/cancel)
 Snackbar host (feedback/optional undo/polite live region)

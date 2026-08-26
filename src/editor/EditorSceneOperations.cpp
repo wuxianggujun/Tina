@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <limits>
 #include <new>
 #include <span>
@@ -427,7 +428,8 @@ Core::Result<EditorSceneOperationResult>
 addWorld2DNode(World2DAuthoringDocument& document,
                World2DNodeTemplate nodeTemplate,
                Core::u32 parentStableId,
-               const World2DNodeTemplateAssets& assets)
+               const World2DNodeTemplateAssets& assets,
+               const World2DNodePlacement& placement)
 try
 {
     if (static_cast<Core::usize>(nodeTemplate) >= World2DNodeTemplateCount) {
@@ -451,6 +453,13 @@ try
         return Core::failure(
             EditorErrorCode::InvalidAuthoringOperation,
             "Editor scene resource node template requires an asset");
+    }
+    if (!std::isfinite(placement.positionX) ||
+        !std::isfinite(placement.positionY) ||
+        !std::isfinite(placement.positionZ)) {
+        return Core::failure(
+            EditorErrorCode::InvalidAuthoringOperation,
+            "Editor scene node placement must contain finite coordinates");
     }
 
     std::vector<AssetFormat::World2DEntityDesc> storage;
@@ -499,6 +508,9 @@ try
         .stableEntityId = *stableId,
         .parentStableEntityId = parentStableId,
         .nodeKind = static_cast<AssetFormat::World2DNodeKind>(nodeTemplate),
+        .positionX = placement.positionX,
+        .positionY = placement.positionY,
+        .positionZ = placement.positionZ,
     };
     switch (nodeTemplate) {
     case World2DNodeTemplate::Node2D:

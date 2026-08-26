@@ -380,9 +380,6 @@ auto EditorWorkspaceState::processPendingOutputLocate(
             !status) {
             return status;
         }
-        if (auto status = projectAssets_.setCurrentFolder({}); !status) {
-            return status;
-        }
         if (auto status = projectAssets_.setSearchQuery({}); !status) {
             return status;
         }
@@ -841,11 +838,6 @@ auto EditorWorkspaceState::refreshWorkspacePanelsUi(
         outputLayout.visibility = next == BottomPanelKind::Output
                                       ? UI::UIVisibility::Visible
                                       : UI::UIVisibility::Collapsed;
-        UI::UILayoutStyle layoutDebugLayout = layoutDebugPanelLayout_;
-        layoutDebugLayout.visibility = next == BottomPanelKind::Layout
-                                           ? UI::UIVisibility::Visible
-                                           : UI::UIVisibility::Collapsed;
-
         if (auto status = tree.setLayoutStyle(
                 bottomPanelSplitter_, splitterLayout);
             !status) {
@@ -863,11 +855,6 @@ auto EditorWorkspaceState::refreshWorkspacePanelsUi(
             !status) {
             return status;
         }
-        if (auto status = tree.setLayoutStyle(
-                layoutDebugPanel_, layoutDebugLayout);
-            !status) {
-            return status;
-        }
         if (auto status = tree.setSplitViewFraction(
                 bottomPanelSplitView_,
                 panelVisible ? bottomPanelVisibleFraction_ : 1.0F);
@@ -877,7 +864,6 @@ auto EditorWorkspaceState::refreshWorkspacePanelsUi(
         constexpr std::array BottomPanels{
             BottomPanelKind::Animation,
             BottomPanelKind::Output,
-            BottomPanelKind::Layout,
         };
         for (u32 index = 0; index < bottomPanelButtons_.size(); ++index) {
             if (auto status = tree.setRadioButtonSelected(
@@ -887,22 +873,45 @@ auto EditorWorkspaceState::refreshWorkspacePanelsUi(
             }
         }
         if (auto status = tree.setMenuItemChecked(
-                viewLayoutDebuggerMenuItem_, next == BottomPanelKind::Layout);
+                viewLayoutDebuggerMenuItem_, layoutDebuggerVisible_);
             !status) {
             return status;
         }
-
         bottomPanelSplitterLayout_ = splitterLayout;
         bottomPanelHostLayout_ = hostLayout;
         animationPanelLayout_ = animationLayout;
         outputPanelLayout_ = outputLayout;
-        layoutDebugPanelLayout_ = layoutDebugLayout;
-        if (bottomPanel_ != next) {
-            layoutDebugDetailsRefreshPending_ = true;
+        bottomPanel_ = next;
+        pendingBottomPanelOpen_.reset();
+        pendingBottomPanelToggle_.reset();
+    }
+
+    if (pendingLayoutDebuggerOpen_ || pendingLayoutDebuggerToggle_) {
+        const bool nextVisible = pendingLayoutDebuggerOpen_
+            ? true
+            : !layoutDebuggerVisible_;
+        UI::UILayoutStyle layoutDebugLayout = layoutDebugPanelLayout_;
+        layoutDebugLayout.visibility = nextVisible
+            ? UI::UIVisibility::Visible
+            : UI::UIVisibility::Collapsed;
+        if (auto status = tree.setLayoutStyle(layoutDebugPanel_, layoutDebugLayout);
+            !status) {
+            return status;
         }
-        if (next != BottomPanelKind::Layout) {
+        layoutDebugPanelLayout_ = layoutDebugLayout;
+        if (auto status = tree.setRadioButtonSelected(
+                layoutDebugStatusButton_, nextVisible); !status) {
+            return status;
+        }
+        if (auto status = tree.setMenuItemChecked(
+                viewLayoutDebuggerMenuItem_, nextVisible); !status) {
+            return status;
+        }
+        layoutDebuggerVisible_ = nextVisible;
+        if (!nextVisible) {
             layoutDebugPickArmed_ = false;
             pendingLayoutDebugPickPoint_.reset();
+            layoutDebugRevealSelectionPending_ = false;
             layoutDebugSelectedNode_ = {};
             layoutDebugSelectedEntry_.reset();
             layoutDebugSelectionKey_ = UI::InvalidUITreeViewItemKey;
@@ -912,9 +921,9 @@ auto EditorWorkspaceState::refreshWorkspacePanelsUi(
                 return status;
             }
         }
-        bottomPanel_ = next;
-        pendingBottomPanelOpen_.reset();
-        pendingBottomPanelToggle_.reset();
+        layoutDebugDetailsRefreshPending_ = true;
+        pendingLayoutDebuggerOpen_ = false;
+        pendingLayoutDebuggerToggle_ = false;
     }
 
     if (auto status = refreshInspectorGridLayout(tree); !status) {
@@ -962,7 +971,7 @@ auto EditorWorkspaceState::refreshMainMenuUi(
     }
     if (auto status = tree.setMenuItemChecked(
             viewLayoutDebuggerMenuItem_,
-            bottomPanel_ == BottomPanelKind::Layout);
+            layoutDebuggerVisible_);
         !status) {
         return status;
     }
@@ -1542,9 +1551,6 @@ auto EditorWorkspaceState::refreshPlaySessionUi(
     if (auto status = tree.setEnabled(projectAssetTypeDropdown_, false); !status) {
         return status;
     }
-    if (auto status = tree.setEnabled(projectAssetFolderTree_, false); !status) {
-        return status;
-    }
     for (const UI::UINodeId button : projectAssetViewButtons_) {
         if (auto status = tree.setEnabled(button, false); !status) {
             return status;
@@ -1568,7 +1574,7 @@ auto EditorWorkspaceState::refreshPlaySessionUi(
     }
     for (const NodePropertySectionUi& section : nodePropertySections_) {
         const std::array sectionControls{
-            section.activeSwitch, section.assignButton, section.applyButton};
+            section.activeSwitch, section.resourceAssignButton, section.applyButton};
         for (const UI::UINodeId control : sectionControls) {
             if (!control.hasValue()) {
                 continue;

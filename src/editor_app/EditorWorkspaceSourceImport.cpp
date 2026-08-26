@@ -2,7 +2,30 @@
 
 #include "EditorSourceImportSelection.hpp"
 
+#include <tina/render/RenderErrors.hpp>
+#include <tina/runtime/RuntimeErrors.hpp>
+#include <tina/ui/UIErrors.hpp>
+
 namespace Tina::EditorApp::WorkspaceInternal {
+bool EditorWorkspaceState::isFatalSourceImportError(
+    const Tina::Core::Error& error) noexcept
+{
+    const bool lifecycleInvariant =
+        error.code == Tina::Core::CoreErrorCode::InvalidArgument &&
+        (error.message.find("owner thread") != std::string::npos ||
+         error.message.find("requires Idle state") != std::string::npos ||
+         error.message.find("requires Ready state") != std::string::npos ||
+         error.message.find("requires Failed state") != std::string::npos ||
+         error.message.find("requires Running state") != std::string::npos);
+    return error.code == Tina::Core::CoreErrorCode::OutOfMemory ||
+           error.code == Tina::Core::CoreErrorCode::Internal ||
+           error.code == Tina::Asset::AssetErrorCode::AllocationFailed ||
+           error.code == Tina::Asset::AssetErrorCode::WrongOwnerThread ||
+           error.code == Tina::Render::RenderErrorCode::WrongOwnerThread ||
+           error.code == Tina::RuntimeErrorCode::WrongOwnerThread ||
+           error.code == Tina::UI::UIErrorCode::WrongOwnerThread ||
+           lifecycleInvariant;
+}
 
 EditorAssetImportStatus EditorWorkspaceState::assetImportStatusForPhase(
     Tina::EditorApp::Detail::EditorSourceImportPhase phase) noexcept
@@ -137,7 +160,85 @@ void EditorWorkspaceState::pruneAssetImportHistoryToCatalog() noexcept
 
 auto EditorWorkspaceState::startSourceImport(
     std::span<const Tina::EditorApp::Detail::EditorSourceImportUnit> intendedUnits,
-    std::vector<std::string> selectedPathsUtf8) -> Tina::Core::Status{
+    std::vector<std::string> selectedPathsUtf8) -> Tina::Core::Status
+{
+    std::vector<Tina::EditorApp::Detail::EditorSourceImportUnit> retryUnits;
+    std::vector<std::string> retryPathsUtf8;
+    const auto recoverStartFailure =
+        [this, &retryUnits, &retryPathsUtf8](
+            std::string_view prefix, Tina::Core::Error error)
+        -> Tina::Core::Status {
+        if (isFatalSourceImportError(error)) {
+            return Tina::Core::failure(std::move(error));
+        }
+        // A source-file rename is an ingress transaction owned by the import
+        // request. If staging/cache/worker launch fails before the worker can
+        // commit a new Catalog, restore the old path before exposing Retry.
+        // Retry must target the restored unit list, otherwise the old Catalog
+        // and the filesystem would disagree about the source path.
+        bool retryMatchesFilesystem = true;
+        if (pendingProjectAssetSourceRename_.has_value() &&
+            !sourceImportCatalogCommitted_) {
+            if (auto rollback = rollbackProjectAssetSourceRename(); !rollback) {
+                if (isFatalSourceImportError(rollback.error())) {
+                    return rollback;
+                }
+                retryMatchesFilesystem = false;
+                if (auto feedback = reportAuthoringFailure(
+                        "Source import failed and source-file rollback is pending: ",
+                        rollback.error()); !feedback) {
+                    return feedback;
+                }
+            } else {
+                try {
+                    retryUnits = sourceImportUnits_;
+                } catch (const std::bad_alloc&) {
+                    return Tina::Core::failure(
+                        Tina::Core::CoreErrorCode::OutOfMemory,
+                        "Editor could not retain the restored source-import retry request");
+                }
+            }
+        }
+        if (auto feedback = reportAuthoringFailure(prefix, error); !feedback) {
+            return feedback;
+        }
+        ++counters_.sourceImportFailures;
+        counters_.sourceImportRunning = false;
+        counters_.sourceImportReady = false;
+        sourceImportObservedPhase_ =
+            Tina::EditorApp::Detail::EditorSourceImportPhase::Failed;
+        sourceImportCatalogCommitted_ = false;
+        sourceImportLastFailed_ = true;
+        sourceImportUiRefreshPending_ = true;
+        try {
+            sourceImportFailureMessageUtf8_ = error.message;
+        } catch (const std::bad_alloc&) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::OutOfMemory,
+                "Editor could not retain source import failure feedback");
+        }
+        if (fileDropFeedbackState_ != FileDropFeedbackState::Hidden) {
+            setFileDropFeedback(
+                FileDropFeedbackState::Failed,
+                sourceImportFailureMessageUtf8_.empty()
+                    ? std::string_view{"Source import could not start"}
+                    : std::string_view{sourceImportFailureMessageUtf8_});
+        }
+        try {
+            if (retryMatchesFilesystem) {
+                sourceImportRetryUnits_ = retryUnits;
+                sourceImportRetryPathsUtf8_ = retryPathsUtf8;
+            } else {
+                sourceImportRetryUnits_.clear();
+                sourceImportRetryPathsUtf8_.clear();
+            }
+        } catch (const std::bad_alloc&) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::OutOfMemory,
+                "Editor could not retain the source-import retry request");
+        }
+        return Tina::Core::success();
+    };
     const bool hasSelectedPaths = !selectedPathsUtf8.empty();
     if (!activeProjectWorkspace_.has_value()) {
         authoringFeedback_ = "Source import requires an open Tina project";
@@ -148,10 +249,22 @@ auto EditorWorkspaceState::startSourceImport(
         authoringFeedback_ = "Source import is already running or awaiting Catalog commit";
         return Tina::Core::success();
     }
+    activeAssetImportIds_.clear();
+    sourceImportPointerPathUtf8_.clear();
+    sourceImportPendingStageRootUtf8_.clear();
+    try {
+        retryUnits.assign(intendedUnits.begin(), intendedUnits.end());
+        retryPathsUtf8 = selectedPathsUtf8;
+    } catch (const std::bad_alloc&) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::OutOfMemory,
+            "Editor could not retain the source-import retry request");
+    }
 
     auto stagePaths = createSourceImportStagePaths(*activeProjectWorkspace_);
     if (!stagePaths) {
-        return Tina::Core::failure(std::move(stagePaths.error()));
+        return recoverStartFailure(
+            "Source import staging failed: ", std::move(stagePaths.error()));
     }
     auto stageReservation = Tina::Core::makeScopeExit([this, &stagePaths]() noexcept {
         cleanupOwnedSourceImportStage(stagePaths->catalogRootUtf8);
@@ -160,12 +273,12 @@ auto EditorWorkspaceState::startSourceImport(
     });
     auto cache = ensureSourceImportCache(*activeProjectWorkspace_);
     if (!cache) {
-        return Tina::Core::failure(std::move(cache.error()));
+        return recoverStartFailure(
+            "Source import cache preparation failed: ",
+            std::move(cache.error()));
     }
 
     Tina::EditorApp::Detail::EditorSourceImportRequest request{};
-    std::vector<Tina::EditorApp::Detail::EditorSourceImportUnit> retryUnits;
-    std::vector<std::string> retryPathsUtf8;
     try {
         request.sourceRootUtf8.assign(activeProjectWorkspace_->sourceRootUtf8());
         request.baselineCatalogRootUtf8 = assetResources_.sourceImportCatalogRootUtf8;
@@ -175,15 +288,12 @@ auto EditorWorkspaceState::startSourceImport(
         request.targetPlatform = activeProjectWorkspace_->targetPlatform();
         request.units.assign(intendedUnits.begin(), intendedUnits.end());
         request.selectedPathsUtf8 = std::move(selectedPathsUtf8);
-        retryUnits = request.units;
-        retryPathsUtf8 = request.selectedPathsUtf8;
         sourceImportPointerPathUtf8_ = pathToUtf8(cache->activeCatalogPointer);
         sourceImportPendingStageRootUtf8_ = request.freshStageRootUtf8;
 
         // Existing unit mappings are the only authoritative way to know which
         // AssetIds a reimport will touch before the worker returns. New output
         // ids are added from the validated stage in updateSourceImport().
-        activeAssetImportIds_.clear();
         for (const auto& intendedUnit : intendedUnits) {
             for (const auto& mapping : sourceImportUnitOutputs_) {
                 if (mapping.sourceUtf8Path != intendedUnit.sourcePathUtf8) {
@@ -213,13 +323,15 @@ auto EditorWorkspaceState::startSourceImport(
 
     if (auto status = sourceImportService_.start(std::move(request)); !status) {
         activeAssetImportIds_.clear();
-        return status;
+        return recoverStartFailure(
+            "Source import could not start: ", std::move(status.error()));
     }
     sourceImportRetryUnits_.swap(retryUnits);
     sourceImportRetryPathsUtf8_.swap(retryPathsUtf8);
     sourceImportUiRefreshPending_ = true;
     stageReservation.release();
     sourceImportCatalogCommitted_ = false;
+    previewAssetBindingsFailureFeedbackPending_ = false;
     sourceImportLastFailed_ = false;
     sourceImportFailureMessageUtf8_.clear();
     counters_.sourceImportRunning = true;
@@ -282,9 +394,12 @@ auto EditorWorkspaceState::removeSelectedSourceImport() -> Tina::Core::Status{
     if (auto status = startSourceImport(*intendedUnits, {}); !status) {
         return status;
     }
-    authoringFeedback_ = removesFinalUnit
-        ? "Removing the final source import and publishing an empty Catalog"
-        : "Rebuilding the Catalog without the selected source import";
+    if (sourceImportService_.state() ==
+        Tina::EditorApp::Detail::EditorSourceImportServiceState::Running) {
+        authoringFeedback_ = removesFinalUnit
+            ? "Removing the final source import and publishing an empty Catalog"
+            : "Rebuilding the Catalog without the selected source import";
+    }
     return Tina::Core::success();
 }
 
@@ -367,6 +482,13 @@ auto EditorWorkspaceState::cleanupOwnedAuthoringStage(std::string_view catalogRo
 }
 
 auto EditorWorkspaceState::cleanupFailedSourceImportStage() noexcept -> void{
+    // After reloadPreparedCatalog() succeeds this stage is live. A later
+    // pointer/state publish failure must not let generic failure cleanup delete
+    // the Catalog that AssetSystem is currently serving.
+    if (sourceImportCatalogCommitted_) {
+        sourceImportPendingStageRootUtf8_.clear();
+        return;
+    }
     cleanupOwnedSourceImportStage(sourceImportPendingStageRootUtf8_);
     sourceImportPendingStageRootUtf8_.clear();
 }
@@ -384,23 +506,12 @@ auto EditorWorkspaceState::rollbackProjectAssetSourceRename() noexcept
     return Tina::Core::success();
 }
 
+
 auto EditorWorkspaceState::publishCommittedSourceImportState(
-    const Tina::EditorApp::Detail::EditorSourceImportReadyStage& ready) -> Tina::Core::Status{
+    const Tina::EditorApp::Detail::EditorSourceImportReadyStage& ready) -> Tina::Core::Status
+{
     if (!ready.stageCreated) {
         return Tina::Core::success();
-    }
-    if (activeProjectWorkspace_.has_value()) {
-        const auto authoringPointer =
-            authoringCachePaths(*activeProjectWorkspace_).activeCatalogPointer;
-        std::error_code pointerError;
-        (void)std::filesystem::remove(authoringPointer, pointerError);
-        if (pointerError && pointerError != std::errc::no_such_file_or_directory) {
-            Tina::Core::Error error{
-                Tina::Core::CoreErrorCode::Io,
-                "Editor could not retire the active authoring Catalog pointer"};
-            error.setNativeCode(pointerError.value());
-            return Tina::Core::failure(std::move(error));
-        }
     }
     try {
         std::error_code stateError;
@@ -419,6 +530,11 @@ auto EditorWorkspaceState::publishCommittedSourceImportState(
         error.setNativeCode(exception.code().value());
         return Tina::Core::failure(std::move(error));
     }
+    if (sourceImportPointerPathUtf8_.empty()) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::Internal,
+            "Source import committed without an active Catalog pointer path");
+    }
     const auto pointerBytes = std::as_bytes(std::span{
         ready.stageRootUtf8.data(), ready.stageRootUtf8.size()});
     if (auto status = Tina::Core::writeFile(
@@ -426,15 +542,96 @@ auto EditorWorkspaceState::publishCommittedSourceImportState(
         !status) {
         return status;
     }
-    cleanupOwnedSourceImportStage(sourceImportSupersededCatalogRootUtf8_);
+    if (activeProjectWorkspace_.has_value()) {
+        const auto authoringPointer =
+            authoringCachePaths(*activeProjectWorkspace_).activeCatalogPointer;
+        std::error_code pointerError;
+        (void)std::filesystem::remove(authoringPointer, pointerError);
+        if (pointerError && pointerError != std::errc::no_such_file_or_directory) {
+            Tina::Core::Error error{
+                Tina::Core::CoreErrorCode::Io,
+                "Editor could not retire the active authoring Catalog pointer"};
+            error.setNativeCode(pointerError.value());
+            return Tina::Core::failure(std::move(error));
+        }
+    }
+    if (sourceImportSupersededCatalogRootUtf8_ !=
+        assetResources_.sourceImportCatalogRootUtf8) {
+        cleanupOwnedSourceImportStage(sourceImportSupersededCatalogRootUtf8_);
+    }
     sourceImportSupersededCatalogRootUtf8_.clear();
-    cleanupOwnedAuthoringStage(sourceImportSupersededAuthoringCatalogRootUtf8_);
+    if (sourceImportSupersededAuthoringCatalogRootUtf8_ !=
+        assetResources_.sourceImportCatalogRootUtf8) {
+        cleanupOwnedAuthoringStage(sourceImportSupersededAuthoringCatalogRootUtf8_);
+    }
     sourceImportSupersededAuthoringCatalogRootUtf8_.clear();
     return Tina::Core::success();
 }
 
 auto EditorWorkspaceState::commitSourceImportCatalog(
     Tina::EditorApp::Detail::EditorSourceImportReadyStage& ready) -> Tina::Core::Status{
+    const auto recoverReadyFailure =
+        [this](std::string_view prefix, Tina::Core::Error error)
+        -> Tina::Core::Status {
+        if (isFatalSourceImportError(error)) {
+            return Tina::Core::failure(std::move(error));
+        }
+        if (auto status = reportAuthoringFailure(prefix, error); !status) {
+            return status;
+        }
+        setCurrentImportAssetHistory(EditorAssetImportStatus::Error);
+        ++counters_.sourceImportFailures;
+        counters_.sourceImportRunning = false;
+        counters_.sourceImportReady = false;
+        sourceImportLastFailed_ = true;
+        sourceImportCatalogCommitted_ = false;
+        sourceImportUiRefreshPending_ = true;
+        try {
+            sourceImportFailureMessageUtf8_ = error.message;
+        } catch (const std::bad_alloc&) {
+            sourceImportFailureMessageUtf8_.clear();
+        }
+        if (fileDropFeedbackState_ == FileDropFeedbackState::Processing) {
+            setFileDropFeedback(
+                FileDropFeedbackState::Failed,
+                sourceImportFailureMessageUtf8_.empty()
+                    ? std::string_view{"Source import could not be committed; previous Catalog preserved"}
+                    : std::string_view{sourceImportFailureMessageUtf8_});
+        }
+        cleanupFailedSourceImportStage();
+        const bool hadSourceRename = pendingProjectAssetSourceRename_.has_value();
+        bool sourceRenameRestored = !hadSourceRename;
+        if (auto rollback = rollbackProjectAssetSourceRename(); !rollback) {
+            if (isFatalSourceImportError(rollback.error())) {
+                return rollback;
+            }
+            if (auto feedback = reportAuthoringFailure(
+                    "Source import failed; source-file rollback is pending: ",
+                    rollback.error()); !feedback) {
+                return feedback;
+            }
+            sourceImportRetryUnits_.clear();
+            sourceImportRetryPathsUtf8_.clear();
+        } else {
+            sourceRenameRestored = true;
+        }
+        if (hadSourceRename && sourceRenameRestored) {
+            try {
+                // The rename transaction restored the old filesystem path.
+                // Retry must use the same path as the preserved Catalog.
+                sourceImportRetryUnits_ = sourceImportUnits_;
+                sourceImportRetryPathsUtf8_.clear();
+            } catch (const std::bad_alloc&) {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::OutOfMemory,
+                    "Editor could not retain the restored source-import retry request");
+            }
+        }
+        if (auto discard = sourceImportService_.discardReady(); !discard) {
+            return discard;
+        }
+        return Tina::Core::success();
+    };
     if (!ready.stageCreated) {
         return Tina::Core::success();
     }
@@ -452,7 +649,9 @@ auto EditorWorkspaceState::commitSourceImportCatalog(
                 "Source import ready; save or discard modified Catalog documents: ",
                 candidateTabs.error());
         }
-        return Tina::Core::failure(std::move(candidateTabs.error()));
+        return recoverReadyFailure(
+            "Source import could not prepare Catalog documents: ",
+            std::move(candidateTabs.error()));
     }
 
     const auto previousFilter = projectAssets_.typeFilter();
@@ -485,13 +684,14 @@ auto EditorWorkspaceState::commitSourceImportCatalog(
     }
     auto browser = prepareProjectBrowserForSnapshot(
         ready.catalog, previousFilter, previousSelection, previousSearchQuery,
-        projectAssets_.currentFolderPath(),
         nextUnitOutputs, assetMetadata_,
         activeProjectWorkspace_.has_value()
             ? activeProjectWorkspace_->sourceRootUtf8()
             : std::string_view{});
     if (!browser) {
-        return Tina::Core::failure(std::move(browser.error()));
+        return recoverReadyFailure(
+            "Source import Browser rebuild failed; previous Catalog preserved: ",
+            std::move(browser.error()));
     }
 
     Tina::Asset::Sprite2DBindingRegistry* spriteParticipant =
@@ -516,25 +716,12 @@ auto EditorWorkspaceState::commitSourceImportCatalog(
                                  "the next safe frame";
             return Tina::Core::success();
         }
-        auto status = reportAuthoringFailure(
-            "Source import reload failed; previous Catalog preserved: ", reload.error());
-        if (!status) {
-            return status;
+        if (isFatalSourceImportError(reload.error())) {
+            return Tina::Core::failure(std::move(reload.error()));
         }
-        ++counters_.sourceImportFailures;
-        counters_.sourceImportRunning = false;
-        counters_.sourceImportReady = false;
-        setCurrentImportAssetHistory(EditorAssetImportStatus::Error);
-        if (auto discard = sourceImportService_.discardReady(); !discard) {
-            return discard;
-        }
-        cleanupFailedSourceImportStage();
-        if (auto rollback = rollbackProjectAssetSourceRename(); !rollback) {
-            return rollback;
-        }
-        sourceImportRetryUnits_.clear();
-        sourceImportRetryPathsUtf8_.clear();
-        return Tina::Core::success();
+        return recoverReadyFailure(
+            "Source import reload failed; previous Catalog preserved: ",
+            std::move(reload.error()));
     }
     sourceImportCatalogCommitted_ = true;
 
@@ -545,11 +732,28 @@ auto EditorWorkspaceState::commitSourceImportCatalog(
             "Source import committed without an AssetSystem Catalog snapshot");
     }
     ++counters_.sourceImportCatalogReloads;
+    bool documentRefreshPending = false;
     if (auto status = switchCatalogAuthoringOwnersToPinnedTabs(); !status) {
-        return status;
+        if (isFatalSourceImportError(status.error())) {
+            return status;
+        }
+        if (auto feedback = reportAuthoringFailure(
+                "Catalog committed, but document ownership refresh failed: ",
+                status.error()); !feedback) {
+            return feedback;
+        }
+        documentRefreshPending = true;
     }
     if (auto status = refreshPinnedCatalogAuthoringDocuments(*browser); !status) {
-        return status;
+        if (isFatalSourceImportError(status.error())) {
+            return status;
+        }
+        if (auto feedback = reportAuthoringFailure(
+                "Catalog committed, but open document refresh failed: ",
+                status.error()); !feedback) {
+            return feedback;
+        }
+        documentRefreshPending = true;
     }
     assetResources_.catalogRootUtf8.swap(nextCatalogRoot);
     assetResources_.sourceImportCatalogRootUtf8.swap(nextSourceImportCatalogRoot);
@@ -565,20 +769,65 @@ auto EditorWorkspaceState::commitSourceImportCatalog(
     if (auto status = rebuildLiveCatalogPreview(
             "Source import Catalog, Browser, documents, and previews committed");
         !status) {
-        return status;
+        counters_.runtimePreviewValid = false;
+        previewAssetBindingsRefreshPending_ = true;
+        previewAssetBindingsFailureFeedbackPending_ = true;
+        if (isFatalSourceImportError(status.error())) {
+            return status;
+        }
+        if (auto feedback = reportAuthoringFailure(
+                "Catalog committed, but runtime preview refresh is pending: ",
+                status.error()); !feedback) {
+            return feedback;
+        }
+        authoringFeedback_ += " The Editor remains usable; preview will retry.";
     }
     projectAssets_ = std::move(*browser);
     sourceImportUnitOutputs_ = std::move(nextUnitOutputs);
     commitProjectSwitchDocumentTabs(std::move(*candidateTabs));
     observedProjectAssetSelectionIndex_.reset();
     projectBrowserUiRefreshPending_ = true;
-    previewAssetBindingsRefreshPending_ = false;
+    if (counters_.runtimePreviewValid) {
+        previewAssetBindingsRefreshPending_ = false;
+    }
+    if (documentRefreshPending) {
+        catalogRefreshPending_ = true;
+        authoringFeedback_ = previewAssetBindingsRefreshPending_
+            ? "Catalog committed; documents and runtime preview will retry"
+            : "Catalog committed; open documents will retry against the live Catalog";
+    }
     return Tina::Core::success();
 }
 
 auto EditorWorkspaceState::updateSourceImport() -> Tina::Core::Status{
     if (pendingProjectSwitch_.has_value()) {
         return Tina::Core::success();
+    }
+    if (sourceImportLastFailed_ &&
+        pendingProjectAssetSourceRename_.has_value() &&
+        sourceImportService_.state() ==
+            Tina::EditorApp::Detail::EditorSourceImportServiceState::Idle) {
+        if (auto rollback = rollbackProjectAssetSourceRename(); !rollback) {
+            if (isFatalSourceImportError(rollback.error())) {
+                return rollback;
+            }
+            if (auto feedback = reportAuthoringFailure(
+                    "Source import failed; source-file rollback will retry: ",
+                    rollback.error()); !feedback) {
+                return feedback;
+            }
+            sourceImportUiRefreshPending_ = true;
+            return Tina::Core::success();
+        }
+        try {
+            sourceImportRetryUnits_ = sourceImportUnits_;
+            sourceImportRetryPathsUtf8_.clear();
+        } catch (const std::bad_alloc&) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::OutOfMemory,
+                "Editor could not retain the restored source-import retry request");
+        }
+        sourceImportUiRefreshPending_ = true;
     }
     if (cancelSourceImportPending_) {
         cancelSourceImportPending_ = false;
@@ -591,8 +840,18 @@ auto EditorWorkspaceState::updateSourceImport() -> Tina::Core::Status{
             cleanupOwnedSourceImportStage(sourceImportPendingStageRootUtf8_);
             sourceImportPendingStageRootUtf8_.clear();
             sourceImportPointerPathUtf8_.clear();
+            bool sourceRenameRollbackPending = false;
             if (auto rollback = rollbackProjectAssetSourceRename(); !rollback) {
-                return rollback;
+                if (isFatalSourceImportError(rollback.error())) {
+                    return rollback;
+                }
+                if (auto feedback = reportAuthoringFailure(
+                        "Import cancelled; source-file rollback is pending: ",
+                        rollback.error()); !feedback) {
+                    return feedback;
+                }
+                sourceRenameRollbackPending = true;
+                sourceImportUiRefreshPending_ = true;
             }
             setCurrentImportAssetHistory(EditorAssetImportStatus::Committed);
             activeAssetImportIds_.clear();
@@ -602,13 +861,16 @@ auto EditorWorkspaceState::updateSourceImport() -> Tina::Core::Status{
             sourceImportObservedPhase_ =
                 Tina::EditorApp::Detail::EditorSourceImportPhase::Idle;
             sourceImportCatalogCommitted_ = false;
-            sourceImportLastFailed_ = false;
-            sourceImportFailureMessageUtf8_.clear();
+            sourceImportLastFailed_ = sourceRenameRollbackPending;
+            if (!sourceRenameRollbackPending) {
+                sourceImportFailureMessageUtf8_.clear();
+            }
             counters_.sourceImportRunning = false;
             counters_.sourceImportReady = false;
             sourceImportUiRefreshPending_ = true;
-            authoringFeedback_ =
-                "Source import cancelled; previous Catalog preserved";
+            authoringFeedback_ = sourceRenameRollbackPending
+                ? "Import cancelled; source-file rollback is pending"
+                : "Source import cancelled; previous Catalog preserved";
             if (fileDropFeedbackState_ ==
                 FileDropFeedbackState::Processing) {
                 setFileDropFeedback(
@@ -732,13 +994,33 @@ auto EditorWorkspaceState::updateSourceImport() -> Tina::Core::Status{
             sourceImportProfileDeactivatePending_ = true;
         }
         cleanupFailedSourceImportStage();
+        const bool hadSourceRename = pendingProjectAssetSourceRename_.has_value();
+        bool sourceRenameRestored = !hadSourceRename;
         if (auto rollback = rollbackProjectAssetSourceRename(); !rollback) {
-            return rollback;
+            if (isFatalSourceImportError(rollback.error())) {
+                return rollback;
+            }
+            if (auto feedback = reportAuthoringFailure(
+                    "Source import failed; source-file rollback is pending: ",
+                    rollback.error()); !feedback) {
+                return feedback;
+            }
+            sourceImportRetryUnits_.clear();
+            sourceImportRetryPathsUtf8_.clear();
+        } else {
+            sourceRenameRestored = true;
         }
-        sourceImportRetryUnits_.clear();
-        sourceImportRetryPathsUtf8_.clear();
-        if (options_.sourceImport.importOnStart &&
-            options_.targetFrameCount != 0U) {
+        if (hadSourceRename && sourceRenameRestored) {
+            try {
+                sourceImportRetryUnits_ = sourceImportUnits_;
+                sourceImportRetryPathsUtf8_.clear();
+            } catch (const std::bad_alloc&) {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::OutOfMemory,
+                    "Editor could not retain the restored source-import retry request");
+            }
+        }
+        if (isFatalSourceImportError(*failure)) {
             return Tina::Core::failure(*failure);
         }
         return sourceImportService_.dismissFailure();
@@ -819,11 +1101,27 @@ auto EditorWorkspaceState::updateSourceImport() -> Tina::Core::Status{
                 FileDropFeedbackState::Failed,
                 status.error().message);
         }
-        return reportAuthoringFailure(
-            "Imported Catalog is live; import state commit will retry: ",
-            status.error());
+        if (isFatalSourceImportError(status.error())) {
+            return status;
+        }
+        if (auto feedback = reportAuthoringFailure(
+                "Imported Catalog is live; import state commit will retry: ",
+                status.error()); !feedback) {
+            return feedback;
+        }
+        sourceImportLastFailed_ = true;
+        sourceImportUiRefreshPending_ = true;
+        try {
+            sourceImportFailureMessageUtf8_ = status.error().message;
+        } catch (const std::bad_alloc&) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::OutOfMemory,
+                "Editor could not retain source import state-publish feedback");
+        }
+        return Tina::Core::success();
     }
 
+    const bool recoveredStatePublishFailure = sourceImportLastFailed_;
     counters_.sourceImportUnitsTotal = ready->statistics.unitsTotal;
     counters_.sourceImportUnitsRecooked = ready->statistics.unitsRecooked;
     counters_.sourceImportUnitsRemoved = ready->statistics.unitsRemoved;
@@ -850,12 +1148,22 @@ auto EditorWorkspaceState::updateSourceImport() -> Tina::Core::Status{
         sourceImportProfileDeactivatePending_ = true;
     }
     ++counters_.sourceImportCompletions;
-    if (fileDropFeedbackState_ == FileDropFeedbackState::Processing) {
-        setFileDropFeedback(
-            FileDropFeedbackState::Committed,
-            completionFeedback);
+    if (fileDropFeedbackState_ == FileDropFeedbackState::Processing ||
+        (recoveredStatePublishFailure &&
+         fileDropFeedbackState_ == FileDropFeedbackState::Failed)) {
+        if (previewAssetBindingsRefreshPending_) {
+            setFileDropFeedback(
+                FileDropFeedbackState::Failed,
+                "Catalog committed; runtime preview refresh is pending");
+        } else {
+            setFileDropFeedback(
+                FileDropFeedbackState::Committed,
+                completionFeedback);
+        }
     }
-    authoringFeedback_.swap(completionFeedback);
+    if (!previewAssetBindingsRefreshPending_) {
+        authoringFeedback_.swap(completionFeedback);
+    }
     if (!ready->stageCreated) {
         cleanupOwnedSourceImportStage(sourceImportPendingStageRootUtf8_);
     }
@@ -884,7 +1192,18 @@ auto EditorWorkspaceState::updateSourceImport() -> Tina::Core::Status{
                 FileDropFeedbackState::Failed,
                 committedUnits.error().message);
         }
-        return Tina::Core::failure(std::move(committedUnits.error()));
+        if (isFatalSourceImportError(committedUnits.error())) {
+            return Tina::Core::failure(std::move(committedUnits.error()));
+        }
+        if (auto feedback = reportAuthoringFailure(
+                "Imported Catalog is live; service finalization will retry: ",
+                committedUnits.error()); !feedback) {
+            return feedback;
+        }
+        sourceImportLastFailed_ = true;
+        counters_.sourceImportReady = true;
+        sourceImportUiRefreshPending_ = true;
+        return Tina::Core::success();
     }
     sourceImportUnits_.swap(*committedUnits);
     if (pendingProjectAssetSourceRename_.has_value()) {

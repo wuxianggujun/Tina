@@ -11,7 +11,51 @@ namespace Tina::Editor {
 namespace {
 
 constexpr Core::usize MaxProjectAssetFolderPathBytes = 4096U;
-constexpr Core::usize MaxProjectAssetFolderCount = 65536U;
+
+[[nodiscard]] Core::Result<std::string>
+normalizeFolderPath(std::string_view folderPathUtf8)
+{
+    if (folderPathUtf8.empty()) {
+        return std::string{};
+    }
+    if (folderPathUtf8.size() > MaxProjectAssetFolderPathBytes ||
+        !Core::isStrictUtf8WithoutNul(folderPathUtf8) ||
+        folderPathUtf8.front() == '/' || folderPathUtf8.front() == '\\' ||
+        folderPathUtf8.back() == '/' || folderPathUtf8.back() == '\\') {
+        return Core::failure(EditorErrorCode::InvalidConfiguration,
+                             "Project asset folder path is invalid");
+    }
+    try {
+        std::string normalized;
+        normalized.reserve(folderPathUtf8.size());
+        Core::usize begin = 0U;
+        while (begin < folderPathUtf8.size()) {
+            const Core::usize separator = folderPathUtf8.find_first_of("/\\", begin);
+            const Core::usize end = separator == std::string_view::npos
+                ? folderPathUtf8.size() : separator;
+            const std::string_view component = folderPathUtf8.substr(begin, end - begin);
+            if (component.empty() || component == "." || component == ".." ||
+                component.find(':') != std::string_view::npos ||
+                component.find_first_of("\t\r\n") != std::string_view::npos) {
+                return Core::failure(EditorErrorCode::InvalidConfiguration,
+                                     "Project asset folder path has an invalid component");
+            }
+            if (!normalized.empty()) {
+                normalized.push_back('/');
+            }
+            normalized.append(component);
+            if (separator == std::string_view::npos) {
+                break;
+            }
+            begin = separator + 1U;
+        }
+        return normalized;
+    } catch (const std::bad_alloc&) {
+        return Core::failure(Core::CoreErrorCode::OutOfMemory,
+                             "Project asset folder normalization allocation failed");
+    }
+}
+
 
 [[nodiscard]] bool validTypeFilter(ProjectAssetTypeFilter filter) noexcept
 {
@@ -71,158 +115,6 @@ constexpr Core::usize MaxProjectAssetFolderCount = 65536U;
         }
     }
     return false;
-}
-
-[[nodiscard]] Core::Result<std::string>
-normalizeFolderPath(std::string_view folderPathUtf8)
-{
-    if (folderPathUtf8.empty())
-    {
-        return std::string{};
-    }
-    if (folderPathUtf8.size() > MaxProjectAssetFolderPathBytes ||
-        !Core::isStrictUtf8WithoutNul(folderPathUtf8) ||
-        folderPathUtf8.front() == '/' || folderPathUtf8.front() == '\\' ||
-        folderPathUtf8.back() == '/' || folderPathUtf8.back() == '\\')
-    {
-        return Core::failure(EditorErrorCode::InvalidConfiguration,
-                             "Project asset folder path is invalid");
-    }
-
-    try
-    {
-        std::string normalized;
-        normalized.reserve(folderPathUtf8.size());
-        Core::usize componentBegin = 0U;
-        while (componentBegin < folderPathUtf8.size())
-        {
-            const Core::usize separator = folderPathUtf8.find_first_of(
-                "/\\", componentBegin);
-            const Core::usize componentEnd =
-                separator == std::string_view::npos ? folderPathUtf8.size() : separator;
-            const std::string_view component =
-                folderPathUtf8.substr(componentBegin, componentEnd - componentBegin);
-            if (component.empty() || component == "." || component == ".." ||
-                component.find(':') != std::string_view::npos ||
-                component.find_first_of("\t\r\n") != std::string_view::npos)
-            {
-                return Core::failure(EditorErrorCode::InvalidConfiguration,
-                                     "Project asset folder path has an invalid component");
-            }
-            if (!normalized.empty())
-            {
-                normalized.push_back('/');
-            }
-            normalized.append(component);
-            if (separator == std::string_view::npos)
-            {
-                break;
-            }
-            componentBegin = separator + 1U;
-        }
-        return normalized;
-    }
-    catch (const std::bad_alloc&)
-    {
-        return Core::failure(Core::CoreErrorCode::OutOfMemory,
-                             "Project asset folder normalization allocation failed");
-    }
-}
-
-void appendFolderAndParents(std::vector<std::string>& paths,
-                            std::string_view normalizedPath)
-{
-    Core::usize end = normalizedPath.find('/');
-    while (end != std::string_view::npos)
-    {
-        paths.emplace_back(normalizedPath.substr(0U, end));
-        end = normalizedPath.find('/', end + 1U);
-    }
-    if (!normalizedPath.empty())
-    {
-        paths.emplace_back(normalizedPath);
-    }
-}
-
-[[nodiscard]] Core::Result<std::vector<ProjectAssetFolderDescriptor>>
-buildFolderDescriptors(std::span<const ProjectAssetDescriptor> assets,
-                       std::span<const std::string> scannedFolderPaths,
-                       Core::usize folderCapacity)
-{
-    try
-    {
-        std::vector<std::string> paths;
-        paths.reserve((std::min)(folderCapacity, assets.size()));
-        for (const auto& asset : assets)
-        {
-            appendFolderAndParents(paths, asset.folderPathUtf8);
-        }
-        for (const auto& scannedPath : scannedFolderPaths)
-        {
-            auto normalized = normalizeFolderPath(scannedPath);
-            if (!normalized)
-            {
-                return Core::failure(std::move(normalized.error()));
-            }
-            appendFolderAndParents(paths, *normalized);
-        }
-        std::sort(paths.begin(), paths.end());
-        paths.erase(std::unique(paths.begin(), paths.end()), paths.end());
-        if (paths.size() + 1U > folderCapacity)
-        {
-            return Core::failure(EditorErrorCode::ProjectAssetCapacityExceeded,
-                                 "Project Source exceeds the asset folder capacity");
-        }
-
-        std::vector<ProjectAssetFolderDescriptor> folders;
-        folders.reserve(paths.size() + 1U);
-        folders.push_back(ProjectAssetFolderDescriptor{
-            .pathUtf8 = {},
-            .displayName = "Assets",
-            .level = 0U,
-            .expandable = !paths.empty(),
-        });
-        for (Core::usize index = 0U; index < paths.size(); ++index)
-        {
-            const std::string& path = paths[index];
-            const Core::usize finalSeparator = path.rfind('/');
-            const std::string_view displayName =
-                finalSeparator == std::string::npos
-                    ? std::string_view{path}
-                    : std::string_view{path}.substr(finalSeparator + 1U);
-            const Core::u32 level = static_cast<Core::u32>(
-                1U + static_cast<Core::usize>(std::count(path.begin(), path.end(), '/')));
-            bool expandable = false;
-            if (index + 1U < paths.size())
-            {
-                const std::string& next = paths[index + 1U];
-                expandable = next.size() > path.size() &&
-                             next.compare(0U, path.size(), path) == 0 &&
-                             next[path.size()] == '/';
-            }
-            folders.push_back(ProjectAssetFolderDescriptor{
-                .pathUtf8 = path,
-                .displayName = std::string(displayName),
-                .level = level,
-                .expandable = expandable,
-            });
-        }
-        return folders;
-    }
-    catch (const std::bad_alloc&)
-    {
-        return Core::failure(Core::CoreErrorCode::OutOfMemory,
-                             "Project asset folder index allocation failed");
-    }
-}
-
-[[nodiscard]] bool pathIsInFolder(std::string_view assetFolder,
-                                  std::string_view currentFolder) noexcept
-{
-    return currentFolder.empty() || assetFolder == currentFolder ||
-           (assetFolder.size() > currentFolder.size() &&
-            assetFolder.compare(0U, currentFolder.size(), currentFolder) == 0 &&
-            assetFolder[currentFolder.size()] == '/');
 }
 
 } // namespace
@@ -348,8 +240,7 @@ Core::Result<ProjectAssetBrowserModel> ProjectAssetBrowserModel::Create(
     std::span<const ProjectAssetDescriptor> assets,
     ProjectAssetBrowserConfig config)
 {
-    if (config.itemCapacity == 0U || config.folderCapacity == 0U ||
-        config.folderCapacity > MaxProjectAssetFolderCount ||
+    if (config.itemCapacity == 0U ||
         config.itemCapacity > AssetFormat::Wire::MaxManifestEntries ||
         config.dependencyCapacity > AssetFormat::Wire::MaxManifestDependencies ||
         config.dependencyCapacityPerAsset > AssetFormat::Wire::MaxDependenciesPerAsset ||
@@ -459,12 +350,6 @@ Core::Result<ProjectAssetBrowserModel> ProjectAssetBrowserModel::Create(
             }
         }
 
-        auto folders = buildFolderDescriptors(ownedAssets, {}, config.folderCapacity);
-        if (!folders)
-        {
-            return Core::failure(std::move(folders.error()));
-        }
-
         std::vector<Core::usize> visibleIndices;
         visibleIndices.reserve(ownedAssets.size());
         for (Core::usize index = 0; index < ownedAssets.size(); ++index)
@@ -472,7 +357,6 @@ Core::Result<ProjectAssetBrowserModel> ProjectAssetBrowserModel::Create(
             visibleIndices.push_back(index);
         }
         return ProjectAssetBrowserModel{config, std::move(ownedAssets),
-                                        std::move(*folders),
                                         std::move(visibleIndices)};
     }
     catch (const std::bad_alloc&)
@@ -485,10 +369,8 @@ Core::Result<ProjectAssetBrowserModel> ProjectAssetBrowserModel::Create(
 ProjectAssetBrowserModel::ProjectAssetBrowserModel(
     ProjectAssetBrowserConfig config,
     std::vector<ProjectAssetDescriptor> assets,
-    std::vector<ProjectAssetFolderDescriptor> folders,
     std::vector<Core::usize> visibleIndices) noexcept
     : m_config(config), m_assets(std::move(assets)),
-      m_folders(std::move(folders)),
       m_visibleIndices(std::move(visibleIndices))
 {
     if (!m_visibleIndices.empty())
@@ -516,17 +398,6 @@ Core::u64 ProjectAssetBrowserModel::visibleItemStableKey(
         return 0U;
     }
     return static_cast<Core::u64>(m_visibleIndices[visibleIndex]) + 1U;
-}
-
-const ProjectAssetFolderDescriptor* ProjectAssetBrowserModel::folder(
-    Core::usize index) const noexcept
-{
-    return index < m_folders.size() ? &m_folders[index] : nullptr;
-}
-
-Core::u64 ProjectAssetBrowserModel::folderStableKey(Core::usize index) const noexcept
-{
-    return index < m_folders.size() ? static_cast<Core::u64>(index) + 1U : 0U;
 }
 
 const ProjectAssetDescriptor* ProjectAssetBrowserModel::selectedItem() const noexcept
@@ -582,53 +453,6 @@ Core::Status ProjectAssetBrowserModel::setTypeFilter(
     if (m_typeFilter != filter)
     {
         m_typeFilter = filter;
-        rebuildVisibleIndices();
-    }
-    return Core::success();
-}
-
-Core::Status ProjectAssetBrowserModel::replaceFolders(
-    std::span<const std::string> folderPathsUtf8) noexcept
-{
-    auto folders = buildFolderDescriptors(m_assets, folderPathsUtf8,
-                                          m_config.folderCapacity);
-    if (!folders)
-    {
-        return Core::failure(std::move(folders.error()));
-    }
-    const bool currentFolderStillExists = std::any_of(
-        folders->begin(), folders->end(), [this](const auto& candidate) {
-            return candidate.pathUtf8 == m_currentFolderPathUtf8;
-        });
-    m_folders.swap(*folders);
-    if (!currentFolderStillExists)
-    {
-        m_currentFolderPathUtf8.clear();
-    }
-    rebuildVisibleIndices();
-    return Core::success();
-}
-
-Core::Status ProjectAssetBrowserModel::setCurrentFolder(
-    std::string_view folderPathUtf8) noexcept
-{
-    auto normalized = normalizeFolderPath(folderPathUtf8);
-    if (!normalized)
-    {
-        return Core::failure(std::move(normalized.error()));
-    }
-    const auto folderEntry = std::find_if(
-        m_folders.begin(), m_folders.end(), [&normalized](const auto& candidate) {
-            return candidate.pathUtf8 == *normalized;
-        });
-    if (folderEntry == m_folders.end())
-    {
-        return Core::failure(EditorErrorCode::ProjectAssetNotFound,
-                             "Project asset folder is not in the Source snapshot");
-    }
-    if (m_currentFolderPathUtf8 != *normalized)
-    {
-        m_currentFolderPathUtf8 = std::move(*normalized);
         rebuildVisibleIndices();
     }
     return Core::success();
@@ -742,9 +566,7 @@ void ProjectAssetBrowserModel::rebuildVisibleIndices() noexcept
     m_selectedVisibleIndex.reset();
     for (Core::usize index = 0; index < m_assets.size(); ++index)
     {
-        if (!projectAssetMatchesTypeFilter(m_assets[index].assetKind, m_typeFilter) ||
-            !pathIsInFolder(m_assets[index].folderPathUtf8,
-                            m_currentFolderPathUtf8))
+        if (!projectAssetMatchesTypeFilter(m_assets[index].assetKind, m_typeFilter))
         {
             continue;
         }

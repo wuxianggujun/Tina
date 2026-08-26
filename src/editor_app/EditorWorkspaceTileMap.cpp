@@ -57,7 +57,6 @@ auto EditorWorkspaceState::bakeAndPublishNavigation2D() -> Tina::Core::Status{
     const std::string_view previousSearchQuery = projectAssets_.searchQuery();
     auto browser = prepareProjectBrowserForSnapshot(
         *staged, previousFilter, previousSelection, previousSearchQuery,
-        projectAssets_.currentFolderPath(),
         sourceImportUnitOutputs_, assetMetadata_,
         activeProjectWorkspace_.has_value()
             ? activeProjectWorkspace_->sourceRootUtf8()

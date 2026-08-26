@@ -15,8 +15,8 @@
   读取 `localId/materialFlags/UV`；selection 只改变 `selectedTileId_`，Paint/viewport 使用该真实 localId。
   Tileset 缺失或没有 tile 时 Paint 保持禁用。未引入新的 Tileset schema，也未把 palette 选择写成 document revision。
 - **E2 设置载体**：Editor 私有 UTF-8 文本 settings，Windows 写 `%APPDATA%/TinaEditor/settings`，Linux 依次使用
-  `XDG_CONFIG_HOME`、`$HOME/.config`；schema version=1、固定 10 条 Recent capacity、原子 sibling replace，读取失败回默认值。
-  当前持久化布局 fraction/可见性、底部面板、snap enabled；主题仍沿用现有 Dark/Compact 默认，Preferences UI 留待后续切片。
+  `XDG_CONFIG_HOME`、`$HOME/.config`；schema version=2、固定 10 条 Recent capacity、原子 sibling replace，读取失败回默认值。
+  当前持久化布局 fraction/可见性、底部面板、悬浮 Layout Debugger 可见性、snap enabled；主题仍沿用现有 Dark/Compact 默认，Preferences UI 留待后续切片。
 - **E3 Recent Projects**：成功 project Catalog switch（覆盖 New/Open/Temporary Save As 的统一提交点）记录 canonical project root，
   最近优先、同路径去重、最多 10 条；Start Center 使用固定行按钮，File 菜单提供 `Open Recent` 子菜单，失效路径会从列表移除并报告错误。
 

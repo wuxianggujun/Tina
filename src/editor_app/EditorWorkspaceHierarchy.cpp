@@ -1,7 +1,18 @@
 ﻿#include "EditorWorkspaceState.hpp"
 
+#include <cmath>
+
 namespace Tina::EditorApp::WorkspaceInternal {
 namespace {
+
+[[nodiscard]] bool pointInRect(const UI::UILogicalRect& rect,
+                               UI::UILogicalPoint point) noexcept
+{
+    return std::isfinite(point.x) && std::isfinite(point.y) &&
+           point.x >= rect.x && point.y >= rect.y &&
+           point.x < rect.x + rect.width &&
+           point.y < rect.y + rect.height;
+}
 
 [[nodiscard]] constexpr char hierarchyAsciiLower(char value) noexcept
 {
@@ -1002,6 +1013,14 @@ void EditorWorkspaceState::handleProjectAssetPointerDown(
     projectAssetDragAssetId_ = asset->assetId;
     projectAssetDragStartPosition_ = input.position;
     projectAssetDragActive_ = false;
+    // Keep the current node Inspector available while the pointer may become
+    // a drag. A click releases this reservation on ButtonUp, so ordinary asset
+    // selection still opens the Asset Inspector.
+    projectAssetPointerDownPreservedNodeInspector_ =
+        sceneDocumentActive() &&
+        stableEntityIdForHierarchyItem(selectionKey_) != 0U;
+    preserveNodeInspectorOnProjectAssetSelection_ =
+        projectAssetPointerDownPreservedNodeInspector_;
     event.capturePointer();
 }
 
@@ -1016,10 +1035,56 @@ void EditorWorkspaceState::handleProjectAssetPointerMove(
     const float dy = event.input().position.y - projectAssetDragStartPosition_.y;
     if (!projectAssetDragActive_ && (dx * dx + dy * dy) >= 25.0F) {
         projectAssetDragActive_ = true;
+        preserveNodeInspectorOnProjectAssetSelection_ = true;
+        assetInspectorActive_ = false;
+        pendingProjectAssetOpen_.reset();
+        if (pendingEditorCommand_ == EditorCommand::OpenSelectedProjectAsset) {
+            pendingEditorCommand_.reset();
+        }
+        lastProjectAssetPointerDownAssetId_ = {};
+    }
+    const auto* draggedAsset =
+        projectAssets_.inspectorSnapshot(projectAssetDragAssetId_);
+    const bool compatibleSpriteAsset = draggedAsset != nullptr &&
+        (draggedAsset->assetKind == Tina::AssetFormat::AssetKind::Sprite ||
+         draggedAsset->assetKind == Tina::AssetFormat::AssetKind::Texture2D);
+    const bool pointerOverSpriteResource = projectAssetDragActive_ &&
+        pointInRect(inspectorSpriteResourceRect_, event.input().position);
+    projectAssetDragOverSpriteResource_ =
+        pointerOverSpriteResource && compatibleSpriteAsset;
+    const bool pointerOverViewport = projectAssetDragActive_ &&
+        pointInRect(viewportLogicalRect_, event.input().position);
+    projectAssetDragOverViewport_ =
+        projectAssetDragActive_ && workspaceMode_ == WorkspaceMode::World2D &&
+        compatibleSpriteAsset && pointerOverViewport;
+    hierarchyPreselectionStableId_ = 0U;
+    if (projectAssetDragActive_ && compatibleSpriteAsset) {
+        const u32 targetStableId =
+            hierarchyStableIdAtPosition(event.input().position).value_or(0U);
+        const EditorHierarchyRow* target = hierarchyRow(targetStableId);
+        if (target != nullptr &&
+            (target->kindName == "Sprite2D" ||
+             target->kindName == "AnimatedSprite2D")) {
+            hierarchyPreselectionStableId_ = targetStableId;
+        }
     }
     if (projectAssetDragActive_) {
+        if (projectAssetDragOverViewport_ &&
+            !projectAssetDragOverSpriteResource_) {
+            authoringFeedback_ = "Drop to create a Sprite2D at the viewport position";
+        } else if (projectAssetDragOverSpriteResource_) {
+            authoringFeedback_ = "Drop to assign this resource in the Sprite Inspector";
+        } else if (hierarchyPreselectionStableId_ != 0U) {
+            authoringFeedback_ = "Drop to assign this resource to the Sprite node";
+        } else if ((pointerOverViewport || pointerOverSpriteResource) &&
+                   !compatibleSpriteAsset) {
+            authoringFeedback_ =
+                "This drop target requires a Sprite or Texture2D Project Asset";
+        }
         event.consumeInputTransition();
         event.preventDefaultAction();
+    } else {
+        preserveNodeInspectorOnProjectAssetSelection_ = false;
     }
 }
 
@@ -1030,11 +1095,37 @@ void EditorWorkspaceState::handleProjectAssetPointerUp(
         event.input().button != Tina::Platform::PointerButton::Primary) {
         return;
     }
-    if (projectAssetDragActive_) {
+    const bool completedDrag = projectAssetDragActive_;
+    if (completedDrag) {
+        const bool droppedOnInspectorResource =
+            pointInRect(inspectorSpriteResourceRect_, event.input().position);
         const auto target = hierarchyStableIdAtPosition(event.input().position);
-        if (target.has_value() && *target != 0U) {
+        if (droppedOnInspectorResource) {
+            const u32 selectedStableId = stableEntityIdForHierarchyItem(selectionKey_);
+            const auto* selectedRow = hierarchyRow(selectedStableId);
+            if (selectedStableId != 0U && selectedRow != nullptr &&
+                (selectedRow->kindName == "Sprite2D" ||
+                 selectedRow->kindName == "AnimatedSprite2D")) {
+                pendingProjectAssetDrop_ = ProjectAssetDropRequest{
+                    .assetId = projectAssetDragAssetId_,
+                    .target = ProjectAssetDropTarget::InspectorResourceSlot,
+                    .targetStableId = selectedStableId,
+                };
+            } else {
+                authoringFeedback_ =
+                    "Resource drag cancelled: select a Sprite node before dropping";
+            }
+        } else if (workspaceMode_ == WorkspaceMode::World2D &&
+                   pointInRect(viewportLogicalRect_, event.input().position)) {
             pendingProjectAssetDrop_ = ProjectAssetDropRequest{
                 .assetId = projectAssetDragAssetId_,
+                .target = ProjectAssetDropTarget::Viewport,
+                .viewportPosition = event.input().position,
+            };
+        } else if (target.has_value() && *target != 0U) {
+            pendingProjectAssetDrop_ = ProjectAssetDropRequest{
+                .assetId = projectAssetDragAssetId_,
+                .target = ProjectAssetDropTarget::HierarchyNode,
                 .targetStableId = *target,
             };
         } else {
@@ -1047,6 +1138,19 @@ void EditorWorkspaceState::handleProjectAssetPointerUp(
     event.releasePointerCapture();
     projectAssetDragAssetId_ = {};
     projectAssetDragActive_ = false;
+    projectAssetDragOverSpriteResource_ = false;
+    projectAssetDragOverViewport_ = false;
+    hierarchyPreselectionStableId_ = 0U;
+    if (!completedDrag && projectAssetPointerDownPreservedNodeInspector_) {
+        // The list selection is committed before PointerUp. A click therefore
+        // needs to opt back into the Asset Inspector; a real drag keeps the
+        // node Inspector context for assignment or viewport creation.
+        assetInspectorActive_ = true;
+    }
+    if (!pendingProjectAssetDrop_.has_value()) {
+        preserveNodeInspectorOnProjectAssetSelection_ = false;
+    }
+    projectAssetPointerDownPreservedNodeInspector_ = false;
 }
 
 void EditorWorkspaceState::handleProjectAssetPointerCancel(
@@ -1061,6 +1165,11 @@ void EditorWorkspaceState::handleProjectAssetPointerCancel(
     event.preventDefaultAction();
     projectAssetDragAssetId_ = {};
     projectAssetDragActive_ = false;
+    projectAssetDragOverSpriteResource_ = false;
+    projectAssetDragOverViewport_ = false;
+    hierarchyPreselectionStableId_ = 0U;
+    preserveNodeInspectorOnProjectAssetSelection_ = false;
+    projectAssetPointerDownPreservedNodeInspector_ = false;
     lastProjectAssetPointerDownAssetId_ = {};
     pendingProjectAssetOpen_.reset();
 }

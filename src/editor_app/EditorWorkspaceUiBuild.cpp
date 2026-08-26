@@ -579,10 +579,6 @@ auto EditorWorkspaceState::buildWorkspaceUi(UiBuildContext& ui, UI::UINodeId par
     if (auto status = buildOutputPanelUi(ui, bottomPanelHost_, outputPanel_); !status) {
         return status;
     }
-    if (auto status = buildLayoutDebuggerUi(
-            ui, bottomPanelHost_, layoutDebugPanel_); !status) {
-        return status;
-    }
     return ui.tree.setSplitViewParts(
         bottomPanelSplitView_, viewport, bottomPanelSplitter_, bottomPanelHost_);
 }
@@ -932,48 +928,6 @@ auto EditorWorkspaceState::buildLeftDockUi(
             return status;
         }
     }
-
-    projectAssetFolderTreeLayout_ = fillWidth(112.0F);
-    projectAssetFolderTreeLayout_.flexItem.shrink = 0.0F;
-    auto projectFolderTree = ui.tree.createElement(
-        left, UI::makeTreeViewElement(
-                  {.materializedItemCapacity =
-                       ProjectAssetFolderMaterializedCapacity},
-                  projectAssetFolderTreeLayout_));
-    if (!projectFolderTree) {
-        return Tina::Core::failure(std::move(projectFolderTree.error()));
-    }
-    projectAssetFolderTree_ = *projectFolderTree;
-    if (auto status = ui.tree.setTreeViewStyle(
-            projectAssetFolderTree_,
-            UI::UITreeViewStyle{
-                .rowHeight = ui.productTheme.controls.treeRowHeight,
-                .overscanRows = 1,
-                .scrollBarVisibility = UI::UIScrollBarVisibility::Auto,
-                .wheelStep = ui.productTheme.controls.treeRowHeight,
-                .indentation = ui.productTheme.spacing.space5,
-                .disclosureExtent = 10.0F,
-                .disclosureGap = ui.productTheme.spacing.space2,
-            }); !status) {
-        return status;
-    }
-    if (auto status = ui.tree.setTreeViewPaint(
-            projectAssetFolderTree_, UI::makeTreeViewPaint(ui.productTheme));
-        !status) {
-        return status;
-    }
-    if (auto status = ui.tree.setTreeViewDataSource(
-            projectAssetFolderTree_, projectAssetFolderDataSource()); !status) {
-        return status;
-    }
-    const auto initialFolderIndex = visibleProjectAssetFolderIndex(
-        projectAssets_.currentFolderPath()).value_or(0U);
-    if (auto status = ui.tree.setTreeViewSelectedIndex(
-            projectAssetFolderTree_, initialFolderIndex); !status) {
-        return status;
-    }
-    projectAssetFolderSelectionKey_ =
-        projectAssets_.folderStableKey(initialFolderIndex);
 
     projectAssetStartCenterLayout_ = fillWidth(0.0F);
     projectAssetStartCenterLayout_.size.height = UI::UILayoutLength::Auto();
@@ -1755,6 +1709,23 @@ auto EditorWorkspaceState::buildViewportUi(
         !status) {
         return status;
     }
+    UI::UILayoutStyle viewportDropStyle = fixedSize(1.0F, 1.0F);
+    viewportDropStyle.placement = UI::UILayoutPlacement::Overlay;
+    viewportDropStyle.visibility = UI::UIVisibility::Collapsed;
+    UI::UIElementDescriptor viewportDrop =
+        UI::makePanelElement(viewportDropStyle);
+    viewportDrop.visual.boxPaint = UI::makeSolidBox(UI::rgb(0x000000, 0));
+    viewportDrop.visual.boxPaint->borderLight = ui.productTheme.colors.primary;
+    viewportDrop.visual.boxPaint->borderDark = ui.productTheme.colors.primary;
+    viewportDrop.visual.boxPaint->borderWidth = 2.0F;
+    viewportDrop.pointerHitPolicy = UI::UIPointerHitPolicy::Ignore;
+    viewportDrop.semantics.mode = UI::UISemanticsMode::Exclude;
+    if (auto status = storeNode(
+            ui.tree.createElement(viewportPreviewLayer_, viewportDrop),
+            viewportAssetDropIndicator_);
+        !status) {
+        return status;
+    }
     for (UI::UINodeId& gridNode : viewportGridNodes_) {
         UI::UILayoutStyle gridLineStyle = fixedSize(1.0F, 1.0F);
         gridLineStyle.placement = UI::UILayoutPlacement::Overlay;
@@ -2213,17 +2184,6 @@ auto EditorWorkspaceState::buildInspectorUi(
         !status) {
         return status;
     }
-    UI::UILayoutStyle inspectorAssetAssignLayout = fillWidth(
-        ui.productTheme.controls.buttonHeight);
-    inspectorAssetAssignLayout.flexItem.shrink = 0.0F;
-    inspectorAssetAssignLayout.visibility = assetRowStyle.visibility;
-    if (auto status = storeNode(
-            ui.createButton(inspectorContent, "Assign to Selected Sprite2D",
-                            inspectorAssetAssignLayout, false),
-            inspectorAssignSpriteButton_);
-        !status) {
-        return status;
-    }
     UI::UILayoutStyle dependencySummaryStyle = fillWidth(22.0F);
     dependencySummaryStyle.flexItem.shrink = 0.0F;
     dependencySummaryStyle.visibility = assetRowStyle.visibility;
@@ -2531,6 +2491,58 @@ auto EditorWorkspaceState::buildInspectorUi(
             !status) {
             return status;
         }
+        if (withAssign) {
+            // Sprite2D/AnimatedSprite2D use one canonical resource slot. The
+            // slot is both the visible binding and the Project Assets drop
+            // target; the assign action only reads the current Project Assets
+            // selection through NodeAssignSprite.
+            UI::UILayoutStyle resourceRowLayout = fillWidth(
+                ui.productTheme.controls.textEditHeight);
+            resourceRowLayout.flexItem.shrink = 0.0F;
+            auto resourceRow = EditorPropertyRow::Build(
+                ui.tree, section.collapsible.content, ui.productTheme,
+                "Texture", ui.secondaryText, resourceRowLayout,
+                EditorPropertyLabelWidth,
+                UI::UIGridTrackList::Of({UI::UIGridTrack::Fr()}));
+            if (!resourceRow) {
+                return Tina::Core::failure(std::move(resourceRow.error()));
+            }
+            UI::UILayoutStyle resourceSlotLayout = fillWidth(
+                ui.productTheme.controls.textEditHeight);
+            resourceSlotLayout.flexContainer.direction = UI::UIFlexDirection::Row;
+            resourceSlotLayout.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+            resourceSlotLayout.flexContainer.gap.column = ui.productTheme.spacing.space2;
+            resourceSlotLayout.padding = UI::UIEdgeSpacing::HorizontalVertical(
+                ui.productTheme.spacing.space2, 0.0F);
+            UI::UIElementDescriptor resourceSlotDescriptor =
+                UI::makePanelElement(resourceSlotLayout);
+            resourceSlotDescriptor.visual.boxPaint = UI::makeSolidBox(
+                ui.productTheme.colors.surfaceContainerLow);
+            resourceSlotDescriptor.semantics.name = "Sprite resource drop target";
+            resourceSlotDescriptor.semantics.description =
+                "Drop a Sprite or Texture2D from Project Assets here";
+            auto resourceSlot = ui.tree.createElement(
+                resourceRow->value, resourceSlotDescriptor);
+            if (!resourceSlot) {
+                return Tina::Core::failure(std::move(resourceSlot.error()));
+            }
+            section.resourceSlot = *resourceSlot;
+            if (auto status = storeNode(
+                    ui.createLabel(section.resourceSlot,
+                                   "Drop Sprite or Texture2D",
+                                   growingRegion(), ui.compactText),
+                    section.resourceLabel);
+                !status) {
+                return status;
+            }
+            if (auto status = storeNode(
+                    ui.createIconButton(section.resourceSlot, EditorIcon::Apply,
+                                        "Assign selected Project Asset", {}, false),
+                    section.resourceAssignButton);
+                !status) {
+                return status;
+            }
+        }
         if (withPointLightColor) {
             UI::UILayoutStyle colorFieldLayout{};
             colorFieldLayout.size.width = UI::UILayoutLength::Percent(100.0F);
@@ -2645,15 +2657,6 @@ auto EditorWorkspaceState::buildInspectorUi(
                     return Tina::Core::failure(std::move(inputNode.error()));
                 }
                 section.fields[section.fieldCount++] = *inputNode;
-            }
-        }
-        if (withAssign) {
-            if (auto status = storeNode(
-                    ui.createButton(section.collapsible.content, "Assign Sprite From Selection",
-                                 fillWidth(ui.productTheme.controls.buttonHeight), false),
-                    section.assignButton);
-                !status) {
-                return status;
             }
         }
         if (!applyCaption.empty()) {
@@ -3422,11 +3425,27 @@ auto EditorWorkspaceState::buildLayoutDebuggerUi(
     UiBuildContext& ui, UI::UINodeId parent, UI::UINodeId& layoutPanel)
     -> Tina::Core::Status
 {
-    layoutDebugPanelLayout_ = growingRegion();
+    layoutDebugPanelLayout_ = fixedSize(760.0F, 560.0F);
+    // Keep the initial composition inside the root viewport; the interaction
+    // state machine further clamps every drag/resize update to that same rect.
+    layoutDebugPanelLayout_.minMax.maxWidth = UI::UILayoutLength::Percent(100.0F);
+    layoutDebugPanelLayout_.minMax.maxHeight = UI::UILayoutLength::Percent(100.0F);
+    layoutDebugPanelLayout_.flexItem.shrink = 0.0F;
     layoutDebugPanelLayout_.flexContainer.direction = UI::UIFlexDirection::Column;
     layoutDebugPanelLayout_.flexContainer.gap.row = ui.productTheme.spacing.space3;
     layoutDebugPanelLayout_.padding =
         UI::UIEdgeSpacing::All(ui.productTheme.spacing.space4);
+    layoutDebugPanelLayout_.placement = UI::UILayoutPlacement::Overlay;
+    // Keep the floating window origin in logical top-left coordinates so
+    // pointer dragging can apply deltas directly without reversing axes.
+    layoutDebugPanelLayout_.overlay.horizontal = UI::UIAxisAlignment::Start;
+    layoutDebugPanelLayout_.overlay.vertical = UI::UIAxisAlignment::Start;
+    layoutDebugPanelLayout_.overlay.offset.x =
+        UI::UILayoutLength::Px(ui.productTheme.spacing.space4);
+    layoutDebugPanelLayout_.overlay.offset.y =
+        UI::UILayoutLength::Px(ui.productTheme.controls.commandBarHeight +
+                               ui.productTheme.controls.tabHeight +
+                               ui.productTheme.spacing.space4);
     layoutDebugPanelLayout_.visibility = UI::UIVisibility::Collapsed;
     if (auto status = storeNode(
             ui.createSurface(parent, layoutDebugPanelLayout_,
@@ -3441,6 +3460,15 @@ auto EditorWorkspaceState::buildLayoutDebuggerUi(
         fillWidth(ui.productTheme.controls.buttonHeight));
     if (!header) {
         return Tina::Core::failure(std::move(header.error()));
+    }
+    layoutDebugHeader_ = header->root;
+    // The header surface is the drag target when the pointer does not land on
+    // one of its action buttons. Capture-phase routing keeps those buttons'
+    // normal activation behavior intact.
+    if (auto status = ui.tree.setPointerHitPolicy(
+            layoutDebugHeader_, UI::UIPointerHitPolicy::Targetable);
+        !status) {
+        return status;
     }
     UI::UILayoutStyle summaryLayout = growingRegion();
     summaryLayout.size.height = UI::UILayoutLength::Px(22.0F);
@@ -3511,8 +3539,8 @@ auto EditorWorkspaceState::buildLayoutDebuggerUi(
                 .scrollBarVisibility = UI::UIScrollBarVisibility::Auto,
                 .wheelStep = ui.productTheme.controls.listRowHeight * 2.0F,
                 .indentation = 16.0F,
-                // TreeView metrics require a positive disclosure extent even
-                // when this flat inspection projection has no expandable rows.
+                // TreeView metrics require a positive disclosure extent; layout
+                // debugging uses the slot for real expand/collapse affordances.
                 .disclosureExtent = 10.0F,
                 .disclosureGap = 0.0F,
             });
@@ -3601,6 +3629,27 @@ auto EditorWorkspaceState::buildLayoutDebuggerUi(
             return status;
         }
     }
+
+    // Create the handle last so its resize glyph remains above the tree and
+    // details scroll regions in paint and hit order.
+    layoutDebugResizeHandleLayout_ = fixedSize(18.0F, 18.0F);
+    layoutDebugResizeHandleLayout_.placement = UI::UILayoutPlacement::Overlay;
+    layoutDebugResizeHandleLayout_.overlay.horizontal = UI::UIAxisAlignment::End;
+    layoutDebugResizeHandleLayout_.overlay.vertical = UI::UIAxisAlignment::End;
+    UI::UIElementDescriptor resizeHandle =
+        UI::makePanelElement(layoutDebugResizeHandleLayout_);
+    resizeHandle.visual.boxPaint = UI::makeSolidLine(
+        ui.productTheme.colors.onSurfaceVariant,
+        UI::UILogicalPoint{.x = 3.0F, .y = 15.0F},
+        UI::UILogicalPoint{.x = 15.0F, .y = 3.0F}, 2.0F);
+    resizeHandle.pointerHitPolicy = UI::UIPointerHitPolicy::Targetable;
+    resizeHandle.semantics.mode = UI::UISemanticsMode::Exclude;
+    if (auto status = storeNode(
+            ui.tree.createElement(layoutPanel, resizeHandle),
+            layoutDebugResizeHandle_);
+        !status) {
+        return status;
+    }
     return Tina::Core::success();
 }
 
@@ -3679,30 +3728,38 @@ auto EditorWorkspaceState::buildStatusBarUi(UiBuildContext& ui, UI::UINodeId par
         !status) {
         return status;
     }
-    UI::UINodeId bottomPanelControls{};
-    UI::UILayoutStyle bottomPanelControlsStyle{};
-    bottomPanelControlsStyle.size.height = UI::UILayoutLength::Px(24.0F);
-    bottomPanelControlsStyle.flexItem.shrink = 0.0F;
-    bottomPanelControlsStyle.flexContainer.direction = UI::UIFlexDirection::Row;
-    bottomPanelControlsStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
-    bottomPanelControlsStyle.flexContainer.gap.column = ui.productTheme.spacing.space1;
+    UI::UINodeId statusPanelControls{};
+    UI::UILayoutStyle statusPanelControlsStyle{};
+    statusPanelControlsStyle.size.height = UI::UILayoutLength::Px(24.0F);
+    statusPanelControlsStyle.flexItem.shrink = 0.0F;
+    statusPanelControlsStyle.flexContainer.direction = UI::UIFlexDirection::Row;
+    statusPanelControlsStyle.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+    statusPanelControlsStyle.flexContainer.gap.column = ui.productTheme.spacing.space1;
     if (auto status = storeNode(
-            ui.createPanel(statusBar, bottomPanelControlsStyle),
-            bottomPanelControls);
+            ui.createPanel(statusBar, statusPanelControlsStyle),
+            statusPanelControls);
         !status) {
         return status;
     }
-    constexpr std::array<std::string_view, 3> BottomPanelLabels{
-        "Animation", "Output", "Layout"};
+    constexpr std::array<std::string_view, 2> BottomPanelLabels{
+        "Animation", "Output"};
     for (u32 index = 0; index < bottomPanelButtons_.size(); ++index) {
         if (auto status = storeNode(
                 ui.createSegmentedButton(
-                    bottomPanelControls, BottomPanelLabels[index],
+                    statusPanelControls, BottomPanelLabels[index],
                     fixedSize(index == 0U ? 82.0F : 72.0F, 24.0F)),
                 bottomPanelButtons_[index]);
             !status) {
             return status;
         }
+    }
+    if (auto status = storeNode(
+            ui.createSegmentedButton(
+                statusPanelControls, "Layout",
+                fixedSize(72.0F, 24.0F)),
+            layoutDebugStatusButton_);
+        !status) {
+        return status;
     }
     if (auto status = storeNode(ui.tree.createElement(
                                     statusBar,
@@ -4344,7 +4401,7 @@ auto EditorWorkspaceState::buildProjectAssetFolderDialogUi(
         parent,
         UI::UIDialogConfig{
             .title = "New Project Folder",
-            .body = "Create one folder inside the current Project Assets folder.",
+            .body = "Create a folder inside the project Source directory.",
             .actions = actions,
             .layout = editorDialogOverlayLayout(),
             .surfaceLayout = editorDialogSurfaceLayout(ui.productTheme),
@@ -4637,15 +4694,7 @@ auto EditorWorkspaceState::registerUiCallbacks(
             }
         }
         if (auto status = ui.tree.setButtonAction(
-                nodePropertySections_[0].assignButton,
-                UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
-                    queueEditorCommand(EditorCommand::NodeAssignSprite);
-                }});
-            !status) {
-            return status;
-        }
-        if (auto status = ui.tree.setButtonAction(
-                inspectorAssignSpriteButton_,
+                nodePropertySections_[0].resourceAssignButton,
                 UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
                     queueEditorCommand(EditorCommand::NodeAssignSprite);
                 }});
@@ -4731,7 +4780,7 @@ auto EditorWorkspaceState::registerUiCallbacks(
             viewLayoutDebuggerMenuItem_,
             UI::UIButtonActionCallback{
                 [this](const UI::UIButtonActionEvent&) noexcept {
-                    pendingBottomPanelToggle_ = BottomPanelKind::Layout;
+                    pendingLayoutDebuggerToggle_ = true;
                 }});
         !status) {
         return status;
@@ -4869,7 +4918,6 @@ auto EditorWorkspaceState::registerUiCallbacks(
     constexpr std::array BottomPanels{
         BottomPanelKind::Animation,
         BottomPanelKind::Output,
-        BottomPanelKind::Layout,
     };
     for (u32 index = 0; index < bottomPanelButtons_.size(); ++index) {
         if (auto status = ui.tree.setButtonAction(
@@ -4888,7 +4936,6 @@ auto EditorWorkspaceState::registerUiCallbacks(
     const std::array bottomPanelCollapseBindings{
         std::pair{animationCollapseButton_, BottomPanelKind::Animation},
         std::pair{outputCollapseButton_, BottomPanelKind::Output},
-        std::pair{layoutDebugCollapseButton_, BottomPanelKind::Layout},
     };
     for (const auto& [button, panel] : bottomPanelCollapseBindings) {
         if (auto status = ui.tree.setButtonAction(
@@ -4902,6 +4949,24 @@ auto EditorWorkspaceState::registerUiCallbacks(
             !status) {
             return status;
         }
+    }
+    if (auto status = ui.tree.setButtonAction(
+            layoutDebugStatusButton_,
+            UI::UIButtonActionCallback{
+                [this](const UI::UIButtonActionEvent&) noexcept {
+                    pendingLayoutDebuggerToggle_ = true;
+                }});
+        !status) {
+        return status;
+    }
+    if (auto status = ui.tree.setButtonAction(
+            layoutDebugCollapseButton_,
+            UI::UIButtonActionCallback{
+                [this](const UI::UIButtonActionEvent&) noexcept {
+                    pendingLayoutDebuggerToggle_ = true;
+                }});
+        !status) {
+        return status;
     }
     if (auto status = ui.tree.setButtonAction(
             layoutDebugShowAllButton_,
@@ -4940,6 +5005,36 @@ auto EditorWorkspaceState::registerUiCallbacks(
     }
     layoutDebugPickPointerListener_ =
         std::move(*layoutDebugPickPointerListener);
+    constexpr std::array layoutDebugWindowPointerKinds{
+        UI::UIRoutedPointerEventKind::ButtonDown,
+        UI::UIRoutedPointerEventKind::Move,
+        UI::UIRoutedPointerEventKind::ButtonUp,
+        UI::UIRoutedPointerEventKind::PointerCancel,
+    };
+    for (u32 index = 0U; index < layoutDebugWindowPointerKinds.size(); ++index) {
+        auto listener = ui.tree.addRoutedPointerListener(
+            {
+                .node = layoutDebugPanel_,
+                .kind = layoutDebugWindowPointerKinds[index],
+                .phases = UI::UIEventPhaseMask::Capture,
+            },
+            UI::UIRoutedPointerCallback{
+                [this, index](UI::UIRoutedPointerEvent& event) noexcept {
+                    if (index == 0U) {
+                        handleLayoutDebugWindowPointerDown(event);
+                    } else if (index == 1U) {
+                        handleLayoutDebugWindowPointerMove(event);
+                    } else if (index == 2U) {
+                        handleLayoutDebugWindowPointerUp(event);
+                    } else {
+                        handleLayoutDebugWindowPointerCancel(event);
+                    }
+                }});
+        if (!listener) {
+            return Tina::Core::failure(std::move(listener.error()));
+        }
+        layoutDebugWindowPointerListeners_[index] = std::move(*listener);
+    }
     constexpr std::array outputFilters{
         OutputFilter::All,
         OutputFilter::Info,
@@ -5626,7 +5721,9 @@ auto EditorWorkspaceState::onEnter(Tina::GameStateEnterContext& context) -> Tina
     leftDockVisible_ = editorSettings_.leftDockVisible;
     inspectorVisible_ = editorSettings_.inspectorVisible;
     bottomPanel_ = BottomPanelKind::None;
+    layoutDebuggerVisible_ = false;
     pendingBottomPanelOpen_.reset();
+    pendingLayoutDebuggerOpen_ = editorSettings_.layoutDebuggerVisible;
     if (editorSettings_.bottomPanel != BottomPanelKind::None) {
         pendingBottomPanelOpen_ = editorSettings_.bottomPanel;
     }
@@ -5767,6 +5864,9 @@ auto EditorWorkspaceState::onEnter(Tina::GameStateEnterContext& context) -> Tina
         return status;
     }
     if (auto status = buildWorkspaceUi(ui, rootNode); !status) {
+        return status;
+    }
+    if (auto status = buildLayoutDebuggerUi(ui, rootNode, layoutDebugPanel_); !status) {
         return status;
     }
     if (auto status = buildStatusBarUi(ui, rootNode); !status) {

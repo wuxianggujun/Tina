@@ -75,9 +75,9 @@ world2DNodeTemplateRegistry() noexcept;
 [[nodiscard]] std::span<const EditorNodeTemplateInfo>
 world3DNodeTemplateRegistry() noexcept;
 
-// Resolves the one supported Editor node kind represented by an existing wire
-// item. Legacy payload mixtures fail closed instead of being exposed as a node
-// with attachable components.
+// Resolves the one supported Editor node kind represented by a canonical wire
+// item. Noncanonical payload mixtures fail closed instead of being exposed as
+// a node with attachable components.
 [[nodiscard]] Core::Result<World2DNodeTemplate> classifyWorld2DNodeTemplate(
     const AssetFormat::World2DEntityDesc& entity);
 
@@ -90,6 +90,12 @@ struct World2DNodeTemplateAssets final {
     Core::AssetId spriteId{};
     Core::AssetId animationClipId{};
     Core::AssetId resourceId{};
+};
+
+struct World2DNodePlacement final {
+    float positionX = 0.0F;
+    float positionY = 0.0F;
+    float positionZ = 0.0F;
 };
 
 struct World3DNodeTemplateAssets final {
@@ -112,7 +118,8 @@ struct World3DNodeTemplateAssets final {
 addWorld2DNode(World2DAuthoringDocument& document,
                World2DNodeTemplate nodeTemplate,
                Core::u32 parentStableId = 0,
-               const World2DNodeTemplateAssets& assets = {});
+               const World2DNodeTemplateAssets& assets = {},
+               const World2DNodePlacement& placement = {});
 
 [[nodiscard]] Core::Result<EditorSceneOperationResult>
 duplicateWorld2DNodeSubtree(World2DAuthoringDocument& document,

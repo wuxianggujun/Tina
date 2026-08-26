@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 // Tina Editor desktop composition: shared retained tool chrome backed by
 // validated World2D and World3D authoring documents and Scene GPU previews.
@@ -149,7 +149,6 @@ inline constexpr float MainCenterInitialFraction = 0.68F;
 inline constexpr float ViewportInitialFraction = 0.68F;
 inline constexpr u32 HierarchyMaterializedCapacity = 64;
 inline constexpr u32 AssetBrowserMaterializedCapacity = 24;
-inline constexpr u32 ProjectAssetFolderMaterializedCapacity = 32;
 inline constexpr u32 ProjectAssetTypeFilterCount = 7;
 inline constexpr u32 ProjectAssetCompactIdCharacterCount = 4;
 inline constexpr float ProjectAssetMinimumItemWidth = 116.0F;
@@ -300,7 +299,6 @@ enum class BottomPanelKind : u8 {
     None,
     Animation,
     Output,
-    Layout,
 };
 enum class WorkspacePanelKind : u8 {
     LeftDock,
@@ -417,13 +415,14 @@ loadEditorAssetMetadata(const Tina::Editor::EditorProjectWorkspace& workspace) n
 }
 
 struct EditorSettings final {
-    static constexpr u32 SchemaVersion = 1;
+    static constexpr u32 SchemaVersion = 2;
     float leftDockFraction = LeftDockInitialFraction;
     float inspectorFraction = MainCenterInitialFraction;
     float bottomPanelFraction = ViewportInitialFraction;
     bool leftDockVisible = true;
     bool inspectorVisible = true;
     BottomPanelKind bottomPanel = BottomPanelKind::None;
+    bool layoutDebuggerVisible = false;
     bool snapEnabled = false;
     std::array<std::string, RecentProjectCapacity> recentProjects{};
     u32 recentProjectCount = 0;
@@ -470,7 +469,7 @@ struct EditorSettings final {
             const auto end = text.find('\n', start);
             return std::string_view{text}.substr(start, end == std::string::npos ? text.size() - start : end - start);
         };
-        if (value("version") != "1") return settings;
+        if (value("version") != std::to_string(EditorSettings::SchemaVersion)) return settings;
         const auto parseFloat = [&value](std::string_view key, float fallback) {
             const auto raw = value(key);
             if (raw.empty()) return fallback;
@@ -486,7 +485,8 @@ struct EditorSettings final {
         settings.inspectorVisible = value("inspectorVisible") != "0";
         settings.snapEnabled = value("snap") == "1";
         const auto panel = value("bottomPanel");
-        settings.bottomPanel = panel == "animation" ? BottomPanelKind::Animation : panel == "output" ? BottomPanelKind::Output : panel == "layout" ? BottomPanelKind::Layout : BottomPanelKind::None;
+        settings.bottomPanel = panel == "animation" ? BottomPanelKind::Animation : panel == "output" ? BottomPanelKind::Output : BottomPanelKind::None;
+        settings.layoutDebuggerVisible = value("layoutDebugger") == "1";
         for (u32 index = 0; index < RecentProjectCapacity; ++index) {
             const std::string key = "recent" + std::to_string(index);
             const auto recent = value(key);
@@ -505,13 +505,15 @@ struct EditorSettings final {
     try {
         const auto path = editorSettingsPath();
         if (path.empty()) return Tina::Core::success();
-        std::string text = "version=1\nleftDock=" + std::to_string(settings.leftDockFraction) +
+        std::string text = "version=" + std::to_string(EditorSettings::SchemaVersion) +
+            "\nleftDock=" + std::to_string(settings.leftDockFraction) +
             "\ninspector=" + std::to_string(settings.inspectorFraction) +
             "\nbottom=" + std::to_string(settings.bottomPanelFraction) +
             "\nleftVisible=" + std::to_string(settings.leftDockVisible ? 1 : 0) +
             "\ninspectorVisible=" + std::to_string(settings.inspectorVisible ? 1 : 0) +
+            "\nlayoutDebugger=" + std::to_string(settings.layoutDebuggerVisible ? 1 : 0) +
             "\nsnap=" + std::to_string(settings.snapEnabled ? 1 : 0) + "\nbottomPanel=" +
-            std::string(settings.bottomPanel == BottomPanelKind::Animation ? "animation" : settings.bottomPanel == BottomPanelKind::Output ? "output" : settings.bottomPanel == BottomPanelKind::Layout ? "layout" : "none") + "\n";
+            std::string(settings.bottomPanel == BottomPanelKind::Animation ? "animation" : settings.bottomPanel == BottomPanelKind::Output ? "output" : "none") + "\n";
         for (u32 index = 0; index < settings.recentProjectCount && index < RecentProjectCapacity; ++index) {
             text += "recent" + std::to_string(index) + "=" + settings.recentProjects[index] + "\n";
         }
@@ -2814,9 +2816,17 @@ struct HierarchyDropRequest final {
     u32 targetStableId = 0;
     HierarchyDropIntent intent = HierarchyDropIntent::Reparent;
 };
+enum class ProjectAssetDropTarget : u8 {
+    Invalid,
+    HierarchyNode,
+    InspectorResourceSlot,
+    Viewport,
+};
 struct ProjectAssetDropRequest final {
     Tina::Core::AssetId assetId{};
+    ProjectAssetDropTarget target = ProjectAssetDropTarget::Invalid;
     u32 targetStableId = 0;
+    UI::UILogicalPoint viewportPosition{};
 };
 
 struct ProjectAssetRemoveConfirmation final {
@@ -3495,94 +3505,6 @@ createAuthoringDocuments(const EditorLaunchOptions& options)
         .world3DSession = std::move(world3DSession),
     };
 }
-[[nodiscard]] inline Tina::Core::Result<std::vector<std::string>>
-scanProjectAssetFolders(std::string_view sourceRootUtf8)
-{
-    if (sourceRootUtf8.empty()) {
-        return std::vector<std::string>{};
-    }
-    try {
-        const auto sourceRoot = std::filesystem::u8path(
-            sourceRootUtf8.begin(), sourceRootUtf8.end()).lexically_normal();
-        if (auto status = validatePhysicalProjectDirectory(
-                sourceRoot, "projectAssetSourceRoot"); !status) {
-            return Tina::Core::failure(std::move(status.error()));
-        }
-
-        std::vector<std::string> folders;
-        folders.reserve(128U);
-        std::error_code error;
-        std::filesystem::recursive_directory_iterator iterator(
-            sourceRoot, std::filesystem::directory_options::none, error);
-        const std::filesystem::recursive_directory_iterator end;
-        if (error) {
-            Tina::Core::Error failure{
-                Tina::Core::CoreErrorCode::Io,
-                "Editor could not enumerate Project Source folders"};
-            failure.setNativeCode(error.value());
-            return Tina::Core::failure(std::move(failure));
-        }
-        while (iterator != end) {
-            const auto path = iterator->path();
-            const auto status = iterator->symlink_status(error);
-            if (error) {
-                Tina::Core::Error failure{
-                    Tina::Core::CoreErrorCode::Io,
-                    "Editor could not inspect a Project Source entry"};
-                failure.setNativeCode(error.value());
-                return Tina::Core::failure(std::move(failure));
-            }
-            bool skipDirectory = std::filesystem::is_symlink(status);
-#if defined(_WIN32)
-            if (std::filesystem::is_directory(status)) {
-                const DWORD attributes = ::GetFileAttributesW(path.c_str());
-                if (attributes == INVALID_FILE_ATTRIBUTES) {
-                    Tina::Core::Error failure{
-                        Tina::Core::CoreErrorCode::Io,
-                        "Editor could not inspect Win32 Source folder attributes"};
-                    failure.setNativeCode(static_cast<Tina::Core::i64>(::GetLastError()));
-                    return Tina::Core::failure(std::move(failure));
-                }
-                skipDirectory = skipDirectory ||
-                    (attributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0U;
-            }
-#endif
-            if (skipDirectory) {
-                iterator.disable_recursion_pending();
-            } else if (std::filesystem::is_directory(status)) {
-                const auto relative = path.lexically_relative(sourceRoot);
-                if (relative.empty() || relative == "." || relative.has_root_path()) {
-                    return Tina::Core::failure(
-                        Tina::Core::CoreErrorCode::PermissionDenied,
-                        "Editor Project Source folder escaped its root");
-                }
-                const std::u8string generic = relative.generic_u8string();
-                folders.emplace_back(
-                    reinterpret_cast<const char*>(generic.data()), generic.size());
-            }
-            iterator.increment(error);
-            if (error) {
-                Tina::Core::Error failure{
-                    Tina::Core::CoreErrorCode::Io,
-                    "Editor could not continue enumerating Project Source folders"};
-                failure.setNativeCode(error.value());
-                return Tina::Core::failure(std::move(failure));
-            }
-        }
-        return folders;
-    } catch (const std::bad_alloc&) {
-        return Tina::Core::failure(
-            Tina::Core::CoreErrorCode::OutOfMemory,
-            "Editor Project Source folder scan allocation failed");
-    } catch (const std::filesystem::filesystem_error& exception) {
-        Tina::Core::Error failure{
-            Tina::Core::CoreErrorCode::Io,
-            "Editor Project Source folder scan failed"};
-        failure.setNativeCode(exception.code().value());
-        return Tina::Core::failure(std::move(failure));
-    }
-}
-
 [[nodiscard]] inline Tina::Core::Result<Tina::Editor::ProjectAssetBrowserModel>
 createProjectAssetBrowser(
     const Tina::Asset::CatalogSnapshot& catalog,
@@ -3591,6 +3513,23 @@ createProjectAssetBrowser(
     std::string_view sourceRootUtf8 = {})
 {
     try {
+        std::optional<std::filesystem::path> physicalSourceRoot;
+        if (!sourceRootUtf8.empty()) {
+            const auto sourceRoot = std::filesystem::u8path(
+                sourceRootUtf8.begin(), sourceRootUtf8.end());
+            std::error_code canonicalError;
+            auto resolvedSourceRoot = std::filesystem::weakly_canonical(
+                sourceRoot, canonicalError);
+            if (canonicalError) {
+                Tina::Core::Error failure{
+                    Tina::Core::CoreErrorCode::Io,
+                    "Tina Editor could not resolve the Project Source root"};
+                failure.setNativeCode(canonicalError.value());
+                return Tina::Core::failure(std::move(failure));
+            }
+            physicalSourceRoot.emplace(std::move(resolvedSourceRoot));
+        }
+
         std::vector<Tina::Editor::ProjectAssetDescriptor> assets;
         assets.reserve(catalog.entryCount());
         for (u32 index = 0; index < catalog.entryCount(); ++index) {
@@ -3612,12 +3551,25 @@ createProjectAssetBrowser(
                     continue;
                 }
                 sourcePathUtf8 = mapping.sourceUtf8Path;
-                if (!sourceRootUtf8.empty()) {
-                    const auto root = std::filesystem::u8path(
-                        sourceRootUtf8.begin(), sourceRootUtf8.end());
+                if (physicalSourceRoot.has_value()) {
                     const auto absolute = std::filesystem::u8path(
                         sourcePathUtf8.begin(), sourcePathUtf8.end());
-                    const auto relative = absolute.lexically_relative(root);
+                    // Windows can expose the same directory through an 8.3 alias
+                    // in the workspace and a long path in the import mapping.
+                    // Resolve both sides before deriving the Source-relative folder
+                    // so the browser never receives synthetic ".." components.
+                    std::error_code canonicalError;
+                    const auto physicalSource = std::filesystem::weakly_canonical(
+                        absolute, canonicalError);
+                    if (canonicalError) {
+                        Tina::Core::Error failure{
+                            Tina::Core::CoreErrorCode::Io,
+                            "Tina Editor could not resolve an imported source path"};
+                        failure.setNativeCode(canonicalError.value());
+                        return Tina::Core::failure(std::move(failure));
+                    }
+                    const auto relative =
+                        physicalSource.lexically_relative(*physicalSourceRoot);
                     if (!relative.empty() && relative != "." &&
                         !relative.has_root_path() && relative.parent_path() != ".") {
                         folderPathUtf8 = pathToUtf8(relative.parent_path());
@@ -3675,20 +3627,12 @@ createProjectAssetBrowser(
             assets, Tina::Editor::ProjectAssetBrowserConfig{
                         .itemCapacity = (std::max)(Tina::Core::usize{4096},
                                                   assets.size()),
-                        .folderCapacity = 4096U,
                         .dependencyCapacity = (std::max)(
                             Tina::Core::usize{16384},
                             static_cast<Tina::Core::usize>(catalog.dependencyCount())),
                     });
         if (!browser) {
             return Tina::Core::failure(std::move(browser.error()));
-        }
-        auto folders = scanProjectAssetFolders(sourceRootUtf8);
-        if (!folders) {
-            return Tina::Core::failure(std::move(folders.error()));
-        }
-        if (auto status = browser->replaceFolders(*folders); !status) {
-            return Tina::Core::failure(std::move(status.error()));
         }
         return std::move(*browser);
     } catch (const std::bad_alloc&) {
@@ -3777,7 +3721,6 @@ class EditorWorkspaceState final : public Tina::IGameState {
     {
         hierarchyRows_.reserve(AuthoringEntityCapacity + 1U);
         collapsedHierarchyIds_.reserve(AuthoringEntityCapacity + 1U);
-        collapsedProjectAssetFolderKeys_.reserve(4096U);
         assetImportHistory_.reserve(4096U);
         activeAssetImportIds_.reserve(4096U);
         activeProjectWorkspace_ = std::move(assetResources_.initialProjectWorkspace);
@@ -4160,7 +4103,6 @@ class EditorWorkspaceState final : public Tina::IGameState {
         Tina::Editor::ProjectAssetTypeFilter filter,
         std::optional<Tina::Core::AssetId> selectedAsset,
         std::string_view searchQuery = {},
-        std::string_view currentFolderPathUtf8 = {},
         std::span<const Tina::Asset::SourceImportPipelineUnitOutput> sourceMappings = {},
         std::span<const EditorAssetMetadataRecord> metadata = {},
         std::string_view sourceRootUtf8 = {});
@@ -4190,6 +4132,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] Tina::Core::Status startSourceImport(
         std::span<const Tina::EditorApp::Detail::EditorSourceImportUnit> intendedUnits,
         std::vector<std::string> selectedPathsUtf8);
+    [[nodiscard]] static bool isFatalSourceImportError(
+        const Tina::Core::Error& error) noexcept;
     [[nodiscard]] Tina::Core::Status importSelectedSourceFiles(
         std::vector<std::string> selectedPathsUtf8);
     [[nodiscard]] Tina::Core::Status importSourceFromDialog();
@@ -4224,9 +4168,6 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] Tina::Core::Status applyProjectAssetTypeFilter(
         Tina::PrimaryWindowUITreeUpdater& tree,
         Tina::Editor::ProjectAssetTypeFilter filter);
-    [[nodiscard]] Tina::Core::Status applyProjectAssetFolder(
-        Tina::PrimaryWindowUITreeUpdater& tree,
-        std::string_view folderPathUtf8);
     [[nodiscard]] Tina::Core::Status applyProjectAssetViewMode(
         Tina::PrimaryWindowUITreeUpdater& tree, ProjectAssetViewMode mode);
     [[nodiscard]] Tina::Core::Status synchronizePendingProjectAssetSelection(
@@ -4446,7 +4387,18 @@ class EditorWorkspaceState final : public Tina::IGameState {
     static bool resolveLayoutDebugTreeItem(
         const void* state, u64 logicalIndex,
         UI::UITreeViewItemDescriptor& output) noexcept;
+    static bool setLayoutDebugTreeItemExpanded(
+        void* state, UI::UITreeViewItemKey key, bool expanded) noexcept;
+    [[nodiscard]] bool rebuildLayoutDebugTreeProjection() noexcept;
     void handleLayoutDebugPickPointerDown(
+        UI::UIRoutedPointerEvent& event) noexcept;
+    void handleLayoutDebugWindowPointerDown(
+        UI::UIRoutedPointerEvent& event) noexcept;
+    void handleLayoutDebugWindowPointerMove(
+        UI::UIRoutedPointerEvent& event) noexcept;
+    void handleLayoutDebugWindowPointerUp(
+        UI::UIRoutedPointerEvent& event) noexcept;
+    void handleLayoutDebugWindowPointerCancel(
         UI::UIRoutedPointerEvent& event) noexcept;
     [[nodiscard]] const EditorOutputHistoryEntry*
     selectedOutputEntry() const noexcept;
@@ -4497,17 +4449,6 @@ class EditorWorkspaceState final : public Tina::IGameState {
     static bool resolveHierarchyItem(const void* state, u64 logicalIndex,
                                      UI::UITreeViewItemDescriptor& output) noexcept;
     static bool setHierarchyExpanded(void* state, UI::UITreeViewItemKey key, bool expanded) noexcept;
-    [[nodiscard]] UI::UITreeViewDataSource projectAssetFolderDataSource() noexcept;
-    [[nodiscard]] static u64 projectAssetFolderItemCount(const void* state) noexcept;
-    static bool resolveProjectAssetFolderItem(
-        const void* state, u64 logicalIndex,
-        UI::UITreeViewItemDescriptor& output) noexcept;
-    static bool setProjectAssetFolderExpanded(
-        void* state, UI::UITreeViewItemKey key, bool expanded) noexcept;
-    [[nodiscard]] bool projectAssetFolderVisible(
-        const Tina::Editor::ProjectAssetFolderDescriptor& folder) const noexcept;
-    [[nodiscard]] std::optional<u64> visibleProjectAssetFolderIndex(
-        std::string_view folderPathUtf8) const noexcept;
     EditorLaunchOptions options_;
     LifecycleCounters& counters_;
     Tina::Editor::World2DAuthoringDocument document_;
@@ -4588,8 +4529,6 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId hierarchyPreselectionNode_{};
     UI::UILayoutStyle hierarchyDropIndicatorLayout_{};
     UI::UINodeId projectAssetList_{};
-    UI::UINodeId projectAssetFolderTree_{};
-    UI::UILayoutStyle projectAssetFolderTreeLayout_{};
     UI::UINodeId tilePaletteGrid_{};
     UI::UILayoutStyle tilePaletteGridLayout_{};
     UI::UINodeId projectAssetCount_{};
@@ -4661,7 +4600,6 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId inspectorAssetRow_{};
     UI::UILayoutStyle inspectorAssetRowLayout_{};
     UI::UINodeId inspectorAssetPath_{};
-    UI::UINodeId inspectorAssignSpriteButton_{};
     UI::UINodeId inspectorDependencySummary_{};
     UI::UINodeId inspectorDependencyList_{};
     UI::UINodeId viewportPreviewLayer_{};
@@ -4734,6 +4672,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId animationPanel_{};
     UI::UINodeId outputPanel_{};
     UI::UINodeId layoutDebugPanel_{};
+    UI::UINodeId layoutDebugHeader_{};
+    UI::UINodeId layoutDebugResizeHandle_{};
     UI::UINodeId outputGrid_{};
     std::array<UI::UINodeId, 4> outputFilterButtons_{};
     UI::UINodeId outputClearButton_{};
@@ -4751,12 +4691,14 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UILayoutStyle animationPanelLayout_{};
     UI::UILayoutStyle outputPanelLayout_{};
     UI::UILayoutStyle layoutDebugPanelLayout_{};
+    UI::UILayoutStyle layoutDebugResizeHandleLayout_{};
     UI::UINodeId leftDockCollapseButton_{};
     UI::UINodeId inspectorCollapseButton_{};
     UI::UINodeId animationCollapseButton_{};
     UI::UINodeId outputCollapseButton_{};
     UI::UINodeId layoutDebugCollapseButton_{};
-    std::array<UI::UINodeId, 3> bottomPanelButtons_{};
+    std::array<UI::UINodeId, 2> bottomPanelButtons_{};
+    UI::UINodeId layoutDebugStatusButton_{};
     UI::UINodeId layoutDebugShowAllButton_{};
     UI::UINodeId layoutDebugPickButton_{};
     UI::UINodeId layoutDebugSummary_{};
@@ -4764,6 +4706,19 @@ class EditorWorkspaceState final : public Tina::IGameState {
     std::array<UI::UINodeId, LayoutDebugDetailRowCount>
         layoutDebugDetailLabels_{};
     UI::UIRoutedPointerListenerToken layoutDebugPickPointerListener_{};
+    std::array<UI::UIRoutedPointerListenerToken, 4>
+        layoutDebugWindowPointerListeners_{};
+    UI::UILogicalRect layoutDebugPanelRect_{};
+    UI::UILogicalRect layoutDebugHeaderRect_{};
+    UI::UILogicalRect layoutDebugResizeHandleRect_{};
+    UI::UILogicalRect layoutDebugViewportRect_{};
+    std::array<UI::UILogicalRect, 3> layoutDebugActionRects_{};
+    UI::UILogicalPoint layoutDebugWindowPointerStart_{};
+    UI::UILogicalRect layoutDebugWindowInitialRect_{};
+    Tina::Platform::PointerId layoutDebugWindowPointer_{};
+    bool layoutDebugWindowDragActive_ = false;
+    bool layoutDebugWindowResizeActive_ = false;
+    bool layoutDebugWindowStyleDirty_ = false;
     UI::UINodeId animationStatus_{};
     UI::UINodeId animationSelection_{};
     UI::UINodeId animationTimelineScale_{};
@@ -4810,9 +4765,13 @@ class EditorWorkspaceState final : public Tina::IGameState {
         bool expanded = true;
         bool collapseUpdatePending = false;
         UI::UINodeId activeSwitch{};
+        // Resource slot used by Sprite2D and AnimatedSprite2D rendering.
+        // It is a real drop target, not a second selection/state model.
+        UI::UINodeId resourceSlot{};
+        UI::UINodeId resourceLabel{};
+        UI::UINodeId resourceAssignButton{};
         std::array<UI::UINodeId, 6> fields{};
         Tina::Core::usize fieldCount = 0;
-        UI::UINodeId assignButton{};
         UI::UINodeId applyButton{};
     };
     // Rendering, Camera, Light, Occlusion, Animation, and 3D Rendering.
@@ -4949,9 +4908,6 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UITreeViewItemKey selectionKey_ = UI::InvalidUITreeViewItemKey;
     std::vector<EditorHierarchyRow> hierarchyRows_{};
     std::vector<u32> collapsedHierarchyIds_{};
-    std::vector<u64> collapsedProjectAssetFolderKeys_{};
-    UI::UITreeViewItemKey projectAssetFolderSelectionKey_ =
-        UI::InvalidUITreeViewItemKey;
     std::string hierarchyFilterUtf8_{};
     ProjectAssetViewMode projectAssetViewMode_ = ProjectAssetViewMode::Grid;
     std::optional<ProjectAssetViewMode> pendingProjectAssetViewMode_{};
@@ -4995,9 +4951,11 @@ class EditorWorkspaceState final : public Tina::IGameState {
     Tina::Core::AssetId projectAssetDragAssetId_{};
     Tina::Core::AssetId projectAssetContextAssetId_{};
     bool projectAssetDragActive_ = false;
+    bool projectAssetPointerDownPreservedNodeInspector_ = false;
     UI::UILogicalPoint projectAssetDragStartPosition_{};
     std::optional<Tina::Core::AssetId> pendingProjectAssetOpen_{};
     std::optional<ProjectAssetDropRequest> pendingProjectAssetDrop_{};
+    bool preserveNodeInspectorOnProjectAssetSelection_ = false;
     std::optional<ProjectAssetRemoveConfirmation>
         pendingProjectAssetRemoveConfirmation_{};
     bool pendingProjectAssetRemoveDialogFocus_ = false;
@@ -5006,6 +4964,9 @@ class EditorWorkspaceState final : public Tina::IGameState {
     bool pendingProjectAssetFolderDialogFocus_ = false;
     std::array<UI::UIRoutedPointerListenerToken, 4>
         projectAssetPointerListeners_{};
+    UI::UILogicalRect inspectorSpriteResourceRect_{};
+    bool projectAssetDragOverSpriteResource_ = false;
+    bool projectAssetDragOverViewport_ = false;
     ViewportToolMode viewportToolMode_ = ViewportToolMode::Select;
     u32 hierarchyPreselectionStableId_ = 0U;
     u32 viewportPreselectionStableId_ = 0U;
@@ -5068,6 +5029,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
     Tina::EditorApp::Detail::EditorAnimationPreview animationPreview_{};
     u32 animationSelectedEventIndex_ = 0;
     bool previewAssetBindingsRefreshPending_ = false;
+    // A source import can publish its Catalog before the runtime preview is
+    // rebuilt. Retain this separately from pipeline failure state so a later
+    // successful frame-boundary retry can restore the user-facing feedback.
+    bool previewAssetBindingsFailureFeedbackPending_ = false;
     bool catalogRefreshPending_ = false;
     bool projectBrowserUiRefreshPending_ = false;
     bool projectAssetSelectionSyncPending_ = false;
@@ -5116,6 +5081,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     Tina::Core::usize viewportGridVisibleNodeCount_ = 0;
     float viewportZoomPercent_ = 100.0F;
     UI::UILogicalRect viewportLogicalRect_{};
+    UI::UINodeId viewportAssetDropIndicator_{};
     std::optional<Tina::Render::RenderNormalizedViewport> viewportNormalized_{};
     u32 surfacePixelWidth_ = WindowLogicalWidth;
     u32 surfacePixelHeight_ = WindowLogicalHeight;
@@ -5146,11 +5112,16 @@ class EditorWorkspaceState final : public Tina::IGameState {
     std::optional<WorkspacePanelKind> pendingWorkspacePanelToggle_{};
     std::optional<BottomPanelKind> pendingBottomPanelToggle_{};
     std::optional<BottomPanelKind> pendingBottomPanelOpen_{};
+    bool pendingLayoutDebuggerToggle_ = false;
+    bool pendingLayoutDebuggerOpen_ = false;
     struct LayoutDebugProjectionRow final {
         UI::UINodeId node{};
         UI::UITreeViewItemKey key = UI::InvalidUITreeViewItemKey;
+        UI::UITreeViewItemKey parentKey = UI::InvalidUITreeViewItemKey;
         u32 depth = 0U;
         u32 preorder = 0U;
+        bool expandable = false;
+        bool expanded = false;
         std::array<char, 80> label{};
         u32 labelLength = 0U;
 
@@ -5158,11 +5129,14 @@ class EditorWorkspaceState final : public Tina::IGameState {
     };
     std::array<LayoutDebugProjectionRow, LayoutDebugProjectionCapacity>
         layoutDebugProjection_{};
+    std::array<LayoutDebugProjectionRow, LayoutDebugProjectionCapacity>
+        layoutDebugTreeRows_{};
     std::array<UI::UINodeId, LayoutDebugProjectionCapacity>
         layoutDebugPanelSubtreeNodes_{};
     std::optional<UI::UILayoutDebugEntry> layoutDebugSelectedEntry_{};
     Tina::Core::usize layoutDebugSnapshotEntryCount_ = 0U;
     Tina::Core::usize layoutDebugProjectionCount_ = 0U;
+    Tina::Core::usize layoutDebugTreeRowCount_ = 0U;
     Tina::Core::usize layoutDebugPanelSubtreeNodeCount_ = 0U;
     u64 layoutDebugStructureRevision_ = 0U;
     u64 layoutDebugLayoutRevision_ = 0U;
@@ -5170,11 +5144,21 @@ class EditorWorkspaceState final : public Tina::IGameState {
     u32 layoutDebugPanelPreorderEnd_ = 0U;
     UI::UITreeViewItemKey layoutDebugSelectionKey_ =
         UI::InvalidUITreeViewItemKey;
+    std::array<UI::UITreeViewItemKey, LayoutDebugProjectionCapacity>
+        layoutDebugCollapsedKeys_{};
+    std::array<bool, LayoutDebugProjectionCapacity>
+        layoutDebugAncestorVisible_{};
+    std::array<UI::UITreeViewItemKey, LayoutDebugProjectionCapacity>
+        layoutDebugAncestorKeys_{};
+    Tina::Core::usize layoutDebugCollapsedKeyCount_ = 0U;
     UI::UINodeId layoutDebugSelectedNode_{};
     bool layoutDebugShowAllVisibleBounds_ = true;
+    bool layoutDebuggerVisible_ = false;
     bool layoutDebugPickArmed_ = false;
     bool layoutDebugSnapshotInitialized_ = false;
     bool layoutDebugPanelProjectionRangeValid_ = false;
+    bool layoutDebugProjectionChangedPending_ = false;
+    bool layoutDebugRevealSelectionPending_ = false;
     bool layoutDebugDetailsRefreshPending_ = true;
     std::optional<UI::UILogicalPoint> pendingLayoutDebugPickPoint_{};
     std::string layoutDebugPickFeedback_{};

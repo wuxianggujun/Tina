@@ -49,21 +49,8 @@ struct ProjectAssetDescriptor final {
                            const ProjectAssetDescriptor&) = default;
 };
 
-struct ProjectAssetFolderDescriptor final {
-    // Empty path identifies the Source root presented as "Assets". All other
-    // paths are normalized, source-root-relative UTF-8 with '/' separators.
-    std::string pathUtf8{};
-    std::string displayName{};
-    Core::u32 level = 0;
-    bool expandable = false;
-
-    friend bool operator==(const ProjectAssetFolderDescriptor&,
-                           const ProjectAssetFolderDescriptor&) = default;
-};
-
 struct ProjectAssetBrowserConfig final {
     Core::usize itemCapacity = 4096;
-    Core::usize folderCapacity = 4096;
     Core::usize dependencyCapacity = AssetFormat::Wire::MaxManifestDependencies;
     Core::usize dependencyCapacityPerAsset = AssetFormat::Wire::MaxDependenciesPerAsset;
 };
@@ -108,17 +95,6 @@ public:
     {
         return m_typeFilter;
     }
-    [[nodiscard]] Core::usize folderCount() const noexcept
-    {
-        return m_folders.size();
-    }
-    [[nodiscard]] const ProjectAssetFolderDescriptor*
-    folder(Core::usize index) const noexcept;
-    [[nodiscard]] Core::u64 folderStableKey(Core::usize index) const noexcept;
-    [[nodiscard]] std::string_view currentFolderPath() const noexcept
-    {
-        return m_currentFolderPathUtf8;
-    }
     [[nodiscard]] std::string_view searchQuery() const noexcept
     {
         return m_searchQueryUtf8;
@@ -145,13 +121,6 @@ public:
     [[nodiscard]] const ProjectAssetDescriptor* selectedInspectorSnapshot() const noexcept;
 
     [[nodiscard]] Core::Status setTypeFilter(ProjectAssetTypeFilter filter) noexcept;
-    // Replaces the physical Source directory snapshot. Asset-owned folders and
-    // all required parents are always retained, while empty scanned folders are
-    // added transactionally up to folderCapacity.
-    [[nodiscard]] Core::Status replaceFolders(
-        std::span<const std::string> folderPathsUtf8) noexcept;
-    [[nodiscard]] Core::Status setCurrentFolder(
-        std::string_view folderPathUtf8) noexcept;
     [[nodiscard]] Core::Status setSearchQuery(std::string_view queryUtf8) noexcept;
     [[nodiscard]] Core::Status selectVisibleIndex(Core::usize visibleIndex) noexcept;
     [[nodiscard]] Core::Status selectAsset(Core::AssetId assetId) noexcept;
@@ -164,17 +133,14 @@ public:
 private:
     ProjectAssetBrowserModel(ProjectAssetBrowserConfig config,
                              std::vector<ProjectAssetDescriptor> assets,
-                             std::vector<ProjectAssetFolderDescriptor> folders,
                              std::vector<Core::usize> visibleIndices) noexcept;
 
     void rebuildVisibleIndices() noexcept;
 
     ProjectAssetBrowserConfig m_config{};
     std::vector<ProjectAssetDescriptor> m_assets{};
-    std::vector<ProjectAssetFolderDescriptor> m_folders{};
     std::vector<Core::usize> m_visibleIndices{};
     ProjectAssetTypeFilter m_typeFilter = ProjectAssetTypeFilter::All;
-    std::string m_currentFolderPathUtf8{};
     std::string m_searchQueryUtf8{};
     std::optional<Core::AssetId> m_selectedAssetId{};
     std::optional<Core::usize> m_selectedVisibleIndex{};

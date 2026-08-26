@@ -896,9 +896,11 @@ Linux 定向编译和真实 helper 产品门禁完成前，`2D-EDITOR` 仍保持
 `EditorSceneOperations` 暴露单一 Node authoring 契约：`world2DNodeTemplateRegistry()` /
 `world3DNodeTemplateRegistry()` 是 Create Node、Hierarchy Kind 与 Inspector 的共享类型词表；`addWorld2DNode()` /
 `addWorld3DNode()` 以一次 canonical revision 创建完整类型节点，duplicate/reparent/reorder/delete 只操作 Node hierarchy。
+`addWorld2DNode()` 可附带 `World2DNodePlacement`，让编辑器把 Viewport drop 的世界坐标写入同一次创建 revision，避免
+“先创建节点、再补一次位置”的平行历史。
 旧的空 Entity/Node 包装方法与 Add/Remove Component API 不保留。World2D optional payload 和 Prefab mesh/material 仍是
 current-schema wire 细节；`classifyWorld2DNodeTemplate()` / `classifyWorld3DNodeTemplate()` 只接受精确对应一个受支持
-Node kind 的形状，旧式多 payload 混合 fail-closed。
+Node kind 的 canonical 形状，任何非规范多 payload 混合都 fail-closed，不提供旧模型兼容路径。
 
 `EditorNodePropertyOperations` 只修改现有 Node kind 固有的 Rendering/Camera/Light/Occlusion/Animation 属性；它不改变
 Node kind。optional 输入表示多选 `Mixed` 字段保持各节点原值，成功 batch 最多发布一次 `replace()`，kind mismatch、

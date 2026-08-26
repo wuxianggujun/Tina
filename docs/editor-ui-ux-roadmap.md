@@ -141,7 +141,7 @@ Project Assets 是本路线图的第一优先级。它同时承载资源发现�
 
 ```text
 Project Assets                         [23 / 42] [Search] [Grid/List] [+]
-Assets / Imported / Images              [All] [2D] [3D] [Media]
+[All Types]
 ┌──────────────┐ ┌──────────────┐
 │   thumbnail   │ │  type icon    │
 │               │ │               │
@@ -207,8 +207,8 @@ CatalogSnapshot
 
 - 增加 Project Assets 专用 SearchField，按 ASCII case-insensitive name/kind 匹配；未来可扩展 path/tag，但不在首切片混入全文索引。
 - `All/2D/3D/Media` 继续使用 SegmentedButton；过滤变化只重建 browser index 和 VirtualGrid data source，不丢 stable selection 恢复能力。
-- `UIBreadcrumb` 首先显示逻辑 Project/Source/Imported 路径，不暴露未授权的物理路径细节；长路径使用 ellipsis，Tooltip/semantics
-  提供完整值。
+- `UIBreadcrumb` 只标识当前 Catalog 来源，不承担目录导航；旧的 `Assets -> Imported -> Images` 文件夹树已移除，资源区直接把完整
+  Catalog 投影为 Grid/List。长文本使用 ellipsis，Tooltip/semantics 提供完整值。
 - Grid/List 切换只改变 item presentation 和固定 metrics，不改变 logical item order、key 或 selection。
 
 ### 5.6 右键和快捷操作

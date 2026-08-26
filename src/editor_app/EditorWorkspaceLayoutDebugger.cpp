@@ -2,10 +2,23 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cmath>
 #include <cstring>
 
 namespace Tina::EditorApp::WorkspaceInternal {
 namespace {
+
+inline constexpr float LayoutDebugWindowMinWidth = 520.0F;
+inline constexpr float LayoutDebugWindowMinHeight = 320.0F;
+inline constexpr float LayoutDebugWindowViewportMargin = 8.0F;
+
+[[nodiscard]] bool layoutDebugPointInRect(
+    UI::UILogicalPoint point, const UI::UILogicalRect& rect) noexcept
+{
+    return std::isfinite(point.x) && std::isfinite(point.y) &&
+           point.x >= rect.x && point.y >= rect.y &&
+           point.x < rect.right() && point.y < rect.bottom();
+}
 
 [[nodiscard]] std::string_view layoutDebugElementTypeName(
     UI::UILayoutDebugElementType type) noexcept
@@ -412,6 +425,7 @@ auto EditorWorkspaceState::layoutDebugTreeDataSource() noexcept
         .state = this,
         .itemCount = &EditorWorkspaceState::layoutDebugTreeItemCount,
         .resolveItem = &EditorWorkspaceState::resolveLayoutDebugTreeItem,
+        .setItemExpanded = &EditorWorkspaceState::setLayoutDebugTreeItemExpanded,
     };
 }
 
@@ -435,16 +449,267 @@ bool EditorWorkspaceState::resolveLayoutDebugTreeItem(
         .label = std::string_view(row.label.data(), row.labelLength),
         .level = row.depth,
         .enabled = true,
-        .expandable = false,
-        .expanded = false,
+        .expandable = row.expandable,
+        .expanded = row.expandable && row.expanded,
     };
     return true;
+}
+
+bool EditorWorkspaceState::setLayoutDebugTreeItemExpanded(
+    void* state, UI::UITreeViewItemKey key, bool expanded) noexcept
+{
+    auto* self = static_cast<EditorWorkspaceState*>(state);
+    if (self == nullptr || key == UI::InvalidUITreeViewItemKey) {
+        return false;
+    }
+    if (self->layoutDebugTreeRowCount_ > self->layoutDebugTreeRows_.size() ||
+        self->layoutDebugTreeRowCount_ > self->layoutDebugProjection_.size() ||
+        self->layoutDebugCollapsedKeyCount_ >
+            self->layoutDebugCollapsedKeys_.size()) {
+        return false;
+    }
+    auto row = std::find_if(
+        self->layoutDebugTreeRows_.begin(),
+        self->layoutDebugTreeRows_.begin() +
+            static_cast<std::ptrdiff_t>(self->layoutDebugTreeRowCount_),
+        [key](const LayoutDebugProjectionRow& candidate) {
+            return candidate.key == key;
+        });
+    if (row == self->layoutDebugTreeRows_.begin() +
+                   static_cast<std::ptrdiff_t>(self->layoutDebugTreeRowCount_) ||
+        !row->expandable) {
+        return false;
+    }
+    // Projection rebuild is fixed-capacity and noexcept. Validate the complete
+    // source before mutating collapse state so a rejected request is atomic.
+    for (Tina::Core::usize index = 0U;
+         index < self->layoutDebugTreeRowCount_; ++index) {
+        if (self->layoutDebugTreeRows_[index].depth >= LayoutDebugProjectionCapacity) {
+            return false;
+        }
+    }
+    const auto end = self->layoutDebugCollapsedKeys_.begin() +
+                     static_cast<std::ptrdiff_t>(self->layoutDebugCollapsedKeyCount_);
+    auto expandedKey = std::find(self->layoutDebugCollapsedKeys_.begin(), end, key);
+    const bool wasCollapsed = expandedKey != end;
+    std::size_t removedIndex = 0U;
+    if (expanded) {
+        if (expandedKey != end) {
+            removedIndex = static_cast<std::size_t>(
+                expandedKey - self->layoutDebugCollapsedKeys_.begin());
+            for (std::size_t cursor = removedIndex + 1U;
+                 cursor < self->layoutDebugCollapsedKeyCount_; ++cursor) {
+                self->layoutDebugCollapsedKeys_[cursor - 1U] =
+                    self->layoutDebugCollapsedKeys_[cursor];
+            }
+            --self->layoutDebugCollapsedKeyCount_;
+        }
+    } else if (expandedKey == end) {
+        if (self->layoutDebugCollapsedKeyCount_ >=
+            self->layoutDebugCollapsedKeys_.size()) {
+            return false;
+        }
+        self->layoutDebugCollapsedKeys_[self->layoutDebugCollapsedKeyCount_++] = key;
+    }
+    if (!self->rebuildLayoutDebugTreeProjection()) {
+        if (expanded && wasCollapsed) {
+            for (std::size_t cursor = self->layoutDebugCollapsedKeyCount_;
+                 cursor > removedIndex; --cursor) {
+                self->layoutDebugCollapsedKeys_[cursor] =
+                    self->layoutDebugCollapsedKeys_[cursor - 1U];
+            }
+            self->layoutDebugCollapsedKeys_[removedIndex] = key;
+            ++self->layoutDebugCollapsedKeyCount_;
+        } else if (!expanded && !wasCollapsed) {
+            --self->layoutDebugCollapsedKeyCount_;
+        }
+        return false;
+    }
+    self->layoutDebugProjectionChangedPending_ = true;
+    self->layoutDebugDetailsRefreshPending_ = true;
+    return true;
+}
+
+bool EditorWorkspaceState::rebuildLayoutDebugTreeProjection() noexcept
+{
+    if (layoutDebugCollapsedKeyCount_ > layoutDebugCollapsedKeys_.size()) {
+        return false;
+    }
+    const auto isCollapsed = [this](UI::UITreeViewItemKey key) noexcept {
+        const auto end = layoutDebugCollapsedKeys_.begin() +
+                         static_cast<std::ptrdiff_t>(layoutDebugCollapsedKeyCount_);
+        return std::find(layoutDebugCollapsedKeys_.begin(), end, key) != end;
+    };
+    if (layoutDebugTreeRowCount_ > layoutDebugTreeRows_.size() ||
+        layoutDebugTreeRowCount_ > layoutDebugProjection_.size()) {
+        return false;
+    }
+    for (Tina::Core::usize index = 0U; index < layoutDebugTreeRowCount_; ++index) {
+        if (layoutDebugTreeRows_[index].depth >= LayoutDebugProjectionCapacity) {
+            return false;
+        }
+    }
+
+    // Validation above guarantees the fixed member projection cannot overflow.
+    // Publish directly into it so expanding a row does not place another full
+    // 4096-row projection on the owner thread's stack.
+    layoutDebugProjectionCount_ = 0U;
+    layoutDebugAncestorVisible_.fill(false);
+    layoutDebugAncestorKeys_.fill(UI::InvalidUITreeViewItemKey);
+    for (Tina::Core::usize index = 0U; index < layoutDebugTreeRowCount_; ++index) {
+        auto& source = layoutDebugTreeRows_[index];
+        const bool visible = source.depth == 0U
+                                 ? true
+                                 : (layoutDebugAncestorVisible_[source.depth - 1U] &&
+                                    layoutDebugAncestorKeys_[source.depth - 1U] == source.parentKey);
+        const bool expanded = source.expandable && !isCollapsed(source.key);
+        source.expanded = expanded;
+        layoutDebugAncestorVisible_[source.depth] = visible && expanded;
+        layoutDebugAncestorKeys_[source.depth] = source.key;
+        if (!visible) {
+            continue;
+        }
+        layoutDebugProjection_[layoutDebugProjectionCount_++] = source;
+    }
+    return true;
+}
+
+void EditorWorkspaceState::handleLayoutDebugWindowPointerDown(
+    UI::UIRoutedPointerEvent& event) noexcept
+{
+    if (!layoutDebuggerVisible_ ||
+        event.input().button != Tina::Platform::PointerButton::Primary) {
+        return;
+    }
+    const UI::UILogicalPoint point = event.input().position;
+    const bool resize = layoutDebugPointInRect(point, layoutDebugResizeHandleRect_);
+    const bool header = layoutDebugPointInRect(point, layoutDebugHeaderRect_);
+    bool headerAction = false;
+    for (const UI::UILogicalRect& actionRect : layoutDebugActionRects_) {
+        headerAction = headerAction || layoutDebugPointInRect(point, actionRect);
+    }
+    // Header action buttons retain their normal invoke behavior. The capture
+    // listener only owns blank/title header space and the resize affordance.
+    if (!resize && (!header || headerAction)) {
+        return;
+    }
+    layoutDebugWindowPointer_ = event.input().pointer;
+    layoutDebugWindowPointerStart_ = event.input().position;
+    layoutDebugWindowInitialRect_ = layoutDebugPanelRect_;
+    layoutDebugWindowDragActive_ = !resize;
+    layoutDebugWindowResizeActive_ = resize;
+    event.capturePointer();
+    (void)event.claimPointerButton(Tina::Platform::PointerButton::Primary);
+    event.consumeInputTransition();
+    event.preventDefaultAction();
+    event.stopPropagation();
+}
+
+void EditorWorkspaceState::handleLayoutDebugWindowPointerMove(
+    UI::UIRoutedPointerEvent& event) noexcept
+{
+    if ((!layoutDebugWindowDragActive_ && !layoutDebugWindowResizeActive_) ||
+        event.input().pointer != layoutDebugWindowPointer_) {
+        return;
+    }
+    const UI::UILogicalPoint position = event.input().position;
+    const float deltaX = position.x - layoutDebugWindowPointerStart_.x;
+    const float deltaY = position.y - layoutDebugWindowPointerStart_.y;
+    const UI::UILogicalRect viewport = layoutDebugViewportRect_;
+    if (viewport.width <= 0.0F || viewport.height <= 0.0F ||
+        layoutDebugWindowInitialRect_.width <= 0.0F ||
+        layoutDebugWindowInitialRect_.height <= 0.0F) {
+        return;
+    }
+
+    UI::UILogicalRect next = layoutDebugWindowInitialRect_;
+    if (layoutDebugWindowDragActive_) {
+        next.x += deltaX;
+        next.y += deltaY;
+    } else {
+        next.width += deltaX;
+        next.height += deltaY;
+    }
+
+    const float viewportRight = viewport.right() - LayoutDebugWindowViewportMargin;
+    const float viewportBottom = viewport.bottom() - LayoutDebugWindowViewportMargin;
+    const float viewportLeft = viewport.x + LayoutDebugWindowViewportMargin;
+    const float viewportTop = viewport.y + LayoutDebugWindowViewportMargin;
+    const float viewportWidthLimit = (std::max)(1.0F, viewport.width -
+                                                       2.0F * LayoutDebugWindowViewportMargin);
+    const float viewportHeightLimit = (std::max)(1.0F, viewport.height -
+                                                        2.0F * LayoutDebugWindowViewportMargin);
+    const float minimumWidth = (std::min)(LayoutDebugWindowMinWidth, viewportWidthLimit);
+    const float minimumHeight = (std::min)(LayoutDebugWindowMinHeight, viewportHeightLimit);
+    next.width = (std::min)(next.width, viewportWidthLimit);
+    next.height = (std::min)(next.height, viewportHeightLimit);
+    if (layoutDebugWindowDragActive_) {
+        next.x = std::clamp(next.x, viewportLeft,
+                            (std::max)(viewportLeft, viewportRight - next.width));
+        next.y = std::clamp(next.y, viewportTop,
+                            (std::max)(viewportTop, viewportBottom - next.height));
+    } else {
+        next.x = std::clamp(next.x, viewportLeft,
+                            (std::max)(viewportLeft, viewportRight - minimumWidth));
+        next.y = std::clamp(next.y, viewportTop,
+                            (std::max)(viewportTop, viewportBottom - minimumHeight));
+        const float maxWidth = (std::max)(minimumWidth, viewportRight - next.x);
+        const float maxHeight = (std::max)(minimumHeight, viewportBottom - next.y);
+        next.width = std::clamp(next.width, minimumWidth, maxWidth);
+        next.height = std::clamp(next.height, minimumHeight, maxHeight);
+    }
+
+    layoutDebugPanelLayout_.size.width = UI::UILayoutLength::Px(next.width);
+    layoutDebugPanelLayout_.size.height = UI::UILayoutLength::Px(next.height);
+    layoutDebugPanelLayout_.visibility = UI::UIVisibility::Visible;
+    layoutDebugPanelLayout_.overlay.horizontal = UI::UIAxisAlignment::Start;
+    layoutDebugPanelLayout_.overlay.vertical = UI::UIAxisAlignment::Start;
+    layoutDebugPanelLayout_.overlay.offset.x =
+        UI::UILayoutLength::Px(next.x - viewport.x);
+    layoutDebugPanelLayout_.overlay.offset.y =
+        UI::UILayoutLength::Px(next.y - viewport.y);
+    layoutDebugPanelRect_ = next;
+    layoutDebugWindowStyleDirty_ = true;
+    event.consumeInputTransition();
+    event.preventDefaultAction();
+    event.stopPropagation();
+}
+
+void EditorWorkspaceState::handleLayoutDebugWindowPointerUp(
+    UI::UIRoutedPointerEvent& event) noexcept
+{
+    if ((!layoutDebugWindowDragActive_ && !layoutDebugWindowResizeActive_) ||
+        event.input().pointer != layoutDebugWindowPointer_ ||
+        event.input().button != Tina::Platform::PointerButton::Primary) {
+        return;
+    }
+    event.releasePointerCapture();
+    event.consumeInputTransition();
+    event.preventDefaultAction();
+    event.stopPropagation();
+    layoutDebugWindowDragActive_ = false;
+    layoutDebugWindowResizeActive_ = false;
+}
+
+void EditorWorkspaceState::handleLayoutDebugWindowPointerCancel(
+    UI::UIRoutedPointerEvent& event) noexcept
+{
+    if ((!layoutDebugWindowDragActive_ && !layoutDebugWindowResizeActive_) ||
+        event.input().pointer != layoutDebugWindowPointer_) {
+        return;
+    }
+    event.releasePointerCapture();
+    event.consumeInputTransition();
+    event.preventDefaultAction();
+    event.stopPropagation();
+    layoutDebugWindowDragActive_ = false;
+    layoutDebugWindowResizeActive_ = false;
 }
 
 void EditorWorkspaceState::handleLayoutDebugPickPointerDown(
     UI::UIRoutedPointerEvent& event) noexcept
 {
-    if (!layoutDebugPickArmed_ || bottomPanel_ != BottomPanelKind::Layout) {
+    if (!layoutDebugPickArmed_ || !layoutDebuggerVisible_) {
         return;
     }
     const UI::UINodeId target = event.targetNode();
@@ -472,14 +737,55 @@ auto EditorWorkspaceState::refreshLayoutDebuggerUi(
 {
     const auto applyLayoutDebugOptions = [&]() -> Tina::Core::Status {
         UI::UILayoutDebugOptions options{};
-        options.enabled = bottomPanel_ == BottomPanelKind::Layout;
+        options.enabled = layoutDebuggerVisible_;
         options.showAllVisibleBounds = layoutDebugShowAllVisibleBounds_;
         options.selectedNode = layoutDebugSelectedNode_;
         options.excludedSubtreeRoot = layoutDebugPanel_;
         return context.setPrimaryWindowUILayoutDebugOptions(options);
     };
-    if (bottomPanel_ != BottomPanelKind::Layout) {
+    if (!layoutDebuggerVisible_) {
+        layoutDebugWindowDragActive_ = false;
+        layoutDebugWindowResizeActive_ = false;
+        layoutDebugRevealSelectionPending_ = false;
         return applyLayoutDebugOptions();
+    }
+
+    auto rootRect = tree.committedLayoutRect(uiRoot_.rootNodeId());
+    if (!rootRect) {
+        return Tina::Core::failure(std::move(rootRect.error()));
+    }
+    layoutDebugViewportRect_ = *rootRect;
+    if (auto panelRect = tree.committedLayoutRect(layoutDebugPanel_); panelRect) {
+        layoutDebugPanelRect_ = *panelRect;
+    } else {
+        return Tina::Core::failure(std::move(panelRect.error()));
+    }
+    if (auto headerRect = tree.committedLayoutRect(layoutDebugHeader_); headerRect) {
+        layoutDebugHeaderRect_ = *headerRect;
+    } else {
+        return Tina::Core::failure(std::move(headerRect.error()));
+    }
+    if (auto resizeRect = tree.committedLayoutRect(layoutDebugResizeHandle_);
+        resizeRect) {
+        layoutDebugResizeHandleRect_ = *resizeRect;
+    } else {
+        return Tina::Core::failure(std::move(resizeRect.error()));
+    }
+    const std::array<UI::UINodeId, 3> actionNodes{
+        layoutDebugShowAllButton_, layoutDebugPickButton_, layoutDebugCollapseButton_};
+    for (u32 index = 0U; index < actionNodes.size(); ++index) {
+        if (auto actionRect = tree.committedLayoutRect(actionNodes[index]); actionRect) {
+            layoutDebugActionRects_[index] = *actionRect;
+        } else {
+            return Tina::Core::failure(std::move(actionRect.error()));
+        }
+    }
+    if (layoutDebugWindowStyleDirty_) {
+        if (auto status = tree.setLayoutStyle(
+                layoutDebugPanel_, layoutDebugPanelLayout_); !status) {
+            return status;
+        }
+        layoutDebugWindowStyleDirty_ = false;
     }
 
     if (layoutDebugSelectedNode_.hasValue()) {
@@ -509,16 +815,17 @@ auto EditorWorkspaceState::refreshLayoutDebuggerUi(
         layoutDebugStructureRevision_ != snapshot->structureRevision() ||
         layoutDebugLayoutRevision_ != snapshot->layoutRevision();
     bool pickedThisFrame = false;
-    bool projectionChanged = false;
+    bool projectionChanged = layoutDebugProjectionChangedPending_;
     bool hadSelectionToRestore = false;
+    UI::UITreeViewItemKey selectionKeyToRestore = layoutDebugSelectionKey_;
     std::optional<Tina::Core::usize> restoredSelectionIndex{};
     if (snapshotChanged) {
         auto selectionBeforeRebuild = tree.treeViewSelection(layoutDebugTree_);
         if (!selectionBeforeRebuild) {
             return Tina::Core::failure(std::move(selectionBeforeRebuild.error()));
         }
-        UI::UITreeViewItemKey selectionKeyToRestore = layoutDebugSelectionKey_;
-        if (selectionBeforeRebuild->hasValue()) {
+        if (selectionBeforeRebuild->hasValue() &&
+            !layoutDebugRevealSelectionPending_) {
             selectionKeyToRestore = selectionBeforeRebuild->key;
         }
         hadSelectionToRestore =
@@ -528,8 +835,6 @@ auto EditorWorkspaceState::refreshLayoutDebuggerUi(
         const auto entries = snapshot->entries();
         const Tina::Core::usize count = (std::min)(
             entries.size(), static_cast<Tina::Core::usize>(LayoutDebugProjectionCapacity));
-        const Tina::Core::usize previousProjectionCount =
-            layoutDebugProjectionCount_;
         std::array<Tina::Core::usize, LayoutDebugProjectionCapacity> order{};
         for (Tina::Core::usize index = 0U; index < count; ++index) {
             order[index] = index;
@@ -540,11 +845,36 @@ auto EditorWorkspaceState::refreshLayoutDebuggerUi(
                   });
 
         layoutDebugSnapshotEntryCount_ = entries.size();
+        const Tina::Core::usize previousTreeRowCount = layoutDebugTreeRowCount_;
+        bool treeRowsChanged = false;
+        bool collapsedKeysChanged = false;
         layoutDebugProjectionCount_ = 0U;
         layoutDebugPanelSubtreeNodeCount_ = 0U;
         layoutDebugPanelProjectionRangeValid_ = false;
         layoutDebugStructureRevision_ = snapshot->structureRevision();
         layoutDebugLayoutRevision_ = snapshot->layoutRevision();
+
+        for (Tina::Core::usize keyIndex = 0U;
+             keyIndex < layoutDebugCollapsedKeyCount_;) {
+            const UI::UITreeViewItemKey key = layoutDebugCollapsedKeys_[keyIndex];
+            bool valid = false;
+            for (const auto& entry : entries) {
+                if (layoutDebugNodeKey(entry.node) == key) {
+                    valid = true;
+                    break;
+                }
+            }
+            if (valid) {
+                ++keyIndex;
+                continue;
+            }
+            for (Tina::Core::usize move = keyIndex + 1U;
+                 move < layoutDebugCollapsedKeyCount_; ++move) {
+                layoutDebugCollapsedKeys_[move - 1U] = layoutDebugCollapsedKeys_[move];
+            }
+            --layoutDebugCollapsedKeyCount_;
+            collapsedKeysChanged = true;
+        }
 
         Tina::Core::usize panelOrderIndex = count;
         u32 panelDepth = 0U;
@@ -576,41 +906,164 @@ auto EditorWorkspaceState::refreshLayoutDebuggerUi(
             }
         }
 
+        const auto isExcluded = [this](const UI::UILayoutDebugEntry& entry) noexcept {
+            return layoutDebugPanelProjectionRangeValid_ &&
+                   entry.preorder >= layoutDebugPanelPreorderBegin_ &&
+                   entry.preorder < layoutDebugPanelPreorderEnd_;
+        };
+        layoutDebugTreeRowCount_ = 0U;
         for (Tina::Core::usize orderIndex = 0U; orderIndex < count;
              ++orderIndex) {
             const auto& entry = entries[order[orderIndex]];
-            if (layoutDebugPanelProjectionRangeValid_ &&
-                entry.preorder >= layoutDebugPanelPreorderBegin_ &&
-                entry.preorder < layoutDebugPanelPreorderEnd_) {
+            if (isExcluded(entry)) {
                 continue;
+            }
+            if (entry.depth >= LayoutDebugProjectionCapacity) {
+                continue;
+            }
+            const UI::UITreeViewItemKey key = layoutDebugNodeKey(entry.node);
+            bool expandable = false;
+            for (Tina::Core::usize childIndex = orderIndex + 1U;
+                 childIndex < count; ++childIndex) {
+                const auto& candidate = entries[order[childIndex]];
+                if (isExcluded(candidate)) {
+                    continue;
+                }
+                if (candidate.depth <= entry.depth) {
+                    break;
+                }
+                if (candidate.parent == entry.node) {
+                    expandable = true;
+                    break;
+                }
+            }
+            if (layoutDebugTreeRowCount_ >= layoutDebugTreeRows_.size()) {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::CapacityExceeded,
+                    "Layout debugger tree snapshot exceeds projection capacity");
             }
             LayoutDebugProjectionRow row{};
             row.node = entry.node;
-            row.key = layoutDebugNodeKey(entry.node);
+            row.key = key;
+            row.parentKey = entry.parent.hasValue()
+                                ? layoutDebugNodeKey(entry.parent)
+                                : UI::InvalidUITreeViewItemKey;
             row.depth = entry.depth;
             row.preorder = entry.preorder;
+            row.expandable = expandable;
+            const auto collapsedEnd = layoutDebugCollapsedKeys_.begin() +
+                                      static_cast<std::ptrdiff_t>(layoutDebugCollapsedKeyCount_);
+            row.expanded = expandable &&
+                           std::find(layoutDebugCollapsedKeys_.begin(), collapsedEnd, key) ==
+                               collapsedEnd;
             const std::string label = layoutDebugNodeLabel(entry);
             const u32 labelLength = static_cast<u32>((std::min)(
                 label.size(), row.label.size() - 1U));
             std::memcpy(row.label.data(), label.data(), labelLength);
             row.label[labelLength] = '\0';
             row.labelLength = labelLength;
-            if (layoutDebugProjectionCount_ >= previousProjectionCount ||
-                layoutDebugProjection_[layoutDebugProjectionCount_] != row) {
-                projectionChanged = true;
+            if (layoutDebugTreeRowCount_ >= previousTreeRowCount ||
+                layoutDebugTreeRows_[layoutDebugTreeRowCount_] != row) {
+                treeRowsChanged = true;
             }
-            layoutDebugProjection_[layoutDebugProjectionCount_] = row;
+            layoutDebugTreeRows_[layoutDebugTreeRowCount_++] = row;
+        }
+        for (Tina::Core::usize keyIndex = 0U;
+             keyIndex < layoutDebugCollapsedKeyCount_;) {
+            const UI::UITreeViewItemKey key = layoutDebugCollapsedKeys_[keyIndex];
+            const auto row = std::find_if(
+                layoutDebugTreeRows_.begin(),
+                layoutDebugTreeRows_.begin() +
+                    static_cast<std::ptrdiff_t>(layoutDebugTreeRowCount_),
+                [key](const LayoutDebugProjectionRow& candidate) {
+                    return candidate.key == key;
+                });
+            if (row != layoutDebugTreeRows_.begin() +
+                           static_cast<std::ptrdiff_t>(layoutDebugTreeRowCount_) &&
+                row->expandable) {
+                ++keyIndex;
+                continue;
+            }
+            for (Tina::Core::usize move = keyIndex + 1U;
+                 move < layoutDebugCollapsedKeyCount_; ++move) {
+                layoutDebugCollapsedKeys_[move - 1U] = layoutDebugCollapsedKeys_[move];
+            }
+            --layoutDebugCollapsedKeyCount_;
+            collapsedKeysChanged = true;
+        }
+        if (!rebuildLayoutDebugTreeProjection()) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::CapacityExceeded,
+                "Layout debugger tree projection exceeds capacity");
+        }
+        projectionChanged = projectionChanged || treeRowsChanged ||
+                            collapsedKeysChanged ||
+                            layoutDebugTreeRowCount_ != previousTreeRowCount;
+        for (Tina::Core::usize index = 0U; index < layoutDebugProjectionCount_; ++index) {
+            const auto& row = layoutDebugProjection_[index];
             if (row.key == selectionKeyToRestore ||
                 (selectionKeyToRestore == UI::InvalidUITreeViewItemKey &&
                  row.node == layoutDebugSelectedNode_)) {
-                restoredSelectionIndex = layoutDebugProjectionCount_;
+                restoredSelectionIndex = index;
+                break;
             }
-            ++layoutDebugProjectionCount_;
         }
-        projectionChanged = projectionChanged ||
-                            layoutDebugProjectionCount_ != previousProjectionCount;
         layoutDebugSnapshotInitialized_ = true;
         layoutDebugDetailsRefreshPending_ = true;
+    }
+    if (projectionChanged) {
+        auto selectionBeforeProjection = tree.treeViewSelection(layoutDebugTree_);
+        if (!selectionBeforeProjection) {
+            return Tina::Core::failure(std::move(selectionBeforeProjection.error()));
+        }
+        if (selectionBeforeProjection->hasValue() &&
+            selectionKeyToRestore == UI::InvalidUITreeViewItemKey) {
+            selectionKeyToRestore = selectionBeforeProjection->key;
+        }
+        hadSelectionToRestore =
+            selectionKeyToRestore != UI::InvalidUITreeViewItemKey ||
+            layoutDebugSelectedNode_.hasValue();
+        for (Tina::Core::usize index = 0U; index < layoutDebugProjectionCount_; ++index) {
+            const auto& row = layoutDebugProjection_[index];
+            if (row.key == selectionKeyToRestore ||
+                (selectionKeyToRestore == UI::InvalidUITreeViewItemKey &&
+                 row.node == layoutDebugSelectedNode_)) {
+                restoredSelectionIndex = index;
+                break;
+            }
+        }
+        if (!restoredSelectionIndex.has_value() &&
+            selectionKeyToRestore != UI::InvalidUITreeViewItemKey) {
+            auto hiddenRow = std::find_if(
+                layoutDebugTreeRows_.begin(),
+                layoutDebugTreeRows_.begin() +
+                    static_cast<std::ptrdiff_t>(layoutDebugTreeRowCount_),
+                [selectionKeyToRestore](const LayoutDebugProjectionRow& row) {
+                    return row.key == selectionKeyToRestore;
+                });
+            while (hiddenRow != layoutDebugTreeRows_.begin() +
+                                   static_cast<std::ptrdiff_t>(layoutDebugTreeRowCount_) &&
+                   hiddenRow->parentKey != UI::InvalidUITreeViewItemKey) {
+                const auto parentKey = hiddenRow->parentKey;
+                for (Tina::Core::usize index = 0U;
+                     index < layoutDebugProjectionCount_; ++index) {
+                    if (layoutDebugProjection_[index].key == parentKey) {
+                        restoredSelectionIndex = index;
+                        break;
+                    }
+                }
+                if (restoredSelectionIndex.has_value()) {
+                    break;
+                }
+                hiddenRow = std::find_if(
+                    layoutDebugTreeRows_.begin(),
+                    layoutDebugTreeRows_.begin() +
+                        static_cast<std::ptrdiff_t>(layoutDebugTreeRowCount_),
+                    [parentKey](const LayoutDebugProjectionRow& row) {
+                        return row.key == parentKey;
+                    });
+            }
+        }
     }
     if (projectionChanged) {
         if (auto status = tree.invalidateTreeViewItems(layoutDebugTree_); !status) {
@@ -624,6 +1077,15 @@ auto EditorWorkspaceState::refreshLayoutDebuggerUi(
             }
             layoutDebugSelectedNode_ = restored.node;
             layoutDebugSelectionKey_ = restored.key;
+            if (layoutDebugRevealSelectionPending_) {
+                if (auto status = tree.scrollTreeViewToIndex(
+                        layoutDebugTree_, *restoredSelectionIndex,
+                        UI::UITreeViewScrollAlignment::Nearest);
+                    !status) {
+                    return status;
+                }
+                layoutDebugRevealSelectionPending_ = false;
+            }
         } else if (hadSelectionToRestore) {
             if (auto status = tree.clearTreeViewSelection(layoutDebugTree_);
                 !status) {
@@ -632,7 +1094,9 @@ auto EditorWorkspaceState::refreshLayoutDebuggerUi(
             layoutDebugSelectedNode_ = {};
             layoutDebugSelectionKey_ = UI::InvalidUITreeViewItemKey;
             layoutDebugPickFeedback_ = "Selected node is no longer inspectable";
+            layoutDebugRevealSelectionPending_ = false;
         }
+        layoutDebugProjectionChangedPending_ = false;
     }
 
     if (pendingLayoutDebugPickPoint_.has_value()) {
@@ -643,15 +1107,75 @@ auto EditorWorkspaceState::refreshLayoutDebuggerUi(
             return Tina::Core::failure(std::move(hit.error()));
         }
         if (hit->hasTarget()) {
+            bool expandedPickAncestors = false;
+            for (auto source = layoutDebugTreeRows_.begin();
+                 source != layoutDebugTreeRows_.begin() +
+                                static_cast<std::ptrdiff_t>(layoutDebugTreeRowCount_);
+                 ++source) {
+                if (source->node != hit->target.node) {
+                    continue;
+                }
+                UI::UITreeViewItemKey ancestor = source->parentKey;
+                while (ancestor != UI::InvalidUITreeViewItemKey) {
+                    auto ancestorRow = std::find_if(
+                        layoutDebugTreeRows_.begin(),
+                        layoutDebugTreeRows_.begin() +
+                            static_cast<std::ptrdiff_t>(layoutDebugTreeRowCount_),
+                        [ancestor](const LayoutDebugProjectionRow& row) {
+                            return row.key == ancestor;
+                        });
+                    if (ancestorRow == layoutDebugTreeRows_.begin() +
+                                           static_cast<std::ptrdiff_t>(layoutDebugTreeRowCount_)) {
+                        break;
+                    }
+                    const auto collapsed = std::find(
+                        layoutDebugCollapsedKeys_.begin(),
+                        layoutDebugCollapsedKeys_.begin() +
+                            static_cast<std::ptrdiff_t>(layoutDebugCollapsedKeyCount_),
+                        ancestor);
+                    if (collapsed != layoutDebugCollapsedKeys_.begin() +
+                                         static_cast<std::ptrdiff_t>(layoutDebugCollapsedKeyCount_)) {
+                        const auto index = static_cast<std::size_t>(
+                            collapsed - layoutDebugCollapsedKeys_.begin());
+                        for (std::size_t move = index + 1U;
+                             move < layoutDebugCollapsedKeyCount_; ++move) {
+                            layoutDebugCollapsedKeys_[move - 1U] =
+                                layoutDebugCollapsedKeys_[move];
+                        }
+                        --layoutDebugCollapsedKeyCount_;
+                        expandedPickAncestors = true;
+                    }
+                    ancestor = ancestorRow->parentKey;
+                }
+                if (expandedPickAncestors && !rebuildLayoutDebugTreeProjection()) {
+                    return Tina::Core::failure(
+                        Tina::Core::CoreErrorCode::CapacityExceeded,
+                        "Layout debugger tree projection exceeds capacity");
+                }
+                if (expandedPickAncestors) {
+                    layoutDebugProjectionChangedPending_ = true;
+                }
+                break;
+            }
             bool found = false;
             for (Tina::Core::usize index = 0U;
                  index < layoutDebugProjectionCount_; ++index) {
                 if (layoutDebugProjection_[index].node == hit->target.node) {
                     layoutDebugSelectedNode_ = hit->target.node;
                     layoutDebugSelectionKey_ = layoutDebugProjection_[index].key;
-                    if (auto status = tree.setTreeViewSelectedIndex(
-                            layoutDebugTree_, index); !status) {
-                        return status;
+                    if (!expandedPickAncestors) {
+                        if (auto status = tree.setTreeViewSelectedIndex(
+                                layoutDebugTree_, index); !status) {
+                            return status;
+                        }
+                        if (auto status = tree.scrollTreeViewToIndex(
+                                layoutDebugTree_, index,
+                                UI::UITreeViewScrollAlignment::Nearest);
+                            !status) {
+                            return status;
+                        }
+                    } else {
+                        layoutDebugRevealSelectionPending_ = true;
                     }
                     layoutDebugPickFeedback_ = "Picked committed target";
                     found = true;
@@ -667,6 +1191,7 @@ auto EditorWorkspaceState::refreshLayoutDebuggerUi(
                 layoutDebugSelectionKey_ = UI::InvalidUITreeViewItemKey;
                 layoutDebugPickFeedback_ =
                     "Picked target is outside the inspectable snapshot";
+                layoutDebugRevealSelectionPending_ = false;
             }
         } else {
             if (auto status = tree.clearTreeViewSelection(layoutDebugTree_);
@@ -676,6 +1201,7 @@ auto EditorWorkspaceState::refreshLayoutDebuggerUi(
             layoutDebugSelectedNode_ = {};
             layoutDebugSelectionKey_ = UI::InvalidUITreeViewItemKey;
             layoutDebugPickFeedback_ = "No target at pointer location";
+            layoutDebugRevealSelectionPending_ = false;
         }
         layoutDebugDetailsRefreshPending_ = true;
         pickedThisFrame = true;
@@ -696,6 +1222,7 @@ auto EditorWorkspaceState::refreshLayoutDebuggerUi(
     } else if (!pickedThisFrame && selection->hasValue()) {
         layoutDebugSelectedNode_ = {};
         layoutDebugSelectionKey_ = UI::InvalidUITreeViewItemKey;
+        layoutDebugRevealSelectionPending_ = false;
         layoutDebugDetailsRefreshPending_ = true;
     }
 
@@ -729,6 +1256,7 @@ auto EditorWorkspaceState::refreshLayoutDebuggerUi(
             layoutDebugSelectedNode_ = {};
             layoutDebugSelectionKey_ = UI::InvalidUITreeViewItemKey;
             layoutDebugPickFeedback_ = "Selected node was destroyed";
+            layoutDebugRevealSelectionPending_ = false;
             layoutDebugDetailsRefreshPending_ = true;
         }
     }

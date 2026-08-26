@@ -400,13 +400,6 @@ auto EditorWorkspaceState::publishInspector(Tina::PrimaryWindowUITreeUpdater& tr
             !status) {
             return status;
         }
-        UI::UILayoutStyle assignStyle = fillWidth(42.0F);
-        assignStyle.flexItem.shrink = 0.0F;
-        assignStyle.visibility = visibility;
-        if (auto status = tree.setLayoutStyle(
-                inspectorAssignSpriteButton_, assignStyle); !status) {
-            return status;
-        }
         UI::UILayoutStyle summaryStyle = fillWidth(22.0F);
         summaryStyle.flexItem.shrink = 0.0F;
         summaryStyle.visibility = visibility;
@@ -456,10 +449,6 @@ auto EditorWorkspaceState::publishInspector(Tina::PrimaryWindowUITreeUpdater& tr
                 return status;
             }
             if (auto status = tree.setText(inspectorDependencySummary_, "Dependencies 0");
-                !status) {
-                return status;
-            }
-            if (auto status = tree.setEnabled(inspectorAssignSpriteButton_, false);
                 !status) {
                 return status;
             }
@@ -519,14 +508,6 @@ auto EditorWorkspaceState::publishInspector(Tina::PrimaryWindowUITreeUpdater& tr
             !status) {
             return status;
         }
-        const bool canAssignSprite =
-            authoringEnabled() && !playSessionActive() &&
-            workspaceMode_ == WorkspaceMode::World2D && sceneDocumentActive() &&
-            viewportSelectedEntityCount_ != 0U && selectedProjectSpriteAssetId();
-        if (auto status = tree.setEnabled(
-                inspectorAssignSpriteButton_, canAssignSprite); !status) {
-            return status;
-        }
         try {
             std::vector<std::string> dependencyLabels;
             dependencyLabels.reserve(asset->dependencies.size());
@@ -566,10 +547,6 @@ auto EditorWorkspaceState::publishInspector(Tina::PrimaryWindowUITreeUpdater& tr
         return Tina::Core::success();
     }
     if (auto status = setAssetMetadataVisibility(UI::UIVisibility::Collapsed);
-        !status) {
-        return status;
-    }
-    if (auto status = tree.setEnabled(inspectorAssignSpriteButton_, false);
         !status) {
         return status;
     }

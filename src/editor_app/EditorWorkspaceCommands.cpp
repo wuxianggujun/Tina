@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <filesystem>
 
 namespace Tina::EditorApp::WorkspaceInternal {
@@ -678,6 +679,94 @@ auto EditorWorkspaceState::processPendingProjectAssetDrop(
     }
     const ProjectAssetDropRequest request = *pendingProjectAssetDrop_;
     pendingProjectAssetDrop_.reset();
+    // The pointer gesture has ended. Invalid or stale drops must not leak the
+    // temporary Inspector-preservation intent into the next asset click; valid
+    // assignment/viewport branches opt back in below until selection sync.
+    preserveNodeInspectorOnProjectAssetSelection_ = false;
+    if (request.target == ProjectAssetDropTarget::Viewport) {
+        if (!sceneDocumentActive() || workspaceMode_ != WorkspaceMode::World2D) {
+            authoringFeedback_ =
+                "Resource drop rejected: open an editable World2D scene first";
+            return Tina::Core::success();
+        }
+        const auto* asset = projectAssets_.inspectorSnapshot(request.assetId);
+        if (asset == nullptr ||
+            (asset->assetKind != Tina::AssetFormat::AssetKind::Sprite &&
+             asset->assetKind != Tina::AssetFormat::AssetKind::Texture2D)) {
+            authoringFeedback_ =
+                "Resource drop rejected: drop a Sprite or Texture2D into the 2D viewport";
+            return Tina::Core::success();
+        }
+        if (!std::isfinite(request.viewportPosition.x) ||
+            !std::isfinite(request.viewportPosition.y) ||
+            viewportLogicalRect_.width <= 0.0F ||
+            viewportLogicalRect_.height <= 0.0F) {
+            authoringFeedback_ =
+                "Resource drop rejected: the 2D viewport has no committed layout";
+            return Tina::Core::success();
+        }
+        const Tina::Scene::WorldTransform* camera =
+            previewWorld_.has_value()
+                ? previewWorld_->worldTransform(previewCamera2D_)
+                : nullptr;
+        if (camera == nullptr) {
+            authoringFeedback_ =
+                "Resource drop rejected: Camera2D preview is unavailable";
+            return Tina::Core::success();
+        }
+        const float normalizedX =
+            (request.viewportPosition.x - viewportLogicalRect_.x) /
+                viewportLogicalRect_.width;
+        const float normalizedY =
+            (request.viewportPosition.y - viewportLogicalRect_.y) /
+                viewportLogicalRect_.height;
+        const float worldX = camera->position.x +
+            (normalizedX - 0.5F) * viewportWorldWidth();
+        const float worldY = camera->position.y -
+            (normalizedY - 0.5F) * viewportWorldHeight();
+        if (!std::isfinite(worldX) || !std::isfinite(worldY)) {
+            authoringFeedback_ =
+                "Resource drop rejected: the viewport world position is invalid";
+            return Tina::Core::success();
+        }
+        Tina::Editor::World2DNodeTemplateAssets assets{};
+        assets.spriteId = request.assetId;
+        if (auto status = projectAssets_.selectAsset(request.assetId); !status) {
+            return reportAuthoringFailure("Resource drop rejected: ", status.error());
+        }
+        const auto added = Tina::Editor::addWorld2DNode(
+            document_, Tina::Editor::World2DNodeTemplate::Sprite2D, 0U, assets,
+            Tina::Editor::World2DNodePlacement{
+                .positionX = worldX,
+                .positionY = worldY,
+            });
+        if (!added) {
+            return reportAuthoringFailure(
+                "Resource drop rejected; scene hierarchy preserved: ",
+                added.error());
+        }
+        projectAssetSelectionSyncPending_ = true;
+        preserveNodeInspectorOnProjectAssetSelection_ = true;
+        assetInspectorActive_ = false;
+        pendingSelectionStableId_ = added->primaryStableId;
+        queueViewportToolMode(ViewportToolMode::Translate);
+        ++counters_.authoringEdits;
+        ++counters_.sceneAddCommands;
+        authoringFeedback_ = "Sprite2D created from dropped resource at viewport position";
+        if (auto previewStatus = validateRuntimePreview(); !previewStatus) {
+            return previewStatus;
+        }
+        if (auto refresh = refreshHierarchyTree(tree, added->primaryStableId); !refresh) {
+            return refresh;
+        }
+        return refreshAuthoringUi(tree);
+    }
+    if (request.target != ProjectAssetDropTarget::HierarchyNode &&
+        request.target != ProjectAssetDropTarget::InspectorResourceSlot) {
+        authoringFeedback_ =
+            "Resource drop rejected: the drop target is no longer valid";
+        return Tina::Core::success();
+    }
     const EditorHierarchyRow* target = hierarchyRow(request.targetStableId);
     if (!sceneDocumentActive() || workspaceMode_ != WorkspaceMode::World2D ||
         target == nullptr ||
@@ -687,24 +776,41 @@ auto EditorWorkspaceState::processPendingProjectAssetDrop(
             "Resource drop rejected: drop a Sprite or Texture2D onto Sprite2D/AnimatedSprite2D";
         return Tina::Core::success();
     }
-    if (!request.assetId ||
-        projectAssets_.inspectorSnapshot(request.assetId) == nullptr) {
+    const auto* droppedAsset = request.assetId
+        ? projectAssets_.inspectorSnapshot(request.assetId)
+        : nullptr;
+    if (droppedAsset == nullptr) {
         authoringFeedback_ =
             "Resource drop rejected: the Project Assets item is no longer available";
+        return Tina::Core::success();
+    }
+    if (droppedAsset->assetKind != Tina::AssetFormat::AssetKind::Sprite &&
+        droppedAsset->assetKind != Tina::AssetFormat::AssetKind::Texture2D) {
+        authoringFeedback_ =
+            "Resource drop rejected: Sprite2D requires a Sprite or Texture2D asset";
         return Tina::Core::success();
     }
     if (auto status = projectAssets_.selectAsset(request.assetId); !status) {
         return reportAuthoringFailure("Resource drop rejected: ", status.error());
     }
-    assetInspectorActive_ = true;
+    // Selecting a candidate asset for an assignment must not switch the
+    // Inspector away from the node being edited. The selected Project Asset
+    // remains the command input; the canonical document selection stays the
+    // Inspector context.
+    preserveNodeInspectorOnProjectAssetSelection_ = true;
+    assetInspectorActive_ = false;
     projectAssetSelectionSyncPending_ = true;
     pendingSelectionStableId_ = request.targetStableId;
     if (!queueEditorCommand(EditorCommand::NodeAssignSprite)) {
+        preserveNodeInspectorOnProjectAssetSelection_ = false;
         authoringFeedback_ =
             "Resource drop rejected: another editor command is already pending";
         return Tina::Core::success();
     }
-    authoringFeedback_ = "Assigning dropped resource to the selected Sprite node";
+    authoringFeedback_ =
+        request.target == ProjectAssetDropTarget::InspectorResourceSlot
+        ? "Assigning dropped resource to the Sprite resource slot"
+        : "Assigning dropped resource to the selected Sprite node";
     return Tina::Core::success();
 }
 
@@ -955,7 +1061,11 @@ auto EditorWorkspaceState::confirmProjectAssetRename(
             }
             return status;
         }
-        authoringFeedback_ = "Renaming source file and rebuilding its Project Asset";
+        if (sourceImportService_.state() ==
+            Tina::EditorApp::Detail::EditorSourceImportServiceState::Running) {
+            authoringFeedback_ =
+                "Renaming source file and rebuilding its Project Asset";
+        }
         if (auto status = hideProjectAssetRenameDialog(tree); !status) {
             return status;
         }
@@ -1022,10 +1132,7 @@ auto EditorWorkspaceState::confirmProjectAssetFolder(
         const auto sourceRoot = std::filesystem::u8path(
             activeProjectWorkspace_->sourceRootUtf8().begin(),
             activeProjectWorkspace_->sourceRootUtf8().end()).lexically_normal();
-        const auto currentFolder = std::filesystem::u8path(
-            projectAssets_.currentFolderPath().begin(),
-            projectAssets_.currentFolderPath().end());
-        const auto candidate = (sourceRoot / currentFolder /
+        const auto candidate = (sourceRoot /
             std::filesystem::u8path(text->begin(), text->end())).lexically_normal();
         if (!pathIsSameOrDescendant(candidate, sourceRoot) || candidate == sourceRoot) {
             authoringFeedback_ = "Folder rejected: path escaped the Source root";
@@ -1054,58 +1161,6 @@ auto EditorWorkspaceState::confirmProjectAssetFolder(
         failure.setNativeCode(exception.code().value());
         return Tina::Core::failure(std::move(failure));
     }
-    auto folders = scanProjectAssetFolders(
-        activeProjectWorkspace_->sourceRootUtf8());
-    if (!folders) {
-        if (auto status = reportAuthoringFailure(
-                "Folder was created, but Project Assets could not refresh: ",
-                folders.error()); !status) {
-            return status;
-        }
-        return hideProjectAssetFolderDialog(tree);
-    }
-    if (auto status = projectAssets_.replaceFolders(*folders); !status) {
-        if (auto feedback = reportAuthoringFailure(
-                "Folder was created, but Project Assets could not publish it: ",
-                status.error()); !feedback) {
-            return feedback;
-        }
-        return hideProjectAssetFolderDialog(tree);
-    }
-    std::string createdFolderPath;
-    try {
-        createdFolderPath.assign(projectAssets_.currentFolderPath());
-        if (!createdFolderPath.empty()) {
-            createdFolderPath.push_back('/');
-        }
-        createdFolderPath.append(*text);
-    } catch (const std::bad_alloc&) {
-        return Tina::Core::failure(
-            Tina::Core::CoreErrorCode::OutOfMemory,
-            "Editor could not retain the new Project Source folder path");
-    }
-    if (auto status = projectAssets_.setCurrentFolder(createdFolderPath); !status) {
-        return status;
-    }
-    collapsedProjectAssetFolderKeys_.clear();
-    if (auto status = tree.setTreeViewDataSource(
-            projectAssetFolderTree_, projectAssetFolderDataSource()); !status) {
-        return status;
-    }
-    if (auto status = tree.invalidateTreeViewItems(projectAssetFolderTree_); !status) {
-        return status;
-    }
-    const u64 selectedIndex = visibleProjectAssetFolderIndex(
-        createdFolderPath).value_or(0U);
-    if (auto status = tree.setTreeViewSelectedIndex(
-            projectAssetFolderTree_, selectedIndex); !status) {
-        return status;
-    }
-    UI::UITreeViewItemDescriptor selected{};
-    projectAssetFolderSelectionKey_ =
-        resolveProjectAssetFolderItem(this, selectedIndex, selected)
-            ? selected.key
-            : UI::InvalidUITreeViewItemKey;
     if (auto status = hideProjectAssetFolderDialog(tree); !status) {
         return status;
     }
@@ -1321,6 +1376,9 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
     case EditorCommand::NodeAssignSprite: {
         bool published = false;
         status = runNodePropertyCommand(tree, command, published);
+        if (command == EditorCommand::NodeAssignSprite) {
+            preserveNodeInspectorOnProjectAssetSelection_ = false;
+        }
         if (status && published) {
             requiresPreviewValidation = true;
         }
@@ -2445,7 +2503,8 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
                     Tina::Core::CoreErrorCode::OutOfMemory,
                     "Editor could not stage the selected Project Asset for reimport");
             }
-            if (status) {
+            if (status && sourceImportService_.state() ==
+                              Tina::EditorApp::Detail::EditorSourceImportServiceState::Running) {
                 authoringFeedback_ = "Reimporting the selected Project Asset";
             }
         }
@@ -2520,8 +2579,11 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
             break;
         }
         status = startSourceImport(*intendedUnits, {});
-        if (status) {
+        if (status && sourceImportService_.state() ==
+                          Tina::EditorApp::Detail::EditorSourceImportServiceState::Running) {
             authoringFeedback_ = "Removing the selected source-import unit";
+        }
+        if (status) {
             status = hideProjectAssetRemoveConfirmation(tree);
         }
         break;

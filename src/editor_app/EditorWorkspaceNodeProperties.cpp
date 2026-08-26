@@ -551,8 +551,25 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                 return status;
             }
         }
-        if (section.assignButton.hasValue()) {
-            if (auto status = tree.setEnabled(section.assignButton, false); !status) {
+        if (section.resourceAssignButton.hasValue()) {
+            if (auto status = tree.setEnabled(section.resourceAssignButton, false); !status) {
+                return status;
+            }
+        }
+        if (section.resourceLabel.hasValue()) {
+            if (auto status = tree.setText(
+                    section.resourceLabel, "Drop Sprite or Texture2D");
+                !status) {
+                return status;
+            }
+            auto theme = tree.productTheme();
+            if (!theme) {
+                return Tina::Core::failure(std::move(theme.error()));
+            }
+            if (auto status = tree.setBoxPaint(
+                    section.resourceSlot,
+                    UI::makeSolidBox(theme->colors.surfaceContainerLow));
+                !status) {
                 return status;
             }
         }
@@ -734,10 +751,10 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                     return status;
                 }
             }
-            if (section.assignButton.hasValue()) {
+            if (section.resourceAssignButton.hasValue()) {
                 const bool spriteSelectionAvailable =
                     sectionIndex == 0U && selectedProjectSpriteAssetId();
-                if (auto status = tree.setEnabled(section.assignButton,
+                if (auto status = tree.setEnabled(section.resourceAssignButton,
                                                   fieldsEditable &&
                                                       spriteSelectionAvailable);
                     !status) {
@@ -809,10 +826,60 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
             switch (group) {
             case World2DNodePropertyGroup::Rendering: {
                 const auto& sprite = *primary->sprite;
-                status = tree.setChecked(
-                    section.activeSwitch,
-                    sprite.visible &&
-                        !mixedBool([](const auto& e) { return e.sprite->visible; }));
+                std::string resourceText;
+                try {
+                    const bool mixedSpriteId = std::any_of(
+                        selected.begin(), selected.end(),
+                        [&sprite](const auto* entity) {
+                            return entity->sprite->spriteId != sprite.spriteId;
+                        });
+                    if (mixedSpriteId) {
+                        resourceText = "Mixed";
+                    } else {
+                        const auto* resourceAsset =
+                            projectAssets_.inspectorSnapshot(sprite.spriteId);
+                        if (resourceAsset != nullptr) {
+                            resourceText = resourceAsset->displayName;
+                        } else if (sprite.spriteId) {
+                            const auto idText = sprite.spriteId.canonicalText();
+                            resourceText.assign("Missing asset ");
+                            resourceText.append(idText.data(), 8U);
+                        } else {
+                            resourceText = "Drop Sprite or Texture2D";
+                        }
+                    }
+                } catch (const std::bad_alloc&) {
+                    return Tina::Core::failure(
+                        Tina::Core::CoreErrorCode::OutOfMemory,
+                        "Sprite resource slot label allocation failed");
+                }
+                if (status) {
+                    status = tree.setText(section.resourceLabel, resourceText);
+                }
+                if (status) {
+                    status = tree.setEnabled(section.resourceAssignButton,
+                                             fieldsEditable &&
+                                                 selectedProjectSpriteAssetId());
+                }
+                if (status) {
+                    auto theme = tree.productTheme();
+                    if (!theme) {
+                        return Tina::Core::failure(std::move(theme.error()));
+                    }
+                    status = tree.setBoxPaint(
+                        section.resourceSlot,
+                        UI::makeSolidBox(projectAssetDragOverSpriteResource_
+                                             ? theme->colors.primaryContainer
+                                             : theme->colors.surfaceContainerLow));
+                }
+                if (status) {
+                    status = tree.setChecked(
+                        section.activeSwitch,
+                        sprite.visible &&
+                            !mixedBool([](const auto& e) {
+                                return e.sprite->visible;
+                            }));
+                }
                 if (status) {
                     status = setNumberField(
                         0,

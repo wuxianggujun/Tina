@@ -214,6 +214,7 @@ auto EditorWorkspaceState::onExit(Tina::GameStateExitContext&) noexcept -> void{
     editorSettings_.leftDockVisible = leftDockVisible_;
     editorSettings_.inspectorVisible = inspectorVisible_;
     editorSettings_.bottomPanel = bottomPanel_;
+    editorSettings_.layoutDebuggerVisible = layoutDebuggerVisible_;
     editorSettings_.snapEnabled = viewportTransformGizmo_.snap().enabled;
     (void)saveEditorSettings(editorSettings_);
     platformEventSubscription_.reset();
@@ -221,6 +222,7 @@ auto EditorWorkspaceState::onExit(Tina::GameStateExitContext&) noexcept -> void{
     cancelSourceImportPending_ = false;
     sourceImportRetryUnits_.clear();
     sourceImportRetryPathsUtf8_.clear();
+    previewAssetBindingsFailureFeedbackPending_ = false;
     fileDropFeedbackState_ = FileDropFeedbackState::Hidden;
     fileDropFeedbackDetail_.clear();
     using ImportState =
@@ -282,6 +284,12 @@ auto EditorWorkspaceState::onExit(Tina::GameStateExitContext&) noexcept -> void{
             std::terminate();
         }
     }
+    // Keep the committed stage alive for AssetSystem; only retire superseded
+    // request-owned stages during shutdown.
+    cleanupOwnedSourceImportStage(sourceImportSupersededCatalogRootUtf8_);
+    sourceImportSupersededCatalogRootUtf8_.clear();
+    cleanupOwnedAuthoringStage(sourceImportSupersededAuthoringCatalogRootUtf8_);
+    sourceImportSupersededAuthoringCatalogRootUtf8_.clear();
     imageResolverRegistration_.reset();
     if (uiRoot_) {
         uiRoot_.reset();
@@ -300,6 +308,7 @@ auto EditorWorkspaceState::onExit(Tina::GameStateExitContext&) noexcept -> void{
     cleanupOwnedTemporaryProject(pendingTemporaryProjectCleanupRootUtf8_);
     cleanupOwnedTemporaryProject(temporaryProjectRootUtf8_);
     sourceImportCatalogCommitted_ = false;
+    previewAssetBindingsFailureFeedbackPending_ = false;
     ++counters_.stateExits;
 }
 
@@ -369,8 +378,6 @@ auto EditorWorkspaceState::updateFrame(Tina::FrameUpdateContext& context) -> Tin
         if (auto status = refreshProjectCatalog(); !status) {
             return status;
         }
-        previewAssetBindingsRefreshPending_ = false;
-        projectBrowserUiRefreshPending_ = true;
     }
     if (previewAssetBindingsRefreshPending_) {
         if (auto status = rebuildLiveCatalogPreview(
@@ -380,9 +387,35 @@ auto EditorWorkspaceState::updateFrame(Tina::FrameUpdateContext& context) -> Tin
                 Tina::Asset::AssetErrorCode::CatalogReloadBusy) {
                 return Tina::Core::success();
             }
-            return status;
+            counters_.runtimePreviewValid = false;
+            if (isFatalSourceImportError(status.error())) {
+                return status;
+            }
+            if (!previewAssetBindingsFailureFeedbackPending_) {
+                previewAssetBindingsFailureFeedbackPending_ = true;
+                if (auto feedback = reportAuthoringFailure(
+                        "Catalog is live, but preview refresh will retry: ",
+                        status.error()); !feedback) {
+                    return feedback;
+                }
+            }
+            sourceImportUiRefreshPending_ = true;
+            return Tina::Core::success();
         }
         previewAssetBindingsRefreshPending_ = false;
+        if (previewAssetBindingsFailureFeedbackPending_) {
+            previewAssetBindingsFailureFeedbackPending_ = false;
+            sourceImportFailureMessageUtf8_.clear();
+            sourceImportUiRefreshPending_ = true;
+            authoringFeedback_ =
+                "Catalog, Project Browser, documents, and runtime preview bindings refreshed";
+            if (fileDropFeedbackState_ == FileDropFeedbackState::Failed &&
+                !sourceImportLastFailed_) {
+                setFileDropFeedback(
+                    FileDropFeedbackState::Committed,
+                    "Catalog committed; runtime preview bindings refreshed");
+            }
+        }
     }
     if (options_.autoDemo &&
         sourceImportService_.state() ==
@@ -1048,8 +1081,53 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
     if (auto rect = tree->committedLayoutRect(projectAssetList_); rect) {
         projectAssetListRect_ = *rect;
     }
+    if (nodePropertySections_[0].resourceSlot.hasValue()) {
+        if (auto rect = tree->committedLayoutRect(
+                nodePropertySections_[0].resourceSlot); rect) {
+            inspectorSpriteResourceRect_ = *rect;
+        }
+        auto theme = tree->productTheme();
+        if (!theme) {
+            return Tina::Core::failure(std::move(theme.error()));
+        }
+        if (auto status = tree->setBoxPaint(
+                nodePropertySections_[0].resourceSlot,
+                UI::makeSolidBox(projectAssetDragOverSpriteResource_
+                                     ? theme->colors.primaryContainer
+                                     : theme->colors.surfaceContainerLow));
+            !status) {
+            return status;
+        }
+    }
+    const u32 inspectorStableId = stableEntityIdForHierarchyItem(selectionKey_);
+    const EditorHierarchyRow* inspectorRow = hierarchyRow(inspectorStableId);
+    const bool spriteInspectorSelection = inspectorRow != nullptr &&
+        (inspectorRow->kindName == "Sprite2D" ||
+         inspectorRow->kindName == "AnimatedSprite2D");
+    if (assetInspectorActive_ || !sceneDocumentActive() ||
+        !spriteInspectorSelection) {
+        inspectorSpriteResourceRect_ = {};
+        projectAssetDragOverSpriteResource_ = false;
+    }
     if (auto rect = tree->committedLayoutRect(viewportPreviewLayer_); rect) {
         viewportLogicalRect_ = *rect;
+    }
+    if (viewportAssetDropIndicator_.hasValue()) {
+        UI::UILayoutStyle dropStyle = fixedSize(
+            (std::max)(1.0F, viewportLogicalRect_.width),
+            (std::max)(1.0F, viewportLogicalRect_.height));
+        dropStyle.placement = UI::UILayoutPlacement::Overlay;
+        dropStyle.overlay.horizontal = UI::UIAxisAlignment::Start;
+        dropStyle.overlay.vertical = UI::UIAxisAlignment::Start;
+        dropStyle.overlay.offset.x = UI::UILayoutLength::Px(0.0F);
+        dropStyle.overlay.offset.y = UI::UILayoutLength::Px(0.0F);
+        dropStyle.visibility = projectAssetDragOverViewport_
+            ? UI::UIVisibility::Visible
+            : UI::UIVisibility::Collapsed;
+        if (auto status = tree->setLayoutStyle(
+                viewportAssetDropIndicator_, dropStyle); !status) {
+            return status;
+        }
     }
     if (auto metrics = tree->virtualGridViewMetrics(projectAssetList_); metrics) {
         projectAssetListMetrics_ = *metrics;
@@ -1271,26 +1349,6 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
     }
     if (projectBrowserUiRefreshPending_) {
         projectBrowserUiRefreshPending_ = false;
-        collapsedProjectAssetFolderKeys_.clear();
-        if (auto status = tree->setTreeViewDataSource(
-                projectAssetFolderTree_, projectAssetFolderDataSource()); !status) {
-            return status;
-        }
-        if (auto status = tree->invalidateTreeViewItems(projectAssetFolderTree_);
-            !status) {
-            return status;
-        }
-        const u64 folderIndex = visibleProjectAssetFolderIndex(
-            projectAssets_.currentFolderPath()).value_or(0U);
-        if (auto status = tree->setTreeViewSelectedIndex(
-                projectAssetFolderTree_, folderIndex); !status) {
-            return status;
-        }
-        UI::UITreeViewItemDescriptor folderSelection{};
-        projectAssetFolderSelectionKey_ =
-            resolveProjectAssetFolderItem(this, folderIndex, folderSelection)
-                ? folderSelection.key
-                : UI::InvalidUITreeViewItemKey;
         if (auto status = tree->setVirtualGridViewDataSource(
                 projectAssetList_, projectAssetDataSource());
             !status) {
@@ -1353,31 +1411,6 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
         }
     }
     preserveViewportSelectionOnHierarchyPublish_ = false;
-    auto projectFolderSelection = tree->treeViewSelection(
-        projectAssetFolderTree_);
-    if (!projectFolderSelection) {
-        return Tina::Core::failure(std::move(projectFolderSelection.error()));
-    }
-    if (projectFolderSelection->key != projectAssetFolderSelectionKey_) {
-        UI::UITreeViewItemDescriptor selectedFolder{};
-        if (!resolveProjectAssetFolderItem(
-                this, projectFolderSelection->logicalIndex, selectedFolder)) {
-            return Tina::Core::failure(
-                Tina::Core::CoreErrorCode::Internal,
-                "Editor Project Asset folder selection could not be resolved");
-        }
-        const auto* folder = projectAssets_.folder(
-            static_cast<Tina::Core::usize>(selectedFolder.key - 1U));
-        if (folder == nullptr) {
-            return Tina::Core::failure(
-                Tina::Core::CoreErrorCode::Internal,
-                "Editor Project Asset folder selection key is stale");
-        }
-        projectAssetFolderSelectionKey_ = selectedFolder.key;
-        if (auto status = applyProjectAssetFolder(*tree, folder->pathUtf8); !status) {
-            return status;
-        }
-    }
     if (!projectAssetSelectionSyncPending_) {
         auto projectSelection = tree->virtualGridViewSelection(projectAssetList_);
         if (!projectSelection) {
@@ -1391,7 +1424,9 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
                 return status;
             }
             observedProjectAssetSelectionIndex_ = projectSelection->logicalIndex;
-            assetInspectorActive_ = true;
+            assetInspectorActive_ =
+                preserveNodeInspectorOnProjectAssetSelection_ ? false : true;
+            preserveNodeInspectorOnProjectAssetSelection_ = false;
             synchronizeViewportSelectionFromHierarchy();
             ++counters_.projectAssetSelectionChanges;
             if (auto status = refreshAuthoringUi(*tree); !status) {
@@ -1406,6 +1441,14 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
                 return status;
             }
         }
+    }
+    // A valid drag may preserve the node Inspector even when the dragged
+    // asset was already the Project Assets selection, so the observer above
+    // has no index transition through which to consume the one-shot intent.
+    // Once selection synchronization has completed, never carry it into a
+    // later, unrelated asset interaction.
+    if (!projectAssetSelectionSyncPending_) {
+        preserveNodeInspectorOnProjectAssetSelection_ = false;
     }
     auto sourceImportSelection = tree->dataGridSelection(sourceImportGrid_);
     if (!sourceImportSelection) {
@@ -2372,7 +2415,13 @@ auto EditorWorkspaceState::processPendingFileDrops(
             setFileDropFeedback(
                 FileDropFeedbackState::Failed,
                 status.error().message);
+            if (isFatalSourceImportError(status.error())) {
+                return status;
+            }
             return reportAuthoringFailure("File drop rejected: ", status.error());
+        }
+        if (sourceImportService_.state() != ImportState::Running) {
+            return Tina::Core::success();
         }
         authoringFeedback_ = "Dropped files are importing into Project Assets";
         setFileDropFeedback(
@@ -2446,7 +2495,11 @@ auto EditorWorkspaceState::importSourceFromDialog() -> Tina::Core::Status{
                 "Native source import selection is unavailable on this platform";
             return Tina::Core::success();
         }
-        return Tina::Core::failure(std::move(selected.error()));
+        if (isFatalSourceImportError(selected.error())) {
+            return Tina::Core::failure(std::move(selected.error()));
+        }
+        return reportAuthoringFailure(
+            "Source import selection failed: ", selected.error());
     }
     if (!selected->selected()) {
         authoringFeedback_ = "Source import cancelled";
