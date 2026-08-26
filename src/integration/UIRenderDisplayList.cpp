@@ -685,6 +685,7 @@ struct ProjectedQuad final {
     Render::UIPremultipliedRgba8 color,
     float logicalThickness,
     u64& nextPaintOrdinal,
+    const std::optional<Render::UIPixelRect>& exclusion,
     UIRenderDisplayListBuildStatistics& statistics)
 {
     if (!validLogicalRect(logicalRect) || logicalRect.width <= 0.0F || logicalRect.height <= 0.0F)
@@ -698,7 +699,7 @@ struct ProjectedQuad final {
     }
 
     const Render::UIPixelRect outer = *projected;
-    const auto addPart = [&](const Render::UIPixelRect& part) -> Core::Status {
+    const auto submitPart = [&](const Render::UIPixelRect& part) -> Core::Status {
         if (part.empty())
         {
             return Core::success();
@@ -718,6 +719,72 @@ struct ProjectedQuad final {
             ++statistics.submittedLayoutDebugQuadCount;
         }
         return status;
+    };
+    // Overlay quads carry the highest paint ordinals and no clip, so without an
+    // explicit exclusion they would paint across the debugger window that owns
+    // them. Split along the part's longer axis, which yields at most two pieces
+    // and stays exact for outline strips: a strip is 1-2px on its short axis
+    // while the excluded window is hundreds of px, so the excluded band always
+    // spans the strip completely on that axis.
+    const auto addPart = [&](const Render::UIPixelRect& part) -> Core::Status {
+        if (part.empty())
+        {
+            return Core::success();
+        }
+        if (!exclusion.has_value() || exclusion->empty())
+        {
+            return submitPart(part);
+        }
+        const i64 partLeft = part.x;
+        const i64 partTop = part.y;
+        const i64 partRight = partLeft + part.width;
+        const i64 partBottom = partTop + part.height;
+        const i64 blockLeft = exclusion->x;
+        const i64 blockTop = exclusion->y;
+        const i64 blockRight = blockLeft + exclusion->width;
+        const i64 blockBottom = blockTop + exclusion->height;
+        if (partRight <= blockLeft || partLeft >= blockRight ||
+            partBottom <= blockTop || partTop >= blockBottom)
+        {
+            return submitPart(part);
+        }
+        if (part.width >= part.height)
+        {
+            const Render::UIPixelRect before{
+                .x = part.x,
+                .y = part.y,
+                .width = static_cast<u32>((std::max)(i64{0}, blockLeft - partLeft)),
+                .height = part.height,
+            };
+            const Render::UIPixelRect after{
+                .x = static_cast<i32>((std::max)(partLeft, blockRight)),
+                .y = part.y,
+                .width = static_cast<u32>((std::max)(i64{0}, partRight - (std::max)(partLeft, blockRight))),
+                .height = part.height,
+            };
+            if (Core::Status status = submitPart(before); !status)
+            {
+                return status;
+            }
+            return submitPart(after);
+        }
+        const Render::UIPixelRect above{
+            .x = part.x,
+            .y = part.y,
+            .width = part.width,
+            .height = static_cast<u32>((std::max)(i64{0}, blockTop - partTop)),
+        };
+        const Render::UIPixelRect below{
+            .x = part.x,
+            .y = static_cast<i32>((std::max)(partTop, blockBottom)),
+            .width = part.width,
+            .height = static_cast<u32>((std::max)(i64{0}, partBottom - (std::max)(partTop, blockBottom))),
+        };
+        if (Core::Status status = submitPart(above); !status)
+        {
+            return status;
+        }
+        return submitPart(below);
     };
     const double projectedThickness = static_cast<double>(logicalThickness) *
                                       (std::min)(projection.scaleX, projection.scaleY);
@@ -828,6 +895,25 @@ struct ProjectedQuad final {
             }
         }
     }
+    // Keep every outline out of the excluded window's screen area. Subtree
+    // exclusion alone only suppresses that subtree's own outlines; other nodes
+    // would still draw across it because overlay quads are unclipped.
+    std::optional<Render::UIPixelRect> exclusionArea{};
+    if (excludedRoot != nullptr &&
+        excludedRoot->effectiveVisibility == UI::UIVisibility::Visible &&
+        validLogicalRect(excludedRoot->worldRect) && excludedRoot->worldRect.width > 0.0F &&
+        excludedRoot->worldRect.height > 0.0F)
+    {
+        auto projectedExclusion = projectRect(excludedRoot->worldRect, projection);
+        if (!projectedExclusion)
+        {
+            return Core::failure(std::move(projectedExclusion.error()));
+        }
+        if (!projectedExclusion->empty())
+        {
+            exclusionArea = *projectedExclusion;
+        }
+    }
     for (const UI::UILayoutDebugEntry& entry : overlay.snapshot.entries())
     {
         if (excludedRoot != nullptr && entry.preorder >= excludedRoot->preorder &&
@@ -850,7 +936,7 @@ struct ProjectedQuad final {
             Core::Status status = addDebugOutline(
                 builder, entry.worldRect, projection,
                 Render::UIPremultipliedRgba8{.red = 29, .green = 54, .blue = 92, .alpha = 92},
-                1.0F, nextPaintOrdinal, statistics);
+                1.0F, nextPaintOrdinal, exclusionArea, statistics);
             if (!status)
             {
                 return status;
@@ -866,7 +952,7 @@ struct ProjectedQuad final {
     Core::Status status = addDebugOutline(
         builder, selected->worldRect, projection,
         Render::UIPremultipliedRgba8{.red = 40, .green = 235, .blue = 255, .alpha = 255},
-        2.0F, nextPaintOrdinal, statistics);
+        2.0F, nextPaintOrdinal, exclusionArea, statistics);
     if (!status)
     {
         return status;
@@ -874,7 +960,7 @@ struct ProjectedQuad final {
     status = addDebugOutline(
         builder, selected->contentPlacement.contentBox, projection,
         Render::UIPremultipliedRgba8{.red = 63, .green = 216, .blue = 108, .alpha = 230},
-        1.0F, nextPaintOrdinal, statistics);
+        1.0F, nextPaintOrdinal, exclusionArea, statistics);
     if (!status)
     {
         return status;
@@ -882,7 +968,7 @@ struct ProjectedQuad final {
     return addDebugOutline(
         builder, selected->effectiveClip, projection,
         Render::UIPremultipliedRgba8{.red = 230, .green = 171, .blue = 45, .alpha = 230},
-        1.0F, nextPaintOrdinal, statistics);
+        1.0F, nextPaintOrdinal, exclusionArea, statistics);
 }
 
 } // namespace

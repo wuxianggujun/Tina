@@ -17,6 +17,9 @@ struct UIGlyphAtlasPageView final {
     u32 width = 0;
     u32 height = 0;
     std::span<const u8> pixels{};
+    // Monotonic page-content revision. A backend that already uploaded this
+    // revision may skip the transfer; zero means "unknown, always upload".
+    u64 pageRevision = 0;
 };
 
 struct RenderFrame final {

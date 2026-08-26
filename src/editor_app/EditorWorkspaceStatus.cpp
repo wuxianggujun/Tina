@@ -668,23 +668,36 @@ auto EditorWorkspaceState::refreshOutputAndStatusUi(
     if (auto status = tree.setText(statusTask_, taskText); !status) {
         return status;
     }
-    const auto formatMetric = [](double value) {
+    // Whole FPS and one decimal of milliseconds. Full precision would change the
+    // string on every frame and dirty the tree just to republish it.
+    const auto formatWholeMetric = [](double value) {
+        return std::to_string(static_cast<u64>(value + 0.5));
+    };
+    const auto formatMillisecondMetric = [](double value) {
         std::string text = std::to_string(value);
-        while (text.size() > 1U && text.back() == '0') {
-            text.pop_back();
-        }
-        if (!text.empty() && text.back() == '.') {
-            text.pop_back();
+        const auto dot = text.find('.');
+        if (dot != std::string::npos && dot + 2U < text.size()) {
+            text.resize(dot + 2U);
         }
         return text;
     };
-    std::string activityText = taskText;
     const double frameSeconds = counters_.lastFrameSeconds;
     if (frameSeconds > 0.0 && std::isfinite(frameSeconds)) {
+        statusFrameMetricElapsedSeconds_ += frameSeconds;
+        if (!statusFrameMetricValid_ ||
+            statusFrameMetricElapsedSeconds_ >= StatusFrameMetricIntervalSeconds) {
+            statusFrameMetricElapsedSeconds_ = 0.0;
+            statusFrameMetricFps_ = 1.0 / frameSeconds;
+            statusFrameMetricMilliseconds_ = frameSeconds * 1000.0;
+            statusFrameMetricValid_ = true;
+        }
+    }
+    std::string activityText = taskText;
+    if (statusFrameMetricValid_) {
         activityText += "  |  ";
-        activityText += formatMetric(1.0 / frameSeconds);
+        activityText += formatWholeMetric(statusFrameMetricFps_);
         activityText += " FPS  |  ";
-        activityText += formatMetric(frameSeconds * 1000.0);
+        activityText += formatMillisecondMetric(statusFrameMetricMilliseconds_);
         activityText += " ms";
     }
     if (statusActivity_.hasValue()) {

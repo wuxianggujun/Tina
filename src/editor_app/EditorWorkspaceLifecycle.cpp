@@ -1025,31 +1025,52 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
     if (!tree) {
         return Tina::Core::failure(std::move(tree.error()));
     }
-    tilePaletteTileCount_ = 0U;
-    if (previewTilesetAsset_ && assetResources_.system.has_value()) {
-        if (const auto* file = assetResources_.system->tryGet(previewTilesetAsset_);
-            file != nullptr) {
-            auto payload = Tina::AssetFormat::parseTilesetPayload(file->payload());
-            if (payload) {
-                const u32 count = (std::min)(payload->tileCount,
-                    static_cast<u32>(tilePaletteTiles_.size()));
-                for (u32 index = 0; index < count; ++index) {
-                    const auto tile = payload->tile(index);
-                    if (!tile.has_value()) continue;
-                    tilePaletteTiles_[tilePaletteTileCount_] = *tile;
-                    tilePaletteLabels_[tilePaletteTileCount_] =
-                        "Tile " + std::to_string(tile->localId);
-                    ++tilePaletteTileCount_;
+    // The palette projection depends on the resolved tileset payload and on the
+    // editing context that gates each row. Both invalidate paths below dirty
+    // Style unconditionally, which re-resolves all TilePaletteMaterializedCapacity
+    // rows, so rebuild only when one of those inputs actually changed.
+    const Tina::Core::ContentHash tilesetHash = [&]() noexcept {
+        if (!previewTilesetAsset_ || !assetResources_.system.has_value()) {
+            return Tina::Core::ContentHash{};
+        }
+        const auto* file = assetResources_.system->tryGet(previewTilesetAsset_);
+        return file != nullptr ? file->header().contentHash : Tina::Core::ContentHash{};
+    }();
+    const bool tileMapEditing = tileMapEditingContext();
+    if (!tilePaletteProjectionInitialized_ ||
+        observedTilePaletteTilesetAsset_ != previewTilesetAsset_ ||
+        observedTilePaletteTilesetHash_ != tilesetHash ||
+        observedTilePaletteEditingContext_ != tileMapEditing) {
+        observedTilePaletteTilesetAsset_ = previewTilesetAsset_;
+        observedTilePaletteTilesetHash_ = tilesetHash;
+        observedTilePaletteEditingContext_ = tileMapEditing;
+        tilePaletteProjectionInitialized_ = true;
+        tilePaletteTileCount_ = 0U;
+        if (previewTilesetAsset_ && assetResources_.system.has_value()) {
+            if (const auto* file = assetResources_.system->tryGet(previewTilesetAsset_);
+                file != nullptr) {
+                auto payload = Tina::AssetFormat::parseTilesetPayload(file->payload());
+                if (payload) {
+                    const u32 count = (std::min)(payload->tileCount,
+                        static_cast<u32>(tilePaletteTiles_.size()));
+                    for (u32 index = 0; index < count; ++index) {
+                        const auto tile = payload->tile(index);
+                        if (!tile.has_value()) continue;
+                        tilePaletteTiles_[tilePaletteTileCount_] = *tile;
+                        tilePaletteLabels_[tilePaletteTileCount_] =
+                            "Tile " + std::to_string(tile->localId);
+                        ++tilePaletteTileCount_;
+                    }
                 }
             }
         }
-    }
-    if (auto status = tree->setVirtualGridViewDataSource(
-            tilePaletteGrid_, tilePaletteDataSource()); !status) {
-        return status;
-    }
-    if (auto status = tree->invalidateVirtualGridViewItems(tilePaletteGrid_); !status) {
-        return status;
+        if (auto status = tree->setVirtualGridViewDataSource(
+                tilePaletteGrid_, tilePaletteDataSource()); !status) {
+            return status;
+        }
+        if (auto status = tree->invalidateVirtualGridViewItems(tilePaletteGrid_); !status) {
+            return status;
+        }
     }
     if (auto selection = tree->virtualGridViewSelection(tilePaletteGrid_); selection) {
         if (selection->hasValue() && observedTilePaletteSelection_ != selection->logicalIndex &&

@@ -175,6 +175,7 @@ Core::Result<UIGlyphPlacement> UIGlyphAtlas::placeNew(
                 + atlasX;
             std::memcpy(dst, src, glyph.width);
         }
+        ++m_pageRevision;
     }
 
     const u32 slotIndex = m_freeSlots.back();
@@ -261,6 +262,7 @@ void UIGlyphAtlas::clear() noexcept
     m_glyphCount = 0;
     m_usedPixels = 0;
     std::memset(m_page.data(), 0, m_page.size());
+    ++m_pageRevision;
 }
 
 UIGlyphAtlasCapacity UIGlyphAtlas::capacity() const noexcept
@@ -285,6 +287,11 @@ UIGlyphAtlasStatistics UIGlyphAtlas::statistics() const noexcept
 std::span<const u8> UIGlyphAtlas::pagePixels() const noexcept
 {
     return std::span<const u8>(m_page.data(), m_page.size());
+}
+
+u64 UIGlyphAtlas::pageRevision() const noexcept
+{
+    return m_pageRevision;
 }
 
 const UIGlyphAtlas::GlyphSlot* UIGlyphAtlas::resolve(UIGlyphId id) const noexcept

@@ -1343,5 +1343,102 @@ TEST_F(UIRenderDisplayListTest, RejectsMalformedImageMetadataBeforeResolverInvoc
     EXPECT_EQ(builder.statistics().rolledBackBuildCount, malformedEntries.size());
 }
 
+TEST_F(UIRenderDisplayListTest, LayoutDebugOverlaySkipsExcludedWindowArea)
+{
+    auto contextResult = UI::UIContext::Create(
+        window, {.nodeCapacity = 8, .rootCapacity = 1, .layoutDebuggerSnapshotCapacity = 8});
+    ASSERT_TRUE(contextResult.has_value()) << contextResult.error().message;
+    auto context = std::move(*contextResult);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root);
+
+    // A full-viewport panel plus a smaller floating window. The wide panel's
+    // outline would otherwise paint straight across the excluded window.
+    UI::UILayoutStyle wideStyle;
+    wideStyle.size.width = UI::UILayoutLength::Px(100.0F);
+    wideStyle.size.height = UI::UILayoutLength::Px(100.0F);
+    auto wideResult = context->authoring().rootBuilder().createElement(
+        root.rootNodeId(), UI::makePanelElement(wideStyle));
+    ASSERT_TRUE(wideResult.has_value()) << wideResult.error().message;
+
+    UI::UILayoutStyle windowStyle;
+    windowStyle.size.width = UI::UILayoutLength::Px(60.0F);
+    windowStyle.size.height = UI::UILayoutLength::Px(60.0F);
+    windowStyle.placement = UI::UILayoutPlacement::Overlay;
+    windowStyle.overlay.horizontal = UI::UIAxisAlignment::Start;
+    windowStyle.overlay.vertical = UI::UIAxisAlignment::Start;
+    windowStyle.overlay.offset.x = UI::UILayoutLength::Px(20.0F);
+    windowStyle.overlay.offset.y = UI::UILayoutLength::Px(20.0F);
+    auto windowResult = context->authoring().rootBuilder().createElement(
+        root.rootNodeId(), UI::makePanelElement(windowStyle));
+    ASSERT_TRUE(windowResult.has_value()) << windowResult.error().message;
+    ASSERT_TRUE(context->publication().commitLayout({100.0F, 100.0F}).has_value());
+
+    const auto snapshot = context->publication().committedLayoutDebugSnapshot();
+    ASSERT_FALSE(snapshot.empty());
+    const auto paint = context->publication().committedPaint();
+    const Render::UIPixelRect blocked{.x = 20, .y = 20, .width = 60, .height = 60};
+
+    auto builder = createBuilder({.commandCount = 256, .clipCount = 16, .batchCount = 256});
+    auto unexcluded = Integration::buildUIDisplayList(
+        builder, paint, {.framebufferViewport = {0, 0, 100, 100}}, {},
+        Integration::UIRenderLayoutDebugOverlay{
+            .options = {.enabled = true, .showAllVisibleBounds = true},
+            .snapshot = snapshot,
+        });
+    ASSERT_TRUE(unexcluded.has_value())
+        << (unexcluded ? "" : unexcluded.error().message);
+    ASSERT_GT(unexcluded->statistics.submittedLayoutDebugQuadCount, 0U);
+    const auto overlapsBlocked = [&blocked](const Render::UIPixelRect& bounds) {
+        const i64 left = bounds.x;
+        const i64 top = bounds.y;
+        const i64 right = left + bounds.width;
+        const i64 bottom = top + bounds.height;
+        return !(right <= blocked.x || left >= blocked.x + blocked.width ||
+                 bottom <= blocked.y || top >= blocked.y + blocked.height);
+    };
+    // Baseline: without an exclusion at least one outline does cross the window,
+    // so the excluded run below is a real assertion and not vacuously true.
+    usize baselineOverlaps = 0;
+    for (const Render::UIDrawCommand& command : unexcluded->displayList.commands())
+    {
+        if (command.paintOrdinal >= paint.size() && overlapsBlocked(command.bounds))
+        {
+            ++baselineOverlaps;
+        }
+    }
+    EXPECT_GT(baselineOverlaps, 0U);
+
+    auto excluded = Integration::buildUIDisplayList(
+        builder, paint, {.framebufferViewport = {0, 0, 100, 100}}, {},
+        Integration::UIRenderLayoutDebugOverlay{
+            .options = {.enabled = true,
+                        .showAllVisibleBounds = true,
+                        .excludedSubtreeRoot = *windowResult},
+            .snapshot = snapshot,
+        });
+    ASSERT_TRUE(excluded.has_value()) << (excluded ? "" : excluded.error().message);
+    u32 previousOverlayOrdinal = 0;
+    bool sawOverlay = false;
+    for (const Render::UIDrawCommand& command : excluded->displayList.commands())
+    {
+        if (command.paintOrdinal < paint.size())
+        {
+            continue; // ordinary UI content, not an overlay quad
+        }
+        EXPECT_FALSE(overlapsBlocked(command.bounds))
+            << "overlay quad (" << command.bounds.x << "," << command.bounds.y << ","
+            << command.bounds.width << "," << command.bounds.height
+            << ") paints inside the excluded window";
+        if (sawOverlay)
+        {
+            EXPECT_GT(command.paintOrdinal, previousOverlayOrdinal);
+        }
+        previousOverlayOrdinal = command.paintOrdinal;
+        sawOverlay = true;
+    }
+    EXPECT_TRUE(sawOverlay);
+}
+
 } // namespace
 } // namespace Tina::Tests

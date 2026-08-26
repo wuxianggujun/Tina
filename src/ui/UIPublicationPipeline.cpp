@@ -64,5 +64,10 @@ u32 UIPublicationPipeline::glyphAtlasHeight() const noexcept
     return m_context->m_impl->glyphAtlasHeight();
 }
 
+u64 UIPublicationPipeline::glyphAtlasPageRevision() const noexcept
+{
+    return m_context->m_impl->glyphAtlasPageRevision();
+}
+
 
 } // namespace Tina::UI

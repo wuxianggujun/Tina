@@ -938,4 +938,9 @@ UIContext::Impl::committedLayoutDebugSnapshot() const noexcept
     return glyphAtlas ? glyphAtlas->capacity().height : 0U;
 }
 
+[[nodiscard]] u64 UIContext::Impl::glyphAtlasPageRevision() const noexcept
+{
+    return glyphAtlas ? glyphAtlas->pageRevision() : 0U;
+}
+
 } // namespace Tina::UI

@@ -121,6 +121,11 @@ class UIGlyphAtlas final {
     // Size is always width*height.
     [[nodiscard]] std::span<const u8> pagePixels() const noexcept;
 
+    // Monotonic counter bumped whenever page pixels change. The page is
+    // allocated at full size up front, so emptiness cannot signal "nothing to
+    // upload"; consumers compare this instead of re-uploading every frame.
+    [[nodiscard]] u64 pageRevision() const noexcept;
+
   private:
     UIGlyphAtlas(
         UIGlyphAtlasCapacity capacity,
@@ -163,6 +168,9 @@ class UIGlyphAtlas final {
     u32 m_usedPixels = 0;
     u32 m_usedPixelHighWater = 0;
     u32 m_nextShelfY = 0;
+    // Starts at 1 so a consumer's zero-initialized "last uploaded" value always
+    // differs from the first published revision.
+    u64 m_pageRevision = 1;
 };
 
 [[nodiscard]] Core::Status validateUIGlyphAtlasCapacity(

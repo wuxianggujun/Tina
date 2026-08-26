@@ -31,7 +31,9 @@ Texture2D/GPU mesh/EnvironmentMap 已有独立、backend-proven 的 GPU resource
 - submit-call-local `FrameResourceTableView`；
 - submit-call-local primary World `RenderSceneView`；
 - submit-call-local primary UI `UIDisplayListView`；
-- optional R8 `UIGlyphAtlasPageView`。
+- optional R8 `UIGlyphAtlasPageView`。它带一个单调的 `pageRevision`：page 始终按满尺寸分配并逐帧传入，
+  所以 backend 用它判断是否可以跳过整页上传，`0` 表示未知、必须上传。`UIGlyphAtlas::pageRevision()` 只在
+  glyph 像素写入或 `clear()` 时自增。
 
 所有 view/span/pixel pointer 只在 `IRenderDevice::submitFrame()` 调用期间有效。backend 必须同步消费，
 返回后不能保存。`submitFrame()` 返回 `Submitted` 或 `SkippedSuspendedSurface`；只有前者允许 Runtime
@@ -122,7 +124,8 @@ EngineHost 在创建任何 module factory 前 fail closed，Null/bgfx 直接 fac
 `EngineConfig::renderDrawCallCapacity` 是每帧 backend submission 的启动定容，合法值为1024的整数倍或
 精确的 native 上限65535，默认65535以保持通用 Runtime 上限。bgfx 将它传给 `Init::limits.numDrawCalls`，并因 Tina
 只允许 RenderDevice owner thread 提交而把 `maxEncoders` 固定为1；工具可依据其冻结的 scene/UI 容量显式降低。
-`TinaEditor` 使用33792：32K 对应 Layout Debugger 可占满的 UI DisplayList，额外1K留给有界 scene pass；
+`TinaEditor` 使用50176：48K 对应 Layout Debugger 可占满的 UI DisplayList（overlay 边框会被面板排除区
+最多切成两段），额外1K留给有界 scene pass；
 这仍避免空会话承担 bgfx 的65K双帧 render-item arrays 与默认多 encoder uniform buffers。
 
 `EngineConfig::renderMsaaSamples` 同样是 device-lifetime 启动配置：`0`（默认，关闭）或 `2/4/8/16`，

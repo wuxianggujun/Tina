@@ -77,6 +77,10 @@ layout snapshot 提供节点树、authored/resolved 布局参数、几何与 bas
 并在所有构建配置中可用。Layout Debugger 使用 Root 级悬浮面板，不再占用底部面板空间。可通过
 `View -> Layout Debugger` 或 Status Bar 的 `Layout` 打开；`All Bounds`
 在全部可见节点与当前选择之间切换，`Pick` 从真实 committed hit 结果选中、展开并滚动到布局树节点。
+UI paint 顺序是 tree preorder 加固定的 Popup/Menu/Tooltip 提升，没有 z-order，因此该面板在 root 子节点中
+**最后**创建，任何后续 chrome 都不会覆盖它；Menu/Popup/Tooltip 仍按提升 pass 绘制在它之上，而 modal
+对话框打开时面板置为 `Hidden` 让位（保留布局、拖拽与选择状态）。overlay 边框会绕开面板矩形，
+因此 `All Bounds` 不会把全视口节点的边框画穿面板。
 `%APPDATA%\\TinaEditor\\settings` 中的 `layoutDebugger=1` 会在下次启动恢复悬浮面板。Hierarchy 与 Inspector Header 分别提供向外收起按钮，
 `View` 菜单中的 `Left Dock` / `Inspector` Check 项用于恢复或再次隐藏；收起前保存用户最后拖拽比例。
 Project Assets 中的 `Sprite` 或 `Texture2D` 可直接拖入 2D Viewport；释放后会在指针对应的世界坐标创建一个
@@ -389,10 +393,10 @@ Workspace
   Active 2D/3D viewport (one Scene-TileMap/transform/snap/marquee/tile/frame/view toolbar + preview canvas)
   Inspector dock (scrollable identity/transform/node properties/hierarchy/TileMap/document/36px dependency list)
 Collapsible bottom panel (Animation timeline or structured Output history; closed by default)
-Root floating Layout Debugger overlay (hidden by default; independent of the bottom panel host)
 Status bar (schema/entities/revision/preview/selection)
 Dirty-close modal (save/save-as/discard/cancel)
 Snackbar host (feedback/optional undo/polite live region)
+Root floating Layout Debugger overlay (authored last so no chrome paints over it; hidden by default)
 ```
 
 这层属于 `Tina::EditorApp` 组合根，`Tina::Editor` 公共头仍不依赖 UI、Runtime、Scene 或 backend。布局与 GPU smoke 的
@@ -449,9 +453,10 @@ mutation；非法配置或容量失败保留上一份 publication。公共头不
   overlay 继续使用 `PointerHitPolicy::Ignore`，effective clip 仍是 axis-aligned scissor，几何命中继续由
   gizmo backend 负责。Editor 不再为整个 backbuffer 打开 8× MSAA，跨 GPU UI-003 golden 仍由 backlog
   `RENDER-LINES-001` 跟踪。
-- Layout Debugger 把 Editor 的 UI DisplayList 上限固定为32768，并为 scene submission 额外预留1024，
-  因此 `EngineConfig::renderDrawCallCapacity` 为33792。它仍低于 bgfx 的65K通用上限，同时不会让满载
-  layout overlay 与 world pass 争用同一份32K ceiling。
+- Layout Debugger 把 Editor 的 UI DisplayList 上限固定为49152，并为 scene submission 额外预留1024，
+  因此 `EngineConfig::renderDrawCallCapacity` 为50176。每条 overlay 边框可能被面板排除区切成两段，
+  所以预算是 `4096 节点 × 4 边框 × 2` 加选择态 overlay 与文本余量。它仍低于 bgfx 的65K通用上限，
+  同时不会让满载 layout overlay 与 world pass 争用同一份 ceiling。
 - grid、transform gizmo 与 marquee overlay node 在 root 创建期一次性预分配，未使用槽为 `Collapsed`，并保持
   `UIPointerHitPolicy::Ignore`；它们的命中仍由 `viewportPreviewLayer_` 统一路由给 navigation、transform gizmo、
   marquee 与 TileMap brush。

@@ -1196,6 +1196,7 @@ class EngineHostImplementation final {
                         .width = uiContext.publication().glyphAtlasWidth(),
                         .height = uiContext.publication().glyphAtlasHeight(),
                         .pixels = pixels,
+                        .pageRevision = uiContext.publication().glyphAtlasPageRevision(),
                     };
                 }
             }

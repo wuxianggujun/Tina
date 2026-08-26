@@ -32,6 +32,10 @@ class UIPublicationPipeline final {
     [[nodiscard]] std::span<const u8> glyphAtlasPixels() const noexcept;
     [[nodiscard]] u32 glyphAtlasWidth() const noexcept;
     [[nodiscard]] u32 glyphAtlasHeight() const noexcept;
+    // Bumped only when page pixels change, so a backend can skip re-uploading an
+    // unchanged page. The page is always allocated at full size, so its byte span
+    // alone cannot distinguish "unchanged" from "never written".
+    [[nodiscard]] u64 glyphAtlasPageRevision() const noexcept;
 
   private:
     friend class UIContext;

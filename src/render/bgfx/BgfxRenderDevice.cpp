@@ -2261,6 +2261,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                 bgfx::destroy(uiGlyphAtlasTexture_);
                 uiGlyphAtlasTexture_ = BGFX_INVALID_HANDLE;
                 uiGlyphAtlasPageSize_ = {};
+                uiGlyphAtlasUploadedPageRevision_ = 0;
                 --statistics_.liveResources;
             }
             if (bgfx::isValid(uiTexColorUniform_))
@@ -4672,6 +4673,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             bgfx::destroy(uiGlyphAtlasTexture_);
             uiGlyphAtlasTexture_ = BGFX_INVALID_HANDLE;
             uiGlyphAtlasPageSize_ = {};
+            uiGlyphAtlasUploadedPageRevision_ = 0;
             --statistics_.liveResources;
         }
         if (!bgfx::isValid(uiGlyphAtlasTexture_))
@@ -4685,11 +4687,26 @@ class BgfxRenderDevice final : public IRenderDevice {
             uiGlyphAtlasTexture_ = *created;
             uiGlyphAtlasPageSize_ =
                 UIAtlasPageSize{.width = atlas->width, .height = atlas->height};
+            uiGlyphAtlasUploadedPageRevision_ = atlas->pageRevision;
             ++statistics_.liveResources;
             return Core::success();
         }
-        return updateUIGlyphAtlasTexture(
-            uiGlyphAtlasTexture_, atlas->width, atlas->height, atlas->pixels);
+        // The page is allocated at full size and handed to us every frame, so
+        // without this check a full 512x512 R8 copy is queued each frame even
+        // when no glyph was rasterized. Revision zero means "unknown".
+        if (atlas->pageRevision != 0
+            && atlas->pageRevision == uiGlyphAtlasUploadedPageRevision_)
+        {
+            return Core::success();
+        }
+        if (auto status = updateUIGlyphAtlasTexture(
+                uiGlyphAtlasTexture_, atlas->width, atlas->height, atlas->pixels);
+            !status)
+        {
+            return status;
+        }
+        uiGlyphAtlasUploadedPageRevision_ = atlas->pageRevision;
+        return Core::success();
     }
 
     [[nodiscard]] Core::Status preflightUIImageBindings(
@@ -5017,6 +5034,8 @@ class BgfxRenderDevice final : public IRenderDevice {
     bgfx::TextureHandle uiSolidWhiteTexture_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle uiGlyphAtlasTexture_ = BGFX_INVALID_HANDLE;
     UIAtlasPageSize uiGlyphAtlasPageSize_{};
+    // Last page revision handed to the GPU. Zero means nothing uploaded yet.
+    u64 uiGlyphAtlasUploadedPageRevision_ = 0;
     bgfx::UniformHandle uiTexColorUniform_ = BGFX_INVALID_HANDLE;
 
     enum class RetirementPhase : u8 {

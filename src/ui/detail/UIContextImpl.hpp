@@ -2749,6 +2749,9 @@ struct UIContext::Impl final {
     [[nodiscard]] u32 glyphAtlasHeight() const noexcept;
 
 
+    [[nodiscard]] u64 glyphAtlasPageRevision() const noexcept;
+
+
     [[nodiscard]] Core::Status openTextFont(std::span<const std::byte> fontBytes, i32 faceIndex);
 
 

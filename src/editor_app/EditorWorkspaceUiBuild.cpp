@@ -5866,9 +5866,6 @@ auto EditorWorkspaceState::onEnter(Tina::GameStateEnterContext& context) -> Tina
     if (auto status = buildWorkspaceUi(ui, rootNode); !status) {
         return status;
     }
-    if (auto status = buildLayoutDebuggerUi(ui, rootNode, layoutDebugPanel_); !status) {
-        return status;
-    }
     if (auto status = buildStatusBarUi(ui, rootNode); !status) {
         return status;
     }
@@ -5900,6 +5897,14 @@ auto EditorWorkspaceState::onEnter(Tina::GameStateEnterContext& context) -> Tina
         return status;
     }
     if (auto status = buildAboutDialogUi(ui, rootNode); !status) {
+        return status;
+    }
+    // Built last on purpose. UI paint order is tree preorder with a fixed
+    // Popup/Menu/Tooltip promotion; there is no z-order. A floating window must
+    // therefore be the final root-level sibling so no later-authored chrome
+    // paints over it. Menus, popups and tooltips still promote above it, and
+    // modal dialogs hide it explicitly while they own the screen.
+    if (auto status = buildLayoutDebuggerUi(ui, rootNode, layoutDebugPanel_); !status) {
         return status;
     }
     if (auto status = registerUiCallbacks(ui, rootNode); !status) {

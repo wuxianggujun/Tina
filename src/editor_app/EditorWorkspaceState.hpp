@@ -163,15 +163,21 @@ inline constexpr u32 LayoutDebugProjectionCapacity = 4096;
 inline constexpr u32 LayoutDebugTreeMaterializedCapacity = 96;
 inline constexpr u32 LayoutDebugDetailRowCount = 25;
 inline constexpr u32 LayoutDebugOverlayCommandsPerNode = 4;
+// Each overlay border quad is split around the debugger window so no outline
+// paints across it. A border strip is thin on its short axis, so a single split
+// along the long axis is exact and yields at most two pieces per quad.
+inline constexpr u32 LayoutDebugOverlayExclusionSplitFactor = 2;
 inline constexpr u32 LayoutDebugSelectedOverlayCommandCapacity = 12;
-inline constexpr u32 LayoutDebugDisplayListEntryCapacity = 32U * 1024U;
+inline constexpr u32 LayoutDebugDisplayListEntryCapacity = 48U * 1024U;
 inline constexpr u32 EditorRenderDrawCallHeadroom = 1024U;
 inline constexpr u32 EditorRenderDrawCallCapacity =
     LayoutDebugDisplayListEntryCapacity + EditorRenderDrawCallHeadroom;
 static_assert(
     LayoutDebugDisplayListEntryCapacity >=
-    LayoutDebugProjectionCapacity * LayoutDebugOverlayCommandsPerNode +
-        LayoutDebugSelectedOverlayCommandCapacity + 8192U);
+    LayoutDebugProjectionCapacity * LayoutDebugOverlayCommandsPerNode *
+            LayoutDebugOverlayExclusionSplitFactor +
+        LayoutDebugSelectedOverlayCommandCapacity *
+            LayoutDebugOverlayExclusionSplitFactor + 8192U);
 static_assert(EditorRenderDrawCallCapacity % 1024U == 0U);
 static_assert(EditorRenderDrawCallCapacity < 65535U);
 inline constexpr float OutputSeverityColumnWidth = 76.0F;
@@ -183,6 +189,10 @@ inline constexpr u32 AnimationVisibleFrameSlots = 6;
 inline constexpr u32 DocumentTabSlots = 6;
 inline constexpr u32 RecentProjectCapacity = 10;
 inline constexpr u32 TilePaletteMaterializedCapacity = 64;
+// Status-bar frame metrics refresh interval. Long enough that the readout text
+// is byte-identical across most frames, short enough to stay legible as a live
+// reading.
+inline constexpr double StatusFrameMetricIntervalSeconds = 0.25;
 inline constexpr float TilePaletteMinimumItemWidth = 72.0F;
 inline constexpr float TilePaletteItemHeight = 64.0F;
 inline constexpr u32 MainMenuCount = 4;
@@ -4732,6 +4742,13 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId statusTask_{};
     UI::UINodeId statusCatalog_{};
     UI::UINodeId statusActivity_{};
+    // The frame-rate readout is quantized and rate limited. A full-precision
+    // per-frame string differs every frame, and setText would then dirty layout
+    // and paint on every idle frame just to publish it.
+    double statusFrameMetricElapsedSeconds_ = StatusFrameMetricIntervalSeconds;
+    double statusFrameMetricFps_ = 0.0;
+    double statusFrameMetricMilliseconds_ = 0.0;
+    bool statusFrameMetricValid_ = false;
     UI::UIDialogParts sceneAddDialog_{};
     UI::UINodeId sceneAddParentLabel_{};
     UI::UINodeId sceneAddSearchInput_{};
@@ -5008,6 +5025,13 @@ class EditorWorkspaceState final : public Tina::IGameState {
         tilePaletteTiles_{};
     std::array<std::string, Tina::AssetFormat::TilesetWire::MaxTiles> tilePaletteLabels_{};
     u32 tilePaletteTileCount_ = 0;
+    // The palette projection is rebuilt only when its inputs change. The
+    // VirtualGridView invalidate path dirties Style unconditionally, which
+    // would otherwise re-resolve every materialized row on every idle frame.
+    Tina::Asset::AssetHandle observedTilePaletteTilesetAsset_{};
+    Tina::Core::ContentHash observedTilePaletteTilesetHash_{};
+    bool observedTilePaletteEditingContext_ = false;
+    bool tilePaletteProjectionInitialized_ = false;
     std::optional<u64> observedTilePaletteSelection_{};
     std::optional<Tina::Editor::TileMapAuthoringCellEdit> lastPaintedTile_{};
     std::optional<Tina::Editor::TileMapAuthoringCellEdit> pendingTileCellEdit_{};
