@@ -47,6 +47,70 @@ struct PixelProjection final {
     return point.x == 0.0F && point.y == 0.0F;
 }
 
+[[nodiscard]] UI::UILogicalRect translatedRect(
+    UI::UILogicalRect rect, UI::UILogicalPoint offset) noexcept
+{
+    rect.x += offset.x;
+    rect.y += offset.y;
+    return rect;
+}
+
+struct TransientTransformRange final {
+    u32 begin = 0;
+    u32 end = 0;
+    UI::UILogicalRect viewportClip{};
+    bool hasViewportClip = false;
+    bool valid = false;
+};
+
+[[nodiscard]] TransientTransformRange transientTransformRange(
+    const UIRenderLayoutDebugOverlay& overlay) noexcept
+{
+    if (!overlay.options.transientTransformRoot.hasValue() ||
+        overlay.snapshot.empty())
+    {
+        return {};
+    }
+    const auto entries = overlay.snapshot.entries();
+    const UI::UILayoutDebugEntry* root = nullptr;
+    for (const UI::UILayoutDebugEntry& candidate : entries)
+    {
+        if (candidate.node == overlay.options.transientTransformRoot)
+        {
+            root = &candidate;
+            break;
+        }
+    }
+    if (root == nullptr)
+    {
+        return {};
+    }
+    u32 endPreorder = (std::numeric_limits<u32>::max)();
+    UI::UILogicalRect viewportClip{};
+    bool hasViewportClip = false;
+    for (const UI::UILayoutDebugEntry& candidate : entries)
+    {
+        if (!hasViewportClip && candidate.depth == 0U)
+        {
+            // Every top-level UI root is arranged against the same window
+            // viewport. Unlike per-node effective clips, this clip is not
+            // part of the moved diagnostic subtree's local geometry.
+            viewportClip = candidate.effectiveClip;
+            hasViewportClip = true;
+        }
+        if (candidate.preorder > root->preorder && candidate.depth <= root->depth)
+        {
+            endPreorder = (std::min)(endPreorder, candidate.preorder);
+        }
+    }
+    return TransientTransformRange{
+        .begin = root->preorder,
+        .end = endPreorder,
+        .viewportClip = viewportClip,
+        .hasViewportClip = hasViewportClip,
+        .valid = true};
+}
+
 [[nodiscard]] bool validLogicalCornerRadii(
     const UI::UILogicalCornerRadii& radii) noexcept
 {
@@ -839,6 +903,26 @@ struct ProjectedQuad final {
     UI::UICommittedPaintView paintView,
     const UIRenderLayoutDebugOverlay& overlay)
 {
+    const bool hasTransientTransform =
+        overlay.options.transientTransformRoot.hasValue();
+    if (!std::isfinite(overlay.options.transientTransformOffset.x) ||
+        !std::isfinite(overlay.options.transientTransformOffset.y))
+    {
+        return invalidInput(
+            "The UI layout debug transient transform offset must be finite");
+    }
+    if (!hasTransientTransform &&
+        (overlay.options.transientTransformOffset.x != 0.0F ||
+         overlay.options.transientTransformOffset.y != 0.0F))
+    {
+        return invalidInput(
+            "The UI layout debug transient transform offset requires a root node");
+    }
+    if (hasTransientTransform && !overlay.options.enabled)
+    {
+        return invalidInput(
+            "The UI layout debug transient transform requires an enabled overlay");
+    }
     if (!overlay.options.enabled)
     {
         return Core::success();
@@ -859,6 +943,11 @@ struct ProjectedQuad final {
             return invalidInput(
                 "UI layout debug entries require valid node identities and finite non-negative geometry");
         }
+    }
+    if (hasTransientTransform && !transientTransformRange(overlay).valid)
+    {
+        return invalidInput(
+            "The UI layout debug transient transform root must exist in the committed snapshot");
     }
     return Core::success();
 }
@@ -1051,8 +1140,35 @@ Core::Result<UIRenderDisplayListBuild> buildUIDisplayList(
     }
 
     u64 nextDebugPaintOrdinal = 0;
+    const TransientTransformRange transformRange =
+        transientTransformRange(layoutDebugOverlay);
     for (const UI::UICommittedPaintEntry& entry : paintView.entries())
     {
+        const bool transientTransform =
+            transformRange.valid && entry.layoutOrdinal >= transformRange.begin &&
+            entry.layoutOrdinal < transformRange.end;
+        const UI::UILogicalPoint transformOffset = transientTransform
+                                                        ? layoutDebugOverlay.options.transientTransformOffset
+                                                        : UI::UILogicalPoint{};
+        UI::UICommittedPaintEntry transformedEntry = entry;
+        if (transientTransform)
+        {
+            transformedEntry.worldRect = translatedRect(entry.worldRect, transformOffset);
+            // Node clips are local subtree geometry and move with the window.
+            // The top-level UI viewport remains fixed so transformed content
+            // cannot escape the primary window.
+            if (!transformRange.hasViewportClip ||
+                entry.effectiveClip != transformRange.viewportClip)
+            {
+                transformedEntry.effectiveClip = translatedRect(entry.effectiveClip, transformOffset);
+            }
+            transformedEntry.lineStart = {
+                entry.lineStart.x + transformOffset.x,
+                entry.lineStart.y + transformOffset.y};
+            transformedEntry.lineEnd = {
+                entry.lineEnd.x + transformOffset.x,
+                entry.lineEnd.y + transformOffset.y};
+        }
         if (entry.paintOrdinal == (std::numeric_limits<u32>::max)())
         {
             nextDebugPaintOrdinal = static_cast<u64>((std::numeric_limits<u32>::max)()) + 1U;
@@ -1065,14 +1181,17 @@ Core::Result<UIRenderDisplayListBuild> buildUIDisplayList(
         const std::optional<UI::UILogicalPoint> sharedBoundsEnd =
             entry.kind == UI::UICommittedPaintKind::Image &&
                     entry.imageBoundsProjection == UI::UICommittedImageBoundsProjection::SharedBoundary
-                ? std::optional<UI::UILogicalPoint>{entry.imageProjectionEnd}
+                ? std::optional<UI::UILogicalPoint>{
+                      UI::UILogicalPoint{
+                          .x = entry.imageProjectionEnd.x + transformOffset.x,
+                          .y = entry.imageProjectionEnd.y + transformOffset.y}}
                 : std::nullopt;
         const bool solidLine = entry.kind == UI::UICommittedPaintKind::SolidLine;
         Render::UIPixelRect boundsValue{};
         std::optional<Render::UISolidQuadVertices> explicitVertices;
         if (solidLine)
         {
-            auto projected = projectLine(entry, *projection);
+            auto projected = projectLine(transformedEntry, *projection);
             if (!projected)
             {
                 return Core::failure(std::move(projected.error()));
@@ -1082,14 +1201,14 @@ Core::Result<UIRenderDisplayListBuild> buildUIDisplayList(
         }
         else
         {
-            auto bounds = projectRect(entry.worldRect, *projection, sharedBoundsEnd, false);
+            auto bounds = projectRect(transformedEntry.worldRect, *projection, sharedBoundsEnd, false);
             if (!bounds)
             {
                 return Core::failure(std::move(bounds.error()));
             }
             boundsValue = *bounds;
         }
-        auto clip = projectRect(entry.effectiveClip, *projection);
+        auto clip = projectRect(transformedEntry.effectiveClip, *projection);
         if (!clip)
         {
             return Core::failure(std::move(clip.error()));

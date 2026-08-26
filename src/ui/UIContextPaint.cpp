@@ -1043,6 +1043,7 @@ void UIContext::Impl::appendImagePaint(std::pmr::vector<UICommittedPaintEntry>& 
                                               const UICommittedLayoutEntry& layoutEntry, u32& nextPaintOrdinal,
                                               bool useCandidateTextEditVisualState)
 {
+    const usize firstPaintEntry = output.size();
     const u32 nodeIndex = layoutEntry.node.index();
     const UIBoxPaint boxPaint = resolvedBoxChrome(layoutEntry.node, nodeIndex);
     const UIPremultipliedRgba8Color fill =
@@ -1079,6 +1080,11 @@ void UIContext::Impl::appendImagePaint(std::pmr::vector<UICommittedPaintEntry>& 
     }
     appendTextGlyphPaints(
         output, layoutEntry, nextPaintOrdinal, useCandidateTextEditVisualState);
+    for (usize paintEntryIndex = firstPaintEntry;
+         paintEntryIndex < output.size(); ++paintEntryIndex)
+    {
+        output[paintEntryIndex].layoutOrdinal = layoutEntry.layoutOrdinal;
+    }
     return Core::success();
 }
 

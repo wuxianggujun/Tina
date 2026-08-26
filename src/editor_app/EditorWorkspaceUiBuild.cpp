@@ -5722,7 +5722,6 @@ auto EditorWorkspaceState::onEnter(Tina::GameStateEnterContext& context) -> Tina
     inspectorVisible_ = editorSettings_.inspectorVisible;
     bottomPanel_ = BottomPanelKind::None;
     layoutDebuggerVisible_ = false;
-    layoutDebugProfileDragInitialized_ = false;
     layoutDebugProfileMutationPendingCommit_ = false;
     layoutDebugProfileCommittedStatisticsPending_ = false;
     layoutDebugProfileMutationIndex_ = 0;

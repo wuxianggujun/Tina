@@ -1440,5 +1440,241 @@ TEST_F(UIRenderDisplayListTest, LayoutDebugOverlaySkipsExcludedWindowArea)
     EXPECT_TRUE(sawOverlay);
 }
 
+TEST_F(UIRenderDisplayListTest, LayoutDebugTransientTransformMovesOnlyItsSubtree)
+{
+    auto contextResult = UI::UIContext::Create(
+        window, {.nodeCapacity = 8, .rootCapacity = 1, .layoutDebuggerSnapshotCapacity = 8});
+    ASSERT_TRUE(contextResult.has_value()) << contextResult.error().message;
+    auto context = std::move(*contextResult);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root);
+
+    UI::UILayoutStyle staticStyle;
+    staticStyle.size.width = UI::UILayoutLength::Px(10.0F);
+    staticStyle.size.height = UI::UILayoutLength::Px(10.0F);
+    auto staticResult = context->authoring().rootBuilder().createElement(
+        root.rootNodeId(), UI::makePanelElement(staticStyle));
+    ASSERT_TRUE(staticResult.has_value()) << staticResult.error().message;
+
+    UI::UILayoutStyle movingStyle;
+    movingStyle.size.width = UI::UILayoutLength::Px(20.0F);
+    movingStyle.size.height = UI::UILayoutLength::Px(20.0F);
+    movingStyle.placement = UI::UILayoutPlacement::Overlay;
+    movingStyle.overlay.horizontal = UI::UIAxisAlignment::Start;
+    movingStyle.overlay.vertical = UI::UIAxisAlignment::Start;
+    movingStyle.overlay.offset.x = UI::UILayoutLength::Px(75.0F);
+    movingStyle.overlay.offset.y = UI::UILayoutLength::Px(20.0F);
+    auto movingResult = context->authoring().rootBuilder().createElement(
+        root.rootNodeId(), UI::makePanelElement(movingStyle));
+    ASSERT_TRUE(movingResult.has_value()) << movingResult.error().message;
+
+    UI::UILayoutStyle childStyle;
+    childStyle.size.width = UI::UILayoutLength::Px(8.0F);
+    childStyle.size.height = UI::UILayoutLength::Px(6.0F);
+    auto childResult = context->authoring().rootBuilder().createElement(
+        *movingResult, UI::makePanelElement(childStyle));
+    ASSERT_TRUE(childResult.has_value()) << childResult.error().message;
+
+    auto updaterResult = context->authoring().treeUpdater(root);
+    ASSERT_TRUE(updaterResult.has_value()) << updaterResult.error().message;
+    const UI::UIBoxPaint paint{
+        .solidFill = UI::UISolidFill{
+            .color = {.red = 40, .green = 80, .blue = 120, .alpha = 255},
+        },
+    };
+    ASSERT_TRUE(updaterResult->setBoxPaint(*staticResult, paint).has_value());
+    ASSERT_TRUE(updaterResult->setBoxPaint(*movingResult, paint).has_value());
+    ASSERT_TRUE(updaterResult->setBoxPaint(*childResult, paint).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({100.0F, 100.0F}).has_value());
+
+    const auto snapshot = context->publication().committedLayoutDebugSnapshot();
+    const auto paintView = context->publication().committedPaint();
+    ASSERT_FALSE(snapshot.empty());
+    const auto findPaintEntry = [&paintView](UI::UINodeId node)
+        -> const UI::UICommittedPaintEntry* {
+        for (const UI::UICommittedPaintEntry& entry : paintView.entries())
+        {
+            if (entry.node == node && entry.kind == UI::UICommittedPaintKind::SolidQuad)
+            {
+                return &entry;
+            }
+        }
+        return nullptr;
+    };
+    const UI::UICommittedPaintEntry* const staticPaint = findPaintEntry(*staticResult);
+    const UI::UICommittedPaintEntry* const movingPaint = findPaintEntry(*movingResult);
+    const UI::UICommittedPaintEntry* const childPaint = findPaintEntry(*childResult);
+    ASSERT_NE(staticPaint, nullptr);
+    ASSERT_NE(movingPaint, nullptr);
+    ASSERT_NE(childPaint, nullptr);
+    EXPECT_EQ(movingPaint->effectiveClip,
+              (UI::UILogicalRect{.x = 75.0F, .y = 20.0F, .width = 20.0F, .height = 20.0F}));
+
+    constexpr UI::UILogicalPoint transformOffset{.x = 15.0F, .y = 0.0F};
+    auto builder = createBuilder({.commandCount = 8, .clipCount = 4, .batchCount = 8});
+    auto result = Integration::buildUIDisplayList(
+        builder, paintView, {.framebufferViewport = {0, 0, 100, 100}}, {},
+        Integration::UIRenderLayoutDebugOverlay{
+            .options = {
+                .enabled = true,
+                .excludedSubtreeRoot = *movingResult,
+                .transientTransformRoot = *movingResult,
+                .transientTransformOffset = transformOffset,
+            },
+            .snapshot = snapshot,
+        });
+    ASSERT_TRUE(result.has_value()) << (result ? "" : result.error().message);
+
+    const auto findCommand = [&result](u32 paintOrdinal) -> const Render::UIDrawCommand* {
+        for (const Render::UIDrawCommand& command : result->displayList.commands())
+        {
+            if (command.paintOrdinal == paintOrdinal)
+            {
+                return &command;
+            }
+        }
+        return nullptr;
+    };
+    const Render::UIDrawCommand* const staticCommand = findCommand(staticPaint->paintOrdinal);
+    const Render::UIDrawCommand* const movingCommand = findCommand(movingPaint->paintOrdinal);
+    const Render::UIDrawCommand* const childCommand = findCommand(childPaint->paintOrdinal);
+    ASSERT_NE(staticCommand, nullptr);
+    ASSERT_NE(movingCommand, nullptr);
+    ASSERT_NE(childCommand, nullptr);
+    EXPECT_EQ(staticCommand->bounds.x, static_cast<i32>(staticPaint->worldRect.x));
+    EXPECT_EQ(staticCommand->bounds.y, static_cast<i32>(staticPaint->worldRect.y));
+    EXPECT_EQ(movingCommand->bounds.x,
+              static_cast<i32>(movingPaint->worldRect.x + transformOffset.x));
+    EXPECT_EQ(movingCommand->bounds.y,
+              static_cast<i32>(movingPaint->worldRect.y + transformOffset.y));
+    EXPECT_EQ(childCommand->bounds.x,
+              static_cast<i32>(childPaint->worldRect.x + transformOffset.x));
+    EXPECT_EQ(childCommand->bounds.y,
+              static_cast<i32>(childPaint->worldRect.y + transformOffset.y));
+
+    // The panel's own clip is local subtree geometry. It moves to x = 90 and
+    // is then clamped by the fixed framebuffer viewport at x = 100. Keeping
+    // it at x = 75 would submit a stale scissor.
+    ASSERT_TRUE(movingCommand->clip.hasClip());
+    ASSERT_EQ(result->displayList.clips().size(), 1U);
+    EXPECT_EQ(result->displayList.clips().front(),
+              (Render::UIPixelRect{.x = 90, .y = 20, .width = 10, .height = 20}));
+}
+
+TEST_F(UIRenderDisplayListTest, LayoutDebugTransientTransformKeepsViewportClipFixed)
+{
+    auto contextResult = UI::UIContext::Create(
+        window, {.nodeCapacity = 4, .rootCapacity = 1, .layoutDebuggerSnapshotCapacity = 4});
+    ASSERT_TRUE(contextResult.has_value()) << contextResult.error().message;
+    auto context = std::move(*contextResult);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root);
+
+    UI::UILayoutStyle viewportStyle;
+    viewportStyle.size.width = UI::UILayoutLength::Px(100.0F);
+    viewportStyle.size.height = UI::UILayoutLength::Px(100.0F);
+    viewportStyle.placement = UI::UILayoutPlacement::Overlay;
+    viewportStyle.overlay.horizontal = UI::UIAxisAlignment::Start;
+    viewportStyle.overlay.vertical = UI::UIAxisAlignment::Start;
+    auto viewportResult = context->authoring().rootBuilder().createElement(
+        root.rootNodeId(), UI::makePanelElement(viewportStyle));
+    ASSERT_TRUE(viewportResult.has_value()) << viewportResult.error().message;
+    auto updaterResult = context->authoring().treeUpdater(root);
+    ASSERT_TRUE(updaterResult.has_value()) << updaterResult.error().message;
+    const UI::UIBoxPaint paint{
+        .solidFill = UI::UISolidFill{
+            .color = {.red = 40, .green = 80, .blue = 120, .alpha = 255},
+        },
+    };
+    ASSERT_TRUE(updaterResult->setBoxPaint(*viewportResult, paint).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({100.0F, 100.0F}).has_value());
+
+    const auto snapshot = context->publication().committedLayoutDebugSnapshot();
+    const auto paintView = context->publication().committedPaint();
+    const UI::UICommittedPaintEntry* viewportPaint = nullptr;
+    for (const UI::UICommittedPaintEntry& entry : paintView.entries())
+    {
+        if (entry.node == *viewportResult && entry.kind == UI::UICommittedPaintKind::SolidQuad)
+        {
+            viewportPaint = &entry;
+            break;
+        }
+    }
+    ASSERT_NE(viewportPaint, nullptr);
+    EXPECT_EQ(viewportPaint->effectiveClip,
+              (UI::UILogicalRect{.x = 0.0F, .y = 0.0F, .width = 100.0F, .height = 100.0F}));
+
+    auto builder = createBuilder({.commandCount = 4, .clipCount = 4, .batchCount = 4});
+    auto result = Integration::buildUIDisplayList(
+        builder, paintView, {.framebufferViewport = {0, 0, 100, 100}}, {},
+        Integration::UIRenderLayoutDebugOverlay{
+            .options = {
+                .enabled = true,
+                .excludedSubtreeRoot = *viewportResult,
+                .transientTransformRoot = *viewportResult,
+                .transientTransformOffset = {.x = 15.0F, .y = 0.0F},
+            },
+            .snapshot = snapshot,
+        });
+    ASSERT_TRUE(result.has_value()) << (result ? "" : result.error().message);
+    const Render::UIDrawCommand* viewportCommand = nullptr;
+    for (const Render::UIDrawCommand& command : result->displayList.commands())
+    {
+        if (command.paintOrdinal == viewportPaint->paintOrdinal)
+        {
+            viewportCommand = &command;
+            break;
+        }
+    }
+    ASSERT_NE(viewportCommand, nullptr);
+    EXPECT_EQ(viewportCommand->bounds, (Render::UIPixelRect{.x = 15, .y = 0, .width = 100, .height = 100}));
+    ASSERT_TRUE(viewportCommand->clip.hasClip());
+    ASSERT_EQ(result->displayList.clips().size(), 1U);
+    EXPECT_EQ(result->displayList.clips().front(),
+              (Render::UIPixelRect{.x = 0, .y = 0, .width = 100, .height = 100}));
+}
+
+TEST_F(UIRenderDisplayListTest, LayoutDebugTransientTransformRejectsRootOutsideSnapshot)
+{
+    auto contextResult = UI::UIContext::Create(
+        window, {.nodeCapacity = 4, .rootCapacity = 1, .layoutDebuggerSnapshotCapacity = 4});
+    ASSERT_TRUE(contextResult.has_value()) << contextResult.error().message;
+    auto context = std::move(*contextResult);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root);
+    auto panelResult = context->authoring().rootBuilder().createElement(
+        root.rootNodeId(), UI::makePanelElement());
+    ASSERT_TRUE(panelResult.has_value()) << panelResult.error().message;
+    auto updaterResult = context->authoring().treeUpdater(root);
+    ASSERT_TRUE(updaterResult.has_value()) << updaterResult.error().message;
+    const UI::UIBoxPaint paint{
+        .solidFill = UI::UISolidFill{
+            .color = {.red = 40, .green = 80, .blue = 120, .alpha = 255},
+        },
+    };
+    ASSERT_TRUE(updaterResult->setBoxPaint(*panelResult, paint).has_value());
+    ASSERT_TRUE(context->publication().commitLayout({100.0F, 100.0F}).has_value());
+
+    const auto snapshot = context->publication().committedLayoutDebugSnapshot();
+    const auto paintView = context->publication().committedPaint();
+    auto outsideSnapshotResult = context->authoring().rootBuilder().createElement(
+        root.rootNodeId(), UI::makePanelElement());
+    ASSERT_TRUE(outsideSnapshotResult.has_value()) << outsideSnapshotResult.error().message;
+
+    auto builder = createBuilder({.commandCount = 4, .clipCount = 4, .batchCount = 4});
+    auto result = Integration::buildUIDisplayList(
+        builder, paintView, {.framebufferViewport = {0, 0, 100, 100}}, {},
+        Integration::UIRenderLayoutDebugOverlay{
+            .options = {
+                .enabled = true,
+                .transientTransformRoot = *outsideSnapshotResult,
+                .transientTransformOffset = {.x = 1.0F, .y = 1.0F},
+            },
+            .snapshot = snapshot,
+        });
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, Core::CoreErrorCode::InvalidArgument);
+}
+
 } // namespace
 } // namespace Tina::Tests

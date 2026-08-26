@@ -29,6 +29,10 @@ enum class UICommittedImageBoundsProjection : u8 {
 struct UICommittedPaintEntry final {
     UINodeId node{};
     UINodeId root{};
+    // Layout preorder identity used by frame-local render transforms. It is
+    // assigned while the paint snapshot is built and remains stable until the
+    // next successful layout publication.
+    u32 layoutOrdinal = 0;
     UILogicalRect worldRect{};
     UILogicalRect effectiveClip{};
     u32 paintOrdinal = 0;

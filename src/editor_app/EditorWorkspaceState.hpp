@@ -4785,19 +4785,16 @@ class EditorWorkspaceState final : public Tina::IGameState {
     std::array<UI::UILogicalRect, 3> layoutDebugActionRects_{};
     UI::UILogicalPoint layoutDebugWindowPointerStart_{};
     UI::UILogicalRect layoutDebugWindowInitialRect_{};
+    UI::UILogicalPoint layoutDebugTransientOffset_{};
     Tina::Platform::PointerId layoutDebugWindowPointer_{};
     bool layoutDebugWindowDragActive_ = false;
     bool layoutDebugWindowResizeActive_ = false;
     // Moving/resizing the debugger only changes the excluded overlay subtree.
     // Keep the expensive tree projection stable until the interaction ends.
     bool layoutDebugWindowMoveProjectionSkip_ = false;
-    bool layoutDebugProfileDragInitialized_ = false;
     bool layoutDebugProfileMutationPendingCommit_ = false;
     bool layoutDebugProfileCommittedStatisticsPending_ = false;
     u64 layoutDebugProfileMutationIndex_ = 0;
-    UI::UILayoutStyle layoutDebugProfileBaseLayout_{};
-    float layoutDebugProfileOriginX_ = 0.0F;
-    float layoutDebugProfileOriginY_ = 0.0F;
     bool layoutDebugWindowStyleDirty_ = false;
     UI::UINodeId animationStatus_{};
     UI::UINodeId animationSelection_{};

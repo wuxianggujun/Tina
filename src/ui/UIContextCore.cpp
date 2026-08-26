@@ -1,5 +1,7 @@
 #include "detail/UIContextImpl.hpp"
 
+#include <cmath>
+
 namespace Tina::UI {
 
 [[nodiscard]] bool UIContext::Impl::isPhaseDirty(UIDirty flags) const noexcept
@@ -86,6 +88,26 @@ namespace Tina::UI {
         !excludedStatus)
     {
         return excludedStatus;
+    }
+    if (Core::Status transformStatus = validateNode(
+            options.transientTransformRoot,
+            "UI layout debugger transient transform root is not live in this context");
+        !transformStatus)
+    {
+        return transformStatus;
+    }
+    if (!std::isfinite(options.transientTransformOffset.x) ||
+        !std::isfinite(options.transientTransformOffset.y))
+    {
+        return fail(UIErrorCode::InvalidLayout,
+                    "UI layout debugger transient transform offset must be finite");
+    }
+    if (!options.transientTransformRoot.hasValue() &&
+        (options.transientTransformOffset.x != 0.0F ||
+         options.transientTransformOffset.y != 0.0F))
+    {
+        return fail(UIErrorCode::InvalidNode,
+                    "UI layout debugger transient transform offset requires a root node");
     }
     layoutDebugOptions = options;
     return Core::success();

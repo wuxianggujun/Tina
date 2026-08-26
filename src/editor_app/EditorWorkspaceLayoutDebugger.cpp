@@ -597,6 +597,7 @@ void EditorWorkspaceState::handleLayoutDebugWindowPointerDown(
     layoutDebugWindowPointer_ = event.input().pointer;
     layoutDebugWindowPointerStart_ = event.input().position;
     layoutDebugWindowInitialRect_ = layoutDebugPanelRect_;
+    layoutDebugTransientOffset_ = {};
     layoutDebugWindowDragActive_ = !resize;
     layoutDebugWindowResizeActive_ = resize;
     // Window movement only changes the debugger overlay placement. Keep the
@@ -673,6 +674,12 @@ void EditorWorkspaceState::handleLayoutDebugWindowPointerMove(
     layoutDebugPanelLayout_.overlay.offset.y =
         UI::UILayoutLength::Px(next.y - viewport.y);
     layoutDebugPanelRect_ = next;
+    if (layoutDebugWindowDragActive_)
+    {
+        layoutDebugTransientOffset_ = {
+            .x = next.x - layoutDebugWindowInitialRect_.x,
+            .y = next.y - layoutDebugWindowInitialRect_.y};
+    }
     layoutDebugWindowStyleDirty_ = true;
     event.consumeInputTransition();
     event.preventDefaultAction();
@@ -694,7 +701,9 @@ void EditorWorkspaceState::handleLayoutDebugWindowPointerUp(
     layoutDebugWindowDragActive_ = false;
     layoutDebugWindowResizeActive_ = false;
     layoutDebugWindowMoveProjectionSkip_ = false;
+    layoutDebugTransientOffset_ = {};
     layoutDebugProjectionChangedPending_ = true;
+    layoutDebugWindowStyleDirty_ = true;
 }
 
 void EditorWorkspaceState::handleLayoutDebugWindowPointerCancel(
@@ -711,7 +720,9 @@ void EditorWorkspaceState::handleLayoutDebugWindowPointerCancel(
     layoutDebugWindowDragActive_ = false;
     layoutDebugWindowResizeActive_ = false;
     layoutDebugWindowMoveProjectionSkip_ = false;
+    layoutDebugTransientOffset_ = {};
     layoutDebugProjectionChangedPending_ = true;
+    layoutDebugWindowStyleDirty_ = true;
 }
 
 void EditorWorkspaceState::handleLayoutDebugPickPointerDown(
@@ -765,6 +776,11 @@ auto EditorWorkspaceState::refreshLayoutDebuggerUi(
             layoutDebugShowAllVisibleBounds_ && !layoutDebugInteractionActive;
         options.selectedNode = layoutDebugSelectedNode_;
         options.excludedSubtreeRoot = layoutDebugPanel_;
+        if (layoutDebugWindowDragActive_)
+        {
+            options.transientTransformRoot = layoutDebugPanel_;
+            options.transientTransformOffset = layoutDebugTransientOffset_;
+        }
         if (options_.profileUi && layoutDebuggerVisible_ &&
             layoutDebugInteractionActive && layoutDebugShowAllVisibleBounds_) {
             ++counters_.layoutDebugAllBoundsSuppressedFrames;
@@ -812,15 +828,6 @@ auto EditorWorkspaceState::refreshLayoutDebuggerUi(
         }
     }
     if (options_.profileUiLayoutDrag) {
-        if (!layoutDebugProfileDragInitialized_) {
-            layoutDebugProfileBaseLayout_ = layoutDebugPanelLayout_;
-            layoutDebugProfileOriginX_ =
-                layoutDebugPanelRect_.x - layoutDebugViewportRect_.x;
-            layoutDebugProfileOriginY_ =
-                layoutDebugPanelRect_.y - layoutDebugViewportRect_.y;
-            layoutDebugProfileDragInitialized_ = true;
-        }
-
         const bool mutationWindowActive =
             counters_.frameUpdates > LayoutDebugProfileWarmupFrameCount &&
             layoutDebugProfileMutationIndex_ <
@@ -841,19 +848,10 @@ auto EditorWorkspaceState::refreshLayoutDebuggerUi(
             };
             const UI::UILogicalPoint offset = ProfileDragOffsets[
                 layoutDebugProfileMutationIndex_ % ProfileDragOffsets.size()];
-            UI::UILayoutStyle profileLayout = layoutDebugProfileBaseLayout_;
-            profileLayout.visibility = UI::UIVisibility::Visible;
-            profileLayout.overlay.offset.x = UI::UILayoutLength::Px(
-                layoutDebugProfileOriginX_ + offset.x);
-            profileLayout.overlay.offset.y = UI::UILayoutLength::Px(
-                layoutDebugProfileOriginY_ + offset.y);
-            if (profileLayout != layoutDebugPanelLayout_) {
-                layoutDebugPanelLayout_ = profileLayout;
-                layoutDebugWindowStyleDirty_ = true;
-                layoutDebugProfileMutationPendingCommit_ = true;
-                ++layoutDebugProfileMutationIndex_;
-                ++counters_.layoutDebugProfileMutationFrames;
-            }
+            layoutDebugTransientOffset_ = offset;
+            layoutDebugProfileMutationPendingCommit_ = true;
+            ++layoutDebugProfileMutationIndex_;
+            ++counters_.layoutDebugProfileMutationFrames;
             layoutDebugInteractionActive = true;
         } else if (layoutDebugProfileMutationIndex_ >=
                        LayoutDebugProfileMutationFrameCount &&
@@ -864,11 +862,15 @@ auto EditorWorkspaceState::refreshLayoutDebuggerUi(
             // cooldown rather than carrying interaction state to process exit.
             layoutDebugWindowDragActive_ = false;
             layoutDebugWindowMoveProjectionSkip_ = false;
+            layoutDebugTransientOffset_ = {};
             layoutDebugProjectionChangedPending_ = true;
             layoutDebugInteractionActive = layoutDebugWindowResizeActive_;
         }
     }
-    if (layoutDebugWindowStyleDirty_) {
+    // Resize remains a retained-layout interaction; only pure movement uses
+    // the frame-local render transform until the pointer is released.
+    if (layoutDebugWindowStyleDirty_ &&
+        (!layoutDebugWindowDragActive_ || layoutDebugWindowResizeActive_)) {
         if (auto status = tree.setLayoutStyle(
                 layoutDebugPanel_, layoutDebugPanelLayout_); !status) {
             return status;

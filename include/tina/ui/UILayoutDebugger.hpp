@@ -157,6 +157,11 @@ struct UILayoutDebugOptions final {
     bool showAllVisibleBounds = false;
     UINodeId selectedNode{};
     UINodeId excludedSubtreeRoot{};
+    // Frame-local transform for an actively dragged diagnostic subtree. This
+    // never enters retained layout; the Render bridge applies it to the
+    // committed paint snapshot for the current frame only.
+    UINodeId transientTransformRoot{};
+    UILogicalPoint transientTransformOffset{};
 
     auto operator<=>(const UILayoutDebugOptions&) const = default;
 };
