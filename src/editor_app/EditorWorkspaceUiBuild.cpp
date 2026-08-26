@@ -5722,8 +5722,19 @@ auto EditorWorkspaceState::onEnter(Tina::GameStateEnterContext& context) -> Tina
     inspectorVisible_ = editorSettings_.inspectorVisible;
     bottomPanel_ = BottomPanelKind::None;
     layoutDebuggerVisible_ = false;
+    layoutDebugProfileDragInitialized_ = false;
+    layoutDebugProfileMutationPendingCommit_ = false;
+    layoutDebugProfileCommittedStatisticsPending_ = false;
+    layoutDebugProfileMutationIndex_ = 0;
     pendingBottomPanelOpen_.reset();
     pendingLayoutDebuggerOpen_ = editorSettings_.layoutDebuggerVisible;
+    if (options_.profileUiLayoutDrag) {
+        // The deterministic profile workload must not depend on persisted user
+        // settings. It opens the debugger and drives a bounded panel trajectory
+        // from the owner thread after the first UI tree is built.
+        pendingLayoutDebuggerOpen_ = true;
+        layoutDebugShowAllVisibleBounds_ = true;
+    }
     if (editorSettings_.bottomPanel != BottomPanelKind::None) {
         pendingBottomPanelOpen_ = editorSettings_.bottomPanel;
     }

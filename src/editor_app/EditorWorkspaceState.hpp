@@ -169,6 +169,13 @@ inline constexpr u32 LayoutDebugOverlayCommandsPerNode = 4;
 inline constexpr u32 LayoutDebugOverlayExclusionSplitFactor = 2;
 inline constexpr u32 LayoutDebugSelectedOverlayCommandCapacity = 12;
 inline constexpr u32 LayoutDebugDisplayListEntryCapacity = 48U * 1024U;
+inline constexpr u64 LayoutDebugProfileWarmupFrameCount = 30U;
+inline constexpr u64 LayoutDebugProfileMutationFrameCount = 120U;
+inline constexpr u64 LayoutDebugProfileCooldownFrameCount = 5U;
+inline constexpr u64 LayoutDebugProfileMinimumFrameCount =
+    LayoutDebugProfileWarmupFrameCount +
+    LayoutDebugProfileMutationFrameCount +
+    LayoutDebugProfileCooldownFrameCount;
 inline constexpr u32 EditorRenderDrawCallHeadroom = 1024U;
 inline constexpr u32 EditorRenderDrawCallCapacity =
     LayoutDebugDisplayListEntryCapacity + EditorRenderDrawCallHeadroom;
@@ -697,6 +704,10 @@ struct EditorLaunchOptions final {
     RgbaCaptureStage rgbaStage = RgbaCaptureStage::Workspace;
     bool autoDemo = false;
     bool profileUi = false;
+    // Deterministic profile-only workload: repeatedly moves the Layout
+    // Debugger overlay so layout/paint/display-list costs can be compared
+    // without relying on an external pointer automation harness.
+    bool profileUiLayoutDrag = false;
 };
 enum class OutputFilter : u8 {
     All,
@@ -1845,6 +1856,25 @@ struct EditorFrameTimingStatistics final {
 struct LifecycleCounters final {
     u64 frameUpdates = 0;
     double lastFrameSeconds = 0.0;
+    // Profile-only CPU timing for the Editor UI orchestration and the layout
+    // debugger refresh. These are intentionally separate from Runtime phase
+    // timings so a Tracy capture can be correlated with the JSON report without
+    // claiming that they cover UI commit or Render submit.
+    EditorFrameTimingStatistics updateUiTiming{};
+    EditorFrameTimingStatistics layoutDebuggerUiTiming{};
+    EditorFrameTimingStatistics layoutDebuggerDragFrameTiming{};
+    u64 layoutDebugSnapshotChangedFrames = 0;
+    u64 layoutDebugProjectionChangedFrames = 0;
+    u64 layoutDebugDragFrames = 0;
+    u64 layoutDebugAllBoundsSuppressedFrames = 0;
+    u64 layoutDebugProfileMutationFrames = 0;
+    u64 layoutDebugProfileCommittedSamples = 0;
+    u64 layoutDebugProfileLayoutRebuildFrames = 0;
+    u64 layoutDebugProfileLayoutMeasuredNodes = 0;
+    u64 layoutDebugProfileLayoutArrangedNodes = 0;
+    u64 layoutDebugProfileHitRebuildFrames = 0;
+    u64 layoutDebugProfilePaintSnapshotRebuildFrames = 0;
+    bool layoutDebugProfileCompleted = false;
     u64 uiStatisticsSamples = 0;
     UI::UIContextStatistics uiStatisticsFirst{};
     UI::UIContextStatistics uiStatisticsLast{};
@@ -2493,6 +2523,7 @@ parseInspectorTransformValue(std::string_view text, std::string_view fieldName)
     bool hasWorkspace = false;
     bool hasAutoDemo = false;
     bool hasProfileUi = false;
+    bool hasProfileUiLayoutDrag = false;
     for (int index = 1; index < argumentCount; ++index) {
         const std::string_view argument{arguments[index]};
         auto sourceImportOption =
@@ -2667,6 +2698,17 @@ parseInspectorTransformValue(std::string_view text, std::string_view fieldName)
             hasProfileUi = true;
             continue;
         }
+        if (argument == "--profile-ui-layout-drag") {
+            if (hasProfileUiLayoutDrag) {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::InvalidArgument,
+                    "Duplicate --profile-ui-layout-drag argument");
+            }
+            options.profileUi = true;
+            options.profileUiLayoutDrag = true;
+            hasProfileUiLayoutDrag = true;
+            continue;
+        }
         return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                    "Unsupported command-line argument");
     }
@@ -2701,6 +2743,24 @@ parseInspectorTransformValue(std::string_view text, std::string_view fieldName)
         message += std::to_string(AutomaticAuthoringMinimumFrameCount);
         return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                    std::move(message));
+    }
+    if (options.profileUiLayoutDrag && options.autoDemo) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::InvalidArgument,
+            "--profile-ui-layout-drag cannot be combined with --auto-demo");
+    }
+    if (options.profileUiLayoutDrag && options.sourceImport.importOnStart) {
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::InvalidArgument,
+            "--profile-ui-layout-drag cannot be combined with startup source import");
+    }
+    if (options.profileUiLayoutDrag &&
+        (!hasFrames || options.targetFrameCount < LayoutDebugProfileMinimumFrameCount)) {
+        std::string message =
+            "--profile-ui-layout-drag requires --frames of at least ";
+        message += std::to_string(LayoutDebugProfileMinimumFrameCount);
+        return Tina::Core::failure(
+            Tina::Core::CoreErrorCode::InvalidArgument, std::move(message));
     }
     return options;
 }
@@ -4728,6 +4788,16 @@ class EditorWorkspaceState final : public Tina::IGameState {
     Tina::Platform::PointerId layoutDebugWindowPointer_{};
     bool layoutDebugWindowDragActive_ = false;
     bool layoutDebugWindowResizeActive_ = false;
+    // Moving/resizing the debugger only changes the excluded overlay subtree.
+    // Keep the expensive tree projection stable until the interaction ends.
+    bool layoutDebugWindowMoveProjectionSkip_ = false;
+    bool layoutDebugProfileDragInitialized_ = false;
+    bool layoutDebugProfileMutationPendingCommit_ = false;
+    bool layoutDebugProfileCommittedStatisticsPending_ = false;
+    u64 layoutDebugProfileMutationIndex_ = 0;
+    UI::UILayoutStyle layoutDebugProfileBaseLayout_{};
+    float layoutDebugProfileOriginX_ = 0.0F;
+    float layoutDebugProfileOriginY_ = 0.0F;
     bool layoutDebugWindowStyleDirty_ = false;
     UI::UINodeId animationStatus_{};
     UI::UINodeId animationSelection_{};

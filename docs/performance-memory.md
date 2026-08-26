@@ -109,6 +109,14 @@ Motion 只遍历 active list，`M == 0` 不产生额外 dirty；Image/Icon/NineS
 `TinaEditor --profile-ui --frames=180 --frame-delay-ms=0` 会在每个 UI phase 采样并在末尾输出 JSON。该模式只增加
 诊断账本和进程快照，不额外修改 Editor 的 node、paint、display-list、draw-call 或 MSAA 容量：
 
+针对 Layout Debugger 拖动，使用 `TinaEditor --profile-ui-layout-drag --frames=155 --frame-delay-ms=0`。
+该 deterministic workload 会打开 Layout Debugger，先 warm-up 30 帧，再以固定轨迹提交 120 帧 overlay
+位置 mutation，最后保留 5 帧 cooldown 以采集尾部 commit。JSON 顶层 `frameTiming` 与 `layoutDebugger`
+独立于 `sourceImportProfile.frameTiming`；后者只属于 source import。`layoutDebugger` 同时报告
+`profileMutationFrames`、`profileCommittedSamples`、测量/排列节点数、Hit/Paint rebuild 帧数、All Bounds
+抑制帧数及 `profileCompleted`。该 workload 用于隔离 `setLayoutStyle -> CommitLayout -> publication` 的
+CPU 成本，不代表真实鼠标设备的输入采样或 present/GPU 时间。
+
 - `uiPmrFirstBytes` / `uiPmrLastBytes` / `uiPmrPeakBytes`：UIContext 实际通过其 PMR 请求的字节数；
 - `uiPmrCurrentDeltaBytes`、首末帧 allocation/deallocation count 及 delta：用于识别 warm-up 后是否仍在反复扩容；
 - `uiPmrNodePoolBytes`、`uiPmrStateStorageBytes`、`uiPmrScratchReserveBytes`、
@@ -131,6 +139,13 @@ Motion 只遍历 active list，`M == 0` 不产生额外 dirty；Image/Icon/NineS
   cooked file 不应因为新 Texture2D 增长；Windows `peakWorkingSetBytes` 来自进程高水位，能捕获短于逐帧采样间隔的
   worker 峰值；
 - `processWorkingSetBytes` / `processPrivateBytes` 及 peak：进程级末次/峰值样本，包含非 Tina PMR、渲染后端和驱动分配。
+
+解释拖动 profile 时，若 `profileMutationFrames == profileCommittedSamples == 120`，且
+`profileLayoutMeasuredNodes / 120` 接近 committed node 数，说明每次 overlay 移动仍触发整棵布局树的
+Measure/Arrange；这通常比 debugger projection refresh 更重要。`updateUi` 只覆盖 Editor 的 UI authoring
+编排，不包含 Runtime `CommitLayout`、DisplayList conversion、Render submit 或 present wait；这些阶段应
+在 Tracy 的 `Runtime.GameState.UpdateUI`、`Runtime.UI.CommitLayout`、`Runtime.UI.BuildDisplayList` 和
+`Runtime.UI.BuildDisplayList.Convert` zone 中分别观察。
 
 判读顺序固定为：
 
@@ -263,5 +278,7 @@ py -3 -m unittest tools/bench/test_run_benchmark_gate.py -v
 - Visual capture：画面/布局，不证明 CPU/GPU 性能；
 - ASan/UBSan/LSan、VS Profiler/ETW、Linux perf/heaptrack：交叉验证；
 - Tracy：未来可选定位工具，不是当前公共 API，也不作为 hard baseline。
+- Tracy 当前已为 Editor UI update、Layout Debugger refresh 和 DisplayList conversion 增加定位 zone；它们只
+  用于热点定位，不能把一次 Debug 本机 capture 当成 PERF-002 hard baseline。
 
 完整门禁映射见 [测试说明](testing.md)，任务见 [Backlog](backlog.md)。

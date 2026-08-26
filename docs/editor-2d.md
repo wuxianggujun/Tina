@@ -649,6 +649,11 @@ Core 另保留 `WriteFileTests.FailedAtomicReplacePreservesExistingTargetDirecto
 创建分类与首末帧增量、dirty/rebuild counters，以及 Catalog/Engine/首帧/末帧/销毁阶段的 Windows Working Set /
 Private Bytes。该诊断不修改产品容量；应先根据阶段 delta 定位 owner，再根据 UI PMR 分类决定是否重构稠密
 state storage，不能只看单一容量字段判断泄漏。
+需要隔离 Layout Debugger 拖动热点时使用 `--profile-ui-layout-drag --frames=155 --frame-delay-ms=0`。
+该模式固定执行 30 帧 warm-up、120 帧 panel overlay mutation 和 5 帧 cooldown，并在 JSON 的顶层
+`frameTiming.layoutDebuggerDrag` / `layoutDebugger` 输出拖动帧耗时、mutation 与实际 commit 后的
+Measure/Arrange/Hit/Paint 工作量。它是 CPU workload 诊断入口，不替代真实鼠标交互、Tracy capture 或
+GPU/present 测量。
 同一参数也会记录交互式 source import 的 before/worker/commit/peak 内存快照、cooked payload、临时 pool
 峰值和释放后字节、AssetStore resident CPU payload，以及导入前/中/后的 FPS/帧耗时。图片只导入到 Project Assets
 而尚未被场景引用时，完整 Texture2D payload 不属于 resident 数据；worker 和 Catalog validation 的完整文件缓冲

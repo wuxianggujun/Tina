@@ -735,6 +735,8 @@ void writeFrameTimingStatistics(
               << ",\"frameDelayMs\":" << options.frameDelayMilliseconds
               << ",\"autoDemo\":" << (options.autoDemo ? "true" : "false")
               << ",\"profileUi\":" << (options.profileUi ? "true" : "false")
+              << ",\"profileUiLayoutDrag\":"
+              << (options.profileUiLayoutDrag ? "true" : "false")
               << ",\"configuredUiNodeCapacity\":"
               << uiCapacities.nodeCapacity
               << ",\"configuredUiPaintCapacity\":"
@@ -902,7 +904,47 @@ void writeFrameTimingStatistics(
     std::cout << ",\"after\":";
     writeFrameTimingStatistics(
         std::cout, counters.frameTimingAfterSourceImport);
-    std::cout << "}},\"uiNodeCapacity\":" << counters.uiStatisticsLast.nodeCapacity
+    // Close sourceImportProfile before emitting the Editor-wide timing fields.
+    // This keeps import-only and orchestration measurements unambiguous for
+    // profile consumers.
+    std::cout << "}},\"frameTiming\":{\"overall\":";
+    writeFrameTimingStatistics(std::cout, counters.frameTimingOverall);
+    std::cout << ",\"updateUi\":";
+    writeFrameTimingStatistics(std::cout, counters.updateUiTiming);
+    std::cout << ",\"layoutDebuggerUi\":";
+    writeFrameTimingStatistics(std::cout, counters.layoutDebuggerUiTiming);
+    std::cout << ",\"layoutDebuggerDrag\":";
+    writeFrameTimingStatistics(std::cout, counters.layoutDebuggerDragFrameTiming);
+    std::cout << "},\"layoutDebugger\":{\"snapshotChangedFrames\":"
+              << counters.layoutDebugSnapshotChangedFrames
+              << ",\"projectionChangedFrames\":"
+              << counters.layoutDebugProjectionChangedFrames
+              << ",\"dragFrames\":" << counters.layoutDebugDragFrames
+              << ",\"allBoundsSuppressedFrames\":"
+              << counters.layoutDebugAllBoundsSuppressedFrames
+              << ",\"profileMutationFrames\":"
+              << counters.layoutDebugProfileMutationFrames
+              << ",\"profileCommittedSamples\":"
+              << counters.layoutDebugProfileCommittedSamples
+              << ",\"profileWarmupFrames\":"
+              << LayoutDebugProfileWarmupFrameCount
+              << ",\"profileRequestedMutationFrames\":"
+              << LayoutDebugProfileMutationFrameCount
+              << ",\"profileCooldownFrames\":"
+              << LayoutDebugProfileCooldownFrameCount
+              << ",\"profileCompleted\":"
+              << (counters.layoutDebugProfileCompleted ? "true" : "false")
+              << ",\"profileLayoutRebuildFrames\":"
+              << counters.layoutDebugProfileLayoutRebuildFrames
+              << ",\"profileLayoutMeasuredNodes\":"
+              << counters.layoutDebugProfileLayoutMeasuredNodes
+              << ",\"profileLayoutArrangedNodes\":"
+              << counters.layoutDebugProfileLayoutArrangedNodes
+              << ",\"profileHitRebuildFrames\":"
+              << counters.layoutDebugProfileHitRebuildFrames
+              << ",\"profilePaintSnapshotRebuildFrames\":"
+              << counters.layoutDebugProfilePaintSnapshotRebuildFrames
+              << "},\"uiNodeCapacity\":" << counters.uiStatisticsLast.nodeCapacity
               << ",\"uiLiveNodeCount\":" << counters.uiStatisticsLast.liveNodeCount
               << ",\"uiCommittedNodeCount\":" << counters.uiStatisticsLast.committedNodeCount
               << ",\"uiLayoutRebuilds\":" << counters.uiStatisticsLast.lastLayoutPassCount

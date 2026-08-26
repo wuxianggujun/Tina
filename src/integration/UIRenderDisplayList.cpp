@@ -1,5 +1,7 @@
 #include <tina/integration/UIRenderDisplayList.hpp>
 
+#include <tina/core/trace/Trace.hpp>
+
 #include <tina/core/base/ScopeExit.hpp>
 
 #include <algorithm>
@@ -873,26 +875,31 @@ struct ProjectedQuad final {
         return Core::success();
     }
 
+    const auto entries = overlay.snapshot.entries();
     const UI::UILayoutDebugEntry* selected = nullptr;
     const UI::UILayoutDebugEntry* excludedRoot = nullptr;
-    for (const UI::UILayoutDebugEntry& entry : overlay.snapshot.entries())
+    u32 excludedEndPreorder = (std::numeric_limits<u32>::max)();
+    // Resolve the two optional identities and the excluded subtree range in a
+    // single snapshot pass. The previous implementation scanned the complete
+    // snapshot once for the root and again for the range before doing the real
+    // overlay pass; in Selected mode that was pure diagnostic overhead.
+    for (const UI::UILayoutDebugEntry& entry : entries)
     {
+        if (overlay.options.selectedNode.hasValue() &&
+            entry.node == overlay.options.selectedNode)
+        {
+            selected = &entry;
+        }
         if (overlay.options.excludedSubtreeRoot.hasValue() &&
             entry.node == overlay.options.excludedSubtreeRoot)
         {
             excludedRoot = &entry;
-            break;
+            continue;
         }
-    }
-    u32 excludedEndPreorder = (std::numeric_limits<u32>::max)();
-    if (excludedRoot != nullptr)
-    {
-        for (const UI::UILayoutDebugEntry& entry : overlay.snapshot.entries())
+        if (excludedRoot != nullptr && entry.preorder > excludedRoot->preorder &&
+            entry.depth <= excludedRoot->depth)
         {
-            if (entry.preorder > excludedRoot->preorder && entry.depth <= excludedRoot->depth)
-            {
-                excludedEndPreorder = (std::min)(excludedEndPreorder, entry.preorder);
-            }
+            excludedEndPreorder = (std::min)(excludedEndPreorder, entry.preorder);
         }
     }
     // Keep every outline out of the excluded window's screen area. Subtree
@@ -914,28 +921,34 @@ struct ProjectedQuad final {
             exclusionArea = *projectedExclusion;
         }
     }
-    for (const UI::UILayoutDebugEntry& entry : overlay.snapshot.entries())
+    if (!overlay.options.showAllVisibleBounds)
     {
-        if (excludedRoot != nullptr && entry.preorder >= excludedRoot->preorder &&
-            entry.preorder < excludedEndPreorder)
+        if (selected == nullptr ||
+            (excludedRoot != nullptr && selected->preorder >= excludedRoot->preorder &&
+             selected->preorder < excludedEndPreorder))
         {
-            // Snapshot preorder/depth makes subtree exclusion frame-local and
-            // avoids retaining a second tree traversal or parent map here.
-            continue;
+            return Core::success();
         }
-        if (overlay.options.selectedNode.hasValue() && entry.node == overlay.options.selectedNode)
+    }
+    else
+    {
+        for (const UI::UILayoutDebugEntry& entry : entries)
         {
-            selected = &entry;
-        }
-        if (entry.effectiveVisibility != UI::UIVisibility::Visible)
-        {
-            continue;
-        }
-        if (overlay.options.showAllVisibleBounds)
-        {
+            if (excludedRoot != nullptr && entry.preorder >= excludedRoot->preorder &&
+                entry.preorder < excludedEndPreorder)
+            {
+                // Snapshot preorder/depth makes subtree exclusion frame-local and
+                // avoids retaining a second tree traversal or parent map here.
+                continue;
+            }
+            if (entry.effectiveVisibility != UI::UIVisibility::Visible)
+            {
+                continue;
+            }
             Core::Status status = addDebugOutline(
                 builder, entry.worldRect, projection,
-                Render::UIPremultipliedRgba8{.red = 29, .green = 54, .blue = 92, .alpha = 92},
+                Render::UIPremultipliedRgba8{
+                    .red = 29, .green = 54, .blue = 92, .alpha = 92},
                 1.0F, nextPaintOrdinal, exclusionArea, statistics);
             if (!status)
             {
@@ -980,6 +993,7 @@ Core::Result<UIRenderDisplayListBuild> buildUIDisplayList(
     UIRenderImageBuildContext imageContext,
     UIRenderLayoutDebugOverlay layoutDebugOverlay)
 {
+    TINA_TRACE_ZONE("Runtime.UI.BuildDisplayList.Convert");
     Core::Status beginStatus = builder.beginFrame();
     if (!beginStatus)
     {

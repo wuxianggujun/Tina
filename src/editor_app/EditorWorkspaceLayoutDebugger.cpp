@@ -4,6 +4,7 @@
 #include <charconv>
 #include <cmath>
 #include <cstring>
+#include <tina/core/trace/Trace.hpp>
 
 namespace Tina::EditorApp::WorkspaceInternal {
 namespace {
@@ -598,6 +599,9 @@ void EditorWorkspaceState::handleLayoutDebugWindowPointerDown(
     layoutDebugWindowInitialRect_ = layoutDebugPanelRect_;
     layoutDebugWindowDragActive_ = !resize;
     layoutDebugWindowResizeActive_ = resize;
+    // Window movement only changes the debugger overlay placement. Keep the
+    // expensive committed-tree projection stable until the interaction ends.
+    layoutDebugWindowMoveProjectionSkip_ = true;
     event.capturePointer();
     (void)event.claimPointerButton(Tina::Platform::PointerButton::Primary);
     event.consumeInputTransition();
@@ -689,6 +693,8 @@ void EditorWorkspaceState::handleLayoutDebugWindowPointerUp(
     event.stopPropagation();
     layoutDebugWindowDragActive_ = false;
     layoutDebugWindowResizeActive_ = false;
+    layoutDebugWindowMoveProjectionSkip_ = false;
+    layoutDebugProjectionChangedPending_ = true;
 }
 
 void EditorWorkspaceState::handleLayoutDebugWindowPointerCancel(
@@ -704,6 +710,8 @@ void EditorWorkspaceState::handleLayoutDebugWindowPointerCancel(
     event.stopPropagation();
     layoutDebugWindowDragActive_ = false;
     layoutDebugWindowResizeActive_ = false;
+    layoutDebugWindowMoveProjectionSkip_ = false;
+    layoutDebugProjectionChangedPending_ = true;
 }
 
 void EditorWorkspaceState::handleLayoutDebugPickPointerDown(
@@ -735,17 +743,38 @@ auto EditorWorkspaceState::refreshLayoutDebuggerUi(
     Tina::UIUpdateContext& context,
     Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status
 {
+    TINA_TRACE_ZONE("Editor.UI.LayoutDebugger.Refresh");
+    std::optional<std::chrono::steady_clock::time_point> profileStart{};
+    if (options_.profileUi) {
+        profileStart = std::chrono::steady_clock::now();
+    }
+    auto profileScope = Tina::Core::makeScopeExit([&]() noexcept {
+        if (!profileStart.has_value()) {
+            return;
+        }
+        const double elapsed = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - *profileStart).count();
+        recordEditorFrameTiming(counters_.layoutDebuggerUiTiming, elapsed);
+    });
+    bool layoutDebugInteractionActive =
+        layoutDebugWindowDragActive_ || layoutDebugWindowResizeActive_;
     const auto applyLayoutDebugOptions = [&]() -> Tina::Core::Status {
         UI::UILayoutDebugOptions options{};
         options.enabled = layoutDebuggerVisible_;
-        options.showAllVisibleBounds = layoutDebugShowAllVisibleBounds_;
+        options.showAllVisibleBounds =
+            layoutDebugShowAllVisibleBounds_ && !layoutDebugInteractionActive;
         options.selectedNode = layoutDebugSelectedNode_;
         options.excludedSubtreeRoot = layoutDebugPanel_;
+        if (options_.profileUi && layoutDebuggerVisible_ &&
+            layoutDebugInteractionActive && layoutDebugShowAllVisibleBounds_) {
+            ++counters_.layoutDebugAllBoundsSuppressedFrames;
+        }
         return context.setPrimaryWindowUILayoutDebugOptions(options);
     };
     if (!layoutDebuggerVisible_) {
         layoutDebugWindowDragActive_ = false;
         layoutDebugWindowResizeActive_ = false;
+        layoutDebugWindowMoveProjectionSkip_ = false;
         layoutDebugRevealSelectionPending_ = false;
         return applyLayoutDebugOptions();
     }
@@ -782,6 +811,63 @@ auto EditorWorkspaceState::refreshLayoutDebuggerUi(
             return Tina::Core::failure(std::move(actionRect.error()));
         }
     }
+    if (options_.profileUiLayoutDrag) {
+        if (!layoutDebugProfileDragInitialized_) {
+            layoutDebugProfileBaseLayout_ = layoutDebugPanelLayout_;
+            layoutDebugProfileOriginX_ =
+                layoutDebugPanelRect_.x - layoutDebugViewportRect_.x;
+            layoutDebugProfileOriginY_ =
+                layoutDebugPanelRect_.y - layoutDebugViewportRect_.y;
+            layoutDebugProfileDragInitialized_ = true;
+        }
+
+        const bool mutationWindowActive =
+            counters_.frameUpdates > LayoutDebugProfileWarmupFrameCount &&
+            layoutDebugProfileMutationIndex_ <
+                LayoutDebugProfileMutationFrameCount;
+        if (mutationWindowActive) {
+            layoutDebugWindowDragActive_ = true;
+            layoutDebugWindowMoveProjectionSkip_ = true;
+
+            constexpr std::array<UI::UILogicalPoint, 8> ProfileDragOffsets{
+                UI::UILogicalPoint{.x = -24.0F, .y = 0.0F},
+                UI::UILogicalPoint{.x = -48.0F, .y = 18.0F},
+                UI::UILogicalPoint{.x = -72.0F, .y = 36.0F},
+                UI::UILogicalPoint{.x = -96.0F, .y = 54.0F},
+                UI::UILogicalPoint{.x = -72.0F, .y = 36.0F},
+                UI::UILogicalPoint{.x = -48.0F, .y = 18.0F},
+                UI::UILogicalPoint{.x = -24.0F, .y = 0.0F},
+                UI::UILogicalPoint{.x = 0.0F, .y = 0.0F},
+            };
+            const UI::UILogicalPoint offset = ProfileDragOffsets[
+                layoutDebugProfileMutationIndex_ % ProfileDragOffsets.size()];
+            UI::UILayoutStyle profileLayout = layoutDebugProfileBaseLayout_;
+            profileLayout.visibility = UI::UIVisibility::Visible;
+            profileLayout.overlay.offset.x = UI::UILayoutLength::Px(
+                layoutDebugProfileOriginX_ + offset.x);
+            profileLayout.overlay.offset.y = UI::UILayoutLength::Px(
+                layoutDebugProfileOriginY_ + offset.y);
+            if (profileLayout != layoutDebugPanelLayout_) {
+                layoutDebugPanelLayout_ = profileLayout;
+                layoutDebugWindowStyleDirty_ = true;
+                layoutDebugProfileMutationPendingCommit_ = true;
+                ++layoutDebugProfileMutationIndex_;
+                ++counters_.layoutDebugProfileMutationFrames;
+            }
+            layoutDebugInteractionActive = true;
+        } else if (layoutDebugProfileMutationIndex_ >=
+                       LayoutDebugProfileMutationFrameCount &&
+                   (layoutDebugWindowDragActive_ ||
+                    layoutDebugWindowMoveProjectionSkip_)) {
+            // The 120-step path ends at its origin. Release the synthetic drag,
+            // restore All Bounds, and refresh the projection once during the
+            // cooldown rather than carrying interaction state to process exit.
+            layoutDebugWindowDragActive_ = false;
+            layoutDebugWindowMoveProjectionSkip_ = false;
+            layoutDebugProjectionChangedPending_ = true;
+            layoutDebugInteractionActive = layoutDebugWindowResizeActive_;
+        }
+    }
     if (layoutDebugWindowStyleDirty_) {
         if (auto status = tree.setLayoutStyle(
                 layoutDebugPanel_, layoutDebugPanelLayout_); !status) {
@@ -816,12 +902,23 @@ auto EditorWorkspaceState::refreshLayoutDebuggerUi(
         !layoutDebugSnapshotInitialized_ ||
         layoutDebugStructureRevision_ != snapshot->structureRevision() ||
         layoutDebugLayoutRevision_ != snapshot->layoutRevision();
+    if (options_.profileUi && layoutDebuggerVisible_) {
+        if (layoutDebugInteractionActive) {
+            ++counters_.layoutDebugDragFrames;
+        }
+        if (snapshotChanged) {
+            ++counters_.layoutDebugSnapshotChangedFrames;
+        }
+    }
     bool pickedThisFrame = false;
     bool projectionChanged = layoutDebugProjectionChangedPending_;
     bool hadSelectionToRestore = false;
     UI::UITreeViewItemKey selectionKeyToRestore = layoutDebugSelectionKey_;
     std::optional<Tina::Core::usize> restoredSelectionIndex{};
-    if (snapshotChanged) {
+    // Moving/resizing the debugger changes the layout revision because its
+    // overlay style is committed, but it does not change the inspectable tree.
+    // Defer projection work until pointer-up/cancel to keep drag frames cheap.
+    if (snapshotChanged && !layoutDebugWindowMoveProjectionSkip_) {
         auto selectionBeforeRebuild = tree.treeViewSelection(layoutDebugTree_);
         if (!selectionBeforeRebuild) {
             return Tina::Core::failure(std::move(selectionBeforeRebuild.error()));
@@ -934,10 +1031,12 @@ auto EditorWorkspaceState::refreshLayoutDebuggerUi(
                 if (candidate.depth <= entry.depth) {
                     break;
                 }
-                if (candidate.parent == entry.node) {
-                    expandable = true;
-                    break;
-                }
+                // In preorder the first non-excluded descendant is the only
+                // candidate that can be a direct child. The old loop kept
+                // scanning every descendant, making projection O(n²) for a
+                // deep or flat snapshot.
+                expandable = candidate.parent == entry.node;
+                break;
             }
             if (layoutDebugTreeRowCount_ >= layoutDebugTreeRows_.size()) {
                 return Tina::Core::failure(
@@ -1014,6 +1113,9 @@ auto EditorWorkspaceState::refreshLayoutDebuggerUi(
         layoutDebugDetailsRefreshPending_ = true;
     }
     if (projectionChanged) {
+        if (options_.profileUi) {
+            ++counters_.layoutDebugProjectionChangedFrames;
+        }
         auto selectionBeforeProjection = tree.treeViewSelection(layoutDebugTree_);
         if (!selectionBeforeProjection) {
             return Tina::Core::failure(std::move(selectionBeforeProjection.error()));

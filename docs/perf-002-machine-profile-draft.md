@@ -28,6 +28,10 @@ Hard gate requires **all** of:
 Debug provisional multi-process runs already exist (`docs/perf-002-provisional-evidence.md`) and prove
 protocol compatibility only (`conclusion=provisional`, `hardGateEligible=false`).
 
+Editor Layout Debugger 的 `--profile-ui-layout-drag` 是独立的开发机 deterministic workload，不属于
+PERF-002 hard gate。它固定使用 30 warm-up / 120 mutation / 5 cooldown 帧；结果必须同时保留 JSON
+工作量计数和 Tracy phase capture，不能以 Debug 单机 FPS 直接替代 Release、多进程、受审机器 profile。
+
 ## Next operator steps
 
 ```powershell

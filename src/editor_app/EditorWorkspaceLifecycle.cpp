@@ -1,5 +1,6 @@
 ﻿#include "EditorWorkspaceState.hpp"
 
+#include <tina/core/trace/Trace.hpp>
 #include <tina/ui/UIErrors.hpp>
 
 namespace Tina::EditorApp::WorkspaceInternal {
@@ -324,6 +325,16 @@ auto EditorWorkspaceState::updateFrame(Tina::FrameUpdateContext& context) -> Tin
         const double frameSeconds =
             static_cast<double>(context.frameTiming().updateDelta.count());
         recordEditorFrameTiming(counters_.frameTimingOverall, frameSeconds);
+        if (options_.profileUiLayoutDrag &&
+            layoutDebugProfileMutationPendingCommit_) {
+            recordEditorFrameTiming(
+                counters_.layoutDebuggerDragFrameTiming, frameSeconds);
+            // updateDelta covers the frame that committed the mutation
+            // submitted by the previous updateUI call. Latch a separate flag
+            // before updateUI can submit the next mutation.
+            layoutDebugProfileCommittedStatisticsPending_ = true;
+            layoutDebugProfileMutationPendingCommit_ = false;
+        }
         if (sourceImportProfileActive_) {
             recordEditorFrameTiming(
                 counters_.frameTimingDuringSourceImport, frameSeconds);
@@ -1018,6 +1029,19 @@ auto EditorWorkspaceState::extractRenderScene(Tina::RenderSceneExtractionContext
 }
 
 auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Core::Status{
+    TINA_TRACE_ZONE("Editor.UI.Update");
+    std::optional<std::chrono::steady_clock::time_point> profileStart{};
+    if (options_.profileUi) {
+        profileStart = std::chrono::steady_clock::now();
+    }
+    auto profileScope = Tina::Core::makeScopeExit([&]() noexcept {
+        if (!profileStart.has_value()) {
+            return;
+        }
+        const double elapsed = std::chrono::duration<double>(
+            std::chrono::steady_clock::now() - *profileStart).count();
+        recordEditorFrameTiming(counters_.updateUiTiming, elapsed);
+    });
     if (!context.hasPrimaryWindowUI() || !uiRoot_) {
         return Tina::Core::success();
     }
@@ -1712,6 +1736,28 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
         counters_.uiStatisticsLast = *statistics;
         counters_.uiStatisticsPeakPmrBytes =
             (std::max)(counters_.uiStatisticsPeakPmrBytes, statistics->pmrPeakBytes);
+        if (options_.profileUiLayoutDrag &&
+            layoutDebugProfileCommittedStatisticsPending_) {
+            ++counters_.layoutDebugProfileCommittedSamples;
+            if (statistics->lastLayoutPassCount != 0U) {
+                ++counters_.layoutDebugProfileLayoutRebuildFrames;
+            }
+            counters_.layoutDebugProfileLayoutMeasuredNodes +=
+                statistics->lastLayoutMeasuredNodeCount;
+            counters_.layoutDebugProfileLayoutArrangedNodes +=
+                statistics->lastLayoutArrangedNodeCount;
+            counters_.layoutDebugProfileHitRebuildFrames +=
+                statistics->lastHitRebuildCount;
+            counters_.layoutDebugProfilePaintSnapshotRebuildFrames +=
+                statistics->lastPaintSnapshotRebuildCount;
+            layoutDebugProfileCommittedStatisticsPending_ = false;
+            if (counters_.layoutDebugProfileMutationFrames ==
+                    LayoutDebugProfileMutationFrameCount &&
+                !layoutDebugProfileMutationPendingCommit_ &&
+                !layoutDebugWindowDragActive_) {
+                counters_.layoutDebugProfileCompleted = true;
+            }
+        }
         const EditorProcessMemorySnapshot processMemory = queryEditorProcessMemory();
         if (counters_.uiStatisticsSamples == 0U) {
             counters_.processFirstUiFrame = processMemory;
