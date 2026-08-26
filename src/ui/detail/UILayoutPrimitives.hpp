@@ -1,5 +1,7 @@
 #pragma once
 
+#include "UIWidgetTraits.hpp"
+
 #include <tina/ui/UIContent.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UIPopup.hpp>
@@ -99,8 +101,7 @@ struct LayoutScratchState final {
     // pass it through; ScrollView replaces it with its content viewport.
     UILogicalRect descendantClip{};
     UIVisibility effectiveVisibility = UIVisibility::Visible;
-    bool inPopupSubtree = false;
-    bool inTooltipSubtree = false;
+    UIPaintLayer paintLayer = UIPaintLayer::Content;
     bool parentContentWidthDefinite = false;
     bool parentContentHeightDefinite = false;
     float parentContentWidth = 0.0F;

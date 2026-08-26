@@ -46,9 +46,32 @@ TEST(UILayoutPrimitivesTests, LayoutStateModelsStartStableAndComparePreparedInpu
     changed.contentWidthDefinite = true;
 
     EXPECT_EQ(scratch.effectiveVisibility, UI::UIVisibility::Visible);
-    EXPECT_FALSE(scratch.inPopupSubtree);
+    EXPECT_EQ(scratch.paintLayer, UI::Detail::UIPaintLayer::Content);
     EXPECT_EQ(scratch.preparedInputs, initial);
     EXPECT_NE(initial, changed);
+}
+
+TEST(UILayoutPrimitivesTest, PaintLayerOrdersContentBelowModalPopupAndTooltip)
+{
+    using Layer = UI::Detail::UIPaintLayer;
+    using Kind = UI::Detail::BuiltinElementKind;
+
+    EXPECT_LT(Layer::Content, Layer::Modal);
+    EXPECT_LT(Layer::Modal, Layer::Popup);
+    EXPECT_LT(Layer::Popup, Layer::Tooltip);
+
+    EXPECT_EQ(UI::Detail::paintLayerForKind(Kind::Panel), Layer::Content);
+    EXPECT_EQ(UI::Detail::paintLayerForKind(Kind::Modal), Layer::Modal);
+    EXPECT_EQ(UI::Detail::paintLayerForKind(Kind::Popup), Layer::Popup);
+    EXPECT_EQ(UI::Detail::paintLayerForKind(Kind::Menu), Layer::Popup);
+    EXPECT_EQ(UI::Detail::paintLayerForKind(Kind::Tooltip), Layer::Tooltip);
+
+    // Promotion moves whole subtrees and never demotes: a child cannot outrank
+    // its own parent, which is what the hit and semantics builders rely on.
+    EXPECT_EQ(UI::Detail::combinePaintLayer(Layer::Popup, Layer::Content), Layer::Popup);
+    EXPECT_EQ(UI::Detail::combinePaintLayer(Layer::Content, Layer::Popup), Layer::Popup);
+    EXPECT_EQ(UI::Detail::combinePaintLayer(Layer::Popup, Layer::Tooltip), Layer::Tooltip);
+    EXPECT_EQ(UI::Detail::combinePaintLayer(Layer::Tooltip, Layer::Popup), Layer::Tooltip);
 }
 
 TEST(UILayoutPrimitivesTests, ResolvesAndClampsAxisSpecificOuterSizes)

@@ -77,9 +77,9 @@ layout snapshot 提供节点树、authored/resolved 布局参数、几何与 bas
 并在所有构建配置中可用。Layout Debugger 使用 Root 级悬浮面板，不再占用底部面板空间。可通过
 `View -> Layout Debugger` 或 Status Bar 的 `Layout` 打开；`All Bounds`
 在全部可见节点与当前选择之间切换，`Pick` 从真实 committed hit 结果选中、展开并滚动到布局树节点。
-UI paint 顺序是 tree preorder 加固定的 Popup/Menu/Tooltip 提升，没有 z-order，因此该面板在 root 子节点中
-**最后**创建，任何后续 chrome 都不会覆盖它；Menu/Popup/Tooltip 仍按提升 pass 绘制在它之上，而 modal
-对话框打开时面板置为 `Hidden` 让位（保留布局、拖拽与选择状态）。overlay 边框会绕开面板矩形，
+UI paint 顺序是 layer 升序 + layer 内 tree preorder，没有 per-node z-index。该面板属于 `Content` layer，
+所以在 root 子节点中**最后**创建，任何后续 chrome 都不会覆盖它；`Modal`/`Popup`/`Menu`/`Tooltip` 是更高
+layer，仍绘制在它之上，因此对话框打开时面板无需再自行隐藏。overlay 边框会绕开面板矩形，
 因此 `All Bounds` 不会把全视口节点的边框画穿面板。
 `%APPDATA%\\TinaEditor\\settings` 中的 `layoutDebugger=1` 会在下次启动恢复悬浮面板。Hierarchy 与 Inspector Header 分别提供向外收起按钮，
 `View` 菜单中的 `Left Dock` / `Inspector` Check 项用于恢复或再次隐藏；收起前保存用户最后拖拽比例。

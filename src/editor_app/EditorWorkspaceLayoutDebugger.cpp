@@ -750,39 +750,8 @@ auto EditorWorkspaceState::refreshLayoutDebuggerUi(
         return applyLayoutDebugOptions();
     }
 
-    // The panel is the last root-level sibling so ordinary chrome cannot paint
-    // over it. Modal dialogs paint in that same pass, so yield to them with
-    // Hidden: layout, drag state and selection all survive, only paint stops.
-    const std::array<UI::UINodeId, 7> modalDialogs{
-        sceneAddDialog_.modal, dirtyCloseDialog_.modal, sceneDeleteDialog_.modal,
-        projectAssetRemoveDialog_.modal, projectAssetRenameDialog_.modal,
-        projectAssetFolderDialog_.modal, aboutDialog_.modal};
-    bool modalOwnsScreen = false;
-    for (const UI::UINodeId dialog : modalDialogs) {
-        if (!dialog.hasValue()) {
-            continue;
-        }
-        auto open = tree.isDialogOpen(dialog);
-        if (!open) {
-            return Tina::Core::failure(std::move(open.error()));
-        }
-        if (*open) {
-            modalOwnsScreen = true;
-            break;
-        }
-    }
-    const UI::UIVisibility panelVisibility = modalOwnsScreen
-        ? UI::UIVisibility::Hidden
-        : UI::UIVisibility::Visible;
-    if (layoutDebugPanelLayout_.visibility != panelVisibility) {
-        layoutDebugPanelLayout_.visibility = panelVisibility;
-        layoutDebugWindowStyleDirty_ = true;
-        if (modalOwnsScreen) {
-            layoutDebugWindowDragActive_ = false;
-            layoutDebugWindowResizeActive_ = false;
-        }
-    }
-
+    // Modal is its own paint layer, so dialogs already outrank this panel and it
+    // no longer has to hide itself while one is open.
     auto rootRect = tree.committedLayoutRect(uiRoot_.rootNodeId());
     if (!rootRect) {
         return Tina::Core::failure(std::move(rootRect.error()));

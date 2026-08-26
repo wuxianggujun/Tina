@@ -595,5 +595,56 @@ TEST_F(UIFocusModalTest, FocusTraversalIsRejectedDuringPointerDispatch)
     EXPECT_EQ(routed->routedTarget.node, button);
 }
 
+TEST_F(UIFocusModalTest, ModalPaintsAboveLaterAuthoredSiblingsRegardlessOfTreeOrder)
+{
+    auto context = createContext(window);
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    ASSERT_TRUE(root);
+    auto updater = createUpdater(*context, root);
+
+    // Author the Modal FIRST, then ordinary chrome after it. Before Modal became
+    // a paint layer this painted the panel over the scrim while the modal
+    // barrier still rejected all input to it: visibly broken, silently.
+    auto modalResult =
+        updater.createElement(root.rootNodeId(), UI::makeModalElement(overlay(0.0F, 0.0F, 200.0F, 150.0F)));
+    ASSERT_TRUE(modalResult.has_value()) << modalResult.error().message;
+    auto laterPanelResult =
+        updater.createElement(root.rootNodeId(), UI::makePanelElement(overlay(0.0F, 0.0F, 200.0F, 150.0F)));
+    ASSERT_TRUE(laterPanelResult.has_value()) << laterPanelResult.error().message;
+
+    ASSERT_TRUE(context->publication().commitLayout({.width = 200.0F, .height = 150.0F}).has_value());
+
+    const auto layout = context->publication().committedLayout();
+    std::optional<u32> modalPaintOrdinal;
+    std::optional<u32> panelPaintOrdinal;
+    std::optional<u32> modalLayoutOrdinal;
+    std::optional<u32> panelLayoutOrdinal;
+    for (const UI::UICommittedLayoutEntry& entry : layout.entries())
+    {
+        if (entry.node == *modalResult)
+        {
+            modalPaintOrdinal = entry.paintOrdinal;
+            modalLayoutOrdinal = entry.layoutOrdinal;
+        }
+        if (entry.node == *laterPanelResult)
+        {
+            panelPaintOrdinal = entry.paintOrdinal;
+            panelLayoutOrdinal = entry.layoutOrdinal;
+        }
+    }
+    ASSERT_TRUE(modalPaintOrdinal.has_value());
+    ASSERT_TRUE(panelPaintOrdinal.has_value());
+    ASSERT_TRUE(modalLayoutOrdinal.has_value());
+    ASSERT_TRUE(panelLayoutOrdinal.has_value());
+
+    // The Modal is authored earlier, so preorder must still put it first. Only
+    // paint order is promoted; layoutOrdinal stays pure preorder because the
+    // layout debugger's subtree-exclusion ranges depend on that.
+    EXPECT_LT(*modalLayoutOrdinal, *panelLayoutOrdinal);
+    EXPECT_GT(*modalPaintOrdinal, *panelPaintOrdinal)
+        << "a Modal must paint above ordinary chrome authored after it";
+}
+
 } // namespace
 } // namespace Tina::Tests

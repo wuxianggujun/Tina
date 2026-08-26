@@ -145,7 +145,9 @@ text/text style、visual box/Canvas、enabled、pointer hit policy 与 focus sco
   与 Overlay 后代沿既有 `descendantClip` 链与 owner 的 world border-box 求交。后代 `worldRect`、布局和
   tree/semantics 顺序不变，committed `effectiveClip` 统一供 hit/paint 使用；viewport-level Popup 继续走专用
   anchor/clip policy；这不是 rounded clip，也不额外改变 owner 自身的 paint clip；
-- tree 顺序同时决定 layout、paint、focus 与 semantics 顺序，没有 CSS `order` 双轨。
+- tree 顺序同时决定 layout、paint、focus 与 semantics 顺序，没有 CSS `order` 双轨。paint 顺序在此之上
+  再叠加一层 layer 提升：`Content < Modal < Popup < Tooltip`（见下）。hit、tab/方向 focus、semantics
+  都从同一份 paint 顺序数组派生，因此三者始终与所见一致。
 - `UILayoutLength::{MinContent,MaxContent}` 可用于 width/height、Flex basis 与 min/max constraint。文本叶子分别取
   最长不可断词宽和最长 authored line 宽；Image 取 intrinsic logical size；Flex/Grid 容器继续聚合后代、padding、
   gap、margin、显式 size 与 min/max constraint。无确定 basis 的 Percent 不参与 intrinsic contribution；wrapped
@@ -385,8 +387,24 @@ DataSource descriptor、文本或容量失败时，候选 bindings/layout/paint/
 完整通用 dirty-range pruning 仍未实现。
 
 Tree structure publication、subtree destroy 以及 layout/hit/paint snapshot 构建不依赖 C++ 调用栈递归；
-专项 stress gate 使用 50,000 层 retained tree 覆盖这些路径。Popup 最终绘制顺序所需的
-`inPopupSubtree` 在 layout preorder 中一次传播，publication 不再为每个节点重复回溯祖先链。
+专项 stress gate 使用 50,000 层 retained tree 覆盖这些路径。绘制顺序所需的 `paintLayer` 在 layout
+preorder 中一次传播，publication 不再为每个节点重复回溯祖先链。
+
+绘制层级为 `UIPaintLayer`：`Content < Modal < Popup < Tooltip`，发射顺序是先按 layer 升序、layer 内按
+tree preorder。节点 layer 为 `max(parentLayer, ownLayer)`，只有 `Modal` / `Popup` / `Menu`（与 Popup 同层）
+/ `Tooltip` 四种 kind 会提升自己及其子树。
+
+**没有 per-node z-index，这是刻意的**：hit 与 semantics 快照都靠回查"已发射条目"解析祖先，前者在祖先缺失时
+硬失败，后者会静默读到零值 scratch 而损坏 a11y 父子关系。因此提升只能整棵子树移动，子节点永远不能越过自己的
+父节点。
+
+`Modal` 是真实 layer 而非普通流，因为模态性是由 hit 快照强制的：在此之前把 Modal 写在兄弟节点之前，会让
+chrome 画在 scrim 之上却又完全不可点击 —— 看起来像渲染 bug，且没有任何断言或诊断。
+
+活动 menu 链是 **layer 内**的排序问题（父菜单要在其子菜单之前），扁平 layer 表达不了，所以这些节点被从
+Popup pass 中延后，紧随其后按链序单独遍历。
+
+`layoutOrdinal` 保持纯 preorder，与 `paintOrdinal` 解耦 —— Layout Debugger 的子树排除依赖 preorder 区间性质。
 
 当前性能边界需要如实区分：无 dirty 且 viewport 不变的 `commitLayout()` 会直接返回，
 `lastLayoutPassCount/lastHitRebuildCount/lastPaintSnapshotRebuildCount` 均为零；paint-only 状态变化不会使

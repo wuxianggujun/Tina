@@ -5,6 +5,31 @@
 
 namespace Tina::UI::Detail {
 
+// Paint layer, in ascending order. Paint order is tree preorder within a layer,
+// then layer between them; there is no per-node z-index, because both the hit
+// and semantics snapshots resolve ancestry against already-emitted entries and
+// would break if a child could outrank its own parent. Promotion therefore
+// always moves whole subtrees: a node's layer is max(parentLayer, ownLayer).
+//
+// Modal is a real layer rather than plain flow because modality is enforced
+// through the hit snapshot. A Modal authored before its siblings used to paint
+// under chrome that was already non-interactive, which looked like a rendering
+// bug and had no diagnostic.
+enum class UIPaintLayer : u8 {
+    Content = 0,
+    Modal,
+    Popup,
+    Tooltip,
+};
+
+inline constexpr u8 UIPaintLayerCount = 4;
+
+[[nodiscard]] constexpr UIPaintLayer combinePaintLayer(
+    UIPaintLayer parent, UIPaintLayer local) noexcept
+{
+    return parent > local ? parent : local;
+}
+
 // Private dispatch tag for retained built-in side storage. Public authoring
 // identifies capabilities through UIElementDescriptor instead.
 enum class BuiltinElementKind : u8 {
@@ -114,6 +139,26 @@ struct UIWidgetTraits final {
         return {};
     }
     return {};
+}
+
+// Layer a kind establishes for itself and its subtree. Ordinary content stays in
+// Content; only these four kinds promote. Menu shares Popup because an open menu
+// and an open dropdown occupy the same tier; ordering within the active menu
+// chain is a separate intra-layer concern a flat layer cannot express.
+[[nodiscard]] constexpr UIPaintLayer paintLayerForKind(BuiltinElementKind kind) noexcept
+{
+    switch (kind)
+    {
+    case BuiltinElementKind::Modal:
+        return UIPaintLayer::Modal;
+    case BuiltinElementKind::Popup:
+    case BuiltinElementKind::Menu:
+        return UIPaintLayer::Popup;
+    case BuiltinElementKind::Tooltip:
+        return UIPaintLayer::Tooltip;
+    default:
+        return UIPaintLayer::Content;
+    }
 }
 
 [[nodiscard]] constexpr bool isButtonChromeKind(BuiltinElementKind kind) noexcept

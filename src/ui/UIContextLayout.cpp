@@ -300,9 +300,7 @@ void UIContext::Impl::prepareLayoutState(UILogicalSize viewportSize, const std::
         }
         if (record->parentIndex == InvalidNodeIndex)
         {
-            scratch.inPopupSubtree = record->kind == BuiltinElementKind::Popup ||
-                                     record->kind == BuiltinElementKind::Menu;
-            scratch.inTooltipSubtree = record->kind == BuiltinElementKind::Tooltip;
+            scratch.paintLayer = Detail::paintLayerForKind(record->kind);
             scratch.parentContentWidthDefinite = true;
             scratch.parentContentHeightDefinite = true;
             scratch.parentContentWidth = viewportSize.width;
@@ -311,13 +309,8 @@ void UIContext::Impl::prepareLayoutState(UILogicalSize viewportSize, const std::
         {
             const LayoutScratchState& parentScratch =
                 layoutScratchByIndex[record->parentIndex];
-            scratch.inPopupSubtree =
-                record->kind == BuiltinElementKind::Popup ||
-                record->kind == BuiltinElementKind::Menu ||
-                parentScratch.inPopupSubtree;
-            scratch.inTooltipSubtree =
-                record->kind == BuiltinElementKind::Tooltip ||
-                parentScratch.inTooltipSubtree;
+            scratch.paintLayer = Detail::combinePaintLayer(
+                parentScratch.paintLayer, Detail::paintLayerForKind(record->kind));
             scratch.parentContentWidthDefinite =
                 parentScratch.contentWidthDefinite;
             scratch.parentContentHeightDefinite =
@@ -3116,12 +3109,11 @@ void UIContext::Impl::buildCommittedLayout(std::pmr::vector<UICommittedLayoutEnt
         }
         return false;
     };
-    const auto appendPass = [&](bool popupPass, bool tooltipPass,
+    const auto appendPass = [&](Detail::UIPaintLayer layer,
                                 bool deferActiveMenus = false) noexcept {
         for (const u32 index : order)
         {
-            if (layoutScratchByIndex[index].inPopupSubtree != popupPass ||
-                layoutScratchByIndex[index].inTooltipSubtree != tooltipPass ||
+            if (layoutScratchByIndex[index].paintLayer != layer ||
                 (deferActiveMenus && belongsToActiveMenuChain(index)))
             {
                 continue;
@@ -3129,8 +3121,13 @@ void UIContext::Impl::buildCommittedLayout(std::pmr::vector<UICommittedLayoutEnt
             appendNode(index);
         }
     };
-    appendPass(false, false);
-    appendPass(true, false, true);
+    // Ascending layer, tree preorder within each. The active menu chain is an
+    // intra-layer ordering concern: a flat layer cannot express "parent menu
+    // before its submenu", so those nodes are deferred out of the Popup pass and
+    // walked in chain order right after it.
+    appendPass(Detail::UIPaintLayer::Content);
+    appendPass(Detail::UIPaintLayer::Modal);
+    appendPass(Detail::UIPaintLayer::Popup, true);
 
     UINodeId activeChainMenu = menuStorage.rootMenu();
     usize visited = 0;
@@ -3150,13 +3147,15 @@ void UIContext::Impl::buildCommittedLayout(std::pmr::vector<UICommittedLayoutEnt
             {
                 break;
             }
+            // The tree contract restricts Menu children to MenuItem and forbids
+            // MenuItem children, so this one-level walk covers the whole chain.
+            // Relaxing either rule would emit a non-MenuItem child twice.
             appendNode(childIndex);
             childIndex = child->nextSiblingIndex;
         }
         activeChainMenu = menuStorage.activeChildMenu(activeChainMenu);
     }
-    appendPass(false, true);
-    appendPass(true, true);
+    appendPass(Detail::UIPaintLayer::Tooltip);
 }
 
 namespace {
