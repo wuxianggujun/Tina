@@ -425,7 +425,9 @@ primary-window capability 转发给 Editor。GLFW 3.4 已明确提供 Windows/X1
 
 1. `VirtualGridView` 是否接受窄的 item presentation 扩展，还是先由 Editor 私有 profile 验证。
 2. 缩略图当前优先来自 Cooked Texture/Sprite；后续是否引入 Editor cache 或独立 thumbnail artifact，以及其缓存和失效 owner 是谁。
-3. Recent Projects 的存储位置、最大条数、路径隐私和失效记录清理策略。
+3. Recent Projects 的策略已由实现确定：Windows 使用 `%APPDATA%/TinaEditor/settings`，Linux 依次使用
+   `XDG_CONFIG_HOME/TinaEditor/settings` 或 `$HOME/.config/TinaEditor/settings`；最多 10 条 canonical project root，
+   同路径去重，失效路径在读取/打开时移除。后续只需补跨重启与路径隐私的人工验收记录。
 4. AssetTile 的 Grid/List 两档最终视觉 metrics 与 Project Assets 在 200% DPI 下的最小可用宽度；当前已使用真实 preview/icon
    presentation，逻辑 metrics 仍为约 132x72 / 280x30 logical px。
 

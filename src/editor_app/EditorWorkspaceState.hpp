@@ -2182,11 +2182,15 @@ enum class EditorCommand : u32 {
     NodeApplyPointLight,
     NodeApplyShadowOccluder,
     NodeApplyAnimationProperties,
+    NodeApplyPhysicsBody,
+    NodeApplyPhysicsShape,
     NodeToggleSpriteVisible,
     NodeToggleCameraActive,
     NodeTogglePointLightActive,
     NodeToggleShadowOccluderActive,
     NodeToggleSpriteAnimationAutoPlay,
+    NodeTogglePhysicsBodyEnabled,
+    NodeTogglePhysicsShapeEnabled,
     NodeToggleMeshVisible,
     NodeAssignSprite,
     Undo,
@@ -4854,13 +4858,13 @@ class EditorWorkspaceState final : public Tina::IGameState {
         UI::UINodeId resourceSlot{};
         UI::UINodeId resourceLabel{};
         UI::UINodeId resourceAssignButton{};
-        std::array<UI::UINodeId, 6> fields{};
+        std::array<UI::UINodeId, 8> fields{};
         Tina::Core::usize fieldCount = 0;
         UI::UINodeId applyButton{};
     };
-    // Rendering, Camera, Light, Occlusion, Animation, and 3D Rendering.
-    static constexpr Tina::Core::usize MeshPropertiesSectionIndex = 5;
-    std::array<NodePropertySectionUi, 6> nodePropertySections_{};
+    // Rendering, Camera, Light, Occlusion, Animation, Physics body, Physics shape, and 3D Rendering.
+    static constexpr Tina::Core::usize MeshPropertiesSectionIndex = 7;
+    std::array<NodePropertySectionUi, 8> nodePropertySections_{};
     struct InspectorPointLightColorChannelRequest final {
         UI::UIColorPickerChannel channel = UI::UIColorPickerChannel::Red;
         float value = 0.0F;

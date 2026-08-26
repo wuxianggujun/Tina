@@ -9,6 +9,8 @@ enum class World2DNodePropertyGroup : Tina::Core::u8 {
     Light = 2,
     Occlusion = 3,
     Animation = 4,
+    PhysicsBody = 5,
+    PhysicsShape = 6,
 };
 
 } // namespace
@@ -271,6 +273,42 @@ auto EditorWorkspaceState::runNodePropertyCommand(
         propertyGroupName = "Animation auto play";
         break;
     }
+    case EditorCommand::NodeTogglePhysicsBodyEnabled: {
+        auto primary = primaryWorld2DEntity();
+        if (!primary) {
+            result = Tina::Core::failure(std::move(primary.error()));
+            break;
+        }
+        if (!primary->physicsBody) {
+            result = Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::NodePropertyUnavailable,
+                "Toggle requires a physics body selection");
+            break;
+        }
+        result = Tina::Editor::applyWorld2DPhysicsBodyNodeProperties(
+            document_, ids, {.enabled = !primary->physicsBody->enabled});
+        successVerb = "toggled";
+        propertyGroupName = "Physics body enabled";
+        break;
+    }
+    case EditorCommand::NodeTogglePhysicsShapeEnabled: {
+        auto primary = primaryWorld2DEntity();
+        if (!primary) {
+            result = Tina::Core::failure(std::move(primary.error()));
+            break;
+        }
+        if (!primary->physicsShape) {
+            result = Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::NodePropertyUnavailable,
+                "Toggle requires a CollisionShape2D selection");
+            break;
+        }
+        result = Tina::Editor::applyWorld2DPhysicsShapeNodeProperties(
+            document_, ids, {.enabled = !primary->physicsShape->enabled});
+        successVerb = "toggled";
+        propertyGroupName = "Physics shape enabled";
+        break;
+    }
     case EditorCommand::NodeApplyAnimationProperties: {
         const auto& section = nodePropertySections_[4];
         auto clipText = tree.text(section.fields[0]);
@@ -300,6 +338,87 @@ auto EditorWorkspaceState::runNodePropertyCommand(
                                                                input);
         successVerb = "applied";
         propertyGroupName = "Animation";
+        break;
+    }
+    case EditorCommand::NodeApplyPhysicsBody: {
+        const auto& section = nodePropertySections_[5];
+        Tina::Editor::World2DPhysicsBodyNodeProperties input{};
+        const std::array<std::pair<UI::UINodeId, std::optional<float>*>, 6>
+            fieldBindings{{
+                {section.fields[0], &input.linearVelocityX},
+                {section.fields[1], &input.linearVelocityY},
+                {section.fields[2], &input.angularVelocityRadiansPerSecond},
+                {section.fields[3], &input.linearDamping},
+                {section.fields[4], &input.angularDamping},
+                {section.fields[5], &input.gravityScale},
+            }};
+        const std::array<std::string_view, 6> fieldNames{
+            "Linear velocity X", "Linear velocity Y", "Angular velocity",
+            "Linear damping", "Angular damping", "Gravity scale"};
+        for (Tina::Core::usize index = 0; index < fieldBindings.size(); ++index) {
+            auto parsed = parseFloatField(fieldBindings[index].first,
+                                          fieldNames[index]);
+            if (!parsed) {
+                if (isRejectable(parsed.error())) {
+                    return reject(parsed.error());
+                }
+                return Tina::Core::failure(std::move(parsed.error()));
+            }
+            *fieldBindings[index].second = *parsed;
+        }
+        result = Tina::Editor::applyWorld2DPhysicsBodyNodeProperties(
+            document_, ids, input);
+        successVerb = "applied";
+        propertyGroupName = "Physics body";
+        break;
+    }
+    case EditorCommand::NodeApplyPhysicsShape: {
+        const auto& section = nodePropertySections_[6];
+        Tina::Editor::World2DPhysicsShapeNodeProperties input{};
+        auto kindText = tree.text(section.fields[0]);
+        if (!kindText) {
+            return Tina::Core::failure(std::move(kindText.error()));
+        }
+        if (*kindText != "Mixed" && *kindText != "n/a") {
+            if (*kindText == "Box") {
+                input.kind = Tina::AssetFormat::World2DPhysicsShapeKind::Box;
+            } else if (*kindText == "Circle") {
+                input.kind = Tina::AssetFormat::World2DPhysicsShapeKind::Circle;
+            } else if (*kindText == "Capsule") {
+                input.kind = Tina::AssetFormat::World2DPhysicsShapeKind::Capsule;
+            } else {
+                return reject(Tina::Core::Error{
+                    Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                    "Shape kind must be Box, Circle, Capsule, or Mixed"});
+            }
+        }
+        const std::array<std::pair<UI::UINodeId, std::optional<float>*>, 6>
+            fieldBindings{{
+                {section.fields[1], &input.halfExtentX},
+                {section.fields[2], &input.halfExtentY},
+                {section.fields[3], &input.radius},
+                {section.fields[4], &input.density},
+                {section.fields[5], &input.friction},
+                {section.fields[6], &input.restitution},
+            }};
+        const std::array<std::string_view, 6> fieldNames{
+            "Half extent X", "Half extent Y", "Radius", "Density",
+            "Friction", "Restitution"};
+        for (Tina::Core::usize index = 0; index < fieldBindings.size(); ++index) {
+            auto parsed = parseFloatField(fieldBindings[index].first,
+                                          fieldNames[index]);
+            if (!parsed) {
+                if (isRejectable(parsed.error())) {
+                    return reject(parsed.error());
+                }
+                return Tina::Core::failure(std::move(parsed.error()));
+            }
+            *fieldBindings[index].second = *parsed;
+        }
+        result = Tina::Editor::applyWorld2DPhysicsShapeNodeProperties(
+            document_, ids, input);
+        successVerb = "applied";
+        propertyGroupName = "Physics shape";
         break;
     }
     case EditorCommand::NodeToggleMeshVisible: {
@@ -667,7 +786,8 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
         }
 
         if (primary == nullptr || selected.empty()) {
-            for (Tina::Core::usize sectionIndex = 0; sectionIndex < 5U;
+            for (Tina::Core::usize sectionIndex = 0;
+                 sectionIndex < MeshPropertiesSectionIndex;
                  ++sectionIndex) {
                 if (auto status = resetSection(nodePropertySections_[sectionIndex]);
                     !status) {
@@ -709,18 +829,21 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                 case Tina::Editor::World2DNodeTemplate::Marker2D:
                 case Tina::Editor::World2DNodeTemplate::TileMap2D:
                 case Tina::Editor::World2DNodeTemplate::FxEmitter2D:
+                case Tina::Editor::World2DNodeTemplate::NavigationRegion2D:
+                case Tina::Editor::World2DNodeTemplate::AudioPlayer2D:
+                    return false;
+                case Tina::Editor::World2DNodeTemplate::CollisionShape2D:
+                    return group == World2DNodePropertyGroup::PhysicsShape;
                 case Tina::Editor::World2DNodeTemplate::StaticBody2D:
                 case Tina::Editor::World2DNodeTemplate::RigidBody2D:
                 case Tina::Editor::World2DNodeTemplate::CharacterBody2D:
                 case Tina::Editor::World2DNodeTemplate::Area2D:
-                case Tina::Editor::World2DNodeTemplate::CollisionShape2D:
-                case Tina::Editor::World2DNodeTemplate::NavigationRegion2D:
-                case Tina::Editor::World2DNodeTemplate::AudioPlayer2D:
-                    return false;
+                    return group == World2DNodePropertyGroup::PhysicsBody;
                 }
                 return false;
             };
-        for (Tina::Core::usize sectionIndex = 0; sectionIndex < 5U;
+        for (Tina::Core::usize sectionIndex = 0;
+             sectionIndex < MeshPropertiesSectionIndex;
              ++sectionIndex) {
             const auto& section = nodePropertySections_[sectionIndex];
             const auto group = static_cast<World2DNodePropertyGroup>(
@@ -1102,6 +1225,99 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                 }
                 break;
             }
+            case World2DNodePropertyGroup::PhysicsBody: {
+                const auto& body = *primary->physicsBody;
+                status = tree.setChecked(
+                    section.activeSwitch,
+                    body.enabled &&
+                        !mixedBool([](const auto& e) {
+                            return e.physicsBody->enabled;
+                        }));
+                const std::array<std::pair<float, bool>, 6> values{{
+                    {body.linearVelocityX, mixedFloat([](const auto& e) {
+                         return e.physicsBody->linearVelocityX;
+                     })},
+                    {body.linearVelocityY, mixedFloat([](const auto& e) {
+                         return e.physicsBody->linearVelocityY;
+                     })},
+                    {body.angularVelocityRadiansPerSecond,
+                     mixedFloat([](const auto& e) {
+                         return e.physicsBody->angularVelocityRadiansPerSecond;
+                     })},
+                    {body.linearDamping, mixedFloat([](const auto& e) {
+                         return e.physicsBody->linearDamping;
+                     })},
+                    {body.angularDamping, mixedFloat([](const auto& e) {
+                         return e.physicsBody->angularDamping;
+                     })},
+                    {body.gravityScale, mixedFloat([](const auto& e) {
+                         return e.physicsBody->gravityScale;
+                     })},
+                }};
+                for (Tina::Core::usize index = 0;
+                     status && index < values.size(); ++index) {
+                    status = setNumberField(index, values[index].second,
+                                            values[index].first);
+                }
+                break;
+            }
+            case World2DNodePropertyGroup::PhysicsShape: {
+                const auto& shape = *primary->physicsShape;
+                status = tree.setChecked(
+                    section.activeSwitch,
+                    shape.enabled &&
+                        !mixedBool([](const auto& e) {
+                            return e.physicsShape->enabled;
+                        }));
+                bool kindMixed = false;
+                for (const auto* entity : selected) {
+                    if (entity->physicsShape->kind != shape.kind) {
+                        kindMixed = true;
+                        break;
+                    }
+                }
+                const auto kindText = [](Tina::AssetFormat::World2DPhysicsShapeKind kind)
+                    -> std::string_view {
+                    switch (kind) {
+                    case Tina::AssetFormat::World2DPhysicsShapeKind::Box:
+                        return "Box";
+                    case Tina::AssetFormat::World2DPhysicsShapeKind::Circle:
+                        return "Circle";
+                    case Tina::AssetFormat::World2DPhysicsShapeKind::Capsule:
+                        return "Capsule";
+                    }
+                    return "n/a";
+                };
+                if (status) {
+                    status = setField(0, kindMixed, kindText(shape.kind));
+                }
+                const std::array<std::pair<float, bool>, 6> values{{
+                    {shape.halfExtentX, mixedFloat([](const auto& e) {
+                         return e.physicsShape->halfExtentX;
+                     })},
+                    {shape.halfExtentY, mixedFloat([](const auto& e) {
+                         return e.physicsShape->halfExtentY;
+                     })},
+                    {shape.radius, mixedFloat([](const auto& e) {
+                         return e.physicsShape->radius;
+                     })},
+                    {shape.density, mixedFloat([](const auto& e) {
+                         return e.physicsShape->density;
+                     })},
+                    {shape.friction, mixedFloat([](const auto& e) {
+                         return e.physicsShape->friction;
+                     })},
+                    {shape.restitution, mixedFloat([](const auto& e) {
+                         return e.physicsShape->restitution;
+                     })},
+                }};
+                for (Tina::Core::usize index = 0;
+                     status && index < values.size(); ++index) {
+                    status = setNumberField(index + 1U, values[index].second,
+                                            values[index].first);
+                }
+                break;
+            }
             }
             if (!status) {
                 return status;
@@ -1110,7 +1326,8 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
         return Tina::Core::success();
     }
 
-    for (Tina::Core::usize sectionIndex = 0; sectionIndex < 5U; ++sectionIndex) {
+    for (Tina::Core::usize sectionIndex = 0;
+         sectionIndex < MeshPropertiesSectionIndex; ++sectionIndex) {
         if (auto status = resetSection(nodePropertySections_[sectionIndex]);
             !status) {
             return status;

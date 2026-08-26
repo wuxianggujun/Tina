@@ -2735,6 +2735,37 @@ auto EditorWorkspaceState::buildInspectorUi(
             !status) {
             return status;
         }
+        const std::array<InspectorNodePropertyFieldRow, 5> physicsBodyFields{{
+            {.caption = "Linear Velocity", .axisLabels = {"X", "Y"},
+             .accessibleNames = {"Physics linear velocity X", "Physics linear velocity Y"},
+             .valueCount = 2U, .axisLabelWidth = InspectorTransformAxisLabelWidth},
+            {.caption = "Angular Velocity", .accessibleNames = {"Physics angular velocity", ""}},
+            {.caption = "Linear Damping", .accessibleNames = {"Physics linear damping", ""}},
+            {.caption = "Angular Damping", .accessibleNames = {"Physics angular damping", ""}},
+            {.caption = "Gravity Scale", .accessibleNames = {"Physics gravity scale", ""}},
+        }};
+        if (auto status = createNodePropertySection(
+                nodePropertySections_[5], "Physics Body", "Enabled",
+                physicsBodyFields, false, "Apply Physics Body");
+            !status) {
+            return status;
+        }
+        const std::array<InspectorNodePropertyFieldRow, 6> physicsShapeFields{{
+            {.caption = "Shape Kind", .accessibleNames = {"Collision shape kind", ""}},
+            {.caption = "Half Extent", .axisLabels = {"X", "Y"},
+             .accessibleNames = {"Collision half extent X", "Collision half extent Y"},
+             .valueCount = 2U, .axisLabelWidth = InspectorTransformAxisLabelWidth},
+            {.caption = "Radius", .accessibleNames = {"Collision radius", ""}},
+            {.caption = "Density", .accessibleNames = {"Collision density", ""}},
+            {.caption = "Friction", .accessibleNames = {"Collision friction", ""}},
+            {.caption = "Restitution", .accessibleNames = {"Collision restitution", ""}},
+        }};
+        if (auto status = createNodePropertySection(
+                nodePropertySections_[6], "Collision Shape", "Enabled",
+                physicsShapeFields, false, "Apply Collision Shape");
+            !status) {
+            return status;
+        }
         const std::array<InspectorNodePropertyFieldRow, 2> meshFields{{
             {.caption = "Mesh", .accessibleNames = {"Mesh asset", ""}},
             {.caption = "Material", .accessibleNames = {"Material asset", ""}},
@@ -4652,13 +4683,17 @@ auto EditorWorkspaceState::registerUiCallbacks(
             EditorCommand::NodeTogglePointLightActive,
             EditorCommand::NodeToggleShadowOccluderActive,
             EditorCommand::NodeToggleSpriteAnimationAutoPlay,
+            EditorCommand::NodeTogglePhysicsBodyEnabled,
+            EditorCommand::NodeTogglePhysicsShapeEnabled,
             EditorCommand::NodeToggleMeshVisible,
         };
-        const std::array<EditorCommand, 5> sectionApplyCommands{
+        const std::array<EditorCommand, 7> sectionApplyCommands{
             EditorCommand::NodeApplySprite, EditorCommand::NodeApplyCamera,
             EditorCommand::NodeApplyPointLight,
             EditorCommand::NodeApplyShadowOccluder,
-            EditorCommand::NodeApplyAnimationProperties};
+            EditorCommand::NodeApplyAnimationProperties,
+            EditorCommand::NodeApplyPhysicsBody,
+            EditorCommand::NodeApplyPhysicsShape};
         for (Tina::Core::usize sectionIndex = 0;
              sectionIndex < nodePropertySections_.size(); ++sectionIndex) {
             const auto& section = nodePropertySections_[sectionIndex];

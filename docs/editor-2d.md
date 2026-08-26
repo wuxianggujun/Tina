@@ -28,7 +28,8 @@ Hierarchy 创建器、Hierarchy Kind 和 Inspector 都读取同一词表。Asset
 一个受支持 Node kind；旧式多 payload 混合直接 fail-closed，不用“最具体组件优先”掩盖数据形状。
 `EditorNodePropertyOperations` 只编辑节点类型本来拥有的属性，不改变节点类型：`Sprite2D`/`AnimatedSprite2D` 发布
 Rendering，`Camera2D` 发布 Camera，`PointLight2D` 发布 Light，`ShadowOccluder2D` 发布 Occlusion，
-`AnimatedSprite2D` 额外发布 Animation，`Mesh3D` 发布 Rendering。每个可见区段只包含属性行、Apply 与
+`AnimatedSprite2D` 额外发布 Animation，Physics body 节点发布 Physics Body，`CollisionShape2D` 发布 Collision Shape，
+`Mesh3D` 发布 Rendering。每个可见区段只包含属性行、Apply 与
 `visible/active/autoPlay` Compact switch，不存在 Components Header、Add Component、Remove Component 或兼容菜单。
 同类型多选时属性按一致性显示 `Mixed`，未明确填写的字段保留每个节点自己的 canonical 值；一次 Apply 最多发布一条
 revision，非法值、未知 stable ID 或类型不匹配保持 document/history 字节不变，no-op 不发布 revision。
@@ -60,9 +61,10 @@ TileMap Inspector 已提供固定容量 Tile Palette：数据来自当前 reside
 document revision，且无 Tileset 时 Paint 控件禁用。Editor 私有 settings carrier 已接入启动读取和退出原子写入，保存
 SplitView fraction/可见性、Bottom Panel、Layout Debugger 可见性与 snap enabled；主题和 snap 步长 Preferences UI 尚未承诺完成。Recent Projects
 在统一 Catalog switch 提交点记录最近 10 个 project root，并在 Start Center 以固定按钮行呈现；无效路径从列表移除。
-上述能力没有新增自动测试；本批统一证据已完成：`tina_editor_tests` 112/112、`tina_editor_app_tests` 23/23，
-`tina_sample_2d --frames=300 --frame-delay-ms=0` 与 `tina_sample_3d --frames=30 --frame-delay-ms=0` 均
-`status=ok`。跨重启 settings、TileMap 多次选择/绘制、Recent Projects 失效移除及文件对话框重复打开仍需人工验收。
+本批新增 Physics Inspector 定向单测；本次定向验证为 `tina_editor_tests` 116/116、
+`tina_editor_app_tests` 23/23。既有 `tina_sample_2d --frames=300 --frame-delay-ms=0` 与
+`tina_sample_3d --frames=30 --frame-delay-ms=0` `status=ok` 证据未因本切片重跑。跨重启 settings、
+TileMap 多次选择/绘制、Recent Projects 失效移除及文件对话框重复打开仍需人工验收。
 
 当前 Editor application 的 retained UI 布局已完整铺开：带 `File/Edit/View/Help` 的 Command Bar、按需出现的 Document Tab strip、
 Hierarchy/Project Assets Left Dock、active Viewport、可滚动 Inspector

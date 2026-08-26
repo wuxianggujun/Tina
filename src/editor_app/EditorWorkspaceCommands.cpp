@@ -1367,11 +1367,15 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
     case EditorCommand::NodeApplyPointLight:
     case EditorCommand::NodeApplyShadowOccluder:
     case EditorCommand::NodeApplyAnimationProperties:
+    case EditorCommand::NodeApplyPhysicsBody:
+    case EditorCommand::NodeApplyPhysicsShape:
     case EditorCommand::NodeToggleSpriteVisible:
     case EditorCommand::NodeToggleCameraActive:
     case EditorCommand::NodeTogglePointLightActive:
     case EditorCommand::NodeToggleShadowOccluderActive:
     case EditorCommand::NodeToggleSpriteAnimationAutoPlay:
+    case EditorCommand::NodeTogglePhysicsBodyEnabled:
+    case EditorCommand::NodeTogglePhysicsShapeEnabled:
     case EditorCommand::NodeToggleMeshVisible:
     case EditorCommand::NodeAssignSprite: {
         bool published = false;

@@ -68,6 +68,42 @@ struct World2DAnimatedSpriteNodeProperties final {
     std::optional<bool> autoPlay{};
 };
 
+struct World2DPhysicsBodyNodeProperties final {
+    std::optional<float> linearVelocityX{};
+    std::optional<float> linearVelocityY{};
+    std::optional<float> angularVelocityRadiansPerSecond{};
+    std::optional<float> linearDamping{};
+    std::optional<float> angularDamping{};
+    std::optional<float> gravityScale{};
+    std::optional<bool> enabled{};
+    std::optional<bool> enableSleep{};
+    std::optional<bool> initiallyAwake{};
+    std::optional<bool> fixedRotation{};
+    std::optional<bool> continuousCollision{};
+};
+
+struct World2DPhysicsShapeNodeProperties final {
+    std::optional<AssetFormat::World2DPhysicsShapeKind> kind{};
+    std::optional<float> halfExtentX{};
+    std::optional<float> halfExtentY{};
+    std::optional<float> radius{};
+    std::optional<float> localCenterX{};
+    std::optional<float> localCenterY{};
+    std::optional<float> localAngleRadians{};
+    std::optional<float> localPointAX{};
+    std::optional<float> localPointAY{};
+    std::optional<float> localPointBX{};
+    std::optional<float> localPointBY{};
+    std::optional<float> density{};
+    std::optional<float> friction{};
+    std::optional<float> restitution{};
+    std::optional<bool> enabled{};
+    std::optional<bool> sensor{};
+    std::optional<bool> sensorEvents{};
+    std::optional<bool> contactEvents{};
+    std::optional<bool> hitEvents{};
+};
+
 struct World3DMeshNodeProperties final {
     std::optional<Core::AssetId> meshId{};
     std::optional<Core::AssetId> materialId{};
@@ -103,6 +139,18 @@ applyWorld2DAnimatedSpriteNodeProperties(
     World2DAuthoringDocument& document,
     std::span<const Core::u32> stableEntityIds,
     const World2DAnimatedSpriteNodeProperties& properties);
+
+[[nodiscard]] Core::Result<EditorSceneOperationResult>
+applyWorld2DPhysicsBodyNodeProperties(
+    World2DAuthoringDocument& document,
+    std::span<const Core::u32> stableEntityIds,
+    const World2DPhysicsBodyNodeProperties& properties);
+
+[[nodiscard]] Core::Result<EditorSceneOperationResult>
+applyWorld2DPhysicsShapeNodeProperties(
+    World2DAuthoringDocument& document,
+    std::span<const Core::u32> stableEntityIds,
+    const World2DPhysicsShapeNodeProperties& properties);
 
 [[nodiscard]] Core::Result<EditorSceneOperationResult>
 applyWorld3DMeshNodeProperties(

@@ -16,12 +16,13 @@
   Tileset 缺失或没有 tile 时 Paint 保持禁用。未引入新的 Tileset schema，也未把 palette 选择写成 document revision。
 - **E2 设置载体**：Editor 私有 UTF-8 文本 settings，Windows 写 `%APPDATA%/TinaEditor/settings`，Linux 依次使用
   `XDG_CONFIG_HOME`、`$HOME/.config`；schema version=2、固定 10 条 Recent capacity、原子 sibling replace，读取失败回默认值。
-  当前持久化布局 fraction/可见性、底部面板、悬浮 Layout Debugger 可见性、snap enabled；主题仍沿用现有 Dark/Compact 默认，Preferences UI 留待后续切片。
+  当前持久化布局 fraction/可见性、底部面板、悬浮 Layout Debugger 可见性与 snap enabled；snap 的 translation/rotation/scale 步长仍使用 gizmo 默认值，尚未进入 settings schema；主题仍沿用现有 Dark/Compact 默认，Preferences UI 留待后续切片。
 - **E3 Recent Projects**：成功 project Catalog switch（覆盖 New/Open/Temporary Save As 的统一提交点）记录 canonical project root，
   最近优先、同路径去重、最多 10 条；Start Center 使用固定行按钮，File 菜单提供 `Open Recent` 子菜单，失效路径会从列表移除并报告错误。
 
-统一验证已完成：`tina_editor_tests` 112/112、`tina_editor_app_tests` 23/23，`tina_sample_2d --frames=300`
-与 `tina_sample_3d --frames=30` 均以 `status=ok` 退出。剩余证据是人工交互验收，不新增自动测试。
+本次定向验证已完成：`tina_editor_tests` 116/116、`tina_editor_app_tests` 23/23；此前的
+`tina_sample_2d --frames=300` 与 `tina_sample_3d --frames=30` `status=ok` 仅作为既有历史证据，未因本切片重跑。
+剩余证据是人工交互验收，不新增自动测试。
 
 ## 1. 现状小结（2026-08-24 源码核验）
 
@@ -38,9 +39,9 @@ Project New/Open/live Catalog switch、Timeline 动画与 event marker、Output/
 | TileMap 画刷没有 tile 选择：`selectedTileId_` 按 `localId % 4 + 1` 循环，无 tileset 调色板 | `EditorWorkspaceTileMap.cpp` |
 | 场景节点无 Copy/Paste，只有 Duplicate；跨文档/跨会话复制不可用 | `EditorWorkspaceCommands.cpp` |
 | Copy AssetId / Copy Source Path / Locate Source 因“无平台 clipboard/shell adapter”显式禁用 | `EditorWorkspaceCommands.cpp` |
-| Start Center 的 Recent Projects 是写死的“No recent projects”占位，无持久化 | `EditorWorkspaceUiBuild.cpp` |
-| 无任何编辑器设置持久化：主题写死 Dark/Compact，snap 步长为固定常量，布局比例不跨会话保存 | `EditorWorkspaceUiBuild.cpp` / grep 无 settings 文件路径 |
-| Node registry 只有渲染/相机/灯光/遮挡类节点，无 Physics、Audio、FX、Text 类 authoring 入口 | `world2DNodeTemplateRegistry()`；`src/editor` 内 Physics/Audio 零引用 |
+| Recent Projects 已接入 versioned settings、统一 Catalog switch 提交点和 Start Center/File 菜单；仍待跨重启人工验收 | `EditorWorkspaceState.hpp` / `EditorWorkspaceUiBuild.cpp` |
+| Editor settings 已持久化布局/可见性、Bottom Panel、Layout Debugger、snap enabled 与 Recent Projects；snap 三类步长和 Preferences UI 仍未落地 | `EditorWorkspaceState.hpp` / `EditorWorkspaceUiBuild.cpp` |
+| Node registry 已覆盖渲染/相机/灯光/遮挡、Physics、Audio、FX 类节点；Text authoring 入口仍缺失 | `world2DNodeTemplateRegistry()`；`EditorNodePropertyOperations` 已接入 Physics body/shape Inspector |
 | `Fx2DAuthoringDocument` 公共 API 已存在，但 EditorApp 无可见 FX 面板或消费入口 | [editor-2d.md](editor-2d.md) 已明示 |
 | 2D 无 Prefab 工作流：不能从选择创建 Prefab，也不能在 World2D 内实例化 Prefab | Node registry / scene operations |
 | viewport 画布无右键上下文菜单（Hierarchy 已有） | grep `viewportContextMenu` 无实现 |
@@ -59,7 +60,7 @@ runtime 能力的 authoring 面；P2 = 成熟编辑器的体验补强，可在 P
 | P0 | E3 Recent Projects | Start Center 已留位，开箱体验最直接的补强 | E2 的持久化载体 |
 | P1 | E4 平台 clipboard/shell adapter | 解锁三个已存在但禁用的命令 + 节点 Copy/Paste | Platform 窄能力 SPI |
 | P1 | E5 场景节点 Copy/Paste | 补齐 Duplicate 之外的基本编辑动作 | E4（跨进程可选，进程内可先行） |
-| P1 | E6 Physics2D authoring 节点 | Runtime 能力齐全，Editor 完全没有入口 | World2D schema 扩展（破坏式 bump） |
+| P1 | E6 Physics2D authoring 节点 | 首个 Physics Body/Collision Shape Inspector 属性组已落地；继续补齐完整物理 authoring | World2D current schema 与 `EditorNodePropertyOperations` |
 | P1 | E7 FX2D 面板 | 公共 document API 已就绪，只缺 EditorApp 消费面 | `Fx2DAuthoringDocument` |
 | P1 | E8 2D Prefab 工作流 | 复用是关卡生产的核心动作 | World2D schema / 新 Prefab2D 资产决策 |
 | P2 | E9 自动保存与恢复 | dirty 内容不再随崩溃丢失 | E2 的持久化目录约定 |
@@ -162,23 +163,15 @@ settings 写入失败只出 Snackbar warning，不影响 authoring。
 
 ### E6 Physics2D authoring 节点（P1）
 
-**问题**：Runtime Physics2D 已覆盖 Box/Circle/Capsule/ConvexPolygon/Chain 与三类 joint，
-TileMap 也有 collision 派生，但 World2D authoring 完全没有物理形状的表达；游戏侧只能靠
-gameplay blob 或 TileMap 碰撞，无法在场景里摆一个碰撞体。
+**状态**：首个 Inspector 属性切片已落地；完整物理 authoring（关节、Polygon/Chain 形状、viewport outline 与 gizmo 尺寸联动）仍是后续工作。
 
-**提案范围**：
+**已落地范围**：
 
-- World2D schema 破坏式 bump：为 entity record 增加可选 Physics payload（body type +
-  shape kind + 尺寸参数 + sensor flag），沿用“分类精确映射一个 Node kind、混合 payload
-  fail-closed”的现行规则。
-- Node registry 新增 `StaticBody2D` / `RigidBody2D`（含 shape 参数）或首切片只做
-  `CollisionShape2D`（static-only），由维护者定夺范围；Inspector 按 kind 发布 Physics 区段。
-- Viewport 以既有 Line 原语绘制 shape outline（选中高亮），gizmo 缩放联动 shape 尺寸。
-- 游戏消费路径与 TileMap gameplay 一致：instantiate 时由 game-owned 逻辑创建真实 Physics body，
-  Editor 不直接持有 `PhysicsWorld2D`。
+- World2D current schema 已包含 Physics body/shape payload，Node registry 提供 `StaticBody2D`、`RigidBody2D`、`CharacterBody2D`、`Area2D` 与 `CollisionShape2D`。
+- Inspector 按 Node kind 发布 Physics Body 与 Collision Shape 分组，可编辑速度、阻尼、重力倍率、Enabled，以及 Box/Circle/Capsule 的尺寸、密度、摩擦和恢复系数；多选显示 `Mixed`，一次 Apply 最多发布一条 `replace()` revision。
+- `EditorNodePropertyOperations` 对类型不匹配、非法/非有限值和不适用的形状参数 fail-closed；Undo/dirty 继续复用现有 document revision 流程。Runtime Physics2D 仍由 game-owned instantiate 路径消费，Editor 不直接持有 `PhysicsWorld2D`。
 
-**边界**：不做关节 authoring、不做物理模拟预览（PlaySession 仍是渲染 preview）；旧 schema 拒绝，
-一次性同步 cooker/runtime/测试/文档。这是本清单里改动面最大的一项，建议独立 ADR。
+**后续范围**：不做关节 authoring、不做物理模拟预览（PlaySession 仍是渲染 preview）；Polygon/Chain、sensor/events、local center/angle 与 viewport outline 待独立切片，并在对应 schema/runtime/测试闭环后更新证据。
 
 ### E7 FX2D 面板（P1）
 
