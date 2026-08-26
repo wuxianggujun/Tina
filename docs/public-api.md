@@ -185,6 +185,25 @@ RenderScene/DisplayList 上限显式降低，非法值在 EngineConfig 和 bgfx 
 `EngineConfig::renderMsaaSamples`（`0` 默认关闭，或 `2/4/8/16`）在启动时选择 backbuffer MSAA 采样数，
 非法值 fail closed；它是 device-lifetime 配置，不支持热改。像素证据 gate、samples 与 Editor 保持 `0`。
 
+`EngineConfig::renderVsync`（默认 `true`）是唯一**可以**热改的 render 设置，因为面向玩家的画面选项不应
+要求重启。它只用于给设备播种；运行时通过 `FrameUpdateContext::displaySettings()` 拿到 `DisplaySettings`
+句柄修改：
+
+```cpp
+Core::Status updateFrame(FrameUpdateContext& context) override {
+    if (settingsMenu_.vsyncJustToggled()) {
+        context.displaySettings().setVsyncEnabled(settingsMenu_.vsyncEnabled());
+    }
+    return Core::success();
+}
+```
+
+`DisplaySettings` 是 phase-local 借用句柄，不得跨帧保存，并且和 Action rebinding 一样是 **top-state
+权限** —— 非栈顶 State 拿到空句柄，`setVsyncEnabled` 静默无效，`hasValue()` 返回 `false`。它刻意只暴露
+玩家可改的选项而不是 `IRenderDevice` 本身，所以 backend 生命周期与资源 API 不进入 GameState 视野。
+`vsyncEnabled()` 报告的是**已请求**状态；backend 最迟在下一次 `present()` 应用，不保证在请求当帧生效。
+设备重建后该值会从 `RenderDeviceCreateParams::vsync` 重新播种，不会自动保留。
+
 ## `IGameApplication` 与 `IGameState`
 
 当前 Application 接口：

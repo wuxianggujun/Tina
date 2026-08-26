@@ -230,7 +230,9 @@ constexpr bgfx::ViewId kSprite2DView = 14;
 constexpr bgfx::ViewId kUIView = 15;
 // Must remain after every view that can reference a retireable resource.
 constexpr bgfx::ViewId kRetirementMarkerView = 16;
-constexpr u32 kDefaultResetFlags = BGFX_RESET_VSYNC;
+// Reset flags that are fixed for the device lifetime. Vsync and MSAA are OR'd
+// in separately: MSAA at creation, vsync whenever setVsyncEnabled changes it.
+constexpr u32 kDefaultResetFlags = BGFX_RESET_NONE;
 constexpr u32 kClearRgba = 0x102a43ff;
 constexpr usize kIndicesPerSolidQuad = 6;
 #if defined(BGFX_CONFIG_MAX_DRAW_CALLS)
@@ -1754,6 +1756,15 @@ class BgfxRenderDevice final : public IRenderDevice {
         if (framePlan->resetBackbuffer)
         {
             resetBackbuffer(framePlan->targetExtent);
+            resetFlagsDirty_ = false;
+        }
+        else if (resetFlagsDirty_)
+        {
+            // A vsync toggle changes no geometry, so the surface frame planner
+            // never asks for a reset. Re-apply the current extent so the new
+            // flags reach the driver instead of waiting for the next resize.
+            resetBackbuffer(appliedBackbuffer_);
+            resetFlagsDirty_ = false;
         }
 
         submitPrimaryFrame(committedSurfaceState_, frame.primaryWorldScene, frame.resources, preparedOpaque3D,
@@ -1794,6 +1805,33 @@ class BgfxRenderDevice final : public IRenderDevice {
             std::terminate();
         }
         return statistics_;
+    }
+
+    void setVsyncEnabled(bool enabled) noexcept override
+    {
+        if (std::this_thread::get_id() != ownerThread_)
+        {
+            std::terminate();
+        }
+        const u32 next = enabled ? (resetFlags_ | BGFX_RESET_VSYNC)
+                                 : (resetFlags_ & ~u32{BGFX_RESET_VSYNC});
+        if (next == resetFlags_)
+        {
+            return;
+        }
+        resetFlags_ = next;
+        // Deferred to the next submitted frame: bgfx::reset must not run between
+        // a submitFrame and its present().
+        resetFlagsDirty_ = true;
+    }
+
+    [[nodiscard]] bool vsyncEnabled() const noexcept override
+    {
+        if (std::this_thread::get_id() != ownerThread_)
+        {
+            std::terminate();
+        }
+        return (resetFlags_ & BGFX_RESET_VSYNC) != 0U;
     }
 
     [[nodiscard]] Core::Status drainGpuRetirements() noexcept override
@@ -4964,6 +5002,9 @@ class BgfxRenderDevice final : public IRenderDevice {
     ShadowMapExtentConfig shadowMapExtents_{};
     u32 drawCallCapacity_ = RenderDeviceCreateParams::DefaultDrawCallCapacity;
     u32 resetFlags_ = kDefaultResetFlags;
+    // Set when resetFlags_ changed without a geometry change, so the next
+    // submitted frame re-applies them at the current extent.
+    bool resetFlagsDirty_ = false;
     RenderSurfaceExtent appliedBackbuffer_ = BgfxSurfaceFramePlanner::BootstrapBackbufferExtent;
     RenderStatistics statistics_{};
     u64 nextFrameIndex_ = 0;
@@ -5159,6 +5200,10 @@ Core::Result<std::unique_ptr<IRenderDevice>> createBgfxRenderDevice(const Render
     default:
         return Core::failure(RenderErrorCode::InvalidSurfaceState,
                              "The bgfx render device MSAA sample count must be 0, 2, 4, 8, or 16");
+    }
+    if (params.vsync)
+    {
+        resetFlags |= BGFX_RESET_VSYNC;
     }
     if (!params.initialPrimaryWindowSurface.has_value())
     {

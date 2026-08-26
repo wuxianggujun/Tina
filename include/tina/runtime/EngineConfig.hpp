@@ -42,6 +42,10 @@ struct EngineConfig final {
     // Backbuffer MSAA sample count (0 = off, 2/4/8/16). Pixel-evidence gates
     // and samples keep the 0 default; interactive tools may opt in.
     Core::u8 renderMsaaSamples = 0;
+    // Initial vertical sync. This seeds the device only; a game exposing vsync
+    // as a display option changes it at runtime through
+    // IRenderDevice::setVsyncEnabled rather than by editing this config.
+    bool renderVsync = true;
     InputActionMapConfig inputActions;
     PlatformEventSubscriptionConfig platformEventSubscriptions{};
     Core::FixedStepConfig fixedSimulation;

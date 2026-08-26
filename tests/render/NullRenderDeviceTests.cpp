@@ -225,6 +225,30 @@ TEST(NullRenderDeviceTest, RejectsInvalidShadowMapExtentConfiguration)
               Render::RenderErrorCode::InvalidShadowMapExtentConfig);
 }
 
+TEST(NullRenderDeviceTest, SeedsVsyncFromCreateParamsAndAcceptsRuntimeChanges)
+{
+    Render::RenderDeviceCreateParams params{};
+    ASSERT_TRUE(params.vsync) << "vsync must default on so pixel-evidence gates are unchanged";
+
+    auto enabled = Render::createNullRenderDevice(params);
+    ASSERT_TRUE(enabled.has_value()) << enabled.error().message;
+    EXPECT_TRUE((*enabled)->vsyncEnabled());
+
+    // Unlike the capacity and MSAA knobs, vsync is mutable after creation.
+    (*enabled)->setVsyncEnabled(false);
+    EXPECT_FALSE((*enabled)->vsyncEnabled());
+    (*enabled)->setVsyncEnabled(false);
+    EXPECT_FALSE((*enabled)->vsyncEnabled()) << "redundant disable must be idempotent";
+    (*enabled)->setVsyncEnabled(true);
+    EXPECT_TRUE((*enabled)->vsyncEnabled());
+
+    params.vsync = false;
+    auto disabled = Render::createNullRenderDevice(params);
+    ASSERT_TRUE(disabled.has_value()) << disabled.error().message;
+    EXPECT_FALSE((*disabled)->vsyncEnabled())
+        << "the initial state must come from RenderDeviceCreateParams, not a hardcoded default";
+}
+
 TEST(NullRenderDeviceTest, RejectsStructurallyInvalidInitialWindowSurface)
 {
     const auto expectRejected = [](const Render::RenderSurfaceState& surface) {

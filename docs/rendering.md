@@ -133,6 +133,14 @@ EngineHost 在创建任何 module factory 前 fail closed，Null/bgfx 直接 fac
 `BGFX_RESET_MSAA_X*` flag，由 init 与 resize reset 共用。samples 与所有像素证据 gate 保持 `0`
 以免破坏已冻结的视觉金标；`TinaEditor` 同样使用默认 `0`，不为整个 authoring backbuffer 常驻多采样资源。
 
+垂直同步是**唯一可热改**的设备设置：`IRenderDevice::setVsyncEnabled()` / `vsyncEnabled()` 带默认实现
+（默认报告开启并吸收写入），所以既有 backend 与测试替身无需改动。`EngineConfig::renderVsync`（默认
+`true`）负责播种，`BGFX_RESET_VSYNC` 不再硬编码进 `kDefaultResetFlags`，而是按当前状态 OR 进
+`resetFlags_`。因为 vsync 切换不改变任何几何，surface frame planner 不会请求 reset，所以 backend 用一个
+dirty flag 在下一个已提交帧以当前 extent 重新 `bgfx::reset`；planner 保持纯几何职责不变。切换被推迟到
+提交帧而非立即执行，是因为 `bgfx::reset` 不能在 `submitFrame` 与其 `present()` 之间运行。null device 会
+记录请求状态，使 headless 工具与真实 backend 报告一致。默认保持开启，因此像素证据 gate 不受影响。
+
 Sprite2D lighting（`2D-LIGHT-N5`）只使用 frame-scoped `Sprite2DLightingDesc`：0..8个 committed world-space point
 light、0..32个 world-space shadow segment、正 influence radius、0..influence radius 的 source radius、
 非负 RGB 与 ambient；shadow endpoint 必须 finite，

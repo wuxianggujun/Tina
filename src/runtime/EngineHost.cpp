@@ -1005,10 +1005,15 @@ class EngineHostImplementation final {
                     const FrameActionSnapshot& actionsForState =
                         suppressGameplay ? suppressedFrameActions : frameActions;
                     // Top alone may queue push/pop/replace; below never gets pendingCommands.
+                    // Display settings, like Action rebinding, are a top-state
+                    // authority: a paused menu below the top must not retune the
+                    // device out from under whatever is running above it.
                     FrameUpdateContext ctx{frameTiming, actionsForState, exitAfterFrame,
                                            depthFromTop == 0 ? &m_pendingCommands : nullptr,
                                            m_modules.audioEnginePtr(),
-                                           depthFromTop == 0 ? m_actionMapper.get() : nullptr};
+                                           depthFromTop == 0 ? m_actionMapper.get() : nullptr,
+                                           depthFromTop == 0 ? m_modules.renderDevice.get()
+                                                             : nullptr};
                     return invokeResultBoundary("IGameState::updateFrame",
                                                 RuntimeErrorCode::GameCallbackThrewException,
                                                 [&] { return state.updateFrame(ctx); });
@@ -1904,6 +1909,7 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
                 .shadowMapExtents = ownedConfig.shadowMapExtents,
                 .drawCallCapacity = ownedConfig.renderDrawCallCapacity,
                 .msaaSamples = ownedConfig.renderMsaaSamples,
+                .vsync = ownedConfig.renderVsync,
             };
             auto renderResult = invokeResultBoundary("IndependentPlatformRenderFactories::createRenderDevice",
                                                      RuntimeErrorCode::EngineFactoryThrewException,
@@ -1969,6 +1975,7 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
                 .shadowMapExtents = ownedConfig.shadowMapExtents,
                 .drawCallCapacity = ownedConfig.renderDrawCallCapacity,
                 .msaaSamples = ownedConfig.renderMsaaSamples,
+                .vsync = ownedConfig.renderVsync,
             };
             auto renderResult = invokeResultBoundary(
                 "WindowSurfacePlatformRenderFactories::createWindowSurfaceRenderDevice",

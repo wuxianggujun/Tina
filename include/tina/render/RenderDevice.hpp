@@ -40,6 +40,9 @@ struct RenderDeviceCreateParams final {
     // Backbuffer multisampling: 0 disables MSAA; 2/4/8/16 request that sample
     // count. Anything else fails device creation. Pixel-evidence gates keep 0.
     u8 msaaSamples = 0;
+    // Initial vertical-sync state. Unlike the capacity and MSAA knobs above,
+    // this one is not device-lifetime: see IRenderDevice::setVsyncEnabled.
+    bool vsync = true;
 };
 
 struct RenderStatistics final {
@@ -259,6 +262,22 @@ class IRenderDevice {
     [[nodiscard]] virtual Core::Status present() = 0;
     [[nodiscard]] virtual RenderStatistics statistics() const noexcept = 0;
     virtual void shutdown() noexcept = 0;
+
+    // Vertical sync is the one device setting that may change after creation,
+    // because a player-facing display option must not require a restart. The
+    // backend applies it no later than the next present(); it is not required to
+    // take effect within the frame that requested it. Devices that cannot
+    // present (null/headless) accept and record the request. Callers must not
+    // assume the value survives a device recreate: it is re-seeded from
+    // RenderDeviceCreateParams::vsync.
+    virtual void setVsyncEnabled(bool enabled) noexcept
+    {
+        static_cast<void>(enabled);
+    }
+    [[nodiscard]] virtual bool vsyncEnabled() const noexcept
+    {
+        return true;
+    }
 
     // Optional GPU texture path (M10-A23). Default implementations return Unsupported.
     // Null records logical textures; bgfx creates real GPU textures.

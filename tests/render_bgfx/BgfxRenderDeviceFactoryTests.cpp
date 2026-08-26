@@ -152,5 +152,41 @@ TEST(BgfxRenderDeviceFactoryTest, OversizedInitialViewReleasesTheConsumedLease)
     EXPECT_EQ(control->activeLeaseCount, 0U);
 }
 
+TEST(BgfxRenderDeviceFactoryTest, VsyncDefaultsOnAndIRenderDeviceProvidesADefaultImplementation)
+{
+    // A real bgfx device needs a window, so the backend toggle itself is covered
+    // by the null device and by running the Editor. What must hold here is that
+    // the create param defaults to on, so adding it cannot silently change the
+    // pixel-evidence gates.
+    const RenderDeviceCreateParams params{};
+    EXPECT_TRUE(params.vsync);
+
+    // Devices predating the setting inherit a default implementation rather than
+    // failing to compile. The default reports vsync on and ignores writes.
+    class LegacyDevice final : public IRenderDevice {
+      public:
+        [[nodiscard]] Core::Result<RenderFrameSubmission> submitFrame(const RenderFrame& frame) override
+        {
+            static_cast<void>(frame);
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed, "not used");
+        }
+        [[nodiscard]] Core::Status present() override
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed, "not used");
+        }
+        [[nodiscard]] RenderStatistics statistics() const noexcept override
+        {
+            return {};
+        }
+        void shutdown() noexcept override {}
+    };
+
+    LegacyDevice legacy;
+    EXPECT_TRUE(legacy.vsyncEnabled());
+    legacy.setVsyncEnabled(false);
+    EXPECT_TRUE(legacy.vsyncEnabled())
+        << "the default implementation must absorb the request, not pretend it applied";
+}
+
 } // namespace
 } // namespace Tina::Render::Bgfx

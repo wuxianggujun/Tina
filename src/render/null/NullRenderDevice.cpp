@@ -243,8 +243,8 @@ namespace {
 
 class NullRenderDevice final : public IRenderDevice {
   public:
-    explicit NullRenderDevice(Detail::RenderSurfaceStateTracker surfaceStateTracker) noexcept
-        : surfaceStateTracker_(std::move(surfaceStateTracker))
+    NullRenderDevice(Detail::RenderSurfaceStateTracker surfaceStateTracker, bool vsync) noexcept
+        : surfaceStateTracker_(std::move(surfaceStateTracker)), vsyncEnabled_(vsync)
     {
     }
 
@@ -349,6 +349,18 @@ class NullRenderDevice final : public IRenderDevice {
     [[nodiscard]] RenderStatistics statistics() const noexcept override
     {
         return statistics_;
+    }
+
+    // Nothing to present, but the request is recorded so headless tests and
+    // tools can witness the same state a real backend would report.
+    void setVsyncEnabled(bool enabled) noexcept override
+    {
+        vsyncEnabled_ = enabled;
+    }
+
+    [[nodiscard]] bool vsyncEnabled() const noexcept override
+    {
+        return vsyncEnabled_;
     }
 
     [[nodiscard]] Core::Result<GpuTextureId> createTexture2DRgba8(const Texture2DUploadDesc& desc) override
@@ -1238,6 +1250,7 @@ class NullRenderDevice final : public IRenderDevice {
     u64 nextSubmissionIndex_ = 0;
     bool frameOpen_ = false;
     bool stopped_ = false;
+    bool vsyncEnabled_ = true;
 };
 
 } // namespace
@@ -1254,7 +1267,8 @@ Core::Result<std::unique_ptr<IRenderDevice>> createNullRenderDevice(const Render
         return Core::failure(std::move(surfaceStateTracker.error()));
     }
 
-    std::unique_ptr<IRenderDevice> renderDevice = std::make_unique<NullRenderDevice>(std::move(*surfaceStateTracker));
+    std::unique_ptr<IRenderDevice> renderDevice =
+        std::make_unique<NullRenderDevice>(std::move(*surfaceStateTracker), params.vsync);
     return renderDevice;
 }
 

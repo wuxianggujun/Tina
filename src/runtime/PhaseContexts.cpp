@@ -126,12 +126,14 @@ Audio::AudioEngine* FixedUpdateContext::audioEngine() const noexcept
 FrameUpdateContext::FrameUpdateContext(const FrameTiming& frameTiming, const FrameActionSnapshot& frameActions,
                                        bool& exitRequested, GameStatePendingCommands* pendingCommands,
                                        Audio::AudioEngine* audioEngine,
-                                       Runtime::Input::ActionMapper* actionMapper) noexcept
+                                       Runtime::Input::ActionMapper* actionMapper,
+                                       Render::IRenderDevice* renderDevice) noexcept
     : m_frameTiming(&frameTiming),
       m_frameActions(&frameActions),
       m_exitRequested(&exitRequested),
       m_pendingCommands(pendingCommands),
       m_audioEngine(audioEngine),
+      m_renderDevice(renderDevice),
       m_inputActionRebinding(actionMapper),
       m_rebindingAvailable(actionMapper != nullptr)
 {
@@ -150,6 +152,11 @@ const FrameTiming& FrameUpdateContext::frameTiming() const noexcept
 Audio::AudioEngine* FrameUpdateContext::audioEngine() const noexcept
 {
     return m_audioEngine;
+}
+
+DisplaySettings FrameUpdateContext::displaySettings() const noexcept
+{
+    return DisplaySettings{m_renderDevice};
 }
 
 InputActionRebinding* FrameUpdateContext::inputActionRebinding() noexcept

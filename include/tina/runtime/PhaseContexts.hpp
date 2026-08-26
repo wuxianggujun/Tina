@@ -3,6 +3,7 @@
 #include <tina/audio/AudioEngine.hpp>
 #include <tina/core/error/Error.hpp>
 #include <tina/render/FrameResource.hpp>
+#include <tina/render/RenderDevice.hpp>
 #include <tina/render/RenderScene.hpp>
 #include <tina/runtime/EngineConfig.hpp>
 #include <tina/runtime/FrameTiming.hpp>
@@ -24,6 +25,48 @@ class EngineHostImplementation;
 }
 
 namespace Tina {
+
+class FrameUpdateContext;
+
+// Phase-local handle for player-facing display options. It deliberately exposes
+// only the settings a game menu may change at runtime, not the RenderDevice
+// itself, so backend lifecycle and resource APIs stay out of GameState reach.
+// Copyable and cheap; never outlive the phase that handed it out.
+class DisplaySettings final {
+  public:
+    constexpr DisplaySettings() noexcept = default;
+
+    [[nodiscard]] constexpr bool hasValue() const noexcept
+    {
+        return m_device != nullptr;
+    }
+
+    // No-op when the device is absent. The backend applies the change no later
+    // than the next present(), so a toggle is not guaranteed to affect the frame
+    // that requested it.
+    void setVsyncEnabled(bool enabled) const noexcept
+    {
+        if (m_device != nullptr)
+        {
+            m_device->setVsyncEnabled(enabled);
+        }
+    }
+
+    // Reports the requested state, which the backend may not have applied yet.
+    // Defaults to true when no device is present.
+    [[nodiscard]] bool vsyncEnabled() const noexcept
+    {
+        return m_device == nullptr || m_device->vsyncEnabled();
+    }
+
+  private:
+    friend class Detail::EngineHostImplementation;
+    friend class FrameUpdateContext;
+
+    explicit constexpr DisplaySettings(Render::IRenderDevice* device) noexcept : m_device(device) {}
+
+    Render::IRenderDevice* m_device = nullptr;
+};
 
 class GameStartupContext final {
   public:
@@ -113,6 +156,8 @@ class FrameUpdateContext final {
     // Phase-local top-state authority for transactional Action rebinding. Lower
     // GameStates receive null and cannot mutate the global binding map.
     [[nodiscard]] InputActionRebinding* inputActionRebinding() noexcept;
+    // Player-facing display options. Empty when no render device is present.
+    [[nodiscard]] DisplaySettings displaySettings() const noexcept;
     void requestExitAfterFrame() noexcept;
 
     // Deferred stack commands (ADR 0014). Commit is EngineHost-only after updateFrame.
@@ -124,13 +169,15 @@ class FrameUpdateContext final {
   private:
     FrameUpdateContext(const FrameTiming& frameTiming, const FrameActionSnapshot& frameActions,
                        bool& exitRequested, GameStatePendingCommands* pendingCommands,
-                       Audio::AudioEngine* audioEngine, Runtime::Input::ActionMapper* actionMapper) noexcept;
+                       Audio::AudioEngine* audioEngine, Runtime::Input::ActionMapper* actionMapper,
+                       Render::IRenderDevice* renderDevice) noexcept;
 
     const FrameTiming* m_frameTiming = nullptr;
     const FrameActionSnapshot* m_frameActions = nullptr;
     bool* m_exitRequested = nullptr;
     GameStatePendingCommands* m_pendingCommands = nullptr;
     Audio::AudioEngine* m_audioEngine = nullptr;
+    Render::IRenderDevice* m_renderDevice = nullptr;
     InputActionRebinding m_inputActionRebinding;
     bool m_rebindingAvailable = false;
 
