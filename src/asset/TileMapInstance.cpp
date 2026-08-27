@@ -19,14 +19,17 @@ namespace {
 
 TileMapInstance::TileMapInstance(Core::u32 width, Core::u32 height, float cellSize, Core::u16 chunkSize,
                                  Core::AssetId tileMapAssetId, Core::AssetId tilesetAssetId,
-                                 std::pmr::vector<std::byte> payloadBytes, std::pmr::vector<TileDef> tileDefs,
+                                 std::pmr::vector<std::byte> payloadBytes,
+                                 std::pmr::vector<AssetFormat::TileMapLayerPayloadView> layers,
+                                 std::pmr::vector<TileDef> tileDefs,
                                  std::pmr::vector<ResidentChunk> residentChunks,
                                  Core::usize residentCapacity) noexcept
     : m_width(width), m_height(height), m_cellSizeMeters(cellSize), m_chunkSize(chunkSize),
       m_chunkCountX(ceilDiv(width, chunkSize)), m_chunkCountY(ceilDiv(height, chunkSize)),
       m_tileMapAssetId(tileMapAssetId), m_tilesetAssetId(tilesetAssetId),
-      m_payloadBytes(std::move(payloadBytes)), m_tileDefs(std::move(tileDefs)),
-      m_residentChunks(std::move(residentChunks)), m_residentCapacity(residentCapacity)
+      m_payloadBytes(std::move(payloadBytes)), m_layers(std::move(layers)),
+      m_tileDefs(std::move(tileDefs)), m_residentChunks(std::move(residentChunks)),
+      m_residentCapacity(residentCapacity)
 {
 }
 
@@ -99,12 +102,36 @@ Core::Result<TileMapInstance> TileMapInstance::Create(const AssetFormat::TileMap
 
         std::pmr::vector<std::byte> payloadBytes{config.memoryResource};
         payloadBytes.assign(parsedMap->payloadBytes.begin(), parsedMap->payloadBytes.end());
+
+        // Re-parse the owned copy so every cached layer view borrows the bytes the
+        // instance keeps, never the caller's. Parsing once here is what lets
+        // layer() -- and therefore every per-cell lookup -- avoid re-validating the
+        // whole payload, which is quadratic in chunk refs and objects.
+        auto ownedMap = AssetFormat::parseTileMapPayload(
+            std::span<const std::byte>{payloadBytes.data(), payloadBytes.size()});
+        if (!ownedMap)
+        {
+            return Core::failure(std::move(ownedMap.error()));
+        }
+        std::pmr::vector<AssetFormat::TileMapLayerPayloadView> layers{config.memoryResource};
+        layers.reserve(ownedMap->layerCount);
+        for (Core::u16 index = 0; index < ownedMap->layerCount; ++index)
+        {
+            const auto view = ownedMap->layerAt(index);
+            if (!view.has_value())
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "tilemap layer disappeared after validation");
+            }
+            layers.push_back(*view);
+        }
+
         std::pmr::vector<ResidentChunk> residentChunks{config.memoryResource};
         residentChunks.reserve(config.residentChunkCapacity);
         return TileMapInstance(parsedMap->widthCells, parsedMap->heightCells, parsedMap->cellSizeMeters,
                                parsedMap->chunkSizeCells, tileMapAssetId, tilesetAssetId,
-                               std::move(payloadBytes), std::move(defs), std::move(residentChunks),
-                               config.residentChunkCapacity);
+                               std::move(payloadBytes), std::move(layers), std::move(defs),
+                               std::move(residentChunks), config.residentChunkCapacity);
     }
     catch (const std::bad_alloc&)
     {
@@ -124,18 +151,17 @@ TileMapInstance::layer(AssetFormat::TileMapLayerId layerId) const
     {
         return Core::failure(AssetErrorCode::TileMapLayerNotFound, "tilemap layer id is invalid");
     }
-    auto parsed = AssetFormat::parseTileMapPayload(
-        std::span<const std::byte>{m_payloadBytes.data(), m_payloadBytes.size()});
-    if (!parsed)
+    // Layer ids are unique (the parser rejects duplicates) and a map authors at most
+    // MaxLayers of them, so a linear scan of the cached table replaces a full
+    // payload re-validation.
+    for (const AssetFormat::TileMapLayerPayloadView& candidate : m_layers)
     {
-        return Core::failure(std::move(parsed.error()));
+        if (candidate.stableLayerId == layerId)
+        {
+            return candidate;
+        }
     }
-    const auto selected = parsed->findLayer(layerId);
-    if (!selected)
-    {
-        return Core::failure(AssetErrorCode::TileMapLayerNotFound, "tilemap layer id was not found");
-    }
-    return *selected;
+    return Core::failure(AssetErrorCode::TileMapLayerNotFound, "tilemap layer id was not found");
 }
 
 Core::Result<AssetFormat::TileMapLayerPayloadView>

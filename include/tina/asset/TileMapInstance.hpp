@@ -67,8 +67,15 @@ class TileMapInstance final {
 
     TileMapInstance(const TileMapInstance&) = delete;
     TileMapInstance& operator=(const TileMapInstance&) = delete;
+    // Move construction transfers the payload buffer, so the cached layer views keep
+    // pointing at bytes this instance owns.
     TileMapInstance(TileMapInstance&&) noexcept = default;
-    TileMapInstance& operator=(TileMapInstance&&) noexcept = default;
+    // Move assignment is deleted: it would have to destroy the existing payload
+    // while the incoming layer views still borrowed the source buffer, and a pmr
+    // vector may reallocate rather than steal when allocators differ. TileMapStream
+    // has the same restriction for the same reason, and every caller constructs
+    // in place.
+    TileMapInstance& operator=(TileMapInstance&&) = delete;
 
     // Copies only root metadata/object layers and the Tileset lookup table.
     [[nodiscard]] static Core::Result<TileMapInstance>
@@ -116,6 +123,11 @@ class TileMapInstance final {
     // Returns a borrowed v3 root layer view. It remains valid until this instance
     // is moved or destroyed. Root metadata/chunk refs stay immutable; resident
     // mutable cells are observed through tileIdAt()/tileInfoAt().
+    //
+    // Resolved from a table built once at Create. The payload is immutable for the
+    // life of the instance, so re-validating it per lookup was pure cost: this is
+    // called once per cell by tileIdAt()/tileInfoAt(), and full payload validation
+    // is quadratic in chunk refs and objects.
     [[nodiscard]] Core::Result<AssetFormat::TileMapLayerPayloadView>
     layer(AssetFormat::TileMapLayerId layerId) const;
 
@@ -170,9 +182,13 @@ class TileMapInstance final {
         std::pmr::vector<Core::u16> cells{};
     };
 
+    // `layers` must already borrow `payloadBytes`, which this constructor takes
+    // ownership of. Create builds both together so the views cannot outlive them.
     TileMapInstance(Core::u32 width, Core::u32 height, float cellSize, Core::u16 chunkSize,
                     Core::AssetId tileMapAssetId, Core::AssetId tilesetAssetId,
-                    std::pmr::vector<std::byte> payloadBytes, std::pmr::vector<TileDef> tileDefs,
+                    std::pmr::vector<std::byte> payloadBytes,
+                    std::pmr::vector<AssetFormat::TileMapLayerPayloadView> layers,
+                    std::pmr::vector<TileDef> tileDefs,
                     std::pmr::vector<ResidentChunk> residentChunks, Core::usize residentCapacity) noexcept;
 
     [[nodiscard]] bool inBounds(Core::u32 x, Core::u32 y) const noexcept;
@@ -192,6 +208,9 @@ class TileMapInstance final {
     Core::AssetId m_tileMapAssetId{};
     Core::AssetId m_tilesetAssetId{};
     std::pmr::vector<std::byte> m_payloadBytes{};
+    // Layer views borrowed from m_payloadBytes, in authored order. Built once from
+    // the owned bytes, so they stay valid exactly as long as this instance does.
+    std::pmr::vector<AssetFormat::TileMapLayerPayloadView> m_layers{};
     // Indexed by localTileId; entry.valid when present in tileset.
     std::pmr::vector<TileDef> m_tileDefs{};
     std::pmr::vector<ResidentChunk> m_residentChunks{};
