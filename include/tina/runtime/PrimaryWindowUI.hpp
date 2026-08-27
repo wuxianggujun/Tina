@@ -181,6 +181,10 @@ class PrimaryWindowUITreeUpdater final {
     [[nodiscard]] Core::Result<UI::UIFocusScopeMode> focusScopeMode(UI::UINodeId node) const;
     [[nodiscard]] Core::Status requestFocus(UI::UINodeId node);
     [[nodiscard]] Core::Status clearFocus();
+    // Committed keyboard focus owned by this root, or an unset node when focus is
+    // elsewhere. Read-only, so products can commit an edit when focus leaves a
+    // field without the UI layer growing a per-widget change callback.
+    [[nodiscard]] Core::Result<UI::UINodeId> focusedNode() const;
     [[nodiscard]] Core::Status setStyleRole(UI::UINodeId node, UI::UIStyleRoleId role);
     [[nodiscard]] Core::Result<UI::UIStyleRoleId> styleRole(UI::UINodeId node) const;
     [[nodiscard]] Core::Result<UI::UIStraightSrgba8Color>

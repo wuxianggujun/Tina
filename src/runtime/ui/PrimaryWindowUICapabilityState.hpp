@@ -171,6 +171,8 @@ class PrimaryWindowUICapabilityState final {
     [[nodiscard]] Core::Status requestFocus(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                             UI::UINodeId node);
     [[nodiscard]] Core::Status clearFocus(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater);
+    [[nodiscard]] Core::Result<UI::UINodeId> focusedNode(u64 epoch, PrimaryWindowUIPhase phase,
+                                                        const UI::UITreeUpdater& updater);
     [[nodiscard]] Core::Status setStyleRole(u64 epoch, PrimaryWindowUIPhase phase, UI::UITreeUpdater& updater,
                                             UI::UINodeId node, UI::UIStyleRoleId role);
     [[nodiscard]] Core::Result<UI::UIStyleRoleId>

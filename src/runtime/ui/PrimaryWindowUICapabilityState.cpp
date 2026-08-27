@@ -1185,6 +1185,22 @@ Core::Status PrimaryWindowUICapabilityState::clearFocus(u64 epoch, PrimaryWindow
     return Core::success();
 }
 
+Core::Result<UI::UINodeId> PrimaryWindowUICapabilityState::focusedNode(u64 epoch, PrimaryWindowUIPhase phase,
+                                                                      const UI::UITreeUpdater& updater)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUITreeUpdater::focusedNode";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    auto focus = updater.focusedNode();
+    if (!focus)
+    {
+        return Core::failure(rememberFirstError(std::move(focus.error()), Operation));
+    }
+    return *focus;
+}
+
 Core::Status PrimaryWindowUICapabilityState::setStyleRole(u64 epoch, PrimaryWindowUIPhase phase,
                                                           UI::UITreeUpdater& updater, UI::UINodeId node,
                                                           UI::UIStyleRoleId role)

@@ -537,6 +537,15 @@ Core::Status PrimaryWindowUITreeUpdater::clearFocus()
     return m_state->clearFocus(m_epoch, m_phase, m_updater);
 }
 
+Core::Result<UI::UINodeId> PrimaryWindowUITreeUpdater::focusedNode() const
+{
+    if (m_state == nullptr)
+    {
+        return expiredFacade<UI::UINodeId>("PrimaryWindowUITreeUpdater::focusedNode");
+    }
+    return m_state->focusedNode(m_epoch, m_phase, m_updater);
+}
+
 Core::Status PrimaryWindowUITreeUpdater::setStyleRole(UI::UINodeId node, UI::UIStyleRoleId role)
 {
     if (m_state == nullptr)

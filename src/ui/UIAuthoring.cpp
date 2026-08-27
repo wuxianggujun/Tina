@@ -535,6 +535,15 @@ Core::Status UITreeUpdater::clearFocus()
     return m_context->m_impl->clearFocusFromUpdater(m_root);
 }
 
+Core::Result<UINodeId> UITreeUpdater::focusedNode() const
+{
+    if (m_context == nullptr)
+    {
+        return fail(UIErrorCode::WrongContext, "UI tree updater is not bound to a context");
+    }
+    return m_context->m_impl->focusedNodeFromUpdater(m_root);
+}
+
 Core::Status UITreeUpdater::setStyleRole(UINodeId node, UIStyleRoleId role)
 {
     if (m_context == nullptr)

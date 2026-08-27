@@ -1260,9 +1260,18 @@ TEST_F(PrimaryWindowUICapabilityTest, ModalAndFocusFacadesRoundTripAndExpireWith
     ASSERT_TRUE(context->publication().commitLayout({.width = 160.0F, .height = 90.0F}).has_value());
     EXPECT_EQ(context->input().activeModal(), *modal);
     EXPECT_EQ(context->input().defaultActionFocus(), *modalButton);
+    auto committedFocus = treeView.focusedNode();
+    ASSERT_TRUE(committedFocus.has_value()) << committedFocus.error().message;
+    EXPECT_EQ(*committedFocus, *modalButton);
     ASSERT_TRUE(tree->requestFocus(*modalButton).has_value());
+    auto requestedFocus = treeView.focusedNode();
+    ASSERT_TRUE(requestedFocus.has_value()) << requestedFocus.error().message;
+    EXPECT_EQ(*requestedFocus, *modalButton);
     ASSERT_TRUE(tree->clearFocus().has_value());
     EXPECT_FALSE(context->input().defaultActionFocus().hasValue());
+    auto clearedFocus = treeView.focusedNode();
+    ASSERT_TRUE(clearedFocus.has_value()) << clearedFocus.error().message;
+    EXPECT_FALSE(clearedFocus->hasValue());
 
     ASSERT_TRUE(state.finishPhase(*epoch, CapabilityPhase::GameStateEnter).has_value());
     auto expiredModal = tree->createElement(root->rootNodeId(), UI::makeModalElement());
@@ -1274,6 +1283,9 @@ TEST_F(PrimaryWindowUICapabilityTest, ModalAndFocusFacadesRoundTripAndExpireWith
     Core::Status expiredClear = tree->clearFocus();
     ASSERT_FALSE(expiredClear.has_value());
     EXPECT_EQ(expiredClear.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
+    auto expiredFocusQuery = treeView.focusedNode();
+    ASSERT_FALSE(expiredFocusQuery.has_value());
+    EXPECT_EQ(expiredFocusQuery.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);
     auto expiredScope = treeView.focusScopeMode(*panel);
     ASSERT_FALSE(expiredScope.has_value());
     EXPECT_EQ(expiredScope.error().code, RuntimeErrorCode::UIPhaseCapabilityExpired);

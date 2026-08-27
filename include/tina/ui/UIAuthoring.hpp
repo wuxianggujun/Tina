@@ -217,6 +217,10 @@ class UITreeUpdater final {
     [[nodiscard]] Core::Result<UIFocusScopeMode> focusScopeMode(UINodeId node) const;
     [[nodiscard]] Core::Status requestFocus(UINodeId node);
     [[nodiscard]] Core::Status clearFocus();
+    // Committed keyboard focus owned by this updater root, or an unset node when
+    // focus is elsewhere or absent. Read-only: it dirties nothing and reports the
+    // same target that Tab, requestFocus() and pointer activation converge on.
+    [[nodiscard]] Core::Result<UINodeId> focusedNode() const;
     [[nodiscard]] Core::Status setStyleRole(UINodeId node, UIStyleRoleId role);
     [[nodiscard]] Core::Result<UIStyleRoleId> styleRole(UINodeId node) const;
     [[nodiscard]] Core::Status clearOverride(UINodeId node, UIStyleOverride properties = UIStyleOverride::All);

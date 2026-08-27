@@ -2881,6 +2881,9 @@ struct UIContext::Impl final {
     [[nodiscard]] Core::Status clearFocusFromUpdater(UINodeId updaterRoot);
 
 
+    [[nodiscard]] Core::Result<UINodeId> focusedNodeFromUpdater(UINodeId updaterRoot) const;
+
+
     [[nodiscard]] UINodeId activeFocusScope() const noexcept;
 
 

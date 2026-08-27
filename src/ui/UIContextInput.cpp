@@ -1034,6 +1034,24 @@ UIContext::Impl::routeDefaultActionRelease(Platform::PlatformFrameId platformFra
     return clearFocus();
 }
 
+[[nodiscard]] Core::Result<UINodeId> UIContext::Impl::focusedNodeFromUpdater(UINodeId updaterRoot) const
+{
+    if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
+    {
+        return Core::failure(ownerThread.error());
+    }
+    if (!updaterRoot.hasValue() || !contains(updaterRoot))
+    {
+        return fail(UIErrorCode::RootRequired, "UI tree updater requires a live root owner");
+    }
+    const UINodeId focus = defaultActionFocus();
+    if (!focus.hasValue() || !isNodeWithinRoot(updaterRoot, focus))
+    {
+        return UINodeId{};
+    }
+    return focus;
+}
+
 [[nodiscard]] UINodeId UIContext::Impl::activeFocusScope() const noexcept
 {
     const auto& entries = committedHitBuffers[publishedHitBufferIndex];
