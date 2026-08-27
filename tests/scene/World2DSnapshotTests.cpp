@@ -1,5 +1,6 @@
 #include <tina/asset/AssetStore.hpp>
 #include <tina/asset_format/World2DSnapshot.hpp>
+#include <tina/core/io/WriteFile.hpp>
 #include <tina/scene/PerspectiveCamera3D.hpp>
 #include <tina/scene/SceneErrors.hpp>
 #include <tina/scene/World.hpp>
@@ -7,13 +8,16 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <filesystem>
 #include <functional>
 #include <memory_resource>
 #include <optional>
 #include <span>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -350,6 +354,62 @@ TEST_F(World2DSnapshotSceneTests, CaptureRejectsUnsupported3DComponents)
         world, captureConfig([entity](EntityId candidate) { return candidate == entity ? 1U : 0U; }));
     ASSERT_FALSE(captured);
     EXPECT_EQ(captured.error().code, SceneErrorCode::InvalidComponent);
+}
+
+// This is the path a shipped game uses to load an authored scene, so it must
+// round-trip the gameplay blob and leave the World untouched on every failure.
+TEST_F(World2DSnapshotSceneTests, LoadsAuthoredSceneFileAndFailsClosed)
+{
+    const std::array gameplay{std::byte{0x11}, std::byte{0x22}, std::byte{0x33}};
+    const std::array entities{
+        AssetFormat::World2DEntityDesc{
+            .stableEntityId = 7,
+            .nodeKind = AssetFormat::World2DNodeKind::Sprite2D,
+            .sprite = AssetFormat::World2DSpriteDesc{.spriteId = spriteId_},
+        },
+    };
+    auto bytes = AssetFormat::writeWorld2DSnapshotBytes(AssetFormat::World2DSnapshotDesc{
+        .entities = entities,
+        .gameplaySchema = 900U,
+        .gameplayVersion = 2U,
+        .gameplayBytes = gameplay,
+    });
+    ASSERT_TRUE(bytes) << bytes.error().message;
+
+    const std::filesystem::path scenePath =
+        std::filesystem::temp_directory_path() / "tina_scene_load_test.tworld";
+    ASSERT_TRUE(Core::writeFile(scenePath.string(), *bytes));
+
+    World world = makeWorld();
+    auto loaded = loadWorld2DSceneFromFile(world, scenePath.string(), resolver());
+    ASSERT_TRUE(loaded) << loaded.error().message;
+    ASSERT_EQ(loaded->bindings.size(), 1U);
+    EXPECT_EQ(loaded->bindings[0].stableEntityId, 7U);
+    EXPECT_TRUE(world.contains(loaded->bindings[0].entity));
+    // The parsed view borrows the byte buffer the loader owns and frees, so the
+    // blob must have been copied out rather than aliased.
+    EXPECT_EQ(loaded->gameplaySchema, 900U);
+    EXPECT_EQ(loaded->gameplayVersion, 2U);
+    ASSERT_EQ(loaded->gameplayBytes.size(), gameplay.size());
+    EXPECT_TRUE(std::equal(gameplay.begin(), gameplay.end(), loaded->gameplayBytes.begin()));
+
+    // An unresolved sprite must not partially populate the world.
+    World unresolvedWorld = makeWorld();
+    auto unresolved = loadWorld2DSceneFromFile(unresolvedWorld, scenePath.string());
+    ASSERT_FALSE(unresolved);
+    EXPECT_EQ(unresolved.error().code, SceneErrorCode::UnresolvedSprite);
+    EXPECT_EQ(unresolvedWorld.entityCount(), 0U);
+
+    World missingWorld = makeWorld();
+    const EntityId existing = missingWorld.createEntity().value();
+    auto missing = loadWorld2DSceneFromFile(
+        missingWorld, (scenePath.parent_path() / "tina_scene_absent.tworld").string(), resolver());
+    ASSERT_FALSE(missing);
+    EXPECT_EQ(missingWorld.entityCount(), 1U);
+    EXPECT_TRUE(missingWorld.contains(existing));
+
+    std::error_code removeError;
+    std::filesystem::remove(scenePath, removeError);
 }
 
 } // namespace

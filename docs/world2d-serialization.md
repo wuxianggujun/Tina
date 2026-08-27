@@ -60,6 +60,10 @@ restore 的 schema/容量/资源/组件失败发生在 World mutation 前。后�
 entity，再恢复 transform publication；调用前已存在的 entity 保留。返回 binding 只把 stable ID 映射到本次
 生成的 runtime `EntityId`，不能持久化后者。
 
+`loadWorld2DSceneFromFile(world, utf8Path, assets)` 是上述三步（读文件 → parse → instantiate）的组合入口，
+供 shipped game 直接消费 Editor 保存的 `.tworld`。它没有独立的格式或校验分支，失败保持 World 原样。
+`World2DSceneLoadResult::gameplayBytes` 是拷贝：parsed view 借用的是该调用自己拥有并在返回前释放的缓冲区。
+
 ## 版本策略
 
 Runtime 只接受 `World2DSnapshotWire::SchemaVersion`。旧版本 fixture 必须返回 `UnsupportedSchema`；当前开发期

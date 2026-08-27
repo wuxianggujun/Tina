@@ -1,5 +1,6 @@
 #include <tina/scene/World2DSnapshot.hpp>
 
+#include <tina/core/io/ReadFile.hpp>
 #include <tina/render/Camera2DProjection.hpp>
 #include <tina/scene/Camera2D.hpp>
 #include <tina/scene/PointLight2D.hpp>
@@ -11,6 +12,7 @@
 
 #include <algorithm>
 #include <exception>
+#include <memory_resource>
 #include <new>
 #include <optional>
 #include <utility>
@@ -808,6 +810,44 @@ instantiateWorld2DSnapshot(World& world, const AssetFormat::World2DSnapshotView&
         rollback();
         return Core::failure(SceneErrorCode::ConstructionFailed, "World2D restore callback threw an unknown exception");
     }
+}
+
+Core::Result<World2DSceneLoadResult>
+loadWorld2DSceneFromFile(World& world, std::string_view utf8Path, const World2DSnapshotAssetResolver& assets)
+try
+{
+    // readFile requires an explicit resource. The buffer is scoped to this call,
+    // so the default resource is correct and no allocator has to be threaded
+    // through the public signature.
+    auto bytes = Core::readFile(utf8Path, {.memoryResource = std::pmr::get_default_resource()});
+    if (!bytes)
+    {
+        return Core::failure(std::move(bytes.error()));
+    }
+    // entityStorage must outlive the view, and the view borrows `bytes`, so both
+    // stay alive until instantiate has finished copying what it needs.
+    std::vector<AssetFormat::World2DEntityDesc> entityStorage;
+    auto snapshot = AssetFormat::parseWorld2DSnapshot(*bytes, entityStorage);
+    if (!snapshot)
+    {
+        return Core::failure(std::move(snapshot.error()));
+    }
+    auto bindings = instantiateWorld2DSnapshot(world, *snapshot, assets);
+    if (!bindings)
+    {
+        return Core::failure(std::move(bindings.error()));
+    }
+    World2DSceneLoadResult result{
+        .bindings = std::move(*bindings),
+        .gameplaySchema = snapshot->gameplaySchema,
+        .gameplayVersion = snapshot->gameplayVersion,
+    };
+    result.gameplayBytes.assign(snapshot->gameplayBytes.begin(), snapshot->gameplayBytes.end());
+    return result;
+}
+catch (const std::bad_alloc&)
+{
+    return Core::failure(Core::CoreErrorCode::OutOfMemory, "World2D scene load allocation failed");
 }
 
 } // namespace Tina::Scene

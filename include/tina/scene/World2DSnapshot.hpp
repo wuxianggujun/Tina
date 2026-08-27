@@ -53,4 +53,24 @@ captureWorld2DSnapshotBytes(const World& world, const World2DSnapshotCaptureConf
 instantiateWorld2DSnapshot(World& world, const AssetFormat::World2DSnapshotView& snapshot,
                            const World2DSnapshotAssetResolver& assets = {});
 
+struct World2DSceneLoadResult final {
+    std::vector<World2DEntityBinding> bindings{};
+    // Game-owned blob copied out of the file, since the parsed view borrows the
+    // byte buffer this call owns and frees.
+    std::vector<std::byte> gameplayBytes{};
+    Core::u32 gameplaySchema = 0;
+    Core::u32 gameplayVersion = 0;
+};
+
+// Reads an authored World2D snapshot file (what the Editor saves as .tworld) and
+// instantiates it into `world`. This is read + parse + instantiate composed; it
+// adds no new wire format and no new schema tolerance. Failure leaves `world`
+// exactly as it was, so a bad or missing scene file cannot half-populate it.
+//
+// Every sprite/texture/animation AssetId still resolves through `assets`; an
+// unresolved handle fails closed rather than instantiating an invisible entity.
+[[nodiscard]] Core::Result<World2DSceneLoadResult>
+loadWorld2DSceneFromFile(World& world, std::string_view utf8Path,
+                         const World2DSnapshotAssetResolver& assets = {});
+
 } // namespace Tina::Scene
