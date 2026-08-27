@@ -272,5 +272,93 @@ TEST(EditorNodePropertyOperationsTests, MeshPropertiesKeepMeshNodeKind)
     EXPECT_FALSE(node->visible);
 }
 
+// Authoring any UV component must set the UvRect override, or the runtime would
+// keep sampling the full texture and a spritesheet slice would never appear.
+TEST(EditorNodePropertyOperationsTests, SpriteUvRectSetsOverrideAndRejectsInvertedRects)
+{
+    auto document = createWorld2D();
+    auto added = addWorld2DNode(
+        document, World2DNodeTemplate::Sprite2D, 0U,
+        {.spriteId = testAssetId('a')});
+    ASSERT_TRUE(added) << added.error().message;
+    const std::array ids{added->primaryStableId};
+
+    auto edited = applyWorld2DSpriteNodeProperties(
+        document, ids,
+        {.uvU0 = 0.25F, .uvV0 = 0.5F, .uvU1 = 0.75F, .uvV1 = 1.0F});
+    ASSERT_TRUE(edited) << edited.error().message;
+    EXPECT_EQ(edited->affectedItemCount, 1U);
+    const auto entities = world2DEntities(document);
+    const auto entity = std::find_if(
+        entities.begin(), entities.end(), [&](const auto& candidate) {
+            return candidate.stableEntityId == added->primaryStableId;
+        });
+    ASSERT_NE(entity, entities.end());
+    ASSERT_TRUE(entity->sprite.has_value());
+    EXPECT_TRUE(hasFlag(entity->sprite->overrides,
+                        AssetFormat::World2DSpriteOverrideFlags::UvRect));
+    EXPECT_FLOAT_EQ(entity->sprite->uvU0, 0.25F);
+    EXPECT_FLOAT_EQ(entity->sprite->uvV1, 1.0F);
+
+    const Core::u64 revision = document.revision();
+    // u1 below u0 would produce a degenerate rect; the document must not move.
+    auto inverted = applyWorld2DSpriteNodeProperties(
+        document, ids, {.uvU0 = 0.9F, .uvU1 = 0.1F});
+    ASSERT_FALSE(inverted);
+    EXPECT_EQ(inverted.error().code,
+              EditorErrorCode::InvalidAuthoringOperation);
+    EXPECT_EQ(document.revision(), revision);
+
+    auto outOfRange = applyWorld2DSpriteNodeProperties(
+        document, ids, {.uvV1 = 1.5F});
+    ASSERT_FALSE(outOfRange);
+    EXPECT_EQ(document.revision(), revision);
+}
+
+// Resource nodes could previously only receive an asset at create time.
+TEST(EditorNodePropertyOperationsTests, ResourcePropertiesRebindAssetAndFailClosed)
+{
+    auto document = createWorld2D();
+    auto added = addWorld2DNode(
+        document, World2DNodeTemplate::TileMap2D, 0U,
+        {.resourceId = testAssetId('a')});
+    ASSERT_TRUE(added) << added.error().message;
+    const std::array ids{added->primaryStableId};
+
+    auto edited = applyWorld2DResourceNodeProperties(
+        document, ids, {.assetId = testAssetId('b'), .active = false});
+    ASSERT_TRUE(edited) << edited.error().message;
+    EXPECT_EQ(edited->affectedItemCount, 1U);
+    const auto entities = world2DEntities(document);
+    const auto entity = std::find_if(
+        entities.begin(), entities.end(), [&](const auto& candidate) {
+            return candidate.stableEntityId == added->primaryStableId;
+        });
+    ASSERT_NE(entity, entities.end());
+    ASSERT_TRUE(entity->resource.has_value());
+    EXPECT_EQ(entity->resource->assetId, testAssetId('b'));
+    EXPECT_FALSE(entity->resource->active);
+    auto nodeKind = classifyWorld2DNodeTemplate(*entity);
+    ASSERT_TRUE(nodeKind) << nodeKind.error().message;
+    EXPECT_EQ(*nodeKind, World2DNodeTemplate::TileMap2D);
+
+    const Core::u64 revision = document.revision();
+    auto zeroId = applyWorld2DResourceNodeProperties(
+        document, ids, {.assetId = Core::AssetId{}});
+    ASSERT_FALSE(zeroId);
+    EXPECT_EQ(document.revision(), revision);
+
+    // A Sprite2D owns no resource payload, so the edit must be refused.
+    auto sprite = addWorld2DNode(
+        document, World2DNodeTemplate::Sprite2D, 0U,
+        {.spriteId = testAssetId('c')});
+    ASSERT_TRUE(sprite) << sprite.error().message;
+    const std::array spriteIds{sprite->primaryStableId};
+    auto mismatch = applyWorld2DResourceNodeProperties(
+        document, spriteIds, {.active = false});
+    ASSERT_FALSE(mismatch);
+    EXPECT_EQ(mismatch.error().code, EditorErrorCode::NodePropertyUnavailable);
+}
+
 } // namespace
 } // namespace Tina::Editor

@@ -326,6 +326,10 @@ applyWorld2DSpriteNodeProperties(World2DAuthoringDocument& document,
             input.sizeY.value_or(1.0F),
             input.pivotX.value_or(0.5F),
             input.pivotY.value_or(0.5F),
+            input.uvU0.value_or(0.0F),
+            input.uvV0.value_or(0.0F),
+            input.uvU1.value_or(1.0F),
+            input.uvV1.value_or(1.0F),
         })); !status) {
         return Core::failure(std::move(status.error()));
     }
@@ -358,6 +362,25 @@ applyWorld2DSpriteNodeProperties(World2DAuthoringDocument& document,
             if (input.pivotX.has_value() || input.pivotY.has_value()) {
                 sprite.overrides =
                     sprite.overrides | AssetFormat::World2DSpriteOverrideFlags::Pivot;
+            }
+            applyOptional(input.uvU0, sprite.uvU0);
+            applyOptional(input.uvV0, sprite.uvV0);
+            applyOptional(input.uvU1, sprite.uvU1);
+            applyOptional(input.uvV1, sprite.uvV1);
+            if (input.uvU0.has_value() || input.uvV0.has_value() ||
+                input.uvU1.has_value() || input.uvV1.has_value()) {
+                sprite.overrides =
+                    sprite.overrides | AssetFormat::World2DSpriteOverrideFlags::UvRect;
+                // Rejected here rather than at the wire layer so the message names
+                // the authoring rule; the document keeps its previous bytes.
+                if (!(sprite.uvU0 >= 0.0F) || !(sprite.uvV0 >= 0.0F) ||
+                    !(sprite.uvU1 <= 1.0F) || !(sprite.uvV1 <= 1.0F) ||
+                    !(sprite.uvU0 < sprite.uvU1) ||
+                    !(sprite.uvV0 < sprite.uvV1)) {
+                    return Core::failure(
+                        EditorErrorCode::InvalidAuthoringOperation,
+                        "Sprite UV rect must satisfy 0 <= u0 < u1 <= 1 and 0 <= v0 < v1 <= 1");
+                }
             }
             if (input.color.has_value()) {
                 sprite.colorRed = (*input.color)[0];
@@ -605,6 +628,37 @@ applyWorld2DPhysicsShapeNodeProperties(
                     EditorErrorCode::InvalidAuthoringOperation,
                     "Physics shape dimensions are invalid for the selected kind");
             }
+            return Core::success();
+        });
+}
+
+Core::Result<EditorSceneOperationResult>
+applyWorld2DResourceNodeProperties(World2DAuthoringDocument& document,
+                       std::span<const Core::u32> stableEntityIds,
+                       const World2DResourceNodeProperties& input)
+{
+    if (input.assetId.has_value() && !*input.assetId) {
+        return Core::failure(
+            EditorErrorCode::InvalidAuthoringOperation,
+            "Resource node properties require a non-zero asset AssetId");
+    }
+    return editWorld2DEntities(
+        document, stableEntityIds,
+        [&](AssetFormat::World2DEntityDesc& entity) -> Core::Status {
+            if (auto status = requireWorld2DNodeKind(
+                    entity,
+                    {World2DNodeTemplate::TileMap2D,
+                     World2DNodeTemplate::FxEmitter2D,
+                     World2DNodeTemplate::NavigationRegion2D,
+                     World2DNodeTemplate::AudioPlayer2D},
+                    "Resource properties require a TileMap2D, FxEmitter2D, "
+                    "NavigationRegion2D, or AudioPlayer2D node");
+                !status) {
+                return status;
+            }
+            auto& resource = *entity.resource;
+            applyOptional(input.assetId, resource.assetId);
+            applyOptional(input.active, resource.active);
             return Core::success();
         });
 }

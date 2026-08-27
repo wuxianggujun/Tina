@@ -22,6 +22,14 @@ struct World2DSpriteNodeProperties final {
     std::optional<float> sizeY{};
     std::optional<float> pivotX{};
     std::optional<float> pivotY{};
+    // Normalized sub-rect on the bound texture, which is how one spritesheet
+    // feeds many nodes. Authoring any component sets the UvRect override flag;
+    // the resulting rect must stay finite, within 0..1, and strictly ordered
+    // (u0<u1, v0<v1), matching the runtime SpriteRenderer2D contract.
+    std::optional<float> uvU0{};
+    std::optional<float> uvV0{};
+    std::optional<float> uvU1{};
+    std::optional<float> uvV1{};
     std::optional<std::array<Core::u8, 4>> color{};
     std::optional<Core::i16> sortingLayer{};
     std::optional<Core::i32> orderInLayer{};
@@ -104,6 +112,14 @@ struct World2DPhysicsShapeNodeProperties final {
     std::optional<bool> hitEvents{};
 };
 
+// TileMap2D, FxEmitter2D, NavigationRegion2D and AudioPlayer2D each carry one
+// required resource AssetId. Without this the asset could only be chosen at
+// create time and never rebound.
+struct World2DResourceNodeProperties final {
+    std::optional<Core::AssetId> assetId{};
+    std::optional<bool> active{};
+};
+
 struct World3DMeshNodeProperties final {
     std::optional<Core::AssetId> meshId{};
     std::optional<Core::AssetId> materialId{};
@@ -151,6 +167,12 @@ applyWorld2DPhysicsShapeNodeProperties(
     World2DAuthoringDocument& document,
     std::span<const Core::u32> stableEntityIds,
     const World2DPhysicsShapeNodeProperties& properties);
+
+[[nodiscard]] Core::Result<EditorSceneOperationResult>
+applyWorld2DResourceNodeProperties(
+    World2DAuthoringDocument& document,
+    std::span<const Core::u32> stableEntityIds,
+    const World2DResourceNodeProperties& properties);
 
 [[nodiscard]] Core::Result<EditorSceneOperationResult>
 applyWorld3DMeshNodeProperties(
