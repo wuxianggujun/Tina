@@ -132,6 +132,13 @@ step：fixed-step accumulator 与 catch-up 策略归帧循环所有者（ADR 001
 移动 body 走 `PhysicsWorld2D::enqueueSetTransform`；`physicsBridge()` 暴露桥本身以便按 authored entity
 查 body。
 
+消费者参考实现是 `samples/2d_authored_scene`（target `tina_sample_2d_authored_scene`，仅
+`TINA_BUILD_PHYSICS2D=ON`）：它把一个含四种 resource 节点 + physics body/shape 的场景写成真实
+`.tworld`，再经 `loadWorld2DSceneFromFile` 读回并交给 `Scene2DRuntime`。它刻意 **headless**（null render
+device + disabled task system），因为受验的是所有权与顺序而不是像素，故不需要 GPU；像素证据仍归 bgfx
+产品样例。它是 tests 之外第一个链接 `Tina::Gameplay2D` 的 target，输出自己的 `evidenceSchema 1` JSON 并
+接入 product-2d gate（gate 按字段做 JSON 数值比较，不用无锚定 substring 正则）。
+
 `tileMap(entity)` 返回 resident `TileMapInstance` 的引用，`tileLayers(entity)` 返回 authored 层序与
 visibility。二者必须暴露，因为五个真实消费者都需要按引用拿到 instance 且都无法在 runtime 内重新实现：
 `TileMapGridCollision` 借用其整个生命周期、`TileMapPhysicsSync2D` 在 Create 与每次 synchronize 都要、

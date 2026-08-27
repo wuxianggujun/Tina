@@ -49,6 +49,7 @@ $BinDir = [System.IO.Path]::GetFullPath($BinDir)
 $expectedGate = 'bgfx-physics-freetype-audio'
 $targets = @(
     'tina_sample_2d',
+    'tina_sample_2d_authored_scene',
     'tina_navigation2d_tests',
     'tina_scene_tests',
     'tina_render_scene_tests',
@@ -301,6 +302,91 @@ if (-not $renderExtractionsMatch.Success -or -not $sceneLightingFramesMatch.Succ
         -Detail 'lighting submissions plus suspended-surface skips must exactly account for renderExtractions'
 }
 Add-Step -Name 'tina_sample_2d' -ExitCode 0 -Detail "productGate=$expectedGate frames=$SampleFrames"
+
+# The authored-scene sample is the Gameplay2D consumer: it loads a .tworld and lets
+# Scene2DRuntime own the per-frame order for all four resource kinds plus physics.
+# Headless, so it adds no GPU dependency to this gate.
+#
+# Parsed as JSON with numeric comparisons rather than substring regexes: an unanchored
+# pattern like 'physicsSteps\":300' also matches 3000, so a counter that grew a digit
+# would pass silently.
+$authoredScenePath = Join-Path $BinDir 'tina_sample_2d_authored_scene.exe'
+if (-not (Test-Path -LiteralPath $authoredScenePath)) {
+    Add-Step -Name 'tina_sample_2d_authored_scene' -ExitCode 1 `
+        -Detail "missing executable: $authoredScenePath"
+}
+$authoredSceneOut = & $authoredScenePath "--frames=$SampleFrames" 2>&1 | Out-String
+$authoredSceneExit = $LASTEXITCODE
+if ($authoredSceneExit -ne 0) {
+    Add-Step -Name 'tina_sample_2d_authored_scene' -ExitCode $authoredSceneExit `
+        -Detail $authoredSceneOut.Trim()
+}
+$authoredSceneLine = $authoredSceneOut -split "`n" |
+    Where-Object { $_ -match '^\{"status":"ok","sample":"tina_sample_2d_authored_scene"' } |
+    Select-Object -Last 1
+if (-not $authoredSceneLine) {
+    Add-Step -Name 'tina_sample_2d_authored_scene' -ExitCode 1 `
+        -Detail "no ok evidence line; output=$($authoredSceneOut.Trim())"
+}
+$authoredScene = $authoredSceneLine | ConvertFrom-Json
+$authoredSceneExpected = [ordered]@{
+    evidenceSchema               = 1
+    frames                       = [int64]$SampleFrames
+    submittedFrames              = [int64]$SampleFrames
+    presentedFrames              = [int64]$SampleFrames
+    sceneLoadedFromFile          = $true
+    authoredEntities             = 10
+    resolvedNodesByAuthoredName  = $true
+    tileMapNodes                 = 1
+    tileLayers                   = 2
+    fxNodes                      = 1
+    navigationNodes              = 1
+    audioNodes                   = 1
+    unresolvedNodes              = 0
+    residentTileChunks           = 2
+    demandUpdates                = [int64]$SampleFrames
+    commits                      = [int64]$SampleFrames
+    extracts                     = [int64]$SampleFrames
+    physicsSteps                 = [int64]$SampleFrames
+    extractBeforeCommitRejected  = $true
+    tileMapReachable             = $true
+    collisionCellsFound          = 4
+    navigationGridReachable      = $true
+    visibleTileSprites           = 16
+    lastFrameHadCamera           = $true
+    audioVoiceStarted            = $true
+    runtimeShutdownOk            = $true
+    stateExits                   = 1
+    applicationShutdowns         = 1
+    renderShutdowns              = 1
+}
+foreach ($field in $authoredSceneExpected.Keys) {
+    $actual = $authoredScene.$field
+    $expected = $authoredSceneExpected[$field]
+    if ($null -eq $actual) {
+        Add-Step -Name "authoredScene:$field" -ExitCode 1 -Detail 'field missing from evidence'
+    }
+    if ($actual -ne $expected) {
+        Add-Step -Name "authoredScene:$field" -ExitCode 1 `
+            -Detail "expected $expected; actual $actual"
+    }
+}
+# The authored transform must place the emitter, not the Fx payload's own origin.
+if ([double]$authoredScene.fxOriginX -ne 2.0 -or [double]$authoredScene.fxOriginY -ne 1.0) {
+    Add-Step -Name 'authoredScene:fxOrigin' -ExitCode 1 `
+        -Detail "expected (2,1); actual ($($authoredScene.fxOriginX),$($authoredScene.fxOriginY))"
+}
+# Physics is authoritative and written back: the crate fell from its authored height
+# and settled on the authored floor rather than falling forever.
+$crateStartY = [double]$authoredScene.crateStartY
+$crateEndY = [double]$authoredScene.crateEndY
+if ($crateStartY -ne 6.0 -or $crateEndY -ge $crateStartY -or
+    [math]::Abs($crateEndY - 1.0) -gt 0.1) {
+    Add-Step -Name 'authoredScene:cratePhysics' -ExitCode 1 `
+        -Detail "expected fall from 6.0 to about 1.0; actual start=$crateStartY end=$crateEndY"
+}
+Add-Step -Name 'tina_sample_2d_authored_scene' -ExitCode 0 `
+    -Detail "evidenceSchema=1 frames=$SampleFrames crateEndY=$crateEndY"
 
 $shadowVisualScript = Join-Path $SourceRoot 'tools\windows\RunProduct2dShadowVisualGate.ps1'
 if (-not (Test-Path -LiteralPath $shadowVisualScript -PathType Leaf)) {
