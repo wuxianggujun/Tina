@@ -71,6 +71,10 @@ class TileChunkDirtyCache final {
     void clear() noexcept;
 
   private:
+    // One tracked chunk. There is deliberately no `occupied` flag: the vector holds
+    // exactly the tracked entries, so a lookup scans those rather than the whole
+    // configured capacity -- at capacity 4096 that was 4096 comparisons per visible
+    // chunk per frame, inside a cache whose purpose is to save work.
     struct Entry final {
         Core::AssetId tileMapAssetId{};
         AssetFormat::TileMapLayerId layerId = 0;
@@ -79,7 +83,6 @@ class TileChunkDirtyCache final {
         Core::u32 revision = 0;
         Core::u64 residencyGeneration = 0;
         Core::u64 lastFrame = 0;
-        bool occupied = false;
     };
 
     explicit TileChunkDirtyCache(std::pmr::vector<Entry> entries, Core::usize capacity) noexcept;

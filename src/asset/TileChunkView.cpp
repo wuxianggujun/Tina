@@ -102,33 +102,19 @@ Core::Result<Core::u32> extractVisibleTileChunks(const TileMapInstance& map, Ass
                     continue;
                 }
 
-                Core::u32 nonEmpty = 0;
-                for (Core::u32 y = 0; y < height; ++y)
-                {
-                    for (Core::u32 x = 0; x < width; ++x)
-                    {
-                        auto tileId = map.tileIdAt(layerId, originX + x, originY + y);
-                        if (!tileId)
-                        {
-                            out.clear();
-                            return Core::failure(std::move(tileId.error()));
-                        }
-                        if (*tileId != AssetFormat::TileMapWire::EmptyTileId)
-                        {
-                            ++nonEmpty;
-                        }
-                    }
-                }
-                if (nonEmpty == 0)
-                {
-                    continue;
-                }
-
+                // nonEmptyCount is maintained incrementally by attachChunk/setTile, so
+                // the count is read rather than recomputed. Recounting meant a full
+                // per-cell pass here plus a second one in sprite emission, both every
+                // frame, to rediscover a number the instance already knew exactly.
                 auto state = map.chunkState(layerId, cx, cy);
                 if (!state)
                 {
                     out.clear();
                     return Core::failure(std::move(state.error()));
+                }
+                if (state->nonEmptyCount == 0)
+                {
+                    continue;
                 }
                 out.push_back(TileChunkView{
                     .layerId = layerId,
@@ -145,7 +131,7 @@ Core::Result<Core::u32> extractVisibleTileChunks(const TileMapInstance& map, Ass
                     .worldMaxY = worldMaxY,
                     .tileMapAssetId = map.tileMapAssetId(),
                     .tilesetAssetId = map.tilesetAssetId(),
-                    .nonEmptyTileCount = nonEmpty,
+                    .nonEmptyTileCount = state->nonEmptyCount,
                     .empty = false,
                 });
             }
@@ -194,25 +180,28 @@ Core::Result<Core::u32> collectChunkNonEmptyCells(const TileMapInstance& map, As
     const Core::u32 originY = coord.chunkY * chunkSize;
     const Core::u32 width = rootRef->widthCells;
     const Core::u32 height = rootRef->heightCells;
+    // Resolved once for the whole chunk. Per-cell tileInfoAt() would redo the layer
+    // scan, chunk-ref search and resident lookup for every one of up to 4096 cells.
+    auto cells = map.chunkCells(layerId, coord);
+    if (!cells)
+    {
+        out.clear();
+        return Core::failure(std::move(cells.error()));
+    }
     try
     {
+        out.reserve(cells->nonEmptyCount);
         for (Core::u32 y = 0; y < height; ++y)
         {
             for (Core::u32 x = 0; x < width; ++x)
             {
-                const Core::u32 cellX = originX + x;
-                const Core::u32 cellY = originY + y;
-                auto info = map.tileInfoAt(layerId, cellX, cellY);
-                if (!info)
-                {
-                    out.clear();
-                    return Core::failure(std::move(info.error()));
-                }
-                if (!*info || (*info)->empty)
+                const auto info = map.tileInfoForLocalId(cells->localTileIdAt(x, y));
+                if (!info.has_value())
                 {
                     continue;
                 }
-                out.push_back(TileChunkCell{.cellX = cellX, .cellY = cellY, .info = **info});
+                out.push_back(
+                    TileChunkCell{.cellX = originX + x, .cellY = originY + y, .info = *info});
             }
         }
     } catch (const std::bad_alloc&)

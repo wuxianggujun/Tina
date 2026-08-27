@@ -48,6 +48,9 @@ struct TileMapChunkCoord final {
 struct TileMapChunkState final {
     Core::u32 contentRevision = 0;
     Core::u64 residencyGeneration = 0;
+    // Maintained incrementally by attachChunk/setTile, so a caller never has to
+    // recount cells to learn whether a chunk is worth visiting.
+    Core::u32 nonEmptyCount = 0;
 };
 
 struct TileMapTileInfo final {
@@ -58,6 +61,34 @@ struct TileMapTileInfo final {
     float u1 = 1.0f;
     float v1 = 1.0f;
     bool empty = true;
+};
+
+// Borrowed cells of one resident chunk. Resolved once so a per-cell loop does not
+// repeat the layer scan, chunk-ref binary search and resident-chunk scan that
+// tileIdAt() must redo on every single call.
+//
+// Valid until the owning instance detaches this chunk or is destroyed.
+struct TileMapChunkCellsView final {
+    AssetFormat::TileMapLayerId layerId = 0;
+    TileMapChunkCoord coord{};
+    Core::u32 originCellX = 0;
+    Core::u32 originCellY = 0;
+    Core::u16 widthCells = 0;
+    Core::u16 heightCells = 0;
+    Core::u32 nonEmptyCount = 0;
+    // Row-major, widthCells * heightCells entries. 0 is the empty tile.
+    std::span<const Core::u16> cells{};
+
+    // Chunk-local coordinates. Out of range reads as empty rather than failing,
+    // because the caller already bounds its loop by widthCells/heightCells.
+    [[nodiscard]] Core::u16 localTileIdAt(Core::u32 localX, Core::u32 localY) const noexcept
+    {
+        if (localX >= widthCells || localY >= heightCells)
+        {
+            return 0U;
+        }
+        return cells[static_cast<Core::usize>(localY) * widthCells + localX];
+    }
 };
 
 class TileMapInstance final {
@@ -135,6 +166,17 @@ class TileMapInstance final {
                                                    Core::u32 y) const;
     [[nodiscard]] Core::Result<std::optional<TileMapTileInfo>>
     tileInfoAt(AssetFormat::TileMapLayerId layerId, Core::u32 x, Core::u32 y) const;
+
+    // Resolves one resident chunk's cells once, for callers that then walk every
+    // cell in it. tileIdAt() has to redo the layer scan, the chunk-ref binary search
+    // and the resident-chunk scan per call, and all three are invariant across a
+    // chunk -- so a 64x64 chunk paid for them 4096 times.
+    [[nodiscard]] Core::Result<TileMapChunkCellsView>
+    chunkCells(AssetFormat::TileMapLayerId layerId, TileMapChunkCoord coord) const;
+
+    // Material and UVs for a local tile id, or nullopt for empty/unknown. Pairs with
+    // chunkCells() so a loop can go from cell id to tile info without another lookup.
+    [[nodiscard]] std::optional<TileMapTileInfo> tileInfoForLocalId(Core::u16 localTileId) const noexcept;
 
     // Sets a cell in the selected tile layer; bumps that layer's affected chunk revision.
     // localTileId 0 = empty. Unknown non-zero local ids fail.

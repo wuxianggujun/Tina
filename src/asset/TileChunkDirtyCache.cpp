@@ -24,7 +24,11 @@ Core::Result<TileChunkDirtyCache> TileChunkDirtyCache::Create(TileChunkDirtyCach
     try
     {
         std::pmr::vector<Entry> entries{resource};
-        entries.resize(config.capacity);
+        // Reserved, not resized: the vector holds only tracked entries, so lookups
+        // scan what is actually tracked rather than the whole configured capacity.
+        // Reserving up front also means push_back never reallocates, which is what
+        // lets classifyVisible hold an Entry* across allocateEntry().
+        entries.reserve(config.capacity);
         return TileChunkDirtyCache{std::move(entries), config.capacity};
     } catch (const std::bad_alloc&)
     {
@@ -38,7 +42,7 @@ TileChunkDirtyCache::Entry* TileChunkDirtyCache::findEntry(Core::AssetId tileMap
 {
     for (Entry& entry : m_entries)
     {
-        if (entry.occupied && entry.tileMapAssetId == tileMapAssetId && entry.layerId == layerId &&
+        if (entry.tileMapAssetId == tileMapAssetId && entry.layerId == layerId &&
             entry.chunkX == chunkX && entry.chunkY == chunkY)
         {
             return &entry;
@@ -49,21 +53,18 @@ TileChunkDirtyCache::Entry* TileChunkDirtyCache::findEntry(Core::AssetId tileMap
 
 TileChunkDirtyCache::Entry* TileChunkDirtyCache::allocateEntry() noexcept
 {
-    for (Entry& entry : m_entries)
+    if (m_entries.size() < m_capacity)
     {
-        if (!entry.occupied)
-        {
-            entry.occupied = true;
-            ++m_tracked;
-            return &entry;
-        }
+        m_entries.push_back(Entry{});
+        ++m_tracked;
+        return &m_entries.back();
     }
-    // Evict least-recently-used occupied slot.
+    // Evict least-recently-used slot.
     Entry* victim = nullptr;
     Core::u64 oldest = (std::numeric_limits<Core::u64>::max)();
     for (Entry& entry : m_entries)
     {
-        if (entry.occupied && entry.lastFrame < oldest)
+        if (entry.lastFrame < oldest)
         {
             oldest = entry.lastFrame;
             victim = &entry;
@@ -73,7 +74,6 @@ TileChunkDirtyCache::Entry* TileChunkDirtyCache::allocateEntry() noexcept
     {
         ++m_capacityEvictions;
         *victim = Entry{};
-        victim->occupied = true;
         // tracked count unchanged (replace one with another)
         return victim;
     }
@@ -194,16 +194,16 @@ void TileChunkDirtyCache::invalidate(Core::AssetId tileMapAssetId, AssetFormat::
     {
         return;
     }
-    *entry = Entry{};
+    // Swap-erase: the table is an unordered set of tracked entries, so removing one
+    // must not leave a hole that lookups still have to walk past.
+    *entry = m_entries.back();
+    m_entries.pop_back();
     --m_tracked;
 }
 
 void TileChunkDirtyCache::clear() noexcept
 {
-    for (Entry& entry : m_entries)
-    {
-        entry = Entry{};
-    }
+    m_entries.clear();
     m_tracked = 0;
 }
 

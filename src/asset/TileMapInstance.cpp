@@ -338,6 +338,57 @@ Core::Result<TileMapChunkState> TileMapInstance::chunkState(AssetFormat::TileMap
     return TileMapChunkState{
         .contentRevision = resident->contentRevision,
         .residencyGeneration = resident->residencyGeneration,
+        .nonEmptyCount = resident->nonEmptyCount,
+    };
+}
+
+Core::Result<TileMapChunkCellsView> TileMapInstance::chunkCells(AssetFormat::TileMapLayerId layerId,
+                                                                TileMapChunkCoord coord) const
+{
+    auto metadata = tileLayerMetadata(layerId);
+    if (!metadata)
+    {
+        return Core::failure(std::move(metadata.error()));
+    }
+    if (!metadata->findChunkRef(coord.chunkX, coord.chunkY))
+    {
+        return Core::failure(AssetErrorCode::TileMapLayerNotFound,
+                             "tilemap layer does not reference the requested chunk");
+    }
+    const ResidentChunk* resident = residentChunk(layerId, coord);
+    if (resident == nullptr)
+    {
+        return Core::failure(AssetErrorCode::TileMapChunkNotResident,
+                             "tilemap chunk is referenced but not resident");
+    }
+    return TileMapChunkCellsView{
+        .layerId = layerId,
+        .coord = coord,
+        .originCellX = coord.chunkX * m_chunkSize,
+        .originCellY = coord.chunkY * m_chunkSize,
+        .widthCells = resident->widthCells,
+        .heightCells = resident->heightCells,
+        .nonEmptyCount = resident->nonEmptyCount,
+        .cells = std::span<const Core::u16>{resident->cells.data(), resident->cells.size()},
+    };
+}
+
+std::optional<TileMapTileInfo> TileMapInstance::tileInfoForLocalId(Core::u16 localTileId) const noexcept
+{
+    if (localTileId == AssetFormat::TileMapWire::EmptyTileId || localTileId >= m_tileDefs.size() ||
+        !m_tileDefs[localTileId].valid)
+    {
+        return std::nullopt;
+    }
+    const TileDef& def = m_tileDefs[localTileId];
+    return TileMapTileInfo{
+        .localTileId = localTileId,
+        .materialFlags = def.materialFlags,
+        .u0 = def.u0,
+        .v0 = def.v0,
+        .u1 = def.u1,
+        .v1 = def.v1,
+        .empty = false,
     };
 }
 
@@ -520,6 +571,11 @@ Core::Result<Core::u32> TileMapInstance::querySolidAabb(AssetFormat::TileMapLaye
 
     try
     {
+        // Resolved lazily and reused while the scan stays inside one chunk. Without
+        // this, every cell redid the layer scan, the chunk-ref binary search and the
+        // resident-chunk scan, all of which are constant across a chunk.
+        TileMapChunkCoord cachedCoord{};
+        const ResidentChunk* cached = nullptr;
         for (Core::u32 y = minY; y <= maxY; ++y)
         {
             for (Core::u32 x = minX; x <= maxX; ++x)
@@ -533,15 +589,36 @@ Core::Result<Core::u32> TileMapInstance::querySolidAabb(AssetFormat::TileMapLaye
                 {
                     continue;
                 }
-                auto localId = tileIdAt(layerId, x, y);
-                if (!localId)
+                const TileMapChunkCoord coord = chunkCoordForCell(x, y);
+                if (cached == nullptr || !(cachedCoord == coord))
+                {
+                    if (!metadata->findChunkRef(coord.chunkX, coord.chunkY))
+                    {
+                        // Unreferenced chunks hold no cells, so nothing here is solid.
+                        continue;
+                    }
+                    cached = residentChunk(layerId, coord);
+                    if (cached == nullptr)
+                    {
+                        out.clear();
+                        return Core::failure(AssetErrorCode::TileMapChunkNotResident,
+                                             "tilemap cell belongs to a non-resident chunk");
+                    }
+                    cachedCoord = coord;
+                }
+                const Core::u32 localX = x - coord.chunkX * m_chunkSize;
+                const Core::u32 localY = y - coord.chunkY * m_chunkSize;
+                if (localX >= cached->widthCells || localY >= cached->heightCells)
                 {
                     out.clear();
-                    return Core::failure(std::move(localId.error()));
+                    return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                         "tilemap resident chunk extent does not cover requested cell");
                 }
-                if (*localId == AssetFormat::TileMapWire::EmptyTileId || *localId >= m_tileDefs.size() ||
-                    !m_tileDefs[*localId].valid ||
-                    (m_tileDefs[*localId].materialFlags & AssetFormat::TilesetWire::MaterialSolid) == 0U)
+                const Core::u16 localId =
+                    cached->cells[static_cast<Core::usize>(localY) * cached->widthCells + localX];
+                if (localId == AssetFormat::TileMapWire::EmptyTileId || localId >= m_tileDefs.size() ||
+                    !m_tileDefs[localId].valid ||
+                    (m_tileDefs[localId].materialFlags & AssetFormat::TilesetWire::MaterialSolid) == 0U)
                 {
                     continue;
                 }
@@ -549,8 +626,8 @@ Core::Result<Core::u32> TileMapInstance::querySolidAabb(AssetFormat::TileMapLaye
                     .layerId = layerId,
                     .cellX = x,
                     .cellY = y,
-                    .localTileId = *localId,
-                    .materialFlags = m_tileDefs[*localId].materialFlags,
+                    .localTileId = localId,
+                    .materialFlags = m_tileDefs[localId].materialFlags,
                 });
             }
         }

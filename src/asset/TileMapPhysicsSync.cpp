@@ -201,14 +201,17 @@ Core::Result<Core::usize> TileMapPhysicsSync2D::bakeChunk(
     }
 
     std::fill_n(m_occupancy.begin(), cellCount, Core::u8{0});
+    // Resolved once for the chunk: tileInfoAt() per cell would redo the layer scan,
+    // the chunk-ref search and the resident-chunk scan for each of up to 4096 cells,
+    // and all three are constant here.
+    auto cells = map.chunkCells(m_layerId, coord);
+    if (!cells) {
+        return Core::failure(std::move(cells.error()));
+    }
     for (Core::u32 localY = 0; localY < height; ++localY) {
         for (Core::u32 localX = 0; localX < width; ++localX) {
-            auto tile = map.tileInfoAt(m_layerId, startX + localX, startY + localY);
-            if (!tile) {
-                return Core::failure(std::move(tile.error()));
-            }
-            if (tile->has_value() && !tile->value().empty
-                && isSolidMaterial(tile->value().materialFlags)) {
+            const auto tile = map.tileInfoForLocalId(cells->localTileIdAt(localX, localY));
+            if (tile.has_value() && isSolidMaterial(tile->materialFlags)) {
                 m_occupancy[static_cast<Core::usize>(localY) * width + localX] = 1;
             }
         }
