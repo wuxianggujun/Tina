@@ -15,6 +15,7 @@ set(TINA_UI_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIMenu.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UITreeView.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIVirtualGridView.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/ui/UIVirtualStick.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIProgressBar.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIPopup.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/ui/UIRadioButton.hpp

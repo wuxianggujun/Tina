@@ -369,6 +369,30 @@ TextInput/Scroll/Select resolver 当前仍选择 TextEdit/ScrollView/Dropdown，
 不能仅靠新增 flags 得到任意输入路由、滚动条视觉、Dropdown popup、Knob、自定义 drag state machine 或新的 Behavior SPI；更高阶
 SPI 继续后置，不能绕过 committed snapshot 或 Render 边界。
 
+### 案例：屏幕摇杆（product-side composition）
+
+`include/tina/ui/UIVirtualStick.hpp` 与 `samples/virtual_stick` 是上表「自定义交互」那一行的具体样板：
+**没有新 widget kind，没有新 Behavior，没有新 pointer 管道**。摇杆 = 两个 Element（base ring 用
+`makeEllipseOutline`，knob 用 `makeSolidEllipse`）+ base 上四个 routed pointer listener
+（ButtonDown / Move / ButtonUp / PointerCancel）+ 产品自己持有的 drag state。
+
+三个必须知道的接线点：
+
+- **base 必须显式 `setPointerHitPolicy(Targetable)`**。裸 Panel 默认 `Ignore`，只有携带标准 Behavior
+  时才被自动提升，而自定义 drag 控件不携带。
+- **knob 必须显式 `Ignore`**。它整段手势都在指针下方，若可命中就会从 base 抢走 press。
+- **knob 是 base 的兄弟节点而非子节点**，因为子节点会被约束在 base 的 layout box 内，而 knob 必须能停在
+  drag 决定的任意位置。每帧改写它的 `overlay.offset` 来移动它——**Canvas command 在 `createElement()`
+  之后不可变**，所以 knob 不能是一条重画的 canvas 命令。
+
+`capturePointer()` 是关键：它让指针移出 ring 之后 Move 仍然到达同一个 listener。摇杆逻辑本身在
+`UIVirtualStick.hpp` 里是纯函数（无 `UIContext` 依赖、可单测）。几何与失败语义：travel 半径是
+`baseRadius - knobRadius`（knob 不越出 base）、命中是圆形而非 Element 矩形、超出 travel 时 knob 夹到环上
+并保持满偏（**不是**冻结）、deadzone 径向且外侧重标定（与 gamepad 后端同一形状，因此手指与实体摇杆手感
+一致）、对角线归一化（W+D 不比 D 快 `sqrt(2)` 倍）、单一 pointer 拥有摇杆（第二根手指被忽略）、
+release/cancel 一律回中。每一条都对应 cocos2d-x 圆形控件上的一个真实缺陷，详见头文件注释与
+[平台输入](platform-input.md) 的 cocos2d-x 参考节。
+
 ## Tree 与事务提交
 
 Tree mutation、layout、hit、paint 与 semantics 都有固定容量和明确 commit。失败不能发布半份 snapshot；

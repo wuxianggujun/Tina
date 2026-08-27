@@ -19,6 +19,9 @@ if(TINA_BUILD_PLATFORM_GLFW AND TINA_BUILD_RENDER_BGFX)
     add_subdirectory(desktop)
     add_subdirectory(ui_showcase)
     add_subdirectory(desktop_shell)
+    # On-screen thumbstick driven by pointer drag or WASD. Needs a real window and
+    # UI backend, so it lives with the other desktop-only samples.
+    add_subdirectory(virtual_stick)
     add_subdirectory(3d_bgfx)
     add_subdirectory(3d_product)
     add_subdirectory(2d_bgfx)

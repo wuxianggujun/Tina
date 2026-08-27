@@ -210,6 +210,28 @@ X11(Xvfb)/sanitizer 证据已经记录；可选 Wayland/真显示器、真实 Ga
 
 ## 参考：cocos2d-x 手柄实现的可迁移教训
 
+**补充（2026-08-28，屏幕摇杆）：cocos2d-x 整棵树里没有任何虚拟/屏幕摇杆。** 搜过
+`joystick`/`thumbstick`/`dpad`/`VirtualPad`/`TouchStick`/`Sneaky` 的文件名与内容，全部命中都是**实体手柄**
+代码；`cocos/ui/` 的 24 个 widget 里没有径向控件。最接近的是
+`extensions/GUI/CCControlExtension` 的三个圆形控件，它们的缺陷正好构成 Tina
+`include/tina/ui/UIVirtualStick.hpp` 的设计依据（每条都有对应单测）：
+
+- `CCControlSaturationBrightnessPicker.cpp:205-209`：手指移出 base 圆的瞬间 **knob 冻结**，因为 move
+  处理器在 `dist > radius` 时提前返回；修复代码就在源码里被注释掉了。Tina 改为夹到环上并保持满偏——
+  继续滑动仍然满舵，这才是玩家预期。
+- `CCControlHuePicker.cpp:154-166`：命中测试是**硬编码环带 59..80**，而 knob 实际travel半径是 61
+  （`:107`），并且 x 上加了个裸 `+ 10` 而 y 没有对应项。Tina 的每个半径都从 config 推导，不含针对单一
+  屏幕尺寸调出来的字面量。
+- 全引擎无 deadzone，原始值直达游戏。Tina 用径向 deadzone + 外侧重标定，形状与 GLFW 后端一致。
+- `CCEventDispatcher.cpp:997-1006`：`EventListenerTouchOneByOne` 会把**每一个**命中控件的 touch 都
+  claim 进 `_claimedTouches`，所以两根手指在同一摇杆上都会驱动 knob、互相争抢；三个控件都没有 touch-id
+  防护。Tina 记录engage 时的 pointer，其余一概忽略。
+- 三个 picker **都没有 touch-ended 处理**，knob 永不回中。Tina 的 release/cancel 一律回中。
+
+保留下来的一条尺寸关系来自 `CCControlHuePicker.cpp:107`（`limit = width*0.5f - 15.0f`）：travel 要让
+**knob 整体留在 base 内**，而不是让 knob 圆心走到 base 边缘。绝对尺寸没有沿用——那是取色器而非拇指控件。
+消费面与接线注意事项见 [UI 框架](ui.md) 的「案例：屏幕摇杆」。
+
 2026-08-28 通读 cocos2d-x 的 controller 实现（`cocos/base/CCController*`、
 `cocos/platform/android/**/GameController*`）后记录。**结论：不移植任何代码**——它的形态与 Tina 冲突
 （每个 controller 一个可变对象、`delete this`、复用并 latch `stopPropagation` 的事件对象、按设备名字符串

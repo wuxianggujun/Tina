@@ -16,6 +16,7 @@ add_executable(tina_ui_tests
     UIControlGeometryTests.cpp
     UIControlPaintEmitterTests.cpp
     UIControlValuePrimitivesTests.cpp
+    UIVirtualStickTests.cpp
     UIContextLifetimeControlTests.cpp
     UIComponentProfileTests.cpp
     UIDialogTests.cpp
@@ -115,6 +116,7 @@ add_executable(tina_ui_tests
     header_isolation/UIListViewHeader.cpp
     header_isolation/UITreeViewHeader.cpp
     header_isolation/UIVirtualGridViewHeader.cpp
+    header_isolation/UIVirtualStickHeader.cpp
     header_isolation/UIDropdownHeader.cpp
     header_isolation/UIPopupHeader.cpp
     header_isolation/UISliderHeader.cpp
