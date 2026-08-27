@@ -119,6 +119,39 @@ runtime 会让一个场景对象隐式驱动全局资源系统。其余三步的
 - **不**合并 `Scene2DPhysicsBridge`：物理的 authoritative 方向与 fixed-step 语义独立（D5）；
 - **不**处理 3D：`World2DSnapshot` 明确拒绝携带 3D 组件的 entity，3D 场景序列化本身尚不存在。
 
+## 实现状态（2026-08-27）
+
+本 ADR 仍是 Proposed，但代码已部分落地（backlog `GAMEPLAY2D-001`）。已实现与未实现的分界必须显式记录，
+否则「Proposed」会被误读为「什么都还没有」：
+
+| 决策 | 状态 |
+| --- | --- |
+| D1 单个 `Scene2DRuntime` | 已实现 |
+| D2 追加 `Tina::Asset` + `Tina::Audio` | 已实现，无环 |
+| D3 运行时状态放 side table | 已实现，组件仍是纯数据 |
+| D4 顺序由三段式内部保证 | 已实现，`extract` 早于 `commitReady` 返回错误 |
+| **D5 由 `Scene2DRuntime` 统一驱动物理桥** | **未实现**：`Scene2DRuntime` 完全不引用 `Scene2DPhysicsBridge`，游戏仍需自己接。要么补接线，要么改本决定 |
+| D6 统一写 writer | 已实现 |
+| D7 `active == false` 仍实例化 | 已实现，并强化为**同时不可达**（见下） |
+
+实施中修正的三处偏差（均为「已发布契约与实现不符」，不是新功能）：
+
+1. **TileMap 的 layer 选择**：`ResourceBinding2D` 与 wire 的 `World2DResourceNodeDesc` 都没有 layer 字段，
+   而 `TileMapInstance::layer()` 拒绝 0，因此任何 TileMap 节点第一帧就返回错误。结论是**不需要 schema
+   bump**：TileMap 节点绑定整张地图，runtime 驱动全部 tile layer，只有 `visible` 层 emit —— 这正是 layer
+   标志在 asset 与 Editor 里已有的含义，也正是 sample 手写的行为（layer 10 visible 渲染、layer 20
+   invisible 仅供碰撞）。层序决定 `sortingLayer`，每层独立 stable key 区间。
+2. **authored transform 必须定位节点**：Fx 分支原先忽略 `WorldTransform`，因此在 Editor 里拖动
+   FxEmitter2D 不改变运行时粒子位置。这属于 ADR 0030 D3 判定为缺陷的同一类（Editor 所见与 runtime 不
+   一致），已修正为 payload origin 在节点 world 位置上偏移。
+3. **`active == false` 必须同时不可达**：原实现只跳过 update/extract，但 `navigationGrid()` 与
+   `playAudio()` 不看该标志，因此 authored 关闭的导航区仍会阻挡寻路。现在两者以及 `fxInstance()` 都对
+   inactive 节点返回 null / `InvalidArgument`。
+4. **`shutdown()` 必须先停 voice 再放 lease**：原实现只清容器。`AudioPcmClipView` 非拥有，而
+   `AssetStore::releaseLease` 在 `UnloadPending` 时立即擦除 payload，因此仍在播放的 voice 会读到已释放
+   内存——这是 use-after-free 而非泄漏。runtime 现在跟踪 `playAudio()` 返回的 voice，并在释放 lease 前
+   `enqueueStop` + `pumpCompletions`。
+
 ## 结果
 
 - authored 的四种 resource 节点第一次在 runtime 有意义，Editor 里画的东西和跑起来的东西一致；

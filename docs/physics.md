@@ -123,10 +123,26 @@ Scene2DRuntime::extract(...)           // tile + particle sprites
 `extract()` 在 `commitReady()` 之前调用返回错误，而不是安静地画出过期地图。`pump` 不藏进 runtime，
 因为一个场景对象不应隐式驱动全局资源系统。
 
+节点位置由 authored `WorldTransform` 决定：TileMap 的 map-local 原点与 Fx 的 burst origin 都在其上偏移
+（Fx2D payload 自带的 origin 是节点内偏移，两者相加而非互相取代）。因此在 Editor 里拖动节点，运行时位置
+随之改变。
+
+TileMap 节点绑定的是整张地图，wire format 没有「选哪个 layer」的字段，因此 runtime 驱动该地图的**全部
+tile layer**：每层都 stream（不可见层是游戏查询碰撞/寻路的数据源），但只有 `visible` 层 emit sprite，
+这正是 layer 标志在 asset 与 Editor 中已有的含义。层序决定 `sortingLayer`，每层使用独立的 stable key
+区间，否则两层同一 cell 的 tile 会被 sprite 排序视作同一项。object layer 被跳过（它承载 spawn 数据而非
+cell）。一张地图的 tile layer 数超过 `tileLayersPerMapCapacity` 时 build 失败。
+
 失败语义：kind 不匹配或 AssetId 不在 catalog 中的节点计入 `unresolvedCount` 并跳过——一个陈旧引用不该让
 整个场景无法加载；容量不足与 lease 获取失败则 fail closed，且回滚本次已获取的全部 lease。
-`active == false` 的节点仍被实例化并保留 lease，但不 update、不 extract，因此切回 active 是一次布尔翻转
-而不是一次加载。`shutdown()` 必须在 `AssetSystem`/`AudioEngine` 之前调用，可重复调用。
+`active == false` 的节点仍被实例化并保留 lease，但不 update、不 extract、也**不可达**——
+`navigationGrid()`/`fxInstance()` 返回 null，`playAudio()` 返回 `InvalidArgument`，因为能被寻路查询到的
+「已关闭」区域仍会阻挡路径。切回 active 因此是一次布尔翻转而不是一次加载。
+
+`shutdown()` 必须在 `AssetSystem`/`AudioEngine` 之前调用，可重复调用。它**先停 voice 再放 lease**：
+`AudioPcmClipView` 是非拥有的，而释放最后一个 lease 会立即擦除 cooked payload，顺序反了就是
+use-after-free 而不是泄漏。`playAudio()` 返回的 voice 被跟踪到终态；`releaseFinishedVoices()` 回收引擎
+已退休的槽位，超出 `audioVoiceCapacity` 时 fail closed 而不是启动一个 shutdown 无法停止的 voice。
 
 ## Scene collider bridge
 

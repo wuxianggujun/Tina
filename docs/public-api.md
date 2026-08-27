@@ -798,8 +798,15 @@ schema 直接拒绝，不保留运行时兼容分支。详见 [World2D 序列化
 
 `Gameplay2D::Scene2DRuntime`（`TINA_BUILD_PHYSICS2D=ON` 时随 `Tina::GameSDK` 提供）实例化 authored 的
 `TileMap2D`/`FxEmitter2D`/`NavigationRegion2D`/`AudioPlayer2D` 节点，并持有它们的 lease 与每帧顺序。
-`Scene::ResourceBinding2D` 因此保持纯数据、`tina_scene` 继续不链接 Asset/Audio。详见
-[physics.md](physics.md#scene-运行时所有者) 与 [ADR 0031](adr/0031-scene-2d-runtime-ownership.md)。
+`Scene::ResourceBinding2D` 因此保持纯数据、`tina_scene` 继续不链接 Asset/Audio。
+
+节点位置来自 authored `WorldTransform`（`build()` 前须跑 `updateWorldTransforms()`）。TileMap 节点绑定整张
+地图并驱动其**全部 tile layer**——不可见层仍 stream 供碰撞/寻路查询，但只有 `visible` 层 emit sprite。
+`active == false` 的节点保留 lease 但既不参与每帧也**不可达**：`navigationGrid()`/`fxInstance()` 返回
+null，`playAudio()` 返回 `InvalidArgument`。`shutdown()` 先停 voice 再放 lease（`AudioPcmClipView` 非拥有，
+顺序反了是 use-after-free），且必须在 `AssetSystem`/`AudioEngine` 之前调用。**限制：** 物理桥仍需游戏自己
+接（ADR 0031 的 D5 未实现）。详见 [physics.md](physics.md#scene-运行时所有者) 与
+[ADR 0031](adr/0031-scene-2d-runtime-ownership.md)（Proposed）。
 
 `World2DSceneIndex` 把 authored 身份关联到实例化后的 entity，这是把游戏逻辑挂到「不是代码建的场景」上的
 最小充分条件。它提供 `entityForStableId()`、`entityForName()`、`stableIdForEntity()` 与 `nameForEntity()`；

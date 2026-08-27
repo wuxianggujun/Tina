@@ -23,9 +23,19 @@ struct Scene2DRuntimeConfig final {
     Core::usize fxCapacity = 64;
     Core::usize navigationCapacity = 4;
     Core::usize audioCapacity = 64;
-    // Per TileMap node, forwarded to TileMapStream.
+    // Voices started by playAudio() that are still tracked. The runtime has to
+    // remember them because the clip view it handed the engine borrows the lease
+    // payload, so shutdown() must stop them before that payload is released.
+    Core::usize audioVoiceCapacity = 32;
+    // Tile layers instantiated per TileMap node. A map may author up to 256; a
+    // scene node that uses more than this is CapacityExceeded.
+    Core::usize tileLayersPerMapCapacity = 8;
+    // Per TileMap node, forwarded to TileMapStream. residentCapacity has to cover
+    // every tile layer at once, because all of them stream from the same stream.
     Asset::TileMapStreamConfig tileMapStream{};
-    // Sprites emitted by one TileMap layer in one frame.
+    // Reserved once for the per-layer emission scratch buffer. Emission still grows
+    // it if a layer produces more, so this is a no-reallocation hint rather than a
+    // hard bound.
     Core::usize tileSpriteCapacity = 4096;
     std::pmr::memory_resource* memoryResource = nullptr;
 };
@@ -39,9 +49,22 @@ struct Scene2DRuntimeStats final {
     // are counted rather than failing the build, because one bad reference in a
     // large scene should not make the scene unloadable.
     Core::usize unresolvedCount = 0;
+    // Tile layers driven across every TileMap node. Reported because a map whose
+    // layers were all invisible looks identical to one that failed to instantiate.
+    Core::usize tileLayerCount = 0;
     Core::usize residentTileChunks = 0;
     Core::u64 tileSpritesEmitted = 0;
     Core::u64 particleSpritesEmitted = 0;
+};
+
+// One tile layer of an instantiated TileMap node.
+struct Scene2DTileLayer final {
+    AssetFormat::TileMapLayerId layerId = 0;
+    // Authored layer visibility. Every tile layer streams, because an invisible
+    // layer is still the source a game queries for collision and navigation, but
+    // only visible ones emit sprites -- which is what the flag already means in the
+    // asset and in the Editor.
+    bool visible = false;
 };
 
 // Owner that turns an authored 2D scene into a running one.
@@ -107,17 +130,45 @@ class Scene2DRuntime final {
 
     // Plays the clip bound to one AudioPlayer2D node. Playback is explicit rather
     // than automatic on build, because when a sound starts is gameplay's decision.
+    //
+    // An inactive node refuses to play, matching the rule that active is what
+    // decides whether an authored node participates.
+    //
+    // The returned voice is tracked until it reaches a terminal completion or
+    // shutdown() stops it, because the clip view the engine holds borrows this
+    // node's lease payload.
     [[nodiscard]] Core::Result<Audio::AudioVoiceId> playAudio(Scene::EntityId entity);
+
+    // Drops voices the engine has already retired, so long-running scenes do not
+    // fill audioVoiceCapacity with finished one-shots. The caller still owns
+    // AudioEngine::pumpCompletions; this only reconciles against what it observed.
+    [[nodiscard]] Core::Status releaseFinishedVoices();
 
     // Releases every lease, voice and grid in reverse order. Must run before the
     // AssetSystem or AudioEngine it was built against is destroyed, matching the
     // TileMapPhysicsSync2D and Scene2DPhysicsBridge contract. Safe to call twice.
+    //
+    // Voices are stopped and pumped to their terminal completion *before* the clip
+    // leases backing them are released: AudioPcmClipView is non-owning, and
+    // releasing the last lease erases the cooked payload the engine is still
+    // reading. Ordering it the other way is a use-after-free, not a leak.
     [[nodiscard]] Core::Status shutdown() noexcept;
 
     [[nodiscard]] const Scene2DRuntimeStats& stats() const noexcept { return m_stats; }
-    // Null when the entity is not an instantiated navigation node. Exposed so a
-    // game can path against an authored grid without rebuilding it.
+    // Null when the entity is not an instantiated navigation node, or when that
+    // node is authored inactive. Exposed so a game can path against an authored
+    // grid without rebuilding it.
     [[nodiscard]] Navigation2D::NavigationGrid2D* navigationGrid(Scene::EntityId entity) noexcept;
+
+    // Null for a non-Fx or inactive node. Mutable because a trail only has
+    // segments if something appends points to it, and that something is gameplay:
+    // the runtime advances and emits the trail but cannot know where it should go.
+    [[nodiscard]] Scene::Fx2DInstance* fxInstance(Scene::EntityId entity) noexcept;
+
+    // World position the node was instantiated at, or {0,0} for an unknown entity.
+    // Particle origins are already offset by it; a game appending trail points
+    // needs it to place them in the same space.
+    [[nodiscard]] Scene::Vec2 fxOrigin(Scene::EntityId entity) const noexcept;
 
   private:
     struct TileMapEntry final {
@@ -125,7 +176,9 @@ class Scene2DRuntime final {
         // TileMapStream is move-constructible but not move-assignable, so it is
         // constructed in place rather than assigned into an existing entry.
         std::optional<Asset::TileMapStream> stream{};
-        AssetFormat::TileMapLayerId layerId = 0;
+        // Discovered from the asset. A TileMap node binds a whole map, and the wire
+        // format has no field to select one layer, so all tile layers are driven.
+        std::vector<Scene2DTileLayer> layers{};
         float originX = 0.0F;
         float originY = 0.0F;
         bool active = true;
@@ -138,6 +191,10 @@ class Scene2DRuntime final {
         std::optional<Scene::Fx2DInstance> instance{};
         // The particle sprite is a weak handle, so the lease has to live here.
         Asset::AssetLease spriteLease{};
+        // Node world position at build. The Fx2D payload's own origin is authored
+        // relative to the node, so both are summed rather than one replacing the
+        // other -- otherwise moving the node in the Editor changes nothing.
+        Scene::Vec2 origin{};
         bool active = true;
     };
 
@@ -157,6 +214,9 @@ class Scene2DRuntime final {
     };
 
     [[nodiscard]] std::pmr::memory_resource& memory() const noexcept;
+    // Stops every tracked voice and pumps until the engine reports them retired,
+    // so no voice is still reading a clip payload when its lease goes away.
+    void stopTrackedVoices() noexcept;
 
     Scene2DRuntimeConfig m_config{};
     Asset::AssetSystem* m_assets = nullptr;
@@ -165,10 +225,15 @@ class Scene2DRuntime final {
     std::vector<FxEntry> m_fx{};
     std::vector<NavigationEntry> m_navigation{};
     std::vector<AudioEntry> m_audio_nodes{};
+    // Voices whose bound clip borrows one of the leases above.
+    std::vector<Audio::AudioVoiceId> m_voices{};
     // Reused across frames so extraction allocates nothing per frame.
     std::pmr::vector<Render::RenderSprite2DInput> m_tileSprites{
         std::pmr::polymorphic_allocator<Render::RenderSprite2DInput>{
             std::pmr::get_default_resource()}};
+    // One entry per tile layer of the node being updated, reused for the same
+    // reason: updateDemand takes the whole span at once.
+    std::vector<Asset::TileMapChunkDemand> m_demands{};
     Scene2DRuntimeStats m_stats{};
     bool m_committedThisFrame = false;
 };

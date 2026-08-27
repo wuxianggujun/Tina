@@ -49,10 +49,16 @@
 
 ## Proposed
 
-当前唯一未决的 Proposed ADR 是 [0027](adr/0027-runtime-metrics-registry.md)（Runtime Metrics 固定
-容量 counter registry：owner/生命周期、counter 模型、注册身份与线程模型、热路径错误、容量、
-snapshot 语义、编译开关等关键决策待确认；Accepted 前不建立占位 API，不修改 Runtime）。新的候选
-决定必须先新增 ADR，不能只写入主题文档。
+当前未决的 Proposed ADR 有三个。新的候选决定必须先新增 ADR，不能只写入主题文档。
+
+| ADR | 范围 | 实现状态 |
+| --- | --- | --- |
+| [0027](adr/0027-runtime-metrics-registry.md) | Runtime Metrics 固定容量 counter registry：owner/生命周期、counter 模型、注册身份与线程模型、热路径错误、容量、snapshot 语义、编译开关等关键决策待确认 | 未实现：Accepted 前不建立占位 API，不修改 Runtime |
+| [0030](adr/0030-gameplay-2d-binding-and-physics-bridge.md) | World 保持封闭 + `World2DSceneIndex` 关联；authored payload 不得静默丢弃；`tina_gameplay2d` 单向 physics 桥 | **已实现**（`GAMEPLAY2D-001`）。与 0027 不同，本 ADR 的代码先落地了：payload 静默丢弃是正确性缺陷，不能等待审阅。maintainer 审阅可能要求调整已实施部分 |
+| [0031](adr/0031-scene-2d-runtime-ownership.md) | `Scene2DRuntime` 拥有四种 authored resource 节点的实例化、lease 生命周期与每帧顺序 | **部分实现**（`GAMEPLAY2D-001`）：D1-D4、D6、D7 已落地；**D5（由 `Scene2DRuntime` 统一驱动物理桥）未实现**，游戏仍需自己接 `Scene2DPhysicsBridge` |
+
+「Proposed 但已实现」是明确的例外状态而非常态：它表示实现事实已存在、决策理由尚未被批准，因此
+`design-freeze.md` 的 Accepted 表不收录它们，且不得被引用为既定契约。
 
 固定机 hard-gate / 多进程 MAD 等实现尾巴记在 [Backlog](backlog.md)（PERF-002），不单独占 Proposed 行。
 `UI-FLOW-001` 复用现有 retained node：Layer 是 root 直接子节点，Screen 是 Layer 直接子节点，固定容量栈

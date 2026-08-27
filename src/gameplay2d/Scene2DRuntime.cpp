@@ -49,6 +49,65 @@ namespace {
                          "TileMap asset has no required Tileset dependency");
 }
 
+// A TileMap node binds a whole map, and the wire format carries no field to select
+// a layer, so the runtime drives every tile layer the map authored. Object layers
+// are skipped: they hold gameplay spawn data, not cells, and the stream rejects
+// demand for them.
+[[nodiscard]] Core::Status collectTileLayers(const Asset::CookedAssetFile& file,
+                                            Core::usize capacity,
+                                            std::vector<Scene2DTileLayer>& out)
+{
+    out.clear();
+    auto payload = Asset::parseTileMapFromCooked(file);
+    if (!payload)
+    {
+        return Core::failure(std::move(payload.error()));
+    }
+    for (Core::u16 index = 0; index < payload->layerCount; ++index)
+    {
+        const auto layer = payload->layerAt(index);
+        if (!layer.has_value() || layer->kind != AssetFormat::TileMapLayerKind::Tile)
+        {
+            continue;
+        }
+        if (out.size() == capacity)
+        {
+            return Core::failure(Scene::SceneErrorCode::CapacityExceeded,
+                                 "TileMap authors more tile layers than tileLayersPerMapCapacity");
+        }
+        out.push_back(
+            Scene2DTileLayer{.layerId = layer->stableLayerId, .visible = layer->visible});
+    }
+    if (out.empty())
+    {
+        return Core::failure(Asset::AssetErrorCode::CatalogEntryMismatch,
+                             "TileMap asset authors no tile layer");
+    }
+    return Core::success();
+}
+
+// Where an authored node sits in the world. WorldTransform is used rather than
+// LocalTransform so a node parented under a moved root lands correctly; the caller
+// must have run updateWorldTransforms(). A missing transform means the entity was
+// never published, which is treated as the origin rather than an error because the
+// resource binding itself is still valid.
+[[nodiscard]] Scene::Vec2 worldOrigin(const Scene::World& world, Scene::EntityId entity) noexcept
+{
+    const Scene::WorldTransform* transform = world.worldTransform(entity);
+    if (transform == nullptr)
+    {
+        return {};
+    }
+    return {transform->position.x, transform->position.y};
+}
+
+// Separates one layer's stable tile keys from the next. A layer holds at most
+// MaxDimension^2 cells, so this stride cannot overlap, and layer ids are bounded by
+// MaxLayers -- the product stays far inside u64.
+constexpr Core::u64 TileLayerStableKeyStride =
+    static_cast<Core::u64>(AssetFormat::TileMapWire::MaxDimension) *
+    AssetFormat::TileMapWire::MaxDimension;
+
 } // namespace
 
 std::pmr::memory_resource& Scene2DRuntime::memory() const noexcept
@@ -70,6 +129,11 @@ try
     {
         return Core::failure(Core::CoreErrorCode::InvalidArgument,
                              "Scene2DRuntime tile sprite capacity must be non-zero");
+    }
+    if (config.tileLayersPerMapCapacity == 0)
+    {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                             "Scene2DRuntime tile layer capacity must be non-zero");
     }
     m_config = config;
     m_assets = &assets;
@@ -145,16 +209,22 @@ try
                 return Core::failure(std::move(stream.error()));
             }
             TileMapEntry entry{.entity = entity, .active = binding->active};
+            // Discovered before the stream is stored so a malformed map fails the
+            // build instead of returning an error from the first frame's demand.
+            if (auto status = collectTileLayers(*file, m_config.tileLayersPerMapCapacity,
+                                                entry.layers);
+                !status)
+            {
+                rollback();
+                return status;
+            }
             entry.stream.emplace(std::move(*stream));
             entry.tileset = *tilesetHandle;
             // Map-local origin comes from the node's published world transform, so
             // moving the node in the Editor moves the tiles.
-            if (const Scene::WorldTransform* transform = world.worldTransform(entity);
-                transform != nullptr)
-            {
-                entry.originX = transform->position.x;
-                entry.originY = transform->position.y;
-            }
+            const Scene::Vec2 origin = worldOrigin(world, entity);
+            entry.originX = origin.x;
+            entry.originY = origin.y;
             m_tileMaps.push_back(std::move(entry));
             break;
         }
@@ -192,6 +262,12 @@ try
                 rollback();
                 return Core::failure(std::move(instance.error()));
             }
+            // The authored node transform places the emitter; the payload origin is
+            // an offset within it. Ignoring the transform would make dragging an
+            // FxEmitter2D in the Editor have no runtime effect.
+            const Scene::Vec2 origin = worldOrigin(world, entity);
+            instance->initialBurst.origin.x += origin.x;
+            instance->initialBurst.origin.y += origin.y;
             // The factory returns the initial burst but does not emit it.
             if (auto status = instance->particles.emitBurst(instance->initialBurst); !status)
             {
@@ -201,6 +277,7 @@ try
             FxEntry entry{.entity = entity, .active = binding->active};
             entry.instance.emplace(std::move(*instance));
             entry.spriteLease = std::move(*spriteLease);
+            entry.origin = origin;
             m_fx.push_back(std::move(entry));
             break;
         }
@@ -264,6 +341,9 @@ try
         m_tileSprites = std::pmr::vector<Render::RenderSprite2DInput>{
             std::pmr::polymorphic_allocator<Render::RenderSprite2DInput>{&memory()}};
         m_tileSprites.reserve(m_config.tileSpriteCapacity);
+        // Reserved up front so per-frame demand publication never allocates.
+        m_demands.reserve(m_config.tileLayersPerMapCapacity);
+        m_voices.reserve(m_config.audioVoiceCapacity);
     } catch (const std::bad_alloc&)
     {
         rollback();
@@ -272,6 +352,10 @@ try
     }
 
     m_stats.tileMapCount = m_tileMaps.size();
+    for (const TileMapEntry& entry : m_tileMaps)
+    {
+        m_stats.tileLayerCount += entry.layers.size();
+    }
     m_stats.fxCount = m_fx.size();
     m_stats.navigationCount = m_navigation.size();
     m_stats.audioCount = m_audio_nodes.size();
@@ -296,10 +380,21 @@ Core::Status Scene2DRuntime::updateDemand(const Asset::TileChunkCameraQuery& cam
         Asset::TileChunkCameraQuery local = camera;
         local.centerX -= entry.originX;
         local.centerY -= entry.originY;
-        const std::array<Asset::TileMapChunkDemand, 1> demands{
-            Asset::TileMapChunkDemand{.layerId = entry.layerId, .priority = 0, .camera = local},
-        };
-        if (auto status = entry.stream->updateDemand(demands); !status)
+        // One demand per tile layer in a single call: updateDemand is transactional
+        // over the whole span, so splitting it per layer would let the second layer
+        // hit capacity after the first already replaced the active set.
+        m_demands.clear();
+        for (const Scene2DTileLayer& layer : entry.layers)
+        {
+            // Visible layers first so they win the request budget when residency
+            // cannot cover every layer this frame.
+            m_demands.push_back(Asset::TileMapChunkDemand{
+                .layerId = layer.layerId,
+                .priority = layer.visible ? 1U : 0U,
+                .camera = local,
+            });
+        }
+        if (auto status = entry.stream->updateDemand(m_demands); !status)
         {
             return status;
         }
@@ -369,32 +464,59 @@ Core::Status Scene2DRuntime::extract(const Scene::World& world, Render::RenderSc
             continue;
         }
         const Asset::TileMapInstance& map = entry.stream->map();
+        // Every resident chunk of the map spans the same world rectangle, so the
+        // emission window is computed once per node from the map extent rather than
+        // from an unbounded constant that would depend on float range.
+        const float extentX =
+            static_cast<float>(map.widthCells()) * map.cellSizeMeters() * 0.5F;
+        const float extentY =
+            static_cast<float>(map.heightCells()) * map.cellSizeMeters() * 0.5F;
+        Asset::TileChunkCameraQuery local{};
+        // Map-local: the whole map, because residency already bounded what is
+        // loaded. Re-culling here against a camera extract was not given would drop
+        // chunks the caller paid to stream in.
+        local.centerX = extentX;
+        local.centerY = extentY;
+        local.halfWidth = extentX;
+        local.halfHeight = extentY;
+
         Asset::TileChunkSpriteEmitParams params{};
         params.tileset = entry.tileset;
         params.bindingResolver = resolver;
         params.originX = entry.originX;
         params.originY = entry.originY;
-        Asset::TileChunkCameraQuery local{};
-        local.centerX = 0.0F;
-        local.centerY = 0.0F;
-        // Residency already bounded what is loaded, so emission covers everything
-        // resident rather than re-culling against a camera it was not given.
-        local.halfWidth = 1.0e6F;
-        local.halfHeight = 1.0e6F;
-        auto emitted = Asset::emitVisibleTileMapSprites(map, entry.layerId, local, params,
-                                                        frameResources, m_tileSprites);
-        if (!emitted)
+        Core::i16 sortingLayer = 0;
+        for (const Scene2DTileLayer& layer : entry.layers)
         {
-            return Core::failure(std::move(emitted.error()));
-        }
-        for (const Render::RenderSprite2DInput& sprite : m_tileSprites)
-        {
-            if (auto status = writer.addSprite2D(sprite); !status)
+            // An invisible layer still streams -- games query it for collision -- but
+            // emitting it would draw the collision mask over the visual one.
+            if (!layer.visible)
             {
-                return status;
+                continue;
             }
+            // Authored layer order decides draw order. Without this every layer
+            // would share sortingLayer 0 and overlap resolution would fall back to
+            // the tile stable key, which is layer-independent.
+            params.sortingLayer = sortingLayer++;
+            // Distinct per layer, or two layers' tiles at the same cell would claim
+            // the same stable key and the sprite sort would treat them as one item.
+            params.stableEntityKeyBase =
+                static_cast<Core::u64>(layer.layerId) * TileLayerStableKeyStride;
+            auto emitted = Asset::emitVisibleTileMapSprites(map, layer.layerId, local, params,
+                                                            frameResources, m_tileSprites);
+            if (!emitted)
+            {
+                return Core::failure(std::move(emitted.error()));
+            }
+            for (const Render::RenderSprite2DInput& sprite : m_tileSprites)
+            {
+                if (auto status = writer.addSprite2D(sprite); !status)
+                {
+                    return status;
+                }
+            }
+            m_stats.tileSpritesEmitted += *emitted;
         }
-        m_stats.tileSpritesEmitted += *emitted;
     }
 
     for (FxEntry& entry : m_fx)
@@ -430,6 +552,25 @@ Core::Result<Audio::AudioVoiceId> Scene2DRuntime::playAudio(Scene::EntityId enti
         return Core::failure(Core::CoreErrorCode::NotFound,
                              "Scene entity is not an instantiated AudioPlayer2D node");
     }
+    if (!found->active)
+    {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                             "AudioPlayer2D node is authored inactive");
+    }
+    // A tracked voice keeps this node's lease reachable for shutdown, so refusing
+    // here is better than starting playback the runtime cannot later stop safely.
+    if (m_voices.size() == m_config.audioVoiceCapacity)
+    {
+        if (auto status = releaseFinishedVoices(); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        if (m_voices.size() == m_config.audioVoiceCapacity)
+        {
+            return Core::failure(Scene::SceneErrorCode::CapacityExceeded,
+                                 "Scene2DRuntime tracked audio voice capacity is exhausted");
+        }
+    }
     const Asset::CookedAssetFile* file = found->clipLease.get();
     if (file == nullptr)
     {
@@ -446,13 +587,88 @@ Core::Result<Audio::AudioVoiceId> Scene2DRuntime::playAudio(Scene::EntityId enti
     {
         return Core::failure(std::move(clip.error()));
     }
-    return m_audio->playOneShotPcm(*clip);
+    auto voice = m_audio->playOneShotPcm(*clip);
+    if (!voice)
+    {
+        return voice;
+    }
+    try
+    {
+        m_voices.push_back(*voice);
+    } catch (const std::bad_alloc&)
+    {
+        // Losing track of the voice would leave it reading the clip payload after
+        // shutdown released the lease, so the voice is stopped instead of kept.
+        static_cast<void>(m_audio->enqueueStop(*voice));
+        static_cast<void>(m_audio->pumpCompletions());
+        return Core::failure(Core::CoreErrorCode::OutOfMemory,
+                             "Scene2DRuntime could not track the started audio voice");
+    }
+    return voice;
+}
+
+Core::Status Scene2DRuntime::releaseFinishedVoices()
+{
+    if (m_audio == nullptr)
+    {
+        return Core::success();
+    }
+    // isVoiceLive is false once a terminal completion retired the transient voice,
+    // which is exactly when its clip payload is no longer being read.
+    for (auto it = m_voices.begin(); it != m_voices.end();)
+    {
+        auto live = m_audio->isVoiceLive(*it);
+        if (!live)
+        {
+            return Core::failure(std::move(live.error()));
+        }
+        it = *live ? std::next(it) : m_voices.erase(it);
+    }
+    return Core::success();
+}
+
+void Scene2DRuntime::stopTrackedVoices() noexcept
+{
+    if (m_audio == nullptr)
+    {
+        m_voices.clear();
+        return;
+    }
+    for (const Audio::AudioVoiceId voice : m_voices)
+    {
+        // A voice the engine already retired reports StaleVoice; that is the
+        // desired end state, so the result is deliberately not propagated.
+        static_cast<void>(m_audio->enqueueStop(voice));
+    }
+    // Stop is a queued command: without pumping it, the mix slot stays active and
+    // the callback keeps reading the payload the lease is about to release.
+    static_cast<void>(m_audio->pumpCompletions());
+    m_voices.clear();
+}
+
+Scene::Fx2DInstance* Scene2DRuntime::fxInstance(Scene::EntityId entity) noexcept
+{
+    const auto found = std::ranges::find(m_fx, entity, &FxEntry::entity);
+    if (found == m_fx.end() || !found->active || !found->instance.has_value())
+    {
+        return nullptr;
+    }
+    return &*found->instance;
+}
+
+Scene::Vec2 Scene2DRuntime::fxOrigin(Scene::EntityId entity) const noexcept
+{
+    const auto found = std::ranges::find(m_fx, entity, &FxEntry::entity);
+    return found == m_fx.end() ? Scene::Vec2{} : found->origin;
 }
 
 Navigation2D::NavigationGrid2D* Scene2DRuntime::navigationGrid(Scene::EntityId entity) noexcept
 {
     const auto found = std::ranges::find(m_navigation, entity, &NavigationEntry::entity);
-    if (found == m_navigation.end() || !found->grid.has_value())
+    // An inactive node keeps its grid built so re-activating is a bool flip, but it
+    // must not be reachable: a game that pathed against it would still be blocked
+    // by geometry the author switched off.
+    if (found == m_navigation.end() || !found->active || !found->grid.has_value())
     {
         return nullptr;
     }
@@ -462,6 +678,9 @@ Navigation2D::NavigationGrid2D* Scene2DRuntime::navigationGrid(Scene::EntityId e
 Core::Status Scene2DRuntime::shutdown() noexcept
 {
     Core::Status result = Core::success();
+    // Before any lease is dropped: a live voice holds a non-owning view into a
+    // clip lease payload, and releasing the last lease erases that payload.
+    stopTrackedVoices();
     // Reverse acquisition order: streams release their chunk leases before the
     // root leases they were built from are dropped.
     for (TileMapEntry& entry : m_tileMaps)
@@ -480,6 +699,7 @@ Core::Status Scene2DRuntime::shutdown() noexcept
     m_navigation.clear();
     m_audio_nodes.clear();
     m_tileSprites.clear();
+    m_demands.clear();
     m_assets = nullptr;
     m_audio = nullptr;
     m_stats = {};
