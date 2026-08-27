@@ -130,7 +130,7 @@ runtime 会让一个场景对象隐式驱动全局资源系统。其余三步的
 | D2 追加 `Tina::Asset` + `Tina::Audio` | 已实现，无环 |
 | D3 运行时状态放 side table | 已实现，组件仍是纯数据 |
 | D4 顺序由三段式内部保证 | 已实现，`extract` 早于 `commitReady` 返回错误 |
-| **D5 由 `Scene2DRuntime` 统一驱动物理桥** | **未实现**：`Scene2DRuntime` 完全不引用 `Scene2DPhysicsBridge`，游戏仍需自己接。要么补接线，要么改本决定 |
+| D5 由 `Scene2DRuntime` 统一驱动物理桥 | 已实现：`build()` 接受 optional `PhysicsWorld2D*`，`fixedUpdatePhysics(world)` 在内部固定 `step → applyTo → updateWorldTransforms`。选择「调用方传入 world」而非 runtime 自建，因为 `PhysicsWorld2D` 的生命周期与配置归产品；`tina_gameplay2d` 本就只在 `TINA_BUILD_PHYSICS2D=ON` 时存在，故不新增依赖。桥仍是独立类型（D5 原意），只是所有权归 runtime |
 | D6 统一写 writer | 已实现 |
 | D7 `active == false` 仍实例化 | 已实现，并强化为**同时不可达**（见下） |
 
@@ -151,6 +151,11 @@ runtime 会让一个场景对象隐式驱动全局资源系统。其余三步的
    `AssetStore::releaseLease` 在 `UnloadPending` 时立即擦除 payload，因此仍在播放的 voice 会读到已释放
    内存——这是 use-after-free 而非泄漏。runtime 现在跟踪 `playAudio()` 返回的 voice，并在释放 lease 前
    `enqueueStop` + `pumpCompletions`。
+5. **必须暴露 resident `TileMapInstance`**：本 ADR 第 1 节说 runtime「编排而不重新实现」，但原实现把
+   instance 藏了起来，于是那些不该被重新实现的消费者一个都拿不到它——`TileMapGridCollision`（借用整个
+   生命周期）、`TileMapPhysicsSync2D`、`TileChunkDirtyCache::syncVisible`、cell picking、相机世界边界。
+   结论是 `tileMap()`/`tileLayers()` 属于本 ADR 的既有承诺而非新增能力。代价是 `Scene2DRuntime` 变为
+   **不可移动**：借用方持有 instance 引用，移动会在其背后搬走对象。
 
 ## 结果
 

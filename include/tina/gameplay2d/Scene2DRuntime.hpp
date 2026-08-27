@@ -4,6 +4,7 @@
 #include <tina/asset/TileMapStream.hpp>
 #include <tina/audio/AudioEngine.hpp>
 #include <tina/core/error/Result.hpp>
+#include <tina/gameplay2d/Scene2DPhysicsBridge.hpp>
 #include <tina/navigation2d/NavigationGrid2D.hpp>
 #include <tina/render/RenderScene.hpp>
 #include <tina/scene/Entity.hpp>
@@ -12,6 +13,7 @@
 
 #include <memory_resource>
 #include <optional>
+#include <span>
 #include <vector>
 
 namespace Tina::Gameplay2D {
@@ -37,6 +39,8 @@ struct Scene2DRuntimeConfig final {
     // it if a layer produces more, so this is a no-reallocation hint rather than a
     // hard bound.
     Core::usize tileSpriteCapacity = 4096;
+    // Forwarded to the physics bridge when build() is given a PhysicsWorld2D.
+    Scene2DPhysicsBridgeConfig physics{};
     std::pmr::memory_resource* memoryResource = nullptr;
 };
 
@@ -55,6 +59,9 @@ struct Scene2DRuntimeStats final {
     Core::usize residentTileChunks = 0;
     Core::u64 tileSpritesEmitted = 0;
     Core::u64 particleSpritesEmitted = 0;
+    // Simulation steps driven through fixedUpdatePhysics(). Zero when the runtime
+    // was built without a physics world.
+    Core::u64 physicsSteps = 0;
 };
 
 // One tile layer of an instantiated TileMap node.
@@ -89,9 +96,13 @@ class Scene2DRuntime final {
     Scene2DRuntime() noexcept = default;
     ~Scene2DRuntime() noexcept = default;
 
+    // Immovable. tileMap() hands out a reference that TileMapGridCollision and
+    // TileMapPhysicsSync2D borrow for their whole life, and moving the runtime
+    // would relocate the instance behind them. Making that a compile error is
+    // better than documenting it, because the failure is a dangling read.
     Scene2DRuntime(const Scene2DRuntime&) = delete;
     Scene2DRuntime& operator=(const Scene2DRuntime&) = delete;
-    Scene2DRuntime(Scene2DRuntime&&) noexcept = default;
+    Scene2DRuntime(Scene2DRuntime&&) = delete;
     Scene2DRuntime& operator=(Scene2DRuntime&&) = delete;
 
     // Instantiates every ResourceBinding2D in the world. Each kind acquires the
@@ -102,10 +113,15 @@ class Scene2DRuntime final {
     // audioEngine may be null when a product composes no Audio module; audio
     // nodes then count as unresolved rather than failing the build.
     //
+    // physicsWorld may be null when a scene has no authored physics or a product
+    // drives its own. When given, the authored PhysicsBody2D/PhysicsShape2D
+    // components are bridged here and fixedUpdatePhysics() owns the step order.
+    //
     // On failure everything this call created is released, so a partial runtime
     // is never left behind.
     [[nodiscard]] Core::Status build(const Scene::World& world, Asset::AssetSystem& assets,
                                      Audio::AudioEngine* audioEngine,
+                                     Physics2D::PhysicsWorld2D* physicsWorld,
                                      Scene2DRuntimeConfig config = {});
 
     // Step 1 of the frame. Publishes chunk demand for every active TileMap node
@@ -120,6 +136,22 @@ class Scene2DRuntime final {
 
     // Step 3. Advances particle and trail simulation for active Fx nodes.
     [[nodiscard]] Core::Status fixedUpdate(Core::Duration delta);
+
+    // Step 3b, when build() was given a PhysicsWorld2D. Runs one simulation step
+    // and republishes the hierarchy in the only order that is correct:
+    //
+    //   step() -> applyTo(world) -> updateWorldTransforms()
+    //
+    // Getting this wrong is silent. Reading transforms before applyTo renders a
+    // frame behind; skipping updateWorldTransforms leaves children at their old
+    // world position while the parent body has already moved. Physics stays
+    // authoritative in one direction -- to move a body, use
+    // PhysicsWorld2D::enqueueSetTransform rather than writing a transform.
+    //
+    // One step per call: the runtime does not own a fixed-step accumulator, because
+    // catch-up policy belongs to whoever owns the frame loop (ADR 0015). Call it
+    // once per substep. Returns Unsupported when no physics world was given.
+    [[nodiscard]] Core::Status fixedUpdatePhysics(Scene::World& world);
 
     // Step 4. Writes tile and particle sprites for active nodes into the frame.
     // Inactive nodes keep their leases but emit nothing.
@@ -155,10 +187,39 @@ class Scene2DRuntime final {
     [[nodiscard]] Core::Status shutdown() noexcept;
 
     [[nodiscard]] const Scene2DRuntimeStats& stats() const noexcept { return m_stats; }
+
+    // The bridge this runtime owns, so a game can look up the body for an authored
+    // entity and enqueue forces or teleports against it. Null when build() was
+    // given no physics world.
+    [[nodiscard]] Scene2DPhysicsBridge* physicsBridge() noexcept
+    {
+        return m_physics != nullptr ? &m_bridge : nullptr;
+    }
     // Null when the entity is not an instantiated navigation node, or when that
     // node is authored inactive. Exposed so a game can path against an authored
     // grid without rebuilding it.
     [[nodiscard]] Navigation2D::NavigationGrid2D* navigationGrid(Scene::EntityId entity) noexcept;
+
+    // The resident map of an instantiated TileMap node, or null for any other
+    // entity. Inactive nodes still return theirs: unlike a navigation grid, an
+    // inactive map is not a queryable world feature, so nothing is falsified by
+    // handing it out, and a game switching a map on needs it already reachable.
+    //
+    // Exposed because every real TileMap consumer needs the instance by reference
+    // and none of them can be reimplemented here: TileMapGridCollision borrows it
+    // for its whole life, TileMapPhysicsSync2D takes it at Create and every
+    // synchronize, TileChunkDirtyCache::syncVisible takes it per frame, and cell
+    // picking plus camera world bounds read its extent.
+    //
+    // Stable while this runtime lives and is not rebuilt. shutdown() invalidates
+    // it, so anything borrowing it long-term must be torn down first -- the same
+    // ordering TileMapPhysicsSync2D::shutdown() already requires.
+    [[nodiscard]] const Asset::TileMapInstance* tileMap(Scene::EntityId entity) const noexcept;
+
+    // The tile layers of an instantiated TileMap node, in authored order. Empty for
+    // any other entity. A game needs these to know which layer id to query for
+    // collision, because the ids are authored in the asset rather than fixed.
+    [[nodiscard]] std::span<const Scene2DTileLayer> tileLayers(Scene::EntityId entity) const noexcept;
 
     // Null for a non-Fx or inactive node. Mutable because a trail only has
     // segments if something appends points to it, and that something is gameplay:
@@ -221,6 +282,10 @@ class Scene2DRuntime final {
     Scene2DRuntimeConfig m_config{};
     Asset::AssetSystem* m_assets = nullptr;
     Audio::AudioEngine* m_audio = nullptr;
+    Physics2D::PhysicsWorld2D* m_physics = nullptr;
+    // Kept as a member rather than an optional: the bridge is empty until built,
+    // and its own build()/shutdown() already carry the lifecycle.
+    Scene2DPhysicsBridge m_bridge{};
     std::vector<TileMapEntry> m_tileMaps{};
     std::vector<FxEntry> m_fx{};
     std::vector<NavigationEntry> m_navigation{};

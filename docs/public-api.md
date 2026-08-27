@@ -804,8 +804,15 @@ schema 直接拒绝，不保留运行时兼容分支。详见 [World2D 序列化
 地图并驱动其**全部 tile layer**——不可见层仍 stream 供碰撞/寻路查询，但只有 `visible` 层 emit sprite。
 `active == false` 的节点保留 lease 但既不参与每帧也**不可达**：`navigationGrid()`/`fxInstance()` 返回
 null，`playAudio()` 返回 `InvalidArgument`。`shutdown()` 先停 voice 再放 lease（`AudioPcmClipView` 非拥有，
-顺序反了是 use-after-free），且必须在 `AssetSystem`/`AudioEngine` 之前调用。**限制：** 物理桥仍需游戏自己
-接（ADR 0031 的 D5 未实现）。详见 [physics.md](physics.md#scene-运行时所有者) 与
+顺序反了是 use-after-free），且必须在 `AssetSystem`/`AudioEngine`/`PhysicsWorld2D` 之前调用。
+
+`build()` 可选接收 `PhysicsWorld2D*`；给定时 runtime 拥有 `Scene2DPhysicsBridge`，
+`fixedUpdatePhysics(world)` 在内部固定 `step → applyTo → updateWorldTransforms`（每次一个 step，
+accumulator 仍归帧循环所有者），未给定时返回 `Unsupported` 而非静默空转。`tileMap()`/`tileLayers()`
+暴露 resident 地图与 authored 层序，供 `TileMapGridCollision`/`TileMapPhysicsSync2D`/`TileChunkDirtyCache`
+与 cell picking 借用；**`Scene2DRuntime` 因此不可移动**（move 已删除），且借用方必须在 `shutdown()` 前拆除。
+
+详见 [physics.md](physics.md#scene-运行时所有者) 与
 [ADR 0031](adr/0031-scene-2d-runtime-ownership.md)（Proposed）。
 
 `World2DSceneIndex` 把 authored 身份关联到实例化后的 entity，这是把游戏逻辑挂到「不是代码建的场景」上的

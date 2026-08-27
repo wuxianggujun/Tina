@@ -117,7 +117,9 @@ std::pmr::memory_resource& Scene2DRuntime::memory() const noexcept
 }
 
 Core::Status Scene2DRuntime::build(const Scene::World& world, Asset::AssetSystem& assets,
-                                   Audio::AudioEngine* audioEngine, Scene2DRuntimeConfig config)
+                                   Audio::AudioEngine* audioEngine,
+                                   Physics2D::PhysicsWorld2D* physicsWorld,
+                                   Scene2DRuntimeConfig config)
 try
 {
     if (m_assets != nullptr)
@@ -138,6 +140,7 @@ try
     m_config = config;
     m_assets = &assets;
     m_audio = audioEngine;
+    m_physics = physicsWorld;
     m_stats = {};
 
     // Anything acquired before a failure is released, so a failed build never
@@ -351,6 +354,17 @@ try
                              "Scene2DRuntime tile sprite storage allocation failed");
     }
 
+    // Physics last, so a bridge failure unwinds the resource leases above through
+    // the same rollback rather than needing its own path.
+    if (m_physics != nullptr)
+    {
+        if (auto status = m_bridge.build(world, *m_physics, m_config.physics); !status)
+        {
+            rollback();
+            return status;
+        }
+    }
+
     m_stats.tileMapCount = m_tileMaps.size();
     for (const TileMapEntry& entry : m_tileMaps)
     {
@@ -441,6 +455,33 @@ Core::Status Scene2DRuntime::fixedUpdate(Core::Duration delta)
             return status;
         }
     }
+    return Core::success();
+}
+
+Core::Status Scene2DRuntime::fixedUpdatePhysics(Scene::World& world)
+{
+    if (m_physics == nullptr)
+    {
+        return Core::failure(Core::CoreErrorCode::Unsupported,
+                             "Scene2DRuntime was built without a PhysicsWorld2D");
+    }
+    if (auto status = m_physics->step(); !status)
+    {
+        return status;
+    }
+    // Immediately after the step, before anything reads a transform: applyTo copies
+    // simulated position/angle into LocalTransform.
+    if (auto status = m_bridge.applyTo(world, *m_physics); !status)
+    {
+        return status;
+    }
+    // And republish, or children still sit at the world position their parent body
+    // occupied before the step.
+    if (auto status = world.updateWorldTransforms(); !status)
+    {
+        return status;
+    }
+    ++m_stats.physicsSteps;
     return Core::success();
 }
 
@@ -646,6 +687,22 @@ void Scene2DRuntime::stopTrackedVoices() noexcept
     m_voices.clear();
 }
 
+const Asset::TileMapInstance* Scene2DRuntime::tileMap(Scene::EntityId entity) const noexcept
+{
+    const auto found = std::ranges::find(m_tileMaps, entity, &TileMapEntry::entity);
+    if (found == m_tileMaps.end() || !found->stream.has_value())
+    {
+        return nullptr;
+    }
+    return &found->stream->map();
+}
+
+std::span<const Scene2DTileLayer> Scene2DRuntime::tileLayers(Scene::EntityId entity) const noexcept
+{
+    const auto found = std::ranges::find(m_tileMaps, entity, &TileMapEntry::entity);
+    return found == m_tileMaps.end() ? std::span<const Scene2DTileLayer>{} : found->layers;
+}
+
 Scene::Fx2DInstance* Scene2DRuntime::fxInstance(Scene::EntityId entity) noexcept
 {
     const auto found = std::ranges::find(m_fx, entity, &FxEntry::entity);
@@ -681,6 +738,15 @@ Core::Status Scene2DRuntime::shutdown() noexcept
     // Before any lease is dropped: a live voice holds a non-owning view into a
     // clip lease payload, and releasing the last lease erases that payload.
     stopTrackedVoices();
+    // Bodies and shapes go before the physics world they live in, which is the
+    // contract the caller is honouring by calling us first.
+    if (m_physics != nullptr)
+    {
+        if (Core::Status status = m_bridge.shutdown(*m_physics); !status && result)
+        {
+            result = status;
+        }
+    }
     // Reverse acquisition order: streams release their chunk leases before the
     // root leases they were built from are dropped.
     for (TileMapEntry& entry : m_tileMaps)
@@ -702,6 +768,7 @@ Core::Status Scene2DRuntime::shutdown() noexcept
     m_demands.clear();
     m_assets = nullptr;
     m_audio = nullptr;
+    m_physics = nullptr;
     m_stats = {};
     m_committedThisFrame = false;
     return result;

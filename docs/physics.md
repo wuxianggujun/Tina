@@ -113,15 +113,33 @@ lease 获取与 kind 校验）、把运行时状态放进按 `EntityId` 索引�
 每帧顺序：
 
 ```text
-Scene2DRuntime::updateDemand(camera)   // TileMap chunk demand（world → map-local）
-AssetSystem::pump(budget)              // 留在外部：AssetSystem 服务整个游戏
-Scene2DRuntime::commitReady()          // chunk residency 提交
-Scene2DRuntime::fixedUpdate(delta)     // particles / trails
-Scene2DRuntime::extract(...)           // tile + particle sprites
+Scene2DRuntime::updateDemand(camera)      // TileMap chunk demand（world → map-local）
+AssetSystem::pump(budget)                 // 留在外部：AssetSystem 服务整个游戏
+Scene2DRuntime::commitReady()             // chunk residency 提交
+Scene2DRuntime::fixedUpdate(delta)        // particles / trails
+Scene2DRuntime::fixedUpdatePhysics(world) // step → applyTo → updateWorldTransforms
+Scene2DRuntime::extract(...)              // tile + particle sprites
 ```
 
 `extract()` 在 `commitReady()` 之前调用返回错误，而不是安静地画出过期地图。`pump` 不藏进 runtime，
 因为一个场景对象不应隐式驱动全局资源系统。
+
+`fixedUpdatePhysics()` 把三步合成一次调用（ADR 0031 的 D5）：**`step()` → `applyTo()` →
+`updateWorldTransforms()`**。这三步顺序错了同样是安静的——在 `applyTo` 之前读 transform 会渲染出落后
+一帧的画面，漏掉 `updateWorldTransforms` 则子节点停在父 body 移动前的世界位置。每次调用只走**一个**
+step：fixed-step accumulator 与 catch-up 策略归帧循环所有者（ADR 0015），需要多 substep 就调用多次。
+`build()` 未传 `PhysicsWorld2D` 时返回 `Unsupported`，而不是静默空转。物理仍单向 authoritative，
+移动 body 走 `PhysicsWorld2D::enqueueSetTransform`；`physicsBridge()` 暴露桥本身以便按 authored entity
+查 body。
+
+`tileMap(entity)` 返回 resident `TileMapInstance` 的引用，`tileLayers(entity)` 返回 authored 层序与
+visibility。二者必须暴露，因为五个真实消费者都需要按引用拿到 instance 且都无法在 runtime 内重新实现：
+`TileMapGridCollision` 借用其整个生命周期、`TileMapPhysicsSync2D` 在 Create 与每次 synchronize 都要、
+`TileChunkDirtyCache::syncVisible` 每帧要、cell picking 与相机世界边界读它的 extent。层 id 是 asset
+authored 的而非固定值，所以游戏必须读 `tileLayers()` 才知道该查哪层碰撞。
+
+因此 `Scene2DRuntime` 是**不可移动的**（move 构造与赋值都已删除）：移动它会在借用方背后搬走 instance，
+而那个失败是悬垂读取，不该只靠注释约束。`shutdown()` 使借用失效，故借用方必须先拆。
 
 节点位置由 authored `WorldTransform` 决定：TileMap 的 map-local 原点与 Fx 的 burst origin 都在其上偏移
 （Fx2D payload 自带的 origin 是节点内偏移，两者相加而非互相取代）。因此在 Editor 里拖动节点，运行时位置

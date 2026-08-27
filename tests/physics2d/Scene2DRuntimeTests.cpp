@@ -1,6 +1,7 @@
 #include <tina/gameplay2d/Scene2DRuntime.hpp>
 
 #include <tina/asset/CatalogCook.hpp>
+#include <tina/asset/GridCollision.hpp>
 #include <tina/audio/AudioErrors.hpp>
 #include <tina/render/FramePin.hpp>
 #include <tina/render/RenderFramePacket.hpp>
@@ -192,6 +193,29 @@ class Scene2DRuntimeTest : public ::testing::Test {
         return std::move(*engine);
     }
 
+    [[nodiscard]] Physics2D::PhysicsWorld2D makePhysicsWorld()
+    {
+        auto world = Physics2D::PhysicsWorld2D::Create(Physics2D::PhysicsWorld2DConfig{
+            .gravityMetersPerSecondSquared = {0.0F, -10.0F},
+            .fixedDeltaSeconds = 1.0 / 60.0,
+        });
+        EXPECT_TRUE(world) << (world ? "" : world.error().message);
+        return std::move(*world);
+    }
+
+    // A dynamic body with one box shape, which is the minimum that actually falls.
+    [[nodiscard]] Scene::EntityId addFallingBody(Scene::World& world, float x, float y)
+    {
+        Scene::LocalTransform local{};
+        local.position = {x, y, 0.0F};
+        const Scene::EntityId body = world.createEntity(local).value();
+        EXPECT_TRUE(world.setPhysicsBody2D(body, Scene::PhysicsBody2D{
+                                                     .kind = Scene::PhysicsBodyKind2D::Rigid,
+                                                 }));
+        EXPECT_TRUE(world.setPhysicsShape2D(body, Scene::PhysicsShape2D{}));
+        return body;
+    }
+
     std::filesystem::path catalogRoot_{};
     std::pmr::unsynchronized_pool_resource memory_{};
     std::optional<Asset::AssetSystem> assets_{};
@@ -211,7 +235,7 @@ TEST_F(Scene2DRuntimeTest, InstantiatesEachResourceKindAndReleasesOnShutdown)
     Scene2DRuntime runtime;
     // No AudioEngine composed, so audio nodes count as unresolved rather than
     // failing the whole scene.
-    ASSERT_TRUE(runtime.build(world, *assets_, nullptr));
+    ASSERT_TRUE(runtime.build(world, *assets_, nullptr, nullptr));
     EXPECT_EQ(runtime.stats().fxCount, 1U);
     EXPECT_EQ(runtime.stats().navigationCount, 1U);
     EXPECT_EQ(runtime.stats().audioCount, 0U);
@@ -242,8 +266,8 @@ TEST_F(Scene2DRuntimeTest, RebuildWithoutShutdownIsRefused)
     ASSERT_TRUE(world.updateWorldTransforms());
 
     Scene2DRuntime runtime;
-    ASSERT_TRUE(runtime.build(world, *assets_, nullptr));
-    auto again = runtime.build(world, *assets_, nullptr);
+    ASSERT_TRUE(runtime.build(world, *assets_, nullptr, nullptr));
+    auto again = runtime.build(world, *assets_, nullptr, nullptr);
     ASSERT_FALSE(again);
     EXPECT_EQ(again.error().code, Core::CoreErrorCode::AlreadyExists);
     ASSERT_TRUE(runtime.shutdown());
@@ -263,7 +287,7 @@ TEST_F(Scene2DRuntimeTest, WrongKindAndMissingAssetsCountAsUnresolved)
     ASSERT_TRUE(world.updateWorldTransforms());
 
     Scene2DRuntime runtime;
-    ASSERT_TRUE(runtime.build(world, *assets_, nullptr));
+    ASSERT_TRUE(runtime.build(world, *assets_, nullptr, nullptr));
     EXPECT_EQ(runtime.stats().unresolvedCount, 2U);
     EXPECT_EQ(runtime.stats().navigationCount, 1U);
     EXPECT_NE(runtime.navigationGrid(good), nullptr);
@@ -280,7 +304,7 @@ TEST_F(Scene2DRuntimeTest, InactiveNodesInstantiateButDoNotSimulate)
     ASSERT_TRUE(world.updateWorldTransforms());
 
     Scene2DRuntime runtime;
-    ASSERT_TRUE(runtime.build(world, *assets_, nullptr));
+    ASSERT_TRUE(runtime.build(world, *assets_, nullptr, nullptr));
     EXPECT_EQ(runtime.stats().fxCount, 1U);
     // fixedUpdate must skip it rather than fail.
     ASSERT_TRUE(runtime.fixedUpdate(Core::Duration{1.0 / 60.0}));
@@ -300,7 +324,7 @@ TEST_F(Scene2DRuntimeTest, FxParticlesSpawnAtTheAuthoredNodeTransform)
     ASSERT_TRUE(world.updateWorldTransforms());
 
     Scene2DRuntime runtime;
-    ASSERT_TRUE(runtime.build(world, *assets_, nullptr));
+    ASSERT_TRUE(runtime.build(world, *assets_, nullptr, nullptr));
     EXPECT_EQ(runtime.fxOrigin(origin).x, 0.0F);
     EXPECT_EQ(runtime.fxOrigin(moved).x, 40.0F);
     EXPECT_EQ(runtime.fxOrigin(moved).y, -25.0F);
@@ -338,7 +362,7 @@ TEST_F(Scene2DRuntimeTest, InactiveNavigationAndAudioNodesAreNotReachable)
 
     Audio::AudioEngine engine = makeAudioEngine();
     Scene2DRuntime runtime;
-    ASSERT_TRUE(runtime.build(world, *assets_, &engine));
+    ASSERT_TRUE(runtime.build(world, *assets_, &engine, nullptr));
     // Instantiated, so re-activating stays a bool flip rather than a load.
     EXPECT_EQ(runtime.stats().navigationCount, 1U);
     EXPECT_EQ(runtime.stats().audioCount, 1U);
@@ -364,7 +388,7 @@ TEST_F(Scene2DRuntimeTest, ShutdownStopsVoicesBeforeReleasingClipLeases)
 
     Audio::AudioEngine engine = makeAudioEngine();
     Scene2DRuntime runtime;
-    ASSERT_TRUE(runtime.build(world, *assets_, &engine));
+    ASSERT_TRUE(runtime.build(world, *assets_, &engine, nullptr));
     EXPECT_EQ(runtime.stats().audioCount, 1U);
 
     auto voice = runtime.playAudio(audio);
@@ -393,7 +417,7 @@ TEST_F(Scene2DRuntimeTest, FinishedVoicesAreReleasedAndCapacityIsEnforced)
 
     Audio::AudioEngine engine = makeAudioEngine();
     Scene2DRuntime runtime;
-    ASSERT_TRUE(runtime.build(world, *assets_, &engine, {.audioVoiceCapacity = 1}));
+    ASSERT_TRUE(runtime.build(world, *assets_, &engine, nullptr, {.audioVoiceCapacity = 1}));
 
     auto first = runtime.playAudio(audio);
     ASSERT_TRUE(first) << first.error().message;
@@ -425,7 +449,7 @@ TEST_F(Scene2DRuntimeTest, TileMapStreamsEveryLayerAndEmitsOnlyVisibleOnes)
     ASSERT_TRUE(world.updateWorldTransforms());
 
     Scene2DRuntime runtime;
-    ASSERT_TRUE(runtime.build(world, *assets_, nullptr));
+    ASSERT_TRUE(runtime.build(world, *assets_, nullptr, nullptr));
     EXPECT_EQ(runtime.stats().tileMapCount, 1U);
     // Both layers are driven; the map has no field to select one.
     EXPECT_EQ(runtime.stats().tileLayerCount, 2U);
@@ -491,7 +515,7 @@ TEST_F(Scene2DRuntimeTest, InactiveTileMapDoesNotStreamOrEmit)
     ASSERT_TRUE(world.updateWorldTransforms());
 
     Scene2DRuntime runtime;
-    ASSERT_TRUE(runtime.build(world, *assets_, nullptr));
+    ASSERT_TRUE(runtime.build(world, *assets_, nullptr, nullptr));
     // Instantiated with its leases, so re-activating stays a bool flip.
     EXPECT_EQ(runtime.stats().tileMapCount, 1U);
     EXPECT_EQ(runtime.stats().tileLayerCount, 2U);
@@ -505,6 +529,145 @@ TEST_F(Scene2DRuntimeTest, InactiveTileMapDoesNotStreamOrEmit)
     ASSERT_TRUE(runtime.shutdown());
 }
 
+// The five real TileMap consumers all take `const TileMapInstance&` and none can be
+// reimplemented inside the runtime, so hiding the instance made the API unusable for
+// any actual tilemap.
+TEST_F(Scene2DRuntimeTest, ExposesTheResidentMapAndItsLayersToConsumers)
+{
+    Scene::World world = makeWorld();
+    const Scene::EntityId map =
+        addResourceNode(world, TileMapSeed, Scene::ResourceBindingKind2D::TileMap);
+    const Scene::EntityId notAMap =
+        addResourceNode(world, NavigationSeed, Scene::ResourceBindingKind2D::NavigationRegion);
+    ASSERT_TRUE(world.updateWorldTransforms());
+
+    Scene2DRuntime runtime;
+    ASSERT_TRUE(runtime.build(world, *assets_, nullptr, nullptr));
+
+    const Asset::TileMapInstance* instance = runtime.tileMap(map);
+    ASSERT_NE(instance, nullptr);
+    EXPECT_EQ(runtime.tileMap(notAMap), nullptr);
+    EXPECT_EQ(instance->widthCells(), 4U);
+    EXPECT_EQ(instance->heightCells(), 2U);
+
+    // Layer ids are authored in the asset, so a game has to read them rather than
+    // hardcode them to know which layer carries collision.
+    const auto layers = runtime.tileLayers(map);
+    ASSERT_EQ(layers.size(), 2U);
+    EXPECT_EQ(layers[0].layerId, VisualLayerId);
+    EXPECT_TRUE(layers[0].visible);
+    EXPECT_EQ(layers[1].layerId, CollisionLayerId);
+    EXPECT_FALSE(layers[1].visible);
+    EXPECT_TRUE(runtime.tileLayers(notAMap).empty());
+
+    ASSERT_TRUE(runtime.updateDemand(Asset::TileChunkCameraQuery{
+        .centerX = 2.0F, .centerY = 1.0F, .halfWidth = 4.0F, .halfHeight = 3.0F}));
+    ASSERT_TRUE(assets_->pump(16));
+    ASSERT_TRUE(runtime.commitReady());
+
+    // The borrowing adapter that motivated the accessor: it holds the reference for
+    // its whole life, which is why the runtime is immovable.
+    const Asset::TileMapGridCollision collision{*instance, CollisionLayerId};
+    EXPECT_EQ(collision.widthCells(), 4U);
+    std::pmr::vector<Asset::TileMapSolidHit> hits{&memory_};
+    auto found = collision.querySolidAabb(
+        Asset::TileMapSolidQuery{.minX = 0.0F, .minY = 0.0F, .maxX = 4.0F, .maxY = 1.0F}, hits);
+    ASSERT_TRUE(found.has_value()) << found.error().message;
+    // The collision layer's bottom row is 4 solid cells.
+    EXPECT_EQ(*found, 4U);
+
+    ASSERT_TRUE(runtime.shutdown());
+    EXPECT_EQ(runtime.tileMap(map), nullptr);
+}
+
+// ADR 0031 D5: the runtime drives the bridge, so step -> applyTo ->
+// updateWorldTransforms is one guaranteed call instead of three the game must order.
+TEST_F(Scene2DRuntimeTest, DrivesThePhysicsBridgeInTheCorrectOrder)
+{
+    Scene::World world = makeWorld();
+    const Scene::EntityId body = addFallingBody(world, 0.0F, 10.0F);
+    // A child proves updateWorldTransforms ran: its world position only tracks the
+    // parent body if the hierarchy was republished after applyTo.
+    Scene::LocalTransform childLocal{};
+    childLocal.position = {1.0F, 0.0F, 0.0F};
+    const Scene::EntityId child = world.createEntity(childLocal).value();
+    ASSERT_TRUE(world.setParent(child, body, Scene::ReparentMode::KeepLocal));
+    ASSERT_TRUE(world.updateWorldTransforms());
+
+    Physics2D::PhysicsWorld2D physics = makePhysicsWorld();
+    Scene2DRuntime runtime;
+    ASSERT_TRUE(runtime.build(world, *assets_, nullptr, &physics));
+    ASSERT_NE(runtime.physicsBridge(), nullptr);
+    EXPECT_EQ(runtime.physicsBridge()->stats().bodyCount, 1U);
+    EXPECT_TRUE(runtime.physicsBridge()->bodyFor(body).hasValue());
+
+    for (Core::u32 step = 0; step < 30U; ++step)
+    {
+        ASSERT_TRUE(runtime.fixedUpdatePhysics(world));
+    }
+    EXPECT_EQ(runtime.stats().physicsSteps, 30U);
+
+    // Gravity is negative, so the body fell and the child came with it.
+    const Scene::WorldTransform* bodyWorld = world.worldTransform(body);
+    const Scene::WorldTransform* childWorld = world.worldTransform(child);
+    ASSERT_NE(bodyWorld, nullptr);
+    ASSERT_NE(childWorld, nullptr);
+    EXPECT_LT(bodyWorld->position.y, 10.0F);
+    EXPECT_FLOAT_EQ(childWorld->position.y, bodyWorld->position.y);
+    EXPECT_FLOAT_EQ(childWorld->position.x, bodyWorld->position.x + 1.0F);
+
+    // Must run before the physics world is destroyed.
+    ASSERT_TRUE(runtime.shutdown());
+    EXPECT_EQ(runtime.physicsBridge(), nullptr);
+    physics.shutdown();
+}
+
+// A product with no authored physics, or one driving its own world, must not be
+// forced to pass one -- and must not silently get a no-op step either.
+TEST_F(Scene2DRuntimeTest, PhysicsStepIsUnsupportedWithoutAPhysicsWorld)
+{
+    Scene::World world = makeWorld();
+    static_cast<void>(addFallingBody(world, 0.0F, 4.0F));
+    ASSERT_TRUE(world.updateWorldTransforms());
+
+    Scene2DRuntime runtime;
+    ASSERT_TRUE(runtime.build(world, *assets_, nullptr, nullptr));
+    EXPECT_EQ(runtime.physicsBridge(), nullptr);
+    auto stepped = runtime.fixedUpdatePhysics(world);
+    ASSERT_FALSE(stepped);
+    EXPECT_EQ(stepped.error().code, Core::CoreErrorCode::Unsupported);
+    EXPECT_EQ(runtime.stats().physicsSteps, 0U);
+    ASSERT_TRUE(runtime.shutdown());
+}
+
+// A bridge failure has to unwind the resource leases acquired before it, or a failed
+// build leaves a half-wired scene holding leases.
+TEST_F(Scene2DRuntimeTest, PhysicsCapacityFailureRollsBackResourceLeases)
+{
+    Scene::World world = makeWorld();
+    static_cast<void>(addResourceNode(world, Fx2DSeed, Scene::ResourceBindingKind2D::FxEmitter));
+    static_cast<void>(addFallingBody(world, 0.0F, 4.0F));
+    static_cast<void>(addFallingBody(world, 2.0F, 4.0F));
+    ASSERT_TRUE(world.updateWorldTransforms());
+
+    Physics2D::PhysicsWorld2D physics = makePhysicsWorld();
+    Scene2DRuntime runtime;
+    auto overCapacity =
+        runtime.build(world, *assets_, nullptr, &physics, {.physics = {.bodyCapacity = 1}});
+    ASSERT_FALSE(overCapacity);
+    EXPECT_EQ(overCapacity.error().code, Scene::SceneErrorCode::CapacityExceeded);
+    // The Fx node was instantiated before the bridge failed; it must be gone.
+    EXPECT_EQ(runtime.stats().fxCount, 0U);
+    EXPECT_EQ(runtime.physicsBridge(), nullptr);
+
+    // Reusable afterwards, which is what proves the rollback fully unwound.
+    ASSERT_TRUE(runtime.build(world, *assets_, nullptr, &physics));
+    EXPECT_EQ(runtime.stats().fxCount, 1U);
+    EXPECT_EQ(runtime.physicsBridge()->stats().bodyCount, 2U);
+    ASSERT_TRUE(runtime.shutdown());
+    physics.shutdown();
+}
+
 TEST_F(Scene2DRuntimeTest, CapacityFailureLeavesNothingBehind)
 {
     Scene::World world = makeWorld();
@@ -513,13 +676,13 @@ TEST_F(Scene2DRuntimeTest, CapacityFailureLeavesNothingBehind)
     ASSERT_TRUE(world.updateWorldTransforms());
 
     Scene2DRuntime runtime;
-    auto overCapacity = runtime.build(world, *assets_, nullptr, {.fxCapacity = 1});
+    auto overCapacity = runtime.build(world, *assets_, nullptr, nullptr, {.fxCapacity = 1});
     ASSERT_FALSE(overCapacity);
     EXPECT_EQ(overCapacity.error().code, Scene::SceneErrorCode::CapacityExceeded);
     // A failed build must not leave a partially wired scene holding leases.
     EXPECT_EQ(runtime.stats().fxCount, 0U);
     // The runtime is reusable afterwards, which proves the rollback fully unwound.
-    ASSERT_TRUE(runtime.build(world, *assets_, nullptr));
+    ASSERT_TRUE(runtime.build(world, *assets_, nullptr, nullptr));
     EXPECT_EQ(runtime.stats().fxCount, 2U);
     ASSERT_TRUE(runtime.shutdown());
 }
