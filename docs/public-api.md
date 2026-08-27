@@ -796,6 +796,16 @@ finite playback speed 均为显式状态；`setClip()` 事务替换同 skeleton 
 ref/key 都不持久化。gameplay blob 由 game-owned schema/version/bytes 携带，Runtime 不解释。旧 snapshot
 schema 直接拒绝，不保留运行时兼容分支。详见 [World2D 序列化](world2d-serialization.md)。
 
+`World2DSceneIndex` 把 authored 身份关联到实例化后的 entity，这是把游戏逻辑挂到「不是代码建的场景」上的
+最小充分条件。它提供 `entityForStableId()`、`entityForName()`、`stableIdForEntity()` 与 `nameForEntity()`；
+名称按 authored bytes **精确**匹配，不折叠大小写也不 trim，因为 Editor 视其为不透明 UTF-8，折叠会凭空
+造出冲突。Editor 允许重名，因此 `entityForName()` 返回 stable ID 最小者，`entityCountForName()` 暴露
+歧义。名称由 index 自己拥有而非存进 `EntityRecord`——多数 entity 无名，不该为此每个都付 64 bytes。
+
+index 是**一次 instantiate 的快照**，不是 live view：它不持 `World` 引用、不观察销毁。这是安全的，因为
+`EntityId` 是 generation handle，过期 id 会被 `World` 拒绝而不会别名到复用的 slot。
+`loadWorld2DSceneFromFile()` 顺带构建它，所以常规路径无需自己重建映射。
+
 `loadWorld2DSceneFromFile(world, utf8Path, assets)` 把 read + `parseWorld2DSnapshot()` +
 `instantiateWorld2DSnapshot()` 组合成一次调用，是 shipped game 读取 Editor 所存 `.tworld` 的入口。它不新增
 wire format，也不放宽任何 schema 校验：AssetId 仍全部经 resolver 解析，未解析即 fail closed，任何失败都保持目标

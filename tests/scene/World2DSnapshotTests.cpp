@@ -356,6 +356,70 @@ TEST_F(World2DSnapshotSceneTests, CaptureRejectsUnsupported3DComponents)
     EXPECT_EQ(captured.error().code, SceneErrorCode::InvalidComponent);
 }
 
+// Authored names existed only in the wire format, so a game had no way to find a
+// node it did not create in code. The index is the mapping that makes attaching
+// game logic to an authored scene possible at all.
+TEST_F(World2DSnapshotSceneTests, SceneIndexResolvesStableIdsAndAuthoredNames)
+{
+    const std::array entities{
+        AssetFormat::World2DEntityDesc{.stableEntityId = 1, .name = "root"},
+        AssetFormat::World2DEntityDesc{
+            .stableEntityId = 4,
+            .parentStableEntityId = 1,
+            .name = "duplicate",
+        },
+        AssetFormat::World2DEntityDesc{
+            .stableEntityId = 9,
+            .parentStableEntityId = 1,
+            // The Editor allows duplicate names, so the index must report the
+            // ambiguity rather than pretend the second one does not exist.
+            .name = "duplicate",
+        },
+        AssetFormat::World2DEntityDesc{.stableEntityId = 12, .parentStableEntityId = 1},
+    };
+    auto bytes = AssetFormat::writeWorld2DSnapshotBytes(
+        AssetFormat::World2DSnapshotDesc{.entities = entities});
+    ASSERT_TRUE(bytes) << bytes.error().message;
+    std::vector<AssetFormat::World2DEntityDesc> storage;
+    auto snapshot = AssetFormat::parseWorld2DSnapshot(*bytes, storage);
+    ASSERT_TRUE(snapshot) << snapshot.error().message;
+
+    World world = makeWorld();
+    auto bindings = instantiateWorld2DSnapshot(world, *snapshot, resolver());
+    ASSERT_TRUE(bindings) << bindings.error().message;
+    auto index = World2DSceneIndex::Create(*snapshot, *bindings);
+    ASSERT_TRUE(index) << index.error().message;
+    EXPECT_EQ(index->entityCount(), 4U);
+
+    const EntityId root = index->entityForStableId(1U);
+    EXPECT_TRUE(world.contains(root));
+    EXPECT_EQ(index->stableIdForEntity(root), 1U);
+    EXPECT_EQ(index->nameForEntity(root), "root");
+    EXPECT_EQ(index->entityForName("root"), root);
+
+    // Lowest stable ID wins, and the count exposes that there is more than one.
+    EXPECT_EQ(index->entityForName("duplicate"), index->entityForStableId(4U));
+    EXPECT_EQ(index->entityCountForName("duplicate"), 2U);
+
+    // An unnamed entity is reachable by stable ID but has no name.
+    const EntityId unnamed = index->entityForStableId(12U);
+    EXPECT_TRUE(world.contains(unnamed));
+    EXPECT_TRUE(index->nameForEntity(unnamed).empty());
+
+    // Misses are unset rather than an error, and an empty name never matches.
+    EXPECT_FALSE(index->entityForStableId(777U).hasValue());
+    EXPECT_FALSE(index->entityForName("absent").hasValue());
+    EXPECT_FALSE(index->entityForName({}).hasValue());
+    EXPECT_EQ(index->entityCountForName({}), 0U);
+
+    // The index is a snapshot of one instantiate call, not a live view. After the
+    // entity is destroyed the stored handle must be rejected by generation rather
+    // than aliasing a recycled slot.
+    ASSERT_TRUE(world.destroyEntity(root));
+    EXPECT_EQ(index->entityForStableId(1U), root);
+    EXPECT_FALSE(world.contains(root));
+}
+
 // Physics and resource payloads used to be dropped on restore: the Editor could
 // author them and the wire format carried them, but nothing read them back, so a
 // saved scene lost data every reload. Assert a full byte round-trip.

@@ -34,6 +34,7 @@ set(TINA_SCENE_TEST_SOURCES
     header_isolation/Trail2DHeader.cpp
     header_isolation/TransformHeader.cpp
     header_isolation/WorldHeader.cpp
+    header_isolation/World2DSceneIndexHeader.cpp
     header_isolation/World2DSnapshotHeader.cpp
 )
 

@@ -26,6 +26,7 @@ set(TINA_SCENE_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/scene/Trail2D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/Transform.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/World.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/scene/World2DSceneIndex.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/World2DSnapshot.hpp
 )
 
@@ -40,6 +41,7 @@ add_library(tina_scene STATIC
     SpriteAnimator2D.cpp
     Trail2D.cpp
     World.cpp
+    World2DSceneIndex.cpp
     World2DSnapshot.cpp
 )
 add_library(Tina::Scene ALIAS tina_scene)

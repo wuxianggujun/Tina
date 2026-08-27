@@ -1098,8 +1098,14 @@ try
     {
         return Core::failure(std::move(bindings.error()));
     }
+    auto index = World2DSceneIndex::Create(*snapshot, *bindings);
+    if (!index)
+    {
+        return Core::failure(std::move(index.error()));
+    }
     World2DSceneLoadResult result{
         .bindings = std::move(*bindings),
+        .index = std::move(*index),
         .gameplaySchema = snapshot->gameplaySchema,
         .gameplayVersion = snapshot->gameplayVersion,
     };

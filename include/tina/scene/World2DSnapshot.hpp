@@ -5,6 +5,7 @@
 #include <tina/core/error/Result.hpp>
 #include <tina/core/id/AssetId.hpp>
 #include <tina/scene/Entity.hpp>
+#include <tina/scene/World2DSceneIndex.hpp>
 
 #include <cstddef>
 #include <functional>
@@ -32,13 +33,6 @@ struct World2DSnapshotAssetResolver final {
     std::function<Asset::AssetHandle(Core::AssetId)> resolveAnimationClip{};
 };
 
-struct World2DEntityBinding final {
-    Core::u32 stableEntityId = 0;
-    EntityId entity{};
-
-    friend bool operator==(const World2DEntityBinding&, const World2DEntityBinding&) = default;
-};
-
 // Captures the current 2D World components into the unique schema-v1 snapshot.
 // Runtime EntityId owner/index/generation bits never enter the byte stream.
 // Entities carrying 3D components are rejected instead of being serialized lossy.
@@ -55,6 +49,9 @@ instantiateWorld2DSnapshot(World& world, const AssetFormat::World2DSnapshotView&
 
 struct World2DSceneLoadResult final {
     std::vector<World2DEntityBinding> bindings{};
+    // Built from the same call, so a game can immediately look nodes up by
+    // authored name or stable ID instead of rebuilding that mapping itself.
+    World2DSceneIndex index{};
     // Game-owned blob copied out of the file, since the parsed view borrows the
     // byte buffer this call owns and frees.
     std::vector<std::byte> gameplayBytes{};
