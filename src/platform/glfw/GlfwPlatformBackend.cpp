@@ -1452,11 +1452,18 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         // synthetic Down→Up is invented between polls.
         std::array<bool, GLFW_JOYSTICK_LAST + 1> present{};
         std::array<GLFWgamepadstate, GLFW_JOYSTICK_LAST + 1> states{};
+        u32 unmapped = 0;
         for (int jid = GLFW_JOYSTICK_1; jid <= GLFW_JOYSTICK_LAST; ++jid)
         {
-            if (glfwJoystickPresent(jid) != GLFW_TRUE
-                || glfwJoystickIsGamepad(jid) != GLFW_TRUE)
+            if (glfwJoystickPresent(jid) != GLFW_TRUE)
             {
+                continue;
+            }
+            // A joystick with no mapping yields no input at all. Count it so the
+            // condition is visible instead of looking like a dead controller.
+            if (glfwJoystickIsGamepad(jid) != GLFW_TRUE)
+            {
+                ++unmapped;
                 continue;
             }
             if (glfwGetGamepadState(jid, &states[static_cast<usize>(jid)]) != GLFW_TRUE)
@@ -1465,6 +1472,7 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
             }
             present[static_cast<usize>(jid)] = true;
         }
+        frameBuilder_.recordUnmappedGamepads(unmapped);
 
         for (int jid = GLFW_JOYSTICK_1; jid <= GLFW_JOYSTICK_LAST; ++jid)
         {
@@ -1509,8 +1517,19 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
                 slotState.revision = 1;
                 slotState.heldButtons.reset();
                 slotState.axes.fill(0.0F);
+                // Queried once per connection: GLFW returns pointers owned by its
+                // own joystick state, so they are copied into fixed storage before
+                // the event leaves this scope.
+                const char* glfwName = glfwGetGamepadName(jid);
+                const char* glfwGuid = glfwGetJoystickGUID(jid);
+                GamepadDeviceInfo info{
+                    .name = Detail::makeGamepadName(glfwName),
+                    .guid = Detail::makeGamepadGuid(glfwGuid),
+                };
+                info.layout = Detail::classifyGamepadLayout(info.name.view(), info.guid.view());
                 recordAppend(frameBuilder_.appendPlatformEvent(GamepadConnectedEvent{
                     .gamepad = slotState.id,
+                    .device = info,
                 }));
             }
 
@@ -1968,6 +1987,21 @@ createBackendUnchecked(const PlatformBackendCreateParams& params, bool publishDu
             glfwFailure(PlatformErrorCode::BackendInitializationFailed, "GLFW initialization failed", "glfwInit"));
     }
     initialized = true;
+
+    // Applied before the first poll so a pad that needs one of these mappings is
+    // recognised on its very first appearance rather than after a reconnect.
+    if (!params.gamepadMappings.empty())
+    {
+        // GLFW needs a NUL-terminated string, and the caller's view need not be.
+        const std::string mappings{params.gamepadMappings};
+        clearGlfwErrors();
+        if (glfwUpdateGamepadMappings(mappings.c_str()) != GLFW_TRUE)
+        {
+            return Core::failure(glfwFailure(PlatformErrorCode::BackendInitializationFailed,
+                                             "The supplied gamepad mappings were rejected",
+                                             "glfwUpdateGamepadMappings"));
+        }
+    }
 
     auto plan = buildWindowCreatePlan(params.primaryWindow);
     if (!plan)

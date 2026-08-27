@@ -102,4 +102,56 @@ TEST(GlfwGamepadTranslationTests, ApplyStateZerosStickNoiseInsideDeadzone)
         1.0e-5F);
 }
 
+// A product cannot draw correct button glyphs without knowing the legend, and
+// guessing wrongly is worse than showing a neutral prompt, so unknown pads must
+// classify as Generic rather than defaulting to a popular vendor.
+TEST(GlfwGamepadTranslationTests, ClassifiesLayoutFromGuidVendorThenName)
+{
+    using Platform::GamepadLayout;
+    using Platform::Detail::classifyGamepadLayout;
+
+    // SDL GUIDs carry the little-endian USB vendor id in bytes 8..11, so "4c05"
+    // is vendor 0x054C (Sony). The GUID is checked before the name because driver
+    // and OS names vary while the vendor id does not.
+    EXPECT_EQ(classifyGamepadLayout({}, "030000004c050000cc09000011810000"),
+              GamepadLayout::PlayStation);
+    EXPECT_EQ(classifyGamepadLayout({}, "030000005e040000e002000003090000"), GamepadLayout::Xbox);
+    EXPECT_EQ(classifyGamepadLayout({}, "030000007e0500000920000011810000"), GamepadLayout::Nintendo);
+
+    // The GUID wins over a contradicting name.
+    EXPECT_EQ(classifyGamepadLayout("Xbox 360 Controller", "030000004c050000cc09000011810000"),
+              GamepadLayout::PlayStation);
+
+    // Name is the fallback when the GUID carries no known vendor.
+    EXPECT_EQ(classifyGamepadLayout("Xbox Series Pad", "00000000000000000000000000000000"),
+              GamepadLayout::Xbox);
+    EXPECT_EQ(classifyGamepadLayout("Sony DualSense Wireless", {}), GamepadLayout::PlayStation);
+    EXPECT_EQ(classifyGamepadLayout("Nintendo Switch Pro Controller", {}), GamepadLayout::Nintendo);
+    // Matching is case-insensitive because names differ by driver.
+    EXPECT_EQ(classifyGamepadLayout("generic xinput device", {}), GamepadLayout::Xbox);
+
+    EXPECT_EQ(classifyGamepadLayout("Some Unknown Pad", {}), GamepadLayout::Generic);
+    EXPECT_EQ(classifyGamepadLayout({}, {}), GamepadLayout::Generic);
+    // A truncated GUID must not be read past its end.
+    EXPECT_EQ(classifyGamepadLayout({}, "0300"), GamepadLayout::Generic);
+}
+
+// Identity is presentation-only, so an over-long name is truncated rather than
+// failing the connect event that carries it.
+TEST(GlfwGamepadTranslationTests, DeviceIdentityCopiesAndTruncates)
+{
+    EXPECT_TRUE(Platform::Detail::makeGamepadName(nullptr).view().empty());
+    EXPECT_TRUE(Platform::Detail::makeGamepadGuid(nullptr).view().empty());
+    EXPECT_EQ(Platform::Detail::makeGamepadName("Pad").view(), "Pad");
+
+    const std::string overlong(Platform::GamepadNameCapacity + 32U, 'x');
+    const Platform::GamepadName name = Platform::Detail::makeGamepadName(overlong.c_str());
+    EXPECT_EQ(name.view().size(), Platform::GamepadNameCapacity);
+
+    // The GUID buffer reserves room for a terminator, so it holds one less.
+    const std::string longGuid(Platform::GamepadGuidCapacity + 8U, 'a');
+    const Platform::GamepadGuid guid = Platform::Detail::makeGamepadGuid(longGuid.c_str());
+    EXPECT_EQ(guid.view().size(), Platform::GamepadGuidCapacity - 1U);
+}
+
 } // namespace Tina::Tests

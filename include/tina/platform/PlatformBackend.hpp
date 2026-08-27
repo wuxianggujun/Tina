@@ -7,6 +7,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string_view>
 
 namespace Tina::Platform {
 
@@ -18,6 +19,13 @@ struct PlatformBackendCreateParams final {
     bool publishSystemColorSchemeEvents = false;
     // Optional OS file-drop event source. Authoring hosts opt in explicitly.
     bool acceptFileDropEvents = false;
+    // Additional SDL_GameControllerDB mapping lines, newline-separated. A desktop
+    // backend only recognises pads it has a mapping for, so a controller the
+    // shipped mapping table predates is otherwise invisible with no diagnostic.
+    // Supplying entries here is the only way to fix that without rebuilding the
+    // backend's third-party dependency. Ignored by backends with no mapping
+    // concept, such as Headless.
+    std::string_view gamepadMappings{};
 };
 
 class IPlatformBackend {

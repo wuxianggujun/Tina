@@ -3,6 +3,7 @@
 #include <tina/platform/Input.hpp>
 
 #include <optional>
+#include <string_view>
 
 struct GLFWgamepadstate;
 
@@ -37,5 +38,17 @@ void applyGlfwGamepadState(
     GamepadSnapshot& snapshot,
     const GLFWgamepadstate& state,
     float stickDeadzone = DefaultGamepadStickDeadzone) noexcept;
+
+// Classifies a face-button legend from the pad's reported name and SDL GUID.
+// Vendor id lives in GUID bytes 8..11 of the SDL layout, which is more reliable
+// than the name; the name is only a fallback. Unrecognised pads are Generic,
+// because showing a neutral prompt beats guessing the wrong glyph.
+[[nodiscard]] GamepadLayout classifyGamepadLayout(std::string_view name,
+                                                  std::string_view guid) noexcept;
+
+// Copies into the fixed inline storage, truncating rather than failing: identity
+// is presentation-only and a shortened label is better than dropping the event.
+[[nodiscard]] GamepadName makeGamepadName(const char* name) noexcept;
+[[nodiscard]] GamepadGuid makeGamepadGuid(const char* guid) noexcept;
 
 } // namespace Tina::Platform::Detail

@@ -58,6 +58,9 @@ struct SystemColorSchemeChangedEvent final {
 
 struct GamepadConnectedEvent final {
     GamepadId gamepad{};
+    // Identity is fixed for the lifetime of this connection. It is delivered here
+    // rather than in GamepadSnapshot so the per-frame snapshot array stays small.
+    GamepadDeviceInfo device{};
 };
 
 struct GamepadDisconnectedEvent final {
@@ -99,6 +102,12 @@ struct PlatformFrameDiagnostics final {
     u32 inputTextOverflowCount = 0;
     u32 platformEventOverflowCount = 0;
     u32 fileDropOverflowCount = 0;
+    // Joysticks present but without a usable gamepad mapping, so they produce no
+    // input at all. Reported because "controller plugged in but does nothing" is
+    // otherwise indistinguishable from a broken binding table, and the fix
+    // (supplying PlatformBackendCreateParams::gamepadMappings) is not guessable
+    // from silence.
+    u32 unmappedGamepadCount = 0;
 };
 
 class PlatformFrameBuilder;
@@ -539,6 +548,16 @@ class PlatformFrameBuilder final {
         }
         ++diagnostics_.fileDropOverflowCount;
         return FrameBatchAppendResult::RejectedCapacity;
+    }
+
+    // Reports joysticks the backend saw but could not treat as gamepads. Purely
+    // diagnostic: it publishes no input and never fails a frame.
+    void recordUnmappedGamepads(u32 count) noexcept
+    {
+        if (frameOpen_)
+        {
+            diagnostics_.unmappedGamepadCount = count;
+        }
     }
 
     [[nodiscard]] Core::Result<PlatformFrameView> finishFrame()

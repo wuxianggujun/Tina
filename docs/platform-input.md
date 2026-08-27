@@ -31,13 +31,24 @@ digital edge 与 final held state 的一致性。view、span 和 string_view 只
 
 - Keyboard：backend-neutral `Key`、Down/Up/repeat 与 held snapshot；
 - Pointer：primary pointer、button/move/wheel，transition 保存事件发生时的 logical position；
-- Gamepad：generation `GamepadId`、标准 button/axis、连接/断开、snapshot revision；
+- Gamepad：generation `GamepadId`、标准 button/axis、连接/断开、snapshot revision，以及随
+  `GamepadConnectedEvent` 携带的 `GamepadDeviceInfo`（name、SDL GUID 与派生 `GamepadLayout`）；
 - Text：strict UTF-8 committed text；
 - Composition：Started/Updated/Ended/Cancelled、preedit 与 codepoint cursor；
 - Cancel/Reset：focus lost、device disconnect、window closing、capacity/backend recovery。
 
 Gamepad/Window ID 是 owner-aware generation identity，不能按 native index 持久化。Focus loss、disconnect
 和 stream reset 必须清除 held/default-action state，不能伪造普通 Up。
+
+设备身份（name / SDL GUID / layout）在一次连接内固定，因此随 `GamepadConnectedEvent` 一次性交付，
+**不进** `GamepadSnapshot`：snapshot 是每帧复制的16槽数组，把静态字节放进去纯属浪费。存储是固定内联的
+`GamepadName`/`GamepadGuid`，超长静默截断——身份只用于展示，缩短标签比因此丢掉 connect 事件更好。
+`GamepadLayout` 只决定产品画哪套按键图形，抽象的 South/East/West/North 仍是输入的唯一权威命名；
+无法识别时为 `Generic`，因为猜错图形比显示中性提示更糟。分类优先读 SDL GUID 的 vendor id
+（bytes 8..11，little-endian），name 只作兜底：驱动与 OS 会改 name，vendor id 不会。
+
+**震动/haptics 不在能力内,也无法通过当前后端实现**：GLFW 完全没有输出到手柄的 API（已核验 vendored
+`glfw3.h`），gamepad 面是只读的。要支持震动必须新增一个平台后端能力或换/补 backend，属独立决策。
 
 ## GLFW adapter 当前能力
 
@@ -49,7 +60,12 @@ GLFW backend 已实现：
   `framebufferExtent` 约为 `logicalExtent * 2`，UI layout、hit-test 与 Pointer route 使用同一坐标空间；
 - committed Unicode text 转 strict UTF-8；
 - 标准 Gamepad 轮询（`glfwGetGamepadState`）、generation registry、button diff、axis deadzone/hysteresis、
-  connect/disconnect 与 snapshot revision；
+  connect/disconnect 与 snapshot revision；连接时经 `glfwGetGamepadName`/`glfwGetJoystickGUID` 采集身份；
+- `PlatformBackendCreateParams::gamepadMappings` 接受追加的 SDL_GameControllerDB 映射行，在首次 poll 前
+  经 `glfwUpdateGamepadMappings` 应用（非法内容 fail closed）。GLFW 只识别**有映射**的手柄，因此比内置
+  映射表更新的设备原本完全不可见；这是不重建第三方依赖就能修的唯一途径。已插入但无映射的 joystick 计入
+  `PlatformFrameDiagnostics::unmappedGamepadCount`——"插了手柄但没反应"与"绑定表坏了"在现场无法区分，
+  而从沉默中猜不出解法。
 - 可选系统 Dark/Light 偏好观察；只有 Desktop 显式开启时才发布 Tina-owned
   `SystemColorSchemeChangedEvent`，同帧变化合并且不携带 Win32/GLFW 类型；
 - Windows 原生 WindowSurface binding；Linux X11/Wayland binding；

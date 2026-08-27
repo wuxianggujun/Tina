@@ -224,6 +224,62 @@ struct WindowInputSnapshot final {
     }
 };
 
+// Which face-button legend a pad prints, derived from its reported identity. The
+// abstract South/East/West/North button names stay authoritative for input; this
+// exists only so a product can draw the right glyph, which is otherwise
+// impossible to get right.
+//
+// Generic means the pad is usable but its legend is unknown. It is not an error:
+// guessing a legend wrongly is worse than showing a neutral prompt.
+enum class GamepadLayout : u8 {
+    Generic = 0,
+    Xbox = 1,
+    PlayStation = 2,
+    Nintendo = 3,
+};
+
+inline constexpr usize GamepadNameCapacity = 64;
+// SDL joystick GUIDs are 32 hex characters.
+inline constexpr usize GamepadGuidCapacity = 33;
+
+// Fixed inline storage so device identity never allocates and never dangles.
+// Truncation is silent because a name is presentation-only; a shortened label is
+// preferable to failing a connect event over it.
+struct GamepadName final {
+    std::array<char, GamepadNameCapacity> bytes{};
+    u8 length = 0;
+
+    [[nodiscard]] constexpr std::string_view view() const noexcept
+    {
+        return std::string_view(bytes.data(), length);
+    }
+
+    auto operator<=>(const GamepadName&) const = default;
+};
+
+struct GamepadGuid final {
+    std::array<char, GamepadGuidCapacity> bytes{};
+    u8 length = 0;
+
+    [[nodiscard]] constexpr std::string_view view() const noexcept
+    {
+        return std::string_view(bytes.data(), length);
+    }
+
+    auto operator<=>(const GamepadGuid&) const = default;
+};
+
+// Identity is stable for one connection, so it travels on the connect event
+// rather than in the per-frame snapshot: 16 snapshot slots are copied every
+// frame, and repeating static bytes there would be pure waste.
+struct GamepadDeviceInfo final {
+    GamepadName name{};
+    GamepadGuid guid{};
+    GamepadLayout layout = GamepadLayout::Generic;
+
+    auto operator<=>(const GamepadDeviceInfo&) const = default;
+};
+
 struct GamepadSnapshot final {
     GamepadId gamepad{};
     u64 revision = 0;
