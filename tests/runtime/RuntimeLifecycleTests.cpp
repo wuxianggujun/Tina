@@ -13,6 +13,7 @@
 #include <tina/runtime/spi/EngineCompositionFactories.hpp>
 #include <tina/task/TaskErrors.hpp>
 #include <tina/task/TaskSystem.hpp>
+#include <tina/ui/UIErrors.hpp>
 
 #include "support/ManualMonotonicClock.hpp"
 
@@ -2249,6 +2250,143 @@ class RebindFacadeLowerState final : public IGameState {
     RebindFacadeProbe* probe_;
 };
 
+struct TimeScaleProbe final {
+    bool topSawHandle = false;
+    bool lowerHandleWasEmpty = false;
+    bool rejectedNegative = false;
+    bool rejectedNonFinite = false;
+    bool readBackHalf = false;
+    bool lowerSetWasRejected = false;
+    u32 fixedStepsWhileFrozen = 0;
+    u32 framesWhileFrozen = 0;
+};
+
+// Freezing simulation must stop fixedUpdate while updateFrame keeps running,
+// which is what lets a pause menu animate over a stopped world.
+class TimeScaleTopState final : public IGameState {
+  public:
+    explicit TimeScaleTopState(TimeScaleProbe& probe) noexcept : probe_(&probe)
+    {
+    }
+
+    Core::Status onEnter(GameStateEnterContext&) override
+    {
+        return Core::success();
+    }
+
+    void onExit(GameStateExitContext&) noexcept override
+    {
+    }
+
+    [[nodiscard]] GameStatePolicy initialPolicy() const noexcept override
+    {
+        return {};
+    }
+
+    Core::Status fixedUpdate(FixedUpdateContext&) override
+    {
+        if (frozen_)
+        {
+            ++probe_->fixedStepsWhileFrozen;
+        }
+        return Core::success();
+    }
+
+    Core::Status updateFrame(FrameUpdateContext& context) override
+    {
+        const TimeScaleSettings settings = context.timeScaleSettings();
+        probe_->topSawHandle = settings.hasValue();
+        if (frozen_)
+        {
+            ++probe_->framesWhileFrozen;
+        }
+        const u64 frameIndex = context.frameTiming().frameIndex;
+        if (frameIndex == 1U)
+        {
+            probe_->rejectedNegative = !settings.setTimeScale(-1.0);
+            probe_->rejectedNonFinite =
+                !settings.setTimeScale(std::numeric_limits<double>::quiet_NaN());
+            if (auto status = settings.setTimeScale(0.5); !status)
+            {
+                return status;
+            }
+            probe_->readBackHalf = settings.timeScale() == 0.5;
+            // Zero is legal and must freeze simulation rather than fail.
+            if (auto status = settings.setTimeScale(0.0); !status)
+            {
+                return status;
+            }
+            frozen_ = true;
+        } else if (frameIndex >= 3U)
+        {
+            context.requestExitAfterFrame();
+        }
+        return Core::success();
+    }
+
+  private:
+    TimeScaleProbe* probe_;
+    bool frozen_ = false;
+};
+
+class TimeScaleLowerState final : public IGameState {
+  public:
+    explicit TimeScaleLowerState(TimeScaleProbe& probe) noexcept : probe_(&probe)
+    {
+    }
+
+    Core::Status onEnter(GameStateEnterContext&) override
+    {
+        return Core::success();
+    }
+
+    void onExit(GameStateExitContext&) noexcept override
+    {
+    }
+
+    [[nodiscard]] GameStatePolicy initialPolicy() const noexcept override
+    {
+        return {};
+    }
+
+    Core::Status updateFrame(FrameUpdateContext& context) override
+    {
+        if (context.frameTiming().frameIndex == 0U)
+        {
+            // This state is still the top here, so it legitimately holds the
+            // authority. The restriction is only observable once it is buried.
+            return context.requestPush(std::make_unique<TimeScaleTopState>(*probe_));
+        }
+        const TimeScaleSettings settings = context.timeScaleSettings();
+        probe_->lowerHandleWasEmpty = !settings.hasValue();
+        probe_->lowerSetWasRejected = !settings.setTimeScale(2.0);
+        return Core::success();
+    }
+
+  private:
+    TimeScaleProbe* probe_;
+};
+
+class TimeScaleGameApplication final : public IGameApplication {
+  public:
+    explicit TimeScaleGameApplication(TimeScaleProbe& probe) noexcept : probe_(&probe)
+    {
+    }
+
+    Core::Result<std::unique_ptr<IGameState>> createInitialState(GameStartupContext&) override
+    {
+        std::unique_ptr<IGameState> state = std::make_unique<TimeScaleLowerState>(*probe_);
+        return state;
+    }
+
+    void onShutdown(GameShutdownContext&) noexcept override
+    {
+    }
+
+  private:
+    TimeScaleProbe* probe_;
+};
+
 class RebindFacadeGameApplication final : public IGameApplication {
   public:
     explicit RebindFacadeGameApplication(RebindFacadeProbe& probe) noexcept : probe_(&probe)
@@ -4343,6 +4481,41 @@ TEST(EngineHostRunTest, M7ANullRenderDoesNotFabricateSurfaceSuspension)
     EXPECT_FALSE(runtime.lastSubmittedHadPrimaryWindowSurface);
     EXPECT_EQ(runtime.submittedFrames, 1U);
     EXPECT_EQ(runtime.presentedFrames, 1U);
+}
+
+TEST(EngineHostRunTest, GameplayTimeScaleIsTopStateAuthorityAndZeroFreezesSimulation)
+{
+    RuntimeProbe runtime;
+    // Every frame carries enough real time for at least one fixed step, so any
+    // step observed while frozen is a genuine failure to scale.
+    runtime.frameDeltas = {
+        Core::Duration{0.02}, Core::Duration{0.02}, Core::Duration{0.02},
+        Core::Duration{0.02}, Core::Duration{0.02},
+    };
+    TimeScaleProbe probe;
+    TimeScaleGameApplication application(probe);
+    auto config = EngineConfig::Defaults();
+    config.fixedSimulation = Core::FixedStepConfig{
+        .fixedDelta = Core::Duration{0.01},
+        .maximumAcceptedRealDelta = Core::Duration{0.20},
+        .maximumStepsPerFrame = 4,
+    };
+    auto hostResult = createRuntimeHost(runtime, std::move(config));
+    ASSERT_TRUE(hostResult.has_value());
+
+    auto runResult = (*hostResult)->run(application);
+
+    ASSERT_TRUE(runResult.has_value()) << runResult.error().message;
+    EXPECT_EQ(*runResult, RunExitReason::GameRequestedExitAfterCurrentFrame);
+    EXPECT_TRUE(probe.topSawHandle);
+    EXPECT_TRUE(probe.lowerHandleWasEmpty);
+    EXPECT_TRUE(probe.lowerSetWasRejected);
+    EXPECT_TRUE(probe.rejectedNegative);
+    EXPECT_TRUE(probe.rejectedNonFinite);
+    EXPECT_TRUE(probe.readBackHalf);
+    EXPECT_EQ(probe.fixedStepsWhileFrozen, 0U);
+    // The frame phase must keep running while simulation is stopped.
+    EXPECT_GT(probe.framesWhileFrozen, 0U);
 }
 
 TEST(EngineHostRunTest, FixedStepTimingCoversZeroOneAndMaximumFourStepsWithStableIndices)

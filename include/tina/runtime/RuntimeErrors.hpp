@@ -32,6 +32,9 @@ inline constexpr Core::ErrorCode GameStateStackCapacityExceeded{Core::ErrorDomai
 inline constexpr Core::ErrorCode GameStateTransitionFailed{Core::ErrorDomain::Runtime, 17};
 inline constexpr Core::ErrorCode GameStateCommandRejected{Core::ErrorDomain::Runtime, 18};
 inline constexpr Core::ErrorCode InvalidRebindTransaction{Core::ErrorDomain::Runtime, 19};
+// A phase-local settings handle was used without an owner behind it, which is
+// how a lower GameState sees authority reserved for the top state.
+inline constexpr Core::ErrorCode PhaseCapabilityUnavailable{Core::ErrorDomain::Runtime, 20};
 
 } // namespace RuntimeErrorCode
 

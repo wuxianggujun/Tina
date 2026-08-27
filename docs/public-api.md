@@ -204,6 +204,26 @@ Core::Status updateFrame(FrameUpdateContext& context) override {
 `vsyncEnabled()` 报告的是**已请求**状态；backend 最迟在下一次 `present()` 应用，不保证在请求当帧生效。
 设备重建后该值会从 `RenderDeviceCreateParams::vsync` 重新播种，不会自动保留。
 
+`EngineConfig::gameplayTimeScale` 同样只是播种值：运行时由 `FrameUpdateContext::timeScaleSettings()`
+返回的 `TimeScaleSettings` 拥有。缩放施加在真实 delta 被 clamp 之后、进入 fixed-step accumulator 之前
+（`FixedStepAccumulator::advance`），因此 slow motion、hitstop 与暂停都不需要各个 State 自行解释 delta。
+
+```cpp
+Core::Status updateFrame(FrameUpdateContext& context) override {
+    if (pauseMenu_.visible()) {
+        // 0 冻结 simulation：fixedUpdate 不再收到 step，updateFrame 继续运行，
+        // 所以暂停菜单可以在静止世界之上继续动画。
+        return context.timeScaleSettings().setTimeScale(0.0);
+    }
+    return context.timeScaleSettings().setTimeScale(1.0);
+}
+```
+
+`TimeScaleSettings` 与 `DisplaySettings` 同为 phase-local 借用句柄且同为 **top-state 权限**，但它
+返回 `Status` 而非静默无效：非栈顶 State 调用 `setTimeScale` 得到
+`RuntimeErrorCode::PhaseCapabilityUnavailable`，非有限或负值得到
+`CoreErrorCode::InvalidArgument`，两种情况都不改变当前缩放。`0.0` 是合法值，不是错误。
+
 ## `IGameApplication` 与 `IGameState`
 
 当前 Application 接口：

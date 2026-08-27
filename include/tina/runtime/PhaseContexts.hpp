@@ -68,6 +68,40 @@ class DisplaySettings final {
     Render::IRenderDevice* m_device = nullptr;
 };
 
+// Phase-local handle for the gameplay time scale. Simulation time is scaled
+// before it reaches the fixed-step accumulator, so this drives slow motion,
+// hitstop and pause without any state having to reinterpret its own deltas.
+// Copyable and cheap; never outlive the phase that handed it out.
+class TimeScaleSettings final {
+  public:
+    constexpr TimeScaleSettings() noexcept = default;
+
+    [[nodiscard]] constexpr bool hasValue() const noexcept
+    {
+        return m_timeScale != nullptr;
+    }
+
+    // Rejects non-finite and negative values so an invalid scale cannot reach
+    // the accumulator and fail the frame. Zero is legal and freezes simulation:
+    // fixedUpdate stops receiving steps while updateFrame keeps running, which
+    // is what a pause menu wants.
+    [[nodiscard]] Core::Status setTimeScale(double timeScale) const noexcept;
+
+    // Defaults to 1.0 when no owner is present.
+    [[nodiscard]] double timeScale() const noexcept
+    {
+        return m_timeScale == nullptr ? 1.0 : *m_timeScale;
+    }
+
+  private:
+    friend class Detail::EngineHostImplementation;
+    friend class FrameUpdateContext;
+
+    explicit constexpr TimeScaleSettings(double* timeScale) noexcept : m_timeScale(timeScale) {}
+
+    double* m_timeScale = nullptr;
+};
+
 class GameStartupContext final {
   public:
     GameStartupContext(const GameStartupContext&) = delete;
@@ -158,6 +192,9 @@ class FrameUpdateContext final {
     [[nodiscard]] InputActionRebinding* inputActionRebinding() noexcept;
     // Player-facing display options. Empty when no render device is present.
     [[nodiscard]] DisplaySettings displaySettings() const noexcept;
+    // Gameplay time scale authority, restricted to the top GameState so a paused
+    // layer below cannot fight the state that owns the pause.
+    [[nodiscard]] TimeScaleSettings timeScaleSettings() const noexcept;
     void requestExitAfterFrame() noexcept;
 
     // Deferred stack commands (ADR 0014). Commit is EngineHost-only after updateFrame.
@@ -170,7 +207,7 @@ class FrameUpdateContext final {
     FrameUpdateContext(const FrameTiming& frameTiming, const FrameActionSnapshot& frameActions,
                        bool& exitRequested, GameStatePendingCommands* pendingCommands,
                        Audio::AudioEngine* audioEngine, Runtime::Input::ActionMapper* actionMapper,
-                       Render::IRenderDevice* renderDevice) noexcept;
+                       Render::IRenderDevice* renderDevice, double* gameplayTimeScale) noexcept;
 
     const FrameTiming* m_frameTiming = nullptr;
     const FrameActionSnapshot* m_frameActions = nullptr;
@@ -178,6 +215,7 @@ class FrameUpdateContext final {
     GameStatePendingCommands* m_pendingCommands = nullptr;
     Audio::AudioEngine* m_audioEngine = nullptr;
     Render::IRenderDevice* m_renderDevice = nullptr;
+    double* m_gameplayTimeScale = nullptr;
     InputActionRebinding m_inputActionRebinding;
     bool m_rebindingAvailable = false;
 

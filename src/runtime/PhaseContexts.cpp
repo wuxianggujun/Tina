@@ -3,6 +3,9 @@
 #include "input/ActionMapper.hpp"
 #include "ui/PrimaryWindowUICapabilityState.hpp"
 
+#include <tina/runtime/RuntimeErrors.hpp>
+
+#include <cmath>
 #include <utility>
 
 namespace Tina {
@@ -127,16 +130,34 @@ FrameUpdateContext::FrameUpdateContext(const FrameTiming& frameTiming, const Fra
                                        bool& exitRequested, GameStatePendingCommands* pendingCommands,
                                        Audio::AudioEngine* audioEngine,
                                        Runtime::Input::ActionMapper* actionMapper,
-                                       Render::IRenderDevice* renderDevice) noexcept
+                                       Render::IRenderDevice* renderDevice,
+                                       double* gameplayTimeScale) noexcept
     : m_frameTiming(&frameTiming),
       m_frameActions(&frameActions),
       m_exitRequested(&exitRequested),
       m_pendingCommands(pendingCommands),
       m_audioEngine(audioEngine),
       m_renderDevice(renderDevice),
+      m_gameplayTimeScale(gameplayTimeScale),
       m_inputActionRebinding(actionMapper),
       m_rebindingAvailable(actionMapper != nullptr)
 {
+}
+
+Core::Status TimeScaleSettings::setTimeScale(double timeScale) const noexcept
+{
+    if (m_timeScale == nullptr)
+    {
+        return Core::failure(RuntimeErrorCode::PhaseCapabilityUnavailable,
+                             "Gameplay time scale is not available in this phase");
+    }
+    if (!std::isfinite(timeScale) || timeScale < 0.0)
+    {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                             "gameplayTimeScale must be finite and non-negative");
+    }
+    *m_timeScale = timeScale;
+    return Core::success();
 }
 
 const FrameActionSnapshot& FrameUpdateContext::frameActions() const noexcept
@@ -157,6 +178,11 @@ Audio::AudioEngine* FrameUpdateContext::audioEngine() const noexcept
 DisplaySettings FrameUpdateContext::displaySettings() const noexcept
 {
     return DisplaySettings{m_renderDevice};
+}
+
+TimeScaleSettings FrameUpdateContext::timeScaleSettings() const noexcept
+{
+    return TimeScaleSettings{m_gameplayTimeScale};
 }
 
 InputActionRebinding* FrameUpdateContext::inputActionRebinding() noexcept

@@ -591,7 +591,8 @@ class EngineHostImplementation final {
         PrimaryWindowUIContextFactory createPrimaryWindowUIContext = {},
         std::optional<std::uintptr_t> primaryWin32Hwnd = {},
         std::unique_ptr<Render::ISubmissionCompletionLedger> submissionCompletionLedger = {})
-        : m_config(std::move(config)), m_fixedStepAccumulator(std::move(fixedStepAccumulator)),
+        : m_config(std::move(config)), m_gameplayTimeScale(m_config.gameplayTimeScale),
+          m_fixedStepAccumulator(std::move(fixedStepAccumulator)),
           m_platformEventDispatcher(std::move(platformEventDispatcher)), m_actionMapper(std::move(actionMapper)),
           m_uiInputRouteProducer(std::move(uiInputRouteProducer)), m_modules(std::move(modules)),
           m_primaryWindowUi(m_config.primaryWindowUICapacities, *std::pmr::get_default_resource(),
@@ -856,7 +857,9 @@ class EngineHostImplementation final {
             }
 
             const Core::Duration realDelta = Core::durationBetween(previousFrameTime, currentFrameTime);
-            auto framePlanResult = m_fixedStepAccumulator.advance(realDelta, m_config.gameplayTimeScale);
+            // Seeded from EngineConfig, then owned by the top GameState through
+            // TimeScaleSettings, so slow motion and pause are runtime decisions.
+            auto framePlanResult = m_fixedStepAccumulator.advance(realDelta, m_gameplayTimeScale);
             if (!framePlanResult)
             {
                 auto error = std::move(framePlanResult.error());
@@ -1013,7 +1016,8 @@ class EngineHostImplementation final {
                                            m_modules.audioEnginePtr(),
                                            depthFromTop == 0 ? m_actionMapper.get() : nullptr,
                                            depthFromTop == 0 ? m_modules.renderDevice.get()
-                                                             : nullptr};
+                                                             : nullptr,
+                                           depthFromTop == 0 ? &m_gameplayTimeScale : nullptr};
                     return invokeResultBoundary("IGameState::updateFrame",
                                                 RuntimeErrorCode::GameCallbackThrewException,
                                                 [&] { return state.updateFrame(ctx); });
@@ -1575,6 +1579,9 @@ class EngineHostImplementation final {
     }
 
     EngineConfig m_config;
+    // Live gameplay time scale. EngineConfig only seeds it; the top GameState
+    // retunes it through TimeScaleSettings.
+    double m_gameplayTimeScale = 1.0;
     Core::FixedStepAccumulator m_fixedStepAccumulator;
     PlatformEventDispatcher m_platformEventDispatcher;
     std::unique_ptr<Runtime::Input::ActionMapper> m_actionMapper;
