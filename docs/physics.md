@@ -98,6 +98,35 @@ Chain 采用 Box2D one-sided 边界语义，按输入点序的每条有向边右
 任意两点间距必须严格大于 `0.005 m`，避免 backend 退化边；当前 Tina 不检测 self-intersection，authoring
 侧必须提供简单边界。Chain 不开放 sensor、dynamic/kinematic body 或 per-segment public handle。
 
+## Scene collider bridge
+
+`Tina::Gameplay2D`（target `Tina::Gameplay2D`，仅在 `TINA_BUILD_PHYSICS2D=ON` 时存在）是 authored
+场景与 `PhysicsWorld2D` 之间的桥。它必须是独立模块：`tina_scene` 不能链接 Physics2D（否则所有 Scene
+消费者——含纯渲染与 UI 场景——都被迫拖入 Box2D），而 `tina_physics2d` 不能知道 Scene。这与
+`TileMapPhysicsSync2D` 住在 `tina_asset` 是同一条理由（见 [ADR 0030](adr/0030-gameplay-2d-binding-and-physics-bridge.md)）。
+
+`Scene2DPhysicsBridge`：
+
+1. `build(world, physicsWorld, config)` 为每个带 `PhysicsBody2D` 的 entity 建一个 body，body 的
+   position/angle 取该 entity 已发布的 `WorldTransform`（因此调用前必须先跑
+   `World::updateWorldTransforms()`）。随后把每个带 `PhysicsShape2D` 的 entity 挂到**最近的 physics-body
+   祖先**上——父子关系决定归属，与 Editor 要求 `CollisionShape2D` 必须有 body 父节点同一条规则；shape 与
+   body 也可以在同一 entity 上。没有 body 祖先的 shape 计入 `orphanShapeCount` 而不是静默丢弃，因为
+   「碰不到任何东西的 shape」和「桥没看见的 shape」在现场表现一样。
+2. body kind 映射：`Rigid`→Dynamic，`Static`→Static，`Character`/`Area`→Kinematic（前者由 gameplay
+   移动驱动、后者是 trigger 体，都不该被碰撞反推）。
+3. `applyTo(world, physicsWorld)` 在 `step()` 之后把 body 的 position/angle 写回 `LocalTransform`，
+   之后由调用方跑 `updateWorldTransforms()`。**物理单向 authoritative**：桥从不反读 transform 去驱动
+   物理，因为双向同步必须定义谁赢与何时，而 teleport 与 CCD 语义会互相打架。要移动 body 就走
+   `enqueueSetTransform`。有 parent 的 entity 被跳过：它的 `LocalTransform` 是相对父节点的，而 body 在
+   world space，写进去会每帧叠加一次父变换。
+4. 容量在 build 时固定，超出返回 `CapacityExceeded`；build 失败会销毁本次已创建的全部对象，不留半个
+   模拟。重复 build 返回 `AlreadyExists`（否则会泄漏第一批 handle）。`shutdown(physicsWorld)` 必须在销毁
+   physics world 之前调用，且可重复调用。
+
+桥**不**驱动 `step()`：fixed-step accumulator 归 Runtime，与 `PhysicsWorld2D::step()` 既有契约一致。
+`ConvexPolygon`/`Chain` 没有 authoring 表示，需要它们的游戏直接用 Physics2D API 建。
+
 ## Chunk collider bridge
 
 Physics2D 侧只提供 backend-neutral 的 `PhysicsGridSolidRect2D` 与

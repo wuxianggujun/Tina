@@ -65,11 +65,22 @@ function(tina_configure_game_sdk_package)
     tina_configure_game_sdk_target(tina_window_surface_integration WindowSurfaceIntegration)
     tina_configure_game_sdk_target(tina_ui_render_integration UIRenderIntegration)
 
+    # Physics2D and the Scene bridge join the GameSDK interface when built, so a
+    # 2D physics game does not have to know internal target names to link them.
     set(TINA_PACKAGE_WITH_PHYSICS2D OFF)
     if(TARGET tina_physics2d)
         list(APPEND tina_sdk_export_targets tina_physics2d)
         tina_configure_game_sdk_target(tina_physics2d Physics2D)
+        target_link_libraries(tina_game_sdk INTERFACE Tina::Physics2D)
         set(TINA_PACKAGE_WITH_PHYSICS2D ON)
+    endif()
+
+    set(TINA_PACKAGE_WITH_GAMEPLAY2D OFF)
+    if(TARGET tina_gameplay2d)
+        list(APPEND tina_sdk_export_targets tina_gameplay2d)
+        tina_configure_game_sdk_target(tina_gameplay2d Gameplay2D)
+        target_link_libraries(tina_game_sdk INTERFACE Tina::Gameplay2D)
+        set(TINA_PACKAGE_WITH_GAMEPLAY2D ON)
     endif()
 
     set(TINA_PACKAGE_WITH_UI_UIA OFF)

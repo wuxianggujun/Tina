@@ -39,6 +39,9 @@ set(Tina_GAME_SDK_TARGETS
 if(@TINA_PACKAGE_WITH_PHYSICS2D@)
     list(APPEND Tina_GAME_SDK_TARGETS Tina::Physics2D)
 endif()
+if(@TINA_PACKAGE_WITH_GAMEPLAY2D@)
+    list(APPEND Tina_GAME_SDK_TARGETS Tina::Gameplay2D)
+endif()
 set(Tina_PACKAGE_TARGETS
     ${Tina_GAME_SDK_TARGETS}
     Tina::AssetTypes

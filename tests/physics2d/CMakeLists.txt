@@ -4,6 +4,7 @@ set(TINA_PHYSICS2D_HEADER_ISOLATION_SOURCES
     header_isolation/PhysicsIdsHeader.cpp
     header_isolation/PhysicsTypesHeader.cpp
     header_isolation/PhysicsWorld2DHeader.cpp
+    header_isolation/Scene2DPhysicsBridgeHeader.cpp
 )
 
 add_library(tina_physics2d_header_isolation OBJECT
@@ -24,6 +25,7 @@ add_executable(tina_physics2d_tests
     TileMapPhysicsSyncTests.cpp
     PhysicsNavigationSync2DTests.cpp
     CharacterControllerPhysicsCoexistenceTests.cpp
+    Scene2DPhysicsBridgeTests.cpp
     $<TARGET_OBJECTS:tina_physics2d_header_isolation>
 )
 target_compile_features(tina_physics2d_tests PRIVATE cxx_std_23)
@@ -33,6 +35,7 @@ target_include_directories(tina_physics2d_tests PRIVATE
 target_link_libraries(tina_physics2d_tests PRIVATE
     Tina::ProjectOptions
     Tina::Physics2D
+    Tina::Gameplay2D
     Tina::Asset
     GTest::gtest_main
 )

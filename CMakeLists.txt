@@ -266,6 +266,8 @@ add_subdirectory(src/scene)
 add_subdirectory(src/navigation2d)
 if (TINA_BUILD_PHYSICS2D)
     add_subdirectory(src/physics2d)
+    # The Scene/Physics bridge only exists when a physics backend does.
+    add_subdirectory(src/gameplay2d)
 endif ()
 add_subdirectory(src/asset_format)
 add_subdirectory(src/editor)
