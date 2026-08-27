@@ -98,6 +98,36 @@ Chain 采用 Box2D one-sided 边界语义，按输入点序的每条有向边右
 任意两点间距必须严格大于 `0.005 m`，避免 backend 退化边；当前 Tina 不检测 self-intersection，authoring
 侧必须提供简单边界。Chain 不开放 sensor、dynamic/kinematic body 或 per-segment public handle。
 
+## Scene 运行时所有者
+
+`Tina::Gameplay2D` 除物理桥外还提供 `Scene2DRuntime`，它是「把 authored 场景跑起来」的所有者
+（[ADR 0031](adr/0031-scene-2d-runtime-ownership.md)）。它**编排而不重新实现**：TileMap residency 仍归
+`TileMapStream`，particle/trail 仍归 `ParticleSystem2D`/`Trail2D`，寻路网格仍归 `NavigationGrid2D`，
+播放仍归 `AudioEngine`。它只做这些类型自己做不到的四件事——从 `AssetId` 走到可用对象（含各自要求的
+lease 获取与 kind 校验）、把运行时状态放进按 `EntityId` 索引的 side table、固定每帧调用顺序、逆序释放。
+
+存在理由是：这套顺序与生命周期对每个游戏都一样，而**每一处错误都是安静的**。TileMap 在 `commitReady()`
+之前 extract 只会少画；`AudioPcmClipView` 是非拥有的，clip lease 早放就是 use-after-free。此前每个游戏
+自己手写全套（见 `samples/2d_tilemap_bgfx`，6660 行）。
+
+每帧顺序：
+
+```text
+Scene2DRuntime::updateDemand(camera)   // TileMap chunk demand（world → map-local）
+AssetSystem::pump(budget)              // 留在外部：AssetSystem 服务整个游戏
+Scene2DRuntime::commitReady()          // chunk residency 提交
+Scene2DRuntime::fixedUpdate(delta)     // particles / trails
+Scene2DRuntime::extract(...)           // tile + particle sprites
+```
+
+`extract()` 在 `commitReady()` 之前调用返回错误，而不是安静地画出过期地图。`pump` 不藏进 runtime，
+因为一个场景对象不应隐式驱动全局资源系统。
+
+失败语义：kind 不匹配或 AssetId 不在 catalog 中的节点计入 `unresolvedCount` 并跳过——一个陈旧引用不该让
+整个场景无法加载；容量不足与 lease 获取失败则 fail closed，且回滚本次已获取的全部 lease。
+`active == false` 的节点仍被实例化并保留 lease，但不 update、不 extract，因此切回 active 是一次布尔翻转
+而不是一次加载。`shutdown()` 必须在 `AssetSystem`/`AudioEngine` 之前调用，可重复调用。
+
 ## Scene collider bridge
 
 `Tina::Gameplay2D`（target `Tina::Gameplay2D`，仅在 `TINA_BUILD_PHYSICS2D=ON` 时存在）是 authored

@@ -796,6 +796,11 @@ finite playback speed 均为显式状态；`setClip()` 事务替换同 skeleton 
 ref/key 都不持久化。gameplay blob 由 game-owned schema/version/bytes 携带，Runtime 不解释。旧 snapshot
 schema 直接拒绝，不保留运行时兼容分支。详见 [World2D 序列化](world2d-serialization.md)。
 
+`Gameplay2D::Scene2DRuntime`（`TINA_BUILD_PHYSICS2D=ON` 时随 `Tina::GameSDK` 提供）实例化 authored 的
+`TileMap2D`/`FxEmitter2D`/`NavigationRegion2D`/`AudioPlayer2D` 节点，并持有它们的 lease 与每帧顺序。
+`Scene::ResourceBinding2D` 因此保持纯数据、`tina_scene` 继续不链接 Asset/Audio。详见
+[physics.md](physics.md#scene-运行时所有者) 与 [ADR 0031](adr/0031-scene-2d-runtime-ownership.md)。
+
 `World2DSceneIndex` 把 authored 身份关联到实例化后的 entity，这是把游戏逻辑挂到「不是代码建的场景」上的
 最小充分条件。它提供 `entityForStableId()`、`entityForName()`、`stableIdForEntity()` 与 `nameForEntity()`；
 名称按 authored bytes **精确**匹配，不折叠大小写也不 trim，因为 Editor 视其为不透明 UTF-8，折叠会凭空

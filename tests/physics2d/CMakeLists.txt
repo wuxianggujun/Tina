@@ -5,6 +5,7 @@ set(TINA_PHYSICS2D_HEADER_ISOLATION_SOURCES
     header_isolation/PhysicsTypesHeader.cpp
     header_isolation/PhysicsWorld2DHeader.cpp
     header_isolation/Scene2DPhysicsBridgeHeader.cpp
+    header_isolation/Scene2DRuntimeHeader.cpp
 )
 
 add_library(tina_physics2d_header_isolation OBJECT
@@ -26,6 +27,7 @@ add_executable(tina_physics2d_tests
     PhysicsNavigationSync2DTests.cpp
     CharacterControllerPhysicsCoexistenceTests.cpp
     Scene2DPhysicsBridgeTests.cpp
+    Scene2DRuntimeTests.cpp
     $<TARGET_OBJECTS:tina_physics2d_header_isolation>
 )
 target_compile_features(tina_physics2d_tests PRIVATE cxx_std_23)
