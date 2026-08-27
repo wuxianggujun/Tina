@@ -16,6 +16,7 @@ add_library(tina_editor_app STATIC
     EditorWorkspacePreview.cpp
     EditorWorkspaceProject.cpp
     EditorWorkspaceSourceImport.cpp
+    EditorWorkspaceSpriteAssetPicker.cpp
     EditorWorkspaceStatus.cpp
     EditorWorkspaceTileMap.cpp
     EditorWorkspaceUiBuild.cpp

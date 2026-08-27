@@ -1754,6 +1754,20 @@ auto EditorWorkspaceState::buildViewportUi(
             return status;
         }
     }
+    for (UI::UINodeId& shapeNode : viewportCollisionShapeVisualNodes_) {
+        UI::UILayoutStyle shapeStyle = fixedSize(1.0F, 1.0F);
+        shapeStyle.placement = UI::UILayoutPlacement::Overlay;
+        shapeStyle.visibility = UI::UIVisibility::Collapsed;
+        UI::UIElementDescriptor shape = UI::makePanelElement(shapeStyle);
+        shape.visual.boxPaint = UI::makeSolidBox(UI::rgb(0x000000, 0));
+        shape.pointerHitPolicy = UI::UIPointerHitPolicy::Ignore;
+        shape.semantics.mode = UI::UISemanticsMode::Exclude;
+        if (auto status = storeNode(
+                ui.tree.createElement(viewportPreviewLayer_, shape), shapeNode);
+            !status) {
+            return status;
+        }
+    }
     for (UI::UINodeId& preselectionNode : viewportPreselectionVisualNodes_) {
         UI::UILayoutStyle preselectionStyle = fixedSize(1.0F, 1.0F);
         preselectionStyle.placement = UI::UILayoutPlacement::Overlay;
@@ -2231,17 +2245,13 @@ auto EditorWorkspaceState::buildInspectorUi(
         !status) {
         return status;
     }
+    // Reset stays: it is its own authoring intent (write identity), not a commit
+    // affordance. Transform fields commit on focus loss or Enter, so there is no
+    // Apply button.
     if (auto status = storeNode(
             ui.createIconButton(inspectorTransformHeader_, EditorIcon::Refresh,
                                 "Reset transform", {}, false),
             resetTransformButton_);
-        !status) {
-        return status;
-    }
-    if (auto status = storeNode(
-            ui.createIconButton(inspectorTransformHeader_, EditorIcon::Apply,
-                                "Apply transform", {}, false),
-            applyTransformButton_);
         !status) {
         return status;
     }
@@ -2425,12 +2435,18 @@ auto EditorWorkspaceState::buildInspectorUi(
         !status) {
         return status;
     }
+    // Sections carry no Apply button: every field commits on focus loss or Enter,
+    // and the owning group command still batches all of its fields into one
+    // document revision.
+    // withAssign builds the shared resource slot. withSpriteExtras adds the
+    // Sprite-only tint/flip controls, which are single instances rather than one
+    // per section, so only the Rendering group may request them.
     const auto createNodePropertySection =
         [&](NodePropertySectionUi& section, std::string_view name,
             std::string_view activeCaption,
             std::span<const InspectorNodePropertyFieldRow> fieldRows,
             bool withAssign,
-            std::string_view applyCaption,
+            bool withSpriteExtras = false,
             bool withPointLightColor = false) -> Tina::Core::Status {
         section.rootLayout.size.width = UI::UILayoutLength::Percent(100.0F);
         section.rootLayout.flexItem.shrink = 0.0F;
@@ -2492,10 +2508,11 @@ auto EditorWorkspaceState::buildInspectorUi(
             return status;
         }
         if (withAssign) {
-            // Sprite2D/AnimatedSprite2D use one canonical resource slot. The
-            // slot is both the visible binding and the Project Assets drop
-            // target; the assign action only reads the current Project Assets
-            // selection through NodeAssignSprite.
+            // Sprite2D/AnimatedSprite2D use one canonical resource slot. The slot
+            // is the visible binding, the Project Assets drop target, and a button
+            // that opens the asset picker, so the binding is reachable without
+            // discovering the drag gesture. The trailing icon assigns whatever is
+            // currently selected in Project Assets through NodeAssignSprite.
             UI::UILayoutStyle resourceRowLayout = fillWidth(
                 ui.productTheme.controls.textEditHeight);
             resourceRowLayout.flexItem.shrink = 0.0F;
@@ -2515,12 +2532,16 @@ auto EditorWorkspaceState::buildInspectorUi(
             resourceSlotLayout.padding = UI::UIEdgeSpacing::HorizontalVertical(
                 ui.productTheme.spacing.space2, 0.0F);
             UI::UIElementDescriptor resourceSlotDescriptor =
-                UI::makePanelElement(resourceSlotLayout);
+                UI::makeButtonElement({}, resourceSlotLayout);
+            resourceSlotDescriptor.contentAlignment.horizontal =
+                UI::UIAxisAlignment::Start;
             resourceSlotDescriptor.visual.boxPaint = UI::makeSolidBox(
                 ui.productTheme.colors.surfaceContainerLow);
-            resourceSlotDescriptor.semantics.name = "Sprite resource drop target";
+            resourceSlotDescriptor.semantics.name = "Sprite resource";
+            resourceSlotDescriptor.semantics.useContentAsName = false;
             resourceSlotDescriptor.semantics.description =
-                "Drop a Sprite or Texture2D from Project Assets here";
+                "Click to choose a Sprite or Texture2D, or drop one from Project Assets";
+            resourceSlotDescriptor.enabled = false;
             auto resourceSlot = ui.tree.createElement(
                 resourceRow->value, resourceSlotDescriptor);
             if (!resourceSlot) {
@@ -2529,7 +2550,7 @@ auto EditorWorkspaceState::buildInspectorUi(
             section.resourceSlot = *resourceSlot;
             if (auto status = storeNode(
                     ui.createLabel(section.resourceSlot,
-                                   "Drop Sprite or Texture2D",
+                                   "Click to choose a Sprite or Texture2D",
                                    growingRegion(), ui.compactText),
                     section.resourceLabel);
                 !status) {
@@ -2541,6 +2562,63 @@ auto EditorWorkspaceState::buildInspectorUi(
                     section.resourceAssignButton);
                 !status) {
                 return status;
+            }
+        }
+        if (withSpriteExtras) {
+            // Sprite tint and flips complete the Rendering group. Colour needs a
+            // colour field rather than a numeric row, and the flips are switches,
+            // so neither fits the shared field table.
+            UI::UILayoutStyle colorFieldLayout{};
+            colorFieldLayout.size.width = UI::UILayoutLength::Percent(100.0F);
+            colorFieldLayout.flexItem.shrink = 0.0F;
+            auto spriteColor = ui.tree.buildColorField(
+                section.collapsible.content,
+                UI::UIColorFieldConfig{
+                    .label = "Color",
+                    .value = spriteColorValue_,
+                    .swatchAccessibleName = "Sprite tint color",
+                    .layout = colorFieldLayout,
+                    .textEditLayout = inspectorValueInputLayout(ui.productTheme),
+                    .enabled = false,
+                });
+            if (!spriteColor) {
+                return Tina::Core::failure(std::move(spriteColor.error()));
+            }
+            spriteColorField_ = *spriteColor;
+
+            UI::UILayoutStyle flipRowLayout = fillWidth(
+                ui.productTheme.controls.buttonHeight);
+            flipRowLayout.flexItem.shrink = 0.0F;
+            flipRowLayout.flexContainer.direction = UI::UIFlexDirection::Row;
+            flipRowLayout.flexContainer.alignItems = UI::UIAxisAlignment::Center;
+            flipRowLayout.flexContainer.gap.column =
+                ui.productTheme.spacing.space4;
+            auto flipRow = ui.createPanel(section.collapsible.content,
+                                          flipRowLayout);
+            if (!flipRow) {
+                return Tina::Core::failure(std::move(flipRow.error()));
+            }
+            const std::array<std::pair<std::string_view, UI::UINodeId*>, 2>
+                flipToggles{{
+                    {"Flip X", &spriteFlipXSwitch_},
+                    {"Flip Y", &spriteFlipYSwitch_},
+                }};
+            for (const auto& [caption, target] : flipToggles) {
+                auto label = ui.createLabel(*flipRow, caption, {},
+                                            ui.secondaryText);
+                if (!label) {
+                    return Tina::Core::failure(std::move(label.error()));
+                }
+                UI::UIElementDescriptor flipSwitch = UI::makeSwitchElement({
+                    .accessibleName = caption,
+                    .size = UI::UISwitchSize::Compact,
+                });
+                flipSwitch.enabled = false;
+                auto flipNode = ui.tree.createElement(*flipRow, flipSwitch);
+                if (!flipNode) {
+                    return Tina::Core::failure(std::move(flipNode.error()));
+                }
+                *target = *flipNode;
             }
         }
         if (withPointLightColor) {
@@ -2659,24 +2737,22 @@ auto EditorWorkspaceState::buildInspectorUi(
                 section.fields[section.fieldCount++] = *inputNode;
             }
         }
-        if (!applyCaption.empty()) {
-            if (auto status = storeNode(
-                    ui.createButton(section.collapsible.content, applyCaption,
-                                 fillWidth(ui.productTheme.controls.buttonHeight), false),
-                    section.applyButton);
-                !status) {
-                return status;
-            }
-        }
         return Tina::Core::success();
     };
     {
-        const std::array<InspectorNodePropertyFieldRow, 4> spriteFields{{
+        // UV Min/Max author the normalized sub-rect used to slice a spritesheet.
+        const std::array<InspectorNodePropertyFieldRow, 6> spriteFields{{
             {.caption = "Size", .axisLabels = {"X", "Y"},
              .accessibleNames = {"Sprite size X", "Sprite size Y"},
              .valueCount = 2U, .axisLabelWidth = InspectorTransformAxisLabelWidth},
             {.caption = "Pivot", .axisLabels = {"X", "Y"},
              .accessibleNames = {"Sprite pivot X", "Sprite pivot Y"},
+             .valueCount = 2U, .axisLabelWidth = InspectorTransformAxisLabelWidth},
+            {.caption = "UV Min", .axisLabels = {"U", "V"},
+             .accessibleNames = {"Sprite UV u0", "Sprite UV v0"},
+             .valueCount = 2U, .axisLabelWidth = InspectorTransformAxisLabelWidth},
+            {.caption = "UV Max", .axisLabels = {"U", "V"},
+             .accessibleNames = {"Sprite UV u1", "Sprite UV v1"},
              .valueCount = 2U, .axisLabelWidth = InspectorTransformAxisLabelWidth},
             {.caption = "Sort Layer", .accessibleNames = {"Sprite sort layer", ""},
              .valueCount = 1U},
@@ -2685,7 +2761,7 @@ auto EditorWorkspaceState::buildInspectorUi(
         }};
         if (auto status = createNodePropertySection(
                 nodePropertySections_[0], "Rendering", "Visible", spriteFields,
-                true, "Apply Rendering");
+                true, true);
             !status) {
             return status;
         }
@@ -2696,7 +2772,7 @@ auto EditorWorkspaceState::buildInspectorUi(
         }};
         if (auto status = createNodePropertySection(
                 nodePropertySections_[1], "Camera", "Active", cameraFields,
-                false, "Apply Camera");
+                false);
             !status) {
             return status;
         }
@@ -2707,7 +2783,7 @@ auto EditorWorkspaceState::buildInspectorUi(
         }};
         if (auto status = createNodePropertySection(
                 nodePropertySections_[2], "Light", "Active", lightFields,
-                false, "Apply Light", true);
+                false, false, true);
             !status) {
             return status;
         }
@@ -2721,7 +2797,7 @@ auto EditorWorkspaceState::buildInspectorUi(
         }};
         if (auto status = createNodePropertySection(
                 nodePropertySections_[3], "Occlusion", "Active",
-                occluderFields, false, "Apply Occlusion");
+                occluderFields, false);
             !status) {
             return status;
         }
@@ -2731,7 +2807,7 @@ auto EditorWorkspaceState::buildInspectorUi(
         }};
         if (auto status = createNodePropertySection(
                 nodePropertySections_[4], "Animation", "Auto Play",
-                animationFields, false, "Apply Animation");
+                animationFields, false);
             !status) {
             return status;
         }
@@ -2746,23 +2822,38 @@ auto EditorWorkspaceState::buildInspectorUi(
         }};
         if (auto status = createNodePropertySection(
                 nodePropertySections_[5], "Physics Body", "Enabled",
-                physicsBodyFields, false, "Apply Physics Body");
+                physicsBodyFields, false);
             !status) {
             return status;
         }
-        const std::array<InspectorNodePropertyFieldRow, 6> physicsShapeFields{{
-            {.caption = "Shape Kind", .accessibleNames = {"Collision shape kind", ""}},
+        const std::array<InspectorNodePropertyFieldRow, 8> physicsShapeFields{{
+            {.caption = "Shape Kind", .accessibleNames = {"Collision shape kind", ""},
+             .valueCount = 1U},
             {.caption = "Half Extent", .axisLabels = {"X", "Y"},
              .accessibleNames = {"Collision half extent X", "Collision half extent Y"},
              .valueCount = 2U, .axisLabelWidth = InspectorTransformAxisLabelWidth},
             {.caption = "Radius", .accessibleNames = {"Collision radius", ""}},
+            {.caption = "Center", .axisLabels = {"X", "Y"},
+             .accessibleNames = {"Collision local center X",
+                                 "Collision local center Y"},
+             .valueCount = 2U, .axisLabelWidth = InspectorTransformAxisLabelWidth},
+            {.caption = "Angle deg",
+             .accessibleNames = {"Collision local angle degrees", ""}},
             {.caption = "Density", .accessibleNames = {"Collision density", ""}},
             {.caption = "Friction", .accessibleNames = {"Collision friction", ""}},
-            {.caption = "Restitution", .accessibleNames = {"Collision restitution", ""}},
+            {.caption = "Restitution",
+             .accessibleNames = {"Collision restitution", ""}},
         }};
         if (auto status = createNodePropertySection(
                 nodePropertySections_[6], "Collision Shape", "Enabled",
-                physicsShapeFields, false, "Apply Collision Shape");
+                physicsShapeFields, false);
+            !status) {
+            return status;
+        }
+        // Resource nodes bind exactly one asset, so the group is only the slot
+        // plus its active switch; there are no numeric rows.
+        if (auto status = createNodePropertySection(
+                nodePropertySections_[7], "Resource", "Active", {}, true);
             !status) {
             return status;
         }
@@ -2772,7 +2863,7 @@ auto EditorWorkspaceState::buildInspectorUi(
         }};
         if (auto status = createNodePropertySection(
                 nodePropertySections_[MeshPropertiesSectionIndex], "Rendering",
-                "Visible", meshFields, false, {});
+                "Visible", meshFields, false);
             !status) {
             return status;
         }
@@ -4257,6 +4348,89 @@ auto EditorWorkspaceState::buildSceneAddModalUi(
     return Tina::Core::success();
 }
 
+auto EditorWorkspaceState::buildSpriteAssetPickerUi(
+    UiBuildContext& ui, UI::UINodeId parent) -> Tina::Core::Status
+{
+    constexpr std::array actions{
+        UI::UIDialogActionConfig{
+            .text = "Cancel",
+            .variant = UI::UIButtonVariant::Text,
+        },
+        UI::UIDialogActionConfig{
+            .text = "Assign",
+            .variant = UI::UIButtonVariant::Primary,
+        },
+    };
+    UI::UILayoutStyle surfaceLayout = editorDialogSurfaceLayout(ui.productTheme);
+    surfaceLayout.size.width = UI::UILayoutLength::Px(640.0F);
+    auto dialog = ui.tree.buildDialog(
+        parent,
+        UI::UIDialogConfig{
+            .title = "Select Sprite or Texture2D",
+            .actions = actions,
+            .layout = editorDialogOverlayLayout(),
+            .surfaceLayout = surfaceLayout,
+        });
+    if (!dialog) {
+        return Tina::Core::failure(std::move(dialog.error()));
+    }
+    spriteAssetPickerDialog_ = *dialog;
+    spriteAssetPickerCancelButton_ = spriteAssetPickerDialog_.actions[0];
+    spriteAssetPickerConfirmButton_ = spriteAssetPickerDialog_.actions[1];
+    auto search = EditorSearchField::Build(
+        ui.tree, spriteAssetPickerDialog_.content, ui.productTheme, {},
+        "Search sprite or texture",
+        fillWidth(ui.productTheme.controls.textEditHeight), true);
+    if (!search) {
+        return Tina::Core::failure(std::move(search.error()));
+    }
+    spriteAssetPickerSearchInput_ = search->textEdit;
+    UI::UILayoutStyle listLayout = fillWidth(320.0F);
+    listLayout.flexItem.shrink = 0.0F;
+    auto list = ui.tree.createElement(
+        spriteAssetPickerDialog_.content,
+        UI::makeVirtualGridViewElement(
+            {.materializedItemCapacity = AssetBrowserMaterializedCapacity},
+            listLayout));
+    if (!list) {
+        return Tina::Core::failure(std::move(list.error()));
+    }
+    spriteAssetPickerList_ = *list;
+    spriteAssetPickerListStyle_ = UI::UIVirtualGridViewStyle{
+        .minimumItemWidth = 320.0F,
+        .itemHeight = 60.0F,
+        .stretchLastRow = true,
+        .overscanRows = 1,
+        .scrollBarVisibility = UI::UIScrollBarVisibility::Auto,
+        .wheelStep = ui.productTheme.controls.listRowHeight,
+        .itemTextOverflow = UI::UITextOverflow::Ellipsis,
+    };
+    if (auto status = ui.tree.setVirtualGridViewStyle(
+            spriteAssetPickerList_, spriteAssetPickerListStyle_);
+        !status) {
+        return status;
+    }
+    if (auto status = ui.tree.setVirtualGridViewPaint(
+            spriteAssetPickerList_,
+            UI::makeVirtualGridViewPaint(ui.productTheme));
+        !status) {
+        return status;
+    }
+    if (auto status = ui.tree.setVirtualGridViewDataSource(
+            spriteAssetPickerList_, spriteAssetPickerDataSource());
+        !status) {
+        return status;
+    }
+    if (auto status = storeNode(
+            ui.createLabel(spriteAssetPickerDialog_.content, {},
+                           fillWidth(30.0F), ui.secondaryText),
+            spriteAssetPickerStatus_);
+        !status) {
+        return status;
+    }
+    return Tina::Core::success();
+}
+
 auto EditorWorkspaceState::buildDirtyCloseModalUi(UiBuildContext& ui, UI::UINodeId parent) -> Tina::Core::Status
 {
     constexpr std::array actions{
@@ -4661,13 +4835,6 @@ auto EditorWorkspaceState::registerUiCallbacks(
         return status;
     }
     if (auto status = ui.tree.setButtonAction(
-            applyTransformButton_, UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
-                queueEditorCommand(EditorCommand::ApplyTransform);
-            }});
-        !status) {
-        return status;
-    }
-    if (auto status = ui.tree.setButtonAction(
             resetTransformButton_,
             UI::UIButtonActionCallback{
                 [this](const UI::UIButtonActionEvent&) noexcept {
@@ -4685,15 +4852,9 @@ auto EditorWorkspaceState::registerUiCallbacks(
             EditorCommand::NodeToggleSpriteAnimationAutoPlay,
             EditorCommand::NodeTogglePhysicsBodyEnabled,
             EditorCommand::NodeTogglePhysicsShapeEnabled,
+            EditorCommand::NodeToggleResourceActive,
             EditorCommand::NodeToggleMeshVisible,
         };
-        const std::array<EditorCommand, 7> sectionApplyCommands{
-            EditorCommand::NodeApplySprite, EditorCommand::NodeApplyCamera,
-            EditorCommand::NodeApplyPointLight,
-            EditorCommand::NodeApplyShadowOccluder,
-            EditorCommand::NodeApplyAnimationProperties,
-            EditorCommand::NodeApplyPhysicsBody,
-            EditorCommand::NodeApplyPhysicsShape};
         for (Tina::Core::usize sectionIndex = 0;
              sectionIndex < nodePropertySections_.size(); ++sectionIndex) {
             const auto& section = nodePropertySections_[sectionIndex];
@@ -4716,17 +4877,6 @@ auto EditorWorkspaceState::registerUiCallbacks(
                 !status) {
                 return status;
             }
-            if (sectionIndex < sectionApplyCommands.size()) {
-                if (auto status = ui.tree.setButtonAction(
-                        section.applyButton,
-                        UI::UIButtonActionCallback{[this, command = sectionApplyCommands[sectionIndex]](
-                                                       const UI::UIButtonActionEvent&) noexcept {
-                            queueEditorCommand(command);
-                        }});
-                    !status) {
-                    return status;
-                }
-            }
         }
         if (auto status = ui.tree.setButtonAction(
                 nodePropertySections_[0].resourceAssignButton,
@@ -4736,6 +4886,61 @@ auto EditorWorkspaceState::registerUiCallbacks(
             !status) {
             return status;
         }
+        if (auto status = ui.tree.setButtonAction(
+                nodePropertySections_[0].resourceSlot,
+                UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                    queueEditorCommand(EditorCommand::NodePickSpriteAsset);
+                }});
+            !status) {
+            return status;
+        }
+        if (auto status = ui.tree.setButtonAction(
+                nodePropertySections_[7].resourceSlot,
+                UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                    queueEditorCommand(EditorCommand::NodePickResourceAsset);
+                }});
+            !status) {
+            return status;
+        }
+        if (auto status = ui.tree.setButtonAction(
+                nodePropertySections_[7].resourceAssignButton,
+                UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                    queueEditorCommand(EditorCommand::NodeAssignResource);
+                }});
+            !status) {
+            return status;
+        }
+        const std::array<std::pair<UI::UINodeId, EditorCommand>, 2> flipToggles{{
+            {spriteFlipXSwitch_, EditorCommand::NodeToggleSpriteFlipX},
+            {spriteFlipYSwitch_, EditorCommand::NodeToggleSpriteFlipY},
+        }};
+        for (const auto& [toggle, command] : flipToggles) {
+            if (auto status = ui.tree.setCheckboxAction(
+                    toggle,
+                    UI::UIButtonActionCallback{
+                        [this, command](const UI::UIButtonActionEvent&) noexcept {
+                            queueEditorCommand(command);
+                        }});
+                !status) {
+                return status;
+            }
+        }
+    }
+    if (auto status = ui.tree.setButtonAction(
+            spriteAssetPickerConfirmButton_,
+            UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                queueEditorCommand(EditorCommand::SpriteAssetPickerConfirm);
+            }});
+        !status) {
+        return status;
+    }
+    if (auto status = ui.tree.setButtonAction(
+            spriteAssetPickerCancelButton_,
+            UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
+                queueEditorCommand(EditorCommand::SpriteAssetPickerCancel);
+            }});
+        !status) {
+        return status;
     }
     if (auto status = ui.tree.setButtonAction(
             undoButton_, UI::UIButtonActionCallback{[this](const UI::UIButtonActionEvent&) noexcept {
@@ -5924,6 +6129,9 @@ auto EditorWorkspaceState::onEnter(Tina::GameStateEnterContext& context) -> Tina
         return status;
     }
     if (auto status = buildSceneAddModalUi(ui, rootNode); !status) {
+        return status;
+    }
+    if (auto status = buildSpriteAssetPickerUi(ui, rootNode); !status) {
         return status;
     }
     if (auto status = buildDirtyCloseModalUi(ui, rootNode); !status) {

@@ -72,7 +72,16 @@ auto EditorWorkspaceState::refreshProjectAssetCollection(
     }
     if (projectAssets_.visibleItemCount() != 0U) {
         projectAssetSelectionSyncPending_ = true;
-        assetInspectorActive_ = true;
+        // A collection refresh (import finished, filter changed, folder added) is
+        // not a request to inspect an asset. Stealing the Inspector from a
+        // selected scene node would hide the resource slot the user is about to
+        // assign into, so the node context wins unless the Asset Inspector was
+        // already the active context or there is no node selected.
+        const bool nodeSelected =
+            sceneDocumentActive() &&
+            stableEntityIdForHierarchyItem(selectionKey_) != 0U;
+        assetInspectorActive_ = assetInspectorActive_ || !nodeSelected;
+        preserveNodeInspectorOnProjectAssetSelection_ = !assetInspectorActive_;
     } else {
         projectAssetSelectionSyncPending_ = false;
         assetInspectorActive_ = false;

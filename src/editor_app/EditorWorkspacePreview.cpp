@@ -965,6 +965,16 @@ auto EditorWorkspaceState::validateRuntimePreview() -> Tina::Core::Status{
     counters_.catalogResolved2DSprites = resolvedSpriteCount;
     counters_.world2DWorkspaceReady = true;
     counters_.runtimePreviewValid = true;
+    // The world was just replaced, so any previous animators point at dead
+    // entities. Rebuild them while playing; editing keeps none.
+    if (playSessionActive()) {
+        if (auto status = rebuildPlayAnimators(); !status) {
+            return status;
+        }
+    } else {
+        releasePlayAnimators();
+        counters_.playAnimatorCount = 0U;
+    }
     return Tina::Core::success();
 }
 

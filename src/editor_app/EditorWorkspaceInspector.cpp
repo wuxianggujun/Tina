@@ -705,6 +705,12 @@ auto EditorWorkspaceState::publishInspector(Tina::PrimaryWindowUITreeUpdater& tr
     const auto setTransformField = [&](UI::UINodeId node,
                                        InspectorTransformField field,
                                        float value) -> Tina::Core::Status {
+        // Never overwrite the field the user is typing in. A gizmo commit or
+        // selection sync refreshes every field, and without this the in-flight
+        // text would be silently replaced by the canonical value.
+        if (inspectorFieldIsBeingEdited(node)) {
+            return Tina::Core::success();
+        }
         if (!hasEntity) {
             return tree.setText(node, "n/a");
         }
@@ -718,13 +724,15 @@ auto EditorWorkspaceState::publishInspector(Tina::PrimaryWindowUITreeUpdater& tr
         return tree.setText(node, text->view());
     };
     const EditorHierarchyRow* selectedRow = hierarchyRow(stableEntityId);
-    if (auto status = tree.setText(
-            inspectorParentStableId_,
-            hasEntity && selectedRow != nullptr
-                ? std::to_string(selectedRow->parentStableId)
-                : "n/a");
-        !status) {
-        return status;
+    if (!inspectorFieldIsBeingEdited(inspectorParentStableId_)) {
+        if (auto status = tree.setText(
+                inspectorParentStableId_,
+                hasEntity && selectedRow != nullptr
+                    ? std::to_string(selectedRow->parentStableId)
+                    : "n/a");
+            !status) {
+            return status;
+        }
     }
     if (auto status = setTransformField(
             inspectorPositionX_, InspectorTransformField::PositionX, positionX);

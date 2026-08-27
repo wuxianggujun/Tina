@@ -107,78 +107,42 @@ auto EditorWorkspaceState::createNodeFromSceneAddRequest(
             Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
             "Editor scene node template is unknown");
     std::string_view createdKind{};
+    auto resolvedAssets = resolveNodeTemplateAssets(
+        slot, request.workspace == WorkspaceMode::World2D);
+    if (!resolvedAssets) {
+        return Tina::Core::failure(std::move(resolvedAssets.error()));
+    }
+    const std::string_view templateDisplayName =
+        request.workspace == WorkspaceMode::World2D
+            ? Tina::Editor::world2DNodeTemplateRegistry()[slot].displayName
+            : Tina::Editor::world3DNodeTemplateRegistry()[slot].displayName;
+    // A node bound to an absent AssetId renders nothing and reports as a plain
+    // Node2D, so the refusal happens before the document is touched.
+    if (!resolvedAssets->missingAssetKindName.empty()) {
+        try {
+            authoringFeedback_.assign("Create cancelled: ");
+            authoringFeedback_ += templateDisplayName;
+            authoringFeedback_ += " requires a ";
+            authoringFeedback_ += resolvedAssets->missingAssetKindName;
+            authoringFeedback_ +=
+                " asset. Import one, then select it in Project Assets.";
+        } catch (const std::bad_alloc&) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::OutOfMemory,
+                "Create Node rejection feedback allocation failed");
+        }
+        return hideSceneAddModal(tree);
+    }
+    createdKind = templateDisplayName;
     if (request.workspace == WorkspaceMode::World2D) {
-        const auto registry = Tina::Editor::world2DNodeTemplateRegistry();
-        const auto& info = registry[slot];
-        createdKind = info.displayName;
-        Tina::Editor::World2DNodeTemplateAssets assets{};
-        if (info.requiresSpriteAsset) {
-            assets.spriteId = selectedProjectSpriteAssetId();
-            if (!assets.spriteId) {
-                assets.spriteId = editorAssetId(0x22U);
-            }
-        }
-        if (info.requiresAnimationClipAsset) {
-            assets.animationClipId = selectedProjectAssetIdOfKind(
-                Tina::AssetFormat::AssetKind::SpriteAnimationClip);
-            if (!assets.animationClipId) {
-                assets.animationClipId = editorAssetId(0x10U);
-            }
-        }
-        if (info.requiredResourceAssetKind !=
-            Tina::AssetFormat::AssetKind::Invalid) {
-            assets.resourceId = selectedProjectAssetIdOfKind(
-                info.requiredResourceAssetKind);
-            if (!assets.resourceId) {
-                switch (info.requiredResourceAssetKind) {
-                case Tina::AssetFormat::AssetKind::TileMap:
-                    assets.resourceId = editorAssetId(0x42U);
-                    break;
-                case Tina::AssetFormat::AssetKind::NavigationGrid2D:
-                    assets.resourceId = editorAssetId(0x61U);
-                    break;
-                case Tina::AssetFormat::AssetKind::Fx2D:
-                    assets.resourceId = editorAssetId(0x62U);
-                    break;
-                case Tina::AssetFormat::AssetKind::AudioClip:
-                    assets.resourceId = editorAssetId(0x63U);
-                    break;
-                default:
-                    return Tina::Core::failure(
-                        Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
-                        "Create Node resource kind has no preview fallback");
-                }
-            }
-        }
         added = Tina::Editor::addWorld2DNode(
             document_,
             static_cast<Tina::Editor::World2DNodeTemplate>(slot),
-            request.parentStableId, assets);
+            request.parentStableId, resolvedAssets->world2D);
     } else {
-        const auto registry = Tina::Editor::world3DNodeTemplateRegistry();
-        const auto& info = registry[slot];
-        createdKind = info.displayName;
-        Tina::Editor::World3DNodeTemplateAssets assets{};
-        if (info.requiredMeshAssetKind !=
-            Tina::AssetFormat::AssetKind::Invalid) {
-            assets.meshId = selectedProjectAssetIdOfKind(
-                info.requiredMeshAssetKind);
-            if (!assets.meshId) {
-                assets.meshId = editorAssetId(
-                    info.requiredMeshAssetKind ==
-                            Tina::AssetFormat::AssetKind::SkinnedMesh
-                        ? 0x34U
-                        : 0x31U);
-            }
-            assets.materialId = selectedProjectAssetIdOfKind(
-                Tina::AssetFormat::AssetKind::Material);
-            if (!assets.materialId) {
-                assets.materialId = editorAssetId(0x32U);
-            }
-        }
         added = Tina::Editor::addWorld3DNode(
             document3D_, static_cast<Tina::Editor::World3DNodeTemplate>(slot),
-            request.parentStableId, assets);
+            request.parentStableId, resolvedAssets->world3D);
     }
     if (!added) {
         Tina::Core::Error createError = std::move(added.error());
@@ -330,9 +294,20 @@ auto EditorWorkspaceState::refreshSceneAddModalUi(
         }
     }
 
-    // Asset-backed node kinds use the Project Assets selection, then the
-    // built-in preview asset, so every creation row remains reachable.
+    // Asset-backed node kinds resolve the Project Assets selection, then the
+    // built-in preview asset. A kind whose asset is absent from the active
+    // Catalog stays disabled: creating it would author a dangling AssetId whose
+    // node renders nothing.
     bool selectedParentAcceptsCreation = firstVisibleSlot.has_value();
+    std::string_view missingAssetKindName{};
+    if (selectedParentAcceptsCreation) {
+        auto resolvedAssets = resolveNodeTemplateAssets(selected, world2D);
+        if (!resolvedAssets) {
+            return Tina::Core::failure(std::move(resolvedAssets.error()));
+        }
+        missingAssetKindName = resolvedAssets->missingAssetKindName;
+        selectedParentAcceptsCreation = missingAssetKindName.empty();
+    }
     if (selectedParentAcceptsCreation && world2D &&
         selected == static_cast<Tina::Core::usize>(
                         Tina::Editor::World2DNodeTemplate::CollisionShape2D)) {
@@ -351,11 +326,24 @@ auto EditorWorkspaceState::refreshSceneAddModalUi(
         !status) {
         return status;
     }
-    return tree.setText(
-        sceneAddDescription_,
-        !firstVisibleSlot.has_value()
-            ? std::string_view{"No matching node types"}
-            : registry[selected].description);
+    if (!firstVisibleSlot.has_value()) {
+        return tree.setText(sceneAddDescription_, "No matching node types");
+    }
+    if (!missingAssetKindName.empty()) {
+        try {
+            sceneAddDescriptionUtf8_.assign(registry[selected].description);
+            sceneAddDescriptionUtf8_ += "  |  Needs a ";
+            sceneAddDescriptionUtf8_ += missingAssetKindName;
+            sceneAddDescriptionUtf8_ +=
+                " asset in this project. Import one, then select it in Project Assets.";
+        } catch (const std::bad_alloc&) {
+            return Tina::Core::failure(
+                Tina::Core::CoreErrorCode::OutOfMemory,
+                "Create Node description allocation failed");
+        }
+        return tree.setText(sceneAddDescription_, sceneAddDescriptionUtf8_);
+    }
+    return tree.setText(sceneAddDescription_, registry[selected].description);
 }
 
 auto EditorWorkspaceState::processPendingSceneAddTemplate(
@@ -1370,6 +1358,8 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
     case EditorCommand::NodeApplyPhysicsBody:
     case EditorCommand::NodeApplyPhysicsShape:
     case EditorCommand::NodeToggleSpriteVisible:
+    case EditorCommand::NodeToggleSpriteFlipX:
+    case EditorCommand::NodeToggleSpriteFlipY:
     case EditorCommand::NodeToggleCameraActive:
     case EditorCommand::NodeTogglePointLightActive:
     case EditorCommand::NodeToggleShadowOccluderActive:
@@ -1377,10 +1367,13 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
     case EditorCommand::NodeTogglePhysicsBodyEnabled:
     case EditorCommand::NodeTogglePhysicsShapeEnabled:
     case EditorCommand::NodeToggleMeshVisible:
+    case EditorCommand::NodeToggleResourceActive:
+    case EditorCommand::NodeAssignResource:
     case EditorCommand::NodeAssignSprite: {
         bool published = false;
         status = runNodePropertyCommand(tree, command, published);
-        if (command == EditorCommand::NodeAssignSprite) {
+        if (command == EditorCommand::NodeAssignSprite ||
+            command == EditorCommand::NodeAssignResource) {
             preserveNodeInspectorOnProjectAssetSelection_ = false;
         }
         if (status && published) {
@@ -1388,6 +1381,21 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
         }
         break;
     }
+    case EditorCommand::NodePickSpriteAsset:
+    case EditorCommand::NodePickResourceAsset:
+        // Both slots open the same picker; it derives the accepted AssetKind from
+        // the selected node rather than from which slot was clicked.
+        status = showSpriteAssetPicker(tree);
+        break;
+    case EditorCommand::SpriteAssetPickerConfirm:
+        status = confirmSpriteAssetPicker(tree);
+        break;
+    case EditorCommand::SpriteAssetPickerCancel:
+        if (spriteAssetPickerVisible_) {
+            authoringFeedback_ = "Sprite resource assignment cancelled";
+        }
+        status = hideSpriteAssetPicker(tree);
+        break;
     case EditorCommand::Undo: {
         const auto* activeTab = documentTabs_.activeTab();
         if (activeTab == nullptr) {

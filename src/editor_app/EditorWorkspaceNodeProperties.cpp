@@ -11,6 +11,7 @@ enum class World2DNodePropertyGroup : Tina::Core::u8 {
     Animation = 4,
     PhysicsBody = 5,
     PhysicsShape = 6,
+    Resource = 7,
 };
 
 } // namespace
@@ -67,6 +68,260 @@ auto EditorWorkspaceState::selectedProjectSpriteAssetId() const noexcept
     return asset->assetId;
 }
 
+auto EditorWorkspaceState::projectAssetExists(
+    Tina::Core::AssetId assetId) const noexcept -> bool{
+    return assetId && projectAssets_.inspectorSnapshot(assetId) != nullptr;
+}
+
+auto EditorWorkspaceState::resolvedNodeTemplateSpriteAssetId(
+    u8 fallbackMarker) const noexcept -> Tina::Core::AssetId{
+    const Tina::Core::AssetId selected = selectedProjectSpriteAssetId();
+    if (selected) {
+        return selected;
+    }
+    const Tina::Core::AssetId fallback = editorAssetId(fallbackMarker);
+    return projectAssetExists(fallback) ? fallback : Tina::Core::AssetId{};
+}
+
+auto EditorWorkspaceState::resolvedNodeTemplateAssetId(
+    Tina::AssetFormat::AssetKind kind, u8 fallbackMarker) const noexcept
+    -> Tina::Core::AssetId{
+    const Tina::Core::AssetId selected = selectedProjectAssetIdOfKind(kind);
+    if (selected) {
+        return selected;
+    }
+    const Tina::Core::AssetId fallback = editorAssetId(fallbackMarker);
+    return projectAssetExists(fallback) ? fallback : Tina::Core::AssetId{};
+}
+
+auto EditorWorkspaceState::resolveNodeTemplateAssets(
+    Tina::Core::usize slot, bool world2D) const noexcept
+    -> Tina::Core::Result<NodeTemplateAssetResolution>{
+    NodeTemplateAssetResolution resolution{};
+    if (!world2D) {
+        const auto registry = Tina::Editor::world3DNodeTemplateRegistry();
+        if (slot >= registry.size()) {
+            return Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                "Editor scene node template is unknown");
+        }
+        const auto& info = registry[slot];
+        if (info.requiredMeshAssetKind ==
+            Tina::AssetFormat::AssetKind::Invalid) {
+            return resolution;
+        }
+        resolution.world3D.meshId = resolvedNodeTemplateAssetId(
+            info.requiredMeshAssetKind,
+            info.requiredMeshAssetKind ==
+                    Tina::AssetFormat::AssetKind::SkinnedMesh
+                ? 0x34U
+                : 0x31U);
+        resolution.world3D.materialId = resolvedNodeTemplateAssetId(
+            Tina::AssetFormat::AssetKind::Material, 0x32U);
+        if (!resolution.world3D.meshId) {
+            resolution.missingAssetKindName =
+                Tina::Editor::projectAssetKindLabel(info.requiredMeshAssetKind);
+        } else if (!resolution.world3D.materialId) {
+            resolution.missingAssetKindName =
+                Tina::Editor::projectAssetKindLabel(
+                    Tina::AssetFormat::AssetKind::Material);
+        }
+        return resolution;
+    }
+
+    const auto registry = Tina::Editor::world2DNodeTemplateRegistry();
+    if (slot >= registry.size()) {
+        return Tina::Core::failure(
+            Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+            "Editor scene node template is unknown");
+    }
+    const auto& info = registry[slot];
+    if (info.requiresSpriteAsset) {
+        resolution.world2D.spriteId = resolvedNodeTemplateSpriteAssetId(0x22U);
+        if (!resolution.world2D.spriteId) {
+            resolution.missingAssetKindName = "Sprite or Texture2D";
+            return resolution;
+        }
+    }
+    if (info.requiresAnimationClipAsset) {
+        resolution.world2D.animationClipId = resolvedNodeTemplateAssetId(
+            Tina::AssetFormat::AssetKind::SpriteAnimationClip, 0x10U);
+        if (!resolution.world2D.animationClipId) {
+            resolution.missingAssetKindName =
+                Tina::Editor::projectAssetKindLabel(
+                    Tina::AssetFormat::AssetKind::SpriteAnimationClip);
+            return resolution;
+        }
+    }
+    if (info.requiredResourceAssetKind ==
+        Tina::AssetFormat::AssetKind::Invalid) {
+        return resolution;
+    }
+    u8 fallbackMarker = 0U;
+    switch (info.requiredResourceAssetKind) {
+    case Tina::AssetFormat::AssetKind::TileMap:
+        fallbackMarker = 0x42U;
+        break;
+    case Tina::AssetFormat::AssetKind::NavigationGrid2D:
+        fallbackMarker = 0x61U;
+        break;
+    case Tina::AssetFormat::AssetKind::Fx2D:
+        fallbackMarker = 0x62U;
+        break;
+    case Tina::AssetFormat::AssetKind::AudioClip:
+        fallbackMarker = 0x63U;
+        break;
+    default:
+        return Tina::Core::failure(
+            Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+            "Create Node resource kind has no preview fallback");
+    }
+    resolution.world2D.resourceId = resolvedNodeTemplateAssetId(
+        info.requiredResourceAssetKind, fallbackMarker);
+    if (!resolution.world2D.resourceId) {
+        resolution.missingAssetKindName = Tina::Editor::projectAssetKindLabel(
+            info.requiredResourceAssetKind);
+    }
+    return resolution;
+}
+
+auto EditorWorkspaceState::inspectorFieldCommitCommand(
+    UI::UINodeId field) const noexcept -> std::optional<EditorCommand>{
+    if (!field.hasValue()) {
+        return std::nullopt;
+    }
+    const std::array<UI::UINodeId, 10> transformFields{
+        inspectorPositionX_, inspectorPositionY_, inspectorPositionZ_,
+        inspectorRotationX_, inspectorRotationY_, inspectorRotationZ_,
+        inspectorScaleX_,    inspectorScaleY_,    inspectorScaleZ_,
+        inspectorParentStableId_};
+    for (Tina::Core::usize index = 0; index < transformFields.size(); ++index) {
+        if (transformFields[index] == field) {
+            return index + 1U == transformFields.size()
+                       ? EditorCommand::SceneReparent
+                       : EditorCommand::ApplyTransform;
+        }
+    }
+    if (field == pointLightColorField_.textEdit) {
+        return EditorCommand::NodeApplyPointLight;
+    }
+    if (field == spriteColorField_.textEdit) {
+        return EditorCommand::NodeApplySprite;
+    }
+    const std::array<EditorCommand, 7> sectionCommands{
+        EditorCommand::NodeApplySprite,
+        EditorCommand::NodeApplyCamera,
+        EditorCommand::NodeApplyPointLight,
+        EditorCommand::NodeApplyShadowOccluder,
+        EditorCommand::NodeApplyAnimationProperties,
+        EditorCommand::NodeApplyPhysicsBody,
+        EditorCommand::NodeApplyPhysicsShape};
+    for (Tina::Core::usize sectionIndex = 0;
+         sectionIndex < sectionCommands.size(); ++sectionIndex) {
+        const auto& section = nodePropertySections_[sectionIndex];
+        for (Tina::Core::usize index = 0; index < section.fieldCount; ++index) {
+            if (section.fields[index] == field) {
+                return sectionCommands[sectionIndex];
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+auto EditorWorkspaceState::requiredResourceAssetKind(
+    Tina::Editor::World2DNodeTemplate nodeTemplate) noexcept
+    -> Tina::AssetFormat::AssetKind{
+    const auto registry = Tina::Editor::world2DNodeTemplateRegistry();
+    const auto slot = static_cast<Tina::Core::usize>(nodeTemplate);
+    return slot < registry.size() ? registry[slot].requiredResourceAssetKind
+                                  : Tina::AssetFormat::AssetKind::Invalid;
+}
+
+auto EditorWorkspaceState::inspectorFieldIsBeingEdited(
+    UI::UINodeId field) const noexcept -> bool{
+    return field.hasValue() && inspectorFieldEdit_.field == field;
+}
+
+auto EditorWorkspaceState::processInspectorFieldCommit(
+    Tina::PrimaryWindowUITreeUpdater& tree) -> Tina::Core::Status{
+    auto focus = tree.focusedNode();
+    if (!focus) {
+        return Tina::Core::failure(std::move(focus.error()));
+    }
+    const UI::UINodeId focused = *focus;
+    const UI::UINodeId tracked = inspectorFieldEdit_.field;
+    const bool enterPressed = pendingInspectorFieldCommit_;
+    pendingInspectorFieldCommit_ = false;
+    const u32 currentStableId = stableEntityIdForHierarchyItem(selectionKey_);
+
+    // Focus moving to another Inspector field ends the previous field's intent.
+    // Enter ends it without moving focus, which is how a single-field edit is
+    // confirmed without reaching for the pointer.
+    const bool commitTracked = tracked.hasValue() &&
+                               (enterPressed || focused != tracked);
+    if (commitTracked) {
+        auto currentText = tree.text(tracked);
+        // Selection moved out from under the typed text, so the value no longer
+        // belongs to any node the command would target. A destroyed or rebuilt
+        // field is the same case: drop the intent, since nothing was published.
+        const bool selectionIntact =
+            inspectorFieldEdit_.stableId == currentStableId &&
+            inspectorFieldEdit_.viewportSelectionRevision ==
+                viewportSelectionRevision_;
+        const bool changed = selectionIntact && currentText.has_value() &&
+                             *currentText != inspectorFieldEdit_.baselineTextUtf8;
+        const EditorCommand command = inspectorFieldEdit_.command;
+        if (enterPressed && focused == tracked && changed) {
+            // Enter keeps focus, so the field must re-baseline against the value
+            // just published or the next blur would publish it a second time.
+            try {
+                inspectorFieldEdit_.baselineTextUtf8.assign(*currentText);
+            } catch (const std::bad_alloc&) {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::OutOfMemory,
+                    "Inspector field commit baseline allocation failed");
+            }
+        } else {
+            inspectorFieldEdit_ = {};
+        }
+        if (changed && !queueEditorCommand(command)) {
+            // Another command owns this frame. Re-arm the same intent so the edit
+            // is published next frame instead of being lost.
+            pendingInspectorFieldCommit_ = true;
+            inspectorFieldEdit_.field = tracked;
+            inspectorFieldEdit_.command = command;
+            inspectorFieldEdit_.stableId = currentStableId;
+            inspectorFieldEdit_.viewportSelectionRevision =
+                viewportSelectionRevision_;
+            return Tina::Core::success();
+        }
+    }
+
+    if (!inspectorFieldEdit_.field.hasValue() && focused.hasValue()) {
+        const auto command = inspectorFieldCommitCommand(focused);
+        if (command.has_value()) {
+            auto text = tree.text(focused);
+            if (!text) {
+                return Tina::Core::failure(std::move(text.error()));
+            }
+            try {
+                inspectorFieldEdit_.field = focused;
+                inspectorFieldEdit_.baselineTextUtf8.assign(*text);
+                inspectorFieldEdit_.command = *command;
+                inspectorFieldEdit_.stableId = currentStableId;
+                inspectorFieldEdit_.viewportSelectionRevision =
+                    viewportSelectionRevision_;
+            } catch (const std::bad_alloc&) {
+                inspectorFieldEdit_ = {};
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::OutOfMemory,
+                    "Inspector field commit baseline allocation failed");
+            }
+        }
+    }
+    return Tina::Core::success();
+}
+
 auto EditorWorkspaceState::runNodePropertyCommand(
     Tina::PrimaryWindowUITreeUpdater& tree, EditorCommand command,
     bool& published) -> Tina::Core::Status{
@@ -91,7 +346,11 @@ auto EditorWorkspaceState::runNodePropertyCommand(
     };
 
     const bool meshCommand = command == EditorCommand::NodeToggleMeshVisible;
-    const bool assignSpriteCommand = command == EditorCommand::NodeAssignSprite;
+    // Assign reads the Project Assets selection, so it is the one command that
+    // may legitimately run while that selection is what changed last.
+    const bool assignSpriteCommand =
+        command == EditorCommand::NodeAssignSprite ||
+        command == EditorCommand::NodeAssignResource;
     if (!authoringEnabled() || (!assignSpriteCommand && assetInspectorActive_) ||
         !sceneDocumentActive() ||
         tileMapEditingContext()) {
@@ -392,18 +651,24 @@ auto EditorWorkspaceState::runNodePropertyCommand(
                     "Shape kind must be Box, Circle, Capsule, or Mixed"});
             }
         }
-        const std::array<std::pair<UI::UINodeId, std::optional<float>*>, 6>
+        // Angle is authored in degrees and stored in radians, so it is parsed
+        // separately from the pass-through float fields below.
+        std::optional<float> localAngleDegrees{};
+        const std::array<std::pair<UI::UINodeId, std::optional<float>*>, 9>
             fieldBindings{{
                 {section.fields[1], &input.halfExtentX},
                 {section.fields[2], &input.halfExtentY},
                 {section.fields[3], &input.radius},
-                {section.fields[4], &input.density},
-                {section.fields[5], &input.friction},
-                {section.fields[6], &input.restitution},
+                {section.fields[4], &input.localCenterX},
+                {section.fields[5], &input.localCenterY},
+                {section.fields[6], &localAngleDegrees},
+                {section.fields[7], &input.density},
+                {section.fields[8], &input.friction},
+                {section.fields[9], &input.restitution},
             }};
-        const std::array<std::string_view, 6> fieldNames{
-            "Half extent X", "Half extent Y", "Radius", "Density",
-            "Friction", "Restitution"};
+        const std::array<std::string_view, 9> fieldNames{
+            "Half extent X", "Half extent Y", "Radius", "Center X", "Center Y",
+            "Angle deg", "Density", "Friction", "Restitution"};
         for (Tina::Core::usize index = 0; index < fieldBindings.size(); ++index) {
             auto parsed = parseFloatField(fieldBindings[index].first,
                                           fieldNames[index]);
@@ -414,6 +679,9 @@ auto EditorWorkspaceState::runNodePropertyCommand(
                 return Tina::Core::failure(std::move(parsed.error()));
             }
             *fieldBindings[index].second = *parsed;
+        }
+        if (localAngleDegrees.has_value()) {
+            input.localAngleRadians = *localAngleDegrees * DegreesToRadians;
         }
         result = Tina::Editor::applyWorld2DPhysicsShapeNodeProperties(
             document_, ids, input);
@@ -443,6 +711,51 @@ auto EditorWorkspaceState::runNodePropertyCommand(
         propertyGroupName = "Rendering visibility";
         break;
     }
+    case EditorCommand::NodeToggleResourceActive: {
+        auto primary = primaryWorld2DEntity();
+        if (!primary) {
+            result = Tina::Core::failure(std::move(primary.error()));
+            break;
+        }
+        if (!primary->resource) {
+            result = Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::NodePropertyUnavailable,
+                "Toggle requires a resource node selection");
+            break;
+        }
+        result = Tina::Editor::applyWorld2DResourceNodeProperties(
+            document_, ids, {.active = !primary->resource->active});
+        successVerb = "toggled";
+        propertyGroupName = "Resource active";
+        break;
+    }
+    case EditorCommand::NodeAssignResource: {
+        auto primary = primaryWorld2DEntity();
+        if (!primary) {
+            result = Tina::Core::failure(std::move(primary.error()));
+            break;
+        }
+        auto primaryTemplate =
+            Tina::Editor::classifyWorld2DNodeTemplate(*primary);
+        if (!primaryTemplate) {
+            result = Tina::Core::failure(std::move(primaryTemplate.error()));
+            break;
+        }
+        const Tina::AssetFormat::AssetKind kind =
+            requiredResourceAssetKind(*primaryTemplate);
+        const Tina::Core::AssetId assetId = selectedProjectAssetIdOfKind(kind);
+        if (!assetId) {
+            result = Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                "Assign requires a matching asset kind selected in Project Assets");
+            break;
+        }
+        result = Tina::Editor::applyWorld2DResourceNodeProperties(
+            document_, ids, {.assetId = assetId});
+        successVerb = "assigned";
+        propertyGroupName = "Resource";
+        break;
+    }
     case EditorCommand::NodeAssignSprite: {
         const Tina::Core::AssetId spriteId = selectedProjectSpriteAssetId();
         if (!spriteId) {
@@ -464,17 +777,24 @@ auto EditorWorkspaceState::runNodePropertyCommand(
         auto sizeY = parseFloatField(section.fields[1], "Size Y");
         auto pivotX = parseFloatField(section.fields[2], "Pivot X");
         auto pivotY = parseFloatField(section.fields[3], "Pivot Y");
-        auto sortingLayer = sizeX && sizeY && pivotX && pivotY
-            ? parseIntField(section.fields[4], "Sort Layer", -32768L, 32767L)
+        auto uvU0 = parseFloatField(section.fields[4], "UV u0");
+        auto uvV0 = parseFloatField(section.fields[5], "UV v0");
+        auto uvU1 = parseFloatField(section.fields[6], "UV u1");
+        auto uvV1 = parseFloatField(section.fields[7], "UV v1");
+        const bool numericFieldsParsed = sizeX && sizeY && pivotX && pivotY &&
+                                         uvU0 && uvV0 && uvU1 && uvV1;
+        auto sortingLayer = numericFieldsParsed
+            ? parseIntField(section.fields[8], "Sort Layer", -32768L, 32767L)
             : Tina::Core::Result<std::optional<long>>{std::optional<long>{}};
         auto orderInLayer = sortingLayer
-            ? parseIntField(section.fields[5], "Order", -2147483647L, 2147483647L)
+            ? parseIntField(section.fields[9], "Order", -2147483647L, 2147483647L)
             : Tina::Core::Result<std::optional<long>>{std::optional<long>{}};
-        if (!sizeX || !sizeY || !pivotX || !pivotY || !sortingLayer ||
-            !orderInLayer) {
+        if (!numericFieldsParsed || !sortingLayer || !orderInLayer) {
             const Tina::Core::Error error =
                 !sizeX ? sizeX.error() : !sizeY ? sizeY.error()
                 : !pivotX ? pivotX.error() : !pivotY ? pivotY.error()
+                : !uvU0 ? uvU0.error() : !uvV0 ? uvV0.error()
+                : !uvU1 ? uvU1.error() : !uvV1 ? uvV1.error()
                 : !sortingLayer ? sortingLayer.error() : orderInLayer.error();
             if (isRejectable(error)) {
                 return reject(error);
@@ -485,15 +805,59 @@ auto EditorWorkspaceState::runNodePropertyCommand(
         input.sizeY = *sizeY;
         input.pivotX = *pivotX;
         input.pivotY = *pivotY;
+        input.uvU0 = *uvU0;
+        input.uvV0 = *uvV0;
+        input.uvU1 = *uvU1;
+        input.uvV1 = *uvV1;
         if (sortingLayer->has_value()) {
             input.sortingLayer = static_cast<Tina::Core::i16>(**sortingLayer);
         }
         if (orderInLayer->has_value()) {
             input.orderInLayer = static_cast<Tina::Core::i32>(**orderInLayer);
         }
+        auto spriteColorText = tree.text(spriteColorField_.textEdit);
+        if (!spriteColorText) {
+            return Tina::Core::failure(std::move(spriteColorText.error()));
+        }
+        if (*spriteColorText != "Mixed" && *spriteColorText != "n/a") {
+            auto color = UI::parseColorFieldValue(*spriteColorText);
+            if (!color) {
+                return reject(Tina::Core::Error{
+                    Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
+                    "Sprite color must use #RRGGBBAA hexadecimal format"});
+            }
+            input.color = std::array<Tina::Core::u8, 4>{
+                color->red, color->green, color->blue, color->alpha};
+        }
         result = Tina::Editor::applyWorld2DSpriteNodeProperties(document_, ids, input);
         successVerb = "applied";
         propertyGroupName = "Rendering";
+        break;
+    }
+    case EditorCommand::NodeToggleSpriteFlipX:
+    case EditorCommand::NodeToggleSpriteFlipY: {
+        auto primary = primaryWorld2DEntity();
+        if (!primary) {
+            result = Tina::Core::failure(std::move(primary.error()));
+            break;
+        }
+        if (!primary->sprite) {
+            result = Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::NodePropertyUnavailable,
+                "Flip requires a Sprite2D or AnimatedSprite2D selection");
+            break;
+        }
+        Tina::Editor::World2DSpriteNodeProperties input{};
+        if (command == EditorCommand::NodeToggleSpriteFlipX) {
+            input.flipX = !primary->sprite->flipX;
+            propertyGroupName = "Rendering flip X";
+        } else {
+            input.flipY = !primary->sprite->flipY;
+            propertyGroupName = "Rendering flip Y";
+        }
+        result = Tina::Editor::applyWorld2DSpriteNodeProperties(document_, ids,
+                                                               input);
+        successVerb = "toggled";
         break;
     }
     case EditorCommand::NodeApplyCamera: {
@@ -675,9 +1039,16 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                 return status;
             }
         }
+        if (section.resourceSlot.hasValue()) {
+            if (auto status = tree.setEnabled(section.resourceSlot, false);
+                !status) {
+                return status;
+            }
+        }
         if (section.resourceLabel.hasValue()) {
             if (auto status = tree.setText(
-                    section.resourceLabel, "Drop Sprite or Texture2D");
+                    section.resourceLabel,
+                    "Click to choose a Sprite or Texture2D");
                 !status) {
                 return status;
             }
@@ -692,9 +1063,29 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                 return status;
             }
         }
-        if (section.applyButton.hasValue()) {
-            if (auto status = tree.setEnabled(section.applyButton, false); !status) {
+        if (&section == &nodePropertySections_[0]) {
+            spriteColorMixed_ = false;
+            if (auto status = tree.setText(spriteColorField_.textEdit, "n/a");
+                !status) {
                 return status;
+            }
+            if (auto status = tree.setEnabled(spriteColorField_.swatchButton,
+                                              false);
+                !status) {
+                return status;
+            }
+            if (auto status = tree.setEnabled(spriteColorField_.textEdit, false);
+                !status) {
+                return status;
+            }
+            for (const UI::UINodeId flip : {spriteFlipXSwitch_,
+                                            spriteFlipYSwitch_}) {
+                if (auto status = tree.setChecked(flip, false); !status) {
+                    return status;
+                }
+                if (auto status = tree.setEnabled(flip, false); !status) {
+                    return status;
+                }
             }
         }
         if (&section == &nodePropertySections_[2]) {
@@ -825,12 +1216,13 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                     return group == World2DNodePropertyGroup::Light;
                 case Tina::Editor::World2DNodeTemplate::ShadowOccluder2D:
                     return group == World2DNodePropertyGroup::Occlusion;
-                case Tina::Editor::World2DNodeTemplate::Node2D:
-                case Tina::Editor::World2DNodeTemplate::Marker2D:
                 case Tina::Editor::World2DNodeTemplate::TileMap2D:
                 case Tina::Editor::World2DNodeTemplate::FxEmitter2D:
                 case Tina::Editor::World2DNodeTemplate::NavigationRegion2D:
                 case Tina::Editor::World2DNodeTemplate::AudioPlayer2D:
+                    return group == World2DNodePropertyGroup::Resource;
+                case Tina::Editor::World2DNodeTemplate::Node2D:
+                case Tina::Editor::World2DNodeTemplate::Marker2D:
                     return false;
                 case Tina::Editor::World2DNodeTemplate::CollisionShape2D:
                     return group == World2DNodePropertyGroup::PhysicsShape;
@@ -875,17 +1267,24 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                 }
             }
             if (section.resourceAssignButton.hasValue()) {
-                const bool spriteSelectionAvailable =
-                    sectionIndex == 0U && selectedProjectSpriteAssetId();
+                // Rendering accepts Sprite or Texture2D; a resource node accepts
+                // only its own declared kind.
+                const bool assignableSelection =
+                    sectionIndex == 0U
+                        ? static_cast<bool>(selectedProjectSpriteAssetId())
+                        : static_cast<bool>(selectedProjectAssetIdOfKind(
+                              requiredResourceAssetKind(*primaryTemplate)));
                 if (auto status = tree.setEnabled(section.resourceAssignButton,
                                                   fieldsEditable &&
-                                                      spriteSelectionAvailable);
+                                                      assignableSelection);
                     !status) {
                     return status;
                 }
             }
-            if (section.applyButton.hasValue()) {
-                if (auto status = tree.setEnabled(section.applyButton,
+            if (section.resourceSlot.hasValue()) {
+                // The slot opens the picker, so it stays reachable even when
+                // Project Assets has nothing compatible selected.
+                if (auto status = tree.setEnabled(section.resourceSlot,
                                                   fieldsEditable);
                     !status) {
                     return status;
@@ -929,6 +1328,11 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
             };
             const auto setField = [&](Tina::Core::usize index, bool mixedValue,
                                       std::string_view value) -> Tina::Core::Status {
+                // Refreshes run on every authoring command, so the field the user
+                // is typing in keeps its in-flight text until it commits.
+                if (inspectorFieldIsBeingEdited(section.fields[index])) {
+                    return Tina::Core::success();
+                }
                 return tree.setText(section.fields[index],
                                     mixedValue ? std::string_view{"Mixed"} : value);
             };
@@ -968,7 +1372,7 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                             resourceText.assign("Missing asset ");
                             resourceText.append(idText.data(), 8U);
                         } else {
-                            resourceText = "Drop Sprite or Texture2D";
+                            resourceText = "Click to choose a Sprite or Texture2D";
                         }
                     }
                 } catch (const std::bad_alloc&) {
@@ -1028,8 +1432,36 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                         sprite.pivotY);
                 }
                 if (status) {
+                    status = setNumberField(
+                        4, mixedFloat([](const auto& e) {
+                            return e.sprite->uvU0;
+                        }),
+                        sprite.uvU0);
+                }
+                if (status) {
+                    status = setNumberField(
+                        5, mixedFloat([](const auto& e) {
+                            return e.sprite->uvV0;
+                        }),
+                        sprite.uvV0);
+                }
+                if (status) {
+                    status = setNumberField(
+                        6, mixedFloat([](const auto& e) {
+                            return e.sprite->uvU1;
+                        }),
+                        sprite.uvU1);
+                }
+                if (status) {
+                    status = setNumberField(
+                        7, mixedFloat([](const auto& e) {
+                            return e.sprite->uvV1;
+                        }),
+                        sprite.uvV1);
+                }
+                if (status) {
                     status = setField(
-                        4,
+                        8,
                         mixedFloat([](const auto& e) {
                             return static_cast<float>(e.sprite->sortingLayer);
                         }),
@@ -1037,11 +1469,67 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                 }
                 if (status) {
                     status = setField(
-                        5,
+                        9,
                         mixedFloat([](const auto& e) {
                             return static_cast<float>(e.sprite->orderInLayer);
                         }),
                         std::to_string(sprite.orderInLayer));
+                }
+                spriteColorMixed_ =
+                    mixedBool([](const auto& e) { return e.sprite->colorRed; }) ||
+                    mixedBool([](const auto& e) { return e.sprite->colorGreen; }) ||
+                    mixedBool([](const auto& e) { return e.sprite->colorBlue; }) ||
+                    mixedBool([](const auto& e) { return e.sprite->colorAlpha; });
+                spriteColorValue_ = UI::rgba8(sprite.colorRed, sprite.colorGreen,
+                                              sprite.colorBlue, sprite.colorAlpha);
+                if (status &&
+                    !inspectorFieldIsBeingEdited(spriteColorField_.textEdit)) {
+                    const UI::UIColorFieldText colorText =
+                        UI::formatColorFieldValue(spriteColorValue_);
+                    status = tree.setText(
+                        spriteColorField_.textEdit,
+                        spriteColorMixed_ ? std::string_view{"Mixed"}
+                                          : colorText.view());
+                }
+                if (status) {
+                    auto spriteTheme = tree.productTheme();
+                    if (!spriteTheme) {
+                        return Tina::Core::failure(std::move(spriteTheme.error()));
+                    }
+                    status = tree.setBoxPaint(
+                        spriteColorField_.swatchButton,
+                        UI::makePanelBoxPaint(*spriteTheme, spriteColorValue_,
+                                              UI::UIElevation::Flat));
+                }
+                if (status) {
+                    status = tree.setEnabled(spriteColorField_.swatchButton,
+                                             fieldsEditable);
+                }
+                if (status) {
+                    status = tree.setEnabled(spriteColorField_.textEdit,
+                                             fieldsEditable);
+                }
+                if (status) {
+                    status = tree.setChecked(
+                        spriteFlipXSwitch_,
+                        sprite.flipX &&
+                            !mixedBool([](const auto& e) {
+                                return e.sprite->flipX;
+                            }));
+                }
+                if (status) {
+                    status = tree.setChecked(
+                        spriteFlipYSwitch_,
+                        sprite.flipY &&
+                            !mixedBool([](const auto& e) {
+                                return e.sprite->flipY;
+                            }));
+                }
+                if (status) {
+                    status = tree.setEnabled(spriteFlipXSwitch_, fieldsEditable);
+                }
+                if (status) {
+                    status = tree.setEnabled(spriteFlipYSwitch_, fieldsEditable);
                 }
                 break;
             }
@@ -1105,7 +1593,8 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                     toByte(light.colorBlue));
                 const UI::UIColorPickerState colorState =
                     UI::synchronizeColorPickerValue(pointLightColorValue_, false);
-                if (status) {
+                if (status &&
+                    !inspectorFieldIsBeingEdited(pointLightColorField_.textEdit)) {
                     status = tree.setText(
                         pointLightColorField_.textEdit,
                         pointLightColorMixed_ ? std::string_view{"Mixed"}
@@ -1291,7 +1780,8 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                 if (status) {
                     status = setField(0, kindMixed, kindText(shape.kind));
                 }
-                const std::array<std::pair<float, bool>, 6> values{{
+                // Angle is stored in radians and authored in degrees.
+                const std::array<std::pair<float, bool>, 9> values{{
                     {shape.halfExtentX, mixedFloat([](const auto& e) {
                          return e.physicsShape->halfExtentX;
                      })},
@@ -1300,6 +1790,16 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                      })},
                     {shape.radius, mixedFloat([](const auto& e) {
                          return e.physicsShape->radius;
+                     })},
+                    {shape.localCenterX, mixedFloat([](const auto& e) {
+                         return e.physicsShape->localCenterX;
+                     })},
+                    {shape.localCenterY, mixedFloat([](const auto& e) {
+                         return e.physicsShape->localCenterY;
+                     })},
+                    {shape.localAngleRadians * RadiansToDegrees,
+                     mixedFloat([](const auto& e) {
+                         return e.physicsShape->localAngleRadians;
                      })},
                     {shape.density, mixedFloat([](const auto& e) {
                          return e.physicsShape->density;
@@ -1315,6 +1815,44 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                      status && index < values.size(); ++index) {
                     status = setNumberField(index + 1U, values[index].second,
                                             values[index].first);
+                }
+                break;
+            }
+            case World2DNodePropertyGroup::Resource: {
+                const auto& resource = *primary->resource;
+                status = tree.setChecked(
+                    section.activeSwitch,
+                    resource.active &&
+                        !mixedBool([](const auto& e) {
+                            return e.resource->active;
+                        }));
+                std::string resourceText;
+                try {
+                    const bool mixedAssetId = std::any_of(
+                        selected.begin(), selected.end(),
+                        [&resource](const auto* entity) {
+                            return entity->resource->assetId != resource.assetId;
+                        });
+                    if (mixedAssetId) {
+                        resourceText = "Mixed";
+                    } else if (const auto* asset = projectAssets_.inspectorSnapshot(
+                                   resource.assetId);
+                               asset != nullptr) {
+                        resourceText = asset->displayName;
+                    } else if (resource.assetId) {
+                        const auto idText = resource.assetId.canonicalText();
+                        resourceText.assign("Missing asset ");
+                        resourceText.append(idText.data(), 8U);
+                    } else {
+                        resourceText = "Click to choose an asset";
+                    }
+                } catch (const std::bad_alloc&) {
+                    return Tina::Core::failure(
+                        Tina::Core::CoreErrorCode::OutOfMemory,
+                        "Resource slot label allocation failed");
+                }
+                if (status) {
+                    status = tree.setText(section.resourceLabel, resourceText);
                 }
                 break;
             }

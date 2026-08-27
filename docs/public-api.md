@@ -664,6 +664,11 @@ Keyboard Arrow 与 Gamepad D-pad 通过 Runtime 复用该路由，复合控件�
 disabled、Hidden/Collapsed、destroy 与 Modal change 会清除或迁移焦点。`UISliderPaint::focusedThumbColor`
 只表达该焦点的 paint feedback，dragging 仍优先。
 
+`UITreeUpdater` 与 `PrimaryWindowUITreeUpdater` 均提供只读 `focusedNode()`：返回本 updater root 拥有的
+committed keyboard focus，focus 不存在或属于其它 root 时返回 unset node。它与 `requestFocus()`、Tab、空间导航
+解析到同一 target，不 dirty 任何 pass，也不新增 per-widget change callback。产品据此在焦点离开输入控件时提交
+一次编辑（Editor Inspector 的隐式 commit 即用此路径），而不是要求用户点击显式 Apply。
+
 `UIRangeInputCommand::{Decrease,Increase}` 与 `context.input().routeRangeInputCommand()` 提供独立于空间焦点的
 capability-level 调值契约。Runtime 将 Keyboard Left/Down 与 D-pad Left/Down 映射为 Decrease，将
 Right/Up 映射为 Increase；路由优先级位于 Menu/Dropdown/ListView/TreeView/VirtualGridView/DataGrid/TextEdit 等复合方向控件之后、
@@ -743,6 +748,12 @@ finite playback speed 均为显式状态；`setClip()` 事务替换同 skeleton 
 解析；失败销毁本次创建的完整集合并保留既有实体。Runtime `EntityId`/generation、AssetHandle、Lease、Render
 ref/key 都不持久化。gameplay blob 由 game-owned schema/version/bytes 携带，Runtime 不解释。旧 snapshot
 schema 直接拒绝，不保留运行时兼容分支。详见 [World2D 序列化](world2d-serialization.md)。
+
+`loadWorld2DSceneFromFile(world, utf8Path, assets)` 把 read + `parseWorld2DSnapshot()` +
+`instantiateWorld2DSnapshot()` 组合成一次调用，是 shipped game 读取 Editor 所存 `.tworld` 的入口。它不新增
+wire format，也不放宽任何 schema 校验：AssetId 仍全部经 resolver 解析，未解析即 fail closed，任何失败都保持目标
+World 原样，不会半填充。返回 `World2DSceneLoadResult`（binding 表 + gameplay schema/version/bytes）；gameplay bytes
+是拷贝而非借用，因为 parsed view 借的是该调用自己拥有并随即释放的缓冲区。
 
 `DirectionalLight3D` 保存 linear color、非负 intensity 与 active 标志；Entity 的 world local `+Z` 指向
 光源。extraction 按稳定 Entity identity 收集最多4个 active light，把 world direction、color×intensity 与

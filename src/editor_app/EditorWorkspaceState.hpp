@@ -240,6 +240,10 @@ inline constexpr Tina::Core::usize ViewportGridVisualNodeCapacity =
     Tina::Editor::EditorViewportGridSegmentCapacity;
 inline constexpr Tina::Core::usize ViewportGizmoVisualNodeCapacity = 256;
 inline constexpr Tina::Core::usize ViewportPreselectionVisualNodeCapacity = 1;
+// Four box edges, or one ellipse ring, per CollisionShape2D. Capacity bounds how
+// many shapes an outline pass can draw; extra shapes are skipped, never dropped
+// from the document.
+inline constexpr Tina::Core::usize ViewportCollisionShapeVisualNodeCapacity = 128;
 inline constexpr Tina::Core::usize ViewportOrientationAxisCount = 3;
 inline constexpr float ViewportOrientationCompassExtent = 82.0F;
 inline constexpr float ViewportOrientationCompass2DExtent = 58.0F;
@@ -2010,6 +2014,10 @@ struct LifecycleCounters final {
     u64 playStops = 0;
     u64 playSimulationSteps = 0;
     u64 playMaximumSimulationTick = 0;
+    // Animators built for the current play session, and how many times one
+    // advanced onto a new frame. Both are zero while editing.
+    Tina::Core::usize playAnimatorCount = 0;
+    u64 playAnimatorFrameChanges = 0;
     u64 viewportGridRevision = 0;
     u64 viewportGridSegments = 0;
     u64 viewportGridMinorLines = 0;
@@ -2185,6 +2193,8 @@ enum class EditorCommand : u32 {
     NodeApplyPhysicsBody,
     NodeApplyPhysicsShape,
     NodeToggleSpriteVisible,
+    NodeToggleSpriteFlipX,
+    NodeToggleSpriteFlipY,
     NodeToggleCameraActive,
     NodeTogglePointLightActive,
     NodeToggleShadowOccluderActive,
@@ -2193,6 +2203,12 @@ enum class EditorCommand : u32 {
     NodeTogglePhysicsShapeEnabled,
     NodeToggleMeshVisible,
     NodeAssignSprite,
+    NodePickSpriteAsset,
+    SpriteAssetPickerConfirm,
+    SpriteAssetPickerCancel,
+    NodeAssignResource,
+    NodePickResourceAsset,
+    NodeToggleResourceActive,
     Undo,
     Redo,
     Save,
@@ -3903,6 +3919,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] Tina::Core::Status buildDirtyCloseModalUi(UiBuildContext& ui, UI::UINodeId parent);
     [[nodiscard]] Tina::Core::Status buildSceneAddModalUi(
         UiBuildContext& ui, UI::UINodeId parent);
+    [[nodiscard]] Tina::Core::Status buildSpriteAssetPickerUi(
+        UiBuildContext& ui, UI::UINodeId parent);
     [[nodiscard]] Tina::Core::Status buildSceneDeleteDialogUi(
         UiBuildContext& ui, UI::UINodeId parent);
     [[nodiscard]] Tina::Core::Status buildProjectAssetRemoveDialogUi(
@@ -4132,6 +4150,18 @@ class EditorWorkspaceState final : public Tina::IGameState {
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::Status updateViewportPreselectionVisual(
         Tina::PrimaryWindowUITreeUpdater& tree);
+    // Draws every CollisionShape2D outline in the active World2D document. The
+    // shape payload is not a transform, so the gizmo cannot show it; without an
+    // outline a user editing half extents or radius has no feedback at all and
+    // reasonably assumes dragging the node already resizes the shape.
+    [[nodiscard]] Tina::Core::Status updateViewportCollisionShapeVisuals(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    // Play drives every AnimatedSprite2D in the isolated preview world from the
+    // session's fixed-step clock. Before this, Play only advanced a tick counter,
+    // so pressing it changed nothing on screen.
+    [[nodiscard]] Tina::Core::Status rebuildPlayAnimators();
+    [[nodiscard]] Tina::Core::Status advancePlayAnimators(u32 steps);
+    void releasePlayAnimators() noexcept;
     [[nodiscard]] Tina::Core::Status updateHierarchyPreselectionVisual(
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] std::optional<u64> hierarchyIndexForStableId(
@@ -4298,6 +4328,28 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] Tina::Core::Status processPendingSceneAddTemplate(
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] Tina::Core::usize sceneAddTemplateCount() const noexcept;
+    // Sprite resource picker. Only one Dialog may be open per window, so this
+    // refuses to open while another modal owns the window.
+    [[nodiscard]] Tina::Core::Status showSpriteAssetPicker(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status hideSpriteAssetPicker(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status refreshSpriteAssetPickerUi(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status updateSpriteAssetPickerSearch(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status synchronizeSpriteAssetPickerSelection(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    [[nodiscard]] Tina::Core::Status confirmSpriteAssetPicker(
+        Tina::PrimaryWindowUITreeUpdater& tree);
+    void rebuildSpriteAssetPickerRows() noexcept;
+    [[nodiscard]] UI::UIVirtualGridViewDataSource
+    spriteAssetPickerDataSource() const noexcept;
+    [[nodiscard]] static u64 spriteAssetPickerItemCount(
+        const void* state) noexcept;
+    [[nodiscard]] static bool spriteAssetPickerResolveItem(
+        const void* state, u64 logicalIndex,
+        UI::UIVirtualGridViewItemDescriptor& output) noexcept;
     [[nodiscard]] Tina::Core::Status createNodeFromSceneAddRequest(
         Tina::PrimaryWindowUITreeUpdater& tree,
         std::optional<u32>& hierarchyRefreshStableId,
@@ -4397,6 +4449,52 @@ class EditorWorkspaceState final : public Tina::IGameState {
     selectedProjectAssetIdOfKind(Tina::AssetFormat::AssetKind kind) const noexcept;
     [[nodiscard]] Tina::Core::AssetId
     selectedProjectSpriteAssetId() const noexcept;
+    // A new node's required asset must exist in the active Catalog, otherwise the
+    // node is authored against a dangling AssetId: the preview demotes it to a
+    // plain Node2D and the viewport silently draws nothing. Resolution prefers the
+    // current Project Assets selection and falls back to a built-in preview asset
+    // only when that asset is really present, so a non-empty missingAssetKindName
+    // means creation must be refused rather than bound to a missing asset.
+    struct NodeTemplateAssetResolution final {
+        Tina::Editor::World2DNodeTemplateAssets world2D{};
+        Tina::Editor::World3DNodeTemplateAssets world3D{};
+        std::string_view missingAssetKindName{};
+    };
+    [[nodiscard]] bool projectAssetExists(Tina::Core::AssetId assetId) const noexcept;
+    [[nodiscard]] Tina::Core::AssetId
+    resolvedNodeTemplateSpriteAssetId(u8 fallbackMarker) const noexcept;
+    [[nodiscard]] Tina::Core::AssetId
+    resolvedNodeTemplateAssetId(Tina::AssetFormat::AssetKind kind,
+                                u8 fallbackMarker) const noexcept;
+    [[nodiscard]] Tina::Core::Result<NodeTemplateAssetResolution>
+    resolveNodeTemplateAssets(Tina::Core::usize slot, bool world2D) const noexcept;
+    // Inspector text fields commit the way the viewport gizmo does: one finished
+    // user intent publishes at most one revision. The gizmo's intent boundary is
+    // pointer-up; a text field's is losing focus or pressing Enter, so no
+    // separate Apply button is needed. Each field maps to the group command that
+    // owns it, and a group command still batches all of its fields into a single
+    // document `replace()`, preserving undo granularity.
+    struct InspectorFieldCommitState final {
+        UI::UINodeId field{};
+        std::string baselineTextUtf8{};
+        EditorCommand command = EditorCommand::ApplyTransform;
+        // The selection the text was typed against. Clicking another node moves
+        // focus and changes the selection in the same frame, so a commit without
+        // this guard would write one node's text onto a different node.
+        u32 stableId = 0;
+        u64 viewportSelectionRevision = 0;
+    };
+    [[nodiscard]] std::optional<EditorCommand>
+    inspectorFieldCommitCommand(UI::UINodeId field) const noexcept;
+    // AssetKind a resource node template requires, or Invalid for node kinds that
+    // own no resource payload.
+    [[nodiscard]] static Tina::AssetFormat::AssetKind requiredResourceAssetKind(
+        Tina::Editor::World2DNodeTemplate nodeTemplate) noexcept;
+    // True while the user is editing this field. Canonical refreshes must not
+    // overwrite it, or a gizmo drag/selection sync would silently discard typing.
+    [[nodiscard]] bool inspectorFieldIsBeingEdited(UI::UINodeId field) const noexcept;
+    [[nodiscard]] Tina::Core::Status processInspectorFieldCommit(
+        Tina::PrimaryWindowUITreeUpdater& tree);
     // Runs one Inspector property edit against nodes of the matching kind.
     // Rejections (invalid selection, kind mismatch, invalid values) are
     // reported through authoringFeedback_ and return success; `published` is
@@ -4686,6 +4784,8 @@ class EditorWorkspaceState final : public Tina::IGameState {
         viewportGizmoVisualNodes_{};
     std::array<UI::UINodeId, ViewportPreselectionVisualNodeCapacity>
         viewportPreselectionVisualNodes_{};
+    std::array<UI::UINodeId, ViewportCollisionShapeVisualNodeCapacity>
+        viewportCollisionShapeVisualNodes_{};
     UI::UINodeId viewportOrientationCompass_{};
     std::array<UI::UINodeId, ViewportOrientationOrbLayerCount>
         viewportOrientationOrbLayers_{};
@@ -4822,11 +4922,53 @@ class EditorWorkspaceState final : public Tina::IGameState {
     bool statusFrameMetricValid_ = false;
     UI::UIDialogParts sceneAddDialog_{};
     UI::UINodeId sceneAddParentLabel_{};
+    // Sprite tint and flip live outside the numeric field table: colour needs the
+    // hex text edit + swatch, and flips are booleans. Both were already supported
+    // by EditorNodePropertyOperations before the Inspector surfaced them.
+    UI::UIColorFieldParts spriteColorField_{};
+    UI::UIStraightSrgba8Color spriteColorValue_{UI::rgba8(255, 255, 255)};
+    bool spriteColorMixed_ = false;
+    UI::UINodeId spriteFlipXSwitch_{};
+    UI::UINodeId spriteFlipYSwitch_{};
     UI::UINodeId sceneAddSearchInput_{};
     UI::UINodeId sceneAddDescription_{};
     std::array<UI::UINodeId, SceneAddTemplateSlotCount> sceneAddTemplateButtons_{};
     UI::UINodeId sceneAddCreateButton_{};
     UI::UINodeId sceneAddCancelButton_{};
+    // Clicking the Inspector resource slot opens this picker. Drag-and-drop from
+    // Project Assets stays supported; the picker exists so the binding is
+    // reachable without discovering the drag gesture. It reuses the same
+    // ProjectAssetBrowserModel rows filtered to Sprite/Texture2D.
+    UI::UIDialogParts spriteAssetPickerDialog_{};
+    UI::UINodeId spriteAssetPickerSearchInput_{};
+    UI::UINodeId spriteAssetPickerList_{};
+    UI::UINodeId spriteAssetPickerStatus_{};
+    UI::UINodeId spriteAssetPickerConfirmButton_{};
+    UI::UINodeId spriteAssetPickerCancelButton_{};
+    UI::UIVirtualGridViewStyle spriteAssetPickerListStyle_{};
+    std::string spriteAssetPickerFilterUtf8_{};
+    std::string spriteAssetPickerStatusUtf8_{};
+    // Visible rows for the picker, rebuilt whenever it opens or its filter
+    // changes. Indices address projectAssets_.items(), which owns the strings the
+    // data source hands to the UI.
+    std::vector<Tina::Core::usize> spriteAssetPickerRows_{};
+    std::optional<u64> spriteAssetPickerObservedSelection_{};
+    Tina::Core::AssetId spriteAssetPickerSelectedAssetId_{};
+    u32 spriteAssetPickerTargetStableId_ = 0;
+    // Invalid means the Sprite2D case, which uniquely accepts two kinds
+    // (Sprite or a directly bound Texture2D). Any other value is a resource node
+    // that accepts exactly its declared kind.
+    Tina::AssetFormat::AssetKind spriteAssetPickerKind_ =
+        Tina::AssetFormat::AssetKind::Invalid;
+    bool spriteAssetPickerVisible_ = false;
+    bool spriteAssetPickerFocusPending_ = false;
+    // One animator per AnimatedSprite2D entity in the play world. Built when Play
+    // starts and released on stop, so editing never pays for them.
+    struct PlayAnimatorBinding final {
+        Tina::Scene::EntityId entity{};
+        std::optional<Tina::Scene::SpriteAnimator2D> animator{};
+    };
+    std::vector<PlayAnimatorBinding> playAnimators_{};
     UI::UIDialogParts dirtyCloseDialog_{};
     UI::UINodeId dirtyCloseTitle_{};
     UI::UINodeId dirtyCloseMessage_{};
@@ -4858,19 +5000,25 @@ class EditorWorkspaceState final : public Tina::IGameState {
         UI::UINodeId resourceSlot{};
         UI::UINodeId resourceLabel{};
         UI::UINodeId resourceAssignButton{};
-        std::array<UI::UINodeId, 8> fields{};
+        // Collision Shape is the widest group at 10 values (kind, half extent XY,
+        // radius, center XY, angle, density, friction, restitution).
+        std::array<UI::UINodeId, 12> fields{};
         Tina::Core::usize fieldCount = 0;
-        UI::UINodeId applyButton{};
     };
-    // Rendering, Camera, Light, Occlusion, Animation, Physics body, Physics shape, and 3D Rendering.
-    static constexpr Tina::Core::usize MeshPropertiesSectionIndex = 7;
-    std::array<NodePropertySectionUi, 8> nodePropertySections_{};
+    // Rendering, Camera, Light, Occlusion, Animation, Physics body, Physics
+    // shape, Resource, and 3D Rendering.
+    static constexpr Tina::Core::usize MeshPropertiesSectionIndex = 8;
+    std::array<NodePropertySectionUi, 9> nodePropertySections_{};
+    // Tracks the focused Inspector field and the text it held when focus arrived.
+    // A commit is published when focus leaves it or Enter is pressed, so the
+    // Inspector needs no per-section Apply button.
+    InspectorFieldCommitState inspectorFieldEdit_{};
+    bool pendingInspectorFieldCommit_ = false;
     struct InspectorPointLightColorChannelRequest final {
         UI::UIColorPickerChannel channel = UI::UIColorPickerChannel::Red;
         float value = 0.0F;
     };
-    UI::UIColorFieldParts pointLightColorField_{};
-    UI::UIColorPickerParts pointLightColorPicker_{};
+    UI::UIColorFieldParts pointLightColorField_{};    UI::UIColorPickerParts pointLightColorPicker_{};
     UI::UILayoutStyle pointLightColorPickerLayout_{};
     UI::UIStraightSrgba8Color pointLightColorValue_{UI::rgba8(255, 255, 255)};
     std::optional<InspectorPointLightColorChannelRequest>
@@ -4937,7 +5085,6 @@ class EditorWorkspaceState final : public Tina::IGameState {
     UI::UINodeId focusEntityButton_{};
     UI::UINodeId tilePaintToolButton_{};
     UI::UINodeId tileEraseToolButton_{};
-    UI::UINodeId applyTransformButton_{};
     UI::UINodeId resetTransformButton_{};
     UI::UINodeId undoButton_{};
     UI::UINodeId redoButton_{};
@@ -5000,6 +5147,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
     ProjectAssetViewMode projectAssetViewMode_ = ProjectAssetViewMode::Grid;
     std::optional<ProjectAssetViewMode> pendingProjectAssetViewMode_{};
     std::string sceneAddFilterUtf8_{};
+    // Owns the Create Node description text whenever it is composed rather than
+    // borrowed from the template registry; setText copies, but the buffer must
+    // still outlive the call.
+    std::string sceneAddDescriptionUtf8_{};
     UI::UILogicalRect hierarchyTreeRect_{};
     UI::UITreeViewMetrics hierarchyTreeMetrics_{};
     float hierarchyTreeRowHeight_ = 28.0F;

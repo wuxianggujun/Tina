@@ -1,7 +1,25 @@
 ﻿#include "EditorWorkspaceState.hpp"
 
+#include <tina/asset/AssetTypedViews.hpp>
+
 namespace Tina::EditorApp::WorkspaceInternal {
 namespace {
+
+// The cooked and Scene playback enums have different numeric values, so the
+// mapping must be explicit rather than a cast.
+[[nodiscard]] Tina::Scene::SpriteAnimationPlaybackMode scenePlaybackMode(
+    Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcept
+{
+    switch (mode) {
+    case Tina::AssetFormat::SpriteAnimationPlaybackMode::Once:
+        return Tina::Scene::SpriteAnimationPlaybackMode::Once;
+    case Tina::AssetFormat::SpriteAnimationPlaybackMode::PingPong:
+        return Tina::Scene::SpriteAnimationPlaybackMode::PingPong;
+    case Tina::AssetFormat::SpriteAnimationPlaybackMode::Loop:
+    default:
+        return Tina::Scene::SpriteAnimationPlaybackMode::Loop;
+    }
+}
 
 [[nodiscard]] u32 hashAnimationEventTag(std::string_view name) noexcept
 {
@@ -53,6 +71,136 @@ auto EditorWorkspaceState::animationModeLabel(Tina::AssetFormat::SpriteAnimation
     default:
         return "Loop";
     }
+}
+
+void EditorWorkspaceState::releasePlayAnimators() noexcept{
+    playAnimators_.clear();
+}
+
+auto EditorWorkspaceState::rebuildPlayAnimators() -> Tina::Core::Status
+try {
+    releasePlayAnimators();
+    if (!previewWorld_.has_value() || !assetResources_.system.has_value() ||
+        workspaceMode_ != WorkspaceMode::World2D) {
+        return Tina::Core::success();
+    }
+    for (const auto& binding : previewBindings_) {
+        const Tina::Scene::SpriteAnimationBinding2D* animation =
+            previewWorld_->spriteAnimationBinding2D(binding.entity);
+        if (animation == nullptr || !animation->clip) {
+            continue;
+        }
+        const auto* clipFile = assetResources_.system->tryGet(animation->clip);
+        if (clipFile == nullptr) {
+            continue;
+        }
+        auto clip = Tina::Asset::parseSpriteAnimationClipFromCooked(*clipFile);
+        if (!clip) {
+            continue;
+        }
+        // Each frame's sprite is a cooked dependency of the clip, resolved through
+        // the same live catalog the preview already bound.
+        std::vector<Tina::Scene::SpriteAnimationFrame2D> frames;
+        frames.reserve(clip->frameCount);
+        bool framesResolved = clip->frameCount != 0U;
+        for (u32 index = 0; index < clip->frameCount; ++index) {
+            const auto frame = clip->frame(index);
+            if (!frame.has_value()) {
+                framesResolved = false;
+                break;
+            }
+            const auto dependency =
+                clipFile->dependency(frame->spriteDependencyIndex);
+            if (!dependency.has_value()) {
+                framesResolved = false;
+                break;
+            }
+            const Tina::Asset::AssetHandle sprite = loadedAsset(
+                dependency->assetId, Tina::AssetFormat::AssetKind::Sprite);
+            if (!sprite) {
+                framesResolved = false;
+                break;
+            }
+            frames.push_back(Tina::Scene::SpriteAnimationFrame2D{
+                .sprite = Tina::Scene::SpriteRenderer2D{.sprite = sprite},
+                .duration = Tina::Core::Duration{frame->durationSeconds},
+            });
+        }
+        if (!framesResolved) {
+            // An unresolved clip downgrades that one node to a static sprite; it
+            // must not fail the play session.
+            continue;
+        }
+        auto animator = Tina::Scene::SpriteAnimator2D::Create(
+            Tina::Scene::SpriteAnimationClip2D{
+                .frames = frames,
+                .playbackMode = scenePlaybackMode(clip->playbackMode),
+            },
+            assetResources_.memory);
+        if (!animator) {
+            continue;
+        }
+        if (auto status = animator->setPlaybackSpeed(animation->playbackSpeed);
+            !status) {
+            continue;
+        }
+        if (animation->autoPlay) {
+            animator->play();
+        } else {
+            animator->pause();
+        }
+        PlayAnimatorBinding entry{.entity = binding.entity};
+        entry.animator.emplace(std::move(*animator));
+        playAnimators_.push_back(std::move(entry));
+    }
+    counters_.playAnimatorCount = playAnimators_.size();
+    return Tina::Core::success();
+} catch (const std::bad_alloc&) {
+    releasePlayAnimators();
+    return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
+                               "Play animator staging allocation failed");
+}
+
+auto EditorWorkspaceState::advancePlayAnimators(u32 steps) -> Tina::Core::Status{
+    if (steps == 0U || playAnimators_.empty() || !previewWorld_.has_value()) {
+        return Tina::Core::success();
+    }
+    const Tina::Core::Duration step{
+        playSession_.has_value() ? playSession_->config().fixedStepSeconds
+                                 : 1.0 / 60.0};
+    for (PlayAnimatorBinding& entry : playAnimators_) {
+        if (!entry.animator.has_value()) {
+            continue;
+        }
+        bool spriteChanged = false;
+        for (u32 index = 0; index < steps; ++index) {
+            auto update = entry.animator->update(step);
+            if (!update) {
+                return Tina::Core::failure(std::move(update.error()));
+            }
+            spriteChanged = spriteChanged || update->currentFrameChanged;
+        }
+        if (!spriteChanged) {
+            continue;
+        }
+        const Tina::Scene::SpriteRenderer2D* frameSprite =
+            entry.animator->currentSprite();
+        const Tina::Scene::SpriteRenderer2D* current =
+            previewWorld_->spriteRenderer2D(entry.entity);
+        if (frameSprite == nullptr || current == nullptr) {
+            continue;
+        }
+        // Only the bound asset comes from the clip; the node keeps its authored
+        // size, pivot, tint, flips and sorting.
+        Tina::Scene::SpriteRenderer2D updated = *current;
+        updated.sprite = frameSprite->sprite;
+        if (auto status = previewWorld_->setSpriteRenderer2D(entry.entity, updated);
+            !status) {
+            return status;
+        }
+        ++counters_.playAnimatorFrameChanges;
+    }
+    return Tina::Core::success();
 }
 
 auto EditorWorkspaceState::applyAnimationPreviewFrame(u32 frameIndex) -> Tina::Core::Status{

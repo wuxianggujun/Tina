@@ -365,6 +365,11 @@ auto EditorWorkspaceState::updateFrame(Tina::FrameUpdateContext& context) -> Tin
         counters_.playMaximumSimulationTick = (std::max)(
             counters_.playMaximumSimulationTick,
             playSession_->snapshot().simulationTickCount);
+        // The clock is only useful if something consumes it: drive the isolated
+        // world's animators with the steps it just produced.
+        if (auto status = advancePlayAnimators(*steps); !status) {
+            return status;
+        }
     }
     if (auto status = processEditorShortcuts(context.frameActions()); !status) {
         return status;
@@ -1206,6 +1211,15 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
     if (auto status = updateSceneAddSearch(*tree); !status) {
         return status;
     }
+    if (auto status = updateSpriteAssetPickerSearch(*tree); !status) {
+        return status;
+    }
+    if (auto status = synchronizeSpriteAssetPickerSelection(*tree); !status) {
+        return status;
+    }
+    if (auto status = processInspectorFieldCommit(*tree); !status) {
+        return status;
+    }
     if (auto status = processPendingFileDrops(*tree); !status) {
         return status;
     }
@@ -1244,6 +1258,12 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
             return status;
         }
         pendingSceneAddDialogFocus_ = false;
+    } else if (spriteAssetPickerFocusPending_) {
+        if (auto status = tree->requestFocus(spriteAssetPickerSearchInput_);
+            !status) {
+            return status;
+        }
+        spriteAssetPickerFocusPending_ = false;
     } else if (pendingSceneDeleteDialogFocus_) {
         if (auto status = tree->requestFocus(
                 sceneDeleteDialog_.actions[SceneDeleteConfirmActionIndex]);
@@ -1337,6 +1357,9 @@ auto EditorWorkspaceState::updateUI(Tina::UIUpdateContext& context) -> Tina::Cor
         return status;
     }
     if (auto status = updateViewportMarqueeVisual(*tree); !status) {
+        return status;
+    }
+    if (auto status = updateViewportCollisionShapeVisuals(*tree); !status) {
         return status;
     }
     if (auto status = updateViewportPreselectionVisual(*tree); !status) {
@@ -2004,6 +2027,15 @@ auto EditorWorkspaceState::processEditorShortcuts(
         }
         return Tina::Core::success();
     }
+    if (spriteAssetPickerVisible_) {
+        if (editorShortcutStarted(actions, EditorShortcutActions::Escape)) {
+            queue(EditorCommand::SpriteAssetPickerCancel);
+        } else if (editorShortcutStarted(actions,
+                                         EditorShortcutActions::ConfirmRename)) {
+            queue(EditorCommand::SpriteAssetPickerConfirm);
+        }
+        return Tina::Core::success();
+    }
     if (pendingSceneDeleteConfirmation_.has_value()) {
         if (editorShortcutStarted(actions, EditorShortcutActions::Escape)) {
             queue(EditorCommand::SceneDeleteCancel);
@@ -2028,6 +2060,14 @@ auto EditorWorkspaceState::processEditorShortcuts(
         } else if (editorShortcutStarted(actions, EditorShortcutActions::ConfirmRename)) {
             pendingHierarchyRenameCommit_ = true;
         }
+        return Tina::Core::success();
+    }
+    // Enter confirms the focused Inspector field in place, the same intent
+    // boundary a gizmo gets on pointer-up. Blur commits the same edit, so this
+    // is only the keyboard path, not the sole one.
+    if (inspectorFieldEdit_.field.hasValue() &&
+        editorShortcutStarted(actions, EditorShortcutActions::ConfirmRename)) {
+        pendingInspectorFieldCommit_ = true;
         return Tina::Core::success();
     }
 

@@ -1142,12 +1142,13 @@ void EditorWorkspaceState::handleProjectAssetPointerUp(
     projectAssetDragOverViewport_ = false;
     hierarchyPreselectionStableId_ = 0U;
     if (!completedDrag && projectAssetPointerDownPreservedNodeInspector_) {
-        // The list selection is committed before PointerUp. A click therefore
-        // needs to opt back into the Asset Inspector; a real drag keeps the
-        // node Inspector context for assignment or viewport creation.
-        assetInspectorActive_ = true;
-    }
-    if (!pendingProjectAssetDrop_.has_value()) {
+        // Selecting an asset while a scene node is selected is an assignment
+        // input, not a context switch: the node Inspector stays published so the
+        // resource slot and its assign action remain reachable. The read-only
+        // Asset Inspector is reached explicitly by double-click / Open.
+        preserveNodeInspectorOnProjectAssetSelection_ = true;
+        assetInspectorActive_ = false;
+    } else if (!pendingProjectAssetDrop_.has_value()) {
         preserveNodeInspectorOnProjectAssetSelection_ = false;
     }
     projectAssetPointerDownPreservedNodeInspector_ = false;

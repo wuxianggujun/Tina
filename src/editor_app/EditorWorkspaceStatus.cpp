@@ -1288,9 +1288,6 @@ auto EditorWorkspaceState::refreshAuthoringUi(Tina::PrimaryWindowUITreeUpdater& 
     if (auto status = tree.setEnabled(inspectorParentStableId_, selectionEditable); !status) {
         return status;
     }
-    if (auto status = tree.setEnabled(applyTransformButton_, selectionEditable); !status) {
-        return status;
-    }
     if (auto status = tree.setEnabled(resetTransformButton_, selectionEditable);
         !status) {
         return status;
@@ -1587,7 +1584,9 @@ auto EditorWorkspaceState::refreshPlaySessionUi(
     }
     for (const NodePropertySectionUi& section : nodePropertySections_) {
         const std::array sectionControls{
-            section.activeSwitch, section.resourceAssignButton, section.applyButton};
+            section.activeSwitch, section.resourceAssignButton,
+            section.resourceSlot, spriteFlipXSwitch_, spriteFlipYSwitch_,
+            spriteColorField_.swatchButton, spriteColorField_.textEdit};
         for (const UI::UINodeId control : sectionControls) {
             if (!control.hasValue()) {
                 continue;

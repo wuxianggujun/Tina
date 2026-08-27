@@ -14,10 +14,20 @@ schema 兼容格式。
 `Fx2DAuthoringDocument`，以及项目根模型与空项目目录创建 API；独立
 `Tina::EditorApp` 负责桌面组合，正式产品 target `tina_editor_desktop` 输出 `TinaEditor.exe`，其 `main()` 只负责
 调用应用模块。2D Inspector 编辑 Position X/Y、Rotation Z（度）与 Scale X/Y；3D Inspector 编辑完整
-Position/Rotation/Scale XYZ。viewport 多选时各字段独立显示 `Mixed`，显式 Apply 只解析用户给出具体数值的字段，
-`Mixed` 字段按 `std::nullopt` 保留每个对象自己的 canonical 值。一次多对象 Apply 只调用一次 active document
-`replace()`，no-op 不发布 revision、command counter 或 dirty 状态。Transform Header 的 Reset 对 2D/3D 使用对应 identity TRS 并复用同一提交路径；Inspector Header 的 Modified Badge 读取真实 document dirty，校验错误在下一行绑定当前 stable ID，切换对象后清除。`Apply Transform`、`Move X +1`、viewport transform
-gizmo、Undo、Redo 都接到 active document，每次成功 canonical command 后从同一份 bytes 实例化新的 `Scene::World`。
+Position/Rotation/Scale XYZ。viewport 多选时各字段独立显示 `Mixed`，提交只解析用户给出具体数值的字段，
+`Mixed` 字段按 `std::nullopt` 保留每个对象自己的 canonical 值。一次多对象提交只调用一次 active document
+`replace()`，no-op 不发布 revision、command counter 或 dirty 状态。
+
+Inspector 不提供逐区段 Apply 按钮。数值字段的提交时机与 viewport gizmo 相同——gizmo 的用户意图边界是 pointer-up，
+文本字段的是**失去焦点或按 Enter**，两者都只发布一条 revision。实现读取只读的
+`PrimaryWindowUITreeUpdater::focusedNode()`（见 [公开 API](public-api.md)）：焦点离开某字段且文本与获得焦点时的
+baseline 不同就提交该字段所属的 group command，该 command 仍然把本组全部字段批成一次 `replace()`，因此 undo 粒度
+不变。正在编辑的字段不会被 canonical 刷新覆盖，否则 gizmo 提交或选择同步会静默丢弃用户输入；提交时若选择已改变
+（stable ID 或 viewport selection revision 不同）则丢弃该次意图，不把一个节点的文本写到另一个节点上。
+Transform Header 只保留 Reset：它是独立的 authoring 意图（写入 identity TRS），不是提交入口。Inspector Header 的
+Modified Badge 读取真实 document dirty，校验错误在下一行绑定当前 stable ID，切换对象后清除。字段提交、`Move X +1`、
+viewport transform gizmo、Undo、Redo 都接到 active document，每次成功 canonical command 后从同一份 bytes 实例化新的
+`Scene::World`。
 2D Camera/Sprite 与 3D PerspectiveCamera/Mesh preview 都由同一个
 World/binding 驱动，不维护平行的 UI 模拟状态，也不把默认 proxy 冒充已解析的 Catalog 产品资源。
 
@@ -29,15 +39,37 @@ Hierarchy 创建器、Hierarchy Kind 和 Inspector 都读取同一词表。Asset
 `EditorNodePropertyOperations` 只编辑节点类型本来拥有的属性，不改变节点类型：`Sprite2D`/`AnimatedSprite2D` 发布
 Rendering，`Camera2D` 发布 Camera，`PointLight2D` 发布 Light，`ShadowOccluder2D` 发布 Occlusion，
 `AnimatedSprite2D` 额外发布 Animation，Physics body 节点发布 Physics Body，`CollisionShape2D` 发布 Collision Shape，
-`Mesh3D` 发布 Rendering。每个可见区段只包含属性行、Apply 与
-`visible/active/autoPlay` Compact switch，不存在 Components Header、Add Component、Remove Component 或兼容菜单。
-同类型多选时属性按一致性显示 `Mixed`，未明确填写的字段保留每个节点自己的 canonical 值；一次 Apply 最多发布一条
+`Mesh3D` 发布 Rendering。每个可见区段只包含属性行与
+`visible/active/autoPlay` Compact switch，不存在 Apply 按钮、Components Header、Add Component、Remove Component 或兼容菜单。
+Rendering 额外提供 Sprite tint `Color`、`Flip X`/`Flip Y` switch 与 `UV Min`/`UV Max`，Collision Shape 额外提供
+local `Center X/Y` 与 `Angle deg`（度输入，radians 存储）。`UV Min/Max` 授权 `World2DSpriteOverrideFlags::UvRect`：
+填写任一分量即置位该 override，并要求 `0 <= u0 < u1 <= 1`、`0 <= v0 < v1 <= 1`，非法值保持 document 字节不变。
+这是把一张 spritesheet 切给多个节点的唯一入口——runtime 与 wire format 一直支持该字段，此前只是没有 authoring UI。
+
+`TileMap2D`、`FxEmitter2D`、`NavigationRegion2D` 与 `AudioPlayer2D` 发布 Resource 区段（resource slot + `Active`
+switch），经 `applyWorld2DResourceNodeProperties` 重新绑定各自 template 声明的 `requiredResourceAssetKind`。
+此前这些 node kind 完全没有 Inspector，资源只能在创建时选定、之后无法更换。
+同类型多选时属性按一致性显示 `Mixed`，未明确填写的字段保留每个节点自己的 canonical 值；一次提交最多发布一条
 revision，非法值、未知 stable ID 或类型不匹配保持 document/history 字节不变，no-op 不发布 revision。
-Rendering 区的 `Texture` resource slot 显示当前 Sprite AssetId 对应的 Project Asset 名称或缺失状态；`Assign selected Project Asset`
-使用同一 `NodeAssignSprite` canonical command 更新 `Sprite2D`/`AnimatedSprite2D` 的 Sprite AssetId。Project Assets 中的 Sprite/Texture2D
-可直接拖到该 resource slot，也可拖到 Hierarchy 中的目标 Sprite 节点；拖放期间 slot 使用 primary container 高亮，释放后保持节点 Inspector 上下文。
+Rendering 区的 `Texture` resource slot 显示当前 Sprite AssetId 对应的 Project Asset 名称或缺失状态。该 slot 本身是
+一个按钮：点击打开 `Select Sprite or Texture2D` picker（复用 Project Assets 的 `ProjectAssetBrowserModel`，只过滤出
+`Sprite`/`Texture2D`，带搜索、Enter 确认与 Escape 取消），确认后经 `applyWorld2DSpriteNodeProperties` 发布一条 revision。
+因此绑定资源不再依赖用户先发现拖拽手势。slot 内的 `Assign selected Project Asset` 图标仍然把 Project Assets 的当前
+选择通过 `NodeAssignSprite` 赋给节点；Project Assets 中的 Sprite/Texture2D 也仍可直接拖到该 resource slot、拖到
+Hierarchy 中的目标 Sprite 节点或拖到 viewport；拖放期间 slot 使用 primary container 高亮，释放后保持节点 Inspector 上下文。
+在场景节点已选中时点击 Project Assets 属于赋值输入而不是上下文切换：node Inspector 保持发布，只读 Asset Inspector
+仍由双击/Open 显式进入，否则 resource slot 会在用户准备赋值的一瞬间消失。
 Sprite 资源是节点的必需 payload，因此不提供伪造的 Clear 操作。Play active 时全部节点属性控件
 与其它 authoring 控件一同锁定；成功编辑后 runtime preview 从新的 canonical bytes 重建。
+
+创建节点时必需资源必须真实存在于当前 Catalog：Create Node 先解析 Project Assets 选择，再回退到内置 preview 资源，
+且只在该资源确实存在时才使用。都不可用时对应 node kind 的 `Create` 保持 disabled 并在描述里说明缺什么，而不是用一个
+悬空 AssetId 建出节点——那样的节点会被 preview 降级成 `Node2D`，viewport 上什么都不画。
+
+viewport 为每个 enabled `CollisionShape2D` 绘制轮廓：Box 用矩形边框，Circle/Capsule 用 ellipse ring，位置取
+world transform 加 local center，尺寸随 transform scale 缩放，sensor 与实体形状用不同颜色，选中项加粗。shape payload
+不是 transform，gizmo 无法表达它；没有轮廓时用户改 half extent/radius 得不到任何反馈，会误以为拖动节点就能改形状。
+capsule 的长度存在 local points 中、暂无 Inspector 行，因此其 ring 只表达当前可编辑的 radius。
 
 Editor 默认进入无帧数上限的交互模式，由主窗口关闭结束生命周期；自动演示不再默认执行。只有同时显式传入
 `--auto-demo` 与 `--frames=<N>` 且 `N >= 70` 才运行自动 authoring 流程，重复 `--auto-demo`、缺少 `--frames`
@@ -142,8 +174,8 @@ Transform 使用 Position、Rotation、Scale 三行第一方 Grid：每行以52 
 X/Y/Z label + `Fr` TextEdit，并把整体限制在52..96 logical px。拖动 Inspector 只改变 track 分配，不切换
 方向、不重建节点，也不使用宽度阈值。World2D entity 的 Position/Scale 发布 X/Y，Rotation 只发布 Z；
 World3D entity 发布完整九轴。Asset Inspector、TileMap document 或无 entity selection 时，Header、向量字段容器与
-Apply 一并 `Collapsed`。旧的九行 `UINumberField`、逐轴减号/加号回调与延迟 step 状态已删除，数值仍由 Transform
-Header 右侧的 Apply action 统一解析并提交。节点专属属性与 Parent ID 等其他 Inspector PropertyRow 使用
+Reset action 一并 `Collapsed`。旧的九行 `UINumberField`、逐轴减号/加号回调与延迟 step 状态已删除，数值由字段的
+focus-loss/Enter 提交路径统一解析并发布。节点专属属性与 Parent ID 等其他 Inspector PropertyRow 使用
 68 logical px label + `Fr` value Grid，单值 TextEdit 最大宽度统一为132 logical px。Sprite Size/Pivot 与
 ShadowOccluder Start/End 分别把 X/Y 合并在同一属性行，轴 label 的 horizontal/vertical content alignment 均居中。
 节点专属属性按当前 selection/workspace 发布：只有同类型 Node 多选才显示该类型固有的 property section；
@@ -195,7 +227,7 @@ document tab 时整个 strip 为 `Collapsed`，不会保留空白横栏。
 每个可见槽使用 170 px preferred、112 px minimum 和 shrink，未占用及 context-only 槽为 `Collapsed`；每次 refresh
 都重新应用完整 slot layout，因此重新打开 Catalog document 可恢复 `Visible`，不会保留旧折叠状态。
 两个打开的 document 不得拥有相同文本路径。
-2D 的五个字段和 3D 的九个字段都通过显式 Apply 合并为一次 document revision；严格拒绝 trailing text、NaN 和 Infinity，
+2D 的五个字段和 3D 的九个字段都在提交时合并为一次 document revision；严格拒绝 trailing text、NaN 和 Infinity，
 拒绝时恢复 canonical 字段并保持 document/history/preview 不变。多选 batch 对每个 optional 缺失字段保留原值，并要求
 全部 selected stable ID 都存在后才原子发布。2D Rotation Z 总是发布 X/Y 为零的平面 Z quaternion；3D Euler XYZ
 合并当前未编辑分量后发布完整规范化 quaternion，并保留 hierarchy、Mesh/Material 与 visibility。GPU preview 同步读取完整 canonical TRS。
@@ -243,6 +275,13 @@ Command Bar 或 Edit menu 的 active-document Undo/Redo。按下 Play 时才复�
 `canonicalByteCapacity` 只限制合法快照大小，不在 Editor 空启动时预留整块容量；复制成功后才原子进入 Playing，
 以有界 fixed-step clock 驱动隔离 preview，authoring document 不被 simulation 修改。play session 活跃期间锁定 authoring command
 与 document tab 切换，仍允许 viewport Focus；Stop 后释放隔离 snapshot 容量并从 canonical authoring document 重建 preview。
+
+该 clock 现在真的被消费：Play 为隔离 world 中每个带 `SpriteAnimation2D` binding 的 entity 建立一个
+`Scene::SpriteAnimator2D`（clip 从 cooked 依赖解析，`autoPlay` 决定初始是否播放，`playbackSpeed` 直接传入），
+并用 `advance()` 返回的 step 数按 `fixedStepSeconds` 推进它们，帧切换时只改写该 entity 的 sprite handle，
+节点自身的 size/pivot/tint/flip/sorting 全部保留。clip 解析失败或某帧 sprite 未解析只让该节点退化为静态 sprite，
+不使整个 play session 失败。animator 在 preview 重建时同步重建（world 换了，旧 entity 句柄即失效），编辑态不持有 animator。
+Physics 尚未参与 Play：`Scene::World` 目前没有 physics body 组件，接入需要先冻结 Scene↔Physics2D 的桥接契约。
 
 普通工作区信息、路径与状态摘要统一使用 Theme primary text；warning/error 只用于真实可恢复异常或失败反馈，
 不再把常规信息染成 warning 黄色。
