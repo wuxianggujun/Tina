@@ -143,6 +143,110 @@ TEST_F(UIInputRouteProducerTest, GamepadDpadUsesTheSameSpatialFocusRoute)
     EXPECT_FLOAT_EQ(*sliderValue, 25.0F);
 }
 
+// A stick reports a continuous value while focus navigation is edge-triggered, so
+// the interesting behaviour is that holding it moves focus exactly once.
+TEST_F(UIInputRouteProducerTest, LeftStickStepsSpatialFocusOncePerNeutralReturn)
+{
+    auto tree = createRouteTree(window, focusNavigationCapacities());
+    ASSERT_NE(tree.context, nullptr);
+    auto second = tree.updater.createElement(tree.panel, UI::makeButtonElement());
+    ASSERT_TRUE(second.has_value()) << (second ? "" : second.error().message);
+    expectOk(tree.updater.setLayoutStyle(*second, fixedSize(40.0F, 40.0F)));
+    expectOk(tree.context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
+    expectOk(tree.context->input().requestFocus(tree.target));
+
+    auto producer = createProducer();
+    ASSERT_NE(producer, nullptr);
+    const Platform::GamepadSnapshot snapshot{.gamepad = gamepad, .revision = 410};
+
+    // Past the step threshold: focus moves once.
+    auto frame = buildFrame(*builder, window,
+                            {
+                                .frameId = {410},
+                                .transitions = {gamepadAxis(window, gamepad,
+                                                            Platform::GamepadAxis::LeftY, 0.9F)},
+                                .gamepadSnapshots = {snapshot},
+                            });
+    ASSERT_TRUE(frame.has_value()) << (frame ? "" : frame.error().message);
+    auto output = producer->produce(tree.context.get(), *frame);
+    ASSERT_TRUE(output.has_value()) << (output ? "" : output.error().message);
+    EXPECT_TRUE(output->consumption.isConsumed(0));
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), *second);
+
+    // Still held: the latch must refuse to step again, or focus would race at
+    // frame rate for as long as the player holds the stick.
+    auto heldFrame = buildFrame(*builder, window,
+                                {
+                                    .frameId = {411},
+                                    .transitions = {gamepadAxis(window, gamepad,
+                                                                Platform::GamepadAxis::LeftY, 0.95F)},
+                                    .gamepadSnapshots = {{.gamepad = gamepad, .revision = 411}},
+                                });
+    ASSERT_TRUE(heldFrame.has_value()) << (heldFrame ? "" : heldFrame.error().message);
+    auto heldOutput = producer->produce(tree.context.get(), *heldFrame);
+    ASSERT_TRUE(heldOutput.has_value()) << (heldOutput ? "" : heldOutput.error().message);
+    EXPECT_FALSE(heldOutput->consumption.isConsumed(0));
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), *second);
+
+    // Returning under the release threshold re-arms without moving focus.
+    auto neutralFrame = buildFrame(*builder, window,
+                                   {
+                                       .frameId = {412},
+                                       .transitions = {gamepadAxis(window, gamepad,
+                                                                   Platform::GamepadAxis::LeftY, 0.1F)},
+                                       .gamepadSnapshots = {{.gamepad = gamepad, .revision = 412}},
+                                   });
+    ASSERT_TRUE(neutralFrame.has_value()) << (neutralFrame ? "" : neutralFrame.error().message);
+    auto neutralOutput = producer->produce(tree.context.get(), *neutralFrame);
+    ASSERT_TRUE(neutralOutput.has_value()) << (neutralOutput ? "" : neutralOutput.error().message);
+    EXPECT_FALSE(neutralOutput->consumption.isConsumed(0));
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), *second);
+
+    // Re-armed, so pushing back up steps focus again.
+    auto againFrame = buildFrame(*builder, window,
+                                 {
+                                     .frameId = {413},
+                                     .transitions = {gamepadAxis(window, gamepad,
+                                                                 Platform::GamepadAxis::LeftY, -0.9F)},
+                                     .gamepadSnapshots = {{.gamepad = gamepad, .revision = 413}},
+                                 });
+    ASSERT_TRUE(againFrame.has_value()) << (againFrame ? "" : againFrame.error().message);
+    auto againOutput = producer->produce(tree.context.get(), *againFrame);
+    ASSERT_TRUE(againOutput.has_value()) << (againOutput ? "" : againOutput.error().message);
+    EXPECT_TRUE(againOutput->consumption.isConsumed(0));
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.target);
+}
+
+// The right stick is conventionally a camera, so it must not fight menu focus.
+TEST_F(UIInputRouteProducerTest, RightStickAndTriggersDoNotMoveFocus)
+{
+    auto tree = createRouteTree(window, focusNavigationCapacities());
+    ASSERT_NE(tree.context, nullptr);
+    auto second = tree.updater.createElement(tree.panel, UI::makeButtonElement());
+    ASSERT_TRUE(second.has_value()) << (second ? "" : second.error().message);
+    expectOk(tree.updater.setLayoutStyle(*second, fixedSize(40.0F, 40.0F)));
+    expectOk(tree.context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
+    expectOk(tree.context->input().requestFocus(tree.target));
+
+    auto producer = createProducer();
+    ASSERT_NE(producer, nullptr);
+    auto frame = buildFrame(*builder, window,
+                            {
+                                .frameId = {420},
+                                .transitions = {gamepadAxis(window, gamepad,
+                                                            Platform::GamepadAxis::RightY, 0.9F),
+                                                gamepadAxis(window, gamepad,
+                                                            Platform::GamepadAxis::LeftTrigger, 1.0F)},
+                                .gamepadSnapshots = {{.gamepad = gamepad, .revision = 420}},
+                            });
+    ASSERT_TRUE(frame.has_value()) << (frame ? "" : frame.error().message);
+    auto output = producer->produce(tree.context.get(), *frame);
+    ASSERT_TRUE(output.has_value()) << (output ? "" : output.error().message);
+    EXPECT_FALSE(output->consumption.isConsumed(0));
+    EXPECT_FALSE(output->consumption.isConsumed(1));
+    EXPECT_EQ(tree.context->input().defaultActionFocus(), tree.target);
+}
+
 TEST_F(UIInputRouteProducerTest, HorizontalTabViewOwnsArrowAndHomeEndBeforeSpatialFocus)
 {
     auto tree = createRouteTree(window, focusNavigationCapacities());

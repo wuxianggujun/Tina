@@ -257,6 +257,18 @@ gamepadButtonUp(Platform::WindowId window, Platform::GamepadId gamepad) noexcept
     };
 }
 
+[[nodiscard]] Platform::GamepadAxisTransition gamepadAxis(
+    Platform::WindowId window, Platform::GamepadId gamepad, Platform::GamepadAxis axis,
+    float value) noexcept
+{
+    return Platform::GamepadAxisTransition{
+        .routedWindow = window,
+        .gamepad = gamepad,
+        .axis = axis,
+        .value = value,
+    };
+}
+
 [[nodiscard]] Platform::GamepadSnapshot
 heldSouthSnapshot(Platform::GamepadId gamepad, u64 revision) noexcept
 {

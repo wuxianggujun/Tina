@@ -4,7 +4,9 @@
 #include <tina/platform/PlatformFrame.hpp>
 #include <tina/ui/InputRouting.hpp>
 #include <tina/ui/UIContext.hpp>
+#include <tina/ui/UIFocus.hpp>
 
+#include <array>
 #include <memory>
 #include <memory_resource>
 #include <optional>
@@ -50,8 +52,23 @@ class UIInputRouteProducer final {
     [[nodiscard]] Core::Status preflight(const UI::UIContext* context,
                                          const Platform::PlatformFrameView& platformFrame) const;
 
+    // Analog sticks report a continuous value while focus navigation is
+    // edge-triggered, so a held stick would otherwise move focus every frame.
+    // One latch per gamepad slot and axis pair: the stick must return to neutral
+    // before it can step focus again, and two pads latch independently.
+    struct StickNavigationLatch final {
+        Platform::GamepadId gamepad{};
+        // Direction currently held past the step threshold, or none while neutral.
+        std::optional<UI::UIFocusNavigationDirection> horizontal{};
+        std::optional<UI::UIFocusNavigationDirection> vertical{};
+    };
+
+    [[nodiscard]] StickNavigationLatch& stickLatchFor(Platform::GamepadId gamepad) noexcept;
+
     usize rawTransitionCapacity_ = 0;
     usize continuousControlClaimCapacity_ = 0;
+    std::array<StickNavigationLatch, Platform::PlatformFrameBuilder::MaximumGamepadSlots>
+        stickLatches_{};
     std::pmr::vector<u64> publishedWords_;
     std::pmr::vector<u64> stagingWords_;
     std::pmr::vector<UI::ContinuousControlClaim> publishedClaims_;

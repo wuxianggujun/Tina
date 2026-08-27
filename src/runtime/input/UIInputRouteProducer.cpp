@@ -205,6 +205,42 @@ flowInputDeviceObservation(const Platform::InputTransitionPayload& payload,
     }
 }
 
+// Stick navigation uses split thresholds so a stick resting just past the step
+// point cannot oscillate: it must pass Step to move focus and fall back under
+// Release before it may move again. Both sit above the backend's 0.18 radial
+// deadzone, so a centred stick never reaches either.
+inline constexpr float StickNavigationStepThreshold = 0.60F;
+inline constexpr float StickNavigationReleaseThreshold = 0.40F;
+
+// Which navigation axis a stick belongs to, and whether it is one Tina drives.
+// Triggers and the right stick are excluded: the right stick is conventionally a
+// camera and would fight menu navigation.
+[[nodiscard]] std::optional<bool> isVerticalNavigationAxis(Platform::GamepadAxis axis) noexcept
+{
+    switch (axis)
+    {
+    case Platform::GamepadAxis::LeftX:
+        return false;
+    case Platform::GamepadAxis::LeftY:
+        return true;
+    default:
+        return std::nullopt;
+    }
+}
+
+// GLFW reports stick Y as negative-up, matching the screen convention where Up
+// decreases the coordinate.
+[[nodiscard]] UI::UIFocusNavigationDirection stickDirectionFor(bool vertical, float value) noexcept
+{
+    if (vertical)
+    {
+        return value < 0.0F ? UI::UIFocusNavigationDirection::Up
+                            : UI::UIFocusNavigationDirection::Down;
+    }
+    return value < 0.0F ? UI::UIFocusNavigationDirection::Left
+                        : UI::UIFocusNavigationDirection::Right;
+}
+
 [[nodiscard]] std::optional<UI::UIRangeInputCommand>
 rangeInputCommandForGamepadButton(Platform::GamepadButton button) noexcept
 {
@@ -639,6 +675,22 @@ UIInputRouteProducer::UIInputRouteProducer(
       stagingWords_(std::move(stagingWords)), publishedClaims_(std::move(publishedClaims)),
       stagingClaims_(std::move(stagingClaims)), ownerThreadId_(std::this_thread::get_id())
 {
+}
+
+UIInputRouteProducer::StickNavigationLatch& UIInputRouteProducer::stickLatchFor(
+    Platform::GamepadId gamepad) noexcept
+{
+    // Slot index is the natural key. A slot reused by a different generation must
+    // start neutral, or a new pad would inherit the previous one's held direction.
+    const usize slot = gamepad.hasValue() && gamepad.index() < stickLatches_.size()
+                           ? gamepad.index()
+                           : 0U;
+    StickNavigationLatch& latch = stickLatches_[slot];
+    if (latch.gamepad != gamepad)
+    {
+        latch = StickNavigationLatch{.gamepad = gamepad};
+    }
+    return latch;
 }
 
 Core::Status UIInputRouteProducer::preflight(const UI::UIContext* context,
@@ -1518,6 +1570,58 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
                         u64{1} << (ordinal % BitsPerConsumptionWord);
                     anyConsumed = true;
                     continue;
+                }
+            }
+        }
+
+        // Left stick drives the same spatial focus path as the D-pad, at the same
+        // priority and after stateful controls decline, so adding it cannot change
+        // how the D-pad or a focused Slider already behave.
+        if (const auto* axis =
+                std::get_if<Platform::GamepadAxisTransition>(&transitions[ordinal].payload);
+            axis != nullptr && axis->routedWindow == context->ownerWindow())
+        {
+            const auto vertical = isVerticalNavigationAxis(axis->axis);
+            if (vertical.has_value())
+            {
+                StickNavigationLatch& latch = stickLatchFor(axis->gamepad);
+                std::optional<UI::UIFocusNavigationDirection>& held =
+                    *vertical ? latch.vertical : latch.horizontal;
+                const float magnitude = std::abs(axis->value);
+                if (!held.has_value() && magnitude >= StickNavigationStepThreshold)
+                {
+                    const UI::UIFocusNavigationDirection direction =
+                        stickDirectionFor(*vertical, axis->value);
+                    held = direction;
+                    // A stick step is one discrete move, so press and release are
+                    // routed together: there is no analog hold for focus.
+                    auto pressed = context->input().routeFocusNavigation(
+                        direction, true, UI::UIInputModality::Gamepad);
+                    if (!pressed)
+                    {
+                        Core::Error error = std::move(pressed.error());
+                        error.addContext("UIInputRouteProducer::produce(gamepad-stick-navigation)");
+                        return Core::failure(std::move(error));
+                    }
+                    auto released = context->input().routeFocusNavigation(
+                        direction, false, UI::UIInputModality::Gamepad);
+                    if (!released)
+                    {
+                        Core::Error error = std::move(released.error());
+                        error.addContext("UIInputRouteProducer::produce(gamepad-stick-navigation)");
+                        return Core::failure(std::move(error));
+                    }
+                    if (pressed->consumed || released->consumed)
+                    {
+                        stagingWords_[ordinal / BitsPerConsumptionWord] |=
+                            u64{1} << (ordinal % BitsPerConsumptionWord);
+                        anyConsumed = true;
+                        continue;
+                    }
+                } else if (held.has_value() && magnitude < StickNavigationReleaseThreshold)
+                {
+                    // Returning toward neutral re-arms the axis without moving focus.
+                    held.reset();
                 }
             }
         }

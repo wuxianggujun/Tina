@@ -122,6 +122,14 @@ Hidden/Collapsed 与 Modal scope change 会释放 capture，其中 target 失效
 合成一次 synthetic-only `PointerCancel`。Keyboard Arrow/Gamepad D-pad 方向空间导航已复用 committed geometry
 的 beam/axis scoring；成功移动的 Down/Up 由固定容量 latch 成对消费。
 
+Gamepad **左摇杆**走同一条 spatial focus 路由，优先级与 D-pad 相同（都在有方向状态的控件拒绝该
+transition 之后），因此接入它不改变 D-pad 或已聚焦 Slider 的既有行为。摇杆报的是连续值而 focus 导航是
+边沿触发，所以每个 gamepad slot、每条轴各有一个 latch：越过 step 阈值 `0.60` 触发**一次**移动，必须回落到
+release 阈值 `0.40` 以下才重新武装——否则玩家按住摇杆时 focus 会以帧率连跳。两个阈值分离是为了防止停在
+阈值附近时反复触发；两者都高于 backend 的 `0.18` 径向死区，居中摇杆不会碰到。slot 被不同 generation 复用
+时 latch 重置，新手柄不会继承上一个的方向。**右摇杆与扳机不参与 focus 导航**：右摇杆按惯例是镜头，会和
+菜单导航打架。
+
 `preventDefaultAction()`、route stop、transition consume 和 control claim 是不同语义：consume/claim 阻止
 Gameplay Action，不能隐式替代 UI default-action policy。
 

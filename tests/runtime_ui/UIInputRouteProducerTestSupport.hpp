@@ -121,6 +121,9 @@ gamepadButtonUp(Platform::WindowId window, Platform::GamepadId gamepad) noexcept
 [[nodiscard]] Platform::GamepadButtonTransition gamepadButton(
     Platform::WindowId window, Platform::GamepadId gamepad, Platform::GamepadButton button,
     Platform::DigitalTransition state) noexcept;
+[[nodiscard]] Platform::GamepadAxisTransition gamepadAxis(
+    Platform::WindowId window, Platform::GamepadId gamepad, Platform::GamepadAxis axis,
+    float value) noexcept;
 [[nodiscard]] Platform::GamepadSnapshot heldSouthSnapshot(Platform::GamepadId gamepad, u64 revision) noexcept;
 [[nodiscard]] Platform::GamepadSnapshot releasedSouthSnapshot(Platform::GamepadId gamepad,
                                                               u64 revision) noexcept;
