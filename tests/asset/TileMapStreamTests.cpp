@@ -14,6 +14,8 @@
 #include <array>
 #include <cstddef>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <memory_resource>
 #include <span>
 #include <string_view>
@@ -621,6 +623,172 @@ TEST(TileMapStreamTests, CapacityFailureLeavesResidentSetUnchanged)
     EXPECT_EQ(rejected.error().code, Core::CoreErrorCode::CapacityExceeded);
     EXPECT_TRUE(stream->map().isChunkResident(VisualLayerId, TileMapChunkCoord{.chunkX = 0U, .chunkY = 0U}));
     EXPECT_EQ(stream->stats().residentSlots, 1U);
+
+    EXPECT_TRUE(stream->shutdown().has_value());
+    std::error_code ec;
+    std::filesystem::remove_all(package.root, ec);
+}
+
+// A load failure used to be terminal: the slot stayed Failed, eviction kept it
+// because it was still desired, the request loop skipped it because a slot existed,
+// and commitReady only looks at Requested slots. One transient IO error made a chunk
+// blank for as long as the camera kept it in view, and only stats() showed it.
+TEST(TileMapStreamTests, FailedChunkIsRetriedOnTheNextDemandUpdate)
+{
+    TrackingMemoryResource resource;
+    const auto package = writeTileMapStreamPackage("tina_tilemap_stream_failed_retry");
+
+    auto system = AssetSystem::Create(AssetSystemConfig{.storeCapacity = 16,
+                                                        .memoryResource = &resource,
+                                                        .batch = CookedAssetBatchLoadConfig{
+                                                            .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
+                                                            .memoryResource = &resource},
+                                                        .queueCapacity = 16});
+    ASSERT_TRUE(system.has_value()) << system.error().message;
+    auto bound = bindPackage(*system, package, resource);
+    ASSERT_TRUE(bound.has_value()) << bound.error().message;
+
+    auto rootHandle = system->loadOne(package.tileMapId);
+    ASSERT_TRUE(rootHandle.has_value()) << rootHandle.error().message;
+    auto tilesetHandle = system->findFirstLoadedOfKind(AssetFormat::AssetKind::Tileset);
+    ASSERT_TRUE(tilesetHandle.has_value());
+    auto rootLease = system->acquire(*rootHandle);
+    auto tilesetLease = system->acquire(*tilesetHandle);
+    ASSERT_TRUE(rootLease.has_value());
+    ASSERT_TRUE(tilesetLease.has_value());
+
+    auto stream = TileMapStream::Create(*system, std::move(*rootLease), std::move(*tilesetLease),
+                                        TileMapStreamConfig{.residentCapacity = 2,
+                                                            .requestBudgetPerUpdate = 1,
+                                                            .retainMarginChunks = 0,
+                                                            .memoryResource = &resource});
+    ASSERT_TRUE(stream.has_value()) << stream.error().message;
+
+    const std::array left{TileMapChunkDemand{.layerId = VisualLayerId,
+                                             .camera = TileChunkCameraQuery{.centerX = 1.0f,
+                                                                            .centerY = 1.0f,
+                                                                            .halfWidth = 1.0f,
+                                                                            .halfHeight = 1.0f}}};
+
+    // Simulate a transient read failure by removing the artifact before the pump.
+    auto chunkPath = AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::TileMapChunk,
+                                                         package.chunkAId);
+    ASSERT_TRUE(chunkPath.has_value()) << chunkPath.error().message;
+    const std::filesystem::path chunkFile =
+        package.root / Tina::TestSupport::pathFromUtf8Bytes(chunkPath->view());
+    std::vector<std::byte> saved;
+    {
+        std::ifstream input{chunkFile, std::ios::binary};
+        ASSERT_TRUE(input.good());
+        const std::string raw{std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
+        saved.reserve(raw.size());
+        for (const char byte : raw)
+        {
+            saved.push_back(static_cast<std::byte>(static_cast<unsigned char>(byte)));
+        }
+    }
+    std::error_code removeError;
+    std::filesystem::remove(chunkFile, removeError);
+    ASSERT_FALSE(removeError);
+
+    ASSERT_TRUE(stream->updateDemand(left).has_value());
+    ASSERT_TRUE(system->pump(8).has_value());
+    auto failedCommit = stream->commitReady();
+    ASSERT_TRUE(failedCommit.has_value()) << failedCommit.error().message;
+    EXPECT_EQ(failedCommit->failedSlots, 1U);
+    EXPECT_EQ(failedCommit->totalFailed, 1U);
+    EXPECT_FALSE(stream->map().isChunkResident(VisualLayerId, TileMapChunkCoord{.chunkX = 0U, .chunkY = 0U}));
+
+    // The transient cause is gone; the same demand must re-request rather than leave
+    // the slot stranded.
+    writeBytes(chunkFile, saved);
+    ASSERT_TRUE(stream->updateDemand(left).has_value());
+    EXPECT_EQ(stream->stats().failedSlots, 0U);
+    EXPECT_EQ(stream->stats().requestedSlots, 1U);
+    EXPECT_EQ(stream->stats().totalRequests, 2U);
+
+    pumpUntilReady(*system, *system->find(package.chunkAId));
+    auto recovered = stream->commitReady();
+    ASSERT_TRUE(recovered.has_value()) << recovered.error().message;
+    EXPECT_EQ(recovered->residentSlots, 1U);
+    EXPECT_TRUE(stream->map().isChunkResident(VisualLayerId, TileMapChunkCoord{.chunkX = 0U, .chunkY = 0U}));
+
+    EXPECT_TRUE(stream->shutdown().has_value());
+    std::error_code ec;
+    std::filesystem::remove_all(package.root, ec);
+}
+
+// The retain margin is a world-space window, so it has to widen the overlap test too.
+// Testing the unwidened camera first made the retain set collapse to empty the moment
+// the camera cleared the map rect, which unloaded every resident chunk in one frame
+// and re-requested them all on the way back.
+TEST(TileMapStreamTests, RetainMarginSurvivesSteppingJustPastTheMapEdge)
+{
+    TrackingMemoryResource resource;
+    const auto package = writeTileMapStreamPackage("tina_tilemap_stream_edge_retain");
+
+    auto system = AssetSystem::Create(AssetSystemConfig{.storeCapacity = 16,
+                                                        .memoryResource = &resource,
+                                                        .batch = CookedAssetBatchLoadConfig{
+                                                            .file = CookedAssetFileLoadConfig{.memoryResource = &resource},
+                                                            .memoryResource = &resource},
+                                                        .queueCapacity = 16});
+    ASSERT_TRUE(system.has_value()) << system.error().message;
+    auto bound = bindPackage(*system, package, resource);
+    ASSERT_TRUE(bound.has_value()) << bound.error().message;
+
+    auto rootHandle = system->loadOne(package.tileMapId);
+    ASSERT_TRUE(rootHandle.has_value()) << rootHandle.error().message;
+    auto tilesetHandle = system->findFirstLoadedOfKind(AssetFormat::AssetKind::Tileset);
+    ASSERT_TRUE(tilesetHandle.has_value());
+    auto rootLease = system->acquire(*rootHandle);
+    auto tilesetLease = system->acquire(*tilesetHandle);
+    ASSERT_TRUE(rootLease.has_value());
+    ASSERT_TRUE(tilesetLease.has_value());
+
+    auto stream = TileMapStream::Create(*system, std::move(*rootLease), std::move(*tilesetLease),
+                                        TileMapStreamConfig{.residentCapacity = 4,
+                                                            .requestBudgetPerUpdate = 4,
+                                                            .retainMarginChunks = 1,
+                                                            .memoryResource = &resource});
+    ASSERT_TRUE(stream.has_value()) << stream.error().message;
+
+    // Inside the map: chunk (1,0) becomes resident.
+    const std::array inside{TileMapChunkDemand{.layerId = VisualLayerId,
+                                               .camera = TileChunkCameraQuery{.centerX = 6.0f,
+                                                                              .centerY = 1.0f,
+                                                                              .halfWidth = 1.0f,
+                                                                              .halfHeight = 1.0f}}};
+    ASSERT_TRUE(stream->updateDemand(inside).has_value());
+    pumpUntilReady(*system, *system->find(package.chunkBId));
+    ASSERT_TRUE(stream->commitReady().has_value());
+    ASSERT_TRUE(stream->map().isChunkResident(VisualLayerId, TileMapChunkCoord{.chunkX = 1U, .chunkY = 0U}));
+
+    // One step past the right edge. The camera no longer overlaps the map, but the
+    // retain window still does, so the resident chunk must stay.
+    const float mapWidthMeters =
+        static_cast<float>(stream->map().widthCells()) * stream->map().cellSizeMeters();
+    const std::array justPast{
+        TileMapChunkDemand{.layerId = VisualLayerId,
+                           .camera = TileChunkCameraQuery{.centerX = mapWidthMeters + 1.5f,
+                                                          .centerY = 1.0f,
+                                                          .halfWidth = 1.0f,
+                                                          .halfHeight = 1.0f}}};
+    ASSERT_TRUE(stream->updateDemand(justPast).has_value());
+    EXPECT_TRUE(stream->map().isChunkResident(VisualLayerId, TileMapChunkCoord{.chunkX = 1U, .chunkY = 0U}))
+        << "the retain margin must survive the camera clearing the map rect";
+    EXPECT_EQ(stream->stats().totalUnloaded, 0U);
+
+    // Far away, beyond the retain window: now it is correct to evict.
+    const std::array farAway{
+        TileMapChunkDemand{.layerId = VisualLayerId,
+                           .camera = TileChunkCameraQuery{.centerX = mapWidthMeters + 100.0f,
+                                                          .centerY = 1.0f,
+                                                          .halfWidth = 1.0f,
+                                                          .halfHeight = 1.0f}}};
+    ASSERT_TRUE(stream->updateDemand(farAway).has_value());
+    EXPECT_FALSE(stream->map().isChunkResident(VisualLayerId, TileMapChunkCoord{.chunkX = 1U, .chunkY = 0U}));
+    EXPECT_EQ(stream->stats().totalUnloaded, 1U);
 
     EXPECT_TRUE(stream->shutdown().has_value());
     std::error_code ec;

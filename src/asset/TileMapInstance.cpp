@@ -299,10 +299,15 @@ Core::Status TileMapInstance::detachChunk(AssetFormat::TileMapLayerId layerId,
                 m_residentChunks[index] = std::move(m_residentChunks.back());
             }
             m_residentChunks.pop_back();
-            break;
+            return Core::success();
         }
     }
-    return Core::success();
+    // Reported rather than silently succeeding: a caller that believes a chunk is
+    // resident when the instance does not is a desync, and the whole point of
+    // returning Status here is to surface it. Callers who legitimately do not know
+    // should ask isChunkResident() first.
+    return Core::failure(AssetErrorCode::TileMapChunkNotResident,
+                         "tilemap chunk to detach is not resident");
 }
 
 bool TileMapInstance::isChunkResident(AssetFormat::TileMapLayerId layerId,

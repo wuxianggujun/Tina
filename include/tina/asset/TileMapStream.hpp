@@ -115,8 +115,8 @@ class TileMapStream final {
 
     [[nodiscard]] Core::Status buildDemandSet(std::span<const TileMapChunkDemand> demands,
                                               Core::u16 margin, std::pmr::vector<DesiredChunk>& out) const;
-    [[nodiscard]] bool retainedByDemand(std::span<const TileMapChunkDemand> demands,
-                                        const ChunkKey& key, Core::u16 margin) const noexcept;
+    // Slots still inside the wider retain window but not desired this frame.
+    void buildRetainSet(std::span<const TileMapChunkDemand> demands) noexcept;
     [[nodiscard]] Slot* findSlot(const ChunkKey& key) noexcept;
     [[nodiscard]] const Slot* findSlot(const ChunkKey& key) const noexcept;
     [[nodiscard]] static bool contains(std::span<const ChunkKey> keys, const ChunkKey& key) noexcept;

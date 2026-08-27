@@ -31,7 +31,13 @@ struct DemandChunkRange final {
     const float minWorldY = camera.centerY - camera.halfHeight;
     const float maxWorldX = camera.centerX + camera.halfWidth;
     const float maxWorldY = camera.centerY + camera.halfHeight;
-    if (maxWorldX <= 0.0f || maxWorldY <= 0.0f || minWorldX >= mapMaxX || minWorldY >= mapMaxY)
+    // The margin widens the window in world space, before the overlap test. Testing
+    // the unwidened camera first made the retain window collapse to nothing the
+    // instant the camera cleared the map rect, so a camera stepping just past the
+    // edge unloaded the whole resident set and re-requested it on the way back.
+    const float marginWorld = static_cast<float>(margin) * static_cast<float>(map.chunkSizeCells()) * cellSize;
+    if (maxWorldX + marginWorld <= 0.0f || maxWorldY + marginWorld <= 0.0f ||
+        minWorldX - marginWorld >= mapMaxX || minWorldY - marginWorld >= mapMaxY)
     {
         return {};
     }
@@ -337,24 +343,61 @@ Core::Status TileMapStream::buildDemandSet(std::span<const TileMapChunkDemand> d
     return Core::success();
 }
 
-bool TileMapStream::retainedByDemand(std::span<const TileMapChunkDemand> demands,
-                                     const ChunkKey& key, Core::u16 margin) const noexcept
+// Slots not desired this frame but still inside the wider retain window, most
+// recently demanded first, truncated to the capacity left over after the desired set.
+//
+// Demands are the outer loop so each window is computed once. The previous shape
+// looped slots outside and recomputed the range per (slot, demand) pair, running a
+// ~30-float-op calculation slots x demands times per frame for a result that depends
+// only on the camera, the margin and the map extent.
+void TileMapStream::buildRetainSet(std::span<const TileMapChunkDemand> demands) noexcept
 {
+    m_retain.clear();
+    const Core::usize optionalRetainCapacity =
+        m_config.residentCapacity - (std::min)(m_config.residentCapacity, m_desired.size());
+    if (optionalRetainCapacity == 0)
+    {
+        return;
+    }
     for (const TileMapChunkDemand& demand : demands)
     {
-        if (demand.layerId != key.layerId)
+        const DemandChunkRange range = demandChunkRange(m_map, demand.camera, m_config.retainMarginChunks);
+        if (!range.intersectsMap)
         {
             continue;
         }
-        const DemandChunkRange range = demandChunkRange(m_map, demand.camera, margin);
-        if (range.intersectsMap && key.coord.chunkX >= range.minChunkX &&
-            key.coord.chunkX <= range.maxChunkX && key.coord.chunkY >= range.minChunkY &&
-            key.coord.chunkY <= range.maxChunkY)
+        for (const Slot& slot : m_slots)
         {
-            return true;
+            if (slot.key.layerId != demand.layerId || slot.key.coord.chunkX < range.minChunkX ||
+                slot.key.coord.chunkX > range.maxChunkX || slot.key.coord.chunkY < range.minChunkY ||
+                slot.key.coord.chunkY > range.maxChunkY)
+            {
+                continue;
+            }
+            // Two demands may cover the same slot, so the union needs a dedup that the
+            // old slot-outer shape got for free.
+            if (contains(m_desired, slot.key) || contains(m_retain, slot.key))
+            {
+                continue;
+            }
+            m_retain.push_back(RetainCandidate{
+                .key = slot.key,
+                .lastDesiredDemand = slot.lastDesiredDemand,
+            });
         }
     }
-    return false;
+    std::sort(m_retain.begin(), m_retain.end(),
+              [](const RetainCandidate& left, const RetainCandidate& right) {
+                  if (left.lastDesiredDemand != right.lastDesiredDemand)
+                  {
+                      return left.lastDesiredDemand > right.lastDesiredDemand;
+                  }
+                  return keyLess(left.key, right.key);
+              });
+    if (m_retain.size() > optionalRetainCapacity)
+    {
+        m_retain.resize(optionalRetainCapacity);
+    }
 }
 
 void TileMapStream::removeSlot(Core::usize index) noexcept
@@ -396,31 +439,7 @@ Core::Status TileMapStream::updateDemand(std::span<const TileMapChunkDemand> dem
     {
         return status;
     }
-    m_retain.clear();
-    for (const Slot& slot : m_slots)
-    {
-        if (!contains(m_desired, slot.key) &&
-            retainedByDemand(demands, slot.key, m_config.retainMarginChunks))
-        {
-            m_retain.push_back(RetainCandidate{
-                .key = slot.key,
-                .lastDesiredDemand = slot.lastDesiredDemand,
-            });
-        }
-    }
-    std::sort(m_retain.begin(), m_retain.end(), [](const RetainCandidate& left,
-                                                   const RetainCandidate& right) {
-        if (left.lastDesiredDemand != right.lastDesiredDemand)
-        {
-            return left.lastDesiredDemand > right.lastDesiredDemand;
-        }
-        return keyLess(left.key, right.key);
-    });
-    const Core::usize optionalRetainCapacity = m_config.residentCapacity - m_desired.size();
-    if (m_retain.size() > optionalRetainCapacity)
-    {
-        m_retain.resize(optionalRetainCapacity);
-    }
+    buildRetainSet(demands);
 
     for (Core::usize index = 0; index < m_slots.size();)
     {
@@ -430,26 +449,40 @@ Core::Status TileMapStream::updateDemand(std::span<const TileMapChunkDemand> dem
             ++index;
             continue;
         }
-        if (slot.state == TileMapChunkResidencyState::Resident)
+        // Detach and lease release happen only once the unload is known to succeed:
+        // returning in between would leave a slot the instance no longer holds cells
+        // for while the slot still claims Resident, and nothing can repair that.
+        const bool wasResident = slot.state == TileMapChunkResidencyState::Resident;
+        if (wasResident)
         {
-            const auto detached = m_map.detachChunk(slot.key.layerId, slot.key.coord);
-            if (!detached)
+            if (auto detached = m_map.detachChunk(slot.key.layerId, slot.key.coord); !detached)
             {
                 return detached;
             }
             slot.lease = AssetLease{};
         }
-        else if (slot.state == TileMapChunkResidencyState::Requested)
-        {
-            ++m_totalCancelled;
-        }
         if (auto status = m_assets->unload(slot.handle); !status)
         {
+            // The chunk is gone from the map but the handle survives, so the slot must
+            // not keep claiming residency. Marking it Requested puts it back on the
+            // path that commitReady() can complete, instead of stranding it.
+            if (wasResident)
+            {
+                slot.state = TileMapChunkResidencyState::Requested;
+                ++m_totalUnloaded;
+            }
             return status;
         }
-        if (slot.state == TileMapChunkResidencyState::Resident)
+        if (wasResident)
         {
             ++m_totalUnloaded;
+        }
+        else if (slot.state == TileMapChunkResidencyState::Requested)
+        {
+            // Counted here rather than before the unload, so an aborted eviction does
+            // not report a cancellation that did not happen and then report it again
+            // on the next pass.
+            ++m_totalCancelled;
         }
         removeSlot(index);
     }
@@ -458,8 +491,42 @@ Core::Status TileMapStream::updateDemand(std::span<const TileMapChunkDemand> dem
     for (const DesiredChunk& desired : m_desired)
     {
         const ChunkKey& key = desired.key;
-        if (findSlot(key) != nullptr || issued >= m_config.requestBudgetPerUpdate)
+        if (issued >= m_config.requestBudgetPerUpdate)
         {
+            continue;
+        }
+        Slot* existing = findSlot(key);
+        if (existing != nullptr)
+        {
+            // A Failed slot would otherwise be terminal: eviction keeps it because it
+            // is still desired, this loop skipped it because a slot existed, and
+            // commitReady() only looks at Requested. The chunk stayed blank forever
+            // after one transient IO failure. Re-requesting is the retry.
+            if (existing->state != TileMapChunkResidencyState::Failed)
+            {
+                continue;
+            }
+            if (auto status = m_assets->unload(existing->handle); !status)
+            {
+                return status;
+            }
+            auto handle = m_assets->requestOne(key.assetId);
+            if (!handle)
+            {
+                // The old handle is already unloaded, so the slot cannot stay. Dropping
+                // it lets the next frame request cleanly rather than leaving a slot
+                // pointing at a released handle.
+                removeSlot(static_cast<Core::usize>(existing - m_slots.data()));
+                if (handle.error().code == AssetErrorCode::AssetQueueFull)
+                {
+                    break;
+                }
+                return Core::failure(std::move(handle.error()));
+            }
+            existing->handle = *handle;
+            existing->state = TileMapChunkResidencyState::Requested;
+            ++m_totalRequests;
+            ++issued;
             continue;
         }
         auto handle = m_assets->requestOne(key.assetId);

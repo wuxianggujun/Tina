@@ -185,9 +185,15 @@ class TileMapInstance final {
 
     // Attaches one validated chunk transactionally. The payload is copied into bounded
     // instance-owned mutable storage; duplicate coordinates or mismatched root refs fail.
+    //
+    // `chunk` must come from parseTileMapChunkPayload: nonEmptyCount is taken from it
+    // rather than recounted, and callers rely on that count to decide whether a chunk
+    // is worth drawing, so an unvalidated view would make a chunk silently invisible.
     [[nodiscard]] Core::Status attachChunk(Core::AssetId chunkAssetId,
                                            const AssetFormat::TileMapChunkPayloadView& chunk,
                                            Core::u64 residencyGeneration);
+    // TileMapChunkNotResident when the chunk was not attached, so a caller/instance
+    // desync surfaces instead of passing as success.
     [[nodiscard]] Core::Status detachChunk(AssetFormat::TileMapLayerId layerId, TileMapChunkCoord coord) noexcept;
     [[nodiscard]] bool isChunkResident(AssetFormat::TileMapLayerId layerId, TileMapChunkCoord coord) const noexcept;
     [[nodiscard]] Core::Result<TileMapChunkState> chunkState(AssetFormat::TileMapLayerId layerId,
