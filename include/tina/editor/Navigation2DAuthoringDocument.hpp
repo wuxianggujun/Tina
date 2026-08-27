@@ -41,7 +41,6 @@ public:
         return !hasBake() || !m_catalogPublished || tileMapRevision == 0U ||
                m_preview.sourceTileMapRevision != tileMapRevision;
     }
-    [[nodiscard]] bool catalogPublished() const noexcept { return m_catalogPublished; }
     void markCatalogPublished() noexcept { m_catalogPublished = hasBake(); }
     void markCatalogDirty() noexcept { m_catalogPublished = false; }
     [[nodiscard]] const Navigation2DBakePreview& preview() const noexcept

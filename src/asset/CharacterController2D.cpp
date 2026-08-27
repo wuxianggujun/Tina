@@ -17,18 +17,6 @@ namespace {
 
 CharacterController2D::CharacterController2D(CharacterController2DConfig config) noexcept : m_config(config) {}
 
-void CharacterController2D::setPosition(float x, float y) noexcept
-{
-    m_state.positionX = x;
-    m_state.positionY = y;
-}
-
-void CharacterController2D::setVelocity(float vx, float vy) noexcept
-{
-    m_state.velocityX = vx;
-    m_state.velocityY = vy;
-}
-
 void CharacterController2D::teleport(float x, float y, bool clearVelocity) noexcept
 {
     m_state.positionX = x;

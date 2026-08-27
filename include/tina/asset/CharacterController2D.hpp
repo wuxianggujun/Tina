@@ -59,8 +59,8 @@ class CharacterController2D final {
         return m_state;
     }
 
-    void setPosition(float x, float y) noexcept;
-    void setVelocity(float vx, float vy) noexcept;
+    // Position and velocity are placed either through teleport() or through the
+    // mutable state() reference above; there is deliberately no third way.
     void teleport(float x, float y, bool clearVelocity) noexcept;
 
     // Integrates one fixed/variable step against the grid. Uses provider solid AABB queries only.

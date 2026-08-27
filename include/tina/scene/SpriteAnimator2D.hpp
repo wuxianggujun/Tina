@@ -107,10 +107,6 @@ public:
     [[nodiscard]] const SpriteRenderer2D* currentSprite() const noexcept;
     [[nodiscard]] usize frameIndex() const noexcept { return m_frameIndex; }
     [[nodiscard]] usize frameCount() const noexcept { return m_frames.size(); }
-    [[nodiscard]] Core::Duration elapsedInCurrentFrame() const noexcept
-    {
-        return Core::Duration{m_frameElapsedSeconds};
-    }
     [[nodiscard]] float playbackSpeed() const noexcept { return m_playbackSpeed; }
     [[nodiscard]] SpriteAnimationPlaybackMode playbackMode() const noexcept { return m_playbackMode; }
     [[nodiscard]] bool isPlaying() const noexcept { return m_playing; }

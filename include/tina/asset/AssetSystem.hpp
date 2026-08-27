@@ -169,11 +169,8 @@ class AssetSystem final {
     // advanced by this call. Passing 0 uses defaultPumpBudget.
     [[nodiscard]] Core::Result<AssetPumpStats> pump(Core::u32 budget = 0);
 
-    // Explicitly track a ReadyCpu handle for GPU upload (no-op without upload ledger).
-    [[nodiscard]] Core::Status trackForGpuUpload(AssetHandle handle);
-
-    // Pump only GPU upload coordinator (no IO). No-op stats if upload not configured.
-    [[nodiscard]] Core::Result<AssetGpuUploadStats> pumpGpuUploads();
+    // GPU upload is driven through AssetGpuUploadCoordinator directly; the former
+    // trackForGpuUpload()/pumpGpuUploads() forwarders here had no callers.
 
     [[nodiscard]] const CookedAssetFile* tryGet(AssetHandle handle) const noexcept;
     [[nodiscard]] AssetLogicalState state(AssetHandle handle) const noexcept;

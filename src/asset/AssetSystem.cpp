@@ -1559,24 +1559,6 @@ Core::Result<AssetPumpStats> AssetSystem::pump(Core::u32 budget)
     return pumpAsync(limit);
 }
 
-Core::Status AssetSystem::trackForGpuUpload(AssetHandle handle)
-{
-    if (m_gpuUpload == nullptr)
-    {
-        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "asset system has no upload ledger configured");
-    }
-    return m_gpuUpload->track(handle);
-}
-
-Core::Result<AssetGpuUploadStats> AssetSystem::pumpGpuUploads()
-{
-    if (m_gpuUpload == nullptr)
-    {
-        return AssetGpuUploadStats{};
-    }
-    return m_gpuUpload->pumpUploads();
-}
-
 void AssetSystem::noteReadyCpu(AssetHandle handle) noexcept
 {
     if (!m_autoGpuUpload || m_gpuUpload == nullptr || !handle)

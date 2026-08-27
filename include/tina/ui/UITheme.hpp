@@ -310,9 +310,12 @@ struct UITheme final {
     return color;
 }
 
-[[nodiscard]] constexpr UIStraightSrgba8Color applyStateLayer(
+// Composites `content` over `base` at `alpha`, preserving base alpha. Single entry
+// point: the applyStateLayer() that this used to forward to is gone, matching the
+// no-alias rule stated above.
+[[nodiscard]] constexpr UIStraightSrgba8Color stateLayer(
     UIStraightSrgba8Color base,
-    UIStraightSrgba8Color layer,
+    UIStraightSrgba8Color content,
     u8 alpha) noexcept
 {
     const auto composite = [alpha](u8 background, u8 foreground) constexpr noexcept -> u8 {
@@ -320,16 +323,8 @@ struct UITheme final {
                           static_cast<u16>(foreground) * static_cast<u16>(alpha);
         return static_cast<u8>((value + 127U) / 255U);
     };
-    return rgba8(composite(base.red, layer.red), composite(base.green, layer.green),
-                 composite(base.blue, layer.blue), base.alpha);
-}
-
-[[nodiscard]] constexpr UIStraightSrgba8Color stateLayer(
-    UIStraightSrgba8Color base,
-    UIStraightSrgba8Color content,
-    u8 alpha) noexcept
-{
-    return applyStateLayer(base, content, alpha);
+    return rgba8(composite(base.red, content.red), composite(base.green, content.green),
+                 composite(base.blue, content.blue), base.alpha);
 }
 
 // Product panel chrome: fill + border + optional shadow + rounded outer shape.
