@@ -252,4 +252,20 @@ GamepadGuid makeGamepadGuid(const char* guid) noexcept
     return result;
 }
 
+bool gamepadIdentityChanged(const GamepadDeviceInfo& previous,
+                            const GamepadDeviceInfo& current) noexcept
+{
+    // A driver that reports nothing is not evidence of a swap, and treating it as
+    // one would fabricate a disconnect/connect pair on every poll.
+    if (current.guid.length == 0 && current.name.length == 0) {
+        return false;
+    }
+    if (current.guid.length != 0 && previous.guid.length != 0
+        && current.guid.view() != previous.guid.view()) {
+        return true;
+    }
+    return current.name.length != 0 && previous.name.length != 0
+        && current.name.view() != previous.name.view();
+}
+
 } // namespace Tina::Platform::Detail

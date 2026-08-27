@@ -1452,6 +1452,7 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         // synthetic Down→Up is invented between polls.
         std::array<bool, GLFW_JOYSTICK_LAST + 1> present{};
         std::array<GLFWgamepadstate, GLFW_JOYSTICK_LAST + 1> states{};
+        std::array<GamepadDeviceInfo, GLFW_JOYSTICK_LAST + 1> identities{};
         u32 unmapped = 0;
         for (int jid = GLFW_JOYSTICK_1; jid <= GLFW_JOYSTICK_LAST; ++jid)
         {
@@ -1470,6 +1471,13 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
             {
                 continue;
             }
+            // Identity is read every poll, not just on connect: it is the only way
+            // to notice that the device in this slot was swapped between two polls.
+            // GLFW owns these pointers, so they are copied before use.
+            GamepadDeviceInfo& info = identities[static_cast<usize>(jid)];
+            info.name = Detail::makeGamepadName(glfwGetGamepadName(jid));
+            info.guid = Detail::makeGamepadGuid(glfwGetJoystickGUID(jid));
+            info.layout = Detail::classifyGamepadLayout(info.name.view(), info.guid.view());
             present[static_cast<usize>(jid)] = true;
         }
         frameBuilder_.recordUnmappedGamepads(unmapped);
@@ -1477,7 +1485,15 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         for (int jid = GLFW_JOYSTICK_1; jid <= GLFW_JOYSTICK_LAST; ++jid)
         {
             const usize slot = static_cast<usize>(jid);
-            if (!gamepadSlots_[slot].active || present[slot])
+            if (!gamepadSlots_[slot].active)
+            {
+                continue;
+            }
+            // Either the slot emptied, or a different device now occupies it. Both
+            // end the previous connection, and the swap case must still produce the
+            // full cancel + disconnect so held input is released against the old id.
+            if (present[slot] && !Detail::gamepadIdentityChanged(gamepadSlots_[slot].device,
+                                                                identities[slot]))
             {
                 continue;
             }
@@ -1517,19 +1533,12 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
                 slotState.revision = 1;
                 slotState.heldButtons.reset();
                 slotState.axes.fill(0.0F);
-                // Queried once per connection: GLFW returns pointers owned by its
-                // own joystick state, so they are copied into fixed storage before
-                // the event leaves this scope.
-                const char* glfwName = glfwGetGamepadName(jid);
-                const char* glfwGuid = glfwGetJoystickGUID(jid);
-                GamepadDeviceInfo info{
-                    .name = Detail::makeGamepadName(glfwName),
-                    .guid = Detail::makeGamepadGuid(glfwGuid),
-                };
-                info.layout = Detail::classifyGamepadLayout(info.name.view(), info.guid.view());
+                // Sampled in the presence pass above, where it also feeds swap
+                // detection. GLFW owns the strings, so they were copied there.
+                slotState.device = identities[slot];
                 recordAppend(frameBuilder_.appendPlatformEvent(GamepadConnectedEvent{
                     .gamepad = slotState.id,
-                    .device = info,
+                    .device = slotState.device,
                 }));
             }
 
@@ -1828,6 +1837,11 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         u64 revision = 0;
         std::bitset<GamepadButtonCount> heldButtons{};
         std::array<float, GamepadAxisCount> axes{};
+        // Kept so a swap into the same joystick id is detectable. A poll-based
+        // backend cannot observe a disconnect followed by a connect between two
+        // polls -- the slot just looks continuously occupied -- and without this
+        // the new pad inherits the old GamepadId, layout and player assignment.
+        GamepadDeviceInfo device{};
         bool active = false;
     };
 

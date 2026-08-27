@@ -47,6 +47,13 @@ Gamepad/Window ID 是 owner-aware generation identity，不能按 native index �
 无法识别时为 `Generic`，因为猜错图形比显示中性提示更糟。分类优先读 SDL GUID 的 vendor id
 （bytes 8..11，little-endian），name 只作兜底：驱动与 OS 会改 name，vendor id 不会。
 
+身份**每帧重新采样**并与上一帧比较，因为 poll 型后端看不见"断开后立刻插入同一 joystick id"——槽位看起来
+是连续占用的。若不比较，新手柄会静默继承旧 `GamepadId`、旧 layout 与按该 id 建立的 per-player 分配，
+于是产品画错按键图形、把输入路由给错误的本地用户，而帧里没有任何迹象。检测到换设备时发出完整的
+cancel + disconnect + connect 三段，与真实拔插同一路径，因此旧 id 上按住的输入一定被释放。
+GUID 先比（它标识型号），name 也要比（同型号两只手柄 GUID 相同，但互换仍是一次连接结束、另一次开始）；
+新身份为空时视为未变化——驱动停止上报身份不构成"换了设备"的证据，否则每帧都会伪造一次断开。
+
 **震动/haptics 不在能力内,也无法通过当前后端实现**：GLFW 完全没有输出到手柄的 API（已核验 vendored
 `glfw3.h`），gamepad 面是只读的。要支持震动必须新增一个平台后端能力或换/补 backend，属独立决策。
 
@@ -60,7 +67,8 @@ GLFW backend 已实现：
   `framebufferExtent` 约为 `logicalExtent * 2`，UI layout、hit-test 与 Pointer route 使用同一坐标空间；
 - committed Unicode text 转 strict UTF-8；
 - 标准 Gamepad 轮询（`glfwGetGamepadState`）、generation registry、button diff、axis deadzone/hysteresis、
-  connect/disconnect 与 snapshot revision；连接时经 `glfwGetGamepadName`/`glfwGetJoystickGUID` 采集身份；
+  connect/disconnect 与 snapshot revision；身份经 `glfwGetGamepadName`/`glfwGetJoystickGUID` 每帧采集，
+  用于连接事件与换设备检测；
 - `PlatformBackendCreateParams::gamepadMappings` 接受追加的 SDL_GameControllerDB 映射行，在首次 poll 前
   经 `glfwUpdateGamepadMappings` 应用（非法内容 fail closed）。GLFW 只识别**有映射**的手柄，因此比内置
   映射表更新的设备原本完全不可见；这是不重建第三方依赖就能修的唯一途径。已插入但无映射的 joystick 计入
@@ -189,9 +197,72 @@ X11(Xvfb)/sanitizer 证据已经记录；可选 Wayland/真显示器、真实 Ga
 ## 尚未完成
 
 - 可选 Linux Wayland/真显示器与真实设备 Gamepad 矩阵；TEST-001 当前 tip 已完成；
+- **Android 平台后端**：`src/platform/` 只有 `glfw` 与 `headless`，全仓库零个 Android 引用。这不是"补一个
+  后端实现"那么小——GLFW 不支持 Android，因此需要一个新的 `IPlatformBackend`（NDK `AGameActivity` 或自建
+  `ANativeActivity` 接线）、Java↔JNI 输入桥、以及 gradle/manifest/工具链。手柄部分参考 cocos2d-x 的经验
+  见下节；
 - Windows Narrator/Inspect 人工金标：`UI-002`（action/control patterns 与跨进程 HWND gate 已有）；
 - Linux AT-SPI adapter 与真实辅助技术验收：`UI-002-LINUX`；
 - BiDi/复杂 shaping、Linux 原生 XIM/Wayland preedit/candidate placement，以及 Windows 真机 IME 候选窗
   跟随/提交/取消/失焦人工矩阵：`TEXT-001`。
 
 这些能力不应从已有 `GamepadId`、composition type 或 focused flag 推断为已完成。
+
+## 参考：cocos2d-x 手柄实现的可迁移教训
+
+2026-08-28 通读 cocos2d-x 的 controller 实现（`cocos/base/CCController*`、
+`cocos/platform/android/**/GameController*`）后记录。**结论：不移植任何代码**——它的形态与 Tina 冲突
+（每个 controller 一个可变对象、`delete this`、复用并 latch `stopPropagation` 的事件对象、按设备名字符串
+查表），但其中的"坑"是真金，且大多来自真实设备。以下按"Tina 已避免 / Tina 应吸收"两类记录。
+
+**Tina 已经避免的（作为设计校验，不需要动作）：**
+
+- *身份没有 generation。* 桌面端身份只是 GLFW 槽位号，注释直言拿不到断开设备的名字；同槽换设备后旧
+  mapping 会静默套到新手柄上。Tina 的 `GamepadId` 是 owner-aware generation，加上本轮的身份比较后，同槽
+  换设备走完整 disconnect/connect。
+- *`isConnected()` 在 3 个平台上硬编码 `return true`。* 因为它的 controller 对象在断开时 `delete this`。
+  Tina 的槽位状态是值语义，断开即清空。
+- *完全没有 deadzone。* 全仓库搜不到 deadzone，原始值直接进事件，全部丢给游戏。Tina 是后端径向 0.18 +
+  per-binding 两级。
+- *桌面端每帧对每个手柄的每个按钮/轴无条件发事件*，按住的键以 60Hz 触发 repeat。Tina 做 button diff 与轴
+  hysteresis。
+- *按设备名字符串精确匹配的 172 个手写 profile*（名字里带双空格、尾随空格的都有），且因为一个 raw index
+  只能映射到一个 key，**180 行映射被注释掉**——其中 64 个 `DPAD_DOWN`、62 个 `DPAD_RIGHT`。结果是约 64 款
+  手柄上"下"会以负值报成"上"。Tina 走 SDL_GameControllerDB + `glfwUpdateGamepadMappings`，方向由映射层
+  解决，且未映射的手柄计入 `unmappedGamepadCount` 而不是静默失效。
+
+**值得吸收的教训（其中第 1 条本轮已修）：**
+
+1. **同槽换设备必须当成两次连接。** 已实现，见上文"输入模型"。
+2. **同一物理控件不要有两条到达路径。** Android 侧 L2/R2 同时经 key 路径与 axis 路径到达同一个 key code，
+   互相覆盖；只有 Moga adapter 显式 `return` 掉了 key 路径，默认路径没有。Tina 目前 trigger 只有 axis 一条
+   路，`GamepadButton` 里没有 trigger 项——这条要保持，不要为"方便"再加一个 digital trigger 按钮。
+3. **D-pad 可能以 hat axis 而非按钮到达。** cocos 的 Android 路径只处理 `KEYCODE_DPAD_*`，从未处理
+   `AXIS_HAT_X/Y`(15/16)，所以驱动只报 hat 的手柄 D-pad 完全失效。Tina 当前依赖 GLFW 把 hat 归一化为
+   `GLFW_GAMEPAD_BUTTON_DPAD_*`，**这是有效的前提假设**；若将来新增非 GLFW 后端（尤其 Android），hat→button
+   的归一化必须由该后端自己补齐，不能假定上层能收到按钮。
+4. **多手柄不能共享"上一次的值"。** `GameControllerHelper` 只有一组 `mOldLeftThumbstickX/Y` 等，每个
+   Activity 一个实例，两只手柄互相污染彼此的轴状态与变化检测。Tina 的 `GamepadSlotState` 是 per-slot 的，
+   这一点必须在任何后续重构（例如把变化检测上移）中保持。
+5. **C++ 与 Java 的按键枚举靠数值巧合对齐**，无翻译层、无 static assert，改动任一侧顺序就静默错位；且
+   `1017/1018` 在 C++ 叫 `AXIS_*_TRIGGER`、在 Java 叫 `BUTTON_*_TRIGGER`。若 Tina 将来引入 JNI 输入桥，
+   跨语言枚举必须有单一权威来源与编译期校验，不能手抄两份。
+
+**Android 支持的形状（cocos 的做法与代价）：**
+
+- 检测走 `InputManagerCompat`（AOSP ControllerSample 的抄本），`SDK_INT >= 16` 用系统 `InputManager` 的
+  device listener，否则每 3 秒轮询 `InputDevice.getDevice(id)` 判空推断断开。设备分类是
+  `getSources() & (SOURCE_GAMEPAD | SOURCE_JOYSTICK)`。
+- Java→C++ 每个事件都经 `Cocos2dxHelper.runOnGLThread`（即 `GLSurfaceView.queueEvent`）marshal 到 GL 线程
+  ——线程问题解决了，但代价是**每个事件分配一个 Runnable 并捕获一个 String**，轴事件洪流下是实打实的 GC
+  压力。Tina 的 `PlatformFrameBuilder` 是固定容量、per-poll 的，若做 Android 桥应让 Java 侧写入固定环形
+  缓冲、C++ 在 poll 时取走，而不是每事件一个 Runnable。
+- JNI 只靠名字修饰导出，没有 `RegisterNatives`；反向调用用字符串查类名，而那个类只存在于可选模块里，
+  默认工程调用即失败。
+- `ControllerManualAdapter` 之所以与主 java 目录分开，是因为它链接三个第三方预编译 jar（Moga
+  `com.bda.controller.jar`、Nibiru、OUYA `ouya-sdk.jar`）——三个产品今天都已消亡。**教训是把设备特化的
+  第三方 SDK 隔离在可选模块里**，但代价是 JNI 桥的生产者（`GameControllerAdapter.java`，在必编目录）与
+  消费者（`GameControllerHelper`，在可选模块）被拆开，默认工程里手柄静默不工作且不报错。
+- 若 Tina 要做 Android：需要新增 `IPlatformBackend` 实现（GLFW 不支持 Android）、Java↔JNI 输入桥、
+  gradle/manifest/NDK 工具链，以及把 hat→button、L2/R2 双路径去重放在该后端内部完成——这样
+  `PlatformFrame` 的语义与 GLFW 后端保持一致。属独立决策，需要先有 ADR。

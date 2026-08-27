@@ -51,4 +51,21 @@ void applyGlfwGamepadState(
 [[nodiscard]] GamepadName makeGamepadName(const char* name) noexcept;
 [[nodiscard]] GamepadGuid makeGamepadGuid(const char* guid) noexcept;
 
+// True when the device occupying a slot is not the one that was there before.
+//
+// A poll-based backend cannot see a disconnect that is immediately followed by a
+// connect into the same joystick id: the slot simply looks continuously occupied.
+// Without this check the new pad silently inherits the previous pad's GamepadId,
+// its published name/GUID/layout, and any per-player assignment keyed off that id
+// -- so a product draws the wrong button glyphs and routes input to the wrong
+// local user, with nothing in the frame indicating why.
+//
+// GUID is compared first because it identifies the model; the name is compared
+// too because two identical models share a GUID, and swapping one for the other
+// still ends one connection and begins another. An empty incoming identity is
+// treated as unchanged, since a driver that stops reporting identity is not
+// evidence of a different device.
+[[nodiscard]] bool gamepadIdentityChanged(const GamepadDeviceInfo& previous,
+                                          const GamepadDeviceInfo& current) noexcept;
+
 } // namespace Tina::Platform::Detail

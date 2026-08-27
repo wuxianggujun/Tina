@@ -154,4 +154,42 @@ TEST(GlfwGamepadTranslationTests, DeviceIdentityCopiesAndTruncates)
     EXPECT_EQ(guid.view().size(), Platform::GamepadGuidCapacity - 1U);
 }
 
+// A poll-based backend cannot see a disconnect immediately followed by a connect
+// into the same joystick id -- the slot just looks continuously occupied. Without
+// comparing identity, the new pad inherits the old GamepadId, the old published
+// layout, and any per-player assignment keyed off that id, so a product silently
+// draws the wrong glyphs and routes input to the wrong local user.
+TEST(GlfwGamepadTranslationTests, DetectsADeviceSwapIntoTheSameSlot)
+{
+    using Platform::Detail::gamepadIdentityChanged;
+    using Platform::Detail::makeGamepadGuid;
+    using Platform::Detail::makeGamepadName;
+
+    const Platform::GamepadDeviceInfo xbox{
+        .name = makeGamepadName("Xbox Controller"),
+        .guid = makeGamepadGuid("030000005e040000e002000000007200"),
+        .layout = Platform::GamepadLayout::Xbox,
+    };
+    const Platform::GamepadDeviceInfo dualsense{
+        .name = makeGamepadName("PS5 Controller"),
+        .guid = makeGamepadGuid("030000004c050000e60c000000006800"),
+        .layout = Platform::GamepadLayout::PlayStation,
+    };
+
+    EXPECT_FALSE(gamepadIdentityChanged(xbox, xbox));
+    EXPECT_TRUE(gamepadIdentityChanged(xbox, dualsense));
+
+    // Two units of the same model share a GUID, so the name still has to decide:
+    // swapping one for the other ends one connection and begins another.
+    Platform::GamepadDeviceInfo sameModelOtherUnit = xbox;
+    sameModelOtherUnit.name = makeGamepadName("Xbox Controller #2");
+    EXPECT_TRUE(gamepadIdentityChanged(xbox, sameModelOtherUnit));
+
+    // A driver that stops reporting identity is not evidence of a different
+    // device; treating it as one would fabricate a disconnect on every poll.
+    EXPECT_FALSE(gamepadIdentityChanged(xbox, Platform::GamepadDeviceInfo{}));
+    // And a slot that had no identity gaining one is not a swap either.
+    EXPECT_FALSE(gamepadIdentityChanged(Platform::GamepadDeviceInfo{}, xbox));
+}
+
 } // namespace Tina::Tests
