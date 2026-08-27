@@ -10,7 +10,7 @@
 - 固定容量、PMR-backed `World`；
 - generation/owner-aware `EntityId`；
 - Local/World Transform 层级与显式 publication barrier；
-- Camera2D、SpriteRenderer2D、SpriteAnimationBinding2D、PointLight2D、ShadowOccluder2D、PerspectiveCamera3D、MeshRenderer3D、DirectionalLight3D 组件；
+- Camera2D、SpriteRenderer2D、SpriteAnimationBinding2D、PointLight2D、ShadowOccluder2D、PhysicsBody2D、PhysicsShape2D、ResourceBinding2D、PerspectiveCamera3D、MeshRenderer3D、DirectionalLight3D 组件；
 - standalone allocation-free `CameraFollow2D` controller；
 - standalone fixed-capacity `ParticleSystem2D` 与 `Trail2D`；
 - World 到 phase-local `RenderSceneWriter` 的 2D/3D extraction；
@@ -63,6 +63,9 @@ borrowed resolver，并只传递 Tina-owned Core/Render，不会把完整 AssetS
 | `SpriteAnimationBinding2D` | weak SpriteAnimationClip `AssetHandle`、playback speed、autoPlay | World 只保存 binding；clip 推进与帧解析由产品 State/Animator 负责，speed 必须正 finite |
 | `PointLight2D` | linear RGB color、非负 intensity、正影响半径、0..影响半径内的 source radius、active 标志 | Entity world position 是灯光中心；source radius=0 为硬阴影、正值启用连续 penumbra；有 resolved Camera2D 时每帧最多提交8个 camera-affecting light，无相机/0x0 surface 时对全部 active light 保留同一上限 |
 | `ShadowOccluder2D` | 一条 local-space 线段与 active 标志 | 应用已发布 XY scale/rotation/position；每帧最多32个 active segment，按稳定 Entity identity 发布且不做 camera culling |
+| `PhysicsBody2D` | body kind（Static/Rigid/Character/Area）、速度、阻尼、重力倍率与 sleep/rotation/CCD 标志 | **纯 authored 数据**：不含 `PhysicsBodyId` 或 backend handle，World 不创建任何 body，也不参与 extraction。kind 由组件显式携带，因为 wire format 把它编码在 `nodeKind` 上。校验只做 Scene 能判定的部分（有限值、非负阻尼） |
+| `PhysicsShape2D` | Box/Circle/Capsule 尺寸、local center/angle、capsule 端点、材质与事件标志 | 同为纯数据组件；按 kind 校验尺寸（Box 需正 half extent，Circle/Capsule 需正 radius）。body 归属由节点父子关系决定，不存 handle。`ConvexPolygon`/`Chain` 无 wire 表示，故不在此 |
+| `ResourceBinding2D` | 资源 `AssetId`、binding kind（TileMap/FxEmitter/NavigationRegion/AudioPlayer）与 active | World **不解释** AssetId 用途，只保证 restore→capture 字节往返；实例化属游戏或 Asset 层。kind 同样因 wire 编码在 `nodeKind` 而显式携带 |
 | `PerspectiveCamera3D` | perspective 参数与 active 标志 | 每帧最多一个 active 3D camera |
 | `MeshRenderer3D` | weak mesh/material `AssetHandle`、local sphere bounds、base color、可见性 | World 只校验结构；有效 PerspectiveCamera3D + 非0 surface 时先按 world transformed sphere 做 frustum culling，再通过两个 kind-specific resolver 解析 packet-local ref；无相机/0x0 surface 保留全量提取 |
 | `DirectionalLight3D` | linear RGB color、非负 intensity、active 标志 | Entity world local `+Z` 指向光源；每帧最多4个 active light，按稳定 Entity identity 发布 |

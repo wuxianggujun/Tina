@@ -7,8 +7,11 @@
 #include <tina/scene/Entity.hpp>
 #include <tina/scene/MeshRenderer3D.hpp>
 #include <tina/scene/PerspectiveCamera3D.hpp>
+#include <tina/scene/PhysicsBody2D.hpp>
+#include <tina/scene/PhysicsShape2D.hpp>
 #include <tina/scene/PointLight2D.hpp>
 #include <tina/scene/PointLight3D.hpp>
+#include <tina/scene/ResourceBinding2D.hpp>
 #include <tina/scene/SceneErrors.hpp>
 #include <tina/scene/SkinnedMeshRenderer3D.hpp>
 #include <tina/scene/ShadowOccluder2D.hpp>
@@ -91,6 +94,17 @@ public:
         EntityId entity,
         SpriteAnimationBinding2D binding) noexcept;
     [[nodiscard]] Core::Status clearSpriteAnimationBinding2D(EntityId entity) noexcept;
+    // Authored physics and resource data. Scene stores and round-trips these but
+    // never acts on them: no body is created and no resource is instantiated
+    // here. Turning a body into a live one is the Gameplay2D bridge's job.
+    [[nodiscard]] Core::Status setPhysicsBody2D(EntityId entity, PhysicsBody2D body) noexcept;
+    [[nodiscard]] Core::Status clearPhysicsBody2D(EntityId entity) noexcept;
+    [[nodiscard]] Core::Status setPhysicsShape2D(EntityId entity, PhysicsShape2D shape) noexcept;
+    [[nodiscard]] Core::Status clearPhysicsShape2D(EntityId entity) noexcept;
+    [[nodiscard]] Core::Status setResourceBinding2D(
+        EntityId entity,
+        ResourceBinding2D binding) noexcept;
+    [[nodiscard]] Core::Status clearResourceBinding2D(EntityId entity) noexcept;
     [[nodiscard]] Core::Status setPerspectiveCamera3D(
         EntityId entity,
         PerspectiveCamera3D camera) noexcept;
@@ -123,6 +137,9 @@ public:
     [[nodiscard]] const PointLight2D* pointLight2D(EntityId entity) const noexcept;
     [[nodiscard]] const ShadowOccluder2D* shadowOccluder2D(EntityId entity) const noexcept;
     [[nodiscard]] const SpriteAnimationBinding2D* spriteAnimationBinding2D(EntityId entity) const noexcept;
+    [[nodiscard]] const PhysicsBody2D* physicsBody2D(EntityId entity) const noexcept;
+    [[nodiscard]] const PhysicsShape2D* physicsShape2D(EntityId entity) const noexcept;
+    [[nodiscard]] const ResourceBinding2D* resourceBinding2D(EntityId entity) const noexcept;
     [[nodiscard]] const PerspectiveCamera3D* perspectiveCamera3D(EntityId entity) const noexcept;
     [[nodiscard]] const MeshRenderer3D* meshRenderer3D(EntityId entity) const noexcept;
     [[nodiscard]] const SkinnedMeshRenderer3D* skinnedMeshRenderer3D(EntityId entity) const noexcept;

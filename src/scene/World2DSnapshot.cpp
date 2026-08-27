@@ -35,7 +35,81 @@ struct PreparedEntity final {
     std::optional<PointLight2D> pointLight{};
     std::optional<ShadowOccluder2D> shadowOccluder{};
     std::optional<SpriteAnimationBinding2D> spriteAnimation{};
+    std::optional<PhysicsBody2D> physicsBody{};
+    std::optional<PhysicsShape2D> physicsShape{};
+    std::optional<ResourceBinding2D> resourceBinding{};
 };
+
+// Body and resource kinds live in the wire node kind rather than the payload, so
+// the mapping has to be explicit in both directions or capture cannot reproduce
+// the authored node kind.
+[[nodiscard]] std::optional<PhysicsBodyKind2D> physicsBodyKindFor(
+    AssetFormat::World2DNodeKind kind) noexcept
+{
+    switch (kind)
+    {
+    case AssetFormat::World2DNodeKind::StaticBody2D:
+        return PhysicsBodyKind2D::Static;
+    case AssetFormat::World2DNodeKind::RigidBody2D:
+        return PhysicsBodyKind2D::Rigid;
+    case AssetFormat::World2DNodeKind::CharacterBody2D:
+        return PhysicsBodyKind2D::Character;
+    case AssetFormat::World2DNodeKind::Area2D:
+        return PhysicsBodyKind2D::Area;
+    default:
+        return std::nullopt;
+    }
+}
+
+[[nodiscard]] AssetFormat::World2DNodeKind nodeKindFor(PhysicsBodyKind2D kind) noexcept
+{
+    switch (kind)
+    {
+    case PhysicsBodyKind2D::Rigid:
+        return AssetFormat::World2DNodeKind::RigidBody2D;
+    case PhysicsBodyKind2D::Character:
+        return AssetFormat::World2DNodeKind::CharacterBody2D;
+    case PhysicsBodyKind2D::Area:
+        return AssetFormat::World2DNodeKind::Area2D;
+    case PhysicsBodyKind2D::Static:
+    default:
+        return AssetFormat::World2DNodeKind::StaticBody2D;
+    }
+}
+
+[[nodiscard]] std::optional<ResourceBindingKind2D> resourceKindFor(
+    AssetFormat::World2DNodeKind kind) noexcept
+{
+    switch (kind)
+    {
+    case AssetFormat::World2DNodeKind::TileMap2D:
+        return ResourceBindingKind2D::TileMap;
+    case AssetFormat::World2DNodeKind::FxEmitter2D:
+        return ResourceBindingKind2D::FxEmitter;
+    case AssetFormat::World2DNodeKind::NavigationRegion2D:
+        return ResourceBindingKind2D::NavigationRegion;
+    case AssetFormat::World2DNodeKind::AudioPlayer2D:
+        return ResourceBindingKind2D::AudioPlayer;
+    default:
+        return std::nullopt;
+    }
+}
+
+[[nodiscard]] AssetFormat::World2DNodeKind nodeKindFor(ResourceBindingKind2D kind) noexcept
+{
+    switch (kind)
+    {
+    case ResourceBindingKind2D::FxEmitter:
+        return AssetFormat::World2DNodeKind::FxEmitter2D;
+    case ResourceBindingKind2D::NavigationRegion:
+        return AssetFormat::World2DNodeKind::NavigationRegion2D;
+    case ResourceBindingKind2D::AudioPlayer:
+        return AssetFormat::World2DNodeKind::AudioPlayer2D;
+    case ResourceBindingKind2D::TileMap:
+    default:
+        return AssetFormat::World2DNodeKind::TileMap2D;
+    }
+}
 
 [[nodiscard]] const CaptureEntity* findCaptureEntity(std::span<const CaptureEntity> entities, EntityId entity) noexcept
 {
@@ -486,6 +560,10 @@ Core::Result<std::vector<std::byte>> captureWorld2DSnapshotBytes(const World& wo
                 return Core::failure(SceneErrorCode::InvalidTransform,
                                      "World2D capture could not read a valid local transform");
             }
+            // Body and resource kinds are not part of their payloads; they are
+            // recovered here so the derived node kind matches what was authored.
+            PhysicsBodyKind2D capturedBodyKind = PhysicsBodyKind2D::Static;
+            ResourceBindingKind2D capturedResourceKind = ResourceBindingKind2D::TileMap;
             AssetFormat::World2DEntityDesc entity{
                 .stableEntityId = captured.stableEntityId,
                 .parentStableEntityId = captured.parentStableEntityId,
@@ -546,12 +624,79 @@ Core::Result<std::vector<std::byte>> captureWorld2DSnapshotBytes(const World& wo
                 }
                 entity.spriteAnimation = std::move(*capturedAnimation);
             }
+            if (const PhysicsBody2D* body = world.physicsBody2D(captured.entity))
+            {
+                if (!isValid(*body))
+                {
+                    return Core::failure(SceneErrorCode::InvalidComponent,
+                                         "World2D capture found an invalid PhysicsBody2D");
+                }
+                entity.physicsBody = AssetFormat::World2DPhysicsBodyDesc{
+                    .linearVelocityX = body->linearVelocityX,
+                    .linearVelocityY = body->linearVelocityY,
+                    .angularVelocityRadiansPerSecond = body->angularVelocityRadiansPerSecond,
+                    .linearDamping = body->linearDamping,
+                    .angularDamping = body->angularDamping,
+                    .gravityScale = body->gravityScale,
+                    .enabled = body->enabled,
+                    .enableSleep = body->enableSleep,
+                    .initiallyAwake = body->initiallyAwake,
+                    .fixedRotation = body->fixedRotation,
+                    .continuousCollision = body->continuousCollision,
+                };
+                capturedBodyKind = body->kind;
+            }
+            if (const PhysicsShape2D* shape = world.physicsShape2D(captured.entity))
+            {
+                if (!isValid(*shape))
+                {
+                    return Core::failure(SceneErrorCode::InvalidComponent,
+                                         "World2D capture found an invalid PhysicsShape2D");
+                }
+                entity.physicsShape = AssetFormat::World2DPhysicsShapeDesc{
+                    .kind = static_cast<AssetFormat::World2DPhysicsShapeKind>(shape->kind),
+                    .halfExtentX = shape->halfExtentX,
+                    .halfExtentY = shape->halfExtentY,
+                    .radius = shape->radius,
+                    .localCenterX = shape->localCenterX,
+                    .localCenterY = shape->localCenterY,
+                    .localAngleRadians = shape->localAngleRadians,
+                    .localPointAX = shape->localPointAX,
+                    .localPointAY = shape->localPointAY,
+                    .localPointBX = shape->localPointBX,
+                    .localPointBY = shape->localPointBY,
+                    .density = shape->density,
+                    .friction = shape->friction,
+                    .restitution = shape->restitution,
+                    .enabled = shape->enabled,
+                    .sensor = shape->sensor,
+                    .sensorEvents = shape->sensorEvents,
+                    .contactEvents = shape->contactEvents,
+                    .hitEvents = shape->hitEvents,
+                };
+            }
+            if (const ResourceBinding2D* binding = world.resourceBinding2D(captured.entity))
+            {
+                if (!isValid(*binding))
+                {
+                    return Core::failure(SceneErrorCode::InvalidComponent,
+                                         "World2D capture found an invalid ResourceBinding2D");
+                }
+                entity.resource = AssetFormat::World2DResourceNodeDesc{
+                    .assetId = binding->assetId,
+                    .active = binding->active,
+                };
+                capturedResourceKind = binding->kind;
+            }
             const Core::usize payloadCount =
                 static_cast<Core::usize>(entity.sprite.has_value()) +
                 static_cast<Core::usize>(entity.camera.has_value()) +
                 static_cast<Core::usize>(entity.pointLight.has_value()) +
                 static_cast<Core::usize>(entity.shadowOccluder.has_value()) +
-                static_cast<Core::usize>(entity.spriteAnimation.has_value());
+                static_cast<Core::usize>(entity.spriteAnimation.has_value()) +
+                static_cast<Core::usize>(entity.physicsBody.has_value()) +
+                static_cast<Core::usize>(entity.physicsShape.has_value()) +
+                static_cast<Core::usize>(entity.resource.has_value());
             if (payloadCount == 0U)
             {
                 entity.nodeKind = AssetFormat::World2DNodeKind::Node2D;
@@ -576,6 +721,18 @@ Core::Result<std::vector<std::byte>> captureWorld2DSnapshotBytes(const World& wo
             else if (payloadCount == 1U && entity.shadowOccluder)
             {
                 entity.nodeKind = AssetFormat::World2DNodeKind::ShadowOccluder2D;
+            }
+            else if (payloadCount == 1U && entity.physicsBody)
+            {
+                entity.nodeKind = nodeKindFor(capturedBodyKind);
+            }
+            else if (payloadCount == 1U && entity.physicsShape)
+            {
+                entity.nodeKind = AssetFormat::World2DNodeKind::CollisionShape2D;
+            }
+            else if (payloadCount == 1U && entity.resource)
+            {
+                entity.nodeKind = nodeKindFor(capturedResourceKind);
             }
             else
             {
@@ -717,6 +874,82 @@ instantiateWorld2DSnapshot(World& world, const AssetFormat::World2DSnapshotView&
                 }
                 entity.spriteAnimation = std::move(*animation);
             }
+            if (source.physicsBody)
+            {
+                const auto bodyKind = physicsBodyKindFor(source.nodeKind);
+                if (!bodyKind.has_value())
+                {
+                    return Core::failure(SceneErrorCode::InvalidComponent,
+                                         "World2D physics body payload does not match a body node kind");
+                }
+                entity.physicsBody = PhysicsBody2D{
+                    .kind = *bodyKind,
+                    .linearVelocityX = source.physicsBody->linearVelocityX,
+                    .linearVelocityY = source.physicsBody->linearVelocityY,
+                    .angularVelocityRadiansPerSecond = source.physicsBody->angularVelocityRadiansPerSecond,
+                    .linearDamping = source.physicsBody->linearDamping,
+                    .angularDamping = source.physicsBody->angularDamping,
+                    .gravityScale = source.physicsBody->gravityScale,
+                    .enabled = source.physicsBody->enabled,
+                    .enableSleep = source.physicsBody->enableSleep,
+                    .initiallyAwake = source.physicsBody->initiallyAwake,
+                    .fixedRotation = source.physicsBody->fixedRotation,
+                    .continuousCollision = source.physicsBody->continuousCollision,
+                };
+                if (!isValid(*entity.physicsBody))
+                {
+                    return Core::failure(SceneErrorCode::InvalidComponent,
+                                         "World2D restored PhysicsBody2D is invalid");
+                }
+            }
+            if (source.physicsShape)
+            {
+                entity.physicsShape = PhysicsShape2D{
+                    .kind = static_cast<PhysicsShapeKind2D>(source.physicsShape->kind),
+                    .halfExtentX = source.physicsShape->halfExtentX,
+                    .halfExtentY = source.physicsShape->halfExtentY,
+                    .radius = source.physicsShape->radius,
+                    .localCenterX = source.physicsShape->localCenterX,
+                    .localCenterY = source.physicsShape->localCenterY,
+                    .localAngleRadians = source.physicsShape->localAngleRadians,
+                    .localPointAX = source.physicsShape->localPointAX,
+                    .localPointAY = source.physicsShape->localPointAY,
+                    .localPointBX = source.physicsShape->localPointBX,
+                    .localPointBY = source.physicsShape->localPointBY,
+                    .density = source.physicsShape->density,
+                    .friction = source.physicsShape->friction,
+                    .restitution = source.physicsShape->restitution,
+                    .enabled = source.physicsShape->enabled,
+                    .sensor = source.physicsShape->sensor,
+                    .sensorEvents = source.physicsShape->sensorEvents,
+                    .contactEvents = source.physicsShape->contactEvents,
+                    .hitEvents = source.physicsShape->hitEvents,
+                };
+                if (!isValid(*entity.physicsShape))
+                {
+                    return Core::failure(SceneErrorCode::InvalidComponent,
+                                         "World2D restored PhysicsShape2D is invalid");
+                }
+            }
+            if (source.resource)
+            {
+                const auto resourceKind = resourceKindFor(source.nodeKind);
+                if (!resourceKind.has_value())
+                {
+                    return Core::failure(SceneErrorCode::InvalidComponent,
+                                         "World2D resource payload does not match a resource node kind");
+                }
+                entity.resourceBinding = ResourceBinding2D{
+                    .assetId = source.resource->assetId,
+                    .kind = *resourceKind,
+                    .active = source.resource->active,
+                };
+                if (!isValid(*entity.resourceBinding))
+                {
+                    return Core::failure(SceneErrorCode::InvalidComponent,
+                                         "World2D restored ResourceBinding2D is invalid");
+                }
+            }
             prepared.push_back(std::move(entity));
         }
 
@@ -784,6 +1017,34 @@ instantiateWorld2DSnapshot(World& world, const AssetFormat::World2DSnapshotView&
             {
                 if (Core::Status status =
                         world.setSpriteAnimationBinding2D(*entity, *preparedEntity.spriteAnimation);
+                    !status)
+                {
+                    rollback();
+                    return Core::failure(std::move(status.error()));
+                }
+            }
+            if (preparedEntity.physicsBody)
+            {
+                if (Core::Status status = world.setPhysicsBody2D(*entity, *preparedEntity.physicsBody);
+                    !status)
+                {
+                    rollback();
+                    return Core::failure(std::move(status.error()));
+                }
+            }
+            if (preparedEntity.physicsShape)
+            {
+                if (Core::Status status = world.setPhysicsShape2D(*entity, *preparedEntity.physicsShape);
+                    !status)
+                {
+                    rollback();
+                    return Core::failure(std::move(status.error()));
+                }
+            }
+            if (preparedEntity.resourceBinding)
+            {
+                if (Core::Status status =
+                        world.setResourceBinding2D(*entity, *preparedEntity.resourceBinding);
                     !status)
                 {
                     rollback();

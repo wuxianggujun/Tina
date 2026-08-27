@@ -9,14 +9,18 @@ set(TINA_SCENE_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/scene/MeshRenderer3D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/ParticleSystem2D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/PerspectiveCamera3D.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/scene/PhysicsBody2D.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/scene/PhysicsShape2D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/PointLight2D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/PointLight3D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/PrefabInstantiate.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/scene/ResourceBinding2D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/Scene.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/SceneErrors.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/ShadowOccluder2D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/SkinnedMeshRenderer3D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/SpotLight3D.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/scene/SpriteAnimationBinding2D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/SpriteAnimator2D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/SpriteRenderer2D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/Trail2D.hpp

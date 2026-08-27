@@ -356,6 +356,116 @@ TEST_F(World2DSnapshotSceneTests, CaptureRejectsUnsupported3DComponents)
     EXPECT_EQ(captured.error().code, SceneErrorCode::InvalidComponent);
 }
 
+// Physics and resource payloads used to be dropped on restore: the Editor could
+// author them and the wire format carried them, but nothing read them back, so a
+// saved scene lost data every reload. Assert a full byte round-trip.
+TEST_F(World2DSnapshotSceneTests, PhysicsAndResourcePayloadsSurviveRoundTrip)
+{
+    const std::array entities{
+        AssetFormat::World2DEntityDesc{.stableEntityId = 1},
+        AssetFormat::World2DEntityDesc{
+            .stableEntityId = 2,
+            .parentStableEntityId = 1,
+            .nodeKind = AssetFormat::World2DNodeKind::RigidBody2D,
+            .physicsBody = AssetFormat::World2DPhysicsBodyDesc{
+                .linearVelocityX = 1.5F,
+                .linearVelocityY = -2.5F,
+                .angularVelocityRadiansPerSecond = 0.75F,
+                .linearDamping = 0.25F,
+                .angularDamping = 0.125F,
+                .gravityScale = 2.0F,
+                .enableSleep = false,
+                .fixedRotation = true,
+                .continuousCollision = true,
+            },
+        },
+        // The wire format requires a CollisionShape2D to have a physics-body
+        // parent, so this must stay under entity 2.
+        AssetFormat::World2DEntityDesc{
+            .stableEntityId = 3,
+            .parentStableEntityId = 2,
+            .nodeKind = AssetFormat::World2DNodeKind::CollisionShape2D,
+            .physicsShape = AssetFormat::World2DPhysicsShapeDesc{
+                .kind = AssetFormat::World2DPhysicsShapeKind::Capsule,
+                .radius = 0.375F,
+                .localCenterX = 0.5F,
+                .localCenterY = -0.25F,
+                .localAngleRadians = 0.5F,
+                .density = 2.5F,
+                .friction = 0.3F,
+                .restitution = 0.4F,
+                .sensor = true,
+                .sensorEvents = true,
+                .contactEvents = false,
+                .hitEvents = true,
+            },
+        },
+    };
+    // Capture orders by hierarchy depth then stable ID. The shape sits at depth 2
+    // under its body, so the depth-1 resource node is authored before it to match
+    // that order and let the byte comparison stand.
+    const std::array orderedEntities{
+        entities[0],
+        entities[1],
+        AssetFormat::World2DEntityDesc{
+            .stableEntityId = 4,
+            .parentStableEntityId = 1,
+            .nodeKind = AssetFormat::World2DNodeKind::AudioPlayer2D,
+            .resource = AssetFormat::World2DResourceNodeDesc{
+                .assetId = assetId(9),
+                .active = false,
+            },
+        },
+        entities[2],
+    };
+    auto bytes = AssetFormat::writeWorld2DSnapshotBytes(
+        AssetFormat::World2DSnapshotDesc{.entities = orderedEntities});
+    ASSERT_TRUE(bytes) << bytes.error().message;
+    std::vector<AssetFormat::World2DEntityDesc> storage;
+    auto snapshot = AssetFormat::parseWorld2DSnapshot(*bytes, storage);
+    ASSERT_TRUE(snapshot) << snapshot.error().message;
+
+    World world = makeWorld();
+    auto bindings = instantiateWorld2DSnapshot(world, *snapshot, resolver());
+    ASSERT_TRUE(bindings) << bindings.error().message;
+    ASSERT_EQ(bindings->size(), 4U);
+
+    const EntityId bodyEntity = (*bindings)[1].entity;
+    const PhysicsBody2D* body = world.physicsBody2D(bodyEntity);
+    ASSERT_NE(body, nullptr);
+    // Body kind is encoded in the node kind, not the payload, so it must be
+    // recovered from RigidBody2D rather than defaulting to Static.
+    EXPECT_EQ(body->kind, PhysicsBodyKind2D::Rigid);
+    EXPECT_FLOAT_EQ(body->gravityScale, 2.0F);
+    EXPECT_TRUE(body->fixedRotation);
+    EXPECT_FALSE(body->enableSleep);
+
+    const PhysicsShape2D* shape = world.physicsShape2D((*bindings)[3].entity);
+    ASSERT_NE(shape, nullptr);
+    EXPECT_EQ(shape->kind, PhysicsShapeKind2D::Capsule);
+    EXPECT_FLOAT_EQ(shape->radius, 0.375F);
+    EXPECT_TRUE(shape->sensor);
+    EXPECT_FALSE(shape->contactEvents);
+
+    const ResourceBinding2D* binding = world.resourceBinding2D((*bindings)[2].entity);
+    ASSERT_NE(binding, nullptr);
+    EXPECT_EQ(binding->kind, ResourceBindingKind2D::AudioPlayer);
+    EXPECT_EQ(binding->assetId, assetId(9));
+    EXPECT_FALSE(binding->active);
+
+    // Recapture must reproduce the original bytes, including each node kind.
+    const std::vector<World2DEntityBinding> captured = *bindings;
+    auto recaptured = captureWorld2DSnapshotBytes(
+        world, captureConfig([captured](EntityId candidate) {
+            return stableIdFor(captured, candidate);
+        }));
+    ASSERT_TRUE(recaptured) << recaptured.error().message;
+    ASSERT_EQ(recaptured->size(), bytes->size());
+    for (Core::usize index = 0; index < bytes->size(); ++index) {
+        ASSERT_EQ((*recaptured)[index], (*bytes)[index]) << "byte " << index;
+    }
+}
+
 // This is the path a shipped game uses to load an authored scene, so it must
 // round-trip the gameplay blob and leave the World untouched on every failure.
 TEST_F(World2DSnapshotSceneTests, LoadsAuthoredSceneFileAndFailsClosed)

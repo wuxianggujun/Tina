@@ -10,7 +10,8 @@ snapshot，不是新的 Catalog `AssetKind`，也不替产品决定文件路径�
 override 区域必须为零；payload 长度必须与 header 精确一致。旧 schema v1（224-byte entity）按
 current-only 纪律直接拒绝，不保留兼容或迁移分支。
 
-entity record 保存稳定 entity ID、先出现的 parent stable ID、LocalTransform 和以下可选组件：
+entity record 保存稳定 entity ID、先出现的 parent stable ID、LocalTransform 和以下可选组件。
+**每个 wire payload 都必须被 Scene 消费或显式拒绝，不允许静默丢弃**（[ADR 0030](adr/0030-gameplay-2d-binding-and-physics-bridge.md)）：
 
 - `name`：节点 UTF-8 名称，空字符串表示未命名；
 - `SpriteRenderer2D`：Sprite/normal Texture `AssetId`、override、颜色、排序、flip/visible；
@@ -21,6 +22,18 @@ entity record 保存稳定 entity ID、先出现的 parent stable ID、LocalTran
   该组件是对同 entity `SpriteRenderer2D` 的绑定，缺少 sprite 时校验拒绝。Scene World 以
   `SpriteAnimationBinding2D`（weak clip handle + speed + autoPlay）承载它：restore 需要 resolver 把 clip
   `AssetId` 解析为 weak handle（未解析 fail closed），capture 经 `assetIdForHandle` 写回稳定 `AssetId`。
+- `PhysicsBody2D`：速度、阻尼、重力倍率与 sleep/rotation/CCD 标志。Scene 以同名**数据**组件承载，
+  组件内不含 `PhysicsBodyId` 或任何 backend handle，因此 `tina_scene` 不链接 Physics2D
+  （[ADR 0010](adr/0010-separate-physics-backends.md) 的后端分离不被破坏）；
+- `PhysicsShape2D`：Box/Circle/Capsule 尺寸、local center/angle、capsule 端点与材质/事件标志。
+  同为数据组件；`ConvexPolygon`/`Chain` 没有 wire 表示，需要它们的游戏直接用 Physics2D API 建；
+- `ResourceBinding2D`：TileMap/Fx2D/NavigationGrid2D/AudioClip 的 `AssetId` 与 active。Scene **不解释**
+  该 AssetId 的用途，只保证字节往返；实例化仍属游戏或 Asset 层。
+
+body 与 resource 的**具体种类不在 payload 里**——wire format 把 Static/Rigid/Character/Area 与
+TileMap/Fx/Navigation/Audio 编码在 `nodeKind` 上。因此两个 Scene 组件各自显式携带一个 kind 字段，
+restore 时从 `nodeKind` 恢复、capture 时据此重新派生 `nodeKind`；否则 round-trip 会把所有 body 退化成
+`StaticBody2D`。`CollisionShape2D` 必须有 physics body 父节点，这条 wire 校验与 Editor 侧约束同口径。
 
 Runtime `EntityId` owner/index/generation、weak `AssetHandle`、AssetLease、Render/GPU identity 永不序列化。
 这避免 restore 后误把旧 registry identity 当成 live 对象。

@@ -18,9 +18,12 @@ set(TINA_SCENE_TEST_SOURCES
     header_isolation/MeshRenderer3DHeader.cpp
     header_isolation/ParticleSystem2DHeader.cpp
     header_isolation/PerspectiveCamera3DHeader.cpp
+    header_isolation/PhysicsBody2DHeader.cpp
+    header_isolation/PhysicsShape2DHeader.cpp
     header_isolation/PointLight2DHeader.cpp
     header_isolation/PointLight3DHeader.cpp
     header_isolation/PrefabInstantiateHeader.cpp
+    header_isolation/ResourceBinding2DHeader.cpp
     header_isolation/SceneErrorsHeader.cpp
     header_isolation/SceneHeader.cpp
     header_isolation/ShadowOccluder2DHeader.cpp

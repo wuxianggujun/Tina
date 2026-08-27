@@ -26,6 +26,12 @@ struct World::EntityRecord final {
     SpriteRenderer2D spriteRenderer2D{};
     bool hasPointLight2D = false;
     PointLight2D pointLight2D{};
+    bool hasPhysicsBody2D = false;
+    PhysicsBody2D physicsBody2D{};
+    bool hasPhysicsShape2D = false;
+    PhysicsShape2D physicsShape2D{};
+    bool hasResourceBinding2D = false;
+    ResourceBinding2D resourceBinding2D{};
     bool hasShadowOccluder2D = false;
     ShadowOccluder2D shadowOccluder2D{};
     bool hasSpriteAnimationBinding2D = false;
@@ -1101,6 +1107,177 @@ Core::Status World::clearPointLight2D(EntityId entity) noexcept
     return Core::success();
 }
 
+Core::Status World::setPhysicsBody2D(EntityId entity, PhysicsBody2D body) noexcept
+{
+    if (m_impl == nullptr) {
+        return Core::failure(
+            SceneErrorCode::InvalidEntity,
+            "Scene World is not initialized");
+    }
+    if (!m_impl->isOwnerThread()) {
+        return Core::failure(
+            SceneErrorCode::WrongOwnerThread,
+            "Scene World mutation must run on the owner thread");
+    }
+    if (const Core::Status status = validateEntity(entity); !status) {
+        return status;
+    }
+    if (!isValid(body)) {
+        return Core::failure(
+            SceneErrorCode::InvalidComponent,
+            "Scene PhysicsBody2D has an invalid kind, non-finite value, or negative damping");
+    }
+    EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr) {
+        return Core::failure(
+            SceneErrorCode::CorruptHierarchy,
+            "Scene entity could not be resolved for PhysicsBody2D");
+    }
+    entityRecord->physicsBody2D = body;
+    entityRecord->hasPhysicsBody2D = true;
+    return Core::success();
+}
+
+Core::Status World::clearPhysicsBody2D(EntityId entity) noexcept
+{
+    if (m_impl == nullptr) {
+        return Core::failure(
+            SceneErrorCode::InvalidEntity,
+            "Scene World is not initialized");
+    }
+    if (!m_impl->isOwnerThread()) {
+        return Core::failure(
+            SceneErrorCode::WrongOwnerThread,
+            "Scene World mutation must run on the owner thread");
+    }
+    if (const Core::Status status = validateEntity(entity); !status) {
+        return status;
+    }
+    EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr) {
+        return Core::failure(
+            SceneErrorCode::CorruptHierarchy,
+            "Scene entity could not be resolved for PhysicsBody2D clear");
+    }
+    entityRecord->hasPhysicsBody2D = false;
+    entityRecord->physicsBody2D = {};
+    return Core::success();
+}
+
+Core::Status World::setPhysicsShape2D(EntityId entity, PhysicsShape2D shape) noexcept
+{
+    if (m_impl == nullptr) {
+        return Core::failure(
+            SceneErrorCode::InvalidEntity,
+            "Scene World is not initialized");
+    }
+    if (!m_impl->isOwnerThread()) {
+        return Core::failure(
+            SceneErrorCode::WrongOwnerThread,
+            "Scene World mutation must run on the owner thread");
+    }
+    if (const Core::Status status = validateEntity(entity); !status) {
+        return status;
+    }
+    if (!isValid(shape)) {
+        return Core::failure(
+            SceneErrorCode::InvalidComponent,
+            "Scene PhysicsShape2D has an invalid kind, non-finite value, or non-positive extent for its kind");
+    }
+    EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr) {
+        return Core::failure(
+            SceneErrorCode::CorruptHierarchy,
+            "Scene entity could not be resolved for PhysicsShape2D");
+    }
+    entityRecord->physicsShape2D = shape;
+    entityRecord->hasPhysicsShape2D = true;
+    return Core::success();
+}
+
+Core::Status World::clearPhysicsShape2D(EntityId entity) noexcept
+{
+    if (m_impl == nullptr) {
+        return Core::failure(
+            SceneErrorCode::InvalidEntity,
+            "Scene World is not initialized");
+    }
+    if (!m_impl->isOwnerThread()) {
+        return Core::failure(
+            SceneErrorCode::WrongOwnerThread,
+            "Scene World mutation must run on the owner thread");
+    }
+    if (const Core::Status status = validateEntity(entity); !status) {
+        return status;
+    }
+    EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr) {
+        return Core::failure(
+            SceneErrorCode::CorruptHierarchy,
+            "Scene entity could not be resolved for PhysicsShape2D clear");
+    }
+    entityRecord->hasPhysicsShape2D = false;
+    entityRecord->physicsShape2D = {};
+    return Core::success();
+}
+
+Core::Status World::setResourceBinding2D(EntityId entity, ResourceBinding2D binding) noexcept
+{
+    if (m_impl == nullptr) {
+        return Core::failure(
+            SceneErrorCode::InvalidEntity,
+            "Scene World is not initialized");
+    }
+    if (!m_impl->isOwnerThread()) {
+        return Core::failure(
+            SceneErrorCode::WrongOwnerThread,
+            "Scene World mutation must run on the owner thread");
+    }
+    if (const Core::Status status = validateEntity(entity); !status) {
+        return status;
+    }
+    if (!isValid(binding)) {
+        return Core::failure(
+            SceneErrorCode::InvalidComponent,
+            "Scene ResourceBinding2D requires a non-zero AssetId and a known kind");
+    }
+    EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr) {
+        return Core::failure(
+            SceneErrorCode::CorruptHierarchy,
+            "Scene entity could not be resolved for ResourceBinding2D");
+    }
+    entityRecord->resourceBinding2D = binding;
+    entityRecord->hasResourceBinding2D = true;
+    return Core::success();
+}
+
+Core::Status World::clearResourceBinding2D(EntityId entity) noexcept
+{
+    if (m_impl == nullptr) {
+        return Core::failure(
+            SceneErrorCode::InvalidEntity,
+            "Scene World is not initialized");
+    }
+    if (!m_impl->isOwnerThread()) {
+        return Core::failure(
+            SceneErrorCode::WrongOwnerThread,
+            "Scene World mutation must run on the owner thread");
+    }
+    if (const Core::Status status = validateEntity(entity); !status) {
+        return status;
+    }
+    EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr) {
+        return Core::failure(
+            SceneErrorCode::CorruptHierarchy,
+            "Scene entity could not be resolved for ResourceBinding2D clear");
+    }
+    entityRecord->hasResourceBinding2D = false;
+    entityRecord->resourceBinding2D = {};
+    return Core::success();
+}
+
 Core::Status World::setShadowOccluder2D(
     EntityId entity,
     ShadowOccluder2D occluder) noexcept
@@ -1194,6 +1371,42 @@ const PointLight2D* World::pointLight2D(EntityId entity) const noexcept
         return nullptr;
     }
     return &entityRecord->pointLight2D;
+}
+
+const PhysicsBody2D* World::physicsBody2D(EntityId entity) const noexcept
+{
+    if (m_impl == nullptr || !m_impl->isOwnerThread()) {
+        return nullptr;
+    }
+    const EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr || !entityRecord->hasPhysicsBody2D) {
+        return nullptr;
+    }
+    return &entityRecord->physicsBody2D;
+}
+
+const PhysicsShape2D* World::physicsShape2D(EntityId entity) const noexcept
+{
+    if (m_impl == nullptr || !m_impl->isOwnerThread()) {
+        return nullptr;
+    }
+    const EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr || !entityRecord->hasPhysicsShape2D) {
+        return nullptr;
+    }
+    return &entityRecord->physicsShape2D;
+}
+
+const ResourceBinding2D* World::resourceBinding2D(EntityId entity) const noexcept
+{
+    if (m_impl == nullptr || !m_impl->isOwnerThread()) {
+        return nullptr;
+    }
+    const EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr || !entityRecord->hasResourceBinding2D) {
+        return nullptr;
+    }
+    return &entityRecord->resourceBinding2D;
 }
 
 const ShadowOccluder2D* World::shadowOccluder2D(EntityId entity) const noexcept
