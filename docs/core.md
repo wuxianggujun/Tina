@@ -73,7 +73,15 @@ ContentHash。
 - `createParentDirectories(path)`；
 - `writeFile(path, bytes, config)`：默认创建父目录，并使用同目录唯一临时文件 + OS 原子 replace；Windows
   `MoveFileExW(REPLACE_EXISTING | WRITE_THROUGH)` 与其他平台 rename 均不通过“先删除目标”降级；
-- 空路径、目录、非法 UTF-8、容量、permission 与 OS error 返回结构化 Error。
+- 空路径、目录、非法 UTF-8、容量、permission 与 OS error 返回结构化 Error；
+- `userApplicationDirectory(appName, kind)` 与 `userApplicationFilePath(appName, fileName, kind)`：解析
+  per-user `Config`/`State` 目录并返回 UTF-8 路径。**只做路径拼接，不碰文件系统**——创建目录由
+  `writeFile()` 的 `createParents` 负责，因此只读环境不会在 resolve 阶段失败。Windows 优先
+  `%LOCALAPPDATA%` 再 `%APPDATA%`；其它平台按 XDG basedir 用 `$XDG_CONFIG_HOME`/`$XDG_STATE_HOME`，
+  缺失时回退 `$HOME/.config`、`$HOME/.local/state`。环境 base 必须是**绝对**路径，相对值会解析到进程
+  工作目录而不是 per-user 位置，因此显式拒绝并返回 `NotFound`。`appName`/`fileName` 各须是单个
+  UTF-8 path segment：空串、`.`、`..`、含分隔符或 `:` 一律 `InvalidArgument`，因为 segment 是逐字
+  拼接的，不做净化。
 
 路径 canonicalization、sandbox/root containment 属于具体 Cooker/Asset 输入策略，不由 Core
 `writeFile()` 自动猜测。

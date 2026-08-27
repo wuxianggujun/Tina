@@ -224,6 +224,33 @@ Core::Status updateFrame(FrameUpdateContext& context) override {
 `RuntimeErrorCode::PhaseCapabilityUnavailable`，非有限或负值得到
 `CoreErrorCode::InvalidArgument`，两种情况都不改变当前缩放。`0.0` 是合法值，不是错误。
 
+### 玩家设置持久化
+
+`GameSettings`（`tina/runtime/GameSettings.hpp`）是一个**纯值类型**：Runtime 不持有设置状态，何时
+load、何时 apply、何时 save 全由产品决定。它覆盖三个玩家可改面：固定三条 audio bus 的 volume/mute、
+vsync，以及持久化 rebinding。
+
+```cpp
+auto path = Core::userApplicationFilePath("MyGame", "settings.txt");
+auto loaded = loadGameSettingsFromFile(*path);          // 缺文件 = 首次运行，不是错误
+auto bindings = mergeInputBindingSettings(startupBindings, loaded->settings.inputBindings);
+config.inputActions.bindings = std::move(*bindings);    // 随后由 EngineConfig::validate 校验
+```
+
+序列化形式是行式 UTF-8 `key=value` 文本而非 cooked 二进制 payload：它天然是用户可编辑的，也不进
+Catalog，不是 asset。三条规则值得注意：
+
+- **schema 不匹配返回默认值而不是失败**：玩家升级跨过一次改名后应该得到能跑的游戏，不是启动报错；
+- **未知 key 被忽略，但已知 key 的非法值报错**。降级不该摧毁新版本写入的无关字段；而静默丢弃玩家
+  明确设定的值比告诉产品文件坏了更糟；
+- **`version` 必须是第一个 key**，否则会在 schema 未知的前提下解析值。
+
+`InputBindingSetting` 以 `(action, domain)` 加**显式** `InputBindingId` 为键，绝不用自动分配的 id：
+自动 id 在 EngineHost 创建时按 config 顺序发放（`ActionMapper`），跨运行不稳定。
+`mergeInputBindingSettings()` 先按显式 id 匹配，再退回 `(action, domain)`；匹配不到任何 startup
+binding 的条目被忽略——游戏删掉某个 action 后，一个过期设置文件不该让游戏起不来。合并结果仍须经
+`EngineConfig::validate`，那里才是拒绝重复物理控件的地方。
+
 ## `IGameApplication` 与 `IGameState`
 
 当前 Application 接口：

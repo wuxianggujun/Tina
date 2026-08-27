@@ -5,6 +5,7 @@ set(TINA_CORE_TEST_SOURCES
     core/CrashHandlerTests.cpp
     core/DiagnosticsTests.cpp
     core/ReadFileTests.cpp
+    core/UserPathsTests.cpp
     core/WriteFileTests.cpp
     core/EnumFlagsTests.cpp
     core/header_isolation/AssetIdHeader.cpp
@@ -16,6 +17,7 @@ set(TINA_CORE_TEST_SOURCES
     core/header_isolation/LogLevelHeader.cpp
     core/header_isolation/LogRecordHeader.cpp
     core/header_isolation/ReadFileHeader.cpp
+    core/header_isolation/UserPathsHeader.cpp
     core/header_isolation/WriteFileHeader.cpp
     core/header_isolation/ErrorHeader.cpp
     core/header_isolation/CountingMemoryResourceHeader.cpp
@@ -75,6 +77,7 @@ set(TINA_RUNTIME_TEST_SOURCES
     runtime/header_isolation/EngineConfigHeader.cpp
     runtime/header_isolation/EngineHostHeader.cpp
     runtime/header_isolation/GameApplicationHeader.cpp
+    runtime/header_isolation/GameSettingsHeader.cpp
     runtime/header_isolation/GameStateCommandsHeader.cpp
     runtime/header_isolation/InputActionsHeader.cpp
     runtime/header_isolation/InputActionMapHeader.cpp
@@ -87,6 +90,7 @@ set(TINA_RUNTIME_TEST_SOURCES
     runtime/Sample2DTileSelectionTests.cpp
     runtime/Sample2DWindowVisibilityPacingTests.cpp
     runtime/PlatformEventDispatcherTests.cpp
+    runtime/GameSettingsTests.cpp
     runtime/GameStateStackTests.cpp
     runtime/GameStateStackIntegrationTests.cpp
     runtime/RuntimeLifecycleTests.cpp

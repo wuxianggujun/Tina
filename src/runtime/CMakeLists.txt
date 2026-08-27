@@ -5,6 +5,7 @@ add_library(tina_runtime STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/GameApplication.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/GameState.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/GameStateCommands.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/runtime/GameSettings.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/InputActions.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/InputActionMap.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/PhaseContexts.hpp
@@ -17,6 +18,7 @@ add_library(tina_runtime STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/runtime/spi/PlatformEventDispatcher.hpp
     EngineConfig.cpp
     EngineHost.cpp
+    GameSettings.cpp
     PhaseContexts.cpp
     PrimaryWindowUI.cpp
     PlatformEventDispatcher.cpp

@@ -16,6 +16,7 @@ add_library(tina_core STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/core/hash/ContentHash.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/hash/ContentHashDigest.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/io/ReadFile.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/io/UserPaths.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/io/WriteFile.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/id/AssetId.hpp
 
@@ -35,6 +36,7 @@ add_library(tina_core STATIC
     diagnostics/Diagnostics.cpp
     hash/ContentHashDigest.cpp
     io/ReadFile.cpp
+    io/UserPaths.cpp
     io/Utf8Path.hpp
     io/WriteFile.cpp
     id/GenerationId.cpp
