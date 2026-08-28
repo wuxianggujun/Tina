@@ -58,7 +58,12 @@ D7 取消。这两项留给未来的 TCP/HTTP 切片。
   （`http://127.0.0.1`）—— 任何需要 resolver 或需要拆分的输入一律拒绝。
 
 输出始终是 canonical 形式：IPv6 小写，压缩最长的零组连续段（并列时取最左），且
-单个零组不压缩（RFC 5952）。因此 `parse → format → parse` 往返稳定。
+单个零组不压缩（RFC 5952）。
+
+**`format()` 做的是规范化，不是恒等回显。** 解析接受 `::` 代表单个零组（如
+`::2:3:4:5:6:7:8`），但格式化不允许产生这种写法，所以输出会是展开的
+`0:2:3:4:5:6:7:8`。稳定的是**地址值**：`parse(format(a)) == a` 恒成立，而
+`format(parse(s)) == s` 只在 `s` 本身已是 canonical 时成立。
 
 ## 数据报大小
 
@@ -111,8 +116,8 @@ out\build\windows-msvc-vnext\bin\Debug\tina_network_tests.exe --gtest_color=yes
 
 测试直接运行，不注册 CTest（ADR 0006）。
 
-**2026-08-28 证据：** `tina_network_tests` 35/35（`IpAddressTest` 17、
-`NetworkEndpointTest` 1、`UdpSocketTest` 17）；同轮 `tina_tests` 411/411、
+**2026-08-28 证据：** `tina_network_tests` 47/47（`IpAddressTest` 23、
+`NetworkEndpointTest` 1、`UdpSocketTest` 23）；同轮 `tina_tests` 413/413、
 `tina_ui_tests` 836/836、`tina_runtime_ui_tests` 151/151、`tina_sample_null`
 300 帧 exit 0，确认新增 `MemoryTag::Network` 与 `MemoryTagCount` 由 13 改 14 后
 无回归。`VerifyInstalledTinaSdkHeaders.cmake` 扫描 292 个公开头（含 3 个 network 头）
@@ -125,13 +130,54 @@ IPv6 用例在本机实际执行（非 skip），IPv6 不可用的宿主上 `GTE
 `OversizedDatagramIsDiscardedAndCounted` 用两个不同 `maximumDatagramBytes` 的 socket
 构造真实超限，`FullQueueDefersWithoutCountingDiscards` 证明队列满是延迟而非丢弃。
 
+失败路径另有两个用例：`RepeatedFailedCreateLeavesTransportUsable` 连跑 150 次失败
+`Create` 后仍能正常收发，覆盖 Winsock 进程级 refcount 的平衡（泄漏会让库永不卸载，
+过度释放会在活 socket 下卸载库，两者都不可直接观测）；`BindingAnAlreadyBoundPortFails`
+证明重复 bind 被拒绝而非静默产生第二个同端点 socket。
+
+V6 解析器是手写的，因此另有 `RejectsV6GroupCountBoundaryViolations`、
+`AcceptsMaximalEmbeddedV4Form`（六组 + 嵌入 V4 = 恰好八组，最大合法形式）、
+`EmbeddedV4InheritsOctetStrictness`（嵌入的 V4 同样拒绝前导零）与
+`RejectsEmbeddedV4InNonTrailingPosition` 覆盖分组计数与位置约束的缝。
+
+语义边界另有四个用例：`MovedFromSocketAnswersQueriesInertly`（moved-from 句柄的每个
+访问器都惰性作答而非解引用空 impl，counter 归零而非透出目标 socket 的实时值）、
+`ReportsConfiguredCapacities`、`LastCountersResetPerCallWhileTotalsAccumulate`
+（`last*` 每次调用重置而 `total*` 持续累计），以及
+`ReceiveBoundsSyscallsWhenEveryDatagramIsDiscarded` —— 后者是唯一实际执行 syscall
+上限分支的用例，用连续超限 datagram 制造「全部被丢弃、不占 slot」的情形。
+
 ## 未测到的部分
 
 自动测试全部在 loopback 上进行，因此以下均未覆盖：真实网络丢包、乱序、重复、
 路径 MTU 分片、NAT 行为、跨主机 IPv6、防火墙拦截。内核发送缓冲区满导致的
-`WouldBlock` 在 loopback 上难以稳定触发，其分支未被自动执行。`receive()` 的
-syscall 上限在正常流量下不会触及，其边界同样未被自动执行。
+`WouldBlock` 在 loopback 上难以稳定触发，其分支未被自动执行。
 
 `CheckDocs.ps1` 本轮受 shell 权限限制未能执行；本文引用的 target
 （`tina_network`、`tina_network_tests`）、preset 与相对链接已逐条手工核验存在。
-Linux/POSIX 分支已按平台条件编写但**未在 Linux 上构建或运行过**。
+
+## Linux 证据
+
+**2026-08-28，Docker `tina-linux-gcc13:test-001`（Ubuntu 24.04 + GCC 13.3.0 + CMake
+3.28.3）挂载仓库运行：** POSIX 分支首次编译，`tina_network` 与三个 header-isolation
+TU **零 warning 零 error**；`tina_network_tests` **35/35**，与 Windows 逐项一致。
+
+两个最可能出现平台差异的用例都通过：`ExactlyMaximumSizedPayloadIsDelivered` 与
+`OversizedDatagramIsDiscardedAndCounted`。这验证了「slot 多留一字节」的做法在 POSIX
+`recvfrom` 静默截断语义下**确实**能区分「恰好等于上限」与「超限」—— 该设计原本就是为
+POSIX 而非 Windows 引入的，Windows 有 `WSAEMSGSIZE` 可直接判定。
+
+`SupportsV6Loopback` 在容器内实际执行而非 skip（`disable_ipv6=0`，结果为 OK）。
+
+同轮 Linux 回归：`tina_ui_tests` 836/836、`tina_runtime_ui_tests` 151/151、
+`tina_ui_render_integration_tests` 32/32、`tina_sample_null` 300 帧 exit 0，`tina_tests`
+412 通过 / 1 失败。唯一失败是 `CrashHandlerTest.BacktraceNamesTheCallingFunction`，
+**与本模块无关**：`src/core/diagnostics/CrashHandler.cpp:247-252` 的 `emitBacktrace`
+只有 Windows 实现，`#else` 分支输出 "unavailable on this platform"，而该测试未按平台
+守卫就断言符号名。这属 `CORE-DIAG-001`（backlog 已记载「Linux terminate/abort 生成
+可读 artifact 并明确无 backtrace」），本轮未修改。
+
+vcpkg 首次 configure 因 `codeload.github.com` 下载 mikktspace 超时失败；把宿主
+`$VCPKG_ROOT/downloads` 挂载进容器 `/opt/vcpkg/downloads` 后通过。后续 Linux 门禁
+建议沿用该挂载。Linux build tree 为 `out/build/linux-gcc13-vnext`，与五个
+`out/build/windows-msvc-*` 互不影响。
