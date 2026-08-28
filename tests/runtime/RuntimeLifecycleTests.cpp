@@ -2367,6 +2367,86 @@ class TimeScaleLowerState final : public IGameState {
     TimeScaleProbe* probe_;
 };
 
+// A pushed state whose onEnter fails. ADR 0014 says enter failure rolls the
+// candidate back without onExit and keeps the stack, so the state below must
+// survive and keep running -- the failure must not become a silent dead end.
+struct EnterFailureProbe final {
+    u64 lowerUpdateCount = 0;
+    u64 candidateEnterAttempts = 0;
+    u64 candidateUpdateCount = 0;
+    u64 candidateExits = 0;
+    bool lowerStillRunningAfterFailedPush = false;
+};
+
+class EnterFailureCandidateState final : public IGameState {
+  public:
+    explicit EnterFailureCandidateState(EnterFailureProbe& probe) noexcept : probe_(&probe) {}
+
+    Core::Status onEnter(GameStateEnterContext&) override
+    {
+        ++probe_->candidateEnterAttempts;
+        return Core::failure(RuntimeErrorCode::GameStateCommandRejected,
+                             "scripted onEnter failure");
+    }
+
+    // Neither of these may run: a candidate that failed to enter was never on the
+    // stack, so it must not be updated and must not receive onExit.
+    void onExit(GameStateExitContext&) noexcept override { ++probe_->candidateExits; }
+
+    [[nodiscard]] GameStatePolicy initialPolicy() const noexcept override { return {}; }
+
+    Core::Status updateFrame(FrameUpdateContext&) override
+    {
+        ++probe_->candidateUpdateCount;
+        return Core::success();
+    }
+
+  private:
+    EnterFailureProbe* probe_;
+};
+
+class EnterFailureLowerState final : public IGameState {
+  public:
+    explicit EnterFailureLowerState(EnterFailureProbe& probe) noexcept : probe_(&probe) {}
+
+    Core::Status onEnter(GameStateEnterContext&) override { return Core::success(); }
+    void onExit(GameStateExitContext&) noexcept override {}
+    [[nodiscard]] GameStatePolicy initialPolicy() const noexcept override { return {}; }
+
+    Core::Status updateFrame(FrameUpdateContext& context) override
+    {
+        ++probe_->lowerUpdateCount;
+        if (context.frameTiming().frameIndex == 0U)
+        {
+            return context.requestPush(std::make_unique<EnterFailureCandidateState>(*probe_));
+        }
+        // Reaching a second frame at all proves the failed push left this state in
+        // place rather than tearing the stack down.
+        probe_->lowerStillRunningAfterFailedPush = true;
+        context.requestExitAfterFrame();
+        return Core::success();
+    }
+
+  private:
+    EnterFailureProbe* probe_;
+};
+
+class EnterFailureGameApplication final : public IGameApplication {
+  public:
+    explicit EnterFailureGameApplication(EnterFailureProbe& probe) noexcept : probe_(&probe) {}
+
+    Core::Result<std::unique_ptr<IGameState>> createInitialState(GameStartupContext&) override
+    {
+        std::unique_ptr<IGameState> state = std::make_unique<EnterFailureLowerState>(*probe_);
+        return state;
+    }
+
+    void onShutdown(GameShutdownContext&) noexcept override {}
+
+  private:
+    EnterFailureProbe* probe_;
+};
+
 class TimeScaleGameApplication final : public IGameApplication {
   public:
     explicit TimeScaleGameApplication(TimeScaleProbe& probe) noexcept : probe_(&probe)
@@ -3583,6 +3663,11 @@ TEST(EngineHostRunTest, EmptyStateStackExitSkipsExtractionAndSubmissionAccountin
 
     ASSERT_TRUE(runResult.has_value()) << runResult.error().message;
     EXPECT_EQ(*runResult, RunExitReason::GameStateStackBecameEmpty);
+    // The game must be told the same thing run()'s caller is told. This site used to
+    // report GameRequestedExitAfterCurrentFrame, so a game that persists differently
+    // for "the player popped the last state" could not distinguish the two from
+    // inside onShutdown -- and this enumerator was never delivered anywhere.
+    EXPECT_EQ(game.shutdownStopCause, RunStopCause::GameStateStackBecameEmpty);
     EXPECT_FALSE(containsEventPrefix(runtime.events, "state.extract."));
     EXPECT_FALSE(containsEventPrefix(runtime.events, "state.ui."));
     EXPECT_FALSE(containsEventPrefix(runtime.events, "render.submit."));
@@ -3593,6 +3678,34 @@ TEST(EngineHostRunTest, EmptyStateStackExitSkipsExtractionAndSubmissionAccountin
     EXPECT_EQ(runtime.completionLedgerInflight, 0U);
     ASSERT_TRUE(runtime.completionLedgerInflightAtStateExit.has_value());
     EXPECT_EQ(*runtime.completionLedgerInflightAtStateExit, 0U);
+}
+
+// ADR 0014: a failed onEnter rolls back the candidate only -- no onExit, stack
+// intact. That was correct, but the error was destroyed unread and the function
+// returns the same false it returns for "nothing was pending", so a dropped push
+// was indistinguishable from a no-op. From the outside that is an unresponsive
+// button with no log line while the diagnosed cause existed one line earlier.
+TEST(EngineHostRunTest, FailedStateEnterRollsBackTheCandidateAndKeepsTheStackRunning)
+{
+    RuntimeProbe runtime;
+    runtime.frameDeltas = {Core::Duration::zero(), Core::Duration::zero()};
+    EnterFailureProbe probe;
+    EnterFailureGameApplication application(probe);
+    auto hostResult = createRuntimeHost(runtime);
+    ASSERT_TRUE(hostResult.has_value()) << hostResult.error().message;
+
+    auto runResult = (*hostResult)->run(application);
+
+    // The run continues normally: a rejected push is not a runtime failure.
+    ASSERT_TRUE(runResult.has_value()) << runResult.error().message;
+    EXPECT_EQ(*runResult, RunExitReason::GameRequestedExitAfterCurrentFrame);
+    EXPECT_EQ(probe.candidateEnterAttempts, 1U);
+    // Never entered, so it must never be updated and must never receive onExit.
+    EXPECT_EQ(probe.candidateUpdateCount, 0U);
+    EXPECT_EQ(probe.candidateExits, 0U);
+    // The state below kept the frame after the failed push.
+    EXPECT_TRUE(probe.lowerStillRunningAfterFailedPush);
+    EXPECT_GE(probe.lowerUpdateCount, 2U);
 }
 
 TEST(EngineHostRunTest, LaterUiFailureWinsOverExitRequestFromSameFrame)

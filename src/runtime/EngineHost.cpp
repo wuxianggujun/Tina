@@ -1044,8 +1044,16 @@ class EngineHostImplementation final {
                 if (m_gameStateStack.empty())
                 {
                     m_pendingCommands.clearAll();
+                    // The two enums are deliberately parallel: RunExitReason tells
+                    // run()'s caller why the loop ended, RunStopCause tells the game.
+                    // This site reported the reason correctly but told the game
+                    // "GameRequestedExitAfterCurrentFrame", so a game that persists
+                    // differently for "the player popped the last state" could not
+                    // tell the two apart from inside onShutdown -- and
+                    // RunStopCause::GameStateStackBecameEmpty existed but was never
+                    // delivered anywhere.
                     return stopNormally(gameApplication, RunExitReason::GameStateStackBecameEmpty,
-                                        RunStopCause::GameRequestedExitAfterCurrentFrame);
+                                        RunStopCause::GameStateStackBecameEmpty);
                 }
             }
             m_pendingCommands.clearAll();
@@ -1547,6 +1555,27 @@ class EngineHostImplementation final {
             if (!enterResult)
             {
                 // ADR 0014: enter failure rolls back candidate only (no onExit), keep stack.
+                //
+                // The rollback is right, but the error used to be destroyed unread.
+                // This function returns false both here and for "no structural
+                // command was pending", so the caller cannot tell a dropped push
+                // from nothing to do -- and from the outside a failed push is an
+                // unresponsive button with no log line, while the diagnosed cause
+                // existed one line earlier. Reported before the candidate dies.
+                if (m_modules.diagnostics != nullptr)
+                {
+                    // The state's own message is the whole point: "onEnter failed"
+                    // without it says no more than the silent return did. LogRecord
+                    // borrows its views, and the error outlives this write.
+                    m_modules.diagnostics->channel().write({
+                        .level = Core::Diagnostics::LogLevel::Error,
+                        .category = "runtime.lifecycle",
+                        .message = enterResult.error().message.empty()
+                                       ? std::string_view{"GameStateEnterFailed: state push/replace "
+                                                          "rolled back"}
+                                       : std::string_view{enterResult.error().message},
+                    });
+                }
                 candidate.reset();
                 return false;
             }
