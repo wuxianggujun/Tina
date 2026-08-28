@@ -47,7 +47,7 @@ UI-STUDIO-DESIGN 的代码与自动证据已固化，剩余 state-feedback 视�
 | 2D-ANIM-EVENTS-PRODUCT | Done：product-2d 消费 `crossedEvents`；300帧 gate 固化 footstep/hit=`15/1`、overflow/unknown=`0/0`（字段现由 schema 29 继承） |
 | TEXT-001 | InProgress：多行、UAX #29 grapheme 子集、二维 hit/navigation 与 Windows IMM32 caret/candidate placement 的代码和自动 gate 已完成；BiDi/复杂 shaping、Linux 原生 XIM/Wayland 与 Windows 真机 IME 人工矩阵仍待收口 |
 | NAV-COOK-001 | Done：Cooked NavigationGrid2D v1、typed load、Editor bake/persistent overlay 与 product bit-exact 双路径通过统一模块/Editor/product gate |
-| FX-ASSET-001 | InProgress：Fx2D v1、完整 recipe、typed dependency 与 Scene factory 已完成；`Fx2DAuthoringDocument` 有 API/单测，但 EditorApp 尚无可见 document tab/Inspector 消费面；GPU simulation 留 Later |
+| FX-ASSET-001 | InProgress：Fx2D v1、完整 recipe、typed dependency 与 Scene factory 已完成；`Fx2DAuthoringDocument` 有 API 但**无单测**（2026-08-28 更正：`tests/editor/` 只有 SpriteAnimation/TileMap/World2D/World3D 四个 authoring document 测试，Fx2D 的 170 行 authoring 代码零覆盖），EditorApp 亦无可见 document tab/Inspector 消费面；GPU simulation 留 Later |
 | PHYS2D-CHAIN | Done：static open/loop Chain、多 segment 生命周期/query 去重通过 Physics2D 49/49 与产品 ready gate |
 | ASSET-SEC-002 | Done：glTF 之外全部 cooked payload 的资源炸弹/malformed 矩阵已补齐，`tina_asset_format_tests` 124/124、corpus 17/17、`tina_asset_tests` 312/312 |
 | UI-MOTION-002 | Done：keyframe timeline、bounded `LayoutWidth`/`LayoutHeight`/`LayoutOffset` 与 atomic Layout/Hit/Paint publication；UI 28/28、Runtime facade 1/1、bench unit 10/10 及 paint/layout seed 0/1/2 通过 |
@@ -119,7 +119,7 @@ ABI tuple 的 artifact/API/symbol baseline 与 previous-object probe 作为 rele
 - layout whitelist 扩展，以及 loop/seek/pause/repeat/yoyo/completion callback、spring/inertia 等高级 Motion playback；
 - `MeshRenderer3D` / `SkinnedMeshRenderer3D` 的 LOD 与剩余 instancing 扩展（static/skinned sphere-frustum culling 已在 resolver 前完成；opaque static 当前仅对 mesh/material/submesh/doubleSided 相同的连续 item 合批并以 bgfx instanced draw 提交，transparent static 与 skinned path 仍逐 item draw）；
 - Asset Bundle/Patch、cache/LRU 与 network Asset；
-- 移动端（Android/iOS）平台后端（`MOBILE-001`，[ADR 0032](adr/0032-mobile-platform-contract-boundaries.md) Proposed）。后端本身只有 7 个纯虚；成本在六个已生效的桌面契约上（单 pointer、指针位置永久存在、native surface 不变、poll 线程==渲染线程、只有三个 renderer、preedit 由应用控制）。其中**切片 A（多点触控 + pointer presence）不需要移动后端，可在桌面上完成并验证**，是最大的单项前置工作。ADR 0032 的 D3（`run()` 保持阻塞还是改外部驱动 `tick()`）未定则 iOS 无法开工。
+- 移动端（Android/iOS）平台后端（`MOBILE-001`，[ADR 0032](adr/0032-mobile-platform-contract-boundaries.md) Proposed）。后端本身只有 7 个纯虚；成本在六个桌面契约上（单 pointer、指针位置永久存在、native surface 不变、poll 线程==渲染线程、只有三个 renderer、preedit 由应用控制）。**切片 A 已完成**（2026-08-28 更正，此前写作最大单项前置工作）：pointer presence（`3569f0b4`）与多点触控路由（`4ec987a9`）均已在桌面落地并有单测，`UIVirtualStick` 是首个真实多点消费者，故前两个契约已不再是阻塞项。剩余四个契约与后端实现仍待 ADR 0032 的 D3（`run()` 保持阻塞还是改外部驱动 `tick()`）定论，未定则 iOS 无法开工。
 
 Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语义和验收命令，不能只按功能名称开工。
 
