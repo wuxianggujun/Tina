@@ -5,6 +5,7 @@
 #include <tina/runtime/RunExitReason.hpp>
 
 #include <memory>
+#include <optional>
 
 namespace Tina::Detail {
 class EngineHostImplementation;
@@ -32,6 +33,22 @@ class EngineHost final {
     Create(const EngineConfig& config, EngineCompositionFactories factories) noexcept;
 
     [[nodiscard]] Core::Result<RunExitReason> run(IGameApplication& gameApplication) noexcept;
+
+    // Externally driven alternative to run(), for hosts that do not let the caller own
+    // the frame loop: iOS delivers frames from a CADisplayLink callback, and the same
+    // shape fits an embedded viewport or any other external main loop.
+    //
+    // start() runs the startup transaction and commits the first game state; tick()
+    // then advances exactly one frame. A successful tick returns nullopt while the run
+    // continues, and a RunExitReason once it has ended — at which point teardown has
+    // already happened and neither call may be made again. A failure is final in the
+    // same way; both mirror run()'s result exactly, because both go through the same
+    // frame body.
+    //
+    // start() and run() are mutually exclusive, and every call must be on the thread
+    // that created the host.
+    [[nodiscard]] Core::Status start(IGameApplication& gameApplication) noexcept;
+    [[nodiscard]] Core::Result<std::optional<RunExitReason>> tick(IGameApplication& gameApplication) noexcept;
 
   private:
     explicit EngineHost(std::unique_ptr<Detail::EngineHostImplementation> implementation) noexcept;

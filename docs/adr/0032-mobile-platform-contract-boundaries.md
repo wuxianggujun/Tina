@@ -50,7 +50,7 @@ system color scheme 等桌面专属项可以不做。
 | --- | --- | --- | --- |
 | D1 | 顺序 | **先扩宽契约（C1/C2），再写后端**。多点触控与 pointer presence 可以完全在桌面上实现并验证 | 先写后端：会在没有多点模型的情况下产出一个只能发 `PrimaryPointerId` 的移动后端，等于把 cocos 默认模板 `setMultipleTouchEnabled:NO` 的处境重演一遍 |
 | D2 | 平台顺序 | **Android 先，iOS 后**。`ANativeWindow` → bgfx 比 `CAMetalLayer` 简单，且 iOS 还要额外解决 `run()` 不能阻塞 | iOS 先：Metal 后端更现代，但 `run()` 形态冲突会立刻迫使一个尚未准备好的决定 |
-| D3 | `run()` 形态（C4/iOS） | **保持阻塞 `run()`，移动后端在内部驱动**：Android 用 NDK 的 looper 在 `pollFrame()` 内取事件；iOS 需要一个由 `CADisplayLink` 驱动的 pump 而 `run()` 在其上阻塞等待 | 改成外部驱动的 `tick()`：更贴合 iOS，但会改变所有平台的 `EngineHost` 契约与 `RunExitReason` 语义，且 ADR 0014 的四相位阻断都建立在 `run()` 拥有循环之上 |
+| D3 | `run()` 形态（C4/iOS） | **已定（2026-08-28）：外部驱动 `start()`/`tick()`**，`run()` 保留为 `while` 封装、75 处调用点零改动。maintainer 未采纳原推荐的「保持阻塞、后端内部适配」，因为后者在 iOS 上需要第二线程 + 每帧信号 + 渲染提交 marshal 回主线程，反而违背它要保住的 C4。详见「决定」第 4 节 | 已否决：保持阻塞 `run()` 让移动后端内部驱动 |
 | D4 | 多点触控的下游状态（C1） | UI 侧单槽状态改为按 `PointerId` 索引的固定容量表 | 只放宽平台校验：`armedSlider` 等仍是单槽，第二根手指会抢走第一根的控件——正是 cocos 三个圆形控件的多点缺陷 |
 | D5 | pointer presence（C2） | `PointerSnapshot` 增加 presence 标志；缺席时 hover 判定跳过，且不要求位置有限 | 用哨兵位置（如 NaN 或屏幕外）：会与 `PlatformFrame.hpp:918-920` 的有限性校验冲突，且每个消费者都要自己认哨兵 |
 | D6 | surface 重建（C3） | 新增一类 native binding 失效/重建事件，允许 RenderDevice 在同一 run 内重建 GPU 资源；`NativeWindowBindingChangedUnsupported` 保留给**真正不支持**的后端 | 把 Android 的 surface 循环压成 `suspended`：语义错误——GPU 资源确实丢了，画上去是未定义行为 |
@@ -79,12 +79,29 @@ Windows 上可以用多个 pointer 设备验证；无设备时至少 `PlatformFr
 资源已经消失后继续认为它们有效。因此需要新增一类失效/重建事件，并允许 RenderDevice 在同一 run 内重建
 资源。`NativeWindowBindingChangedUnsupported` 保留给真正不支持 rebind 的后端（GLFW 可以继续用它）。
 
-### 4. `run()` 保持阻塞（D3 推荐），代价记录在案
+### 4. D3 已定：外部驱动的 `start()`/`tick()`（2026-08-28，maintainer 选择备选方案）
 
-改成外部驱动的 `tick()` 会波及每个平台的 `EngineHost` 契约、`RunExitReason` 语义，以及 ADR 0014 建立在
-"`run()` 拥有循环"之上的四相位阻断。因此推荐让移动后端在内部适配：Android 在 `pollFrame()` 内取 looper
-事件；iOS 则需要 `CADisplayLink` 驱动一个 pump 而 `run()` 在其上等待。**这条如果选错，代价比其他五条
-加起来更大**，所以它是本 ADR 最需要 maintainer 明确的一项。
+本节原推荐「`run()` 保持阻塞，移动后端在内部适配」，理由是改动面小。**maintainer 选择了备选方案**，
+因为「内部适配」的代价并非表面那么小：iOS 上它需要引擎线程 + `CADisplayLink` 线程、每帧信号传递，以及
+把渲染提交 marshal 回主线程（`CAMetalLayer` 必须主线程访问）——而这恰好违背它本想保住的 C4（poll 线程 ==
+渲染线程），使 `EngineHost.cpp` 的错线程检查变成必须绕过的东西。外部驱动是零跨线程、零信号、零 marshal。
+
+实现方式**不是**替换 `run()`，而是把帧提取成可调用单元：
+
+- `tickOnce()` 是唯一帧函数体，`run()` 变为 `while` 封装。原循环 5 个 loop-local 变量收进
+  `m_frameLoop`，57 个 return 中 48 个本来就走 `stopNormally`/`failAfterStartupCommit`，其余 9 个是 lambda
+  体内的正常返回，**不是**循环出口——所以出口收敛比预估简单：`std::optional<Result<RunExitReason>>` 即可
+  表达「继续 / 终态」，无需新增 outcome 枚举。
+- `startUnchecked()` 从 `runUnchecked()` 拆出，公开为 `start()`；`tick()` 推进一帧。
+- 三条入口（`run`/`start`/`tick`）共用 `guardRunBoundary()`，因此异常→`Result` 与 teardown 完全一致；
+  `failUnexpectedRunException()` 改为返回裸 `Error` 以适配三种不同的 `Result` 类型。
+
+代价与原文预估的差异也记录在案：ADR 0014 的四相位阻断（`forEachDispatch` 四处）**不受影响**，它作用在
+一帧之内，与谁拥有循环无关；`RunExitReason` 语义未变；75 处 `run()` 调用点**零改动**，因为 `run()` 保留。
+`start()`/`run()` 互斥、`tick()` 需先 `start()`、终态后 `tick()` 拒绝，三条各有测试，且
+`ExternallyDrivenFramesMatchRunExactly` 逐事件比对两条路径。
+
+剩余的 iOS 工作因此收窄为后端本身：`CADisplayLink` 回调直接调 `tick()`，无需线程编排。
 
 ### 5. 立即执行的一件事：删除死的 `cmake/ShaderUtils.cmake`
 

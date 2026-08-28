@@ -637,6 +637,62 @@ class EngineHostImplementation final {
         }
     }
 
+    // Runs the startup transaction and leaves the host ready to be ticked. On success
+    // the game is committed and the next call must be tick(); on failure teardown has
+    // already happened, exactly as a failed run() leaves it.
+    [[nodiscard]] Core::Status startForExternalDriver(IGameApplication& gameApplication)
+    {
+        if (std::this_thread::get_id() != m_ownerThread)
+        {
+            return Core::failure(RuntimeErrorCode::WrongOwnerThread,
+                                 "EngineHost::start must execute on the thread that created the host");
+        }
+        if (m_lifecycleState != LifecycleState::Ready)
+        {
+            return Core::failure(RuntimeErrorCode::EngineRunAlreadyStarted,
+                                 "EngineHost::start may be called only once, and not after run()");
+        }
+        auto startup = guardRunBoundary(gameApplication, [&] { return startUnchecked(gameApplication); });
+        if (!startup)
+        {
+            return Core::failure(std::move(startup.error()));
+        }
+        m_externallyDriven = true;
+        return Core::success();
+    }
+
+    // One frame from an external driver. nullopt means the run continues; a value is
+    // final and teardown has already happened, matching run()'s result exactly.
+    [[nodiscard]] Core::Result<std::optional<RunExitReason>> tick(IGameApplication& gameApplication)
+    {
+        if (std::this_thread::get_id() != m_ownerThread)
+        {
+            return Core::failure(RuntimeErrorCode::WrongOwnerThread,
+                                 "EngineHost::tick must execute on the thread that created the host");
+        }
+        if (!m_externallyDriven || m_lifecycleState != LifecycleState::Running)
+        {
+            return Core::failure(RuntimeErrorCode::EngineRunAlreadyStarted,
+                                 "EngineHost::tick requires a successful start() and a run that has not ended");
+        }
+        auto outcome = guardRunBoundary(gameApplication, [&] {
+            std::optional<Core::Result<RunExitReason>> frame = tickOnce(gameApplication);
+            // Keep the two failure shapes distinct: a frame that simply continues is
+            // success-with-no-exit, not an error.
+            if (!frame.has_value())
+            {
+                return Core::Result<std::optional<RunExitReason>>{std::optional<RunExitReason>{}};
+            }
+            if (!*frame)
+            {
+                return Core::Result<std::optional<RunExitReason>>{
+                    Core::failure(std::move(frame->error()))};
+            }
+            return Core::Result<std::optional<RunExitReason>>{std::optional<RunExitReason>{**frame}};
+        });
+        return outcome;
+    }
+
     [[nodiscard]] Core::Result<RunExitReason> run(IGameApplication& gameApplication)
     {
         if (std::this_thread::get_id() != m_ownerThread)
@@ -649,28 +705,42 @@ class EngineHostImplementation final {
             return Core::failure(RuntimeErrorCode::EngineRunAlreadyStarted, "EngineHost::run may be called only once");
         }
 
-        try
-        {
-            return runUnchecked(gameApplication);
-        } catch (const std::bad_alloc&)
-        {
-            return failUnexpectedRunException(gameApplication,
-                                              boundaryException(Core::CoreErrorCode::OutOfMemory, "EngineHost::run"));
-        } catch (const std::exception& exception)
-        {
-            return failUnexpectedRunException(gameApplication,
-                                              boundaryException(RuntimeErrorCode::LifecycleInvariantViolation,
-                                                                "EngineHost::run", safeExceptionDetail(exception)));
-        } catch (...)
-        {
-            return failUnexpectedRunException(gameApplication,
-                                              boundaryException(RuntimeErrorCode::LifecycleInvariantViolation,
-                                                                "EngineHost::run", "non-standard exception"));
-        }
+        return guardRunBoundary(gameApplication, [&] { return runUnchecked(gameApplication); });
     }
 
   private:
-    [[nodiscard]] Core::Result<RunExitReason> runUnchecked(IGameApplication& gameApplication)
+    // Every entry point that can reach game code shares one boundary: an exception must
+    // become a Result and must not leave a half-torn-down host, whether the frame was
+    // reached through run() or through an external tick().
+    template <typename Body>
+    [[nodiscard]] auto guardRunBoundary(IGameApplication& gameApplication, Body&& body)
+        -> decltype(body())
+    {
+        using Outcome = decltype(body());
+        try
+        {
+            return std::forward<Body>(body)();
+        } catch (const std::bad_alloc&)
+        {
+            return Outcome{Core::failure(failUnexpectedRunException(
+                gameApplication, boundaryException(Core::CoreErrorCode::OutOfMemory, "EngineHost::run")))};
+        } catch (const std::exception& exception)
+        {
+            return Outcome{Core::failure(failUnexpectedRunException(
+                gameApplication, boundaryException(RuntimeErrorCode::LifecycleInvariantViolation, "EngineHost::run",
+                                                   safeExceptionDetail(exception))))};
+        } catch (...)
+        {
+            return Outcome{Core::failure(failUnexpectedRunException(
+                gameApplication, boundaryException(RuntimeErrorCode::LifecycleInvariantViolation, "EngineHost::run",
+                                                   "non-standard exception")))};
+        }
+    }
+    // The startup transaction, up to and including committing the first game state.
+    // Split from the frame loop so an external driver can start the host and then own
+    // the frame cadence (ADR 0032 D3). Failure teardown is unchanged: every path here
+    // still goes through failBeforeStartupCommit.
+    [[nodiscard]] Core::Status startUnchecked(IGameApplication& gameApplication)
     {
 
         m_lifecycleState = LifecycleState::Starting;
@@ -765,13 +835,47 @@ class EngineHostImplementation final {
         m_pendingCommands.clearAll();
         m_lifecycleState = LifecycleState::Running;
 
-        Core::MonotonicTimePoint previousFrameTime = m_modules.monotonicClock->now();
-        u64 frameIndex = 0;
-        u64 simulationTick = 0;
-        std::optional<Platform::PlatformFrameId> lastPlatformFrameId;
-        std::optional<u64> lastPlatformSourceSequence;
+        m_frameLoop = FrameLoopState{.previousFrameTime = m_modules.monotonicClock->now()};
+        return Core::success();
+    }
 
+    [[nodiscard]] Core::Result<RunExitReason> runUnchecked(IGameApplication& gameApplication)
+    {
+        if (Core::Status startup = startUnchecked(gameApplication); !startup)
+        {
+            // startUnchecked already ran the failure teardown for its own stage.
+            return Core::failure(std::move(startup.error()));
+        }
         for (;;)
+        {
+            std::optional<Core::Result<RunExitReason>> outcome = tickOnce(gameApplication);
+            if (outcome.has_value())
+            {
+                return std::move(*outcome);
+            }
+        }
+    }
+
+    // One frame. nullopt means the run continues; a value is the run's final result and
+    // its teardown has already happened inside this call.
+    //
+    // Split out of runUnchecked so the frame can be driven from outside the engine:
+    // iOS delivers frames through a CADisplayLink callback rather than letting the
+    // caller own a loop, and ADR 0032 D3 chose to make the driver external instead of
+    // inverting that inside the iOS backend, which would have needed a second thread
+    // plus a per-frame handoff and would have contradicted the poll-thread ==
+    // render-thread contract it was meant to preserve.
+    //
+    // The carried state lives in m_frameLoop and is aliased below so the body reads as
+    // the loop-local state it was: this extraction is deliberately byte-identical
+    // otherwise, so the existing suites are a real regression net for it.
+    [[nodiscard]] std::optional<Core::Result<RunExitReason>> tickOnce(IGameApplication& gameApplication)
+    {
+        Core::MonotonicTimePoint& previousFrameTime = m_frameLoop.previousFrameTime;
+        u64& frameIndex = m_frameLoop.frameIndex;
+        u64& simulationTick = m_frameLoop.simulationTick;
+        std::optional<Platform::PlatformFrameId>& lastPlatformFrameId = m_frameLoop.lastPlatformFrameId;
+        std::optional<u64>& lastPlatformSourceSequence = m_frameLoop.lastPlatformSourceSequence;
         {
             TINA_TRACE_ZONE("Runtime.Frame");
             auto pollResult =
@@ -1393,21 +1497,28 @@ class EngineHostImplementation final {
                                     RunStopCause::GameRequestedExitAfterCurrentFrame);
             }
         }
+        // The frame completed and the run continues.
+        return std::nullopt;
     }
 
-    [[nodiscard]] Core::Result<RunExitReason> failUnexpectedRunException(IGameApplication& gameApplication,
-                                                                         Core::Error error)
+    // Returns the bare Error so guardRunBoundary can put it into whichever Result the
+    // guarded body returns: run() yields RunExitReason, tick() yields optional<...>,
+    // start() yields void, and all three must report the same teardown.
+    [[nodiscard]] Core::Error failUnexpectedRunException(IGameApplication& gameApplication, Core::Error error)
     {
         if (!m_gameStateStack.empty())
         {
             stopCommittedGame(gameApplication, RunStopCause::RuntimeFailure, &error);
             m_lifecycleState = LifecycleState::Failed;
-            return Core::failure(std::move(error));
+            return error;
         }
-        return failBeforeStartupCommit(std::move(error));
+        Core::Status rolledBack = failBeforeStartupCommit(std::move(error));
+        return std::move(rolledBack.error());
     }
 
-    [[nodiscard]] Core::Result<RunExitReason> failBeforeStartupCommit(Core::Error error)
+    // Returns Status rather than Result<RunExitReason> because a startup rollback never
+    // produces an exit reason, and startUnchecked's callers want the plain failure.
+    [[nodiscard]] Core::Status failBeforeStartupCommit(Core::Error error)
     {
         error.addContext("EngineHost::run", "startup transaction was rolled back");
         m_lifecycleState = LifecycleState::Stopping;
@@ -1632,6 +1743,20 @@ class EngineHostImplementation final {
     std::unique_ptr<Render::ISubmissionCompletionLedger> m_submissionCompletionLedger{};
     Render::RenderFramePacket m_renderFramePacket{};
     LifecycleState m_lifecycleState = LifecycleState::Ready;
+    // Frame-loop carry state. Was local to the loop in runUnchecked; it has to survive
+    // between calls now that one frame is a callable unit (ADR 0032 D3). Reset once at
+    // the start of the run, then only advanced by tickOnce().
+    struct FrameLoopState final {
+        Core::MonotonicTimePoint previousFrameTime{};
+        u64 frameIndex = 0;
+        u64 simulationTick = 0;
+        std::optional<Platform::PlatformFrameId> lastPlatformFrameId{};
+        std::optional<u64> lastPlatformSourceSequence{};
+    };
+    FrameLoopState m_frameLoop{};
+    // Set once start() succeeds. Distinguishes an externally driven run from run(),
+    // which owns its own loop and must never be mixed with tick().
+    bool m_externallyDriven = false;
     std::optional<Integration::WindowSurfaceSnapshot> m_lastWindowSurface;
 
 #if defined(TINA_HAS_UI_UIA)
@@ -2084,6 +2209,16 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
 Core::Result<RunExitReason> EngineHost::run(IGameApplication& gameApplication) noexcept
 {
     return m_implementation->run(gameApplication);
+}
+
+Core::Status EngineHost::start(IGameApplication& gameApplication) noexcept
+{
+    return m_implementation->startForExternalDriver(gameApplication);
+}
+
+Core::Result<std::optional<RunExitReason>> EngineHost::tick(IGameApplication& gameApplication) noexcept
+{
+    return m_implementation->tick(gameApplication);
 }
 
 } // namespace Tina

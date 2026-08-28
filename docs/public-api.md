@@ -139,6 +139,10 @@ return host.value()->run(application);
 
 - 帧逻辑只写在 `IGameState` 相位里；Application 不做逐帧工作。
 - 优先 `Desktop::CreateEngine`；手写 `EngineCompositionFactories` 是测试/Headless/特殊集成的接线税。
+- 宿主不让调用方拥有主循环时（iOS 的 `CADisplayLink`、内嵌视口、外部主循环），改用
+  `start()` + 逐帧 `tick()`：`tick()` 返回 `nullopt` 表示继续，返回 `RunExitReason` 表示 run 已结束且
+  teardown 已完成。它与 `run()` 共用同一帧函数体，可观察行为一致；两者互斥，且都只能在创建线程调用。
+  详见 [Runtime](runtime.md) 的「外部驱动」。
 - 不取得 `IRenderDevice*`、不缓存 phase Context/writer/span 跨回调。
 - AssetSystem / Scene::World / ParticleSystem2D / Trail2D / Physics2D 由游戏 State（或样例）显式持有，
   不是 Host 内置模块。

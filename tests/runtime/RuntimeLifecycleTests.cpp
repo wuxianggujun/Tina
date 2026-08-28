@@ -4671,6 +4671,174 @@ TEST(EngineHostRunTest, FixedStepTimingCoversZeroOneAndMaximumFourStepsWithStabl
     }
 }
 
+// An externally driven run has to be indistinguishable from run(): iOS delivers frames
+// from a CADisplayLink callback rather than letting the caller own a loop, and ADR 0032
+// D3 chose to make the driver external instead of inverting that inside the iOS backend.
+// Both paths share one frame body, so the observable sequence must match exactly.
+TEST(EngineHostTickTest, ExternallyDrivenFramesMatchRunExactly)
+{
+    const auto driveWithRun = [] {
+        RuntimeProbe runtime;
+        runtime.frameDeltas = {Core::Duration::zero(), Core::Duration::zero(), Core::Duration::zero()};
+        GameProbe game;
+        game.runtime = &runtime;
+        game.exitOnFrame = 2;
+        ScriptedGameApplication application(game);
+        auto hostResult = createRuntimeHost(runtime);
+        EXPECT_TRUE(hostResult.has_value());
+        auto result = (*hostResult)->run(application);
+        EXPECT_TRUE(result.has_value());
+        return std::pair{std::move(runtime.events), game.shutdownCount};
+    };
+
+    const auto driveWithTick = [] {
+        RuntimeProbe runtime;
+        runtime.frameDeltas = {Core::Duration::zero(), Core::Duration::zero(), Core::Duration::zero()};
+        GameProbe game;
+        game.runtime = &runtime;
+        game.exitOnFrame = 2;
+        ScriptedGameApplication application(game);
+        auto hostResult = createRuntimeHost(runtime);
+        EXPECT_TRUE(hostResult.has_value());
+
+        EXPECT_TRUE((*hostResult)->start(application).has_value());
+        std::optional<RunExitReason> exitReason;
+        // Bounded so a tick that never reports an end fails the test rather than hanging.
+        for (int attempt = 0; attempt < 16 && !exitReason.has_value(); ++attempt)
+        {
+            auto frame = (*hostResult)->tick(application);
+            EXPECT_TRUE(frame.has_value());
+            if (!frame)
+            {
+                break;
+            }
+            exitReason = *frame;
+        }
+        EXPECT_TRUE(exitReason.has_value());
+        if (exitReason.has_value())
+        {
+            EXPECT_EQ(*exitReason, RunExitReason::GameRequestedExitAfterCurrentFrame);
+        }
+        return std::pair{std::move(runtime.events), game.shutdownCount};
+    };
+
+    const auto [runEvents, runShutdowns] = driveWithRun();
+    const auto [tickEvents, tickShutdowns] = driveWithTick();
+    EXPECT_EQ(tickEvents, runEvents)
+        << "the external driver produced a different frame sequence than run()";
+    EXPECT_EQ(tickShutdowns, runShutdowns);
+    EXPECT_EQ(tickShutdowns, 1U);
+}
+
+// Teardown happens inside the tick that reports the exit, so a later tick has nothing
+// left to drive. Returning success there would let a driver keep calling into a host
+// whose modules are already shut down.
+TEST(EngineHostTickTest, TickAfterTheRunEndedIsRefused)
+{
+    RuntimeProbe runtime;
+    runtime.frameDeltas = {Core::Duration::zero()};
+    GameProbe game;
+    game.runtime = &runtime;
+    game.exitOnFrame = 0;
+    ScriptedGameApplication application(game);
+    auto hostResult = createRuntimeHost(runtime);
+    ASSERT_TRUE(hostResult.has_value());
+
+    ASSERT_TRUE((*hostResult)->start(application).has_value());
+    auto first = (*hostResult)->tick(application);
+    ASSERT_TRUE(first.has_value());
+    ASSERT_TRUE(first->has_value());
+    const std::size_t eventCountAtExit = runtime.events.size();
+
+    auto afterExit = (*hostResult)->tick(application);
+    ASSERT_FALSE(afterExit.has_value());
+    EXPECT_EQ(afterExit.error().code, RuntimeErrorCode::EngineRunAlreadyStarted);
+    EXPECT_EQ(runtime.events.size(), eventCountAtExit) << "a refused tick still ran a frame";
+    EXPECT_EQ(game.shutdownCount, 1U) << "a refused tick shut the game down a second time";
+}
+
+// start() and run() both consume the single-run budget, in either order: mixing them
+// would mean two owners of the frame cadence.
+TEST(EngineHostTickTest, StartAndRunAreMutuallyExclusive)
+{
+    {
+        RuntimeProbe runtime;
+        runtime.frameDeltas = {Core::Duration::zero()};
+        GameProbe game;
+        game.runtime = &runtime;
+        game.exitOnFrame = 0;
+        ScriptedGameApplication application(game);
+        auto hostResult = createRuntimeHost(runtime);
+        ASSERT_TRUE(hostResult.has_value());
+
+        ASSERT_TRUE((*hostResult)->start(application).has_value());
+        auto run = (*hostResult)->run(application);
+        ASSERT_FALSE(run.has_value());
+        EXPECT_EQ(run.error().code, RuntimeErrorCode::EngineRunAlreadyStarted);
+        // Drain so the host tears down through its normal path.
+        auto frame = (*hostResult)->tick(application);
+        ASSERT_TRUE(frame.has_value());
+        EXPECT_TRUE(frame->has_value());
+    }
+    {
+        RuntimeProbe runtime;
+        runtime.frameDeltas = {Core::Duration::zero()};
+        GameProbe game;
+        game.runtime = &runtime;
+        game.exitOnFrame = 0;
+        ScriptedGameApplication application(game);
+        auto hostResult = createRuntimeHost(runtime);
+        ASSERT_TRUE(hostResult.has_value());
+
+        ASSERT_TRUE((*hostResult)->run(application).has_value());
+        auto start = (*hostResult)->start(application);
+        ASSERT_FALSE(start.has_value());
+        EXPECT_EQ(start.error().code, RuntimeErrorCode::EngineRunAlreadyStarted);
+    }
+}
+
+// tick() without a successful start() must not run a frame: the startup transaction is
+// what commits the first game state, and ticking without it would drive an empty stack.
+TEST(EngineHostTickTest, TickWithoutStartIsRefused)
+{
+    RuntimeProbe runtime;
+    GameProbe game;
+    game.runtime = &runtime;
+    ScriptedGameApplication application(game);
+    auto hostResult = createRuntimeHost(runtime);
+    ASSERT_TRUE(hostResult.has_value());
+
+    auto frame = (*hostResult)->tick(application);
+    ASSERT_FALSE(frame.has_value());
+    EXPECT_EQ(frame.error().code, RuntimeErrorCode::EngineRunAlreadyStarted);
+    EXPECT_FALSE(containsEvent(runtime.events, "game.create"));
+    EXPECT_EQ(game.shutdownCount, 0U);
+}
+
+// A failed startup rolls back exactly as it does under run(), and leaves the budget
+// consumed so a driver cannot retry into a torn-down host.
+TEST(EngineHostTickTest, StartupFailureRollsBackAndConsumesTheAttempt)
+{
+    RuntimeProbe runtime;
+    GameProbe game;
+    game.runtime = &runtime;
+    game.startupMode = StartupMode::ReturnError;
+    ScriptedGameApplication application(game);
+    auto hostResult = createRuntimeHost(runtime);
+    ASSERT_TRUE(hostResult.has_value());
+
+    auto start = (*hostResult)->start(application);
+    ASSERT_FALSE(start.has_value());
+    EXPECT_TRUE(containsEvent(runtime.events, "render.shutdown"));
+    EXPECT_TRUE(containsEvent(runtime.events, "task.shutdown"));
+    EXPECT_TRUE(containsEvent(runtime.events, "platform.shutdown"));
+    EXPECT_EQ(game.shutdownCount, 0U);
+
+    auto frame = (*hostResult)->tick(application);
+    ASSERT_FALSE(frame.has_value());
+    EXPECT_EQ(frame.error().code, RuntimeErrorCode::EngineRunAlreadyStarted);
+}
+
 TEST(EngineHostRunTest, RunCanOnlyBeStartedOnce)
 {
     RuntimeProbe runtime;

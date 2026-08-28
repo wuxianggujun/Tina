@@ -5,7 +5,8 @@
 
 ## 当前结论
 
-- `EngineHost` 是唯一非全局组合根；`run()` 只能在创建线程调用一次。
+- `EngineHost` 是唯一非全局组合根；`run()` 只能在创建线程调用一次。外部驱动的 `start()`/`tick()` 是它的
+  等价替代（同一帧函数体），二者互斥，见下文「外部驱动」。
 - `EngineConfig::shadowMapExtents` 在任何 module factory 前校验，并一次性传播到 independent 或
   WindowSurface `RenderDeviceCreateParams`；设备生命周期内不可热改。`renderDrawCallCapacity` 与
   `renderMsaaSamples` 同样是 device-lifetime。唯一例外是 `renderVsync`：它只给设备播种，之后由栈顶
@@ -70,6 +71,28 @@ budget 的 move-only component transaction。底层事务由 Runtime capability 
 
 候选 State 在提交前失败时直接销毁，不调用其 `onExit()`，也不调用 Application `onShutdown()`。
 提交后，无论正常退出还是 Runtime 失败，State `onExit()` 与 Application `onShutdown()` 各执行一次。
+
+## 外部驱动：`start()` + `tick()`
+
+`run()` 拥有循环，适合桌面；但 iOS 由 `CADisplayLink` 回调交付帧，形态相反。[ADR 0032](adr/0032-mobile-platform-contract-boundaries.md)
+的 D3 选择把帧驱动权交给调用方，而不是在 iOS 后端内部倒转（那需要第二个线程、每帧信号传递，以及把渲染
+提交 marshal 回主线程——反而违背它要保住的「poll 线程 == 渲染线程」契约）。
+
+`start()` 执行上面那份启动事务并提交首个 State，随后 `tick()` 推进恰好一帧：
+
+```text
+start(app)                    -> Status，失败即已回滚（与 run() 的 startup 失败同路径）
+tick(app) -> nullopt          -> 这一帧结束，run 继续
+tick(app) -> RunExitReason    -> run 已结束，teardown 已在该次调用内完成
+tick(app) -> failure          -> 同上，失败终态
+```
+
+两条路径共用同一帧函数体（`tickOnce()`），因此可观察序列完全一致，
+`EngineHostTickTest.ExternallyDrivenFramesMatchRunExactly` 逐事件比对二者。
+
+约束：`start()` 与 `run()` 互斥（任一方消耗唯一一次 run 预算，顺序无关）；`tick()` 必须在 `start()` 成功后
+调用；报出 exit 或 failure 之后的 `tick()` 一律拒绝——teardown 已发生，继续调用等于驱动一个已关闭模块的
+Host。全部调用必须在创建线程上。
 
 ## 当前帧顺序
 
