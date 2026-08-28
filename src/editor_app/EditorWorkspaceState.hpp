@@ -2201,6 +2201,10 @@ enum class EditorCommand : u32 {
     NodeToggleSpriteAnimationAutoPlay,
     NodeTogglePhysicsBodyEnabled,
     NodeTogglePhysicsShapeEnabled,
+    NodeTogglePhysicsShapeSensor,
+    NodeTogglePhysicsShapeSensorEvents,
+    NodeTogglePhysicsShapeContactEvents,
+    NodeTogglePhysicsShapeHitEvents,
     NodeToggleMeshVisible,
     NodeAssignSprite,
     NodePickSpriteAsset,
@@ -5001,9 +5005,12 @@ class EditorWorkspaceState final : public Tina::IGameState {
         UI::UINodeId resourceLabel{};
         UI::UINodeId resourceAssignButton{};
         // Collision Shape is the widest group at 10 values (kind, half extent XY,
-        // radius, center XY, angle, density, friction, restitution).
+        // radius, center XY, angle, density, friction, restitution) plus four
+        // event-related toggles.
         std::array<UI::UINodeId, 12> fields{};
         Tina::Core::usize fieldCount = 0;
+        std::array<UI::UINodeId, 4> toggles{};
+        Tina::Core::usize toggleCount = 0;
     };
     // Rendering, Camera, Light, Occlusion, Animation, Physics body, Physics
     // shape, Resource, and 3D Rendering.

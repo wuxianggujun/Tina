@@ -25,6 +25,11 @@ struct InspectorNodePropertyFieldRow final {
     float axisLabelWidth = 0.0F;
 };
 
+struct InspectorNodePropertyToggleRow final {
+    std::string_view caption{};
+    std::string_view accessibleName{};
+};
+
 [[nodiscard]] constexpr UI::UITheme makeEditorProductTheme() noexcept
 {
     UI::UITheme theme = UI::makeModernDesktopTheme(
@@ -2447,7 +2452,9 @@ auto EditorWorkspaceState::buildInspectorUi(
             std::span<const InspectorNodePropertyFieldRow> fieldRows,
             bool withAssign,
             bool withSpriteExtras = false,
-            bool withPointLightColor = false) -> Tina::Core::Status {
+            bool withPointLightColor = false,
+            std::span<const InspectorNodePropertyToggleRow> toggleRows = {})
+            -> Tina::Core::Status {
         section.rootLayout.size.width = UI::UILayoutLength::Percent(100.0F);
         section.rootLayout.flexItem.shrink = 0.0F;
         section.rootLayout.flexContainer.direction =
@@ -2737,6 +2744,37 @@ auto EditorWorkspaceState::buildInspectorUi(
                 section.fields[section.fieldCount++] = *inputNode;
             }
         }
+        section.toggleCount = 0U;
+        for (const InspectorNodePropertyToggleRow& toggleRow : toggleRows) {
+            UI::UILayoutStyle toggleRowLayout = fillWidth(
+                ui.productTheme.controls.buttonHeight);
+            toggleRowLayout.flexItem.shrink = 0.0F;
+            toggleRowLayout.flexContainer.direction = UI::UIFlexDirection::Row;
+            toggleRowLayout.flexContainer.alignItems =
+                UI::UIAxisAlignment::Center;
+            toggleRowLayout.flexContainer.gap.column =
+                ui.productTheme.spacing.space4;
+            auto toggleRowNode = ui.createPanel(
+                section.collapsible.content, toggleRowLayout);
+            if (!toggleRowNode) {
+                return Tina::Core::failure(std::move(toggleRowNode.error()));
+            }
+            auto label = ui.createLabel(*toggleRowNode, toggleRow.caption,
+                                        growingRegion(), ui.secondaryText);
+            if (!label) {
+                return Tina::Core::failure(std::move(label.error()));
+            }
+            UI::UIElementDescriptor toggle = UI::makeSwitchElement({
+                .accessibleName = toggleRow.accessibleName,
+                .size = UI::UISwitchSize::Compact,
+            });
+            toggle.enabled = false;
+            auto toggleNode = ui.tree.createElement(*toggleRowNode, toggle);
+            if (!toggleNode) {
+                return Tina::Core::failure(std::move(toggleNode.error()));
+            }
+            section.toggles[section.toggleCount++] = *toggleNode;
+        }
         return Tina::Core::success();
     };
     {
@@ -2846,7 +2884,15 @@ auto EditorWorkspaceState::buildInspectorUi(
         }};
         if (auto status = createNodePropertySection(
                 nodePropertySections_[6], "Collision Shape", "Enabled",
-                physicsShapeFields, false);
+                physicsShapeFields, false, false, false,
+                std::array<InspectorNodePropertyToggleRow, 4>{{
+                    {.caption = "Sensor", .accessibleName = "Collision sensor"},
+                    {.caption = "Sensor Events",
+                     .accessibleName = "Collision sensor events"},
+                    {.caption = "Contact Events",
+                     .accessibleName = "Collision contact events"},
+                    {.caption = "Hit Events", .accessibleName = "Collision hit events"},
+                }});
             !status) {
             return status;
         }
@@ -4915,6 +4961,28 @@ auto EditorWorkspaceState::registerUiCallbacks(
             {spriteFlipYSwitch_, EditorCommand::NodeToggleSpriteFlipY},
         }};
         for (const auto& [toggle, command] : flipToggles) {
+            if (auto status = ui.tree.setCheckboxAction(
+                    toggle,
+                    UI::UIButtonActionCallback{
+                        [this, command](const UI::UIButtonActionEvent&) noexcept {
+                            queueEditorCommand(command);
+                        }});
+                !status) {
+                return status;
+            }
+        }
+        const std::array<std::pair<UI::UINodeId, EditorCommand>, 4>
+            physicsShapeToggles{{
+                {nodePropertySections_[6].toggles[0],
+                 EditorCommand::NodeTogglePhysicsShapeSensor},
+                {nodePropertySections_[6].toggles[1],
+                 EditorCommand::NodeTogglePhysicsShapeSensorEvents},
+                {nodePropertySections_[6].toggles[2],
+                 EditorCommand::NodeTogglePhysicsShapeContactEvents},
+                {nodePropertySections_[6].toggles[3],
+                 EditorCommand::NodeTogglePhysicsShapeHitEvents},
+            }};
+        for (const auto& [toggle, command] : physicsShapeToggles) {
             if (auto status = ui.tree.setCheckboxAction(
                     toggle,
                     UI::UIButtonActionCallback{

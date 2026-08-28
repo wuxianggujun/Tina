@@ -568,6 +568,47 @@ auto EditorWorkspaceState::runNodePropertyCommand(
         propertyGroupName = "Physics shape enabled";
         break;
     }
+    case EditorCommand::NodeTogglePhysicsShapeSensor:
+    case EditorCommand::NodeTogglePhysicsShapeSensorEvents:
+    case EditorCommand::NodeTogglePhysicsShapeContactEvents:
+    case EditorCommand::NodeTogglePhysicsShapeHitEvents: {
+        auto primary = primaryWorld2DEntity();
+        if (!primary) {
+            result = Tina::Core::failure(std::move(primary.error()));
+            break;
+        }
+        if (!primary->physicsShape) {
+            result = Tina::Core::failure(
+                Tina::Editor::EditorErrorCode::NodePropertyUnavailable,
+                "Toggle requires a CollisionShape2D selection");
+            break;
+        }
+        Tina::Editor::World2DPhysicsShapeNodeProperties input{};
+        switch (command) {
+        case EditorCommand::NodeTogglePhysicsShapeSensor:
+            input.sensor = !primary->physicsShape->sensor;
+            propertyGroupName = "Physics shape sensor";
+            break;
+        case EditorCommand::NodeTogglePhysicsShapeSensorEvents:
+            input.sensorEvents = !primary->physicsShape->sensorEvents;
+            propertyGroupName = "Physics shape sensor events";
+            break;
+        case EditorCommand::NodeTogglePhysicsShapeContactEvents:
+            input.contactEvents = !primary->physicsShape->contactEvents;
+            propertyGroupName = "Physics shape contact events";
+            break;
+        case EditorCommand::NodeTogglePhysicsShapeHitEvents:
+            input.hitEvents = !primary->physicsShape->hitEvents;
+            propertyGroupName = "Physics shape hit events";
+            break;
+        default:
+            break;
+        }
+        result = Tina::Editor::applyWorld2DPhysicsShapeNodeProperties(
+            document_, ids, input);
+        successVerb = "toggled";
+        break;
+    }
     case EditorCommand::NodeApplyAnimationProperties: {
         const auto& section = nodePropertySections_[4];
         auto clipText = tree.text(section.fields[0]);
@@ -1034,6 +1075,16 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                 return status;
             }
         }
+        for (Tina::Core::usize index = 0; index < section.toggleCount; ++index) {
+            if (auto status = tree.setChecked(section.toggles[index], false);
+                !status) {
+                return status;
+            }
+            if (auto status = tree.setEnabled(section.toggles[index], false);
+                !status) {
+                return status;
+            }
+        }
         if (section.resourceAssignButton.hasValue()) {
             if (auto status = tree.setEnabled(section.resourceAssignButton, false); !status) {
                 return status;
@@ -1261,6 +1312,14 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
             for (Tina::Core::usize index = 0; index < section.fieldCount;
                  ++index) {
                 if (auto status = tree.setEnabled(section.fields[index],
+                                                  fieldsEditable);
+                    !status) {
+                    return status;
+                }
+            }
+            for (Tina::Core::usize index = 0; index < section.toggleCount;
+                 ++index) {
+                if (auto status = tree.setEnabled(section.toggles[index],
                                                   fieldsEditable);
                     !status) {
                     return status;
@@ -1815,6 +1874,28 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                      status && index < values.size(); ++index) {
                     status = setNumberField(index + 1U, values[index].second,
                                             values[index].first);
+                }
+                if (status) {
+                    const std::array<std::pair<bool, bool>, 4> eventValues{{
+                        {shape.sensor, mixedBool([](const auto& e) {
+                             return e.physicsShape->sensor;
+                         })},
+                        {shape.sensorEvents, mixedBool([](const auto& e) {
+                             return e.physicsShape->sensorEvents;
+                         })},
+                        {shape.contactEvents, mixedBool([](const auto& e) {
+                             return e.physicsShape->contactEvents;
+                         })},
+                        {shape.hitEvents, mixedBool([](const auto& e) {
+                             return e.physicsShape->hitEvents;
+                         })},
+                    }};
+                    for (Tina::Core::usize index = 0;
+                         status && index < eventValues.size(); ++index) {
+                        status = tree.setChecked(
+                            section.toggles[index],
+                            eventValues[index].first && !eventValues[index].second);
+                    }
                 }
                 break;
             }

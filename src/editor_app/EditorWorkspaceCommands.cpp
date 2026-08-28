@@ -1366,6 +1366,10 @@ auto EditorWorkspaceState::executeEditorCommand(Tina::PrimaryWindowUITreeUpdater
     case EditorCommand::NodeToggleSpriteAnimationAutoPlay:
     case EditorCommand::NodeTogglePhysicsBodyEnabled:
     case EditorCommand::NodeTogglePhysicsShapeEnabled:
+    case EditorCommand::NodeTogglePhysicsShapeSensor:
+    case EditorCommand::NodeTogglePhysicsShapeSensorEvents:
+    case EditorCommand::NodeTogglePhysicsShapeContactEvents:
+    case EditorCommand::NodeTogglePhysicsShapeHitEvents:
     case EditorCommand::NodeToggleMeshVisible:
     case EditorCommand::NodeToggleResourceActive:
     case EditorCommand::NodeAssignResource:

@@ -168,10 +168,10 @@ settings 写入失败只出 Snackbar warning，不影响 authoring。
 **已落地范围**：
 
 - World2D current schema 已包含 Physics body/shape payload，Node registry 提供 `StaticBody2D`、`RigidBody2D`、`CharacterBody2D`、`Area2D` 与 `CollisionShape2D`。
-- Inspector 按 Node kind 发布 Physics Body 与 Collision Shape 分组，可编辑速度、阻尼、重力倍率、Enabled，以及 Box/Circle/Capsule 的尺寸、密度、摩擦和恢复系数；多选显示 `Mixed`，一次 Apply 最多发布一条 `replace()` revision。
+- Inspector 按 Node kind 发布 Physics Body 与 Collision Shape 分组，可编辑速度、阻尼、重力倍率、Enabled，以及 Box/Circle/Capsule 的尺寸、local center/angle、密度、摩擦、恢复系数和 `Sensor` / `Sensor Events` / `Contact Events` / `Hit Events` 开关；多选显示 `Mixed`，一次 Apply 最多发布一条 `replace()` revision。
 - `EditorNodePropertyOperations` 对类型不匹配、非法/非有限值和不适用的形状参数 fail-closed；Undo/dirty 继续复用现有 document revision 流程。Runtime Physics2D 仍由 game-owned instantiate 路径消费，Editor 不直接持有 `PhysicsWorld2D`。
 
-**后续范围**：不做关节 authoring、不做物理模拟预览（PlaySession 仍是渲染 preview）；Polygon/Chain、sensor/events、local center/angle 与 viewport outline 待独立切片，并在对应 schema/runtime/测试闭环后更新证据。
+**后续范围**：不做关节 authoring、不做物理模拟预览（PlaySession 仍是渲染 preview）；Polygon/Chain 与 viewport outline/gizmo 尺寸联动待独立切片，并在对应 schema/runtime/测试闭环后更新证据。
 
 ### E7 FX2D 面板（P1）
 

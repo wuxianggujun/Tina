@@ -179,7 +179,11 @@ TEST(EditorNodePropertyOperationsTests, PhysicsShapePropertiesValidateAndPublish
          .radius = 2.0F,
          .density = 2.5F,
          .friction = 0.2F,
-         .restitution = 0.75F});
+         .restitution = 0.75F,
+         .sensor = true,
+         .sensorEvents = true,
+         .contactEvents = false,
+         .hitEvents = true});
     ASSERT_TRUE(edited) << edited.error().message;
     const auto entities = world2DEntities(document);
     const auto shape = std::find_if(
@@ -194,6 +198,50 @@ TEST(EditorNodePropertyOperationsTests, PhysicsShapePropertiesValidateAndPublish
     EXPECT_FLOAT_EQ(shape->physicsShape->density, 2.5F);
     EXPECT_FLOAT_EQ(shape->physicsShape->friction, 0.2F);
     EXPECT_FLOAT_EQ(shape->physicsShape->restitution, 0.75F);
+    EXPECT_TRUE(shape->physicsShape->sensor);
+    EXPECT_TRUE(shape->physicsShape->sensorEvents);
+    EXPECT_FALSE(shape->physicsShape->contactEvents);
+    EXPECT_TRUE(shape->physicsShape->hitEvents);
+}
+
+TEST(EditorNodePropertyOperationsTests,
+     PhysicsShapeEventFlagsPublishOneRevisionForMultiSelection)
+{
+    auto document = createWorld2D();
+    auto body = addWorld2DNode(document, World2DNodeTemplate::StaticBody2D);
+    ASSERT_TRUE(body) << body.error().message;
+    auto first = addWorld2DNode(
+        document, World2DNodeTemplate::CollisionShape2D, body->primaryStableId);
+    auto second = addWorld2DNode(
+        document, World2DNodeTemplate::CollisionShape2D, body->primaryStableId);
+    ASSERT_TRUE(first) << first.error().message;
+    ASSERT_TRUE(second) << second.error().message;
+    const std::array ids{first->primaryStableId, second->primaryStableId};
+    const Core::u64 revision = document.revision();
+
+    auto edited = applyWorld2DPhysicsShapeNodeProperties(
+        document, ids,
+        {.sensor = true,
+         .sensorEvents = true,
+         .contactEvents = false,
+         .hitEvents = true});
+    ASSERT_TRUE(edited) << edited.error().message;
+    EXPECT_EQ(edited->affectedItemCount, 2U);
+    EXPECT_EQ(document.revision(), revision + 1U);
+
+    const auto entities = world2DEntities(document);
+    for (const Core::u32 id : ids) {
+        const auto shape = std::find_if(
+            entities.begin(), entities.end(), [id](const auto& entity) {
+                return entity.stableEntityId == id;
+            });
+        ASSERT_NE(shape, entities.end());
+        ASSERT_TRUE(shape->physicsShape.has_value());
+        EXPECT_TRUE(shape->physicsShape->sensor);
+        EXPECT_TRUE(shape->physicsShape->sensorEvents);
+        EXPECT_FALSE(shape->physicsShape->contactEvents);
+        EXPECT_TRUE(shape->physicsShape->hitEvents);
+    }
 }
 
 TEST(EditorNodePropertyOperationsTests, PhysicsPropertiesRejectInvalidValues)

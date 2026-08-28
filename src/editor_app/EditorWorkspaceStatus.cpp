@@ -1601,6 +1601,12 @@ auto EditorWorkspaceState::refreshPlaySessionUi(
                 return status;
             }
         }
+        for (Tina::Core::usize index = 0; index < section.toggleCount; ++index) {
+            if (auto status = tree.setEnabled(section.toggles[index], false);
+                !status) {
+                return status;
+            }
+        }
     }
     return Tina::Core::success();
 }

@@ -42,7 +42,8 @@ Rendering，`Camera2D` 发布 Camera，`PointLight2D` 发布 Light，`ShadowOccl
 `Mesh3D` 发布 Rendering。每个可见区段只包含属性行与
 `visible/active/autoPlay` Compact switch，不存在 Apply 按钮、Components Header、Add Component、Remove Component 或兼容菜单。
 Rendering 额外提供 Sprite tint `Color`、`Flip X`/`Flip Y` switch 与 `UV Min`/`UV Max`，Collision Shape 额外提供
-local `Center X/Y` 与 `Angle deg`（度输入，radians 存储）。`UV Min/Max` 授权 `World2DSpriteOverrideFlags::UvRect`：
+local `Center X/Y`、`Angle deg`（度输入，radians 存储）以及 `Sensor`、`Sensor Events`、`Contact Events`、`Hit Events`
+switch。`UV Min/Max` 授权 `World2DSpriteOverrideFlags::UvRect`：
 填写任一分量即置位该 override，并要求 `0 <= u0 < u1 <= 1`、`0 <= v0 < v1 <= 1`，非法值保持 document 字节不变。
 这是把一张 spritesheet 切给多个节点的唯一入口——runtime 与 wire format 一直支持该字段，此前只是没有 authoring UI。
 
@@ -93,8 +94,9 @@ TileMap Inspector 已提供固定容量 Tile Palette：数据来自当前 reside
 document revision，且无 Tileset 时 Paint 控件禁用。Editor 私有 settings carrier 已接入启动读取和退出原子写入，保存
 SplitView fraction/可见性、Bottom Panel、Layout Debugger 可见性与 snap enabled；主题和 snap 步长 Preferences UI 尚未承诺完成。Recent Projects
 在统一 Catalog switch 提交点记录最近 10 个 project root，并在 Start Center 以固定按钮行呈现；无效路径从列表移除。
-本批新增 Physics Inspector 定向单测；本次定向验证为 `tina_editor_tests` 116/116、
-`tina_editor_app_tests` 23/23。既有 `tina_sample_2d --frames=300 --frame-delay-ms=0` 与
+本批新增 Physics Inspector 定向单测；本次定向验证为
+`tina_editor_tests --gtest_filter=EditorNodePropertyOperationsTests.*` 13/13、
+`tina_editor_app_tests` 23/23，`tina_editor_desktop` 编译成功。既有 `tina_sample_2d --frames=300 --frame-delay-ms=0` 与
 `tina_sample_3d --frames=30 --frame-delay-ms=0` `status=ok` 证据未因本切片重跑。跨重启 settings、
 TileMap 多次选择/绘制、Recent Projects 失效移除及文件对话框重复打开仍需人工验收。
 
