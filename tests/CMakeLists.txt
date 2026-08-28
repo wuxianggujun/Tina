@@ -85,6 +85,7 @@ set(TINA_RUNTIME_TEST_SOURCES
     runtime/header_isolation/PlatformEventsHeader.cpp
     runtime/header_isolation/PrimaryWindowUIHeader.cpp
     runtime/header_isolation/WindowSurfaceIntegrationHeader.cpp
+    runtime/EngineConfigValidationTests.cpp
     runtime/InputActionTests.cpp
     runtime/Sample2DAudioControlStateTests.cpp
     runtime/Sample2DTileSelectionTests.cpp
