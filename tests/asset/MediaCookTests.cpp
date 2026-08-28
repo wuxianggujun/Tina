@@ -188,6 +188,82 @@ TEST_F(MediaCookTests, DistinctImagePathsNeverShareAnAssetId)
     EXPECT_EQ(seen.size(), locators.size());
 }
 
+// Cross-unit corpus: one importer's outputs must not collide with another's for the
+// same locator. Media and glTF share one derivation function, and two role-tag
+// values are reused across them -- TextureMedia and the glTF metallic-roughness
+// texture are both 0x75, AudioMedia and the glTF animation clip are both 0x77.
+// Since the tag is also the leading byte of the AssetId, those pairs are separated
+// only by the remaining hash inputs (AssetKind for the 0x77 pair, channel for the
+// 0x75 pair, where both sides are Texture2D). Media's own two tags differ, so
+// texture-vs-audio was never the fragile case; the reuse against glTF is.
+TEST_F(MediaCookTests, MediaIdsDoNotCollideWithGltfOutputsSharingTheirRoleTag)
+{
+    cacheRootUtf8();
+
+    // Same locator, cooked as each media kind: distinct because the tags differ.
+    const auto pngPath = writeSource("shared/name.png", tinyPngBytes());
+    const auto wavPath = writeSource("shared/name.wav", tinyWavBytes());
+    auto texture = cookTextureFileToCatalogSourceResult(
+        pngPath, AssetFormat::TargetPlatform::WindowsX64, captureConfig());
+    ASSERT_TRUE(texture) << texture.error().message;
+    ASSERT_EQ(texture->request.assets.size(), 1U);
+    auto audio = cookAudioFileToCatalogSourceResult(
+        wavPath, AssetFormat::TargetPlatform::WindowsX64, captureConfig());
+    ASSERT_TRUE(audio) << audio.error().message;
+    ASSERT_EQ(audio->request.assets.size(), 1U);
+    EXPECT_NE(texture->request.assets.front().assetId, audio->request.assets.front().assetId);
+
+    // The identity must also survive being reached by the two public entry points on
+    // a byte-for-byte identical locator, which the cook path cannot express because
+    // the extension is part of the locator. The glTF side of the tag reuse is pinned
+    // in GltfCookTests, which can reach that cooker; here the point is that the media
+    // derivation is a pure function of (locator, kind) and never of call order.
+    constexpr std::string_view locator = "shared/name";
+    const auto mediaTexture = deriveTextureMediaAssetId(locator);
+    const auto mediaAudio = deriveAudioMediaAssetId(locator);
+    ASSERT_TRUE(mediaTexture) << mediaTexture.error().message;
+    ASSERT_TRUE(mediaAudio) << mediaAudio.error().message;
+    EXPECT_NE(*mediaTexture, *mediaAudio)
+        << "one locator produced the same id for both media kinds";
+
+    // Stable across repeated calls: a project reopened later must resolve the same
+    // ids, so the derivation cannot depend on anything but its inputs.
+    const auto textureAgain = deriveTextureMediaAssetId(locator);
+    const auto audioAgain = deriveAudioMediaAssetId(locator);
+    ASSERT_TRUE(textureAgain) << textureAgain.error().message;
+    ASSERT_TRUE(audioAgain) << audioAgain.error().message;
+    EXPECT_EQ(*mediaTexture, *textureAgain);
+    EXPECT_EQ(*mediaAudio, *audioAgain);
+}
+
+// Long locators must stay distinct where they differ only past the point a fixed
+// buffer would cut. A derivation that hashed a truncated prefix would return the
+// same id for both, and the collision would surface only on deep project trees --
+// the ones least likely to appear in a fixture.
+//
+// Exercised through the derivation entry point rather than by cooking real files:
+// a locator long enough to be interesting exceeds Windows MAX_PATH for the fixture
+// root, so a file-based version would only ever prove that the filesystem refused
+// the path. Locator length is what the derivation consumes, and the source-import
+// limit (MaxPathBytes) allows locators far longer than MAX_PATH permits on disk.
+TEST_F(MediaCookTests, LongLocatorsDifferingOnlyNearTheEndStayDistinct)
+{
+    const std::string prefix = "textures/" + std::string(240, 'p') + "/asset_name_";
+    const auto left = deriveTextureMediaAssetId(prefix + "a.png");
+    const auto right = deriveTextureMediaAssetId(prefix + "b.png");
+    ASSERT_TRUE(left) << left.error().message;
+    ASSERT_TRUE(right) << right.error().message;
+    EXPECT_NE(*left, *right)
+        << "two long locators differing only near the end collided; the derivation "
+           "is hashing a truncated prefix";
+
+    // The same locator must also be stable, so the inequality above is a real
+    // difference rather than the derivation returning something unrepeatable.
+    const auto repeated = deriveTextureMediaAssetId(prefix + "a.png");
+    ASSERT_TRUE(repeated) << repeated.error().message;
+    EXPECT_EQ(*left, *repeated);
+}
+
 TEST_F(MediaCookTests, WavCooksAudioClipAndRejectsNonWavBytes)
 {
     cacheRootUtf8();

@@ -1,6 +1,9 @@
 #include <tina/asset/CatalogCook.hpp>
 #include <tina/asset/CatalogPackage.hpp>
 #include <tina/asset/GltfCook.hpp>
+// For the cross-importer identity check: glTF and media outputs share role-tag
+// values, so their ids have to be compared against each other somewhere.
+#include <tina/asset/MediaCook.hpp>
 #include <tina/asset_format/AnimationClip3DPayload.hpp>
 #include <tina/asset_format/MaterialPayload.hpp>
 #include <tina/asset_format/PrefabPayload.hpp>
@@ -542,6 +545,81 @@ TEST(GltfCookTests, VersionedDefaultIdsUseCanonicalLocatorAndAvoidLegacyCollisio
 
     std::filesystem::remove_all(root, errorCode);
     std::filesystem::remove_all(movedRoot, errorCode);
+}
+
+// Cross-importer corpus for a mesh-only document: its mesh, material and prefab
+// outputs must not collide with what the media cooker derives for the same or
+// neighbouring locators, and must be distinct among themselves.
+//
+// Scope note: this fixture emits no texture or animation, so it does not exercise the
+// two reused role-tag values (0x75 metallic-roughness/imported-texture, 0x77
+// animation/imported-audio). That pair is checked in
+// CooksMetallicRoughnessAndNormalTextureDeps, which actually produces the sharing
+// output. Removing AssetKind and channel from the derivation does not fail this test,
+// which is exactly why the claim is stated narrowly here rather than implied.
+TEST(GltfCookTests, MeshOnlyGltfOutputsStayDistinctFromMediaIds)
+{
+    const auto root = std::filesystem::temp_directory_path() / "tina_gltf_media_identity";
+    std::error_code errorCode;
+    std::filesystem::remove_all(root, errorCode);
+    std::filesystem::create_directories(root, errorCode);
+    ASSERT_FALSE(errorCode) << errorCode.message();
+
+    // The glTF document and the imported media share a stem, which is what makes the
+    // canonical locators overlap.
+    writeTextFile(root / "shared.gltf", minimalTriangleGltfJson());
+
+    auto cooked = cookGltfFileToCatalogSourceResult(
+        (root / "shared.gltf").string(), AssetFormat::TargetPlatform::WindowsX64,
+        SourceImportCaptureConfig{.sourceRootUtf8 = root.string()});
+    ASSERT_TRUE(cooked) << cooked.error().message;
+    ASSERT_FALSE(cooked->request.assets.empty());
+
+    // Media ids for every locator a project could plausibly hold alongside the
+    // document, *including the document's own locator*. That last one is the case
+    // that matters: it is the only way the two importers can present byte-identical
+    // input to the shared derivation, so it is where the reused role tags would
+    // actually collide. The others are the realistic sibling-file spellings.
+    std::vector<Core::AssetId> mediaIds;
+    for (const std::string_view locator : {"shared.gltf", "shared", "shared.png", "shared.wav"})
+    {
+        const auto textureId = deriveTextureMediaAssetId(locator);
+        const auto audioId = deriveAudioMediaAssetId(locator);
+        ASSERT_TRUE(textureId) << locator << ": " << textureId.error().message;
+        ASSERT_TRUE(audioId) << locator << ": " << audioId.error().message;
+        mediaIds.push_back(*textureId);
+        mediaIds.push_back(*audioId);
+    }
+    // Distinctness among the media ids themselves, so a duplicate below cannot be
+    // masked by two media locators having already collapsed onto one id.
+    for (std::size_t index = 0U; index < mediaIds.size(); ++index)
+    {
+        for (std::size_t other = index + 1U; other < mediaIds.size(); ++other)
+        {
+            EXPECT_NE(mediaIds[index], mediaIds[other])
+                << "two media locators collapsed onto one id (" << index << " vs " << other << ")";
+        }
+    }
+
+    for (const auto& asset : cooked->request.assets)
+    {
+        EXPECT_EQ(std::find(mediaIds.begin(), mediaIds.end(), asset.assetId), mediaIds.end())
+            << "a glTF output collided with a media id derived from the same locator; "
+               "the shared role-tag values (0x75, 0x77) are separated only by the "
+               "remaining hash inputs";
+    }
+
+    // Every glTF output within one document must also be distinct from the others,
+    // which is what the ordinal and channel inputs exist for.
+    std::vector<Core::AssetId> seen;
+    for (const auto& asset : cooked->request.assets)
+    {
+        EXPECT_EQ(std::find(seen.begin(), seen.end(), asset.assetId), seen.end())
+            << "duplicate AssetId among one document's outputs";
+        seen.push_back(asset.assetId);
+    }
+
+    std::filesystem::remove_all(root, errorCode);
 }
 
 TEST(GltfCookTests, MapsBlendAlphaModeAndRejectsUnsupportedModes)
@@ -1917,6 +1995,27 @@ TEST(GltfCookTests, CooksMetallicRoughnessAndNormalTextureDeps)
     }
     EXPECT_EQ(textureCount, 3U);
     EXPECT_TRUE(sawMaterial);
+
+    // Cross-importer identity. The metallic-roughness texture's role tag (0x75) is
+    // also the imported-texture tag, and that byte leads the AssetId, so these two
+    // producers are separated only by the remaining hash inputs -- AssetKind is
+    // Texture2D on both sides, leaving the channel. This document is one of the few
+    // fixtures that actually emits the tag-sharing output, so the check belongs here
+    // rather than beside a mesh-only fixture where it cannot fail.
+    //
+    // The comparison uses the document's own locator: that is the only way both
+    // importers can present byte-identical input to the shared derivation, and a
+    // collision would surface as a duplicate-owner failure at publish time.
+    {
+        const auto mediaTextureId = deriveTextureMediaAssetId("pbr.gltf");
+        ASSERT_TRUE(mediaTextureId) << mediaTextureId.error().message;
+        for (const auto& asset : request->assets)
+        {
+            EXPECT_NE(asset.assetId, *mediaTextureId)
+                << "a glTF output collided with the imported-texture id for the same "
+                   "locator; role tag 0x75 is shared between them";
+        }
+    }
 
     const auto catalogRoot = dir / "catalog";
     ASSERT_TRUE(cookAndPublishCatalogPackage(catalogRoot.string(), *request).has_value());

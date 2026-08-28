@@ -13,9 +13,27 @@ namespace Tina::Asset::Detail {
 // must bump their version at the same time so old metadata cannot be reused.
 inline constexpr Core::u32 DefaultAssetIdDerivationVersion = 2U;
 
-// Role tags are ordered where a cooked dependency list requires it. The hash
-// input still contains the semantic AssetKind, ordinal, and channel so the tag
-// is only a stable ordering/namespace byte, not the identity itself.
+// Role tags are ordered where a cooked dependency list requires it. The hash input
+// also contains the semantic AssetKind, ordinal, and channel, so the tag is a stable
+// ordering/namespace byte rather than the identity itself.
+//
+// In practice the tag does most of the separating: outputs of one importer differ
+// from each other by tag alone, and outputs of different importers additionally
+// differ by locator (the file extension is part of it). Removing AssetKind or channel
+// from the hash does not currently make any test fail -- they are defence in depth,
+// not the discriminator. Treat that as a reason to keep tags unique, not as licence
+// to drop inputs.
+//
+// Two values below are deliberately reused across importers, which is safe only
+// because the remaining inputs differ:
+//   0x75  glTF metallic-roughness texture  /  imported texture media
+//         Both are AssetKind::Texture2D, so only `channel` (1 vs 0) separates them
+//         when the locator matches byte for byte.
+//   0x77  glTF animation clip  /  imported audio media
+//         Separated by AssetKind (AnimationClip3D vs AudioClip).
+// A new producer that reuses a tag *and* matches the other's kind/channel/ordinal
+// would collide. Prefer an unused value; the corpus tests in GltfCookTests and
+// MediaCookTests pin the two pairs above but cannot anticipate a third.
 inline constexpr Core::u8 GltfMeshAssetIdTag = 0x71U;
 inline constexpr Core::u8 GltfMaterialAssetIdTag = 0x72U;
 inline constexpr Core::u8 GltfPrefabAssetIdTag = 0x73U;
@@ -23,7 +41,9 @@ inline constexpr Core::u8 GltfBaseColorTextureAssetIdTag = 0x74U;
 inline constexpr Core::u8 GltfMetallicRoughnessTextureAssetIdTag = 0x75U;
 inline constexpr Core::u8 GltfNormalTextureAssetIdTag = 0x76U;
 inline constexpr Core::u8 GltfAnimationAssetIdTag = 0x77U;
+// Shares 0x75 with GltfMetallicRoughnessTextureAssetIdTag; see the note above.
 inline constexpr Core::u8 TextureMediaAssetIdTag = 0x75U;
+// Shares 0x77 with GltfAnimationAssetIdTag; see the note above.
 inline constexpr Core::u8 AudioMediaAssetIdTag = 0x77U;
 
 [[nodiscard]] inline Core::AssetId deriveVersionedAssetId(
