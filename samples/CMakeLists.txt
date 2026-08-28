@@ -1,5 +1,8 @@
 add_subdirectory(null)
 add_subdirectory(asset)
+# Tina::Network is built unconditionally, so its first consumer outside the tests
+# is too. Headless: no GPU, no window, no EngineHost.
+add_subdirectory(network)
 add_subdirectory(2d)
 add_subdirectory(2d_tilemap)
 add_subdirectory(3d)

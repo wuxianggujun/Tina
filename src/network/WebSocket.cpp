@@ -85,6 +85,11 @@ constexpr Core::usize MaskBytes = 4;
 
 } // namespace
 
+std::string webSocketAcceptToken(std::string_view clientKey)
+{
+    return Detail::computeWebSocketAccept(clientKey);
+}
+
 struct WebSocket::Impl final {
     Impl(std::pmr::memory_resource& resource, IByteStream& streamIn)
         : stream(&streamIn)

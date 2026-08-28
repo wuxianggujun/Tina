@@ -5,10 +5,20 @@
 #include <tina/network/ByteStream.hpp>
 
 #include <memory_resource>
+#include <string>
 #include <span>
 #include <string_view>
 
 namespace Tina::Network {
+
+// base64(sha1(clientKey + RFC 6455 GUID)) -- the value a server must echo in
+// Sec-WebSocket-Accept, and the value this client verifies.
+//
+// Exposed because a server needs exactly this and nothing else. It is not a
+// general hashing utility: the input is a public nonce plus a published constant,
+// and SHA-1 stays private to the module so it cannot be reached for hashing that
+// matters. Core::ContentHash is for that.
+[[nodiscard]] std::string webSocketAcceptToken(std::string_view clientKey);
 
 enum class WebSocketState : Core::u8 {
     // HTTP upgrade request sent; waiting for the 101 response.
