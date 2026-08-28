@@ -197,10 +197,13 @@ X11(Xvfb)/sanitizer 证据已经记录；可选 Wayland/真显示器、真实 Ga
 ## 尚未完成
 
 - 可选 Linux Wayland/真显示器与真实设备 Gamepad 矩阵；TEST-001 当前 tip 已完成；
-- **Android 平台后端**：`src/platform/` 只有 `glfw` 与 `headless`，全仓库零个 Android 引用。这不是"补一个
-  后端实现"那么小——GLFW 不支持 Android，因此需要一个新的 `IPlatformBackend`（NDK `AGameActivity` 或自建
-  `ANativeActivity` 接线）、Java↔JNI 输入桥、以及 gradle/manifest/工具链。手柄部分参考 cocos2d-x 的经验
-  见下节；
+- **移动端（Android/iOS）平台后端**：`src/platform/` 只有 `glfw` 与 `headless`，全仓库零个 Android/iOS
+  引用。范围与顺序已由 [ADR 0032](adr/0032-mobile-platform-contract-boundaries.md)（Proposed）冻结：后端
+  本身只有 7 个纯虚，成本在**六个已生效的桌面契约**上——只发 `PrimaryPointerId`、指针位置每帧必须有限且
+  存在、native surface 在 RenderDevice 生命周期内不变、poll 线程 == 渲染线程、只有 D3D11/OpenGL/Vulkan
+  三个 renderer、preedit 由应用控制。其中**多点触控与 pointer presence 不需要移动后端，可在桌面上完成并
+  验证**，是最大的单项前置工作（backlog `MOBILE-001` 切片 A）。ADR 0032 的 D3（`run()` 保持阻塞还是改成
+  外部驱动的 `tick()`）未定则 iOS 无法开工。手柄部分的参照见下节；
 - Windows Narrator/Inspect 人工金标：`UI-002`（action/control patterns 与跨进程 HWND gate 已有）；
 - Linux AT-SPI adapter 与真实辅助技术验收：`UI-002-LINUX`；
 - BiDi/复杂 shaping、Linux 原生 XIM/Wayland preedit/candidate placement，以及 Windows 真机 IME 候选窗

@@ -118,6 +118,7 @@ ABI tuple 的 artifact/API/symbol baseline 与 previous-object probe 作为 rele
 - layout whitelist 扩展，以及 loop/seek/pause/repeat/yoyo/completion callback、spring/inertia 等高级 Motion playback；
 - `MeshRenderer3D` / `SkinnedMeshRenderer3D` 的 LOD 与剩余 instancing 扩展（static/skinned sphere-frustum culling 已在 resolver 前完成；opaque static 当前仅对 mesh/material/submesh/doubleSided 相同的连续 item 合批并以 bgfx instanced draw 提交，transparent static 与 skinned path 仍逐 item draw）；
 - Asset Bundle/Patch、cache/LRU 与 network Asset；
+- 移动端（Android/iOS）平台后端（`MOBILE-001`，[ADR 0032](adr/0032-mobile-platform-contract-boundaries.md) Proposed）。后端本身只有 7 个纯虚；成本在六个已生效的桌面契约上（单 pointer、指针位置永久存在、native surface 不变、poll 线程==渲染线程、只有三个 renderer、preedit 由应用控制）。其中**切片 A（多点触控 + pointer presence）不需要移动后端，可在桌面上完成并验证**，是最大的单项前置工作。ADR 0032 的 D3（`run()` 保持阻塞还是改外部驱动 `tick()`）未定则 iOS 无法开工。
 
 Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语义和验收命令，不能只按功能名称开工。
 

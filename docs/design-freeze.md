@@ -49,13 +49,14 @@
 
 ## Proposed
 
-当前未决的 Proposed ADR 有三个。新的候选决定必须先新增 ADR，不能只写入主题文档。
+当前未决的 Proposed ADR 有四个。新的候选决定必须先新增 ADR，不能只写入主题文档。
 
 | ADR | 范围 | 实现状态 |
 | --- | --- | --- |
 | [0027](adr/0027-runtime-metrics-registry.md) | Runtime Metrics 固定容量 counter registry：owner/生命周期、counter 模型、注册身份与线程模型、热路径错误、容量、snapshot 语义、编译开关等关键决策待确认 | 未实现：Accepted 前不建立占位 API，不修改 Runtime |
 | [0030](adr/0030-gameplay-2d-binding-and-physics-bridge.md) | World 保持封闭 + `World2DSceneIndex` 关联；authored payload 不得静默丢弃；`tina_gameplay2d` 单向 physics 桥 | **已实现**（`GAMEPLAY2D-001`）。与 0027 不同，本 ADR 的代码先落地了：payload 静默丢弃是正确性缺陷，不能等待审阅。maintainer 审阅可能要求调整已实施部分 |
 | [0031](adr/0031-scene-2d-runtime-ownership.md) | `Scene2DRuntime` 拥有四种 authored resource 节点的实例化、lease 生命周期与每帧顺序 | **已实现**（`GAMEPLAY2D-001`）：D1-D7 全部落地，含 D5 的 `fixedUpdatePhysics()`。**待**：尚无 sample/product 链接 `Tina::Gameplay2D`，故 product gate 未覆盖该 owner |
+| [0032](adr/0032-mobile-platform-contract-boundaries.md) | 移动端（Android/iOS）需要扩宽的六个桌面契约、先扩契约后写后端的顺序 | **未实现**（`MOBILE-001`）：只冻结范围与顺序，不实现任何后端。D3（`run()` 保持阻塞还是改外部驱动 `tick()`）是最需要 maintainer 明确的一项；未定则 iOS 无法开工。已执行的唯一动作是删除死的 `cmake/ShaderUtils.cmake` |
 
 「Proposed 但已实现」是明确的例外状态而非常态：它表示实现事实已存在、决策理由尚未被批准，因此
 `design-freeze.md` 的 Accepted 表不收录它们，且不得被引用为既定契约。
