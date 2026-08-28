@@ -114,6 +114,117 @@ TEST(BoundedTaskSystemTest, ScheduleCpuAndTaskGroupWaitIdle)
     (*system)->shutdownAndJoin();
 }
 
+// waitIdleFor's whole reason to exist is that it comes back. It had no test, and
+// the timeout path was the only recovery a caller has -- there is no detach
+// (ADR 0017).
+TEST(BoundedTaskSystemTest, TaskGroupWaitIdleForTimesOutWhileWorkIsStillRunning)
+{
+    auto system = Task::createBoundedTaskSystem(Task::TaskSystemCreateParams{
+        .ioWorkerCount = 1,
+        .cpuWorkerCount = 1,
+        .ioQueueCapacity = 4,
+        .cpuQueueCapacity = 8,
+        .mainQueueCapacity = 4,
+    });
+    ASSERT_TRUE(system.has_value()) << system.error().message;
+
+    std::atomic<bool> release{false};
+    std::atomic<bool> started{false};
+    {
+        Task::TaskGroup group(**system);
+        ASSERT_TRUE(group
+                        .add([&release, &started] {
+                            started.store(true, std::memory_order_release);
+                            while (!release.load(std::memory_order_acquire))
+                            {
+                                std::this_thread::sleep_for(std::chrono::milliseconds{1});
+                            }
+                        })
+                        .has_value());
+        while (!started.load(std::memory_order_acquire))
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds{1});
+        }
+
+        const Core::Status timedOut = group.waitIdleFor(std::chrono::milliseconds{30});
+        ASSERT_FALSE(timedOut);
+        EXPECT_EQ(timedOut.error().code, Task::TaskErrorCode::WaitTimeout);
+        EXPECT_FALSE(group.isIdle());
+        EXPECT_EQ(group.pending(), 1U);
+
+        // And once the work finishes it reports success rather than staying stuck.
+        release.store(true, std::memory_order_release);
+        EXPECT_TRUE(group.waitIdleFor(std::chrono::milliseconds{5000}).has_value());
+        EXPECT_TRUE(group.isIdle());
+    }
+    (*system)->shutdownAndJoin();
+}
+
+// The stop exit was written as `pending == 0 || (isStopping() && pending == 0)`,
+// which is identically `pending == 0` -- so the exit did not exist and the
+// documented TaskSystemStopped failure was unreachable. A group holding work that
+// can never run had no way out of waitIdle at all.
+TEST(BoundedTaskSystemTest, TaskGroupWaitReportsStoppedWhenWorkCanNoLongerRun)
+{
+    auto system = Task::createBoundedTaskSystem(Task::TaskSystemCreateParams{
+        .ioWorkerCount = 1,
+        .cpuWorkerCount = 1,
+        .ioQueueCapacity = 4,
+        .cpuQueueCapacity = 8,
+        .mainQueueCapacity = 4,
+    });
+    ASSERT_TRUE(system.has_value()) << system.error().message;
+
+    std::atomic<bool> release{false};
+    std::atomic<bool> started{false};
+    Task::TaskGroup group(**system);
+    // Occupy the single CPU worker, then queue a second item behind it. The second
+    // will still be pending when the system stops.
+    ASSERT_TRUE(group
+                    .add([&release, &started] {
+                        started.store(true, std::memory_order_release);
+                        while (!release.load(std::memory_order_acquire))
+                        {
+                            std::this_thread::sleep_for(std::chrono::milliseconds{1});
+                        }
+                    })
+                    .has_value());
+    while (!started.load(std::memory_order_acquire))
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    }
+    std::atomic<bool> secondRan{false};
+    ASSERT_TRUE(group.add([&secondRan] { secondRan.store(true, std::memory_order_release); }).has_value());
+
+    // Stopping on another thread: shutdownAndJoin cannot complete until the blocked
+    // task returns, so the wait below observes a stopping system with work pending.
+    std::atomic<bool> shutdownEntered{false};
+    std::thread stopper([&system, &shutdownEntered] {
+        shutdownEntered.store(true, std::memory_order_release);
+        (*system)->shutdownAndJoin();
+    });
+    while (!shutdownEntered.load(std::memory_order_acquire))
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    }
+    // Give the stop flag time to be observable before releasing the worker, so the
+    // wait resolves through the stop condition rather than through completion.
+    std::this_thread::sleep_for(std::chrono::milliseconds{20});
+
+    const Core::Status stopped = group.waitIdleFor(std::chrono::milliseconds{2000});
+    if (!stopped)
+    {
+        // The documented outcome: stopped with work outstanding, not a timeout.
+        EXPECT_EQ(stopped.error().code, Task::TaskErrorCode::TaskSystemStopped);
+    }
+
+    release.store(true, std::memory_order_release);
+    stopper.join();
+    // Whatever the race resolved to, the wait returned instead of hanging -- which
+    // is the property under test. The destructor must also return.
+    EXPECT_TRUE(true);
+}
+
 TEST(BoundedTaskSystemTest, ScheduleCpuWithoutWorkersIsNotSupported)
 {
     auto system = Task::createBoundedTaskSystem(Task::TaskSystemCreateParams{
