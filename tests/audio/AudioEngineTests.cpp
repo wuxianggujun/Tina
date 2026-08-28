@@ -618,6 +618,69 @@ TEST(AudioEngineTest, OneShotRetiresWhenStoppedCompletionCannotBeQueued)
     EXPECT_EQ(stats->rejectedCommands, 1U);
 }
 
+// A clip voice's natural end lives only in its mix slot. applyCommands runs before
+// harvestNaturalEnds inside one pump, so a Play queued in that same pump used to take
+// the finished slot and zero the token: the first voice never received Stopped, stayed
+// playing forever, could not be rebound or cleared, and -- because its mixSlot still
+// pointed at the reused slot -- its gain/pitch/pan setters silently retargeted the new
+// voice. Streams were already safe because their terminal is parked outside the slot.
+TEST(AudioEngineTest, ReusingAFinishedClipSlotStillReportsThePreviousStopped)
+{
+    // Two voices must coexist, so the pool needs two slots -- but voiceCapacity also
+    // sizes the mix slot table, and the contention this test needs is *one* mix slot.
+    // The first voice therefore has to finish before the second can be given a slot,
+    // which is exactly the interleaving under test.
+    auto engine = AudioEngine::Create(AudioEngineConfig{
+        .voiceCapacity = 2,
+        .commandCapacity = 8,
+        .completionCapacity = 8,
+    });
+    ASSERT_TRUE(engine.has_value()) << (engine ? "" : engine.error().message);
+
+    const float pcm[1] = {0.25F};
+    const AudioPcmClipView clip{.frames = pcm, .frameCount = 1, .channels = 1, .sampleRate = 48000};
+
+    auto first = engine->createVoice();
+    ASSERT_TRUE(first.has_value());
+    ASSERT_TRUE(engine->bindVoiceClip(*first, clip).has_value());
+    ASSERT_TRUE(engine->enqueuePlay(*first).has_value());
+    ASSERT_TRUE(engine->pumpCompletions(4).has_value());
+
+    // Run the clip past its single frame so the callback flags a natural end. The
+    // owner has not harvested it yet.
+    float out[1]{};
+    engine->mixRealtime(out, 1, 1, 48000);
+
+    auto second = engine->createVoice();
+    ASSERT_TRUE(second.has_value());
+    ASSERT_TRUE(engine->bindVoiceClip(*second, clip).has_value());
+    ASSERT_TRUE(engine->enqueuePlay(*second).has_value());
+
+    // One pump: applyCommands wants the only slot, which still holds the first
+    // voice's terminal.
+    AudioCompletionEvent events[4]{};
+    auto drained = engine->pumpCompletions(std::span<AudioCompletionEvent>{events}, 0);
+    ASSERT_TRUE(drained.has_value());
+
+    bool sawFirstStopped = false;
+    for (Core::u32 index = 0; index < *drained; ++index)
+    {
+        if (events[index].voice == *first && events[index].kind == AudioCompletionKind::Stopped)
+        {
+            sawFirstStopped = true;
+        }
+    }
+    EXPECT_TRUE(sawFirstStopped)
+        << "the first voice's Stopped was lost when its slot was reused";
+
+    // And the first voice is genuinely finished rather than wedged: not playing, and
+    // its clip can be cleared again -- both impossible while playing stayed true.
+    auto playing = engine->isVoicePlaying(*first);
+    ASSERT_TRUE(playing.has_value());
+    EXPECT_FALSE(*playing);
+    EXPECT_TRUE(engine->clearVoiceClip(*first).has_value());
+}
+
 TEST(AudioEngineTest, VoiceControlsRejectInvalidValuesWithoutMutation)
 {
     auto engine = AudioEngine::Create(AudioEngineConfig{.voiceCapacity = 1});

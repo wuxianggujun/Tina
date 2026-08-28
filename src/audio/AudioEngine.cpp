@@ -313,6 +313,22 @@ struct AudioEngine::Impl final {
         Core::u32 mixSlot = InvalidMixSlot;
     };
 
+    // A clip terminal that cannot be published yet because the realtime callback may
+    // still be reading the caller's payload. Streams park theirs in StreamSlot;
+    // clips had nowhere, so an explicit Stop published Stopped -- the caller's
+    // free-the-payload signal -- while the mix block was still interpolating from
+    // those frames. Held in a fixed table rather than on VoiceRecord because the
+    // voice may be retired the moment the terminal is delivered.
+    struct PendingClipTerminal final {
+        bool pending = false;
+        AudioVoiceId voice{};
+        AudioCompletionKind kind = AudioCompletionKind::Stopped;
+        Core::u64 commandSequence = 0;
+        Core::u32 quiescingMixSlot = InvalidMixSlot;
+        Core::u64 quiescingPublicationGeneration = 0;
+        bool retires = false;
+    };
+
     struct CallbackReaderGuard final {
         MixSlot* slot = nullptr;
 
@@ -478,6 +494,7 @@ struct AudioEngine::Impl final {
         // Terminal completion debt is paid before ordinary command completions
         // can consume newly available ring capacity.
         flushPendingStreamTerminals();
+        flushPendingClipTerminals();
         AudioCommand command{};
         while (commands.tryPop(command))
         {
@@ -545,9 +562,15 @@ struct AudioEngine::Impl final {
                 }
                 else
                 {
-                    deactivateMixSlot(*record);
-                    pushCompletion(AudioCompletionKind::Stopped, command.voice, command.sequence);
-                    retireTransientVoiceIfNeeded(*record);
+                    // Deferred for the same reason streams defer: Stopped is the
+                    // caller's signal that the PCM frames may be freed, and the
+                    // callback can still be mid-block on them. Publishing here and
+                    // letting the caller drop its AssetLease was a use-after-free
+                    // that only the "stop the device first" advice in docs/audio.md
+                    // was hiding.
+                    const Core::u32 mixSlot = deactivateMixSlot(*record);
+                    queueClipTerminal(*record, AudioCompletionKind::Stopped, command.sequence,
+                                      mixSlot);
                 }
                 break;
             case AudioCommandKind::CancelStream:
@@ -560,6 +583,7 @@ struct AudioEngine::Impl final {
             }
         }
         flushPendingStreamTerminals();
+        flushPendingClipTerminals();
     }
 
     [[nodiscard]] float computeSfxGain() const noexcept
@@ -802,6 +826,91 @@ struct AudioEngine::Impl final {
                 : 0;
     }
 
+    // Parks a clip terminal until the realtime callback has provably let go of the
+    // payload. Mirrors queueStreamTerminal, but the token lives on the VoiceRecord:
+    // a clip's mix slot can be handed to another voice before this drains, so the
+    // slot is not a safe place to keep it.
+    void queueClipTerminal(VoiceRecord& record, AudioCompletionKind kind,
+                           Core::u64 commandSequence, Core::u32 quiescingMixSlot) noexcept
+    {
+        record.playing = false;
+        record.mixSlot = InvalidMixSlot;
+        PendingClipTerminal* pending = nullptr;
+        for (PendingClipTerminal& candidate : pendingClipTerminals)
+        {
+            if (candidate.pending && candidate.voice == record.id)
+            {
+                // Already queued: first terminal wins, exactly as streams behave.
+                return;
+            }
+            if (!candidate.pending && pending == nullptr)
+            {
+                pending = &candidate;
+            }
+        }
+        if (pending == nullptr)
+        {
+            // One slot per voice and the table is voiceCapacity wide, so this cannot
+            // fill. Publishing immediately is still the safer fallback than dropping
+            // the caller's only free-the-payload signal.
+            pushCompletion(kind, record.id, commandSequence);
+            retireTransientVoiceIfNeeded(record);
+            return;
+        }
+        pending->pending = true;
+        pending->voice = record.id;
+        pending->kind = kind;
+        pending->commandSequence = commandSequence;
+        pending->quiescingMixSlot = quiescingMixSlot;
+        pending->quiescingPublicationGeneration =
+            quiescingMixSlot != InvalidMixSlot && quiescingMixSlot < config.voiceCapacity
+                ? mixSlots[quiescingMixSlot].publicationGeneration.load(std::memory_order_seq_cst)
+                : 0;
+        pending->retires = record.autoRetire;
+    }
+
+    void flushPendingClipTerminals() noexcept
+    {
+        for (PendingClipTerminal& pending : pendingClipTerminals)
+        {
+            if (!pending.pending)
+            {
+                continue;
+            }
+            if (pending.quiescingMixSlot != InvalidMixSlot &&
+                pending.quiescingMixSlot < config.voiceCapacity)
+            {
+                MixSlot& mix = mixSlots[pending.quiescingMixSlot];
+                // Only wait while the slot still belongs to this terminal. Once the
+                // generation moves on another voice owns the slot, and its readers
+                // say nothing about whether our payload is still being read.
+                if (mix.publicationGeneration.load(std::memory_order_seq_cst) ==
+                        pending.quiescingPublicationGeneration &&
+                    mix.callbackReaders.load(std::memory_order_seq_cst) != 0)
+                {
+                    continue;
+                }
+            }
+            if (completions.full())
+            {
+                // Keep the token and retry next pump rather than losing the caller's
+                // only free-the-payload signal.
+                continue;
+            }
+            pushCompletion(pending.kind, pending.voice, pending.commandSequence);
+            const bool retires = pending.retires;
+            const AudioVoiceId voice = pending.voice;
+            pending = PendingClipTerminal{};
+            if (retires)
+            {
+                if (VoiceRecord* record = voices.tryGet(voice); record != nullptr)
+                {
+                    retireTransientVoiceIfNeeded(*record);
+                }
+            }
+        }
+    }
+
     void flushPendingStreamTerminals() noexcept
     {
         for (Core::usize index = 0; index < config.voiceCapacity; ++index)
@@ -871,6 +980,21 @@ struct AudioEngine::Impl final {
             MixSlot& slot = mixSlots[index];
             if (slot.active.load(std::memory_order_seq_cst) ||
                 slot.callbackReaders.load(std::memory_order_seq_cst) != 0)
+            {
+                continue;
+            }
+            // A slot holding an unharvested natural end cannot simply be taken: this
+            // runs from applyCommands, which pumpCompletions calls *before*
+            // harvestNaturalEnds, so overwriting the token destroyed the only record
+            // that the previous voice had finished. That voice then never received
+            // Stopped, stayed playing forever, could not be rebound or cleared, and
+            // -- because its mixSlot still pointed here -- its gain, pitch and pan
+            // setters silently retargeted whichever voice took the slot over.
+            //
+            // Harvested in place rather than by reordering the pump: Cancel has to be
+            // able to absorb a racing natural end, which only works while
+            // applyCommands still runs first.
+            if (!harvestNaturalEndForSlot(index))
             {
                 continue;
             }
@@ -1000,72 +1124,85 @@ struct AudioEngine::Impl final {
         (void)voices.erase(voice);
     }
 
+    // Converts one slot's natural-end flag into a terminal completion. Returns true
+    // when the slot is left free for reuse -- either it held no terminal, or the
+    // terminal was consumed here. False means a callback is still reading it.
+    //
+    // Split out of harvestNaturalEnds so activateMixSlot can drain a slot before
+    // taking it: applyCommands runs before the pump's harvest, so a Play arriving in
+    // the same pump used to overwrite the token and lose the previous voice's Stopped.
+    [[nodiscard]] bool harvestNaturalEndForSlot(Core::u32 index) noexcept
+    {
+        MixSlot& slot = mixSlots[index];
+        Core::u64 finishedPublicationGeneration =
+            slot.finishedPublicationGeneration.load(std::memory_order_seq_cst);
+        if (finishedPublicationGeneration == 0)
+        {
+            return true;
+        }
+        if (slot.callbackReaders.load(std::memory_order_seq_cst) != 0)
+        {
+            return false;
+        }
+        const Core::u64 currentPublicationGeneration =
+            slot.publicationGeneration.load(std::memory_order_seq_cst);
+        if (finishedPublicationGeneration != currentPublicationGeneration)
+        {
+            // The callback belonged to a publication that the owner already stopped.
+            // Clear only that stale terminal token; never inspect or clear metadata
+            // owned by a newer publication.
+            (void)slot.finishedPublicationGeneration.compare_exchange_strong(
+                finishedPublicationGeneration,
+                0,
+                std::memory_order_seq_cst,
+                std::memory_order_seq_cst);
+            return true;
+        }
+        if (!slot.finishedPublicationGeneration.compare_exchange_strong(
+                finishedPublicationGeneration,
+                0,
+                std::memory_order_seq_cst,
+                std::memory_order_seq_cst))
+        {
+            return false;
+        }
+        slot.active.store(false, std::memory_order_seq_cst);
+        (void)slot.publicationGeneration.fetch_add(1, std::memory_order_seq_cst);
+        const AudioVoiceId voice = slot.voice;
+        if (!voice.hasValue())
+        {
+            clearInactiveMixSlotMetadata(slot);
+            return true;
+        }
+        if (auto* record = voices.tryGet(voice); record != nullptr && record->mixSlot == index)
+        {
+            record->gain = (std::clamp)(slot.currentVoiceGain.load(std::memory_order_relaxed),
+                                        AudioVoiceMinGain,
+                                        AudioVoiceMaxGain);
+            record->playing = false;
+            record->mixSlot = InvalidMixSlot;
+            if (record->hasStream)
+            {
+                queueStreamTerminal(*record, AudioCompletionKind::Stopped, 0, index);
+            }
+            else
+            {
+                retireTransientVoiceIfNeeded(*record);
+                pushCompletion(AudioCompletionKind::Stopped, voice, 0);
+            }
+        }
+        clearInactiveMixSlotMetadata(slot);
+        return true;
+    }
+
     void harvestNaturalEnds() noexcept
     {
         for (Core::u32 index = 0; index < config.voiceCapacity; ++index)
         {
-            MixSlot& slot = mixSlots[index];
-            Core::u64 finishedPublicationGeneration =
-                slot.finishedPublicationGeneration.load(std::memory_order_seq_cst);
-            if (finishedPublicationGeneration == 0)
-            {
-                continue;
-            }
-            if (slot.callbackReaders.load(std::memory_order_seq_cst) != 0)
-            {
-                continue;
-            }
-            const Core::u64 currentPublicationGeneration =
-                slot.publicationGeneration.load(std::memory_order_seq_cst);
-            if (finishedPublicationGeneration != currentPublicationGeneration)
-            {
-                // The callback belonged to a publication that the owner already
-                // stopped. Clear only that stale terminal token; never inspect or
-                // clear metadata owned by a newer publication.
-                (void)slot.finishedPublicationGeneration.compare_exchange_strong(
-                    finishedPublicationGeneration,
-                    0,
-                    std::memory_order_seq_cst,
-                    std::memory_order_seq_cst);
-                continue;
-            }
-            if (!slot.finishedPublicationGeneration.compare_exchange_strong(
-                    finishedPublicationGeneration,
-                    0,
-                    std::memory_order_seq_cst,
-                    std::memory_order_seq_cst))
-            {
-                continue;
-            }
-            slot.active.store(false, std::memory_order_seq_cst);
-            (void)slot.publicationGeneration.fetch_add(1, std::memory_order_seq_cst);
-            const AudioVoiceId voice = slot.voice;
-            if (!voice.hasValue())
-            {
-                clearInactiveMixSlotMetadata(slot);
-                continue;
-            }
-            if (auto* record = voices.tryGet(voice);
-                record != nullptr && record->mixSlot == index)
-            {
-                record->gain = (std::clamp)(slot.currentVoiceGain.load(std::memory_order_relaxed),
-                                           AudioVoiceMinGain,
-                                           AudioVoiceMaxGain);
-                record->playing = false;
-                record->mixSlot = InvalidMixSlot;
-                if (record->hasStream)
-                {
-                    queueStreamTerminal(*record, AudioCompletionKind::Stopped, 0, index);
-                }
-                else
-                {
-                    retireTransientVoiceIfNeeded(*record);
-                    pushCompletion(AudioCompletionKind::Stopped, voice, 0);
-                }
-            }
-            clearInactiveMixSlotMetadata(slot);
+            (void)harvestNaturalEndForSlot(index);
         }
         flushPendingStreamTerminals();
+        flushPendingClipTerminals();
     }
 
     void mixRealtime(float* interleavedOut, Core::u32 outFrames, Core::u32 outChannels,
@@ -1471,6 +1608,9 @@ struct AudioEngine::Impl final {
     std::array<AudioBusState, AudioBusCount> buses{};
     std::array<MixSlot, MaxMixSlots> mixSlots{};
     std::array<StreamSlot, MaxMixSlots> streamSlots{};
+    // One entry per possible voice, so a queued clip terminal always has somewhere
+    // to wait for the realtime callback to release the caller's payload.
+    std::array<PendingClipTerminal, MaxMixSlots> pendingClipTerminals{};
     std::thread::id owner{};
     AudioEngineState state = AudioEngineState::Uninitialized;
     bool closed = false;
