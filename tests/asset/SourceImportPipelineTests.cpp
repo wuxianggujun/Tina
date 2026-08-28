@@ -1,4 +1,7 @@
+#include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/SourceImportPipeline.hpp>
+#include <tina/core/io/ReadFile.hpp>
+#include <tina/core/io/WriteFile.hpp>
 
 #include <gtest/gtest.h>
 
@@ -37,6 +40,31 @@ void writePngFixture(const std::filesystem::path& path)
     output.write(reinterpret_cast<const char*>(bytes.data()),
                  static_cast<std::streamsize>(bytes.size()));
     ASSERT_TRUE(output.good());
+}
+
+[[nodiscard]] bool rewriteFirstImporterVersion(const std::filesystem::path& statePath,
+                                               Core::u32 importerVersion)
+{
+    auto bytes = Core::readFile(
+        toUtf8(statePath),
+        Core::ReadFileConfig{.memoryResource = std::pmr::new_delete_resource()});
+    if (!bytes) {
+        return false;
+    }
+    auto metadata = AssetFormat::parseSourceImportMetadataView(*bytes);
+    if (!metadata || metadata->header().unitCount == 0U) {
+        return false;
+    }
+
+    const auto unitOffset = static_cast<std::size_t>(metadata->header().unitsOffset);
+    if (unitOffset + AssetFormat::SourceImportWire::UnitEntryBytes > bytes->size()) {
+        return false;
+    }
+    for (Core::u32 shift = 0U; shift < 32U; shift += 8U) {
+        (*bytes)[unitOffset + 20U + shift / 8U] =
+            static_cast<std::byte>((importerVersion >> shift) & 0xFFU);
+    }
+    return Core::writeFile(toUtf8(statePath), *bytes).has_value();
 }
 
 TEST(SourceImportPipelineTests, LinuxRecipeRecooksThenReusesCommittedBaseline)
@@ -212,6 +240,90 @@ TEST(SourceImportPipelineTests, IncrementalTextureImportRetainsPriorPngAndMapsOu
     EXPECT_TRUE(empty->unitOutputs.empty());
     EXPECT_EQ(empty->unitsRemoved, 2U);
     EXPECT_EQ(empty->catalogEntries, 0U);
+
+    std::filesystem::remove_all(workRoot, error);
+}
+
+TEST(SourceImportPipelineTests, ImporterVersionMigrationForcesFullRecookWithoutReuse)
+{
+    const auto workRoot = std::filesystem::temp_directory_path() /
+                          "tina_source_import_pipeline_importer_migration";
+    std::error_code error;
+    std::filesystem::remove_all(workRoot, error);
+    ASSERT_TRUE(std::filesystem::create_directories(workRoot / "Source", error));
+    ASSERT_FALSE(error);
+
+    const auto imagePath = workRoot / "Source" / "icon.png";
+    writePngFixture(imagePath);
+
+    std::pmr::unsynchronized_pool_resource memory;
+    CatalogPackageStageConfig stageConfig{};
+    stageConfig.validation.manifest.catalog.maxEntries = 8;
+    stageConfig.validation.manifest.catalog.maxDependencies = 8;
+    stageConfig.validation.manifest.catalog.maxDependenciesPerAsset = 4;
+    stageConfig.validation.manifest.catalog.memoryResource = &memory;
+    stageConfig.validation.validation.file.memoryResource = &memory;
+    stageConfig.validation.validation.verifyTypedPayload = true;
+
+    const std::string sourceRoot = toUtf8(workRoot / "Source");
+    const std::string catalogRoot = toUtf8(workRoot / "Catalog");
+    const std::string statePath = toUtf8(workRoot / "import-state.tmeta");
+    const std::string imagePathUtf8 = toUtf8(imagePath);
+    const std::array units{SourceImportPipelineUnit{
+        .kind = SourceImportPipelineUnitKind::Texture,
+        .sourceUtf8Path = imagePathUtf8,
+    }};
+    const SourceImportPipelineRequest initialRequest{
+        .sourceRootUtf8 = sourceRoot,
+        .targetPlatform = AssetFormat::TargetPlatform::WindowsX64,
+        .units = units,
+        .baselineCatalogRootUtf8 = catalogRoot,
+        .baselineStateUtf8Path = statePath,
+        .stageConfig = stageConfig,
+    };
+
+    auto initial = executeSourceImportPipeline(initialRequest);
+    ASSERT_TRUE(initial) << (initial ? "" : initial.error().message);
+    ASSERT_EQ(initial->mode, SourceImportPipelineMode::FullRecook);
+    ASSERT_EQ(initial->unitsRecooked, 1U);
+    ASSERT_EQ(initial->objectsCooked, 1U);
+    ASSERT_TRUE(initial->importStateCommitted);
+    ASSERT_TRUE(rewriteFirstImporterVersion(std::filesystem::path(statePath), 1U));
+
+    auto missingStage = executeSourceImportPipeline(initialRequest);
+    ASSERT_FALSE(missingStage);
+    EXPECT_EQ(missingStage.error().code, AssetErrorCode::InvalidCatalogConfig);
+
+    ASSERT_TRUE(std::filesystem::create_directories(workRoot / "migration-stage", error));
+    ASSERT_FALSE(error);
+    const std::string migrationStageCatalogRoot =
+        toUtf8(workRoot / "migration-stage" / "Catalog");
+    const std::string migrationStageStatePath =
+        toUtf8(workRoot / "migration-stage" / "import-state.tmeta");
+    const SourceImportPipelineRequest migrationRequest{
+        .sourceRootUtf8 = sourceRoot,
+        .targetPlatform = AssetFormat::TargetPlatform::WindowsX64,
+        .units = units,
+        .baselineCatalogRootUtf8 = catalogRoot,
+        .baselineStateUtf8Path = statePath,
+        .stageCatalogRootUtf8 = migrationStageCatalogRoot,
+        .stageStateUtf8Path = migrationStageStatePath,
+        .stageConfig = stageConfig,
+    };
+    auto migrated = executeSourceImportPipeline(migrationRequest);
+    ASSERT_TRUE(migrated) << (migrated ? "" : migrated.error().message);
+    EXPECT_EQ(migrated->mode, SourceImportPipelineMode::FullRecook);
+    EXPECT_EQ(migrated->probeState, SourceImportProbeState::Dirty);
+    EXPECT_EQ(migrated->probeReason, SourceImportProbeReason::ImporterVersionChanged);
+    EXPECT_EQ(migrated->unitsRecooked, 1U);
+    EXPECT_EQ(migrated->objectsReused, 0U);
+    EXPECT_EQ(migrated->objectsCooked, 1U);
+    EXPECT_TRUE(migrated->stageCreated);
+    EXPECT_TRUE(migrated->importStateCommitted);
+    ASSERT_EQ(migrated->unitOutputs.size(), 1U);
+    ASSERT_EQ(migrated->unitOutputs.front().outputs.size(), 1U);
+    EXPECT_EQ(migrated->unitOutputs.front().outputs.front().assetId,
+              initial->unitOutputs.front().outputs.front().assetId);
 
     std::filesystem::remove_all(workRoot, error);
 }

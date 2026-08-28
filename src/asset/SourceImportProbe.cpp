@@ -27,9 +27,9 @@ namespace Tina::Asset {
 namespace {
 
 inline constexpr Core::u32 CatalogRecipeImporterVersion = 1U;
-inline constexpr Core::u32 GltfImporterVersion = 1U;
-inline constexpr Core::u32 TextureImporterVersion = 1U;
-inline constexpr Core::u32 AudioImporterVersion = 1U;
+inline constexpr Core::u32 GltfImporterVersion = 2U;
+inline constexpr Core::u32 TextureImporterVersion = 2U;
+inline constexpr Core::u32 AudioImporterVersion = 2U;
 
 [[nodiscard]] constexpr std::array<std::byte, 16>
 canonicalCatalogRecipeSettings(AssetFormat::TargetPlatform targetPlatform) noexcept
@@ -51,7 +51,7 @@ canonicalCatalogRecipeSettings(AssetFormat::TargetPlatform targetPlatform) noexc
         std::byte{'G'}, std::byte{'L'}, std::byte{'T'}, std::byte{'F'},
         std::byte{'C'}, std::byte{'F'}, std::byte{'G'}, std::byte{0},
     };
-    constexpr Core::u32 SettingsSchemaVersion = 1;
+    constexpr Core::u32 SettingsSchemaVersion = 2;
     constexpr std::size_t AssetIdBytes = Core::AssetId::Bytes{}.size();
     std::array<std::byte, Domain.size() + sizeof(Core::u32) + AssetIdBytes * 3U> canonical{};
     auto cursor = std::copy(Domain.begin(), Domain.end(), canonical.begin());
@@ -446,7 +446,7 @@ currentTextureSourceImportContract(std::string_view normalizedPrimarySourcePath,
 {
     return currentMediaSourceImportContract(SourceImporterKind::Texture,
                                             TextureImporterVersion,
-                                            "tina.import.texture.v1",
+                                            "tina.import.texture.v2",
                                             normalizedPrimarySourcePath,
                                             stableAssetId);
 }
@@ -457,7 +457,7 @@ currentAudioSourceImportContract(std::string_view normalizedPrimarySourcePath,
 {
     return currentMediaSourceImportContract(SourceImporterKind::Audio,
                                             AudioImporterVersion,
-                                            "tina.import.audio.v1",
+                                           "tina.import.audio.v2",
                                             normalizedPrimarySourcePath,
                                             stableAssetId);
 }

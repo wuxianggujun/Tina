@@ -152,6 +152,7 @@ TEST_F(MediaCookTests, PngCooksOneTextureWithStableId)
     ASSERT_EQ(first->sourceImports.units.size(), 1U);
     const auto& unit = first->sourceImports.units.front();
     EXPECT_EQ(unit.importerKind, SourceImporterKind::Texture);
+    EXPECT_EQ(unit.importerVersion, 2U);
     ASSERT_EQ(unit.outputs.size(), 1U);
     ASSERT_EQ(first->sourceImports.sources.size(), 1U);
     EXPECT_EQ(first->sourceImports.sources.front().path, "textures/albedo.png");
@@ -207,6 +208,7 @@ TEST_F(MediaCookTests, WavCooksAudioClipAndRejectsNonWavBytes)
 
     ASSERT_EQ(cooked->sourceImports.units.size(), 1U);
     EXPECT_EQ(cooked->sourceImports.units.front().importerKind, SourceImporterKind::Audio);
+    EXPECT_EQ(cooked->sourceImports.units.front().importerVersion, 2U);
 
     const auto png = tinyPngBytes();
     const auto bogus = writeSource("audio/not_audio.wav", png);

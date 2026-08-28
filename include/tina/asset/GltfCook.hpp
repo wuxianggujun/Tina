@@ -37,7 +37,9 @@ struct GltfCookIds final {
 };
 
 // targetPlatform is explicit because the same source may be cooked for Windows or Linux.
-// When ids are default/empty, deterministic ids are derived from the glTF path string.
+// When ids are default/empty, deterministic ids are derived from the canonical source-root-
+// relative locator when SourceImportCaptureConfig is provided; the plain request API uses a
+// lexically-normalized locator because it has no authoring-root context.
 [[nodiscard]] Core::Result<CatalogCookRequest> cookGltfFileToCatalogRequest(
     std::string_view gltfUtf8Path,
     AssetFormat::TargetPlatform targetPlatform,

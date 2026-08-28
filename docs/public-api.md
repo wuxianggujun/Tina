@@ -1099,11 +1099,15 @@ symlink/junction 保持可用，逃逸、读取期间身份/size/time 变化或�
 预算失败都返回 `Core::Error`，不返回部分 `CatalogCookRequest`。调用方随后仍须经 `cookCatalogPackage` 与
 package publication；该 API 不让 Runtime 直接消费 source URI，也不暴露 cgltf/stb/native handle。
 
-`GltfCookIds` 只固定首 mesh/material/prefab；multi-mesh、纹理与动画等其他输出仍需派生。当前默认派生直接使用调用方
-传入的 `gltfUtf8Path` 字符串，并保留 legacy per-position XOR 算法；Source Import 的 root-relative provenance
-normalization 不会改变该 seed。因此工程根移动/路径拼写变化可改变默认 ID，某些等长路径还可构造碰撞；重复 output
-owner 会使整个候选 fail closed，不会覆盖已有 asset。`ASSET-ID-001` 负责 versioned replacement 与 recook/migration
-契约，完成前不能把“同一输入字符串结果确定”扩大为“跨工程位置稳定”或“无碰撞”。
+`GltfCookIds` 只固定首 mesh/material/prefab；multi-mesh、纹理与动画等其他输出使用统一的 versioned derivation。
+Source Import 场景以 canonical root-relative locator 为 seed，并把 `AssetKind`、output ordinal/channel 和完整
+locator 纳入派生；因此同一相对工程路径在工程根移动后保持 output ID 稳定，首字符差异、字符转位和长路径不再复现
+旧 per-position XOR 构造碰撞。plain `cookGltfFileToCatalogRequest()` 没有 authoring-root 参数，只能使用
+lexically-normalized locator，因此需要跨工程根稳定性时应走带 `SourceImportCaptureConfig` 的 API。
+
+当前 default AssetId derivation version 为 2，Gltf/Texture/Audio importer contract 同步为 version 2；旧 metadata
+会进入 `Reimport`/full recook，不静默复用旧 output。role tag 只用于稳定命名空间与 Material texture dependency
+排序，不提供数学上的无碰撞保证；重复 output owner 仍会使整个候选 fail closed。
 
 `cookTextureFileToCatalogSourceResult()` 把一张 PNG/JPEG cook 为单一 RGBA8 Texture2D；它不再生成默认 Sprite
 wrapper。`Sprite2DBindingRegistry::resolveSprite()` / `internSpriteFrameResource()` 接受该 Texture2D 直接作为

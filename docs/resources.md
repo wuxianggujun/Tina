@@ -221,15 +221,15 @@ ownership，同时拥有精确的 fully validated `CatalogSnapshot`。它同步�
 ## 身份、视图与所有权
 
 `AssetId` 是 Catalog 内的逻辑身份，不等于文件路径或 `ContentHash`。recipe 使用显式 canonical ID；media importer
-从 canonical source-root 相对 locator 派生默认 ID，Editor rename 可为单输出媒体保留既有 ID。glTF Cooker 只允许显式指定首 mesh/material/prefab ID，其他输出及
-空 ID 仍从调用方传入的 `gltfUtf8Path` 原字符串派生。Importer provenance/state 的 stable `ImportUnitId` 使用 canonical
-root-relative path，但它不会改写 glTF output ID seed。glTF、recipe 和多输出 unit 当前没有 rename map：重命名表现为旧 unit Removed + 新 unit
-Added；移动工程根、改变绝对路径拼写也可能改变默认 glTF AssetId。
+与 glTF importer 都从 canonical source-root-relative locator 派生默认 ID，Editor rename 可为单输出媒体保留既有 ID。
+glTF Cooker 只允许显式指定首 mesh/material/prefab ID，其他输出及空 ID 使用统一的 versioned derivation，输入包含
+`AssetKind`、output ordinal/channel 和完整 locator。Importer provenance/state 的 stable `ImportUnitId` 同样使用
+canonical root-relative path。glTF、recipe 和多输出 unit 当前没有 rename map：重命名表现为旧 unit Removed + 新 unit
+Added；使用 Source Import root 时移动工程根不会改变默认 output ID。
 
-当前 glTF 默认 ID 还保留旧 per-position XOR 派生：byte 0 最终被 kind tag 覆盖，因此某些仅首字符不同的等长路径可
-构造出同一 output ID。Catalog/source-import output ownership 会原子拒绝重复 owner，不会静默覆盖，但这仍会让合法的
-双文件导入失败。该兼容性与迁移问题由 `ASSET-ID-001` 跟踪；在完成 versioned 派生前，单 mesh 的首组输出应优先使用
-显式 `GltfCookIds`，multi-output 仍无法完全规避旧派生。
+默认 output identity 当前为 derivation version 2；glTF/Texture/Audio importer contract 同步提升到 version 2，旧
+metadata 会被判定为 Reimport/full recook，不静默复用旧 output。role tag 只用于稳定命名空间和 Material texture
+dependency 排序，不代表数学上的无碰撞保证；重复 output owner 仍由 Catalog/source-import transaction fail closed。
 
 `ContentHash` 用于确定性产物校验与非对抗性损坏检测。Hash 匹配后仍必须执行 wire bounds、schema、
 kind/type 与 Catalog entry 对齐检查；它不替代包签名或信任策略。
@@ -489,8 +489,9 @@ Opaque3D→Transparent3D→Sprite2D→UI 的确定性 pass scheduler 已完成�
   current-only source import metadata/planner、真实 importer provenance capture、validated state commit、多 unit mixed
   fresh-stage executor 与 all-clean 零改写复用。watcher/revision/reload/baseline acceptance 仍由 host 显式编排；通用
   Asset cache/LRU、Bundle/Patch 与 network Asset 是独立后续项；
-- media 默认 ID 已改为 canonical root-relative locator 的双 FNV-1a 派生；glTF 默认 output ID 仍使用传入路径字符串的
-  legacy XOR 派生，存在工程移动 identity 变化与可构造碰撞，见 `ASSET-ID-001` / `R-ASSET-ID-01`；
+- glTF/Texture/Audio 默认 output ID 已统一为 versioned canonical root-relative locator 派生；旧 importer
+  metadata 会因 contract version mismatch 进入 full recook，不能静默复用旧 output。request-only glTF API
+  因没有 authoring root 仍使用 lexically-normalized locator；`ASSET-ID-001` 的 Editor Product 证据尚待补齐；
 - UI Image/Icon/NineSlice 已接入资源链：retained tree 只保存 AssetId/图片元数据，Runtime 使用
   move-only root-scoped resolver registration，在当前 frame packet 中按 `(root, AssetId)` 去重
   resolve/pin，并复用 Sprite/UI 共用 `Texture2D` kind/binding；Canvas NineSlice 展开后的1..9个 quad

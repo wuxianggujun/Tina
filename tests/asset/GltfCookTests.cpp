@@ -488,6 +488,62 @@ TEST(GltfCookTests, CooksMinimalTriangleToMeshMaterialPrefab)
     ASSERT_TRUE(cookAndPublishCatalogPackage(catalogRoot.string(), *request).has_value());
 }
 
+TEST(GltfCookTests, VersionedDefaultIdsUseCanonicalLocatorAndAvoidLegacyCollisions)
+{
+    const auto root = std::filesystem::temp_directory_path() / "tina_gltf_versioned_ids";
+    const auto movedRoot = std::filesystem::temp_directory_path() / "tina_gltf_versioned_ids_moved";
+    std::error_code errorCode;
+    std::filesystem::remove_all(root, errorCode);
+    std::filesystem::remove_all(movedRoot, errorCode);
+    std::filesystem::create_directories(root, errorCode);
+    ASSERT_FALSE(errorCode) << errorCode.message();
+    std::filesystem::create_directories(movedRoot, errorCode);
+    ASSERT_FALSE(errorCode) << errorCode.message();
+
+    writeTextFile(root / "scene.gltf", minimalTriangleGltfJson());
+    writeTextFile(movedRoot / "scene.gltf", minimalTriangleGltfJson());
+    writeTextFile(root / "ab.gltf", minimalTriangleGltfJson());
+    writeTextFile(root / "ba.gltf", minimalTriangleGltfJson());
+
+    const auto cookWithRoot = [](const std::filesystem::path& path,
+                                 const std::filesystem::path& sourceRoot) {
+        return cookGltfFileToCatalogSourceResult(
+            path.string(), AssetFormat::TargetPlatform::WindowsX64,
+            SourceImportCaptureConfig{.sourceRootUtf8 = sourceRoot.string()});
+    };
+
+    auto original = cookWithRoot(root / "scene.gltf", root);
+    auto moved = cookWithRoot(movedRoot / "scene.gltf", movedRoot);
+    ASSERT_TRUE(original) << original.error().message;
+    ASSERT_TRUE(moved) << moved.error().message;
+    ASSERT_EQ(original->request.assets.size(), moved->request.assets.size());
+    for (std::size_t index = 0U; index < original->request.assets.size(); ++index)
+    {
+        EXPECT_EQ(original->request.assets[index].assetKind,
+                  moved->request.assets[index].assetKind);
+        EXPECT_EQ(original->request.assets[index].assetId,
+                  moved->request.assets[index].assetId)
+            << "output index " << index;
+    }
+    ASSERT_EQ(original->sourceImports.units.size(), 1U);
+    EXPECT_EQ(original->sourceImports.units.front().importerVersion, 2U);
+
+    auto transposedLeft = cookWithRoot(root / "ab.gltf", root);
+    auto transposedRight = cookWithRoot(root / "ba.gltf", root);
+    ASSERT_TRUE(transposedLeft) << transposedLeft.error().message;
+    ASSERT_TRUE(transposedRight) << transposedRight.error().message;
+    ASSERT_EQ(transposedLeft->request.assets.size(), transposedRight->request.assets.size());
+    for (std::size_t index = 0U; index < transposedLeft->request.assets.size(); ++index)
+    {
+        EXPECT_NE(transposedLeft->request.assets[index].assetId,
+                  transposedRight->request.assets[index].assetId)
+            << "legacy path/XOR collision at output index " << index;
+    }
+
+    std::filesystem::remove_all(root, errorCode);
+    std::filesystem::remove_all(movedRoot, errorCode);
+}
+
 TEST(GltfCookTests, MapsBlendAlphaModeAndRejectsUnsupportedModes)
 {
     const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_alpha_mode";
@@ -1653,7 +1709,7 @@ TEST(GltfCookTests, CapturesPrimaryExternalBufferPrefixAndExternalImage)
 
     const auto& unit = cooked->sourceImports.units[0];
     EXPECT_EQ(unit.importerKind, SourceImporterKind::Gltf);
-    EXPECT_EQ(unit.importerVersion, 1U);
+    EXPECT_EQ(unit.importerVersion, 2U);
     ASSERT_EQ(unit.inputs.size(), 3U);
     std::size_t primaryInputCount = 0;
     for (const auto& input : unit.inputs)

@@ -7,6 +7,7 @@
 
 #include <mikktspace.h>
 
+#include "DerivedAssetId.hpp"
 #include "GltfFileSnapshot.hpp"
 #include "Utf8Path.hpp"
 
@@ -43,31 +44,6 @@
 namespace Tina::Asset {
 namespace {
 
-[[nodiscard]] Core::AssetId deriveId(std::string_view seed, Core::u8 tag)
-{
-    Core::AssetId::Bytes bytes{};
-    for (std::size_t i = 0; i < seed.size(); ++i)
-    {
-        bytes[i % 16] = static_cast<std::byte>(
-            static_cast<Core::u8>(bytes[i % 16]) ^ static_cast<Core::u8>(seed[i]) ^ tag);
-    }
-    bytes[0] = static_cast<std::byte>(tag);
-    return *Core::AssetId::fromBytes(bytes);
-}
-
-// Sequential suffix keeps derived output identities path-stable:
-// bytes[12..15] = big-endian index after a seed hash prefix.
-[[nodiscard]] Core::AssetId deriveIndexedId(std::string_view seed, Core::u8 tag, Core::u32 index)
-{
-    Core::AssetId id = deriveId(seed, tag == 0 ? 0x71 : tag);
-    Core::AssetId::Bytes bytes = id.bytes();
-    bytes[12] = static_cast<std::byte>(static_cast<Core::u8>((index >> 24) & 0xFFU));
-    bytes[13] = static_cast<std::byte>(static_cast<Core::u8>((index >> 16) & 0xFFU));
-    bytes[14] = static_cast<std::byte>(static_cast<Core::u8>((index >> 8) & 0xFFU));
-    bytes[15] = static_cast<std::byte>(static_cast<Core::u8>(index & 0xFFU));
-    return *Core::AssetId::fromBytes(bytes);
-}
-
 // Texture channels force Material dep AssetIds into baseColor < MR < normal order
 // (CatalogCook requires strictly increasing deps; flag order must stay base/MR/normal).
 enum class GltfTextureChannel : Core::u8 {
@@ -79,10 +55,21 @@ enum class GltfTextureChannel : Core::u8 {
 [[nodiscard]] Core::AssetId deriveTextureChannelId(std::string_view seed, GltfTextureChannel channel,
                                                    Core::u32 sequence)
 {
-    // bytes[12]=channel, bytes[13..15]=sequence under shared path hash (tag 0x74).
-    const Core::u32 packed =
-        (static_cast<Core::u32>(channel) << 24) | (sequence & 0x00FFFFFFU);
-    return deriveIndexedId(seed, 0x74, packed);
+    Core::u8 tag = Detail::GltfBaseColorTextureAssetIdTag;
+    switch (channel)
+    {
+    case GltfTextureChannel::BaseColor:
+        tag = Detail::GltfBaseColorTextureAssetIdTag;
+        break;
+    case GltfTextureChannel::MetallicRoughness:
+        tag = Detail::GltfMetallicRoughnessTextureAssetIdTag;
+        break;
+    case GltfTextureChannel::Normal:
+        tag = Detail::GltfNormalTextureAssetIdTag;
+        break;
+    }
+    return Detail::deriveVersionedAssetId(seed, AssetFormat::AssetKind::Texture2D, tag, sequence,
+                                          static_cast<Core::u32>(channel));
 }
 
 [[nodiscard]] Core::Status mapCgltfResult(cgltf_result result) noexcept
@@ -1323,6 +1310,8 @@ namespace {
     };
     GltfSourceCaptureContext* activeCapture = captureConfig != nullptr ? &capture : nullptr;
     Core::u32 primarySourceIndex = 0;
+    std::string identityLocator;
+    const std::filesystem::path requestedPath = Detail::pathFromUtf8Bytes(gltfUtf8Path);
 
     if (captureConfig != nullptr)
     {
@@ -1332,8 +1321,18 @@ namespace {
             return Core::failure(std::move(primaryPath.error())
                                      .withContext("cookGltfFileToCatalogSourceResult", "root preflight"));
         }
+        identityLocator = std::move(*primaryPath);
     }
-    const std::filesystem::path requestedPath = Detail::pathFromUtf8Bytes(gltfUtf8Path);
+    else
+    {
+        const auto generic = requestedPath.lexically_normal().generic_u8string();
+        identityLocator.assign(generic.begin(), generic.end());
+        if (identityLocator.empty())
+        {
+            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                 "glTF path cannot produce an identity locator");
+        }
+    }
     if (activeCapture != nullptr)
     {
         capture.documentSourcePath = requestedPath;
@@ -1399,7 +1398,9 @@ namespace {
 
     if (!static_cast<bool>(ids.prefabId))
     {
-        ids.prefabId = deriveId(gltfUtf8Path, 0x73);
+        ids.prefabId = Detail::deriveVersionedAssetId(
+            identityLocator, AssetFormat::AssetKind::Prefab,
+            Detail::GltfPrefabAssetIdTag, 0U);
     }
 
     struct MeshEntry final {
@@ -1534,7 +1535,7 @@ namespace {
             return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                                  "glTF cooked texture output budget exceeded");
         }
-        const Core::AssetId textureId = deriveTextureChannelId(gltfUtf8Path, channel, sequence);
+        const Core::AssetId textureId = deriveTextureChannelId(identityLocator, channel, sequence);
         auto texPayload = AssetFormat::writeTexture2DPayloadBytes(AssetFormat::Texture2DPayloadDesc{
             .width = static_cast<Core::u16>(decoded->second.width),
             .height = static_cast<Core::u16>(decoded->second.height),
@@ -1594,8 +1595,14 @@ namespace {
             else
             {
                 // Distinct tags so mesh/material never collide under dense sequential indexes.
-                meshId = deriveIndexedId(gltfUtf8Path, 0x71, nextPrimSlot);
-                materialId = deriveIndexedId(gltfUtf8Path, 0x72, nextPrimSlot);
+                meshId = Detail::deriveVersionedAssetId(
+                    identityLocator,
+                    hasSkinBinding ? AssetFormat::AssetKind::SkinnedMesh
+                                   : AssetFormat::AssetKind::StaticMesh,
+                    Detail::GltfMeshAssetIdTag, nextPrimSlot);
+                materialId = Detail::deriveVersionedAssetId(
+                    identityLocator, AssetFormat::AssetKind::Material,
+                    Detail::GltfMaterialAssetIdTag, nextPrimSlot);
             }
             ++nextPrimSlot;
 
@@ -1878,7 +1885,9 @@ namespace {
             return Core::failure(std::move(animationPayload.error()));
         }
         animations.push_back(CookedAnimationEntry{
-            .assetId = deriveIndexedId(gltfUtf8Path, 0x76, static_cast<Core::u32>(animationIndex)),
+            .assetId = Detail::deriveVersionedAssetId(
+                identityLocator, AssetFormat::AssetKind::AnimationClip3D,
+                Detail::GltfAnimationAssetIdTag, static_cast<Core::u32>(animationIndex)),
             .payload = std::move(*animationPayload),
         });
     }
