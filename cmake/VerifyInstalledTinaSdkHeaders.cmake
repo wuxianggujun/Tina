@@ -45,7 +45,9 @@ set(tina_forbidden_patterns
     "wl_[A-Za-z0-9_]+[ \t]*[*&]"
     "xcb_[A-Za-z0-9_]+[ \t]*[*&]"
     # Platform socket types stay inside src/network.
-    "#[ \t]*include[ \t]*[<\"](winsock2|ws2tcpip|sys/socket|netinet/in|arpa/inet)[/.>\"]"
+    "#[ \t]*include[ \t]*[<\"](winsock2|ws2tcpip|sys/socket|netinet/in|arpa/inet|mbedtls|psa)[/.>\"]"
+    "mbedtls_[A-Za-z0-9_]+"
+    "MBEDTLS_[A-Za-z0-9_]+"
     "SOCKET[ \t]*[*&]"
     "sockaddr(_in|_in6|_storage)?[ \t]*[*&]"
 )

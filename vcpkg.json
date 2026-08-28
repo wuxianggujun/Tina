@@ -26,6 +26,15 @@
         "box2d"
       ]
     },
+    "network-tls": {
+      "description": "Build the private Tina TLS transport adapter (mbedTLS).",
+      "dependencies": [
+        {
+          "name": "mbedtls",
+          "version>=": "3.6.5"
+        }
+      ]
+    },
     "audio-miniaudio": {
       "description": "Build the private Tina vNext miniaudio audio adapter (WAV/FLAC/MP3 built-in).",
       "dependencies": [

@@ -10,6 +10,12 @@ if (TINA_BUILD_PHYSICS2D)
     find_package(box2d CONFIG REQUIRED)
 endif ()
 
+if (TINA_BUILD_NETWORK_TLS)
+    # TLS adapter: mbedTLS is driven through caller-supplied BIO callbacks, so it
+    # never owns the socket or a thread. mbedTLS types stay inside src/network/tls.
+    find_package(MbedTLS CONFIG REQUIRED)
+endif ()
+
 if (TINA_BUILD_AUDIO_MINIAUDIO)
     # vNext audio adapter: header-only miniaudio via vcpkg feature audio-miniaudio.
     # Single MINIAUDIO_IMPLEMENTATION TU lives in src/audio/miniaudio.
