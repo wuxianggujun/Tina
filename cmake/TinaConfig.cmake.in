@@ -21,6 +21,7 @@ set(Tina_PlatformGlfw_FOUND FALSE)
 set(Tina_RenderBgfx_FOUND FALSE)
 set(Tina_UIFreetype_FOUND FALSE)
 set(Tina_AudioMiniaudio_FOUND FALSE)
+set(Tina_NetworkTls_FOUND FALSE)
 set(Tina_DesktopBootstrap_FOUND FALSE)
 set(Tina_GAME_SDK_TARGETS
     Tina::GameSDK
@@ -148,6 +149,20 @@ if(@TINA_PACKAGE_WITH_AUDIO_MINIAUDIO@ AND "AudioMiniaudio" IN_LIST Tina_FIND_CO
     unset(tina_audio_miniaudio_dependencies_found)
 endif()
 
+if(@TINA_PACKAGE_WITH_NETWORK_TLS@ AND "NetworkTls" IN_LIST Tina_FIND_COMPONENTS)
+    # mbedTLS links PRIVATE into a static library, so a consumer still needs the
+    # package present at link time even though it never sees the types.
+    if(Tina_FIND_REQUIRED_NetworkTls)
+        find_dependency(MbedTLS)
+    else()
+        find_package(MbedTLS QUIET CONFIG)
+    endif()
+    if(MbedTLS_FOUND)
+        include("${CMAKE_CURRENT_LIST_DIR}/TinaNetworkTlsTargets.cmake")
+        set(Tina_NetworkTls_FOUND TRUE)
+    endif()
+endif()
+
 if(@TINA_PACKAGE_WITH_DESKTOP_BOOTSTRAP@ AND tina_load_desktop_bootstrap AND
    TARGET Tina::PlatformGlfw AND TARGET Tina::RenderBgfx AND
    (NOT @TINA_PACKAGE_WITH_UI_FREETYPE@ OR TARGET Tina::UIFreetype))
@@ -170,6 +185,10 @@ endif()
 if(TARGET Tina::AudioMiniaudio)
     list(APPEND Tina_ADAPTER_TARGETS Tina::AudioMiniaudio)
     list(APPEND Tina_PACKAGE_TARGETS Tina::AudioMiniaudio)
+endif()
+if(TARGET Tina::NetworkTls)
+    list(APPEND Tina_ADAPTER_TARGETS Tina::NetworkTls)
+    list(APPEND Tina_PACKAGE_TARGETS Tina::NetworkTls)
 endif()
 if(TARGET Tina::DesktopBootstrap)
     set(Tina_DESKTOP_BOOTSTRAP_TARGETS

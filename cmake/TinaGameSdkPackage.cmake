@@ -118,6 +118,14 @@ function(tina_configure_game_sdk_package)
         set(TINA_PACKAGE_WITH_UI_FREETYPE ON)
     endif()
 
+    # TLS is an adapter rather than part of the neutral SDK: it exists only when a
+    # third-party backend was built, so it gets its own export set and component.
+    set(TINA_PACKAGE_WITH_NETWORK_TLS OFF)
+    if(TARGET tina_network_tls)
+        tina_configure_game_sdk_target(tina_network_tls NetworkTls)
+        set(TINA_PACKAGE_WITH_NETWORK_TLS ON)
+    endif()
+
     set(TINA_PACKAGE_WITH_AUDIO_MINIAUDIO OFF)
     set(TINA_PACKAGE_AUDIO_MINIAUDIO_NEEDS_THREADS OFF)
     set(TINA_PACKAGE_AUDIO_MINIAUDIO_WITH_LIBVORBIS OFF)
@@ -243,6 +251,14 @@ function(tina_configure_game_sdk_package)
             RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
         )
     endif()
+    if(TARGET tina_network_tls)
+        install(TARGETS tina_network_tls
+            EXPORT TinaNetworkTlsTargets
+            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        )
+    endif()
     if(TARGET tina_bootstrap_desktop)
         install(TARGETS tina_bootstrap_desktop
             EXPORT TinaDesktopBootstrapTargets
@@ -274,6 +290,9 @@ function(tina_configure_game_sdk_package)
         PATTERN "FreeTypeTextRasterizerFactory.hpp" EXCLUDE
         PATTERN "WindowsUiaAccessibilityProviderFactory.hpp" EXCLUDE
         PATTERN "TileMapPhysicsSync.hpp" EXCLUDE
+        # Reinstalled below only when the TLS adapter was built, so a package
+        # without it does not advertise a header its consumer cannot link.
+        PATTERN "tls" EXCLUDE
     )
     if(TARGET tina_physics2d)
         install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/tina/physics2d"
@@ -297,6 +316,12 @@ function(tina_configure_game_sdk_package)
     if(TARGET tina_ui_freetype)
         install(FILES "${PROJECT_SOURCE_DIR}/include/tina/ui/text/FreeTypeTextRasterizerFactory.hpp"
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/ui/text"
+        )
+    endif()
+    if(TARGET tina_network_tls)
+        install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/tina/network/tls"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/network"
+            FILES_MATCHING PATTERN "*.hpp"
         )
     endif()
     if(TARGET tina_audio_miniaudio)
@@ -365,6 +390,13 @@ function(tina_configure_game_sdk_package)
     if(TARGET tina_audio_miniaudio)
         install(EXPORT TinaAudioMiniaudioTargets
             FILE TinaAudioMiniaudioTargets.cmake
+            NAMESPACE Tina::
+            DESTINATION "${tina_package_directory}"
+        )
+    endif()
+    if(TARGET tina_network_tls)
+        install(EXPORT TinaNetworkTlsTargets
+            FILE TinaNetworkTlsTargets.cmake
             NAMESPACE Tina::
             DESTINATION "${tina_package_directory}"
         )
