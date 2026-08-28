@@ -49,6 +49,17 @@ focus loss 同一形状。默认值是 `true`，因此既有后端与测试语�
 这不只是移动端的准备：没有它，hover 会永久锁在最后一个 hover 过的控件上。鼠标总有位置所以可以忍，触摸
 设备两次点击之间根本没有位置（[ADR 0032](adr/0032-mobile-platform-contract-boundaries.md) C2）。
 
+`InputCancelTransition::pointer` 给取消加了作用域：具名 pointer 只释放该 slot 的 arm/hover/capture，
+nullopt 才是全量取消（focus loss、window closing、stream reset 用）。它与 `gamepad` 互斥——两者是不相交
+的设备类别——且越界 slot 由 `isValidInputCancelTransition` 拒绝。UI 侧的 `cancelPointerInteraction()` 接受
+同一可选 pointer；具名形式**不**拆除 focus、tooltip、IME 与 command press latch，因为那些是键鼠共享状态，
+一根手指抬起不构成拆它们的理由（capture 持有者仍收到 synthetic `PointerCancel`）。
+
+作用域是必需的而非优化：`present` 本来就是 per-pointer，所以平台早已能表达「第 2 根手指抬起了」，但在此
+之前 UI 唯一的取消入口会清空全部八个 slot。桌面上看不出来（只有一个指针），触摸设备上就是一根手指抬起
+让另一根丢掉正握着的控件——[ADR 0032](adr/0032-mobile-platform-contract-boundaries.md) 引 cocos2d-x 三个
+圆形控件为反例的正是这类缺陷。GLFW 的 cursor-leave 因此只取消 Primary。
+
 设备身份（name / SDL GUID / layout）在一次连接内固定，因此随 `GamepadConnectedEvent` 一次性交付，
 **不进** `GamepadSnapshot`：snapshot 是每帧复制的16槽数组，把静态字节放进去纯属浪费。存储是固定内联的
 `GamepadName`/`GamepadGuid`，超长静默截断——身份只用于展示，缩短标签比因此丢掉 connect 事件更好。

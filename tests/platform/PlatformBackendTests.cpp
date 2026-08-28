@@ -858,6 +858,21 @@ TEST(PlatformFrameBuilderTest, RejectsInvalidInputTransitionPayloads)
         .reason = Platform::InputCancelReason::WindowClosing,
         .gamepad = gamepad,
     });
+    // A pointer-scoped cancel must name a slot inside the fixed capacity, or the
+    // consumer would index its per-pointer table out of range.
+    expectInvalidInputPayload(Platform::InputCancelTransition{
+        .routedWindow = window,
+        .reason = Platform::InputCancelReason::FocusLost,
+        .pointer = static_cast<Platform::PointerId>(Platform::PointerCapacity),
+    });
+    // Pointer and gamepad are disjoint device classes: a pad disconnect is never
+    // also one finger lifting, and accepting both would leave the scope ambiguous.
+    expectInvalidInputPayload(Platform::InputCancelTransition{
+        .routedWindow = window,
+        .reason = Platform::InputCancelReason::DeviceDisconnected,
+        .gamepad = gamepad,
+        .pointer = Platform::PrimaryPointerId,
+    });
     expectInvalidInputPayload(Platform::InputStreamReset{
         .routedWindow = std::optional<Platform::WindowId>{Platform::WindowId{}},
         .reason = Platform::InputResetReason::CapacityExceeded,
@@ -1521,6 +1536,97 @@ TEST(PlatformFrameBuilderTest, RejectsDigitalEdgesInconsistentWithFinalSnapshots
             .state = Platform::DigitalTransition::Down,
         },
         false, {}, true);
+}
+
+// A pointer-scoped cancel is a per-slot state barrier: the named pointer must end the
+// frame with nothing held, while another pointer's press in the same frame survives.
+// The window-wide form still clears every expectation, which is what focus loss needs.
+// Before the scope existed, one lifted finger forced the whole frame's input to be
+// treated as released.
+TEST(PlatformFrameBuilderTest, PointerScopedCancelClearsOnlyThatPointer)
+{
+    auto windowPoolResult = TestWindowPool::Create(1);
+    ASSERT_TRUE(windowPoolResult.has_value());
+    auto& windowPool = *windowPoolResult;
+    const Platform::WindowId window = createWindowId(windowPool);
+
+    auto builderResult = Platform::PlatformFrameBuilder::Create({
+        .inputTransitionCapacity = 4,
+        .platformEventCapacity = 1,
+    });
+    ASSERT_TRUE(builderResult.has_value());
+    auto& builder = *builderResult;
+    ASSERT_TRUE(builder.beginFrame({1}).has_value());
+
+    // Two fingers press, then the second one lifts through a scoped cancel.
+    EXPECT_EQ(builder.appendInputTransition(Platform::PointerButtonTransition{
+                  .window = window,
+                  .pointer = 1,
+                  .button = Platform::PointerButton::Primary,
+                  .state = Platform::DigitalTransition::Down,
+              }),
+              Platform::FrameBatchAppendResult::Appended);
+    EXPECT_EQ(builder.appendInputTransition(Platform::PointerButtonTransition{
+                  .window = window,
+                  .pointer = 2,
+                  .button = Platform::PointerButton::Primary,
+                  .state = Platform::DigitalTransition::Down,
+              }),
+              Platform::FrameBatchAppendResult::Appended);
+    EXPECT_EQ(builder.appendInputTransition(Platform::InputCancelTransition{
+                  .routedWindow = window,
+                  .reason = Platform::InputCancelReason::FocusLost,
+                  .pointer = 2,
+              }),
+              Platform::FrameBatchAppendResult::Appended);
+
+    auto finalInput = validWindowInput(window, 1);
+    finalInput.pointers[1].present = true;
+    finalInput.pointers[1].heldButtons.set(static_cast<usize>(Platform::PointerButton::Primary));
+    // Pointer 2 lifted: absent and holding nothing, which the frame contract requires.
+    finalInput.pointers[2].present = false;
+    EXPECT_TRUE(builder.setPrimaryWindowSnapshot(validWindowMetrics(window, 1), finalInput));
+    EXPECT_TRUE(builder.finishFrame().has_value())
+        << "the surviving pointer's press was rejected by a cancel that was not its own";
+}
+
+// The same frame is refused when the cancelled pointer is still reported as holding a
+// button: a cancel means released, so the snapshot must agree.
+TEST(PlatformFrameBuilderTest, PointerScopedCancelRejectsAStillHeldButtonOnThatPointer)
+{
+    auto windowPoolResult = TestWindowPool::Create(1);
+    ASSERT_TRUE(windowPoolResult.has_value());
+    auto& windowPool = *windowPoolResult;
+    const Platform::WindowId window = createWindowId(windowPool);
+
+    auto builderResult = Platform::PlatformFrameBuilder::Create({
+        .inputTransitionCapacity = 4,
+        .platformEventCapacity = 1,
+    });
+    ASSERT_TRUE(builderResult.has_value());
+    auto& builder = *builderResult;
+    ASSERT_TRUE(builder.beginFrame({1}).has_value());
+
+    EXPECT_EQ(builder.appendInputTransition(Platform::PointerButtonTransition{
+                  .window = window,
+                  .pointer = 1,
+                  .button = Platform::PointerButton::Primary,
+                  .state = Platform::DigitalTransition::Down,
+              }),
+              Platform::FrameBatchAppendResult::Appended);
+    EXPECT_EQ(builder.appendInputTransition(Platform::InputCancelTransition{
+                  .routedWindow = window,
+                  .reason = Platform::InputCancelReason::FocusLost,
+                  .pointer = 1,
+              }),
+              Platform::FrameBatchAppendResult::Appended);
+
+    auto finalInput = validWindowInput(window, 1);
+    finalInput.pointers[1].present = true;
+    finalInput.pointers[1].heldButtons.set(static_cast<usize>(Platform::PointerButton::Primary));
+    EXPECT_TRUE(builder.setPrimaryWindowSnapshot(validWindowMetrics(window, 1), finalInput));
+    EXPECT_FALSE(builder.finishFrame().has_value())
+        << "a cancelled pointer was allowed to end the frame still holding a button";
 }
 
 TEST(PlatformFrameBuilderTest, AcceptsFinalDigitalStateAfterLaterEdgeOrReset)

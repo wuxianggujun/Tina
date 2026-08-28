@@ -1251,12 +1251,15 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         // shape it sees on focus loss, instead of a press with no matching Up.
         //
         // This is the desktop analogue of a finger lifting: the pointer stops having
-        // a position at all, which is why presence exists (ADR 0032 C2).
+        // a position at all, which is why presence exists (ADR 0032 C2). Scoped to
+        // the primary pointer because that is the only one a cursor can be -- a
+        // window-wide cancel here would release controls held by other pointers.
         if (input_.pointers[Platform::PrimaryPointerId].heldButtons.any() && collectingFrame_)
         {
             recordAppend(frameBuilder_.appendInputTransition(InputCancelTransition{
                 .routedWindow = windowId_,
                 .reason = InputCancelReason::FocusLost,
+                .pointer = Platform::PrimaryPointerId,
             }));
         }
         input_.pointers[Platform::PrimaryPointerId].heldButtons.reset();

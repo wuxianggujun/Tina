@@ -47,8 +47,16 @@ class UIInputRouter final {
                              UIRoutedPointerCallback callback);
     [[nodiscard]] Core::Result<UIPointerRouteResult>
     routePointerInput(const UIPointerInputEvent& input);
+    // Releases pointer interaction state. `pointer` scopes the cancel to one slot,
+    // leaving every other pointer's arm, hover and capture intact; nullopt cancels
+    // all of them, which is what focus loss and a window-wide reset need.
+    //
+    // The scoped form exists because one finger lifting on a touch device is routine
+    // and independent -- cancelling all pointers there would let another finger lose
+    // the control it is holding.
     [[nodiscard]] Core::Status
-    cancelPointerInteraction(Platform::WindowId routedWindow);
+    cancelPointerInteraction(Platform::WindowId routedWindow,
+                             std::optional<Platform::PointerId> pointer = std::nullopt);
     [[nodiscard]] Core::Status cancelDefaultActionInteraction(
         Platform::WindowId routedWindow,
         std::optional<Platform::GamepadId> gamepad = std::nullopt);

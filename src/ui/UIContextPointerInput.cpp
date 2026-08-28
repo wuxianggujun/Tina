@@ -1513,7 +1513,8 @@ void UIContext::Impl::dispatchPointerCancelForSubtree(UINodeId subtreeRoot) noex
     return result;
 }
 
-[[nodiscard]] Core::Status UIContext::Impl::cancelPointerInteraction(Platform::WindowId routedWindow)
+[[nodiscard]] Core::Status UIContext::Impl::cancelPointerInteraction(
+    Platform::WindowId routedWindow, std::optional<Platform::PointerId> pointer)
 {
     if (Core::Status ownerThread = ensureOwnerThread(); !ownerThread)
     {
@@ -1527,6 +1528,18 @@ void UIContext::Impl::dispatchPointerCancelForSubtree(UINodeId subtreeRoot) noex
     if (routedWindow != ownerWindow)
     {
         return fail(UIErrorCode::WrongOwnerWindow, "UI Pointer interaction cancellation belongs to another Window");
+    }
+    if (pointer.has_value() && *pointer >= Platform::PointerCapacity)
+    {
+        return fail(UIErrorCode::InvalidPointerInput,
+                    "UI Pointer interaction cancellation names a pointer outside the fixed capacity");
+    }
+    // One pointer lifting is routine and independent on a touch device, so it must not
+    // disturb the others: their arm, hover and capture stay, and the shared
+    // focus/tooltip/latch teardown below is skipped because no device went away.
+    if (pointer.has_value())
+    {
+        return cancelSinglePointerInteraction(*pointer);
     }
     std::array<UINodeId, Platform::PointerCapacity * 5 + 2> cancelledNodes{};
     usize cancelledNodeCount = 0;
@@ -1593,6 +1606,50 @@ void UIContext::Impl::dispatchPointerCancelForSubtree(UINodeId subtreeRoot) noex
     for (usize index = 0; index < cancelledNodeCount; ++index)
     {
         static_cast<void>(markPaintDirty(cancelledNodes[index]));
+    }
+    return Core::success();
+}
+
+// Releases exactly one pointer's interaction state. Runs on the winning pointer's
+// saved slot rather than the live registers, so the caller's active pointer is
+// restored unchanged -- routing may be mid-dispatch for a different finger.
+//
+// Deliberately narrower than the window-wide cancel: focus, tooltips, IME and the
+// command press latches are keyboard/gamepad-shared state, and a finger lifting is
+// not a reason to tear them down.
+[[nodiscard]] Core::Status UIContext::Impl::cancelSinglePointerInteraction(
+    Platform::PointerId pointer) noexcept
+{
+    const Platform::PointerId restore = activePointerState;
+    savePointerInteractionState(restore);
+
+    PointerInteractionState& target = pointerInteractionStates[pointer];
+    // Capture is the one piece with an observable side effect: its holder expects a
+    // synthetic PointerCancel along the committed ancestry it was captured on.
+    if (target.capturedPointerNode.hasValue())
+    {
+        loadPointerInteractionState(pointer);
+        dispatchPointerCancelForCurrentCapture();
+        savePointerInteractionState(pointer);
+    }
+
+    const std::array<UINodeId, 5> cancelledNodes{
+        target.armedPrimaryButton, target.armedSlider, target.armedScrollView,
+        target.armedTextEdit, target.hoveredPrimaryControl,
+    };
+    target = {};
+
+    restorePointerInteractionState(pointerInteractionStates[restore]);
+    activePointerState = restore;
+
+    // Best effort, exactly as the window-wide path: a full dirty queue still leaves
+    // the state cleared, and pending work will rebuild the snapshot anyway.
+    for (const UINodeId node : cancelledNodes)
+    {
+        if (node.hasValue())
+        {
+            static_cast<void>(markPaintDirty(node));
+        }
     }
     return Core::success();
 }

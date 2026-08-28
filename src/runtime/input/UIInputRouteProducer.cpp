@@ -832,8 +832,12 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
             cancel != nullptr) {
             if (!cancel->gamepad.has_value()
                 && cancel->routedWindow == context->ownerWindow()) {
+                // Forwards the platform's scope verbatim: a single lifted pointer
+                // releases only its own control, while nullopt is the window-wide
+                // teardown focus loss needs.
                 Core::Status cancelStatus =
-                    context->input().cancelPointerInteraction(cancel->routedWindow);
+                    context->input().cancelPointerInteraction(cancel->routedWindow,
+                                                              cancel->pointer);
                 if (!cancelStatus) {
                     Core::Error error = std::move(cancelStatus.error());
                     error.addContext("UIInputRouteProducer::produce(cancel)");

@@ -5,6 +5,7 @@
 
 #include <memory>
 #include <memory_resource>
+#include <tuple>
 #include <utility>
 
 namespace Tina::Tests {
@@ -298,6 +299,113 @@ TEST_F(UIPointerCaptureTest, MultiplePointersKeepCaptureAndArmsIndependent)
         pointerInputFor(window, 1, UI::UIRoutedPointerEventKind::ButtonUp, 90.0F, 90.0F, 5));
     ASSERT_TRUE(firstUp.has_value()) << (firstUp ? "" : firstUp.error().message);
     EXPECT_FALSE(context->input().pointerCapture(1).hasValue());
+}
+
+// A single pointer lifting is routine and independent on a touch device. Cancelling
+// it must not disturb any other pointer -- releasing all of them would let one finger
+// drop the control another is holding, which is the multi-touch defect ADR 0032 cites
+// from cocos2d-x. Before the scoped cancel existed, the only cancel entry point
+// cleared all eight slots, so the platform could report "pointer 2 is gone" and UI
+// could only forget everything.
+TEST_F(UIPointerCaptureTest, CancellingOnePointerLeavesTheOthersHolding)
+{
+    auto context = createContext(window);
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    auto updater = createUpdater(*context, root);
+    const UI::UINodeId rootNode = root.rootNodeId();
+    const UI::UINodeId first = createButton(updater, rootNode);
+    const UI::UINodeId second = createButton(updater, rootNode);
+    const UI::UINodeId third = createButton(updater, rootNode);
+    expectOk(updater.setLayoutStyle(rootNode, fixedSize(300.0F, 100.0F)));
+    expectOk(updater.setLayoutStyle(first, overlay(0.0F, 0.0F, 60.0F, 40.0F)));
+    expectOk(updater.setLayoutStyle(second, overlay(100.0F, 0.0F, 60.0F, 40.0F)));
+    expectOk(updater.setLayoutStyle(third, overlay(200.0F, 0.0F, 60.0F, 40.0F)));
+    expectOk(context->publication().commitLayout({.width = 300.0F, .height = 100.0F}));
+
+    // Three fingers, each holding its own control.
+    for (const auto& [pointer, node, x] : {std::tuple{Platform::PointerId{1}, first, 10.0F},
+                                           std::tuple{Platform::PointerId{2}, second, 110.0F},
+                                           std::tuple{Platform::PointerId{3}, third, 210.0F}})
+    {
+        auto down = context->input().routePointerInput(pointerInputFor(
+            window, pointer, UI::UIRoutedPointerEventKind::ButtonDown, x, 10.0F, pointer));
+        ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
+        ASSERT_EQ(context->input().pointerCapture(pointer), node);
+    }
+
+    // The middle finger lifts.
+    ASSERT_TRUE(context->input().cancelPointerInteraction(window, 2).has_value());
+    EXPECT_FALSE(context->input().pointerCapture(2).hasValue());
+    EXPECT_EQ(context->input().pointerCapture(1), first)
+        << "cancelling pointer 2 released pointer 1's capture";
+    EXPECT_EQ(context->input().pointerCapture(3), third)
+        << "cancelling pointer 2 released pointer 3's capture";
+
+    // The surviving pointers still route through their own capture afterwards.
+    auto firstMove = context->input().routePointerInput(
+        pointerInputFor(window, 1, UI::UIRoutedPointerEventKind::Move, 250.0F, 90.0F, 10));
+    ASSERT_TRUE(firstMove.has_value()) << (firstMove ? "" : firstMove.error().message);
+    EXPECT_EQ(firstMove->routedTarget.node, first);
+    EXPECT_TRUE(firstMove->routedThroughPointerCapture);
+
+    // And the cancelled slot is reusable: a new touch there captures normally.
+    auto reuse = context->input().routePointerInput(
+        pointerInputFor(window, 2, UI::UIRoutedPointerEventKind::ButtonDown, 110.0F, 10.0F, 11));
+    ASSERT_TRUE(reuse.has_value()) << (reuse ? "" : reuse.error().message);
+    EXPECT_EQ(context->input().pointerCapture(2), second);
+}
+
+// The window-wide form must keep working: focus loss and stream resets are not about
+// one device, and every pointer has to let go.
+TEST_F(UIPointerCaptureTest, CancellingWithoutAPointerStillReleasesEveryPointer)
+{
+    auto context = createContext(window);
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    auto updater = createUpdater(*context, root);
+    const UI::UINodeId rootNode = root.rootNodeId();
+    const UI::UINodeId first = createButton(updater, rootNode);
+    const UI::UINodeId second = createButton(updater, rootNode);
+    expectOk(updater.setLayoutStyle(rootNode, fixedSize(200.0F, 100.0F)));
+    expectOk(updater.setLayoutStyle(first, overlay(0.0F, 0.0F, 60.0F, 40.0F)));
+    expectOk(updater.setLayoutStyle(second, overlay(100.0F, 0.0F, 60.0F, 40.0F)));
+    expectOk(context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
+
+    ASSERT_TRUE(context->input()
+                    .routePointerInput(pointerInputFor(
+                        window, 1, UI::UIRoutedPointerEventKind::ButtonDown, 10.0F, 10.0F, 1))
+                    .has_value());
+    ASSERT_TRUE(context->input()
+                    .routePointerInput(pointerInputFor(
+                        window, 2, UI::UIRoutedPointerEventKind::ButtonDown, 110.0F, 10.0F, 2))
+                    .has_value());
+    ASSERT_EQ(context->input().pointerCapture(1), first);
+    ASSERT_EQ(context->input().pointerCapture(2), second);
+
+    ASSERT_TRUE(context->input().cancelPointerInteraction(window).has_value());
+    EXPECT_FALSE(context->input().pointerCapture(1).hasValue());
+    EXPECT_FALSE(context->input().pointerCapture(2).hasValue());
+}
+
+// A slot outside the fixed capacity is refused rather than silently ignored or used
+// to index the table.
+TEST_F(UIPointerCaptureTest, CancellingAnOutOfRangePointerFailsClosed)
+{
+    auto context = createContext(window);
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    auto updater = createUpdater(*context, root);
+    expectOk(updater.setLayoutStyle(root.rootNodeId(), fixedSize(100.0F, 100.0F)));
+    expectOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
+
+    auto status = context->input().cancelPointerInteraction(
+        window, static_cast<Platform::PointerId>(Platform::PointerCapacity));
+    EXPECT_FALSE(status);
+    if (!status)
+    {
+        EXPECT_EQ(status.error().code, UI::UIErrorCode::InvalidPointerInput);
+    }
 }
 
 TEST_F(UIPointerCaptureTest, ControlsAutoCaptureAndReleaseOnUpCancelDestroyDisableHideAndModal)

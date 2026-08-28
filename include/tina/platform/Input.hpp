@@ -430,6 +430,18 @@ struct InputCancelTransition final {
     WindowId routedWindow{};
     InputCancelReason reason = InputCancelReason::FocusLost;
     std::optional<GamepadId> gamepad{};
+    // Which pointer lost its interaction. nullopt means every pointer, which is what
+    // focus loss or a window-wide cancel needs.
+    //
+    // A single pointer must be nameable because on a touch device one finger lifting
+    // is routine and independent: cancelling all of them would let the second finger
+    // steal or drop the first one's control, exactly the multi-touch defect ADR 0032
+    // cites from cocos2d-x. Absence is per-pointer in PointerSnapshot already, so
+    // without this the platform could say "pointer 2 is gone" and the only thing UI
+    // could do with it was forget all eight.
+    //
+    // Gamepad cancels never carry a pointer: the two are disjoint device classes.
+    std::optional<PointerId> pointer{};
 };
 
 struct InputStreamReset final {

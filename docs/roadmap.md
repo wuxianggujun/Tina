@@ -119,7 +119,7 @@ ABI tuple 的 artifact/API/symbol baseline 与 previous-object probe 作为 rele
 - layout whitelist 扩展，以及 loop/seek/pause/repeat/yoyo/completion callback、spring/inertia 等高级 Motion playback；
 - `MeshRenderer3D` / `SkinnedMeshRenderer3D` 的 LOD 与剩余 instancing 扩展（static/skinned sphere-frustum culling 已在 resolver 前完成；opaque static 当前仅对 mesh/material/submesh/doubleSided 相同的连续 item 合批并以 bgfx instanced draw 提交，transparent static 与 skinned path 仍逐 item draw）；
 - Asset Bundle/Patch、cache/LRU 与 network Asset；
-- 移动端（Android/iOS）平台后端（`MOBILE-001`，[ADR 0032](adr/0032-mobile-platform-contract-boundaries.md) Proposed）。后端本身只有 7 个纯虚；成本在六个桌面契约上（单 pointer、指针位置永久存在、native surface 不变、poll 线程==渲染线程、只有三个 renderer、preedit 由应用控制）。**切片 A 已完成**（2026-08-28 更正，此前写作最大单项前置工作）：pointer presence（`3569f0b4`）与多点触控路由（`4ec987a9`）均已在桌面落地并有单测，`UIVirtualStick` 是首个真实多点消费者，故前两个契约已不再是阻塞项。剩余四个契约与后端实现仍待 ADR 0032 的 D3（`run()` 保持阻塞还是改外部驱动 `tick()`）定论，未定则 iOS 无法开工。
+- 移动端（Android/iOS）平台后端（`MOBILE-001`，[ADR 0032](adr/0032-mobile-platform-contract-boundaries.md) Proposed）。后端本身只有 7 个纯虚；成本在六个桌面契约上（单 pointer、指针位置永久存在、native surface 不变、poll 线程==渲染线程、只有三个 renderer、preedit 由应用控制）。**切片 A 已完成**（2026-08-28 更正，此前写作最大单项前置工作）：pointer presence（`3569f0b4`）、多点触控路由（`4ec987a9`）与 per-pointer cancel 作用域均已在桌面落地并有单测，`UIVirtualStick` 是首个真实多点消费者，故前两个契约已不再是阻塞项。per-pointer cancel 补的是 presence 与多点之间的接缝：平台此前能报「某根手指抬起」，而 UI 只能全量取消八个 slot —— 在触摸设备上一根手指抬起会让另一根丢掉控件。剩余四个契约与后端实现仍待 ADR 0032 的 D3（`run()` 保持阻塞还是改外部驱动 `tick()`）定论，未定则 iOS 无法开工；切片 B 的三项（surface 重建事件、软键盘 show/hide 与遮挡矩形、Metal/ESSL shader profile）经核实**均为零实现**。
 
 Later 项进入 Now 前必须先补清楚产品场景、容量边界、失败语义和验收命令，不能只按功能名称开工。
 

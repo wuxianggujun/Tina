@@ -797,6 +797,13 @@ class PlatformFrameBuilder final {
         {
             return false;
         }
+        // A pointer-scoped cancel names a slot that exists. Gamepad and pointer are
+        // disjoint: a device-disconnect cancel is about a pad and never a pointer.
+        if (transition.pointer.has_value() &&
+            (*transition.pointer >= PointerCapacity || transition.gamepad.has_value()))
+        {
+            return false;
+        }
         if (transition.reason == InputCancelReason::DeviceDisconnected)
         {
             return transition.gamepad.has_value() && isValidGamepadId(*transition.gamepad);
@@ -1344,6 +1351,13 @@ class PlatformFrameBuilder final {
             {
                 if (!cancel->gamepad.has_value())
                 {
+                    // A pointer-scoped cancel clears only that pointer's buttons; keys
+                    // and pads are untouched because no such device went away.
+                    if (cancel->pointer.has_value())
+                    {
+                        pointerExpectations[*cancel->pointer].fill(ExpectedDigitalState::Released);
+                        continue;
+                    }
                     clearAllExpectations();
                     continue;
                 }

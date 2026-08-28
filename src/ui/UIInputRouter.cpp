@@ -102,9 +102,10 @@ Core::Result<UIPointerRouteResult> UIInputRouter::routePointerInput(const UIPoin
     return m_context->m_impl->routePointerInput(input);
 }
 
-Core::Status UIInputRouter::cancelPointerInteraction(Platform::WindowId routedWindow)
+Core::Status UIInputRouter::cancelPointerInteraction(Platform::WindowId routedWindow,
+                                                    std::optional<Platform::PointerId> pointer)
 {
-    return m_context->m_impl->cancelPointerInteraction(routedWindow);
+    return m_context->m_impl->cancelPointerInteraction(routedWindow, pointer);
 }
 
 Core::Status UIInputRouter::cancelDefaultActionInteraction(Platform::WindowId routedWindow,

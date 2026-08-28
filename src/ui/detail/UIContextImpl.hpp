@@ -2823,7 +2823,11 @@ struct UIContext::Impl final {
     [[nodiscard]] Core::Result<UIPointerRouteResult> routePointerInput(const UIPointerInputEvent& input);
 
 
-    [[nodiscard]] Core::Status cancelPointerInteraction(Platform::WindowId routedWindow);
+    [[nodiscard]] Core::Status cancelPointerInteraction(
+        Platform::WindowId routedWindow,
+        std::optional<Platform::PointerId> pointer = std::nullopt);
+    [[nodiscard]] Core::Status cancelSinglePointerInteraction(
+        Platform::PointerId pointer) noexcept;
 
 
     [[nodiscard]] static bool isValidFlowLocalUser(UIFlowLocalUserId localUser) noexcept;
