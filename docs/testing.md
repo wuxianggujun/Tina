@@ -297,63 +297,22 @@ out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
 测试数量随功能增长，不作为永久契约；本轮必须直接运行对应 GoogleTest executable，并以最终 gate
 JSON 与退出码记录结果。
 
-## 3D-SKIN-001 A1-A4 定向门禁（已通过）
+## 3D-SKIN-001 与 RENDER-002-TRANSPARENT（均已 Done）
 
-当前代码与集中产品门禁均已闭环；`3D-SKIN-001` 已转 Done。
+两项的逐条 gate 明细、当时的测试计数与历史 schema 15 字段值只保留在 git history。当前由 product-3d
+evidence schema 16 与常规 3D product gate 保护，仍需成立的契约为：
 
-- **A1 wire/cook/typed**：`SkinnedMeshPayloadTests.*`、`AnimationClip3DPayloadTests.*` 覆盖 writer/parser
-  round-trip、截断、保留字段、排序、时长、固定4 influence 权重和 joint 上限；`GltfCookTests.*` 覆盖
-  skin/inverse bind、child-before-parent remap、JOINTS/WEIGHTS、LINEAR/STEP sampler、CUBICSPLINE 拒绝、
-  skin 外 animation target 拒绝与 malformed fail-closed。
-- **A2 Scene/CPU pose**：`Animator3DTests.*` 覆盖层级 pose、LINEAR/STEP、Once/Loop/PingPong、暂停/停止/
-  speed、无分配 update 与失败原子性；`SceneMeshAssetTest` 的 skinned extraction 用例覆盖
-  `SkinnedMeshRenderer3D`、`SkinnedPose3DProvider`、palette 深拷贝、隐藏跳过和 missing/malformed pose
-  fail-closed；World setter 验证 static/skinned renderer 互斥且非法替换不破坏原组件。
-- **A3 Render/GPU**：`RenderSceneBuilderTest` 覆盖 packet-local palette capacity、排序/cull/deep-copy；
-  `NullRenderDeviceMeshTest`/`NullRenderDeviceTest` 覆盖 skinned upload、joint/weight 校验、kind 与 skeleton
-  对账；`BgfxOpaque3DGeometryTest` 和 shader embedded assets 覆盖 skinned frame preflight 与 GPU palette
-  vertex path。公开头由 `Animator3DHeader.cpp`、`SkinnedMeshRenderer3DHeader.cpp` 与对应 payload
-  header-isolation TU 覆盖。
-- **A4 product evidence**：`tina_sample_3d` 的 built-in witness 固定 total mesh/material=`3`、static=`2`、
-  skinned=`1`、joints=`2`、skinned Prefab instances=`3`；`--skin-animation=on|off` 都逐帧 update、extract、
-  submit，on 要求 pose fingerprint 变化，off 要求 pose fingerprint 不变且 RGB ROI 仍产生 draw。脚本
-  `RunProduct3dGate.ps1` 以 evidence schema 15 检查计数、fingerprint 稳定性、on/off 逐字节 RGB L1 与临时
-  raw capture 回收。
+- **Skin**：`SkinnedMeshRenderer3D` 与 `MeshRenderer3D` 互斥；`Animator3D` CPU pose 无分配且失败原子；
+  palette 为 packet-local 深拷贝；CUBICSPLINE、skin 外 animation target 与 malformed 一律 fail closed。
+- **Transparent**：Material v2 与 Cooker 只接受显式 `Opaque`/`Blend`，`MASK`/未知 alpha mode fail closed，
+  不从 baseColor alpha 或纹理内容猜测 pass；Blend static/skinned 进入统一 back-to-front 全序，等距按
+  stable Entity identity → kind → item index 决胜；透明 draw 容量独立固定且事务提交，超限不发半帧。
+- **Pass 顺序**（两项共同依赖）：CSM×4 → Spot×1 → Point×6 → Opaque3D → Transparent3D → Sprite2D → UI。
+  Transparent3D 使用 straight-alpha、depth test less、不写 depth；不投 shadow 但仍接收 lighting/shadow/PBR/IBL。
+- **schema 16 当前字段**：total/static/skinned mesh=`3/2/1`、Material=`4`。`--skin-animation=on|off` 与
+  `--transparency=on|off` 的 A/B 要求同模式 fingerprint 稳定、跨模式不同且 RGB L1 达标。
 
-2026-08-14 在常驻 `windows-msvc-vnext-bgfx-ui-freetype` build tree 执行
-`RunProduct3dGate.ps1 -SkipConfigure -SkipBuild`：11个 GoogleTest executable 全部 exit 0；300帧 schema 15
-主 sample exit 0，Animator pose changes=`300`、packet pose fingerprint changes=`299`，3组 mesh/material/texture
- owner 全部 retirement Released。30帧 skin on/off scene fingerprint 各自稳定且跨模式不同，RGB L1 达到
-门槛；同轮 IBL 与 PointLight shadow 的 on/off fingerprint 也各自稳定、跨模式不同且 L1 达标。比较用 raw
-RGB 均已删除。测试数量随代码增长，不从截断日志推测未保留的 GoogleTest 汇总数量。
-
-## RENDER-002-TRANSPARENT 定向门禁（2026-08-15 已完成）
-
-常驻 `windows-msvc-vnext-bgfx-ui-freetype` build tree 已执行
-`RunProduct3dGate.ps1 -SkipConfigure`。增量 build、11个 GoogleTest executable、300帧主 sample 与全部30帧
-A/B 视觉运行均 exit 0，`RENDER-002-TRANSPARENT` 转为 Done。随后修复 cgltf 未知 `alphaMode` 静默回退
-Opaque 的边界并增量复验 `tina_asset_tests` 311/311。
-
-- **Cook/公开契约**：Material v2 与 glTF Cooker 只接受显式 `Opaque`/`Blend`，`MASK` 与未知 alpha mode
-  fail closed；Scene
-  static/skinned renderer、Prefab resolver、packet item 与 device material binding 必须携带一致 alpha intent，
-  不从 baseColor alpha 或纹理内容猜测 pass。
-- **RenderScene**：Opaque static 保持相邻实例 batch；Blend static/skinned 进入统一 back-to-front 全序，
-  等距按 stable Entity identity、kind、item index 决定。透明 draw 容量独立、固定且事务提交，超限不得发布
-  半帧；统计暴露 draw count 与 sort checksum。
-- **Backend**：Null/bgfx preflight 校验 opaque/transparent 分区、统一顺序、完整覆盖和 material alpha binding；
-  pass 固定为 CSM×4→Spot×1→Point×6→Opaque3D→Transparent3D→Sprite2D→UI。Transparent3D 使用
-  straight-alpha blend、depth test less、不写 depth；透明 draw 不投 shadow但继续接收 lighting/shadow/PBR/IBL。
-- **产品证据**：内建 schema 16 已固定 total/static/skinned mesh=`3/2/1`、Material=`4`。默认 on 以独立
-  Blend Material + 两个复用 static mesh 的交叠 witness 验证 transparent frames/static/skinned/draw=
-  `N/2/0/2`、checksum 非零且跨帧稳定；off 只省略 witness，Material 仍完成 load/bind/retire，透明字段为
-  `0/0/0/0`、checksum=`0`、stable=true。300帧 on 的 static/skinned/pose/material resolver 预期为
-  `1200/300/300/1500`，off 为 `600/300/300/900`。
-- **集中验证**：产品 gate 复用 IBL-on baseline 增加一次 `--transparency=off`，中央 RGB ROI fingerprint
-  不同、raw byte 数精确且逐字节 L1 达到 ROI pixel count 门槛；临时 raw capture 已在 `finally` 回收。
-  glTF alpha mode 边界另由 `GltfCookTests.MapsBlendAlphaModeAndRejectsUnsupportedModes` 覆盖。Docker/Linux
-  不属于本轮范围。
-
+命令见下方 `RunProduct3dGate.ps1` 一节；A/B 差分产生的临时 raw capture 必须在 `finally` 中回收。
 ## Tracy Profile 定向门禁
 
 Trace backend 只在专用 Profile tree 验证，不改写常驻 Null tree，也不在功能 worktree 重建依赖：
@@ -723,421 +682,65 @@ out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe --gtest_color=yes `
 当前工作目录的同名文件。report file 的非 ASCII Windows 路径验收、Linux terminate/abort artifact，以及 Windows fatal
 SEH 矩阵由 `CORE-DIAG-001` 收口。
 
-## Scene Sprite AssetHandle A1
+## ASSET-HANDLE-SCENE（A1-A6 与 N16.1-N16.4 全部 Done）
 
-`ASSET-HANDLE-SCENE-2D-A1` 的自动门禁归属 `tina_scene_tests` 与 2D product gate：
+九个切片已收敛为一个契约。逐切片的历史 gate 配方、当时的测试计数与被取代的 schema 4/13/14 字段值
+只保留在 git history，不再作为当前预期；下列契约是仍需回归保护的部分：
 
-- `AssetHandle.hpp`、`SpriteRenderer2D.hpp`、`ExtractRenderScene.hpp` header isolation 编译；
-- World 可保存 default weak handle，但 visible extract 必须返回 `UnresolvedSprite`；
-- stale、cross-store、wrong-kind、unbound、缺 resolver 和 resolver 返回0都 fail closed；
-- hidden unresolved sprite 不调用 resolver；成功解析保持 UV/pivot/transform/color/sort，writer failure 原样传播；
-- `SpriteAnimator2D` 的空 handle frame 仍为 `InvalidAnimation`；
-- `tina_sample_2d` 的 World crate/character 组件来自 Catalog Sprite handle，resolver 每次验证 Store/kind/
-  binding 后映射 key。A1 本身未证明 registry；A2 已补该证据，A3 已完成 FX Handle 化，A4 已完成
-  TileMap Tileset Handle 化；A5 已完成 3D component/Prefab Handle 化，A6 已补 engine-provided、State-owned 3D registry；
-  Sprite2D 与 Mesh3D 的 `FrameResourceRef`/retirement ownership 已由 N16.1-N16.4 统一，总项 Done。
+- Scene/Prefab/FX/TileMap 只保存 weak `AssetHandle`，不持 Lease/payload/GPU owner；
+- 全部 Sprite2D/Mesh3D Render item 只保存 packet-local `FrameResourceRef`，packet 固定资源预算320，
+  超出返回 `FrameResourceCapacityExceeded`；
+- `Sprite2DBindingRegistry` Entry 唯一拥有 resident `AssetLease`/`GpuTextureId`/binding；
+  `Mesh3DBindingRegistry` 同时拥有 Mesh Lease/GPU/binding、Material Lease/binding，并按 AssetId 去重
+  共享 Texture Lease/GPU，Material 引用计数阻止 live dependency 被退休；
+- register 成功才消费 GPU owner；owner-thread、kind/store/state、PMR、ledger 与 backend failure 都保留
+  Lease/GPU/Entry 供重试；active frame borrow/pin 阻止 retirement；
+- invalid/stale/cross-store/wrong-kind/unbound/缺 resolver 一律 fail closed，分别映射为 Scene
+  `UnresolvedSprite`/`UnresolvedMesh` 或 Asset `SpriteBindingNotFound`，TileMap 失败清空输出；
+- hidden/off-camera/空集合不解析；Trail 每次非空 extract 解析一次，Particle 按 live item 解析。
+
+门禁归属 `tina_scene_tests`、`tina_asset_tests`、`tina_render_scene_tests`、`tina_render_bgfx_tests`
+与 2D/3D product gate。当前字段以 product-2d evidence schema 29 与 product-3d schema 16 为准：2D 的
+`spriteBindingTextures=3`、三份 owner/retirement handoff、retirement ledger 全部 Released 且 live=0、
+四类 resolver hits 非0；3D 为 3 Mesh / 4 Material / 3 Texture 全部 load/bind/retire。
 
 ```powershell
 cmake --build --preset windows-vnext-bgfx-product-2d-debug `
-  --target tina_scene_tests tina_sample_2d --parallel 1 -- /nr:false
+  --target tina_scene_tests tina_asset_tests tina_sample_2d --parallel 2 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_scene_tests.exe --gtest_color=yes
-out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
-  --frames=300 --frame-delay-ms=0
-```
-
-## Sprite2D Binding Registry A2 / N16.3
-
-`ASSET-HANDLE-SCENE-2D-A2` 的模块门禁归属 `tina_asset_tests`，产品闭环归属 2D product gate：
-
-- `Sprite2DBindingRegistry.hpp` header isolation；Create 容量/PMR failure 与 owner-thread 约束；
-- Texture2D Handle/GPU texture validation、exact duplicate conflict、同 AssetId conflict、同一 registry
-  重复 GPU owner conflict、固定容量，以及 device instance namespace 内 key 唯一、单调不复用；
-- 多个 registry 共享同一 device 时 key distinct、独立 resolve/retirement；
-- register 成功消费一份 `AssetLease` 与调用方 `GpuTextureId&`；所有 preflight/acquire/backend failure
-  保留候选 GPU 且无 Lease 净增长；
-- active frame borrow 阻止 retirement；PMR/backend retirement failure 保留完整 Entry，成功才 handoff；
-  覆盖同步 completion、延迟 completion 在 Registry 析构后释放 Lease、retire-all 部分提交/重试与析构门禁；
-- Sprite 必须是 live Handle 且 Cooked 文件恰有一个 required `Texture2D` dependency；stale/wrong-kind/
-  missing/multiple dependency、unbound/stale texture 都返回0；
-- Registry 是 Sprite2D Lease/GPU/binding 唯一 owner；产品 State 不再保存裸 GPU owner，退出只通过
-  `retireAllTextureBindings()` handoff；
-- N16.3 当时的 product evidence schema 14 已由当前 schema 29 继承（lighting 的 schema 16..19 字段继续保留）：`spriteBindingTextures=3`、
-  `spriteTextureLeasesAcquired=3`、
-  `spriteTextureRetirementsAccepted=3`、`spriteBindingRegistryReleased=true`、
-  `spriteTextureHandlesInvalidated=3`、`spriteTextureRetirementRecords=3`、
-  `spriteTextureRetirementReleased=3`、`spriteTextureRetirementLive=0`，且四类 resolver hit 均非0。
-
-```powershell
-cmake --build --preset windows-vnext-bgfx-product-2d-debug `
-  --target tina_asset_tests tina_scene_tests tina_sample_2d --parallel 1 -- /nr:false
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_asset_tests.exe --gtest_color=yes
-out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_scene_tests.exe --gtest_color=yes
-out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
-  --frames=300 --frame-delay-ms=0
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --frames=300 --frame-delay-ms=0
 ```
 
-A2 保留 A1 resolver ABI；A3 随后完成 Particle/Trail Handle 化，A4 完成 TileMap Tileset Handle 化，A5
-完成 3D Mesh/Material component Handle 化，A6 再补 engine-provided、State-owned 3D registry。N16.3
-统一 Sprite2D retirement ownership 与 `FrameResourceRef`，N16.4 已统一 Mesh3D/Material/共享 Texture owner，
-因此 `ASSET-HANDLE-SCENE` 总项 Done。
-
-## Particle/Trail Sprite AssetHandle A3
-
-`ASSET-HANDLE-SCENE-2D-A3` 的模块门禁归属 `tina_scene_tests`，产品闭环归属 2D product gate：
-
-- `AssetFrameResourceResolver.hpp`、`ParticleSystem2D.hpp`、`Trail2D.hpp` header isolation 编译；
-- Particle burst 与 live particle、Trail config 保存 weak Sprite `AssetHandle`，无旧 key overload/双轨，
-  且不持有 resolver、Lease、Cooked payload 或 GPU owner；
-- 空 Particle burst/Trail config 在发布前返回 `InvalidComponent`；Particle 失败保持 live set、stable key 与
-  RNG 状态不变；
-- live Particle 按 item 解析；非空 Trail 只解析一次并复用。missing/zero/stale/wrong-kind binding 均
-  `UnresolvedSprite` fail closed，空 Particle/Trail 不调用 resolver；
-- Particle 18/18、Trail 13/13，完整 `tina_scene_tests` 83/83；覆盖 handle 保留、PMR 300帧稳态与 writer
-  capacity failure；
-- product evidence schema 11 分别要求 `particleSpriteBindingResolverHits>0`、
-  `trailSpriteBindingResolverHits>0`；FX fingerprint schema 2 序列化稳定 `AssetId` bytes，不序列化 runtime
-  generation bits 或 render key。
-
-```powershell
-cmake --build --preset windows-vnext-bgfx-product-2d-debug `
-  --target tina_scene_tests tina_sample_2d --parallel 1 -- /nr:false
-out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_scene_tests.exe `
-  --gtest_filter="ParticleSystem2DTests.*:Trail2DAssetTest.*" --gtest_color=yes
-out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_scene_tests.exe --gtest_color=yes
-out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe `
-  --frames=300 --frame-delay-ms=0
-```
-
-A3 不迁移 TileMap、3D Mesh/Material registry、统一 retirement ownership 或 `FrameResourceRef`。
-
-## TileMap Tileset AssetHandle A4
-
-`ASSET-HANDLE-SCENE-2D-A4` 的模块门禁归属 `tina_asset_tests`，产品闭环归属 2D product gate：
-
-- N13 当时的 `AssetBindingResolver.hpp` 与更新后的 `TileChunkRender.hpp` header isolation 编译；N16.2 已以
-  `AssetFrameResourceResolver.hpp` 替代旧 header，Scene resolver 保留语义 alias，AssetTypes 不反向依赖 Scene；
-- `TileChunkSpriteEmitParams` 保存 weak Tileset Handle 与 borrowed resolver，无旧 `spriteKey` 字段/双轨；
-- registry `resolveTileset()` 要求 live Tileset、唯一 required Texture2D dependency 与 live binding；wrong-kind、
-  queued、stale、missing/unbound dependency 均返回0；
-- hidden/off-camera/empty TileMap 不调用 resolver，单 chunk 与跨 chunk 非空 visible set 均只解析一次；
-  missing/zero binding fail closed 为 `SpriteBindingNotFound` 并清空输出；
-- `tina_asset_tests` 170/170、`tina_scene_tests` 83/83、headless TileMap sample 300 帧通过；
-- product evidence schema 12 新增 `tileMapSpriteBindingResolverHits>0`，selection highlight 即时解析 Tileset，
-  产品 State 不再保存 `tileSpriteKey_`。
-
-```powershell
-cmake --build --preset windows-vnext-bgfx-product-2d-debug `
-  --target tina_asset_tests tina_scene_tests tina_sample_2d tina_sample_2d_tilemap --parallel 1 -- /nr:false
-out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_asset_tests.exe --gtest_color=yes
-out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_scene_tests.exe --gtest_color=yes
-out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d_tilemap.exe --frames=300
-powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct2dGate.ps1 `
-  -SkipConfigure -SkipBuild
-```
-
-A4 本身不迁移 3D；A5 随后完成 component/Prefab Handle 化，但不实现 engine-provided、State-owned Mesh/Material
-registry、统一 retirement ownership 或 `FrameResourceRef`。
-
-## Mesh/Material AssetHandle A5
-
-`ASSET-HANDLE-SCENE-3D-A5` 的模块门禁归属 `tina_scene_tests`，产品闭环归属 3D product smoke：
-
-- `MeshRenderer3D` 保存 weak StaticMesh/Material Handle，不保存 mesh/material key；结构属性校验与资源
-  存活校验分开，World 可保存 empty weak handle；
-- visible extraction 分别借用 mesh/material resolver，严格按预期 AssetKind 解析；empty/stale/cross-store/
-  wrong-kind/unbound/zero 统一 `UnresolvedMesh`，mesh 失败不调用 material resolver，hidden mesh 不解析；
-- `PrefabMeshBinding` 只做 AssetId→Handle 并保持失败全量 rollback，不生成 Render key；
-- infrastructure sample 使用 State-owned 最小 `AssetStore` fixture；产品 sample 的 Resources-owned
-  `AssetStore` 覆盖 World/extraction，backend key 只保留在私有 GPU binding slot；
-- 3D product evidence schema 1 要求 mesh/material handle 发布数匹配 slot 数、两类 resolver hits>0、
-  AssetStore active、像素捕获成功与 GPU ledger 归零。
-
-```powershell
-cmake --build --preset windows-vnext-bgfx-debug `
-  --target tina_scene_tests tina_sample_3d_infrastructure tina_sample_3d --parallel 2 -- /nr:false
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_scene_tests.exe --gtest_color=yes
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d_infrastructure.exe --frames=300 --frame-delay-ms=0
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=300 --frame-delay-ms=0
-```
-
-A5 不实现 engine-provided、State-owned 3D Mesh/Material binding registry、统一 retirement ownership 或
-`FrameResourceRef`，因此 `ASSET-HANDLE-SCENE` 总项仍为 Partial。
-
-## Mesh3D Binding Registry A6
-
-`ASSET-HANDLE-SCENE-3D-A6-BINDINGS` 的模块门禁归属 `tina_asset_tests` 与 Render 测试，产品闭环归属
-3D product smoke：
-
-- `Mesh3DBindingRegistry.hpp` header isolation；Create 分别校验 mesh/material 容量、PMR failure 与
-  owner-thread 约束，稳态 register/resolve/unbind 不再分配 PMR；
-- mesh/material 使用独立 device-instance key namespace；两类 key 都从2开始，分别保留内置 key 1；
-  同 device 多 registry key distinct，bind 成功后才消费，解绑后不复用；
-- mesh 与 material Handle 的 invalid/stale/cross-store/wrong-kind/not-ready、exact duplicate、同 AssetId
-  conflict、容量和 backend rollback 都有失败原子性覆盖；
-- Material 从 Cooked payload 取得 factors，并要求每个启用 role 有 live Texture2D/GPU pair，按
-  baseColor/MR/normal 顺序与 Cooked required Texture2D dependency 精确匹配；三张纹理与
-  factors 单次原子发布，任一 dependency stale 后 resolve fail closed；
-- Material v2 writer 要求最多三个 Texture2D dependency 在 baseColor/MR/normal role 顺序下 AssetId 严格
-  递增且唯一；乱序与多 role 共享同一 AssetId 都返回结构化错误；
-- exact handle stale 后仍可 unbind；backend unbind 失败保留 entry 供重试，仅当资源仍 live 时 resolve 继续
-  有效，stale 资源始终解析为0；成功 unbind 才删除 entry；
-- 产品先 reset World，再逆序 exact unbind；只有 unbind 成功才 destroy 对应 GPU owner，失败保留 owner 供
-  teardown 重试。schema 2 要求 `meshBindingsRegistered=2`、`materialBindingsRegistered=2`、
-  `meshBindingsReleased=2`、`materialBindingsReleased=2`、`meshesDestroyed=2`、`texturesDestroyed=6`、
-  `meshAssetBindingResolverHits=600`、`materialAssetBindingResolverHits=600`、
-  `bindingRegistryReleased=true`、GPU ledger 归零与像素捕获成功。
-
-```powershell
-cmake --build --preset windows-vnext-bgfx-debug `
-  --target tina_tests tina_render_bgfx_tests tina_asset_format_tests tina_asset_tests tina_sample_3d --parallel 2 -- /nr:false
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_tests.exe --gtest_color=yes
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_bgfx_tests.exe --gtest_color=yes
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_asset_format_tests.exe --gtest_color=yes
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_asset_tests.exe --gtest_color=yes `
-  --gtest_filter="Mesh3DBindingRegistryTests.*"
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=300 --frame-delay-ms=0
-```
-
-A6 当时不拥有 GPU resource、`AssetLease` 或 retirement record；其历史门禁保持不变。N16.4 已用统一
-retirement ownership 与 `FrameResourceRef` 替代该分裂 owner 契约，并关闭 `ASSET-HANDLE-SCENE` 总项。
-
-## Frame Resource Core N16.1
-
-`ASSET-HANDLE-SCENE-N16.1-CORE` 的门禁归属 `tina_tests`、`tina_asset_tests` 与 Render header isolation：
-
-- `FrameResourceRef` 不能由调用方构造有效 identity；packet table 按 kind+binding key 去重；重复 pin 立即
-  释放，invalid/capacity 失败不消费 pin；
-- cross-packet、stale generation、wrong-kind 与越界 ref fail closed；complete、skip、abandon、复用和析构
-  exactly-once 释放，普通 FramePin 与 resource pin 容量相互独立；
-- Runtime 在 extraction 前 begin packet，空 State 栈正常退出不 begin；extract/UI/submit/present 失败和成功
-  present 都在 State `onExit` 前清零 submission accounting；若 persistent failure 使 packet abandon 失败，
-  Runtime 必须 fail-stop，不能继续销毁仍被 live frame owner 引用的 State；
-- Texture2D 既有 Lease+GPU owner retirement 覆盖成功转移、PMR payload allocation rollback、backend reject
-  后重试、wrong-kind/cross-store/invalid/wrong-thread 不变性、同步 completion 完成最后一个
-  `UnloadPending` Lease，以及 drain exactly-once。
-
-```powershell
-cmake --build --preset windows-vnext-bgfx-debug `
-  --target tina_tests tina_asset_tests tina_render_bgfx_tests --parallel 2 -- /nr:false
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_tests.exe --gtest_color=yes
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_asset_tests.exe --gtest_color=yes
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_bgfx_tests.exe --gtest_color=yes
-```
-
-本轮结果：`tina_tests` 329/329、`tina_asset_tests` 188/188、`tina_render_bgfx_tests` 52/52；2D/3D
-产品 sample 均通过 300 帧 smoke，DOC-002 为0 error / 0 warning。
-
-N16.1 不迁移 Scene item，也不让 registry 拥有 Lease/GPU retirement；产品 2D 证据由 N16.2/N16.3 升级，
-`ASSET-HANDLE-SCENE` 总项保持 InProgress。
-
-## Sprite Frame Resource N16.2
-
-`ASSET-HANDLE-SCENE-N16.2-SPRITE` 的门禁覆盖 Runtime、Scene、Asset、RenderScene、Null 与 bgfx：
-
-- `AssetFrameResourceResolver` 只在 extraction 期间借用当前 `FrameResourceSink`，World、TileMap、selection、
-  Particle 与 Trail 的 Sprite2D item 只保存 packet-local texture ref；同帧相同 binding 只 intern 一次；
-- registry 首次 intern 时转移 entry borrow pin；N16.3 后活跃 packet 完成、跳过或 abandon 前 retirement
-  必须失败且保留完整 Entry，packet 释放后可重试；
-- Null/bgfx 在任何 draw/binding 提交副作用前验证 cross-packet、stale、wrong-kind、越界与 binding key
-  表示范围，失败不产生部分提交；
-- N16.2 当时尚未迁移 3D `Mesh3D` item；该剩余项已由 N16.4 完成。
-
-```powershell
-cmake --build --preset windows-vnext-bgfx-debug `
-  --target tina_tests tina_scene_tests tina_asset_tests tina_render_scene_tests tina_render_bgfx_tests `
-           tina_sample_2d tina_sample_3d --parallel 2 -- /nr:false
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_tests.exe --gtest_color=yes
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_scene_tests.exe --gtest_color=yes
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_asset_tests.exe --gtest_color=yes
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_scene_tests.exe --gtest_color=yes
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_bgfx_tests.exe --gtest_color=yes
-powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct2dGate.ps1 `
-  -SkipConfigure -SkipBuild
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=300 --frame-delay-ms=0
-```
-
-本轮基础 bgfx 图直接测试结果：`tina_tests` 330/330、`tina_scene_tests` 91/91、
-`tina_asset_tests` 199/199、`tina_render_scene_tests` 39/39、`tina_render_bgfx_tests` 54/54。
-Product-2D 同轮门禁已返回 `productGate=bgfx-physics-freetype-audio`，3D 300 帧 smoke exit 0 且
-`renderResourceLedgerBalanced=true`、final-present capture 成功。
-
-## Mesh3D Frame Resource 与 Owner N16.4
-
-`ASSET-HANDLE-SCENE-N16.4-MESH-OWNER` 的门禁覆盖 Scene、Asset、RenderScene、Null、bgfx 与完整
-product-3d：
-
-- `RenderMesh3DInput/Item/Batch` 只保存 `Mesh3DGeometry`/`Mesh3DMaterial` packet-local ref；旧
-  `meshKey/materialKey` 字段无兼容双轨；
-- packet 固定资源预算为320，覆盖默认64个 Sprite2D Texture，以及 Product 3D 上限各128个
-  Mesh3D Geometry/Material 的混合 working set；不动态增长，超过预算仍返回
-  `FrameResourceCapacityExceeded`；
-- Scene mesh/material resolver 统一使用 `AssetFrameResourceResolver`；旧 `AssetBindingResolver.hpp` 与
-  header-isolation TU 删除；invalid/stale/wrong-kind/unbound/empty 继续 `UnresolvedMesh` fail closed；
-- Null/bgfx 在提交副作用前验证 cross-packet、stale、wrong-kind、index 与 `u32` binding range；
-- `GpuTextureId`/`GpuMeshId` 校验 device owner；两个 live Null device 的 index/generation 碰撞仍确定性拒绝；
-- bgfx Texture/Mesh/EnvironmentMap 私有 slot 的 generation 达到 `u32` 上限后永久退役，创建扫描不再复用该 slot；
-- Mesh registry 注册成功才消费 GPU owner；Mesh/Texture retirement 的 owner-thread、kind/store/state、PMR、
-  ledger 与 backend failure 保留 Lease/GPU/Entry，可重试；active Mesh/Material frame borrow 阻止 retirement；
-- Material 引用计数允许跨 Material 共享 Texture owner，并阻止 live dependency 被退休；`retireAllBindings()`
-  按 Material→Texture→Mesh 关闭，析构要求全空；
-- N16.4 历史 product-3d schema 4 要求2 Mesh、2 Material、3共享 Texture 上传与 retirement，weak handle 失效数为
-  2/2/3，retirement records 全部 Released 且 live=0，两类 frame-resource resolver hits 为600/600，registry
-  释放、GPU ledger 平衡、pixel capture 成功。
-
-```powershell
-cmake --build --preset windows-vnext-bgfx-debug `
-  --target tina_tests tina_scene_tests tina_asset_tests tina_render_scene_tests tina_render_bgfx_tests `
-           tina_sample_3d tina_sample_3d_extraction tina_sample_3d_infrastructure --parallel 2 -- /nr:false
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_tests.exe --gtest_color=yes
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_scene_tests.exe --gtest_color=yes
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_asset_tests.exe --gtest_color=yes
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_scene_tests.exe --gtest_color=yes
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_render_bgfx_tests.exe --gtest_color=yes
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d_extraction.exe --frames=300
-out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d_infrastructure.exe --frames=300 --frame-delay-ms=0
-powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3dGate.ps1
-```
-
-基础 bgfx 图结果：`tina_tests` 335/335、`tina_scene_tests` 91/91、`tina_asset_tests` 204/204、
-`tina_render_scene_tests` 39/39、`tina_render_bgfx_tests` 61/61；两个 infrastructure sample 与 product sample
-均完成300帧。FreeType 同轮产品门禁结果见下文 TEST-003。
-
-## Scene DirectionalLight3D
-
-`RENDER-001-SCENE-LIGHTS` 的最小门禁覆盖：
-
-- World `set/clear/queryDirectionalLight3D()`、非法 component 零替换与 entity 生命周期；
-- active light 的 world local `+Z` 方向、color×intensity、ambient、稳定 Entity identity 排序；
-- 超过固定4灯上限显式 `TooManyActiveDirectionalLights`；inactive-only 发布 ambient-only snapshot；
-- `RenderSceneWriter::setMesh3DLighting()` 深拷贝调用方 span，重复/非法描述使 build 原子失败；
-- Null/bgfx submit preflight；bgfx frame snapshot 临时覆盖 device fallback，且每帧只编码一次 uniform arrays；
-- product-3d schema 16 继续证明 `directionalLightCount=3`、`sceneLightingFrames=300`，继承同一 lighting 契约。
-
-直接验证入口为 `tina_scene_tests`、`tina_render_scene_tests`、`tina_render_bgfx_tests` 与
-`tina_sample_3d --frames=300 --frame-delay-ms=0 --ui-theme=dark --ui-theme-demo`。公开新头还由
-`DirectionalLight3DHeader.cpp` header-isolation TU 覆盖。
-
-## Scene PointLight3D
-
-`RENDER-001-POINT-LIGHTS` 的最小门禁覆盖：
-
-- World `set/clear/queryPointLight3D()`、非法 component 零替换与 entity generation 生命周期；
-- world position、正 influence radius、color×intensity、inactive 过滤与稳定 Entity identity 排序；
-- 有效 PerspectiveCamera3D 下的 sphere-frustum center/tangent/outside、相机 world rotation 与容量前 culling；
-- 第9个 camera-affecting light 显式 `TooManyActivePointLights3D`，无相机/0x0 surface 保留未裁剪容量；
-- RenderScene snapshot 深拷贝与统计、Null/bgfx preflight、bgfx 8槽 position/radius + color uniform 与线性径向衰减；
-- product-3d schema 16 继续证明 `authoredPointLight3DCount=3`、`pointLight3DCount=2`、
-  `culledPointLight3DCount=1`、`submittedLightingFrames=300` 与 `lightingCountsStable=true`。
-
-开发阶段先定向运行 `ScenePointLight3DTest.*`、RenderScene Mesh3D lighting 与 Null/bgfx lighting filters，
-再构建 GLSL 120、SPIR-V、DXBC shader；产品闭环只需先跑30帧 smoke，完整 gate 留到切片收口。
-公开新头由 `PointLight3DHeader.cpp` header-isolation TU 覆盖。
-
-## Scene SpotLight3D
-
-`RENDER-001-SPOT-LIGHTS` 的最小门禁覆盖：
-
-- World `set/clear/querySpotLight3D()`、非法 component 零替换与 entity generation 生命周期；
-- world position、local `-Z` 出光方向、正 influence radius、inner/outer cone、color×intensity 与稳定排序；
-- active component 全量预验证；有效 PerspectiveCamera3D 下 influence sphere culling 先于容量检查；
-- 第9个 camera-affecting light 显式 `TooManyActiveSpotLights3D`，无相机/0x0 surface 保留未裁剪容量；
-- RenderScene snapshot 深拷贝与统计、Null/bgfx preflight、bgfx 8槽 position/radius、direction/inner、
-  color/outer uniform，以及 shader 的线性径向×平滑角度衰减；
-- product-3d schema 16 继续继承 schema 8 固化的 `authoredSpotLight3DCount=3`、`spotLight3DCount=2`、
-  `culledSpotLight3DCount=1` 与 `lightingCountsStable=true`。
-
-开发阶段先定向运行 `SceneSpotLight3DTest.*`、RenderScene Mesh3D lighting 与 Null/bgfx lighting filters，
-再构建 GLSL 120、SPIR-V、DXBC shader；产品闭环最后统一跑30帧 smoke 与完整 gate。
-公开新头由 `SpotLight3DHeader.cpp` header-isolation TU 覆盖。
-
-## StaticMesh Vertex Tangents
-
-`RENDER-001-VERTEX-TANGENTS` 的最小门禁覆盖：
-
-- StaticMesh payload v1 固定校验 P3N3T4UV2（12 floats/vertex）与 UInt16 index，不接受其他 stride/layout；
-- glTF authored `TANGENT` 读取、校验并规范化，NORMAL+TEXCOORD_0 缺 tangent 时由 MikkTSpace 生成；
-- 缺 NORMAL/UV primitive 显式 cook 失败，不发布不完整 StaticMesh；
-- Asset mesh upload 使用 `createStaticMesh(StaticMeshUploadDesc)` 与 `createSkinnedMesh(SkinnedMeshUploadDesc)`，Null/bgfx 对共享 `GpuMeshId` generation/retirement 使用同一契约；
-- Opaque3D vertex tangent TBN 与 signed model scale handedness 由 shader/backend test 覆盖，不存在 derivative fallback；
-- product-3d schema 16 继续要求 complete-PBR fixture `tangentMeshesUploaded=2`。
-
-统一验证阶段先定向运行 StaticMesh payload、`GltfCookTests.*Tangent*`、GPU mesh upload/bgfx shader filters，
-再构建 `tina_sample_3d` 做30帧 smoke；完整 TEST-003 gate 最后执行。
-
-`RENDER-001-CSM` 的最小门禁覆盖：
-
-- Scene `CascadedDirectionalShadow3D` 与 `Mesh3DLightingDesc::cascadedDirectionalShadow` 校验有限、有界 maximum distance/depth bias/normal bias，且最多一个级联配置；
-- Scene extraction 在稳定 directional-light 排序后深拷贝 `directionalLightIndex`；scheduler 固定生成4个 `CascadedDirectionalShadowDepth` pass（`cascadeIndex=0..3`），并证明 atlas clear 不消费 primary-surface clear；
-- bgfx projection math 覆盖四个 camera slice、backend homogeneous depth/origin；resource contract 以非默认 cascade tile 覆盖2×2 sampled D16 atlas、失败回滚与销毁；view rect 与 PCF texel size 由同一 immutable device config 驱动；
-- shader contract 覆盖独立 depth program、receiver normal/depth bias、shadowed directional slot 与 3×3 PCF；
-- product-3d schema 16 继续要求 `cascadedDirectionalShadowCount=1`、`submittedCascadedDirectionalShadowCount=1` 及 authored/submitted cascade constant=`4`；GPU 四级联实绘由 bgfx contract 与最终产品视觉 gate 证明。
-
-## SpotLight3D shadow
-
-`RENDER-001-SPOT-SHADOW` 的最小门禁覆盖：
-
-- Scene `SpotLightShadow3D` 与 Render `Mesh3DSpotLightShadow` 校验 finite near/depth/normal bias，且
-  `0 < nearPlaneMeters < influenceRadiusMeters`；非法 component/descriptor 保持事务原子性；
-- Scene extraction 先完成 camera culling 与稳定 spot-light 排序，再映射 `spotLightIndex`；最多一个
-  camera-affecting shadow config，第二个显式失败；
-- scheduler 固定在4个 CSM pass 后、Opaque3D 前生成一个 `SpotLightShadowDepth` pass，独立 shadow map clear
-  不消费 primary-surface clear；
-- bgfx projection/resource contract 覆盖完整公开 cone 合法域、非默认配置尺寸的 sampled D16 map、失败回滚
-  与销毁；view rect 与 PCF texel size 由同一 immutable device config 驱动，shader contract 覆盖独立 depth pass、匹配 spot slot、normal/depth bias 与3×3 PCF；
-- product-3d schema 16 继续要求 `authoredSpotLightShadowCount=1`、`submittedSpotLightShadowCount=1`，并由
-  `DeviceCapture` 比较 committed descriptor，证明整个提交区间保持稳定。
-
-开发阶段只跑 Scene/RenderScene/scheduler/Null/bgfx shadow filters 与30帧 product smoke；完整 TEST-003
-只在合并后的核心常驻 build tree 执行一次。
-
-## PointLight3D shadow
-
-`RENDER-001-POINT-SHADOW` 的最小门禁覆盖：
-
-- Scene `PointLightShadow3D` 与 Render `Mesh3DPointLightShadow` 校验 finite near/depth/normal bias，且
-  `0 < nearPlaneMeters < influenceRadiusMeters`；非法 component/descriptor 保持事务原子性；
-- Scene extraction 先完成 camera culling 与稳定 point-light 排序，再映射 `pointLightIndex`；最多一个
-  camera-affecting shadow config，第二个显式 `TooManyActivePointLightShadows`；
-- scheduler 固定在4个 CSM、1个 Spot pass 后、Opaque3D 前生成六个 `PointLightShadowDepth` pass，面序
-  `+X/-X/+Y/-Y/+Z/-Z`，独立 shadow-map clear 不消费 primary-surface clear；
-- bgfx projection/resource contract 以非默认配置覆盖六张同尺寸的 sampled D16 map、失败原子回滚与销毁；
-  view rect 与 PCF texel size 由同一 immutable device config 驱动，shader contract 覆盖 dominant-axis 面选择、匹配 point slot、normal/depth bias 与3×3 PCF；
-- product-3d schema 16 默认要求 `authoredPointLightShadowCount=1`、
-  `submittedPointLightShadowCount=1`；`--point-shadow=off` 要求两者为0。Windows gate 复用 IBL-on
-  baseline，要求 on/off 中央 3D RGB ROI fingerprint 不同且逐像素 L1 大于0。
-
-开发阶段只跑 PointLight Scene/RenderScene/scheduler/Null/bgfx filters 与30帧 product smoke；完整 TEST-003
-只在合并后的核心常驻 build tree 执行一次。
-
-## Shadow map extent configuration
-
-`ShadowMapExtentConfigTest` 覆盖默认值、`[128,4096]` 边界、非2次幂与越界值；Null/bgfx direct factory
-在接触 surface/backend 前拒绝非法配置。`EngineConfigTest`、`EngineHostCreationTest` 与
-`WindowSurfaceRuntimeTest` 分别验证 Host 预检及 independent/window-surface factory 传播；三类 bgfx
-resource contract 使用非默认尺寸证明 D16 resource 接线，view rect 与3×3 PCF texel size 在 device 内只读取
-同一 immutable config。开发期只构建
-`tina_tests` 与 `tina_render_bgfx_tests` 并运行对应 filters。
-
-## Opaque3D PBR 与 IBL
-
-`RENDER-001-IBL` 的最小门禁覆盖：
-
-- EnvironmentMap payload v1 固定校验32B little-endian header、RGBA16F diffuse/specular cubemap、完整
-  specular mip 链、RG16F BRDF LUT 与 section byte count；
-- Asset typed parse 与 `uploadEnvironmentMapFromCooked()` 只接受 `AssetKind::EnvironmentMap` 当前 schema；
-- Null/bgfx 对三纹理 create failure 原子回滚，并校验 device owner、generation、stale/cross-device、绑定清除、
-  retirement marker 与 shutdown ledger；
-- shader contract 固化 Cook-Torrance GGX direct light、diffuse irradiance、roughness specular LOD、BRDF LUT
-  split-sum、intensity 与 world-Y rotation，同时保留 directional 3×3 PCF；
-- product-3d schema 16 的 `--ibl=on` 继续要求 `cookedEnvironmentMap=true`、上传/IBL bind/clear/retire=
-  `1/1/1/1`；`--ibl=off` 仍要求上传/retire=`1/1`，但 bind/clear=`0/0`，两种模式都固定
-  diffuse/specular/mips/BRDF=`2/4/3/4×4`；
-- Windows product gate 另以30帧执行 on×2 + off×2，同模式 RGBA8 fingerprint 必须稳定，on/off fingerprint
-  必须不同，避免仅凭 API 调用计数把未影响最终像素的 IBL 判为通过。
-
-功能切片收口时先运行 EnvironmentMap AssetFormat/Asset/Null/bgfx/shader filters，再跑30帧 product smoke；
-最后才执行完整 TEST-003，不在每个实现步骤重复全量测试。
-
+## RENDER-001 3D lighting / shadow / tangent / IBL（全部 Done）
+
+`RENDER-001-SCENE-LIGHTS`、`-POINT-LIGHTS`、`-SPOT-LIGHTS`、`-VERTEX-TANGENTS`、`-CSM`、
+`-SPOT-SHADOW`、`-POINT-SHADOW`、`-IBL` 与 shadow extent 配置的逐条 gate 明细留在 git history。当前契约：
+
+- **容量与裁剪**：directional ≤4；point/spot 各 ≤8，且 influence sphere 按 active `PerspectiveCamera3D`
+  frustum **先裁剪再做容量检查**；超容量第 N+1 盏显式失败。所有灯按稳定 Entity identity 排序后逐帧
+  深拷贝为 self-contained RenderScene snapshot。
+- **shadow 唯一性**：directional CSM、spot shadow、point shadow 各最多一个 camera-affecting config；
+  非法 near/depth/normal bias 与第二个可见 shadow 一律 fail closed。CSM 固定4级联写 2×2 sampled D16
+  atlas；point 固定六面按 `+X/-X/+Y/-Y/+Z/-Z`，dominant-axis 选面。
+- **extent 配置**：`ShadowMapExtentConfig` 为 startup-only，取值为 `[128,4096]` 内的2次幂，默认
+  `1024/1024/512`（directional tile / spot / point face）；`EngineConfig` 在任何 factory 前校验，
+  Null/bgfx 直接 factory 同样 fail closed，PCF texel size 只使用当前配置，无固定尺寸兼容分支。
+- **顶点格式**：StaticMesh v1 固定 P3N3T4UV2；glTF authored TANGENT 优先，缺 tangent 由私有 MikkTSpace
+  生成，缺 NORMAL/UV 显式失败；shader TBN 按 signed model scale 修正 handedness。
+- **着色**：Opaque3D 使用 Cook-Torrance GGX direct light + cooked EnvironmentMap split-sum IBL
+  （diffuse irradiance、roughness specular LOD、BRDF LUT、intensity、world-Y rotation），并保留
+  directional 3×3 PCF。EnvironmentMap v1 固定 RGBA16F cubemap + 完整 specular mip 链 + RG16F BRDF LUT，
+  三纹理 create failure 原子回滚。
+- **不投 shadow 的 pass**：见上文 Transparent3D 一节。
+
+product-3d schema 16 当前字段：authored/committed/culled=`3/2/1`（point 与 spot 各自），CSM cascade
+常量=`4`，spot/point shadow authored/submitted=`1/1`，`--ibl=on` 的上传/bind/clear/retire=`1/1/1/1`
+而 `--ibl=off` 为 `1/0/0/1`，两模式 diffuse/specular/mips/BRDF 固定 `2/4/3/4×4`。GPU 实绘由 bgfx
+contract 测试与 A/B 视觉差分证明，不能只凭 API 调用计数判定通过。
+
+功能切片收口时先跑对应 AssetFormat/Asset/Null/bgfx/shader filter 与30帧 product smoke，最后才执行完整
+TEST-003；不在每个实现步骤重复全量测试。
 ## World2D serialization
 
 `2D-SERIALIZATION` 的最小门禁只构建 `tina_asset_format_tests` 与 `tina_scene_tests`，然后定向运行：
@@ -1327,84 +930,31 @@ Browser 和 preview 必须保持不变，且不能显示 test fixture 的纹理�
 Core 的目录替换失败回归保留在 `WriteFileTests.FailedAtomicReplacePreservesExistingTargetDirectory`；当前
 `tina_tests` 是 Core + Runtime monolithic target，小型 Editor 切片不为单个 filter 重编全部对象，留到大功能统一 gate。
 
-## Scene ShadowOccluder2D
+## 2D-LIGHT N1-N5（Done，跨 GPU exact golden 除外）
 
-`2D-LIGHT-N2` 的最小门禁覆盖：
+`ShadowOccluder2D`、`PointLight2D` camera culling、finite-source soft shadow 与 Sprite2D normal map 的
+逐条 gate 明细留在 git history。当前契约：
 
-- World `set/clear/queryShadowOccluder2D()`、非法 component 零替换与 entity slot reuse；
-- active segment 的已发布 XY scale/rotation/position、稳定 Entity identity 排序与 inactive 过滤；
-- 超过固定32段上限显式 `TooManyActiveShadowOccluders2D`，occluder-only 保持 unlit；
-- `RenderSceneWriter::setSprite2DLighting()` 深拷贝 segment span，非 finite、退化、超容量或重复描述使
-  build 原子失败；
-- Null/bgfx submit preflight；bgfx fragment→light 相交仅清零对应点光贡献；
-- product-2d schema 16 从成功提交的 committed snapshot 观测 `pointLight2DCount=2`、
-  `shadowOccluder2DCount=2` 与逐帧 lighting count。
+- **容量与裁剪**：active `PointLight2D` ≤8，先按 resolved、pixel-snapped `Camera2D` 做旋转相机空间的
+  精确 circle-vs-rectangle 裁剪，只有 camera-affecting light 占槽，第9盏仍显式失败；无相机或 0x0 surface
+  保留未裁剪语义。`ShadowOccluder2D` ≤32 个 active segment，**不参与裁剪**。
+- **软阴影**：source radius 默认0精确保留 hard ray；正值以 normalized-depth segment projection 连续计算
+  finite line-source visibility，多段使用固定成本 multiplicative transmittance。
+- **normal map**：`SpriteRenderer2D::normalTexture` 是 optional weak Texture2D handle，经独立 resolver
+  取得 packet-local ref；缺 resolver/stale/wrong-kind/empty 统一 `UnresolvedSprite` 且失败发生在
+  `addSprite2D()` 之前；连续 batch identity 为 `(baseTexture, normalTexture)`；derivative TBN 自动覆盖
+  rotation、signed scale、atlas UV 与 flip。normal **只**调制 point-light contribution，ambient、shadow
+  visibility、attenuation、premultiplied alpha 与无 normal 分支保持不变。
+- **不变量**：fragment→light 相交只清零点光贡献；ambient、透明排序与 premultiplied alpha 不受影响；
+  排序 checksum 不受 normal binding 影响。
 
-直接验证入口为 `tina_scene_tests`、`tina_render_scene_tests`、`tina_render_bgfx_tests` 与
-`tina_sample_2d --frames=300 --frame-delay-ms=0 --ui-theme-demo --ui-tree-demo`。公开新头还由
-`ShadowOccluder2DHeader.cpp` header-isolation TU 覆盖。
+product-2d schema 29 当前字段（继承 schema 16..19）：authored/committed/culled=`3/2/1`、
+`shadowOccluder2DCount=2`、`softShadowPointLight2DCount=2`、`normalMappedSpriteCount=1`（off 模式为0）、
+`texturesUploaded=3` 且3份 Texture owner/retirement lifecycle 完整。
 
-## Scene PointLight2D camera culling
-
-`2D-LIGHT-N3` 的最小门禁覆盖：
-
-- 离屏 active light 不占8个 committed 槽，圆与相机矩形边界相切仍可见；
-- 旋转 Camera2D 使用 camera-local 精确 circle-vs-rectangle 相交，不退化为 world AABB；
-- culling 使用与 committed Camera2D 相同的 pixel-snapped center；
-- 第9盏 camera-affecting light 显式 `TooManyActivePointLights2D`，不做 top-K 或静默丢弃；
-- active component、`WorldTransform` 与 color×intensity 在 culling 前校验，非法离屏灯仍失败；
-- 无 active Camera2D 或 framebuffer 0x0 时不裁剪，保留全部 active light 的8槽上限；
-- `ShadowOccluder2D` 不随 Camera2D 裁剪，N2 的32段容量与遮挡门禁继续生效。
-
-开发阶段直接运行 `tina_scene_tests` 的 `ScenePointLight2DTest.CullsOffscreenLightsBeforeApplyingVisibleCapacity`、
-`CullsPointLightsInRotatedCameraSpace`、`CullingUsesTheCommittedPixelSnappedCameraCenter`、
-`RejectsTheNinthCameraAffectingPointLight`、`ValidatesOffscreenPointLightsBeforeCulling`、
-`SuspendedSurfaceKeepsTheUnculledCapacityContract` 与既有
-`EnforcesCapacityAndPublishesInactiveAmbientOnly`；本切片不要求重复运行全测试集合。product-2d schema 17
-再以 `authoredPointLight2DCount=3`、`pointLight2DCount=2`、`culledPointLight2DCount=1` 提供集成证据，
-同时继承 schema 16 的 `shadowOccluder2DCount=2` 与逐帧 lighting snapshot。
-
-## Sprite2D finite-source soft shadow
-
-`2D-LIGHT-N4` 的最小门禁覆盖：
-
-- Scene `sourceRadiusMeters` 必须 finite、`0 <= source <= radiusMeters`，非法替换保持旧 component，且非法离屏
-  active light 在 N3 culling 前失败；
-- RenderScene 对 source radius 做同一校验并深拷贝 committed snapshot，非法/重复描述保持 build 原子失败；
-- test-only CPU reference 固定验证 hard-shadow 兼容、完整遮挡/半影/无遮挡 `0/0.5/1`、receiver/light 后方
-  segment、端点反序、source radius 覆盖变化与 multiplicative composition；
-- bgfx 将 source radius 编码进既有 light color uniform `.w`，不增加 uniform 数组；GLSL 120、SPIR-V、
-  DXBC SM5 三个 shader profile 均以 `--Werror` 构建；
-- `RunProduct2dShadowVisualGate.ps1` 保持四次300帧 probe：soft A/B 与 forced-hard A/B 各自像素和结构证据
-  可重复，soft/hard RGBA8 fingerprint 必须不同。当前 schema 29 继承 N4 的 committed snapshot 并观测
-  `softShadowPointLight2DCount=2/0`，并继续断言 authored/committed/culled=`3/2/1`、双 occluder 与逐帧 lighting。
-
-开发阶段直接运行 `ScenePointLight2DTest.*`、两个 RenderScene lighting tests 与
-`Sprite2DShadowMathTest.*`；shader/backend 修改再最小构建 `tina_sample_2d`。完整同轮 product gate 只在切片
-闭环时运行。多 occluder 投影重叠使用 multiplicative transmittance，是连续固定成本近似，不作为精确
-area-light interval union 或跨 GPU exact golden 证据。
-
-## Sprite2D normal map
-
-`2D-LIGHT-N5` 的最小门禁覆盖：
-
-- `SpriteRenderer2D::normalTexture` 是 optional weak Texture2D handle；hidden/empty 不解析，非空 visible item
-  必须经独立 `normalTextureBindingResolver` 得到非空 packet-local Texture2D ref；缺 resolver、stale、
-  wrong-kind、empty 统一 `UnresolvedSprite`，且失败发生在 `addSprite2D()` 前；
-- RenderScene 原样提交 optional normal ref，排序 checksum 不受 normal binding 影响；Null/bgfx 对 cross-packet、
-  stale、wrong-kind 与 binding-range fail closed，连续 batch identity 为 `(baseTexture, normalTexture)`；
-- bgfx slot 1 normal sampler、device-owned flat-normal texture 与 batch-local enable uniform 通过 resource/batch tests；
-  derivative TBN 自动覆盖 rotation、signed scale、atlas UV 与 flip。normal 只调制 point-light contribution，
-  ambient、shadow visibility、attenuation、premultiplied alpha 与无 normal 分支保持不变；
-- GLSL 120、SPIR-V 与 DXBC SM5 三个 shader profile 均构建通过；RGBA8 `(128,128,255)` flat normal 的
-  相对 Lambert factor 精确为1；
-- `RunProduct2dNormalMapVisualGate.ps1` 对 normal on A/B 与 off A/B 各跑一次完整 sample。两种模式均 cook、
-  load、upload、register、retire 独立 normal atlas并断言3份 Texture lifecycle；只清空组件 normal handle。
-  当前 schema 29 继承 schema 19 的 `normalMappedSpriteCount=1/0`，同模式像素/结构证据可重复，跨模式 fingerprint 必须不同。
-
-开发阶段直接运行 Scene normal resolver、RenderScene normal propagation、Null/bgfx normal resource/batch 的
-定向 filter；闭环后再跑产品四次视觉差分与完整 product gate。该证据不声明跨 GPU exact golden。
-
+A/B 视觉差分（soft/hard、normal on/off）要求同模式 RGBA8 fingerprint 可重复、跨模式必须不同；这不声明
+跨 GPU exact golden，后者由 `UI-003` 跟踪。开发阶段先跑 Scene resolver、RenderScene propagation 与
+Null/bgfx resource/batch 定向 filter，闭环后再跑产品视觉差分与完整 product gate。
 ## 产品与样例的证据边界
 
 | Executable | 证明 | 不证明 |
@@ -1749,17 +1299,13 @@ N4 另以 committed soft count=2 和 soft/hard 四跑差分覆盖连续 penumbra
 `windows-msvc-vnext-bgfx-ui-freetype`，直接构建并运行 Core、Scene、AssetFormat、Asset、bgfx Render、
 UI、Runtime UI、UI Render bridge 与 FreeType 测试，再执行300帧
 `--ui-theme=dark --ui-theme-demo --ibl=on --point-shadow=on --skin-animation=on`。
-schema 15 同时断言 total/static/skinned mesh=`3/2/1`、material=`3`、`tangentMeshesUploaded=2`、
-uploaded/palette joint count=`2/2`、skinned Prefab instances=`3`、300帧 Animator update/pose change 与
-skinned draw；还断言固定4级联 CSM config authored/submitted=`1` 且
-cascade constant=`4`；这些字段只证明配置与固定级联数，GPU 四级联实绘由 bgfx contract 与最终产品视觉 gate 证明；另断言
-一份 cooked EnvironmentMap 的上传/IBL bind/clear/retire 与2/4/3/4×4尺寸、3个跨 Material 共享 PBR Texture、packet-local static/skinned/pose/material resolver=`600/300/300/900`、Mesh/Texture
-retirement records Released、3个 directional light、PointLight3D/SpotLight3D 各自
-authored/committed/culled=`3/2/1`、固定 SpotLight/PointLight shadow authored/submitted=`1/1` 且 committed descriptor 跨帧稳定、
-`sceneLightingFrames=300`/`submittedLightingFrames=300`/registry 生命周期、7 Panel/13 Label、Button/Checkbox/Slider/ProgressBar/
-ListView/TreeView 创建、2次 collection step、stable keys、继承 chrome、Dark→Light→Dark、100% progress、
-final-present capture、实时 framebuffer camera aspect、responsive UI authoring 与 ledger 归零。开发期 resize
-定向 smoke 可直接使用 `--width=1280 --height=720` 与 `--width=1440 --height=900`，无需重跑完整 gate：
+当前断言以 product-3d evidence schema 16 为准（3 Mesh / 4 Material / 3 共享 Texture、skinned mesh=`1`、
+joints=`2`、point/spot 各 authored/committed/culled=`3/2/1`、CSM cascade=`4`、spot/point shadow
+authored/submitted=`1/1`、EnvironmentMap 上传/bind/clear/retire 与 `2/4/3/4×4` 尺寸、retirement ledger
+全部 Released 且归零、Dark→Light→Dark 与 final-present capture）。schema 15 及更早的逐字段数值只保留在
+git history，不作为当前预期；shadow 字段只证明配置与固定级联数，GPU 实绘由 bgfx contract 与产品视觉 gate
+证明。开发期 resize 定向 smoke 可直接使用 `--width=1280 --height=720` 与 `--width=1440 --height=900`，
+无需重跑完整 gate：
 
 ```powershell
 out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --frame-delay-ms=0 --width=1280 --height=720
@@ -1790,13 +1336,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunProduct3d
   -SkipConfigure -SkipBuild -OutJson artifacts\gates\product-3d.json
 ```
 
-2026-07-29 基线 `e61b6a00` + N16.4 工作树的实际验收先使用 `-SkipConfigure` 执行 build、测试与 sample，
-再使用 `-SkipConfigure -SkipBuild -OutJson artifacts\gates\product-3d.json` 无重建复验并写报告。脚本 build exit 0；
-`tina_tests` 335/335、`tina_scene_tests` 91/91、`tina_asset_format_tests` 59/59、
-`tina_asset_tests` 204/204、`tina_render_scene_tests` 39/39、`tina_render_bgfx_tests` 61/61、
-`tina_ui_tests` 282/282、`tina_runtime_ui_tests` 85/85、`tina_ui_render_integration_tests` 15/15、
-`tina_ui_freetype_tests` 3/3；`tina_sample_3d` 300帧 exit 0，schema 4 校验通过。
-无重建复验写出 `artifacts/gates/product-3d.json`，报告 `ok=true`。
+推荐用法是先 `-SkipConfigure` 执行 build、测试与 sample，再以
+`-SkipConfigure -SkipBuild -OutJson artifacts\gates\product-3d.json` 无重建复验并写报告 `ok=true`。
+历史逐 executable 计数（2026-07-29 基线的 `tina_tests` 335/335 等）已被当前数量取代，只保留在 git
+history；测试数量属易变证据，不在本文固化。
 
 2026-07-30 当前 DirectionalLight3D 提交候选使用 MSVC 14.50 `cl.exe` 和上述第一条命令完成同轮
 build、测试与300帧 sample。`tina_tests` 336/336、`tina_scene_tests` 96/96、
