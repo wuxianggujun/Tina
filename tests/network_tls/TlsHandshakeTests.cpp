@@ -9,6 +9,7 @@
 #include "TlsTestServer.hpp"
 
 #include <tina/network/HttpClient.hpp>
+#include <tina/network/WebSocket.hpp>
 #include <tina/network/NetworkErrors.hpp>
 #include <tina/network/tls/TlsConnection.hpp>
 
@@ -246,6 +247,70 @@ TEST(TlsHandshakeTest, HttpRequestRunsOverTlsStream)
     // only ever saw the request after it.
     EXPECT_TRUE(client->statistics().handshakeComplete);
     EXPECT_NE(server.observedRequest().find("GET /secure "), std::string::npos);
+}
+
+// wss: a WebSocket session over TLS. Until now this combination was only inferred
+// from HTTP working over the same IByteStream seam, which is reasoning rather than
+// evidence -- and the two protocols differ in exactly the place that could break,
+// since WebSocket keeps reading frames after the upgrade while HTTP stops.
+TEST(TlsHandshakeTest, WebSocketRunsOverTlsStream)
+{
+    TlsTestServer server;
+    ASSERT_TRUE(server.isValid()) << server.lastError();
+    server.setWebSocketEcho(true);
+
+    auto client = TlsConnection::Create(clientConfig(server));
+    ASSERT_TRUE(client.has_value());
+
+    Network::WebSocketConfig config{};
+    config.stream = &*client;
+    config.target = "/socket";
+    config.host = std::string{TlsTestCertificates::ServerName};
+
+    auto socket = Network::WebSocket::Create(config);
+    ASSERT_TRUE(socket.has_value());
+
+    // The upgrade rides on top of a TLS handshake, so both must complete before a
+    // frame can move.
+    bool open = false;
+    for (int attempt = 0; attempt < 8000 && !open; ++attempt) {
+        server.pump();
+        const auto pumped = socket->pump();
+        ASSERT_TRUE(pumped.has_value())
+            << "domain=" << static_cast<int>(pumped.error().code.domain)
+            << " value=" << pumped.error().code.value
+            << " message=" << pumped.error().message;
+        open = socket->state() == Network::WebSocketState::Open;
+    }
+    ASSERT_TRUE(open);
+    EXPECT_TRUE(server.webSocketUpgraded());
+    EXPECT_TRUE(client->statistics().handshakeComplete);
+
+    constexpr std::string_view payload = "wss-round-trip";
+    ASSERT_TRUE(socket->sendText(payload).has_value());
+
+    std::string echoed;
+    for (int attempt = 0; attempt < 8000 && echoed.empty(); ++attempt) {
+        server.pump();
+        const auto pumped = socket->pump();
+        ASSERT_TRUE(pumped.has_value());
+        if (*pumped) {
+            const auto message = socket->message();
+            ASSERT_TRUE(message.has_value());
+            EXPECT_EQ(message->kind, Network::WebSocketMessageKind::Text);
+            echoed.assign(
+                reinterpret_cast<const char*>(message->payload.data()),
+                message->payload.size());
+            ASSERT_TRUE(socket->consumeMessage().has_value());
+        }
+    }
+
+    EXPECT_EQ(echoed, payload);
+    EXPECT_GE(server.webSocketFramesEchoed(), 1U);
+    // The client masked its frame, as RFC 6455 requires, and the server unmasked
+    // it -- otherwise the echo would not have matched.
+    EXPECT_GE(socket->statistics().sentFrameCount, 1U);
+    EXPECT_GE(socket->statistics().receivedFrameCount, 1U);
 }
 
 } // namespace Tina::Tests

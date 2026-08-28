@@ -2,7 +2,10 @@
 
 #include <mbedtls/error.h>
 
+#include <tina/network/WebSocket.hpp>
+
 #include <array>
+#include <string_view>
 #include <cstring>
 
 namespace Tina::Tests {
@@ -323,12 +326,42 @@ void TlsTestServer::pump()
             }
         }
 
-        if (!m_httpReply.empty() && !m_httpReplied
+        // Once upgraded the connection carries frames, so the request parser must
+        // not run again on frame bytes.
+        if (m_webSocketUpgraded) {
+            serveWebSocketFrames();
+        } else if (m_webSocketEcho) {
+            const Core::usize terminator = m_request.find("\r\n\r\n");
+            if (terminator != std::string::npos) {
+                const Core::usize bodyStart = terminator + 4;
+                const std::string head = m_request.substr(0, bodyStart);
+                // Anything past the terminator already belongs to the frame layer.
+                m_request.erase(0, bodyStart);
+
+                const std::string needle = "Sec-WebSocket-Key: ";
+                std::string key;
+                const Core::usize keyStart = head.find(needle);
+                if (keyStart != std::string::npos) {
+                    const Core::usize valueStart = keyStart + needle.size();
+                    const Core::usize keyEnd = head.find("\r\n", valueStart);
+                    if (keyEnd != std::string::npos) {
+                        key = head.substr(valueStart, keyEnd - valueStart);
+                    }
+                }
+
+                std::string response = "HTTP/1.1 101 Switching Protocols\r\n";
+                response += "Upgrade: websocket\r\nConnection: Upgrade\r\n";
+                response +=
+                    "Sec-WebSocket-Accept: " + Network::webSocketAcceptToken(key) + "\r\n\r\n";
+                writeAll(response);
+                m_webSocketUpgraded = true;
+                // Frames may already be buffered behind the request.
+                serveWebSocketFrames();
+            }
+        } else if (
+            !m_httpReply.empty() && !m_httpReplied
             && m_request.find("\r\n\r\n") != std::string::npos) {
-            (void)mbedtls_ssl_write(
-                &m_ssl,
-                reinterpret_cast<const unsigned char*>(m_httpReply.data()),
-                m_httpReply.size());
+            writeAll(m_httpReply);
             m_httpReplied = true;
             // Closing delimits a reply with no Content-Length and ends the exchange
             // for one that has it.
@@ -359,6 +392,103 @@ void TlsTestServer::closeNotify() noexcept
     // before the server's own handshake call returns. Gating here silently
     // dropped the request.
     m_closeNotifyRequested = true;
+}
+
+void TlsTestServer::writeAll(std::string_view bytes) noexcept
+{
+    // mbedtls_ssl_write can accept a prefix, so the tail is retried. Bounded
+    // because a fixture must fail a test rather than spin forever.
+    Core::usize sent = 0;
+    for (int attempt = 0; attempt < 4000 && sent < bytes.size(); ++attempt) {
+        const int written = mbedtls_ssl_write(
+            &m_ssl,
+            reinterpret_cast<const unsigned char*>(bytes.data() + sent),
+            bytes.size() - sent);
+        if (written > 0) {
+            sent += static_cast<Core::usize>(written);
+            continue;
+        }
+        if (written != MBEDTLS_ERR_SSL_WANT_READ && written != MBEDTLS_ERR_SSL_WANT_WRITE) {
+            return;
+        }
+    }
+}
+
+void TlsTestServer::serveWebSocketFrames()
+{
+    // Client frames are always masked (RFC 6455 requires it); server frames never
+    // are. Only complete frames are consumed, so a partial one waits for more
+    // plaintext.
+    while (true) {
+        const auto* raw = reinterpret_cast<const unsigned char*>(m_request.data());
+        const Core::usize available = m_request.size();
+        if (available < 2) {
+            return;
+        }
+
+        const bool fin = (raw[0] & 0x80U) != 0;
+        const unsigned char opcode = raw[0] & 0x0FU;
+        const bool masked = (raw[1] & 0x80U) != 0;
+        Core::usize payloadLength = raw[1] & 0x7FU;
+        Core::usize headerSize = 2;
+
+        if (payloadLength == 126) {
+            if (available < 4) {
+                return;
+            }
+            payloadLength = (static_cast<Core::usize>(raw[2]) << 8)
+                | static_cast<Core::usize>(raw[3]);
+            headerSize = 4;
+        } else if (payloadLength == 127) {
+            // The fixture never needs frames this large, so refusing is honest
+            // rather than pretending to support them.
+            return;
+        }
+        if (masked) {
+            headerSize += 4;
+        }
+        if (available < headerSize + payloadLength) {
+            return;
+        }
+
+        std::string payload;
+        payload.resize(payloadLength);
+        const unsigned char* body = raw + headerSize;
+        if (masked) {
+            const unsigned char* mask = raw + headerSize - 4;
+            for (Core::usize index = 0; index < payloadLength; ++index) {
+                payload[index] = static_cast<char>(body[index] ^ mask[index % 4]);
+            }
+        } else {
+            payload.assign(reinterpret_cast<const char*>(body), payloadLength);
+        }
+
+        m_request.erase(0, headerSize + payloadLength);
+
+        const auto buildFrame = [](unsigned char frameOpcode, std::string_view data) {
+            std::string frame;
+            frame.push_back(static_cast<char>(0x80U | frameOpcode));
+            if (data.size() < 126) {
+                frame.push_back(static_cast<char>(data.size()));
+            } else {
+                frame.push_back(static_cast<char>(126));
+                frame.push_back(static_cast<char>((data.size() >> 8) & 0xFFU));
+                frame.push_back(static_cast<char>(data.size() & 0xFFU));
+            }
+            frame.append(data);
+            return frame;
+        };
+
+        if (fin && opcode == 0x1) {
+            writeAll(buildFrame(0x1, payload));
+            ++m_framesEchoed;
+        } else if (opcode == 0x8) {
+            // Echo the close so the client sees an orderly shutdown.
+            writeAll(buildFrame(0x8, payload));
+        } else if (opcode == 0x9) {
+            writeAll(buildFrame(0xA, payload));
+        }
+    }
 }
 
 const std::string& unrelatedCertificatePem()

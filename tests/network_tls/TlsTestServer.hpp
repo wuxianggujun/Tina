@@ -64,6 +64,17 @@ class TlsTestServer final {
 
     [[nodiscard]] const std::string& observedRequest() const noexcept { return m_request; }
 
+    // Answers a WebSocket upgrade and then echoes text frames. Enabling this puts
+    // the fixture into frame mode after the 101 response, because an upgraded
+    // connection carries frames rather than requests.
+    void setWebSocketEcho(bool value) noexcept { m_webSocketEcho = value; }
+
+    [[nodiscard]] bool webSocketUpgraded() const noexcept { return m_webSocketUpgraded; }
+    [[nodiscard]] Core::usize webSocketFramesEchoed() const noexcept
+    {
+        return m_framesEchoed;
+    }
+
     // Accepts, advances the handshake, and moves application data. Safe to call
     // before a client connects.
     void pump();
@@ -80,6 +91,9 @@ class TlsTestServer final {
     [[nodiscard]] bool generateCredentials();
     [[nodiscard]] bool startListening();
     void closeAccepted() noexcept;
+    // Consumes buffered plaintext as WebSocket frames and echoes text ones.
+    void serveWebSocketFrames();
+    void writeAll(std::string_view bytes) noexcept;
 
     bool m_valid = false;
     bool m_scoped = false;
@@ -103,6 +117,9 @@ class TlsTestServer final {
     bool m_handshakeDone = false;
     bool m_httpReplied = false;
     bool m_echo = false;
+    bool m_webSocketEcho = false;
+    bool m_webSocketUpgraded = false;
+    Core::usize m_framesEchoed = 0;
     // close_notify can report WANT_WRITE on a non-blocking socket, so the request
     // is latched and retried from pump() until it actually leaves.
     bool m_closeNotifyRequested = false;
