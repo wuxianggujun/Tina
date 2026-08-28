@@ -47,6 +47,11 @@ struct CrashHandlerConfig final {
 
 // Removes Tina-owned hooks and restores the captured std::terminate handler.
 // Mainly for isolated tests; it is not a general signal/filter chaining API.
+//
+// The Windows purecall and invalid-parameter hooks are cleared rather than
+// restored: their setters return the previous value and install does not keep it.
+// Clearing matches the CRT default, and leaving them armed meant an uninstalled
+// handler still terminated the process.
 TINA_CORE_API void uninstallCrashHandler() noexcept;
 
 // Process-lifetime number of crash reports written. A test can assert a report

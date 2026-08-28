@@ -229,6 +229,44 @@ TEST(CrashHandlerTest, InstallReportsWhetherTheRequestedReportFileIsUsable)
     uninstallCrashHandler();
 }
 
+// A path longer than the internal fixed buffer used to be truncated silently. If
+// the cut landed on a valid boundary, CREATE_ALWAYS created the shortened name and
+// install returned true, so every crash went to a file nobody would look for.
+//
+// Note this specific input is also past Windows MAX_PATH, so it would be refused
+// even without the length check -- what this pins is the *contract* (an
+// over-long path is never reported as ready), not the truncation mechanism on its
+// own. The mechanism is covered by copyBounded returning whether the source fit,
+// which install now requires before opening anything.
+TEST(CrashHandlerTest, RefusesAReportPathTooLongForItsFixedBuffer)
+{
+    std::error_code error;
+    const std::filesystem::path directory = reportPath("tina_crash_long_path");
+    std::filesystem::remove_all(directory, error);
+    ASSERT_TRUE(std::filesystem::create_directories(directory, error)) << error.message();
+
+    std::string longName(700, 'x');
+    longName += ".txt";
+    const std::filesystem::path path = directory / longName;
+
+    EXPECT_FALSE(installCrashHandler(CrashHandlerConfig{
+        .applicationName = "tina_crash_long",
+        .reportPathUtf8 = path.string(),
+        .captureBacktrace = false,
+    }));
+    uninstallCrashHandler();
+
+    // Nothing was created under a shortened name.
+    std::size_t created = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(directory, error))
+    {
+        static_cast<void>(entry);
+        ++created;
+    }
+    EXPECT_EQ(created, 0U) << "a truncated path was opened instead of being refused";
+    std::filesystem::remove_all(directory, error);
+}
+
 TEST(CrashHandlerTest, InstallIsIdempotentAndUninstallRestoresPreviousHandlers)
 {
     const std::terminate_handler before = std::get_terminate();

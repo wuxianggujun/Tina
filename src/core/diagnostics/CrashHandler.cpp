@@ -17,6 +17,9 @@
 #include <DbgHelp.h>
 #include <crtdbg.h>
 #include <cstdint>
+#else
+// nanosleep for the bounded wait when a second thread crashes during a report.
+#include <ctime>
 #endif
 
 namespace Tina::Core::Diagnostics {
@@ -45,6 +48,14 @@ struct HandlerState final {
 
 HandlerState g_state{};
 std::atomic<unsigned long long> g_reportCount{0};
+// Set once the winning thread has emitted its complete report, so a concurrent
+// crash on another thread can let it finish instead of terminating over the top
+// of it.
+std::atomic<bool> g_reportComplete{false};
+// Bounded so a winner that faults inside its own report cannot hang the process.
+// 200 x 5ms is long enough for DbgHelp symbol resolution on a deep stack and
+// still an order of magnitude below any watchdog that would notice.
+constexpr unsigned ReportCompletionWaitAttempts = 200;
 // Serialises concurrent crashes so two threads cannot interleave one report.
 std::atomic_flag g_reporting = ATOMIC_FLAG_INIT;
 std::terminate_handler g_previousTerminate = nullptr;
@@ -52,14 +63,39 @@ std::terminate_handler g_previousTerminate = nullptr;
 void* g_vectoredHandle = nullptr;
 #endif
 
-void copyBounded(char* destination, std::size_t capacity, std::string_view source) noexcept
+// Returns false when the source did not fit. Truncation matters for the report
+// path specifically: a truncated path that still happens to be valid names a
+// *different* file, so the handler would arm a file nobody will look for while
+// install reported success.
+bool copyBounded(char* destination, std::size_t capacity, std::string_view source) noexcept
 {
-    const std::size_t count = source.size() < capacity - 1U ? source.size() : capacity - 1U;
+    if (capacity == 0U)
+    {
+        return source.empty();
+    }
+    const std::size_t limit = capacity - 1U;
+    const std::size_t count = source.size() < limit ? source.size() : limit;
     if (count != 0U)
     {
         std::memcpy(destination, source.data(), count);
     }
     destination[count] = '\0';
+    return count == source.size();
+}
+
+// Yields for a few milliseconds without allocating, taking a CRT lock, or
+// touching the Diagnostics owner -- all of which may be unusable by the time a
+// crash handler runs.
+void sleepBriefly() noexcept
+{
+#if defined(_WIN32)
+    ::Sleep(5);
+#else
+    struct timespec request{};
+    request.tv_sec = 0;
+    request.tv_nsec = 5 * 1000 * 1000;
+    (void)::nanosleep(&request, nullptr);
+#endif
 }
 
 // Writes to stderr and, when configured, to the pre-opened report file. Both use
@@ -236,6 +272,25 @@ void writeReport(const char* reason, const char* detail, PlatformContext* contex
     // wins, any other returns and lets the process die.
     if (g_reporting.test_and_set())
     {
+        // Returning immediately is not enough. Every caller terminates the process
+        // right after this returns, so a loser that returns at once kills the winner
+        // mid-report -- and the winner holds the reason that actually names the
+        // fault. The truncation lands inside emitBacktrace, by far the widest window
+        // here because DbgHelp symbol resolution costs hundreds of milliseconds: the
+        // more informative the crash, the more likely it was the one lost.
+        //
+        // So the loser waits for the winner to finish, bounded so a winner that
+        // itself faults cannot hang the process. Sleeping is safe where taking a
+        // lock is not: no allocation, no CRT lock, and no deadlock if the winner
+        // died holding something.
+        for (unsigned attempt = 0; attempt < ReportCompletionWaitAttempts; ++attempt)
+        {
+            if (g_reportComplete.load(std::memory_order_acquire))
+            {
+                break;
+            }
+            sleepBriefly();
+        }
         return;
     }
 
@@ -270,6 +325,9 @@ void writeReport(const char* reason, const char* detail, PlatformContext* contex
     emit("==== end Tina fatal error ====\n");
 
     g_reportCount.fetch_add(1U, std::memory_order_relaxed);
+    // Released last: a concurrent crash waits on this before letting the process
+    // die, so it must not be visible until the trailer above is out.
+    g_reportComplete.store(true, std::memory_order_release);
     // Deliberately not cleared; see the note above.
 }
 
@@ -418,8 +476,13 @@ void onInvalidParameter(const wchar_t*, const wchar_t*, const wchar_t*, unsigned
 
 bool installCrashHandler(const CrashHandlerConfig& config) noexcept
 {
-    copyBounded(g_state.applicationName, MaxNameBytes, config.applicationName);
-    copyBounded(g_state.reportPathUtf8, MaxPathBytes, config.reportPathUtf8);
+    // The name is presentation-only, so truncating it loses nothing that matters.
+    (void)copyBounded(g_state.applicationName, MaxNameBytes, config.applicationName);
+    // The path is not: a truncated path that still parses names a different file,
+    // so the handler would arm a report nobody will look for while reporting
+    // success. Treated as an unusable report file rather than silently redirected.
+    const bool pathFits =
+        copyBounded(g_state.reportPathUtf8, MaxPathBytes, config.reportPathUtf8);
     g_state.captureBacktrace = config.captureBacktrace;
 
     // A requested report file that could not be opened is the one failure a caller
@@ -435,7 +498,7 @@ bool installCrashHandler(const CrashHandlerConfig& config) noexcept
     bool reportFileReady = config.reportPathUtf8.empty();
 #if !defined(_WIN32)
     // Verify the path is writable now rather than discovering it during a crash.
-    if (!reportFileReady)
+    if (!reportFileReady && pathFits)
     {
         if (std::FILE* probe = std::fopen(g_state.reportPathUtf8, "ab"))
         {
@@ -451,7 +514,9 @@ bool installCrashHandler(const CrashHandlerConfig& config) noexcept
         (void)::CloseHandle(g_state.reportFile);
         g_state.reportFile = INVALID_HANDLE_VALUE;
     }
-    if (g_state.reportPathUtf8[0] != '\0')
+    // A truncated path is not opened at all: CREATE_ALWAYS would happily create the
+    // shortened name, and the caller would be told the report file is ready.
+    if (pathFits && g_state.reportPathUtf8[0] != '\0')
     {
         // The path is UTF-8 by contract, so it must be widened rather than handed
         // to the ANSI API: CreateFileA reinterprets the bytes in the process ANSI
@@ -543,6 +608,17 @@ void uninstallCrashHandler() noexcept
         (void)::RemoveVectoredExceptionHandler(g_vectoredHandle);
         g_vectoredHandle = nullptr;
     }
+    // These two were left armed. Both call writeReport and then _Exit(3), and
+    // writeReport does not consult g_state.installed -- so an uninstalled handler
+    // still killed the process. The caller that hits this is exactly the one the
+    // header names: a test that hands diagnostics back to its own harness and then
+    // provokes a CRT failure it means to observe.
+    //
+    // Restoring the *previous* handlers is not possible: the setters return the old
+    // value and install discarded it. Clearing is the honest reversal, and it is
+    // what the CRT default is anyway.
+    (void)_set_purecall_handler(nullptr);
+    (void)_set_invalid_parameter_handler(nullptr);
     if (g_state.reportFile != INVALID_HANDLE_VALUE)
     {
         (void)::CloseHandle(g_state.reportFile);
@@ -554,6 +630,7 @@ void uninstallCrashHandler() noexcept
     // Re-arm so a later install can still report; the latch is only meant to
     // collapse the cascade within a single death.
     g_reporting.clear();
+    g_reportComplete.store(false, std::memory_order_release);
 }
 
 unsigned long long crashReportCount() noexcept
