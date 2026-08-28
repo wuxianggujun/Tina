@@ -448,7 +448,7 @@ TEST_F(UIVirtualGridViewTest,
         {.x = 215.0F, .y = 12.0F}));
     ASSERT_TRUE(thumbDown.has_value()) << thumbDown.error().message;
     EXPECT_TRUE(thumbDown->consumed);
-    EXPECT_EQ(context->input().pointerCapture(), grid);
+    EXPECT_EQ(context->input().pointerCapture(Platform::PrimaryPointerId), grid);
     ASSERT_TRUE(context->input().routePointerInput(pointerInput(
                     window, UI::UIRoutedPointerEventKind::Move, 7,
                     {.x = 215.0F, .y = 90.0F}))
@@ -457,7 +457,7 @@ TEST_F(UIVirtualGridViewTest,
                     window, UI::UIRoutedPointerEventKind::ButtonUp, 8,
                     {.x = 215.0F, .y = 90.0F}))
                     .has_value());
-    EXPECT_FALSE(context->input().pointerCapture().hasValue());
+    EXPECT_FALSE(context->input().pointerCapture(Platform::PrimaryPointerId).hasValue());
     assertOk(context->publication().commitLayout({.width = 220.0F, .height = 120.0F}));
     EXPECT_GT(updater.virtualGridViewMetrics(grid).value().scrollOffset, 0.0F);
 }

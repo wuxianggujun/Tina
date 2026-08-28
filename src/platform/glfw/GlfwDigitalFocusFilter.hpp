@@ -22,7 +22,7 @@ class GlfwDigitalFocusFilter final {
     {
         acceptsInput_ = false;
         suppressedKeys_ |= input.heldKeys;
-        suppressedPointerButtons_ |= input.pointer.heldButtons;
+        suppressedPointerButtons_ |= input.pointers[Platform::PrimaryPointerId].heldButtons;
     }
 
     void onFocusGained() noexcept

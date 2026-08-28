@@ -55,8 +55,8 @@ template <typename... Callables> Overloaded(Callables...) -> Overloaded<Callable
                 return binding.key != Platform::Key::Unknown &&
                        static_cast<usize>(binding.key) < Platform::KeyCount;
             },
-            [](const PrimaryPointerButtonBinding& binding) {
-                return binding.pointer == Platform::PrimaryPointerId &&
+            [](const PointerButtonBinding& binding) {
+                return binding.pointer < Platform::PointerCapacity &&
                        static_cast<usize>(binding.button) < Platform::PointerButtonCount;
             },
             [](const StandardGamepadButtonBinding& binding) {
@@ -844,7 +844,7 @@ Core::Status ActionMapper::applyClaims(const Platform::PlatformFrameView& platfo
                 },
                 [&](const Platform::PointerButtonControlIdentity& control) {
                     const usize binding = findPatternIndex(
-                        PrimaryPointerButtonBinding{control.pointer, control.button});
+                        PointerButtonBinding{control.pointer, control.button});
                     return binding == InvalidIndex ? Core::success()
                                                    : claimBinding(binding, control.window, {});
                 },
@@ -904,7 +904,7 @@ Core::Status ActionMapper::mapTransition(const Platform::PlatformFrameView& plat
             },
             [&](const Platform::PointerButtonTransition& input) {
                 return mapDigital(platformFrame,
-                                  PrimaryPointerButtonBinding{input.pointer, input.button}, input.window,
+                                  PointerButtonBinding{input.pointer, input.button}, input.window,
                                   {}, input.state, false, transition.sequence, consumed,
                                   nextSimulationTick, &input, lastPresentedCamera2D);
             },
@@ -1464,14 +1464,15 @@ void ActionMapper::seedSuppressionFromSnapshots(const Platform::PlatformFrameVie
         }
         return;
     }
-    if (const auto* pointer = std::get_if<PrimaryPointerButtonBinding>(&binding.input);
+    if (const auto* pointer = std::get_if<PointerButtonBinding>(&binding.input);
         pointer != nullptr)
     {
         if (const Platform::WindowFrameSnapshot* window = primaryWindow(platformFrame); window != nullptr)
         {
             SourceState& source = sources_[offset];
             source.routedWindow = window->input.window;
-            source.physicalValue = window->input.pointer.isHeld(pointer->button)
+            const Platform::PointerSnapshot* snapshot = window->input.pointerSnapshot(pointer->pointer);
+            source.physicalValue = snapshot != nullptr && snapshot->isHeld(pointer->button)
                                        ? binding.scale
                                        : 0.0F;
             source.suppressedUntilNeutral = active(source.physicalValue);
@@ -1551,12 +1552,14 @@ float ActionMapper::physicalValue(const Platform::PlatformFrameView& platformFra
                    ? binding.scale
                    : 0.0F;
     }
-    if (const auto* pointer = std::get_if<PrimaryPointerButtonBinding>(&binding.input);
+    if (const auto* pointer = std::get_if<PointerButtonBinding>(&binding.input);
         pointer != nullptr)
     {
         const Platform::WindowFrameSnapshot* window = primaryWindow(platformFrame);
-        return window != nullptr && window->input.window == source.routedWindow &&
-                       window->input.pointer.isHeld(pointer->button)
+        const Platform::PointerSnapshot* snapshot =
+            window == nullptr ? nullptr : window->input.pointerSnapshot(pointer->pointer);
+        return window != nullptr && window->input.window == source.routedWindow && snapshot != nullptr &&
+                       snapshot->isHeld(pointer->button)
                    ? binding.scale
                    : 0.0F;
     }

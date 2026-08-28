@@ -43,7 +43,7 @@ struct PointerFrameSpec final {
 {
     return InputActionBinding{
         .input =
-            PrimaryPointerButtonBinding{
+            PointerButtonBinding{
                 .pointer = Platform::PrimaryPointerId,
                 .button = Platform::PointerButton::Primary,
             },
@@ -116,11 +116,11 @@ struct PointerFrameSpec final {
         .window = window,
         .sourceMetricsRevision = spec.frameId.value,
     };
-    input.pointer.logicalX = spec.finalPointerX;
-    input.pointer.logicalY = spec.finalPointerY;
+    input.pointers[Platform::PrimaryPointerId].logicalX = spec.finalPointerX;
+    input.pointers[Platform::PrimaryPointerId].logicalY = spec.finalPointerY;
     for (Platform::PointerButton button : spec.heldPointerButtons)
     {
-        input.pointer.heldButtons.set(static_cast<usize>(button));
+        input.pointers[Platform::PrimaryPointerId].heldButtons.set(static_cast<usize>(button));
     }
     if (!builder.setPrimaryWindowSnapshot(metrics, input) || !builder.setGamepadSnapshots({}))
     {

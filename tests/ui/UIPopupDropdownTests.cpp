@@ -400,7 +400,7 @@ TEST_F(UIPopupDropdownTest, PointerTogglesSelectsAndDismissesWithoutClickThrough
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
     EXPECT_TRUE(down->consumed);
     EXPECT_FALSE(updater.isDropdownOpen(tree.dropdown).value());
-    EXPECT_FALSE(context->input().pointerCapture().hasValue());
+    EXPECT_FALSE(context->input().pointerCapture(Platform::PrimaryPointerId).hasValue());
     up = context->input().routePointerInput(
         pointerInput(window, UI::UIRoutedPointerEventKind::ButtonUp, 6, outside));
     ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);

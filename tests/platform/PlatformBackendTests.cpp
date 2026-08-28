@@ -342,9 +342,9 @@ TEST(PlatformFrameBuilderTest, PreservesPointerEventTimeLogicalPositions)
               Platform::FrameBatchAppendResult::Appended);
 
     auto finalInput = validWindowInput(window, 1);
-    finalInput.pointer.logicalX = 100.0;
-    finalInput.pointer.logicalY = 200.0;
-    finalInput.pointer.heldButtons.set(static_cast<usize>(Platform::PointerButton::Primary));
+    finalInput.pointers[Platform::PrimaryPointerId].logicalX = 100.0;
+    finalInput.pointers[Platform::PrimaryPointerId].logicalY = 200.0;
+    finalInput.pointers[Platform::PrimaryPointerId].heldButtons.set(static_cast<usize>(Platform::PointerButton::Primary));
     EXPECT_TRUE(builder.setPrimaryWindowSnapshot(validWindowMetrics(window, 1), finalInput));
 
     auto frame = builder.finishFrame();
@@ -362,8 +362,8 @@ TEST(PlatformFrameBuilderTest, PreservesPointerEventTimeLogicalPositions)
     EXPECT_DOUBLE_EQ(wheel->logicalX, 11.0);
     EXPECT_DOUBLE_EQ(wheel->logicalY, 21.0);
     ASSERT_NE(frame->primaryWindow(), nullptr);
-    EXPECT_DOUBLE_EQ(frame->primaryWindow()->input.pointer.logicalX, 100.0);
-    EXPECT_DOUBLE_EQ(frame->primaryWindow()->input.pointer.logicalY, 200.0);
+    EXPECT_DOUBLE_EQ(frame->primaryWindow()->input.pointers[Platform::PrimaryPointerId].logicalX, 100.0);
+    EXPECT_DOUBLE_EQ(frame->primaryWindow()->input.pointers[Platform::PrimaryPointerId].logicalY, 200.0);
 }
 
 TEST(PlatformFrameBuilderTest, DoesNotCoalescePointerMovesAcrossButtonTransitions)
@@ -410,11 +410,11 @@ TEST(PlatformFrameBuilderTest, DoesNotCoalescePointerMovesAcrossButtonTransition
               Platform::FrameBatchAppendResult::Appended);
 
     auto finalInput = validWindowInput(window, 1);
-    finalInput.pointer.logicalX = 12.0;
-    finalInput.pointer.logicalY = 14.0;
-    finalInput.pointer.accumulatedDeltaX = 6.0;
-    finalInput.pointer.accumulatedDeltaY = 8.0;
-    finalInput.pointer.heldButtons.set(static_cast<usize>(Platform::PointerButton::Primary));
+    finalInput.pointers[Platform::PrimaryPointerId].logicalX = 12.0;
+    finalInput.pointers[Platform::PrimaryPointerId].logicalY = 14.0;
+    finalInput.pointers[Platform::PrimaryPointerId].accumulatedDeltaX = 6.0;
+    finalInput.pointers[Platform::PrimaryPointerId].accumulatedDeltaY = 8.0;
+    finalInput.pointers[Platform::PrimaryPointerId].heldButtons.set(static_cast<usize>(Platform::PointerButton::Primary));
     EXPECT_TRUE(builder.setPrimaryWindowSnapshot(validWindowMetrics(window, 1), finalInput));
 
     auto frame = builder.finishFrame();
@@ -424,6 +424,62 @@ TEST(PlatformFrameBuilderTest, DoesNotCoalescePointerMovesAcrossButtonTransition
     EXPECT_NE(std::get_if<Platform::PointerMoveTransition>(&transitions[0].payload), nullptr);
     EXPECT_NE(std::get_if<Platform::PointerButtonTransition>(&transitions[1].payload), nullptr);
     EXPECT_NE(std::get_if<Platform::PointerMoveTransition>(&transitions[2].payload), nullptr);
+}
+
+TEST(PlatformFrameBuilderTest, KeepsPointerMovesAndHeldButtonsIndependentPerPointer)
+{
+    auto poolResult = TestWindowPool::Create(1);
+    ASSERT_TRUE(poolResult.has_value());
+    auto& pool = *poolResult;
+    const Platform::WindowId window = createWindowId(pool);
+
+    auto builderResult = Platform::PlatformFrameBuilder::Create({
+        .inputTransitionCapacity = 4,
+        .platformEventCapacity = 1,
+    });
+    ASSERT_TRUE(builderResult.has_value());
+    auto& builder = *builderResult;
+    ASSERT_TRUE(builder.beginFrame({1}).has_value());
+
+    EXPECT_EQ(builder.appendInputTransition(Platform::PointerMoveTransition{
+                  .window = window,
+                  .pointer = 1,
+                  .logicalX = 10.0,
+                  .logicalY = 20.0,
+                  .deltaX = 1.0,
+                  .deltaY = 2.0,
+              }),
+              Platform::FrameBatchAppendResult::Appended);
+    EXPECT_EQ(builder.appendInputTransition(Platform::PointerMoveTransition{
+                  .window = window,
+                  .pointer = 2,
+                  .logicalX = 30.0,
+                  .logicalY = 40.0,
+                  .deltaX = 3.0,
+                  .deltaY = 4.0,
+              }),
+              Platform::FrameBatchAppendResult::Appended);
+
+    auto finalInput = validWindowInput(window, 1);
+    finalInput.pointers[1].present = true;
+    finalInput.pointers[1].logicalX = 10.0;
+    finalInput.pointers[1].logicalY = 20.0;
+    finalInput.pointers[1].heldButtons.set(static_cast<usize>(Platform::PointerButton::Primary));
+    finalInput.pointers[2].logicalX = 30.0;
+    finalInput.pointers[2].logicalY = 40.0;
+    EXPECT_TRUE(builder.setPrimaryWindowSnapshot(validWindowMetrics(window, 1), finalInput));
+
+    auto frame = builder.finishFrame();
+    ASSERT_TRUE(frame.has_value()) << frame.error().message;
+    ASSERT_EQ(frame->inputTransitions().size(), 2U);
+    const auto* firstMove = std::get_if<Platform::PointerMoveTransition>(&frame->inputTransitions()[0].payload);
+    const auto* secondMove = std::get_if<Platform::PointerMoveTransition>(&frame->inputTransitions()[1].payload);
+    ASSERT_NE(firstMove, nullptr);
+    ASSERT_NE(secondMove, nullptr);
+    EXPECT_EQ(firstMove->pointer, 1U);
+    EXPECT_EQ(secondMove->pointer, 2U);
+    EXPECT_TRUE(frame->primaryWindow()->input.pointers[1].isHeld(Platform::PointerButton::Primary));
+    EXPECT_FALSE(frame->primaryWindow()->input.pointers[2].isHeld(Platform::PointerButton::Primary));
 }
 
 TEST(PlatformFrameBuilderTest, RejectsPointerMoveCoalesceDeltaOverflow)
@@ -708,7 +764,7 @@ TEST(PlatformFrameBuilderTest, RejectsInvalidInputTransitionPayloads)
     });
     expectInvalidInputPayload(Platform::PointerButtonTransition{
         .window = window,
-        .pointer = Platform::PrimaryPointerId + 1,
+        .pointer = static_cast<Platform::PointerId>(Platform::PointerCapacity),
     });
     expectInvalidInputPayload(Platform::PointerButtonTransition{
         .window = window,
@@ -724,7 +780,7 @@ TEST(PlatformFrameBuilderTest, RejectsInvalidInputTransitionPayloads)
     });
     expectInvalidInputPayload(Platform::PointerMoveTransition{
         .window = window,
-        .pointer = Platform::PrimaryPointerId + 1,
+        .pointer = static_cast<Platform::PointerId>(Platform::PointerCapacity),
     });
     expectInvalidInputPayload(Platform::PointerWheelTransition{
         .window = window,
@@ -740,7 +796,7 @@ TEST(PlatformFrameBuilderTest, RejectsInvalidInputTransitionPayloads)
     });
     expectInvalidInputPayload(Platform::PointerWheelTransition{
         .window = window,
-        .pointer = Platform::PrimaryPointerId + 1,
+        .pointer = static_cast<Platform::PointerId>(Platform::PointerCapacity),
     });
     expectInvalidInputPayload(Platform::GamepadButtonTransition{
         .routedWindow = window,
@@ -1395,7 +1451,7 @@ TEST(PlatformFrameBuilderTest, RejectsDigitalEdgesInconsistentWithFinalSnapshots
         } else if (const auto* pointer = std::get_if<Platform::PointerButtonTransition>(&transition);
                    pointer != nullptr)
         {
-            finalInput.pointer.heldButtons.set(static_cast<usize>(pointer->button), finalHeld);
+            finalInput.pointers[Platform::PrimaryPointerId].heldButtons.set(static_cast<usize>(pointer->button), finalHeld);
         } else if (const auto* gamepadTransition = std::get_if<Platform::GamepadButtonTransition>(&transition);
                    gamepadTransition != nullptr)
         {
@@ -1524,7 +1580,7 @@ TEST(PlatformFrameBuilderTest, AcceptsFinalDigitalStateAfterLaterEdgeOrReset)
               }),
               Platform::FrameBatchAppendResult::Appended);
     auto edgeInput = validWindowInput(window, 1);
-    edgeInput.pointer.heldButtons.set(static_cast<usize>(Platform::PointerButton::Primary));
+    edgeInput.pointers[Platform::PrimaryPointerId].heldButtons.set(static_cast<usize>(Platform::PointerButton::Primary));
     EXPECT_TRUE(edgeBuilder.setPrimaryWindowSnapshot(validWindowMetrics(window, 1), edgeInput));
     auto finalGamepad = validGamepadSnapshot(gamepad, 1);
     finalGamepad.heldButtons.set(static_cast<usize>(Platform::GamepadButton::South));
@@ -1611,25 +1667,25 @@ TEST(PlatformFrameBuilderTest, RejectsInvalidFinalWindowSnapshots)
 
     metrics = validWindowMetrics(window, 1);
     input = validWindowInput(window, 1);
-    input.pointer.pointer = Platform::PrimaryPointerId + 1;
+    input.pointers[Platform::PrimaryPointerId].pointer = static_cast<Platform::PointerId>(Platform::PointerCapacity);
     expectInvalidWindowSnapshot(metrics, input);
 
     metrics = validWindowMetrics(window, 1);
     input = validWindowInput(window, 1);
-    input.pointer.logicalX = std::numeric_limits<double>::quiet_NaN();
+    input.pointers[Platform::PrimaryPointerId].logicalX = std::numeric_limits<double>::quiet_NaN();
     expectInvalidWindowSnapshot(metrics, input);
 
     metrics = validWindowMetrics(window, 1);
     input = validWindowInput(window, 1);
-    input.pointer.accumulatedDeltaY = std::numeric_limits<double>::infinity();
+    input.pointers[Platform::PrimaryPointerId].accumulatedDeltaY = std::numeric_limits<double>::infinity();
     expectInvalidWindowSnapshot(metrics, input);
 
     // An absent pointer holding a button would be a press no later Up can balance,
     // because the pointer it belongs to is gone.
     metrics = validWindowMetrics(window, 1);
     input = validWindowInput(window, 1);
-    input.pointer.present = false;
-    input.pointer.heldButtons.set(static_cast<usize>(Platform::PointerButton::Primary));
+    input.pointers[Platform::PrimaryPointerId].present = false;
+    input.pointers[Platform::PrimaryPointerId].heldButtons.set(static_cast<usize>(Platform::PointerButton::Primary));
     expectInvalidWindowSnapshot(metrics, input);
 }
 
@@ -1650,18 +1706,18 @@ TEST(PlatformFrameBuilderTest, AcceptsAnAbsentPointerThatHoldsNoButtons)
     ASSERT_TRUE(builder.beginFrame({1}).has_value());
 
     Platform::WindowInputSnapshot input = validWindowInput(window, 1);
-    input.pointer.present = false;
+    input.pointers[Platform::PrimaryPointerId].present = false;
     // The position keeps its last value rather than becoming a sentinel, so it must
     // still pass the finiteness check: `present` is the single thing to test.
-    input.pointer.logicalX = 42.0;
-    input.pointer.logicalY = 17.0;
+    input.pointers[Platform::PrimaryPointerId].logicalX = 42.0;
+    input.pointers[Platform::PrimaryPointerId].logicalY = 17.0;
     EXPECT_TRUE(builder.setPrimaryWindowSnapshot(validWindowMetrics(window, 1), input));
 
     auto frame = builder.finishFrame();
     ASSERT_TRUE(frame.has_value());
     ASSERT_EQ(frame->windows().size(), 1U);
-    EXPECT_FALSE(frame->windows()[0].input.pointer.present);
-    EXPECT_DOUBLE_EQ(frame->windows()[0].input.pointer.logicalX, 42.0);
+    EXPECT_FALSE(frame->windows()[0].input.pointers[Platform::PrimaryPointerId].present);
+    EXPECT_DOUBLE_EQ(frame->windows()[0].input.pointers[Platform::PrimaryPointerId].logicalX, 42.0);
 
     // And presence defaults to true, so every existing backend and test keeps its
     // meaning without opting in.

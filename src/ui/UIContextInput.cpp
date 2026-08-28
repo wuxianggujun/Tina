@@ -1072,11 +1072,18 @@ UIContext::Impl::routeDefaultActionRelease(Platform::PlatformFrameId platformFra
     return activeModalNode;
 }
 
-[[nodiscard]] UINodeId UIContext::Impl::pointerCapture() const noexcept
+[[nodiscard]] UINodeId UIContext::Impl::pointerCapture(Platform::PointerId pointer) const noexcept
 {
+    if (pointer >= Platform::PointerCapacity)
+    {
+        return {};
+    }
     const auto& entries = committedHitBuffers[publishedHitBufferIndex];
-    return isPointerCaptureCandidate(capturedPointerNode, entries, committedActiveModalEntryIndex)
-               ? capturedPointerNode
+    const UINodeId capture = pointer == activePointerState
+                                 ? capturedPointerNode
+                                 : pointerInteractionStates[pointer].capturedPointerNode;
+    return isPointerCaptureCandidate(capture, entries, committedActiveModalEntryIndex)
+               ? capture
                : UINodeId{};
 }
 
@@ -2370,10 +2377,7 @@ UIContext::Impl::dataGridSelection(UINodeId dataGrid) const
 
     defaultActionPressState.clearAll();
     defaultActionFocusButton = nextFocus;
-    clearArmedPrimaryButton();
-    clearArmedSlider();
-    clearArmedTextEdit();
-    capturedPointerNode = {};
+    clearAllPointerArms();
     const NodeRecord* nextRecord = nodes.tryGet(nextFocus.storageId());
     if (nextRecord != nullptr && nextRecord->kind == BuiltinElementKind::TextEdit)
     {

@@ -267,11 +267,11 @@ UIContext::Impl::resolveControlPaintBatch(const UICommittedLayoutEntry& layoutEn
             add(geometry.filledTrack, controlColor(paint.filledTrackColor), trackRadii);
         }
         const UIStraightSrgba8Color thumbColor =
-            armedSlider == layoutEntry.node && paint.draggingThumbColor.alpha != 0
+            isAnyPointerSliderArmed(layoutEntry.node) && paint.draggingThumbColor.alpha != 0
                 ? paint.draggingThumbColor
                 : isFocusVisible(layoutEntry.node) && paint.focusedThumbColor.alpha != 0
                     ? paint.focusedThumbColor
-                    : hoveredPrimaryControl == layoutEntry.node &&
+                    : isAnyPointerHovering(layoutEntry.node) &&
                               paint.hoveredThumbColor.alpha != 0
                         ? paint.hoveredThumbColor
                     : paint.thumbColor;
@@ -314,10 +314,10 @@ UIContext::Impl::resolveControlPaintBatch(const UICommittedLayoutEntry& layoutEn
             UIStraightSrgba8Color lineColor = paint.lineColor;
             if (isCandidateNodeEnabled(layoutEntry.node))
             {
-                if (armedSlider == layoutEntry.node && paint.draggingLineColor.alpha != 0)
+                if (isAnyPointerSliderArmed(layoutEntry.node) && paint.draggingLineColor.alpha != 0)
                 {
                     lineColor = paint.draggingLineColor;
-                } else if (hoveredPrimaryControl == layoutEntry.node &&
+                } else if (isAnyPointerHovering(layoutEntry.node) &&
                            paint.hoveredLineColor.alpha != 0)
                 {
                     lineColor = paint.hoveredLineColor;
@@ -339,8 +339,7 @@ UIContext::Impl::resolveControlPaintBatch(const UICommittedLayoutEntry& layoutEn
                 return;
             }
             add(geometry.track, controlColor(scroll.trackColor));
-            const UIStraightSrgba8Color thumbColor = scrollThumbDragActive && armedScrollView == layoutEntry.node &&
-                                                             armedScrollAxis == axis &&
+            const UIStraightSrgba8Color thumbColor = isAnyPointerScrollDragging(layoutEntry.node, axis) &&
                                                              scroll.draggingThumbColor.alpha != 0
                                                          ? scroll.draggingThumbColor
                                                          : scroll.thumbColor;
@@ -358,7 +357,7 @@ UIContext::Impl::resolveControlPaintBatch(const UICommittedLayoutEntry& layoutEn
         if (geometry.visible)
         {
             add(geometry.track, controlColor(list.paint.scrollBar.trackColor));
-            const UIStraightSrgba8Color thumbColor = scrollThumbDragActive && armedScrollView == layoutEntry.node &&
+            const UIStraightSrgba8Color thumbColor = isAnyPointerScrollThumbDragging(layoutEntry.node) &&
                                                              list.paint.scrollBar.draggingThumbColor.alpha != 0
                                                          ? list.paint.scrollBar.draggingThumbColor
                                                          : list.paint.scrollBar.thumbColor;
@@ -382,8 +381,7 @@ UIContext::Impl::resolveControlPaintBatch(const UICommittedLayoutEntry& layoutEn
                 add(geometry.track,
                     controlColor(state->paint.scrollBar.trackColor));
                 const UIStraightSrgba8Color thumbColor =
-                    scrollThumbDragActive &&
-                            armedScrollView == layoutEntry.node &&
+                    isAnyPointerScrollThumbDragging(layoutEntry.node) &&
                             state->paint.scrollBar.draggingThumbColor.alpha != 0
                         ? state->paint.scrollBar.draggingThumbColor
                         : state->paint.scrollBar.thumbColor;
@@ -411,9 +409,7 @@ UIContext::Impl::resolveControlPaintBatch(const UICommittedLayoutEntry& layoutEn
                 add(bar.track,
                     controlColor(state->paint.scrollBar.trackColor));
                 const UIStraightSrgba8Color thumbColor =
-                    scrollThumbDragActive &&
-                            armedScrollView == layoutEntry.node &&
-                            armedScrollAxis == axis &&
+                    isAnyPointerScrollDragging(layoutEntry.node, axis) &&
                             state->paint.scrollBar.draggingThumbColor.alpha != 0
                         ? state->paint.scrollBar.draggingThumbColor
                         : state->paint.scrollBar.thumbColor;
@@ -432,7 +428,7 @@ UIContext::Impl::resolveControlPaintBatch(const UICommittedLayoutEntry& layoutEn
         if (geometry.visible)
         {
             add(geometry.track, controlColor(tree.paint.scrollBar.trackColor));
-            const UIStraightSrgba8Color thumbColor = scrollThumbDragActive && armedScrollView == layoutEntry.node &&
+            const UIStraightSrgba8Color thumbColor = isAnyPointerScrollThumbDragging(layoutEntry.node) &&
                                                              tree.paint.scrollBar.draggingThumbColor.alpha != 0
                                                          ? tree.paint.scrollBar.draggingThumbColor
                                                          : tree.paint.scrollBar.thumbColor;

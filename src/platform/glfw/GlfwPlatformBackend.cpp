@@ -408,8 +408,8 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
             }));
             focusCancelPending_ = false;
         }
-        input_.pointer.accumulatedDeltaX = 0.0;
-        input_.pointer.accumulatedDeltaY = 0.0;
+        input_.pointers[Platform::PrimaryPointerId].accumulatedDeltaX = 0.0;
+        input_.pointers[Platform::PrimaryPointerId].accumulatedDeltaY = 0.0;
         collectingFrame_ = true;
         bool waitForEvents = surfaceSnapshot_.suspended;
         double waitTimeoutSeconds = SuspendedEventWaitTimeoutSeconds;
@@ -773,13 +773,13 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         metrics_ = *latestMetrics;
         input_.window = windowId_;
         input_.sourceMetricsRevision = metrics_.revision;
-        input_.pointer.pointer = PrimaryPointerId;
+        input_.pointers[Platform::PrimaryPointerId].pointer = PrimaryPointerId;
         pointerContentScaleX_ = metrics_.contentScale.x;
         pointerContentScaleY_ = metrics_.contentScale.y;
-        input_.pointer.logicalX = logicalPointerCoordinate(cursorX, pointerContentScaleX_);
-        input_.pointer.logicalY = logicalPointerCoordinate(cursorY, pointerContentScaleY_);
-        input_.pointer.accumulatedDeltaX = 0.0;
-        input_.pointer.accumulatedDeltaY = 0.0;
+        input_.pointers[Platform::PrimaryPointerId].logicalX = logicalPointerCoordinate(cursorX, pointerContentScaleX_);
+        input_.pointers[Platform::PrimaryPointerId].logicalY = logicalPointerCoordinate(cursorY, pointerContentScaleY_);
+        input_.pointers[Platform::PrimaryPointerId].accumulatedDeltaX = 0.0;
+        input_.pointers[Platform::PrimaryPointerId].accumulatedDeltaY = 0.0;
         focusFilter_.reset(metrics_.focused);
         metricsDirty_ = false;
         surfaceSnapshot_ = makeSurfaceSnapshot(surfaceId_, metrics_, 1);
@@ -1240,7 +1240,7 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
 
     void onCursorPresence(bool present) noexcept
     {
-        input_.pointer.present = present;
+        input_.pointers[Platform::PrimaryPointerId].present = present;
         if (present)
         {
             return;
@@ -1252,14 +1252,14 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         //
         // This is the desktop analogue of a finger lifting: the pointer stops having
         // a position at all, which is why presence exists (ADR 0032 C2).
-        if (input_.pointer.heldButtons.any() && collectingFrame_)
+        if (input_.pointers[Platform::PrimaryPointerId].heldButtons.any() && collectingFrame_)
         {
             recordAppend(frameBuilder_.appendInputTransition(InputCancelTransition{
                 .routedWindow = windowId_,
                 .reason = InputCancelReason::FocusLost,
             }));
         }
-        input_.pointer.heldButtons.reset();
+        input_.pointers[Platform::PrimaryPointerId].heldButtons.reset();
     }
 
     void onCursorPosition(double logicalX, double logicalY) noexcept
@@ -1272,16 +1272,16 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
             }
             return;
         }
-        const double deltaX = logicalX - input_.pointer.logicalX;
-        const double deltaY = logicalY - input_.pointer.logicalY;
-        input_.pointer.logicalX = logicalX;
-        input_.pointer.logicalY = logicalY;
+        const double deltaX = logicalX - input_.pointers[Platform::PrimaryPointerId].logicalX;
+        const double deltaY = logicalY - input_.pointers[Platform::PrimaryPointerId].logicalY;
+        input_.pointers[Platform::PrimaryPointerId].logicalX = logicalX;
+        input_.pointers[Platform::PrimaryPointerId].logicalY = logicalY;
         if (!collectingFrame_)
         {
             return;
         }
-        input_.pointer.accumulatedDeltaX += deltaX;
-        input_.pointer.accumulatedDeltaY += deltaY;
+        input_.pointers[Platform::PrimaryPointerId].accumulatedDeltaX += deltaX;
+        input_.pointers[Platform::PrimaryPointerId].accumulatedDeltaY += deltaY;
         recordAppend(frameBuilder_.appendInputTransition(PointerMoveTransition{
             .window = windowId_,
             .pointer = PrimaryPointerId,
@@ -1323,14 +1323,14 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
     void appendAcceptedPointerButton(PointerButton button, DigitalTransition transition) noexcept
     {
         const bool held = transition == DigitalTransition::Down;
-        input_.pointer.heldButtons.set(static_cast<usize>(button), held);
+        input_.pointers[Platform::PrimaryPointerId].heldButtons.set(static_cast<usize>(button), held);
         recordAppend(frameBuilder_.appendInputTransition(PointerButtonTransition{
             .window = windowId_,
             .pointer = PrimaryPointerId,
             .button = button,
             .state = transition,
-            .logicalX = input_.pointer.logicalX,
-            .logicalY = input_.pointer.logicalY,
+            .logicalX = input_.pointers[Platform::PrimaryPointerId].logicalX,
+            .logicalY = input_.pointers[Platform::PrimaryPointerId].logicalY,
         }));
     }
 
@@ -1345,8 +1345,8 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
             .pointer = PrimaryPointerId,
             .deltaX = deltaX,
             .deltaY = deltaY,
-            .logicalX = input_.pointer.logicalX,
-            .logicalY = input_.pointer.logicalY,
+            .logicalX = input_.pointers[Platform::PrimaryPointerId].logicalX,
+            .logicalY = input_.pointers[Platform::PrimaryPointerId].logicalY,
         }));
     }
 
@@ -1663,7 +1663,7 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         }
         focusFilter_.onFocusLost(input_);
         input_.heldKeys.reset();
-        input_.pointer.heldButtons.reset();
+        input_.pointers[Platform::PrimaryPointerId].heldButtons.reset();
 #if defined(_WIN32)
         if (collectingFrame_)
         {

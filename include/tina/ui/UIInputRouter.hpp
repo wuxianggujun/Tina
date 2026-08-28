@@ -112,7 +112,7 @@ class UIInputRouter final {
     [[nodiscard]] UINodeId defaultActionFocus() const noexcept;
     [[nodiscard]] UINodeId activeFocusScope() const noexcept;
     [[nodiscard]] UINodeId activeModal() const noexcept;
-    [[nodiscard]] UINodeId pointerCapture() const noexcept;
+    [[nodiscard]] UINodeId pointerCapture(Platform::PointerId pointer) const noexcept;
     [[nodiscard]] UINodeId activePopup() const noexcept;
     [[nodiscard]] UINodeId activeMenu() const noexcept;
     [[nodiscard]] Core::Status requestFocus(UINodeId node);

@@ -123,7 +123,7 @@ void appendPattern(std::string& out, const ActionBindingPattern& pattern)
         out.append(std::to_string(static_cast<Core::u32>(key->key)));
         return;
     }
-    if (const auto* pointer = std::get_if<PrimaryPointerButtonBinding>(&pattern))
+    if (const auto* pointer = std::get_if<PointerButtonBinding>(&pattern))
     {
         out.append(PointerPatternTag);
         out.push_back(':');
@@ -175,7 +175,7 @@ void appendPattern(std::string& out, const ActionBindingPattern& pattern)
         {
             return false;
         }
-        pattern = PrimaryPointerButtonBinding{
+        pattern = PointerButtonBinding{
             .pointer = Platform::PrimaryPointerId,
             .button = static_cast<Platform::PointerButton>(raw),
         };

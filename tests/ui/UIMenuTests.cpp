@@ -550,7 +550,7 @@ TEST_F(UIMenuTest, PointerBarrierBlocksChromeAndOutsideClickThroughButItemsActiv
     ASSERT_TRUE(down.has_value()) << down.error().message;
     EXPECT_TRUE(down->consumed);
     EXPECT_TRUE(updater.isMenuOpen(pair.menu).value());
-    EXPECT_FALSE(context->input().pointerCapture().hasValue());
+    EXPECT_FALSE(context->input().pointerCapture(Platform::PrimaryPointerId).hasValue());
     EXPECT_FALSE(updater.isButtonPressed(*underlay).value());
     auto up = context->input().routePointerInput(pointerInput(
         window, UI::UIRoutedPointerEventKind::ButtonUp, 2, {.x = 11, .y = 35}));

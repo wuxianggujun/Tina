@@ -548,21 +548,21 @@ tabViewBoundaryCommandForKey(Platform::Key key) noexcept
     if (const auto* value = std::get_if<Platform::PointerButtonTransition>(&payload); value != nullptr)
     {
         return primaryWindow.hasValue() && value->window == primaryWindow &&
-               value->pointer == Platform::PrimaryPointerId && isValidPointerButton(value->button) &&
+               value->pointer < Platform::PointerCapacity && isValidPointerButton(value->button) &&
                isValidDigitalTransition(value->state) && isRepresentableLogicalValue(value->logicalX) &&
                isRepresentableLogicalValue(value->logicalY);
     }
     if (const auto* value = std::get_if<Platform::PointerMoveTransition>(&payload); value != nullptr)
     {
         return primaryWindow.hasValue() && value->window == primaryWindow &&
-               value->pointer == Platform::PrimaryPointerId && isRepresentableLogicalValue(value->logicalX) &&
+               value->pointer < Platform::PointerCapacity && isRepresentableLogicalValue(value->logicalX) &&
                isRepresentableLogicalValue(value->logicalY) && isRepresentableLogicalValue(value->deltaX) &&
                isRepresentableLogicalValue(value->deltaY);
     }
     if (const auto* value = std::get_if<Platform::PointerWheelTransition>(&payload); value != nullptr)
     {
         return primaryWindow.hasValue() && value->window == primaryWindow &&
-               value->pointer == Platform::PrimaryPointerId && isRepresentableLogicalValue(value->logicalX) &&
+               value->pointer < Platform::PointerCapacity && isRepresentableLogicalValue(value->logicalX) &&
                isRepresentableLogicalValue(value->logicalY) && isRepresentableLogicalValue(value->deltaX) &&
                isRepresentableLogicalValue(value->deltaY);
     }
@@ -1928,10 +1928,16 @@ Core::Result<UIInputRouteOutputView> UIInputRouteProducer::produce(UI::UIContext
         {
             continue;
         }
+        const Platform::PointerSnapshot* pointerSnapshot =
+            primaryWindow->input.pointerSnapshot(input->pointer);
+        if (pointerSnapshot == nullptr)
+        {
+            continue;
+        }
         for (usize buttonIndex = 0; buttonIndex < Platform::PointerButtonCount; ++buttonIndex)
         {
             if (!routeResult->claimedPointerButtons.test(buttonIndex) ||
-                !primaryWindow->input.pointer.heldButtons.test(buttonIndex))
+                !pointerSnapshot->heldButtons.test(buttonIndex))
             {
                 continue;
             }

@@ -521,7 +521,7 @@ TEST_F(UITooltipTest, OnlyOneTooltipIsPublishedAndItDoesNotOwnFocusHitOrBarrier)
     assertOk(context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
     EXPECT_TRUE(updater.isTooltipOpen(first.tooltip).value());
     EXPECT_EQ(context->input().defaultActionFocus(), first.anchor);
-    EXPECT_FALSE(context->input().pointerCapture().hasValue());
+    EXPECT_FALSE(context->input().pointerCapture(Platform::PrimaryPointerId).hasValue());
 
     const UI::UIPointerHitQueryResult query =
         context->input().queryPointerHit({.x = 40.0F, .y = 40.0F});
@@ -542,7 +542,7 @@ TEST_F(UITooltipTest, OnlyOneTooltipIsPublishedAndItDoesNotOwnFocusHitOrBarrier)
     ASSERT_TRUE(down.has_value()) << down.error().message;
     ASSERT_TRUE(down->hasRoutedTarget());
     EXPECT_EQ(down->routedTarget.node, *underlay);
-    EXPECT_EQ(context->input().pointerCapture(), *underlay);
+    EXPECT_EQ(context->input().pointerCapture(Platform::PrimaryPointerId), *underlay);
     assertOk(context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
     EXPECT_FALSE(updater.isTooltipOpen(first.tooltip).value());
 }

@@ -560,10 +560,7 @@ namespace Tina::UI {
             nextFocus = isNodeEnabled(dropdown) ? dropdown : UINodeId{};
         }
         defaultActionPressState.clearAll();
-        clearArmedPrimaryButton();
-        clearArmedSlider();
-        clearArmedTextEdit();
-        capturedPointerNode = {};
+        clearAllPointerArms();
         resetImeCompositionState();
         textInputFocus = {};
         defaultActionFocusButton = nextFocus;

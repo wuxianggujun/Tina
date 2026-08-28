@@ -9,7 +9,7 @@ namespace {
 {
     WindowInputSnapshot input;
     input.heldKeys.set(static_cast<usize>(Key::A));
-    input.pointer.heldButtons.set(static_cast<usize>(PointerButton::Primary));
+    input.pointers[Platform::PrimaryPointerId].heldButtons.set(static_cast<usize>(PointerButton::Primary));
     return input;
 }
 

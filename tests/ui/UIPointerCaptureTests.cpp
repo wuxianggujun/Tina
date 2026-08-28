@@ -156,6 +156,16 @@ pointerInput(Platform::WindowId window, UI::UIRoutedPointerEventKind kind, float
     };
 }
 
+[[nodiscard]] UI::UIPointerInputEvent
+pointerInputFor(Platform::WindowId window, Platform::PointerId pointer,
+                UI::UIRoutedPointerEventKind kind, float x, float y, u64 sequence,
+                Platform::PointerButton button = Platform::PointerButton::Primary) noexcept
+{
+    auto input = pointerInput(window, kind, x, y, sequence, button);
+    input.pointer = pointer;
+    return input;
+}
+
 class UIPointerCaptureTest : public testing::Test {
   protected:
     void SetUp() override
@@ -223,7 +233,7 @@ TEST_F(UIPointerCaptureTest, ListenerCaptureSeparatesPhysicalAndRoutedTargetsThe
     EXPECT_EQ(down->routedTarget.node, target);
     EXPECT_FALSE(down->routedThroughPointerCapture);
     EXPECT_TRUE(down->pointerCaptureChanged);
-    EXPECT_EQ(context->input().pointerCapture(), panel);
+    EXPECT_EQ(context->input().pointerCapture(Platform::PrimaryPointerId), panel);
 
     auto move = context->input().routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::Move, 110.0F, 10.0F, 2));
     ASSERT_TRUE(move.has_value()) << (move ? "" : move.error().message);
@@ -233,7 +243,7 @@ TEST_F(UIPointerCaptureTest, ListenerCaptureSeparatesPhysicalAndRoutedTargetsThe
     EXPECT_TRUE(move->hasRoutedTarget());
     EXPECT_TRUE(move->pointerCaptureChanged);
     EXPECT_TRUE(capturedMoveObserved);
-    EXPECT_FALSE(context->input().pointerCapture().hasValue());
+    EXPECT_FALSE(context->input().pointerCapture(Platform::PrimaryPointerId).hasValue());
 
     auto uncapturedMove =
         context->input().routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::Move, 110.0F, 10.0F, 3));
@@ -241,6 +251,53 @@ TEST_F(UIPointerCaptureTest, ListenerCaptureSeparatesPhysicalAndRoutedTargetsThe
     EXPECT_EQ(uncapturedMove->pointQuery.target.node, physicalOther);
     EXPECT_EQ(uncapturedMove->routedTarget.node, physicalOther);
     EXPECT_FALSE(uncapturedMove->routedThroughPointerCapture);
+}
+
+TEST_F(UIPointerCaptureTest, MultiplePointersKeepCaptureAndArmsIndependent)
+{
+    auto context = createContext(window);
+    ASSERT_NE(context, nullptr);
+    auto root = createRoot(*context);
+    auto updater = createUpdater(*context, root);
+    const UI::UINodeId rootNode = root.rootNodeId();
+    const UI::UINodeId first = createButton(updater, rootNode);
+    const UI::UINodeId second = createButton(updater, rootNode);
+    expectOk(updater.setLayoutStyle(rootNode, fixedSize(200.0F, 100.0F)));
+    expectOk(updater.setLayoutStyle(first, overlay(0.0F, 0.0F, 60.0F, 40.0F)));
+    expectOk(updater.setLayoutStyle(second, overlay(100.0F, 0.0F, 60.0F, 40.0F)));
+    expectOk(context->publication().commitLayout({.width = 200.0F, .height = 100.0F}));
+
+    auto firstDown = context->input().routePointerInput(
+        pointerInputFor(window, 1, UI::UIRoutedPointerEventKind::ButtonDown, 10.0F, 10.0F, 1));
+    ASSERT_TRUE(firstDown.has_value()) << (firstDown ? "" : firstDown.error().message);
+    EXPECT_EQ(firstDown->pointQuery.target.node, first);
+    EXPECT_TRUE(firstDown->pointerCaptureChanged);
+
+    auto secondDown = context->input().routePointerInput(
+        pointerInputFor(window, 2, UI::UIRoutedPointerEventKind::ButtonDown, 110.0F, 10.0F, 2));
+    ASSERT_TRUE(secondDown.has_value()) << (secondDown ? "" : secondDown.error().message);
+    EXPECT_EQ(secondDown->pointQuery.target.node, second);
+    EXPECT_TRUE(secondDown->pointerCaptureChanged);
+    EXPECT_EQ(context->input().pointerCapture(1), first);
+    EXPECT_EQ(context->input().pointerCapture(2), second);
+
+    auto firstMove = context->input().routePointerInput(
+        pointerInputFor(window, 1, UI::UIRoutedPointerEventKind::Move, 90.0F, 90.0F, 3));
+    ASSERT_TRUE(firstMove.has_value()) << (firstMove ? "" : firstMove.error().message);
+    EXPECT_EQ(firstMove->routedTarget.node, first);
+    EXPECT_TRUE(firstMove->routedThroughPointerCapture);
+
+    auto secondUp = context->input().routePointerInput(
+        pointerInputFor(window, 2, UI::UIRoutedPointerEventKind::ButtonUp, 110.0F, 10.0F, 4));
+    ASSERT_TRUE(secondUp.has_value()) << (secondUp ? "" : secondUp.error().message);
+    EXPECT_TRUE(secondUp->routedThroughPointerCapture);
+    EXPECT_FALSE(context->input().pointerCapture(2).hasValue());
+    EXPECT_EQ(context->input().pointerCapture(1), first);
+
+    auto firstUp = context->input().routePointerInput(
+        pointerInputFor(window, 1, UI::UIRoutedPointerEventKind::ButtonUp, 90.0F, 90.0F, 5));
+    ASSERT_TRUE(firstUp.has_value()) << (firstUp ? "" : firstUp.error().message);
+    EXPECT_FALSE(context->input().pointerCapture(1).hasValue());
 }
 
 TEST_F(UIPointerCaptureTest, ControlsAutoCaptureAndReleaseOnUpCancelDestroyDisableHideAndModal)
@@ -311,7 +368,7 @@ TEST_F(UIPointerCaptureTest, ControlsAutoCaptureAndReleaseOnUpCancelDestroyDisab
     auto down =
         context->input().routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 10.0F, 10.0F, 1));
     ASSERT_TRUE(down.has_value());
-    EXPECT_EQ(context->input().pointerCapture(), button);
+    EXPECT_EQ(context->input().pointerCapture(Platform::PrimaryPointerId), button);
     auto moveOutside =
         context->input().routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::Move, 310.0F, 90.0F, 2));
     ASSERT_TRUE(moveOutside.has_value());
@@ -320,55 +377,55 @@ TEST_F(UIPointerCaptureTest, ControlsAutoCaptureAndReleaseOnUpCancelDestroyDisab
     auto up =
         context->input().routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::ButtonUp, 310.0F, 90.0F, 3));
     ASSERT_TRUE(up.has_value());
-    EXPECT_FALSE(context->input().pointerCapture().hasValue());
+    EXPECT_FALSE(context->input().pointerCapture(Platform::PrimaryPointerId).hasValue());
     EXPECT_EQ(buttonCancelCount, 0);
 
     down = context->input().routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 110.0F, 10.0F, 4));
     ASSERT_TRUE(down.has_value());
-    EXPECT_EQ(context->input().pointerCapture(), slider);
+    EXPECT_EQ(context->input().pointerCapture(Platform::PrimaryPointerId), slider);
     expectOk(context->input().cancelPointerInteraction(window));
-    EXPECT_FALSE(context->input().pointerCapture().hasValue());
+    EXPECT_FALSE(context->input().pointerCapture(Platform::PrimaryPointerId).hasValue());
     EXPECT_EQ(sliderCancelCount, 0);
 
     down = context->input().routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 110.0F, 10.0F, 5));
     ASSERT_TRUE(down.has_value());
-    EXPECT_EQ(context->input().pointerCapture(), slider);
+    EXPECT_EQ(context->input().pointerCapture(Platform::PrimaryPointerId), slider);
     expectOk(updater.destroy(slider));
-    EXPECT_FALSE(context->input().pointerCapture().hasValue());
+    EXPECT_FALSE(context->input().pointerCapture(Platform::PrimaryPointerId).hasValue());
     EXPECT_EQ(sliderCancelCount, 1);
     EXPECT_TRUE(cancelListenerDestroyedTarget);
     expectOk(context->publication().commitLayout({.width = 320.0F, .height = 100.0F}));
 
     down = context->input().routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 210.0F, 10.0F, 6));
     ASSERT_TRUE(down.has_value());
-    EXPECT_EQ(context->input().pointerCapture(), textEdit);
+    EXPECT_EQ(context->input().pointerCapture(Platform::PrimaryPointerId), textEdit);
     expectOk(updater.setEnabled(textEdit, false));
-    EXPECT_FALSE(context->input().pointerCapture().hasValue());
+    EXPECT_FALSE(context->input().pointerCapture(Platform::PrimaryPointerId).hasValue());
     EXPECT_EQ(textEditCancelCount, 1);
     expectOk(updater.setEnabled(textEdit, true));
     expectOk(context->publication().commitLayout({.width = 320.0F, .height = 100.0F}));
 
     down = context->input().routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 210.0F, 10.0F, 7));
     ASSERT_TRUE(down.has_value());
-    EXPECT_EQ(context->input().pointerCapture(), textEdit);
+    EXPECT_EQ(context->input().pointerCapture(Platform::PrimaryPointerId), textEdit);
     UI::UILayoutStyle hiddenTextEdit = overlay(200.0F, 0.0F, 60.0F, 40.0F);
     hiddenTextEdit.visibility = UI::UIVisibility::Hidden;
     expectOk(updater.setLayoutStyle(textEdit, hiddenTextEdit));
-    EXPECT_EQ(context->input().pointerCapture(), textEdit);
+    EXPECT_EQ(context->input().pointerCapture(Platform::PrimaryPointerId), textEdit);
     expectOk(context->publication().commitLayout({.width = 320.0F, .height = 100.0F}));
-    EXPECT_FALSE(context->input().pointerCapture().hasValue());
+    EXPECT_FALSE(context->input().pointerCapture(Platform::PrimaryPointerId).hasValue());
     EXPECT_EQ(textEditCancelCount, 2);
 
     down = context->input().routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 10.0F, 10.0F, 8));
     ASSERT_TRUE(down.has_value());
-    EXPECT_EQ(context->input().pointerCapture(), button);
+    EXPECT_EQ(context->input().pointerCapture(Platform::PrimaryPointerId), button);
     const UI::UINodeId modal = createModal(updater, rootNode);
     const UI::UINodeId modalButton = createButton(updater, modal);
     expectOk(updater.setLayoutStyle(modal, overlay(80.0F, 10.0F, 120.0F, 70.0F)));
     expectOk(updater.setLayoutStyle(modalButton, fixedSize(50.0F, 20.0F)));
     expectOk(context->publication().commitLayout({.width = 320.0F, .height = 100.0F}));
     EXPECT_EQ(context->input().activeModal(), modal);
-    EXPECT_FALSE(context->input().pointerCapture().hasValue());
+    EXPECT_FALSE(context->input().pointerCapture(Platform::PrimaryPointerId).hasValue());
     EXPECT_EQ(buttonCancelCount, 1);
     EXPECT_TRUE(cancelContractObserved);
 }
@@ -400,7 +457,7 @@ TEST_F(UIPointerCaptureTest, CaptureRoutingUsesNoAdditionalSuppliedPmrAllocation
     auto up =
         context->input().routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::ButtonUp, 90.0F, 90.0F, 302));
     ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
-    EXPECT_FALSE(context->input().pointerCapture().hasValue());
+    EXPECT_FALSE(context->input().pointerCapture(Platform::PrimaryPointerId).hasValue());
     EXPECT_EQ(resource.allocationCount(), allocationsBeforeRoutes);
 }
 

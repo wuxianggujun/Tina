@@ -492,6 +492,8 @@ void UIContext::Impl::publishControlLayoutState(const std::pmr::vector<u32>& ord
     const bool previousScrollThumbDragActive = scrollThumbDragActive;
     const UINodeId previousArmedTextEdit = armedTextEdit;
     const UINodeId previousCapturedPointer = capturedPointerNode;
+    const auto previousPointerInteractionStates = pointerInteractionStates;
+    const Platform::PointerId previousActivePointerState = activePointerState;
     const usize previousPublishedHitBufferIndex = publishedHitBufferIndex;
     const Detail::UIImeCompositionState previousImeComposition = imeComposition;
     StyleInteractionNodeSet styleInteractionCandidates{};
@@ -535,6 +537,8 @@ void UIContext::Impl::publishControlLayoutState(const std::pmr::vector<u32>& ord
         scrollThumbDragActive = previousScrollThumbDragActive;
         armedTextEdit = previousArmedTextEdit;
         capturedPointerNode = previousCapturedPointer;
+        pointerInteractionStates = previousPointerInteractionStates;
+        activePointerState = previousActivePointerState;
         imeComposition = previousImeComposition;
         for (usize saved = 0; saved < focusRestoreRollbackCount; ++saved)
         {
@@ -645,6 +649,73 @@ void UIContext::Impl::publishControlLayoutState(const std::pmr::vector<u32>& ord
         semanticsNeedsCommit = true;
     }
 
+    savePointerInteractionState(activePointerState);
+    std::array<bool, Platform::PointerCapacity> clearPointerCaptureByPointer{};
+    bool anyPointerInteractionCleared = false;
+    for (usize pointerIndex = 0; pointerIndex < Platform::PointerCapacity; ++pointerIndex)
+    {
+        PointerInteractionState& pointerState = pointerInteractionStates[pointerIndex];
+        const bool clearTextEdit =
+            pointerState.armedTextEdit.hasValue() &&
+            (!isLiveTextEdit(pointerState.armedTextEdit) ||
+             !isKeyboardFocusCandidate(pointerState.armedTextEdit, candidateHitEntries,
+                                       candidateActiveModalEntryIndex) ||
+             pointerState.armedTextEdit != desiredFocus);
+        const bool clearButton =
+            pointerState.armedPrimaryButton.hasValue() &&
+            !isPointerInteractionCandidate(pointerState.armedPrimaryButton, candidateHitEntries,
+                                            candidateActiveModalEntryIndex);
+        const bool clearSlider =
+            pointerState.armedSlider.hasValue() &&
+            !isPointerInteractionCandidate(pointerState.armedSlider, candidateHitEntries,
+                                            candidateActiveModalEntryIndex);
+        const bool clearScroll =
+            pointerState.armedScrollView.hasValue() &&
+            !isPointerInteractionCandidate(pointerState.armedScrollView, candidateHitEntries,
+                                            candidateActiveModalEntryIndex);
+        const bool clearHover =
+            pointerState.hoveredPrimaryControl.hasValue() &&
+            !isPointerInteractionCandidate(pointerState.hoveredPrimaryControl, candidateHitEntries,
+                                            candidateActiveModalEntryIndex);
+        const bool clearCapture =
+            pointerState.capturedPointerNode.hasValue() &&
+            !isPointerCaptureCandidate(pointerState.capturedPointerNode, candidateHitEntries,
+                                        candidateActiveModalEntryIndex);
+        if (clearTextEdit)
+        {
+            pointerState.armedTextEdit = {};
+        }
+        if (clearButton)
+        {
+            pointerState.armedPrimaryButton = {};
+            pointerState.armedPrimaryButtonPressed = false;
+            pointerState.armedTreeDisclosure = false;
+        }
+        if (clearSlider)
+        {
+            pointerState.armedSlider = {};
+            pointerState.splitterDragGrabOffset = 0.0F;
+        }
+        if (clearScroll)
+        {
+            pointerState.armedScrollView = {};
+            pointerState.armedScrollAxis = UIScrollAxes::None;
+            pointerState.scrollDragGrabOffset = 0.0F;
+            pointerState.scrollThumbDragActive = false;
+        }
+        if (clearHover)
+        {
+            pointerState.hoveredPrimaryControl = {};
+        }
+        if (clearCapture)
+        {
+            clearPointerCaptureByPointer[pointerIndex] = true;
+        }
+        anyPointerInteractionCleared = anyPointerInteractionCleared || clearTextEdit || clearButton ||
+                                       clearSlider || clearScroll || clearHover;
+    }
+    restorePointerInteractionState(pointerInteractionStates[activePointerState]);
+
     const bool clearTextEditArm =
         armedTextEdit.hasValue() &&
         (!isLiveTextEdit(armedTextEdit) ||
@@ -665,6 +736,10 @@ void UIContext::Impl::publishControlLayoutState(const std::pmr::vector<u32>& ord
     const bool clearPointerCapture =
         capturedPointerNode.hasValue() &&
         !isPointerCaptureCandidate(capturedPointerNode, candidateHitEntries, candidateActiveModalEntryIndex);
+    if (anyPointerInteractionCleared)
+    {
+        paintNeedsCommit = true;
+    }
     if (clearTextEditArm)
     {
         armedTextEdit = {};
@@ -841,6 +916,20 @@ void UIContext::Impl::publishControlLayoutState(const std::pmr::vector<u32>& ord
         const auto& previousHitEntries = committedHitBuffers[previousPublishedHitBufferIndex];
         dispatchPointerCancelToCapture(previousHitEntries);
     }
+    const Platform::PointerId restorePointer = activePointerState;
+    for (Platform::PointerId pointer = 0; pointer < Platform::PointerCapacity; ++pointer)
+    {
+        if (!clearPointerCaptureByPointer[pointer] || pointer == Platform::PrimaryPointerId)
+        {
+            continue;
+        }
+        loadPointerInteractionState(pointer);
+        const auto& previousHitEntries = committedHitBuffers[previousPublishedHitBufferIndex];
+        dispatchPointerCancelToCapture(previousHitEntries);
+        savePointerInteractionState(pointer);
+    }
+    restorePointerInteractionState(pointerInteractionStates[restorePointer]);
+    activePointerState = restorePointer;
     return Core::success();
 }
 

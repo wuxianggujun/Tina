@@ -315,9 +315,9 @@ TEST(GlfwBackendIntegrationTests, PointerButtonAndWheelKeepEventTimeLogicalPosit
 
     const WindowFrameSnapshot* primary = poll->frame()->primaryWindow();
     ASSERT_NE(primary, nullptr);
-    EXPECT_DOUBLE_EQ(primary->input.pointer.logicalX, CursorBX);
-    EXPECT_DOUBLE_EQ(primary->input.pointer.logicalY, CursorBY);
-    EXPECT_TRUE(primary->input.pointer.isHeld(PointerButton::Primary));
+    EXPECT_DOUBLE_EQ(primary->input.pointers[Platform::PrimaryPointerId].logicalX, CursorBX);
+    EXPECT_DOUBLE_EQ(primary->input.pointers[Platform::PrimaryPointerId].logicalY, CursorBY);
+    EXPECT_TRUE(primary->input.pointers[Platform::PrimaryPointerId].isHeld(PointerButton::Primary));
     (*backend)->shutdown();
 }
 

@@ -73,10 +73,7 @@ void UIContext::Impl::closeActiveMenuForDialogNoFail(UINodeId menu) noexcept
         nextFocus = isNodeEnabled(anchor) ? anchor : UINodeId{};
     }
     defaultActionPressState.clearAll();
-    clearArmedPrimaryButton();
-    clearArmedSlider();
-    clearArmedTextEdit();
-    capturedPointerNode = {};
+    clearAllPointerArms();
     resetImeCompositionState();
     textInputFocus = {};
     defaultActionFocusButton = nextFocus;
@@ -1373,10 +1370,7 @@ UIContext::Impl::contextMenuForTarget(UINodeId target) const noexcept
             nextFocus = isNodeEnabled(anchor) ? anchor : UINodeId{};
         }
         defaultActionPressState.clearAll();
-        clearArmedPrimaryButton();
-        clearArmedSlider();
-        clearArmedTextEdit();
-        capturedPointerNode = {};
+        clearAllPointerArms();
         resetImeCompositionState();
         textInputFocus = {};
         defaultActionFocusButton = nextFocus;

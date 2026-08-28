@@ -294,7 +294,7 @@ TEST(UIBehaviorCompositionTests, GenericRangeInputDoesNotEnterSliderPointerDragP
     const UI::UIPointerRouteResult down =
         route(*context, makePointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 1));
     EXPECT_FALSE(down.consumed);
-    EXPECT_FALSE(context->input().pointerCapture().hasValue());
+    EXPECT_FALSE(context->input().pointerCapture(Platform::PrimaryPointerId).hasValue());
     EXPECT_FALSE(context->input().defaultActionFocus().hasValue());
     auto value = updater.sliderValue(node);
     ASSERT_TRUE(value);

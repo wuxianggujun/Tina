@@ -88,7 +88,7 @@ namespace Tina::UI {
             return false;
         }
         const bool vertical = hasScrollAxis(state->style.axes, UIScrollAxes::Vertical);
-        entry.focused = enabled && scrollThumbDragActive && armedScrollView == node;
+        entry.focused = enabled && isAnyPointerScrollThumbDragging(node);
         entry.hasRange = true;
         entry.maxValue = vertical ? metrics.maxOffsetY() : metrics.maxOffsetX();
         entry.value = vertical ? metrics.offset.y : metrics.offset.x;

@@ -24,7 +24,7 @@ namespace {
             if constexpr (std::is_same_v<PatternType, PrimaryWindowKeyBinding>)
             {
                 return value.key > Platform::Key::Unknown && value.key < Platform::Key::Count;
-            } else if constexpr (std::is_same_v<PatternType, PrimaryPointerButtonBinding>)
+            } else if constexpr (std::is_same_v<PatternType, PointerButtonBinding>)
             {
                 return value.pointer == Platform::PrimaryPointerId && value.button < Platform::PointerButton::Count;
             } else if constexpr (std::is_same_v<PatternType, StandardGamepadButtonBinding>)

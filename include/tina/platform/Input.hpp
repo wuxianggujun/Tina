@@ -193,6 +193,9 @@ enum class InputResetReason : u8 {
 
 inline constexpr usize KeyCount = static_cast<usize>(Key::Count);
 inline constexpr usize PointerButtonCount = static_cast<usize>(PointerButton::Count);
+// Pointer ids are backend-neutral dense slots. The fixed bound keeps frame
+// validation and downstream interaction state allocation deterministic.
+inline constexpr usize PointerCapacity = 8;
 inline constexpr usize GamepadButtonCount = static_cast<usize>(GamepadButton::Count);
 inline constexpr usize GamepadAxisCount = static_cast<usize>(GamepadAxis::Count);
 
@@ -225,7 +228,25 @@ struct WindowInputSnapshot final {
     WindowId window{};
     u64 sourceMetricsRevision = 0;
     std::bitset<KeyCount> heldKeys{};
-    PointerSnapshot pointer{};
+    // Fixed-capacity pointer table. Slot zero is the primary pointer.
+    std::array<PointerSnapshot, PointerCapacity> pointers = [] {
+        std::array<PointerSnapshot, PointerCapacity> result{};
+        for (usize index = 0; index < PointerCapacity; ++index)
+        {
+            result[index].pointer = static_cast<PointerId>(index);
+            result[index].present = index == static_cast<usize>(PrimaryPointerId);
+        }
+        return result;
+    }();
+
+    [[nodiscard]] const PointerSnapshot* pointerSnapshot(PointerId pointerId) const noexcept
+    {
+        if (pointerId >= PointerCapacity)
+        {
+            return nullptr;
+        }
+        return &pointers[pointerId];
+    }
 
     [[nodiscard]] bool isHeld(Key key) const noexcept
     {

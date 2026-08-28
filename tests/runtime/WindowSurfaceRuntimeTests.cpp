@@ -163,7 +163,7 @@ class ScriptedWindowSurfacePlatform final : public Integration::IWindowSurfacePl
             .window = activeWindow_,
             .sourceMetricsRevision = metrics_.revision,
         };
-        input.pointer.pointer = Platform::PrimaryPointerId;
+        input.pointers[Platform::PrimaryPointerId].pointer = Platform::PrimaryPointerId;
         if (!frameBuilder_.setPrimaryWindowSnapshot(metrics_, input) || !frameBuilder_.setGamepadSnapshots({}))
         {
             return Core::failure(Platform::PlatformErrorCode::InvalidFrameSnapshot,

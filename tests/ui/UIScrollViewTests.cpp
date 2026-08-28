@@ -492,7 +492,7 @@ TEST_F(UIScrollViewTest, ThumbDragCapturesPointerPublishesActivePaintAndReleases
         pointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 1, {.x = 95.0F, .y = 20.0F}));
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
     EXPECT_TRUE(down->consumed);
-    EXPECT_EQ(context->input().pointerCapture(), tree.scrollView);
+    EXPECT_EQ(context->input().pointerCapture(Platform::PrimaryPointerId), tree.scrollView);
     EXPECT_TRUE(updater.isScrollViewDragging(tree.scrollView).value());
     assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     ASSERT_EQ(context->publication().committedPaint().size(), 2U);
@@ -511,7 +511,7 @@ TEST_F(UIScrollViewTest, ThumbDragCapturesPointerPublishesActivePaintAndReleases
         pointerInput(window, UI::UIRoutedPointerEventKind::ButtonUp, 3, {.x = 95.0F, .y = 75.0F}));
     ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
     EXPECT_TRUE(up->consumed);
-    EXPECT_FALSE(context->input().pointerCapture().hasValue());
+    EXPECT_FALSE(context->input().pointerCapture(Platform::PrimaryPointerId).hasValue());
     EXPECT_FALSE(updater.isScrollViewDragging(tree.scrollView).value());
     assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     EXPECT_EQ(context->publication().committedPaint().entries()[1].solidFill,
@@ -538,7 +538,7 @@ TEST_F(UIScrollViewTest, TrackPressPagesByOneViewportAndCapturesUntilUp)
         pointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 1, {.x = 95.0F, .y = 75.0F}));
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
     EXPECT_TRUE(down->consumed);
-    EXPECT_EQ(context->input().pointerCapture(), tree.scrollView);
+    EXPECT_EQ(context->input().pointerCapture(Platform::PrimaryPointerId), tree.scrollView);
     EXPECT_FALSE(updater.isScrollViewDragging(tree.scrollView).value());
     EXPECT_FLOAT_EQ(updater.scrollViewOffset(tree.scrollView).value().y, 100.0F);
 
@@ -546,7 +546,7 @@ TEST_F(UIScrollViewTest, TrackPressPagesByOneViewportAndCapturesUntilUp)
         pointerInput(window, UI::UIRoutedPointerEventKind::ButtonUp, 2, {.x = 95.0F, .y = 75.0F}));
     ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
     EXPECT_TRUE(up->consumed);
-    EXPECT_FALSE(context->input().pointerCapture().hasValue());
+    EXPECT_FALSE(context->input().pointerCapture(Platform::PrimaryPointerId).hasValue());
 }
 
 TEST_F(UIScrollViewTest, CancelDisableModalAndDestroyClearThumbCapture)
@@ -561,18 +561,18 @@ TEST_F(UIScrollViewTest, CancelDisableModalAndDestroyClearThumbCapture)
         auto down = context->input().routePointerInput(
             pointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, sequence, {.x = 95.0F, .y = 20.0F}));
         EXPECT_TRUE(down.has_value()) << (down ? "" : down.error().message);
-        EXPECT_EQ(context->input().pointerCapture(), tree.scrollView);
+        EXPECT_EQ(context->input().pointerCapture(Platform::PrimaryPointerId), tree.scrollView);
         EXPECT_TRUE(updater.isScrollViewDragging(tree.scrollView).value());
     };
 
     arm(1);
     assertOk(context->input().cancelPointerInteraction(window));
-    EXPECT_FALSE(context->input().pointerCapture().hasValue());
+    EXPECT_FALSE(context->input().pointerCapture(Platform::PrimaryPointerId).hasValue());
     EXPECT_FALSE(updater.isScrollViewDragging(tree.scrollView).value());
 
     arm(2);
     assertOk(updater.setEnabled(tree.scrollView, false));
-    EXPECT_FALSE(context->input().pointerCapture().hasValue());
+    EXPECT_FALSE(context->input().pointerCapture(Platform::PrimaryPointerId).hasValue());
     EXPECT_FALSE(updater.isScrollViewDragging(tree.scrollView).value());
     assertOk(updater.setEnabled(tree.scrollView, true));
     assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
@@ -583,14 +583,14 @@ TEST_F(UIScrollViewTest, CancelDisableModalAndDestroyClearThumbCapture)
     assertOk(updater.setLayoutStyle(*modalResult, fixedSize(100.0F, 100.0F)));
     assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     EXPECT_EQ(context->input().activeModal(), *modalResult);
-    EXPECT_FALSE(context->input().pointerCapture().hasValue());
+    EXPECT_FALSE(context->input().pointerCapture(Platform::PrimaryPointerId).hasValue());
     EXPECT_FALSE(updater.isScrollViewDragging(tree.scrollView).value());
 
     assertOk(updater.destroy(*modalResult));
     assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     arm(4);
     assertOk(updater.destroy(tree.scrollView));
-    EXPECT_FALSE(context->input().pointerCapture().hasValue());
+    EXPECT_FALSE(context->input().pointerCapture(Platform::PrimaryPointerId).hasValue());
     EXPECT_FALSE(updater.isAlive(tree.scrollView));
 }
 

@@ -769,7 +769,7 @@ class AdvancingPlatform final : public Platform::IPlatformBackend {
         {
             for (Platform::PointerButton button : probe_->heldPointerButtonsByFrame[frameIndex])
             {
-                input.pointer.heldButtons.set(static_cast<usize>(button));
+                input.pointers[Platform::PrimaryPointerId].heldButtons.set(static_cast<usize>(button));
             }
         }
         if (frameIndex < probe_->pointerButtonTransitionsByFrame.size() &&
@@ -777,8 +777,8 @@ class AdvancingPlatform final : public Platform::IPlatformBackend {
         {
             const ScriptedPointerButtonTransition& finalPointer =
                 probe_->pointerButtonTransitionsByFrame[frameIndex].back();
-            input.pointer.logicalX = finalPointer.logicalX;
-            input.pointer.logicalY = finalPointer.logicalY;
+            input.pointers[Platform::PrimaryPointerId].logicalX = finalPointer.logicalX;
+            input.pointers[Platform::PrimaryPointerId].logicalY = finalPointer.logicalY;
         }
         if (!frameBuilder_.setPrimaryWindowSnapshot(metrics, input))
         {
@@ -2727,7 +2727,7 @@ TEST(EngineConfigTest, RejectsInvalidDuplicateAndExcessBindings)
     auto unsupportedPointer = EngineConfig::Defaults();
     unsupportedPointer.inputActions.bindings.push_back(InputActionBinding{
         .input =
-            PrimaryPointerButtonBinding{
+            PointerButtonBinding{
                 .pointer = Platform::PrimaryPointerId + 1,
                 .button = Platform::PointerButton::Primary,
             },
@@ -3285,7 +3285,7 @@ TEST(EngineHostRunTest, GameSdkPointerListenerPublishesClaimBeforeActionsAndRele
     config.inputActions.bindings = {
         InputActionBinding{
             .input =
-                PrimaryPointerButtonBinding{
+                PointerButtonBinding{
                     .pointer = Platform::PrimaryPointerId,
                     .button = Platform::PointerButton::Primary,
                 },
@@ -4309,7 +4309,7 @@ TEST(EngineHostRunTest, WorldPointerActionPayloadUsesLastPresentedCamera2D)
     config.inputActions.bindings = {
         InputActionBinding{
             .input =
-                PrimaryPointerButtonBinding{
+                PointerButtonBinding{
                     .pointer = Platform::PrimaryPointerId,
                     .button = Platform::PointerButton::Primary,
                 },

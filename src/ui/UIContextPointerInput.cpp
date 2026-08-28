@@ -102,7 +102,7 @@ UIContext::Impl::addRoutedPointerListenerFromUpdater(UINodeId updaterRoot, UIRou
     {
         return fail(UIErrorCode::WrongOwnerWindow, "UI pointer input belongs to another owner window");
     }
-    if (input.pointer != Platform::PrimaryPointerId || !isValidRoutedPointerEventKind(input.kind) ||
+    if (input.pointer >= Platform::PointerCapacity || !isValidRoutedPointerEventKind(input.kind) ||
         input.kind == UIRoutedPointerEventKind::PointerCancel || !std::isfinite(input.position.x) ||
         !std::isfinite(input.position.y) || !std::isfinite(input.delta.x) || !std::isfinite(input.delta.y))
     {
@@ -280,10 +280,24 @@ void UIContext::Impl::dispatchPointerCancelForCurrentCapture() noexcept
 
 void UIContext::Impl::dispatchPointerCancelForSubtree(UINodeId subtreeRoot) noexcept
 {
-    if (!pointerCancelDispatchInProgress && isNodeWithinSubtree(subtreeRoot, capturedPointerNode))
+    if (pointerCancelDispatchInProgress)
     {
-        dispatchPointerCancelForCurrentCapture();
+        return;
     }
+
+    savePointerInteractionState(activePointerState);
+    const Platform::PointerId originalPointer = activePointerState;
+    for (Platform::PointerId pointer = 0; pointer < Platform::PointerCapacity; ++pointer)
+    {
+        loadPointerInteractionState(pointer);
+        if (isNodeWithinSubtree(subtreeRoot, capturedPointerNode))
+        {
+            dispatchPointerCancelForCurrentCapture();
+        }
+        savePointerInteractionState(pointer);
+    }
+    restorePointerInteractionState(pointerInteractionStates[originalPointer]);
+    activePointerState = originalPointer;
 }
 
 [[nodiscard]] Core::Result<UIPointerRouteResult> UIContext::Impl::routePointerInput(const UIPointerInputEvent& input)
@@ -305,6 +319,14 @@ void UIContext::Impl::dispatchPointerCancelForSubtree(UINodeId subtreeRoot) noex
     {
         return Core::failure(modality.error());
     }
+    loadPointerInteractionState(input.pointer);
+    auto pointerStateCleanup = Core::makeScopeExit([this, pointer = input.pointer]() noexcept {
+        savePointerInteractionState(pointer);
+        if (pointer != Platform::PrimaryPointerId)
+        {
+            loadPointerInteractionState(Platform::PrimaryPointerId);
+        }
+    });
     lastPointerInput = input;
     hasLastPointerInput = true;
 
@@ -1506,12 +1528,40 @@ void UIContext::Impl::dispatchPointerCancelForSubtree(UINodeId subtreeRoot) noex
     {
         return fail(UIErrorCode::WrongOwnerWindow, "UI Pointer interaction cancellation belongs to another Window");
     }
-    const UINodeId cancelledButton = armedPrimaryButton;
-    const UINodeId cancelledSlider = armedSlider;
-    const UINodeId cancelledScrollView = armedScrollView;
-    const UINodeId cancelledTextEdit = armedTextEdit;
+    std::array<UINodeId, Platform::PointerCapacity * 5 + 2> cancelledNodes{};
+    usize cancelledNodeCount = 0;
+    const auto remember = [&cancelledNodes, &cancelledNodeCount](UINodeId node) noexcept {
+        if (!node.hasValue() || cancelledNodeCount >= cancelledNodes.size())
+        {
+            return;
+        }
+        for (usize index = 0; index < cancelledNodeCount; ++index)
+        {
+            if (cancelledNodes[index] == node)
+            {
+                return;
+            }
+        }
+        cancelledNodes[cancelledNodeCount++] = node;
+    };
+    for (const PointerInteractionState& state : pointerInteractionStates)
+    {
+        remember(state.armedPrimaryButton);
+        remember(state.armedSlider);
+        remember(state.armedScrollView);
+        remember(state.armedTextEdit);
+        remember(state.hoveredPrimaryControl);
+    }
     const UINodeId cancelledFocus = defaultActionFocusButton;
+    remember(cancelledFocus);
     const UINodeId cancelledHover = hoveredPrimaryControl;
+    remember(cancelledHover);
+    for (PointerInteractionState& state : pointerInteractionStates)
+    {
+        state = {};
+    }
+    restorePointerInteractionState(pointerInteractionStates[Platform::PrimaryPointerId]);
+    activePointerState = Platform::PrimaryPointerId;
     clearArmedPrimaryButton();
     clearArmedSlider();
     clearArmedScrollView();
@@ -1540,14 +1590,10 @@ void UIContext::Impl::dispatchPointerCancelForSubtree(UINodeId subtreeRoot) noex
     // any pointer interaction armed. Existing dirty work will rebuild the
     // paint/semantics snapshot; otherwise this best-effort mark schedules
     // the cleared control state for the next commit.
-    static_cast<void>(markPaintDirtyBatch({
-        cancelledButton,
-        cancelledSlider,
-        cancelledScrollView,
-        cancelledTextEdit,
-        cancelledFocus,
-        cancelledHover,
-    }));
+    for (usize index = 0; index < cancelledNodeCount; ++index)
+    {
+        static_cast<void>(markPaintDirty(cancelledNodes[index]));
+    }
     return Core::success();
 }
 

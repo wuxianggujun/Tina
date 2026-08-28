@@ -116,7 +116,7 @@ struct TestFrameInput final {
     }
     for (Platform::PointerButton button : input.heldPointerButtons)
     {
-        snapshot.pointer.heldButtons.set(static_cast<usize>(button));
+        snapshot.pointers[Platform::PrimaryPointerId].heldButtons.set(static_cast<usize>(button));
     }
     if (!builder.setPrimaryWindowSnapshot(metrics, snapshot))
     {
@@ -302,8 +302,8 @@ TEST(InputActionMapperConfigurationTest, RejectsDuplicatePhysicalBindingAndCapac
     const std::array unsupportedPointer{
         InputActionBinding{
             .input =
-                PrimaryPointerButtonBinding{
-                    .pointer = Platform::PrimaryPointerId + 1,
+                PointerButtonBinding{
+                    .pointer = static_cast<Platform::PointerId>(Platform::PointerCapacity),
                     .button = Platform::PointerButton::Primary,
                 },
             .action = MoveAction,

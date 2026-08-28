@@ -268,13 +268,13 @@ UINodeId UIInputRouter::activeModal() const noexcept
     return m_context->m_impl->activeModal();
 }
 
-UINodeId UIInputRouter::pointerCapture() const noexcept
+UINodeId UIInputRouter::pointerCapture(Platform::PointerId pointer) const noexcept
 {
     if (!m_context->m_impl->isOwnerThread())
     {
         return {};
     }
-    return m_context->m_impl->pointerCapture();
+    return m_context->m_impl->pointerCapture(pointer);
 }
 
 UINodeId UIInputRouter::activePopup() const noexcept

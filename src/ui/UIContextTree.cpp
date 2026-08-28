@@ -2689,7 +2689,7 @@ void UIContext::Impl::destroyRootImmediately(UINodeId root) noexcept
     {
         return Core::success();
     }
-    const bool clearHover = hoveredPrimaryControl == node && policy != UIPointerHitPolicy::Targetable;
+    const bool clearHover = isAnyPointerHovering(node) && policy != UIPointerHitPolicy::Targetable;
     if (clearHover)
     {
         // Hover chrome is paint-only; hit policy itself is HitTest metadata.
@@ -2806,7 +2806,7 @@ void UIContext::Impl::destroyRootImmediately(UINodeId root) noexcept
             return closed;
         }
     }
-    if (!enabled && capturedPointerNode == node)
+    if (!enabled && isAnyPointerCapturedInSubtree(node))
     {
         dispatchPointerCancelForCurrentCapture();
         if (!contains(node))
@@ -2818,30 +2818,7 @@ void UIContext::Impl::destroyRootImmediately(UINodeId root) noexcept
     if (!enabled)
     {
         defaultActionPressState.clearNode(node);
-        if (hoveredPrimaryControl == node)
-        {
-            hoveredPrimaryControl = {};
-        }
-        if (armedPrimaryButton == node)
-        {
-            clearArmedPrimaryButton();
-        }
-        if (armedSlider == node)
-        {
-            clearArmedSlider();
-        }
-        if (armedScrollView == node)
-        {
-            clearArmedScrollView();
-        }
-        if (armedTextEdit == node)
-        {
-            clearArmedTextEdit();
-        }
-        if (capturedPointerNode == node)
-        {
-            capturedPointerNode = {};
-        }
+        clearPointerInteractionNode(node);
         if (defaultActionFocusButton == node)
         {
             defaultActionFocusButton = {};

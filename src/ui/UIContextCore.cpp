@@ -370,8 +370,225 @@ void UIContext::Impl::drainDeferredRootDestroys() noexcept
 
 [[nodiscard]] bool UIContext::Impl::isButtonPressed(UINodeId node) const noexcept
 {
-    return (armedPrimaryButton == node && armedPrimaryButtonPressed) ||
-           defaultActionPressState.isPressed(node);
+    if (defaultActionPressState.isPressed(node))
+    {
+        return true;
+    }
+    if (armedPrimaryButton == node && armedPrimaryButtonPressed)
+    {
+        return true;
+    }
+    for (const PointerInteractionState& state : pointerInteractionStates)
+    {
+        if (state.armedPrimaryButton == node && state.armedPrimaryButtonPressed)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+UIContext::Impl::PointerInteractionState UIContext::Impl::capturePointerInteractionState() const noexcept
+{
+    return PointerInteractionState{
+        .armedPrimaryButton = armedPrimaryButton,
+        .armedPrimaryButtonPressed = armedPrimaryButtonPressed,
+        .hoveredPrimaryControl = hoveredPrimaryControl,
+        .armedSlider = armedSlider,
+        .splitterDragGrabOffset = splitterDragGrabOffset,
+        .armedScrollView = armedScrollView,
+        .armedScrollAxis = armedScrollAxis,
+        .scrollDragGrabOffset = scrollDragGrabOffset,
+        .scrollThumbDragActive = scrollThumbDragActive,
+        .armedTextEdit = armedTextEdit,
+        .capturedPointerNode = capturedPointerNode,
+        .lastPointerInput = lastPointerInput,
+        .hasLastPointerInput = hasLastPointerInput,
+        .armedTreeDisclosure = armedTreeDisclosure,
+    };
+}
+
+void UIContext::Impl::restorePointerInteractionState(const PointerInteractionState& state) noexcept
+{
+    armedPrimaryButton = state.armedPrimaryButton;
+    armedPrimaryButtonPressed = state.armedPrimaryButtonPressed;
+    hoveredPrimaryControl = state.hoveredPrimaryControl;
+    armedSlider = state.armedSlider;
+    splitterDragGrabOffset = state.splitterDragGrabOffset;
+    armedScrollView = state.armedScrollView;
+    armedScrollAxis = state.armedScrollAxis;
+    scrollDragGrabOffset = state.scrollDragGrabOffset;
+    scrollThumbDragActive = state.scrollThumbDragActive;
+    armedTextEdit = state.armedTextEdit;
+    capturedPointerNode = state.capturedPointerNode;
+    lastPointerInput = state.lastPointerInput;
+    hasLastPointerInput = state.hasLastPointerInput;
+    armedTreeDisclosure = state.armedTreeDisclosure;
+}
+
+void UIContext::Impl::savePointerInteractionState(Platform::PointerId pointer) noexcept
+{
+    if (pointer < pointerInteractionStates.size())
+    {
+        pointerInteractionStates[pointer] = capturePointerInteractionState();
+    }
+}
+
+void UIContext::Impl::loadPointerInteractionState(Platform::PointerId pointer) noexcept
+{
+    if (pointer >= pointerInteractionStates.size())
+    {
+        return;
+    }
+    savePointerInteractionState(activePointerState);
+    restorePointerInteractionState(pointerInteractionStates[pointer]);
+    activePointerState = pointer;
+}
+
+bool UIContext::Impl::isAnyPointerHovering(UINodeId node) const noexcept
+{
+    if (hoveredPrimaryControl == node)
+    {
+        return true;
+    }
+    return std::ranges::any_of(pointerInteractionStates,
+                               [node](const PointerInteractionState& state) noexcept {
+                                   return state.hoveredPrimaryControl == node;
+                               });
+}
+
+bool UIContext::Impl::isAnyPointerSliderArmed(UINodeId node) const noexcept
+{
+    if (armedSlider == node)
+    {
+        return true;
+    }
+    return std::ranges::any_of(pointerInteractionStates,
+                               [node](const PointerInteractionState& state) noexcept {
+                                   return state.armedSlider == node;
+                               });
+}
+
+bool UIContext::Impl::isAnyPointerScrollDragging(UINodeId node, UIScrollAxes axis) const noexcept
+{
+    if (scrollThumbDragActive && armedScrollView == node && armedScrollAxis == axis)
+    {
+        return true;
+    }
+    return std::ranges::any_of(pointerInteractionStates,
+                               [node, axis](const PointerInteractionState& state) noexcept {
+                                   return state.scrollThumbDragActive && state.armedScrollView == node &&
+                                          state.armedScrollAxis == axis;
+                               });
+}
+
+bool UIContext::Impl::isAnyPointerScrollThumbDragging(UINodeId node) const noexcept
+{
+    if (scrollThumbDragActive && armedScrollView == node)
+    {
+        return true;
+    }
+    return std::ranges::any_of(pointerInteractionStates,
+                               [node](const PointerInteractionState& state) noexcept {
+                                   return state.scrollThumbDragActive && state.armedScrollView == node;
+                               });
+}
+
+bool UIContext::Impl::isAnyPointerTextEditArmed(UINodeId node) const noexcept
+{
+    if (armedTextEdit == node)
+    {
+        return true;
+    }
+    return std::ranges::any_of(pointerInteractionStates,
+                               [node](const PointerInteractionState& state) noexcept {
+                                   return state.armedTextEdit == node;
+                               });
+}
+
+bool UIContext::Impl::isAnyPointerCapturedInSubtree(UINodeId subtreeRoot) const noexcept
+{
+    if (isNodeWithinSubtree(subtreeRoot, capturedPointerNode))
+    {
+        return true;
+    }
+    return std::ranges::any_of(pointerInteractionStates,
+                               [this, subtreeRoot](const PointerInteractionState& state) noexcept {
+                                   return isNodeWithinSubtree(subtreeRoot, state.capturedPointerNode);
+                               });
+}
+
+void UIContext::Impl::clearPointerInteractionNode(UINodeId node) noexcept
+{
+    if (!node.hasValue())
+    {
+        return;
+    }
+    savePointerInteractionState(activePointerState);
+    for (PointerInteractionState& state : pointerInteractionStates)
+    {
+        if (state.armedPrimaryButton == node)
+        {
+            state.armedPrimaryButton = {};
+            state.armedPrimaryButtonPressed = false;
+            state.armedTreeDisclosure = false;
+        }
+        if (state.hoveredPrimaryControl == node)
+        {
+            state.hoveredPrimaryControl = {};
+        }
+        if (state.armedSlider == node)
+        {
+            state.armedSlider = {};
+            state.splitterDragGrabOffset = 0.0F;
+        }
+        if (state.armedScrollView == node)
+        {
+            state.armedScrollView = {};
+            state.armedScrollAxis = UIScrollAxes::None;
+            state.scrollDragGrabOffset = 0.0F;
+            state.scrollThumbDragActive = false;
+        }
+        if (state.armedTextEdit == node)
+        {
+            state.armedTextEdit = {};
+        }
+        if (state.capturedPointerNode == node)
+        {
+            state.capturedPointerNode = {};
+        }
+    }
+    restorePointerInteractionState(pointerInteractionStates[activePointerState]);
+}
+
+void UIContext::Impl::clearAllPointerInteractions() noexcept
+{
+    for (PointerInteractionState& state : pointerInteractionStates)
+    {
+        state = {};
+    }
+    activePointerState = Platform::PrimaryPointerId;
+    restorePointerInteractionState(pointerInteractionStates[Platform::PrimaryPointerId]);
+}
+
+void UIContext::Impl::clearAllPointerArms() noexcept
+{
+    savePointerInteractionState(activePointerState);
+    for (PointerInteractionState& state : pointerInteractionStates)
+    {
+        state.armedPrimaryButton = {};
+        state.armedPrimaryButtonPressed = false;
+        state.armedTreeDisclosure = false;
+        state.armedSlider = {};
+        state.splitterDragGrabOffset = 0.0F;
+        state.armedScrollView = {};
+        state.armedScrollAxis = UIScrollAxes::None;
+        state.scrollDragGrabOffset = 0.0F;
+        state.scrollThumbDragActive = false;
+        state.armedTextEdit = {};
+        state.capturedPointerNode = {};
+    }
+    restorePointerInteractionState(pointerInteractionStates[activePointerState]);
 }
 
 void UIContext::Impl::clearArmedPrimaryButton() noexcept
@@ -571,30 +788,40 @@ void UIContext::Impl::deactivateButtonActionForNode(u32 nodeIndex) noexcept
     // Node destruction makes every matching control identity stale; no
     // synthetic Up is emitted for the destroyed target.
     defaultActionPressState.clearNode(node);
-    if (hoveredPrimaryControl == node)
+    for (PointerInteractionState& state : pointerInteractionStates)
     {
-        hoveredPrimaryControl = {};
+        if (state.hoveredPrimaryControl == node)
+        {
+            state.hoveredPrimaryControl = {};
+        }
+        if (state.armedPrimaryButton == node)
+        {
+            state.armedPrimaryButton = {};
+            state.armedPrimaryButtonPressed = false;
+            state.armedTreeDisclosure = false;
+        }
+        if (state.armedSlider == node)
+        {
+            state.armedSlider = {};
+            state.splitterDragGrabOffset = 0.0F;
+        }
+        if (state.armedScrollView == node)
+        {
+            state.armedScrollView = {};
+            state.armedScrollAxis = UIScrollAxes::None;
+            state.scrollDragGrabOffset = 0.0F;
+            state.scrollThumbDragActive = false;
+        }
+        if (state.armedTextEdit == node)
+        {
+            state.armedTextEdit = {};
+        }
+        if (state.capturedPointerNode == node)
+        {
+            state.capturedPointerNode = {};
+        }
     }
-    if (armedPrimaryButton == node)
-    {
-        clearArmedPrimaryButton();
-    }
-    if (armedSlider == node)
-    {
-        clearArmedSlider();
-    }
-    if (armedScrollView == node)
-    {
-        clearArmedScrollView();
-    }
-    if (armedTextEdit == node)
-    {
-        clearArmedTextEdit();
-    }
-    if (capturedPointerNode == node)
-    {
-        capturedPointerNode = {};
-    }
+    restorePointerInteractionState(pointerInteractionStates[activePointerState]);
     if (defaultActionFocusButton == node)
     {
         clearDefaultActionFocus();

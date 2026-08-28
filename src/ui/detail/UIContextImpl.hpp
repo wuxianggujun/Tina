@@ -290,6 +290,24 @@ struct UIContext::Impl final {
     usize routeDispatchDepth = 0;
     u64 buttonRouteSerial = 0;
     u64 accessibilityActionSequence = 0;
+    struct PointerInteractionState final {
+        UINodeId armedPrimaryButton{};
+        bool armedPrimaryButtonPressed = false;
+        UINodeId hoveredPrimaryControl{};
+        UINodeId armedSlider{};
+        float splitterDragGrabOffset = 0.0F;
+        UINodeId armedScrollView{};
+        UIScrollAxes armedScrollAxis = UIScrollAxes::None;
+        float scrollDragGrabOffset = 0.0F;
+        bool scrollThumbDragActive = false;
+        UINodeId armedTextEdit{};
+        UINodeId capturedPointerNode{};
+        UIPointerInputEvent lastPointerInput{};
+        bool hasLastPointerInput = false;
+        bool armedTreeDisclosure = false;
+    };
+    std::array<PointerInteractionState, Platform::PointerCapacity> pointerInteractionStates{};
+    Platform::PointerId activePointerState = Platform::PrimaryPointerId;
     UINodeId armedPrimaryButton{};
     bool armedPrimaryButtonPressed = false;
     UINodeId hoveredPrimaryControl{};
@@ -341,6 +359,20 @@ struct UIContext::Impl final {
     // Focused single-line editor that receives keyboard and IME input.
     UINodeId textInputFocus{};
     Detail::UIImeCompositionState imeComposition;
+
+    [[nodiscard]] PointerInteractionState capturePointerInteractionState() const noexcept;
+    void restorePointerInteractionState(const PointerInteractionState& state) noexcept;
+    void loadPointerInteractionState(Platform::PointerId pointer) noexcept;
+    void savePointerInteractionState(Platform::PointerId pointer) noexcept;
+    [[nodiscard]] bool isAnyPointerHovering(UINodeId node) const noexcept;
+    [[nodiscard]] bool isAnyPointerSliderArmed(UINodeId node) const noexcept;
+    [[nodiscard]] bool isAnyPointerScrollDragging(UINodeId node, UIScrollAxes axis) const noexcept;
+    [[nodiscard]] bool isAnyPointerScrollThumbDragging(UINodeId node) const noexcept;
+    [[nodiscard]] bool isAnyPointerTextEditArmed(UINodeId node) const noexcept;
+    [[nodiscard]] bool isAnyPointerCapturedInSubtree(UINodeId subtreeRoot) const noexcept;
+    void clearPointerInteractionNode(UINodeId node) noexcept;
+    void clearAllPointerArms() noexcept;
+    void clearAllPointerInteractions() noexcept;
 
     Impl(Platform::WindowId owner, UIContextCapacityConfig capacities, std::thread::id threadId,
          std::shared_ptr<Detail::UIContextLifetimeControl> lifetimeControl,
@@ -2890,7 +2922,7 @@ struct UIContext::Impl final {
     [[nodiscard]] UINodeId activeModal() const noexcept;
 
 
-    [[nodiscard]] UINodeId pointerCapture() const noexcept;
+    [[nodiscard]] UINodeId pointerCapture(Platform::PointerId pointer) const noexcept;
 
 
     [[nodiscard]] UINodeId activePopup() const noexcept;

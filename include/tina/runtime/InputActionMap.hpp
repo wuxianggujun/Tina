@@ -64,10 +64,10 @@ struct PrimaryWindowKeyBinding final {
     auto operator<=>(const PrimaryWindowKeyBinding&) const = default;
 };
 
-struct PrimaryPointerButtonBinding final {
+struct PointerButtonBinding final {
     Platform::PointerId pointer = Platform::PrimaryPointerId;
     Platform::PointerButton button = Platform::PointerButton::Primary;
-    auto operator<=>(const PrimaryPointerButtonBinding&) const = default;
+    auto operator<=>(const PointerButtonBinding&) const = default;
 };
 
 struct StandardGamepadButtonBinding final {
@@ -93,7 +93,7 @@ struct StandardGamepadAxisBinding final {
 // contribute scale while axes are normalized, dead-zoned, rescaled, and then
 // multiplied by scale. SumClamped clamps after all contributions are composed.
 using ActionBindingPattern =
-    std::variant<PrimaryWindowKeyBinding, PrimaryPointerButtonBinding, StandardGamepadButtonBinding,
+    std::variant<PrimaryWindowKeyBinding, PointerButtonBinding, StandardGamepadButtonBinding,
                  StandardGamepadAxisBinding>;
 
 struct InputActionBinding final {

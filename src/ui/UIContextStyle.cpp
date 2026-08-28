@@ -56,7 +56,7 @@ namespace Tina::UI {
                               ? paint.checkedFocusedBackgroundColor
                               : paint.focusedIndicatorColor);
         }
-        if (hoveredPrimaryControl == node)
+        if (isAnyPointerHovering(node))
         {
             applyOverride(switchPresentation && checked
                               ? paint.checkedHoveredBackgroundColor
@@ -90,7 +90,7 @@ namespace Tina::UI {
             applyOverride(radio.selected ? paint.selectedFocusedBackgroundColor
                                          : paint.focusedBackgroundColor);
         }
-        if (hoveredPrimaryControl == node)
+        if (isAnyPointerHovering(node))
         {
             applyOverride(radio.selected ? paint.selectedHoveredBackgroundColor
                                          : paint.hoveredBackgroundColor);
@@ -127,7 +127,7 @@ namespace Tina::UI {
             applyOverride(selected ? paint.selectedFocusedBackgroundColor
                                    : paint.focusedBackgroundColor);
         }
-        if (hoveredPrimaryControl == node)
+        if (isAnyPointerHovering(node))
         {
             applyOverride(selected ? paint.selectedHoveredBackgroundColor
                                    : paint.hoveredBackgroundColor);
@@ -157,11 +157,11 @@ namespace Tina::UI {
         {
             applyOverride(paint.focusedBackgroundColor);
         }
-        if (hoveredPrimaryControl == node)
+        if (isAnyPointerHovering(node))
         {
             applyOverride(paint.hoveredBackgroundColor);
         }
-        if (armedTextEdit == node)
+        if (isAnyPointerTextEditArmed(node))
         {
             applyOverride(paint.pressedBackgroundColor);
         }
@@ -200,7 +200,7 @@ namespace Tina::UI {
     {
         applyOverride(paint.focusedBackgroundColor);
     }
-    if (hoveredPrimaryControl == node)
+    if (isAnyPointerHovering(node))
     {
         applyOverride(paint.hoveredBackgroundColor);
     }
@@ -252,11 +252,11 @@ namespace Tina::UI {
                                              u32 nodeIndex) const noexcept
 {
     UIStyleState states = UIStyleState::None;
-    if (hoveredPrimaryControl == node)
+    if (isAnyPointerHovering(node))
     {
         states |= UIStyleState::Hovered;
     }
-    if (isButtonPressed(node) || armedTextEdit == node)
+    if (isButtonPressed(node) || isAnyPointerTextEditArmed(node))
     {
         states |= UIStyleState::Pressed;
     }
@@ -322,7 +322,7 @@ namespace Tina::UI {
     {
         states |= UIStyleState::Open;
     }
-    if (armedSlider == node || armedScrollView == node)
+    if (isAnyPointerSliderArmed(node) || isAnyPointerScrollThumbDragging(node))
     {
         states |= UIStyleState::Dragging;
     }
@@ -339,6 +339,14 @@ namespace Tina::UI {
     result.add(armedSlider);
     result.add(armedScrollView);
     result.add(armedTextEdit);
+    for (const PointerInteractionState& state : pointerInteractionStates)
+    {
+        result.add(state.hoveredPrimaryControl);
+        result.add(state.armedPrimaryButton);
+        result.add(state.armedSlider);
+        result.add(state.armedScrollView);
+        result.add(state.armedTextEdit);
+    }
     for (const UINodeId target : defaultActionPressState.pressedTargets())
     {
         result.add(target);
@@ -554,7 +562,7 @@ void UIContext::Impl::setResolvedImageTintTokenDependency(u32 nodeIndex, UIStyle
     case UIStyleRoleId::ButtonText:
         tint = isButtonPressed(node)
                    ? productTheme.colors.primary
-                   : ((hoveredPrimaryControl == node || isFocusVisible(node))
+                   : ((isAnyPointerHovering(node) || isFocusVisible(node))
                           ? productTheme.colors.onSurface
                           : productTheme.colors.onSurfaceVariant);
         break;
@@ -566,7 +574,7 @@ void UIContext::Impl::setResolvedImageTintTokenDependency(u32 nodeIndex, UIStyle
                    ? productTheme.colors.onPrimaryContainer
                    : (isButtonPressed(node)
                           ? productTheme.colors.primary
-                          : ((hoveredPrimaryControl == node || isFocusVisible(node))
+                          : ((isAnyPointerHovering(node) || isFocusVisible(node))
                                  ? productTheme.colors.onSurface
                                  : productTheme.colors.onSurfaceVariant));
         break;
@@ -765,7 +773,7 @@ void UIContext::Impl::setResolvedImageTintTokenDependency(u32 nodeIndex, UIStyle
     {
         applyOverride(paint.focusedIndicatorColor);
     }
-    if (hoveredPrimaryControl == node)
+    if (isAnyPointerHovering(node))
     {
         applyOverride(paint.hoveredIndicatorColor);
     }
@@ -809,7 +817,7 @@ void UIContext::Impl::setResolvedImageTintTokenDependency(u32 nodeIndex, UIStyle
         {
             applyOverride(focusedColor);
         }
-        if (hoveredPrimaryControl == item)
+        if (isAnyPointerHovering(item))
         {
             applyOverride(hoveredColor);
         }

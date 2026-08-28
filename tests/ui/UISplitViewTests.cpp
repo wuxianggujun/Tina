@@ -404,7 +404,7 @@ TEST_F(UISplitViewTest, PointerDragCapturesSplitterAndKeyboardRangeInputUpdatesF
         {.x = grabX, .y = 50.0F}));
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
     EXPECT_TRUE(down->consumed);
-    EXPECT_EQ(context->input().pointerCapture(), nodes.splitter);
+    EXPECT_EQ(context->input().pointerCapture(Platform::PrimaryPointerId), nodes.splitter);
     EXPECT_TRUE(updater.isSplitterDragging(nodes.splitter).value());
 
     auto move = context->input().routePointerInput(pointerInput(
@@ -421,7 +421,7 @@ TEST_F(UISplitViewTest, PointerDragCapturesSplitterAndKeyboardRangeInputUpdatesF
         {.x = 220.0F, .y = 50.0F}));
     ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
     EXPECT_FALSE(updater.isSplitterDragging(nodes.splitter).value());
-    EXPECT_FALSE(context->input().pointerCapture().hasValue());
+    EXPECT_FALSE(context->input().pointerCapture(Platform::PrimaryPointerId).hasValue());
 
     assertOk(updater.setSplitViewFraction(nodes.splitView, 0.5F));
     assertOk(context->publication().commitLayout({.width = 300.0F, .height = 100.0F}));

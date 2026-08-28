@@ -454,7 +454,7 @@ TEST_F(UIFocusModalTest, FailedPaintCommitDoesNotPublishModalFocusOrCapture)
     auto armed = context->input().routePointerInput(pointerDown(window, 10.0F, 10.0F));
     ASSERT_TRUE(armed.has_value()) << (armed ? "" : armed.error().message);
     EXPECT_EQ(context->input().defaultActionFocus(), background);
-    EXPECT_EQ(context->input().pointerCapture(), background);
+    EXPECT_EQ(context->input().pointerCapture(Platform::PrimaryPointerId), background);
     usize pointerCancelCount = 0;
     auto pointerCancelListener = context->input().addRoutedPointerListener(
         {
@@ -482,14 +482,14 @@ TEST_F(UIFocusModalTest, FailedPaintCommitDoesNotPublishModalFocusOrCapture)
     EXPECT_EQ(context->publication().committedHit().hitRevision(), hitRevision);
     EXPECT_FALSE(context->input().activeModal().hasValue());
     EXPECT_EQ(context->input().defaultActionFocus(), background);
-    EXPECT_EQ(context->input().pointerCapture(), background);
+    EXPECT_EQ(context->input().pointerCapture(Platform::PrimaryPointerId), background);
     EXPECT_EQ(pointerCancelCount, 0);
 
     expectOk(updater.setBoxPaint(modal, UI::UIBoxPaint{}));
     expectOk(context->publication().commitLayout({.width = 200.0F, .height = 200.0F}));
     EXPECT_EQ(context->input().activeModal(), modal);
     EXPECT_EQ(context->input().defaultActionFocus(), modalButton);
-    EXPECT_FALSE(context->input().pointerCapture().hasValue());
+    EXPECT_FALSE(context->input().pointerCapture(Platform::PrimaryPointerId).hasValue());
     EXPECT_EQ(pointerCancelCount, 1);
 }
 
@@ -516,7 +516,7 @@ TEST_F(UIFocusModalTest, FailedSemanticsCommitDoesNotPublishModalFocusOrCapture)
     auto armed = context->input().routePointerInput(pointerDown(window, 10.0F, 10.0F));
     ASSERT_TRUE(armed.has_value()) << (armed ? "" : armed.error().message);
     EXPECT_EQ(context->input().defaultActionFocus(), background);
-    EXPECT_EQ(context->input().pointerCapture(), background);
+    EXPECT_EQ(context->input().pointerCapture(Platform::PrimaryPointerId), background);
     usize pointerCancelCount = 0;
     auto pointerCancelListener = context->input().addRoutedPointerListener(
         {
@@ -549,14 +549,14 @@ TEST_F(UIFocusModalTest, FailedSemanticsCommitDoesNotPublishModalFocusOrCapture)
     EXPECT_EQ(context->publication().committedSemantics().semanticsRevision(), semanticsRevision);
     EXPECT_FALSE(context->input().activeModal().hasValue());
     EXPECT_EQ(context->input().defaultActionFocus(), background);
-    EXPECT_EQ(context->input().pointerCapture(), background);
+    EXPECT_EQ(context->input().pointerCapture(Platform::PrimaryPointerId), background);
     EXPECT_EQ(pointerCancelCount, 0);
 
     expectOk(updater.setText(modalButton, ""));
     expectOk(context->publication().commitLayout({.width = 200.0F, .height = 200.0F}));
     EXPECT_EQ(context->input().activeModal(), modal);
     EXPECT_EQ(context->input().defaultActionFocus(), modalButton);
-    EXPECT_FALSE(context->input().pointerCapture().hasValue());
+    EXPECT_FALSE(context->input().pointerCapture(Platform::PrimaryPointerId).hasValue());
     EXPECT_EQ(pointerCancelCount, 1);
 }
 

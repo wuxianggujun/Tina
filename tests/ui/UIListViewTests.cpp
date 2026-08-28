@@ -307,7 +307,7 @@ TEST_F(UIListViewTest, PointerSelectionWheelAndScrollbarUseCommittedVirtualRows)
         pointerInput(window, UI::UIRoutedPointerEventKind::ButtonDown, 1, rowCenter));
     ASSERT_TRUE(down.has_value()) << (down ? "" : down.error().message);
     EXPECT_TRUE(down->consumed);
-    EXPECT_EQ(context->input().pointerCapture(), thirdRow->node);
+    EXPECT_EQ(context->input().pointerCapture(Platform::PrimaryPointerId), thirdRow->node);
     auto up = context->input().routePointerInput(pointerInput(window, UI::UIRoutedPointerEventKind::ButtonUp, 2, rowCenter));
     ASSERT_TRUE(up.has_value()) << (up ? "" : up.error().message);
     EXPECT_TRUE(up->consumed);
@@ -386,14 +386,14 @@ TEST_F(UIListViewTest, PointerSelectionWheelAndScrollbarUseCommittedVirtualRows)
                                                              {.x = 95.0F, .y = 12.0F}));
     ASSERT_TRUE(thumbDown.has_value()) << (thumbDown ? "" : thumbDown.error().message);
     EXPECT_TRUE(thumbDown->consumed);
-    EXPECT_EQ(context->input().pointerCapture(), listView);
+    EXPECT_EQ(context->input().pointerCapture(Platform::PrimaryPointerId), listView);
     auto thumbMove = context->input().routePointerInput(
         pointerInput(window, UI::UIRoutedPointerEventKind::Move, 9, {.x = 95.0F, .y = 80.0F}));
     ASSERT_TRUE(thumbMove.has_value()) << (thumbMove ? "" : thumbMove.error().message);
     auto thumbUp = context->input().routePointerInput(
         pointerInput(window, UI::UIRoutedPointerEventKind::ButtonUp, 10, {.x = 95.0F, .y = 80.0F}));
     ASSERT_TRUE(thumbUp.has_value()) << (thumbUp ? "" : thumbUp.error().message);
-    EXPECT_FALSE(context->input().pointerCapture().hasValue());
+    EXPECT_FALSE(context->input().pointerCapture(Platform::PrimaryPointerId).hasValue());
     assertOk(context->publication().commitLayout({.width = 100.0F, .height = 100.0F}));
     EXPECT_GT(updater.listViewMetrics(listView).value().scrollOffset, 0.0F);
 }

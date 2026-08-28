@@ -663,17 +663,17 @@ addListener(UI::UIContext& context, UI::UIRoutedPointerListenerDesc descriptor, 
         .window = window,
         .sourceMetricsRevision = spec.frameId.value,
     };
-    input.pointer.logicalX = spec.pointerX;
-    input.pointer.logicalY = spec.pointerY;
-    input.pointer.accumulatedDeltaX = spec.accumulatedDeltaX;
-    input.pointer.accumulatedDeltaY = spec.accumulatedDeltaY;
+    input.pointers[Platform::PrimaryPointerId].logicalX = spec.pointerX;
+    input.pointers[Platform::PrimaryPointerId].logicalY = spec.pointerY;
+    input.pointers[Platform::PrimaryPointerId].accumulatedDeltaX = spec.accumulatedDeltaX;
+    input.pointers[Platform::PrimaryPointerId].accumulatedDeltaY = spec.accumulatedDeltaY;
     for (Platform::Key key : spec.heldKeys)
     {
         input.heldKeys.set(static_cast<usize>(key));
     }
     for (Platform::PointerButton button : spec.heldPointerButtons)
     {
-        input.pointer.heldButtons.set(static_cast<usize>(button));
+        input.pointers[Platform::PrimaryPointerId].heldButtons.set(static_cast<usize>(button));
     }
     if (!builder.setPrimaryWindowSnapshot(metrics, input) ||
         !builder.setGamepadSnapshots(spec.gamepadSnapshots))
@@ -718,7 +718,7 @@ createProducer(usize rawTransitionCapacity, usize continuousControlClaimCapacity
     const std::array bindings{
         InputActionBinding{
             .input =
-                PrimaryPointerButtonBinding{
+                PointerButtonBinding{
                     .pointer = Platform::PrimaryPointerId,
                     .button = Platform::PointerButton::Primary,
                 },

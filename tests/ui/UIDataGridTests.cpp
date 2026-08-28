@@ -438,7 +438,7 @@ TEST_F(UIDataGridTest,
         {.x = 175.0F, .y = 32.0F}));
     ASSERT_TRUE(verticalThumb.has_value()) << verticalThumb.error().message;
     EXPECT_TRUE(verticalThumb->consumed);
-    EXPECT_EQ(context->input().pointerCapture(), grid);
+    EXPECT_EQ(context->input().pointerCapture(Platform::PrimaryPointerId), grid);
     ASSERT_TRUE(context->input().routePointerInput(pointerInput(
                     window, UI::UIRoutedPointerEventKind::Move, 8,
                     {.x = 175.0F, .y = 90.0F}))
@@ -447,7 +447,7 @@ TEST_F(UIDataGridTest,
                     window, UI::UIRoutedPointerEventKind::ButtonUp, 9,
                     {.x = 175.0F, .y = 90.0F}))
                     .has_value());
-    EXPECT_FALSE(context->input().pointerCapture().hasValue());
+    EXPECT_FALSE(context->input().pointerCapture(Platform::PrimaryPointerId).hasValue());
     assertOk(context->publication().commitLayout({.width = 180.0F, .height = 120.0F}));
     EXPECT_GT(updater.dataGridMetrics(grid).value().scrollOffset.y, 0.0F);
 }

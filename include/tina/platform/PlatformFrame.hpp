@@ -765,6 +765,11 @@ class PlatformFrameBuilder final {
         return button < PointerButton::Count;
     }
 
+    [[nodiscard]] static bool isValidPointerId(PointerId pointer) noexcept
+    {
+        return pointer < PointerCapacity;
+    }
+
     [[nodiscard]] static bool isValidGamepadButton(GamepadButton button) noexcept
     {
         return button < GamepadButton::Count;
@@ -826,18 +831,18 @@ class PlatformFrameBuilder final {
         }
         if (const auto* value = std::get_if<PointerButtonTransition>(&payload); value != nullptr)
         {
-            return value->window.hasValue() && value->pointer == PrimaryPointerId &&
+            return value->window.hasValue() && isValidPointerId(value->pointer) &&
                    isValidPointerButton(value->button) && isValidDigitalTransition(value->state) &&
                    isFinite(value->logicalX) && isFinite(value->logicalY);
         }
         if (const auto* value = std::get_if<PointerMoveTransition>(&payload); value != nullptr)
         {
-            return value->window.hasValue() && value->pointer == PrimaryPointerId && isFinite(value->logicalX) &&
+            return value->window.hasValue() && isValidPointerId(value->pointer) && isFinite(value->logicalX) &&
                    isFinite(value->logicalY) && isFinite(value->deltaX) && isFinite(value->deltaY);
         }
         if (const auto* value = std::get_if<PointerWheelTransition>(&payload); value != nullptr)
         {
-            return value->window.hasValue() && value->pointer == PrimaryPointerId && isFinite(value->logicalX) &&
+            return value->window.hasValue() && isValidPointerId(value->pointer) && isFinite(value->logicalX) &&
                    isFinite(value->logicalY) && isFinite(value->deltaX) && isFinite(value->deltaY);
         }
         if (const auto* value = std::get_if<GamepadButtonTransition>(&payload); value != nullptr)
@@ -911,17 +916,34 @@ class PlatformFrameBuilder final {
     {
         const WindowMetricsSnapshot& metrics = snapshot.metrics;
         const WindowInputSnapshot& input = snapshot.input;
-        return metrics.window.hasValue() && metrics.window == input.window && metrics.revision != 0 &&
+        if (!(metrics.window.hasValue() && metrics.window == input.window && metrics.revision != 0 &&
                metrics.revision == input.sourceMetricsRevision && metrics.logicalExtent.width != 0 &&
                metrics.logicalExtent.height != 0 && isFinite(metrics.contentScale.x) &&
                isFinite(metrics.contentScale.y) && metrics.contentScale.x > 0.0F && metrics.contentScale.y > 0.0F &&
-               input.pointer.pointer == PrimaryPointerId && isFinite(input.pointer.logicalX) &&
-               isFinite(input.pointer.logicalY) && isFinite(input.pointer.accumulatedDeltaX) &&
-               isFinite(input.pointer.accumulatedDeltaY) &&
+               input.pointers[PrimaryPointerId].pointer == PrimaryPointerId &&
+               isFinite(input.pointers[PrimaryPointerId].logicalX) &&
+               isFinite(input.pointers[PrimaryPointerId].logicalY) &&
+               isFinite(input.pointers[PrimaryPointerId].accumulatedDeltaX) &&
+               isFinite(input.pointers[PrimaryPointerId].accumulatedDeltaY) &&
                // An absent pointer cannot be holding a button. Allowing it would let
                // a backend publish a press that no later Up can balance, since the
                // pointer it belongs to is gone.
-               (input.pointer.present || input.pointer.heldButtons.none());
+               (input.pointers[PrimaryPointerId].present ||
+                input.pointers[PrimaryPointerId].heldButtons.none())))
+        {
+            return false;
+        }
+        for (usize index = 0; index < PointerCapacity; ++index)
+        {
+            const PointerSnapshot& pointer = input.pointers[index];
+            if (pointer.pointer != index || !isFinite(pointer.logicalX) || !isFinite(pointer.logicalY) ||
+                !isFinite(pointer.accumulatedDeltaX) || !isFinite(pointer.accumulatedDeltaY) ||
+                (!pointer.present && pointer.heldButtons.any()))
+            {
+                return false;
+            }
+        }
+        return true;
     }
 
     [[nodiscard]] static bool isValidGamepadSnapshot(const GamepadSnapshot& snapshot) noexcept
@@ -1276,13 +1298,16 @@ class PlatformFrameBuilder final {
             return transition == DigitalTransition::Down ? ExpectedDigitalState::Held : ExpectedDigitalState::Released;
         };
         std::array<ExpectedDigitalState, KeyCount> keyExpectations{};
-        std::array<ExpectedDigitalState, PointerButtonCount> pointerExpectations{};
+        std::array<std::array<ExpectedDigitalState, PointerButtonCount>, PointerCapacity> pointerExpectations{};
         std::array<std::array<ExpectedDigitalState, GamepadButtonCount>, MaximumGamepadSlots> gamepadExpectations{};
         std::array<GamepadId, MaximumGamepadSlots> expectedGamepads{};
 
         const auto clearAllExpectations = [&]() noexcept {
             keyExpectations.fill(ExpectedDigitalState::Unspecified);
-            pointerExpectations.fill(ExpectedDigitalState::Unspecified);
+            for (auto& expectations : pointerExpectations)
+            {
+                expectations.fill(ExpectedDigitalState::Unspecified);
+            }
             for (auto& expectations : gamepadExpectations)
             {
                 expectations.fill(ExpectedDigitalState::Unspecified);
@@ -1300,7 +1325,8 @@ class PlatformFrameBuilder final {
             }
             if (const auto* pointer = std::get_if<PointerButtonTransition>(&payload); pointer != nullptr)
             {
-                pointerExpectations[static_cast<usize>(pointer->button)] = expectedState(pointer->state);
+                pointerExpectations[pointer->pointer][static_cast<usize>(pointer->button)] =
+                    expectedState(pointer->state);
                 continue;
             }
             if (const auto* gamepad = std::get_if<GamepadButtonTransition>(&payload); gamepad != nullptr)
@@ -1345,13 +1371,21 @@ class PlatformFrameBuilder final {
                 return false;
             }
         }
-        for (usize buttonIndex = 0; buttonIndex < pointerExpectations.size(); ++buttonIndex)
+        for (usize pointerIndex = 0; pointerIndex < pointerExpectations.size(); ++pointerIndex)
         {
-            const ExpectedDigitalState expected = pointerExpectations[buttonIndex];
-            if (expected != ExpectedDigitalState::Unspecified &&
-                finalWindow.pointer.heldButtons.test(buttonIndex) != (expected == ExpectedDigitalState::Held))
+            const PointerSnapshot* finalPointer = finalWindow.pointerSnapshot(static_cast<PointerId>(pointerIndex));
+            if (finalPointer == nullptr)
             {
-                return false;
+                continue;
+            }
+            for (usize buttonIndex = 0; buttonIndex < pointerExpectations[pointerIndex].size(); ++buttonIndex)
+            {
+                const ExpectedDigitalState expected = pointerExpectations[pointerIndex][buttonIndex];
+                if (expected != ExpectedDigitalState::Unspecified &&
+                    finalPointer->heldButtons.test(buttonIndex) != (expected == ExpectedDigitalState::Held))
+                {
+                    return false;
+                }
             }
         }
         for (usize slot = 0; slot < expectedGamepads.size(); ++slot)
