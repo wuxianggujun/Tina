@@ -23,6 +23,9 @@ Tina 是一个以 C++23 为基线的 2D/3D 游戏 Runtime。当前产品路径�
 - `tina_sample_ui_showcase` 提供 20 控件工作台、完整交互层次、集合/滚动流程与 Dark/Light 实时换肤；
 - Audio 提供 backend-neutral engine 与可选 miniaudio；Physics2D 提供 Box/Circle/Capsule/ConvexPolygon、
   Distance/Revolute/Prismatic joint 与可选 Box2D 3.x adapter；
+- Network 提供严格的数值 IPv4/IPv6 地址与 owner-thread、固定容量、非阻塞 UDP datagram
+  socket，不依赖任何第三方库；TCP、HTTP、WebSocket、TLS、名字解析与可靠 UDP 通道
+  不在当前切片范围内；
 - `tina_sample_2d` 是 Catalog/TileMap/Navigation2D/UI/Audio/Physics2D 产品门禁，`tina_sample_3d` 是
   glTF/Prefab/Scene/Render 产品门禁。
 

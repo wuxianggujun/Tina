@@ -83,6 +83,7 @@ Tina 文档按用途分为四类，避免把设计目标、当前事实和一次
 | Scene / 2D / 3D / Navigation / Editor | [Scene](scene-ecs.md) · [2D](game-2d.md) · [2D 导航](navigation2d.md) · [World2D 序列化](world2d-serialization.md) · [Editor 2D / 3D](editor-2d.md) · [Editor UI/UX 路线图](editor-ui-ux-roadmap.md) · [Editor 功能扩展计划](editor-feature-plan.md) · [3D](game-3d.md) |
 | Render / Asset | [Render](rendering.md) · [资源](resources.md) |
 | UI / Audio / Physics | [Retained UI](ui.md) · [UI 框架设计](ui-framework.md) · [Modern Desktop UI](ui-modern-desktop.md) · [Audio](audio.md) · [Physics](physics.md) |
+| Network | [网络](network.md) |
 | Core / 性能 / 依赖 | [Core](core.md) · [性能与内存](performance-memory.md) · [依赖治理](dependencies.md) |
 | 参考与完整目标 | [vNext 目标架构](vnext-architecture.md) · [Carbon 参考](carbon-reference.md) |
 | 风险 | [风险登记](risks.md) |

@@ -62,6 +62,7 @@ Vorbis/Opus 的安装图还分别解析 `Vorbis`、`Opus`、`OpusFile`。未请�
 | `Tina::Platform` | Window/Input/PlatformFrame/backend SPI |
 | `Tina::PlatformGlfw` | optional installed GLFW Platform adapter；需 `COMPONENTS PlatformGlfw` |
 | `Tina::Task` | bounded IO/CPU/Main TaskSystem |
+| `Tina::Network` | 数值 IP 地址/endpoint 与 owner-thread 非阻塞 UDP datagram socket |
 | `Tina::Render` | RenderDevice、Surface/Frame/Scene/UI DisplayList、GPU IDs |
 | `Tina::RenderBgfx` | optional installed bgfx Render adapter；需 `COMPONENTS RenderBgfx` |
 | `Tina::Runtime` | EngineHost、Game Application/State、phase context、Action/Event facade |
@@ -903,6 +904,35 @@ projection component 或 `World`。
 
 当前没有公开 SceneManager、ECS registry 或 Runtime-owned World capability。EnTT 不在公开面，也未被当前
 Scene target 使用。
+
+## Network
+
+`IpAddress` 是数值地址，`parse()` 只接受 IPv4 dotted-quad 与 RFC 4291 IPv6 literal
+（含 `::` 压缩与尾部嵌入 V4）。刻意拒绝带前导零的 octet（`010` 的八进制/十进制歧义
+是真实的地址伪造手法）、方括号形式（`[::1]` 属 URI authority 语法）、主机名、带端口
+后缀与带 scheme 的输入 —— 任何需要 resolver 的输入一律 fail closed。`format()` 输出
+canonical 形式，IPv6 按 RFC 5952 小写并压缩最长零组段（并列取最左，单组不压缩），
+缓冲区不足返回 0 而非截断。`NetworkEndpoint` 是地址 + 端口，端口在公开接口一律
+host byte order。
+
+`UdpSocket::Create()` 捕获 owner 线程，并按 `receiveQueueCapacity ×
+maximumDatagramBytes` 一次性分配接收存储；`send()`/`receive()` 之后不再增长。所有
+方法从非 owner 线程调用返回 `WrongOwnerThread`。socket 不持有线程也不提供回调：
+`receive()` 排空内核已缓冲的 datagram 并按到达顺序返回，返回的 span 与其中 payload
+借用 socket 存储，只在下一次 `receive()` 前有效。
+
+`send()` 成功只表示已交给 OS，不表示送达；`WouldBlock` 是瞬态的（发送缓冲区满），
+应在后续帧重试而非当作错误。空 payload、超过 `maximumDatagramBytes`、端口 0、
+无地址、以及与 socket 绑定 family 不同的目标均 fail closed。`receive()` 在排空中途
+遇到硬失败仍返回已收集的 datagram，只有一个都没收到时才返回错误。
+
+恰好等于 `maximumDatagramBytes` 的 payload 可完整收发 —— 接收 slot 比声明上限多留
+一字节，使 POSIX `recvfrom` 的静默截断可被检测；真正超限的 datagram 被丢弃并计入
+`totalOversizedDatagramCount`，绝不截断后当完整数据交出。`totalDiscardedDatagramCount`
+与 `totalReceivedDatagramCount` 不相交，且**队列满不计入丢弃** —— 超出容量的 datagram
+留在内核缓冲区等下一次 `receive()`，是延迟而非丢失。单次 `receive()` 的 syscall 次数
+另有上限，因为被丢弃的 datagram 不占 slot。详见 [网络](network.md) 与
+[ADR 0033](adr/0033-network-module-boundaries.md)。
 
 ## Navigation2D
 

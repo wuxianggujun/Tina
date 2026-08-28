@@ -47,11 +47,14 @@ TEST(MemoryTagTest, UsesStableExplicitDiagnosticValues)
     static_assert(std::to_underlying(Core::MemoryTag::Core) == 1U);
     static_assert(std::to_underlying(Core::MemoryTag::RuntimeFrame) == 5U);
     static_assert(std::to_underlying(Core::MemoryTag::Cooker) == 12U);
-    static_assert(std::to_underlying(Core::MemoryTag::Count) == 13U);
+    static_assert(std::to_underlying(Core::MemoryTag::Network) == 13U);
+    static_assert(std::to_underlying(Core::MemoryTag::Count) == 14U);
 
     EXPECT_TRUE(Core::isValidMemoryTag(Core::MemoryTag::UI));
+    EXPECT_TRUE(Core::isValidMemoryTag(Core::MemoryTag::Network));
     EXPECT_FALSE(Core::isValidMemoryTag(Core::MemoryTag::Invalid));
     EXPECT_EQ(Core::memoryTagName(Core::MemoryTag::Physics2D), "Physics2D");
+    EXPECT_EQ(Core::memoryTagName(Core::MemoryTag::Network), "Network");
 }
 
 TEST(MemoryTrackerTest, TracksIndependentCurrentPeakFailureAndInvalidDeallocationCounters)

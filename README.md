@@ -21,6 +21,7 @@ The current retained UI still lives in `include/tina/ui` and `src/ui`. Reference
 - `tina_sample_ui_showcase` presents 20 controls, layered interaction feedback, collection/scroll
   workflows, and live Dark/Light themes.
 - Audio and Physics2D have optional miniaudio and Box2D adapters; Physics2D exposes Box/Circle/Capsule/ConvexPolygon shapes and Distance/Revolute/Prismatic joints.
+- Network provides strict numeric IPv4/IPv6 addresses and an owner-thread, fixed-capacity, non-blocking UDP datagram socket with no third-party dependency. TCP, HTTP, WebSocket, TLS, name resolution, and reliable-UDP channels are out of scope for this slice.
 - `tina_sample_2d` covers Catalog/TileMap/Navigation2D/UI/Audio/Physics2D; `tina_sample_3d` covers the 3D product path.
 
 Public headers and the Game SDK do not expose bgfx, GLFW, Box2D, miniaudio, FreeType, cgltf,
