@@ -40,6 +40,13 @@ inline constexpr Core::ErrorCode HttpResponseTooLarge{Core::ErrorDomain::Network
 inline constexpr Core::ErrorCode HttpTimeout{Core::ErrorDomain::Network, 23};
 // The peer closed before the declared body length arrived.
 inline constexpr Core::ErrorCode HttpIncompleteResponse{Core::ErrorDomain::Network, 24};
+// The server did not accept the upgrade, or its accept token did not match.
+inline constexpr Core::ErrorCode WebSocketHandshakeFailed{Core::ErrorDomain::Network, 25};
+// A frame violated RFC 6455: a reserved bit, an unknown opcode, an unmasked
+// server frame that should be masked, or a control frame that was fragmented.
+inline constexpr Core::ErrorCode WebSocketProtocolError{Core::ErrorDomain::Network, 26};
+inline constexpr Core::ErrorCode WebSocketMessageTooLarge{Core::ErrorDomain::Network, 27};
+inline constexpr Core::ErrorCode WebSocketClosed{Core::ErrorDomain::Network, 28};
 
 } // namespace NetworkErrorCode
 

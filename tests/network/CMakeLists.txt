@@ -5,6 +5,7 @@ set(TINA_NETWORK_HEADER_ISOLATION_SOURCES
     header_isolation/NetworkErrorsHeader.cpp
     header_isolation/TcpConnectionHeader.cpp
     header_isolation/UdpSocketHeader.cpp
+    header_isolation/WebSocketHeader.cpp
 )
 
 # Links only ProjectOptions and points at include/, so a public header that
@@ -27,6 +28,7 @@ add_executable(tina_network_tests
     ReadinessPollerTests.cpp
     TcpConnectionTests.cpp
     UdpSocketTests.cpp
+    WebSocketTests.cpp
     $<TARGET_OBJECTS:tina_network_header_isolation>
 )
 target_compile_features(tina_network_tests PRIVATE cxx_std_23)

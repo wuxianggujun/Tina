@@ -5,6 +5,7 @@ set(TINA_NETWORK_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/network/NetworkErrors.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/network/TcpConnection.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/network/UdpSocket.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/network/WebSocket.hpp
 )
 
 add_library(tina_network STATIC
@@ -13,8 +14,10 @@ add_library(tina_network STATIC
     NetworkEndpoint.cpp
     TcpConnection.cpp
     UdpSocket.cpp
+    WebSocket.cpp
     detail/NativeSocket.cpp
     detail/ReadinessPoller.cpp
+    detail/WebSocketHandshake.cpp
 )
 add_library(Tina::Network ALIAS tina_network)
 
