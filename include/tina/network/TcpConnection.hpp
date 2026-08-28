@@ -138,6 +138,16 @@ class TcpConnection final : public IByteStream {
 
     explicit TcpConnection(Impl* impl) noexcept;
 
+    // Adopts a socket that is already connected, which is what accept() returns.
+    // Private because a caller has no way to obtain a raw socket through the public
+    // surface: TcpListener is the only producer, and it is a friend rather than a
+    // second Create overload so no platform type reaches this header.
+    friend class TcpListener;
+    [[nodiscard]] static Core::Result<TcpConnection> adoptAcceptedSocket(
+        void* nativeSocket,
+        const NetworkEndpoint& remoteEndpoint,
+        const TcpConnectionConfig& config);
+
     Impl* m_impl = nullptr;
 };
 

@@ -17,6 +17,9 @@
 #include <arpa/inet.h>
 #include <cerrno>
 #include <fcntl.h>
+// getaddrinfo and addrinfo come from netdb.h on POSIX; ws2tcpip.h already
+// provides them on Windows.
+#include <netdb.h>
 #include <netinet/in.h>
 #include <poll.h>
 #include <sys/socket.h>

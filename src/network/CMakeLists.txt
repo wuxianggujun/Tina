@@ -1,18 +1,22 @@
 set(TINA_NETWORK_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/network/ByteStream.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/network/DnsResolver.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/network/HttpClient.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/network/NetworkEndpoint.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/network/NetworkErrors.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/network/TcpConnection.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/network/TcpListener.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/network/UdpSocket.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/network/WebSocket.hpp
 )
 
 add_library(tina_network STATIC
     ${TINA_NETWORK_PUBLIC_HEADERS}
+    DnsResolver.cpp
     HttpClient.cpp
     NetworkEndpoint.cpp
     TcpConnection.cpp
+    TcpListener.cpp
     UdpSocket.cpp
     WebSocket.cpp
     detail/NativeSocket.cpp
@@ -24,7 +28,7 @@ add_library(Tina::Network ALIAS tina_network)
 target_compile_features(tina_network PUBLIC cxx_std_23)
 target_include_directories(tina_network PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(tina_network
-    PUBLIC Tina::Core
+    PUBLIC Tina::Core Tina::Task
     PRIVATE "$<BUILD_INTERFACE:Tina::ProjectOptions>"
 )
 

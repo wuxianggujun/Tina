@@ -245,6 +245,90 @@ TcpConnectionState TcpConnection::state() const noexcept
     return m_impl->state;
 }
 
+Core::Result<TcpConnection> TcpConnection::adoptAcceptedSocket(
+    void* nativeSocket,
+    const NetworkEndpoint& remoteEndpoint,
+    const TcpConnectionConfig& config)
+{
+    // The socket arrives from accept() already connected, so this skips connect()
+    // and starts in Connected. Everything else -- buffers, poller registration,
+    // owner thread -- matches Create so an accepted connection is not a second
+    // kind of object with its own rules.
+    if (config.sendBufferBytes == 0 || config.receiveBufferBytes == 0) {
+        return Core::failure(
+            NetworkErrorCode::InvalidConfiguration,
+            "TcpConnection send and receive buffer sizes must be greater than zero");
+    }
+
+    const auto socket = *static_cast<const NativeSocket*>(nativeSocket);
+    if (socket == InvalidNativeSocket) {
+        return Core::failure(
+            NetworkErrorCode::BackendFailure,
+            "TcpConnection cannot adopt an invalid socket");
+    }
+
+    std::pmr::memory_resource* resource = config.memoryResource != nullptr
+        ? config.memoryResource
+        : std::pmr::get_default_resource();
+
+    // The caller already holds a transport scope for the listener, but this
+    // connection outlives any particular listener call, so it takes its own.
+    if (const Core::Status status = TransportScope::acquire(); !status) {
+        return Core::failure(status.error());
+    }
+    auto transportGuard = Core::makeScopeExit([]() noexcept { TransportScope::release(); });
+
+    auto poller = ReadinessPoller::Create(1, *resource);
+    if (!poller) {
+        return Core::failure(std::move(poller.error()));
+    }
+
+    Impl* impl = nullptr;
+    try {
+        impl = new Impl{*resource, std::move(*poller)};
+        impl->sendBuffer.resize(config.sendBufferBytes);
+        impl->receiveBuffer.resize(config.receiveBufferBytes);
+    } catch (const std::bad_alloc&) {
+        delete impl;
+        return Core::failure(
+            NetworkErrorCode::AllocationFailed,
+            "TcpConnection fixed buffer allocation failed");
+    } catch (...) {
+        delete impl;
+        return Core::failure(
+            NetworkErrorCode::ConstructionFailed,
+            "TcpConnection construction failed");
+    }
+
+    // Owns the socket from here: a failure below must close it, otherwise the
+    // descriptor leaks and the peer never learns the connection died.
+    impl->socket = socket;
+    auto implGuard = Core::makeScopeExit([&impl]() noexcept {
+        if (impl != nullptr) {
+            closeNativeSocket(impl->socket);
+            delete impl;
+        }
+    });
+
+    impl->owner = std::this_thread::get_id();
+    impl->remote = remoteEndpoint;
+
+    if (const Core::Status status = Detail::setNativeSocketNonBlocking(impl->socket); !status) {
+        return Core::failure(status.error());
+    }
+
+    auto registration = impl->poller.register_(impl->socket, ReadinessInterest::Readable);
+    if (!registration) {
+        return Core::failure(std::move(registration.error()));
+    }
+    impl->registration = *registration;
+    impl->state = TcpConnectionState::Connected;
+
+    implGuard.release();
+    transportGuard.release();
+    return TcpConnection{impl};
+}
+
 Core::Result<NetworkEndpoint> TcpConnection::localEndpoint() const noexcept
 {
     if (m_impl == nullptr) {

@@ -1,9 +1,11 @@
 set(TINA_NETWORK_HEADER_ISOLATION_SOURCES
     header_isolation/ByteStreamHeader.cpp
+    header_isolation/DnsResolverHeader.cpp
     header_isolation/HttpClientHeader.cpp
     header_isolation/NetworkEndpointHeader.cpp
     header_isolation/NetworkErrorsHeader.cpp
     header_isolation/TcpConnectionHeader.cpp
+    header_isolation/TcpListenerHeader.cpp
     header_isolation/UdpSocketHeader.cpp
     header_isolation/WebSocketHeader.cpp
 )
@@ -24,9 +26,11 @@ set_target_properties(tina_network_header_isolation PROPERTIES CXX_EXTENSIONS OF
 
 add_executable(tina_network_tests
     HttpClientTests.cpp
+    DnsResolverTests.cpp
     IpAddressTests.cpp
     ReadinessPollerTests.cpp
     TcpConnectionTests.cpp
+    TcpListenerTests.cpp
     UdpSocketTests.cpp
     WebSocketTests.cpp
     $<TARGET_OBJECTS:tina_network_header_isolation>
@@ -40,6 +44,7 @@ target_include_directories(tina_network_tests PRIVATE
 target_link_libraries(tina_network_tests PRIVATE
     Tina::ProjectOptions
     Tina::Network
+    Tina::Task
     GTest::gtest_main
 )
 set_target_properties(tina_network_tests PROPERTIES CXX_EXTENSIONS OFF)

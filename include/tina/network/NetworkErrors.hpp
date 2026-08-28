@@ -47,6 +47,13 @@ inline constexpr Core::ErrorCode WebSocketHandshakeFailed{Core::ErrorDomain::Net
 inline constexpr Core::ErrorCode WebSocketProtocolError{Core::ErrorDomain::Network, 26};
 inline constexpr Core::ErrorCode WebSocketMessageTooLarge{Core::ErrorDomain::Network, 27};
 inline constexpr Core::ErrorCode WebSocketClosed{Core::ErrorDomain::Network, 28};
+// The name could not be resolved. Distinct from a transport failure: nothing was
+// connected yet.
+inline constexpr Core::ErrorCode DnsResolutionFailed{Core::ErrorDomain::Network, 29};
+// The query never ran because the resolver had no free slot or no worker.
+inline constexpr Core::ErrorCode DnsQueryRejected{Core::ErrorDomain::Network, 30};
+inline constexpr Core::ErrorCode DnsQueryPending{Core::ErrorDomain::Network, 31};
+inline constexpr Core::ErrorCode InvalidQuery{Core::ErrorDomain::Network, 32};
 
 } // namespace NetworkErrorCode
 
