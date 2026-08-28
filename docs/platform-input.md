@@ -40,6 +40,15 @@ digital edge 与 final held state 的一致性。view、span 和 string_view 只
 Gamepad/Window ID 是 owner-aware generation identity，不能按 native index 持久化。Focus loss、disconnect
 和 stream reset 必须清除 held/default-action state，不能伪造普通 Up。
 
+`PointerSnapshot::present` 区分「没有指针」与「指针停在上次的位置」。位置在缺席时**保留最后已知值**而不是
+变成哨兵——否则每个消费者都要自己认哨兵，而 `present` 是唯一需要判断的东西。缺席时不允许持有按键
+（`isValidWindowSnapshot` 拒绝该组合）：那会发布一个之后没有 Up 能配对的 press，因为它所属的指针已经没了。
+GLFW backend 由 `glfwSetCursorEnterCallback` 驱动它，光标离开窗口时先走既有的 cancel 路径释放按键，与
+focus loss 同一形状。默认值是 `true`，因此既有后端与测试语义不变。
+
+这不只是移动端的准备：没有它，hover 会永久锁在最后一个 hover 过的控件上。鼠标总有位置所以可以忍，触摸
+设备两次点击之间根本没有位置（[ADR 0032](adr/0032-mobile-platform-contract-boundaries.md) C2）。
+
 设备身份（name / SDL GUID / layout）在一次连接内固定，因此随 `GamepadConnectedEvent` 一次性交付，
 **不进** `GamepadSnapshot`：snapshot 是每帧复制的16槽数组，把静态字节放进去纯属浪费。存储是固定内联的
 `GamepadName`/`GamepadGuid`，超长静默截断——身份只用于展示，缩短标签比因此丢掉 connect 事件更好。

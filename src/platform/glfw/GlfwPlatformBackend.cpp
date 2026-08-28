@@ -639,6 +639,7 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         glfwSetKeyCallback(window_, &GlfwPlatformBackend::keyCallback);
         glfwSetCharCallback(window_, &GlfwPlatformBackend::characterCallback);
         glfwSetCursorPosCallback(window_, &GlfwPlatformBackend::cursorPositionCallback);
+        glfwSetCursorEnterCallback(window_, &GlfwPlatformBackend::cursorEnterCallback);
         glfwSetMouseButtonCallback(window_, &GlfwPlatformBackend::mouseButtonCallback);
         glfwSetScrollCallback(window_, &GlfwPlatformBackend::scrollCallback);
         glfwSetWindowFocusCallback(window_, &GlfwPlatformBackend::focusCallback);
@@ -1237,6 +1238,30 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         }));
     }
 
+    void onCursorPresence(bool present) noexcept
+    {
+        input_.pointer.present = present;
+        if (present)
+        {
+            return;
+        }
+        // A cursor that leaves the window cannot still be holding a button, and the
+        // frame contract refuses that combination. Releasing through the existing
+        // cancel path rather than clearing the bitset means downstream sees the same
+        // shape it sees on focus loss, instead of a press with no matching Up.
+        //
+        // This is the desktop analogue of a finger lifting: the pointer stops having
+        // a position at all, which is why presence exists (ADR 0032 C2).
+        if (input_.pointer.heldButtons.any() && collectingFrame_)
+        {
+            recordAppend(frameBuilder_.appendInputTransition(InputCancelTransition{
+                .routedWindow = windowId_,
+                .reason = InputCancelReason::FocusLost,
+            }));
+        }
+        input_.pointer.heldButtons.reset();
+    }
+
     void onCursorPosition(double logicalX, double logicalY) noexcept
     {
         if (!std::isfinite(logicalX) || !std::isfinite(logicalY))
@@ -1717,6 +1742,7 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         glfwSetKeyCallback(window_, nullptr);
         glfwSetCharCallback(window_, nullptr);
         glfwSetCursorPosCallback(window_, nullptr);
+        glfwSetCursorEnterCallback(window_, nullptr);
         glfwSetMouseButtonCallback(window_, nullptr);
         glfwSetScrollCallback(window_, nullptr);
         glfwSetWindowFocusCallback(window_, nullptr);
@@ -1751,6 +1777,14 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
             backend->onCursorPosition(
                 logicalPointerCoordinate(nativeX, backend->pointerContentScaleX_),
                 logicalPointerCoordinate(nativeY, backend->pointerContentScaleY_));
+        }
+    }
+
+    static void cursorEnterCallback(GLFWwindow* window, int entered) noexcept
+    {
+        if (auto* backend = fromWindow(window); backend != nullptr)
+        {
+            backend->onCursorPresence(entered == GLFW_TRUE);
         }
     }
 

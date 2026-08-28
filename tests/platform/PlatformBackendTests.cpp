@@ -1623,6 +1623,49 @@ TEST(PlatformFrameBuilderTest, RejectsInvalidFinalWindowSnapshots)
     input = validWindowInput(window, 1);
     input.pointer.accumulatedDeltaY = std::numeric_limits<double>::infinity();
     expectInvalidWindowSnapshot(metrics, input);
+
+    // An absent pointer holding a button would be a press no later Up can balance,
+    // because the pointer it belongs to is gone.
+    metrics = validWindowMetrics(window, 1);
+    input = validWindowInput(window, 1);
+    input.pointer.present = false;
+    input.pointer.heldButtons.set(static_cast<usize>(Platform::PointerButton::Primary));
+    expectInvalidWindowSnapshot(metrics, input);
+}
+
+// Absence is a first-class state, not a sentinel position: "no pointer" and
+// "pointer resting where it last was" must be distinguishable, or hover latches
+// forever. With a mouse that is survivable; on touch there is no position at all
+// between taps (ADR 0032 C2).
+TEST(PlatformFrameBuilderTest, AcceptsAnAbsentPointerThatHoldsNoButtons)
+{
+    auto poolResult = TestWindowPool::Create(1);
+    ASSERT_TRUE(poolResult.has_value());
+    auto& pool = *poolResult;
+    const Platform::WindowId window = createWindowId(pool);
+
+    auto builderResult = Platform::PlatformFrameBuilder::Create();
+    ASSERT_TRUE(builderResult.has_value());
+    auto& builder = *builderResult;
+    ASSERT_TRUE(builder.beginFrame({1}).has_value());
+
+    Platform::WindowInputSnapshot input = validWindowInput(window, 1);
+    input.pointer.present = false;
+    // The position keeps its last value rather than becoming a sentinel, so it must
+    // still pass the finiteness check: `present` is the single thing to test.
+    input.pointer.logicalX = 42.0;
+    input.pointer.logicalY = 17.0;
+    EXPECT_TRUE(builder.setPrimaryWindowSnapshot(validWindowMetrics(window, 1), input));
+
+    auto frame = builder.finishFrame();
+    ASSERT_TRUE(frame.has_value());
+    ASSERT_EQ(frame->windows().size(), 1U);
+    EXPECT_FALSE(frame->windows()[0].input.pointer.present);
+    EXPECT_DOUBLE_EQ(frame->windows()[0].input.pointer.logicalX, 42.0);
+
+    // And presence defaults to true, so every existing backend and test keeps its
+    // meaning without opting in.
+    EXPECT_TRUE(Platform::PointerSnapshot{}.present);
 }
 
 TEST(PlatformFrameBuilderTest, RejectsInvalidFinalGamepadSnapshots)

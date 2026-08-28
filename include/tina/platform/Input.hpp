@@ -198,6 +198,16 @@ inline constexpr usize GamepadAxisCount = static_cast<usize>(GamepadAxis::Count)
 
 struct PointerSnapshot final {
     PointerId pointer = PrimaryPointerId;
+    // False when the pointer is not over the window at all: the cursor left, or on
+    // a touch device the finger lifted. The position stays at its last known value
+    // rather than becoming a sentinel, because every consumer would then have to
+    // recognise the sentinel; `present` is the single thing to test.
+    //
+    // Without this, "no pointer" is indistinguishable from "pointer resting where
+    // it last was", so hover latches on the last hovered control forever. That is
+    // survivable with a mouse, which always has a position, and wrong on touch,
+    // where between taps there is no position at all (ADR 0032 C2).
+    bool present = true;
     double logicalX = 0.0;
     double logicalY = 0.0;
     double accumulatedDeltaX = 0.0;

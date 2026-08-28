@@ -917,7 +917,11 @@ class PlatformFrameBuilder final {
                isFinite(metrics.contentScale.y) && metrics.contentScale.x > 0.0F && metrics.contentScale.y > 0.0F &&
                input.pointer.pointer == PrimaryPointerId && isFinite(input.pointer.logicalX) &&
                isFinite(input.pointer.logicalY) && isFinite(input.pointer.accumulatedDeltaX) &&
-               isFinite(input.pointer.accumulatedDeltaY);
+               isFinite(input.pointer.accumulatedDeltaY) &&
+               // An absent pointer cannot be holding a button. Allowing it would let
+               // a backend publish a press that no later Up can balance, since the
+               // pointer it belongs to is gone.
+               (input.pointer.present || input.pointer.heldButtons.none());
     }
 
     [[nodiscard]] static bool isValidGamepadSnapshot(const GamepadSnapshot& snapshot) noexcept
