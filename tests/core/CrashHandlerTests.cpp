@@ -134,9 +134,15 @@ TEST(CrashHandlerTest, ReportFileReceivesTheCrashTextForGuiProcesses)
 }
 
 // The backtrace is the whole point of the handler: without it a report names a
-// reason but not the code that produced it. Verify frames are actually resolved
-// rather than trusting the flag.
-TEST(CrashHandlerTest, BacktraceNamesTheCallingFunction)
+// reason but not the code that produced it.
+//
+// Symbol resolution is Windows-only today (DbgHelp); elsewhere `emitBacktrace`
+// deliberately records that it is unavailable. Both branches assert something
+// real rather than skipping: what must never happen is the section going missing
+// silently, because then a reader cannot tell "no frames" from "no handler".
+// This assertion was previously unguarded and failed on Linux for a defect that
+// was never in the handler.
+TEST(CrashHandlerTest, BacktraceIsResolvedWhereSupportedAndExplicitWhereNot)
 {
     const std::filesystem::path path = reportPath("tina_crash_backtrace_test.txt");
     std::error_code removeError;
@@ -156,12 +162,61 @@ TEST(CrashHandlerTest, BacktraceNamesTheCallingFunction)
 
     const std::string contents = readAll(path);
     EXPECT_NE(contents.find("backtrace:"), std::string::npos)
-        << "report file contents: " << contents;
+        << "the report must always account for the backtrace, even when it has "
+           "none; contents: "
+        << contents;
+#if defined(_WIN32)
     // reportFatalAndTerminate is on the captured stack, so its symbol proves the
     // frames were resolved and not just printed as bare addresses.
     EXPECT_NE(contents.find("reportFatalAndTerminate"), std::string::npos)
         << "backtrace did not resolve symbols; contents: " << contents;
+#else
+    // The absence has to be stated, not implied by an empty section.
+    EXPECT_NE(contents.find("unavailable on this platform"), std::string::npos)
+        << "a platform without symbol resolution must say so explicitly; contents: "
+        << contents;
+#endif
     std::filesystem::remove(path, removeError);
+}
+
+// Installation must leave an armed marker and must own the file for this run.
+// Both are what docs/testing.md tells an operator to rely on when triaging a
+// vanished window: a file with only a marker means the process died somewhere no
+// handler can observe, while no file at all means the handler was never installed.
+// This was Windows-only behaviour -- on other platforms the file did not exist
+// until a crash, and then only grew, so a stale report from an earlier run could
+// be mistaken for the current one.
+TEST(CrashHandlerTest, InstallArmsTheReportFileAndTakesOwnershipOfThisRun)
+{
+    const std::filesystem::path path = reportPath("tina_crash_armed_marker_test.txt");
+    std::error_code error;
+    std::filesystem::remove(path, error);
+
+    // A leftover report from a previous run must not survive into this one.
+    {
+        std::ofstream stale{path, std::ios::binary};
+        ASSERT_TRUE(stale.is_open());
+        stale << "stale report from an earlier run\n";
+    }
+
+    // The application name deliberately does not contain the word "armed": naming
+    // it e.g. "tina_crash_armed" made the marker assertion below pass off the name
+    // alone, so a mangled marker line still looked correct.
+    EXPECT_TRUE(installCrashHandler(CrashHandlerConfig{
+        .applicationName = "tina_crash_probe",
+        .reportPathUtf8 = path.string(),
+        .captureBacktrace = false,
+    }));
+    uninstallCrashHandler();
+
+    const std::string contents = readAll(path);
+    EXPECT_NE(contents.find("armed"), std::string::npos)
+        << "installation left no armed marker; contents: " << contents;
+    EXPECT_NE(contents.find("tina_crash_probe"), std::string::npos)
+        << "the marker must name the application; contents: " << contents;
+    EXPECT_EQ(contents.find("stale report from an earlier run"), std::string::npos)
+        << "the previous run's report was not truncated; contents: " << contents;
+    std::filesystem::remove(path, error);
 }
 
 // The report path is UTF-8 by contract. Handing it to the ANSI Win32 API turned

@@ -1250,12 +1250,25 @@ int runEditorApplication(int argumentCount, char** arguments)
     // TinaEditor is a GUI subsystem binary, so stderr is usually not visible.
     // The report file is what the user can actually read afterwards; writeError()
     // appends fatal non-crash exits to the same file.
-    (void)Tina::Core::Diagnostics::installCrashHandler(
-        Tina::Core::Diagnostics::CrashHandlerConfig{
-            .applicationName = "TinaEditor",
-            .reportPathUtf8 = editorDiagnosticReportPathUtf8(),
-            .captureBacktrace = true,
-        });
+    // The result is not ignorable here, even though nothing can be done to recover.
+    // A false return means the report file could not be opened, so every crash from
+    // this point on would reach stderr only -- and this is a GUI-subsystem binary
+    // whose stderr nobody sees. Saying so on stderr at least gives an operator who
+    // did launch from a console the reason the file they were told to read is
+    // missing; silently continuing made an unopenable path indistinguishable from a
+    // process that died before it could write.
+    if (!Tina::Core::Diagnostics::installCrashHandler(
+            Tina::Core::Diagnostics::CrashHandlerConfig{
+                .applicationName = "TinaEditor",
+                .reportPathUtf8 = editorDiagnosticReportPathUtf8(),
+                .captureBacktrace = true,
+            })) {
+        std::cerr << "{\"status\":\"warning\",\"application\":\"TinaEditor\",\"message\":"
+                     "\"crash report file could not be opened; fatal errors will reach "
+                     "stderr only\",\"reportPath\":";
+        writeJsonString(std::cerr, editorDiagnosticReportPathUtf8());
+        std::cerr << "}\n";
+    }
     try {
         return runEditor(argumentCount, arguments);
     } catch (const std::bad_alloc&) {

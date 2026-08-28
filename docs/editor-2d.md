@@ -653,9 +653,11 @@ history 可撤销性检查。以下失败均保留 current bytes、revision、un
 Undo/Redo 无对应 revision 时分别返回 `UndoUnavailable` / `RedoUnavailable`，不改变 cursor。
 
 进程级不可恢复故障与普通 document transaction failure 分账。`TinaEditor.exe` 在任何 Editor/Runtime 创建前安装
-Core CrashHandler；每次启动在 `%TEMP%/tina_editor_crash.txt` 建立 armed marker；系统临时目录查询失败时回退当前工作目录的
-同名文件。`std::terminate`、abort 或 Windows
-fatal exception 写 `status=crash`、reason 与 best-effort backtrace；穿过顶层 application boundary 的可表示
+Core CrashHandler；每次启动**截断** `%TEMP%/tina_editor_crash.txt` 并建立 armed marker，故文件内容必定属于本次
+运行；系统临时目录查询失败时回退当前工作目录的同名文件。该 install 的返回值不被忽略：report file 打不开时
+Editor 在 stderr 输出 `status=warning` 并指明路径，因为 GUI subsystem 的 stderr 通常不可见，静默继续会让
+「路径不可写」与「进程死得太早来不及写」无法区分。`std::terminate`、abort 或 Windows
+fatal exception 写 `status=crash`、reason 与 best-effort backtrace（符号解析仅 Windows）；穿过顶层 application boundary 的可表示
 `Core::Error` 写 `status=fatal`、domain/code、origin 与完整 context chain。该文件用于回答“窗口为何消失”，不代表
 Editor 能从损坏进程恢复；导入/保存等可恢复错误仍应留在 UI feedback/Output 并保持旧 Catalog/document。
 

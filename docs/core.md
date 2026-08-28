@@ -98,9 +98,15 @@ shutdown 后 channel 写入为 no-op。
 `<tina/core/diagnostics/CrashHandler.hpp>` 是与上述日志 owner 分离的进程级最后兜底。应用应在任何 factory、线程或
 窗口创建前显式调用 `installCrashHandler()`；`EngineHost`/Desktop 不自动安装。handler 覆盖
 `std::terminate()` 与 `SIGABRT`，Windows 还覆盖选定 fatal SEH、pure virtual call 和 CRT invalid parameter。
-配置字符串在安装时复制到固定存储；Windows report file 在安装时预打开并截断，先写 armed marker，故障时写
-application/reason/pid/tid、best-effort DbgHelp backtrace 和 `{"status":"crash"...}`。非 Windows 当前只提供
-terminate/abort 文本报告，backtrace 明确记为 unavailable。
+配置字符串在安装时复制到固定存储。**所有平台**在安装时都截断 report file 并写入 armed marker，因此报告
+始终描述当前这次运行，且「文件只有 marker」与「文件不存在」可区分——前者表示进程死在 handler 观察不到的
+地方，后者表示 handler 从未安装。Windows 额外在安装时预打开并保持 handle，故障时无需再打开文件；其他平台
+在报告时以 append 模式重新打开。故障时写 application/reason/pid/tid（非 Windows 无 pid/tid）与
+`{"status":"crash"...}`。
+
+backtrace 的**符号解析目前仅 Windows 具备**（私有 DbgHelp），其他平台该段仍然出现但明确记为
+`unavailable on this platform`——段落本身不会消失，否则读者无法区分「没有栈帧」与「没装 handler」。
+`captureBacktrace` 的公开注释已按此说明限定，`CrashHandlerTest` 按平台分别断言两种形态。
 
 只有第一份并发或级联故障会完整输出；`reportFatalAndTerminate()` 走同一漏斗并以非零状态结束进程。
 `crashReportCount()` 是进程生命周期累计值，不在重复 install 时清零。该路径避免动态分配和 C++ iostream，

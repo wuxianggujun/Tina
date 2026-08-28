@@ -498,10 +498,27 @@ bool installCrashHandler(const CrashHandlerConfig& config) noexcept
     bool reportFileReady = config.reportPathUtf8.empty();
 #if !defined(_WIN32)
     // Verify the path is writable now rather than discovering it during a crash.
+    //
+    // Opened with "wb" rather than "ab" so each run owns its report, matching the
+    // Windows CREATE_ALWAYS behaviour: appending forever meant a reader could not
+    // tell the current crash from one several runs old, and the operator
+    // instructions in docs/testing.md assume the file describes this run.
+    // Reporting-time writes still append, so they land in this run's file.
     if (!reportFileReady && pathFits)
     {
-        if (std::FILE* probe = std::fopen(g_state.reportPathUtf8, "ab"))
+        if (std::FILE* probe = std::fopen(g_state.reportPathUtf8, "wb"))
         {
+            // Same armed marker Windows writes. Without it a missing file was
+            // ambiguous between "handler never installed" and "process died in a
+            // way no handler can observe" -- and on this platform the file did not
+            // exist at all until a crash, so the marker the docs tell operators to
+            // look for was never there.
+            char marker[MaxNameBytes + 128]{};
+            std::snprintf(marker, sizeof(marker), "Tina crash handler armed for %s\n",
+                          g_state.applicationName[0] != '\0' ? g_state.applicationName
+                                                             : "(unknown)");
+            (void)std::fputs(marker, probe);
+            (void)std::fflush(probe);
             (void)std::fclose(probe);
             reportFileReady = true;
         }

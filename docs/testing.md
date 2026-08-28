@@ -677,10 +677,15 @@ out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe --gtest_color=yes `
 ```
 
 这些 death tests 不等于真实 access violation、stack overflow、GPU driver fault 或损坏堆的产品证据。
-`TinaEditor.exe` 人工故障排查先检查 `%TEMP%/tina_editor_crash.txt`：正常启动至少有 armed marker；handler crash
-应以 `status=crash` 结束，顶层可表示 `Core::Error` 应以 `status=fatal` 结束并含 origin/context。系统临时目录查询失败时应改查
-当前工作目录的同名文件。report file 的非 ASCII Windows 路径验收、Linux terminate/abort artifact，以及 Windows fatal
-SEH 矩阵由 `CORE-DIAG-001` 收口。
+`TinaEditor.exe` 人工故障排查先检查 `%TEMP%/tina_editor_crash.txt`：正常启动至少有 armed marker（现已是全
+平台行为，且每次启动截断，故内容必定属于本次运行）；handler crash 应以 `status=crash` 结束，顶层可表示
+`Core::Error` 应以 `status=fatal` 结束并含 origin/context。系统临时目录查询失败时应改查当前工作目录的同名
+文件。若该文件**完全不存在**，先看 stderr 是否有 `status=warning` 的 report-path 提示——Editor 现在会在
+report file 打不开时明确说明，此前这种情况与「进程还没来得及写」无法区分。
+
+backtrace 段按平台断言：Windows 要求解析出符号名，其他平台要求出现 `unavailable on this platform`。
+非 ASCII Windows 路径验收与 Windows fatal SEH 矩阵仍由 `CORE-DIAG-001` 收口；Linux 真机 terminate/abort
+artifact 复跑亦由该项跟踪（本轮只在 Windows 验证，Linux 分支按平台条件编写）。
 
 ## ASSET-HANDLE-SCENE（A1-A6 与 N16.1-N16.4 全部 Done）
 
