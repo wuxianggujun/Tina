@@ -1,4 +1,5 @@
 set(TINA_NETWORK_HEADER_ISOLATION_SOURCES
+    header_isolation/HttpClientHeader.cpp
     header_isolation/NetworkEndpointHeader.cpp
     header_isolation/NetworkErrorsHeader.cpp
     header_isolation/TcpConnectionHeader.cpp
@@ -20,6 +21,7 @@ target_link_libraries(tina_network_header_isolation PRIVATE
 set_target_properties(tina_network_header_isolation PROPERTIES CXX_EXTENSIONS OFF)
 
 add_executable(tina_network_tests
+    HttpClientTests.cpp
     IpAddressTests.cpp
     ReadinessPollerTests.cpp
     TcpConnectionTests.cpp

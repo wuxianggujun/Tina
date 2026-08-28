@@ -1,5 +1,6 @@
 set(TINA_NETWORK_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/network/NetworkEndpoint.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/network/HttpClient.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/network/NetworkErrors.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/network/TcpConnection.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/network/UdpSocket.hpp
@@ -7,6 +8,7 @@ set(TINA_NETWORK_PUBLIC_HEADERS
 
 add_library(tina_network STATIC
     ${TINA_NETWORK_PUBLIC_HEADERS}
+    HttpClient.cpp
     NetworkEndpoint.cpp
     TcpConnection.cpp
     UdpSocket.cpp

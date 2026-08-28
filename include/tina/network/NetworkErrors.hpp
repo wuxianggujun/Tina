@@ -32,6 +32,14 @@ inline constexpr Core::ErrorCode TlsProtocolFailure{Core::ErrorDomain::Network, 
 inline constexpr Core::ErrorCode TlsInsecureConfigurationRejected{
     Core::ErrorDomain::Network,
     20};
+// The response was not valid HTTP/1.1. Distinct from a transport failure: the
+// bytes arrived, they just did not parse.
+inline constexpr Core::ErrorCode HttpMalformedResponse{Core::ErrorDomain::Network, 21};
+// Headers or body exceeded the configured cap. Never silently truncated.
+inline constexpr Core::ErrorCode HttpResponseTooLarge{Core::ErrorDomain::Network, 22};
+inline constexpr Core::ErrorCode HttpTimeout{Core::ErrorDomain::Network, 23};
+// The peer closed before the declared body length arrived.
+inline constexpr Core::ErrorCode HttpIncompleteResponse{Core::ErrorDomain::Network, 24};
 
 } // namespace NetworkErrorCode
 
