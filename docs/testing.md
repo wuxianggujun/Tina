@@ -666,8 +666,14 @@ Core 最后故障报告归属 `tina_tests`：
 
 - `CrashHandlerDeathTest` 覆盖显式 fatal reason、`std::terminate`、in-flight `std::exception::what()` 与
   `{"status":"crash"}` 非零退出；
-- `CrashHandlerTest` 覆盖 GUI report file、Windows DbgHelp 至少解析出调用函数、重复 install 不自递归，以及
-  uninstall 恢复 captured `std::terminate` handler；
+- `CrashHandlerTest` 覆盖 GUI report file、armed marker 与 per-run 截断、重复 install 不自递归，以及
+  uninstall 恢复 captured `std::terminate` handler。backtrace 按平台断言：Windows 要求 DbgHelp 解析出调用
+  函数，其他平台要求出现 `unavailable on this platform`（两边都断言，段落缺失本身即失败）；
+- **Windows fatal 矩阵**（受控 death-test 子进程，各自绕开 `std::terminate`）：access violation 必须报出
+  读/写分类与 faulting address、pure virtual call、CRT invalid parameter，以及 cascade 只产生一份报告
+  （terminate→abort→SIGABRT 只留第一个 reason，banner 计数为1）。AV 用例发现过一个真实缺陷：
+  operation/address 只在 `SetUnhandledExceptionFilter` 分支提取，而 vectored handler 注册在前且 latch
+  first-wins，故真实 AV 一直丢失这两个字段；现由两个入口共用同一 `describeExceptionDetail()`；
 - `CrashHandler.hpp` 由独立 header-isolation TU 编译，公开面不得泄漏 Windows/DbgHelp/CRT token。
 
 ```powershell
@@ -676,7 +682,8 @@ out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe --gtest_color=yes `
   --gtest_filter="CrashHandlerDeathTest.*:CrashHandlerTest.*"
 ```
 
-这些 death tests 不等于真实 access violation、stack overflow、GPU driver fault 或损坏堆的产品证据。
+access violation、purecall 与 invalid parameter 现由受控子进程触发真实故障，但这些仍不等于 stack overflow、
+GPU driver fault 或损坏堆下的产品证据 —— 后三者不在自动 gate 范围内，因为报告本身在那些状态下也可能不完整。
 `TinaEditor.exe` 人工故障排查先检查 `%TEMP%/tina_editor_crash.txt`：正常启动至少有 armed marker（现已是全
 平台行为，且每次启动截断，故内容必定属于本次运行）；handler crash 应以 `status=crash` 结束，顶层可表示
 `Core::Error` 应以 `status=fatal` 结束并含 origin/context。系统临时目录查询失败时应改查当前工作目录的同名

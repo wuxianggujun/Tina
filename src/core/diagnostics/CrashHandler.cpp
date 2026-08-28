@@ -397,6 +397,30 @@ const char* describeSehCode(DWORD code) noexcept
     }
 }
 
+// Describes the fault into `detail`. `origin` distinguishes which hook observed it,
+// because the two see the same exception and only their ordering differs.
+//
+// Shared by both handlers deliberately: the access-violation address used to be
+// extracted only in the unhandled-exception filter, but the vectored handler is
+// registered first and the report latch is first-wins, so in practice every real AV
+// was reported by the vectored path and lost the operation/address -- the two fields
+// that make an AV actionable rather than just a category.
+void describeExceptionDetail(char* detail, std::size_t capacity, const char* origin,
+                             const EXCEPTION_RECORD& record) noexcept
+{
+    if (record.ExceptionCode == EXCEPTION_ACCESS_VIOLATION && record.NumberParameters >= 2)
+    {
+        const ULONG_PTR operation = record.ExceptionInformation[0];
+        const ULONG_PTR address = record.ExceptionInformation[1];
+        std::snprintf(detail, capacity, "%s%s address 0x%016llX", origin,
+                      operation == 0 ? "read from" : (operation == 1 ? "write to" : "execute at"),
+                      static_cast<unsigned long long>(address));
+        return;
+    }
+    std::snprintf(detail, capacity, "%scode 0x%08lX", origin,
+                  static_cast<unsigned long>(record.ExceptionCode));
+}
+
 LONG WINAPI onUnhandledSeh(EXCEPTION_POINTERS* pointers) noexcept
 {
     DWORD code = 0;
@@ -406,20 +430,7 @@ LONG WINAPI onUnhandledSeh(EXCEPTION_POINTERS* pointers) noexcept
     {
         code = pointers->ExceptionRecord->ExceptionCode;
         context = pointers->ContextRecord;
-        if (code == EXCEPTION_ACCESS_VIOLATION &&
-            pointers->ExceptionRecord->NumberParameters >= 2)
-        {
-            const ULONG_PTR operation = pointers->ExceptionRecord->ExceptionInformation[0];
-            const ULONG_PTR address = pointers->ExceptionRecord->ExceptionInformation[1];
-            std::snprintf(detail, sizeof(detail), "%s address 0x%016llX",
-                          operation == 0 ? "read from" : (operation == 1 ? "write to" : "execute at"),
-                          static_cast<unsigned long long>(address));
-        }
-        else
-        {
-            std::snprintf(detail, sizeof(detail), "code 0x%08lX",
-                          static_cast<unsigned long>(code));
-        }
+        describeExceptionDetail(detail, sizeof(detail), "", *pointers->ExceptionRecord);
     }
     writeReport(describeSehCode(code), detail, context);
     return EXCEPTION_EXECUTE_HANDLER;
@@ -450,9 +461,11 @@ LONG CALLBACK onVectoredException(EXCEPTION_POINTERS* pointers) noexcept
     {
         return EXCEPTION_CONTINUE_SEARCH;
     }
+    // Same description as the filter path: this handler runs first for every real
+    // fault, so reporting only the raw code here meant the operation and address
+    // were effectively never recorded.
     char detail[256]{};
-    std::snprintf(detail, sizeof(detail), "vectored, code 0x%08lX",
-                  static_cast<unsigned long>(code));
+    describeExceptionDetail(detail, sizeof(detail), "vectored, ", *pointers->ExceptionRecord);
     writeReport(describeSehCode(code), detail, pointers->ContextRecord);
     return EXCEPTION_CONTINUE_SEARCH;
 }

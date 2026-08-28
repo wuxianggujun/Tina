@@ -98,6 +98,10 @@ shutdown 后 channel 写入为 no-op。
 `<tina/core/diagnostics/CrashHandler.hpp>` 是与上述日志 owner 分离的进程级最后兜底。应用应在任何 factory、线程或
 窗口创建前显式调用 `installCrashHandler()`；`EngineHost`/Desktop 不自动安装。handler 覆盖
 `std::terminate()` 与 `SIGABRT`，Windows 还覆盖选定 fatal SEH、pure virtual call 和 CRT invalid parameter。
+Windows 的 fatal SEH 有两个入口：`SetUnhandledExceptionFilter` 与更早触发的 vectored handler。**实际生效的
+几乎总是 vectored** —— 它注册在前，而 report latch 是 first-wins，因此二者必须产生同样的 detail（access
+violation 的读/写/执行分类与 faulting address）。这四类入口各自绕开 `std::terminate`，terminate hook 不能
+作为它们的证据，故 `CrashHandlerTest` 用受控 death-test 子进程分别触发真实故障。
 配置字符串在安装时复制到固定存储。**所有平台**在安装时都截断 report file 并写入 armed marker，因此报告
 始终描述当前这次运行，且「文件只有 marker」与「文件不存在」可区分——前者表示进程死在 handler 观察不到的
 地方，后者表示 handler 从未安装。Windows 额外在安装时预打开并保持 handle，故障时无需再打开文件；其他平台

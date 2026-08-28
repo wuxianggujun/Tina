@@ -2,6 +2,7 @@
 
 #include <tina/core/diagnostics/CrashHandler.hpp>
 
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -9,6 +10,7 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <vector>
 
 namespace Tina::Tests {
@@ -343,6 +345,195 @@ TEST(CrashHandlerTest, InstallIsIdempotentAndUninstallRestoresPreviousHandlers)
     uninstallCrashHandler();
     EXPECT_EQ(std::get_terminate(), before);
 }
+
+// --- Windows fatal-path matrix -------------------------------------------------
+//
+// These are the failure modes the header claims to cover but that no test reached:
+// they bypass std::terminate entirely, so the terminate hook proves nothing about
+// them. Each provokes a genuine fault in a forked death-test child and asserts the
+// report both names the cause and carries the machine-readable trailer a gate
+// scrapes.
+//
+// Windows-only by nature: the SEH filter, the vectored handler, the purecall hook
+// and the invalid-parameter hook are all CRT/Win32 mechanisms. Every one of these
+// tests would report a *different* failure on POSIX (an uncaught SIGSEGV with no
+// handler output), which is exactly the trap the backtrace test fell into.
+#if defined(_WIN32)
+
+// Reads the report file, retrying briefly: the child writes it and dies, and on a
+// loaded machine the parent can observe the exit before the last flush is visible.
+[[nodiscard]] std::string readReportAfterChildDeath(const std::filesystem::path& path)
+{
+    for (int attempt = 0; attempt < 50; ++attempt)
+    {
+        const std::string contents = readAll(path);
+        if (contents.find("==== end Tina fatal error ====") != std::string::npos)
+        {
+            return contents;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds{10});
+    }
+    return readAll(path);
+}
+
+// Written through a volatile pointer so the optimiser cannot delete the store as
+// undefined behaviour it is entitled to assume never happens.
+void writeToNullPointer() noexcept
+{
+    volatile int* target = nullptr;
+    *target = 1;
+}
+
+// An access violation is the single most common real crash and reaches the handler
+// only through the SEH filter or the vectored handler -- never through terminate.
+TEST(CrashHandlerTest, AccessViolationIsReportedWithItsFaultingAddress)
+{
+    const std::filesystem::path path = reportPath("tina_crash_av_test.txt");
+    std::error_code error;
+    std::filesystem::remove(path, error);
+    const std::string pathUtf8 = path.string();
+
+    ASSERT_DEATH(
+        {
+            (void)installCrashHandler(CrashHandlerConfig{
+                .applicationName = "tina_crash_av",
+                .reportPathUtf8 = pathUtf8,
+                // Symbols are slow here and the cause, not the stack, is the contract.
+                .captureBacktrace = false,
+            });
+            writeToNullPointer();
+        },
+        "EXCEPTION_ACCESS_VIOLATION");
+
+    const std::string contents = readReportAfterChildDeath(path);
+    EXPECT_NE(contents.find("EXCEPTION_ACCESS_VIOLATION"), std::string::npos)
+        << "report contents: " << contents;
+    // The write-vs-read classification and the address are what make an AV report
+    // actionable rather than just a category.
+    EXPECT_NE(contents.find("write to address"), std::string::npos)
+        << "the faulting access was not classified; contents: " << contents;
+    EXPECT_NE(contents.find("\"status\":\"crash\""), std::string::npos)
+        << "a gate scraping status would miss this crash; contents: " << contents;
+    std::filesystem::remove(path, error);
+}
+
+// A pure virtual call bypasses both terminate and the SEH filter: the CRT routes it
+// to _set_purecall_handler. Without that hook the process died with no output.
+struct PureCallBase {
+    PureCallBase() { callDuringConstruction(); }
+    virtual ~PureCallBase() = default;
+    virtual void pureHook() = 0;
+    // Calling a pure virtual from the base constructor is the classic route: the
+    // derived vtable is not installed yet, so this dispatches into _purecall.
+    void callDuringConstruction() { pureHook(); }
+};
+
+struct PureCallDerived final : PureCallBase {
+    void pureHook() override {}
+};
+
+TEST(CrashHandlerTest, PureVirtualCallIsReportedRatherThanSilent)
+{
+    const std::filesystem::path path = reportPath("tina_crash_purecall_test.txt");
+    std::error_code error;
+    std::filesystem::remove(path, error);
+    const std::string pathUtf8 = path.string();
+
+    ASSERT_DEATH(
+        {
+            (void)installCrashHandler(CrashHandlerConfig{
+                .applicationName = "tina_crash_purecall",
+                .reportPathUtf8 = pathUtf8,
+                .captureBacktrace = false,
+            });
+            PureCallDerived instance;
+            // Never reached; keeps the object from being optimised away.
+            instance.pureHook();
+        },
+        "pure virtual function call");
+
+    const std::string contents = readReportAfterChildDeath(path);
+    EXPECT_NE(contents.find("pure virtual function call"), std::string::npos)
+        << "report contents: " << contents;
+    EXPECT_NE(contents.find("\"status\":\"crash\""), std::string::npos)
+        << "report contents: " << contents;
+    std::filesystem::remove(path, error);
+}
+
+// The CRT invalid-parameter hook is the fourth independent entry point. It fires for
+// contract violations inside CRT functions, which otherwise terminate the process
+// without touching terminate or the SEH filter.
+TEST(CrashHandlerTest, CrtInvalidParameterIsReportedRatherThanSilent)
+{
+    const std::filesystem::path path = reportPath("tina_crash_invalidparam_test.txt");
+    std::error_code error;
+    std::filesystem::remove(path, error);
+    const std::string pathUtf8 = path.string();
+
+    ASSERT_DEATH(
+        {
+            (void)installCrashHandler(CrashHandlerConfig{
+                .applicationName = "tina_crash_invalidparam",
+                .reportPathUtf8 = pathUtf8,
+                .captureBacktrace = false,
+            });
+            // A null FILE* is an invalid parameter by CRT contract, and the debug
+            // CRT routes it to the invalid-parameter handler rather than returning.
+            (void)std::fclose(nullptr);
+        },
+        "CRT invalid parameter");
+
+    const std::string contents = readReportAfterChildDeath(path);
+    EXPECT_NE(contents.find("CRT invalid parameter"), std::string::npos)
+        << "report contents: " << contents;
+    EXPECT_NE(contents.find("\"status\":\"crash\""), std::string::npos)
+        << "report contents: " << contents;
+    std::filesystem::remove(path, error);
+}
+
+// One death produces one report. A terminate typically ends in abort and an abort
+// raises SIGABRT, so an unlatched handler would print the same crash two or three
+// times and bury the first reason -- the only one naming the actual fault.
+TEST(CrashHandlerTest, CascadingFailuresReportOnlyTheFirstReason)
+{
+    const std::filesystem::path path = reportPath("tina_crash_cascade_test.txt");
+    std::error_code error;
+    std::filesystem::remove(path, error);
+    const std::string pathUtf8 = path.string();
+
+    ASSERT_DEATH(
+        {
+            (void)installCrashHandler(CrashHandlerConfig{
+                .applicationName = "tina_crash_cascade",
+                .reportPathUtf8 = pathUtf8,
+                .captureBacktrace = false,
+            });
+            // std::terminate's default behaviour is to abort, so the SIGABRT handler
+            // is reached as well: two entry points, one death.
+            std::terminate();
+        },
+        "std::terminate was called");
+
+    const std::string contents = readReportAfterChildDeath(path);
+    // Count report openings rather than reasons: a second report would restate the
+    // banner, and the first reason must be the one that survives.
+    std::size_t banners = 0;
+    for (std::size_t at = contents.find("==== Tina fatal error ====");
+         at != std::string::npos;
+         at = contents.find("==== Tina fatal error ====", at + 1))
+    {
+        ++banners;
+    }
+    EXPECT_EQ(banners, 1U) << "the cascade was reported more than once; contents: " << contents;
+    EXPECT_NE(contents.find("std::terminate was called"), std::string::npos)
+        << "the first reason did not survive the cascade; contents: " << contents;
+    // SIGABRT arriving second must not have replaced the terminate reason.
+    EXPECT_EQ(contents.find("SIGABRT"), std::string::npos)
+        << "a later cascade step overwrote the original reason; contents: " << contents;
+    std::filesystem::remove(path, error);
+}
+
+#endif // defined(_WIN32)
 
 } // namespace
 } // namespace Tina::Tests
