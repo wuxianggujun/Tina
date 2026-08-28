@@ -47,7 +47,7 @@ UI-STUDIO-DESIGN 的代码与自动证据已固化，剩余 state-feedback 视�
 | 2D-ANIM-EVENTS-PRODUCT | Done：product-2d 消费 `crossedEvents`；300帧 gate 固化 footstep/hit=`15/1`、overflow/unknown=`0/0`（字段现由 schema 29 继承） |
 | TEXT-001 | InProgress：多行、UAX #29 grapheme 子集、二维 hit/navigation 与 Windows IMM32 caret/candidate placement 的代码和自动 gate 已完成；BiDi/复杂 shaping、Linux 原生 XIM/Wayland 与 Windows 真机 IME 人工矩阵仍待收口 |
 | NAV-COOK-001 | Done：Cooked NavigationGrid2D v1、typed load、Editor bake/persistent overlay 与 product bit-exact 双路径通过统一模块/Editor/product gate |
-| FX-ASSET-001 | InProgress：Fx2D v1、完整 recipe、typed dependency 与 Scene factory 已完成；`Fx2DAuthoringDocument` 有 API 但**无单测**（2026-08-28 更正：`tests/editor/` 只有 SpriteAnimation/TileMap/World2D/World3D 四个 authoring document 测试，Fx2D 的 170 行 authoring 代码零覆盖），EditorApp 亦无可见 document tab/Inspector 消费面；GPU simulation 留 Later |
+| FX-ASSET-001 | InProgress：Fx2D v1、完整 recipe、typed dependency 与 Scene factory 已完成。`Fx2DAuthoringDocument` 的单测已补齐（2026-08-28：此前被记为「有单测」但实际零覆盖，同日新增 11 例并修掉两处 Create 缺陷 —— `historyEntryCapacity = 1` 会产出永久只读 document，以及极大容量令 `reserve()` 的 `length_error` 穿出返回 `Result` 的函数）。EditorApp 仍无可见 document tab/Inspector 消费面；GPU simulation 留 Later |
 | PHYS2D-CHAIN | Done：static open/loop Chain、多 segment 生命周期/query 去重通过 Physics2D 49/49 与产品 ready gate |
 | ASSET-SEC-002 | Done：glTF 之外全部 cooked payload 的资源炸弹/malformed 矩阵已补齐，`tina_asset_format_tests` 124/124、corpus 17/17、`tina_asset_tests` 312/312 |
 | UI-MOTION-002 | Done：keyframe timeline、bounded `LayoutWidth`/`LayoutHeight`/`LayoutOffset` 与 atomic Layout/Hit/Paint publication；UI 28/28、Runtime facade 1/1、bench unit 10/10 及 paint/layout seed 0/1/2 通过 |

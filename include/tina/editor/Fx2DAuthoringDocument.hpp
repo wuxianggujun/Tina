@@ -9,7 +9,18 @@
 
 namespace Tina::Editor {
 
+// Matches the other authoring documents' bounds so one Editor-wide history budget
+// applies to every document kind.
+namespace Fx2DAuthoringLimits {
+inline constexpr Core::usize MinimumHistoryEntries = 2;
+inline constexpr Core::usize MaximumHistoryEntries = 256;
+inline constexpr Core::usize MaximumHistoryBytes = Core::usize{1} << 30U;
+} // namespace Fx2DAuthoringLimits
+
 struct Fx2DAuthoringDocumentConfig final {
+    // At least two entries: one holds the initial revision, so a capacity of one
+    // would accept the config and then refuse every replace, reporting a transient
+    // HistoryCapacityExceeded for a document that can never accept an edit.
     Core::usize historyEntryCapacity = 32;
     Core::usize historyByteCapacity = 1024U * 1024U;
 };

@@ -11,10 +11,22 @@ namespace Tina::Editor {
 Core::Result<Fx2DAuthoringDocument> Fx2DAuthoringDocument::Create(
     const AssetFormat::Fx2DPayloadDesc& initial, Fx2DAuthoringDocumentConfig config)
 {
-    if (config.historyEntryCapacity == 0U || config.historyByteCapacity == 0U) {
+    // Bounded on both ends. The lower bound is the substantive one: a capacity of one
+    // accepts here and then makes every replace fail with HistoryCapacityExceeded,
+    // which a caller reads as transient. The upper bound keeps reserve() away from
+    // max_size(), where it throws length_error -- not bad_alloc -- and so escaped the
+    // catch below and left this Result-returning function by exception.
+    if (config.historyEntryCapacity < Fx2DAuthoringLimits::MinimumHistoryEntries ||
+        config.historyEntryCapacity > Fx2DAuthoringLimits::MaximumHistoryEntries) {
         return Core::failure(
-            EditorErrorCode::InvalidAuthoringOperation,
-            "Fx2D authoring history capacities must be non-zero");
+            EditorErrorCode::InvalidConfiguration,
+            "Fx2D authoring history must contain between 2 and 256 entries");
+    }
+    if (config.historyByteCapacity == 0U ||
+        config.historyByteCapacity > Fx2DAuthoringLimits::MaximumHistoryBytes) {
+        return Core::failure(
+            EditorErrorCode::InvalidConfiguration,
+            "Fx2D authoring history byte capacity is outside the supported range");
     }
     auto bytes = AssetFormat::writeFx2DPayloadBytes(initial);
     if (!bytes) {

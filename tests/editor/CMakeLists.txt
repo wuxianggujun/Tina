@@ -7,6 +7,7 @@ add_executable(tina_editor_tests
     EditorProjectWorkspaceTests.cpp
     EditorSceneOperationsTests.cpp
     EditorTransformGizmoTests.cpp
+    Fx2DAuthoringDocumentTests.cpp
     EditorViewportGridTests.cpp
     EditorViewportNavigationTests.cpp
     ProjectAssetBrowserTests.cpp
