@@ -1,6 +1,7 @@
 set(TINA_NETWORK_PUBLIC_HEADERS
-    ${PROJECT_SOURCE_DIR}/include/tina/network/NetworkEndpoint.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/network/ByteStream.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/network/HttpClient.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/network/NetworkEndpoint.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/network/NetworkErrors.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/network/TcpConnection.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/network/UdpSocket.hpp

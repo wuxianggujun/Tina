@@ -2,7 +2,7 @@
 
 #include <tina/core/base/ScopeExit.hpp>
 #include <tina/network/NetworkErrors.hpp>
-#include <tina/network/TcpConnection.hpp>
+#include <tina/network/ByteStream.hpp>
 
 #include <algorithm>
 #include <cstring>
@@ -144,8 +144,8 @@ std::string_view HttpResponse::header(std::string_view name) const noexcept
 }
 
 struct HttpRequest::Impl final {
-    Impl(std::pmr::memory_resource& resource, TcpConnection transportIn)
-        : transport(std::move(transportIn))
+    Impl(std::pmr::memory_resource& resource, IByteStream& streamIn)
+        : stream(&streamIn)
         , requestBytes(&resource)
         , headerBytes(&resource)
         , bodyBytes(&resource)
@@ -153,7 +153,9 @@ struct HttpRequest::Impl final {
     {
     }
 
-    TcpConnection transport;
+    // Borrowed, never owned: the caller decides the transport and therefore
+    // whether the bytes are encrypted.
+    IByteStream* stream = nullptr;
     std::thread::id owner{};
     HttpRequestState state = HttpRequestState::Connecting;
 
@@ -371,6 +373,11 @@ HttpRequest::~HttpRequest() noexcept
 
 Core::Result<HttpRequest> HttpRequest::Create(HttpRequestConfig config)
 {
+    if (config.stream == nullptr) {
+        return Core::failure(
+            NetworkErrorCode::InvalidConfiguration,
+            "HttpRequest requires a byte stream to run over");
+    }
     if (config.target.empty() || config.target.front() != '/') {
         return Core::failure(
             NetworkErrorCode::InvalidConfiguration,
@@ -432,22 +439,9 @@ Core::Result<HttpRequest> HttpRequest::Create(HttpRequestConfig config)
 
     const Core::usize requestSize = head.size() + config.body.size();
 
-    TcpConnectionConfig transportConfig{};
-    transportConfig.remoteEndpoint = config.remoteEndpoint;
-    // The transport send buffer must hold the whole request, since send() refuses
-    // a payload it cannot take whole.
-    transportConfig.sendBufferBytes = (std::max)(requestSize, Core::usize{4096});
-    transportConfig.receiveBufferBytes = 64 * 1024;
-    transportConfig.memoryResource = resource;
-
-    auto transport = TcpConnection::Create(transportConfig);
-    if (!transport) {
-        return Core::failure(std::move(transport.error()));
-    }
-
     Impl* impl = nullptr;
     try {
-        impl = new Impl{*resource, std::move(*transport)};
+        impl = new Impl{*resource, *config.stream};
         impl->requestBytes.resize(requestSize);
         std::memcpy(impl->requestBytes.data(), head.data(), head.size());
         if (!config.body.empty()) {
@@ -517,19 +511,19 @@ Core::Result<bool> HttpRequest::pump()
             "HTTP request made no progress within the stall limit");
     }
 
-    auto transportPumped = m_impl->transport.pump();
+    auto transportPumped = m_impl->stream->pumpStream();
     if (!transportPumped) {
         m_impl->markFailed();
         return Core::failure(std::move(transportPumped.error()));
     }
 
     if (m_impl->state == HttpRequestState::Connecting) {
-        const auto transportState = m_impl->transport.state();
-        if (transportState == TcpConnectionState::Connecting) {
+        const auto streamState = m_impl->stream->streamState();
+        if (streamState == ByteStreamState::Connecting) {
             return false;
         }
-        if (transportState == TcpConnectionState::Failed
-            || transportState == TcpConnectionState::Closed) {
+        if (streamState == ByteStreamState::Failed
+            || streamState == ByteStreamState::Closed) {
             m_impl->markFailed();
             return Core::failure(
                 NetworkErrorCode::ConnectionFailed,
@@ -544,23 +538,23 @@ Core::Result<bool> HttpRequest::pump()
             const auto payload = std::span<const std::byte>{
                 m_impl->requestBytes.data(),
                 m_impl->requestBytes.size()};
-            if (const auto status = m_impl->transport.send(payload); !status) {
+            if (const auto status = m_impl->stream->sendBytes(payload); !status) {
                 m_impl->markFailed();
                 return Core::failure(status.error());
             }
             m_impl->requestSent = m_impl->requestBytes.size();
             m_impl->stats.sentBytes = m_impl->requestSent;
         }
-        if (m_impl->transport.statistics().queuedSendBytes == 0) {
-            m_impl->state = HttpRequestState::ReceivingHeaders;
-            m_impl->noteProgress();
-        } else {
-            return false;
-        }
+        // The stream reports no queue depth on purpose -- that is transport
+        // detail -- so move on and let later pumps drain it. Reading can begin
+        // immediately: a server replies only after it has the whole request, and
+        // the parser simply sees nothing until then.
+        m_impl->state = HttpRequestState::ReceivingHeaders;
+        m_impl->noteProgress();
     }
 
     // Drain whatever arrived into the header buffer, then the body.
-    auto buffered = m_impl->transport.receive();
+    auto buffered = m_impl->stream->peekReceived();
     if (!buffered) {
         m_impl->markFailed();
         return Core::failure(std::move(buffered.error()));
@@ -604,7 +598,7 @@ Core::Result<bool> HttpRequest::pump()
                 return Core::failure(status.error());
             }
 
-            if (const auto status = m_impl->transport.consume(buffered->size()); !status) {
+            if (const auto status = m_impl->stream->consumeReceived(buffered->size()); !status) {
                 m_impl->markFailed();
                 return Core::failure(status.error());
             }
@@ -625,7 +619,7 @@ Core::Result<bool> HttpRequest::pump()
                 m_impl->stats.bodyBytes = m_impl->bodyBytes.size();
             }
         } else {
-            if (const auto status = m_impl->transport.consume(buffered->size()); !status) {
+            if (const auto status = m_impl->stream->consumeReceived(buffered->size()); !status) {
                 m_impl->markFailed();
                 return Core::failure(status.error());
             }
@@ -647,13 +641,13 @@ Core::Result<bool> HttpRequest::pump()
             std::memcpy(m_impl->bodyBytes.data() + offset, buffered->data(), incoming);
             m_impl->stats.bodyBytes = m_impl->bodyBytes.size();
 
-            if (const auto status = m_impl->transport.consume(incoming); !status) {
+            if (const auto status = m_impl->stream->consumeReceived(incoming); !status) {
                 m_impl->markFailed();
                 return Core::failure(status.error());
             }
         }
 
-        const auto transportState = m_impl->transport.state();
+        const auto streamState = m_impl->stream->streamState();
 
         if (m_impl->bodyForbidden) {
             m_impl->bodyBytes.clear();
@@ -672,8 +666,8 @@ Core::Result<bool> HttpRequest::pump()
                 m_impl->state = HttpRequestState::Complete;
                 return true;
             }
-            if (transportState == TcpConnectionState::PeerClosed
-                || transportState == TcpConnectionState::Closed) {
+            if (streamState == ByteStreamState::PeerClosed
+                || streamState == ByteStreamState::Closed) {
                 m_impl->markFailed();
                 return Core::failure(
                     NetworkErrorCode::HttpIncompleteResponse,
@@ -691,8 +685,8 @@ Core::Result<bool> HttpRequest::pump()
                 m_impl->state = HttpRequestState::Complete;
                 return true;
             }
-            if (transportState == TcpConnectionState::PeerClosed
-                || transportState == TcpConnectionState::Closed) {
+            if (streamState == ByteStreamState::PeerClosed
+                || streamState == ByteStreamState::Closed) {
                 m_impl->markFailed();
                 return Core::failure(
                     NetworkErrorCode::HttpIncompleteResponse,
@@ -703,8 +697,8 @@ Core::Result<bool> HttpRequest::pump()
 
         // No framing headers: the close is the delimiter.
         if (m_impl->bodyEndsAtClose
-            && (transportState == TcpConnectionState::PeerClosed
-                || transportState == TcpConnectionState::Closed)) {
+            && (streamState == ByteStreamState::PeerClosed
+                || streamState == ByteStreamState::Closed)) {
             m_impl->state = HttpRequestState::Complete;
             return true;
         }
@@ -810,7 +804,7 @@ void HttpRequest::cancel() noexcept
     if (m_impl == nullptr || !m_impl->isOwnerThread()) {
         return;
     }
-    m_impl->transport.close();
+    m_impl->stream->closeStream();
     if (m_impl->state != HttpRequestState::Complete) {
         m_impl->state = HttpRequestState::Failed;
     }

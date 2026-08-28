@@ -613,4 +613,46 @@ Core::usize TcpConnection::receiveBufferCapacity() const noexcept
     return m_impl != nullptr ? m_impl->receiveBuffer.size() : 0;
 }
 
+ByteStreamState TcpConnection::streamState() const noexcept
+{
+    switch (state()) {
+    case TcpConnectionState::Connecting:
+        return ByteStreamState::Connecting;
+    case TcpConnectionState::Connected:
+        return ByteStreamState::Connected;
+    case TcpConnectionState::PeerClosed:
+        return ByteStreamState::PeerClosed;
+    case TcpConnectionState::Closed:
+        return ByteStreamState::Closed;
+    case TcpConnectionState::Failed:
+        return ByteStreamState::Failed;
+    }
+    return ByteStreamState::Failed;
+}
+
+Core::Status TcpConnection::sendBytes(std::span<const std::byte> payload)
+{
+    return send(payload);
+}
+
+Core::Result<Core::usize> TcpConnection::pumpStream()
+{
+    return pump();
+}
+
+Core::Result<std::span<const std::byte>> TcpConnection::peekReceived()
+{
+    return receive();
+}
+
+Core::Status TcpConnection::consumeReceived(Core::usize byteCount)
+{
+    return consume(byteCount);
+}
+
+void TcpConnection::closeStream() noexcept
+{
+    close();
+}
+
 } // namespace Tina::Network

@@ -2,6 +2,7 @@
 
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
+#include <tina/network/ByteStream.hpp>
 #include <tina/network/NetworkEndpoint.hpp>
 
 #include <memory_resource>
@@ -64,7 +65,7 @@ struct TcpConnectionStatistics final {
 // There is no worker thread. pump() performs one non-blocking readiness check and
 // advances the state machine, so the caller decides when bytes move. A connection
 // makes no progress unless pump() is called.
-class TcpConnection final {
+class TcpConnection final : public IByteStream {
   public:
     // Starts a connection. Returns immediately in Connecting state; the handshake
     // completes during a later pump(). A refused or unreachable peer is therefore
@@ -122,6 +123,15 @@ class TcpConnection final {
 
     [[nodiscard]] Core::usize sendBufferCapacity() const noexcept;
     [[nodiscard]] Core::usize receiveBufferCapacity() const noexcept;
+
+    // IByteStream. Thin forwards to the concrete API above, so a protocol can run
+    // over this or over TLS without knowing which.
+    [[nodiscard]] ByteStreamState streamState() const noexcept override;
+    [[nodiscard]] Core::Status sendBytes(std::span<const std::byte> payload) override;
+    [[nodiscard]] Core::Result<Core::usize> pumpStream() override;
+    [[nodiscard]] Core::Result<std::span<const std::byte>> peekReceived() override;
+    [[nodiscard]] Core::Status consumeReceived(Core::usize byteCount) override;
+    void closeStream() noexcept override;
 
   private:
     struct Impl;

@@ -7,6 +7,7 @@
 
 #include <tina/network/HttpClient.hpp>
 #include <tina/network/NetworkErrors.hpp>
+#include <tina/network/TcpConnection.hpp>
 
 #include <gtest/gtest.h>
 
@@ -134,10 +135,10 @@ class ScriptedHttpServer final {
     bool m_scoped = false;
 };
 
-[[nodiscard]] HttpRequestConfig configFor(const Network::NetworkEndpoint& endpoint)
+[[nodiscard]] HttpRequestConfig configFor(Network::IByteStream& stream)
 {
     HttpRequestConfig config{};
-    config.remoteEndpoint = endpoint;
+    config.stream = &stream;
     config.target = "/";
     config.host = "tina.test";
     return config;
@@ -145,6 +146,19 @@ class ScriptedHttpServer final {
 
 // Interleaves client and server pumps until the request finishes or the budget
 // runs out. Neither side can progress alone.
+// Connects a TcpConnection to the scripted server, so a test says what it means
+// (an HTTP exchange) rather than restating transport setup each time.
+[[nodiscard]] Core::Result<Network::TcpConnection> connectTo(
+    const Network::NetworkEndpoint& endpoint,
+    Core::usize sendBufferBytes = 64 * 1024)
+{
+    Network::TcpConnectionConfig config{};
+    config.remoteEndpoint = endpoint;
+    config.sendBufferBytes = sendBufferBytes;
+    config.receiveBufferBytes = 64 * 1024;
+    return Network::TcpConnection::Create(config);
+}
+
 [[nodiscard]] Core::Result<bool> driveToCompletion(
     HttpRequest& request,
     ScriptedHttpServer& server,
@@ -173,26 +187,43 @@ class ScriptedHttpServer final {
 
 } // namespace
 
+TEST(HttpRequestTest, RejectsMissingStream)
+{
+    HttpRequestConfig config{};
+    config.target = "/";
+    config.host = "tina.test";
+
+    // A request with nowhere to send bytes is a configuration error, not something
+    // to discover on the first pump.
+    const auto request = HttpRequest::Create(config);
+    ASSERT_FALSE(request.has_value());
+    EXPECT_EQ(request.error().code, Network::NetworkErrorCode::InvalidConfiguration);
+}
+
 TEST(HttpRequestTest, RejectsInvalidConfiguration)
 {
-    const Network::NetworkEndpoint endpoint{Network::IpAddress::v4Loopback(), 8080};
+    // Never pumped, so the stream only has to exist.
+    ScriptedHttpServer server;
+    ASSERT_TRUE(server.isValid());
+    auto stream = connectTo(server.endpoint());
+    ASSERT_TRUE(stream.has_value());
 
     {
-        auto config = configFor(endpoint);
+        auto config = configFor(*stream);
         config.target = "index.html";  // missing leading slash
         const auto request = HttpRequest::Create(config);
         ASSERT_FALSE(request.has_value());
         EXPECT_EQ(request.error().code, Network::NetworkErrorCode::InvalidConfiguration);
     }
     {
-        auto config = configFor(endpoint);
+        auto config = configFor(*stream);
         config.host = {};
         const auto request = HttpRequest::Create(config);
         ASSERT_FALSE(request.has_value());
         EXPECT_EQ(request.error().code, Network::NetworkErrorCode::InvalidConfiguration);
     }
     {
-        auto config = configFor(endpoint);
+        auto config = configFor(*stream);
         config.maximumBodyBytes = 0;
         const auto request = HttpRequest::Create(config);
         ASSERT_FALSE(request.has_value());
@@ -204,20 +235,23 @@ TEST(HttpRequestTest, RejectsInvalidConfiguration)
 // refused rather than escaped.
 TEST(HttpRequestTest, RejectsHeaderInjectionAttempts)
 {
-    const Network::NetworkEndpoint endpoint{Network::IpAddress::v4Loopback(), 8080};
+    ScriptedHttpServer server;
+    ASSERT_TRUE(server.isValid());
+    auto stream = connectTo(server.endpoint());
+    ASSERT_TRUE(stream.has_value());
 
     for (const std::string_view target : {
              "/a\r\nX-Injected: 1",
              "/a\nX-Injected: 1",
              "/a b",
          }) {
-        auto config = configFor(endpoint);
+        auto config = configFor(*stream);
         config.target = target;
         const auto request = HttpRequest::Create(config);
         EXPECT_FALSE(request.has_value()) << "accepted target " << target;
     }
 
-    auto config = configFor(endpoint);
+    auto config = configFor(*stream);
     config.host = "tina.test\r\nX-Injected: 1";
     const auto request = HttpRequest::Create(config);
     EXPECT_FALSE(request.has_value());
@@ -228,8 +262,10 @@ TEST(HttpRequestTest, SendsWellFormedRequestLineAndHost)
     ScriptedHttpServer server;
     ASSERT_TRUE(server.isValid());
     server.setReply("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi");
+    auto stream = connectTo(server.endpoint());
+    ASSERT_TRUE(stream.has_value());
 
-    auto config = configFor(server.endpoint());
+    auto config = configFor(*stream);
     config.target = "/api/thing";
     auto request = HttpRequest::Create(config);
     ASSERT_TRUE(request.has_value());
@@ -253,7 +289,10 @@ TEST(HttpRequestTest, ParsesStatusHeadersAndContentLengthBody)
         "\r\n"
         "hello tina!");
 
-    auto request = HttpRequest::Create(configFor(server.endpoint()));
+    auto stream = connectTo(server.endpoint());
+    ASSERT_TRUE(stream.has_value());
+
+    auto request = HttpRequest::Create(configFor(*stream));
     ASSERT_TRUE(request.has_value());
 
     const auto done = driveToCompletion(*request, server);
@@ -280,8 +319,10 @@ TEST(HttpRequestTest, NonSuccessStatusStillCompletes)
     ScriptedHttpServer server;
     ASSERT_TRUE(server.isValid());
     server.setReply("HTTP/1.1 404 Not Found\r\nContent-Length: 9\r\n\r\nnot here!");
+    auto stream = connectTo(server.endpoint());
+    ASSERT_TRUE(stream.has_value());
 
-    auto request = HttpRequest::Create(configFor(server.endpoint()));
+    auto request = HttpRequest::Create(configFor(*stream));
     ASSERT_TRUE(request.has_value());
 
     const auto done = driveToCompletion(*request, server);
@@ -308,7 +349,10 @@ TEST(HttpRequestTest, DecodesChunkedBody)
         "4\r\ntina\r\n"
         "0\r\n\r\n");
 
-    auto request = HttpRequest::Create(configFor(server.endpoint()));
+    auto stream = connectTo(server.endpoint());
+    ASSERT_TRUE(stream.has_value());
+
+    auto request = HttpRequest::Create(configFor(*stream));
     ASSERT_TRUE(request.has_value());
 
     const auto done = driveToCompletion(*request, server);
@@ -333,7 +377,10 @@ TEST(HttpRequestTest, IgnoresChunkExtensions)
         "4;name=value\r\ndata\r\n"
         "0\r\n\r\n");
 
-    auto request = HttpRequest::Create(configFor(server.endpoint()));
+    auto stream = connectTo(server.endpoint());
+    ASSERT_TRUE(stream.has_value());
+
+    auto request = HttpRequest::Create(configFor(*stream));
     ASSERT_TRUE(request.has_value());
 
     const auto done = driveToCompletion(*request, server);
@@ -352,8 +399,10 @@ TEST(HttpRequestTest, BodyDelimitedByConnectionClose)
     ASSERT_TRUE(server.isValid());
     server.setReply("HTTP/1.1 200 OK\r\n\r\nunbounded body");
     server.setCloseAfterReply(true);
+    auto stream = connectTo(server.endpoint());
+    ASSERT_TRUE(stream.has_value());
 
-    auto request = HttpRequest::Create(configFor(server.endpoint()));
+    auto request = HttpRequest::Create(configFor(*stream));
     ASSERT_TRUE(request.has_value());
 
     const auto done = driveToCompletion(*request, server);
@@ -372,8 +421,10 @@ TEST(HttpRequestTest, NoContentStatusHasNoBody)
     ScriptedHttpServer server;
     ASSERT_TRUE(server.isValid());
     server.setReply("HTTP/1.1 204 No Content\r\nContent-Length: 5\r\n\r\n");
+    auto stream = connectTo(server.endpoint());
+    ASSERT_TRUE(stream.has_value());
 
-    auto request = HttpRequest::Create(configFor(server.endpoint()));
+    auto request = HttpRequest::Create(configFor(*stream));
     ASSERT_TRUE(request.has_value());
 
     const auto done = driveToCompletion(*request, server);
@@ -393,8 +444,10 @@ TEST(HttpRequestTest, HeadResponseHasNoBodyDespiteContentLength)
     ScriptedHttpServer server;
     ASSERT_TRUE(server.isValid());
     server.setReply("HTTP/1.1 200 OK\r\nContent-Length: 1234\r\n\r\n");
+    auto stream = connectTo(server.endpoint());
+    ASSERT_TRUE(stream.has_value());
 
-    auto config = configFor(server.endpoint());
+    auto config = configFor(*stream);
     config.method = HttpMethod::Head;
     auto request = HttpRequest::Create(config);
     ASSERT_TRUE(request.has_value());
@@ -417,7 +470,10 @@ TEST(HttpRequestTest, SendsRequestBodyWithContentLength)
     server.setReply("HTTP/1.1 201 Created\r\nContent-Length: 0\r\n\r\n");
 
     constexpr std::string_view payload = R"({"key":"value"})";
-    auto config = configFor(server.endpoint());
+    auto stream = connectTo(server.endpoint());
+    ASSERT_TRUE(stream.has_value());
+
+    auto config = configFor(*stream);
     config.method = HttpMethod::Post;
     config.body = std::as_bytes(std::span{payload.data(), payload.size()});
     config.contentType = "application/json";
@@ -452,7 +508,10 @@ TEST(HttpRequestTest, RejectsBothContentLengthAndTransferEncoding)
         "\r\n"
         "0\r\n\r\n");
 
-    auto request = HttpRequest::Create(configFor(server.endpoint()));
+    auto stream = connectTo(server.endpoint());
+    ASSERT_TRUE(stream.has_value());
+
+    auto request = HttpRequest::Create(configFor(*stream));
     ASSERT_TRUE(request.has_value());
 
     const auto done = driveToCompletion(*request, server);
@@ -466,8 +525,10 @@ TEST(HttpRequestTest, RejectsWhitespaceBeforeHeaderColon)
     ScriptedHttpServer server;
     ASSERT_TRUE(server.isValid());
     server.setReply("HTTP/1.1 200 OK\r\nContent-Length : 2\r\n\r\nhi");
+    auto stream = connectTo(server.endpoint());
+    ASSERT_TRUE(stream.has_value());
 
-    auto request = HttpRequest::Create(configFor(server.endpoint()));
+    auto request = HttpRequest::Create(configFor(*stream));
     ASSERT_TRUE(request.has_value());
 
     const auto done = driveToCompletion(*request, server);
@@ -487,7 +548,10 @@ TEST(HttpRequestTest, RejectsMalformedStatusLine)
         ASSERT_TRUE(server.isValid());
         server.setReply(std::string{reply});
 
-        auto request = HttpRequest::Create(configFor(server.endpoint()));
+    auto stream = connectTo(server.endpoint());
+    ASSERT_TRUE(stream.has_value());
+
+        auto request = HttpRequest::Create(configFor(*stream));
         ASSERT_TRUE(request.has_value());
 
         const auto done = driveToCompletion(*request, server, 600);
@@ -506,8 +570,10 @@ TEST(HttpRequestTest, TruncatedBodyIsReportedAsIncomplete)
     ASSERT_TRUE(server.isValid());
     server.setReply("HTTP/1.1 200 OK\r\nContent-Length: 20\r\n\r\nonly-part");
     server.setCloseAfterReply(true);
+    auto stream = connectTo(server.endpoint());
+    ASSERT_TRUE(stream.has_value());
 
-    auto request = HttpRequest::Create(configFor(server.endpoint()));
+    auto request = HttpRequest::Create(configFor(*stream));
     ASSERT_TRUE(request.has_value());
 
     const auto done = driveToCompletion(*request, server);
@@ -520,8 +586,10 @@ TEST(HttpRequestTest, RejectsBodyExceedingLimit)
     ScriptedHttpServer server;
     ASSERT_TRUE(server.isValid());
     server.setReply("HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n");
+    auto stream = connectTo(server.endpoint());
+    ASSERT_TRUE(stream.has_value());
 
-    auto config = configFor(server.endpoint());
+    auto config = configFor(*stream);
     config.maximumBodyBytes = 10;
     auto request = HttpRequest::Create(config);
     ASSERT_TRUE(request.has_value());
@@ -544,7 +612,10 @@ TEST(HttpRequestTest, RejectsHeadersExceedingLimit)
     reply += "Content-Length: 0\r\n\r\n";
     server.setReply(reply);
 
-    auto config = configFor(server.endpoint());
+    auto stream = connectTo(server.endpoint());
+    ASSERT_TRUE(stream.has_value());
+
+    auto config = configFor(*stream);
     config.maximumHeaderBytes = 512;
     auto request = HttpRequest::Create(config);
     ASSERT_TRUE(request.has_value());
@@ -562,7 +633,10 @@ TEST(HttpRequestTest, StallLimitEndsASilentServer)
     ASSERT_TRUE(server.isValid());
     server.setReply({});  // never answers
 
-    auto config = configFor(server.endpoint());
+    auto stream = connectTo(server.endpoint());
+    ASSERT_TRUE(stream.has_value());
+
+    auto config = configFor(*stream);
     config.stallPumpLimit = 30;
     auto request = HttpRequest::Create(config);
     ASSERT_TRUE(request.has_value());
@@ -585,8 +659,10 @@ TEST(HttpRequestTest, ResponseUnavailableBeforeCompletion)
 {
     ScriptedHttpServer server;
     ASSERT_TRUE(server.isValid());
+    auto stream = connectTo(server.endpoint());
+    ASSERT_TRUE(stream.has_value());
 
-    auto request = HttpRequest::Create(configFor(server.endpoint()));
+    auto request = HttpRequest::Create(configFor(*stream));
     ASSERT_TRUE(request.has_value());
 
     const auto premature = request->response();
@@ -599,8 +675,10 @@ TEST(HttpRequestTest, PumpAfterCompletionIsIdempotent)
     ScriptedHttpServer server;
     ASSERT_TRUE(server.isValid());
     server.setReply("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok");
+    auto stream = connectTo(server.endpoint());
+    ASSERT_TRUE(stream.has_value());
 
-    auto request = HttpRequest::Create(configFor(server.endpoint()));
+    auto request = HttpRequest::Create(configFor(*stream));
     ASSERT_TRUE(request.has_value());
     ASSERT_TRUE(*driveToCompletion(*request, server));
 
@@ -618,8 +696,10 @@ TEST(HttpRequestTest, CancelStopsTheExchange)
     ScriptedHttpServer server;
     ASSERT_TRUE(server.isValid());
     server.setReply({});
+    auto stream = connectTo(server.endpoint());
+    ASSERT_TRUE(stream.has_value());
 
-    auto request = HttpRequest::Create(configFor(server.endpoint()));
+    auto request = HttpRequest::Create(configFor(*stream));
     ASSERT_TRUE(request.has_value());
     (void)request->pump();
 
@@ -638,8 +718,10 @@ TEST(HttpRequestTest, RejectsUseFromNonOwnerThread)
 {
     ScriptedHttpServer server;
     ASSERT_TRUE(server.isValid());
+    auto stream = connectTo(server.endpoint());
+    ASSERT_TRUE(stream.has_value());
 
-    auto request = HttpRequest::Create(configFor(server.endpoint()));
+    auto request = HttpRequest::Create(configFor(*stream));
     ASSERT_TRUE(request.has_value());
 
     Core::ErrorCode pumpCode{};
@@ -663,8 +745,10 @@ TEST(HttpRequestTest, MovedFromRequestAnswersQueriesInertly)
 {
     ScriptedHttpServer server;
     ASSERT_TRUE(server.isValid());
+    auto stream = connectTo(server.endpoint());
+    ASSERT_TRUE(stream.has_value());
 
-    auto request = HttpRequest::Create(configFor(server.endpoint()));
+    auto request = HttpRequest::Create(configFor(*stream));
     ASSERT_TRUE(request.has_value());
     HttpRequest moved{std::move(*request)};
 

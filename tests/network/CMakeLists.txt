@@ -1,4 +1,5 @@
 set(TINA_NETWORK_HEADER_ISOLATION_SOURCES
+    header_isolation/ByteStreamHeader.cpp
     header_isolation/HttpClientHeader.cpp
     header_isolation/NetworkEndpointHeader.cpp
     header_isolation/NetworkErrorsHeader.cpp

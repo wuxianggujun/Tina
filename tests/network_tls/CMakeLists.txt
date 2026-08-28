@@ -18,12 +18,24 @@ set_target_properties(tina_network_tls_header_isolation PROPERTIES CXX_EXTENSION
 
 add_executable(tina_network_tls_tests
     TlsConnectionTests.cpp
+    TlsHandshakeTests.cpp
+    TlsTestServer.cpp
     $<TARGET_OBJECTS:tina_network_tls_header_isolation>
 )
 target_compile_features(tina_network_tls_tests PRIVATE cxx_std_23)
+# The handshake fixture is a real mbedTLS server, so it needs the library and the
+# private socket helpers. Only the test binary sees them; the module's public
+# headers stay free of both.
+target_include_directories(tina_network_tls_tests PRIVATE
+    ${PROJECT_SOURCE_DIR}/src/network
+)
 target_link_libraries(tina_network_tls_tests PRIVATE
     Tina::ProjectOptions
     Tina::NetworkTls
+    Tina::Network
+    MbedTLS::mbedtls
+    MbedTLS::mbedx509
+    MbedTLS::mbedcrypto
     GTest::gtest_main
 )
 set_target_properties(tina_network_tls_tests PROPERTIES CXX_EXTENSIONS OFF)

@@ -2,6 +2,7 @@
 
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
+#include <tina/network/ByteStream.hpp>
 #include <tina/network/NetworkEndpoint.hpp>
 
 #include <memory_resource>
@@ -53,7 +54,13 @@ struct HttpResponse final {
 };
 
 struct HttpRequestConfig final {
-    NetworkEndpoint remoteEndpoint{};
+    // Borrowed, and must outlive the request. Supplying the stream rather than an
+    // endpoint is what makes HTTPS possible without Tina::Network depending on the
+    // optional TLS adapter: hand it a TlsConnection and the same parser runs over
+    // an encrypted stream.
+    //
+    // The stream may still be Connecting; pump() waits for it.
+    IByteStream* stream = nullptr;
 
     HttpMethod method = HttpMethod::Get;
 
@@ -98,15 +105,20 @@ struct HttpRequestStatistics final {
     bool chunkedTransferEncoding = false;
 };
 
-// Non-blocking HTTP/1.1 client for a single request. Every method must be called
-// from the thread that called Create.
+// Non-blocking HTTP/1.1 client for a single request over a caller-supplied stream.
+// Every method must be called from the thread that created the stream.
 //
 // One request per object rather than a reusable client: a queue inside the client
 // would need a policy for ordering, cancellation and head-of-line blocking that
 // the caller is better placed to choose.
 //
-// No worker thread. pump() advances the transport and the parser, so a request
-// makes no progress unless pump() is called.
+// The request borrows the stream and never owns it, so the same parser serves
+// http:// over TcpConnection and https:// over TlsConnection. That also keeps the
+// choice of transport -- and therefore whether verification happened -- visible at
+// the call site rather than hidden behind a scheme string.
+//
+// No worker thread. pump() advances the stream and the parser, so a request makes
+// no progress unless pump() is called.
 class HttpRequest final {
   public:
     [[nodiscard]] static Core::Result<HttpRequest> Create(HttpRequestConfig config);

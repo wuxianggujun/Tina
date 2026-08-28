@@ -630,4 +630,49 @@ Core::usize TlsConnection::receiveBufferCapacity() const noexcept
     return m_impl != nullptr ? m_impl->plaintextReceive.size() : 0;
 }
 
+ByteStreamState TlsConnection::streamState() const noexcept
+{
+    switch (state()) {
+    case TlsConnectionState::ConnectingTransport:
+    case TlsConnectionState::HandshakingTls:
+        // Both mean "not usable yet". Surfacing which one would make every
+        // protocol above care about TLS.
+        return ByteStreamState::Connecting;
+    case TlsConnectionState::Connected:
+        return ByteStreamState::Connected;
+    case TlsConnectionState::PeerClosed:
+        return ByteStreamState::PeerClosed;
+    case TlsConnectionState::Closed:
+        return ByteStreamState::Closed;
+    case TlsConnectionState::Failed:
+        return ByteStreamState::Failed;
+    }
+    return ByteStreamState::Failed;
+}
+
+Core::Status TlsConnection::sendBytes(std::span<const std::byte> payload)
+{
+    return send(payload);
+}
+
+Core::Result<Core::usize> TlsConnection::pumpStream()
+{
+    return pump();
+}
+
+Core::Result<std::span<const std::byte>> TlsConnection::peekReceived()
+{
+    return receive();
+}
+
+Core::Status TlsConnection::consumeReceived(Core::usize byteCount)
+{
+    return consume(byteCount);
+}
+
+void TlsConnection::closeStream() noexcept
+{
+    close();
+}
+
 } // namespace Tina::Network

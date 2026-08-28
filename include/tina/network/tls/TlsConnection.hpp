@@ -2,6 +2,7 @@
 
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
+#include <tina/network/ByteStream.hpp>
 #include <tina/network/NetworkEndpoint.hpp>
 
 #include <memory_resource>
@@ -85,7 +86,7 @@ struct TlsConnectionStatistics final {
 // No worker thread and no callback: the TLS library is driven entirely by
 // caller-supplied transport callbacks, so records move only during pump(). The
 // handshake therefore spans several pumps rather than blocking one.
-class TlsConnection final {
+class TlsConnection final : public IByteStream {
   public:
     // Starts the TCP connection and prepares the TLS session. Returns immediately
     // in ConnectingTransport. A refused peer, a failed handshake, or a rejected
@@ -130,6 +131,15 @@ class TlsConnection final {
 
     [[nodiscard]] Core::usize sendBufferCapacity() const noexcept;
     [[nodiscard]] Core::usize receiveBufferCapacity() const noexcept;
+
+    // IByteStream. Both TLS handshake states map to Connecting: a protocol above
+    // only needs to know the stream is not yet usable, not why.
+    [[nodiscard]] ByteStreamState streamState() const noexcept override;
+    [[nodiscard]] Core::Status sendBytes(std::span<const std::byte> payload) override;
+    [[nodiscard]] Core::Result<Core::usize> pumpStream() override;
+    [[nodiscard]] Core::Result<std::span<const std::byte>> peekReceived() override;
+    [[nodiscard]] Core::Status consumeReceived(Core::usize byteCount) override;
+    void closeStream() noexcept override;
 
   private:
     struct Impl;
