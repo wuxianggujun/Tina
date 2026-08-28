@@ -12,15 +12,26 @@
 
 namespace Tina::Render {
 
-// Backend-neutral GPU upload ticket (ADR 0016). This Null ledger owns staging until explicit
-// retire and may advance Pending → Ready immediately. It is separate from IRenderDevice's
-// backend-proven Texture2D/StaticMesh resource retirement path.
+// Backend-neutral CPU-side staging ownership for a queued GPU upload (ADR 0016).
+// This Null ledger owns the staging copy until an explicit retire and may advance
+// Pending → Ready immediately.
+//
+// It is deliberately NOT a GPU completion mechanism. ADR 0016 originally cast the
+// ticket as the upload itself, to be driven toward Ready by a backend fence, but
+// RENDER-FENCE settled on a separate proof: a 1x1 BLIT_DST | READ_BACK marker whose
+// readTexture() ready frame completes the retirement timeline. So the ticket kept
+// only the half it actually implements -- who owns the staging bytes and when they
+// are freed -- and GPU resource retirement does not reuse it (docs/rendering.md).
+//
+// That leaves no failure state to report: submit() copies the bytes and either
+// returns a ticket or fails immediately, so once a ticket exists nothing downstream
+// can fail. There is no Failed enumerator for that reason. A future ledger that does
+// wait on a real fence would need one, and would have to define who publishes it.
 enum class UploadTicketState : Core::u8 {
     Invalid = 0,
     Pending = 1,
     Ready = 2,
     Retired = 3,
-    Failed = 4,
 };
 
 struct UploadTicketId final {
@@ -71,15 +82,15 @@ class NullUploadLedger final {
     // Copies bytes into owned staging and returns a Pending ticket.
     [[nodiscard]] Core::Result<UploadTicketId> submit(UploadSubmitParams params);
 
-    // Null backend: Pending → Ready immediately (simulates completed GPU upload).
-    // Real backends will wait for fence/completion before Ready.
+    // Null backend: Pending → Ready immediately (simulates a completed upload).
+    // A backend that waits on a real fence would drive this transition instead.
     [[nodiscard]] Core::Status poll(UploadTicketId ticket) noexcept;
 
     [[nodiscard]] UploadTicketState state(UploadTicketId ticket) const noexcept;
     [[nodiscard]] std::span<const std::byte> staging(UploadTicketId ticket) const noexcept;
     [[nodiscard]] Core::u64 userTag(UploadTicketId ticket) const noexcept;
 
-    // Frees staging. Allowed from Ready or Failed. Invalidates the ticket.
+    // Frees staging. Allowed only from Ready. Invalidates the ticket.
     [[nodiscard]] Core::Status retire(UploadTicketId ticket) noexcept;
 
   private:

@@ -253,7 +253,12 @@ kind/type 与 Catalog entry 对齐检查；它不替代包签名或信任策略�
   owning `CookedAssetFile`，State 上传并绑定唯一 GPU owner，失败回滚和 `onExit` 都显式 retirement；
 - `TileMapStream` 持有 root/tileset lease 与 demanded chunk handle/lease；必须先把 `AssetSystem` 和 stream
   放到最终地址，再创建借用 `stream.map()` 的 collision adapter，且 stream 必须先于 AssetSystem 析构；
-- `UploadTicket` 当前只由 Null ledger 完整实现，用于验证 staging 与逻辑状态；
+- `UploadTicket` 只表达 **CPU 侧 staging 所有权**，不是 GPU 完成证明。ADR 0016 最初把它设想为 upload 本身、
+  由 backend fence 推向 `Ready`/`Failed`，但 `RENDER-FENCE` 最终采用了另一套证明（1×1 `BLIT_DST | READ_BACK`
+  marker 的 `readTexture()` ready frame），于是它只保留了自己真正实现的那一半。因此**没有 `Failed` 状态**：
+  `submit()` 当场完成拷贝，要么返回 ticket 要么立即失败，ticket 存在之后不存在可失败的后续环节；
+  `UploadTicketState::Failed` 及其死分支已于 2026-08-28 删除。注意 `AssetLogicalState::Failed`
+  是另一回事，仍可达（`submit()` 自身失败时经 `failGpu()` 进入）；
 - `AssetRetirementLedger` 按 Logical/UploadStaging/GpuTexture2D/GpuMesh 记录
   `DestroyQueued`、`Retiring`、`Released`；真实 GPU 销毁仍由 RenderDevice 执行。
 

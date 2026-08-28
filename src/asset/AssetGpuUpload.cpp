@@ -153,32 +153,16 @@ Core::Result<AssetGpuUploadStats> AssetGpuUploadCoordinator::pumpUploads()
                 it = m_pending.erase(it);
             } else
             {
-                // Keep ticket until cancelUpload/explicit retire (real fence backends).
+                // Keep ticket until cancelUpload/explicit retire.
                 ++it;
             }
             continue;
         }
-        if (ticketState == Render::UploadTicketState::Failed)
-        {
-            if (m_store->state(it->handle) == AssetLogicalState::UploadQueued)
-            {
-                (void)m_store->failGpu(it->handle);
-                ++stats.failed;
-            }
-            if (m_config.retireOnGpuReady)
-            {
-                (void)m_ledger->retire(it->ticket);
-                if (m_retirement != nullptr)
-                {
-                    m_retirement->markReleased(it->handle);
-                }
-                it = m_pending.erase(it);
-            } else
-            {
-                ++it;
-            }
-            continue;
-        }
+        // No failure branch: a ticket cannot fail after submit() returned it. The
+        // ledger only owns the staging copy, which is already made by then, so the
+        // states left here are Retired and Invalid -- both meaning this entry is
+        // stale rather than failed. AssetLogicalState::Failed is still reachable via
+        // failGpu() above when submit() itself fails.
         ++it;
     }
 
@@ -205,14 +189,13 @@ Core::Status AssetGpuUploadCoordinator::cancelUpload(AssetHandle handle) noexcep
             (void)m_retirement->enqueueDestroy(handle, assetId, it->ticket);
             m_retirement->markRetiring(handle);
         }
-        // Free staging for Pending/Ready/Failed tickets.
+        // Free staging for Pending/Ready tickets.
         const auto ticketState = m_ledger->state(it->ticket);
         if (ticketState == Render::UploadTicketState::Pending)
         {
             (void)m_ledger->poll(it->ticket);
         }
-        if (m_ledger->state(it->ticket) == Render::UploadTicketState::Ready ||
-            m_ledger->state(it->ticket) == Render::UploadTicketState::Failed)
+        if (m_ledger->state(it->ticket) == Render::UploadTicketState::Ready)
         {
             (void)m_ledger->retire(it->ticket);
         }

@@ -285,7 +285,9 @@ pin；active packet 结束前拒绝对应 retirement。Mesh/Texture 通过 lease
 
 `UploadTicketLedger` 与 `CpuSubmissionCompletionLedger` 仍分别表达 staging 与 CPU completion。GPU 资源
 retirement 不复用它们：`destroy*` 是无外部 pin 的便利入口，`retire*` 成功才转移 pin；
-`RenderStatistics` 分别报告 `pendingGpuRetirements/completedGpuRetirements`。
+`RenderStatistics` 分别报告 `pendingGpuRetirements/completedGpuRetirements`。因为 upload ticket 只管
+staging 所有权，它没有失败状态可报（`submit()` 之后没有可失败的环节）；`UploadTicketState::Failed`
+是那套被取代的 fence 设计的残留，已于 2026-08-28 删除。
 
 bgfx retirement marker 使用 1×1 source texture 与 `BLIT_DST | READ_BACK` destination texture；在最后一个
 view 提交 blit/readback，仅以 `readTexture()` 的 ready frame 判断完成。active/suspended/capture/drain 都会

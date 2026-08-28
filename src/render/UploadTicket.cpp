@@ -153,11 +153,11 @@ Core::Status NullUploadLedger::retire(UploadTicketId ticket) noexcept
     {
         return Core::failure(RenderErrorCode::UploadTicketInvalid, "upload ticket is invalid or stale");
     }
-    if (slot->state != UploadTicketState::Ready && slot->state != UploadTicketState::Failed)
+    if (slot->state != UploadTicketState::Ready)
     {
-        return Core::failure(RenderErrorCode::UploadTicketNotRetirable, "only Ready/Failed upload tickets can be retired");
+        return Core::failure(RenderErrorCode::UploadTicketNotRetirable, "only Ready upload tickets can be retired");
     }
-    if (slot->state == UploadTicketState::Ready && m_ready > 0U)
+    if (m_ready > 0U)
     {
         --m_ready;
     }
