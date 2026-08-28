@@ -5367,7 +5367,7 @@ class TileMapBgfxApplication final : public Tina::IGameApplication {
         .deadzone = 0.2F,
     });
     config.inputActions.bindings.push_back(Tina::InputActionBinding{
-        .input = Tina::PrimaryPointerButtonBinding{
+        .input = Tina::PointerButtonBinding{
             .pointer = Tina::Platform::PrimaryPointerId,
             .button = Tina::Platform::PointerButton::Primary,
         },
