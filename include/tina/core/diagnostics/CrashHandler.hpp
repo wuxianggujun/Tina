@@ -33,10 +33,17 @@ struct CrashHandlerConfig final {
     bool captureBacktrace = true;
 };
 
-// Safe to call more than once; later calls replace the configuration. The
-// current implementation returns true after attempting the portable hooks;
-// optional report-file and platform-specific hooks remain best effort.
-TINA_CORE_API bool installCrashHandler(const CrashHandlerConfig& config) noexcept;
+// Safe to call more than once; later calls replace the configuration.
+//
+// Returns whether the requested report file is usable: true when reportPathUtf8
+// is empty (stderr only), and otherwise only when the file was actually opened.
+// A false return means a crash will reach stderr and nothing else, which a gate
+// that does not capture stderr would lose entirely — so it is worth acting on.
+//
+// The hooks themselves stay best effort and do not affect the result: a partially
+// hooked process still reports more than an unhooked one, and a caller cannot do
+// anything useful about a refused platform filter.
+[[nodiscard]] TINA_CORE_API bool installCrashHandler(const CrashHandlerConfig& config) noexcept;
 
 // Removes Tina-owned hooks and restores the captured std::terminate handler.
 // Mainly for isolated tests; it is not a general signal/filter chaining API.

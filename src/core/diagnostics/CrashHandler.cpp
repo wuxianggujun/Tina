@@ -422,6 +422,29 @@ bool installCrashHandler(const CrashHandlerConfig& config) noexcept
     copyBounded(g_state.reportPathUtf8, MaxPathBytes, config.reportPathUtf8);
     g_state.captureBacktrace = config.captureBacktrace;
 
+    // A requested report file that could not be opened is the one failure a caller
+    // must be able to see: everything else here is genuinely best effort, but if
+    // this is false the crash will only reach stderr, and a gate that captures no
+    // stderr would lose the report entirely. Returning true unconditionally hid
+    // that.
+    //
+    // Only Windows pre-opens the file, so only Windows can answer this at install
+    // time. Elsewhere the file is opened while reporting, and claiming readiness
+    // here would be a guess -- so an empty path (stderr only, always available) is
+    // the only case that reports ready.
+    bool reportFileReady = config.reportPathUtf8.empty();
+#if !defined(_WIN32)
+    // Verify the path is writable now rather than discovering it during a crash.
+    if (!reportFileReady)
+    {
+        if (std::FILE* probe = std::fopen(g_state.reportPathUtf8, "ab"))
+        {
+            (void)std::fclose(probe);
+            reportFileReady = true;
+        }
+    }
+#endif
+
 #if defined(_WIN32)
     if (g_state.reportFile != INVALID_HANDLE_VALUE)
     {
@@ -430,15 +453,35 @@ bool installCrashHandler(const CrashHandlerConfig& config) noexcept
     }
     if (g_state.reportPathUtf8[0] != '\0')
     {
-        // Truncating: each run owns its report, so a stale one cannot be mistaken
-        // for the current crash. FILE_SHARE_WRITE matters as much as SHARE_READ:
-        // the application appends non-crash fatal errors to this same file
-        // through ordinary file APIs, and withholding write sharing would make
-        // those opens fail silently while this handle is alive.
-        g_state.reportFile = ::CreateFileA(
-            g_state.reportPathUtf8, FILE_APPEND_DATA,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, CREATE_ALWAYS,
-            FILE_ATTRIBUTE_NORMAL, nullptr);
+        // The path is UTF-8 by contract, so it must be widened rather than handed
+        // to the ANSI API: CreateFileA reinterprets the bytes in the process ANSI
+        // codepage, which turns any non-ASCII path into a mojibake filename or an
+        // outright failure. A crash report nobody can find is the worst possible
+        // outcome for a diagnostic, and it fails on exactly the machines whose
+        // user profile is not ASCII.
+        wchar_t widePath[MaxPathBytes]{};
+        const int wideLength =
+            ::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, g_state.reportPathUtf8, -1,
+                                  widePath, static_cast<int>(MaxPathBytes));
+        if (wideLength <= 0)
+        {
+            // Malformed UTF-8, or a path that does not fit once widened. Reported
+            // rather than silently writing somewhere unexpected.
+            reportFileReady = false;
+        }
+        else
+        {
+            // Truncating: each run owns its report, so a stale one cannot be
+            // mistaken for the current crash. FILE_SHARE_WRITE matters as much as
+            // SHARE_READ: the application appends non-crash fatal errors to this
+            // same file through ordinary file APIs, and withholding write sharing
+            // would make those opens fail silently while this handle is alive.
+            g_state.reportFile = ::CreateFileW(
+                widePath, FILE_APPEND_DATA,
+                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, CREATE_ALWAYS,
+                FILE_ATTRIBUTE_NORMAL, nullptr);
+            reportFileReady = g_state.reportFile != INVALID_HANDLE_VALUE;
+        }
         if (g_state.reportFile != INVALID_HANDLE_VALUE)
         {
             // A run marker proves the handler was installed. If a crash leaves
@@ -478,7 +521,11 @@ bool installCrashHandler(const CrashHandlerConfig& config) noexcept
 #endif
         g_state.installed = true;
     }
-    return true;
+    // The hooks themselves stay best effort by design -- a partially hooked process
+    // still reports more than an unhooked one, and there is nothing useful a caller
+    // could do about a refused SEH filter. The report file is different: it is the
+    // one thing the caller asked for by name and can act on.
+    return reportFileReady;
 }
 
 void uninstallCrashHandler() noexcept

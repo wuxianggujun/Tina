@@ -164,6 +164,71 @@ TEST(CrashHandlerTest, BacktraceNamesTheCallingFunction)
     std::filesystem::remove(path, removeError);
 }
 
+// The report path is UTF-8 by contract. Handing it to the ANSI Win32 API turned
+// any non-ASCII path into a mojibake filename or an outright failure -- and it
+// failed on exactly the machines whose user profile is not ASCII, which is the
+// worst possible place for a diagnostic to go missing.
+TEST(CrashHandlerTest, OpensAReportFileWhoseUtf8PathIsNotAscii)
+{
+    std::error_code error;
+    const std::filesystem::path temp = std::filesystem::temp_directory_path(error);
+    const std::filesystem::path base = error ? std::filesystem::path{"."} : temp;
+    // Han characters plus an accented Latin letter: both are multi-byte in UTF-8
+    // and neither survives a codepage reinterpretation intact.
+    const std::filesystem::path directory = base / L"tina_崩溃_réports";
+    std::filesystem::remove_all(directory, error);
+    ASSERT_TRUE(std::filesystem::create_directories(directory, error)) << error.message();
+    const std::filesystem::path path = directory / L"报告_cräsh.txt";
+
+    // The UTF-8 bytes are what the API contract specifies, so that is what is
+    // passed -- not the platform-native wide string.
+    const std::string utf8Path = path.u8string().empty()
+                                     ? std::string{}
+                                     : std::string{reinterpret_cast<const char*>(
+                                           path.u8string().c_str())};
+    ASSERT_FALSE(utf8Path.empty());
+
+    EXPECT_TRUE(installCrashHandler(CrashHandlerConfig{
+        .applicationName = "tina_crash_utf8",
+        .reportPathUtf8 = utf8Path,
+        .captureBacktrace = false,
+    }));
+    uninstallCrashHandler();
+
+    // The armed marker proves the handler opened *this* file rather than a
+    // codepage-mangled sibling.
+    EXPECT_TRUE(std::filesystem::exists(path, error))
+        << "no report at the requested UTF-8 path; a mangled name means the ANSI "
+           "API was used";
+    std::filesystem::remove_all(directory, error);
+}
+
+// Install returns whether the requested report file is usable, because a crash
+// that can only reach stderr is lost by any gate that does not capture stderr.
+// Returning true unconditionally hid that.
+TEST(CrashHandlerTest, InstallReportsWhetherTheRequestedReportFileIsUsable)
+{
+    // No file requested: stderr is always available, so this is ready.
+    EXPECT_TRUE(installCrashHandler(CrashHandlerConfig{
+        .applicationName = "tina_crash_stderr_only",
+        .captureBacktrace = false,
+    }));
+    uninstallCrashHandler();
+
+    // A path inside a directory that does not exist cannot be opened, and the
+    // caller has to be able to see that before the crash rather than after.
+    std::error_code error;
+    const std::filesystem::path missing =
+        reportPath("tina_crash_absent_dir") / "nested" / "report.txt";
+    std::filesystem::remove_all(reportPath("tina_crash_absent_dir"), error);
+    EXPECT_FALSE(installCrashHandler(CrashHandlerConfig{
+        .applicationName = "tina_crash_unopenable",
+        .reportPathUtf8 = missing.string(),
+        .captureBacktrace = false,
+    }));
+    uninstallCrashHandler();
+}
+
 TEST(CrashHandlerTest, InstallIsIdempotentAndUninstallRestoresPreviousHandlers)
 {
     const std::terminate_handler before = std::get_terminate();
