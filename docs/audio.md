@@ -16,7 +16,7 @@ Tina 的正式 Audio backend 方向是 miniaudio（ADR 0012）。`tina_audio` �
 - one-shot 在显式 Stop 或 natural end 后自动 retire，不占用永久 voice slot；
 - `playPcmStream()`、owner-thread 整块原子 submit、EOF drain、underrun 静音计数与 cancel；
 - Create 时为每个 voice 固定预分配双声道 stream ring，callback/submit 路径不扩容；
-- stream terminal completion 在 completion ring 满或 realtime reader 未退出时延迟但不丢失；
+- clip 与 stream 的 terminal completion 都在 completion ring 满或 realtime reader 未退出时延迟但不丢失；
 - Disabled/Enabled/Stopped 生命周期、stale handle 与重复 shutdown；
 - PMR-backed Tina-owned storage 和统计。
 
@@ -76,12 +76,22 @@ voice 参数由 owner thread 修改；正在播放时在下一次 realtime callb
 `AudioPcmClipView` 是 non-owning borrow，AudioEngine **不会**自动取得 AssetLease。调用方必须让 PCM
 frames 存活到 voice 停止并完成 completion drain。
 
+判定"frames 可以释放"的唯一依据是 terminal completion 被 pump，**不是** `isVoicePlaying()` 返回 false。
+clip terminal 与 stream terminal 一样会在 completion ring 满或 realtime reader 未退出时延迟发布，而排队
+terminal 的同时就已清除 `playing`；因此在该窗口内 voice 报告 not playing，frames 却仍被 mixer 借用。
+`bindVoiceClip()`、`clearVoiceClip()` 与 `destroyVoice()` 在这个窗口内一律返回 `InvalidConfiguration`
+且不改变状态——它们要么交出释放许可、要么擦除调用方唯一的通知来源。窗口内到达的 `Play` 被吸收
+（terminal intent 是 absorbing，与 stream 一致），不会让 voice 重新开始播放。
+
 `AudioPcmStreamChunkView` 只在 `submitPcmStreamFrames()` 调用期间借用 producer 内存。成功返回前，
 完整 chunk 已复制到 Tina-owned 固定 ring；空间不足返回 `CapacityExceeded`，不得发布半块。stream
 descriptor 的逻辑容量不得超过 `AudioEngineConfig::streamBufferFrameCapacity`，并至少保留两个 frame，
 以保证 fractional linear interpolation 在等待下一个 sample 时仍能让 producer 继续推进。
 
-普通 `createVoice()` 返回的 voice 仍由调用方显式销毁；`playOneShotPcm()` 创建的是 transient voice，
+普通 `createVoice()` 返回的 voice 仍由调用方显式销毁，但 `destroyVoice()` 只接受既不 playing、也没有
+未 pump completion 的 voice：正在播放的 clip voice 返回 `InvalidConfiguration`，必须先 `enqueueStop()`
+并 pump。这与 streaming voice 必须走 EOF/`cancelPcmStream()`/Stop 是同一条约束——擦除 record 会让调用方
+永远收不到"PCM 已不再被读取"的信号。`playOneShotPcm()` 创建的是 transient voice，
 显式 Stop 或 natural end 被 `pumpCompletions()` 收口后自动 retire。Stopped event 中的 one-shot
 `AudioVoiceId` 只用于关联完成事件，pump 返回后允许已经 stale，不能再作为长期 owner。
 

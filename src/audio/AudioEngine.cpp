@@ -317,8 +317,18 @@ struct AudioEngine::Impl final {
     // still be reading the caller's payload. Streams park theirs in StreamSlot;
     // clips had nowhere, so an explicit Stop published Stopped -- the caller's
     // free-the-payload signal -- while the mix block was still interpolating from
-    // those frames. Held in a fixed table rather than on VoiceRecord because the
-    // voice may be retired the moment the terminal is delivered.
+    // those frames.
+    //
+    // Indexed by voice index, exactly like streamSlots, so parking can never fail to
+    // find a space and no path has to fall back to publishing early. That holds only
+    // because a voice cannot be erased while its entry is parked: destroyVoice and
+    // retirement both refuse or clear first, so the index is never recycled under a
+    // live entry.
+    //
+    // While an entry is parked the voice reads as not playing but its frames are
+    // still borrowed, so `playing` alone is not a safe predicate for "the caller may
+    // free the payload" -- see the pendingClipTerminal guards on destroyVoice,
+    // bindVoiceClip and clearVoiceClip.
     struct PendingClipTerminal final {
         bool pending = false;
         AudioVoiceId voice{};
@@ -519,6 +529,13 @@ struct AudioEngine::Impl final {
                         // storage that a Stop/Cancel terminal will retire.
                         break;
                     }
+                }
+                if (clipTerminalParked(*record))
+                {
+                    // Clip terminal intent is absorbing too. Reactivating the slot here
+                    // would leave a parked Stopped to be published for a voice that is
+                    // playing again -- and, for a one-shot, would retire it mid-playback.
+                    break;
                 }
                 if (record->sourceKind == VoiceSourceKind::None ||
                     (record->sourceKind == VoiceSourceKind::Clip &&
@@ -826,53 +843,93 @@ struct AudioEngine::Impl final {
                 : 0;
     }
 
+    [[nodiscard]] PendingClipTerminal& pendingClipTerminalFor(const VoiceRecord& record) noexcept
+    {
+        return pendingClipTerminals[record.id.index()];
+    }
+
+    [[nodiscard]] const PendingClipTerminal& pendingClipTerminalFor(
+        const VoiceRecord& record) const noexcept
+    {
+        return pendingClipTerminals[record.id.index()];
+    }
+
+    // True while a realtime callback may still be reading this voice's caller-owned
+    // frames. `playing` is not that predicate: parking a terminal clears it, and so
+    // does a rejected re-Play, while deactivateMixSlot deliberately leaves the frame
+    // pointer intact for an admitted callback to finish its block.
+    //
+    // Reads the mix table rather than a cached flag because deactivateMixSlot already
+    // records the fact: it only clears slot metadata once readers reach zero, so a
+    // slot still naming this voice with a live reader is exactly the borrow. The slot
+    // is inactive by then, so no new callback can enter it and the count is monotone
+    // down. A recycled voice index compares unequal here, since AudioVoiceId carries
+    // its generation.
+    [[nodiscard]] bool clipFramesStillReadByCallback(const VoiceRecord& record) const noexcept
+    {
+        if (record.sourceKind == VoiceSourceKind::Stream)
+        {
+            return false;
+        }
+        for (Core::usize index = 0; index < config.voiceCapacity; ++index)
+        {
+            const MixSlot& slot = mixSlots[index];
+            if (slot.voice == record.id &&
+                slot.callbackReaders.load(std::memory_order_seq_cst) != 0)
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // A terminal is chosen but not yet published. Terminal intent is absorbing, so a
+    // later Play must not reactivate the voice out from under it.
+    [[nodiscard]] bool clipTerminalParked(const VoiceRecord& record) const noexcept
+    {
+        return record.sourceKind != VoiceSourceKind::Stream &&
+               pendingClipTerminalFor(record).pending;
+    }
+
+    // The caller may not treat its PCM as free yet: either a callback is still
+    // reading it, or a terminal completion is parked and dropping the voice now would
+    // destroy the caller's only notification.
+    [[nodiscard]] bool clipPayloadStillBorrowed(const VoiceRecord& record) const noexcept
+    {
+        return clipTerminalParked(record) || clipFramesStillReadByCallback(record);
+    }
+
     // Parks a clip terminal until the realtime callback has provably let go of the
-    // payload. Mirrors queueStreamTerminal, but the token lives on the VoiceRecord:
-    // a clip's mix slot can be handed to another voice before this drains, so the
-    // slot is not a safe place to keep it.
+    // payload, mirroring queueStreamTerminal. Indexed by voice, so there is always
+    // room and no caller ever loses its only free-the-payload signal.
     void queueClipTerminal(VoiceRecord& record, AudioCompletionKind kind,
                            Core::u64 commandSequence, Core::u32 quiescingMixSlot) noexcept
     {
-        record.playing = false;
-        record.mixSlot = InvalidMixSlot;
-        PendingClipTerminal* pending = nullptr;
-        for (PendingClipTerminal& candidate : pendingClipTerminals)
+        PendingClipTerminal& pending = pendingClipTerminalFor(record);
+        if (pending.pending)
         {
-            if (candidate.pending && candidate.voice == record.id)
-            {
-                // Already queued: first terminal wins, exactly as streams behave.
-                return;
-            }
-            if (!candidate.pending && pending == nullptr)
-            {
-                pending = &candidate;
-            }
-        }
-        if (pending == nullptr)
-        {
-            // One slot per voice and the table is voiceCapacity wide, so this cannot
-            // fill. Publishing immediately is still the safer fallback than dropping
-            // the caller's only free-the-payload signal.
-            pushCompletion(kind, record.id, commandSequence);
-            retireTransientVoiceIfNeeded(record);
+            // Already queued: first terminal wins, exactly as streams behave.
             return;
         }
-        pending->pending = true;
-        pending->voice = record.id;
-        pending->kind = kind;
-        pending->commandSequence = commandSequence;
-        pending->quiescingMixSlot = quiescingMixSlot;
-        pending->quiescingPublicationGeneration =
+        record.playing = false;
+        record.mixSlot = InvalidMixSlot;
+        pending.pending = true;
+        pending.voice = record.id;
+        pending.kind = kind;
+        pending.commandSequence = commandSequence;
+        pending.quiescingMixSlot = quiescingMixSlot;
+        pending.quiescingPublicationGeneration =
             quiescingMixSlot != InvalidMixSlot && quiescingMixSlot < config.voiceCapacity
                 ? mixSlots[quiescingMixSlot].publicationGeneration.load(std::memory_order_seq_cst)
                 : 0;
-        pending->retires = record.autoRetire;
+        pending.retires = record.autoRetire;
     }
 
     void flushPendingClipTerminals() noexcept
     {
-        for (PendingClipTerminal& pending : pendingClipTerminals)
+        for (Core::usize index = 0; index < config.voiceCapacity; ++index)
         {
+            PendingClipTerminal& pending = pendingClipTerminals[index];
             if (!pending.pending)
             {
                 continue;
@@ -1933,6 +1990,19 @@ Core::Status AudioEngine::destroyVoice(AudioVoiceId voice) noexcept
             return fail(AudioErrorCode::InvalidConfiguration,
                         "Streaming voices must finish by EOF, cancelPcmStream, or enqueueStop");
         }
+        // Erasing a playing clip voice used to publish nothing at all: the record
+        // vanished while deactivateMixSlot deliberately left slot.frames intact for
+        // the in-flight callback, so the caller was never told when its PCM stopped
+        // being read. Fail closed and make it go through Stop, which parks a terminal
+        // and delivers exactly that signal. Refusing here is also what keeps the
+        // pending table indexable by voice -- an erased index must never be recycled
+        // while an entry for it is still parked.
+        if (record->playing || m_impl->clipPayloadStillBorrowed(*record))
+        {
+            return fail(AudioErrorCode::InvalidConfiguration,
+                        "Clip voices must finish by enqueueStop so the caller learns when the "
+                        "realtime callback released the PCM frames");
+        }
         m_impl->releaseBoundClip(*record);
         m_impl->deactivateMixSlot(*record);
         record->playing = false;
@@ -2023,6 +2093,14 @@ Core::Status AudioEngine::bindVoiceClip(AudioVoiceId voice, AudioPcmClipView cli
     {
         return fail(AudioErrorCode::InvalidConfiguration, "Cannot rebind clip while voice is playing");
     }
+    // A parked terminal means Stop already cleared `playing` but the callback may
+    // still be mid-block on the old frames. Rebinding would tell the caller the old
+    // clip is free while it is still being read.
+    if (m_impl->clipPayloadStillBorrowed(*record))
+    {
+        return fail(AudioErrorCode::InvalidConfiguration,
+                    "Cannot rebind clip until the pending Stop completion is pumped");
+    }
     if (record->hasStream)
     {
         return fail(AudioErrorCode::InvalidConfiguration,
@@ -2061,6 +2139,13 @@ Core::Status AudioEngine::clearVoiceClip(AudioVoiceId voice) noexcept
     if (record->playing)
     {
         return fail(AudioErrorCode::InvalidConfiguration, "Cannot clear clip while voice is playing");
+    }
+    // Same window as bindVoiceClip: clearing is the caller's cue that it owns the
+    // frames again, and a parked terminal means the callback has not let go yet.
+    if (m_impl->clipPayloadStillBorrowed(*record))
+    {
+        return fail(AudioErrorCode::InvalidConfiguration,
+                    "Cannot clear clip until the pending Stop completion is pumped");
     }
     if (record->hasClip)
     {
@@ -2871,6 +2956,13 @@ void AudioEngine::shutdown() noexcept
         slot.appliedGainControlRevision.store(0, std::memory_order_relaxed);
         slot.fadeActive.store(false, std::memory_order_relaxed);
         slot.voice = {};
+    }
+    // Reset alongside streamSlots: shutdown does not promise to deliver terminals
+    // that were never pumped, and a stale entry would otherwise outlive the voice
+    // index it guards.
+    for (auto& pending : m_impl->pendingClipTerminals)
+    {
+        pending = Impl::PendingClipTerminal{};
     }
     for (auto& stream : m_impl->streamSlots)
     {

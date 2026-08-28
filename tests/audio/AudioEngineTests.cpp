@@ -681,6 +681,131 @@ TEST(AudioEngineTest, ReusingAFinishedClipSlotStillReportsThePreviousStopped)
     EXPECT_TRUE(engine->clearVoiceClip(*first).has_value());
 }
 
+// Deferring a clip terminal means `playing` goes false while the mixer may still be
+// reading the caller's frames. Three APIs hand the caller permission to free that
+// memory, and all three used `playing` as the predicate, so all three said yes inside
+// the deferral window. A full completion ring makes the window deterministic: the
+// terminal is chosen and parked, but cannot be published.
+TEST(AudioEngineTest, PayloadCannotBeReleasedWhileAClipTerminalIsStillParked)
+{
+    auto engine = AudioEngine::Create(AudioEngineConfig{
+        .voiceCapacity = 1,
+        .commandCapacity = 4,
+        // One slot, consumed by Started, so the parked Stopped cannot be published.
+        .completionCapacity = 1,
+    });
+    ASSERT_TRUE(engine.has_value()) << (engine ? "" : engine.error().message);
+
+    const float pcm[4] = {0.25F, 0.25F, 0.25F, 0.25F};
+    const AudioPcmClipView clip{.frames = pcm, .frameCount = 4, .channels = 1, .sampleRate = 48000};
+
+    auto voice = engine->createVoice();
+    ASSERT_TRUE(voice.has_value());
+    ASSERT_TRUE(engine->bindVoiceClip(*voice, clip).has_value());
+    ASSERT_TRUE(engine->enqueuePlay(*voice).has_value());
+    ASSERT_TRUE(engine->enqueueStop(*voice).has_value());
+
+    // Apply both commands without draining: Started fills the ring, so Stop's terminal
+    // parks. Do not pump with a drain here -- that would free the slot immediately.
+    auto applied = engine->pumpCompletions(std::span<AudioCompletionEvent>{}, 0);
+    ASSERT_TRUE(applied.has_value());
+    EXPECT_EQ(*applied, 0U);
+
+    auto parkedStats = engine->stats();
+    ASSERT_TRUE(parkedStats.has_value());
+    ASSERT_EQ(parkedStats->pendingCompletions, 1U)
+        << "test needs the ring full so the terminal is provably still parked";
+
+    // Stop already cleared `playing`, which is exactly why it is the wrong predicate.
+    auto playing = engine->isVoicePlaying(*voice);
+    ASSERT_TRUE(playing.has_value());
+    ASSERT_FALSE(*playing);
+
+    // All three refuse rather than telling the caller its PCM is free.
+    expectFailureCode(engine->clearVoiceClip(*voice), AudioErrorCode::InvalidConfiguration);
+    expectFailureCode(engine->bindVoiceClip(*voice, clip), AudioErrorCode::InvalidConfiguration);
+    expectFailureCode(engine->destroyVoice(*voice), AudioErrorCode::InvalidConfiguration);
+
+    // Refusal must be atomic: the clip is still the original binding, and the voice is
+    // still live and still owns its pending terminal.
+    auto bound = engine->voiceClip(*voice);
+    ASSERT_TRUE(bound.has_value());
+    EXPECT_EQ(bound->frames, pcm);
+    auto live = engine->isVoiceLive(*voice);
+    ASSERT_TRUE(live.has_value());
+    EXPECT_TRUE(*live);
+
+    // A Play arriving inside the window must not reactivate the voice out from under
+    // the parked Stopped, or that Stopped would later be published for a playing voice.
+    ASSERT_TRUE(engine->enqueuePlay(*voice).has_value());
+    AudioCompletionEvent drainOne[1]{};
+    auto firstDrain = engine->pumpCompletions(std::span<AudioCompletionEvent>{drainOne}, 0);
+    ASSERT_TRUE(firstDrain.has_value());
+    ASSERT_EQ(*firstDrain, 1U);
+    EXPECT_EQ(drainOne[0].kind, AudioCompletionKind::Started);
+    auto replayed = engine->isVoicePlaying(*voice);
+    ASSERT_TRUE(replayed.has_value());
+    EXPECT_FALSE(*replayed) << "Play must be absorbed while a clip terminal is parked";
+
+    // Once the ring has room the terminal drains, and only then does the caller get
+    // its release signal and the right to reuse the voice.
+    AudioCompletionEvent events[4]{};
+    auto drained = engine->pumpCompletions(std::span<AudioCompletionEvent>{events}, 0);
+    ASSERT_TRUE(drained.has_value());
+    bool sawStopped = false;
+    for (Core::u32 index = 0; index < *drained; ++index)
+    {
+        if (events[index].voice == *voice && events[index].kind == AudioCompletionKind::Stopped)
+        {
+            sawStopped = true;
+        }
+    }
+    EXPECT_TRUE(sawStopped) << "the deferred terminal must still be delivered";
+    EXPECT_TRUE(engine->clearVoiceClip(*voice).has_value());
+    EXPECT_TRUE(engine->destroyVoice(*voice).has_value());
+}
+
+// destroyVoice on a playing clip voice erased the record while the callback was still
+// reading the frames, and published nothing at all -- the caller never learned when
+// its PCM stopped being read. Streams were already refused here for the same reason.
+TEST(AudioEngineTest, DestroyingAPlayingClipVoiceIsRefusedSoTheOwnerLearnsWhenPcmIsFree)
+{
+    auto engine = AudioEngine::Create(
+        AudioEngineConfig{.voiceCapacity = 1, .commandCapacity = 4, .completionCapacity = 4});
+    ASSERT_TRUE(engine.has_value()) << (engine ? "" : engine.error().message);
+
+    const float pcm[4] = {0.5F, 0.5F, 0.5F, 0.5F};
+    auto voice = engine->createVoice();
+    ASSERT_TRUE(voice.has_value());
+    ASSERT_TRUE(engine
+                    ->bindVoiceClip(*voice,
+                                    AudioPcmClipView{.frames = pcm,
+                                                     .frameCount = 4,
+                                                     .channels = 1,
+                                                     .sampleRate = 48000})
+                    .has_value());
+    ASSERT_TRUE(engine->enqueuePlay(*voice).has_value());
+    ASSERT_TRUE(engine->pumpCompletions(4).has_value());
+    auto playing = engine->isVoicePlaying(*voice);
+    ASSERT_TRUE(playing.has_value());
+    ASSERT_TRUE(*playing);
+
+    expectFailureCode(engine->destroyVoice(*voice), AudioErrorCode::InvalidConfiguration);
+    auto stillLive = engine->isVoiceLive(*voice);
+    ASSERT_TRUE(stillLive.has_value());
+    EXPECT_TRUE(*stillLive) << "a refused destroy must not erase the record";
+
+    // The supported route delivers the signal, and only then does destroy succeed.
+    ASSERT_TRUE(engine->enqueueStop(*voice).has_value());
+    AudioCompletionEvent events[2]{};
+    auto stopped = engine->pumpCompletions(std::span<AudioCompletionEvent>{events}, 0);
+    ASSERT_TRUE(stopped.has_value());
+    ASSERT_EQ(*stopped, 1U);
+    EXPECT_EQ(events[0].kind, AudioCompletionKind::Stopped);
+    EXPECT_EQ(events[0].voice, *voice);
+    EXPECT_TRUE(engine->destroyVoice(*voice).has_value());
+}
+
 TEST(AudioEngineTest, VoiceControlsRejectInvalidValuesWithoutMutation)
 {
     auto engine = AudioEngine::Create(AudioEngineConfig{.voiceCapacity = 1});

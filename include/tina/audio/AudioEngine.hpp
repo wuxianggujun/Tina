@@ -35,12 +35,21 @@ class AudioEngine final {
     [[nodiscard]] Core::Result<AudioEngineStats> stats() const noexcept;
 
     [[nodiscard]] Core::Result<AudioVoiceId> createVoice() noexcept;
+    // Only for a voice that is not playing and has no completion still pending.
+    // Every voice kind must reach its end through the queue -- enqueueStop for clips,
+    // EOF/cancelPcmStream/enqueueStop for streams -- because erasing the record is
+    // what would destroy the caller's only notification that the realtime callback
+    // released its PCM. Otherwise returns InvalidConfiguration and changes nothing.
     [[nodiscard]] Core::Status destroyVoice(AudioVoiceId voice) noexcept;
     [[nodiscard]] Core::Result<bool> isVoiceLive(AudioVoiceId voice) const noexcept;
     [[nodiscard]] Core::Result<bool> isVoicePlaying(AudioVoiceId voice) const noexcept;
 
     // Bind/clear non-owning PCM for a live voice. Invalid/empty clip rejected.
-    // Caller keeps frames valid until Stop completion (or clear while not playing).
+    // Caller keeps frames valid until the terminal completion for that playback is
+    // pumped. Both calls fail while the voice is playing AND while a terminal is
+    // queued but not yet pumped: in that window the mixer may still be reading the
+    // frames, so a success here would be a false release signal. Pump completions
+    // and retry; the deferral is bounded by the realtime callback block.
     [[nodiscard]] Core::Status bindVoiceClip(AudioVoiceId voice, AudioPcmClipView clip) noexcept;
     [[nodiscard]] Core::Status clearVoiceClip(AudioVoiceId voice) noexcept;
     [[nodiscard]] Core::Result<AudioPcmClipView> voiceClip(AudioVoiceId voice) const noexcept;

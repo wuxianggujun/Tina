@@ -1410,10 +1410,15 @@ pitch 使用 `sourceSampleRate / outputSampleRate * pitch` 的 source step 与�
 正的 `Core::Duration` 与 `KeepPlaying/StopVoice` end action 构成，并在 realtime callback block 边界
 start/cancel；cancel 保留 callback 已推进到的 current gain。
 
-clip PCM 调用方必须保活到底层 voice stop/completion；产品 2D 用 `AssetLease` 持有 Cooked AudioClip。普通
-`createVoice()` 由调用方显式销毁；`playOneShotPcm()` 的 transient voice 在 Stop、fade-to-stop 或 natural
-end 被 pump 后自动 retire，completion 携带的 one-shot ID 随后允许 stale。miniaudio device/decode 留在
-adapter。
+clip PCM 调用方必须保活到底层 voice 的 terminal completion 被 pump；产品 2D 用 `AssetLease` 持有 Cooked
+AudioClip。普通 `createVoice()` 由调用方显式销毁，但**只能在 voice 既不 playing、也没有未 pump 的
+completion 时**：`destroyVoice()` 对正在播放或 terminal 仍待发布的 clip voice 返回
+`InvalidConfiguration` 且不改变状态，因为擦除 record 会毁掉调用方唯一的"PCM 已不再被读取"通知——与
+streaming voice 必须走 EOF/cancel/Stop 是同一条理由。同理，`bindVoiceClip()`/`clearVoiceClip()` 在
+terminal 仍待发布时也失败：此时 `playing` 已是 false，但 mixer 可能仍在读旧 frames，返回成功等于给出错误的
+释放许可。三者都要求先 pump completion 再重试，延迟以一个 realtime callback block 为界。
+`playOneShotPcm()` 的 transient voice 在 Stop、fade-to-stop 或 natural end 被 pump 后自动 retire，
+completion 携带的 one-shot ID 随后允许 stale。miniaudio device/decode 留在 adapter。
 
 bounded stream 公开入口为 `playPcmStream()`、`submitPcmStreamFrames()`、`signalPcmStreamEof()`、
 `cancelPcmStream()` 与 `pcmStreamState()`。Create 一次性预分配每 voice 的双声道最大 ring；descriptor 的
