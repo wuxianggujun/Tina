@@ -1,13 +1,17 @@
 set(TINA_NETWORK_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/network/NetworkEndpoint.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/network/NetworkErrors.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/network/TcpConnection.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/network/UdpSocket.hpp
 )
 
 add_library(tina_network STATIC
     ${TINA_NETWORK_PUBLIC_HEADERS}
     NetworkEndpoint.cpp
+    TcpConnection.cpp
     UdpSocket.cpp
+    detail/NativeSocket.cpp
+    detail/ReadinessPoller.cpp
 )
 add_library(Tina::Network ALIAS tina_network)
 

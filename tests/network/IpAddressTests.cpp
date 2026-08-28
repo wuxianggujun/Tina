@@ -222,6 +222,87 @@ TEST(IpAddressTest, RejectsHostnamesAndPortSuffixes)
     }
 }
 
+// The V6 parser is hand-rolled, so these probe the seams: group overflow via an
+// embedded V4 tail, "::" standing for zero groups, and compression adjacent to a
+// full address. Each was reachable by construction rather than by guessing.
+TEST(IpAddressTest, RejectsV6GroupCountBoundaryViolations)
+{
+    for (const std::string_view input : {
+             // Seven groups plus an embedded V4 would need nine.
+             "1:2:3:4:5:6:7:1.2.3.4",
+             // Eight groups plus "::" leaves nothing for the compression to mean.
+             "1:2:3:4:5:6:7:8::",
+             "::1:2:3:4:5:6:7:8",
+             // Nine explicit groups.
+             "1:2:3:4:5:6:7:8:9",
+             // A compressed form that still overflows.
+             "1::2:3:4:5:6:7:8",
+         }) {
+        EXPECT_FALSE(Network::IpAddress::parse(input).has_value())
+            << "unexpectedly accepted " << input;
+    }
+}
+
+// Six groups plus an embedded V4 is exactly eight -- the largest legal form.
+TEST(IpAddressTest, AcceptsMaximalEmbeddedV4Form)
+{
+    const auto parsed = Network::IpAddress::parse("1:2:3:4:5:6:1.2.3.4");
+    ASSERT_TRUE(parsed.has_value());
+    EXPECT_EQ(parsed->family(), Network::IpFamily::V6);
+
+    const auto& bytes = parsed->bytes();
+    EXPECT_EQ(bytes[12], 1);
+    EXPECT_EQ(bytes[13], 2);
+    EXPECT_EQ(bytes[14], 3);
+    EXPECT_EQ(bytes[15], 4);
+}
+
+// An embedded V4 must obey the same octet rules as a standalone one, including
+// the leading-zero refusal.
+TEST(IpAddressTest, EmbeddedV4InheritsOctetStrictness)
+{
+    EXPECT_FALSE(Network::IpAddress::parse("::ffff:010.0.0.1").has_value());
+    EXPECT_FALSE(Network::IpAddress::parse("::ffff:256.0.0.1").has_value());
+    EXPECT_FALSE(Network::IpAddress::parse("::ffff:1.2.3").has_value());
+    EXPECT_TRUE(Network::IpAddress::parse("::ffff:0.0.0.0").has_value());
+}
+
+// An embedded V4 is only legal as the final component.
+TEST(IpAddressTest, RejectsEmbeddedV4InNonTrailingPosition)
+{
+    EXPECT_FALSE(Network::IpAddress::parse("1.2.3.4:5:6:7:8:9:10:11").has_value());
+    EXPECT_FALSE(Network::IpAddress::parse("::1.2.3.4:5").has_value());
+}
+
+// Parsing is lenient about "::" standing for a single zero group, but formatting
+// is not allowed to produce it (RFC 5952 forbids compressing one group). So these
+// inputs are accepted and then canonicalised to the expanded form -- round-trip
+// through format() is canonical, not identity.
+TEST(IpAddressTest, SingleElidedGroupExpandsOnFormat)
+{
+    const auto leading = Network::IpAddress::parse("::2:3:4:5:6:7:8");
+    ASSERT_TRUE(leading.has_value());
+    EXPECT_EQ(formatToString(*leading), "0:2:3:4:5:6:7:8");
+
+    const auto trailing = Network::IpAddress::parse("1:2:3:4:5:6:7::");
+    ASSERT_TRUE(trailing.has_value());
+    EXPECT_EQ(formatToString(*trailing), "1:2:3:4:5:6:7:0");
+
+    // Re-parsing the canonical form must land on the same address.
+    const auto reparsedLeading = Network::IpAddress::parse("0:2:3:4:5:6:7:8");
+    ASSERT_TRUE(reparsedLeading.has_value());
+    EXPECT_EQ(*reparsedLeading, *leading);
+}
+
+// A zero run long enough to compress, sitting at either edge, exercises the
+// separator logic where "::" already supplies a colon.
+TEST(IpAddressTest, FormatsCompressibleZeroRunsAtBothEdges)
+{
+    expectRoundTrip("::3:4:5:6:7:8", "::3:4:5:6:7:8");
+    expectRoundTrip("1:2:3:4:5:6::", "1:2:3:4:5:6::");
+    expectRoundTrip("1::8", "1::8");
+}
+
 TEST(IpAddressTest, FormatFailsClosedOnShortBuffer)
 {
     const auto address = Network::IpAddress::parse("255.255.255.255");

@@ -1,192 +1,28 @@
 #include <tina/network/UdpSocket.hpp>
 
+#include "detail/NativeSocket.hpp"
+
+#include <tina/core/base/ScopeExit.hpp>
 #include <tina/network/NetworkErrors.hpp>
 
 #include <algorithm>
 #include <cstring>
 #include <limits>
-#include <mutex>
 #include <new>
 #include <thread>
 #include <vector>
 
-#if defined(_WIN32)
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#else
-#include <arpa/inet.h>
-#include <cerrno>
-#include <fcntl.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
-#include <unistd.h>
-#endif
-
 namespace Tina::Network {
 namespace {
 
-#if defined(_WIN32)
-using NativeSocket = SOCKET;
-inline constexpr NativeSocket InvalidNativeSocket = INVALID_SOCKET;
-using NativeAddressLength = int;
-#else
-using NativeSocket = int;
-inline constexpr NativeSocket InvalidNativeSocket = -1;
-using NativeAddressLength = socklen_t;
-#endif
-
-void closeNativeSocket(NativeSocket socket) noexcept
-{
-    if (socket == InvalidNativeSocket) {
-        return;
-    }
-#if defined(_WIN32)
-    ::closesocket(socket);
-#else
-    ::close(socket);
-#endif
-}
-
-[[nodiscard]] int lastSocketError() noexcept
-{
-#if defined(_WIN32)
-    return ::WSAGetLastError();
-#else
-    return errno;
-#endif
-}
-
-[[nodiscard]] bool isWouldBlockError(int error) noexcept
-{
-#if defined(_WIN32)
-    return error == WSAEWOULDBLOCK;
-#else
-    return error == EAGAIN || error == EWOULDBLOCK;
-#endif
-}
-
-// A datagram larger than the receive buffer. Windows reports this as an error on
-// the call, POSIX silently truncates and sets MSG_TRUNC.
-[[nodiscard]] bool isMessageSizeError(int error) noexcept
-{
-#if defined(_WIN32)
-    return error == WSAEMSGSIZE;
-#else
-    return error == EMSGSIZE;
-#endif
-}
-
-// Winsock needs process-wide init. Refcounted so that constructing and dropping
-// sockets repeatedly across a run cannot leave the library torn down while a
-// socket is still open.
-#if defined(_WIN32)
-class WinsockScope final {
-  public:
-    [[nodiscard]] static Core::Status acquire() noexcept
-    {
-        static std::mutex mutex;
-        const std::lock_guard<std::mutex> guard{mutex};
-        if (s_refCount == 0) {
-            WSADATA data{};
-            if (::WSAStartup(MAKEWORD(2, 2), &data) != 0) {
-                return Core::failure(
-                    NetworkErrorCode::BackendFailure,
-                    "WSAStartup failed");
-            }
-        }
-        ++s_refCount;
-        return Core::success();
-    }
-
-    static void release() noexcept
-    {
-        static std::mutex mutex;
-        const std::lock_guard<std::mutex> guard{mutex};
-        if (s_refCount == 0) {
-            return;
-        }
-        --s_refCount;
-        if (s_refCount == 0) {
-            ::WSACleanup();
-        }
-    }
-
-  private:
-    static Core::usize s_refCount;
-};
-
-Core::usize WinsockScope::s_refCount = 0;
-#endif
-
-[[nodiscard]] Core::Status setNonBlocking(NativeSocket socket) noexcept
-{
-#if defined(_WIN32)
-    u_long mode = 1;
-    if (::ioctlsocket(socket, FIONBIO, &mode) != 0) {
-        return Core::failure(
-            NetworkErrorCode::BackendFailure,
-            "Failed to place UDP socket in non-blocking mode");
-    }
-    return Core::success();
-#else
-    const int flags = ::fcntl(socket, F_GETFL, 0);
-    if (flags < 0 || ::fcntl(socket, F_SETFL, flags | O_NONBLOCK) < 0) {
-        return Core::failure(
-            NetworkErrorCode::BackendFailure,
-            "Failed to place UDP socket in non-blocking mode");
-    }
-    return Core::success();
-#endif
-}
-
-// Fills a sockaddr from a Tina endpoint. Returns 0 on an unsupported family.
-[[nodiscard]] NativeAddressLength toNativeAddress(
-    const NetworkEndpoint& endpoint,
-    sockaddr_storage& out) noexcept
-{
-    std::memset(&out, 0, sizeof(out));
-    if (endpoint.address.family() == IpFamily::V4) {
-        auto* v4 = reinterpret_cast<sockaddr_in*>(&out);
-        v4->sin_family = AF_INET;
-        v4->sin_port = ::htons(endpoint.port);
-        std::memcpy(&v4->sin_addr, endpoint.address.bytes().data(), IpAddress::V4ByteCount);
-        return static_cast<NativeAddressLength>(sizeof(sockaddr_in));
-    }
-    if (endpoint.address.family() == IpFamily::V6) {
-        auto* v6 = reinterpret_cast<sockaddr_in6*>(&out);
-        v6->sin6_family = AF_INET6;
-        v6->sin6_port = ::htons(endpoint.port);
-        std::memcpy(&v6->sin6_addr, endpoint.address.bytes().data(), IpAddress::V6ByteCount);
-        return static_cast<NativeAddressLength>(sizeof(sockaddr_in6));
-    }
-    return 0;
-}
-
-[[nodiscard]] bool fromNativeAddress(
-    const sockaddr_storage& source,
-    NetworkEndpoint& out) noexcept
-{
-    if (source.ss_family == AF_INET) {
-        const auto* v4 = reinterpret_cast<const sockaddr_in*>(&source);
-        std::array<Core::u8, IpAddress::V4ByteCount> bytes{};
-        std::memcpy(bytes.data(), &v4->sin_addr, IpAddress::V4ByteCount);
-        out.address = IpAddress::v4(bytes[0], bytes[1], bytes[2], bytes[3]);
-        out.port = ::ntohs(v4->sin_port);
-        return true;
-    }
-    if (source.ss_family == AF_INET6) {
-        const auto* v6 = reinterpret_cast<const sockaddr_in6*>(&source);
-        std::array<Core::u8, IpAddress::V6ByteCount> bytes{};
-        std::memcpy(bytes.data(), &v6->sin6_addr, IpAddress::V6ByteCount);
-        out.address = IpAddress::v6(bytes);
-        out.port = ::ntohs(v6->sin6_port);
-        return true;
-    }
-    return false;
-}
+using Detail::closeNativeSocket;
+using Detail::InvalidNativeSocket;
+using Detail::isMessageSizeError;
+using Detail::isWouldBlockError;
+using Detail::lastSocketError;
+using Detail::NativeAddressLength;
+using Detail::NativeSocket;
+using Detail::TransportScope;
 
 } // namespace
 
@@ -235,7 +71,7 @@ UdpSocket::~UdpSocket() noexcept
     }
     closeNativeSocket(m_impl->socket);
 #if defined(_WIN32)
-    WinsockScope::release();
+    TransportScope::release();
 #endif
     delete m_impl;
     m_impl = nullptr;
@@ -273,9 +109,13 @@ Core::Result<UdpSocket> UdpSocket::Create(UdpSocketConfig config)
         : std::pmr::get_default_resource();
 
 #if defined(_WIN32)
-    if (const Core::Status status = WinsockScope::acquire(); !status) {
+    if (const Core::Status status = TransportScope::acquire(); !status) {
         return Core::failure(status.error());
     }
+    // Every failure below must give the Winsock refcount back. Releasing through
+    // one guard keeps that off the six early-return paths, where a missed release
+    // would leak the library init and only surface much later.
+    auto winsockGuard = Core::makeScopeExit([]() noexcept { TransportScope::release(); });
 #endif
 
     Impl* impl = nullptr;
@@ -290,21 +130,24 @@ Core::Result<UdpSocket> UdpSocket::Create(UdpSocketConfig config)
         impl->datagrams.resize(config.receiveQueueCapacity);
     } catch (const std::bad_alloc&) {
         delete impl;
-#if defined(_WIN32)
-        WinsockScope::release();
-#endif
         return Core::failure(
             NetworkErrorCode::AllocationFailed,
             "UdpSocket fixed receive storage allocation failed");
     } catch (...) {
         delete impl;
-#if defined(_WIN32)
-        WinsockScope::release();
-#endif
         return Core::failure(
             NetworkErrorCode::ConstructionFailed,
             "UdpSocket construction failed");
     }
+
+    // Owns impl until construction is known to succeed, so the socket and the
+    // allocation are released by one path instead of six.
+    auto implGuard = Core::makeScopeExit([&impl]() noexcept {
+        if (impl != nullptr) {
+            closeNativeSocket(impl->socket);
+            delete impl;
+        }
+    });
 
     impl->owner = std::this_thread::get_id();
     impl->receiveQueueCapacity = config.receiveQueueCapacity;
@@ -314,10 +157,6 @@ Core::Result<UdpSocket> UdpSocket::Create(UdpSocketConfig config)
     const int addressFamily = impl->family == IpFamily::V4 ? AF_INET : AF_INET6;
     impl->socket = ::socket(addressFamily, SOCK_DGRAM, IPPROTO_UDP);
     if (impl->socket == InvalidNativeSocket) {
-        delete impl;
-#if defined(_WIN32)
-        WinsockScope::release();
-#endif
         return Core::failure(
             NetworkErrorCode::BackendFailure,
             "Failed to create UDP socket");
@@ -340,39 +179,30 @@ Core::Result<UdpSocket> UdpSocket::Create(UdpSocketConfig config)
 #endif
     }
 
-    if (const Core::Status status = setNonBlocking(impl->socket); !status) {
-        closeNativeSocket(impl->socket);
-        delete impl;
-#if defined(_WIN32)
-        WinsockScope::release();
-#endif
+    if (const Core::Status status = Detail::setNativeSocketNonBlocking(impl->socket); !status) {
         return Core::failure(status.error());
     }
 
     sockaddr_storage bindAddress{};
-    const NativeAddressLength bindLength = toNativeAddress(config.localEndpoint, bindAddress);
+    const NativeAddressLength bindLength = Detail::toNativeAddress(config.localEndpoint, bindAddress);
     if (bindLength == 0) {
-        closeNativeSocket(impl->socket);
-        delete impl;
-#if defined(_WIN32)
-        WinsockScope::release();
-#endif
         return Core::failure(
             NetworkErrorCode::InvalidEndpoint,
             "UdpSocket localEndpoint family is unsupported");
     }
 
     if (::bind(impl->socket, reinterpret_cast<const sockaddr*>(&bindAddress), bindLength) != 0) {
-        closeNativeSocket(impl->socket);
-        delete impl;
-#if defined(_WIN32)
-        WinsockScope::release();
-#endif
         return Core::failure(
             NetworkErrorCode::AddressUnavailable,
             "Failed to bind UDP socket to the requested local endpoint");
     }
 
+    // Construction succeeded: the socket now owns the Winsock refcount and the
+    // allocation, and both guards must stop acting.
+    implGuard.release();
+#if defined(_WIN32)
+    winsockGuard.release();
+#endif
     return UdpSocket{impl};
 }
 
@@ -398,7 +228,7 @@ Core::Result<NetworkEndpoint> UdpSocket::localEndpoint() const noexcept
     }
 
     NetworkEndpoint endpoint{};
-    if (!fromNativeAddress(address, endpoint)) {
+    if (!Detail::fromNativeAddress(address, endpoint)) {
         return Core::failure(
             NetworkErrorCode::BackendFailure,
             "Bound local endpoint has an unsupported family");
@@ -442,7 +272,7 @@ Core::Status UdpSocket::send(
     }
 
     sockaddr_storage address{};
-    const NativeAddressLength addressLength = toNativeAddress(destination, address);
+    const NativeAddressLength addressLength = Detail::toNativeAddress(destination, address);
     if (addressLength == 0) {
         return Core::failure(
             NetworkErrorCode::InvalidEndpoint,
@@ -595,7 +425,7 @@ Core::Result<std::span<const ReceivedDatagram>> UdpSocket::receive()
         }
 
         NetworkEndpoint sender{};
-        if (!fromNativeAddress(address, sender)) {
+        if (!Detail::fromNativeAddress(address, sender)) {
             ++m_impl->stats.lastDiscardedDatagramCount;
             ++m_impl->stats.totalDiscardedDatagramCount;
             continue;

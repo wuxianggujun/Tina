@@ -141,6 +141,68 @@ TEST(UdpSocketTest, RejectsInvalidConfiguration)
     }
 }
 
+// Every failed Create must give back whatever it acquired. On Windows that
+// includes the process-wide Winsock refcount; a leak there would keep the
+// library initialised forever, and an over-release would tear it down under a
+// live socket. Neither is observable directly, so this drives the failure path
+// repeatedly and then proves a real socket still works.
+TEST(UdpSocketTest, RepeatedFailedCreateLeavesTransportUsable)
+{
+    for (int iteration = 0; iteration < 50; ++iteration) {
+        auto badCapacity = loopbackConfig();
+        badCapacity.receiveQueueCapacity = 0;
+        EXPECT_FALSE(Network::UdpSocket::Create(badCapacity).has_value());
+
+        auto badSize = loopbackConfig();
+        badSize.maximumDatagramBytes = Network::MaximumDatagramBytes + 1;
+        EXPECT_FALSE(Network::UdpSocket::Create(badSize).has_value());
+
+        Network::UdpSocketConfig noFamily{};
+        noFamily.receiveQueueCapacity = 4;
+        EXPECT_FALSE(Network::UdpSocket::Create(noFamily).has_value());
+    }
+
+    // If the failure paths had unbalanced the refcount, this would fail.
+    auto receiver = Network::UdpSocket::Create(loopbackConfig());
+    ASSERT_TRUE(receiver.has_value());
+    auto sender = Network::UdpSocket::Create(loopbackConfig());
+    ASSERT_TRUE(sender.has_value());
+
+    const auto target = receiver->localEndpoint();
+    ASSERT_TRUE(target.has_value());
+    ASSERT_TRUE(sender->send(*target, asBytes("after-failures")).has_value());
+
+    const auto texts = drainTexts(*receiver, 1);
+    ASSERT_EQ(texts.size(), 1U);
+    EXPECT_EQ(texts.front(), "after-failures");
+}
+
+// Binding a port that is already bound must fail cleanly rather than silently
+// producing a second socket on the same endpoint.
+TEST(UdpSocketTest, BindingAnAlreadyBoundPortFails)
+{
+    auto first = Network::UdpSocket::Create(loopbackConfig());
+    ASSERT_TRUE(first.has_value());
+    const auto bound = first->localEndpoint();
+    ASSERT_TRUE(bound.has_value());
+
+    Network::UdpSocketConfig sameEndpoint = loopbackConfig();
+    sameEndpoint.localEndpoint = *bound;
+
+    const auto second = Network::UdpSocket::Create(sameEndpoint);
+    ASSERT_FALSE(second.has_value());
+    EXPECT_EQ(second.error().code, Network::NetworkErrorCode::AddressUnavailable);
+
+    // The original socket is unaffected by the failed attempt.
+    auto sender = Network::UdpSocket::Create(loopbackConfig());
+    ASSERT_TRUE(sender.has_value());
+    ASSERT_TRUE(sender->send(*bound, asBytes("still-mine")).has_value());
+
+    const auto texts = drainTexts(*first, 1);
+    ASSERT_EQ(texts.size(), 1U);
+    EXPECT_EQ(texts.front(), "still-mine");
+}
+
 TEST(UdpSocketTest, SendsAndReceivesDatagramWithSenderEndpoint)
 {
     auto receiver = Network::UdpSocket::Create(loopbackConfig());
@@ -533,6 +595,121 @@ TEST(UdpSocketTest, MoveConstructionTransfersOwnership)
     const auto closed = socket->localEndpoint();
     ASSERT_FALSE(closed.has_value());
     EXPECT_EQ(closed.error().code, Network::NetworkErrorCode::SocketClosed);
+}
+
+// A moved-from socket must answer every query inertly rather than dereferencing
+// a null impl. These are the accessors a caller is most likely to reach for
+// without first checking operator bool().
+TEST(UdpSocketTest, MovedFromSocketAnswersQueriesInertly)
+{
+    auto socket = Network::UdpSocket::Create(loopbackConfig(8));
+    ASSERT_TRUE(socket.has_value());
+    Network::UdpSocket moved{std::move(*socket)};
+
+    EXPECT_EQ(socket->receiveQueueCapacity(), 0U);
+    EXPECT_EQ(socket->maximumDatagramBytes(), 0U);
+
+    // Zeroed rather than stale: reading a live socket's counters through a
+    // moved-from handle would be worse than reporting nothing.
+    const auto stats = socket->statistics();
+    EXPECT_EQ(stats.receiveCallCount, 0U);
+    EXPECT_EQ(stats.totalSentDatagramCount, 0U);
+    EXPECT_EQ(stats.totalReceivedDatagramCount, 0U);
+
+    const auto received = socket->receive();
+    ASSERT_FALSE(received.has_value());
+    EXPECT_EQ(received.error().code, Network::NetworkErrorCode::SocketClosed);
+
+    const Network::NetworkEndpoint target{Network::IpAddress::v4Loopback(), 9000};
+    const auto sent = socket->send(target, asBytes("x"));
+    ASSERT_FALSE(sent.has_value());
+    EXPECT_EQ(sent.error().code, Network::NetworkErrorCode::SocketClosed);
+
+    // The destination socket is fully functional.
+    EXPECT_EQ(moved.receiveQueueCapacity(), 8U);
+    EXPECT_EQ(moved.maximumDatagramBytes(), Network::MaximumDatagramBytes);
+}
+
+// The advertised config values must be readable back, including a non-default
+// maximumDatagramBytes -- a caller sizing its own buffers depends on this.
+TEST(UdpSocketTest, ReportsConfiguredCapacities)
+{
+    Network::UdpSocketConfig config = loopbackConfig(16);
+    config.maximumDatagramBytes = 512;
+
+    auto socket = Network::UdpSocket::Create(config);
+    ASSERT_TRUE(socket.has_value());
+    EXPECT_EQ(socket->receiveQueueCapacity(), 16U);
+    EXPECT_EQ(socket->maximumDatagramBytes(), 512U);
+
+    // Defaults are what the header documents.
+    auto defaulted = Network::UdpSocket::Create(loopbackConfig());
+    ASSERT_TRUE(defaulted.has_value());
+    EXPECT_EQ(defaulted->maximumDatagramBytes(), Network::MaximumDatagramBytes);
+}
+
+// receive() bounds its syscalls, not just its output, because discarded
+// datagrams consume no slot.
+TEST(UdpSocketTest, ReceiveBoundsSyscallsWhenEveryDatagramIsDiscarded)
+{
+    constexpr Core::usize queueCapacity = 2;
+
+    // send() refuses empty payloads, so oversized datagrams are the way to make
+    // every arrival discardable: they are dropped without consuming a slot, which
+    // is exactly the branch the syscall budget exists to bound.
+    Network::UdpSocketConfig smallConfig = loopbackConfig(queueCapacity);
+    smallConfig.maximumDatagramBytes = 32;
+    auto smallReceiver = Network::UdpSocket::Create(smallConfig);
+    ASSERT_TRUE(smallReceiver.has_value());
+    auto sender = Network::UdpSocket::Create(loopbackConfig());
+    ASSERT_TRUE(sender.has_value());
+
+    const auto smallTarget = smallReceiver->localEndpoint();
+    ASSERT_TRUE(smallTarget.has_value());
+
+    const std::vector<std::byte> oversized(200, std::byte{0x44});
+    for (int index = 0; index < 12; ++index) {
+        ASSERT_TRUE(sender->send(*smallTarget, oversized).has_value());
+    }
+
+    // One call must terminate on its own budget rather than draining all 12.
+    const auto received = smallReceiver->receive();
+    ASSERT_TRUE(received.has_value());
+    EXPECT_TRUE(received->empty());
+
+    const auto stats = smallReceiver->statistics();
+    EXPECT_EQ(stats.receiveCallCount, 1U);
+    // Budget is capacity * 2, so a single call cannot have discarded all of them.
+    EXPECT_LE(stats.lastDiscardedDatagramCount, queueCapacity * 2);
+    EXPECT_GT(stats.lastDiscardedDatagramCount, 0U);
+    EXPECT_EQ(stats.totalReceivedDatagramCount, 0U);
+}
+
+// last* counters describe the most recent call only, so a later quiet call must
+// reset them while total* keeps accumulating.
+TEST(UdpSocketTest, LastCountersResetPerCallWhileTotalsAccumulate)
+{
+    auto receiver = Network::UdpSocket::Create(loopbackConfig(8));
+    ASSERT_TRUE(receiver.has_value());
+    auto sender = Network::UdpSocket::Create(loopbackConfig());
+    ASSERT_TRUE(sender.has_value());
+
+    const auto target = receiver->localEndpoint();
+    ASSERT_TRUE(target.has_value());
+
+    ASSERT_TRUE(sender->send(*target, asBytes("first")).has_value());
+    ASSERT_EQ(drainTexts(*receiver, 1).size(), 1U);
+    EXPECT_EQ(receiver->statistics().lastReceivedDatagramCount, 1U);
+
+    // An idle call clears last* but leaves total* alone.
+    const auto idle = receiver->receive();
+    ASSERT_TRUE(idle.has_value());
+    EXPECT_TRUE(idle->empty());
+
+    const auto stats = receiver->statistics();
+    EXPECT_EQ(stats.lastReceivedDatagramCount, 0U);
+    EXPECT_EQ(stats.totalReceivedDatagramCount, 1U);
+    EXPECT_EQ(stats.totalReceivedBytes, 5U);
 }
 
 TEST(UdpSocketTest, SupportsV6Loopback)
