@@ -23,6 +23,14 @@
 #include "vs_tina_opaque3d_skinned_dxbc.bin.h"
 #endif
 
+#if defined(TINA_RENDER_BGFX_MOBILE_SHADERS)
+#include "fs_tina_opaque3d_mr_essl.bin.h"
+#include "fs_tina_opaque3d_csm_depth_essl.bin.h"
+#include "vs_tina_opaque3d_mr_essl.bin.h"
+#include "vs_tina_opaque3d_csm_depth_essl.bin.h"
+#include "vs_tina_opaque3d_skinned_essl.bin.h"
+#endif
+
 namespace Tina::Render::Bgfx::ShaderDetail {
 namespace {
 
@@ -36,6 +44,10 @@ constexpr bgfx::EmbeddedShader EmbeddedShaders[] = {
 #endif
             {bgfx::RendererType::OpenGL, vs_tina_opaque3d_mr_glsl,
              sizeof(vs_tina_opaque3d_mr_glsl)},
+#if defined(TINA_RENDER_BGFX_MOBILE_SHADERS)
+            {bgfx::RendererType::OpenGLES, vs_tina_opaque3d_mr_essl,
+             sizeof(vs_tina_opaque3d_mr_essl)},
+#endif
             {bgfx::RendererType::Vulkan, vs_tina_opaque3d_mr_spv, sizeof(vs_tina_opaque3d_mr_spv)},
             {bgfx::RendererType::Count, nullptr, 0},
         },
@@ -49,6 +61,10 @@ constexpr bgfx::EmbeddedShader EmbeddedShaders[] = {
 #endif
             {bgfx::RendererType::OpenGL, fs_tina_opaque3d_mr_glsl,
              sizeof(fs_tina_opaque3d_mr_glsl)},
+#if defined(TINA_RENDER_BGFX_MOBILE_SHADERS)
+            {bgfx::RendererType::OpenGLES, fs_tina_opaque3d_mr_essl,
+             sizeof(fs_tina_opaque3d_mr_essl)},
+#endif
             {bgfx::RendererType::Vulkan, fs_tina_opaque3d_mr_spv, sizeof(fs_tina_opaque3d_mr_spv)},
             {bgfx::RendererType::Count, nullptr, 0},
         },
@@ -62,6 +78,10 @@ constexpr bgfx::EmbeddedShader EmbeddedShaders[] = {
 #endif
             {bgfx::RendererType::OpenGL, vs_tina_opaque3d_skinned_glsl,
              sizeof(vs_tina_opaque3d_skinned_glsl)},
+#if defined(TINA_RENDER_BGFX_MOBILE_SHADERS)
+            {bgfx::RendererType::OpenGLES, vs_tina_opaque3d_skinned_essl,
+             sizeof(vs_tina_opaque3d_skinned_essl)},
+#endif
             {bgfx::RendererType::Vulkan, vs_tina_opaque3d_skinned_spv,
              sizeof(vs_tina_opaque3d_skinned_spv)},
             {bgfx::RendererType::Count, nullptr, 0},
@@ -76,6 +96,10 @@ constexpr bgfx::EmbeddedShader EmbeddedShaders[] = {
 #endif
             {bgfx::RendererType::OpenGL, vs_tina_opaque3d_csm_depth_glsl,
              sizeof(vs_tina_opaque3d_csm_depth_glsl)},
+#if defined(TINA_RENDER_BGFX_MOBILE_SHADERS)
+            {bgfx::RendererType::OpenGLES, vs_tina_opaque3d_csm_depth_essl,
+             sizeof(vs_tina_opaque3d_csm_depth_essl)},
+#endif
             {bgfx::RendererType::Vulkan, vs_tina_opaque3d_csm_depth_spv,
              sizeof(vs_tina_opaque3d_csm_depth_spv)},
             {bgfx::RendererType::Count, nullptr, 0},
@@ -90,6 +114,10 @@ constexpr bgfx::EmbeddedShader EmbeddedShaders[] = {
 #endif
             {bgfx::RendererType::OpenGL, fs_tina_opaque3d_csm_depth_glsl,
              sizeof(fs_tina_opaque3d_csm_depth_glsl)},
+#if defined(TINA_RENDER_BGFX_MOBILE_SHADERS)
+            {bgfx::RendererType::OpenGLES, fs_tina_opaque3d_csm_depth_essl,
+             sizeof(fs_tina_opaque3d_csm_depth_essl)},
+#endif
             {bgfx::RendererType::Vulkan, fs_tina_opaque3d_csm_depth_spv,
              sizeof(fs_tina_opaque3d_csm_depth_spv)},
             {bgfx::RendererType::Count, nullptr, 0},

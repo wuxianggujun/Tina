@@ -310,7 +310,32 @@ pin，才以 `bgfx::shutdown()` 返回作为 hard completion fallback。
 - Texture2D/GPU mesh/EnvironmentMap generation storage、静态与蒙皮 vertex layout 及 key binding；
 - Texture2D/GPU mesh/EnvironmentMap backend-proven retirement marker、suspend flush 与 shutdown hard drain；
 - present 后 primary framebuffer capture；
-- D3D11/OpenGL/Vulkan 对应 embedded shader 选择（按构建与平台可用性）。
+- D3D11/OpenGL/Vulkan 对应 embedded shader 选择（按构建与平台可用性），可选加入 OpenGLES。
+
+### Embedded shader profile 与 OpenGL ES
+
+6 个 program（含 skinned 的 vertex-only 与 CSM depth）共 11 个 shader 二进制，由
+`cmake/TinaBgfxEmbeddedShaders.cmake` 的 `tina_bgfx_shader_profiles()` 统一决定 profile 集合，
+`src/render/bgfx/*Shader.cpp` 的 4 张表按后缀引用对应 header。默认 `glsl`(120) + `spv`(spirv)，
+Windows 额外 `dxbc`(s_5_0)。
+
+后缀不是自选的：bgfx 自己的 `bgfxToolUtils.cmake` 在 `_bgfx_get_profile_ext()` 里给出
+`120→glsl`、`100_es`/`300_es`→`essl`、`spirv→spv`、`s_5_0→dxbc`、`metal→mtl`，注释标明
+"consistent with embedded_shader.h"。加 Metal 时用 `mtl`。`spv` 固定用 `platform=linux`，与 bgfx
+`bgfxToolUtils.cmake:650` 对 spirv 强制 LINUX 的做法一致，不要"顺手"改成目标平台。
+
+`TINA_RENDER_BGFX_MOBILE_SHADERS=ON` 额外 cook `essl`(300_es, platform=android) 并在 4 张表里启用
+`RendererType::OpenGLES` 条目（Android 与 iOS GLES 都报这个 renderer，一份二进制覆盖两者）；同一个
+`if` 同时设置 option 与编译宏 `TINA_RENDER_BGFX_MOBILE_SHADERS`，因此表不可能引用 cook 步骤没产出的
+header。该选项在桌面上也可开启，这是刻意的——否则 ESSL 分支只会被没人运行的工具链编译，正是已删除的
+`cmake/ShaderUtils.cmake` "假装 Metal/GLES 已就绪"的成因（[ADR 0032](adr/0032-mobile-platform-contract-boundaries.md) 第 5 节）。
+
+**未采用 bgfx 的 `bgfx_compile_shaders()`**：它按 profile 分子目录输出（我们的表按后缀平铺引用，且
+`100_es`/`300_es` 会撞同一个 `essl` 目录）、按**宿主**平台选 profile（而 C5 要的正是在 Windows 上 cook
+android essl）、并把 `-O` 绑定到 CMake 配置（会改动 Debug 的 shader 二进制与产品像素指纹）。只采纳其命名
+权威。
+
+这一步只证明**编译与查表**：ESSL 二进制能产出、表能命中。GLES 上的实际绘制仍需真机或模拟器。
 
 `tina_sample_2d` 已使用 Cooked Texture2D 与产品 sprite binding；`tina_sample_3d` 已使用 Cooked
 StaticMesh/Material/Prefab 的 **双 mesh** engine-provided、State-owned registry binding（3D-001 / N15），

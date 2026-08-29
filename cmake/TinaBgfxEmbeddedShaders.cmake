@@ -1,5 +1,54 @@
 include_guard(GLOBAL)
 
+# Which bgfx renderer binaries every embedded program is cooked for. Each entry is
+# "suffix|shaderc platform|shaderc profile"; the suffix becomes both the generated symbol
+# and the header name, so the tables in src/render/bgfx/*Shader.cpp must name the same
+# suffixes.
+#
+# The suffixes are not ours to choose. bgfx's own bgfxToolUtils.cmake maps profiles to
+# exactly these names in _bgfx_get_profile_ext(), commented "extensions consistent with
+# embedded_shader.h": 120 -> glsl, 100_es/300_es -> essl, spirv -> spv, s_5_0 -> dxbc,
+# metal -> mtl. Keep them aligned, and use mtl when Metal is added.
+#
+# `spv` is cooked with platform=linux on purpose, matching what bgfx does at
+# bgfxToolUtils.cmake:650, where spirv forces PLATFORM_I=LINUX regardless of the target.
+# It reads like an oversight in our list otherwise, and "fixing" it to windows/android
+# walks into whatever that override exists to avoid.
+#
+# We deliberately do not call bgfx_compile_shaders() here, having read it:
+#   - it writes ${OUTPUT_DIR}/${profile}/name.bin.h, while our tables include flat
+#     name_suffix.bin.h and distinguish variants by symbol. Its layout also collapses
+#     100_es and 300_es onto one `essl` directory, so both GLES tiers cannot coexist;
+#   - it picks profiles from the *host* (IOS/ANDROID/WIN32 branches), which is the
+#     opposite of what C5 needs: cooking android essl from a Windows host is the whole
+#     point, so the ESSL path is compiled by a toolchain someone actually runs;
+#   - it ties -O to the CMake config, and changing our fixed -O 3 would alter shader
+#     binaries in Debug and move the product pixel fingerprints.
+# What we take from it is the naming authority above, not the driver.
+#
+# The set is host-conditional today: dxbc only exists on Windows because shaderc's HLSL
+# path needs the Windows SDK. Mobile profiles are opt-in via
+# TINA_RENDER_BGFX_MOBILE_SHADERS so a desktop build does not pay for renderers it can
+# never select -- but the option is available on desktop, because otherwise the ESSL
+# branch would only ever be built by a toolchain nobody here runs, which is exactly how
+# the deleted cmake/ShaderUtils.cmake came to claim Metal/GLES support it never had
+# (ADR 0032 section 5).
+function(tina_bgfx_shader_profiles OUT_VAR)
+    set(PROFILES
+        "glsl|linux|120"
+        "spv|linux|spirv"
+    )
+    if(WIN32)
+        list(APPEND PROFILES "dxbc|windows|s_5_0")
+    endif()
+    if(TINA_RENDER_BGFX_MOBILE_SHADERS)
+        # OpenGL ES 3.0: the floor for ANativeWindow-era Android and for iOS GLES.
+        # bgfx reports both as RendererType::OpenGLES, so one binary covers them.
+        list(APPEND PROFILES "essl|android|300_es")
+    endif()
+    set("${OUT_VAR}" "${PROFILES}" PARENT_SCOPE)
+endfunction()
+
 function(tina_add_bgfx_embedded_shader TARGET SHADER_NAME VERTEX_SHADER FRAGMENT_SHADER VARYING_DEF)
     if(NOT TARGET "${TARGET}")
         message(FATAL_ERROR "tina_add_bgfx_embedded_shader: target '${TARGET}' does not exist")
@@ -12,13 +61,7 @@ function(tina_add_bgfx_embedded_shader TARGET SHADER_NAME VERTEX_SHADER FRAGMENT
     set(SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/shaders/${SHADER_NAME}")
     set(SHADER_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/thirdparty/bgfx.cmake/bgfx/src")
 
-    set(SHADER_PROFILES
-        "glsl|linux|120"
-        "spv|linux|spirv"
-    )
-    if(WIN32)
-        list(APPEND SHADER_PROFILES "dxbc|windows|s_5_0")
-    endif()
+    tina_bgfx_shader_profiles(SHADER_PROFILES)
 
     set(GENERATED_HEADERS)
     foreach(SHADER_STAGE IN ITEMS vertex fragment)
@@ -92,13 +135,7 @@ function(tina_add_bgfx_embedded_vertex_shader TARGET SHADER_NAME VERTEX_SHADER V
     set(SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/shaders/${SHADER_NAME}")
     set(SHADER_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/thirdparty/bgfx.cmake/bgfx/src")
 
-    set(SHADER_PROFILES
-        "glsl|linux|120"
-        "spv|linux|spirv"
-    )
-    if(WIN32)
-        list(APPEND SHADER_PROFILES "dxbc|windows|s_5_0")
-    endif()
+    tina_bgfx_shader_profiles(SHADER_PROFILES)
 
     get_filename_component(SHADER_SYMBOL_BASE "${VERTEX_SHADER}" NAME_WE)
     set(GENERATED_HEADERS)

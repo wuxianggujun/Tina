@@ -101,6 +101,12 @@ if(TINA_BUILD_RENDER_BGFX)
         EXPORT_NAME RenderBgfx
     )
     include(TinaBgfxEmbeddedShaders)
+    if(TINA_RENDER_BGFX_MOBILE_SHADERS)
+        # The shader tables include the essl headers behind this macro. Keeping the
+        # option and the macro in one place means a table can never reference a header
+        # the cook step did not produce.
+        target_compile_definitions(tina_render_bgfx PRIVATE TINA_RENDER_BGFX_MOBILE_SHADERS=1)
+    endif()
     tina_add_bgfx_embedded_shader(
         tina_render_bgfx
         tina_ui_textured_quad

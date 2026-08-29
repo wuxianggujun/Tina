@@ -14,6 +14,11 @@
 #include "vs_tina_ui_image_quad_dxbc.bin.h"
 #endif
 
+#if defined(TINA_RENDER_BGFX_MOBILE_SHADERS)
+#include "fs_tina_ui_image_quad_essl.bin.h"
+#include "vs_tina_ui_image_quad_essl.bin.h"
+#endif
+
 namespace Tina::Render::Bgfx::ShaderDetail {
 namespace {
 
@@ -27,6 +32,10 @@ constexpr bgfx::EmbeddedShader EmbeddedShaders[] = {
 #endif
             {bgfx::RendererType::OpenGL, vs_tina_ui_image_quad_glsl,
              sizeof(vs_tina_ui_image_quad_glsl)},
+#if defined(TINA_RENDER_BGFX_MOBILE_SHADERS)
+            {bgfx::RendererType::OpenGLES, vs_tina_ui_image_quad_essl,
+             sizeof(vs_tina_ui_image_quad_essl)},
+#endif
             {bgfx::RendererType::Vulkan, vs_tina_ui_image_quad_spv,
              sizeof(vs_tina_ui_image_quad_spv)},
             {bgfx::RendererType::Count, nullptr, 0},
@@ -41,6 +50,10 @@ constexpr bgfx::EmbeddedShader EmbeddedShaders[] = {
 #endif
             {bgfx::RendererType::OpenGL, fs_tina_ui_image_quad_glsl,
              sizeof(fs_tina_ui_image_quad_glsl)},
+#if defined(TINA_RENDER_BGFX_MOBILE_SHADERS)
+            {bgfx::RendererType::OpenGLES, fs_tina_ui_image_quad_essl,
+             sizeof(fs_tina_ui_image_quad_essl)},
+#endif
             {bgfx::RendererType::Vulkan, fs_tina_ui_image_quad_spv,
              sizeof(fs_tina_ui_image_quad_spv)},
             {bgfx::RendererType::Count, nullptr, 0},

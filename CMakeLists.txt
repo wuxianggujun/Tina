@@ -53,6 +53,11 @@ option(TINA_BUILD_SHADERS "Build cooked runtime shaders with the bundled shader 
 option(TINA_BUILD_LEGACY "Build Legacy product (retired; must stay OFF)" OFF)
 option(TINA_BUILD_PLATFORM_GLFW "Build the private vNext GLFW platform backend" OFF)
 option(TINA_BUILD_RENDER_BGFX "Build the private vNext bgfx render backend" OFF)
+# Cooks the OpenGL ES variant of every embedded program. Required for Android/iOS, where
+# bgfx reports RendererType::OpenGLES and the desktop-only tables would miss. Available
+# on desktop so the branch is actually compiled by a toolchain someone runs.
+option(TINA_RENDER_BGFX_MOBILE_SHADERS
+    "Also cook OpenGL ES (essl) variants of the embedded bgfx shaders" OFF)
 option(TINA_BUILD_UI_FREETYPE "Build the private vNext FreeType UI text adapter" OFF)
 option(TINA_BUILD_UI_UIA "Build the private Windows UIA accessibility adapter" OFF)
 option(TINA_BUILD_PHYSICS2D "Build the optional vNext Box2D physics module" OFF)

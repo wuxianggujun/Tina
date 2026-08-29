@@ -6,7 +6,11 @@ SAMPLER2D(s_texColor, 0);
 
 void main()
 {
-    vec4 sample = texture2D(s_texColor, v_texcoord0);
-    sample.rgb *= sample.a;
-    gl_FragColor = sample * v_color0;
+    // Not named `sample`: that is a reserved word in GLSL ES 3.0 (a multisample
+    // interpolation qualifier), so the ESSL variant of this shader fails to compile
+    // with "illegal use of reserved word". Desktop GLSL 120, SPIR-V and HLSL all
+    // accepted it, which is why it survived until the OpenGLES profile was cooked.
+    vec4 texel = texture2D(s_texColor, v_texcoord0);
+    texel.rgb *= texel.a;
+    gl_FragColor = texel * v_color0;
 }
