@@ -784,14 +784,14 @@ using FixtureStartup = Core::Status (*)(UI::UIContext&, void* userData);
         }
     }
 
-    auto root = fixture.context->rootBuilder().createRoot();
+    auto root = fixture.context->authoring().rootBuilder().createRoot();
     if (!root) {
         error = root.error().message;
         return std::nullopt;
     }
     fixture.root = std::move(*root);
 
-    auto updater = fixture.context->treeUpdater(fixture.root);
+    auto updater = fixture.context->authoring().treeUpdater(fixture.root);
     if (!updater) {
         error = updater.error().message;
         return std::nullopt;
@@ -809,7 +809,7 @@ struct StyleFixtureStartup final {
 {
     auto& startup = *static_cast<StyleFixtureStartup*>(userData);
     for (UI::UIStyleClassId& styleClass : startup.classes) {
-        auto registered = context.registerStyleClass();
+        auto registered = context.style().registerStyleClass();
         if (!registered) {
             return Core::failure(registered.error());
         }
@@ -837,7 +837,7 @@ struct StyleFixtureStartup final {
             };
         }
     }
-    return context.installStyleSheet(rules);
+    return context.style().installStyleSheet(rules);
 }
 
 [[nodiscard]] bool populateStyleTree(
@@ -948,7 +948,7 @@ void accumulateCommitStatistics(const UI::UIContextStatistics& statistics,
 {
     auto build = Integration::buildUIDisplayList(
         builder,
-        fixture.context->committedPaint(),
+        fixture.context->publication().committedPaint(),
         Integration::UIRenderViewportMapping{.framebufferViewport = framebufferViewport});
     if (!build) {
         error = build.error().message;
@@ -988,7 +988,7 @@ void accumulateCommitStatistics(const UI::UIContextStatistics& statistics,
         return false;
     }
     auto build = Integration::buildUIDisplayList(
-        builder, fixture.context->committedPaint(),
+        builder, fixture.context->publication().committedPaint(),
         Integration::UIRenderViewportMapping{.framebufferViewport = framebufferViewport},
         {
             .resourceSink = &packet.resourceSink(),
@@ -1354,7 +1354,7 @@ void hashLogicalRect(DeterministicHash& hash, const UI::UILogicalRect& rect) noe
 [[nodiscard]] u64 hashComponentTree(const UIFixture& fixture) noexcept
 {
     DeterministicHash hash{};
-    const UI::UICommittedStructureView structure = fixture.context->committedStructure();
+    const UI::UICommittedStructureView structure = fixture.context->publication().committedStructure();
     hash.addU64(structure.size());
     for (const UI::UICommittedNodeEntry& entry : structure) {
         hash.addU32(entry.depth);
@@ -1363,7 +1363,7 @@ void hashLogicalRect(DeterministicHash& hash, const UI::UILogicalRect& rect) noe
         hash.addBool(entry.parent.hasValue());
     }
 
-    const UI::UICommittedLayoutView layout = fixture.context->committedLayout();
+    const UI::UICommittedLayoutView layout = fixture.context->publication().committedLayout();
     hash.addU64(layout.size());
     for (const UI::UICommittedLayoutEntry& entry : layout) {
         hashLogicalRect(hash, entry.localRect);
@@ -1374,7 +1374,7 @@ void hashLogicalRect(DeterministicHash& hash, const UI::UILogicalRect& rect) noe
         hash.addU32(entry.paintOrdinal);
     }
 
-    const UI::UICommittedPaintView paint = fixture.context->committedPaint();
+    const UI::UICommittedPaintView paint = fixture.context->publication().committedPaint();
     hash.addU64(paint.size());
     for (const UI::UICommittedPaintEntry& entry : paint) {
         hashLogicalRect(hash, entry.worldRect);
@@ -1402,7 +1402,7 @@ void hashLogicalRect(DeterministicHash& hash, const UI::UILogicalRect& rect) noe
         hash.addFloat(entry.ellipseStrokeWidth);
     }
 
-    hash.addU64(hashStableSemantics(fixture.context->committedSemantics()));
+    hash.addU64(hashStableSemantics(fixture.context->publication().committedSemantics()));
 
     const UI::UIContextStatistics statistics = fixture.context->statistics();
     hash.addU64(statistics.liveNodeCount);
@@ -1434,7 +1434,7 @@ void hashLogicalRect(DeterministicHash& hash, const UI::UILogicalRect& rect) noe
     constexpr UI::UILogicalSize Viewport{.width = 1.0F, .height = static_cast<float>(kLargeNodeCount)};
     constexpr Render::UIPixelRect Framebuffer{.x = 0, .y = 0, .width = 1, .height = kLargeNodeCount};
 
-    if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
+    if (Core::Status status = fixture.context->publication().commitLayout(Viewport); !status) {
         error = status.error().message;
         return false;
     }
@@ -1452,7 +1452,7 @@ void hashLogicalRect(DeterministicHash& hash, const UI::UILogicalRect& rect) noe
         const bool measured = iteration >= options.warmUpIterations;
         const auto totalBegin = clock.now();
         const auto commitBegin = clock.now();
-        if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
+        if (Core::Status status = fixture.context->publication().commitLayout(Viewport); !status) {
             error = status.error().message;
             return false;
         }
@@ -1515,7 +1515,7 @@ void hashLogicalRect(DeterministicHash& hash, const UI::UILogicalRect& rect) noe
     constexpr UI::UILogicalSize Viewport{.width = 1.0F, .height = static_cast<float>(kLargeNodeCount)};
     constexpr Render::UIPixelRect Framebuffer{.x = 0, .y = 0, .width = 1, .height = kLargeNodeCount};
 
-    if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
+    if (Core::Status status = fixture.context->publication().commitLayout(Viewport); !status) {
         error = status.error().message;
         return false;
     }
@@ -1540,7 +1540,7 @@ void hashLogicalRect(DeterministicHash& hash, const UI::UILogicalRect& rect) noe
             return false;
         }
         const auto commitBegin = clock.now();
-        if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
+        if (Core::Status status = fixture.context->publication().commitLayout(Viewport); !status) {
             error = status.error().message;
             return false;
         }
@@ -1618,7 +1618,7 @@ void hashLogicalRect(DeterministicHash& hash, const UI::UILogicalRect& rect) noe
     }
 
     BenchMotionClock motionClock{};
-    if (Core::Status status = fixture.context->setMotionClock(&motionClock); !status) {
+    if (Core::Status status = fixture.context->motion().setMotionClock(&motionClock); !status) {
         error = status.error().message;
         return false;
     }
@@ -1631,7 +1631,7 @@ void hashLogicalRect(DeterministicHash& hash, const UI::UILogicalRect& rect) noe
     constexpr UI::UILogicalSize Viewport{.width = 1.0F, .height = static_cast<float>(kLargeNodeCount)};
     constexpr Render::UIPixelRect Framebuffer{.x = 0, .y = 0, .width = 1, .height = kLargeNodeCount};
 
-    if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
+    if (Core::Status status = fixture.context->publication().commitLayout(Viewport); !status) {
         error = status.error().message;
         return false;
     }
@@ -1668,7 +1668,7 @@ void hashLogicalRect(DeterministicHash& hash, const UI::UILogicalRect& rect) noe
                 ((iteration + index) & 1U) == 0U ? UI::rgba8(40, 120, 200)
                                                  : UI::rgba8(200, 80, 40);
             if (Core::Status status =
-                    fixture.context->beginBackgroundColorTransition(leaf, target, spec);
+                    fixture.context->motion().beginBackgroundColorTransition(leaf, target, spec);
                 !status) {
                 error = status.error().message;
                 return false;
@@ -1678,7 +1678,7 @@ void hashLogicalRect(DeterministicHash& hash, const UI::UILogicalRect& rect) noe
         motionClock.advance(Core::Duration{0.050});
         const auto commitBegin = wallClock.now();
         // commitLayout samples motion via context clock.
-        if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
+        if (Core::Status status = fixture.context->publication().commitLayout(Viewport); !status) {
             error = status.error().message;
             return false;
         }
@@ -1780,7 +1780,7 @@ void hashLogicalRect(DeterministicHash& hash, const UI::UILogicalRect& rect) noe
     }
 
     BenchMotionClock motionClock{};
-    if (Core::Status status = fixture.context->setMotionClock(&motionClock); !status) {
+    if (Core::Status status = fixture.context->motion().setMotionClock(&motionClock); !status) {
         error = status.error().message;
         return false;
     }
@@ -1789,7 +1789,7 @@ void hashLogicalRect(DeterministicHash& hash, const UI::UILogicalRect& rect) noe
     timelines.reserve(kTimelineCapacity);
     for (usize timelineIndex = 0; timelineIndex < kTimelineCapacity; ++timelineIndex) {
         const auto retainTimeline = [&](const auto& tracks) {
-            auto timeline = fixture.context->createTimeline(UI::UITimelineDesc{
+            auto timeline = fixture.context->motion().createTimeline(UI::UITimelineDesc{
                 .duration = Core::Duration{0.100},
                 .delay = Core::Duration{0.0},
                 .tracks = tracks,
@@ -1935,7 +1935,7 @@ void hashLogicalRect(DeterministicHash& hash, const UI::UILogicalRect& rect) noe
     Render::UIDisplayListBuilder builder = std::move(*builderResult);
     constexpr UI::UILogicalSize Viewport{.width = 1.0F, .height = static_cast<float>(kLargeNodeCount)};
     constexpr Render::UIPixelRect Framebuffer{.x = 0, .y = 0, .width = 1, .height = kLargeNodeCount};
-    if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
+    if (Core::Status status = fixture.context->publication().commitLayout(Viewport); !status) {
         error = status.error().message;
         return false;
     }
@@ -1962,7 +1962,7 @@ void hashLogicalRect(DeterministicHash& hash, const UI::UILogicalRect& rect) noe
         for (usize timelineIndex = 0; timelineIndex < activeTimelineTarget;
              ++timelineIndex) {
             if (Core::Status status =
-                    fixture.context->playTimeline(timelines[timelineIndex]);
+                    fixture.context->motion().playTimeline(timelines[timelineIndex]);
                 !status) {
                 error = status.error().message;
                 return false;
@@ -1970,7 +1970,7 @@ void hashLogicalRect(DeterministicHash& hash, const UI::UILogicalRect& rect) noe
         }
         motionClock.advance(Core::Duration{0.025});
         const auto commitBegin = wallClock.now();
-        if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
+        if (Core::Status status = fixture.context->publication().commitLayout(Viewport); !status) {
             error = status.error().message;
             return false;
         }
@@ -2147,7 +2147,7 @@ void hashLogicalRect(DeterministicHash& hash, const UI::UILogicalRect& rect) noe
         .height = kLargeNodeCount,
     };
 
-    if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
+    if (Core::Status status = fixture.context->publication().commitLayout(Viewport); !status) {
         error = status.error().message;
         return false;
     }
@@ -2174,7 +2174,7 @@ void hashLogicalRect(DeterministicHash& hash, const UI::UILogicalRect& rect) noe
             return false;
         }
         const auto commitBegin = clock.now();
-        if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
+        if (Core::Status status = fixture.context->publication().commitLayout(Viewport); !status) {
             error = status.error().message;
             return false;
         }
@@ -2203,7 +2203,7 @@ void hashLogicalRect(DeterministicHash& hash, const UI::UILogicalRect& rect) noe
             return false;
         }
         const auto cleanCommitBegin = clock.now();
-        if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
+        if (Core::Status status = fixture.context->publication().commitLayout(Viewport); !status) {
             error = status.error().message;
             return false;
         }
@@ -2351,7 +2351,7 @@ void hashLogicalRect(DeterministicHash& hash, const UI::UILogicalRect& rect) noe
 {
     tokens.reserve(routeNodes.size() + 2U);
     for (const UI::UINodeId node : routeNodes) {
-        auto token = fixture.context->addRoutedPointerListener(
+        auto token = fixture.context->input().addRoutedPointerListener(
             UI::UIRoutedPointerListenerDesc{
                 .node = node,
                 .kind = UI::UIRoutedPointerEventKind::Move,
@@ -2365,7 +2365,7 @@ void hashLogicalRect(DeterministicHash& hash, const UI::UILogicalRect& rect) noe
         tokens.push_back(std::move(*token));
     }
 
-    auto down = fixture.context->addRoutedPointerListener(
+    auto down = fixture.context->input().addRoutedPointerListener(
         UI::UIRoutedPointerListenerDesc{
             .node = target,
             .kind = UI::UIRoutedPointerEventKind::ButtonDown,
@@ -2382,7 +2382,7 @@ void hashLogicalRect(DeterministicHash& hash, const UI::UILogicalRect& rect) noe
     }
     tokens.push_back(std::move(*down));
 
-    auto up = fixture.context->addRoutedPointerListener(
+    auto up = fixture.context->input().addRoutedPointerListener(
         UI::UIRoutedPointerListenerDesc{
             .node = target,
             .kind = UI::UIRoutedPointerEventKind::ButtonUp,
@@ -2429,7 +2429,7 @@ void accumulateRouteResult(const UI::UIPointerRouteResult& route, UIBenchmarkRep
                             usize ordinal, UI::UIRoutedPointerEventKind kind, UI::UILogicalPoint position,
                             UIBenchmarkReport* report, DeterministicHash* hash, std::string& error)
 {
-    auto route = fixture.context->routePointerInput(UI::UIPointerInputEvent{
+    auto route = fixture.context->input().routePointerInput(UI::UIPointerInputEvent{
         .platformFrame = frame,
         .transitionOrdinal = ordinal,
         .sourceSequence = sequence,
@@ -2484,11 +2484,11 @@ void accumulateRouteResult(const UI::UIPointerRouteResult& route, UIBenchmarkRep
         return false;
     }
     constexpr UI::UILogicalSize Viewport{.width = 1.0F, .height = static_cast<float>(kLargeNodeCount)};
-    if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
+    if (Core::Status status = fixture.context->publication().commitLayout(Viewport); !status) {
         error = status.error().message;
         return false;
     }
-    if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
+    if (Core::Status status = fixture.context->publication().commitLayout(Viewport); !status) {
         error = status.error().message;
         return false;
     }
@@ -2614,7 +2614,7 @@ void accumulateRouteResult(const UI::UIPointerRouteResult& route, UIBenchmarkRep
     Render::UIDisplayListBuilder builder = std::move(*builderResult);
     constexpr UI::UILogicalSize Viewport{.width = 64.0F, .height = 64.0F};
     constexpr Render::UIPixelRect Framebuffer{.x = 0, .y = 0, .width = 64, .height = 64};
-    if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
+    if (Core::Status status = fixture.context->publication().commitLayout(Viewport); !status) {
         error = status.error().message;
         return false;
     }
@@ -2646,7 +2646,7 @@ void accumulateRouteResult(const UI::UIPointerRouteResult& route, UIBenchmarkRep
             return false;
         }
         const auto commitBegin = clock.now();
-        if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
+        if (Core::Status status = fixture.context->publication().commitLayout(Viewport); !status) {
             error = status.error().message;
             return false;
         }
@@ -2694,7 +2694,7 @@ void accumulateRouteResult(const UI::UIPointerRouteResult& route, UIBenchmarkRep
     }
     report.selectionKey = finalSelection->key;
     report.selectionIndex = finalSelection->logicalIndex;
-    const UI::UICommittedSemanticsView semantics = fixture.context->committedSemantics();
+    const UI::UICommittedSemanticsView semantics = fixture.context->publication().committedSemantics();
     report.semanticsEntryCount = semantics.size();
     report.semanticsChecksum = hashSemantics(semantics);
     captureFinalState(memory, report, fixture);
@@ -2752,7 +2752,7 @@ void accumulateRouteResult(const UI::UIPointerRouteResult& route, UIBenchmarkRep
                                    static_cast<float>(kImageBenchmarkElementCount)),
     };
 
-    if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
+    if (Core::Status status = fixture.context->publication().commitLayout(Viewport); !status) {
         error = status.error().message;
         return false;
     }
@@ -2773,7 +2773,7 @@ void accumulateRouteResult(const UI::UIPointerRouteResult& route, UIBenchmarkRep
         const bool measured = iteration >= options.warmUpIterations;
         const auto totalBegin = clock.now();
         const auto commitBegin = clock.now();
-        if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
+        if (Core::Status status = fixture.context->publication().commitLayout(Viewport); !status) {
             error = status.error().message;
             return false;
         }
@@ -3040,7 +3040,7 @@ using ComponentBuilder = bool (*)(UIFixture&, ComponentRootArray&, UIBenchmarkRe
     ComponentRootArray componentRoots{};
     constexpr UI::UILogicalSize Viewport{.width = 64.0F, .height = 8'192.0F};
 
-    if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
+    if (Core::Status status = fixture.context->publication().commitLayout(Viewport); !status) {
         error = status.error().message;
         return false;
     }
@@ -3085,7 +3085,7 @@ using ComponentBuilder = bool (*)(UIFixture&, ComponentRootArray&, UIBenchmarkRe
         }
 
         const auto commitBegin = clock.now();
-        if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
+        if (Core::Status status = fixture.context->publication().commitLayout(Viewport); !status) {
             error = status.error().message;
             return false;
         }
@@ -3099,7 +3099,7 @@ using ComponentBuilder = bool (*)(UIFixture&, ComponentRootArray&, UIBenchmarkRe
         expectedTreeChecksum = treeChecksum;
 
         const auto cleanCommitBegin = clock.now();
-        if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
+        if (Core::Status status = fixture.context->publication().commitLayout(Viewport); !status) {
             error = status.error().message;
             return false;
         }
@@ -3127,7 +3127,7 @@ using ComponentBuilder = bool (*)(UIFixture&, ComponentRootArray&, UIBenchmarkRe
             report.componentTreeChecksum = treeChecksum;
             report.semanticsEntryCount = committedStatistics.committedSemanticsNodeCount;
             report.semanticsChecksum =
-                hashStableSemantics(fixture.context->committedSemantics());
+                hashStableSemantics(fixture.context->publication().committedSemantics());
             report.liveNodeHighWater =
                 (std::max)(report.liveNodeHighWater,
                            static_cast<u64>(committedStatistics.liveNodeCount));
@@ -3148,7 +3148,7 @@ using ComponentBuilder = bool (*)(UIFixture&, ComponentRootArray&, UIBenchmarkRe
         if (!destroyComponents(fixture, componentRoots, error)) {
             return false;
         }
-        if (Core::Status status = fixture.context->commitLayout(Viewport); !status) {
+        if (Core::Status status = fixture.context->publication().commitLayout(Viewport); !status) {
             error = status.error().message;
             return false;
         }
