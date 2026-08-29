@@ -155,7 +155,7 @@ void writeError(const Core::Error& error)
         error.message.c_str());
 }
 
-// Serves one HTTP request and one WebSocket upgrade over accepted connections.
+// Serves one HTTP request and one WebSocket session over accepted connections.
 // Deliberately minimal: it exists so the client side has a real peer, not to be a
 // server implementation.
 class LoopbackServer final {
@@ -167,11 +167,15 @@ class LoopbackServer final {
 
     void setHttpReply(std::string reply) { m_httpReply = std::move(reply); }
 
-    // Echoes WebSocket text frames back, which is enough to prove the frame layer
-    // works in both directions.
+    // Echoes WebSocket text frames back, which is what proves the frame layer
+    // works in both directions rather than only outbound.
     void setWebSocketEcho(bool value) noexcept { m_webSocketEcho = value; }
 
     [[nodiscard]] Core::usize acceptedCount() const noexcept { return m_accepted; }
+    [[nodiscard]] Core::usize webSocketFramesEchoed() const noexcept
+    {
+        return m_framesEchoed;
+    }
 
     [[nodiscard]] Core::Status pump()
     {
@@ -180,35 +184,43 @@ class LoopbackServer final {
             return Core::failure(accepted.error());
         }
 
-        while (m_listener.readyConnectionCount() > 0
-               && m_connections.size() < MaximumConnections) {
+        while (m_listener.readyConnectionCount() > 0 && m_peers.size() < MaximumConnections) {
             auto connection = m_listener.acceptNext();
             if (!connection) {
                 break;
             }
-            m_connections.push_back(
-                std::make_unique<Network::TcpConnection>(std::move(*connection)));
-            m_pending.emplace_back();
+            auto peer = std::make_unique<Peer>();
+            // unique_ptr because TcpConnection deletes move-assignment on purpose.
+            peer->connection =
+                std::make_unique<Network::TcpConnection>(std::move(*connection));
+            m_peers.push_back(std::move(peer));
             ++m_accepted;
         }
 
-        for (Core::usize index = 0; index < m_connections.size(); ++index) {
-            auto& connection = *m_connections[index];
+        for (auto& peer : m_peers) {
+            auto& connection = *peer->connection;
             if (!connection.pump()) {
                 continue;
             }
 
             const auto buffered = connection.receive();
-            if (!buffered || buffered->empty()) {
+            if (!buffered) {
                 continue;
             }
-            m_pending[index].append(asText(*buffered));
-            const Core::usize consumed = buffered->size();
-            if (!connection.consume(consumed)) {
-                continue;
+            if (!buffered->empty()) {
+                peer->pending.append(asText(*buffered));
+                if (!connection.consume(buffered->size())) {
+                    continue;
+                }
             }
 
-            serve(connection, m_pending[index]);
+            // Once upgraded the connection speaks frames, not requests, so the
+            // handshake parser must not run again on frame bytes.
+            if (peer->upgraded) {
+                serveFrames(*peer);
+            } else {
+                serveRequest(*peer);
+            }
         }
         return Core::success();
     }
@@ -216,33 +228,126 @@ class LoopbackServer final {
   private:
     static constexpr Core::usize MaximumConnections = 4;
 
-    // Dispatches on what the peer sent. A WebSocket upgrade and a plain request
-    // both start with a request line, so the Upgrade header is what tells them
-    // apart.
-    void serve(Network::TcpConnection& connection, std::string& request)
+    struct Peer final {
+        std::unique_ptr<Network::TcpConnection> connection;
+        std::string pending;
+        bool upgraded = false;
+    };
+
+    // A WebSocket upgrade and a plain request both start with a request line, so
+    // the Upgrade header is what tells them apart.
+    void serveRequest(Peer& peer)
     {
-        if (request.find("\r\n\r\n") == std::string::npos) {
+        const Core::usize terminator = peer.pending.find("\r\n\r\n");
+        if (terminator == std::string::npos) {
             return;
         }
+        const Core::usize bodyStart = terminator + 4;
+        const std::string head = peer.pending.substr(0, bodyStart);
+        // Anything past the terminator already belongs to the next layer.
+        peer.pending.erase(0, bodyStart);
 
-        if (request.find("Upgrade: websocket") != std::string::npos) {
-            if (!m_upgraded) {
-                const std::string response = buildUpgradeResponse(request);
-                (void)connection.send(asBytes(response));
-                m_upgraded = true;
-            }
-            request.clear();
+        if (head.find("Upgrade: websocket") != std::string::npos) {
+            (void)peer.connection->send(asBytes(buildUpgradeResponse(head)));
+            peer.upgraded = true;
             return;
         }
 
         if (!m_httpReply.empty()) {
-            (void)connection.send(asBytes(m_httpReply));
+            (void)peer.connection->send(asBytes(m_httpReply));
             // Deliberately no shutdownSend here: it drops queued unsent bytes, and
             // send() has only queued the reply -- a later pump still has to flush
             // it. The reply carries Content-Length, so the client does not need a
             // close to know where the body ends.
         }
-        request.clear();
+    }
+
+    // Parses client frames and echoes text ones back. Client frames are always
+    // masked (RFC 6455 requires it), server frames never are.
+    void serveFrames(Peer& peer)
+    {
+        while (true) {
+            const auto* raw = reinterpret_cast<const unsigned char*>(peer.pending.data());
+            const Core::usize available = peer.pending.size();
+            if (available < 2) {
+                return;
+            }
+
+            const bool fin = (raw[0] & 0x80U) != 0;
+            const unsigned char opcode = raw[0] & 0x0FU;
+            const bool masked = (raw[1] & 0x80U) != 0;
+            Core::usize payloadLength = raw[1] & 0x7FU;
+            Core::usize headerSize = 2;
+
+            if (payloadLength == 126) {
+                if (available < 4) {
+                    return;
+                }
+                payloadLength = (static_cast<Core::usize>(raw[2]) << 8)
+                    | static_cast<Core::usize>(raw[3]);
+                headerSize = 4;
+            } else if (payloadLength == 127) {
+                // The sample never sends anything this large, so refusing is
+                // honest rather than pretending to support it.
+                return;
+            }
+            if (masked) {
+                headerSize += 4;
+            }
+            if (available < headerSize + payloadLength) {
+                return;
+            }
+
+            std::string payload;
+            payload.resize(payloadLength);
+            const unsigned char* body = raw + headerSize;
+            if (masked) {
+                const unsigned char* mask = raw + headerSize - 4;
+                for (Core::usize index = 0; index < payloadLength; ++index) {
+                    payload[index] = static_cast<char>(body[index] ^ mask[index % 4]);
+                }
+            } else {
+                payload.assign(reinterpret_cast<const char*>(body), payloadLength);
+            }
+
+            peer.pending.erase(0, headerSize + payloadLength);
+
+            // Text frame, complete, and echo requested: send it straight back.
+            if (fin && opcode == 0x1 && m_webSocketEcho) {
+                (void)peer.connection->send(asBytes(buildTextFrame(payload)));
+                ++m_framesEchoed;
+            } else if (opcode == 0x8) {
+                // Echo the close so the client sees an orderly shutdown.
+                (void)peer.connection->send(asBytes(buildCloseFrame(payload)));
+            }
+        }
+    }
+
+    // Unmasked server frame. A client must accept it; masking here would be a
+    // protocol violation in the other direction.
+    [[nodiscard]] static std::string buildTextFrame(std::string_view payload)
+    {
+        return buildFrame(0x1, payload);
+    }
+
+    [[nodiscard]] static std::string buildCloseFrame(std::string_view payload)
+    {
+        return buildFrame(0x8, payload);
+    }
+
+    [[nodiscard]] static std::string buildFrame(unsigned char opcode, std::string_view payload)
+    {
+        std::string frame;
+        frame.push_back(static_cast<char>(0x80U | opcode));
+        if (payload.size() < 126) {
+            frame.push_back(static_cast<char>(payload.size()));
+        } else {
+            frame.push_back(static_cast<char>(126));
+            frame.push_back(static_cast<char>((payload.size() >> 8) & 0xFFU));
+            frame.push_back(static_cast<char>(payload.size() & 0xFFU));
+        }
+        frame.append(payload);
+        return frame;
     }
 
     // The accept token proves the server processed this specific key, so it is
@@ -274,13 +379,11 @@ class LoopbackServer final {
     }
 
     Network::TcpListener m_listener;
-    // unique_ptr because TcpConnection deletes move-assignment on purpose.
-    std::vector<std::unique_ptr<Network::TcpConnection>> m_connections;
-    std::vector<std::string> m_pending;
+    std::vector<std::unique_ptr<Peer>> m_peers;
     std::string m_httpReply;
     Core::usize m_accepted = 0;
+    Core::usize m_framesEchoed = 0;
     bool m_webSocketEcho = false;
-    bool m_upgraded = false;
 };
 
 } // namespace
@@ -407,10 +510,32 @@ int main(int argc, char** argv)
             return 1;
         }
 
+        // A WebSocket session on a fourth connection. This is the only path that
+        // exercises the upgrade, the mask, and frame reassembly end to end.
+        Network::TcpConnectionConfig socketTransportConfig{};
+        socketTransportConfig.remoteEndpoint = *serverEndpoint;
+        auto socketTransport = Network::TcpConnection::Create(socketTransportConfig);
+        if (!socketTransport) {
+            writeError(socketTransport.error());
+            return 1;
+        }
+
+        Network::WebSocketConfig socketConfig{};
+        socketConfig.stream = &*socketTransport;
+        socketConfig.target = "/socket";
+        socketConfig.host = "tina.sample";
+        auto webSocket = Network::WebSocket::Create(socketConfig);
+        if (!webSocket) {
+            writeError(webSocket.error());
+            return 1;
+        }
+
         constexpr std::string_view udpPayload = "udp-frame";
         constexpr std::string_view expectedHttpBody = "hello tina!";
+        constexpr std::string_view webSocketPayload = "ws-round-trip";
 
         bool udpSent = false;
+        bool webSocketSent = false;
         std::string httpBody;
 
         for (Core::u32 frame = 0; frame < *frameCount; ++frame) {
@@ -494,6 +619,31 @@ int main(int argc, char** argv)
                     evidence.tcpClientToServerMatched = true;
                 }
             }
+
+            // WebSocket: pump the handshake, then send once and wait for the echo.
+            const auto socketPumped = webSocket->pump();
+            if (!socketPumped) {
+                writeError(socketPumped.error());
+                return 1;
+            }
+            if (webSocket->state() == Network::WebSocketState::Open) {
+                evidence.webSocketHandshakeCompleted = true;
+                if (!webSocketSent) {
+                    if (webSocket->sendText(webSocketPayload)) {
+                        webSocketSent = true;
+                    }
+                }
+            }
+            if (*socketPumped) {
+                if (const auto message = webSocket->message()) {
+                    if (message->kind == Network::WebSocketMessageKind::Text
+                        && asText(message->payload) == webSocketPayload) {
+                        evidence.webSocketEchoMatched = true;
+                    }
+                    (void)webSocket->consumeMessage();
+                }
+            }
+            evidence.webSocketFramesSent = webSocket->statistics().sentFrameCount;
         }
 
         // The reverse direction is proven by the HTTP body: it travelled from the
@@ -523,12 +673,15 @@ int main(int argc, char** argv)
         && evidence.dnsResolvedNumericLiteral
         && evidence.dnsRejectedUnresolvableName
         && evidence.dnsPumpCount > 0
-        && evidence.tcpConnectionsAccepted >= 2
+        && evidence.tcpConnectionsAccepted >= 3
         && evidence.tcpClientToServerMatched
         && evidence.httpRequestCompleted
         && evidence.httpStatusCode == 200
         && evidence.httpBodyMatched
-        && evidence.tcpServerToClientMatched;
+        && evidence.tcpServerToClientMatched
+        && evidence.webSocketHandshakeCompleted
+        && evidence.webSocketEchoMatched
+        && evidence.webSocketFramesSent >= 1;
 
     if (!ok) {
         writeEvidence(stderr, "error", evidence);
