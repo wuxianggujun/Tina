@@ -2663,6 +2663,44 @@ TEST(EngineConfigTest, RejectsInvalidShadowMapExtents)
     EXPECT_EQ(result.error().code, ConfigurationErrorCode::InvalidEngineConfig);
 }
 
+// The default must stay Automatic: every product pixel fingerprint and visual-gate
+// baseline in this repo was frozen under the renderer bgfx picks on this host, so
+// changing the default is a deliberate re-baseline rather than a config tweak.
+TEST(EngineConfigTest, RendererApiDefaultsToAutomaticAndAcceptsEveryNamedApi)
+{
+    EXPECT_EQ(EngineConfig::Defaults().rendererApi, Render::RendererApi::Automatic);
+    EXPECT_TRUE(EngineConfig::Defaults().validate().has_value());
+
+    for (const Render::RendererApi api : {
+             Render::RendererApi::Automatic, Render::RendererApi::Vulkan,
+             Render::RendererApi::Direct3D11, Render::RendererApi::Direct3D12,
+             Render::RendererApi::Metal, Render::RendererApi::OpenGL,
+             Render::RendererApi::OpenGLES,
+         })
+    {
+        auto config = EngineConfig::Defaults();
+        config.rendererApi = api;
+        // Config validation is about the value being nameable, not about this host
+        // being able to create it; an unavailable API fails at device creation.
+        EXPECT_TRUE(config.validate().has_value())
+            << "rendererApi " << static_cast<int>(api) << " was rejected by validate()";
+    }
+}
+
+// Caught in validate() rather than at device creation: an out-of-range enum would reach
+// the backend as an unmapped value, and "the backend refused it" reads like a driver
+// problem instead of a bad config.
+TEST(EngineConfigTest, RejectsAnOutOfRangeRendererApi)
+{
+    auto config = EngineConfig::Defaults();
+    config.rendererApi = static_cast<Render::RendererApi>(200);
+
+    const Core::Status result = config.validate();
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, ConfigurationErrorCode::InvalidEngineConfig);
+}
+
 TEST(EngineConfigTest, RejectsInvalidTextTimingAndScale)
 {
     std::vector<EngineConfig> invalidConfigs;

@@ -269,6 +269,14 @@ Core::Status EngineConfig::validate() const
         return Core::failure(ConfigurationErrorCode::InvalidEngineConfig,
                              "renderMsaaSamples must be 0, 2, 4, 8, or 16");
     }
+    // Rejected here rather than at device creation: an out-of-range enum would reach
+    // the backend as an unmapped value, and "the backend refused it" reads like a
+    // driver problem instead of a bad config.
+    if (!Render::isSupportedRendererApi(rendererApi))
+    {
+        return Core::failure(ConfigurationErrorCode::InvalidEngineConfig,
+                             "rendererApi is not a supported Render::RendererApi value");
+    }
     if (platformEventSubscriptions.subscriberCapacity == 0 ||
         platformEventSubscriptions.subscriberCapacity > PlatformEventSubscriptionConfig::MaximumSubscriberCapacity)
     {

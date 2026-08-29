@@ -35,6 +35,11 @@ struct EngineConfig final {
     PrimaryWindowUIDisplayListCapacityConfig primaryWindowUIDisplayListCapacities{};
     Render::RenderSceneCapacity renderSceneCapacities{};
     Render::ShadowMapExtentConfig shadowMapExtents{};
+    // Graphics API for the render device. Automatic uses Tina's platform preference
+    // (Vulkan on Android, backend choice on desktop -- see Render::preferredRendererApi).
+    // An explicit API the backend cannot create fails engine creation rather than
+    // silently falling back, so a game that requires Vulkan learns it did not get it.
+    Render::RendererApi rendererApi = Render::RendererApi::Automatic;
     // Per-frame backend submission storage. Tools with bounded workloads can
     // lower this without changing RenderScene or UI capacities.
     Core::u32 renderDrawCallCapacity =

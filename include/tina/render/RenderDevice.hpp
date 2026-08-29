@@ -19,6 +19,61 @@
 
 namespace Tina::Render {
 
+// Which graphics API a device should use. Backend-neutral by name so the public
+// surface stays free of bgfx tokens; a backend that cannot honour the request fails
+// device creation rather than silently substituting another API, because a game that
+// asked for Vulkan and got GL would be told nothing.
+//
+// `Automatic` defers to the backend's own preference. It is not "no opinion": Tina
+// applies its own platform preference first (see preferredRendererApi), because bgfx's
+// auto-pick scores OpenGLES highest on Android and never scores Vulkan there at all,
+// even though Vulkan has shipped since Android 7.0 and is compiled in
+// (bgfx/src/config.h enables BGFX_CONFIG_RENDERER_VULKAN for BX_PLATFORM_ANDROID).
+enum class RendererApi : u8 {
+    Automatic = 0,
+    Vulkan = 1,
+    Direct3D11 = 2,
+    Direct3D12 = 3,
+    Metal = 4,
+    OpenGL = 5,
+    OpenGLES = 6,
+};
+
+[[nodiscard]] constexpr bool isSupportedRendererApi(RendererApi api) noexcept
+{
+    switch (api)
+    {
+    case RendererApi::Automatic:
+    case RendererApi::Vulkan:
+    case RendererApi::Direct3D11:
+    case RendererApi::Direct3D12:
+    case RendererApi::Metal:
+    case RendererApi::OpenGL:
+    case RendererApi::OpenGLES:
+        return true;
+    }
+    return false;
+}
+
+// Tina's platform preference, applied when a caller leaves the choice Automatic.
+//
+// Mobile prefers Vulkan: it is the current API on Android and the one with a real
+// driver investment behind it, while bgfx's own scoring would pick OpenGLES. The ESSL
+// shader variants stay as the fallback for devices whose Vulkan driver is unusable.
+//
+// Desktop stays Automatic on purpose. Every product pixel fingerprint and visual-gate
+// baseline in this repo was frozen under the backend bgfx picks on Windows (D3D11);
+// forcing Vulkan here would invalidate all of them, which is a deliberate re-baseline
+// rather than a default change. Games can still ask for Vulkan explicitly.
+[[nodiscard]] constexpr RendererApi preferredRendererApi() noexcept
+{
+#if defined(__ANDROID__)
+    return RendererApi::Vulkan;
+#else
+    return RendererApi::Automatic;
+#endif
+}
+
 struct RenderDeviceCreateParams final {
     static constexpr u32 MinimumDrawCallCapacity = 1024;
     static constexpr u32 MaximumDrawCallCapacity = 65'535;
@@ -34,6 +89,9 @@ struct RenderDeviceCreateParams final {
 
     std::optional<RenderSurfaceState> initialPrimaryWindowSurface;
     ShadowMapExtentConfig shadowMapExtents{};
+    // Requested graphics API. Automatic resolves through preferredRendererApi(); an
+    // explicit value the backend cannot create fails device creation.
+    RendererApi rendererApi = RendererApi::Automatic;
     // Maximum draw/compute submissions retained per frame. Capacities use
     // bgfx's 1024-entry blocks, except for the exact 65535 native maximum.
     u32 drawCallCapacity = DefaultDrawCallCapacity;

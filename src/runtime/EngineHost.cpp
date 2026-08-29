@@ -2068,6 +2068,7 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
         {
             const Render::RenderDeviceCreateParams renderParams{
                 .shadowMapExtents = ownedConfig.shadowMapExtents,
+                .rendererApi = ownedConfig.rendererApi,
                 .drawCallCapacity = ownedConfig.renderDrawCallCapacity,
                 .msaaSamples = ownedConfig.renderMsaaSamples,
                 .vsync = ownedConfig.renderVsync,
@@ -2134,6 +2135,7 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
             const Render::RenderDeviceCreateParams renderParams{
                 .initialPrimaryWindowSurface = toRenderSurfaceState(*snapshotResult),
                 .shadowMapExtents = ownedConfig.shadowMapExtents,
+                .rendererApi = ownedConfig.rendererApi,
                 .drawCallCapacity = ownedConfig.renderDrawCallCapacity,
                 .msaaSamples = ownedConfig.renderMsaaSamples,
                 .vsync = ownedConfig.renderVsync,

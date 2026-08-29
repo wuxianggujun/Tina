@@ -1261,6 +1261,16 @@ Core::Result<std::unique_ptr<IRenderDevice>> createNullRenderDevice(const Render
     {
         return Core::failure(std::move(status.error()));
     }
+    // The Null device implements no graphics API, so it can only honour Automatic.
+    // Accepting an explicit request would make a headless run look like it satisfied
+    // "I need Vulkan", which is exactly the silent substitution this selection exists
+    // to prevent.
+    if (params.rendererApi != RendererApi::Automatic)
+    {
+        return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                             "The Null render device implements no graphics API and cannot honour an "
+                             "explicit Render::RendererApi request");
+    }
     auto surfaceStateTracker = Detail::RenderSurfaceStateTracker::create(params.initialPrimaryWindowSurface);
     if (!surfaceStateTracker)
     {

@@ -128,6 +128,33 @@ EngineHost 在创建任何 module factory 前 fail closed，Null/bgfx 直接 fac
 最多切成两段），额外1K留给有界 scene pass；
 这仍避免空会话承担 bgfx 的65K双帧 render-item arrays 与默认多 encoder uniform buffers。
 
+### 图形 API 选择（`EngineConfig::rendererApi`）
+
+`Render::RendererApi` 是 backend-neutral 的 API 选择：`Automatic`（默认）、`Vulkan`、`Direct3D11`、
+`Direct3D12`、`Metal`、`OpenGL`、`OpenGLES`。非法枚举值在 `EngineConfig::validate()` 就拒绝——若放到
+device 创建才报，读起来像驱动问题而不是配置错误。
+
+**显式请求不被满足时 fail closed。** bgfx 接受显式 `init.type` 后仍可能回退到别的 renderer；因此
+device 在 `bgfx::init()` 之后比对 `bgfx::getRendererType()`，不一致即失败。实测在 Windows 上
+`--renderer=metal` 返回「bgfx created a different renderer than the requested graphics API」而**不是**
+静默跑 D3D11。理由很直接：要求 Vulkan 却拿到 GL 的游戏会带着错误的性能假设发布，且无从察觉。
+Null device 同理只接受 `Automatic`——它不实现任何图形 API，接受显式请求就等于假称满足了「我需要 Vulkan」。
+
+`Automatic` **不等于**"无意见"：它先过 `Render::preferredRendererApi()`。**Android 上偏好 Vulkan**，
+因为 bgfx 自己的评分（`bgfx/src/bgfx.cpp:3269-3276`）在 Android 分支只给 `OpenGLES` 加 20 分、
+**给 Vulkan 加 0 分**，而 Vulkan 自 Android 7.0 起可用、且在 bgfx 里本就为 `BX_PLATFORM_ANDROID`
+编译进去（`bgfx/src/config.h:105`）。也就是说拦住 Vulkan 的只有自动挑选的评分，不是能力缺失；ESSL
+变体退居 Vulkan 驱动不可用时的回退路径。
+
+**桌面保持 `Automatic`（即 bgfx 选 D3D11）是刻意的**：本仓库全部产品像素指纹与视觉 gate baseline 都在
+该 renderer 下固化，改默认等于一次刻意的 re-baseline，而不是配置调整。游戏仍可显式要求 Vulkan。
+
+**已知限制（本机实测）：** Windows 上显式 Vulkan 可正常初始化并提交帧（124 帧、3 张贴图 upload/bind/
+retire 齐全），但 `capturePrimaryFrameRgba8()` 失败、`pixelCaptureOk=false`。原因在 bgfx：
+`renderer_vk.cpp:4450` 的 `isSwapChainReadable()` 要求 `m_supportsReadback`，本机 Vulkan swapchain 不满足，
+`requestScreenShot` 直接返回。**因此像素证据 gate 必须留在默认 renderer 上**，不能用 `--renderer=vulkan`
+跑视觉门禁。这是 bgfx/驱动的能力边界，不是 Tina 的缺陷。
+
 `EngineConfig::renderMsaaSamples` 同样是 device-lifetime 启动配置：`0`（默认，关闭）或 `2/4/8/16`，
 其余值在 EngineConfig 校验与 bgfx factory 双双 fail closed。它映射为 backbuffer 的
 `BGFX_RESET_MSAA_X*` flag，由 init 与 resize reset 共用。samples 与所有像素证据 gate 保持 `0`

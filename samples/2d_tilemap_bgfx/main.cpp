@@ -261,6 +261,10 @@ struct SampleOptions final {
     bool uiThemeDemo = false;
     // Product gate only: exercise Scene Explorer selection and virtualized scrolling.
     bool uiTreeDemo = false;
+    // Explicit graphics API. Default Automatic keeps the frozen pixel baselines, which
+    // were captured under the renderer bgfx picks on this host; --renderer=vulkan is how
+    // the selection is actually exercised end to end.
+    Tina::Render::RendererApi rendererApi = Tina::Render::RendererApi::Automatic;
     // Differential GPU visual gate: keep the same World topology but disable shadow contribution.
     bool disableShadowOccluders = false;
     // Differential GPU visual gate: preserve all occluders while forcing point-source hard shadows.
@@ -731,6 +735,38 @@ void writeError(const Tina::Core::Error& error)
         if (argument == "--ui-tree-demo")
         {
             options.uiTreeDemo = true;
+            continue;
+        }
+        if (argument.starts_with("--renderer="))
+        {
+            const std::string_view value = argument.substr(std::string_view{"--renderer="}.size());
+            if (value == "auto")
+            {
+                options.rendererApi = Tina::Render::RendererApi::Automatic;
+            } else if (value == "vulkan")
+            {
+                options.rendererApi = Tina::Render::RendererApi::Vulkan;
+            } else if (value == "d3d11")
+            {
+                options.rendererApi = Tina::Render::RendererApi::Direct3D11;
+            } else if (value == "d3d12")
+            {
+                options.rendererApi = Tina::Render::RendererApi::Direct3D12;
+            } else if (value == "opengl")
+            {
+                options.rendererApi = Tina::Render::RendererApi::OpenGL;
+            } else if (value == "opengles")
+            {
+                options.rendererApi = Tina::Render::RendererApi::OpenGLES;
+            } else if (value == "metal")
+            {
+                options.rendererApi = Tina::Render::RendererApi::Metal;
+            } else
+            {
+                return Tina::Core::failure(
+                    Tina::Core::CoreErrorCode::InvalidArgument,
+                    "--renderer expects auto, vulkan, d3d11, d3d12, opengl, opengles, or metal");
+            }
             continue;
         }
         if (argument == "--disable-shadow-occluders")
@@ -5326,6 +5362,7 @@ class TileMapBgfxApplication final : public Tina::IGameApplication {
     config.primaryWindow.title = "Tina Sample 2D — TileMap + Character + UI";
     config.primaryWindow.initialLogicalExtent = {options.windowLogicalWidth, options.windowLogicalHeight};
     config.primaryWindow.initiallyVisible = true;
+    config.rendererApi = options.rendererApi;
     config.renderSceneCapacities.spriteCapacity = 64;
     // A/D + arrows for interactive walk; automated smoke uses scripted walk after land.
     config.inputActions.bindings.push_back(Tina::InputActionBinding{

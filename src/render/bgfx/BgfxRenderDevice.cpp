@@ -959,11 +959,12 @@ class BgfxRenderDevice final : public IRenderDevice {
   public:
     BgfxRenderDevice(Detail::RenderSurfaceStateTracker surfaceStateTracker, Integration::NativeWindowSurfaceLease lease,
                      RenderSurfaceState initialSurface, ShadowMapExtentConfig shadowMapExtents,
-                     u32 drawCallCapacity, u32 resetFlags) noexcept
+                     u32 drawCallCapacity, u32 resetFlags,
+                     bgfx::RendererType::Enum requestedRenderer) noexcept
         : surfaceStateTracker_(std::move(surfaceStateTracker)), lease_(std::move(lease)),
           ownerThread_(std::this_thread::get_id()), committedSurfaceState_(initialSurface),
           shadowMapExtents_(shadowMapExtents), drawCallCapacity_(drawCallCapacity),
-          resetFlags_(resetFlags)
+          resetFlags_(resetFlags), requestedRenderer_(requestedRenderer)
     {
     }
 
@@ -981,7 +982,11 @@ class BgfxRenderDevice final : public IRenderDevice {
             BgfxSurfaceFramePlanner::bootstrapBackbufferExtent(committedSurfaceState_);
 
         bgfx::Init init{};
-        init.type = bgfx::RendererType::Count;
+        // Count is bgfx's "you choose" sentinel. Tina only passes it when the caller
+        // asked for Automatic *and* has no platform preference; otherwise the resolved
+        // renderer is named explicitly, because bgfx's own scoring never selects Vulkan
+        // on Android even though it is compiled in there.
+        init.type = requestedRenderer_;
         init.platformData = platformData;
         init.resolution.width = initialBackbuffer.width;
         init.resolution.height = initialBackbuffer.height;
@@ -1003,6 +1008,17 @@ class BgfxRenderDevice final : public IRenderDevice {
 
         bgfxInitialized_ = true;
         appliedBackbuffer_ = initialBackbuffer;
+
+        // bgfx accepts an explicit type and may still fall back to another renderer
+        // when creation fails. A game that asked for Vulkan and silently got GL would
+        // ship with the wrong performance characteristics and no way to tell, so an
+        // unhonoured request fails device creation instead.
+        if (requestedRenderer_ != bgfx::RendererType::Count &&
+            bgfx::getRendererType() != requestedRenderer_)
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx created a different renderer than the requested graphics API");
+        }
 
         const bgfx::Caps* const caps = bgfx::getCaps();
         constexpr u64 RequiredRetirementCaps =
@@ -5001,6 +5017,8 @@ class BgfxRenderDevice final : public IRenderDevice {
     RenderSurfaceState committedSurfaceState_{};
     ShadowMapExtentConfig shadowMapExtents_{};
     u32 drawCallCapacity_ = RenderDeviceCreateParams::DefaultDrawCallCapacity;
+    // Resolved at creation; Count means "let bgfx score it".
+    bgfx::RendererType::Enum requestedRenderer_ = bgfx::RendererType::Count;
     u32 resetFlags_ = kDefaultResetFlags;
     // Set when resetFlags_ changed without a geometry change, so the next
     // submitted frame re-applies them at the current extent.
@@ -5163,6 +5181,39 @@ class BgfxRenderDevice final : public IRenderDevice {
     return Core::success();
 }
 
+// Maps Tina's backend-neutral API selection onto a bgfx renderer, resolving Automatic
+// through Tina's platform preference first. Fails for an API this build cannot create
+// rather than falling through to bgfx's scoring, so an unsupported request is reported
+// as such instead of quietly running on something else.
+[[nodiscard]] Core::Result<bgfx::RendererType::Enum> resolveRendererType(RendererApi requested)
+{
+    RendererApi api = requested;
+    if (api == RendererApi::Automatic)
+    {
+        api = preferredRendererApi();
+    }
+    switch (api)
+    {
+    case RendererApi::Automatic:
+        // No platform preference: let bgfx score the available renderers.
+        return bgfx::RendererType::Count;
+    case RendererApi::Vulkan:
+        return bgfx::RendererType::Vulkan;
+    case RendererApi::Direct3D11:
+        return bgfx::RendererType::Direct3D11;
+    case RendererApi::Direct3D12:
+        return bgfx::RendererType::Direct3D12;
+    case RendererApi::Metal:
+        return bgfx::RendererType::Metal;
+    case RendererApi::OpenGL:
+        return bgfx::RendererType::OpenGL;
+    case RendererApi::OpenGLES:
+        return bgfx::RendererType::OpenGLES;
+    }
+    return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                         "The requested graphics API is not a supported Render::RendererApi value");
+}
+
 } // namespace
 
 Core::Result<std::unique_ptr<IRenderDevice>> createBgfxRenderDevice(const RenderDeviceCreateParams& params,
@@ -5234,12 +5285,18 @@ Core::Result<std::unique_ptr<IRenderDevice>> createBgfxRenderDevice(const Render
         return Core::failure(std::move(nativeBinding.error()));
     }
 
+    auto rendererType = resolveRendererType(params.rendererApi);
+    if (!rendererType)
+    {
+        return Core::failure(std::move(rendererType.error()));
+    }
+
     try
     {
         auto renderDevice = std::unique_ptr<BgfxRenderDevice>(
             new BgfxRenderDevice(std::move(*surfaceStateTracker), std::move(lease), initialSurface,
                                  params.shadowMapExtents, params.drawCallCapacity,
-                                 resetFlags));
+                                 resetFlags, *rendererType));
 
         if (auto status = renderDevice->initialize(nativeBinding->platformData); !status)
         {

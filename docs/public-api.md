@@ -188,6 +188,14 @@ TaskSystem 阶段返回 `TaskErrorCode::WaitTimeout`，Host 先写入 `runtime.l
 backend submission storage；`RenderDeviceCreateParams` 暴露相同契约。工具可依据冻结的
 RenderScene/DisplayList 上限显式降低，非法值在 EngineConfig 和 bgfx direct factory 双双 fail closed。
 
+`EngineConfig::rendererApi`（`Render::RendererApi`，默认 `Automatic`）让游戏选择图形 API：
+`Vulkan`/`Direct3D11`/`Direct3D12`/`Metal`/`OpenGL`/`OpenGLES`。**显式请求不被满足即失败**，不会静默
+换成别的 API——要求 Vulkan 却拿到 GL 的游戏会带着错误的性能假设发布。`Automatic` 走 Tina 的平台偏好：
+**Android 偏好 Vulkan**（bgfx 自己的评分在 Android 上从不选 Vulkan，尽管它自 Android 7.0 可用且已编译
+进去），桌面保持 bgfx 选择以维持已冻结的像素 baseline。device-lifetime 配置，不支持热改。
+细节与已知限制（Windows 上 Vulkan 无法做 swapchain readback，故像素 gate 留在默认 renderer）见
+[Rendering](rendering.md)。
+
 `EngineConfig::renderMsaaSamples`（`0` 默认关闭，或 `2/4/8/16`）在启动时选择 backbuffer MSAA 采样数，
 非法值 fail closed；它是 device-lifetime 配置，不支持热改。像素证据 gate、samples 与 Editor 保持 `0`。
 

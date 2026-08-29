@@ -225,6 +225,33 @@ TEST(NullRenderDeviceTest, RejectsInvalidShadowMapExtentConfiguration)
               Render::RenderErrorCode::InvalidShadowMapExtentConfig);
 }
 
+// A game that asked for Vulkan and got a device implementing no graphics API would
+// believe its requirement was met. The Null device can only honour Automatic, and says
+// so rather than substituting silently -- the same reason the bgfx device rejects a
+// request bgfx did not actually create.
+TEST(NullRenderDeviceTest, RefusesAnExplicitGraphicsApiItCannotImplement)
+{
+    for (const Render::RendererApi api : {
+             Render::RendererApi::Vulkan, Render::RendererApi::Direct3D11,
+             Render::RendererApi::Direct3D12, Render::RendererApi::Metal,
+             Render::RendererApi::OpenGL, Render::RendererApi::OpenGLES,
+         })
+    {
+        Render::RenderDeviceCreateParams params{};
+        params.rendererApi = api;
+
+        auto result = Render::createNullRenderDevice(params);
+
+        ASSERT_FALSE(result.has_value()) << "Null device accepted API " << static_cast<int>(api);
+        EXPECT_EQ(result.error().code, Render::RenderErrorCode::DeviceInitializationFailed);
+    }
+
+    // Automatic is the one it can satisfy, and still does.
+    Render::RenderDeviceCreateParams automatic{};
+    automatic.rendererApi = Render::RendererApi::Automatic;
+    EXPECT_TRUE(Render::createNullRenderDevice(automatic).has_value());
+}
+
 TEST(NullRenderDeviceTest, SeedsVsyncFromCreateParamsAndAcceptsRuntimeChanges)
 {
     Render::RenderDeviceCreateParams params{};
