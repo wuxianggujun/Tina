@@ -107,6 +107,10 @@ struct RenderStatistics final {
     u64 submitted = 0;
     u64 presented = 0;
     u64 skippedSuspendedSurfaceFrames = 0;
+    // Times the backbuffer was rebuilt because the surface's native window was
+    // replaced (ADR 0034). Zero on desktop, where the native window is stable for the
+    // device lifetime; a gate can assert that.
+    u64 nativeSurfaceRebinds = 0;
     u64 liveResources = 0;
     // Resources that are logically stale but whose native handles are still
     // waiting for backend-proven GPU completion.

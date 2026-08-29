@@ -49,6 +49,19 @@ struct RenderSurfaceState final {
     RenderSurfaceContentScale contentScale{};
     u64 sourceMetricsRevision = 0;
     u64 surfaceRevision = 0;
+    // Bumped only when the *native* window behind this surface is replaced -- Android
+    // destroys its ANativeWindow on background and hands back a different one on
+    // resume. Orthogonal to surfaceRevision, which tracks geometry and availability.
+    //
+    // It is deliberately not folded into Suspended: that state promises the resources
+    // are still valid and only presentation is paused, whereas a new native window
+    // means the backbuffer's surface and swapchain must be rebuilt. Conflating them
+    // would leave the engine holding a backbuffer attached to a window that is gone
+    // (ADR 0034).
+    //
+    // Starts at 1 so the first committed state is already a valid binding; 0 means
+    // "no binding published yet" and is refused by validation.
+    u64 nativeBindingRevision = 1;
     RenderSurfaceAvailability availability = RenderSurfaceAvailability::Suspended;
 };
 

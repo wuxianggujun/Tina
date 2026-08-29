@@ -155,6 +155,12 @@ surfaceRevision, suspended }`。Surface adapter 禁止再次查询 GLFW 或独�
   变化立即返回结构化 `NativeWindowBindingChangedUnsupported`，停止 ingress 并进入 Failed → Draining，
   不销毁仍被旧 lease pin 住的窗口。未来只有新增内部 rebind capability 与独立 ADR 后才允许重获 lease。
 
+  > **本条已被 [ADR 0034](0034-native-surface-rebind.md) 取代（2026-08-29）。** 上文记录的是 M7-B 当时的
+  > 实现边界，但被写成了能力限制。实测 bgfx 的 `setPlatformData()` 允许在 `init` 之后更换 native window
+  > handle（`bgfx.cpp:448-458` 的断言只禁止改 display type 与 context），且 `renderer_vk.cpp:7622-7626`
+  > 已有对应的 surface/swapchain 重建路径。ADR 0034 按本条自己规定的解锁条件（新增独立 ADR）允许 live
+  > rebind；`NativeWindowBindingChangedUnsupported` 保留给真正无法 rebind 的后端。历史理由保持原样。
+
 ### Suspend、Resume、Close 与 Drain 状态机
 
 每个 surface 独立遵循以下状态，而不是修改整个 RenderDevice 的全局可用性：

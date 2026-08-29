@@ -17,7 +17,8 @@ namespace {
 
 [[nodiscard]] Core::Status validateStructure(const RenderSurfaceState& state)
 {
-    if (!state.surface.hasValue() || state.sourceMetricsRevision == 0 || state.surfaceRevision == 0)
+    if (!state.surface.hasValue() || state.sourceMetricsRevision == 0 || state.surfaceRevision == 0 ||
+        state.nativeBindingRevision == 0)
     {
         return invalidSurfaceState("A render surface contains an invalid identity or revision");
     }
@@ -91,12 +92,23 @@ Core::Status RenderSurfaceStateTracker::validateAndCommit(const std::optional<Re
         return invalidSurfaceState("Render surface identity changed after device creation");
     }
     if (state->sourceMetricsRevision < previous.sourceMetricsRevision ||
-        state->surfaceRevision < previous.surfaceRevision)
+        state->surfaceRevision < previous.surfaceRevision ||
+        state->nativeBindingRevision < previous.nativeBindingRevision)
     {
         return invalidSurfaceState("Render surface revisions must not move backward");
     }
 
-    const bool factsChanged = surfaceFactsChanged(*state, previous);
+    // A replaced native window is always a new backbuffer fact, so it has to arrive
+    // with a new surfaceRevision. Without this a backend could observe the rebind and
+    // the geometry it must reset to in two different frames.
+    const bool nativeBindingChanged = state->nativeBindingRevision != previous.nativeBindingRevision;
+    if (nativeBindingChanged && state->surfaceRevision == previous.surfaceRevision)
+    {
+        return invalidSurfaceState(
+            "A render surface native binding change must publish a new surface revision");
+    }
+
+    const bool factsChanged = surfaceFactsChanged(*state, previous) || nativeBindingChanged;
     if (factsChanged && state->sourceMetricsRevision == previous.sourceMetricsRevision)
     {
         return invalidSurfaceState("Render surface facts changed without a new source metrics revision");
@@ -112,6 +124,9 @@ Core::Status RenderSurfaceStateTracker::validateAndCommit(const std::optional<Re
     }
 
     committedState_ = *state;
+    // Latched rather than returned so a backend that does not rebind needs no code
+    // change, and so a rejected commit above cannot leave a rebind pending.
+    nativeBindingChanged_ = nativeBindingChanged;
     return Core::success();
 }
 

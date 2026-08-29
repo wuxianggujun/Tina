@@ -316,6 +316,14 @@ class NullRenderDevice final : public IRenderDevice {
             return Core::failure(std::move(status.error()));
         }
 
+        // The Null device owns no native surface, so a rebind costs it nothing -- but it
+        // still counts one, so the same headless test can assert that a rebind was
+        // observed exactly once per published binding change (ADR 0034).
+        if (surfaceStateTracker_.consumeNativeBindingChanged())
+        {
+            ++statistics_.nativeSurfaceRebinds;
+        }
+
         ++nextFrameIndex_;
         if (frame.primaryWindowSurface.has_value() &&
             frame.primaryWindowSurface->availability == RenderSurfaceAvailability::Suspended)

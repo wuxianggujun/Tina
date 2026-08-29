@@ -1045,6 +1045,85 @@ TEST(NullRenderDeviceTest, RejectsWindowSurfaceRevisionRollbackWithoutMutatingCo
     ASSERT_TRUE(device->present().has_value());
 }
 
+// Android destroys its ANativeWindow on background and returns a different one on
+// resume. Before ADR 0034 that terminated the whole run; now it is an ordinary surface
+// event that rebuilds the backbuffer while every device resource and AssetLease stays
+// alive. Counted per published change so a rebind cannot be silently skipped or applied
+// twice.
+TEST(NullRenderDeviceTest, AcceptsNativeBindingRebindAndCountsItOncePerChange)
+{
+    auto initial = activeSurface();
+    initial.sourceMetricsRevision = 4;
+    initial.surfaceRevision = 4;
+    initial.nativeBindingRevision = 1;
+    auto device = createDevice(Render::RenderDeviceCreateParams{.initialPrimaryWindowSurface = initial});
+    ASSERT_NE(device, nullptr);
+    ASSERT_EQ(device->statistics().nativeSurfaceRebinds, 0U);
+
+    // An ordinary frame on the same binding rebinds nothing.
+    ASSERT_TRUE(device->submitFrame(Render::RenderFrame{.frameIndex = 0, .primaryWindowSurface = initial}).has_value());
+    ASSERT_TRUE(device->present().has_value());
+    EXPECT_EQ(device->statistics().nativeSurfaceRebinds, 0U);
+
+    // Resume with a new native window. The extent is deliberately unchanged: a
+    // same-size resume is the case a geometry-only check would miss.
+    auto rebound = initial;
+    rebound.nativeBindingRevision = 2;
+    rebound.surfaceRevision = 5;
+    rebound.sourceMetricsRevision = 5;
+    ASSERT_TRUE(device->submitFrame(Render::RenderFrame{.frameIndex = 1, .primaryWindowSurface = rebound}).has_value());
+    ASSERT_TRUE(device->present().has_value());
+    EXPECT_EQ(device->statistics().nativeSurfaceRebinds, 1U);
+
+    // The latch is consumed: a further frame on the same binding does not rebind again.
+    ASSERT_TRUE(device->submitFrame(Render::RenderFrame{.frameIndex = 2, .primaryWindowSurface = rebound}).has_value());
+    ASSERT_TRUE(device->present().has_value());
+    EXPECT_EQ(device->statistics().nativeSurfaceRebinds, 1U)
+        << "a rebind was applied again without a new native binding revision";
+}
+
+// The rebind must arrive with a new surfaceRevision, or a backend would learn that the
+// window changed in one frame and the geometry to reset to in another.
+TEST(NullRenderDeviceTest, RejectsNativeBindingChangeWithoutANewSurfaceRevision)
+{
+    auto initial = activeSurface();
+    initial.sourceMetricsRevision = 4;
+    initial.surfaceRevision = 4;
+    initial.nativeBindingRevision = 1;
+    auto device = createDevice(Render::RenderDeviceCreateParams{.initialPrimaryWindowSurface = initial});
+    ASSERT_NE(device, nullptr);
+
+    auto reboundWithoutRevision = initial;
+    reboundWithoutRevision.nativeBindingRevision = 2;
+    reboundWithoutRevision.sourceMetricsRevision = 5;
+    auto missingSurfaceRevision = device->submitFrame(
+        Render::RenderFrame{.frameIndex = 0, .primaryWindowSurface = reboundWithoutRevision});
+    ASSERT_FALSE(missingSurfaceRevision.has_value());
+    EXPECT_EQ(missingSurfaceRevision.error().code, Render::RenderErrorCode::InvalidSurfaceState);
+
+    // A rebind is a surface fact change, so it also needs new source metrics.
+    auto reboundWithoutMetrics = initial;
+    reboundWithoutMetrics.nativeBindingRevision = 2;
+    reboundWithoutMetrics.surfaceRevision = 5;
+    auto missingMetrics =
+        device->submitFrame(Render::RenderFrame{.frameIndex = 0, .primaryWindowSurface = reboundWithoutMetrics});
+    ASSERT_FALSE(missingMetrics.has_value());
+    EXPECT_EQ(missingMetrics.error().code, Render::RenderErrorCode::InvalidSurfaceState);
+
+    // Rolling the binding backward is refused like any other revision rollback.
+    auto rolledBack = initial;
+    rolledBack.nativeBindingRevision = 0;
+    auto invalidZero = device->submitFrame(Render::RenderFrame{.frameIndex = 0, .primaryWindowSurface = rolledBack});
+    ASSERT_FALSE(invalidZero.has_value());
+    EXPECT_EQ(invalidZero.error().code, Render::RenderErrorCode::InvalidSurfaceState);
+
+    // None of the refusals mutated committed state, so the original binding still works
+    // and no rebind was counted.
+    ASSERT_TRUE(device->submitFrame(Render::RenderFrame{.frameIndex = 0, .primaryWindowSurface = initial}).has_value());
+    ASSERT_TRUE(device->present().has_value());
+    EXPECT_EQ(device->statistics().nativeSurfaceRebinds, 0U);
+}
+
 TEST(NullRenderDeviceTest, RequiresSurfaceRevisionToMatchCommittedFactChanges)
 {
     const auto initial = activeSurface();

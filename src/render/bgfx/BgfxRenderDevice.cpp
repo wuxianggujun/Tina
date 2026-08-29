@@ -1762,6 +1762,18 @@ class BgfxRenderDevice final : public IRenderDevice {
         committedSurfaceState_ = *frame.primaryWindowSurface;
         ++nextFrameIndex_;
 
+        // A replaced native window (Android background/resume) must be handed to bgfx
+        // before anything is submitted against the old backbuffer. Device-scope
+        // resources -- programs, textures, meshes, shadow atlases -- survive: only the
+        // surface and swapchain are rebuilt, so no asset is re-uploaded (ADR 0034).
+        if (surfaceStateTracker_.consumeNativeBindingChanged())
+        {
+            if (auto status = rebindNativeSurface(); !status)
+            {
+                return Core::failure(std::move(status.error()));
+            }
+        }
+
         if (!framePlan->shouldSubmit())
         {
             ++statistics_.skippedSuspendedSurfaceFrames;
@@ -2453,6 +2465,32 @@ class BgfxRenderDevice final : public IRenderDevice {
     {
         bgfx::reset(extent.width, extent.height, resetFlags_);
         appliedBackbuffer_ = extent;
+    }
+
+    // Points bgfx at the surface's current native window and rebuilds the backbuffer.
+    //
+    // setPlatformData() is documented "must be called before bgfx::init", but its
+    // implementation only forbids changing the display type and context after init
+    // (bgfx.cpp:448-458) -- the native window handle is explicitly allowed, and
+    // renderer_vk.cpp:7622-7626 recreates the surface when it observes a different nwh
+    // on the following reset. This is the same path bgfx's own Android example relies
+    // on, and it is why a rebind does not need bgfx::shutdown().
+    [[nodiscard]] Core::Status rebindNativeSurface()
+    {
+        auto binding = decodeNativeWindowBinding(lease_);
+        if (!binding)
+        {
+            return Core::failure(std::move(binding.error()));
+        }
+        bgfx::setPlatformData(binding->platformData);
+        // Forced because the extent may be unchanged across the rebind: without this a
+        // same-size resume would skip the reset that actually rebuilds the swapchain.
+        const RenderSurfaceExtent extent =
+            BgfxSurfaceFramePlanner::bootstrapBackbufferExtent(committedSurfaceState_);
+        resetBackbuffer(extent);
+        resetFlagsDirty_ = false;
+        ++statistics_.nativeSurfaceRebinds;
+        return Core::success();
     }
 
     void submitRetirementMarkerIfNeeded() noexcept

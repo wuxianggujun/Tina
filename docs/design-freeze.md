@@ -46,6 +46,7 @@
 | UI Keyframe | 每窗口 fixed-capacity timeline、唯一 monotonic clock、presentation owner，以及 Layout/Hit/Paint 原子 layout-animation 边界 | [0026](adr/0026-ui-keyframe-timeline-and-layout-animation.md) | Accepted/Implemented：paint 与 bounded `LayoutWidth`/`LayoutHeight`/`LayoutOffset` timeline、跨 motion candidate transaction、Runtime facade 与两个 workload 均已落地；UI/Runtime/bench unit 及 seed 0/1/2 确定性 gate 已通过 |
 | UI Grid | Flex/Grid 并存；普通 Flow child 使用固定8x8 `Px/Auto/Fr` track、span、row-major auto placement 与 per-item alignment | [0028](adr/0028-ui-fixed-capacity-grid-layout.md) | Implemented：公开 layout 契约、normalization、私有 Measure/Arrange、header isolation 与 Editor Inspector consumer 已落地；不替代 VirtualGridView/DataGrid |
 | UI Layout Debugger | 始终编译的 fixed-capacity committed layout snapshot、Runtime 精确拾取与 frame-local Render overlay | [0029](adr/0029-ui-layout-debugger.md) | Implemented：UI capability、双缓冲原子 publication、phase facade、pointer-hit query、subtree exclusion、DisplayList overlay 与 Editor DevTools consumer 已落地；容量默认关闭，产品显式启用 |
+| Native surface rebind | native binding 变化是 surface **事件**（`nativeBindingRevision`）而非 `Suspended` 状态；rebind 只重建 surface/swapchain，device 资源与 `AssetLease` 全部存活 | [0034](adr/0034-native-surface-rebind.md) | Implemented：tracker 校验（递增须伴随新 surface/metrics revision，后退与 0 拒绝）+ latch 通知 backend；bgfx 用 `setPlatformData` + 强制 reset，不 `shutdown()`；未新增 `IRenderDevice` 纯虚、未新增 drain 协议。取代 [0020](adr/0020-window-surface-handoff.md) 的「不支持 live native rebind」。**待**：Android 真机验证 |
 
 ## Proposed
 

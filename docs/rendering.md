@@ -39,6 +39,31 @@ Texture2D/GPU mesh/EnvironmentMap 已有独立、backend-proven 的 GPU resource
 返回后不能保存。`submitFrame()` 返回 `Submitted` 或 `SkippedSuspendedSurface`；只有前者允许 Runtime
 调用 `present()`。
 
+### native surface 重建（`nativeBindingRevision`）
+
+`RenderSurfaceState::nativeBindingRevision` 单调递增，**仅在 surface 背后的 native window 被替换时**
+递增——Android 切后台销毁 `ANativeWindow`、回前台给一个新的。它与 `surfaceRevision` 正交，后者表达
+几何与可用性。
+
+**它不能与 `Suspended` 合并**：`Suspended` 承诺资源仍然有效、只是暂停呈现；而新的 native window 意味着
+backbuffer 的 surface 与 swapchain 必须重建。合并会让引擎持有一个依附于已消失窗口的 backbuffer
+（[ADR 0034](adr/0034-native-surface-rebind.md)）。
+
+校验集中在 `RenderSurfaceStateTracker`：递增必须伴随新的 `surfaceRevision` 与新的
+`sourceMetricsRevision`（binding 变化本身就是一次 surface fact 变化），后退与 0 一律拒绝。tracker 用
+一个 latch 把「本次提交发生了 rebind」告知 backend，因此不 rebind 的 backend 无需任何改动，且被拒绝的
+提交不会遗留待处理的 rebind。
+
+bgfx 后端的 rebind 是 `setPlatformData(新 nwh)` + 强制 `bgfx::reset()`，**不调用 `bgfx::shutdown()`**。
+`setPlatformData()` 的头文件注释写「必须在 `init` 之前调用」，但其实现只禁止改 display type 与 context
+（`bgfx.cpp:448-458`），native window handle 明确允许更换；`renderer_vk.cpp:7622-7626` 在下一次 reset
+观察到不同的 nwh 时重建 surface。reset 是强制的，因为 resume 时 extent 可能不变——只看几何会漏掉
+same-size resume。
+
+因此 **program/texture/mesh/shadow atlas 等 device 资源与全部 `AssetLease` 都存活**，没有资源被重新上传。
+`RenderStatistics::nativeSurfaceRebinds` 记录次数；桌面恒为 0（native window 在 device 生命周期内不变），
+产品 gate 可据此断言。`NativeWindowBindingChangedUnsupported` 保留给真正无法 rebind 的后端。
+
 `RenderFramePacket` + `FramePin` + `ISubmissionCompletionLedger` 已接入 EngineHost：submit 前可登记
 Surface/GlyphAtlas pin；失败路径 abandon；suspended skip 与成功 present 都确定性释放。Host 持有
 `unique_ptr<ISubmissionCompletionLedger>`，可选 factory 只允许替换记账实现，**不能改变完成时点**。
