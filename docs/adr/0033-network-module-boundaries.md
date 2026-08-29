@@ -1,7 +1,7 @@
 # ADR 0033：网络模块边界与跨线程完成契约
 
-- 状态：Proposed
-- 日期：2026-08-28
+- 状态：Accepted
+- 日期：2026-08-28（2026-08-29 按已落地实现校准）
 - 决策者：Tina maintainers
 
 ## 背景
@@ -37,18 +37,15 @@ libwebsockets 2.4.2 为 **LGPL-2.1 + 静态链接例外**，其署名声明是�
 （`SOCK_DGRAM`/`recvfrom`/`sendto` 在 `cocos/`、`extensions/` 零命中），故 UDP 方向
 无可参考先例。
 
-## 待确认决策
+## 决策记录
 
-本 ADR 为 Proposed，下表为待 maintainer 追认的决策点。
+本节记录已定案的决策点。**实现先于追认** —— owner 逐轮口头授权推进，模块整体落地后本
+ADR 才转 Accepted。这个顺序本身是流程偏差，留在此处而非抹平：它使本文档有一段时间与
+代码不符，而下面的「与首版的偏差」正是那段时间累积的账。
 
-**实施状态（2026-08-28）：** 项目 owner 已授权按下表推荐值实施，UDP datagram 首切片
-（D1）已落地，`ErrorDomain::Network = 15` 与 `MemoryTag::Network = 13` 已写入 Core
-共享头。因此本表记录的是**已执行的选择**，而非待选项；若 maintainer 否决其中任何一条，
-需先更新本 ADR 再回滚对应实现。
-
-**D3 与 D7 已于 2026-08-28 撤销并由 D11 取代。** 原 D3 把问题设成「worker 干完活结果
-怎么回到 owner 线程」，这个提问本身预设了 worker 的存在，而该前提是错的：TCP/TLS 的
-慢在**等**而不在**算**，等待可以不占线程。撤销理由见下方 D11 与「决定」第 12 节。
+**D3 与 D7 已撤销并由 D11 取代。** 原 D3 把问题设成「worker 干完活结果怎么回到 owner
+线程」，这个提问预设了 worker 的存在，而该前提对 TCP/TLS 是错的：慢在**等**而不在
+**算**，等待不必占线程。理由见 D11 与第 12 节。
 
 | # | 决策点 | 推荐 | 主要备选与取舍 |
 | --- | --- | --- | --- |
@@ -56,22 +53,40 @@ libwebsockets 2.4.2 为 **LGPL-2.1 + 静态链接例外**，其署名声明是�
 | D2 | 模块切分 | **neutral `Tina::Network` + 独立 adapter** | 单一 `tina_network` 全包：cocos2d-x 正是如此，结果 HttpClient 分裂成三份复制粘贴（其一 31KB 无人编译）。neutral + adapter 复用 `Tina::Audio` / `Tina::AudioMiniaudio` 既有先例 |
 | ~~D3~~ | ~~完成通知机制~~ | **已撤销，见 D11** | 撤销于 2026-08-28。原推荐（Asset 式 per-request 状态 + 原子标志）与备选（`postMain`/`pumpMain`）都在用线程模拟等待。`postMain` 另有两处实测代价：它与 `scheduleIo`/`scheduleCpu` 共用同一把 `m_mutex`（`BoundedTaskSystem.cpp:325`，三个 queue 全在其下），故每个完成事件都与所有任务提交争锁；且 `TaskCallable` 是 `std::move_only_function<void()>`，每个事件一次堆分配，与稳态零分配冲突 |
 | D4 | `ErrorDomain` 是否新增 `Network = 15` | **新增** | 复用 `Platform`：语义不符，且 `AssetFormat` 复用 `Asset` domain 的做法依赖显式值域划分注释（`AssetErrors.hpp:7`），网络无自然归属。新增即触碰共享头，须与其他并行工作协调 |
-| D5 | `MemoryTag` 是否新增 `Network` | **待定** | 新增会把 `MemoryTagCount` 从 13 改到 14，连带改 `memoryTagName()` switch 与 `PublicHeaderIsolationTests` 的 static_assert；复用 `Core` tag 则诊断粒度变粗 |
-| D6 | TLS 策略（若 D1 选 HTTP/WSS） | **默认使用系统信任库，校验失败即失败** | 见"决定"第 5 节。跳过校验必须显式、刺眼、且 Release 不可生效 |
+| D5 | `MemoryTag` 是否新增 `Network` | **已新增** | 落地时 `MemoryTagCount` 由 13 改为 14，并同步 `memoryTagName()` switch 与**两处** static_assert（`PublicHeaderIsolationTests.cpp:39`、`MemoryTrackerTests.cpp:50`）。复用 `Core` tag 则诊断粒度变粗 |
+| D6 | TLS 信任锚来源 | **平台信任库优先，显式锚点覆盖，不内嵌 bundle** | 见第 5 节与 D13。跳过校验必须显式、刺眼、且 Release 不可生效 |
 | ~~D7~~ | ~~取消语义~~ | **已简化，见 D11** | 撤销于 2026-08-28。跨线程取消需要「不再投递完成」这种绕的承诺，因为无法中断已进入 syscall 的操作。在单线程 readiness 模型下取消就是把状态机置为 Cancelled 并关闭 socket，同步完成、无需跨线程协调。仍不承诺远端未收到已发出的字节 |
 | D8 | 完成顺序 | **允许乱序，按完成时序投递** | 严格 FIFO：见背景，队头阻塞 |
 | D9 | 可靠 UDP / netcode 是否在范围内 | **不在** | 序号/ack/重传/分片重组/拥塞控制/快照 delta/客户端预测是独立子系统，需单独 ADR |
 | D10 | 第三方选型 | **传输层零第三方；TLS 另议** | 平台 socket + readiness API 足以实现 UDP/TCP。TLS 必须选可非阻塞驱动的库（OpenSSL memory BIO 或 mbedTLS 自定义 BIO），不接受自带线程或自带事件循环的库。注意 libuv 已因 lws 被链入但项目从不调用（`cocos/` 侧 `uv_` 零命中），不构成可用基础 |
 | D11 | 传输的并发模型 | **owner-thread readiness 多路复用，不引入 worker 线程** | 取代 D3/D7。每帧一次 `WSAPoll`/`epoll_wait`（timeout=0）覆盖全部 socket，然后推进各自状态机。线程池方案：与非原子 `FixedRing`（`AudioEngine.cpp:29-89` 的 head/tail/count 均非 atomic）、稳态零分配、单线程 mutation 三条既有约束处处冲突。代价是要写状态机，且 TLS 需非阻塞接口 |
-| D12 | DNS 解析 | **切出本 ADR，先只支持数值地址** | `getaddrinfo` 阻塞且无可移植非阻塞版本，是 readiness 模型下唯一真正需要线程的部分。它应作为独立切片，届时那个窄口子才是 `postMain` 的合理首个用户 —— 而非整条网络关键路径 |
+| D12 | DNS 解析 | **独立切片，`scheduleIo` + owner 轮询** | `getaddrinfo` 阻塞且无可移植非阻塞版本，是 readiness 模型下唯一真正需要线程的部分。**首版曾推荐 `postMain`，实现时改用 `scheduleIo` + per-request `atomic<Outcome>` + owner 轮询** —— 见 D14 |
+| D13 | 是否自建 DNS over UDP 以保持单线程 | **不自建** | 只有 c-ares 走这条路，代价是放弃 `getaddrinfo`/nsswitch 背后的一切：NSS 模块、DNSSEC、mDNS `.local`、split-horizon/VPN 分流、search domain、Windows NRPT。c-ares#134 记录了它采集到 loopback/VirtualBox 的 site-local server 并排在真实 resolver 之前，造成「multi-second delays of up to 14 seconds」；curl 维护者 Eissing：「it can never reach 100% equality」，且「Many distributions building curl do therefore not enable c-ares」 |
+| D14 | DNS 的完成回传机制 | **`scheduleIo` + per-request 原子标志 + owner 轮询** | 取代 D12 首版推荐的 `postMain`。三条实测理由：`pumpMain` **不捕获异常**（`BoundedTaskSystem.cpp:175-179` 无 try/catch，而 `workerLoop:296-306` 有），任务抛出会逃到调用方且该任务已出队无法重试；`postMain` 与 `scheduleIo`/`scheduleCpu` 共用同一把 `m_mutex`（`:325`，三个 deque 全在其下）；`TaskCallable` 是 `std::move_only_function<void()>`，每事件一次堆分配。而 `AssetSystem.cpp:1328-1419` 的 per-request 模式在本仓库已有验证，且不吃这三项代价。**但不照抄它的 completed-prefix 顺序**（`:1445-1452`），那对网络是队头阻塞 |
 
-## 决定（Proposed）
+## 与首版的偏差
 
-### 1. 本 ADR 不实现任何协议
+本 ADR 首版写在实现之前，随后模块整体落地。以下是文档与代码分歧过、现已按代码校准的
+条目。列出而非改写，因为「为什么当初那样想」和「为什么最后没那样做」都是决策的一部分。
 
-本轮交付物只有契约。协议实现、第三方依赖接线、构建接线、测试目录均在 D1-D10
-确认之后另行开工。现存 `src/network/`、`include/tina/network/` 草稿**不得增量扩写**
-—— 它依赖不存在的枚举成员与不采用的测试惯例，须在实现开始时整体重写。
+| 处 | 首版所写 | 实际实现 | 为什么改 |
+| --- | --- | --- | --- |
+| §1 | 「本 ADR 不实现任何协议」 | UDP/TCP/TLS/HTTP/WebSocket/DNS/Listener 全部落地 | 该句描述的是首版交付范围，模块推进后成为陈述性错误 |
+| §3 | scratch 用 `std::fill` 清理 | 用 `memmove` 压缩前缀 | 网络缓冲是**流**而非槽位表：消费一个前缀后剩余字节必须搬到头部保持连续，调用方拿到的是 `span`。`std::fill` 适合 `PhysicsNavigationSync2D` 那种定长槽位，不适合流 |
+| §3 | 查找用 `occupied` + 线性扫描 | 仅 `DnsResolver` 与 `ReadinessPoller` 如此 | UDP/TCP 没有槽位表可扫；它们是单 socket 加缓冲区 |
+| §4 | `pump()` 走 plan → preflight → apply | TCP/TLS/HTTP/WebSocket 是状态机 | 三阶段适合「一次发布一批相互依赖的变更」；协议推进是**逐步**的，每步都可能只完成一部分（部分写、半个 frame），没有可整体回滚的批次 |
+| §5 | 「默认使用平台系统信任库」 | 首版实现**不读** store，要求调用方自带锚点 | 文档原本是对的、实现落后。2026-08-29 已按 D6 补齐平台 store 读取 |
+| §6 | cancel 语义是「不再投递完成」 | readiness 传输是同步关闭；只有 DNS 是延迟语义 | 单线程 readiness 下取消可以同步完成，不需要那条绕行承诺。它只对无法中断的 `getaddrinfo` 成立 |
+| §8 | 句柄用 `Core::GenerationId` | `DnsQueryHandle` 自建 slot + generation | 公开头引 `GenerationId.hpp` 会把 Core 的 ID 体系拉进网络的公开面，而 DNS 只需要两个 `u32`。generation-safe 的语义保留了 |
+| D5 | 「待定」 | 已新增 | 表格未随实现更新，与同节上方段落自相矛盾 |
+| D12 | DNS 用 `postMain` | 用 `scheduleIo` + 轮询 | 见 D14 的三条实测理由 |
+
+## 决定
+
+### 1. 交付顺序
+
+首版只交付契约；实现随后逐切片推进，每切片自带测试与门禁。现已全部落地，遗留缺口见
+「结果」节。
 
 ### 2. Owner-thread 单线程 mutation
 
@@ -85,45 +100,78 @@ libwebsockets 2.4.2 为 **LGPL-2.1 + 静态链接例外**，其署名声明是�
 选择：既有的非原子 `FixedRing`、稳态零分配与单线程 mutation 三条约束都建立在这个
 前提上。
 
-### 3. 固定容量、Create 一次性分配、稳态零分配
+唯一例外是 `DnsResolver` 的 worker（第 13 节）：它只写自己独占的 per-request 状态，
+以一次 release store 发布，从不触碰 owner 的容器。
+
+### 3. 固定容量与 Create 一次性分配
 
 容量在 `Create` 的 Config 中声明并校验非零，存储用 `std::pmr::vector` 在 `Create`
-时 `resize()` 到定容，运行期只改内容不改 size；scratch 用 `std::fill` 清理而非
-`clear()`/`resize()`。查找用 `occupied` 标志 + 线性扫描（`GenerationPool` 无迭代器
-，见 `src/audio/AudioEngine.cpp:1445`，而网络每次 `pump()` 需全量扫描）。这套形状
-照 `PhysicsNavigationSync2D`（`src/asset/PhysicsNavigationSync2D.cpp:33-62` 的
-Create、`:64-83` 的线性查找、`:233-237` 的 `clearPlan`）。
+时 `resize()` 到定容，运行期不改 size。
 
-`Error` 构造会分配（C4），故成功路径永不构造 `Error`；容量耗尽等预期失败返回
-带 message 的 `Error` 是可接受的一次性分配。稳态零分配须由分配计数门禁证明，
-形态照 `tests/asset/Sprite2DBindingRegistryTests.cpp:1430-1457`。
+**槽位表与流用不同的清理方式。** `DnsResolver`/`ReadinessPoller` 是定长槽位表，查找用
+`occupied` 标志加线性扫描（`GenerationPool` 无迭代器，见 `AudioEngine.cpp:1445`）。而
+UDP/TCP/HTTP/WebSocket 的接收缓冲是**流**：调用方消费一个前缀后，剩余字节必须 `memmove`
+到头部以保持连续，因为交出去的是 `span`。首版写的 `std::fill` 只适合前者。
 
-### 4. 三阶段 plan → preflight → apply
+`Error` 构造会分配（C4），故成功路径永不构造 `Error`；容量耗尽等预期失败返回带 message
+的 `Error` 是可接受的一次性分配。稳态零分配须由分配计数门禁证明，形态照
+`tests/asset/Sprite2DBindingRegistryTests.cpp:1430-1457`。
 
-`pump()` 遵循与 `PhysicsNavigationSync2D::synchronize()`
-（`src/asset/PhysicsNavigationSync2D.cpp:239-377`）相同的结构：先只写 scratch 完成
-plan，再一次性预检全部容量，最后按固定顺序 apply。任一阶段失败保留上一次成功
-发布的状态，不留部分生效的中间态。
+### 4. 协议推进是状态机，不是批量发布
+
+首版要求 `pump()` 走 `PhysicsNavigationSync2D::synchronize()` 那种
+plan → preflight → apply。实现没有采用：那个形状适合「一次发布一批相互依赖的变更」，
+而协议推进是**逐步**的 —— 一次 `send` 可能只走掉一半、一个 frame 可能只到一半 —— 没有
+可整体回滚的批次。
+
+取而代之的不变量是：**任何一步失败都保留上一次成功发布的状态**。未发完的尾部留在队列
+里，未解析完的字节留在缓冲里，都不产生部分生效的中间态。
 
 ### 5. TLS 默认安全，且不可静默降级
 
-默认使用平台系统信任库并完整校验证书链与主机名。校验失败即请求失败，不降级、
-不自动加例外。跳过校验只能经显式命名的 opt-in 字段开启，该字段在 Release 配置下
-不生效。CA 来源、证书固定（pinning）是否支持留待 D6。
+完整校验证书链与主机名。校验失败即失败，不降级、不自动加例外。跳过校验需要两个独立
+opt-in（`InsecureSkipVerify` 加 `allowInsecureVerification`），且 Release 构建直接拒绝。
 
-这条直接针对 cocos2d-x 的三层不安全默认：`HttpClient.cpp:193-195` 在 CA 为空时关闭
+**信任锚来源：平台 store 优先，显式锚点覆盖，不内嵌 bundle。** 调用方留空
+`trustAnchorsPem` 即使用平台 store；提供锚点则**替换**而非追加平台集合，使固定私有 CA
+的调用方不会仍然信任所有公共 CA。这是 Godot 的优先级模型（显式 bundle 覆盖胜出，OS
+store 其次）。
+
+**不内嵌 CA bundle。** 内嵌意味着一份会过期的负债 —— Godot 保留内嵌 bundle 仅作为无法
+读取 store 的平台的兜底，而正是那份兜底会过期。平台不可读时本模块选择明确失败并要求
+调用方提供锚点，而不是静默用一份陈旧快照。
+
+**读锚点不等于把裁决交给 OS。** 本实现提取一份扁平锚点列表交 mbedTLS 判定，因此平台的
+distrust 记录、EKU 约束、CTL 状态与吊销信息**均未被查询**。这是行业普遍限制：Godot、
+UE5（非 Apple）、Unity 都是如此，只有 UE5-on-Apple 与 `rustls-platform-verifier` 真正
+委托裁决。rustls 自己的文档措辞是 system store「with no (dis)trust decisions. All roots
+are treated equally regardless of their status」。具体后果：macOS store 仍列出 Apple
+按日期屏蔽的 StartCom 锚点，扁平快照无法表达这条。该限制写在公开头而非藏在实现里。
+
+**一次读取并缓存。** 平台 store 在进程内只读一次。成本是实测的：naive 实现会「populate
+the x509 store again for every *new* connection」，而解析成本随 OpenSSL 版本从 4.5ms
+跳到 50ms（openssl#16878），macOS 在 Go 的测量里到秒级。Godot 在 `main.cpp` 启动时读一
+次，UE5 在 `FSslModule::StartupModule()` 读一次，本模块同此。
+
+这条针对 cocos2d-x 的三层不安全默认：`HttpClient.cpp:193-195` 在 CA 为空时关闭
 `VERIFYPEER`/`VERIFYHOST`；`CCDownloader-curl.cpp:390-391` 无条件关闭且无开关；
 `WebSocket.cpp:845` 降级为 `ALLOW_SELFSIGNED | SKIP_SERVER_CERT_HOSTNAME_CHECK`。
 其 Apple 死代码更进一步，在 `kSecTrustResultRecoverableTrustFailure` 时用
 `SecTrustSetExceptions` 把导致失败的原因加入白名单（`HttpClient-apple.mm:185-191`）。
 
-### 6. 取消是一等公民，语义明确
+### 6. 取消语义按传输分层
 
-每个在途操作有 generation-safe 句柄，句柄级 `cancel()` 是公开 API 的组成部分而非
-后续扩展。语义明确为"不再向 owner 投递完成事件"，**不承诺**已发出的字节未送达、
-不承诺远端未收到。这一点必须写进公开头注释，避免 cocos2d-x 那种
-`clearResponseAndRequestQueue` 只能清未出队请求、已进入 `curl_easy_perform` 的请求
-无法中断而契约又不说明的状态。
+每个在途操作有 generation-safe 句柄，句柄级 `cancel()` 是公开 API 而非后续扩展。
+
+**readiness 传输（UDP/TCP/TLS/HTTP/WebSocket）的取消是同步的** —— 置状态并关闭 socket，
+当场完成。单线程模型下不需要「不再投递完成」这种绕行承诺。
+
+**只有 DNS 是延迟语义。** `getaddrinfo` 无法中断，所以取消标记 slot 为 abandoned，直到
+worker 发布才回收；立刻复用会让 worker 写进后续查询占用的 slot。
+
+两者都**不承诺**已发出的字节未送达、不承诺远端未收到。这写在公开头，避免 cocos2d-x 那种
+`clearResponseAndRequestQueue` 只能清未出队请求、已进入 `curl_easy_perform` 的无法中断
+而契约又不说明的状态。
 
 ### 7. 所有接收路径有显式上限
 
@@ -202,45 +250,49 @@ datagram 超出缓冲区时静默截断，使「恰好等于缓冲区」与「�
 readiness 层是新建而非复用。UDP 切片因每帧 `receive()` 已是此模型的退化形式（单
 socket、无需 poll），故与本节一致，不需要改造。
 
-### 13. DNS 是唯一的线程例外，且切出本 ADR
+### 13. DNS 是唯一的线程例外
 
-`getaddrinfo` 阻塞且无可移植的非阻塞版本，是 readiness 模型下唯一真正需要线程的
-部分。因此：传输层先只接受数值地址（UDP 切片已如此），DNS 作为独立切片单独设计。
+`getaddrinfo` 阻塞且无可移植非阻塞版本，是 readiness 模型下唯一真正需要线程的部分。
+这与全行业一致，不是本项目的妥协：libuv 用 4 线程池（且 DNS 受
+`slow_work_thread_threshold` 限制，默认池下并发只有 **2**）、Boost.Asio 每 execution
+context 一条 resolver 线程、libcurl 8.20 起用线程池（`CURLMOPT_RESOLVE_THREADS_MAX`
+默认 20）。Godot 更保守：**单条** resolver 线程串行处理，256 个待处理槽位，缓存无 TTL
+无淘汰。
 
-那个切片才是 `postMain` 的合理首个用户 —— 一个窄口子、低频调用、失败可重试，而不是
-整条网络关键路径。在它落地前，需要域名的调用方自行解析并传入数值地址。
+唯一的例外是 c-ares —— 它自己讲 DNS 协议以保持单线程，代价见 D13，本模块不走那条路。
+
+**完成回传用 `scheduleIo` + per-request 原子标志 + owner 轮询，不用 `postMain`。**
+理由见 D14。传输层只接受数值地址，域名解析是调用方显式调用 `DnsResolver` 的一步 ——
+不在 `HttpRequest` 内部隐式解析，因为那会让每个协议都依赖 task system。
 
 ## 结果
 
-- 网络模块的 owner/容量/线程/失败/取消/TLS 语义在实现之前被冻结，避免重演
-  cocos2d-x 那种"默认不安全 + 无取消 + 无界队列"三件套。
-- UDP datagram 首切片已落地并通过门禁，证明第 2/3/7/8 节的形状在真实平台 socket 上
-  可实现且零第三方依赖。第 10/11 节是从该实现的缺陷复盘补写的，对后续传输同样生效。
-- 第 12 节取代原 D3/D7 后，网络不再需要 worker 线程，因此 `postMain`/`pumpMain`
-  （至今零生产调用点）不必由整条网络关键路径充当首个用户；该角色移交给第 13 节的
-  DNS 切片。UDP 与未来 TCP 因此共用同一个并发模型，而不是两套。
-- 成本与限制：readiness 层是新建基础设施（仓库当前对 `epoll`/`WSAPoll`/IOCP/
-  `io_uring`/`kqueue`/`select` 零使用）；TCP 需手写连接状态机；TLS 受限于可非阻塞
-  驱动的库；需要域名的调用方在 DNS 切片落地前必须自行解析。第 12/13 节改变了本 ADR
-  的并发结论，若 maintainer 倾向线程池模型，须先更新本 ADR 再实现。
-- 需要建立的门禁：readiness 层的 pump 在无 socket、全部 idle、部分 ready 三种情形下
-  的行为；连接状态机每个状态转移的定向测试；单次 pump 的 syscall 与工作量上限；
-  取消发生在每个状态时的清理完整性；稳态零分配计数门禁。
-- `postMain`/`pumpMain` 是否成为首个生产用户被显式提为 D3，而不是在实现中偶然
-  决定。
-- 明确了 Asset 的 completed-prefix 顺序**不适用**于网络，避免照抄出队头阻塞。
-- 成本与限制：D1 未定则无法开工；D4/D5 涉及修改 `Core` 共享头
-  （`Error.hpp` 的 `ErrorDomain`、`MemoryTag.hpp` 的 `MemoryTagCount` 及其
-  static_assert），与并行工作有冲突面，须先协调再落地。可靠 UDP、netcode、HTTP/2、
-  HTTP/3、DNS 缓存、代理、断点续传均不在本 ADR 范围。首切片不提供 Editor 或
-  sample 消费面。
-- 需要建立的门禁：每个公开头对应一个 `tests/network/header_isolation/*Header.cpp`
-  单 TU；新公开头加入 `tests/core/PublicHeaderIsolationTests.cpp` 的 include 列表
-  （ADR 0027 §9.1）；`cmake/VerifyInstalledTinaSdkHeaders.cmake` token 清单扩充并由
-  `tools/windows/RunSdkConsumerGate.ps1` 覆盖；容量耗尽 / stale 句柄 / 错误 owner /
-  取消后不投递 / 超限拒绝的定向单测；稳态零分配的分配计数门禁；若引入第三方依赖，
-  新增 `tests/sdk_consumer_network*` consumer gate 与对应 vcpkg feature。测试可执行
-  文件直接运行，不注册 CTest（ADR 0006）。
+- 全部传输已落地并有测试证据：UDP、readiness poller、TCP、TLS（含真实握手）、
+  HTTP/1.1、HTTPS、WebSocket、wss、DNS、TcpListener。`IByteStream` 接缝使 HTTP 与
+  WebSocket 各只有一份实现，`ws`/`wss` 与 `http`/`https` 的差别只是传入哪个流。
+- 除 DNS 外零 worker 线程、零锁、零跨线程 marshal。因此 `postMain`/`pumpMain` 至今
+  仍是零生产调用点 —— D14 决定连 DNS 也不用它，那三条实测代价（不捕获异常、共用
+  `m_mutex`、每事件堆分配）对任何用户都成立，不只对网络。
+- 第 10/11 节是从实现缺陷复盘补写的，对后续传输同样生效。第 11 节尤其：
+  `MaximumDatagramBytes` 原本发得出收不到，是只在恰好取边界值时出现的静默丢包。
+- 成本与限制：
+  - **Linux 一次没验证。** 十个组件的 POSIX 分支写了但从未编译或运行过，包括
+    `SystemTrustStore.cpp` 的 bundle 路径探测。这是当前最大的未知面。
+  - **所有测试在 loopback。** 真实丢包、乱序、重复、路径 MTU 分片、NAT 一概未覆盖；
+    发送缓冲区满的 `WouldBlock` 分支与 `receive()` 的 syscall 上限分支在 loopback 上
+    无法稳定触发。
+  - **不委托验证裁决给 OS**（第 5 节），因此 distrust 记录/EKU/CTL/吊销未被查询。
+  - **无证书固定（pinning）。** UE5 有 `[SSL] +PinnedPublicKeys`，本模块没有。
+  - 不在范围：可靠 UDP、netcode、HTTP/2、HTTP/3、DNS 缓存与 TTL、代理、断点续传、
+    以及委托式验证。
+- 已建立的门禁：每个公开头一个 `tests/network/header_isolation/*Header.cpp` 单 TU；
+  `VerifyInstalledTinaSdkHeaders.cmake` 的 token 清单已扩充 socket/Winsock/mbedTLS 并
+  以合成泄漏头反向验证；容量耗尽 / stale 句柄 / 错误 owner / 取消后不投递 / 超限拒绝
+  的定向单测；稳态零分配的分配计数门禁；`tina_sample_network` 作为 tests 之外的首个
+  消费者，在同一 pump 循环里跑通全部组件。测试可执行文件直接运行，不注册 CTest
+  （ADR 0006）。
+- 尚未建立的门禁：`tina_sample_network` 未接入 product gate 脚本；`RunSdkConsumerGate.ps1`
+  的完整 relocated consumer gate 未随 `Tina::NetworkTls` 复跑。
 
 ## 被拒绝方案
 
@@ -257,10 +309,15 @@ socket、无需 poll），故与本节一致，不需要改造。
   `curl_easy_perform`，队列无上限无背压，要并发只能用 `sendImmediate`，而它每次
   new 一条 OS 线程（`HttpClient.cpp:472`），Lua 的 XHR 正走这条路。
 - **每请求一线程**：与 `BoundedTaskSystem` 的有界 worker 池直接冲突。
-- **worker 池 + 完成事件回传（原 D3 的两个候选）**：无论用 Asset 式 per-request 原子
-  标志还是 `postMain`/`pumpMain`，本质都是用线程模拟等待。`postMain` 与任务提交共用
-  一把锁且每事件一次堆分配；per-request 原子标志则要为每个连接维护跨线程状态。两者
-  都比 readiness 多路复用更复杂且更慢，见第 12 节。
+- **worker 池 + 完成事件回传（用于传输层）**：无论用 per-request 原子标志还是
+  `postMain`/`pumpMain`，对**传输**都是用线程模拟等待，比 readiness 多路复用更复杂且
+  更慢，见第 12 节。注意这条只拒绝把它用在传输层 —— DNS 无法用 readiness 表达，那里
+  per-request 原子标志正是采用的方案（D14）。
+- **内嵌 CA bundle**：一份会过期的负债。Godot 保留内嵌 bundle 只作为无法读取 store 的
+  平台的兜底，而正是那份兜底会过期（其 `ca-bundle.crt` 在 4.6 才从
+  `ca-certificates.crt` 改名，官方文档至今仍链接死路径）。平台不可读时明确失败胜过静默
+  使用陈旧快照。
+- **自建 DNS over UDP**：见 D13。放弃 nsswitch 背后的一切换取单线程，代价过高。
 - **引入自带事件循环的网络库（libuv、asio、libcurl multi 的内建循环）**：会把第二个
   调度器带进只有一个 owner 线程的运行时。libuv 虽已因 libwebsockets 被链入 cocos2d-x，
   但那份树里 `uv_` 零调用，不构成先例。

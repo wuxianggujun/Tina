@@ -1,6 +1,8 @@
 #include <tina/network/tls/TlsConnection.hpp>
 
 #include <tina/core/base/ScopeExit.hpp>
+#include "SystemTrustStore.hpp"
+
 #include <tina/network/NetworkErrors.hpp>
 #include <tina/network/TcpConnection.hpp>
 
@@ -185,18 +187,12 @@ Core::Result<TlsConnection> TlsConnection::Create(TlsConnectionConfig config)
         }
 #endif
     } else {
-        // Without a name there is nothing to match a certificate against, and
-        // without an anchor there is nothing to chain to. Either omission would
-        // make "Required" verify nothing at all.
+        // Without a name there is nothing to match a certificate against, so
+        // "Required" would verify a chain but not that it belongs to this peer.
         if (config.serverName.empty()) {
             return Core::failure(
                 NetworkErrorCode::InvalidConfiguration,
                 "TLS verification requires a serverName to match the certificate");
-        }
-        if (config.trustAnchorsPem.empty()) {
-            return Core::failure(
-                NetworkErrorCode::InvalidConfiguration,
-                "TLS verification requires at least one PEM trust anchor");
         }
     }
 
@@ -263,14 +259,42 @@ Core::Result<TlsConnection> TlsConnection::Create(TlsConnectionConfig config)
     }
 
     if (config.verification == TlsVerificationMode::Required) {
-        // mbedtls_x509_crt_parse needs the terminator counted, so the PEM is
-        // copied into a NUL-terminated buffer rather than passed as a view.
-        std::string anchors{config.trustAnchorsPem};
+        // Explicit anchors replace the platform set rather than extending it, so
+        // pinning a private CA does not leave every public one trusted too.
+        const bool useSystemStore = config.trustAnchorsPem.empty();
+
+        // mbedtls_x509_crt_parse counts the terminator, so the explicit path needs
+        // an owning copy. The system path already holds a NUL-terminated
+        // process-lifetime string and is pointed at rather than copied -- that
+        // string can be a few hundred KB.
+        std::string owned;
+        if (!useSystemStore) {
+            owned.assign(config.trustAnchorsPem);
+        }
+        const std::string* anchors =
+            useSystemStore ? &Detail::systemTrustAnchorsPem() : &owned;
+
+        if (anchors->empty()) {
+            // Nothing to chain to. Distinguished from a parse failure because the
+            // fix is different: this build has no readable store, so the caller
+            // must supply anchors.
+            return Core::failure(
+                NetworkErrorCode::InvalidConfiguration,
+                useSystemStore
+                    ? "TLS verification found no platform trust anchors; supply "
+                      "trustAnchorsPem for this platform"
+                    : "TLS verification requires at least one PEM trust anchor");
+        }
+
         const int parsed = mbedtls_x509_crt_parse(
             &impl->trustAnchors,
-            reinterpret_cast<const unsigned char*>(anchors.c_str()),
-            anchors.size() + 1);
-        if (parsed != 0) {
+            reinterpret_cast<const unsigned char*>(anchors->c_str()),
+            anchors->size() + 1);
+        // A positive return counts certificates that failed while others parsed.
+        // The platform store routinely contains an entry mbedTLS rejects, and
+        // failing the whole connection over one would make a working store
+        // unusable; only a total failure is fatal.
+        if (parsed < 0 || impl->trustAnchors.version == 0) {
             return Core::failure(
                 NetworkErrorCode::InvalidConfiguration,
                 "Failed to parse the PEM trust anchors");
@@ -628,6 +652,20 @@ Core::usize TlsConnection::sendBufferCapacity() const noexcept
 Core::usize TlsConnection::receiveBufferCapacity() const noexcept
 {
     return m_impl != nullptr ? m_impl->plaintextReceive.size() : 0;
+}
+
+TlsTrustStoreInfo tlsTrustStoreInfo()
+{
+    // Reading it here is what populates the cache, so a caller can probe at
+    // startup rather than discovering an empty store on its first connect.
+    const std::string& anchors = Detail::systemTrustAnchorsPem();
+    const auto stats = Detail::systemTrustStoreStatistics();
+
+    TlsTrustStoreInfo info{};
+    info.certificateCount = stats.certificateCount;
+    info.skippedEntryCount = stats.skippedEntryCount;
+    info.available = !anchors.empty();
+    return info;
 }
 
 ByteStreamState TlsConnection::streamState() const noexcept

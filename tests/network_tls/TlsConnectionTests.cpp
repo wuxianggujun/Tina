@@ -80,16 +80,21 @@ TEST(TlsConnectionTest, RequiredVerificationRejectsMissingServerName)
     EXPECT_EQ(connection.error().code, Network::NetworkErrorCode::InvalidConfiguration);
 }
 
-// No trust anchors means nothing to chain to. This module ships no bundled roots
-// and reads no system store, so an empty set can never verify.
-TEST(TlsConnectionTest, RequiredVerificationRejectsMissingTrustAnchors)
+// Empty anchors now mean "use the platform store" rather than "fail", so whether
+// Create succeeds depends on whether this host has a readable store. Asserting on
+// that rather than assuming one keeps the test honest on a bare container.
+TEST(TlsConnectionTest, RequiredVerificationFallsBackToThePlatformStore)
 {
     auto config = secureConfig();
     config.trustAnchorsPem = {};
 
     const auto connection = TlsConnection::Create(config);
-    ASSERT_FALSE(connection.has_value());
-    EXPECT_EQ(connection.error().code, Network::NetworkErrorCode::InvalidConfiguration);
+    if (Network::tlsTrustStoreInfo().available) {
+        EXPECT_TRUE(connection.has_value());
+    } else {
+        ASSERT_FALSE(connection.has_value());
+        EXPECT_EQ(connection.error().code, Network::NetworkErrorCode::InvalidConfiguration);
+    }
 }
 
 TEST(TlsConnectionTest, RequiredVerificationRejectsMalformedTrustAnchors)
@@ -366,6 +371,56 @@ TEST(TlsConnectionTest, PumpCallCountTracksEveryCall)
         }
     }
     EXPECT_GT(connection->statistics().pumpCallCount, 0U);
+}
+
+} // namespace Tina::Tests
+
+namespace Tina::Tests {
+
+// The platform store is what a client talking to a public endpoint relies on, so
+// an empty one is a product limitation rather than a per-connection error.
+TEST(TlsTrustStoreTest, ReadsPlatformAnchors)
+{
+    const auto info = Network::tlsTrustStoreInfo();
+
+    if (!info.available) {
+        // A container with no ca-certificates package is a real configuration; the
+        // contract is that Required mode then fails with a clear message, which
+        // RequiredVerificationWithoutAnchorsFailsClearly covers.
+        GTEST_SKIP() << "no platform trust store on this host";
+    }
+
+    // A usable store has tens of roots, not one. A single certificate would mean
+    // the enumeration stopped early.
+    EXPECT_GT(info.certificateCount, 10U);
+
+    // Cached: a second call must not re-read, so the counts cannot move.
+    const auto again = Network::tlsTrustStoreInfo();
+    EXPECT_EQ(again.certificateCount, info.certificateCount);
+    EXPECT_EQ(again.skippedEntryCount, info.skippedEntryCount);
+}
+
+// With no anchors supplied and no readable store, Required mode must say which of
+// the two problems it is -- the fix differs.
+TEST(TlsTrustStoreTest, RequiredModeUsesTheStoreWhenNoAnchorsGiven)
+{
+    const auto info = Network::tlsTrustStoreInfo();
+
+    Network::TlsConnectionConfig config{};
+    config.remoteEndpoint = Network::NetworkEndpoint{Network::IpAddress::v4Loopback(), 9};
+    config.serverName = "tina.test";
+    config.verification = Network::TlsVerificationMode::Required;
+    // trustAnchorsPem deliberately left empty.
+
+    const auto connection = Network::TlsConnection::Create(config);
+    if (info.available) {
+        // The store supplied anchors, so Create succeeds and the connection fails
+        // later at the transport, not here.
+        EXPECT_TRUE(connection.has_value());
+    } else {
+        ASSERT_FALSE(connection.has_value());
+        EXPECT_EQ(connection.error().code, Network::NetworkErrorCode::InvalidConfiguration);
+    }
 }
 
 } // namespace Tina::Tests

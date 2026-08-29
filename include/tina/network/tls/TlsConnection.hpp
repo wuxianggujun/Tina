@@ -25,6 +25,30 @@ enum class TlsConnectionState : Core::u8 {
     Failed,
 };
 
+// Whether the platform trust store could be read, and what it yielded. Useful
+// because an empty store is not a failure of any one connection -- it means this
+// build cannot verify a public endpoint until the caller supplies anchors.
+struct TlsTrustStoreInfo final {
+    Core::usize certificateCount = 0;
+    // Entries the platform offered that would not parse. Counted rather than
+    // fatal: one malformed enterprise root must not disable every other anchor.
+    Core::usize skippedEntryCount = 0;
+    bool available = false;
+};
+
+// Reads the platform trust anchors once per process and reports what was found.
+// Safe to call before any connection exists, which is the point: a caller can
+// decide at startup whether it needs to ship its own anchors.
+//
+// What this does NOT do is delegate the verification verdict to the OS. It
+// extracts a flat anchor list and mbedTLS decides, so platform distrust records,
+// EKU constraints, CTL status and revocation are not consulted. Every engine
+// surveyed (Godot, UE5 on non-Apple, Unity) has the same limitation; only UE5 on
+// Apple and rustls-platform-verifier hand the verdict over. A concrete
+// consequence: macOS still lists StartCom anchors that Apple blocks by date, and
+// a flat snapshot cannot express that.
+[[nodiscard]] TlsTrustStoreInfo tlsTrustStoreInfo();
+
 // How the server certificate is checked. There is deliberately no "skip
 // verification" value: a transport that silently accepts any certificate provides
 // encryption without authentication, which is worse than a visible failure
@@ -46,9 +70,16 @@ struct TlsConnectionConfig final {
     // certificate's DNS names, so omitting it would make verification vacuous.
     std::string_view serverName{};
 
-    // PEM-encoded trust anchors. Must contain at least one certificate when
-    // verification is Required. This module ships no bundled roots and does not
-    // read a system store, so the caller decides what it trusts.
+    // PEM-encoded trust anchors. Leave empty to use the platform trust store,
+    // which is what a client talking to a public endpoint wants.
+    //
+    // Supplying anchors replaces the platform set rather than adding to it, so a
+    // caller pinning a private CA does not silently keep trusting every public
+    // one. This matches Godot's precedence: an explicit bundle wins outright.
+    //
+    // No CA bundle is shipped with the engine. A bundle in-tree is a liability
+    // that expires -- Godot keeps one only as a fallback for platforms with no
+    // readable store, and that fallback is exactly what goes stale.
     std::string_view trustAnchorsPem{};
 
     TlsVerificationMode verification = TlsVerificationMode::Required;

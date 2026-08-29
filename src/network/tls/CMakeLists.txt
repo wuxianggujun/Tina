@@ -4,6 +4,7 @@ set(TINA_NETWORK_TLS_PUBLIC_HEADERS
 
 add_library(tina_network_tls STATIC
     ${TINA_NETWORK_TLS_PUBLIC_HEADERS}
+    SystemTrustStore.cpp
     TlsConnection.cpp
 )
 add_library(Tina::NetworkTls ALIAS tina_network_tls)
@@ -21,5 +22,10 @@ target_link_libraries(tina_network_tls
         MbedTLS::mbedx509
         MbedTLS::mbedcrypto
 )
+
+# CertOpenSystemStoreW and the certificate enumeration live in crypt32.
+if (WIN32)
+    target_link_libraries(tina_network_tls PRIVATE crypt32)
+endif ()
 
 set_target_properties(tina_network_tls PROPERTIES CXX_EXTENSIONS OFF)
