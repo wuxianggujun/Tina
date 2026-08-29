@@ -1300,6 +1300,37 @@ query 去重与 TileMap bridge/CharacterController coexistence。产品 300 帧�
 `physicsConvexPolygonReady=true`、`physicsRevoluteJointReady=true`、`physicsPrismaticJointReady=true`、
 `physicsChainReady=true`。
 
+## Network gate
+
+`tools/windows/RunNetworkGate.ps1` 固化 NET-001 拓扑，跨**两棵**构建树，因为传输层无条件
+构建而 TLS 是可选 feature：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/windows/RunNetworkGate.ps1 `
+  -OutJson artifacts/gates/network-<date>.json
+```
+
+`windows-msvc-vnext` 跑 `tina_network_tests` 与 `tina_sample_network`；
+`windows-msvc-vnext-network-tls` 跑 `tina_network_tls_tests`。`-SkipTls` 只在无法提供
+mbedTLS 时使用 —— 那样这轮门禁对 TLS 不构成任何证据，故不是默认。
+
+三条断言方式值得说明：
+
+- **sample 跑两次并要求逐字节一致。** 确定性比任何单个字段更重要:运行间有差异意味着
+  状态跨帧泄漏或计数器读到未初始化内存。
+- **按 JSON 字段做类型比较,不用子串正则。** `httpStatusCode\":200` 这种无锚点模式也会
+  匹配 2000,于是一个多出一位的值会静默通过。这条沿用 `RunProduct2dGate.ps1` 的做法。
+- **TLS 侧显式要求四个握手用例出现在 OK 列表里**（可信证书连通、主机名不匹配拒绝、
+  HTTP over TLS、WebSocket over TLS）。它们是「TLS 编译过」与「TLS 能用」的分界;一个
+  跳过了它们的全绿套件对握手不构成证据。
+
+`tina_network_tests` 预期恰好 1 个 skip（本宿主 loopback 吞下多兆字节发送,真实背压
+不可达）。门禁记录该数量,使第二个无关的 skip 无法藏在它后面。
+
+**2026-08-29 证据：** `artifacts/gates/network-20260829.json` —— `ok=true`、
+`skips=1`、sample 两次运行逐字节一致、`tcpConnectionsAccepted=3`、
+公开头扫描 299/299、`readPlatformAnchors=True`（Windows ROOT store 真实读取）。
+
 Windows 同轮 product-2d 拓扑由 `tools/windows/RunProduct2dGate.ps1` 固化：包含
 `tina_navigation2d_tests`、`tina_scene_tests` 的上述测试 executable 全部 exit 0 后，再跑 sample 300 帧并校验
 `productGate=bgfx-physics-freetype-audio` 与 schema 29 Theme、TreeView、UI Flow、Sprite owner/retirement、

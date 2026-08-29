@@ -91,7 +91,9 @@ $knownTargets = @(
     'tina_tests', 'tina_ui_tests', 'tina_runtime_ui_tests', 'tina_ui_render_integration_tests',
     'tina_ui_freetype_tests', 'tina_platform_glfw_tests', 'tina_render_bgfx_tests',
     'tina_asset_tests', 'tina_physics2d_tests', 'tina_audio_tests', 'tina_audio_miniaudio_tests',
+    'tina_network_tests', 'tina_network_tls_tests',
     'tina_sample_2d', 'tina_sample_3d', 'tina_sample_null', 'tina_sample_platform', 'tina_sample_desktop',
+    'tina_sample_network',
     'tina_bootstrap_desktop', 'tina_assetc', 'tina_catalog_validate'
 )
 foreach ($t in $knownTargets) { $targetNames[$t] = $true }

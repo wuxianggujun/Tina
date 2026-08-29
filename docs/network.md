@@ -165,6 +165,11 @@ out\build\windows-msvc-vnext-network-tls\bin\Debug\tina_network_tls_tests.exe --
 
 测试直接运行,不注册 CTest(ADR 0006)。
 
+例行门禁由 `tools/windows/RunNetworkGate.ps1` 固化,它跨上面两棵树,并做三件单测做不到的事:
+sample 跑两次要求逐字节一致(运行间有差异意味着状态跨帧泄漏)、按 JSON 字段做类型比较而非
+子串正则(`httpStatusCode\":200` 也会匹配 2000)、以及显式要求四个 TLS 握手用例出现在 OK
+列表里(它们是「TLS 编译过」与「TLS 能用」的分界)。
+
 `tina_sample_network` 是 tests 之外的首个消费者:headless、无 GPU、无 EngineHost,在
 **同一个 pump 循环**里跑 UDP、DNS、TcpListener、三条客户端连接、HTTP 与 WebSocket,
 输出带 `evidenceSchema` 的单行 JSON。
@@ -182,5 +187,5 @@ mbedTLS 服务端对端验证。
 - **所有测试在 loopback。** 真实丢包、乱序、重复、路径 MTU 分片、NAT 一概未覆盖。
 - 发送缓冲区满的 `WouldBlock` 分支与 `receive()` 的 syscall 上限分支在 loopback 上
   无法稳定触发。
-- `tina_sample_network` 未接入 product gate 脚本;`RunSdkConsumerGate.ps1` 的完整
-  relocated consumer gate 未随 `Tina::NetworkTls` 复跑。
+- `RunSdkConsumerGate.ps1` 的完整 relocated consumer gate 未随 `Tina::NetworkTls` 复跑
+  （安装与外部 consumer 已单独验证过一次,但不是那个脚本的完整流程）。
