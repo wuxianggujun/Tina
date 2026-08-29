@@ -265,12 +265,14 @@ executable。`tina_ui_tests` 为 667/667，`tina_runtime_ui_tests` 为 130/130�
 | `tina_asset_tests` | Catalog、AssetSystem、Handle/Lease、Cooker、upload/retirement | 基础图 |
 | `tina_navigation2d_tests` | NavigationGrid2D immutable weighted cost/blocker/revision、确定性四向/对角同步/分步 A*、TileMap material-cost 导航转换 | 基础图 |
 | `tina_audio_tests` | backend-neutral AudioEngine/voice/bus/command/completion | 基础图 |
+| `tina_network_tests` | 数值地址解析、UDP、readiness poller、TCP 连接与 listener、HTTP/1.1、WebSocket 帧与握手原语、DNS。全部在 loopback，使用 ephemeral 端口故可并行 | 基础图 |
 | `tina_platform_glfw_tests` | GLFW adapter 与 WindowSurface | `TINA_BUILD_PLATFORM_GLFW=ON` |
 | `tina_render_bgfx_tests` | bgfx lifecycle、2D/3D/UI geometry/resource | `TINA_BUILD_RENDER_BGFX=ON` |
 | `tina_ui_freetype_tests` | FreeType font open/measure/rasterize | `TINA_BUILD_UI_FREETYPE=ON` |
 | `tina_ui_uia_tests` | Windows UIA property/fragment、control pattern、action 与 provider lifecycle | `TINA_BUILD_UI_UIA=ON` (Windows) |
 | `tina_physics2d_tests` | Box2D lifecycle/contact/query/deferred command/grid bridge | `TINA_BUILD_PHYSICS2D=ON` |
 | `tina_audio_miniaudio_tests` | miniaudio null-device、decode/mix adapter | `TINA_BUILD_AUDIO_MINIAUDIO=ON` |
+| `tina_network_tls_tests` | TLS 配置拒绝、平台信任库读取，以及对 in-process mbedTLS 服务端的**真实握手**：可信证书连通、主机名不匹配与无关签发者均拒绝、应用数据往返、`close_notify`、HTTP over TLS、WebSocket over TLS | `TINA_BUILD_NETWORK_TLS=ON` |
 
 ## 基础 Windows 门禁
 
@@ -279,7 +281,7 @@ cmake --preset windows-msvc-vnext
 cmake --build --preset windows-vnext-debug `
   --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests `
            tina_scene_tests tina_render_scene_tests tina_asset_format_tests tina_asset_tests tina_navigation2d_tests `
-           tina_audio_tests tina_sample_null --parallel 2 -- /nr:false
+           tina_audio_tests tina_network_tests tina_sample_network tina_sample_null --parallel 2 -- /nr:false
 
 out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_ui_tests.exe --gtest_color=yes
@@ -291,7 +293,17 @@ out\build\windows-msvc-vnext\bin\Debug\tina_asset_format_tests.exe --gtest_color
 out\build\windows-msvc-vnext\bin\Debug\tina_asset_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_navigation2d_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_audio_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext\bin\Debug\tina_network_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext\bin\Debug\tina_sample_network.exe --frames=300
 out\build\windows-msvc-vnext\bin\Debug\tina_sample_null.exe --frames=300
+```
+
+TLS 是独立 feature，需要单独一棵树：
+
+```powershell
+cmake --preset windows-msvc-vnext-network-tls
+cmake --build --preset windows-vnext-network-tls-debug --target tina_network_tls_tests --parallel 2 -- /nr:false
+out\build\windows-msvc-vnext-network-tls\bin\Debug\tina_network_tls_tests.exe --gtest_color=yes
 ```
 
 测试数量随功能增长，不作为永久契约；本轮必须直接运行对应 GoogleTest executable，并以最终 gate

@@ -26,6 +26,9 @@
 | libvorbis | 可选 Ogg Vorbis decode | feature `audio-miniaudio-vorbis` | miniaudio adapter PRIVATE；默认 OFF |
 | libopus/opusfile | 可选 Opus decode | feature `audio-miniaudio-opus` | miniaudio adapter PRIVATE；默认 OFF |
 | Box2D 3.x | 2D Physics backend | vcpkg feature `physics2d` | `tina_physics2d` PRIVATE |
+| mbedTLS 3.6+ | 唯一 TLS backend | vcpkg feature `network-tls` | `tina_network_tls` PRIVATE；`TINA_BUILD_NETWORK_TLS` |
+| platform sockets | UDP/TCP/readiness/DNS，无第三方 | OS SDK（Winsock2 `ws2_32`、POSIX BSD sockets） | `tina_network` PRIVATE；无 feature，无条件构建 |
+| CryptoAPI (system) | Windows 平台信任库读取（`CertOpenSystemStoreW`） | OS SDK（`crypt32`） | `tina_network_tls` PRIVATE |
 | xxHash | ContentHash/确定性校验 | vcpkg root dependency | `tina_core` PRIVATE adapter；非安全签名 |
 | GoogleTest | 单元/集成契约测试 | 默认 vcpkg feature `tests` | tests only；直接运行，不注册 CTest |
 | cgltf v1.15 | glTF/GLB parse/validate | vendored `thirdparty/cgltf` | `src/asset/GltfCook.cpp` PRIVATE |
@@ -45,6 +48,7 @@ bgfx.cmake、bx、bimg 的源码 revision 由 submodule commit 锁定。cgltf/st
 platform-glfw
 ui-freetype
 physics2d
+network-tls
 audio-miniaudio
 audio-miniaudio-vorbis
 audio-miniaudio-opus

@@ -62,7 +62,8 @@ Vorbis/Opus 的安装图还分别解析 `Vorbis`、`Opus`、`OpusFile`。未请�
 | `Tina::Platform` | Window/Input/PlatformFrame/backend SPI |
 | `Tina::PlatformGlfw` | optional installed GLFW Platform adapter；需 `COMPONENTS PlatformGlfw` |
 | `Tina::Task` | bounded IO/CPU/Main TaskSystem |
-| `Tina::Network` | 数值 IP 地址/endpoint 与 owner-thread 非阻塞 UDP datagram socket |
+| `Tina::Network` | 数值 IP/endpoint、UDP、TCP 连接与 listener、`IByteStream`、HTTP/1.1、WebSocket、DNS |
+| `Tina::NetworkTls` | optional installed mbedTLS TLS adapter；需 `COMPONENTS NetworkTls` |
 | `Tina::Render` | RenderDevice、Surface/Frame/Scene/UI DisplayList、GPU IDs |
 | `Tina::RenderBgfx` | optional installed bgfx Render adapter；需 `COMPONENTS RenderBgfx` |
 | `Tina::Runtime` | EngineHost、Game Application/State、phase context、Action/Event facade |
@@ -935,8 +936,47 @@ maximumDatagramBytes` 一次性分配接收存储；`send()`/`receive()` 之后�
 `totalOversizedDatagramCount`，绝不截断后当完整数据交出。`totalDiscardedDatagramCount`
 与 `totalReceivedDatagramCount` 不相交，且**队列满不计入丢弃** —— 超出容量的 datagram
 留在内核缓冲区等下一次 `receive()`，是延迟而非丢失。单次 `receive()` 的 syscall 次数
-另有上限，因为被丢弃的 datagram 不占 slot。详见 [网络](network.md) 与
-[ADR 0033](adr/0033-network-module-boundaries.md)。
+另有上限，因为被丢弃的 datagram 不占 slot。
+
+`IByteStream` 是传输中立的字节流接缝：`TcpConnection` 与 `TlsConnection` 都实现它，而
+`HttpRequest`/`WebSocket` 只认这个接口。因此 `http`/`https` 与 `ws`/`wss` **不是两份
+实现**，差别只是构造时递进哪个流；也因此 `Tina::Network` 不依赖可选的 TLS 适配器 ——
+反向依赖会让可选模块变成必需。协议**借用**流、从不拥有，所以"用了哪个传输、有没有做
+证书校验"留在调用点可见，而不是藏在 scheme 字符串后面。
+
+`TcpConnection::send()` 只入队，字节在后续 `pump()` 离开；**部分写是 TCP 的正常行为**，
+未发完的尾部保留到下次。`shutdownSend()` 会丢弃排队字节，所以 `send()` 紧接
+`shutdownSend()` 读起来像"发这个然后收尾"，实际会把它丢掉。`recv` 返回 0 是有序的
+end-of-stream，产出 `PeerClosed` 且已缓冲字节仍可读，不是失败。
+
+`TcpListener::pump()` 接受 OS 已排队的连接；`connectionCapacity` 限制**已接受未领取**
+的数量，超出的留在 OS backlog 等下次 pump，是延迟而非丢弃。`acceptNext()` 交出的
+`TcpConnection` 与拨出去的是同一类型。
+
+`HttpRequest` 一个对象一个请求，不是可复用 client：排队、取消与队头阻塞的策略由调用方
+决定更合适。响应同时带 `Content-Length` 与 `Transfer-Encoding`、header 冒号前有空格
+都直接拒绝（请求走私面）；body 短于声明长度是 `HttpIncompleteResponse` 而非"短成功"。
+204/304/1xx 与任何 HEAD 响应一律视为无 body，不管 framing 头怎么说。stall 上限按 pump
+次数而非毫秒计，因为这个类型不持有时钟。
+
+`WebSocket` 客户端帧**强制掩码且每帧换掩码**：服务端遇到未掩码的客户端帧必须断开，
+复用掩码会跨帧泄漏明文结构。保留位、未知 opcode、被分片的控制帧、无消息进行中的
+continuation 全部 fail closed。未消费的消息**阻塞下一条**而非被覆盖。
+`webSocketAcceptToken()` 是公开的，因为写服务端只需要这一个值；SHA-1 本身保持私有。
+
+`DnsResolver` 是模块内唯一使用 worker 的部分（`getaddrinfo` 阻塞且无可移植非阻塞
+版本），需要一个至少有一个 IO worker 的 `ITaskSystem`。数值 literal 也走同一路径，故
+调用方可统一传名字或地址。**取消不能打断 `getaddrinfo`**，所以取消的 slot 标记为
+abandoned、直到 worker 返回才回收；已解析的查询持有 slot 直到 `release()`，使答案不会
+在被读取前被覆盖，generation 让 stale 句柄读到 `Cancelled` 而非别人的地址。
+
+`TlsConnection` 留空 `trustAnchorsPem` 即用平台信任库（进程内只读一次并缓存），提供
+锚点则**替换**而非追加。跳过校验需要两个独立 opt-in 且 Release 构建直接拒绝。
+`tlsTrustStoreInfo()` 可在任何连接前调用。注意本实现提取扁平锚点交 mbedTLS 判定，
+**不把裁决交给 OS**，故 distrust 记录/EKU/CTL/吊销未被查询 —— 与 Godot、UE5（非
+Apple）、Unity 同一限制。
+
+详见 [网络](network.md) 与 [ADR 0033](adr/0033-network-module-boundaries.md)。
 
 ## Navigation2D
 
