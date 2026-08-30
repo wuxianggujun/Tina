@@ -55,6 +55,17 @@ public final class TinaNative {
      */
     public static native void nativeSetPreferOpenGles(long session, boolean preferOpenGles);
 
+    /**
+     * Runs the browsable sample gallery instead of the telemetry demo.
+     *
+     * <p>Must be called before the first surface is bound, since that is when the application is built.
+     *
+     * <p>Opt-in rather than the default: the telemetry demo is what carries the device evidence -- the
+     * counters this class exposes all read from it -- so replacing it would trade something proven for
+     * something nicer to look at. Enable with {@code am start --ez tina.gallery true}.
+     */
+    public static native void nativeSetUseGallery(long session, boolean useGallery);
+
     public static native void nativeDestroySession(long session);
 
     /**

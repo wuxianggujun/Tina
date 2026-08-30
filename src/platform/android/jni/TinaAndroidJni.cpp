@@ -22,6 +22,12 @@
 
 #include "TinaAndroidGame.hpp"
 
+// The sample gallery, linked as a library rather than reimplemented here: the menu and its scenes are
+// the same translation units the desktop front-end uses, which is the only way a scene stays written
+// once. Available because samples/gallery builds without GLFW.
+#include "GalleryActions.hpp"
+#include "GalleryScene.hpp"
+
 #include <tina/core/time/MonotonicClock.hpp>
 #include <tina/render/RenderFrame.hpp>
 #include <tina/runtime/EngineConfig.hpp>
@@ -123,6 +129,16 @@ struct TinaAndroidSession final {
     // Tracked because the game has one key to give: without alternating, every press would re-show a
     // keyboard that is already up and there would be no way to dismiss it.
     bool softKeyboardVisible = false;
+    // Engine ticks that completed, owned by the host rather than by either application. The telemetry
+    // demo has its own frame counter, but reporting that one made the gallery look frozen -- Java uses
+    // this value for log sampling and for gating the scripted diagnostics, so a permanently-zero count
+    // silenced both with no error anywhere.
+    Tina::u64 ticks = 0;
+    // Which application to run. The telemetry demo stays the default because it is what carries the
+    // device evidence -- eleven JNI counters read from it, and the platform slices are verified through
+    // those. The gallery is the browsable one, so it is opt-in rather than a replacement: swapping it in
+    // by default would trade proven evidence for something merely nicer to look at.
+    bool useGallery = false;
     // Automatic prefers Vulkan on Android (Render::preferredRendererApi), which is right for real
     // devices. It is selectable because some Vulkan implementations are unusable and the GLES path
     // exists as the documented fallback -- measured 2026-08-29: the SDK emulator's vulkan.ranchu.so
@@ -209,6 +225,28 @@ JNIEXPORT void JNICALL Java_dev_tina_TinaNative_nativeSetPreferOpenGles(JNIEnv*,
                                                      : Tina::Render::RendererApi::Automatic;
 #else
     (void)preferOpenGles;
+#endif
+}
+
+// Runs the browsable sample gallery instead of the telemetry demo.
+//
+// Must be called before the first surfaceCreated, since that is when the application is built. Opt-in
+// rather than the default because the telemetry demo is what carries the device evidence -- eleven JNI
+// counters read from it -- and replacing it would trade something proven for something nicer to look at.
+JNIEXPORT void JNICALL Java_dev_tina_TinaNative_nativeSetUseGallery(JNIEnv*, jclass, jlong handle,
+                                                                  jboolean useGallery)
+{
+    auto* session = asSession(handle);
+    if (session == nullptr)
+    {
+        return;
+    }
+#if defined(TINA_ANDROID_WITH_BGFX)
+    session->useGallery = useGallery == JNI_TRUE;
+#else
+    // Without a renderer there is no EngineHost and so no application at all: the bare backend path only
+    // exercises the platform bridge. Ignored rather than stored, so the flag cannot look effective.
+    (void)useGallery;
 #endif
 }
 
@@ -318,21 +356,38 @@ JNIEXPORT jboolean JNICALL Java_dev_tina_TinaNative_nativeSurfaceCreated(JNIEnv*
     // WindowInputSnapshot and stops there, which is indistinguishable from the bridge not working.
     // Arrows and D-pad map to the same engine Key, so a TV remote drives this too.
     Tina::EngineConfig engineConfig = Tina::EngineConfig::Defaults();
-    // Enter is the key that still reaches game code once the TextEdit has focus, which it now does by
-    // default. A focused TextEdit consumes *every* key except Tab, Enter/KeypadEnter and Escape
-    // (UIInputRouteProducer keeps exactly those three available to the frame action mapper), so the
-    // arrows below stop producing actions the moment a field is focused -- correct behaviour, but it
-    // silently took the device's `keys=` counter to zero and left it there, which reads exactly like a
-    // broken key bridge. The arrows stay bound so a TV remote still drives the highlight when focus is
-    // elsewhere; Enter is what makes the counter meaningful with a field focused.
-    for (const auto key : {Tina::Platform::Key::Up, Tina::Platform::Key::Down, Tina::Platform::Key::Left,
-                           Tina::Platform::Key::Right, Tina::Platform::Key::Enter})
+    // One application's bindings or the other's, never both. The default input context allows a physical
+    // control exactly one binding, and both sets want the arrows and Enter -- so appending both makes
+    // EngineHost::Create fail outright with "one physical control may have only one binding". Measured on
+    // a device: the gallery would not start at all, and the only symptom was that one log line.
+    if (session->useGallery)
     {
-        engineConfig.inputActions.bindings.push_back(Tina::InputActionBinding{
-            .input = Tina::PrimaryWindowKeyBinding{.key = key},
-            .action = Tina::Platform::Android::AndroidHighlightAction,
-            .domain = Tina::InputActionDomain::Frame,
-        });
+        // The gallery declares its own actions so desktop and Android bind the same ids. A host inventing
+        // its own would leave a scene reading an action nothing ever produces.
+        Tina::Gallery::appendGalleryBindings(engineConfig);
+    } else
+    {
+        // One bound action, so the key path is observable end to end. Without a binding a key reaches
+        // WindowInputSnapshot and stops there, which is indistinguishable from the bridge not working.
+        // Arrows and D-pad map to the same engine Key, so a TV remote drives this too.
+        //
+        // Enter is the key that still reaches game code once the TextEdit has focus, which it does by
+        // default. A focused TextEdit consumes *every* key except Tab, Enter/KeypadEnter and Escape
+        // (UIInputRouteProducer keeps exactly those three available to the frame action mapper), so the
+        // arrows stop producing actions the moment a field is focused -- correct behaviour, but it
+        // silently took the device's `keys=` counter to zero and left it there, which reads exactly like a
+        // broken key bridge. The arrows stay bound so a TV remote still drives the highlight when focus is
+        // elsewhere; Enter is what makes the counter meaningful with a field focused.
+        for (const auto key : {Tina::Platform::Key::Up, Tina::Platform::Key::Down,
+                               Tina::Platform::Key::Left, Tina::Platform::Key::Right,
+                               Tina::Platform::Key::Enter})
+        {
+            engineConfig.inputActions.bindings.push_back(Tina::InputActionBinding{
+                .input = Tina::PrimaryWindowKeyBinding{.key = key},
+                .action = Tina::Platform::Android::AndroidHighlightAction,
+                .domain = Tina::InputActionDomain::Frame,
+            });
+        }
     }
 
     auto host = Tina::EngineHost::Create(
@@ -395,7 +450,11 @@ JNIEXPORT jboolean JNICALL Java_dev_tina_TinaNative_nativeSurfaceCreated(JNIEnv*
         return JNI_FALSE;
     }
     session->host = std::move(*host);
-    session->game = Tina::Platform::Android::createAndroidGameApplication(session->telemetry);
+    // The gallery is opt-in; the telemetry demo is the default. Both are real IGameApplications over the
+    // same EngineHost, so this is a one-line choice rather than two code paths.
+    session->game = session->useGallery
+                        ? Tina::Gallery::createGalleryApplication()
+                        : Tina::Platform::Android::createAndroidGameApplication(session->telemetry);
     if (auto started = session->host->start(*session->game); !started)
     {
         __android_log_print(ANDROID_LOG_ERROR, "Tina", "EngineHost::start rejected: domain=%d code=%d %s",
@@ -814,7 +873,15 @@ JNIEXPORT jint JNICALL Java_dev_tina_TinaNative_nativePollFrame(JNIEnv*, jclass,
         session->hostFinished = true;
         return -1;
     }
-    return static_cast<jint>(session->telemetry.frameUpdates.load(std::memory_order_relaxed));
+    // Counted here rather than read from the telemetry demo, because the demo is only one of the two
+    // applications this host can run. Returning its counter meant the gallery reported 0 forever, and
+    // Java reads this value for its sampling and its diagnostics gating -- so the log went silent and the
+    // scripted diagnostics never fired, with nothing to say why.
+    //
+    // A tick that got this far completed, so incrementing after the outcome checks counts frames the
+    // engine actually ran rather than calls made.
+    ++session->ticks;
+    return static_cast<jint>(session->ticks);
 #else
     // No renderer, so no EngineHost either. Polling the bare backend still exercises the window,
     // touch and lifecycle path, which is what makes a shaderc-less checkout verifiable.
@@ -1042,6 +1109,8 @@ const JNINativeMethod TinaNativeMethods[]{
     {"nativeDestroySession", "(J)V", reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeDestroySession)},
     {"nativeSetPreferOpenGles", "(JZ)V",
      reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeSetPreferOpenGles)},
+    {"nativeSetUseGallery", "(JZ)V",
+     reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeSetUseGallery)},
     {"nativeSurfaceCreated", "(JLandroid/view/Surface;F)Z",
      reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeSurfaceCreated)},
     {"nativeSurfaceDestroyed", "(J)V",

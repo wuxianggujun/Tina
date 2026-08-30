@@ -13,10 +13,15 @@
              session whose EngineHost::Create then fails with "bgfx failed to initialize". Measured on a
              device: relaunching produced two onCreate calls with no onDestroy between them, and the app
              froze after the first background/foreground cycle. -->
+        <!-- Fullscreen with no title bar. A game owns its whole surface: the default theme's ActionBar
+             both wastes the space and puts a second, differently-themed UI above the engine's own.
+             The theme removes the title bar; the status and navigation bars are hidden at runtime,
+             because only WindowInsetsController can do that in a way the user can swipe back. -->
         <activity
             android:name="dev.tina.TinaActivity"
             android:exported="true"
             android:launchMode="singleTask"
+            android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

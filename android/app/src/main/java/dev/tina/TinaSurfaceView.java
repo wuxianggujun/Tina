@@ -141,12 +141,30 @@ public final class TinaSurfaceView extends SurfaceView implements SurfaceHolder.
 
     private int composeStep;
 
+    /**
+     * {@code KeyEvent.KEYCODE_BACK}, spelled out to match how the rest of this file treats key codes:
+     * they are raw platform integers that C++ translates, so this side names no key table.
+     */
+    private static final int KEYCODE_BACK = 4;
+
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
         // getRepeatCount() > 0 is Android's own key-hold repeat. Forwarded rather than filtered here,
         // because held-key navigation depends on it and the engine's KeyTransition can express it.
         final boolean consumed =
                 TinaNative.nativeOnKey(session, TinaNative.KEY_DOWN, keyCode, event.getRepeatCount() > 0);
+        if (keyCode == KEYCODE_BACK) {
+            // Back is claimed unconditionally, because the return value above says only "queued", not
+            // "the game used it" -- keys cross into the engine asynchronously and are handled a frame
+            // later, long after this method must answer.
+            //
+            // Letting it fall through meant Back did both things at once: measured on a device, the
+            // gallery popped its scene *and* the activity went back to the launcher in the same press.
+            //
+            // The consequence is that the engine now owns leaving the app. A state with nowhere to go
+            // back to must call requestExitAfterFrame, or Back does nothing and the user is stuck.
+            return true;
+        }
         // Unconsumed keys fall through to the system on purpose: swallowing Back would trap the user in
         // the app, and swallowing volume would break the device's own controls. The engine only claims
         // keys it actually mapped.

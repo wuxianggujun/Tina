@@ -998,6 +998,16 @@ Null/bgfx resource/batch 定向 filter，闭环后再跑产品视觉差分与完
 
 `tina_sample_2d` 是唯一产品 2D target；中间迁移名 `tina_sample_2d_tilemap_bgfx` 已删除。
 
+**`tina_sample_gallery_desktop` 不在上表，因为它不是门禁。** 上面每一个都是「跑固定帧数、打印 JSON 证据、
+返回退出码」的程序，而 gallery 跑到用户关窗为止，不打印证据也不断言任何东西 —— 它证明的是「引擎能被人
+用手操作」，那不是 CI 能读的东西。**不要把它加进任何门禁清单**：它没有可比较的输出，一个「通过」只意味着
+进程没崩。
+
+它存在的理由是上表暴露的一个空缺：20 个示例里没有一个能回答「让我在手机上看看这引擎」。它们是门禁，
+其中 8 个还绑死 GLFW（Android 编不了）。gallery 因此拆成两半 —— `tina_sample_gallery`（场景库，不链
+GLFW，Android 也链它）加各自的宿主前端 —— 所以一个场景写一次、两端都跑。**现有 20 个门禁示例一个都没动**：
+它们是既有证据，改写成可交互场景等于拿已证明的换好看的。
+
 ## Asset/Cooker E2E
 
 ```powershell

@@ -1,3 +1,11 @@
+# gallery/ is deliberately NOT added here. The root CMakeLists adds it outside TINA_BUILD_EXAMPLES,
+# because the Android APK links its scene library while building with examples off -- and adding it in
+# both places would define the same targets twice.
+#
+# Every sample below is a gate program: fixed frame count, printed evidence, exit code. Eight cannot
+# build for Android at all, since their content and their GLFW composition root share one translation
+# unit. The gallery exists so an interactive scene is written once and both hosts run it.
+
 add_subdirectory(null)
 add_subdirectory(asset)
 # Tina::Network is built unconditionally, so its first consumer outside the tests

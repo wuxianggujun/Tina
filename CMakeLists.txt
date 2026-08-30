@@ -311,6 +311,19 @@ endif()
 include(TinaGameSdkPackage)
 tina_configure_game_sdk_package()
 
+# The sample gallery's scene library, added outside TINA_BUILD_EXAMPLES on purpose.
+#
+# The Android APK links it while building with TINA_BUILD_EXAMPLES=OFF, and turning that option on for
+# Android is not an option: it would also pull in the twenty gate samples and the host tools, and most of
+# those cannot cross-compile at all -- eight link GLFW, the tools are build-host executables. So the one
+# library that has to be reachable from two very different hosts is added directly, while
+# samples/gallery/CMakeLists.txt keeps its desktop executable behind the usual GLFW guard.
+#
+# Guarded on the render backend because a scene needs UI, which needs a render device.
+if (TINA_BUILD_RENDER_BGFX)
+    add_subdirectory(samples/gallery)
+endif ()
+
 # Examples and small host tools (catalog validate CLI, samples).
 if (TINA_BUILD_EXAMPLES)
     add_subdirectory(samples)

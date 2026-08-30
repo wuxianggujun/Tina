@@ -32,7 +32,12 @@ if(TINA_BUILD_RENDER_BGFX)
         TinaAndroidGame.hpp
         TinaAndroidGame.cpp
     )
-    target_link_libraries(tina_platform_android_jni PRIVATE Tina::Runtime tina_render_bgfx)
+    # Tina::SampleGallery is linked, not reimplemented: the menu and scenes are the same translation
+    # units the desktop front-end uses. That library deliberately links no GLFW, which is what makes it
+    # reachable from here at all -- the eight windowed samples are not, because their content and their
+    # GLFW composition root share one translation unit.
+    target_link_libraries(tina_platform_android_jni PRIVATE Tina::Runtime tina_render_bgfx
+                                                           Tina::SampleGallery)
     # The concrete backend header is private to src/, reached the same way a desktop composition root
     # reaches it. It never appears in a public header.
     target_include_directories(tina_platform_android_jni PRIVATE ${PROJECT_SOURCE_DIR}/src)

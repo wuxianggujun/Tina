@@ -350,6 +350,12 @@ include 它**——`add_shader_compile_dir`、`add_shaders_directory`、`bgfx_co
   路径，而不是绕过转换去伪造结果。
 - **`deleteSurroundingText` 译成 Backspace 按键**而非文本编辑：引擎在此没有可删除的 editable buffer，而按键
   路径是它的 TextEdit 消费者已经处理的东西。
+- **BACK 键由 Java 侧无条件券走，退出应用因此成了引擎的责任（2026-08-30 更正）。** 原先「未消费的键交还
+  系统」这条对 BACK **不成立**：`nativeOnKey` 的返回值只表示「入队成功」，而按键是异步跨线程入队、下一帧
+  才被处理 —— `onKeyDown` 必须立刻作答的时刻，引擎还根本没看到它。于是 BACK **两件事同时发生**：实测
+  gallery 里按一次返回，场景 pop 了，activity 也回了桌面。修法是 Java 对 `KEYCODE_BACK` 一律返回 true。
+  代价必须说清：**没有上一层可回的 State 必须自己调 `requestExitAfterFrame()`**，否则 BACK 什么都不做、
+  用户困在应用里。这不能由平台层兜底 —— 只有游戏知道自己是不是最外层。
 - **一个按键切换软键盘**，因为手机没有硬件键：游戏 latch 意向、宿主执行（只有 Java 能调 `InputMethodManager`），
   且必须交替 —— 只有一个键可用，不交替就无法收起键盘。
 

@@ -3,10 +3,13 @@ package dev.tina;
 import android.app.Activity;
 import android.graphics.Matrix;
 import android.graphics.Rect;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.view.View;
+import android.view.WindowInsets;
+import android.view.WindowInsetsController;
 import android.view.inputmethod.CursorAnchorInfo;
 import android.view.inputmethod.InputMethodManager;
 
@@ -27,6 +30,8 @@ public final class TinaActivity extends Activity {
     private boolean engineEnded;
     private boolean commitEmojiOnFirstFrame;
     private boolean composeTextDiagnostics;
+    /** Whether the gallery is running, which decides what the progress log can meaningfully report. */
+    private boolean useGallery;
     private int lastLoggedFrame = -1;
 
     private final Runnable frameTick = new Runnable() {
@@ -89,6 +94,13 @@ public final class TinaActivity extends Activity {
         if (isEmulator()) {
             TinaNative.nativeSetPreferOpenGles(session, true);
         }
+        // The browsable gallery, opt-in via `am start --ez tina.gallery true`. Must be set before the
+        // first surface binds, because that is when the application is built. The telemetry demo stays
+        // the default so the device evidence the counters provide is not traded away.
+        useGallery = getIntent().getBooleanExtra("tina.gallery", false);
+        if (useGallery) {
+            TinaNative.nativeSetUseGallery(session, true);
+        }
         surfaceView = new TinaSurfaceView(this, session);
         setContentView(surfaceView);
         frameHandler = new Handler(Looper.getMainLooper());
@@ -97,8 +109,55 @@ public final class TinaActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        // Re-applied on every resume, not once in onCreate: the system restores the bars whenever the
+        // window loses focus, so a single call at startup is undone by the first notification shade pull
+        // or app switch.
+        hideSystemBars();
         running = true;
         frameHandler.post(frameTick);
+    }
+
+    /**
+     * Hides the status and navigation bars, leaving the engine the whole surface.
+     *
+     * <p>The manifest theme removes the title bar, but the system bars need a runtime call --
+     * {@code WindowInsetsController} is the only API that hides them in a way the user can still swipe
+     * back, which matters because otherwise there is no way to reach the notification shade or the
+     * back gesture.
+     *
+     * <p>{@code BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE} is what makes them transient rather than gone:
+     * hiding them permanently is what traps users in an app they cannot leave.
+     *
+     * <p>This changes the baseline the soft-keyboard occlusion is measured against --
+     * {@code getWindowVisibleDisplayFrame} now spans the full display -- so the reported height is the
+     * keyboard alone rather than keyboard plus navigation bar. That is the value UI code actually wants.
+     *
+     * <p>Two implementations because {@code WindowInsetsController} is API 30 and {@code minSdk} is 24.
+     * Calling it unconditionally would throw {@code NoSuchMethodError} on every device below 30 --
+     * a crash on exactly the older hardware that cannot be tested here.
+     */
+    private void hideSystemBars() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            final WindowInsetsController insets = getWindow().getInsetsController();
+            if (insets == null) {
+                return;
+            }
+            insets.hide(WindowInsets.Type.statusBars() | WindowInsets.Type.navigationBars());
+            insets.setSystemBarsBehavior(
+                    WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            return;
+        }
+        // Pre-30 path. Deprecated on newer releases, which is why it is confined to this branch rather
+        // than used everywhere for brevity.
+        surfaceView.setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                        | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                        | View.SYSTEM_UI_FLAG_FULLSCREEN
+                        // Immersive *sticky*: the bars come back transiently on a swipe and hide again
+                        // on their own, so the user is never stranded without the back gesture.
+                        | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
     }
 
     @Override
@@ -137,6 +196,15 @@ public final class TinaActivity extends Activity {
     private void logProgress(int frameUpdates) {
         if (frameUpdates > 0 && frameUpdates % 60 == 0 && frameUpdates != lastLoggedFrame) {
             lastLoggedFrame = frameUpdates;
+            if (useGallery) {
+                // The gallery is a different IGameApplication, so *every* counter below reads zero -- they
+                // all come from the telemetry demo's own state, including fixedUpdates and uiUpdates.
+                // Logging them anyway would print a wall of zeros that reads exactly like a broken input
+                // bridge. The frame count is the one number that still means something here, because
+                // nativePollFrame returns it from the engine rather than from the demo.
+                android.util.Log.i("Tina", "gallery frame=" + frameUpdates);
+                return;
+            }
             android.util.Log.i(
                     "Tina",
                     "frameUpdates=" + frameUpdates

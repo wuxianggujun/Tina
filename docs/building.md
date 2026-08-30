@@ -617,7 +617,15 @@ adb shell am start -n dev.tina/dev.tina.TinaActivity
 # 既表达不了代理对、也不携带组词区）。两者都走与真实键盘同一条 InputConnection 路径。
 adb shell am start -n dev.tina/.TinaActivity --ez tina.commitEmoji true
 adb shell am start -n dev.tina/.TinaActivity --ez tina.composeText true
+
+# 可浏览的示例 gallery（菜单选场景，返回键回菜单）。默认跑的仍是遥测 demo。
+adb shell am start -n dev.tina/.TinaActivity --ez tina.gallery true
 ```
+
+**gallery 是 opt-in 而非默认，这是刻意的取舍。** 遥测 demo 承载全部设备证据 —— 十一个 JNI 计数器都从它
+读 —— 换成 gallery 等于拿已证明的换好看的。两者是同一个 `EngineHost` 上的两个 `IGameApplication`，
+一行选择。gallery 模式下**所有那些计数器读数为零**（它们是 demo 自己的状态），所以进度日志会换成一行
+`gallery frame=N`：照原样打印会是一屏零，读起来和输入桥坏了一模一样。
 
 **模拟器上必须走 GLES。** SDK 模拟器的 Vulkan 实现（`vulkan.ranchu.so`）会在 swapchain 创建时 SIGSEGV，
 所以 `TinaActivity` 按 `Build.HARDWARE` 含 `ranchu`/`goldfish` 自动改用 GLES；真机保持默认（Android 上偏好
