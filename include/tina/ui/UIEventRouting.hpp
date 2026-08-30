@@ -294,6 +294,12 @@ class UIRoutedPointerCallback final {
     // Declare the constructor constraint before its first use. MSVC accepts a
     // later class-scope declaration, while GCC correctly requires the name to
     // be visible at the requires-clause point.
+    //
+    // The self-exclusion is repeated in the requires-clause, not just here, and it has to
+    // be: a variable template is not short-circuited, so every trait below is instantiated
+    // even when the first conjunct is already false. Asking
+    // is_nothrow_constructible_v<Self, Self&&> re-enters this very constraint, which Clang
+    // rejects outright as "depends on itself". MSVC happens to accept it.
     template <typename Callable, typename Source>
     static constexpr bool CanStoreCallable =
         !std::is_same_v<Callable, UIRoutedPointerCallback> && sizeof(Callable) <= InlineStorageBytes &&
@@ -304,8 +310,10 @@ class UIRoutedPointerCallback final {
   public:
     UIRoutedPointerCallback() noexcept = default;
 
+    // The conjunction short-circuits, so a copy/move of this type never reaches the traits.
     template <typename Source>
-        requires CanStoreCallable<std::decay_t<Source>, Source>
+        requires (!std::is_same_v<std::decay_t<Source>, UIRoutedPointerCallback>)
+                 && CanStoreCallable<std::decay_t<Source>, Source>
     explicit UIRoutedPointerCallback(Source&& source) noexcept
     {
         using Callable = std::decay_t<Source>;

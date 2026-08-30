@@ -49,14 +49,60 @@ function(tina_bgfx_shader_profiles OUT_VAR)
     set("${OUT_VAR}" "${PROFILES}" PARENT_SCOPE)
 endfunction()
 
+# Resolves the shaderc to cook with, plus whatever the cook steps must depend on.
+#
+# shaderc is a BUILD-HOST tool: it turns shader source into headers during the build, and
+# nothing ever runs it on the target. bgfx.cmake upstream declares it with a plain
+# add_executable() and has no cross-compiling story, so a cross build aims it at the target
+# and produces a binary the host cannot execute.
+#
+# Measured 2026-08-29 with an Android arm64-v8a probe (NDK 28): bx/bimg/bgfx cross-compile
+# cleanly and every Tina .cpp in tina_render_bgfx compiles, but all 22 cook steps failed
+# because bin/shaderc came out a 460 MB AArch64 ELF (llvm-readelf: Machine AArch64). Zero C++
+# errors -- the whole failure surface was this one host/target confusion.
+#
+# Hence TINA_BGFX_SHADERC_EXECUTABLE for cross builds. Note what is NOT done here: the cook
+# is never skipped when shaderc is unavailable. The generated headers are exactly what the
+# RendererType tables in src/render/bgfx/*Shader.cpp include, so skipping would trade a clear
+# build error for an obscure link error.
+#
+# OUT_COMMAND receives the executable to run; OUT_DEPENDS the DEPENDS entries. A native build
+# depends on the bgfx::shaderc *target* so editing bgfx re-cooks; an imported host binary is a
+# file dependency instead, since this tree cannot rebuild it.
+function(_tina_resolve_bgfx_shaderc CALLER OUT_COMMAND OUT_DEPENDS)
+    if(TINA_BGFX_SHADERC_EXECUTABLE)
+        if(NOT EXISTS "${TINA_BGFX_SHADERC_EXECUTABLE}")
+            message(FATAL_ERROR
+                "${CALLER}: TINA_BGFX_SHADERC_EXECUTABLE is set to "
+                "'${TINA_BGFX_SHADERC_EXECUTABLE}', which does not exist. It must be a shaderc "
+                "built for the build host.")
+        endif()
+        set("${OUT_COMMAND}" "${TINA_BGFX_SHADERC_EXECUTABLE}" PARENT_SCOPE)
+        set("${OUT_DEPENDS}" "${TINA_BGFX_SHADERC_EXECUTABLE}" PARENT_SCOPE)
+        return()
+    endif()
+
+    if(CMAKE_CROSSCOMPILING)
+        message(FATAL_ERROR
+            "${CALLER}: shaderc runs on the build host, but this is a cross build targeting "
+            "${CMAKE_SYSTEM_NAME}, so the in-tree shaderc cannot execute here. Set "
+            "-DTINA_BGFX_SHADERC_EXECUTABLE=<path to a host-built shaderc> (for example the "
+            "one in an existing desktop build tree's bin directory).")
+    endif()
+    if(NOT TARGET bgfx::shaderc)
+        message(FATAL_ERROR
+            "${CALLER}: bgfx::shaderc is required for the private bgfx backend")
+    endif()
+    set("${OUT_COMMAND}" "$<TARGET_FILE:bgfx::shaderc>" PARENT_SCOPE)
+    set("${OUT_DEPENDS}" "bgfx::shaderc" PARENT_SCOPE)
+endfunction()
+
 function(tina_add_bgfx_embedded_shader TARGET SHADER_NAME VERTEX_SHADER FRAGMENT_SHADER VARYING_DEF)
     if(NOT TARGET "${TARGET}")
         message(FATAL_ERROR "tina_add_bgfx_embedded_shader: target '${TARGET}' does not exist")
     endif()
-    if(NOT TARGET bgfx::shaderc)
-        message(FATAL_ERROR
-            "tina_add_bgfx_embedded_shader: bgfx::shaderc is required for the private bgfx backend")
-    endif()
+    _tina_resolve_bgfx_shaderc(
+        "tina_add_bgfx_embedded_shader" SHADERC_COMMAND SHADERC_DEPENDS)
 
     set(SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/shaders/${SHADER_NAME}")
     set(SHADER_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/thirdparty/bgfx.cmake/bgfx/src")
@@ -83,7 +129,7 @@ function(tina_add_bgfx_embedded_shader TARGET SHADER_NAME VERTEX_SHADER FRAGMENT
             add_custom_command(
                 OUTPUT "${SHADER_HEADER}"
                 COMMAND "${CMAKE_COMMAND}" -E make_directory "${SHADER_OUTPUT_DIR}"
-                COMMAND $<TARGET_FILE:bgfx::shaderc>
+                COMMAND "${SHADERC_COMMAND}"
                     --type "${SHADER_STAGE}"
                     --platform "${SHADER_PLATFORM}"
                     --profile "${SHADER_PROFILE}"
@@ -96,7 +142,7 @@ function(tina_add_bgfx_embedded_shader TARGET SHADER_NAME VERTEX_SHADER FRAGMENT
                     --Werror
                     -O 3
                 DEPENDS
-                    bgfx::shaderc
+                    ${SHADERC_DEPENDS}
                     "${SHADER_SOURCE}"
                     "${VARYING_DEF}"
                 COMMENT "Compiling ${SHADER_NAME} ${SHADER_STAGE} shader for ${SHADER_PROFILE}"
@@ -127,10 +173,8 @@ function(tina_add_bgfx_embedded_vertex_shader TARGET SHADER_NAME VERTEX_SHADER V
     if(NOT TARGET "${TARGET}")
         message(FATAL_ERROR "tina_add_bgfx_embedded_vertex_shader: target '${TARGET}' does not exist")
     endif()
-    if(NOT TARGET bgfx::shaderc)
-        message(FATAL_ERROR
-            "tina_add_bgfx_embedded_vertex_shader: bgfx::shaderc is required for the private bgfx backend")
-    endif()
+    _tina_resolve_bgfx_shaderc(
+        "tina_add_bgfx_embedded_vertex_shader" SHADERC_COMMAND SHADERC_DEPENDS)
 
     set(SHADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated/shaders/${SHADER_NAME}")
     set(SHADER_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/thirdparty/bgfx.cmake/bgfx/src")
@@ -150,7 +194,7 @@ function(tina_add_bgfx_embedded_vertex_shader TARGET SHADER_NAME VERTEX_SHADER V
         add_custom_command(
             OUTPUT "${SHADER_HEADER}"
             COMMAND "${CMAKE_COMMAND}" -E make_directory "${SHADER_OUTPUT_DIR}"
-            COMMAND $<TARGET_FILE:bgfx::shaderc>
+            COMMAND "${SHADERC_COMMAND}"
                 --type vertex
                 --platform "${SHADER_PLATFORM}"
                 --profile "${SHADER_PROFILE}"
@@ -163,7 +207,7 @@ function(tina_add_bgfx_embedded_vertex_shader TARGET SHADER_NAME VERTEX_SHADER V
                 --Werror
                 -O 3
             DEPENDS
-                bgfx::shaderc
+                ${SHADERC_DEPENDS}
                 "${VERTEX_SHADER}"
                 "${VARYING_DEF}"
             COMMENT "Compiling ${SHADER_NAME} vertex shader for ${SHADER_PROFILE}"

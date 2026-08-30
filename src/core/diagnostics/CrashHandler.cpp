@@ -30,7 +30,11 @@ namespace {
 // the time we crash.
 constexpr std::size_t MaxNameBytes = 64;
 constexpr std::size_t MaxPathBytes = 512;
+#if defined(_WIN32)
+// Only the DbgHelp backtrace walks frames; other platforms report the section as
+// unavailable and never size a frame buffer, so this would be an unused constant there.
 constexpr std::size_t MaxFrames = 62;
+#endif
 
 struct HandlerState final {
     char applicationName[MaxNameBytes]{};

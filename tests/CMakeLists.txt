@@ -1,6 +1,7 @@
 set(TINA_CORE_TEST_SOURCES
     core/AssertReleaseCompileTests.cpp
     core/AssertTests.cpp
+    core/CancellationSignalTests.cpp
     core/ContentHashDigestTests.cpp
     core/CrashHandlerTests.cpp
     core/DiagnosticsTests.cpp
@@ -8,7 +9,10 @@ set(TINA_CORE_TEST_SOURCES
     core/UserPathsTests.cpp
     core/WriteFileTests.cpp
     core/EnumFlagsTests.cpp
+    core/MoveOnlyFunctionTests.cpp
+    core/ParseFloatTests.cpp
     core/header_isolation/AssetIdHeader.cpp
+    core/header_isolation/CancellationSignalHeader.cpp
     core/header_isolation/ContentHashHeader.cpp
     core/header_isolation/ContentHashDigestHeader.cpp
     core/header_isolation/CrashHandlerHeader.cpp
@@ -27,6 +31,8 @@ set(TINA_CORE_TEST_SOURCES
     core/header_isolation/GenerationPoolHeader.cpp
     core/header_isolation/MemoryTrackerHeader.cpp
     core/header_isolation/MonotonicClockHeader.cpp
+    core/header_isolation/MoveOnlyFunctionHeader.cpp
+    core/header_isolation/ParseFloatHeader.cpp
     core/header_isolation/ResultHeader.cpp
     core/header_isolation/TraceHeader.cpp
     core/header_isolation/Utf8Header.cpp
@@ -133,6 +139,10 @@ set_target_properties(tina_tests PROPERTIES CXX_EXTENSIONS OFF)
 
 if(TINA_BUILD_PLATFORM_GLFW)
     add_subdirectory(platform_glfw)
+endif()
+
+if(ANDROID)
+    add_subdirectory(platform_android)
 endif()
 
 if(TINA_BUILD_RENDER_BGFX)

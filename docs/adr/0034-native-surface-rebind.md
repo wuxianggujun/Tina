@@ -106,6 +106,23 @@ per-frame 校验走同一 tracker。
 - 成本：`RenderSurfaceState` 增加一个字段，所有构造点需要显式意图（Tina 不保留兼容默认值）；
 - 门禁：tracker 的 rebind 接受/拒绝/单调性单测；product smoke 指纹不变（桌面不触发 rebind）。
 
+## 后续修正（2026-08-29）：本 ADR 落地时缺一个生产者
+
+上文「Android 切后台/回前台不再终止 run」在本 ADR 落地当时**并不成立**，因为
+`RenderSurfaceState::nativeBindingRevision` 从未被任何生产代码赋值：
+
+- 全仓库唯一写它的地方是 `tests/render/NullRenderDeviceTests.cpp`；
+- `EngineHost::toRenderSurfaceState()` 没有转发该字段，故它恒为默认值 1；
+- `Integration::WindowSurfaceSnapshot`（平台侧的来源）**连这个字段都不存在**。
+
+也就是说 tracker 的校验、bgfx 的 `setPlatformData` + 强制 reset 都写好了，但整条路径只能从测试到达 ——
+一个已发布却没有生产者的契约。这与本仓库反复出现的形态相同：契约写下了，实现边界没跟上；而「桌面恒为 0」
+读起来像设计意图，实际是没有任何东西能让它非 0。
+
+已于 `MOBILE-001` 补齐：`WindowSurfaceSnapshot` 新增该字段、`EngineHost` 转发、Android 后端在窗口替换时
+递增（并要求三个 revision 同时推进，符合本 ADR 的 tracker 契约）。**仍未验证：** 真实 `ANativeWindow`
+替换下 `bgfx::reset` 的行为 —— 模拟器覆盖的是契约与 revision 推进，不是 GPU 侧重建。
+
 ## 被拒绝方案
 
 - **把 surface 销毁压成 `Suspended`**：语义错误。`Suspended` 承诺资源仍有效，而 native window 已经不是

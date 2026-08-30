@@ -11,6 +11,8 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+// std::strlen is used below; MSVC leaks it in transitively, GCC does not.
+#include <cstring>
 #include <memory_resource>
 #include <thread>
 #include <vector>

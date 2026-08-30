@@ -11,6 +11,9 @@ enum class NativeWindowBindingKind : u8 {
     Win32,
     X11,
     Wayland,
+    // ANativeWindow*. Unlike X11/Wayland there is no display to carry: the window handle is
+    // self-contained, which is also why nativeDisplay must stay 0 for this kind.
+    Android,
 };
 
 struct NativeWindowBinding final {

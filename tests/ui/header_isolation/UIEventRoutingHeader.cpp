@@ -74,3 +74,8 @@ static_assert(!std::is_constructible_v<
 static_assert(!std::is_constructible_v<
               Tina::UI::UIRoutedPointerCallback,
               OversizedPointerListener>);
+// The storing constructor must never be a candidate for this type itself. Asking the
+// question at all is what used to re-enter the constructor's own constraint under Clang.
+static_assert(!std::is_constructible_v<
+              Tina::UI::UIRoutedPointerCallback,
+              Tina::UI::UIRoutedPointerCallback&>);

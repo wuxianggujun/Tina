@@ -483,6 +483,22 @@ toBgfxPlatformData(const Integration::Detail::NativeWindowBinding& binding)
                              "The native window binding is missing its window handle or revision");
     }
 
+    // Range-checked before the switch rather than handled by a default label. A default would
+    // also swallow a newly added enumerator, which is the one case that should break the
+    // build instead of failing at runtime -- the switch below is therefore exhaustive, and
+    // this guard covers only values that are not enumerators at all.
+    switch (binding.kind)
+    {
+    case Integration::Detail::NativeWindowBindingKind::Win32:
+    case Integration::Detail::NativeWindowBindingKind::X11:
+    case Integration::Detail::NativeWindowBindingKind::Wayland:
+    case Integration::Detail::NativeWindowBindingKind::Android:
+        break;
+    default:
+        return Core::failure(RenderErrorCode::InvalidNativeWindowBinding,
+                             "The native window binding kind is not a known value");
+    }
+
     bgfx::PlatformData platformData{};
     platformData.nwh = toNativePointer(binding.nativeWindow);
 
@@ -509,10 +525,22 @@ toBgfxPlatformData(const Integration::Detail::NativeWindowBinding& binding)
         platformData.ndt = toNativePointer(binding.nativeDisplay);
         platformData.type = bgfx::NativeWindowHandleType::Wayland;
         break;
-    default:
-        return Core::failure(RenderErrorCode::InvalidNativeWindowBinding,
-                             "The native window binding kind is not supported by the bgfx backend");
+    case Integration::Detail::NativeWindowBindingKind::Android:
+        // ANativeWindow* is self-contained: bgfx's own Android entry hands it straight to
+        // nwh with the default handle type and never sets ndt. A non-zero display here would
+        // therefore be silently ignored, so reject it rather than accept a binding whose
+        // extra field means nothing.
+        if (binding.nativeDisplay != 0)
+        {
+            return Core::failure(RenderErrorCode::InvalidNativeWindowBinding,
+                                 "The Android native window binding must not carry a display pointer");
+        }
+        platformData.type = bgfx::NativeWindowHandleType::Default;
+        break;
     }
+
+    // No default label: every enumerator is handled above, so adding a binding kind must
+    // fail to compile here rather than fall through to a runtime rejection.
 
     return platformData;
 }

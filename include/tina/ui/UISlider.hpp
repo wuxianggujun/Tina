@@ -48,6 +48,11 @@ class UISliderChangeCallback final {
     static constexpr usize InlineStorageBytes = 48;
 
   private:
+    // The self-exclusion is repeated in the requires-clause, not just here, and it has to
+    // be: a variable template is not short-circuited, so every trait below is instantiated
+    // even when the first conjunct is already false. Asking
+    // is_nothrow_constructible_v<Self, Self&&> re-enters this very constraint, which Clang
+    // rejects outright as "depends on itself". MSVC happens to accept it.
     template <typename Callable, typename Source>
     static constexpr bool CanStoreCallable =
         !std::is_same_v<Callable, UISliderChangeCallback> && sizeof(Callable) <= InlineStorageBytes &&
@@ -58,8 +63,10 @@ class UISliderChangeCallback final {
   public:
     UISliderChangeCallback() noexcept = default;
 
+    // The conjunction short-circuits, so a copy/move of this type never reaches the traits.
     template <typename Source>
-        requires CanStoreCallable<std::decay_t<Source>, Source>
+        requires (!std::is_same_v<std::decay_t<Source>, UISliderChangeCallback>)
+                 && CanStoreCallable<std::decay_t<Source>, Source>
     explicit UISliderChangeCallback(Source&& source) noexcept
     {
         using Callable = std::decay_t<Source>;

@@ -108,6 +108,54 @@ TEST(BgfxRenderDeviceFactoryTest, SurfaceIdentityMismatchReleasesTheConsumedLeas
     EXPECT_EQ(control->activeLeaseCount, 0U);
 }
 
+// ANativeWindow* is self-contained, so a display pointer on an Android binding would be
+// silently dropped by bgfx. Rejecting it keeps the binding's fields meaningful rather than
+// accepting one whose extra field does nothing.
+TEST(BgfxRenderDeviceFactoryTest, AndroidBindingRejectsADisplayPointerAndReleasesTheLease)
+{
+    auto pool = createSurfacePool();
+    auto surface = pool.tryEmplace();
+    ASSERT_TRUE(surface.has_value());
+
+    auto control = createLeaseControl();
+    auto androidBinding = validWin32Binding();
+    androidBinding.kind = Integration::Detail::NativeWindowBindingKind::Android;
+    androidBinding.nativeDisplay = 0x1234;
+    auto lease = Integration::Detail::NativeWindowSurfaceLeaseAccess::Create(
+        control, *surface, androidBinding);
+    ASSERT_TRUE(lease.has_value());
+
+    auto result = createBgfxRenderDevice(
+        RenderDeviceCreateParams{.initialPrimaryWindowSurface = activeSurface(*surface)},
+        std::move(*lease));
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, RenderErrorCode::InvalidNativeWindowBinding);
+    EXPECT_EQ(control->activeLeaseCount, 0U);
+}
+
+// A missing window handle is rejected by the lease itself, one layer before bgfx decoding, so
+// Android inherits that guard with no extra code. Asserting it here pins where the check
+// lives: a null ANativeWindow* can never reach bgfx::init, and no lease is leaked either.
+TEST(BgfxRenderDeviceFactoryTest, AndroidBindingWithoutAWindowHandleIsRejectedByTheLease)
+{
+    auto pool = createSurfacePool();
+    auto surface = pool.tryEmplace();
+    ASSERT_TRUE(surface.has_value());
+
+    auto control = createLeaseControl();
+    auto androidBinding = validWin32Binding();
+    androidBinding.kind = Integration::Detail::NativeWindowBindingKind::Android;
+    androidBinding.nativeWindow = 0;
+
+    auto lease = Integration::Detail::NativeWindowSurfaceLeaseAccess::Create(
+        control, *surface, androidBinding);
+    ASSERT_FALSE(lease.has_value());
+    EXPECT_EQ(control->activeLeaseCount, 0U);
+}
+
+// The switch over binding kinds is exhaustive so that adding an enumerator breaks the build;
+// a value that is not an enumerator at all is caught by an explicit range check instead.
 TEST(BgfxRenderDeviceFactoryTest, UnsupportedNativeBindingReleasesTheConsumedLease)
 {
     auto pool = createSurfacePool();

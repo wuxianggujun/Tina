@@ -41,9 +41,9 @@ struct BaselineLoadResult final {
     bool catalogPresent = false;
 };
 
-[[nodiscard]] Core::Status checkStopped(const std::stop_token stopToken)
+[[nodiscard]] Core::Status checkStopped(const Core::CancellationToken cancellation)
 {
-    if (stopToken.stop_requested())
+    if (cancellation.cancellationRequested())
     {
         return Core::failure(AssetErrorCode::SourceImportCancelled,
                              "source import pipeline was cancelled");
@@ -525,7 +525,7 @@ collectUnitOutputsFromBaseline(const SourceImportPipelineRequest& request,
 
 [[nodiscard]] Core::Result<SourceImportPipelineResult>
 executeSourceImportPipelineImpl(const SourceImportPipelineRequest& request,
-                                const std::stop_token stopToken)
+                                const Core::CancellationToken cancellation)
 {
     if (const auto status = validateRequest(request); !status)
     {
@@ -537,7 +537,7 @@ executeSourceImportPipelineImpl(const SourceImportPipelineRequest& request,
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "source import pipeline requires validation memory resources");
     }
-    if (const auto status = checkStopped(stopToken); !status)
+    if (const auto status = checkStopped(cancellation); !status)
     {
         return Core::failure(std::move(status.error()));
     }
@@ -634,7 +634,7 @@ executeSourceImportPipelineImpl(const SourceImportPipelineRequest& request,
                 retainedUnitIds.push_back(descriptions[index].expected.unitId);
                 continue;
             }
-            if (const auto status = checkStopped(stopToken); !status)
+            if (const auto status = checkStopped(cancellation); !status)
             {
                 return Core::failure(std::move(status.error()));
             }
@@ -665,7 +665,7 @@ executeSourceImportPipelineImpl(const SourceImportPipelineRequest& request,
         {
             return Core::failure(std::move(unitOutputs.error()));
         }
-        if (const auto status = checkStopped(stopToken); !status)
+        if (const auto status = checkStopped(cancellation); !status)
         {
             return Core::failure(std::move(status.error()));
         }
@@ -689,7 +689,7 @@ executeSourceImportPipelineImpl(const SourceImportPipelineRequest& request,
         {
             return Core::failure(std::move(staged.error()));
         }
-        if (const auto status = checkStopped(stopToken); !status)
+        if (const auto status = checkStopped(cancellation); !status)
         {
             return Core::failure(std::move(status.error()));
         }
@@ -723,7 +723,7 @@ executeSourceImportPipelineImpl(const SourceImportPipelineRequest& request,
     candidates.reserve(request.units.size());
     for (const auto& unit : request.units)
     {
-        if (const auto status = checkStopped(stopToken); !status)
+        if (const auto status = checkStopped(cancellation); !status)
         {
             return Core::failure(std::move(status.error()));
         }
@@ -750,7 +750,7 @@ executeSourceImportPipelineImpl(const SourceImportPipelineRequest& request,
     {
         return Core::failure(std::move(unitOutputs.error()));
     }
-    if (const auto status = checkStopped(stopToken); !status)
+    if (const auto status = checkStopped(cancellation); !status)
     {
         return Core::failure(std::move(status.error()));
     }
@@ -764,7 +764,7 @@ executeSourceImportPipelineImpl(const SourceImportPipelineRequest& request,
     {
         return Core::failure(std::move(staged.error()));
     }
-    if (const auto status = checkStopped(stopToken); !status)
+    if (const auto status = checkStopped(cancellation); !status)
     {
         return Core::failure(std::move(status.error()));
     }
@@ -785,11 +785,11 @@ executeSourceImportPipelineImpl(const SourceImportPipelineRequest& request,
 
 Core::Result<SourceImportPipelineResult>
 executeSourceImportPipeline(const SourceImportPipelineRequest& request,
-                            const std::stop_token stopToken) noexcept
+                            const Core::CancellationToken cancellation) noexcept
 {
     try
     {
-        return executeSourceImportPipelineImpl(request, stopToken);
+        return executeSourceImportPipelineImpl(request, cancellation);
     } catch (const std::bad_alloc&)
     {
         return Core::failure(AssetErrorCode::AllocationFailed,

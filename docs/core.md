@@ -7,7 +7,7 @@ xxHash、EASTL、spdlog 或平台 SDK 类型。
 
 | 子域 | 已实现 |
 | --- | --- |
-| Base | 固定宽度类型、Platform/Compiler、SourceLocation、EnumFlags、`ScopeExit` |
+| Base | 固定宽度类型、Platform/Compiler、SourceLocation、EnumFlags、`ScopeExit`、`MoveOnlyFunction`、`CancellationSignal`/`CancellationToken` |
 | Error | C++23 `std::expected` 的 `Result<T>`/`Status`、稳定 domain/code、origin、native code、UTF-8 context chain |
 | Time | `Duration`、`MonotonicTimePoint`、`IMonotonicClock`、`SteadyMonotonicClock`、`FixedStepAccumulator` |
 | Diagnostics | `TINA_ASSERT`、`LogLevel/LogRecord`、Engine-owned `Diagnostics`/console sink，以及 opt-in `CrashHandler` 最后故障报告 |
@@ -15,7 +15,7 @@ xxHash、EASTL、spdlog 或平台 SDK 类型。
 | Memory | `MemoryTag`、`MemoryTracker`、`CountingMemoryResource`、owning `FrameArena` |
 | ID | `GenerationId/GenerationPool`、`AssetId` |
 | Hash | 128-bit `ContentHash` 与 PRIVATE XXH3-128 digest adapter |
-| IO/Text | strict UTF-8 helpers、有界 `readFile`、`createParentDirectories`、`writeFile` 与 atomic sibling replace |
+| IO/Text | strict UTF-8 helpers、`convertUtf16ToStrictUtf8`、`parseStrictFloat`、有界 `readFile`、`createParentDirectories`、`writeFile` 与 atomic sibling replace |
 
 不在当前 Core 的能力：通用线程池、Asset job、Runtime event queue、全局 allocator 替换、MetricsRegistry、
 Trace session/capture 控制面、minidump/CrashContext、可移植 callstack 符号化、崩溃恢复和通用 Tina STL。
@@ -137,6 +137,51 @@ Runtime 已在 `GameStateDispatchPhase::FrameUpdate` 的逐 State dispatch 内�
 `TINA_TRACE_ZONE("Runtime.GameState.UpdateFrame")`。None 构建中它完全编译消失；Tracy Profile 构建中，
 同一 annotation 由可选 adapter 发布为 zone。普通 benchmark 仍使用 None，不能把 profiler capture
 当作稳定性能 baseline。
+
+## 三个替代标准库的 Base 类型（libc++ 缺口，非风格选择）
+
+以下三个类型都不是「自研 STL」，而是因为 **libc++ 至今没有实现对应的标准库设施**，而 Android NDK 用
+libc++：任何公共头一旦命名它们，整个模块就无法为 Android 编译。ADR 0007 允许在有明确消费者时实现少量
+引擎专用结构（原文举例即含 `InlineFunction`），这三个各有唯一且已存在的消费者。
+
+| 类型 | 替代 | libc++ 缺口 | 消费者 |
+| --- | --- | --- | --- |
+| `Core::MoveOnlyFunction` | `std::move_only_function` | NDK 28（libc++ 19）与 NDK 29（libc++ 21）都把 `__cpp_lib_move_only_function` 在 `<version>` 里注释掉；这是库缺口不是语言缺口，Clang 接受 `-std=c++23` | 全部 backend factory、`TaskCallable`、`PlatformEventCallback` |
+| `Core::parseStrictFloat` | `std::from_chars`（浮点重载） | NDK 28 的 libc++ 无 `__charconv/from_chars_floating_point.h`，只有整数与 `to_chars` 两半；NDK 29 才补上 | `CatalogCook` 的 `parseFloatToken`、`parseNumberFieldValue` |
+| `Core::CancellationSignal`/`CancellationToken` | `std::stop_token` | NDK 28 把它挡在 `_LIBCPP_HAS_NO_EXPERIMENTAL_STOP_TOKEN` 后；开 `_LIBCPP_ENABLE_EXPERIMENTAL` 会一次打开全部未完成特性，代价远大于本类型 | `executeSourceImportPipeline` |
+
+三点刻意的取舍：
+
+- **`MoveOnlyFunction` 有堆回退，不是纯 inline。** 最初写成 inline-only，被编译器证否：`TaskGroup::add`
+  把调用者的 `TaskCallable` 再包一层以附加完成记账，外层 target 因此包含一整个 `MoveOnlyFunction`，
+  **按构造**必然大于它要放进的缓冲区 —— 没有任何容量值能满足（128→256 只是重演同一失败）。本仓库真正
+  的不变量是**有界队列与 arena** 不静默增长（队列满返回 `CapacityExceeded`），而 type-erased callable
+  不属于那类。移动只搬指针，故仍是 noexcept 且不分配。
+- **`parseStrictFloat` 不是 `strtof` 的薄封装。** `strtof` 会接受 `" 1.5"`、`0x1p3`、`inf`、`nan`，而
+  `from_chars` 一个都不接受；替换若不显式拒绝这些，等于悄悄放宽了 cooked 文本的格式。`strtof` 的
+  locale 敏感性在此无害：Tina 从不调用 `setlocale` 也不 imbue，进程终生停在 "C" locale。
+- **`CancellationToken` 比 `std::stop_token` 小得多，是有意的。** 没有 `stop_callback` 注册、没有共享
+  引用计数、没有侵入式回调链 —— Tina 的调用点从来只在工作项之间问一次 `stop_requested()`。桌面侧
+  `editor_app` 保留 `std::jthread`，在 Asset 边界用一个 `std::stop_callback` 把 token 桥成 signal
+  （选 callback 而非轮询：它对「调用前已经请求过取消」也会立刻触发，不会漏掉）。
+
+## UTF-16 → 严格 UTF-8
+
+`convertUtf16ToStrictUtf8()` 存在的原因是**平台 IME 说 UTF-16，而 Tina 的每一条文本契约都是严格 UTF-8**。
+它放在 Core 而不是某个平台适配器里，因为这个缺口是通用的：Android 的 JNI 直接给 UTF-16，Windows 的 IMM32
+同样如此。
+
+Android 上不能用看似方便的 `GetStringUTFChars`：它返回的是 **modified UTF-8**，NUL 编码成两字节，且非 BMP
+字符（emoji）以 **CESU-8 代理对**到达 —— 一个 emoji 会变成两个非法的三字节序列，被严格校验器拒绝，字符静默
+丢失。
+
+三条刻意的取舍：
+
+- **只产最短形式。** 输出 overlong 序列会让这个函数自己的产物被下游校验器拒绝。
+- **未配对代理、内嵌 NUL、输出溢出都返回 `nullopt`，绝不截断。** 截断出的半个多字节字符本身就是非法 UTF-8，
+  忽略返回值的调用者会污染数据流。
+- **失败时输出 span 可能含部分字节**，故返回的长度是唯一权威 —— 拿到 `nullopt` 就不得读该 span。这比每条
+  失败路径都清空更省，而调用者本来就必须检查结果才知道长度。
 
 ## 时间与文本
 

@@ -660,7 +660,9 @@ Core::Result<bool> HttpRequest::pump()
             const auto decoded = decodeChunkedBody();
             if (!decoded) {
                 m_impl->markFailed();
-                return Core::failure(std::move(decoded.error()));
+                // decoded is const, so error() yields a const reference and the
+                // move would silently copy anyway.
+                return Core::failure(decoded.error());
             }
             if (*decoded) {
                 m_impl->state = HttpRequestState::Complete;

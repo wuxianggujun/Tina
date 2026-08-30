@@ -1,6 +1,8 @@
 add_library(tina_core STATIC
+    ${PROJECT_SOURCE_DIR}/include/tina/core/base/CancellationSignal.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/base/Compiler.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/base/EnumFlags.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/base/MoveOnlyFunction.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/base/Platform.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/base/ScopeExit.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/base/SourceLocation.hpp
@@ -29,6 +31,7 @@ add_library(tina_core STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/core/memory/MemoryTracker.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/time/FixedStepAccumulator.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/time/MonotonicClock.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/text/ParseFloat.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/text/Utf8.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/trace/Trace.hpp
     diagnostics/Assert.cpp

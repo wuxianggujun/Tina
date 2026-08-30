@@ -25,6 +25,7 @@
 #include <tina/asset_format/TilesetPayload.hpp>
 #include <tina/core/hash/ContentHashDigest.hpp>
 #include <tina/core/io/ReadFile.hpp>
+#include <tina/core/text/ParseFloat.hpp>
 #include <tina/core/text/Utf8.hpp>
 
 #include <algorithm>
@@ -399,10 +400,18 @@ struct RecipeSourceCaptureContext final {
     return result.ec == std::errc{} && result.ptr == text.data() + text.size();
 }
 
+// Core::parseStrictFloat rather than std::from_chars: libc++ through NDK 28 ships no
+// floating-point from_chars, so this one line decided whether tina_asset compiles for
+// Android. The integer parses above keep from_chars, which libc++ does implement.
 [[nodiscard]] bool parseFloatToken(std::string_view text, float& out) noexcept
 {
-    const auto [end, err] = std::from_chars(text.data(), text.data() + text.size(), out);
-    return err == std::errc{} && end == text.data() + text.size();
+    const auto parsed = Core::parseStrictFloat(text);
+    if (!parsed)
+    {
+        return false;
+    }
+    out = *parsed;
+    return true;
 }
 
 [[nodiscard]] std::optional<std::byte> parseHexByte(std::string_view text) noexcept

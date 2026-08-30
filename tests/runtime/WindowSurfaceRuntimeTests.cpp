@@ -109,6 +109,10 @@ enum class WindowSurfaceScriptViolation : u8 {
     SourceMetricsRevisionMovedBackward,
     SurfaceFactsChangedWithoutNewMetricsRevision,
     SurfaceRevisionSkipped,
+    // Not a violation: a native window replaced at identical geometry, which is what Android delivers
+    // when an activity returns to the foreground at the same size. It belongs in this enum because it
+    // drives the same script; the test asserts the run *succeeds*.
+    NativeBindingReplacedAtSameGeometry,
 };
 
 class ScriptedWindowSurfacePlatform final : public Integration::IWindowSurfacePlatformBackend {
@@ -263,9 +267,13 @@ class ScriptedWindowSurfacePlatform final : public Integration::IWindowSurfacePl
             probe_->switchedWindowWasValid = windows_.contains(activeWindow_);
         }
 
-        const bool suspended = index == 1;
-        const u32 width = suspended ? 0U : (index == 2 ? 800U : 640U);
-        const u32 height = suspended ? 0U : (index == 2 ? 600U : 480U);
+        const bool rebindAtSameGeometry =
+            violation_ == WindowSurfaceScriptViolation::NativeBindingReplacedAtSameGeometry;
+        // Geometry deliberately held constant for the rebind case: the whole point is that the binding
+        // alone changed, which is the situation the check used to see as "nothing changed".
+        const bool suspended = !rebindAtSameGeometry && index == 1;
+        const u32 width = suspended ? 0U : (!rebindAtSameGeometry && index == 2 ? 800U : 640U);
+        const u32 height = suspended ? 0U : (!rebindAtSameGeometry && index == 2 ? 600U : 480U);
         u64 metricsRevision = index + 1;
         if (violation_ == WindowSurfaceScriptViolation::SourceMetricsRevisionMovedBackward)
         {
@@ -294,6 +302,10 @@ class ScriptedWindowSurfacePlatform final : public Integration::IWindowSurfacePl
             .surfaceRevision =
                 violation_ == WindowSurfaceScriptViolation::SurfaceRevisionSkipped && index >= 1 ? index + 2
                                                                                                   : index + 1,
+            // Advances in lockstep with surfaceRevision for the rebind script, which is what a real
+            // platform backend must do: the two plus the metrics revision move together or the frame is
+            // rejected.
+            .nativeBindingRevision = rebindAtSameGeometry ? index + 1 : 1U,
             .suspended = suspended,
         };
     }
@@ -662,6 +674,28 @@ TEST(WindowSurfaceRuntimeTest, RejectsSurfaceFactsWithoutANewSourceMetricsRevisi
     EXPECT_EQ(probe.leaseCountAtPlatformShutdown, 0U);
     EXPECT_FALSE(probe.lifecycleOrderingViolation);
     EXPECT_LT(eventPosition(probe, "render.shutdown"), eventPosition(probe, "platform.shutdown"));
+}
+
+// A replaced native window at unchanged geometry must be accepted. Android delivers exactly this when
+// an activity returns to the foreground at the same size, and the check used to see "no facts changed"
+// while the revision had advanced -- so it rejected every frame after a background/foreground cycle.
+// Found on a device, because desktop backends never replace a binding.
+TEST(WindowSurfaceRuntimeTest, AcceptsANativeBindingReplacedAtUnchangedGeometry)
+{
+    WindowSurfaceRuntimeProbe probe;
+    auto host = EngineHost::Create(
+        EngineConfig::Defaults(),
+        makeWindowSurfaceFactories(probe, WindowSurfaceFactoryFailure::None,
+                                   WindowSurfaceScriptViolation::NativeBindingReplacedAtSameGeometry));
+    ASSERT_TRUE(host.has_value());
+
+    PassiveGameApplication gameApplication{probe};
+    auto run = (*host)->run(gameApplication);
+    ASSERT_TRUE(run.has_value()) << "a same-geometry rebind is a valid state change, not a violation";
+    EXPECT_TRUE(probe.gameShutdown);
+    // Every scripted frame ran rather than the run stopping at the first rebind.
+    EXPECT_GT(probe.engineFrameIndices.size(), 1U);
+    EXPECT_FALSE(probe.lifecycleOrderingViolation);
 }
 
 TEST(WindowSurfaceRuntimeTest, RejectsSkippedSurfaceRevision)

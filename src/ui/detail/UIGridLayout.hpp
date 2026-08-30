@@ -84,9 +84,13 @@ constexpr void occupyGridArea(GridPlacementState& state,
     }
     const bool rowAuto = item.row == UIGridAutoIndex;
     const bool columnAuto = item.column == UIGridAutoIndex;
+    // u8 rather than 0U: both arms must already be u8, or the conditional's common type is
+    // int after integral promotion and the narrowing is ill-formed in an initializer list.
+    // Clang rejects it; MSVC accepts it silently.
+    constexpr u8 firstTrack = 0U;
     GridArea area{
-        .row = rowAuto ? 0U : item.row,
-        .column = columnAuto ? 0U : item.column,
+        .row = rowAuto ? firstTrack : item.row,
+        .column = columnAuto ? firstTrack : item.column,
         .rowSpan = item.rowSpan,
         .columnSpan = item.columnSpan,
     };

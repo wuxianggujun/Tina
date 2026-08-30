@@ -101,3 +101,11 @@ CMakeSettings.json
 .kilo/
 /隔离一下/
 /temp/
+
+# Android gradle project. local.properties holds machine-specific SDK/CMake paths; the rest is
+# build output. See docs/building.md for the two lines local.properties needs.
+/android/local.properties
+/android/.gradle/
+/android/build/
+/android/app/build/
+/android/app/.cxx/

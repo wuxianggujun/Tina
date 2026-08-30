@@ -2,7 +2,15 @@
 # required by Tina. Nested bgfx/bx/bimg repositories are managed by bgfx.cmake itself.
 # The vNext bgfx backend cooks its private shader set into build-tree headers.
 if(TINA_BUILD_RENDER_BGFX OR TINA_BUILD_SHADERS)
-    set(TINA_NEEDS_BGFX_SHADERC ON)
+    # shaderc only ever runs on the build host. When one is supplied from a host build tree
+    # (the cross-compiling case), building the in-tree copy is pure waste: upstream declares it
+    # with a plain add_executable(), so it would be built for the target -- measured at 460 MB
+    # of AArch64 ELF that the host cannot execute. See cmake/TinaBgfxEmbeddedShaders.cmake.
+    if(TINA_BGFX_SHADERC_EXECUTABLE)
+        set(TINA_NEEDS_BGFX_SHADERC OFF)
+    else()
+        set(TINA_NEEDS_BGFX_SHADERC ON)
+    endif()
     set(BGFX_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     set(BGFX_BUILD_TESTS OFF CACHE BOOL "" FORCE)
     # Tina installs only the bgfx runtime closure required by RenderBgfx. The

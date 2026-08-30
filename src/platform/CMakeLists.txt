@@ -18,3 +18,10 @@ set_target_properties(tina_platform PROPERTIES CXX_EXTENSIONS OFF)
 if(TINA_BUILD_PLATFORM_GLFW)
     add_subdirectory(glfw)
 endif()
+
+# Gated on the target platform rather than an option: this adapter is only buildable when
+# targeting Android, so an option would advertise a choice that does not exist. GLFW is an
+# option because a desktop build can legitimately go without it.
+if(ANDROID)
+    add_subdirectory(android)
+endif()

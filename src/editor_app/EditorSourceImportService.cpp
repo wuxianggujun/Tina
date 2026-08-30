@@ -3,6 +3,7 @@
 #include "EditorSourceImportSelection.hpp"
 
 #include <tina/asset/AssetErrors.hpp>
+#include <tina/core/base/CancellationSignal.hpp>
 #include <tina/core/memory/CountingMemoryResource.hpp>
 #include <tina/core/memory/MemoryTracker.hpp>
 #include <tina/core/text/Utf8.hpp>
@@ -14,6 +15,7 @@
 #include <memory_resource>
 #include <new>
 #include <optional>
+#include <stop_token>
 #include <string_view>
 #include <system_error>
 #include <thread>
@@ -486,6 +488,16 @@ EditorSourceImportWorker makeEditorSourceImportPipelineWorker()
             });
         }
 
+        // The Asset boundary takes a Core::CancellationToken, not a std::stop_token, because
+        // libc++ keeps stop_token experimental through NDK 28. Desktop keeps std::jthread, so
+        // bridge the two here. std::stop_callback rather than polling the token: it also runs
+        // immediately if a stop was already requested before this point, so a cancel that
+        // lands between the request and the pipeline call is not lost. It sets a latched
+        // atomic flag, which is all the pipeline reads between work items.
+        Core::CancellationSignal cancellation;
+        const std::stop_callback forwardStop{stopToken,
+                                             [&cancellation]() noexcept { cancellation.requestCancellation(); }};
+
         auto pipeline = Asset::executeSourceImportPipeline(
             Asset::SourceImportPipelineRequest{
                 .sourceRootUtf8 = request.sourceRootUtf8,
@@ -497,7 +509,7 @@ EditorSourceImportWorker makeEditorSourceImportPipelineWorker()
                 .stageStateUtf8Path = request.freshStageStatePathUtf8,
                 .stageConfig = stageConfig,
             },
-            stopToken);
+            Core::CancellationToken{cancellation});
         if (!pipeline)
         {
             return Core::failure(std::move(pipeline.error()).withContext(

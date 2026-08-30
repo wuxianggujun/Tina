@@ -2366,10 +2366,14 @@ readGltfSkinInfluences(const cgltf_primitive& prim, const GltfSkinCookInfo& skin
             Core::u16 joint = 0;
             Core::u16 weight = 0;
         } encoded[4]{};
+        // u16-typed rather than 0U: mixing 0U with a u16 makes the conditional's common
+        // type int, and narrowing int back to u16 in an initializer list is ill-formed.
+        // Clang rejects it; MSVC accepts it silently.
+        constexpr Core::u16 unusedJoint = 0U;
         for (std::size_t slot = 0; slot < valueCount; ++slot)
         {
             encoded[slot] = QuantizedInfluence{
-                .joint = encodedWeights[slot] == 0U ? 0U : values[slot].joint,
+                .joint = encodedWeights[slot] == 0U ? unusedJoint : values[slot].joint,
                 .weight = static_cast<Core::u16>(encodedWeights[slot]),
             };
         }

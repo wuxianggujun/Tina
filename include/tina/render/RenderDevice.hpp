@@ -1,5 +1,6 @@
 #pragma once
 
+#include <tina/core/base/MoveOnlyFunction.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/render/FramePin.hpp>
 #include <tina/render/RenderErrors.hpp>
@@ -682,6 +683,6 @@ class IRenderDevice {
 };
 
 using RenderDeviceFactory =
-    std::move_only_function<Core::Result<std::unique_ptr<IRenderDevice>>(const RenderDeviceCreateParams&)>;
+    Core::MoveOnlyFunction<Core::Result<std::unique_ptr<IRenderDevice>>(const RenderDeviceCreateParams&)>;
 
 } // namespace Tina::Render

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <tina/core/base/MoveOnlyFunction.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/core/id/GenerationId.hpp>
 #include <tina/platform/PlatformBackend.hpp>
@@ -20,6 +21,14 @@ struct WindowSurfaceSnapshot final {
     Platform::ContentScale contentScale{};
     u64 sourceMetricsRevision = 0;
     u64 surfaceRevision = 0;
+    // Advances only when the platform handed over a *different* native window, which Android
+    // does across background/foreground transitions. Orthogonal to surfaceRevision: that one
+    // also moves for a plain resize, where the window itself is unchanged.
+    //
+    // Render's RenderSurfaceState has carried this since ADR 0034, but nothing ever assigned
+    // it -- the whole rebind path was reachable only from tests. Publishing it here is what
+    // connects a real platform to it. Desktop backends leave it at 1 forever.
+    u64 nativeBindingRevision = 1;
     bool suspended = true;
 };
 
@@ -74,7 +83,7 @@ class IWindowSurfacePlatformBackend : public Platform::IPlatformBackend, public 
 };
 
 using WindowSurfacePlatformBackendFactory =
-    std::move_only_function<Core::Result<std::unique_ptr<IWindowSurfacePlatformBackend>>(
+    Core::MoveOnlyFunction<Core::Result<std::unique_ptr<IWindowSurfacePlatformBackend>>(
         const Platform::PlatformBackendCreateParams&)>;
 
 } // namespace Tina::Integration

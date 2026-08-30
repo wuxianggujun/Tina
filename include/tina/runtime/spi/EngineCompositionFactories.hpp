@@ -12,25 +12,22 @@
 #include <tina/ui/UIContext.hpp>
 #include <tina/ui/UIContextConfig.hpp>
 
-#include <functional>
+#include <tina/core/base/MoveOnlyFunction.hpp>
+
 #include <memory>
 #include <memory_resource>
 #include <variant>
 
-#if !defined(__cpp_lib_move_only_function) || __cpp_lib_move_only_function < 202110L
-#error "Tina Runtime requires C++23 std::move_only_function support"
-#endif
-
 namespace Tina {
 
-using MonotonicClockFactory = std::move_only_function<Core::Result<std::unique_ptr<Core::IMonotonicClock>>()>;
+using MonotonicClockFactory = Core::MoveOnlyFunction<Core::Result<std::unique_ptr<Core::IMonotonicClock>>()>;
 
 struct IndependentPlatformRenderFactories final {
     Platform::PlatformBackendFactory createPlatformBackend;
     Render::RenderDeviceFactory createRenderDevice;
 };
 
-using WindowSurfaceRenderDeviceFactory = std::move_only_function<Core::Result<std::unique_ptr<Render::IRenderDevice>>(
+using WindowSurfaceRenderDeviceFactory = Core::MoveOnlyFunction<Core::Result<std::unique_ptr<Render::IRenderDevice>>(
     const Render::RenderDeviceCreateParams&, Integration::NativeWindowSurfaceLease)>;
 
 struct WindowSurfacePlatformRenderFactories final {
@@ -45,7 +42,7 @@ using PlatformRenderComposition =
 // UIContext::Create(window, capacities, resource) with the placeholder
 // rasterizer. Desktop FreeType samples may inject a FreeType rasterizer and
 // open a fixture face here. Must not retain Platform views.
-using PrimaryWindowUIContextFactory = std::move_only_function<Core::Result<std::unique_ptr<UI::UIContext>>(
+using PrimaryWindowUIContextFactory = Core::MoveOnlyFunction<Core::Result<std::unique_ptr<UI::UIContext>>(
     Platform::WindowId ownerWindow,
     const UI::UIContextCapacityConfig& capacities,
     std::pmr::memory_resource& resource)>;
@@ -53,13 +50,13 @@ using PrimaryWindowUIContextFactory = std::move_only_function<Core::Result<std::
 // Optional AudioEngine construction (M11-A14). Empty → no Audio module.
 // Prefer AudioEngine::Create (Disabled) for Null graphs; miniaudio device stays
 // sample/adapter private and is not required by Runtime.
-using AudioEngineFactory = std::move_only_function<Core::Result<Audio::AudioEngine>()>;
+using AudioEngineFactory = Core::MoveOnlyFunction<Core::Result<Audio::AudioEngine>()>;
 
 // Optional CPU submission accounting ledger (RUNTIME-002). Empty means Host owns a
 // CpuSubmissionCompletionLedger. Custom ledgers observe the same present-return
 // completion point; this factory is not a GPU-fence extension point.
 using SubmissionCompletionLedgerFactory =
-    std::move_only_function<Core::Result<std::unique_ptr<Render::ISubmissionCompletionLedger>>()>;
+    Core::MoveOnlyFunction<Core::Result<std::unique_ptr<Render::ISubmissionCompletionLedger>>()>;
 
 // One-shot composition input. The tagged Platform/Render branch prevents an
 // invalid mixture of independent and native-window-aware factories.

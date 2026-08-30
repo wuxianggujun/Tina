@@ -1,5 +1,6 @@
 #pragma once
 
+#include <tina/core/base/MoveOnlyFunction.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/platform/PlatformFrame.hpp>
 
@@ -54,7 +55,7 @@ class PlatformEventNotification final {
     friend class PlatformEventDispatcher;
 };
 
-using PlatformEventCallback = std::move_only_function<void(const PlatformEventNotification&)>;
+using PlatformEventCallback = Core::MoveOnlyFunction<void(const PlatformEventNotification&)>;
 
 class PlatformEventSubscription final {
   public:

@@ -1,10 +1,10 @@
 #pragma once
 
+#include <tina/core/base/MoveOnlyFunction.hpp>
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 
-#include <functional>
 #include <memory>
 
 namespace Tina::Task {
@@ -58,7 +58,7 @@ struct TaskSystemCreateParams final {
 }
 
 // Owning, type-erased work item. Prefer small captures; no automatic heap fallback contract.
-using TaskCallable = std::move_only_function<void()>;
+using TaskCallable = Core::MoveOnlyFunction<void()>;
 
 class ITaskSystem {
   public:
@@ -94,6 +94,6 @@ class ITaskSystem {
 };
 
 using TaskSystemFactory =
-    std::move_only_function<Core::Result<std::unique_ptr<ITaskSystem>>(const TaskSystemCreateParams&)>;
+    Core::MoveOnlyFunction<Core::Result<std::unique_ptr<ITaskSystem>>(const TaskSystemCreateParams&)>;
 
 } // namespace Tina::Task

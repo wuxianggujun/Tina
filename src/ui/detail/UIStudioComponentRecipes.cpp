@@ -1,5 +1,6 @@
 #include "UIContextImpl.hpp"
 
+#include <tina/core/text/ParseFloat.hpp>
 #include <tina/core/text/Utf8.hpp>
 #include <tina/ui/UICollapsibleSection.hpp>
 #include <tina/ui/UIColorField.hpp>
@@ -717,25 +718,36 @@ parseNumberFieldValue(std::string_view text,
                              "UINumberField text must not be empty");
     }
 
-    float parsed = 0.0F;
+    // A leading '+' is stripped rather than parsed: std::from_chars rejects it outright,
+    // so this field accepts "+1.5" only because of this branch, and that must survive the
+    // move off from_chars.
     const bool hasLeadingPlus = text.front() == '+';
     if (hasLeadingPlus && text.size() == 1U)
     {
         return Core::failure(UIErrorCode::InvalidControlValue,
                              "UINumberField sign must be followed by a number");
     }
-    const char* const begin = text.data() + (hasLeadingPlus ? 1U : 0U);
-    const char* const end = text.data() + text.size();
-    const std::from_chars_result result =
-        std::from_chars(begin, end, parsed, std::chars_format::general);
-    if (result.ec != std::errc{} || result.ptr != end ||
-        !std::isfinite(parsed))
+    const std::string_view digits = hasLeadingPlus ? text.substr(1U) : text;
+    // A second sign must stay rejected: strtof would read "+-1" as -1 after the strip,
+    // while from_chars never accepted it.
+    if (hasLeadingPlus && (digits.front() == '+' || digits.front() == '-'))
+    {
+        return Core::failure(UIErrorCode::InvalidControlValue,
+                             "UINumberField sign must be followed by a number");
+    }
+
+    // Core::parseStrictFloat rather than std::from_chars: libc++ through NDK 28 ships no
+    // floating-point from_chars overload, which made this the one line that kept tina_ui
+    // from compiling for Android. It enforces the same full-consumption and finiteness
+    // rules this call site already required.
+    const auto parsed = Core::parseStrictFloat(digits);
+    if (!parsed)
     {
         return Core::failure(
             UIErrorCode::InvalidControlValue,
             "UINumberField text must be one complete finite number");
     }
-    return normalizeNumberFieldValue(parsed, spec);
+    return normalizeNumberFieldValue(*parsed, spec);
 }
 
 Core::Result<UINumberFieldText>

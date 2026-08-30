@@ -58,6 +58,13 @@ option(TINA_BUILD_RENDER_BGFX "Build the private vNext bgfx render backend" OFF)
 # on desktop so the branch is actually compiled by a toolchain someone runs.
 option(TINA_RENDER_BGFX_MOBILE_SHADERS
     "Also cook OpenGL ES (essl) variants of the embedded bgfx shaders" OFF)
+# shaderc runs on the build HOST: it cooks shaders into headers during the build, and nothing
+# ever executes it on the target. A cross build therefore cannot use the in-tree one, which
+# gets built for the target and refuses to run here -- point this at a shaderc from a host
+# build tree instead. Required when cross-compiling with TINA_BUILD_RENDER_BGFX=ON; a native
+# build leaves it empty and keeps using the in-tree bgfx::shaderc.
+set(TINA_BGFX_SHADERC_EXECUTABLE "" CACHE FILEPATH
+    "Host-built bgfx shaderc used to cook embedded shaders when cross-compiling")
 option(TINA_BUILD_UI_FREETYPE "Build the private vNext FreeType UI text adapter" OFF)
 option(TINA_BUILD_UI_UIA "Build the private Windows UIA accessibility adapter" OFF)
 option(TINA_BUILD_PHYSICS2D "Build the optional vNext Box2D physics module" OFF)

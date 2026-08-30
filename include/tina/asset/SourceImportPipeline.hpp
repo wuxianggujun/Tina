@@ -3,11 +3,11 @@
 #include <tina/asset/CatalogCook.hpp>
 #include <tina/asset/GltfCook.hpp>
 #include <tina/asset/SourceImportProbe.hpp>
+#include <tina/core/base/CancellationSignal.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/core/id/AssetId.hpp>
 
 #include <span>
-#include <stop_token>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -90,8 +90,10 @@ struct SourceImportPipelineResult final {
 // validates an immutable fresh stage, then commits state bound to that stage revision. The returned
 // CatalogSnapshot is the exact fully validated package and can be moved into AssetSystem at an
 // owner-thread safe point without reopening the package. The function does not touch AssetSystem/UI.
+// Cancellation is a Core::CancellationToken rather than a std::stop_token because libc++
+// keeps stop_token experimental through NDK 28; an empty token never cancels.
 [[nodiscard]] Core::Result<SourceImportPipelineResult>
 executeSourceImportPipeline(const SourceImportPipelineRequest& request,
-                            std::stop_token stopToken = {}) noexcept;
+                            Core::CancellationToken cancellation = {}) noexcept;
 
 } // namespace Tina::Asset

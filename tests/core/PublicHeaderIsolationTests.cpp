@@ -1,7 +1,9 @@
 #include <gtest/gtest.h>
 
 #include <tina/core/base/Compiler.hpp>
+#include <tina/core/base/CancellationSignal.hpp>
 #include <tina/core/base/EnumFlags.hpp>
+#include <tina/core/base/MoveOnlyFunction.hpp>
 #include <tina/core/base/Platform.hpp>
 #include <tina/core/base/ScopeExit.hpp>
 #include <tina/core/base/SourceLocation.hpp>
@@ -20,6 +22,7 @@
 #include <tina/core/memory/MemoryStatistics.hpp>
 #include <tina/core/memory/MemoryTag.hpp>
 #include <tina/core/memory/MemoryTracker.hpp>
+#include <tina/core/text/ParseFloat.hpp>
 #include <tina/core/time/FixedStepAccumulator.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 #include <tina/core/trace/Trace.hpp>
