@@ -96,6 +96,15 @@ Adapter targets `Tina::PlatformGlfw`、`Tina::RenderBgfx`、`Tina::UIFreetype`�
 
 公开头不允许依赖传递 include 才能编译；每个重要头有 header-isolation translation unit。
 
+三个公共 Base 类型替代了标准库设施，因为 **libc++（Android NDK 用它）至今未实现对应设施**，公共头一旦命名它们
+整个模块就无法为 Android 编译。它们不是风格选择，取舍与消费者见 [Core](core.md)：
+
+| 用 | 而不是 |
+| --- | --- |
+| `Core::MoveOnlyFunction<Sig>`（`core/base/MoveOnlyFunction.hpp`） | `std::move_only_function` —— 全部 backend factory、`Task::TaskCallable`、`PlatformEventCallback` 都是它 |
+| `Core::parseStrictFloat(text)`（`core/text/ParseFloat.hpp`） | `std::from_chars` 的**浮点**重载；整数重载 libc++ 有，继续直接用 |
+| `Core::CancellationToken`（`core/base/CancellationSignal.hpp`） | `std::stop_token`，用于同步长任务的取消轮询 |
+
 Trace frontend 是可供 Runtime/Game SDK consumer 编译的 Tina-owned 公共面，不暴露 Tracy token、类型或
 include。启用 Profile backend 时，公共头只实例化具有 64-byte opaque storage 的 Tina-owned RAII zone，
 第三方对象由 `Tina::TraceTracy` adapter 在该 storage 内构造和销毁；None 仍完全编译消失。zone name 必须是
@@ -311,7 +320,7 @@ Runtime 私有持有 `GameStateStack`（定容 8）。`FrameUpdateContext` 提�
 | `FixedUpdateContext` | frame/fixed timing、Simulation Action、可选 Audio | `fixedUpdate()` 回调 |
 | `FrameUpdateContext` | timing、Frame Action、可选 Audio、exit-after-frame；仅栈顶可借用 `InputActionRebinding` | `updateFrame()` 回调 |
 | `RenderSceneExtractionContext` | phase-local `RenderSceneWriter` | extraction 回调 |
-| `UIUpdateContext` | root-scoped UI updater、主窗口 layout debugger snapshot/options 与 committed pointer-hit query | `updateUI()` 回调 |
+| `UIUpdateContext` | root-scoped UI updater、主窗口 layout debugger snapshot/options、committed pointer-hit query 与 `imeCompositionActive()`（焦点 TextEdit 是否正在画 preedit） | `updateUI()` 回调 |
 | Exit/Shutdown Context | stop cause、只借用 failure Error | 对应 callback |
 
 这些 Context 不可复制/移动，地址、内部 view、writer 和模块 pointer 都不得保存。可以保存的 owner 是明确
@@ -1252,7 +1261,10 @@ source fingerprint 冲突、重复 UnitId/output owner 与 target platform 不�
 importer，再通过 incremental stage API 复制 clean object、移除 removed output 并完整验证 fresh stage。Cooker API 不启动 watcher，
 也不物理替换仍在使用的 live root；Runtime/tool host 可显式组合独立 `CatalogPackageWatcher`。
 
-`executeSourceImportPipeline(request, stopToken)` 是 recipe/glTF host 共用的同步高层工具 API。request 必须给出完整 intended
+`executeSourceImportPipeline(request, cancellation)` 是 recipe/glTF host 共用的同步高层工具 API。取消参数是
+`Core::CancellationToken` 而非 `std::stop_token`（libc++ 至 NDK 28 仍把 stop_token 挡在实验开关后，见
+[Core](core.md)），默认构造的空 token 永不取消；拥有线程的 host 在桌面上仍可用 `std::jthread`，把它的 token 桥成一个
+`Core::CancellationSignal`。request 必须给出完整 intended
 unit span、显式且非 `Invalid` 的 target platform、source/baseline/state 与 fresh-stage 路径；实现统一执行 baseline current-schema validation、batch probe、all-clean
 零改写复用、dirty/added recook、removed output 剔除、candidate compose、fresh package 完整验证和 stage-bound state commit。
 结果明确报告 `CleanReuse|FullRecook|IncrementalRecook`、unit/object 统计、本次 recook 的

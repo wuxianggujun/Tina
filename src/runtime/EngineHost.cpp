@@ -405,9 +405,23 @@ validateWindowSurfaceSnapshotForFrame(const Integration::WindowSurfaceSnapshot& 
                              "WindowSurface source metrics revision moved backward");
     }
 
+    if (snapshot.nativeBindingRevision < previous->nativeBindingRevision)
+    {
+        return Core::failure(RuntimeErrorCode::LifecycleInvariantViolation,
+                             "WindowSurface native binding revision moved backward");
+    }
+
+    // A replaced native window counts as a facts change even when the geometry is identical, which is
+    // exactly what Android delivers when an activity returns to the foreground at the same size.
+    // Without this term the revision advanced while this check still saw "no change" and rejected the
+    // frame -- measured on a device: every frame after a background/foreground cycle failed with
+    // "revision must advance exactly once". RenderSurfaceStateTracker already folds the binding into
+    // its own facts comparison; the two must agree or a rebind is valid for one and invalid for the
+    // other.
+    const bool nativeBindingChanged = snapshot.nativeBindingRevision != previous->nativeBindingRevision;
     const bool surfaceFactsChanged = snapshot.framebufferExtent != previous->framebufferExtent ||
                                      snapshot.contentScale != previous->contentScale ||
-                                     snapshot.suspended != previous->suspended;
+                                     snapshot.suspended != previous->suspended || nativeBindingChanged;
     if (surfaceFactsChanged && snapshot.sourceMetricsRevision == previous->sourceMetricsRevision)
     {
         return Core::failure(RuntimeErrorCode::LifecycleInvariantViolation,
@@ -448,6 +462,10 @@ toRenderSurfaceState(const Integration::WindowSurfaceSnapshot& snapshot) noexcep
             },
         .sourceMetricsRevision = snapshot.sourceMetricsRevision,
         .surfaceRevision = snapshot.surfaceRevision,
+        // Forwarded, not defaulted. Omitting it left RenderSurfaceState pinned at 1 forever, so
+        // the ADR 0034 rebind path was reachable only from tests -- a published contract with no
+        // production producer.
+        .nativeBindingRevision = snapshot.nativeBindingRevision,
         .availability = snapshot.suspended ? Render::RenderSurfaceAvailability::Suspended
                                            : Render::RenderSurfaceAvailability::Active,
     };

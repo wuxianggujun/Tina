@@ -1,0 +1,11 @@
+// Pinned rather than a range: AGP and the NDK toolchain interact closely, and a floating version
+// would change the native build under us without any source change.
+buildscript {
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.13.2'
+    }
+}

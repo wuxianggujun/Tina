@@ -322,6 +322,17 @@ Core::Result<UI::UICommittedSemanticsView> UIUpdateContext::committedSemantics()
         m_uiEpoch, Runtime::Detail::PrimaryWindowUIPhase::UIUpdate);
 }
 
+Core::Result<bool> UIUpdateContext::imeCompositionActive() const
+{
+    if (m_primaryWindowUI == nullptr)
+    {
+        return Core::failure(RuntimeErrorCode::PrimaryWindowUIUnavailable,
+                             "The active Runtime phase has no primary-window UI");
+    }
+    return m_primaryWindowUI->imeCompositionActive(
+        m_uiEpoch, Runtime::Detail::PrimaryWindowUIPhase::UIUpdate);
+}
+
 Core::Result<UI::UIContextStatistics> UIUpdateContext::primaryWindowUIStatistics() const
 {
     if (m_primaryWindowUI == nullptr)

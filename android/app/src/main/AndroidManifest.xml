@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application
+        android:label="Tina"
+        android:hasCode="true">
+
+        <!-- No configChanges exclusions on purpose: letting Android recreate the activity on rotation
+             is what exercises the surface rebind path this slice exists to prove. Suppressing it
+             would hide the very lifecycle the engine now handles. -->
+        <!-- singleTask, not the default LAUNCH_MULTIPLE. The engine owns process-global state (bgfx can
+             only be initialised once per process), so a second activity instance creates a second
+             session whose EngineHost::Create then fails with "bgfx failed to initialize". Measured on a
+             device: relaunching produced two onCreate calls with no onDestroy between them, and the app
+             froze after the first background/foreground cycle. -->
+        <activity
+            android:name="dev.tina.TinaActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

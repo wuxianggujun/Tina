@@ -491,6 +491,183 @@ LSAN_OPTIONS=exitcode=23 ./out/build/linux-clang22-vnext-sanitize/bin/tina_tests
 
 其余 sanitizer executable 应使用相同环境变量逐个运行；不要把一次 configure/build 成功当成测试通过。
 
+## Android 交叉编译（compile-only；无 preset、无平台后端）
+
+**能编译不等于能运行。** 16 个引擎模块（含 bgfx render backend）可为 Android 交叉编译成静态库，但
+**没有任何 Android 平台后端**（`src/platform/` 只有 `glfw` 与 `headless`），所以没有窗口、没有输入、
+没有可启动的产物，也没有真机验证。这条路径的唯一用途是守住可移植性：MSVC 会接受若干 Clang 拒绝的写法，
+只有真的为 Android 编译才会暴露。
+
+刻意**不加 CMakePresets 条目**：preset 会暗示存在一个可交付的 Android 产品图，而目前没有；NDK 路径也
+因机器而异。
+
+```bash
+export ANDROID_NDK_HOME=/path/to/Android/Sdk/ndk/28.2.13676358
+cmake -S . -B out/build/tmp-android-arm64 -G Ninja \
+  -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+  -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+  -DVCPKG_TARGET_TRIPLET=arm64-android -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-24 \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DTINA_BUILD_TESTING=OFF -DTINA_BUILD_BENCHMARKS=OFF \
+  -DTINA_BUILD_PLATFORM_GLFW=OFF -DTINA_BUILD_SHADERS=OFF \
+  -DTINA_BUILD_PHYSICS2D=OFF -DTINA_BUILD_AUDIO_MINIAUDIO=OFF \
+  -DTINA_BUILD_UI_FREETYPE=OFF -DTINA_BUILD_UI_UIA=OFF \
+  -DTINA_BUILD_RENDER_BGFX=ON -DTINA_RENDER_BGFX_MOBILE_SHADERS=ON \
+  -DTINA_BGFX_SHADERC_EXECUTABLE="$PWD/out/build/windows-msvc-vnext-bgfx-product-2d/bin/Debug/shaderc.exe"
+cmake --build out/build/tmp-android-arm64 --target tina_core tina_task tina_platform tina_render \
+  tina_scene tina_asset_format tina_asset tina_ui tina_audio tina_runtime tina_network \
+  tina_navigation2d tina_editor tina_render_bgfx
+```
+
+要点：
+
+- **`ANDROID_NDK_HOME` 必须导出**，即使已经传了 `VCPKG_CHAINLOAD_TOOLCHAIN_FILE`：vcpkg 用它**自己的**
+  `scripts/toolchains/android.cmake` 做 compiler-hash 探测，那个文件只认这个环境变量，找不到就报
+  `Could not find android ndk. Searched at C:\Program Files (x86)/Android/android-sdk/ndk-bundle`。
+  `ANDROID_HOME` 不够。
+- `TINA_BUILD_PLATFORM_GLFW=OFF` 是必需的（GLFW 不支持 Android），`desktop`/`editor_app` 随之不参与
+  构建 —— 它们要求 GLFW + bgfx 同时开启，因此 `editor_app` 的 `std::jthread` 从不进入 Android 编译。
+- **NDK 28 与 NDK 29 都已实测通过**（arm64-v8a 与 x86_64 各 15 个静态库、零 error）。28 的 libc++ 缺
+  浮点 `from_chars` 与 `stop_token`，引擎用 `Core::parseStrictFloat` 与 `Core::CancellationToken` 绕开
+  （理由见 [Core](core.md)）；不要改用 `_LIBCPP_ENABLE_EXPERIMENTAL`，它会一次打开全部未完成 libc++ 特性。
+- **`TINA_BUILD_RENDER_BGFX=ON` 需要额外给一个宿主 shaderc**，见下节；不给会在 configure 阶段报错。
+- 该 build tree 属临时资源，取得结论后按 `AGENTS.md` 回收；常驻树不受影响。
+
+### Android APK（gradle，可安装可运行）
+
+`android/` 下是一个 AGP 工程，产出**真正能装到设备上的 APK**。带渲染器时它跑**完整的 `EngineHost`**
+（每帧 `tick()`）并画出一棵真实的 Retained UI 树 —— 一个橙色面板 RGB(220,90,40)，内含每约 1 秒在
+RGB(60,190,120) 与橙色之间切换的子面板；**按住面板会让子面板换色并放大**，这条是整个触摸链的端到端证据。
+另有一个**自动聚焦的 TextEdit**：没有它，IME 那半条链完全不可观测（`routeTextComposition` 走「无焦点」
+分支返回未消费，而平台的 stage 计数照样递增），而且 caret placement 路径根本不会被走到 —— Runtime 只在
+TextEdit 聚焦时 publish caret。用来证明平台桥（窗口、触摸、按键、文本、组词、生命周期、软键盘）、
+surface 重建、引擎相位与 UI 渲染在真机上可用。
+
+Android 上 FreeType 是关闭的，所以字形退化为实心块 —— 但这**反而**让 preedit 更好判读：组词文本用
+(0,180,255) 专色，提交文本用普通文本色，像素上比真字形更容易区分。
+
+**在设备上验证的三个陷阱**（都实测踩过）：
+
+- **`adb shell input swipe ... &` 会杀掉被测 app。** 宿主侧的 job control 在 adb 会话结束时终止进程，logcat
+  显示 `exited cleanly (3)` 与 `Remote process closed the socket` —— 看起来像引擎崩溃。要把 `&` 放进设备端
+  shell：`adb shell 'input swipe ... & sleep 1; screencap -p /data/local/tmp/x.png'`。
+- **不要用 `am start -n` 之外的方式反复启动来测「回到前台」。** activity 现在是 `singleTask`，但在它之前
+  `LAUNCH_MULTIPLE` 会造出第二个 engine 实例并让 bgfx 二次初始化失败。判断依据是 `onCreate` 日志出现两次而
+  中间没有 `onDestroy`。
+- **构建退出码要单独确认。** 把 gradle 串在长命令里会让 manifest 解析失败之类的错误被后续命令的退出码掩盖，
+  于是拿旧 APK 验证并误以为已修好。
+
+**判断引擎是否真在跑要看 logcat，不要看画面** —— 运行中与停住的画面都是一片纯色：
+
+```bash
+adb logcat -s Tina
+# I Tina: frameUpdates=300 ... keys=1 textCommits=1 composition=1/1/1/0(start/update/end/cancel)
+#         preeditDrawn=false editCodepoints=2 droppedTouches=0 droppedKeys=0
+```
+
+- `fixedUpdates` 与 `frameUpdates` **不同步是正确的**：固定步长累加器走独立时钟。
+- `uiUpdates` 应**等于** `frameUpdates`；若前者停滞而后者上升，说明 UI 相位被跳过。
+- `pulseOn` 与截图像素必须对应：`false` → RGB(60,190,120)，`true` → RGB(220,90,40)。这条是判断「画面真的在
+  更新」而非「恰好停在某一帧」的唯一可靠方法。
+- 任何 `rejected` 或 `stopped producing frames` 都是缺陷。
+- **进度行突然停止但 `Tina` tag 里什么都没有，先看 `adb logcat -s AndroidRuntime:E`。** 帧循环跑在一个
+  Handler Runnable 上，任何 Java 异常都会静默杀掉它 —— 现场与原生挂死完全一样。实测踩过：
+  `CursorAnchorInfo.Builder.build()` 在设了位置却没设 matrix 时抛异常，而这条路径只有真实输入法索取
+  cursor updates 时才走到，比任何脚本化诊断都晚。
+- **`keys=` 与聚焦状态相关，不是纯粹的桥接证据。** 聚焦的 TextEdit 会消费**除 Tab / Enter / Escape 以外的
+  每一个键**（正确行为），所以用方向键当证据时，一旦有文本框获得焦点计数就会归零并停在那里 —— 与「按键桥
+  坏了」现场一致。demo 因此把 Enter 也绑进同一个 action。
+
+`android/local.properties` **不提交**（含机器路径），需要自己创建两行：
+
+```properties
+sdk.dir=D:\\Programs\\Android\\Sdk
+cmake.dir=D:\\Programs\\CMake
+```
+
+**`android/` 下没有 `gradlew`/`gradlew.bat`。** 上面写 `./gradlew` 是习惯写法，但 wrapper 需要一个
+`gradle-wrapper.jar`，而本仓库不提交任何二进制。仓库里只有 `gradle/wrapper/gradle-wrapper.properties`
+（钉住 Gradle 8.13）。两条可用路径：装一个 Gradle 8.13+ 直接用，或用它生成 wrapper
+（`gradle wrapper` 会产出被 gitignore 的脚本与 jar）。
+
+**`ANDROID_NDK_HOME` 在 gradle 构建里同样必须导出。** AGP 会把 NDK 路径传给 CMake，所以看起来不需要 ——
+但 vcpkg 用它**自己的** `scripts/toolchains/android.cmake` 做 compiler-hash 探测，那个文件只认这个环境
+变量。不导出时 AGP 只报「cmake.exe finished with non-zero exit value 1」，**真正的 vcpkg 错误不出现在
+gradle 输出里**；把同一条 cmake 命令单独跑一遍才能看到。这与上一节交叉编译的坑是同一条。
+
+然后：
+
+```bash
+export JAVA_HOME=/path/to/jdk-17
+export VCPKG_ROOT=/path/to/vcpkg
+cd android
+
+# 不带渲染器：APK 可装可跑，画面空白，只验证平台桥。
+./gradlew :app:assembleDebug
+
+# 带渲染器：需要一个**宿主** shaderc（构建期工具，交叉构建产不出可用的），
+# 任一桌面 bgfx 构建树里都有现成的。
+./gradlew :app:assembleDebug \
+  -Ptina.shaderc=/abs/path/out/build/windows-msvc-vnext-bgfx-product-2d/bin/Debug/shaderc.exe
+
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+adb shell am start -n dev.tina/dev.tina.TinaActivity
+
+# 两条 IME 诊断入口，因为非 ASCII 与组词过程都无法从测试工具注入（adb 按 keycode 合成，
+# 既表达不了代理对、也不携带组词区）。两者都走与真实键盘同一条 InputConnection 路径。
+adb shell am start -n dev.tina/.TinaActivity --ez tina.commitEmoji true
+adb shell am start -n dev.tina/.TinaActivity --ez tina.composeText true
+```
+
+**模拟器上必须走 GLES。** SDK 模拟器的 Vulkan 实现（`vulkan.ranchu.so`）会在 swapchain 创建时 SIGSEGV，
+所以 `TinaActivity` 按 `Build.HARDWARE` 含 `ranchu`/`goldfish` 自动改用 GLES；真机保持默认（Android 上偏好
+Vulkan）。**因此模拟器验证不覆盖 Vulkan 路径。**
+
+验证画面是否真的在渲染，不要只看「没崩」：截图后统计主色，bgfx 清屏色是 RGB(16,42,67)，而 Android 默认背景
+是黑或白 —— 二者一眼可分，而「黑屏」恰好是 submit 被拒时的症状。
+
+四个非显然的坑，都是实测踩出来的：
+
+- **`cmake.dir` 是必需的。** SDK 自带 CMake 3.22.1，而引擎要求 3.25+，否则 configure 直接失败。
+- **AGP 的 `path` 指向 `android/app/CMakeLists.txt` 这个 wrapper，不是仓库根。** 指向根会让 AGP 读到同目录的
+  `CMakeSettings.json`（Visual Studio 的文件，带 UTF-8 BOM），并按自己的 JSON schema 解析，报
+  `Expected BEGIN_OBJECT but was STRING`。那个文件是合法且共享的，所以改的是这边。
+- **vcpkg 必须反过来 chainload NDK toolchain。** AGP 传的 `CMAKE_TOOLCHAIN_FILE` 直指 NDK；wrapper 把它移到
+  `VCPKG_CHAINLOAD_TOOLCHAIN_FILE` 并把 vcpkg 放前面，否则 `find_package(xxHash)` 失败。
+- **`VCPKG_MANIFEST_DIR` 必须显式给。** vcpkg 只在 `CMAKE_SOURCE_DIR` 找 `vcpkg.json`，而 wrapper 让那里变成
+  `android/app`；不指定它会**静默跳过 manifest 模式**，然后在第一个 `find_package` 处报一个完全不提 vcpkg 的
+  缺失配置错误。triplet 按 `ANDROID_ABI` 选（AGP 每个 ABI 单独 configure，写死一个会让另一个 ABI 拿到错误
+  架构的依赖），未验证的 ABI 直接 FATAL 而不猜。
+
+### 交叉编译 bgfx：必须外部提供宿主 shaderc
+
+**shader 不在设备上编译。** `shaderc` 是构建期**宿主**工具，把 `.sc` 源码烤成 `*.bin.h` 头文件
+`#include` 进库（见 `src/render/bgfx/*Shader.cpp` 顶部）；设备运行时只是从数组里取现成字节。所以
+Android 侧从不需要 shaderc —— 需要的是一个能在**你的机器**上跑的 shaderc。
+
+bgfx.cmake 上游用朴素的 `add_executable(shaderc ...)` 声明它、无任何交叉编译处理，于是交叉构建会把这个
+宿主工具也编成目标架构：实测产物是 460 MB 的 AArch64 ELF（`llvm-readelf -h` 报 `Machine: AArch64`），
+宿主无法执行。因此交叉构建时**必须**指定 `TINA_BGFX_SHADERC_EXECUTABLE`：
+
+```bash
+# 复用任一桌面构建树里已有的 shaderc.exe（PE 格式，约 43 MB）
+-DTINA_BUILD_RENDER_BGFX=ON \
+-DTINA_RENDER_BGFX_MOBILE_SHADERS=ON \
+-DTINA_BGFX_SHADERC_EXECUTABLE="$PWD/out/build/windows-msvc-vnext-bgfx-product-2d/bin/Debug/shaderc.exe"
+```
+
+指定后 in-tree `shaderc` **不再构建**（`thirdparty/CMakeLists.txt` 把 `BGFX_BUILD_TOOLS` 关掉），省下那
+460 MB 无用产物和相应编译时间。三条错误路径都在 configure 阶段就给出可操作诊断：交叉但未提供、提供的
+路径不存在、`bgfx::shaderc` 目标缺失。
+
+**bgfx 本身从来不是障碍**（2026-08-29 实测）：`bx`/`bimg`/`bgfx` 与 `tina_render_bgfx` 在 arm64-v8a 与
+x86_64 上均**零 error**；编进去的是真实实现而非空壳 —— `renderer_vk.cpp.o` 1341 个符号、
+`renderer_gl.cpp.o` 696 个，而 `renderer_d3d11.cpp.o` 只剩 87 个，`glcontext_egl.cpp.o` 在列，与
+「Android 偏好 Vulkan」的既有决定一致。产物含 11 个 `essl` 符号、0 个 `dxbc`。
+
+**不要**用「关掉 shader cook」绕过缺失的 shaderc：embedded header 正是 RendererType 表引用的对象，跳过
+只会把清晰的构建错误换成难查的链接错误。
+
 ## 常用选项
 
 | 选项 | 默认 | 作用 |
@@ -500,6 +677,7 @@ LSAN_OPTIONS=exitcode=23 ./out/build/linux-clang22-vnext-sanitize/bin/tina_tests
 | `TINA_BUILD_SHADERS` | ON | build-tree shaderc/cooked shader；Null 图可 OFF |
 | `TINA_BUILD_LEGACY` | OFF，强制 | 已退役；ON 直接 FATAL |
 | `TINA_BUILD_RENDER_BGFX` | OFF | 私有 bgfx backend |
+| `TINA_BGFX_SHADERC_EXECUTABLE` | 空 | 宿主 shaderc 路径；**仅交叉编译需要**，给定后不再构建 in-tree shaderc |
 | `TINA_BUILD_PLATFORM_GLFW` | OFF | 私有 GLFW adapter |
 | `TINA_BUILD_UI_FREETYPE` | OFF | 私有 FreeType rasterizer |
 | `TINA_BUILD_AUDIO_MINIAUDIO` | OFF | 私有 miniaudio adapter |

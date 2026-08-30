@@ -1248,6 +1248,14 @@ driver 或 backend 复制为通用金标。需要可人工查看的 PNG 与 blan
 bgfx 截图回调是异步的；backend 在最终 present 后使用有界120-frame/1ms poll wait 等待 render thread
 交付。超限必须保留 `FrameCaptureFailed`，gate 不得通过 PowerShell 盲重试把首次失败掩盖为成功。
 
+**`pixelFingerprint` 在同机、同二进制上也会偶发漂移。** 2026-08-29 实测：连续 6 次 `tina_sample_2d
+--frames=300`，前两次得到 `76bc083a…` 与 `58f17167…`，后四次稳定在既有基线 `1428d901…`；全部 6 次
+`status=ok` 且 `pixelGoldenMatched=true`。所以**单次指纹变化不构成回归证据** —— 在把它当成渲染改动的信号
+之前，先不带 `--expect-pixel-fingerprint` 连跑几次，分辨拿到的是稳定值还是漂移值。判断 sample 是否健康优
+先看 `status=ok` 与 `evidenceFingerprint`（实测稳定，且是逐字段的行为证据）。漂移根因未查明（疑与首帧
+合成/驱动时序有关，参见本文档关于「初始化白帧不得作为稳定画面」的既有约束），故此处只记录现象与应对，
+不声称已定位。
+
 ## Physics2D 与 Audio
 
 完整 product-2d 图直接运行：
@@ -1438,6 +1446,75 @@ Windows 宿主在用户切换 OS 设置后已完成 100%/150%/200% 对应 baseli
 `PER_MONITOR_AWARE_V2` Win32 探针确认 system DPI 为 96/144。
 
 **未证明：** 多显示器混 DPI；跨 GPU 像素金标。
+
+## Android 平台后端
+
+`tina_platform_android_tests` 是纯契约断言（无窗口、无 GPU、无 JNI），所以它**能**在宿主交叉编译后推到设备
+或模拟器上直接跑 —— 这是它与 compile-only 的区别。宿主没有 preset（理由见
+[building.md](building.md)）：
+
+```bash
+export ANDROID_NDK_HOME=/path/to/Android/Sdk/ndk/28.2.13676358
+cmake -S . -B out/build/tmp-android-x64 -G Ninja \
+  -DCMAKE_MAKE_PROGRAM="$ANDROID_HOME/cmake/3.22.1/bin/ninja.exe" \
+  -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+  -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+  -DVCPKG_TARGET_TRIPLET=x64-android -DANDROID_ABI=x86_64 -DANDROID_PLATFORM=android-24 \
+  -DCMAKE_BUILD_TYPE=Debug -DTINA_BUILD_TESTING=ON -DTINA_BUILD_EXAMPLES=OFF \
+  -DTINA_BUILD_BENCHMARKS=OFF -DTINA_BUILD_PLATFORM_GLFW=OFF -DTINA_BUILD_SHADERS=OFF \
+  -DTINA_BUILD_PHYSICS2D=OFF -DTINA_BUILD_AUDIO_MINIAUDIO=OFF \
+  -DTINA_BUILD_UI_FREETYPE=OFF -DTINA_BUILD_UI_UIA=OFF -DTINA_BUILD_RENDER_BGFX=OFF
+cmake --build out/build/tmp-android-x64 --target tina_platform_android_tests
+adb push out/build/tmp-android-x64/bin/tina_platform_android_tests /data/local/tmp/
+adb shell chmod 755 /data/local/tmp/tina_platform_android_tests
+adb shell /data/local/tmp/tina_platform_android_tests --gtest_color=no
+```
+
+在 Git Bash 下必须 `export MSYS_NO_PATHCONV=1`，否则 `/data/local/tmp` 会被改写成一个 Windows 路径，
+`adb push` 报 `secure_mkdirs() failed` 而**退出码仍是 0**、随后的 `chmod` 才失败。
+
+**2026-08-30 记录：80/80** 在 Android 36 x86_64 模拟器实机通过（较上轮 +20：preedit 状态机全表含两条
+「什么都不发」、`Ended` 必先于其文本的顺序、光标 UTF-16→codepoint 换算与夹取、512 边界与溢出拒绝、
+窗口销毁取消在飞组词、caret latch 与 physical 转换、非法几何拒绝、读取不清除）。同轮宿主侧
+`tina_tests` 455/455、`tina_ui_tests` 839/839、`tina_runtime_ui_tests` 151/151、
+`tina_platform_glfw_tests` 53/53。
+
+实机四条输入路径共存实测：`keys=1 textCommits=1 composition=1/1/1/0 editCodepoints=2`，
+`presses`/`releases` 平衡，`droppedTouches=0 droppedKeys=0`，零 `FATAL`。旋转（native window 替换，
+ADR 0034 路径）后计数从 0 重新开始且继续增长 —— 这是**预期**的：manifest 刻意不排除 `configChanges`，
+所以 Android 会重建 activity。判读时看的是「旋转后帧数继续爬升且无 error」，不是「计数保持连续」。
+
+**IME 相关的验证边界要说清楚。** 非 ASCII 与组词过程**都无法**从测试工具注入：`adb shell input text` 按
+keycode 合成，既表达不了代理对、也不携带组词区。故 APK 提供两条诊断入口，都走**与真实键盘完全同一条**
+`InputConnection` 路径而非绕过转换伪造结果：
+
+```bash
+adb shell am start -n dev.tina/.TinaActivity --ez tina.commitEmoji true   # U+1F600 走 commitText
+adb shell am start -n dev.tina/.TinaActivity --ez tina.composeText true   # ni→nihao→commit 你好
+adb logcat -s Tina:I    # 看 composition=start/update/end/cancel 与 preeditDrawn / editCodepoints
+```
+
+`composeText` 每 30 帧推进一步：TextEdit 需要一个已提交的帧才可聚焦，且分帧才能让 preedit 在屏幕上停留
+足够久、各 stage 落在不同 poll。判读时 `preeditDrawn=true` 是关键 —— 平台的 stage 计数在**无 TextEdit
+聚焦**时照样递增（`routeTextComposition` 走「无焦点」分支返回未消费），所以计数递增而 `preeditDrawn` 恒为
+false 恰好就是「平台通了、UI 从未看见」。`editCodepoints` 上升则证明组词最终落成了真实文本，而不是画了一段
+preedit 又被丢掉。典型序列：第 120 帧 `composition=1/1/0/0 preeditDrawn=true editCodepoints=0`，
+第 180 帧 `1/1/1/0 preeditDrawn=false editCodepoints=2`。
+
+**两条判读陷阱，都实测踩过：**
+
+- **先点面板再按键会让 `keys=` 归零**，因为点击把焦点从 TextEdit 移走了（正确行为）。反过来说，**聚焦的
+  TextEdit 会消费除 Tab / Enter / Escape 以外的每一个键**，所以方向键在有文本框聚焦时也不产生 action。
+  按顺序验：先按 Enter（此时 TextEdit 仍聚焦），再点面板。
+- **进度行突然停止而 `Tina` tag 里什么都没有时，先看 `adb logcat -s AndroidRuntime:E`。** 帧循环跑在
+  Handler Runnable 上，Java 异常会静默杀掉它。实测：`CursorAnchorInfo.Builder.build()` 在设了位置却没设
+  matrix 时抛 `IllegalArgumentException`，而这条路径**只有真实输入法索取 cursor updates 时才走到** ——
+  比任何脚本化诊断都晚，所以在那之前从未被执行过。
+
+**未证明：** ① **候选窗是否真的跟随光标。** `CursorAnchorInfo` 已按 `requestCursorUpdates()` 上报，但某个
+输入法是否索取、候选窗是否真的跟着走，不由本工程决定，需要一个会索取 cursor updates 的中文输入法加人眼；
+归 `TEXT-001`。② **真实中文/日文输入法的完整组词矩阵**（`composeText` 证明的是链路，不是任一具体输入法的
+行为）。③ **真机 Vulkan 路径**（模拟器 `vulkan.ranchu.so` 在 swapchain 创建时 segfault，只能验证 GLES）。
 
 ## Linux 与 sanitizer
 

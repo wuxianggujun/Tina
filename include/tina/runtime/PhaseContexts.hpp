@@ -264,6 +264,13 @@ class UIUpdateContext final {
     // Last committed semantics for accessibility rebuild (owner-thread, phase-scoped).
     // Reflects the most recent commitLayout (startup or previous frame), not in-progress edits.
     [[nodiscard]] Core::Result<UI::UICommittedSemanticsView> committedSemantics() const;
+    // Whether the focused TextEdit is currently showing an IME preedit (composing text).
+    //
+    // Scoped to a focused, committed TextEdit, so this is "a preedit is on screen" rather than "a
+    // composition exists". A game normally does not need it -- the TextEdit handles composition itself --
+    // but it is the only way to distinguish a working IME chain from a broken one: a composition stage
+    // routed with no text focus is dropped, so a platform's own counters advance either way.
+    [[nodiscard]] Core::Result<bool> imeCompositionActive() const;
     // Owner-thread diagnostic snapshot for bounded UI storage. The result is
     // phase-scoped and does not expose the UIContext itself.
     [[nodiscard]] Core::Result<UI::UIContextStatistics> primaryWindowUIStatistics() const;

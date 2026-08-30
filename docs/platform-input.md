@@ -9,6 +9,8 @@ GLFW、Win32、X11 或 Wayland 类型。
 | --- | --- |
 | `tina_platform` | Window/Input POD、`PlatformFrameBuilder/View`、Headless backend、错误契约 |
 | `tina_platform_glfw` | GLFW NO_API 窗口、Keyboard/Pointer/Gamepad、UTF-8 text、WindowSurface lease |
+| `tina_platform_android` | 仅 `ANDROID` 目标：ANativeWindow surface、多点触控、按键、committed text 与 preedit、软键盘意向与 caret latch；不链接 libandroid/JNI |
+| `tina_platform_android_jni` | 唯一链接 libandroid/JNI 的目标，`RegisterNatives` 显式注册；Java 侧不持有按键表也不持有 composition 状态 |
 | `tina_window_surface_integration` | move-only native surface handoff，真实 native 类型仍在 PRIVATE adapter |
 | `tina_runtime` | lifecycle dispatch、UI route、唯一 ActionMapper、unified binding、Simulation/Frame domain 与运行时 rebind |
 
@@ -217,17 +219,46 @@ X11(Xvfb)/sanitizer 证据已经记录；可选 Wayland/真显示器、真实 Ga
 ## 尚未完成
 
 - 可选 Linux Wayland/真显示器与真实设备 Gamepad 矩阵；TEST-001 当前 tip 已完成；
-- **移动端（Android/iOS）平台后端**：`src/platform/` 只有 `glfw` 与 `headless`，全仓库零个 Android/iOS
-  引用。范围与顺序已由 [ADR 0032](adr/0032-mobile-platform-contract-boundaries.md)（Proposed）冻结：后端
-  本身只有 7 个纯虚，成本在**六个已生效的桌面契约**上——只发 `PrimaryPointerId`、指针位置每帧必须有限且
-  存在、native surface 在 RenderDevice 生命周期内不变、poll 线程 == 渲染线程、只有 D3D11/OpenGL/Vulkan
-  三个 renderer、preedit 由应用控制。其中**多点触控与 pointer presence 不需要移动后端，可在桌面上完成并
-  验证**，是最大的单项前置工作（backlog `MOBILE-001` 切片 A）。ADR 0032 的 D3（`run()` 保持阻塞还是改成
-  外部驱动的 `tick()`）未定则 iOS 无法开工。手柄部分的参照见下节；
+- **Android 后端：窗口、触摸、按键、文本、组词与软键盘均已打通；剩真机 Vulkan 与候选窗人工验收**：
+  `src/platform/android/` 提供 `tina_platform_android`，
+  实现全部 7 个纯虚，并在 Android 36 x86_64 模拟器上实测 **80/80 通过**。触摸走**单生产者/单消费者无锁
+  环形缓冲**（`AndroidTouchEventQueue`）：UI 线程 push、owner 线程每 poll 排空，有界且满时丢最新并计数 ——
+  刻意不照 cocos 的 `runOnGLThread`（每事件一个 Runnable，见下节第 2 条）。Android 稀疏且复用的 pointer id
+  由 `AndroidTouchSlotTable` 映射到 0..7 密集槽，重复 Down 保留原槽而非丢弃（cocos 正是丢弃，导致该
+  identity 上后续每根手指永久不可见）。逐指 Cancel 按 pointer 作用域，绝不取消整窗。生命周期与软键盘（C6）
+  走 Android 专属接口 `IAndroidPlatformBackend`（宿主 `dynamic_cast` 取 facet），**不**给 `IPlatformBackend`
+  加纯虚 —— 桌面后端无法有意义地实现，加了会迫使 GLFW/Headless 与每个测试替身都实现一个只能失败的方法。
+  软键盘的 show/hide 只 latch 意向（只有 Java 能调 `InputMethodManager`），遮挡高度必须由宿主上报而非引擎
+  推算。**按键亦已打通**：Java 侧**不持有任何键表**，只原样传 Android `KEYCODE_*`，映射唯一发生在 C++ 的
+  `androidKeyFromKeyCode()`（连续区间按范围映射 + `static_assert` 钉住 `Key` 枚举连续性；未映射键码返回
+  `Key::Unknown` 并丢弃）—— 这正是下节 lesson 5 的落实。`BACK`→`Escape`、`DPAD_CENTER`→`Enter`；引擎未映射
+  的键交还系统，否则会吞掉返回键与音量键。**文本走 `InputConnection`**，不能靠按键 —— 软键盘根本不产生
+  key code，它以 `commitText` 交付整串；`onCheckIsTextEditor()` 必须返回 true，否则键盘弹出但打字无反应。
+  事件自持字节（`string_view` 会指向 JNI 返回即失效的 Java 字符串），校验在生产端复用引擎的
+  `countStrictUtf8CodepointsWithoutNul`。**emoji/星平面文本亦已支持**：必须用 `GetStringChars` 而非
+  `GetStringUTFChars`（后者是 modified UTF-8，emoji 以 CESU-8 代理对到达并被严格校验器拒绝），转换走
+  `Core::convertUtf16ToStrictUtf8()`。**preedit 组词文本已打通**（2026-08-30）：`setComposingText` /
+  `finishComposingText` / `commitText` 由 C++ 的 `AndroidCompositionSession` 映射到四阶段，Java 侧**不持有
+  任何 composition 状态**（与按键表同一条理由）。空 preedit 与 `finishComposingText` 都是 `Cancelled` 而非
+  `Ended`（Android 没有 cancel 调用；而 `Cancelled` 被 flow device observation 排除，所以"放弃组词"不该算
+  用户活动）；无 session 时这两个调用**什么都不发**。**commit 与 preedit 共用一条队列**，因为 `Ended` 必须
+  先于它产生的文本，两条队列会被依次排空、无法表达这个先后。光标从 UTF-16 code unit 换算成 codepoint 并
+  夹取（越界会让 `PlatformFrameBuilder` 拒绝整帧）；preedit 容量 512 与 `UIImeCompositionState::
+  MaximumPreeditBytes` 对齐。窗口销毁会取消在飞的组词并在下一次 poll 发布（事发处运行在帧之外）。
+  **`updateTextInputPlacement` 由"拒绝"改为 latch**：原先拒绝非空 placement 会在 TextEdit 获得焦点时让
+  `tick()` 走终止路径、**帧循环永久停止**。Android 的 caret 协议是 `CursorAnchorInfo`，候选窗属于输入法
+  进程，应用只能上报几何，故与软键盘同构（引擎 latch、宿主执行），且读取**不清除**、只在输入法
+  `requestCursorUpdates()` 后才上报。**未验证：** 候选窗是否真的跟随光标（取决于所装输入法是否索取 cursor
+  updates，需人工）。iOS 侧仍完全零实现。[ADR 0032](adr/0032-mobile-platform-contract-boundaries.md) 列的
+  六个桌面契约里，C1 多点触控、C2 pointer presence、C3 native surface 重建
+  （[ADR 0034](adr/0034-native-surface-rebind.md)）、C5 ESSL shader、C6 软键盘与 preedit 均已完成，
+  D3 也已定为外部驱动的 `EngineHost::start()`/`tick()`，故 iOS 不再被它阻塞；Android 交叉编译已打通且含
+  bgfx backend（见 [building.md](building.md)），JNI 输入桥与 gradle 工程亦已就位。手柄部分见下节；
 - Windows Narrator/Inspect 人工金标：`UI-002`（action/control patterns 与跨进程 HWND gate 已有）；
 - Linux AT-SPI adapter 与真实辅助技术验收：`UI-002-LINUX`；
 - BiDi/复杂 shaping、Linux 原生 XIM/Wayland preedit/candidate placement，以及 Windows 真机 IME 候选窗
-  跟随/提交/取消/失焦人工矩阵：`TEXT-001`。
+  跟随/提交/取消/失焦人工矩阵：`TEXT-001`。**Android 的候选窗跟随同属这一项**：`CursorAnchorInfo` 已上报，
+  但某个输入法是否索取 cursor updates、候选窗是否真的跟着光标走，需要一个中文输入法加人眼。
 
 这些能力不应从已有 `GamepadId`、composition type 或 focused flag 推断为已完成。
 

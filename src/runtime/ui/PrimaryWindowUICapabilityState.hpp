@@ -40,6 +40,8 @@ class PrimaryWindowUICapabilityState final {
     // Last committed semantics (after startup/frame commitLayout). Owner-thread, phase-scoped.
     // For accessibility adapters / product evidence; not a platform UIA bridge.
     [[nodiscard]] Core::Result<UI::UICommittedSemanticsView> committedSemantics(u64 epoch, PrimaryWindowUIPhase phase);
+    // Whether the focused TextEdit is currently showing an IME preedit. Owner-thread, phase-scoped.
+    [[nodiscard]] Core::Result<bool> imeCompositionActive(u64 epoch, PrimaryWindowUIPhase phase);
     [[nodiscard]] Core::Result<UI::UIContextStatistics> statistics(u64 epoch, PrimaryWindowUIPhase phase);
     [[nodiscard]] Core::Result<UI::UILayoutDebugOptions>
     layoutDebugOptions(u64 epoch, PrimaryWindowUIPhase phase);

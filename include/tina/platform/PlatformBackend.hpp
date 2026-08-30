@@ -1,5 +1,6 @@
 #pragma once
 
+#include <tina/core/base/MoveOnlyFunction.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/platform/PlatformFrame.hpp>
 #include <tina/platform/Window.hpp>
@@ -51,6 +52,6 @@ class IPlatformBackend {
 };
 
 using PlatformBackendFactory =
-    std::move_only_function<Core::Result<std::unique_ptr<IPlatformBackend>>(const PlatformBackendCreateParams&)>;
+    Core::MoveOnlyFunction<Core::Result<std::unique_ptr<IPlatformBackend>>(const PlatformBackendCreateParams&)>;
 
 } // namespace Tina::Platform

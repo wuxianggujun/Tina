@@ -1,0 +1,85 @@
+apply plugin: 'com.android.application'
+
+android {
+    namespace 'dev.tina'
+    compileSdk 36
+    ndkVersion '28.2.13676358'
+
+
+    defaultConfig {
+        applicationId 'dev.tina'
+        // 24 matches the ANativeWindow-era floor the engine's Android backend targets.
+        minSdk 24
+        targetSdk 36
+        versionCode 1
+        versionName '0.1'
+
+        externalNativeBuild {
+            cmake {
+                targets 'tina_platform_android_jni'
+
+                // Mirrors the compile-only Android configuration documented in docs/building.md.
+                // GLFW cannot build for Android, and desktop/editor_app require it, so they drop out.
+                // The vcpkg wiring (toolchain chainload and per-ABI triplet) lives in
+                // app/CMakeLists.txt instead of here, because the triplet depends on ANDROID_ABI and
+                // AGP configures each ABI separately -- picking one here would give the other ABI the
+                // wrong dependencies.
+                def cmakeArguments = ['-DTINA_BUILD_TESTING=OFF',
+                                      '-DTINA_BUILD_EXAMPLES=OFF',
+                                      '-DTINA_BUILD_BENCHMARKS=OFF',
+                                      '-DTINA_BUILD_DOCS=OFF',
+                                      '-DTINA_BUILD_PLATFORM_GLFW=OFF',
+                                      '-DTINA_BUILD_SHADERS=OFF',
+                                      '-DTINA_BUILD_PHYSICS2D=OFF',
+                                      '-DTINA_BUILD_AUDIO_MINIAUDIO=OFF',
+                                      '-DTINA_BUILD_UI_FREETYPE=OFF',
+                                      '-DTINA_BUILD_UI_UIA=OFF']
+
+                // The renderer is opt-in via -Ptina.shaderc=<path to a host shaderc.exe>, because
+                // shaderc is a build-HOST tool that this cross build cannot produce: built here it
+                // would target Android and refuse to run. Without it the APK still installs and the
+                // bridge still runs, the screen is just blank. See docs/building.md.
+                //
+                // Accumulated into one list because successive arguments() calls replace rather than
+                // append, so a second call would silently drop everything above it.
+                if (project.hasProperty('tina.shaderc')) {
+                    cmakeArguments += ['-DTINA_BUILD_RENDER_BGFX=ON',
+                                       '-DTINA_RENDER_BGFX_MOBILE_SHADERS=ON',
+                                       '-DTINA_BGFX_SHADERC_EXECUTABLE=' +
+                                               project.property('tina.shaderc').toString().replace('\\', '/')]
+                } else {
+                    cmakeArguments += ['-DTINA_BUILD_RENDER_BGFX=OFF']
+                }
+
+                arguments cmakeArguments as String[]
+            }
+        }
+
+        ndk {
+            // Only the two ABIs the engine has actually been verified on. Adding armeabi-v7a or x86
+            // would ship untested binaries.
+            abiFilters 'arm64-v8a', 'x86_64'
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            // A local wrapper, not the repository root: pointing AGP at the root makes it pick up the
+            // sibling CMakeSettings.json (a Visual Studio file) and fail configuration. See the
+            // comment in app/CMakeLists.txt.
+            path 'CMakeLists.txt'
+            version '3.22.1+'
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    buildTypes {
+        debug {
+            debuggable true
+        }
+    }
+}

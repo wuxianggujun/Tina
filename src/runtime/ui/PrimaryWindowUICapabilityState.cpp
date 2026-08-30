@@ -8,6 +8,7 @@
 #include <tina/ui/UIMotionController.hpp>
 #include <tina/ui/UIPublicationPipeline.hpp>
 #include <tina/ui/UIStyleController.hpp>
+#include <tina/ui/UITextSystem.hpp>
 
 #include <limits>
 #include <exception>
@@ -137,6 +138,20 @@ PrimaryWindowUICapabilityState::committedSemantics(u64 epoch, PrimaryWindowUIPha
         return Core::failure(std::move(status.error()));
     }
     return context_->publication().committedSemantics();
+}
+
+Core::Result<bool> PrimaryWindowUICapabilityState::imeCompositionActive(u64 epoch, PrimaryWindowUIPhase phase)
+{
+    constexpr std::string_view Operation = "PrimaryWindowUICapabilityState::imeCompositionActive";
+    if (Core::Status status = validate(epoch, phase, true, Operation); !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    // UIContext already scopes this to a focused, committed TextEdit, so it means "a preedit is being
+    // drawn" rather than "a composition exists somewhere". That distinction is why it is worth exposing:
+    // a platform's stage counters climb even when the stage was routed with nothing focused, and so
+    // drawn nowhere.
+    return context_->text().imeCompositionActive();
 }
 
 Core::Result<UI::UIContextStatistics>
