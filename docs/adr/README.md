@@ -39,6 +39,8 @@ ADR 记录处于提议、接受、被替代或拒绝状态的架构决定。主�
 | [0032](0032-mobile-platform-contract-boundaries.md) | Proposed | 移动端（Android/iOS）需要扩宽的六个桌面契约、先扩契约后写后端的顺序，以及删除死的 shader cmake |
 | [0033](0033-network-module-boundaries.md) | Accepted | 传输统一用 owner-thread readiness 多路复用而非 worker 池；DNS 是唯一线程例外且用 `scheduleIo` 而非 `postMain`；TLS 信任锚取平台 store、不内嵌 bundle |
 | [0034](0034-native-surface-rebind.md) | Accepted | native binding 变化是 surface **事件**而非 `Suspended` 状态；bgfx 实测允许 init 后更换 nwh，故 rebind 只需 `setPlatformData` + `reset`，device 资源与 Lease 全部存活。取代 ADR 0020 的「不支持 live native rebind」 |
+| [0035](0035-math-module-boundaries.md) | Accepted | `Tina::Math` 是几何类型的唯一定义点；header-only、列主序右手系、失败用 `optional` 不占 `ErrorDomain`，旧 `Scene::Vec3`/`PhysicsVec2` 直接删除 |
+| [0036](0036-gameplay-tooling-boundaries.md) | Accepted | `Tina::Gameplay` 只依赖 Core+Math 提供 timer/tween/sequence 与 `Signal<T>`；delta 由调用方给、余量携带而积压丢弃并计数、重入返回 `ReentrantDispatch`；tween 写目标是 setter 回调而非 Scene 属性枚举 |
 
 新增 ADR 从 [模板](0000-template.md) 复制。替代旧决定时新建 ADR，并把旧记录状态改为
 Superseded 和链接新编号；不要改写历史理由。

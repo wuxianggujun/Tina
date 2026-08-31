@@ -17,6 +17,7 @@ namespace {
 
 constexpr std::string_view Crlf = "\r\n";
 constexpr std::string_view HeaderTerminator = "\r\n\r\n";
+constexpr Core::usize MaximumInformationalResponses = 8;
 
 [[nodiscard]] std::string_view methodToken(HttpMethod method) noexcept
 {
@@ -38,6 +39,41 @@ constexpr std::string_view HeaderTerminator = "\r\n\r\n";
 [[nodiscard]] constexpr bool isDigit(char value) noexcept
 {
     return value >= '0' && value <= '9';
+}
+
+[[nodiscard]] constexpr bool isAsciiControl(char value) noexcept
+{
+    const auto byte = static_cast<unsigned char>(value);
+    return byte <= 0x1FU || byte == 0x7FU;
+}
+
+[[nodiscard]] constexpr bool isHttpTokenCharacter(char value) noexcept
+{
+    if (isDigit(value)
+        || (value >= 'A' && value <= 'Z')
+        || (value >= 'a' && value <= 'z')) {
+        return true;
+    }
+    switch (value) {
+    case '!': case '#': case '$': case '%': case '&': case '\'': case '*':
+    case '+': case '-': case '.': case '^': case '_': case '`': case '|': case '~':
+        return true;
+    default:
+        return false;
+    }
+}
+
+[[nodiscard]] bool isValidHeaderName(std::string_view name) noexcept
+{
+    return !name.empty()
+        && std::ranges::all_of(name, [](char value) { return isHttpTokenCharacter(value); });
+}
+
+[[nodiscard]] bool isValidHeaderValue(std::string_view value) noexcept
+{
+    return std::ranges::none_of(value, [](char character) {
+        return isAsciiControl(character) && character != '\t';
+    });
 }
 
 [[nodiscard]] constexpr char toLowerAscii(char value) noexcept
@@ -102,6 +138,10 @@ constexpr std::string_view HeaderTerminator = "\r\n\r\n";
 {
     const Core::usize semicolon = line.find(';');
     if (semicolon != std::string_view::npos) {
+        const std::string_view extensions = line.substr(semicolon + 1U);
+        if (extensions.empty() || !isValidHeaderValue(extensions)) {
+            return false;
+        }
         line = line.substr(0, semicolon);
     }
     line = trimOptionalWhitespace(line);
@@ -131,6 +171,54 @@ constexpr std::string_view HeaderTerminator = "\r\n\r\n";
     return true;
 }
 
+[[nodiscard]] Core::Status validateTrailerSection(
+    std::string_view trailers,
+    Core::usize maximumTrailerCount)
+{
+    Core::usize count = 0;
+    Core::usize cursor = 0;
+    while (cursor < trailers.size()) {
+        const Core::usize lineEnd = trailers.find(Crlf, cursor);
+        const Core::usize end = lineEnd == std::string_view::npos
+            ? trailers.size()
+            : lineEnd;
+        if (end == cursor || count >= maximumTrailerCount) {
+            return Core::failure(
+                NetworkErrorCode::HttpMalformedResponse,
+                "HTTP chunk trailer is empty or exceeds the field count limit");
+        }
+
+        const std::string_view field = trailers.substr(cursor, end - cursor);
+        const Core::usize colon = field.find(':');
+        if (colon == std::string_view::npos || colon == 0) {
+            return Core::failure(
+                NetworkErrorCode::HttpMalformedResponse,
+                "HTTP chunk trailer has no field name");
+        }
+        const std::string_view name = field.substr(0, colon);
+        const std::string_view value = trimOptionalWhitespace(field.substr(colon + 1));
+        if (!isValidHeaderName(name) || !isValidHeaderValue(value)) {
+            return Core::failure(
+                NetworkErrorCode::HttpMalformedResponse,
+                "HTTP chunk trailer contains invalid field syntax");
+        }
+        if (equalsIgnoreAsciiCase(name, "Content-Length")
+            || equalsIgnoreAsciiCase(name, "Transfer-Encoding")
+            || equalsIgnoreAsciiCase(name, "Host")) {
+            return Core::failure(
+                NetworkErrorCode::HttpMalformedResponse,
+                "HTTP chunk trailer attempts to change message framing or routing");
+        }
+
+        ++count;
+        if (lineEnd == std::string_view::npos) {
+            break;
+        }
+        cursor = lineEnd + Crlf.size();
+    }
+    return Core::success();
+}
+
 } // namespace
 
 std::string_view HttpResponse::header(std::string_view name) const noexcept
@@ -149,6 +237,7 @@ struct HttpRequest::Impl final {
         , requestBytes(&resource)
         , headerBytes(&resource)
         , bodyBytes(&resource)
+        , chunkBytes(&resource)
         , headers(&resource)
     {
     }
@@ -165,7 +254,21 @@ struct HttpRequest::Impl final {
     // Raw status line and headers, kept because the parsed views point into it.
     std::pmr::string headerBytes;
     std::pmr::vector<std::byte> bodyBytes;
+    // Encoded bytes not yet consumed by the incremental chunk parser. Keeping
+    // these separate makes maximumBodyBytes an exact decoded-body cap rather
+    // than charging chunk headers and trailers against application data.
+    std::pmr::vector<std::byte> chunkBytes;
     std::pmr::vector<HttpHeader> headers;
+
+    enum class ChunkState : Core::u8 {
+        SizeLine,
+        Data,
+        DataTerminator,
+        Trailers,
+        Complete,
+    };
+    ChunkState chunkState = ChunkState::SizeLine;
+    Core::usize chunkBytesRemaining = 0;
 
     Core::u16 statusCode = 0;
     // Offsets rather than views: the string can still grow while headers arrive,
@@ -180,8 +283,10 @@ struct HttpRequest::Impl final {
     // Set for 204/304 and any HEAD response, where a body must not be read even
     // if the framing headers suggest one.
     bool bodyForbidden = false;
+    bool headRequest = false;
     // No Content-Length and not chunked: the body ends when the peer closes.
     bool bodyEndsAtClose = false;
+    Core::usize informationalResponseCount = 0;
 
     Core::usize maximumBodyBytes = 0;
     Core::usize maximumHeaderBytes = 0;
@@ -198,7 +303,15 @@ struct HttpRequest::Impl final {
         return std::this_thread::get_id() == owner;
     }
 
-    void markFailed() noexcept { state = HttpRequestState::Failed; }
+    void markFailed() noexcept
+    {
+        // Borrowed means this object does not destroy the stream owner. The
+        // single-request exchange still exclusively consumes that connection,
+        // so a malformed/incomplete response must close it rather than leave
+        // unframed bytes available for accidental reuse.
+        stream->closeStream();
+        state = HttpRequestState::Failed;
+    }
 
     void noteProgress() noexcept { stalledPumps = 0; }
 
@@ -227,10 +340,11 @@ struct HttpRequest::Impl final {
 
         // Status line: HTTP-version SP status-code SP [reason-phrase]
         const std::string_view statusLine = all.substr(0, lineEnd);
-        if (!statusLine.starts_with("HTTP/1.")) {
+        if (!statusLine.starts_with("HTTP/1.0 ")
+            && !statusLine.starts_with("HTTP/1.1 ")) {
             return Core::failure(
                 NetworkErrorCode::HttpMalformedResponse,
-                "HTTP response is not HTTP/1.x");
+                "HTTP response version is not HTTP/1.0 or HTTP/1.1");
         }
         const Core::usize firstSpace = statusLine.find(' ');
         if (firstSpace == std::string_view::npos) {
@@ -245,15 +359,21 @@ struct HttpRequest::Impl final {
             : remainder.substr(0, secondSpace);
 
         Core::usize code = 0;
-        if (codeText.size() != 3 || !parseDecimal(codeText, code) || code > 999) {
+        if (codeText.size() != 3 || !parseDecimal(codeText, code)
+            || code < 100 || code > 599) {
             return Core::failure(
                 NetworkErrorCode::HttpMalformedResponse,
-                "HTTP status code is not three digits");
+                "HTTP status code is outside the 100-599 range");
         }
         statusCode = static_cast<Core::u16>(code);
 
         if (secondSpace != std::string_view::npos) {
             const std::string_view reason = remainder.substr(secondSpace + 1);
+            if (!isValidHeaderValue(reason)) {
+                return Core::failure(
+                    NetworkErrorCode::HttpMalformedResponse,
+                    "HTTP reason phrase contains a control character");
+            }
             reasonOffset = static_cast<Core::usize>(reason.data() - all.data());
             reasonLength = reason.size();
         }
@@ -276,13 +396,12 @@ struct HttpRequest::Impl final {
                     NetworkErrorCode::HttpMalformedResponse,
                     "HTTP header field has no name");
             }
-            // A space before the colon is a request-smuggling vector, so it is
-            // rejected rather than trimmed.
             const std::string_view name = field.substr(0, colon);
-            if (name.back() == ' ' || name.back() == '\t') {
+            const std::string_view value = trimOptionalWhitespace(field.substr(colon + 1));
+            if (!isValidHeaderName(name) || !isValidHeaderValue(value)) {
                 return Core::failure(
                     NetworkErrorCode::HttpMalformedResponse,
-                    "HTTP header name has trailing whitespace before the colon");
+                    "HTTP header field contains invalid syntax");
             }
 
             if (headers.size() >= maximumHeaderCount) {
@@ -292,50 +411,80 @@ struct HttpRequest::Impl final {
             }
             headers.push_back(HttpHeader{
                 .name = name,
-                .value = trimOptionalWhitespace(field.substr(colon + 1))});
+                .value = value});
 
             cursor = fieldEnd + Crlf.size();
         }
 
-        // Framing. Transfer-Encoding wins over Content-Length; a message carrying
-        // both is a smuggling attempt and is refused outright.
-        const std::string_view transferEncoding = findHeader("Transfer-Encoding");
-        const std::string_view contentLengthField = findHeader("Content-Length");
-
-        if (!transferEncoding.empty()) {
-            if (!equalsIgnoreAsciiCase(transferEncoding, "chunked")) {
-                return Core::failure(
-                    NetworkErrorCode::HttpMalformedResponse,
-                    "HTTP Transfer-Encoding other than chunked is unsupported");
+        // Framing is collected across every occurrence. Looking up only the first Content-Length would
+        // accept an inconsistent duplicate, which is precisely the ambiguity request smuggling uses.
+        bool sawTransferEncoding = false;
+        bool sawContentLength = false;
+        Core::usize declaredContentLength = 0;
+        for (const HttpHeader& header : headers) {
+            if (equalsIgnoreAsciiCase(header.name, "Transfer-Encoding")) {
+                if (sawTransferEncoding || !equalsIgnoreAsciiCase(header.value, "chunked")) {
+                    return Core::failure(
+                        NetworkErrorCode::HttpMalformedResponse,
+                        "HTTP Transfer-Encoding must be one unambiguous chunked field");
+                }
+                sawTransferEncoding = true;
+                continue;
             }
-            if (!contentLengthField.empty()) {
-                return Core::failure(
-                    NetworkErrorCode::HttpMalformedResponse,
-                    "HTTP response carries both Transfer-Encoding and Content-Length");
+            if (!equalsIgnoreAsciiCase(header.name, "Content-Length")) {
+                continue;
             }
-            chunked = true;
-            stats.chunkedTransferEncoding = true;
-        } else if (!contentLengthField.empty()) {
             Core::usize declared = 0;
-            if (!parseDecimal(contentLengthField, declared)) {
+            if (!parseDecimal(header.value, declared)) {
                 return Core::failure(
                     NetworkErrorCode::HttpMalformedResponse,
                     "HTTP Content-Length is not a valid length");
             }
-            if (declared > maximumBodyBytes) {
+            if (sawContentLength && declared != declaredContentLength) {
+                return Core::failure(
+                    NetworkErrorCode::HttpMalformedResponse,
+                    "HTTP response carries inconsistent Content-Length fields");
+            }
+            sawContentLength = true;
+            declaredContentLength = declared;
+        }
+
+        bodyForbidden = headRequest || statusCode < 200 || statusCode == 204
+            || statusCode == 205 || statusCode == 304;
+
+        if (sawTransferEncoding) {
+            if (sawContentLength) {
+                return Core::failure(
+                    NetworkErrorCode::HttpMalformedResponse,
+                    "HTTP response carries both Transfer-Encoding and Content-Length");
+            }
+            if (statusCode < 200 || statusCode == 204) {
+                return Core::failure(
+                    NetworkErrorCode::HttpMalformedResponse,
+                    "HTTP response status forbids Transfer-Encoding");
+            }
+            chunked = true;
+            stats.chunkedTransferEncoding = true;
+        } else if (sawContentLength) {
+            if (statusCode < 200 || statusCode == 204) {
+                return Core::failure(
+                    NetworkErrorCode::HttpMalformedResponse,
+                    "HTTP response status forbids Content-Length");
+            }
+            if (statusCode == 205 && declaredContentLength != 0) {
+                return Core::failure(
+                    NetworkErrorCode::HttpMalformedResponse,
+                    "HTTP 205 response requires a zero Content-Length");
+            }
+            if (!bodyForbidden && declaredContentLength > maximumBodyBytes) {
                 return Core::failure(
                     NetworkErrorCode::HttpResponseTooLarge,
                     "HTTP Content-Length exceeds the configured body limit");
             }
             hasContentLength = true;
-            contentLength = declared;
-        } else {
+            contentLength = declaredContentLength;
+        } else if (!bodyForbidden) {
             bodyEndsAtClose = true;
-        }
-
-        // 1xx, 204 and 304 never carry a body, whatever the framing says.
-        if (statusCode == 204 || statusCode == 304 || (statusCode >= 100 && statusCode < 200)) {
-            bodyForbidden = true;
         }
 
         stats.headerCount = headers.size();
@@ -343,15 +492,26 @@ struct HttpRequest::Impl final {
         return Core::success();
     }
 
-    [[nodiscard]] std::string_view findHeader(std::string_view name) const noexcept
+    void resetForNextResponse() noexcept
     {
-        for (const auto& entry : headers) {
-            if (equalsIgnoreAsciiCase(entry.name, name)) {
-                return entry.value;
-            }
-        }
-        return {};
+        headerBytes.clear();
+        headers.clear();
+        statusCode = 0;
+        reasonOffset = 0;
+        reasonLength = 0;
+        headersParsed = false;
+        chunked = false;
+        hasContentLength = false;
+        contentLength = 0;
+        bodyForbidden = headRequest;
+        bodyEndsAtClose = false;
+        chunkState = ChunkState::SizeLine;
+        chunkBytesRemaining = 0;
+        chunkBytes.clear();
+        stats.headerCount = 0;
+        stats.chunkedTransferEncoding = false;
     }
+
 };
 
 HttpRequest::HttpRequest(Impl* impl) noexcept
@@ -394,20 +554,24 @@ Core::Result<HttpRequest> HttpRequest::Create(HttpRequestConfig config)
             NetworkErrorCode::InvalidConfiguration,
             "HTTP response limits must be greater than zero");
     }
-    // A control character in either would let a caller inject a header line.
     for (const char value : config.target) {
-        if (value == '\r' || value == '\n' || value == ' ') {
+        if (isAsciiControl(value) || value == ' ' || value == '#') {
             return Core::failure(
                 NetworkErrorCode::InvalidConfiguration,
-                "HTTP target must not contain whitespace or CRLF");
+                "HTTP target contains an invalid origin-form character");
         }
     }
     for (const char value : config.host) {
-        if (value == '\r' || value == '\n') {
+        if (isAsciiControl(value) || value == ' ') {
             return Core::failure(
                 NetworkErrorCode::InvalidConfiguration,
-                "HTTP host must not contain CRLF");
+                "HTTP host contains whitespace or a control character");
         }
+    }
+    if (!config.contentType.empty() && !isValidHeaderValue(config.contentType)) {
+        return Core::failure(
+            NetworkErrorCode::InvalidConfiguration,
+            "HTTP Content-Type contains a control character");
     }
 
     std::pmr::memory_resource* resource = config.memoryResource != nullptr
@@ -415,28 +579,42 @@ Core::Result<HttpRequest> HttpRequest::Create(HttpRequestConfig config)
         : std::pmr::get_default_resource();
 
     std::string head;
-    head.reserve(256);
-    head.append(methodToken(config.method));
-    head.push_back(' ');
-    head.append(config.target);
-    head.append(" HTTP/1.1\r\nHost: ");
-    head.append(config.host);
-    // No keep-alive: this type performs one request, so asking the server to hold
-    // the connection open would only delay the close that ends an
-    // unknown-length body.
-    head.append("\r\nConnection: close\r\n");
-    if (!config.body.empty()) {
-        head.append("Content-Length: ");
-        head.append(std::to_string(config.body.size()));
-        head.append(Crlf);
-        if (!config.contentType.empty()) {
-            head.append("Content-Type: ");
-            head.append(config.contentType);
+    try {
+        head.reserve(256);
+        head.append(methodToken(config.method));
+        head.push_back(' ');
+        head.append(config.target);
+        head.append(" HTTP/1.1\r\nHost: ");
+        head.append(config.host);
+        // No keep-alive: this type performs one request, so asking the server to
+        // hold the connection open would delay an unknown-length response.
+        head.append("\r\nConnection: close\r\n");
+        if (!config.body.empty()) {
+            head.append("Content-Length: ");
+            head.append(std::to_string(config.body.size()));
             head.append(Crlf);
+            if (!config.contentType.empty()) {
+                head.append("Content-Type: ");
+                head.append(config.contentType);
+                head.append(Crlf);
+            }
         }
+        head.append(Crlf);
+    } catch (const std::bad_alloc&) {
+        return Core::failure(
+            NetworkErrorCode::AllocationFailed,
+            "HTTP request header allocation failed");
+    } catch (...) {
+        return Core::failure(
+            NetworkErrorCode::ConstructionFailed,
+            "HTTP request header construction failed");
     }
-    head.append(Crlf);
 
+    if (config.body.size() > (std::numeric_limits<Core::usize>::max)() - head.size()) {
+        return Core::failure(
+            NetworkErrorCode::CapacityExceeded,
+            "HTTP request size overflows addressable storage");
+    }
     const Core::usize requestSize = head.size() + config.body.size();
 
     Impl* impl = nullptr;
@@ -469,7 +647,8 @@ Core::Result<HttpRequest> HttpRequest::Create(HttpRequestConfig config)
     impl->maximumHeaderBytes = config.maximumHeaderBytes;
     impl->maximumHeaderCount = config.maximumHeaderCount;
     impl->stallPumpLimit = config.stallPumpLimit;
-    impl->bodyForbidden = config.method == HttpMethod::Head;
+    impl->headRequest = config.method == HttpMethod::Head;
+    impl->bodyForbidden = impl->headRequest;
 
     return HttpRequest{impl};
 }
@@ -575,71 +754,216 @@ Core::Result<bool> HttpRequest::pump()
         const Core::usize searchStart = m_impl->headerBytes.size() >= HeaderTerminator.size()
             ? m_impl->headerBytes.size() - (HeaderTerminator.size() - 1)
             : 0;
-        m_impl->headerBytes.append(incoming);
-
-        if (m_impl->headerBytes.size() > m_impl->maximumHeaderBytes) {
+        try {
+            m_impl->headerBytes.append(incoming);
+        } catch (const std::bad_alloc&) {
             m_impl->markFailed();
             return Core::failure(
-                NetworkErrorCode::HttpResponseTooLarge,
-                "HTTP headers exceeded the configured limit");
+                NetworkErrorCode::AllocationFailed,
+                "HTTP header buffer allocation failed");
+        } catch (...) {
+            m_impl->markFailed();
+            return Core::failure(
+                NetworkErrorCode::ConstructionFailed,
+                "HTTP header buffer construction failed");
         }
+        if (const auto status = m_impl->stream->consumeReceived(buffered->size()); !status) {
+            m_impl->markFailed();
+            return Core::failure(status.error());
+        }
+        buffered = std::span<const std::byte>{};
 
-        const std::string_view all{m_impl->headerBytes};
-        const Core::usize terminator = all.find(HeaderTerminator, searchStart);
-        if (terminator != std::string_view::npos) {
+        Core::usize nextSearchStart = searchStart;
+        while (m_impl->state == HttpRequestState::ReceivingHeaders) {
+            const std::string_view all{m_impl->headerBytes};
+            const Core::usize terminator = all.find(HeaderTerminator, nextSearchStart);
+            const Core::usize headerSize = terminator == std::string_view::npos
+                ? all.size()
+                : terminator + HeaderTerminator.size();
+            if (headerSize > m_impl->maximumHeaderBytes) {
+                m_impl->markFailed();
+                return Core::failure(
+                    NetworkErrorCode::HttpResponseTooLarge,
+                    "HTTP headers exceeded the configured limit");
+            }
+            if (terminator == std::string_view::npos) {
+                const auto streamState = m_impl->stream->streamState();
+                if (streamState == ByteStreamState::PeerClosed
+                    || streamState == ByteStreamState::Closed) {
+                    m_impl->markFailed();
+                    return Core::failure(
+                        NetworkErrorCode::HttpIncompleteResponse,
+                        "HTTP transport closed before the response headers completed");
+                }
+                return false;
+            }
+
             const Core::usize bodyStart = terminator + HeaderTerminator.size();
-            // Anything past the terminator is body, so it is moved out before the
-            // header text is finalised.
-            std::string leftover{all.substr(bodyStart)};
+            std::string leftover;
+            try {
+                leftover.assign(all.substr(bodyStart));
+            } catch (const std::bad_alloc&) {
+                m_impl->markFailed();
+                return Core::failure(
+                    NetworkErrorCode::AllocationFailed,
+                    "HTTP response remainder allocation failed");
+            } catch (...) {
+                m_impl->markFailed();
+                return Core::failure(
+                    NetworkErrorCode::ConstructionFailed,
+                    "HTTP response remainder construction failed");
+            }
             m_impl->headerBytes.resize(terminator + Crlf.size());
 
-            if (const auto status = m_impl->finaliseHeaders(); !status) {
+            try {
+                if (const auto status = m_impl->finaliseHeaders(); !status) {
+                    m_impl->markFailed();
+                    return Core::failure(status.error());
+                }
+            } catch (const std::bad_alloc&) {
                 m_impl->markFailed();
-                return Core::failure(status.error());
+                return Core::failure(
+                    NetworkErrorCode::AllocationFailed,
+                    "HTTP parsed header allocation failed");
+            } catch (...) {
+                m_impl->markFailed();
+                return Core::failure(
+                    NetworkErrorCode::ConstructionFailed,
+                    "HTTP parsed header construction failed");
             }
 
-            if (const auto status = m_impl->stream->consumeReceived(buffered->size()); !status) {
-                m_impl->markFailed();
-                return Core::failure(status.error());
+            if (m_impl->statusCode >= 100 && m_impl->statusCode < 200) {
+                if (m_impl->statusCode == 101) {
+                    m_impl->markFailed();
+                    return Core::failure(NetworkErrorCode::HttpMalformedResponse,
+                                         "HTTP protocol switching is unsupported by HttpRequest");
+                }
+                ++m_impl->informationalResponseCount;
+                if (m_impl->informationalResponseCount > MaximumInformationalResponses) {
+                    m_impl->markFailed();
+                    return Core::failure(NetworkErrorCode::HttpMalformedResponse,
+                                         "HTTP response contains too many informational responses");
+                }
+                // Informational responses do not complete an HTTP exchange. Parse the next response from
+                // the bytes already received before waiting for another pump.
+                m_impl->resetForNextResponse();
+                try {
+                    m_impl->headerBytes.assign(leftover);
+                } catch (const std::bad_alloc&) {
+                    m_impl->markFailed();
+                    return Core::failure(
+                        NetworkErrorCode::AllocationFailed,
+                        "HTTP informational response allocation failed");
+                } catch (...) {
+                    m_impl->markFailed();
+                    return Core::failure(
+                        NetworkErrorCode::ConstructionFailed,
+                        "HTTP informational response construction failed");
+                }
+                nextSearchStart = 0;
+                if (m_impl->headerBytes.empty()) {
+                    return false;
+                }
+                continue;
             }
-            buffered = std::span<const std::byte>{};
 
             m_impl->state = HttpRequestState::ReceivingBody;
             m_impl->noteProgress();
-
             if (!leftover.empty()) {
-                if (leftover.size() > m_impl->maximumBodyBytes) {
+                if (m_impl->bodyForbidden) {
+                    m_impl->markFailed();
+                    return Core::failure(
+                        NetworkErrorCode::HttpMalformedResponse,
+                        "HTTP response carried bytes where a body is forbidden");
+                }
+                const Core::usize storageLimit = m_impl->chunked
+                    ? ((m_impl->maximumBodyBytes
+                        > (std::numeric_limits<Core::usize>::max)()
+                            - m_impl->maximumHeaderBytes)
+                           ? (std::numeric_limits<Core::usize>::max)()
+                           : m_impl->maximumBodyBytes + m_impl->maximumHeaderBytes)
+                    : m_impl->maximumBodyBytes;
+                if (leftover.size() > storageLimit) {
                     m_impl->markFailed();
                     return Core::failure(
                         NetworkErrorCode::HttpResponseTooLarge,
-                        "HTTP body exceeded the configured limit");
+                        "HTTP body exceeded the configured storage limit");
                 }
-                m_impl->bodyBytes.resize(leftover.size());
-                std::memcpy(m_impl->bodyBytes.data(), leftover.data(), leftover.size());
-                m_impl->stats.bodyBytes = m_impl->bodyBytes.size();
+                try {
+                    auto& destination = m_impl->chunked
+                        ? m_impl->chunkBytes
+                        : m_impl->bodyBytes;
+                    destination.resize(leftover.size());
+                    std::memcpy(destination.data(), leftover.data(), leftover.size());
+                } catch (const std::bad_alloc&) {
+                    m_impl->markFailed();
+                    return Core::failure(
+                        NetworkErrorCode::AllocationFailed,
+                        "HTTP body buffer allocation failed");
+                } catch (...) {
+                    m_impl->markFailed();
+                    return Core::failure(
+                        NetworkErrorCode::ConstructionFailed,
+                        "HTTP body buffer construction failed");
+                }
             }
-        } else {
-            if (const auto status = m_impl->stream->consumeReceived(buffered->size()); !status) {
-                m_impl->markFailed();
-                return Core::failure(status.error());
-            }
-            return false;
         }
+    }
+
+    if (m_impl->state == HttpRequestState::ReceivingHeaders
+        && (m_impl->stream->streamState() == ByteStreamState::PeerClosed
+            || m_impl->stream->streamState() == ByteStreamState::Closed)) {
+        m_impl->markFailed();
+        return Core::failure(
+            NetworkErrorCode::HttpIncompleteResponse,
+            "HTTP transport closed before the response headers completed");
     }
 
     if (m_impl->state == HttpRequestState::ReceivingBody) {
         if (buffered.has_value() && !buffered->empty()) {
             const Core::usize incoming = buffered->size();
-            if (m_impl->bodyBytes.size() + incoming > m_impl->maximumBodyBytes) {
+            if (m_impl->bodyForbidden) {
+                m_impl->markFailed();
+                return Core::failure(
+                    NetworkErrorCode::HttpMalformedResponse,
+                    "HTTP response carried bytes where a body is forbidden");
+            }
+
+            auto& destination = m_impl->chunked
+                ? m_impl->chunkBytes
+                : m_impl->bodyBytes;
+            const Core::usize storageLimit = m_impl->chunked
+                ? ((m_impl->maximumBodyBytes
+                    > (std::numeric_limits<Core::usize>::max)()
+                        - m_impl->maximumHeaderBytes)
+                       ? (std::numeric_limits<Core::usize>::max)()
+                       : m_impl->maximumBodyBytes + m_impl->maximumHeaderBytes)
+                : m_impl->maximumBodyBytes;
+            if (destination.size() > storageLimit
+                || incoming > storageLimit - destination.size()) {
                 m_impl->markFailed();
                 return Core::failure(
                     NetworkErrorCode::HttpResponseTooLarge,
-                    "HTTP body exceeded the configured limit");
+                    "HTTP body exceeded the configured storage limit");
             }
-            const Core::usize offset = m_impl->bodyBytes.size();
-            m_impl->bodyBytes.resize(offset + incoming);
-            std::memcpy(m_impl->bodyBytes.data() + offset, buffered->data(), incoming);
-            m_impl->stats.bodyBytes = m_impl->bodyBytes.size();
+            const Core::usize offset = destination.size();
+            try {
+                destination.resize(offset + incoming);
+                std::memcpy(destination.data() + offset, buffered->data(), incoming);
+            } catch (const std::bad_alloc&) {
+                m_impl->markFailed();
+                return Core::failure(
+                    NetworkErrorCode::AllocationFailed,
+                    "HTTP body buffer allocation failed");
+            } catch (...) {
+                m_impl->markFailed();
+                return Core::failure(
+                    NetworkErrorCode::ConstructionFailed,
+                    "HTTP body buffer construction failed");
+            }
+            if (!m_impl->chunked) {
+                m_impl->stats.bodyBytes = m_impl->bodyBytes.size();
+            }
 
             if (const auto status = m_impl->stream->consumeReceived(incoming); !status) {
                 m_impl->markFailed();
@@ -650,6 +974,11 @@ Core::Result<bool> HttpRequest::pump()
         const auto streamState = m_impl->stream->streamState();
 
         if (m_impl->bodyForbidden) {
+            if (!m_impl->bodyBytes.empty()) {
+                m_impl->markFailed();
+                return Core::failure(NetworkErrorCode::HttpMalformedResponse,
+                                     "HTTP response carried a body where one is forbidden");
+            }
             m_impl->bodyBytes.clear();
             m_impl->stats.bodyBytes = 0;
             m_impl->state = HttpRequestState::Complete;
@@ -679,11 +1008,12 @@ Core::Result<bool> HttpRequest::pump()
         }
 
         if (m_impl->hasContentLength) {
-            if (m_impl->bodyBytes.size() >= m_impl->contentLength) {
-                // A server that sends more than it declared is framing the message
-                // ambiguously, so the extra is dropped rather than guessed at.
-                m_impl->bodyBytes.resize(m_impl->contentLength);
-                m_impl->stats.bodyBytes = m_impl->bodyBytes.size();
+            if (m_impl->bodyBytes.size() > m_impl->contentLength) {
+                m_impl->markFailed();
+                return Core::failure(NetworkErrorCode::HttpMalformedResponse,
+                                     "HTTP response contains bytes beyond Content-Length");
+            }
+            if (m_impl->bodyBytes.size() == m_impl->contentLength) {
                 m_impl->state = HttpRequestState::Complete;
                 return true;
             }
@@ -710,66 +1040,160 @@ Core::Result<bool> HttpRequest::pump()
     return false;
 }
 
-// Decodes in place. Returns true once the terminating zero-length chunk is seen.
+// Incrementally decodes complete chunk prefixes. Encoded bytes are compacted as
+// they are consumed, so an idle pump does not repeatedly reparse the whole body.
 Core::Result<bool> HttpRequest::decodeChunkedBody()
 {
-    // bodyBytes holds the raw chunked stream; decode into a separate buffer and
-    // swap, because a chunk header is longer than nothing and in-place shifting
-    // would overwrite unread input.
-    std::pmr::vector<std::byte> decoded{m_impl->bodyBytes.get_allocator()};
-    const std::string_view raw{
-        reinterpret_cast<const char*>(m_impl->bodyBytes.data()),
-        m_impl->bodyBytes.size()};
-
-    Core::usize cursor = 0;
-    while (true) {
-        const Core::usize lineEnd = raw.find(Crlf, cursor);
-        if (lineEnd == std::string_view::npos) {
-            // Incomplete chunk header; wait for more bytes.
-            return false;
+    const auto consumeEncoded = [this](Core::usize byteCount) noexcept {
+        const Core::usize remaining = m_impl->chunkBytes.size() - byteCount;
+        if (remaining != 0) {
+            std::memmove(
+                m_impl->chunkBytes.data(),
+                m_impl->chunkBytes.data() + byteCount,
+                remaining);
         }
+        m_impl->chunkBytes.resize(remaining);
+    };
 
-        Core::usize chunkSize = 0;
-        if (!parseChunkSize(raw.substr(cursor, lineEnd - cursor), chunkSize)) {
-            return Core::failure(
-                NetworkErrorCode::HttpMalformedResponse,
-                "HTTP chunk size is malformed");
-        }
+    try {
+        while (true) {
+            const char* encodedData = m_impl->chunkBytes.empty()
+                ? ""
+                : reinterpret_cast<const char*>(m_impl->chunkBytes.data());
+            const std::string_view encoded{
+                encodedData,
+                m_impl->chunkBytes.size()};
 
-        const Core::usize dataStart = lineEnd + Crlf.size();
-        if (chunkSize == 0) {
-            // Terminating chunk. Any trailer section is ignored, but the final
-            // CRLF must be present for the message to be complete.
-            const Core::usize trailerEnd = raw.find(Crlf, dataStart);
-            if (trailerEnd == std::string_view::npos && raw.size() < dataStart + Crlf.size()) {
-                return false;
+            switch (m_impl->chunkState) {
+            case Impl::ChunkState::SizeLine: {
+                const Core::usize lineEnd = encoded.find(Crlf);
+                if (lineEnd == std::string_view::npos) {
+                    if (encoded.size() > m_impl->maximumHeaderBytes) {
+                        return Core::failure(
+                            NetworkErrorCode::HttpResponseTooLarge,
+                            "HTTP chunk size line exceeded the header limit");
+                    }
+                    return false;
+                }
+
+                Core::usize chunkSize = 0;
+                if (!parseChunkSize(encoded.substr(0, lineEnd), chunkSize)) {
+                    return Core::failure(
+                        NetworkErrorCode::HttpMalformedResponse,
+                        "HTTP chunk size or extension is malformed");
+                }
+                if (chunkSize > m_impl->maximumBodyBytes - m_impl->bodyBytes.size()) {
+                    return Core::failure(
+                        NetworkErrorCode::HttpResponseTooLarge,
+                        "HTTP chunked body exceeded the configured limit");
+                }
+
+                consumeEncoded(lineEnd + Crlf.size());
+                if (chunkSize == 0) {
+                    m_impl->chunkState = Impl::ChunkState::Trailers;
+                } else {
+                    m_impl->chunkBytesRemaining = chunkSize;
+                    m_impl->chunkState = Impl::ChunkState::Data;
+                }
+                break;
             }
-            m_impl->bodyBytes = std::move(decoded);
-            m_impl->stats.bodyBytes = m_impl->bodyBytes.size();
-            return true;
-        }
+            case Impl::ChunkState::Data: {
+                if (m_impl->chunkBytes.empty()) {
+                    return false;
+                }
+                const Core::usize take = (std::min)(
+                    m_impl->chunkBytesRemaining,
+                    m_impl->chunkBytes.size());
+                if (take > m_impl->maximumBodyBytes - m_impl->bodyBytes.size()) {
+                    return Core::failure(
+                        NetworkErrorCode::HttpResponseTooLarge,
+                        "HTTP chunked body exceeded the configured limit");
+                }
 
-        if (decoded.size() + chunkSize > m_impl->maximumBodyBytes) {
-            return Core::failure(
-                NetworkErrorCode::HttpResponseTooLarge,
-                "HTTP chunked body exceeded the configured limit");
-        }
-        if (dataStart + chunkSize + Crlf.size() > raw.size()) {
-            // The chunk body has not fully arrived yet.
-            return false;
-        }
+                const Core::usize outputOffset = m_impl->bodyBytes.size();
+                m_impl->bodyBytes.resize(outputOffset + take);
+                std::memcpy(
+                    m_impl->bodyBytes.data() + outputOffset,
+                    m_impl->chunkBytes.data(),
+                    take);
+                consumeEncoded(take);
+                m_impl->chunkBytesRemaining -= take;
+                m_impl->stats.bodyBytes = m_impl->bodyBytes.size();
+                if (m_impl->chunkBytesRemaining != 0) {
+                    return false;
+                }
+                m_impl->chunkState = Impl::ChunkState::DataTerminator;
+                break;
+            }
+            case Impl::ChunkState::DataTerminator:
+                if (encoded.size() < Crlf.size()) {
+                    return false;
+                }
+                if (encoded.substr(0, Crlf.size()) != Crlf) {
+                    return Core::failure(
+                        NetworkErrorCode::HttpMalformedResponse,
+                        "HTTP chunk is not terminated by CRLF");
+                }
+                consumeEncoded(Crlf.size());
+                m_impl->chunkState = Impl::ChunkState::SizeLine;
+                break;
+            case Impl::ChunkState::Trailers: {
+                if (encoded.size() < Crlf.size()) {
+                    return false;
+                }
 
-        const Core::usize offset = decoded.size();
-        decoded.resize(offset + chunkSize);
-        std::memcpy(decoded.data() + offset, raw.data() + dataStart, chunkSize);
+                Core::usize trailerBytes = 0;
+                if (encoded.substr(0, Crlf.size()) == Crlf) {
+                    trailerBytes = Crlf.size();
+                } else {
+                    const Core::usize terminator = encoded.find(HeaderTerminator);
+                    if (terminator == std::string_view::npos) {
+                        if (encoded.size() > m_impl->maximumHeaderBytes) {
+                            return Core::failure(
+                                NetworkErrorCode::HttpResponseTooLarge,
+                                "HTTP chunk trailers exceeded the header limit");
+                        }
+                        return false;
+                    }
+                    if (terminator + HeaderTerminator.size() > m_impl->maximumHeaderBytes) {
+                        return Core::failure(
+                            NetworkErrorCode::HttpResponseTooLarge,
+                            "HTTP chunk trailers exceeded the header limit");
+                    }
+                    const Core::usize remainingHeaderSlots =
+                        m_impl->headers.size() >= m_impl->maximumHeaderCount
+                        ? 0
+                        : m_impl->maximumHeaderCount - m_impl->headers.size();
+                    if (const auto status = validateTrailerSection(
+                            encoded.substr(0, terminator),
+                            remainingHeaderSlots);
+                        !status) {
+                        return Core::failure(status.error());
+                    }
+                    trailerBytes = terminator + HeaderTerminator.size();
+                }
 
-        cursor = dataStart + chunkSize;
-        if (raw.substr(cursor, Crlf.size()) != Crlf) {
-            return Core::failure(
-                NetworkErrorCode::HttpMalformedResponse,
-                "HTTP chunk is not terminated by CRLF");
+                consumeEncoded(trailerBytes);
+                if (!m_impl->chunkBytes.empty()) {
+                    return Core::failure(
+                        NetworkErrorCode::HttpMalformedResponse,
+                        "HTTP chunked response contains bytes after its terminator");
+                }
+                m_impl->chunkState = Impl::ChunkState::Complete;
+                return true;
+            }
+            case Impl::ChunkState::Complete:
+                return true;
+            }
         }
-        cursor += Crlf.size();
+    } catch (const std::bad_alloc&) {
+        return Core::failure(
+            NetworkErrorCode::AllocationFailed,
+            "HTTP chunk decode allocation failed");
+    } catch (...) {
+        return Core::failure(
+            NetworkErrorCode::ConstructionFailed,
+            "HTTP chunk decode failed");
     }
 }
 

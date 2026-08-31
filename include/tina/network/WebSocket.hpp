@@ -25,7 +25,8 @@ enum class WebSocketState : Core::u8 {
     Handshaking,
     Open,
     // Close frame exchanged in at least one direction. Buffered messages stay
-    // readable.
+    // readable. A peer close enters Closing first so the mandatory echo can be
+    // handed to the transport, then transitions to Closed.
     Closing,
     Closed,
     Failed,
@@ -46,7 +47,8 @@ struct WebSocketMessage final {
 
 struct WebSocketConfig final {
     // Borrowed, and must outlive the socket. Supplying the stream is what lets wss
-    // work without Tina::Network depending on the optional TLS adapter.
+    // work without Tina::Network depending on the optional TLS adapter. A
+    // protocol failure closes the stream but never destroys its owner.
     IByteStream* stream = nullptr;
 
     // Origin-form target for the upgrade request, e.g. "/socket".

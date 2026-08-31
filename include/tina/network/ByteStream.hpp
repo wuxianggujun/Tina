@@ -41,6 +41,12 @@ class IByteStream {
     // partial acceptance it did not ask for.
     [[nodiscard]] virtual Core::Status sendBytes(std::span<const std::byte> payload) = 0;
 
+    // Bytes accepted by sendBytes() but not yet handed to the platform socket.
+    // Zero proves local handoff only, not peer delivery or acknowledgement. This
+    // lets a protocol keep pumping an orderly close without depending on a
+    // transport-specific statistics type.
+    [[nodiscard]] virtual Core::usize pendingSendBytes() const noexcept = 0;
+
     // Advances the stream. Never blocks. Returns the number of bytes newly
     // available to peekReceived(); zero is the normal idle answer.
     [[nodiscard]] virtual Core::Result<Core::usize> pumpStream() = 0;

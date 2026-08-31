@@ -5,6 +5,7 @@
 #include <tina/core/error/Result.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 #include <tina/render/RenderScene.hpp>
+#include <tina/math/Vec.hpp>
 #include <tina/scene/SpriteRenderer2D.hpp>
 
 #include <memory_resource>
@@ -24,8 +25,8 @@ struct ParticleSystem2DConfig final {
 };
 
 struct ParticleVec2Range final {
-    Vec2 minimum{};
-    Vec2 maximum{};
+    Math::Vec2 minimum{};
+    Math::Vec2 maximum{};
 };
 
 struct ParticleLifetimeRange final {
@@ -37,12 +38,12 @@ struct ParticleBurst2D final {
     usize count = 1;
     // Copyable weak handle; emitting copies it into each particle and acquires no AssetLease.
     Asset::AssetHandle sprite{};
-    Vec2 origin{};
+    Math::Vec2 origin{};
     ParticleVec2Range positionOffset{};
     ParticleVec2Range velocity{};
     ParticleLifetimeRange lifetime{};
-    Vec2 startSizeMeters{1.0F, 1.0F};
-    Vec2 endSizeMeters{1.0F, 1.0F};
+    Math::Vec2 startSizeMeters{1.0F, 1.0F};
+    Math::Vec2 endSizeMeters{1.0F, 1.0F};
     ColorRgba8 startColor{};
     ColorRgba8 endColor{};
     float rotationRadians = 0.0F;
@@ -56,12 +57,12 @@ struct Particle2D final {
     u64 stableParticleKey = 0;
     // Retained weak handle only; the particle system does not own the asset lifetime.
     Asset::AssetHandle sprite{};
-    Vec2 position{};
-    Vec2 velocity{};
+    Math::Vec2 position{};
+    Math::Vec2 velocity{};
     Core::Duration age{};
     Core::Duration lifetime{};
-    Vec2 startSizeMeters{};
-    Vec2 endSizeMeters{};
+    Math::Vec2 startSizeMeters{};
+    Math::Vec2 endSizeMeters{};
     ColorRgba8 startColor{};
     ColorRgba8 endColor{};
     float rotationRadians = 0.0F;

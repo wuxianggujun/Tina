@@ -476,7 +476,14 @@ dolly；Focus 与 Frame All 根据当前动态选择或全部 preview 内容重�
 session，切换 workspace 或重建 preview 后恢复各自最近视角；Frame All reference 与用户 session 分离，不会在 preview rebuild
 时覆盖已初始化 session。3D view selector 按 Perspective → Top → Front → Right → Back → Left → Bottom 循环，orbit 后清除
 preset 并显示 `View: Custom`。状态再统一驱动 Camera、projection、grid、TileMap picking/culling、marquee candidate projection
-与 transform gizmo，不存在只移动装饰网格的旁路。
+与 transform gizmo，不存在只移动装饰网格的旁路。3D 相机的 vertical FOV 只有一处定义
+（`ViewportPerspectiveFovDegrees`），因为拾取射线必须与画面同源——第二份副本一旦漂移，拾取会稳定偏一点点
+而外观完全正常。
+
+**单击拾取与框选是两种语义，各用各的候选集。** 单击在 3D 走世界空间 ray（最近命中优先），因此重叠物体命中
+的是**更靠前**的那个；框选保持屏幕矩形，因为用户拖一个矩形时期望框住"看起来在框里"的东西。2D 单击继续用
+屏幕包围盒——正交投影下屏幕包围盒是世界包围盒的线性映射，没有深度歧义可解。preselection 高亮框仍由屏幕
+矩形候选驱动：拾取决定**选谁**，高亮框决定**画在哪**。
 
 `Tina::Editor::EditorViewportGrid` 是 backend-neutral、固定 `160` segment 容量的正式 Editor 模块。输入只包含 projection、
 committed logical extent、25%-400% zoom、相机中心和 world spacing；成功 publication 输出归一化且限制在 `[0,1]` 的
@@ -630,6 +637,12 @@ history vector 在 Create 时一次 reserve 到配置 entry 上限。发布新 r
   shear/零 scale 或 baseline 冲突恢复 canonical preview，不生成 history entry；
 - `EditorMarqueeSelection::Evaluate()`：以固定容量 stable-ID candidate/current selection 计算 Replace/Add/Toggle 结果与
   added/removed diff；非法 rect、重复/零 stable ID 或 union 超限时原子失败；空结果同步 Hierarchy document root；
+- `editorViewportPickRay()` / `pickNearestViewportCandidate()`：**3D 单击拾取**。前者把视口局部逻辑像素转为
+  世界 `Math::Ray`（相机看向自身 -Z；Y 轴翻转，因为逻辑 UI 向下增长而相机 up 向上）；后者对固定 64 容量的
+  世界包围球候选做 `Math::raycast` 取**最近命中**，距离相等按 stable ID 升序以保证与候选顺序无关。退化相机
+  基、零面积视口、越界 FOV 或非有限输入返回 `nullopt` 而不是任意射线；「未命中」用 `optional` 而非 `Result`，
+  因为每次点击都可能落空，那不是错误。候选携带包围球**中心**：authored `localBounds` 偏离原点的 mesh
+  （glTF 导入的常态）必须在它实际出现的位置可拾取，而不是在 transform 原点；
 - `EditorPlaySession`：Play 时按实际 payload 事务复制 current-schema canonical bytes，提供 Playing/Paused、bounded
   fixed-step advance、single-step 与 Stop；空 session 不按容量上限预留，Stop 释放快照，session 不持有或修改
   authoring document；

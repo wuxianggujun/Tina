@@ -109,8 +109,8 @@ template <typename Id>
 }
 
 [[nodiscard]] PhysicsBody2DDesc dynamicBody(
-    PhysicsVec2 position = {},
-    PhysicsVec2 velocity = {}) noexcept
+    Math::Vec2 position = {},
+    Math::Vec2 velocity = {}) noexcept
 {
     PhysicsBody2DDesc desc;
     desc.type = PhysicsBodyType2D::Dynamic;

@@ -9,6 +9,8 @@
 
 - 固定容量、PMR-backed `World`；
 - generation/owner-aware `EntityId`；
+- strict UTF-8 runtime name 与 game-defined tag/layer/group metadata；
+- 封闭组件白名单上的只读 `get/has/view/query`；
 - Local/World Transform 层级与显式 publication barrier；
 - Camera2D、SpriteRenderer2D、SpriteAnimationBinding2D、PointLight2D、ShadowOccluder2D、PhysicsBody2D、PhysicsShape2D、ResourceBinding2D、PerspectiveCamera3D、MeshRenderer3D、DirectionalLight3D 组件；
 - standalone allocation-free `CameraFollow2D` controller；
@@ -42,6 +44,21 @@ borrowed resolver，并只传递 Tina-owned Core/Render，不会把完整 AssetS
 
 默认 `destroyEntity()` 只销毁目标实体，直接子节点提升到 root 并保持最后发布的 world transform；
 需要整体删除时显式调用 `destroySubtree()`。
+
+## 只读 typed view 与 metadata
+
+`WorldReadableComponent` 只接受 `EntityMetadata`、`LocalTransform`、`WorldTransform` 和当前 World 已公开的
+固定组件类型。`get<T>()`/`has<T>()` 提供只读 typed access；`view<T...>()` 与同义的 `query<T...>()`
+惰性遍历同时拥有全部请求组件的 Entity。range 本身产出 `EntityId`，`each()` 再按模板顺序传入
+`EntityId, const T&...`。它不提供 generic add/remove/set，不允许注册新 component type，因此没有把 World
+改成任意动态 ECS。view、iterator 和 component pointer 只在 owner thread 使用，并在任意 World mutation、move
+或销毁后失效。
+
+每个 live entity 都有一份 `EntityMetadata`。runtime name 最多63个 UTF-8 bytes，拒绝非法 UTF-8 与 embedded
+NUL，失败不覆盖旧 metadata；空 name 表示未命名。`EntityTag`/`EntityLayer`/`EntityGroup` 是 Scene 不解释的
+game-defined `u32`，0 分别表示 no tag、default layer、no group。`setMetadata()` 原子替换四项；也可用
+`setRuntimeName()`/`setTag()`/`setLayer()`/`setGroup()` 单独更新。World2D instantiate/capture 会复制 authored
+name；tag/layer/group 不进入 snapshot。
 
 ## Transform 契约
 

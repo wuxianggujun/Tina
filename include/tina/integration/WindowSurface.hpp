@@ -37,9 +37,10 @@ struct NativeWindowSurfaceLeaseState;
 class NativeWindowSurfaceLeaseAccess;
 } // namespace Detail
 
-// Pins one native primary-window binding for the complete RenderDevice
-// lifetime. It exposes only a generation identity; the private platform/render
-// bridge is the sole decoder of the native binding.
+// Pins the primary WindowSurface lifetime for the complete RenderDevice
+// lifetime. The binding behind that identity may be replaced by a platform
+// lifecycle rebind; the private platform/render bridge is the sole decoder of
+// its current native binding.
 class NativeWindowSurfaceLease final {
   public:
     NativeWindowSurfaceLease() noexcept = default;

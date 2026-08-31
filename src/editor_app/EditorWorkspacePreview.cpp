@@ -775,8 +775,8 @@ auto EditorWorkspaceState::validateRuntimePreview() -> Tina::Core::Status{
                                    "editor runtime preview entity count mismatch");
     }
     Tina::Scene::Camera2D editorCameraComponent{};
-    Tina::Scene::Vec3 editorCameraPosition{};
-    Tina::Scene::Quaternion editorCameraRotation{};
+    Tina::Math::Vec3 editorCameraPosition{};
+    Tina::Math::Quaternion editorCameraRotation{};
     bool cameraPoseSelected = false;
     bool activeCameraPoseSelected = false;
     for (const auto& binding : *bindings) {
@@ -1164,8 +1164,8 @@ auto EditorWorkspaceState::validateWorld3DRuntimePreview() -> Tina::Core::Status
         return status;
     }
 
-    Tina::Scene::Vec3 boundsMinimum{};
-    Tina::Scene::Vec3 boundsMaximum{};
+    Tina::Math::Vec3 boundsMinimum{};
+    Tina::Math::Vec3 boundsMaximum{};
     bool hasBounds = false;
     for (const Tina::Scene::EntityId entity : *entities) {
         const Tina::Scene::WorldTransform* transform = world->worldTransform(entity);
@@ -1185,14 +1185,14 @@ auto EditorWorkspaceState::validateWorld3DRuntimePreview() -> Tina::Core::Status
         boundsMaximum.y = (std::max)(boundsMaximum.y, transform->position.y);
         boundsMaximum.z = (std::max)(boundsMaximum.z, transform->position.z);
     }
-    const Tina::Scene::Vec3 sceneCenter = hasBounds
+    const Tina::Math::Vec3 sceneCenter = hasBounds
         ? (boundsMinimum + boundsMaximum) * 0.5F
-        : Tina::Scene::Vec3{};
-    const Tina::Scene::Vec3 boundsExtent = hasBounds
+        : Tina::Math::Vec3{};
+    const Tina::Math::Vec3 boundsExtent = hasBounds
         ? (boundsMaximum - boundsMinimum) * 0.5F
-        : Tina::Scene::Vec3{};
+        : Tina::Math::Vec3{};
     const float boundsRadius = std::sqrt(
-        (std::max)(0.0F, Tina::Scene::dot(boundsExtent, boundsExtent)));
+        (std::max)(0.0F, Tina::Math::dot(boundsExtent, boundsExtent)));
     const float cameraDistance = (std::max)(
         PreviewWorld3DCameraDistance, boundsRadius * 2.5F);
     constexpr float InitialPitchRadians = 0.32F;
@@ -1210,7 +1210,7 @@ auto EditorWorkspaceState::validateWorld3DRuntimePreview() -> Tina::Core::Status
     if (auto status = world->setPerspectiveCamera3D(
             *editorCameraEntity,
             Tina::Scene::PerspectiveCamera3D{
-                .verticalFovDegrees = 55.0F,
+                .verticalFovDegrees = ViewportPerspectiveFovDegrees,
                 .nearPlaneMeters = 0.1F,
                 .farPlaneMeters = (std::max)(1000.0F, cameraDistance * 4.0F),
                 .normalizedViewport = viewportNormalized_.value_or(

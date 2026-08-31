@@ -63,5 +63,17 @@ inline constexpr Core::ErrorCode EnvironmentMapUploadUnsupported{Core::ErrorDoma
 inline constexpr Core::ErrorCode InvalidEnvironmentMapUpload{Core::ErrorDomain::Render, 55};
 inline constexpr Core::ErrorCode EnvironmentMapNotFound{Core::ErrorDomain::Render, 56};
 inline constexpr Core::ErrorCode InvalidShadowMapExtentConfig{Core::ErrorDomain::Render, 57};
+inline constexpr Core::ErrorCode InvalidRenderTexture{Core::ErrorDomain::Render, 58};
+inline constexpr Core::ErrorCode RenderTextureUnsupported{Core::ErrorDomain::Render, 59};
+inline constexpr Core::ErrorCode RenderTextureNotFound{Core::ErrorDomain::Render, 60};
+inline constexpr Core::ErrorCode RenderTextureBindingKeyExhausted{Core::ErrorDomain::Render, 61};
+inline constexpr Core::ErrorCode InvalidPostProcessChain{Core::ErrorDomain::Render, 62};
+inline constexpr Core::ErrorCode PostProcessCapacityExceeded{Core::ErrorDomain::Render, 63};
+inline constexpr Core::ErrorCode InvalidOffscreenPass{Core::ErrorDomain::Render, 64};
+inline constexpr Core::ErrorCode InvalidDecal{Core::ErrorDomain::Render, 65};
+inline constexpr Core::ErrorCode ShaderUploadUnsupported{Core::ErrorDomain::Render, 66};
+inline constexpr Core::ErrorCode InvalidShaderUpload{Core::ErrorDomain::Render, 67};
+inline constexpr Core::ErrorCode ShaderNotFound{Core::ErrorDomain::Render, 68};
+inline constexpr Core::ErrorCode ShaderBindingKeyExhausted{Core::ErrorDomain::Render, 69};
 
 } // namespace Tina::Render::RenderErrorCode

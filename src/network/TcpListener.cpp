@@ -5,7 +5,9 @@
 #include <tina/core/base/ScopeExit.hpp>
 #include <tina/network/NetworkErrors.hpp>
 
+#include <algorithm>
 #include <memory>
+#include <limits>
 #include <new>
 #include <thread>
 #include <vector>
@@ -189,7 +191,9 @@ Core::Result<TcpListener> TcpListener::Create(TcpListenerConfig config)
             "Failed to bind the listening socket");
     }
 
-    if (::listen(impl->socket, static_cast<int>(config.backlog)) != 0) {
+    const Core::u32 maximumBacklog = static_cast<Core::u32>((std::numeric_limits<int>::max)());
+    const int backlog = static_cast<int>((std::min)(config.backlog, maximumBacklog));
+    if (::listen(impl->socket, backlog) != 0) {
         return Core::failure(
             NetworkErrorCode::BackendFailure,
             "Failed to listen on the bound socket");
@@ -276,7 +280,8 @@ Core::Result<Core::usize> TcpListener::pump()
             remote,
             m_impl->connectionTemplate);
         if (!connection) {
-            closeNativeSocket(socket);
+            // adoptAcceptedSocket takes ownership as soon as it sees a valid descriptor, including on
+            // failure. Closing here as well can close an unrelated descriptor if the OS already reused it.
             ++m_impl->stats.acceptFailureCount;
             continue;
         }

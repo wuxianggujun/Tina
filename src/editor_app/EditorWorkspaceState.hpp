@@ -49,6 +49,7 @@
 #include <tina/editor/EditorTransformGizmo.hpp>
 #include <tina/editor/EditorViewportGrid.hpp>
 #include <tina/editor/EditorViewportNavigation.hpp>
+#include <tina/editor/EditorViewportPick.hpp>
 #include <tina/editor/Navigation2DAuthoringDocument.hpp>
 #include <tina/editor/ProjectAssetBrowser.hpp>
 #include <tina/editor/SpriteAnimationAuthoringDocument.hpp>
@@ -234,8 +235,15 @@ inline constexpr u32 EditorCrateArchetypeId = 2;
 inline constexpr float PreviewWorldWidth = 16.0F;
 inline constexpr float PreviewWorldHeight = 9.0F;
 inline constexpr float PreviewWorld3DCameraDistance = 8.0F;
-inline constexpr float DegreesToRadians = 0.01745329251994329577F;
-inline constexpr float RadiansToDegrees = 57.295779513082320876F;
+// Angle conversions come from Tina::Math rather than a local copy of the same two
+// constants.
+using Tina::Math::DegreesToRadians;
+using Tina::Math::RadiansToDegrees;
+// Vertical field of view of the 3D preview camera. Single definition on purpose:
+// the pick ray must be built from the same value the viewport projects with, and a
+// drifted second copy yields picking that misses by a little without ever looking
+// obviously wrong.
+inline constexpr float ViewportPerspectiveFovDegrees = 55.0F;
 inline constexpr Tina::Core::usize ViewportGridVisualNodeCapacity =
     Tina::Editor::EditorViewportGridSegmentCapacity;
 inline constexpr Tina::Core::usize ViewportGizmoVisualNodeCapacity = 256;
@@ -650,7 +658,7 @@ struct ViewportTransformTransaction final {
     u32 stableEntityId = 0;
     u64 baselineRevision = 0;
     u64 selectionRevision = 0;
-    Tina::Scene::Vec3 pivot{};
+    Tina::Math::Vec3 pivot{};
     Tina::Scene::LocalTransform baselineTransform{};
     Tina::Scene::LocalTransform previewTransform{};
     std::array<Target, ViewportTransformTargetCapacity> targets{};
@@ -4034,7 +4042,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] static Tina::Editor::EditorViewportNavigationConfig
     viewportNavigationConfig() noexcept;
     [[nodiscard]] Tina::Core::Status ensureViewportNavigation();
-    [[nodiscard]] static Tina::Scene::Quaternion viewportOrbitRotation(
+    [[nodiscard]] static Tina::Math::Quaternion viewportOrbitRotation(
         float yawRadians, float pitchRadians) noexcept;
     void syncViewportZoomFromNavigation() noexcept;
     void persistViewportNavigationState() noexcept;
@@ -4086,15 +4094,15 @@ class EditorWorkspaceState final : public Tina::IGameState {
         Tina::Scene::EntityId entity) const noexcept;
     [[nodiscard]] Tina::Core::usize viewportTransformTargetCount(
         std::span<const u64> selection) const noexcept;
-    [[nodiscard]] Tina::Scene::Vec3 viewportSelectionPivot() const noexcept;
+    [[nodiscard]] Tina::Math::Vec3 viewportSelectionPivot() const noexcept;
     [[nodiscard]] Tina::Core::Status captureViewportTransformTargets(
         ViewportTransformTransaction& transaction);
     [[nodiscard]] static Tina::Core::Result<Tina::Scene::WorldTransform>
     applyViewportWorldTransformDelta(
         const Tina::Scene::WorldTransform& baseline,
-        Tina::Scene::Vec3 pivot,
+        Tina::Math::Vec3 pivot,
         const Tina::Editor::EditorTransformGizmoDelta& delta,
-        Tina::Scene::Quaternion localBasis) noexcept;
+        Tina::Math::Quaternion localBasis) noexcept;
     [[nodiscard]] static bool viewportTransformNearlyEqual(float left,
                                                            float right) noexcept;
     [[nodiscard]] static bool viewportWorldTransformsEquivalent(
@@ -4140,7 +4148,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     resolvePreviewMaterial(void* userData, Tina::Asset::AssetHandle asset,
                            Tina::Render::FrameResourceSink& sink) noexcept;
     [[nodiscard]] ViewportProjectedPoint projectViewportWorldPoint(
-        Tina::Scene::Vec3 worldPoint) const noexcept;
+        Tina::Math::Vec3 worldPoint) const noexcept;
     [[nodiscard]] static UI::UIStraightSrgba8Color viewportGizmoColor(
         Tina::Editor::EditorTransformGizmoHandle handle,
         bool highlighted) noexcept;
@@ -4173,8 +4181,19 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] std::optional<u32> automaticHierarchyStableId(
         bool preferLast) const noexcept;
     void synchronizeViewportSelectionFromHierarchy() noexcept;
+    // Screen-space bounds, used by marquee drag and the preselection highlight
+    // rectangle. Marquee stays a 2D operation: the user drags a rectangle on screen
+    // and expects to catch what looks enclosed by it.
     [[nodiscard]] Tina::Core::usize collectViewportMarqueeCandidates(
         std::span<Tina::Editor::EditorMarqueeCandidate> output) const noexcept;
+    // World-space bounding spheres, used by single-click picking in 3D. Separate
+    // from the marquee collector because the two answer different questions:
+    // "what is under this pixel, nearest first" versus "what overlaps this
+    // rectangle on screen".
+    [[nodiscard]] Tina::Core::usize collectViewportPickCandidates(
+        std::span<Tina::Editor::EditorViewportPickCandidate> output) const noexcept;
+    [[nodiscard]] std::optional<Tina::Math::Ray> viewportPickRay(
+        UI::UILogicalPoint position) const noexcept;
     [[nodiscard]] Tina::Core::Status processViewportMarquee(
         Tina::PrimaryWindowUITreeUpdater& tree);
     [[nodiscard]] float viewportWorldHeight() const noexcept;

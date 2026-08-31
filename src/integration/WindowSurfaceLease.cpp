@@ -3,6 +3,7 @@
 #include <tina/core/error/Error.hpp>
 
 #include <exception>
+#include <limits>
 #include <new>
 #include <utility>
 
@@ -73,7 +74,8 @@ NativeWindowSurfaceLeaseAccess::Create(std::shared_ptr<NativeWindowSurfaceLeaseC
         auto state = std::make_unique<NativeWindowSurfaceLeaseState>();
         state->control = std::move(control);
         state->surface = surface;
-        state->binding = binding;
+        state->control->surface = surface;
+        state->control->binding = binding;
         ++state->control->activeLeaseCount;
         return NativeWindowSurfaceLease{std::move(state)};
     } catch (const std::bad_alloc&)
@@ -84,6 +86,41 @@ NativeWindowSurfaceLeaseAccess::Create(std::shared_ptr<NativeWindowSurfaceLeaseC
         return Core::failure(Core::CoreErrorCode::Internal,
                              "The native window surface lease allocation threw unexpectedly");
     }
+}
+
+Core::Status NativeWindowSurfaceLeaseAccess::rebind(
+    const std::shared_ptr<NativeWindowSurfaceLeaseControl>& control, WindowSurfaceId surface,
+    NativeWindowBinding binding) noexcept
+{
+    if (control == nullptr || !surface.hasValue() || binding.nativeWindow == 0 || binding.bindingRevision == 0)
+    {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                             "A native window surface rebind requires a live identity and binding");
+    }
+    if (std::this_thread::get_id() != control->ownerThread)
+    {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                             "A native window surface rebind must run on its owner thread");
+    }
+    if (!control->surfaceAlive || control->surface != surface || control->binding.nativeWindow == 0)
+    {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                             "A native window surface rebind requires a live published surface");
+    }
+    if (control->binding.bindingRevision == (std::numeric_limits<u64>::max)() ||
+        binding.bindingRevision != control->binding.bindingRevision + 1)
+    {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                             "A native window surface binding revision must advance exactly once");
+    }
+    if (binding.kind != control->binding.kind || binding.nativeDisplay != control->binding.nativeDisplay)
+    {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                             "A native window surface rebind may only replace the native window");
+    }
+
+    control->binding = binding;
+    return Core::success();
 }
 
 Core::Result<NativeWindowBinding> NativeWindowSurfaceLeaseAccess::decode(const NativeWindowSurfaceLease& lease) noexcept
@@ -97,7 +134,13 @@ Core::Result<NativeWindowBinding> NativeWindowSurfaceLeaseAccess::decode(const N
         return Core::failure(Core::CoreErrorCode::InvalidArgument,
                              "The native window surface lease must be decoded on its owner thread");
     }
-    return lease.m_state->binding;
+    if (lease.m_state->control->surface != lease.m_state->surface ||
+        lease.m_state->control->binding.nativeWindow == 0)
+    {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                             "The native window surface lease binding is unavailable");
+    }
+    return lease.m_state->control->binding;
 }
 
 } // namespace Detail

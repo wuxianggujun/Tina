@@ -13,6 +13,7 @@
 #include <mbedtls/x509_crt.h>
 
 #include <algorithm>
+#include <climits>
 #include <cstring>
 #include <limits>
 #include <new>
@@ -73,6 +74,11 @@ struct TlsConnection::Impl final {
     std::pmr::vector<std::byte> plaintextReceive;
     Core::usize sendPending = 0;
     Core::usize receivePending = 0;
+    // close_notify may require multiple WANT_WRITE attempts. Starting it forbids
+    // later application records; sent becomes true only once mbedTLS has handed
+    // the complete alert to the TCP transport.
+    bool shutdownStarted = false;
+    bool shutdownSent = false;
 
     // mbedTLS keeps a borrowed pointer to the SNI string, so it must outlive the
     // session rather than the config argument.
@@ -125,6 +131,9 @@ struct TlsConnection::Impl final {
     static int transportSend(void* context, const unsigned char* buffer, size_t length) noexcept
     {
         auto* self = static_cast<Impl*>(context);
+        if (length > static_cast<size_t>(INT_MAX)) {
+            return MBEDTLS_ERR_SSL_BUFFER_TOO_SMALL;
+        }
         const auto transportState = self->transport.state();
         if (transportState == TcpConnectionState::Failed
             || transportState == TcpConnectionState::Closed) {
@@ -146,7 +155,15 @@ struct TlsConnection::Impl final {
         return static_cast<int>(length);
     }
 
-    void markFailed() noexcept { state = TlsConnectionState::Failed; }
+    void markFailed() noexcept
+    {
+        // TLS owns the TCP transport. Closing it at the failure boundary prevents
+        // a failed handshake/record layer from leaving a live socket behind.
+        transport.close();
+        state = TlsConnectionState::Failed;
+        sendPending = 0;
+        stats.queuedSendBytes = 0;
+    }
 };
 
 TlsConnection::TlsConnection(Impl* impl) noexcept
@@ -172,6 +189,20 @@ Core::Result<TlsConnection> TlsConnection::Create(TlsConnectionConfig config)
         return Core::failure(
             NetworkErrorCode::InvalidConfiguration,
             "TlsConnection send and receive buffer sizes must be greater than zero");
+    }
+    if (config.serverName.size() > 253
+        || std::ranges::any_of(config.serverName, [](char value) {
+            const auto byte = static_cast<unsigned char>(value);
+            return byte <= 0x20U || byte == 0x7FU;
+        })) {
+        return Core::failure(
+            NetworkErrorCode::InvalidConfiguration,
+            "TLS serverName is too long or contains whitespace/control bytes");
+    }
+    if (config.trustAnchorsPem.find('\0') != std::string_view::npos) {
+        return Core::failure(
+            NetworkErrorCode::InvalidConfiguration,
+            "TLS trust anchors contain an embedded NUL");
     }
 
     if (config.verification == TlsVerificationMode::InsecureSkipVerify) {
@@ -267,37 +298,48 @@ Core::Result<TlsConnection> TlsConnection::Create(TlsConnectionConfig config)
         // an owning copy. The system path already holds a NUL-terminated
         // process-lifetime string and is pointed at rather than copied -- that
         // string can be a few hundred KB.
-        std::string owned;
-        if (!useSystemStore) {
-            owned.assign(config.trustAnchorsPem);
-        }
-        const std::string* anchors =
-            useSystemStore ? &Detail::systemTrustAnchorsPem() : &owned;
+        try {
+            std::string owned;
+            if (!useSystemStore) {
+                owned.assign(config.trustAnchorsPem);
+            }
+            const std::string* anchors =
+                useSystemStore ? &Detail::systemTrustAnchorsPem() : &owned;
 
-        if (anchors->empty()) {
-            // Nothing to chain to. Distinguished from a parse failure because the
-            // fix is different: this build has no readable store, so the caller
-            // must supply anchors.
-            return Core::failure(
-                NetworkErrorCode::InvalidConfiguration,
-                useSystemStore
-                    ? "TLS verification found no platform trust anchors; supply "
-                      "trustAnchorsPem for this platform"
-                    : "TLS verification requires at least one PEM trust anchor");
-        }
+            if (anchors->empty()) {
+                // Nothing to chain to. Distinguished from a parse failure because
+                // the fix is different: this platform has no readable store.
+                return Core::failure(
+                    NetworkErrorCode::InvalidConfiguration,
+                    useSystemStore
+                        ? "TLS verification found no platform trust anchors; supply "
+                          "trustAnchorsPem for this platform"
+                        : "TLS verification requires at least one PEM trust anchor");
+            }
 
-        const int parsed = mbedtls_x509_crt_parse(
-            &impl->trustAnchors,
-            reinterpret_cast<const unsigned char*>(anchors->c_str()),
-            anchors->size() + 1);
-        // A positive return counts certificates that failed while others parsed.
-        // The platform store routinely contains an entry mbedTLS rejects, and
-        // failing the whole connection over one would make a working store
-        // unusable; only a total failure is fatal.
-        if (parsed < 0 || impl->trustAnchors.version == 0) {
+            const int parsed = mbedtls_x509_crt_parse(
+                &impl->trustAnchors,
+                reinterpret_cast<const unsigned char*>(anchors->c_str()),
+                anchors->size() + 1);
+            // A positive return means some entries failed. A platform snapshot
+            // routinely contains one legacy entry mbedTLS cannot parse, but an
+            // explicit caller bundle is a precise configuration and must parse
+            // completely rather than silently weakening its intended anchors.
+            const bool parseFailed = parsed < 0 || impl->trustAnchors.version == 0
+                || (!useSystemStore && parsed != 0);
+            if (parseFailed) {
+                return Core::failure(
+                    NetworkErrorCode::InvalidConfiguration,
+                    "Failed to parse the PEM trust anchors");
+            }
+        } catch (const std::bad_alloc&) {
             return Core::failure(
-                NetworkErrorCode::InvalidConfiguration,
-                "Failed to parse the PEM trust anchors");
+                NetworkErrorCode::AllocationFailed,
+                "TLS trust anchor allocation failed");
+        } catch (...) {
+            return Core::failure(
+                NetworkErrorCode::ConstructionFailed,
+                "TLS trust store loading failed");
         }
         mbedtls_ssl_conf_authmode(&impl->config, MBEDTLS_SSL_VERIFY_REQUIRED);
         mbedtls_ssl_conf_ca_chain(&impl->config, &impl->trustAnchors, nullptr);
@@ -389,6 +431,16 @@ Core::Status TlsConnection::send(std::span<const std::byte> payload)
     if (m_impl->state == TlsConnectionState::Failed) {
         return Core::failure(NetworkErrorCode::ConnectionFailed, "TlsConnection has failed");
     }
+    if (m_impl->state == TlsConnectionState::PeerClosed) {
+        return Core::failure(
+            NetworkErrorCode::ConnectionClosed,
+            "TLS peer has already closed its sending side");
+    }
+    if (m_impl->shutdownStarted) {
+        return Core::failure(
+            NetworkErrorCode::ConnectionClosed,
+            "TLS close_notify has already started");
+    }
 
     const Core::usize available = m_impl->plaintextSend.size() - m_impl->sendPending;
     if (payload.size() > available) {
@@ -454,7 +506,11 @@ Core::Result<Core::usize> TlsConnection::pump()
         if (result == MBEDTLS_ERR_SSL_WANT_READ || result == MBEDTLS_ERR_SSL_WANT_WRITE) {
             // Normal: the handshake needs more records, which arrive on a later
             // pump. Flush whatever it produced.
-            (void)m_impl->transport.pump();
+            auto flushed = m_impl->transport.pump();
+            if (!flushed) {
+                m_impl->markFailed();
+                return Core::failure(std::move(flushed.error()));
+            }
             return Core::usize{0};
         }
         if (result != 0) {
@@ -474,16 +530,24 @@ Core::Result<Core::usize> TlsConnection::pump()
 
         m_impl->state = TlsConnectionState::Connected;
         m_impl->stats.handshakeComplete = true;
-        (void)m_impl->transport.pump();
+        auto flushed = m_impl->transport.pump();
+        if (!flushed) {
+            m_impl->markFailed();
+            return Core::failure(std::move(flushed.error()));
+        }
     }
 
     // Encrypt queued plaintext. A partial write is normal, so the tail is kept and
     // compacted for the next pump.
-    if (m_impl->sendPending != 0 && m_impl->state != TlsConnectionState::PeerClosed) {
+    if (m_impl->sendPending != 0 && m_impl->state != TlsConnectionState::PeerClosed
+        && !m_impl->shutdownStarted) {
+        const auto writeLength = (std::min)(
+            m_impl->sendPending,
+            static_cast<Core::usize>(INT_MAX));
         const int written = mbedtls_ssl_write(
             &m_impl->ssl,
             reinterpret_cast<const unsigned char*>(m_impl->plaintextSend.data()),
-            m_impl->sendPending);
+            writeLength);
         if (written > 0) {
             const auto sent = static_cast<Core::usize>(written);
             if (sent < m_impl->sendPending) {
@@ -502,7 +566,11 @@ Core::Result<Core::usize> TlsConnection::pump()
                 NetworkErrorCode::TlsProtocolFailure,
                 "TLS write failed");
         }
-        (void)m_impl->transport.pump();
+        auto flushed = m_impl->transport.pump();
+        if (!flushed) {
+            m_impl->markFailed();
+            return Core::failure(std::move(flushed.error()));
+        }
     }
 
     // Decrypt whatever arrived. Loop because one TCP read can carry several
@@ -510,11 +578,12 @@ Core::Result<Core::usize> TlsConnection::pump()
     Core::usize newlyReceived = 0;
     while (m_impl->receivePending < m_impl->plaintextReceive.size()) {
         const Core::usize space = m_impl->plaintextReceive.size() - m_impl->receivePending;
+        const auto readLength = (std::min)(space, static_cast<Core::usize>(INT_MAX));
         const int read = mbedtls_ssl_read(
             &m_impl->ssl,
             reinterpret_cast<unsigned char*>(
                 m_impl->plaintextReceive.data() + m_impl->receivePending),
-            space);
+            readLength);
 
         if (read > 0) {
             const auto got = static_cast<Core::usize>(read);
@@ -533,9 +602,14 @@ Core::Result<Core::usize> TlsConnection::pump()
             m_impl->state = TlsConnectionState::PeerClosed;
             break;
         }
-        if (read == 0) {
-            m_impl->state = TlsConnectionState::PeerClosed;
-            break;
+        if (read == 0 || read == MBEDTLS_ERR_SSL_CONN_EOF) {
+            // A raw TCP EOF without close_notify is a truncated TLS stream. Do
+            // not expose it as PeerClosed: callers must be able to distinguish a
+            // clean shutdown from a possible record truncation.
+            m_impl->markFailed();
+            return Core::failure(
+                NetworkErrorCode::TlsTruncated,
+                "TLS peer closed without close_notify");
         }
         m_impl->markFailed();
         return Core::failure(
@@ -602,6 +676,9 @@ Core::Status TlsConnection::shutdownTls()
             NetworkErrorCode::WrongOwnerThread,
             "TlsConnection must be used from its owner thread");
     }
+    if (m_impl->shutdownSent) {
+        return Core::success();
+    }
     if (m_impl->state != TlsConnectionState::Connected
         && m_impl->state != TlsConnectionState::PeerClosed) {
         return Core::failure(
@@ -609,17 +686,40 @@ Core::Status TlsConnection::shutdownTls()
             "TlsConnection is not connected");
     }
 
-    // close_notify may need several attempts if the transport is congested; it is
-    // best effort by design, so a WANT result is not a failure.
+    // Application records must be handed to mbedTLS before the close alert is
+    // started. Silently dropping this queue would turn an orderly shutdown into
+    // data loss that the caller cannot observe.
+    if (!m_impl->shutdownStarted && m_impl->sendPending != 0) {
+        return Core::failure(
+            NetworkErrorCode::WouldBlock,
+            "TLS application data is still queued; pump before shutdownTls");
+    }
+
+    m_impl->shutdownStarted = true;
+
+    // close_notify may need several attempts if the transport is congested.
+    // WouldBlock is explicit so success always means mbedTLS accepted the whole
+    // alert; the caller can then use pendingSendBytes() to wait for socket handoff.
     const int result = mbedtls_ssl_close_notify(&m_impl->ssl);
     if (result != 0 && result != MBEDTLS_ERR_SSL_WANT_READ
         && result != MBEDTLS_ERR_SSL_WANT_WRITE) {
+        m_impl->markFailed();
         return Core::failure(
             NetworkErrorCode::TlsProtocolFailure,
             "Failed to send TLS close_notify");
     }
-    (void)m_impl->transport.pump();
-    return Core::success();
+    auto flushed = m_impl->transport.pump();
+    if (!flushed) {
+        m_impl->markFailed();
+        return Core::failure(std::move(flushed.error()));
+    }
+    if (result == 0) {
+        m_impl->shutdownSent = true;
+        return Core::success();
+    }
+    return Core::failure(
+        NetworkErrorCode::WouldBlock,
+        "TLS close_notify is waiting for transport capacity");
 }
 
 void TlsConnection::close() noexcept
@@ -691,6 +791,17 @@ ByteStreamState TlsConnection::streamState() const noexcept
 Core::Status TlsConnection::sendBytes(std::span<const std::byte> payload)
 {
     return send(payload);
+}
+
+Core::usize TlsConnection::pendingSendBytes() const noexcept
+{
+    if (m_impl == nullptr) {
+        return 0;
+    }
+    const Core::usize plaintext = m_impl->sendPending;
+    const Core::usize ciphertext = m_impl->transport.pendingSendBytes();
+    const Core::usize limit = (std::numeric_limits<Core::usize>::max)();
+    return ciphertext > limit - plaintext ? limit : plaintext + ciphertext;
 }
 
 Core::Result<Core::usize> TlsConnection::pumpStream()

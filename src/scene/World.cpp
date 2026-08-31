@@ -1,6 +1,7 @@
 #include <tina/scene/World.hpp>
 
 #include <tina/core/id/GenerationPool.hpp>
+#include <tina/core/text/Utf8.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -15,6 +16,7 @@
 namespace Tina::Scene {
 
 struct World::EntityRecord final {
+    EntityMetadata metadata{};
     LocalTransform local{};
     WorldTransform world{};
     EntityId parent{};
@@ -99,6 +101,26 @@ struct World::Impl final {
 
 namespace {
 
+[[nodiscard]] Core::Result<EntityName> makeEntityName(
+    std::string_view name) noexcept
+{
+    if (name.size() > EntityNameMaximumBytes) {
+        return Core::failure(
+            SceneErrorCode::CapacityExceeded,
+            "Scene runtime entity name exceeds fixed UTF-8 byte capacity");
+    }
+    if (!Core::isStrictUtf8WithoutNul(name)) {
+        return Core::failure(
+            SceneErrorCode::InvalidMetadata,
+            "Scene runtime entity name must be strict UTF-8 without embedded NUL");
+    }
+
+    EntityName result{};
+    std::copy(name.begin(), name.end(), result.bytes.begin());
+    result.size = static_cast<u8>(name.size());
+    return result;
+}
+
 [[nodiscard]] Core::Status invalidTransformStatus() noexcept
 {
     return Core::failure(
@@ -106,7 +128,7 @@ namespace {
         "Scene transform contains non-finite values, overflow, or a zero quaternion");
 }
 
-[[nodiscard]] bool hasInvertibleScale(Vec3 scale) noexcept
+[[nodiscard]] bool hasInvertibleScale(Math::Vec3 scale) noexcept
 {
     constexpr float MinimumScaleMagnitude = 1.0e-12F;
     return std::abs(scale.x) > MinimumScaleMagnitude
@@ -149,7 +171,7 @@ namespace {
             "Scene world transform is not finite or has a zero quaternion");
     }
 
-    world.rotation = normalized(world.rotation);
+    world.rotation = Math::normalized(world.rotation);
     if (parent == nullptr) {
         return LocalTransform{world.position, world.rotation, world.scale};
     }
@@ -159,14 +181,14 @@ namespace {
             "Scene parent transform cannot preserve a child world transform");
     }
 
-    const Vec3 relative = world.position - parent->position;
-    const Vec3 unrotated = rotate(quaternionConjugate(parent->rotation), relative);
+    const Math::Vec3 relative = world.position - parent->position;
+    const Math::Vec3 unrotated =
+        Math::rotate(Math::conjugate(parent->rotation), relative);
     LocalTransform local{
         {unrotated.x / parent->scale.x,
             unrotated.y / parent->scale.y,
             unrotated.z / parent->scale.z},
-        normalized(quaternionMultiply(
-            quaternionConjugate(parent->rotation), world.rotation)),
+        Math::normalized(Math::conjugate(parent->rotation) * world.rotation),
         {world.scale.x / parent->scale.x,
             world.scale.y / parent->scale.y,
             world.scale.z / parent->scale.z}};
@@ -395,7 +417,7 @@ Core::Result<EntityId> World::createEntity(LocalTransform local)
             SceneErrorCode::InvalidTransform,
             "Scene transform contains non-finite values or a zero quaternion");
     }
-    local.rotation = normalized(local.rotation);
+    local.rotation = Math::normalized(local.rotation);
 
     auto idResult = m_impl->entities.tryEmplace();
     if (!idResult) {
@@ -451,7 +473,7 @@ Core::Status World::setLocalTransform(
     if (!isValid(local)) {
         return invalidTransformStatus();
     }
-    local.rotation = normalized(local.rotation);
+    local.rotation = Math::normalized(local.rotation);
     record(entity)->local = local;
     m_impl->worldDirty = true;
     return Core::success();
@@ -888,6 +910,138 @@ Core::Status World::updateWorldTransforms() noexcept
         entityRecord->world = m_impl->worldScratch[entity.index()];
     }
     m_impl->worldDirty = false;
+    return Core::success();
+}
+
+Core::Status World::setMetadata(
+    EntityId entity,
+    EntityMetadataDesc metadataDesc) noexcept
+{
+    if (m_impl == nullptr) {
+        return Core::failure(
+            SceneErrorCode::InvalidEntity,
+            "Scene World is not initialized");
+    }
+    if (!m_impl->isOwnerThread()) {
+        return Core::failure(
+            SceneErrorCode::WrongOwnerThread,
+            "Scene World mutation must run on its owner thread");
+    }
+    if (const Core::Status status = validateEntity(entity); !status) {
+        return status;
+    }
+
+    auto entityName = makeEntityName(metadataDesc.name);
+    if (!entityName) {
+        return Core::failure(std::move(entityName.error()));
+    }
+    EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr) {
+        return Core::failure(
+            SceneErrorCode::CorruptHierarchy,
+            "Scene entity could not be resolved for metadata replacement");
+    }
+
+    entityRecord->metadata = EntityMetadata{
+        .name = *entityName,
+        .tag = metadataDesc.tag,
+        .layer = metadataDesc.layer,
+        .group = metadataDesc.group,
+    };
+    return Core::success();
+}
+
+Core::Status World::setRuntimeName(
+    EntityId entity,
+    std::string_view name) noexcept
+{
+    if (m_impl == nullptr) {
+        return Core::failure(
+            SceneErrorCode::InvalidEntity,
+            "Scene World is not initialized");
+    }
+    if (!m_impl->isOwnerThread()) {
+        return Core::failure(
+            SceneErrorCode::WrongOwnerThread,
+            "Scene World mutation must run on its owner thread");
+    }
+    if (const Core::Status status = validateEntity(entity); !status) {
+        return status;
+    }
+
+    auto entityName = makeEntityName(name);
+    if (!entityName) {
+        return Core::failure(std::move(entityName.error()));
+    }
+    EntityRecord* entityRecord = record(entity);
+    if (entityRecord == nullptr) {
+        return Core::failure(
+            SceneErrorCode::CorruptHierarchy,
+            "Scene entity could not be resolved for runtime name update");
+    }
+    entityRecord->metadata.name = *entityName;
+    return Core::success();
+}
+
+Core::Status World::clearRuntimeName(EntityId entity) noexcept
+{
+    return setRuntimeName(entity, {});
+}
+
+Core::Status World::setTag(EntityId entity, EntityTag tagValue) noexcept
+{
+    if (m_impl == nullptr) {
+        return Core::failure(
+            SceneErrorCode::InvalidEntity,
+            "Scene World is not initialized");
+    }
+    if (!m_impl->isOwnerThread()) {
+        return Core::failure(
+            SceneErrorCode::WrongOwnerThread,
+            "Scene World mutation must run on its owner thread");
+    }
+    if (const Core::Status status = validateEntity(entity); !status) {
+        return status;
+    }
+    record(entity)->metadata.tag = tagValue;
+    return Core::success();
+}
+
+Core::Status World::setLayer(EntityId entity, EntityLayer layerValue) noexcept
+{
+    if (m_impl == nullptr) {
+        return Core::failure(
+            SceneErrorCode::InvalidEntity,
+            "Scene World is not initialized");
+    }
+    if (!m_impl->isOwnerThread()) {
+        return Core::failure(
+            SceneErrorCode::WrongOwnerThread,
+            "Scene World mutation must run on its owner thread");
+    }
+    if (const Core::Status status = validateEntity(entity); !status) {
+        return status;
+    }
+    record(entity)->metadata.layer = layerValue;
+    return Core::success();
+}
+
+Core::Status World::setGroup(EntityId entity, EntityGroup groupValue) noexcept
+{
+    if (m_impl == nullptr) {
+        return Core::failure(
+            SceneErrorCode::InvalidEntity,
+            "Scene World is not initialized");
+    }
+    if (!m_impl->isOwnerThread()) {
+        return Core::failure(
+            SceneErrorCode::WrongOwnerThread,
+            "Scene World mutation must run on its owner thread");
+    }
+    if (const Core::Status status = validateEntity(entity); !status) {
+        return status;
+    }
+    record(entity)->metadata.group = groupValue;
     return Core::success();
 }
 
@@ -1912,6 +2066,39 @@ const SpotLight3D* World::spotLight3D(EntityId entity) const noexcept
         return nullptr;
     }
     return &entityRecord->spotLight3D;
+}
+
+const EntityMetadata* World::metadata(EntityId entity) const noexcept
+{
+    if (m_impl == nullptr || !m_impl->isOwnerThread()) {
+        return nullptr;
+    }
+    const EntityRecord* entityRecord = record(entity);
+    return entityRecord == nullptr ? nullptr : &entityRecord->metadata;
+}
+
+std::string_view World::runtimeName(EntityId entity) const noexcept
+{
+    const EntityMetadata* entityMetadata = metadata(entity);
+    return entityMetadata == nullptr ? std::string_view{} : entityMetadata->name.view();
+}
+
+EntityTag World::tag(EntityId entity) const noexcept
+{
+    const EntityMetadata* entityMetadata = metadata(entity);
+    return entityMetadata == nullptr ? NoEntityTag : entityMetadata->tag;
+}
+
+EntityLayer World::layer(EntityId entity) const noexcept
+{
+    const EntityMetadata* entityMetadata = metadata(entity);
+    return entityMetadata == nullptr ? DefaultEntityLayer : entityMetadata->layer;
+}
+
+EntityGroup World::group(EntityId entity) const noexcept
+{
+    const EntityMetadata* entityMetadata = metadata(entity);
+    return entityMetadata == nullptr ? NoEntityGroup : entityMetadata->group;
 }
 
 std::span<const EntityId> World::liveEntities() const noexcept

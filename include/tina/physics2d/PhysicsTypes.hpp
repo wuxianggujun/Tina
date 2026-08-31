@@ -1,19 +1,13 @@
 #pragma once
 
 #include <tina/core/base/Types.hpp>
+#include <tina/math/Vec.hpp>
 #include <tina/physics2d/PhysicsIds.hpp>
 
 #include <array>
 #include <span>
 
 namespace Tina::Physics2D {
-
-struct PhysicsVec2 final {
-    float x = 0.0F;
-    float y = 0.0F;
-
-    friend constexpr bool operator==(const PhysicsVec2&, const PhysicsVec2&) noexcept = default;
-};
 
 enum class PhysicsBodyType2D : Core::u8 {
     Static,
@@ -54,16 +48,16 @@ struct PhysicsWorld2DConfig final {
     Core::usize contactEndCapacity = DefaultContactEndCapacity;
     Core::usize contactHitCapacity = DefaultContactHitCapacity;
     Core::usize commandCapacity = DefaultCommandCapacity;
-    PhysicsVec2 gravityMetersPerSecondSquared{0.0F, -9.8F};
+    Math::Vec2 gravityMetersPerSecondSquared{0.0F, -9.8F};
     float fixedDeltaSeconds = 1.0F / 60.0F;
     Core::u32 solverSubStepCount = DefaultSolverSubStepCount;
 };
 
 struct PhysicsBody2DDesc final {
     PhysicsBodyType2D type = PhysicsBodyType2D::Static;
-    PhysicsVec2 positionMeters{};
+    Math::Vec2 positionMeters{};
     float angleRadians = 0.0F;
-    PhysicsVec2 linearVelocityMetersPerSecond{};
+    Math::Vec2 linearVelocityMetersPerSecond{};
     float angularVelocityRadiansPerSecond = 0.0F;
     float linearDamping = 0.0F;
     float angularDamping = 0.0F;
@@ -94,23 +88,23 @@ struct PhysicsShape2DDesc final {
     // Box: positive halfExtentsMeters, localCenterMeters, localAngleRadians.
     // Circle: positive radiusMeters, localCenterMeters.
     // Capsule: positive radiusMeters, distinct localPointA/BMeters.
-    PhysicsVec2 halfExtentsMeters{0.5F, 0.5F};
+    Math::Vec2 halfExtentsMeters{0.5F, 0.5F};
     float radiusMeters = 0.5F;
-    PhysicsVec2 localCenterMeters{};
+    Math::Vec2 localCenterMeters{};
     float localAngleRadians = 0.0F;
-    PhysicsVec2 localPointAMeters{-0.5F, 0.0F};
-    PhysicsVec2 localPointBMeters{0.5F, 0.0F};
+    Math::Vec2 localPointAMeters{-0.5F, 0.0F};
+    Math::Vec2 localPointBMeters{0.5F, 0.0F};
     // ConvexPolygon: 3..8 finite, distinct vertices in clockwise or
     // counter-clockwise strictly convex boundary order. Self-intersection and
     // collinear boundary vertices are rejected. The local center/angle transform
     // is applied before backend upload.
-    std::array<PhysicsVec2, MaximumConvexPolygonVertices2D> polygonVertices{};
+    std::array<Math::Vec2, MaximumConvexPolygonVertices2D> polygonVertices{};
     Core::u32 polygonVertexCount = 0;
     // Chain: 4..64 finite body-local points separated by more than 0.005 m.
     // Box2D creates one-sided segments whose collision face is on the right of
     // each directed edge, and requires a static owner body. A loop closes the
     // last point to the first, so do not repeat the first point last.
-    std::array<PhysicsVec2, MaximumChainVertices2D> chainVertices{};
+    std::array<Math::Vec2, MaximumChainVertices2D> chainVertices{};
     Core::u32 chainVertexCount = 0;
     bool chainLoop = false;
     float density = 1.0F;
@@ -140,11 +134,11 @@ struct PhysicsJoint2DDesc final {
     PhysicsJointKind2D kind = PhysicsJointKind2D::Distance;
     PhysicsBodyId bodyA{};
     PhysicsBodyId bodyB{};
-    PhysicsVec2 localAnchorAMeters{};
-    PhysicsVec2 localAnchorBMeters{};
+    Math::Vec2 localAnchorAMeters{};
+    Math::Vec2 localAnchorBMeters{};
     // Prismatic: finite, non-zero local translation direction in body A. Its
     // magnitude is ignored and the runtime normalizes it before backend upload.
-    PhysicsVec2 localAxisA{1.0F, 0.0F};
+    Math::Vec2 localAxisA{1.0F, 0.0F};
     // Distance only.
     float lengthMeters = 1.0F;
     // All joint kinds support an optional spring. targetAngleRadians applies to
@@ -203,9 +197,9 @@ struct PhysicsJointState2D final {
 };
 
 struct PhysicsBodyState2D final {
-    PhysicsVec2 positionMeters{};
+    Math::Vec2 positionMeters{};
     float angleRadians = 0.0F;
-    PhysicsVec2 linearVelocityMetersPerSecond{};
+    Math::Vec2 linearVelocityMetersPerSecond{};
     float angularVelocityRadiansPerSecond = 0.0F;
     bool awake = false;
     bool enabled = false;
@@ -239,8 +233,8 @@ struct PhysicsContactHitEvent2D final {
     PhysicsBodyId bodyB{};
     PhysicsShapeId shapeA{};
     PhysicsShapeId shapeB{};
-    PhysicsVec2 pointMeters{};
-    PhysicsVec2 normalFromAToB{};
+    Math::Vec2 pointMeters{};
+    Math::Vec2 normalFromAToB{};
     float approachSpeedMetersPerSecond = 0.0F;
 };
 
@@ -267,15 +261,15 @@ struct PhysicsQueryFilter2D final {
 };
 
 struct PhysicsAabb2D final {
-    PhysicsVec2 lowerMeters{};
-    PhysicsVec2 upperMeters{};
+    Math::Vec2 lowerMeters{};
+    Math::Vec2 upperMeters{};
 
     friend constexpr bool operator==(const PhysicsAabb2D&, const PhysicsAabb2D&) noexcept = default;
 };
 
 struct PhysicsRayCast2D final {
-    PhysicsVec2 originMeters{};
-    PhysicsVec2 translationMeters{};
+    Math::Vec2 originMeters{};
+    Math::Vec2 translationMeters{};
 
     friend constexpr bool operator==(const PhysicsRayCast2D&, const PhysicsRayCast2D&) noexcept = default;
 };
@@ -290,8 +284,8 @@ struct PhysicsOverlapHit2D final {
 struct PhysicsCastHit2D final {
     PhysicsBodyId body{};
     PhysicsShapeId shape{};
-    PhysicsVec2 pointMeters{};
-    PhysicsVec2 normalMeters{};
+    Math::Vec2 pointMeters{};
+    Math::Vec2 normalMeters{};
     float fraction = 0.0F;
 
     friend constexpr bool operator==(const PhysicsCastHit2D&, const PhysicsCastHit2D&) noexcept = default;
@@ -320,7 +314,7 @@ enum class PhysicsCommandKind2D : Core::u8 {
 struct PhysicsCommand2D final {
     PhysicsCommandKind2D kind = PhysicsCommandKind2D::DestroyBody;
     PhysicsBodyId body{};
-    PhysicsVec2 vectorMeters{};
+    Math::Vec2 vectorMeters{};
     float scalar = 0.0F;
     bool flag = false;
 };

@@ -16,7 +16,7 @@ namespace {
     return std::isfinite(value);
 }
 
-[[nodiscard]] bool finite(Vec2 value) noexcept
+[[nodiscard]] bool finite(Math::Vec2 value) noexcept
 {
     return finite(value.x) && finite(value.y);
 }

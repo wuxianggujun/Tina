@@ -39,6 +39,14 @@ if(NOT DEFINED VCPKG_CHAINLOAD_TOOLCHAIN_FILE)
     get_filename_component(TINA_REPOSITORY_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
     set(VCPKG_MANIFEST_DIR "${TINA_REPOSITORY_ROOT}" CACHE PATH "" FORCE)
 
+    # FreeType, so UI text renders as glyphs rather than solid blocks. Selected here rather than in
+    # build.gradle because vcpkg only reads manifest features while its toolchain runs, which is before
+    # project() -- setting it afterwards is silently ignored and the first find_package(freetype) fails.
+    #
+    # The engine also FATAL_ERRORs when TINA_BUILD_UI_FREETYPE is on without this feature, so the two must
+    # be turned on together.
+    set(VCPKG_MANIFEST_FEATURES "ui-freetype" CACHE STRING "" FORCE)
+
     set(CMAKE_TOOLCHAIN_FILE "$ENV{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" CACHE FILEPATH "" FORCE)
 endif()
 

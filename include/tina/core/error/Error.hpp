@@ -28,6 +28,8 @@ enum class ErrorDomain : u16 {
     Navigation2D = 13,
     Editor = 14,
     Network = 15,
+    Save = 16,
+    Gameplay = 17,
 };
 
 struct ErrorCode final {

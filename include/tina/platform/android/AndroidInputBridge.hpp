@@ -6,6 +6,7 @@
 #include <array>
 #include <atomic>
 #include <cstddef>
+#include <span>
 #include <string_view>
 
 namespace Tina::Platform {
@@ -84,7 +85,8 @@ inline constexpr usize AndroidKeyEventCapacity = 128;
 //
 // Android's InputConnection.commitText delivers whole strings, not characters -- autocomplete, paste
 // and IME conversion all arrive as one call, so this is not a per-keystroke bound. 256 bytes holds a
-// long paste in any script; anything larger is split across slots by the producer rather than dropped.
+// long paste in any script. This is one slot's bound; producers that accept a larger commit must split
+// it at codepoint boundaries and publish the resulting slots as one batch.
 inline constexpr usize AndroidTextCommitBytes = 256;
 
 // One committed text event.
@@ -181,6 +183,14 @@ inline constexpr usize AndroidCompositionEventCapacity = 32;
 // Converting from UTF-16 is what lets astral-plane text through intact.
 [[nodiscard]] bool makeAndroidTextEventFromUtf16(std::u16string_view utf16, AndroidTextEvent& event) noexcept;
 
+// Splits one committed UTF-16 string into ordered composition-queue events without breaking a Unicode
+// codepoint. Returns false for empty/invalid UTF-16, embedded NUL, or insufficient output capacity.
+// The caller must publish the returned prefix with tryPushBatch(), so a full queue cannot expose only
+// half of a paste or IME conversion.
+[[nodiscard]] bool makeAndroidCommitEventsFromUtf16(std::u16string_view utf16,
+                                                    std::span<AndroidCompositionEvent> events,
+                                                    usize& eventCount) noexcept;
+
 // Maps an Android KEYCODE_* to the engine's Key.
 //
 // Returns Key::Unknown for anything unmapped, and callers drop those rather than guessing: an
@@ -276,6 +286,36 @@ class AndroidEventQueue final {
 
         slots_[write] = event;
         // Release publishes the slot write above before the consumer can observe the new index.
+        writeIndex_.store(next, std::memory_order_release);
+        return true;
+    }
+
+    // Producer side: publishes all events atomically with respect to the consumer. Either the whole
+    // batch fits, or none of its slots become visible. This matters for split text commits: exposing a
+    // prefix and dropping the suffix would silently corrupt pasted text.
+    [[nodiscard]] bool tryPushBatch(std::span<const Event> events) noexcept
+    {
+        if (events.empty())
+        {
+            return true;
+        }
+
+        const u64 write = writeIndex_.load(std::memory_order_relaxed);
+        const u64 read = readIndex_.load(std::memory_order_acquire);
+        const u64 used = write >= read ? write - read : SlotCount - (read - write);
+        const u64 available = Capacity - used;
+        if (events.size() > available)
+        {
+            droppedEventCount_.fetch_add(static_cast<u64>(events.size()), std::memory_order_relaxed);
+            return false;
+        }
+
+        u64 next = write;
+        for (const Event& event : events)
+        {
+            slots_[next] = event;
+            next = (next + 1) % SlotCount;
+        }
         writeIndex_.store(next, std::memory_order_release);
         return true;
     }

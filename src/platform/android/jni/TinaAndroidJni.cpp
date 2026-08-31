@@ -13,6 +13,8 @@
 
 #include <tina/platform/android/AndroidInputBridge.hpp>
 #include <tina/platform/android/AndroidPlatformFactory.hpp>
+#include <tina/core/base/ScopeExit.hpp>
+#include <tina/core/text/Utf8.hpp>
 
 #if defined(TINA_ANDROID_WITH_BGFX)
 // Private backend header, reached the same way a desktop composition root reaches it: the concrete
@@ -29,11 +31,25 @@
 #include "GalleryScene.hpp"
 
 #include <tina/core/time/MonotonicClock.hpp>
-#include <tina/render/RenderFrame.hpp>
+// RenderDevice, not RenderFrame: this file names RendererApi and RenderDeviceCreateParams, and the
+// RenderFrame include was only ever there for the surface-state conversion deleted above.
+#include <tina/render/RenderDevice.hpp>
 #include <tina/runtime/EngineConfig.hpp>
 #include <tina/runtime/EngineHost.hpp>
 #include <tina/runtime/spi/EngineCompositionFactories.hpp>
-#include <tina/task/disabled/DisabledTaskSystemFactory.hpp>
+#include <tina/task/bounded/BoundedTaskSystemFactory.hpp>
+
+#if defined(TINA_HAS_UI_FREETYPE)
+#include <tina/core/io/ReadFile.hpp>
+#include <tina/ui/UIContext.hpp>
+#include <tina/ui/UITextSystem.hpp>
+#include <tina/ui/text/FreeTypeTextRasterizerFactory.hpp>
+#endif
+
+#include <memory_resource>
+#include <span>
+#include <string>
+#include <thread>
 #endif
 
 #include <android/log.h>
@@ -42,6 +58,11 @@
 #include <jni.h>
 
 #include <atomic>
+#include <array>
+#include <bit>
+#include <cmath>
+#include <exception>
+#include <limits>
 #include <memory>
 #include <new>
 
@@ -83,6 +104,18 @@ static_assert(static_cast<int>(AndroidTouchAction::Cancel) == 3);
     }
 }
 
+struct NativeWindowReleaser final {
+    void operator()(ANativeWindow* window) const noexcept
+    {
+        if (window != nullptr)
+        {
+            ANativeWindow_release(window);
+        }
+    }
+};
+
+using NativeWindowOwner = std::unique_ptr<ANativeWindow, NativeWindowReleaser>;
+
 // Everything one activity needs, kept alive across the Java surface lifecycle.
 //
 // The queue outlives the backend on purpose: Android can deliver touches before the surface exists
@@ -103,7 +136,7 @@ struct TinaAndroidSession final {
     // because the frame loop may not be the UI thread in a later host. Gated rather than reported
     // unconditionally: Android's contract is that a host sends CursorAnchorInfo after a request, and
     // most IMEs never ask -- doing it every frame is a JNI call plus an object allocation for nothing.
-    std::atomic<bool> cursorUpdatesRequested{false};
+    std::atomic<jint> cursorUpdateMode{0};
     // Maps Android's sparse, reused pointer ids to dense engine slots. Lives here because the JNI
     // layer is the only thing that ever sees a raw Android pointer id.
     Tina::Platform::AndroidTouchSlotTable slots{};
@@ -134,6 +167,9 @@ struct TinaAndroidSession final {
     // this value for log sampling and for gating the scripted diagnostics, so a permanently-zero count
     // silenced both with no error anywhere.
     Tina::u64 ticks = 0;
+    // Filesystem path to the UI font, chosen by Java. Empty means no font, and the UI then draws every
+    // glyph as a solid block -- legible as a shape, useless as text.
+    std::string uiFontPath{};
     // Which application to run. The telemetry demo stays the default because it is what carries the
     // device evidence -- eleven JNI counters read from it, and the platform slices are verified through
     // those. The gallery is the browsable one, so it is opt-in rather than a replacement: swapping it in
@@ -148,10 +184,15 @@ struct TinaAndroidSession final {
 #endif
     // Acquired references, released by this session. Java owns the Surface objects; these keep the
     // native handles alive for as long as bgfx might still touch them.
-    ANativeWindow* window = nullptr;
-    // The window a rebind replaced. bgfx acts on a new binding only at the next submitFrame, so the old
-    // one must outlive that frame; it is released when a further replacement arrives or at teardown.
-    ANativeWindow* retiredWindow = nullptr;
+    NativeWindowOwner window{};
+    // The window bgfx used before the latest rebind. It stays alive until a frame has completed with the
+    // replacement binding. If callbacks replace the pending window again before that frame, only the
+    // unobserved intermediate window is released; this one still protects the render thread.
+    NativeWindowOwner retiredWindow{};
+    bool replacementBindingObserved = false;
+    // Distinguishes a repeated surfaceChanged for the current live window from a destroy/create cycle
+    // that happens to reuse the same pointer address. Pointer equality alone cannot make that decision.
+    bool surfaceBound = false;
 
     [[nodiscard]] Tina::Platform::IAndroidPlatformBackend* androidFacet() noexcept
     {
@@ -164,37 +205,83 @@ struct TinaAndroidSession final {
     return reinterpret_cast<TinaAndroidSession*>(static_cast<std::uintptr_t>(handle));
 }
 
-#if defined(TINA_ANDROID_WITH_BGFX)
-// Mirrors EngineHost::toRenderSurfaceState. Duplicated rather than shared because that one is
-// private to EngineHost, and this slice drives the device directly instead of through EngineHost --
-// the APK has no game state to run yet. Forwarding nativeBindingRevision is the part that matters:
-// omitting it pins the value and the rebind never reaches the backend.
-[[nodiscard]] Tina::Render::RenderSurfaceState
-tinaRenderSurfaceState(const Tina::Integration::WindowSurfaceSnapshot& snapshot) noexcept
+// tinaRenderSurfaceState used to live here, mirroring EngineHost's private conversion because an early
+// slice drove the render device directly. That stopped being true once the APK ran a real EngineHost,
+// which does the conversion itself -- so it was dead code kept alive only by a comment describing a
+// design that no longer existed. Deleted rather than left for reference: this repo removes unused paths,
+// and a duplicate of a private engine conversion is exactly the thing that drifts silently.
+
+#if defined(TINA_ANDROID_WITH_BGFX) && defined(TINA_HAS_UI_FREETYPE)
+// Builds a UI context with a real text rasterizer, or an empty factory when there is no font.
+//
+// Empty rather than failing: without a font the UI falls back to drawing each glyph as a solid block,
+// which is ugly but running. Refusing to create the engine because a font is missing would turn a
+// cosmetic gap into a dead app, and the placeholder path exists precisely so text is optional.
+//
+// The bytes are read once here and shared, not re-read per context: a context is rebuilt on surface
+// rebind, and reloading a megabyte of font on every rotation is pure waste.
+[[nodiscard]] Tina::PrimaryWindowUIContextFactory
+makePrimaryWindowUIContextFactory(const std::string& fontPath) noexcept
 {
-    return Tina::Render::RenderSurfaceState{
-        .surface =
+    if (fontPath.empty())
+    {
+        return {};
+    }
+    try
+    {
+        auto fontBytes = Tina::Core::readFile(
+            fontPath, Tina::Core::ReadFileConfig{.memoryResource = std::pmr::get_default_resource()});
+        if (!fontBytes || fontBytes->empty())
+        {
+            __android_log_print(ANDROID_LOG_WARN, "Tina",
+                                "UI font could not be read (%s); text will draw as blocks",
+                                fontPath.c_str());
+            return {};
+        }
+
+        auto shared = std::make_shared<std::pmr::vector<std::byte>>(std::move(*fontBytes));
+        return [shared](Tina::Platform::WindowId ownerWindow,
+                        const Tina::UI::UIContextCapacityConfig& capacities,
+                        std::pmr::memory_resource& resource)
+                   -> Tina::Core::Result<std::unique_ptr<Tina::UI::UIContext>> {
+            auto rasterizer = Tina::UI::createFreeTypeTextRasterizer({}, resource);
+            if (!rasterizer)
             {
-                .owner = snapshot.surface.owner().value(),
-                .index = snapshot.surface.index(),
-                .generation = snapshot.surface.generation(),
-            },
-        .framebufferExtent =
+                return Tina::Core::failure(std::move(rasterizer.error()));
+            }
+            auto context =
+                Tina::UI::UIContext::Create(ownerWindow, capacities, std::move(*rasterizer), resource);
+            if (!context)
             {
-                .width = snapshot.framebufferExtent.width,
-                .height = snapshot.framebufferExtent.height,
-            },
-        .contentScale =
+                return Tina::Core::failure(std::move(context.error()));
+            }
+            const auto opened = (*context)->text().openTextFont(
+                std::span<const std::byte>(shared->data(), shared->size()));
+            if (!opened)
             {
-                .x = snapshot.contentScale.x,
-                .y = snapshot.contentScale.y,
-            },
-        .sourceMetricsRevision = snapshot.sourceMetricsRevision,
-        .surfaceRevision = snapshot.surfaceRevision,
-        .nativeBindingRevision = snapshot.nativeBindingRevision,
-        .availability = snapshot.suspended ? Tina::Render::RenderSurfaceAvailability::Suspended
-                                           : Tina::Render::RenderSurfaceAvailability::Active,
-    };
+                return Tina::Core::failure(opened.error());
+            }
+            return std::move(*context);
+        };
+    } catch (...)
+    {
+        __android_log_print(ANDROID_LOG_ERROR, "Tina",
+                            "allocating the UI font factory failed; text will draw as blocks");
+        return {};
+    }
+}
+#elif defined(TINA_ANDROID_WITH_BGFX)
+// Built without the FreeType adapter. The font path is accepted and ignored rather than rejected, so a
+// host does not need to know which way the engine was configured.
+[[nodiscard]] Tina::PrimaryWindowUIContextFactory
+makePrimaryWindowUIContextFactory(const std::string& fontPath) noexcept
+{
+    if (!fontPath.empty())
+    {
+        __android_log_print(ANDROID_LOG_WARN, "Tina",
+                            "a UI font was supplied but this build has no FreeType adapter");
+    }
+    return {};
 }
 #endif
 
@@ -206,8 +293,16 @@ extern "C" {
 // surfaceCreated. Splitting them is what lets touches queue up before the surface exists.
 JNIEXPORT jlong JNICALL Java_dev_tina_TinaNative_nativeCreateSession(JNIEnv*, jclass)
 {
-    auto* session = new (std::nothrow) TinaAndroidSession{};
-    return static_cast<jlong>(reinterpret_cast<std::uintptr_t>(session));
+    try
+    {
+        auto* session = new (std::nothrow) TinaAndroidSession{};
+        return static_cast<jlong>(reinterpret_cast<std::uintptr_t>(session));
+    } catch (...)
+    {
+        // Member initializers allocate the shared input queues, so nothrow on operator new alone is not
+        // enough to keep an allocation failure from crossing JNI.
+        return 0;
+    }
 }
 
 // Must be called before the first surfaceCreated, since that is when the device is built. Ignored
@@ -225,6 +320,68 @@ JNIEXPORT void JNICALL Java_dev_tina_TinaNative_nativeSetPreferOpenGles(JNIEnv*,
                                                      : Tina::Render::RendererApi::Automatic;
 #else
     (void)preferOpenGles;
+#endif
+}
+
+// Supplies the UI font, as a filesystem path.
+//
+// Java picks the path rather than C++ guessing one. /system/fonts is a stable public location, but which
+// files live there is not: DroidSans on this emulator, Roboto on most modern devices, vendor-specific
+// names elsewhere. Java can resolve that from Typeface and the actual directory listing; a hard-coded
+// name in C++ would render text on the devices that happen to match and silently fall back to blocks on
+// the rest.
+//
+// A path rather than the bytes: the engine already has a memory-resource-aware readFile, so handing over
+// a path avoids copying a megabyte of font through a JNI byte array.
+//
+// Must be called before the first surfaceCreated, since that is when the UI context is built. Without it
+// the UI keeps its placeholder path and every glyph draws as a solid block.
+JNIEXPORT void JNICALL Java_dev_tina_TinaNative_nativeSetUiFontPath(JNIEnv* env, jclass, jlong handle,
+                                                                  jstring path)
+{
+    auto* session = asSession(handle);
+    if (session == nullptr || path == nullptr)
+    {
+        return;
+    }
+#if defined(TINA_ANDROID_WITH_BGFX)
+    const jsize utf16Length = env->GetStringLength(path);
+    if (utf16Length <= 0 ||
+        static_cast<std::size_t>(utf16Length) > (std::numeric_limits<std::size_t>::max)() / 3U)
+    {
+        return;
+    }
+    const jchar* utf16 = env->GetStringChars(path, nullptr);
+    if (utf16 == nullptr)
+    {
+        return;
+    }
+    auto releaseChars = Tina::Core::makeScopeExit([env, path, utf16]() noexcept {
+        env->ReleaseStringChars(path, utf16);
+    });
+    try
+    {
+        // JNI's modified UTF-8 corrupts non-BMP characters and encodes NUL differently. A system font
+        // normally has an ASCII path, but the boundary accepts any valid Java path and therefore uses
+        // the same strict UTF-16 conversion as committed text instead of relying on that accident.
+        std::string converted(static_cast<std::size_t>(utf16Length) * 3U, '\0');
+        const auto written = Tina::Core::convertUtf16ToStrictUtf8(
+            std::u16string_view{reinterpret_cast<const char16_t*>(utf16),
+                                static_cast<std::size_t>(utf16Length)},
+            std::span<char>{converted});
+        if (!written || *written == 0)
+        {
+            return;
+        }
+        converted.resize(*written);
+        session->uiFontPath = std::move(converted);
+    } catch (...)
+    {
+        __android_log_print(ANDROID_LOG_ERROR, "Tina", "storing the UI font path failed");
+    }
+#else
+    (void)env;
+    (void)path;
 #endif
 }
 
@@ -268,40 +425,39 @@ JNIEXPORT void JNICALL Java_dev_tina_TinaNative_nativeDestroySession(JNIEnv*, jc
     {
         session->backend->shutdown();
     }
-    // Both references are released only now, after the host (and with it bgfx) is gone, so nothing can
-    // still query them. Doing it here rather than relying on Java also means a session torn down
-    // without surfaceDestroyed still gives its windows back.
-    if (session->window != nullptr)
-    {
-        ANativeWindow_release(session->window);
-    }
-    if (session->retiredWindow != nullptr)
-    {
-        ANativeWindow_release(session->retiredWindow);
-    }
+    // Both RAII references are released by the session only now, after the host (and with it bgfx) is
+    // gone, so nothing can still query them. A session torn down without surfaceDestroyed is covered too.
     delete session;
 }
 
 // Returns false rather than throwing: a failed surface bind is a lifecycle outcome the Java side
 // decides how to present, and throwing across JNI from a surface callback tends to abort.
-JNIEXPORT jboolean JNICALL Java_dev_tina_TinaNative_nativeSurfaceCreated(JNIEnv* env, jclass, jlong handle,
-                                                                        jobject surface, jfloat density)
+[[nodiscard]] jboolean nativeSurfaceCreatedImpl(JNIEnv* env, jlong handle, jobject surface, jfloat density)
 {
     auto* session = asSession(handle);
-    if (session == nullptr || surface == nullptr || !(density > 0.0F))
+    if (session == nullptr || surface == nullptr || !std::isfinite(density) || !(density > 0.0F))
     {
         return JNI_FALSE;
     }
 
-    ANativeWindow* window = ANativeWindow_fromSurface(env, surface);
+    NativeWindowOwner windowOwner{ANativeWindow_fromSurface(env, surface)};
+    ANativeWindow* window = windowOwner.get();
     if (window == nullptr)
     {
         __android_log_print(ANDROID_LOG_ERROR, "Tina", "ANativeWindow_fromSurface returned null");
         return JNI_FALSE;
     }
 
-    const auto width = static_cast<Tina::u32>(ANativeWindow_getWidth(window));
-    const auto height = static_cast<Tina::u32>(ANativeWindow_getHeight(window));
+    const int nativeWidth = ANativeWindow_getWidth(window);
+    const int nativeHeight = ANativeWindow_getHeight(window);
+    if (nativeWidth <= 0 || nativeHeight <= 0)
+    {
+        __android_log_print(ANDROID_LOG_ERROR, "Tina", "ANativeWindow has invalid extent %dx%d",
+                            nativeWidth, nativeHeight);
+        return JNI_FALSE;
+    }
+    const auto width = static_cast<Tina::u32>(nativeWidth);
+    const auto height = static_cast<Tina::u32>(nativeHeight);
     const Tina::Platform::AndroidNativeWindowHandle nativeWindow{
         .nativeWindow = reinterpret_cast<std::uintptr_t>(window)};
     const Tina::Platform::FramebufferExtent extent{.width = width, .height = height};
@@ -312,6 +468,7 @@ JNIEXPORT jboolean JNICALL Java_dev_tina_TinaNative_nativeSurfaceCreated(JNIEnv*
     // session no longer holds it, but a replacement window must still drive the rebind.
     if (session->androidFacet() != nullptr)
     {
+        const bool sameLiveWindow = session->surfaceBound && session->window.get() == window;
         // A replacement window: drive the ADR 0034 rebind rather than rebuilding the backend, so the
         // render device keeps its device resources and only the backbuffer is recreated.
         auto* facet = session->androidFacet();
@@ -322,8 +479,14 @@ JNIEXPORT jboolean JNICALL Java_dev_tina_TinaNative_nativeSurfaceCreated(JNIEnv*
             __android_log_print(ANDROID_LOG_ERROR, "Tina", "rebind rejected: domain=%d code=%d %s",
                                 static_cast<int>(status.error().code.domain),
                                 static_cast<int>(status.error().code.value), status.error().message.c_str());
-            ANativeWindow_release(window);
             return JNI_FALSE;
+        }
+        if (sameLiveWindow)
+        {
+            // surfaceChanged also reports ordinary resize and may repeat unchanged facts. The backend
+            // updates geometry idempotently; this newly acquired duplicate reference can now fall out of
+            // scope while the session retains its original owner.
+            return JNI_TRUE;
         }
         // The previous window is retired, not released here.
         //
@@ -336,12 +499,22 @@ JNIEXPORT jboolean JNICALL Java_dev_tina_TinaNative_nativeSurfaceCreated(JNIEnv*
         // surfaceDestroyed), then again by backgrounding mid-touch, which reaches this path instead.
         // Holding one extra window until a *later* replacement arrives is a bounded cost -- at most two
         // native windows alive -- and it is the only point where bgfx is known to have moved on.
-        if (session->retiredWindow != nullptr)
+        if (session->retiredWindow != nullptr && session->replacementBindingObserved)
         {
-            ANativeWindow_release(session->retiredWindow);
+            session->retiredWindow.reset();
         }
-        session->retiredWindow = session->window;
-        session->window = window;
+        if (session->retiredWindow == nullptr)
+        {
+            session->retiredWindow = std::move(session->window);
+        } else if (session->window != nullptr)
+        {
+            // The previous replacement was superseded before bgfx observed it. It was never submitted,
+            // so it can be released while the older window remains pinned for the render thread.
+            session->window.reset();
+        }
+        session->window = std::move(windowOwner);
+        session->replacementBindingObserved = false;
+        session->surfaceBound = true;
         return JNI_TRUE;
     }
 
@@ -398,7 +571,26 @@ JNIEXPORT jboolean JNICALL Java_dev_tina_TinaNative_nativeSurfaceCreated(JNIEnv*
                     return std::unique_ptr<Tina::Core::IMonotonicClock>{
                         std::make_unique<Tina::Core::SteadyMonotonicClock>()};
                 },
-            .createTaskSystem = Tina::Task::createDisabledTaskSystem,
+            // A real worker pool, not the disabled system.
+            //
+            // With createDisabledTaskSystem every scheduleCpu runs inline on the caller, so asset
+            // decode, cook and any parallel work happened on the frame thread -- which on Android is
+            // also the UI thread, so a single texture load stalled both rendering and touch delivery.
+            // Phones have had multiple cores for a decade; leaving them idle was a placeholder from the
+            // slice that only needed the bridge to work.
+            //
+            // interactiveCpuWorkerCount reserves one hardware thread for the main thread (ADR 0017),
+            // which matters more here than on desktop: the main thread is shared with the platform's own
+            // UI work, so oversubscribing it costs input latency rather than just throughput.
+            .createTaskSystem =
+                [](const Tina::Task::TaskSystemCreateParams& params)
+                    -> Tina::Core::Result<std::unique_ptr<Tina::Task::ITaskSystem>> {
+                    Tina::Task::TaskSystemCreateParams effective = params;
+                    const unsigned int cores = std::thread::hardware_concurrency();
+                    effective.cpuWorkerCount = Tina::Task::interactiveCpuWorkerCount(
+                        cores == 0U ? 1U : static_cast<Tina::u32>(cores));
+                    return Tina::Task::createBoundedTaskSystem(effective);
+                },
             .platformRender =
                 Tina::WindowSurfacePlatformRenderFactories{
                     .createWindowSurfacePlatformBackend =
@@ -440,13 +632,16 @@ JNIEXPORT jboolean JNICALL Java_dev_tina_TinaNative_nativeSurfaceCreated(JNIEnv*
                         return Tina::Render::Bgfx::createBgfxRenderDevice(effective, std::move(lease));
                     },
                 },
+            .createPrimaryWindowUIContext = makePrimaryWindowUIContextFactory(session->uiFontPath),
         });
     if (!host)
     {
         __android_log_print(ANDROID_LOG_ERROR, "Tina", "EngineHost::Create rejected: domain=%d code=%d %s",
                             static_cast<int>(host.error().code.domain),
                             static_cast<int>(host.error().code.value), host.error().message.c_str());
-        ANativeWindow_release(window);
+        // The platform factory may already have published its non-owning view before a later factory
+        // failed. EngineHost rolled the backend back, so that view must not survive the failure.
+        session->androidBackend = nullptr;
         return JNI_FALSE;
     }
     session->host = std::move(*host);
@@ -455,6 +650,13 @@ JNIEXPORT jboolean JNICALL Java_dev_tina_TinaNative_nativeSurfaceCreated(JNIEnv*
     session->game = session->useGallery
                         ? Tina::Gallery::createGalleryApplication()
                         : Tina::Platform::Android::createAndroidGameApplication(session->telemetry);
+    if (session->game == nullptr)
+    {
+        __android_log_print(ANDROID_LOG_ERROR, "Tina", "creating the Android game application failed");
+        session->host.reset();
+        session->androidBackend = nullptr;
+        return JNI_FALSE;
+    }
     if (auto started = session->host->start(*session->game); !started)
     {
         __android_log_print(ANDROID_LOG_ERROR, "Tina", "EngineHost::start rejected: domain=%d code=%d %s",
@@ -463,7 +665,6 @@ JNIEXPORT jboolean JNICALL Java_dev_tina_TinaNative_nativeSurfaceCreated(JNIEnv*
         session->host.reset();
         session->game.reset();
         session->androidBackend = nullptr;
-        ANativeWindow_release(window);
         return JNI_FALSE;
     }
 #else
@@ -482,15 +683,43 @@ JNIEXPORT jboolean JNICALL Java_dev_tina_TinaNative_nativeSurfaceCreated(JNIEnv*
         });
     if (!backend)
     {
-        ANativeWindow_release(window);
         return JNI_FALSE;
     }
     session->androidBackend = dynamic_cast<Tina::Platform::IAndroidPlatformBackend*>(backend->get());
     session->backend = std::move(*backend);
 #endif
 
-    session->window = window;
+    session->window = std::move(windowOwner);
+    session->surfaceBound = true;
     return JNI_TRUE;
+}
+
+JNIEXPORT jboolean JNICALL Java_dev_tina_TinaNative_nativeSurfaceCreated(JNIEnv* env, jclass, jlong handle,
+                                                                        jobject surface, jfloat density)
+{
+    auto* session = asSession(handle);
+    const bool hadBackend = session != nullptr && session->androidFacet() != nullptr;
+    try
+    {
+        return nativeSurfaceCreatedImpl(env, handle, surface, density);
+    } catch (const std::exception& exception)
+    {
+        __android_log_print(ANDROID_LOG_ERROR, "Tina", "surface creation threw: %s", exception.what());
+    } catch (...)
+    {
+        __android_log_print(ANDROID_LOG_ERROR, "Tina", "surface creation threw an unknown exception");
+    }
+
+    if (!hadBackend && session != nullptr)
+    {
+#if defined(TINA_ANDROID_WITH_BGFX)
+        session->host.reset();
+        session->game.reset();
+#endif
+        session->backend.reset();
+        session->androidBackend = nullptr;
+    }
+    return JNI_FALSE;
 }
 
 JNIEXPORT void JNICALL Java_dev_tina_TinaNative_nativeSurfaceDestroyed(JNIEnv*, jclass, jlong handle)
@@ -500,11 +729,17 @@ JNIEXPORT void JNICALL Java_dev_tina_TinaNative_nativeSurfaceDestroyed(JNIEnv*, 
     {
         return;
     }
+    session->surfaceBound = false;
     if (auto* facet = session->androidFacet(); facet != nullptr)
     {
         // Also releases every touch slot, so a drag interrupted by a task switch cannot strand its
         // finger -- the cocos2d-x defect ADR 0032 cites.
-        (void)facet->onNativeWindowDestroyed();
+        if (auto status = facet->onNativeWindowDestroyed(); !status)
+        {
+            __android_log_print(ANDROID_LOG_ERROR, "Tina", "surface destroy rejected: domain=%d code=%d %s",
+                                static_cast<int>(status.error().code.domain),
+                                static_cast<int>(status.error().code.value), status.error().message.c_str());
+        }
     }
     session->slots.releaseAll();
 #if defined(TINA_ANDROID_WITH_BGFX)
@@ -568,10 +803,17 @@ JNIEXPORT jboolean JNICALL Java_dev_tina_TinaNative_nativeOnTouch(JNIEnv*, jclas
     {
         return JNI_FALSE;
     }
-    return session->touchEvents->tryPush(Tina::Platform::AndroidTouchEvent{
-               .action = action, .pointerSlot = slot, .physicalX = x, .physicalY = y})
-               ? JNI_TRUE
-               : JNI_FALSE;
+    const bool pushed = session->touchEvents->tryPush(Tina::Platform::AndroidTouchEvent{
+        .action = action, .pointerSlot = slot, .physicalX = x, .physicalY = y});
+    if (!pushed)
+    {
+        // The lost event may have been the only Up/Cancel for any live finger. Clearing the complete
+        // producer mapping forces subsequent Moves to be rejected until fresh Downs establish a new,
+        // recoverable stream; the backend observes the queue's drop counter and publishes a reset.
+        session->slots.releaseAll();
+        return JNI_FALSE;
+    }
+    return JNI_TRUE;
 }
 
 // One KeyEvent. The raw Android key code crosses as-is; translation to Tina's Key happens in C++ so
@@ -600,6 +842,13 @@ JNIEXPORT jboolean JNICALL Java_dev_tina_TinaNative_nativeOnKey(JNIEnv*, jclass,
     default:
         // Rejected rather than cast, for the same reason as touch actions: a cast would turn a Java-side
         // change into an out-of-range enum.
+        return JNI_FALSE;
+    }
+
+    if (Tina::Platform::androidKeyFromKeyCode(androidKeyCode) == Tina::Platform::Key::Unknown)
+    {
+        // Return false before enqueueing so Java hands volume/media/vendor keys back to Android instead
+        // of claiming them now and discovering only on the next engine poll that they were unmapped.
         return JNI_FALSE;
     }
 
@@ -643,20 +892,22 @@ JNIEXPORT jboolean JNICALL Java_dev_tina_TinaNative_nativeOnTextCommit(JNIEnv* e
     }
     const jsize utf16Length = env->GetStringLength(text);
 
-    Tina::Platform::AndroidCompositionEvent event{};
-    const bool built = Tina::Platform::makeAndroidCompositionEventFromUtf16(
+    std::array<Tina::Platform::AndroidCompositionEvent,
+               Tina::Platform::AndroidCompositionEventCapacity>
+        events{};
+    Tina::usize eventCount = 0;
+    const bool built = Tina::Platform::makeAndroidCommitEventsFromUtf16(
         std::u16string_view{reinterpret_cast<const char16_t*>(utf16), static_cast<std::size_t>(utf16Length)},
-        // A commit carries no caret of its own -- the text replaces the composing region outright, and
-        // the engine's own TextEdit places the caret after it.
-        0, Tina::Platform::AndroidCompositionAction::Commit, event);
+        std::span<Tina::Platform::AndroidCompositionEvent>{events}, eventCount);
     env->ReleaseStringChars(text, utf16);
-    // An empty commit is accepted by the composition converter (it is meaningful for a preedit) but
-    // carries no information as a commit, so it is rejected here rather than queued as a no-op.
-    if (!built || event.byteCount == 0)
+    if (!built || eventCount == 0)
     {
         return JNI_FALSE;
     }
-    return session->compositionEvents->tryPush(event) ? JNI_TRUE : JNI_FALSE;
+    return session->compositionEvents->tryPushBatch(
+               std::span<const Tina::Platform::AndroidCompositionEvent>{events}.first(eventCount))
+               ? JNI_TRUE
+               : JNI_FALSE;
 }
 
 // Composing (preedit) text, from InputConnection.setComposingText.
@@ -724,31 +975,42 @@ JNIEXPORT jboolean JNICALL Java_dev_tina_TinaNative_nativeOnComposingFinish(JNIE
     return session->compositionEvents->tryPush(event) ? JNI_TRUE : JNI_FALSE;
 }
 
-// Records that the IME asked for (or stopped asking for) cursor updates.
-//
-// Gated because Android's contract is that CursorAnchorInfo is reported *after* a request. Reporting
-// unconditionally would cost a JNI call and a CursorAnchorInfo allocation every frame for the majority
-// of IMEs that never ask.
-JNIEXPORT void JNICALL Java_dev_tina_TinaNative_nativeSetCursorUpdatesRequested(JNIEnv*, jclass, jlong handle,
-                                                                              jboolean requested)
+inline constexpr jint CursorUpdateImmediate = 1;
+inline constexpr jint CursorUpdateMonitor = 2;
+inline constexpr jint SupportedCursorUpdateModes = CursorUpdateImmediate | CursorUpdateMonitor;
+
+// Stores Android's independent IMMEDIATE and MONITOR mode bits. IMMEDIATE is consumed after one report;
+// MONITOR remains set until the InputConnection explicitly cancels it with mode 0.
+JNIEXPORT void JNICALL Java_dev_tina_TinaNative_nativeSetCursorUpdateMode(JNIEnv*, jclass, jlong handle,
+                                                                         jint mode)
 {
     auto* session = asSession(handle);
     if (session == nullptr)
     {
         return;
     }
-    session->cursorUpdatesRequested.store(requested == JNI_TRUE, std::memory_order_release);
+    session->cursorUpdateMode.store(mode & SupportedCursorUpdateModes, std::memory_order_release);
 }
 
-// Whether the host should be reporting CursorAnchorInfo this frame.
-JNIEXPORT jboolean JNICALL Java_dev_tina_TinaNative_nativeCursorUpdatesRequested(JNIEnv*, jclass, jlong handle)
+JNIEXPORT jint JNICALL Java_dev_tina_TinaNative_nativeCursorUpdateMode(JNIEnv*, jclass, jlong handle)
 {
     auto* session = asSession(handle);
     if (session == nullptr)
     {
-        return JNI_FALSE;
+        return 0;
     }
-    return session->cursorUpdatesRequested.load(std::memory_order_acquire) ? JNI_TRUE : JNI_FALSE;
+    return session->cursorUpdateMode.load(std::memory_order_acquire);
+}
+
+JNIEXPORT void JNICALL Java_dev_tina_TinaNative_nativeAcknowledgeImmediateCursorUpdate(JNIEnv*, jclass,
+                                                                                       jlong handle)
+{
+    auto* session = asSession(handle);
+    if (session == nullptr)
+    {
+        return;
+    }
+    session->cursorUpdateMode.fetch_and(~CursorUpdateImmediate, std::memory_order_acq_rel);
 }
 
 // The focused caret in physical pixels, packed into one jlong, or -1 when nothing is focused.
@@ -781,8 +1043,12 @@ JNIEXPORT jlong JNICALL Java_dev_tina_TinaNative_nativeCaretPixels(JNIEnv*, jcla
     {
         return -1;
     }
-    return (static_cast<jlong>(caret->x) << 48) | (static_cast<jlong>(caret->y) << 32) |
-           (static_cast<jlong>(caret->width) << 16) | static_cast<jlong>(caret->height);
+    const Tina::u64 packed = (static_cast<Tina::u64>(caret->x) << 48U) |
+                             (static_cast<Tina::u64>(caret->y) << 32U) |
+                             (static_cast<Tina::u64>(caret->width) << 16U) |
+                             static_cast<Tina::u64>(caret->height);
+    static_assert(sizeof(packed) == sizeof(jlong));
+    return std::bit_cast<jlong>(packed);
 }
 
 JNIEXPORT void JNICALL Java_dev_tina_TinaNative_nativeOnSoftKeyboardOcclusion(JNIEnv*, jclass, jlong handle,
@@ -799,10 +1065,10 @@ JNIEXPORT void JNICALL Java_dev_tina_TinaNative_nativeOnSoftKeyboardOcclusion(JN
     }
 }
 
-// The engine can only record intent; only Java can call InputMethodManager. Java polls this and acts
-// on it, and the read clears the latch so one request yields exactly one IME call.
-JNIEXPORT jint JNICALL Java_dev_tina_TinaNative_nativeTakePendingSoftKeyboardRequest(JNIEnv*, jclass,
-                                                                                    jlong handle)
+// The engine can only record intent; only Java can call InputMethodManager. This read is non-consuming,
+// so a temporarily unavailable manager or window token does not lose the request.
+JNIEXPORT jint JNICALL Java_dev_tina_TinaNative_nativePendingSoftKeyboardRequest(JNIEnv*, jclass,
+                                                                                jlong handle)
 {
     auto* session = asSession(handle);
     if (session == nullptr)
@@ -814,7 +1080,35 @@ JNIEXPORT jint JNICALL Java_dev_tina_TinaNative_nativeTakePendingSoftKeyboardReq
     {
         return static_cast<jint>(Tina::Platform::AndroidSoftKeyboardRequest::None);
     }
-    return static_cast<jint>(facet->takePendingSoftKeyboardRequest());
+    return static_cast<jint>(facet->pendingSoftKeyboardRequest());
+}
+
+JNIEXPORT jboolean JNICALL Java_dev_tina_TinaNative_nativeAcknowledgeSoftKeyboardRequest(
+    JNIEnv*, jclass, jlong handle, jint rawRequest)
+{
+    auto* session = asSession(handle);
+    if (session == nullptr)
+    {
+        return JNI_FALSE;
+    }
+    Tina::Platform::AndroidSoftKeyboardRequest request{};
+    switch (rawRequest)
+    {
+    case static_cast<jint>(Tina::Platform::AndroidSoftKeyboardRequest::Show):
+        request = Tina::Platform::AndroidSoftKeyboardRequest::Show;
+        break;
+    case static_cast<jint>(Tina::Platform::AndroidSoftKeyboardRequest::Hide):
+        request = Tina::Platform::AndroidSoftKeyboardRequest::Hide;
+        break;
+    default:
+        return JNI_FALSE;
+    }
+    auto* facet = session->androidFacet();
+    if (facet == nullptr)
+    {
+        return JNI_FALSE;
+    }
+    return facet->acknowledgeSoftKeyboardRequest(request) ? JNI_TRUE : JNI_FALSE;
 }
 
 // Advances exactly one engine frame.
@@ -881,6 +1175,10 @@ JNIEXPORT jint JNICALL Java_dev_tina_TinaNative_nativePollFrame(JNIEnv*, jclass,
     // A tick that got this far completed, so incrementing after the outcome checks counts frames the
     // engine actually ran rather than calls made.
     ++session->ticks;
+    if (session->retiredWindow != nullptr)
+    {
+        session->replacementBindingObserved = true;
+    }
     return static_cast<jint>(session->ticks);
 #else
     // No renderer, so no EngineHost either. Polling the bare backend still exercises the window,
@@ -1111,6 +1409,8 @@ const JNINativeMethod TinaNativeMethods[]{
      reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeSetPreferOpenGles)},
     {"nativeSetUseGallery", "(JZ)V",
      reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeSetUseGallery)},
+    {"nativeSetUiFontPath", "(JLjava/lang/String;)V",
+     reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeSetUiFontPath)},
     {"nativeSurfaceCreated", "(JLandroid/view/Surface;F)Z",
      reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeSurfaceCreated)},
     {"nativeSurfaceDestroyed", "(J)V",

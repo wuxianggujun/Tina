@@ -26,8 +26,11 @@ set(Tina_DesktopBootstrap_FOUND FALSE)
 set(Tina_GAME_SDK_TARGETS
     Tina::GameSDK
     Tina::Core
+    Tina::Math
     Tina::Platform
     Tina::Task
+    Tina::Save
+    Tina::Gameplay
     Tina::Render
     Tina::Runtime
     Tina::Scene

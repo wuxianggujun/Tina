@@ -2,7 +2,6 @@
 
 #include "detail/NativeSocket.hpp"
 
-#include <tina/core/base/ScopeExit.hpp>
 #include <tina/network/NetworkErrors.hpp>
 #include <tina/task/TaskErrors.hpp>
 
@@ -42,8 +41,16 @@ struct DnsRequestState final {
     // Worker-owned until outcome is published.
     std::vector<NetworkEndpoint> addresses;
     bool truncated = false;
+    bool ownsTransportScope = false;
 
     std::atomic<Outcome> outcome{Outcome::Running};
+
+    ~DnsRequestState() noexcept
+    {
+        if (ownsTransportScope) {
+            Detail::TransportScope::release();
+        }
+    }
 };
 
 struct DnsResolver::Impl final {
@@ -149,15 +156,16 @@ void performResolution(const std::shared_ptr<DnsRequestState>& request) noexcept
         hints.ai_socktype = SOCK_STREAM;
         hints.ai_protocol = IPPROTO_TCP;
 
-        addrinfo* results = nullptr;
+        addrinfo* rawResults = nullptr;
         const int status = ::getaddrinfo(
             request->hostName.c_str(),
             request->portText.c_str(),
             &hints,
-            &results);
+            &rawResults);
+        std::unique_ptr<addrinfo, decltype(&::freeaddrinfo)> results{rawResults, &::freeaddrinfo};
 
         if (status == 0 && results != nullptr) {
-            for (const addrinfo* entry = results; entry != nullptr; entry = entry->ai_next) {
+            for (const addrinfo* entry = results.get(); entry != nullptr; entry = entry->ai_next) {
                 if (request->addresses.size() >= request->maximumAddresses) {
                     // More addresses than the caller reserved room for. Keeping the
                     // first N in system order is better than failing: a client only
@@ -184,9 +192,6 @@ void performResolution(const std::shared_ptr<DnsRequestState>& request) noexcept
             ok = !request->addresses.empty();
         }
 
-        if (results != nullptr) {
-            ::freeaddrinfo(results);
-        }
     } catch (...) {
         // The worker must not let anything escape: pumpMain does not catch, and a
         // throw here would take down the whole task system.
@@ -216,13 +221,10 @@ DnsResolver::~DnsResolver() noexcept
     if (m_impl == nullptr) {
         return;
     }
-    // Workers may still hold shared state; the shared_ptr keeps it alive past this
-    // destructor, so no in-flight query can write into freed memory. The transport
-    // scope is released last for the same reason -- getaddrinfo needs Winsock
-    // initialised, and a worker may still be inside it.
+    // Workers may still hold shared state; the shared_ptr keeps both that state and its per-request
+    // transport scope alive until getaddrinfo has returned.
     delete m_impl;
     m_impl = nullptr;
-    Detail::TransportScope::release();
 }
 
 Core::Result<DnsResolver> DnsResolver::Create(DnsResolverConfig config)
@@ -241,14 +243,6 @@ Core::Result<DnsResolver> DnsResolver::Create(DnsResolverConfig config)
     std::pmr::memory_resource* resource = config.memoryResource != nullptr
         ? config.memoryResource
         : std::pmr::get_default_resource();
-
-    // getaddrinfo needs Winsock initialised on Windows just as much as socket()
-    // does, and the resolver has no socket of its own to carry that for it.
-    if (const Core::Status status = Detail::TransportScope::acquire(); !status) {
-        return Core::failure(status.error());
-    }
-    auto transportGuard = Core::makeScopeExit(
-        []() noexcept { Detail::TransportScope::release(); });
 
     Impl* impl = nullptr;
     try {
@@ -273,7 +267,6 @@ Core::Result<DnsResolver> DnsResolver::Create(DnsResolverConfig config)
     impl->owner = std::this_thread::get_id();
     impl->maximumAddressesPerQuery = config.maximumAddressesPerQuery;
 
-    transportGuard.release();
     return DnsResolver{impl};
 }
 
@@ -328,6 +321,10 @@ Core::Result<DnsQueryHandle> DnsResolver::resolve(
     Task::TaskCallable work;
     try {
         request = std::make_shared<DnsRequestState>();
+        if (const Core::Status status = Detail::TransportScope::acquire(); !status) {
+            return Core::failure(status.error());
+        }
+        request->ownsTransportScope = true;
         request->hostName.assign(hostName);
         request->portText = std::to_string(port);
         request->maximumAddresses = m_impl->maximumAddressesPerQuery;

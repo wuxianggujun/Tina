@@ -25,6 +25,8 @@ struct NativeWindowBinding final {
 
 struct NativeWindowSurfaceLeaseControl final {
     std::thread::id ownerThread{};
+    WindowSurfaceId surface{};
+    NativeWindowBinding binding{};
     usize activeLeaseCount = 0;
     bool surfaceAlive = true;
 };
@@ -32,7 +34,6 @@ struct NativeWindowSurfaceLeaseControl final {
 struct NativeWindowSurfaceLeaseState final {
     std::shared_ptr<NativeWindowSurfaceLeaseControl> control;
     WindowSurfaceId surface{};
-    NativeWindowBinding binding{};
 
     ~NativeWindowSurfaceLeaseState() noexcept;
 };
@@ -41,6 +42,10 @@ class NativeWindowSurfaceLeaseAccess final {
   public:
     [[nodiscard]] static Core::Result<NativeWindowSurfaceLease>
     Create(std::shared_ptr<NativeWindowSurfaceLeaseControl> control, WindowSurfaceId surface,
+           NativeWindowBinding binding) noexcept;
+
+    [[nodiscard]] static Core::Status
+    rebind(const std::shared_ptr<NativeWindowSurfaceLeaseControl>& control, WindowSurfaceId surface,
            NativeWindowBinding binding) noexcept;
 
     [[nodiscard]] static Core::Result<NativeWindowBinding> decode(const NativeWindowSurfaceLease& lease) noexcept;

@@ -1,5 +1,6 @@
 #include <tina/scene/Animator3D.hpp>
 
+#include <tina/math/Mat4.hpp>
 #include <tina/scene/SceneErrors.hpp>
 
 #include <algorithm>
@@ -13,7 +14,20 @@
 namespace Tina::Scene {
 namespace {
 
-using Matrix4 = std::array<float, 16>;
+// Joint matrices are kept in one flat float buffer so the whole palette can be
+// handed to the render packet as a span. These two helpers move a single joint
+// between that buffer and Math::Mat4.
+[[nodiscard]] Math::Mat4 loadMatrix(std::span<const float, 16> source) noexcept
+{
+    Math::Mat4 result{};
+    std::copy(source.begin(), source.end(), result.columns.begin());
+    return result;
+}
+
+void storeMatrix(const Math::Mat4& source, std::span<float, 16> destination) noexcept
+{
+    std::copy(source.columns.begin(), source.columns.end(), destination.begin());
+}
 
 [[nodiscard]] bool isKnownPlaybackMode(
     AssetFormat::AnimationClip3DPlaybackMode mode) noexcept
@@ -55,95 +69,12 @@ using Matrix4 = std::array<float, 16>;
         + static_cast<u32>(channel);
 }
 
-[[nodiscard]] bool isFiniteMatrix(std::span<const float, 16> matrix) noexcept
+[[nodiscard]] Math::Mat4 transformMatrix(const LocalTransform& transform) noexcept
 {
-    return std::ranges::all_of(matrix, [](float value) { return std::isfinite(value); });
-}
-
-[[nodiscard]] Matrix4 transformMatrix(const LocalTransform& transform) noexcept
-{
-    const Quaternion rotation = normalized(transform.rotation);
-    const float xx = rotation.x * rotation.x;
-    const float yy = rotation.y * rotation.y;
-    const float zz = rotation.z * rotation.z;
-    const float xy = rotation.x * rotation.y;
-    const float xz = rotation.x * rotation.z;
-    const float yz = rotation.y * rotation.z;
-    const float wx = rotation.w * rotation.x;
-    const float wy = rotation.w * rotation.y;
-    const float wz = rotation.w * rotation.z;
-    return {
-        (1.0F - 2.0F * (yy + zz)) * transform.scale.x,
-        (2.0F * (xy + wz)) * transform.scale.x,
-        (2.0F * (xz - wy)) * transform.scale.x,
-        0.0F,
-        (2.0F * (xy - wz)) * transform.scale.y,
-        (1.0F - 2.0F * (xx + zz)) * transform.scale.y,
-        (2.0F * (yz + wx)) * transform.scale.y,
-        0.0F,
-        (2.0F * (xz + wy)) * transform.scale.z,
-        (2.0F * (yz - wx)) * transform.scale.z,
-        (1.0F - 2.0F * (xx + yy)) * transform.scale.z,
-        0.0F,
-        transform.position.x,
-        transform.position.y,
-        transform.position.z,
-        1.0F,
-    };
-}
-
-[[nodiscard]] Matrix4 multiply(
-    std::span<const float, 16> left,
-    std::span<const float, 16> right) noexcept
-{
-    Matrix4 result{};
-    for (usize column = 0; column < 4; ++column) {
-        for (usize row = 0; row < 4; ++row) {
-            double value = 0.0;
-            for (usize element = 0; element < 4; ++element) {
-                value += static_cast<double>(left[element * 4 + row])
-                    * static_cast<double>(right[column * 4 + element]);
-            }
-            result[column * 4 + row] = static_cast<float>(value);
-        }
-    }
-    return result;
-}
-
-[[nodiscard]] Quaternion shortestPathSlerp(
-    Quaternion from,
-    Quaternion to,
-    float alpha) noexcept
-{
-    from = normalized(from);
-    to = normalized(to);
-    double cosine = static_cast<double>(from.x) * to.x
-        + static_cast<double>(from.y) * to.y
-        + static_cast<double>(from.z) * to.z
-        + static_cast<double>(from.w) * to.w;
-    if (cosine < 0.0) {
-        to = {-to.x, -to.y, -to.z, -to.w};
-        cosine = -cosine;
-    }
-    cosine = std::clamp(cosine, 0.0, 1.0);
-    if (cosine > 0.9995) {
-        return normalized(Quaternion{
-            from.x + (to.x - from.x) * alpha,
-            from.y + (to.y - from.y) * alpha,
-            from.z + (to.z - from.z) * alpha,
-            from.w + (to.w - from.w) * alpha,
-        });
-    }
-    const double angle = std::acos(cosine);
-    const double sine = std::sin(angle);
-    const double fromScale = std::sin((1.0 - static_cast<double>(alpha)) * angle) / sine;
-    const double toScale = std::sin(static_cast<double>(alpha) * angle) / sine;
-    return normalized(Quaternion{
-        static_cast<float>(fromScale * from.x + toScale * to.x),
-        static_cast<float>(fromScale * from.y + toScale * to.y),
-        static_cast<float>(fromScale * from.z + toScale * to.z),
-        static_cast<float>(fromScale * from.w + toScale * to.w),
-    });
+    return Math::fromTrs(
+        transform.position,
+        Math::normalized(transform.rotation),
+        transform.scale);
 }
 
 } // namespace
@@ -227,7 +158,7 @@ Core::Status Animator3D::initializeSkeleton(
                 SceneErrorCode::InvalidAnimation,
                 "Animator3D bind pose contains an invalid transform");
         }
-        transform.rotation = normalized(transform.rotation);
+        transform.rotation = Math::normalized(transform.rotation);
         m_parents.push_back(joint->parentJoint);
         m_bindPose.push_back(transform);
     }
@@ -328,7 +259,7 @@ Core::Status Animator3D::setClip(
             if (source->channel == AssetFormat::AnimationChannel::Rotation) {
                 for (usize key = 0; key < source->keyCount; ++key) {
                     const usize base = key * 4U;
-                    const Quaternion rotation{
+                    const Math::Quaternion rotation{
                         values[base], values[base + 1U], values[base + 2U], values[base + 3U]};
                     if (!isValid(LocalTransform{.rotation = rotation})) {
                         return Core::failure(
@@ -447,15 +378,15 @@ Core::Status Animator3D::evaluatePose(float timeSeconds) noexcept
             };
             break;
         case AssetFormat::AnimationChannel::Rotation: {
-            const Quaternion from{
+            const Math::Quaternion from{
                 values[firstValue], values[firstValue + 1U],
                 values[firstValue + 2U], values[firstValue + 3U]};
-            const Quaternion to{
+            const Math::Quaternion to{
                 values[secondValue], values[secondValue + 1U],
                 values[secondValue + 2U], values[secondValue + 3U]};
             transform.rotation = firstKey == secondKey
-                ? normalized(from)
-                : shortestPathSlerp(from, to, alpha);
+                ? Math::normalized(from)
+                : Math::slerp(from, to, alpha);
             break;
         }
         case AssetFormat::AnimationChannel::Invalid:
@@ -471,31 +402,31 @@ Core::Status Animator3D::evaluatePose(float timeSeconds) noexcept
     }
 
     for (usize jointIndex = 0; jointIndex < m_localScratch.size(); ++jointIndex) {
-        const Matrix4 local = transformMatrix(m_localScratch[jointIndex]);
-        Matrix4 global = local;
+        const Math::Mat4 local = transformMatrix(m_localScratch[jointIndex]);
+        Math::Mat4 global = local;
         const u16 parent = m_parents[jointIndex];
         if (parent != AssetFormat::SkinnedMeshWire::JointIndexNone) {
             const auto parentMatrix = std::span<const float, 16>{
                 m_globalScratch.data() + static_cast<usize>(parent) * 16U, 16U};
-            global = multiply(parentMatrix, local);
+            global = Math::multiply(loadMatrix(parentMatrix), local);
         }
-        if (!isFiniteMatrix(global)) {
+        if (!Math::isFinite(global)) {
             return Core::failure(
                 SceneErrorCode::InvalidAnimation,
                 "Animator3D global pose matrix overflowed");
         }
-        std::copy(global.begin(), global.end(),
-            m_globalScratch.begin() + static_cast<std::ptrdiff_t>(jointIndex * 16U));
+        storeMatrix(global,
+            std::span<float, 16>{m_globalScratch.data() + jointIndex * 16U, 16U});
         const auto inverseBind = std::span<const float, 16>{
             m_inverseBindMatrices.data() + jointIndex * 16U, 16U};
-        const Matrix4 skinning = multiply(global, inverseBind);
-        if (!isFiniteMatrix(skinning)) {
+        const Math::Mat4 skinning = Math::multiply(global, loadMatrix(inverseBind));
+        if (!Math::isFinite(skinning)) {
             return Core::failure(
                 SceneErrorCode::InvalidAnimation,
                 "Animator3D skinning matrix overflowed");
         }
-        std::copy(skinning.begin(), skinning.end(),
-            m_skinningScratch.begin() + static_cast<std::ptrdiff_t>(jointIndex * 16U));
+        storeMatrix(skinning,
+            std::span<float, 16>{m_skinningScratch.data() + jointIndex * 16U, 16U});
     }
     m_localPose.swap(m_localScratch);
     m_globalMatrices.swap(m_globalScratch);

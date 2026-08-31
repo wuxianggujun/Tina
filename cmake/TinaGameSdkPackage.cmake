@@ -17,8 +17,11 @@ function(tina_configure_game_sdk_package)
     target_compile_features(tina_game_sdk INTERFACE cxx_std_23)
     target_link_libraries(tina_game_sdk INTERFACE
         Tina::Core
+        Tina::Math
         Tina::Platform
         Tina::Task
+        Tina::Save
+        Tina::Gameplay
         Tina::Render
         Tina::Runtime
         Tina::Scene
@@ -34,8 +37,11 @@ function(tina_configure_game_sdk_package)
     set(tina_sdk_export_targets
         tina_game_sdk
         tina_core
+        tina_math
         tina_platform
         tina_task
+        tina_save
+        tina_gameplay
         tina_render
         tina_runtime
         tina_scene
@@ -52,8 +58,11 @@ function(tina_configure_game_sdk_package)
     )
 
     tina_configure_game_sdk_target(tina_core Core)
+    tina_configure_game_sdk_target(tina_math Math)
     tina_configure_game_sdk_target(tina_platform Platform)
     tina_configure_game_sdk_target(tina_task Task)
+    tina_configure_game_sdk_target(tina_save Save)
+    tina_configure_game_sdk_target(tina_gameplay Gameplay)
     tina_configure_game_sdk_target(tina_render Render)
     tina_configure_game_sdk_target(tina_runtime Runtime)
     tina_configure_game_sdk_target(tina_scene Scene)
@@ -269,8 +278,11 @@ function(tina_configure_game_sdk_package)
     endif()
     install(DIRECTORY
         "${PROJECT_SOURCE_DIR}/include/tina/core"
+        "${PROJECT_SOURCE_DIR}/include/tina/math"
         "${PROJECT_SOURCE_DIR}/include/tina/platform"
         "${PROJECT_SOURCE_DIR}/include/tina/task"
+        "${PROJECT_SOURCE_DIR}/include/tina/save"
+        "${PROJECT_SOURCE_DIR}/include/tina/gameplay"
         "${PROJECT_SOURCE_DIR}/include/tina/render"
         "${PROJECT_SOURCE_DIR}/include/tina/runtime"
         "${PROJECT_SOURCE_DIR}/include/tina/scene"

@@ -1,5 +1,7 @@
 #include <tina/asset/PhysicsNavigationSync2D.hpp>
 
+#include <tina/math/Geometry2D.hpp>
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -10,11 +12,6 @@ namespace Tina::Asset {
 namespace {
 
 inline constexpr Core::usize InvalidIndex = (std::numeric_limits<Core::usize>::max)();
-
-[[nodiscard]] bool isFinite(const Physics2D::PhysicsVec2 value) noexcept
-{
-    return std::isfinite(value.x) && std::isfinite(value.y);
-}
 
 } // namespace
 
@@ -156,25 +153,18 @@ PhysicsNavigationSync2D::projectBody(
     if (!bodyState.enabled) {
         return std::optional<Navigation2D::NavigationCellRect2D>{};
     }
-    const float localCenterX =
-        (localBoundsMeters.lowerMeters.x + localBoundsMeters.upperMeters.x) * 0.5F;
-    const float localCenterY =
-        (localBoundsMeters.lowerMeters.y + localBoundsMeters.upperMeters.y) * 0.5F;
-    const float localHalfWidth =
-        (localBoundsMeters.upperMeters.x - localBoundsMeters.lowerMeters.x) * 0.5F;
-    const float localHalfHeight =
-        (localBoundsMeters.upperMeters.y - localBoundsMeters.lowerMeters.y) * 0.5F;
-    const float cosine = std::cos(bodyState.angleRadians);
-    const float sine = std::sin(bodyState.angleRadians);
-    const float worldCenterX = bodyState.positionMeters.x + cosine * localCenterX - sine * localCenterY;
-    const float worldCenterY = bodyState.positionMeters.y + sine * localCenterX + cosine * localCenterY;
-    const float worldHalfWidth = std::abs(cosine) * localHalfWidth + std::abs(sine) * localHalfHeight;
-    const float worldHalfHeight = std::abs(sine) * localHalfWidth + std::abs(cosine) * localHalfHeight;
-    const float lowerX = worldCenterX - worldHalfWidth;
-    const float lowerY = worldCenterY - worldHalfHeight;
-    const float upperX = worldCenterX + worldHalfWidth;
-    const float upperY = worldCenterY + worldHalfHeight;
-    if (!isFinite(bodyState.positionMeters) || !std::isfinite(bodyState.angleRadians) ||
+    // Conservative on purpose: the rasterized rect must cover the rotated body, so
+    // a blocker is never missed. Math::rotatedBounds is the same |cos| / |sin|
+    // projection this function used before Tina::Math existed.
+    const Math::Aabb2 worldBounds = Math::rotatedBounds(
+        Math::Aabb2{localBoundsMeters.lowerMeters, localBoundsMeters.upperMeters},
+        bodyState.angleRadians,
+        bodyState.positionMeters);
+    const float lowerX = worldBounds.lower.x;
+    const float lowerY = worldBounds.lower.y;
+    const float upperX = worldBounds.upper.x;
+    const float upperY = worldBounds.upper.y;
+    if (!Math::isFinite(bodyState.positionMeters) || !std::isfinite(bodyState.angleRadians) ||
         !std::isfinite(lowerX) || !std::isfinite(lowerY) ||
         !std::isfinite(upperX) || !std::isfinite(upperY)) {
         return Core::failure(

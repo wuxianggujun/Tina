@@ -41,6 +41,14 @@ if(TINA_BUILD_RENDER_BGFX)
     # The concrete backend header is private to src/, reached the same way a desktop composition root
     # reaches it. It never appears in a public header.
     target_include_directories(tina_platform_android_jni PRIVATE ${PROJECT_SOURCE_DIR}/src)
+    # Real glyphs instead of solid blocks. Without the FreeType adapter the UI still runs -- it falls back
+    # to drawing each glyph as a filled quad -- but every label is unreadable, which makes a menu of named
+    # scenes pointless. Gated on the option so a checkout without the vcpkg feature still builds.
+    if(TINA_BUILD_UI_FREETYPE)
+        target_compile_definitions(tina_platform_android_jni PRIVATE TINA_HAS_UI_FREETYPE=1)
+        target_link_libraries(tina_platform_android_jni PRIVATE tina_ui_freetype)
+    endif()
+
     # bgfx's GLES renderer calls EGL and GLESv2 directly, and its Vulkan renderer loads libvulkan at
     # runtime rather than linking it. Both GLES libraries are needed even when Vulkan is preferred,
     # because the GLES path stays compiled in as the fallback for devices whose Vulkan driver is

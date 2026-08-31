@@ -124,8 +124,10 @@ target_include_directories(tina_asset PRIVATE
     ${PROJECT_SOURCE_DIR}/thirdparty/cgltf
     ${PROJECT_SOURCE_DIR}/thirdparty/stb
 )
+# Math is named explicitly rather than inherited through Tina::Physics2D, so the
+# dependency does not silently disappear when that feature gate is off.
 target_link_libraries(tina_asset
-    PUBLIC Tina::Core Tina::AssetTypes Tina::AssetFormat Tina::Task Tina::Render Tina::Navigation2D
+    PUBLIC Tina::Core Tina::Math Tina::AssetTypes Tina::AssetFormat Tina::Task Tina::Render Tina::Navigation2D
     PRIVATE "$<BUILD_INTERFACE:Tina::ProjectOptions>" mikktspace::mikktspace
 )
 if (TINA_BUILD_PHYSICS2D)

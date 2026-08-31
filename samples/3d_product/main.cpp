@@ -94,8 +94,8 @@ inline constexpr u32 MaxProductMeshSlots = 128;
     return out;
 }
 
-[[nodiscard]] Tina::Scene::Quaternion rotationFromPositiveZ(
-    Tina::Scene::Vec3 directionTowardLight) noexcept
+[[nodiscard]] Tina::Math::Quaternion rotationFromPositiveZ(
+    Tina::Math::Vec3 directionTowardLight) noexcept
 {
     const double lengthSquared =
         static_cast<double>(directionTowardLight.x) * directionTowardLight.x +
@@ -107,7 +107,7 @@ inline constexpr u32 MaxProductMeshSlots = 128;
     {
         return {1.0F, 0.0F, 0.0F, 0.0F};
     }
-    return Tina::Scene::normalized(Tina::Scene::Quaternion{
+    return Tina::Math::normalized(Tina::Math::Quaternion{
         .x = -directionTowardLight.y,
         .y = directionTowardLight.x,
         .z = 0.0F,
@@ -2023,7 +2023,7 @@ class Product3DState final : public Tina::IGameState {
         world_.emplace(std::move(*worldResult));
 
         struct ProductDirectionalLight final {
-            Tina::Scene::Vec3 directionTowardLight{};
+            Tina::Math::Vec3 directionTowardLight{};
             Tina::Render::RenderLinearColor color{};
             bool hasCascadedShadow = false;
         };
@@ -2216,9 +2216,9 @@ class Product3DState final : public Tina::IGameState {
         const bool hasBuiltInPointShadowWitness = !resources_->externalGltf;
         if (hasBuiltInPointShadowWitness)
         {
-            constexpr std::array<Tina::Scene::Vec3, 2> WitnessPositions{
-                Tina::Scene::Vec3{-1.0F, -1.0F, 0.0F},
-                Tina::Scene::Vec3{-0.35F, -0.35F, 0.85F},
+            constexpr std::array<Tina::Math::Vec3, 2> WitnessPositions{
+                Tina::Math::Vec3{-1.0F, -1.0F, 0.0F},
+                Tina::Math::Vec3{-0.35F, -0.35F, 0.85F},
             };
             constexpr std::array<float, 2> WitnessScales{2.4F, 0.85F};
             for (std::size_t index = 0; index < WitnessPositions.size(); ++index)
@@ -2236,7 +2236,7 @@ class Product3DState final : public Tina::IGameState {
 
                 Tina::Scene::LocalTransform local = *existing;
                 local.position = WitnessPositions[index];
-                local.scale = Tina::Scene::Vec3{
+                local.scale = Tina::Math::Vec3{
                     WitnessScales[index], WitnessScales[index], WitnessScales[index]};
                 if (auto status = world_->setLocalTransform(entity, local); !status)
                 {
@@ -2358,8 +2358,8 @@ class Product3DState final : public Tina::IGameState {
             const float witnessScale =
                 (std::max)(radius * 0.48F / witnessMesh->meshBoundsRadius, 0.15F);
             const std::array witnessPositions{
-                Tina::Scene::Vec3{centerX - radius * 0.08F, centerY, centerZ + radius * 0.62F},
-                Tina::Scene::Vec3{centerX + radius * 0.08F, centerY, centerZ + radius * 0.84F},
+                Tina::Math::Vec3{centerX - radius * 0.08F, centerY, centerZ + radius * 0.62F},
+                Tina::Math::Vec3{centerX + radius * 0.08F, centerY, centerZ + radius * 0.84F},
             };
             constexpr std::array witnessColors{
                 Tina::Render::RenderLinearColor{
@@ -2399,7 +2399,7 @@ class Product3DState final : public Tina::IGameState {
         }
 
         struct ProductPointLight final {
-            Tina::Scene::Vec3 position{};
+            Tina::Math::Vec3 position{};
             Tina::Render::RenderLinearColor color{};
             float intensity = 1.0F;
         };
@@ -2409,10 +2409,10 @@ class Product3DState final : public Tina::IGameState {
         const std::array ProductPointLights{
             ProductPointLight{
                 .position = hasBuiltInPointShadowWitness
-                    ? Tina::Scene::Vec3{centerX + radius * 0.2F,
+                    ? Tina::Math::Vec3{centerX + radius * 0.2F,
                                         centerY + radius * 0.15F,
                                         centerZ + radius * 1.8F}
-                    : Tina::Scene::Vec3{centerX - radius * 0.8F,
+                    : Tina::Math::Vec3{centerX - radius * 0.8F,
                                         centerY + radius * 0.9F,
                                         centerZ + radius * 0.75F},
                 .color = {.red = 1.0F, .green = 0.32F, .blue = 0.12F},
@@ -2460,8 +2460,8 @@ class Product3DState final : public Tina::IGameState {
         counters_->authoredPointLight3DCount = static_cast<u32>(ProductPointLights.size());
 
         struct ProductSpotLight final {
-            Tina::Scene::Vec3 position{};
-            Tina::Scene::Vec3 target{};
+            Tina::Math::Vec3 position{};
+            Tina::Math::Vec3 target{};
             Tina::Render::RenderLinearColor color{};
             float intensity = 1.0F;
             float innerConeHalfAngleDegrees = 16.0F;
@@ -2469,7 +2469,7 @@ class Product3DState final : public Tina::IGameState {
             bool castsShadow = false;
         };
         const float spotInfluenceRadius = (std::max)(radius * 2.25F, 3.0F);
-        const Tina::Scene::Vec3 sceneCenter{centerX, centerY, centerZ};
+        const Tina::Math::Vec3 sceneCenter{centerX, centerY, centerZ};
         const std::array ProductSpotLights{
             ProductSpotLight{
                 .position = {centerX - radius * 1.15F, centerY + radius * 1.35F,
@@ -2499,7 +2499,7 @@ class Product3DState final : public Tina::IGameState {
         };
         for (const ProductSpotLight& light : ProductSpotLights)
         {
-            const Tina::Scene::Vec3 positiveZDirection = light.position - light.target;
+            const Tina::Math::Vec3 positiveZDirection = light.position - light.target;
             auto lightEntity = world_->createEntity(Tina::Scene::LocalTransform{
                 .position = light.position,
                 .rotation = rotationFromPositiveZ(positiveZDirection),

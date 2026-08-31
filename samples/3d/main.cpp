@@ -318,7 +318,7 @@ class Extraction3DState final : public Tina::IGameState {
         }
         cameraEntity_ = *cameraResult;
 
-        constexpr std::array<Tina::Scene::Vec3, 4> positions{{
+        constexpr std::array<Tina::Math::Vec3, 4> positions{{
             {-1.5F, 0.0F, 0.0F},
             {1.5F, 0.0F, -1.0F},
             {0.0F, 0.0F, -3.0F},

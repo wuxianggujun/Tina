@@ -66,6 +66,21 @@ public final class TinaNative {
      */
     public static native void nativeSetUseGallery(long session, boolean useGallery);
 
+    /**
+     * Supplies the UI font as a filesystem path.
+     *
+     * <p>Java picks it because /system/fonts is a stable location but its contents are not -- DroidSans on
+     * older emulators, Roboto on modern devices, vendor names elsewhere. A name hard-coded in C++ would
+     * render text on the devices that happen to match and silently fall back to blocks on the rest.
+     *
+     * <p>A path rather than bytes: the engine reads it with its own memory-resource-aware file IO, so
+     * nothing copies a megabyte of font through a JNI array.
+     *
+     * <p>Must be called before the first surface is bound, since that is when the UI context is built.
+     * Without it every glyph draws as a solid block.
+     */
+    public static native void nativeSetUiFontPath(long session, String path);
+
     public static native void nativeDestroySession(long session);
 
     /**

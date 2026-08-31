@@ -2,17 +2,11 @@
 
 #include <tina/asset/AssetHandle.hpp>
 #include <tina/core/base/Types.hpp>
+#include <tina/math/Vec.hpp>
 
 #include <cmath>
 
 namespace Tina::Scene {
-
-struct Vec2 final {
-    float x = 0.0F;
-    float y = 0.0F;
-
-    friend constexpr bool operator==(const Vec2&, const Vec2&) noexcept = default;
-};
 
 struct ColorRgba8 final {
     u8 red = 255;
@@ -74,10 +68,10 @@ struct SpriteRenderer2D final {
     // the Sprite asset and never retains a lease or backend binding here.
     Asset::AssetHandle normalTexture{};
     SpriteOverrideFlags overrides = SpriteOverrideFlags::None;
-    Vec2 sizeOverrideMeters{1.0F, 1.0F};
+    Math::Vec2 sizeOverrideMeters{1.0F, 1.0F};
     // Pivot in [0,1] relative to sprite extents; geometric center is adjusted
     // from the entity WorldTransform position before writing RenderSprite2DInput.
-    Vec2 pivotOverride{0.5F, 0.5F};
+    Math::Vec2 pivotOverride{0.5F, 0.5F};
     // Used only when overrides includes UvRect; otherwise extract uses full [0,1].
     SpriteUvRect uvRectOverride{};
     ColorRgba8 color{};

@@ -99,17 +99,17 @@ auto EditorWorkspaceState::automaticViewportGizmoPoint(float fraction) const noe
     }
     // The automatic drag spans multiple frames. Keep its pointer path anchored
     // to the frozen transaction baseline while preview publication mutates World.
-    const Tina::Scene::Vec3 originWorld =
+    const Tina::Math::Vec3 originWorld =
         viewportGizmo_.selectionCount > 1U ? viewportGizmo_.pivot
                                            : viewportGizmo_.targets[0].baselineWorld.position;
     const ViewportProjectedPoint origin =
         projectViewportWorldPoint(originWorld);
     const ViewportProjectedPoint xAxis = projectViewportWorldPoint(
-        originWorld + Tina::Scene::Vec3{1.0F, 0.0F, 0.0F});
-    const Tina::Scene::Vec3 secondDirection =
+        originWorld + Tina::Math::Vec3{1.0F, 0.0F, 0.0F});
+    const Tina::Math::Vec3 secondDirection =
         workspaceMode_ == WorkspaceMode::World2D
-            ? Tina::Scene::Vec3{0.0F, 1.0F, 0.0F}
-            : Tina::Scene::Vec3{0.0F, 0.0F, 1.0F};
+            ? Tina::Math::Vec3{0.0F, 1.0F, 0.0F}
+            : Tina::Math::Vec3{0.0F, 0.0F, 1.0F};
     const ViewportProjectedPoint secondAxis =
         projectViewportWorldPoint(originWorld + secondDirection);
     if (!origin.projectable || !xAxis.projectable ||
@@ -348,11 +348,11 @@ auto EditorWorkspaceState::viewportTransformTargetCount(
     return count;
 }
 
-auto EditorWorkspaceState::viewportSelectionPivot() const noexcept -> Tina::Scene::Vec3{
+auto EditorWorkspaceState::viewportSelectionPivot() const noexcept -> Tina::Math::Vec3{
     if (!previewWorld_.has_value()) {
         return {};
     }
-    Tina::Scene::Vec3 sum{};
+    Tina::Math::Vec3 sum{};
     Tina::Core::usize count = 0;
     const auto append = [&](u64 stableId) {
         const Tina::Scene::EntityId entity = findPreviewEntity(
@@ -362,7 +362,7 @@ auto EditorWorkspaceState::viewportSelectionPivot() const noexcept -> Tina::Scen
         }
         const Tina::Scene::WorldTransform* transform =
             previewWorld_->worldTransform(entity);
-        if (transform == nullptr || !Tina::Scene::isFinite(transform->position)) {
+        if (transform == nullptr || !Tina::Math::isFinite(transform->position)) {
             return;
         }
         sum = sum + transform->position;
@@ -419,7 +419,7 @@ auto EditorWorkspaceState::captureViewportTransformTargets(
     transaction.selectionCount = viewportSelectedEntityCount_ != 0U
                                      ? viewportSelectedEntityCount_
                                      : Tina::Core::usize{1};
-    Tina::Scene::Vec3 pivotSum{};
+    Tina::Math::Vec3 pivotSum{};
     for (Tina::Core::usize index = 0; index < orderedCount; ++index) {
         const u32 stableId = static_cast<u32>(orderedIds[index]);
         const Tina::Scene::EntityId entity = findPreviewEntity(stableId);
@@ -466,21 +466,21 @@ auto EditorWorkspaceState::captureViewportTransformTargets(
 
 auto EditorWorkspaceState::applyViewportWorldTransformDelta(
     const Tina::Scene::WorldTransform& baseline,
-    Tina::Scene::Vec3 pivot,
+    Tina::Math::Vec3 pivot,
     const Tina::Editor::EditorTransformGizmoDelta& delta,
-    Tina::Scene::Quaternion localBasis) noexcept -> Tina::Core::Result<Tina::Scene::WorldTransform>{
-    const Tina::Scene::Vec3 translation{
+    Tina::Math::Quaternion localBasis) noexcept -> Tina::Core::Result<Tina::Scene::WorldTransform>{
+    const Tina::Math::Vec3 translation{
         delta.translation.x, delta.translation.y, delta.translation.z};
-    const Tina::Scene::Vec3 rotationAxis{
+    const Tina::Math::Vec3 rotationAxis{
         delta.rotationAxis.x, delta.rotationAxis.y, delta.rotationAxis.z};
-    const Tina::Scene::Vec3 scaleFactors{
+    const Tina::Math::Vec3 scaleFactors{
         delta.scaleFactors.x, delta.scaleFactors.y, delta.scaleFactors.z};
     if (!Tina::Scene::isValid(baseline) ||
-        !Tina::Scene::isFinite(pivot) ||
-        !Tina::Scene::isFinite(translation) ||
-        !Tina::Scene::isFinite(rotationAxis) ||
+        !Tina::Math::isFinite(pivot) ||
+        !Tina::Math::isFinite(translation) ||
+        !Tina::Math::isFinite(rotationAxis) ||
         !std::isfinite(delta.rotationDegrees) ||
-        !Tina::Scene::isFinite(scaleFactors) ||
+        !Tina::Math::isFinite(scaleFactors) ||
         scaleFactors.x <= 0.0F || scaleFactors.y <= 0.0F ||
         scaleFactors.z <= 0.0F) {
         return Tina::Core::failure(
@@ -488,39 +488,38 @@ auto EditorWorkspaceState::applyViewportWorldTransformDelta(
             "Viewport group transform contains a non-finite value");
     }
     Tina::Scene::WorldTransform result = baseline;
-    Tina::Scene::Vec3 relative = result.position - pivot;
+    Tina::Math::Vec3 relative = result.position - pivot;
     if (std::abs(delta.rotationDegrees) > 1.0e-6F) {
         const float axisLengthSquared =
-            Tina::Scene::dot(rotationAxis, rotationAxis);
+            Tina::Math::dot(rotationAxis, rotationAxis);
         if (!std::isfinite(axisLengthSquared) || axisLengthSquared <= 1.0e-12F) {
             return Tina::Core::failure(
                 Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
                 "Viewport group rotation has an invalid axis");
         }
-        const Tina::Scene::Vec3 axis =
+        const Tina::Math::Vec3 axis =
             rotationAxis * (1.0F / std::sqrt(axisLengthSquared));
         const float halfRadians =
             delta.rotationDegrees * DegreesToRadians * 0.5F;
         const float sine = std::sin(halfRadians);
-        const Tina::Scene::Quaternion rotationDelta{
+        const Tina::Math::Quaternion rotationDelta{
             .x = axis.x * sine,
             .y = axis.y * sine,
             .z = axis.z * sine,
             .w = std::cos(halfRadians),
         };
-        relative = Tina::Scene::rotate(rotationDelta, relative);
-        result.rotation = Tina::Scene::normalized(
-            Tina::Scene::quaternionMultiply(rotationDelta,
-                                             result.rotation));
+        relative = Tina::Math::rotate(rotationDelta, relative);
+        result.rotation =
+            Tina::Math::normalized(rotationDelta * result.rotation);
     }
-    if (scaleFactors != Tina::Scene::Vec3{1.0F, 1.0F, 1.0F}) {
+    if (scaleFactors != Tina::Math::Vec3{1.0F, 1.0F, 1.0F}) {
         if (delta.orientation ==
             Tina::Editor::EditorTransformGizmoOrientation::Local) {
-            const Tina::Scene::Quaternion basis =
-                Tina::Scene::normalized(localBasis);
-            relative = Tina::Scene::rotate(
+            const Tina::Math::Quaternion basis =
+                Tina::Math::normalized(localBasis);
+            relative = Tina::Math::rotate(
                 basis,
-                Tina::Scene::rotate(Tina::Scene::quaternionConjugate(basis),
+                Tina::Math::rotate(Tina::Math::conjugate(basis),
                                     relative) * scaleFactors);
         } else {
             relative = relative * scaleFactors;
@@ -573,7 +572,7 @@ auto EditorWorkspaceState::localTransformFromWorld(Tina::Scene::EntityId entity,
     }
     Tina::Scene::LocalTransform local{
         .position = world.position,
-        .rotation = Tina::Scene::normalized(world.rotation),
+        .rotation = Tina::Math::normalized(world.rotation),
         .scale = world.scale,
     };
     const Tina::Scene::EntityId parent = previewWorld_->parent(entity);
@@ -593,19 +592,19 @@ auto EditorWorkspaceState::localTransformFromWorld(Tina::Scene::EntityId entity,
                 Tina::Editor::EditorErrorCode::InvalidAuthoringOperation,
                 "Viewport transform cannot edit below a zero-scale parent");
         }
-        const Tina::Scene::Quaternion inverseRotation =
-            Tina::Scene::quaternionConjugate(
-                Tina::Scene::normalized(parentWorld->rotation));
-        const Tina::Scene::Vec3 relative = world.position - parentWorld->position;
-        const Tina::Scene::Vec3 parentLocal =
-            Tina::Scene::rotate(inverseRotation, relative);
+        const Tina::Math::Quaternion inverseRotation =
+            Tina::Math::conjugate(
+                Tina::Math::normalized(parentWorld->rotation));
+        const Tina::Math::Vec3 relative = world.position - parentWorld->position;
+        const Tina::Math::Vec3 parentLocal =
+            Tina::Math::rotate(inverseRotation, relative);
         local.position = {
             .x = parentLocal.x / parentWorld->scale.x,
             .y = parentLocal.y / parentWorld->scale.y,
             .z = parentLocal.z / parentWorld->scale.z,
         };
-        local.rotation = Tina::Scene::normalized(
-            Tina::Scene::quaternionMultiply(inverseRotation, world.rotation));
+        local.rotation =
+            Tina::Math::normalized(inverseRotation * world.rotation);
         local.scale = {
             .x = world.scale.x / parentWorld->scale.x,
             .y = world.scale.y / parentWorld->scale.y,
@@ -824,7 +823,7 @@ auto EditorWorkspaceState::processViewportGizmo(Tina::PrimaryWindowUITreeUpdater
         viewportGizmo_.processedGizmoRevision = snapshot.revision;
         viewportGizmo_.delta = snapshot.delta;
         bool changed = false;
-        Tina::Scene::Quaternion localBasis = viewportGizmo_.baselineTransform.rotation;
+        Tina::Math::Quaternion localBasis = viewportGizmo_.baselineTransform.rotation;
         if (viewportGizmo_.targetCount != 0U) {
             localBasis = viewportGizmo_.targets[0].baselineWorld.rotation;
         }
@@ -987,7 +986,7 @@ auto EditorWorkspaceState::processViewportGizmo(Tina::PrimaryWindowUITreeUpdater
 }
 
 auto EditorWorkspaceState::projectViewportWorldPoint(
-    Tina::Scene::Vec3 worldPoint) const noexcept -> ViewportProjectedPoint{
+    Tina::Math::Vec3 worldPoint) const noexcept -> ViewportProjectedPoint{
     if (!previewWorld_.has_value() || viewportLogicalRect_.width <= 0.0F ||
         viewportLogicalRect_.height <= 0.0F) {
         return {};
@@ -1021,14 +1020,14 @@ auto EditorWorkspaceState::projectViewportWorldPoint(
     if (camera == nullptr) {
         return {};
     }
-    const Tina::Scene::Vec3 relative = worldPoint - camera->position;
-    const Tina::Scene::Vec3 cameraSpace = Tina::Scene::rotate(
-        Tina::Scene::quaternionConjugate(camera->rotation), relative);
+    const Tina::Math::Vec3 relative = worldPoint - camera->position;
+    const Tina::Math::Vec3 cameraSpace = Tina::Math::rotate(
+        Tina::Math::conjugate(camera->rotation), relative);
     const float depth = -cameraSpace.z;
     if (!std::isfinite(depth) || depth <= 0.01F) {
         return {};
     }
-    const float tangent = std::tan(55.0F * DegreesToRadians * 0.5F);
+    const float tangent = std::tan(ViewportPerspectiveFovDegrees * DegreesToRadians * 0.5F);
     const float aspect = viewportLogicalRect_.width / viewportLogicalRect_.height;
     const float normalizedDeviceX = cameraSpace.x / (depth * tangent * aspect);
     const float normalizedDeviceY = cameraSpace.y / (depth * tangent);
@@ -1331,7 +1330,7 @@ auto EditorWorkspaceState::updateViewportTransformGizmo(
         return collapseViewportGizmoVisuals(tree);
     }
     if (!viewportGizmo_.captured) {
-        const Tina::Scene::Vec3 gizmoOrigin = viewportSelectedEntityCount_ > 1U
+        const Tina::Math::Vec3 gizmoOrigin = viewportSelectedEntityCount_ > 1U
                                                   ? viewportSelectionPivot()
                                                   : transform->position;
         const ViewportProjectedPoint origin =
@@ -1340,9 +1339,9 @@ auto EditorWorkspaceState::updateViewportTransformGizmo(
             return collapseViewportGizmoVisuals(tree);
         }
         constexpr std::array worldDirections{
-            Tina::Scene::Vec3{1.0F, 0.0F, 0.0F},
-            Tina::Scene::Vec3{0.0F, 1.0F, 0.0F},
-            Tina::Scene::Vec3{0.0F, 0.0F, 1.0F},
+            Tina::Math::Vec3{1.0F, 0.0F, 0.0F},
+            Tina::Math::Vec3{0.0F, 1.0F, 0.0F},
+            Tina::Math::Vec3{0.0F, 0.0F, 1.0F},
         };
         Tina::Editor::EditorTransformGizmoFrame frame{
             .dimension = workspaceMode_ == WorkspaceMode::World2D
@@ -1352,9 +1351,9 @@ auto EditorWorkspaceState::updateViewportTransformGizmo(
         };
         for (Tina::Core::usize axis = 0; axis < worldDirections.size();
              ++axis) {
-            const Tina::Scene::Vec3 worldDirection = worldDirections[axis];
-            const Tina::Scene::Vec3 localDirection =
-                Tina::Scene::rotate(transform->rotation, worldDirection);
+            const Tina::Math::Vec3 worldDirection = worldDirections[axis];
+            const Tina::Math::Vec3 localDirection =
+                Tina::Math::rotate(transform->rotation, worldDirection);
             const ViewportProjectedPoint worldEndpoint =
                 projectViewportWorldPoint(gizmoOrigin + worldDirection);
             const ViewportProjectedPoint localEndpoint =
@@ -1442,6 +1441,31 @@ auto EditorWorkspaceState::viewportStableIdAtPosition(
         position.y >= viewportLogicalRect_.bottom()) {
         return std::nullopt;
     }
+    // 3D picks against world geometry along a ray, so the nearest object under the
+    // cursor wins. Screen-space bounds cannot express depth: they would hand the
+    // click to whichever box happens to be smaller on screen, which is the far
+    // object as often as the near one.
+    if (workspaceMode_ != WorkspaceMode::World2D) {
+        const std::optional<Tina::Math::Ray> ray = viewportPickRay(position);
+        if (!ray) {
+            return std::nullopt;
+        }
+        std::array<Tina::Editor::EditorViewportPickCandidate,
+                   Tina::Editor::EditorViewportPickCandidateCapacity>
+            candidates{};
+        const Tina::Core::usize candidateCount =
+            collectViewportPickCandidates(candidates);
+        const std::optional<Tina::Editor::EditorViewportPickHit> hit =
+            Tina::Editor::pickNearestViewportCandidate(
+                *ray, std::span{candidates.data(), candidateCount});
+        if (!hit) {
+            return std::nullopt;
+        }
+        return static_cast<u32>(hit->stableId);
+    }
+
+    // 2D uses an orthographic camera, so the screen bounds are a linear map of the
+    // world bounds and carry no depth ambiguity to resolve.
     std::array<Tina::Editor::EditorMarqueeCandidate,
                ViewportMarqueeCandidateCapacity>
         candidates{};
@@ -1631,7 +1655,7 @@ auto EditorWorkspaceState::updateViewportCollisionShapeVisuals(
             continue;
         }
         const auto& shape = *entity.physicsShape;
-        Tina::Scene::Vec3 center = transform->position;
+        Tina::Math::Vec3 center = transform->position;
         center.x += shape.localCenterX;
         center.y += shape.localCenterY;
         const ViewportProjectedPoint projected =
@@ -1733,7 +1757,7 @@ auto EditorWorkspaceState::collectViewportMarqueeCandidates(
             const float pixelsPerWorldUnit =
                 viewportLogicalRect_.height /
                 (2.0F * projected.cameraDepth *
-                 std::tan(55.0F * DegreesToRadians * 0.5F));
+                 std::tan(ViewportPerspectiveFovDegrees * DegreesToRadians * 0.5F));
             halfWidth = halfHeight = (std::max)(
                 6.0F, mesh->localBounds.radius * maximumScale *
                           pixelsPerWorldUnit);
@@ -1758,6 +1782,71 @@ auto EditorWorkspaceState::collectViewportMarqueeCandidates(
         }
     }
     return count;
+}
+
+auto EditorWorkspaceState::collectViewportPickCandidates(
+    std::span<Tina::Editor::EditorViewportPickCandidate> output) const noexcept
+    -> Tina::Core::usize{
+    if (!previewWorld_.has_value() || workspaceMode_ == WorkspaceMode::World2D) {
+        return 0;
+    }
+    Tina::Core::usize count = 0;
+    for (const auto& binding : preview3DBindings_) {
+        if (binding.stableNodeId == 0U || count == output.size()) {
+            break;
+        }
+        const Tina::Scene::WorldTransform* transform =
+            previewWorld_->worldTransform(binding.entity);
+        if (transform == nullptr) {
+            continue;
+        }
+        const Tina::Scene::MeshRenderer3D* mesh =
+            previewWorld_->meshRenderer3D(binding.entity);
+        // Authored local bounds, center included. Reducing this to a radius around
+        // the transform origin is what previously put the hot zone away from an
+        // imported mesh whose bounds are offset.
+        const Tina::Math::Sphere localBounds =
+            mesh != nullptr
+                ? Tina::Math::Sphere{
+                      Tina::Math::Vec3{mesh->localBounds.centerX,
+                                       mesh->localBounds.centerY,
+                                       mesh->localBounds.centerZ},
+                      mesh->localBounds.radius}
+                // A node without a mesh still needs a grabbable volume; use a small
+                // sphere at its origin so empties stay selectable.
+                : Tina::Math::Sphere{Tina::Math::Vec3{}, 0.25F};
+        const std::optional<Tina::Math::Sphere> worldBounds = Tina::Math::transformed(
+            localBounds, transform->position, transform->rotation, transform->scale);
+        if (!worldBounds) {
+            continue;
+        }
+        output[count++] = Tina::Editor::EditorViewportPickCandidate{
+            .stableId = binding.stableNodeId,
+            .worldBounds = *worldBounds,
+        };
+    }
+    return count;
+}
+
+auto EditorWorkspaceState::viewportPickRay(
+    UI::UILogicalPoint position) const noexcept -> std::optional<Tina::Math::Ray>{
+    if (!previewWorld_.has_value()) {
+        return std::nullopt;
+    }
+    const Tina::Scene::WorldTransform* camera =
+        previewWorld_->worldTransform(previewCamera3D_);
+    if (camera == nullptr) {
+        return std::nullopt;
+    }
+    return Tina::Editor::editorViewportPickRay(Tina::Editor::EditorViewportRayQuery{
+        .cameraPosition = camera->position,
+        .cameraRotation = camera->rotation,
+        .verticalFovDegrees = ViewportPerspectiveFovDegrees,
+        .viewportWidth = viewportLogicalRect_.width,
+        .viewportHeight = viewportLogicalRect_.height,
+        .pointerX = position.x - viewportLogicalRect_.x,
+        .pointerY = position.y - viewportLogicalRect_.y,
+    });
 }
 
 auto EditorWorkspaceState::processViewportMarquee(

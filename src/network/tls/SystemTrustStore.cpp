@@ -1,5 +1,7 @@
 #include "SystemTrustStore.hpp"
 
+#include <tina/core/base/ScopeExit.hpp>
+
 #include <mbedtls/base64.h>
 
 #include <array>
@@ -70,6 +72,9 @@ void appendPemBlock(std::string& out, const unsigned char* der, Core::usize derS
     if (store == nullptr) {
         return pem;
     }
+    auto storeGuard = Core::makeScopeExit([store]() noexcept {
+        ::CertCloseStore(store, 0);
+    });
 
     PCCERT_CONTEXT context = nullptr;
     while ((context = ::CertEnumCertificatesInStore(store, context)) != nullptr) {
@@ -85,7 +90,6 @@ void appendPemBlock(std::string& out, const unsigned char* der, Core::usize derS
 
     // CERT_CLOSE_STORE_FORCE_FLAG would free contexts still referenced elsewhere;
     // the enumeration above released each one as it advanced.
-    ::CertCloseStore(store, 0);
     return pem;
 }
 
@@ -113,6 +117,9 @@ void appendPemBlock(std::string& out, const unsigned char* der, Core::usize derS
         if (file == nullptr) {
             continue;
         }
+        auto fileGuard = Core::makeScopeExit([file]() noexcept {
+            std::fclose(file);
+        });
 
         std::string contents;
         std::array<char, 8192> buffer{};
@@ -123,8 +130,6 @@ void appendPemBlock(std::string& out, const unsigned char* der, Core::usize derS
             }
             contents.append(buffer.data(), read);
         }
-        std::fclose(file);
-
         if (contents.empty()) {
             continue;
         }
@@ -153,8 +158,19 @@ const std::string& systemTrustAnchorsPem()
 
     const std::lock_guard<std::mutex> guard{storeMutex()};
     if (!g_statistics.loadAttempted) {
+        // Publish the cache only after the complete read succeeds. If allocation
+        // throws, the next caller may retry and the partial statistics are reset.
+        g_statistics.certificateCount = 0;
+        g_statistics.skippedEntryCount = 0;
+        try {
+            std::string loaded = readPlatformAnchors();
+            cached = std::move(loaded);
+        } catch (...) {
+            g_statistics.certificateCount = 0;
+            g_statistics.skippedEntryCount = 0;
+            throw;
+        }
         g_statistics.loadAttempted = true;
-        cached = readPlatformAnchors();
         g_statistics.loaded = !cached.empty();
     }
     return cached;

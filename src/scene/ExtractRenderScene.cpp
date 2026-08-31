@@ -1,5 +1,7 @@
 #include <tina/scene/ExtractRenderScene.hpp>
 
+#include <tina/math/Frustum.hpp>
+#include <tina/math/Geometry3D.hpp>
 #include <tina/scene/Camera2D.hpp>
 #include <tina/scene/DirectionalLight3D.hpp>
 #include <tina/scene/MeshRenderer3D.hpp>
@@ -28,9 +30,9 @@ namespace {
 
 // WorldTransform stores a unit quaternion. For 2D XY content the authored spin
 // is around +Z; extract the signed angle from the quaternion (Z-up rotation).
-[[nodiscard]] float rotationRadiansAroundZ(const Quaternion& rotation) noexcept
+[[nodiscard]] float rotationRadiansAroundZ(const Math::Quaternion& rotation) noexcept
 {
-    const Quaternion unit = normalized(rotation);
+    const Math::Quaternion unit = Math::normalized(rotation);
     // atan2(2*(w*z + x*y), 1 - 2*(y*y + z*z)) for yaw about Z with x~y~0.
     const float sinYCosX = 2.0F * (unit.w * unit.z + unit.x * unit.y);
     const float cosYCosX = 1.0F - 2.0F * (unit.y * unit.y + unit.z * unit.z);
@@ -53,7 +55,7 @@ namespace {
     return 1.0F;
 }
 
-[[nodiscard]] Vec2 resolvePivot(const SpriteRenderer2D& sprite) noexcept
+[[nodiscard]] Math::Vec2 resolvePivot(const SpriteRenderer2D& sprite) noexcept
 {
     if (hasFlag(sprite.overrides, SpriteOverrideFlags::Pivot)) {
         return sprite.pivotOverride;
@@ -89,11 +91,6 @@ struct ShadowOccluder2DCandidate final {
     Render::Sprite2DShadowSegment segment{};
 };
 
-struct WorldBoundingSphere final {
-    Vec3 center{};
-    float radius = 0.0F;
-};
-
 [[nodiscard]] float snapCameraCoordinate(float value, float pixelsPerMeter) noexcept
 {
     const double snapped = std::round(static_cast<double>(value) * pixelsPerMeter) / pixelsPerMeter;
@@ -117,6 +114,9 @@ struct WorldBoundingSphere final {
     return std::hypot(outsideX, outsideY) <= static_cast<double>(light.radiusMeters);
 }
 
+// Culls against the camera basis directly rather than building a Math::Frustum,
+// because each item here arrives with its own camera reference and the basis form
+// keeps the double accumulation this classification has always used.
 [[nodiscard]] bool sphereIntersectsPerspectiveCamera(
     float positionX,
     float positionY,
@@ -124,56 +124,33 @@ struct WorldBoundingSphere final {
     float influenceRadius,
     const Render::RenderPerspectiveCamera& camera) noexcept
 {
-    const Vec3 cameraPosition{camera.positionX, camera.positionY, camera.positionZ};
-    const Vec3 forward{camera.forwardX, camera.forwardY, camera.forwardZ};
-    const Vec3 up{camera.upX, camera.upY, camera.upZ};
-    const Vec3 right{
-        forward.y * up.z - forward.z * up.y,
-        forward.z * up.x - forward.x * up.z,
-        forward.x * up.y - forward.y * up.x,
-    };
-    const Vec3 relative =
-        Vec3{positionX, positionY, positionZ} - cameraPosition;
-    const double x = static_cast<double>(dot(relative, right));
-    const double y = static_cast<double>(dot(relative, up));
-    const double depth = static_cast<double>(dot(relative, forward));
-    const double radius = static_cast<double>(influenceRadius);
-
-    if (!std::isfinite(x) || !std::isfinite(y) || !std::isfinite(depth) ||
-        !std::isfinite(radius) || depth + radius < camera.nearPlaneMeters ||
-        depth - radius > camera.farPlaneMeters) {
-        return false;
-    }
-
-    const double tangentY =
-        std::tan(static_cast<double>(camera.verticalFovDegrees) * std::numbers::pi / 360.0);
-    const double tangentX = tangentY * static_cast<double>(camera.aspectRatio);
-    const double horizontalRadiusScale = std::hypot(tangentX, 1.0);
-    const double verticalRadiusScale = std::hypot(tangentY, 1.0);
-    return depth * tangentX + x >= -radius * horizontalRadiusScale &&
-           depth * tangentX - x >= -radius * horizontalRadiusScale &&
-           depth * tangentY + y >= -radius * verticalRadiusScale &&
-           depth * tangentY - y >= -radius * verticalRadiusScale;
+    return Math::sphereIntersectsPerspectiveFrustum(
+        Math::Vec3{positionX, positionY, positionZ},
+        influenceRadius,
+        Math::Vec3{camera.positionX, camera.positionY, camera.positionZ},
+        Math::Vec3{camera.forwardX, camera.forwardY, camera.forwardZ},
+        Math::Vec3{camera.upX, camera.upY, camera.upZ},
+        camera.verticalFovDegrees,
+        camera.aspectRatio,
+        camera.nearPlaneMeters,
+        camera.farPlaneMeters);
 }
 
-[[nodiscard]] std::optional<WorldBoundingSphere> resolveWorldBoundingSphere(
+[[nodiscard]] std::optional<Math::Sphere> resolveWorldBoundingSphere(
     const Render::RenderBoundingSphereInput& localBounds,
     const WorldTransform& transform) noexcept
 {
-    if (!isValid(transform) || transform.scale.x <= 0.0F || transform.scale.y <= 0.0F
-        || transform.scale.z <= 0.0F) {
+    if (!isValid(transform)) {
         return std::nullopt;
     }
-
-    const Quaternion rotation = normalized(transform.rotation);
-    const Vec3 scaledLocalCenter =
-        Vec3{localBounds.centerX, localBounds.centerY, localBounds.centerZ} * transform.scale;
-    const WorldBoundingSphere sphere{
-        .center = transform.position + rotate(rotation, scaledLocalCenter),
-        .radius = localBounds.radius
-            * std::max({transform.scale.x, transform.scale.y, transform.scale.z}),
-    };
-    if (!isFinite(sphere.center) || !std::isfinite(sphere.radius) || sphere.radius <= 0.0F) {
+    const std::optional<Math::Sphere> sphere = Math::transformed(
+        Math::Sphere{
+            Math::Vec3{localBounds.centerX, localBounds.centerY, localBounds.centerZ},
+            localBounds.radius},
+        transform.position,
+        transform.rotation,
+        transform.scale);
+    if (!sphere || sphere->radius <= 0.0F) {
         return std::nullopt;
     }
     return sphere;
@@ -282,19 +259,21 @@ struct WorldBoundingSphere final {
                 "Scene active ShadowOccluder2D or its WorldTransform is invalid");
         }
 
-        const Vec3 scaledStart{
+        const Math::Vec3 scaledStart{
             component->localStartX * transform->scale.x,
             component->localStartY * transform->scale.y,
             0.0F,
         };
-        const Vec3 scaledEnd{
+        const Math::Vec3 scaledEnd{
             component->localEndX * transform->scale.x,
             component->localEndY * transform->scale.y,
             0.0F,
         };
-        const Vec3 worldStart = transform->position + rotate(transform->rotation, scaledStart);
-        const Vec3 worldEnd = transform->position + rotate(transform->rotation, scaledEnd);
-        if (!isFinite(worldStart) || !isFinite(worldEnd) ||
+        const Math::Vec3 worldStart =
+            transform->position + Math::rotate(transform->rotation, scaledStart);
+        const Math::Vec3 worldEnd =
+            transform->position + Math::rotate(transform->rotation, scaledEnd);
+        if (!Math::isFinite(worldStart) || !Math::isFinite(worldEnd) ||
             (worldStart.x == worldEnd.x && worldStart.y == worldEnd.y)) {
             return Core::failure(
                 SceneErrorCode::InvalidComponent,
@@ -384,12 +363,12 @@ struct WorldBoundingSphere final {
                 "Scene active DirectionalLight3D or its WorldTransform is invalid");
         }
 
-        const Vec3 directionTowardLight =
-            rotate(normalized(transform->rotation), Vec3{0.0F, 0.0F, 1.0F});
+        const Math::Vec3 directionTowardLight = Math::rotate(
+            Math::normalized(transform->rotation), Math::Vec3{0.0F, 0.0F, 1.0F});
         const float colorR = component->color.red * component->intensity;
         const float colorG = component->color.green * component->intensity;
         const float colorB = component->color.blue * component->intensity;
-        if (!isFinite(directionTowardLight) || !std::isfinite(colorR) ||
+        if (!Math::isFinite(directionTowardLight) || !std::isfinite(colorR) ||
             !std::isfinite(colorG) || !std::isfinite(colorB)) {
             return Core::failure(
                 SceneErrorCode::InvalidComponent,
@@ -531,8 +510,8 @@ struct WorldBoundingSphere final {
                 "Scene active SpotLight3D or its WorldTransform is invalid");
         }
 
-        const Vec3 directionFromLight =
-            rotate(normalized(transform->rotation), Vec3{0.0F, 0.0F, -1.0F});
+        const Math::Vec3 directionFromLight = Math::rotate(
+            Math::normalized(transform->rotation), Math::Vec3{0.0F, 0.0F, -1.0F});
         const float colorR = component->color.red * component->intensity;
         const float colorG = component->color.green * component->intensity;
         const float colorB = component->color.blue * component->intensity;
@@ -540,8 +519,9 @@ struct WorldBoundingSphere final {
             spotLightConeCosine(component->innerConeHalfAngleDegrees);
         const float outerConeCosine =
             spotLightConeCosine(component->outerConeHalfAngleDegrees);
-        const float directionLengthSquared = dot(directionFromLight, directionFromLight);
-        if (!isFinite(directionFromLight) || !std::isfinite(directionLengthSquared) ||
+        const float directionLengthSquared =
+            Math::dot(directionFromLight, directionFromLight);
+        if (!Math::isFinite(directionFromLight) || !std::isfinite(directionLengthSquared) ||
             directionLengthSquared <= 0.0F || !std::isfinite(colorR) ||
             !std::isfinite(colorG) || !std::isfinite(colorB) ||
             !std::isfinite(innerConeCosine) || !std::isfinite(outerConeCosine)) {
@@ -557,8 +537,8 @@ struct WorldBoundingSphere final {
             continue;
         }
         const WorldTransform* transform = world.worldTransform(entity);
-        const Vec3 directionFromLight =
-            rotate(normalized(transform->rotation), Vec3{0.0F, 0.0F, -1.0F});
+        const Math::Vec3 directionFromLight = Math::rotate(
+            Math::normalized(transform->rotation), Math::Vec3{0.0F, 0.0F, -1.0F});
         const Render::Mesh3DSpotLight light{
             .positionX = transform->position.x,
             .positionY = transform->position.y,
@@ -804,7 +784,7 @@ Core::Status extractRenderSceneFromWorld(
 
         const float widthMeters = resolveWidthMeters(*sprite);
         const float heightMeters = resolveHeightMeters(*sprite);
-        const Vec2 pivot = resolvePivot(*sprite);
+        const Math::Vec2 pivot = resolvePivot(*sprite);
         // Pivot (0.5,0.5) is geometric center of the entity position. Other
         // pivots shift the render center in local sprite space before world
         // scale (uniform XY) and Z rotation are applied.
@@ -927,9 +907,10 @@ Core::Status extractRenderSceneFromWorld(
             if (const Core::Status status = writer.setPerspectiveCamera(input); !status) {
                 return status;
             }
-            const Quaternion rotation = normalized(transform->rotation);
-            const Vec3 forward = rotate(rotation, Vec3{0.0F, 0.0F, -1.0F});
-            const Vec3 up = rotate(rotation, Vec3{0.0F, 1.0F, 0.0F});
+            const Math::Quaternion rotation = Math::normalized(transform->rotation);
+            const Math::Vec3 forward =
+                Math::rotate(rotation, Math::Vec3{0.0F, 0.0F, -1.0F});
+            const Math::Vec3 up = Math::rotate(rotation, Math::Vec3{0.0F, 1.0F, 0.0F});
             const float surfaceAspect =
                 static_cast<float>(params.surfaceViewport.pixelWidth) /
                 static_cast<float>(params.surfaceViewport.pixelHeight);
@@ -988,7 +969,7 @@ Core::Status extractRenderSceneFromWorld(
                 "Scene MeshRenderer3D has invalid render properties");
         }
         const WorldTransform* transform = world.worldTransform(entity);
-        const std::optional<WorldBoundingSphere> worldBounds = transform == nullptr
+        const std::optional<Math::Sphere> worldBounds = transform == nullptr
             ? std::nullopt
             : resolveWorldBoundingSphere(mesh->localBounds, *transform);
         if (!worldBounds) {
@@ -1075,7 +1056,7 @@ Core::Status extractRenderSceneFromWorld(
                 "Scene SkinnedMeshRenderer3D has invalid render properties");
         }
         const WorldTransform* transform = world.worldTransform(entity);
-        const std::optional<WorldBoundingSphere> worldBounds = transform == nullptr
+        const std::optional<Math::Sphere> worldBounds = transform == nullptr
             ? std::nullopt
             : resolveWorldBoundingSphere(mesh->localBounds, *transform);
         if (!worldBounds) {

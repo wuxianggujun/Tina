@@ -1060,11 +1060,11 @@ struct TileMapResources final {
     if (const auto status = particles.emitBurst(persistentBurst); !status) return status;
 
     constexpr std::array firstTrailPoints{
-        Tina::Scene::Vec2{3.2F, 1.4F},
-        Tina::Scene::Vec2{3.7F, 1.8F},
-        Tina::Scene::Vec2{4.2F, 1.5F},
+        Tina::Math::Vec2{3.2F, 1.4F},
+        Tina::Math::Vec2{3.7F, 1.8F},
+        Tina::Math::Vec2{4.2F, 1.5F},
     };
-    for (const Tina::Scene::Vec2 point : firstTrailPoints)
+    for (const Tina::Math::Vec2 point : firstTrailPoints)
     {
         if (const auto status = trail.appendPoint(point); !status)
         {
@@ -1074,10 +1074,10 @@ struct TileMapResources final {
     trail.breakTrail();
     ++counters.trailBreaks;
     constexpr std::array secondTrailPoints{
-        Tina::Scene::Vec2{4.35F, 2.25F},
-        Tina::Scene::Vec2{4.85F, 2.65F},
+        Tina::Math::Vec2{4.35F, 2.25F},
+        Tina::Math::Vec2{4.85F, 2.65F},
     };
-    for (const Tina::Scene::Vec2 point : secondTrailPoints)
+    for (const Tina::Math::Vec2 point : secondTrailPoints)
     {
         if (const auto status = trail.appendPoint(point); !status)
         {
@@ -1502,7 +1502,7 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     Tina::Core::AssetId clipId,
     Tina::Core::AssetId expectedTextureId,
     Tina::Asset::AssetHandle normalTexture,
-    Tina::Scene::Vec2 characterSize,
+    Tina::Math::Vec2 characterSize,
     ResolvedCharacterAnimationClip& output)
 {
     auto clipHandle = system.find(clipId);
@@ -1661,7 +1661,7 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
                                    "controller required for character animation");
     }
     const auto& config = resources.controller->config();
-    const Tina::Scene::Vec2 characterSize{config.halfWidth * 2.0F, config.halfHeight * 2.0F};
+    const Tina::Math::Vec2 characterSize{config.halfWidth * 2.0F, config.halfHeight * 2.0F};
     if (auto status = resolveCharacterAnimationClip(
             system, idleClipId, characterTextureId, characterNormalTexture, characterSize,
             resources.idleAnimation);
@@ -2245,11 +2245,11 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     Tina::Physics2D::PhysicsShape2DDesc cratePolygon;
     cratePolygon.kind = Tina::Physics2D::PhysicsShapeKind2D::ConvexPolygon;
     cratePolygon.polygonVertices = {
-        Tina::Physics2D::PhysicsVec2{-resources.dynamicHalfExtent, -resources.dynamicHalfExtent},
-        Tina::Physics2D::PhysicsVec2{resources.dynamicHalfExtent * 0.6F, -resources.dynamicHalfExtent},
-        Tina::Physics2D::PhysicsVec2{resources.dynamicHalfExtent, 0.0F},
-        Tina::Physics2D::PhysicsVec2{resources.dynamicHalfExtent * 0.6F, resources.dynamicHalfExtent},
-        Tina::Physics2D::PhysicsVec2{-resources.dynamicHalfExtent, resources.dynamicHalfExtent},
+        Tina::Math::Vec2{-resources.dynamicHalfExtent, -resources.dynamicHalfExtent},
+        Tina::Math::Vec2{resources.dynamicHalfExtent * 0.6F, -resources.dynamicHalfExtent},
+        Tina::Math::Vec2{resources.dynamicHalfExtent, 0.0F},
+        Tina::Math::Vec2{resources.dynamicHalfExtent * 0.6F, resources.dynamicHalfExtent},
+        Tina::Math::Vec2{-resources.dynamicHalfExtent, resources.dynamicHalfExtent},
     };
     cratePolygon.polygonVertexCount = 5;
     cratePolygon.density = 1.0F;
@@ -2501,11 +2501,11 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     Tina::Physics2D::PhysicsShape2DDesc chainShapeDesc;
     chainShapeDesc.kind = Tina::Physics2D::PhysicsShapeKind2D::Chain;
     chainShapeDesc.chainVertices = {
-        Tina::Physics2D::PhysicsVec2{-2.0F, 0.0F},
-        Tina::Physics2D::PhysicsVec2{-1.0F, 0.5F},
-        Tina::Physics2D::PhysicsVec2{0.0F, 0.0F},
-        Tina::Physics2D::PhysicsVec2{1.0F, -0.5F},
-        Tina::Physics2D::PhysicsVec2{2.0F, 0.0F},
+        Tina::Math::Vec2{-2.0F, 0.0F},
+        Tina::Math::Vec2{-1.0F, 0.5F},
+        Tina::Math::Vec2{0.0F, 0.0F},
+        Tina::Math::Vec2{1.0F, -0.5F},
+        Tina::Math::Vec2{2.0F, 0.0F},
     };
     chainShapeDesc.chainVertexCount = 5;
     chainShapeDesc.chainLoop = false;

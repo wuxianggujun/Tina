@@ -4,6 +4,7 @@ set(TINA_SCENE_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/scene/CameraFollow2D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/DirectionalLight3D.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/Entity.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/scene/EntityMetadata.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/ExtractRenderScene.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/Fx2DFactory.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/scene/MeshRenderer3D.hpp
@@ -48,8 +49,10 @@ add_library(Tina::Scene ALIAS tina_scene)
 
 target_compile_features(tina_scene PUBLIC cxx_std_23)
 target_include_directories(tina_scene PUBLIC ${PROJECT_SOURCE_DIR}/include)
+# Math is PUBLIC here, unlike in Render: Transform.hpp and SpriteRenderer2D.hpp
+# name Math::Vec3 / Math::Vec2 / Math::Quaternion in published component fields.
 target_link_libraries(tina_scene
-    PUBLIC Tina::Core Tina::Render Tina::AssetFormat Tina::AssetTypes
+    PUBLIC Tina::Core Tina::Math Tina::Render Tina::AssetFormat Tina::AssetTypes
     PRIVATE "$<BUILD_INTERFACE:Tina::ProjectOptions>"
 )
 set_target_properties(tina_scene PROPERTIES CXX_EXTENSIONS OFF)

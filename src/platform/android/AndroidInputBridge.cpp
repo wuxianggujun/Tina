@@ -179,6 +179,80 @@ bool makeAndroidTextEventFromUtf16(std::u16string_view utf16, AndroidTextEvent& 
     return true;
 }
 
+bool makeAndroidCommitEventsFromUtf16(std::u16string_view utf16,
+                                      std::span<AndroidCompositionEvent> events,
+                                      usize& eventCount) noexcept
+{
+    eventCount = 0;
+    if (utf16.empty())
+    {
+        return false;
+    }
+
+    usize offset = 0;
+    while (offset < utf16.size())
+    {
+        if (eventCount == events.size())
+        {
+            eventCount = 0;
+            return false;
+        }
+
+        const usize chunkStart = offset;
+        usize chunkBytes = 0;
+        while (offset < utf16.size())
+        {
+            const char16_t first = utf16[offset];
+            if (first == 0 || (first >= 0xDC00U && first <= 0xDFFFU))
+            {
+                eventCount = 0;
+                return false;
+            }
+
+            usize codeUnits = 1;
+            usize utf8Bytes = 0;
+            if (first >= 0xD800U && first <= 0xDBFFU)
+            {
+                if (offset + 1 >= utf16.size() || utf16[offset + 1] < 0xDC00U ||
+                    utf16[offset + 1] > 0xDFFFU)
+                {
+                    eventCount = 0;
+                    return false;
+                }
+                codeUnits = 2;
+                utf8Bytes = 4;
+            } else if (first <= 0x7FU)
+            {
+                utf8Bytes = 1;
+            } else if (first <= 0x7FFU)
+            {
+                utf8Bytes = 2;
+            } else
+            {
+                utf8Bytes = 3;
+            }
+
+            if (chunkBytes + utf8Bytes > AndroidCompositionPreeditBytes)
+            {
+                break;
+            }
+            chunkBytes += utf8Bytes;
+            offset += codeUnits;
+        }
+
+        AndroidCompositionEvent& event = events[eventCount];
+        if (!makeAndroidCompositionEventFromUtf16(utf16.substr(chunkStart, offset - chunkStart), 0,
+                                                  AndroidCompositionAction::Commit, event) ||
+            event.byteCount == 0)
+        {
+            eventCount = 0;
+            return false;
+        }
+        ++eventCount;
+    }
+    return true;
+}
+
 namespace {
 
 // Android KEYCODE_* values, spelled out rather than included from <android/keycodes.h>.

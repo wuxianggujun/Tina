@@ -5,6 +5,7 @@
 #include <tina/audio/AudioEngine.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/gameplay2d/Scene2DPhysicsBridge.hpp>
+#include <tina/math/Vec.hpp>
 #include <tina/navigation2d/NavigationGrid2D.hpp>
 #include <tina/render/RenderScene.hpp>
 #include <tina/scene/Entity.hpp>
@@ -229,7 +230,7 @@ class Scene2DRuntime final {
     // World position the node was instantiated at, or {0,0} for an unknown entity.
     // Particle origins are already offset by it; a game appending trail points
     // needs it to place them in the same space.
-    [[nodiscard]] Scene::Vec2 fxOrigin(Scene::EntityId entity) const noexcept;
+    [[nodiscard]] Math::Vec2 fxOrigin(Scene::EntityId entity) const noexcept;
 
   private:
     struct TileMapEntry final {
@@ -255,7 +256,7 @@ class Scene2DRuntime final {
         // Node world position at build. The Fx2D payload's own origin is authored
         // relative to the node, so both are summed rather than one replacing the
         // other -- otherwise moving the node in the Editor changes nothing.
-        Scene::Vec2 origin{};
+        Math::Vec2 origin{};
         bool active = true;
     };
 

@@ -2,6 +2,7 @@
 
 #include <tina/core/base/Types.hpp>
 #include <tina/render/FrameResource.hpp>
+#include <tina/render/RenderPostProcess.hpp>
 #include <tina/render/RenderSurface.hpp>
 #include <tina/render/RenderScene.hpp>
 #include <tina/render/UIDisplayList.hpp>
@@ -40,6 +41,9 @@ struct RenderFrame final {
     // World RenderScene follows the same submit-call-local borrow contract as
     // the UI DisplayList. A backend must not retain it after submitFrame().
     RenderSceneView primaryWorldScene{};
+    // Optional offscreen/HDR/post-process graph. Every span and nested scene is
+    // submit-call-local under the same borrow contract as primaryWorldScene.
+    RenderPostProcessChainView postProcess{};
 };
 
 } // namespace Tina::Render

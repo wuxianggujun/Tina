@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tina/core/error/Result.hpp>
+#include <tina/math/Vec.hpp>
 #include <tina/physics2d/PhysicsErrors.hpp>
 #include <tina/physics2d/PhysicsTypes.hpp>
 
@@ -55,21 +56,21 @@ public:
     [[nodiscard]] Core::Status enqueueDestroyBody(PhysicsBodyId body) noexcept;
     [[nodiscard]] Core::Status enqueueSetTransform(
         PhysicsBodyId body,
-        PhysicsVec2 positionMeters,
+        Math::Vec2 positionMeters,
         float angleRadians) noexcept;
     [[nodiscard]] Core::Status enqueueSetLinearVelocity(
         PhysicsBodyId body,
-        PhysicsVec2 linearVelocityMetersPerSecond) noexcept;
+        Math::Vec2 linearVelocityMetersPerSecond) noexcept;
     [[nodiscard]] Core::Status enqueueSetAngularVelocity(
         PhysicsBodyId body,
         float angularVelocityRadiansPerSecond) noexcept;
     [[nodiscard]] Core::Status enqueueApplyForceToCenter(
         PhysicsBodyId body,
-        PhysicsVec2 forceNewtons,
+        Math::Vec2 forceNewtons,
         bool wake = true) noexcept;
     [[nodiscard]] Core::Status enqueueApplyLinearImpulseToCenter(
         PhysicsBodyId body,
-        PhysicsVec2 impulseNewtonSeconds,
+        Math::Vec2 impulseNewtonSeconds,
         bool wake = true) noexcept;
     [[nodiscard]] Core::Status enqueueSetEnabled(PhysicsBodyId body, bool enabled) noexcept;
     [[nodiscard]] Core::Status enqueueSetAwake(PhysicsBodyId body, bool awake) noexcept;

@@ -15,8 +15,11 @@ add_library(Tina::Physics2D ALIAS tina_physics2d)
 
 target_compile_features(tina_physics2d PUBLIC cxx_std_23)
 target_include_directories(tina_physics2d PUBLIC ${PROJECT_SOURCE_DIR}/include)
+# Math is PUBLIC: PhysicsTypes.hpp names Math::Vec2 in its published descriptors.
+# The Meters-suffixed field names still carry the Box2D unit contract; only the
+# vector type is shared.
 target_link_libraries(tina_physics2d
-    PUBLIC Tina::Core
+    PUBLIC Tina::Core Tina::Math
     PRIVATE "$<BUILD_INTERFACE:Tina::ProjectOptions>" box2d::box2d
 )
 set_target_properties(tina_physics2d PROPERTIES CXX_EXTENSIONS OFF)

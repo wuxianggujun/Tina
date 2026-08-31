@@ -13,6 +13,7 @@ set(TINA_SCENE_TEST_SOURCES
     header_isolation/CameraFollow2DHeader.cpp
     header_isolation/DirectionalLight3DHeader.cpp
     header_isolation/EntityHeader.cpp
+    header_isolation/EntityMetadataHeader.cpp
     header_isolation/ExtractRenderSceneHeader.cpp
     header_isolation/Fx2DFactoryHeader.cpp
     header_isolation/MeshRenderer3DHeader.cpp

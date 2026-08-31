@@ -679,11 +679,6 @@ namespace {
 
 static_assert(MaximumConvexPolygonVertices2D == B2_MAX_POLYGON_VERTICES);
 
-[[nodiscard]] bool isFinite(PhysicsVec2 value) noexcept
-{
-    return std::isfinite(value.x) && std::isfinite(value.y);
-}
-
 [[nodiscard]] bool isKnownBodyType(PhysicsBodyType2D type) noexcept
 {
     switch (type) {
@@ -719,7 +714,7 @@ static_assert(MaximumConvexPolygonVertices2D == B2_MAX_POLYGON_VERTICES);
     return false;
 }
 
-[[nodiscard]] bool tryNormalizeDirection(PhysicsVec2 direction, b2Vec2& normalized) noexcept
+[[nodiscard]] bool tryNormalizeDirection(Math::Vec2 direction, b2Vec2& normalized) noexcept
 {
     if (!isFinite(direction)) {
         return false;
@@ -797,7 +792,7 @@ static_assert(MaximumConvexPolygonVertices2D == B2_MAX_POLYGON_VERTICES);
     const float cosine = std::cos(desc.localAngleRadians);
     const float sine = std::sin(desc.localAngleRadians);
     for (Core::u32 index = 0; index < desc.polygonVertexCount; ++index) {
-        const PhysicsVec2 vertex = desc.polygonVertices[index];
+        const Math::Vec2 vertex = desc.polygonVertices[index];
         if (!isFinite(vertex)) {
             return Core::failure(
                 Physics2DErrorCode::InvalidShapeDescription,
@@ -2166,7 +2161,7 @@ Core::Status PhysicsWorld2D::enqueueDestroyBody(PhysicsBodyId body) noexcept
 
 Core::Status PhysicsWorld2D::enqueueSetTransform(
     PhysicsBodyId body,
-    PhysicsVec2 positionMeters,
+    Math::Vec2 positionMeters,
     float angleRadians) noexcept
 {
     if (const Core::Status status = ensureUsable(); !status) {
@@ -2190,7 +2185,7 @@ Core::Status PhysicsWorld2D::enqueueSetTransform(
 
 Core::Status PhysicsWorld2D::enqueueSetLinearVelocity(
     PhysicsBodyId body,
-    PhysicsVec2 linearVelocityMetersPerSecond) noexcept
+    Math::Vec2 linearVelocityMetersPerSecond) noexcept
 {
     if (const Core::Status status = ensureUsable(); !status) {
         return status;
@@ -2236,7 +2231,7 @@ Core::Status PhysicsWorld2D::enqueueSetAngularVelocity(
 
 Core::Status PhysicsWorld2D::enqueueApplyForceToCenter(
     PhysicsBodyId body,
-    PhysicsVec2 forceNewtons,
+    Math::Vec2 forceNewtons,
     bool wake) noexcept
 {
     if (const Core::Status status = ensureUsable(); !status) {
@@ -2260,7 +2255,7 @@ Core::Status PhysicsWorld2D::enqueueApplyForceToCenter(
 
 Core::Status PhysicsWorld2D::enqueueApplyLinearImpulseToCenter(
     PhysicsBodyId body,
-    PhysicsVec2 impulseNewtonSeconds,
+    Math::Vec2 impulseNewtonSeconds,
     bool wake) noexcept
 {
     if (const Core::Status status = ensureUsable(); !status) {

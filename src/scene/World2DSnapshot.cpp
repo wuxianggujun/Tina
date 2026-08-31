@@ -15,6 +15,7 @@
 #include <memory_resource>
 #include <new>
 #include <optional>
+#include <string>
 #include <utility>
 
 namespace Tina::Scene {
@@ -567,6 +568,7 @@ Core::Result<std::vector<std::byte>> captureWorld2DSnapshotBytes(const World& wo
             AssetFormat::World2DEntityDesc entity{
                 .stableEntityId = captured.stableEntityId,
                 .parentStableEntityId = captured.parentStableEntityId,
+                .name = std::string(world.runtimeName(captured.entity)),
                 .positionX = local->position.x,
                 .positionY = local->position.y,
                 .positionZ = local->position.z,
@@ -966,6 +968,13 @@ instantiateWorld2DSnapshot(World& world, const AssetFormat::World2DSnapshotView&
                 .stableEntityId = preparedEntity.source->stableEntityId,
                 .entity = *entity,
             });
+            if (Core::Status status =
+                    world.setRuntimeName(*entity, preparedEntity.source->name);
+                !status)
+            {
+                rollback();
+                return Core::failure(std::move(status.error()));
+            }
             if (preparedEntity.source->parentStableEntityId != 0U)
             {
                 const EntityId parent = findInstantiatedEntity(bindings, preparedEntity.source->parentStableEntityId);

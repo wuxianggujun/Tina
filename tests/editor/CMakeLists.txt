@@ -10,6 +10,7 @@ add_executable(tina_editor_tests
     Fx2DAuthoringDocumentTests.cpp
     EditorViewportGridTests.cpp
     EditorViewportNavigationTests.cpp
+    EditorViewportPickTests.cpp
     ProjectAssetBrowserTests.cpp
     SpriteAnimationAuthoringDocumentTests.cpp
     SpriteAnimationAuthoringFileTests.cpp
@@ -31,6 +32,7 @@ add_executable(tina_editor_tests
     header_isolation/EditorTransformGizmoHeader.cpp
     header_isolation/EditorViewportGridHeader.cpp
     header_isolation/EditorViewportNavigationHeader.cpp
+    header_isolation/EditorViewportPickHeader.cpp
     header_isolation/ProjectAssetBrowserHeader.cpp
     header_isolation/SpriteAnimationAuthoringDocumentHeader.cpp
     header_isolation/SpriteAnimationAuthoringFileHeader.cpp

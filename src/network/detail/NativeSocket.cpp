@@ -110,6 +110,21 @@ Core::Status setNativeSocketNonBlocking(NativeSocket socket) noexcept
 #endif
 }
 
+Core::Status configureNativeSocketStreamSend(NativeSocket socket) noexcept
+{
+    if (socket == InvalidNativeSocket) {
+        return Core::failure(NetworkErrorCode::SocketClosed, "Cannot configure a closed socket");
+    }
+#if !defined(_WIN32) && defined(SO_NOSIGPIPE)
+    int enabled = 1;
+    if (::setsockopt(socket, SOL_SOCKET, SO_NOSIGPIPE, &enabled, sizeof(enabled)) != 0) {
+        return Core::failure(NetworkErrorCode::BackendFailure,
+                             "Failed to disable SIGPIPE for the stream socket");
+    }
+#endif
+    return Core::success();
+}
+
 int takePendingSocketError(NativeSocket socket) noexcept
 {
     int pending = 0;
@@ -135,16 +150,21 @@ int takePendingSocketError(NativeSocket socket) noexcept
     return pending;
 }
 
-void shutdownNativeSocketSend(NativeSocket socket) noexcept
+Core::Status shutdownNativeSocketSend(NativeSocket socket) noexcept
 {
     if (socket == InvalidNativeSocket) {
-        return;
+        return Core::failure(NetworkErrorCode::SocketClosed, "Cannot shut down a closed socket");
     }
 #if defined(_WIN32)
-    ::shutdown(socket, SD_SEND);
+    if (::shutdown(socket, SD_SEND) != 0) {
+        return Core::failure(NetworkErrorCode::BackendFailure, "Failed to shut down the socket send half");
+    }
 #else
-    ::shutdown(socket, SHUT_WR);
+    if (::shutdown(socket, SHUT_WR) != 0) {
+        return Core::failure(NetworkErrorCode::BackendFailure, "Failed to shut down the socket send half");
+    }
 #endif
+    return Core::success();
 }
 
 void requestNativeSocketBufferSizes(

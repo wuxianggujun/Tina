@@ -23,7 +23,7 @@ target_include_directories(tina_gameplay2d
 # per-frame ordering and lease lifetime that every game would otherwise rewrite
 # (ADR 0031). Asset transitively provides Navigation2D and Physics2D.
 target_link_libraries(tina_gameplay2d
-    PUBLIC Tina::Core Tina::Scene Tina::Physics2D Tina::Asset Tina::Audio
+    PUBLIC Tina::Core Tina::Math Tina::Scene Tina::Physics2D Tina::Asset Tina::Audio
     PRIVATE "$<BUILD_INTERFACE:Tina::ProjectOptions>"
 )
 set_target_properties(tina_gameplay2d PROPERTIES CXX_EXTENSIONS OFF)

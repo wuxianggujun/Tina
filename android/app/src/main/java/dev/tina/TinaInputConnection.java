@@ -33,10 +33,9 @@ final class TinaInputConnection extends BaseInputConnection {
         if (text == null || text.length() == 0) {
             return super.commitText(text, newCursorPosition);
         }
-        // Reported even when native rejects it, so the IME is not left waiting on a commit that will
-        // never be acknowledged. Rejections are counted natively rather than being silently dropped.
-        TinaNative.nativeOnTextCommit(session, text.toString());
-        return true;
+        // The native queue publishes split commits atomically. Returning its result keeps a capacity or
+        // validation failure visible to the IME instead of acknowledging text the engine never received.
+        return TinaNative.nativeOnTextCommit(session, text.toString());
     }
 
     @Override
@@ -47,19 +46,19 @@ final class TinaInputConnection extends BaseInputConnection {
         //
         // Chinese and Japanese input depend entirely on this. Without it the user sees nothing until the
         // pass ends in a commitText, so the whole conversion happens invisibly.
-        TinaNative.nativeOnComposingText(
+        final boolean accepted = TinaNative.nativeOnComposingText(
                 session, text == null ? null : text.toString(), newCursorPosition);
         // super still runs: BaseInputConnection tracks the composing region itself, and skipping it makes
         // the IME's own bookkeeping disagree with the region it thinks it owns.
-        return super.setComposingText(text, newCursorPosition);
+        return super.setComposingText(text, newCursorPosition) && accepted;
     }
 
     @Override
     public boolean finishComposingText() {
         // The IME gave up the region without committing. Distinct from a commit and reported as such --
         // native maps it to Cancelled, because nothing was produced.
-        TinaNative.nativeOnComposingFinish(session);
-        return super.finishComposingText();
+        final boolean accepted = TinaNative.nativeOnComposingFinish(session);
+        return super.finishComposingText() && accepted;
     }
 
     @Override

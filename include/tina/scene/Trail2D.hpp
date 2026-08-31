@@ -5,6 +5,7 @@
 #include <tina/core/error/Result.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 #include <tina/render/RenderScene.hpp>
+#include <tina/math/Vec.hpp>
 #include <tina/scene/SpriteRenderer2D.hpp>
 
 #include <memory_resource>
@@ -31,8 +32,8 @@ struct Trail2DConfig final {
 };
 
 struct Trail2DSegment final {
-    Vec2 start{};
-    Vec2 end{};
+    Math::Vec2 start{};
+    Math::Vec2 end{};
     Core::Duration age{};
     Core::Duration lifetime{};
     u64 stableEntityKey = 0;
@@ -56,7 +57,7 @@ public:
 
     // The first point establishes an anchor. Each later point appends one
     // segment from the previous anchor and becomes the new anchor.
-    [[nodiscard]] Core::Status appendPoint(Vec2 point) noexcept;
+    [[nodiscard]] Core::Status appendPoint(Math::Vec2 point) noexcept;
     // The next append establishes a new anchor without connecting to the old one.
     void breakTrail() noexcept;
     [[nodiscard]] Core::Status update(Core::Duration delta) noexcept;
@@ -81,7 +82,7 @@ private:
 
     Trail2DConfig m_config{};
     std::pmr::vector<Trail2DSegment> m_segments;
-    Vec2 m_anchor{};
+    Math::Vec2 m_anchor{};
     u64 m_nextStableEntityKey = 1;
     bool m_hasAnchor = false;
     bool m_stableEntityKeysExhausted = false;

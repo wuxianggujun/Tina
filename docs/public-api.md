@@ -59,9 +59,11 @@ Vorbis/Opus 的安装图还分别解析 `Vorbis`、`Opus`、`OpusFile`。未请�
 | --- | --- |
 | `Tina::GameSDK` | backend-neutral Game SDK 聚合 target；不包含 Desktop/backend adapter |
 | `Tina::Core` | Result、time、memory、ID/hash、UTF-8、IO、diagnostics、compile-time Trace frontend |
+| `Tina::Math` | `Vec2/3/4`、`Quaternion`、列主序右手系 `Mat4`、`Aabb2/3`、`Rect`、`Sphere`、`Plane`、`Ray`、`Frustum` 与几何查询；header-only，见 [Math](math.md) |
 | `Tina::Platform` | Window/Input/PlatformFrame/backend SPI |
 | `Tina::PlatformGlfw` | optional installed GLFW Platform adapter；需 `COMPONENTS PlatformGlfw` |
 | `Tina::Task` | bounded IO/CPU/Main TaskSystem |
+| `Tina::Gameplay` | `Scheduler`/timer、`Action`/`ActionRunner` tween 与 sequence/parallel/repeat、28 条 `Easing`、scoped `Signal<T>`；只依赖 Core+Math，见 [Gameplay 工具层](gameplay-tooling.md) |
 | `Tina::Network` | 数值 IP/endpoint、UDP、TCP 连接与 listener、`IByteStream`、HTTP/1.1、WebSocket、DNS |
 | `Tina::NetworkTls` | optional installed mbedTLS TLS adapter；需 `COMPONENTS NetworkTls` |
 | `Tina::Render` | RenderDevice、Surface/Frame/Scene/UI DisplayList、GPU IDs |
@@ -780,6 +782,10 @@ Narrator/Inspect 人工金标仍由 UI-002 跟踪，Linux AT-SPI adapter/真机�
 `Scene::World` 是 fixed-capacity、generation entity owner，提供 Transform hierarchy、Camera2D/
 SpriteRenderer2D/PointLight2D/ShadowOccluder2D/PerspectiveCamera3D/MeshRenderer3D/SkinnedMeshRenderer3D/DirectionalLight3D/
 PointLight3D/SpotLight3D。
+现有固定组件白名单提供只读 `get<T>()`/`has<T>()`/`view<T...>()`/`query<T...>()`；typed view 只产出同时
+具备全部请求组件的 `EntityId`，`each()` 传 `const` component reference，不开放 generic mutation 或动态类型注册。
+每个 entity 同时携带 fixed-inline strict UTF-8 runtime name（最多63 bytes）以及 Scene 不解释的 `u32`
+tag/layer/group；metadata mutation 继续遵守 owner-thread 与 generation 校验。
 `extractRenderSceneFromWorld()` 写调用方的
 RenderSceneWriter；`instantiatePrefab()` 事务式创建 hierarchy，并可通过 AssetId resolver 映射 mesh/
 material weak `AssetHandle`。
@@ -842,7 +848,9 @@ accumulator 仍归帧循环所有者），未给定时返回 `Unsupported` 而�
 最小充分条件。它提供 `entityForStableId()`、`entityForName()`、`stableIdForEntity()` 与 `nameForEntity()`；
 名称按 authored bytes **精确**匹配，不折叠大小写也不 trim，因为 Editor 视其为不透明 UTF-8，折叠会凭空
 造出冲突。Editor 允许重名，因此 `entityForName()` 返回 stable ID 最小者，`entityCountForName()` 暴露
-歧义。名称由 index 自己拥有而非存进 `EntityRecord`——多数 entity 无名，不该为此每个都付 64 bytes。
+歧义。index 仍自行拥有名称副本，以便它在不借用 World 的情况下提供稳定 authored lookup；instantiate 同时把
+名称复制到 World runtime metadata，capture 则读取该 runtime name。tag/layer/group 是 runtime-only，不进入
+World2D wire。
 
 index 是**一次 instantiate 的快照**，不是 live view：它不持 `World` 引用、不观察销毁。这是安全的，因为
 `EntityId` 是 generation handle，过期 id 会被 `World` 拒绝而不会别名到复用的 slot。

@@ -43,15 +43,15 @@ namespace {
 
 // 2D bodies rotate about Z only, so the planar angle is recovered from the
 // quaternion's Z/W terms rather than a full Euler decomposition.
-[[nodiscard]] float planarAngleRadians(const Scene::Quaternion& rotation) noexcept
+[[nodiscard]] float planarAngleRadians(const Math::Quaternion& rotation) noexcept
 {
     return 2.0F * std::atan2(rotation.z, rotation.w);
 }
 
-[[nodiscard]] Scene::Quaternion planarRotation(float angleRadians) noexcept
+[[nodiscard]] Math::Quaternion planarRotation(float angleRadians) noexcept
 {
     const float half = angleRadians * 0.5F;
-    return Scene::Quaternion{.x = 0.0F, .y = 0.0F, .z = std::sin(half), .w = std::cos(half)};
+    return Math::Quaternion{.x = 0.0F, .y = 0.0F, .z = std::sin(half), .w = std::cos(half)};
 }
 
 } // namespace

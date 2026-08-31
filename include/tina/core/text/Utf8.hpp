@@ -8,8 +8,11 @@
 #include <string_view>
 
 namespace Tina::Core {
+namespace Detail {
 
-[[nodiscard]] constexpr std::optional<u32> countStrictUtf8CodepointsWithoutNul(std::string_view text) noexcept
+template <bool RejectNul>
+[[nodiscard]] constexpr std::optional<u32> countStrictUtf8CodepointsImpl(
+    std::string_view text) noexcept
 {
     usize index = 0;
     u32 codepointCount = 0;
@@ -18,9 +21,11 @@ namespace Tina::Core {
         const auto first = static_cast<unsigned char>(text[index]);
         if (first <= 0x7FU)
         {
-            if (first == 0U)
-            {
-                return std::nullopt;
+            if constexpr (RejectNul) {
+                if (first == 0U)
+                {
+                    return std::nullopt;
+                }
             }
             if (codepointCount == (std::numeric_limits<u32>::max)())
             {
@@ -79,6 +84,27 @@ namespace Tina::Core {
         ++codepointCount;
     }
     return codepointCount;
+}
+
+} // namespace Detail
+
+// Validates RFC 3629 UTF-8 and returns the number of Unicode scalar values. Unlike
+// the engine text contract below, protocol text (for example WebSocket text and
+// close reasons) is allowed to contain U+0000.
+[[nodiscard]] constexpr std::optional<u32> countStrictUtf8(std::string_view text) noexcept
+{
+    return Detail::countStrictUtf8CodepointsImpl<false>(text);
+}
+
+[[nodiscard]] constexpr std::optional<u32> countStrictUtf8CodepointsWithoutNul(
+    std::string_view text) noexcept
+{
+    return Detail::countStrictUtf8CodepointsImpl<true>(text);
+}
+
+[[nodiscard]] constexpr bool isStrictUtf8(std::string_view text) noexcept
+{
+    return countStrictUtf8(text).has_value();
 }
 
 [[nodiscard]] constexpr bool isStrictUtf8WithoutNul(std::string_view text) noexcept

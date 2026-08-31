@@ -5,8 +5,7 @@ import android.graphics.Matrix;
 import android.graphics.Rect;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Handler;
-import android.os.Looper;
+import android.view.Choreographer;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowInsetsController;
@@ -16,7 +15,7 @@ import android.view.inputmethod.InputMethodManager;
 /**
  * Minimal host that drives the engine's frame loop and services soft-keyboard intent.
  *
- * <p>Frames are driven from a Handler on the UI thread rather than a render thread. That is enough
+ * <p>Frames are driven from Choreographer on the UI thread rather than a render thread. That is enough
  * for the current slice -- there is no renderer wired up yet, so this proves the platform bridge and
  * nothing more. ADR 0032's D3 chose external frame driving precisely so this choice stays open: a
  * later renderer can move ticking to its own thread without changing the engine contract.
@@ -25,7 +24,7 @@ public final class TinaActivity extends Activity {
 
     private long session;
     private TinaSurfaceView surfaceView;
-    private Handler frameHandler;
+    private Choreographer choreographer;
     private boolean running;
     private boolean engineEnded;
     private boolean commitEmojiOnFirstFrame;
@@ -34,9 +33,22 @@ public final class TinaActivity extends Activity {
     private boolean useGallery;
     private int lastLoggedFrame = -1;
 
-    private final Runnable frameTick = new Runnable() {
+    /**
+     * Drives one engine frame per display refresh.
+     *
+     * <p>{@link Choreographer}, not {@code Handler.post}. The handler version re-posted itself with no
+     * delay, which is not a frame loop at all -- it ran as fast as the UI thread could dispatch, produced
+     * frames the display would never show, and starved the same thread it depends on for touch delivery.
+     * Choreographer is the display's own vsync signal, so the engine now runs at the panel's rate and
+     * inherits variable refresh for free.
+     *
+     * <p>Still on the UI thread. That is deliberate for now: input arrives here, and moving ticking to
+     * its own thread means the platform backend's owner thread changes, which is a real design decision
+     * rather than a tweak. ADR 0032's D3 chose external frame driving precisely so that stays open.
+     */
+    private final Choreographer.FrameCallback frameTick = new Choreographer.FrameCallback() {
         @Override
-        public void run() {
+        public void doFrame(long frameTimeNanos) {
             if (!running) {
                 return;
             }
@@ -60,16 +72,41 @@ public final class TinaActivity extends Activity {
                         composeTextDiagnostics = surfaceView.advanceComposeDiagnostics();
                     }
                     applyPendingSoftKeyboardRequest();
-                    reportSoftKeyboardOcclusion();
-                    reportCursorAnchorInfo();
+                    serviceImeGeometry(frames);
                     logProgress(frames);
                 }
             }
             // Re-posted rather than looping: a loop here would block the UI thread and the app would
             // stop delivering the very touches it is polling for.
-            frameHandler.post(this);
+            choreographer.postFrameCallback(this);
         }
     };
+
+    /**
+     * Reports IME geometry, but not on every frame.
+     *
+     * <p>Both calls are pure overhead while nothing is focused: the occlusion measurement walks the view
+     * hierarchy for a visible-frame rectangle, and the cursor report crosses JNI and allocates a
+     * {@link CursorAnchorInfo}. Neither changes at frame rate -- a keyboard appearing or a caret moving
+     * are user-speed events -- so sampling them costs a fraction of the frame budget and loses nothing a
+     * person can perceive.
+     *
+     * <p>Occlusion is also skipped entirely unless the report would differ, so a steady state costs one
+     * rectangle read rather than a JNI call as well.
+     */
+    private void serviceImeGeometry(int frames) {
+        if (frames % ImeGeometryIntervalFrames != 0) {
+            return;
+        }
+        reportSoftKeyboardOcclusion();
+        reportCursorAnchorInfo();
+    }
+
+    /**
+     * How often IME geometry is sampled. Roughly every 100 ms at 60Hz, which is well inside the latency a
+     * keyboard animation or a caret move is perceived at.
+     */
+    private static final int ImeGeometryIntervalFrames = 6;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -101,9 +138,18 @@ public final class TinaActivity extends Activity {
         if (useGallery) {
             TinaNative.nativeSetUseGallery(session, true);
         }
+        // Before the surface binds, because that is when the UI context is built.
+        final String fontPath = findSystemFont();
+        if (fontPath != null) {
+            TinaNative.nativeSetUiFontPath(session, fontPath);
+        } else {
+            android.util.Log.w("Tina", "no system font found; UI text will draw as solid blocks");
+        }
         surfaceView = new TinaSurfaceView(this, session);
         setContentView(surfaceView);
-        frameHandler = new Handler(Looper.getMainLooper());
+        // Bound to this thread's Looper, which is why it is fetched here rather than held statically:
+        // Choreographer.getInstance() is per-thread and would throw off a thread without a Looper.
+        choreographer = Choreographer.getInstance();
     }
 
     @Override
@@ -114,7 +160,7 @@ public final class TinaActivity extends Activity {
         // or app switch.
         hideSystemBars();
         running = true;
-        frameHandler.post(frameTick);
+        choreographer.postFrameCallback(frameTick);
     }
 
     /**
@@ -166,7 +212,7 @@ public final class TinaActivity extends Activity {
         // own -- docs record cocos2d-x leaving its CADisplayLink running in the background, waking 60
         // times a second for nothing.
         running = false;
-        frameHandler.removeCallbacks(frameTick);
+        choreographer.removeFrameCallback(frameTick);
         super.onPause();
     }
 
@@ -177,8 +223,8 @@ public final class TinaActivity extends Activity {
         // twice in one process, so the second bind then fails with no obvious cause.
         android.util.Log.i("Tina", "onDestroy session=0x" + Long.toHexString(session));
         running = false;
-        if (frameHandler != null) {
-            frameHandler.removeCallbacks(frameTick);
+        if (choreographer != null) {
+            choreographer.removeFrameCallback(frameTick);
         }
         // After the session is gone every native handle is dangling, so nothing may poll afterwards.
         TinaNative.nativeDestroySession(session);
@@ -241,6 +287,42 @@ public final class TinaActivity extends Activity {
     }
 
     /**
+     * Finds a usable UI font in the system font directory, or null.
+     *
+     * <p>Read from the device rather than shipped in the APK: /system/fonts always has a Latin sans-serif,
+     * so bundling one would add a megabyte to every build to duplicate a file already present. It also
+     * means the app inherits whatever the device actually uses.
+     *
+     * <p>Candidates are tried in order rather than guessing one name. Roboto is the modern Android
+     * default, DroidSans is what older images and the SDK emulator ship, and the {@code -Regular} variants
+     * cover devices that split the family into per-weight files. The final fallback is any .ttf at all:
+     * a wrong-looking font is far better than a screen of solid blocks.
+     */
+    private static String findSystemFont() {
+        final String[] candidates = {
+            "/system/fonts/Roboto-Regular.ttf",
+            "/system/fonts/DroidSans.ttf",
+            "/system/fonts/NotoSans-Regular.ttf",
+            "/system/fonts/DroidSansFallback.ttf",
+        };
+        for (final String candidate : candidates) {
+            if (new java.io.File(candidate).canRead()) {
+                return candidate;
+            }
+        }
+        // Nothing matched a known name. Take the first readable .ttf, because a vendor font is still text.
+        final java.io.File[] fonts = new java.io.File("/system/fonts").listFiles();
+        if (fonts != null) {
+            for (final java.io.File font : fonts) {
+                if (font.canRead() && font.getName().endsWith(".ttf")) {
+                    return font.getAbsolutePath();
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
      * Whether this is an emulator, which decides the renderer fallback.
      *
      * <p>Checks the ranchu/goldfish hardware names rather than a Build.FINGERPRINT substring, because
@@ -282,8 +364,17 @@ public final class TinaActivity extends Activity {
         final Rect visible = new Rect();
         root.getWindowVisibleDisplayFrame(visible);
         final int occluded = Math.max(0, root.getHeight() - visible.bottom);
+        // Only crossed when it changed. The value is constant for long stretches -- a keyboard is either
+        // up or down -- so re-reporting it is a JNI call that provably cannot alter engine state.
+        if (occluded == lastReportedOcclusion) {
+            return;
+        }
+        lastReportedOcclusion = occluded;
         TinaNative.nativeOnSoftKeyboardOcclusion(session, occluded);
     }
+
+    /** Last occlusion handed to the engine. -1 so the first report always goes through. */
+    private int lastReportedOcclusion = -1;
 
     /**
      * Tells the IME where the caret is, so its candidate window can follow it.

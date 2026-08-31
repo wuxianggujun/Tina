@@ -115,18 +115,18 @@ auto EditorWorkspaceState::ensureViewportNavigation() -> Tina::Core::Status{
 }
 
 auto EditorWorkspaceState::viewportOrbitRotation(
-    float yawRadians, float pitchRadians) noexcept -> Tina::Scene::Quaternion{
+    float yawRadians, float pitchRadians) noexcept -> Tina::Math::Quaternion{
     const float halfYaw = yawRadians * 0.5F;
     const float halfPitch = -pitchRadians * 0.5F;
-    const Tina::Scene::Quaternion yaw{
+    const Tina::Math::Quaternion yaw{
         .y = std::sin(halfYaw),
         .w = std::cos(halfYaw),
     };
-    const Tina::Scene::Quaternion pitch{
+    const Tina::Math::Quaternion pitch{
         .x = std::sin(halfPitch),
         .w = std::cos(halfPitch),
     };
-    return Tina::Scene::normalized(Tina::Scene::quaternionMultiply(yaw, pitch));
+    return Tina::Math::normalized(yaw * pitch);
 }
 
 auto EditorWorkspaceState::syncViewportZoomFromNavigation() noexcept -> void{
@@ -264,12 +264,12 @@ auto EditorWorkspaceState::initializeOrApplyViewportNavigation() -> Tina::Core::
                 Tina::Core::CoreErrorCode::Internal,
                 "editor could not initialize Camera3D navigation");
         }
-        Tina::Scene::Vec3 direction = Tina::Scene::rotate(
+        Tina::Math::Vec3 direction = Tina::Math::rotate(
             camera->rotation, {.x = 0.0F, .y = 0.0F, .z = -1.0F});
         float distance = PreviewWorld3DCameraDistance;
         if (focus != nullptr) {
-            const Tina::Scene::Vec3 offset = focus->position - camera->position;
-            const float lengthSquared = Tina::Scene::dot(offset, offset);
+            const Tina::Math::Vec3 offset = focus->position - camera->position;
+            const float lengthSquared = Tina::Math::dot(offset, offset);
             if (std::isfinite(lengthSquared) && lengthSquared > 0.25F) {
                 distance = std::sqrt(lengthSquared);
                 const float inverseDistance = 1.0F / distance;
@@ -446,7 +446,7 @@ auto EditorWorkspaceState::processViewportNavigation() -> Tina::Core::Status{
                        Tina::Editor::EditorViewportNavigationInputKind::Pan3D) {
                 const float desiredWorldUnitsPerPixel =
                     2.0F * viewportNavigation_->threeD().distance *
-                    std::tan(55.0F * DegreesToRadians * 0.5F) /
+                    std::tan(ViewportPerspectiveFovDegrees * DegreesToRadians * 0.5F) /
                     viewportHeight;
                 const float moduleWorldUnitsPerPixel =
                     viewportNavigation_->threeD().distance *
@@ -1020,7 +1020,7 @@ auto EditorWorkspaceState::updateViewportGrid(Tina::PrimaryWindowUITreeUpdater& 
         .cameraYawRadians = threeD.yawRadians,
         .cameraPitchRadians = threeD.pitchRadians,
         .cameraDistance = threeD.distance,
-        .verticalFovDegrees = 55.0F,
+        .verticalFovDegrees = ViewportPerspectiveFovDegrees,
     };
     auto updated = viewportGrid_.update(gridConfig);
     if (!updated) {
@@ -1167,9 +1167,9 @@ auto EditorWorkspaceState::updateViewportOrientationCompass(
     }
 
     constexpr std::array worldDirections{
-        Tina::Scene::Vec3{1.0F, 0.0F, 0.0F},
-        Tina::Scene::Vec3{0.0F, 1.0F, 0.0F},
-        Tina::Scene::Vec3{0.0F, 0.0F, 1.0F},
+        Tina::Math::Vec3{1.0F, 0.0F, 0.0F},
+        Tina::Math::Vec3{0.0F, 1.0F, 0.0F},
+        Tina::Math::Vec3{0.0F, 0.0F, 1.0F},
     };
     constexpr std::array axisKinds{
         Tina::Editor::EditorViewportGridSegmentKind::AxisX,
@@ -1177,8 +1177,8 @@ auto EditorWorkspaceState::updateViewportOrientationCompass(
         Tina::Editor::EditorViewportGridSegmentKind::AxisZ,
     };
     const float center = compassExtent * 0.5F;
-    const Tina::Scene::Quaternion inverseCameraRotation =
-        Tina::Scene::quaternionConjugate(viewportOrbitRotation(
+    const Tina::Math::Quaternion inverseCameraRotation =
+        Tina::Math::conjugate(viewportOrbitRotation(
             visualState.cameraYawRadians, visualState.cameraPitchRadians));
 
     for (Tina::Core::usize axis = 0; axis < ViewportOrientationAxisCount;
@@ -1212,9 +1212,9 @@ auto EditorWorkspaceState::updateViewportOrientationCompass(
             continue;
         }
 
-        Tina::Scene::Vec3 cameraDirection = worldDirections[axis];
+        Tina::Math::Vec3 cameraDirection = worldDirections[axis];
         if (world3D) {
-            cameraDirection = Tina::Scene::rotate(
+            cameraDirection = Tina::Math::rotate(
                 inverseCameraRotation, worldDirections[axis]);
         }
         const UI::UILogicalPoint endpoint{

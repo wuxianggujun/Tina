@@ -56,6 +56,7 @@ struct TcpConnection::Impl final {
     std::pmr::vector<std::byte> receiveBuffer;
     Core::usize sendPending = 0;
     Core::usize receivePending = 0;
+    bool sendShutdown = false;
 
     TcpConnectionStatistics stats{};
 
@@ -64,31 +65,39 @@ struct TcpConnection::Impl final {
         return std::this_thread::get_id() == owner;
     }
 
-    // Read interest is always on so a peer close is noticed promptly; write
-    // interest only while bytes are queued, otherwise poll would report the
-    // socket writable every single frame.
-    void refreshInterest() noexcept
+    // Read interest stays on until EOF so a peer close is noticed promptly;
+    // write interest exists only while bytes are queued, otherwise poll would
+    // report the socket writable every frame.
+    [[nodiscard]] Core::Status refreshInterest() noexcept
     {
         if (state != TcpConnectionState::Connecting
             && state != TcpConnectionState::Connected
             && state != TcpConnectionState::PeerClosed) {
-            return;
+            return Core::success();
         }
 
         ReadinessInterest interest = ReadinessInterest::Readable;
         if (state == TcpConnectionState::Connecting) {
             // A completing handshake surfaces as writability.
             interest = ReadinessInterest::ReadableAndWritable;
-        } else if (sendPending != 0) {
+        } else if (state == TcpConnectionState::PeerClosed) {
+            // EOF is final for the receive half. Keeping Readable registered here
+            // makes poll report the same hangup every frame forever.
+            interest = (!sendShutdown && sendPending != 0)
+                ? ReadinessInterest::Writable
+                : ReadinessInterest::None;
+        } else if (!sendShutdown && sendPending != 0) {
             interest = ReadinessInterest::ReadableAndWritable;
         }
-        (void)poller.setInterest(registration, interest);
+        return poller.setInterest(registration, interest);
     }
 
     void markFailed() noexcept
     {
         state = TcpConnectionState::Failed;
-        (void)poller.setInterest(registration, ReadinessInterest::None);
+        sendPending = 0;
+        stats.queuedSendBytes = 0;
+        closeSocket();
     }
 
     void closeSocket() noexcept
@@ -115,10 +124,10 @@ TcpConnection::~TcpConnection() noexcept
     if (m_impl == nullptr) {
         return;
     }
-    closeNativeSocket(m_impl->socket);
-    TransportScope::release();
+    m_impl->closeSocket();
     delete m_impl;
     m_impl = nullptr;
+    TransportScope::release();
 }
 
 Core::Result<TcpConnection> TcpConnection::Create(TcpConnectionConfig config)
@@ -189,6 +198,9 @@ Core::Result<TcpConnection> TcpConnection::Create(TcpConnectionConfig config)
     if (const Core::Status status = Detail::setNativeSocketNonBlocking(impl->socket); !status) {
         return Core::failure(status.error());
     }
+    if (const Core::Status status = Detail::configureNativeSocketStreamSend(impl->socket); !status) {
+        return Core::failure(status.error());
+    }
 
     // Must precede connect: on some stacks a buffer size change is only honoured
     // before the handshake, because the window is negotiated during it.
@@ -254,10 +266,9 @@ Core::Result<TcpConnection> TcpConnection::adoptAcceptedSocket(
     // and starts in Connected. Everything else -- buffers, poller registration,
     // owner thread -- matches Create so an accepted connection is not a second
     // kind of object with its own rules.
-    if (config.sendBufferBytes == 0 || config.receiveBufferBytes == 0) {
-        return Core::failure(
-            NetworkErrorCode::InvalidConfiguration,
-            "TcpConnection send and receive buffer sizes must be greater than zero");
+    if (nativeSocket == nullptr) {
+        return Core::failure(NetworkErrorCode::BackendFailure,
+                             "TcpConnection cannot adopt a null socket pointer");
     }
 
     const auto socket = *static_cast<const NativeSocket*>(nativeSocket);
@@ -265,6 +276,15 @@ Core::Result<TcpConnection> TcpConnection::adoptAcceptedSocket(
         return Core::failure(
             NetworkErrorCode::BackendFailure,
             "TcpConnection cannot adopt an invalid socket");
+    }
+    // Calling adopt transfers the descriptor even when later validation fails. This makes ownership
+    // unambiguous for the listener and prevents both double-close and failure-path leaks.
+    auto socketGuard = Core::makeScopeExit([socket]() noexcept { closeNativeSocket(socket); });
+
+    if (config.sendBufferBytes == 0 || config.receiveBufferBytes == 0) {
+        return Core::failure(
+            NetworkErrorCode::InvalidConfiguration,
+            "TcpConnection send and receive buffer sizes must be greater than zero");
     }
 
     std::pmr::memory_resource* resource = config.memoryResource != nullptr
@@ -300,12 +320,11 @@ Core::Result<TcpConnection> TcpConnection::adoptAcceptedSocket(
             "TcpConnection construction failed");
     }
 
-    // Owns the socket from here: a failure below must close it, otherwise the
-    // descriptor leaks and the peer never learns the connection died.
+    // The entry guard owns the accepted socket from validation onward. Impl only borrows it until the
+    // complete connection has been published, so every earlier failure has exactly one closer.
     impl->socket = socket;
     auto implGuard = Core::makeScopeExit([&impl]() noexcept {
         if (impl != nullptr) {
-            closeNativeSocket(impl->socket);
             delete impl;
         }
     });
@@ -314,6 +333,9 @@ Core::Result<TcpConnection> TcpConnection::adoptAcceptedSocket(
     impl->remote = remoteEndpoint;
 
     if (const Core::Status status = Detail::setNativeSocketNonBlocking(impl->socket); !status) {
+        return Core::failure(status.error());
+    }
+    if (const Core::Status status = Detail::configureNativeSocketStreamSend(impl->socket); !status) {
         return Core::failure(status.error());
     }
 
@@ -325,6 +347,7 @@ Core::Result<TcpConnection> TcpConnection::adoptAcceptedSocket(
     impl->state = TcpConnectionState::Connected;
 
     implGuard.release();
+    socketGuard.release();
     transportGuard.release();
     return TcpConnection{impl};
 }
@@ -405,6 +428,10 @@ Core::Status TcpConnection::send(std::span<const std::byte> payload)
             NetworkErrorCode::ConnectionFailed,
             "TcpConnection has failed");
     }
+    if (m_impl->sendShutdown) {
+        return Core::failure(NetworkErrorCode::ConnectionClosed,
+                             "TcpConnection send half is closed");
+    }
 
     const Core::usize available = m_impl->sendBuffer.size() - m_impl->sendPending;
     if (payload.size() > available) {
@@ -418,7 +445,10 @@ Core::Status TcpConnection::send(std::span<const std::byte> payload)
     std::memcpy(m_impl->sendBuffer.data() + m_impl->sendPending, payload.data(), payload.size());
     m_impl->sendPending += payload.size();
     m_impl->stats.queuedSendBytes = m_impl->sendPending;
-    m_impl->refreshInterest();
+    if (Core::Status status = m_impl->refreshInterest(); !status) {
+        m_impl->markFailed();
+        return status;
+    }
     return Core::success();
 }
 
@@ -448,6 +478,7 @@ Core::Result<Core::usize> TcpConnection::pump()
 
     auto events = m_impl->poller.poll();
     if (!events) {
+        m_impl->markFailed();
         return Core::failure(std::move(events.error()));
     }
 
@@ -484,7 +515,10 @@ Core::Result<Core::usize> TcpConnection::pump()
                 "TCP handshake reported a socket error");
         }
         m_impl->state = TcpConnectionState::Connected;
-        m_impl->refreshInterest();
+        if (Core::Status status = m_impl->refreshInterest(); !status) {
+            m_impl->markFailed();
+            return Core::failure(std::move(status.error()));
+        }
     }
 
     // Drain the send buffer before reading, so a request-then-response exchange
@@ -492,13 +526,25 @@ Core::Result<Core::usize> TcpConnection::pump()
     if (writable && m_impl->sendPending != 0) {
         const char* data = reinterpret_cast<const char*>(m_impl->sendBuffer.data());
 #if defined(_WIN32)
+        const Core::usize sendLimit = static_cast<Core::usize>((std::numeric_limits<int>::max)());
         const int sent = ::send(
             m_impl->socket,
             data,
-            static_cast<int>(m_impl->sendPending),
+            static_cast<int>((std::min)(m_impl->sendPending, sendLimit)),
             0);
 #else
-        const ssize_t sent = ::send(m_impl->socket, data, m_impl->sendPending, 0);
+#if defined(MSG_NOSIGNAL)
+        constexpr int SendFlags = MSG_NOSIGNAL;
+#else
+        constexpr int SendFlags = 0;
+#endif
+        const Core::usize sendLimit = static_cast<Core::usize>(
+            (std::numeric_limits<ssize_t>::max)());
+        const ssize_t sent = ::send(
+            m_impl->socket,
+            data,
+            (std::min)(m_impl->sendPending, sendLimit),
+            SendFlags);
 #endif
         if (sent < 0) {
             const int error = lastSocketError();
@@ -530,7 +576,10 @@ Core::Result<Core::usize> TcpConnection::pump()
             m_impl->sendPending -= sentBytes;
             m_impl->stats.totalSentBytes += sentBytes;
             m_impl->stats.queuedSendBytes = m_impl->sendPending;
-            m_impl->refreshInterest();
+            if (Core::Status status = m_impl->refreshInterest(); !status) {
+                m_impl->markFailed();
+                return Core::failure(std::move(status.error()));
+            }
         }
     }
 
@@ -546,9 +595,17 @@ Core::Result<Core::usize> TcpConnection::pump()
             char* target = reinterpret_cast<char*>(
                 m_impl->receiveBuffer.data() + m_impl->receivePending);
 #if defined(_WIN32)
-            const int got = ::recv(m_impl->socket, target, static_cast<int>(space), 0);
+            const Core::usize receiveLimit = static_cast<Core::usize>((std::numeric_limits<int>::max)());
+            const int got = ::recv(m_impl->socket, target,
+                                   static_cast<int>((std::min)(space, receiveLimit)), 0);
 #else
-            const ssize_t got = ::recv(m_impl->socket, target, space, 0);
+            const Core::usize receiveLimit = static_cast<Core::usize>(
+                (std::numeric_limits<ssize_t>::max)());
+            const ssize_t got = ::recv(
+                m_impl->socket,
+                target,
+                (std::min)(space, receiveLimit),
+                0);
 #endif
             if (got > 0) {
                 newlyReceived = static_cast<Core::usize>(got);
@@ -560,7 +617,10 @@ Core::Result<Core::usize> TcpConnection::pump()
                 // an orderly end-of-stream, not a failure, and already-buffered
                 // bytes stay readable.
                 m_impl->state = TcpConnectionState::PeerClosed;
-                m_impl->refreshInterest();
+                if (Core::Status status = m_impl->refreshInterest(); !status) {
+                    m_impl->markFailed();
+                    return Core::failure(std::move(status.error()));
+                }
             } else {
                 const int error = lastSocketError();
                 if (isConnectionResetError(error)) {
@@ -649,19 +709,30 @@ Core::Status TcpConnection::shutdownSend()
             NetworkErrorCode::WrongOwnerThread,
             "TcpConnection must be used from its owner thread");
     }
-    if (m_impl->state == TcpConnectionState::Closed
+    if (m_impl->state == TcpConnectionState::Connecting
+        || m_impl->state == TcpConnectionState::Closed
         || m_impl->state == TcpConnectionState::Failed) {
         return Core::failure(
             NetworkErrorCode::NotConnected,
             "TcpConnection is not connected");
     }
+    if (m_impl->sendShutdown) {
+        return Core::success();
+    }
 
-    Detail::shutdownNativeSocketSend(m_impl->socket);
+    if (Core::Status status = Detail::shutdownNativeSocketSend(m_impl->socket); !status) {
+        m_impl->markFailed();
+        return status;
+    }
     // Queued bytes can no longer leave, so drop them rather than leave a queue
     // that will never drain.
     m_impl->sendPending = 0;
     m_impl->stats.queuedSendBytes = 0;
-    m_impl->refreshInterest();
+    m_impl->sendShutdown = true;
+    if (Core::Status status = m_impl->refreshInterest(); !status) {
+        m_impl->markFailed();
+        return status;
+    }
     return Core::success();
 }
 
@@ -717,6 +788,11 @@ ByteStreamState TcpConnection::streamState() const noexcept
 Core::Status TcpConnection::sendBytes(std::span<const std::byte> payload)
 {
     return send(payload);
+}
+
+Core::usize TcpConnection::pendingSendBytes() const noexcept
+{
+    return m_impl != nullptr ? m_impl->sendPending : 0;
 }
 
 Core::Result<Core::usize> TcpConnection::pumpStream()

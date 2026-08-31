@@ -112,6 +112,10 @@ set(TINA_RUNTIME_TEST_SOURCES
 add_executable(tina_tests
     ${TINA_CORE_TEST_SOURCES}
     ${TINA_RUNTIME_TEST_SOURCES}
+    # Gameplay has no test executable of its own yet, so its header-isolation
+    # objects ride along here rather than being built by nothing. Move them to
+    # tina_gameplay_tests when that target exists.
+    $<TARGET_OBJECTS:tina_gameplay_header_isolation>
 )
 
 set_source_files_properties(
@@ -128,6 +132,9 @@ target_include_directories(tina_tests PRIVATE
 target_link_libraries(tina_tests PRIVATE
     Tina::ProjectOptions
     Tina::Core
+    # Only for the borrowed gameplay header-isolation objects above: the explicit
+    # Signal<Unit> instantiation needs SignalSubscription's out-of-line definitions.
+    Tina::Gameplay
     Tina::Platform
     Tina::Render
     Tina::Runtime
@@ -136,6 +143,9 @@ target_link_libraries(tina_tests PRIVATE
     GTest::gtest_main
 )
 set_target_properties(tina_tests PROPERTIES CXX_EXTENSIONS OFF)
+
+add_subdirectory(math)
+add_subdirectory(gameplay)
 
 if(TINA_BUILD_PLATFORM_GLFW)
     add_subdirectory(platform_glfw)
@@ -168,6 +178,7 @@ endif()
 add_subdirectory(asset)
 add_subdirectory(navigation2d)
 add_subdirectory(network)
+add_subdirectory(save)
 if (TINA_BUILD_NETWORK_TLS)
     add_subdirectory(network_tls)
 endif ()

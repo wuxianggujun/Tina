@@ -1,5 +1,8 @@
 #include <tina/render/RenderScene.hpp>
 
+#include <tina/math/Mat4.hpp>
+#include <tina/math/Quaternion.hpp>
+#include <tina/math/Vec.hpp>
 #include <tina/render/RenderErrors.hpp>
 
 #include <algorithm>
@@ -16,19 +19,6 @@
 namespace Tina::Render {
 namespace {
 
-struct Vector3 final {
-    float x = 0.0F;
-    float y = 0.0F;
-    float z = 0.0F;
-};
-
-struct Quaternion final {
-    float x = 0.0F;
-    float y = 0.0F;
-    float z = 0.0F;
-    float w = 1.0F;
-};
-
 inline constexpr float Pi = 3.14159265358979323846F;
 inline constexpr u64 FnvOffset = 14695981039346656037ULL;
 inline constexpr u64 FnvPrime = 1099511628211ULL;
@@ -38,59 +28,24 @@ inline constexpr u64 FnvPrime = 1099511628211ULL;
     return std::isfinite(value);
 }
 
-[[nodiscard]] bool finite(Vector3 value) noexcept
+// Math::normalized reports failure by returning the zero quaternion; this boundary
+// turns that into the structured Error the writer contract requires. The two
+// rejection cases stay distinct because their messages name different causes.
+[[nodiscard]] Core::Result<Math::Quaternion> normalizedQuaternion(const RenderPose3DInput& pose)
 {
-    return finite(value.x) && finite(value.y) && finite(value.z);
-}
-
-[[nodiscard]] float dot(Vector3 left, Vector3 right) noexcept
-{
-    return left.x * right.x + left.y * right.y + left.z * right.z;
-}
-
-[[nodiscard]] Vector3 cross(Vector3 left, Vector3 right) noexcept
-{
-    return {
-        left.y * right.z - left.z * right.y,
-        left.z * right.x - left.x * right.z,
-        left.x * right.y - left.y * right.x,
-    };
-}
-
-[[nodiscard]] Vector3 subtract(Vector3 left, Vector3 right) noexcept
-{
-    return {left.x - right.x, left.y - right.y, left.z - right.z};
-}
-
-[[nodiscard]] Vector3 add(Vector3 left, Vector3 right) noexcept
-{
-    return {left.x + right.x, left.y + right.y, left.z + right.z};
-}
-
-[[nodiscard]] Vector3 multiply(Vector3 left, Vector3 right) noexcept
-{
-    return {left.x * right.x, left.y * right.y, left.z * right.z};
-}
-
-[[nodiscard]] Core::Result<Quaternion> normalizedQuaternion(const RenderPose3DInput& pose)
-{
-    const double lengthSquared = static_cast<double>(pose.rotationX) * pose.rotationX +
-                                 static_cast<double>(pose.rotationY) * pose.rotationY +
-                                 static_cast<double>(pose.rotationZ) * pose.rotationZ +
-                                 static_cast<double>(pose.rotationW) * pose.rotationW;
-    if (!std::isfinite(lengthSquared) || lengthSquared <= 1.0e-24)
+    const Math::Quaternion authored{
+        pose.rotationX, pose.rotationY, pose.rotationZ, pose.rotationW};
+    const double lengthSquared = static_cast<double>(authored.x) * authored.x +
+                                 static_cast<double>(authored.y) * authored.y +
+                                 static_cast<double>(authored.z) * authored.z +
+                                 static_cast<double>(authored.w) * authored.w;
+    if (!std::isfinite(lengthSquared) || lengthSquared <= Math::MinimumNormalizableLengthSquared)
     {
         return Core::failure(RenderErrorCode::InvalidRenderSceneInput,
                              "RenderScene 3D rotation quaternion is invalid");
     }
-    const float inverseLength = static_cast<float>(1.0 / std::sqrt(lengthSquared));
-    const Quaternion normalized{
-        .x = pose.rotationX * inverseLength,
-        .y = pose.rotationY * inverseLength,
-        .z = pose.rotationZ * inverseLength,
-        .w = pose.rotationW * inverseLength,
-    };
-    if (!finite(normalized.x) || !finite(normalized.y) || !finite(normalized.z) || !finite(normalized.w))
+    const Math::Quaternion normalized = Math::normalized(authored);
+    if (!Math::isFinite(normalized))
     {
         return Core::failure(RenderErrorCode::InvalidRenderSceneInput,
                              "RenderScene 3D rotation normalization overflowed");
@@ -98,50 +53,18 @@ inline constexpr u64 FnvPrime = 1099511628211ULL;
     return normalized;
 }
 
-[[nodiscard]] Vector3 rotate(Quaternion rotation, Vector3 value) noexcept
+// Column-major, and handed to the backend unchanged. Math::fromTrs produces the
+// same element order this function built by hand before Tina::Math existed.
+[[nodiscard]] std::array<float, 16> makeColumnMajorWorldTransform(
+    const RenderTransform3DInput& transform,
+    Math::Quaternion rotation) noexcept
 {
-    const Vector3 quaternionVector{rotation.x, rotation.y, rotation.z};
-    const Vector3 twiceCross{
-        2.0F * (quaternionVector.y * value.z - quaternionVector.z * value.y),
-        2.0F * (quaternionVector.z * value.x - quaternionVector.x * value.z),
-        2.0F * (quaternionVector.x * value.y - quaternionVector.y * value.x),
-    };
-    return add(value, add(
-                          {rotation.w * twiceCross.x, rotation.w * twiceCross.y, rotation.w * twiceCross.z},
-                          cross(quaternionVector, twiceCross)));
-}
-
-[[nodiscard]] std::array<float, 16> makeColumnMajorWorldTransform(const RenderTransform3DInput& transform,
-                                                                  Quaternion rotation) noexcept
-{
-    const float xx = rotation.x * rotation.x;
-    const float yy = rotation.y * rotation.y;
-    const float zz = rotation.z * rotation.z;
-    const float xy = rotation.x * rotation.y;
-    const float xz = rotation.x * rotation.z;
-    const float yz = rotation.y * rotation.z;
-    const float wx = rotation.w * rotation.x;
-    const float wy = rotation.w * rotation.y;
-    const float wz = rotation.w * rotation.z;
-
-    return {
-        (1.0F - 2.0F * (yy + zz)) * transform.scaleX,
-        (2.0F * (xy + wz)) * transform.scaleX,
-        (2.0F * (xz - wy)) * transform.scaleX,
-        0.0F,
-        (2.0F * (xy - wz)) * transform.scaleY,
-        (1.0F - 2.0F * (xx + zz)) * transform.scaleY,
-        (2.0F * (yz + wx)) * transform.scaleY,
-        0.0F,
-        (2.0F * (xz + wy)) * transform.scaleZ,
-        (2.0F * (yz - wx)) * transform.scaleZ,
-        (1.0F - 2.0F * (xx + yy)) * transform.scaleZ,
-        0.0F,
-        transform.pose.positionX,
-        transform.pose.positionY,
-        transform.pose.positionZ,
-        1.0F,
-    };
+    return Math::fromTrs(
+               Math::Vec3{transform.pose.positionX, transform.pose.positionY,
+                   transform.pose.positionZ},
+               rotation,
+               Math::Vec3{transform.scaleX, transform.scaleY, transform.scaleZ})
+        .columns;
 }
 
 [[nodiscard]] bool finiteViewport(const RenderNormalizedViewport& viewport) noexcept
@@ -722,9 +645,9 @@ Core::Status RenderSceneBuilder::setPerspectiveCamera(const RenderPerspectiveCam
     {
         return failBuild(rotationResult.error().code, rotationResult.error().message.c_str());
     }
-    const Quaternion rotation = *rotationResult;
-    const Vector3 forward = rotate(rotation, {0.0F, 0.0F, -1.0F});
-    const Vector3 up = rotate(rotation, {0.0F, 1.0F, 0.0F});
+    const Math::Quaternion rotation = *rotationResult;
+    const Math::Vec3 forward = Math::rotate(rotation, Math::Vec3{0.0F, 0.0F, -1.0F});
+    const Math::Vec3 up = Math::rotate(rotation, Math::Vec3{0.0F, 1.0F, 0.0F});
     const float aspectRatio = *m_frameParameters.primarySurfaceAspectRatio *
                               camera.normalizedViewport.width / camera.normalizedViewport.height;
     m_perspectiveCamera = RenderPerspectiveCamera{
@@ -783,18 +706,19 @@ Core::Status RenderSceneBuilder::addMesh3D(const RenderMesh3DInput& mesh)
     {
         return failBuild(rotationResult.error().code, rotationResult.error().message.c_str());
     }
-    const Quaternion rotation = *rotationResult;
-    const Vector3 scaledLocalCenter = multiply(
-        {mesh.localBounds.centerX, mesh.localBounds.centerY, mesh.localBounds.centerZ},
-        {mesh.worldTransform.scaleX, mesh.worldTransform.scaleY, mesh.worldTransform.scaleZ});
-    const Vector3 worldCenter = add(
-        {mesh.worldTransform.pose.positionX, mesh.worldTransform.pose.positionY, mesh.worldTransform.pose.positionZ},
-        rotate(rotation, scaledLocalCenter));
+    const Math::Quaternion rotation = *rotationResult;
+    const Math::Vec3 scaledLocalCenter =
+        Math::Vec3{mesh.localBounds.centerX, mesh.localBounds.centerY, mesh.localBounds.centerZ} *
+        Math::Vec3{mesh.worldTransform.scaleX, mesh.worldTransform.scaleY, mesh.worldTransform.scaleZ};
+    const Math::Vec3 worldCenter =
+        Math::Vec3{mesh.worldTransform.pose.positionX, mesh.worldTransform.pose.positionY,
+            mesh.worldTransform.pose.positionZ} +
+        Math::rotate(rotation, scaledLocalCenter);
     const float worldRadius = mesh.localBounds.radius *
                               std::max({mesh.worldTransform.scaleX, mesh.worldTransform.scaleY,
                                         mesh.worldTransform.scaleZ});
     const std::array<float, 16> worldTransform = makeColumnMajorWorldTransform(mesh.worldTransform, rotation);
-    if (!finite(worldCenter) || !finite(worldRadius) || worldRadius <= 0.0F ||
+    if (!Math::isFinite(worldCenter) || !finite(worldRadius) || worldRadius <= 0.0F ||
         !std::ranges::all_of(worldTransform, [](float value) noexcept { return finite(value); }))
     {
         return failBuild(RenderErrorCode::InvalidRenderSceneInput,
@@ -903,18 +827,19 @@ Core::Status RenderSceneBuilder::addSkinnedMesh3D(const RenderSkinnedMesh3DInput
     {
         return failBuild(rotationResult.error().code, rotationResult.error().message.c_str());
     }
-    const Quaternion rotation = *rotationResult;
-    const Vector3 scaledLocalCenter = multiply(
-        {mesh.localBounds.centerX, mesh.localBounds.centerY, mesh.localBounds.centerZ},
-        {mesh.worldTransform.scaleX, mesh.worldTransform.scaleY, mesh.worldTransform.scaleZ});
-    const Vector3 worldCenter = add(
-        {mesh.worldTransform.pose.positionX, mesh.worldTransform.pose.positionY, mesh.worldTransform.pose.positionZ},
-        rotate(rotation, scaledLocalCenter));
+    const Math::Quaternion rotation = *rotationResult;
+    const Math::Vec3 scaledLocalCenter =
+        Math::Vec3{mesh.localBounds.centerX, mesh.localBounds.centerY, mesh.localBounds.centerZ} *
+        Math::Vec3{mesh.worldTransform.scaleX, mesh.worldTransform.scaleY, mesh.worldTransform.scaleZ};
+    const Math::Vec3 worldCenter =
+        Math::Vec3{mesh.worldTransform.pose.positionX, mesh.worldTransform.pose.positionY,
+            mesh.worldTransform.pose.positionZ} +
+        Math::rotate(rotation, scaledLocalCenter);
     const float worldRadius = mesh.localBounds.radius *
                               std::max({mesh.worldTransform.scaleX, mesh.worldTransform.scaleY,
                                         mesh.worldTransform.scaleZ});
     const std::array<float, 16> worldTransform = makeColumnMajorWorldTransform(mesh.worldTransform, rotation);
-    if (!finite(worldCenter) || !finite(worldRadius) || worldRadius <= 0.0F ||
+    if (!Math::isFinite(worldCenter) || !finite(worldRadius) || worldRadius <= 0.0F ||
         !std::ranges::all_of(worldTransform, [](float value) noexcept { return finite(value); }))
     {
         return failBuild(RenderErrorCode::InvalidRenderSceneInput,
@@ -1052,18 +977,27 @@ bool RenderSceneBuilder::intersectsCamera(const RenderSprite2DItem& sprite,
 
 namespace {
 
-[[nodiscard]] bool sphereIntersectsPerspectiveCamera(Vector3 worldCenter, float radius,
+// Deliberately NOT Math::sphereIntersectsPerspectiveFrustum, for two reasons.
+//
+// It also returns the view depth, which the caller needs for depth bucketing and
+// transparent sorting — the shared helper only answers the visibility question.
+//
+// And it accumulates in float where the shared helper uses double. Switching this
+// one to double would reclassify spheres sitting within a float epsilon of a
+// frustum plane, changing published draw counts; that is a re-baselining exercise,
+// not a refactor. The two must stay as they are until it is done deliberately.
+[[nodiscard]] bool sphereIntersectsPerspectiveCamera(Math::Vec3 worldCenter, float radius,
                                                      const RenderPerspectiveCamera& camera,
                                                      float& cameraDepth) noexcept
 {
-    const Vector3 cameraPosition{camera.positionX, camera.positionY, camera.positionZ};
-    const Vector3 forward{camera.forwardX, camera.forwardY, camera.forwardZ};
-    const Vector3 up{camera.upX, camera.upY, camera.upZ};
-    const Vector3 right = cross(forward, up);
-    const Vector3 relative = subtract(worldCenter, cameraPosition);
-    const float x = dot(relative, right);
-    const float y = dot(relative, up);
-    const float depth = dot(relative, forward);
+    const Math::Vec3 cameraPosition{camera.positionX, camera.positionY, camera.positionZ};
+    const Math::Vec3 forward{camera.forwardX, camera.forwardY, camera.forwardZ};
+    const Math::Vec3 up{camera.upX, camera.upY, camera.upZ};
+    const Math::Vec3 right = Math::cross(forward, up);
+    const Math::Vec3 relative = worldCenter - cameraPosition;
+    const float x = Math::dot(relative, right);
+    const float y = Math::dot(relative, up);
+    const float depth = Math::dot(relative, forward);
     cameraDepth = depth;
 
     if (!finite(x) || !finite(y) || !finite(depth) || !finite(radius) ||

@@ -25,9 +25,13 @@ Legacy `Tina.exe`、旧横版 2D 游戏和旧 UI 产品图已经删除。当前 
 ```mermaid
 flowchart TD
     Core["Tina::Core"]
+    Math["Tina::Math"] --> Core
     Platform["Tina::Platform"] --> Core
     Task["Tina::Task"] --> Core
+    Gameplay["Tina::Gameplay"] --> Core
+    Gameplay --> Math
     Render["Tina::Render"] --> Core
+    Render -. "PRIVATE" .-> Math
     Audio["Tina::Audio"] --> Core
     AssetFormat["Tina::AssetFormat"] --> Core
     Editor["Tina::Editor"] --> Core
@@ -41,12 +45,14 @@ flowchart TD
     UI["Tina::UI"] --> Core
     UI --> Platform
     Scene["Tina::Scene"] --> Core
+    Scene --> Math
     Scene --> Render
     Scene --> AssetFormat
     AssetTypes["Tina::AssetTypes"] --> Core
     AssetTypes --> Render
     Scene --> AssetTypes
     Asset["Tina::Asset"] --> Core
+    Asset --> Math
     Asset --> AssetTypes
     Asset --> AssetFormat
     Asset --> Task
@@ -71,6 +77,7 @@ flowchart TD
     Desktop --> Bgfx
     Desktop --> Task
     Physics2D["optional Tina::Physics2D"] --> Core
+    Physics2D --> Math
     Asset -. "feature-gated bridge" .-> Physics2D
 ```
 
@@ -82,8 +89,10 @@ flowchart TD
 | Target | 职责 | 关键边界 |
 | --- | --- | --- |
 | `tina_core` | Result/Status、ID、时间、文件、日志/Trace 与 opt-in 最后故障报告 | xxHash、Windows DbgHelp 仅 PRIVATE；`EngineHost` 不隐式安装进程 handler |
+| `tina_math` | 引擎唯一的 `Vec2/3/4`、`Quaternion`、列主序 `Mat4`、`Aabb2/3`、`Rect`、`Sphere`、`Plane`、`Ray`、`Frustum` 与几何查询 | header-only INTERFACE；只依赖 Core；不占 `ErrorDomain`/`MemoryTag`，查询失败返回 `optional`/`bool`（见 [Math](math.md)、[ADR 0035](adr/0035-math-module-boundaries.md)） |
 | `tina_platform` | 窗口/输入/生命周期的 backend-neutral 契约 | 不含 GLFW 类型 |
 | `tina_task` | 有界 IO/CPU/Main 执行域与 `TaskGroup` | 禁止 detach/强杀 |
+| `tina_gameplay` | `Scheduler`/timer、`Action`/`ActionRunner` tween 与组合子、28 条 `Easing`、scoped `Signal<T>` | 只依赖 Core+Math，不知道 Scene/Asset/Physics/UI；delta 由调用方给，dispatch 重入返回 `ReentrantDispatch`（见 [Gameplay 工具层](gameplay-tooling.md)、[ADR 0036](adr/0036-gameplay-tooling-boundaries.md)） |
 | `tina_render` | RenderDevice SPI、RenderScene、UI DisplayList、GPU 资源句柄 | 不含 bgfx 类型 |
 | `tina_audio` | AudioEngine、voice/bus/command/completion | 不含 miniaudio 类型 |
 | `tina_asset_format` | Cooked wire format 与 typed payload | Runtime 不读取源资产 |
@@ -96,7 +105,7 @@ flowchart TD
 | --- | --- | --- |
 | `tina_runtime` | `EngineHost`、帧阶段、Input→Action、Runtime→UI、Render submit | 唯一正式主循环 |
 | `tina_asset_types` | `AssetHandle` 弱 generation identity、borrowed frame-resource resolver | header-only；只传递 Core/Render，不传递完整 Asset/Task/Physics |
-| `tina_scene` | generation entity、Transform、2D/3D component/extraction 与 allocation-free `CameraFollow2D` | 仅通过 AssetTypes 引用弱 Handle；当前不链接 EnTT/GLM |
+| `tina_scene` | generation entity、Transform、封闭 typed read view、runtime metadata、2D/3D component/extraction 与 allocation-free `CameraFollow2D` | 仅通过 AssetTypes 引用弱 Handle；当前不链接 EnTT/GLM |
 | `tina_asset` | Catalog、AssetSystem、Handle/Lease、Cooker、upload/retirement、Sprite2D/Mesh3D binding registry | cgltf/stb_image 只在 Cooker TU；两类 registry 都借用 AssetSystem/device，并唯一拥有各自 resident Lease/GPU/binding |
 | `tina_ui` | retained Element tree、layout/hit/route/paint/semantics、文本/Glyph、accessibility action | 当前产品 UI 位于 `src/ui`；UI-004/UI-005 已完成，框架演进见 [UI 框架设计](ui-framework.md) |
 | `tina_physics2d` | Box/Circle/Capsule/ConvexPolygon、Distance/Revolute/Prismatic 与查询边界 | 可选，Box2D 3.x PRIVATE |

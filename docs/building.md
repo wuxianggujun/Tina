@@ -622,6 +622,30 @@ adb shell am start -n dev.tina/.TinaActivity --ez tina.composeText true
 adb shell am start -n dev.tina/.TinaActivity --ez tina.gallery true
 ```
 
+**Release 构建：** `./gradlew :app:assembleRelease`。之前只有 `debuggable` 的 debug 变体，也就是此前所有
+性能观察都来自 `-O0`、断言开启的构建 —— 那种数字说明不了发布行为。`minifyEnabled` 保持 false：Java 侧只有
+四个小类没什么可缩，而 R8 会重命名 `RegisterNatives` 在加载期按名字解析的那些方法。native 符号保留
+（`debugSymbolLevel FULL`），因为 strip 过的 `.so` 会把设备崩溃变成一串十六进制地址，而这个移植产生的缺陷
+全靠有名字的栈帧才定位得到。
+
+**四项性能相关的实现选择：**
+
+- **帧循环走 `Choreographer.postFrameCallback`，不是 `Handler.post`。** 后者会无延迟地重发自己 —— 那不是
+  帧循环：它按 UI 线程的派发速度狂转、产出显示器永远不会呈现的帧，还饿着它自己依赖来送触摸的那个线程。
+  Choreographer 是显示器自己的 vsync 信号，所以引擎跟着面板刷新率跑，可变刷新率也顺带拿到。
+- **IME 几何按 6 帧采样，且遮挡值只在变化时跨 JNI。** 两者在无焦点时纯属开销：遮挡测量要走视图层级取
+  visible frame，光标上报要跨 JNI 加一次 `CursorAnchorInfo` 分配。键盘弹出和光标移动都是人的速度，60Hz 采样
+  它们是白付。
+- **task system 换成 bounded，不再是 disabled。** `createDisabledTaskSystem` 让每个 `scheduleCpu` 就地在
+  调用线程跑，于是资产解码和一切并行工作都落在帧线程上 —— 而 Android 上那**同时是 UI 线程**，所以一次纹理
+  加载会同时卡住渲染与触摸派发。worker 数走 `interactiveCpuWorkerCount`（ADR 0017，给主线程留一个硬件
+  线程），这在手机上比桌面更要紧：主线程与平台自己的 UI 工作共享，超订的代价是输入延迟而非只是吞吐。
+- **字体从 `/system/fonts` 读，不打进 APK。** 设备上一定有拉丁无衬线字体，打包等于为每个构建加一兆去复制
+  一个已经在那儿的文件。路径由 **Java 选**：`/system/fonts` 位置稳定但内容不稳定（模拟器是 DroidSans、多数
+  现代设备是 Roboto、厂商还有自己的名字），在 C++ 里写死文件名会在碰巧匹配的设备上出字、在其余设备上静默
+  退化成实心块。传路径而非字节，是因为引擎自己有 memory-resource 感知的 `readFile`，不必把一兆字体经 JNI
+  数组复制一遍。
+
 **gallery 是 opt-in 而非默认，这是刻意的取舍。** 遥测 demo 承载全部设备证据 —— 十一个 JNI 计数器都从它
 读 —— 换成 gallery 等于拿已证明的换好看的。两者是同一个 `EngineHost` 上的两个 `IGameApplication`，
 一行选择。gallery 模式下**所有那些计数器读数为零**（它们是 demo 自己的状态），所以进度日志会换成一行

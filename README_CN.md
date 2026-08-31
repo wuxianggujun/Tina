@@ -13,7 +13,7 @@ Tina 是一个以 C++23 为基线的 2D/3D 游戏 Runtime。当前产品路径�
   error 写入 `%TEMP%/tina_editor_crash.txt`，避免 GUI 进程无声消失；
 - Platform/Input 使用 Tina 公共契约与私有 GLFW adapter；
 - Render 使用后端无关 `RenderFrame`/`RenderScene`，bgfx 只存在于私有 backend；
-- Scene 支持 generation `EntityId`、Transform 层级、2D/3D extraction 与 backend-neutral `CameraFollow2D`；
+- Scene 支持 generation `EntityId`、Transform 层级、封闭 typed read view、runtime metadata、2D/3D extraction 与 backend-neutral `CameraFollow2D`；
 - Navigation2D 支持 immutable weighted 栅格数据、generation 动态阻挡、四向/对角确定性同步/分步 A* 与
   TileMap material-cost 导航派生；
 - Asset 支持 Catalog/Cooked、AssetId、Handle/Lease、Task-backed IO/Main completion、GPU

@@ -149,9 +149,15 @@ class IAndroidPlatformBackend {
     // sits behind the keyboard with no way to know it must scroll into view.
     [[nodiscard]] virtual float softKeyboardOccludedLogicalHeight() const noexcept = 0;
 
-    // Latched intent for the host to consume. Reading it clears it, so one request produces exactly
-    // one InputMethodManager call rather than being re-applied every frame.
-    [[nodiscard]] virtual AndroidSoftKeyboardRequest takePendingSoftKeyboardRequest() noexcept = 0;
+    // Latched intent for the host to inspect. Reading does not clear it: InputMethodManager may be
+    // temporarily unavailable or reject a request while the view has no window token, and consuming at
+    // read time would lose that intent permanently.
+    [[nodiscard]] virtual AndroidSoftKeyboardRequest pendingSoftKeyboardRequest() const noexcept = 0;
+
+    // Clears the pending intent only when it still matches the request the host successfully applied.
+    // A newer opposite request therefore cannot be erased by a late acknowledgement of an older read.
+    [[nodiscard]] virtual Core::Status
+    acknowledgeSoftKeyboardRequest(AndroidSoftKeyboardRequest request) noexcept = 0;
 
     // --- Caret placement ---
     //

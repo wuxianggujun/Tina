@@ -59,7 +59,8 @@ struct HttpRequestConfig final {
     // optional TLS adapter: hand it a TlsConnection and the same parser runs over
     // an encrypted stream.
     //
-    // The stream may still be Connecting; pump() waits for it.
+    // The stream may still be Connecting; pump() waits for it. A failed exchange
+    // closes the stream but never destroys its owner.
     IByteStream* stream = nullptr;
 
     HttpMethod method = HttpMethod::Get;
@@ -153,8 +154,8 @@ class HttpRequest final {
 
     explicit HttpRequest(Impl* impl) noexcept;
 
-    // Decodes the buffered chunked stream in place. True once the terminating
-    // zero-length chunk has been seen.
+    // Incrementally decodes buffered chunk prefixes. True once the terminating
+    // zero-length chunk and trailers have been seen.
     [[nodiscard]] Core::Result<bool> decodeChunkedBody();
 
     Impl* m_impl = nullptr;

@@ -49,7 +49,7 @@ namespace {
     return Core::success();
 }
 
-[[nodiscard]] bool isFinitePoint(Vec2 point) noexcept
+[[nodiscard]] bool isFinitePoint(Math::Vec2 point) noexcept
 {
     return std::isfinite(point.x) && std::isfinite(point.y);
 }
@@ -61,7 +61,9 @@ struct SegmentGeometry final {
     float rotationRadians = 0.0F;
 };
 
-[[nodiscard]] Core::Result<SegmentGeometry> resolveGeometry(Vec2 start, Vec2 end) noexcept
+[[nodiscard]] Core::Result<SegmentGeometry> resolveGeometry(
+    Math::Vec2 start,
+    Math::Vec2 end) noexcept
 {
     if (!isFinitePoint(start) || !isFinitePoint(end)) {
         return Core::failure(
@@ -152,7 +154,7 @@ Core::Result<Trail2D> Trail2D::Create(
     return Trail2D{config, std::move(segments)};
 }
 
-Core::Status Trail2D::appendPoint(Vec2 point) noexcept
+Core::Status Trail2D::appendPoint(Math::Vec2 point) noexcept
 {
     if (!isFinitePoint(point)) {
         return Core::failure(

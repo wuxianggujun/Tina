@@ -497,8 +497,8 @@ TEST_F(Trail2DAssetTest, CapacityFailurePreservesAnchorSegmentsAndStableKeySeque
     EXPECT_EQ(trail->segmentCount(), 0U);
     ASSERT_TRUE(trail->appendPoint({2.0F, 0.0F}).has_value());
     ASSERT_EQ(trail->segmentCount(), 1U);
-    EXPECT_EQ(trail->segments()[0].start, (Vec2{1.0F, 0.0F}));
-    EXPECT_EQ(trail->segments()[0].end, (Vec2{2.0F, 0.0F}));
+    EXPECT_EQ(trail->segments()[0].start, (Math::Vec2{1.0F, 0.0F}));
+    EXPECT_EQ(trail->segments()[0].end, (Math::Vec2{2.0F, 0.0F}));
     EXPECT_EQ(trail->segments()[0].stableEntityKey, 101U);
 }
 

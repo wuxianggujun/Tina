@@ -820,7 +820,7 @@ TEST(WebSocketTest, StallLimitEndsASilentServer)
         }
     }
 
-    EXPECT_EQ(observed, Network::NetworkErrorCode::HttpTimeout);
+    EXPECT_EQ(observed, Network::NetworkErrorCode::WebSocketTimeout);
     EXPECT_EQ(socket->state(), WebSocketState::Failed);
 }
 

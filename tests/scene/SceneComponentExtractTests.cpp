@@ -33,13 +33,13 @@ namespace {
     return transform;
 }
 
-[[nodiscard]] Quaternion rotationAroundZ(float radians) noexcept
+[[nodiscard]] Math::Quaternion rotationAroundZ(float radians) noexcept
 {
     const float halfAngle = radians * 0.5F;
     return {0.0F, 0.0F, std::sin(halfAngle), std::cos(halfAngle)};
 }
 
-[[nodiscard]] Quaternion rotationAroundY(float radians) noexcept
+[[nodiscard]] Math::Quaternion rotationAroundY(float radians) noexcept
 {
     const float halfAngle = radians * 0.5F;
     return {0.0F, std::sin(halfAngle), 0.0F, std::cos(halfAngle)};

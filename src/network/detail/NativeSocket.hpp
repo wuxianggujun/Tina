@@ -63,6 +63,10 @@ void closeNativeSocket(NativeSocket socket) noexcept;
 
 [[nodiscard]] Core::Status setNativeSocketNonBlocking(NativeSocket socket) noexcept;
 
+// Prevents a write to a closed peer from terminating the process on platforms that use SIGPIPE.
+// Linux/Android use MSG_NOSIGNAL per send; BSD-family platforms require SO_NOSIGPIPE on the socket.
+[[nodiscard]] Core::Status configureNativeSocketStreamSend(NativeSocket socket) noexcept;
+
 // Reads and clears the pending socket error. This is the only portable way to
 // learn whether a non-blocking connect succeeded: poll reports the socket
 // writable either way, so the outcome lives here rather than in the poll flags.
@@ -72,7 +76,7 @@ void closeNativeSocket(NativeSocket socket) noexcept;
 
 // Closes the sending half, so the peer observes end-of-stream while this side can
 // still read what is already in flight.
-void shutdownNativeSocketSend(NativeSocket socket) noexcept;
+[[nodiscard]] Core::Status shutdownNativeSocketSend(NativeSocket socket) noexcept;
 
 // Requests kernel send/receive buffer sizes. Exists so tests can shrink them to
 // force backpressure deterministically; production paths leave the defaults

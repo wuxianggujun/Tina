@@ -69,7 +69,7 @@ namespace {
 
 [[nodiscard]] Core::Result<Physics2D::PhysicsBodyId> makeBody(
     Physics2D::PhysicsWorld2D& world,
-    Physics2D::PhysicsVec2 position = {1.5F, 1.5F},
+    Math::Vec2 position = {1.5F, 1.5F},
     float angle = 0.0F)
 {
     Physics2D::PhysicsBody2DDesc desc;
@@ -81,8 +81,8 @@ namespace {
 
 [[nodiscard]] PhysicsNavigationBody2DDesc boundsFor(
     Physics2D::PhysicsBodyId body,
-    Physics2D::PhysicsVec2 lower,
-    Physics2D::PhysicsVec2 upper) noexcept
+    Math::Vec2 lower,
+    Math::Vec2 upper) noexcept
 {
     return PhysicsNavigationBody2DDesc{
         .body = body,

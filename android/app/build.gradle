@@ -32,7 +32,11 @@ android {
                                       '-DTINA_BUILD_SHADERS=OFF',
                                       '-DTINA_BUILD_PHYSICS2D=OFF',
                                       '-DTINA_BUILD_AUDIO_MINIAUDIO=OFF',
-                                      '-DTINA_BUILD_UI_FREETYPE=OFF',
+                                      // ON so UI text is readable. Without it every glyph falls back to a
+                                      // solid quad, which makes a menu of named scenes pointless. The
+                                      // matching vcpkg manifest feature is selected in app/CMakeLists.txt,
+                                      // because it has to be set before project() runs.
+                                      '-DTINA_BUILD_UI_FREETYPE=ON',
                                       '-DTINA_BUILD_UI_UIA=OFF']
 
                 // The renderer is opt-in via -Ptina.shaderc=<path to a host shaderc.exe>, because
@@ -80,6 +84,22 @@ android {
     buildTypes {
         debug {
             debuggable true
+        }
+        release {
+            // Every measurement before this existed came from the debug build, which is compiled -O0 with
+            // assertions live -- so any performance number taken from it says nothing about shipped
+            // behaviour. AGP passes CMAKE_BUILD_TYPE=Release for this variant, which is what actually
+            // turns on optimisation in the native half.
+            debuggable false
+            // No minify: there is no Java to shrink worth speaking of (four small classes), and R8 would
+            // rename the very methods RegisterNatives resolves by name at load time. Keeping it off means
+            // an unsigned release build behaves like the debug one apart from optimisation.
+            minifyEnabled false
+            // Native symbols are kept. A stripped .so turns a device crash into a hex address, and the
+            // defects this port has produced were only diagnosable from named frames.
+            ndk {
+                debugSymbolLevel 'FULL'
+            }
         }
     }
 }

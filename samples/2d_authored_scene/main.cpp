@@ -756,7 +756,7 @@ class AuthoredSceneState final : public Tina::IGameState {
             capture_->extractBeforeCommitRejected = true;
         }
 
-        const Tina::Scene::Vec2 origin = runtime_.fxOrigin(fxEntity_);
+        const Tina::Math::Vec2 origin = runtime_.fxOrigin(fxEntity_);
         capture_->fxOriginX = origin.x;
         capture_->fxOriginY = origin.y;
         capture_->navigationGridReachable = runtime_.navigationGrid(navigationEntity_) != nullptr;

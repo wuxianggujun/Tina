@@ -1,3 +1,4 @@
+#include <tina/core/base/ScopeExit.hpp>
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/platform/PlatformErrors.hpp>
 #include <tina/platform/android/AndroidPlatformFactory.hpp>
@@ -6,6 +7,7 @@
 #include "AndroidCompositionSession.hpp"
 
 #include <cmath>
+#include <exception>
 #include <limits>
 #include <memory>
 #include <new>
@@ -42,10 +44,20 @@ using SurfacePool = Core::GenerationPool<AndroidWindowSurfaceRecord, Integration
         return Core::failure(Core::CoreErrorCode::InvalidArgument,
                              "The Android platform backend requires a non-empty framebuffer extent");
     }
-    if (!(contentScale.x > 0.0F) || !(contentScale.y > 0.0F))
+    if (!std::isfinite(contentScale.x) || !std::isfinite(contentScale.y) ||
+        !(contentScale.x > 0.0F) || !(contentScale.y > 0.0F))
     {
         return Core::failure(Core::CoreErrorCode::InvalidArgument,
-                             "The Android platform backend requires a positive content scale");
+                             "The Android platform backend requires a finite positive content scale");
+    }
+    const double logicalWidth = static_cast<double>(framebufferExtent.width) / contentScale.x;
+    const double logicalHeight = static_cast<double>(framebufferExtent.height) / contentScale.y;
+    constexpr double MaximumLogicalExtent = static_cast<double>((std::numeric_limits<u32>::max)());
+    if (!std::isfinite(logicalWidth) || !std::isfinite(logicalHeight) || logicalWidth < 1.0 ||
+        logicalHeight < 1.0 || logicalWidth > MaximumLogicalExtent || logicalHeight > MaximumLogicalExtent)
+    {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                             "The Android framebuffer and content scale produce an invalid logical extent");
     }
     return Core::success();
 }
@@ -59,8 +71,8 @@ using SurfacePool = Core::GenerationPool<AndroidWindowSurfaceRecord, Integration
         // density is the only conversion available.
         .logicalExtent =
             LogicalExtent{
-                static_cast<u32>(static_cast<float>(framebufferExtent.width) / contentScale.x),
-                static_cast<u32>(static_cast<float>(framebufferExtent.height) / contentScale.y),
+                static_cast<u32>(static_cast<double>(framebufferExtent.width) / contentScale.x),
+                static_cast<u32>(static_cast<double>(framebufferExtent.height) / contentScale.y),
             },
         .framebufferExtent = framebufferExtent,
         .contentScale = contentScale,
@@ -103,14 +115,18 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
           surfaceSnapshot_(makeSurfaceSnapshot(surfaceId, metrics, 1)),
           ownerThread_(std::this_thread::get_id())
     {
+        leaseControl_->surface = surfaceId_;
+        leaseControl_->binding = Integration::Detail::NativeWindowBinding{
+            .kind = Integration::Detail::NativeWindowBindingKind::Android,
+            .nativeDisplay = 0,
+            .nativeWindow = nativeWindow_,
+            .bindingRevision = surfaceSnapshot_.nativeBindingRevision,
+        };
     }
 
     ~AndroidWindowSurfacePlatformBackend() noexcept override
     {
-        if (leaseControl_ != nullptr)
-        {
-            leaseControl_->surfaceAlive = false;
-        }
+        shutdown();
     }
 
     [[nodiscard]] Core::Result<std::optional<WindowMetricsSnapshot>> initialPrimaryWindowMetrics() override
@@ -139,24 +155,75 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
         {
             return std::unexpected(std::move(beginStatus.error()));
         }
+        auto discardPartialFrame = Core::makeScopeExit([this]() noexcept {
+            (void)frameBuilder_.discardFrame();
+            streamRecoveryPending_ = true;
+        });
+
+        resetPointerDeltas();
+        if (inputQueueDropObserved())
+        {
+            streamRecoveryPending_ = true;
+        }
+
         // Transitions first, then the end-of-poll snapshot. Order matters: a transition carries the
         // position captured at that exact moment, while the snapshot is the state the poll ended
         // in, and downstream relies on both being consistent with each other.
-        if (auto status = drainTouchEvents(); !status)
+        if (streamRecoveryPending_)
         {
-            return std::unexpected(std::move(status.error()));
+            resetInputStreamState();
+            if (auto status = append(InputStreamReset{
+                    .routedWindow = metrics_.window,
+                    .reason = InputResetReason::BackendRecovery,
+                });
+                !status)
+            {
+                return std::unexpected(std::move(status.error()));
+            }
+            streamRecoveryPending_ = false;
         }
-        if (auto status = drainKeyEvents(); !status)
+        else
         {
-            return std::unexpected(std::move(status.error()));
-        }
-        if (auto status = drainTextEvents(); !status)
-        {
-            return std::unexpected(std::move(status.error()));
-        }
-        if (auto status = drainCompositionEvents(); !status)
-        {
-            return std::unexpected(std::move(status.error()));
+            if (windowCancelPending_)
+            {
+                if (auto status = append(InputCancelTransition{
+                        .routedWindow = metrics_.window,
+                        .reason = InputCancelReason::FocusLost,
+                    });
+                    !status)
+                {
+                    return std::unexpected(std::move(status.error()));
+                }
+                windowCancelPending_ = false;
+            }
+
+            if (surfaceSnapshot_.suspended)
+            {
+                discardQueuedInput();
+                if (auto status = drainCompositionEvents(); !status)
+                {
+                    return std::unexpected(std::move(status.error()));
+                }
+            }
+            else
+            {
+                if (auto status = drainTouchEvents(); !status)
+                {
+                    return std::unexpected(std::move(status.error()));
+                }
+                if (auto status = drainKeyEvents(); !status)
+                {
+                    return std::unexpected(std::move(status.error()));
+                }
+                if (auto status = drainTextEvents(); !status)
+                {
+                    return std::unexpected(std::move(status.error()));
+                }
+                if (auto status = drainCompositionEvents(); !status)
+                {
+                    return std::unexpected(std::move(status.error()));
+                }
+            }
         }
         if (!frameBuilder_.setPrimaryWindowSnapshot(metrics_, pointerState_))
         {
@@ -172,6 +239,7 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
         // snapshot once per frame, so any further lifecycle change now needs its own revision. Doing
         // this here rather than in an explicit host call means a host cannot forget it.
         surfaceRevisionPendingObservation_ = false;
+        discardPartialFrame.release();
         return PlatformPollResult::Continue(*frame);
     }
 
@@ -222,11 +290,34 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
 
     void shutdown() noexcept override
     {
+        if (stopped_)
+        {
+            return;
+        }
+        if (std::this_thread::get_id() != ownerThread_)
+        {
+            std::terminate();
+        }
+        if (leaseControl_ != nullptr && leaseControl_->activeLeaseCount != 0)
+        {
+            std::terminate();
+        }
         stopped_ = true;
         if (leaseControl_ != nullptr)
         {
             leaseControl_->surfaceAlive = false;
         }
+        if (metrics_.window.hasValue())
+        {
+            (void)windowPool_.erase(metrics_.window);
+            metrics_.window = {};
+        }
+        if (surfaceId_.hasValue())
+        {
+            (void)surfacePool_.erase(surfaceId_);
+            surfaceId_ = {};
+        }
+        nativeWindow_ = 0;
     }
 
     [[nodiscard]] Core::Status publishPrimaryWindow() noexcept override
@@ -249,7 +340,7 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
         {
             return std::unexpected(std::move(status.error()));
         }
-        if (leaseAcquired_)
+        if (leaseControl_ != nullptr && leaseControl_->activeLeaseCount != 0)
         {
             return Core::failure(PlatformErrorCode::WindowSurfaceLeaseAlreadyAcquired,
                                  "The Android primary WindowSurface lease was already acquired");
@@ -260,7 +351,7 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
             // ANativeWindow* is self-contained; the bgfx decoder rejects a display here.
             .nativeDisplay = 0,
             .nativeWindow = nativeWindow_,
-            .bindingRevision = 1,
+            .bindingRevision = surfaceSnapshot_.nativeBindingRevision,
         };
         auto lease =
             Integration::Detail::NativeWindowSurfaceLeaseAccess::Create(leaseControl_, surfaceId_, binding);
@@ -268,7 +359,6 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
         {
             return std::unexpected(std::move(lease.error()));
         }
-        leaseAcquired_ = true;
         return std::move(*lease);
     }
 
@@ -302,8 +392,14 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
             // teardown, and failing there would turn a normal lifecycle into an error.
             return Core::success();
         }
+        if (metrics_.revision == (std::numeric_limits<u64>::max)() ||
+            (!surfaceRevisionPendingObservation_ &&
+             surfaceSnapshot_.surfaceRevision == (std::numeric_limits<u64>::max)()))
+        {
+            return Core::failure(PlatformErrorCode::WindowSurfaceRevisionExhausted,
+                                 "The Android WindowSurface revision is exhausted");
+        }
 
-        nativeWindow_ = 0;
         // Suspended, not "resized to nothing": the GPU resources are genuinely gone, and ADR 0034
         // is explicit that surfaceSuspended does not mean device lost -- the device survives, only
         // the backbuffer does not.
@@ -311,11 +407,20 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
         {
             return status;
         }
+        nativeWindow_ = 0;
+        ++metrics_.revision;
+        metrics_.focused = false;
+        metrics_.visible = false;
+        metrics_.minimized = true;
+        pointerState_.sourceMetricsRevision = metrics_.revision;
         surfaceSnapshot_.suspended = true;
+        surfaceSnapshot_.sourceMetricsRevision = metrics_.revision;
 
         // Every finger is gone with the window. Leaving slots mapped is precisely the cocos2d-x
         // failure where a drag interrupted by a task switch stranded its finger until process exit.
         releaseAllPointers();
+        windowCancelPending_ = true;
+        discardQueuedInput();
 
         // A composition in flight goes with the window too. Losing the surface delivers no
         // InputConnection call at all, so without this the UI keeps drawing a preedit the IME has
@@ -345,32 +450,64 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
             return status;
         }
 
-        nativeWindow_ = window.nativeWindow;
-        metrics_ = makeWindowMetrics(metrics_.window, framebufferExtent, contentScale, metrics_.revision + 1);
-        // pointerState_ must be rebuilt, not carried: it holds the previous metrics revision, and a
-        // published frame is rejected unless the two agree.
-        pointerState_ = quiescentInput(metrics_);
+        const bool bindingChanged = nativeWindow_ == 0 || nativeWindow_ != window.nativeWindow;
+        const bool geometryChanged = metrics_.framebufferExtent != framebufferExtent ||
+                                     metrics_.contentScale != contentScale || surfaceSnapshot_.suspended ||
+                                     !metrics_.focused || !metrics_.visible || metrics_.minimized;
+        if (!bindingChanged && !geometryChanged)
+        {
+            // surfaceChanged may repeat without changing either the native handle or its geometry.
+            // Treating that callback as a rebind would churn swapchains and revisions every time.
+            return Core::success();
+        }
+
+        if (metrics_.revision == (std::numeric_limits<u64>::max)() ||
+            (bindingChanged &&
+             surfaceSnapshot_.nativeBindingRevision == (std::numeric_limits<u64>::max)()) ||
+            (!surfaceRevisionPendingObservation_ &&
+             surfaceSnapshot_.surfaceRevision == (std::numeric_limits<u64>::max)()))
+        {
+            return Core::failure(PlatformErrorCode::WindowSurfaceRevisionExhausted,
+                                 "The Android native window revision is exhausted");
+        }
+
+        u64 nextBindingRevision = surfaceSnapshot_.nativeBindingRevision;
+        if (bindingChanged)
+        {
+            ++nextBindingRevision;
+            const Integration::Detail::NativeWindowBinding binding{
+                .kind = Integration::Detail::NativeWindowBindingKind::Android,
+                .nativeDisplay = 0,
+                .nativeWindow = window.nativeWindow,
+                .bindingRevision = nextBindingRevision,
+            };
+            if (auto status = Integration::Detail::NativeWindowSurfaceLeaseAccess::rebind(
+                    leaseControl_, surfaceId_, binding);
+                !status)
+            {
+                return status;
+            }
+        }
 
         if (auto status = markSurfaceFactsChanged(); !status)
         {
             return status;
         }
+        nativeWindow_ = window.nativeWindow;
+        metrics_ = makeWindowMetrics(metrics_.window, framebufferExtent, contentScale, metrics_.revision + 1);
+        // pointerState_ must be rebuilt, not carried: it holds the previous metrics revision, and a
+        // published frame is rejected unless the two agree.
+        pointerState_ = quiescentInput(metrics_);
+        discardQueuedInput();
+        windowCancelPending_ = true;
         // The tracker requires all three to move together, so a backend can never observe the
         // rebind and the geometry it must reset to in two different frames.
-        if (surfaceSnapshot_.nativeBindingRevision == (std::numeric_limits<u64>::max)())
-        {
-            return Core::failure(PlatformErrorCode::WindowSurfaceRevisionExhausted,
-                                 "The Android native binding revision is exhausted");
-        }
-        ++surfaceSnapshot_.nativeBindingRevision;
+        surfaceSnapshot_.nativeBindingRevision = nextBindingRevision;
         surfaceSnapshot_.framebufferExtent = framebufferExtent;
         surfaceSnapshot_.contentScale = contentScale;
         surfaceSnapshot_.sourceMetricsRevision = metrics_.revision;
         surfaceSnapshot_.suspended = false;
 
-        // A replaced window means a new binding, so the previous lease no longer describes reality.
-        // Allowing a fresh one is the whole point of a rebind.
-        leaseAcquired_ = false;
         return Core::success();
     }
 
@@ -418,11 +555,28 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
         return static_cast<float>(softKeyboardOccludedPhysicalHeight_) / metrics_.contentScale.y;
     }
 
-    [[nodiscard]] AndroidSoftKeyboardRequest takePendingSoftKeyboardRequest() noexcept override
+    [[nodiscard]] AndroidSoftKeyboardRequest pendingSoftKeyboardRequest() const noexcept override
     {
-        // Reading clears, so one request produces exactly one InputMethodManager call instead of
-        // being re-applied on every frame the host polls.
-        return std::exchange(pendingSoftKeyboardRequest_, AndroidSoftKeyboardRequest::None);
+        return pendingSoftKeyboardRequest_;
+    }
+
+    [[nodiscard]] Core::Status
+    acknowledgeSoftKeyboardRequest(AndroidSoftKeyboardRequest request) noexcept override
+    {
+        if (auto status = checkUsable("soft keyboard request acknowledgement"); !status)
+        {
+            return status;
+        }
+        if (request == AndroidSoftKeyboardRequest::None)
+        {
+            return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                                 "A soft keyboard acknowledgement must name a pending request");
+        }
+        if (pendingSoftKeyboardRequest_ == request)
+        {
+            pendingSoftKeyboardRequest_ = AndroidSoftKeyboardRequest::None;
+        }
+        return Core::success();
     }
 
     [[nodiscard]] std::optional<AndroidCaretPixels> caretPixels() const noexcept override
@@ -507,6 +661,63 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
         // Keys go with the window for the same reason fingers do: a key held when the activity loses its
         // window will never deliver an Up, so leaving the bit set latches it for the rest of the run.
         pointerState_.heldKeys.reset();
+    }
+
+    void resetPointerDeltas() noexcept
+    {
+        for (auto& pointer : pointerState_.pointers)
+        {
+            pointer.accumulatedDeltaX = 0.0;
+            pointer.accumulatedDeltaY = 0.0;
+        }
+    }
+
+    void discardQueuedInput() noexcept
+    {
+        AndroidTouchEvent touch{};
+        while (touchEvents_ != nullptr && touchEvents_->tryPop(touch))
+        {
+        }
+        AndroidKeyEvent key{};
+        while (keyEvents_ != nullptr && keyEvents_->tryPop(key))
+        {
+        }
+        AndroidTextEvent text{};
+        while (textEvents_ != nullptr && textEvents_->tryPop(text))
+        {
+        }
+        AndroidCompositionEvent composition{};
+        while (compositionEvents_ != nullptr && compositionEvents_->tryPop(composition))
+        {
+        }
+    }
+
+    void resetInputStreamState() noexcept
+    {
+        releaseAllPointers();
+        discardQueuedInput();
+        composition_ = {};
+        compositionCancelPending_ = false;
+        windowCancelPending_ = false;
+    }
+
+    template <typename Queue>
+    [[nodiscard]] static bool observeQueueDrops(const std::shared_ptr<Queue>& queue, u64& observed) noexcept
+    {
+        const u64 current = queue == nullptr ? 0 : queue->droppedEventCount();
+        const bool changed = current != observed;
+        observed = current;
+        return changed;
+    }
+
+    [[nodiscard]] bool inputQueueDropObserved() noexcept
+    {
+        const bool touchDropped = observeQueueDrops(touchEvents_, observedDroppedTouchEvents_);
+        const bool keyDropped = observeQueueDrops(keyEvents_, observedDroppedKeyEvents_);
+        const bool textDropped = observeQueueDrops(textEvents_, observedDroppedTextEvents_);
+        const bool compositionDropped =
+            observeQueueDrops(compositionEvents_, observedDroppedCompositionEvents_);
+        return touchDropped || keyDropped || textDropped || compositionDropped;
     }
 
     // Records that the surface facts changed, advancing surfaceRevision at most once per observation.
@@ -865,6 +1076,8 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
         {
         case FrameBatchAppendResult::Appended:
         case FrameBatchAppendResult::Coalesced:
+        case FrameBatchAppendResult::ResetInserted:
+        case FrameBatchAppendResult::IgnoredAfterReset:
             return Core::success();
         case FrameBatchAppendResult::RejectedCapacity:
             return Core::failure(PlatformErrorCode::InvalidFrameCapacity,
@@ -924,9 +1137,15 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
     u64 compositionUpdates_ = 0;
     u64 compositionEnds_ = 0;
     u64 compositionCancels_ = 0;
+    u64 observedDroppedTouchEvents_ = 0;
+    u64 observedDroppedKeyEvents_ = 0;
+    u64 observedDroppedTextEvents_ = 0;
+    u64 observedDroppedCompositionEvents_ = 0;
     // Set when the window died with a composition in flight, cleared by the poll that publishes the
     // cancel. See drainCompositionEvents for why it cannot be published at the point it happens.
     bool compositionCancelPending_ = false;
+    bool streamRecoveryPending_ = false;
+    bool windowCancelPending_ = false;
     std::optional<AndroidCaretPixels> caretPixels_{};
     u32 softKeyboardOccludedPhysicalHeight_ = 0;
     AndroidSoftKeyboardRequest pendingSoftKeyboardRequest_ = AndroidSoftKeyboardRequest::None;
@@ -943,7 +1162,6 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
     std::thread::id ownerThread_{};
     u64 nextFrameId_ = 1;
     bool stopped_ = false;
-    bool leaseAcquired_ = false;
     bool published_ = false;
 };
 

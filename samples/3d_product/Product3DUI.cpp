@@ -1,5 +1,6 @@
 #include "Product3DUI.hpp"
 
+#include <tina/math/Geometry2D.hpp>
 #include <tina/runtime/PrimaryWindowUI.hpp>
 #include <tina/ui/UITheme.hpp>
 #include <tina/ui/UIElement.hpp>
@@ -34,19 +35,16 @@ inline constexpr std::array<std::string_view, 7> AssetItemLabels{
     "Hero mesh", "MR material", "Base color", "Normal map", "Lighting rig", "Camera", "Environment",
 };
 
-struct Rect final {
-    float left = 0.0F;
-    float top = 0.0F;
-    float width = 0.0F;
-    float height = 0.0F;
-};
+// Reference-resolution logical rectangles. Math::Rect names the origin x/y rather
+// than left/top; the layout meaning is identical and the field order is the same.
+using Rect = Math::Rect;
 
 [[nodiscard]] UI::UILayoutStyle absoluteStyle(Rect rect, UI::UIEdgeSpacing padding = {}) noexcept
 {
     UI::UILayoutStyle style{};
     style.placement = UI::UILayoutPlacement::Overlay;
-    style.overlay.offset.x = UI::UILayoutLength::Px(rect.left);
-    style.overlay.offset.y = UI::UILayoutLength::Px(rect.top);
+    style.overlay.offset.x = UI::UILayoutLength::Px(rect.x);
+    style.overlay.offset.y = UI::UILayoutLength::Px(rect.y);
     style.size.width = UI::UILayoutLength::Px(rect.width);
     style.size.height = UI::UILayoutLength::Px(rect.height);
     style.padding = padding;
@@ -66,7 +64,7 @@ struct Rect final {
     UI::UILayoutStyle style = absoluteStyle(rect);
     style.overlay.horizontal = UI::UIAxisAlignment::End;
     style.overlay.offset.x = UI::UILayoutLength::Px(0.0F);
-    style.margin.right = ReferenceLogicalWidth - rect.left - rect.width;
+    style.margin.right = ReferenceLogicalWidth - rect.x - rect.width;
     return style;
 }
 
@@ -75,8 +73,8 @@ struct Rect final {
     UI::UILayoutStyle style = rightAnchoredStyle(rect);
     style.overlay.vertical = UI::UIAxisAlignment::Stretch;
     style.overlay.offset.y = UI::UILayoutLength::Px(0.0F);
-    style.margin.top = rect.top;
-    style.margin.bottom = ReferenceLogicalHeight - rect.top - rect.height;
+    style.margin.top = rect.y;
+    style.margin.bottom = ReferenceLogicalHeight - rect.y - rect.height;
     return style;
 }
 
@@ -87,9 +85,9 @@ struct Rect final {
     style.overlay.vertical = UI::UIAxisAlignment::End;
     style.overlay.offset = {};
     style.margin = {
-        .left = rect.left,
-        .right = ReferenceLogicalWidth - rect.left - rect.width,
-        .bottom = ReferenceLogicalHeight - rect.top - rect.height,
+        .left = rect.x,
+        .right = ReferenceLogicalWidth - rect.x - rect.width,
+        .bottom = ReferenceLogicalHeight - rect.y - rect.height,
     };
     return style;
 }

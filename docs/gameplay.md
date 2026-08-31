@@ -105,6 +105,10 @@ IO-only / NotSupported。AssetSystem/Physics2D/miniaudio device 由产品或 fea
 影响玩法正确性的 movement、collision、Physics step、tile command 应放在 `fixedUpdate()`；Camera follow
 presentation、菜单动画等可放在 `updateFrame()`，但不能反向修改已经提交的 simulation 结果。
 
+`Tina::Gameplay` 的 `Scheduler` 与 `ActionRunner` 的 delta 由调用方给，因此同一套划分适用：影响
+玩法的 timer 放 `fixedUpdate()`，纯表现的 tween 放 `updateFrame()`。见
+[Gameplay 工具层](gameplay-tooling.md)。
+
 ## Scene 与 UI 输出
 
 `extractRenderScene()` 通过 callback-only `RenderSceneWriter` 写已解析的 Camera/Sprite/Mesh POD；State

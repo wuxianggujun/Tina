@@ -138,8 +138,8 @@ class TlsConnection final : public IByteStream {
     [[nodiscard]] Core::Result<NetworkEndpoint> localEndpoint() const noexcept;
     [[nodiscard]] Core::Result<NetworkEndpoint> remoteEndpoint() const noexcept;
 
-    // Queues plaintext. Encryption happens during pump(). Returns
-    // CapacityExceeded when the buffer cannot hold the whole payload.
+    // Queues plaintext. Encryption happens during pump(). Once shutdownTls()
+    // starts, no more application bytes may be queued.
     [[nodiscard]] Core::Status send(std::span<const std::byte> payload);
 
     // Advances the transport, the handshake, and record processing. Never blocks.
@@ -152,8 +152,11 @@ class TlsConnection final : public IByteStream {
 
     [[nodiscard]] Core::Status consume(Core::usize byteCount);
 
-    // Sends close_notify so the peer can distinguish an orderly shutdown from a
-    // truncated stream. Best effort: it needs a working transport.
+    // Starts or advances close_notify so the peer can distinguish an orderly
+    // shutdown from a truncated stream. Returns WouldBlock while queued
+    // application data or transport backpressure prevents completion. Success
+    // means the complete alert was accepted by TCP; pendingSendBytes() reaches
+    // zero once it has been handed to the platform socket.
     [[nodiscard]] Core::Status shutdownTls();
 
     void close() noexcept;
@@ -167,6 +170,7 @@ class TlsConnection final : public IByteStream {
     // only needs to know the stream is not yet usable, not why.
     [[nodiscard]] ByteStreamState streamState() const noexcept override;
     [[nodiscard]] Core::Status sendBytes(std::span<const std::byte> payload) override;
+    [[nodiscard]] Core::usize pendingSendBytes() const noexcept override;
     [[nodiscard]] Core::Result<Core::usize> pumpStream() override;
     [[nodiscard]] Core::Result<std::span<const std::byte>> peekReceived() override;
     [[nodiscard]] Core::Status consumeReceived(Core::usize byteCount) override;

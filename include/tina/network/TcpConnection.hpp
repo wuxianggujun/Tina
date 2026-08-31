@@ -128,6 +128,7 @@ class TcpConnection final : public IByteStream {
     // over this or over TLS without knowing which.
     [[nodiscard]] ByteStreamState streamState() const noexcept override;
     [[nodiscard]] Core::Status sendBytes(std::span<const std::byte> payload) override;
+    [[nodiscard]] Core::usize pendingSendBytes() const noexcept override;
     [[nodiscard]] Core::Result<Core::usize> pumpStream() override;
     [[nodiscard]] Core::Result<std::span<const std::byte>> peekReceived() override;
     [[nodiscard]] Core::Status consumeReceived(Core::usize byteCount) override;

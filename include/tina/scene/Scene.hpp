@@ -4,6 +4,7 @@
 #include <tina/scene/CameraFollow2D.hpp>
 #include <tina/scene/Animator3D.hpp>
 #include <tina/scene/Entity.hpp>
+#include <tina/scene/EntityMetadata.hpp>
 #include <tina/scene/ExtractRenderScene.hpp>
 #include <tina/scene/MeshRenderer3D.hpp>
 #include <tina/scene/PerspectiveCamera3D.hpp>

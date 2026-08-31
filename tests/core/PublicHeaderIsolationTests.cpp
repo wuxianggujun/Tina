@@ -39,7 +39,7 @@ TEST(PublicHeaderIsolationTest, PublicCoreSurfaceUsesOnlyTheInstalledIncludeRoot
     static_assert(__cpp_lib_expected >= 202202L);
     static_assert(std::is_same_v<Core::Result<int>, std::expected<int, Core::Error>>);
     static_assert(Core::ProcessBitCount == sizeof(void*) * 8U);
-    static_assert(Core::MemoryTagCount == 14U);
+    static_assert(Core::MemoryTagCount == 15U);
     static_assert(!Core::GenerationId<IsolationGenerationTag>{}.hasValue());
 #if defined(TINA_TRACE_BACKEND_NONE)
     static_assert(TINA_TRACE_BACKEND_NONE == 1);

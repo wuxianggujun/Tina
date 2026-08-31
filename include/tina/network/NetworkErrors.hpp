@@ -54,6 +54,10 @@ inline constexpr Core::ErrorCode DnsResolutionFailed{Core::ErrorDomain::Network,
 inline constexpr Core::ErrorCode DnsQueryRejected{Core::ErrorDomain::Network, 30};
 inline constexpr Core::ErrorCode DnsQueryPending{Core::ErrorDomain::Network, 31};
 inline constexpr Core::ErrorCode InvalidQuery{Core::ErrorDomain::Network, 32};
+// The TCP stream ended before the TLS peer sent close_notify. This is a
+// truncation/protocol failure, not the orderly PeerClosed state.
+inline constexpr Core::ErrorCode TlsTruncated{Core::ErrorDomain::Network, 33};
+inline constexpr Core::ErrorCode WebSocketTimeout{Core::ErrorDomain::Network, 34};
 
 } // namespace NetworkErrorCode
 

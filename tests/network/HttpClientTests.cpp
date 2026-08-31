@@ -414,13 +414,12 @@ TEST(HttpRequestTest, BodyDelimitedByConnectionClose)
     EXPECT_EQ(bodyText(*response), "unbounded body");
 }
 
-// 204 has no body regardless of framing, so a stray Content-Length must not make
-// the client wait for bytes that will never come.
+// A valid 204 has no framing metadata or body and completes at the header boundary.
 TEST(HttpRequestTest, NoContentStatusHasNoBody)
 {
     ScriptedHttpServer server;
     ASSERT_TRUE(server.isValid());
-    server.setReply("HTTP/1.1 204 No Content\r\nContent-Length: 5\r\n\r\n");
+    server.setReply("HTTP/1.1 204 No Content\r\n\r\n");
     auto stream = connectTo(server.endpoint());
     ASSERT_TRUE(stream.has_value());
 

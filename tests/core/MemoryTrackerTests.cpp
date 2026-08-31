@@ -48,7 +48,8 @@ TEST(MemoryTagTest, UsesStableExplicitDiagnosticValues)
     static_assert(std::to_underlying(Core::MemoryTag::RuntimeFrame) == 5U);
     static_assert(std::to_underlying(Core::MemoryTag::Cooker) == 12U);
     static_assert(std::to_underlying(Core::MemoryTag::Network) == 13U);
-    static_assert(std::to_underlying(Core::MemoryTag::Count) == 14U);
+    static_assert(std::to_underlying(Core::MemoryTag::Gameplay) == 14U);
+    static_assert(std::to_underlying(Core::MemoryTag::Count) == 15U);
 
     EXPECT_TRUE(Core::isValidMemoryTag(Core::MemoryTag::UI));
     EXPECT_TRUE(Core::isValidMemoryTag(Core::MemoryTag::Network));

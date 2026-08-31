@@ -91,7 +91,7 @@ namespace {
 // must have run updateWorldTransforms(). A missing transform means the entity was
 // never published, which is treated as the origin rather than an error because the
 // resource binding itself is still valid.
-[[nodiscard]] Scene::Vec2 worldOrigin(const Scene::World& world, Scene::EntityId entity) noexcept
+[[nodiscard]] Math::Vec2 worldOrigin(const Scene::World& world, Scene::EntityId entity) noexcept
 {
     const Scene::WorldTransform* transform = world.worldTransform(entity);
     if (transform == nullptr)
@@ -225,7 +225,7 @@ try
             entry.tileset = *tilesetHandle;
             // Map-local origin comes from the node's published world transform, so
             // moving the node in the Editor moves the tiles.
-            const Scene::Vec2 origin = worldOrigin(world, entity);
+            const Math::Vec2 origin = worldOrigin(world, entity);
             entry.originX = origin.x;
             entry.originY = origin.y;
             m_tileMaps.push_back(std::move(entry));
@@ -268,7 +268,7 @@ try
             // The authored node transform places the emitter; the payload origin is
             // an offset within it. Ignoring the transform would make dragging an
             // FxEmitter2D in the Editor have no runtime effect.
-            const Scene::Vec2 origin = worldOrigin(world, entity);
+            const Math::Vec2 origin = worldOrigin(world, entity);
             instance->initialBurst.origin.x += origin.x;
             instance->initialBurst.origin.y += origin.y;
             // The factory returns the initial burst but does not emit it.
@@ -713,10 +713,10 @@ Scene::Fx2DInstance* Scene2DRuntime::fxInstance(Scene::EntityId entity) noexcept
     return &*found->instance;
 }
 
-Scene::Vec2 Scene2DRuntime::fxOrigin(Scene::EntityId entity) const noexcept
+Math::Vec2 Scene2DRuntime::fxOrigin(Scene::EntityId entity) const noexcept
 {
     const auto found = std::ranges::find(m_fx, entity, &FxEntry::entity);
-    return found == m_fx.end() ? Scene::Vec2{} : found->origin;
+    return found == m_fx.end() ? Math::Vec2{} : found->origin;
 }
 
 Navigation2D::NavigationGrid2D* Scene2DRuntime::navigationGrid(Scene::EntityId entity) noexcept

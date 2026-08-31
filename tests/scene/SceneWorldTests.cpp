@@ -7,6 +7,7 @@
 #include <limits>
 #include <memory_resource>
 #include <new>
+#include <string>
 #include <stdexcept>
 #include <thread>
 
@@ -80,7 +81,7 @@ private:
     return transform;
 }
 
-[[nodiscard]] Quaternion rotationAroundZ(float radians) noexcept
+[[nodiscard]] Math::Quaternion rotationAroundZ(float radians) noexcept
 {
     const float halfAngle = radians * 0.5F;
     return {0.0F, 0.0F, std::sin(halfAngle), std::cos(halfAngle)};
@@ -290,7 +291,7 @@ TEST(SceneWorldTest, NormalizesQuaternionCompositionAcrossADeepHierarchy)
     }
 
     ASSERT_TRUE(world.updateWorldTransforms());
-    const Quaternion rotation = world.worldTransform(deepest)->rotation;
+    const Math::Quaternion rotation = world.worldTransform(deepest)->rotation;
     const float lengthSquared = rotation.x * rotation.x + rotation.y * rotation.y
         + rotation.z * rotation.z + rotation.w * rotation.w;
     EXPECT_NEAR(lengthSquared, 1.0F, 1.0e-5F);
@@ -348,7 +349,7 @@ TEST(SceneWorldTest, RejectsMutationFromAnotherThread)
     worker.join();
 
     EXPECT_EQ(observed, SceneErrorCode::WrongOwnerThread);
-    EXPECT_EQ(world.localTransform(entity)->position, Vec3{});
+    EXPECT_EQ(world.localTransform(entity)->position, Math::Vec3{});
 }
 
 TEST(SceneWorldTest, OwnerThreadAlsoGuardsBorrowedReadAccess)
@@ -404,6 +405,64 @@ TEST(SceneWorldTest, FixedCapacityRejectsAdditionalEntities)
     const auto result = world.createEntity();
     ASSERT_FALSE(result);
     EXPECT_EQ(result.error().code, SceneErrorCode::CapacityExceeded);
+}
+
+TEST(SceneWorldTest, StoresValidatedRuntimeMetadataAtomically)
+{
+    World world = makeWorld();
+    const EntityId entity = world.createEntity().value();
+    ASSERT_TRUE(world.setMetadata(entity, EntityMetadataDesc{
+        .name = "player",
+        .tag = 11,
+        .layer = 3,
+        .group = 7,
+    }));
+
+    ASSERT_NE(world.metadata(entity), nullptr);
+    EXPECT_EQ(world.runtimeName(entity), "player");
+    EXPECT_EQ(world.tag(entity), 11U);
+    EXPECT_EQ(world.layer(entity), 3U);
+    EXPECT_EQ(world.group(entity), 7U);
+
+    const std::string tooLong(EntityNameMaximumBytes + 1U, 'x');
+    const Core::Status rejected = world.setRuntimeName(entity, tooLong);
+    ASSERT_FALSE(rejected);
+    EXPECT_EQ(rejected.error().code, SceneErrorCode::CapacityExceeded);
+    EXPECT_EQ(world.runtimeName(entity), "player");
+
+    const std::string invalidUtf8{"\xC3\x28", 2};
+    EXPECT_EQ(
+        world.setRuntimeName(entity, invalidUtf8).error().code,
+        SceneErrorCode::InvalidMetadata);
+    EXPECT_EQ(world.runtimeName(entity), "player");
+}
+
+TEST(SceneWorldTest, ReadOnlyTypedViewFiltersTheClosedComponentSet)
+{
+    static_assert(WorldReadableComponent<Camera2D>);
+    static_assert(!WorldReadableComponent<int>);
+
+    World world = makeWorld();
+    const EntityId camera = world.createEntity().value();
+    const EntityId plain = world.createEntity().value();
+    ASSERT_TRUE(world.setCamera2D(camera, Camera2D{}));
+    ASSERT_TRUE(world.setTag(camera, 42));
+
+    usize visits = 0;
+    world.query<EntityMetadata, LocalTransform, Camera2D>().each(
+        [&](EntityId entity,
+            const EntityMetadata& metadata,
+            const LocalTransform&,
+            const Camera2D&) {
+            ++visits;
+            EXPECT_EQ(entity, camera);
+            EXPECT_EQ(metadata.tag, 42U);
+        });
+
+    EXPECT_EQ(visits, 1U);
+    EXPECT_TRUE(world.view<Camera2D>().contains(camera));
+    EXPECT_FALSE(world.view<Camera2D>().contains(plain));
+    EXPECT_EQ(world.get<Camera2D>(plain), nullptr);
 }
 
 TEST(SceneWorldTest, DestroysWideSubtreeWithLinearLiveBookkeeping)

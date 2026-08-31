@@ -10,6 +10,7 @@ add_library(tina_render STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderFrameCapture.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderFramePacket.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderPassScheduler.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/render/RenderPostProcess.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderScene.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/RenderSurface.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/render/ShadowMapExtentConfig.hpp
@@ -22,6 +23,7 @@ add_library(tina_render STATIC
     EnvironmentMapUpload.cpp
     Mesh3DLighting.cpp
     RenderPassScheduler.cpp
+    RenderPostProcess.cpp
     RenderSurfaceStateTracker.cpp
     RenderSurfaceStateTracker.hpp
     RenderScene.cpp
@@ -37,7 +39,13 @@ add_library(Tina::Render ALIAS tina_render)
 target_compile_features(tina_render PUBLIC cxx_std_23)
 target_include_directories(tina_render PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(tina_render PUBLIC Tina::Core)
-target_link_libraries(tina_render PRIVATE "$<BUILD_INTERFACE:Tina::ProjectOptions>")
+# Math is PRIVATE because Render's public headers still publish flat float fields;
+# it appears only inside RenderScene.cpp. Making it PUBLIC would advertise a
+# dependency the published contract does not actually have.
+target_link_libraries(tina_render PRIVATE
+    "$<BUILD_INTERFACE:Tina::ProjectOptions>"
+    Tina::Math
+)
 set_target_properties(tina_render PROPERTIES CXX_EXTENSIONS OFF)
 
 if(TINA_BUILD_RENDER_BGFX)

@@ -256,6 +256,9 @@ executable。`tina_ui_tests` 为 667/667，`tina_runtime_ui_tests` 为 130/130�
 | Executable | 主要范围 | 可用条件 |
 | --- | --- | --- |
 | `tina_tests` | Core、Platform contract、Task、Runtime、NullRender、Input/Action、header isolation | 基础图 |
+| `tina_math_tests` | `Vec`/`Quaternion`/`Mat4`/`Aabb`/`Rect`/`Sphere`/`Plane`/`Ray`/`Frustum`、退化输入 fail-closed、列主序与 clip 深度约定、header isolation，以及与被删实现逐元素比对的四个数值等价性回归 | 基础图 |
+| `tina_save_tests` | `SaveStore` 槽位读写/备份晋升/revision 递增、损坏回退与 repair、gameId 隔离、owner-thread 与单事务闭锁、async 句柄一次性语义；`SaveMigrationPipeline` 确定性单边图、缺失路径与越界步骤、payload 上限、抛异常步骤收敛 | 基础图 |
+| `tina_editor_tests` | Editor authoring document/tab/undo、Marquee、Transform gizmo、Viewport grid/navigation，以及 3D 单击拾取的 ray 构造、最近命中决胜、偏移包围球与退化输入 fail-closed（`EditorViewportPickTest`） | 基础图 |
 | `tina_ui_tests` | UI tree/layout/hit/route/paint/semantics、Widget、文本/Glyph | 基础图 |
 | `tina_runtime_ui_tests` | Runtime UI owner/capability/route/layout/display handoff | 基础图 |
 | `tina_ui_render_integration_tests` | committed UI paint → Render DisplayList | 基础图 |
@@ -279,11 +282,13 @@ executable。`tina_ui_tests` 为 667/667，`tina_runtime_ui_tests` 为 130/130�
 ```powershell
 cmake --preset windows-msvc-vnext
 cmake --build --preset windows-vnext-debug `
-  --target tina_tests tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests `
+  --target tina_tests tina_math_tests tina_save_tests tina_ui_tests tina_runtime_ui_tests tina_ui_render_integration_tests `
            tina_scene_tests tina_render_scene_tests tina_asset_format_tests tina_asset_tests tina_navigation2d_tests `
            tina_audio_tests tina_network_tests tina_sample_network tina_sample_null --parallel 2 -- /nr:false
 
 out\build\windows-msvc-vnext\bin\Debug\tina_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext\bin\Debug\tina_math_tests.exe --gtest_color=yes
+out\build\windows-msvc-vnext\bin\Debug\tina_save_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_ui_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_runtime_ui_tests.exe --gtest_color=yes
 out\build\windows-msvc-vnext\bin\Debug\tina_ui_render_integration_tests.exe --gtest_color=yes
