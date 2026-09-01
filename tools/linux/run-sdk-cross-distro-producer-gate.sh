@@ -108,8 +108,11 @@ cmake --preset linux-gcc13-vnext \
   -DTINA_BUILD_AUDIO_MINIAUDIO=OFF \
   -DVCPKG_MANIFEST_FEATURES=
 
+# tina_sdk_install_artifacts covers every target the install rules name, derived from
+# the same list install() uses. Listing them here instead let modules reach the install
+# rules without ever being built, which is how Save and Gameplay broke this gate.
 cmake --build "${BUILD_DIRECTORY}" \
-  --target tina_runtime tina_scene tina_asset \
+  --target tina_sdk_install_artifacts \
   --parallel "${BUILD_JOBS}"
 cmake --install "${BUILD_DIRECTORY}" --prefix "${STAGING_PREFIX}"
 

@@ -114,18 +114,11 @@ fi
 rm -rf -- "${INSTALL_STAGING_PREFIX}" "${INSTALL_PREFIX}" "${CONSUMER_BUILD_DIRECTORY}" \
   "${MISSING_COMPONENT_BUILD_DIRECTORY}" "${COMPONENT_ISOLATION_BUILD_DIRECTORY}"
 
-sdk_build_targets=(tina_runtime tina_scene tina_asset)
-if [[ "${CONSUMER}" == "PlatformGlfw" ]]; then
-  sdk_build_targets+=(tina_platform_glfw)
-fi
-if [[ "${CONSUMER}" == "AudioMiniaudio" ]]; then
-  sdk_build_targets+=(tina_audio_miniaudio)
-fi
-if [[ "${CONSUMER}" == "DesktopBootstrap" ]]; then
-  sdk_build_targets+=(tina_bootstrap_desktop)
-fi
+# tina_sdk_install_artifacts covers every target the install rules name, derived from
+# the same list install() uses. Listing them here instead let modules reach the install
+# rules without ever being built, which is how Save and Gameplay broke this gate.
 cmake --build "${BUILD_DIRECTORY}" --config "${CONFIGURATION}" \
-  --target "${sdk_build_targets[@]}" --parallel "${BUILD_JOBS}"
+  --target tina_sdk_install_artifacts --parallel "${BUILD_JOBS}"
 cmake --install "${BUILD_DIRECTORY}" --config "${CONFIGURATION}" --prefix "${INSTALL_STAGING_PREFIX}"
 AUDIO_MINIAUDIO_ENABLED=OFF
 if [[ "$(cache_value TINA_BUILD_AUDIO_MINIAUDIO)" == "ON" ]]; then

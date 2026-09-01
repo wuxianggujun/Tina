@@ -103,21 +103,15 @@ foreach($managedDirectory in @($installStagingPrefix, $installPrefix, $consumerB
     }
 }
 
-$sdkBuildTargets = @("tina_runtime", "tina_scene", "tina_asset")
-if($isPlatformGlfwConsumer) {
-    $sdkBuildTargets += "tina_platform_glfw"
-}
-if($isAudioMiniaudioConsumer) {
-    $sdkBuildTargets += "tina_audio_miniaudio"
-}
-if($isDesktopBootstrapConsumer) {
-    $sdkBuildTargets += "tina_bootstrap_desktop"
-}
+# tina_sdk_install_artifacts covers every target the install rules name, derived from
+# the same list install() uses. Listing them here instead let modules reach the install
+# rules without ever being built, which is how Save and Gameplay broke this gate.
 $sdkBuildArguments = @(
     "--build", $resolvedBuildDirectory,
     "--config", $Configuration,
-    "--target"
-) + $sdkBuildTargets + @("--parallel", "1", "--", "/nr:false")
+    "--target", "tina_sdk_install_artifacts",
+    "--parallel", "1", "--", "/nr:false"
+)
 & cmake @sdkBuildArguments
 if($LASTEXITCODE -ne 0) { throw "Tina Game SDK build failed with exit code $LASTEXITCODE" }
 

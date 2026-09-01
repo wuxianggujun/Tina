@@ -162,6 +162,13 @@ function(tina_configure_game_sdk_package)
         set(TINA_PACKAGE_WITH_DESKTOP_BOOTSTRAP ON)
     endif()
 
+    # Everything install() below names must already be built, and a gate that
+    # hand-lists those targets drifts the moment a module is added: Save and
+    # Gameplay were installed but unbuildable for exactly that reason. Collect the
+    # names here instead, next to the install() calls that create the requirement,
+    # and expose them as one target for the gates to build.
+    set(tina_sdk_installed_targets ${tina_sdk_export_targets})
+
     install(TARGETS ${tina_sdk_export_targets}
         EXPORT TinaTargets
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -169,6 +176,7 @@ function(tina_configure_game_sdk_package)
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
     if(TARGET tina_platform_glfw)
+        list(APPEND tina_sdk_installed_targets tina_platform_glfw)
         install(TARGETS tina_platform_glfw
             EXPORT TinaPlatformGlfwTargets
             ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -181,6 +189,7 @@ function(tina_configure_game_sdk_package)
             message(FATAL_ERROR "RenderBgfx packaging requires bgfx, bx, and bimg targets")
         endif()
 
+        list(APPEND tina_sdk_installed_targets tina_render_bgfx bgfx bx bimg)
         install(TARGETS tina_render_bgfx
             EXPORT TinaRenderBgfxTargets
             ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -248,6 +257,7 @@ function(tina_configure_game_sdk_package)
         )
     endif()
     if(TARGET tina_ui_freetype)
+        list(APPEND tina_sdk_installed_targets tina_ui_freetype)
         install(TARGETS tina_ui_freetype
             EXPORT TinaUIFreetypeTargets
             ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -256,6 +266,7 @@ function(tina_configure_game_sdk_package)
         )
     endif()
     if(TARGET tina_audio_miniaudio)
+        list(APPEND tina_sdk_installed_targets tina_audio_miniaudio)
         install(TARGETS tina_audio_miniaudio
             EXPORT TinaAudioMiniaudioTargets
             ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -264,6 +275,7 @@ function(tina_configure_game_sdk_package)
         )
     endif()
     if(TARGET tina_network_tls)
+        list(APPEND tina_sdk_installed_targets tina_network_tls)
         install(TARGETS tina_network_tls
             EXPORT TinaNetworkTlsTargets
             ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -272,6 +284,7 @@ function(tina_configure_game_sdk_package)
         )
     endif()
     if(TARGET tina_bootstrap_desktop)
+        list(APPEND tina_sdk_installed_targets tina_bootstrap_desktop)
         install(TARGETS tina_bootstrap_desktop
             EXPORT TinaDesktopBootstrapTargets
             ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -429,4 +442,16 @@ function(tina_configure_game_sdk_package)
         "${PROJECT_BINARY_DIR}/TinaConfigVersion.cmake"
         DESTINATION "${tina_package_directory}"
     )
+
+    # Building this is the precondition for `cmake --install`. INTERFACE libraries
+    # produce no artifact, so they are dropped rather than depended on.
+    set(tina_sdk_buildable_targets "")
+    foreach(candidate IN LISTS tina_sdk_installed_targets)
+        get_target_property(candidate_type ${candidate} TYPE)
+        if(NOT candidate_type STREQUAL "INTERFACE_LIBRARY")
+            list(APPEND tina_sdk_buildable_targets ${candidate})
+        endif()
+    endforeach()
+    add_custom_target(tina_sdk_install_artifacts)
+    add_dependencies(tina_sdk_install_artifacts ${tina_sdk_buildable_targets})
 endfunction()
