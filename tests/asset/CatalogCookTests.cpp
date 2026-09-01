@@ -7,6 +7,7 @@
 #include <tina/asset/CookedAssetFile.hpp>
 #include <tina/asset_format/AssetFormatErrors.hpp>
 #include <tina/asset_format/EnvironmentMapPayload.hpp>
+#include <tina/asset_format/Texture2DPayload.hpp>
 #include <tina/core/hash/ContentHashDigest.hpp>
 #include <tina/core/id/AssetId.hpp>
 #include <tina/core/io/WriteFile.hpp>
@@ -17,6 +18,7 @@
 #include <array>
 #include <filesystem>
 #include <memory_resource>
+#include <ranges>
 #include <span>
 #include <string>
 #include <vector>
@@ -1758,6 +1760,183 @@ TEST(CatalogCookTests, MaterialUnlitWithTextureRecipe)
     EXPECT_TRUE(material->hasBaseColorTexture);
 
     std::filesystem::remove_all(root, ec);
+}
+
+// Whether a recipe texture cooked with a mip chain, read back off the parsed payload.
+[[nodiscard]] Core::Result<AssetFormat::Texture2DPayloadView>
+parseRecipeTexturePayload(const CatalogCookRequest& request, Core::AssetId textureId)
+{
+    const auto found = std::ranges::find_if(request.assets, [textureId](const auto& asset) {
+        return asset.assetId == textureId &&
+               asset.assetKind == AssetFormat::AssetKind::Texture2D;
+    });
+    if (found == request.assets.end())
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "texture not in request");
+    }
+    return AssetFormat::parseTexture2DPayload(found->payload);
+}
+
+// ASSET-TEX-002: a recipe texture nothing carves is a whole image and gets a chain.
+TEST(CatalogCookTests, WholeImageRecipeTextureCooksAMipChain)
+{
+    const auto textureId = *Core::AssetId::fromBytes(idBytes(1U));
+    const auto materialId = *Core::AssetId::fromBytes(idBytes(2U));
+    const auto textureHex = textureId.canonicalText();
+    const auto materialHex = materialId.canonicalText();
+
+    // 4x4 so the chain has three levels, which distinguishes a real chain from the
+    // single level a 1x1 fixture would produce either way.
+    std::string recipe = "platform WindowsX64\ntexture2d ";
+    recipe.append(textureHex.data(), textureHex.size());
+    recipe += " 4 4";
+    for (int index = 0; index < 16; ++index)
+    {
+        recipe += (index % 2 == 0) ? " FFFFFFFF" : " 000000FF";
+    }
+    recipe += "\nmaterial ";
+    recipe.append(materialHex.data(), materialHex.size());
+    recipe += " unlit opaque 1 1 1 1 ";
+    recipe.append(textureHex.data(), textureHex.size());
+    recipe += "\n";
+
+    auto request = parseCatalogCookRecipe(recipe, ".");
+    ASSERT_TRUE(request.has_value()) << request.error().message;
+    auto view = parseRecipeTexturePayload(*request, textureId);
+    ASSERT_TRUE(view.has_value()) << view.error().message;
+
+    EXPECT_EQ(view->levelCount, 3U);
+    EXPECT_EQ(view->sampler.mipFilter, AssetFormat::Texture2DMipFilterMode::Linear);
+    ASSERT_EQ(view->levels().size(), 3U);
+    EXPECT_EQ(view->levels()[0].width, 4U);
+    EXPECT_EQ(view->levels()[1].width, 2U);
+    EXPECT_EQ(view->levels()[2].width, 1U);
+}
+
+// A gutterless atlas must stay single-level: its small levels would average across
+// sprite boundaries, so the 1x1 level is every frame blended together.
+TEST(CatalogCookTests, AtlasRecipeTextureStaysSingleLevel)
+{
+    const auto textureId = *Core::AssetId::fromBytes(idBytes(1U));
+    const auto spriteId = *Core::AssetId::fromBytes(idBytes(2U));
+    const auto textureHex = textureId.canonicalText();
+    const auto spriteHex = spriteId.canonicalText();
+
+    std::string recipe = "platform WindowsX64\ntexture2d ";
+    recipe.append(textureHex.data(), textureHex.size());
+    recipe += " 4 4";
+    for (int index = 0; index < 16; ++index)
+    {
+        recipe += (index % 2 == 0) ? " FFFFFFFF" : " 000000FF";
+    }
+    recipe += "\nsprite ";
+    recipe.append(spriteHex.data(), spriteHex.size());
+    recipe += " ";
+    recipe.append(textureHex.data(), textureHex.size());
+    recipe += " 0 0 0.5 1 0.5 0.5 16\n";
+
+    auto request = parseCatalogCookRecipe(recipe, ".");
+    ASSERT_TRUE(request.has_value()) << request.error().message;
+    auto view = parseRecipeTexturePayload(*request, textureId);
+    ASSERT_TRUE(view.has_value()) << view.error().message;
+
+    EXPECT_EQ(view->levelCount, 1U);
+    EXPECT_EQ(view->sampler.mipFilter, AssetFormat::Texture2DMipFilterMode::None);
+}
+
+// The decisive case: one carving reference denies the chain even when another
+// reference samples the whole image. Deriving per-reference instead of per-texture
+// would mip this and blend the two halves together at minified sizes.
+TEST(CatalogCookTests, OneCarvingReferenceDeniesTheMipChain)
+{
+    const auto textureId = *Core::AssetId::fromBytes(idBytes(1U));
+    const auto wholeSpriteId = *Core::AssetId::fromBytes(idBytes(2U));
+    const auto halfSpriteId = *Core::AssetId::fromBytes(idBytes(3U));
+    const auto textureHex = textureId.canonicalText();
+    const auto wholeHex = wholeSpriteId.canonicalText();
+    const auto halfHex = halfSpriteId.canonicalText();
+
+    std::string recipe = "platform WindowsX64\ntexture2d ";
+    recipe.append(textureHex.data(), textureHex.size());
+    recipe += " 4 4";
+    for (int index = 0; index < 16; ++index)
+    {
+        recipe += (index % 2 == 0) ? " FFFFFFFF" : " 000000FF";
+    }
+    // Declared before the texture line is referenced by the carving sprite, so this
+    // also proves the decision does not depend on recipe line order.
+    recipe += "\nsprite ";
+    recipe.append(wholeHex.data(), wholeHex.size());
+    recipe += " ";
+    recipe.append(textureHex.data(), textureHex.size());
+    recipe += " 0 0 1 1 0.5 0.5 16\nsprite ";
+    recipe.append(halfHex.data(), halfHex.size());
+    recipe += " ";
+    recipe.append(textureHex.data(), textureHex.size());
+    recipe += " 0 0 0.5 1 0.5 0.5 16\n";
+
+    auto request = parseCatalogCookRecipe(recipe, ".");
+    ASSERT_TRUE(request.has_value()) << request.error().message;
+    auto view = parseRecipeTexturePayload(*request, textureId);
+    ASSERT_TRUE(view.has_value()) << view.error().message;
+
+    EXPECT_EQ(view->levelCount, 1U);
+}
+
+// A tileset carves a grid out of its texture, so it denies the chain the same way a
+// sub-rect sprite does even though its payload holds no UV rect of its own.
+TEST(CatalogCookTests, TilesetReferenceDeniesTheMipChain)
+{
+    const auto textureId = *Core::AssetId::fromBytes(idBytes(1U));
+    const auto tilesetId = *Core::AssetId::fromBytes(idBytes(2U));
+    const auto textureHex = textureId.canonicalText();
+    const auto tilesetHex = tilesetId.canonicalText();
+
+    std::string recipe = "platform WindowsX64\ntexture2d ";
+    recipe.append(textureHex.data(), textureHex.size());
+    recipe += " 4 4";
+    for (int index = 0; index < 16; ++index)
+    {
+        recipe += (index % 2 == 0) ? " FFFFFFFF" : " 000000FF";
+    }
+    recipe += "\ntileset ";
+    recipe.append(tilesetHex.data(), tilesetHex.size());
+    recipe += " ";
+    recipe.append(textureHex.data(), textureHex.size());
+    recipe += " 2 2\ntile 1 1 0 0 0.5 0.5\n";
+
+    auto request = parseCatalogCookRecipe(recipe, ".");
+    ASSERT_TRUE(request.has_value()) << request.error().message;
+    auto view = parseRecipeTexturePayload(*request, textureId);
+    ASSERT_TRUE(view.has_value()) << view.error().message;
+
+    EXPECT_EQ(view->levelCount, 1U);
+}
+
+// Reserving the slot during parsing and filling it afterwards must not move assets:
+// recipe authoring order is what makes a cooked catalog reviewable.
+TEST(CatalogCookTests, DeferredTexturePayloadKeepsAuthoringOrder)
+{
+    const auto spriteId = *Core::AssetId::fromBytes(idBytes(1U));
+    const auto textureId = *Core::AssetId::fromBytes(idBytes(2U));
+    const auto spriteHex = spriteId.canonicalText();
+    const auto textureHex = textureId.canonicalText();
+
+    // Sprite first, texture second.
+    std::string recipe = "platform WindowsX64\nsprite ";
+    recipe.append(spriteHex.data(), spriteHex.size());
+    recipe += " ";
+    recipe.append(textureHex.data(), textureHex.size());
+    recipe += " 0 0 1 1 0.5 0.5 16\ntexture2d ";
+    recipe.append(textureHex.data(), textureHex.size());
+    recipe += " 2 1 FFFFFFFF 000000FF\n";
+
+    auto request = parseCatalogCookRecipe(recipe, ".");
+    ASSERT_TRUE(request.has_value()) << request.error().message;
+    ASSERT_EQ(request->assets.size(), 2U);
+    EXPECT_EQ(request->assets[0].assetId, spriteId);
+    EXPECT_EQ(request->assets[1].assetId, textureId);
+    EXPECT_FALSE(request->assets[1].payload.empty());
 }
 
 } // namespace

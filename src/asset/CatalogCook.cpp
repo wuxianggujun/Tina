@@ -8,6 +8,7 @@
 #include <tina/asset/CatalogPackagePublish.hpp>
 #include <tina/asset/CookedAssetFile.hpp>
 #include <tina/asset/SourceImportProbe.hpp>
+#include <tina/asset/TextureMipChain.hpp>
 #include <tina/asset_format/AudioClipPayload.hpp>
 #include <tina/asset_format/EnvironmentMapPayload.hpp>
 #include <tina/asset_format/Fx2DPayload.hpp>
@@ -606,7 +607,18 @@ parseSpriteAnimationFrameEvents(std::string_view eventSuffix, Core::u32& totalEv
     return events;
 }
 
-[[nodiscard]] Core::Result<CatalogCookAssetSpec> parseTexture2dInline(const std::vector<std::string>& tokens)
+// A recipe texture holds its pixels until the whole recipe is parsed, because whether it
+// wants a mip chain is decided by the references other lines make to it, and those lines
+// may come after it.
+struct PendingRecipeTexture final {
+    std::size_t assetIndex = 0;
+    Core::AssetId assetId{};
+    Core::u16 width = 0;
+    Core::u16 height = 0;
+    std::vector<std::byte> rgba8Pixels{};
+};
+
+[[nodiscard]] Core::Result<PendingRecipeTexture> parseTexture2dInline(const std::vector<std::string>& tokens)
 {
     // texture2d <id> <w> <h> <hexRRGGBBAA>...
     if (tokens.size() < 5)
@@ -649,18 +661,87 @@ parseSpriteAnimationFrameEvents(std::string_view eventSuffix, Core::u32& totalEv
             pixels.push_back(*byte);
         }
     }
-    auto payload = AssetFormat::writeTexture2DPayloadBytesRgba8(
-        static_cast<Core::u16>(width), static_cast<Core::u16>(height), pixels);
-    if (!payload)
-    {
-        return Core::failure(std::move(payload.error()));
-    }
-    return CatalogCookAssetSpec{
-        .assetKind = AssetFormat::AssetKind::Texture2D,
+    return PendingRecipeTexture{
         .assetId = *assetId,
-        .assetTypeVersion = AssetFormat::Texture2DWire::SchemaVersion,
-        .payload = std::move(*payload),
+        .width = static_cast<Core::u16>(width),
+        .height = static_cast<Core::u16>(height),
+        .rgba8Pixels = std::move(pixels),
     };
+}
+
+// Whether a referrer samples its whole texture rather than a rect carved out of it.
+[[nodiscard]] bool recipeReferrerSamplesWholeTexture(const CatalogCookAssetSpec& referrer)
+{
+    switch (referrer.assetKind)
+    {
+    case AssetFormat::AssetKind::Material:
+        // Material UVs come from mesh vertices, so the material itself carves nothing.
+        return true;
+    case AssetFormat::AssetKind::Sprite: {
+        auto view = AssetFormat::parseSpritePayload(referrer.payload);
+        if (!view)
+        {
+            return false;
+        }
+        return view->u0 == 0.0F && view->v0 == 0.0F && view->u1 == 1.0F && view->v1 == 1.0F;
+    }
+    default:
+        // A tileset carves a grid. An unrecognised referrer is assumed to carve as well,
+        // because guessing "whole image" would mip an atlas and blend unrelated sprites
+        // together, while guessing "sub-rect" only forgoes a chain.
+        return false;
+    }
+}
+
+// Writes the deferred texture payloads, giving a mip chain to exactly those textures no
+// referrer carves a sub-rect out of.
+//
+// Whole images want a chain: minified sampling without one aliases, and sampling is also
+// cheaper with one because the selected level fits the texture cache. Gutterless atlases
+// want the opposite -- their small levels average across sprite boundaries, so the 1x1
+// level of a 3-frame character atlas is idle+walk+hit blended into mud. Deriving which is
+// which from the references the recipe already states beats a per-texture flag, because a
+// wrong flag is invisible until someone looks at a minified sprite.
+[[nodiscard]] Core::Status writePendingRecipeTexturePayloads(CatalogCookRequest& request,
+                                                             std::span<PendingRecipeTexture> pendingTextures)
+{
+    // One pass over the parsed assets collects every carved texture, so deciding a texture
+    // is a lookup rather than a rescan of the asset list.
+    std::vector<Core::AssetId> carvedTextureIds;
+    for (const auto& asset : request.assets)
+    {
+        if (recipeReferrerSamplesWholeTexture(asset))
+        {
+            continue;
+        }
+        for (const auto& dependency : asset.dependencies)
+        {
+            if (dependency.expectedKind == AssetFormat::AssetKind::Texture2D)
+            {
+                carvedTextureIds.push_back(dependency.assetId);
+            }
+        }
+    }
+    std::sort(carvedTextureIds.begin(), carvedTextureIds.end());
+    carvedTextureIds.erase(std::unique(carvedTextureIds.begin(), carvedTextureIds.end()),
+                           carvedTextureIds.end());
+
+    for (auto& pending : pendingTextures)
+    {
+        const bool carved = std::binary_search(carvedTextureIds.begin(), carvedTextureIds.end(),
+                                               pending.assetId);
+        auto payload = carved ? AssetFormat::writeTexture2DPayloadBytesRgba8(
+                                    pending.width, pending.height, pending.rgba8Pixels)
+                              : writeMippedTexture2DPayloadBytesRgba8(
+                                    pending.width, pending.height, pending.rgba8Pixels,
+                                    AssetFormat::Texture2DColorSpace::Srgb);
+        if (!payload)
+        {
+            return Core::failure(std::move(payload.error()));
+        }
+        request.assets[pending.assetIndex].payload = std::move(*payload);
+    }
+    return Core::success();
 }
 
 [[nodiscard]] Core::u16 readLeU16(std::span<const std::byte> bytes, std::size_t offset) noexcept
@@ -1857,6 +1938,7 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
 {
     CatalogCookRequest request{};
     std::pmr::unsynchronized_pool_resource memory;
+    std::vector<PendingRecipeTexture> pendingTextures;
 
     // Multi-line builders for tileset/tilemap.
     enum class MultiState : Core::u8 { None, Tileset, TileMap };
@@ -2382,12 +2464,20 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
         }
         if (tokens[0] == "texture2d")
         {
-            auto asset = parseTexture2dInline(tokens);
-            if (!asset)
+            auto pending = parseTexture2dInline(tokens);
+            if (!pending)
             {
-                return Core::failure(std::move(asset.error()));
+                return Core::failure(std::move(pending.error()));
             }
-            request.assets.push_back(std::move(*asset));
+            // The slot is reserved in authoring order and its payload filled after the
+            // recipe is fully parsed, so deferring the mip decision cannot reorder assets.
+            pending->assetIndex = request.assets.size();
+            request.assets.push_back(CatalogCookAssetSpec{
+                .assetKind = AssetFormat::AssetKind::Texture2D,
+                .assetId = pending->assetId,
+                .assetTypeVersion = AssetFormat::Texture2DWire::SchemaVersion,
+            });
+            pendingTextures.push_back(std::move(*pending));
             continue;
         }
         if (tokens[0] == "sprite")
@@ -2916,6 +3006,10 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
     if (request.assets.empty())
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "recipe contains no assets");
+    }
+    if (const auto status = writePendingRecipeTexturePayloads(request, pendingTextures); !status)
+    {
+        return Core::failure(status.error());
     }
     return request;
 }
