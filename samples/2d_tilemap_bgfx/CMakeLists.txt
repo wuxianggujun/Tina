@@ -24,8 +24,8 @@ if (TINA_BUILD_PHYSICS2D)
 endif ()
 if (TINA_BUILD_UI_FREETYPE)
     target_compile_definitions(tina_sample_2d PRIVATE TINA_SAMPLE_TILEMAP_FREETYPE=1)
-    tina_target_optional_ui_font(tina_sample_2d TINA_SAMPLE_TILEMAP_FONT_PATH)
     target_link_libraries(tina_sample_2d PRIVATE Tina::UIFreetype)
+    tina_target_stage_ui_font(tina_sample_2d)
 endif ()
 # Optional miniaudio null-device SFX path (M11-A16): attachMixer + start so mixRealtime
 # runs from the device callback. Default product-2d enables this with physics/freetype.
@@ -33,11 +33,16 @@ if (TINA_BUILD_AUDIO_MINIAUDIO)
     target_compile_definitions(tina_sample_2d PRIVATE TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO=1)
     target_link_libraries(tina_sample_2d PRIVATE Tina::AudioMiniaudio)
 endif ()
-# Product catalog recipe (disk file cook path; not in-process payload assembly).
-target_compile_definitions(tina_sample_2d PRIVATE
-    TINA_SAMPLE_2D_RECIPE_PATH="${PROJECT_SOURCE_DIR}/samples/2d_tilemap_bgfx/catalog/sample_2d.recipe"
-)
 set_target_properties(tina_sample_2d PROPERTIES CXX_EXTENSIONS OFF)
+
+# The recipe ships beside the executable and is resolved relative to it at runtime,
+# so the build tree and an installed copy use one code path. Compiling the source-tree
+# path in instead made the sample unrunnable anywhere but this machine.
+add_custom_command(TARGET tina_sample_2d POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/catalog/sample_2d.recipe"
+        "$<TARGET_FILE_DIR:tina_sample_2d>/catalog/sample_2d.recipe"
+)
 
 if(WIN32)
     add_custom_command(TARGET tina_sample_2d POST_BUILD

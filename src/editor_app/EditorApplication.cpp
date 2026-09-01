@@ -1,6 +1,7 @@
 ﻿#include "EditorWorkspaceState.hpp"
 
 #include <tina/core/diagnostics/CrashHandler.hpp>
+#include <tina/desktop/UiFontFile.hpp>
 #include <tina/editor_app/EditorApplication.hpp>
 
 #include <algorithm>
@@ -681,6 +682,15 @@ void writeFrameTimingStatistics(
     EditorRenderDeviceAccess renderDeviceAccess{};
     Tina::Desktop::CreateEngineOptions desktopOptions{};
     desktopOptions.acceptFileDropEvents = true;
+    // The Editor is a shipped product, so its font travels beside TinaEditor.exe rather
+    // than being compiled in as a path to whichever machine built it.
+    auto uiFont = Tina::Desktop::resolveUiFontBytes();
+    if (!uiFont)
+    {
+        writeError(uiFont.error());
+        return 1;
+    }
+    desktopOptions.uiFontBytes = std::move(uiFont->bytes);
     desktopOptions.wrapWindowSurfaceRenderDevice =
         [&renderDeviceAccess](std::unique_ptr<Tina::Render::IRenderDevice> device)
             -> Tina::Core::Result<std::unique_ptr<Tina::Render::IRenderDevice>> {

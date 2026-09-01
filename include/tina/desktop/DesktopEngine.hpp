@@ -5,7 +5,9 @@
 #include <tina/render/RenderDevice.hpp>
 #include <tina/runtime/EngineHost.hpp>
 
+#include <cstddef>
 #include <memory>
+#include <vector>
 
 namespace Tina::Desktop {
 
@@ -25,14 +27,25 @@ struct CreateEngineOptions final {
     // Opt-in OS file-drop publication as backend-neutral Platform events.
     bool acceptFileDropEvents = false;
     WindowSurfaceRenderDeviceWrap wrapWindowSurfaceRenderDevice{};
+    // The font the primary window's UI renders text with, owned by the caller.
+    //
+    // Shared rather than borrowed because the UI context is built from a factory
+    // that outlives this call, so a view would dangle. Null keeps the placeholder
+    // text path, which is also what a build without FreeType gets.
+    //
+    // The engine resolves no path of its own: it used to compile in an absolute
+    // path to the build machine's font, which is dead on any machine the game is
+    // installed to. Tina::Desktop::resolveUiFontBytes() in UiFontFile.hpp is the
+    // opt-in helper for products that want a font shipped beside the executable.
+    std::shared_ptr<std::vector<std::byte>> uiFontBytes{};
 };
 
 // Production Desktop composition: SteadyClock + GLFW WindowSurface + bounded
 // TaskSystem + bgfx + optional Disabled AudioEngine (M11-A15). When
-// TINA_BUILD_UI_FREETYPE is ON, injects FreeType UI rasterizer and opens the
-// sample/source font fixture path if provided at compile time
-// (TINA_DESKTOP_UI_FONT_PATH). That is a development fixture, not a Runtime
-// product font loader. miniaudio device remains adapter/sample private.
+// TINA_BUILD_UI_FREETYPE is ON, injects the FreeType UI rasterizer; text needs a
+// font, which only reaches the engine through CreateEngineOptions::uiFontBytes.
+// This overload passes none, so it renders placeholder text. miniaudio device
+// remains adapter/sample private.
 [[nodiscard]] Core::Result<std::unique_ptr<EngineHost>> CreateEngine(const EngineConfig& config) noexcept;
 
 // Same production composition with optional hooks (device wrap). Prefer the

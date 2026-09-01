@@ -25,12 +25,14 @@
 #include <tina/core/hash/ContentHash.hpp>
 #include <tina/core/hash/ContentHashDigest.hpp>
 #include <tina/core/id/AssetId.hpp>
+#include <tina/core/io/ApplicationPaths.hpp>
 #include <tina/navigation2d/NavigationPathfinder2D.hpp>
 #include <tina/render/Camera2DProjection.hpp>
 #include <tina/render/RenderDevice.hpp>
 #include <tina/render/RenderScene.hpp>
 #include <tina/platform/Input.hpp>
 #include <tina/desktop/DesktopEngine.hpp>
+#include <tina/desktop/UiFontFile.hpp>
 #include <tina/runtime/EngineHost.hpp>
 #include <tina/runtime/GameApplication.hpp>
 #include <tina/runtime/GameState.hpp>
@@ -2008,13 +2010,18 @@ toScenePlaybackMode(Tina::AssetFormat::SpriteAnimationPlaybackMode mode) noexcep
     const auto navigationAssetId = *Tina::Core::AssetId::fromBytes(idBytes(14U));
     const auto fxAssetId = *Tina::Core::AssetId::fromBytes(idBytes(15U));
 
-#if !defined(TINA_SAMPLE_2D_RECIPE_PATH)
-#error "TINA_SAMPLE_2D_RECIPE_PATH must be defined for tina_sample_2d catalog recipe load"
-#endif
     // M10-A38/M11-A19: cook from an on-disk catalog recipe file (product asset path),
     // not in-process payload assembly. Still a hermetic fixture recipe, not
     // the full external cooker CLI pipeline.
-    auto request = Tina::Asset::loadCatalogCookRecipeFile(TINA_SAMPLE_2D_RECIPE_PATH);
+    //
+    // Resolved relative to the executable, which is the only anchor that works both in
+    // the build tree and in an installed copy; CMake stages the recipe beside the exe.
+    auto recipePath = Tina::Core::applicationFilePath("catalog/sample_2d.recipe");
+    if (!recipePath)
+    {
+        return Tina::Core::failure(std::move(recipePath.error()));
+    }
+    auto request = Tina::Asset::loadCatalogCookRecipeFile(*recipePath);
     if (!request)
     {
         return Tina::Core::failure(std::move(request.error()));
@@ -5448,6 +5455,16 @@ int main(int argc, char** argv)
 
     Tina::Sample2D::DeviceCapture capture{};
     Tina::Desktop::CreateEngineOptions desktopOptions{};
+    // The engine compiles in no font path, so the product supplies the bytes. A missing
+    // font leaves this null and the UI renders placeholder text; an unreadable one is a
+    // real failure, since it would otherwise look like a font-less build.
+    auto uiFont = Tina::Desktop::resolveUiFontBytes();
+    if (!uiFont)
+    {
+        writeError(uiFont.error());
+        return 1;
+    }
+    desktopOptions.uiFontBytes = std::move(uiFont->bytes);
     desktopOptions.wrapWindowSurfaceRenderDevice =
         [&capture](std::unique_ptr<Tina::Render::IRenderDevice> device)
             -> Tina::Core::Result<std::unique_ptr<Tina::Render::IRenderDevice>> {

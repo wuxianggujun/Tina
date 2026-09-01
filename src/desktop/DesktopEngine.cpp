@@ -15,9 +15,7 @@
 
 #include "render/bgfx/BgfxRenderDevice.hpp"
 
-#include <cstdlib>
 #include <exception>
-#include <fstream>
 #include <memory>
 #include <new>
 #include <thread>
@@ -33,34 +31,6 @@ namespace {
     error.addContext("Desktop::CreateEngine");
     return error;
 }
-
-#if defined(TINA_HAS_UI_FREETYPE)
-[[nodiscard]] std::shared_ptr<std::vector<std::byte>> loadFontFixtureBytes(const char* path)
-{
-    if (path == nullptr || path[0] == '\0')
-    {
-        return {};
-    }
-    std::ifstream input(path, std::ios::binary);
-    if (!input)
-    {
-        return {};
-    }
-    input.seekg(0, std::ios::end);
-    const auto size = static_cast<std::size_t>(input.tellg());
-    input.seekg(0, std::ios::beg);
-    auto bytes = std::make_shared<std::vector<std::byte>>(size);
-    if (size > 0)
-    {
-        input.read(reinterpret_cast<char*>(bytes->data()), static_cast<std::streamsize>(size));
-    }
-    if (!input)
-    {
-        return {};
-    }
-    return bytes;
-}
-#endif
 
 [[nodiscard]] Core::Result<std::unique_ptr<EngineHost>> createEngineImpl(const EngineConfig& config,
                                                                          CreateEngineOptions options) noexcept
@@ -127,19 +97,10 @@ namespace {
         };
 
 #if defined(TINA_HAS_UI_FREETYPE)
-        // Optional fixture only: TINA_DESKTOP_UI_FONT_PATH / TINA_UI_FONT_PATH / env / repo file.
-        // Games should inject their own font bytes; empty path keeps placeholder UI text path.
-        std::shared_ptr<std::vector<std::byte>> fontBytes{};
-#if defined(TINA_DESKTOP_UI_FONT_PATH)
-        fontBytes = loadFontFixtureBytes(TINA_DESKTOP_UI_FONT_PATH);
-#elif defined(TINA_UI_FONT_PATH)
-        fontBytes = loadFontFixtureBytes(TINA_UI_FONT_PATH);
-#else
-        if (const char* envPath = std::getenv("TINA_UI_FONT_PATH"); envPath != nullptr && envPath[0] != '\0')
-        {
-            fontBytes = loadFontFixtureBytes(envPath);
-        }
-#endif
+        // The caller owns the font. Resolving one here would mean compiling a path
+        // into the library, which is what shipped a dead build-machine path to every
+        // installed game; Desktop::resolveUiFontBytes() is the opt-in helper.
+        std::shared_ptr<std::vector<std::byte>> fontBytes = std::move(options.uiFontBytes);
         if (fontBytes && !fontBytes->empty())
         {
             factories.createPrimaryWindowUIContext =

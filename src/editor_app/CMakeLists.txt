@@ -100,6 +100,10 @@ set_target_properties(tina_editor_desktop PROPERTIES
     OUTPUT_NAME TinaEditor
 )
 
+if(TINA_BUILD_UI_FREETYPE)
+    tina_target_stage_ui_font(tina_editor_desktop)
+endif()
+
 if(WIN32)
     set_target_properties(tina_editor_desktop PROPERTIES
         WIN32_EXECUTABLE TRUE
