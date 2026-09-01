@@ -88,6 +88,7 @@ out\build\windows-msvc-vnext-bgfx\bin\Debug\tina_sample_3d.exe --frames=30 --fra
 - 公共边界 `Result`/`Status`；Game SDK 不暴露 bgfx/GLFW/EnTT/miniaudio 类型。
 - 资源：Catalog cooked + AssetId；引擎不托管完整游戏内容树。
 - `TINA_BUILD_LEGACY` 仅 OFF；ON → FATAL。
+- **不为旧设计留兼容层。** 改设计就一次迁移到位：旧 API 直接删除，不留别名、包装、`deprecated` 标记或双轨分支；旧数据格式改了就把产出方和现存文件一起迁移，不加版本嗅探。理由是双轨会让"哪条路是对的"变成运行时才知道的事，而单轨下走错路是编译错误。改 wire schema 时同时 bump `SchemaVersion`，让不匹配的旧文件 fail closed，而不是被兼容读进来。
 
 ## 技能
 
