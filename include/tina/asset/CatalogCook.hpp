@@ -78,6 +78,14 @@ cookAndStageIncrementalCatalogPackage(std::string_view stagingRootUtf8,
 //   asset Texture2D <32hexId> <payloadPath>
 //   asset Material <32hexId> <payloadPath> <dep32hex:Kind> ...
 //   texture2d <32hexId> <width> <height> <hexRRGGBBAA> ...   // inline Rgba8Unorm pixels
+//     // A texture2d cooks with a full mip chain unless some line in the same recipe
+//     // carves a sub-rect out of it -- a sprite with a UV rect narrower than 0 0 1 1,
+//     // or any tileset, which carves a grid by definition. There is no flag for this:
+//     // a gutterless atlas must not be mipped, because its small levels average across
+//     // sprite boundaries, and a whole image must be, because minified sampling without
+//     // a chain aliases. The recipe already states which one a texture is, so the cooker
+//     // reads that rather than trusting a separate declaration that can contradict it.
+//     // A referrer the cooker does not recognise counts as carving.
 //   sprite <32hexId> <texture32hexId> [u0 v0 u1 v1 pivotX pivotY ppu]
 //   spriteanim <32hexId> <Once|Loop|PingPong> <frame>...
 //     frame := <sprite32hexId>:<durationSeconds>[#<event>[#<event>...]]

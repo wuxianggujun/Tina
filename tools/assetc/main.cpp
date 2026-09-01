@@ -3,6 +3,7 @@
 #include <tina/asset/CatalogPackage.hpp>
 #include <tina/asset/GltfCook.hpp>
 #include <tina/asset/SourceImportPipeline.hpp>
+#include <tina/asset/TextureMipChain.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
 #include <tina/asset_format/AssetFormatErrors.hpp>
 #include <tina/asset_format/SourceImportMetadataFormat.hpp>
@@ -198,12 +199,13 @@ void printUsage()
         << "  --stage-import-state <path> state file bound to --stage-out\n"
         << "  --help\n"
         << "\n"
-        << "Default fixture (no --recipe): Texture2D 2x2 RGBA + Sprite full-UV.\n"
+        << "Default fixture (no --recipe): Texture2D 2x2 RGBA mipped + Sprite full-UV.\n"
         << "Recipe lines:\n"
         << "  platform WindowsX64\n"
         << "  asset Texture2D <32hex> <payloadPath>\n"
         << "  asset Sprite <32hex> <payloadPath> <dep32hex:Texture2D>\n"
         << "  texture2d <32hex> <w> <h> <RRGGBBAA>...\n"
+        << "      Mipped unless a sprite UV rect or a tileset carves a sub-rect out of it.\n"
         << "  sprite <32hex> <texture32hex> [u0 v0 u1 v1 pivotX pivotY ppu]\n"
         << "  tileset <32hex> <texture32hex> <tilePxW> <tilePxH>\n"
         << "  tile <localId> <flags> <u0> <v0> <u1> <v1>\n"
@@ -486,7 +488,11 @@ void printPipelineSuccess(const Tina::Asset::SourceImportPipelineResult& result,
         std::byte{0},   std::byte{0},   std::byte{255}, std::byte{255}, // B
         std::byte{255}, std::byte{255}, std::byte{0},   std::byte{255}, // Y
     };
-    auto texPayload = Tina::AssetFormat::writeTexture2DPayloadBytesRgba8(2, 2, pixels);
+    // The sprite below samples the whole image, so this fixture is a whole-image
+    // producer and gets a chain -- matching what the same content cooks to when it is
+    // written as a recipe instead.
+    auto texPayload = Tina::Asset::writeMippedTexture2DPayloadBytesRgba8(
+        2, 2, pixels, Tina::AssetFormat::Texture2DColorSpace::Srgb);
     if (!texPayload)
     {
         return Tina::Core::failure(std::move(texPayload.error()));
