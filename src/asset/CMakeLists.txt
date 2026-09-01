@@ -70,6 +70,7 @@ set(TINA_ASSET_SOURCES
     GltfFileSnapshot.cpp
     GltfCook.cpp
     MediaCook.cpp
+    TextureMipChain.cpp
     CatalogFile.cpp
     CatalogLoadOrder.cpp
     CatalogLoadPlan.cpp

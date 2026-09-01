@@ -145,8 +145,18 @@ TEST_F(MediaCookTests, PngCooksOneTextureWithStableId)
     EXPECT_EQ(texturePayload->width, 2U);
     EXPECT_EQ(texturePayload->height, 2U);
     EXPECT_EQ(texturePayload->pixelFormat, AssetFormat::Texture2DPixelFormat::Rgba8Unorm);
-    EXPECT_EQ(texturePayload->levelCount, 1U);
-    EXPECT_EQ(texturePayload->sampler.mipFilter, AssetFormat::Texture2DMipFilterMode::None);
+    // An imported image carries a complete chain, so a minified sprite samples a real
+    // level instead of aliasing against the base.
+    EXPECT_EQ(texturePayload->colorSpace, AssetFormat::Texture2DColorSpace::Srgb);
+    ASSERT_EQ(texturePayload->levelCount, AssetFormat::texture2DFullMipLevelCount(2, 2));
+    ASSERT_EQ(texturePayload->levelCount, 2U);
+    EXPECT_EQ(texturePayload->sampler.mipFilter, AssetFormat::Texture2DMipFilterMode::Linear);
+    const auto levels = texturePayload->levels();
+    EXPECT_EQ(levels.front().width, 2U);
+    EXPECT_EQ(levels.front().height, 2U);
+    EXPECT_EQ(levels.back().width, 1U);
+    EXPECT_EQ(levels.back().height, 1U);
+    EXPECT_EQ(levels.back().bytes.size(), 4U);
     ASSERT_EQ(texturePayload->basePixels().size(), 16U);
     EXPECT_EQ(std::to_integer<Core::u8>(texturePayload->basePixels()[0]), 255U);
     EXPECT_EQ(std::to_integer<Core::u8>(texturePayload->basePixels()[5]), 255U);

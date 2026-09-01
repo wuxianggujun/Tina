@@ -10,7 +10,9 @@ namespace Tina::Asset {
 // One-step media importers for the source import pipeline.
 //
 // cookTextureFileToCatalogSourceResult: one PNG/JPEG image file cooks into one
-// Rgba8Unorm Texture2D. Sprite2D resolution accepts this imported Texture2D
+// Rgba8Unorm Texture2D carrying a complete sRGB-filtered mip chain, so a minified
+// sprite samples a real level instead of aliasing against the base. Sprite2D
+// resolution accepts this imported Texture2D
 // directly; explicitly authored Sprite assets remain supported as wrappers.
 // The AssetId is derived deterministically from the canonical source-root-
 // relative path unless a valid stableAssetId override is supplied.

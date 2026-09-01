@@ -80,6 +80,8 @@ if(TINA_BUILD_RENDER_BGFX)
         bgfx/BgfxSurfaceFramePlanner.hpp
         bgfx/BgfxTransientFrameBudget.cpp
         bgfx/BgfxTransientFrameBudget.hpp
+        bgfx/BgfxTexture2DUpload.cpp
+        bgfx/BgfxTexture2DUpload.hpp
         bgfx/BgfxUIAtlasTexture.cpp
         bgfx/BgfxUIAtlasTexture.hpp
         bgfx/BgfxUIDisplayGeometry.cpp

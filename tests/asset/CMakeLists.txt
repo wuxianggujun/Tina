@@ -10,6 +10,7 @@ set(TINA_ASSET_TEST_SOURCES
     AssetSystemGpuPipelineTests.cpp
     CatalogChangePlanTests.cpp
     MediaCookTests.cpp
+    TextureMipChainTests.cpp
     SourceImportCaptureTests.cpp
     SourceImportExecutorTests.cpp
     SourceImportPlanTests.cpp

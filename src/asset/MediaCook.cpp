@@ -6,11 +6,13 @@
 
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/SourceImportProbe.hpp>
+#include <tina/asset/TextureMipChain.hpp>
 #include <tina/asset_format/AudioClipPayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
 #include <tina/core/io/ReadFile.hpp>
 #include <tina/core/text/Utf8.hpp>
 
+#include <array>
 #include <cstddef>
 #include <limits>
 #include <memory>
@@ -180,9 +182,12 @@ try
     if (stbi_info_from_memory(encoded, encodedSize, &headerWidth, &headerHeight,
                               &headerComponents) == 0 ||
         headerWidth <= 0 || headerHeight <= 0 ||
-        headerWidth > static_cast<int>((std::numeric_limits<Core::u16>::max)()) ||
-        headerHeight > static_cast<int>((std::numeric_limits<Core::u16>::max)()))
+        headerWidth > static_cast<int>(AssetFormat::Texture2DWire::MaxDimension) ||
+        headerHeight > static_cast<int>(AssetFormat::Texture2DWire::MaxDimension))
     {
+        // Bounded by the wire limit rather than by what fits in u16: an oversized image
+        // would otherwise decode and build a whole mip chain before the payload writer
+        // rejected it, and report a wire-layer error that never names the real limit.
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "image is not a decodable Texture2D source or exceeds size limits");
     }
@@ -199,10 +204,32 @@ try
     const std::size_t pixelBytes =
         static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4U;
 
-    auto texturePayload = AssetFormat::writeTexture2DPayloadBytesRgba8(
+    // Imported images are authored colour, so they are sRGB and must be filtered as such.
+    constexpr auto ImportedColorSpace = AssetFormat::Texture2DColorSpace::Srgb;
+    auto mipChain = buildTexture2DMipChainRgba8(
         static_cast<Core::u16>(width), static_cast<Core::u16>(height),
-        std::span<const std::byte>{reinterpret_cast<const std::byte*>(pixels.get()), pixelBytes});
+        std::span<const std::byte>{reinterpret_cast<const std::byte*>(pixels.get()), pixelBytes},
+        ImportedColorSpace);
     pixels.reset();
+    if (!mipChain)
+    {
+        return Core::failure(
+            std::move(mipChain.error()).withContext("cookTextureFileToCatalogSourceResult", "mipChain"));
+    }
+
+    std::array<AssetFormat::Texture2DLevelDesc, AssetFormat::Texture2DWire::MaxLevelCount>
+        levelStorage{};
+    const auto levels = mipChain->fillLevelDescs(levelStorage);
+    // A single-level texture must declare mipFilter None; the wire rejects the pair the
+    // other way round, so a 1x1 import cannot claim mip selection it has no levels for.
+    const auto mipFilter = levels.size() > 1U ? AssetFormat::Texture2DMipFilterMode::Linear
+                                              : AssetFormat::Texture2DMipFilterMode::None;
+    auto texturePayload = AssetFormat::writeTexture2DPayloadBytes(AssetFormat::Texture2DPayloadDesc{
+        .pixelFormat = AssetFormat::Texture2DPixelFormat::Rgba8Unorm,
+        .colorSpace = ImportedColorSpace,
+        .sampler = {.mipFilter = mipFilter},
+        .levels = levels,
+    });
     if (!texturePayload)
     {
         return Core::failure(std::move(texturePayload.error()).withContext(

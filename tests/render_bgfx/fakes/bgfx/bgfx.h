@@ -3,26 +3,48 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <optional>
 #include <vector>
 
-#define BGFX_SAMPLER_U_CLAMP UINT64_C(0x00000001)
-#define BGFX_SAMPLER_V_CLAMP UINT64_C(0x00000002)
-#define BGFX_SAMPLER_MIN_POINT UINT64_C(0x00000004)
-#define BGFX_SAMPLER_MAG_POINT UINT64_C(0x00000008)
-#define BGFX_SAMPLER_COMPARE_LEQUAL UINT64_C(0x00000010)
+// Values copied from bgfx/defines.h rather than invented. The wrap bits in particular
+// are a two-bit field per axis, so U_BORDER is U_MIRROR|U_CLAMP; independent bits here
+// would let a translation that accidentally ORs two wrap modes pass against the fake
+// and then request Border from the real bgfx.
+#define BGFX_SAMPLER_U_MIRROR UINT64_C(0x00000001)
+#define BGFX_SAMPLER_U_CLAMP UINT64_C(0x00000002)
+#define BGFX_SAMPLER_U_BORDER UINT64_C(0x00000003)
+#define BGFX_SAMPLER_V_MIRROR UINT64_C(0x00000004)
+#define BGFX_SAMPLER_V_CLAMP UINT64_C(0x00000008)
+#define BGFX_SAMPLER_V_BORDER UINT64_C(0x0000000c)
 #define BGFX_SAMPLER_W_CLAMP UINT64_C(0x00000020)
-#define BGFX_TEXTURE_RT UINT64_C(0x00000100)
+#define BGFX_SAMPLER_MIN_POINT UINT64_C(0x00000040)
+#define BGFX_SAMPLER_MIN_ANISOTROPIC UINT64_C(0x00000080)
+#define BGFX_SAMPLER_MAG_POINT UINT64_C(0x00000100)
+#define BGFX_SAMPLER_MAG_ANISOTROPIC UINT64_C(0x00000200)
+#define BGFX_SAMPLER_MIP_POINT UINT64_C(0x00000400)
+#define BGFX_SAMPLER_COMPARE_LEQUAL UINT64_C(0x00020000)
+#define BGFX_TEXTURE_RT UINT64_C(0x0000001000000000)
+#define BGFX_TEXTURE_SRGB UINT64_C(0x0000200000000000)
 #define BGFX_TEXTURE_NONE UINT64_C(0)
 #define BGFX_INVALID_HANDLE { tina_test_bgfx::InvalidHandle }
 
 namespace tina_test_bgfx {
 
 struct TextureFormat final {
+    // Relative order matches bgfx's enum: the compressed formats precede the
+    // uncompressed ones, and Count is last so an unmapped format lands past every
+    // real value.
     enum Enum : std::uint8_t {
-        R8 = 1,
-        D16 = 2,
-        RGBA16F = 3,
-        RG16F = 4,
+        BC1 = 1,
+        BC3 = 2,
+        BC7 = 3,
+        ASTC4x4 = 4,
+        R8 = 5,
+        RG16F = 6,
+        RGBA8 = 7,
+        RGBA16F = 8,
+        D16 = 9,
+        Count = 10,
     };
 };
 
@@ -38,6 +60,9 @@ struct FrameBufferHandle final {
 
 struct Memory final {
     std::vector<std::uint8_t> bytes;
+    // Mirrors the real struct's writable pointer so callers that fill an alloc'd block
+    // in place compile against the fake unchanged.
+    std::uint8_t* data = nullptr;
 };
 
 namespace Contract {
@@ -74,6 +99,14 @@ struct TextureRecord final {
     std::vector<std::uint8_t> pixels;
 };
 
+struct TextureValidationCall final {
+    std::uint16_t depth = 0;
+    bool cubeMap = false;
+    std::uint16_t layers = 0;
+    TextureFormat::Enum format = TextureFormat::Count;
+    std::uint64_t flags = 0;
+};
+
 struct FrameBufferCreateCall final {
     std::vector<TextureHandle> attachments;
     bool destroyTextures = false;
@@ -94,12 +127,18 @@ struct State final {
     std::uint16_t nextFrameBuffer = 1;
     std::uint32_t copyCalls = 0;
     std::uint32_t failCopyCall = 0;
+    std::uint32_t allocCalls = 0;
+    std::uint32_t failAllocCall = 0;
     std::uint32_t textureCreateCalls = 0;
     std::uint32_t rejectTextureCreateCall = 0;
     bool rejectTextureCreate = false;
     bool rejectTextureValidation = false;
+    // Empty means no per-format rejection. A sentinel drawn from the enum itself would
+    // collide with Count, which is what an unmapped format translates to.
+    std::optional<TextureFormat::Enum> rejectTextureValidationFormat{};
     bool rejectFrameBufferCreate = false;
     std::uint32_t immutableUpdateRejects = 0;
+    std::vector<TextureValidationCall> textureValidations;
     std::vector<TextureCreateCall> textureCreates;
     std::vector<TextureUpdateCall> textureUpdates;
     std::vector<FrameBufferCreateCall> frameBufferCreates;
@@ -130,6 +169,22 @@ inline void reset() noexcept
 
 } // namespace Contract
 
+[[nodiscard]] inline Memory* alloc(std::uint32_t size)
+{
+    ++Contract::state.allocCalls;
+    if (Contract::state.failAllocCall == Contract::state.allocCalls)
+    {
+        return nullptr;
+    }
+    auto* memory = new Memory{};
+    // Real bgfx::alloc hands back uninitialised storage. Filling with a non-zero
+    // pattern means a caller that forgets to write a level leaves this pattern behind
+    // instead of the zeros an assertion could mistake for legitimate black pixels.
+    memory->bytes.assign(size, 0xCD);
+    memory->data = memory->bytes.data();
+    return memory;
+}
+
 [[nodiscard]] inline const Memory* copy(const void* data, std::uint32_t size)
 {
     ++Contract::state.copyCalls;
@@ -144,6 +199,7 @@ inline void reset() noexcept
     {
         std::memcpy(memory->bytes.data(), data, size);
     }
+    memory->data = memory->bytes.data();
     return memory;
 }
 
@@ -228,12 +284,25 @@ inline void reset() noexcept
 }
 
 [[nodiscard]] inline bool isTextureValid(
-    std::uint16_t,
-    bool,
-    std::uint16_t,
-    TextureFormat::Enum,
-    std::uint64_t) noexcept
+    std::uint16_t depth,
+    bool cubeMap,
+    std::uint16_t layers,
+    TextureFormat::Enum format,
+    std::uint64_t flags) noexcept
 {
+    Contract::state.textureValidations.push_back(Contract::TextureValidationCall{
+        .depth = depth,
+        .cubeMap = cubeMap,
+        .layers = layers,
+        .format = format,
+        .flags = flags,
+    });
+    // A real adapter refuses individual formats rather than every texture at once, so
+    // the per-format rejection is modelled separately from the blanket switch.
+    if (Contract::state.rejectTextureValidationFormat == format)
+    {
+        return false;
+    }
     return !Contract::state.rejectTextureValidation;
 }
 

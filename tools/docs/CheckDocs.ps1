@@ -119,13 +119,23 @@ foreach ($file in $mdFiles) {
     $lines = Get-Content -LiteralPath $file.FullName -Encoding UTF8
     $dir = Split-Path -Parent $file.FullName
     $content = ($lines -join "`n")
+    $inFence = $false
 
     for ($i = 0; $i -lt $lines.Count; $i++) {
         $line = $lines[$i]
         $lineNo = $i + 1
 
-        # local markdown links
-        foreach ($m in [regex]::Matches($line, $linkPattern)) {
+        if ($line -match '^\s*(```|~~~)') {
+            $inFence = -not $inFence
+            continue
+        }
+
+        # local markdown links. Skipped inside fences: markdown does not render a link
+        # there, and C++ lambda captures like [this](const Foo::Bar&) match the same
+        # regex, which previously aborted the whole scan on the first such sample.
+        $linkMatches = @()
+        if (-not $inFence) { $linkMatches = [regex]::Matches($line, $linkPattern) }
+        foreach ($m in $linkMatches) {
             $target = $m.Groups[2].Value.Trim()
             if ([string]::IsNullOrWhiteSpace($target)) { continue }
             # skip external / anchors-only / mailto / images with query
@@ -139,7 +149,15 @@ foreach ($file in $mdFiles) {
                 Add-Warn "${rel}:${lineNo}: absolute path link '$pathPart'"
                 continue
             }
-            $resolved = [System.IO.Path]::GetFullPath((Join-Path $dir $pathPart.Replace('/', [IO.Path]::DirectorySeparatorChar)))
+            # A target that is not a legal path is reported and skipped rather than
+            # thrown: an unhandled GetFullPath failure aborts every remaining file, so
+            # one odd line would silently cost the whole gate its coverage.
+            try {
+                $resolved = [System.IO.Path]::GetFullPath((Join-Path $dir $pathPart.Replace('/', [IO.Path]::DirectorySeparatorChar)))
+            } catch {
+                Add-Warn "${rel}:${lineNo}: link target is not a usable path '$pathPart'"
+                continue
+            }
             if (-not $resolved.StartsWith($RepoRoot, [StringComparison]::OrdinalIgnoreCase)) {
                 Add-Warn "${rel}:${lineNo}: link escapes repo '$pathPart'"
                 continue

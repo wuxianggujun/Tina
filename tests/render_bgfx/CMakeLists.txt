@@ -106,6 +106,28 @@ set_target_properties(tina_render_bgfx_environment_map_contract_test_object PROP
     CXX_EXTENSIONS OFF
 )
 
+add_library(tina_render_bgfx_texture2d_upload_contract_obj OBJECT
+    ${PROJECT_SOURCE_DIR}/src/render/bgfx/BgfxTexture2DUpload.cpp
+)
+target_compile_features(tina_render_bgfx_texture2d_upload_contract_obj PRIVATE cxx_std_23)
+target_compile_definitions(tina_render_bgfx_texture2d_upload_contract_obj PRIVATE
+    bgfx=tina_test_bgfx
+    toBgfxTextureFormat=toBgfxTextureFormatContractTest
+    toBgfxTexture2DFlags=toBgfxTexture2DFlagsContractTest
+    createTexture2DUpload=createTexture2DUploadContractTest
+)
+target_include_directories(tina_render_bgfx_texture2d_upload_contract_obj BEFORE PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/fakes
+    ${PROJECT_SOURCE_DIR}/src/render/bgfx
+)
+target_link_libraries(tina_render_bgfx_texture2d_upload_contract_obj PRIVATE
+    Tina::ProjectOptions
+    Tina::Render
+)
+set_target_properties(tina_render_bgfx_texture2d_upload_contract_obj PROPERTIES
+    CXX_EXTENSIONS OFF
+)
+
 add_executable(tina_render_bgfx_tests
     BgfxOpaque3DGeometryTests.cpp
     BgfxCascadedDirectionalShadowMathTests.cpp
@@ -120,6 +142,7 @@ add_executable(tina_render_bgfx_tests
     BgfxRenderDeviceFactoryTests.cpp
     BgfxSprite2DGeometryTests.cpp
     BgfxSurfaceFramePlannerTests.cpp
+    BgfxTexture2DUploadContractTests.cpp
     BgfxTransientFrameBudgetTests.cpp
     BgfxUIAtlasTextureContractTests.cpp
     BgfxUIDisplayGeometryTests.cpp
@@ -128,6 +151,7 @@ add_executable(tina_render_bgfx_tests
     $<TARGET_OBJECTS:tina_render_bgfx_spot_contract_obj>
     $<TARGET_OBJECTS:tina_render_bgfx_point_contract_obj>
     $<TARGET_OBJECTS:tina_render_bgfx_environment_map_contract_test_object>
+    $<TARGET_OBJECTS:tina_render_bgfx_texture2d_upload_contract_obj>
 )
 
 target_compile_features(tina_render_bgfx_tests PRIVATE cxx_std_23)
