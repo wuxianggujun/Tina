@@ -6,6 +6,7 @@
 #include <tina/render/RenderErrors.hpp>
 #include <tina/render/RenderFrame.hpp>
 #include <tina/render/RenderFrameCapture.hpp>
+#include <tina/render/RenderPostProcess.hpp>
 #include <tina/render/ShadowMapExtentConfig.hpp>
 
 #include <atomic>
@@ -113,10 +114,23 @@ struct RenderStatistics final {
     // device lifetime; a gate can assert that.
     u64 nativeSurfaceRebinds = 0;
     u64 liveResources = 0;
+    // Mip levels accepted across every Texture2D upload. Summed rather than counted
+    // per texture so that a cooked mip chain silently collapsing to its base level
+    // shows up in a headless assertion; the pixel difference it causes is only
+    // visible under minification, which no unit test observes.
+    u64 uploadedTextureLevels = 0;
     // Resources that are logically stale but whose native handles are still
     // waiting for backend-proven GPU completion.
     u64 pendingGpuRetirements = 0;
     u64 completedGpuRetirements = 0;
+    // Offscreen render targets currently live on this device.
+    u64 liveRenderTextures = 0;
+    // Frames whose non-empty post-process chain was accepted and scheduled. A
+    // caller can assert this advances, which is how "my chain silently did
+    // nothing" becomes observable rather than invisible.
+    u64 postProcessChainsExecuted = 0;
+    // Extension passes the accepted chains planned, summed across frames.
+    u64 postProcessPassesPlanned = 0;
 };
 
 // Backend-owned GPU texture handle. Owner rejects cross-device use, generation
@@ -150,6 +164,42 @@ struct GpuTextureId final {
         return hasValue();
     }
     [[nodiscard]] friend constexpr bool operator==(const GpuTextureId&, const GpuTextureId&) = default;
+};
+
+// Backend-owned offscreen render target. Deliberately a distinct type from
+// GpuTextureId: a render target is attachable and its lifetime belongs to the
+// post-process graph, not to an AssetLease. One type for both would let a sampled
+// asset texture be bound as a color attachment, which no backend can honour.
+struct GpuRenderTextureId final {
+    inline static constexpr u32 InvalidIndex = (std::numeric_limits<u32>::max)();
+    inline static constexpr u32 UnscopedOwner = (std::numeric_limits<u32>::max)();
+
+    u32 owner = 0;
+    u32 index = InvalidIndex;
+    u32 generation = 0;
+
+    constexpr GpuRenderTextureId() noexcept = default;
+    // Reserved unscoped namespace for deterministic backend test doubles, matching
+    // GpuTextureId. Real devices issue the three-part owner/index/generation form.
+    constexpr GpuRenderTextureId(u32 indexValue, u32 generationValue) noexcept
+        : owner(UnscopedOwner), index(indexValue), generation(generationValue)
+    {
+    }
+    constexpr GpuRenderTextureId(u32 ownerValue, u32 indexValue, u32 generationValue) noexcept
+        : owner(ownerValue), index(indexValue), generation(generationValue)
+    {
+    }
+
+    [[nodiscard]] constexpr bool hasValue() const noexcept
+    {
+        return owner != 0 && index != InvalidIndex && generation != 0;
+    }
+    [[nodiscard]] constexpr explicit operator bool() const noexcept
+    {
+        return hasValue();
+    }
+    [[nodiscard]] friend constexpr bool operator==(const GpuRenderTextureId&,
+                                                   const GpuRenderTextureId&) = default;
 };
 
 // One backend-owned IBL resource: diffuse irradiance cubemap, prefiltered
@@ -215,12 +265,94 @@ struct GpuMeshId final {
     [[nodiscard]] friend constexpr bool operator==(const GpuMeshId&, const GpuMeshId&) = default;
 };
 
-struct Texture2DUploadDesc final {
+// Texture vocabulary is declared here rather than reused from AssetFormat because
+// Render depends only on Core; a cooked-asset type in this header would invert the
+// dependency. Asset owns the translation between the two.
+enum class GpuTextureFormat : u8 {
+    Invalid = 0,
+    Rgba8Unorm = 1,
+    Bc1Rgba = 2,
+    Bc3Rgba = 3,
+    Bc7Rgba = 4,
+    Astc4x4Rgba = 5,
+};
+
+// Whether the stored bytes are gamma encoded. A backend must tell the sampler, or
+// an sRGB texture read as linear double-applies gamma.
+enum class GpuTextureColorSpace : u8 {
+    Invalid = 0,
+    Linear = 1,
+    Srgb = 2,
+};
+
+enum class GpuTextureWrapMode : u8 {
+    Invalid = 0,
+    Repeat = 1,
+    Mirror = 2,
+    Clamp = 3,
+    Border = 4,
+};
+
+enum class GpuTextureFilterMode : u8 {
+    Invalid = 0,
+    Point = 1,
+    Linear = 2,
+    Anisotropic = 3,
+};
+
+enum class GpuTextureMipFilterMode : u8 {
+    None = 0,
+    Point = 1,
+    Linear = 2,
+};
+
+struct GpuTextureSamplerDesc final {
+    GpuTextureWrapMode wrapU = GpuTextureWrapMode::Repeat;
+    GpuTextureWrapMode wrapV = GpuTextureWrapMode::Repeat;
+    GpuTextureFilterMode minFilter = GpuTextureFilterMode::Linear;
+    GpuTextureFilterMode magFilter = GpuTextureFilterMode::Linear;
+    GpuTextureMipFilterMode mipFilter = GpuTextureMipFilterMode::None;
+
+    friend constexpr bool operator==(const GpuTextureSamplerDesc&,
+                                     const GpuTextureSamplerDesc&) noexcept = default;
+};
+
+struct Texture2DUploadLevel final {
     u16 width = 0;
     u16 height = 0;
-    // Row-major RGBA8 bytes; size must be width*height*4.
-    std::span<const std::byte> rgba8Pixels{};
+    std::span<const std::byte> bytes{};
 };
+
+struct Texture2DUploadDesc final {
+    static constexpr u8 MaximumLevelCount = 15;
+    static constexpr u16 MaximumDimension = 16384;
+
+    GpuTextureFormat format = GpuTextureFormat::Rgba8Unorm;
+    GpuTextureColorSpace colorSpace = GpuTextureColorSpace::Srgb;
+    GpuTextureSamplerDesc sampler{};
+    // Level 0 first. The backend uploads these as given and never generates mips:
+    // generating them here would make one asset produce different pixels depending
+    // on which backend loaded it.
+    std::span<const Texture2DUploadLevel> levels{};
+
+    [[nodiscard]] u16 baseWidth() const noexcept
+    {
+        return levels.empty() ? u16{0} : levels.front().width;
+    }
+    [[nodiscard]] u16 baseHeight() const noexcept
+    {
+        return levels.empty() ? u16{0} : levels.front().height;
+    }
+};
+
+// Bytes one level occupies, accounting for 4x4 block compression. Zero means the
+// extent or format is invalid.
+[[nodiscard]] u32 gpuTextureLevelByteSize(GpuTextureFormat format, u16 width, u16 height) noexcept;
+
+// Shared upload validation so Null and bgfx cannot drift on what they accept. Checks
+// format/colour space/sampler vocabulary, level count, the halving chain, and each
+// level's byte count against its extent.
+[[nodiscard]] Core::Status validateTexture2DUploadDesc(const Texture2DUploadDesc& desc) noexcept;
 
 struct EnvironmentMapUploadDesc final {
     u16 diffuseFaceSize = 0;
@@ -342,9 +474,47 @@ class IRenderDevice {
         return true;
     }
 
+    // Optional offscreen render-target path. Default implementations return
+    // Unsupported, so a backend that cannot honour a post-process chain fails
+    // closed instead of accepting the frame and rendering nothing.
+    //
+    // Binding key 0 is reserved for the primary window surface and is never
+    // assignable, which is what lets RenderPostProcessChainView treat 0 as
+    // "target the surface" without a separate flag.
+    [[nodiscard]] virtual Core::Result<GpuRenderTextureId> createRenderTexture(
+        const RenderTextureDesc& desc)
+    {
+        static_cast<void>(desc);
+        return Core::failure(RenderErrorCode::RenderTextureUnsupported,
+                             "This render device does not support offscreen render textures");
+    }
+    [[nodiscard]] virtual Core::Status destroyRenderTexture(GpuRenderTextureId target) noexcept
+    {
+        static_cast<void>(target);
+        return Core::failure(RenderErrorCode::RenderTextureUnsupported,
+                             "This render device does not support offscreen render textures");
+    }
+    // Publishes target under a caller-chosen non-zero key. The key is what a
+    // RenderPostProcessChainView references, so binding must happen before the
+    // frame that uses it.
+    [[nodiscard]] virtual Core::Status setRenderTextureBinding(u32 deviceBindingKey,
+                                                               GpuRenderTextureId target) noexcept
+    {
+        static_cast<void>(deviceBindingKey);
+        static_cast<void>(target);
+        return Core::failure(RenderErrorCode::RenderTextureUnsupported,
+                             "This render device does not support render texture bindings");
+    }
+    [[nodiscard]] virtual Core::Status clearRenderTextureBinding(u32 deviceBindingKey) noexcept
+    {
+        static_cast<void>(deviceBindingKey);
+        return Core::failure(RenderErrorCode::RenderTextureUnsupported,
+                             "This render device does not support render texture bindings");
+    }
+
     // Optional GPU texture path (M10-A23). Default implementations return Unsupported.
     // Null records logical textures; bgfx creates real GPU textures.
-    [[nodiscard]] virtual Core::Result<GpuTextureId> createTexture2DRgba8(const Texture2DUploadDesc& desc)
+    [[nodiscard]] virtual Core::Result<GpuTextureId> createTexture2D(const Texture2DUploadDesc& desc)
     {
         static_cast<void>(desc);
         return Core::failure(RenderErrorCode::TextureUploadUnsupported,

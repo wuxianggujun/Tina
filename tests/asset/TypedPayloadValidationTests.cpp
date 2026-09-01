@@ -35,15 +35,14 @@ TEST(TypedPayloadValidationTests, AcceptsTypedTextureWhenEnabled)
     std::pmr::unsynchronized_pool_resource memory;
     const auto textureId = *Core::AssetId::fromBytes(idBytes(1U));
     std::vector<std::byte> pixels(4, std::byte{9});
-    auto payload = AssetFormat::writeTexture2DPayloadBytes(
-        AssetFormat::Texture2DPayloadDesc{.width = 1, .height = 1, .pixels = pixels});
+    auto payload = AssetFormat::writeTexture2DPayloadBytesRgba8(1, 1, pixels);
     ASSERT_TRUE(payload.has_value());
 
     CatalogCookRequest request{.targetPlatform = AssetFormat::TargetPlatform::WindowsX64};
     request.assets.push_back(CatalogCookAssetSpec{
         .assetKind = AssetFormat::AssetKind::Texture2D,
         .assetId = textureId,
-        .assetTypeVersion = 1,
+        .assetTypeVersion = AssetFormat::Texture2DWire::SchemaVersion,
         .payload = std::move(*payload),
     });
 

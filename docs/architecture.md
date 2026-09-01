@@ -29,6 +29,11 @@ flowchart TD
     Platform["Tina::Platform"] --> Core
     Task["Tina::Task"] --> Core
     Gameplay["Tina::Gameplay"] --> Core
+    Animation3D["Tina::Animation3D"] --> Core
+    Animation3D --> Math
+    Animation3D --> AssetFormat
+    Animation3D --> Scene
+    Animation3D --> Gameplay
     Gameplay --> Math
     Render["Tina::Render"] --> Core
     Render -. "PRIVATE" .-> Math
@@ -92,6 +97,7 @@ flowchart TD
 | `tina_math` | 引擎唯一的 `Vec2/3/4`、`Quaternion`、列主序 `Mat4`、`Aabb2/3`、`Rect`、`Sphere`、`Plane`、`Ray`、`Frustum` 与几何查询 | header-only INTERFACE；只依赖 Core；不占 `ErrorDomain`/`MemoryTag`，查询失败返回 `optional`/`bool`（见 [Math](math.md)、[ADR 0035](adr/0035-math-module-boundaries.md)） |
 | `tina_platform` | 窗口/输入/生命周期的 backend-neutral 契约 | 不含 GLFW 类型 |
 | `tina_task` | 有界 IO/CPU/Main 执行域与 `TaskGroup` | 禁止 detach/强杀 |
+| `tina_animation3d` | `Skeleton3D`/`Pose3D`/`JointMask`、pose 混合、`ClipSampler3D`、`BlendTree3D`、`AnimationGraph3D`、两骨 IK | pose 为 joint-local；不链接 Asset（只消费 payload view）也不链接 Render（palette 写进调用方 span）；建在 `Animator3D` 旁而非替代它（见 [3D 动画图](animation-3d.md)、[ADR 0037](adr/0037-animation3d-graph-boundaries.md)） |
 | `tina_gameplay` | `Scheduler`/timer、`Action`/`ActionRunner` tween 与组合子、28 条 `Easing`、scoped `Signal<T>` | 只依赖 Core+Math，不知道 Scene/Asset/Physics/UI；delta 由调用方给，dispatch 重入返回 `ReentrantDispatch`（见 [Gameplay 工具层](gameplay-tooling.md)、[ADR 0036](adr/0036-gameplay-tooling-boundaries.md)） |
 | `tina_render` | RenderDevice SPI、RenderScene、UI DisplayList、GPU 资源句柄 | 不含 bgfx 类型 |
 | `tina_audio` | AudioEngine、voice/bus/command/completion | 不含 miniaudio 类型 |

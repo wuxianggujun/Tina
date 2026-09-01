@@ -385,9 +385,9 @@ class CapturingRenderDevice final : public Render::IRenderDevice {
     }
     void shutdown() noexcept override { inner_->shutdown(); }
     [[nodiscard]] Core::Result<Render::GpuTextureId>
-    createTexture2DRgba8(const Render::Texture2DUploadDesc& desc) override
+    createTexture2D(const Render::Texture2DUploadDesc& desc) override
     {
-        return inner_->createTexture2DRgba8(desc);
+        return inner_->createTexture2D(desc);
     }
     [[nodiscard]] Core::Status validateTexture2D(Render::GpuTextureId texture) const noexcept override
     {

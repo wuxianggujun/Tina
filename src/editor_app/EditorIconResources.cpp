@@ -47,11 +47,11 @@ Core::Status EditorIconResources::initialize(Render::IRenderDevice& device)
     }
     static const EditorIconAtlasPixels AtlasPixels =
         expandEditorIconAtlasRgba8();
-    auto uploaded = device.createTexture2DRgba8(Render::Texture2DUploadDesc{
-        .width = static_cast<Core::u16>(EditorIconAtlasWidth),
-        .height = static_cast<Core::u16>(EditorIconAtlasHeight),
-        .rgba8Pixels = AtlasPixels,
-    });
+    const std::array<Render::Texture2DUploadLevel, 1> levels{
+        Render::Texture2DUploadLevel{.width = static_cast<Core::u16>(EditorIconAtlasWidth),
+                                     .height = static_cast<Core::u16>(EditorIconAtlasHeight),
+                                     .bytes = AtlasPixels}};
+    auto uploaded = device.createTexture2D(Render::Texture2DUploadDesc{.levels = levels});
     if (!uploaded) {
         return Core::failure(std::move(uploaded.error()));
     }

@@ -235,11 +235,27 @@ public:
         requires(sizeof...(Components) > 0)
     [[nodiscard]] WorldView<std::remove_cvref_t<Components>...> view() const noexcept;
 
+    // Same component filtering as view(), narrowed further by runtime metadata
+    // values. Only tag/layer/group participate, and only when set, so this stays a
+    // declarative query rather than a registry of arbitrary predicates.
+    template <WorldReadableComponent... Components>
+        requires(sizeof...(Components) > 0)
+    [[nodiscard]] WorldView<std::remove_cvref_t<Components>...> viewWhere(
+        EntityMetadataFilter filter) const noexcept;
+
     template <WorldReadableComponent... Components>
         requires(sizeof...(Components) > 0)
     [[nodiscard]] WorldView<std::remove_cvref_t<Components>...> query() const noexcept
     {
         return view<Components...>();
+    }
+
+    template <WorldReadableComponent... Components>
+        requires(sizeof...(Components) > 0)
+    [[nodiscard]] WorldView<std::remove_cvref_t<Components>...> queryWhere(
+        EntityMetadataFilter filter) const noexcept
+    {
+        return viewWhere<Components...>(filter);
     }
 
     // Live entity ids in create-order-independent dense storage. Valid only on
@@ -262,7 +278,8 @@ private:
     Impl* m_impl = nullptr;
 };
 
-// Lazy borrowed range of entities that contain every requested component.
+// Lazy borrowed range of entities that contain every requested component and, when
+// a metadata filter is attached, match every value it sets.
 // Iteration and each() are read-only. Any World mutation, move, or destruction
 // invalidates the view and its iterators.
 template <WorldReadableComponent... Components>
@@ -313,8 +330,9 @@ public:
         Iterator(
             const World* world,
             std::span<const EntityId> entities,
+            EntityMetadataFilter filter,
             usize index) noexcept
-            : m_world(world), m_entities(entities), m_index(index)
+            : m_world(world), m_entities(entities), m_filter(filter), m_index(index)
         {
             advanceToMatch();
         }
@@ -323,26 +341,40 @@ public:
         {
             while (m_world != nullptr && m_index < m_entities.size()) {
                 const EntityId entity = m_entities[m_index];
-                if (((m_world->template get<Components>(entity) != nullptr) && ...)) {
+                if (((m_world->template get<Components>(entity) != nullptr) && ...)
+                    && matchesFilter(entity)) {
                     return;
                 }
                 ++m_index;
             }
         }
 
+        // Components are checked first: the metadata lookup only runs for entities
+        // that already carry every requested component.
+        [[nodiscard]] bool matchesFilter(EntityId entity) const noexcept
+        {
+            if (m_filter.filtersNothing()) {
+                return true;
+            }
+            const EntityMetadata* metadata = m_world->metadata(entity);
+            return metadata != nullptr
+                && matchesEntityMetadataFilter(*metadata, m_filter);
+        }
+
         const World* m_world = nullptr;
         std::span<const EntityId> m_entities{};
+        EntityMetadataFilter m_filter{};
         usize m_index = 0;
     };
 
     [[nodiscard]] Iterator begin() const noexcept
     {
-        return Iterator{m_world, m_entities, 0};
+        return Iterator{m_world, m_entities, m_filter, 0};
     }
 
     [[nodiscard]] Iterator end() const noexcept
     {
-        return Iterator{m_world, m_entities, m_entities.size()};
+        return Iterator{m_world, m_entities, m_filter, m_entities.size()};
     }
 
     [[nodiscard]] bool empty() const noexcept
@@ -352,8 +384,20 @@ public:
 
     [[nodiscard]] bool contains(EntityId entity) const noexcept
     {
-        return m_world != nullptr && m_world->contains(entity)
-            && ((m_world->template get<Components>(entity) != nullptr) && ...);
+        if (m_world == nullptr || !m_world->contains(entity)
+            || !((m_world->template get<Components>(entity) != nullptr) && ...)) {
+            return false;
+        }
+        if (m_filter.filtersNothing()) {
+            return true;
+        }
+        const EntityMetadata* metadata = m_world->metadata(entity);
+        return metadata != nullptr && matchesEntityMetadataFilter(*metadata, m_filter);
+    }
+
+    [[nodiscard]] const EntityMetadataFilter& filter() const noexcept
+    {
+        return m_filter;
     }
 
     template <typename Function>
@@ -371,13 +415,17 @@ public:
 private:
     friend class World;
 
-    WorldView(const World& world, std::span<const EntityId> entities) noexcept
-        : m_world(&world), m_entities(entities)
+    WorldView(
+        const World& world,
+        std::span<const EntityId> entities,
+        EntityMetadataFilter filter = {}) noexcept
+        : m_world(&world), m_entities(entities), m_filter(filter)
     {
     }
 
     const World* m_world = nullptr;
     std::span<const EntityId> m_entities{};
+    EntityMetadataFilter m_filter{};
 };
 
 template <WorldReadableComponent Component>
@@ -426,6 +474,14 @@ template <WorldReadableComponent... Components>
 WorldView<std::remove_cvref_t<Components>...> World::view() const noexcept
 {
     return WorldView<std::remove_cvref_t<Components>...>{*this, liveEntities()};
+}
+
+template <WorldReadableComponent... Components>
+    requires(sizeof...(Components) > 0)
+WorldView<std::remove_cvref_t<Components>...> World::viewWhere(
+    EntityMetadataFilter filter) const noexcept
+{
+    return WorldView<std::remove_cvref_t<Components>...>{*this, liveEntities(), filter};
 }
 
 } // namespace Tina::Scene

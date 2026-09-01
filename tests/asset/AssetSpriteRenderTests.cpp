@@ -43,8 +43,7 @@ TEST(AssetSpriteRenderTests, BuildsUvAndSizeFromTypedPayloads)
     const auto spriteId = *Core::AssetId::fromBytes(idBytes(3U));
 
     std::vector<std::byte> pixels(2U * 2U * 4U, std::byte{255});
-    auto texBytes = AssetFormat::writeCookedTexture2DAsset(
-        textureId, AssetFormat::Texture2DPayloadDesc{.width = 2, .height = 2, .pixels = pixels});
+    auto texBytes = AssetFormat::writeCookedTexture2DAssetRgba8(textureId, 2, 2, pixels);
     ASSERT_TRUE(texBytes.has_value());
     auto spriteBytes = AssetFormat::writeCookedSpriteAsset(spriteId, AssetFormat::SpritePayloadDesc{
                                                                          .u0 = 0.0f,

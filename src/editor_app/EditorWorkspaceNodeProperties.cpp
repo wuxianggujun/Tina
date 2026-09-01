@@ -1376,8 +1376,11 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                 }
                 return false;
             };
-            const auto mixedBool = [&](auto&& accessor) {
-                const bool primaryValue = accessor(*primary);
+            // The accessor's own type is kept rather than narrowed to bool: the sprite
+            // colour channels are u8, and coercing them would report two different
+            // non-zero channels as equal, hiding a mixed selection.
+            const auto mixedField = [&](auto&& accessor) {
+                const auto primaryValue = accessor(*primary);
                 for (const auto* entity : selected) {
                     if (accessor(*entity) != primaryValue) {
                         return true;
@@ -1462,7 +1465,7 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                     status = tree.setChecked(
                         section.activeSwitch,
                         sprite.visible &&
-                            !mixedBool([](const auto& e) {
+                            !mixedField([](const auto& e) {
                                 return e.sprite->visible;
                             }));
                 }
@@ -1535,10 +1538,10 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                         std::to_string(sprite.orderInLayer));
                 }
                 spriteColorMixed_ =
-                    mixedBool([](const auto& e) { return e.sprite->colorRed; }) ||
-                    mixedBool([](const auto& e) { return e.sprite->colorGreen; }) ||
-                    mixedBool([](const auto& e) { return e.sprite->colorBlue; }) ||
-                    mixedBool([](const auto& e) { return e.sprite->colorAlpha; });
+                    mixedField([](const auto& e) { return e.sprite->colorRed; }) ||
+                    mixedField([](const auto& e) { return e.sprite->colorGreen; }) ||
+                    mixedField([](const auto& e) { return e.sprite->colorBlue; }) ||
+                    mixedField([](const auto& e) { return e.sprite->colorAlpha; });
                 spriteColorValue_ = UI::rgba8(sprite.colorRed, sprite.colorGreen,
                                               sprite.colorBlue, sprite.colorAlpha);
                 if (status &&
@@ -1572,7 +1575,7 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                     status = tree.setChecked(
                         spriteFlipXSwitch_,
                         sprite.flipX &&
-                            !mixedBool([](const auto& e) {
+                            !mixedField([](const auto& e) {
                                 return e.sprite->flipX;
                             }));
                 }
@@ -1580,7 +1583,7 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                     status = tree.setChecked(
                         spriteFlipYSwitch_,
                         sprite.flipY &&
-                            !mixedBool([](const auto& e) {
+                            !mixedField([](const auto& e) {
                                 return e.sprite->flipY;
                             }));
                 }
@@ -1597,7 +1600,7 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                 status = tree.setChecked(
                     section.activeSwitch,
                     camera.active &&
-                        !mixedBool([](const auto& e) { return e.camera->active; }));
+                        !mixedField([](const auto& e) { return e.camera->active; }));
                 if (status) {
                     status = setNumberField(
                         0,
@@ -1630,7 +1633,7 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                 status = tree.setChecked(
                     section.activeSwitch,
                     light.active &&
-                        !mixedBool([](const auto& e) {
+                        !mixedField([](const auto& e) {
                             return e.pointLight->active;
                         }));
                 pointLightColorMixed_ =
@@ -1718,7 +1721,7 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                 status = tree.setChecked(
                     section.activeSwitch,
                     occluder.active &&
-                        !mixedBool([](const auto& e) {
+                        !mixedField([](const auto& e) {
                             return e.shadowOccluder->active;
                         }));
                 const std::array<std::pair<float, bool>, 4> values{{
@@ -1747,7 +1750,7 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                 status = tree.setChecked(
                     section.activeSwitch,
                     animation.autoPlay &&
-                        !mixedBool([](const auto& e) {
+                        !mixedField([](const auto& e) {
                             return e.spriteAnimation->autoPlay;
                         }));
                 if (status) {
@@ -1778,7 +1781,7 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                 status = tree.setChecked(
                     section.activeSwitch,
                     body.enabled &&
-                        !mixedBool([](const auto& e) {
+                        !mixedField([](const auto& e) {
                             return e.physicsBody->enabled;
                         }));
                 const std::array<std::pair<float, bool>, 6> values{{
@@ -1814,7 +1817,7 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                 status = tree.setChecked(
                     section.activeSwitch,
                     shape.enabled &&
-                        !mixedBool([](const auto& e) {
+                        !mixedField([](const auto& e) {
                             return e.physicsShape->enabled;
                         }));
                 bool kindMixed = false;
@@ -1877,16 +1880,16 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                 }
                 if (status) {
                     const std::array<std::pair<bool, bool>, 4> eventValues{{
-                        {shape.sensor, mixedBool([](const auto& e) {
+                        {shape.sensor, mixedField([](const auto& e) {
                              return e.physicsShape->sensor;
                          })},
-                        {shape.sensorEvents, mixedBool([](const auto& e) {
+                        {shape.sensorEvents, mixedField([](const auto& e) {
                              return e.physicsShape->sensorEvents;
                          })},
-                        {shape.contactEvents, mixedBool([](const auto& e) {
+                        {shape.contactEvents, mixedField([](const auto& e) {
                              return e.physicsShape->contactEvents;
                          })},
-                        {shape.hitEvents, mixedBool([](const auto& e) {
+                        {shape.hitEvents, mixedField([](const auto& e) {
                              return e.physicsShape->hitEvents;
                          })},
                     }};
@@ -1904,7 +1907,7 @@ auto EditorWorkspaceState::refreshNodePropertySectionsUi(
                 status = tree.setChecked(
                     section.activeSwitch,
                     resource.active &&
-                        !mixedBool([](const auto& e) {
+                        !mixedField([](const auto& e) {
                             return e.resource->active;
                         }));
                 std::string resourceText;

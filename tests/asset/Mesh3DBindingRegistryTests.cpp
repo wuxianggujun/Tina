@@ -333,9 +333,7 @@ class RejectingFrameResourceSink final : public Render::FrameResourceSink {
         std::byte{0x10}, std::byte{0x20}, std::byte{0x30}, std::byte{0xFF}};
     return loadCooked(
         memory,
-        AssetFormat::writeCookedTexture2DAsset(
-            assetId(seed),
-            AssetFormat::Texture2DPayloadDesc{.width = 1, .height = 1, .pixels = pixels}));
+        AssetFormat::writeCookedTexture2DAssetRgba8(assetId(seed), 1, 1, pixels));
 }
 
 [[nodiscard]] CookedAssetFile makeMaterial(
@@ -815,11 +813,14 @@ TEST(Mesh3DBindingRegistryTests, MaterialTextureRegistrationRejectsStaleAndColli
 
     constexpr std::array<std::byte, 4> Pixels{
         std::byte{0x10}, std::byte{0x20}, std::byte{0x30}, std::byte{0xFF}};
-    auto localTexture = (*device)->createTexture2DRgba8(
-        Render::Texture2DUploadDesc{.width = 1, .height = 1, .rgba8Pixels = Pixels});
+    const std::array levels{
+        Render::Texture2DUploadLevel{.width = 1, .height = 1, .bytes = Pixels},
+    };
+    auto localTexture = (*device)->createTexture2D(
+        Render::Texture2DUploadDesc{.levels = levels});
     ASSERT_TRUE(localTexture.has_value());
-    auto foreignTexture = (*foreignDevice)->createTexture2DRgba8(
-        Render::Texture2DUploadDesc{.width = 1, .height = 1, .rgba8Pixels = Pixels});
+    auto foreignTexture = (*foreignDevice)->createTexture2D(
+        Render::Texture2DUploadDesc{.levels = levels});
     ASSERT_TRUE(foreignTexture.has_value());
     EXPECT_EQ(localTexture->index, foreignTexture->index);
     EXPECT_EQ(localTexture->generation, foreignTexture->generation);

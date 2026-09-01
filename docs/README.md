@@ -62,6 +62,7 @@ Tina 文档按用途分为四类，避免把设计目标、当前事实和一次
 | 改 submit / bgfx 边界 | [Render](rendering.md) |
 | 用向量/四元数/矩阵/包围盒/视锥，或加新几何类型 | [Math](math.md) · [ADR 0035](adr/0035-math-module-boundaries.md) |
 | 用 timer/tween/sequence，或让两个 gameplay owner 解耦通信 | [Gameplay 工具层](gameplay-tooling.md) · [ADR 0036](adr/0036-gameplay-tooling-boundaries.md) |
+| 做 3D 角色动画：crossfade / 状态机 / blend tree / layer+mask / root motion / IK | [3D 动画图](animation-3d.md) · [ADR 0037](adr/0037-animation3d-graph-boundaries.md) |
 | 查 `std::terminate`、崩溃或 Editor 致命退出 | [Core](core.md) · [Editor 2D / 3D](editor-2d.md) · [测试](testing.md) |
 | 选 preset / 跑门禁 | [构建](building.md) · [测试](testing.md) |
 | 查“允许做什么” | [design-freeze](design-freeze.md) · [ADR](adr/README.md) |
@@ -82,6 +83,7 @@ Tina 文档按用途分为四类，避免把设计目标、当前事实和一次
 | --- | --- |
 | Runtime / 公共 API | [Runtime](runtime.md) · [公共 API](public-api.md) · [Gameplay](gameplay.md) · [Gameplay 工具层](gameplay-tooling.md) |
 | Platform / Input / Task | [Platform 与 Input](platform-input.md) · [Task System](task-system.md) |
+| 3D 动画 | [3D 动画图](animation-3d.md) · [3D](game-3d.md) |
 | Scene / 2D / 3D / Navigation / Editor | [Scene](scene-ecs.md) · [2D](game-2d.md) · [2D 导航](navigation2d.md) · [World2D 序列化](world2d-serialization.md) · [Editor 2D / 3D](editor-2d.md) · [Editor UI/UX 路线图](editor-ui-ux-roadmap.md) · [Editor 功能扩展计划](editor-feature-plan.md) · [3D](game-3d.md) |
 | Render / Asset | [Render](rendering.md) · [资源](resources.md) |
 | UI / Audio / Physics | [Retained UI](ui.md) · [UI 框架设计](ui-framework.md) · [Modern Desktop UI](ui-modern-desktop.md) · [Audio](audio.md) · [Physics](physics.md) |

@@ -57,9 +57,8 @@ using TestSupport::writeTextureMaterialPackage;
     return TestSupport::CookedPackageAsset{
         .assetId = TestSupport::assetId(seed),
         .assetKind = AssetFormat::AssetKind::Texture2D,
-        .cookedBytes = takeBytes(AssetFormat::writeCookedTexture2DAsset(
-            TestSupport::assetId(seed),
-            AssetFormat::Texture2DPayloadDesc{.width = 1, .height = 1, .pixels = pixels})),
+        .cookedBytes = takeBytes(AssetFormat::writeCookedTexture2DAssetRgba8(
+            TestSupport::assetId(seed), 1, 1, pixels)),
     };
 }
 
@@ -146,7 +145,7 @@ class CatalogReloadRenderDevice final : public Render::IRenderDevice {
     [[nodiscard]] Render::RenderStatistics statistics() const noexcept override { return {}; }
     void shutdown() noexcept override {}
 
-    [[nodiscard]] Core::Result<Render::GpuTextureId> createTexture2DRgba8(
+    [[nodiscard]] Core::Result<Render::GpuTextureId> createTexture2D(
         const Render::Texture2DUploadDesc&) override
     {
         ++m_textureUploadAttempts;
@@ -364,14 +363,13 @@ struct RegistryCleanup final {
 void rewriteTexturePayload(TestSupport::TextureMaterialPackage& package,
                            const std::array<std::byte, 4>& payload)
 {
-    const auto digest = Core::digestContentHashV1(payload);
+    auto payloadBytes = AssetFormat::writeTexture2DPayloadBytesRgba8(1, 1, payload);
+    ASSERT_TRUE(payloadBytes.has_value()) << payloadBytes.error().message;
+    const auto digest = Core::digestContentHashV1(*payloadBytes);
     ASSERT_TRUE(digest.has_value());
-
-    constexpr Core::u32 PayloadAlignment = 16U;
-    const auto payloadOffset = TestSupport::alignUp(AssetFormat::Wire::CookedAssetHeaderBytes,
-                                                    PayloadAlignment);
-    TestSupport::putFixed(package.textureBytes, 48U, digest->bytes());
-    TestSupport::putFixed(package.textureBytes, static_cast<Core::usize>(payloadOffset), payload);
+    auto cooked = AssetFormat::writeCookedTexture2DAssetRgba8(package.textureId, 1, 1, payload);
+    ASSERT_TRUE(cooked.has_value()) << cooked.error().message;
+    package.textureBytes = std::move(*cooked);
 
     const auto artifact = AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Texture2D,
                                                                package.textureId);
@@ -518,7 +516,9 @@ TEST(AssetSystemCatalogReloadTests, MigratesResidentHandlesAndKeepsPreviousLease
 
     const CookedAssetFile* replacementTexture = system->tryGet(textureMigration->current);
     ASSERT_NE(replacementTexture, nullptr);
-    EXPECT_TRUE(std::ranges::equal(replacementTexture->payload(), ReplacementPayload));
+    auto replacementTextureView = AssetFormat::parseTexture2DPayload(replacementTexture->payload());
+    ASSERT_TRUE(replacementTextureView.has_value()) << replacementTextureView.error().message;
+    EXPECT_TRUE(std::ranges::equal(replacementTextureView->basePixels(), ReplacementPayload));
 
     *oldTextureLease = AssetLease{};
     EXPECT_EQ(system->state(*oldTexture), AssetLogicalState::Unloaded);

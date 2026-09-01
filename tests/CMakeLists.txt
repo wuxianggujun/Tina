@@ -146,6 +146,7 @@ set_target_properties(tina_tests PROPERTIES CXX_EXTENSIONS OFF)
 
 add_subdirectory(math)
 add_subdirectory(gameplay)
+add_subdirectory(animation3d)
 
 if(TINA_BUILD_PLATFORM_GLFW)
     add_subdirectory(platform_glfw)

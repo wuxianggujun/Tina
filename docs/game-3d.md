@@ -277,7 +277,13 @@ capture 均已回收。
 - glTF multi-primitive 采用 **SPLIT**（非 merge）：每 TRIANGLES prim 独立 StaticMesh/SkinnedMesh+Material，
   Prefab 1 mesh/1 material 节点契约不变；不支持多 submesh 合并进单一 mesh、无 bufferView 的 data-URI
   image、Draco、morph、sparse accessor 或非三角 primitive；skin 只接受当前 SkinnedMesh v1 的固定4
-  influences/最多256 joints，animation 只接受 joint target + LINEAR/STEP；不支持项返回结构化错误；
+  influences/最多256 joints，animation 只接受 joint target + LINEAR/STEP；不支持项返回结构化错误。
+  **SkinnedMesh wire 已提到 v2**：追加逐 joint 64 字节名称块，cooker 保留 glTF node name 并保证名称
+  跨 `(depth, sourceIndex)` 重排后仍跟随其 joint，重名在 encode/parse/cook 三处拒绝；
+- **`Tina::Animation3D` 已落地**（见 [3D 动画图](animation-3d.md)、[ADR 0037](adr/0037-animation3d-graph-boundaries.md)）：
+  crossfade、状态机、blend tree、layer + mask、root motion 与两骨 IK 建在 `Animator3D` **旁边**，后者
+  一字未改且仍是 `samples/3d_product` 的消费面。仍缺 retargeting、morph target、2D blend space，以及
+  pose-aware bounds（extraction 仍用授权 `localBounds` 剔除，大幅位移或 IK 会 pop）；
 - Cooked Material v2 写入 metallic/roughness factor、可选 MR/normal Texture2D deps 与显式
   `Opaque`/`Blend`；Runtime/bgfx
   产品着色为 Cook-Torrance GGX（有界0..4 directional、0..8 point、0..8 spot lights + ambient fallback + baseColor/可选 MR/normal

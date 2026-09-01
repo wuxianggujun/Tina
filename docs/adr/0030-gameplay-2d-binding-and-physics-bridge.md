@@ -145,6 +145,32 @@ name 因此必须在 restore 时被保留（第 3 节），但**不进入 `Entit
   `World2DSceneIndex` 的重名与 stale-handle 测试、`Scene2DPhysicsBridge` 的父子归属/容量/
   shutdown 顺序测试、SDK consumer 链接 `Tina::Gameplay2D` 的编译门禁。
 
+## 后续修正：runtime name 改由 `EntityRecord` 承载（2026-08-31）
+
+本 ADR 的 D2 与第 91 行原本规定 name **只**由 `World2DSceneIndex` 拥有、capture 从索引写回，并在
+「被拒绝方案」里明确拒绝「把 name 放进 `EntityRecord`」。**实现最终没有采纳这一条**：`EntityRecord`
+现在带一个 `EntityName`（`EntityMetadata` 的一部分），capture 读的是 `world.runtimeName()`。
+这里记录原因而不是抹平差异。
+
+**为什么原方案不成立：** `World2DSceneIndex` 是*一次 instantiate 的快照*，它自己的头注释就写明
+「holds no World reference and does not observe entity destruction」。游戏运行中调用 `setRuntimeName()`
+改名后，索引里的名字会陈旧，capture 从索引写回就会把**旧名**存盘 —— 一次没有任何错误提示的数据丢失。
+name 必须与它描述的实体同生命周期，这决定了它属于 `EntityRecord`。
+
+**64 bytes/entity 的代价是真实的，但当初的估计偏高：** `EntityRecord` 本身已是 13 个组件的 fat-struct
+（数百字节），name 的相对开销远小于写作本 ADR 时的判断。
+
+**两者现在的分工：** `EntityRecord::metadata.name` 是**运行时**名称，可改、参与 snapshot 往返；
+`World2DSceneIndex` 仍拥有 **authored** 名称与 stableId↔entity↔name 三向查找，服务「按 Editor 里写的
+名字找节点」。它们回答不同问题，故并存不是重复实现。
+
+该往返路径此前**零测试覆盖**：capture 已在读 `runtimeName()`，但 round-trip fixture 从未设置任何
+name，byte-equality 断言恰好绕过了它。现已在 fixture 中加入 ASCII、多字节 UTF-8 与一个故意不命名的
+实体，并做过注入验证（去掉 name 写入会使该测试失败）。
+
+同轮新增的 `viewWhere<T...>(EntityMetadataFilter)` 按 tag/layer/group **值**筛选（见
+[Scene](../scene-ecs.md)）。D1「World 保持封闭」不变：筛选维度固定为这三项，不注册任意组件或谓词。
+
 ## 被拒绝方案
 
 - **开放 `addComponent<T>` 组件注册**：需要重写 World 存储并新增 archetype/query/并行迭代语义，

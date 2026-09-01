@@ -145,9 +145,11 @@ TEST_F(MediaCookTests, PngCooksOneTextureWithStableId)
     EXPECT_EQ(texturePayload->width, 2U);
     EXPECT_EQ(texturePayload->height, 2U);
     EXPECT_EQ(texturePayload->pixelFormat, AssetFormat::Texture2DPixelFormat::Rgba8Unorm);
-    ASSERT_EQ(texturePayload->pixels.size(), 16U);
-    EXPECT_EQ(std::to_integer<Core::u8>(texturePayload->pixels[0]), 255U);
-    EXPECT_EQ(std::to_integer<Core::u8>(texturePayload->pixels[5]), 255U);
+    EXPECT_EQ(texturePayload->levelCount, 1U);
+    EXPECT_EQ(texturePayload->sampler.mipFilter, AssetFormat::Texture2DMipFilterMode::None);
+    ASSERT_EQ(texturePayload->basePixels().size(), 16U);
+    EXPECT_EQ(std::to_integer<Core::u8>(texturePayload->basePixels()[0]), 255U);
+    EXPECT_EQ(std::to_integer<Core::u8>(texturePayload->basePixels()[5]), 255U);
 
     ASSERT_EQ(first->sourceImports.units.size(), 1U);
     const auto& unit = first->sourceImports.units.front();

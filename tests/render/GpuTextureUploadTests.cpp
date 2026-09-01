@@ -6,6 +6,7 @@
 
 #include <array>
 #include <limits>
+#include <span>
 #include <vector>
 
 namespace Tina::Tests {
@@ -14,6 +15,16 @@ namespace {
 void countPinRelease(void* userData) noexcept
 {
     ++*static_cast<Core::u32*>(userData);
+}
+
+[[nodiscard]] Core::Result<Render::GpuTextureId>
+uploadRgba8(Render::IRenderDevice& device, std::span<const std::byte> pixels,
+            Core::u16 width = 1, Core::u16 height = 1)
+{
+    const std::array levels{
+        Render::Texture2DUploadLevel{.width = width, .height = height, .bytes = pixels},
+    };
+    return device.createTexture2D(Render::Texture2DUploadDesc{.levels = levels});
 }
 
 } // namespace
@@ -26,17 +37,9 @@ TEST(NullRenderDeviceTextureTest, CreateBindDestroyLifecycle)
     ASSERT_TRUE(foreignDevice.has_value());
 
     std::array<std::byte, 4> pixel{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
-    auto texture = (*device)->createTexture2DRgba8(Render::Texture2DUploadDesc{
-        .width = 1,
-        .height = 1,
-        .rgba8Pixels = pixel,
-    });
+    auto texture = uploadRgba8(**device, pixel);
     ASSERT_TRUE(texture.has_value()) << texture.error().message;
-    auto foreignTexture = (*foreignDevice)->createTexture2DRgba8(Render::Texture2DUploadDesc{
-        .width = 1,
-        .height = 1,
-        .rgba8Pixels = pixel,
-    });
+    auto foreignTexture = uploadRgba8(**foreignDevice, pixel);
     ASSERT_TRUE(foreignTexture.has_value()) << foreignTexture.error().message;
     EXPECT_EQ(texture->index, foreignTexture->index);
     EXPECT_EQ(texture->generation, foreignTexture->generation);
@@ -70,17 +73,9 @@ TEST(NullRenderDeviceTextureTest, MaterialBaseColorAndMetallicRoughnessBindings)
     ASSERT_TRUE(device.has_value());
 
     std::array<std::byte, 4> pixel{std::byte{10}, std::byte{20}, std::byte{30}, std::byte{255}};
-    auto baseColor = (*device)->createTexture2DRgba8(Render::Texture2DUploadDesc{
-        .width = 1,
-        .height = 1,
-        .rgba8Pixels = pixel,
-    });
+    auto baseColor = uploadRgba8(**device, pixel);
     ASSERT_TRUE(baseColor.has_value()) << baseColor.error().message;
-    auto metallicRoughness = (*device)->createTexture2DRgba8(Render::Texture2DUploadDesc{
-        .width = 1,
-        .height = 1,
-        .rgba8Pixels = pixel,
-    });
+    auto metallicRoughness = uploadRgba8(**device, pixel);
     ASSERT_TRUE(metallicRoughness.has_value()) << metallicRoughness.error().message;
 
     ASSERT_TRUE((*device)->setMesh3DMaterialTextureBinding(7U, *baseColor).has_value());
@@ -353,11 +348,7 @@ TEST(NullRenderDeviceTextureTest, MaterialBundleUpdatesComposeAndClearIsIdempote
 
     std::array<std::byte, 4> pixel{std::byte{10}, std::byte{20}, std::byte{30}, std::byte{255}};
     const auto uploadTexture = [&]() {
-        return (*device)->createTexture2DRgba8(Render::Texture2DUploadDesc{
-            .width = 1,
-            .height = 1,
-            .rgba8Pixels = pixel,
-        });
+        return uploadRgba8(**device, pixel);
     };
     auto baseColor = uploadTexture();
     auto metallicRoughness = uploadTexture();
@@ -450,13 +441,106 @@ TEST(NullRenderDeviceTextureTest, RejectsBadUploadSize)
     auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
     ASSERT_TRUE(device.has_value());
     std::array<std::byte, 2> bad{std::byte{1}, std::byte{2}};
-    auto texture = (*device)->createTexture2DRgba8(Render::Texture2DUploadDesc{
-        .width = 1,
-        .height = 1,
-        .rgba8Pixels = bad,
+    const std::array levels{
+        Render::Texture2DUploadLevel{.width = 1, .height = 1, .bytes = bad},
+    };
+    auto texture = (*device)->createTexture2D(Render::Texture2DUploadDesc{
+        .levels = levels,
     });
     ASSERT_FALSE(texture.has_value());
     EXPECT_EQ(texture.error().code, Render::RenderErrorCode::InvalidTextureUpload);
+}
+
+TEST(NullRenderDeviceTextureTest, AcceptsCompleteMipChainAndCountsEveryUploadedLevel)
+{
+    auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
+    ASSERT_TRUE(device.has_value());
+    std::array<std::byte, 64> level0{};
+    std::array<std::byte, 16> level1{};
+    std::array<std::byte, 4> level2{};
+    const std::array levels{
+        Render::Texture2DUploadLevel{.width = 4, .height = 4, .bytes = level0},
+        Render::Texture2DUploadLevel{.width = 2, .height = 2, .bytes = level1},
+        Render::Texture2DUploadLevel{.width = 1, .height = 1, .bytes = level2},
+    };
+    auto texture = (*device)->createTexture2D(Render::Texture2DUploadDesc{
+        .colorSpace = Render::GpuTextureColorSpace::Linear,
+        .sampler =
+            {
+                .wrapU = Render::GpuTextureWrapMode::Clamp,
+                .wrapV = Render::GpuTextureWrapMode::Mirror,
+                .minFilter = Render::GpuTextureFilterMode::Anisotropic,
+                .magFilter = Render::GpuTextureFilterMode::Anisotropic,
+                .mipFilter = Render::GpuTextureMipFilterMode::Linear,
+            },
+        .levels = levels,
+    });
+    ASSERT_TRUE(texture.has_value()) << texture.error().message;
+    EXPECT_EQ((*device)->statistics().uploadedTextureLevels, 3U);
+    ASSERT_TRUE((*device)->destroyTexture2D(*texture).has_value());
+}
+
+TEST(NullRenderDeviceTextureTest, AcceptsOddCompressedMipChainWithWholeTailBlocks)
+{
+    auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
+    ASSERT_TRUE(device.has_value());
+    std::array<std::byte, 32> level0{};
+    std::array<std::byte, 8> level1{};
+    std::array<std::byte, 8> level2{};
+    const std::array levels{
+        Render::Texture2DUploadLevel{.width = 7, .height = 5, .bytes = level0},
+        Render::Texture2DUploadLevel{.width = 3, .height = 2, .bytes = level1},
+        Render::Texture2DUploadLevel{.width = 1, .height = 1, .bytes = level2},
+    };
+
+    auto texture = (*device)->createTexture2D(Render::Texture2DUploadDesc{
+        .format = Render::GpuTextureFormat::Bc1Rgba,
+        .sampler = {.mipFilter = Render::GpuTextureMipFilterMode::Point},
+        .levels = levels,
+    });
+    ASSERT_TRUE(texture.has_value()) << texture.error().message;
+    EXPECT_EQ((*device)->statistics().uploadedTextureLevels, 3U);
+    ASSERT_TRUE((*device)->destroyTexture2D(*texture).has_value());
+}
+
+TEST(NullRenderDeviceTextureTest, RejectsMipFilterAndAnisotropicSamplerMismatch)
+{
+    std::array<std::byte, 64> level0{};
+    std::array<std::byte, 16> level1{};
+    std::array<std::byte, 4> level2{};
+    const std::array singleLevel{
+        Render::Texture2DUploadLevel{.width = 4, .height = 4, .bytes = level0},
+    };
+    auto singleWithMipFilter = Render::validateTexture2DUploadDesc(Render::Texture2DUploadDesc{
+        .sampler = {.mipFilter = Render::GpuTextureMipFilterMode::Linear},
+        .levels = singleLevel,
+    });
+    ASSERT_FALSE(singleWithMipFilter.has_value());
+    EXPECT_EQ(singleWithMipFilter.error().code, Render::RenderErrorCode::InvalidTextureUpload);
+
+    const std::array completeLevels{
+        Render::Texture2DUploadLevel{.width = 4, .height = 4, .bytes = level0},
+        Render::Texture2DUploadLevel{.width = 2, .height = 2, .bytes = level1},
+        Render::Texture2DUploadLevel{.width = 1, .height = 1, .bytes = level2},
+    };
+    auto chainWithoutMipFilter = Render::validateTexture2DUploadDesc(Render::Texture2DUploadDesc{
+        .sampler = {.mipFilter = Render::GpuTextureMipFilterMode::None},
+        .levels = completeLevels,
+    });
+    ASSERT_FALSE(chainWithoutMipFilter.has_value());
+    EXPECT_EQ(chainWithoutMipFilter.error().code, Render::RenderErrorCode::InvalidTextureUpload);
+
+    auto asymmetricAnisotropic = Render::validateTexture2DUploadDesc(Render::Texture2DUploadDesc{
+        .sampler =
+            {
+                .minFilter = Render::GpuTextureFilterMode::Anisotropic,
+                .magFilter = Render::GpuTextureFilterMode::Linear,
+                .mipFilter = Render::GpuTextureMipFilterMode::None,
+            },
+        .levels = singleLevel,
+    });
+    ASSERT_FALSE(asymmetricAnisotropic.has_value());
+    EXPECT_EQ(asymmetricAnisotropic.error().code, Render::RenderErrorCode::InvalidTextureUpload);
 }
 
 TEST(NullRenderDeviceTextureTest, RetirementPinCompletesImmediatelyAndIsNotConsumedOnFailure)
@@ -464,11 +548,7 @@ TEST(NullRenderDeviceTextureTest, RetirementPinCompletesImmediatelyAndIsNotConsu
     auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
     ASSERT_TRUE(device.has_value());
     std::array<std::byte, 4> pixel{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
-    auto texture = (*device)->createTexture2DRgba8(Render::Texture2DUploadDesc{
-        .width = 1,
-        .height = 1,
-        .rgba8Pixels = pixel,
-    });
+    auto texture = uploadRgba8(**device, pixel);
     ASSERT_TRUE(texture.has_value());
 
     Core::u32 releases = 0;

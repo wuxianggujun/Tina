@@ -340,11 +340,13 @@ class ShowcaseImageResources final {
 
         static constexpr Tina::SampleUI::ShowcaseAtlasPixels AtlasPixels =
             Tina::SampleUI::makeShowcaseAtlasPixels();
-        auto uploaded = device->createTexture2DRgba8(Tina::Render::Texture2DUploadDesc{
-            .width = static_cast<Tina::Core::u16>(Tina::SampleUI::ShowcaseAtlasWidth),
-            .height = static_cast<Tina::Core::u16>(Tina::SampleUI::ShowcaseAtlasHeight),
-            .rgba8Pixels = AtlasPixels,
-        });
+        const std::array<Tina::Render::Texture2DUploadLevel, 1> levels{
+            Tina::Render::Texture2DUploadLevel{
+                .width = static_cast<Tina::Core::u16>(Tina::SampleUI::ShowcaseAtlasWidth),
+                .height = static_cast<Tina::Core::u16>(Tina::SampleUI::ShowcaseAtlasHeight),
+                .bytes = AtlasPixels}};
+        auto uploaded =
+            device->createTexture2D(Tina::Render::Texture2DUploadDesc{.levels = levels});
         if (!uploaded) {
             return Tina::Core::failure(std::move(uploaded.error()));
         }

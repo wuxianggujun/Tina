@@ -1192,4 +1192,356 @@ TEST(NullRenderDeviceTest, RejectsWorkAfterIdempotentShutdown)
     EXPECT_EQ(device->statistics().liveResources, 0U);
 }
 
+namespace {
+
+[[nodiscard]] Render::RenderTextureDesc hdrColorTarget() noexcept
+{
+    return Render::RenderTextureDesc{
+        .width = 640,
+        .height = 480,
+        .format = Render::RenderTextureFormat::Rgba16Float,
+        .usage = Render::RenderTextureUsage::ColorAttachment |
+                 Render::RenderTextureUsage::Sampled,
+        .mipCount = 1,
+        .sampleCount = 1,
+    };
+}
+
+[[nodiscard]] Render::RenderTextureDesc depthTarget() noexcept
+{
+    return Render::RenderTextureDesc{
+        .width = 640,
+        .height = 480,
+        .format = Render::RenderTextureFormat::Depth32Float,
+        .usage = Render::RenderTextureUsage::DepthStencilAttachment,
+        .mipCount = 1,
+        .sampleCount = 1,
+    };
+}
+
+} // namespace
+
+// A default RenderFrame carries a default-constructed chain, so the overwhelmingly
+// common case must stay free: no render textures, no planned passes, no rejection.
+TEST(NullRenderDevicePostProcessTest, AFrameWithoutPostProcessPlansNothing)
+{
+    auto device = createDevice();
+    ASSERT_NE(device, nullptr);
+
+    ASSERT_TRUE(device->submitFrame(Render::RenderFrame{.frameIndex = 0}).has_value());
+    ASSERT_TRUE(device->present().has_value());
+
+    const auto statistics = device->statistics();
+    EXPECT_EQ(statistics.postProcessChainsExecuted, 0U);
+    EXPECT_EQ(statistics.postProcessPassesPlanned, 0U);
+    EXPECT_EQ(statistics.liveRenderTextures, 0U);
+}
+
+TEST(NullRenderDevicePostProcessTest, CreatesBindsAndDestroysRenderTextures)
+{
+    auto device = createDevice();
+    ASSERT_NE(device, nullptr);
+
+    auto target = device->createRenderTexture(hdrColorTarget());
+    ASSERT_TRUE(target.has_value());
+    EXPECT_TRUE(target->hasValue());
+    EXPECT_EQ(device->statistics().liveRenderTextures, 1U);
+
+    // Key 0 is reserved for the primary surface and can never name a target.
+    auto reservedKey = device->setRenderTextureBinding(0, *target);
+    ASSERT_FALSE(reservedKey.has_value());
+    EXPECT_EQ(reservedKey.error().code, Render::RenderErrorCode::InvalidRenderTexture);
+
+    ASSERT_TRUE(device->setRenderTextureBinding(1, *target).has_value());
+    ASSERT_TRUE(device->clearRenderTextureBinding(1).has_value());
+    ASSERT_TRUE(device->setRenderTextureBinding(1, *target).has_value());
+
+    ASSERT_TRUE(device->destroyRenderTexture(*target).has_value());
+    EXPECT_EQ(device->statistics().liveRenderTextures, 0U);
+
+    // The handle is stale now, so destroying it twice is rejected rather than
+    // silently accepted.
+    auto doubleDestroy = device->destroyRenderTexture(*target);
+    ASSERT_FALSE(doubleDestroy.has_value());
+    EXPECT_EQ(doubleDestroy.error().code, Render::RenderErrorCode::RenderTextureNotFound);
+}
+
+TEST(NullRenderDevicePostProcessTest, RejectsInvalidRenderTextureDescriptions)
+{
+    auto device = createDevice();
+    ASSERT_NE(device, nullptr);
+
+    Render::RenderTextureDesc zeroExtent = hdrColorTarget();
+    zeroExtent.width = 0;
+    EXPECT_FALSE(device->createRenderTexture(zeroExtent).has_value());
+
+    Render::RenderTextureDesc noUsage = hdrColorTarget();
+    noUsage.usage = Render::RenderTextureUsage::None;
+    EXPECT_FALSE(device->createRenderTexture(noUsage).has_value());
+
+    EXPECT_EQ(device->statistics().liveRenderTextures, 0U);
+}
+
+TEST(NullRenderDevicePostProcessTest, RejectsAnOffscreenDepthClearWithoutDepthBinding)
+{
+    auto device = createDevice();
+    ASSERT_NE(device, nullptr);
+
+    auto color = device->createRenderTexture(hdrColorTarget());
+    ASSERT_TRUE(color.has_value());
+    ASSERT_TRUE(device->setRenderTextureBinding(1, *color).has_value());
+
+    const std::array<Render::RenderOffscreenPassView, 1> passes{
+        Render::RenderOffscreenPassView{.stablePassKey = 7,
+                                       .colorTargetBindingKey = 1}};
+    Render::RenderFrame frame{.frameIndex = 0};
+    frame.postProcess.offscreenPasses = passes;
+
+    auto rejected = device->submitFrame(frame);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, Render::RenderErrorCode::InvalidOffscreenPass);
+    EXPECT_EQ(device->statistics().submitted, 0U);
+
+    // Turning the clear off makes an offscreen color-only pass legal and the same
+    // frame index remains available after the validation failure.
+    auto noDepthClear = passes;
+    noDepthClear[0].clearDepth = false;
+    frame.postProcess.offscreenPasses = noDepthClear;
+    ASSERT_TRUE(device->submitFrame(frame).has_value());
+    ASSERT_TRUE(device->present().has_value());
+}
+
+TEST(NullRenderDevicePostProcessTest, EnforcesRenderTextureRolesAndSampling)
+{
+    auto device = createDevice();
+    ASSERT_NE(device, nullptr);
+
+    Render::RenderTextureDesc colorOnly = hdrColorTarget();
+    colorOnly.usage = Render::RenderTextureUsage::ColorAttachment;
+    auto target = device->createRenderTexture(colorOnly);
+    ASSERT_TRUE(target.has_value());
+    ASSERT_TRUE(device->setRenderTextureBinding(1, *target).has_value());
+
+    Render::RenderFrame frame{.frameIndex = 0};
+    frame.postProcess.sceneColorTargetBindingKey = 1;
+    auto rejected = device->submitFrame(frame);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, Render::RenderErrorCode::InvalidPostProcessChain);
+
+    Render::RenderTextureDesc depth = depthTarget();
+    auto depthHandle = device->createRenderTexture(depth);
+    ASSERT_TRUE(depthHandle.has_value());
+    ASSERT_TRUE(device->setRenderTextureBinding(2, *depthHandle).has_value());
+    frame.postProcess.sceneColorTargetBindingKey = 2;
+    rejected = device->submitFrame(frame);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, Render::RenderErrorCode::InvalidPostProcessChain);
+
+    Render::RenderTextureDesc multisampled = hdrColorTarget();
+    multisampled.sampleCount = 4;
+    auto msaaHandle = device->createRenderTexture(multisampled);
+    ASSERT_TRUE(msaaHandle.has_value());
+    ASSERT_TRUE(device->setRenderTextureBinding(3, *msaaHandle).has_value());
+    frame.postProcess.sceneColorTargetBindingKey = 3;
+    rejected = device->submitFrame(frame);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, Render::RenderErrorCode::InvalidPostProcessChain);
+}
+
+TEST(NullRenderDevicePostProcessTest, RejectsActualRenderTextureAliases)
+{
+    auto device = createDevice();
+    ASSERT_NE(device, nullptr);
+
+    auto target = device->createRenderTexture(hdrColorTarget());
+    ASSERT_TRUE(target.has_value());
+    ASSERT_TRUE(device->setRenderTextureBinding(1, *target).has_value());
+    ASSERT_TRUE(device->setRenderTextureBinding(2, *target).has_value());
+
+    const std::array<Render::RenderPostProcessStep, 1> steps{
+        Render::RenderPostProcessStep{.kind = Render::RenderPostProcessStepKind::Copy,
+                                      .sourceBindingKey = 1,
+                                      .destinationBindingKey = 2}};
+    Render::RenderFrame frame{.frameIndex = 0};
+    frame.postProcess.customSteps = steps;
+    auto rejected = device->submitFrame(frame);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, Render::RenderErrorCode::InvalidPostProcessChain);
+    EXPECT_EQ(device->statistics().submitted, 0U);
+}
+
+TEST(NullRenderDevicePostProcessTest, RejectsCustomShaderBeforeConsumingFrame)
+{
+    auto device = createDevice();
+    ASSERT_NE(device, nullptr);
+
+    auto target = device->createRenderTexture(hdrColorTarget());
+    ASSERT_TRUE(target.has_value());
+    ASSERT_TRUE(device->setRenderTextureBinding(1, *target).has_value());
+    const std::array<Render::RenderPostProcessStep, 1> steps{
+        Render::RenderPostProcessStep{.kind = Render::RenderPostProcessStepKind::CustomShader,
+                                      .sourceBindingKey = 1,
+                                      .destinationBindingKey = 0,
+                                      .shaderBindingKey = 42}};
+    Render::RenderFrame frame{.frameIndex = 0};
+    frame.postProcess.customSteps = steps;
+
+    auto rejected = device->submitFrame(frame);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, Render::RenderErrorCode::RenderTextureUnsupported);
+    EXPECT_EQ(device->statistics().submitted, 0U);
+    EXPECT_EQ(device->statistics().postProcessChainsExecuted, 0U);
+
+    ASSERT_TRUE(device->submitFrame(Render::RenderFrame{.frameIndex = 0}).has_value());
+}
+
+TEST(NullRenderDevicePostProcessTest, PrimarySurfaceSentinelDoesNotAliasAnOffscreenHandle)
+{
+    auto device = createDevice();
+    ASSERT_NE(device, nullptr);
+
+    auto target = device->createRenderTexture(hdrColorTarget());
+    ASSERT_TRUE(target.has_value());
+    ASSERT_TRUE(device->setRenderTextureBinding(1, *target).has_value());
+    const std::array<Render::RenderPostProcessStep, 1> steps{
+        Render::RenderPostProcessStep{.kind = Render::RenderPostProcessStepKind::Copy,
+                                      .sourceBindingKey = 0,
+                                      .destinationBindingKey = 1}};
+    Render::RenderFrame frame{.frameIndex = 0};
+    frame.postProcess.customSteps = steps;
+    ASSERT_TRUE(device->submitFrame(frame).has_value());
+    ASSERT_TRUE(device->present().has_value());
+    EXPECT_EQ(device->statistics().postProcessChainsExecuted, 1U);
+}
+
+// This is the defect the slice exists to close: a chain naming a key nobody bound
+// used to be accepted and then do nothing. It must fail on the first frame.
+TEST(NullRenderDevicePostProcessTest, RejectsAChainReferencingAnUnboundKey)
+{
+    auto device = createDevice();
+    ASSERT_NE(device, nullptr);
+
+    Render::RenderFrame frame{.frameIndex = 0};
+    frame.postProcess.sceneColorTargetBindingKey = 7;
+    frame.postProcess.fog.enabled = true;
+
+    auto rejected = device->submitFrame(frame);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, Render::RenderErrorCode::RenderTextureNotFound);
+
+    // Rejection must not consume the frame index or leave a frame open, so the same
+    // index can be resubmitted once the caller fixes its bindings.
+    const auto statistics = device->statistics();
+    EXPECT_EQ(statistics.submitted, 0U);
+    EXPECT_EQ(statistics.postProcessChainsExecuted, 0U);
+
+    auto target = device->createRenderTexture(hdrColorTarget());
+    ASSERT_TRUE(target.has_value());
+    ASSERT_TRUE(device->setRenderTextureBinding(7, *target).has_value());
+    ASSERT_TRUE(device->submitFrame(frame).has_value());
+    ASSERT_TRUE(device->present().has_value());
+    EXPECT_EQ(device->statistics().postProcessChainsExecuted, 1U);
+}
+
+// Destroying a target drops its bindings, so a chain still naming that key is
+// rejected instead of resolving through a stale slot.
+TEST(NullRenderDevicePostProcessTest, DestroyingATargetInvalidatesItsBinding)
+{
+    auto device = createDevice();
+    ASSERT_NE(device, nullptr);
+
+    auto target = device->createRenderTexture(hdrColorTarget());
+    ASSERT_TRUE(target.has_value());
+    ASSERT_TRUE(device->setRenderTextureBinding(3, *target).has_value());
+    ASSERT_TRUE(device->destroyRenderTexture(*target).has_value());
+
+    Render::RenderFrame frame{.frameIndex = 0};
+    frame.postProcess.sceneColorTargetBindingKey = 3;
+    frame.postProcess.fog.enabled = true;
+
+    auto rejected = device->submitFrame(frame);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, Render::RenderErrorCode::RenderTextureNotFound);
+}
+
+// The Null device is the first real consumer of this contract: it must plan the
+// extension passes and drive the shared reference math, not merely accept the chain.
+TEST(NullRenderDevicePostProcessTest, ExecutesAnHdrChainAndCountsItsPasses)
+{
+    auto device = createDevice();
+    ASSERT_NE(device, nullptr);
+
+    auto sceneColor = device->createRenderTexture(hdrColorTarget());
+    auto ping = device->createRenderTexture(hdrColorTarget());
+    auto pong = device->createRenderTexture(hdrColorTarget());
+    ASSERT_TRUE(sceneColor.has_value());
+    ASSERT_TRUE(ping.has_value());
+    ASSERT_TRUE(pong.has_value());
+    ASSERT_TRUE(device->setRenderTextureBinding(1, *sceneColor).has_value());
+    ASSERT_TRUE(device->setRenderTextureBinding(2, *ping).has_value());
+    ASSERT_TRUE(device->setRenderTextureBinding(3, *pong).has_value());
+    EXPECT_EQ(device->statistics().liveRenderTextures, 3U);
+
+    Render::RenderFrame frame{.frameIndex = 0};
+    frame.postProcess.sceneColorTargetBindingKey = 1;
+    frame.postProcess.pingTargetBindingKey = 2;
+    frame.postProcess.pongTargetBindingKey = 3;
+    frame.postProcess.fog.enabled = true;
+    frame.postProcess.bloom.enabled = true;
+    frame.postProcess.bloom.downsamplePassCount = 3;
+    frame.postProcess.toneMapping.operation = Render::ToneMappingOperator::AcesFitted;
+
+    ASSERT_TRUE(device->submitFrame(frame).has_value());
+    ASSERT_TRUE(device->present().has_value());
+
+    const auto statistics = device->statistics();
+    EXPECT_EQ(statistics.postProcessChainsExecuted, 1U);
+    // fog + prefilter + 3 downsample + blur + upsample + tone mapping.
+    EXPECT_EQ(statistics.postProcessPassesPlanned, 8U);
+    EXPECT_EQ(statistics.submitted, 1U);
+}
+
+// An invalid chain is refused by the device, not silently clamped, and leaves no
+// partial frame state behind.
+TEST(NullRenderDevicePostProcessTest, RejectsAnInvalidChainWithoutConsumingTheFrame)
+{
+    auto device = createDevice();
+    ASSERT_NE(device, nullptr);
+
+    auto sceneColor = device->createRenderTexture(hdrColorTarget());
+    ASSERT_TRUE(sceneColor.has_value());
+    ASSERT_TRUE(device->setRenderTextureBinding(1, *sceneColor).has_value());
+
+    Render::RenderFrame frame{.frameIndex = 0};
+    frame.postProcess.sceneColorTargetBindingKey = 1;
+    // Bloom without ping/pong cannot be executed.
+    frame.postProcess.bloom.enabled = true;
+
+    auto rejected = device->submitFrame(frame);
+    ASSERT_FALSE(rejected.has_value());
+    EXPECT_EQ(rejected.error().code, Render::RenderErrorCode::InvalidPostProcessChain);
+    EXPECT_EQ(device->statistics().submitted, 0U);
+
+    // The frame index was not consumed, so index 0 is still the expected next frame.
+    ASSERT_TRUE(device->submitFrame(Render::RenderFrame{.frameIndex = 0}).has_value());
+}
+
+TEST(NullRenderDevicePostProcessTest, ShutdownReleasesRenderTextures)
+{
+    auto device = createDevice();
+    ASSERT_NE(device, nullptr);
+
+    auto target = device->createRenderTexture(hdrColorTarget());
+    ASSERT_TRUE(target.has_value());
+    ASSERT_TRUE(device->setRenderTextureBinding(1, *target).has_value());
+    ASSERT_EQ(device->statistics().liveRenderTextures, 1U);
+
+    device->shutdown();
+    EXPECT_EQ(device->statistics().liveRenderTextures, 0U);
+
+    auto afterShutdown = device->createRenderTexture(hdrColorTarget());
+    ASSERT_FALSE(afterShutdown.has_value());
+    EXPECT_EQ(afterShutdown.error().code, Render::RenderErrorCode::DeviceStopped);
+}
+
 } // namespace Tina::Tests

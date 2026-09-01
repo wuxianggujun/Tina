@@ -1536,12 +1536,15 @@ namespace {
                                  "glTF cooked texture output budget exceeded");
         }
         const Core::AssetId textureId = deriveTextureChannelId(identityLocator, channel, sequence);
-        auto texPayload = AssetFormat::writeTexture2DPayloadBytes(AssetFormat::Texture2DPayloadDesc{
-            .width = static_cast<Core::u16>(decoded->second.width),
-            .height = static_cast<Core::u16>(decoded->second.height),
-            .pixelFormat = AssetFormat::Texture2DPixelFormat::Rgba8Unorm,
-            .pixels = decoded->second.rgba,
-        });
+        auto texPayload = AssetFormat::writeTexture2DPayloadBytesRgba8(
+            static_cast<Core::u16>(decoded->second.width),
+            static_cast<Core::u16>(decoded->second.height), decoded->second.rgba,
+            // Base colour is authored in sRGB; normal and metallic-roughness carry data
+            // rather than colour, so decoding them through gamma would corrupt the
+            // values the shader reads. v1 had no way to say this, so every cooked glTF
+            // texture was implicitly sRGB.
+            channel == GltfTextureChannel::BaseColor ? AssetFormat::Texture2DColorSpace::Srgb
+                                                    : AssetFormat::Texture2DColorSpace::Linear);
         if (!texPayload)
         {
             return Core::failure(std::move(texPayload.error()));
@@ -2171,6 +2174,50 @@ namespace {
         if (node->has_scale)
         {
             std::copy_n(node->scale, 3U, joint.bindScale);
+        }
+        // SkinnedMesh v2 carries joint names, and they are the only stable identity a
+        // joint has: the cooked index is the (depth, sourceIndex) permutation computed
+        // above, so it moves whenever the source hierarchy is edited. A bone mask or
+        // retarget mapping written against an index would silently point at another bone;
+        // written against a name it either resolves or fails loudly.
+        //
+        // An unnamed node stays unnamed rather than receiving a synthesised "joint_7":
+        // a generated name is indistinguishable from an authored one to every consumer,
+        // and would reintroduce index dependence behind a name that promises otherwise.
+        if (node->name != nullptr)
+        {
+            const std::string_view name{node->name};
+            if (name.size() > AssetFormat::SkinnedMeshWire::MaximumJointNameBytes)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "glTF joint name exceeds the cooked joint name field");
+            }
+            if (!Core::isStrictUtf8WithoutNul(name))
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "glTF joint name must be valid UTF-8 without NUL");
+            }
+            joint.name.assign(name);
+        }
+    }
+
+    // glTF does not require node names to be unique, but a name lookup that could return
+    // either of two joints is not a lookup. Rejected at cook rather than de-duplicated,
+    // because any automatic resolution binds half the authored references to the wrong
+    // joint and nothing reports it.
+    for (cgltf_size first = 0; first < out.joints.size(); ++first)
+    {
+        if (out.joints[first].name.empty())
+        {
+            continue;
+        }
+        for (cgltf_size second = first + 1U; second < out.joints.size(); ++second)
+        {
+            if (out.joints[first].name == out.joints[second].name)
+            {
+                return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                     "glTF skin contains duplicate joint names");
+            }
         }
     }
 

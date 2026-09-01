@@ -30,6 +30,7 @@ add_library(tina_render STATIC
     Sprite2DLighting.cpp
     Sprite2DShadowMath.hpp
     ShadowMapExtentConfig.cpp
+    Texture2DUpload.cpp
     UIDisplayList.cpp
     UploadTicket.cpp
     null/NullRenderDevice.cpp

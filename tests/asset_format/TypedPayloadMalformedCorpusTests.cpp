@@ -1,4 +1,5 @@
 #include <tina/asset_format/AnimationClip3DPayload.hpp>
+#include <tina/asset_format/AssetFormatErrors.hpp>
 #include <tina/asset_format/AudioClipPayload.hpp>
 #include <tina/asset_format/EnvironmentMapPayload.hpp>
 #include <tina/asset_format/Fx2DPayload.hpp>
@@ -86,11 +87,7 @@ void putF32(std::vector<std::byte>& bytes, usize offset, float value)
     const std::array pixels{
         std::byte{0x10}, std::byte{0x20}, std::byte{0x30}, std::byte{0xFF},
     };
-    return requireValue(writeTexture2DPayloadBytes(Texture2DPayloadDesc{
-        .width = 1,
-        .height = 1,
-        .pixels = pixels,
-    }));
+    return requireValue(writeTexture2DPayloadBytesRgba8(1, 1, pixels));
 }
 
 [[nodiscard]] std::vector<std::byte> makeSpritePayload()
@@ -327,10 +324,16 @@ void putF32(std::vector<std::byte>& bytes, usize offset, float value)
     }));
 }
 
-TEST(TypedPayloadMalformedCorpusTests, Texture2DRejectsTruncationBombAndLengthMismatch)
+TEST(TypedPayloadMalformedCorpusTests, Texture2DRejectsDamagedV2HeaderSamplerAndLevelTable)
 {
     const auto canonical = makeTexturePayload();
     ASSERT_TRUE(parseTexture2DPayload(canonical));
+
+    auto legacySchema = canonical;
+    putU16(legacySchema, 0U, 1U);
+    auto legacyResult = parseTexture2DPayload(legacySchema);
+    ASSERT_FALSE(legacyResult.has_value());
+    EXPECT_EQ(legacyResult.error().code, AssetFormatErrorCode::UnsupportedSchema);
 
     auto truncated = canonical;
     truncated.resize(Texture2DWire::HeaderBytes - 1U);
@@ -341,8 +344,44 @@ TEST(TypedPayloadMalformedCorpusTests, Texture2DRejectsTruncationBombAndLengthMi
     expectAssetError(parseTexture2DPayload(bomb));
 
     auto byteCountMismatch = canonical;
-    putU32(byteCountMismatch, 8U, 8U);
+    putU32(byteCountMismatch, 16U, 8U);
     expectAssetError(parseTexture2DPayload(byteCountMismatch));
+
+    auto reserved = canonical;
+    putU32(reserved, 20U, 1U);
+    expectAssetError(parseTexture2DPayload(reserved));
+
+    auto unknownColorSpace = canonical;
+    unknownColorSpace[8U] = std::byte{0};
+    expectAssetError(parseTexture2DPayload(unknownColorSpace));
+
+    auto unknownWrap = canonical;
+    unknownWrap[10U] = std::byte{0};
+    expectAssetError(parseTexture2DPayload(unknownWrap));
+
+    auto asymmetricAnisotropic = canonical;
+    asymmetricAnisotropic[12U] = std::byte{3};
+    expectAssetError(parseTexture2DPayload(asymmetricAnisotropic));
+
+    auto nonZeroSamplerReserved = canonical;
+    nonZeroSamplerReserved[15U] = std::byte{1};
+    expectAssetError(parseTexture2DPayload(nonZeroSamplerReserved));
+
+    auto invalidLevelCount = canonical;
+    invalidLevelCount[9U] = std::byte{0};
+    expectAssetError(parseTexture2DPayload(invalidLevelCount));
+
+    auto aliasedLevelOffset = canonical;
+    putU32(aliasedLevelOffset, Texture2DWire::HeaderBytes, Texture2DWire::HeaderBytes);
+    expectAssetError(parseTexture2DPayload(aliasedLevelOffset));
+
+    auto levelSizeMismatch = canonical;
+    putU32(levelSizeMismatch, Texture2DWire::HeaderBytes + 4U, 8U);
+    expectAssetError(parseTexture2DPayload(levelSizeMismatch));
+
+    auto singleLevelWithMipFilter = canonical;
+    singleLevelWithMipFilter[14U] = std::byte{2};
+    expectAssetError(parseTexture2DPayload(singleLevelWithMipFilter));
 
     auto trailing = canonical;
     trailing.push_back(std::byte{0});
@@ -608,9 +647,14 @@ TEST(TypedPayloadMalformedCorpusTests, SkinnedMeshRejectsBombsIndicesNonFiniteAn
     const auto canonical = makeSkinnedMeshPayload();
     ASSERT_TRUE(parseSkinnedMeshPayload(canonical));
 
+    // One joint, so each per-joint block contributes exactly one record. The v2 name block
+    // sits between the joint records and the submeshes; omitting it from this chain aimed
+    // every corruption below at the wrong bytes, and the parse then succeeded because the
+    // damage landed harmlessly in name padding.
     constexpr usize Joint = SkinnedMeshWire::HeaderBytes +
                             SkinnedMeshWire::InverseBindMatrixBytes;
-    constexpr usize Submesh = Joint + SkinnedMeshWire::JointBytes;
+    constexpr usize JointName = Joint + SkinnedMeshWire::JointBytes;
+    constexpr usize Submesh = JointName + SkinnedMeshWire::JointNameBytes;
     constexpr usize Vertex = Submesh + SkinnedMeshWire::SubmeshBytes;
     constexpr usize JointIndex = Vertex +
                                  3U * SkinnedMeshWire::FloatsPerVertex * sizeof(float);
@@ -651,6 +695,25 @@ TEST(TypedPayloadMalformedCorpusTests, SkinnedMeshRejectsBombsIndicesNonFiniteAn
     auto trailing = canonical;
     trailing.push_back(std::byte{0});
     expectAssetError(parseSkinnedMeshPayload(trailing));
+
+    // v2 name block. A field with no terminator makes the name unreadable, and non-zero
+    // padding after the terminator means two payloads carrying the same name differ
+    // byte-wise, which breaks content hashing.
+    auto unterminatedName = canonical;
+    for (usize index = 0; index < SkinnedMeshWire::JointNameBytes; ++index)
+    {
+        unterminatedName[JointName + index] = static_cast<std::byte>('a');
+    }
+    expectAssetError(parseSkinnedMeshPayload(unterminatedName));
+
+    auto dirtyNamePadding = canonical;
+    dirtyNamePadding[JointName + SkinnedMeshWire::JointNameBytes - 1U] = static_cast<std::byte>('x');
+    expectAssetError(parseSkinnedMeshPayload(dirtyNamePadding));
+
+    // A NUL-terminated but invalid UTF-8 name: a lone continuation byte.
+    auto invalidUtf8Name = canonical;
+    invalidUtf8Name[JointName] = static_cast<std::byte>(0x80U);
+    expectAssetError(parseSkinnedMeshPayload(invalidUtf8Name));
 }
 
 TEST(TypedPayloadMalformedCorpusTests, AnimationClip3DRejectsBombsRangesNonFiniteAndLengthDamage)

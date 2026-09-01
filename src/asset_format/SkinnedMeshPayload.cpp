@@ -1,12 +1,16 @@
 #include <tina/asset_format/SkinnedMeshPayload.hpp>
 
 #include <tina/asset_format/AssetFormatErrors.hpp>
+#include <tina/core/text/Utf8.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <limits>
 #include <new>
+#include <string>
+#include <string_view>
 
 namespace Tina::AssetFormat {
 namespace {
@@ -77,6 +81,7 @@ struct LayoutCounts final {
 struct LayoutOffsets final {
     u64 inverseBindOffset = 0;
     u64 jointOffset = 0;
+    u64 jointNameOffset = 0;
     u64 submeshOffset = 0;
     u64 vertexOffset = 0;
     u64 jointIndexOffset = 0;
@@ -116,14 +121,16 @@ struct LayoutOffsets final {
     }
 
     // Every term is bounded by the checks above, so u64 accumulation cannot overflow:
-    // the widest total is 48 + 108*256 + 16*64 + 64*65535 + 2*4194304 bytes.
+    // the widest total is 48 + 172*256 + 16*64 + 64*65535 + 2*4194304 bytes.
     LayoutOffsets offsets{};
     const auto joints = static_cast<u64>(counts.jointCount);
     const auto vertices = static_cast<u64>(counts.vertexCount);
     offsets.inverseBindOffset = SkinnedMeshWire::HeaderBytes;
     offsets.jointOffset =
         offsets.inverseBindOffset + (joints * SkinnedMeshWire::InverseBindMatrixBytes);
-    offsets.submeshOffset = offsets.jointOffset + (joints * SkinnedMeshWire::JointBytes);
+    offsets.jointNameOffset = offsets.jointOffset + (joints * SkinnedMeshWire::JointBytes);
+    offsets.submeshOffset =
+        offsets.jointNameOffset + (joints * SkinnedMeshWire::JointNameBytes);
     offsets.vertexOffset =
         offsets.submeshOffset + (static_cast<u64>(counts.submeshCount) * SkinnedMeshWire::SubmeshBytes);
     offsets.jointIndexOffset =
@@ -166,8 +173,63 @@ struct LayoutOffsets final {
 }
 
 // Shared by the desc and the wire paths so both reject the same joint records.
+[[nodiscard]] bool bytesAreZero(std::span<const std::byte> bytes, usize offset,
+                                usize size) noexcept
+{
+    return std::all_of(
+        bytes.begin() + static_cast<std::ptrdiff_t>(offset),
+        bytes.begin() + static_cast<std::ptrdiff_t>(offset + size),
+        [](std::byte value) { return value == std::byte{0}; });
+}
+
+// An empty name is legal: glTF nodes need not be named, and the cooker must not invent an
+// identity the source does not have. NUL is refused because the wire field is
+// NUL-terminated, so an embedded one would silently truncate the name on the way back out.
+[[nodiscard]] Core::Status validateJointName(std::string_view name) noexcept
+{
+    if (name.size() > SkinnedMeshWire::MaximumJointNameBytes)
+    {
+        return Core::failure(AssetFormatErrorCode::SizeLimitExceeded,
+                             "skinned mesh joint name exceeds the wire field");
+    }
+    if (!name.empty() && !Core::isStrictUtf8WithoutNul(name))
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                             "skinned mesh joint name must be valid UTF-8 without NUL");
+    }
+    return Core::success();
+}
+
+// Non-empty names must be unique, because the whole point of the block is that a name
+// resolves to one joint. Unnamed joints are exempt: they are not addressable by name, so
+// any number of them can coexist. O(n^2) over at most 256 joints, at encode time only.
+[[nodiscard]] Core::Status validateJointNamesAreUnique(
+    std::span<const SkinnedMeshJointDesc> joints) noexcept
+{
+    for (usize index = 0; index < joints.size(); ++index)
+    {
+        if (joints[index].name.empty())
+        {
+            continue;
+        }
+        for (usize other = index + 1U; other < joints.size(); ++other)
+        {
+            if (joints[index].name == joints[other].name)
+            {
+                return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                                     "skinned mesh joint names must be unique");
+            }
+        }
+    }
+    return Core::success();
+}
+
 [[nodiscard]] Core::Status validateJoint(const SkinnedMeshJointDesc& joint, u16 jointIndex) noexcept
 {
+    if (Core::Status status = validateJointName(joint.name); !status)
+    {
+        return status;
+    }
     if (joint.reserved != 0U)
     {
         return Core::failure(AssetFormatErrorCode::InvalidLayout,
@@ -376,7 +438,49 @@ std::optional<SkinnedMeshJointView> SkinnedMeshPayloadView::joint(Core::u16 inde
     {
         view.bindScale[element] = readF32(jointsBytes, offset + 32U + (element * 4U));
     }
+    view.name = jointName(index);
     return view;
+}
+
+std::string_view SkinnedMeshPayloadView::jointName(Core::u16 index) const noexcept
+{
+    if (index >= jointCount)
+    {
+        return {};
+    }
+    const usize offset = static_cast<usize>(index) * SkinnedMeshWire::JointNameBytes;
+    if (offset + SkinnedMeshWire::JointNameBytes > jointNamesBytes.size())
+    {
+        return {};
+    }
+    // The parser already proved every field is NUL-terminated and zero-padded, so the
+    // terminator scan below cannot run past the field.
+    usize length = 0;
+    while (length < SkinnedMeshWire::MaximumJointNameBytes &&
+           jointNamesBytes[offset + length] != std::byte{0})
+    {
+        ++length;
+    }
+    return std::string_view{
+        reinterpret_cast<const char*>(jointNamesBytes.data() + offset), length};
+}
+
+std::optional<Core::u16> SkinnedMeshPayloadView::findJoint(std::string_view name) const noexcept
+{
+    // An empty query never matches: an unnamed joint is not addressable by name, so
+    // returning the first one would answer a question the caller did not ask.
+    if (name.empty())
+    {
+        return std::nullopt;
+    }
+    for (u16 index = 0; index < jointCount; ++index)
+    {
+        if (jointName(index) == name)
+        {
+            return index;
+        }
+    }
+    return std::nullopt;
 }
 
 std::span<const float> SkinnedMeshPayloadView::inverseBindMatrix(Core::u16 index) const noexcept
@@ -459,6 +563,10 @@ Core::Result<std::vector<std::byte>> writeSkinnedMeshPayloadBytes(const SkinnedM
             return Core::failure(status.error());
         }
     }
+    if (Core::Status status = validateJointNamesAreUnique(desc.joints); !status)
+    {
+        return Core::failure(status.error());
+    }
     for (const StaticMeshSubmeshDesc& submesh : desc.submeshes)
     {
         if (Core::Status status =
@@ -527,6 +635,18 @@ Core::Result<std::vector<std::byte>> writeSkinnedMeshPayloadBytes(const SkinnedM
                 writeF32(bytes, offset + 32U + (element * 4U), joint.bindScale[element]);
             }
             offset += SkinnedMeshWire::JointBytes;
+        }
+
+        // The whole payload was zero-initialised, so writing only the name bytes leaves
+        // the NUL terminator and the padding already correct.
+        offset = static_cast<usize>(offsets->jointNameOffset);
+        for (const SkinnedMeshJointDesc& joint : desc.joints)
+        {
+            for (usize nameIndex = 0; nameIndex < joint.name.size(); ++nameIndex)
+            {
+                bytes[offset + nameIndex] = static_cast<std::byte>(joint.name[nameIndex]);
+            }
+            offset += SkinnedMeshWire::JointNameBytes;
         }
 
         offset = static_cast<usize>(offsets->submeshOffset);
@@ -674,6 +794,32 @@ Core::Result<SkinnedMeshPayloadView> parseSkinnedMeshPayload(std::span<const std
     const usize jointOffset = static_cast<usize>(offsets->jointOffset);
     view.jointsBytes = payload.subspan(jointOffset,
                                        static_cast<usize>(view.jointCount) * SkinnedMeshWire::JointBytes);
+
+    // Bound before any joint is decoded: SkinnedMeshJointView::name comes from this block,
+    // so joint() below would read an empty name rather than the real one if this were
+    // assigned afterwards.
+    const usize jointNameOffset = static_cast<usize>(offsets->jointNameOffset);
+    view.jointNamesBytes = payload.subspan(
+        jointNameOffset, static_cast<usize>(view.jointCount) * SkinnedMeshWire::JointNameBytes);
+    for (u16 index = 0; index < view.jointCount; ++index)
+    {
+        const usize base = jointNameOffset + (static_cast<usize>(index) * SkinnedMeshWire::JointNameBytes);
+        usize length = 0;
+        while (length < SkinnedMeshWire::JointNameBytes && payload[base + length] != std::byte{0})
+        {
+            ++length;
+        }
+        // A full field with no terminator would make the name unreadable; trailing
+        // non-zero bytes would mean two payloads with the same name differ byte-wise,
+        // which breaks content hashing.
+        if (length == SkinnedMeshWire::JointNameBytes ||
+            !bytesAreZero(payload, base + length, SkinnedMeshWire::JointNameBytes - length))
+        {
+            return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                                 "skinned mesh joint name field is not NUL-terminated or zero-padded");
+        }
+    }
+
     for (u16 index = 0; index < view.jointCount; ++index)
     {
         const auto jointView = view.joint(index);
@@ -691,10 +837,22 @@ Core::Result<SkinnedMeshPayloadView> parseSkinnedMeshPayload(std::span<const std
                              jointView->bindRotation[2], jointView->bindRotation[3]},
             .bindScale = {jointView->bindScale[0], jointView->bindScale[1],
                           jointView->bindScale[2]},
+            .name = std::string(jointView->name),
         };
         if (Core::Status status = validateJoint(jointDesc, index); !status)
         {
             return Core::failure(status.error());
+        }
+        // Uniqueness is re-checked on parse, not only at encode: a payload could arrive
+        // from an older cooker or a hand-built file, and a duplicate would make findJoint
+        // silently prefer whichever joint came first.
+        for (u16 other = 0; other < index; ++other)
+        {
+            if (!jointView->name.empty() && view.jointName(other) == jointView->name)
+            {
+                return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                                     "skinned mesh joint names must be unique");
+            }
         }
     }
 

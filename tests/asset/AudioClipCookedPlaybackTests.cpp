@@ -77,13 +77,10 @@ TEST(AudioClipCookedPlaybackTests, ParseCookedAudioClipAndPlayOneShot)
     EXPECT_NEAR(out[1], 0.25F, 1.0e-4F);
 
     // Wrong kind rejects.
-    auto textureCooked = AssetFormat::writeCookedTexture2DAsset(
-        *Core::AssetId::fromBytes(idBytes(0x11)),
-        AssetFormat::Texture2DPayloadDesc{
-            .width = 1,
-            .height = 1,
-            .pixels = std::array<std::byte, 4>{std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}},
-        });
+    const std::array<std::byte, 4> texturePixels{
+        std::byte{1}, std::byte{2}, std::byte{3}, std::byte{4}};
+    auto textureCooked = AssetFormat::writeCookedTexture2DAssetRgba8(
+        *Core::AssetId::fromBytes(idBytes(0x11)), 1, 1, texturePixels);
     ASSERT_TRUE(textureCooked.has_value());
     auto textureFile = makeCookedAssetFileFromBytes(
         std::pmr::vector<std::byte>(textureCooked->begin(), textureCooked->end(), &memory),

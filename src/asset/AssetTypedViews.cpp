@@ -8,15 +8,18 @@
 
 namespace Tina::Asset {
 
-Core::Result<AssetFormat::Texture2DPayloadView> parseTexture2DFromCooked(const CookedAssetFile& file)
+Core::Result<AssetFormat::Texture2DPayloadView>
+parseTexture2DFromCooked(const CookedAssetFile& file)
 {
     if (!file)
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "cooked asset is empty");
     }
-    if (file.header().assetKind != AssetFormat::AssetKind::Texture2D)
+    if (file.header().assetKind != AssetFormat::AssetKind::Texture2D ||
+        file.header().assetTypeVersion != AssetFormat::Texture2DWire::SchemaVersion)
     {
-        return Core::failure(AssetErrorCode::CatalogEntryMismatch, "cooked asset is not Texture2D");
+        return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                             "cooked asset is not a supported Texture2D");
     }
     return AssetFormat::parseTexture2DPayload(file.payload());
 }

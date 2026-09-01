@@ -41,6 +41,7 @@ ADR 记录处于提议、接受、被替代或拒绝状态的架构决定。主�
 | [0034](0034-native-surface-rebind.md) | Accepted | native binding 变化是 surface **事件**而非 `Suspended` 状态；bgfx 实测允许 init 后更换 nwh，故 rebind 只需 `setPlatformData` + `reset`，device 资源与 Lease 全部存活。取代 ADR 0020 的「不支持 live native rebind」 |
 | [0035](0035-math-module-boundaries.md) | Accepted | `Tina::Math` 是几何类型的唯一定义点；header-only、列主序右手系、失败用 `optional` 不占 `ErrorDomain`，旧 `Scene::Vec3`/`PhysicsVec2` 直接删除 |
 | [0036](0036-gameplay-tooling-boundaries.md) | Accepted | `Tina::Gameplay` 只依赖 Core+Math 提供 timer/tween/sequence 与 `Signal<T>`；delta 由调用方给、余量携带而积压丢弃并计数、重入返回 `ReentrantDispatch`；tween 写目标是 setter 回调而非 Scene 属性枚举 |
+| [0037](0037-animation3d-graph-boundaries.md) | Accepted | `Tina::Animation3D` 在 `Animator3D` 旁建立 pose 图：local-space pose、crossfade/状态机/blend tree/layer+mask/root motion/两骨 IK；SkinnedMesh wire 提到 v2 加骨骼名称，因 cooked joint index 是不可反推的排列 |
 
 新增 ADR 从 [模板](0000-template.md) 复制。替代旧决定时新建 ADR，并把旧记录状态改为
 Superseded 和链接新编号；不要改写历史理由。

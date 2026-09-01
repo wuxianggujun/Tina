@@ -47,8 +47,7 @@ TEST(AssetToRenderScenePipelineTests, CookLoadToRenderSceneCommitWithUv)
 
     // 4x2 texture so half UV width is easy to reason about.
     std::vector<std::byte> pixels(4U * 2U * 4U, std::byte{0xCC});
-    auto texPayload = AssetFormat::writeTexture2DPayloadBytes(
-        AssetFormat::Texture2DPayloadDesc{.width = 4, .height = 2, .pixels = pixels});
+    auto texPayload = AssetFormat::writeTexture2DPayloadBytesRgba8(4, 2, pixels);
     ASSERT_TRUE(texPayload.has_value()) << texPayload.error().message;
     auto spritePayload = AssetFormat::writeSpritePayloadBytes(AssetFormat::SpritePayloadDesc{
         .u0 = 0.25f,

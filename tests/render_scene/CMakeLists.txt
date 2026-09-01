@@ -1,6 +1,7 @@
 add_executable(tina_render_scene_tests
     Camera2DPickTests.cpp
     Camera2DProjectionTests.cpp
+    RenderPostProcessTests.cpp
     RenderSceneTests.cpp
     Sprite2DShadowMathTests.cpp
 )

@@ -52,7 +52,21 @@ borrowed resolver，并只传递 Tina-owned Core/Render，不会把完整 AssetS
 惰性遍历同时拥有全部请求组件的 Entity。range 本身产出 `EntityId`，`each()` 再按模板顺序传入
 `EntityId, const T&...`。它不提供 generic add/remove/set，不允许注册新 component type，因此没有把 World
 改成任意动态 ECS。view、iterator 和 component pointer 只在 owner thread 使用，并在任意 World mutation、move
-或销毁后失效。
+或销毁后失效。`WorldView::Iterator` 满足 `std::forward_iterator`，`WorldView` 满足
+`std::ranges::forward_range`（由 `SceneWorldTests` 的 `static_assert` 固定），故可直接用于 ranges 算法；
+它是多趟 range，同一 view 遍历两次给出相同序列。
+
+`viewWhere<T...>(EntityMetadataFilter)` 与同义 `queryWhere<T...>` 在组件条件之上再按 metadata **值**筛选。
+`EntityMetadataFilter` 的 `tag`/`layer`/`group` 各自是 `optional`：**未设置的字段不参与筛选**，已设置的
+字段全部按 AND 匹配。用 `optional` 而非零值哨兵是必须的 —— 0 是 `NoEntityTag`/`DefaultEntityLayer`/
+`NoEntityGroup` 的合法值，「筛 tag == 0」与「不筛 tag」必须能分别表达，否则默认值永远查不出来。
+筛选先判组件再取 metadata，未命中组件的实体不付 metadata 查找成本；`contains()` 同样遵守 filter，
+这也是筛选做成声明式而不是 `each()` 里手写 `if` 的原因（后者无法被 `contains()`/`empty()` 复用）。
+筛选维度固定为这三项，不注册任意谓词，World 的封闭性不变。
+
+**不提供** `findEntityByName`/`entitiesWithTag` 之类反向查找：那需要维护随 mutation 同步的反向索引
+（新的失效面），而调用方用 `viewWhere` 就能做同样的事；authored name 查找已由 `World2DSceneIndex` 承担，
+再放一份运行时 name 索引会出现两个可能不一致的答案。
 
 每个 live entity 都有一份 `EntityMetadata`。runtime name 最多63个 UTF-8 bytes，拒绝非法 UTF-8 与 embedded
 NUL，失败不覆盖旧 metadata；空 name 表示未命名。`EntityTag`/`EntityLayer`/`EntityGroup` 是 Scene 不解释的

@@ -162,11 +162,19 @@ struct RenderPostProcessChainView final {
     ToneMappingDesc toneMapping{};
     std::span<const RenderPostProcessStep> customSteps{};
 
+    // True only when the caller actually asked for offscreen or post work.
+    //
+    // Tone mapping is deliberately NOT part of this test even though its operator
+    // defaults to AcesFitted. A default-constructed chain is what every RenderFrame
+    // carries when the caller never mentions post processing, so counting the
+    // default operator here would report that frame as enabled -- and then fail its
+    // own validation, because tone mapping requires a scene color target that the
+    // caller never set. Tone mapping is a stage OF offscreen rendering, so it only
+    // takes effect once something else opts in.
     [[nodiscard]] constexpr bool enabled() const noexcept
     {
         return sceneColorTargetBindingKey != 0 || !offscreenPasses.empty() ||
                !decals.empty() || fog.enabled || bloom.enabled ||
-               toneMapping.operation != ToneMappingOperator::None ||
                !customSteps.empty();
     }
 };

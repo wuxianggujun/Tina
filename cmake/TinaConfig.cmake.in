@@ -34,6 +34,7 @@ set(Tina_GAME_SDK_TARGETS
     Tina::Render
     Tina::Runtime
     Tina::Scene
+    Tina::Animation3D
     Tina::Navigation2D
     Tina::Network
     Tina::AssetFormat

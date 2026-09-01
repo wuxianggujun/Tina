@@ -37,8 +37,7 @@ TEST(AssetSystemCatalogApiTests, OpenAndBindAndFindByKind)
     const auto textureId = *Core::AssetId::fromBytes(idBytes(1U));
     const auto spriteId = *Core::AssetId::fromBytes(idBytes(3U));
     std::vector<std::byte> pixels(4, std::byte{1});
-    auto texPayload = AssetFormat::writeTexture2DPayloadBytes(
-        AssetFormat::Texture2DPayloadDesc{.width = 1, .height = 1, .pixels = pixels});
+    auto texPayload = AssetFormat::writeTexture2DPayloadBytesRgba8(1, 1, pixels);
     auto spritePayload = AssetFormat::writeSpritePayloadBytes(AssetFormat::SpritePayloadDesc{
         .pixelsPerUnit = 8.0f,
         .textureId = textureId,
@@ -50,7 +49,7 @@ TEST(AssetSystemCatalogApiTests, OpenAndBindAndFindByKind)
     request.assets.push_back(CatalogCookAssetSpec{
         .assetKind = AssetFormat::AssetKind::Texture2D,
         .assetId = textureId,
-        .assetTypeVersion = 1,
+        .assetTypeVersion = AssetFormat::Texture2DWire::SchemaVersion,
         .payload = std::move(*texPayload),
     });
     request.assets.push_back(CatalogCookAssetSpec{

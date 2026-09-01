@@ -119,6 +119,13 @@ TEST_F(World2DSnapshotSceneTests, CapturesRestoresAndRecapturesIdenticalBytes)
     ASSERT_TRUE(source.setParent(light, root, ReparentMode::KeepLocal));
     const EntityId occluder = source.createEntity().value();
     ASSERT_TRUE(source.setParent(occluder, root, ReparentMode::KeepLocal));
+    // Names are carried by EntityRecord and written back by capture, so the
+    // byte-equality assertion at the end of this test only covers that path if the
+    // entities actually carry one. A multi-byte name and a deliberately unnamed
+    // entity both matter: the wire slot is fixed-size and must round trip either.
+    ASSERT_TRUE(source.setRuntimeName(root, "scene-root"));
+    ASSERT_TRUE(source.setRuntimeName(child, "子节点"));
+    ASSERT_TRUE(source.setRuntimeName(light, "key-light"));
     ASSERT_TRUE(source.setCamera2D(root, Camera2D{
                                              .projection =
                                                  Render::PixelPerfect2D{
@@ -202,6 +209,19 @@ TEST_F(World2DSnapshotSceneTests, CapturesRestoresAndRecapturesIdenticalBytes)
     EXPECT_EQ(restoredAnimation->clip, clip_);
     EXPECT_FLOAT_EQ(restoredAnimation->playbackSpeed, 1.5F);
     EXPECT_FALSE(restoredAnimation->autoPlay);
+
+    // Asserted directly as well as through the byte comparison below: a name
+    // regression should say it is about names rather than surface as an opaque
+    // buffer diff.
+    EXPECT_EQ(restored.runtimeName((*bindings)[0].entity), "scene-root");
+    EXPECT_EQ(restored.runtimeName((*bindings)[1].entity), "子节点");
+    // The occluder was never named, and an unnamed entity must stay unnamed.
+    EXPECT_TRUE(restored.runtimeName((*bindings)[3].entity).empty());
+    // tag/layer/group are runtime-only and deliberately absent from the wire, so a
+    // restored entity carries the defaults no matter what the source had.
+    EXPECT_EQ(restored.tag((*bindings)[0].entity), NoEntityTag);
+    EXPECT_EQ(restored.layer((*bindings)[0].entity), DefaultEntityLayer);
+    EXPECT_EQ(restored.group((*bindings)[0].entity), NoEntityGroup);
 
     auto recaptured = captureWorld2DSnapshotBytes(
         restored, captureConfig([&bindings](EntityId entity) { return stableIdFor(*bindings, entity); }, gameplay));

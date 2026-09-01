@@ -25,7 +25,8 @@ enum class MemoryTag : u8 {
     Cooker = 12,
     Network = 13,
     Gameplay = 14,
-    Count = 15,
+    Animation3D = 15,
+    Count = 16,
 };
 
 inline constexpr usize MemoryTagCount = std::to_underlying(MemoryTag::Count);
@@ -73,6 +74,8 @@ inline constexpr usize MemoryTagCount = std::to_underlying(MemoryTag::Count);
         return "Network";
     case MemoryTag::Gameplay:
         return "Gameplay";
+    case MemoryTag::Animation3D:
+        return "Animation3D";
     case MemoryTag::Invalid:
     case MemoryTag::Count:
         return "Invalid";

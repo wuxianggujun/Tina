@@ -64,6 +64,7 @@ Vorbis/Opus 的安装图还分别解析 `Vorbis`、`Opus`、`OpusFile`。未请�
 | `Tina::PlatformGlfw` | optional installed GLFW Platform adapter；需 `COMPONENTS PlatformGlfw` |
 | `Tina::Task` | bounded IO/CPU/Main TaskSystem |
 | `Tina::Gameplay` | `Scheduler`/timer、`Action`/`ActionRunner` tween 与 sequence/parallel/repeat、28 条 `Easing`、scoped `Signal<T>`；只依赖 Core+Math，见 [Gameplay 工具层](gameplay-tooling.md) |
+| `Tina::Animation3D` | `Skeleton3D`/`Pose3D`/`JointMask`、pose 混合、`ClipSampler3D`、`BlendTree3D`、`AnimationGraph3D`（crossfade/状态机/layer/root motion）、两骨 IK；见 [3D 动画图](animation-3d.md) |
 | `Tina::Network` | 数值 IP/endpoint、UDP、TCP 连接与 listener、`IByteStream`、HTTP/1.1、WebSocket、DNS |
 | `Tina::NetworkTls` | optional installed mbedTLS TLS adapter；需 `COMPONENTS NetworkTls` |
 | `Tina::Render` | RenderDevice、Surface/Frame/Scene/UI DisplayList、GPU IDs |

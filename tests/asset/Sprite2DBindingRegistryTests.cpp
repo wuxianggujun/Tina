@@ -278,8 +278,7 @@ class RejectingFrameResourceSink final : public Render::FrameResourceSink {
 [[nodiscard]] CookedAssetFile makeTexture(std::pmr::memory_resource& memory, Core::u8 seed)
 {
     constexpr std::array<std::byte, 4> Pixel{std::byte{0x10}, std::byte{0x20}, std::byte{0x30}, std::byte{0xFF}};
-    auto payload = AssetFormat::writeTexture2DPayloadBytes(
-        AssetFormat::Texture2DPayloadDesc{.width = 1, .height = 1, .pixels = Pixel});
+    auto payload = AssetFormat::writeTexture2DPayloadBytesRgba8(1, 1, Pixel);
     EXPECT_TRUE(payload.has_value()) << (payload ? "" : payload.error().message);
     if (!payload)
     {

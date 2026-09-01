@@ -95,12 +95,7 @@ void writeError(const Tina::Core::Error& error)
         std::byte{0},   std::byte{0},   std::byte{255}, std::byte{255},
         std::byte{255}, std::byte{255}, std::byte{0},   std::byte{255},
     };
-    auto texPayload = Tina::AssetFormat::writeTexture2DPayloadBytes(Tina::AssetFormat::Texture2DPayloadDesc{
-        .width = 2,
-        .height = 2,
-        .pixelFormat = Tina::AssetFormat::Texture2DPixelFormat::Rgba8Unorm,
-        .pixels = pixels,
-    });
+    auto texPayload = Tina::AssetFormat::writeTexture2DPayloadBytesRgba8(2, 2, pixels);
     auto spritePayload = Tina::AssetFormat::writeSpritePayloadBytes(Tina::AssetFormat::SpritePayloadDesc{
         .u0 = 0.0f,
         .v0 = 0.0f,

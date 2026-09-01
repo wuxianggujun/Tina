@@ -180,9 +180,9 @@ class CapturingRenderDevice final : public Tina::Render::IRenderDevice {
         inner_->shutdown();
     }
     [[nodiscard]] Tina::Core::Result<Tina::Render::GpuTextureId>
-    createTexture2DRgba8(const Tina::Render::Texture2DUploadDesc& desc) override
+    createTexture2D(const Tina::Render::Texture2DUploadDesc& desc) override
     {
-        return inner_->createTexture2DRgba8(desc);
+        return inner_->createTexture2D(desc);
     }
     [[nodiscard]] Tina::Core::Status
     validateTexture2D(Tina::Render::GpuTextureId texture) const noexcept override
@@ -243,11 +243,7 @@ struct CatalogResources final {
             pixels[offset + 3] = std::byte{255};
         }
     }
-    auto texPayload = Tina::AssetFormat::writeTexture2DPayloadBytes(Tina::AssetFormat::Texture2DPayloadDesc{
-        .width = Size,
-        .height = Size,
-        .pixels = pixels,
-    });
+    auto texPayload = Tina::AssetFormat::writeTexture2DPayloadBytesRgba8(Size, Size, pixels);
     auto spritePayload = Tina::AssetFormat::writeSpritePayloadBytes(Tina::AssetFormat::SpritePayloadDesc{
         .u0 = 0.0f,
         .v0 = 0.0f,

@@ -649,12 +649,8 @@ parseSpriteAnimationFrameEvents(std::string_view eventSuffix, Core::u32& totalEv
             pixels.push_back(*byte);
         }
     }
-    auto payload = AssetFormat::writeTexture2DPayloadBytes(AssetFormat::Texture2DPayloadDesc{
-        .width = static_cast<Core::u16>(width),
-        .height = static_cast<Core::u16>(height),
-        .pixelFormat = AssetFormat::Texture2DPixelFormat::Rgba8Unorm,
-        .pixels = pixels,
-    });
+    auto payload = AssetFormat::writeTexture2DPayloadBytesRgba8(
+        static_cast<Core::u16>(width), static_cast<Core::u16>(height), pixels);
     if (!payload)
     {
         return Core::failure(std::move(payload.error()));

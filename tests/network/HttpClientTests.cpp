@@ -631,6 +631,10 @@ TEST(HttpRequestTest, StallLimitEndsASilentServer)
     ScriptedHttpServer server;
     ASSERT_TRUE(server.isValid());
     server.setReply({});  // never answers
+    // The connection must stay open, or the client reports the peer close instead and
+    // the stall limit -- the only guard against pumping a silent peer forever -- is
+    // never reached.
+    server.setCloseAfterReply(false);
 
     auto stream = connectTo(server.endpoint());
     ASSERT_TRUE(stream.has_value());

@@ -2,14 +2,19 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cmath>
+#include <concepts>
 #include <cstddef>
+#include <iterator>
 #include <limits>
 #include <memory_resource>
 #include <new>
+#include <ranges>
 #include <string>
 #include <stdexcept>
 #include <thread>
+#include <vector>
 
 namespace Tina::Scene {
 namespace {
@@ -463,6 +468,261 @@ TEST(SceneWorldTest, ReadOnlyTypedViewFiltersTheClosedComponentSet)
     EXPECT_TRUE(world.view<Camera2D>().contains(camera));
     EXPECT_FALSE(world.view<Camera2D>().contains(plain));
     EXPECT_EQ(world.get<Camera2D>(plain), nullptr);
+}
+
+// Metadata lives in EntityRecord, and GenerationPool reuses slots. If destruction
+// did not actually reset the record, a new entity would inherit the previous
+// occupant's name and tag -- a silent identity leak across a recycled slot.
+TEST(SceneWorldTest, MetadataResetsWhenASlotIsReused)
+{
+    World world = makeWorld(2);
+    const EntityId first = world.createEntity().value();
+    ASSERT_TRUE(world.setMetadata(first, EntityMetadataDesc{
+        .name = "leaky",
+        .tag = 9,
+        .layer = 4,
+        .group = 5,
+    }));
+    ASSERT_TRUE(world.destroyEntity(first));
+
+    const EntityId reused = world.createEntity().value();
+    // Same storage slot, different generation.
+    ASSERT_EQ(reused.index(), first.index());
+    ASSERT_NE(reused, first);
+
+    ASSERT_NE(world.metadata(reused), nullptr);
+    EXPECT_TRUE(world.runtimeName(reused).empty());
+    EXPECT_EQ(world.tag(reused), NoEntityTag);
+    EXPECT_EQ(world.layer(reused), DefaultEntityLayer);
+    EXPECT_EQ(world.group(reused), NoEntityGroup);
+    // The stale id is rejected rather than aliasing the recycled slot.
+    EXPECT_EQ(world.metadata(first), nullptr);
+}
+
+// setMetadata replaces all four fields as one transaction. A rejected name must not
+// leave tag/layer/group half-applied.
+TEST(SceneWorldTest, RejectedMetadataReplacementLeavesEveryFieldUnchanged)
+{
+    World world = makeWorld();
+    const EntityId entity = world.createEntity().value();
+    ASSERT_TRUE(world.setMetadata(entity, EntityMetadataDesc{
+        .name = "keep",
+        .tag = 1,
+        .layer = 2,
+        .group = 3,
+    }));
+
+    const std::string tooLong(EntityNameMaximumBytes + 1U, 'x');
+    const Core::Status rejectedLength = world.setMetadata(entity, EntityMetadataDesc{
+        .name = tooLong,
+        .tag = 77,
+        .layer = 88,
+        .group = 99,
+    });
+    ASSERT_FALSE(rejectedLength);
+    EXPECT_EQ(rejectedLength.error().code, SceneErrorCode::CapacityExceeded);
+
+    const std::string invalidUtf8{"\xC3\x28", 2};
+    const Core::Status rejectedUtf8 = world.setMetadata(entity, EntityMetadataDesc{
+        .name = invalidUtf8,
+        .tag = 77,
+        .layer = 88,
+        .group = 99,
+    });
+    ASSERT_FALSE(rejectedUtf8);
+    EXPECT_EQ(rejectedUtf8.error().code, SceneErrorCode::InvalidMetadata);
+
+    // None of the four fields moved.
+    EXPECT_EQ(world.runtimeName(entity), "keep");
+    EXPECT_EQ(world.tag(entity), 1U);
+    EXPECT_EQ(world.layer(entity), 2U);
+    EXPECT_EQ(world.group(entity), 3U);
+}
+
+TEST(SceneWorldTest, RuntimeNameAcceptsTheByteLimitAndMultiByteUtf8)
+{
+    World world = makeWorld();
+    const EntityId entity = world.createEntity().value();
+
+    // The advertised limit must be usable, not merely close to failing.
+    const std::string atLimit(EntityNameMaximumBytes, 'n');
+    ASSERT_TRUE(world.setRuntimeName(entity, atLimit));
+    EXPECT_EQ(world.runtimeName(entity), atLimit);
+
+    // Multi-byte UTF-8 is bounded in bytes, not code points.
+    ASSERT_TRUE(world.setRuntimeName(entity, "玩家一号"));
+    EXPECT_EQ(world.runtimeName(entity), "玩家一号");
+
+    // clearRuntimeName and an empty name are the same thing.
+    ASSERT_TRUE(world.clearRuntimeName(entity));
+    EXPECT_TRUE(world.runtimeName(entity).empty());
+    ASSERT_TRUE(world.setRuntimeName(entity, "named"));
+    ASSERT_TRUE(world.setRuntimeName(entity, {}));
+    EXPECT_TRUE(world.runtimeName(entity).empty());
+}
+
+// The view advertises forward_iterator_tag. Asserting the concept keeps that from
+// silently degrading into something the ranges algorithms will not accept.
+TEST(SceneWorldTest, TypedViewSatisfiesTheForwardRangeContract)
+{
+    using View = WorldView<LocalTransform>;
+    static_assert(std::forward_iterator<View::Iterator>);
+    static_assert(std::ranges::forward_range<View>);
+    static_assert(std::same_as<std::ranges::range_value_t<View>, EntityId>);
+
+    World world = makeWorld();
+    const EntityId first = world.createEntity().value();
+    const EntityId second = world.createEntity().value();
+
+    // Multi-pass: a forward range yields the same sequence when traversed twice.
+    const View view = world.view<LocalTransform>();
+    std::vector<EntityId> firstPass;
+    for (const EntityId entity : view) {
+        firstPass.push_back(entity);
+    }
+    std::vector<EntityId> secondPass;
+    for (const EntityId entity : view) {
+        secondPass.push_back(entity);
+    }
+    EXPECT_EQ(firstPass, secondPass);
+    ASSERT_EQ(firstPass.size(), 2U);
+    EXPECT_NE(std::ranges::find(firstPass, first), firstPass.end());
+    EXPECT_NE(std::ranges::find(firstPass, second), firstPass.end());
+}
+
+TEST(SceneWorldTest, TypedViewRequiresEveryRequestedComponent)
+{
+    World world = makeWorld();
+    const EntityId all = world.createEntity().value();
+    const EntityId partial = world.createEntity().value();
+    const EntityId none = world.createEntity().value();
+
+    ASSERT_TRUE(world.setCamera2D(all, Camera2D{}));
+    ASSERT_TRUE(world.setSpriteRenderer2D(all, SpriteRenderer2D{}));
+    ASSERT_TRUE(world.setCamera2D(partial, Camera2D{}));
+    ASSERT_TRUE(world.updateWorldTransforms());
+
+    usize visits = 0;
+    world.view<Camera2D, SpriteRenderer2D, WorldTransform>().each(
+        [&](EntityId entity, const Camera2D&, const SpriteRenderer2D&, const WorldTransform&) {
+            ++visits;
+            EXPECT_EQ(entity, all);
+        });
+    EXPECT_EQ(visits, 1U);
+
+    const auto intersection = world.view<Camera2D, SpriteRenderer2D>();
+    EXPECT_TRUE(intersection.contains(all));
+    EXPECT_FALSE(intersection.contains(partial));
+    EXPECT_FALSE(intersection.contains(none));
+    EXPECT_FALSE(intersection.empty());
+
+    // Clearing one component drops the entity from the intersection. Bound to a
+    // local first: the comma in the template argument list would otherwise be read
+    // as a macro argument separator.
+    ASSERT_TRUE(world.clearSpriteRenderer2D(all));
+    const auto afterClear = world.view<Camera2D, SpriteRenderer2D>();
+    EXPECT_TRUE(afterClear.empty());
+}
+
+TEST(SceneWorldTest, MetadataFilteredQueryNarrowsByValue)
+{
+    World world = makeWorld();
+    const EntityId enemyA = world.createEntity().value();
+    const EntityId enemyB = world.createEntity().value();
+    const EntityId ally = world.createEntity().value();
+    const EntityId untagged = world.createEntity().value();
+
+    constexpr EntityTag EnemyTag = 7;
+    constexpr EntityTag AllyTag = 8;
+    for (const EntityId entity : {enemyA, enemyB, ally, untagged}) {
+        ASSERT_TRUE(world.setSpriteRenderer2D(entity, SpriteRenderer2D{}));
+    }
+    ASSERT_TRUE(world.setMetadata(enemyA, EntityMetadataDesc{.tag = EnemyTag, .layer = 1, .group = 2}));
+    ASSERT_TRUE(world.setMetadata(enemyB, EntityMetadataDesc{.tag = EnemyTag, .layer = 5, .group = 2}));
+    ASSERT_TRUE(world.setMetadata(ally, EntityMetadataDesc{.tag = AllyTag, .layer = 1, .group = 2}));
+
+    const auto collect = [](auto&& view) {
+        std::vector<EntityId> found;
+        for (const EntityId entity : view) {
+            found.push_back(entity);
+        }
+        return found;
+    };
+
+    // Single dimension.
+    const std::vector<EntityId> enemies =
+        collect(world.viewWhere<SpriteRenderer2D>(EntityMetadataFilter{.tag = EnemyTag}));
+    ASSERT_EQ(enemies.size(), 2U);
+    EXPECT_NE(std::ranges::find(enemies, enemyA), enemies.end());
+    EXPECT_NE(std::ranges::find(enemies, enemyB), enemies.end());
+
+    // Two dimensions combine with AND.
+    const std::vector<EntityId> layerOneEnemies = collect(
+        world.viewWhere<SpriteRenderer2D>(EntityMetadataFilter{.tag = EnemyTag, .layer = 1}));
+    ASSERT_EQ(layerOneEnemies.size(), 1U);
+    EXPECT_EQ(layerOneEnemies.front(), enemyA);
+
+    // A filter matching nothing yields an empty range rather than an error.
+    EXPECT_TRUE(world.viewWhere<SpriteRenderer2D>(EntityMetadataFilter{.tag = 999}).empty());
+
+    // contains() honours the filter too, which is why filtering is declarative
+    // rather than an if inside a caller-supplied each() lambda.
+    const auto enemyView = world.viewWhere<SpriteRenderer2D>(EntityMetadataFilter{.tag = EnemyTag});
+    EXPECT_TRUE(enemyView.contains(enemyA));
+    EXPECT_FALSE(enemyView.contains(ally));
+    EXPECT_FALSE(enemyView.contains(untagged));
+
+    // The component requirement still applies on top of the filter.
+    ASSERT_TRUE(world.clearSpriteRenderer2D(enemyA));
+    EXPECT_EQ(collect(world.viewWhere<SpriteRenderer2D>(
+                          EntityMetadataFilter{.tag = EnemyTag}))
+                  .size(),
+              1U);
+}
+
+// Filtering on 0 must mean "this value", not "no filter". Zero is the default for
+// all three dimensions, so conflating the two would make the defaults unqueryable.
+TEST(SceneWorldTest, FilteringOnZeroDiffersFromNotFiltering)
+{
+    World world = makeWorld();
+    const EntityId defaulted = world.createEntity().value();
+    const EntityId tagged = world.createEntity().value();
+    ASSERT_TRUE(world.setTag(tagged, 3));
+
+    const auto noTag =
+        world.viewWhere<LocalTransform>(EntityMetadataFilter{.tag = NoEntityTag});
+    EXPECT_TRUE(noTag.contains(defaulted));
+    EXPECT_FALSE(noTag.contains(tagged));
+
+    // An unset filter field accepts both.
+    const auto unfiltered = world.viewWhere<LocalTransform>(EntityMetadataFilter{});
+    EXPECT_TRUE(unfiltered.contains(defaulted));
+    EXPECT_TRUE(unfiltered.contains(tagged));
+    EXPECT_TRUE(unfiltered.filter().filtersNothing());
+}
+
+// EntityMetadata is a readable component like any other, so a filtered query can
+// still read the values it filtered on.
+TEST(SceneWorldTest, FilteredQueryStillExposesMetadataToEach)
+{
+    World world = makeWorld();
+    const EntityId entity = world.createEntity().value();
+    ASSERT_TRUE(world.setCamera2D(entity, Camera2D{}));
+    ASSERT_TRUE(world.setMetadata(entity, EntityMetadataDesc{
+        .name = "main-camera",
+        .tag = 21,
+        .layer = 6,
+    }));
+
+    usize visits = 0;
+    world.queryWhere<EntityMetadata, Camera2D>(EntityMetadataFilter{.layer = 6})
+        .each([&](EntityId visited, const EntityMetadata& metadata, const Camera2D&) {
+            ++visits;
+            EXPECT_EQ(visited, entity);
+            EXPECT_EQ(metadata.name.view(), "main-camera");
+            EXPECT_EQ(metadata.tag, 21U);
+        });
+    EXPECT_EQ(visits, 1U);
 }
 
 TEST(SceneWorldTest, DestroysWideSubtreeWithLinearLiveBookkeeping)

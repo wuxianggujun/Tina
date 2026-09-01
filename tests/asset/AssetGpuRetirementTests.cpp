@@ -623,10 +623,11 @@ TEST_F(AssetGpuRetirementTests, NullUploadCleanupPreservesCompletedGpuTextureRet
     ASSERT_TRUE(device.has_value()) << device.error().message;
     constexpr std::array<std::byte, 4> Pixel{
         std::byte{0x10}, std::byte{0x20}, std::byte{0x30}, std::byte{0xFF}};
-    auto texture = (*device)->createTexture2DRgba8(Render::Texture2DUploadDesc{
-        .width = 1,
-        .height = 1,
-        .rgba8Pixels = Pixel,
+    const std::array levels{
+        Render::Texture2DUploadLevel{.width = 1, .height = 1, .bytes = Pixel},
+    };
+    auto texture = (*device)->createTexture2D(Render::Texture2DUploadDesc{
+        .levels = levels,
     });
     ASSERT_TRUE(texture.has_value()) << texture.error().message;
 

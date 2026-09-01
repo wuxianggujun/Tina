@@ -2,6 +2,7 @@
 
 #include <tina/asset/CatalogSnapshot.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
+#include <tina/asset_format/Texture2DPayload.hpp>
 #include <tina/core/hash/ContentHashDigest.hpp>
 #include <tina/core/id/AssetId.hpp>
 
@@ -183,7 +184,9 @@ inline void putFixed(Bytes& bytes, Core::usize offset, const std::array<std::byt
     putFixed(bytes, entryTable, idBytes(1U));
     putFixed(bytes, entryTable + 16U, textureHash.bytes());
     putU16(bytes, entryTable + 32U, static_cast<Core::u16>(AssetFormat::AssetKind::Texture2D));
-    putU16(bytes, entryTable + 34U, 1U);
+    // Taken from the wire constant, not a literal: the loader cross-checks this against
+    // the cooked header, so a hand-written version silently fails every load after a bump.
+    putU16(bytes, entryTable + 34U, AssetFormat::Texture2DWire::SchemaVersion);
     putU32(bytes, entryTable + 40U, 0U);
     putU32(bytes, entryTable + 44U, 0U);
     putU64(bytes, entryTable + 48U, textureBytes);
@@ -303,17 +306,33 @@ struct TextureMaterialPackage final {
 [[nodiscard]] inline TextureMaterialPackage writeTextureMaterialPackage(std::filesystem::path directoryName,
                                                                         bool writeMaterialObject = true)
 {
-    const auto digest = defaultPayloadHash();
+    const auto pixels = defaultPayload();
+    auto texturePayload = AssetFormat::writeTexture2DPayloadBytesRgba8(1, 1, pixels);
+    EXPECT_TRUE(texturePayload.has_value()) << (texturePayload ? "" : texturePayload.error().message);
+    auto textureCooked = AssetFormat::writeCookedTexture2DAssetRgba8(assetId(1U), 1, 1, pixels);
+    EXPECT_TRUE(textureCooked.has_value()) << (textureCooked ? "" : textureCooked.error().message);
+    Core::ContentHash textureHash = defaultPayloadHash();
+    if (texturePayload)
+    {
+        auto textureDigest = Core::digestContentHashV1(*texturePayload);
+        EXPECT_TRUE(textureDigest.has_value()) << (textureDigest ? "" : textureDigest.error().message);
+        if (textureDigest)
+        {
+            textureHash = *textureDigest;
+        }
+    }
+    const auto materialDigest = defaultPayloadHash();
     TextureMaterialPackage package{
         .root = std::filesystem::temp_directory_path() / std::move(directoryName),
         .textureId = assetId(1U),
         .materialId = assetId(2U),
-        .textureBytes = makeCookedAsset(1U, AssetFormat::AssetKind::Texture2D),
+        .textureBytes = textureCooked ? std::move(*textureCooked) : Bytes{},
         .materialBytes = makeCookedAsset(2U, AssetFormat::AssetKind::Material),
     };
 
     writeBytes(package.root / "manifest.tmnft",
-               makeTextureMaterialManifest(package.textureBytes.size(), digest, package.materialBytes.size(), digest));
+               makeTextureMaterialManifest(package.textureBytes.size(), textureHash,
+                                           package.materialBytes.size(), materialDigest));
     writeBytes(package.root / Tina::TestSupport::pathFromUtf8Bytes(
                                   AssetFormat::makeCookedArtifactPath(AssetFormat::AssetKind::Texture2D,
                                                                       package.textureId)

@@ -8,10 +8,76 @@
 namespace Tina::Render {
 namespace {
 
+[[nodiscard]] constexpr bool isKnownRenderTextureFormat(RenderTextureFormat format) noexcept
+{
+    switch (format)
+    {
+    case RenderTextureFormat::Rgba8Unorm:
+    case RenderTextureFormat::Rgba8Srgb:
+    case RenderTextureFormat::Rgba16Float:
+    case RenderTextureFormat::Rg16Float:
+    case RenderTextureFormat::R16Float:
+    case RenderTextureFormat::Depth24Stencil8:
+    case RenderTextureFormat::Depth32Float:
+        return true;
+    case RenderTextureFormat::Invalid:
+        break;
+    }
+    return false;
+}
+
 [[nodiscard]] constexpr bool isDepthFormat(RenderTextureFormat format) noexcept
 {
     return format == RenderTextureFormat::Depth24Stencil8 ||
            format == RenderTextureFormat::Depth32Float;
+}
+
+[[nodiscard]] constexpr u8 fullMipCount(u16 width, u16 height) noexcept
+{
+    u8 count = 1;
+    while (width > 1U || height > 1U)
+    {
+        width = width > 1U ? static_cast<u16>(width / 2U) : u16{1};
+        height = height > 1U ? static_cast<u16>(height / 2U) : u16{1};
+        ++count;
+    }
+    return count;
+}
+
+[[nodiscard]] constexpr bool isKnownToneMappingOperator(ToneMappingOperator operation) noexcept
+{
+    switch (operation)
+    {
+    case ToneMappingOperator::None:
+    case ToneMappingOperator::Reinhard:
+    case ToneMappingOperator::AcesFitted:
+    case ToneMappingOperator::AgXApproximation:
+        return true;
+    }
+    return false;
+}
+
+[[nodiscard]] constexpr bool isKnownFogMode(FogMode mode) noexcept
+{
+    switch (mode)
+    {
+    case FogMode::Linear:
+    case FogMode::Exponential:
+    case FogMode::ExponentialSquared:
+        return true;
+    }
+    return false;
+}
+
+[[nodiscard]] constexpr bool isKnownPostProcessStepKind(RenderPostProcessStepKind kind) noexcept
+{
+    switch (kind)
+    {
+    case RenderPostProcessStepKind::Copy:
+    case RenderPostProcessStepKind::CustomShader:
+        return true;
+    }
+    return false;
 }
 
 [[nodiscard]] bool finiteUnit(float value) noexcept
@@ -66,7 +132,7 @@ Core::Status validateRenderTextureDesc(const RenderTextureDesc& desc) noexcept
         return Core::failure(RenderErrorCode::InvalidRenderTexture,
                              "RenderTexture dimensions are out of range");
     }
-    if (desc.format == RenderTextureFormat::Invalid || desc.usage == RenderTextureUsage::None)
+    if (!isKnownRenderTextureFormat(desc.format) || desc.usage == RenderTextureUsage::None)
     {
         return Core::failure(RenderErrorCode::InvalidRenderTexture,
                              "RenderTexture format and usage are required");
@@ -90,6 +156,7 @@ Core::Status validateRenderTextureDesc(const RenderTextureDesc& desc) noexcept
                              "RenderTexture format does not match its attachment usage");
     }
     if (desc.mipCount == 0 || desc.mipCount > RenderTextureDesc::MaximumMipCount ||
+        desc.mipCount > fullMipCount(desc.width, desc.height) ||
         (desc.sampleCount != 1 && desc.sampleCount != 2 && desc.sampleCount != 4 &&
          desc.sampleCount != 8 && desc.sampleCount != 16) ||
         (desc.sampleCount != 1 && desc.mipCount != 1))
@@ -102,6 +169,12 @@ Core::Status validateRenderTextureDesc(const RenderTextureDesc& desc) noexcept
 
 Core::Status validateRenderPostProcessChain(const RenderPostProcessChainView& chain) noexcept
 {
+    if (!isKnownToneMappingOperator(chain.toneMapping.operation) ||
+        !isKnownFogMode(chain.fog.mode))
+    {
+        return Core::failure(RenderErrorCode::InvalidPostProcessChain,
+                             "Post-process chain contains an unknown effect mode");
+    }
     if (!chain.enabled())
     {
         return Core::success();
@@ -112,8 +185,7 @@ Core::Status validateRenderPostProcessChain(const RenderPostProcessChainView& ch
         return Core::failure(RenderErrorCode::PostProcessCapacityExceeded,
                              "Render post-process chain exceeds fixed capacities");
     }
-    if ((chain.fog.enabled || chain.bloom.enabled ||
-         chain.toneMapping.operation != ToneMappingOperator::None || !chain.decals.empty()) &&
+    if ((chain.fog.enabled || chain.bloom.enabled || !chain.decals.empty()) &&
         chain.sceneColorTargetBindingKey == 0)
     {
         return Core::failure(RenderErrorCode::InvalidPostProcessChain,
@@ -152,6 +224,7 @@ Core::Status validateRenderPostProcessChain(const RenderPostProcessChainView& ch
     for (const RenderOffscreenPassView& pass : chain.offscreenPasses)
     {
         if (pass.stablePassKey == 0 || pass.colorTargetBindingKey == 0 ||
+            (pass.clearDepth && pass.depthTargetBindingKey == 0) ||
             !finiteUnit(pass.clearR) || !finiteUnit(pass.clearG) ||
             !finiteUnit(pass.clearB) || !finiteUnit(pass.clearA))
         {
@@ -171,7 +244,8 @@ Core::Status validateRenderPostProcessChain(const RenderPostProcessChainView& ch
     }
     for (const RenderPostProcessStep& step : chain.customSteps)
     {
-        if (step.sourceBindingKey == step.destinationBindingKey ||
+        if (!isKnownPostProcessStepKind(step.kind) ||
+            step.sourceBindingKey == step.destinationBindingKey ||
             (step.kind == RenderPostProcessStepKind::CustomShader &&
              step.shaderBindingKey == 0))
         {
@@ -192,6 +266,13 @@ buildRenderPipelineSchedule(const RenderPostProcessChainView& chain,
     }
 
     RenderPipelineSchedule schedule{};
+    // A chain nobody opted into plans nothing. Without this early return the default
+    // ToneMappingOperator::AcesFitted would append a tone-mapping pass writing to the
+    // primary surface for every frame that never mentioned post processing.
+    if (!chain.enabled())
+    {
+        return schedule;
+    }
     const auto append = [&schedule](RenderPipelinePassPlan plan) noexcept {
         if (schedule.m_passCount >= RenderPipelineSchedule::MaximumPassCount)
         {
@@ -253,28 +334,29 @@ buildRenderPipelineSchedule(const RenderPostProcessChainView& chain,
         {
             return failCapacity();
         }
+        u32 bloomSource = chain.pingTargetBindingKey;
+        u32 bloomDestination = chain.pongTargetBindingKey;
         for (u32 iteration = 0; iteration < chain.bloom.downsamplePassCount; ++iteration)
         {
             if (!append(RenderPipelinePassPlan{
                     .kind = RenderPipelinePassKind::BloomDownsample,
-                    .sourceBindingKey = (iteration & 1U) == 0U ? chain.pingTargetBindingKey
-                                                               : chain.pongTargetBindingKey,
-                    .destinationBindingKey = (iteration & 1U) == 0U ? chain.pongTargetBindingKey
-                                                                    : chain.pingTargetBindingKey,
+                    .sourceBindingKey = bloomSource,
+                    .destinationBindingKey = bloomDestination,
                     .iteration = iteration,
                 }))
             {
                 return failCapacity();
             }
+            std::swap(bloomSource, bloomDestination);
         }
         if (!append(RenderPipelinePassPlan{
                 .kind = RenderPipelinePassKind::BloomBlur,
-                .sourceBindingKey = chain.pingTargetBindingKey,
-                .destinationBindingKey = chain.pongTargetBindingKey,
+                .sourceBindingKey = bloomSource,
+                .destinationBindingKey = bloomDestination,
             }) ||
             !append(RenderPipelinePassPlan{
                 .kind = RenderPipelinePassKind::BloomUpsample,
-                .sourceBindingKey = chain.pongTargetBindingKey,
+                .sourceBindingKey = bloomDestination,
                 .destinationBindingKey = current,
                 .auxiliaryBindingKey = current,
             }))
@@ -301,7 +383,7 @@ buildRenderPipelineSchedule(const RenderPostProcessChainView& chain,
         current = step.destinationBindingKey;
     }
 
-    if (chain.toneMapping.operation != ToneMappingOperator::None)
+    if (current != 0 && chain.toneMapping.operation != ToneMappingOperator::None)
     {
         if (!append(RenderPipelinePassPlan{
                 .kind = RenderPipelinePassKind::ToneMapping,

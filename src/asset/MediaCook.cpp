@@ -199,13 +199,9 @@ try
     const std::size_t pixelBytes =
         static_cast<std::size_t>(width) * static_cast<std::size_t>(height) * 4U;
 
-    auto texturePayload = AssetFormat::writeTexture2DPayloadBytes(AssetFormat::Texture2DPayloadDesc{
-        .width = static_cast<Core::u16>(width),
-        .height = static_cast<Core::u16>(height),
-        .pixelFormat = AssetFormat::Texture2DPixelFormat::Rgba8Unorm,
-        .pixels = std::span<const std::byte>{
-            reinterpret_cast<const std::byte*>(pixels.get()), pixelBytes},
-    });
+    auto texturePayload = AssetFormat::writeTexture2DPayloadBytesRgba8(
+        static_cast<Core::u16>(width), static_cast<Core::u16>(height),
+        std::span<const std::byte>{reinterpret_cast<const std::byte*>(pixels.get()), pixelBytes});
     pixels.reset();
     if (!texturePayload)
     {
@@ -226,6 +222,7 @@ try
     capture->result.request.assets.push_back(CatalogCookAssetSpec{
         .assetKind = AssetFormat::AssetKind::Texture2D,
         .assetId = textureId,
+        .assetTypeVersion = AssetFormat::Texture2DWire::SchemaVersion,
         .payload = std::move(*texturePayload),
     });
 

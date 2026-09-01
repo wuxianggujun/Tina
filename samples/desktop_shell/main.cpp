@@ -9,6 +9,7 @@
 #include <tina/runtime/GameState.hpp>
 #include <tina/runtime/RunExitReason.hpp>
 
+#include <array>
 #include <charconv>
 #include <chrono>
 #include <cmath>
@@ -94,11 +95,13 @@ class ShellIconResources final {
         }
         static constexpr Tina::SampleUI::DesktopShellIconAtlasPixels AtlasPixels =
             Tina::SampleUI::makeDesktopShellIconAtlasPixels();
-        auto uploaded = device_->createTexture2DRgba8(Tina::Render::Texture2DUploadDesc{
-            .width = static_cast<Tina::Core::u16>(Tina::SampleUI::DesktopShellIconAtlasWidth),
-            .height = static_cast<Tina::Core::u16>(Tina::SampleUI::DesktopShellIconAtlasHeight),
-            .rgba8Pixels = AtlasPixels,
-        });
+        const std::array<Tina::Render::Texture2DUploadLevel, 1> levels{
+            Tina::Render::Texture2DUploadLevel{
+                .width = static_cast<Tina::Core::u16>(Tina::SampleUI::DesktopShellIconAtlasWidth),
+                .height = static_cast<Tina::Core::u16>(Tina::SampleUI::DesktopShellIconAtlasHeight),
+                .bytes = AtlasPixels}};
+        auto uploaded =
+            device_->createTexture2D(Tina::Render::Texture2DUploadDesc{.levels = levels});
         if (!uploaded) {
             return Tina::Core::failure(std::move(uploaded.error()));
         }

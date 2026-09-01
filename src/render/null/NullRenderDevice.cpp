@@ -16,6 +16,16 @@
 namespace Tina::Render {
 namespace {
 
+// Fixed distance used to drive the fog operator over the headless probe pixel. The
+// Null device has no depth buffer, so a constant keeps the evidence deterministic.
+inline constexpr float ProbeCameraDistanceMeters = 25.0F;
+
+[[nodiscard]] constexpr bool isDepthRenderTextureFormat(RenderTextureFormat format) noexcept
+{
+    return format == RenderTextureFormat::Depth24Stencil8 ||
+           format == RenderTextureFormat::Depth32Float;
+}
+
 [[nodiscard]] Core::Status validateSprite2DResources(const RenderFrame& frame) noexcept
 {
     for (const RenderSprite2DItem& sprite : frame.primaryWorldScene.sprites2D())
@@ -311,6 +321,13 @@ class NullRenderDevice final : public IRenderDevice {
             }
         }
 
+        // Before any frame state advances, so a rejected chain leaves the frame
+        // index and surface tracker exactly where they were.
+        if (auto status = validatePostProcessChain(frame); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+
         if (auto status = surfaceStateTracker_.validateAndCommit(frame.primaryWindowSurface); !status)
         {
             return Core::failure(std::move(status.error()));
@@ -330,6 +347,11 @@ class NullRenderDevice final : public IRenderDevice {
         {
             ++statistics_.skippedSuspendedSurfaceFrames;
             return RenderFrameSubmission::SkippedSuspendedSurface();
+        }
+
+        if (auto status = executePostProcessChain(frame); !status)
+        {
+            return Core::failure(std::move(status.error()));
         }
 
         frameOpen_ = true;
@@ -371,20 +393,30 @@ class NullRenderDevice final : public IRenderDevice {
         return vsyncEnabled_;
     }
 
-    [[nodiscard]] Core::Result<GpuTextureId> createTexture2DRgba8(const Texture2DUploadDesc& desc) override
+    [[nodiscard]] Core::Result<GpuTextureId> createTexture2D(const Texture2DUploadDesc& desc) override
     {
         if (stopped_)
         {
             return Core::failure(RenderErrorCode::DeviceStopped, "The null render device is stopped");
         }
-        if (desc.width == 0 || desc.height == 0 ||
-            desc.rgba8Pixels.size() != static_cast<std::size_t>(desc.width) * desc.height * 4U)
+        // Shared with bgfx so the two backends cannot drift on what they accept: a
+        // descriptor Null records must be one a real device would have taken.
+        if (auto status = validateTexture2DUploadDesc(desc); !status)
         {
-            return Core::failure(RenderErrorCode::InvalidTextureUpload, "invalid Texture2D RGBA8 upload descriptor");
+            return Core::failure(std::move(status.error()));
         }
         const u32 index = static_cast<u32>(textures_.size());
-        textures_.push_back(TextureSlot{.generation = 1, .width = desc.width, .height = desc.height, .live = true});
+        textures_.push_back(TextureSlot{
+            .generation = 1,
+            .width = desc.baseWidth(),
+            .height = desc.baseHeight(),
+            .live = true,
+        });
         ++statistics_.liveResources;
+        // Counts every accepted level, not every accepted texture, so a translation
+        // that quietly dropped the mip tail is visible from the published statistics
+        // instead of only from pixels no headless test can see.
+        statistics_.uploadedTextureLevels += desc.levels.size();
         return GpuTextureId{resourceOwnerId(), index, 1};
     }
 
@@ -553,6 +585,114 @@ class NullRenderDevice final : public IRenderDevice {
             return Core::failure(RenderErrorCode::TextureNotFound, "Texture2D handle is invalid");
         }
         textureBindings_[deviceBindingKey] = texture;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<GpuRenderTextureId> createRenderTexture(
+        const RenderTextureDesc& desc) override
+    {
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The null render device is stopped");
+        }
+        if (auto status = validateRenderTextureDesc(desc); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        constexpr std::size_t MaximumRenderTextures = 64;
+        for (std::size_t index = 0; index < renderTextures_.size(); ++index)
+        {
+            if (!renderTextures_[index].live)
+            {
+                renderTextures_[index].live = true;
+                renderTextures_[index].desc = desc;
+                ++statistics_.liveRenderTextures;
+                return GpuRenderTextureId{resourceOwnerId(), static_cast<u32>(index),
+                                          renderTextures_[index].generation};
+            }
+        }
+        if (renderTextures_.size() >= MaximumRenderTextures)
+        {
+            return Core::failure(RenderErrorCode::RenderTextureBindingKeyExhausted,
+                                 "The null render device render texture capacity is exhausted");
+        }
+        renderTextures_.push_back(RenderTextureSlot{.desc = desc, .live = true});
+        ++statistics_.liveRenderTextures;
+        return GpuRenderTextureId{resourceOwnerId(),
+                                  static_cast<u32>(renderTextures_.size() - 1U),
+                                  renderTextures_.back().generation};
+    }
+
+    [[nodiscard]] Core::Status destroyRenderTexture(GpuRenderTextureId target) noexcept override
+    {
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The null render device is stopped");
+        }
+        if (!isLiveRenderTexture(target))
+        {
+            return Core::failure(RenderErrorCode::RenderTextureNotFound,
+                                 "Render texture handle is invalid");
+        }
+        // Bindings are dropped before the slot retires so a stale key cannot be
+        // resolved by a later frame.
+        for (auto binding = renderTextureBindings_.begin();
+             binding != renderTextureBindings_.end();)
+        {
+            binding = binding->second == target ? renderTextureBindings_.erase(binding)
+                                                : std::next(binding);
+        }
+        RenderTextureSlot& slot = renderTextures_[target.index];
+        slot.live = false;
+        slot.desc = RenderTextureDesc{};
+        ++slot.generation;
+        if (statistics_.liveRenderTextures > 0)
+        {
+            --statistics_.liveRenderTextures;
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status setRenderTextureBinding(u32 deviceBindingKey,
+                                                      GpuRenderTextureId target) noexcept override
+    {
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The null render device is stopped");
+        }
+        // Key 0 means "the primary surface" throughout the post-process contract,
+        // so it can never name an offscreen target.
+        if (deviceBindingKey == 0)
+        {
+            return Core::failure(RenderErrorCode::InvalidRenderTexture,
+                                 "Render texture device binding key must be non-zero");
+        }
+        if (!target)
+        {
+            renderTextureBindings_.erase(deviceBindingKey);
+            return Core::success();
+        }
+        if (!isLiveRenderTexture(target))
+        {
+            return Core::failure(RenderErrorCode::RenderTextureNotFound,
+                                 "Render texture handle is invalid");
+        }
+        renderTextureBindings_[deviceBindingKey] = target;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status clearRenderTextureBinding(u32 deviceBindingKey) noexcept override
+    {
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The null render device is stopped");
+        }
+        if (deviceBindingKey == 0)
+        {
+            return Core::failure(RenderErrorCode::InvalidRenderTexture,
+                                 "Render texture device binding key must be non-zero");
+        }
+        renderTextureBindings_.erase(deviceBindingKey);
         return Core::success();
     }
 
@@ -950,12 +1090,15 @@ class NullRenderDevice final : public IRenderDevice {
         frameOpen_ = false;
         textureBindings_.clear();
         textures_.clear();
+        renderTextureBindings_.clear();
+        renderTextures_.clear();
         mesh3DImageBasedLighting_.reset();
         environmentMaps_.clear();
         meshBindings_.clear();
         materialBindings_.clear();
         meshes_.clear();
         statistics_.liveResources = 0;
+        statistics_.liveRenderTextures = 0;
     }
 
   private:
@@ -975,6 +1118,11 @@ class NullRenderDevice final : public IRenderDevice {
     };
     struct EnvironmentMapSlot final {
         u32 generation = 1;
+        bool live = false;
+    };
+    struct RenderTextureSlot final {
+        u32 generation = 1;
+        RenderTextureDesc desc{};
         bool live = false;
     };
 
@@ -1195,6 +1343,320 @@ class NullRenderDevice final : public IRenderDevice {
                             textures_[texture.index].generation == texture.generation);
     }
 
+    // Unlike isLiveTexture, an empty handle is NOT live here: every post-process
+    // binding key must name a real target, and accepting a default-constructed id
+    // would let an unbound key silently resolve.
+    [[nodiscard]] bool isLiveRenderTexture(GpuRenderTextureId target) const noexcept
+    {
+        return target && target.owner == resourceOwnerId() &&
+               target.index < renderTextures_.size() && renderTextures_[target.index].live &&
+               renderTextures_[target.index].generation == target.generation;
+    }
+
+    enum class RenderTextureBindingRole : u8 {
+        ColorAttachment,
+        ColorAttachmentSingleSample,
+        SampledColor,
+        ColorTarget,
+        DepthAttachment,
+    };
+
+    [[nodiscard]] const RenderTextureSlot* boundRenderTexture(u32 deviceBindingKey) const noexcept
+    {
+        if (deviceBindingKey == 0)
+        {
+            return nullptr;
+        }
+        const auto binding = renderTextureBindings_.find(deviceBindingKey);
+        if (binding == renderTextureBindings_.end() || !isLiveRenderTexture(binding->second))
+        {
+            return nullptr;
+        }
+        return &renderTextures_[binding->second.index];
+    }
+
+    // Every non-zero binding key a chain references must already be published,
+    // and each use must be compatible with the role the schedule gives it. A
+    // live handle alone is insufficient: sampling a depth target or attaching a
+    // multisampled texture to a post-process shader would otherwise be accepted
+    // by Null and fail only after a real backend starts consuming the frame.
+    [[nodiscard]] Core::Status requireRenderTextureRole(
+        u32 deviceBindingKey, const char* role, RenderTextureBindingRole expected) const noexcept
+    {
+        if (deviceBindingKey == 0)
+        {
+            // Key zero is the primary surface sentinel for color roles. For a depth
+            // role it means "no optional depth target"; clearDepth is checked by the
+            // chain validator before this resolver is reached.
+            return Core::success();
+        }
+
+        const auto binding = renderTextureBindings_.find(deviceBindingKey);
+        if (binding == renderTextureBindings_.end() || !isLiveRenderTexture(binding->second))
+        {
+            Core::Error error{RenderErrorCode::RenderTextureNotFound,
+                              "Post-process chain references an unbound render texture key"};
+            error.addContext("role", role);
+            return Core::failure(std::move(error));
+        }
+
+        const RenderTextureDesc& desc = renderTextures_[binding->second.index].desc;
+        const bool depth = isDepthRenderTextureFormat(desc.format);
+        const bool colorAttachment =
+            hasRenderTextureUsage(desc.usage, RenderTextureUsage::ColorAttachment);
+        const bool sampled = hasRenderTextureUsage(desc.usage, RenderTextureUsage::Sampled);
+        const bool singleSample = desc.sampleCount == 1;
+        bool valid = false;
+        switch (expected)
+        {
+        case RenderTextureBindingRole::ColorAttachment:
+            valid = !depth && colorAttachment;
+            break;
+        case RenderTextureBindingRole::ColorAttachmentSingleSample:
+            valid = !depth && colorAttachment && singleSample;
+            break;
+        case RenderTextureBindingRole::SampledColor:
+            valid = !depth && sampled && singleSample;
+            break;
+        case RenderTextureBindingRole::ColorTarget:
+            valid = !depth && colorAttachment && sampled && singleSample;
+            break;
+        case RenderTextureBindingRole::DepthAttachment:
+            valid = depth &&
+                    hasRenderTextureUsage(desc.usage, RenderTextureUsage::DepthStencilAttachment);
+            break;
+        }
+        if (!valid)
+        {
+            Core::Error error{RenderErrorCode::InvalidPostProcessChain,
+                              "Post-process render texture does not satisfy its binding role"};
+            error.addContext("role", role);
+            return Core::failure(std::move(error));
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status requireMatchingSampleCount(
+        u32 firstBindingKey, u32 secondBindingKey, const char* role) const noexcept
+    {
+        if (firstBindingKey == 0 || secondBindingKey == 0)
+        {
+            return Core::success();
+        }
+        const RenderTextureSlot* first = boundRenderTexture(firstBindingKey);
+        const RenderTextureSlot* second = boundRenderTexture(secondBindingKey);
+        // Role validation runs before this helper, so a null slot means the
+        // caller supplied an unbound key and should retain RenderTextureNotFound.
+        if (first == nullptr || second == nullptr ||
+            first->desc.sampleCount == second->desc.sampleCount)
+        {
+            return Core::success();
+        }
+        Core::Error error{RenderErrorCode::InvalidPostProcessChain,
+                          "Post-process render textures must use matching sample counts"};
+        error.addContext("role", role);
+        return Core::failure(std::move(error));
+    }
+
+    [[nodiscard]] Core::Status rejectRenderTextureAlias(
+        u32 firstBindingKey, u32 secondBindingKey, const char* operation) const noexcept
+    {
+        if (firstBindingKey == 0 || secondBindingKey == 0 || firstBindingKey == secondBindingKey)
+        {
+            return Core::success();
+        }
+        const auto first = renderTextureBindings_.find(firstBindingKey);
+        const auto second = renderTextureBindings_.find(secondBindingKey);
+        if (first == renderTextureBindings_.end() || second == renderTextureBindings_.end() ||
+            !isLiveRenderTexture(first->second) || !isLiveRenderTexture(second->second) ||
+            first->second != second->second)
+        {
+            return Core::success();
+        }
+        Core::Error error{RenderErrorCode::InvalidPostProcessChain,
+                          "Post-process operation aliases its source and destination texture"};
+        error.addContext("operation", operation);
+        return Core::failure(std::move(error));
+    }
+
+    // Runs the chain for real rather than merely accepting it: builds the extension
+    // schedule and drives the shared reference math over a probe pixel. That makes
+    // the Null device an actual consumer, so "the chain did nothing" is a test
+    // failure here instead of an invisible no-op in a product.
+    [[nodiscard]] Core::Status executePostProcessChain(const RenderFrame& frame) noexcept
+    {
+        const RenderPostProcessChainView& chain = frame.postProcess;
+        if (!chain.enabled())
+        {
+            return Core::success();
+        }
+        auto schedule = buildRenderPipelineSchedule(
+            chain, !frame.primaryWindowUIDisplayList.commands().empty());
+        if (!schedule)
+        {
+            return Core::failure(std::move(schedule.error()));
+        }
+
+        // Scene-linear probe. The Null device has no framebuffer, so one pixel is
+        // enough to prove the operators are wired and finite.
+        LinearRgba probe{0.75F, 0.5F, 0.25F, 1.0F};
+        for (const RenderPipelinePassPlan& pass : schedule->passes())
+        {
+            switch (pass.kind)
+            {
+            case RenderPipelinePassKind::Fog:
+                probe = applyFogToLinearColor(probe, ProbeCameraDistanceMeters, chain.fog);
+                break;
+            case RenderPipelinePassKind::BloomPrefilter:
+                probe = bloomPrefilterLinearColor(probe, chain.bloom);
+                break;
+            case RenderPipelinePassKind::ToneMapping:
+                probe = toneMapLinearColor(probe, chain.toneMapping);
+                break;
+            default:
+                break;
+            }
+        }
+        if (!std::isfinite(probe.r) || !std::isfinite(probe.g) || !std::isfinite(probe.b) ||
+            !std::isfinite(probe.a))
+        {
+            return Core::failure(RenderErrorCode::InvalidPostProcessChain,
+                                 "Post-process reference math produced a non-finite result");
+        }
+
+        lastPostProcessProbe_ = probe;
+        ++statistics_.postProcessChainsExecuted;
+        statistics_.postProcessPassesPlanned += schedule->passes().size();
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status validatePostProcessChain(const RenderFrame& frame) noexcept
+    {
+        const RenderPostProcessChainView& chain = frame.postProcess;
+        if (!chain.enabled())
+        {
+            return Core::success();
+        }
+        if (auto status = validateRenderPostProcessChain(chain); !status)
+        {
+            return status;
+        }
+        // Shader bindings are not part of the Null device SPI yet. Reject a
+        // CustomShader before surface/frame state advances instead of planning a
+        // pass that the probe loop would silently ignore.
+        for (const RenderPostProcessStep& step : chain.customSteps)
+        {
+            if (step.kind == RenderPostProcessStepKind::CustomShader)
+            {
+                return Core::failure(
+                    RenderErrorCode::RenderTextureUnsupported,
+                    "NullRender does not support CustomShader post-process steps yet");
+            }
+        }
+
+        if (auto status = requireRenderTextureRole(
+                chain.sceneColorTargetBindingKey, "sceneColor", RenderTextureBindingRole::ColorTarget);
+            !status)
+        {
+            return status;
+        }
+        if (auto status = requireRenderTextureRole(
+                chain.sceneDepthTargetBindingKey, "sceneDepth", RenderTextureBindingRole::DepthAttachment);
+            !status)
+        {
+            return status;
+        }
+        if (auto status = requireMatchingSampleCount(
+                chain.sceneColorTargetBindingKey, chain.sceneDepthTargetBindingKey, "sceneColor/sceneDepth");
+            !status)
+        {
+            return status;
+        }
+        if (auto status = requireRenderTextureRole(
+                chain.pingTargetBindingKey, "ping", RenderTextureBindingRole::ColorTarget);
+            !status)
+        {
+            return status;
+        }
+        if (auto status = requireRenderTextureRole(
+                chain.pongTargetBindingKey, "pong", RenderTextureBindingRole::ColorTarget);
+            !status)
+        {
+            return status;
+        }
+        if (chain.bloom.enabled)
+        {
+            if (auto status = rejectRenderTextureAlias(
+                    chain.sceneColorTargetBindingKey, chain.pingTargetBindingKey, "bloomPrefilter");
+                !status)
+            {
+                return status;
+            }
+            if (auto status = rejectRenderTextureAlias(
+                    chain.sceneColorTargetBindingKey, chain.pongTargetBindingKey, "bloomUpsample");
+                !status)
+            {
+                return status;
+            }
+            if (auto status = rejectRenderTextureAlias(
+                    chain.pingTargetBindingKey, chain.pongTargetBindingKey, "bloomPingPong");
+                !status)
+            {
+                return status;
+            }
+        }
+        for (const RenderOffscreenPassView& pass : chain.offscreenPasses)
+        {
+            if (auto status = requireRenderTextureRole(
+                    pass.colorTargetBindingKey, "offscreenColor", RenderTextureBindingRole::ColorAttachment);
+                !status)
+            {
+                return status;
+            }
+            if (auto status = requireRenderTextureRole(
+                    pass.depthTargetBindingKey, "offscreenDepth", RenderTextureBindingRole::DepthAttachment);
+                !status)
+            {
+                return status;
+            }
+            if (auto status = requireMatchingSampleCount(
+                    pass.colorTargetBindingKey, pass.depthTargetBindingKey, "offscreenColor/offscreenDepth");
+                !status)
+            {
+                return status;
+            }
+            if (auto status = rejectRenderTextureAlias(
+                    pass.colorTargetBindingKey, pass.depthTargetBindingKey, "offscreenAttachments");
+                !status)
+            {
+                return status;
+            }
+        }
+        for (const RenderPostProcessStep& step : chain.customSteps)
+        {
+            if (auto status = requireRenderTextureRole(
+                    step.sourceBindingKey, "stepSource", RenderTextureBindingRole::SampledColor);
+                !status)
+            {
+                return status;
+            }
+            if (auto status = requireRenderTextureRole(step.destinationBindingKey,
+                                                       "stepDestination",
+                                                       RenderTextureBindingRole::ColorAttachmentSingleSample);
+                !status)
+            {
+                return status;
+            }
+            if (auto status = rejectRenderTextureAlias(
+                    step.sourceBindingKey, step.destinationBindingKey, "customStep");
+                !status)
+            {
+                return status;
+            }
+        }
+        return Core::success();
+    }
+
     [[nodiscard]] bool isLiveEnvironmentMap(GpuEnvironmentMapId environmentMap) const noexcept
     {
         return environmentMap.owner == resourceOwnerId() &&
@@ -1232,6 +1694,11 @@ class NullRenderDevice final : public IRenderDevice {
     std::vector<TextureSlot> textures_{};
     std::unordered_map<u32, GpuTextureId> textureBindings_{};
     std::vector<EnvironmentMapSlot> environmentMaps_{};
+    std::vector<RenderTextureSlot> renderTextures_{};
+    std::unordered_map<u32, GpuRenderTextureId> renderTextureBindings_{};
+    // Result of the last executed chain's probe pixel. Kept so a headless test can
+    // assert the operators actually changed the color.
+    LinearRgba lastPostProcessProbe_{};
     std::optional<Mesh3DImageBasedLightingDesc> mesh3DImageBasedLighting_{};
     std::vector<MeshSlot> meshes_{};
     std::unordered_map<u32, GpuMeshId> meshBindings_{};

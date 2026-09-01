@@ -38,11 +38,7 @@ TEST(Typed2dCatalogPipelineTests, CookLoadParseTextureAndSprite)
     const auto spriteId = *Core::AssetId::fromBytes(idBytes(3U));
 
     std::vector<std::byte> pixels(1U * 1U * 4U, std::byte{0xAB}); // 1x1 rgba
-    auto texPayload = AssetFormat::writeTexture2DPayloadBytes(AssetFormat::Texture2DPayloadDesc{
-        .width = 1,
-        .height = 1,
-        .pixels = pixels,
-    });
+    auto texPayload = AssetFormat::writeTexture2DPayloadBytesRgba8(1, 1, pixels);
     ASSERT_TRUE(texPayload.has_value());
     auto spritePayload = AssetFormat::writeSpritePayloadBytes(AssetFormat::SpritePayloadDesc{
         .u0 = 0.0f,
@@ -137,7 +133,8 @@ TEST(Typed2dCatalogPipelineTests, CookLoadParseTextureAndSprite)
     ASSERT_TRUE(texture.has_value()) << texture.error().message;
     EXPECT_EQ(texture->width, 1);
     EXPECT_EQ(texture->height, 1);
-    EXPECT_EQ(texture->pixels[0], std::byte{0xAB});
+    EXPECT_EQ(texture->sampler.mipFilter, AssetFormat::Texture2DMipFilterMode::None);
+    EXPECT_EQ(texture->basePixels()[0], std::byte{0xAB});
 
     std::filesystem::remove_all(root, ec);
 }

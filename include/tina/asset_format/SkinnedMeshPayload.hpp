@@ -8,11 +8,13 @@
 
 #include <optional>
 #include <span>
+#include <string>
+#include <string_view>
 #include <vector>
 
 namespace Tina::AssetFormat {
 
-// SkinnedMesh cooked payload schema v1 (little-endian, after CookedAsset header/deps).
+// SkinnedMesh cooked payload schema v2 (little-endian, after CookedAsset header/deps).
 // Bytes 0..31 of the header are byte-identical in layout and meaning to the whole
 // StaticMesh v1 header, and the vertex/submesh/index blocks reuse the StaticMesh
 // P3N3T4UV2 record, the 16-byte submesh record and the u16 index array unchanged.
@@ -20,7 +22,7 @@ namespace Tina::AssetFormat {
 // (StaticMeshWire::VertexLayout) keeps exactly 12 floats per vertex.
 //
 // Layout:
-//   u16 schemaVersion       (=1)
+//   u16 schemaVersion       (=2)
 //   u16 vertexLayout        (=2, P3N3T4UV2)
 //   u16 indexType           (1 = U16)
 //   u16 submeshCount        (1..MaxSubmeshes)
@@ -33,6 +35,7 @@ namespace Tina::AssetFormat {
 //   u32 reserved0/1/2       (=0)
 //   f32 inverseBindMatrices[jointCount * 16]  // column-major, 64B per joint
 //   SkinnedMeshJointWire[jointCount]          (44B each)
+//   u8  jointNames[jointCount * 64]           // v2; UTF-8, NUL-terminated, zero padded
 //   StaticMeshSubmeshWire[submeshCount]       (16B each)
 //   f32 vertices[vertexCount * 12]            // interleaved P3N3T4UV2
 //   u16 jointIndices[vertexCount * 4]
@@ -42,12 +45,32 @@ namespace Tina::AssetFormat {
 // The inverse bind block is placed first so it starts at HeaderBytes (48), which is a
 // multiple of 16 and pairs with the cooked payloadAlignment of 16 for SIMD loads.
 //
+// v2 adds the joint name block. Before it, a joint was addressable only by a cook-derived
+// u16 index -- and because the cooker sorts joints by (depth, sourceIndex) so parents
+// precede children, that index is a permutation no consumer can invert. Any feature that
+// has to identify a specific bone therefore had nothing to key on: a bone mask, a retarget
+// mapping or an IK goal could only be written as a raw index, which silently means a
+// different bone after any edit to the source file.
+//
+// The block is unconditional rather than selected by a header flag, costing 64 bytes per
+// joint (16 KiB at the 256-joint bound, against a vertex block measured in megabytes). A
+// flagged block would make the layout depend on a field, and this payload deliberately
+// derives every offset from the counts alone so the writer and the parser cannot disagree.
+//
+// An individual name may be empty: glTF nodes need not be named, and the cooker must not
+// invent an identity that the source does not have. Duplicate non-empty names are rejected
+// at encode -- a lookup that could return either of two joints is not a lookup.
+//
 // Scene Animator3D pose evaluation and Render GPU palette upload consume this
 // immutable cooked payload without changing its wire contract.
 namespace SkinnedMeshWire {
-inline constexpr Core::u16 SchemaVersion = 1;
+inline constexpr Core::u16 SchemaVersion = 2;
 inline constexpr Core::u32 HeaderBytes = 48;
 inline constexpr Core::u32 JointBytes = 44;
+// Matches PrefabWire::NameBytes so a joint name and a prefab node name have the same
+// budget; a rig authored as a node hierarchy keeps its names through either path.
+inline constexpr Core::u32 JointNameBytes = 64;
+inline constexpr Core::u32 MaximumJointNameBytes = JointNameBytes - 1U;
 inline constexpr Core::u32 InverseBindMatrixBytes = 64;
 inline constexpr Core::u32 SubmeshBytes = StaticMeshWire::SubmeshBytes;
 inline constexpr Core::u16 VertexLayout = StaticMeshWire::VertexLayout;
@@ -69,6 +92,8 @@ static_assert(HeaderBytes == StaticMeshWire::HeaderBytes + 16U);
 // Every block starts on a 4-byte boundary, so no padding is encoded between them.
 static_assert(HeaderBytes % 4 == 0);
 static_assert(JointBytes % 4 == 0);
+static_assert(JointNameBytes % 4 == 0);
+static_assert(MaximumJointNameBytes < JointNameBytes);
 static_assert(InverseBindMatrixBytes % 4 == 0);
 static_assert(SubmeshBytes % 4 == 0);
 // The inverse bind block starts at HeaderBytes and needs 16-byte alignment for SIMD.
@@ -91,6 +116,9 @@ struct SkinnedMeshJointDesc final {
     // xyzw quaternion, matching glTF and PrefabNodeDesc.
     float bindRotation[4] = {0.0F, 0.0F, 0.0F, 1.0F};
     float bindScale[3] = {1.0F, 1.0F, 1.0F};
+    // v2. Empty is legal and means the source did not name this joint. Non-empty names
+    // must be unique within one skeleton and valid UTF-8 without NUL.
+    std::string name{};
 };
 
 struct SkinnedMeshJointView final {
@@ -99,6 +127,8 @@ struct SkinnedMeshJointView final {
     float bindTranslation[3] = {0.0F, 0.0F, 0.0F};
     float bindRotation[4] = {0.0F, 0.0F, 0.0F, 1.0F};
     float bindScale[3] = {1.0F, 1.0F, 1.0F};
+    // Borrows the payload's name bytes; empty when the joint is unnamed.
+    std::string_view name{};
 };
 
 struct SkinnedMeshPayloadDesc final {
@@ -133,6 +163,7 @@ struct SkinnedMeshPayloadView final {
     Core::u16 influencesPerVertex = 0;
     std::span<const float> inverseBindMatrices{};
     std::span<const std::byte> jointsBytes{};
+    std::span<const std::byte> jointNamesBytes{};
     std::span<const StaticMeshSubmeshView> submeshes{};
     std::span<const float> vertices{};
     std::span<const Core::u16> jointIndices{};
@@ -145,6 +176,16 @@ struct SkinnedMeshPayloadView final {
 
     // Column-major mat4 of one joint, or empty when index is out of range.
     [[nodiscard]] std::span<const float> inverseBindMatrix(Core::u16 index) const noexcept;
+
+    // Borrowed name of one joint; empty for an unnamed joint or an out-of-range index.
+    [[nodiscard]] std::string_view jointName(Core::u16 index) const noexcept;
+
+    // Index of the joint with this name, or nullopt when no joint carries it. Linear:
+    // a skeleton holds at most 256 joints, and building a map would allocate inside a
+    // view whose whole contract is that it borrows. Callers resolving many names at once
+    // (a mask, a retarget table) should hoist their own map instead of calling this in a
+    // loop. An empty query never matches, because unnamed joints are not addressable.
+    [[nodiscard]] std::optional<Core::u16> findJoint(std::string_view name) const noexcept;
 
     [[nodiscard]] bool empty() const noexcept
     {

@@ -212,7 +212,9 @@ premultiplied-alpha 合成保持不变。Scene extraction 在 descriptor 之前�
 texture，以 batch-local uniform 控制分支；fragment shader 用 world-position/UV derivatives 构造 TBN，因此
 rotation、signed scale、atlas UV 与 flip 无需额外矩阵。normal 只调制 point-light contribution，ambient、shadow
 visibility、attenuation 与 premultiplied alpha 保持原契约；无 normal 走原有分支，RGBA8 `(128,128,255)` 的
-flat normal 相对 Lambert factor 精确为1。当前仍无 HDR/tone mapping。product-2d schema 29 继承 schema 19，并以
+flat normal 相对 Lambert factor 精确为1。Render 已发布 HDR/tone-mapping 后处理契约，Null 可执行 reference
+math；当前 bgfx 产品路径对非空后处理 chain 显式 fail closed，尚无真实 HDR/tone-mapping GPU pass。product-2d
+schema 29 继承 schema 19，并以
 `authoredPointLight2DCount=3`、`pointLight2DCount=2`、`culledPointLight2DCount=1` 提供集成证据，继承双
 ShadowOccluder2D 与 soft/hard 差分，并以 `normalMappedSpriteCount=1/0` 的 normal on/off 可重复像素差分关闭 N5。
 Cooked `Fx2D` 不扩展 Render wire contract：Scene factory 最终仍通过 ParticleSystem/Trail 生成 Sprite2D item，
@@ -295,7 +297,7 @@ shader mode/program，并在采样后 premultiply。DisplayList/frame resource �
 
 | API | Null | bgfx |
 | --- | --- | --- |
-| `create/destroyTexture2DRgba8` | 逻辑 generation storage；同步 retire | 私有 RGBA8 texture；逻辑失效后 marker 延迟销毁 |
+| `create/destroyTexture2D` | 校验格式、色彩空间、sampler 与完整 mip chain；逻辑 generation storage；同步 retire | 映射 native format/sRGB/sampler flags，连续上传完整 mip blob；adapter 不支持的格式 fail closed；逻辑失效后 marker 延迟销毁 |
 | `validateTexture2D` | 非消费式 owner/live/generation 校验；零突变 | owner-thread 非消费式 owner/live/generation 校验；零突变 |
 | `retireTexture2D(texture, pin)` | 成功同步释放 pin | 成功消费 pin，readback marker 后释放 |
 | `createTexture2DBinding` | device-instance allocator；bind 成功才消费非0 key | device-instance allocator；bind 成功才消费非0 key |
@@ -311,6 +313,18 @@ shader mode/program，并在采样后 premultiply。DisplayList/frame resource �
 | `setMesh3DMaterialMetallicRoughnessTextureBinding` | 校验/记录 binding | material key → optional MR texture；未 bind 用默认 metallic=0/roughness=1 |
 | `setMesh3DLighting` | 同步校验/复制低层 fallback | 未提供 frame-scoped Scene lighting 时使用；0..4 directional + 0..8 point + 0..8 spot lights + ambient |
 | `capturePrimaryFrameRgba8` | Unsupported | present 后异步截图路径；owner thread 有界推进最多120个 bgfx frame，并在轮询间给 render callback 1ms 调度窗口，超限返回 `FrameCaptureFailed` |
+
+Texture2D cooked wire 当前为 schema v2。格式集合固定为 `Rgba8Unorm`、BC1/BC3/BC7 与 ASTC 4x4；
+色彩空间是 Linear 或 sRGB；sampler 支持 Repeat/Mirror/Clamp/Border、Point/Linear，以及必须同时用于
+min/mag 的 Anisotropic。公开契约不提供逐纹理的数值 anisotropy 上限，因为 bgfx 只能兑现 sampler enable
+与 device-wide maximum。单级纹理必须使用 `mipFilter=None`；多级纹理必须从 base level
+连续减半到 1x1，并选择 Point 或 Linear mip filter。Asset parser 同时核对 cooked header 的 type version，
+因此旧 v1 payload/type version 不走兼容分支。
+
+这里的“支持”是 schema、typed reader、Asset→Render 映射与 Null/bgfx upload 能消费调用方提供的完整数据，
+不表示生产 cooker 已会生成高级数据。当前 `CatalogCook` 的 `texture2d` recipe、MediaCook、GltfCook 与 assetc
+仍只写 Rgba8 单 mip；glTF 仅正确区分 base-color sRGB 和 normal/metallic-roughness Linear。压缩/transcode、
+mip 生成和 source sampler authoring 仍属于 ASSET-TEX-002 的剩余工作。
 
 `createTexture2DBinding()` 分配的 key 单调且解绑后不复用；backend bind 失败不消费候选 key。
 caller-chosen `setTexture2DBinding()` key 与 allocator-managed key 共用 device namespace，registry
@@ -348,6 +362,40 @@ view 提交 blit/readback，仅以 `readTexture()` 的 ready frame 判断完成�
 pin 的 destroy 则立即使逻辑 handle/binding 失效并把 native handle 交给 `bgfx::destroy` 的 backend-owned
 deferred destruction，不进入 marker timeline。只有已经进入 marker timeline、但有界 drain 未完成的外部
 pin，才以 `bgfx::shutdown()` 返回作为 hard completion fallback。
+
+## 后处理与 offscreen（RenderPostProcess）
+
+`RenderPostProcessChainView` 是 `RenderFrame` 上的可选 offscreen/HDR 图，与 `primaryWorldScene`
+遵循同一条 submit-call-local 借用契约。它承载 HDR scene target、ping/pong、offscreen pass、decal、
+fog、bloom、tone mapping 与自定义 step。
+
+**核心 pass 枚举保持冻结。** `RenderPassKind`（Clear / 三种 shadow depth / Opaque3D / Transparent3D /
+Sprite2D / UI）不因新增效果而改变；后处理由**另一个**枚举 `RenderPipelinePassKind` 承载，
+`buildRenderPipelineSchedule()` 只规划扩展 pass。顺序固定为
+offscreen → decal → fog → bloom（prefilter / downsample×N / blur / upsample）→ 自定义 step →
+tone mapping → UI composite。bloom 在 ping/pong 间交替，故没有任何一步读写同一张贴图。
+
+**`enabled()` 不把 tone mapping 计入。** `ToneMappingDesc::operation` 默认是 `AcesFitted`，而每个
+`RenderFrame` 都携带一个默认构造的 chain；若默认 operator 参与判定，则**任何**从未提到后处理的帧
+都会被报告为「请求了后处理」，随后因为没有 scene color target 而无法通过自身校验。tone mapping 是
+offscreen 渲染的一个**阶段**而不是独立开关，只有别的东西先 opt in 时才生效。同理，
+`buildRenderPipelineSchedule()` 对未启用的 chain 直接返回空 schedule。
+
+**Binding key 0 永远表示主 surface**，不可被 `setRenderTextureBinding()` 占用；这让 chain 用 0 表达
+「输出到 surface」而无需额外 flag。chain 引用的每个非零 key 必须在使用它的那一帧之前完成绑定，
+否则 submit 返回 `RenderTextureNotFound`。校验与绑定解析都发生在任何帧状态推进之前，因此被拒绝的
+帧不消费 frame index。
+
+**当前后端支持面：**
+
+| 后端 | 行为 |
+| --- | --- |
+| Null | **完整消费**：创建/绑定/销毁 render texture、校验 chain、构建扩展 schedule，并对一个 1×1 探针像素执行共享 reference math（`toneMapLinearColor`/`bloomPrefilterLinearColor`/`applyFogToLinearColor`），结果计入 `postProcessChainsExecuted` 与 `postProcessPassesPlanned` |
+| bgfx | **显式 fail closed**：非空 chain 返回 `RenderTextureUnsupported`。GPU 实现（offscreen framebuffer、HDR 格式协商、bloom mip 链，以及 `CustomShader` 所需的 shader binding）是独立切片 |
+
+bgfx 选择报错而非静默忽略：静默忽略会让调用方设置完整 HDR 链、得到 `success()`、却既看不到变化
+也收不到错误。这正是 ADR 0030 所禁止的「payload 必须被消费或显式拒绝」。一个诚实的错误比一个
+看起来成功的空操作有用。
 
 ## bgfx backend
 

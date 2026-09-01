@@ -86,9 +86,8 @@ void writeCookedObject(const std::filesystem::path& root, AssetFormat::AssetKind
     };
     const std::array<std::byte, 4> texturePixels{
         std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF}, std::byte{0xFF}};
-    auto texture = AssetFormat::writeCookedTexture2DAsset(
-        package.textureId,
-        AssetFormat::Texture2DPayloadDesc{.width = 1U, .height = 1U, .pixels = texturePixels});
+    auto texture = AssetFormat::writeCookedTexture2DAssetRgba8(
+        package.textureId, 1U, 1U, texturePixels);
     EXPECT_TRUE(texture.has_value()) << texture.error().message;
     auto tileset = AssetFormat::writeCookedTilesetAsset(
         package.tilesetId, AssetFormat::TilesetPayloadDesc{.tiles = tiles, .textureId = package.textureId});

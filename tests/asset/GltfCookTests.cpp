@@ -820,6 +820,100 @@ TEST(GltfCookTests, MergesDuplicateSkinInfluencesBeforeQuantization)
     FAIL() << "cooked request did not contain a SkinnedMesh";
 }
 
+// SkinnedMesh v2 carries joint names, and the cooker is the only place they can come from.
+// This also pins that a name follows its joint through the (depth, sourceIndex) reorder
+// rather than staying in source order: getting that wrong attaches every name to the wrong
+// bone, and nothing reports it.
+TEST(GltfCookTests, PreservesJointNamesThroughTheSkinReorder)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_skin_joint_names";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto gltfPath = dir / "skinned.gltf";
+
+    std::string json = skinnedTriangleGltfJson();
+    const std::string authoredNodes = "\"nodes\":[{\"children\":[1]},{\"mesh\":0,\"skin\":0}]";
+    const std::string authoredSkin = "\"skins\":[{\"joints\":[0],\"inverseBindMatrices\":7}]";
+    ASSERT_NE(json.find(authoredNodes), std::string::npos);
+    ASSERT_NE(json.find(authoredSkin), std::string::npos);
+    // The skin lists the child joint first. The cooker sorts by (depth, sourceIndex), so
+    // cooked joint 0 must be "hips" and cooked joint 1 "spine" -- the reverse of the
+    // authored joints array.
+    json.replace(json.find(authoredNodes), authoredNodes.size(),
+                 "\"nodes\":[{\"name\":\"hips\",\"children\":[1]},"
+                 "{\"name\":\"spine\",\"children\":[2]},{\"mesh\":0,\"skin\":0}]");
+    json.replace(json.find(authoredSkin), authoredSkin.size(),
+                 "\"skins\":[{\"joints\":[1,0]}]");
+    writeTextFile(gltfPath, json);
+
+    auto bytes = skinnedTriangleBufferBytes();
+    const std::array<Core::u16, 12> joints{0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0};
+    const std::array<float, 12> weights{
+        1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F,
+    };
+    std::memcpy(bytes.data() + 144, joints.data(), sizeof(joints));
+    std::memcpy(bytes.data() + 168, weights.data(), sizeof(weights));
+    writeBinaryFile(dir / "geometry.bin", bytes);
+
+    const auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::LinuxX64);
+    ASSERT_TRUE(request.has_value()) << (request ? "" : request.error().message);
+    for (const auto& asset : request->assets)
+    {
+        if (asset.assetKind != AssetFormat::AssetKind::SkinnedMesh)
+        {
+            continue;
+        }
+        const auto view = AssetFormat::parseSkinnedMeshPayload(asset.payload);
+        ASSERT_TRUE(view.has_value()) << (view ? "" : view.error().message);
+        ASSERT_EQ(view->jointCount, 2U);
+        EXPECT_EQ(view->jointName(0), "hips");
+        EXPECT_EQ(view->jointName(1), "spine");
+        EXPECT_EQ(view->joint(0)->parentJoint, AssetFormat::SkinnedMeshWire::JointIndexNone);
+        EXPECT_EQ(view->joint(1)->parentJoint, 0U);
+        EXPECT_EQ(view->findJoint("spine"), 1U);
+        std::filesystem::remove_all(dir, ec);
+        return;
+    }
+    FAIL() << "cooked request did not contain a SkinnedMesh";
+}
+
+TEST(GltfCookTests, RejectsDuplicateJointNamesInOneSkin)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_skin_duplicate_names";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    const auto gltfPath = dir / "skinned.gltf";
+
+    std::string json = skinnedTriangleGltfJson();
+    const std::string authoredNodes = "\"nodes\":[{\"children\":[1]},{\"mesh\":0,\"skin\":0}]";
+    const std::string authoredSkin = "\"skins\":[{\"joints\":[0],\"inverseBindMatrices\":7}]";
+    ASSERT_NE(json.find(authoredNodes), std::string::npos);
+    ASSERT_NE(json.find(authoredSkin), std::string::npos);
+    // glTF permits duplicate node names. A name resolving to either joint is not a lookup,
+    // so the cook refuses instead of silently picking one.
+    json.replace(json.find(authoredNodes), authoredNodes.size(),
+                 "\"nodes\":[{\"name\":\"bone\",\"children\":[1]},"
+                 "{\"name\":\"bone\",\"children\":[2]},{\"mesh\":0,\"skin\":0}]");
+    json.replace(json.find(authoredSkin), authoredSkin.size(),
+                 "\"skins\":[{\"joints\":[0,1]}]");
+    writeTextFile(gltfPath, json);
+
+    auto bytes = skinnedTriangleBufferBytes();
+    const std::array<Core::u16, 12> joints{0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0};
+    const std::array<float, 12> weights{
+        1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F, 1.0F, 0.0F, 0.0F, 0.0F,
+    };
+    std::memcpy(bytes.data() + 144, joints.data(), sizeof(joints));
+    std::memcpy(bytes.data() + 168, weights.data(), sizeof(weights));
+    writeBinaryFile(dir / "geometry.bin", bytes);
+
+    const auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::LinuxX64);
+    EXPECT_FALSE(request.has_value());
+    std::filesystem::remove_all(dir, ec);
+}
+
 TEST(GltfCookTests, RejectsMalformedSkinWeightAndCubicAnimation)
 {
     const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_skin_malformed";
