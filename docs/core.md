@@ -10,7 +10,7 @@ xxHash、EASTL、spdlog 或平台 SDK 类型。
 | Base | 固定宽度类型、Platform/Compiler、SourceLocation、EnumFlags、`ScopeExit`、`MoveOnlyFunction`、`CancellationSignal`/`CancellationToken` |
 | Error | C++23 `std::expected` 的 `Result<T>`/`Status`、稳定 domain/code、origin、native code、UTF-8 context chain |
 | Time | `Duration`、`MonotonicTimePoint`、`IMonotonicClock`、`SteadyMonotonicClock`、`FixedStepAccumulator` |
-| Diagnostics | `TINA_ASSERT`、`LogLevel/LogRecord`、Engine-owned `Diagnostics`/console sink，以及 opt-in `CrashHandler` 最后故障报告 |
+| Diagnostics | `TINA_ASSERT`、`TINA_LOG_*` 编译期剥离宏、`LogLevel/LogRecord/LogFormat`、Engine-owned `Diagnostics` 与 console/file/platform sink，以及 opt-in `CrashHandler` 最后故障报告 |
 | Trace | backend-neutral `TINA_TRACE_ZONE(nameLiteral)` 编译期 frontend；None + 可选 Tracy Profile backend |
 | Memory | `MemoryTag`、`MemoryTracker`、`CountingMemoryResource`、owning `FrameArena` |
 | ID | `GenerationId/GenerationPool`、`AssetId` |
@@ -102,11 +102,24 @@ ContentHash。
 ## Diagnostics
 
 `Diagnostics` 由 `EngineHost` 在其他模块前创建、在模块 shutdown 后最后关闭。模块只持有不可拥有的
-`DiagnosticChannel`。当前默认 sink 同步输出到 console；级别短路不写 sink，sink 失败计数且不递归，
-shutdown 后 channel 写入为 no-op。
+`DiagnosticChannel`。级别短路不写 sink，sink 失败计数且不递归，shutdown 后 channel 写入为 no-op。
+全部成员可从任意线程调用。
 
-普通 `Diagnostics` 当前没有 file sink、异步日志队列、MetricsRegistry 或 Trace session/capture 控制面。日志不得
-包含 token、密钥、用户正文和不必要的绝对路径；Audio callback/异常信号路径不调用普通日志。
+调用点用 `TINA_LOG_*`（`Log.hpp`），它按 `TINA_LOG_LEVEL_COMPILED` 在编译期剥离低于该常量的级别——
+语句整体消失，参数不被求值。Debug 保留 Trace，其余配置从 Info 起；`TINA_LOG_CRITICAL` 永不剥离。
+测试与持有 channel 的代码用 `TINA_LOG_TO(channel, level, ...)`。格式化是自研的 `{}` 占位符
+（`LogFormat.hpp`），不用 `<format>`——见 [ADR 0039](adr/0039-logging-frontend-and-async-sinks.md)。
+
+`DiagnosticsConfig` 默认同步；`asyncQueueCapacity` 非 0 时启一个 drain 线程与该容量的有界队列，
+满时丢弃最新并累加 `droppedByCapacityCount()`。Error 及以上在 `write()` 返回前完成投递，因为仓库
+有 149 处 `std::terminate()`。`filePath` 非空时叠加 file sink（追加、按 `fileRotateBytes` 轮转并保留
+一个 `.1` 备份、父目录自动创建、打开失败不使 `Create` 失败）。`platformDebugSink` 在 Windows 走
+`OutputDebugStringA`（仅当已附加调试器）、Android 走 logcat。EngineHost 用 1024 槽异步 + 每用户
+`tina.log`（8 MiB 轮转）。
+
+异步不是无条件更快：sink 极快时队列争用反而使它变慢，收益只在 sink 本身慢时出现（实测见 ADR 0039
+结果表）。仍然没有 MetricsRegistry 或 Trace session/capture 控制面。日志不得包含 token、密钥、
+用户正文和不必要的绝对路径；Audio callback/异常信号路径不调用普通日志。
 
 `<tina/core/diagnostics/CrashHandler.hpp>` 是与上述日志 owner 分离的进程级最后兜底。应用应在任何 factory、线程或
 窗口创建前显式调用 `installCrashHandler()`；`EngineHost`/Desktop 不自动安装。handler 覆盖

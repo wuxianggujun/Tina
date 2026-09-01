@@ -7,6 +7,7 @@
 #include <tina/asset_format/Texture2DPayload.hpp>
 #include <tina/core/error/Error.hpp>
 #include <tina/core/id/AssetId.hpp>
+#include <tina/core/text/JsonWriter.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 #include <tina/platform/glfw/GlfwPlatformFactory.hpp>
 #include <tina/render/RenderDevice.hpp>
@@ -63,28 +64,15 @@ struct LifecycleCounters final {
     u64 texturesUploaded = 0;
 };
 
-void writeJsonString(std::ostream& output, std::string_view value)
-{
-    output.put('"');
-    for (const unsigned char byte : value)
-    {
-        if (byte == '"' || byte == '\\')
-        {
-            output.put('\\');
-            output.put(static_cast<char>(byte));
-        } else if (byte >= 0x20U)
-        {
-            output.put(static_cast<char>(byte));
-        }
-    }
-    output.put('"');
-}
-
 void writeError(const Tina::Core::Error& error)
 {
-    std::cerr << "{\"status\":\"error\",\"sample\":\"tina_sample_2d_catalog\",\"message\":";
-    writeJsonString(std::cerr, error.message);
-    std::cerr << "}\n";
+    Tina::Core::JsonWriter writer(std::cerr);
+    writer.beginObject();
+    writer.member("status", "error");
+    writer.member("sample", "tina_sample_2d_catalog");
+    writer.member("message", error.message);
+    writer.endObject();
+    std::cerr << '\n';
 }
 
 [[nodiscard]] Tina::Core::AssetId::Bytes idBytes(u8 seed)
@@ -598,16 +586,21 @@ int main(int argc, char** argv)
 
     std::error_code ec;
     std::filesystem::remove_all(resources.catalogRoot, ec);
-    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_2d_catalog\""
-              << ",\"frames\":" << counters.frameUpdates
-              << ",\"renderExtractions\":" << counters.renderExtractions
-              << ",\"texturesUploaded\":" << counters.texturesUploaded
-              << ",\"stateExits\":" << counters.stateExits
-              << ",\"applicationShutdowns\":" << counters.applicationShutdowns
-              << ",\"exit\":\""
-              << ((*run == Tina::RunExitReason::GameRequestedExitAfterCurrentFrame)
-                      ? "GameRequestedExitAfterCurrentFrame"
-                      : "Other")
-              << "\"}\n";
+    {
+        Tina::Core::JsonWriter writer(std::cout);
+        writer.beginObject();
+        writer.member("status", "ok");
+        writer.member("sample", "tina_sample_2d_catalog");
+        writer.member("frames", counters.frameUpdates);
+        writer.member("renderExtractions", counters.renderExtractions);
+        writer.member("texturesUploaded", counters.texturesUploaded);
+        writer.member("stateExits", counters.stateExits);
+        writer.member("applicationShutdowns", counters.applicationShutdowns);
+        writer.member("exit", (*run == Tina::RunExitReason::GameRequestedExitAfterCurrentFrame)
+                                  ? "GameRequestedExitAfterCurrentFrame"
+                                  : "Other");
+        writer.endObject();
+    }
+    std::cout << '\n';
     return 0;
 }

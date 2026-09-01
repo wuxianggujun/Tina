@@ -6,6 +6,7 @@
 #include <tina/asset_format/SpritePayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
 #include <tina/core/id/AssetId.hpp>
+#include <tina/core/text/JsonWriter.hpp>
 #include <tina/render/RenderFramePacket.hpp>
 #include <tina/render/RenderScene.hpp>
 #include <tina/render/UploadTicket.hpp>
@@ -52,8 +53,14 @@ struct Options final {
 
 void writeError(const Tina::Core::Error& error)
 {
-    std::cerr << "{\"status\":\"error\",\"domain\":" << static_cast<unsigned>(error.code.domain)
-              << ",\"code\":" << error.code.value << ",\"message\":\"" << error.message << "\"}\n";
+    Tina::Core::JsonWriter writer(std::cerr);
+    writer.beginObject();
+    writer.member("status", "error");
+    writer.member("domain", static_cast<unsigned>(error.code.domain));
+    writer.member("code", error.code.value);
+    writer.member("message", error.message);
+    writer.endObject();
+    std::cerr << '\n';
 }
 
 [[nodiscard]] Tina::Core::Result<Options> parseOptions(int argc, char** argv)
@@ -235,7 +242,12 @@ int main(int argc, char** argv)
     }
     if (!requestId)
     {
-        std::cerr << "{\"status\":\"error\",\"message\":\"catalog has no entries\"}\n";
+        Tina::Core::JsonWriter writer(std::cerr);
+        writer.beginObject();
+        writer.member("status", "error");
+        writer.member("message", "catalog has no entries");
+        writer.endObject();
+        std::cerr << '\n';
         return 1;
     }
 
@@ -268,8 +280,13 @@ int main(int argc, char** argv)
 
     if (!gpuReady)
     {
-        std::cerr << "{\"status\":\"error\",\"message\":\"asset did not reach ReadyGpu within frame budget\","
-                  << "\"frames\":" << frames << "}\n";
+        Tina::Core::JsonWriter writer(std::cerr);
+        writer.beginObject();
+        writer.member("status", "error");
+        writer.member("message", "asset did not reach ReadyGpu within frame budget");
+        writer.member("frames", frames);
+        writer.endObject();
+        std::cerr << '\n';
         (*taskSystem)->shutdownAndJoin();
         if (options.deleteCatalogOnExit)
         {
@@ -370,21 +387,32 @@ int main(int argc, char** argv)
         std::filesystem::remove_all(root, ec);
     }
 
-    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_asset\""
-              << ",\"frames\":" << frames << ",\"pumps\":" << pumps
-              << ",\"requestGpuReady\":true"
-              << ",\"storeActive\":" << system->store().activeCount()
-              << ",\"unloadOk\":" << (unloaded ? "true" : "false")
-              << ",\"retirementReleased\":" << retirement.released
-              << ",\"retirementLive\":" << retirement.live
-              << ",\"typedPayload\":" << (parsedTyped ? "true" : "false")
-              << ",\"textureWidth\":" << texW << ",\"textureHeight\":" << texH
-              << ",\"spritePpu\":" << ppu
-              << ",\"renderInputOk\":" << (renderInputOk ? "true" : "false")
-              << ",\"renderWidth\":" << renderW << ",\"renderHeight\":" << renderH
-              << ",\"renderU0\":" << renderU0 << ",\"renderU1\":" << renderU1
-              << ",\"task\":\"bounded_io\""
-              << ",\"upload\":\"null_ledger\""
-              << ",\"catalog\":\"" << (options.catalogRoot.empty() ? "synthetic" : "external") << "\"}\n";
+    {
+        Tina::Core::JsonWriter writer(std::cout);
+        writer.beginObject();
+        writer.member("status", "ok");
+        writer.member("sample", "tina_sample_asset");
+        writer.member("frames", frames);
+        writer.member("pumps", pumps);
+        writer.member("requestGpuReady", true);
+        writer.member("storeActive", system->store().activeCount());
+        writer.member("unloadOk", unloaded.has_value());
+        writer.member("retirementReleased", retirement.released);
+        writer.member("retirementLive", retirement.live);
+        writer.member("typedPayload", parsedTyped);
+        writer.member("textureWidth", texW);
+        writer.member("textureHeight", texH);
+        writer.member("spritePpu", ppu);
+        writer.member("renderInputOk", renderInputOk);
+        writer.member("renderWidth", renderW);
+        writer.member("renderHeight", renderH);
+        writer.member("renderU0", renderU0);
+        writer.member("renderU1", renderU1);
+        writer.member("task", "bounded_io");
+        writer.member("upload", "null_ledger");
+        writer.member("catalog", options.catalogRoot.empty() ? "synthetic" : "external");
+        writer.endObject();
+    }
+    std::cout << '\n';
     return 0;
 }

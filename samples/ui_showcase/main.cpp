@@ -5,6 +5,7 @@
 #include "SampleSpriteFrameResource.hpp"
 
 #include <tina/core/error/Error.hpp>
+#include <tina/core/text/JsonWriter.hpp>
 #include <tina/desktop/DesktopEngine.hpp>
 #include <tina/runtime/GameApplication.hpp>
 #include <tina/runtime/GameState.hpp>
@@ -76,51 +77,17 @@ struct LifecycleCounters final {
     Tina::SampleUI::ShowcaseUISnapshot finalUI{};
 };
 
-void writeJsonString(std::ostream& output, std::string_view value)
-{
-    constexpr char Hexadecimal[] = "0123456789abcdef";
-    output.put('"');
-    for (const unsigned char byte : value) {
-        switch (byte) {
-        case '"':
-            output << "\\\"";
-            break;
-        case '\\':
-            output << "\\\\";
-            break;
-        case '\b':
-            output << "\\b";
-            break;
-        case '\f':
-            output << "\\f";
-            break;
-        case '\n':
-            output << "\\n";
-            break;
-        case '\r':
-            output << "\\r";
-            break;
-        case '\t':
-            output << "\\t";
-            break;
-        default:
-            if (byte < 0x20U) {
-                output << "\\u00" << Hexadecimal[byte >> 4U] << Hexadecimal[byte & 0x0FU];
-            } else {
-                output.put(static_cast<char>(byte));
-            }
-            break;
-        }
-    }
-    output.put('"');
-}
-
 void writeError(const Tina::Core::Error& error)
 {
-    std::cerr << "{\"status\":\"error\",\"sample\":\"tina_sample_ui_showcase\",\"domain\":"
-              << static_cast<std::uint16_t>(error.code.domain) << ",\"code\":" << error.code.value << ",\"message\":";
-    writeJsonString(std::cerr, error.message);
-    std::cerr << "}\n";
+    Tina::Core::JsonWriter writer(std::cerr);
+    writer.beginObject();
+    writer.member("status", "error");
+    writer.member("sample", "tina_sample_ui_showcase");
+    writer.member("domain", static_cast<std::uint16_t>(error.code.domain));
+    writer.member("code", error.code.value);
+    writer.member("message", error.message);
+    writer.endObject();
+    std::cerr << '\n';
 }
 
 template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text, Value& value) noexcept
@@ -775,73 +742,75 @@ class ShowcaseApplication final : public Tina::IGameApplication {
         return 1;
     }
 
-    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_ui_showcase\",\"frames\":" << counters.frameUpdates
-              << ",\"targetFrames\":" << options->targetFrameCount
-              << ",\"autoDemo\":" << (options->autoDemo ? "true" : "false") << ",\"initialTheme\":";
-    writeJsonString(std::cout, themeName(options->initialTheme));
-    std::cout << ",\"finalTheme\":";
-    writeJsonString(std::cout, themeName(counters.finalUI.theme));
-    std::cout << ",\"initialDensity\":";
-    writeJsonString(std::cout, densityName(options->initialDensity));
-    std::cout << ",\"finalDensity\":";
-    writeJsonString(std::cout, densityName(counters.finalUI.density));
-    std::cout << ",\"themeSwitches\":" << counters.finalUI.themeSwitches
-              << ",\"densitySwitchRequests\":" << counters.finalUI.densitySwitchRequests
-              << ",\"densityRebuilds\":" << counters.densityRebuilds
-              << ",\"sliderChanges\":" << counters.finalUI.sliderChanges
-              << ",\"treeExpansionChanges\":" << counters.finalUI.treeExpansionChanges
-              << ",\"progressValue\":" << counters.finalUI.progressValue
-              << ",\"buttonActivations\":" << counters.finalUI.buttonActivations
-              << ",\"listSelectionKey\":" << counters.finalUI.listSelectionKey
-              << ",\"treeSelectionKey\":" << counters.finalUI.treeSelectionKey
-              << ",\"dropdownSelection\":" << counters.finalUI.dropdownSelection
-              << ",\"scrollOffset\":" << counters.finalUI.scrollOffset
-              << ",\"componentScrollOffset\":" << counters.finalUI.componentScrollOffset
-              << ",\"controls\":" << counters.finalUI.controlCount
-              << ",\"imageProducts\":" << counters.finalUI.imageProductCount
-              << ",\"asymmetricCornerProducts\":"
-              << counters.finalUI.asymmetricCornerProductCount
-              << ",\"componentProfiles\":" << counters.finalUI.componentProfileCount
-              << ",\"workbenchBands\":" << counters.finalUI.workbenchBandCount
-              << ",\"desktopWorkbench\":" << (counters.finalUI.desktopWorkbench ? "true" : "false")
-              << ",\"dialogOpen\":" << (counters.finalUI.dialogOpen ? "true" : "false")
-              << ",\"stylesheetInstalled\":" << (counters.finalUI.stylesheetInstalled ? "true" : "false")
-              << ",\"styleTokenUpdates\":" << counters.finalUI.styleTokenUpdates
-              << ",\"motionBegins\":" << counters.finalUI.motionBegins
-              << ",\"imageAtlasUploaded\":" << (counters.imageAtlasUploaded ? "true" : "false")
-              << ",\"imageAtlasReleased\":" << (counters.imageAtlasReleased ? "true" : "false")
-              << ",\"imageAtlasInvalidated\":" << (counters.imageAtlasInvalidatedAfterRelease ? "true" : "false")
-              << ",\"imageFrameBorrowsAtRelease\":" << counters.imageFrameBorrowsAtRelease
-              << ",\"imageLifecycleDemo\":" << (options->imageLifecycleDemo ? "true" : "false")
-              << ",\"imageResolverCalls\":" << counters.imageResolverCalls
-              << ",\"imageResolverHits\":" << counters.imageResolverHits
-              << ",\"imageResolverUnavailable\":" << counters.imageResolverUnavailable
-              << ",\"imageResolverUnbound\":" << (counters.imageResolverUnbound ? "true" : "false")
-              << ",\"imageFrames\":" << renderEvidence.submittedImageFrames
-              << ",\"imageFreeFrames\":" << renderEvidence.submittedImageFreeFrames
-              << ",\"maxImageQuads\":" << renderEvidence.maxImageQuadCommands
-              << ",\"maxImageBatches\":" << renderEvidence.maxImageBatches
-              << ",\"maxUniqueImageResources\":" << renderEvidence.maxUniqueImageResources
-              << ",\"imageLinear\":" << (renderEvidence.sawLinearSampling ? "true" : "false")
-              << ",\"imageNearest\":" << (renderEvidence.sawNearestSampling ? "true" : "false")
-              << ",\"paintOrderChecksum\":" << renderEvidence.lastPaintOrderChecksum
-              << ",\"logicalPixelWidth\":" << counters.logicalPixelWidth
-              << ",\"logicalPixelHeight\":" << counters.logicalPixelHeight
-              << ",\"framebufferPixelWidth\":" << counters.framebufferPixelWidth
-              << ",\"framebufferPixelHeight\":" << counters.framebufferPixelHeight
-              << ",\"contentScaleX\":" << counters.contentScaleX
-              << ",\"contentScaleY\":" << counters.contentScaleY
-              << ",\"windowMetricsEvents\":" << counters.windowMetricsEvents
-              << ",\"quality\":";
-    writeJsonString(std::cout, qualityName(counters.finalUI.quality));
-    std::cout << ",\"notificationsEnabled\":" << (counters.finalUI.notificationsEnabled ? "true" : "false")
-              << ",\"multilineNotesScrolled\":" << (counters.finalUI.multilineNotesScrolled ? "true" : "false")
-              << ",\"stateEnters\":" << counters.stateEnters
-              << ",\"stateExits\":" << counters.stateExits
-              << ",\"uiRootsCreated\":" << counters.uiRootsCreated
-              << ",\"uiRootsReleased\":" << counters.uiRootsReleased << ",\"exit\":";
-    writeJsonString(std::cout, exitReasonName(*result));
-    std::cout << "}\n";
+    {
+        Tina::Core::JsonWriter writer(std::cout);
+        writer.beginObject();
+        writer.member("status", "ok");
+        writer.member("sample", "tina_sample_ui_showcase");
+        writer.member("frames", counters.frameUpdates);
+        writer.member("targetFrames", options->targetFrameCount);
+        writer.member("autoDemo", options->autoDemo);
+        writer.member("initialTheme", themeName(options->initialTheme));
+        writer.member("finalTheme", themeName(counters.finalUI.theme));
+        writer.member("initialDensity", densityName(options->initialDensity));
+        writer.member("finalDensity", densityName(counters.finalUI.density));
+        writer.member("themeSwitches", counters.finalUI.themeSwitches);
+        writer.member("densitySwitchRequests", counters.finalUI.densitySwitchRequests);
+        writer.member("densityRebuilds", counters.densityRebuilds);
+        writer.member("sliderChanges", counters.finalUI.sliderChanges);
+        writer.member("treeExpansionChanges", counters.finalUI.treeExpansionChanges);
+        writer.member("progressValue", counters.finalUI.progressValue);
+        writer.member("buttonActivations", counters.finalUI.buttonActivations);
+        writer.member("listSelectionKey", counters.finalUI.listSelectionKey);
+        writer.member("treeSelectionKey", counters.finalUI.treeSelectionKey);
+        writer.member("dropdownSelection", counters.finalUI.dropdownSelection);
+        writer.member("scrollOffset", counters.finalUI.scrollOffset);
+        writer.member("componentScrollOffset", counters.finalUI.componentScrollOffset);
+        writer.member("controls", counters.finalUI.controlCount);
+        writer.member("imageProducts", counters.finalUI.imageProductCount);
+        writer.member("asymmetricCornerProducts", counters.finalUI.asymmetricCornerProductCount);
+        writer.member("componentProfiles", counters.finalUI.componentProfileCount);
+        writer.member("workbenchBands", counters.finalUI.workbenchBandCount);
+        writer.member("desktopWorkbench", counters.finalUI.desktopWorkbench);
+        writer.member("dialogOpen", counters.finalUI.dialogOpen);
+        writer.member("stylesheetInstalled", counters.finalUI.stylesheetInstalled);
+        writer.member("styleTokenUpdates", counters.finalUI.styleTokenUpdates);
+        writer.member("motionBegins", counters.finalUI.motionBegins);
+        writer.member("imageAtlasUploaded", counters.imageAtlasUploaded);
+        writer.member("imageAtlasReleased", counters.imageAtlasReleased);
+        writer.member("imageAtlasInvalidated", counters.imageAtlasInvalidatedAfterRelease);
+        writer.member("imageFrameBorrowsAtRelease", counters.imageFrameBorrowsAtRelease);
+        writer.member("imageLifecycleDemo", options->imageLifecycleDemo);
+        writer.member("imageResolverCalls", counters.imageResolverCalls);
+        writer.member("imageResolverHits", counters.imageResolverHits);
+        writer.member("imageResolverUnavailable", counters.imageResolverUnavailable);
+        writer.member("imageResolverUnbound", counters.imageResolverUnbound);
+        writer.member("imageFrames", renderEvidence.submittedImageFrames);
+        writer.member("imageFreeFrames", renderEvidence.submittedImageFreeFrames);
+        writer.member("maxImageQuads", renderEvidence.maxImageQuadCommands);
+        writer.member("maxImageBatches", renderEvidence.maxImageBatches);
+        writer.member("maxUniqueImageResources", renderEvidence.maxUniqueImageResources);
+        writer.member("imageLinear", renderEvidence.sawLinearSampling);
+        writer.member("imageNearest", renderEvidence.sawNearestSampling);
+        writer.member("paintOrderChecksum", renderEvidence.lastPaintOrderChecksum);
+        writer.member("logicalPixelWidth", counters.logicalPixelWidth);
+        writer.member("logicalPixelHeight", counters.logicalPixelHeight);
+        writer.member("framebufferPixelWidth", counters.framebufferPixelWidth);
+        writer.member("framebufferPixelHeight", counters.framebufferPixelHeight);
+        writer.member("contentScaleX", counters.contentScaleX);
+        writer.member("contentScaleY", counters.contentScaleY);
+        writer.member("windowMetricsEvents", counters.windowMetricsEvents);
+        writer.member("quality", qualityName(counters.finalUI.quality));
+        writer.member("notificationsEnabled", counters.finalUI.notificationsEnabled);
+        writer.member("multilineNotesScrolled", counters.finalUI.multilineNotesScrolled);
+        writer.member("stateEnters", counters.stateEnters);
+        writer.member("stateExits", counters.stateExits);
+        writer.member("uiRootsCreated", counters.uiRootsCreated);
+        writer.member("uiRootsReleased", counters.uiRootsReleased);
+        writer.member("exit", exitReasonName(*result));
+        writer.endObject();
+    }
+    std::cout << '\n';
     return 0;
 }
 

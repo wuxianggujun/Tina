@@ -1,3 +1,4 @@
+#include <tina/core/text/JsonWriter.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 #include <tina/physics2d/PhysicsWorld2D.hpp>
 
@@ -27,6 +28,19 @@ struct Options final {
     std::uint32_t queryRays = 0;
     bool help = false;
 };
+
+// Every failure path prints the same three keys, so the shape lives here once rather than in
+// five places.
+void writeError(std::string_view message)
+{
+    Tina::Core::JsonWriter writer(std::cerr);
+    writer.beginObject();
+    writer.member("status", "error");
+    writer.member("sample", "tina_physics2d_bench");
+    writer.member("message", message);
+    writer.endObject();
+    std::cerr << '\n';
+}
 
 [[nodiscard]] bool parseU32(std::string_view text, std::uint32_t& out) noexcept
 {
@@ -177,8 +191,7 @@ int main(int argc, char** argv)
     Options options;
     std::string parseError;
     if (!parseOptions(argc, argv, options, parseError)) {
-        std::cerr << "{\"status\":\"error\",\"sample\":\"tina_physics2d_bench\",\"message\":\""
-                  << parseError << "\"}\n";
+        writeError(parseError);
         return 2;
     }
     if (options.help) {
@@ -190,22 +203,19 @@ int main(int argc, char** argv)
 
     auto worldResult = PhysicsWorld2D::Create(makeConfig(options.dynamicBodies));
     if (!worldResult) {
-        std::cerr << "{\"status\":\"error\",\"sample\":\"tina_physics2d_bench\",\"message\":\""
-                  << worldResult.error().message << "\"}\n";
+        writeError(worldResult.error().message);
         return 1;
     }
     PhysicsWorld2D world = std::move(*worldResult);
     if (!buildStackScene(world, options.dynamicBodies)) {
-        std::cerr << "{\"status\":\"error\",\"sample\":\"tina_physics2d_bench\","
-                     "\"message\":\"failed to build stack scene\"}\n";
+        writeError("failed to build stack scene");
         return 1;
     }
 
     Tina::Core::SteadyMonotonicClock clock;
     for (std::uint32_t step = 0; step < options.warmUpSteps; ++step) {
         if (!world.step()) {
-            std::cerr << "{\"status\":\"error\",\"sample\":\"tina_physics2d_bench\","
-                         "\"message\":\"warm-up step failed\"}\n";
+            writeError("warm-up step failed");
             return 1;
         }
     }
@@ -219,8 +229,7 @@ int main(int argc, char** argv)
     for (std::uint32_t step = 0; step < options.measureSteps; ++step) {
         const auto begin = clock.now();
         if (!world.step()) {
-            std::cerr << "{\"status\":\"error\",\"sample\":\"tina_physics2d_bench\","
-                         "\"message\":\"measure step failed\"}\n";
+            writeError("measure step failed");
             return 1;
         }
         const auto end = clock.now();
@@ -259,33 +268,37 @@ int main(int argc, char** argv)
 
     const auto statistics = world.stats();
     if (!world.shutdown()) {
-        std::cerr << "{\"status\":\"error\",\"sample\":\"tina_physics2d_bench\","
-                     "\"message\":\"shutdown failed\"}\n";
+        writeError("shutdown failed");
         return 1;
     }
 
-    std::cout
-        << "{\"status\":\"ok\",\"sample\":\"tina_physics2d_bench\","
-        << "\"workload\":\"stack_dynamic\","
-        << "\"bodies\":" << options.dynamicBodies << ','
-        << "\"warmup_steps\":" << options.warmUpSteps << ','
-        << "\"measured_steps\":" << options.measureSteps << ','
-        << "\"rays_per_step\":" << options.queryRays << ','
-        << "\"step_ns\":{"
-        << "\"p50\":" << p50 << ','
-        << "\"p95\":" << p95 << ','
-        << "\"p99\":" << p99 << ','
-        << "\"max\":" << maxNs << ','
-        << "\"mean\":" << meanNs
-        << "},"
-        << "\"query_ns_total\":" << queryNsTotal << ','
-        << "\"query_hits_total\":" << queryHitTotal << ','
-        << "\"world\":{"
-        << "\"body_count\":" << statistics.bodyCount << ','
-        << "\"shape_count\":" << statistics.shapeCount << ','
-        << "\"completed_steps\":" << statistics.completedStepCount
-        << "},"
-        << "\"note\":\"single-thread baseline only; not ADR-0018 tina_bench schema\""
-        << "}\n";
+    {
+        Tina::Core::JsonWriter writer(std::cout);
+        writer.beginObject();
+        writer.member("status", "ok");
+        writer.member("sample", "tina_physics2d_bench");
+        writer.member("workload", "stack_dynamic");
+        writer.member("bodies", options.dynamicBodies);
+        writer.member("warmup_steps", options.warmUpSteps);
+        writer.member("measured_steps", options.measureSteps);
+        writer.member("rays_per_step", options.queryRays);
+        writer.beginObjectMember("step_ns");
+        writer.member("p50", p50);
+        writer.member("p95", p95);
+        writer.member("p99", p99);
+        writer.member("max", maxNs);
+        writer.member("mean", meanNs);
+        writer.endObject();
+        writer.member("query_ns_total", queryNsTotal);
+        writer.member("query_hits_total", queryHitTotal);
+        writer.beginObjectMember("world");
+        writer.member("body_count", statistics.bodyCount);
+        writer.member("shape_count", statistics.shapeCount);
+        writer.member("completed_steps", statistics.completedStepCount);
+        writer.endObject();
+        writer.member("note", "single-thread baseline only; not ADR-0018 tina_bench schema");
+        writer.endObject();
+    }
+    std::cout << '\n';
     return 0;
 }

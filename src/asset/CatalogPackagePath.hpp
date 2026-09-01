@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Utf8Path.hpp"
+#include "core/io/PathUtil.hpp"
 
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/core/error/Result.hpp>
@@ -16,18 +16,6 @@ struct CatalogManifestPath final {
     std::filesystem::path directory;
     std::filesystem::path fileName;
 };
-
-[[nodiscard]] inline bool hasPathEscapeComponent(const std::filesystem::path& relative) noexcept
-{
-    for (const auto& component : relative)
-    {
-        if (component == "..")
-        {
-            return true;
-        }
-    }
-    return false;
-}
 
 [[nodiscard]] inline Core::Result<CatalogManifestPath>
 resolveCatalogManifestPath(std::string_view catalogRootUtf8,
@@ -45,9 +33,9 @@ resolveCatalogManifestPath(std::string_view catalogRootUtf8,
                              "manifest relative path is invalid");
     }
 
-    const auto relative = pathFromUtf8Bytes(manifestRelativePath);
-    if (relative.is_absolute() || relative.has_root_name() || relative.has_root_directory() ||
-        hasPathEscapeComponent(relative))
+    const auto relative = Core::Detail::pathFromUtf8Bytes(manifestRelativePath);
+    // pathEscapesRoot also rejects an empty relative path, which the check above already covered.
+    if (Core::Detail::pathEscapesRoot(relative))
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "manifest relative path is not safe");
@@ -61,7 +49,7 @@ resolveCatalogManifestPath(std::string_view catalogRootUtf8,
                              "manifest relative path does not name a file");
     }
 
-    auto fullPath = pathFromUtf8Bytes(catalogRootUtf8) / normalizedRelative;
+    auto fullPath = Core::Detail::pathFromUtf8Bytes(catalogRootUtf8) / normalizedRelative;
     fullPath = fullPath.lexically_normal();
     return CatalogManifestPath{
         .fullPath = fullPath,

@@ -4,6 +4,7 @@
 #include "SampleSpriteFrameResource.hpp"
 
 #include <tina/core/error/Error.hpp>
+#include <tina/core/text/JsonWriter.hpp>
 #include <tina/desktop/DesktopEngine.hpp>
 #include <tina/runtime/GameApplication.hpp>
 #include <tina/runtime/GameState.hpp>
@@ -178,46 +179,17 @@ class ShellIconResources final {
     Tina::Samples::SampleSpriteFrameResource frameResource_{};
 };
 
-void writeJsonString(std::ostream& output, std::string_view value)
-{
-    constexpr char Hexadecimal[] = "0123456789abcdef";
-    output.put('"');
-    for (const unsigned char byte : value) {
-        switch (byte) {
-        case '"':
-            output << "\\\"";
-            break;
-        case '\\':
-            output << "\\\\";
-            break;
-        case '\n':
-            output << "\\n";
-            break;
-        case '\r':
-            output << "\\r";
-            break;
-        case '\t':
-            output << "\\t";
-            break;
-        default:
-            if (byte < 0x20U) {
-                output << "\\u00" << Hexadecimal[byte >> 4U] << Hexadecimal[byte & 0x0FU];
-            } else {
-                output.put(static_cast<char>(byte));
-            }
-            break;
-        }
-    }
-    output.put('"');
-}
-
 void writeError(const Tina::Core::Error& error)
 {
-    std::cerr << "{\"status\":\"error\",\"sample\":\"tina_sample_desktop_shell\",\"domain\":"
-              << static_cast<std::uint16_t>(error.code.domain) << ",\"code\":" << error.code.value
-              << ",\"message\":";
-    writeJsonString(std::cerr, error.message);
-    std::cerr << "}\n";
+    Tina::Core::JsonWriter writer(std::cerr);
+    writer.beginObject();
+    writer.member("status", "error");
+    writer.member("sample", "tina_sample_desktop_shell");
+    writer.member("domain", static_cast<std::uint16_t>(error.code.domain));
+    writer.member("code", error.code.value);
+    writer.member("message", error.message);
+    writer.endObject();
+    std::cerr << '\n';
 }
 
 template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text, Value& value) noexcept
@@ -674,50 +646,56 @@ class ShellApplication final : public Tina::IGameApplication {
     }
 
     const Tina::SampleUI::DesktopShellSnapshot& ui = counters.finalUI;
-    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_desktop_shell\",\"frames\":"
-              << counters.frameUpdates << ",\"theme\":";
-    writeJsonString(std::cout, themeName(ui.theme));
-    std::cout << ",\"density\":";
-    writeJsonString(std::cout, densityName(ui.density));
-    std::cout << ",\"splitViews\":" << ui.splitViewCount << ",\"bands\":" << ui.bandCount
-              << ",\"commands\":" << ui.commandCount
-              << ",\"inspectorRows\":" << ui.inspectorRowCount
-              << ",\"leftDockWidth\":" << ui.leftDockWidth
-              << ",\"viewportWidth\":" << ui.viewportWidth
-              << ",\"viewportHeight\":" << ui.viewportHeight
-              << ",\"inspectorWidth\":" << ui.inspectorWidth
-              << ",\"timelineHeight\":" << ui.timelineHeight
-              << ",\"statusBarHeight\":" << ui.statusBarHeight
-              << ",\"viewportUnobstructed\":" << (ui.viewportUnobstructed ? "true" : "false")
-              << ",\"autoDemo\":" << (options->autoDemo ? "true" : "false")
-              << ",\"initialFocusApplied\":" << (ui.initialFocusApplied ? "true" : "false")
-              << ",\"menuOpenObserved\":" << (ui.menuOpenObserved ? "true" : "false")
-              << ",\"dialogOpenObserved\":" << (ui.dialogOpenObserved ? "true" : "false")
-              << ",\"dialogDismissed\":" << (ui.dialogDismissed ? "true" : "false")
-              << ",\"tooltipOpenObserved\":" << (ui.tooltipOpenObserved ? "true" : "false")
-              << ",\"tooltipDismissed\":" << (ui.tooltipDismissed ? "true" : "false")
-              << ",\"tooltipWithinMaxWidth\":" << (ui.tooltipWithinMaxWidth ? "true" : "false")
-              << ",\"splitterMovedGeometry\":" << (ui.splitterMovedGeometry ? "true" : "false")
-              << ",\"splitterMinimumClamped\":" << (ui.splitterMinimumClamped ? "true" : "false")
-              << ",\"leftDockWidthAfterDrag\":" << ui.leftDockWidthAfterDrag
-              << ",\"iconAtlasUploaded\":" << (counters.iconAtlasUploaded ? "true" : "false")
-              << ",\"iconAtlasReleased\":" << (counters.iconAtlasReleased ? "true" : "false")
-              << ",\"iconResolverCalls\":" << counters.iconResolverCalls
-              << ",\"iconResolverHits\":" << counters.iconResolverHits
-              << ",\"commandActivations\":" << ui.commandActivations
-              << ",\"documentSwitches\":" << ui.documentSwitches
-              << ",\"timelineCollapsed\":" << (ui.timelineCollapsed ? "true" : "false")
-              << ",\"inspectorVisible\":" << (ui.inspectorVisible ? "true" : "false")
-              << ",\"logicalPixelWidth\":" << counters.logicalPixelWidth
-              << ",\"logicalPixelHeight\":" << counters.logicalPixelHeight
-              << ",\"framebufferPixelWidth\":" << counters.framebufferPixelWidth
-              << ",\"framebufferPixelHeight\":" << counters.framebufferPixelHeight
-              << ",\"contentScaleX\":" << counters.contentScaleX
-              << ",\"contentScaleY\":" << counters.contentScaleY
-              << ",\"stateEnters\":" << counters.stateEnters
-              << ",\"uiRootsReleased\":" << counters.uiRootsReleased << ",\"exit\":";
-    writeJsonString(std::cout, exitReasonName(*result));
-    std::cout << "}\n";
+    {
+        Tina::Core::JsonWriter writer(std::cout);
+        writer.beginObject();
+        writer.member("status", "ok");
+        writer.member("sample", "tina_sample_desktop_shell");
+        writer.member("frames", counters.frameUpdates);
+        writer.member("theme", themeName(ui.theme));
+        writer.member("density", densityName(ui.density));
+        writer.member("splitViews", ui.splitViewCount);
+        writer.member("bands", ui.bandCount);
+        writer.member("commands", ui.commandCount);
+        writer.member("inspectorRows", ui.inspectorRowCount);
+        writer.member("leftDockWidth", ui.leftDockWidth);
+        writer.member("viewportWidth", ui.viewportWidth);
+        writer.member("viewportHeight", ui.viewportHeight);
+        writer.member("inspectorWidth", ui.inspectorWidth);
+        writer.member("timelineHeight", ui.timelineHeight);
+        writer.member("statusBarHeight", ui.statusBarHeight);
+        writer.member("viewportUnobstructed", ui.viewportUnobstructed);
+        writer.member("autoDemo", options->autoDemo);
+        writer.member("initialFocusApplied", ui.initialFocusApplied);
+        writer.member("menuOpenObserved", ui.menuOpenObserved);
+        writer.member("dialogOpenObserved", ui.dialogOpenObserved);
+        writer.member("dialogDismissed", ui.dialogDismissed);
+        writer.member("tooltipOpenObserved", ui.tooltipOpenObserved);
+        writer.member("tooltipDismissed", ui.tooltipDismissed);
+        writer.member("tooltipWithinMaxWidth", ui.tooltipWithinMaxWidth);
+        writer.member("splitterMovedGeometry", ui.splitterMovedGeometry);
+        writer.member("splitterMinimumClamped", ui.splitterMinimumClamped);
+        writer.member("leftDockWidthAfterDrag", ui.leftDockWidthAfterDrag);
+        writer.member("iconAtlasUploaded", counters.iconAtlasUploaded);
+        writer.member("iconAtlasReleased", counters.iconAtlasReleased);
+        writer.member("iconResolverCalls", counters.iconResolverCalls);
+        writer.member("iconResolverHits", counters.iconResolverHits);
+        writer.member("commandActivations", ui.commandActivations);
+        writer.member("documentSwitches", ui.documentSwitches);
+        writer.member("timelineCollapsed", ui.timelineCollapsed);
+        writer.member("inspectorVisible", ui.inspectorVisible);
+        writer.member("logicalPixelWidth", counters.logicalPixelWidth);
+        writer.member("logicalPixelHeight", counters.logicalPixelHeight);
+        writer.member("framebufferPixelWidth", counters.framebufferPixelWidth);
+        writer.member("framebufferPixelHeight", counters.framebufferPixelHeight);
+        writer.member("contentScaleX", counters.contentScaleX);
+        writer.member("contentScaleY", counters.contentScaleY);
+        writer.member("stateEnters", counters.stateEnters);
+        writer.member("uiRootsReleased", counters.uiRootsReleased);
+        writer.member("exit", exitReasonName(*result));
+        writer.endObject();
+    }
+    std::cout << '\n';
     return 0;
 }
 

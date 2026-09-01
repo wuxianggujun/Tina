@@ -5,6 +5,7 @@
 #include <array>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace Detail = Tina::EditorApp::Detail;
 
@@ -27,6 +28,42 @@ inline constexpr std::string_view GltfPath = "/TinaProject/Source/hero.glb";
     return result;
 }
 
+// The parser reads from a scanner rather than a lone token, because --name value has to reach past
+// the current token for its value. These cases each supply a one-token argv of their own; the
+// storage has to outlive the scanner, which only holds views into it.
+class OwnedArgv final {
+  public:
+    explicit OwnedArgv(const std::vector<std::string>& tokens)
+    {
+        storage_.reserve(tokens.size() + 1U);
+        storage_.emplace_back("editor.exe");
+        storage_.insert(storage_.end(), tokens.begin(), tokens.end());
+        for (auto& token : storage_) {
+            pointers_.push_back(token.data());
+        }
+    }
+
+    [[nodiscard]] Tina::Core::ArgScanner scanner() noexcept
+    {
+        return Tina::Core::ArgScanner(static_cast<int>(pointers_.size()), pointers_.data());
+    }
+
+  private:
+    std::vector<std::string> storage_;
+    std::vector<char*> pointers_;
+};
+
+[[nodiscard]] Tina::Core::Result<bool> parseOne(std::string_view text,
+                                               Detail::EditorSourceImportLaunchOptions& options)
+{
+    OwnedArgv argv({std::string{text}});
+    auto scanner = argv.scanner();
+    if (!scanner.next()) {
+        return false;
+    }
+    return Detail::parseEditorSourceImportLaunchOption(scanner, options);
+}
+
 } // namespace
 
 TEST(EditorSourceImportLaunchOptionsTests, RetainsMixedIntendedUnitSetInCallerOrder)
@@ -39,7 +76,7 @@ TEST(EditorSourceImportLaunchOptionsTests, RetainsMixedIntendedUnitSetInCallerOr
         std::string{"--import-on-start"},
     };
     for (const auto& current : arguments) {
-        auto parsed = Detail::parseEditorSourceImportLaunchOption(current, options);
+        auto parsed = parseOne(current, options);
         ASSERT_TRUE(parsed);
         EXPECT_TRUE(*parsed);
     }
@@ -56,13 +93,11 @@ TEST(EditorSourceImportLaunchOptionsTests, RetainsMixedIntendedUnitSetInCallerOr
 TEST(EditorSourceImportLaunchOptionsTests, RejectsDuplicateUnitWithoutChangingSet)
 {
     Detail::EditorSourceImportLaunchOptions options{};
-    auto initial = Detail::parseEditorSourceImportLaunchOption(
-        argument("--import-gltf=", GltfPath), options);
+    auto initial = parseOne(argument("--import-gltf=", GltfPath), options);
     ASSERT_TRUE(initial);
     ASSERT_TRUE(*initial);
 
-    const auto duplicate = Detail::parseEditorSourceImportLaunchOption(
-        argument("--import-gltf=", GltfPath), options);
+    const auto duplicate = parseOne(argument("--import-gltf=", GltfPath), options);
 
     ASSERT_FALSE(duplicate);
     EXPECT_EQ(duplicate.error().code, Tina::Core::CoreErrorCode::InvalidArgument);
@@ -72,8 +107,7 @@ TEST(EditorSourceImportLaunchOptionsTests, RejectsDuplicateUnitWithoutChangingSe
 TEST(EditorSourceImportLaunchOptionsTests, AutomaticImportRequiresProjectAndUnits)
 {
     Detail::EditorSourceImportLaunchOptions options{};
-    auto parsed = Detail::parseEditorSourceImportLaunchOption(
-        "--import-on-start", options);
+    auto parsed = parseOne("--import-on-start", options);
     ASSERT_TRUE(parsed);
     ASSERT_TRUE(*parsed);
 
@@ -83,8 +117,7 @@ TEST(EditorSourceImportLaunchOptionsTests, AutomaticImportRequiresProjectAndUnit
 TEST(EditorSourceImportLaunchOptionsTests, RejectsEquivalentDuplicatePathsWithoutMutation)
 {
     Detail::EditorSourceImportLaunchOptions options{};
-    auto initial = Detail::parseEditorSourceImportLaunchOption(
-        argument("--import-gltf=", GltfPath), options);
+    auto initial = parseOne(argument("--import-gltf=", GltfPath), options);
     ASSERT_TRUE(initial);
     ASSERT_TRUE(*initial);
 
@@ -95,8 +128,7 @@ TEST(EditorSourceImportLaunchOptionsTests, RejectsEquivalentDuplicatePathsWithou
     constexpr std::string_view equivalent =
         "/TinaProject/Source/nested/../hero.glb";
 #endif
-    const auto duplicate = Detail::parseEditorSourceImportLaunchOption(
-        argument("--import-gltf=", equivalent), options);
+    const auto duplicate = parseOne(argument("--import-gltf=", equivalent), options);
 
     ASSERT_FALSE(duplicate);
     EXPECT_EQ(duplicate.error().code, Tina::Core::CoreErrorCode::InvalidArgument);
@@ -107,15 +139,13 @@ TEST(EditorSourceImportLaunchOptionsTests, RejectsEquivalentDuplicatePathsWithou
 TEST(EditorSourceImportLaunchOptionsTests, RejectsUnitsOutsideProjectSource)
 {
     Detail::EditorSourceImportLaunchOptions options{};
-    ASSERT_TRUE(Detail::parseEditorSourceImportLaunchOption(
-        argument("--project-root=", ProjectRoot), options));
+    ASSERT_TRUE(parseOne(argument("--project-root=", ProjectRoot), options));
 #if defined(_WIN32)
     constexpr std::string_view outside = "C:/TinaProject/External/hero.glb";
 #else
     constexpr std::string_view outside = "/TinaProject/External/hero.glb";
 #endif
-    ASSERT_TRUE(Detail::parseEditorSourceImportLaunchOption(
-        argument("--import-gltf=", outside), options));
+    ASSERT_TRUE(parseOne(argument("--import-gltf=", outside), options));
 
     const auto validated = Detail::validateEditorSourceImportLaunchOptions(options);
 
@@ -123,16 +153,48 @@ TEST(EditorSourceImportLaunchOptionsTests, RejectsUnitsOutsideProjectSource)
     EXPECT_EQ(validated.error().code, Tina::Core::CoreErrorCode::PermissionDenied);
 }
 
+// New with the scanner: the value may arrive as a separate token. The editor gates all use the
+// --name=value spelling, so this is the form that had no coverage before.
+TEST(EditorSourceImportLaunchOptionsTests, AcceptsAValueGivenAsASeparateToken)
+{
+    Detail::EditorSourceImportLaunchOptions options{};
+    OwnedArgv argv({std::string{"--project-root"}, std::string{ProjectRoot}});
+    auto scanner = argv.scanner();
+    ASSERT_TRUE(scanner.next());
+
+    const auto parsed = Detail::parseEditorSourceImportLaunchOption(scanner, options);
+
+    ASSERT_TRUE(parsed);
+    EXPECT_TRUE(*parsed);
+    EXPECT_EQ(options.projectRootUtf8, ProjectRoot);
+}
+
+// A trailing option with no value must not be mistaken for an unknown one. The parser answers false
+// here, and the scanner is what tells the caller why.
+TEST(EditorSourceImportLaunchOptionsTests, TrailingOptionWithNoValueIsReportedByTheScanner)
+{
+    Detail::EditorSourceImportLaunchOptions options{};
+    OwnedArgv argv({std::string{"--project-root"}});
+    auto scanner = argv.scanner();
+    ASSERT_TRUE(scanner.next());
+
+    const auto parsed = Detail::parseEditorSourceImportLaunchOption(scanner, options);
+
+    ASSERT_TRUE(parsed);
+    EXPECT_FALSE(*parsed);
+    EXPECT_TRUE(scanner.failed());
+    EXPECT_EQ(scanner.failedOption(), "--project-root");
+    EXPECT_TRUE(options.projectRootUtf8.empty());
+}
+
 TEST(EditorSourceImportLaunchOptionsTests, RejectsRelativeAndMismatchedUnitPaths)
 {
     Detail::EditorSourceImportLaunchOptions options{};
-    const auto relative = Detail::parseEditorSourceImportLaunchOption(
-        "--import-gltf=Source/hero.glb", options);
+    const auto relative = parseOne("--import-gltf=Source/hero.glb", options);
     ASSERT_FALSE(relative);
     EXPECT_TRUE(options.intendedUnits.empty());
 
-    const auto mismatched = Detail::parseEditorSourceImportLaunchOption(
-        argument("--import-recipe=", GltfPath), options);
+    const auto mismatched = parseOne(argument("--import-recipe=", GltfPath), options);
     ASSERT_FALSE(mismatched);
     EXPECT_TRUE(options.intendedUnits.empty());
 }

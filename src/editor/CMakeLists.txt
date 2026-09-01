@@ -51,6 +51,8 @@ add_library(Tina::Editor ALIAS tina_editor)
 
 target_compile_features(tina_editor PUBLIC cxx_std_23)
 target_include_directories(tina_editor PUBLIC ${PROJECT_SOURCE_DIR}/include)
+# Reaches src/core/io/PathUtil.hpp; see the note in src/asset/CMakeLists.txt.
+target_include_directories(tina_editor PRIVATE ${PROJECT_SOURCE_DIR}/src)
 # Math is PUBLIC: EditorViewportPick.hpp names Math::Ray / Math::Sphere in its
 # published candidate and query types.
 target_link_libraries(tina_editor

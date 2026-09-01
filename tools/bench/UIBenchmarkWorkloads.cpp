@@ -1,6 +1,8 @@
 #include "UIBenchmarkWorkloads.hpp"
 
+#include <tina/core/diagnostics/Assert.hpp>
 #include <tina/core/id/GenerationPool.hpp>
+#include <tina/core/text/JsonWriter.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 #include <tina/integration/UIRenderDisplayList.hpp>
 #include <tina/render/RenderFramePacket.hpp>
@@ -470,39 +472,6 @@ findImageBenchmarkResolver(const void* userData, UI::UINodeId root) noexcept
     return result;
 }
 
-void writeJsonString(std::ostream& output, std::string_view value)
-{
-    static constexpr char HexDigits[] = "0123456789abcdef";
-    output.put('"');
-    for (const unsigned char byte : value) {
-        switch (byte) {
-        case '"':
-            output << "\\\"";
-            break;
-        case '\\':
-            output << "\\\\";
-            break;
-        case '\n':
-            output << "\\n";
-            break;
-        case '\r':
-            output << "\\r";
-            break;
-        case '\t':
-            output << "\\t";
-            break;
-        default:
-            if (byte < 0x20U) {
-                output << "\\u00" << HexDigits[(byte >> 4U) & 0xFU] << HexDigits[byte & 0xFU];
-            } else {
-                output.put(static_cast<char>(byte));
-            }
-            break;
-        }
-    }
-    output.put('"');
-}
-
 [[nodiscard]] u64 elapsedNs(Core::MonotonicTimePoint begin,
                             Core::MonotonicTimePoint end) noexcept
 {
@@ -541,17 +510,20 @@ void writeJsonString(std::ostream& output, std::string_view value)
     return summary;
 }
 
-void writeTimingSummary(std::ostream& output, const TimingSummary& summary,
+// Writes the members of one timing object. The caller opens and closes the scope, because the key
+// it hangs under differs per call site ("timing_ns", "build", "commit", ...).
+void writeTimingSummary(Core::JsonWriter& writer, const TimingSummary& summary,
                         std::optional<u64> wall = std::nullopt)
 {
-    output << "{\"p50\":" << summary.p50 << ",\"p95\":" << summary.p95
-           << ",\"p99\":" << summary.p99 << ",\"max\":" << summary.max
-           << ",\"mean\":" << std::setprecision(17) << summary.mean
-           << ",\"count\":" << summary.count;
+    writer.member("p50", summary.p50);
+    writer.member("p95", summary.p95);
+    writer.member("p99", summary.p99);
+    writer.member("max", summary.max);
+    writer.member("mean", summary.mean);
+    writer.member("count", summary.count);
     if (wall.has_value()) {
-        output << ",\"wall\":" << *wall;
+        writer.member("wall", *wall);
     }
-    output << '}';
 }
 
 [[nodiscard]] UI::UILayoutStyle fixedLayout(float width, float height) noexcept
@@ -3291,14 +3263,15 @@ using ComponentBuilder = bool (*)(UIFixture&, ComponentRootArray&, UIBenchmarkRe
     return true;
 }
 
-void writeComponentBuildPool(std::ostream& output,
+// Body-only, like writeTimingSummary: the caller owns the scope and its key.
+void writeComponentBuildPool(Core::JsonWriter& writer,
                              const UI::UIComponentBuildPoolStatistics& statistics)
 {
-    output << "{\"requested\":" << statistics.requested
-           << ",\"reserved\":" << statistics.reserved
-           << ",\"published\":" << statistics.published
-           << ",\"capacity_failures\":" << statistics.capacityFailures
-           << ",\"outstanding\":" << statistics.outstandingReservations << '}';
+    writer.member("requested", statistics.requested);
+    writer.member("reserved", statistics.reserved);
+    writer.member("published", statistics.published);
+    writer.member("capacity_failures", statistics.capacityFailures);
+    writer.member("outstanding", statistics.outstandingReservations);
 }
 
 void writeReport(std::ostream& output, const UIBenchmarkReport& report)
@@ -3325,342 +3298,382 @@ void writeReport(std::ostream& output, const UIBenchmarkReport& report)
     const TimingSummary route = summarize(report.routeSamples);
     const usize allocationDelta = report.pmrAllocationsAfter - report.pmrAllocationsBefore;
 
-    output << "{\"status\":\"ok\",\"schema\":" << kSchemaVersion
-           << ",\"schemaName\":\"tina_bench\",\"conclusion\":\"provisional\",\"workload\":{";
-    output << "\"id\":";
-    writeJsonString(output, report.workload);
-    output << ",\"version\":" << kWorkloadVersion << ",\"seed\":" << report.options.seed
-           << ",\"parameters\":{\"warmup_iterations\":" << report.options.warmUpIterations
-           << ",\"measure_iterations\":" << report.options.measureIterations
-           << ",\"node_count\":" << report.configuredNodeCount
-           << ",\"route_depth\":" << report.configuredRouteDepth
-           << ",\"logical_item_count\":" << report.configuredLogicalItemCount
-           << ",\"materialized_row_capacity\":" << report.configuredMaterializedRowCapacity
-           << ",\"image_count\":" << report.configuredImageCount
-           << ",\"icon_count\":" << report.configuredIconCount
-           << ",\"nine_slice_count\":" << report.configuredNineSliceCount
-           << ",\"unique_image_resources\":" << report.configuredUniqueImageResourceCount
-           << ",\"component_count\":" << report.configuredComponentCount
-           << ",\"component_nodes_per_transaction\":"
-           << report.configuredComponentNodesPerTransaction
-           << ",\"component_text_bytes_per_transaction\":"
-           << report.configuredComponentTextBytesPerTransaction
-           << ",\"component_canvas_commands_per_transaction\":"
-           << report.configuredComponentCanvasCommandsPerTransaction
-           << ",\"component_activate_slots_per_transaction\":"
-           << report.configuredComponentBehaviorSlotsPerTransaction.activate
-           << ",\"component_toggle_slots_per_transaction\":"
-           << report.configuredComponentBehaviorSlotsPerTransaction.toggle
-           << ",\"component_range_slots_per_transaction\":"
-           << report.configuredComponentBehaviorSlotsPerTransaction.range
-           << ",\"component_text_input_slots_per_transaction\":"
-           << report.configuredComponentBehaviorSlotsPerTransaction.textInput
-           << ",\"component_scroll_slots_per_transaction\":"
-           << report.configuredComponentBehaviorSlotsPerTransaction.scroll
-           << ",\"component_selection_slots_per_transaction\":"
-           << report.configuredComponentBehaviorSlotsPerTransaction.selection;
+    // TimingSummary::mean is the only non-integer this report prints, and precision is a sticky
+    // stream flag, so setting it once here is what the per-summary manipulator used to do.
+    output << std::setprecision(17);
+
+    Core::JsonWriter writer(output);
+    writer.beginObject();
+    writer.member("status", "ok");
+    writer.member("schema", kSchemaVersion);
+    writer.member("schemaName", "tina_bench");
+    writer.member("conclusion", "provisional");
+    writer.beginObjectMember("workload");
+    writer.member("id", report.workload);
+    writer.member("version", kWorkloadVersion);
+    writer.member("seed", report.options.seed);
+    writer.beginObjectMember("parameters");
+    writer.member("warmup_iterations", report.options.warmUpIterations);
+    writer.member("measure_iterations", report.options.measureIterations);
+    writer.member("node_count", report.configuredNodeCount);
+    writer.member("route_depth", report.configuredRouteDepth);
+    writer.member("logical_item_count", report.configuredLogicalItemCount);
+    writer.member("materialized_row_capacity", report.configuredMaterializedRowCapacity);
+    writer.member("image_count", report.configuredImageCount);
+    writer.member("icon_count", report.configuredIconCount);
+    writer.member("nine_slice_count", report.configuredNineSliceCount);
+    writer.member("unique_image_resources", report.configuredUniqueImageResourceCount);
+    writer.member("component_count", report.configuredComponentCount);
+    writer.member("component_nodes_per_transaction",
+                  report.configuredComponentNodesPerTransaction);
+    writer.member("component_text_bytes_per_transaction",
+                  report.configuredComponentTextBytesPerTransaction);
+    writer.member("component_canvas_commands_per_transaction",
+                  report.configuredComponentCanvasCommandsPerTransaction);
+    writer.member("component_activate_slots_per_transaction",
+                  report.configuredComponentBehaviorSlotsPerTransaction.activate);
+    writer.member("component_toggle_slots_per_transaction",
+                  report.configuredComponentBehaviorSlotsPerTransaction.toggle);
+    writer.member("component_range_slots_per_transaction",
+                  report.configuredComponentBehaviorSlotsPerTransaction.range);
+    writer.member("component_text_input_slots_per_transaction",
+                  report.configuredComponentBehaviorSlotsPerTransaction.textInput);
+    writer.member("component_scroll_slots_per_transaction",
+                  report.configuredComponentBehaviorSlotsPerTransaction.scroll);
+    writer.member("component_selection_slots_per_transaction",
+                  report.configuredComponentBehaviorSlotsPerTransaction.selection);
     if (report.workload == kStyleStateWorkload) {
-        output << ",\"styled_node_count\":" << report.configuredStyledNodeCount
-               << ",\"style_class_count\":" << report.configuredStyleClassCount
-               << ",\"style_rule_count\":" << report.configuredStyleRuleCount
-               << ",\"style_classes_per_node\":" << report.configuredStyleClassesPerNode
-               << ",\"style_rules_per_bucket\":" << report.configuredStyleRulesPerBucket;
+        writer.member("styled_node_count", report.configuredStyledNodeCount);
+        writer.member("style_class_count", report.configuredStyleClassCount);
+        writer.member("style_rule_count", report.configuredStyleRuleCount);
+        writer.member("style_classes_per_node", report.configuredStyleClassesPerNode);
+        writer.member("style_rules_per_bucket", report.configuredStyleRulesPerBucket);
     }
     if (report.workload == kMotionWorkload) {
-        output << ",\"motion_track_capacity\":" << report.configuredMotionTrackCapacity
-               << ",\"active_motion_tracks\":" << report.configuredActiveMotionTracks;
+        writer.member("motion_track_capacity", report.configuredMotionTrackCapacity);
+        writer.member("active_motion_tracks", report.configuredActiveMotionTracks);
     }
     if (report.workload == kTimelineMotionWorkload ||
         report.workload == kLayoutTimelineMotionWorkload) {
-        output << ",\"timeline_capacity\":" << report.configuredTimelineCapacity
-               << ",\"timeline_track_capacity\":"
-               << report.configuredTimelineTrackCapacity
-               << ",\"timeline_keyframe_capacity\":"
-               << report.configuredTimelineKeyframeCapacity
-               << ",\"active_timeline_capacity\":"
-               << report.configuredActiveTimelineCapacity
-               << ",\"active_timeline_tracks\":"
-               << report.configuredActiveTimelineTracks;
+        writer.member("timeline_capacity", report.configuredTimelineCapacity);
+        writer.member("timeline_track_capacity", report.configuredTimelineTrackCapacity);
+        writer.member("timeline_keyframe_capacity", report.configuredTimelineKeyframeCapacity);
+        writer.member("active_timeline_capacity", report.configuredActiveTimelineCapacity);
+        writer.member("active_timeline_tracks", report.configuredActiveTimelineTracks);
     }
-    output << "}}";
-    output << ",\"fingerprint\":{\"buildType\":";
-    writeJsonString(output, BuildType);
-    output << ",\"hostOs\":";
-    writeJsonString(output, HostOs);
-    output << ",\"taskSystem\":\"None\",\"platform\":\"SyntheticWindowId\","
-              "\"render\":\"BackendNeutralDisplayList\",\"ui\":\"Tina::UI\"}";
-    output << ",\"timing_ns\":";
-    writeTimingSummary(output, total, report.wallNs);
-    output << ",\"stage_timing_ns\":{\"build\":";
-    writeTimingSummary(output, build);
-    output << ",\"commit\":";
-    writeTimingSummary(output, commit);
-    output << ",\"clean_commit\":";
-    writeTimingSummary(output, cleanCommit);
-    output << ",\"display_list\":";
-    writeTimingSummary(output, displayList);
-    output << ",\"route\":";
-    writeTimingSummary(output, route);
-    output << '}';
+    writer.endObject();
+    writer.endObject();
+    writer.beginObjectMember("fingerprint");
+    writer.member("buildType", BuildType);
+    writer.member("hostOs", HostOs);
+    writer.member("taskSystem", "None");
+    writer.member("platform", "SyntheticWindowId");
+    writer.member("render", "BackendNeutralDisplayList");
+    writer.member("ui", "Tina::UI");
+    writer.endObject();
+    writer.beginObjectMember("timing_ns");
+    writeTimingSummary(writer, total, report.wallNs);
+    writer.endObject();
+    writer.beginObjectMember("stage_timing_ns");
+    writer.beginObjectMember("build");
+    writeTimingSummary(writer, build);
+    writer.endObject();
+    writer.beginObjectMember("commit");
+    writeTimingSummary(writer, commit);
+    writer.endObject();
+    writer.beginObjectMember("clean_commit");
+    writeTimingSummary(writer, cleanCommit);
+    writer.endObject();
+    writer.beginObjectMember("display_list");
+    writeTimingSummary(writer, displayList);
+    writer.endObject();
+    writer.beginObjectMember("route");
+    writeTimingSummary(writer, route);
+    writer.endObject();
+    writer.endObject();
 
-    output << ",\"work_units\":{\"N\":" << report.workN << ",\"P\":" << report.workP
-           << ",\"H\":" << report.workH << ",\"M\":" << report.workM
-           << ",\"Q\":" << report.workQ << ",\"U\":" << report.workU
-           << ",\"B\":" << report.workB << '}';
-    output << ",\"dirty_rebuild\":{\"layout_passes\":" << report.layoutPasses
-           << ",\"measured_nodes\":" << report.measuredNodes
-           << ",\"arranged_nodes\":" << report.arrangedNodes
-           << ",\"hit_rebuilds\":" << report.hitRebuilds
-           << ",\"paint_cache_rebuilds\":" << report.paintCacheRebuilds
-           << ",\"paint_snapshot_rebuilds\":" << report.paintSnapshotRebuilds
-           << ",\"paint_snapshot_inspected_layout_nodes\":" << report.paintSnapshotInspectedLayoutNodes
-           << ",\"paint_snapshot_published_entries\":" << report.paintSnapshotPublishedEntries << '}';
-    output << ",\"display_list\":{\"builds\":" << report.displayListBuilds
-           << ",\"source_entries\":" << report.displayListSourceEntries
-           << ",\"solid_quads\":" << report.displayListSolidQuads
-           << ",\"glyphs\":" << report.displayListGlyphs
-           << ",\"image_quads\":" << report.displayListImageQuads
-           << ",\"batches\":" << report.displayListBatches << '}';
-    output << ",\"image_resources\":{\"resolver_calls\":" << report.imageResolverCalls
-           << ",\"resolver_hits\":" << report.imageResolverHits
-           << ",\"resolver_misses\":" << report.imageResolverMisses
-           << ",\"resolver_not_ready\":" << report.imageResolverNotReady
-           << ",\"extent_mismatches\":" << report.imageExtentMismatches
-           << ",\"cache_deduplicated_entries\":" << report.imageResolutionCacheDedupe
-           << ",\"pin_acquisitions\":" << report.imagePinAcquisitions
-           << ",\"pin_releases\":" << report.imagePinReleases
-           << ",\"resource_intern_deduplications\":" << report.imageResourceInternDedupe
-           << '}';
-    output << ",\"route\":{\"dispatches\":" << report.routeDispatches
-           << ",\"visited_hit_entries\":" << report.hitEntriesVisited
-           << ",\"path_nodes\":" << report.routePathNodes
-           << ",\"max_depth\":" << report.maxRouteDepth
-           << ",\"listener_calls\":" << report.listenerCalls
-           << ",\"consumed_transitions\":" << report.consumedTransitions
-           << ",\"claimed_transitions\":" << report.claimedTransitions
-           << ",\"pointer_capture_routes\":" << report.pointerCaptureRoutes << '}';
-    output << ",\"collection\":{\"materialized_row_high_water\":" << report.materializedRowHighWater
-           << ",\"selection_key\":" << report.selectionKey
-           << ",\"selection_index\":" << report.selectionIndex
-           << ",\"semantics_entries\":" << report.semanticsEntryCount << '}';
+    writer.beginObjectMember("work_units");
+    writer.member("N", report.workN);
+    writer.member("P", report.workP);
+    writer.member("H", report.workH);
+    writer.member("M", report.workM);
+    writer.member("Q", report.workQ);
+    writer.member("U", report.workU);
+    writer.member("B", report.workB);
+    writer.endObject();
+    writer.beginObjectMember("dirty_rebuild");
+    writer.member("layout_passes", report.layoutPasses);
+    writer.member("measured_nodes", report.measuredNodes);
+    writer.member("arranged_nodes", report.arrangedNodes);
+    writer.member("hit_rebuilds", report.hitRebuilds);
+    writer.member("paint_cache_rebuilds", report.paintCacheRebuilds);
+    writer.member("paint_snapshot_rebuilds", report.paintSnapshotRebuilds);
+    writer.member("paint_snapshot_inspected_layout_nodes",
+                  report.paintSnapshotInspectedLayoutNodes);
+    writer.member("paint_snapshot_published_entries", report.paintSnapshotPublishedEntries);
+    writer.endObject();
+    writer.beginObjectMember("display_list");
+    writer.member("builds", report.displayListBuilds);
+    writer.member("source_entries", report.displayListSourceEntries);
+    writer.member("solid_quads", report.displayListSolidQuads);
+    writer.member("glyphs", report.displayListGlyphs);
+    writer.member("image_quads", report.displayListImageQuads);
+    writer.member("batches", report.displayListBatches);
+    writer.endObject();
+    writer.beginObjectMember("image_resources");
+    writer.member("resolver_calls", report.imageResolverCalls);
+    writer.member("resolver_hits", report.imageResolverHits);
+    writer.member("resolver_misses", report.imageResolverMisses);
+    writer.member("resolver_not_ready", report.imageResolverNotReady);
+    writer.member("extent_mismatches", report.imageExtentMismatches);
+    writer.member("cache_deduplicated_entries", report.imageResolutionCacheDedupe);
+    writer.member("pin_acquisitions", report.imagePinAcquisitions);
+    writer.member("pin_releases", report.imagePinReleases);
+    writer.member("resource_intern_deduplications", report.imageResourceInternDedupe);
+    writer.endObject();
+    writer.beginObjectMember("route");
+    writer.member("dispatches", report.routeDispatches);
+    writer.member("visited_hit_entries", report.hitEntriesVisited);
+    writer.member("path_nodes", report.routePathNodes);
+    writer.member("max_depth", report.maxRouteDepth);
+    writer.member("listener_calls", report.listenerCalls);
+    writer.member("consumed_transitions", report.consumedTransitions);
+    writer.member("claimed_transitions", report.claimedTransitions);
+    writer.member("pointer_capture_routes", report.pointerCaptureRoutes);
+    writer.endObject();
+    writer.beginObjectMember("collection");
+    writer.member("materialized_row_high_water", report.materializedRowHighWater);
+    writer.member("selection_key", report.selectionKey);
+    writer.member("selection_index", report.selectionIndex);
+    writer.member("semantics_entries", report.semanticsEntryCount);
+    writer.endObject();
     if (report.workload == kComponentBuildWorkload) {
         const UI::UIComponentBuildStatistics& statistics =
             report.componentReservationStatistics;
-        output << ",\"component_build\":{\"coverage\":\"all_reserved_pools\""
-                  ",\"transaction_scope\":\"UIElementBuildTransaction\""
-                  ",\"frozen_workload_complete\":true"
-                  ",\"reservation_counters_available\":true"
-                  ",\"transactions_started\":"
-               << report.componentTransactionsStarted
-               << ",\"transactions_committed\":" << report.componentTransactionsCommitted
-               << ",\"clean_commits\":" << report.componentCleanCommitCount
-               << ",\"clean_commit_rebuilds\":"
-               << report.componentCleanCommitRebuildCount
-               << ",\"active_transactions\":" << statistics.activeTransactionCount
-               << ",\"transaction_failures\":" << statistics.transactionFailureCount
-               << ",\"reservations\":{\"nodes\":";
-        writeComponentBuildPool(output, statistics.nodes);
-        output << ",\"text_bytes\":";
-        writeComponentBuildPool(output, statistics.textBytes);
-        output << ",\"canvas_commands\":";
-        writeComponentBuildPool(output, statistics.canvasCommands);
-        output << ",\"behaviors\":{\"activate\":";
-        writeComponentBuildPool(output, statistics.behaviors.activate);
-        output << ",\"toggle\":";
-        writeComponentBuildPool(output, statistics.behaviors.toggle);
-        output << ",\"range\":";
-        writeComponentBuildPool(output, statistics.behaviors.range);
-        output << ",\"text_input\":";
-        writeComponentBuildPool(output, statistics.behaviors.textInput);
-        output << ",\"scroll\":";
-        writeComponentBuildPool(output, statistics.behaviors.scroll);
-        output << ",\"selection\":";
-        writeComponentBuildPool(output, statistics.behaviors.selection);
-        output << "}}}";
+        writer.beginObjectMember("component_build");
+        writer.member("coverage", "all_reserved_pools");
+        writer.member("transaction_scope", "UIElementBuildTransaction");
+        writer.member("frozen_workload_complete", true);
+        writer.member("reservation_counters_available", true);
+        writer.member("transactions_started", report.componentTransactionsStarted);
+        writer.member("transactions_committed", report.componentTransactionsCommitted);
+        writer.member("clean_commits", report.componentCleanCommitCount);
+        writer.member("clean_commit_rebuilds", report.componentCleanCommitRebuildCount);
+        writer.member("active_transactions", statistics.activeTransactionCount);
+        writer.member("transaction_failures", statistics.transactionFailureCount);
+        writer.beginObjectMember("reservations");
+        writer.beginObjectMember("nodes");
+        writeComponentBuildPool(writer, statistics.nodes);
+        writer.endObject();
+        writer.beginObjectMember("text_bytes");
+        writeComponentBuildPool(writer, statistics.textBytes);
+        writer.endObject();
+        writer.beginObjectMember("canvas_commands");
+        writeComponentBuildPool(writer, statistics.canvasCommands);
+        writer.endObject();
+        writer.beginObjectMember("behaviors");
+        writer.beginObjectMember("activate");
+        writeComponentBuildPool(writer, statistics.behaviors.activate);
+        writer.endObject();
+        writer.beginObjectMember("toggle");
+        writeComponentBuildPool(writer, statistics.behaviors.toggle);
+        writer.endObject();
+        writer.beginObjectMember("range");
+        writeComponentBuildPool(writer, statistics.behaviors.range);
+        writer.endObject();
+        writer.beginObjectMember("text_input");
+        writeComponentBuildPool(writer, statistics.behaviors.textInput);
+        writer.endObject();
+        writer.beginObjectMember("scroll");
+        writeComponentBuildPool(writer, statistics.behaviors.scroll);
+        writer.endObject();
+        writer.beginObjectMember("selection");
+        writeComponentBuildPool(writer, statistics.behaviors.selection);
+        writer.endObject();
+        writer.endObject();
+        writer.endObject();
+        writer.endObject();
     }
     if (report.workload == kStyleStateWorkload) {
-        output << ",\"style_state\":{\"state_changes\":" << report.styleStateChanges
-               << ",\"inspected_nodes\":" << report.styleInspectedNodes
-               << ",\"resolved_nodes\":" << report.styleResolvedNodes
-               << ",\"candidate_rules\":" << report.styleCandidateRules
-               << ",\"clean_commits\":" << report.styleCleanCommitCount
-               << ",\"clean_inspected_nodes\":" << report.styleCleanInspectedNodes
-               << ",\"clean_resolved_nodes\":" << report.styleCleanResolvedNodes
-               << ",\"clean_candidate_rules\":" << report.styleCleanCandidateRules
-               << ",\"registered_classes\":"
-               << report.statistics.style.registeredClassCount
-               << ",\"registered_tokens\":"
-               << report.statistics.style.registeredTokenCount
-               << ",\"active_rules\":" << report.statistics.style.activeRuleCount
-               << ",\"active_buckets\":" << report.statistics.style.activeBucketCount
-               << ",\"active_node_class_links\":"
-               << report.statistics.style.activeNodeClassLinkCount
-               << ",\"compile_failures\":"
-               << report.statistics.style.compileFailureCount
-               << ",\"capacity_failures\":"
-               << report.statistics.style.capacityFailureCount
-                << ",\"revision\":" << report.statistics.style.revision << '}';
+        writer.beginObjectMember("style_state");
+        writer.member("state_changes", report.styleStateChanges);
+        writer.member("inspected_nodes", report.styleInspectedNodes);
+        writer.member("resolved_nodes", report.styleResolvedNodes);
+        writer.member("candidate_rules", report.styleCandidateRules);
+        writer.member("clean_commits", report.styleCleanCommitCount);
+        writer.member("clean_inspected_nodes", report.styleCleanInspectedNodes);
+        writer.member("clean_resolved_nodes", report.styleCleanResolvedNodes);
+        writer.member("clean_candidate_rules", report.styleCleanCandidateRules);
+        writer.member("registered_classes", report.statistics.style.registeredClassCount);
+        writer.member("registered_tokens", report.statistics.style.registeredTokenCount);
+        writer.member("active_rules", report.statistics.style.activeRuleCount);
+        writer.member("active_buckets", report.statistics.style.activeBucketCount);
+        writer.member("active_node_class_links",
+                      report.statistics.style.activeNodeClassLinkCount);
+        writer.member("compile_failures", report.statistics.style.compileFailureCount);
+        writer.member("capacity_failures", report.statistics.style.capacityFailureCount);
+        writer.member("revision", report.statistics.style.revision);
+        writer.endObject();
     }
     if (report.workload == kMotionWorkload) {
-        output << ",\"motion\":{\"sampled_tracks\":" << report.motionSampledTracks
-               << ",\"active_tracks_sum\":" << report.motionActiveTracks
-               << ",\"track_high_water\":" << report.motionTrackHighWater
-               << ",\"zero_active_iterations\":" << report.motionZeroActiveIterations
-               << ",\"track_capacity\":" << report.statistics.motion.trackCapacity << '}';
+        writer.beginObjectMember("motion");
+        writer.member("sampled_tracks", report.motionSampledTracks);
+        writer.member("active_tracks_sum", report.motionActiveTracks);
+        writer.member("track_high_water", report.motionTrackHighWater);
+        writer.member("zero_active_iterations", report.motionZeroActiveIterations);
+        writer.member("track_capacity", report.statistics.motion.trackCapacity);
+        writer.endObject();
     } else if (report.workload == kTimelineMotionWorkload ||
                report.workload == kLayoutTimelineMotionWorkload) {
-        output << ",\"timeline_motion\":{\"sampled_timelines\":"
-               << report.timelineSampledTimelines
-               << ",\"sampled_tracks\":" << report.timelineSampledTracks;
+        writer.beginObjectMember("timeline_motion");
+        writer.member("sampled_timelines", report.timelineSampledTimelines);
+        writer.member("sampled_tracks", report.timelineSampledTracks);
         if (report.workload == kLayoutTimelineMotionWorkload) {
-            output << ",\"sampled_layout_tracks\":"
-                   << report.timelineSampledLayoutTracks
-                   << ",\"layout_commit_failures\":"
-                   << report.timelineLayoutCommitFailures;
+            writer.member("sampled_layout_tracks", report.timelineSampledLayoutTracks);
+            writer.member("layout_commit_failures", report.timelineLayoutCommitFailures);
         }
-        output
-               << ",\"sampled_segments\":" << report.timelineSampledSegments
-               << ",\"active_timelines_sum\":" << report.timelineActiveCount
-               << ",\"zero_active_iterations\":" << report.timelineZeroActiveIterations
-               << ",\"timeline_capacity\":"
-               << report.statistics.motion.timelineCapacity
-               << ",\"timeline_count\":" << report.statistics.motion.timelineCount
-               << ",\"timeline_track_capacity\":"
-               << report.statistics.motion.timelineTrackCapacity
-               << ",\"timeline_track_count\":"
-               << report.statistics.motion.timelineTrackCount
-               << ",\"keyframe_capacity\":"
-               << report.statistics.motion.keyframeCapacity
-               << ",\"keyframe_count\":" << report.statistics.motion.keyframeCount
-               << ",\"active_timeline_capacity\":"
-               << report.statistics.motion.activeTimelineCapacity
-               << ",\"active_timeline_count\":"
-               << report.statistics.motion.activeTimelineCount
-               << ",\"timeline_high_water\":"
-               << report.statistics.motion.timelineHighWater
-               << ",\"timeline_track_high_water\":"
-               << report.statistics.motion.timelineTrackHighWater
-               << ",\"keyframe_high_water\":"
-               << report.statistics.motion.keyframeHighWater
-               << ",\"active_timeline_high_water\":"
-               << report.statistics.motion.activeTimelineHighWater
-               << ",\"last_sampled_timeline_count\":"
-               << report.statistics.motion.lastSampledTimelineCount
-               << ",\"last_sampled_track_count\":"
-               << report.statistics.motion.lastSampledTimelineTrackCount
-               << ",\"last_sampled_segment_count\":"
-               << report.statistics.motion.lastSampledKeyframeSegmentCount << '}';
+        writer.member("sampled_segments", report.timelineSampledSegments);
+        writer.member("active_timelines_sum", report.timelineActiveCount);
+        writer.member("zero_active_iterations", report.timelineZeroActiveIterations);
+        writer.member("timeline_capacity", report.statistics.motion.timelineCapacity);
+        writer.member("timeline_count", report.statistics.motion.timelineCount);
+        writer.member("timeline_track_capacity", report.statistics.motion.timelineTrackCapacity);
+        writer.member("timeline_track_count", report.statistics.motion.timelineTrackCount);
+        writer.member("keyframe_capacity", report.statistics.motion.keyframeCapacity);
+        writer.member("keyframe_count", report.statistics.motion.keyframeCount);
+        writer.member("active_timeline_capacity",
+                      report.statistics.motion.activeTimelineCapacity);
+        writer.member("active_timeline_count", report.statistics.motion.activeTimelineCount);
+        writer.member("timeline_high_water", report.statistics.motion.timelineHighWater);
+        writer.member("timeline_track_high_water",
+                      report.statistics.motion.timelineTrackHighWater);
+        writer.member("keyframe_high_water", report.statistics.motion.keyframeHighWater);
+        writer.member("active_timeline_high_water",
+                      report.statistics.motion.activeTimelineHighWater);
+        writer.member("last_sampled_timeline_count",
+                      report.statistics.motion.lastSampledTimelineCount);
+        writer.member("last_sampled_track_count",
+                      report.statistics.motion.lastSampledTimelineTrackCount);
+        writer.member("last_sampled_segment_count",
+                      report.statistics.motion.lastSampledKeyframeSegmentCount);
+        writer.endObject();
     }
-    output << ",\"capacity\":{\"nodes\":" << report.statistics.nodeCapacity
-           << ",\"dirty_queue\":" << report.statistics.dirtyQueueCapacity
-           << ",\"layout_snapshot\":" << report.statistics.layoutSnapshotCapacity
-           << ",\"hit_snapshot\":" << report.statistics.hitSnapshotCapacity
-           << ",\"paint_snapshot\":" << report.statistics.paintSnapshotCapacity
-           << ",\"canvas_commands\":" << report.statistics.canvasCommandCapacity
-           << ",\"image_content\":" << report.statistics.imageContentCapacity
-           << ",\"route_path\":" << report.statistics.routePathCapacity
-           << ",\"listeners\":" << report.statistics.routedPointerListenerCapacity
-           << ",\"activate_behavior\":" << report.statistics.activateBehaviorCapacity
-           << ",\"toggle_behavior\":" << report.statistics.toggleBehaviorCapacity
-           << ",\"range_behavior\":" << report.statistics.rangeInputBehaviorCapacity
-           << ",\"text_input_behavior\":" << report.statistics.textInputBehaviorCapacity
-           << ",\"scroll_behavior\":" << report.statistics.scrollBehaviorCapacity
-           << ",\"selection_behavior\":" << report.statistics.selectBehaviorCapacity
-           << ",\"text_bytes\":" << report.statistics.textByteCapacity;
+    writer.beginObjectMember("capacity");
+    writer.member("nodes", report.statistics.nodeCapacity);
+    writer.member("dirty_queue", report.statistics.dirtyQueueCapacity);
+    writer.member("layout_snapshot", report.statistics.layoutSnapshotCapacity);
+    writer.member("hit_snapshot", report.statistics.hitSnapshotCapacity);
+    writer.member("paint_snapshot", report.statistics.paintSnapshotCapacity);
+    writer.member("canvas_commands", report.statistics.canvasCommandCapacity);
+    writer.member("image_content", report.statistics.imageContentCapacity);
+    writer.member("route_path", report.statistics.routePathCapacity);
+    writer.member("listeners", report.statistics.routedPointerListenerCapacity);
+    writer.member("activate_behavior", report.statistics.activateBehaviorCapacity);
+    writer.member("toggle_behavior", report.statistics.toggleBehaviorCapacity);
+    writer.member("range_behavior", report.statistics.rangeInputBehaviorCapacity);
+    writer.member("text_input_behavior", report.statistics.textInputBehaviorCapacity);
+    writer.member("scroll_behavior", report.statistics.scrollBehaviorCapacity);
+    writer.member("selection_behavior", report.statistics.selectBehaviorCapacity);
+    writer.member("text_bytes", report.statistics.textByteCapacity);
     if (report.workload == kStyleStateWorkload) {
-        output << ",\"style_classes\":" << report.statistics.style.classCapacity
-               << ",\"style_tokens\":" << report.statistics.style.tokenCapacity
-               << ",\"style_rules\":" << report.statistics.style.ruleCapacity
-               << ",\"style_buckets\":" << report.statistics.style.bucketCapacity
-               << ",\"style_rules_per_bucket\":"
-               << report.statistics.style.rulesPerBucketCapacity
-               << ",\"node_style_class_links\":"
-               << report.statistics.style.nodeClassLinkCapacity;
+        writer.member("style_classes", report.statistics.style.classCapacity);
+        writer.member("style_tokens", report.statistics.style.tokenCapacity);
+        writer.member("style_rules", report.statistics.style.ruleCapacity);
+        writer.member("style_buckets", report.statistics.style.bucketCapacity);
+        writer.member("style_rules_per_bucket", report.statistics.style.rulesPerBucketCapacity);
+        writer.member("node_style_class_links", report.statistics.style.nodeClassLinkCapacity);
     }
-    output << '}';
-    output << ",\"high_water\":{\"live_nodes\":" << report.liveNodeHighWater
-           << ",\"dirty_queue\":" << report.statistics.dirtyQueueHighWater
-           << ",\"layout_snapshot\":" << report.layoutSnapshotHighWater
-           << ",\"hit_snapshot\":" << report.hitSnapshotHighWater
-           << ",\"paint_snapshot\":" << report.paintSnapshotHighWater
-           << ",\"listeners\":" << report.statistics.routedPointerListenerHighWater
-           << ",\"canvas_commands\":" << report.statistics.canvasCommandHighWater
-           << ",\"image_content\":" << report.statistics.imageContentHighWater
-           << ",\"image_commands\":" << report.imageCommandHighWater
-           << ",\"image_batches\":" << report.imageBatchHighWater
-           << ",\"image_resources\":" << report.imageResourceHighWater
-           << ",\"image_pins\":" << report.imagePinHighWater
-           << ",\"activate_behavior\":" << report.statistics.activateBehaviorHighWater
-           << ",\"toggle_behavior\":" << report.statistics.toggleBehaviorHighWater
-           << ",\"range_behavior\":" << report.statistics.rangeInputBehaviorHighWater
-           << ",\"text_input_behavior\":" << report.statistics.textInputBehaviorHighWater
-           << ",\"scroll_behavior\":" << report.statistics.scrollBehaviorHighWater
-           << ",\"selection_behavior\":" << report.statistics.selectBehaviorHighWater
-           << ",\"text_bytes\":" << report.statistics.textByteHighWater;
+    writer.endObject();
+    writer.beginObjectMember("high_water");
+    writer.member("live_nodes", report.liveNodeHighWater);
+    writer.member("dirty_queue", report.statistics.dirtyQueueHighWater);
+    writer.member("layout_snapshot", report.layoutSnapshotHighWater);
+    writer.member("hit_snapshot", report.hitSnapshotHighWater);
+    writer.member("paint_snapshot", report.paintSnapshotHighWater);
+    writer.member("listeners", report.statistics.routedPointerListenerHighWater);
+    writer.member("canvas_commands", report.statistics.canvasCommandHighWater);
+    writer.member("image_content", report.statistics.imageContentHighWater);
+    writer.member("image_commands", report.imageCommandHighWater);
+    writer.member("image_batches", report.imageBatchHighWater);
+    writer.member("image_resources", report.imageResourceHighWater);
+    writer.member("image_pins", report.imagePinHighWater);
+    writer.member("activate_behavior", report.statistics.activateBehaviorHighWater);
+    writer.member("toggle_behavior", report.statistics.toggleBehaviorHighWater);
+    writer.member("range_behavior", report.statistics.rangeInputBehaviorHighWater);
+    writer.member("text_input_behavior", report.statistics.textInputBehaviorHighWater);
+    writer.member("scroll_behavior", report.statistics.scrollBehaviorHighWater);
+    writer.member("selection_behavior", report.statistics.selectBehaviorHighWater);
+    writer.member("text_bytes", report.statistics.textByteHighWater);
     if (report.workload == kStyleStateWorkload) {
-        output << ",\"style_classes\":" << report.statistics.style.classHighWater
-               << ",\"style_tokens\":" << report.statistics.style.tokenHighWater
-               << ",\"style_rules\":" << report.statistics.style.ruleHighWater
-               << ",\"style_buckets\":" << report.statistics.style.bucketHighWater
-               << ",\"style_bucket_candidates\":"
-               << report.statistics.style.bucketCandidateHighWater
-               << ",\"node_style_class_links\":"
-               << report.statistics.style.nodeClassLinkHighWater;
+        writer.member("style_classes", report.statistics.style.classHighWater);
+        writer.member("style_tokens", report.statistics.style.tokenHighWater);
+        writer.member("style_rules", report.statistics.style.ruleHighWater);
+        writer.member("style_buckets", report.statistics.style.bucketHighWater);
+        writer.member("style_bucket_candidates",
+                      report.statistics.style.bucketCandidateHighWater);
+        writer.member("node_style_class_links", report.statistics.style.nodeClassLinkHighWater);
     }
     if (report.workload == kTimelineMotionWorkload ||
         report.workload == kLayoutTimelineMotionWorkload) {
-        output << ",\"timelines\":" << report.statistics.motion.timelineHighWater
-               << ",\"timeline_tracks\":"
-               << report.statistics.motion.timelineTrackHighWater
-               << ",\"keyframes\":" << report.statistics.motion.keyframeHighWater
-               << ",\"active_timelines\":"
-               << report.statistics.motion.activeTimelineHighWater;
+        writer.member("timelines", report.statistics.motion.timelineHighWater);
+        writer.member("timeline_tracks", report.statistics.motion.timelineTrackHighWater);
+        writer.member("keyframes", report.statistics.motion.keyframeHighWater);
+        writer.member("active_timelines", report.statistics.motion.activeTimelineHighWater);
     }
-    output << '}';
-    output << ",\"allocation\":{\"domain\":\"ui_pmr\",\"before\":"
-           << report.pmrAllocationsBefore << ",\"after\":" << report.pmrAllocationsAfter
-           << ",\"delta\":" << allocationDelta
-           << ",\"deallocations\":" << report.pmrDeallocationsAfter
-           << ",\"bytes_before\":" << report.pmrBytesBefore
-           << ",\"bytes_after\":" << report.pmrBytesAfter
-           << ",\"peak_bytes\":" << report.pmrPeakBytes << '}';
-    output << ",\"checksums\":{\"display_list\":\"" << hex64(report.displayListChecksum)
-           << "\",\"semantics\":\"" << hex64(report.semanticsChecksum)
-           << "\",\"component_tree\":\"" << hex64(report.componentTreeChecksum)
-           << '"';
+    writer.endObject();
+    writer.beginObjectMember("allocation");
+    writer.member("domain", "ui_pmr");
+    writer.member("before", report.pmrAllocationsBefore);
+    writer.member("after", report.pmrAllocationsAfter);
+    writer.member("delta", allocationDelta);
+    writer.member("deallocations", report.pmrDeallocationsAfter);
+    writer.member("bytes_before", report.pmrBytesBefore);
+    writer.member("bytes_after", report.pmrBytesAfter);
+    writer.member("peak_bytes", report.pmrPeakBytes);
+    writer.endObject();
+    writer.beginObjectMember("checksums");
+    writer.member("display_list", hex64(report.displayListChecksum));
+    writer.member("semantics", hex64(report.semanticsChecksum));
+    writer.member("component_tree", hex64(report.componentTreeChecksum));
     if (report.workload == kStyleStateWorkload) {
-        output << ",\"style_state\":\"" << hex64(report.styleStateChecksum)
-               << "\",\"style_enabled_display_list\":\""
-               << hex64(report.styleEnabledDisplayListChecksum)
-               << "\",\"style_disabled_display_list\":\""
-               << hex64(report.styleDisabledDisplayListChecksum) << '"';
+        writer.member("style_state", hex64(report.styleStateChecksum));
+        writer.member("style_enabled_display_list",
+                      hex64(report.styleEnabledDisplayListChecksum));
+        writer.member("style_disabled_display_list",
+                      hex64(report.styleDisabledDisplayListChecksum));
     }
-    output << "},\"checksum\":\"" << hex64(report.checksum)
-           << "\",\"exit\":\"Completed\",\"notes\":["
-              "\"shared_dev_or_ci_is_provisional_not_hard_gate\","
-              "\"tracy_disabled\",\"single_process_run\","
-              "\"allocation_delta_counts_tina_routed_ui_pmr_only\"";
+    writer.endObject();
+    writer.member("checksum", hex64(report.checksum));
+    writer.member("exit", "Completed");
+    writer.beginArrayMember("notes");
+    writer.element("shared_dev_or_ci_is_provisional_not_hard_gate");
+    writer.element("tracy_disabled");
+    writer.element("single_process_run");
+    writer.element("allocation_delta_counts_tina_routed_ui_pmr_only");
     if (report.workload == kComponentBuildWorkload) {
-        output << ",\"component_cleanup_excluded_from_stage_timing\""
-                  ",\"component_reservation_counters_are_measurement_window_deltas\"";
+        writer.element("component_cleanup_excluded_from_stage_timing");
+        writer.element("component_reservation_counters_are_measurement_window_deltas");
     } else if (report.workload == kStyleStateWorkload) {
-        output << ",\"style_rules_compiled_before_first_retained_node\""
-                  ",\"single_node_state_change_resolves_only_the_dirty_node\"";
+        writer.element("style_rules_compiled_before_first_retained_node");
+        writer.element("single_node_state_change_resolves_only_the_dirty_node");
     } else if (report.workload == kMotionWorkload) {
-        output << ",\"motion_samples_only_active_tracks\""
-                  ",\"m_equals_zero_adds_no_extra_dirty_or_rebuild\""
-                  ",\"seed_selects_active_track_count_0_64_or_1024\"";
+        writer.element("motion_samples_only_active_tracks");
+        writer.element("m_equals_zero_adds_no_extra_dirty_or_rebuild");
+        writer.element("seed_selects_active_track_count_0_64_or_1024");
     } else if (report.workload == kTimelineMotionWorkload) {
-        output << ",\"timeline_samples_only_compact_active_index\""
-                  ",\"paint_only_timeline_does_not_rebuild_layout_or_hit\""
-                  ",\"seed_selects_active_track_count_0_64_or_1024\""
-                  ",\"paint_only_workload_excludes_layout_tracks\"";
+        writer.element("timeline_samples_only_compact_active_index");
+        writer.element("paint_only_timeline_does_not_rebuild_layout_or_hit");
+        writer.element("seed_selects_active_track_count_0_64_or_1024");
+        writer.element("paint_only_workload_excludes_layout_tracks");
     } else if (report.workload == kLayoutTimelineMotionWorkload) {
-        output << ",\"timeline_samples_only_compact_active_index\""
-                  ",\"layout_timeline_rebuilds_layout_hit_and_paint_atomically\""
-                  ",\"seed_selects_active_track_count_0_64_or_1024\"";
+        writer.element("timeline_samples_only_compact_active_index");
+        writer.element("layout_timeline_rebuilds_layout_hit_and_paint_atomically");
+        writer.element("seed_selects_active_track_count_0_64_or_1024");
     }
-    output << "]}\n";
+    writer.endArray();
+    writer.endObject();
+    TINA_ASSERT(writer.balanced(), "UI benchmark report JSON left a scope open");
+    output << '\n';
 }
 
 } // namespace
@@ -3733,11 +3746,15 @@ int runUIBenchmark(std::string_view workload, const UIBenchmarkOptions& options,
     }
 
     if (!error.empty()) {
-        errors << "{\"status\":\"error\",\"schema\":" << kSchemaVersion << ",\"workload\":";
-        writeJsonString(errors, workload);
-        errors << ",\"message\":";
-        writeJsonString(errors, error);
-        errors << "}\n";
+        Core::JsonWriter writer(errors);
+        writer.beginObject();
+        writer.member("status", "error");
+        writer.member("schema", kSchemaVersion);
+        writer.member("workload", workload);
+        writer.member("message", error);
+        writer.endObject();
+        TINA_ASSERT(writer.balanced(), "UI benchmark error JSON left a scope open");
+        errors << '\n';
         return 1;
     }
 

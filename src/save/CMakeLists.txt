@@ -15,7 +15,10 @@ add_library(tina_save STATIC
 add_library(Tina::Save ALIAS tina_save)
 
 target_compile_features(tina_save PUBLIC cxx_std_23)
-target_include_directories(tina_save PUBLIC ${PROJECT_SOURCE_DIR}/include)
+target_include_directories(tina_save
+    PUBLIC ${PROJECT_SOURCE_DIR}/include
+    PRIVATE ${PROJECT_SOURCE_DIR}/src
+)
 target_link_libraries(tina_save
     PUBLIC Tina::Core Tina::Task
     PRIVATE "$<BUILD_INTERFACE:Tina::ProjectOptions>"

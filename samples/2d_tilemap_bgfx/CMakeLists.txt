@@ -38,17 +38,8 @@ set_target_properties(tina_sample_2d PROPERTIES CXX_EXTENSIONS OFF)
 # The recipe ships beside the executable and is resolved relative to it at runtime,
 # so the build tree and an installed copy use one code path. Compiling the source-tree
 # path in instead made the sample unrunnable anywhere but this machine.
-add_custom_command(TARGET tina_sample_2d POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${CMAKE_CURRENT_SOURCE_DIR}/catalog/sample_2d.recipe"
-        "$<TARGET_FILE_DIR:tina_sample_2d>/catalog/sample_2d.recipe"
+tina_product_data_file(tina_sample_2d
+    "${CMAKE_CURRENT_SOURCE_DIR}/catalog/sample_2d.recipe"
+    "catalog/sample_2d.recipe"
 )
-
-if(WIN32)
-    add_custom_command(TARGET tina_sample_2d POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_RUNTIME_DLLS:tina_sample_2d>
-            $<TARGET_FILE_DIR:tina_sample_2d>
-        COMMAND_EXPAND_LISTS
-    )
-endif()
+tina_install_product(tina_sample_2d)

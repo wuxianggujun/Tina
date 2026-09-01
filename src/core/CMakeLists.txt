@@ -11,6 +11,8 @@ add_library(tina_core STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/core/diagnostics/CrashHandler.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/diagnostics/DiagnosticChannel.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/diagnostics/Diagnostics.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/diagnostics/Log.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/diagnostics/LogFormat.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/diagnostics/LogLevel.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/diagnostics/LogRecord.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/error/Error.hpp
@@ -32,17 +34,21 @@ add_library(tina_core STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/core/memory/MemoryTracker.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/time/FixedStepAccumulator.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/time/MonotonicClock.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/text/JsonWriter.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/text/ParseFloat.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/text/Utf8.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/trace/Trace.hpp
     diagnostics/Assert.cpp
     diagnostics/CrashHandler.cpp
     diagnostics/Diagnostics.cpp
+    diagnostics/LogFormat.cpp
+    diagnostics/LogRecord.cpp
     hash/ContentHashDigest.cpp
     io/ApplicationPaths.cpp
+    io/PathUtil.cpp
+    io/PathUtil.hpp
     io/ReadFile.cpp
     io/UserPaths.cpp
-    io/Utf8Path.hpp
     io/WriteFile.cpp
     id/GenerationId.cpp
     memory/CountingMemoryResource.cpp
@@ -69,6 +75,10 @@ if (WIN32)
     # CrashHandler resolves backtrace symbols through DbgHelp.
     target_link_libraries(tina_core PRIVATE dbghelp)
 endif ()
+if (ANDROID)
+    # Diagnostics' platform sink writes to logcat through __android_log_write.
+    target_link_libraries(tina_core PRIVATE log)
+endif ()
 if (TINA_TRACE_BACKEND STREQUAL "tracy")
     target_link_libraries(tina_core PUBLIC Tina::TraceTracy)
     target_compile_definitions(tina_core
@@ -78,5 +88,15 @@ if (TINA_TRACE_BACKEND STREQUAL "tracy")
 else ()
     target_compile_definitions(tina_core PUBLIC TINA_TRACE_BACKEND_NONE=1)
 endif ()
+# Compile-time log floor, matching LogLevel's numeric values. Levels below it
+# are stripped from the build entirely. Debug keeps Trace so a developer can see
+# everything; other configurations start at Info to keep hot paths clean.
+if (NOT DEFINED TINA_LOG_LEVEL_COMPILED)
+    set(TINA_LOG_LEVEL_COMPILED "$<IF:$<CONFIG:Debug>,0,2>")
+endif ()
+target_compile_definitions(tina_core
+    PUBLIC
+        TINA_LOG_LEVEL_COMPILED=${TINA_LOG_LEVEL_COMPILED}
+)
 target_compile_definitions(tina_core PRIVATE TINA_CORE_BUILDING)
 set_target_properties(tina_core PROPERTIES CXX_EXTENSIONS OFF)

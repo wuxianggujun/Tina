@@ -11,6 +11,7 @@
 #include "GalleryActions.hpp"
 #include "GalleryScene.hpp"
 
+#include <tina/core/text/JsonWriter.hpp>
 #include <tina/desktop/DesktopEngine.hpp>
 
 #include <exception>
@@ -32,8 +33,14 @@ namespace {
 
 void writeError(const Tina::Core::Error& error)
 {
-    std::cerr << "{\"status\":\"error\",\"sample\":\"tina_sample_gallery_desktop\",\"code\":"
-              << error.code.value << ",\"message\":\"" << error.message << "\"}\n";
+    Tina::Core::JsonWriter writer(std::cerr);
+    writer.beginObject();
+    writer.member("status", "error");
+    writer.member("sample", "tina_sample_gallery_desktop");
+    writer.member("code", error.code.value);
+    writer.member("message", error.message);
+    writer.endObject();
+    std::cerr << '\n';
 }
 
 [[nodiscard]] int runGallery()

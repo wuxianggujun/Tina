@@ -9,6 +9,7 @@
 // Every peer is on loopback. That covers protocol and lifetime behaviour but says
 // nothing about loss, reordering, or path MTU.
 
+#include <tina/core/text/JsonWriter.hpp>
 #include <tina/network/DnsResolver.hpp>
 #include <tina/network/HttpClient.hpp>
 #include <tina/network/NetworkEndpoint.hpp>
@@ -22,6 +23,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdio>
+#include <iostream>
 #include <memory>
 #include <optional>
 #include <span>
@@ -107,52 +109,45 @@ struct Evidence final {
     return value;
 }
 
-void writeEvidence(std::FILE* stream, std::string_view status, const Evidence& evidence)
+void writeEvidence(std::ostream& stream, std::string_view status, const Evidence& evidence)
 {
     // Emitted identically on success and failure so a failing run is diagnosable
     // from the same output shape.
-    std::fprintf(
-        stream,
-        "{\"status\":\"%s\",\"sample\":\"tina_sample_network\",\"evidenceSchema\":%u"
-        ",\"frames\":%u"
-        ",\"udpDatagramsSent\":%llu,\"udpDatagramsReceived\":%llu"
-        ",\"udpSenderEndpointMatched\":%s"
-        ",\"dnsResolvedNumericLiteral\":%s,\"dnsRejectedUnresolvableName\":%s"
-        ",\"dnsPumpCount\":%llu"
-        ",\"tcpConnectionsAccepted\":%llu"
-        ",\"tcpClientToServerMatched\":%s,\"tcpServerToClientMatched\":%s"
-        ",\"httpRequestCompleted\":%s,\"httpStatusCode\":%u,\"httpBodyMatched\":%s"
-        ",\"webSocketHandshakeCompleted\":%s,\"webSocketEchoMatched\":%s"
-        ",\"webSocketFramesSent\":%llu"
-        "}\n",
-        std::string{status}.c_str(),
-        EvidenceSchema,
-        evidence.frames,
-        static_cast<unsigned long long>(evidence.udpDatagramsSent),
-        static_cast<unsigned long long>(evidence.udpDatagramsReceived),
-        evidence.udpSenderEndpointMatched ? "true" : "false",
-        evidence.dnsResolvedNumericLiteral ? "true" : "false",
-        evidence.dnsRejectedUnresolvableName ? "true" : "false",
-        static_cast<unsigned long long>(evidence.dnsPumpCount),
-        static_cast<unsigned long long>(evidence.tcpConnectionsAccepted),
-        evidence.tcpClientToServerMatched ? "true" : "false",
-        evidence.tcpServerToClientMatched ? "true" : "false",
-        evidence.httpRequestCompleted ? "true" : "false",
-        static_cast<unsigned>(evidence.httpStatusCode),
-        evidence.httpBodyMatched ? "true" : "false",
-        evidence.webSocketHandshakeCompleted ? "true" : "false",
-        evidence.webSocketEchoMatched ? "true" : "false",
-        static_cast<unsigned long long>(evidence.webSocketFramesSent));
+    Core::JsonWriter writer(stream);
+    writer.beginObject();
+    writer.member("status", status);
+    writer.member("sample", "tina_sample_network");
+    writer.member("evidenceSchema", EvidenceSchema);
+    writer.member("frames", evidence.frames);
+    writer.member("udpDatagramsSent", evidence.udpDatagramsSent);
+    writer.member("udpDatagramsReceived", evidence.udpDatagramsReceived);
+    writer.member("udpSenderEndpointMatched", evidence.udpSenderEndpointMatched);
+    writer.member("dnsResolvedNumericLiteral", evidence.dnsResolvedNumericLiteral);
+    writer.member("dnsRejectedUnresolvableName", evidence.dnsRejectedUnresolvableName);
+    writer.member("dnsPumpCount", evidence.dnsPumpCount);
+    writer.member("tcpConnectionsAccepted", evidence.tcpConnectionsAccepted);
+    writer.member("tcpClientToServerMatched", evidence.tcpClientToServerMatched);
+    writer.member("tcpServerToClientMatched", evidence.tcpServerToClientMatched);
+    writer.member("httpRequestCompleted", evidence.httpRequestCompleted);
+    writer.member("httpStatusCode", static_cast<unsigned>(evidence.httpStatusCode));
+    writer.member("httpBodyMatched", evidence.httpBodyMatched);
+    writer.member("webSocketHandshakeCompleted", evidence.webSocketHandshakeCompleted);
+    writer.member("webSocketEchoMatched", evidence.webSocketEchoMatched);
+    writer.member("webSocketFramesSent", evidence.webSocketFramesSent);
+    writer.endObject();
+    stream << '\n';
 }
 
 void writeError(const Core::Error& error)
 {
-    std::fprintf(
-        stderr,
-        "{\"status\":\"error\",\"domain\":%u,\"code\":%u,\"message\":\"%s\"}\n",
-        static_cast<unsigned>(error.code.domain),
-        error.code.value,
-        error.message.c_str());
+    Core::JsonWriter writer(std::cerr);
+    writer.beginObject();
+    writer.member("status", "error");
+    writer.member("domain", static_cast<unsigned>(error.code.domain));
+    writer.member("code", error.code.value);
+    writer.member("message", error.message);
+    writer.endObject();
+    std::cerr << '\n';
 }
 
 // Serves one HTTP request and one WebSocket session over accepted connections.
@@ -663,7 +658,7 @@ int main(int argc, char** argv)
     (*taskSystem)->shutdownAndJoin();
 
     if (exitCode != 0) {
-        writeEvidence(stderr, "error", evidence);
+        writeEvidence(std::cerr, "error", evidence);
         return exitCode;
     }
 
@@ -684,10 +679,10 @@ int main(int argc, char** argv)
         && evidence.webSocketFramesSent >= 1;
 
     if (!ok) {
-        writeEvidence(stderr, "error", evidence);
+        writeEvidence(std::cerr, "error", evidence);
         return 1;
     }
 
-    writeEvidence(stdout, "ok", evidence);
+    writeEvidence(std::cout, "ok", evidence);
     return 0;
 }

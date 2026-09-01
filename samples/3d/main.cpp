@@ -1,5 +1,6 @@
 #include <tina/core/error/Error.hpp>
 #include <tina/core/id/GenerationPool.hpp>
+#include <tina/core/text/JsonWriter.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 #include <tina/platform/PlatformBackend.hpp>
 #include <tina/platform/PlatformErrors.hpp>
@@ -538,8 +539,13 @@ class Extraction3DApplication final : public Tina::IGameApplication {
 
 void printError(const Tina::Core::Error& error)
 {
-    std::cerr << "{\"status\":\"error\",\"code\":" << error.code.value << ",\"message\":\""
-              << error.message << "\"}\n";
+    Tina::Core::JsonWriter writer(std::cerr);
+    writer.beginObject();
+    writer.member("status", "error");
+    writer.member("code", error.code.value);
+    writer.member("message", error.message);
+    writer.endObject();
+    std::cerr << '\n';
 }
 
 } // namespace
@@ -590,17 +596,33 @@ int main(int argumentCount, char** arguments)
         }
         else
         {
-            std::cerr << "{\"status\":\"error\",\"message\":\"3D extraction verification failed\"}\n";
+            Tina::Core::JsonWriter writer(std::cerr);
+            writer.beginObject();
+            writer.member("status", "error");
+            writer.member("message", "3D extraction verification failed");
+            writer.endObject();
+            std::cerr << '\n';
         }
         return 1;
     }
 
-    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_3d_extraction\",\"frames\":"
-              << frameCount << ",\"submittedMeshesPerFrame\":4,\"visibleMeshesPerFrame\":3,"
-              << "\"culledMeshesPerFrame\":1,\"instanceBatchesPerFrame\":2,\"aspectChanges\":"
-              << capture.aspectChangeCount << ",\"stateExits\":" << capture.stateExits
-              << ",\"applicationShutdowns\":" << capture.applicationShutdowns
-              << ",\"renderShutdowns\":" << capture.renderShutdowns
-              << ",\"liveResources\":" << capture.liveResources << "}\n";
+    {
+        Tina::Core::JsonWriter writer(std::cout);
+        writer.beginObject();
+        writer.member("status", "ok");
+        writer.member("sample", "tina_sample_3d_extraction");
+        writer.member("frames", frameCount);
+        writer.member("submittedMeshesPerFrame", 4);
+        writer.member("visibleMeshesPerFrame", 3);
+        writer.member("culledMeshesPerFrame", 1);
+        writer.member("instanceBatchesPerFrame", 2);
+        writer.member("aspectChanges", capture.aspectChangeCount);
+        writer.member("stateExits", capture.stateExits);
+        writer.member("applicationShutdowns", capture.applicationShutdowns);
+        writer.member("renderShutdowns", capture.renderShutdowns);
+        writer.member("liveResources", capture.liveResources);
+        writer.endObject();
+    }
+    std::cout << '\n';
     return 0;
 }

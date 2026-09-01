@@ -1,5 +1,7 @@
 #include <tina/desktop/UiFontFile.hpp>
 
+#include "core/io/PathUtil.hpp"
+
 #include <tina/core/io/ApplicationPaths.hpp>
 #include <tina/core/io/ReadFile.hpp>
 
@@ -24,23 +26,14 @@ namespace {
     return std::string_view{value};
 }
 
-[[nodiscard]] std::filesystem::path pathFromUtf8(std::string_view text)
-{
-    std::u8string bytes;
-    bytes.reserve(text.size());
-    for (const char byte : text)
-    {
-        bytes.push_back(static_cast<char8_t>(static_cast<unsigned char>(byte)));
-    }
-    return std::filesystem::path{std::move(bytes)};
-}
+using Core::Detail::pathFromUtf8Bytes;
 
 // Existence is checked before reading so a missing font stays a null result while a
 // present but unreadable one surfaces the read error.
 [[nodiscard]] bool isExistingFile(std::string_view utf8Path)
 {
     std::error_code errorCode;
-    return std::filesystem::is_regular_file(pathFromUtf8(utf8Path), errorCode);
+    return std::filesystem::is_regular_file(pathFromUtf8Bytes(utf8Path), errorCode);
 }
 
 [[nodiscard]] Core::Result<UiFontFile> readFontFile(std::string path, UiFontSource source)

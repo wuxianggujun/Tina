@@ -1,4 +1,5 @@
 #include <tina/core/error/Error.hpp>
+#include <tina/core/text/JsonWriter.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 #include <tina/platform/headless/HeadlessPlatformFactory.hpp>
 #include <tina/render/RenderDevice.hpp>
@@ -316,8 +317,13 @@ class Infrastructure2DApplication final : public Tina::IGameApplication {
 
 void printError(const Tina::Core::Error& error)
 {
-    std::cerr << "{\"status\":\"error\",\"code\":" << error.code.value << ",\"message\":\""
-              << error.message << "\"}\n";
+    Tina::Core::JsonWriter writer(std::cerr);
+    writer.beginObject();
+    writer.member("status", "error");
+    writer.member("code", error.code.value);
+    writer.member("message", error.message);
+    writer.endObject();
+    std::cerr << '\n';
 }
 
 } // namespace
@@ -357,15 +363,29 @@ int main(int argumentCount, char** arguments)
         }
         else
         {
-            std::cerr << "{\"status\":\"error\",\"message\":\"2D infrastructure verification failed\"}\n";
+            Tina::Core::JsonWriter writer(std::cerr);
+            writer.beginObject();
+            writer.member("status", "error");
+            writer.member("message", "2D infrastructure verification failed");
+            writer.endObject();
+            std::cerr << '\n';
         }
         return 1;
     }
 
-    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_2d_infrastructure\",\"frames\":"
-              << frameCount << ",\"spritesPerFrame\":3,\"stateExits\":" << capture.stateExits
-              << ",\"applicationShutdowns\":" << capture.applicationShutdowns
-              << ",\"renderShutdowns\":" << capture.renderShutdowns
-              << ",\"liveResources\":" << capture.liveResources << "}\n";
+    {
+        Tina::Core::JsonWriter writer(std::cout);
+        writer.beginObject();
+        writer.member("status", "ok");
+        writer.member("sample", "tina_sample_2d_infrastructure");
+        writer.member("frames", frameCount);
+        writer.member("spritesPerFrame", 3);
+        writer.member("stateExits", capture.stateExits);
+        writer.member("applicationShutdowns", capture.applicationShutdowns);
+        writer.member("renderShutdowns", capture.renderShutdowns);
+        writer.member("liveResources", capture.liveResources);
+        writer.endObject();
+    }
+    std::cout << '\n';
     return 0;
 }

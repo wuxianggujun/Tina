@@ -1,12 +1,13 @@
 #include "EditorSourceImportSelection.hpp"
 
+#include "core/io/PathUtil.hpp"
+
 #include <tina/core/text/Utf8.hpp>
 
 #include <algorithm>
 #include <cctype>
 #include <cstddef>
 #include <filesystem>
-#include <limits>
 #include <new>
 #include <utility>
 
@@ -23,56 +24,20 @@
 namespace Tina::EditorApp::Detail {
 namespace {
 
-[[nodiscard]] std::string pathToUtf8(const std::filesystem::path& path)
-{
-    const std::u8string encoded = path.u8string();
-    return {reinterpret_cast<const char*>(encoded.data()), encoded.size()};
-}
+using Core::Detail::pathFromUtf8Bytes;
+using Core::Detail::pathIsSameOrDescendant;
+using Core::Detail::pathsReferToSameLocation;
+using Core::Detail::pathToUtf8;
 
-[[nodiscard]] bool pathComponentEquals(const std::filesystem::path& left,
-                                       const std::filesystem::path& right) noexcept
-{
-#if defined(_WIN32)
-    const auto& leftText = left.native();
-    const auto& rightText = right.native();
-    if (leftText.size() != rightText.size() ||
-        leftText.size() > static_cast<std::size_t>((std::numeric_limits<int>::max)())) {
-        return false;
-    }
-    return ::CompareStringOrdinal(leftText.data(), static_cast<int>(leftText.size()),
-                                  rightText.data(), static_cast<int>(rightText.size()),
-                                  TRUE) == CSTR_EQUAL;
-#else
-    return left == right;
-#endif
-}
-
-[[nodiscard]] bool pathIsSameOrDescendant(const std::filesystem::path& candidate,
-                                          const std::filesystem::path& ancestor) noexcept
-{
-    auto candidatePart = candidate.begin();
-    for (auto ancestorPart = ancestor.begin(); ancestorPart != ancestor.end();
-         ++ancestorPart, ++candidatePart) {
-        if (candidatePart == candidate.end() ||
-            !pathComponentEquals(*candidatePart, *ancestorPart)) {
-            return false;
-        }
-    }
-    return true;
-}
-
-[[nodiscard]] bool pathsReferToSameLocation(const std::filesystem::path& left,
-                                            const std::filesystem::path& right) noexcept
-{
-    return pathIsSameOrDescendant(left, right) && pathIsSameOrDescendant(right, left);
-}
-
+// Normalizes both sides before comparing, which pathsReferToSameLocation deliberately does not do.
+// lexically_normal can throw on allocation failure and this is a noexcept predicate, so a failure
+// answers "not the same location" rather than propagating.
 [[nodiscard]] bool sourcePathsReferToSameLocation(std::string_view left,
                                                   std::string_view right) noexcept
 {
     try {
-        const auto leftPath = std::filesystem::u8path(left.begin(), left.end()).lexically_normal();
-        const auto rightPath = std::filesystem::u8path(right.begin(), right.end()).lexically_normal();
+        const auto leftPath = pathFromUtf8Bytes(left).lexically_normal();
+        const auto rightPath = pathFromUtf8Bytes(right).lexically_normal();
         return pathsReferToSameLocation(leftPath, rightPath);
     } catch (...) {
         return false;
@@ -104,10 +69,8 @@ validateUnit(std::string_view sourceRootUtf8, const EditorSourceImportUnit& unit
     }
 
     try {
-        const auto sourceRoot =
-            std::filesystem::u8path(sourceRootUtf8.begin(), sourceRootUtf8.end());
-        const auto candidate = std::filesystem::u8path(
-            unit.sourcePathUtf8.begin(), unit.sourcePathUtf8.end());
+        const auto sourceRoot = pathFromUtf8Bytes(sourceRootUtf8);
+        const auto candidate = pathFromUtf8Bytes(unit.sourcePathUtf8);
         if (!candidate.is_absolute()) {
             return Core::failure(Core::CoreErrorCode::InvalidArgument,
                                  "Editor source import path must be absolute");
@@ -219,8 +182,7 @@ Core::Result<EditorSourceImportUnitKind>
 editorSourceImportUnitKindForPath(std::string_view sourcePathUtf8)
 {
     try {
-        const auto path = std::filesystem::u8path(
-            sourcePathUtf8.begin(), sourcePathUtf8.end());
+        const auto path = pathFromUtf8Bytes(sourcePathUtf8);
         std::string extension = pathToUtf8(path.extension());
         std::transform(extension.begin(), extension.end(), extension.begin(),
                        [](unsigned char value) {

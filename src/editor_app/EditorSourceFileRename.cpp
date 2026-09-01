@@ -1,5 +1,7 @@
 #include "EditorSourceFileRename.hpp"
 
+#include "core/io/PathUtil.hpp"
+
 #include <tina/core/text/Utf8.hpp>
 
 #include <filesystem>
@@ -10,10 +12,7 @@
 namespace Tina::EditorApp::Detail {
 namespace {
 
-[[nodiscard]] std::filesystem::path pathFromUtf8(std::string_view pathUtf8)
-{
-    return std::filesystem::u8path(pathUtf8.begin(), pathUtf8.end());
-}
+using Core::Detail::pathFromUtf8Bytes;
 
 [[nodiscard]] Core::Error filesystemError(std::string_view message,
                                           const std::error_code& error,
@@ -50,8 +49,8 @@ try
                              "Editor source-file rename paths are invalid");
     }
 
-    const auto previousPath = pathFromUtf8(previousPathUtf8);
-    const auto renamedPath = pathFromUtf8(renamedPathUtf8);
+    const auto previousPath = pathFromUtf8Bytes(previousPathUtf8);
+    const auto renamedPath = pathFromUtf8Bytes(renamedPathUtf8);
     if (!previousPath.is_absolute() || !renamedPath.is_absolute())
     {
         return Core::failure(Core::CoreErrorCode::InvalidArgument,
@@ -150,8 +149,8 @@ try
     {
         return Core::success();
     }
-    const auto previousPath = pathFromUtf8(previousPathUtf8_);
-    const auto renamedPath = pathFromUtf8(renamedPathUtf8_);
+    const auto previousPath = pathFromUtf8Bytes(previousPathUtf8_);
+    const auto renamedPath = pathFromUtf8Bytes(renamedPathUtf8_);
 
     std::error_code error;
     const auto renamedStatus = std::filesystem::symlink_status(renamedPath, error);
@@ -220,8 +219,8 @@ void EditorSourceFileRename::rollbackNoexcept() noexcept
     }
     try
     {
-        const auto previousPath = pathFromUtf8(previousPathUtf8_);
-        const auto renamedPath = pathFromUtf8(renamedPathUtf8_);
+        const auto previousPath = pathFromUtf8Bytes(previousPathUtf8_);
+        const auto renamedPath = pathFromUtf8Bytes(renamedPathUtf8_);
         std::error_code error;
         const auto previousStatus = std::filesystem::symlink_status(previousPath, error);
         if (!error && std::filesystem::exists(previousStatus))

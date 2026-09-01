@@ -1,7 +1,7 @@
 #include <tina/asset/SourceImportProbe.hpp>
 
 #include "GltfFileSnapshot.hpp"
-#include "Utf8Path.hpp"
+#include "core/io/PathUtil.hpp"
 
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/GltfCook.hpp>
@@ -235,7 +235,7 @@ findUnitIndex(const AssetFormat::SourceImportMetadataView& baseline,
 canonicalSourceRoot(std::string_view sourceRootUtf8)
 {
     std::error_code errorCode;
-    auto root = std::filesystem::canonical(Detail::pathFromUtf8Bytes(sourceRootUtf8), errorCode);
+    auto root = std::filesystem::canonical(Core::Detail::pathFromUtf8Bytes(sourceRootUtf8), errorCode);
     if (errorCode || !std::filesystem::is_directory(root, errorCode) || errorCode)
     {
         return Core::failure(AssetErrorCode::CatalogFileLoadFailed,
@@ -568,7 +568,7 @@ probeSourceImportUnit(const AssetFormat::SourceImportMetadataView& baseline,
                 "probeSourceImportUnit", "sourceRoot"));
         }
         const auto requestedPrimary = std::filesystem::absolute(
-            Detail::pathFromUtf8Bytes(desc.primarySourceUtf8Path)).lexically_normal();
+            Core::Detail::pathFromUtf8Bytes(desc.primarySourceUtf8Path)).lexically_normal();
         auto primaryProbe = probeFingerprint(*primarySource, requestedPrimary, *sourceRoot);
         if (!primaryProbe)
         {
@@ -584,7 +584,7 @@ probeSourceImportUnit(const AssetFormat::SourceImportMetadataView& baseline,
                 ? primaryProbe->snapshot.finalPath.parent_path()
                 : *sourceRoot;
         const std::filesystem::path requestedRoot = std::filesystem::absolute(
-            Detail::pathFromUtf8Bytes(desc.sourceRootUtf8)).lexically_normal();
+            Core::Detail::pathFromUtf8Bytes(desc.sourceRootUtf8)).lexically_normal();
         for (Core::u32 inputIndex = 0; inputIndex < unit->inputCount; ++inputIndex)
         {
             const auto input = baseline.unitInputForUnit(*unitIndex, inputIndex);
@@ -600,7 +600,7 @@ probeSourceImportUnit(const AssetFormat::SourceImportMetadataView& baseline,
                                      "source import probe secondary source is missing");
             }
             const auto requestedPath =
-                (requestedRoot / Detail::pathFromUtf8Bytes(*path)).lexically_normal();
+                (requestedRoot / Core::Detail::pathFromUtf8Bytes(*path)).lexically_normal();
             auto sourceProbe = probeFingerprint(*source, requestedPath, secondaryRoot);
             if (!sourceProbe)
             {

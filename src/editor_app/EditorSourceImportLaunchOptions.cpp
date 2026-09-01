@@ -1,32 +1,27 @@
 #include "EditorSourceImportLaunchOptions.hpp"
 
+#include "core/io/PathUtil.hpp"
+
 #include <tina/core/text/Utf8.hpp>
 
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
-#include <limits>
 #include <new>
 #include <utility>
-
-#if defined(_WIN32)
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <Windows.h>
-#endif
 
 namespace Tina::EditorApp::Detail {
 namespace {
 
-inline constexpr std::string_view ProjectRootPrefix = "--project-root=";
-inline constexpr std::string_view ImportRecipePrefix = "--import-recipe=";
-inline constexpr std::string_view ImportGltfPrefix = "--import-gltf=";
-inline constexpr std::string_view ImportTexturePrefix = "--import-texture=";
-inline constexpr std::string_view ImportAudioPrefix = "--import-audio=";
+using Core::Detail::pathIsSameOrDescendant;
+
+// Option names, not prefixes: ArgScanner appends the '=' itself when it sees that spelling, and
+// these double as the names in the duplicate and validation messages.
+inline constexpr std::string_view ProjectRootOption = "--project-root";
+inline constexpr std::string_view ImportRecipeOption = "--import-recipe";
+inline constexpr std::string_view ImportGltfOption = "--import-gltf";
+inline constexpr std::string_view ImportTextureOption = "--import-texture";
+inline constexpr std::string_view ImportAudioOption = "--import-audio";
 inline constexpr std::string_view ImportOnStartArgument = "--import-on-start";
 
 [[nodiscard]] Core::Status validatePathText(std::string_view path, std::string_view optionName)
@@ -49,12 +44,7 @@ inline constexpr std::string_view ImportOnStartArgument = "--import-on-start";
 [[nodiscard]] Core::Result<std::filesystem::path> utf8Path(std::string_view path)
 {
     try {
-        std::u8string encoded;
-        encoded.reserve(path.size());
-        for (const char byte : path) {
-            encoded.push_back(static_cast<char8_t>(static_cast<unsigned char>(byte)));
-        }
-        return std::filesystem::path{std::move(encoded)};
+        return Core::Detail::pathFromUtf8Bytes(path);
     } catch (const std::bad_alloc&) {
         return Core::failure(Core::CoreErrorCode::OutOfMemory,
                              "Could not retain source-import path for validation");
@@ -64,38 +54,8 @@ inline constexpr std::string_view ImportOnStartArgument = "--import-on-start";
     }
 }
 
-[[nodiscard]] bool pathComponentEquals(const std::filesystem::path& left,
-                                       const std::filesystem::path& right) noexcept
-{
-#if defined(_WIN32)
-    const auto& leftText = left.native();
-    const auto& rightText = right.native();
-    if (leftText.size() != rightText.size() ||
-        leftText.size() > static_cast<std::size_t>((std::numeric_limits<int>::max)())) {
-        return false;
-    }
-    return ::CompareStringOrdinal(leftText.data(), static_cast<int>(leftText.size()),
-                                  rightText.data(), static_cast<int>(rightText.size()),
-                                  TRUE) == CSTR_EQUAL;
-#else
-    return left == right;
-#endif
-}
-
-[[nodiscard]] bool pathIsSameOrDescendant(const std::filesystem::path& candidate,
-                                          const std::filesystem::path& ancestor) noexcept
-{
-    auto candidatePart = candidate.begin();
-    for (auto ancestorPart = ancestor.begin(); ancestorPart != ancestor.end();
-         ++ancestorPart, ++candidatePart) {
-        if (candidatePart == candidate.end() ||
-            !pathComponentEquals(*candidatePart, *ancestorPart)) {
-            return false;
-        }
-    }
-    return true;
-}
-
+// Text overload: decodes through the validating utf8Path above, then normalizes, which the path
+// overload in PathUtil.hpp deliberately leaves to its caller.
 [[nodiscard]] bool pathsReferToSameLocation(std::string_view left,
                                             std::string_view right) noexcept
 {
@@ -105,10 +65,8 @@ inline constexpr std::string_view ImportOnStartArgument = "--import-on-start";
         if (!leftPath || !rightPath) {
             return false;
         }
-        const auto normalizedLeft = leftPath->lexically_normal();
-        const auto normalizedRight = rightPath->lexically_normal();
-        return pathIsSameOrDescendant(normalizedLeft, normalizedRight) &&
-               pathIsSameOrDescendant(normalizedRight, normalizedLeft);
+        return Core::Detail::pathsReferToSameLocation(leftPath->lexically_normal(),
+                                                      rightPath->lexically_normal());
     } catch (...) {
         return false;
     }
@@ -226,43 +184,42 @@ appendImportUnit(std::string_view path, std::string_view optionName,
 } // namespace
 
 Core::Result<bool>
-parseEditorSourceImportLaunchOption(std::string_view argument,
+parseEditorSourceImportLaunchOption(Core::ArgScanner& scanner,
                                     EditorSourceImportLaunchOptions& options)
 {
-    if (argument.starts_with(ProjectRootPrefix)) {
+    if (const auto path = scanner.value(ProjectRootOption)) {
         if (!options.projectRootUtf8.empty()) {
             return Core::failure(Core::CoreErrorCode::InvalidArgument,
                                  "Duplicate --project-root argument");
         }
-        const std::string_view path = argument.substr(ProjectRootPrefix.size());
-        if (auto status = validateProjectRoot(path); !status) {
+        if (auto status = validateProjectRoot(*path); !status) {
             return Core::failure(std::move(status.error()));
         }
         try {
-            options.projectRootUtf8.assign(path);
+            options.projectRootUtf8.assign(*path);
             return true;
         } catch (const std::bad_alloc&) {
             return Core::failure(Core::CoreErrorCode::OutOfMemory,
                                  "Could not retain --project-root");
         }
     }
-    if (argument.starts_with(ImportRecipePrefix)) {
-        return appendImportUnit(argument.substr(ImportRecipePrefix.size()), "--import-recipe",
+    if (const auto path = scanner.value(ImportRecipeOption)) {
+        return appendImportUnit(*path, ImportRecipeOption,
                                 EditorSourceImportLaunchUnitKind::CatalogRecipe, options);
     }
-    if (argument.starts_with(ImportGltfPrefix)) {
-        return appendImportUnit(argument.substr(ImportGltfPrefix.size()), "--import-gltf",
+    if (const auto path = scanner.value(ImportGltfOption)) {
+        return appendImportUnit(*path, ImportGltfOption,
                                 EditorSourceImportLaunchUnitKind::Gltf, options);
     }
-    if (argument.starts_with(ImportTexturePrefix)) {
-        return appendImportUnit(argument.substr(ImportTexturePrefix.size()), "--import-texture",
+    if (const auto path = scanner.value(ImportTextureOption)) {
+        return appendImportUnit(*path, ImportTextureOption,
                                 EditorSourceImportLaunchUnitKind::Texture, options);
     }
-    if (argument.starts_with(ImportAudioPrefix)) {
-        return appendImportUnit(argument.substr(ImportAudioPrefix.size()), "--import-audio",
+    if (const auto path = scanner.value(ImportAudioOption)) {
+        return appendImportUnit(*path, ImportAudioOption,
                                 EditorSourceImportLaunchUnitKind::Audio, options);
     }
-    if (argument == ImportOnStartArgument) {
+    if (scanner.flag(ImportOnStartArgument)) {
         if (options.importOnStart) {
             return Core::failure(Core::CoreErrorCode::InvalidArgument,
                                  "Duplicate --import-on-start argument");

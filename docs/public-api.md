@@ -113,6 +113,29 @@ include。启用 Profile backend 时，公共头只实例化具有 64-byte opaqu
 第三方对象由 `Tina::TraceTracy` adapter 在该 storage 内构造和销毁；None 仍完全编译消失。zone name 必须是
 string literal，宏传递静态长度与 call-site `SourceLocation`。首切片没有公共 session/capture API。
 
+### 日志
+
+`<tina/core/diagnostics/Log.hpp>` 是调用点唯一需要 include 的头。它同时是唯一按编译期常量剥离的
+日志前端：
+
+```cpp
+TINA_LOG_INFO("render.device", "created {} swapchains", count);
+TINA_LOG_TO(channel, Core::Diagnostics::LogLevel::Error, "runtime", "{}", error.message);
+```
+
+`TINA_LOG_LEVEL_COMPILED` 以下的级别整体消失、参数不被求值（Debug 为 0，其余配置为 2；
+`TINA_LOG_CRITICAL` 永不剥离）。默认目标是 `defaultChannel()`——一个由所有者显式赋值的
+`std::atomic<Diagnostics*>`，赋值前与清空后返回关闭通道，写入是 no-op；不是惰性单例。
+`EngineHost` 负责赋值与清空。宏**不使用** `__VA_OPT__`，因此不要求消费者传
+`/Zc:preprocessor`。
+
+`<tina/core/diagnostics/LogFormat.hpp>` 的 `Format::format()` 是自研的 `{}` 格式化，公共头
+只依赖 `<string_view>`/`<cstddef>`。`<tina/core/diagnostics/LogRecord.hpp>` 的 `LogRecord` 自持
+256 字节消息缓冲（`sizeof` 实测 304 字节），必须经 `LogRecord::make()` 构造——它不是聚合类型。
+`<tina/core/diagnostics/Diagnostics.hpp>` 的 `DiagnosticsConfig` 决定同步/异步、file sink 与轮转、
+platform sink；`filePath` 是 `std::string_view`，`Create` 立即复制，因此临时量安全。
+理由见 [ADR 0039](adr/0039-logging-frontend-and-async-sinks.md)。
+
 ### 进程级最后故障报告
 
 `<tina/core/diagnostics/CrashHandler.hpp>` 提供 opt-in 进程策略：

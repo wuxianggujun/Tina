@@ -5,6 +5,8 @@
 #include <tina/asset/CatalogPackageSummary.hpp>
 #include <tina/core/error/Error.hpp>
 #include <tina/core/id/AssetId.hpp>
+#include <tina/core/text/ArgParser.hpp>
+#include <tina/core/text/JsonWriter.hpp>
 
 #include <cstdint>
 #include <iostream>
@@ -50,139 +52,97 @@ void printUsage()
         << "  --help\n";
 }
 
-[[nodiscard]] bool parseU32(std::string_view text, Tina::Core::u32& out)
-{
-    if (text.empty())
-    {
-        return false;
-    }
-    std::uint64_t value = 0;
-    for (const char ch : text)
-    {
-        if (ch < '0' || ch > '9')
-        {
-            return false;
-        }
-        value = value * 10U + static_cast<std::uint64_t>(ch - '0');
-        if (value > 0xFFFFFFFFULL)
-        {
-            return false;
-        }
-    }
-    out = static_cast<Tina::Core::u32>(value);
-    return true;
-}
-
 [[nodiscard]] int parseArgs(int argc, char** argv, Options& options)
 {
-    for (int index = 1; index < argc; ++index)
+    Tina::Core::ArgScanner scanner(argc, argv);
+    while (scanner.next())
     {
-        const std::string_view arg = argv[index];
-        if (arg == "--help" || arg == "-h")
+        if (scanner.flag("--help") || scanner.flag("-h"))
         {
             printUsage();
             return 2;
         }
-        if (arg == "--metadata-only")
+        if (scanner.flag("--metadata-only"))
         {
             options.metadataOnly = true;
             continue;
         }
-        if (arg == "--no-validate")
+        if (scanner.flag("--no-validate"))
         {
             options.skipValidate = true;
             continue;
         }
-        if (arg == "--list-entries")
+        if (scanner.flag("--list-entries"))
         {
             options.listEntries = true;
             continue;
         }
-        if (arg == "--plan-loads")
+        if (scanner.flag("--plan-loads"))
         {
             options.planLoads = true;
             continue;
         }
-        if (arg == "--load-assets")
+        if (scanner.flag("--load-assets"))
         {
             options.loadAssets = true;
             continue;
         }
-        if (arg == "--typed-payloads")
+        if (scanner.flag("--typed-payloads"))
         {
             options.typedPayloads = true;
             continue;
         }
-        auto requireValue = [&](std::string_view name) -> std::string_view {
-            if (index + 1 >= argc)
-            {
-                std::cerr << "missing value for " << name << '\n';
-                return {};
-            }
-            ++index;
-            return argv[index];
-        };
-        if (arg == "--root")
+        if (const auto value = scanner.value("--root"))
         {
-            const auto value = requireValue(arg);
-            if (value.empty())
-            {
-                return 2;
-            }
-            options.root.assign(value);
+            options.root.assign(*value);
             continue;
         }
-        if (arg == "--manifest")
+        if (const auto value = scanner.value("--manifest"))
         {
-            const auto value = requireValue(arg);
-            if (value.empty())
-            {
-                return 2;
-            }
-            options.manifestRelative.assign(value);
+            options.manifestRelative.assign(*value);
             continue;
         }
-        if (arg == "--asset-id")
+        if (const auto value = scanner.value("--asset-id"))
         {
-            const auto value = requireValue(arg);
-            if (value.empty())
-            {
-                return 2;
-            }
-            options.assetIdTexts.emplace_back(value);
+            options.assetIdTexts.emplace_back(*value);
             continue;
         }
-        if (arg == "--max-entries")
+        if (const auto value = scanner.value("--max-entries"))
         {
-            const auto value = requireValue(arg);
-            if (value.empty() || !parseU32(value, options.maxEntries))
+            if (!Tina::Core::parseArgUnsigned(*value, options.maxEntries))
             {
                 std::cerr << "invalid --max-entries\n";
                 return 2;
             }
             continue;
         }
-        if (arg == "--max-dependencies")
+        // Tested before --max-dependencies-per-asset, which it is a prefix of. ArgScanner only
+        // claims a longer token when an '=' follows the name, so the longer option falls through
+        // to its own test below.
+        if (const auto value = scanner.value("--max-dependencies"))
         {
-            const auto value = requireValue(arg);
-            if (value.empty() || !parseU32(value, options.maxDependencies))
+            if (!Tina::Core::parseArgUnsigned(*value, options.maxDependencies))
             {
                 std::cerr << "invalid --max-dependencies\n";
                 return 2;
             }
             continue;
         }
-        if (arg == "--max-dependencies-per-asset")
+        if (const auto value = scanner.value("--max-dependencies-per-asset"))
         {
-            const auto value = requireValue(arg);
-            if (value.empty() || !parseU32(value, options.maxDependenciesPerAsset))
+            if (!Tina::Core::parseArgUnsigned(*value, options.maxDependenciesPerAsset))
             {
                 std::cerr << "invalid --max-dependencies-per-asset\n";
                 return 2;
             }
             continue;
         }
-        std::cerr << "unknown argument: " << arg << '\n';
+        if (scanner.failed())
+        {
+            std::cerr << "missing value for " << scanner.failedOption() << '\n';
+            return 2;
+        }
+        std::cerr << "unknown argument: " << scanner.token() << '\n';
         printUsage();
         return 2;
     }
@@ -202,35 +162,26 @@ void printUsage()
 
 void printErrorJson(const Tina::Core::Error& error)
 {
-    std::cout << "{\"status\":\"error\",\"domain\":" << static_cast<unsigned>(error.code.domain)
-              << ",\"code\":" << error.code.value << ",\"message\":\"";
-    for (const char ch : error.message)
-    {
-        if (ch == '"' || ch == '\\')
-        {
-            std::cout << '\\';
-        }
-        if (static_cast<unsigned char>(ch) < 0x20U)
-        {
-            continue;
-        }
-        std::cout << ch;
-    }
-    std::cout << "\"}\n";
+    Tina::Core::JsonWriter writer(std::cout);
+    writer.beginObject();
+    writer.member("status", "error");
+    writer.member("domain", static_cast<unsigned>(error.code.domain));
+    writer.member("code", error.code.value);
+    writer.member("message", error.message);
+    writer.endObject();
+    std::cout << '\n';
 }
 
 void printErrorMessage(std::string_view message)
 {
-    std::cout << "{\"status\":\"error\",\"domain\":1,\"code\":1,\"message\":\"";
-    for (const char ch : message)
-    {
-        if (ch == '"' || ch == '\\')
-        {
-            std::cout << '\\';
-        }
-        std::cout << ch;
-    }
-    std::cout << "\"}\n";
+    Tina::Core::JsonWriter writer(std::cout);
+    writer.beginObject();
+    writer.member("status", "error");
+    writer.member("domain", 1);
+    writer.member("code", 1);
+    writer.member("message", message);
+    writer.endObject();
+    std::cout << '\n';
 }
 
 [[nodiscard]] Tina::Core::Result<std::pmr::vector<Tina::Core::AssetId>>
@@ -363,71 +314,69 @@ int main(int argc, char** argv)
         plannedBytes = *total;
     }
 
-    std::cout << "{\"status\":\"ok\",\"entries\":" << summary->entryCount
-              << ",\"dependencies\":" << summary->dependencyCount
-              << ",\"validated\":" << (options.skipValidate ? "false" : "true")
-              << ",\"contentHash\":" << ((!options.skipValidate && !options.metadataOnly) ? "true" : "false")
-              << ",\"loadedAssets\":" << (loadedAssets ? loadedAssets->size() : 0U);
+    Tina::Core::JsonWriter writer(std::cout);
+    writer.beginObject();
+    writer.member("status", "ok");
+    writer.member("entries", summary->entryCount);
+    writer.member("dependencies", summary->dependencyCount);
+    writer.member("validated", !options.skipValidate);
+    writer.member("contentHash", !options.skipValidate && !options.metadataOnly);
+    writer.member("loadedAssets", loadedAssets ? loadedAssets->size() : std::size_t{0});
     if (plannedBytes)
     {
-        std::cout << ",\"plannedCookedFileBytes\":" << *plannedBytes;
+        writer.member("plannedCookedFileBytes", *plannedBytes);
     }
     if (options.listEntries)
     {
-        std::cout << ",\"items\":[";
-        for (std::size_t index = 0; index < summary->entries.size(); ++index)
+        writer.beginArrayMember("items");
+        for (const auto& row : summary->entries)
         {
-            const auto& row = summary->entries[index];
-            if (index != 0U)
-            {
-                std::cout << ',';
-            }
-            std::cout << "{\"id\":\"" << std::string_view(row.assetIdText.data(), row.assetIdText.size())
-                      << "\",\"kind\":" << static_cast<unsigned>(row.assetKind)
-                      << ",\"typeVersion\":" << row.assetTypeVersion
-                      << ",\"dependencyCount\":" << row.dependencyCount
-                      << ",\"cookedFileBytes\":" << row.cookedFileBytes << '}';
+            writer.beginObjectElement();
+            writer.member("id", std::string_view(row.assetIdText.data(), row.assetIdText.size()));
+            writer.member("kind", static_cast<unsigned>(row.assetKind));
+            writer.member("typeVersion", row.assetTypeVersion);
+            writer.member("dependencyCount", row.dependencyCount);
+            writer.member("cookedFileBytes", row.cookedFileBytes);
+            writer.endObject();
         }
-        std::cout << ']';
+        writer.endArray();
     }
     if (planRows)
     {
-        std::cout << ",\"loadPlan\":[";
+        writer.beginArrayMember("loadPlan");
         for (std::size_t index = 0; index < planRows->size(); ++index)
         {
             const auto& row = (*planRows)[index];
-            if (index != 0U)
-            {
-                std::cout << ',';
-            }
             const auto idText = row.assetId.canonicalText();
-            std::cout << "{\"order\":" << index << ",\"entryIndex\":" << row.entryIndex << ",\"id\":\""
-                      << std::string_view(idText.data(), idText.size())
-                      << "\",\"kind\":" << static_cast<unsigned>(row.assetKind)
-                      << ",\"dependencyCount\":" << row.dependencyCount
-                      << ",\"cookedFileBytes\":" << row.cookedFileBytes << ",\"path\":\"" << row.relativePath.view()
-                      << "\"}";
+            writer.beginObjectElement();
+            writer.member("order", index);
+            writer.member("entryIndex", row.entryIndex);
+            writer.member("id", std::string_view(idText.data(), idText.size()));
+            writer.member("kind", static_cast<unsigned>(row.assetKind));
+            writer.member("dependencyCount", row.dependencyCount);
+            writer.member("cookedFileBytes", row.cookedFileBytes);
+            writer.member("path", row.relativePath.view());
+            writer.endObject();
         }
-        std::cout << ']';
+        writer.endArray();
     }
     if (loadedAssets)
     {
-        std::cout << ",\"loaded\":[";
+        writer.beginArrayMember("loaded");
         for (std::size_t index = 0; index < loadedAssets->size(); ++index)
         {
             const auto& asset = (*loadedAssets)[index];
-            if (index != 0U)
-            {
-                std::cout << ',';
-            }
             const auto idText = asset.header().assetId.canonicalText();
-            std::cout << "{\"order\":" << index << ",\"id\":\""
-                      << std::string_view(idText.data(), idText.size())
-                      << "\",\"kind\":" << static_cast<unsigned>(asset.header().assetKind)
-                      << ",\"payloadBytes\":" << asset.header().payloadBytes << '}';
+            writer.beginObjectElement();
+            writer.member("order", index);
+            writer.member("id", std::string_view(idText.data(), idText.size()));
+            writer.member("kind", static_cast<unsigned>(asset.header().assetKind));
+            writer.member("payloadBytes", asset.header().payloadBytes);
+            writer.endObject();
         }
-        std::cout << ']';
+        writer.endArray();
     }
-    std::cout << "}\n";
+    writer.endObject();
+    std::cout << '\n';
     return 0;
 }

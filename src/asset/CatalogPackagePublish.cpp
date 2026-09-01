@@ -1,6 +1,6 @@
 #include <tina/asset/CatalogPackagePublish.hpp>
 
-#include "Utf8Path.hpp"
+#include "core/io/PathUtil.hpp"
 
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/core/io/WriteFile.hpp>
@@ -17,18 +17,6 @@ namespace {
     return text.find('\0') != std::string_view::npos;
 }
 
-[[nodiscard]] bool hasPathEscapeComponent(const std::filesystem::path& relative) noexcept
-{
-    for (const auto& part : relative)
-    {
-        if (part == "..")
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
 [[nodiscard]] Core::Result<std::string> joinRootRelative(std::string_view catalogRootUtf8,
                                                          std::string_view relativeUtf8)
 {
@@ -40,12 +28,12 @@ namespace {
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "relative path is invalid");
     }
-    const auto relative = Detail::pathFromUtf8Bytes(relativeUtf8);
-    if (relative.is_absolute() || hasPathEscapeComponent(relative))
+    const auto relative = Core::Detail::pathFromUtf8Bytes(relativeUtf8);
+    if (relative.is_absolute() || Core::Detail::pathHasParentComponent(relative))
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "relative path is not safe");
     }
-    const auto full = Detail::pathFromUtf8Bytes(catalogRootUtf8) / relative;
+    const auto full = Core::Detail::pathFromUtf8Bytes(catalogRootUtf8) / relative;
     const auto generic = full.generic_u8string();
     return std::string(generic.begin(), generic.end());
 }

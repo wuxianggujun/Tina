@@ -22,19 +22,22 @@ target_link_libraries(tina_sample_3d PRIVATE
 )
 set_target_properties(tina_sample_3d PROPERTIES CXX_EXTENSIONS OFF)
 
-set(_tina_complete_pbr_gltf
-    "${PROJECT_SOURCE_DIR}/tests/fixtures/gltf/complete_pbr/complete_pbr.gltf")
-if(EXISTS "${_tina_complete_pbr_gltf}")
-    # Default product gate uses the complete PBR repo fixture (multi-mesh + MR/normal maps).
-    target_compile_definitions(tina_sample_3d PRIVATE
-        "TINA_COMPLETE_PBR_GLTF_FIXTURE=\"${_tina_complete_pbr_gltf}\"")
-endif()
-
-if(WIN32)
-    add_custom_command(TARGET tina_sample_3d POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_RUNTIME_DLLS:tina_sample_3d>
-            $<TARGET_FILE_DIR:tina_sample_3d>
-        COMMAND_EXPAND_LISTS
+# Default product gate uses the complete PBR repo fixture (multi-mesh + MR/normal maps).
+# It ships beside the executable and is resolved relative to it, same rule as the 2D
+# recipe: the source-tree path this used to compile in named a file that exists only on
+# the build machine. The .gltf's four URIs are relative, so the whole set has to land in
+# one directory for them to keep resolving.
+set(_tina_complete_pbr_dir "${PROJECT_SOURCE_DIR}/tests/fixtures/gltf/complete_pbr")
+foreach(_fixture_file IN ITEMS
+        complete_pbr.gltf
+        geometry.bin
+        base_color.png
+        metallic_roughness.png
+        normal.png)
+    tina_product_data_file(tina_sample_3d
+        "${_tina_complete_pbr_dir}/${_fixture_file}"
+        "assets/complete_pbr/${_fixture_file}"
     )
-endif()
+endforeach()
+
+tina_install_product(tina_sample_3d)

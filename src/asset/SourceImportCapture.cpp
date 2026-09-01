@@ -1,6 +1,6 @@
 #include <tina/asset/SourceImportCapture.hpp>
 
-#include "Utf8Path.hpp"
+#include "core/io/PathUtil.hpp"
 
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/core/hash/ContentHashDigest.hpp>
@@ -38,69 +38,29 @@ namespace {
     return left.size() < right.size() ? -1 : 1;
 }
 
-[[nodiscard]] bool escapesRoot(const std::filesystem::path& relative) noexcept
-{
-    if (relative.empty() || relative.is_absolute() || relative.has_root_path())
-    {
-        return true;
-    }
-    for (const auto& component : relative)
-    {
-        if (component == "..")
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
-[[nodiscard]] bool pathComponentEquals(const std::filesystem::path& left,
-                                       const std::filesystem::path& right) noexcept
-{
-#if defined(_WIN32)
-    const auto& leftText = left.native();
-    const auto& rightText = right.native();
-    return leftText.size() == rightText.size() &&
-           std::equal(leftText.begin(), leftText.end(), rightText.begin(),
-                      [](const wchar_t leftCharacter, const wchar_t rightCharacter) {
-                          return std::towlower(leftCharacter) == std::towlower(rightCharacter);
-                      });
-#else
-    return left == right;
-#endif
-}
-
 [[nodiscard]] Core::Result<std::filesystem::path>
 rootRelativeSourcePath(const std::filesystem::path& root,
                        const std::filesystem::path& source)
 {
-    auto sourcePart = source.begin();
-    for (auto rootPart = root.begin(); rootPart != root.end(); ++rootPart, ++sourcePart)
-    {
-        if (sourcePart == source.end() || !pathComponentEquals(*rootPart, *sourcePart))
-        {
-            return Core::failure(AssetErrorCode::InvalidCatalogConfig,
-                                 "source import path is outside the configured authoring root");
-        }
-    }
-
-    std::filesystem::path relative;
-    for (; sourcePart != source.end(); ++sourcePart)
-    {
-        relative /= *sourcePart;
-    }
-    if (escapesRoot(relative))
+    auto relative = Core::Detail::pathRelativeToAncestor(source, root);
+    if (!relative || Core::Detail::pathEscapesRoot(*relative))
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "source import path is outside the configured authoring root");
     }
+
+    std::filesystem::path stable = std::move(*relative);
 #if defined(_WIN32)
-    auto stableText = relative.native();
+    // This towlower is a transform, not a comparison, so it is deliberately not the ordinal
+    // folding used by pathComponentEquals. Its output is written into the .tmeta wire format as
+    // the persisted identity of an imported source file, so changing how it folds would stop
+    // every already-cooked asset from matching its own source.
+    auto stableText = stable.native();
     std::transform(stableText.begin(), stableText.end(), stableText.begin(),
                    [](const wchar_t character) { return std::towlower(character); });
-    relative = std::filesystem::path(std::move(stableText));
+    stable = std::filesystem::path(std::move(stableText));
 #endif
-    return relative;
+    return stable;
 }
 
 struct CanonicalUnit final {
@@ -127,9 +87,9 @@ Core::Result<std::string> normalizeSourceImportPath(const SourceImportCaptureCon
 
     try
     {
-        const auto root = std::filesystem::absolute(Detail::pathFromUtf8Bytes(config.sourceRootUtf8))
+        const auto root = std::filesystem::absolute(Core::Detail::pathFromUtf8Bytes(config.sourceRootUtf8))
                               .lexically_normal();
-        const auto source = std::filesystem::absolute(Detail::pathFromUtf8Bytes(sourceUtf8Path))
+        const auto source = std::filesystem::absolute(Core::Detail::pathFromUtf8Bytes(sourceUtf8Path))
                                 .lexically_normal();
         auto relative = rootRelativeSourcePath(root, source);
         if (!relative)

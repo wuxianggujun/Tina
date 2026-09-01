@@ -1,6 +1,6 @@
 #include <tina/asset/CatalogPackage.hpp>
 
-#include "Utf8Path.hpp"
+#include "core/io/PathUtil.hpp"
 
 #include <tina/asset/AssetErrors.hpp>
 
@@ -14,18 +14,6 @@ namespace {
 [[nodiscard]] bool containsEmbeddedNul(std::string_view text) noexcept
 {
     return text.find('\0') != std::string_view::npos;
-}
-
-[[nodiscard]] bool hasPathEscapeComponent(const std::filesystem::path& relative) noexcept
-{
-    for (const auto& part : relative)
-    {
-        if (part == "..")
-        {
-            return true;
-        }
-    }
-    return false;
 }
 
 } // namespace
@@ -45,13 +33,13 @@ Core::Result<CatalogSnapshot> openCatalogPackage(std::string_view catalogRootUtf
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "catalog package open requires memory resource");
     }
 
-    const auto relative = Detail::pathFromUtf8Bytes(config.manifestRelativePath);
-    if (relative.is_absolute() || hasPathEscapeComponent(relative))
+    const auto relative = Core::Detail::pathFromUtf8Bytes(config.manifestRelativePath);
+    if (relative.is_absolute() || Core::Detail::pathHasParentComponent(relative))
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "manifest relative path is not safe");
     }
 
-    const auto root = Detail::pathFromUtf8Bytes(catalogRootUtf8);
+    const auto root = Core::Detail::pathFromUtf8Bytes(catalogRootUtf8);
     const auto fullPath = root / relative;
     const auto generic = fullPath.generic_u8string();
     const std::string utf8Path(generic.begin(), generic.end());

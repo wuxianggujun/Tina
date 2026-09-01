@@ -1,5 +1,8 @@
 #include "EditorFileDialog.hpp"
 
+#include <tina/core/text/ArgParser.hpp>
+#include <tina/core/text/JsonWriter.hpp>
+
 #include <array>
 #include <cstdint>
 #include <filesystem>
@@ -24,49 +27,6 @@ struct Options final {
     std::string defaultExtension{};
     std::string titleToken{};
 };
-
-void writeJsonString(std::ostream& output, std::string_view value)
-{
-    constexpr char Hexadecimal[] = "0123456789abcdef";
-    output.put('"');
-    for (const unsigned char byte : value)
-    {
-        switch (byte)
-        {
-        case '"':
-            output << "\\\"";
-            break;
-        case '\\':
-            output << "\\\\";
-            break;
-        case '\b':
-            output << "\\b";
-            break;
-        case '\f':
-            output << "\\f";
-            break;
-        case '\n':
-            output << "\\n";
-            break;
-        case '\r':
-            output << "\\r";
-            break;
-        case '\t':
-            output << "\\t";
-            break;
-        default:
-            if (byte < 0x20U)
-            {
-                output << "\\u00" << Hexadecimal[byte >> 4U] << Hexadecimal[byte & 0x0FU];
-            } else
-            {
-                output.put(static_cast<char>(byte));
-            }
-            break;
-        }
-    }
-    output.put('"');
-}
 
 [[nodiscard]] bool assignOnce(std::string& destination, std::string_view value, std::string_view optionName)
 {
@@ -106,50 +66,46 @@ void writeJsonString(std::ostream& output, std::string_view value)
 
 [[nodiscard]] bool parseOptions(int argumentCount, char** arguments, Options& options)
 {
-    for (int index = 1; index < argumentCount; ++index)
+    Tina::Core::ArgScanner scanner(argumentCount, arguments);
+    while (scanner.next())
     {
-        const std::string_view argument{arguments[index]};
-        constexpr std::string_view OperationPrefix = "--operation=";
-        constexpr std::string_view InitialDirectoryPrefix = "--initial-directory=";
-        constexpr std::string_view SuggestedNamePrefix = "--suggested-name=";
-        constexpr std::string_view DefaultExtensionPrefix = "--default-extension=";
-        constexpr std::string_view TitleTokenPrefix = "--title-token=";
-
-        if (argument.starts_with(OperationPrefix))
+        if (const auto value = scanner.value("--operation"))
         {
-            if (!parseOperation(options, argument.substr(OperationPrefix.size())))
+            if (!parseOperation(options, *value))
             {
                 return false;
             }
-        } else if (argument.starts_with(InitialDirectoryPrefix))
+        } else if (const auto value = scanner.value("--initial-directory"))
         {
-            if (!assignOnce(options.initialDirectory, argument.substr(InitialDirectoryPrefix.size()),
-                            "--initial-directory"))
+            if (!assignOnce(options.initialDirectory, *value, "--initial-directory"))
             {
                 return false;
             }
-        } else if (argument.starts_with(SuggestedNamePrefix))
+        } else if (const auto value = scanner.value("--suggested-name"))
         {
-            if (!assignOnce(options.suggestedName, argument.substr(SuggestedNamePrefix.size()), "--suggested-name"))
+            if (!assignOnce(options.suggestedName, *value, "--suggested-name"))
             {
                 return false;
             }
-        } else if (argument.starts_with(DefaultExtensionPrefix))
+        } else if (const auto value = scanner.value("--default-extension"))
         {
-            if (!assignOnce(options.defaultExtension, argument.substr(DefaultExtensionPrefix.size()),
-                            "--default-extension"))
+            if (!assignOnce(options.defaultExtension, *value, "--default-extension"))
             {
                 return false;
             }
-        } else if (argument.starts_with(TitleTokenPrefix))
+        } else if (const auto value = scanner.value("--title-token"))
         {
-            if (!assignOnce(options.titleToken, argument.substr(TitleTokenPrefix.size()), "--title-token"))
+            if (!assignOnce(options.titleToken, *value, "--title-token"))
             {
                 return false;
             }
+        } else if (scanner.failed())
+        {
+            std::cerr << "missing value for " << scanner.failedOption() << '\n';
+            return false;
         } else
         {
-            std::cerr << "unknown option: " << argument << '\n';
+            std::cerr << "unknown option: " << scanner.token() << '\n';
             return false;
         }
     }
@@ -215,18 +171,24 @@ void writeJsonString(std::ostream& output, std::string_view value)
 
 void writeError(const Tina::Core::Error& error)
 {
-    std::cerr << "{\"schema\":1,\"status\":\"error\",\"domain\":" << static_cast<std::uint16_t>(error.code.domain)
-              << ",\"code\":" << error.code.value << ",\"nativeCode\":";
-    if (error.nativeCode.has_value())
     {
-        std::cerr << *error.nativeCode;
-    } else
-    {
-        std::cerr << "null";
+        Tina::Core::JsonWriter writer(std::cerr);
+        writer.beginObject();
+        writer.member("schema", 1);
+        writer.member("status", "error");
+        writer.member("domain", static_cast<std::uint16_t>(error.code.domain));
+        writer.member("code", error.code.value);
+        if (error.nativeCode.has_value())
+        {
+            writer.member("nativeCode", *error.nativeCode);
+        } else
+        {
+            writer.rawMember("nativeCode", "null");
+        }
+        writer.member("message", error.message);
+        writer.endObject();
     }
-    std::cerr << ",\"message\":";
-    writeJsonString(std::cerr, error.message);
-    std::cerr << "}\n";
+    std::cerr << '\n';
 }
 
 } // namespace
@@ -246,10 +208,15 @@ int main(int argumentCount, char** arguments)
         return 3;
     }
 
-    std::cout << "{\"schema\":1,\"operation\":";
-    writeJsonString(std::cout, options.operationName);
-    std::cout << ",\"outcome\":\"" << (result->selected() ? "selected" : "cancelled") << "\",\"path\":";
-    writeJsonString(std::cout, result->selectedPathUtf8);
-    std::cout << "}\n";
+    {
+        Tina::Core::JsonWriter writer(std::cout);
+        writer.beginObject();
+        writer.member("schema", 1);
+        writer.member("operation", options.operationName);
+        writer.member("outcome", result->selected() ? "selected" : "cancelled");
+        writer.member("path", result->selectedPathUtf8);
+        writer.endObject();
+    }
+    std::cout << '\n';
     return 0;
 }

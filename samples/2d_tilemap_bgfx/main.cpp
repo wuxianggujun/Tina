@@ -26,6 +26,7 @@
 #include <tina/core/hash/ContentHashDigest.hpp>
 #include <tina/core/id/AssetId.hpp>
 #include <tina/core/io/ApplicationPaths.hpp>
+#include <tina/core/text/JsonWriter.hpp>
 #include <tina/navigation2d/NavigationPathfinder2D.hpp>
 #include <tina/render/Camera2DProjection.hpp>
 #include <tina/render/RenderDevice.hpp>
@@ -636,28 +637,17 @@ inline constexpr u32 ExpectedSpritesWithPhysics = ExpectedNonEmptyTiles + 1;
     return style;
 }
 
-void writeJsonString(std::ostream& output, std::string_view value)
-{
-    output.put('"');
-    for (const unsigned char byte : value)
-    {
-        if (byte == '"' || byte == '\\')
-        {
-            output.put('\\');
-            output.put(static_cast<char>(byte));
-        } else if (byte >= 0x20U)
-        {
-            output.put(static_cast<char>(byte));
-        }
-    }
-    output.put('"');
-}
-
 void writeError(const Tina::Core::Error& error)
 {
-    std::cerr << "{\"status\":\"error\",\"sample\":\"tina_sample_2d\",\"message\":";
-    writeJsonString(std::cerr, error.message);
-    std::cerr << "}\n";
+    {
+        Tina::Core::JsonWriter writer(std::cerr);
+        writer.beginObject();
+        writer.member("status", "error");
+        writer.member("sample", "tina_sample_2d");
+        writer.member("message", error.message);
+        writer.endObject();
+    }
+    std::cerr << '\n';
 }
 
 [[nodiscard]] Tina::Core::AssetId::Bytes idBytes(u8 seed)
@@ -6076,278 +6066,238 @@ int main(int argc, char** argv)
 
     if (!ok)
     {
-        std::cerr << "{\"status\":\"error\",\"sample\":\"tina_sample_2d\","
-                     "\"message\":\"verification failed\","
-                     "\"evidenceSchema\":"
-                  << ProductEvidenceSchema
-                  << ",\"evidenceFingerprint\":\"" << evidenceFingerprint << "\""
-                  << ",\"renderFrameAccountingValid\":"
-                  << (renderFrameAccountingValid ? "true" : "false")
-                  << ",\"frames\":"
-                  << counters.frameUpdates << ",\"tileSprites\":" << counters.lastTileSprites
-                  << ",\"spriteBindingTextures\":" << counters.spriteBindingTextures
-                  << ",\"spriteTextureLeasesAcquired\":" << counters.spriteTextureLeasesAcquired
-                  << ",\"spriteTextureRetirementsAccepted\":" << counters.spriteTextureRetirementsAccepted
-                  << ",\"spriteBindingRegistryReleased\":"
-                  << (counters.spriteBindingRegistryReleased ? "true" : "false")
-                  << ",\"spriteTextureHandlesInvalidated\":" << counters.spriteTextureHandlesInvalidated
-                  << ",\"spriteTextureRetirementRecords\":" << counters.spriteTextureRetirementRecords
-                  << ",\"spriteTextureRetirementReleased\":" << counters.spriteTextureRetirementReleased
-                  << ",\"spriteTextureRetirementLive\":" << counters.spriteTextureRetirementLive
-                  << ",\"spriteBindingResolverHits\":" << counters.spriteBindingResolverHits
-                  << ",\"tileMapSpriteBindingResolverHits\":" << counters.tileMapSpriteBindingResolverHits
-                  << ",\"particleSpriteBindingResolverHits\":"
-                  << counters.particleSpriteBindingResolverHits
-                  << ",\"trailSpriteBindingResolverHits\":" << counters.trailSpriteBindingResolverHits
-                  << ",\"requestedFrameDelayMs\":" << options->frameDelayMilliseconds
-                  << ",\"minimumWindowVisibilityMs\":" << minimumWindowVisibilityMilliseconds(*options)
-                  << ",\"totalSprites\":" << counters.lastTotalSprites
-                  << ",\"sprite2DLightingConfigured\":"
-                  << (counters.sprite2DLightingConfigured ? "true" : "false")
-                  << ",\"authoredPointLight2DCount\":" << counters.authoredPointLight2DCount
-                  << ",\"pointLight2DCount\":" << counters.pointLight2DCount
-                  << ",\"culledPointLight2DCount\":" << counters.culledPointLight2DCount
-                  << ",\"shadowOccluder2DCount\":" << counters.shadowOccluder2DCount
-                  << ",\"softShadowPointLight2DCount\":"
-                  << counters.softShadowPointLight2DCount
-                  << ",\"sceneLightingFrames\":" << counters.sceneLightingFrames
-                  << ",\"submittedRenderFrames\":" << counters.submittedRenderFrames
-                  << ",\"skippedSuspendedSurfaceFrames\":"
-                  << counters.skippedSuspendedSurfaceFrames
-                  << ",\"normalMappedSpriteCount\":" << counters.normalMappedSpriteCount
-                  << ",\"particleCapacity\":" << ProductParticleCapacity
-                  << ",\"particleRandomSeed\":" << ProductParticleRandomSeed
-                  << ",\"particleEmitted\":" << counters.particleEmitted
-                  << ",\"particleExpired\":" << counters.particleExpired
-                  << ",\"particleActive\":" << counters.particleActive
-                  << ",\"particleExtracted\":" << counters.particleExtracted
-                  << ",\"trailCapacity\":" << ProductTrailCapacity
-                  << ",\"trailSegmentsCreated\":" << counters.trailSegmentsCreated
-                  << ",\"trailActive\":" << counters.trailActive
-                  << ",\"trailExtracted\":" << counters.trailExtracted
-                  << ",\"trailBreaks\":" << counters.trailBreaks
-                  << ",\"fxInitialFingerprint\":\"" << counters.fxInitialFingerprint << "\""
-                  << ",\"grounded\":" << counters.controllerGroundedFrames
-                  << ",\"walkFrames\":" << counters.controllerWalkFrames
-                  << ",\"hitRight\":" << counters.controllerHitRightFrames
-                  << ",\"animationFromCatalog\":"
-                  << (counters.characterAnimationFromCatalog ? "true" : "false")
-                  << ",\"animationResolvedFrames\":" << counters.characterAnimationResolvedFrames
-                  << ",\"animationUpdates\":" << counters.characterAnimationUpdates
-                  << ",\"animationFrameChanges\":" << counters.characterAnimationFrameChanges
-                  << ",\"animationIdleEntries\":" << counters.characterAnimationIdleEntries
-                  << ",\"animationWalkEntries\":" << counters.characterAnimationWalkEntries
-                  << ",\"animationHitWallEntries\":" << counters.characterAnimationHitWallEntries
-                  << ",\"animationHitCompleted\":"
-                  << (counters.characterAnimationHitCompleted ? "true" : "false")
-                  << ",\"animEventFootsteps\":" << counters.animEventFootsteps
-                  << ",\"animEventHits\":" << counters.animEventHits
-                  << ",\"animEventOverflow\":" << counters.animEventOverflow
-                  << ",\"animEventUnknownTags\":" << counters.animEventUnknownTags
-                  << ",\"maxX\":" << counters.maxControllerX << ",\"uiRoots\":" << counters.uiRootsCreated
-                  << ",\"uiPanels\":" << counters.uiPanelsCreated << ",\"uiLabels\":" << counters.uiTextLabelsCreated
-                  << ",\"uiTextEdits\":" << counters.uiTextEditsCreated
-                  << ",\"uiTextEditInitialTextVerified\":"
-                  << (counters.uiTextEditInitialTextVerified ? "true" : "false")
-                  << ",\"uiButtons\":" << counters.uiButtonsCreated
-                  << ",\"uiButtonPaintVerified\":"
-                  << (counters.uiButtonPaintVerified ? "true" : "false")
-                  << ",\"uiDisabledDemoButtonRequested\":"
-                  << (counters.uiDisabledDemoButtonRequested ? "true" : "false")
-                  << ",\"uiDemoButtonEnabled\":"
-                  << (counters.uiDemoButtonEnabled ? "true" : "false")
-                  << ",\"uiDisabledDemoButtonVerified\":"
-                  << (counters.uiDisabledDemoButtonVerified ? "true" : "false")
-                  << ",\"uiThemeDemoRequested\":"
-                  << (counters.uiThemeDemoRequested ? "true" : "false")
-                  << ",\"uiThemeSwitches\":" << counters.uiThemeSwitches
-                  << ",\"uiThemeButtonActivations\":" << counters.uiThemeButtonActivations
-                  << ",\"uiThemeFinalLight\":" << (counters.uiThemeFinalLight ? "true" : "false")
-                  << ",\"uiTreeDemoRequested\":" << (counters.uiTreeDemoRequested ? "true" : "false")
-                  << ",\"uiTreeViewsCreated\":" << counters.uiTreeViewsCreated
-                  << ",\"uiTreeLogicalItems\":" << counters.uiTreeLogicalItems
-                  << ",\"uiTreeMaterializedCapacity\":" << counters.uiTreeMaterializedCapacity
-                  << ",\"uiTreeSelectionChanges\":" << counters.uiTreeSelectionChanges
-                  << ",\"uiTreeFinalSelectedKey\":" << counters.uiTreeFinalSelectedKey
-                  << ",\"uiTreeFinalSelectedIndex\":" << counters.uiTreeFinalSelectedIndex
-                  << ",\"uiTreeFinalSelectionVerified\":"
-                  << (counters.uiTreeFinalSelectionVerified ? "true" : "false")
-                  << ",\"uiTreeScrolled\":" << (counters.uiTreeScrolled ? "true" : "false")
-                  << ",\"uiTreeThemeVerified\":" << (counters.uiTreeThemeVerified ? "true" : "false")
-                  << ",\"uiFlowLayersRegistered\":" << counters.uiFlowLayersRegistered
-                  << ",\"uiFlowScreensRegistered\":" << counters.uiFlowScreensRegistered
-                  << ",\"uiFlowScreenPushes\":" << counters.uiFlowScreenPushes
-                  << ",\"uiFlowScreenPops\":" << counters.uiFlowScreenPops
-                  << ",\"uiFlowActionsRegistered\":" << counters.uiFlowActionsRegistered
-                  << ",\"uiFlowActionsCleared\":" << counters.uiFlowActionsCleared
-                  << ",\"uiFlowBackActionInvocations\":" << counters.uiFlowBackActionInvocations
-                  << ",\"uiFlowConfirmActionInvocations\":"
-                  << counters.uiFlowConfirmActionInvocations
-                  << ",\"uiFlowMenuActionInvocations\":"
-                  << counters.uiFlowMenuActionInvocations
-                  << ",\"pauseOpenActionInvocations\":"
-                  << counters.pauseOpenActionInvocations
-                  << ",\"pauseInputDeviceHintUpdates\":" << counters.pauseInputDeviceHintUpdates
-                  << ",\"pauseInputDeviceRevision\":" << counters.pauseInputDeviceRevision
-                  << ",\"pauseInputHintKeyboardMouse\":"
-                  << (counters.pauseInputHintKeyboardMouse ? "true" : "false")
-                  << ",\"pauseInputHintGamepad\":"
-                  << (counters.pauseInputHintGamepad ? "true" : "false")
-                  << ",\"pauseAutoResumeRequests\":" << counters.pauseAutoResumeRequests
-                  << ",\"pauseResumeRequestedByAction\":"
-                  << (counters.pauseResumeRequestedByAction ? "true" : "false")
-                  << ",\"pauseUIScreenActivated\":"
-                  << (counters.pauseUIScreenActivated ? "true" : "false")
-                  << ",\"baseUIScreenRestored\":"
-                  << (counters.baseUIScreenRestored ? "true" : "false")
-                  << ",\"uiSliders\":" << counters.uiSlidersCreated
-                  << ",\"uiProgressBars\":" << counters.uiProgressBarsCreated
-                  << ",\"uiRadioButtons\":" << counters.uiRadioButtonsCreated
-                  << ",\"uiReleased\":" << counters.uiRootsReleased
-                  << ",\"lastMasterVolume\":" << counters.lastMasterVolume
-                  << ",\"worldPointerPresses\":" << counters.tileSelection.pointerPresses
-                  << ",\"worldPointerMissingSamples\":" << counters.tileSelection.missingWorldPointerSamples
-                  << ",\"worldPointerViewportMisses\":" << counters.tileSelection.viewportMisses
-                  << ",\"worldPointerMapMisses\":" << counters.tileSelection.mapMisses
-                  << ",\"tileSelectionHits\":" << counters.tileSelection.selectionHits
-                  << ",\"hasTileSelection\":" << (lastSelection != nullptr ? "true" : "false")
-                  << ",\"selectionHighlightSprites\":" << counters.selectionHighlightSprites
-                  << ",\"lastHighlightSprites\":" << counters.lastHighlightSprites
-                  << ",\"seedTileSelection\":" << (options->seedTileSelection ? "true" : "false")
-                  << ",\"cameraFollowUpdates\":" << counters.cameraFollowUpdates
-                  << ",\"minCameraCenterX\":" << counters.minCameraCenterX
-                  << ",\"maxCameraCenterX\":" << counters.maxCameraCenterX
-                  << ",\"lastCameraCenterX\":" << counters.lastCameraCenterX
-                  << ",\"lastCameraCenterY\":" << counters.lastCameraCenterY
-                  << ",\"chunkDirtyFrames\":" << counters.chunkDirtyFramesSynced
-                  << ",\"chunkDirtyRebuilds\":" << counters.chunkDirtyRebuilds
-                  << ",\"chunkDirtyHits\":" << counters.chunkDirtyCacheHits
-                  << ",\"lastChunkDirtyRebuilds\":" << counters.lastChunkDirtyRebuilds
-                  << ",\"lastChunkDirtyHits\":" << counters.lastChunkDirtyCacheHits
-                  << ",\"tileMapStreamDemandUpdates\":" << counters.tileMapStreamDemandUpdates
-                  << ",\"tileMapStreamRequests\":" << counters.tileMapStreamRequests
-                  << ",\"tileMapStreamCommitted\":" << counters.tileMapStreamCommitted
-                  << ",\"tileMapStreamResident\":" << counters.tileMapStreamResident
-                  << ",\"tileMapStreamPeakResident\":" << counters.tileMapStreamPeakResident
-                  << ",\"navigationReady\":" << (counters.navigationReady ? "true" : "false")
-                  << ",\"navigationFromCookedAsset\":"
-                  << (counters.navigationFromCookedAsset ? "true" : "false")
-                  << ",\"navigationCookedBitExact\":"
-                  << (counters.navigationCookedBitExact ? "true" : "false")
-                  << ",\"navigationSolidTileCells\":" << counters.navigationSolidTileCells
-                  << ",\"navigationBlockerRectangles\":" << counters.navigationBlockerRectangles
-                  << ",\"navigationBlockedCells\":" << counters.navigationBlockedCells
-                  << ",\"navigationWeightedCells\":" << counters.navigationWeightedCells
-                  << ",\"navigationMaximumTraversalCost\":"
-                  << counters.navigationMaximumTraversalCost
-                  << ",\"navigationBasePathCells\":" << counters.navigationBasePathCells
-                  << ",\"navigationBasePathCost\":" << counters.navigationBasePathCost
-                  << ",\"navigationDynamicPathCells\":" << counters.navigationDynamicPathCells
-                  << ",\"navigationDynamicPathCost\":" << counters.navigationDynamicPathCost
-                  << ",\"navigationStrictDiagonalPathCells\":"
-                  << counters.navigationStrictDiagonalPathCells
-                  << ",\"navigationStrictDiagonalPathCost\":"
-                  << counters.navigationStrictDiagonalPathCost
-                  << ",\"navigationCornerCutPathCells\":" << counters.navigationCornerCutPathCells
-                  << ",\"navigationCornerCutPathCost\":" << counters.navigationCornerCutPathCost
-                  << ",\"navigationWeightedPathCells\":" << counters.navigationWeightedPathCells
-                  << ",\"navigationWeightedPathCost\":" << counters.navigationWeightedPathCost
-                  << ",\"navigationWeightedPathAvoidedCostCell\":"
-                  << (counters.navigationWeightedPathAvoidedCostCell ? "true" : "false")
-                  << ",\"navigationIncrementalExpandedNodes\":"
-                  << counters.navigationIncrementalExpandedNodes
-                  << ",\"navigationGridRevision\":" << counters.navigationGridRevision
-                  << ",\"navigationDynamicBlockerMutations\":"
-                  << counters.navigationDynamicBlockerMutations
-                  << ",\"navigationPhysicsSynchronizations\":"
-                  << counters.navigationPhysicsSynchronizations
-                  << ",\"navigationPhysicsBlockerAdds\":"
-                  << counters.navigationPhysicsBlockerAdds
-                  << ",\"navigationPhysicsBlockerUpdates\":"
-                  << counters.navigationPhysicsBlockerUpdates
-                  << ",\"navigationPhysicsBlockerRemoves\":"
-                  << counters.navigationPhysicsBlockerRemoves
-                  << ",\"navigationPhysicsPublishedBlockers\":"
-                  << counters.navigationPhysicsPublishedBlockers
-                  << ",\"navigationPhysicsRegisteredBodies\":"
-                  << counters.navigationPhysicsRegisteredBodies
-                  << ",\"navigationPhysicsReady\":"
-                  << (counters.navigationPhysicsReady ? "true" : "false")
-                  << ",\"navigationCancelled\":" << (counters.navigationCancelled ? "true" : "false")
-                  << ",\"cameraProjectionResolves\":" << counters.cameraProjectionResolves
-                   << ",\"renderExtractions\":" << counters.renderExtractions
-                   << ",\"pauseOverlayPushes\":" << counters.pauseOverlayPushes
-                   << ",\"pauseOverlayPops\":" << counters.pauseOverlayPops
-                   << ",\"pauseOverlayFrames\":" << counters.pauseOverlayFrames
-                   << ",\"accessibilityPublished\":" << (counters.accessibilityPublished ? "true" : "false")
-                   << ",\"accessibilityNodeCount\":" << counters.accessibilityNodeCount
-                   << ",\"accessibilityHasTree\":" << (counters.accessibilityHasTree ? "true" : "false")
-                   << ",\"accessibilityHasTreeItem\":"
-                   << (counters.accessibilityHasTreeItem ? "true" : "false")
-                   << ",\"accessibilityTreeSelectionVerified\":"
-                   << (counters.accessibilityTreeSelectionVerified ? "true" : "false")
-                   << ",\"audioEnginePresent\":" << (counters.audioEnginePresent ? "true" : "false")
-                   << ",\"audioOneShotQueued\":" << (counters.audioOneShotQueued ? "true" : "false")
-                   << ",\"audioStartedObserved\":" << (counters.audioStartedObserved ? "true" : "false")
-                  << ",\"audioStartedCount\":" << counters.audioStartedCount
-                  << ",\"audioFromCatalogLease\":" << (counters.audioFromCatalogLease ? "true" : "false")
-                  << ",\"audioClipFrameCount\":" << counters.audioClipFrameCount
-                  << ",\"audioClipSampleRate\":" << counters.audioClipSampleRate
-                  << ",\"audioVoiceParamsConfigured\":"
-                  << (counters.audioVoiceParamsConfigured ? "true" : "false")
-                  << ",\"audioFadeStarted\":" << (counters.audioFadeStarted ? "true" : "false")
-                  << ",\"audioFadeCancelled\":" << (counters.audioFadeCancelled ? "true" : "false")
-                  << ",\"audioFadeStopped\":" << (counters.audioFadeStopped ? "true" : "false")
-                  << ",\"audioOneShotRetired\":" << (counters.audioOneShotRetired ? "true" : "false")
-                  << ",\"audioStreamQueued\":" << (counters.audioStreamQueued ? "true" : "false")
-                  << ",\"audioStreamSubmitted\":" << (counters.audioStreamSubmitted ? "true" : "false")
-                  << ",\"audioStreamEofSignaled\":" << (counters.audioStreamEofSignaled ? "true" : "false")
-                  << ",\"audioStreamStartedObserved\":"
-                  << (counters.audioStreamStartedObserved ? "true" : "false")
-                  << ",\"audioStreamMixed\":" << (counters.audioStreamMixed ? "true" : "false")
-                  << ",\"audioStreamDrained\":" << (counters.audioStreamDrained ? "true" : "false")
-                  << ",\"audioStreamStopped\":" << (counters.audioStreamStopped ? "true" : "false")
-                  << ",\"audioStreamRetired\":" << (counters.audioStreamRetired ? "true" : "false")
-                  << ",\"audioStreamSubmittedFrames\":" << counters.audioStreamSubmittedFrames
-                  << ",\"audioStreamConsumedFrames\":" << counters.audioStreamConsumedFrames
-                  << ",\"audioStreamUnderrunFrames\":" << counters.audioStreamUnderrunFrames
+        Tina::Core::JsonWriter writer(std::cerr);
+        writer.beginObject();
+        writer.member("status", "error");
+        writer.member("sample", "tina_sample_2d");
+        writer.member("message", "verification failed");
+        writer.member("evidenceSchema", ProductEvidenceSchema);
+        writer.member("evidenceFingerprint", evidenceFingerprint);
+        writer.member("renderFrameAccountingValid", renderFrameAccountingValid);
+        writer.member("frames", counters.frameUpdates);
+        writer.member("tileSprites", counters.lastTileSprites);
+        writer.member("spriteBindingTextures", counters.spriteBindingTextures);
+        writer.member("spriteTextureLeasesAcquired", counters.spriteTextureLeasesAcquired);
+        writer.member("spriteTextureRetirementsAccepted", counters.spriteTextureRetirementsAccepted);
+        writer.member("spriteBindingRegistryReleased", counters.spriteBindingRegistryReleased);
+        writer.member("spriteTextureHandlesInvalidated", counters.spriteTextureHandlesInvalidated);
+        writer.member("spriteTextureRetirementRecords", counters.spriteTextureRetirementRecords);
+        writer.member("spriteTextureRetirementReleased", counters.spriteTextureRetirementReleased);
+        writer.member("spriteTextureRetirementLive", counters.spriteTextureRetirementLive);
+        writer.member("spriteBindingResolverHits", counters.spriteBindingResolverHits);
+        writer.member("tileMapSpriteBindingResolverHits", counters.tileMapSpriteBindingResolverHits);
+        writer.member("particleSpriteBindingResolverHits", counters.particleSpriteBindingResolverHits);
+        writer.member("trailSpriteBindingResolverHits", counters.trailSpriteBindingResolverHits);
+        writer.member("requestedFrameDelayMs", options->frameDelayMilliseconds);
+        writer.member("minimumWindowVisibilityMs", minimumWindowVisibilityMilliseconds(*options));
+        writer.member("totalSprites", counters.lastTotalSprites);
+        writer.member("sprite2DLightingConfigured", counters.sprite2DLightingConfigured);
+        writer.member("authoredPointLight2DCount", counters.authoredPointLight2DCount);
+        writer.member("pointLight2DCount", counters.pointLight2DCount);
+        writer.member("culledPointLight2DCount", counters.culledPointLight2DCount);
+        writer.member("shadowOccluder2DCount", counters.shadowOccluder2DCount);
+        writer.member("softShadowPointLight2DCount", counters.softShadowPointLight2DCount);
+        writer.member("sceneLightingFrames", counters.sceneLightingFrames);
+        writer.member("submittedRenderFrames", counters.submittedRenderFrames);
+        writer.member("skippedSuspendedSurfaceFrames", counters.skippedSuspendedSurfaceFrames);
+        writer.member("normalMappedSpriteCount", counters.normalMappedSpriteCount);
+        writer.member("particleCapacity", ProductParticleCapacity);
+        writer.member("particleRandomSeed", ProductParticleRandomSeed);
+        writer.member("particleEmitted", counters.particleEmitted);
+        writer.member("particleExpired", counters.particleExpired);
+        writer.member("particleActive", counters.particleActive);
+        writer.member("particleExtracted", counters.particleExtracted);
+        writer.member("trailCapacity", ProductTrailCapacity);
+        writer.member("trailSegmentsCreated", counters.trailSegmentsCreated);
+        writer.member("trailActive", counters.trailActive);
+        writer.member("trailExtracted", counters.trailExtracted);
+        writer.member("trailBreaks", counters.trailBreaks);
+        writer.member("fxInitialFingerprint", counters.fxInitialFingerprint);
+        writer.member("grounded", counters.controllerGroundedFrames);
+        writer.member("walkFrames", counters.controllerWalkFrames);
+        writer.member("hitRight", counters.controllerHitRightFrames);
+        writer.member("animationFromCatalog", counters.characterAnimationFromCatalog);
+        writer.member("animationResolvedFrames", counters.characterAnimationResolvedFrames);
+        writer.member("animationUpdates", counters.characterAnimationUpdates);
+        writer.member("animationFrameChanges", counters.characterAnimationFrameChanges);
+        writer.member("animationIdleEntries", counters.characterAnimationIdleEntries);
+        writer.member("animationWalkEntries", counters.characterAnimationWalkEntries);
+        writer.member("animationHitWallEntries", counters.characterAnimationHitWallEntries);
+        writer.member("animationHitCompleted", counters.characterAnimationHitCompleted);
+        writer.member("animEventFootsteps", counters.animEventFootsteps);
+        writer.member("animEventHits", counters.animEventHits);
+        writer.member("animEventOverflow", counters.animEventOverflow);
+        writer.member("animEventUnknownTags", counters.animEventUnknownTags);
+        writer.member("maxX", counters.maxControllerX);
+        writer.member("uiRoots", counters.uiRootsCreated);
+        writer.member("uiPanels", counters.uiPanelsCreated);
+        writer.member("uiLabels", counters.uiTextLabelsCreated);
+        writer.member("uiTextEdits", counters.uiTextEditsCreated);
+        writer.member("uiTextEditInitialTextVerified", counters.uiTextEditInitialTextVerified);
+        writer.member("uiButtons", counters.uiButtonsCreated);
+        writer.member("uiButtonPaintVerified", counters.uiButtonPaintVerified);
+        writer.member("uiDisabledDemoButtonRequested", counters.uiDisabledDemoButtonRequested);
+        writer.member("uiDemoButtonEnabled", counters.uiDemoButtonEnabled);
+        writer.member("uiDisabledDemoButtonVerified", counters.uiDisabledDemoButtonVerified);
+        writer.member("uiThemeDemoRequested", counters.uiThemeDemoRequested);
+        writer.member("uiThemeSwitches", counters.uiThemeSwitches);
+        writer.member("uiThemeButtonActivations", counters.uiThemeButtonActivations);
+        writer.member("uiThemeFinalLight", counters.uiThemeFinalLight);
+        writer.member("uiTreeDemoRequested", counters.uiTreeDemoRequested);
+        writer.member("uiTreeViewsCreated", counters.uiTreeViewsCreated);
+        writer.member("uiTreeLogicalItems", counters.uiTreeLogicalItems);
+        writer.member("uiTreeMaterializedCapacity", counters.uiTreeMaterializedCapacity);
+        writer.member("uiTreeSelectionChanges", counters.uiTreeSelectionChanges);
+        writer.member("uiTreeFinalSelectedKey", counters.uiTreeFinalSelectedKey);
+        writer.member("uiTreeFinalSelectedIndex", counters.uiTreeFinalSelectedIndex);
+        writer.member("uiTreeFinalSelectionVerified", counters.uiTreeFinalSelectionVerified);
+        writer.member("uiTreeScrolled", counters.uiTreeScrolled);
+        writer.member("uiTreeThemeVerified", counters.uiTreeThemeVerified);
+        writer.member("uiFlowLayersRegistered", counters.uiFlowLayersRegistered);
+        writer.member("uiFlowScreensRegistered", counters.uiFlowScreensRegistered);
+        writer.member("uiFlowScreenPushes", counters.uiFlowScreenPushes);
+        writer.member("uiFlowScreenPops", counters.uiFlowScreenPops);
+        writer.member("uiFlowActionsRegistered", counters.uiFlowActionsRegistered);
+        writer.member("uiFlowActionsCleared", counters.uiFlowActionsCleared);
+        writer.member("uiFlowBackActionInvocations", counters.uiFlowBackActionInvocations);
+        writer.member("uiFlowConfirmActionInvocations", counters.uiFlowConfirmActionInvocations);
+        writer.member("uiFlowMenuActionInvocations", counters.uiFlowMenuActionInvocations);
+        writer.member("pauseOpenActionInvocations", counters.pauseOpenActionInvocations);
+        writer.member("pauseInputDeviceHintUpdates", counters.pauseInputDeviceHintUpdates);
+        writer.member("pauseInputDeviceRevision", counters.pauseInputDeviceRevision);
+        writer.member("pauseInputHintKeyboardMouse", counters.pauseInputHintKeyboardMouse);
+        writer.member("pauseInputHintGamepad", counters.pauseInputHintGamepad);
+        writer.member("pauseAutoResumeRequests", counters.pauseAutoResumeRequests);
+        writer.member("pauseResumeRequestedByAction", counters.pauseResumeRequestedByAction);
+        writer.member("pauseUIScreenActivated", counters.pauseUIScreenActivated);
+        writer.member("baseUIScreenRestored", counters.baseUIScreenRestored);
+        writer.member("uiSliders", counters.uiSlidersCreated);
+        writer.member("uiProgressBars", counters.uiProgressBarsCreated);
+        writer.member("uiRadioButtons", counters.uiRadioButtonsCreated);
+        writer.member("uiReleased", counters.uiRootsReleased);
+        writer.member("lastMasterVolume", counters.lastMasterVolume);
+        writer.member("worldPointerPresses", counters.tileSelection.pointerPresses);
+        writer.member("worldPointerMissingSamples", counters.tileSelection.missingWorldPointerSamples);
+        writer.member("worldPointerViewportMisses", counters.tileSelection.viewportMisses);
+        writer.member("worldPointerMapMisses", counters.tileSelection.mapMisses);
+        writer.member("tileSelectionHits", counters.tileSelection.selectionHits);
+        writer.member("hasTileSelection", lastSelection != nullptr);
+        writer.member("selectionHighlightSprites", counters.selectionHighlightSprites);
+        writer.member("lastHighlightSprites", counters.lastHighlightSprites);
+        writer.member("seedTileSelection", options->seedTileSelection);
+        writer.member("cameraFollowUpdates", counters.cameraFollowUpdates);
+        writer.member("minCameraCenterX", counters.minCameraCenterX);
+        writer.member("maxCameraCenterX", counters.maxCameraCenterX);
+        writer.member("lastCameraCenterX", counters.lastCameraCenterX);
+        writer.member("lastCameraCenterY", counters.lastCameraCenterY);
+        writer.member("chunkDirtyFrames", counters.chunkDirtyFramesSynced);
+        writer.member("chunkDirtyRebuilds", counters.chunkDirtyRebuilds);
+        writer.member("chunkDirtyHits", counters.chunkDirtyCacheHits);
+        writer.member("lastChunkDirtyRebuilds", counters.lastChunkDirtyRebuilds);
+        writer.member("lastChunkDirtyHits", counters.lastChunkDirtyCacheHits);
+        writer.member("tileMapStreamDemandUpdates", counters.tileMapStreamDemandUpdates);
+        writer.member("tileMapStreamRequests", counters.tileMapStreamRequests);
+        writer.member("tileMapStreamCommitted", counters.tileMapStreamCommitted);
+        writer.member("tileMapStreamResident", counters.tileMapStreamResident);
+        writer.member("tileMapStreamPeakResident", counters.tileMapStreamPeakResident);
+        writer.member("navigationReady", counters.navigationReady);
+        writer.member("navigationFromCookedAsset", counters.navigationFromCookedAsset);
+        writer.member("navigationCookedBitExact", counters.navigationCookedBitExact);
+        writer.member("navigationSolidTileCells", counters.navigationSolidTileCells);
+        writer.member("navigationBlockerRectangles", counters.navigationBlockerRectangles);
+        writer.member("navigationBlockedCells", counters.navigationBlockedCells);
+        writer.member("navigationWeightedCells", counters.navigationWeightedCells);
+        writer.member("navigationMaximumTraversalCost", counters.navigationMaximumTraversalCost);
+        writer.member("navigationBasePathCells", counters.navigationBasePathCells);
+        writer.member("navigationBasePathCost", counters.navigationBasePathCost);
+        writer.member("navigationDynamicPathCells", counters.navigationDynamicPathCells);
+        writer.member("navigationDynamicPathCost", counters.navigationDynamicPathCost);
+        writer.member("navigationStrictDiagonalPathCells", counters.navigationStrictDiagonalPathCells);
+        writer.member("navigationStrictDiagonalPathCost", counters.navigationStrictDiagonalPathCost);
+        writer.member("navigationCornerCutPathCells", counters.navigationCornerCutPathCells);
+        writer.member("navigationCornerCutPathCost", counters.navigationCornerCutPathCost);
+        writer.member("navigationWeightedPathCells", counters.navigationWeightedPathCells);
+        writer.member("navigationWeightedPathCost", counters.navigationWeightedPathCost);
+        writer.member("navigationWeightedPathAvoidedCostCell", counters.navigationWeightedPathAvoidedCostCell);
+        writer.member("navigationIncrementalExpandedNodes", counters.navigationIncrementalExpandedNodes);
+        writer.member("navigationGridRevision", counters.navigationGridRevision);
+        writer.member("navigationDynamicBlockerMutations", counters.navigationDynamicBlockerMutations);
+        writer.member("navigationPhysicsSynchronizations", counters.navigationPhysicsSynchronizations);
+        writer.member("navigationPhysicsBlockerAdds", counters.navigationPhysicsBlockerAdds);
+        writer.member("navigationPhysicsBlockerUpdates", counters.navigationPhysicsBlockerUpdates);
+        writer.member("navigationPhysicsBlockerRemoves", counters.navigationPhysicsBlockerRemoves);
+        writer.member("navigationPhysicsPublishedBlockers", counters.navigationPhysicsPublishedBlockers);
+        writer.member("navigationPhysicsRegisteredBodies", counters.navigationPhysicsRegisteredBodies);
+        writer.member("navigationPhysicsReady", counters.navigationPhysicsReady);
+        writer.member("navigationCancelled", counters.navigationCancelled);
+        writer.member("cameraProjectionResolves", counters.cameraProjectionResolves);
+        writer.member("renderExtractions", counters.renderExtractions);
+        writer.member("pauseOverlayPushes", counters.pauseOverlayPushes);
+        writer.member("pauseOverlayPops", counters.pauseOverlayPops);
+        writer.member("pauseOverlayFrames", counters.pauseOverlayFrames);
+        writer.member("accessibilityPublished", counters.accessibilityPublished);
+        writer.member("accessibilityNodeCount", counters.accessibilityNodeCount);
+        writer.member("accessibilityHasTree", counters.accessibilityHasTree);
+        writer.member("accessibilityHasTreeItem", counters.accessibilityHasTreeItem);
+        writer.member("accessibilityTreeSelectionVerified", counters.accessibilityTreeSelectionVerified);
+        writer.member("audioEnginePresent", counters.audioEnginePresent);
+        writer.member("audioOneShotQueued", counters.audioOneShotQueued);
+        writer.member("audioStartedObserved", counters.audioStartedObserved);
+        writer.member("audioStartedCount", counters.audioStartedCount);
+        writer.member("audioFromCatalogLease", counters.audioFromCatalogLease);
+        writer.member("audioClipFrameCount", counters.audioClipFrameCount);
+        writer.member("audioClipSampleRate", counters.audioClipSampleRate);
+        writer.member("audioVoiceParamsConfigured", counters.audioVoiceParamsConfigured);
+        writer.member("audioFadeStarted", counters.audioFadeStarted);
+        writer.member("audioFadeCancelled", counters.audioFadeCancelled);
+        writer.member("audioFadeStopped", counters.audioFadeStopped);
+        writer.member("audioOneShotRetired", counters.audioOneShotRetired);
+        writer.member("audioStreamQueued", counters.audioStreamQueued);
+        writer.member("audioStreamSubmitted", counters.audioStreamSubmitted);
+        writer.member("audioStreamEofSignaled", counters.audioStreamEofSignaled);
+        writer.member("audioStreamStartedObserved", counters.audioStreamStartedObserved);
+        writer.member("audioStreamMixed", counters.audioStreamMixed);
+        writer.member("audioStreamDrained", counters.audioStreamDrained);
+        writer.member("audioStreamStopped", counters.audioStreamStopped);
+        writer.member("audioStreamRetired", counters.audioStreamRetired);
+        writer.member("audioStreamSubmittedFrames", counters.audioStreamSubmittedFrames);
+        writer.member("audioStreamConsumedFrames", counters.audioStreamConsumedFrames);
+        writer.member("audioStreamUnderrunFrames", counters.audioStreamUnderrunFrames);
 #if defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
-                  << ",\"audioDeviceCreated\":" << (counters.audioDeviceCreated ? "true" : "false")
-                  << ",\"audioDeviceNullBackend\":" << (counters.audioDeviceNullBackend ? "true" : "false")
-                  << ",\"audioDeviceCallbacks\":" << counters.audioDeviceCallbacks
-                  << ",\"audioMixFramesRendered\":" << counters.audioMixFramesRendered
+        writer.member("audioDeviceCreated", counters.audioDeviceCreated);
+        writer.member("audioDeviceNullBackend", counters.audioDeviceNullBackend);
+        writer.member("audioDeviceCallbacks", counters.audioDeviceCallbacks);
+        writer.member("audioMixFramesRendered", counters.audioMixFramesRendered);
 #endif
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
-                  << ",\"physicsEnabled\":true"
-                  << ",\"physicsSteps\":" << counters.physicsSteps
-                  << ",\"physicsStaticBodies\":" << counters.physicsStaticBodies
-                  << ",\"physicsStaticSolidCells\":" << counters.physicsStaticSolidCells
-                  << ",\"physicsStaticBoxShapes\":" << counters.physicsStaticBoxShapes
-                  << ",\"physicsDynamicContacts\":" << counters.physicsDynamicContacts
-                  << ",\"physicsSensorEnters\":" << counters.physicsSensorEnters
-                  << ",\"physicsSensorExits\":" << counters.physicsSensorExits
-                  << ",\"physicsConvexPolygonReady\":"
-                  << (counters.physicsConvexPolygonReady ? "true" : "false")
-                  << ",\"physicsJointReady\":" << (counters.physicsJointReady ? "true" : "false")
-                  << ",\"physicsRevoluteJointReady\":"
-                  << (counters.physicsRevoluteJointReady ? "true" : "false")
-                  << ",\"physicsPrismaticJointReady\":"
-                  << (counters.physicsPrismaticJointReady ? "true" : "false")
-                  << ",\"physicsChainReady\":" << (counters.physicsChainReady ? "true" : "false")
-                  << ",\"lastDynamicY\":" << counters.lastDynamicY
+        writer.member("physicsEnabled", true);
+        writer.member("physicsSteps", counters.physicsSteps);
+        writer.member("physicsStaticBodies", counters.physicsStaticBodies);
+        writer.member("physicsStaticSolidCells", counters.physicsStaticSolidCells);
+        writer.member("physicsStaticBoxShapes", counters.physicsStaticBoxShapes);
+        writer.member("physicsDynamicContacts", counters.physicsDynamicContacts);
+        writer.member("physicsSensorEnters", counters.physicsSensorEnters);
+        writer.member("physicsSensorExits", counters.physicsSensorExits);
+        writer.member("physicsConvexPolygonReady", counters.physicsConvexPolygonReady);
+        writer.member("physicsJointReady", counters.physicsJointReady);
+        writer.member("physicsRevoluteJointReady", counters.physicsRevoluteJointReady);
+        writer.member("physicsPrismaticJointReady", counters.physicsPrismaticJointReady);
+        writer.member("physicsChainReady", counters.physicsChainReady);
+        writer.member("lastDynamicY", counters.lastDynamicY);
 #else
-                  << ",\"physicsEnabled\":false"
+        writer.member("physicsEnabled", false);
 #endif
-                  << ",\"pixelCaptureAttempted\":" << (counters.pixelCaptureAttempted ? "true" : "false")
-                  << ",\"pixelCaptureOk\":" << (counters.pixelCaptureOk ? "true" : "false")
-                  << ",\"pixelCaptureWidth\":" << counters.pixelCaptureWidth
-                  << ",\"pixelCaptureHeight\":" << counters.pixelCaptureHeight
-                  << ",\"pixelCaptureBytes\":" << counters.pixelCaptureBytes
-                  << ",\"pixelFingerprint\":\"" << counters.pixelFingerprint << "\""
-                  << ",\"pixelGoldenChecked\":" << (pixelGoldenChecked ? "true" : "false")
-                  << ",\"pixelGoldenMatched\":" << (pixelGoldenMatched ? "true" : "false")
-                  << ",\"expectPixelFingerprint\":\"" << options->expectPixelFingerprint << "\""
-                  << "}\n";
+        writer.member("pixelCaptureAttempted", counters.pixelCaptureAttempted);
+        writer.member("pixelCaptureOk", counters.pixelCaptureOk);
+        writer.member("pixelCaptureWidth", counters.pixelCaptureWidth);
+        writer.member("pixelCaptureHeight", counters.pixelCaptureHeight);
+        writer.member("pixelCaptureBytes", counters.pixelCaptureBytes);
+        writer.member("pixelFingerprint", counters.pixelFingerprint);
+        writer.member("pixelGoldenChecked", pixelGoldenChecked);
+        writer.member("pixelGoldenMatched", pixelGoldenMatched);
+        writer.member("expectPixelFingerprint", options->expectPixelFingerprint);
+        writer.endObject();
+        std::cerr << '\n';
         return 1;
     }
 
@@ -6355,360 +6305,325 @@ int main(int argc, char** argv)
     // slices were compiled (Physics2D / FreeType). M10-A43/A44 consume A42 locked
     // world-pointer payload, draw selection highlight, and optionally seed selection
     // via --seed-tile-selection=cellX,cellY for automated product evidence.
-    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_2d\""
-              << ",\"frames\":" << counters.frameUpdates << ",\"renderExtractions\":" << counters.renderExtractions
-              << ",\"requestedFrameDelayMs\":" << options->frameDelayMilliseconds
-              << ",\"minimumWindowVisibilityMs\":" << minimumWindowVisibilityMilliseconds(*options)
-              << ",\"catalogFromRecipeFile\":" << (counters.catalogFromRecipeFile ? "true" : "false")
-              << ",\"catalogRecipeAssets\":" << counters.catalogRecipeAssets
-              << ",\"objectLayerConsumed\":" << (counters.objectLayerConsumed ? "true" : "false")
-              << ",\"objectLayerObjects\":" << counters.objectLayerObjectCount
-              << ",\"tileMapStreamDemandUpdates\":" << counters.tileMapStreamDemandUpdates
-              << ",\"tileMapStreamRequests\":" << counters.tileMapStreamRequests
-              << ",\"tileMapStreamCommitted\":" << counters.tileMapStreamCommitted
-              << ",\"tileMapStreamResident\":" << counters.tileMapStreamResident
-              << ",\"tileMapStreamPeakResident\":" << counters.tileMapStreamPeakResident
-              << ",\"navigationReady\":" << (counters.navigationReady ? "true" : "false")
-              << ",\"navigationFromCookedAsset\":"
-              << (counters.navigationFromCookedAsset ? "true" : "false")
-              << ",\"navigationCookedBitExact\":"
-              << (counters.navigationCookedBitExact ? "true" : "false")
-              << ",\"navigationSolidTileCells\":" << counters.navigationSolidTileCells
-              << ",\"navigationBlockerRectangles\":" << counters.navigationBlockerRectangles
-              << ",\"navigationBlockedCells\":" << counters.navigationBlockedCells
-              << ",\"navigationWeightedCells\":" << counters.navigationWeightedCells
-              << ",\"navigationMaximumTraversalCost\":"
-              << counters.navigationMaximumTraversalCost
-              << ",\"navigationBasePathCells\":" << counters.navigationBasePathCells
-              << ",\"navigationBasePathCost\":" << counters.navigationBasePathCost
-              << ",\"navigationDynamicPathCells\":" << counters.navigationDynamicPathCells
-              << ",\"navigationDynamicPathCost\":" << counters.navigationDynamicPathCost
-              << ",\"navigationStrictDiagonalPathCells\":"
-              << counters.navigationStrictDiagonalPathCells
-              << ",\"navigationStrictDiagonalPathCost\":"
-              << counters.navigationStrictDiagonalPathCost
-              << ",\"navigationCornerCutPathCells\":" << counters.navigationCornerCutPathCells
-              << ",\"navigationCornerCutPathCost\":" << counters.navigationCornerCutPathCost
-              << ",\"navigationWeightedPathCells\":" << counters.navigationWeightedPathCells
-              << ",\"navigationWeightedPathCost\":" << counters.navigationWeightedPathCost
-              << ",\"navigationWeightedPathAvoidedCostCell\":"
-              << (counters.navigationWeightedPathAvoidedCostCell ? "true" : "false")
-              << ",\"navigationIncrementalExpandedNodes\":"
-              << counters.navigationIncrementalExpandedNodes
-              << ",\"navigationGridRevision\":" << counters.navigationGridRevision
-              << ",\"navigationDynamicBlockerMutations\":" << counters.navigationDynamicBlockerMutations
-              << ",\"navigationPhysicsSynchronizations\":" << counters.navigationPhysicsSynchronizations
-              << ",\"navigationPhysicsBlockerAdds\":" << counters.navigationPhysicsBlockerAdds
-              << ",\"navigationPhysicsBlockerUpdates\":" << counters.navigationPhysicsBlockerUpdates
-              << ",\"navigationPhysicsBlockerRemoves\":" << counters.navigationPhysicsBlockerRemoves
-              << ",\"navigationPhysicsPublishedBlockers\":" << counters.navigationPhysicsPublishedBlockers
-              << ",\"navigationPhysicsRegisteredBodies\":" << counters.navigationPhysicsRegisteredBodies
-              << ",\"navigationPhysicsReady\":"
-              << (counters.navigationPhysicsReady ? "true" : "false")
-              << ",\"navigationCancelled\":" << (counters.navigationCancelled ? "true" : "false")
-              << ",\"texturesUploaded\":" << counters.texturesUploaded
-              << ",\"spriteBindingTextures\":" << counters.spriteBindingTextures
-              << ",\"spriteTextureLeasesAcquired\":" << counters.spriteTextureLeasesAcquired
-              << ",\"spriteTextureRetirementsAccepted\":" << counters.spriteTextureRetirementsAccepted
-              << ",\"spriteBindingRegistryReleased\":"
-              << (counters.spriteBindingRegistryReleased ? "true" : "false")
-              << ",\"spriteTextureHandlesInvalidated\":" << counters.spriteTextureHandlesInvalidated
-              << ",\"spriteTextureRetirementRecords\":" << counters.spriteTextureRetirementRecords
-              << ",\"spriteTextureRetirementReleased\":" << counters.spriteTextureRetirementReleased
-              << ",\"spriteTextureRetirementLive\":" << counters.spriteTextureRetirementLive
-              << ",\"spriteBindingResolverHits\":" << counters.spriteBindingResolverHits
-              << ",\"tileMapSpriteBindingResolverHits\":" << counters.tileMapSpriteBindingResolverHits
-              << ",\"particleSpriteBindingResolverHits\":" << counters.particleSpriteBindingResolverHits
-              << ",\"trailSpriteBindingResolverHits\":" << counters.trailSpriteBindingResolverHits
-              << ",\"tileSpritesPerFrame\":" << ExpectedNonEmptyTiles
-              << ",\"spritesPerFrame\":" << expectedTotalSprites
-              << ",\"sprite2DLightingConfigured\":"
-              << (counters.sprite2DLightingConfigured ? "true" : "false")
-              << ",\"authoredPointLight2DCount\":" << counters.authoredPointLight2DCount
-              << ",\"pointLight2DCount\":" << counters.pointLight2DCount
-              << ",\"culledPointLight2DCount\":" << counters.culledPointLight2DCount
-              << ",\"shadowOccluder2DCount\":" << counters.shadowOccluder2DCount
-              << ",\"softShadowPointLight2DCount\":"
-              << counters.softShadowPointLight2DCount
-              << ",\"sceneLightingFrames\":" << counters.sceneLightingFrames
-              << ",\"submittedRenderFrames\":" << counters.submittedRenderFrames
-              << ",\"skippedSuspendedSurfaceFrames\":"
-              << counters.skippedSuspendedSurfaceFrames
-              << ",\"renderFrameAccountingValid\":"
-              << (renderFrameAccountingValid ? "true" : "false")
-              << ",\"normalMappedSpriteCount\":" << counters.normalMappedSpriteCount
-              << ",\"particleCapacity\":" << ProductParticleCapacity
-              << ",\"particleRandomSeed\":" << ProductParticleRandomSeed
-              << ",\"particleEmitted\":" << counters.particleEmitted
-              << ",\"particleExpired\":" << counters.particleExpired
-              << ",\"particleActive\":" << counters.particleActive
-              << ",\"particleExtracted\":" << counters.particleExtracted
-              << ",\"trailCapacity\":" << ProductTrailCapacity
-              << ",\"trailSegmentsCreated\":" << counters.trailSegmentsCreated
-              << ",\"trailActive\":" << counters.trailActive
-              << ",\"trailExtracted\":" << counters.trailExtracted
-              << ",\"trailBreaks\":" << counters.trailBreaks
-              << ",\"fxInitialFingerprint\":\"" << counters.fxInitialFingerprint << "\""
-              << ",\"controllerGroundedFrames\":" << counters.controllerGroundedFrames
-              << ",\"controllerWalkFrames\":" << counters.controllerWalkFrames
-              << ",\"controllerHitRightFrames\":" << counters.controllerHitRightFrames
-              << ",\"characterAnimationFromCatalog\":"
-              << (counters.characterAnimationFromCatalog ? "true" : "false")
-              << ",\"characterAnimationResolvedFrames\":" << counters.characterAnimationResolvedFrames
-              << ",\"characterAnimationUpdates\":" << counters.characterAnimationUpdates
-              << ",\"characterAnimationFrameChanges\":" << counters.characterAnimationFrameChanges
-              << ",\"characterAnimationIdleEntries\":" << counters.characterAnimationIdleEntries
-              << ",\"characterAnimationWalkEntries\":" << counters.characterAnimationWalkEntries
-              << ",\"characterAnimationHitWallEntries\":" << counters.characterAnimationHitWallEntries
-              << ",\"characterAnimationLastFrame\":" << counters.characterAnimationLastFrame
-              << ",\"characterAnimationHitCompleted\":"
-              << (counters.characterAnimationHitCompleted ? "true" : "false")
-              << ",\"animEventFootsteps\":" << counters.animEventFootsteps
-              << ",\"animEventHits\":" << counters.animEventHits
-              << ",\"animEventOverflow\":" << counters.animEventOverflow
-              << ",\"animEventUnknownTags\":" << counters.animEventUnknownTags
-              << ",\"maxControllerX\":" << counters.maxControllerX
-              << ",\"uiRootsCreated\":" << counters.uiRootsCreated
-              << ",\"uiPanelsCreated\":" << counters.uiPanelsCreated
-              << ",\"uiTextLabelsCreated\":" << counters.uiTextLabelsCreated
-              << ",\"uiTextEditsCreated\":" << counters.uiTextEditsCreated
-              << ",\"uiTextEditInitialTextVerified\":"
-              << (counters.uiTextEditInitialTextVerified ? "true" : "false")
-              << ",\"uiButtonsCreated\":" << counters.uiButtonsCreated
-              << ",\"uiButtonActionsWired\":" << counters.uiButtonActionsWired
-              << ",\"uiButtonPaintVerified\":"
-              << (counters.uiButtonPaintVerified ? "true" : "false")
-              << ",\"uiDisabledDemoButtonRequested\":"
-              << (counters.uiDisabledDemoButtonRequested ? "true" : "false")
-              << ",\"uiDemoButtonEnabled\":"
-              << (counters.uiDemoButtonEnabled ? "true" : "false")
-              << ",\"uiDisabledDemoButtonVerified\":"
-              << (counters.uiDisabledDemoButtonVerified ? "true" : "false")
-              << ",\"uiThemeDemoRequested\":" << (counters.uiThemeDemoRequested ? "true" : "false")
-              << ",\"uiThemeSwitches\":" << counters.uiThemeSwitches
-              << ",\"uiThemeButtonActivations\":" << counters.uiThemeButtonActivations
-              << ",\"uiThemeFinalLight\":" << (counters.uiThemeFinalLight ? "true" : "false")
-              << ",\"uiTreeDemoRequested\":" << (counters.uiTreeDemoRequested ? "true" : "false")
-              << ",\"uiTreeViewsCreated\":" << counters.uiTreeViewsCreated
-              << ",\"uiTreeLogicalItems\":" << counters.uiTreeLogicalItems
-              << ",\"uiTreeMaterializedCapacity\":" << counters.uiTreeMaterializedCapacity
-              << ",\"uiTreeSelectionChanges\":" << counters.uiTreeSelectionChanges
-              << ",\"uiTreeFinalSelectedKey\":" << counters.uiTreeFinalSelectedKey
-              << ",\"uiTreeFinalSelectedIndex\":" << counters.uiTreeFinalSelectedIndex
-              << ",\"uiTreeFinalSelectionVerified\":"
-              << (counters.uiTreeFinalSelectionVerified ? "true" : "false")
-              << ",\"uiTreeScrolled\":" << (counters.uiTreeScrolled ? "true" : "false")
-              << ",\"uiTreeThemeVerified\":" << (counters.uiTreeThemeVerified ? "true" : "false")
-              << ",\"uiFlowLayersRegistered\":" << counters.uiFlowLayersRegistered
-              << ",\"uiFlowScreensRegistered\":" << counters.uiFlowScreensRegistered
-              << ",\"uiFlowScreenPushes\":" << counters.uiFlowScreenPushes
-              << ",\"uiFlowScreenPops\":" << counters.uiFlowScreenPops
-              << ",\"uiFlowActionsRegistered\":" << counters.uiFlowActionsRegistered
-              << ",\"uiFlowActionsCleared\":" << counters.uiFlowActionsCleared
-              << ",\"uiFlowBackActionInvocations\":" << counters.uiFlowBackActionInvocations
-              << ",\"uiFlowConfirmActionInvocations\":"
-              << counters.uiFlowConfirmActionInvocations
-              << ",\"uiFlowMenuActionInvocations\":"
-              << counters.uiFlowMenuActionInvocations
-              << ",\"pauseOpenActionInvocations\":"
-              << counters.pauseOpenActionInvocations
-              << ",\"pauseInputDeviceHintUpdates\":" << counters.pauseInputDeviceHintUpdates
-              << ",\"pauseInputDeviceRevision\":" << counters.pauseInputDeviceRevision
-              << ",\"pauseInputHintKeyboardMouse\":"
-              << (counters.pauseInputHintKeyboardMouse ? "true" : "false")
-              << ",\"pauseInputHintGamepad\":"
-              << (counters.pauseInputHintGamepad ? "true" : "false")
-              << ",\"pauseAutoResumeRequests\":" << counters.pauseAutoResumeRequests
-              << ",\"pauseResumeRequestedByAction\":"
-              << (counters.pauseResumeRequestedByAction ? "true" : "false")
-              << ",\"pauseUIScreenActivated\":"
-              << (counters.pauseUIScreenActivated ? "true" : "false")
-              << ",\"baseUIScreenRestored\":"
-              << (counters.baseUIScreenRestored ? "true" : "false")
-              << ",\"uiSlidersCreated\":" << counters.uiSlidersCreated
-              << ",\"uiSliderChanges\":" << counters.uiSliderChanges
-              << ",\"uiCheckboxesCreated\":" << counters.uiCheckboxesCreated
-              << ",\"uiCheckboxActions\":" << counters.uiCheckboxActions
-              << ",\"uiProgressBarsCreated\":" << counters.uiProgressBarsCreated
-              << ",\"uiProgressBarValueVerified\":"
-              << (counters.uiProgressBarValueVerified ? "true" : "false")
-              << ",\"uiRadioButtonsCreated\":" << counters.uiRadioButtonsCreated
-              << ",\"uiRadioButtonActionsWired\":" << counters.uiRadioButtonActionsWired
-              << ",\"uiRadioSelectionVerified\":"
-              << (counters.uiRadioSelectionVerified ? "true" : "false")
-              << ",\"lastMasterVolume\":" << counters.lastMasterVolume
-              << ",\"lastMusicVolume\":" << counters.lastMusicVolume
-              << ",\"lastSfxVolume\":" << counters.lastSfxVolume
-              << ",\"lastMasterMuted\":" << (counters.lastMasterMuted ? "true" : "false")
-              << ",\"lastMusicMuted\":" << (counters.lastMusicMuted ? "true" : "false")
-              << ",\"lastSfxMuted\":" << (counters.lastSfxMuted ? "true" : "false")
-              << ",\"masterVolumeFromSlider\":" << (counters.masterVolumeFromSlider ? "true" : "false")
-              << ",\"musicVolumeFromSlider\":" << (counters.musicVolumeFromSlider ? "true" : "false")
-              << ",\"sfxVolumeFromSlider\":" << (counters.sfxVolumeFromSlider ? "true" : "false")
-              << ",\"masterMutedFromCheckbox\":" << (counters.masterMutedFromCheckbox ? "true" : "false")
-              << ",\"musicMutedFromCheckbox\":" << (counters.musicMutedFromCheckbox ? "true" : "false")
-              << ",\"sfxMutedFromCheckbox\":" << (counters.sfxMutedFromCheckbox ? "true" : "false")
-              << ",\"uiRootsReleased\":" << counters.uiRootsReleased
-              << ",\"worldPointerPresses\":" << counters.tileSelection.pointerPresses
-              << ",\"worldPointerMissingSamples\":" << counters.tileSelection.missingWorldPointerSamples
-              << ",\"worldPointerViewportMisses\":" << counters.tileSelection.viewportMisses
-              << ",\"worldPointerMapMisses\":" << counters.tileSelection.mapMisses
-              << ",\"tileSelectionHits\":" << counters.tileSelection.selectionHits
-              << ",\"hasTileSelection\":" << (lastSelection != nullptr ? "true" : "false")
-              << ",\"lastSelectedCellX\":" << (lastSelection != nullptr ? lastSelection->cellX : 0U)
-              << ",\"lastSelectedCellY\":" << (lastSelection != nullptr ? lastSelection->cellY : 0U)
-              << ",\"lastSelectedTileId\":" << counters.lastSelectedTileId
-              << ",\"lastSelectionWorldX\":"
-              << (lastSelection != nullptr ? lastSelection->worldPointer.worldX : 0.0F)
-              << ",\"lastSelectionWorldY\":"
-              << (lastSelection != nullptr ? lastSelection->worldPointer.worldY : 0.0F)
-              << ",\"lastSelectionInputSequence\":"
-              << (lastSelection != nullptr ? lastSelection->worldPointer.inputSequence : 0U)
-              << ",\"lastSelectionCameraRevision\":"
-              << (lastSelection != nullptr ? lastSelection->worldPointer.cameraRevision : 0U)
-              << ",\"lastSelectionSurfaceRevision\":"
-              << (lastSelection != nullptr ? lastSelection->worldPointer.surfaceRevision : 0U)
-              << ",\"selectionHighlightSprites\":" << counters.selectionHighlightSprites
-              << ",\"lastHighlightSprites\":" << counters.lastHighlightSprites
-              << ",\"seedTileSelection\":" << (options->seedTileSelection ? "true" : "false")
-              << ",\"seedTileSelectionApplied\":" << (counters.seedTileSelectionApplied ? "true" : "false")
-              << ",\"windowLogicalWidth\":" << options->windowLogicalWidth
-              << ",\"windowLogicalHeight\":" << options->windowLogicalHeight
-              << ",\"logicalPixelWidth\":" << counters.logicalPixelWidth
-              << ",\"logicalPixelHeight\":" << counters.logicalPixelHeight
-              << ",\"framebufferPixelWidth\":" << counters.framebufferPixelWidth
-              << ",\"framebufferPixelHeight\":" << counters.framebufferPixelHeight
-              << ",\"contentScaleX\":" << counters.contentScaleX
-              << ",\"contentScaleY\":" << counters.contentScaleY
-              << ",\"surfacePixelWidth\":" << counters.surfacePixelWidth
-              << ",\"surfacePixelHeight\":" << counters.surfacePixelHeight
-              << ",\"windowMetricsEvents\":" << counters.windowMetricsEvents
-              << ",\"cameraProjectionResolves\":" << counters.cameraProjectionResolves
-              << ",\"lastCameraWorldWidth\":" << counters.lastCameraWorldWidth
-              << ",\"lastCameraWorldHeight\":" << counters.lastCameraWorldHeight
-              << ",\"lastCameraActualPpm\":" << counters.lastCameraActualPpm
-              << ",\"cameraProjection\":\"FixedWorldHeight2D\""
-              << ",\"cameraFollowUpdates\":" << counters.cameraFollowUpdates
-              << ",\"cameraInterpolatedExtracts\":" << counters.cameraInterpolatedExtracts
-              << ",\"lastCameraCenterX\":" << counters.lastCameraCenterX
-              << ",\"lastCameraCenterY\":" << counters.lastCameraCenterY
-              << ",\"lastCameraInterpolation\":" << counters.lastCameraInterpolation
-              << ",\"minCameraCenterX\":" << counters.minCameraCenterX
-              << ",\"maxCameraCenterX\":" << counters.maxCameraCenterX
-              << ",\"chunkDirtyFramesSynced\":" << counters.chunkDirtyFramesSynced
-              << ",\"chunkDirtyVisibleObservations\":" << counters.chunkDirtyVisibleObservations
-              << ",\"chunkDirtyRebuilds\":" << counters.chunkDirtyRebuilds
-              << ",\"chunkDirtyCacheHits\":" << counters.chunkDirtyCacheHits
-              << ",\"lastChunkDirtyRebuilds\":" << counters.lastChunkDirtyRebuilds
-              << ",\"lastChunkDirtyCacheHits\":" << counters.lastChunkDirtyCacheHits
-              << ",\"lastChunkDirtyVisible\":" << counters.lastChunkDirtyVisible
-              << ",\"audioEnginePresent\":" << (counters.audioEnginePresent ? "true" : "false")
-              << ",\"audioOneShotQueued\":" << (counters.audioOneShotQueued ? "true" : "false")
-              << ",\"audioStartedObserved\":" << (counters.audioStartedObserved ? "true" : "false")
-              << ",\"audioStartedCount\":" << counters.audioStartedCount
-              << ",\"audioStoppedCount\":" << counters.audioStoppedCount
-              << ",\"audioFromCatalogLease\":" << (counters.audioFromCatalogLease ? "true" : "false")
-              << ",\"audioClipFrameCount\":" << counters.audioClipFrameCount
-              << ",\"audioClipSampleRate\":" << counters.audioClipSampleRate
-              << ",\"audioVoiceParamsConfigured\":"
-              << (counters.audioVoiceParamsConfigured ? "true" : "false")
-              << ",\"audioVoiceGain\":" << counters.audioVoiceGain
-              << ",\"audioPitch\":" << counters.audioPitch
-              << ",\"audioPan\":" << counters.audioPan
-              << ",\"audioFadeStarted\":" << (counters.audioFadeStarted ? "true" : "false")
-              << ",\"audioFadeCancelled\":" << (counters.audioFadeCancelled ? "true" : "false")
-              << ",\"audioFadeStopped\":" << (counters.audioFadeStopped ? "true" : "false")
-              << ",\"audioOneShotRetired\":" << (counters.audioOneShotRetired ? "true" : "false")
-              << ",\"audioStreamQueued\":" << (counters.audioStreamQueued ? "true" : "false")
-              << ",\"audioStreamSubmitted\":" << (counters.audioStreamSubmitted ? "true" : "false")
-              << ",\"audioStreamEofSignaled\":" << (counters.audioStreamEofSignaled ? "true" : "false")
-              << ",\"audioStreamStartedObserved\":"
-              << (counters.audioStreamStartedObserved ? "true" : "false")
-              << ",\"audioStreamMixed\":" << (counters.audioStreamMixed ? "true" : "false")
-              << ",\"audioStreamDrained\":" << (counters.audioStreamDrained ? "true" : "false")
-              << ",\"audioStreamStopped\":" << (counters.audioStreamStopped ? "true" : "false")
-              << ",\"audioStreamRetired\":" << (counters.audioStreamRetired ? "true" : "false")
-              << ",\"audioStreamSubmittedFrames\":" << counters.audioStreamSubmittedFrames
-              << ",\"audioStreamConsumedFrames\":" << counters.audioStreamConsumedFrames
-              << ",\"audioStreamUnderrunFrames\":" << counters.audioStreamUnderrunFrames
+    {
+        Tina::Core::JsonWriter writer(std::cout);
+        writer.beginObject();
+        writer.member("status", "ok");
+        writer.member("sample", "tina_sample_2d");
+        writer.member("frames", counters.frameUpdates);
+        writer.member("renderExtractions", counters.renderExtractions);
+        writer.member("requestedFrameDelayMs", options->frameDelayMilliseconds);
+        writer.member("minimumWindowVisibilityMs", minimumWindowVisibilityMilliseconds(*options));
+        writer.member("catalogFromRecipeFile", counters.catalogFromRecipeFile);
+        writer.member("catalogRecipeAssets", counters.catalogRecipeAssets);
+        writer.member("objectLayerConsumed", counters.objectLayerConsumed);
+        writer.member("objectLayerObjects", counters.objectLayerObjectCount);
+        writer.member("tileMapStreamDemandUpdates", counters.tileMapStreamDemandUpdates);
+        writer.member("tileMapStreamRequests", counters.tileMapStreamRequests);
+        writer.member("tileMapStreamCommitted", counters.tileMapStreamCommitted);
+        writer.member("tileMapStreamResident", counters.tileMapStreamResident);
+        writer.member("tileMapStreamPeakResident", counters.tileMapStreamPeakResident);
+        writer.member("navigationReady", counters.navigationReady);
+        writer.member("navigationFromCookedAsset", counters.navigationFromCookedAsset);
+        writer.member("navigationCookedBitExact", counters.navigationCookedBitExact);
+        writer.member("navigationSolidTileCells", counters.navigationSolidTileCells);
+        writer.member("navigationBlockerRectangles", counters.navigationBlockerRectangles);
+        writer.member("navigationBlockedCells", counters.navigationBlockedCells);
+        writer.member("navigationWeightedCells", counters.navigationWeightedCells);
+        writer.member("navigationMaximumTraversalCost", counters.navigationMaximumTraversalCost);
+        writer.member("navigationBasePathCells", counters.navigationBasePathCells);
+        writer.member("navigationBasePathCost", counters.navigationBasePathCost);
+        writer.member("navigationDynamicPathCells", counters.navigationDynamicPathCells);
+        writer.member("navigationDynamicPathCost", counters.navigationDynamicPathCost);
+        writer.member("navigationStrictDiagonalPathCells", counters.navigationStrictDiagonalPathCells);
+        writer.member("navigationStrictDiagonalPathCost", counters.navigationStrictDiagonalPathCost);
+        writer.member("navigationCornerCutPathCells", counters.navigationCornerCutPathCells);
+        writer.member("navigationCornerCutPathCost", counters.navigationCornerCutPathCost);
+        writer.member("navigationWeightedPathCells", counters.navigationWeightedPathCells);
+        writer.member("navigationWeightedPathCost", counters.navigationWeightedPathCost);
+        writer.member("navigationWeightedPathAvoidedCostCell", counters.navigationWeightedPathAvoidedCostCell);
+        writer.member("navigationIncrementalExpandedNodes", counters.navigationIncrementalExpandedNodes);
+        writer.member("navigationGridRevision", counters.navigationGridRevision);
+        writer.member("navigationDynamicBlockerMutations", counters.navigationDynamicBlockerMutations);
+        writer.member("navigationPhysicsSynchronizations", counters.navigationPhysicsSynchronizations);
+        writer.member("navigationPhysicsBlockerAdds", counters.navigationPhysicsBlockerAdds);
+        writer.member("navigationPhysicsBlockerUpdates", counters.navigationPhysicsBlockerUpdates);
+        writer.member("navigationPhysicsBlockerRemoves", counters.navigationPhysicsBlockerRemoves);
+        writer.member("navigationPhysicsPublishedBlockers", counters.navigationPhysicsPublishedBlockers);
+        writer.member("navigationPhysicsRegisteredBodies", counters.navigationPhysicsRegisteredBodies);
+        writer.member("navigationPhysicsReady", counters.navigationPhysicsReady);
+        writer.member("navigationCancelled", counters.navigationCancelled);
+        writer.member("texturesUploaded", counters.texturesUploaded);
+        writer.member("spriteBindingTextures", counters.spriteBindingTextures);
+        writer.member("spriteTextureLeasesAcquired", counters.spriteTextureLeasesAcquired);
+        writer.member("spriteTextureRetirementsAccepted", counters.spriteTextureRetirementsAccepted);
+        writer.member("spriteBindingRegistryReleased", counters.spriteBindingRegistryReleased);
+        writer.member("spriteTextureHandlesInvalidated", counters.spriteTextureHandlesInvalidated);
+        writer.member("spriteTextureRetirementRecords", counters.spriteTextureRetirementRecords);
+        writer.member("spriteTextureRetirementReleased", counters.spriteTextureRetirementReleased);
+        writer.member("spriteTextureRetirementLive", counters.spriteTextureRetirementLive);
+        writer.member("spriteBindingResolverHits", counters.spriteBindingResolverHits);
+        writer.member("tileMapSpriteBindingResolverHits", counters.tileMapSpriteBindingResolverHits);
+        writer.member("particleSpriteBindingResolverHits", counters.particleSpriteBindingResolverHits);
+        writer.member("trailSpriteBindingResolverHits", counters.trailSpriteBindingResolverHits);
+        writer.member("tileSpritesPerFrame", ExpectedNonEmptyTiles);
+        writer.member("spritesPerFrame", expectedTotalSprites);
+        writer.member("sprite2DLightingConfigured", counters.sprite2DLightingConfigured);
+        writer.member("authoredPointLight2DCount", counters.authoredPointLight2DCount);
+        writer.member("pointLight2DCount", counters.pointLight2DCount);
+        writer.member("culledPointLight2DCount", counters.culledPointLight2DCount);
+        writer.member("shadowOccluder2DCount", counters.shadowOccluder2DCount);
+        writer.member("softShadowPointLight2DCount", counters.softShadowPointLight2DCount);
+        writer.member("sceneLightingFrames", counters.sceneLightingFrames);
+        writer.member("submittedRenderFrames", counters.submittedRenderFrames);
+        writer.member("skippedSuspendedSurfaceFrames", counters.skippedSuspendedSurfaceFrames);
+        writer.member("renderFrameAccountingValid", renderFrameAccountingValid);
+        writer.member("normalMappedSpriteCount", counters.normalMappedSpriteCount);
+        writer.member("particleCapacity", ProductParticleCapacity);
+        writer.member("particleRandomSeed", ProductParticleRandomSeed);
+        writer.member("particleEmitted", counters.particleEmitted);
+        writer.member("particleExpired", counters.particleExpired);
+        writer.member("particleActive", counters.particleActive);
+        writer.member("particleExtracted", counters.particleExtracted);
+        writer.member("trailCapacity", ProductTrailCapacity);
+        writer.member("trailSegmentsCreated", counters.trailSegmentsCreated);
+        writer.member("trailActive", counters.trailActive);
+        writer.member("trailExtracted", counters.trailExtracted);
+        writer.member("trailBreaks", counters.trailBreaks);
+        writer.member("fxInitialFingerprint", counters.fxInitialFingerprint);
+        writer.member("controllerGroundedFrames", counters.controllerGroundedFrames);
+        writer.member("controllerWalkFrames", counters.controllerWalkFrames);
+        writer.member("controllerHitRightFrames", counters.controllerHitRightFrames);
+        writer.member("characterAnimationFromCatalog", counters.characterAnimationFromCatalog);
+        writer.member("characterAnimationResolvedFrames", counters.characterAnimationResolvedFrames);
+        writer.member("characterAnimationUpdates", counters.characterAnimationUpdates);
+        writer.member("characterAnimationFrameChanges", counters.characterAnimationFrameChanges);
+        writer.member("characterAnimationIdleEntries", counters.characterAnimationIdleEntries);
+        writer.member("characterAnimationWalkEntries", counters.characterAnimationWalkEntries);
+        writer.member("characterAnimationHitWallEntries", counters.characterAnimationHitWallEntries);
+        writer.member("characterAnimationLastFrame", counters.characterAnimationLastFrame);
+        writer.member("characterAnimationHitCompleted", counters.characterAnimationHitCompleted);
+        writer.member("animEventFootsteps", counters.animEventFootsteps);
+        writer.member("animEventHits", counters.animEventHits);
+        writer.member("animEventOverflow", counters.animEventOverflow);
+        writer.member("animEventUnknownTags", counters.animEventUnknownTags);
+        writer.member("maxControllerX", counters.maxControllerX);
+        writer.member("uiRootsCreated", counters.uiRootsCreated);
+        writer.member("uiPanelsCreated", counters.uiPanelsCreated);
+        writer.member("uiTextLabelsCreated", counters.uiTextLabelsCreated);
+        writer.member("uiTextEditsCreated", counters.uiTextEditsCreated);
+        writer.member("uiTextEditInitialTextVerified", counters.uiTextEditInitialTextVerified);
+        writer.member("uiButtonsCreated", counters.uiButtonsCreated);
+        writer.member("uiButtonActionsWired", counters.uiButtonActionsWired);
+        writer.member("uiButtonPaintVerified", counters.uiButtonPaintVerified);
+        writer.member("uiDisabledDemoButtonRequested", counters.uiDisabledDemoButtonRequested);
+        writer.member("uiDemoButtonEnabled", counters.uiDemoButtonEnabled);
+        writer.member("uiDisabledDemoButtonVerified", counters.uiDisabledDemoButtonVerified);
+        writer.member("uiThemeDemoRequested", counters.uiThemeDemoRequested);
+        writer.member("uiThemeSwitches", counters.uiThemeSwitches);
+        writer.member("uiThemeButtonActivations", counters.uiThemeButtonActivations);
+        writer.member("uiThemeFinalLight", counters.uiThemeFinalLight);
+        writer.member("uiTreeDemoRequested", counters.uiTreeDemoRequested);
+        writer.member("uiTreeViewsCreated", counters.uiTreeViewsCreated);
+        writer.member("uiTreeLogicalItems", counters.uiTreeLogicalItems);
+        writer.member("uiTreeMaterializedCapacity", counters.uiTreeMaterializedCapacity);
+        writer.member("uiTreeSelectionChanges", counters.uiTreeSelectionChanges);
+        writer.member("uiTreeFinalSelectedKey", counters.uiTreeFinalSelectedKey);
+        writer.member("uiTreeFinalSelectedIndex", counters.uiTreeFinalSelectedIndex);
+        writer.member("uiTreeFinalSelectionVerified", counters.uiTreeFinalSelectionVerified);
+        writer.member("uiTreeScrolled", counters.uiTreeScrolled);
+        writer.member("uiTreeThemeVerified", counters.uiTreeThemeVerified);
+        writer.member("uiFlowLayersRegistered", counters.uiFlowLayersRegistered);
+        writer.member("uiFlowScreensRegistered", counters.uiFlowScreensRegistered);
+        writer.member("uiFlowScreenPushes", counters.uiFlowScreenPushes);
+        writer.member("uiFlowScreenPops", counters.uiFlowScreenPops);
+        writer.member("uiFlowActionsRegistered", counters.uiFlowActionsRegistered);
+        writer.member("uiFlowActionsCleared", counters.uiFlowActionsCleared);
+        writer.member("uiFlowBackActionInvocations", counters.uiFlowBackActionInvocations);
+        writer.member("uiFlowConfirmActionInvocations", counters.uiFlowConfirmActionInvocations);
+        writer.member("uiFlowMenuActionInvocations", counters.uiFlowMenuActionInvocations);
+        writer.member("pauseOpenActionInvocations", counters.pauseOpenActionInvocations);
+        writer.member("pauseInputDeviceHintUpdates", counters.pauseInputDeviceHintUpdates);
+        writer.member("pauseInputDeviceRevision", counters.pauseInputDeviceRevision);
+        writer.member("pauseInputHintKeyboardMouse", counters.pauseInputHintKeyboardMouse);
+        writer.member("pauseInputHintGamepad", counters.pauseInputHintGamepad);
+        writer.member("pauseAutoResumeRequests", counters.pauseAutoResumeRequests);
+        writer.member("pauseResumeRequestedByAction", counters.pauseResumeRequestedByAction);
+        writer.member("pauseUIScreenActivated", counters.pauseUIScreenActivated);
+        writer.member("baseUIScreenRestored", counters.baseUIScreenRestored);
+        writer.member("uiSlidersCreated", counters.uiSlidersCreated);
+        writer.member("uiSliderChanges", counters.uiSliderChanges);
+        writer.member("uiCheckboxesCreated", counters.uiCheckboxesCreated);
+        writer.member("uiCheckboxActions", counters.uiCheckboxActions);
+        writer.member("uiProgressBarsCreated", counters.uiProgressBarsCreated);
+        writer.member("uiProgressBarValueVerified", counters.uiProgressBarValueVerified);
+        writer.member("uiRadioButtonsCreated", counters.uiRadioButtonsCreated);
+        writer.member("uiRadioButtonActionsWired", counters.uiRadioButtonActionsWired);
+        writer.member("uiRadioSelectionVerified", counters.uiRadioSelectionVerified);
+        writer.member("lastMasterVolume", counters.lastMasterVolume);
+        writer.member("lastMusicVolume", counters.lastMusicVolume);
+        writer.member("lastSfxVolume", counters.lastSfxVolume);
+        writer.member("lastMasterMuted", counters.lastMasterMuted);
+        writer.member("lastMusicMuted", counters.lastMusicMuted);
+        writer.member("lastSfxMuted", counters.lastSfxMuted);
+        writer.member("masterVolumeFromSlider", counters.masterVolumeFromSlider);
+        writer.member("musicVolumeFromSlider", counters.musicVolumeFromSlider);
+        writer.member("sfxVolumeFromSlider", counters.sfxVolumeFromSlider);
+        writer.member("masterMutedFromCheckbox", counters.masterMutedFromCheckbox);
+        writer.member("musicMutedFromCheckbox", counters.musicMutedFromCheckbox);
+        writer.member("sfxMutedFromCheckbox", counters.sfxMutedFromCheckbox);
+        writer.member("uiRootsReleased", counters.uiRootsReleased);
+        writer.member("worldPointerPresses", counters.tileSelection.pointerPresses);
+        writer.member("worldPointerMissingSamples", counters.tileSelection.missingWorldPointerSamples);
+        writer.member("worldPointerViewportMisses", counters.tileSelection.viewportMisses);
+        writer.member("worldPointerMapMisses", counters.tileSelection.mapMisses);
+        writer.member("tileSelectionHits", counters.tileSelection.selectionHits);
+        writer.member("hasTileSelection", lastSelection != nullptr);
+        writer.member("lastSelectedCellX", (lastSelection != nullptr ? lastSelection->cellX : 0U));
+        writer.member("lastSelectedCellY", (lastSelection != nullptr ? lastSelection->cellY : 0U));
+        writer.member("lastSelectedTileId", counters.lastSelectedTileId);
+        writer.member("lastSelectionWorldX", (lastSelection != nullptr ? lastSelection->worldPointer.worldX : 0.0F));
+        writer.member("lastSelectionWorldY", (lastSelection != nullptr ? lastSelection->worldPointer.worldY : 0.0F));
+        writer.member("lastSelectionInputSequence", (lastSelection != nullptr ? lastSelection->worldPointer.inputSequence : 0U));
+        writer.member("lastSelectionCameraRevision", (lastSelection != nullptr ? lastSelection->worldPointer.cameraRevision : 0U));
+        writer.member("lastSelectionSurfaceRevision", (lastSelection != nullptr ? lastSelection->worldPointer.surfaceRevision : 0U));
+        writer.member("selectionHighlightSprites", counters.selectionHighlightSprites);
+        writer.member("lastHighlightSprites", counters.lastHighlightSprites);
+        writer.member("seedTileSelection", options->seedTileSelection);
+        writer.member("seedTileSelectionApplied", counters.seedTileSelectionApplied);
+        writer.member("windowLogicalWidth", options->windowLogicalWidth);
+        writer.member("windowLogicalHeight", options->windowLogicalHeight);
+        writer.member("logicalPixelWidth", counters.logicalPixelWidth);
+        writer.member("logicalPixelHeight", counters.logicalPixelHeight);
+        writer.member("framebufferPixelWidth", counters.framebufferPixelWidth);
+        writer.member("framebufferPixelHeight", counters.framebufferPixelHeight);
+        writer.member("contentScaleX", counters.contentScaleX);
+        writer.member("contentScaleY", counters.contentScaleY);
+        writer.member("surfacePixelWidth", counters.surfacePixelWidth);
+        writer.member("surfacePixelHeight", counters.surfacePixelHeight);
+        writer.member("windowMetricsEvents", counters.windowMetricsEvents);
+        writer.member("cameraProjectionResolves", counters.cameraProjectionResolves);
+        writer.member("lastCameraWorldWidth", counters.lastCameraWorldWidth);
+        writer.member("lastCameraWorldHeight", counters.lastCameraWorldHeight);
+        writer.member("lastCameraActualPpm", counters.lastCameraActualPpm);
+        writer.member("cameraProjection", "FixedWorldHeight2D");
+        writer.member("cameraFollowUpdates", counters.cameraFollowUpdates);
+        writer.member("cameraInterpolatedExtracts", counters.cameraInterpolatedExtracts);
+        writer.member("lastCameraCenterX", counters.lastCameraCenterX);
+        writer.member("lastCameraCenterY", counters.lastCameraCenterY);
+        writer.member("lastCameraInterpolation", counters.lastCameraInterpolation);
+        writer.member("minCameraCenterX", counters.minCameraCenterX);
+        writer.member("maxCameraCenterX", counters.maxCameraCenterX);
+        writer.member("chunkDirtyFramesSynced", counters.chunkDirtyFramesSynced);
+        writer.member("chunkDirtyVisibleObservations", counters.chunkDirtyVisibleObservations);
+        writer.member("chunkDirtyRebuilds", counters.chunkDirtyRebuilds);
+        writer.member("chunkDirtyCacheHits", counters.chunkDirtyCacheHits);
+        writer.member("lastChunkDirtyRebuilds", counters.lastChunkDirtyRebuilds);
+        writer.member("lastChunkDirtyCacheHits", counters.lastChunkDirtyCacheHits);
+        writer.member("lastChunkDirtyVisible", counters.lastChunkDirtyVisible);
+        writer.member("audioEnginePresent", counters.audioEnginePresent);
+        writer.member("audioOneShotQueued", counters.audioOneShotQueued);
+        writer.member("audioStartedObserved", counters.audioStartedObserved);
+        writer.member("audioStartedCount", counters.audioStartedCount);
+        writer.member("audioStoppedCount", counters.audioStoppedCount);
+        writer.member("audioFromCatalogLease", counters.audioFromCatalogLease);
+        writer.member("audioClipFrameCount", counters.audioClipFrameCount);
+        writer.member("audioClipSampleRate", counters.audioClipSampleRate);
+        writer.member("audioVoiceParamsConfigured", counters.audioVoiceParamsConfigured);
+        writer.member("audioVoiceGain", counters.audioVoiceGain);
+        writer.member("audioPitch", counters.audioPitch);
+        writer.member("audioPan", counters.audioPan);
+        writer.member("audioFadeStarted", counters.audioFadeStarted);
+        writer.member("audioFadeCancelled", counters.audioFadeCancelled);
+        writer.member("audioFadeStopped", counters.audioFadeStopped);
+        writer.member("audioOneShotRetired", counters.audioOneShotRetired);
+        writer.member("audioStreamQueued", counters.audioStreamQueued);
+        writer.member("audioStreamSubmitted", counters.audioStreamSubmitted);
+        writer.member("audioStreamEofSignaled", counters.audioStreamEofSignaled);
+        writer.member("audioStreamStartedObserved", counters.audioStreamStartedObserved);
+        writer.member("audioStreamMixed", counters.audioStreamMixed);
+        writer.member("audioStreamDrained", counters.audioStreamDrained);
+        writer.member("audioStreamStopped", counters.audioStreamStopped);
+        writer.member("audioStreamRetired", counters.audioStreamRetired);
+        writer.member("audioStreamSubmittedFrames", counters.audioStreamSubmittedFrames);
+        writer.member("audioStreamConsumedFrames", counters.audioStreamConsumedFrames);
+        writer.member("audioStreamUnderrunFrames", counters.audioStreamUnderrunFrames);
 #if defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
-              << ",\"audioMiniaudioEnabled\":true"
-              << ",\"audioDeviceCreated\":" << (counters.audioDeviceCreated ? "true" : "false")
-              << ",\"audioDeviceNullBackend\":" << (counters.audioDeviceNullBackend ? "true" : "false")
-              << ",\"audioDeviceCallbacks\":" << counters.audioDeviceCallbacks
-              << ",\"audioMixFramesRendered\":" << counters.audioMixFramesRendered
+        writer.member("audioMiniaudioEnabled", true);
+        writer.member("audioDeviceCreated", counters.audioDeviceCreated);
+        writer.member("audioDeviceNullBackend", counters.audioDeviceNullBackend);
+        writer.member("audioDeviceCallbacks", counters.audioDeviceCallbacks);
+        writer.member("audioMixFramesRendered", counters.audioMixFramesRendered);
 #else
-              << ",\"audioMiniaudioEnabled\":false"
+        writer.member("audioMiniaudioEnabled", false);
 #endif
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
-              << ",\"physicsEnabled\":true"
-              << ",\"physicsSteps\":" << counters.physicsSteps
-              << ",\"physicsStaticBodies\":" << counters.physicsStaticBodies
-              << ",\"physicsStaticSolidCells\":" << counters.physicsStaticSolidCells
-              << ",\"physicsStaticBoxShapes\":" << counters.physicsStaticBoxShapes
-              << ",\"physicsDynamicContacts\":" << counters.physicsDynamicContacts
-              << ",\"physicsSensorEnters\":" << counters.physicsSensorEnters
-              << ",\"physicsSensorExits\":" << counters.physicsSensorExits
-              << ",\"physicsConvexPolygonReady\":"
-              << (counters.physicsConvexPolygonReady ? "true" : "false")
-              << ",\"physicsJointReady\":" << (counters.physicsJointReady ? "true" : "false")
-              << ",\"physicsRevoluteJointReady\":"
-              << (counters.physicsRevoluteJointReady ? "true" : "false")
-              << ",\"physicsPrismaticJointReady\":"
-              << (counters.physicsPrismaticJointReady ? "true" : "false")
-              << ",\"physicsChainReady\":" << (counters.physicsChainReady ? "true" : "false")
-              << ",\"lastDynamicY\":" << counters.lastDynamicY
+        writer.member("physicsEnabled", true);
+        writer.member("physicsSteps", counters.physicsSteps);
+        writer.member("physicsStaticBodies", counters.physicsStaticBodies);
+        writer.member("physicsStaticSolidCells", counters.physicsStaticSolidCells);
+        writer.member("physicsStaticBoxShapes", counters.physicsStaticBoxShapes);
+        writer.member("physicsDynamicContacts", counters.physicsDynamicContacts);
+        writer.member("physicsSensorEnters", counters.physicsSensorEnters);
+        writer.member("physicsSensorExits", counters.physicsSensorExits);
+        writer.member("physicsConvexPolygonReady", counters.physicsConvexPolygonReady);
+        writer.member("physicsJointReady", counters.physicsJointReady);
+        writer.member("physicsRevoluteJointReady", counters.physicsRevoluteJointReady);
+        writer.member("physicsPrismaticJointReady", counters.physicsPrismaticJointReady);
+        writer.member("physicsChainReady", counters.physicsChainReady);
+        writer.member("lastDynamicY", counters.lastDynamicY);
 #else
-              << ",\"physicsEnabled\":false"
+        writer.member("physicsEnabled", false);
 #endif
 #if defined(TINA_SAMPLE_TILEMAP_FREETYPE)
-              << ",\"freetypeEnabled\":true"
+        writer.member("freetypeEnabled", true);
 #else
-              << ",\"freetypeEnabled\":false"
+        writer.member("freetypeEnabled", false);
 #endif
 #if defined(TINA_SAMPLE_TILEMAP_PHYSICS2D) && defined(TINA_SAMPLE_TILEMAP_FREETYPE) && \
     defined(TINA_SAMPLE_TILEMAP_AUDIO_MINIAUDIO)
-              << ",\"productGate\":\"bgfx-physics-freetype-audio\""
+        writer.member("productGate", "bgfx-physics-freetype-audio");
 #elif defined(TINA_SAMPLE_TILEMAP_PHYSICS2D) && defined(TINA_SAMPLE_TILEMAP_FREETYPE)
-              << ",\"productGate\":\"bgfx-physics-freetype\""
+        writer.member("productGate", "bgfx-physics-freetype");
 #elif defined(TINA_SAMPLE_TILEMAP_PHYSICS2D)
-              << ",\"productGate\":\"bgfx-physics\""
+        writer.member("productGate", "bgfx-physics");
 #elif defined(TINA_SAMPLE_TILEMAP_FREETYPE)
-              << ",\"productGate\":\"bgfx-freetype\""
+        writer.member("productGate", "bgfx-freetype");
 #else
-              << ",\"productGate\":\"bgfx\""
+        writer.member("productGate", "bgfx");
 #endif
-              << ",\"stateExits\":" << counters.stateExits
-              << ",\"pauseOverlayPushes\":" << counters.pauseOverlayPushes
-              << ",\"pauseOverlayPops\":" << counters.pauseOverlayPops
-              << ",\"pauseOverlayFrames\":" << counters.pauseOverlayFrames
-              << ",\"accessibilityPublished\":" << (counters.accessibilityPublished ? "true" : "false")
-              << ",\"accessibilityPublishCount\":" << counters.accessibilityPublishCount
-              << ",\"accessibilityNodeCount\":" << counters.accessibilityNodeCount
-              << ",\"accessibilitySemanticsRevision\":" << counters.accessibilitySemanticsRevision
-              << ",\"accessibilityHasButton\":" << (counters.accessibilityHasButton ? "true" : "false")
-              << ",\"accessibilityHasCheckbox\":" << (counters.accessibilityHasCheckbox ? "true" : "false")
-              << ",\"accessibilityHasSlider\":" << (counters.accessibilityHasSlider ? "true" : "false")
-              << ",\"accessibilityHasProgressBar\":" << (counters.accessibilityHasProgressBar ? "true" : "false")
-              << ",\"accessibilityHasRadio\":" << (counters.accessibilityHasRadio ? "true" : "false")
-              << ",\"accessibilityHasTextEdit\":" << (counters.accessibilityHasTextEdit ? "true" : "false")
-              << ",\"accessibilityHasTree\":" << (counters.accessibilityHasTree ? "true" : "false")
-              << ",\"accessibilityHasTreeItem\":" << (counters.accessibilityHasTreeItem ? "true" : "false")
-              << ",\"accessibilityTreeSelectionVerified\":"
-              << (counters.accessibilityTreeSelectionVerified ? "true" : "false")
-              << ",\"applicationShutdowns\":" << counters.applicationShutdowns
-              << ",\"evidenceSchema\":" << ProductEvidenceSchema
-              << ",\"evidenceFingerprint\":\"" << evidenceFingerprint << "\""
-              << ",\"pixelCaptureAttempted\":" << (counters.pixelCaptureAttempted ? "true" : "false")
-              << ",\"pixelCaptureOk\":" << (counters.pixelCaptureOk ? "true" : "false")
-              << ",\"pixelCaptureWidth\":" << counters.pixelCaptureWidth
-              << ",\"pixelCaptureHeight\":" << counters.pixelCaptureHeight
-              << ",\"pixelCaptureBytes\":" << counters.pixelCaptureBytes
-              << ",\"pixelFingerprint\":\"" << counters.pixelFingerprint << "\""
-              << ",\"pixelGoldenChecked\":" << (pixelGoldenChecked ? "true" : "false")
-              << ",\"pixelGoldenMatched\":" << (pixelGoldenMatched ? "true" : "false")
-              << ",\"expectPixelFingerprint\":\"" << options->expectPixelFingerprint << "\""
-              << ",\"exit\":\""
-              << "GameRequestedExitAfterCurrentFrame\"}\n";
+        writer.member("stateExits", counters.stateExits);
+        writer.member("pauseOverlayPushes", counters.pauseOverlayPushes);
+        writer.member("pauseOverlayPops", counters.pauseOverlayPops);
+        writer.member("pauseOverlayFrames", counters.pauseOverlayFrames);
+        writer.member("accessibilityPublished", counters.accessibilityPublished);
+        writer.member("accessibilityPublishCount", counters.accessibilityPublishCount);
+        writer.member("accessibilityNodeCount", counters.accessibilityNodeCount);
+        writer.member("accessibilitySemanticsRevision", counters.accessibilitySemanticsRevision);
+        writer.member("accessibilityHasButton", counters.accessibilityHasButton);
+        writer.member("accessibilityHasCheckbox", counters.accessibilityHasCheckbox);
+        writer.member("accessibilityHasSlider", counters.accessibilityHasSlider);
+        writer.member("accessibilityHasProgressBar", counters.accessibilityHasProgressBar);
+        writer.member("accessibilityHasRadio", counters.accessibilityHasRadio);
+        writer.member("accessibilityHasTextEdit", counters.accessibilityHasTextEdit);
+        writer.member("accessibilityHasTree", counters.accessibilityHasTree);
+        writer.member("accessibilityHasTreeItem", counters.accessibilityHasTreeItem);
+        writer.member("accessibilityTreeSelectionVerified", counters.accessibilityTreeSelectionVerified);
+        writer.member("applicationShutdowns", counters.applicationShutdowns);
+        writer.member("evidenceSchema", ProductEvidenceSchema);
+        writer.member("evidenceFingerprint", evidenceFingerprint);
+        writer.member("pixelCaptureAttempted", counters.pixelCaptureAttempted);
+        writer.member("pixelCaptureOk", counters.pixelCaptureOk);
+        writer.member("pixelCaptureWidth", counters.pixelCaptureWidth);
+        writer.member("pixelCaptureHeight", counters.pixelCaptureHeight);
+        writer.member("pixelCaptureBytes", counters.pixelCaptureBytes);
+        writer.member("pixelFingerprint", counters.pixelFingerprint);
+        writer.member("pixelGoldenChecked", pixelGoldenChecked);
+        writer.member("pixelGoldenMatched", pixelGoldenMatched);
+        writer.member("expectPixelFingerprint", options->expectPixelFingerprint);
+        writer.member("exit", "GameRequestedExitAfterCurrentFrame");
+        writer.endObject();
+    }
+    std::cout << '\n';
     return 0;
 }

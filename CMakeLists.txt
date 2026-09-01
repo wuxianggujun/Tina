@@ -268,6 +268,8 @@ if(TINA_ENABLE_SANITIZERS)
 endif()
 
 include(Dependencies)
+# Before TinaUiFont, which stages the font through tina_product_data_file().
+include(TinaProductInstall)
 include(TinaUiFont)
 
 if(TINA_TRACE_BACKEND STREQUAL "tracy")

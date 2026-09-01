@@ -9,8 +9,12 @@
 #include <tina/asset_format/SourceImportMetadataFormat.hpp>
 #include <tina/asset_format/SpritePayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
+#include "core/io/PathUtil.hpp"
+
 #include <tina/core/id/AssetId.hpp>
 #include <tina/core/io/ReadFile.hpp>
+#include <tina/core/text/ArgParser.hpp>
+#include <tina/core/text/JsonWriter.hpp>
 
 #include <algorithm>
 #include <array>
@@ -54,37 +58,6 @@ struct PreCookProbe final {
     Tina::Core::u32 cleanUnitCount = 0;
     Tina::Core::u32 cleanObjectCount = 0;
 };
-
-[[nodiscard]] bool pathComponentEquals(const std::filesystem::path& left,
-                                       const std::filesystem::path& right) noexcept
-{
-#if defined(_WIN32)
-    const auto& leftText = left.native();
-    const auto& rightText = right.native();
-    return leftText.size() == rightText.size() &&
-           std::equal(leftText.begin(), leftText.end(), rightText.begin(),
-                      [](wchar_t leftCharacter, wchar_t rightCharacter) {
-                          return std::towlower(leftCharacter) == std::towlower(rightCharacter);
-                      });
-#else
-    return left == right;
-#endif
-}
-
-[[nodiscard]] bool pathIsSameOrDescendant(const std::filesystem::path& candidate,
-                                          const std::filesystem::path& ancestor) noexcept
-{
-    auto candidatePart = candidate.begin();
-    for (auto ancestorPart = ancestor.begin(); ancestorPart != ancestor.end();
-         ++ancestorPart, ++candidatePart)
-    {
-        if (candidatePart == candidate.end() || !pathComponentEquals(*candidatePart, *ancestorPart))
-        {
-            return false;
-        }
-    }
-    return true;
-}
 
 [[nodiscard]] std::optional<std::filesystem::path> resolveOptionPath(std::string_view utf8Path)
 {
@@ -132,7 +105,7 @@ struct PreCookProbe final {
         {
             return false;
         }
-        if (pathIsSameOrDescendant(*stageRoot, *liveRoot))
+        if (Tina::Core::Detail::pathIsSameOrDescendant(*stageRoot, *liveRoot))
         {
             std::cerr << "--stage-out must be outside --out\n";
             return false;
@@ -147,7 +120,7 @@ struct PreCookProbe final {
         {
             return false;
         }
-        if (pathIsSameOrDescendant(*baselineState, *liveRoot))
+        if (Tina::Core::Detail::pathIsSameOrDescendant(*baselineState, *liveRoot))
         {
             std::cerr << "--import-state must be outside --out\n";
             return false;
@@ -161,10 +134,10 @@ struct PreCookProbe final {
         {
             return false;
         }
-        if ((baselineState && pathIsSameOrDescendant(*stageState, *baselineState) &&
-             pathIsSameOrDescendant(*baselineState, *stageState)) ||
-            pathIsSameOrDescendant(*stageState, *liveRoot) ||
-            (stageRoot && pathIsSameOrDescendant(*stageState, *stageRoot)))
+        if ((baselineState && Tina::Core::Detail::pathIsSameOrDescendant(*stageState, *baselineState) &&
+             Tina::Core::Detail::pathIsSameOrDescendant(*baselineState, *stageState)) ||
+            Tina::Core::Detail::pathIsSameOrDescendant(*stageState, *liveRoot) ||
+            (stageRoot && Tina::Core::Detail::pathIsSameOrDescendant(*stageState, *stageRoot)))
         {
             std::cerr << "--stage-import-state must be independent of package roots and baseline state\n";
             return false;
@@ -215,96 +188,57 @@ void printUsage()
 
 [[nodiscard]] int parseArgs(int argc, char** argv, Options& options)
 {
-    for (int index = 1; index < argc; ++index)
+    Tina::Core::ArgScanner scanner(argc, argv);
+    while (scanner.next())
     {
-        const std::string_view arg = argv[index];
-        if (arg == "--help" || arg == "-h")
+        if (scanner.flag("--help") || scanner.flag("-h"))
         {
             printUsage();
             return 2;
         }
-        auto requireValue = [&](std::string_view name) -> std::string_view {
-            if (index + 1 >= argc)
-            {
-                std::cerr << "missing value for " << name << '\n';
-                return {};
-            }
-            ++index;
-            return argv[index];
-        };
-        if (arg == "--out")
+        if (const auto value = scanner.value("--out"))
         {
-            const auto value = requireValue(arg);
-            if (value.empty())
-            {
-                return 2;
-            }
-            options.outRoot.assign(value);
+            options.outRoot.assign(*value);
             continue;
         }
-        if (arg == "--recipe")
+        if (const auto value = scanner.value("--recipe"))
         {
-            const auto value = requireValue(arg);
-            if (value.empty())
-            {
-                return 2;
-            }
             options.imports.push_back(ImportOption{.kind = ImportKind::Recipe,
-                                                   .path = std::string(value)});
+                                                   .path = std::string(*value)});
             continue;
         }
-        if (arg == "--gltf")
+        if (const auto value = scanner.value("--gltf"))
         {
-            const auto value = requireValue(arg);
-            if (value.empty())
-            {
-                return 2;
-            }
             options.imports.push_back(ImportOption{.kind = ImportKind::Gltf,
-                                                   .path = std::string(value)});
+                                                   .path = std::string(*value)});
             continue;
         }
-        if (arg == "--source-root")
+        if (const auto value = scanner.value("--source-root"))
         {
-            const auto value = requireValue(arg);
-            if (value.empty())
-            {
-                return 2;
-            }
-            options.sourceRoot.assign(value);
+            options.sourceRoot.assign(*value);
             continue;
         }
-        if (arg == "--import-state")
+        if (const auto value = scanner.value("--import-state"))
         {
-            const auto value = requireValue(arg);
-            if (value.empty())
-            {
-                return 2;
-            }
-            options.importStatePath.assign(value);
+            options.importStatePath.assign(*value);
             continue;
         }
-        if (arg == "--stage-out")
+        if (const auto value = scanner.value("--stage-out"))
         {
-            const auto value = requireValue(arg);
-            if (value.empty())
-            {
-                return 2;
-            }
-            options.stageOutRoot.assign(value);
+            options.stageOutRoot.assign(*value);
             continue;
         }
-        if (arg == "--stage-import-state")
+        if (const auto value = scanner.value("--stage-import-state"))
         {
-            const auto value = requireValue(arg);
-            if (value.empty())
-            {
-                return 2;
-            }
-            options.stageImportStatePath.assign(value);
+            options.stageImportStatePath.assign(*value);
             continue;
         }
-        std::cerr << "unknown argument: " << arg << '\n';
+        if (scanner.failed())
+        {
+            std::cerr << "missing value for " << scanner.failedOption() << '\n';
+            return 2;
+        }
+        std::cerr << "unknown argument: " << scanner.token() << '\n';
         printUsage();
         return 2;
     }
@@ -368,8 +302,14 @@ void printUsage()
 
 void printError(const Tina::Core::Error& error)
 {
-    std::cout << "{\"status\":\"error\",\"domain\":" << static_cast<unsigned>(error.code.domain)
-              << ",\"code\":" << error.code.value << ",\"message\":\"" << error.message << "\"}\n";
+    Tina::Core::JsonWriter writer(std::cout);
+    writer.beginObject();
+    writer.member("status", "error");
+    writer.member("domain", static_cast<unsigned>(error.code.domain));
+    writer.member("code", error.code.value);
+    writer.member("message", error.message);
+    writer.endObject();
+    std::cout << '\n';
 }
 
 [[nodiscard]] constexpr std::string_view
@@ -439,17 +379,25 @@ void printSuccess(const Tina::Asset::CatalogSnapshot& catalog, std::string_view 
                   Tina::Core::u32 objectsReused, Tina::Core::u32 objectsCooked,
                   bool importStateCommitted, std::string_view outRoot)
 {
-    std::cout << "{\"status\":\"ok\",\"tool\":\"tina_assetc\",\"entries\":"
-              << catalog.entryCount() << ",\"dependencies\":" << catalog.dependencyCount()
-              << ",\"mode\":\"" << mode << "\",\"cookMode\":\"" << cookMode
-              << "\",\"probe\":\"" << (probe.enabled ? probeStateName(probe.state) : "disabled")
-              << "\",\"probeReason\":\"" << probe.reason << "\",\"unitsTotal\":"
-              << unitsTotal << ",\"unitsRecooked\":" << unitsRecooked
-              << ",\"unitsRemoved\":" << unitsRemoved
-              << ",\"objectsReused\":" << objectsReused << ",\"objectsCooked\":"
-              << objectsCooked << ",\"importStateCommitted\":"
-              << (importStateCommitted ? "true" : "false") << ",\"out\":\"" << outRoot
-              << "\"}\n";
+    Tina::Core::JsonWriter writer(std::cout);
+    writer.beginObject();
+    writer.member("status", "ok");
+    writer.member("tool", "tina_assetc");
+    writer.member("entries", catalog.entryCount());
+    writer.member("dependencies", catalog.dependencyCount());
+    writer.member("mode", mode);
+    writer.member("cookMode", cookMode);
+    writer.member("probe", probe.enabled ? probeStateName(probe.state) : std::string_view("disabled"));
+    writer.member("probeReason", probe.reason);
+    writer.member("unitsTotal", unitsTotal);
+    writer.member("unitsRecooked", unitsRecooked);
+    writer.member("unitsRemoved", unitsRemoved);
+    writer.member("objectsReused", objectsReused);
+    writer.member("objectsCooked", objectsCooked);
+    writer.member("importStateCommitted", importStateCommitted);
+    writer.member("out", outRoot);
+    writer.endObject();
+    std::cout << '\n';
 }
 
 void printPipelineSuccess(const Tina::Asset::SourceImportPipelineResult& result,
@@ -460,20 +408,25 @@ void printPipelineSuccess(const Tina::Asset::SourceImportPipelineResult& result,
                           : result.mode == Tina::Asset::SourceImportPipelineMode::IncrementalRecook
                               ? "incremental-recook"
                               : "full-recook";
-    std::cout << "{\"status\":\"ok\",\"tool\":\"tina_assetc\",\"entries\":"
-              << result.catalogEntries << ",\"dependencies\":" << result.catalogDependencies
-              << ",\"mode\":\"" << mode << "\",\"cookMode\":\"" << cookMode
-              << "\",\"probe\":\"" << probeStateName(result.probeState)
-              << "\",\"probeReason\":\""
-              << Tina::Asset::sourceImportProbeReasonName(result.probeReason)
-              << "\",\"unitsTotal\":" << result.unitsTotal
-              << ",\"unitsRecooked\":" << result.unitsRecooked
-              << ",\"unitsRemoved\":" << result.unitsRemoved
-              << ",\"objectsReused\":" << result.objectsReused
-              << ",\"objectsCooked\":" << result.objectsCooked
-              << ",\"importStateCommitted\":"
-              << (result.importStateCommitted ? "true" : "false") << ",\"out\":\""
-              << result.catalogRootUtf8 << "\"}\n";
+    Tina::Core::JsonWriter writer(std::cout);
+    writer.beginObject();
+    writer.member("status", "ok");
+    writer.member("tool", "tina_assetc");
+    writer.member("entries", result.catalogEntries);
+    writer.member("dependencies", result.catalogDependencies);
+    writer.member("mode", mode);
+    writer.member("cookMode", cookMode);
+    writer.member("probe", probeStateName(result.probeState));
+    writer.member("probeReason", Tina::Asset::sourceImportProbeReasonName(result.probeReason));
+    writer.member("unitsTotal", result.unitsTotal);
+    writer.member("unitsRecooked", result.unitsRecooked);
+    writer.member("unitsRemoved", result.unitsRemoved);
+    writer.member("objectsReused", result.objectsReused);
+    writer.member("objectsCooked", result.objectsCooked);
+    writer.member("importStateCommitted", result.importStateCommitted);
+    writer.member("out", result.catalogRootUtf8);
+    writer.endObject();
+    std::cout << '\n';
 }
 
 [[nodiscard]] Tina::Core::Result<Tina::Asset::CatalogCookRequest> buildTyped2dRequest()

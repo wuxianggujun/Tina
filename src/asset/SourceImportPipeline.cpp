@@ -1,6 +1,6 @@
 #include <tina/asset/SourceImportPipeline.hpp>
 
-#include "Utf8Path.hpp"
+#include "core/io/PathUtil.hpp"
 
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/CatalogPackage.hpp>
@@ -90,7 +90,7 @@ struct BaselineLoadResult final {
                              "source import pipeline path is invalid");
     }
     std::error_code errorCode;
-    auto resolved = std::filesystem::weakly_canonical(Detail::pathFromUtf8Bytes(utf8Path), errorCode);
+    auto resolved = std::filesystem::weakly_canonical(Core::Detail::pathFromUtf8Bytes(utf8Path), errorCode);
     if (errorCode)
     {
         return Core::failure(Core::Error{Core::CoreErrorCode::Io,

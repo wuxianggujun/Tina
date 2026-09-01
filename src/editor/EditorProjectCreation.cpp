@@ -1,12 +1,13 @@
 #include <tina/editor/EditorProjectCreation.hpp>
 
+#include "core/io/PathUtil.hpp"
+
 #include <tina/core/text/Utf8.hpp>
 
 #include <algorithm>
 #include <cerrno>
 #include <cstdint>
 #include <filesystem>
-#include <limits>
 #include <new>
 #include <optional>
 #include <string>
@@ -53,46 +54,9 @@ namespace {
     return error;
 }
 
-[[nodiscard]] std::filesystem::path pathFromUtf8(std::string_view pathUtf8)
-{
-    const auto* first = reinterpret_cast<const char8_t*>(pathUtf8.data());
-    return std::filesystem::path{std::u8string(first, first + pathUtf8.size())};
-}
-
-[[nodiscard]] bool pathComponentEquals(const std::filesystem::path& left,
-                                       const std::filesystem::path& right) noexcept
-{
-#if defined(_WIN32)
-    const auto& leftText = left.native();
-    const auto& rightText = right.native();
-    if (leftText.size() != rightText.size() ||
-        leftText.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
-    {
-        return false;
-    }
-    return ::CompareStringOrdinal(leftText.data(), static_cast<int>(leftText.size()),
-                                  rightText.data(), static_cast<int>(rightText.size()),
-                                  TRUE) == CSTR_EQUAL;
-#else
-    return left == right;
-#endif
-}
-
-[[nodiscard]] bool pathIsSameOrDescendant(const std::filesystem::path& candidate,
-                                          const std::filesystem::path& ancestor) noexcept
-{
-    auto candidatePart = candidate.begin();
-    for (auto ancestorPart = ancestor.begin(); ancestorPart != ancestor.end();
-         ++ancestorPart, ++candidatePart)
-    {
-        if (candidatePart == candidate.end() ||
-            !pathComponentEquals(*candidatePart, *ancestorPart))
-        {
-            return false;
-        }
-    }
-    return true;
-}
+using Core::Detail::pathComponentEquals;
+using Core::Detail::pathFromUtf8Bytes;
+using Core::Detail::pathIsSameOrDescendant;
 
 [[nodiscard]] bool pathsEqual(const std::filesystem::path& left,
                               const std::filesystem::path& right) noexcept
@@ -226,7 +190,7 @@ captureDirectoryIdentity(const std::filesystem::path& path)
         return Core::failure(std::move(error));
     }
 
-    const auto path = pathFromUtf8(directoryUtf8);
+    const auto path = pathFromUtf8Bytes(directoryUtf8);
     if (path.is_absolute() || path.has_root_path() || path != path.filename() || path == "." ||
         path == "..")
     {
@@ -451,17 +415,17 @@ CreateNewEditorProject(EditorProjectCreationRequest request)
             return Core::failure(std::move(status.error()));
         }
 
-        if (pathComponentEquals(pathFromUtf8(request.sourceDirectoryUtf8),
-                                pathFromUtf8(request.cookedCatalogDirectoryUtf8)))
+        if (pathComponentEquals(pathFromUtf8Bytes(request.sourceDirectoryUtf8),
+                                pathFromUtf8Bytes(request.cookedCatalogDirectoryUtf8)))
         {
             return Core::failure(Core::CoreErrorCode::InvalidArgument,
                                  "Editor source and Cooked Catalog directory names must differ");
         }
 
-        const auto requestedRoot = pathFromUtf8(request.projectRootUtf8);
-        const auto sourceRoot = requestedRoot / pathFromUtf8(request.sourceDirectoryUtf8);
+        const auto requestedRoot = pathFromUtf8Bytes(request.projectRootUtf8);
+        const auto sourceRoot = requestedRoot / pathFromUtf8Bytes(request.sourceDirectoryUtf8);
         const auto catalogRoot = requestedRoot /
-                                 pathFromUtf8(request.cookedCatalogDirectoryUtf8);
+                                 pathFromUtf8Bytes(request.cookedCatalogDirectoryUtf8);
         const auto sourceRootUtf8 = sourceRoot.generic_u8string();
         const auto catalogRootUtf8 = catalogRoot.generic_u8string();
 
@@ -481,9 +445,9 @@ CreateNewEditorProject(EditorProjectCreationRequest request)
                                      .withContext("CreateNewEditorProject", "workspace"));
         }
 
-        const auto projectPath = pathFromUtf8(workspace->projectRootUtf8());
-        const auto sourcePath = pathFromUtf8(workspace->sourceRootUtf8());
-        const auto catalogPath = pathFromUtf8(workspace->cookedCatalogRootUtf8());
+        const auto projectPath = pathFromUtf8Bytes(workspace->projectRootUtf8());
+        const auto sourcePath = pathFromUtf8Bytes(workspace->sourceRootUtf8());
+        const auto catalogPath = pathFromUtf8Bytes(workspace->cookedCatalogRootUtf8());
 
         std::error_code statusError;
         const auto rootStatus = std::filesystem::symlink_status(projectPath, statusError);

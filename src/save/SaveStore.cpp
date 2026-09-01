@@ -1,6 +1,7 @@
 #include <tina/save/SaveStore.hpp>
 
 #include "SaveFormat.hpp"
+#include "core/io/PathUtil.hpp"
 
 #include <tina/core/base/ScopeExit.hpp>
 #include <tina/core/io/ReadFile.hpp>
@@ -134,22 +135,10 @@ struct OwnedSaveWriteRequest final {
     }
 };
 
-[[nodiscard]] std::filesystem::path pathFromUtf8(std::string_view pathUtf8)
-{
-    return std::filesystem::u8path(pathUtf8.begin(), pathUtf8.end());
-}
-
-[[nodiscard]] std::string pathToUtf8(const std::filesystem::path& path)
-{
-    const auto encoded = path.generic_u8string();
-    std::string result;
-    result.reserve(encoded.size());
-    for (const char8_t value : encoded)
-    {
-        result.push_back(static_cast<char>(value));
-    }
-    return result;
-}
+// Save roots are stored and later compared as text, so the generic ('/') encoder is the correct
+// one here; see the note on Core::Detail::pathToUtf8Generic.
+using Core::Detail::pathFromUtf8Bytes;
+using Core::Detail::pathToUtf8Generic;
 
 [[nodiscard]] std::string joinPath(std::string_view root, std::string_view leaf)
 {
@@ -219,7 +208,7 @@ template <typename Value, typename Work>
         return Core::failure(SaveErrorCode::InvalidConfiguration,
                              "save root must be non-empty strict UTF-8 without NUL");
     }
-    if (!pathFromUtf8(config.rootDirectoryUtf8).is_absolute())
+    if (!pathFromUtf8Bytes(config.rootDirectoryUtf8).is_absolute())
     {
         return Core::failure(SaveErrorCode::InvalidConfiguration,
                              "save root must be an absolute path");
@@ -631,7 +620,7 @@ template <typename Value, typename Work>
 [[nodiscard]] Core::Result<bool> removeFile(std::string_view path)
 {
     std::error_code errorCode;
-    const bool removed = std::filesystem::remove(pathFromUtf8(path), errorCode);
+    const bool removed = std::filesystem::remove(pathFromUtf8Bytes(path), errorCode);
     if (errorCode)
     {
         return Core::failure(filesystemError("failed to remove save file", path, errorCode));
@@ -875,8 +864,8 @@ try
     {
         return Core::failure(status.error());
     }
-    config.rootDirectoryUtf8 = pathToUtf8(
-        pathFromUtf8(config.rootDirectoryUtf8).lexically_normal());
+    config.rootDirectoryUtf8 = pathToUtf8Generic(
+        pathFromUtf8Bytes(config.rootDirectoryUtf8).lexically_normal());
     auto state = std::make_shared<Detail::SaveStoreState>(std::move(config));
     return std::unique_ptr<SaveStore>{new SaveStore{std::move(state)}};
 }

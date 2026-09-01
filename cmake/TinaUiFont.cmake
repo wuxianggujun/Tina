@@ -29,7 +29,7 @@ function(tina_resolve_ui_font_path out_var)
     set(${out_var} "${_path}" PARENT_SCOPE)
 endfunction()
 
-# Stages the resolved font beside the target executable as assets/ui-font.otf, which is
+# Stages the resolved font as assets/ui-font.otf, which is
 # Tina::Desktop::DefaultUiFontRelativePath. Keep the two in sync: the product resolves the
 # path at runtime, so a rename here silently produces font-less text rather than an error.
 #
@@ -40,11 +40,10 @@ function(tina_target_stage_ui_font target)
     if(_resolved STREQUAL "")
         return()
     endif()
-    add_custom_command(TARGET ${target} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${_resolved}"
-            "$<TARGET_FILE_DIR:${target}>/assets/ui-font.otf"
-    )
+    # Goes through tina_product_data_file() so the font reaches an installed game too.
+    # Staging it into the build tree alone is what made the sample look correct here
+    # while every installed copy fell back to placeholder text.
+    tina_product_data_file(${target} "${_resolved}" "assets/ui-font.otf")
 endfunction()
 
 # Adds PRIVATE compile definitions when a font path is available:

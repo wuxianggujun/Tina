@@ -43,5 +43,8 @@ ADR 记录处于提议、接受、被替代或拒绝状态的架构决定。主�
 | [0036](0036-gameplay-tooling-boundaries.md) | Accepted | `Tina::Gameplay` 只依赖 Core+Math 提供 timer/tween/sequence 与 `Signal<T>`；delta 由调用方给、余量携带而积压丢弃并计数、重入返回 `ReentrantDispatch`；tween 写目标是 setter 回调而非 Scene 属性枚举 |
 | [0037](0037-animation3d-graph-boundaries.md) | Accepted | `Tina::Animation3D` 在 `Animator3D` 旁建立 pose 图：local-space pose、crossfade/状态机/blend tree/layer+mask/root motion/两骨 IK；SkinnedMesh wire 提到 v2 加骨骼名称，因 cooked joint index 是不可反推的排列 |
 
+| [0039](0039-logging-frontend-and-async-sinks.md) | Accepted | 日志前端按编译期常量剥离且不用 `__VA_OPT__`；`LogRecord` 自持 256B 内联缓冲以支持异步；单 drain 线程 + 有界队列丢弃最新并计数；Error 及以上同步 flush（149 处 `std::terminate()`）；console/file/platform 三 sink 叠加。实测：异步只在 sink 够慢时才更快 |
+| [0040](0040-path-util-single-ordinal-semantics.md) | Accepted | 路径包含判定统一为序数折叠（Windows 用 `CompareStringOrdinal`，与 NTFS 一致），取代逐 `wchar_t` 的 `towlower`（locale 敏感、无法折叠代理对）；`PathUtil.hpp` 留在 `src/` 私有，因 `<filesystem>` 不进公共 SDK 面；三处刻意不统一：大小写敏感比较、`.tmeta` 持久化的 towlower 变换、Windows 保留设备名检查 |
+
 新增 ADR 从 [模板](0000-template.md) 复制。替代旧决定时新建 ADR，并把旧记录状态改为
 Superseded 和链接新编号；不要改写历史理由。

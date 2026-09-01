@@ -1,6 +1,6 @@
 #include <tina/asset/CatalogPackageValidation.hpp>
 
-#include "Utf8Path.hpp"
+#include "core/io/PathUtil.hpp"
 
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/AssetTypedViews.hpp>
@@ -40,18 +40,6 @@ namespace {
     return error;
 }
 
-[[nodiscard]] bool hasPathEscapeComponent(const std::filesystem::path& relative) noexcept
-{
-    for (const auto& part : relative)
-    {
-        if (part == "..")
-        {
-            return true;
-        }
-    }
-    return false;
-}
-
 [[nodiscard]] Core::Result<std::string> resolveObjectPath(std::string_view catalogRootUtf8,
                                                           const CatalogEntry& entry)
 {
@@ -62,9 +50,9 @@ namespace {
             std::move(artifactPath.error()).withContext("validateCatalogPackageOnDisk", "makeCookedArtifactPath"));
     }
 
-    const auto root = Detail::pathFromUtf8Bytes(catalogRootUtf8);
-    const auto relative = Detail::pathFromUtf8Bytes(artifactPath->view());
-    if (relative.is_absolute() || hasPathEscapeComponent(relative))
+    const auto root = Core::Detail::pathFromUtf8Bytes(catalogRootUtf8);
+    const auto relative = Core::Detail::pathFromUtf8Bytes(artifactPath->view());
+    if (relative.is_absolute() || Core::Detail::pathHasParentComponent(relative))
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "artifact relative path is not safe");
     }
@@ -82,7 +70,7 @@ namespace {
     }
 
     std::error_code errorCode;
-    const auto path = Detail::pathFromUtf8Bytes(utf8Path);
+    const auto path = Core::Detail::pathFromUtf8Bytes(utf8Path);
     const auto status = std::filesystem::status(path, errorCode);
     if (errorCode)
     {

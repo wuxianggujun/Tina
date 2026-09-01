@@ -4,6 +4,7 @@
 // validated World2D and World3D authoring documents and Scene GPU previews.
 
 #include "EditorAnimationPreview.hpp"
+#include "core/io/PathUtil.hpp"
 #include "EditorCompositeImageResolver.hpp"
 #include "EditorFileDialog.hpp"
 #include "EditorIconResources.hpp"
@@ -37,6 +38,7 @@
 #include <tina/core/error/Error.hpp>
 #include <tina/core/io/ReadFile.hpp>
 #include <tina/core/io/WriteFile.hpp>
+#include <tina/core/text/JsonWriter.hpp>
 #include <tina/core/text/Utf8.hpp>
 #include <tina/desktop/DesktopEngine.hpp>
 #include <tina/editor/EditorNodePropertyOperations.hpp>
@@ -334,7 +336,13 @@ enum class WorkspacePanelKind : u8 {
     Inspector,
 };
 
-[[nodiscard]] inline std::string pathToUtf8(const std::filesystem::path& path);
+// Path helpers come from the one shared definition; see src/core/io/PathUtil.hpp and ADR 0040.
+// These were four inline copies here, and the Windows spelling disagreed with the asset
+// pipeline's, so the editor and the cooker could reach opposite verdicts on the same pair.
+using Tina::Core::Detail::pathComponentEquals;
+using Tina::Core::Detail::pathIsSameOrDescendant;
+using Tina::Core::Detail::pathsReferToSameLocation;
+using Tina::Core::Detail::pathToUtf8;
 
 struct EditorAssetMetadataRecord final {
     Tina::Core::AssetId assetId{};
@@ -755,48 +763,7 @@ class EditorRenderDeviceAccess final {
   private:
     Tina::Render::IRenderDevice* device_ = nullptr;
 };
-[[nodiscard]] inline std::string pathToUtf8(const std::filesystem::path& path)
-{
-    const std::u8string encoded = path.u8string();
-    return {reinterpret_cast<const char*>(encoded.data()), encoded.size()};
-}
 [[nodiscard]] constexpr Tina::AssetFormat::TargetPlatform editorTargetPlatform() noexcept;
-[[nodiscard]] inline bool pathComponentEquals(const std::filesystem::path& left,
-                                       const std::filesystem::path& right) noexcept
-{
-#if defined(_WIN32)
-    const auto& leftText = left.native();
-    const auto& rightText = right.native();
-    if (leftText.size() != rightText.size() ||
-        leftText.size() > static_cast<std::size_t>((std::numeric_limits<int>::max)())) {
-        return false;
-    }
-    return ::CompareStringOrdinal(leftText.data(), static_cast<int>(leftText.size()),
-                                  rightText.data(), static_cast<int>(rightText.size()),
-                                  TRUE) == CSTR_EQUAL;
-#else
-    return left == right;
-#endif
-}
-[[nodiscard]] inline bool pathIsSameOrDescendant(const std::filesystem::path& candidate,
-                                          const std::filesystem::path& ancestor) noexcept
-{
-    auto candidatePart = candidate.begin();
-    for (auto ancestorPart = ancestor.begin(); ancestorPart != ancestor.end();
-         ++ancestorPart, ++candidatePart) {
-        if (candidatePart == candidate.end() ||
-            !pathComponentEquals(*candidatePart, *ancestorPart)) {
-            return false;
-        }
-    }
-    return true;
-}
-[[nodiscard]] inline bool pathsReferToSameLocation(const std::filesystem::path& left,
-                                            const std::filesystem::path& right) noexcept
-{
-    return pathIsSameOrDescendant(left, right) &&
-           pathIsSameOrDescendant(right, left);
-}
 [[nodiscard]] inline Tina::Core::Status validatePhysicalProjectDirectory(
     const std::filesystem::path& path, std::string_view label)
 {
@@ -2323,44 +2290,6 @@ enum class EditorCommand : u32 {
     }
     return false;
 }
-inline void writeJsonString(std::ostream& output, std::string_view value)
-{
-    constexpr char Hexadecimal[] = "0123456789abcdef";
-    output.put('"');
-    for (const unsigned char byte : value) {
-        switch (byte) {
-        case '"':
-            output << "\\\"";
-            break;
-        case '\\':
-            output << "\\\\";
-            break;
-        case '\b':
-            output << "\\b";
-            break;
-        case '\f':
-            output << "\\f";
-            break;
-        case '\n':
-            output << "\\n";
-            break;
-        case '\r':
-            output << "\\r";
-            break;
-        case '\t':
-            output << "\\t";
-            break;
-        default:
-            if (byte < 0x20U) {
-                output << "\\u00" << Hexadecimal[byte >> 4U] << Hexadecimal[byte & 0x0FU];
-            } else {
-                output.put(static_cast<char>(byte));
-            }
-            break;
-        }
-    }
-    output.put('"');
-}
 // Absolute path of the diagnostic report shared with the crash handler. A single
 // file keeps "the window vanished" answerable regardless of which of the two
 // paths ended the process.
@@ -2377,11 +2306,17 @@ inline void writeJsonString(std::ostream& output, std::string_view value)
 
 inline void writeError(const Tina::Core::Error& error)
 {
-    std::cerr << "{\"status\":\"error\",\"application\":\"TinaEditor\",\"domain\":"
-              << static_cast<std::uint16_t>(error.code.domain) << ",\"code\":" << error.code.value
-              << ",\"message\":";
-    writeJsonString(std::cerr, error.message);
-    std::cerr << "}\n";
+    {
+        Tina::Core::JsonWriter writer(std::cerr);
+        writer.beginObject();
+        writer.member("status", "error");
+        writer.member("application", "TinaEditor");
+        writer.member("domain", static_cast<std::uint16_t>(error.code.domain));
+        writer.member("code", error.code.value);
+        writer.member("message", error.message);
+        writer.endObject();
+    }
+    std::cerr << '\n';
 
     // TinaEditor is a GUI-subsystem binary, so the stderr line above is invisible
     // in normal use: a fatal error looked exactly like a crash or a clean exit.
@@ -2411,8 +2346,14 @@ inline void writeError(const Tina::Core::Error& error)
         report << "\n    at " << entry.location.file_name() << '(' << entry.location.line()
                << ") in " << entry.location.function_name() << '\n';
     }
-    report << "{\"status\":\"fatal\",\"code\":" << error.code.value << "}\n"
-           << "==== end Tina fatal error ====\n";
+    {
+        Tina::Core::JsonWriter writer(report);
+        writer.beginObject();
+        writer.member("status", "fatal");
+        writer.member("code", error.code.value);
+        writer.endObject();
+    }
+    report << '\n' << "==== end Tina fatal error ====\n";
 }
 template <typename Value>
 [[nodiscard]] bool parseUnsigned(std::string_view text, Value& value) noexcept
@@ -2535,15 +2476,6 @@ parseInspectorTransformValue(std::string_view text, std::string_view fieldName)
 }
 [[nodiscard]] inline Tina::Core::Result<EditorLaunchOptions> parseOptions(int argumentCount, char** arguments)
 {
-    constexpr std::string_view FramesPrefix = "--frames=";
-    constexpr std::string_view DelayPrefix = "--frame-delay-ms=";
-    constexpr std::string_view World2DPathPrefix = "--world2d-path=";
-    constexpr std::string_view World3DPathPrefix = "--world3d-path=";
-    constexpr std::string_view CatalogRootPrefix = "--catalog-root=";
-    constexpr std::string_view RgbaOutputPrefix = "--rgba-output=";
-    constexpr std::string_view RgbaStagePrefix = "--rgba-stage=";
-    constexpr std::string_view WorkspacePrefix = "--workspace=";
-
     EditorLaunchOptions options{};
     bool hasFrames = false;
     bool hasDelay = false;
@@ -2556,55 +2488,53 @@ parseInspectorTransformValue(std::string_view text, std::string_view fieldName)
     bool hasAutoDemo = false;
     bool hasProfileUi = false;
     bool hasProfileUiLayoutDrag = false;
-    for (int index = 1; index < argumentCount; ++index) {
-        const std::string_view argument{arguments[index]};
+    Tina::Core::ArgScanner scanner(argumentCount, arguments);
+    while (scanner.next()) {
         auto sourceImportOption =
-            Tina::EditorApp::Detail::parseEditorSourceImportLaunchOption(
-                argument, options.sourceImport);
+            Tina::EditorApp::Detail::parseEditorSourceImportLaunchOption(scanner,
+                                                                        options.sourceImport);
         if (!sourceImportOption) {
             return Tina::Core::failure(std::move(sourceImportOption.error()));
         }
         if (*sourceImportOption) {
             continue;
         }
-        if (argument.starts_with(FramesPrefix)) {
+        if (const auto value = scanner.value("--frames")) {
             if (hasFrames) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                            "Duplicate --frames argument");
             }
-            const std::string_view value = argument.substr(FramesPrefix.size());
-            if (!parseUnsigned(value, options.targetFrameCount) || options.targetFrameCount == 0) {
+            if (!Tina::Core::parseArgUnsigned(*value, options.targetFrameCount)
+                || options.targetFrameCount == 0) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                            "--frames must be an unsigned integer greater than zero");
             }
             hasFrames = true;
             continue;
         }
-        if (argument.starts_with(DelayPrefix)) {
+        if (const auto value = scanner.value("--frame-delay-ms")) {
             if (hasDelay) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                            "Duplicate --frame-delay-ms argument");
             }
-            const std::string_view value = argument.substr(DelayPrefix.size());
-            if (!parseUnsigned(value, options.frameDelayMilliseconds)) {
+            if (!Tina::Core::parseArgUnsigned(*value, options.frameDelayMilliseconds)) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                            "--frame-delay-ms must be an unsigned integer");
             }
             hasDelay = true;
             continue;
         }
-        if (argument.starts_with(World2DPathPrefix)) {
+        if (const auto value = scanner.value("--world2d-path")) {
             if (hasWorld2DPath) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                            "Duplicate --world2d-path argument");
             }
-            const std::string_view value = argument.substr(World2DPathPrefix.size());
-            if (value.empty()) {
+            if (value->empty()) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                            "--world2d-path must not be empty");
             }
             try {
-                options.world2DDocumentPathUtf8.assign(value);
+                options.world2DDocumentPathUtf8.assign(*value);
             } catch (const std::bad_alloc&) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
                                            "Could not retain --world2d-path");
@@ -2612,18 +2542,17 @@ parseInspectorTransformValue(std::string_view text, std::string_view fieldName)
             hasWorld2DPath = true;
             continue;
         }
-        if (argument.starts_with(World3DPathPrefix)) {
+        if (const auto value = scanner.value("--world3d-path")) {
             if (hasWorld3DPath) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                            "Duplicate --world3d-path argument");
             }
-            const std::string_view value = argument.substr(World3DPathPrefix.size());
-            if (value.empty()) {
+            if (value->empty()) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                            "--world3d-path must not be empty");
             }
             try {
-                options.world3DDocumentPathUtf8.assign(value);
+                options.world3DDocumentPathUtf8.assign(*value);
             } catch (const std::bad_alloc&) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
                                            "Could not retain --world3d-path");
@@ -2631,18 +2560,17 @@ parseInspectorTransformValue(std::string_view text, std::string_view fieldName)
             hasWorld3DPath = true;
             continue;
         }
-        if (argument.starts_with(CatalogRootPrefix)) {
+        if (const auto value = scanner.value("--catalog-root")) {
             if (hasCatalogRoot) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                            "Duplicate --catalog-root argument");
             }
-            const std::string_view value = argument.substr(CatalogRootPrefix.size());
-            if (value.empty()) {
+            if (value->empty()) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                            "--catalog-root must not be empty");
             }
             try {
-                options.catalogRootUtf8.assign(value);
+                options.catalogRootUtf8.assign(*value);
             } catch (const std::bad_alloc&) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
                                            "Could not retain --catalog-root");
@@ -2650,20 +2578,19 @@ parseInspectorTransformValue(std::string_view text, std::string_view fieldName)
             hasCatalogRoot = true;
             continue;
         }
-        if (argument.starts_with(RgbaOutputPrefix)) {
+        if (const auto value = scanner.value("--rgba-output")) {
             if (hasRgbaOutput) {
                 return Tina::Core::failure(
                     Tina::Core::CoreErrorCode::InvalidArgument,
                     "Duplicate --rgba-output argument");
             }
-            const std::string_view value = argument.substr(RgbaOutputPrefix.size());
-            if (value.empty() || !Tina::Core::isStrictUtf8WithoutNul(value)) {
+            if (value->empty() || !Tina::Core::isStrictUtf8WithoutNul(*value)) {
                 return Tina::Core::failure(
                     Tina::Core::CoreErrorCode::InvalidArgument,
                     "--rgba-output must be a non-empty strict UTF-8 path");
             }
             try {
-                options.rgbaOutputUtf8.assign(value);
+                options.rgbaOutputUtf8.assign(*value);
             } catch (const std::bad_alloc&) {
                 return Tina::Core::failure(
                     Tina::Core::CoreErrorCode::OutOfMemory,
@@ -2672,18 +2599,17 @@ parseInspectorTransformValue(std::string_view text, std::string_view fieldName)
             hasRgbaOutput = true;
             continue;
         }
-        if (argument.starts_with(RgbaStagePrefix)) {
+        if (const auto value = scanner.value("--rgba-stage")) {
             if (hasRgbaStage) {
                 return Tina::Core::failure(
                     Tina::Core::CoreErrorCode::InvalidArgument,
                     "Duplicate --rgba-stage argument");
             }
-            const std::string_view value = argument.substr(RgbaStagePrefix.size());
-            if (value == "workspace") {
+            if (*value == "workspace") {
                 options.rgbaStage = RgbaCaptureStage::Workspace;
-            } else if (value == "color-picker") {
+            } else if (*value == "color-picker") {
                 options.rgbaStage = RgbaCaptureStage::ColorPicker;
-            } else if (value == "delete-dialog") {
+            } else if (*value == "delete-dialog") {
                 options.rgbaStage = RgbaCaptureStage::DeleteDialog;
             } else {
                 return Tina::Core::failure(
@@ -2693,15 +2619,14 @@ parseInspectorTransformValue(std::string_view text, std::string_view fieldName)
             hasRgbaStage = true;
             continue;
         }
-        if (argument.starts_with(WorkspacePrefix)) {
+        if (const auto value = scanner.value("--workspace")) {
             if (hasWorkspace) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                            "Duplicate --workspace argument");
             }
-            const std::string_view value = argument.substr(WorkspacePrefix.size());
-            if (value == "2d") {
+            if (*value == "2d") {
                 options.initialWorkspace = WorkspaceMode::World2D;
-            } else if (value == "3d") {
+            } else if (*value == "3d") {
                 options.initialWorkspace = WorkspaceMode::World3D;
             } else {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
@@ -2710,7 +2635,7 @@ parseInspectorTransformValue(std::string_view text, std::string_view fieldName)
             hasWorkspace = true;
             continue;
         }
-        if (argument == "--auto-demo") {
+        if (scanner.flag("--auto-demo")) {
             if (hasAutoDemo) {
                 return Tina::Core::failure(
                     Tina::Core::CoreErrorCode::InvalidArgument,
@@ -2720,7 +2645,7 @@ parseInspectorTransformValue(std::string_view text, std::string_view fieldName)
             hasAutoDemo = true;
             continue;
         }
-        if (argument == "--profile-ui") {
+        if (scanner.flag("--profile-ui")) {
             if (hasProfileUi) {
                 return Tina::Core::failure(
                     Tina::Core::CoreErrorCode::InvalidArgument,
@@ -2730,7 +2655,7 @@ parseInspectorTransformValue(std::string_view text, std::string_view fieldName)
             hasProfileUi = true;
             continue;
         }
-        if (argument == "--profile-ui-layout-drag") {
+        if (scanner.flag("--profile-ui-layout-drag")) {
             if (hasProfileUiLayoutDrag) {
                 return Tina::Core::failure(
                     Tina::Core::CoreErrorCode::InvalidArgument,
@@ -2740,6 +2665,12 @@ parseInspectorTransformValue(std::string_view text, std::string_view fieldName)
             options.profileUiLayoutDrag = true;
             hasProfileUiLayoutDrag = true;
             continue;
+        }
+        // An option that appeared without its value also reaches here, so it has to be told apart
+        // from a genuinely unknown one before the generic message is returned.
+        if (scanner.failed()) {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                       "Command-line option is missing its value");
         }
         return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                    "Unsupported command-line argument");

@@ -1,4 +1,5 @@
 #include <tina/core/error/Error.hpp>
+#include <tina/core/text/JsonWriter.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 #include <tina/platform/headless/HeadlessPlatformFactory.hpp>
 #include <tina/render/null/NullRenderDeviceFactory.hpp>
@@ -88,70 +89,27 @@ class NullGameApplication final : public Tina::IGameApplication {
     LifecycleCounters& m_counters;
 };
 
-void writeJsonString(std::ostream& output, std::string_view value)
-{
-    constexpr char hexadecimal[] = "0123456789abcdef";
-    output.put('"');
-    for (const unsigned char byte : value)
-    {
-        switch (byte)
-        {
-        case '"':
-            output << "\\\"";
-            break;
-        case '\\':
-            output << "\\\\";
-            break;
-        case '\b':
-            output << "\\b";
-            break;
-        case '\f':
-            output << "\\f";
-            break;
-        case '\n':
-            output << "\\n";
-            break;
-        case '\r':
-            output << "\\r";
-            break;
-        case '\t':
-            output << "\\t";
-            break;
-        default:
-            if (byte < 0x20U)
-            {
-                output << "\\u00" << hexadecimal[byte >> 4U] << hexadecimal[byte & 0x0FU];
-            } else
-            {
-                output.put(static_cast<char>(byte));
-            }
-            break;
-        }
-    }
-    output.put('"');
-}
-
 void writeError(const Tina::Core::Error& error)
 {
-    std::cerr << "{\"status\":\"error\",\"code\":{\"domain\":" << static_cast<std::uint16_t>(error.code.domain)
-              << ",\"value\":" << error.code.value << "},\"message\":";
-    writeJsonString(std::cerr, error.message);
-    std::cerr << ",\"context\":[";
-    bool firstContext = true;
+    Tina::Core::JsonWriter writer(std::cerr);
+    writer.beginObject();
+    writer.member("status", "error");
+    writer.beginObjectMember("code");
+    writer.member("domain", static_cast<std::uint16_t>(error.code.domain));
+    writer.member("value", error.code.value);
+    writer.endObject();
+    writer.member("message", error.message);
+    writer.beginArrayMember("context");
     for (const Tina::Core::ErrorContext& context : error.context)
     {
-        if (!firstContext)
-        {
-            std::cerr.put(',');
-        }
-        firstContext = false;
-        std::cerr << "{\"operation\":";
-        writeJsonString(std::cerr, context.operation);
-        std::cerr << ",\"detail\":";
-        writeJsonString(std::cerr, context.detail);
-        std::cerr.put('}');
+        writer.beginObjectElement();
+        writer.member("operation", context.operation);
+        writer.member("detail", context.detail);
+        writer.endObject();
     }
-    std::cerr << "]}\n";
+    writer.endArray();
+    writer.endObject();
+    std::cerr << '\n';
 }
 
 [[nodiscard]] Tina::Core::Result<u64> parseTargetFrameCount(int argumentCount, char** arguments)
@@ -258,8 +216,17 @@ int main(int argumentCount, char** arguments)
         return 1;
     }
 
-    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_null\",\"frames\":" << counters.frameUpdates
-              << ",\"exit\":\"GameRequestedExitAfterCurrentFrame\",\"stateExits\":" << counters.stateExits
-              << ",\"applicationShutdowns\":" << counters.applicationShutdowns << "}\n";
+    {
+        Tina::Core::JsonWriter writer(std::cout);
+        writer.beginObject();
+        writer.member("status", "ok");
+        writer.member("sample", "tina_sample_null");
+        writer.member("frames", counters.frameUpdates);
+        writer.member("exit", "GameRequestedExitAfterCurrentFrame");
+        writer.member("stateExits", counters.stateExits);
+        writer.member("applicationShutdowns", counters.applicationShutdowns);
+        writer.endObject();
+    }
+    std::cout << '\n';
     return 0;
 }

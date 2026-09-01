@@ -18,6 +18,8 @@
 #include <tina/core/hash/ContentHash.hpp>
 #include <tina/core/hash/ContentHashDigest.hpp>
 #include <tina/core/id/AssetId.hpp>
+#include <tina/core/io/ApplicationPaths.hpp>
+#include <tina/core/text/JsonWriter.hpp>
 #include <tina/desktop/DesktopEngine.hpp>
 #include <tina/render/RenderDevice.hpp>
 #include <tina/render/RenderScene.hpp>
@@ -440,7 +442,7 @@ struct Product3DResources final {
     return std::span<const unsigned char>{kPng, sizeof(kPng)};
 }
 
-// Fallback only when TINA_COMPLETE_PBR_GLTF_FIXTURE is not compiled in (minimal two-mesh + baseColor).
+// Fallback only when the complete PBR fixture is not staged (minimal two-mesh + baseColor).
 [[nodiscard]] std::string_view productTwoMeshGltfJsonFallback() noexcept
 {
     return R"json({
@@ -618,35 +620,20 @@ struct Product3DResources final {
     return Tina::Core::success();
 }
 
-#if defined(TINA_COMPLETE_PBR_GLTF_FIXTURE)
+// Staged beside the executable by tina_product_data_file(), so the build tree and an
+// installed copy resolve it the same way. Absence is not an error: the caller falls back
+// to the generated two-mesh document, which is what a build without the repo fixture got
+// when this path was a compile-time definition.
 [[nodiscard]] bool tryResolveCompletePbrFixture(std::filesystem::path& outPath) noexcept
 {
-    std::error_code ec;
-    outPath = std::filesystem::path{TINA_COMPLETE_PBR_GLTF_FIXTURE};
-    return std::filesystem::exists(outPath, ec) && !ec;
-}
-#endif
-
-void writeJsonString(std::ostream& output, std::string_view value)
-{
-    output.put('"');
-    for (const unsigned char byte : value)
+    auto resolved = Tina::Core::applicationFilePath("assets/complete_pbr/complete_pbr.gltf");
+    if (!resolved)
     {
-        if (byte == '"' || byte == '\\')
-        {
-            output.put('\\');
-            output.put(static_cast<char>(byte));
-        }
-        else if (byte == '\n')
-        {
-            output << "\\n";
-        }
-        else if (byte >= 0x20U)
-        {
-            output.put(static_cast<char>(byte));
-        }
+        return false;
     }
-    output.put('"');
+    std::error_code ec;
+    outPath = std::filesystem::path{*resolved};
+    return std::filesystem::exists(outPath, ec) && !ec;
 }
 
 [[nodiscard]] std::string errorCodeName(Tina::Core::ErrorCode code)
@@ -656,28 +643,28 @@ void writeJsonString(std::ostream& output, std::string_view value)
 
 void writeError(const Tina::Core::Error& error)
 {
-    std::cerr << "{\"status\":\"error\",\"sample\":\"tina_sample_3d\",\"code\":";
-    writeJsonString(std::cerr, errorCodeName(error.code));
-    std::cerr << ",\"message\":";
-    writeJsonString(std::cerr, error.message);
-    if (!error.context.empty())
     {
-        std::cerr << ",\"context\":[";
-        for (std::size_t index = 0; index < error.context.size(); ++index)
+        Tina::Core::JsonWriter writer(std::cerr);
+        writer.beginObject();
+        writer.member("status", "error");
+        writer.member("sample", "tina_sample_3d");
+        writer.member("code", errorCodeName(error.code));
+        writer.member("message", error.message);
+        if (!error.context.empty())
         {
-            if (index != 0)
+            writer.beginArrayMember("context");
+            for (const Tina::Core::ErrorContext& context : error.context)
             {
-                std::cerr << ',';
+                writer.beginObjectElement();
+                writer.member("operation", context.operation);
+                writer.member("detail", context.detail);
+                writer.endObject();
             }
-            std::cerr << "{\"operation\":";
-            writeJsonString(std::cerr, error.context[index].operation);
-            std::cerr << ",\"detail\":";
-            writeJsonString(std::cerr, error.context[index].detail);
-            std::cerr << '}';
+            writer.endArray();
         }
-        std::cerr << ']';
+        writer.endObject();
     }
-    std::cerr << "}\n";
+    std::cerr << '\n';
 }
 
 void printUsage()
@@ -927,9 +914,13 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
     return options;
 }
 
+// path::string() is the active narrow code page on Windows, not UTF-8, and it is lossy for
+// non-ASCII. The asset API this feeds expects UTF-8. Separators are left native so the paths this
+// prints keep their current form.
 [[nodiscard]] std::string toUtf8(const std::filesystem::path& path)
 {
-    return path.string();
+    const std::u8string encoded = path.u8string();
+    return {reinterpret_cast<const char*>(encoded.data()), encoded.size()};
 }
 
 // Stable product AssetIds (16-bit slot index in bytes[14..15], no 8-bit wrap).
@@ -1020,13 +1011,11 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
             return Tina::Core::failure(std::move(error));
         }
     }
-#if defined(TINA_COMPLETE_PBR_GLTF_FIXTURE)
     else if (tryResolveCompletePbrFixture(gltfPath))
     {
         resources.completePbrFixture = true;
         resources.gltfSourcePath = toUtf8(gltfPath);
     }
-#endif
     else
     {
         if (auto status = writeFallbackGltfFixture(resources.workRoot, gltfPath); !status)
@@ -3249,387 +3238,349 @@ class Product3DApplication final : public Tina::IGameApplication {
         (sceneRgbOutputRequested && !counters.sceneRgbOutputWritten) ||
         !pixelGoldenMatched)
     {
-        std::cerr << "{\"status\":\"error\",\"sample\":\"tina_sample_3d\",\"evidenceSchema\":16,"
-                     "\"message\":\"lifecycle counters did not match\","
-                     "\"frames\":"
-                  << counters.frameUpdates << ",\"meshesUploaded\":" << counters.meshesUploaded
-                  << ",\"tangentMeshesUploaded\":" << tangentMeshesUploaded
-                  << ",\"skinnedMeshesUploaded\":" << skinnedMeshesUploaded
-                  << ",\"uploadedSkinnedJointCount\":" << capture.uploadedSkinnedJointCount()
-                  << ",\"animatorJointCount\":" << counters.animatorJointCount
-                  << ",\"animatorUpdates\":" << counters.animatorUpdates
-                  << ",\"animatorPoseChanges\":" << counters.animatorPoseChanges
-                  << ",\"submittedSkinnedMesh3DFrames\":" << submittedSkinnedMesh3DFrames
-                  << ",\"submittedSkinnedMesh3DCount\":" << submittedSkinnedMesh3DCount
-                  << ",\"visibleSkinnedMesh3DCount\":" << visibleSkinnedMesh3DCount
-                  << ",\"submittedSkinnedPaletteJointCount\":"
-                  << submittedSkinnedPaletteJointCount
-                  << ",\"firstSubmittedSkinnedPoseFingerprint\":"
-                  << firstSubmittedSkinnedPoseFingerprint
-                  << ",\"submittedSkinnedPoseFingerprint\":"
-                  << submittedSkinnedPoseFingerprint
-                  << ",\"submittedSkinnedPoseFingerprintChanges\":"
-                  << submittedSkinnedPoseFingerprintChanges
-                  << ",\"materialsLoaded\":" << counters.materialsLoaded
-                  << ",\"meshAssetHandlesPublished\":" << counters.meshAssetHandlesPublished
-                  << ",\"materialAssetHandlesPublished\":" << counters.materialAssetHandlesPublished
-                  << ",\"meshBindingsRegistered\":" << counters.meshBindingsRegistered
-                  << ",\"materialBindingsRegistered\":" << counters.materialBindingsRegistered
-                  << ",\"meshBindingsReleased\":" << counters.meshBindingsReleased
-                  << ",\"materialBindingsReleased\":" << counters.materialBindingsReleased
-                  << ",\"meshRetirementsAccepted\":" << counters.meshRetirementsAccepted
-                  << ",\"textureRetirementsAccepted\":" << counters.textureRetirementsAccepted
-                  << ",\"meshRetirementRecords\":" << counters.meshRetirementRecords
-                  << ",\"textureRetirementRecords\":" << counters.textureRetirementRecords
-                  << ",\"meshRetirementReleased\":" << counters.meshRetirementReleased
-                  << ",\"textureRetirementReleased\":" << counters.textureRetirementReleased
-                  << ",\"retirementRecordsLive\":" << counters.retirementRecordsLive
-                  << ",\"meshAssetHandlesInvalidated\":" << counters.meshAssetHandlesInvalidated
-                  << ",\"materialAssetHandlesInvalidated\":" << counters.materialAssetHandlesInvalidated
-                  << ",\"textureAssetHandlesInvalidated\":" << counters.textureAssetHandlesInvalidated
-                  << ",\"animationClipAssetHandlesPublished\":"
-                  << counters.animationClipAssetHandlesPublished
-                  << ",\"animationClipAssetHandlesInvalidated\":"
-                  << counters.animationClipAssetHandlesInvalidated
-                  << ",\"skinnedPrefabAssetHandlesPublished\":"
-                  << counters.skinnedPrefabAssetHandlesPublished
-                  << ",\"skinnedPrefabAssetHandlesInvalidated\":"
-                  << counters.skinnedPrefabAssetHandlesInvalidated
-                  << ",\"meshFrameResourceResolverHits\":" << counters.meshFrameResourceResolverHits
-                  << ",\"skinnedMeshFrameResourceResolverHits\":"
-                  << counters.skinnedMeshFrameResourceResolverHits
-                  << ",\"skinnedPoseProviderHits\":" << counters.skinnedPoseProviderHits
-                  << ",\"materialFrameResourceResolverHits\":" << counters.materialFrameResourceResolverHits
-                  << ",\"assetStoreActiveCount\":" << assetStoreActiveCount
-                  << ",\"prefabAssetResident\":" << (prefabAssetResident ? "true" : "false")
-                  << ",\"texturesUploaded\":" << counters.texturesUploaded
-                  << ",\"cookedEnvironmentMap\":"
-                  << (counters.cookedEnvironmentMap ? "true" : "false")
-                  << ",\"environmentMapsUploaded\":" << environmentMapsUploaded
-                  << ",\"imageBasedLightingMode\":\""
-                  << imageBasedLightingModeName(options.imageBasedLightingMode) << "\""
-                  << ",\"pointLightShadowMode\":\""
-                  << pointLightShadowModeName(options.pointLightShadowMode) << "\""
-                  << ",\"skinAnimationMode\":\""
-                  << skinAnimationModeName(options.skinAnimationMode) << "\""
-                  << ",\"transparencyMode\":\""
-                  << transparencyModeName(options.transparencyMode) << "\""
-                  << ",\"blendMaterialCount\":" << resources.blendMaterialCount
-                  << ",\"authoredTransparentStaticWitnessCount\":"
-                  << counters.authoredTransparentStaticWitnessCount
-                  << ",\"transparentWitnessMaterialBound\":"
-                  << (counters.transparentWitnessMaterialBound ? "true" : "false")
-                  << ",\"submittedTransparent3DFrames\":" << submittedTransparent3DFrames
-                  << ",\"submittedTransparentStaticMesh3DCount\":"
-                  << submittedTransparentStaticMesh3DCount
-                  << ",\"submittedTransparentSkinnedMesh3DCount\":"
-                  << submittedTransparentSkinnedMesh3DCount
-                  << ",\"submittedTransparent3DDrawCount\":"
-                  << submittedTransparent3DDrawCount
-                  << ",\"submittedTransparent3DSortOrderChecksum\":"
-                  << submittedTransparent3DSortOrderChecksum
-                  << ",\"transparent3DSortOrderStable\":"
-                  << (transparent3DSortOrderStable ? "true" : "false")
-                  << ",\"imageBasedLightingConfigured\":"
-                  << (counters.imageBasedLightingConfigured ? "true" : "false")
-                  << ",\"imageBasedLightingBindings\":" << imageBasedLightingBindings
-                  << ",\"imageBasedLightingClears\":" << imageBasedLightingClears
-                  << ",\"environmentMapRetirementsAccepted\":" << environmentMapRetirements
-                  << ",\"environmentMapDiffuseFaceSize\":"
-                  << capture.environmentDiffuseFaceSize()
-                  << ",\"environmentMapSpecularFaceSize\":"
-                  << capture.environmentSpecularFaceSize()
-                  << ",\"environmentMapSpecularMipCount\":"
-                  << capture.environmentSpecularMipCount()
-                  << ",\"environmentMapBrdfWidth\":" << capture.environmentBrdfWidth()
-                  << ",\"environmentMapBrdfHeight\":" << capture.environmentBrdfHeight()
-                  << ",\"meshBound\":" << (counters.meshBound ? "true" : "false")
-                  << ",\"materialTextureBound\":" << (counters.materialTextureBound ? "true" : "false")
-                  << ",\"lightingConfigured\":" << (counters.lightingConfigured ? "true" : "false")
-                  << ",\"directionalLightCount\":" << counters.directionalLightCount
-                  << ",\"cascadedDirectionalShadowCount\":"
-                  << counters.cascadedDirectionalShadowCount
-                  << ",\"submittedCascadedDirectionalShadowCount\":"
-                  << submittedCascadedDirectionalShadowCount
-                  << ",\"cascadedDirectionalShadowCascadeCount\":"
-                  << counters.cascadedDirectionalShadowCascadeCount
-                  << ",\"submittedCascadedDirectionalShadowCascadeCount\":"
-                  << submittedCascadedDirectionalShadowCascadeCount
-                  << ",\"authoredSpotLightShadowCount\":"
-                  << counters.authoredSpotLightShadowCount
-                  << ",\"submittedSpotLightShadowCount\":" << submittedSpotLightShadowCount
-                  << ",\"authoredPointLightShadowCount\":"
-                  << counters.authoredPointLightShadowCount
-                  << ",\"submittedPointLightShadowCount\":" << submittedPointLightShadowCount
-                  << ",\"authoredPointLight3DCount\":" << counters.authoredPointLight3DCount
-                  << ",\"pointLight3DCount\":" << counters.pointLight3DCount
-                  << ",\"culledPointLight3DCount\":" << counters.culledPointLight3DCount
-                  << ",\"authoredSpotLight3DCount\":" << counters.authoredSpotLight3DCount
-                  << ",\"spotLight3DCount\":" << counters.spotLight3DCount
-                  << ",\"culledSpotLight3DCount\":" << counters.culledSpotLight3DCount
-                  << ",\"submittedLightingFrames\":" << counters.submittedLightingFrames
-                  << ",\"submittedDirectionalLightCount\":"
-                  << counters.submittedDirectionalLightCount
-                  << ",\"lightingCountsStable\":"
-                  << (counters.lightingCountsStable ? "true" : "false")
-                  << ",\"windowMetricsEvents\":" << counters.windowMetricsEvents
-                  << ",\"logicalPixelWidth\":" << counters.logicalPixelWidth
-                  << ",\"logicalPixelHeight\":" << counters.logicalPixelHeight
-                  << ",\"framebufferPixelWidth\":" << counters.framebufferPixelWidth
-                  << ",\"framebufferPixelHeight\":" << counters.framebufferPixelHeight
-                  << ",\"submittedCameraAspectRatio\":" << counters.submittedCameraAspectRatio
-                  << ",\"cameraAspectChanges\":" << counters.cameraAspectChanges
-                  << ",\"cameraAspectMatchesSurface\":"
-                  << (counters.cameraAspectMatchesSurface ? "true" : "false")
-                  << ",\"gltfCooked\":" << (counters.gltfCooked ? "true" : "false")
-                  << ",\"prefabInstantiated\":" << (counters.prefabInstantiated ? "true" : "false")
-                  << ",\"prefabNodes\":" << counters.prefabNodes
-                  << ",\"prefabInstances\":" << counters.prefabInstances
-                  << ",\"skinnedPrefabInstances\":" << counters.skinnedPrefabInstances
-                  << ",\"catalogCooked\":" << counters.catalogCooked
-                  << ",\"meshSlotCount\":" << expectedMeshes
-                  << ",\"staticMeshSlotCount\":" << expectedStaticMeshes
-                  << ",\"skinnedMeshSlotCount\":" << expectedSkinnedMeshes
-                  << ",\"externalGltf\":" << (resources.externalGltf ? "true" : "false")
-                  << ",\"uiRootsCreated\":" << ui.rootsCreated
-                  << ",\"uiRootsReleased\":" << ui.rootsReleased
-                  << ",\"uiPanelsCreated\":" << ui.panelsCreated
-                  << ",\"uiLabelsCreated\":" << ui.labelsCreated
-                  << ",\"uiListViewsCreated\":" << ui.listViewsCreated
-                  << ",\"uiTreeViewsCreated\":" << ui.treeViewsCreated
-                  << ",\"uiThemeDemoRequested\":" << (ui.themeDemoRequested ? "true" : "false")
-                  << ",\"uiThemeSwitches\":" << ui.themeSwitches
-                  << ",\"uiAutomatedThemeSteps\":" << ui.automatedThemeSteps
-                  << ",\"uiAutomatedCollectionSteps\":" << ui.automatedCollectionSteps
-                  << ",\"uiTreeExpansionChanges\":" << ui.treeExpansionChanges
-                  << ",\"uiListSelectionKey\":" << ui.listSelectionKey
-                  << ",\"uiTreeSelectionKey\":" << ui.treeSelectionKey
-                  << ",\"uiThemeButtonActivations\":" << ui.themeButtonActivations
-                  << ",\"uiThemeInitialLight\":" << (ui.initialThemeLight ? "true" : "false")
-                  << ",\"uiThemeFinalLight\":" << (ui.finalThemeLight ? "true" : "false")
-                  << ",\"uiInheritedChromeVerified\":"
-                  << (ui.inheritedChromeVerified ? "true" : "false")
-                  << ",\"uiControlsInitialStateVerified\":"
-                  << (ui.controlsInitialStateVerified ? "true" : "false")
-                  << ",\"uiResponsiveLayoutVerified\":"
-                  << (ui.responsiveLayoutVerified ? "true" : "false")
-                  << ",\"uiProgressUpdates\":" << ui.progressUpdates
-                  << ",\"uiProgressFinal\":" << ui.finalProgress
-                  << ",\"bindingRegistryReleased\":"
-                  << (counters.bindingRegistryReleased ? "true" : "false")
-                  << ",\"ledgerBalanced\":" << (ledgerBalanced ? "true" : "false")
-                  << ",\"pixelCaptureAttempted\":" << (counters.pixelCaptureAttempted ? "true" : "false")
-                  << ",\"pixelCaptureOk\":" << (counters.pixelCaptureOk ? "true" : "false")
-                  << ",\"pixelCaptureWidth\":" << counters.pixelCaptureWidth
-                  << ",\"pixelCaptureHeight\":" << counters.pixelCaptureHeight
-                  << ",\"pixelCaptureBytes\":" << counters.pixelCaptureBytes
-                  << ",\"pixelFingerprint\":\"" << counters.pixelFingerprint << "\""
-                  << ",\"sceneRgbPixelCount\":" << counters.sceneRgbPixelCount
-                  << ",\"sceneRgbChannelSums\":[" << counters.sceneRgbChannelSums[0] << ','
-                  << counters.sceneRgbChannelSums[1] << ',' << counters.sceneRgbChannelSums[2] << ']'
-                  << ",\"sceneRgbFingerprint\":\"" << counters.sceneRgbFingerprint << "\""
-                  << ",\"sceneRgbOutputRequested\":" << (sceneRgbOutputRequested ? "true" : "false")
-                  << ",\"sceneRgbOutputWritten\":" << (counters.sceneRgbOutputWritten ? "true" : "false")
-                  << ",\"pixelGoldenChecked\":" << (pixelGoldenChecked ? "true" : "false")
-                  << ",\"pixelGoldenMatched\":" << (pixelGoldenMatched ? "true" : "false")
-                  << ",\"expectPixelFingerprint\":\"" << options.expectPixelFingerprint << "\"}\n";
+        Tina::Core::JsonWriter writer(std::cerr);
+        writer.beginObject();
+        writer.member("status", "error");
+        writer.member("sample", "tina_sample_3d");
+        writer.member("evidenceSchema", 16);
+        writer.member("message", "lifecycle counters did not match");
+        writer.member("frames", counters.frameUpdates);
+        writer.member("meshesUploaded", counters.meshesUploaded);
+        writer.member("tangentMeshesUploaded", tangentMeshesUploaded);
+        writer.member("skinnedMeshesUploaded", skinnedMeshesUploaded);
+        writer.member("uploadedSkinnedJointCount", capture.uploadedSkinnedJointCount());
+        writer.member("animatorJointCount", counters.animatorJointCount);
+        writer.member("animatorUpdates", counters.animatorUpdates);
+        writer.member("animatorPoseChanges", counters.animatorPoseChanges);
+        writer.member("submittedSkinnedMesh3DFrames", submittedSkinnedMesh3DFrames);
+        writer.member("submittedSkinnedMesh3DCount", submittedSkinnedMesh3DCount);
+        writer.member("visibleSkinnedMesh3DCount", visibleSkinnedMesh3DCount);
+        writer.member("submittedSkinnedPaletteJointCount", submittedSkinnedPaletteJointCount);
+        writer.member("firstSubmittedSkinnedPoseFingerprint", firstSubmittedSkinnedPoseFingerprint);
+        writer.member("submittedSkinnedPoseFingerprint", submittedSkinnedPoseFingerprint);
+        writer.member("submittedSkinnedPoseFingerprintChanges", submittedSkinnedPoseFingerprintChanges);
+        writer.member("materialsLoaded", counters.materialsLoaded);
+        writer.member("meshAssetHandlesPublished", counters.meshAssetHandlesPublished);
+        writer.member("materialAssetHandlesPublished", counters.materialAssetHandlesPublished);
+        writer.member("meshBindingsRegistered", counters.meshBindingsRegistered);
+        writer.member("materialBindingsRegistered", counters.materialBindingsRegistered);
+        writer.member("meshBindingsReleased", counters.meshBindingsReleased);
+        writer.member("materialBindingsReleased", counters.materialBindingsReleased);
+        writer.member("meshRetirementsAccepted", counters.meshRetirementsAccepted);
+        writer.member("textureRetirementsAccepted", counters.textureRetirementsAccepted);
+        writer.member("meshRetirementRecords", counters.meshRetirementRecords);
+        writer.member("textureRetirementRecords", counters.textureRetirementRecords);
+        writer.member("meshRetirementReleased", counters.meshRetirementReleased);
+        writer.member("textureRetirementReleased", counters.textureRetirementReleased);
+        writer.member("retirementRecordsLive", counters.retirementRecordsLive);
+        writer.member("meshAssetHandlesInvalidated", counters.meshAssetHandlesInvalidated);
+        writer.member("materialAssetHandlesInvalidated", counters.materialAssetHandlesInvalidated);
+        writer.member("textureAssetHandlesInvalidated", counters.textureAssetHandlesInvalidated);
+        writer.member("animationClipAssetHandlesPublished", counters.animationClipAssetHandlesPublished);
+        writer.member("animationClipAssetHandlesInvalidated", counters.animationClipAssetHandlesInvalidated);
+        writer.member("skinnedPrefabAssetHandlesPublished", counters.skinnedPrefabAssetHandlesPublished);
+        writer.member("skinnedPrefabAssetHandlesInvalidated", counters.skinnedPrefabAssetHandlesInvalidated);
+        writer.member("meshFrameResourceResolverHits", counters.meshFrameResourceResolverHits);
+        writer.member("skinnedMeshFrameResourceResolverHits", counters.skinnedMeshFrameResourceResolverHits);
+        writer.member("skinnedPoseProviderHits", counters.skinnedPoseProviderHits);
+        writer.member("materialFrameResourceResolverHits", counters.materialFrameResourceResolverHits);
+        writer.member("assetStoreActiveCount", assetStoreActiveCount);
+        writer.member("prefabAssetResident", prefabAssetResident);
+        writer.member("texturesUploaded", counters.texturesUploaded);
+        writer.member("cookedEnvironmentMap", counters.cookedEnvironmentMap);
+        writer.member("environmentMapsUploaded", environmentMapsUploaded);
+        writer.member("imageBasedLightingMode", imageBasedLightingModeName(options.imageBasedLightingMode));
+        writer.member("pointLightShadowMode", pointLightShadowModeName(options.pointLightShadowMode));
+        writer.member("skinAnimationMode", skinAnimationModeName(options.skinAnimationMode));
+        writer.member("transparencyMode", transparencyModeName(options.transparencyMode));
+        writer.member("blendMaterialCount", resources.blendMaterialCount);
+        writer.member("authoredTransparentStaticWitnessCount", counters.authoredTransparentStaticWitnessCount);
+        writer.member("transparentWitnessMaterialBound", counters.transparentWitnessMaterialBound);
+        writer.member("submittedTransparent3DFrames", submittedTransparent3DFrames);
+        writer.member("submittedTransparentStaticMesh3DCount", submittedTransparentStaticMesh3DCount);
+        writer.member("submittedTransparentSkinnedMesh3DCount", submittedTransparentSkinnedMesh3DCount);
+        writer.member("submittedTransparent3DDrawCount", submittedTransparent3DDrawCount);
+        writer.member("submittedTransparent3DSortOrderChecksum", submittedTransparent3DSortOrderChecksum);
+        writer.member("transparent3DSortOrderStable", transparent3DSortOrderStable);
+        writer.member("imageBasedLightingConfigured", counters.imageBasedLightingConfigured);
+        writer.member("imageBasedLightingBindings", imageBasedLightingBindings);
+        writer.member("imageBasedLightingClears", imageBasedLightingClears);
+        writer.member("environmentMapRetirementsAccepted", environmentMapRetirements);
+        writer.member("environmentMapDiffuseFaceSize", capture.environmentDiffuseFaceSize());
+        writer.member("environmentMapSpecularFaceSize", capture.environmentSpecularFaceSize());
+        writer.member("environmentMapSpecularMipCount", capture.environmentSpecularMipCount());
+        writer.member("environmentMapBrdfWidth", capture.environmentBrdfWidth());
+        writer.member("environmentMapBrdfHeight", capture.environmentBrdfHeight());
+        writer.member("meshBound", counters.meshBound);
+        writer.member("materialTextureBound", counters.materialTextureBound);
+        writer.member("lightingConfigured", counters.lightingConfigured);
+        writer.member("directionalLightCount", counters.directionalLightCount);
+        writer.member("cascadedDirectionalShadowCount", counters.cascadedDirectionalShadowCount);
+        writer.member("submittedCascadedDirectionalShadowCount", submittedCascadedDirectionalShadowCount);
+        writer.member("cascadedDirectionalShadowCascadeCount", counters.cascadedDirectionalShadowCascadeCount);
+        writer.member("submittedCascadedDirectionalShadowCascadeCount", submittedCascadedDirectionalShadowCascadeCount);
+        writer.member("authoredSpotLightShadowCount", counters.authoredSpotLightShadowCount);
+        writer.member("submittedSpotLightShadowCount", submittedSpotLightShadowCount);
+        writer.member("authoredPointLightShadowCount", counters.authoredPointLightShadowCount);
+        writer.member("submittedPointLightShadowCount", submittedPointLightShadowCount);
+        writer.member("authoredPointLight3DCount", counters.authoredPointLight3DCount);
+        writer.member("pointLight3DCount", counters.pointLight3DCount);
+        writer.member("culledPointLight3DCount", counters.culledPointLight3DCount);
+        writer.member("authoredSpotLight3DCount", counters.authoredSpotLight3DCount);
+        writer.member("spotLight3DCount", counters.spotLight3DCount);
+        writer.member("culledSpotLight3DCount", counters.culledSpotLight3DCount);
+        writer.member("submittedLightingFrames", counters.submittedLightingFrames);
+        writer.member("submittedDirectionalLightCount", counters.submittedDirectionalLightCount);
+        writer.member("lightingCountsStable", counters.lightingCountsStable);
+        writer.member("windowMetricsEvents", counters.windowMetricsEvents);
+        writer.member("logicalPixelWidth", counters.logicalPixelWidth);
+        writer.member("logicalPixelHeight", counters.logicalPixelHeight);
+        writer.member("framebufferPixelWidth", counters.framebufferPixelWidth);
+        writer.member("framebufferPixelHeight", counters.framebufferPixelHeight);
+        writer.member("submittedCameraAspectRatio", counters.submittedCameraAspectRatio);
+        writer.member("cameraAspectChanges", counters.cameraAspectChanges);
+        writer.member("cameraAspectMatchesSurface", counters.cameraAspectMatchesSurface);
+        writer.member("gltfCooked", counters.gltfCooked);
+        writer.member("prefabInstantiated", counters.prefabInstantiated);
+        writer.member("prefabNodes", counters.prefabNodes);
+        writer.member("prefabInstances", counters.prefabInstances);
+        writer.member("skinnedPrefabInstances", counters.skinnedPrefabInstances);
+        writer.member("catalogCooked", counters.catalogCooked);
+        writer.member("meshSlotCount", expectedMeshes);
+        writer.member("staticMeshSlotCount", expectedStaticMeshes);
+        writer.member("skinnedMeshSlotCount", expectedSkinnedMeshes);
+        writer.member("externalGltf", resources.externalGltf);
+        writer.member("uiRootsCreated", ui.rootsCreated);
+        writer.member("uiRootsReleased", ui.rootsReleased);
+        writer.member("uiPanelsCreated", ui.panelsCreated);
+        writer.member("uiLabelsCreated", ui.labelsCreated);
+        writer.member("uiListViewsCreated", ui.listViewsCreated);
+        writer.member("uiTreeViewsCreated", ui.treeViewsCreated);
+        writer.member("uiThemeDemoRequested", ui.themeDemoRequested);
+        writer.member("uiThemeSwitches", ui.themeSwitches);
+        writer.member("uiAutomatedThemeSteps", ui.automatedThemeSteps);
+        writer.member("uiAutomatedCollectionSteps", ui.automatedCollectionSteps);
+        writer.member("uiTreeExpansionChanges", ui.treeExpansionChanges);
+        writer.member("uiListSelectionKey", ui.listSelectionKey);
+        writer.member("uiTreeSelectionKey", ui.treeSelectionKey);
+        writer.member("uiThemeButtonActivations", ui.themeButtonActivations);
+        writer.member("uiThemeInitialLight", ui.initialThemeLight);
+        writer.member("uiThemeFinalLight", ui.finalThemeLight);
+        writer.member("uiInheritedChromeVerified", ui.inheritedChromeVerified);
+        writer.member("uiControlsInitialStateVerified", ui.controlsInitialStateVerified);
+        writer.member("uiResponsiveLayoutVerified", ui.responsiveLayoutVerified);
+        writer.member("uiProgressUpdates", ui.progressUpdates);
+        writer.member("uiProgressFinal", ui.finalProgress);
+        writer.member("bindingRegistryReleased", counters.bindingRegistryReleased);
+        writer.member("ledgerBalanced", ledgerBalanced);
+        writer.member("pixelCaptureAttempted", counters.pixelCaptureAttempted);
+        writer.member("pixelCaptureOk", counters.pixelCaptureOk);
+        writer.member("pixelCaptureWidth", counters.pixelCaptureWidth);
+        writer.member("pixelCaptureHeight", counters.pixelCaptureHeight);
+        writer.member("pixelCaptureBytes", counters.pixelCaptureBytes);
+        writer.member("pixelFingerprint", counters.pixelFingerprint);
+        writer.member("sceneRgbPixelCount", counters.sceneRgbPixelCount);
+        writer.beginArrayMember("sceneRgbChannelSums");
+        for (const Tina::u64 channelSum : counters.sceneRgbChannelSums)
+        {
+            writer.element(channelSum);
+        }
+        writer.endArray();
+        writer.member("sceneRgbFingerprint", counters.sceneRgbFingerprint);
+        writer.member("sceneRgbOutputRequested", sceneRgbOutputRequested);
+        writer.member("sceneRgbOutputWritten", counters.sceneRgbOutputWritten);
+        writer.member("pixelGoldenChecked", pixelGoldenChecked);
+        writer.member("pixelGoldenMatched", pixelGoldenMatched);
+        writer.member("expectPixelFingerprint", options.expectPixelFingerprint);
+        writer.endObject();
+        std::cerr << '\n';
         return 1;
     }
 
-    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_3d\",\"evidenceSchema\":16,\"frames\":"
-              << counters.frameUpdates
-              << ",\"gltfCooked\":true,\"cookedStaticMesh\":true,\"cookedSkinnedMesh\":true,"
-                 "\"cookedAnimationClip3D\":true,\"cookedMaterial\":true,\"cookedPrefab\":true,"
-                 "\"cookedEnvironmentMap\":true,"
-                 "\"prefabInstantiated\":true,\"sceneExtract\":true,\"multiMesh\":"
-              << (multiMesh ? "true" : "false") << ",\"materialTextureBound\":"
-              << (counters.materialTextureBound ? "true" : "false") << ",\"texturesUploaded\":"
-              << counters.texturesUploaded << ",\"meshesUploaded\":" << counters.meshesUploaded
-              << ",\"tangentMeshesUploaded\":" << tangentMeshesUploaded
-              << ",\"skinnedMeshesUploaded\":" << skinnedMeshesUploaded
-              << ",\"uploadedSkinnedJointCount\":" << capture.uploadedSkinnedJointCount()
-              << ",\"animatorJointCount\":" << counters.animatorJointCount
-              << ",\"animatorUpdates\":" << counters.animatorUpdates
-              << ",\"animatorPoseChanges\":" << counters.animatorPoseChanges
-              << ",\"submittedSkinnedMesh3DFrames\":" << submittedSkinnedMesh3DFrames
-              << ",\"submittedSkinnedMesh3DCount\":" << submittedSkinnedMesh3DCount
-              << ",\"visibleSkinnedMesh3DCount\":" << visibleSkinnedMesh3DCount
-              << ",\"submittedSkinnedPaletteJointCount\":" << submittedSkinnedPaletteJointCount
-              << ",\"firstSubmittedSkinnedPoseFingerprint\":"
-              << firstSubmittedSkinnedPoseFingerprint
-              << ",\"submittedSkinnedPoseFingerprint\":" << submittedSkinnedPoseFingerprint
-              << ",\"submittedSkinnedPoseFingerprintChanges\":"
-              << submittedSkinnedPoseFingerprintChanges
-              << ",\"environmentMapsUploaded\":" << environmentMapsUploaded
-              << ",\"imageBasedLightingMode\":\""
-              << imageBasedLightingModeName(options.imageBasedLightingMode) << "\""
-              << ",\"pointLightShadowMode\":\""
-              << pointLightShadowModeName(options.pointLightShadowMode) << "\""
-              << ",\"skinAnimationMode\":\""
-              << skinAnimationModeName(options.skinAnimationMode) << "\""
-              << ",\"transparencyMode\":\""
-              << transparencyModeName(options.transparencyMode) << "\""
-              << ",\"blendMaterialCount\":" << resources.blendMaterialCount
-              << ",\"authoredTransparentStaticWitnessCount\":"
-              << counters.authoredTransparentStaticWitnessCount
-              << ",\"transparentWitnessMaterialBound\":"
-              << (counters.transparentWitnessMaterialBound ? "true" : "false")
-              << ",\"submittedTransparent3DFrames\":" << submittedTransparent3DFrames
-              << ",\"submittedTransparentStaticMesh3DCount\":"
-              << submittedTransparentStaticMesh3DCount
-              << ",\"submittedTransparentSkinnedMesh3DCount\":"
-              << submittedTransparentSkinnedMesh3DCount
-              << ",\"submittedTransparent3DDrawCount\":"
-              << submittedTransparent3DDrawCount
-              << ",\"submittedTransparent3DSortOrderChecksum\":"
-              << submittedTransparent3DSortOrderChecksum
-              << ",\"transparent3DSortOrderStable\":"
-              << (transparent3DSortOrderStable ? "true" : "false")
-              << ",\"imageBasedLightingConfigured\":"
-              << (counters.imageBasedLightingConfigured ? "true" : "false")
-              << ",\"imageBasedLightingBindings\":" << imageBasedLightingBindings
-              << ",\"imageBasedLightingClears\":" << imageBasedLightingClears
-              << ",\"environmentMapRetirementsAccepted\":" << environmentMapRetirements
-              << ",\"environmentMapDiffuseFaceSize\":" << capture.environmentDiffuseFaceSize()
-              << ",\"environmentMapSpecularFaceSize\":" << capture.environmentSpecularFaceSize()
-              << ",\"environmentMapSpecularMipCount\":" << capture.environmentSpecularMipCount()
-              << ",\"environmentMapBrdfWidth\":" << capture.environmentBrdfWidth()
-              << ",\"environmentMapBrdfHeight\":" << capture.environmentBrdfHeight()
-              << ",\"materialsLoaded\":" << counters.materialsLoaded << ",\"prefabNodes\":" << counters.prefabNodes
-              << ",\"meshAssetHandlesPublished\":" << counters.meshAssetHandlesPublished
-              << ",\"materialAssetHandlesPublished\":" << counters.materialAssetHandlesPublished
-              << ",\"meshBindingsRegistered\":" << counters.meshBindingsRegistered
-              << ",\"materialBindingsRegistered\":" << counters.materialBindingsRegistered
-              << ",\"meshBindingsReleased\":" << counters.meshBindingsReleased
-              << ",\"materialBindingsReleased\":" << counters.materialBindingsReleased
-              << ",\"meshRetirementsAccepted\":" << counters.meshRetirementsAccepted
-              << ",\"textureRetirementsAccepted\":" << counters.textureRetirementsAccepted
-              << ",\"meshRetirementRecords\":" << counters.meshRetirementRecords
-              << ",\"textureRetirementRecords\":" << counters.textureRetirementRecords
-              << ",\"meshRetirementReleased\":" << counters.meshRetirementReleased
-              << ",\"textureRetirementReleased\":" << counters.textureRetirementReleased
-              << ",\"retirementRecordsLive\":" << counters.retirementRecordsLive
-              << ",\"meshAssetHandlesInvalidated\":" << counters.meshAssetHandlesInvalidated
-              << ",\"materialAssetHandlesInvalidated\":" << counters.materialAssetHandlesInvalidated
-              << ",\"textureAssetHandlesInvalidated\":" << counters.textureAssetHandlesInvalidated
-              << ",\"animationClipAssetHandlesPublished\":"
-              << counters.animationClipAssetHandlesPublished
-              << ",\"animationClipAssetHandlesInvalidated\":"
-              << counters.animationClipAssetHandlesInvalidated
-              << ",\"skinnedPrefabAssetHandlesPublished\":"
-              << counters.skinnedPrefabAssetHandlesPublished
-              << ",\"skinnedPrefabAssetHandlesInvalidated\":"
-              << counters.skinnedPrefabAssetHandlesInvalidated
-              << ",\"meshFrameResourceResolverHits\":" << counters.meshFrameResourceResolverHits
-              << ",\"skinnedMeshFrameResourceResolverHits\":"
-              << counters.skinnedMeshFrameResourceResolverHits
-              << ",\"skinnedPoseProviderHits\":" << counters.skinnedPoseProviderHits
-              << ",\"materialFrameResourceResolverHits\":" << counters.materialFrameResourceResolverHits
-              << ",\"assetStoreActiveCount\":" << assetStoreActiveCount
-              << ",\"prefabAssetResident\":" << (prefabAssetResident ? "true" : "false")
-              << ",\"prefabInstances\":" << counters.prefabInstances
-              << ",\"skinnedPrefabInstances\":" << counters.skinnedPrefabInstances
-              << ",\"meshSlotCount\":" << expectedMeshes
-              << ",\"staticMeshSlotCount\":" << expectedStaticMeshes
-              << ",\"skinnedMeshSlotCount\":" << expectedSkinnedMeshes
-              << ",\"externalGltf\":" << (resources.externalGltf ? "true" : "false")
-              << ",\"completePbrFixture\":" << (resources.completePbrFixture ? "true" : "false")
-              << ",\"materialFactorsBound\":" << (counters.materialFactorsBound ? "true" : "false")
-              << ",\"materialMrTextureBound\":" << (counters.materialMrTextureBound ? "true" : "false")
-              << ",\"materialNormalTextureBound\":" << (counters.materialNormalTextureBound ? "true" : "false")
-              << ",\"lightingConfigured\":" << (counters.lightingConfigured ? "true" : "false")
-              << ",\"directionalLightCount\":" << counters.directionalLightCount
-              << ",\"cascadedDirectionalShadowCount\":"
-              << counters.cascadedDirectionalShadowCount
-              << ",\"submittedCascadedDirectionalShadowCount\":"
-              << submittedCascadedDirectionalShadowCount
-              << ",\"cascadedDirectionalShadowCascadeCount\":"
-              << counters.cascadedDirectionalShadowCascadeCount
-              << ",\"submittedCascadedDirectionalShadowCascadeCount\":"
-              << submittedCascadedDirectionalShadowCascadeCount
-              << ",\"authoredSpotLightShadowCount\":"
-              << counters.authoredSpotLightShadowCount
-              << ",\"submittedSpotLightShadowCount\":" << submittedSpotLightShadowCount
-              << ",\"authoredPointLightShadowCount\":"
-              << counters.authoredPointLightShadowCount
-              << ",\"submittedPointLightShadowCount\":" << submittedPointLightShadowCount
-              << ",\"authoredPointLight3DCount\":" << counters.authoredPointLight3DCount
-              << ",\"pointLight3DCount\":" << counters.pointLight3DCount
-              << ",\"culledPointLight3DCount\":" << counters.culledPointLight3DCount
-              << ",\"authoredSpotLight3DCount\":" << counters.authoredSpotLight3DCount
-              << ",\"spotLight3DCount\":" << counters.spotLight3DCount
-              << ",\"culledSpotLight3DCount\":" << counters.culledSpotLight3DCount
-              << ",\"sceneLightingFrames\":" << counters.sceneLightingFrames
-              << ",\"submittedLightingFrames\":" << counters.submittedLightingFrames
-              << ",\"submittedDirectionalLightCount\":" << counters.submittedDirectionalLightCount
-              << ",\"lightingCountsStable\":" << (counters.lightingCountsStable ? "true" : "false")
-              << ",\"windowMetricsEvents\":" << counters.windowMetricsEvents
-              << ",\"logicalPixelWidth\":" << counters.logicalPixelWidth
-              << ",\"logicalPixelHeight\":" << counters.logicalPixelHeight
-              << ",\"framebufferPixelWidth\":" << counters.framebufferPixelWidth
-              << ",\"framebufferPixelHeight\":" << counters.framebufferPixelHeight
-              << ",\"submittedCameraAspectRatio\":" << counters.submittedCameraAspectRatio
-              << ",\"cameraAspectChanges\":" << counters.cameraAspectChanges
-              << ",\"cameraAspectMatchesSurface\":"
-              << (counters.cameraAspectMatchesSurface ? "true" : "false")
-              << ",\"bindingRegistryReleased\":"
-              << (counters.bindingRegistryReleased ? "true" : "false");
-    if (resources.externalGltf || resources.completePbrFixture)
     {
-        std::cout << ",\"gltfPath\":";
-        writeJsonString(std::cout, resources.gltfSourcePath);
+        Tina::Core::JsonWriter writer(std::cout);
+        writer.beginObject();
+        writer.member("status", "ok");
+        writer.member("sample", "tina_sample_3d");
+        writer.member("evidenceSchema", 16);
+        writer.member("frames", counters.frameUpdates);
+        writer.member("gltfCooked", true);
+        writer.member("cookedStaticMesh", true);
+        writer.member("cookedSkinnedMesh", true);
+        writer.member("cookedAnimationClip3D", true);
+        writer.member("cookedMaterial", true);
+        writer.member("cookedPrefab", true);
+        writer.member("cookedEnvironmentMap", true);
+        writer.member("prefabInstantiated", true);
+        writer.member("sceneExtract", true);
+        writer.member("multiMesh", multiMesh);
+        writer.member("materialTextureBound", counters.materialTextureBound);
+        writer.member("texturesUploaded", counters.texturesUploaded);
+        writer.member("meshesUploaded", counters.meshesUploaded);
+        writer.member("tangentMeshesUploaded", tangentMeshesUploaded);
+        writer.member("skinnedMeshesUploaded", skinnedMeshesUploaded);
+        writer.member("uploadedSkinnedJointCount", capture.uploadedSkinnedJointCount());
+        writer.member("animatorJointCount", counters.animatorJointCount);
+        writer.member("animatorUpdates", counters.animatorUpdates);
+        writer.member("animatorPoseChanges", counters.animatorPoseChanges);
+        writer.member("submittedSkinnedMesh3DFrames", submittedSkinnedMesh3DFrames);
+        writer.member("submittedSkinnedMesh3DCount", submittedSkinnedMesh3DCount);
+        writer.member("visibleSkinnedMesh3DCount", visibleSkinnedMesh3DCount);
+        writer.member("submittedSkinnedPaletteJointCount", submittedSkinnedPaletteJointCount);
+        writer.member("firstSubmittedSkinnedPoseFingerprint", firstSubmittedSkinnedPoseFingerprint);
+        writer.member("submittedSkinnedPoseFingerprint", submittedSkinnedPoseFingerprint);
+        writer.member("submittedSkinnedPoseFingerprintChanges", submittedSkinnedPoseFingerprintChanges);
+        writer.member("environmentMapsUploaded", environmentMapsUploaded);
+        writer.member("imageBasedLightingMode", imageBasedLightingModeName(options.imageBasedLightingMode));
+        writer.member("pointLightShadowMode", pointLightShadowModeName(options.pointLightShadowMode));
+        writer.member("skinAnimationMode", skinAnimationModeName(options.skinAnimationMode));
+        writer.member("transparencyMode", transparencyModeName(options.transparencyMode));
+        writer.member("blendMaterialCount", resources.blendMaterialCount);
+        writer.member("authoredTransparentStaticWitnessCount", counters.authoredTransparentStaticWitnessCount);
+        writer.member("transparentWitnessMaterialBound", counters.transparentWitnessMaterialBound);
+        writer.member("submittedTransparent3DFrames", submittedTransparent3DFrames);
+        writer.member("submittedTransparentStaticMesh3DCount", submittedTransparentStaticMesh3DCount);
+        writer.member("submittedTransparentSkinnedMesh3DCount", submittedTransparentSkinnedMesh3DCount);
+        writer.member("submittedTransparent3DDrawCount", submittedTransparent3DDrawCount);
+        writer.member("submittedTransparent3DSortOrderChecksum", submittedTransparent3DSortOrderChecksum);
+        writer.member("transparent3DSortOrderStable", transparent3DSortOrderStable);
+        writer.member("imageBasedLightingConfigured", counters.imageBasedLightingConfigured);
+        writer.member("imageBasedLightingBindings", imageBasedLightingBindings);
+        writer.member("imageBasedLightingClears", imageBasedLightingClears);
+        writer.member("environmentMapRetirementsAccepted", environmentMapRetirements);
+        writer.member("environmentMapDiffuseFaceSize", capture.environmentDiffuseFaceSize());
+        writer.member("environmentMapSpecularFaceSize", capture.environmentSpecularFaceSize());
+        writer.member("environmentMapSpecularMipCount", capture.environmentSpecularMipCount());
+        writer.member("environmentMapBrdfWidth", capture.environmentBrdfWidth());
+        writer.member("environmentMapBrdfHeight", capture.environmentBrdfHeight());
+        writer.member("materialsLoaded", counters.materialsLoaded);
+        writer.member("prefabNodes", counters.prefabNodes);
+        writer.member("meshAssetHandlesPublished", counters.meshAssetHandlesPublished);
+        writer.member("materialAssetHandlesPublished", counters.materialAssetHandlesPublished);
+        writer.member("meshBindingsRegistered", counters.meshBindingsRegistered);
+        writer.member("materialBindingsRegistered", counters.materialBindingsRegistered);
+        writer.member("meshBindingsReleased", counters.meshBindingsReleased);
+        writer.member("materialBindingsReleased", counters.materialBindingsReleased);
+        writer.member("meshRetirementsAccepted", counters.meshRetirementsAccepted);
+        writer.member("textureRetirementsAccepted", counters.textureRetirementsAccepted);
+        writer.member("meshRetirementRecords", counters.meshRetirementRecords);
+        writer.member("textureRetirementRecords", counters.textureRetirementRecords);
+        writer.member("meshRetirementReleased", counters.meshRetirementReleased);
+        writer.member("textureRetirementReleased", counters.textureRetirementReleased);
+        writer.member("retirementRecordsLive", counters.retirementRecordsLive);
+        writer.member("meshAssetHandlesInvalidated", counters.meshAssetHandlesInvalidated);
+        writer.member("materialAssetHandlesInvalidated", counters.materialAssetHandlesInvalidated);
+        writer.member("textureAssetHandlesInvalidated", counters.textureAssetHandlesInvalidated);
+        writer.member("animationClipAssetHandlesPublished", counters.animationClipAssetHandlesPublished);
+        writer.member("animationClipAssetHandlesInvalidated", counters.animationClipAssetHandlesInvalidated);
+        writer.member("skinnedPrefabAssetHandlesPublished", counters.skinnedPrefabAssetHandlesPublished);
+        writer.member("skinnedPrefabAssetHandlesInvalidated", counters.skinnedPrefabAssetHandlesInvalidated);
+        writer.member("meshFrameResourceResolverHits", counters.meshFrameResourceResolverHits);
+        writer.member("skinnedMeshFrameResourceResolverHits", counters.skinnedMeshFrameResourceResolverHits);
+        writer.member("skinnedPoseProviderHits", counters.skinnedPoseProviderHits);
+        writer.member("materialFrameResourceResolverHits", counters.materialFrameResourceResolverHits);
+        writer.member("assetStoreActiveCount", assetStoreActiveCount);
+        writer.member("prefabAssetResident", prefabAssetResident);
+        writer.member("prefabInstances", counters.prefabInstances);
+        writer.member("skinnedPrefabInstances", counters.skinnedPrefabInstances);
+        writer.member("meshSlotCount", expectedMeshes);
+        writer.member("staticMeshSlotCount", expectedStaticMeshes);
+        writer.member("skinnedMeshSlotCount", expectedSkinnedMeshes);
+        writer.member("externalGltf", resources.externalGltf);
+        writer.member("completePbrFixture", resources.completePbrFixture);
+        writer.member("materialFactorsBound", counters.materialFactorsBound);
+        writer.member("materialMrTextureBound", counters.materialMrTextureBound);
+        writer.member("materialNormalTextureBound", counters.materialNormalTextureBound);
+        writer.member("lightingConfigured", counters.lightingConfigured);
+        writer.member("directionalLightCount", counters.directionalLightCount);
+        writer.member("cascadedDirectionalShadowCount", counters.cascadedDirectionalShadowCount);
+        writer.member("submittedCascadedDirectionalShadowCount", submittedCascadedDirectionalShadowCount);
+        writer.member("cascadedDirectionalShadowCascadeCount", counters.cascadedDirectionalShadowCascadeCount);
+        writer.member("submittedCascadedDirectionalShadowCascadeCount", submittedCascadedDirectionalShadowCascadeCount);
+        writer.member("authoredSpotLightShadowCount", counters.authoredSpotLightShadowCount);
+        writer.member("submittedSpotLightShadowCount", submittedSpotLightShadowCount);
+        writer.member("authoredPointLightShadowCount", counters.authoredPointLightShadowCount);
+        writer.member("submittedPointLightShadowCount", submittedPointLightShadowCount);
+        writer.member("authoredPointLight3DCount", counters.authoredPointLight3DCount);
+        writer.member("pointLight3DCount", counters.pointLight3DCount);
+        writer.member("culledPointLight3DCount", counters.culledPointLight3DCount);
+        writer.member("authoredSpotLight3DCount", counters.authoredSpotLight3DCount);
+        writer.member("spotLight3DCount", counters.spotLight3DCount);
+        writer.member("culledSpotLight3DCount", counters.culledSpotLight3DCount);
+        writer.member("sceneLightingFrames", counters.sceneLightingFrames);
+        writer.member("submittedLightingFrames", counters.submittedLightingFrames);
+        writer.member("submittedDirectionalLightCount", counters.submittedDirectionalLightCount);
+        writer.member("lightingCountsStable", counters.lightingCountsStable);
+        writer.member("windowMetricsEvents", counters.windowMetricsEvents);
+        writer.member("logicalPixelWidth", counters.logicalPixelWidth);
+        writer.member("logicalPixelHeight", counters.logicalPixelHeight);
+        writer.member("framebufferPixelWidth", counters.framebufferPixelWidth);
+        writer.member("framebufferPixelHeight", counters.framebufferPixelHeight);
+        writer.member("submittedCameraAspectRatio", counters.submittedCameraAspectRatio);
+        writer.member("cameraAspectChanges", counters.cameraAspectChanges);
+        writer.member("cameraAspectMatchesSurface", counters.cameraAspectMatchesSurface);
+        writer.member("bindingRegistryReleased", counters.bindingRegistryReleased);
+        if (resources.externalGltf || resources.completePbrFixture)
+        {
+            writer.member("gltfPath", resources.gltfSourcePath);
+        }
+        writer.member("instanceBatchesPerFrame", expectedStaticMeshes);
+        writer.member("catalogCooked", counters.catalogCooked);
+        writer.member("stateExits", counters.stateExits);
+        writer.member("uiRootsCreated", ui.rootsCreated);
+        writer.member("uiRootsReleased", ui.rootsReleased);
+        writer.member("uiPanelsCreated", ui.panelsCreated);
+        writer.member("uiLabelsCreated", ui.labelsCreated);
+        writer.member("uiButtonsCreated", ui.buttonsCreated);
+        writer.member("uiCheckboxesCreated", ui.checkboxesCreated);
+        writer.member("uiSlidersCreated", ui.slidersCreated);
+        writer.member("uiProgressBarsCreated", ui.progressBarsCreated);
+        writer.member("uiListViewsCreated", ui.listViewsCreated);
+        writer.member("uiTreeViewsCreated", ui.treeViewsCreated);
+        writer.member("uiThemeDemoRequested", ui.themeDemoRequested);
+        writer.member("uiThemeSwitches", ui.themeSwitches);
+        writer.member("uiAutomatedThemeSteps", ui.automatedThemeSteps);
+        writer.member("uiAutomatedCollectionSteps", ui.automatedCollectionSteps);
+        writer.member("uiTreeExpansionChanges", ui.treeExpansionChanges);
+        writer.member("uiListSelectionKey", ui.listSelectionKey);
+        writer.member("uiTreeSelectionKey", ui.treeSelectionKey);
+        writer.member("uiThemeButtonActivations", ui.themeButtonActivations);
+        writer.member("uiCheckboxActivations", ui.checkboxActivations);
+        writer.member("uiSliderChanges", ui.sliderChanges);
+        writer.member("uiThemeInitialLight", ui.initialThemeLight);
+        writer.member("uiThemeFinalLight", ui.finalThemeLight);
+        writer.member("uiInheritedChromeVerified", ui.inheritedChromeVerified);
+        writer.member("uiControlsInitialStateVerified", ui.controlsInitialStateVerified);
+        writer.member("uiResponsiveLayoutVerified", ui.responsiveLayoutVerified);
+        writer.member("uiAutoRotateFinal", ui.autoRotate);
+        writer.member("uiRotationSpeedFinal", ui.rotationSpeed);
+        writer.member("uiProgressUpdates", ui.progressUpdates);
+        writer.member("uiProgressFinal", ui.finalProgress);
+        writer.member("applicationShutdowns", counters.applicationShutdowns);
+        writer.member("engineHostDestroyed", true);
+        writer.member("renderResourceLedgerBalanced", true);
+        writer.member("pixelCaptureAttempted", counters.pixelCaptureAttempted);
+        writer.member("pixelCaptureOk", counters.pixelCaptureOk);
+        writer.member("pixelCaptureWidth", counters.pixelCaptureWidth);
+        writer.member("pixelCaptureHeight", counters.pixelCaptureHeight);
+        writer.member("pixelCaptureBytes", counters.pixelCaptureBytes);
+        writer.member("pixelFingerprint", counters.pixelFingerprint);
+        writer.member("sceneRgbPixelCount", counters.sceneRgbPixelCount);
+        writer.beginArrayMember("sceneRgbChannelSums");
+        for (const Tina::u64 channelSum : counters.sceneRgbChannelSums)
+        {
+            writer.element(channelSum);
+        }
+        writer.endArray();
+        writer.member("sceneRgbFingerprint", counters.sceneRgbFingerprint);
+        writer.member("sceneRgbOutputRequested", sceneRgbOutputRequested);
+        writer.member("sceneRgbOutputWritten", counters.sceneRgbOutputWritten);
+        writer.member("pixelGoldenChecked", pixelGoldenChecked);
+        writer.member("pixelGoldenMatched", pixelGoldenMatched);
+        writer.member("expectPixelFingerprint", options.expectPixelFingerprint);
+        writer.endObject();
     }
-    std::cout << ",\"instanceBatchesPerFrame\":" << expectedStaticMeshes
-              << ",\"catalogCooked\":" << counters.catalogCooked
-              << ",\"stateExits\":" << counters.stateExits
-              << ",\"uiRootsCreated\":" << ui.rootsCreated
-              << ",\"uiRootsReleased\":" << ui.rootsReleased
-              << ",\"uiPanelsCreated\":" << ui.panelsCreated
-              << ",\"uiLabelsCreated\":" << ui.labelsCreated
-              << ",\"uiButtonsCreated\":" << ui.buttonsCreated
-              << ",\"uiCheckboxesCreated\":" << ui.checkboxesCreated
-              << ",\"uiSlidersCreated\":" << ui.slidersCreated
-              << ",\"uiProgressBarsCreated\":" << ui.progressBarsCreated
-              << ",\"uiListViewsCreated\":" << ui.listViewsCreated
-              << ",\"uiTreeViewsCreated\":" << ui.treeViewsCreated
-              << ",\"uiThemeDemoRequested\":" << (ui.themeDemoRequested ? "true" : "false")
-              << ",\"uiThemeSwitches\":" << ui.themeSwitches
-              << ",\"uiAutomatedThemeSteps\":" << ui.automatedThemeSteps
-              << ",\"uiAutomatedCollectionSteps\":" << ui.automatedCollectionSteps
-              << ",\"uiTreeExpansionChanges\":" << ui.treeExpansionChanges
-              << ",\"uiListSelectionKey\":" << ui.listSelectionKey
-              << ",\"uiTreeSelectionKey\":" << ui.treeSelectionKey
-              << ",\"uiThemeButtonActivations\":" << ui.themeButtonActivations
-              << ",\"uiCheckboxActivations\":" << ui.checkboxActivations
-              << ",\"uiSliderChanges\":" << ui.sliderChanges
-              << ",\"uiThemeInitialLight\":" << (ui.initialThemeLight ? "true" : "false")
-              << ",\"uiThemeFinalLight\":" << (ui.finalThemeLight ? "true" : "false")
-              << ",\"uiInheritedChromeVerified\":" << (ui.inheritedChromeVerified ? "true" : "false")
-              << ",\"uiControlsInitialStateVerified\":"
-              << (ui.controlsInitialStateVerified ? "true" : "false")
-              << ",\"uiResponsiveLayoutVerified\":"
-              << (ui.responsiveLayoutVerified ? "true" : "false")
-              << ",\"uiAutoRotateFinal\":" << (ui.autoRotate ? "true" : "false")
-              << ",\"uiRotationSpeedFinal\":" << ui.rotationSpeed
-              << ",\"uiProgressUpdates\":" << ui.progressUpdates
-              << ",\"uiProgressFinal\":" << ui.finalProgress
-              << ",\"applicationShutdowns\":" << counters.applicationShutdowns
-              << ",\"engineHostDestroyed\":true,\"renderResourceLedgerBalanced\":true"
-              << ",\"pixelCaptureAttempted\":" << (counters.pixelCaptureAttempted ? "true" : "false")
-              << ",\"pixelCaptureOk\":" << (counters.pixelCaptureOk ? "true" : "false")
-              << ",\"pixelCaptureWidth\":" << counters.pixelCaptureWidth
-              << ",\"pixelCaptureHeight\":" << counters.pixelCaptureHeight
-              << ",\"pixelCaptureBytes\":" << counters.pixelCaptureBytes
-              << ",\"pixelFingerprint\":\"" << counters.pixelFingerprint << "\""
-              << ",\"sceneRgbPixelCount\":" << counters.sceneRgbPixelCount
-              << ",\"sceneRgbChannelSums\":[" << counters.sceneRgbChannelSums[0] << ','
-              << counters.sceneRgbChannelSums[1] << ',' << counters.sceneRgbChannelSums[2] << ']'
-              << ",\"sceneRgbFingerprint\":\"" << counters.sceneRgbFingerprint << "\""
-              << ",\"sceneRgbOutputRequested\":" << (sceneRgbOutputRequested ? "true" : "false")
-              << ",\"sceneRgbOutputWritten\":" << (counters.sceneRgbOutputWritten ? "true" : "false")
-              << ",\"pixelGoldenChecked\":" << (pixelGoldenChecked ? "true" : "false")
-              << ",\"pixelGoldenMatched\":" << (pixelGoldenMatched ? "true" : "false")
-              << ",\"expectPixelFingerprint\":\"" << options.expectPixelFingerprint << "\"}\n";
+    std::cout << '\n';
     return 0;
 }
 

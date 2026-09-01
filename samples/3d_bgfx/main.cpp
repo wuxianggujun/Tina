@@ -1,4 +1,5 @@
 #include <tina/asset/AssetStore.hpp>
+#include <tina/core/text/JsonWriter.hpp>
 #include <tina/desktop/DesktopEngine.hpp>
 #include <tina/render/FramePin.hpp>
 #include <tina/render/RenderScene.hpp>
@@ -103,28 +104,6 @@ struct LifecycleCounters final {
     };
 }
 
-void writeJsonString(std::ostream& output, std::string_view value)
-{
-    output.put('"');
-    for (const unsigned char byte : value)
-    {
-        if (byte == '"' || byte == '\\')
-        {
-            output.put('\\');
-            output.put(static_cast<char>(byte));
-        }
-        else if (byte == '\n')
-        {
-            output << "\\n";
-        }
-        else if (byte >= 0x20U)
-        {
-            output.put(static_cast<char>(byte));
-        }
-    }
-    output.put('"');
-}
-
 [[nodiscard]] std::string errorCodeName(Tina::Core::ErrorCode code)
 {
     return "tina." + std::to_string(static_cast<std::uint16_t>(code.domain)) + "." +
@@ -133,11 +112,14 @@ void writeJsonString(std::ostream& output, std::string_view value)
 
 void writeError(const Tina::Core::Error& error)
 {
-    std::cerr << "{\"status\":\"error\",\"sample\":\"tina_sample_3d_infrastructure\",\"code\":";
-    writeJsonString(std::cerr, errorCodeName(error.code));
-    std::cerr << ",\"message\":";
-    writeJsonString(std::cerr, error.message);
-    std::cerr << "}\n";
+    Tina::Core::JsonWriter writer(std::cerr);
+    writer.beginObject();
+    writer.member("status", "error");
+    writer.member("sample", "tina_sample_3d_infrastructure");
+    writer.member("code", errorCodeName(error.code));
+    writer.member("message", error.message);
+    writer.endObject();
+    std::cerr << '\n';
 }
 
 template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text, Value& value) noexcept
@@ -561,18 +543,36 @@ class Visible3DApplication final : public Tina::IGameApplication {
         counters.uiRootsCreated != 1 || counters.uiPanelsCreated != 2 ||
         counters.uiRootsReleased != 1)
     {
-        std::cerr << "{\"status\":\"error\",\"sample\":\"tina_sample_3d_infrastructure\","
-                     "\"message\":\"lifecycle counters did not match\"}\n";
+        {
+            Tina::Core::JsonWriter writer(std::cerr);
+            writer.beginObject();
+            writer.member("status", "error");
+            writer.member("sample", "tina_sample_3d_infrastructure");
+            writer.member("message", "lifecycle counters did not match");
+            writer.endObject();
+        }
+        std::cerr << '\n';
         return 1;
     }
 
-    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_3d_infrastructure\",\"frames\":"
-              << counters.frameUpdates << ",\"proceduralCubesPerFrame\":" << ProceduralCubeCount
-              << ",\"instanceBatchesPerFrame\":1,\"sceneExtract\":true,\"stateExits\":"
-              << counters.stateExits << ",\"uiPanelsPerFrame\":2,\"uiRootsReleased\":"
-              << counters.uiRootsReleased << ",\"applicationShutdowns\":"
-              << counters.applicationShutdowns
-              << ",\"engineHostDestroyed\":true,\"renderResourceLedgerBalanced\":true}\n";
+    {
+        Tina::Core::JsonWriter writer(std::cout);
+        writer.beginObject();
+        writer.member("status", "ok");
+        writer.member("sample", "tina_sample_3d_infrastructure");
+        writer.member("frames", counters.frameUpdates);
+        writer.member("proceduralCubesPerFrame", ProceduralCubeCount);
+        writer.member("instanceBatchesPerFrame", 1);
+        writer.member("sceneExtract", true);
+        writer.member("stateExits", counters.stateExits);
+        writer.member("uiPanelsPerFrame", 2);
+        writer.member("uiRootsReleased", counters.uiRootsReleased);
+        writer.member("applicationShutdowns", counters.applicationShutdowns);
+        writer.member("engineHostDestroyed", true);
+        writer.member("renderResourceLedgerBalanced", true);
+        writer.endObject();
+    }
+    std::cout << '\n';
     return 0;
 }
 

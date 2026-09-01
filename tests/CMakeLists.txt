@@ -1,5 +1,6 @@
 set(TINA_CORE_TEST_SOURCES
     core/ApplicationPathsTests.cpp
+    core/ArgParserTests.cpp
     core/AssertReleaseCompileTests.cpp
     core/AssertTests.cpp
     core/CancellationSignalTests.cpp
@@ -10,9 +11,13 @@ set(TINA_CORE_TEST_SOURCES
     core/UserPathsTests.cpp
     core/WriteFileTests.cpp
     core/EnumFlagsTests.cpp
+    core/JsonWriterTests.cpp
+    core/LogFormatTests.cpp
     core/MoveOnlyFunctionTests.cpp
+    core/PathUtilTests.cpp
     core/ParseFloatTests.cpp
     core/header_isolation/ApplicationPathsHeader.cpp
+    core/header_isolation/ArgParserHeader.cpp
     core/header_isolation/AssetIdHeader.cpp
     core/header_isolation/CancellationSignalHeader.cpp
     core/header_isolation/ContentHashHeader.cpp
@@ -20,6 +25,8 @@ set(TINA_CORE_TEST_SOURCES
     core/header_isolation/CrashHandlerHeader.cpp
     core/header_isolation/DiagnosticChannelHeader.cpp
     core/header_isolation/DiagnosticsHeader.cpp
+    core/header_isolation/LogFormatHeader.cpp
+    core/header_isolation/LogHeader.cpp
     core/header_isolation/LogLevelHeader.cpp
     core/header_isolation/LogRecordHeader.cpp
     core/header_isolation/ReadFileHeader.cpp
@@ -34,7 +41,9 @@ set(TINA_CORE_TEST_SOURCES
     core/header_isolation/MemoryTrackerHeader.cpp
     core/header_isolation/MonotonicClockHeader.cpp
     core/header_isolation/MoveOnlyFunctionHeader.cpp
+    core/header_isolation/JsonWriterHeader.cpp
     core/header_isolation/ParseFloatHeader.cpp
+    core/header_isolation/PathUtilHeader.cpp
     core/header_isolation/ResultHeader.cpp
     core/header_isolation/TraceHeader.cpp
     core/header_isolation/Utf8Header.cpp
@@ -129,6 +138,9 @@ target_compile_features(tina_tests PRIVATE cxx_std_23)
 target_include_directories(tina_tests PRIVATE
     ${PROJECT_SOURCE_DIR}/tests
     ${PROJECT_SOURCE_DIR}/samples/2d_tilemap_bgfx
+    # Reaches core/io/PathUtil.hpp, which cannot live in include/tina/ because it names
+    # std::filesystem::path. Keep this after ${PROJECT_SOURCE_DIR}/tests so tests/support wins.
+    ${PROJECT_SOURCE_DIR}/src
     ${PROJECT_SOURCE_DIR}/src/integration
 )
 target_link_libraries(tina_tests PRIVATE

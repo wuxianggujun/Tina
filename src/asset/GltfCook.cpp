@@ -9,7 +9,7 @@
 
 #include "DerivedAssetId.hpp"
 #include "GltfFileSnapshot.hpp"
-#include "Utf8Path.hpp"
+#include "core/io/PathUtil.hpp"
 
 #include <tina/asset/GltfCook.hpp>
 
@@ -946,7 +946,7 @@ void freeCgltfMemory(void* user, void* pointer) noexcept
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                              "glTF external URI schemes are not supported (use relative paths under glTF root)");
     }
-    const std::filesystem::path relative = Detail::pathFromUtf8Bytes(decoded);
+    const std::filesystem::path relative = Core::Detail::pathFromUtf8Bytes(decoded);
     if (relative.is_absolute() || relative.has_root_path())
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig,
@@ -1312,7 +1312,7 @@ namespace {
     GltfSourceCaptureContext* activeCapture = captureConfig != nullptr ? &capture : nullptr;
     Core::u32 primarySourceIndex = 0;
     std::string identityLocator;
-    const std::filesystem::path requestedPath = Detail::pathFromUtf8Bytes(gltfUtf8Path);
+    const std::filesystem::path requestedPath = Core::Detail::pathFromUtf8Bytes(gltfUtf8Path);
 
     if (captureConfig != nullptr)
     {

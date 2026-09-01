@@ -1,10 +1,13 @@
 ﻿#include "EditorWorkspaceState.hpp"
 
 #include <tina/core/diagnostics/CrashHandler.hpp>
+#include <tina/core/text/JsonWriter.hpp>
 #include <tina/desktop/UiFontFile.hpp>
 #include <tina/editor_app/EditorApplication.hpp>
 
 #include <algorithm>
+#include <array>
+#include <charconv>
 
 namespace Tina::EditorApp::WorkspaceInternal {
 
@@ -152,44 +155,58 @@ class EditorApplication final : public Tina::IGameApplication {
     return "Unknown";
 }
 
-void writeUnsignedDelta(std::ostream& output, u64 before, u64 after)
+// Emits `after - before` as a signed decimal. A shrinking counter has to print a
+// leading '-' followed by an unsigned magnitude, which no single arithmetic value
+// can express once the difference exceeds the signed range, so that branch renders
+// the digits itself and hands them over verbatim.
+void writeUnsignedDelta(Tina::Core::JsonWriter& writer, std::string_view key, u64 before, u64 after)
 {
     if (after >= before) {
-        output << after - before;
+        writer.member(key, after - before);
         return;
     }
-    output << '-' << before - after;
+    // 20 digits for the widest u64 magnitude, plus the sign.
+    std::array<char, 24> text{};
+    text[0] = '-';
+    const auto conversion =
+        std::to_chars(text.data() + 1, text.data() + text.size(), before - after);
+    writer.rawMember(
+        key, std::string_view(text.data(), static_cast<usize>(conversion.ptr - text.data())));
 }
 
 void writeProcessMemorySnapshot(
-    std::ostream& output,
+    Tina::Core::JsonWriter& writer,
+    std::string_view key,
     const EditorProcessMemorySnapshot& snapshot)
 {
-    output << "{\"sampled\":" << (snapshot.sampled ? "true" : "false")
-           << ",\"workingSetBytes\":" << snapshot.workingSetBytes
-           << ",\"peakWorkingSetBytes\":" << snapshot.peakWorkingSetBytes
-           << ",\"privateBytes\":" << snapshot.privateBytes << '}';
+    writer.beginObjectMember(key);
+    writer.member("sampled", snapshot.sampled);
+    writer.member("workingSetBytes", snapshot.workingSetBytes);
+    writer.member("peakWorkingSetBytes", snapshot.peakWorkingSetBytes);
+    writer.member("privateBytes", snapshot.privateBytes);
+    writer.endObject();
 }
 
 void writeProcessMemoryDelta(
-    std::ostream& output,
+    Tina::Core::JsonWriter& writer,
+    std::string_view key,
     const EditorProcessMemorySnapshot& before,
     const EditorProcessMemorySnapshot& after)
 {
     const bool sampled = before.sampled && after.sampled;
-    output << "{\"sampled\":" << (sampled ? "true" : "false")
-           << ",\"workingSetBytes\":";
-    writeUnsignedDelta(output, before.workingSetBytes, after.workingSetBytes);
-    output << ",\"peakWorkingSetBytes\":";
-    writeUnsignedDelta(output, before.peakWorkingSetBytes,
+    writer.beginObjectMember(key);
+    writer.member("sampled", sampled);
+    writeUnsignedDelta(writer, "workingSetBytes", before.workingSetBytes,
+                       after.workingSetBytes);
+    writeUnsignedDelta(writer, "peakWorkingSetBytes", before.peakWorkingSetBytes,
                        after.peakWorkingSetBytes);
-    output << ",\"privateBytes\":";
-    writeUnsignedDelta(output, before.privateBytes, after.privateBytes);
-    output << '}';
+    writeUnsignedDelta(writer, "privateBytes", before.privateBytes, after.privateBytes);
+    writer.endObject();
 }
 
 void writeFrameTimingStatistics(
-    std::ostream& output,
+    Tina::Core::JsonWriter& writer,
+    std::string_view key,
     const EditorFrameTimingStatistics& statistics)
 {
     const double averageFrameMilliseconds =
@@ -202,13 +219,12 @@ void writeFrameTimingStatistics(
             ? static_cast<double>(statistics.sampleCount) /
                   statistics.totalSeconds
             : 0.0;
-    output << "{\"samples\":" << statistics.sampleCount
-           << ",\"averageFrameMilliseconds\":"
-           << averageFrameMilliseconds
-           << ",\"worstFrameMilliseconds\":"
-           << statistics.maximumSeconds * 1000.0
-           << ",\"averageFramesPerSecond\":"
-           << averageFramesPerSecond << '}';
+    writer.beginObjectMember(key);
+    writer.member("samples", statistics.sampleCount);
+    writer.member("averageFrameMilliseconds", averageFrameMilliseconds);
+    writer.member("worstFrameMilliseconds", statistics.maximumSeconds * 1000.0);
+    writer.member("averageFramesPerSecond", averageFramesPerSecond);
+    writer.endObject();
 }
 
 [[nodiscard]] Tina::Core::Status verifyLifecycle(Tina::RunExitReason exitReason, const EditorLaunchOptions& options,
@@ -735,512 +751,443 @@ void writeFrameTimingStatistics(
     const Tina::UI::UIComponentStateCapacityConfig& componentStateCapacities =
         uiCapacities.componentStates;
 
-    std::cout << "{\"status\":\"ok\",\"application\":\"TinaEditor\",\"readOnly\":false"
-              << ",\"editorModule\":true,\"supports2D\":true,\"supports3D\":true,\"initialWorkspace\":";
-    writeJsonString(std::cout, options.initialWorkspace == WorkspaceMode::World2D ? "2d" : "3d");
-    std::cout << ",\"finalWorkspace\":";
-    writeJsonString(std::cout, counters.finalWorkspaceWorld2D ? "2d" : "3d");
-    std::cout << ",\"frames\":" << counters.frameUpdates
-              << ",\"targetFrames\":" << options.targetFrameCount
-              << ",\"frameDelayMs\":" << options.frameDelayMilliseconds
-              << ",\"autoDemo\":" << (options.autoDemo ? "true" : "false")
-              << ",\"profileUi\":" << (options.profileUi ? "true" : "false")
-              << ",\"profileUiLayoutDrag\":"
-              << (options.profileUiLayoutDrag ? "true" : "false")
-              << ",\"configuredUiNodeCapacity\":"
-              << uiCapacities.nodeCapacity
-              << ",\"configuredUiPaintCapacity\":"
-              << effectiveNodeDerivedCapacity(
-                     uiCapacities.nodeCapacity,
-                     uiCapacities.paintSnapshotCapacity)
-              << ",\"configuredVirtualGridViewStateCapacity\":"
-              << effectiveComponentStateCapacity(
-                     uiCapacities.nodeCapacity,
-                     componentStateCapacities.virtualGridViewCapacity,
-                     Tina::UI::UIComponentStateCapacityConfig::
-                         DefaultVirtualGridViewCapacity)
-              << ",\"configuredVirtualGridItemStateCapacity\":"
-              << effectiveComponentStateCapacity(
-                     uiCapacities.nodeCapacity,
-                     componentStateCapacities.virtualGridItemCapacity,
-                     Tina::UI::UIComponentStateCapacityConfig::
-                         DefaultVirtualGridItemCapacity)
-              << ",\"configuredDataGridStateCapacity\":"
-              << effectiveComponentStateCapacity(
-                     uiCapacities.nodeCapacity,
-                     componentStateCapacities.dataGridCapacity,
-                     Tina::UI::UIComponentStateCapacityConfig::
-                         DefaultDataGridCapacity)
-              << ",\"configuredDataGridColumnStateCapacity\":"
-              << effectiveComponentStateCapacity(
-                     uiCapacities.nodeCapacity,
-                     componentStateCapacities.dataGridColumnCapacity,
-                     Tina::UI::UIComponentStateCapacityConfig::
-                         DefaultDataGridColumnCapacity)
-              << ",\"configuredDataGridRowStateCapacity\":"
-              << effectiveComponentStateCapacity(
-                     uiCapacities.nodeCapacity,
-                     componentStateCapacities.dataGridRowCapacity,
-                     Tina::UI::UIComponentStateCapacityConfig::
-                         DefaultDataGridRowCapacity)
-              << ",\"configuredDataGridCellStateCapacity\":"
-              << effectiveComponentStateCapacity(
-                     uiCapacities.nodeCapacity,
-                     componentStateCapacities.dataGridCellCapacity,
-                     Tina::UI::UIComponentStateCapacityConfig::
-                         DefaultDataGridCellCapacity)
-              << ",\"configuredDisplayListCommandCapacity\":"
-              << engineConfig.primaryWindowUIDisplayListCapacities.commandCapacity
-              << ",\"configuredDisplayListClipCapacity\":"
-              << engineConfig.primaryWindowUIDisplayListCapacities.clipCapacity
-              << ",\"configuredDisplayListBatchCapacity\":"
-              << engineConfig.primaryWindowUIDisplayListCapacities.batchCapacity
-              << ",\"configuredRenderDrawCallCapacity\":"
-              << engineConfig.renderDrawCallCapacity
-              << ",\"configuredRenderMsaaSamples\":"
-              << static_cast<u32>(engineConfig.renderMsaaSamples)
-              << ",\"uiStatisticsSamples\":" << counters.uiStatisticsSamples
-              << ",\"uiPmrFirstBytes\":" << counters.uiStatisticsFirst.pmrCurrentBytes
-              << ",\"uiPmrLastBytes\":" << counters.uiStatisticsLast.pmrCurrentBytes
-              << ",\"uiPmrPeakBytes\":" << counters.uiStatisticsPeakPmrBytes
-              << ",\"uiPmrCurrentDeltaBytes\":";
-    writeUnsignedDelta(std::cout,
+    Tina::Core::JsonWriter writer(std::cout);
+    writer.beginObject();
+    writer.member("status", "ok");
+    writer.member("application", "TinaEditor");
+    writer.member("readOnly", false);
+    writer.member("editorModule", true);
+    writer.member("supports2D", true);
+    writer.member("supports3D", true);
+    writer.member("initialWorkspace",
+                  options.initialWorkspace == WorkspaceMode::World2D ? "2d" : "3d");
+    writer.member("finalWorkspace", counters.finalWorkspaceWorld2D ? "2d" : "3d");
+    writer.member("frames", counters.frameUpdates);
+    writer.member("targetFrames", options.targetFrameCount);
+    writer.member("frameDelayMs", options.frameDelayMilliseconds);
+    writer.member("autoDemo", options.autoDemo);
+    writer.member("profileUi", options.profileUi);
+    writer.member("profileUiLayoutDrag", options.profileUiLayoutDrag);
+    writer.member("configuredUiNodeCapacity", uiCapacities.nodeCapacity);
+    writer.member("configuredUiPaintCapacity",
+                  effectiveNodeDerivedCapacity(uiCapacities.nodeCapacity,
+                                               uiCapacities.paintSnapshotCapacity));
+    writer.member("configuredVirtualGridViewStateCapacity",
+                  effectiveComponentStateCapacity(
+                      uiCapacities.nodeCapacity,
+                      componentStateCapacities.virtualGridViewCapacity,
+                      Tina::UI::UIComponentStateCapacityConfig::
+                          DefaultVirtualGridViewCapacity));
+    writer.member("configuredVirtualGridItemStateCapacity",
+                  effectiveComponentStateCapacity(
+                      uiCapacities.nodeCapacity,
+                      componentStateCapacities.virtualGridItemCapacity,
+                      Tina::UI::UIComponentStateCapacityConfig::
+                          DefaultVirtualGridItemCapacity));
+    writer.member("configuredDataGridStateCapacity",
+                  effectiveComponentStateCapacity(
+                      uiCapacities.nodeCapacity,
+                      componentStateCapacities.dataGridCapacity,
+                      Tina::UI::UIComponentStateCapacityConfig::
+                          DefaultDataGridCapacity));
+    writer.member("configuredDataGridColumnStateCapacity",
+                  effectiveComponentStateCapacity(
+                      uiCapacities.nodeCapacity,
+                      componentStateCapacities.dataGridColumnCapacity,
+                      Tina::UI::UIComponentStateCapacityConfig::
+                          DefaultDataGridColumnCapacity));
+    writer.member("configuredDataGridRowStateCapacity",
+                  effectiveComponentStateCapacity(
+                      uiCapacities.nodeCapacity,
+                      componentStateCapacities.dataGridRowCapacity,
+                      Tina::UI::UIComponentStateCapacityConfig::
+                          DefaultDataGridRowCapacity));
+    writer.member("configuredDataGridCellStateCapacity",
+                  effectiveComponentStateCapacity(
+                      uiCapacities.nodeCapacity,
+                      componentStateCapacities.dataGridCellCapacity,
+                      Tina::UI::UIComponentStateCapacityConfig::
+                          DefaultDataGridCellCapacity));
+    writer.member("configuredDisplayListCommandCapacity",
+                  engineConfig.primaryWindowUIDisplayListCapacities.commandCapacity);
+    writer.member("configuredDisplayListClipCapacity",
+                  engineConfig.primaryWindowUIDisplayListCapacities.clipCapacity);
+    writer.member("configuredDisplayListBatchCapacity",
+                  engineConfig.primaryWindowUIDisplayListCapacities.batchCapacity);
+    writer.member("configuredRenderDrawCallCapacity", engineConfig.renderDrawCallCapacity);
+    writer.member("configuredRenderMsaaSamples",
+                  static_cast<u32>(engineConfig.renderMsaaSamples));
+    writer.member("uiStatisticsSamples", counters.uiStatisticsSamples);
+    writer.member("uiPmrFirstBytes", counters.uiStatisticsFirst.pmrCurrentBytes);
+    writer.member("uiPmrLastBytes", counters.uiStatisticsLast.pmrCurrentBytes);
+    writer.member("uiPmrPeakBytes", counters.uiStatisticsPeakPmrBytes);
+    writeUnsignedDelta(writer, "uiPmrCurrentDeltaBytes",
                        static_cast<u64>(counters.uiStatisticsFirst.pmrCurrentBytes),
                        static_cast<u64>(counters.uiStatisticsLast.pmrCurrentBytes));
-    std::cout << ",\"uiPmrFirstAllocationCount\":"
-              << counters.uiStatisticsFirst.pmrAllocationCount
-              << ",\"uiPmrLastAllocationCount\":"
-              << counters.uiStatisticsLast.pmrAllocationCount
-              << ",\"uiPmrAllocationCountDelta\":";
-    writeUnsignedDelta(std::cout, counters.uiStatisticsFirst.pmrAllocationCount,
+    writer.member("uiPmrFirstAllocationCount",
+                  counters.uiStatisticsFirst.pmrAllocationCount);
+    writer.member("uiPmrLastAllocationCount",
+                  counters.uiStatisticsLast.pmrAllocationCount);
+    writeUnsignedDelta(writer, "uiPmrAllocationCountDelta",
+                       counters.uiStatisticsFirst.pmrAllocationCount,
                        counters.uiStatisticsLast.pmrAllocationCount);
-    std::cout << ",\"uiPmrFirstDeallocationCount\":"
-              << counters.uiStatisticsFirst.pmrDeallocationCount
-              << ",\"uiPmrLastDeallocationCount\":"
-              << counters.uiStatisticsLast.pmrDeallocationCount
-              << ",\"uiPmrDeallocationCountDelta\":";
-    writeUnsignedDelta(std::cout, counters.uiStatisticsFirst.pmrDeallocationCount,
+    writer.member("uiPmrFirstDeallocationCount",
+                  counters.uiStatisticsFirst.pmrDeallocationCount);
+    writer.member("uiPmrLastDeallocationCount",
+                  counters.uiStatisticsLast.pmrDeallocationCount);
+    writeUnsignedDelta(writer, "uiPmrDeallocationCountDelta",
+                       counters.uiStatisticsFirst.pmrDeallocationCount,
                        counters.uiStatisticsLast.pmrDeallocationCount);
-    std::cout << ",\"uiPmrFailedAllocationCount\":"
-              << counters.uiStatisticsLast.pmrFailedAllocationCount
-              << ",\"uiPmrInvalidDeallocationCount\":"
-              << counters.uiStatisticsLast.pmrInvalidDeallocationCount
-              << ",\"uiPmrNodePoolBytes\":"
-              << counters.uiStatisticsLast.pmrNodePoolBytes
-              << ",\"uiPmrStateStorageBytes\":"
-              << counters.uiStatisticsLast.pmrStateStorageBytes
-              << ",\"uiPmrScratchReserveBytes\":"
-              << counters.uiStatisticsLast.pmrScratchReserveBytes
-              << ",\"uiPmrIndexAlignedStorageBytes\":"
-              << counters.uiStatisticsLast.pmrIndexAlignedStorageBytes
-              << ",\"uiPmrSnapshotBufferBytes\":"
-              << counters.uiStatisticsLast.pmrSnapshotBufferBytes
-              << ",\"uiPmrGlyphAtlasBytes\":"
-              << counters.uiStatisticsLast.pmrGlyphAtlasBytes
-              << ",\"processWorkingSetBytes\":" << counters.processWorkingSetBytes
-              << ",\"processPrivateBytes\":" << counters.processPrivateBytes
-              << ",\"processPeakWorkingSetBytes\":" << counters.processPeakWorkingSetBytes
-              << ",\"processPeakPrivateBytes\":" << counters.processPeakPrivateBytes
-              << ",\"processMemoryStages\":{\"afterOptions\":";
-    writeProcessMemorySnapshot(std::cout, counters.processAfterOptions);
-    std::cout << ",\"afterCatalog\":";
-    writeProcessMemorySnapshot(std::cout, counters.processAfterCatalog);
-    std::cout << ",\"afterEngineCreate\":";
-    writeProcessMemorySnapshot(std::cout, counters.processAfterEngineCreate);
-    std::cout << ",\"firstUiFrame\":";
-    writeProcessMemorySnapshot(std::cout, counters.processFirstUiFrame);
-    std::cout << ",\"lastUiFrame\":";
-    writeProcessMemorySnapshot(std::cout, counters.processLastUiFrame);
-    std::cout << ",\"afterRun\":";
-    writeProcessMemorySnapshot(std::cout, counters.processAfterRun);
-    std::cout << ",\"afterEngineDestroy\":";
-    writeProcessMemorySnapshot(std::cout, counters.processAfterEngineDestroy);
-    std::cout << "},\"processMemoryDeltas\":{\"catalog\":";
-    writeProcessMemoryDelta(std::cout, counters.processAfterOptions,
+    writer.member("uiPmrFailedAllocationCount",
+                  counters.uiStatisticsLast.pmrFailedAllocationCount);
+    writer.member("uiPmrInvalidDeallocationCount",
+                  counters.uiStatisticsLast.pmrInvalidDeallocationCount);
+    writer.member("uiPmrNodePoolBytes", counters.uiStatisticsLast.pmrNodePoolBytes);
+    writer.member("uiPmrStateStorageBytes",
+                  counters.uiStatisticsLast.pmrStateStorageBytes);
+    writer.member("uiPmrScratchReserveBytes",
+                  counters.uiStatisticsLast.pmrScratchReserveBytes);
+    writer.member("uiPmrIndexAlignedStorageBytes",
+                  counters.uiStatisticsLast.pmrIndexAlignedStorageBytes);
+    writer.member("uiPmrSnapshotBufferBytes",
+                  counters.uiStatisticsLast.pmrSnapshotBufferBytes);
+    writer.member("uiPmrGlyphAtlasBytes", counters.uiStatisticsLast.pmrGlyphAtlasBytes);
+    writer.member("processWorkingSetBytes", counters.processWorkingSetBytes);
+    writer.member("processPrivateBytes", counters.processPrivateBytes);
+    writer.member("processPeakWorkingSetBytes", counters.processPeakWorkingSetBytes);
+    writer.member("processPeakPrivateBytes", counters.processPeakPrivateBytes);
+    writer.beginObjectMember("processMemoryStages");
+    writeProcessMemorySnapshot(writer, "afterOptions", counters.processAfterOptions);
+    writeProcessMemorySnapshot(writer, "afterCatalog", counters.processAfterCatalog);
+    writeProcessMemorySnapshot(writer, "afterEngineCreate",
+                               counters.processAfterEngineCreate);
+    writeProcessMemorySnapshot(writer, "firstUiFrame", counters.processFirstUiFrame);
+    writeProcessMemorySnapshot(writer, "lastUiFrame", counters.processLastUiFrame);
+    writeProcessMemorySnapshot(writer, "afterRun", counters.processAfterRun);
+    writeProcessMemorySnapshot(writer, "afterEngineDestroy",
+                               counters.processAfterEngineDestroy);
+    writer.endObject();
+    writer.beginObjectMember("processMemoryDeltas");
+    writeProcessMemoryDelta(writer, "catalog", counters.processAfterOptions,
                             counters.processAfterCatalog);
-    std::cout << ",\"engineCreate\":";
-    writeProcessMemoryDelta(std::cout, counters.processAfterCatalog,
+    writeProcessMemoryDelta(writer, "engineCreate", counters.processAfterCatalog,
                             counters.processAfterEngineCreate);
-    std::cout << ",\"uiStartup\":";
-    writeProcessMemoryDelta(std::cout, counters.processAfterEngineCreate,
+    writeProcessMemoryDelta(writer, "uiStartup", counters.processAfterEngineCreate,
                             counters.processFirstUiFrame);
-    std::cout << ",\"steadyState\":";
-    writeProcessMemoryDelta(std::cout, counters.processFirstUiFrame,
+    writeProcessMemoryDelta(writer, "steadyState", counters.processFirstUiFrame,
                             counters.processLastUiFrame);
-    std::cout << ",\"runTeardown\":";
-    writeProcessMemoryDelta(std::cout, counters.processLastUiFrame,
+    writeProcessMemoryDelta(writer, "runTeardown", counters.processLastUiFrame,
                             counters.processAfterRun);
-    std::cout << ",\"engineDestroy\":";
-    writeProcessMemoryDelta(std::cout, counters.processAfterRun,
+    writeProcessMemoryDelta(writer, "engineDestroy", counters.processAfterRun,
                             counters.processAfterEngineDestroy);
-    std::cout << "},\"sourceImportProfile\":{\"cookedPayloadBytes\":"
-              << counters.sourceImportCookedPayloadBytes
-              << ",\"transientPoolPeakBytes\":"
-              << counters.sourceImportTransientMemoryPeakBytes
-              << ",\"transientPoolBytesAfterRelease\":"
-              << counters.sourceImportTransientMemoryBytesAfterRelease
-              << ",\"residentCookedFileBytesBefore\":"
-              << counters.sourceImportResidentCookedFileBytesBefore
-              << ",\"residentCookedFileBytesAfterCommit\":"
-              << counters.sourceImportResidentCookedFileBytesAfterCommit
-              << ",\"processStages\":{\"before\":";
-    writeProcessMemorySnapshot(std::cout, counters.sourceImportProcessBefore);
-    std::cout << ",\"afterWorker\":";
-    writeProcessMemorySnapshot(std::cout, counters.sourceImportProcessAfterWorker);
-    std::cout << ",\"afterCommit\":";
-    writeProcessMemorySnapshot(std::cout, counters.sourceImportProcessAfterCommit);
-    std::cout << ",\"sampledPeak\":";
-    writeProcessMemorySnapshot(std::cout, counters.sourceImportProcessPeak);
-    std::cout << "},\"processDeltas\":{\"worker\":";
-    writeProcessMemoryDelta(std::cout, counters.sourceImportProcessBefore,
+    writer.endObject();
+    writer.beginObjectMember("sourceImportProfile");
+    writer.member("cookedPayloadBytes", counters.sourceImportCookedPayloadBytes);
+    writer.member("transientPoolPeakBytes",
+                  counters.sourceImportTransientMemoryPeakBytes);
+    writer.member("transientPoolBytesAfterRelease",
+                  counters.sourceImportTransientMemoryBytesAfterRelease);
+    writer.member("residentCookedFileBytesBefore",
+                  counters.sourceImportResidentCookedFileBytesBefore);
+    writer.member("residentCookedFileBytesAfterCommit",
+                  counters.sourceImportResidentCookedFileBytesAfterCommit);
+    writer.beginObjectMember("processStages");
+    writeProcessMemorySnapshot(writer, "before", counters.sourceImportProcessBefore);
+    writeProcessMemorySnapshot(writer, "afterWorker",
+                               counters.sourceImportProcessAfterWorker);
+    writeProcessMemorySnapshot(writer, "afterCommit",
+                               counters.sourceImportProcessAfterCommit);
+    writeProcessMemorySnapshot(writer, "sampledPeak", counters.sourceImportProcessPeak);
+    writer.endObject();
+    writer.beginObjectMember("processDeltas");
+    writeProcessMemoryDelta(writer, "worker", counters.sourceImportProcessBefore,
                             counters.sourceImportProcessAfterWorker);
-    std::cout << ",\"commit\":";
-    writeProcessMemoryDelta(std::cout, counters.sourceImportProcessAfterWorker,
+    writeProcessMemoryDelta(writer, "commit", counters.sourceImportProcessAfterWorker,
                             counters.sourceImportProcessAfterCommit);
-    std::cout << ",\"total\":";
-    writeProcessMemoryDelta(std::cout, counters.sourceImportProcessBefore,
+    writeProcessMemoryDelta(writer, "total", counters.sourceImportProcessBefore,
                             counters.sourceImportProcessAfterCommit);
-    std::cout << ",\"sampledPeak\":";
-    writeProcessMemoryDelta(std::cout, counters.sourceImportProcessBefore,
+    writeProcessMemoryDelta(writer, "sampledPeak", counters.sourceImportProcessBefore,
                             counters.sourceImportProcessPeak);
-    std::cout << "},\"frameTiming\":{\"overall\":";
-    writeFrameTimingStatistics(std::cout, counters.frameTimingOverall);
-    std::cout << ",\"before\":";
-    writeFrameTimingStatistics(
-        std::cout, counters.frameTimingBeforeSourceImport);
-    std::cout << ",\"during\":";
-    writeFrameTimingStatistics(
-        std::cout, counters.frameTimingDuringSourceImport);
-    std::cout << ",\"after\":";
-    writeFrameTimingStatistics(
-        std::cout, counters.frameTimingAfterSourceImport);
+    writer.endObject();
+    writer.beginObjectMember("frameTiming");
+    writeFrameTimingStatistics(writer, "overall", counters.frameTimingOverall);
+    writeFrameTimingStatistics(writer, "before",
+                               counters.frameTimingBeforeSourceImport);
+    writeFrameTimingStatistics(writer, "during",
+                               counters.frameTimingDuringSourceImport);
+    writeFrameTimingStatistics(writer, "after", counters.frameTimingAfterSourceImport);
+    writer.endObject();
     // Close sourceImportProfile before emitting the Editor-wide timing fields.
     // This keeps import-only and orchestration measurements unambiguous for
     // profile consumers.
-    std::cout << "}},\"frameTiming\":{\"overall\":";
-    writeFrameTimingStatistics(std::cout, counters.frameTimingOverall);
-    std::cout << ",\"updateUi\":";
-    writeFrameTimingStatistics(std::cout, counters.updateUiTiming);
-    std::cout << ",\"layoutDebuggerUi\":";
-    writeFrameTimingStatistics(std::cout, counters.layoutDebuggerUiTiming);
-    std::cout << ",\"layoutDebuggerDrag\":";
-    writeFrameTimingStatistics(std::cout, counters.layoutDebuggerDragFrameTiming);
-    std::cout << "},\"layoutDebugger\":{\"snapshotChangedFrames\":"
-              << counters.layoutDebugSnapshotChangedFrames
-              << ",\"projectionChangedFrames\":"
-              << counters.layoutDebugProjectionChangedFrames
-              << ",\"dragFrames\":" << counters.layoutDebugDragFrames
-              << ",\"allBoundsSuppressedFrames\":"
-              << counters.layoutDebugAllBoundsSuppressedFrames
-              << ",\"profileMutationFrames\":"
-              << counters.layoutDebugProfileMutationFrames
-              << ",\"profileCommittedSamples\":"
-              << counters.layoutDebugProfileCommittedSamples
-              << ",\"profileWarmupFrames\":"
-              << LayoutDebugProfileWarmupFrameCount
-              << ",\"profileRequestedMutationFrames\":"
-              << LayoutDebugProfileMutationFrameCount
-              << ",\"profileCooldownFrames\":"
-              << LayoutDebugProfileCooldownFrameCount
-              << ",\"profileCompleted\":"
-              << (counters.layoutDebugProfileCompleted ? "true" : "false")
-              << ",\"profileLayoutRebuildFrames\":"
-              << counters.layoutDebugProfileLayoutRebuildFrames
-              << ",\"profileLayoutMeasuredNodes\":"
-              << counters.layoutDebugProfileLayoutMeasuredNodes
-              << ",\"profileLayoutArrangedNodes\":"
-              << counters.layoutDebugProfileLayoutArrangedNodes
-              << ",\"profileHitRebuildFrames\":"
-              << counters.layoutDebugProfileHitRebuildFrames
-              << ",\"profilePaintSnapshotRebuildFrames\":"
-              << counters.layoutDebugProfilePaintSnapshotRebuildFrames
-              << "},\"uiNodeCapacity\":" << counters.uiStatisticsLast.nodeCapacity
-              << ",\"uiLiveNodeCount\":" << counters.uiStatisticsLast.liveNodeCount
-              << ",\"uiCommittedNodeCount\":" << counters.uiStatisticsLast.committedNodeCount
-              << ",\"uiLayoutRebuilds\":" << counters.uiStatisticsLast.lastLayoutPassCount
-              << ",\"uiHitRebuilds\":" << counters.uiStatisticsLast.lastHitRebuildCount
-              << ",\"uiPaintCacheRebuilds\":" << counters.uiStatisticsLast.lastPaintCacheRebuildCount
-              << ",\"uiPaintSnapshotRebuilds\":" << counters.uiStatisticsLast.lastPaintSnapshotRebuildCount
-              << ",\"uiDirtyQueuePending\":" << counters.uiStatisticsLast.dirtyQueuePendingCount
-              << ",\"exit\":";
-    writeJsonString(std::cout, runExitReasonName(*runResult));
-    std::cout << ",\"documentPathConfigured\":"
-              << (counters.documentPathConfigured ? "true" : "false")
-              << ",\"world2DDocumentPath\":";
-    writeJsonString(std::cout, options.world2DDocumentPathUtf8);
-    std::cout << ",\"world3DDocumentPath\":";
-    writeJsonString(std::cout, options.world3DDocumentPathUtf8);
-    std::cout << ",\"catalogRoot\":";
-    writeJsonString(std::cout, options.catalogRootUtf8);
-    std::cout << ",\"projectRoot\":";
-    writeJsonString(std::cout, options.sourceImport.projectRootUtf8);
-    std::cout << ",\"sourceImportOnStart\":"
-              << (options.sourceImport.importOnStart ? "true" : "false")
-              << ",\"sourceImportIntendedUnits\":"
-              << counters.sourceImportIntendedUnits;
-    std::cout << ",\"activeCatalogRoot\":";
-    writeJsonString(std::cout, assetResources.catalogRootUtf8);
-    std::cout << ",\"documentLoaded\":" << (counters.documentLoaded ? "true" : "false")
-              << ",\"world2DDocumentPathConfigured\":"
-              << (counters.world2DDocumentPathConfigured ? "true" : "false")
-              << ",\"world3DDocumentPathConfigured\":"
-              << (counters.world3DDocumentPathConfigured ? "true" : "false")
-              << ",\"world2DDocumentLoaded\":"
-              << (counters.world2DDocumentLoaded ? "true" : "false")
-              << ",\"world3DDocumentLoaded\":"
-              << (counters.world3DDocumentLoaded ? "true" : "false")
-              << ",\"world2DDocumentDirty\":"
-              << (counters.world2DDocumentDirty ? "true" : "false")
-              << ",\"world3DDocumentDirty\":"
-              << (counters.world3DDocumentDirty ? "true" : "false")
-              << ",\"stateEnters\":" << counters.stateEnters << ",\"stateExits\":" << counters.stateExits
-              << ",\"applicationShutdowns\":" << counters.applicationShutdowns
-              << ",\"uiRootsCreated\":" << counters.uiRootsCreated
-              << ",\"uiRootsReleased\":" << counters.uiRootsReleased
-              << ",\"hierarchySelectionChanges\":" << counters.hierarchySelectionChanges
-              << ",\"hierarchyLogicalItems\":" << counters.hierarchyLogicalItems
-              << ",\"projectAssetSelectionChanges\":"
-              << counters.projectAssetSelectionChanges
-              << ",\"projectAssetOpenCount\":" << counters.projectAssetOpenCount
-              << ",\"projectAssetVisibleItems\":" << counters.projectAssetVisibleItems
-              << ",\"projectAssetBrowserReady\":"
-              << (counters.projectAssetBrowserReady ? "true" : "false")
-              << ",\"documentTabCount\":" << counters.documentTabCount
-              << ",\"documentTabSwitches\":" << counters.documentTabSwitches
-              << ",\"tabOwnedDocumentLoads\":" << counters.tabOwnedDocumentLoads
-              << ",\"tabOwnedDocumentSwaps\":" << counters.tabOwnedDocumentSwaps
-              << ",\"previewAssetBindingRefreshes\":"
-              << counters.previewAssetBindingRefreshes
-              << ",\"documentTabsReady\":"
-              << (counters.documentTabsReady ? "true" : "false")
-              << ",\"editorActionsReady\":"
-              << (counters.editorActionsReady ? "true" : "false")
-              << ",\"authoringEdits\":" << counters.authoringEdits
-              << ",\"authoringUndos\":" << counters.authoringUndos
-              << ",\"authoringRedos\":" << counters.authoringRedos
-              << ",\"authoringSaves\":" << counters.authoringSaves
-              << ",\"inspectorTransactions\":" << counters.inspectorTransactions
-              << ",\"inspectorRejectedTransactions\":" << counters.inspectorRejectedTransactions
-              << ",\"viewportGizmoBegins\":" << counters.viewportGizmoBegins
-              << ",\"viewportGizmoPreviews\":" << counters.viewportGizmoPreviews
-              << ",\"viewportGizmoCommits\":" << counters.viewportGizmoCommits
-              << ",\"viewportTranslateGizmoCommits\":"
-              << counters.viewportTranslateGizmoCommits
-              << ",\"viewportRotateGizmoCommits\":"
-              << counters.viewportRotateGizmoCommits
-              << ",\"viewportScaleGizmoCommits\":"
-              << counters.viewportScaleGizmoCommits
-              << ",\"viewportGroupGizmoCommits\":"
-              << counters.viewportGroupGizmoCommits
-              << ",\"viewportGroupRotateGizmoCommits\":"
-              << counters.viewportGroupRotateGizmoCommits
-              << ",\"viewportGroupScaleGizmoCommits\":"
-              << counters.viewportGroupScaleGizmoCommits
-              << ",\"viewportMaximumGizmoTargets\":"
-              << counters.viewportMaximumGizmoTargets
-              << ",\"viewportGizmoCancels\":" << counters.viewportGizmoCancels
-              << ",\"viewportGizmoRejects\":" << counters.viewportGizmoRejects
-              << ",\"viewportNavigationBatches\":"
-              << counters.viewportNavigationBatches
-              << ",\"viewportPan2DInputs\":" << counters.viewportPan2DInputs
-              << ",\"viewportZoom2DInputs\":" << counters.viewportZoom2DInputs
-              << ",\"viewportOrbit3DInputs\":" << counters.viewportOrbit3DInputs
-              << ",\"viewportPan3DInputs\":" << counters.viewportPan3DInputs
-              << ",\"viewportDolly3DInputs\":" << counters.viewportDolly3DInputs
-              << ",\"viewportMarqueeCommits\":" << counters.viewportMarqueeCommits
-              << ",\"viewportMarqueeReplaceCommits\":"
-              << counters.viewportMarqueeReplaceCommits
-              << ",\"viewportMarqueeAddCommits\":"
-              << counters.viewportMarqueeAddCommits
-              << ",\"viewportMarqueeToggleCommits\":"
-              << counters.viewportMarqueeToggleCommits
-              << ",\"viewportMarqueeSelectionChanges\":"
-              << counters.viewportMarqueeSelectionChanges
-              << ",\"viewportMarqueeAddedItems\":"
-              << counters.viewportMarqueeAddedItems
-              << ",\"viewportMarqueeRemovedItems\":"
-              << counters.viewportMarqueeRemovedItems
-              << ",\"viewportMarqueeMaximumSelection\":"
-              << counters.viewportMarqueeMaximumSelection
-              << ",\"viewportMarqueeCancels\":"
-              << counters.viewportMarqueeCancels
-              << ",\"viewportMarqueeRejects\":"
-              << counters.viewportMarqueeRejects
-              << ",\"sceneAddCommands\":" << counters.sceneAddCommands
-              << ",\"sceneDuplicateCommands\":" << counters.sceneDuplicateCommands
-              << ",\"sceneReparentRootCommands\":"
-              << counters.sceneReparentRootCommands
-              << ",\"sceneReparentCommands\":" << counters.sceneReparentCommands
-              << ",\"sceneDeleteCommands\":" << counters.sceneDeleteCommands
-              << ",\"rgbaCaptureAttempted\":"
-              << (counters.rgbaCaptureAttempted ? "true" : "false")
-              << ",\"rgbaCaptureOk\":"
-              << (counters.rgbaCaptureOk ? "true" : "false")
-              << ",\"rgbaCaptureOutputWritten\":"
-              << (counters.rgbaCaptureOutputWritten ? "true" : "false")
-              << ",\"rgbaCaptureWidth\":" << counters.rgbaCaptureWidth
-              << ",\"rgbaCaptureHeight\":" << counters.rgbaCaptureHeight
-              << ",\"rgbaCaptureBytes\":" << counters.rgbaCaptureBytes
-              << ",\"rgbaOutput\":";
-    writeJsonString(std::cout, options.rgbaOutputUtf8);
-    std::cout << ",\"rgbaStage\":";
-    writeJsonString(std::cout, rgbaCaptureStageName(options.rgbaStage));
-    std::cout
-              << ",\"automaticAddedStableId\":" << counters.automaticAddedStableId
-              << ",\"automaticDuplicatedStableId\":"
-              << counters.automaticDuplicatedStableId
-              << ",\"automaticAuthoringStage\":"
-              << counters.automaticAuthoringStage
-              << ",\"playStarts\":" << counters.playStarts
-              << ",\"playPauses\":" << counters.playPauses
-              << ",\"playStepRequests\":" << counters.playStepRequests
-              << ",\"playResumes\":" << counters.playResumes
-              << ",\"playStops\":" << counters.playStops
-              << ",\"playSimulationSteps\":" << counters.playSimulationSteps
-              << ",\"playMaximumSimulationTick\":"
-              << counters.playMaximumSimulationTick
-              << ",\"viewportGridRevision\":" << counters.viewportGridRevision
-              << ",\"viewportGridSegments\":" << counters.viewportGridSegments
-              << ",\"viewportGridMinorLines\":" << counters.viewportGridMinorLines
-              << ",\"viewportGridMajorLines\":" << counters.viewportGridMajorLines
-              << ",\"viewportGridAxisLines\":" << counters.viewportGridAxisLines
-              << ",\"viewportZoomPercent\":" << counters.viewportZoomPercent
-              << ",\"viewportGridReady\":"
-              << (counters.viewportGridReady ? "true" : "false")
-              << ",\"viewportGrid2DObserved\":"
-              << (counters.viewportGrid2DObserved ? "true" : "false")
-              << ",\"viewportGrid3DObserved\":"
-              << (counters.viewportGrid3DObserved ? "true" : "false")
-              << ",\"savedSnapshotBytes\":" << counters.savedSnapshotBytes
-              << ",\"world2DSavedSnapshotBytes\":" << counters.world2DSavedSnapshotBytes
-              << ",\"world3DSavedSnapshotBytes\":" << counters.world3DSavedSnapshotBytes
-              << ",\"editorLayoutRegions\":" << counters.editorLayoutRegions
-              << ",\"viewportLayoutReady\":" << (counters.viewportLayoutReady ? "true" : "false")
-              << ",\"inspectorScrollConfigured\":"
-              << (counters.inspectorScrollConfigured ? "true" : "false")
-              << ",\"renderExtractions\":" << counters.renderExtractions
-              << ",\"gpuViewportSprites\":" << counters.gpuViewportSprites
-              << ",\"gpuViewportMeshes\":" << counters.gpuViewportMeshes
-              << ",\"catalogReady\":" << (counters.catalogReady ? "true" : "false")
-              << ",\"projectCatalogConfigured\":"
-              << (counters.projectCatalogConfigured ? "true" : "false")
-              << ",\"testFixtureCatalog\":"
-              << (counters.testFixtureCatalog ? "true" : "false")
-              << ",\"projectSwitches\":" << counters.projectSwitches
-              << ",\"sourceImportStarts\":" << counters.sourceImportStarts
-              << ",\"sourceImportCompletions\":" << counters.sourceImportCompletions
-              << ",\"sourceImportFailures\":" << counters.sourceImportFailures
-              << ",\"sourceImportBusyRetries\":" << counters.sourceImportBusyRetries
-              << ",\"sourceImportCatalogReloads\":" << counters.sourceImportCatalogReloads
-              << ",\"sourceImportUnitsTotal\":" << counters.sourceImportUnitsTotal
-              << ",\"sourceImportUnitsRecooked\":" << counters.sourceImportUnitsRecooked
-              << ",\"sourceImportUnitsRemoved\":" << counters.sourceImportUnitsRemoved
-              << ",\"sourceImportObjectsReused\":" << counters.sourceImportObjectsReused
-              << ",\"sourceImportObjectsCooked\":" << counters.sourceImportObjectsCooked
-              << ",\"sourceImportRunning\":"
-              << (counters.sourceImportRunning ? "true" : "false")
-              << ",\"sourceImportReady\":"
-              << (counters.sourceImportReady ? "true" : "false")
-              << ",\"sourceImportStateCommitted\":"
-              << (counters.sourceImportStateCommitted ? "true" : "false")
-              << ",\"catalogEntryCount\":" << counters.catalogEntryCount
-              << ",\"catalogAssetsLoaded\":" << counters.catalogAssetsLoaded
-              << ",\"catalogGpuTextures\":" << counters.catalogGpuTextures
-              << ",\"catalogGpuMeshes\":" << counters.catalogGpuMeshes
-              << ",\"catalogSpriteBindings\":" << counters.catalogSpriteBindings
-              << ",\"catalogMeshBindings\":" << counters.catalogMeshBindings
-              << ",\"catalogMaterialBindings\":" << counters.catalogMaterialBindings
-              << ",\"catalogUnresolvedReferences\":"
-              << counters.catalogUnresolvedReferences
-              << ",\"catalogResolved2DSprites\":" << counters.catalogResolved2DSprites
-              << ",\"catalogResolved3DMeshes\":" << counters.catalogResolved3DMeshes
-              << ",\"tileMapDocumentRevision\":" << counters.tileMapDocumentRevision
-              << ",\"tileMapLayerCount\":" << counters.tileMapLayerCount
-              << ",\"tileMapChunkCount\":" << counters.tileMapChunkCount
-              << ",\"tileMapAuthoredCells\":" << counters.tileMapAuthoredCells
-              << ",\"tileMapCookArtifacts\":" << counters.tileMapCookArtifacts
-              << ",\"tileMapCookPreviewBytes\":" << counters.tileMapCookPreviewBytes
-              << ",\"tileMapEmittedSprites\":" << counters.tileMapEmittedSprites
-              << ",\"tileMapEdits\":" << counters.tileMapEdits
-              << ",\"tileMapUndos\":" << counters.tileMapUndos
-              << ",\"tileMapRedos\":" << counters.tileMapRedos
-              << ",\"tileMapGameplayGenerations\":" << counters.tileMapGameplayGenerations
-              << ",\"tileMapGameplaySpawnRecords\":" << counters.tileMapGameplaySpawnRecords
-              << ",\"tileMapGameplayBytes\":" << counters.tileMapGameplayBytes
-              << ",\"tileMapGameplaySourceRevision\":"
-              << counters.tileMapGameplaySourceRevision
-              << ",\"navigationBakeRevision\":" << counters.navigationBakeRevision
-              << ",\"navigationSourceTileMapRevision\":"
-              << counters.navigationSourceTileMapRevision
-              << ",\"navigationPayloadBytes\":" << counters.navigationPayloadBytes
-              << ",\"navigationCatalogPublishes\":"
-              << counters.navigationCatalogPublishes
-              << ",\"navigationBakeReady\":"
-              << (counters.navigationBakeReady ? "true" : "false")
-              << ",\"navigationBakeDirty\":"
-              << (counters.navigationBakeDirty ? "true" : "false")
-              << ",\"animationDocumentRevision\":" << counters.animationDocumentRevision
-              << ",\"animationFrameCount\":" << counters.animationFrameCount
-              << ",\"animationCookPreviewBytes\":" << counters.animationCookPreviewBytes
-              << ",\"animationPreviewFrameIndex\":" << counters.animationPreviewFrameIndex
-              << ",\"animationEventCount\":" << counters.animationEventCount
-              << ",\"animationSelectedEventIndex\":" << counters.animationSelectedEventIndex
-              << ",\"animationEventEdits\":" << counters.animationEventEdits
-              << ",\"animationEventRejectedEdits\":" << counters.animationEventRejectedEdits
-              << ",\"animationEdits\":" << counters.animationEdits
-              << ",\"animationUndos\":" << counters.animationUndos
-              << ",\"animationRedos\":" << counters.animationRedos
-              << ",\"animationPlaybackTransitions\":" << counters.animationPlaybackTransitions
-              << ",\"workspaceSwitches\":" << counters.workspaceSwitches
-              << ",\"world2DWorkspaceReady\":"
-              << (counters.world2DWorkspaceReady ? "true" : "false")
-              << ",\"world3DWorkspaceReady\":"
-              << (counters.world3DWorkspaceReady ? "true" : "false")
-              << ",\"gpuViewportDocumentRevision\":" << counters.gpuViewportDocumentRevision
-              << ",\"gpuViewportReady\":" << (counters.gpuViewportReady ? "true" : "false")
-              << ",\"viewportLogicalX\":" << counters.viewportLogicalX
-              << ",\"viewportLogicalY\":" << counters.viewportLogicalY
-              << ",\"viewportLogicalWidth\":" << counters.viewportLogicalWidth
-              << ",\"viewportLogicalHeight\":" << counters.viewportLogicalHeight
-              << ",\"viewportNormalizedX\":" << counters.viewportNormalizedX
-              << ",\"viewportNormalizedY\":" << counters.viewportNormalizedY
-              << ",\"viewportNormalizedWidth\":" << counters.viewportNormalizedWidth
-              << ",\"viewportNormalizedHeight\":" << counters.viewportNormalizedHeight
-              << ",\"viewportGizmoWorldDeltaX\":" << counters.viewportGizmoWorldDeltaX
-              << ",\"viewportGizmoWorldDeltaY\":" << counters.viewportGizmoWorldDeltaY
-              << ",\"viewportGizmoWorldDeltaZ\":" << counters.viewportGizmoWorldDeltaZ
-              << ",\"viewportGizmoRotationDegrees\":"
-              << counters.viewportGizmoRotationDegrees
-              << ",\"viewportGizmoScaleFactorX\":"
-              << counters.viewportGizmoScaleFactorX
-              << ",\"viewportGizmoScaleFactorY\":"
-              << counters.viewportGizmoScaleFactorY
-              << ",\"viewportGizmoScaleFactorZ\":"
-              << counters.viewportGizmoScaleFactorZ
-              << ",\"runtimePreviewInstantiations\":" << counters.runtimePreviewInstantiations
-              << ",\"runtimePreviewValid\":" << (counters.runtimePreviewValid ? "true" : "false")
-              << ",\"documentRevision\":" << counters.documentRevision
-              << ",\"documentEntityCount\":" << counters.documentEntityCount
-              << ",\"documentUndoDepth\":" << counters.documentUndoDepth
-              << ",\"documentRedoDepth\":" << counters.documentRedoDepth
-              << ",\"documentSaved\":" << (counters.documentSaved ? "true" : "false")
-              << ",\"documentDirty\":" << (counters.documentDirty ? "true" : "false")
-              << ",\"cookPreviewBytes\":" << counters.cookPreviewBytes
-              << ",\"selectedTransformPositionX\":" << counters.selectedTransformPositionX
-              << ",\"selectedTransformPositionY\":" << counters.selectedTransformPositionY
-              << ",\"selectedTransformPositionZ\":" << counters.selectedTransformPositionZ
-              << ",\"selectedTransformRotationXDegrees\":"
-              << counters.selectedTransformRotationXDegrees
-              << ",\"selectedTransformRotationYDegrees\":"
-              << counters.selectedTransformRotationYDegrees
-              << ",\"selectedTransformRotationZDegrees\":"
-              << counters.selectedTransformRotationZDegrees
-              << ",\"selectedTransformScaleX\":" << counters.selectedTransformScaleX
-              << ",\"selectedTransformScaleY\":" << counters.selectedTransformScaleY
-              << ",\"selectedTransformScaleZ\":" << counters.selectedTransformScaleZ
-              << ",\"finalSelectionKey\":" << counters.finalSelectionKey
-              << ",\"finalSelectionIndex\":" << counters.finalSelectionIndex
-              << ",\"selectionVerified\":" << (counters.selectionVerified ? "true" : "false") << "}\n";
+    writer.endObject();
+    writer.beginObjectMember("frameTiming");
+    writeFrameTimingStatistics(writer, "overall", counters.frameTimingOverall);
+    writeFrameTimingStatistics(writer, "updateUi", counters.updateUiTiming);
+    writeFrameTimingStatistics(writer, "layoutDebuggerUi", counters.layoutDebuggerUiTiming);
+    writeFrameTimingStatistics(writer, "layoutDebuggerDrag",
+                               counters.layoutDebuggerDragFrameTiming);
+    writer.endObject();
+    writer.beginObjectMember("layoutDebugger");
+    writer.member("snapshotChangedFrames", counters.layoutDebugSnapshotChangedFrames);
+    writer.member("projectionChangedFrames",
+                  counters.layoutDebugProjectionChangedFrames);
+    writer.member("dragFrames", counters.layoutDebugDragFrames);
+    writer.member("allBoundsSuppressedFrames",
+                  counters.layoutDebugAllBoundsSuppressedFrames);
+    writer.member("profileMutationFrames", counters.layoutDebugProfileMutationFrames);
+    writer.member("profileCommittedSamples",
+                  counters.layoutDebugProfileCommittedSamples);
+    writer.member("profileWarmupFrames", LayoutDebugProfileWarmupFrameCount);
+    writer.member("profileRequestedMutationFrames", LayoutDebugProfileMutationFrameCount);
+    writer.member("profileCooldownFrames", LayoutDebugProfileCooldownFrameCount);
+    writer.member("profileCompleted", counters.layoutDebugProfileCompleted);
+    writer.member("profileLayoutRebuildFrames",
+                  counters.layoutDebugProfileLayoutRebuildFrames);
+    writer.member("profileLayoutMeasuredNodes",
+                  counters.layoutDebugProfileLayoutMeasuredNodes);
+    writer.member("profileLayoutArrangedNodes",
+                  counters.layoutDebugProfileLayoutArrangedNodes);
+    writer.member("profileHitRebuildFrames", counters.layoutDebugProfileHitRebuildFrames);
+    writer.member("profilePaintSnapshotRebuildFrames",
+                  counters.layoutDebugProfilePaintSnapshotRebuildFrames);
+    writer.endObject();
+    writer.member("uiNodeCapacity", counters.uiStatisticsLast.nodeCapacity);
+    writer.member("uiLiveNodeCount", counters.uiStatisticsLast.liveNodeCount);
+    writer.member("uiCommittedNodeCount", counters.uiStatisticsLast.committedNodeCount);
+    writer.member("uiLayoutRebuilds", counters.uiStatisticsLast.lastLayoutPassCount);
+    writer.member("uiHitRebuilds", counters.uiStatisticsLast.lastHitRebuildCount);
+    writer.member("uiPaintCacheRebuilds",
+                  counters.uiStatisticsLast.lastPaintCacheRebuildCount);
+    writer.member("uiPaintSnapshotRebuilds",
+                  counters.uiStatisticsLast.lastPaintSnapshotRebuildCount);
+    writer.member("uiDirtyQueuePending", counters.uiStatisticsLast.dirtyQueuePendingCount);
+    writer.member("exit", runExitReasonName(*runResult));
+    writer.member("documentPathConfigured", counters.documentPathConfigured);
+    writer.member("world2DDocumentPath", options.world2DDocumentPathUtf8);
+    writer.member("world3DDocumentPath", options.world3DDocumentPathUtf8);
+    writer.member("catalogRoot", options.catalogRootUtf8);
+    writer.member("projectRoot", options.sourceImport.projectRootUtf8);
+    writer.member("sourceImportOnStart", options.sourceImport.importOnStart);
+    writer.member("sourceImportIntendedUnits", counters.sourceImportIntendedUnits);
+    writer.member("activeCatalogRoot", assetResources.catalogRootUtf8);
+    writer.member("documentLoaded", counters.documentLoaded);
+    writer.member("world2DDocumentPathConfigured",
+                  counters.world2DDocumentPathConfigured);
+    writer.member("world3DDocumentPathConfigured",
+                  counters.world3DDocumentPathConfigured);
+    writer.member("world2DDocumentLoaded", counters.world2DDocumentLoaded);
+    writer.member("world3DDocumentLoaded", counters.world3DDocumentLoaded);
+    writer.member("world2DDocumentDirty", counters.world2DDocumentDirty);
+    writer.member("world3DDocumentDirty", counters.world3DDocumentDirty);
+    writer.member("stateEnters", counters.stateEnters);
+    writer.member("stateExits", counters.stateExits);
+    writer.member("applicationShutdowns", counters.applicationShutdowns);
+    writer.member("uiRootsCreated", counters.uiRootsCreated);
+    writer.member("uiRootsReleased", counters.uiRootsReleased);
+    writer.member("hierarchySelectionChanges", counters.hierarchySelectionChanges);
+    writer.member("hierarchyLogicalItems", counters.hierarchyLogicalItems);
+    writer.member("projectAssetSelectionChanges", counters.projectAssetSelectionChanges);
+    writer.member("projectAssetOpenCount", counters.projectAssetOpenCount);
+    writer.member("projectAssetVisibleItems", counters.projectAssetVisibleItems);
+    writer.member("projectAssetBrowserReady", counters.projectAssetBrowserReady);
+    writer.member("documentTabCount", counters.documentTabCount);
+    writer.member("documentTabSwitches", counters.documentTabSwitches);
+    writer.member("tabOwnedDocumentLoads", counters.tabOwnedDocumentLoads);
+    writer.member("tabOwnedDocumentSwaps", counters.tabOwnedDocumentSwaps);
+    writer.member("previewAssetBindingRefreshes", counters.previewAssetBindingRefreshes);
+    writer.member("documentTabsReady", counters.documentTabsReady);
+    writer.member("editorActionsReady", counters.editorActionsReady);
+    writer.member("authoringEdits", counters.authoringEdits);
+    writer.member("authoringUndos", counters.authoringUndos);
+    writer.member("authoringRedos", counters.authoringRedos);
+    writer.member("authoringSaves", counters.authoringSaves);
+    writer.member("inspectorTransactions", counters.inspectorTransactions);
+    writer.member("inspectorRejectedTransactions",
+                  counters.inspectorRejectedTransactions);
+    writer.member("viewportGizmoBegins", counters.viewportGizmoBegins);
+    writer.member("viewportGizmoPreviews", counters.viewportGizmoPreviews);
+    writer.member("viewportGizmoCommits", counters.viewportGizmoCommits);
+    writer.member("viewportTranslateGizmoCommits",
+                  counters.viewportTranslateGizmoCommits);
+    writer.member("viewportRotateGizmoCommits", counters.viewportRotateGizmoCommits);
+    writer.member("viewportScaleGizmoCommits", counters.viewportScaleGizmoCommits);
+    writer.member("viewportGroupGizmoCommits", counters.viewportGroupGizmoCommits);
+    writer.member("viewportGroupRotateGizmoCommits",
+                  counters.viewportGroupRotateGizmoCommits);
+    writer.member("viewportGroupScaleGizmoCommits",
+                  counters.viewportGroupScaleGizmoCommits);
+    writer.member("viewportMaximumGizmoTargets", counters.viewportMaximumGizmoTargets);
+    writer.member("viewportGizmoCancels", counters.viewportGizmoCancels);
+    writer.member("viewportGizmoRejects", counters.viewportGizmoRejects);
+    writer.member("viewportNavigationBatches", counters.viewportNavigationBatches);
+    writer.member("viewportPan2DInputs", counters.viewportPan2DInputs);
+    writer.member("viewportZoom2DInputs", counters.viewportZoom2DInputs);
+    writer.member("viewportOrbit3DInputs", counters.viewportOrbit3DInputs);
+    writer.member("viewportPan3DInputs", counters.viewportPan3DInputs);
+    writer.member("viewportDolly3DInputs", counters.viewportDolly3DInputs);
+    writer.member("viewportMarqueeCommits", counters.viewportMarqueeCommits);
+    writer.member("viewportMarqueeReplaceCommits",
+                  counters.viewportMarqueeReplaceCommits);
+    writer.member("viewportMarqueeAddCommits", counters.viewportMarqueeAddCommits);
+    writer.member("viewportMarqueeToggleCommits", counters.viewportMarqueeToggleCommits);
+    writer.member("viewportMarqueeSelectionChanges",
+                  counters.viewportMarqueeSelectionChanges);
+    writer.member("viewportMarqueeAddedItems", counters.viewportMarqueeAddedItems);
+    writer.member("viewportMarqueeRemovedItems", counters.viewportMarqueeRemovedItems);
+    writer.member("viewportMarqueeMaximumSelection",
+                  counters.viewportMarqueeMaximumSelection);
+    writer.member("viewportMarqueeCancels", counters.viewportMarqueeCancels);
+    writer.member("viewportMarqueeRejects", counters.viewportMarqueeRejects);
+    writer.member("sceneAddCommands", counters.sceneAddCommands);
+    writer.member("sceneDuplicateCommands", counters.sceneDuplicateCommands);
+    writer.member("sceneReparentRootCommands", counters.sceneReparentRootCommands);
+    writer.member("sceneReparentCommands", counters.sceneReparentCommands);
+    writer.member("sceneDeleteCommands", counters.sceneDeleteCommands);
+    writer.member("rgbaCaptureAttempted", counters.rgbaCaptureAttempted);
+    writer.member("rgbaCaptureOk", counters.rgbaCaptureOk);
+    writer.member("rgbaCaptureOutputWritten", counters.rgbaCaptureOutputWritten);
+    writer.member("rgbaCaptureWidth", counters.rgbaCaptureWidth);
+    writer.member("rgbaCaptureHeight", counters.rgbaCaptureHeight);
+    writer.member("rgbaCaptureBytes", counters.rgbaCaptureBytes);
+    writer.member("rgbaOutput", options.rgbaOutputUtf8);
+    writer.member("rgbaStage", rgbaCaptureStageName(options.rgbaStage));
+    writer.member("automaticAddedStableId", counters.automaticAddedStableId);
+    writer.member("automaticDuplicatedStableId", counters.automaticDuplicatedStableId);
+    writer.member("automaticAuthoringStage", counters.automaticAuthoringStage);
+    writer.member("playStarts", counters.playStarts);
+    writer.member("playPauses", counters.playPauses);
+    writer.member("playStepRequests", counters.playStepRequests);
+    writer.member("playResumes", counters.playResumes);
+    writer.member("playStops", counters.playStops);
+    writer.member("playSimulationSteps", counters.playSimulationSteps);
+    writer.member("playMaximumSimulationTick", counters.playMaximumSimulationTick);
+    writer.member("viewportGridRevision", counters.viewportGridRevision);
+    writer.member("viewportGridSegments", counters.viewportGridSegments);
+    writer.member("viewportGridMinorLines", counters.viewportGridMinorLines);
+    writer.member("viewportGridMajorLines", counters.viewportGridMajorLines);
+    writer.member("viewportGridAxisLines", counters.viewportGridAxisLines);
+    writer.member("viewportZoomPercent", counters.viewportZoomPercent);
+    writer.member("viewportGridReady", counters.viewportGridReady);
+    writer.member("viewportGrid2DObserved", counters.viewportGrid2DObserved);
+    writer.member("viewportGrid3DObserved", counters.viewportGrid3DObserved);
+    writer.member("savedSnapshotBytes", counters.savedSnapshotBytes);
+    writer.member("world2DSavedSnapshotBytes", counters.world2DSavedSnapshotBytes);
+    writer.member("world3DSavedSnapshotBytes", counters.world3DSavedSnapshotBytes);
+    writer.member("editorLayoutRegions", counters.editorLayoutRegions);
+    writer.member("viewportLayoutReady", counters.viewportLayoutReady);
+    writer.member("inspectorScrollConfigured", counters.inspectorScrollConfigured);
+    writer.member("renderExtractions", counters.renderExtractions);
+    writer.member("gpuViewportSprites", counters.gpuViewportSprites);
+    writer.member("gpuViewportMeshes", counters.gpuViewportMeshes);
+    writer.member("catalogReady", counters.catalogReady);
+    writer.member("projectCatalogConfigured", counters.projectCatalogConfigured);
+    writer.member("testFixtureCatalog", counters.testFixtureCatalog);
+    writer.member("projectSwitches", counters.projectSwitches);
+    writer.member("sourceImportStarts", counters.sourceImportStarts);
+    writer.member("sourceImportCompletions", counters.sourceImportCompletions);
+    writer.member("sourceImportFailures", counters.sourceImportFailures);
+    writer.member("sourceImportBusyRetries", counters.sourceImportBusyRetries);
+    writer.member("sourceImportCatalogReloads", counters.sourceImportCatalogReloads);
+    writer.member("sourceImportUnitsTotal", counters.sourceImportUnitsTotal);
+    writer.member("sourceImportUnitsRecooked", counters.sourceImportUnitsRecooked);
+    writer.member("sourceImportUnitsRemoved", counters.sourceImportUnitsRemoved);
+    writer.member("sourceImportObjectsReused", counters.sourceImportObjectsReused);
+    writer.member("sourceImportObjectsCooked", counters.sourceImportObjectsCooked);
+    writer.member("sourceImportRunning", counters.sourceImportRunning);
+    writer.member("sourceImportReady", counters.sourceImportReady);
+    writer.member("sourceImportStateCommitted", counters.sourceImportStateCommitted);
+    writer.member("catalogEntryCount", counters.catalogEntryCount);
+    writer.member("catalogAssetsLoaded", counters.catalogAssetsLoaded);
+    writer.member("catalogGpuTextures", counters.catalogGpuTextures);
+    writer.member("catalogGpuMeshes", counters.catalogGpuMeshes);
+    writer.member("catalogSpriteBindings", counters.catalogSpriteBindings);
+    writer.member("catalogMeshBindings", counters.catalogMeshBindings);
+    writer.member("catalogMaterialBindings", counters.catalogMaterialBindings);
+    writer.member("catalogUnresolvedReferences", counters.catalogUnresolvedReferences);
+    writer.member("catalogResolved2DSprites", counters.catalogResolved2DSprites);
+    writer.member("catalogResolved3DMeshes", counters.catalogResolved3DMeshes);
+    writer.member("tileMapDocumentRevision", counters.tileMapDocumentRevision);
+    writer.member("tileMapLayerCount", counters.tileMapLayerCount);
+    writer.member("tileMapChunkCount", counters.tileMapChunkCount);
+    writer.member("tileMapAuthoredCells", counters.tileMapAuthoredCells);
+    writer.member("tileMapCookArtifacts", counters.tileMapCookArtifacts);
+    writer.member("tileMapCookPreviewBytes", counters.tileMapCookPreviewBytes);
+    writer.member("tileMapEmittedSprites", counters.tileMapEmittedSprites);
+    writer.member("tileMapEdits", counters.tileMapEdits);
+    writer.member("tileMapUndos", counters.tileMapUndos);
+    writer.member("tileMapRedos", counters.tileMapRedos);
+    writer.member("tileMapGameplayGenerations", counters.tileMapGameplayGenerations);
+    writer.member("tileMapGameplaySpawnRecords", counters.tileMapGameplaySpawnRecords);
+    writer.member("tileMapGameplayBytes", counters.tileMapGameplayBytes);
+    writer.member("tileMapGameplaySourceRevision",
+                  counters.tileMapGameplaySourceRevision);
+    writer.member("navigationBakeRevision", counters.navigationBakeRevision);
+    writer.member("navigationSourceTileMapRevision",
+                  counters.navigationSourceTileMapRevision);
+    writer.member("navigationPayloadBytes", counters.navigationPayloadBytes);
+    writer.member("navigationCatalogPublishes", counters.navigationCatalogPublishes);
+    writer.member("navigationBakeReady", counters.navigationBakeReady);
+    writer.member("navigationBakeDirty", counters.navigationBakeDirty);
+    writer.member("animationDocumentRevision", counters.animationDocumentRevision);
+    writer.member("animationFrameCount", counters.animationFrameCount);
+    writer.member("animationCookPreviewBytes", counters.animationCookPreviewBytes);
+    writer.member("animationPreviewFrameIndex", counters.animationPreviewFrameIndex);
+    writer.member("animationEventCount", counters.animationEventCount);
+    writer.member("animationSelectedEventIndex", counters.animationSelectedEventIndex);
+    writer.member("animationEventEdits", counters.animationEventEdits);
+    writer.member("animationEventRejectedEdits", counters.animationEventRejectedEdits);
+    writer.member("animationEdits", counters.animationEdits);
+    writer.member("animationUndos", counters.animationUndos);
+    writer.member("animationRedos", counters.animationRedos);
+    writer.member("animationPlaybackTransitions", counters.animationPlaybackTransitions);
+    writer.member("workspaceSwitches", counters.workspaceSwitches);
+    writer.member("world2DWorkspaceReady", counters.world2DWorkspaceReady);
+    writer.member("world3DWorkspaceReady", counters.world3DWorkspaceReady);
+    writer.member("gpuViewportDocumentRevision", counters.gpuViewportDocumentRevision);
+    writer.member("gpuViewportReady", counters.gpuViewportReady);
+    writer.member("viewportLogicalX", counters.viewportLogicalX);
+    writer.member("viewportLogicalY", counters.viewportLogicalY);
+    writer.member("viewportLogicalWidth", counters.viewportLogicalWidth);
+    writer.member("viewportLogicalHeight", counters.viewportLogicalHeight);
+    writer.member("viewportNormalizedX", counters.viewportNormalizedX);
+    writer.member("viewportNormalizedY", counters.viewportNormalizedY);
+    writer.member("viewportNormalizedWidth", counters.viewportNormalizedWidth);
+    writer.member("viewportNormalizedHeight", counters.viewportNormalizedHeight);
+    writer.member("viewportGizmoWorldDeltaX", counters.viewportGizmoWorldDeltaX);
+    writer.member("viewportGizmoWorldDeltaY", counters.viewportGizmoWorldDeltaY);
+    writer.member("viewportGizmoWorldDeltaZ", counters.viewportGizmoWorldDeltaZ);
+    writer.member("viewportGizmoRotationDegrees", counters.viewportGizmoRotationDegrees);
+    writer.member("viewportGizmoScaleFactorX", counters.viewportGizmoScaleFactorX);
+    writer.member("viewportGizmoScaleFactorY", counters.viewportGizmoScaleFactorY);
+    writer.member("viewportGizmoScaleFactorZ", counters.viewportGizmoScaleFactorZ);
+    writer.member("runtimePreviewInstantiations", counters.runtimePreviewInstantiations);
+    writer.member("runtimePreviewValid", counters.runtimePreviewValid);
+    writer.member("documentRevision", counters.documentRevision);
+    writer.member("documentEntityCount", counters.documentEntityCount);
+    writer.member("documentUndoDepth", counters.documentUndoDepth);
+    writer.member("documentRedoDepth", counters.documentRedoDepth);
+    writer.member("documentSaved", counters.documentSaved);
+    writer.member("documentDirty", counters.documentDirty);
+    writer.member("cookPreviewBytes", counters.cookPreviewBytes);
+    writer.member("selectedTransformPositionX", counters.selectedTransformPositionX);
+    writer.member("selectedTransformPositionY", counters.selectedTransformPositionY);
+    writer.member("selectedTransformPositionZ", counters.selectedTransformPositionZ);
+    writer.member("selectedTransformRotationXDegrees",
+                  counters.selectedTransformRotationXDegrees);
+    writer.member("selectedTransformRotationYDegrees",
+                  counters.selectedTransformRotationYDegrees);
+    writer.member("selectedTransformRotationZDegrees",
+                  counters.selectedTransformRotationZDegrees);
+    writer.member("selectedTransformScaleX", counters.selectedTransformScaleX);
+    writer.member("selectedTransformScaleY", counters.selectedTransformScaleY);
+    writer.member("selectedTransformScaleZ", counters.selectedTransformScaleZ);
+    writer.member("finalSelectionKey", counters.finalSelectionKey);
+    writer.member("finalSelectionIndex", counters.finalSelectionIndex);
+    writer.member("selectionVerified", counters.selectionVerified);
+    writer.endObject();
+    TINA_ASSERT(writer.balanced(), "Editor report JSON left a scope open");
+    std::cout << '\n';
     return 0;
 }
 
@@ -1273,11 +1220,18 @@ int runEditorApplication(int argumentCount, char** arguments)
                 .reportPathUtf8 = editorDiagnosticReportPathUtf8(),
                 .captureBacktrace = true,
             })) {
-        std::cerr << "{\"status\":\"warning\",\"application\":\"TinaEditor\",\"message\":"
-                     "\"crash report file could not be opened; fatal errors will reach "
-                     "stderr only\",\"reportPath\":";
-        writeJsonString(std::cerr, editorDiagnosticReportPathUtf8());
-        std::cerr << "}\n";
+        {
+            Tina::Core::JsonWriter writer(std::cerr);
+            writer.beginObject();
+            writer.member("status", "warning");
+            writer.member("application", "TinaEditor");
+            writer.member("message",
+                          "crash report file could not be opened; fatal errors will reach "
+                          "stderr only");
+            writer.member("reportPath", editorDiagnosticReportPathUtf8());
+            writer.endObject();
+        }
+        std::cerr << '\n';
     }
     try {
         return runEditor(argumentCount, arguments);

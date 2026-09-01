@@ -90,7 +90,6 @@ set(TINA_ASSET_SOURCES
     CookedAssetBatch.cpp
     CookedAssetFile.cpp
     CatalogPackagePath.hpp
-    Utf8Path.hpp
     WavDecode.hpp
 )
 
@@ -122,6 +121,9 @@ add_library(Tina::Asset ALIAS tina_asset)
 target_compile_features(tina_asset PUBLIC cxx_std_23)
 target_include_directories(tina_asset PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_include_directories(tina_asset PRIVATE
+    # Reaches src/core/io/PathUtil.hpp, the single definition of the path containment
+    # predicates. It cannot live in include/tina/ because it names std::filesystem::path.
+    ${PROJECT_SOURCE_DIR}/src
     ${PROJECT_SOURCE_DIR}/thirdparty/cgltf
     ${PROJECT_SOURCE_DIR}/thirdparty/stb
 )

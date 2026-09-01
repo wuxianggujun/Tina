@@ -1,6 +1,6 @@
 #include <tina/asset/AssetSystem.hpp>
 
-#include "Utf8Path.hpp"
+#include "core/io/PathUtil.hpp"
 
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/CatalogLoadPlan.hpp>
@@ -36,18 +36,6 @@ struct AssetSystem::AsyncRequestState final {
 };
 
 namespace {
-
-[[nodiscard]] bool hasPathEscapeComponent(const std::filesystem::path& relative) noexcept
-{
-    for (const auto& part : relative)
-    {
-        if (part == "..")
-        {
-            return true;
-        }
-    }
-    return false;
-}
 
 struct AssetLeaseRetirementPinPayload final {
     AssetLease lease{};
@@ -938,15 +926,14 @@ Core::Result<std::string> AssetSystem::resolveObjectPath(Core::AssetId assetId, 
     {
         return Core::failure(std::move(artifactPath.error()).withContext("AssetSystem", "artifactPath"));
     }
-    const auto root = Detail::pathFromUtf8Bytes(std::string_view(m_catalogRoot));
-    const auto relative = Detail::pathFromUtf8Bytes(artifactPath->view());
-    if (relative.is_absolute() || hasPathEscapeComponent(relative))
+    const auto root = Core::Detail::pathFromUtf8Bytes(std::string_view(m_catalogRoot));
+    const auto relative = Core::Detail::pathFromUtf8Bytes(artifactPath->view());
+    if (relative.is_absolute() || Core::Detail::pathHasParentComponent(relative))
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "artifact relative path is not safe");
     }
     const auto fullPath = root / relative;
-    const auto generic = fullPath.generic_u8string();
-    return std::string(generic.begin(), generic.end());
+    return Core::Detail::pathToUtf8Generic(fullPath);
 }
 
 Core::Result<std::pmr::vector<AssetHandle>>

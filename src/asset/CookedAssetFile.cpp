@@ -1,6 +1,6 @@
 #include <tina/asset/CookedAssetFile.hpp>
 
-#include "Utf8Path.hpp"
+#include "core/io/PathUtil.hpp"
 
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/core/io/ReadFile.hpp>
@@ -15,18 +15,6 @@ namespace {
 [[nodiscard]] bool containsEmbeddedNul(std::string_view text) noexcept
 {
     return text.find('\0') != std::string_view::npos;
-}
-
-[[nodiscard]] bool hasPathEscapeComponent(const std::filesystem::path& relative) noexcept
-{
-    for (const auto& part : relative)
-    {
-        if (part == "..")
-        {
-            return true;
-        }
-    }
-    return false;
 }
 
 [[nodiscard]] Core::Status alignWithCatalogEntry(const CookedAssetFile& asset, const CatalogEntry& entry)
@@ -201,9 +189,9 @@ Core::Result<CookedAssetFile> loadCookedAssetFromCatalog(std::string_view catalo
             std::move(artifactPath.error()).withContext("loadCookedAssetFromCatalog", "makeCookedArtifactPath"));
     }
 
-    const auto root = Detail::pathFromUtf8Bytes(catalogRootUtf8);
-    const auto relative = Detail::pathFromUtf8Bytes(artifactPath->view());
-    if (relative.is_absolute() || hasPathEscapeComponent(relative))
+    const auto root = Core::Detail::pathFromUtf8Bytes(catalogRootUtf8);
+    const auto relative = Core::Detail::pathFromUtf8Bytes(artifactPath->view());
+    if (relative.is_absolute() || Core::Detail::pathHasParentComponent(relative))
     {
         return Core::failure(AssetErrorCode::InvalidCatalogConfig, "artifact relative path is not safe");
     }

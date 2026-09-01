@@ -2,6 +2,8 @@
 
 #include "EditorSourceImportSelection.hpp"
 
+#include "core/io/PathUtil.hpp"
+
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/core/text/Utf8.hpp>
 
@@ -10,7 +12,6 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
-#include <limits>
 #include <new>
 #include <optional>
 #include <utility>
@@ -57,49 +58,9 @@ struct ExternalSourceMapping final {
     return Core::success();
 }
 
-[[nodiscard]] std::string pathToUtf8(const std::filesystem::path& path)
-{
-    const std::u8string encoded = path.u8string();
-    return {reinterpret_cast<const char*>(encoded.data()), encoded.size()};
-}
-
-[[nodiscard]] bool pathComponentEquals(const std::filesystem::path& left,
-                                       const std::filesystem::path& right) noexcept
-{
-#if defined(_WIN32)
-    const auto& leftText = left.native();
-    const auto& rightText = right.native();
-    if (leftText.size() != rightText.size() ||
-        leftText.size() > static_cast<std::size_t>((std::numeric_limits<int>::max)())) {
-        return false;
-    }
-    return ::CompareStringOrdinal(leftText.data(), static_cast<int>(leftText.size()),
-                                  rightText.data(), static_cast<int>(rightText.size()),
-                                  TRUE) == CSTR_EQUAL;
-#else
-    return left == right;
-#endif
-}
-
-[[nodiscard]] bool pathIsSameOrDescendant(const std::filesystem::path& candidate,
-                                          const std::filesystem::path& ancestor) noexcept
-{
-    auto candidatePart = candidate.begin();
-    for (auto ancestorPart = ancestor.begin(); ancestorPart != ancestor.end();
-         ++ancestorPart, ++candidatePart) {
-        if (candidatePart == candidate.end() ||
-            !pathComponentEquals(*candidatePart, *ancestorPart)) {
-            return false;
-        }
-    }
-    return true;
-}
-
-[[nodiscard]] bool pathsReferToSameLocation(const std::filesystem::path& left,
-                                            const std::filesystem::path& right) noexcept
-{
-    return pathIsSameOrDescendant(left, right) && pathIsSameOrDescendant(right, left);
-}
+using Core::Detail::pathIsSameOrDescendant;
+using Core::Detail::pathsReferToSameLocation;
+using Core::Detail::pathToUtf8;
 
 [[nodiscard]] Core::Error ioError(std::string_view message,
                                   const std::filesystem::path& path,
@@ -382,8 +343,7 @@ void EditorSourceImportIngress::rollback() noexcept
          file != createdFilePathsUtf8_.rend(); ++file) {
         try {
             std::error_code cleanupError;
-            (void)std::filesystem::remove(
-                std::filesystem::u8path(file->begin(), file->end()), cleanupError);
+            (void)std::filesystem::remove(Core::Detail::pathFromUtf8Bytes(*file), cleanupError);
         } catch (...) {
         }
     }
@@ -391,8 +351,8 @@ void EditorSourceImportIngress::rollback() noexcept
          directory != createdDirectoryPathsUtf8_.rend(); ++directory) {
         try {
             std::error_code cleanupError;
-            (void)std::filesystem::remove(
-                std::filesystem::u8path(directory->begin(), directory->end()), cleanupError);
+            (void)std::filesystem::remove(Core::Detail::pathFromUtf8Bytes(*directory),
+                                          cleanupError);
         } catch (...) {
         }
     }
@@ -428,8 +388,7 @@ prepareEditorSourceImportIngress(
     }
 
     try {
-        const auto sourceRootInput =
-            std::filesystem::u8path(sourceRootUtf8.begin(), sourceRootUtf8.end());
+        const auto sourceRootInput = Core::Detail::pathFromUtf8Bytes(sourceRootUtf8);
         if (!sourceRootInput.is_absolute()) {
             return Core::failure(Core::CoreErrorCode::InvalidArgument,
                                  "Editor project Source path must be absolute");
@@ -476,8 +435,7 @@ prepareEditorSourceImportIngress(
                     Core::CoreErrorCode::InvalidArgument,
                     "Editor import path must be bounded strict UTF-8 without NUL");
             }
-            const auto selectedInput = std::filesystem::u8path(
-                selectedPathUtf8.begin(), selectedPathUtf8.end());
+            const auto selectedInput = Core::Detail::pathFromUtf8Bytes(selectedPathUtf8);
             if (!selectedInput.is_absolute()) {
                 return Core::failure(Core::CoreErrorCode::InvalidArgument,
                                      "Editor import path must be absolute");

@@ -1,6 +1,8 @@
 #include "UIBenchmarkWorkloads.hpp"
 
 #include <tina/core/error/Error.hpp>
+#include <tina/core/text/ArgParser.hpp>
+#include <tina/core/text/JsonWriter.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 #include <tina/platform/headless/HeadlessPlatformFactory.hpp>
 #include <tina/render/null/NullRenderDeviceFactory.hpp>
@@ -13,7 +15,6 @@
 #include <tina/task/disabled/DisabledTaskSystemFactory.hpp>
 
 #include <algorithm>
-#include <charconv>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -48,64 +49,51 @@ struct Counters final {
     u64 applicationShutdowns = 0;
 };
 
-[[nodiscard]] bool parseU64(std::string_view text, u64& out) noexcept
-{
-    unsigned long long value = 0;
-    const char* begin = text.data();
-    const char* end = text.data() + text.size();
-    const auto result = std::from_chars(begin, end, value);
-    if (result.ec != std::errc{} || result.ptr != end) {
-        return false;
-    }
-    out = static_cast<u64>(value);
-    return true;
-}
-
 [[nodiscard]] bool parseOptions(int argc, char** argv, Options& options, std::string& error)
 {
-    for (int index = 1; index < argc; ++index) {
-        const std::string_view argument = argv[index];
-        if (argument == "--help" || argument == "-h") {
+    Tina::Core::ArgScanner scanner(argc, argv);
+    while (scanner.next()) {
+        if (scanner.flag("--help") || scanner.flag("-h")) {
             options.help = true;
             return true;
         }
-        constexpr std::string_view warmPrefix = "--warmup=";
-        constexpr std::string_view samplesPrefix = "--samples=";
-        constexpr std::string_view seedPrefix = "--seed=";
-        constexpr std::string_view workloadPrefix = "--workload=";
-        if (argument.starts_with(warmPrefix)) {
-            if (!parseU64(argument.substr(warmPrefix.size()), options.warmUpFrames)) {
+        if (const auto value = scanner.value("--warmup")) {
+            if (!Tina::Core::parseArgUnsigned(*value, options.warmUpFrames)) {
                 error = "invalid --warmup value";
                 return false;
             }
             continue;
         }
-        if (argument.starts_with(samplesPrefix)) {
-            if (!parseU64(argument.substr(samplesPrefix.size()), options.measureFrames)
+        if (const auto value = scanner.value("--samples")) {
+            if (!Tina::Core::parseArgUnsigned(*value, options.measureFrames)
                 || options.measureFrames == 0) {
                 error = "invalid --samples value";
                 return false;
             }
             continue;
         }
-        if (argument.starts_with(seedPrefix)) {
-            if (!parseU64(argument.substr(seedPrefix.size()), options.seed)) {
+        if (const auto value = scanner.value("--seed")) {
+            if (!Tina::Core::parseArgUnsigned(*value, options.seed)) {
                 error = "invalid --seed value";
                 return false;
             }
             continue;
         }
-        if (argument.starts_with(workloadPrefix)) {
-            const auto id = argument.substr(workloadPrefix.size());
-            if (id != kWorkloadId && !Tina::Bench::isUIBenchmarkWorkload(id)) {
+        if (const auto value = scanner.value("--workload")) {
+            if (*value != kWorkloadId && !Tina::Bench::isUIBenchmarkWorkload(*value)) {
                 error = "unknown workload (see --help for supported workload ids)";
                 return false;
             }
-            options.workload = id;
+            options.workload = *value;
             continue;
         }
+        if (scanner.failed()) {
+            error = "missing value for ";
+            error.append(scanner.failedOption());
+            return false;
+        }
         error = "unknown argument: ";
-        error.append(argument);
+        error.append(scanner.token());
         return false;
     }
 
@@ -245,8 +233,13 @@ int main(int argc, char** argv)
     Options options{};
     std::string parseError;
     if (!parseOptions(argc, argv, options, parseError)) {
-        std::cerr << "{\"status\":\"error\",\"schema\":" << kSchemaVersion
-                  << ",\"message\":\"" << parseError << "\"}\n";
+        Tina::Core::JsonWriter writer(std::cerr);
+        writer.beginObject();
+        writer.member("status", "error");
+        writer.member("schema", kSchemaVersion);
+        writer.member("message", parseError);
+        writer.endObject();
+        std::cerr << '\n';
         return 2;
     }
     if (options.help) {
@@ -284,8 +277,13 @@ int main(int argc, char** argv)
 
     auto hostResult = Tina::EngineHost::Create(Tina::EngineConfig::Defaults(), std::move(factories));
     if (!hostResult) {
-        std::cerr << "{\"status\":\"error\",\"schema\":" << kSchemaVersion
-                  << ",\"message\":\"EngineHost::Create failed\"}\n";
+        Tina::Core::JsonWriter writer(std::cerr);
+        writer.beginObject();
+        writer.member("status", "error");
+        writer.member("schema", kSchemaVersion);
+        writer.member("message", "EngineHost::Create failed");
+        writer.endObject();
+        std::cerr << '\n';
         return 1;
     }
 
@@ -294,8 +292,13 @@ int main(int argc, char** argv)
     auto runResult = (*hostResult)->run(app);
     const auto wallEnd = Tina::Core::SteadyMonotonicClock{}.now();
     if (!runResult) {
-        std::cerr << "{\"status\":\"error\",\"schema\":" << kSchemaVersion
-                  << ",\"message\":\"EngineHost::run failed\"}\n";
+        Tina::Core::JsonWriter writer(std::cerr);
+        writer.beginObject();
+        writer.member("status", "error");
+        writer.member("schema", kSchemaVersion);
+        writer.member("message", "EngineHost::run failed");
+        writer.endObject();
+        std::cerr << '\n';
         return 1;
     }
 
@@ -351,55 +354,64 @@ int main(int argc, char** argv)
     constexpr const char* kHostOs = "unknown";
 #endif
 
-    std::cout << "{"
-              << "\"status\":\"ok\","
-              << "\"schema\":" << kSchemaVersion << ','
-              << "\"schemaName\":\"tina_bench\","
-              << "\"conclusion\":\"provisional\","
-              << "\"workload\":{"
-              << "\"id\":\"" << kWorkloadId << "\","
-              << "\"version\":" << kWorkloadVersion << ','
-              << "\"seed\":" << options.seed << ','
-              << "\"parameters\":{"
-              << "\"warmup_frames\":" << options.warmUpFrames << ','
-              << "\"measure_frames\":" << options.measureFrames
-              << "}"
-              << "},"
-              << "\"fingerprint\":{"
-              << "\"buildType\":\"" << kBuildType << "\","
-              << "\"hostOs\":\"" << kHostOs << "\","
-              << "\"taskSystem\":\"DisabledTaskSystem\","
-              << "\"platform\":\"Headless\","
-              << "\"render\":\"Null\""
-              << "},"
-              << "\"timing_ns\":{"
-              << "\"p50\":" << p50 << ','
-              << "\"p95\":" << p95 << ','
-              << "\"p99\":" << p99 << ','
-              << "\"max\":" << maxNs << ','
-              << "\"mean\":" << meanNs << ','
-              << "\"count\":" << frameNs.size() << ','
-              << "\"wall\":" << wallNs
-              << "},"
-              << "\"counters\":{"
-              << "\"frame_updates\":" << counters.frameUpdates << ','
-              << "\"state_exits\":" << counters.stateExits << ','
-              << "\"application_shutdowns\":" << counters.applicationShutdowns
-              << "},"
-              << "\"checksum\":\"" << checksum << "\","
-              << "\"exit\":\"GameRequestedExitAfterCurrentFrame\","
-              << "\"notes\":["
-              << "\"shared_dev_or_ci_is_provisional_not_hard_gate\","
-              << "\"tracy_disabled\","
-              << "\"single_process_run\""
-              << "]"
-              << "}\n";
+    {
+        Tina::Core::JsonWriter writer(std::cout);
+        writer.beginObject();
+        writer.member("status", "ok");
+        writer.member("schema", kSchemaVersion);
+        writer.member("schemaName", "tina_bench");
+        writer.member("conclusion", "provisional");
+        writer.beginObjectMember("workload");
+        writer.member("id", kWorkloadId);
+        writer.member("version", kWorkloadVersion);
+        writer.member("seed", options.seed);
+        writer.beginObjectMember("parameters");
+        writer.member("warmup_frames", options.warmUpFrames);
+        writer.member("measure_frames", options.measureFrames);
+        writer.endObject();
+        writer.endObject();
+        writer.beginObjectMember("fingerprint");
+        writer.member("buildType", kBuildType);
+        writer.member("hostOs", kHostOs);
+        writer.member("taskSystem", "DisabledTaskSystem");
+        writer.member("platform", "Headless");
+        writer.member("render", "Null");
+        writer.endObject();
+        writer.beginObjectMember("timing_ns");
+        writer.member("p50", p50);
+        writer.member("p95", p95);
+        writer.member("p99", p99);
+        writer.member("max", maxNs);
+        writer.member("mean", meanNs);
+        writer.member("count", frameNs.size());
+        writer.member("wall", wallNs);
+        writer.endObject();
+        writer.beginObjectMember("counters");
+        writer.member("frame_updates", counters.frameUpdates);
+        writer.member("state_exits", counters.stateExits);
+        writer.member("application_shutdowns", counters.applicationShutdowns);
+        writer.endObject();
+        writer.member("checksum", checksum);
+        writer.member("exit", "GameRequestedExitAfterCurrentFrame");
+        writer.beginArrayMember("notes");
+        writer.element("shared_dev_or_ci_is_provisional_not_hard_gate");
+        writer.element("tracy_disabled");
+        writer.element("single_process_run");
+        writer.endArray();
+        writer.endObject();
+    }
+    std::cout << '\n';
     (void)runResult;
 
     // Determinism smoke: expected counter relationship for this workload.
     if (counters.frameUpdates != totalFrames || counters.stateExits != 1 || counters.applicationShutdowns != 1) {
-        std::cerr << "{\"status\":\"error\",\"schema\":" << kSchemaVersion
-                  << ",\"message\":\"counter invariant failed\"}\n";
+        Tina::Core::JsonWriter writer(std::cerr);
+        writer.beginObject();
+        writer.member("status", "error");
+        writer.member("schema", kSchemaVersion);
+        writer.member("message", "counter invariant failed");
+        writer.endObject();
+        std::cerr << '\n';
         return 1;
     }
     return 0;

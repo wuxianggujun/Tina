@@ -18,6 +18,8 @@
 
 #include <tina/core/base/ScopeExit.hpp>
 #include <tina/core/diagnostics/Diagnostics.hpp>
+#include <tina/core/diagnostics/Log.hpp>
+#include <tina/core/io/UserPaths.hpp>
 #include <tina/core/trace/Trace.hpp>
 
 #include "input/ActionMapper.hpp"
@@ -545,6 +547,10 @@ struct EngineModules final {
         monotonicClock.reset();
         if (diagnostics != nullptr)
         {
+            // Unpublish before destroying: the macros resolve through a process-wide
+            // pointer, so clearing it after the reset would leave a window where a
+            // write on any thread dereferences freed storage.
+            Core::Diagnostics::setDefaultDiagnostics(nullptr);
             diagnostics->shutdown();
             diagnostics.reset();
         }
@@ -571,11 +577,12 @@ struct EngineModules final {
                     : "LifecycleInvariantViolation: TaskSystem shutdown failed unexpectedly";
             if (diagnostics != nullptr)
             {
-                diagnostics->channel().write({
-                    .level = Core::Diagnostics::LogLevel::Error,
-                    .category = "runtime.lifecycle",
-                    .message = diagnosticMessage,
-                });
+                TINA_LOG_TO(
+                    diagnostics->channel(),
+                    Core::Diagnostics::LogLevel::Error,
+                    "runtime.lifecycle",
+                    "{}",
+                    diagnosticMessage);
             }
             std::terminate();
         }
@@ -1571,11 +1578,11 @@ class EngineHostImplementation final {
         {
             if (m_modules.diagnostics != nullptr)
             {
-                m_modules.diagnostics->channel().write({
-                    .level = Core::Diagnostics::LogLevel::Error,
-                    .category = "runtime.lifecycle",
-                    .message = "FramePacketAbandonFailed: refusing State teardown with live frame ownership",
-                });
+                TINA_LOG_TO(
+                    m_modules.diagnostics->channel(),
+                    Core::Diagnostics::LogLevel::Error,
+                    "runtime.lifecycle",
+                    "FramePacketAbandonFailed: refusing State teardown with live frame ownership");
             }
             std::terminate();
         }
@@ -1694,16 +1701,15 @@ class EngineHostImplementation final {
                 if (m_modules.diagnostics != nullptr)
                 {
                     // The state's own message is the whole point: "onEnter failed"
-                    // without it says no more than the silent return did. LogRecord
-                    // borrows its views, and the error outlives this write.
-                    m_modules.diagnostics->channel().write({
-                        .level = Core::Diagnostics::LogLevel::Error,
-                        .category = "runtime.lifecycle",
-                        .message = enterResult.error().message.empty()
-                                       ? std::string_view{"GameStateEnterFailed: state push/replace "
-                                                          "rolled back"}
-                                       : std::string_view{enterResult.error().message},
-                    });
+                    // without it says no more than the silent return did.
+                    TINA_LOG_TO(
+                        m_modules.diagnostics->channel(),
+                        Core::Diagnostics::LogLevel::Error,
+                        "runtime.lifecycle",
+                        "{}",
+                        enterResult.error().message.empty()
+                            ? std::string_view{"GameStateEnterFailed: state push/replace rolled back"}
+                            : std::string_view{enterResult.error().message});
                 }
                 candidate.reset();
                 return false;
@@ -1988,7 +1994,25 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
 
         EngineModules modules{ownedConfig.shutdownDeadline};
         {
-            auto diagnosticsResult = Core::Diagnostics::Diagnostics::Create({});
+            // A per-user log file, so a bug report from a player who never opened
+            // a console still carries the run that produced it. NotFound is a real
+            // condition on stripped service accounts, so a failure here leaves the
+            // console sink alone rather than failing engine creation.
+            std::string logFilePath;
+            if (auto resolved = Core::userApplicationFilePath(
+                    ownedConfig.applicationName, "tina.log", Core::UserDirectoryKind::State))
+            {
+                logFilePath = std::move(*resolved);
+            }
+
+            // Asynchronous here, unlike the synchronous default: a frame thread
+            // must not pay for a sink, and 1024 records absorb a startup or
+            // teardown burst without the queue refusing any.
+            auto diagnosticsResult = Core::Diagnostics::Diagnostics::Create({
+                .asyncQueueCapacity = 1024,
+                .filePath = logFilePath,
+                .fileRotateBytes = 8u * 1024u * 1024u,
+            });
             if (!diagnosticsResult)
             {
                 auto error = std::move(diagnosticsResult.error());
@@ -1996,6 +2020,10 @@ Core::Result<std::unique_ptr<EngineHost>> EngineHost::Create(const EngineConfig&
                 return Core::failure(std::move(error));
             }
             modules.diagnostics = std::move(*diagnosticsResult);
+            // Publishes the channel the TINA_LOG_* macros resolve to. Cleared in
+            // EngineModules teardown before the owner is destroyed, so a late
+            // write finds a closed channel rather than a dangling pointer.
+            Core::Diagnostics::setDefaultDiagnostics(modules.diagnostics.get());
         }
 
         auto clockResult = invokeResultBoundary("EngineCompositionFactories::createMonotonicClock",

@@ -1,6 +1,6 @@
 #include <tina/core/io/ReadFile.hpp>
 
-#include "Utf8Path.hpp"
+#include "PathUtil.hpp"
 
 #include <tina/core/text/Utf8.hpp>
 

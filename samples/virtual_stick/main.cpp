@@ -14,6 +14,7 @@
 // direction sequence so the same behaviour has automated evidence.
 
 #include <tina/core/error/Error.hpp>
+#include <tina/core/text/JsonWriter.hpp>
 #include <tina/desktop/DesktopEngine.hpp>
 #include <tina/runtime/EngineConfig.hpp>
 #include <tina/runtime/GameApplication.hpp>
@@ -176,8 +177,14 @@ struct LifecycleCounters final {
 
 void writeError(const Tina::Core::Error& error)
 {
-    std::cerr << "{\"status\":\"error\",\"sample\":\"tina_sample_virtual_stick\",\"code\":"
-              << error.code.value << ",\"message\":\"" << error.message << "\"}\n";
+    Tina::Core::JsonWriter writer(std::cerr);
+    writer.beginObject();
+    writer.member("status", "error");
+    writer.member("sample", "tina_sample_virtual_stick");
+    writer.member("code", error.code.value);
+    writer.member("message", error.message);
+    writer.endObject();
+    std::cerr << '\n';
 }
 
 class VirtualStickState final : public Tina::IGameState {
@@ -650,36 +657,45 @@ class VirtualStickApplication final : public Tina::IGameApplication {
 void printEvidence(std::ostream& out, const char* status, const SampleOptions& options,
                    const LifecycleCounters& counters)
 {
-    out << "{\"status\":\"" << status << "\",\"sample\":\"tina_sample_virtual_stick\""
-        << ",\"evidenceSchema\":" << EvidenceSchema << ",\"frames\":" << options.targetFrameCount
-        << ",\"autoDemo\":" << (options.autoDemo ? "true" : "false")
-        << ",\"frameUpdates\":" << counters.frameUpdates << ",\"uiUpdates\":" << counters.uiUpdates
-        << ",\"baseRadius\":" << BaseRadius << ",\"knobRadius\":" << KnobRadius
-        << ",\"travelRadius\":" << Tina::UI::virtualStickTravelRadius(StickConfig)
-        << ",\"deadzone\":" << StickConfig.deadzone
-        << ",\"pointerPresses\":" << counters.pointerPresses
-        << ",\"pointerDrags\":" << counters.pointerDrags
-        << ",\"pointerReleases\":" << counters.pointerReleases
-        << ",\"pointerCancels\":" << counters.pointerCancels
-        << ",\"pointerPressesOutsideBase\":" << counters.pointerPressesOutsideBase
-        << ",\"secondPointerRejected\":" << counters.secondPointerRejected
-        << ",\"digitalEngagedFrames\":" << counters.digitalEngagedFrames
-        << ",\"demoSegmentsObserved\":" << counters.demoSegmentsObserved
-        << ",\"maximumMagnitude\":" << counters.maximumMagnitude
-        << ",\"maximumKnobDistance\":" << counters.maximumKnobDistance
-        << ",\"observedUp\":" << (counters.observedUp ? "true" : "false")
-        << ",\"observedDown\":" << (counters.observedDown ? "true" : "false")
-        << ",\"observedLeft\":" << (counters.observedLeft ? "true" : "false")
-        << ",\"observedRight\":" << (counters.observedRight ? "true" : "false")
-        << ",\"observedDiagonal\":" << (counters.observedDiagonal ? "true" : "false")
-        << ",\"observedOppositeKeysCancel\":"
-        << (counters.observedOppositeKeysCancel ? "true" : "false")
-        << ",\"knobStayedInsideRing\":" << (counters.knobStayedInsideRing ? "true" : "false")
-        << ",\"magnitudeStayedNormalized\":"
-        << (counters.magnitudeStayedNormalized ? "true" : "false")
-        << ",\"recentredAfterRelease\":" << (counters.recentredAfterRelease ? "true" : "false")
-        << ",\"stateEnters\":" << counters.stateEnters << ",\"stateExits\":" << counters.stateExits
-        << ",\"applicationShutdowns\":" << counters.applicationShutdowns << "}\n";
+    {
+        Tina::Core::JsonWriter writer(out);
+        writer.beginObject();
+        writer.member("status", status);
+        writer.member("sample", "tina_sample_virtual_stick");
+        writer.member("evidenceSchema", EvidenceSchema);
+        writer.member("frames", options.targetFrameCount);
+        writer.member("autoDemo", options.autoDemo);
+        writer.member("frameUpdates", counters.frameUpdates);
+        writer.member("uiUpdates", counters.uiUpdates);
+        writer.member("baseRadius", BaseRadius);
+        writer.member("knobRadius", KnobRadius);
+        writer.member("travelRadius", Tina::UI::virtualStickTravelRadius(StickConfig));
+        writer.member("deadzone", StickConfig.deadzone);
+        writer.member("pointerPresses", counters.pointerPresses);
+        writer.member("pointerDrags", counters.pointerDrags);
+        writer.member("pointerReleases", counters.pointerReleases);
+        writer.member("pointerCancels", counters.pointerCancels);
+        writer.member("pointerPressesOutsideBase", counters.pointerPressesOutsideBase);
+        writer.member("secondPointerRejected", counters.secondPointerRejected);
+        writer.member("digitalEngagedFrames", counters.digitalEngagedFrames);
+        writer.member("demoSegmentsObserved", counters.demoSegmentsObserved);
+        writer.member("maximumMagnitude", counters.maximumMagnitude);
+        writer.member("maximumKnobDistance", counters.maximumKnobDistance);
+        writer.member("observedUp", counters.observedUp);
+        writer.member("observedDown", counters.observedDown);
+        writer.member("observedLeft", counters.observedLeft);
+        writer.member("observedRight", counters.observedRight);
+        writer.member("observedDiagonal", counters.observedDiagonal);
+        writer.member("observedOppositeKeysCancel", counters.observedOppositeKeysCancel);
+        writer.member("knobStayedInsideRing", counters.knobStayedInsideRing);
+        writer.member("magnitudeStayedNormalized", counters.magnitudeStayedNormalized);
+        writer.member("recentredAfterRelease", counters.recentredAfterRelease);
+        writer.member("stateEnters", counters.stateEnters);
+        writer.member("stateExits", counters.stateExits);
+        writer.member("applicationShutdowns", counters.applicationShutdowns);
+        writer.endObject();
+    }
+    out << '\n';
 }
 
 [[nodiscard]] int runSample(int argumentCount, char** arguments)

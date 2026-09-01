@@ -1,4 +1,5 @@
 #include <tina/core/error/Error.hpp>
+#include <tina/core/text/JsonWriter.hpp>
 #include <tina/desktop/DesktopEngine.hpp>
 #include <tina/runtime/GameApplication.hpp>
 #include <tina/runtime/GameState.hpp>
@@ -77,49 +78,6 @@ struct LifecycleCounters final {
     };
 }
 
-void writeJsonString(std::ostream& output, std::string_view value)
-{
-    constexpr char hexadecimal[] = "0123456789abcdef";
-    output.put('"');
-    for (const unsigned char byte : value)
-    {
-        switch (byte)
-        {
-        case '"':
-            output << "\\\"";
-            break;
-        case '\\':
-            output << "\\\\";
-            break;
-        case '\b':
-            output << "\\b";
-            break;
-        case '\f':
-            output << "\\f";
-            break;
-        case '\n':
-            output << "\\n";
-            break;
-        case '\r':
-            output << "\\r";
-            break;
-        case '\t':
-            output << "\\t";
-            break;
-        default:
-            if (byte < 0x20U)
-            {
-                output << "\\u00" << hexadecimal[byte >> 4U] << hexadecimal[byte & 0x0FU];
-            } else
-            {
-                output.put(static_cast<char>(byte));
-            }
-            break;
-        }
-    }
-    output.put('"');
-}
-
 [[nodiscard]] std::string errorCodeName(Tina::Core::ErrorCode code)
 {
     if (code == Tina::Core::CoreErrorCode::InvalidArgument)
@@ -139,27 +97,27 @@ void writeJsonString(std::ostream& output, std::string_view value)
 
 void writeError(const Tina::Core::Error& error)
 {
-    std::cerr << "{\"status\":\"error\",\"sample\":\"tina_sample_desktop\",\"code\":";
-    writeJsonString(std::cerr, errorCodeName(error.code));
-    std::cerr << ",\"tinaCode\":{\"domain\":" << static_cast<std::uint16_t>(error.code.domain)
-              << ",\"value\":" << error.code.value << "},\"message\":";
-    writeJsonString(std::cerr, error.message);
-    std::cerr << ",\"context\":[";
-    bool firstContext = true;
+    Tina::Core::JsonWriter writer(std::cerr);
+    writer.beginObject();
+    writer.member("status", "error");
+    writer.member("sample", "tina_sample_desktop");
+    writer.member("code", errorCodeName(error.code));
+    writer.beginObjectMember("tinaCode");
+    writer.member("domain", static_cast<std::uint16_t>(error.code.domain));
+    writer.member("value", error.code.value);
+    writer.endObject();
+    writer.member("message", error.message);
+    writer.beginArrayMember("context");
     for (const Tina::Core::ErrorContext& context : error.context)
     {
-        if (!firstContext)
-        {
-            std::cerr.put(',');
-        }
-        firstContext = false;
-        std::cerr << "{\"operation\":";
-        writeJsonString(std::cerr, context.operation);
-        std::cerr << ",\"detail\":";
-        writeJsonString(std::cerr, context.detail);
-        std::cerr.put('}');
+        writer.beginObjectElement();
+        writer.member("operation", context.operation);
+        writer.member("detail", context.detail);
+        writer.endObject();
     }
-    std::cerr << "]}\n";
+    writer.endArray();
+    writer.endObject();
+    std::cerr << '\n';
 }
 
 template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text, Value& value) noexcept
@@ -557,16 +515,25 @@ class DesktopSmokeApplication final : public Tina::IGameApplication {
         return 1;
     }
 
-    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_desktop\",\"frames\":" << counters.frameUpdates
-              << ",\"targetFrames\":" << options.targetFrameCount
-              << ",\"frameDelayMs\":" << options.frameDelayMilliseconds << ",\"exit\":";
-    writeJsonString(std::cout, runExitReasonName(*runResult));
-    std::cout << ",\"stateEnters\":" << counters.stateEnters << ",\"stateExits\":" << counters.stateExits
-              << ",\"applicationShutdowns\":" << counters.applicationShutdowns
-              << ",\"uiRootsCreated\":" << counters.uiRootsCreated
-              << ",\"uiPaintedPanelsCreated\":" << counters.uiPaintedPanelsCreated
-              << ",\"uiTextLabelsCreated\":" << counters.uiTextLabelsCreated
-              << ",\"uiRootsReleased\":" << counters.uiRootsReleased << "}\n";
+    {
+        Tina::Core::JsonWriter writer(std::cout);
+        writer.beginObject();
+        writer.member("status", "ok");
+        writer.member("sample", "tina_sample_desktop");
+        writer.member("frames", counters.frameUpdates);
+        writer.member("targetFrames", options.targetFrameCount);
+        writer.member("frameDelayMs", options.frameDelayMilliseconds);
+        writer.member("exit", runExitReasonName(*runResult));
+        writer.member("stateEnters", counters.stateEnters);
+        writer.member("stateExits", counters.stateExits);
+        writer.member("applicationShutdowns", counters.applicationShutdowns);
+        writer.member("uiRootsCreated", counters.uiRootsCreated);
+        writer.member("uiPaintedPanelsCreated", counters.uiPaintedPanelsCreated);
+        writer.member("uiTextLabelsCreated", counters.uiTextLabelsCreated);
+        writer.member("uiRootsReleased", counters.uiRootsReleased);
+        writer.endObject();
+    }
+    std::cout << '\n';
     return 0;
 }
 

@@ -68,6 +68,9 @@ target_compile_features(tina_editor_app PUBLIC cxx_std_23)
 target_include_directories(tina_editor_app
     PUBLIC
         "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>"
+    PRIVATE
+        # Reaches src/core/io/PathUtil.hpp; see the note in src/asset/CMakeLists.txt.
+        "${PROJECT_SOURCE_DIR}/src"
 )
 target_link_libraries(tina_editor_app
     PRIVATE
@@ -109,10 +112,9 @@ if(WIN32)
         WIN32_EXECUTABLE TRUE
     )
     target_link_libraries(tina_editor_desktop PRIVATE shell32)
-    add_custom_command(TARGET tina_editor_desktop POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            $<TARGET_RUNTIME_DLLS:tina_editor_desktop>
-            $<TARGET_FILE_DIR:tina_editor_desktop>
-        COMMAND_EXPAND_LISTS
-    )
 endif()
+
+# After OUTPUT_NAME above, which decides the installed directory name (TinaEditor).
+# Also stages the runtime DLLs into the build tree, which is why the WIN32 block no
+# longer copies them itself.
+tina_install_product(tina_editor_desktop)

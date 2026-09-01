@@ -8,6 +8,7 @@
 #include <tina/asset_format/TilesetPayload.hpp>
 #include <tina/core/error/Error.hpp>
 #include <tina/core/id/AssetId.hpp>
+#include <tina/core/text/JsonWriter.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 #include <tina/platform/headless/HeadlessPlatformFactory.hpp>
 #include <tina/render/RenderDevice.hpp>
@@ -626,8 +627,14 @@ class TileMap2DApplication final : public Tina::IGameApplication {
 
 void printError(const Tina::Core::Error& error)
 {
-    std::cerr << "{\"status\":\"error\",\"sample\":\"tina_sample_2d_tilemap\",\"code\":" << error.code.value
-              << ",\"message\":\"" << error.message << "\"}\n";
+    Tina::Core::JsonWriter writer(std::cerr);
+    writer.beginObject();
+    writer.member("status", "error");
+    writer.member("sample", "tina_sample_2d_tilemap");
+    writer.member("code", error.code.value);
+    writer.member("message", error.message);
+    writer.endObject();
+    std::cerr << '\n';
 }
 
 } // namespace
@@ -675,24 +682,38 @@ int main(int argumentCount, char** arguments)
         }
         else
         {
-            std::cerr << "{\"status\":\"error\",\"sample\":\"tina_sample_2d_tilemap\","
-                         "\"message\":\"2D tilemap verification failed\","
-                         "\"submitted\":"
-                      << capture.submittedFrames << ",\"presented\":" << capture.presentedFrames
-                      << ",\"lastSprites\":" << capture.lastVisibleSpriteCount
-                      << ",\"lastTiles\":" << capture.lastTileSpriteCount
-                      << ",\"groundedFrames\":" << capture.controllerGroundedFrames
-                      << ",\"fixedSteps\":" << capture.fixedSteps << "}\n";
+            Tina::Core::JsonWriter writer(std::cerr);
+            writer.beginObject();
+            writer.member("status", "error");
+            writer.member("sample", "tina_sample_2d_tilemap");
+            writer.member("message", "2D tilemap verification failed");
+            writer.member("submitted", capture.submittedFrames);
+            writer.member("presented", capture.presentedFrames);
+            writer.member("lastSprites", capture.lastVisibleSpriteCount);
+            writer.member("lastTiles", capture.lastTileSpriteCount);
+            writer.member("groundedFrames", capture.controllerGroundedFrames);
+            writer.member("fixedSteps", capture.fixedSteps);
+            writer.endObject();
+            std::cerr << '\n';
         }
         return 1;
     }
 
-    std::cout << "{\"status\":\"ok\",\"sample\":\"tina_sample_2d_tilemap\",\"frames\":" << frameCount
-              << ",\"tileSpritesPerFrame\":" << ExpectedNonEmptyTiles
-              << ",\"spritesPerFrame\":" << (ExpectedNonEmptyTiles + 1)
-              << ",\"controllerGroundedFrames\":" << capture.controllerGroundedFrames
-              << ",\"fixedSteps\":" << capture.fixedSteps << ",\"stateExits\":" << capture.stateExits
-              << ",\"applicationShutdowns\":" << capture.applicationShutdowns
-              << ",\"renderShutdowns\":" << capture.renderShutdowns << "}\n";
+    {
+        Tina::Core::JsonWriter writer(std::cout);
+        writer.beginObject();
+        writer.member("status", "ok");
+        writer.member("sample", "tina_sample_2d_tilemap");
+        writer.member("frames", frameCount);
+        writer.member("tileSpritesPerFrame", ExpectedNonEmptyTiles);
+        writer.member("spritesPerFrame", ExpectedNonEmptyTiles + 1);
+        writer.member("controllerGroundedFrames", capture.controllerGroundedFrames);
+        writer.member("fixedSteps", capture.fixedSteps);
+        writer.member("stateExits", capture.stateExits);
+        writer.member("applicationShutdowns", capture.applicationShutdowns);
+        writer.member("renderShutdowns", capture.renderShutdowns);
+        writer.endObject();
+    }
+    std::cout << '\n';
     return 0;
 }

@@ -1,24 +1,15 @@
 #include <tina/editor/EditorProjectWorkspace.hpp>
 
+#include "core/io/PathUtil.hpp"
+
 #include <tina/core/text/Utf8.hpp>
 #include <tina/editor/EditorErrors.hpp>
 
 #include <algorithm>
 #include <filesystem>
-#include <limits>
 #include <new>
 #include <string>
 #include <utility>
-
-#if defined(_WIN32)
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#ifndef WIN32_LEAN_AND_MEAN
-#define WIN32_LEAN_AND_MEAN
-#endif
-#include <Windows.h>
-#endif
 
 namespace Tina::Editor {
 namespace {
@@ -37,46 +28,8 @@ namespace {
     return false;
 }
 
-[[nodiscard]] std::filesystem::path pathFromUtf8(std::string_view pathUtf8)
-{
-    const auto* first = reinterpret_cast<const char8_t*>(pathUtf8.data());
-    return std::filesystem::path{std::u8string(first, first + pathUtf8.size())};
-}
-
-[[nodiscard]] bool pathComponentEquals(const std::filesystem::path& left,
-                                       const std::filesystem::path& right) noexcept
-{
-#if defined(_WIN32)
-    const auto& leftText = left.native();
-    const auto& rightText = right.native();
-    if (leftText.size() != rightText.size() ||
-        leftText.size() > static_cast<std::size_t>(std::numeric_limits<int>::max()))
-    {
-        return false;
-    }
-    return ::CompareStringOrdinal(leftText.data(), static_cast<int>(leftText.size()),
-                                  rightText.data(), static_cast<int>(rightText.size()),
-                                  TRUE) == CSTR_EQUAL;
-#else
-    return left == right;
-#endif
-}
-
-[[nodiscard]] bool pathIsSameOrDescendant(const std::filesystem::path& candidate,
-                                          const std::filesystem::path& ancestor) noexcept
-{
-    auto candidatePart = candidate.begin();
-    for (auto ancestorPart = ancestor.begin(); ancestorPart != ancestor.end();
-         ++ancestorPart, ++candidatePart)
-    {
-        if (candidatePart == candidate.end() ||
-            !pathComponentEquals(*candidatePart, *ancestorPart))
-        {
-            return false;
-        }
-    }
-    return true;
-}
+using Core::Detail::pathFromUtf8Bytes;
+using Core::Detail::pathIsSameOrDescendant;
 
 [[nodiscard]] bool pathsEqual(const std::filesystem::path& left,
                               const std::filesystem::path& right) noexcept
@@ -95,7 +48,7 @@ normalizeRootPath(std::string_view rootUtf8, Core::usize byteCapacity)
                              "Editor project root must be bounded strict UTF-8 without NUL");
     }
 
-    const auto path = pathFromUtf8(rootUtf8);
+    const auto path = pathFromUtf8Bytes(rootUtf8);
     if (!path.is_absolute())
     {
         return Core::failure(EditorErrorCode::InvalidConfiguration,

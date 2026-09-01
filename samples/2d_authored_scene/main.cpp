@@ -23,6 +23,7 @@
 #include <tina/audio/AudioEngine.hpp>
 #include <tina/core/error/Error.hpp>
 #include <tina/core/id/AssetId.hpp>
+#include <tina/core/text/JsonWriter.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 #include <tina/gameplay2d/Scene2DRuntime.hpp>
 #include <tina/physics2d/PhysicsWorld2D.hpp>
@@ -933,43 +934,61 @@ class AuthoredSceneApplication final : public Tina::IGameApplication {
 
 void printError(const Tina::Core::Error& error)
 {
-    std::cerr << "{\"status\":\"error\",\"sample\":\"tina_sample_2d_authored_scene\",\"code\":"
-              << error.code.value << ",\"message\":\"" << error.message << "\"}\n";
+    Tina::Core::JsonWriter writer(std::cerr);
+    writer.beginObject();
+    writer.member("status", "error");
+    writer.member("sample", "tina_sample_2d_authored_scene");
+    writer.member("code", error.code.value);
+    writer.member("message", error.message);
+    writer.endObject();
+    std::cerr << '\n';
 }
 
 // Every field the gate reads, emitted identically on success and failure so a failing
 // run is diagnosable from the same output shape.
 void printEvidence(std::ostream& out, const char* status, const SampleCapture& capture, u64 frames)
 {
-    out << "{\"status\":\"" << status << "\",\"sample\":\"tina_sample_2d_authored_scene\""
-        << ",\"evidenceSchema\":" << EvidenceSchema << ",\"frames\":" << frames
-        << ",\"submittedFrames\":" << capture.submittedFrames
-        << ",\"presentedFrames\":" << capture.presentedFrames
-        << ",\"sceneLoadedFromFile\":" << (capture.sceneLoaded ? "true" : "false")
-        << ",\"authoredEntities\":" << capture.authoredEntityCount
-        << ",\"resolvedNodesByAuthoredName\":" << (capture.foundNodesByAuthoredName ? "true" : "false")
-        << ",\"tileMapNodes\":" << capture.tileMapCount
-        << ",\"tileLayers\":" << capture.tileLayerCount << ",\"fxNodes\":" << capture.fxCount
-        << ",\"navigationNodes\":" << capture.navigationCount
-        << ",\"audioNodes\":" << capture.audioCount
-        << ",\"unresolvedNodes\":" << capture.unresolvedCount
-        << ",\"residentTileChunks\":" << capture.residentTileChunks
-        << ",\"demandUpdates\":" << capture.demandUpdates << ",\"commits\":" << capture.commits
-        << ",\"extracts\":" << capture.extracts << ",\"physicsSteps\":" << capture.physicsSteps
-        << ",\"extractBeforeCommitRejected\":"
-        << (capture.extractBeforeCommitRejected ? "true" : "false")
-        << ",\"tileMapReachable\":" << (capture.tileMapReachable ? "true" : "false")
-        << ",\"collisionCellsFound\":" << capture.collisionCellsFound
-        << ",\"navigationGridReachable\":" << (capture.navigationGridReachable ? "true" : "false")
-        << ",\"fxOriginX\":" << capture.fxOriginX << ",\"fxOriginY\":" << capture.fxOriginY
-        << ",\"crateStartY\":" << capture.crateStartY << ",\"crateEndY\":" << capture.crateEndY
-        << ",\"audioVoiceStarted\":" << (capture.audioVoiceStarted ? "true" : "false")
-        << ",\"visibleTileSprites\":" << capture.lastSpriteCount
-        << ",\"lastFrameHadCamera\":" << (capture.lastFrameHadCamera ? "true" : "false")
-        << ",\"runtimeShutdownOk\":" << (capture.runtimeShutdownOk ? "true" : "false")
-        << ",\"stateExits\":" << capture.stateExits
-        << ",\"applicationShutdowns\":" << capture.applicationShutdowns
-        << ",\"renderShutdowns\":" << capture.renderShutdowns << "}\n";
+    {
+        Tina::Core::JsonWriter writer(out);
+        writer.beginObject();
+        writer.member("status", status);
+        writer.member("sample", "tina_sample_2d_authored_scene");
+        writer.member("evidenceSchema", EvidenceSchema);
+        writer.member("frames", frames);
+        writer.member("submittedFrames", capture.submittedFrames);
+        writer.member("presentedFrames", capture.presentedFrames);
+        writer.member("sceneLoadedFromFile", capture.sceneLoaded);
+        writer.member("authoredEntities", capture.authoredEntityCount);
+        writer.member("resolvedNodesByAuthoredName", capture.foundNodesByAuthoredName);
+        writer.member("tileMapNodes", capture.tileMapCount);
+        writer.member("tileLayers", capture.tileLayerCount);
+        writer.member("fxNodes", capture.fxCount);
+        writer.member("navigationNodes", capture.navigationCount);
+        writer.member("audioNodes", capture.audioCount);
+        writer.member("unresolvedNodes", capture.unresolvedCount);
+        writer.member("residentTileChunks", capture.residentTileChunks);
+        writer.member("demandUpdates", capture.demandUpdates);
+        writer.member("commits", capture.commits);
+        writer.member("extracts", capture.extracts);
+        writer.member("physicsSteps", capture.physicsSteps);
+        writer.member("extractBeforeCommitRejected", capture.extractBeforeCommitRejected);
+        writer.member("tileMapReachable", capture.tileMapReachable);
+        writer.member("collisionCellsFound", capture.collisionCellsFound);
+        writer.member("navigationGridReachable", capture.navigationGridReachable);
+        writer.member("fxOriginX", capture.fxOriginX);
+        writer.member("fxOriginY", capture.fxOriginY);
+        writer.member("crateStartY", capture.crateStartY);
+        writer.member("crateEndY", capture.crateEndY);
+        writer.member("audioVoiceStarted", capture.audioVoiceStarted);
+        writer.member("visibleTileSprites", capture.lastSpriteCount);
+        writer.member("lastFrameHadCamera", capture.lastFrameHadCamera);
+        writer.member("runtimeShutdownOk", capture.runtimeShutdownOk);
+        writer.member("stateExits", capture.stateExits);
+        writer.member("applicationShutdowns", capture.applicationShutdowns);
+        writer.member("renderShutdowns", capture.renderShutdowns);
+        writer.endObject();
+    }
+    out << '\n';
 }
 
 } // namespace
@@ -993,8 +1012,15 @@ int main(int argumentCount, char** arguments)
     std::filesystem::create_directories(catalogRoot, cleanup);
     if (cleanup)
     {
-        std::cerr << "{\"status\":\"error\",\"sample\":\"tina_sample_2d_authored_scene\","
-                     "\"message\":\"could not create the sample working directory\"}\n";
+        {
+            Tina::Core::JsonWriter writer(std::cerr);
+            writer.beginObject();
+            writer.member("status", "error");
+            writer.member("sample", "tina_sample_2d_authored_scene");
+            writer.member("message", "could not create the sample working directory");
+            writer.endObject();
+        }
+        std::cerr << '\n';
         return 1;
     }
     if (auto status = writeSceneFile(scenePath); !status)

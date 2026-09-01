@@ -1,6 +1,6 @@
 #include <tina/asset/CatalogCook.hpp>
 
-#include "Utf8Path.hpp"
+#include "core/io/PathUtil.hpp"
 #include "WavDecode.hpp"
 
 #include <tina/asset/AssetErrors.hpp>
@@ -146,7 +146,7 @@ struct RecipeSourceCaptureContext final {
 
     try
     {
-        const auto stagingRoot = Detail::pathFromUtf8Bytes(stagingRootUtf8);
+        const auto stagingRoot = Core::Detail::pathFromUtf8Bytes(stagingRootUtf8);
         const auto parent = stagingRoot.parent_path();
         std::error_code errorCode;
         if (!std::filesystem::exists(parent.empty() ? std::filesystem::path{"."} : parent, errorCode))
@@ -372,13 +372,13 @@ struct RecipeSourceCaptureContext final {
 
 [[nodiscard]] Core::Result<std::string> joinPath(std::string_view baseUtf8, std::string_view relativeOrAbsolute)
 {
-    const auto path = Detail::pathFromUtf8Bytes(relativeOrAbsolute);
+    const auto path = Core::Detail::pathFromUtf8Bytes(relativeOrAbsolute);
     if (path.is_absolute())
     {
         const auto generic = path.generic_u8string();
         return std::string(generic.begin(), generic.end());
     }
-    const auto full = Detail::pathFromUtf8Bytes(baseUtf8) / path;
+    const auto full = Core::Detail::pathFromUtf8Bytes(baseUtf8) / path;
     const auto generic = full.generic_u8string();
     return std::string(generic.begin(), generic.end());
 }
@@ -1168,37 +1168,6 @@ findCookAsset(std::span<const CookAssetValidationView> assets, Core::AssetId ass
     return found != assets.end() && found->assetId == assetId ? &*found : nullptr;
 }
 
-[[nodiscard]] bool pathComponentEquals(const std::filesystem::path& left,
-                                       const std::filesystem::path& right) noexcept
-{
-#if defined(_WIN32)
-    const auto& leftText = left.native();
-    const auto& rightText = right.native();
-    return leftText.size() == rightText.size() &&
-           std::equal(leftText.begin(), leftText.end(), rightText.begin(),
-                      [](wchar_t leftCharacter, wchar_t rightCharacter) {
-                          return std::towlower(leftCharacter) == std::towlower(rightCharacter);
-                      });
-#else
-    return left == right;
-#endif
-}
-
-[[nodiscard]] bool pathIsSameOrDescendant(const std::filesystem::path& candidate,
-                                          const std::filesystem::path& ancestor) noexcept
-{
-    auto candidatePart = candidate.begin();
-    for (auto ancestorPart = ancestor.begin(); ancestorPart != ancestor.end();
-         ++ancestorPart, ++candidatePart)
-    {
-        if (candidatePart == candidate.end() || !pathComponentEquals(*candidatePart, *ancestorPart))
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
 [[nodiscard]] Core::Status validateStageOutsideBaseline(std::string_view stagingRootUtf8,
                                                         std::string_view baselineRootUtf8)
 {
@@ -1206,18 +1175,19 @@ findCookAsset(std::span<const CookAssetValidationView> assets, Core::AssetId ass
     {
         std::error_code errorCode;
         const auto stage = std::filesystem::weakly_canonical(
-            Detail::pathFromUtf8Bytes(stagingRootUtf8), errorCode);
+            Core::Detail::pathFromUtf8Bytes(stagingRootUtf8), errorCode);
         if (errorCode)
         {
             return Core::failure(makeStageFilesystemError("failed to resolve staging root", errorCode));
         }
         const auto baseline = std::filesystem::weakly_canonical(
-            Detail::pathFromUtf8Bytes(baselineRootUtf8), errorCode);
+            Core::Detail::pathFromUtf8Bytes(baselineRootUtf8), errorCode);
         if (errorCode)
         {
             return Core::failure(makeStageFilesystemError("failed to resolve baseline root", errorCode));
         }
-        if (pathIsSameOrDescendant(stage.lexically_normal(), baseline.lexically_normal()))
+        if (Core::Detail::pathIsSameOrDescendant(stage.lexically_normal(),
+                                                 baseline.lexically_normal()))
         {
             return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                                  "staging root must be outside the baseline package");
@@ -3111,7 +3081,7 @@ loadCatalogCookRecipeFileInternal(std::string_view recipeUtf8Path,
         {
             text[index] = static_cast<char>(std::to_integer<unsigned char>((*bytes)[index]));
         }
-        const auto path = Detail::pathFromUtf8Bytes(recipeUtf8Path);
+        const auto path = Core::Detail::pathFromUtf8Bytes(recipeUtf8Path);
         const auto base = path.parent_path();
         std::string baseUtf8 = ".";
         if (!base.empty())
