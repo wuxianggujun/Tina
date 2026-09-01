@@ -1,4 +1,5 @@
 set(TINA_CORE_TEST_SOURCES
+    core/ApplicationPathsTests.cpp
     core/AssertReleaseCompileTests.cpp
     core/AssertTests.cpp
     core/CancellationSignalTests.cpp
@@ -11,6 +12,7 @@ set(TINA_CORE_TEST_SOURCES
     core/EnumFlagsTests.cpp
     core/MoveOnlyFunctionTests.cpp
     core/ParseFloatTests.cpp
+    core/header_isolation/ApplicationPathsHeader.cpp
     core/header_isolation/AssetIdHeader.cpp
     core/header_isolation/CancellationSignalHeader.cpp
     core/header_isolation/ContentHashHeader.cpp
