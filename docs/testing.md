@@ -393,6 +393,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
   .\tools\windows\RunLinuxDockerGate.ps1 -Gate sdk-audio-miniaudio-consumer
 ```
 
+这些脚本在 `cmake --install` 之前只构建一个目标：`tina_sdk_install_artifacts`。它由
+`cmake/TinaGameSdkPackage.cmake` 在每处 `install(TARGETS ...)` 旁边收集目标名后聚合而成（INTERFACE
+库无产物，已滤除），所以「装什么」与「先编什么」同源。**不要在门禁脚本里手写目标清单**：那等于把同一份
+清单存两处，新模块只要进了 install 规则却没进脚本，install 就会因为某个从未被编译的库而失败——Save
+与 Gameplay 就是这样让 DesktopBootstrap 门禁挂在缺失的 `tina_save.lib` 上的，而 `tina_editor` 只是碰巧
+被别的构建留在树里才没暴露。
+
 成功条件是：版本化 package 和声明的 `Tina_GAME_SDK_TARGETS` 全部可发现；实际安装头通过第三方
 include/type token 扫描；所有 Tina imported target 的 include 都来自安装 prefix 而非源码树；外部
 `tina_sdk_consumer` 只链接 `Tina::GameSDK`，并从 relocated installed headers 编译；consumer 还会

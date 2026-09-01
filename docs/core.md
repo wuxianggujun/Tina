@@ -82,6 +82,19 @@ ContentHash。
   工作目录而不是 per-user 位置，因此显式拒绝并返回 `NotFound`。`appName`/`fileName` 各须是单个
   UTF-8 path segment：空串、`.`、`..`、含分隔符或 `:` 一律 `InvalidArgument`，因为 segment 是逐字
   拼接的，不做净化。
+- `applicationDirectory()` 与 `applicationFilePath(relativePath)`（`core/io/ApplicationPaths.hpp`）：
+  解析**正在运行的可执行文件所在目录**，以及相对它的路径。这是随包只读数据的锚点：装出去的游戏会被
+  拷到任意位置、并从别处启动，所以编译期绝对路径（只在编译它的那台机器上对）和进程工作目录（在玩家
+  启动它的地方）都找不到自己的资产，只有 exe 位置可以。Windows 读已加载模块路径，其它平台读
+  `/proc/self/exe`；返回 UTF-8，不含尾部分隔符。
+  - 与 `UserPaths.hpp` 是两个**不同**问题，故不合并：那边答的是「产品可以往哪写」，按 application
+    name 索引；这边答的是「产品的只读数据在哪」，除 exe 位置外无输入。
+  - 同样**只做路径拼接，不碰文件系统**，所以只读或空安装目录里 resolve 不会失败，资产缺失由随后失败
+    的读取报告，而不是由 resolve 报告。
+  - `relativePath` 允许多级目录（随包数据本来就是分层摆放的），但必须用 `/` 作分隔符，让同一逻辑路径
+    只有一种写法。逐字拼接，因此凡是可能解析到 exe 目录**之外**的值一律 `InvalidArgument`：绝对路径、
+    含 `\`、含 `:`、`.`、`..`、以及任何空组件（含 `//` 与尾部 `/`）。
+  - 根目录会保留其分隔符：`""` 是相对路径，而 `C:` 指的是 C 盘的当前工作目录而非根目录。
 
 路径 canonicalization、sandbox/root containment 属于具体 Cooker/Asset 输入策略，不由 Core
 `writeFile()` 自动猜测。

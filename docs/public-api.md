@@ -142,8 +142,8 @@ minidump、CrashContext、POSIX fatal-signal 栈回溯、恢复执行或损坏�
 ### 正确姿势（普通桌面游戏）
 
 ```cpp
-// 1) 实现 IGameApplication：createInitialState + onShutdown
-// 2) 实现 IGameState：onEnter/onExit/initialPolicy + 需要的相位
+// 1) 实现 IGameApplication：只有 createInitialState 是必须的
+// 2) 实现 IGameState：只重写需要的相位，其余都有默认实现
 // 3) 组合并运行（不要自建主循环）
 auto host = Tina::Desktop::CreateEngine(config);
 if (!host) { /* handle error */ }
@@ -282,21 +282,25 @@ binding 的条目被忽略——游戏删掉某个 action 后，一个过期设�
 当前 Application 接口：
 
 ```cpp
-createInitialState(GameStartupContext&)
-onShutdown(GameShutdownContext&) noexcept
+createInitialState(GameStartupContext&)   // 纯虚
+onShutdown(GameShutdownContext&) noexcept // 默认空实现
 ```
 
-当前 State 接口：
+当前 State 接口（**全部带默认实现**）：
 
 ```cpp
-onEnter(GameStateEnterContext&)
-onExit(GameStateExitContext&) noexcept
-initialPolicy() const noexcept
-fixedUpdate(FixedUpdateContext&)
-updateFrame(FrameUpdateContext&)
-extractRenderScene(RenderSceneExtractionContext&) const
-updateUI(UIUpdateContext&)
+onEnter(GameStateEnterContext&)                          // 默认 success()
+onExit(GameStateExitContext&) noexcept                   // 默认空
+initialPolicy() const noexcept                           // 默认 {}，不阻断任何相位
+fixedUpdate(FixedUpdateContext&)                         // 默认 success()
+updateFrame(FrameUpdateContext&)                         // 默认 success()
+extractRenderScene(RenderSceneExtractionContext&) const  // 默认 success()
+updateUI(UIUpdateContext&)                               // 默认 success()
 ```
+
+最小可用 State 只重写它关心的那一个相位。`createInitialState` 是唯一的纯虚：没有起始 State 的
+Application 无从运行，因此没有可选的默认值。`tests/sdk_consumer_desktop/main.cpp` 是这一约定的
+编译期断言——它只重写 `updateFrame` 与 `createInitialState`，任何钩子退回纯虚都会让它编不过。
 
 Runtime 私有持有 `GameStateStack`（定容 8）。`FrameUpdateContext` 提供 `requestPush` /
 `requestPop` / `requestReplace` / `requestPolicyChange`：每帧最多一个 structural command，在

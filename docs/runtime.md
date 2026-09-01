@@ -12,7 +12,8 @@
   `renderMsaaSamples` 同样是 device-lifetime。唯一例外是 `renderVsync`：它只给设备播种，之后由栈顶
   State 通过 `FrameUpdateContext::displaySettings()` 热改。
 - `IGameApplication` 只通过 `createInitialState()` 创建首个 State，并在已提交游戏结束时接收
-  `onShutdown()`。
+  `onShutdown()`。`createInitialState()` 是 Game SDK 里唯一的纯虚钩子——没有起始 State 的
+  Application 无从运行；`onShutdown()` 默认空实现。
 - Runtime 持有私有 `GameStateStack`（定容 8）；初始 State 经 onEnter 成功后 push。
 - `FrameUpdateContext` 提供 `requestPush` / `requestPop` / `requestReplace` / `requestPolicyChange`：
   每帧最多一个 structural command，在 Frame Update 与 extract 之间唯一 commit；enter 失败只丢
@@ -20,6 +21,8 @@
 - `GameStatePolicy` 在 enter 成功后采样；`requestPolicyChange` 更新栈顶 committed policy。
   帧阶段按栈 **自顶向下** 调度（见下节 policy 语义）。structural command 仍仅栈顶可排队。
 - `IGameState` 承担 `fixedUpdate()`、`updateFrame()`、`extractRenderScene()` 与 `updateUI()`。
+  `IGameState` 的**每个**钩子都有默认实现（相位返回 `success()`、`onExit()` 空、`initialPolicy()`
+  返回不阻断任何相位的 `{}`），所以最小可用 State 只重写它关心的那一个相位。
 - Runtime 唯一 `ActionMapper` 使用 unified digital/analog binding；只有栈顶 State 可在
   `FrameUpdateContext` 中排队下一 mapping frame 生效的 rebind transaction。
 - Runtime 已组合 Clock、Platform、Task、Render 和可选 Audio；AssetSystem/World/Physics2D 仍由
