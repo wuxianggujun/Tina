@@ -15,6 +15,7 @@
 
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/SourceImportProbe.hpp>
+#include <tina/asset/TextureMipChain.hpp>
 #include <tina/asset_format/MaterialPayload.hpp>
 #include <tina/asset_format/PrefabPayload.hpp>
 #include <tina/asset_format/StaticMeshPayload.hpp>
@@ -1536,13 +1537,14 @@ namespace {
                                  "glTF cooked texture output budget exceeded");
         }
         const Core::AssetId textureId = deriveTextureChannelId(identityLocator, channel, sequence);
-        auto texPayload = AssetFormat::writeTexture2DPayloadBytesRgba8(
+        auto texPayload = writeMippedTexture2DPayloadBytesRgba8(
             static_cast<Core::u16>(decoded->second.width),
             static_cast<Core::u16>(decoded->second.height), decoded->second.rgba,
             // Base colour is authored in sRGB; normal and metallic-roughness carry data
             // rather than colour, so decoding them through gamma would corrupt the
             // values the shader reads. v1 had no way to say this, so every cooked glTF
-            // texture was implicitly sRGB.
+            // texture was implicitly sRGB. The colour space also selects the mip filter's
+            // maths, so a Linear channel is averaged in the space it is stored in.
             channel == GltfTextureChannel::BaseColor ? AssetFormat::Texture2DColorSpace::Srgb
                                                     : AssetFormat::Texture2DColorSpace::Linear);
         if (!texPayload)

@@ -1683,6 +1683,76 @@ TEST(GltfCookTests, CooksMultipleMeshesToDistinctAssets)
     return std::vector<unsigned char>(std::begin(kPng), std::end(kPng));
 }
 
+// 2x2 RGBA8 PNG: red, green / blue, translucent white. Needed because a 1x1 image cannot
+// produce a mip chain, so the 1x1 fixtures above cannot observe mip generation at all.
+[[nodiscard]] std::vector<unsigned char> twoByTwoPngBytes()
+{
+    static constexpr unsigned char kPng[] = {
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D,
+        0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02,
+        0x08, 0x06, 0x00, 0x00, 0x00, 0x72, 0xB6, 0x0D, 0x24, 0x00, 0x00, 0x00,
+        0x13, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9C, 0x63, 0xF8, 0xCF, 0xC0, 0xF0,
+        0x1F, 0x0C, 0x81, 0x34, 0x08, 0x34, 0x00, 0x00, 0x49, 0x49, 0x09, 0x78,
+        0x28, 0xA0, 0xDB, 0x77, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44,
+        0xAE, 0x42, 0x60, 0x82};
+    return std::vector<unsigned char>(std::begin(kPng), std::end(kPng));
+}
+
+// One base-colour texture (sRGB) and one normal texture (Linear) sharing the same source
+// image, so a cook that ignored the colour space would produce identical mip bytes.
+[[nodiscard]] std::string twoByTwoTexturedGltfJson()
+{
+    return R"json({
+  "asset": {"version": "2.0"},
+  "scenes": [{"nodes": [0]}],
+  "nodes": [{"mesh": 0}],
+  "meshes": [{
+    "primitives": [{
+      "attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2},
+      "indices": 3,
+      "mode": 4,
+      "material": 0
+    }]
+  }],
+  "materials": [{
+    "pbrMetallicRoughness": {
+      "baseColorFactor": [1.0, 1.0, 1.0, 1.0],
+      "metallicFactor": 0.4,
+      "roughnessFactor": 0.5,
+      "baseColorTexture": {"index": 0}
+    },
+    "normalTexture": {"index": 1}
+  }],
+  "textures": [{"source": 0}, {"source": 1}],
+  "images": [{"uri": "base.png"}, {"uri": "n.png"}],
+  "accessors": [
+    {
+      "bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3",
+      "max": [1.0, 1.0, 0.0], "min": [0.0, 0.0, 0.0]
+    },
+    {
+      "bufferView": 1, "componentType": 5126, "count": 3, "type": "VEC3"
+    },
+    {
+      "bufferView": 2, "componentType": 5126, "count": 3, "type": "VEC2"
+    },
+    {
+      "bufferView": 3, "componentType": 5123, "count": 3, "type": "SCALAR"
+    }
+  ],
+  "bufferViews": [
+    {"buffer": 0, "byteOffset": 0, "byteLength": 36},
+    {"buffer": 0, "byteOffset": 36, "byteLength": 36},
+    {"buffer": 0, "byteOffset": 72, "byteLength": 24},
+    {"buffer": 0, "byteOffset": 96, "byteLength": 6}
+  ],
+  "buffers": [{
+    "byteLength": 104,
+    "uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAABAAIAAAA="
+  }]
+})json";
+}
+
 [[nodiscard]] std::string texturedTriangleGltfJson()
 {
     // Same triangle as minimal, material uses baseColorTexture index 0 → image "tex.png".
@@ -2113,6 +2183,77 @@ TEST(GltfCookTests, CooksMetallicRoughnessAndNormalTextureDeps)
 
     const auto catalogRoot = dir / "catalog";
     ASSERT_TRUE(cookAndPublishCatalogPackage(catalogRoot.string(), *request).has_value());
+}
+
+// Every other textured fixture here is 1x1, which yields a one-level chain and therefore
+// cannot tell a mipped cook from an unmipped one. This one is 2x2 so the chain is real,
+// and it feeds the same source image to a base-colour and a normal slot so the two
+// colour spaces are compared against identical pixels.
+TEST(GltfCookTests, CooksAFullMipChainAndFiltersEachChannelInItsOwnColorSpace)
+{
+    const auto dir = std::filesystem::temp_directory_path() / "tina_gltf_tex_mips";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    {
+        const auto png = twoByTwoPngBytes();
+        for (const char* name : {"base.png", "n.png"})
+        {
+            std::ofstream out(dir / name, std::ios::binary);
+            ASSERT_TRUE(out.good());
+            out.write(reinterpret_cast<const char*>(png.data()), static_cast<std::streamsize>(png.size()));
+        }
+    }
+    const auto gltfPath = dir / "mipped.gltf";
+    {
+        std::ofstream out(gltfPath, std::ios::binary);
+        ASSERT_TRUE(out.good());
+        out << twoByTwoTexturedGltfJson();
+    }
+
+    auto request = cookGltfFileToCatalogRequest(gltfPath.string(), AssetFormat::TargetPlatform::WindowsX64);
+    ASSERT_TRUE(request.has_value()) << (request ? "" : request.error().message);
+
+    std::vector<AssetFormat::Texture2DColorSpace> spaces;
+    std::vector<std::vector<std::byte>> tailPixels;
+    for (const auto& asset : request->assets)
+    {
+        if (asset.assetKind != AssetFormat::AssetKind::Texture2D)
+        {
+            continue;
+        }
+        auto view = AssetFormat::parseTexture2DPayload(asset.payload);
+        ASSERT_TRUE(view.has_value()) << (view ? "" : view.error().message);
+        EXPECT_EQ(view->width, 2U);
+        EXPECT_EQ(view->height, 2U);
+        ASSERT_EQ(view->levelCount, AssetFormat::texture2DFullMipLevelCount(2, 2));
+        ASSERT_EQ(view->levelCount, 2U);
+        // A chain with mipFilter None would ship levels the sampler never selects.
+        EXPECT_EQ(view->sampler.mipFilter, AssetFormat::Texture2DMipFilterMode::Linear);
+        const auto levels = view->levels();
+        ASSERT_EQ(levels.size(), 2U);
+        EXPECT_EQ(levels.back().width, 1U);
+        EXPECT_EQ(levels.back().height, 1U);
+        ASSERT_EQ(levels.back().bytes.size(), 4U);
+        spaces.push_back(view->colorSpace);
+        tailPixels.emplace_back(levels.back().bytes.begin(), levels.back().bytes.end());
+    }
+
+    ASSERT_EQ(spaces.size(), 2U);
+    ASSERT_EQ(tailPixels.size(), 2U);
+    // One sRGB (base colour) and one Linear (normal), in either cook order.
+    const bool sawSrgb = spaces[0] == AssetFormat::Texture2DColorSpace::Srgb ||
+                         spaces[1] == AssetFormat::Texture2DColorSpace::Srgb;
+    const bool sawLinear = spaces[0] == AssetFormat::Texture2DColorSpace::Linear ||
+                           spaces[1] == AssetFormat::Texture2DColorSpace::Linear;
+    EXPECT_TRUE(sawSrgb);
+    EXPECT_TRUE(sawLinear);
+    ASSERT_NE(spaces[0], spaces[1]);
+    // The decisive assertion: identical source pixels must not average to the same tail
+    // level under the two colour spaces. Equal bytes here would mean the colour space is
+    // recorded in the header but ignored by the filter, which is invisible from the
+    // header alone and shows up only as mips that are too dark.
+    EXPECT_NE(tailPixels[0], tailPixels[1]);
 }
 
 TEST(GltfCookTests, RejectsExternalImagePathTraversal)

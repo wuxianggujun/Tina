@@ -206,30 +206,11 @@ try
 
     // Imported images are authored colour, so they are sRGB and must be filtered as such.
     constexpr auto ImportedColorSpace = AssetFormat::Texture2DColorSpace::Srgb;
-    auto mipChain = buildTexture2DMipChainRgba8(
+    auto texturePayload = writeMippedTexture2DPayloadBytesRgba8(
         static_cast<Core::u16>(width), static_cast<Core::u16>(height),
         std::span<const std::byte>{reinterpret_cast<const std::byte*>(pixels.get()), pixelBytes},
         ImportedColorSpace);
     pixels.reset();
-    if (!mipChain)
-    {
-        return Core::failure(
-            std::move(mipChain.error()).withContext("cookTextureFileToCatalogSourceResult", "mipChain"));
-    }
-
-    std::array<AssetFormat::Texture2DLevelDesc, AssetFormat::Texture2DWire::MaxLevelCount>
-        levelStorage{};
-    const auto levels = mipChain->fillLevelDescs(levelStorage);
-    // A single-level texture must declare mipFilter None; the wire rejects the pair the
-    // other way round, so a 1x1 import cannot claim mip selection it has no levels for.
-    const auto mipFilter = levels.size() > 1U ? AssetFormat::Texture2DMipFilterMode::Linear
-                                              : AssetFormat::Texture2DMipFilterMode::None;
-    auto texturePayload = AssetFormat::writeTexture2DPayloadBytes(AssetFormat::Texture2DPayloadDesc{
-        .pixelFormat = AssetFormat::Texture2DPixelFormat::Rgba8Unorm,
-        .colorSpace = ImportedColorSpace,
-        .sampler = {.mipFilter = mipFilter},
-        .levels = levels,
-    });
     if (!texturePayload)
     {
         return Core::failure(std::move(texturePayload.error()).withContext(

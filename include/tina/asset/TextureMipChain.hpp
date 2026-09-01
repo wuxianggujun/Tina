@@ -61,4 +61,16 @@ buildTexture2DMipChainRgba8(Core::u16 width, Core::u16 height,
                             std::span<const std::byte> rgba8BasePixels,
                             AssetFormat::Texture2DColorSpace colorSpace);
 
+// Builds the chain and writes the cooked payload in one step, which is what every
+// producer of an RGBA8 texture wants.
+//
+// It exists as one function because the chain and the sampler's mip filter have to agree:
+// the wire rejects mipFilter None over multiple levels, and a multi-level payload that
+// claims None would ship a chain the sampler never selects from. Deriving the filter from
+// the level count it just produced makes the two impossible to set inconsistently.
+[[nodiscard]] Core::Result<std::vector<std::byte>>
+writeMippedTexture2DPayloadBytesRgba8(Core::u16 width, Core::u16 height,
+                                      std::span<const std::byte> rgba8BasePixels,
+                                      AssetFormat::Texture2DColorSpace colorSpace);
+
 } // namespace Tina::Asset

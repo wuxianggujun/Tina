@@ -277,4 +277,26 @@ buildTexture2DMipChainRgba8(Core::u16 width, Core::u16 height,
     return chain;
 }
 
+Core::Result<std::vector<std::byte>>
+writeMippedTexture2DPayloadBytesRgba8(Core::u16 width, Core::u16 height,
+                                      std::span<const std::byte> rgba8BasePixels,
+                                      AssetFormat::Texture2DColorSpace colorSpace)
+{
+    auto chain = buildTexture2DMipChainRgba8(width, height, rgba8BasePixels, colorSpace);
+    if (!chain)
+    {
+        return Core::failure(std::move(chain.error()));
+    }
+    std::array<AssetFormat::Texture2DLevelDesc, AssetFormat::Texture2DWire::MaxLevelCount>
+        levelStorage{};
+    const auto levels = chain->fillLevelDescs(levelStorage);
+    return AssetFormat::writeTexture2DPayloadBytes(AssetFormat::Texture2DPayloadDesc{
+        .pixelFormat = AssetFormat::Texture2DPixelFormat::Rgba8Unorm,
+        .colorSpace = colorSpace,
+        .sampler = {.mipFilter = levels.size() > 1U ? AssetFormat::Texture2DMipFilterMode::Linear
+                                                    : AssetFormat::Texture2DMipFilterMode::None},
+        .levels = levels,
+    });
+}
+
 } // namespace Tina::Asset
