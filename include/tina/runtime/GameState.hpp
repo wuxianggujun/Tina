@@ -26,9 +26,20 @@ class IGameState {
 public:
     virtual ~IGameState() noexcept = default;
 
-    virtual Core::Status onEnter(GameStateEnterContext& context) = 0;
-    virtual void onExit(GameStateExitContext& context) noexcept = 0;
-    [[nodiscard]] virtual GameStatePolicy initialPolicy() const noexcept = 0;
+    // Every hook is defaulted, so the smallest usable state overrides only the one it
+    // cares about. A defaulted policy blocks nothing, which is the answer for a game
+    // whose stack never holds two states at once.
+    virtual Core::Status onEnter(GameStateEnterContext&)
+    {
+        return Core::success();
+    }
+
+    virtual void onExit(GameStateExitContext&) noexcept {}
+
+    [[nodiscard]] virtual GameStatePolicy initialPolicy() const noexcept
+    {
+        return GameStatePolicy{};
+    }
 
     virtual Core::Status fixedUpdate(FixedUpdateContext&)
     {

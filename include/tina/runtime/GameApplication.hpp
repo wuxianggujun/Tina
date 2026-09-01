@@ -12,10 +12,12 @@ class IGameApplication {
 public:
     virtual ~IGameApplication() noexcept = default;
 
+    // The one hook with no sensible default: an application that names no starting state
+    // has nothing to run.
     [[nodiscard]] virtual Core::Result<std::unique_ptr<IGameState>> createInitialState(
         GameStartupContext& context) = 0;
 
-    virtual void onShutdown(GameShutdownContext& context) noexcept = 0;
+    virtual void onShutdown(GameShutdownContext&) noexcept {}
 };
 
 } // namespace Tina

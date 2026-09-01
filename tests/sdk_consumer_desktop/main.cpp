@@ -8,22 +8,11 @@
 
 namespace {
 
+// Overriding nothing but the two hooks that carry this consumer's intent also asserts
+// that the installed headers default the rest: were any of them still pure, this would
+// not compile.
 class ConsumerState final : public Tina::IGameState {
   public:
-    Tina::Core::Status onEnter(Tina::GameStateEnterContext&) override
-    {
-        return Tina::Core::success();
-    }
-
-    void onExit(Tina::GameStateExitContext&) noexcept override
-    {
-    }
-
-    [[nodiscard]] Tina::GameStatePolicy initialPolicy() const noexcept override
-    {
-        return {};
-    }
-
     Tina::Core::Status updateFrame(Tina::FrameUpdateContext& context) override
     {
         context.requestExitAfterFrame();
@@ -36,10 +25,6 @@ class ConsumerApplication final : public Tina::IGameApplication {
     Tina::Core::Result<std::unique_ptr<Tina::IGameState>> createInitialState(Tina::GameStartupContext&) override
     {
         return std::unique_ptr<Tina::IGameState>{std::make_unique<ConsumerState>()};
-    }
-
-    void onShutdown(Tina::GameShutdownContext&) noexcept override
-    {
     }
 };
 
