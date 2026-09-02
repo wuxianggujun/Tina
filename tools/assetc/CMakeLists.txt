@@ -8,5 +8,6 @@ target_link_libraries(tina_assetc
     PRIVATE
         Tina::ProjectOptions
         Tina::Asset
+        TinaBgfxRuntime::l-smash
 )
 set_target_properties(tina_assetc PROPERTIES CXX_EXTENSIONS OFF)

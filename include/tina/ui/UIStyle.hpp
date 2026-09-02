@@ -1,5 +1,6 @@
 #pragma once
 
+#include <tina/core/base/EnumFlags.hpp>
 #include <tina/core/base/Types.hpp>
 #include <tina/ui/UIDirty.hpp>
 #include <tina/ui/UIPaint.hpp>
@@ -123,25 +124,11 @@ enum class UIInputModality : u8 {
     Accessibility,
 };
 
-[[nodiscard]] constexpr UIStyleState operator|(UIStyleState left, UIStyleState right) noexcept
-{
-    return static_cast<UIStyleState>(static_cast<u16>(left) | static_cast<u16>(right));
-}
-
-[[nodiscard]] constexpr UIStyleState operator&(UIStyleState left, UIStyleState right) noexcept
-{
-    return static_cast<UIStyleState>(static_cast<u16>(left) & static_cast<u16>(right));
-}
-
-constexpr UIStyleState& operator|=(UIStyleState& left, UIStyleState right) noexcept
-{
-    left = left | right;
-    return left;
-}
+TINA_ENUM_FLAG_OPERATORS(UIStyleState);
 
 [[nodiscard]] constexpr bool hasStyleState(UIStyleState set, UIStyleState state) noexcept
 {
-    return (set & state) == state;
+    return hasAllFlags(set, state);
 }
 
 // First stylesheet declaration slice. Rules are copied and precompiled by the
@@ -185,25 +172,11 @@ enum class UIStyleOverride : u16 {
     All = (1U << 16U) - 1U,
 };
 
-[[nodiscard]] constexpr UIStyleOverride operator|(UIStyleOverride left, UIStyleOverride right) noexcept
-{
-    return static_cast<UIStyleOverride>(static_cast<u16>(left) | static_cast<u16>(right));
-}
-
-[[nodiscard]] constexpr UIStyleOverride operator&(UIStyleOverride left, UIStyleOverride right) noexcept
-{
-    return static_cast<UIStyleOverride>(static_cast<u16>(left) & static_cast<u16>(right));
-}
-
-constexpr UIStyleOverride& operator|=(UIStyleOverride& left, UIStyleOverride right) noexcept
-{
-    left = left | right;
-    return left;
-}
+TINA_ENUM_FLAG_OPERATORS(UIStyleOverride);
 
 [[nodiscard]] constexpr bool hasStyleOverride(UIStyleOverride set, UIStyleOverride property) noexcept
 {
-    return (set & property) == property;
+    return hasAllFlags(set, property);
 }
 
 // Static dirty metadata for style/visual mutations (ADR 0023 / UI-STYLE-001).

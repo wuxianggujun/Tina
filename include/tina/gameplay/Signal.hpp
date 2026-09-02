@@ -210,6 +210,17 @@ class Signal final {
             // delivered to or skipped depending on slot reuse order.
             slot.armedAtDispatch = state.dispatchSequence + (state.dispatching ? 1 : 0);
         } else {
+            // subscriberCount alone does not say whether a slot can be appended. A slot
+            // unsubscribed during a dispatch is neither active nor yet on the free list,
+            // so the count drops while the slot stays occupied, and appending here would
+            // grow past the capacity Create reserved. That reallocation moves the very
+            // Slot whose callback is currently executing, which is a use-after-free
+            // rather than a missed delivery -- so this window is refused instead.
+            if (state.slots.size() >= state.config.subscriberCapacity) {
+                return Core::failure(GameplayErrorCode::CapacityExceeded,
+                                     "Signal subscriberCapacity is exhausted until the "
+                                     "running dispatch releases its unsubscribed slots");
+            }
             slotIndex = static_cast<u32>(state.slots.size());
             state.slots.push_back(Slot{
                 .callback = std::move(callback),

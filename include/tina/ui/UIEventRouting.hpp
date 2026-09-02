@@ -1,5 +1,6 @@
 #pragma once
 
+#include <tina/core/base/EnumFlags.hpp>
 #include <tina/core/base/Types.hpp>
 #include <tina/platform/Input.hpp>
 #include <tina/platform/PlatformFrame.hpp>
@@ -55,25 +56,11 @@ enum class UIEventPhaseMask : u8 {
     return static_cast<std::underlying_type_t<UIEventPhaseMask>>(value);
 }
 
-[[nodiscard]] constexpr UIEventPhaseMask operator|(UIEventPhaseMask left, UIEventPhaseMask right) noexcept
-{
-    return static_cast<UIEventPhaseMask>(eventPhaseMaskValue(left) | eventPhaseMaskValue(right));
-}
-
-[[nodiscard]] constexpr UIEventPhaseMask operator&(UIEventPhaseMask left, UIEventPhaseMask right) noexcept
-{
-    return static_cast<UIEventPhaseMask>(eventPhaseMaskValue(left) & eventPhaseMaskValue(right));
-}
-
-constexpr UIEventPhaseMask& operator|=(UIEventPhaseMask& left, UIEventPhaseMask right) noexcept
-{
-    left = left | right;
-    return left;
-}
+TINA_ENUM_FLAG_OPERATORS(UIEventPhaseMask);
 
 [[nodiscard]] constexpr bool hasEventPhase(UIEventPhaseMask phases, UIEventPhaseMask phase) noexcept
 {
-    return (phases & phase) != UIEventPhaseMask::None;
+    return hasAnyFlag(phases, phase);
 }
 
 // One backend-normalized pointer transition. Position and delta remain in

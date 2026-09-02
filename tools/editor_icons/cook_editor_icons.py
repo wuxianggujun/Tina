@@ -25,10 +25,10 @@ except ImportError as error:
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 MANIFEST_PATH = REPOSITORY_ROOT / "resources/editor/icons/manifest.json"
 GENERATED_HEADER_PATH = (
-    REPOSITORY_ROOT / "src/editor_app/EditorIconAtlas.generated.hpp"
+    REPOSITORY_ROOT / "editor/app/EditorIconAtlas.generated.hpp"
 )
 GENERATED_ALPHA_PATH = (
-    REPOSITORY_ROOT / "src/editor_app/EditorIconAtlas.generated.inc"
+    REPOSITORY_ROOT / "editor/app/EditorIconAtlas.generated.inc"
 )
 NUMBER_PATTERN = r"[-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?"
 PATH_TOKEN_PATTERN = re.compile(rf"[A-Za-z]|{NUMBER_PATTERN}")

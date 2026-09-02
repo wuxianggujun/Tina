@@ -2,7 +2,7 @@
 
 - 状态：`E1/E2/E3 源码与统一 build/test/smoke 已完成，待人工交互验收`
 - 日期：2026-08-24
-- 当前事实：[Editor 2D / 3D](editor-2d.md)、[Editor UI/UX 路线图](editor-ui-ux-roadmap.md)、源码 `src/editor` / `src/editor_app`
+- 当前事实：[Editor 2D / 3D](editor-2d.md)、[Editor UI/UX 路线图](editor-ui-ux-roadmap.md)、源码 `editor/src` / `editor/app`
 - 任务权威：[Roadmap](roadmap.md) 与 [Backlog](backlog.md)；本文条目进入实施前应先在 Backlog 建立正式任务行
 
 本文回答一个问题：Editor 当前闭环之后，下一批**功能扩展**应该做什么、为什么、按什么顺序。它与

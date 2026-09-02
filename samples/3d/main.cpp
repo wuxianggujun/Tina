@@ -140,6 +140,15 @@ class ResizingWindowPlatformBackend final : public Tina::Platform::IPlatformBack
                    : Tina::Core::success();
     }
 
+    Tina::Core::Status setPointerCaptureMode(Tina::Platform::PointerCaptureMode mode) override
+    {
+        static_cast<void>(mode);
+        return stopped_
+                   ? Tina::Core::failure(Tina::Platform::PlatformErrorCode::BackendStopped,
+                                         "The 3D extraction platform backend is stopped")
+                   : Tina::Core::success();
+    }
+
     void shutdown() noexcept override
     {
         stopped_ = true;

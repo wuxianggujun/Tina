@@ -113,7 +113,10 @@ provider 与 RenderScene 容量消费前剔除；无相机/0x0 surface 保留未
 映射为 `Mesh3DCascadedDirectionalShadow`，以排序后的 `directionalLightIndex` 关联灯光。bgfx 在首次出现对应
 shadow pass 时按需创建独立2×2 D16 `DirectionalShadowAtlas`（默认2048×2048、每 tile 1024×1024），并执行 camera-slice projection
 与每级联3×3 PCF；级联 pass 不消费
-primary-surface clear ownership。最多一个 camera-affecting spot light 可携带 optional `SpotLightShadow3D`；
+primary-surface clear ownership。级联的横向窗口取 frustum slice 的**外接球**而非八角点紧 AABB，并把窗口中心
+吸附到整数个 atlas texel（ADR 0044）：外接球半径只由 split 深度与镜头决定，相机平移旋转都不改变它，因而存在
+一个固定的 texel 栅格可供吸附；深度轴不吸附也不用外接球，仍取八角点紧 AABB，因为它不做光栅化，且放宽会把
+远处沿光轴的几何（如太阳 billboard）拖进 depth pass。窗口额外携带1个 texel 余量以容纳吸附偏移。最多一个 camera-affecting spot light 可携带 optional `SpotLightShadow3D`；
 它以正且小于 influence radius 的 near plane、depth bias 与 normal bias 描述。Render snapshot 在 spot lights
 稳定排序后映射 `spotLightIndex`，bgfx 在四个 CSM pass 后执行一个 sampled D16 depth pass（默认1024×1024），
 receiver 仅对匹配的 spot slot 应用3×3 PCF。最多一个 camera-affecting point light 可携带 optional
@@ -193,6 +196,15 @@ dirty flag 在下一个已提交帧以当前 extent 重新 `bgfx::reset`；plann
 提交帧而非立即执行，是因为 `bgfx::reset` 不能在 `submitFrame` 与其 `present()` 之间运行。null device 会
 记录请求状态，使 headless 工具与真实 backend 报告一致。默认保持开启，因此像素证据 gate 不受影响。
 
+游戏代码不直接接触 `IRenderDevice`：唯一入口是 Frame Update 相位的
+`FrameUpdateContext::displaySettings()`（`include/tina/runtime/PhaseContexts.hpp:194`），它返回 phase-local
+的 `DisplaySettings` 句柄，只暴露 `setVsyncEnabled()` / `vsyncEnabled()`，不暴露 backend 生命周期与资源
+API。该句柄不得跨帧保存。它和 Action rebinding 一样是 **top-state 权限**：只有栈顶 State 拿到有效句柄，
+非栈顶 State 拿到空句柄（`hasValue()` 为 `false`），`setVsyncEnabled()` **静默无效且不报错**
+（`src/runtime/EngineHost.cpp:1146` 按 `depthFromTop == 0` 传入 device 或 `nullptr`），这样下层暂停菜单
+不会把设备从上层正在运行的内容脚下改掉。同样地，`vsyncEnabled()` 报告的是**已请求**状态，backend 最迟
+在下一次 `present()` 应用，不保证在请求当帧生效；无 device 时它返回 `true`。
+
 Sprite2D lighting（`2D-LIGHT-N5`）只使用 frame-scoped `Sprite2DLightingDesc`：0..8个 committed world-space point
 light、0..32个 world-space shadow segment、正 influence radius、0..influence radius 的 source radius、
 非负 RGB 与 ambient；shadow endpoint 必须 finite，
@@ -231,6 +243,7 @@ beginFrame(surface facts)
   -> add Camera2D/PerspectiveCamera3D/Sprite2D/Mesh3D/SkinnedMesh3D
   -> optional setSprite2DLighting (deep-copy fixed frame snapshot)
   -> optional setMesh3DLighting (deep-copy fixed frame snapshot)
+  -> optional setClearColor (once per frame)
   -> validate, cull, stable sort and batch
   -> commit borrowed view
 ```
@@ -242,8 +255,25 @@ beginFrame(surface facts)
 - optional self-contained Sprite2D lighting snapshot、最多8个 committed point light、32个 shadow segment 与 ambient；
 - PerspectiveCamera3D、point/spot/static/skinned sphere-frustum culling、Opaque3D stable batch，以及 static/skinned 统一 Transparent3D back-to-front draw 序列；
 - optional self-contained Mesh3D lighting snapshot、可选 CSM/SpotLight shadow 描述、重复设置/非法描述的事务失败与统计；
+- 逐帧 clear color（ADR 0042）；
 - framebuffer 0x0 suspended 路径；
 - 容量/非法数值/非法 resource ref 失败时不发布半份 scene。
+
+`RenderSceneWriter::setClearColor()` 收**线性** `RenderLinearColor`，与 `baseColorFactor`、
+`Mesh3DDirectionalLight::colorR` 同一标尺；sRGB 编码由后端负责，公共 API 不出现 gamma。
+一帧只允许设一次，重复设置返回 `RenderErrorCode::InvalidSceneClearColor`；非有限、负、
+大于 1 的分量同样拒绝。未调用时使用 `DefaultSceneClearColor`，其 sRGB 编码逐字节等于旧后端
+常量 `0x102a43`，故不设色的产品与既有 gate 输出不变。后端不再持有颜色常量。
+这只是清屏色，不是天空盒：没有渐变、没有大气散射，需要那些就得画东西。
+
+自发光材质（ADR 0043）：`Mesh3DMaterialBindingDesc::emissiveFactorR/G/B` 是逐材质的线性
+radiance，默认 0，故不改变任何既有材质。它在 direct 与 ambient/IBL 之后**相加**，不乘 `NdotL`、
+不乘衰减、不受阴影影响，因此背对所有光源的面也能是亮的。校验取 finite 且非负但**不设上限** ——
+它与 `Mesh3DDirectionalLight::colorR` 同标尺，不是 `metallicFactor` 那种 `[0,1]` 的 BRDF 参数。
+静态/骨骼/透明三条路共用 `fs_tina_opaque3d_mr`，所以三者行为一致。当前只有 factor，没有
+emissive 贴图，即整个材质均匀自发光。**没有 tone mapping**：shader 末尾是 `linearToSrgb(lit)`，
+超过 1 的部分直接被编码 clamp 成白，所以自发光物体是纯白色块而非过曝光晕；选值时要对着传输函数
+验算，否则算好的颜色会在编码阶段被悄悄吃掉。bloom 在 bgfx 后端不可用。
 
 Scene/Runtime writer 不能创建 GPU resource。产品 State 在安全阶段上传并绑定资源；Sprite2D extraction
 与 Mesh3D extraction 都通过 phase-local `FrameResourceSink` intern 当前 binding，RenderScene 不保存
@@ -312,6 +342,7 @@ shader mode/program，并在采样后 premultiply。DisplayList/frame resource �
 | `setMesh3DMaterialTextureBinding` | 校验/记录 binding | material key → base-color texture；Opaque3D MR submit **采样** `s_texColor`（默认 1×1 白） |
 | `setMesh3DMaterialMetallicRoughnessTextureBinding` | 校验/记录 binding | material key → optional MR texture；未 bind 用默认 metallic=0/roughness=1 |
 | `setMesh3DLighting` | 同步校验/复制低层 fallback | 未提供 frame-scoped Scene lighting 时使用；0..4 directional + 0..8 point + 0..8 spot lights + ambient |
+| `set/createMesh3DMaterialBinding` 的 `emissiveFactorR/G/B` | 校验 finite 且非负，无上限 | 逐材质自发光 radiance，`u_emissiveFactor`；在 direct + ambient/IBL **之后相加**，不乘 `NdotL`、衰减、阴影或 ambient |
 | `capturePrimaryFrameRgba8` | Unsupported | present 后异步截图路径；owner thread 有界推进最多120个 bgfx frame，并在轮询间给 render callback 1ms 调度窗口，超限返回 `FrameCaptureFailed` |
 
 Texture2D cooked wire 当前为 schema v2。格式集合固定为 `Rgba8Unorm`、BC1/BC3/BC7 与 ASTC 4x4；
@@ -390,7 +421,7 @@ offscreen 渲染的一个**阶段**而不是独立开关，只有别的东西先
 
 | 后端 | 行为 |
 | --- | --- |
-| Null | **完整消费**：创建/绑定/销毁 render texture、校验 chain、构建扩展 schedule，并对一个 1×1 探针像素执行共享 reference math（`toneMapLinearColor`/`bloomPrefilterLinearColor`/`applyFogToLinearColor`），结果计入 `postProcessChainsExecuted` 与 `postProcessPassesPlanned` |
+| Null | **消费内建 step**：创建/绑定/销毁 render texture、校验 chain、构建扩展 schedule，并对一个 1×1 探针像素执行共享 reference math（`toneMapLinearColor`/`bloomPrefilterLinearColor`/`applyFogToLinearColor`），结果计入 `postProcessChainsExecuted` 与 `postProcessPassesPlanned`。**`CustomShader` step 例外**：shader binding 尚未进入 Null device SPI，任何 `CustomShader` 在帧状态推进前即返回 `RenderTextureUnsupported`（`src/render/null/NullRenderDevice.cpp:1547-1554`），因此 Null 后端**不能**用来验证自定义 shader step |
 | bgfx | **显式 fail closed**：非空 chain 返回 `RenderTextureUnsupported`。GPU 实现（offscreen framebuffer、HDR 格式协商、bloom mip 链，以及 `CustomShader` 所需的 shader binding）是独立切片 |
 
 bgfx 选择报错而非静默忽略：静默忽略会让调用方设置完整 HDR 链、得到 `success()`、却既看不到变化

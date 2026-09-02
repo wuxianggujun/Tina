@@ -326,9 +326,40 @@
         "TINA_BUILD_WAYLAND": "ON",
         "VCPKG_MANIFEST_FEATURES": "tests;platform-glfw;wayland"
       }
+    },
+    {
+      "name": "wasm32-emscripten",
+      "displayName": "WebAssembly (Emscripten + vcpkg)",
+      "inherits": "base",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/build/wasm32-emscripten",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "VCPKG_TARGET_TRIPLET": "wasm32-emscripten",
+        "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "D:/Programs/emsdk/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
+        "TINA_BUILD_EXAMPLES": "OFF",
+        "TINA_BUILD_TESTING": "OFF",
+        "TINA_BUILD_LEGACY": "OFF",
+        "TINA_BUILD_RENDER_BGFX": "OFF",
+        "TINA_BUILD_SHADERS": "OFF",
+        "VCPKG_MANIFEST_NO_DEFAULT_FEATURES": "ON",
+        "VCPKG_MANIFEST_FEATURES": ""
+      },
+      "environment": {
+        "EMSDK": "D:/Programs/emsdk",
+        "PATH": "D:/Programs/emsdk;D:/Programs/emsdk/upstream/emscripten;D:/Programs/emsdk/node/24.19.0_64bit;D:/Programs/emsdk/python/3.13.3_64bit;D:/Program Files/Microsoft Visual Studio/18/Professional/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja;$penv{PATH}"
+      }
     }
   ],
   "buildPresets": [
+    {
+      "name": "wasm32-emscripten",
+      "configurePreset": "wasm32-emscripten",
+      "environment": {
+        "EMSDK": "D:/Programs/emsdk",
+        "PATH": "D:/Programs/emsdk;D:/Programs/emsdk/upstream/emscripten;D:/Programs/emsdk/node/24.19.0_64bit;D:/Programs/emsdk/python/3.13.3_64bit;D:/Program Files/Microsoft Visual Studio/18/Professional/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja;$penv{PATH}"
+      }
+    },
     {
       "name": "windows-debug",
       "configurePreset": "windows-msvc",

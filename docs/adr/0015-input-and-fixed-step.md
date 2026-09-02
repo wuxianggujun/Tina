@@ -7,7 +7,11 @@
   EngineHost 帧链路已落地；2D-INPUT-ADV/N3 已收敛为 Runtime 唯一 unified digital/analog mapper，覆盖
   value/deadzone/scale、SumClamped/StrongestMagnitude、多 Gamepad source、UI digital/axis suppression 与
   顶层 State transactional rebind。Windows IMM32 与可见 Runtime UI 已落地；真实设备/DPI 平台矩阵仍按
-  独立测试门禁记录。本轮 N3 命令执行结果以最终验证记录为准
+  独立测试门禁记录。本轮 N3 命令执行结果以最终验证记录为准。
+  2026-09-02 扩展：`FrameActionSnapshot` 增加 `wheelDeltaX/Y` 与 per-pointer `FramePointerState` 表
+  （`pointers` / `pointerState()`），滚轮按帧求和、per-pointer 认领生效；认领词汇未变
+  （`PointerContinuousControl { Delta, Wheel }` 与 per-pointer identity 本来就存在，缺口在 `ActionMapper`
+  的发布侧）。下面「M7-A 仅接受 PrimaryPointerId」一段已相应订正
 
 ## 背景
 
@@ -83,8 +87,11 @@ Text/Composition 先经过严格 UTF-8 与 cursor 校验，再整段复制到 Cr
 Key、Pointer Button 与 Gamepad Button 的最后一个未被后续 cancel/raw reset 覆盖的 digital edge
 必须与 final held Snapshot 一致；实现使用固定数组单次扫描，不分配、不做 O(n²) 回看。
 M7-A 仅接受 `PrimaryPointerId`（0）：Pointer snapshot、Button/Move/Wheel transition 与 pointer binding
-使用其他 id 均结构化失败。同一帧所有 `GamepadSnapshot` 必须来自同一个 registry owner，每个 slot
-index 唯一；同 slot 的不同 generation 不能同时作为最终快照。
+使用其他 id 均结构化失败。**这一条已被 ADR 0032 的 C1 部分取代**：Pointer snapshot 与 transition
+现在按 `PointerCapacity` 做边界校验（`include/tina/platform/PlatformFrame.hpp:770,803`），非 primary
+槽位是合法的；**pointer binding 仍然只接受 primary**（`src/runtime/EngineConfig.cpp:29`），所以第 2 根
+手指按下不产生 Action，只能从 `FrameActionSnapshot::pointers` 读。同一帧所有 `GamepadSnapshot` 必须
+来自同一个 registry owner，每个 slot index 唯一；同 slot 的不同 generation 不能同时作为最终快照。
 Pointer Button/Wheel transition 必须保存该事件发生时的 window-logical position。UI hit-test 不得用
 Poll 结束时的最终 Pointer snapshot 替换它；否则 Button/Wheel 后同 Poll 内的 Move 会改变历史事件的
 目标。生产 GLFW adapter 使用按 callback 顺序维护的 backend-owned pointer state 固化该坐标，builder

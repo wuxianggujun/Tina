@@ -54,7 +54,7 @@ if (-not (Test-Path -LiteralPath $presetsPath)) {
 
 # --- collect CMake target names (Tina-owned trees only) ---
 $targetNames = @{}
-$cmakeRoots = @('CMakeLists.txt', 'src', 'tests', 'samples', 'tools', 'cmake')
+$cmakeRoots = @('CMakeLists.txt', 'src', 'tests', 'samples', 'tools', 'cmake', 'editor')
 foreach ($root in $cmakeRoots) {
     $path = Join-Path $RepoRoot $root
     if (-not (Test-Path -LiteralPath $path)) { continue }

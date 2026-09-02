@@ -523,6 +523,15 @@ struct Mesh3DMaterialBindingDesc final {
     GpuTextureId normalTexture{};
     float metallicFactor = 0.0F;
     float roughnessFactor = 1.0F;
+    // Radiance the material emits on its own, added after direct and ambient lighting and
+    // not scaled by either (ADR 0043). Zero leaves a material purely lit, which is why the
+    // default changes nothing. Finite and non-negative, but deliberately unbounded above:
+    // this is on the same scale as Mesh3DDirectionalLight::colorR, not a [0,1] BRDF
+    // parameter like the two factors above. There is no tone mapping, so anything past 1
+    // clamps to white at sRGB encode.
+    float emissiveFactorR = 0.0F;
+    float emissiveFactorG = 0.0F;
+    float emissiveFactorB = 0.0F;
     Mesh3DAlphaMode alphaMode = Mesh3DAlphaMode::Opaque;
 
     [[nodiscard]] friend constexpr bool operator==(const Mesh3DMaterialBindingDesc&,

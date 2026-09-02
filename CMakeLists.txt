@@ -51,6 +51,11 @@ option(TINA_BUILD_DOCS "Whether or not to generate documentation" "${PROJECT_IS_
 option(TINA_BUILD_TESTING "Build Tina tests" ON)
 option(TINA_BUILD_SHADERS "Build cooked runtime shaders with the bundled shader compiler" ON)
 option(TINA_BUILD_LEGACY "Build Legacy product (retired; must stay OFF)" OFF)
+# The editor is a tool built on top of the engine, not part of it. Off for consumers who add this
+# tree as a subdirectory -- Android otherwise cross-compiles ~9.5k lines of authoring code for a
+# device that will never run an editor.
+option(TINA_BUILD_EDITOR "Build the Tina editor (authoring library and TinaEditor desktop app)"
+    "${PROJECT_IS_TOP_LEVEL}")
 option(TINA_BUILD_PLATFORM_GLFW "Build the private vNext GLFW platform backend" OFF)
 option(TINA_BUILD_RENDER_BGFX "Build the private vNext bgfx render backend" OFF)
 # Cooks the OpenGL ES variant of every embedded program. Required for Android/iOS, where
@@ -271,6 +276,8 @@ include(Dependencies)
 # Before TinaUiFont, which stages the font through tina_product_data_file().
 include(TinaProductInstall)
 include(TinaUiFont)
+# Content/frontend split helpers for games and samples. Defines functions only.
+include(TinaGameProject)
 
 if(TINA_TRACE_BACKEND STREQUAL "tracy")
     add_subdirectory(src/trace/tracy)
@@ -301,7 +308,6 @@ if (TINA_BUILD_PHYSICS2D)
     add_subdirectory(src/gameplay2d)
 endif ()
 add_subdirectory(src/asset_format)
-add_subdirectory(src/editor)
 add_subdirectory(src/asset)
 add_subdirectory(src/ui)
 add_subdirectory(src/audio)
@@ -311,8 +317,21 @@ endif ()
 add_subdirectory(src/runtime)
 if(TINA_BUILD_PLATFORM_GLFW AND TINA_BUILD_RENDER_BGFX)
     add_subdirectory(src/desktop)
-    add_subdirectory(src/editor_app)
 endif()
+
+# Outside src/ because the editor consumes the engine rather than being part of it: it is allowed to
+# depend on product modules (Asset, Runtime, Scene), which a module under src/ is not.
+if(TINA_BUILD_EDITOR)
+    add_subdirectory(editor)
+endif()
+
+# Host tools, before the SDK package: tina_assetc is the asset cooker, and the package installs
+# it so a game built against an installed SDK can cook at build time instead of at startup.
+# tina_configure_game_sdk_package() only sees targets that already exist, so adding this after it
+# silently produces a package with no cooker in it.
+if (TINA_BUILD_EXAMPLES)
+    add_subdirectory(tools)
+endif ()
 
 include(TinaGameSdkPackage)
 tina_configure_game_sdk_package()
@@ -330,11 +349,9 @@ if (TINA_BUILD_RENDER_BGFX)
     add_subdirectory(samples/gallery)
 endif ()
 
-# Examples and small host tools (catalog validate CLI, samples).
+# Examples. The host tools they use are added above, ahead of the SDK package.
 if (TINA_BUILD_EXAMPLES)
     add_subdirectory(samples)
-    add_subdirectory(tools)
-
 endif ()
 
 # Tests

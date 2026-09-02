@@ -7,8 +7,13 @@ description: Legacy 产品图已退役。此 skill 仅说明迁移后状态并�
 
 ## 状态
 
-横版 2D 小游戏、`Tina.exe`、旧 `src/ui`（Legacy UI）、`src/game`/`engine`/`ecs`/`renderer` 等**已删除**。  
+横版 2D 小游戏、`Tina.exe`、Legacy UI **产品图**（旧 Application/EnTT 产品实现）、
+`src/game`/`engine`/`ecs`/`renderer` 等**已删除**。
 `TINA_BUILD_LEGACY=ON` 会 **FATAL**。
+
+> **`src/ui` 与 `include/tina/ui` 不在删除范围内。** 它们是当前唯一在用的产品 Retained UI 模块。
+> 「Legacy UI 已删除」仅指旧产品图里的 UI 实现，**不构成删除当前 `src/ui` 的依据**
+> （见 `README.md:6`、`README_CN.md:6` 的同一条警告）。下表把 UI 改动指向 `src/ui` 正是因为它仍然存活。
 
 ## 不要做
 

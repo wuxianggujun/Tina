@@ -1,5 +1,6 @@
 #include "BgfxRenderDevice.hpp"
 #include "BgfxCascadedDirectionalShadowMath.hpp"
+#include "BgfxClearColor.hpp"
 #include "BgfxCascadedDirectionalShadowResources.hpp"
 #include "BgfxSpotLightShadowMath.hpp"
 #include "BgfxSpotLightShadowResources.hpp"
@@ -263,7 +264,7 @@ constexpr bgfx::ViewId kRetirementMarkerView = 16;
 // Reset flags that are fixed for the device lifetime. Vsync and MSAA are OR'd
 // in separately: MSAA at creation, vsync whenever setVsyncEnabled changes it.
 constexpr u32 kDefaultResetFlags = BGFX_RESET_MAXANISOTROPY;
-constexpr u32 kClearRgba = 0x102a43ff;
+// ADR 0042 clear-colour encoding lives in BgfxClearColor.hpp so it stays testable.
 constexpr usize kIndicesPerSolidQuad = 6;
 #if defined(BGFX_CONFIG_MAX_DRAW_CALLS)
 constexpr u32 kCompiledBgfxMaximumDrawCalls = BGFX_CONFIG_MAX_DRAW_CALLS;
@@ -523,6 +524,7 @@ toBgfxPlatformData(const Integration::Detail::NativeWindowBinding& binding)
     case Integration::Detail::NativeWindowBindingKind::X11:
     case Integration::Detail::NativeWindowBindingKind::Wayland:
     case Integration::Detail::NativeWindowBindingKind::Android:
+    case Integration::Detail::NativeWindowBindingKind::Html5:
         break;
     default:
         return Core::failure(RenderErrorCode::InvalidNativeWindowBinding,
@@ -564,6 +566,17 @@ toBgfxPlatformData(const Integration::Detail::NativeWindowBinding& binding)
         {
             return Core::failure(RenderErrorCode::InvalidNativeWindowBinding,
                                  "The Android native window binding must not carry a display pointer");
+        }
+        platformData.type = bgfx::NativeWindowHandleType::Default;
+        break;
+    case Integration::Detail::NativeWindowBindingKind::Html5:
+        // nwh is a CSS selector string, not a handle. bgfx's HTML5 GL context copies it out
+        // with bx::strCopy before returning, so the string only has to outlive bgfx::init.
+        // There is no display to carry, so a non-zero one would be silently ignored.
+        if (binding.nativeDisplay != 0)
+        {
+            return Core::failure(RenderErrorCode::InvalidNativeWindowBinding,
+                                 "The HTML5 native window binding must not carry a display pointer");
         }
         platformData.type = bgfx::NativeWindowHandleType::Default;
         break;
@@ -763,7 +776,8 @@ preflightUIDisplayList(UIDisplayListView displayList, FrameResourceTableView res
 }
 
 [[nodiscard]] Core::Result<PreparedOpaque3D>
-preflightOpaque3D(RenderSceneView scene, FrameResourceTableView resources)
+preflightOpaque3D(RenderSceneView scene, FrameResourceTableView resources,
+                  u16 directionalCascadeTileExtent)
 {
     auto requirements = checkedOpaque3DFrame(scene, resources);
     if (!requirements)
@@ -815,6 +829,9 @@ preflightOpaque3D(RenderSceneView scene, FrameResourceTableView resources)
                 .camera = *scene.perspectiveCamera(),
                 .light = directionalLights[shadow.directionalLightIndex],
                 .maximumDistanceMeters = shadow.maximumDistanceMeters,
+                // The snap grid must be the atlas grid, so the configured tile extent has to
+                // reach the math rather than the math assuming the default.
+                .tileExtent = directionalCascadeTileExtent,
             },
             caps->homogeneousDepth,
             caps->originBottomLeft);
@@ -1509,6 +1526,15 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         ++statistics_.liveResources;
 
+        opaque3DEmissiveFactorUniform_ =
+            bgfx::createUniform("u_emissiveFactor", bgfx::UniformType::Vec4);
+        if (!bgfx::isValid(opaque3DEmissiveFactorUniform_))
+        {
+            return Core::failure(RenderErrorCode::DeviceInitializationFailed,
+                                 "bgfx rejected the Opaque3D emissive factor uniform");
+        }
+        ++statistics_.liveResources;
+
         opaque3DNormalSampler_ = bgfx::createUniform("s_texNormal", bgfx::UniformType::Sampler);
         if (!bgfx::isValid(opaque3DNormalSampler_))
         {
@@ -1770,7 +1796,8 @@ class BgfxRenderDevice final : public IRenderDevice {
         if (framePlan->shouldSubmit())
         {
             auto opaque3DPreflight =
-                preflightOpaque3D(frame.primaryWorldScene, frame.resources);
+                preflightOpaque3D(frame.primaryWorldScene, frame.resources,
+                                  shadowMapExtents_.directionalCascadeTileExtent);
             if (!opaque3DPreflight)
             {
                 return Core::failure(std::move(opaque3DPreflight.error()));
@@ -2273,6 +2300,12 @@ class BgfxRenderDevice final : public IRenderDevice {
             {
                 bgfx::destroy(opaque3DMrParamsUniform_);
                 opaque3DMrParamsUniform_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(opaque3DEmissiveFactorUniform_))
+            {
+                bgfx::destroy(opaque3DEmissiveFactorUniform_);
+                opaque3DEmissiveFactorUniform_ = BGFX_INVALID_HANDLE;
                 --statistics_.liveResources;
             }
             if (bgfx::isValid(opaque3DNormalSampler_))
@@ -2831,11 +2864,11 @@ class BgfxRenderDevice final : public IRenderDevice {
         return Core::success();
     }
 
-    void configureSurfaceClearView(const RenderSurfaceState& surface) noexcept
+    void configureSurfaceClearView(const RenderSurfaceState& surface, u32 clearRgba) noexcept
     {
         bgfx::setViewRect(kSurfaceClearView, 0, 0, static_cast<u16>(surface.framebufferExtent.width),
                           static_cast<u16>(surface.framebufferExtent.height));
-        bgfx::setViewClear(kSurfaceClearView, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, kClearRgba, 1.0F, 0);
+        bgfx::setViewClear(kSurfaceClearView, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, clearRgba, 1.0F, 0);
         bgfx::setViewMode(kSurfaceClearView, bgfx::ViewMode::Sequential);
         bgfx::touch(kSurfaceClearView);
     }
@@ -2921,7 +2954,7 @@ class BgfxRenderDevice final : public IRenderDevice {
 
     void configureMesh3DView(bgfx::ViewId viewId, const RenderSurfaceState& surface,
                              const RenderPerspectiveCamera& camera,
-                             bool clearColor, bool clearDepth) noexcept
+                             bool clearColor, bool clearDepth, u32 clearRgba) noexcept
     {
         const BgfxViewRect rect = viewportRect(surface, camera.normalizedViewport);
         if (rect.width == 0 || rect.height == 0)
@@ -2931,7 +2964,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         bgfx::setViewRect(viewId, rect.x, rect.y, rect.width, rect.height);
         const u16 clearFlags = static_cast<u16>((clearColor ? BGFX_CLEAR_COLOR : 0U) |
                                                 (clearDepth ? BGFX_CLEAR_DEPTH : 0U));
-        bgfx::setViewClear(viewId, clearFlags, kClearRgba, 1.0F, 0);
+        bgfx::setViewClear(viewId, clearFlags, clearRgba, 1.0F, 0);
         bgfx::setViewMode(viewId, bgfx::ViewMode::Sequential);
 
         const bx::Vec3 eye{camera.positionX, camera.positionY, camera.positionZ};
@@ -2953,7 +2986,7 @@ class BgfxRenderDevice final : public IRenderDevice {
     }
 
     void configureSprite2DView(const RenderSurfaceState& surface, const RenderCamera2D& camera,
-                               bool clearColor, bool clearDepth) noexcept
+                               bool clearColor, bool clearDepth, u32 clearRgba) noexcept
     {
         const BgfxViewRect rect = viewportRect(surface, camera.normalizedViewport);
         if (rect.width == 0 || rect.height == 0)
@@ -2963,7 +2996,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         bgfx::setViewRect(kSprite2DView, rect.x, rect.y, rect.width, rect.height);
         const u16 clearFlags = static_cast<u16>((clearColor ? BGFX_CLEAR_COLOR : 0U) |
                                                 (clearDepth ? BGFX_CLEAR_DEPTH : 0U));
-        bgfx::setViewClear(kSprite2DView, clearFlags, kClearRgba, 1.0F, 0);
+        bgfx::setViewClear(kSprite2DView, clearFlags, clearRgba, 1.0F, 0);
         bgfx::setViewMode(kSprite2DView, bgfx::ViewMode::Sequential);
 
         const float cosine = std::cos(camera.rotationRadians);
@@ -2995,13 +3028,14 @@ class BgfxRenderDevice final : public IRenderDevice {
         bgfx::touch(kSprite2DView);
     }
 
-    void configureUIView(const RenderSurfaceState& surface, bool clearColor, bool clearDepth) noexcept
+    void configureUIView(const RenderSurfaceState& surface, bool clearColor, bool clearDepth,
+                         u32 clearRgba) noexcept
     {
         bgfx::setViewRect(kUIView, 0, 0, static_cast<u16>(surface.framebufferExtent.width),
                           static_cast<u16>(surface.framebufferExtent.height));
         const u16 clearFlags = static_cast<u16>((clearColor ? BGFX_CLEAR_COLOR : 0U) |
                                                 (clearDepth ? BGFX_CLEAR_DEPTH : 0U));
-        bgfx::setViewClear(kUIView, clearFlags, kClearRgba, 1.0F, 0);
+        bgfx::setViewClear(kUIView, clearFlags, clearRgba, 1.0F, 0);
         bgfx::setViewMode(kUIView, bgfx::ViewMode::Sequential);
 
         float projection[16]{};
@@ -3498,6 +3532,10 @@ class BgfxRenderDevice final : public IRenderDevice {
                 binding.metallicFactor, binding.roughnessFactor, ambientScale, mrMapBound};
             // x = normal map bound; yzw unused.
             const std::array<float, 4> normalParams{normalMapBound, 0.0F, 0.0F, 0.0F};
+            // Linear radiance the material emits regardless of lighting (ADR 0043); w unused.
+            const std::array<float, 4> emissiveFactor{binding.emissiveFactorR,
+                                                      binding.emissiveFactorG,
+                                                      binding.emissiveFactorB, 0.0F};
 
             bgfx::setTexture(0, opaque3DSampler_, materialTexture);
             bgfx::setTexture(1, opaque3DMrSampler_, mrTexture);
@@ -3542,6 +3580,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                              static_cast<u16>(Mesh3DLightingDesc::MaximumSpotLightCount));
             bgfx::setUniform(opaque3DMrParamsUniform_, mrParams.data());
             bgfx::setUniform(opaque3DNormalParamsUniform_, normalParams.data());
+            bgfx::setUniform(opaque3DEmissiveFactorUniform_, emissiveFactor.data());
             bgfx::setUniform(opaque3DCsmMatricesUniform_, csmMatrices.front().data(),
                              static_cast<u16>(csmMatrices.size()));
             bgfx::setUniform(opaque3DCsmSplitDepthsUniform_, csmSplitDepths.data());
@@ -4640,10 +4679,16 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             return Core::failure(RenderErrorCode::InvalidTextureUpload, "materialKey must be non-zero");
         }
+        // Emissive is checked for finite and non-negative but not for an upper bound: it is
+        // radiance, on the same scale as light colour, not a [0,1] BRDF parameter (ADR 0043).
+        const auto emissiveValid = [](float value) noexcept {
+            return std::isfinite(value) && value >= 0.0F;
+        };
         if (!(desc.metallicFactor >= 0.0F && desc.metallicFactor <= 1.0F) ||
             !(desc.roughnessFactor >= 0.0F && desc.roughnessFactor <= 1.0F) ||
             !std::isfinite(desc.metallicFactor) || !std::isfinite(desc.roughnessFactor) ||
-            !isSupportedMesh3DAlphaMode(desc.alphaMode))
+            !emissiveValid(desc.emissiveFactorR) || !emissiveValid(desc.emissiveFactorG) ||
+            !emissiveValid(desc.emissiveFactorB) || !isSupportedMesh3DAlphaMode(desc.alphaMode))
         {
             return Core::failure(RenderErrorCode::InvalidTextureUpload,
                                  "Mesh3D material factors or alpha mode are invalid");
@@ -5183,6 +5228,10 @@ class BgfxRenderDevice final : public IRenderDevice {
         prepareOpaque3DInstanceBuffer(scene, resources, preparedOpaque3D,
                                       opaque3DInstanceBuffer);
 
+        // Encoded once per frame rather than per pass: only one pass owns the clear, but
+        // every candidate is configured, and all of them must agree on the colour.
+        const u32 clearRgba = packClearRgba(scene.clearColor());
+
         for (const RenderPassPlan& pass : schedule.passes())
         {
             const auto requireResource = [&pass](RenderPassResource expected) noexcept {
@@ -5195,7 +5244,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             {
             case RenderPassKind::Clear:
                 requireResource(RenderPassResource::PrimarySurface);
-                configureSurfaceClearView(surface);
+                configureSurfaceClearView(surface, clearRgba);
                 break;
             case RenderPassKind::CascadedDirectionalShadowDepth:
             {
@@ -5246,7 +5295,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             case RenderPassKind::Opaque3D:
                 requireResource(RenderPassResource::PrimarySurface);
                 configureMesh3DView(kOpaque3DView, surface, *scene.perspectiveCamera(),
-                                    pass.clearColor, pass.clearDepth);
+                                    pass.clearColor, pass.clearDepth, clearRgba);
                 submitMesh3D(scene, resources, preparedOpaque3D,
                              opaque3DInstanceBuffer, false);
                 break;
@@ -5254,18 +5303,19 @@ class BgfxRenderDevice final : public IRenderDevice {
                 requireResource(RenderPassResource::PrimarySurface);
                 configureMesh3DView(kTransparent3DView, surface,
                                     *scene.perspectiveCamera(), pass.clearColor,
-                                    pass.clearDepth);
+                                    pass.clearDepth, clearRgba);
                 submitMesh3D(scene, resources, preparedOpaque3D,
                              opaque3DInstanceBuffer, true);
                 break;
             case RenderPassKind::Sprite2D:
                 requireResource(RenderPassResource::PrimarySurface);
-                configureSprite2DView(surface, *scene.camera2D(), pass.clearColor, pass.clearDepth);
+                configureSprite2DView(surface, *scene.camera2D(), pass.clearColor, pass.clearDepth,
+                                      clearRgba);
                 submitSprite2D(scene, resources, preparedSprite2D);
                 break;
             case RenderPassKind::UI:
                 requireResource(RenderPassResource::PrimarySurface);
-                configureUIView(surface, pass.clearColor, pass.clearDepth);
+                configureUIView(surface, pass.clearColor, pass.clearDepth, clearRgba);
                 submitUI(surface, displayList, resources, preparedUI);
                 break;
             }
@@ -5331,6 +5381,7 @@ class BgfxRenderDevice final : public IRenderDevice {
     bgfx::UniformHandle opaque3DSpotLightDirectionsUniform_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DSpotLightColorsUniform_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DMrParamsUniform_ = BGFX_INVALID_HANDLE;
+    bgfx::UniformHandle opaque3DEmissiveFactorUniform_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle opaque3DNormalParamsUniform_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle opaque3DDefaultTexture_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle opaque3DDefaultMrTexture_ = BGFX_INVALID_HANDLE;

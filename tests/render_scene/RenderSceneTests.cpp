@@ -738,6 +738,80 @@ TEST(RenderSceneBuilderTest, Mesh3DLightingCopiesIntoTheCommittedFrameSnapshot)
     EXPECT_FALSE(committed->empty());
 }
 
+// ADR 0042.
+TEST(RenderSceneBuilderTest, AFrameThatNeverSetsAClearColorKeepsTheEngineDefault)
+{
+    RenderSceneBuilder builder = makeBuilder();
+    ASSERT_TRUE(builder.beginFrame());
+    auto committed = builder.commit();
+    ASSERT_TRUE(committed.has_value());
+    EXPECT_EQ(committed->clearColor(), DefaultSceneClearColor);
+    EXPECT_FALSE(committed->statistics().clearColorConfigured);
+    // The background is not scene content: a frame carrying only the default clear colour
+    // is still empty, or every idle frame would report as non-empty.
+    EXPECT_TRUE(committed->empty());
+}
+
+TEST(RenderSceneBuilderTest, ClearColorReachesTheCommittedFrameAndIsRecordedInStatistics)
+{
+    RenderSceneBuilder builder = makeBuilder();
+    ASSERT_TRUE(builder.beginFrame());
+    constexpr RenderLinearColor sky{.red = 0.25F, .green = 0.5F, .blue = 0.75F, .alpha = 1.0F};
+    ASSERT_TRUE(builder.writer().setClearColor(sky));
+    auto committed = builder.commit();
+    ASSERT_TRUE(committed.has_value());
+    EXPECT_EQ(committed->clearColor(), sky);
+    EXPECT_TRUE(committed->statistics().clearColorConfigured);
+}
+
+TEST(RenderSceneBuilderTest, ASecondClearColorInOneFrameIsRejected)
+{
+    RenderSceneBuilder builder = makeBuilder();
+    ASSERT_TRUE(builder.beginFrame());
+    ASSERT_TRUE(builder.writer().setClearColor(RenderLinearColor{
+        .red = 0.1F, .green = 0.1F, .blue = 0.1F, .alpha = 1.0F}));
+    const Core::Status second = builder.writer().setClearColor(RenderLinearColor{
+        .red = 0.2F, .green = 0.2F, .blue = 0.2F, .alpha = 1.0F});
+    ASSERT_FALSE(second);
+    EXPECT_EQ(second.error().code, RenderErrorCode::InvalidSceneClearColor);
+}
+
+TEST(RenderSceneBuilderTest, ClearColorRejectsNonFiniteNegativeAndOverRangeComponents)
+{
+    constexpr std::array rejected{
+        RenderLinearColor{.red = std::numeric_limits<float>::quiet_NaN()},
+        RenderLinearColor{.green = std::numeric_limits<float>::infinity()},
+        RenderLinearColor{.blue = -0.001F},
+        // Over-range is refused here rather than clamped in a backend, so the caller
+        // learns that a background cannot carry radiance above full white.
+        RenderLinearColor{.red = 1.001F},
+        RenderLinearColor{.alpha = 2.0F},
+    };
+    for (const RenderLinearColor& color : rejected)
+    {
+        RenderSceneBuilder builder = makeBuilder();
+        ASSERT_TRUE(builder.beginFrame());
+        const Core::Status status = builder.writer().setClearColor(color);
+        ASSERT_FALSE(status);
+        EXPECT_EQ(status.error().code, RenderErrorCode::InvalidSceneClearColor);
+    }
+}
+
+TEST(RenderSceneBuilderTest, ANewFrameReturnsToTheDefaultClearColorRatherThanLatchingTheLastOne)
+{
+    RenderSceneBuilder builder = makeBuilder();
+    ASSERT_TRUE(builder.beginFrame());
+    ASSERT_TRUE(builder.writer().setClearColor(RenderLinearColor{
+        .red = 0.9F, .green = 0.8F, .blue = 0.7F, .alpha = 1.0F}));
+    ASSERT_TRUE(builder.commit().has_value());
+
+    ASSERT_TRUE(builder.beginFrame());
+    auto second = builder.commit();
+    ASSERT_TRUE(second.has_value());
+    EXPECT_EQ(second->clearColor(), DefaultSceneClearColor);
+    EXPECT_FALSE(second->statistics().clearColorConfigured);
+}
+
 TEST(RenderSceneBuilderTest, PointLightShadowValidationRejectsInvalidCasterIndexNearPlaneAndBias)
 {
     const std::array pointLights{Mesh3DPointLight{.influenceRadius = 5.0F}};

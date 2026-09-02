@@ -130,6 +130,17 @@ GLFW 平台先创建隐藏的 NO_API 主窗口。windowed factory 取得 move-on
 snapshot，RenderDevice 成功创建后才 `publishPrimaryWindow()`。lease 与 snapshot identity 必须一致；
 失败时逆序回滚，不能提前显示半初始化窗口。
 
+`PrimaryWindowConfig::pointerCapture = Locked` **记录于窗口创建、生效于 `publishPrimaryWindow()`**。
+两者必须分开：窗口在 publish 之前是隐藏的，而 Locked 在 Win32 上就是把光标 clip 进窗口矩形，所以在创建期
+就应用会把指针困在一个用户看不见的矩形里——从点击可执行文件到窗口出现之间，鼠标已经不能动了。请求本身仍
+按已授予上报（调用方要的是窗口的稳态，不是这一瞬间），因此 backend 内部区分"请求的模式"与"已应用的模式"；
+`setPointerCaptureMode()` 在 publish 前同样只记录。始终隐藏的窗口永不应用 clip。
+
+`shutdown()` 在销毁窗口前把光标恢复成 `GLFW_CURSOR_NORMAL`，且只在自己确实加过锁时恢复。**实测（Windows 11）
+销毁窗口与 `_Exit` 都会由系统解除 clip**，所以这不是修 clip 泄漏，而是防止将来改动（不再销毁窗口、或跨运行
+复用隐藏窗口）静默引入泄漏。释放属于加锁方的义务而不能交给游戏：跑满帧数退出、报错退出、原生关闭请求这三条
+路都不经过游戏的 Escape 分支。
+
 每帧 Runtime 核对 metrics/surface revision：回退、跳号或旧 metrics 上的 surface facts 变化均失败。
 framebuffer 0x0 表示 suspended；Render submit 必须返回 `SkippedSuspendedSurface`，不 present。
 

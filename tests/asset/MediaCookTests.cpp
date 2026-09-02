@@ -288,6 +288,7 @@ TEST_F(MediaCookTests, WavCooksAudioClipAndRejectsNonWavBytes)
     ASSERT_EQ(cooked->request.assets.size(), 1U);
     const auto& clip = cooked->request.assets.front();
     EXPECT_EQ(clip.assetKind, AssetFormat::AssetKind::AudioClip);
+    EXPECT_EQ(clip.assetTypeVersion, AssetFormat::AudioClipWire::SchemaVersion);
     auto payload = AssetFormat::parseAudioClipPayload(clip.payload);
     ASSERT_TRUE(payload) << payload.error().message;
     EXPECT_EQ(payload->channels, 1U);

@@ -1,0 +1,35 @@
+# Source assets for MyGame, in the engine's line recipe format.
+#
+# This file is the authoring input. The shipped artifact is the *cooked catalog* built from
+# it: a manifest.tmnft plus an objects/ directory. Content loads only from that catalog,
+# never from this text, so a release never carries source art.
+#
+# The full grammar is documented at the top of include/tina/asset/CatalogCook.hpp -- it
+# covers textures, sprites, sprite animations, tilemaps, audio clips, meshes, materials,
+# prefabs, navigation grids and 2D effects. Only the two smallest are used here.
+#
+# AssetIds are 32 hex characters (16 bytes) and are the permanent name of an asset: they go
+# into saves and into cooked dependency edges, so an id is never reassigned once shipped.
+# Pick any scheme that keeps them unique; this template numbers the first byte.
+
+# The cook target. Every asset in one catalog shares it.
+#
+# WindowsX64 and LinuxX64 are the only values TargetPlatform defines
+# (include/tina/asset_format/AssetFormat.hpp), which is why this line names a desktop
+# platform even in a project that also builds for the browser. See README.md: the browser
+# consumes a desktop-cooked catalog, and Android/iOS cannot be cooked for at all yet.
+platform WindowsX64
+
+# A 2x2 inline texture. Pixels are RRGGBBAA, left to right then top to bottom, and are
+# written straight into the cooked object -- an inline texture needs no image file on disk,
+# which is what keeps this template self-contained.
+texture2d 0100000000000000000000000000001a 2 2 FFFFFFFF FF4C4CFF 4CFF4CFF 4C4CFFFF
+
+# A sprite covering that whole texture. Arguments after the texture id are
+# u0 v0 u1 v1 pivotX pivotY pixelsPerUnit.
+#
+# The UV rect being the full 0 0 1 1 matters beyond framing: the cooker gives a texture a
+# full mip chain unless some line carves a sub-rect out of it, so a full-image sprite is
+# mipped and an atlas sub-rect is not. That decision is read from the recipe rather than
+# declared separately, so it cannot contradict how the texture is actually sampled.
+sprite 0200000000000000000000000000002a 0100000000000000000000000000001a 0 0 1 1 0.5 0.5 32

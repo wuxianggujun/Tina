@@ -4,6 +4,13 @@
 - 日期：2026-08-17
 - 决策者：Tina maintainers
 
+> **实现状态更正（2026-09-01）：** 截至 2026-09-01 仍无任何实现代码。
+> `MetricsRegistry`、`MetricId`、`CounterRegistry` 在 `include/`、`src/`、`tests/`、`tools/`
+> 全部零命中，与下文 2026-08-17 核验时的结论一致。本 ADR 状态为 **Proposed**，
+> 因此这不是未兑现的决定，而是尚未开始的提案：文中出现的类型与 API 均为**设计草案，不可调用**。
+> 消费方在本 ADR 被 Accepted 并有源码与测试证明之前，请继续使用下文「相邻事实」列出的
+> 既有模块自报统计（`MemoryTracker`、`UIContextStatistics` 等）。
+
 ## 背景
 
 [ADR 0002](0002-tracy-and-benchmark.md) 接受了「Tina Trace/Metrics」方向。Trace lane 已由

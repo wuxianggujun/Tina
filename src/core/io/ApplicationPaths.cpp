@@ -1,5 +1,7 @@
 #include <tina/core/io/ApplicationPaths.hpp>
 
+#include "PathUtil.hpp"
+
 #include <tina/core/text/Utf8.hpp>
 
 #include <string>
@@ -34,44 +36,7 @@ namespace {
     return std::unexpected<Error>{std::move(error)};
 }
 
-// A relative path is joined verbatim, so anything that could redirect the result
-// out of the executable directory is rejected instead of sanitized. '\' is
-// rejected rather than translated: accepting both separators would make the same
-// logical path have two spellings, and only one of them works when the string
-// reaches a POSIX filesystem.
-[[nodiscard]] bool isSafeRelativePath(std::string_view relativePath) noexcept
-{
-    if (relativePath.empty() || !isStrictUtf8WithoutNul(relativePath))
-    {
-        return false;
-    }
-    if (relativePath.find('\\') != std::string_view::npos ||
-        relativePath.find(':') != std::string_view::npos)
-    {
-        return false;
-    }
-    // Every component is examined, including the one after a trailing separator:
-    // stopping once the remainder runs out would accept "assets/", whose final
-    // component is empty and names no file. A leading '/' is absolute and shows up
-    // here as an empty first component, and '//' as an empty middle one.
-    usize start = 0;
-    for (;;)
-    {
-        const usize separator = relativePath.find('/', start);
-        const std::string_view component = separator == std::string_view::npos
-                                               ? relativePath.substr(start)
-                                               : relativePath.substr(start, separator - start);
-        if (component.empty() || component == "." || component == "..")
-        {
-            return false;
-        }
-        if (separator == std::string_view::npos)
-        {
-            return true;
-        }
-        start = separator + 1U;
-    }
-}
+using Detail::isSafeRelativeContentPath;
 
 // Keeps the parent of the OS-reported executable path. Separators are left as the
 // OS spelled them, matching userApplicationDirectory, so both '/' and '\' count
@@ -216,7 +181,7 @@ catch (const std::bad_alloc&)
 Result<std::string> applicationFilePath(std::string_view relativePath)
 try
 {
-    if (!isSafeRelativePath(relativePath))
+    if (!isSafeRelativeContentPath(relativePath))
     {
         return fail(CoreErrorCode::InvalidArgument,
                     "application relative path must be UTF-8, '/'-separated, and below the executable "
@@ -227,16 +192,7 @@ try
     {
         return Core::failure(std::move(directory.error()));
     }
-    std::string joined = std::move(*directory);
-    // Only a root directory arrives already separator-terminated, and stripping
-    // that separator would change which directory it names, so add one rather than
-    // normalising to a single spelling.
-    if (joined.back() != '/' && joined.back() != '\\')
-    {
-        joined.push_back('/');
-    }
-    joined.append(relativePath);
-    return joined;
+    return Detail::joinContentPath(std::move(*directory), relativePath);
 }
 catch (const std::bad_alloc&)
 {

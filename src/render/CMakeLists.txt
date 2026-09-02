@@ -54,6 +54,8 @@ if(TINA_BUILD_RENDER_BGFX)
     add_library(tina_render_bgfx STATIC
         bgfx/BgfxRenderDevice.cpp
         bgfx/BgfxRenderDevice.hpp
+        bgfx/BgfxClearColor.cpp
+        bgfx/BgfxClearColor.hpp
         bgfx/BgfxEnvironmentMapResources.cpp
         bgfx/BgfxEnvironmentMapResources.hpp
         bgfx/BgfxOpaque3DGeometry.cpp

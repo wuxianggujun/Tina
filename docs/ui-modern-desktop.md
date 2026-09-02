@@ -695,7 +695,7 @@ src/ui/detail/
 ```text
 samples/ui_showcase/          # 第一视觉消费者；同时展示 Compact/Comfortable、Dark/Light
 samples/desktop_shell/        # Desktop Shell reference；嵌套 SplitView 工作流与第一个 SplitView 产品消费者
-src/editor_app/               # 体系稳定后的 Compact 迁移；遵守 Editor 大功能统一验证节奏
+editor/app/                   # 体系稳定后的 Compact 迁移；遵守 Editor 大功能统一验证节奏
 samples/2d_tilemap_bgfx/      # 只迁移产品 Theme/role，不改 gameplay
 samples/3d_product/           # 只迁移产品 Theme/role，不改 Render/Asset owner
 ```

@@ -461,5 +461,35 @@ TEST(UIDirtySubtreeTest, PhaseDirtyStatsTrackStructureLayoutHitPaintAndSemantics
     EXPECT_EQ(afterLayoutCommit.dirtyQueuePendingCount, 0U);
 }
 
+// UIDirty declares 11 of the 16 bits in its u16, so it keeps a masked operator~ instead
+// of the raw complement TINA_ENUM_FLAG_OPERATORS would have to assume. clearDirty()
+// depends on the complement setting no bit that names no channel.
+TEST(UIDirtyFlagsTest, ComplementStaysInsideTheDeclaredBits)
+{
+    constexpr UI::UIDirty complement = ~UI::UIDirty::Paint;
+    EXPECT_EQ(UI::dirtyMaskValue(complement),
+              static_cast<u16>(UI::dirtyMaskValue(UI::UIDirtyMaskAll) &
+                               ~UI::dirtyMaskValue(UI::UIDirty::Paint)));
+    EXPECT_FALSE(UI::hasDirty(complement, UI::UIDirty::Paint));
+    EXPECT_TRUE(UI::hasDirty(complement, UI::UIDirty::Style));
+    EXPECT_EQ(UI::clearDirty(UI::UIDirty::Paint | UI::UIDirty::Style, UI::UIDirty::Paint),
+              UI::UIDirty::Style);
+}
+
+TEST(UIDirtyFlagsTest, MacroOperatorsRoundTrip)
+{
+    UI::UIDirty flags = UI::UIDirty::None;
+    flags |= UI::UIDirty::Paint;
+    flags |= UI::UIDirty::Measure;
+    EXPECT_TRUE(UI::hasAllDirty(flags, UI::UIDirty::Paint | UI::UIDirty::Measure));
+
+    flags &= UI::UIDirty::Paint;
+    EXPECT_TRUE(UI::hasDirty(flags, UI::UIDirty::Paint));
+    EXPECT_FALSE(UI::hasDirty(flags, UI::UIDirty::Measure));
+
+    flags ^= UI::UIDirty::Paint;
+    EXPECT_FALSE(UI::anyDirty(flags));
+}
+
 } // namespace
 } // namespace Tina::Tests

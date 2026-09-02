@@ -1,4 +1,5 @@
 #include <tina/core/error/Error.hpp>
+#include <tina/core/text/ArgParser.hpp>
 #include <tina/core/text/JsonWriter.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 #include <tina/integration/WindowSurface.hpp>
@@ -14,7 +15,6 @@
 #include <tina/runtime/spi/EngineCompositionFactories.hpp>
 #include <tina/task/disabled/DisabledTaskSystemFactory.hpp>
 
-#include <charconv>
 #include <chrono>
 #include <cstdint>
 #include <iostream>
@@ -70,12 +70,6 @@ void writeError(const Tina::Core::Error& error)
     std::cerr << '\n';
 }
 
-template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text, Value& value) noexcept
-{
-    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
-    return error == std::errc{} && end == text.data() + text.size();
-}
-
 [[nodiscard]] Tina::Core::Result<SampleOptions> parseOptions(int argumentCount, char** arguments)
 {
     if (argumentCount == 1)
@@ -103,7 +97,7 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
         const std::string_view argument{arguments[index]};
         if (argument.starts_with(framesPrefix) && !hasFrames)
         {
-            hasFrames = parseUnsigned(argument.substr(framesPrefix.size()), options.targetFrameCount) &&
+            hasFrames = Tina::Core::parseArgUnsigned(argument.substr(framesPrefix.size()), options.targetFrameCount) &&
                         options.targetFrameCount != 0;
             if (hasFrames)
             {
@@ -111,7 +105,7 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
             }
         } else if (argument.starts_with(delayPrefix) && !hasDelay)
         {
-            hasDelay = parseUnsigned(argument.substr(delayPrefix.size()), options.frameDelayMilliseconds) &&
+            hasDelay = Tina::Core::parseArgUnsigned(argument.substr(delayPrefix.size()), options.frameDelayMilliseconds) &&
                        options.frameDelayMilliseconds <= 1000;
             if (hasDelay)
             {

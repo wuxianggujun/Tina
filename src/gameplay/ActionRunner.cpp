@@ -293,6 +293,12 @@ struct ActionRunner::Impl final {
             }
 
             remaining = child.leftover;
+            // Cleared before the bound is tested, not after. The iteration counted just
+            // above has to leave a runnable child behind: returning with the child still
+            // marked finished makes the next advance's step() return immediately while
+            // this loop counts the iteration anyway, so a finite repeat silently applies
+            // fewer times than it was authored to.
+            resetSubtree(instance, childIndex);
             // A subtree whose total duration is zero would restart forever here, and
             // the failure looks exactly like a hang rather than like a content
             // error. Bounded and counted instead, so the cause is visible in stats.
@@ -300,7 +306,6 @@ struct ActionRunner::Impl final {
                 ++stats.clampedRepeatIterations;
                 return StepResult{.leftover = Core::Duration{0.0}, .finished = false};
             }
-            resetSubtree(instance, childIndex);
         }
     }
 };

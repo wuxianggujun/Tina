@@ -288,6 +288,23 @@ class AndroidWindowSurfacePlatformBackend final : public Integration::IWindowSur
         return Core::success();
     }
 
+    Core::Status setPointerCaptureMode(PointerCaptureMode mode) override
+    {
+        if (auto status = checkUsable("pointer capture mode"); !status)
+        {
+            return status;
+        }
+        // Android touch is a sequence of discrete contact events with no persisted
+        // cursor entity, so locking a cursor is a category error: there is nothing to
+        // lock. The Free request matches what touch always is.
+        if (mode != PointerCaptureMode::Free)
+        {
+            return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                                 "Android touch input has no cursor to lock");
+        }
+        return Core::success();
+    }
+
     void shutdown() noexcept override
     {
         if (stopped_)

@@ -450,6 +450,93 @@ TEST(AudioEngineTest, MixRealtimeMuteWhenMasterMuted)
     EXPECT_FLOAT_EQ(out[1], 0.0F);
 }
 
+// The Music bus used to be inert: every active voice was published the Sfx gain, so
+// a Music volume of 0.5 left playback at full scale. This covers the activateMixSlot
+// path, where the gain is resolved as the voice starts.
+TEST(AudioEngineTest, MusicBusVolumeScalesMusicVoiceWhenSetBeforePlay)
+{
+    auto engine = AudioEngine::Create(AudioEngineConfig{.voiceCapacity = 1, .commandCapacity = 4, .completionCapacity = 4});
+    ASSERT_TRUE(engine.has_value());
+    auto voice = engine->createVoice(AudioBusId::Music);
+    ASSERT_TRUE(voice.has_value());
+    const float pcm[2] = {1.0F, 1.0F};
+    ASSERT_TRUE(engine
+                    ->bindVoiceClip(*voice, AudioPcmClipView{.frames = pcm, .frameCount = 2, .channels = 1,
+                                                             .sampleRate = 48000})
+                    .has_value());
+    ASSERT_TRUE(engine->setBusVolume(AudioBusId::Music, 0.5F).has_value());
+    ASSERT_TRUE(engine->enqueuePlay(*voice).has_value());
+    ASSERT_TRUE(engine->pumpCompletions(2).has_value());
+
+    float out[4]{};
+    engine->mixRealtime(out, 2, 2, 48000);
+    EXPECT_FLOAT_EQ(out[0], 0.5F);
+}
+
+// Same defect via the other path: publishBusGainToActiveSlots must resolve each
+// slot's bus instead of publishing one engine-wide value to every active slot.
+TEST(AudioEngineTest, MusicMuteSilencesMusicVoiceWhenSetAfterPlay)
+{
+    auto engine = AudioEngine::Create(AudioEngineConfig{.voiceCapacity = 1, .commandCapacity = 4, .completionCapacity = 4});
+    ASSERT_TRUE(engine.has_value());
+    auto voice = engine->createVoice(AudioBusId::Music);
+    ASSERT_TRUE(voice.has_value());
+    const float pcm[2] = {1.0F, 1.0F};
+    ASSERT_TRUE(engine
+                    ->bindVoiceClip(*voice, AudioPcmClipView{.frames = pcm, .frameCount = 2, .channels = 1,
+                                                             .sampleRate = 48000})
+                    .has_value());
+    ASSERT_TRUE(engine->enqueuePlay(*voice).has_value());
+    ASSERT_TRUE(engine->pumpCompletions(2).has_value());
+    ASSERT_TRUE(engine->setBusMuted(AudioBusId::Music, true).has_value());
+
+    float out[4]{};
+    engine->mixRealtime(out, 2, 2, 48000);
+    EXPECT_FLOAT_EQ(out[0], 0.0F);
+}
+
+// Guards the reverse leak: per-slot resolution must not let a Music change reach an
+// Sfx voice.
+TEST(AudioEngineTest, MusicMuteLeavesSfxVoiceAudible)
+{
+    auto engine = AudioEngine::Create(AudioEngineConfig{.voiceCapacity = 1, .commandCapacity = 4, .completionCapacity = 4});
+    ASSERT_TRUE(engine.has_value());
+    auto voice = engine->createVoice(AudioBusId::Sfx);
+    ASSERT_TRUE(voice.has_value());
+    const float pcm[2] = {1.0F, 1.0F};
+    ASSERT_TRUE(engine
+                    ->bindVoiceClip(*voice, AudioPcmClipView{.frames = pcm, .frameCount = 2, .channels = 1,
+                                                             .sampleRate = 48000})
+                    .has_value());
+    ASSERT_TRUE(engine->enqueuePlay(*voice).has_value());
+    ASSERT_TRUE(engine->pumpCompletions(2).has_value());
+    ASSERT_TRUE(engine->setBusMuted(AudioBusId::Music, true).has_value());
+
+    float out[4]{};
+    engine->mixRealtime(out, 2, 2, 48000);
+    EXPECT_FLOAT_EQ(out[0], 1.0F);
+}
+
+TEST(AudioEngineTest, VoiceBusRoundTripsAndRejectsOutOfRangeBus)
+{
+    auto engine = AudioEngine::Create(AudioEngineConfig{.voiceCapacity = 2, .commandCapacity = 4, .completionCapacity = 4});
+    ASSERT_TRUE(engine.has_value());
+    auto music = engine->createVoice(AudioBusId::Music);
+    ASSERT_TRUE(music.has_value());
+    auto reported = engine->voiceBus(*music);
+    ASSERT_TRUE(reported.has_value());
+    EXPECT_EQ(*reported, AudioBusId::Music);
+
+    auto sfx = engine->createVoice();
+    ASSERT_TRUE(sfx.has_value());
+    auto sfxBus = engine->voiceBus(*sfx);
+    ASSERT_TRUE(sfxBus.has_value());
+    EXPECT_EQ(*sfxBus, AudioBusId::Sfx);
+
+    expectFailureCode(engine->createVoice(static_cast<AudioBusId>(99)),
+                      AudioErrorCode::InvalidConfiguration);
+}
+
 TEST(AudioEngineTest, PlayOneShotPcmBindsAndStarts)
 {
     auto engine = AudioEngine::Create(AudioEngineConfig{.voiceCapacity = 2, .commandCapacity = 4, .completionCapacity = 4});

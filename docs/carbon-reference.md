@@ -1,5 +1,9 @@
 # Carbon Engine 参考取证
 
+> 取证日期：**2026-07-16**（本地研究集）；落地状态最后复核：**2026-09-01**。
+> 本文是参考取证记录，不是当前契约：下方“采纳/拒绝”与“尚未落地”都会随 Tina 源码前进而过期，
+> 引用前按 [文档索引](README.md) 的优先级回到当前源码/CMake 复核。
+
 Carbon 只作为成熟工程经验来源，不是 Tina 的依赖、兼容目标或代码移植源。官方项目入口见
 [Carbon Engine GitHub](https://github.com/carbonengine) 与
 [Fenris Carbon](https://fenris.com/carbon)。本地只读参考位于被忽略的 `temp/carbon-engine`，不进入 Tina
@@ -56,12 +60,26 @@ Carbon 取证只是输入，以下事实由 Tina 当前源码/测试独立证明
 - 32-bit FNV 作为 AssetId/内容身份；
 - 因参考项目“成熟”就跳过 Tina 自己的失败注入、sanitizer、产品 smoke 和资源账本。
 
+## 曾列为“尚未落地”、现已落地的部分
+
+2026-09-01 复核，以下取证结论已由 Tina 自己的源码与门禁证明，不再算待办：
+
+- **owning `RenderFramePacket` 与 CPU completion**：`include/tina/render/RenderFramePacket.hpp`；
+  [风险登记](risks.md) 的 R-LIFE-01 已 Closed（FramePin、Texture/Mesh readback marker 与
+  AssetLease-backed retirement）。
+- **pass scheduling**：`RenderPassScheduler`（`src/render/RenderPassScheduler.cpp`）与
+  `RenderPipelineSchedule`/`buildRenderPipelineSchedule`（`include/tina/render/RenderPostProcess.hpp`）；
+  [测试](testing.md) 的 G3 记为 deterministic pass scheduler。
+- **进程级崩溃取证**：`include/tina/core/diagnostics/CrashHandler.hpp`；`TinaEditor.exe` 把 crash 与
+  顶层 fatal error 写入 `%TEMP%/tina_editor_crash.txt`。
+- **Trace 前端**：`include/tina/core/trace/Trace.hpp`（Tracy 后端在 `src/trace/tracy`）。
+
 ## 仍可借鉴但尚未落地
 
-- 统一 Metrics/Trace/CrashContext；
+- 统一 Metrics 注册表，以及 Trace 的 session/capture 控制面（[Core](core.md) 明确记为仍缺）；
 - 固定机器、版本化 workload 与 benchmark baseline；
-- owning RenderFramePacket/submission completion；
-- 更完整的 pass scheduling、resource state 与 GPU timing；
+- 通用 GPU submission fence（当前只有 backend-proven readback marker，见根 README）；
+- render resource state 跟踪与 GPU timing；
 - Audio streaming/voice virtualization；
 - Bundle/Patch 交付层。
 

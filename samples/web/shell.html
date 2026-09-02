@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>Tina Web 样例</title>
+<style>
+  body { margin: 0; background: #1b1b1f; color: #e6e6e6;
+         font-family: Consolas, "Cascadia Mono", monospace; }
+  main { display: flex; flex-direction: column; gap: 12px; padding: 16px; }
+  /* The backend measures the canvas with emscripten_get_element_css_size and rejects a
+     zero extent, so the CSS size must be explicit here. */
+  #canvas { width: 960px; height: 540px; background: #000; display: block;
+            border: 1px solid #444; }
+  #canvas:focus { outline: 2px solid #4a9eff; }
+  table { border-collapse: collapse; }
+  th, td { text-align: left; padding: 2px 16px 2px 0; }
+  td { font-variant-numeric: tabular-nums; }
+  #state[data-ok="false"] { color: #ff6b6b; }
+  #state[data-ok="true"] { color: #6bff9e; }
+  p.hint { margin: 0; color: #9a9aa2; }
+</style>
+</head>
+<body>
+<main>
+  <!-- tabindex makes the canvas focusable. Without it a canvas never receives
+       keydown/keyup, and the backend listens on the canvas rather than the window so
+       that a host page embedding Tina keeps its own key handling. -->
+  <canvas id="canvas" tabindex="0" width="960" height="540"></canvas>
+  <p class="hint">画布应显示四个色块：左上红、右上绿、左下蓝、右下白。点击画布取得焦点。W 计数，点击/单指触摸计 taps，Escape 结束。观察 frames 是否持续增长。</p>
+  <table>
+    <tr><th>state</th><td id="state">loading</td></tr>
+    <tr><th>frames</th><td id="frames">0</td></tr>
+    <tr><th>W presses</th><td id="forward">0</td></tr>
+    <tr><th>taps / clicks</th><td id="taps">0</td></tr>
+    <tr><th>right clicks</th><td id="secondary">0</td></tr>
+    <tr><th>middle clicks</th><td id="middle">0</td></tr>
+    <tr><th>move frames</th><td id="moveFrames">0</td></tr>
+    <tr><th>pointer travel</th><td id="travel">0</td></tr>
+    <tr><th>wheel (notches)</th><td id="wheel">0</td></tr>
+    <tr><th>fingers (max / slots)</th><td id="fingers">0</td></tr>
+    <tr><th>pointer lock</th><td id="lock">free</td></tr>
+    <tr><th>escape</th><td id="escape">no</td></tr>
+    <tr><th>sprite texture</th><td id="texture">no</td></tr>
+  </table>
+</main>
+<script>
+  // Keep the enum in step with SessionState in main.cpp.
+  const STATE_NAMES = {
+    0: 'running', 1: 'finished', 2: 'create-failed',
+    3: 'start-failed', 4: 'tick-failed', 5: 'lifecycle-mismatch',
+  };
+
+  // Field order must match ReportField in main.cpp. The module hands over a pointer to a
+  // block of ints rather than a positional argument list, because the field count outgrew
+  // what stays readable as $0..$N.
+  const FIELD = {
+    frames: 0, forwardStarts: 1, escapeRequested: 2, state: 3, tapStarts: 4,
+    secondaryClicks: 5, middleClicks: 6, pointerMoveFrames: 7, pointerTravel: 8,
+    lockRequested: 9, lockRequestFailed: 10, captureLocked: 11,
+    wheelFrames: 12, wheelCentinotches: 13, maxConcurrentPointers: 14, pointerSlotsSeen: 15,
+    textureUploaded: 16,
+  };
+
+  globalThis.tinaReport = function (values) {
+    const at = (field) => (field < values.length ? values[field] : 0);
+
+    document.getElementById('frames').textContent = at(FIELD.frames);
+    document.getElementById('forward').textContent = at(FIELD.forwardStarts);
+    document.getElementById('taps').textContent = at(FIELD.tapStarts);
+    document.getElementById('secondary').textContent = at(FIELD.secondaryClicks);
+    document.getElementById('middle').textContent = at(FIELD.middleClicks);
+    document.getElementById('moveFrames').textContent = at(FIELD.pointerMoveFrames);
+    document.getElementById('travel').textContent = at(FIELD.pointerTravel);
+    document.getElementById('escape').textContent = at(FIELD.escapeRequested) ? 'yes' : 'no';
+    document.getElementById('texture').textContent = at(FIELD.textureUploaded) ? 'uploaded' : 'no';
+    // Centinotches back to notches. The sign matters and is displayed: the backend negates the
+    // browser's Y, so scrolling away from the user has to read positive here.
+    const notches = at(FIELD.wheelCentinotches) / 100;
+    document.getElementById('wheel').textContent =
+      `${notches.toFixed(2)} over ${at(FIELD.wheelFrames)} frames`;
+    document.getElementById('fingers').textContent =
+      `${at(FIELD.maxConcurrentPointers)} / 0b${at(FIELD.pointerSlotsSeen).toString(2)}`;
+
+    // Requested and engaged are separate facts: a browser grants pointer lock only from
+    // inside a user gesture, so a pending request is the normal state, not a failure.
+    const lockParts = [at(FIELD.captureLocked) ? 'locked' : 'free'];
+    if (at(FIELD.lockRequested)) {
+      lockParts.push('requested');
+    }
+    if (at(FIELD.lockRequestFailed)) {
+      lockParts.push('request-failed');
+    }
+    document.getElementById('lock').textContent = lockParts.join(' / ');
+
+    const state = at(FIELD.state);
+    const cell = document.getElementById('state');
+    cell.textContent = STATE_NAMES[state] ?? ('unknown:' + state);
+    cell.dataset.ok = String(state === 0 || state === 1);
+  };
+
+  // Focus on click so the keyboard check does not silently measure an unfocused canvas.
+  const canvas = document.getElementById('canvas');
+  canvas.addEventListener('click', () => canvas.focus());
+
+  // Proves the touch counter came from the touch path rather than from the mouse events a
+  // browser synthesises for an unhandled tap. The backend's handler returns EM_TRUE, which
+  // makes Emscripten call preventDefault. These are passive observers and cannot change what
+  // the backend sees.
+  globalThis.tinaTouchProbe = { starts: 0, prevented: 0, syntheticMouseDowns: 0 };
+  canvas.addEventListener('touchstart', (event) => {
+    globalThis.tinaTouchProbe.starts += 1;
+    // defaultPrevented has to be read after dispatch finishes, not here: this script runs
+    // before the module's, so this listener was registered first and therefore fires before
+    // the backend's. The flag stays readable on the event object once dispatch is over.
+    setTimeout(() => {
+      if (event.defaultPrevented) {
+        globalThis.tinaTouchProbe.prevented += 1;
+      }
+    }, 0);
+  });
+  // A mousedown carrying no real button press during a touch sequence is a synthesized one.
+  canvas.addEventListener('mousedown', () => {
+    globalThis.tinaTouchProbe.syntheticMouseDowns += 1;
+  });
+
+  var Module = {
+    canvas: canvas,
+    print: (text) => console.log(text),
+    printErr: (text) => console.error(text),
+  };
+</script>
+{{{ SCRIPT }}}
+</body>
+</html>

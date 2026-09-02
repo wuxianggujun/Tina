@@ -143,6 +143,18 @@ void reportSinkFailureOnce(const char* detail) noexcept
     std::fflush(stderr);
 }
 
+// Whether this target can spawn the drain thread at all. Emscripten without
+// -pthread cannot: std::thread's constructor throws, and the project builds with
+// -fno-exceptions, so the catch below would abort the process instead of degrading.
+// A browser build asking for an async queue would therefore never reach its first
+// frame. Synchronous logging on a single-threaded target is the honest fallback --
+// there is no other thread for a sink to interfere with.
+#if defined(__EMSCRIPTEN__) && !defined(__EMSCRIPTEN_PTHREADS__)
+inline constexpr bool kDrainThreadSupported = false;
+#else
+inline constexpr bool kDrainThreadSupported = true;
+#endif
+
 // Per-thread, not per-object: a sink that logs is a defect whichever Diagnostics
 // it targets, and the recursion it would cause is confined to the thread that
 // entered the sink. Suppressing it globally per thread also covers a sink that
@@ -281,7 +293,13 @@ Result<std::unique_ptr<Diagnostics>> Diagnostics::Create(const DiagnosticsConfig
             }
         }
 
-        if (config.asyncQueueCapacity > 0) {
+        if (config.asyncQueueCapacity > 0 && !kDrainThreadSupported) {
+            // Downgraded to synchronous rather than failed, for the same reason as the
+            // log file above: refusing to start because logging cannot be asynchronous
+            // would be a worse outcome than logging synchronously. isAsync() reports
+            // false afterwards, so a caller that cares can still tell.
+            reportSinkFailureOnce("async logging unavailable on this target; using synchronous writes");
+        } else if (config.asyncQueueCapacity > 0) {
             // Allocated here rather than through MemoryTracker: Diagnostics is
             // created before the tracker exists, and a logger that needs another
             // subsystem to start would invert the dependency it is there to serve.

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <tina/core/base/EnumFlags.hpp>
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/render/RenderScene.hpp>
@@ -34,24 +35,12 @@ enum class RenderTextureUsage : u16 {
     TransferDestination = 1U << 4U,
 };
 
-[[nodiscard]] constexpr RenderTextureUsage operator|(RenderTextureUsage left,
-                                                     RenderTextureUsage right) noexcept
-{
-    return static_cast<RenderTextureUsage>(static_cast<u16>(left) |
-                                           static_cast<u16>(right));
-}
-
-[[nodiscard]] constexpr RenderTextureUsage operator&(RenderTextureUsage left,
-                                                     RenderTextureUsage right) noexcept
-{
-    return static_cast<RenderTextureUsage>(static_cast<u16>(left) &
-                                           static_cast<u16>(right));
-}
+TINA_ENUM_FLAG_OPERATORS(RenderTextureUsage);
 
 [[nodiscard]] constexpr bool hasRenderTextureUsage(RenderTextureUsage value,
                                                    RenderTextureUsage flag) noexcept
 {
-    return (value & flag) == flag;
+    return hasAllFlags(value, flag);
 }
 
 struct RenderTextureDesc final {

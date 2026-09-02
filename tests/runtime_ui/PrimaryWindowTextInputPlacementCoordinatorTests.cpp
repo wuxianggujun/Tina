@@ -42,6 +42,12 @@ class PlacementBackend final : public Platform::IPlatformBackend {
         return Core::success();
     }
 
+    Core::Status setPointerCaptureMode(Platform::PointerCaptureMode mode) override
+    {
+        static_cast<void>(mode);
+        return Core::success();
+    }
+
     void shutdown() noexcept override {}
 
     std::optional<Platform::TextInputPlacement> lastPlacement{};

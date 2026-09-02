@@ -1,5 +1,6 @@
 #pragma once
 
+#include <tina/core/base/EnumFlags.hpp>
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/core/id/AssetId.hpp>
@@ -8,6 +9,8 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace Tina::AssetFormat {
@@ -70,15 +73,11 @@ enum class World2DSpriteOverrideFlags : Core::u8 {
     UvRect = 1U << 2U,
 };
 
-[[nodiscard]] constexpr World2DSpriteOverrideFlags operator|(World2DSpriteOverrideFlags left,
-                                                             World2DSpriteOverrideFlags right) noexcept
-{
-    return static_cast<World2DSpriteOverrideFlags>(static_cast<Core::u8>(left) | static_cast<Core::u8>(right));
-}
+TINA_ENUM_FLAG_OPERATORS(World2DSpriteOverrideFlags);
 
 [[nodiscard]] constexpr bool hasFlag(World2DSpriteOverrideFlags value, World2DSpriteOverrideFlags flag) noexcept
 {
-    return (static_cast<Core::u8>(value) & static_cast<Core::u8>(flag)) != 0U;
+    return hasAnyFlag(value, flag);
 }
 
 enum class World2DCameraProjectionKind : Core::u8 {
@@ -263,6 +262,59 @@ struct World2DSnapshotView final {
     // Borrowed from the parsed payload until that payload is changed or destroyed.
     std::span<const std::byte> gameplayBytes{};
 };
+
+namespace Detail {
+
+// Counts the declared members of an aggregate by finding the largest number of
+// initializers it still accepts. Valid only because none of the Desc members is
+// itself an aggregate: brace elision would let a nested aggregate absorb several
+// initializers and inflate the count.
+struct AnyField final {
+    template <typename Field>
+    constexpr operator Field() const noexcept; // NOLINT(google-explicit-constructor)
+};
+
+template <typename Aggregate, typename Indices>
+struct AcceptsInitializers;
+
+template <typename Aggregate, Core::usize... Index>
+struct AcceptsInitializers<Aggregate, std::index_sequence<Index...>>
+    : std::bool_constant<requires { Aggregate{(static_cast<void>(Index), AnyField{})...}; }> {
+};
+
+template <typename Aggregate, Core::usize Count = 0>
+[[nodiscard]] consteval Core::usize aggregateFieldCount() noexcept
+{
+    if constexpr (AcceptsInitializers<Aggregate, std::make_index_sequence<Count + 1U>>::value)
+    {
+        return aggregateFieldCount<Aggregate, Count + 1U>();
+    }
+    else
+    {
+        return Count;
+    }
+}
+
+} // namespace Detail
+
+// Adding a member to any Desc below trips its assertion. Each one is serialized by
+// hand at five sites, none of which the compiler can check: writeWorld2DSnapshotBytes
+// and parseWorld2DSnapshot in src/asset_format/World2DSnapshot.cpp, plus capture and
+// restore in src/scene/World2DSnapshot.cpp, and validate* alongside the writer. The
+// capture path uses designated initialization, so an unhandled member is accepted
+// there and silently persists its default instead of the authored value.
+//
+// After adding a member: update all five sites, extend World2DSnapshotWire offsets and
+// EntityBytes, bump SchemaVersion, then raise the count here.
+static_assert(Detail::aggregateFieldCount<World2DSpriteDesc>() == 20);
+static_assert(Detail::aggregateFieldCount<World2DCameraDesc>() == 10);
+static_assert(Detail::aggregateFieldCount<World2DPointLightDesc>() == 8);
+static_assert(Detail::aggregateFieldCount<World2DShadowOccluderDesc>() == 5);
+static_assert(Detail::aggregateFieldCount<World2DSpriteAnimationDesc>() == 3);
+static_assert(Detail::aggregateFieldCount<World2DResourceNodeDesc>() == 2);
+static_assert(Detail::aggregateFieldCount<World2DPhysicsBodyDesc>() == 11);
+static_assert(Detail::aggregateFieldCount<World2DPhysicsShapeDesc>() == 19);
+static_assert(Detail::aggregateFieldCount<World2DEntityDesc>() == 22);
 
 [[nodiscard]] Core::Status validateWorld2DSnapshotDesc(const World2DSnapshotDesc& desc) noexcept;
 

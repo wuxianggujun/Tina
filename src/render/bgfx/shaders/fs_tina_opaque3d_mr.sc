@@ -43,6 +43,8 @@ uniform vec4 u_spotLightColorOuter[8];
 uniform vec4 u_mrParams;
 // x = 1 if normal map bound, yzw unused.
 uniform vec4 u_normalParams;
+// rgb = linear radiance the material emits on its own, w unused (ADR 0043).
+uniform vec4 u_emissiveFactor;
 uniform mat4 u_csmMatrices[4];
 // Positive view-space far depth for cascades 0..3.
 uniform vec4 u_csmSplitDepths;
@@ -494,6 +496,11 @@ void main()
 		float ambientScale = max(u_mrParams.z, 0.0);
 		lit += albedo * ambientScale * (1.0 - metallic * 0.6) + F0 * (ambientScale * 0.25);
 	}
+
+	// Added last and scaled by nothing: emissive is radiance the surface produces, so it
+	// does not take NdotL, attenuation, shadowing or ambient (ADR 0043). A face pointing
+	// away from every light is still bright, which is what a sun disc needs.
+	lit += max(u_emissiveFactor.rgb, vec3_splat(0.0));
 
 	gl_FragColor = vec4(linearToSrgb(lit), baseColor.a);
 }

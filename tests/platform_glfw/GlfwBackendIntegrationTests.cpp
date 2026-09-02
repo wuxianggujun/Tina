@@ -15,6 +15,13 @@
 #include <string_view>
 #include <thread>
 
+#if defined(_WIN32)
+// GetClipCursor reads the desktop-wide cursor clip, which is the state a leaked pointer lock
+// leaves behind. No Tina header exposes it, so the test reaches for the OS directly.
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#endif
+
 namespace Tina::Platform {
 namespace {
 
@@ -721,6 +728,86 @@ TEST(GlfwBackendIntegrationTests, FailedPartialPollRecoversBothStreamsFromFinalS
         }
     }
     EXPECT_TRUE(reachedTarget);
+    (*backend)->shutdown();
+}
+
+#if defined(_WIN32)
+// A locked cursor is clipped to the window rect. Measured on Windows 11: destroying the window
+// releases the clip, and so does an abrupt _Exit, so this is not the source of a leaked clip --
+// it is pinned here so a future refactor that stops destroying the window on shutdown, or that
+// keeps a hidden window alive across runs, does not silently start leaking one.
+TEST(GlfwBackendIntegrationTests, ShutdownReleasesALockedCursorClip)
+{
+    // The window is far smaller than any desktop, so "released" is asserted as "the clip grew
+    // back past the window" rather than against absolute screen bounds. Absolute bounds are not
+    // usable here: GetClipCursor reports physical pixels while GetSystemMetrics reports logical
+    // ones in a process that is not per-monitor DPI aware, so on a scaled display the two
+    // disagree by the scale factor even when the cursor is fully released.
+    //
+    // The pre-open clip is equally unusable as a baseline, because the clip is desktop-wide
+    // state that outlives the process that set it: an earlier unreleased run leaves it already
+    // narrowed, and comparing against it would make this test pass on a machine whose pointer
+    // is still trapped.
+    PlatformBackendCreateParams params = hiddenWindowParams();
+    params.primaryWindow.initiallyVisible = true;
+    params.primaryWindow.pointerCapture = PointerCaptureMode::Locked;
+    auto backend = createGlfwWindowSurfacePlatformBackend(params);
+    ASSERT_TRUE(backend.has_value()) << backend.error().message;
+    ASSERT_TRUE((*backend)->publishPrimaryWindow().has_value());
+
+    RECT lockedClip{};
+    ASSERT_NE(GetClipCursor(&lockedClip), 0);
+    const LONG lockedWidth = lockedClip.right - lockedClip.left;
+    const LONG lockedHeight = lockedClip.bottom - lockedClip.top;
+    // 320x180 logical, so even at 200% scale the clip is far under 1000 physical pixels wide if
+    // it really is confined to the window.
+    const bool clipNarrowed = lockedWidth < 1000 && lockedHeight < 1000;
+
+    (*backend)->shutdown();
+
+    RECT clipAfterShutdown{};
+    ASSERT_NE(GetClipCursor(&clipAfterShutdown), 0);
+    // Guarded because a headless or remote session may refuse the clip outright; the release is
+    // only observable where the lock was observable, and asserting otherwise would test the host
+    // rather than the backend.
+    if (clipNarrowed)
+    {
+        EXPECT_GT(clipAfterShutdown.right - clipAfterShutdown.left, lockedWidth);
+        EXPECT_GT(clipAfterShutdown.bottom - clipAfterShutdown.top, lockedHeight);
+        EXPECT_GE(clipAfterShutdown.right - clipAfterShutdown.left,
+                  GetSystemMetrics(SM_CXVIRTUALSCREEN));
+        EXPECT_GE(clipAfterShutdown.bottom - clipAfterShutdown.top,
+                  GetSystemMetrics(SM_CYVIRTUALSCREEN));
+    }
+}
+#endif
+
+// Locking before the window is shown clips the pointer to a rect the user cannot see, which is
+// the "my cursor was trapped before the demo even appeared" half of the same defect. The lock
+// has to wait for publication. This uses the WindowSurface factory because that is the path the
+// engine actually takes: it defers publication until the render device has its surface, which is
+// exactly the window during which the old code already held the cursor.
+TEST(GlfwBackendIntegrationTests, RequestedLockIsDeferredUntilTheWindowIsPublished)
+{
+    PlatformBackendCreateParams params = hiddenWindowParams();
+    params.primaryWindow.initiallyVisible = true;
+    params.primaryWindow.pointerCapture = PointerCaptureMode::Locked;
+    auto backend = createGlfwWindowSurfacePlatformBackend(params);
+    ASSERT_TRUE(backend.has_value()) << backend.error().message;
+
+    auto deferred = Detail::glfwPointerCaptureStateForTest(**backend);
+    ASSERT_TRUE(deferred.has_value()) << deferred.error().message;
+    // The request is remembered, not dropped: the caller asked for Locked and must still read
+    // Locked back, or a game would think the backend refused and disable its camera.
+    EXPECT_EQ(deferred->requestedMode, PointerCaptureMode::Locked);
+    EXPECT_FALSE(deferred->cursorHidden);
+
+    ASSERT_TRUE((*backend)->publishPrimaryWindow().has_value());
+
+    auto applied = Detail::glfwPointerCaptureStateForTest(**backend);
+    ASSERT_TRUE(applied.has_value()) << applied.error().message;
+    EXPECT_EQ(applied->requestedMode, PointerCaptureMode::Locked);
+    EXPECT_TRUE(applied->cursorHidden);
     (*backend)->shutdown();
 }
 

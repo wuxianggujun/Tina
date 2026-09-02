@@ -1,5 +1,6 @@
 #pragma once
 
+#include <tina/core/base/EnumFlags.hpp>
 #include <tina/core/base/Types.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UIPaint.hpp>
@@ -15,14 +16,11 @@ enum class UIScrollAxes : u8 {
     Both = (1U << 0U) | (1U << 1U),
 };
 
-[[nodiscard]] constexpr UIScrollAxes operator|(UIScrollAxes left, UIScrollAxes right) noexcept
-{
-    return static_cast<UIScrollAxes>(static_cast<u8>(left) | static_cast<u8>(right));
-}
+TINA_ENUM_FLAG_OPERATORS(UIScrollAxes);
 
 [[nodiscard]] constexpr bool hasScrollAxis(UIScrollAxes axes, UIScrollAxes axis) noexcept
 {
-    return (static_cast<u8>(axes) & static_cast<u8>(axis)) != 0;
+    return hasAnyFlag(axes, axis);
 }
 
 enum class UIScrollBarVisibility : u8 {

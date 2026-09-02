@@ -1,5 +1,6 @@
 #pragma once
 
+#include <tina/core/base/EnumFlags.hpp>
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/ui/UIErrors.hpp>
@@ -29,19 +30,11 @@ enum class UIAccessibilityState : u32 {
     Selected = 1u << 7,
 };
 
-[[nodiscard]] constexpr UIAccessibilityState operator|(UIAccessibilityState a, UIAccessibilityState b) noexcept
-{
-    return static_cast<UIAccessibilityState>(static_cast<u32>(a) | static_cast<u32>(b));
-}
-
-[[nodiscard]] constexpr UIAccessibilityState operator&(UIAccessibilityState a, UIAccessibilityState b) noexcept
-{
-    return static_cast<UIAccessibilityState>(static_cast<u32>(a) & static_cast<u32>(b));
-}
+TINA_ENUM_FLAG_OPERATORS(UIAccessibilityState);
 
 [[nodiscard]] constexpr bool hasState(UIAccessibilityState set, UIAccessibilityState flag) noexcept
 {
-    return (static_cast<u32>(set) & static_cast<u32>(flag)) != 0U;
+    return hasAnyFlag(set, flag);
 }
 
 // Stable, owner-thread node published for assistive tech adapters.

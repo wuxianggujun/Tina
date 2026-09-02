@@ -18,10 +18,16 @@ The current retained UI still lives in `include/tina/ui` and `src/ui`. Reference
 - The retained UI includes layout, routing, text/glyph rendering, Button, Checkbox, Slider,
   ProgressBar, RadioButton, single-line TextEdit, ScrollView, Dropdown/Popup, and virtualized
   ListView/TreeView collections.
-- `tina_sample_ui_showcase` presents 20 controls, layered interaction feedback, collection/scroll
+- `tina_sample_ui_showcase` presents 24 controls, layered interaction feedback, collection/scroll
   workflows, and live Dark/Light themes.
 - Audio and Physics2D have optional miniaudio and Box2D adapters; Physics2D exposes Box/Circle/Capsule/ConvexPolygon shapes and Distance/Revolute/Prismatic joints.
-- Network provides strict numeric IPv4/IPv6 addresses and an owner-thread, fixed-capacity, non-blocking UDP datagram socket with no third-party dependency. TCP, HTTP, WebSocket, TLS, name resolution, and reliable-UDP channels are out of scope for this slice.
+- Network provides strict numeric IPv4/IPv6 addresses plus owner-thread, fixed-capacity,
+  non-blocking UDP, TCP client/listener, HTTP/1.1, RFC 6455 WebSocket, and name resolution over a
+  transport-neutral `IByteStream` seam; the transport layer has no third-party dependency and TLS is
+  an optional mbedTLS adapter (`TINA_BUILD_NETWORK_TLS`, target `tina_network_tls`) that keeps
+  mbedTLS types out of every public header. Reliable-UDP channels, netcode (snapshot sync, client
+  prediction), NAT traversal, HTTP/2, HTTP/3, DNS caching, proxies, and certificate pinning remain
+  out of scope.
 - `tina_sample_2d` covers Catalog/TileMap/Navigation2D/UI/Audio/Physics2D; `tina_sample_3d` covers the 3D product path.
 
 Public headers and the Game SDK do not expose bgfx, GLFW, Box2D, miniaudio, FreeType, cgltf,
@@ -64,9 +70,11 @@ materials to backend keys; cooked base-color, metallic-roughness, and normal tex
 uploaded, bound, and sampled by the experimental metallic-roughness path with material factors
 and key/fill directional lights. Texture/Mesh resources use backend-proven readback markers for
 AssetLease-backed retirement; a general GPU submission fence remains outside the current contract.
-Full PBR, IBL, shadows, and a general light/pass system remain open. The accepted task-system
-policy is implemented: interactive Desktop defaults CPU workers to `max(1, hw-1)` while explicit
-settings remain preserved.
+Cook-Torrance GGX direct lighting, cooked EnvironmentMap split-sum IBL, directional CSM, spot and
+point shadows, bounded directional/point/spot light snapshots, and a deterministic pass scheduler are
+implemented (see [testing](docs/testing.md) RENDER-001, all Done). Post-process beyond the current
+chain and cross-GPU visual golden remain open. The accepted task-system policy is implemented:
+interactive Desktop defaults CPU workers to `max(1, hw-1)` while explicit settings remain preserved.
 
 See the [Chinese project guide](README_CN.md), [documentation index](docs/README.md),
 [roadmap](docs/roadmap.md), and [actionable backlog](docs/backlog.md).

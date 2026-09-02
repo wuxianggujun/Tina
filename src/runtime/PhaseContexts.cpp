@@ -131,7 +131,9 @@ FrameUpdateContext::FrameUpdateContext(const FrameTiming& frameTiming, const Fra
                                        Audio::AudioEngine* audioEngine,
                                        Runtime::Input::ActionMapper* actionMapper,
                                        Render::IRenderDevice* renderDevice,
-                                       double* gameplayTimeScale) noexcept
+                                       double* gameplayTimeScale,
+                                       Platform::IPlatformBackend* platformBackend,
+                                       Platform::PointerCaptureMode* pointerCaptureMode) noexcept
     : m_frameTiming(&frameTiming),
       m_frameActions(&frameActions),
       m_exitRequested(&exitRequested),
@@ -139,9 +141,32 @@ FrameUpdateContext::FrameUpdateContext(const FrameTiming& frameTiming, const Fra
       m_audioEngine(audioEngine),
       m_renderDevice(renderDevice),
       m_gameplayTimeScale(gameplayTimeScale),
+      m_platformBackend(platformBackend),
+      m_pointerCaptureMode(pointerCaptureMode),
       m_inputActionRebinding(actionMapper),
       m_rebindingAvailable(actionMapper != nullptr)
 {
+}
+
+Core::Status PointerCaptureSettings::setMode(Platform::PointerCaptureMode mode) const noexcept
+{
+    if (m_backend == nullptr || m_mode == nullptr)
+    {
+        return Core::failure(RuntimeErrorCode::PhaseCapabilityUnavailable,
+                             "Pointer capture is not available in this phase");
+    }
+    if (mode == *m_mode)
+    {
+        return Core::success();
+    }
+    if (auto status = m_backend->setPointerCaptureMode(mode); !status)
+    {
+        return status;
+    }
+    // Recorded only after the backend accepted it, so mode() never reports a mode the
+    // window is not actually in.
+    *m_mode = mode;
+    return Core::success();
 }
 
 Core::Status TimeScaleSettings::setTimeScale(double timeScale) const noexcept
@@ -183,6 +208,11 @@ DisplaySettings FrameUpdateContext::displaySettings() const noexcept
 TimeScaleSettings FrameUpdateContext::timeScaleSettings() const noexcept
 {
     return TimeScaleSettings{m_gameplayTimeScale};
+}
+
+PointerCaptureSettings FrameUpdateContext::pointerCaptureSettings() const noexcept
+{
+    return PointerCaptureSettings{m_platformBackend, m_pointerCaptureMode};
 }
 
 InputActionRebinding* FrameUpdateContext::inputActionRebinding() noexcept

@@ -26,6 +26,13 @@ if(TINA_BUILD_PLATFORM_GLFW)
     add_subdirectory(platform)
 endif()
 
+if(EMSCRIPTEN)
+    # Drives EngineHost::tick from emscripten_set_main_loop, because a browser owns the
+    # frame loop and run() would have to block. Gated on the toolchain rather than an
+    # option, for the same reason as the html5 platform backend itself.
+    add_subdirectory(web)
+endif()
+
 if(TINA_BUILD_PLATFORM_GLFW AND TINA_BUILD_RENDER_BGFX)
     add_subdirectory(desktop)
     add_subdirectory(ui_showcase)

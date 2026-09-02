@@ -19,6 +19,7 @@
 #include <tina/core/hash/ContentHashDigest.hpp>
 #include <tina/core/id/AssetId.hpp>
 #include <tina/core/io/ApplicationPaths.hpp>
+#include <tina/core/text/ArgParser.hpp>
 #include <tina/core/text/JsonWriter.hpp>
 #include <tina/desktop/DesktopEngine.hpp>
 #include <tina/render/RenderDevice.hpp>
@@ -48,7 +49,6 @@
 
 #include <algorithm>
 #include <array>
-#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -695,12 +695,6 @@ void printUsage()
         << "structured JSON on stderr (status=error, code, message, optional context).\n";
 }
 
-template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text, Value& value) noexcept
-{
-    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
-    return error == std::errc{} && end == text.data() + text.size();
-}
-
 [[nodiscard]] Tina::Core::Result<SampleOptions> parseOptions(int argumentCount, char** arguments)
 {
     constexpr std::string_view FramesPrefix = "--frames=";
@@ -739,7 +733,7 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
         }
         if (argument.starts_with(FramesPrefix))
         {
-            if (hasFrames || !parseUnsigned(argument.substr(FramesPrefix.size()), options.targetFrameCount) ||
+            if (hasFrames || !Tina::Core::parseArgUnsigned(argument.substr(FramesPrefix.size()), options.targetFrameCount) ||
                 options.targetFrameCount == 0)
             {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
@@ -749,7 +743,7 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
         }
         else if (argument.starts_with(DelayPrefix))
         {
-            if (hasDelay || !parseUnsigned(argument.substr(DelayPrefix.size()), options.frameDelayMilliseconds))
+            if (hasDelay || !Tina::Core::parseArgUnsigned(argument.substr(DelayPrefix.size()), options.frameDelayMilliseconds))
             {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                            "--frame-delay-ms must appear once and be unsigned");
@@ -758,7 +752,7 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
         }
         else if (argument.starts_with(WidthPrefix))
         {
-            if (hasWidth || !parseUnsigned(argument.substr(WidthPrefix.size()), options.windowLogicalWidth) ||
+            if (hasWidth || !Tina::Core::parseArgUnsigned(argument.substr(WidthPrefix.size()), options.windowLogicalWidth) ||
                 options.windowLogicalWidth == 0)
             {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
@@ -768,7 +762,7 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
         }
         else if (argument.starts_with(HeightPrefix))
         {
-            if (hasHeight || !parseUnsigned(argument.substr(HeightPrefix.size()), options.windowLogicalHeight) ||
+            if (hasHeight || !Tina::Core::parseArgUnsigned(argument.substr(HeightPrefix.size()), options.windowLogicalHeight) ||
                 options.windowLogicalHeight == 0)
             {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,

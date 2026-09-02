@@ -12,6 +12,7 @@
 
 #include "NativeSocket.hpp"
 
+#include <tina/core/base/EnumFlags.hpp>
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
 
@@ -30,19 +31,13 @@ enum class ReadinessInterest : Core::u8 {
     ReadableAndWritable = Readable | Writable,
 };
 
-[[nodiscard]] constexpr ReadinessInterest operator|(
-    ReadinessInterest left,
-    ReadinessInterest right) noexcept
-{
-    return static_cast<ReadinessInterest>(
-        static_cast<Core::u8>(left) | static_cast<Core::u8>(right));
-}
+TINA_ENUM_FLAG_OPERATORS(ReadinessInterest);
 
 [[nodiscard]] constexpr bool hasInterest(
     ReadinessInterest value,
     ReadinessInterest probe) noexcept
 {
-    return (static_cast<Core::u8>(value) & static_cast<Core::u8>(probe)) != 0;
+    return hasAnyFlag(value, probe);
 }
 
 // What actually happened. readable/writable are advisory: a socket reported

@@ -34,7 +34,12 @@ class AudioEngine final {
     [[nodiscard]] AudioEngineState state() const noexcept;
     [[nodiscard]] Core::Result<AudioEngineStats> stats() const noexcept;
 
-    [[nodiscard]] Core::Result<AudioVoiceId> createVoice() noexcept;
+    // `bus` fixes which mixer bus scales this voice for its whole lifetime; it is a
+    // creation parameter rather than a setter because playOneShotPcm/playPcmStream
+    // create and queue in one call, leaving a caller no window to assign it.
+    [[nodiscard]] Core::Result<AudioVoiceId> createVoice(
+        AudioBusId bus = AudioBusId::Sfx) noexcept;
+    [[nodiscard]] Core::Result<AudioBusId> voiceBus(AudioVoiceId voice) const noexcept;
     // Only for a voice that is not playing and has no completion still pending.
     // Every voice kind must reach its end through the queue -- enqueueStop for clips,
     // EOF/cancelPcmStream/enqueueStop for streams -- because erasing the record is
@@ -83,14 +88,16 @@ class AudioEngine final {
     // next to apply and receive Started. Stop/natural end automatically retires
     // this transient voice, so the returned id may be stale after Stopped is pumped.
     // Frames must outlive that terminal completion pump.
-    [[nodiscard]] Core::Result<AudioVoiceId> playOneShotPcm(AudioPcmClipView clip) noexcept;
+    [[nodiscard]] Core::Result<AudioVoiceId> playOneShotPcm(
+        AudioPcmClipView clip, AudioBusId bus = AudioBusId::Sfx) noexcept;
 
     // Create and queue a transient bounded PCM stream. Tina reserves all ring
     // storage at AudioEngine::Create; this call never creates a second device or
     // backend. The AudioEngine owner thread is the sole producer and calls
     // submitPcmStreamFrames/signalPcmStreamEof/cancelPcmStream. A Task worker must
     // marshal decoded chunks to that owner thread rather than calling directly.
-    [[nodiscard]] Core::Result<AudioVoiceId> playPcmStream(AudioPcmStreamDesc desc) noexcept;
+    [[nodiscard]] Core::Result<AudioVoiceId> playPcmStream(
+        AudioPcmStreamDesc desc, AudioBusId bus = AudioBusId::Sfx) noexcept;
     // Atomic whole-chunk submit: insufficient free frames returns CapacityExceeded
     // without publishing a partial chunk. EOF/Stop/cancel reject later submissions.
     [[nodiscard]] Core::Status submitPcmStreamFrames(

@@ -13,13 +13,17 @@ class IGameApplication {
 public:
     virtual ~IGameApplication() noexcept = default;
 
-    virtual Core::Result<std::unique_ptr<IGameState>> createInitialState(
+    // 唯一没有合理默认值的 hook。
+    [[nodiscard]] virtual Core::Result<std::unique_ptr<IGameState>> createInitialState(
         GameStartupContext& context) = 0;
-    virtual void onShutdown(GameShutdownContext& context) noexcept = 0;
+
+    virtual void onShutdown(GameShutdownContext&) noexcept {}
 };
 ```
 
 Application 只负责创建初始 State 与最终 shutdown，不接收逐帧回调，也不拥有 backend。
+`createInitialState` 是唯一纯虚方法：不指定起始 State 的 Application 无从运行；`onShutdown` 有空默认
+实现，不需要清理时可以不重写。
 
 ### `IGameState`
 
@@ -28,18 +32,28 @@ class IGameState {
 public:
     virtual ~IGameState() noexcept = default;
 
-    virtual Core::Status onEnter(GameStateEnterContext& context) = 0;
-    virtual void onExit(GameStateExitContext& context) noexcept = 0;
-    virtual GameStatePolicy initialPolicy() const noexcept = 0;
+    // 每个 hook 都有默认实现，最小可用 State 只重写自己关心的那一个。
+    virtual Core::Status onEnter(GameStateEnterContext&) { return Core::success(); }
+    virtual void onExit(GameStateExitContext&) noexcept {}
+    [[nodiscard]] virtual GameStatePolicy initialPolicy() const noexcept
+    {
+        return GameStatePolicy{};
+    }
 
-    virtual Core::Status fixedUpdate(FixedUpdateContext& context);
-    virtual Core::Status updateFrame(FrameUpdateContext& context);
-    virtual Core::Status extractRenderScene(RenderSceneExtractionContext& context) const;
-    virtual Core::Status updateUI(UIUpdateContext& context);
+    virtual Core::Status fixedUpdate(FixedUpdateContext&) { return Core::success(); }
+    virtual Core::Status updateFrame(FrameUpdateContext&) { return Core::success(); }
+    virtual Core::Status extractRenderScene(RenderSceneExtractionContext&) const
+    {
+        return Core::success();
+    }
+    virtual Core::Status updateUI(UIUpdateContext&) { return Core::success(); }
 };
 ```
 
-默认逐帧实现返回 success。Runtime 持有私有 `GameStateStack`（定容 8）：enter 成功后采样
+`IGameState` 没有纯虚方法：`onEnter` 默认返回 `Core::success()`、`onExit` 是空体、`initialPolicy`
+返回默认 `GameStatePolicy{}`（不阻塞任何相位，对栈内不会同时存在两个 State 的游戏就是正确答案），
+四个逐帧 hook 默认返回 success。因此最小可用的游戏只需要在 Application 里重写 `createInitialState`
+并提供一个空 State，State 侧按需逐个重写 hook。Runtime 持有私有 `GameStateStack`（定容 8）：enter 成功后采样
 `initialPolicy()`，帧内可 `requestPush` / `requestPop` / `requestReplace` / `requestPolicyChange`。
 四相位 `blocksFixedUpdateBelow` / `blocksFrameUpdateBelow` / `blocksRenderBelow` /
 `blocksUIUpdateBelow`（控制下层 `updateUI` 是否调用；**不**回改当帧 UI route）已调度。

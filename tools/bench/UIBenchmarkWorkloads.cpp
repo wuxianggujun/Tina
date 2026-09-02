@@ -1669,8 +1669,8 @@ void hashLogicalRect(DeterministicHash& hash, const UI::UILogicalRect& rect) noe
             accumulateCommitStatistics(statistics, report);
             report.motionSampledTracks += statistics.motion.lastSampledTrackCount;
             report.motionActiveTracks += statistics.motion.activeTrackCount;
-            report.motionTrackHighWater =
-                (std::max)(report.motionTrackHighWater, statistics.motion.trackHighWater);
+            report.motionTrackHighWater = (std::max)(report.motionTrackHighWater,
+                                                    static_cast<u64>(statistics.motion.trackHighWater));
             if (activeTarget == 0) {
                 ++report.motionZeroActiveIterations;
                 if (statistics.motion.lastSampledTrackCount != 0 ||

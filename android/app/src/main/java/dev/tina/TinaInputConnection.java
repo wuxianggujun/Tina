@@ -65,13 +65,18 @@ final class TinaInputConnection extends BaseInputConnection {
     public boolean requestCursorUpdates(int cursorUpdateMode) {
         // Android's contract: report CursorAnchorInfo only after the IME asks. The mode carries two
         // independent bits -- IMMEDIATE wants one report now, MONITOR wants them until further notice --
-        // and the host satisfies both by reporting per frame while either is set.
-        final boolean wanted = cursorUpdateMode != 0;
-        TinaNative.nativeSetCursorUpdatesRequested(session, wanted);
+        // and the raw value is handed across so native can retire IMMEDIATE after one report while MONITOR
+        // keeps running. Collapsing it to a boolean here would make a one-shot request report forever.
+        TinaNative.nativeSetCursorUpdateMode(session, cursorUpdateMode);
+        // Only the bits this host actually implements are claimed. Claiming an unsupported bit tells the
+        // IME to expect reports with semantics that were never written, whereas declining just that bit
+        // leaves it to fall back.
+        final int supported =
+                cursorUpdateMode & (TinaNative.CURSOR_UPDATE_IMMEDIATE | TinaNative.CURSOR_UPDATE_MONITOR);
         // Claimed rather than delegated to super, which returns false: returning false tells the IME the
         // editor cannot report cursor positions, and it then never places its candidate window against
         // the caret at all.
-        return wanted;
+        return supported == cursorUpdateMode && supported != 0;
     }
 
     @Override

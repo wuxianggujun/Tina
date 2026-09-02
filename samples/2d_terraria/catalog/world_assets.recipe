@@ -1,0 +1,26 @@
+# Static assets for the Terraria-like sample. The tilemap itself is NOT here:
+# WorldGen.hpp appends a generated `tilemap` block to this text at startup, and the
+# combined text goes through parseCatalogCookRecipe().
+#
+# AssetIds follow the sample idBytes(seed) convention: byte[0] = seed, byte[15] = seed ^ 0xA5.
+#
+# One 5x1 atlas serves the whole sample so there is a single texture binding to
+# resolve. Texels left to right:
+#   0 air    (fully transparent, alpha 00)
+#   1 dirt   (brown)
+#   2 stone  (grey)
+#   3 grass  (green)
+#   4 player (amber) -- not a tile, sampled directly by the player quad
+platform WindowsX64
+texture2d 010000000000000000000000000000a4 5 1 00000000 8B5A2BFF 8A8F98FF 4CAF50FF FFC04AFF
+
+# 1px tiles out of the 5x1 atlas.
+tileset 020000000000000000000000000000a7 010000000000000000000000000000a4 1 1
+# tile <localId> <materialFlags> <u0> <v0> <u1> <v1>
+# flags bit0 = MaterialSolid. Air is deliberately a REAL tile with flags 0 rather than
+# tile id 0: the cooker drops all-empty chunks, and a dropped chunk can never be built
+# on at runtime (setTile returns TileMapChunkNotResident forever).
+tile 1 0 0.0 0 0.2 1
+tile 2 1 0.2 0 0.4 1
+tile 3 1 0.4 0 0.6 1
+tile 4 1 0.6 0 0.8 1

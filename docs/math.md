@@ -83,7 +83,7 @@ broadphase 与栅格化需要的保证 —— 漏掉一个 cell 是正确性缺�
 | `src/render/RenderScene.cpp` 的私有 `Vector3`/`Quaternion` | **已删除** |
 | `src/scene/ExtractRenderScene.cpp` 的 `WorldBoundingSphere` 与球-视锥剔除 | **已删除**，改用 `Math::Sphere` 与 `Math::sphereIntersectsPerspectiveFrustum` |
 | `src/scene/Animator3D.cpp` 的 4x4 乘法与 `shortestPathSlerp` | **已删除**，改用 `Math::multiply` 与 `Math::slerp` |
-| `UI::UILogicalRect` | **保留**。它有自己的 logical-pixel 语义与 469 处引用；`Math::Rect` 只用于世界/屏幕矩形 |
+| `UI::UILogicalRect` | **保留**。它有自己的 logical-pixel 语义与 469 处引用（2026-09-01 复算口径：`grep -rn UILogicalRect src include tests samples editor`，按匹配行计数，不含 `tools/`；`tools/` 另有 1 处）；`Math::Rect` 只用于世界/屏幕矩形 |
 | `Scene::CameraFollowPoint2D` | **保留**。是 2D 相机跟随的独立语义类型 |
 | `bx::Vec3` / `bx::mtx*`（`src/render/bgfx/`） | **保留**。私有后端的实现细节，且已被 bgfx 自己的 `mtxLookAt`/`mtxOrtho` 消费；换成 `Math::Vec3` 只会在边界上来回转换 |
 

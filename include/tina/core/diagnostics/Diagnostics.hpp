@@ -35,6 +35,10 @@ struct DiagnosticsConfig final {
     //
     // Default is synchronous because a test that writes then reads a counter must
     // see the result without an intervening flush. EngineHost opts in.
+    //
+    // Silently downgraded to synchronous on targets that cannot spawn the drain
+    // thread (Emscripten built without -pthread). Create still succeeds; isAsync()
+    // reports false.
     usize asyncQueueCapacity = 0;
 
     // Non-empty opens a file sink. Copied during Create, so a temporary is fine.

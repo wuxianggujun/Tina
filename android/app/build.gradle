@@ -37,7 +37,12 @@ android {
                                       // matching vcpkg manifest feature is selected in app/CMakeLists.txt,
                                       // because it has to be set before project() runs.
                                       '-DTINA_BUILD_UI_FREETYPE=ON',
-                                      '-DTINA_BUILD_UI_UIA=OFF']
+                                      '-DTINA_BUILD_UI_UIA=OFF',
+                                      // The default already excludes it (PROJECT_IS_TOP_LEVEL is
+                                      // false through add_subdirectory), but stated so the intent is
+                                      // greppable: a phone never runs the editor, and building it
+                                      // cross-compiled ~9.5k lines of authoring code for arm64.
+                                      '-DTINA_BUILD_EDITOR=OFF']
 
                 // The renderer is opt-in via -Ptina.shaderc=<path to a host shaderc.exe>, because
                 // shaderc is a build-HOST tool that this cross build cannot produce: built here it

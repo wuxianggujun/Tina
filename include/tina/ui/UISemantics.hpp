@@ -1,5 +1,6 @@
 #pragma once
 
+#include <tina/core/base/EnumFlags.hpp>
 #include <tina/core/base/Types.hpp>
 #include <tina/ui/UILayout.hpp>
 #include <tina/ui/UIListView.hpp>
@@ -67,25 +68,11 @@ enum class UISemanticsAction : u8 {
     SetTextValue = 1U << 4U,
 };
 
-[[nodiscard]] constexpr UISemanticsAction operator|(UISemanticsAction left, UISemanticsAction right) noexcept
-{
-    return static_cast<UISemanticsAction>(static_cast<u8>(left) | static_cast<u8>(right));
-}
-
-[[nodiscard]] constexpr UISemanticsAction operator&(UISemanticsAction left, UISemanticsAction right) noexcept
-{
-    return static_cast<UISemanticsAction>(static_cast<u8>(left) & static_cast<u8>(right));
-}
-
-constexpr UISemanticsAction& operator|=(UISemanticsAction& left, UISemanticsAction right) noexcept
-{
-    left = left | right;
-    return left;
-}
+TINA_ENUM_FLAG_OPERATORS(UISemanticsAction);
 
 [[nodiscard]] constexpr bool hasSemanticsAction(UISemanticsAction set, UISemanticsAction action) noexcept
 {
-    return (set & action) == action;
+    return hasAllFlags(set, action);
 }
 
 struct UISemanticsDescriptor final {

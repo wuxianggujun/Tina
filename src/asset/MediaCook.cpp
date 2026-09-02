@@ -292,6 +292,7 @@ try
     capture->result.request.assets.push_back(CatalogCookAssetSpec{
         .assetKind = AssetFormat::AssetKind::AudioClip,
         .assetId = stableAssetId ? stableAssetId : *derivedAudioId,
+        .assetTypeVersion = AssetFormat::AudioClipWire::SchemaVersion,
         .payload = std::move(*clipPayload),
     });
 

@@ -442,8 +442,9 @@ capacity/lifetime/width/stable-key/UV/颜色/排序；parser 校验 finite range
 产品消费闭环，不能把它们列为已完成资源类型。FreeType 字体仍通过显式 `TINA_UI_FONT_PATH`/fixture
 接入，详见 [UI](ui.md)。
 
-StaticMesh v1 固定为 P3N3T4UV2 + UInt16 index，不携带运行时 layout 分支；SkinnedMesh v1 复用该顶点/索引
-布局并额外携带最多256 joints、inverse bind 与每顶点固定4个 U16 influences；AnimationClip3D v1 只接受
+StaticMesh v1 固定为 P3N3T4UV2 + UInt16 index，不携带运行时 layout 分支；SkinnedMesh v2 复用该顶点/索引
+布局并额外携带最多256 joints、inverse bind、每顶点固定4个 U16 influences，以及 v2 新增的每 joint 64B
+joint name 块（无条件存在，不由 header flag 选择）；AnimationClip3D v1 只接受
 joint target 的 LINEAR/STEP track。glTF authored `TANGENT`
 优先，具备 NORMAL+UV 但缺 tangent 时由 PRIVATE MikkTSpace 生成，缺 NORMAL/UV 的 primitive 显式失败。
 Material v2（40B）为 `UnlitBaseColor`，携带 `baseColor` RGBA、`metallicFactor`/`roughnessFactor`、

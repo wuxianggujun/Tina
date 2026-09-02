@@ -74,7 +74,7 @@ Vorbis/Opus 的安装图还分别解析 `Vorbis`、`Opus`、`OpusFile`。未请�
 | `Tina::Scene` | World/Entity/Transform、2D/3D components/extraction/Prefab、World2D snapshot、standalone Particle/Trail、`Fx2D` factory、`CameraFollow2D` |
 | `Tina::Navigation2D` | immutable weighted grid、generation dynamic blocker、确定性四向/对角同步与分步 A* |
 | `Tina::AssetFormat` | versioned Cooked payload/manifest types |
-| `Tina::Editor` | 工具侧 validated World2D/World3D/TileMap/SpriteAnimationClip/Navigation2D/Fx2D authoring document、Project Asset index、project workspace/空目录创建、document-tab navigation、bounded revision history、文件加载/原子保存与 runtime/cook preview；不由 `Tina::GameSDK` 聚合链接 |
+| `Tina::Editor` | 工具侧 validated World2D/World3D/TileMap/SpriteAnimationClip/Navigation2D/Fx2D authoring document、Project Asset index、project workspace/空目录创建、document-tab navigation、bounded revision history、文件加载/原子保存与 runtime/cook preview；**不随 SDK 包发布**，也不由 `Tina::GameSDK` 聚合链接（ADR 0041） |
 | `Tina::Asset` | Catalog、AssetSystem、Handle/Lease、Cooker helpers、typed parse/upload、Sprite2D/Mesh3D binding registry |
 | `Tina::UI` | retained Element tree、layout/input/paint、text、semantics 与固定容量 layout diagnostics |
 | `Tina::UIFreetype` | optional installed FreeType text rasterizer adapter；需 `COMPONENTS UIFreetype` |
@@ -1067,6 +1067,10 @@ kind/version/dependency contract；`loadNavigationGrid2DDataFromCooked()` 再把
 已解析 desc 与调用方提供的 weak Sprite handle。
 
 ## Editor
+
+编辑器整树位于 `editor/`（不在 `src/` 下），由 `TINA_BUILD_EDITOR` 控制，且**不安装进 SDK 包** ——
+`find_package(Tina)` 之后没有 `Tina::Editor`。它需要引擎私有头（`core/io/PathUtil.hpp`），
+只能在引擎源码树内构建，不能作为独立工程消费已安装的 SDK。详见 [ADR 0041](adr/0041-editor-module-boundaries.md)。
 
 `Tina::Editor` 是不依赖 UI/Runtime/Scene/backend 的工具侧 document target；`Tina::EditorApp` 是独立桌面组合 target，
 负责 2D/3D 独立 workspace session、retained UI、Runtime preview 与 GPU viewport，不把这些依赖反向带入 document 层。

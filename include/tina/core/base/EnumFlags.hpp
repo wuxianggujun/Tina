@@ -1,62 +1,9 @@
 #pragma once
 
-#include <concepts>
 #include <type_traits>
 #include <utility>
 
 namespace Tina {
-
-template <typename Enum>
-struct EnableEnumFlags : std::false_type {
-};
-
-template <typename Enum>
-concept EnumFlagsEnabled = std::is_enum_v<Enum> && EnableEnumFlags<Enum>::value;
-
-template <EnumFlagsEnabled Enum>
-[[nodiscard]] constexpr Enum operator|(Enum lhs, Enum rhs) noexcept
-{
-    return static_cast<Enum>(std::to_underlying(lhs) | std::to_underlying(rhs));
-}
-
-template <EnumFlagsEnabled Enum>
-[[nodiscard]] constexpr Enum operator&(Enum lhs, Enum rhs) noexcept
-{
-    return static_cast<Enum>(std::to_underlying(lhs) & std::to_underlying(rhs));
-}
-
-template <EnumFlagsEnabled Enum>
-[[nodiscard]] constexpr Enum operator^(Enum lhs, Enum rhs) noexcept
-{
-    return static_cast<Enum>(std::to_underlying(lhs) ^ std::to_underlying(rhs));
-}
-
-template <EnumFlagsEnabled Enum>
-[[nodiscard]] constexpr Enum operator~(Enum value) noexcept
-{
-    return static_cast<Enum>(~std::to_underlying(value));
-}
-
-template <EnumFlagsEnabled Enum>
-constexpr Enum& operator|=(Enum& lhs, Enum rhs) noexcept
-{
-    lhs = lhs | rhs;
-    return lhs;
-}
-
-template <EnumFlagsEnabled Enum>
-constexpr Enum& operator&=(Enum& lhs, Enum rhs) noexcept
-{
-    lhs = lhs & rhs;
-    return lhs;
-}
-
-template <EnumFlagsEnabled Enum>
-constexpr Enum& operator^=(Enum& lhs, Enum rhs) noexcept
-{
-    lhs = lhs ^ rhs;
-    return lhs;
-}
 
 template <typename Enum>
     requires std::is_enum_v<Enum>
@@ -93,6 +40,40 @@ constexpr void setFlag(Enum& flags, Enum flag, bool enabled) noexcept
 
 } // namespace Tina
 
-#define TINA_ENABLE_ENUM_FLAGS(EnumType) \
-    template <>                         \
-    struct Tina::EnableEnumFlags<EnumType> : std::true_type {}
+// Defines the bitwise operators for a flag enum. Expand it inside the namespace that
+// declares the enum: for an enum type, ADL considers only its innermost enclosing
+// namespace, so operators defined in `Tina` are unreachable for a caller that writes
+// `Tina::UI::UIDirty::Paint | Tina::UI::UIDirty::Style` from anywhere else.
+//
+// `operator~` is deliberately absent. None of these enums fill their underlying type,
+// so a raw complement yields bits outside the declared set; a correct one needs an
+// all-bits mask this macro cannot know. Define it by hand where it is actually needed.
+#define TINA_ENUM_FLAG_OPERATORS(EnumType)                                                 \
+    [[nodiscard]] constexpr EnumType operator|(EnumType left, EnumType right) noexcept     \
+    {                                                                                      \
+        return static_cast<EnumType>(std::to_underlying(left) | std::to_underlying(right)); \
+    }                                                                                      \
+    [[nodiscard]] constexpr EnumType operator&(EnumType left, EnumType right) noexcept     \
+    {                                                                                      \
+        return static_cast<EnumType>(std::to_underlying(left) & std::to_underlying(right)); \
+    }                                                                                      \
+    [[nodiscard]] constexpr EnumType operator^(EnumType left, EnumType right) noexcept     \
+    {                                                                                      \
+        return static_cast<EnumType>(std::to_underlying(left) ^ std::to_underlying(right)); \
+    }                                                                                      \
+    constexpr EnumType& operator|=(EnumType& left, EnumType right) noexcept                \
+    {                                                                                      \
+        left = left | right;                                                               \
+        return left;                                                                       \
+    }                                                                                      \
+    constexpr EnumType& operator&=(EnumType& left, EnumType right) noexcept                \
+    {                                                                                      \
+        left = left & right;                                                               \
+        return left;                                                                       \
+    }                                                                                      \
+    constexpr EnumType& operator^=(EnumType& left, EnumType right) noexcept                \
+    {                                                                                      \
+        left = left ^ right;                                                               \
+        return left;                                                                       \
+    }                                                                                      \
+    static_assert(std::is_enum_v<EnumType>, "TINA_ENUM_FLAG_OPERATORS requires an enum type")

@@ -10,8 +10,8 @@
 写出抽象，事实形态是两点：
 
 1. 一个转义函数 `writeJsonString(std::ostream&, std::string_view)` 被复制了 13 份
-   （`src/editor_app/EditorFileDialogGateMain.cpp`、
-   `src/editor_app/EditorWorkspaceState.hpp`、`tools/bench/UIBenchmarkWorkloads.cpp`
+   （`editor/app/EditorFileDialogGateMain.cpp`、
+   `editor/app/EditorWorkspaceState.hpp`、`tools/bench/UIBenchmarkWorkloads.cpp`
    和 10 个 `samples/*/main.cpp`），共 66 个调用点。这 13 份**并不一致**，而是三个版本
    （按 `git show HEAD:<file>` 逐份核对函数体所得）：
 

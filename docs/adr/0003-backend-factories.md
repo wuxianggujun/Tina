@@ -47,6 +47,17 @@ snapshot、延迟发布与 Runtime handoff；M7-B2 已实现私有 bgfx clear-on
 SteadyClock、GLFW WindowSurface、DisabledTaskSystem 与 bgfx；任一真实 backend 失败都不得通过
 全局状态或静默降级绕过。
 
+> **更正（2026-09-01）：** 上文「DisabledTaskSystem」已不是 Desktop production 组合的实际内容。
+> `src/desktop/DesktopEngine.cpp:57` 返回 `Task::createBoundedTaskSystem(effective)`，其中
+> `effective` 由 `Task::resolveDesktopTaskSystemParams()` 依据 `std::thread::hardware_concurrency()`
+> 解析得出（同文件 54-56 行，硬件并发数为 0 时回退为 1）。该处注释也写明这是
+> 「Production Desktop: bounded IO + interactive CPU workers (ADR 0017 / TASK-001)」，
+> 并说明 `DisabledTaskSystem` 现在只留给 samples/tests 注入。
+> 这与 [ADR 0017](0017-bounded-task-system.md)（有界 TaskSystem）以及 `docs/backlog.md:176`
+> 的 TASK-001（位于 `## Done` 段）一致：**0003 是滞后方，0017 是现状**。本 ADR 的核心决定
+> （factory bundle 按值组合、不注册全局状态、失败不静默降级）不受影响，失效的只是这一句
+> 对当时已落地 backend 的清点。历史理由保持原样。
+
 ## 结果
 
 - Runtime 只依赖模块接口；

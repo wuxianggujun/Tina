@@ -12,7 +12,7 @@
 - strict UTF-8 runtime name 与 game-defined tag/layer/group metadata；
 - 封闭组件白名单上的只读 `get/has/view/query`；
 - Local/World Transform 层级与显式 publication barrier；
-- Camera2D、SpriteRenderer2D、SpriteAnimationBinding2D、PointLight2D、ShadowOccluder2D、PhysicsBody2D、PhysicsShape2D、ResourceBinding2D、PerspectiveCamera3D、MeshRenderer3D、DirectionalLight3D 组件；
+- Camera2D、SpriteRenderer2D、SpriteAnimationBinding2D、PointLight2D、ShadowOccluder2D、PhysicsBody2D、PhysicsShape2D、ResourceBinding2D、PerspectiveCamera3D、MeshRenderer3D、SkinnedMeshRenderer3D、DirectionalLight3D、PointLight3D、SpotLight3D 组件；
 - standalone allocation-free `CameraFollow2D` controller；
 - standalone fixed-capacity `ParticleSystem2D` 与 `Trail2D`；
 - World 到 phase-local `RenderSceneWriter` 的 2D/3D extraction；

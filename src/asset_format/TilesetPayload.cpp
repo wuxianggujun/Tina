@@ -3,7 +3,7 @@
 #include <tina/asset_format/AssetFormatErrors.hpp>
 
 #include <array>
-#include <cstring>
+#include <bit>
 
 namespace Tina::AssetFormat {
 namespace {
@@ -39,9 +39,7 @@ inline constexpr u16 AllowedMaterialFlags = TilesetWire::MaterialSolid | Tileset
 
 [[nodiscard]] float readF32(std::span<const std::byte> bytes, usize offset) noexcept
 {
-    float value = 0.0f;
-    std::memcpy(&value, bytes.data() + offset, sizeof(float));
-    return value;
+    return std::bit_cast<float>(readU32(bytes, offset));
 }
 
 void writeU8(std::vector<std::byte>& bytes, usize offset, u8 value)
@@ -65,7 +63,7 @@ void writeU32(std::vector<std::byte>& bytes, usize offset, u32 value)
 
 void writeF32(std::vector<std::byte>& bytes, usize offset, float value)
 {
-    std::memcpy(bytes.data() + offset, &value, sizeof(float));
+    writeU32(bytes, offset, std::bit_cast<u32>(value));
 }
 
 [[nodiscard]] bool finiteUv(float value) noexcept

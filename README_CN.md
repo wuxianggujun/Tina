@@ -20,12 +20,15 @@ Tina 是一个以 C++23 为基线的 2D/3D 游戏 Runtime。当前产品路径�
   upload/retirement；
 - UI 支持 retained tree、布局、路由、文本/Glyph、Button、Checkbox、Slider、ProgressBar、RadioButton、
   单行 TextEdit、ScrollView、Dropdown/Popup 及虚拟化 ListView/TreeView；
-- `tina_sample_ui_showcase` 提供 20 控件工作台、完整交互层次、集合/滚动流程与 Dark/Light 实时换肤；
+- `tina_sample_ui_showcase` 提供 24 控件工作台、完整交互层次、集合/滚动流程与 Dark/Light 实时换肤；
 - Audio 提供 backend-neutral engine 与可选 miniaudio；Physics2D 提供 Box/Circle/Capsule/ConvexPolygon、
   Distance/Revolute/Prismatic joint 与可选 Box2D 3.x adapter；
-- Network 提供严格的数值 IPv4/IPv6 地址与 owner-thread、固定容量、非阻塞 UDP datagram
-  socket，不依赖任何第三方库；TCP、HTTP、WebSocket、TLS、名字解析与可靠 UDP 通道
-  不在当前切片范围内；
+- Network 提供严格的数值 IPv4/IPv6 地址，以及 owner-thread、固定容量、非阻塞的 UDP datagram、
+  TCP 客户端/listener、HTTP/1.1、RFC 6455 WebSocket 与名字解析，协议统一跑在传输中立的
+  `IByteStream` 接缝上；传输层不依赖任何第三方库，TLS 是可选的 mbedTLS adapter
+  （`TINA_BUILD_NETWORK_TLS`，独立 target `tina_network_tls`），mbedTLS 类型不出现在任何公开头中。
+  可靠 UDP 通道、netcode（快照同步、客户端预测）、NAT 穿透、HTTP/2、HTTP/3、DNS 缓存、代理与
+  证书固定仍不在范围内（见 [网络](docs/network.md)）；
 - `tina_sample_2d` 是 Catalog/TileMap/Navigation2D/UI/Audio/Physics2D 产品门禁，`tina_sample_3d` 是
   glTF/Prefab/Scene/Render 产品门禁。
 
@@ -83,9 +86,11 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d.exe --fram
 - 3D 产品：multi-mesh glTF cooking、AssetId resolver、外部 URI/size policy、baseColor/MR/normal
   Texture2D cook 与 product GPU upload/bind 已完成；样例按多个 mesh/material key 提交，experimental
   metallic-roughness 路径采样三类贴图并使用 material factors 与 key/fill directional light；
-  完整 PBR、IBL、shadow、通用 light/pass system 与通用 GPU submission fence 仍后置；Texture/Mesh
-  已使用 readback marker 完成 AssetLease-backed GPU retirement；
-- UI：20 控件 showcase、虚拟化 ListView/TreeView、Runtime facade，以及 2D Scene Explorer 和 3D
+  Cook-Torrance GGX 直接光、cooked EnvironmentMap split-sum IBL、directional CSM、spot/point shadow、
+  逐帧有界 light snapshot 与 deterministic pass scheduler 已落地（见 [测试](docs/testing.md)
+  RENDER-001，全部 Done）；通用 GPU submission fence、当前链之外的 post-process 与跨 GPU 视觉 golden
+  仍后置；Texture/Mesh 已使用 readback marker 完成 AssetLease-backed GPU retirement；
+- UI：24 控件 showcase、虚拟化 ListView/TreeView、Runtime facade，以及 2D Scene Explorer 和 3D
   Asset/Scene collections 已接入产品门禁；具体测试数量以本轮直接运行的 GoogleTest 输出为准；
 - Task：ADR 0017 的 Desktop 交互默认值已落实为 `max(1, hw-1)` 个 CPU worker，显式配置保持不变；
 - Linux tip 已有 GCC/Clang（含 sanitizer）证据；Wayland、跨 GPU/DPI 视觉 golden、Narrator/AT-SPI

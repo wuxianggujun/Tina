@@ -16,6 +16,19 @@ endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/TinaTargets.cmake")
 
+# Scaffolding helpers, so a generated game project gets tina_add_game_content(),
+# tina_add_desktop_frontend(), tina_add_web_frontend(), tina_product_data_file() and
+# tina_install_product() from find_package(Tina) alone. Both files define functions only.
+include("${CMAKE_CURRENT_LIST_DIR}/TinaGameProject.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/TinaProductInstall.cmake")
+
+# Whether this package shipped the asset cooker. A package configured with
+# TINA_BUILD_EXAMPLES=OFF has no tools/ directory and therefore no tina_assetc, so
+# tina_find_assetc() reports that as a package-content problem instead of leaving a caller to
+# discover a missing file. Set before use, since these are plain variables rather than targets.
+set(Tina_WITH_AssetC @TINA_PACKAGE_WITH_ASSETC@)
+set(Tina_ASSETC_HINT_DIR "@PACKAGE_CMAKE_INSTALL_BINDIR@")
+
 set(Tina_GameSDK_FOUND TRUE)
 set(Tina_PlatformGlfw_FOUND FALSE)
 set(Tina_RenderBgfx_FOUND FALSE)
@@ -51,7 +64,6 @@ endif()
 set(Tina_PACKAGE_TARGETS
     ${Tina_GAME_SDK_TARGETS}
     Tina::AssetTypes
-    Tina::Editor
     Tina::WindowSurfaceIntegration
     Tina::UIRenderIntegration
 )

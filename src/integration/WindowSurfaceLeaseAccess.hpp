@@ -14,6 +14,9 @@ enum class NativeWindowBindingKind : u8 {
     // ANativeWindow*. Unlike X11/Wayland there is no display to carry: the window handle is
     // self-contained, which is also why nativeDisplay must stay 0 for this kind.
     Android,
+    // A NUL-terminated CSS selector naming the canvas, not a window handle. The pointed-to
+    // string must outlive the lease; nativeDisplay stays 0 as there is no display to carry.
+    Html5,
 };
 
 struct NativeWindowBinding final {

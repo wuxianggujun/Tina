@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tina/core/error/Result.hpp>
+#include <tina/core/io/ContentRoot.hpp>
 #include <tina/core/time/FixedStepAccumulator.hpp>
 #include <tina/platform/PlatformFrame.hpp>
 #include <tina/platform/Window.hpp>
@@ -29,6 +30,15 @@ struct EngineConfig final {
     static constexpr Core::u32 MaximumFixedStepsPerFrame = 4;
 
     std::string applicationName;
+    // Where this product's shipped, read-only content lives. Empty by default, because a
+    // game with no shipped content is legitimate and must not fail to start.
+    //
+    // The frontend fills this in: only the composition root knows what its platform offers,
+    // which is a directory beside the executable on desktop, a preloaded virtual filesystem
+    // in a browser, and an extraction directory on Android. Content then reaches it through
+    // the EngineConfig it already receives on every phase context, so no gameplay code
+    // spells out a path or learns which platform it is on.
+    Core::ContentRoot contentRoot;
     Platform::PrimaryWindowConfig primaryWindow;
     Platform::PlatformFrameCapacityConfig platformFrameCapacities{};
     UI::UIContextCapacityConfig primaryWindowUICapacities{};

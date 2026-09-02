@@ -1,5 +1,6 @@
 #pragma once
 
+#include <tina/core/base/EnumFlags.hpp>
 #include <tina/core/base/Types.hpp>
 #include <tina/core/error/Result.hpp>
 #include <tina/core/hash/ContentHash.hpp>
@@ -86,14 +87,11 @@ enum class DependencyFlags : Core::u16 {
     Deferred = 1U << 1U,
 };
 
-[[nodiscard]] constexpr DependencyFlags operator|(DependencyFlags left, DependencyFlags right) noexcept
-{
-    return static_cast<DependencyFlags>(static_cast<Core::u16>(left) | static_cast<Core::u16>(right));
-}
+TINA_ENUM_FLAG_OPERATORS(DependencyFlags);
 
 [[nodiscard]] constexpr bool hasDependencyFlag(DependencyFlags value, DependencyFlags flag) noexcept
 {
-    return (static_cast<Core::u16>(value) & static_cast<Core::u16>(flag)) == static_cast<Core::u16>(flag);
+    return hasAllFlags(value, flag);
 }
 
 struct CookedAssetLimits final {

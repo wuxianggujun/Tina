@@ -514,7 +514,7 @@ try {
         Start-Sleep -Milliseconds 100
     }
 
-    $probeOk = $windowTitle -eq 'Tina UI Showcase - Complete Retained Controls' -and
+    $probeOk = $windowTitle -eq 'Tina Modern Desktop Workbench' -and
         $tinaProviderCount -ge 20 -and $positiveBoundsCount -ge 20 -and $focusableCount -ge 8 -and
         $fragmentIntegrityVerified -and
         $missingTypes.Count -eq 0 -and $missingNames.Count -eq 0 -and $initialTextEditValue -eq 'Tina Player' -and

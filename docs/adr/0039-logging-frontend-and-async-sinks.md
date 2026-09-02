@@ -21,8 +21,18 @@ by default, no background queue"，这不是缺失的功能清单，而是四个
 缺失的设施——命名了整个模块就无法为 Android 编译。这条政策直接排除 `std::format`：
 全仓库 `<format>` 出现 0 次，这是政策的结果而非疏漏。
 
-还有一个决定 flush 策略的事实：仓库有 149 处 `std::terminate()`。日志紧跟终止是常见形态，
+还有一个决定 flush 策略的事实：仓库有 125 处 `std::terminate()`（统计口径：仅 `src/` 与
+`include/`，按 `grep -ro "std::terminate()" src include | wc -l` 计**出现次数**而非行数；
+其中 `src/` 122 处、`include/` 3 处）。日志紧跟终止是常见形态，
 而一条排队未投递的记录会随进程一起死掉——恰恰是解释这次终止的那一行。
+
+> **更正（2026-09-01）：** 本行与下文「决定」段原写作 **149 处**，未注明统计口径，无法复算。
+> 2026-09-01 重新统计为上述 125 处。若把一方代码全部计入
+> （`src include tests tools samples editor`）则为 150 处，明细为 `src/` 122、`include/` 3、
+> `tests/` 6、`tools/` 0、`samples/` 14、`editor/` 5。此处采用 `src/` + `include/` 口径，
+> 因为该论据针对的是**引擎自身**在终止路径上的日志投递，测试与示例的终止点不构成运行时约束。
+> 数字变化不影响结论：无论 125 还是 149，终止路径的数量级都要求 Error 及以上同步 flush。
+> 历史理由保持原样。
 
 ## 决定
 
@@ -64,7 +74,8 @@ by default, no background queue"，这不是缺失的功能清单，而是四个
 `new[]`，不经 MemoryTracker——Diagnostics 先于 tracker 存在，让日志依赖另一个子系统会颠倒
 它本该服务的依赖方向。
 
-**Error 及以上在 `write()` 返回前完成投递。** 这是那 149 处 `std::terminate()` 的直接结果。
+**Error 及以上在 `write()` 返回前完成投递。** 这是那 125 处 `std::terminate()`（口径见上文「背景」
+段更正）的直接结果。
 仍然先入队再等待，不插队到队首，否则致命行会排在为它铺垫上下文的记录之前。这个缺陷是
 `EngineHostFramePacketDeathTest` 实测暴露的，不是设计时想到的。
 

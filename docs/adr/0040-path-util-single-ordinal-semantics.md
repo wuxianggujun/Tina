@@ -12,7 +12,7 @@
 
 | Windows 折叠方式 | 份数 | 位置 |
 | --- | --- | --- |
-| `::CompareStringOrdinal(..., TRUE)` | 6 | `src/editor/EditorProjectCreation.cpp`、`src/editor/EditorProjectWorkspace.cpp`、`src/editor_app/EditorSourceImportIngress.cpp`、`src/editor_app/EditorSourceImportLaunchOptions.cpp`、`src/editor_app/EditorSourceImportSelection.cpp`、`src/editor_app/EditorWorkspaceState.hpp` |
+| `::CompareStringOrdinal(..., TRUE)` | 6 | `editor/src/EditorProjectCreation.cpp`、`editor/src/EditorProjectWorkspace.cpp`、`editor/app/EditorSourceImportIngress.cpp`、`editor/app/EditorSourceImportLaunchOptions.cpp`、`editor/app/EditorSourceImportSelection.cpp`、`editor/app/EditorWorkspaceState.hpp` |
 | `std::towlower` 逐 `wchar_t` | 4 | `src/asset/CatalogCook.cpp`、`src/asset/SourceImportCapture.cpp`、`src/asset/SourceImportPipeline.cpp`、`tools/assetc/main.cpp` |
 
 两种写法都喂给 `pathIsSameOrDescendant`（9 份逐字节相同），而后者决定一条路径是否逃出创作
@@ -40,7 +40,7 @@ UTF-8 字节转路径同样是抄的：`src/` 与 `tools/` 下有 7 份等价的
 公共 Tina 头依赖 `<filesystem>`（公共面把路径以 UTF-8 文本发布，见
 `core/io/ApplicationPaths.hpp`）。消费方通过把 `${PROJECT_SOURCE_DIR}/src` 加到**私有**包含
 路径来取用，`src/desktop` 与 `src/runtime` 早已是这个形态；引号包含从 `src/` 起算，写作
-`#include "core/io/PathUtil.hpp"`。本次为 `src/asset`、`src/editor`、`src/editor_app`、
+`#include "core/io/PathUtil.hpp"`。本次为 `src/asset`、`editor/src`、`editor/app`、
 `src/save`、`tools/assetc`、`tina_tests` 补上了这条私有路径。
 
 **Windows 折叠统一为序数**，即 `::CompareStringOrdinal(..., TRUE)`：locale 无关、整串比较，
@@ -87,7 +87,7 @@ workspace 根。把其中任何一处换成 `pathToUtf8` 都会静默作废所�
   它比较的是已规范化的最终句柄路径，是第三种语义，不是漏改。
 - `src/asset/SourceImportCapture.cpp` 保留 `towlower` 的**变换**（不是比较）。它的输出写进
   `.tmeta` 作为被导入源文件的持久化身份，改折叠方式会让所有已烘焙资产对不上自己的源。
-- `src/editor/EditorProjectCreation.cpp` 的 `CompareStringOrdinal` 用于 Windows 保留设备名
+- `editor/src/EditorProjectCreation.cpp` 的 `CompareStringOrdinal` 用于 Windows 保留设备名
   （`NUL`、`CON` 等）检查，不是路径组件比较。
 
 ## 结果
@@ -102,7 +102,7 @@ gate 可见的输出）。这处比"非 ASCII 会乱码"要重一档：它的返
 
 代价是 `src/save` 等模块的私有包含路径多了 `${PROJECT_SOURCE_DIR}/src`。
 
-`src/editor_app/EditorWorkspaceState.hpp` 中另有 20 处 deprecated 的
+`editor/app/EditorWorkspaceState.hpp` 中另有 20 处 deprecated 的
 `std::filesystem::u8path` 未在本次改动范围内：它们是标准库调用而非手抄副本，且在一个 5400 行
 且有并发改动的头里做 20 处跨行编辑，风险高于收益。
 

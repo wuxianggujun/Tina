@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tina/core/base/Types.hpp>
+#include <tina/core/text/Utf8.hpp>
 
 #include <filesystem>
 #include <optional>
@@ -209,6 +210,73 @@ pathRelativeToAncestor(const std::filesystem::path& source, const std::filesyste
 {
     const std::u8string encoded = path.generic_u8string();
     return {reinterpret_cast<const char*>(encoded.data()), encoded.size()};
+}
+
+// Whether a UTF-8 relative path is safe to join below a shipped-content root.
+//
+// This is the guard behind both Core::applicationFilePath and Core::ContentRoot::resolve.
+// It has one definition because the two must agree exactly: a caller moving between them
+// should not discover that one accepts "assets/" or "a/../b" and the other does not, and a
+// root-escape rule that differs by call site is the shape of bug ADR 0040 documents.
+//
+// Unlike pathEscapesRoot above, this works on UTF-8 text rather than a std::filesystem::path
+// and is therefore usable before any path object exists -- which matters because the
+// rejection has to happen before the bytes reach a filesystem that might interpret them
+// differently from us.
+//
+// Rejected, all as InvalidArgument at the call site: empty text, non-strict UTF-8, an
+// embedded NUL, a '\' separator, a ':' (drive letter or ADS), and any empty, "." or ".."
+// component. '\' and ':' are rejected rather than translated because accepting both
+// separators would give one logical path two spellings, and only one of them survives
+// reaching a POSIX filesystem.
+[[nodiscard]] inline bool isSafeRelativeContentPath(std::string_view relativePath) noexcept
+{
+    if (relativePath.empty() || !isStrictUtf8WithoutNul(relativePath))
+    {
+        return false;
+    }
+    if (relativePath.find('\\') != std::string_view::npos ||
+        relativePath.find(':') != std::string_view::npos)
+    {
+        return false;
+    }
+    // Every component is examined, including the one after a trailing separator: stopping
+    // once the remainder runs out would accept "assets/", whose final component is empty and
+    // names no file. A leading '/' is absolute and shows up here as an empty first
+    // component, and "//" as an empty middle one.
+    usize start = 0;
+    for (;;)
+    {
+        const usize separator = relativePath.find('/', start);
+        const std::string_view component = separator == std::string_view::npos
+                                               ? relativePath.substr(start)
+                                               : relativePath.substr(start, separator - start);
+        if (component.empty() || component == "." || component == "..")
+        {
+            return false;
+        }
+        if (separator == std::string_view::npos)
+        {
+            return true;
+        }
+        start = separator + 1U;
+    }
+}
+
+// Joins a validated relative path below a base directory, in the one spelling both
+// applicationFilePath and ContentRoot::resolve produce.
+//
+// Only a root directory arrives already separator-terminated, and stripping that separator
+// would change which directory it names, so this adds one rather than normalising the base
+// to a single spelling. The caller must have already run isSafeRelativeContentPath.
+[[nodiscard]] inline std::string joinContentPath(std::string base, std::string_view relativePath)
+{
+    if (!base.empty() && base.back() != '/' && base.back() != '\\')
+    {
+        base.push_back('/');
+    }
+    base.append(relativePath);
+    return base;
 }
 
 } // namespace Tina::Core::Detail

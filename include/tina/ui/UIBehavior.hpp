@@ -1,5 +1,6 @@
 #pragma once
 
+#include <tina/core/base/EnumFlags.hpp>
 #include <tina/core/base/Types.hpp>
 
 namespace Tina::UI {
@@ -33,25 +34,11 @@ enum class UIElementBehavior : u32 {
     DataGridColumnHeader = 1U << 21U,
 };
 
-[[nodiscard]] constexpr UIElementBehavior operator|(UIElementBehavior left, UIElementBehavior right) noexcept
-{
-    return static_cast<UIElementBehavior>(static_cast<u32>(left) | static_cast<u32>(right));
-}
-
-[[nodiscard]] constexpr UIElementBehavior operator&(UIElementBehavior left, UIElementBehavior right) noexcept
-{
-    return static_cast<UIElementBehavior>(static_cast<u32>(left) & static_cast<u32>(right));
-}
-
-constexpr UIElementBehavior& operator|=(UIElementBehavior& left, UIElementBehavior right) noexcept
-{
-    left = left | right;
-    return left;
-}
+TINA_ENUM_FLAG_OPERATORS(UIElementBehavior);
 
 [[nodiscard]] constexpr bool hasBehavior(UIElementBehavior set, UIElementBehavior behavior) noexcept
 {
-    return (set & behavior) == behavior;
+    return hasAllFlags(set, behavior);
 }
 
 } // namespace Tina::UI

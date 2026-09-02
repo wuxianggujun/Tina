@@ -75,5 +75,10 @@ inline constexpr Core::ErrorCode ShaderUploadUnsupported{Core::ErrorDomain::Rend
 inline constexpr Core::ErrorCode InvalidShaderUpload{Core::ErrorDomain::Render, 67};
 inline constexpr Core::ErrorCode ShaderNotFound{Core::ErrorDomain::Render, 68};
 inline constexpr Core::ErrorCode ShaderBindingKeyExhausted{Core::ErrorDomain::Render, 69};
+inline constexpr Core::ErrorCode VideoDecodeUnsupported{Core::ErrorDomain::Render, 70};
+inline constexpr Core::ErrorCode VideoCodecUnsupported{Core::ErrorDomain::Render, 71};
+inline constexpr Core::ErrorCode InvalidVideoDecodeSubmission{Core::ErrorDomain::Render, 72};
+inline constexpr Core::ErrorCode VideoDecodeTextureNotFound{Core::ErrorDomain::Render, 73};
+inline constexpr Core::ErrorCode InvalidSceneClearColor{Core::ErrorDomain::Render, 74};
 
 } // namespace Tina::Render::RenderErrorCode

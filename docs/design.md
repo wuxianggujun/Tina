@@ -24,6 +24,11 @@ Tina 的设计目标不是“功能最多”，而是让游戏 Runtime 的模块
 | Asset | Catalog/Cooked + cgltf Cooker | cgltf 不进入 Runtime/public header |
 | Audio | miniaudio 是可选真实 backend | backend-neutral AudioEngine 可独立测试 |
 | Physics | Box2D 2D、Jolt 3D，API 分离 | Box2D adapter已实现；Jolt 尚未接入 |
+| Math | `Tina::Math` 是几何类型的唯一定义点，不保留任何模块私有副本 | header-only、列主序右手系、失败用 `optional`/`bool` 故不占 `ErrorDomain`/`MemoryTag`；`Scene::Vec3`/`PhysicsVec2` 等旧重复定义已删除（[ADR 0035](adr/0035-math-module-boundaries.md)） |
+| Gameplay | `Tina::Gameplay` 时序工具层只依赖 Core+Math，不引入 coroutine | `Easing`/`Scheduler`/`Action`/`Signal<T>`，固定容量、单 owner、delta 由调用方给；占 `ErrorDomain::Gameplay = 17`（[ADR 0036](adr/0036-gameplay-tooling-boundaries.md)） |
+| Animation3D | `Tina::Animation3D` pose 图建在 `Animator3D` **旁**，不替代也不迁移它 | pose 为 joint-local、root motion 从 pose 中移除并单独上报；SkinnedMesh wire v2 加骨骼名称；占 `ErrorDomain::Animation3D = 18`（[ADR 0037](adr/0037-animation3d-graph-boundaries.md)） |
+| Network | 自研传输，不引入 asio/libuv/curl；TLS 是可选独立模块 | owner-thread readiness 多路复用（每帧一次 `WSAPoll`/`poll`），除 DNS 外零 worker 零锁；`Tina::NetworkTls` 用 mbedTLS 且信任锚取平台 store；公开头不出现 socket/Winsock/mbedTLS 类型（[ADR 0033](adr/0033-network-module-boundaries.md)） |
+| Save | `Tina::Save` 只做版本化 slot 存储，不定义游戏 payload 语义 | slot 文件名由 `SaveStore` 生成故调用方文本不进路径；primary+backup 双份 + digest 校验与 `SaveSlotHealth` 恢复分级；migration 图由产品拥有且每版本恰一条严格递增边（无降级）；owner-thread 命令面，async 经 `ITaskSystem`。尚无 ADR |
 | ECS | 如采用 EnTT，只能是 Scene 私有实现 | 当前 `tina_scene` 不链接 EnTT |
 | 容器 | 标准库/`std::pmr` + 少量专用有界结构 | 不恢复 EASTL 产品依赖 |
 | 测试 | GoogleTest executable 直接运行 | 不使用 CTest 调度 |
@@ -42,16 +47,33 @@ flowchart LR
     Game --> Navigation["Navigation2D grid / A*"]
     Runtime --> Audio["AudioEngine"]
     Runtime --> Render["RenderFrame"]
+    Game --> Gameplay["Gameplay timer / tween / Signal"]
+    Game --> Animation3D["Animation3D pose graph"]
+    Game --> Network["Network UDP/TCP/HTTP/WS"]
+    Game --> Save["Save versioned slots"]
+    Animation3D --> Scene
+    Gameplay --> Animation3D
     Assets["Catalog / AssetSystem"] --> Scene
     Assets --> Navigation
     Assets --> Render
     Task["IO / CPU / Main executors"] --> Assets
+    Task --> Network
+    Task --> Save
+    Math["Math geometry types"] --> Scene
+    Math --> Render
+    Math --> Gameplay
+    Math --> Animation3D
     Platform --> Glfw["private GLFW"]
     UI --> Display["UI DisplayList"]
     Display --> Render
     Render --> Bgfx["private bgfx"]
     Audio --> Mini["private miniaudio"]
+    Network --> Tls["optional NetworkTls / private mbedTLS"]
 ```
+
+`Math` 是 header-only 的几何类型定义点，被 Scene/Render/Physics/Gameplay/Animation3D 共用，图中只画了主要消费者。
+`Gameplay`、`Animation3D`、`Network`、`Save` 由游戏代码在合法 frame phase 内自行驱动（delta 与 pump 由调用方给），
+`EngineHost` 不代为调度；`Animation3D` 建在 `Animator3D` 旁而非替代它。
 
 游戏状态写 gameplay model、Scene extraction 和 UI retained state。Runtime 决定它们在帧内的调用顺序，
 adapter 负责把 Tina-owned 数据翻译到第三方库。游戏代码不能越过 Runtime 直接驱动具体 backend。
@@ -134,6 +156,11 @@ layout candidate transaction 与 `ui_motion_layout_v1` 已落地并通过统一�
 | 3D | multi-mesh/multi-prim SPLIT cook、authored/MikkTSpace tangent、唯一 P3N3T4UV2、SkinnedMesh/AnimationClip3D + Animator3D CPU pose + GPU skinning、Resources-owned AssetStore、Prefab/Scene weak Mesh/Material Handle、engine-provided/State-owned fixed-capacity Mesh3D registry、packet-local geometry/material ref、Mesh/Material/共享 Texture 统一 owner、原子 material bundle、baseColor/MR/normal 采样、material factors、Cook-Torrance GGX + cooked EnvironmentMap split-sum IBL、World DirectionalLight3D/PointLight3D/SpotLight3D→逐帧 RenderScene snapshot、point/spot influence-sphere frustum culling、固定4级联 directional CSM、固定单 SpotLight shadow 与固定单 PointLight 六面 shadow、三类 startup-only 可配置 D16 extent（默认1024/1024/512）、三类3×3 PCF、显式 Opaque/Blend、统一 static/skinned back-to-front 排序与 Transparent3D、deterministic pass scheduler、实时 framebuffer camera aspect、responsive product UI、URI 安全、Texture/Mesh/EnvironmentMap retirement marker | post、跨 GPU golden、Jolt 3D gameplay |
 | UI | Tree/layout/hit/route/paint/semantics、文本/Glyph、Focus Scope/Modal/Pointer Capture、ScrollView、Dropdown/Popup、虚拟 ListView/TreeView；Element/recipe authoring、完整预算 Component transaction、六类 Behavior side store 与 node/text/canvas/Behavior reservation/counter、统一 RoundedRect；Image/Icon content、Canvas Image/NineSlice、root-scoped resolver/pin、RGBA ImageQuad、产品/失效/尺寸矩阵与固定 workload；StyleClass、node-local pseudo-state、ColorToken registry/value 与 reverse-dependency 运行期更新、literal/token-backed BoxFill/imageTint stylesheet、Runtime startup facade 与固定 workload；fixed-capacity paint-only transition + typed paint/bounded-layout keyframe timeline、Style BackgroundColor reservation/activation、reduced-motion；多行 TextEdit（LF/soft-wrap/滚动/二维 hit/navigation）、UAX #29 grapheme 边界编辑与 Windows IMM32 caret/candidate placement；Slider Focusable/Focus semantics、RangeInput Arrow/D-pad 独立调值 command 与 Dark/Light 交互状态矩阵已关闭；accessibility action seam、Windows UIA Invoke/Toggle/RangeValue/Value patterns、HWND 桥接与跨进程 action gate | 更广 Style/layout 属性面与高级 Motion playback；BiDi/复杂 shaping、Linux 原生 XIM/Wayland preedit/candidate placement、Windows 真机 IME 人工金标、Narrator/Inspect 金标、AT-SPI |
 | Runtime | State 栈/commands、四相位阻断、`blocksGameplayInputBelow` 空 snapshot、FramePin/CPU ledger、固定步长、bounded Task shutdown + Host-enforced TaskSystem deadline | 通用 GPU submission fence、多 World、Runtime 内置 Asset/World |
+| Math | 七个公开头：`Vec2/3/4`、`Quaternion`、列主序右手系 `Mat4`、`Aabb2/3`、`Rect`、`Sphere`、`Plane`、`Ray`、`Frustum` 与几何查询；全部旧重复定义（`Scene::Vec3`/`Vec2`/`Quaternion`、`PhysicsVec2`、三处私有副本）已删除且无别名残留；四个数值等价性回归把被删实现原样复制进测试逐元素比对；`tina_math_tests` 114 例 | `OBB`/`Mat3`/SIMD **明确不在范围**（[ADR 0035](adr/0035-math-module-boundaries.md)），非缺口 |
+| Gameplay | `Easing`（28 曲线）、`Scheduler`/`TimerId`（`Repeat`、per-timer `ignoresTimeScale`、暂停）、`Action`/`ActionRunner`（`tween`/`delay`/`call` 叶子与 `sequence`/`parallel`/`repeat` 组合子）、`Signal<T>`/`SignalSubscription`（`emit` 立即 + `post`/`drain` 延迟）；已进安装 package | 单元测试**落地中**（`tina_gameplay_tests` target 已建，`ActionAuthoringTests`/`ActionRunnerTests` 两个源文件尚缺故当前无法链接）；sample 消费面缺；coroutine 与 tween 的 relative/reverse/speed 变体明确不在范围 |
+| Animation3D | `Skeleton3D`/`Pose3D`/`JointMask`、`PoseBlend3D`、`ClipSampler3D`（三播放模式 + 负速度）、`BlendTree3D`（Clip/Blend2/Blend1D/Additive）、`AnimationGraph3D`（状态机 + crossfade + layer/mask + root motion）、两骨解析解 IK；SkinnedMesh wire v2 加逐 joint 64 字节骨骼名称（cooked joint index 是不可反推的排列，名称是唯一稳定身份） | **无 sample/Editor 消费者**（`AnimationGraph3D` 在 `samples/` 与 `editor/` 零命中，目前只有 `tests/` 一个消费者；`samples/3d_product` 用的是 `Animator3D`）；retargeting 与 pose-aware bounds 按 [ADR 0037](adr/0037-animation3d-graph-boundaries.md) 不在范围 |
+| Network | 数值 IP/endpoint、UDP、readiness poller、TCP 连接与 listener、`IByteStream`、HTTP/1.1、WebSocket、DNS；可选 `Tina::NetworkTls`（mbedTLS，信任锚取平台 store）；请求走私面 fail closed；`samples/network` 是 tests 之外首个消费者，headless 无 GPU 无 EngineHost | **Linux 一次未验证**（十个组件的 POSIX 分支写了但从未编译或运行，含六条 trust-store bundle 路径探测，为当前最大未知面）；全部测试在 loopback，真实丢包/乱序/MTU 分片/NAT 未覆盖；无证书固定，不委托验证裁决给 OS |
+| Save | 版本化 slot 存储：primary+backup 双份 + digest 校验、`SaveSlotHealth` 五级恢复分级（`Empty`/`Healthy`/`PrimaryOnly`/`RecoverableFromBackup`/`Unrecoverable`）、slot 文件名由 `SaveStore` 生成故调用方文本永不成为路径组件、产品拥有的 migration 图（每版本恰一条严格递增边、无降级）、owner-thread 命令面 + 经 `ITaskSystem` 的 async handle（facade 销毁后仍有效）；`tina_save_tests` 44 例 | **尚无 ADR**，也无 sample/产品消费者（目前只有 `tests/` 一个消费者）；wire schema 仍为 v1；cloud/跨设备同步与 slot 加密未涉及 |
 | 性能 | `tina_bench` schema v1 + provisional 结论；UI 50,000 节点深树 structure/layout/hit/paint 非递归回归，Popup publication 为线性步骤；UI clean/dirty/route/virtual collection、Image/NineSlice、完整 Component/Style/transition、`ui_motion_timeline_v1` 与 `ui_motion_layout_v1` workload 均有 seed 0/1/2 确定性 gate | 完整 dirty-range pruning、固定门禁机 hard gate、多进程 MAD |
 
 ## 游戏侧正确姿势（摘要）

@@ -29,10 +29,24 @@ git submodule status --recursive
 | bgfx Desktop/2D/3D | `windows-msvc-vnext-bgfx` | `windows-vnext-bgfx-debug`；`tina_render_bgfx_tests`、samples |
 | UI + FreeType + UIA | `windows-msvc-vnext-bgfx-ui-freetype` | `windows-vnext-bgfx-ui-freetype-debug`；UI/UIA tests + showcase |
 | 完整 2D 产品 | `windows-msvc-vnext-bgfx-product-2d` | `windows-vnext-bgfx-product-2d-debug`；Physics/Audio/UI/Asset + `tina_sample_2d` |
-| Editor（authoring + 桌面） | `windows-msvc-vnext-bgfx-product-2d` | `tina_editor_tests`、`tina_editor_app_tests`、`tina_editor_desktop`；smoke 用 `TinaEditor.exe --auto-demo --frames=600`（2D/3D 各一次） |
+| Editor（authoring + 桌面） | `windows-msvc-vnext-bgfx-product-2d` | `tina_editor_tests`、`tina_editor_app_tests`、`tina_editor_desktop`（均需 `TINA_BUILD_EDITOR=ON`）；smoke 见下 |
 | Physics2D 或 Audio 专图 | 对应 `windows-msvc-vnext-*` preset | 对应模块 tests/bench |
 
-Legacy 产品图已删除；`TINA_BUILD_LEGACY=ON` 必须 FATAL。FreeType 字体通过 CMake/env
+Editor smoke 的正式调用形式（`--auto-demo` 强制要求显式 `--frames`，最小预算 **70** 帧，正式 2D/3D
+smoke 固定 70 帧；`--workspace` 省略时默认 `2d`，两个 workspace 必须各跑一次）：
+
+```powershell
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\TinaEditor.exe `
+  --frames=70 --frame-delay-ms=0 --workspace=2d --auto-demo
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\TinaEditor.exe `
+  --frames=70 --frame-delay-ms=0 --workspace=3d --auto-demo
+```
+
+Editor 位于 `editor/`（不在 `src/` 下），整棵树由 `TINA_BUILD_EDITOR` gate；顶层工程默认 ON，
+OFF 时上述 target 根本不存在。`tina_editor_app_tests` 与 `tina_editor_desktop` 另需 GLFW + bgfx。
+
+Legacy 产品图已删除；`TINA_BUILD_LEGACY=ON` 必须 FATAL。**但当前产品 Retained UI `src/ui` /
+`include/tina/ui` 仍在使用，不属于删除范围。** FreeType 字体通过 CMake/env
 `TINA_UI_FONT_PATH`，源码和终端保持 UTF-8，MSVC 使用 `/utf-8`。
 
 ## 执行规则

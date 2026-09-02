@@ -40,6 +40,21 @@ public final class TinaNative {
     public static final int KEYBOARD_REQUEST_HIDE = 2;
 
     /**
+     * Cursor-update bits, mirroring {@code InputConnection.CURSOR_UPDATE_IMMEDIATE} and
+     * {@code CURSOR_UPDATE_MONITOR}.
+     *
+     * <p>Restated here rather than referenced from {@code InputConnection} because the native side stores
+     * and masks these values, so they are part of the JNI contract, not just the framework's. The values
+     * are the framework's own -- {@code requestCursorUpdates} hands the raw mode across unchanged, so a
+     * divergence would misread the IME's request rather than fail to compile.
+     *
+     * <p>Any other bit the framework adds later is dropped natively: reporting for a mode whose semantics
+     * this host does not implement is worse than not claiming it.
+     */
+    public static final int CURSOR_UPDATE_IMMEDIATE = 1;
+    public static final int CURSOR_UPDATE_MONITOR = 2;
+
+    /**
      * Allocates the engine session. Does not create the platform backend: that needs a Surface,
      * which arrives later. The split is what lets touches queue before a surface exists.
      */
@@ -80,6 +95,24 @@ public final class TinaNative {
      * Without it every glyph draws as a solid block.
      */
     public static native void nativeSetUiFontPath(long session, String path);
+
+    /**
+     * Supplies the directory this app's shipped content was extracted to.
+     *
+     * <p>Java owns this because only Java can: APK assets are not files, so nothing in the engine's read
+     * path can open them, and the destination to copy them to is a {@code Context} property with no
+     * native equivalent. Extracting rather than teaching the engine to read an {@code AAssetManager}
+     * keeps one read path across desktop, browser and device.
+     *
+     * <p>The engine puts this in its content root, so game code asks for {@code "assets/game.recipe"}
+     * here exactly as it does beside the executable on desktop -- it never learns which platform
+     * answered.
+     *
+     * <p>Must be called before the first surface is bound, since that is when the engine config is
+     * built. Optional: an app that ships no content simply does not call it, and the root then rejects
+     * every lookup rather than returning a path that cannot exist.
+     */
+    public static native void nativeSetContentRootPath(long session, String path);
 
     public static native void nativeDestroySession(long session);
 
@@ -162,16 +195,36 @@ public final class TinaNative {
     public static native boolean nativeOnComposingFinish(long session);
 
     /**
-     * Records that the IME asked for, or stopped asking for, cursor updates.
+     * Records the cursor-update mode the IME asked for, as the raw bit set from
+     * {@code requestCursorUpdates}.
      *
      * <p>Gated because Android's contract is that {@code CursorAnchorInfo} is reported after a request.
      * Reporting unconditionally costs a JNI call and an object allocation every frame for the majority of
      * IMEs that never ask.
+     *
+     * <p>The mode is carried as a bit set rather than a boolean because Android's two bits mean different
+     * things: {@link #CURSOR_UPDATE_IMMEDIATE} wants exactly one report, {@link #CURSOR_UPDATE_MONITOR}
+     * wants them until cancelled. Collapsing them loses the ability to stop after one, which turns a
+     * one-shot request into a permanent per-frame report.
      */
-    public static native void nativeSetCursorUpdatesRequested(long session, boolean requested);
+    public static native void nativeSetCursorUpdateMode(long session, int mode);
 
-    /** Whether {@code CursorAnchorInfo} should be reported this frame. */
-    public static native boolean nativeCursorUpdatesRequested(long session);
+    /**
+     * The cursor-update bits currently in force, or 0 when the IME wants nothing.
+     *
+     * <p>Non-consuming: the host reports while either bit is set and retires IMMEDIATE explicitly via
+     * {@link #nativeAcknowledgeImmediateCursorUpdate}, so a frame that cannot build a report does not
+     * lose the request.
+     */
+    public static native int nativeCursorUpdateMode(long session);
+
+    /**
+     * Clears the IMMEDIATE bit after one report was actually delivered to the IME.
+     *
+     * <p>Separate from the read because delivery can fail -- no focused caret, no InputMethodManager, no
+     * window token -- and clearing at read time would drop the single report the IME asked for.
+     */
+    public static native void nativeAcknowledgeImmediateCursorUpdate(long session);
 
     /**
      * The focused caret in physical pixels, packed as {@code x<<48 | y<<32 | width<<16 | height}, or -1
@@ -204,11 +257,27 @@ public final class TinaNative {
     public static native void nativeOnSoftKeyboardOcclusion(long session, int occludedPhysicalHeight);
 
     /**
-     * Consumes the engine's pending keyboard intent. Only Java can call InputMethodManager, so the
-     * engine records what it wants and this is how the host learns it. The read clears the latch, so
-     * one request produces exactly one IME call.
+     * The engine's pending keyboard intent. Only Java can call InputMethodManager, so the engine records
+     * what it wants and this is how the host learns it.
+     *
+     * <p>The read does <em>not</em> clear the latch: InputMethodManager may be unavailable, or reject the
+     * call while the view holds no window token. Consuming here would discard that intent permanently and
+     * present as a keyboard that never appears. The host clears it with
+     * {@link #nativeAcknowledgeSoftKeyboardRequest} once the IME call actually went through.
      */
-    public static native int nativeTakePendingSoftKeyboardRequest(long session);
+    public static native int nativePendingSoftKeyboardRequest(long session);
+
+    /**
+     * Clears the pending intent, but only if it still matches {@code request}.
+     *
+     * <p>Match-checked rather than unconditional so a newer opposite request cannot be erased by a late
+     * acknowledgement of an older read -- otherwise a show issued while a hide was in flight would be
+     * silently dropped.
+     *
+     * @param request one of {@link #KEYBOARD_REQUEST_SHOW} or {@link #KEYBOARD_REQUEST_HIDE}
+     * @return whether the latch was cleared
+     */
+    public static native boolean nativeAcknowledgeSoftKeyboardRequest(long session, int request);
 
     /**
      * Advances exactly one engine frame.

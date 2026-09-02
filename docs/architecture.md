@@ -40,7 +40,9 @@ flowchart TD
     Audio["Tina::Audio"] --> Core
     AssetFormat["Tina::AssetFormat"] --> Core
     Editor["Tina::Editor"] --> Core
+    Editor --> Math
     Editor --> AssetFormat
+    Editor --> Asset
     EditorApp["Tina::EditorApp"] --> Editor
     EditorApp --> Asset
     EditorApp --> Scene
@@ -102,7 +104,6 @@ flowchart TD
 | `tina_render` | RenderDevice SPI、RenderScene、UI DisplayList、GPU 资源句柄 | 不含 bgfx 类型 |
 | `tina_audio` | AudioEngine、voice/bus/command/completion | 不含 miniaudio 类型 |
 | `tina_asset_format` | Cooked wire format 与 typed payload | Runtime 不读取源资产 |
-| `tina_editor` | current-schema authoring documents、Project Asset index 与 document-tab navigation state | 只依赖 Core/AssetFormat；owner move-only，不反向依赖 UI/Runtime/Scene |
 | `tina_navigation2d` | immutable weighted grid、generation dynamic blocker、确定性四向/对角同步与分步 A* | 只依赖 Core；不创建线程，不进入 Scene World |
 
 ### 产品模块
@@ -115,6 +116,20 @@ flowchart TD
 | `tina_asset` | Catalog、AssetSystem、Handle/Lease、Cooker、upload/retirement、Sprite2D/Mesh3D binding registry | cgltf/stb_image 只在 Cooker TU；两类 registry 都借用 AssetSystem/device，并唯一拥有各自 resident Lease/GPU/binding |
 | `tina_ui` | retained Element tree、layout/hit/route/paint/semantics、文本/Glyph、accessibility action | 当前产品 UI 位于 `src/ui`；UI-004/UI-005 已完成，框架演进见 [UI 框架设计](ui-framework.md) |
 | `tina_physics2d` | Box/Circle/Capsule/ConvexPolygon、Distance/Revolute/Prismatic 与查询边界 | 可选，Box2D 3.x PRIVATE |
+| `tina_save` | 存档 slot 的原子写入/读取与 `SaveMigrationPipeline` schema 迁移 | 只依赖 Core+Task；进 `Tina::GameSDK` 聚合 |
+| `tina_network` | backend-neutral 传输：UDP/TCP、`IByteStream`、HTTP/1.1、WebSocket、DNS | 只依赖 Core+Task；不含 socket 平台类型（Windows `ws2_32` PRIVATE）；DNS 是模块内唯一用 worker 的部分。见 [Network](network.md)、[ADR 0033](adr/0033-network-module-boundaries.md) |
+| `tina_gameplay2d` | Scene 与 Physics2D 之间唯一的 2D 玩法桥 | 可选，仅在 `TINA_BUILD_PHYSICS2D` 时存在；单向权威，层级决定 shape 归属 |
+
+### 工具模块（`editor/`，引擎之上）
+
+这些 target 位于 `src/` 之外，因为它们**消费**引擎而不是构成引擎，因而允许依赖产品模块。
+由 `TINA_BUILD_EDITOR` 控制（默认 `PROJECT_IS_TOP_LEVEL`），不属于 `Tina::GameSDK`
+聚合，也不进 SDK 包。理由见 [ADR 0041](adr/0041-editor-module-boundaries.md)。
+
+| Target | 职责 | 关键边界 |
+| --- | --- | --- |
+| `tina_editor` | current-schema authoring documents、Project Asset index 与 document-tab navigation state | 依赖 Core/Math/AssetFormat/**Asset**（`Navigation2DAuthoringDocument.hpp` 公开 include `tina/asset/CatalogCook.hpp`）；owner move-only，不依赖 UI/Runtime/Scene |
+| `tina_editor_app` | `TinaEditor.exe` 的 UI 组合、Inspector、文件对话框、source import 编排 | 依赖 DesktopBootstrap/Asset/Editor/Runtime/Scene，全部 PRIVATE；公开面只有 `EditorApplication.hpp` |
 
 ### 私有 adapter 与组合
 
@@ -127,6 +142,8 @@ flowchart TD
 | `tina_audio_miniaudio` | miniaudio device/mix adapter；可选 Vorbis/Opus |
 | `tina_window_surface_integration` | Platform 与 Render 之间的 native surface handoff |
 | `tina_ui_render_integration` | committed UI paint 到 Render DisplayList 的窄桥 |
+| `tina_network_tls` | mbedTLS TLS 传输 adapter（可选，`TINA_BUILD_NETWORK_TLS`）；PUBLIC 只有 `Tina::Network`，mbedTLS 三个库全部 PRIVATE |
+| `tina_trace_tracy` | Tracy 客户端 trace 后端（可选，`TINA_TRACE_BACKEND=tracy`）；`Tracy::TracyClient` PRIVATE，引擎 `include/` 只作私有 include |
 | `tina_bootstrap_desktop` | 注入 GLFW/bgfx/Task/可选字体的普通桌面组合入口 |
 
 ## 所有权

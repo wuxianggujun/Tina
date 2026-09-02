@@ -1,5 +1,6 @@
 #pragma once
 
+#include <tina/core/base/EnumFlags.hpp>
 #include <tina/core/base/Types.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 #include <tina/ui/UILayout.hpp>
@@ -23,31 +24,12 @@ enum class UITooltipTrigger : u8 {
     Manual = 1U << 2U,
 };
 
-[[nodiscard]] constexpr UITooltipTrigger operator|(UITooltipTrigger left,
-                                                    UITooltipTrigger right) noexcept
-{
-    return static_cast<UITooltipTrigger>(static_cast<u8>(left) |
-                                         static_cast<u8>(right));
-}
-
-[[nodiscard]] constexpr UITooltipTrigger operator&(UITooltipTrigger left,
-                                                    UITooltipTrigger right) noexcept
-{
-    return static_cast<UITooltipTrigger>(static_cast<u8>(left) &
-                                         static_cast<u8>(right));
-}
-
-constexpr UITooltipTrigger& operator|=(UITooltipTrigger& left,
-                                       UITooltipTrigger right) noexcept
-{
-    left = left | right;
-    return left;
-}
+TINA_ENUM_FLAG_OPERATORS(UITooltipTrigger);
 
 [[nodiscard]] constexpr bool hasTooltipTrigger(UITooltipTrigger set,
                                                UITooltipTrigger trigger) noexcept
 {
-    return (set & trigger) == trigger;
+    return hasAllFlags(set, trigger);
 }
 
 struct UITooltipConfig final {

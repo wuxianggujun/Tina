@@ -30,6 +30,7 @@
 #include "GalleryActions.hpp"
 #include "GalleryScene.hpp"
 
+#include <tina/core/io/ContentRoot.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 // RenderDevice, not RenderFrame: this file names RendererApi and RenderDeviceCreateParams, and the
 // RenderFrame include was only ever there for the surface-state conversion deleted above.
@@ -65,6 +66,7 @@
 #include <limits>
 #include <memory>
 #include <new>
+#include <optional>
 
 namespace {
 
@@ -170,6 +172,17 @@ struct TinaAndroidSession final {
     // Filesystem path to the UI font, chosen by Java. Empty means no font, and the UI then draws every
     // glyph as a solid block -- legible as a shape, useless as text.
     std::string uiFontPath{};
+    // Where this app's shipped content was extracted to, chosen by Java. It goes into
+    // EngineConfig::contentRoot, so content resolves paths below it exactly as it does on desktop.
+    //
+    // Java picks it because only Java can: assets live inside the APK, where no std::ifstream can reach
+    // them, so they have to be copied to a real directory first and the destination is a Context
+    // property (getFilesDir) with no native equivalent. Extraction rather than an AAssetManager backend
+    // keeps one read path -- Core::readFile -- for every platform.
+    //
+    // Empty is legal and means this app ships no content, which is true of the telemetry demo. The root
+    // then refuses every resolve() with NotFound instead of handing back a path that cannot exist.
+    std::string contentRootPath{};
     // Which application to run. The telemetry demo stays the default because it is what carries the
     // device evidence -- eleven JNI counters read from it, and the platform slices are verified through
     // those. The gallery is the browsable one, so it is opt-in rather than a replacement: swapping it in
@@ -285,6 +298,52 @@ makePrimaryWindowUIContextFactory(const std::string& fontPath) noexcept
 }
 #endif
 
+#if defined(TINA_ANDROID_WITH_BGFX)
+// Converts a Java String to UTF-8, or returns nothing.
+//
+// Not GetStringUTFChars: that yields JNI's *modified* UTF-8, which encodes non-BMP characters as
+// surrogate pairs and NUL as two bytes. Both are invalid UTF-8, and the engine's path handling requires
+// strict UTF-8. A device path is normally ASCII, where the two agree -- which is exactly why relying on
+// that accident would work everywhere it was tested and fail on the first localised external-storage
+// directory.
+[[nodiscard]] std::optional<std::string> toStrictUtf8(JNIEnv* env, jstring value)
+{
+    const jsize utf16Length = env->GetStringLength(value);
+    if (utf16Length <= 0 ||
+        static_cast<std::size_t>(utf16Length) > (std::numeric_limits<std::size_t>::max)() / 3U)
+    {
+        return std::nullopt;
+    }
+    const jchar* utf16 = env->GetStringChars(value, nullptr);
+    if (utf16 == nullptr)
+    {
+        return std::nullopt;
+    }
+    auto releaseChars = Tina::Core::makeScopeExit([env, value, utf16]() noexcept {
+        env->ReleaseStringChars(value, utf16);
+    });
+    try
+    {
+        // Three bytes per UTF-16 code unit is the worst case: a surrogate pair is two units and encodes
+        // to four bytes, so the bound holds for non-BMP text too.
+        std::string converted(static_cast<std::size_t>(utf16Length) * 3U, '\0');
+        const auto written = Tina::Core::convertUtf16ToStrictUtf8(
+            std::u16string_view{reinterpret_cast<const char16_t*>(utf16),
+                                static_cast<std::size_t>(utf16Length)},
+            std::span<char>{converted});
+        if (!written || *written == 0)
+        {
+            return std::nullopt;
+        }
+        converted.resize(*written);
+        return converted;
+    } catch (...)
+    {
+        return std::nullopt;
+    }
+}
+#endif
+
 } // namespace
 
 extern "C" {
@@ -345,39 +404,57 @@ JNIEXPORT void JNICALL Java_dev_tina_TinaNative_nativeSetUiFontPath(JNIEnv* env,
         return;
     }
 #if defined(TINA_ANDROID_WITH_BGFX)
-    const jsize utf16Length = env->GetStringLength(path);
-    if (utf16Length <= 0 ||
-        static_cast<std::size_t>(utf16Length) > (std::numeric_limits<std::size_t>::max)() / 3U)
+    auto converted = toStrictUtf8(env, path);
+    if (!converted)
     {
+        __android_log_print(ANDROID_LOG_ERROR, "Tina", "storing the UI font path failed");
         return;
     }
-    const jchar* utf16 = env->GetStringChars(path, nullptr);
-    if (utf16 == nullptr)
-    {
-        return;
-    }
-    auto releaseChars = Tina::Core::makeScopeExit([env, path, utf16]() noexcept {
-        env->ReleaseStringChars(path, utf16);
-    });
     try
     {
-        // JNI's modified UTF-8 corrupts non-BMP characters and encodes NUL differently. A system font
-        // normally has an ASCII path, but the boundary accepts any valid Java path and therefore uses
-        // the same strict UTF-16 conversion as committed text instead of relying on that accident.
-        std::string converted(static_cast<std::size_t>(utf16Length) * 3U, '\0');
-        const auto written = Tina::Core::convertUtf16ToStrictUtf8(
-            std::u16string_view{reinterpret_cast<const char16_t*>(utf16),
-                                static_cast<std::size_t>(utf16Length)},
-            std::span<char>{converted});
-        if (!written || *written == 0)
-        {
-            return;
-        }
-        converted.resize(*written);
-        session->uiFontPath = std::move(converted);
+        session->uiFontPath = std::move(*converted);
     } catch (...)
     {
         __android_log_print(ANDROID_LOG_ERROR, "Tina", "storing the UI font path failed");
+    }
+#else
+    (void)env;
+    (void)path;
+#endif
+}
+
+// Supplies the directory this app's shipped content was extracted to.
+//
+// Java owns this decision because only Java can make it: APK assets are not files, so nothing in the
+// engine's read path can open them, and the destination to copy them to is a Context property with no
+// native equivalent. Extracting rather than adding an AAssetManager read backend keeps a single read
+// path -- Core::readFile -- across desktop, browser and device.
+//
+// Goes into EngineConfig::contentRoot, so content resolves "assets/game.recipe" here exactly as it does
+// beside the executable on desktop. Must be called before the first surfaceCreated, since that is when
+// the config is built; afterwards it has no effect. Not calling it at all is legal and leaves the root
+// empty, which is correct for an app that ships no content.
+JNIEXPORT void JNICALL Java_dev_tina_TinaNative_nativeSetContentRootPath(JNIEnv* env, jclass, jlong handle,
+                                                                        jstring path)
+{
+    auto* session = asSession(handle);
+    if (session == nullptr || path == nullptr)
+    {
+        return;
+    }
+#if defined(TINA_ANDROID_WITH_BGFX)
+    auto converted = toStrictUtf8(env, path);
+    if (!converted)
+    {
+        __android_log_print(ANDROID_LOG_ERROR, "Tina", "storing the content root path failed");
+        return;
+    }
+    try
+    {
+        session->contentRootPath = std::move(*converted);
+    } catch (...)
+    {
+        __android_log_print(ANDROID_LOG_ERROR, "Tina", "storing the content root path failed");
     }
 #else
     (void)env;
@@ -529,6 +606,26 @@ JNIEXPORT void JNICALL Java_dev_tina_TinaNative_nativeDestroySession(JNIEnv*, jc
     // WindowInputSnapshot and stops there, which is indistinguishable from the bridge not working.
     // Arrows and D-pad map to the same engine Key, so a TV remote drives this too.
     Tina::EngineConfig engineConfig = Tina::EngineConfig::Defaults();
+    // Where content loads from. This is the Android half of the same seam desktop fills from the
+    // executable directory: content asks the root for a relative path and never learns which platform
+    // answered. Left empty when Java supplied nothing, which is correct for an app with no content --
+    // the root then fails every resolve() with NotFound rather than producing an unopenable path.
+    if (!session->contentRootPath.empty())
+    {
+        auto contentRoot = Tina::Core::ContentRoot::Create(session->contentRootPath);
+        if (contentRoot)
+        {
+            engineConfig.contentRoot = std::move(*contentRoot);
+        } else
+        {
+            // Logged rather than fatal: an app whose content is unreachable still starts, and the
+            // failure then surfaces at the first load with a path in it. A silent empty root would make
+            // that read as "this app ships nothing".
+            __android_log_print(ANDROID_LOG_ERROR, "Tina",
+                                "the content root was rejected: %s",
+                                contentRoot.error().message.c_str());
+        }
+    }
     // One application's bindings or the other's, never both. The default input context allows a physical
     // control exactly one binding, and both sets want the arrows and Enter -- so appending both makes
     // EngineHost::Create fail outright with "one physical control may have only one binding". Measured on
@@ -1411,6 +1508,8 @@ const JNINativeMethod TinaNativeMethods[]{
      reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeSetUseGallery)},
     {"nativeSetUiFontPath", "(JLjava/lang/String;)V",
      reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeSetUiFontPath)},
+    {"nativeSetContentRootPath", "(JLjava/lang/String;)V",
+     reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeSetContentRootPath)},
     {"nativeSurfaceCreated", "(JLandroid/view/Surface;F)Z",
      reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeSurfaceCreated)},
     {"nativeSurfaceDestroyed", "(J)V",
@@ -1423,17 +1522,21 @@ const JNINativeMethod TinaNativeMethods[]{
      reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeOnComposingText)},
     {"nativeOnComposingFinish", "(J)Z",
      reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeOnComposingFinish)},
-    {"nativeSetCursorUpdatesRequested", "(JZ)V",
-     reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeSetCursorUpdatesRequested)},
-    {"nativeCursorUpdatesRequested", "(J)Z",
-     reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeCursorUpdatesRequested)},
+    {"nativeSetCursorUpdateMode", "(JI)V",
+     reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeSetCursorUpdateMode)},
+    {"nativeCursorUpdateMode", "(J)I",
+     reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeCursorUpdateMode)},
+    {"nativeAcknowledgeImmediateCursorUpdate", "(J)V",
+     reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeAcknowledgeImmediateCursorUpdate)},
     {"nativeCaretPixels", "(J)J", reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeCaretPixels)},
     {"nativeCompositionCounts", "(J)J",
      reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeCompositionCounts)},
     {"nativeOnSoftKeyboardOcclusion", "(JI)V",
      reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeOnSoftKeyboardOcclusion)},
-    {"nativeTakePendingSoftKeyboardRequest", "(J)I",
-     reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeTakePendingSoftKeyboardRequest)},
+    {"nativePendingSoftKeyboardRequest", "(J)I",
+     reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativePendingSoftKeyboardRequest)},
+    {"nativeAcknowledgeSoftKeyboardRequest", "(JI)Z",
+     reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeAcknowledgeSoftKeyboardRequest)},
     {"nativePollFrame", "(J)I", reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativePollFrame)},
     {"nativeFixedUpdateCount", "(J)J",
      reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeFixedUpdateCount)},

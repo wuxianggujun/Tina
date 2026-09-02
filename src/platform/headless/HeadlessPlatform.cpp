@@ -68,6 +68,22 @@ class HeadlessPlatformBackend final : public IPlatformBackend {
         return Core::success();
     }
 
+    Core::Status setPointerCaptureMode(PointerCaptureMode mode) override
+    {
+        if (stopped_)
+        {
+            return Core::failure(PlatformErrorCode::BackendStopped, "The headless platform backend is stopped");
+        }
+        // Headless has no window or cursor: Free is its permanent state, and Locked
+        // is a caller contract error since the capability cannot exist.
+        if (mode != PointerCaptureMode::Free)
+        {
+            return Core::failure(Core::CoreErrorCode::InvalidArgument,
+                                 "Headless platform cannot lock a cursor");
+        }
+        return Core::success();
+    }
+
     void shutdown() noexcept override
     {
         stopped_ = true;

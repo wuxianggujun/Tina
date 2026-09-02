@@ -192,6 +192,16 @@ class ScriptedWindowSurfacePlatform final : public Integration::IWindowSurfacePl
         return Core::success();
     }
 
+    Core::Status setPointerCaptureMode(Platform::PointerCaptureMode mode) override
+    {
+        static_cast<void>(mode);
+        if (stopped_)
+        {
+            return Core::failure(Platform::PlatformErrorCode::BackendStopped, "The scripted backend is stopped");
+        }
+        return Core::success();
+    }
+
     void shutdown() noexcept override
     {
         if (stopped_)

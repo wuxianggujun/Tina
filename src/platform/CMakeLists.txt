@@ -25,3 +25,9 @@ endif()
 if(ANDROID)
     add_subdirectory(android)
 endif()
+
+# Same reasoning as Android: this adapter binds to a browser canvas through
+# Emscripten's html5.h, so it is only buildable when targeting Emscripten.
+if(EMSCRIPTEN)
+    add_subdirectory(html5)
+endif()

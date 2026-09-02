@@ -195,8 +195,12 @@ include 它**——`add_shader_compile_dir`、`add_shaders_directory`、`bgfx_co
   失败的方法。宿主用 `dynamic_cast` 取得该 facet。这也让 D7 的顾虑消失 —— 原本担心的正是「新增纯虚会波及
   全部后端」。
 - **C6 的形状：请求是意向，遮挡由宿主上报。** `requestShow/HideSoftKeyboard()` 只**latch 意向**，因为只有
-  Java 能调 `InputMethodManager`；`takePendingSoftKeyboardRequest()` 读取即清空，故一次请求恰好产生一次
-  IME 调用，而不是每帧重复施加。键盘遮挡高度**必须由宿主上报**（`onSoftKeyboardOcclusionChanged`，物理
+  Java 能调 `InputMethodManager`；读取（`pendingSoftKeyboardRequest()`）**不清空**，由宿主在 IME 调用真的
+  成功后用 `acknowledgeSoftKeyboardRequest(request)` 显式清除，故一次请求恰好产生一次生效的 IME 调用，而不
+  是每帧重复施加。**此处原先写作「读取即清空」，与实现不符，已更正**：consume-on-read 会在
+  `InputMethodManager` 缺席、或 view 尚无 window token（`hideSoftInputFromWindow` 需要它）时把意向永久丢掉，
+  现场表现是「键盘就是不弹出来」而没有任何错误。acknowledge 还要求**与 latch 中的值仍然一致**才清除，否则一个
+  更新的反向请求会被旧读取的迟到 acknowledge 抹掉。键盘遮挡高度**必须由宿主上报**（`onSoftKeyboardOcclusionChanged`，物理
   像素）而不能由引擎推算：Android 的 IME 高度取决于键盘应用、语言、是否显示候选条与分屏几何，猜测会把
   聚焦输入框错位任意距离。读取侧 `softKeyboardOccludedLogicalHeight()` 返回 window-logical，供 UI 直接
   相减 —— 没有它，聚焦的文本框会躺在键盘背后且无从得知需要滚动。高于窗口的遮挡值**拒绝而非 clamp**：那
@@ -416,6 +420,16 @@ Android 真正的 caret 协议是 `CursorAnchorInfo`，与 IMM32 形状完全不
 `CursorAnchorInfo`）。两个细节：读取 caret **不清除**（caret 是持续状态而非一次性意向，输入法每次索取都要
 拿到当前值，consume-on-read 会让第二次索取拿到空），且只在输入法通过 `requestCursorUpdates()` 主动索取后
 才上报（Android 的契约是请求/上报成对，无条件每帧上报是白付一次 JNI 调用加一次对象分配）。
+
+索取状态**按位存储而非布尔**：`requestCursorUpdates(mode)` 的 `CURSOR_UPDATE_IMMEDIATE`(1) 与
+`CURSOR_UPDATE_MONITOR`(2) 语义不同 —— 前者只要一次上报，后者要持续到取消（mode 0）。压成一个 bool 会让
+一次性请求变成永久每帧上报。因此 JNI 面是 `nativeSetCursorUpdateMode(int)` / `nativeCursorUpdateMode()`，
+IMMEDIATE 位由宿主在**上报真的送达输入法之后**调 `nativeAcknowledgeImmediateCursorUpdate()` 退位，与软键盘
+意向同一个理由：这一帧可能没有聚焦 caret、或拿不到 `InputMethodManager`，读取即清会把唯一那次上报吞掉。
+两个常量值取自框架自身（`InputConnection` 原样把 mode 交过来），故本工程复述它们时值必须一致；已实测
+android-36 的 `CURSOR_UPDATE_IMMEDIATE == 1`、`CURSOR_UPDATE_MONITOR == 2`。框架日后新增的其他位在 native
+侧被掩掉，`requestCursorUpdates` 也只对**本工程真的实现的位**返回 true —— 声称支持一个没写实现的模式，比
+不声称更糟。
 非法几何（非有限、高度非正、窗口不匹配）**拒绝而非夹取**：替换成一个看似合理的矩形会把候选窗放到任意位置，
 且现场无从追溯。
 

@@ -50,7 +50,6 @@ function(tina_configure_game_sdk_package)
         tina_navigation2d
         tina_network
         tina_asset_format
-        tina_editor
         tina_asset_types
         tina_asset
         tina_ui
@@ -72,7 +71,6 @@ function(tina_configure_game_sdk_package)
     tina_configure_game_sdk_target(tina_navigation2d Navigation2D)
     tina_configure_game_sdk_target(tina_network Network)
     tina_configure_game_sdk_target(tina_asset_format AssetFormat)
-    tina_configure_game_sdk_target(tina_editor Editor)
     tina_configure_game_sdk_target(tina_asset_types AssetTypes)
     tina_configure_game_sdk_target(tina_asset Asset)
     tina_configure_game_sdk_target(tina_ui UI)
@@ -306,7 +304,6 @@ function(tina_configure_game_sdk_package)
         "${PROJECT_SOURCE_DIR}/include/tina/navigation2d"
         "${PROJECT_SOURCE_DIR}/include/tina/network"
         "${PROJECT_SOURCE_DIR}/include/tina/asset_format"
-        "${PROJECT_SOURCE_DIR}/include/tina/editor"
         "${PROJECT_SOURCE_DIR}/include/tina/asset"
         "${PROJECT_SOURCE_DIR}/include/tina/ui"
         "${PROJECT_SOURCE_DIR}/include/tina/audio"
@@ -368,12 +365,45 @@ function(tina_configure_game_sdk_package)
         )
     endif()
 
+    # The cooker ships as part of the SDK, because a game built against an installed package
+    # otherwise has no way to produce a catalog: cooking is a build-time step and the binary
+    # that performs it lived only in this tree's build directory. That is what forces
+    # templates/game-project to cook at startup instead.
+    #
+    # Guarded on the target existing rather than on an option, because tools/ is only added
+    # under TINA_BUILD_EXAMPLES -- an unguarded rule would fail to configure in exactly the
+    # SDK-packaging case this exists for. A package built with examples off therefore ships no
+    # cooker, and TINA_PACKAGE_WITH_ASSETC records which kind of package this is so a consumer
+    # gets a named error rather than a missing file.
+    #
+    # Deliberately not an exported IMPORTED target: a consumer runs this by path, and an
+    # exported executable in TinaTargets.cmake would make find_package(Tina) fail outright on
+    # a package that shipped without one. tina_find_assetc() in TinaGameProject.cmake is the
+    # lookup, and it is why this must be computed before TinaConfig.cmake is generated.
+    set(TINA_PACKAGE_WITH_ASSETC OFF)
+    if(TARGET tina_assetc)
+        list(APPEND tina_sdk_installed_targets tina_assetc)
+        install(TARGETS tina_assetc
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        )
+        if(WIN32)
+            # The DLLs the cooker loads go beside it, because that is where the loader looks.
+            # Without them the installed binary exits before printing anything, and a build
+            # that shells out to it reports a failed command with no diagnostic -- the exe is
+            # present, so the install looks complete.
+            install(FILES $<TARGET_RUNTIME_DLLS:tina_assetc>
+                DESTINATION ${CMAKE_INSTALL_BINDIR}
+            )
+        endif()
+        set(TINA_PACKAGE_WITH_ASSETC ON)
+    endif()
+
     set(tina_package_directory "${CMAKE_INSTALL_LIBDIR}/cmake/Tina")
     configure_package_config_file(
         "${PROJECT_SOURCE_DIR}/cmake/TinaConfig.cmake.in"
         "${PROJECT_BINARY_DIR}/TinaConfig.cmake"
         INSTALL_DESTINATION "${tina_package_directory}"
-        PATH_VARS CMAKE_INSTALL_INCLUDEDIR
+        PATH_VARS CMAKE_INSTALL_INCLUDEDIR CMAKE_INSTALL_BINDIR
     )
     # ADR 0024 requires stricter semantics than CMake's built-in ExactVersion
     # template: that template ignores a tweak component and accepts the lower
@@ -441,6 +471,33 @@ function(tina_configure_game_sdk_package)
         "${PROJECT_BINARY_DIR}/TinaConfig.cmake"
         "${PROJECT_BINARY_DIR}/TinaConfigVersion.cmake"
         DESTINATION "${tina_package_directory}"
+    )
+    # The scaffolding modules ship with the package, not just with this tree. A game created
+    # from templates/game-project calls tina_add_game_content() and tina_product_data_file(),
+    # so a package without these two files gives that project an unknown-command error --
+    # the template would only ever build in-tree, which is the opposite of its purpose.
+    install(FILES
+        "${PROJECT_SOURCE_DIR}/cmake/TinaGameProject.cmake"
+        "${PROJECT_SOURCE_DIR}/cmake/TinaProductInstall.cmake"
+        DESTINATION "${tina_package_directory}"
+    )
+
+    # The project template and its generator. Without these a consumer has the engine but no
+    # starting point: the only way to obtain templates/game-project was to clone this
+    # repository, which defeats shipping an SDK at all.
+    #
+    # The generator is a script-mode module rather than an executable on purpose. It copies a
+    # directory and rewrites two identifiers, so it needs nothing a C++ tool would bring --
+    # and a tool would bring three costs tina_assetc already pays: a place in the build graph,
+    # a per-platform binary in the install tree, and a host build to point at when
+    # cross-compiling. CMake is by definition present, since the consumer is running it.
+    install(FILES
+        "${PROJECT_SOURCE_DIR}/cmake/TinaNewProject.cmake"
+        DESTINATION "${tina_package_directory}"
+    )
+    install(DIRECTORY
+        "${PROJECT_SOURCE_DIR}/templates/game-project"
+        DESTINATION "${tina_package_directory}/templates"
     )
 
     # Building this is the precondition for `cmake --install`. INTERFACE libraries

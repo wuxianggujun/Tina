@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstring>
 #include <new>
@@ -56,9 +57,7 @@ struct ParsedLayer final {
 
 [[nodiscard]] float readF32(std::span<const std::byte> bytes, usize offset) noexcept
 {
-    float value = 0.0f;
-    std::memcpy(&value, bytes.data() + offset, sizeof(value));
-    return value;
+    return std::bit_cast<float>(readU32(bytes, offset));
 }
 
 [[nodiscard]] std::optional<Core::AssetId> readAssetId(std::span<const std::byte> bytes, usize offset) noexcept
@@ -93,9 +92,7 @@ void appendU32(std::vector<std::byte>& bytes, u32 value)
 
 void appendF32(std::vector<std::byte>& bytes, float value)
 {
-    const usize offset = bytes.size();
-    bytes.resize(offset + sizeof(value));
-    std::memcpy(bytes.data() + offset, &value, sizeof(value));
+    appendU32(bytes, std::bit_cast<u32>(value));
 }
 
 void appendText(std::vector<std::byte>& bytes, std::string_view text)

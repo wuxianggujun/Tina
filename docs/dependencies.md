@@ -29,7 +29,9 @@
 | mbedTLS 3.6+ | 唯一 TLS backend | vcpkg feature `network-tls` | `tina_network_tls` PRIVATE；`TINA_BUILD_NETWORK_TLS` |
 | platform sockets | UDP/TCP/readiness/DNS，无第三方 | OS SDK（Winsock2 `ws2_32`、POSIX BSD sockets） | `tina_network` PRIVATE；无 feature，无条件构建 |
 | CryptoAPI (system) | Windows 平台信任库读取（`CertOpenSystemStoreW`） | OS SDK（`crypt32`） | `tina_network_tls` PRIVATE |
-| xxHash | ContentHash/确定性校验 | vcpkg root dependency | `tina_core` PRIVATE adapter；非安全签名 |
+| xxHash | ContentHash/确定性校验 | vcpkg root dependency（无条件） | `tina_core` PRIVATE adapter；非安全签名 |
+| mikktspace | glTF Cook 的切线空间生成 | vcpkg root dependency（无条件） | `tina_asset` PRIVATE（`src/asset/GltfCook.cpp`）；`TinaConfig.cmake.in` 以 `find_dependency` 传递给 SDK consumer |
+| Tracy | 可选开发定位 profiler | vcpkg feature `profile-tracy`，要求 `tracy >= 0.13.1` | `tina_trace_tracy` PRIVATE；`TINA_TRACE_BACKEND=tracy` |
 | GoogleTest | 单元/集成契约测试 | 默认 vcpkg feature `tests` | tests only；直接运行，不注册 CTest |
 | cgltf v1.15 | glTF/GLB parse/validate | vendored `thirdparty/cgltf` | `src/asset/GltfCook.cpp` PRIVATE |
 | stb_image v2.30 | glTF image decode 为 RGBA8 Texture2D | vendored `thirdparty/stb` | 同一 Cooker TU PRIVATE |
@@ -40,20 +42,29 @@
 bgfx.cmake、bx、bimg 的源码 revision 由 submodule commit 锁定。cgltf/stb_image 不是 submodule，版本、
 来源和许可证分别由 `thirdparty/cgltf/NOTICE.json`、`LICENSE` 与 `thirdparty/stb/NOTICE.txt` 记录。
 
+**vendored 与 submodule 源码一律位于 `thirdparty/`。** 仓库根还有一个 `dependencies/` 目录，但它当前
+**为空且不被 Git 跟踪**（`git ls-files dependencies/` 无输出），不承载任何依赖；它只作为搜索排除项出现在
+`AGENTS.md`。不要往那里找依赖，也不要据它推断存在第二套依赖树。
+
 ## Manifest 与 CMake
 
-`vcpkg.json` 当前默认只启用 `tests`，root dependency 为 `xxhash`。可选 feature：
+`vcpkg.json` 的 `default-features` 只有 `tests`；`dependencies`（无条件 root dependency）有**两项**：
+`mikktspace` 与 `xxhash`。除默认 `tests` 外的可选 feature 共 9 个：
 
 ```text
-platform-glfw
-ui-freetype
+profile-tracy
 physics2d
 network-tls
 audio-miniaudio
 audio-miniaudio-vorbis
 audio-miniaudio-opus
+platform-glfw
+ui-freetype
 wayland
 ```
+
+`features` 段合计 10 个（上列 9 个 + 默认 `tests`）。带下限约束的只有两个：`profile-tracy` 的
+`tracy >= 0.13.1`、`network-tls` 的 `mbedtls >= 3.6.5`；`wayland` 额外声明 `"supports": "linux"`。
 
 vcpkg `legacy` feature 已删除（CLEAN-001）。EnTT、GLM、spdlog、utfcpp 不得再作为当前 Runtime 依赖声明；
 若未来 Scene 使用 EnTT，只能经 ADR 0013 作为 Scene 私有存储并单独 feature 接入。
@@ -72,8 +83,15 @@ TINA_AUDIO_ENABLE_LIBOPUS=OFF|ON
 TINA_BUILD_SHADERS=OFF|ON
 TINA_BUILD_WAYLAND=OFF|ON
 TINA_BUILD_TESTING=OFF|ON
+TINA_BUILD_EDITOR=OFF|ON
 TINA_BUILD_LEGACY=OFF only
 ```
+
+`TINA_BUILD_EDITOR` 定义于根 `CMakeLists.txt:57`，默认值是 `PROJECT_IS_TOP_LEVEL`（把 Tina 作为
+subdirectory 引入的 consumer 默认 OFF），并在根 `CMakeLists.txt:322` gate 整棵 `editor/` 树。它 OFF 时
+`tina_editor`、`tina_editor_desktop`、`tina_editor_tests`、`tina_editor_app_tests` 都不存在。编辑器不随
+Game SDK 发布：`cmake/TinaGameSdkPackage.cmake` 已不含 `tina_editor`、`Editor` component 与
+`include/tina/editor`（见 ADR 0041）。
 
 `TINA_BUILD_LEGACY=ON` 必须在 configure 阶段 FATAL。全部 preset 与输出路径见[构建说明](building.md)，
 这里不复制 preset 清单。

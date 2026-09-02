@@ -436,6 +436,60 @@ TEST(NullRenderDeviceTextureTest, MaterialBundleUpdatesComposeAndClearIsIdempote
     EXPECT_EQ((*device)->statistics().liveResources, 0U);
 }
 
+// ADR 0043. Emissive is radiance, so unlike metallic/roughness it has no upper bound; the
+// only rejections are the ones that would make the shader produce a NaN or subtract light.
+TEST(NullRenderDeviceTextureTest, EmissiveFactorDefaultsToZeroAndAcceptsRadianceAboveOne)
+{
+    auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
+    ASSERT_TRUE(device.has_value());
+
+    // A material that says nothing about emissive is not emissive: this is what keeps every
+    // existing material unchanged by the new field.
+    EXPECT_EQ(Render::Mesh3DMaterialBindingDesc{}.emissiveFactorR, 0.0F);
+    EXPECT_EQ(Render::Mesh3DMaterialBindingDesc{}.emissiveFactorG, 0.0F);
+    EXPECT_EQ(Render::Mesh3DMaterialBindingDesc{}.emissiveFactorB, 0.0F);
+
+    auto dim = (*device)->createMesh3DMaterialBinding(Render::Mesh3DMaterialBindingDesc{});
+    ASSERT_TRUE(dim.has_value()) << dim.error().message;
+
+    // The sun in samples/3d_voxel needs values far above 1 to survive sRGB encoding, which is
+    // the reason this field is not clamped the way metallicFactor is.
+    auto bright = (*device)->createMesh3DMaterialBinding(Render::Mesh3DMaterialBindingDesc{
+        .emissiveFactorR = 48.0F,
+        .emissiveFactorG = 31.5F,
+        .emissiveFactorB = 12.25F,
+    });
+    ASSERT_TRUE(bright.has_value()) << bright.error().message;
+
+    ASSERT_TRUE((*device)->clearMesh3DMaterialBinding(*dim).has_value());
+    ASSERT_TRUE((*device)->clearMesh3DMaterialBinding(*bright).has_value());
+    EXPECT_EQ((*device)->statistics().liveResources, 0U);
+}
+
+TEST(NullRenderDeviceTextureTest, EmissiveFactorRejectsNegativeAndNonFiniteComponents)
+{
+    auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});
+    ASSERT_TRUE(device.has_value());
+
+    // Each component is checked independently: a per-channel test is the only way to catch a
+    // validator that looks at one channel and assumes the rest.
+    const std::array<Render::Mesh3DMaterialBindingDesc, 6> rejected{
+        Render::Mesh3DMaterialBindingDesc{.emissiveFactorR = -0.01F},
+        Render::Mesh3DMaterialBindingDesc{.emissiveFactorG = -1.0F},
+        Render::Mesh3DMaterialBindingDesc{.emissiveFactorB = -std::numeric_limits<float>::infinity()},
+        Render::Mesh3DMaterialBindingDesc{.emissiveFactorR = std::numeric_limits<float>::infinity()},
+        Render::Mesh3DMaterialBindingDesc{.emissiveFactorG = std::numeric_limits<float>::quiet_NaN()},
+        Render::Mesh3DMaterialBindingDesc{.emissiveFactorB = std::numeric_limits<float>::quiet_NaN()},
+    };
+    for (const auto& desc : rejected)
+    {
+        auto created = (*device)->createMesh3DMaterialBinding(desc);
+        ASSERT_FALSE(created.has_value());
+        EXPECT_EQ(created.error().code, Render::RenderErrorCode::InvalidTextureUpload);
+    }
+    EXPECT_EQ((*device)->statistics().liveResources, 0U);
+}
+
 TEST(NullRenderDeviceTextureTest, RejectsBadUploadSize)
 {
     auto device = Render::createNullRenderDevice(Render::RenderDeviceCreateParams{});

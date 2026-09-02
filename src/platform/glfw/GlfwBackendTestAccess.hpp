@@ -22,6 +22,13 @@ struct GlfwEventPumpStats final {
     u64 waitEventsTimeoutCalls = 0;
 };
 
+struct GlfwPointerCaptureState final {
+    // What the caller asked for, which a deferred lock must still report.
+    PointerCaptureMode requestedMode = PointerCaptureMode::Free;
+    // Whether the native cursor mode is actually applied right now.
+    bool cursorHidden = false;
+};
+
 enum class GlfwPointerInjectionKind : u8 {
     CursorPosition,
     Button,
@@ -66,6 +73,8 @@ queueGlfwPointerEventsForNextPollForTest(IPlatformBackend& backend,
                                                                GlfwFileDropInjection injection) noexcept;
 [[nodiscard]] Core::Result<GlfwEventPumpStats> glfwEventPumpStatsForTest(IPlatformBackend& backend) noexcept;
 [[nodiscard]] Core::Result<GlfwRuntimePlatform> glfwRuntimePlatformForTest(IPlatformBackend& backend) noexcept;
+[[nodiscard]] Core::Result<GlfwPointerCaptureState>
+glfwPointerCaptureStateForTest(IPlatformBackend& backend) noexcept;
 [[nodiscard]] Core::Result<bool> glfwWindowVisibleForTest(IPlatformBackend& backend) noexcept;
 
 } // namespace Tina::Platform::Detail

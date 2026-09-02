@@ -1,4 +1,5 @@
 #include <tina/core/error/Error.hpp>
+#include <tina/core/text/ArgParser.hpp>
 #include <tina/core/text/JsonWriter.hpp>
 #include <tina/desktop/DesktopEngine.hpp>
 #include <tina/runtime/GameApplication.hpp>
@@ -10,7 +11,6 @@
 #include <tina/ui/UIPaint.hpp>
 #include <tina/ui/UIText.hpp>
 
-#include <charconv>
 #include <chrono>
 #include <cstdint>
 #include <exception>
@@ -120,12 +120,6 @@ void writeError(const Tina::Core::Error& error)
     std::cerr << '\n';
 }
 
-template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text, Value& value) noexcept
-{
-    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
-    return error == std::errc{} && end == text.data() + text.size();
-}
-
 [[nodiscard]] Tina::Core::Result<SampleOptions> parseOptions(int argumentCount, char** arguments)
 {
     constexpr std::string_view framesPrefix = "--frames=";
@@ -146,7 +140,7 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
                 return Tina::Core::failure(std::move(error));
             }
             const std::string_view valueText = argument.substr(framesPrefix.size());
-            if (!parseUnsigned(valueText, options.targetFrameCount) || options.targetFrameCount == 0)
+            if (!Tina::Core::parseArgUnsigned(valueText, options.targetFrameCount) || options.targetFrameCount == 0)
             {
                 Tina::Core::Error error{Tina::Core::CoreErrorCode::InvalidArgument,
                                         "--frames must be an unsigned integer greater than zero"};
@@ -166,7 +160,7 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
                 return Tina::Core::failure(std::move(error));
             }
             const std::string_view valueText = argument.substr(delayPrefix.size());
-            if (!parseUnsigned(valueText, options.frameDelayMilliseconds))
+            if (!Tina::Core::parseArgUnsigned(valueText, options.frameDelayMilliseconds))
             {
                 Tina::Core::Error error{Tina::Core::CoreErrorCode::InvalidArgument,
                                         "--frame-delay-ms must be an unsigned integer"};

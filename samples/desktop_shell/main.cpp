@@ -4,6 +4,7 @@
 #include "SampleSpriteFrameResource.hpp"
 
 #include <tina/core/error/Error.hpp>
+#include <tina/core/text/ArgParser.hpp>
 #include <tina/core/text/JsonWriter.hpp>
 #include <tina/desktop/DesktopEngine.hpp>
 #include <tina/runtime/GameApplication.hpp>
@@ -11,7 +12,6 @@
 #include <tina/runtime/RunExitReason.hpp>
 
 #include <array>
-#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -192,12 +192,6 @@ void writeError(const Tina::Core::Error& error)
     std::cerr << '\n';
 }
 
-template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text, Value& value) noexcept
-{
-    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
-    return error == std::errc{} && end == text.data() + text.size();
-}
-
 [[nodiscard]] Tina::Core::Result<SampleOptions> parseOptions(int argumentCount, char** arguments)
 {
     constexpr std::string_view FramesPrefix = "--frames=";
@@ -214,7 +208,7 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
         const std::string_view argument{arguments[index]};
         if (argument.starts_with(FramesPrefix)) {
             const std::string_view value = argument.substr(FramesPrefix.size());
-            if (!parseUnsigned(value, options.targetFrameCount) || options.targetFrameCount == 0) {
+            if (!Tina::Core::parseArgUnsigned(value, options.targetFrameCount) || options.targetFrameCount == 0) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                            "--frames must be an unsigned integer greater than zero");
             }
@@ -222,7 +216,7 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
         }
         if (argument.starts_with(DelayPrefix)) {
             const std::string_view value = argument.substr(DelayPrefix.size());
-            if (!parseUnsigned(value, options.frameDelayMilliseconds)) {
+            if (!Tina::Core::parseArgUnsigned(value, options.frameDelayMilliseconds)) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                            "--frame-delay-ms must be an unsigned integer");
             }
@@ -254,7 +248,7 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
         }
         if (argument.starts_with(WidthPrefix)) {
             const std::string_view value = argument.substr(WidthPrefix.size());
-            if (!parseUnsigned(value, options.windowLogicalWidth) ||
+            if (!Tina::Core::parseArgUnsigned(value, options.windowLogicalWidth) ||
                 options.windowLogicalWidth < 960U || options.windowLogicalWidth > 3840U) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                            "--width must be in the range 960..3840");
@@ -264,7 +258,7 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
         }
         if (argument.starts_with(HeightPrefix)) {
             const std::string_view value = argument.substr(HeightPrefix.size());
-            if (!parseUnsigned(value, options.windowLogicalHeight) ||
+            if (!Tina::Core::parseArgUnsigned(value, options.windowLogicalHeight) ||
                 options.windowLogicalHeight < 640U || options.windowLogicalHeight > 2160U) {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
                                            "--height must be in the range 640..2160");

@@ -4055,11 +4055,13 @@ class TileMapBgfxState final : public Tina::IGameState {
                                                "product audioclip exceeds default PCM stream capacity");
                 }
 
-                auto voice = audio->playPcmStream(Tina::Audio::AudioPcmStreamDesc{
-                    .channels = pcmView->channels,
-                    .sampleRate = pcmView->sampleRate,
-                    .bufferCapacityFrames = static_cast<Tina::Core::usize>(pcmView->frameCount),
-                });
+                auto voice = audio->playPcmStream(
+                    Tina::Audio::AudioPcmStreamDesc{
+                        .channels = pcmView->channels,
+                        .sampleRate = pcmView->sampleRate,
+                        .bufferCapacityFrames = static_cast<Tina::Core::usize>(pcmView->frameCount),
+                    },
+                    Tina::Audio::AudioBusId::Music);
                 if (!voice)
                 {
                     return Tina::Core::failure(std::move(voice.error()));

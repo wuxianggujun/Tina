@@ -178,10 +178,14 @@ watchdog 都需要，因为用 gameplay 时间缩放去缩放它们意味着它�
 | 配置 | 作用 | 超出时 |
 | --- | --- | --- |
 | `SchedulerConfig::maximumCatchUpStepsPerAdvance` | 一次 advance 内单个 timer 的最大投递次数 | 整周期积压被丢弃并计入 `discardedCatchUpSteps` |
-| `ActionRunnerConfig::maximumRepeatIterationsPerAdvance` | 一次 advance 内单个 Repeat 节点的最大重启次数 | 计入 `clampedRepeatIterations` |
+| `ActionRunnerConfig::maximumRepeatIterationsPerAdvance` | 一次 advance 内单个 Repeat 节点的最大重启次数 | 剩余迭代推迟到下次 advance，并计入 `clampedRepeatIterations` |
 
-积压**丢弃而不携带**：携带会让卡顿后的每一帧都发满上限，把一次停顿变成一列停顿。丢弃让 timer
+timer 积压**丢弃而不携带**：携带会让卡顿后的每一帧都发满上限，把一次停顿变成一列停顿。丢弃让 timer
 重新同步到现在，计数器让这次损失在 stats 里可见而不是只在行为里可见。
+
+**Repeat 的上限方向相反：它推迟迭代而不丢弃迭代。** 两者的差别来自被限界的东西不同 —— timer 积压是
+已经流逝的时间，补投再多次也追不回那段时间；而 `Repeat::times(n)` 的 n 是授权的次数，少跑一次就是内容
+没按授权跑完。所以触发上限时子树的游标会被清掉，下一次 advance 从那一迭代继续。
 
 `clampedRepeatIterations` 非零通常意味着某个被 repeat 的子树总时长为零 —— 那种情况看起来和卡死
 一模一样，所以它被限界并计数而不是让它转下去。
@@ -194,4 +198,7 @@ watchdog 都需要，因为用 gameplay 时间缩放去缩放它们意味着它�
 - **`Action` 授权在堆上分配**（不取自 runner 的存储）：授权经常发生在该 runner 自己的回调执行
   期间。
 - **`Signal<T>` 每个 payload 类型一份实例化**，signal 种类多的产品会付编译期成本。
-- **尚无单元测试与 sample 消费面。**
+- **`Signal<T>` 在 dispatch 期间取消订阅后再订阅，可能拿到 `CapacityExceeded` 而非空槽。** 被取消的
+  槽在本次 dispatch 结束前既不 active 也未回到 free list，此时增长 slot 存储会重分配掉正在执行的那个
+  callback，所以这个窗口选择拒绝。容量按并发订阅者的峰值留出余量即可避开。
+- **尚无 sample 消费面**（单元测试见 `tests/gameplay/`）。

@@ -220,6 +220,18 @@ struct RenderLinearColor final {
                                      const RenderLinearColor&) noexcept = default;
 };
 
+// Background a frame is cleared to when the scene does not override it (ADR 0042).
+// Linear, because the writer takes linear colours on the same scale as baseColorFactor
+// and light radiance; backends encode. These three values are the linear equivalents of
+// sRGB 16/42/67, the colour the bgfx backend used to hold as a private constant, and
+// they survive a linear -> sRGB -> u8 round trip byte-exactly.
+inline constexpr RenderLinearColor DefaultSceneClearColor{
+    .red = 0.005182F,
+    .green = 0.023153F,
+    .blue = 0.056128F,
+    .alpha = 1.0F,
+};
+
 // Explicit cooked/authoring intent. Runtime never derives a 3D pass from color
 // alpha or texture contents.
 enum class Mesh3DAlphaMode : u8 {
@@ -603,6 +615,9 @@ struct RenderSceneStatistics final {
     u64 skinnedMesh3DSortOrderChecksum = 0;
     u32 transparent3DDrawCount = 0;
     u64 transparent3DSortOrderChecksum = 0;
+    // False means the frame kept DefaultSceneClearColor. The colour is readable either
+    // way; this only says whether the game named it.
+    bool clearColorConfigured = false;
 };
 
 struct RenderSceneBuilderStatistics final {
@@ -682,6 +697,13 @@ class RenderSceneView final {
         return m_mesh3DLighting;
     }
 
+    // Always present: every frame has a background whether or not the game named one.
+    // statistics().clearColorConfigured says which of the two this is.
+    [[nodiscard]] constexpr const RenderLinearColor& clearColor() const noexcept
+    {
+        return m_clearColor;
+    }
+
     [[nodiscard]] constexpr const RenderSceneStatistics& statistics() const noexcept
     {
         return m_statistics;
@@ -709,6 +731,7 @@ class RenderSceneView final {
                               std::span<const RenderTransparent3DDraw> transparent3DDraws,
                               std::span<const float> skinnedMesh3DPalette,
                               std::optional<RenderMesh3DLighting> mesh3DLighting,
+                              RenderLinearColor clearColor,
                               RenderSceneStatistics statistics) noexcept
         : m_camera(std::move(camera)), m_sprites(sprites), m_sprite2DLighting(std::move(sprite2DLighting)),
           m_perspectiveCamera(std::move(perspectiveCamera)), m_meshes3D(meshes3D),
@@ -716,7 +739,7 @@ class RenderSceneView final {
           m_skinnedMeshes3D(skinnedMeshes3D), m_opaqueSkinnedMesh3DCount(opaqueSkinnedMesh3DCount),
           m_transparent3DDraws(transparent3DDraws),
           m_skinnedMesh3DPalette(skinnedMesh3DPalette), m_mesh3DLighting(std::move(mesh3DLighting)),
-          m_statistics(statistics)
+          m_clearColor(clearColor), m_statistics(statistics)
     {
     }
 
@@ -732,6 +755,7 @@ class RenderSceneView final {
     std::span<const RenderTransparent3DDraw> m_transparent3DDraws{};
     std::span<const float> m_skinnedMesh3DPalette{};
     std::optional<RenderMesh3DLighting> m_mesh3DLighting{};
+    RenderLinearColor m_clearColor = DefaultSceneClearColor;
     RenderSceneStatistics m_statistics{};
 };
 
@@ -750,6 +774,7 @@ class RenderSceneWriter final {
     [[nodiscard]] Core::Status addMesh3D(const RenderMesh3DInput& mesh);
     [[nodiscard]] Core::Status addSkinnedMesh3D(const RenderSkinnedMesh3DInput& mesh);
     [[nodiscard]] Core::Status setMesh3DLighting(const Mesh3DLightingDesc& lighting);
+    [[nodiscard]] Core::Status setClearColor(const RenderLinearColor& color);
 
   private:
     friend class RenderSceneBuilder;
@@ -804,6 +829,7 @@ class RenderSceneBuilder final {
     [[nodiscard]] Core::Status addMesh3D(const RenderMesh3DInput& mesh);
     [[nodiscard]] Core::Status addSkinnedMesh3D(const RenderSkinnedMesh3DInput& mesh);
     [[nodiscard]] Core::Status setMesh3DLighting(const Mesh3DLightingDesc& lighting);
+    [[nodiscard]] Core::Status setClearColor(const RenderLinearColor& color);
     [[nodiscard]] Core::Status failBuild(Core::ErrorCode code, const char* message);
     [[nodiscard]] Core::Status validateCamera(const RenderCamera2DInput& camera) const noexcept;
     [[nodiscard]] Core::Status validateSprite(const RenderSprite2DInput& sprite) const noexcept;
@@ -842,6 +868,7 @@ class RenderSceneBuilder final {
     std::optional<RenderSprite2DLighting> m_sprite2DLighting{};
     std::optional<RenderPerspectiveCamera> m_perspectiveCamera{};
     std::optional<RenderMesh3DLighting> m_mesh3DLighting{};
+    RenderLinearColor m_clearColor = DefaultSceneClearColor;
     RenderSceneFrameParameters m_frameParameters{};
     RenderSceneStatistics m_candidateStatistics{};
     RenderSceneStatistics m_publishedStatistics{};

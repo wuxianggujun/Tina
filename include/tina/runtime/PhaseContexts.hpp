@@ -2,6 +2,7 @@
 
 #include <tina/audio/AudioEngine.hpp>
 #include <tina/core/error/Error.hpp>
+#include <tina/platform/PlatformBackend.hpp>
 #include <tina/render/FrameResource.hpp>
 #include <tina/render/RenderDevice.hpp>
 #include <tina/render/RenderScene.hpp>
@@ -66,6 +67,47 @@ class DisplaySettings final {
     explicit constexpr DisplaySettings(Render::IRenderDevice* device) noexcept : m_device(device) {}
 
     Render::IRenderDevice* m_device = nullptr;
+};
+
+// Phase-local handle for the primary window's cursor mode.
+//
+// Separate from DisplaySettings because this is a platform capability, not a render
+// one, and because it can legitimately fail: a backend with no cursor rejects Locked
+// rather than pretending. Callers must therefore check the Status -- a first-person
+// game that ignores it would run with a free cursor and a camera that jams at the
+// edge of the screen.
+//
+// Copyable and cheap; never outlive the phase that handed it out.
+class PointerCaptureSettings final {
+  public:
+    constexpr PointerCaptureSettings() noexcept = default;
+
+    [[nodiscard]] constexpr bool hasValue() const noexcept
+    {
+        return m_backend != nullptr;
+    }
+
+    [[nodiscard]] Core::Status setMode(Platform::PointerCaptureMode mode) const noexcept;
+
+    // The last mode this handle successfully applied, which is what the window is in.
+    // Defaults to Free when no backend is present.
+    [[nodiscard]] Platform::PointerCaptureMode mode() const noexcept
+    {
+        return m_mode == nullptr ? Platform::PointerCaptureMode::Free : *m_mode;
+    }
+
+  private:
+    friend class Detail::EngineHostImplementation;
+    friend class FrameUpdateContext;
+
+    constexpr PointerCaptureSettings(Platform::IPlatformBackend* backend,
+                                     Platform::PointerCaptureMode* mode) noexcept
+        : m_backend(backend), m_mode(mode)
+    {
+    }
+
+    Platform::IPlatformBackend* m_backend = nullptr;
+    Platform::PointerCaptureMode* m_mode = nullptr;
 };
 
 // Phase-local handle for the gameplay time scale. Simulation time is scaled
@@ -192,6 +234,10 @@ class FrameUpdateContext final {
     [[nodiscard]] InputActionRebinding* inputActionRebinding() noexcept;
     // Player-facing display options. Empty when no render device is present.
     [[nodiscard]] DisplaySettings displaySettings() const noexcept;
+    // Primary window cursor mode, restricted to the top GameState for the same reason
+    // as display settings: a paused layer below must not release the cursor out from
+    // under the state running above it.
+    [[nodiscard]] PointerCaptureSettings pointerCaptureSettings() const noexcept;
     // Gameplay time scale authority, restricted to the top GameState so a paused
     // layer below cannot fight the state that owns the pause.
     [[nodiscard]] TimeScaleSettings timeScaleSettings() const noexcept;
@@ -207,7 +253,9 @@ class FrameUpdateContext final {
     FrameUpdateContext(const FrameTiming& frameTiming, const FrameActionSnapshot& frameActions,
                        bool& exitRequested, GameStatePendingCommands* pendingCommands,
                        Audio::AudioEngine* audioEngine, Runtime::Input::ActionMapper* actionMapper,
-                       Render::IRenderDevice* renderDevice, double* gameplayTimeScale) noexcept;
+                       Render::IRenderDevice* renderDevice, double* gameplayTimeScale,
+                       Platform::IPlatformBackend* platformBackend,
+                       Platform::PointerCaptureMode* pointerCaptureMode) noexcept;
 
     const FrameTiming* m_frameTiming = nullptr;
     const FrameActionSnapshot* m_frameActions = nullptr;
@@ -216,6 +264,8 @@ class FrameUpdateContext final {
     Audio::AudioEngine* m_audioEngine = nullptr;
     Render::IRenderDevice* m_renderDevice = nullptr;
     double* m_gameplayTimeScale = nullptr;
+    Platform::IPlatformBackend* m_platformBackend = nullptr;
+    Platform::PointerCaptureMode* m_pointerCaptureMode = nullptr;
     InputActionRebinding m_inputActionRebinding;
     bool m_rebindingAvailable = false;
 

@@ -145,6 +145,11 @@ public final class TinaActivity extends Activity {
         } else {
             android.util.Log.w("Tina", "no system font found; UI text will draw as solid blocks");
         }
+        // Also before the surface binds, because that is when the engine config is built.
+        final String contentRoot = extractContent();
+        if (contentRoot != null) {
+            TinaNative.nativeSetContentRootPath(session, contentRoot);
+        }
         surfaceView = new TinaSurfaceView(this, session);
         setContentView(surfaceView);
         // Bound to this thread's Looper, which is why it is fetched here rather than held statically:
@@ -287,6 +292,137 @@ public final class TinaActivity extends Activity {
     }
 
     /**
+     * Copies the APK's {@code assets/} tree into a real directory and returns it, or null when the app
+     * ships no assets.
+     *
+     * <p>Why copy at all: APK assets are entries in a zip, not files. The engine reads content through
+     * one function backed by {@code std::ifstream}, and the NDK's {@code ifstream} cannot see inside an
+     * APK -- {@code AAssetManager} is the only native way in, and it is a different API with no
+     * {@code FILE*} to hand out. Extracting once means desktop, browser and device all load through the
+     * same path, so a content bug is never platform-specific by construction.
+     *
+     * <p>Destination is {@code getFilesDir()/content}: app-private, survives reboots, and is cleared on
+     * uninstall. Not the cache directory, which the system may delete between launches, and not external
+     * storage, which needs a permission and may be absent.
+     *
+     * <p>Re-extracts whenever the installed version changes, tracked by a stamp file holding the version
+     * code. Skipping that check would leave an updated APK running the previous release's assets, which
+     * presents as content that ignores the update -- much harder to recognise than a slow first launch.
+     */
+    private String extractContent() {
+        final java.io.File destination = new java.io.File(getFilesDir(), "content");
+        final java.io.File stamp = new java.io.File(destination, ".version");
+        final String version = installedVersion();
+        if (destination.isDirectory() && version.equals(readStamp(stamp))) {
+            return destination.getAbsolutePath();
+        }
+        // A stale tree is deleted rather than merged into: a file removed from the new APK would
+        // otherwise survive forever and keep loading.
+        deleteRecursively(destination);
+        try {
+            if (!copyAssetDirectory("", destination)) {
+                // No assets/ in the APK. Not an error -- the telemetry demo ships none -- and returning
+                // null leaves the engine's content root empty, which is the honest description.
+                deleteRecursively(destination);
+                return null;
+            }
+            writeStamp(stamp, version);
+            return destination.getAbsolutePath();
+        } catch (final java.io.IOException exception) {
+            // Partial output is worse than none: it would satisfy the isDirectory() check above on the
+            // next launch and pin the app to a half-extracted tree.
+            deleteRecursively(destination);
+            android.util.Log.e("Tina", "extracting content failed", exception);
+            return null;
+        }
+    }
+
+    /**
+     * Copies one asset directory recursively. Returns false when {@code assetPath} holds nothing.
+     *
+     * <p>{@code AssetManager.list} cannot distinguish an empty directory from a file, so a leaf is
+     * detected by trying to open it. That is also why an empty directory in the APK simply does not
+     * appear in the output -- the packager drops those anyway.
+     */
+    private boolean copyAssetDirectory(String assetPath, java.io.File destination)
+            throws java.io.IOException {
+        final android.content.res.AssetManager assets = getAssets();
+        final String[] entries = assets.list(assetPath);
+        if (entries == null || entries.length == 0) {
+            return false;
+        }
+        if (!destination.isDirectory() && !destination.mkdirs()) {
+            throw new java.io.IOException("could not create " + destination);
+        }
+        for (final String entry : entries) {
+            final String childAssetPath = assetPath.isEmpty() ? entry : assetPath + "/" + entry;
+            final java.io.File childDestination = new java.io.File(destination, entry);
+            if (!copyAssetDirectory(childAssetPath, childDestination)) {
+                copyAssetFile(childAssetPath, childDestination);
+            }
+        }
+        return true;
+    }
+
+    private void copyAssetFile(String assetPath, java.io.File destination) throws java.io.IOException {
+        final java.io.File parent = destination.getParentFile();
+        if (parent != null && !parent.isDirectory() && !parent.mkdirs()) {
+            throw new java.io.IOException("could not create " + parent);
+        }
+        try (java.io.InputStream input = getAssets().open(assetPath);
+             java.io.OutputStream output = new java.io.FileOutputStream(destination)) {
+            final byte[] buffer = new byte[64 * 1024];
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                output.write(buffer, 0, read);
+            }
+        }
+    }
+
+    /** The installed version code, as the re-extraction key. */
+    private String installedVersion() {
+        try {
+            final android.content.pm.PackageInfo info =
+                getPackageManager().getPackageInfo(getPackageName(), 0);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                return Long.toString(info.getLongVersionCode());
+            }
+            return Integer.toString(info.versionCode);
+        } catch (final android.content.pm.PackageManager.NameNotFoundException exception) {
+            // Cannot happen for the running package, but a wrong answer here must not silently skip
+            // re-extraction, so fall back to a value that never matches a stamp.
+            return "unknown";
+        }
+    }
+
+    private static String readStamp(java.io.File stamp) {
+        try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                new java.io.InputStreamReader(new java.io.FileInputStream(stamp), "UTF-8"))) {
+            final String line = reader.readLine();
+            return line == null ? "" : line.trim();
+        } catch (final java.io.IOException exception) {
+            return "";
+        }
+    }
+
+    private static void writeStamp(java.io.File stamp, String version) throws java.io.IOException {
+        try (java.io.Writer writer = new java.io.OutputStreamWriter(
+                new java.io.FileOutputStream(stamp), "UTF-8")) {
+            writer.write(version);
+        }
+    }
+
+    private static void deleteRecursively(java.io.File file) {
+        final java.io.File[] children = file.listFiles();
+        if (children != null) {
+            for (final java.io.File child : children) {
+                deleteRecursively(child);
+            }
+        }
+        file.delete();
+    }
+
+    /**
      * Finds a usable UI font in the system font directory, or null.
      *
      * <p>Read from the device rather than shipped in the APK: /system/fonts always has a Latin sans-serif,
@@ -334,9 +470,19 @@ public final class TinaActivity extends Activity {
         return hardware != null && (hardware.contains("ranchu") || hardware.contains("goldfish"));
     }
 
-    /** Only Java can call InputMethodManager, so the engine's latched intent is performed here. */
+    /**
+     * Only Java can call InputMethodManager, so the engine's latched intent is performed here.
+     *
+     * <p>Read, act, then acknowledge -- not read-and-consume. InputMethodManager can be absent, and
+     * {@code hideSoftInputFromWindow} needs a window token the view may not hold yet, so an intent that
+     * was consumed at read time would be gone with nothing having happened. Leaving it latched means the
+     * next frame retries, which is what makes "the keyboard appears once the window is ready" work.
+     *
+     * <p>Acknowledged only on the reported outcome of the IME call, and natively only if the latch still
+     * holds that same request, so a newer opposite intent cannot be erased by this acknowledgement.
+     */
     private void applyPendingSoftKeyboardRequest() {
-        final int request = TinaNative.nativeTakePendingSoftKeyboardRequest(session);
+        final int request = TinaNative.nativePendingSoftKeyboardRequest(session);
         if (request == TinaNative.KEYBOARD_REQUEST_NONE) {
             return;
         }
@@ -345,11 +491,17 @@ public final class TinaActivity extends Activity {
         if (ime == null || surfaceView == null) {
             return;
         }
+        final boolean applied;
         if (request == TinaNative.KEYBOARD_REQUEST_SHOW) {
             surfaceView.requestFocus();
-            ime.showSoftInput(surfaceView, InputMethodManager.SHOW_IMPLICIT);
+            applied = ime.showSoftInput(surfaceView, InputMethodManager.SHOW_IMPLICIT);
         } else {
-            ime.hideSoftInputFromWindow(surfaceView.getWindowToken(), 0);
+            // A null token is the "no window yet" case the retry exists for, and passing it would throw.
+            final android.os.IBinder token = surfaceView.getWindowToken();
+            applied = token != null && ime.hideSoftInputFromWindow(token, 0);
+        }
+        if (applied) {
+            TinaNative.nativeAcknowledgeSoftKeyboardRequest(session, request);
         }
     }
 
@@ -387,11 +539,17 @@ public final class TinaActivity extends Activity {
      * allocate a {@link CursorAnchorInfo} every frame for the majority of IMEs that never ask, and
      * Android's contract is a request/report pair rather than a broadcast.
      *
+     * <p>The two request bits are honoured separately. Either one makes this frame report; only IMMEDIATE
+     * is then retired, and only after the report actually reached the IME, so a frame with no focused
+     * caret or no InputMethodManager retries instead of swallowing the single report that was asked for.
+     * MONITOR is left alone -- it ends when the IME cancels it with mode 0.
+     *
      * <p>Whether a given keyboard actually asks is not under this app's control -- so this path being
      * exercised at all depends on the installed IME. See docs/testing.md.
      */
     private void reportCursorAnchorInfo() {
-        if (!TinaNative.nativeCursorUpdatesRequested(session)) {
+        final int mode = TinaNative.nativeCursorUpdateMode(session);
+        if (mode == 0) {
             return;
         }
         final long packed = TinaNative.nativeCaretPixels(session);
@@ -441,5 +599,8 @@ public final class TinaActivity extends Activity {
                         x, y, y + height, y + height, CursorAnchorInfo.FLAG_HAS_VISIBLE_REGION)
                 .build();
         ime.updateCursorAnchorInfo(surfaceView, info);
+        if ((mode & TinaNative.CURSOR_UPDATE_IMMEDIATE) != 0) {
+            TinaNative.nativeAcknowledgeImmediateCursorUpdate(session);
+        }
     }
 }

@@ -426,6 +426,40 @@ Core::Status ActionMapper::mapFrame(const Platform::PlatformFrameView& platformF
     frameTransitionSources_.clear();
     frameNormalTransitionCount_ = 0;
     frameResetWritten_ = false;
+    framePointerLookClaimed_ = false;
+    framePointerLookDeltaX_ = 0.0;
+    framePointerLookDeltaY_ = 0.0;
+    framePointerDeltaClaimed_.fill(false);
+    framePointerWheelClaimed_.fill(false);
+    for (usize slot = 0; slot < framePointers_.size(); ++slot)
+    {
+        // Reset rather than reuse: an absent slot must not publish the previous frame's
+        // buttons or motion, and a slot the backend no longer reports must go quiet.
+        framePointers_[slot] = FramePointerState{.pointer = static_cast<Platform::PointerId>(slot)};
+    }
+    if (const Platform::WindowFrameSnapshot* window = primaryWindow(platformFrame); window != nullptr)
+    {
+        for (usize slot = 0; slot < framePointers_.size(); ++slot)
+        {
+            const Platform::PointerSnapshot* pointer =
+                window->input.pointerSnapshot(static_cast<Platform::PointerId>(slot));
+            if (pointer == nullptr)
+            {
+                continue;
+            }
+            FramePointerState& state = framePointers_[slot];
+            state.present = pointer->present;
+            state.logicalX = pointer->logicalX;
+            state.logicalY = pointer->logicalY;
+            state.deltaX = pointer->accumulatedDeltaX;
+            state.deltaY = pointer->accumulatedDeltaY;
+            state.heldButtons = pointer->heldButtons;
+        }
+        // The scalar look delta stays a separate field rather than a read through the table,
+        // because it has its own claim flag and its own published contract.
+        framePointerLookDeltaX_ = framePointers_[Platform::PrimaryPointerId].deltaX;
+        framePointerLookDeltaY_ = framePointers_[Platform::PrimaryPointerId].deltaY;
+    }
     for (ActionRecord& action : actions_)
     {
         action.frameStartValue = action.value;
@@ -452,8 +486,10 @@ Core::Status ActionMapper::mapFrame(const Platform::PlatformFrameView& platformF
 
     for (usize ordinal = 0; ordinal < transitions.size(); ++ordinal)
     {
+        const bool consumed = consumption.isConsumed(ordinal);
+        accumulatePointerWheel(transitions[ordinal], consumed);
         if (auto transitionStatus =
-                mapTransition(platformFrame, transitions[ordinal], consumption.isConsumed(ordinal),
+                mapTransition(platformFrame, transitions[ordinal], consumed,
                               nextUncompletedSimulationTick, lastPresentedCamera2D);
             !transitionStatus)
         {
@@ -461,6 +497,7 @@ Core::Status ActionMapper::mapFrame(const Platform::PlatformFrameView& platformF
         }
         lastAcceptedRawInputSequence_ = transitions[ordinal].sequence;
     }
+    applyPointerClaims();
     if (auto snapshotStatus = validateRetainedSources(platformFrame); !snapshotStatus)
     {
         return snapshotStatus;
@@ -471,12 +508,57 @@ Core::Status ActionMapper::mapFrame(const Platform::PlatformFrameView& platformF
     return Core::success();
 }
 
+void ActionMapper::accumulatePointerWheel(const Platform::InputTransition& transition, bool consumed) noexcept
+{
+    // A consumed wheel transition belongs to the UI, so it must not reach the game. This is
+    // the per-transition counterpart of a claim: consumption is decided per event, a claim
+    // covers the whole frame.
+    if (consumed)
+    {
+        return;
+    }
+    const auto* wheel = std::get_if<Platform::PointerWheelTransition>(&transition.payload);
+    if (wheel == nullptr || wheel->pointer >= framePointers_.size())
+    {
+        return;
+    }
+    // Summed rather than replaced: a frame can carry several wheel transitions, and dropping
+    // all but the last would silently scale fast scrolling down to one notch.
+    framePointers_[wheel->pointer].wheelDeltaX += wheel->deltaX;
+    framePointers_[wheel->pointer].wheelDeltaY += wheel->deltaY;
+}
+
+void ActionMapper::applyPointerClaims() noexcept
+{
+    // Zeroing happens once here rather than at publish time so that frameActions() stays a
+    // const view over already-settled state.
+    for (usize slot = 0; slot < framePointers_.size(); ++slot)
+    {
+        if (framePointerDeltaClaimed_[slot])
+        {
+            framePointers_[slot].deltaX = 0.0;
+            framePointers_[slot].deltaY = 0.0;
+        }
+        if (framePointerWheelClaimed_[slot])
+        {
+            framePointers_[slot].wheelDeltaX = 0.0;
+            framePointers_[slot].wheelDeltaY = 0.0;
+        }
+    }
+}
+
 FrameActionSnapshot ActionMapper::frameActions() const noexcept
 {
     return FrameActionSnapshot{
         .engineFrameIndex = currentEngineFrameIndex_,
         .states = frameActionStates_,
         .transitions = frameTransitions_,
+        .pointerLookDeltaX = framePointerLookClaimed_ ? 0.0 : framePointerLookDeltaX_,
+        .pointerLookDeltaY = framePointerLookClaimed_ ? 0.0 : framePointerLookDeltaY_,
+        // Already claim-adjusted by applyPointerClaims, so no conditional here.
+        .wheelDeltaX = framePointers_[Platform::PrimaryPointerId].wheelDeltaX,
+        .wheelDeltaY = framePointers_[Platform::PrimaryPointerId].wheelDeltaY,
+        .pointers = framePointers_,
     };
 }
 
@@ -877,7 +959,30 @@ Core::Status ActionMapper::applyClaims(const Platform::PlatformFrameView& platfo
                     }
                     return Core::success();
                 },
-                [](const Platform::PointerContinuousControlIdentity&) {
+                [this](const Platform::PointerContinuousControlIdentity& control) {
+                    // No binding pattern resolves to pointer delta or wheel, so there is no
+                    // SourceState to suppress the way a gamepad axis claim does. The claim
+                    // instead withholds the published value: a scene under a widget that owns
+                    // the pointer must not keep turning its camera or scrolling its world.
+                    if (control.pointer >= framePointers_.size())
+                    {
+                        return Core::success();
+                    }
+                    switch (control.control)
+                    {
+                    case Platform::PointerContinuousControl::Delta:
+                        framePointerDeltaClaimed_[control.pointer] = true;
+                        // The scalar look delta carries its own flag because it is published
+                        // whether or not the pointer table is.
+                        if (control.pointer == Platform::PrimaryPointerId)
+                        {
+                            framePointerLookClaimed_ = true;
+                        }
+                        break;
+                    case Platform::PointerContinuousControl::Wheel:
+                        framePointerWheelClaimed_[control.pointer] = true;
+                        break;
+                    }
                     return Core::success();
                 },
             },

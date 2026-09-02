@@ -15,6 +15,13 @@ Tina Legacy 已使用 GLFW 完成 Windows/Linux 窗口、键鼠和标准 Gamepad
 基础输入 backend。GLFW 未覆盖的能力通过最窄平台适配补齐，例如 Windows IME 使用 IMM32。
 不引入 SDL、SDL3 或 SDL_mixer，公共接口不暴露 GLFW/Win32 类型。
 
+> **更正（2026-09-01）：** 「不引入 SDL」这一核心决定仍然成立，失效的只是
+> 「`tina_platform_glfw` 是**唯一**真实窗口与基础输入 backend」的排他性表述。
+> `src/platform/` 下现有 `android/`、`glfw/`、`headless/` 三个 backend，
+> `src/platform/android/CMakeLists.txt:1` 定义 `tina_platform_android`（含 `jni/` 桥与
+> `AndroidInputBridge.cpp`）。移动端边界见
+> [ADR 0032](0032-mobile-platform-contract-boundaries.md)。历史理由保持原样。
+
 ## 结果
 
 - 窗口、输入和事件只有一套所有权与时间线；

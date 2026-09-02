@@ -14,6 +14,12 @@ static_assert(std::is_same_v<
               decltype(&Tina::Platform::IPlatformBackend::updateTextInputPlacement),
               Tina::Core::Status (Tina::Platform::IPlatformBackend::*)(
                   std::optional<Tina::Platform::TextInputPlacement>)>);
+static_assert(std::is_same_v<
+              decltype(&Tina::Platform::IPlatformBackend::setPointerCaptureMode),
+              Tina::Core::Status (Tina::Platform::IPlatformBackend::*)(
+                  Tina::Platform::PointerCaptureMode)>);
+static_assert(Tina::Platform::PrimaryWindowConfig{}.pointerCapture ==
+              Tina::Platform::PointerCaptureMode::Free);
 static_assert(std::is_same_v<decltype(Tina::Platform::TextInputCaretRect::x), double>);
 static_assert(!Tina::Platform::WindowId{}.hasValue());
 static_assert(Tina::Platform::PlatformFrameCapacityConfig::DefaultInputTransitionCapacity == 256);

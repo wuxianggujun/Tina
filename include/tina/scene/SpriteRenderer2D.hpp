@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tina/asset/AssetHandle.hpp>
+#include <tina/core/base/EnumFlags.hpp>
 #include <tina/core/base/Types.hpp>
 #include <tina/math/Vec.hpp>
 
@@ -26,27 +27,13 @@ enum class SpriteOverrideFlags : u8 {
     UvRect = 1 << 2,
 };
 
-[[nodiscard]] constexpr SpriteOverrideFlags operator|(
-    SpriteOverrideFlags left,
-    SpriteOverrideFlags right) noexcept
-{
-    return static_cast<SpriteOverrideFlags>(
-        static_cast<u8>(left) | static_cast<u8>(right));
-}
-
-[[nodiscard]] constexpr SpriteOverrideFlags operator&(
-    SpriteOverrideFlags left,
-    SpriteOverrideFlags right) noexcept
-{
-    return static_cast<SpriteOverrideFlags>(
-        static_cast<u8>(left) & static_cast<u8>(right));
-}
+TINA_ENUM_FLAG_OPERATORS(SpriteOverrideFlags);
 
 [[nodiscard]] constexpr bool hasFlag(
     SpriteOverrideFlags flags,
     SpriteOverrideFlags mask) noexcept
 {
-    return (static_cast<u8>(flags) & static_cast<u8>(mask)) != 0;
+    return hasAnyFlag(flags, mask);
 }
 
 // Normalized texture-space UV rectangle [u0,v0]→[u1,v1], same contract as

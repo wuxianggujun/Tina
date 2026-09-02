@@ -43,6 +43,9 @@ inline constexpr InputActionId ExitAction{3};
 struct TestFrameInput final {
     std::vector<Platform::Key> heldKeys;
     std::vector<Platform::PointerButton> heldPointerButtons;
+    // Whole-slot overrides applied after the primary-pointer conveniences above, so a test
+    // can place a second finger or give a pointer motion the snapshot has to carry.
+    std::vector<Platform::PointerSnapshot> pointerOverrides;
     std::vector<Platform::GamepadSnapshot> gamepads;
     std::vector<Platform::InputTransitionPayload> transitions;
     std::vector<Platform::PlatformEventPayload> platformEvents;
@@ -117,6 +120,14 @@ struct TestFrameInput final {
     for (Platform::PointerButton button : input.heldPointerButtons)
     {
         snapshot.pointers[Platform::PrimaryPointerId].heldButtons.set(static_cast<usize>(button));
+    }
+    for (const Platform::PointerSnapshot& pointer : input.pointerOverrides)
+    {
+        if (pointer.pointer >= Platform::PointerCapacity)
+        {
+            return Core::failure(Core::CoreErrorCode::InvalidArgument, "test pointer override is out of range");
+        }
+        snapshot.pointers[pointer.pointer] = pointer;
     }
     if (!builder.setPrimaryWindowSnapshot(metrics, snapshot))
     {
@@ -574,6 +585,182 @@ TEST_F(InputActionMapperTest, FrameActionEdgesExpireAtTheNextRenderFrame)
     FrameActionSnapshot secondFrame = mapper->frameActions();
     EXPECT_TRUE(secondFrame.transitions.empty());
     EXPECT_TRUE(secondFrame.isActive(ExitAction));
+}
+
+TEST_F(InputActionMapperTest, WheelTransitionsAccumulateIntoTheFrameSnapshot)
+{
+    const std::array bindings{keyBinding(Platform::Key::Escape, ExitAction, InputActionDomain::Frame)};
+    auto mapper = createMapper(bindings);
+    ASSERT_NE(mapper, nullptr);
+
+    // Two notches in one frame. Summed rather than replaced: keeping only the last would
+    // silently scale fast scrolling down to a single notch.
+    TestFrameInput input;
+    input.transitions = {
+        Platform::PointerWheelTransition{.window = window_, .deltaX = 0.0, .deltaY = 1.5},
+        Platform::PointerWheelTransition{.window = window_, .deltaX = -0.5, .deltaY = 2.0},
+    };
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 1, 0, 0, input).has_value());
+
+    const FrameActionSnapshot frame = mapper->frameActions();
+    EXPECT_DOUBLE_EQ(frame.wheelDeltaY, 3.5);
+    EXPECT_DOUBLE_EQ(frame.wheelDeltaX, -0.5);
+    ASSERT_FALSE(frame.pointers.empty());
+    EXPECT_DOUBLE_EQ(frame.pointers[Platform::PrimaryPointerId].wheelDeltaY, 3.5);
+}
+
+TEST_F(InputActionMapperTest, WheelDoesNotSurviveIntoTheNextFrame)
+{
+    const std::array bindings{keyBinding(Platform::Key::Escape, ExitAction, InputActionDomain::Frame)};
+    auto mapper = createMapper(bindings);
+    ASSERT_NE(mapper, nullptr);
+
+    TestFrameInput scrolled;
+    scrolled.transitions = {Platform::PointerWheelTransition{.window = window_, .deltaY = 2.0}};
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 1, 0, 0, scrolled).has_value());
+    ASSERT_DOUBLE_EQ(mapper->frameActions().wheelDeltaY, 2.0);
+
+    // A wheel is a per-frame quantity with no resting value, so a frame with no wheel
+    // transition must report zero rather than the previous frame's total.
+    const TestFrameInput idle;
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 2, 1, 0, idle).has_value());
+    EXPECT_DOUBLE_EQ(mapper->frameActions().wheelDeltaY, 0.0);
+}
+
+TEST_F(InputActionMapperTest, ConsumedWheelTransitionIsWithheldFromTheGame)
+{
+    const std::array bindings{keyBinding(Platform::Key::Escape, ExitAction, InputActionDomain::Frame)};
+    auto mapper = createMapper(bindings);
+    ASSERT_NE(mapper, nullptr);
+
+    // The UI ate the first notch and left the second. Consumption is per transition, so the
+    // game must see exactly the remainder, not all of it and not none of it.
+    TestFrameInput input;
+    input.transitions = {
+        Platform::PointerWheelTransition{.window = window_, .deltaY = 1.0},
+        Platform::PointerWheelTransition{.window = window_, .deltaY = 4.0},
+    };
+    input.consumedOrdinals = {0};
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 1, 0, 0, input).has_value());
+
+    EXPECT_DOUBLE_EQ(mapper->frameActions().wheelDeltaY, 4.0);
+}
+
+TEST_F(InputActionMapperTest, WheelClaimWithholdsWheelWithoutTouchingMotion)
+{
+    const std::array bindings{keyBinding(Platform::Key::Escape, ExitAction, InputActionDomain::Frame)};
+    auto mapper = createMapper(bindings);
+    ASSERT_NE(mapper, nullptr);
+
+    Platform::PointerSnapshot moving{};
+    moving.pointer = Platform::PrimaryPointerId;
+    moving.present = true;
+    moving.accumulatedDeltaX = 7.0;
+
+    // Wheel and motion are separately claimable controls on the same pointer. A scrollable
+    // widget claims the wheel; the camera underneath must keep its motion.
+    TestFrameInput input;
+    input.pointerOverrides = {moving};
+    input.transitions = {Platform::PointerWheelTransition{.window = window_, .deltaY = 3.0}};
+    input.claims = {ContinuousControlClaim{
+        .control = Platform::PointerContinuousControlIdentity{
+            .window = window_,
+            .pointer = Platform::PrimaryPointerId,
+            .control = Platform::PointerContinuousControl::Wheel,
+        },
+    }};
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 1, 0, 0, input).has_value());
+
+    const FrameActionSnapshot frame = mapper->frameActions();
+    EXPECT_DOUBLE_EQ(frame.wheelDeltaY, 0.0);
+    EXPECT_DOUBLE_EQ(frame.pointerLookDeltaX, 7.0);
+    EXPECT_DOUBLE_EQ(frame.pointers[Platform::PrimaryPointerId].deltaX, 7.0);
+}
+
+TEST_F(InputActionMapperTest, PointerTableReportsNonPrimaryPointers)
+{
+    const std::array bindings{keyBinding(Platform::Key::Escape, ExitAction, InputActionDomain::Frame)};
+    auto mapper = createMapper(bindings);
+    ASSERT_NE(mapper, nullptr);
+
+    // A second finger. Before the pointer table existed this was invisible to a game: the
+    // snapshot published only the primary pointer's look delta.
+    Platform::PointerSnapshot second{};
+    second.pointer = 1;
+    second.present = true;
+    second.logicalX = 120.0;
+    second.logicalY = 240.0;
+    second.accumulatedDeltaY = -4.0;
+    second.heldButtons.set(static_cast<usize>(Platform::PointerButton::Primary));
+
+    TestFrameInput input;
+    input.pointerOverrides = {second};
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 1, 0, 0, input).has_value());
+
+    const FrameActionSnapshot frame = mapper->frameActions();
+    ASSERT_EQ(frame.pointers.size(), Platform::PointerCapacity);
+    const FramePointerState* state = frame.pointerState(1);
+    ASSERT_NE(state, nullptr);
+    // Slot identity is positional, so index and id must agree or a caller tracking a drag
+    // would follow the wrong finger.
+    EXPECT_EQ(state->pointer, 1U);
+    EXPECT_TRUE(state->present);
+    EXPECT_DOUBLE_EQ(state->logicalX, 120.0);
+    EXPECT_DOUBLE_EQ(state->logicalY, 240.0);
+    EXPECT_DOUBLE_EQ(state->deltaY, -4.0);
+    EXPECT_TRUE(state->isHeld(Platform::PointerButton::Primary));
+
+    // An untouched slot must be absent rather than inheriting the primary pointer's defaults.
+    const FramePointerState* unused = frame.pointerState(5);
+    ASSERT_NE(unused, nullptr);
+    EXPECT_FALSE(unused->present);
+    EXPECT_EQ(frame.pointerState(Platform::PointerCapacity), nullptr);
+}
+
+TEST_F(InputActionMapperTest, PointerDeltaClaimAppliesOnlyToTheClaimedPointer)
+{
+    const std::array bindings{keyBinding(Platform::Key::Escape, ExitAction, InputActionDomain::Frame)};
+    auto mapper = createMapper(bindings);
+    ASSERT_NE(mapper, nullptr);
+
+    Platform::PointerSnapshot primary{};
+    primary.pointer = Platform::PrimaryPointerId;
+    primary.present = true;
+    primary.accumulatedDeltaX = 5.0;
+    Platform::PointerSnapshot second{};
+    second.pointer = 1;
+    second.present = true;
+    second.accumulatedDeltaX = 9.0;
+
+    // Claims carry a pointer id, so a widget owning one finger must not mute the other.
+    TestFrameInput input;
+    input.pointerOverrides = {primary, second};
+    input.claims = {ContinuousControlClaim{
+        .control = Platform::PointerContinuousControlIdentity{
+            .window = window_,
+            .pointer = 1,
+            .control = Platform::PointerContinuousControl::Delta,
+        },
+    }};
+    ASSERT_TRUE(mapTestFrame(*mapper, *frameBuilder_, window_, 1, 0, 0, input).has_value());
+
+    const FrameActionSnapshot frame = mapper->frameActions();
+    EXPECT_DOUBLE_EQ(frame.pointers[1].deltaX, 0.0);
+    EXPECT_DOUBLE_EQ(frame.pointers[Platform::PrimaryPointerId].deltaX, 5.0);
+    // The scalar look delta describes the primary pointer, so a claim on finger 1 leaves it.
+    EXPECT_DOUBLE_EQ(frame.pointerLookDeltaX, 5.0);
+}
+
+TEST_F(InputActionMapperTest, SuppressedFrameSnapshotHasNoPointerTable)
+{
+    // A suppressed snapshot must not hand out a stale table: the documented contract is that
+    // pointers is empty, and pointerState then returns null for every id.
+    const FrameActionSnapshot suppressed = FrameActionSnapshot::suppressed(9);
+    EXPECT_EQ(suppressed.engineFrameIndex, 9U);
+    EXPECT_TRUE(suppressed.pointers.empty());
+    EXPECT_EQ(suppressed.pointerState(Platform::PrimaryPointerId), nullptr);
+    EXPECT_DOUBLE_EQ(suppressed.wheelDeltaX, 0.0);
+    EXPECT_DOUBLE_EQ(suppressed.wheelDeltaY, 0.0);
 }
 
 TEST_F(InputActionMapperTest, RebindAndClaimRebuildOpposingFrameSourcesFromFrameBaseline)

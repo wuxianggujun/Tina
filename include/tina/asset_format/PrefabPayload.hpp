@@ -130,6 +130,33 @@ struct PrefabNodeView final {
     std::optional<PrefabLight3DDesc> light{};
 };
 
+// Every field of PrefabNodeDesc must be assigned here: a missing one is accepted by
+// designated initialization and silently republishes the default instead of the authored value.
+[[nodiscard]] inline PrefabNodeDesc prefabNodeDescFromView(const PrefabNodeView& node)
+{
+    return PrefabNodeDesc{
+        .stableNodeId = node.stableNodeId,
+        .parentIndex = node.parentIndex,
+        .nodeKind = node.nodeKind,
+        .name = node.name,
+        .positionX = node.positionX,
+        .positionY = node.positionY,
+        .positionZ = node.positionZ,
+        .rotationX = node.rotationX,
+        .rotationY = node.rotationY,
+        .rotationZ = node.rotationZ,
+        .rotationW = node.rotationW,
+        .scaleX = node.scaleX,
+        .scaleY = node.scaleY,
+        .scaleZ = node.scaleZ,
+        .meshId = node.meshId,
+        .materialId = node.materialId,
+        .visible = node.visible,
+        .camera = node.camera,
+        .light = node.light,
+    };
+}
+
 struct PrefabPayloadDesc final {
     std::span<const PrefabNodeDesc> nodes{};
 };

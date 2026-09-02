@@ -48,6 +48,17 @@ class IPlatformBackend {
     // Implementations remain thread-affine and may treat unsupported IME
     // placement as a platform-specific no-op while preserving the contract.
     virtual Core::Status updateTextInputPlacement(std::optional<TextInputPlacement> placement) = 0;
+    // Sets the cursor mode of the backend-owned primary window.
+    //
+    // Pure virtual with no default: a backend that cannot lock a cursor must say so
+    // rather than accept the request and leave the caller believing a first-person
+    // camera will work. Headless and Android therefore fail Locked outright.
+    //
+    // A backend switching to Locked must also drop the position difference across the
+    // switch. The native layer warps the cursor as it captures it, and reporting that
+    // warp as pointer movement would spin a first-person camera on the first frame.
+    // Implementations remain thread-affine.
+    virtual Core::Status setPointerCaptureMode(PointerCaptureMode mode) = 0;
     virtual void shutdown() noexcept = 0;
 };
 

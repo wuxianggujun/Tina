@@ -8,6 +8,7 @@
 #include <tina/runtime/InputActions.hpp>
 #include <tina/ui/InputRouting.hpp>
 
+#include <array>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -141,6 +142,12 @@ class ActionMapper final {
                                              const Platform::InputTransition& transition, bool consumed,
                                              u64 nextSimulationTick,
                                              const LastPresentedCamera2DLatch* lastPresentedCamera2D);
+    // Wheel is transition-only in the Platform snapshot, so it is summed while walking the
+    // frame rather than read out of the settled state the way pointer motion is.
+    void accumulatePointerWheel(const Platform::InputTransition& transition, bool consumed) noexcept;
+    // Applies this frame's pointer claims to the published table. Runs after the transition
+    // walk so it also covers wheel accumulated during it.
+    void applyPointerClaims() noexcept;
     [[nodiscard]] Core::Status mapDigital(const Platform::PlatformFrameView& platformFrame,
                                           const ActionBindingPattern& pattern, Platform::WindowId window,
                                           Platform::GamepadId gamepad, Platform::DigitalTransition state,
@@ -209,6 +216,22 @@ class ActionMapper final {
     SimulationActionLatch simulationLatch_;
     usize frameNormalTransitionCount_ = 0;
     bool frameResetWritten_ = false;
+    // Primary-pointer motion for the frame being mapped, published through
+    // FrameActionSnapshot. Recomputed every mapFrame and zeroed when the UI claims
+    // pointer delta, so a stale value cannot survive into a frame the UI owns.
+    double framePointerLookDeltaX_ = 0.0;
+    double framePointerLookDeltaY_ = 0.0;
+    bool framePointerLookClaimed_ = false;
+    // The whole pointer table for the frame being mapped, published through
+    // FrameActionSnapshot. Fixed size and indexed by PointerId so a slot's identity never
+    // depends on how many pointers happen to be present. Claim-aware: a claimed pointer's
+    // delta or wheel is zeroed here, which is why this cannot be the raw Platform table.
+    std::array<FramePointerState, Platform::PointerCapacity> framePointers_{};
+    // Wheel has no persistent state in the Platform snapshot -- it exists only as
+    // PointerWheelTransition -- so it has to be accumulated per pointer while walking the
+    // frame's transitions, rather than read out of the final snapshot the way motion is.
+    std::array<bool, Platform::PointerCapacity> framePointerDeltaClaimed_{};
+    std::array<bool, Platform::PointerCapacity> framePointerWheelClaimed_{};
     u64 currentEngineFrameIndex_ = 0;
     std::optional<u64> lastMappedEngineFrame_;
     std::optional<Platform::PlatformFrameId> lastMappedPlatformFrame_;

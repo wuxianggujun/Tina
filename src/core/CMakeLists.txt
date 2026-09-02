@@ -20,6 +20,7 @@ add_library(tina_core STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/core/hash/ContentHash.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/hash/ContentHashDigest.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/io/ApplicationPaths.hpp
+    ${PROJECT_SOURCE_DIR}/include/tina/core/io/ContentRoot.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/io/ReadFile.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/io/UserPaths.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/io/WriteFile.hpp
@@ -45,6 +46,7 @@ add_library(tina_core STATIC
     diagnostics/LogRecord.cpp
     hash/ContentHashDigest.cpp
     io/ApplicationPaths.cpp
+    io/ContentRoot.cpp
     io/PathUtil.cpp
     io/PathUtil.hpp
     io/ReadFile.cpp

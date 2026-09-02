@@ -4,8 +4,8 @@
 #include <tina/core/text/Utf8.hpp>
 
 #include <algorithm>
+#include <bit>
 #include <cmath>
-#include <cstring>
 #include <limits>
 #include <new>
 #include <vector>
@@ -45,9 +45,7 @@ using Core::usize;
 
 [[nodiscard]] float readF32(std::span<const std::byte> bytes, usize offset) noexcept
 {
-    float value = 0.0F;
-    std::memcpy(&value, bytes.data() + offset, sizeof(float));
-    return value;
+    return std::bit_cast<float>(readU32(bytes, offset));
 }
 
 void writeU8(std::vector<std::byte>& bytes, usize offset, u8 value)
@@ -76,7 +74,7 @@ void writeI32(std::vector<std::byte>& bytes, usize offset, i32 value)
 
 void writeF32(std::vector<std::byte>& bytes, usize offset, float value)
 {
-    std::memcpy(bytes.data() + offset, &value, sizeof(float));
+    writeU32(bytes, offset, std::bit_cast<u32>(value));
 }
 
 void writeAssetId(std::vector<std::byte>& bytes, usize offset, Core::AssetId assetId)

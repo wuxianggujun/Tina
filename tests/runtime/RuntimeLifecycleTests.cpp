@@ -189,6 +189,12 @@ class LoggingPlatform final : public Platform::IPlatformBackend {
         return Core::success();
     }
 
+    Core::Status setPointerCaptureMode(Platform::PointerCaptureMode mode) override
+    {
+        static_cast<void>(mode);
+        return Core::success();
+    }
+
     void shutdown() noexcept override
     {
         if (!stopped_)
@@ -923,6 +929,16 @@ class AdvancingPlatform final : public Platform::IPlatformBackend {
         return Core::success();
     }
 
+    Core::Status setPointerCaptureMode(Platform::PointerCaptureMode mode) override
+    {
+        static_cast<void>(mode);
+        if (stopped_)
+        {
+            return Core::failure(Platform::PlatformErrorCode::BackendStopped, "The scripted platform is stopped");
+        }
+        return Core::success();
+    }
+
     void shutdown() noexcept override
     {
         if (probe_->failIfOwnerDestroyedAfterTaskTimeout && probe_->taskShutdownTimedOut)
@@ -1088,6 +1104,17 @@ class OversizedPlatformFrameBackend final : public Platform::IPlatformBackend {
     Core::Status updateTextInputPlacement(std::optional<Platform::TextInputPlacement> placement) override
     {
         static_cast<void>(placement);
+        if (stopped_)
+        {
+            return Core::failure(Platform::PlatformErrorCode::BackendStopped,
+                                 "The oversized platform backend is stopped");
+        }
+        return Core::success();
+    }
+
+    Core::Status setPointerCaptureMode(Platform::PointerCaptureMode mode) override
+    {
+        static_cast<void>(mode);
         if (stopped_)
         {
             return Core::failure(Platform::PlatformErrorCode::BackendStopped,

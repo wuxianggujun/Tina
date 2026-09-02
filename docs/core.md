@@ -112,7 +112,9 @@ ContentHash。
 
 `DiagnosticsConfig` 默认同步；`asyncQueueCapacity` 非 0 时启一个 drain 线程与该容量的有界队列，
 满时丢弃最新并累加 `droppedByCapacityCount()`。Error 及以上在 `write()` 返回前完成投递，因为仓库
-有 149 处 `std::terminate()`。`filePath` 非空时叠加 file sink（追加、按 `fileRotateBytes` 轮转并保留
+有 125 处 `std::terminate()`（2026-09-01 统计口径：`grep -rn "std::terminate()" src/ include/`，
+仅 `src/` 与 `include/`，不含 `tests/`、`samples/`、`tools/`、`editor/`；其中 `src/` 122、`include/` 3）。
+`filePath` 非空时叠加 file sink（追加、按 `fileRotateBytes` 轮转并保留
 一个 `.1` 备份、父目录自动创建、打开失败不使 `Create` 失败）。`platformDebugSink` 在 Windows 走
 `OutputDebugStringA`（仅当已附加调试器）、Android 走 logcat。EngineHost 用 1024 槽异步 + 每用户
 `tina.log`（8 MiB 轮转）。
@@ -188,7 +190,8 @@ libc++：任何公共头一旦命名它们，整个模块就无法为 Android �
   locale 敏感性在此无害：Tina 从不调用 `setlocale` 也不 imbue，进程终生停在 "C" locale。
 - **`CancellationToken` 比 `std::stop_token` 小得多，是有意的。** 没有 `stop_callback` 注册、没有共享
   引用计数、没有侵入式回调链 —— Tina 的调用点从来只在工作项之间问一次 `stop_requested()`。桌面侧
-  `editor_app` 保留 `std::jthread`，在 Asset 边界用一个 `std::stop_callback` 把 token 桥成 signal
+  Editor（`editor/app/EditorSourceImportService.cpp`，产品代码里唯一的 `std::jthread` 使用点）
+  保留 `std::jthread`，在 Asset 边界用一个 `std::stop_callback` 把 token 桥成 signal
   （选 callback 而非轮询：它对「调用前已经请求过取消」也会立刻触发，不会漏掉）。
 
 ## UTF-16 → 严格 UTF-8

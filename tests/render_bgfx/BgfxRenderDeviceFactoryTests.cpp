@@ -154,6 +154,52 @@ TEST(BgfxRenderDeviceFactoryTest, AndroidBindingWithoutAWindowHandleIsRejectedBy
     EXPECT_EQ(control->activeLeaseCount, 0U);
 }
 
+// An HTML5 binding carries a CSS selector in nativeWindow, not a handle, and there is no
+// display to go with it. A display pointer would be silently ignored by bgfx's HTML5 context,
+// so it is rejected for the same reason as on Android: an accepted field that does nothing is
+// worse than a rejected binding.
+TEST(BgfxRenderDeviceFactoryTest, Html5BindingRejectsADisplayPointerAndReleasesTheLease)
+{
+    auto pool = createSurfacePool();
+    auto surface = pool.tryEmplace();
+    ASSERT_TRUE(surface.has_value());
+
+    auto control = createLeaseControl();
+    auto html5Binding = validWin32Binding();
+    html5Binding.kind = Integration::Detail::NativeWindowBindingKind::Html5;
+    html5Binding.nativeDisplay = 0x1234;
+    auto lease = Integration::Detail::NativeWindowSurfaceLeaseAccess::Create(
+        control, *surface, html5Binding);
+    ASSERT_TRUE(lease.has_value());
+
+    auto result = createBgfxRenderDevice(
+        RenderDeviceCreateParams{.initialPrimaryWindowSurface = activeSurface(*surface)},
+        std::move(*lease));
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error().code, RenderErrorCode::InvalidNativeWindowBinding);
+    EXPECT_EQ(control->activeLeaseCount, 0U);
+}
+
+// A null selector pointer is rejected by the lease, one layer before bgfx decoding. Without
+// this guard bgfx would call bx::strCopy on nullptr rather than fail a check.
+TEST(BgfxRenderDeviceFactoryTest, Html5BindingWithoutASelectorIsRejectedByTheLease)
+{
+    auto pool = createSurfacePool();
+    auto surface = pool.tryEmplace();
+    ASSERT_TRUE(surface.has_value());
+
+    auto control = createLeaseControl();
+    auto html5Binding = validWin32Binding();
+    html5Binding.kind = Integration::Detail::NativeWindowBindingKind::Html5;
+    html5Binding.nativeWindow = 0;
+
+    auto lease = Integration::Detail::NativeWindowSurfaceLeaseAccess::Create(
+        control, *surface, html5Binding);
+    ASSERT_FALSE(lease.has_value());
+    EXPECT_EQ(control->activeLeaseCount, 0U);
+}
+
 // The switch over binding kinds is exhaustive so that adding an enumerator breaks the build;
 // a value that is not an enumerator at all is caught by an explicit range check instead.
 TEST(BgfxRenderDeviceFactoryTest, UnsupportedNativeBindingReleasesTheConsumedLease)

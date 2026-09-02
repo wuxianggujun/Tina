@@ -827,10 +827,16 @@ class NullRenderDevice final : public IRenderDevice {
         {
             return Core::failure(RenderErrorCode::InvalidTextureUpload, "materialKey must be non-zero");
         }
+        // Emissive is checked for finite and non-negative but not for an upper bound: it is
+        // radiance, on the same scale as light colour, not a [0,1] BRDF parameter (ADR 0043).
+        const auto emissiveValid = [](float value) noexcept {
+            return std::isfinite(value) && value >= 0.0F;
+        };
         if (!(desc.metallicFactor >= 0.0F && desc.metallicFactor <= 1.0F) ||
             !(desc.roughnessFactor >= 0.0F && desc.roughnessFactor <= 1.0F) ||
             !std::isfinite(desc.metallicFactor) || !std::isfinite(desc.roughnessFactor) ||
-            !isSupportedMesh3DAlphaMode(desc.alphaMode))
+            !emissiveValid(desc.emissiveFactorR) || !emissiveValid(desc.emissiveFactorG) ||
+            !emissiveValid(desc.emissiveFactorB) || !isSupportedMesh3DAlphaMode(desc.alphaMode))
         {
             return Core::failure(RenderErrorCode::InvalidTextureUpload,
                                  "Mesh3D material factors or alpha mode are invalid");

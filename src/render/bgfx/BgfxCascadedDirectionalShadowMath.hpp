@@ -2,6 +2,7 @@
 
 #include <tina/core/error/Result.hpp>
 #include <tina/render/RenderScene.hpp>
+#include <tina/render/ShadowMapExtentConfig.hpp>
 
 #include <array>
 
@@ -30,12 +31,19 @@ struct BgfxCascadedDirectionalShadowInput final {
     Mesh3DDirectionalLight light{};
     float maximumDistanceMeters = 50.0F;
     float depthPaddingMeters = 10.0F;
+    // Tile resolution of one cascade in the atlas. Cascade bounds are snapped to whole
+    // texels of this grid, which is what keeps shadow edges from crawling as the camera
+    // moves; a wrong value here degrades stability rather than correctness.
+    u16 tileExtent = ShadowMapExtentConfig::DefaultDirectionalCascadeTileExtent;
 };
 
 struct BgfxCascadedDirectionalShadowCascade final {
     BgfxCascadedDirectionalShadowBounds bounds{};
     float nearDepthMeters = 0.0F;
     float farDepthMeters = 0.0F;
+    // World size of one atlas texel for this cascade, and therefore the quantum the
+    // sampling transform steps in as the camera moves.
+    float texelSizeMeters = 0.0F;
     std::array<float, 16> lightView{};
     std::array<float, 16> lightProjection{};
     // World position -> atlas UV/depth, including backend crop and tile rules.

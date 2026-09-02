@@ -129,6 +129,7 @@ set_target_properties(tina_render_bgfx_texture2d_upload_contract_obj PROPERTIES
 )
 
 add_executable(tina_render_bgfx_tests
+    BgfxClearColorTests.cpp
     BgfxOpaque3DGeometryTests.cpp
     BgfxCascadedDirectionalShadowMathTests.cpp
     BgfxCascadedDirectionalShadowResourcesContractTests.cpp

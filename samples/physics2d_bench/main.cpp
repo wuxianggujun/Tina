@@ -1,9 +1,9 @@
+#include <tina/core/text/ArgParser.hpp>
 #include <tina/core/text/JsonWriter.hpp>
 #include <tina/core/time/MonotonicClock.hpp>
 #include <tina/physics2d/PhysicsWorld2D.hpp>
 
 #include <algorithm>
-#include <charconv>
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
@@ -42,19 +42,6 @@ void writeError(std::string_view message)
     std::cerr << '\n';
 }
 
-[[nodiscard]] bool parseU32(std::string_view text, std::uint32_t& out) noexcept
-{
-    std::uint32_t value = 0;
-    const char* begin = text.data();
-    const char* end = text.data() + text.size();
-    const auto result = std::from_chars(begin, end, value);
-    if (result.ec != std::errc{} || result.ptr != end) {
-        return false;
-    }
-    out = value;
-    return true;
-}
-
 [[nodiscard]] bool parseOptions(int argc, char** argv, Options& options, std::string& error)
 {
     for (int index = 1; index < argc; ++index) {
@@ -68,7 +55,7 @@ void writeError(std::string_view message)
         constexpr std::string_view measurePrefix = "--steps=";
         constexpr std::string_view raysPrefix = "--rays=";
         if (argument.starts_with(bodiesPrefix)) {
-            if (!parseU32(argument.substr(bodiesPrefix.size()), options.dynamicBodies)
+            if (!Tina::Core::parseArgUnsigned(argument.substr(bodiesPrefix.size()), options.dynamicBodies)
                 || options.dynamicBodies == 0) {
                 error = "invalid --bodies value";
                 return false;
@@ -76,14 +63,14 @@ void writeError(std::string_view message)
             continue;
         }
         if (argument.starts_with(warmPrefix)) {
-            if (!parseU32(argument.substr(warmPrefix.size()), options.warmUpSteps)) {
+            if (!Tina::Core::parseArgUnsigned(argument.substr(warmPrefix.size()), options.warmUpSteps)) {
                 error = "invalid --warmup value";
                 return false;
             }
             continue;
         }
         if (argument.starts_with(measurePrefix)) {
-            if (!parseU32(argument.substr(measurePrefix.size()), options.measureSteps)
+            if (!Tina::Core::parseArgUnsigned(argument.substr(measurePrefix.size()), options.measureSteps)
                 || options.measureSteps == 0) {
                 error = "invalid --steps value";
                 return false;
@@ -91,7 +78,7 @@ void writeError(std::string_view message)
             continue;
         }
         if (argument.starts_with(raysPrefix)) {
-            if (!parseU32(argument.substr(raysPrefix.size()), options.queryRays)) {
+            if (!Tina::Core::parseArgUnsigned(argument.substr(raysPrefix.size()), options.queryRays)) {
                 error = "invalid --rays value";
                 return false;
             }

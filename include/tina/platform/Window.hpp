@@ -51,12 +51,30 @@ enum class WindowMode : u8 {
     BorderlessFullscreen,
 };
 
+// How the primary window treats the mouse cursor.
+//
+// Free is the only mode a UI or a 2D world pick can use: the cursor is visible and
+// its position is a real point inside the window, so hit testing means something.
+//
+// Locked hides the cursor and stops it from leaving the window, which turns pointer
+// position into an unbounded virtual value whose per-move delta is the only useful
+// part. A first-person camera requires it: under Free the cursor reaches the edge of
+// the screen and stops moving, so the delta becomes zero and the camera jams while
+// the player is still moving the mouse.
+enum class PointerCaptureMode : u8 {
+    Free,
+    Locked,
+};
+
 struct PrimaryWindowConfig final {
     std::string title = "Tina";
     LogicalExtent initialLogicalExtent{1280, 720};
     WindowMode mode = WindowMode::Windowed;
     bool resizable = true;
     bool initiallyVisible = true;
+    // Applied when the window is created, so a first-person game does not show one
+    // frame with a free cursor before it locks.
+    PointerCaptureMode pointerCapture = PointerCaptureMode::Free;
 };
 
 } // namespace Tina::Platform

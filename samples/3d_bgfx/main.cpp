@@ -1,4 +1,5 @@
 #include <tina/asset/AssetStore.hpp>
+#include <tina/core/text/ArgParser.hpp>
 #include <tina/core/text/JsonWriter.hpp>
 #include <tina/desktop/DesktopEngine.hpp>
 #include <tina/render/FramePin.hpp>
@@ -16,7 +17,6 @@
 #include <tina/ui/UIPaint.hpp>
 
 #include <array>
-#include <charconv>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -122,12 +122,6 @@ void writeError(const Tina::Core::Error& error)
     std::cerr << '\n';
 }
 
-template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text, Value& value) noexcept
-{
-    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
-    return error == std::errc{} && end == text.data() + text.size();
-}
-
 [[nodiscard]] Tina::Core::Result<SampleOptions> parseOptions(int argumentCount, char** arguments)
 {
     constexpr std::string_view FramesPrefix = "--frames=";
@@ -141,7 +135,7 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
         const std::string_view argument{arguments[index]};
         if (argument.starts_with(FramesPrefix))
         {
-            if (hasFrames || !parseUnsigned(argument.substr(FramesPrefix.size()), options.targetFrameCount) ||
+            if (hasFrames || !Tina::Core::parseArgUnsigned(argument.substr(FramesPrefix.size()), options.targetFrameCount) ||
                 options.targetFrameCount == 0)
             {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
@@ -151,7 +145,7 @@ template <typename Value> [[nodiscard]] bool parseUnsigned(std::string_view text
         }
         else if (argument.starts_with(DelayPrefix))
         {
-            if (hasDelay || !parseUnsigned(argument.substr(DelayPrefix.size()),
+            if (hasDelay || !Tina::Core::parseArgUnsigned(argument.substr(DelayPrefix.size()),
                                             options.frameDelayMilliseconds))
             {
                 return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,

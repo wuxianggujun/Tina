@@ -310,6 +310,7 @@ struct AudioEngine::Impl final {
         float gain = 1.0F;
         float pitch = 1.0F;
         float pan = 0.0F;
+        AudioBusId bus = AudioBusId::Sfx;
         Core::u32 mixSlot = InvalidMixSlot;
     };
 
@@ -554,7 +555,7 @@ struct AudioEngine::Impl final {
                     pushCompletion(AudioCompletionKind::Started, command.voice, command.sequence);
                     break;
                 }
-                if (!activateMixSlot(*record, computeSfxGain()))
+                if (!activateMixSlot(*record, computeBusGain(record->bus)))
                 {
                     record->playing = false;
                     pushCompletion(AudioCompletionKind::RejectedNoClip, command.voice, command.sequence);
@@ -603,26 +604,31 @@ struct AudioEngine::Impl final {
         flushPendingClipTerminals();
     }
 
-    [[nodiscard]] float computeSfxGain() const noexcept
+    [[nodiscard]] float computeBusGain(AudioBusId bus) const noexcept
     {
         const AudioBusState& master = buses[static_cast<Core::usize>(AudioBusId::Master)];
-        const AudioBusState& sfx = buses[static_cast<Core::usize>(AudioBusId::Sfx)];
-        if (master.muted || sfx.muted)
+        const AudioBusState& target = buses[static_cast<Core::usize>(bus)];
+        if (master.muted || target.muted)
         {
             return 0.0F;
         }
-        return master.volume * sfx.volume;
+        return master.volume * target.volume;
     }
 
     void publishBusGainToActiveSlots() noexcept
     {
-        const float gain = computeSfxGain();
         for (auto& slot : mixSlots)
         {
-            if (slot.active.load(std::memory_order_relaxed))
+            if (!slot.active.load(std::memory_order_relaxed))
             {
-                slot.busGain.store(gain, std::memory_order_relaxed);
+                continue;
             }
+            // Which gain a slot needs depends on the bus its voice plays on, so this
+            // resolves per slot. Publishing one engine-wide value here was what made
+            // AudioBusId::Music inert: every active voice got the Sfx gain.
+            const VoiceRecord* record = voices.tryGet(slot.voice);
+            const AudioBusId bus = record != nullptr ? record->bus : AudioBusId::Sfx;
+            slot.busGain.store(computeBusGain(bus), std::memory_order_relaxed);
         }
     }
 
@@ -1926,7 +1932,7 @@ Core::Result<AudioEngineStats> AudioEngine::stats() const noexcept
     };
 }
 
-Core::Result<AudioVoiceId> AudioEngine::createVoice() noexcept
+Core::Result<AudioVoiceId> AudioEngine::createVoice(AudioBusId bus) noexcept
 {
     if (m_impl == nullptr)
     {
@@ -1935,6 +1941,10 @@ Core::Result<AudioVoiceId> AudioEngine::createVoice() noexcept
     if (Core::Status status = m_impl->requireOpenOwner(); !status)
     {
         return Core::failure(status.error());
+    }
+    if (!Impl::isValidBus(bus))
+    {
+        return Core::failure(AudioErrorCode::InvalidConfiguration, "AudioBusId is out of range");
     }
 
     auto voice = m_impl->voices.tryEmplace();
@@ -1963,6 +1973,7 @@ Core::Result<AudioVoiceId> AudioEngine::createVoice() noexcept
         record->gain = 1.0F;
         record->pitch = 1.0F;
         record->pan = 0.0F;
+        record->bus = bus;
         record->mixSlot = Impl::InvalidMixSlot;
     }
     return *voice;
@@ -2064,6 +2075,24 @@ Core::Result<bool> AudioEngine::isVoicePlaying(AudioVoiceId voice) const noexcep
         return false;
     }
     return record->playing;
+}
+
+Core::Result<AudioBusId> AudioEngine::voiceBus(AudioVoiceId voice) const noexcept
+{
+    if (m_impl == nullptr)
+    {
+        return Core::failure(AudioErrorCode::EngineClosed, "AudioEngine is closed");
+    }
+    if (!m_impl->isOwnerThread())
+    {
+        return Core::failure(AudioErrorCode::WrongOwnerThread, "AudioEngine API must run on the owner thread");
+    }
+    const auto* record = m_impl->voices.tryGet(voice);
+    if (record == nullptr)
+    {
+        return Core::failure(AudioErrorCode::InvalidConfiguration, "AudioVoiceId is not live");
+    }
+    return record->bus;
 }
 
 Core::Status AudioEngine::bindVoiceClip(AudioVoiceId voice, AudioPcmClipView clip) noexcept
@@ -2552,7 +2581,7 @@ Core::Status AudioEngine::enqueueStop(AudioVoiceId voice) noexcept
     return status;
 }
 
-Core::Result<AudioVoiceId> AudioEngine::playOneShotPcm(AudioPcmClipView clip) noexcept
+Core::Result<AudioVoiceId> AudioEngine::playOneShotPcm(AudioPcmClipView clip, AudioBusId bus) noexcept
 {
     if (m_impl == nullptr)
     {
@@ -2562,7 +2591,7 @@ Core::Result<AudioVoiceId> AudioEngine::playOneShotPcm(AudioPcmClipView clip) no
     {
         return Core::failure(status.error());
     }
-    auto voice = createVoice();
+    auto voice = createVoice(bus);
     if (!voice)
     {
         return Core::failure(voice.error());
@@ -2585,7 +2614,7 @@ Core::Result<AudioVoiceId> AudioEngine::playOneShotPcm(AudioPcmClipView clip) no
     return *voice;
 }
 
-Core::Result<AudioVoiceId> AudioEngine::playPcmStream(AudioPcmStreamDesc desc) noexcept
+Core::Result<AudioVoiceId> AudioEngine::playPcmStream(AudioPcmStreamDesc desc, AudioBusId bus) noexcept
 {
     if (m_impl == nullptr)
     {
@@ -2600,7 +2629,7 @@ Core::Result<AudioVoiceId> AudioEngine::playPcmStream(AudioPcmStreamDesc desc) n
         return Core::failure(status.error());
     }
 
-    auto voice = createVoice();
+    auto voice = createVoice(bus);
     if (!voice)
     {
         return Core::failure(voice.error());

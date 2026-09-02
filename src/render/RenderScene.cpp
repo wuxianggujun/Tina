@@ -287,7 +287,8 @@ RenderSceneBuilder::RenderSceneBuilder(RenderSceneBuilder&& other) noexcept
       m_camera(std::move(other.m_camera)),
       m_sprite2DLighting(std::move(other.m_sprite2DLighting)),
       m_perspectiveCamera(std::move(other.m_perspectiveCamera)),
-      m_mesh3DLighting(std::move(other.m_mesh3DLighting)), m_frameParameters(other.m_frameParameters),
+      m_mesh3DLighting(std::move(other.m_mesh3DLighting)), m_clearColor(other.m_clearColor),
+      m_frameParameters(other.m_frameParameters),
       m_candidateStatistics(other.m_candidateStatistics), m_publishedStatistics(other.m_publishedStatistics),
       m_statistics(other.m_statistics), m_stickyBuildError(std::move(other.m_stickyBuildError)), m_state(other.m_state)
 {
@@ -296,6 +297,7 @@ RenderSceneBuilder::RenderSceneBuilder(RenderSceneBuilder&& other) noexcept
     other.m_sprite2DLighting.reset();
     other.m_perspectiveCamera.reset();
     other.m_mesh3DLighting.reset();
+    other.m_clearColor = DefaultSceneClearColor;
     other.m_frameParameters = {};
     other.m_candidateStatistics = {};
     other.m_publishedStatistics = {};
@@ -405,6 +407,16 @@ Core::Status RenderSceneWriter::setMesh3DLighting(const Mesh3DLightingDesc& ligh
                              "The RenderScene writer is no longer attached to a builder");
     }
     return m_builder->setMesh3DLighting(lighting);
+}
+
+Core::Status RenderSceneWriter::setClearColor(const RenderLinearColor& color)
+{
+    if (m_builder == nullptr)
+    {
+        return Core::failure(RenderErrorCode::RenderSceneBuildNotOpen,
+                             "The RenderScene writer is no longer attached to a builder");
+    }
+    return m_builder->setClearColor(color);
 }
 
 Core::Status RenderSceneBuilder::validateCamera(const RenderCamera2DInput& camera) const noexcept
@@ -913,6 +925,39 @@ Core::Status RenderSceneBuilder::setMesh3DLighting(const Mesh3DLightingDesc& lig
     m_candidateStatistics.directionalLightCount = snapshot.m_directionalLightCount;
     m_candidateStatistics.pointLight3DCount = snapshot.m_pointLightCount;
     m_candidateStatistics.spotLight3DCount = snapshot.m_spotLightCount;
+    return Core::success();
+}
+
+Core::Status RenderSceneBuilder::setClearColor(const RenderLinearColor& color)
+{
+    if (m_state != State::Building)
+    {
+        return buildStateFailure(RenderErrorCode::RenderSceneBuildNotOpen,
+                                 "A RenderScene build must be open before setting the clear color");
+    }
+    if (m_stickyBuildError.has_value())
+    {
+        return Core::failure(Core::Error{m_stickyBuildError->code, m_stickyBuildError->message,
+                                         m_stickyBuildError->origin});
+    }
+    if (m_candidateStatistics.clearColorConfigured)
+    {
+        return failBuild(RenderErrorCode::InvalidSceneClearColor,
+                         "A RenderScene may contain only one clear color");
+    }
+    // Linear radiance, so values above 1 are meaningful for lights but not for a
+    // background: the surface cannot display more than full white, and letting an
+    // over-range value through would silently clamp in the backend instead of here.
+    if (!finite(color.red) || !finite(color.green) || !finite(color.blue) || !finite(color.alpha) ||
+        color.red < 0.0F || color.green < 0.0F || color.blue < 0.0F || color.alpha < 0.0F ||
+        color.red > 1.0F || color.green > 1.0F || color.blue > 1.0F || color.alpha > 1.0F)
+    {
+        return failBuild(RenderErrorCode::InvalidSceneClearColor,
+                         "RenderScene clear color components must be finite and within [0, 1]");
+    }
+
+    m_clearColor = color;
+    m_candidateStatistics.clearColorConfigured = true;
     return Core::success();
 }
 
@@ -1497,6 +1542,10 @@ void RenderSceneBuilder::clearCandidate() noexcept
     m_sprite2DLighting.reset();
     m_perspectiveCamera.reset();
     m_mesh3DLighting.reset();
+    // Back to the engine default, not to the previous frame's colour: a frame that stops
+    // calling setClearColor must go back to the documented background rather than latch
+    // whatever the last frame happened to ask for.
+    m_clearColor = DefaultSceneClearColor;
     m_frameParameters = {};
     m_candidateStatistics = {};
     m_stickyBuildError.reset();
@@ -1569,6 +1618,7 @@ RenderSceneView RenderSceneBuilder::makePublishedView() const noexcept
                                static_cast<usize>(m_skinnedMesh3DPaletteJointCount) *
                                    SkinnedMesh3DPaletteFloatsPerJoint},
         m_mesh3DLighting,
+        m_clearColor,
         m_publishedStatistics,
     };
 }

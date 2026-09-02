@@ -592,6 +592,41 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         return Core::success();
     }
 
+    Core::Status setPointerCaptureMode(PointerCaptureMode mode) override
+    {
+        if (stopped_)
+        {
+            return Core::failure(PlatformErrorCode::BackendStopped, "The GLFW platform backend is stopped");
+        }
+        if (std::this_thread::get_id() != ownerThread_)
+        {
+            return Core::failure(PlatformErrorCode::WrongOwnerThread,
+                                 "The GLFW pointer capture mode must be set on the creating thread");
+        }
+        if (!hasLiveWindow())
+        {
+            return Core::failure(PlatformErrorCode::BackendOperationFailed,
+                                 "The GLFW primary window registry entry is no longer live");
+        }
+        if (mode == pointerCaptureMode_)
+        {
+            return Core::success();
+        }
+        // Recorded even while the window is hidden, so a caller that locks before publication
+        // still gets the lock when the window appears rather than silently losing it.
+        pointerCaptureMode_ = mode;
+        if (!windowPublished_ || !initiallyVisible_ || mode == appliedPointerCaptureMode_)
+        {
+            return Core::success();
+        }
+        if (auto status = applyPointerCaptureMode(mode); !status)
+        {
+            return status;
+        }
+        appliedPointerCaptureMode_ = mode;
+        return Core::success();
+    }
+
     void shutdown() noexcept override
     {
         if (stopped_)
@@ -614,6 +649,26 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         }
         if (window_ != nullptr)
         {
+            // Release the cursor before the window goes away. A locked cursor is clipped to the
+            // window rect, and that clip is per-desktop state that nothing in the OS undoes for
+            // an exiting process, so skipping this leaves the user's pointer trapped in the
+            // rectangle of a window that no longer exists. Releasing is therefore the
+            // obligation of whoever took the lock, and it cannot be left to the game: a run
+            // that ends on a frame budget, an error, or a native close request never gets to
+            // ask. Errors are deliberately dropped -- shutdown is noexcept and must finish
+            // destroying the window either way, and a failed release is strictly better than a
+            // leaked window.
+            if (appliedPointerCaptureMode_ != PointerCaptureMode::Free)
+            {
+                clearGlfwErrors();
+                glfwSetInputMode(window_, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+                if (glfwRawMouseMotionSupported() == GLFW_TRUE)
+                {
+                    glfwSetInputMode(window_, GLFW_RAW_MOUSE_MOTION, GLFW_FALSE);
+                }
+                clearGlfwErrors();
+                appliedPointerCaptureMode_ = PointerCaptureMode::Free;
+            }
             clearCallbacks();
             glfwSetWindowUserPointer(window_, nullptr);
             glfwDestroyWindow(window_);
@@ -654,12 +709,18 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         }
     }
 
-    [[nodiscard]] Core::Status finishCreation(bool publishDuringCreation)
+    [[nodiscard]] Core::Status finishCreation(bool publishDuringCreation, PointerCaptureMode pointerCapture)
     {
         if (auto status = refreshInitialState(); !status)
         {
             return status;
         }
+        // The requested mode is recorded now but only applied once the window is published.
+        // Clipping the cursor to a window the user cannot see yet traps the pointer in an
+        // invisible rect, so the lock waits for the window to actually appear; a hidden window
+        // never applies it at all. The request is still reported back as granted, because the
+        // caller asked for the window's steady state, not for this instant.
+        pointerCaptureMode_ = pointerCapture;
 #if defined(_WIN32)
         if (auto status = attachImeHost(); !status)
         {
@@ -747,6 +808,19 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
             metricsDirty_ = true;
         }
         windowPublished_ = true;
+        // The lock deferred by finishCreation lands here, once there is a visible window to
+        // clip the cursor to. A window published while still hidden stays unclipped: the
+        // pointer must not be trapped in a rect the user cannot see.
+        if (initiallyVisible_ && pointerCaptureMode_ != appliedPointerCaptureMode_)
+        {
+            if (auto status = applyPointerCaptureMode(pointerCaptureMode_); !status)
+            {
+                Core::Error error = std::move(status.error());
+                error.addContext("IWindowSurfacePlatformBackend::publishPrimaryWindow");
+                return Core::failure(std::move(error));
+            }
+            appliedPointerCaptureMode_ = pointerCaptureMode_;
+        }
         return Core::success();
     }
 
@@ -886,6 +960,31 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
         clearGlfwErrors();
         glfwSetWindowShouldClose(window_, GLFW_TRUE);
         return checkGlfwOperation("glfwSetWindowShouldClose");
+    }
+
+    [[nodiscard]] Core::Result<Detail::GlfwPointerCaptureState> pointerCaptureStateForTest() noexcept
+    {
+        if (stopped_ || !hasLiveWindow())
+        {
+            return Core::failure(PlatformErrorCode::BackendStopped, "The GLFW test backend is stopped");
+        }
+        if (std::this_thread::get_id() != ownerThread_)
+        {
+            return Core::failure(PlatformErrorCode::WrongOwnerThread,
+                                 "The GLFW test operation must run on the creating thread");
+        }
+        clearGlfwErrors();
+        const int cursorMode = glfwGetInputMode(window_, GLFW_CURSOR);
+        if (auto status = checkGlfwOperation("glfwGetInputMode(GLFW_CURSOR)"); !status)
+        {
+            return std::unexpected(std::move(status.error()));
+        }
+        // Read from the native mode rather than from appliedPointerCaptureMode_, so the test
+        // cannot pass on a bookkeeping field that disagrees with the cursor.
+        return Detail::GlfwPointerCaptureState{
+            .requestedMode = pointerCaptureMode_,
+            .cursorHidden = cursorMode == GLFW_CURSOR_DISABLED,
+        };
     }
 
     [[nodiscard]] Core::Result<bool> windowVisibleForTest() noexcept
@@ -1147,6 +1246,60 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
     {
         const GlfwWindowRecord* record = windows_.tryGet(windowId_);
         return record != nullptr && record->native == window_ && window_ != nullptr;
+    }
+
+    // Applies the native cursor mode and then re-anchors the cached pointer position.
+    //
+    // The re-anchor is the whole reason this is not a bare glfwSetInputMode call.
+    // GLFW warps the cursor as it captures and releases it, and onCursorPosition
+    // derives its delta from the previous cached position, so without re-anchoring the
+    // first move after a switch would report the warp distance -- a single frame of
+    // hundreds of pixels, which reads as the camera being thrown across the world.
+    [[nodiscard]] Core::Status applyPointerCaptureMode(PointerCaptureMode mode)
+    {
+        clearGlfwErrors();
+        glfwSetInputMode(window_, GLFW_CURSOR,
+                         mode == PointerCaptureMode::Locked ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+        if (auto status = checkGlfwOperation("glfwSetInputMode(GLFW_CURSOR)"); !status)
+        {
+            return status;
+        }
+        // Raw motion bypasses the desktop's pointer acceleration curve, which is
+        // tuned for reaching UI targets rather than for aiming. Absence is not a
+        // failure: GLFW reports it unsupported on platforms that have no such API,
+        // and the accelerated delta still aims, just less evenly.
+        if (glfwRawMouseMotionSupported() == GLFW_TRUE)
+        {
+            clearGlfwErrors();
+            glfwSetInputMode(window_, GLFW_RAW_MOUSE_MOTION,
+                             mode == PointerCaptureMode::Locked ? GLFW_TRUE : GLFW_FALSE);
+            if (auto status = checkGlfwOperation("glfwSetInputMode(GLFW_RAW_MOUSE_MOTION)"); !status)
+            {
+                return status;
+            }
+        }
+        else
+        {
+            clearGlfwErrors();
+        }
+
+        double cursorX = 0.0;
+        double cursorY = 0.0;
+        clearGlfwErrors();
+        glfwGetCursorPos(window_, &cursorX, &cursorY);
+        if (auto status = checkGlfwOperation("glfwGetCursorPos(pointer capture)"); !status)
+        {
+            return status;
+        }
+        if (!std::isfinite(cursorX) || !std::isfinite(cursorY))
+        {
+            return Core::failure(PlatformErrorCode::BackendOperationFailed,
+                                 "GLFW returned an invalid cursor position after a capture mode change");
+        }
+        PointerSnapshot& pointer = input_.pointers[Platform::PrimaryPointerId];
+        pointer.logicalX = logicalPointerCoordinate(cursorX, pointerContentScaleX_);
+        pointer.logicalY = logicalPointerCoordinate(cursorY, pointerContentScaleY_);
+        return Core::success();
     }
 
     [[nodiscard]] static GlfwPlatformBackend* fromWindow(GLFWwindow* window) noexcept
@@ -1905,6 +2058,12 @@ class GlfwPlatformBackend final : public Integration::IWindowSurfacePlatformBack
     Integration::WindowSurfaceSnapshot surfaceSnapshot_{};
     u64 nextFrameId_ = 1;
     CallbackAssemblyFailure callbackFailure_ = CallbackAssemblyFailure::None;
+    // What the caller asked for. Split from the applied mode because a lock requested before
+    // the window is visible has to be remembered without being applied.
+    PointerCaptureMode pointerCaptureMode_ = PointerCaptureMode::Free;
+    // What the native cursor is actually set to. Shutdown keys the release off this one, so it
+    // never touches a cursor it did not lock.
+    PointerCaptureMode appliedPointerCaptureMode_ = PointerCaptureMode::Free;
     bool collectingFrame_ = false;
     bool focusCancelPending_ = false;
     bool streamRecoveryPending_ = false;
@@ -1962,6 +2121,11 @@ class GlfwIndependentPlatformBackend final : public IPlatformBackend {
     Core::Status updateTextInputPlacement(std::optional<TextInputPlacement> placement) override
     {
         return implementation_->updateTextInputPlacement(std::move(placement));
+    }
+
+    Core::Status setPointerCaptureMode(PointerCaptureMode mode) override
+    {
+        return implementation_->setPointerCaptureMode(mode);
     }
 
     void shutdown() noexcept override
@@ -2124,7 +2288,7 @@ createBackendUnchecked(const PlatformBackendCreateParams& params, bool publishDu
     {
         return std::unexpected(std::move(status.error()));
     }
-    if (auto status = backend->finishCreation(publishDuringCreation); !status)
+    if (auto status = backend->finishCreation(publishDuringCreation, params.primaryWindow.pointerCapture); !status)
     {
         return std::unexpected(std::move(status.error()));
     }
@@ -2253,6 +2417,16 @@ Core::Result<bool> glfwWindowVisibleForTest(IPlatformBackend& backend) noexcept
         return Core::failure(Core::CoreErrorCode::InvalidArgument, "The backend is not a GLFW platform backend");
     }
     return glfwBackend->windowVisibleForTest();
+}
+
+Core::Result<GlfwPointerCaptureState> glfwPointerCaptureStateForTest(IPlatformBackend& backend) noexcept
+{
+    auto* glfwBackend = glfwBackendForTest(backend);
+    if (glfwBackend == nullptr)
+    {
+        return Core::failure(Core::CoreErrorCode::InvalidArgument, "The backend is not a GLFW platform backend");
+    }
+    return glfwBackend->pointerCaptureStateForTest();
 }
 
 } // namespace Detail
