@@ -38,4 +38,24 @@ if(TINA_BUILD_PLATFORM_GLFW AND TINA_BUILD_RENDER_BGFX)
     add_subdirectory(2d_bgfx)
     add_subdirectory(2d_catalog)
     add_subdirectory(2d_tilemap_bgfx)
+    # Procedurally generated destructible tile world; interactive, not a gate program.
+    add_subdirectory(2d_terraria)
+    # Reports the GPU's hardware video decode capabilities. Needs the production bgfx
+    # device to answer at all, which is why it lives here rather than with the
+    # headless samples.
+    add_subdirectory(video_probe)
+    # Demuxes an MP4 into the Annex B parameter sets and access units the decode SPI
+    # expects, and checks them against that SPI's documented preconditions. It needs no
+    # GPU, but l-smash only exists when bgfx is built, which is why it is guarded here.
+    add_subdirectory(video_demux)
+    # Closes the gap video_demux and video_probe leave: submits real access units to a
+    # real device and proves the decoded picture reached the screen by comparing two
+    # captures of the same scene, one with zero submitted AUs and one with many. A
+    # falsifiable criterion that needs no fabricated threshold for what constitutes a
+    # "real" picture.
+    add_subdirectory(video_playback)
+    # First-person voxel world: the Minecraft core loop. Interactive rather than a gate
+    # program, and desktop-only because the cursor lock and mouse-look have no meaning
+    # without a real window.
+    add_subdirectory(3d_voxel)
 endif()

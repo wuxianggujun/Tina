@@ -33,6 +33,7 @@ add_library(tina_render STATIC
     Texture2DUpload.cpp
     UIDisplayList.cpp
     UploadTicket.cpp
+    VideoDecode.cpp
     null/NullRenderDevice.cpp
 )
 add_library(Tina::Render ALIAS tina_render)
@@ -82,6 +83,8 @@ if(TINA_BUILD_RENDER_BGFX)
         bgfx/BgfxTransientFrameBudget.hpp
         bgfx/BgfxTexture2DUpload.cpp
         bgfx/BgfxTexture2DUpload.hpp
+        bgfx/BgfxVideoDecode.cpp
+        bgfx/BgfxVideoDecode.hpp
         bgfx/BgfxUIAtlasTexture.cpp
         bgfx/BgfxUIAtlasTexture.hpp
         bgfx/BgfxUIDisplayGeometry.cpp

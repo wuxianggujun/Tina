@@ -19,6 +19,7 @@
 #include "BgfxUIAtlasTexture.hpp"
 #include "BgfxUIImageShader.hpp"
 #include "BgfxUITexturedShader.hpp"
+#include "BgfxVideoDecode.hpp"
 
 #include "../../integration/WindowSurfaceLeaseAccess.hpp"
 #include "../RenderSurfaceStateTracker.hpp"
@@ -95,10 +96,38 @@ class BgfxCaptureCallback final : public bgfx::CallbackI {
         std::_Exit(3);
     }
 
-    void traceVargs(const char* /*filePath*/, uint16_t /*line*/, const char* /*format*/,
-                    va_list /*argList*/) override
+    // bgfx reports every recoverable backend failure through BX_TRACE and then degrades
+    // silently, so a whole subsystem can decline to work while every API call still
+    // returns success. Dropping these by default is deliberate (writing to a redirected
+    // stderr from bgfx's render thread deadlocks), so the sink is a file and it is opt-in
+    // via TINA_BGFX_TRACE_FILE. Nothing changes for a run that does not set it.
+    void traceVargs(const char* /*filePath*/, uint16_t /*line*/, const char* format,
+                    va_list argList) override
     {
+        const char* path = std::getenv("TINA_BGFX_TRACE_FILE");
+        if (path == nullptr || path[0] == '\0')
+        {
+            return;
+        }
+        char line[2048]{};
+        const int written = std::vsnprintf(line, sizeof(line), format, argList);
+        if (written <= 0)
+        {
+            return;
+        }
+        // bgfx traces from both the api and render threads; the lock keeps one trace per
+        // line instead of two interleaved halves.
+        const std::lock_guard<std::mutex> guard{traceMutex_};
+        std::FILE* file = std::fopen(path, "ab");
+        if (file == nullptr)
+        {
+            return;
+        }
+        std::fwrite(line, 1, static_cast<std::size_t>(written), file);
+        std::fclose(file);
     }
+
+    std::mutex traceMutex_;
 
     void profilerBegin(const char* /*name*/, uint32_t /*abgr*/, const char* /*filePath*/,
                        uint16_t /*line*/) override
@@ -1029,6 +1058,10 @@ class BgfxRenderDevice final : public IRenderDevice {
         init.limits.numDrawCallPeakFrames = 0;
         // M11-D1: required for requestScreenShot / product pixel evidence.
         init.callback = &captureCallback_;
+        // Without this the backend never probes the decoder, so caps->codecs stays zero and
+        // videoDecodeCapabilities() can only ever report "unsupported". bgfx's probe cannot
+        // fail initialization: an unsupported device simply reports no codecs.
+        init.videoDecode = true;
 
         if (!bgfx::init(init))
         {
@@ -1859,11 +1892,27 @@ class BgfxRenderDevice final : public IRenderDevice {
                                  "A bgfx frame must be submitted before it can be presented");
         }
 
+        // bgfx services a screenshot request right after it submits the frame that
+        // carries it, so arming has to happen here, before this frame is dispatched.
+        // Requesting it after bgfx::frame() would attach it to the next, empty frame.
+        const bool capturingThisFrame = captureArmed_;
+        if (capturingThisFrame)
+        {
+            captureArmed_ = false;
+            captureCallback_.beginCapture();
+            bgfx::requestScreenShot(BGFX_INVALID_HANDLE, "tina-primary-frame");
+        }
+
         submitRetirementMarkerIfNeeded();
         const u32 currentFrame = bgfx::frame();
         completeRetirementsThrough(currentFrame);
         frameOpen_ = false;
         ++statistics_.presented;
+
+        if (capturingThisFrame)
+        {
+            awaitCaptureDelivery();
+        }
         return Core::success();
     }
 
@@ -3793,6 +3842,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             const u32 indexCount = (batchEnd - batchBegin) * 6U;
             bgfx::setIndexBuffer(&transientIndices, firstIndex, indexCount);
             bgfx::submit(kSprite2DView, sprite2DProgram_);
+            ++statistics_.sprite2DDrawsSubmitted;
             batchBegin = batchEnd;
         }
     }
@@ -3814,22 +3864,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         const bgfx::TextureHandle handle = *created;
 
-        u32 index = (std::numeric_limits<u32>::max)();
-        for (u32 slotIndex = 0; slotIndex < static_cast<u32>(textures_.size()); ++slotIndex)
-        {
-            if (textures_[slotIndex].identity.canReuse(
-                    textures_[slotIndex].live,
-                    textures_[slotIndex].retirementPhase != RetirementPhase::None))
-            {
-                index = slotIndex;
-                break;
-            }
-        }
-        if (index == (std::numeric_limits<u32>::max)())
-        {
-            index = static_cast<u32>(textures_.size());
-            textures_.push_back(TextureSlot{});
-        }
+        const u32 index = acquireTextureSlot();
         TextureSlot& slot = textures_[index];
         slot.handle = handle;
         slot.width = desc.baseWidth();
@@ -3940,6 +3975,88 @@ class BgfxRenderDevice final : public IRenderDevice {
         retirementTimeline_.queue();
         ++statistics_.pendingGpuRetirements;
         return Core::success();
+    }
+
+    [[nodiscard]] VideoDecodeCapabilities videoDecodeCapabilities() const noexcept override
+    {
+        if (stopped_ || !bgfxInitialized_)
+        {
+            return VideoDecodeCapabilities{};
+        }
+        return Bgfx::readVideoDecodeCapabilities();
+    }
+
+    [[nodiscard]] bool isVideoDecodeSupported(const VideoDecodeTextureDesc& desc) const noexcept override
+    {
+        if (stopped_ || !bgfxInitialized_)
+        {
+            return false;
+        }
+        if (auto status = validateVideoDecodeTextureDesc(desc); !status)
+        {
+            return false;
+        }
+        return Bgfx::isVideoDecodeSupported(desc);
+    }
+
+    [[nodiscard]] Core::Result<GpuTextureId> createVideoDecodeTexture(
+        const VideoDecodeTextureDesc& desc) override
+    {
+        if (auto status = validateApiThread("BgfxRenderDevice::createVideoDecodeTexture"); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        if (stopped_ || !bgfxInitialized_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        auto created = Bgfx::createVideoDecodeTexture(desc);
+        if (!created)
+        {
+            return Core::failure(std::move(created.error()));
+        }
+
+        const u32 index = acquireTextureSlot();
+        TextureSlot& slot = textures_[index];
+        slot.handle = *created;
+        slot.width = desc.codedWidth;
+        slot.height = desc.codedHeight;
+        slot.live = true;
+        slot.videoDecode = true;
+        slot.retirementPhase = RetirementPhase::None;
+        ++statistics_.liveResources;
+        // uploadedTextureLevels counts CPU-side pixel uploads. A decode target never
+        // receives any, so leaving it untouched keeps the upload budget honest.
+        return GpuTextureId{resourceOwnerId(), index, slot.identity.value()};
+    }
+
+    [[nodiscard]] Core::Status submitVideoDecodeFrame(
+        GpuTextureId texture, const VideoDecodeSubmission& submission) noexcept override
+    {
+        if (auto status = validateApiThread("BgfxRenderDevice::submitVideoDecodeFrame"); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        if (stopped_ || !bgfxInitialized_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        if (!texture || !isLiveTexture(texture))
+        {
+            return Core::failure(RenderErrorCode::TextureNotFound,
+                                 "Texture2D handle is invalid, stale, or belongs to another device");
+        }
+        const TextureSlot& slot = textures_[texture.index];
+        if (!slot.videoDecode)
+        {
+            return Core::failure(RenderErrorCode::VideoDecodeTextureNotFound,
+                                 "Texture2D handle does not refer to a video decode target");
+        }
+        if (auto status = validateVideoDecodeSubmission(submission); !status)
+        {
+            return status;
+        }
+        return Bgfx::submitVideoDecodeFrame(slot.handle, slot.width, slot.height, submission);
     }
 
     [[nodiscard]] Core::Result<GpuEnvironmentMapId>
@@ -4440,6 +4557,28 @@ class BgfxRenderDevice final : public IRenderDevice {
                             textures_[texture.index].identity.value() == texture.generation);
     }
 
+    // Claims a reusable slot or grows the table. Shared by uploaded textures and
+    // video decode targets: both occupy the same table so that one destroy path,
+    // one retirement path and one binding namespace cover them.
+    [[nodiscard]] u32 acquireTextureSlot()
+    {
+        for (u32 slotIndex = 0; slotIndex < static_cast<u32>(textures_.size()); ++slotIndex)
+        {
+            if (textures_[slotIndex].identity.canReuse(
+                    textures_[slotIndex].live,
+                    textures_[slotIndex].retirementPhase != RetirementPhase::None))
+            {
+                // A reused slot carries the previous resource's kind, so clear it here:
+                // the caller sets it only when the new resource is a decode target.
+                textures_[slotIndex].videoDecode = false;
+                return slotIndex;
+            }
+        }
+        const auto index = static_cast<u32>(textures_.size());
+        textures_.push_back(TextureSlot{});
+        return index;
+    }
+
     [[nodiscard]] bool isLiveEnvironmentMap(GpuEnvironmentMapId environmentMap) const noexcept
     {
         if (!environmentMap || environmentMap.owner != resourceOwnerId() ||
@@ -4759,6 +4898,65 @@ class BgfxRenderDevice final : public IRenderDevice {
         captureInFlight_ = true;
         captureCallback_.beginCapture();
         bgfx::requestScreenShot(BGFX_INVALID_HANDLE, "tina-primary-frame");
+        awaitCaptureDelivery();
+        captureInFlight_ = false;
+        if (!captureCallback_.isReady())
+        {
+            return Core::failure(RenderErrorCode::FrameCaptureFailed,
+                                 "bgfx did not deliver a screenshot within the bounded 120-frame capture wait");
+        }
+        return captureCallback_.take();
+    }
+
+    [[nodiscard]] Core::Status requestPrimaryFrameCaptureOnNextPresent() override
+    {
+        if (auto status = validateApiThread("BgfxRenderDevice::requestPrimaryFrameCaptureOnNextPresent");
+            !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        if (stopped_ || !bgfxInitialized_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        if (captureInFlight_)
+        {
+            return Core::failure(RenderErrorCode::FrameCaptureBusy,
+                                 "A bgfx frame capture is already in progress");
+        }
+        captureArmed_ = true;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Result<Rgba8FrameCapture> collectPrimaryFrameCapture() override
+    {
+        if (auto status = validateApiThread("BgfxRenderDevice::collectPrimaryFrameCapture"); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        if (stopped_ || !bgfxInitialized_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        if (captureArmed_)
+        {
+            captureArmed_ = false;
+            return Core::failure(RenderErrorCode::FrameCaptureFailed,
+                                 "The armed primary frame capture was never presented");
+        }
+        if (!captureCallback_.isReady())
+        {
+            return Core::failure(RenderErrorCode::FrameCaptureFailed,
+                                 "No primary frame capture was armed, or bgfx did not deliver it");
+        }
+        return captureCallback_.take();
+    }
+
+    // Pumps bgfx until the screenshot callback publishes, within a bounded budget. The
+    // frames it pumps carry no new content, so they cannot change what was captured:
+    // the screenshot was already attached to an earlier frame.
+    void awaitCaptureDelivery() noexcept
+    {
         for (int frameIndex = 0;
              frameIndex < PrimaryFrameCaptureDeliveryFrameBudget && !captureCallback_.isReady();
              ++frameIndex)
@@ -4774,13 +4972,6 @@ class BgfxRenderDevice final : public IRenderDevice {
                 std::this_thread::sleep_for(PrimaryFrameCapturePollDelay);
             }
         }
-        captureInFlight_ = false;
-        if (!captureCallback_.isReady())
-        {
-            return Core::failure(RenderErrorCode::FrameCaptureFailed,
-                                 "bgfx did not deliver a screenshot within the bounded 120-frame capture wait");
-        }
-        return captureCallback_.take();
     }
 
     [[nodiscard]] Core::Status syncUIGlyphAtlas(
@@ -5179,6 +5370,10 @@ class BgfxRenderDevice final : public IRenderDevice {
         u16 width = 0;
         u16 height = 0;
         bool live = false;
+        // A decode target only accepts decode submissions, and an uploaded texture only
+        // accepts pixel uploads. Both live in this table, so the slot has to say which it
+        // is: handing a decode blob to an ordinary texture would reach bgfx as pixel data.
+        bool videoDecode = false;
         RetirementPhase retirementPhase = RetirementPhase::None;
         FramePin completionPin{};
     };
@@ -5228,6 +5423,8 @@ class BgfxRenderDevice final : public IRenderDevice {
     bool stopped_ = false;
     bool bgfxInitialized_ = false;
     bool captureInFlight_ = false;
+    // Set between frames, consumed by present() before it dispatches the frame.
+    bool captureArmed_ = false;
     bool retirementMarkerSupported_ = false;
     bgfx::TextureHandle retirementMarkerSource_ = BGFX_INVALID_HANDLE;
     bgfx::TextureHandle retirementMarkerReadback_ = BGFX_INVALID_HANDLE;

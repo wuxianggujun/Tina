@@ -9,6 +9,7 @@
 #include <tina/render/RenderPostProcess.hpp>
 #include <tina/render/ShadowMapExtentConfig.hpp>
 
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <exception>
@@ -131,6 +132,11 @@ struct RenderStatistics final {
     u64 postProcessChainsExecuted = 0;
     // Extension passes the accepted chains planned, summed across frames.
     u64 postProcessPassesPlanned = 0;
+    // Sprite2D batches handed to the backend's draw call, summed across frames. A
+    // scene can carry a camera and sprites, schedule its pass, and still reach the
+    // GPU with nothing drawn; this separates that from "the pixels were drawn but
+    // the frame that was read back is not the frame they were drawn into".
+    u64 sprite2DDrawsSubmitted = 0;
 };
 
 // Backend-owned GPU texture handle. Owner rejects cross-device use, generation
@@ -344,6 +350,122 @@ struct Texture2DUploadDesc final {
         return levels.empty() ? u16{0} : levels.front().height;
     }
 };
+
+// Video vocabulary is declared here rather than reused from AssetFormat for the same
+// reason the texture vocabulary is: a device must be describable without an asset
+// pipeline. Cooked video payloads map onto these at the extraction boundary.
+enum class VideoCodec : u8 {
+    H264 = 0,
+    H265,
+    Av1,
+};
+
+enum class VideoChromaSubsampling : u8 {
+    Yuv420 = 0,
+    Yuv422,
+    Yuv444,
+};
+
+// What this device can hardware decode. Every field is false/empty when the backend
+// has no video decoder at all, which is the OpenGL and Null case.
+struct VideoDecodeCapabilities final {
+    static constexpr usize CodecCount = 3;
+
+    struct CodecSupport final {
+        bool bitDepth8 = false;
+        bool bitDepth10 = false;
+        bool bitDepth12 = false;
+        bool yuv420 = false;
+        bool yuv422 = false;
+        bool yuv444 = false;
+
+        [[nodiscard]] constexpr bool anySupport() const noexcept
+        {
+            return bitDepth8 || bitDepth10 || bitDepth12;
+        }
+
+        friend constexpr bool operator==(const CodecSupport&, const CodecSupport&) noexcept = default;
+    };
+
+    // False when the device cannot decode video regardless of codec. The per-codec
+    // entries are only meaningful while this is true.
+    bool supported = false;
+    // A decoded picture lands in a sampleable colour texture, so the destination
+    // format must itself be usable as a decode target. A device may advertise a
+    // codec and still be unusable because of this.
+    bool destinationFormatSupported = false;
+    std::array<CodecSupport, CodecCount> codecs{};
+
+    [[nodiscard]] constexpr const CodecSupport& codec(VideoCodec value) const noexcept
+    {
+        return codecs[static_cast<usize>(value)];
+    }
+
+    friend constexpr bool operator==(const VideoDecodeCapabilities&,
+                                     const VideoDecodeCapabilities&) noexcept = default;
+};
+
+// A decode target is created once per clip and rewritten every frame, so it carries
+// the whole-stream description: the codec parameter sets plus the picture-buffer
+// shape the stream needs. Coded extents are the macroblock/CTU-aligned dimensions,
+// which may exceed the displayed extent.
+struct VideoDecodeTextureDesc final {
+    static constexpr u16 MaximumDimension = 8192;
+
+    VideoCodec codec = VideoCodec::H264;
+    VideoChromaSubsampling chroma = VideoChromaSubsampling::Yuv420;
+    u8 bitDepth = 8;
+    u16 codedWidth = 0;
+    u16 codedHeight = 0;
+    // Decoded-picture-buffer shape. A stream needing more slots than the device
+    // allows fails at creation rather than corrupting reference handling later.
+    u8 maxDpbSlots = 0;
+    u8 maxActiveReferences = 0;
+    // Annex B for H.264/H.265, OBUs for AV1. The backend parses chroma format, bit
+    // depth, profile and level out of these, so they must describe the same stream
+    // the fields above do.
+    std::span<const std::byte> parameterSets{};
+};
+
+// One access unit inside a submission batch. `byteSize` slices the submission's
+// bitstream span; entries are stored back to back in decode order.
+struct VideoDecodeAccessUnit final {
+    u32 byteSize = 0;
+    i64 presentationTimeUs = 0;
+};
+
+// Per-frame decode work. A submission either advances the presentation clock,
+// enqueues access units, or both: an empty `accessUnits` with a valid
+// `presentationTimeUs` is a clock-only tick, which is how a paused-but-live
+// decoder keeps presenting the same picture.
+struct VideoDecodeSubmission final {
+    // Concatenation of every entry in `accessUnits`, in decode order.
+    std::span<const std::byte> bitstream{};
+    std::span<const VideoDecodeAccessUnit> accessUnits{};
+    // Playback clock. The device presents whichever decoded picture best matches.
+    // Must not move backwards between submissions unless `isSeekDiscontinuity`.
+    i64 presentationTimeUs = 0;
+    // First submission after a seek. The first access unit must be a clean IDR:
+    // the device flushes its picture buffer and reorder pool before decoding, which
+    // is what makes a backwards jump in `presentationTimeUs` legal here.
+    bool isSeekDiscontinuity = false;
+    // Decode without presenting. Used while pre-rolling so the visible picture does
+    // not churn through intermediate frames.
+    bool suppressPresentation = false;
+    // Last access unit of the clip. Lets the device finish without waiting for
+    // lookahead that will never arrive.
+    bool isFinalAccessUnit = false;
+};
+
+// Shared validation so Null and bgfx cannot drift on what they accept.
+//
+// The stream shape and the parameter sets are validated separately because
+// isVideoDecodeSupported answers a question about the device, not about a
+// particular stream's headers: requiring parameter sets there would force a caller
+// asking "can this machine decode 1080p H.264 at all" to fabricate a header first.
+[[nodiscard]] Core::Status validateVideoDecodeTextureDesc(const VideoDecodeTextureDesc& desc) noexcept;
+[[nodiscard]] Core::Status validateVideoDecodeTextureCreation(const VideoDecodeTextureDesc& desc) noexcept;
+[[nodiscard]] Core::Status validateVideoDecodeSubmission(const VideoDecodeSubmission& submission) noexcept;
 
 // Bytes one level occupies, accounting for 4x4 block compression. Zero means the
 // extent or format is invalid.
@@ -592,6 +714,42 @@ class IRenderDevice {
         return Core::failure(RenderErrorCode::TextureUploadUnsupported,
                              "This render device does not support Texture2D binding");
     }
+    // What this device can hardware decode. Always answerable: a device with no
+    // decoder reports an all-false capability set rather than failing, so a caller
+    // can choose a still-image fallback without treating absence as an error.
+    [[nodiscard]] virtual VideoDecodeCapabilities videoDecodeCapabilities() const noexcept
+    {
+        return VideoDecodeCapabilities{};
+    }
+    // Whether this exact stream shape can be decoded. Coarse capability reporting
+    // cannot answer this: a device may support the codec and bit depth and still
+    // reject a specific extent or picture-buffer layout.
+    [[nodiscard]] virtual bool isVideoDecodeSupported(
+        const VideoDecodeTextureDesc& desc) const noexcept
+    {
+        static_cast<void>(desc);
+        return false;
+    }
+    // Creates a decode destination. The result is an ordinary sampleable texture:
+    // colour conversion happens inside the device, so callers bind and sample it
+    // exactly like an uploaded Texture2D and destroy it with destroyTexture2D.
+    [[nodiscard]] virtual Core::Result<GpuTextureId> createVideoDecodeTexture(
+        const VideoDecodeTextureDesc& desc)
+    {
+        static_cast<void>(desc);
+        return Core::failure(RenderErrorCode::VideoDecodeUnsupported,
+                             "This render device does not support hardware video decoding");
+    }
+    // Advances one decode target: enqueues access units, moves the presentation
+    // clock, or both. Called once per frame per live clip.
+    [[nodiscard]] virtual Core::Status submitVideoDecodeFrame(
+        GpuTextureId texture, const VideoDecodeSubmission& submission) noexcept
+    {
+        static_cast<void>(texture);
+        static_cast<void>(submission);
+        return Core::failure(RenderErrorCode::VideoDecodeUnsupported,
+                             "This render device does not support hardware video decoding");
+    }
     // Transactionally allocates a non-zero key from this device's Texture2D key
     // namespace and binds texture. Backend failure does not consume the key.
     // Caller-selected keys passed directly to setTexture2DBinding share the
@@ -622,7 +780,33 @@ class IRenderDevice {
     // M11-D1: capture primary backbuffer as RGBA8 (top-left origin) after present.
     // Default Unsupported; Null returns Unsupported; bgfx implements via requestScreenShot.
     // Must not be called while a frame is open (between submit and present).
+    //
+    // This reads back *after* the frame it is called between has already been handed to
+    // the backend, so the pixels it returns are whatever the surface held before that
+    // point, not the frame the caller just submitted. Use the arm/collect pair below to
+    // read back a specific frame's own pixels.
     [[nodiscard]] virtual Core::Result<Rgba8FrameCapture> capturePrimaryFrameRgba8()
+    {
+        return Core::failure(RenderErrorCode::FrameCaptureUnsupported,
+                             "This render device does not support primary frame capture");
+    }
+
+    // Arms a read-back of the next presented frame. The request must reach the backend
+    // before that frame is dispatched, which is why this cannot be expressed as a single
+    // call: by the time a caller could ask, the frame is already gone. Call this before
+    // submitFrame, then collectPrimaryFrameCapture after the following present.
+    //
+    // Arming twice without collecting keeps the first request and is not an error: the
+    // capture belongs to the next presented frame either way.
+    [[nodiscard]] virtual Core::Status requestPrimaryFrameCaptureOnNextPresent()
+    {
+        return Core::failure(RenderErrorCode::FrameCaptureUnsupported,
+                             "This render device does not support primary frame capture");
+    }
+
+    // Takes the armed capture. Fails if none was armed, or if the backend did not
+    // deliver one within its bounded wait; an empty result is never returned as success.
+    [[nodiscard]] virtual Core::Result<Rgba8FrameCapture> collectPrimaryFrameCapture()
     {
         return Core::failure(RenderErrorCode::FrameCaptureUnsupported,
                              "This render device does not support primary frame capture");
