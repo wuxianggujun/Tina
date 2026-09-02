@@ -1,6 +1,7 @@
 #pragma once
 
 #include <tina/core/base/Types.hpp>
+#include <tina/core/text/ParseInteger.hpp>
 
 #include <charconv>
 #include <limits>
@@ -112,30 +113,14 @@ class ArgScanner final {
     std::string_view failedOption_{};
 };
 
-// Parses an unsigned option value, rejecting anything the whole text is not: leading or trailing
-// spaces, a sign, trailing garbage, and values above the target type's maximum.
+// Parses an unsigned option value; forwards to parseUnsigned.
 //
-// from_chars accepts no sign for unsigned types, so "+5" and "-5" both fail here, matching what the
-// hand-written digit loops this replaces already did.
+// This exists so call sites can use a name that signals "command-line argument" rather than
+// "generic text", but the implementation is the shared parseUnsigned from ParseInteger.hpp.
 template <typename Value>
 [[nodiscard]] bool parseArgUnsigned(std::string_view text, Value& out) noexcept
 {
-    static_assert(std::is_unsigned_v<Value>, "parseArgUnsigned is for unsigned targets only");
-
-    unsigned long long parsed = 0;
-    const char* const begin = text.data();
-    const char* const end = begin + text.size();
-    const auto result = std::from_chars(begin, end, parsed);
-    if (result.ec != std::errc{} || result.ptr != end)
-    {
-        return false;
-    }
-    if (parsed > static_cast<unsigned long long>((std::numeric_limits<Value>::max)()))
-    {
-        return false;
-    }
-    out = static_cast<Value>(parsed);
-    return true;
+    return parseUnsigned(text, out);
 }
 
 } // namespace Tina::Core
