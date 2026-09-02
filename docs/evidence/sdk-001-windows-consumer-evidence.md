@@ -1,4 +1,17 @@
-# SDK-001 Windows Consumer Evidence (tip)
+# SDK-001 Windows Consumer Evidence (2026-08-03 / 2026-08-16 快照)
+
+> **一次性运行快照，不是当前契约。** 标题里的 "tip" 指取证当日的 tip，不是今天的 tip。
+> 2026-09-01 复核有两处必须先看：
+>
+> 1. **计数已过期。** 下文 2026-08-16 记的「241 个安装头」现在是 **319**
+>    （`out/build/windows-msvc-vnext-bgfx/sdk-desktop-bootstrap-consumer-relocated-prefix` 实测；
+>    [Backlog](../backlog.md) 的 SDK-001 行已自校准到同一数字）。
+> 2. **本文覆盖期内该门禁在干净树上其实是坏的。** 三个 SDK 门禁脚本手抄了一份「install 前先编哪些
+>    目标」的清单，只列 `tina_runtime`/`tina_scene`/`tina_asset`；`Save`/`Gameplay`/`Network`/
+>    `Animation3D` 无人链接因而从未被编译，`cmake --install` 撞上不存在的 `tina_save.lib` 直接失败。
+>    `tina_editor` 只是碰巧被别的构建留在树里才没暴露。因此下文那些 exit 0 只在**已被其它构建污染过
+>    的常驻 tree** 上成立，不能读成「干净树可复现」。修复见 `75bfbb06`（每处 `install(TARGETS)` 旁
+>    收集目标名并聚合出 `tina_sdk_install_artifacts`，门禁只编这一个目标）。
 
 Local **moved-prefix** install/consumer gates on this developer machine.
 Does **not** replace cross-distro artifact transfer or tuple-scoped ABI baselines from ADR 0024.
@@ -7,7 +20,7 @@ Does **not** replace cross-distro artifact transfer or tuple-scoped ABI baseline
 
 本页的 Windows/Linux consumer、moved-prefix、component isolation 与跨发行版 fresh-consumer 证据继续有效，
 但它们证明的是 package/source portability 与实际 tuple 的 artifact transfer，不自动形成旧对象二进制兼容承诺。
-[ADR 0024](adr/0024-sdk-abi-compatibility.md) 已 Accepted，选择如下：
+[ADR 0024](../adr/0024-sdk-abi-compatibility.md) 已 Accepted，选择如下：
 
 - `0.y.z` 的 `y` 是 breaking compatibility epoch；同 epoch 内保持兼容的修复/加法递增 `z`；
 - 完整 epoch baseline 与 previous-release source/object probe 建立前，package 使用 strict exact-version
@@ -30,7 +43,7 @@ Does **not** replace cross-distro artifact transfer or tuple-scoped ABI baseline
 ### 2026-08-16 final DesktopBootstrap gate
 
 `windows-msvc-vnext-bgfx` Debug 的 `RunSdkConsumerGate.ps1 -Consumer DesktopBootstrap` exit 0：producer
-增量构建与安装完成，241 个 Tina public headers 通过第三方 token 扫描；version probe 接受三段 `0.0.1`，
+增量构建与安装完成，241 个 Tina public headers 通过第三方 token 扫描（**2026-09-01 已过期，当前 319**）；version probe 接受三段 `0.0.1`，
 拒绝 `0.0.0`、`0.0.2`、`0.0.1.0` tweak 与以 `0.0.1` 为 lower endpoint 的 range；12 个 relocated CMake
 package 文件通过绝对路径检查。missing-component 与
 GameSDK-only component-isolation probe、外部 consumer configure/build/run 均 exit 0，最终输出：

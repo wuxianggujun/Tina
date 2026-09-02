@@ -90,6 +90,8 @@ Style 垂直切片已补齐 `ui_style_state_v1`，并将 style token capacity/co
 | `ui_style_state_v1` | 4096 nodes、256 rules、每节点最多 4 classes | resolved/inspected nodes、candidate rules、token/bucket/class-link capacity/high-water；当前 workload 注册 token=0，只验证单节点 state change；运行期 token update 的 reverse-dependency 路径由 unit tests 覆盖 |
 | `ui_image_nineslice_v1` | 256 Image + 232 Icon + 512 full NineSlice、64 unique `(resolver scope, AssetId)` | 每 build `Q=5096/U=64/B=1000`、64 resolve hit、5032 cache dedupe、64 pin acquire/release；missing/not-ready/extent mismatch/resource-intern dedupe 与 allocation delta 为 0；command/batch/resource/pin high-water 和 DisplayList checksum 稳定 |
 | `ui_motion_v1` | 4096 nodes、seed%3→active tracks 0/64/1024、固定 fakeable clock | sampled/active/high-water；`M==0` 时 motion work/额外 dirty 为 0；layout/hit rebuild 为 0，记录 paint publication |
+| `ui_motion_timeline_v1` | 4096 nodes、256 timeline × 4 track × 4 keyframe、seed%3→active tracks 0/64/1024、固定 fakeable clock | timeline/track/keyframe/active-timeline 的 configured 容量与 high-water、sampled timelines/tracks/segments、active count、zero-active 迭代数与 checksum |
+| `ui_motion_layout_v1` | 同上 timeline 规模，额外 4095 个 overlay leaf；Layout/Hit/Paint 原子 timeline rebuild | 除 `ui_motion_timeline_v1` 全部计数外，另记 sampled layout tracks 与 timeline layout commit failures（须为 0） |
 
 每项分别记录 UI commit、route、DisplayList build 的 active CPU 时间和工作量，不能只给混合 frame time；
 Render submit/present wait 与 GPU timestamp 继续单列。UI benchmark 不能靠减少 entry、跳过 listener 或关闭
@@ -226,9 +228,11 @@ Editor 的 resident `CookedAssetFile` bytes 使用可实际 deallocate 的独立
 [ADR 0018](adr/0018-benchmark-protocol.md) 已为 `Accepted`（schema v1 首切片）。独立可执行
 `tina_bench`（`tools/bench`，随 `TINA_BUILD_EXAMPLES` 或 `TINA_BUILD_BENCHMARKS` 构建）输出
 版本化 JSON：`schema`、workload id/version/seed/parameters、build/host fingerprint、counters
-checksum、p50/p95/p99。当前包含 `null_runtime_frames`（Headless+Null+DisabledTask）以及
-`ui_static_commit_v1`、`ui_paint_dirty_v1`、`ui_route_v1`、`ui_virtual_collection_v1`、
-`ui_image_nineslice_v1`、`ui_component_build_v1` workload。
+checksum、p50/p95/p99。当前包含 `null_runtime_frames`（Headless+Null+DisabledTask）以及全部10个 UI
+workload：`ui_static_commit_v1`、`ui_paint_dirty_v1`、`ui_route_v1`、`ui_virtual_collection_v1`、
+`ui_image_nineslice_v1`、`ui_component_build_v1`、`ui_style_state_v1`、`ui_motion_v1`、
+`ui_motion_timeline_v1`、`ui_motion_layout_v1`（注册与 dispatch 见
+`tools/bench/UIBenchmarkWorkloads.cpp:38-47` 与 `isUIBenchmarkWorkload()`）。
 
 `tools/bench/run_benchmark_gate.py` 顺序启动独立 `tina_bench` 进程，先要求全部子结果的 schema、
 workload/version/seed/parameters、fingerprint 和 checksum 完全兼容，再对 run-level p99 计算 median/MAD。
@@ -268,8 +272,9 @@ py -3 -m unittest tools/bench/test_run_benchmark_gate.py -v
 
 正式候选采样遵循 ADR 0018：每进程 warm-up 600、普通样本至少 2,000；p99/泄漏结论使用 10,000，且需
 多进程 runner 可以验证统计与兼容协议，但只有受审固定 machine profile/baseline 才能启用 hard gate。
-当前命令已覆盖 `UI-PERF-001` 全套 workload（含 Style 与 `ui_motion_v1`）。多进程 provisional 示例见
-[perf-002-provisional-evidence.md](perf-002-provisional-evidence.md)。
+当前命令已覆盖 `UI-PERF-001` 全套10个 workload（含 Style、`ui_motion_v1` 与两个 timeline motion
+workload）。多进程 provisional 示例见
+[perf-002-provisional-evidence.md](evidence/perf-002-provisional-evidence.md)。
 
 ## 验证工具
 

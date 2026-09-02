@@ -1,5 +1,9 @@
 # Agent visual inspection (2026-08-03)
 
+> **一次性运行快照，不是当前契约。** 本文记录 2026-08-03 那一轮人工视觉巡检的结果；其中的 target
+> 名、路径、截图路径与 Pass/Fail 结论只对该日的 tip 成立，后续提交可能已推翻。引用前回到当前
+> 源码/CMake 复核。
+
 Screenshots under `artifacts/screenshots/agent-inspect-20260803/` (gitignore).
 Gates re-run the same day: UI-STYLE visual ok; UI-002 UIA tip-r2 ok; UI unit filters 51/51.
 
@@ -40,7 +44,8 @@ Path: `sample2d-freetype/.../frame-02.png`
 **Issues:** none blocking. Particle/trail motion is intentional product demo (UI-003 playfield ROI jitter source).
 
 > 2026-08-07：本节保留当时的 target/path 作为历史证据；当前产品入口已迁移为
-> `src/editor_app/main.cpp` + `tina_editor_desktop` / `TinaEditor.exe`。
+> `editor/app/main.cpp` + `tina_editor_desktop` / `TinaEditor.exe`（Editor 已从 `src/editor_app/`
+> 移到顶层 `editor/`，2026-09-01 复核）。
 
 ### 3. `tina_sample_editor_shell` (bgfx Debug, historical name)
 

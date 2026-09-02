@@ -867,7 +867,7 @@ capture 仅作为 TMD-07 前的卡片墙基线，不再代表当前布局。
 2026-07-31 的 `RunUiStateFeedbackVisualGate.ps1` 通过 Windows MSVC/bgfx/FreeType 产品路径驱动真实
 Win32 pointer route，对 Dark/Light 的 normal、hover、focus、pressed/drag、selected 与 disabled 状态执行
 22项差分检查并全部通过。可复现环境、可执行文件与截图哈希记录在
-[UI-STATE-FEEDBACK Windows Evidence](ui-state-feedback-evidence-windows.md)；生成截图已按约定回收。
+[UI-STATE-FEEDBACK Windows Evidence](evidence/ui-state-feedback-evidence-windows.md)；生成截图已按约定回收。
 
 `tina_sample_2d` 当前 UI 包含：
 

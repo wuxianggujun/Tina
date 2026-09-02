@@ -6,7 +6,7 @@ Operator-only product evidence. Completing this checklist is required to set
 
 ## Prerequisites
 
-1. Pass tip automatic gate (see [ui-002-uia-evidence-windows.md](ui-002-uia-evidence-windows.md)).
+1. Pass tip automatic gate (see [ui-002-uia-evidence-windows.md](evidence/ui-002-uia-evidence-windows.md)).
 2. Build FreeType + UIA graph:
 
 ```powershell
@@ -64,5 +64,5 @@ out\build\windows-msvc-vnext-bgfx-ui-freetype\bin\Debug\tina_sample_ui_showcase.
 ## After pass
 
 1. Attach this filled table (or a dated copy under `docs/` / `artifacts/gates/`).
-2. Update [ui-002-uia-evidence-windows.md](ui-002-uia-evidence-windows.md) with a Manual section
+2. Update [ui-002-uia-evidence-windows.md](evidence/ui-002-uia-evidence-windows.md) with a Manual section
    and set backlog UI-002 to Done only when both automatic tip gate and this checklist pass.

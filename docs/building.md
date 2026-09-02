@@ -1,7 +1,7 @@
 # 构建与运行
 
 本文只记录当前可执行命令。测试数量和一次性机器结果见 [testing.md](testing.md) 与
-[M12 Windows 证据](m12-evidence-windows.md)。所有 Windows Debug/Release 构建在同一 build tree
+[M12 Windows 证据](evidence/m12-evidence-windows.md)。所有 Windows Debug/Release 构建在同一 build tree
 内串行执行；日常验证禁止 `--clean-first` 和删除 `out/build`。
 
 ## 环境
@@ -71,13 +71,24 @@ powershell -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
 | `windows-msvc-vnext-audio-miniaudio` | Null + miniaudio adapter | `tests;audio-miniaudio` |
 | `windows-msvc-vnext-audio-miniaudio-codecs` | miniaudio + Vorbis/Opus | 对应 codec features |
 | `windows-msvc-vnext-bgfx-product-2d` | bgfx + Physics2D + FreeType + miniaudio | `tests;platform-glfw;physics2d;ui-freetype;audio-miniaudio` |
+| `windows-msvc-vnext-network-tls` | Null + mbedTLS TLS transport | `tests;network-tls` |
 | `linux-gcc13-vnext` | Linux Null | `tests` |
+| `linux-gcc13-vnext-physics2d` | Linux Null + Box2D | `tests;physics2d` |
 | `linux-gcc13-vnext-audio-miniaudio` | Linux Null + miniaudio adapter | `tests;audio-miniaudio` |
 | `linux-gcc13-vnext-platform` | Linux GLFW/X11 | `tests;platform-glfw` |
+| `linux-gcc13-vnext-bgfx` | Linux GLFW + bgfx | 继承 `linux-gcc13-vnext-platform`（`tests;platform-glfw`） |
 | `linux-gcc13-vnext-platform-wayland` | Linux GLFW/Wayland | `tests;platform-glfw;wayland` |
 | `linux-clang22-vnext` | Clang Null | `tests` |
-| `linux-clang22-vnext-sanitize` | Clang ASan/UBSan/LSan | `tests` |
-| `linux-clang22-vnext-platform*` | Clang GLFW/X11/Wayland + sanitizer 变体 | 对应 platform features |
+| `linux-clang22-vnext-platform` | Clang GLFW/X11 | `tests;platform-glfw` |
+| `linux-clang22-vnext-sanitize` | Clang Null + ASan/UBSan/LSan | `tests` |
+| `linux-clang22-vnext-physics2d-sanitize` | Clang Box2D + sanitizer | `tests;physics2d` |
+| `linux-clang22-vnext-platform-sanitize` | Clang GLFW/X11 + sanitizer | `tests;platform-glfw` |
+| `linux-clang22-vnext-platform-wayland-sanitize` | Clang GLFW/Wayland + sanitizer | `tests;platform-glfw;wayland` |
+
+上表为 vNext configurePresets 全量。此外 `CMakePresets.json` 还保留 `windows-msvc`、
+`windows-msvc-vs2022`、`linux-ninja`、`linux-wayland` 四个非 vNext 条目，以及 hidden 的 `base`。
+每个 preset 名必须逐字取自 `CMakePresets.json`：拼错的 `--target`/`--preset` 组合不会让 CMake 报错，
+只会静默地什么都不构建。
 
 `TINA_BUILD_UI_FREETYPE`、`TINA_BUILD_AUDIO_MINIAUDIO`、`TINA_BUILD_PHYSICS2D`、
 `TINA_BUILD_PLATFORM_GLFW` 和 `TINA_BUILD_RENDER_BGFX` 必须与相应 manifest feature 同时启用；
@@ -119,7 +130,7 @@ source/toolchain/target tuple，执行规则如下：
    运行测试，应把它记录为单独的 test gate，并显式复用已有 binary；不得把测试偷偷附加到 compile-only 后面。
    仅要求 Linux 编译兼容性时，即使刚生成了测试 executable，也必须保持 `testRuns=0`，不能以“顺便验证”为由
    运行新 binary 或重跑历史测试结果。
-3. Docker、WSL、临时 worktree 或一次性 Linux preset 产生的 build tree 默认都是 **ephemeral**。取得 compiler
+3. Docker、临时 worktree 或一次性 Linux preset 产生的 build tree 默认都是 **ephemeral**。取得 compiler
    exit code 和首个错误记录后，无论成功失败都立即删除；失败产物只允许保留到错误已记录，不跨任务保留。
 4. 同一轮不同 helper/container 只复用已构建 binary 和 hash，不再调用 CMake。需要不同 compiler/toolchain 的
    独立结论时才建立新的 tuple，且每个 tuple 完成后分别回收。
@@ -133,6 +144,12 @@ source/toolchain/target tuple，执行规则如下：
 并记录本轮临时文件的合计占用。只清理账簿中由本轮创建或明确独占的资源，不猜测、不全局 prune；共享资源若需
 保留，转入 `retainedCaches` 并写明 owner、路径或 ID、占用和保留原因。这样既避免误删共享缓存，也避免无人认领
 的 Linux 构建产物继续把项目目录膨胀到数十 GiB。
+
+**Linux 门禁只走 Docker，仓库里没有任何 WSL 脚本。** `tools/linux/` 只有 Docker wrapper 会调用的
+容器内 `run-*-gate.sh` 与 `cmake-cache-source-guard.sh`；入口一律是
+`tools/windows/RunLinuxDockerGate.ps1` / `RunSdkCrossDistroGate.ps1`。容器把仓库**挂载**（`-v <repo>:/work/tina`）
+而非拷贝进去，所以 Linux build tree 与 Windows 的互不冲突 —— 但它们同时对 Windows 侧可见，
+`out/build/docker-*` 的清理责任仍在本轮。
 
 收尾报告至少写明以下事实，不能只写“已清理”：
 
@@ -148,7 +165,7 @@ retainedCaches=<owner + path-or-id + bytes + 保留原因；没有则为 none>
 
 开始前只对本轮明确使用的临时 tree 记录占用字节，结束后验证路径不存在并记为0；可列出 `out/build` 的直接
 子目录定位异常增长，但不要递归扫描整个仓库。任何保留项都必须逐项记录路径、占用和保留原因，未登记的
-Linux/Docker/WSL 临时 tree 仍存在即视为收尾失败。不能因为后续“也许会再测”把数十 GiB 的
+Linux/Docker 临时 tree 仍存在即视为收尾失败。不能因为后续“也许会再测”把数十 GiB 的
 vcpkg/bgfx/shaderc/object 产物留在项目中。
 
 上述资源块必须进入 gate 日志和任务最终报告。某项无法查询时必须写 `unknown` 和原因，并将
@@ -308,8 +325,9 @@ RenderBgfx 在 Tina prefix 中安装最小 `bgfx`/`bx`/`bimg` runtime package，
 离线工具。每个 consumer gate 都先安装到 staging prefix，再物理移动到不同名的
 relocated prefix；原 prefix 消失后，package 路径扫描、`find_package`、链接和运行只允许使用新位置。
 这证明同一 OS/toolchain 内的 moved-prefix relocatability，不替代跨发行版 artifact transfer。Docker
-入口固定限制为 2 CPU/8 GiB，并为每个 SDK gate 使用独立的 container-only build directory，避免
-WSL `/mnt/c` 与 Docker `/work/tina` 共用绝对路径 cache。
+入口固定限制为 2 CPU/8 GiB，并为每个 SDK gate 使用独立的 container-only build directory，避免与宿主
+build tree 共用绝对路径 cache。`tools/linux/cmake-cache-source-guard.sh` 在 `CMAKE_HOME_DIRECTORY`
+不匹配时只删 `CMakeCache.txt`，保留 object 与 `vcpkg_installed`。
 
 跨发行版 artifact transfer 是 **release/ABI candidate 门禁**，不属于日常开发或每次 SDK 修改的必跑项。
 需要生成发布证据时，下面的编排器才会让 Ubuntu 24.04/GCC 13 producer 将 Release GameSDK 写入 named
@@ -491,15 +509,25 @@ LSAN_OPTIONS=exitcode=23 ./out/build/linux-clang22-vnext-sanitize/bin/tina_tests
 
 其余 sanitizer executable 应使用相同环境变量逐个运行；不要把一次 configure/build 成功当成测试通过。
 
-## Android 交叉编译（compile-only；无 preset、无平台后端）
+## Android 交叉编译（无 preset；已有平台后端）
 
-**能编译不等于能运行。** 16 个引擎模块（含 bgfx render backend）可为 Android 交叉编译成静态库，但
-**没有任何 Android 平台后端**（`src/platform/` 只有 `glfw` 与 `headless`），所以没有窗口、没有输入、
-没有可启动的产物，也没有真机验证。这条路径的唯一用途是守住可移植性：MSVC 会接受若干 Clang 拒绝的写法，
-只有真的为 Android 编译才会暴露。
+**已存在 Android 平台后端。** `src/platform/` 有 `android/`（含 `jni/`）、`glfw/`、`headless/` 三个目录；
+`src/platform/android/CMakeLists.txt:1` 定义 `tina_platform_android` / `Tina::PlatformAndroid`，提供
+window（宿主以 opaque integer 递交 `ANativeWindow`）、touch/key/IME 输入桥与 composition session。
+`android/` 下另有可安装的 Gradle APK 工程。`tina_platform_android_tests` 已在 Android 36 x86_64
+实机/模拟器跑通 **80/80**，实机四条输入路径共存与旋转（native window 替换）也有记录，
+证据见 [testing.md](testing.md) 的「Android 平台后端」一节。
 
-刻意**不加 CMakePresets 条目**：preset 会暗示存在一个可交付的 Android 产品图，而目前没有；NDK 路径也
-因机器而异。
+后端的**实际边界**（不要过度承诺）：
+
+- **没有 Android gamepad/手柄后端。** `src/platform/android/` 无任何 Gamepad 实现，contract test
+  直接断言 `first->frame()->gamepads().empty()`（`tests/platform_android/AndroidBackendContractTests.cpp:151`）。
+- `tina_platform_android_tests` 是纯契约断言：无窗口、无 GPU、无 JNI，所以它才能直接 push 到设备上跑。
+- 非 ASCII 与组词过程无法由 `adb shell input text` 注入，只能走 APK 的两条 `InputConnection` 诊断入口。
+- 交叉编译仍然独立地守着可移植性：MSVC 会接受若干 Clang 拒绝的写法，只有真的为 Android 编译才会暴露。
+
+刻意**不加 CMakePresets 条目**：NDK 与 `CMAKE_MAKE_PROGRAM` 路径因机器而异，写进 preset 只会在别人机器上
+configure 失败。因此下面使用显式 `-D` 调用。
 
 ```bash
 export ANDROID_NDK_HOME=/path/to/Android/Sdk/ndk/28.2.13676358
@@ -706,6 +734,7 @@ x86_64 上均**零 error**；编进去的是真实实现而非空壳 —— `ren
 | --- | --- | --- |
 | `TINA_BUILD_EXAMPLES` | 顶层工程 ON | samples 与 `tina_assetc`/`tina_catalog_validate` |
 | `TINA_BUILD_TESTING` | ON | GoogleTest targets |
+| `TINA_BUILD_EDITOR` | 顶层工程 ON | gate 整棵 `editor/` 树。**OFF 时 `tina_editor`、`tina_editor_desktop`、`tina_editor_tests`、`tina_editor_app_tests` 完全不存在**；`--target` 写了不存在的名字 CMake 不报错、只是什么都不编译 |
 | `TINA_BUILD_SHADERS` | ON | build-tree shaderc/cooked shader；Null 图可 OFF |
 | `TINA_BUILD_LEGACY` | OFF，强制 | 已退役；ON 直接 FATAL |
 | `TINA_BUILD_RENDER_BGFX` | OFF | 私有 bgfx backend |

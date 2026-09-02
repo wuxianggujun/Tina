@@ -25,7 +25,7 @@ Hard gate requires **all** of:
 5. `review.status = "approved"` with reviewer + date
 6. Matching `tina_bench_baseline` on the same `machineId`
 
-Debug provisional multi-process runs already exist (`docs/perf-002-provisional-evidence.md`) and prove
+Debug provisional multi-process runs already exist (`docs/evidence/perf-002-provisional-evidence.md`) and prove
 protocol compatibility only (`conclusion=provisional`, `hardGateEligible=false`).
 
 Editor Layout Debugger 的 `--profile-ui-layout-drag` 是独立的开发机 deterministic workload，不属于

@@ -129,6 +129,18 @@ Tile 与角色因此可以在同一 RenderScene 中保持排序语义并使用�
 offset；v1 payload 以 `UnsupportedSchema` 拒绝，不做双读或迁移。Asset typed
 view 继续校验 Cooked kind/version、依赖数量、required Sprite kind，以及每个 dependency 都实际被帧引用。
 
+这里的 `Once`/`Loop`/`PingPong` 属于 `AssetFormat::SpriteAnimationPlaybackMode`
+（`include/tina/asset_format/SpriteAnimationClipPayload.hpp:15`），与下文 `SpriteAnimator2D` 使用的
+`Scene::SpriteAnimationPlaybackMode`（`include/tina/scene/SpriteAnimator2D.hpp:13`）是**两个不同的类型**：
+前者取值 `Once=1`/`Loop=2`/`PingPong=3`，后者取值 `Once=0`/`Loop=1`/`PingPong=2`，整体相差 1。
+
+跨这条边界必须写显式转换，`static_cast` 会静默损坏播放模式：cooked `Once` 变成 Scene `Loop`、cooked
+`Loop` 变成 Scene `PingPong`，两者都是合法 Scene 取值，因此 `SpriteAnimator2D` 的
+`isValidPlaybackMode()`（`src/scene/SpriteAnimator2D.cpp:19-28`）不会报错，动画只是播错模式；只有
+cooked `PingPong` 会越界成非法值并被 `setClip()` 以 `SceneErrorCode::InvalidAnimation` 拒绝。范例转换
+函数见 `samples/2d_tilemap_bgfx/main.cpp:1476-1490` 的 `toScenePlaybackMode()`：逐枚举值 switch 映射，
+并对未知值返回 failure 而非落到默认分支。
+
 Catalog recipe 支持：
 
 ```text
@@ -383,7 +395,7 @@ exit 0。2026-07-29 动态 glyph atlas 修复后的 Dark/Light FreeType 截图�
 均为 `ok=true`、exit 0，运行时新增的 `gameplay #30` 与主题按钮字符完整。尺寸矩阵 compare 报告
 `artifacts/screenshots/ui-003-size-matrix/20260729-004341/matrix-report.json` 为5/5 `ok=true` 且
 `baselineCompare.matched=true`。
-历史与当前 Windows 视觉、完整模块测试证据见 [M12 Windows 证据](m12-evidence-windows.md)；当前代码门禁
+历史与当前 Windows 视觉、完整模块测试证据见 [M12 Windows 证据](evidence/m12-evidence-windows.md)；当前代码门禁
 还会校验上述双纹理与动画字段。可复现脚本：
 `tools/windows/RunProduct2dGate.ps1`（TEST-002）。测试数量不是永久基线。
 

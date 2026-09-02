@@ -1,4 +1,14 @@
-# M12 / tip Linux 证据
+# M12 / tip Linux 证据（2026-08-03 快照）
+
+> **一次性运行快照，不是当前契约。** 文中「当前 tip」指取证当日的 tip，不是今天的 tip。
+>
+> **覆盖面必须先说清（2026-09-01 复核）**：Linux 门禁只构建并运行 **4 个** test executable ——
+> `tina_tests`、`tina_ui_tests`、`tina_runtime_ui_tests`、`tina_ui_render_integration_tests`
+> （加 `tina_sample_null`），见 `tools/linux/run-gcc13-null-gate.sh:29`。仓库现有 **23 个** test
+> executable，因此 `tina_network_tests`、`tina_math_tests`、`tina_gameplay_tests`、
+> `tina_animation3d_tests`、`tina_save_tests`、`tina_scene_tests` 等**在 Linux 上一次未跑**。
+> 下文的「TEST-001 主验收已关闭」只覆盖那 4 个 executable 所证明的 toolchain/sanitizer 可用性，
+> 不能读成整库已在 Linux 验证。
 
 本文记录 **Docker Desktop → Linux 容器** 对当前 tip 的可复现证据。
 Windows 证据见 [m12-evidence-windows.md](m12-evidence-windows.md)。
@@ -124,6 +134,9 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\RunLinuxDockerGate.ps1 
 
 **TEST-001 主验收（GCC Null/GLFW + Clang sanitizer）在 Docker 复现路径上已关闭。**
 可选后置：Wayland、真显示器、Linux product-2d。
+
+范围限定（2026-09-01 补记）：上述关闭结论建立在 4 个 test executable 之上（见本文开头），
+**不覆盖**其余 19 个；扩大 Linux 测试覆盖面是独立待做项，不能由本文反推为已完成。
 
 ## 2026-08-03 tip `b8360c2d` — Docker 再证
 

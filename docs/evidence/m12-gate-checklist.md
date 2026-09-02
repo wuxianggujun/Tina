@@ -4,7 +4,7 @@
 > 不是再次授权删除。当前 `include/tina/ui` + `src/ui` 是 vNext retained UI，必须保留。
 
 证据摘录见 [M12 Windows 证据](m12-evidence-windows.md)，删除范围见
-[产品退役说明](m12-legacy-ui-retirement.md)，剩余任务见 [Backlog](backlog.md)。
+[产品退役说明](m12-legacy-ui-retirement.md)，剩余任务见 [Backlog](../backlog.md)。
 
 ## 门禁状态
 
@@ -16,13 +16,15 @@
 | G3 | 3D 产品 | Partial | multi-mesh 产品 E2E（3D-001）、Prefab/Scene weak Mesh/Material Handle + engine-provided、State-owned Mesh3D registry + packet-local geometry/material ref、Mesh/Material/共享 Texture 统一 owner、原子 material bundle、base/MR/normal 贴图采样、Cook-Torrance GGX + cooked EnvironmentMap split-sum IBL、SkinnedMesh/AnimationClip3D + Animator3D CPU pose + GPU skinning、World 逐帧有界 directional/point/spot-light snapshot（sample directional=3，point/spot authored/committed/culled 均为`3/2/1`）、point/spot influence-sphere culling、固定4级联 directional CSM、固定单 SpotLight shadow、固定单 PointLight 六面全向 shadow、三类 startup-only 可配置 D16 extent、显式 Opaque/Blend + 统一 static/skinned back-to-front 排序 + Transparent3D、deterministic pass scheduler、Texture/Mesh/EnvironmentMap backend retirement marker 与 stale-safe teardown 已落地；post 与跨 GPU golden 仍后置 |
 | G4 | Asset/Cooker | Strong | multi-mesh、multi-primitive SPLIT、distinct AssetId/Prefab dependency、baseColor/MR/normal Texture2D cook 与 Material dependency、EnvironmentMap cooked payload/publication/typed parse 已完成；不可信 glTF 输入的单 handle/fd 快照、最终路径 containment 与资源预算矩阵已通过 Windows/Linux 门禁 |
 | G5 | Audio | Evidence | backend-neutral tests、miniaudio null-device 与 product-2d JSON 已有 Windows 证据 |
-| G6 | 平台矩阵 | Strong | tip Docker：GCC13 Null + Platform/GLFW(Xvfb) + Clang22 Null + Clang22 sanitizer 均 exit 0（见 [Linux 证据](m12-evidence-linux.md)） |
+| G6 | 平台矩阵 | Partial | tip Docker：GCC13 Null + Platform/GLFW(Xvfb) + Clang22 Null + Clang22 sanitizer 均 exit 0（见 [Linux 证据](m12-evidence-linux.md)）。**但 Linux 覆盖面窄**：`tools/linux/run-gcc13-null-gate.sh:29` 只构建 `tina_tests`、`tina_ui_tests`、`tina_runtime_ui_tests`、`tina_ui_render_integration_tests` 四个 test executable（加 `tina_sample_null`），仓库现有 23 个；`tina_network_tests`、`tina_math_tests`、`tina_gameplay_tests`、`tina_animation3d_tests`、`tina_save_tests`、`tina_scene_tests` 等在 Linux 上一次未跑（2026-09-01 复核） |
 | G7 | Legacy smoke | N/A | 产品已删除，不再运行 Legacy smoke |
 | G8 | 产品旧接口零引用 | Done | Legacy product target/source 已删除；整库残留见 CLEAN-001～003 |
 | G9 | 独立产品删除 | Done | `e2ef3d5e` 起的删除及后续迁移提交 |
 
 门禁状态与功能路线分开。G2/G3/G4 的后续证据不改变“M12 产品删除 Done”。G6 的 Linux TEST-001
-已经完成；可选 Wayland/真显示器仍是独立扩展，不能反向写成当前 tip 未复验。
+**主验收**（GCC Null/GLFW + Clang sanitizer）已经完成，可选 Wayland/真显示器仍是独立扩展，不能
+反向写成当前 tip 未复验；但“主验收已关闭”只覆盖上表那四个 test executable，**不等于整库测试已在
+Linux 验证过** —— 扩大 Linux 测试覆盖面是独立的待做项。
 
 ## UI 证据
 
@@ -80,7 +82,7 @@ fingerprint 或 PNG hash。
 ## 后续工作边界
 
 M12 只跟踪 Legacy 产品图删除及其替代产品证据；不再把已关闭的 `TEST-001`、`TEST-002`、`3D-001` 和
-`CLEAN-001`～`CLEAN-003` 重新列为待办。当前未关闭的功能和验证风险以 [Backlog](backlog.md) 为唯一
+`CLEAN-001`～`CLEAN-003` 重新列为待办。当前未关闭的功能和验证风险以 [Backlog](../backlog.md) 为唯一
 明细；本历史门禁不复制易漂移的 Now/Next 任务快照。Linux AT-SPI 已拆为 Later 的 `UI-002-LINUX`，
 `RENDER-FENCE` 与 `RENDER-001` 已完成。
 
@@ -134,6 +136,14 @@ normal-map gate 固定四跑（on×2 + off×2）；两种模式都保持 `textur
 
 ## 字体规则
 
-FreeType 字体解析顺序：CMake `TINA_UI_FONT_PATH`、环境变量 `TINA_UI_FONT_PATH`、最后才是可选的
-`resources/fonts/SourceHanSansSC-Regular.otf` fixture。没有字体时相关测试可以明确 skip，但不能把
-skip 记录为 CJK 视觉通过。
+**产品顺序**（`395c3c2c` 起，`src/desktop/UiFontFile.cpp:63-87` 的 `resolveUiFontBytes()`）：环境变量
+`TINA_UI_FONT_PATH` 优先（设了但文件不存在直接 `NotFound` 失败，不回退），否则取 exe 旁的
+`assets/ui-font.otf`（由 `tina_target_stage_ui_font()` 放置）。编译期的
+`TINA_DESKTOP_UI_FONT_PATH` **已删除** —— 它烧的是跑 CMake 那台机器的绝对路径，装出去的游戏必然找不到。
+
+**测试 fixture 顺序**（仅 build tree 内，`tests/ui_freetype/FreeTypeTextRasterizerTests.cpp:22-32`）：
+CMake `TINA_UI_FREETYPE_TEST_FONT_PATH` → CMake `TINA_UI_FONT_PATH` → 环境变量 `TINA_UI_FONT_PATH`
+→ 可选的 `resources/fonts/SourceHanSansSC-Regular.otf` fixture。旧的“CMake 优先”只对这条测试路径成立，
+不再是产品行为。
+
+没有字体时相关测试可以明确 skip，但不能把 skip 记录为 CJK 视觉通过。

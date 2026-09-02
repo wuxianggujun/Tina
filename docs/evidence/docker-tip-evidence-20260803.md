@@ -70,4 +70,4 @@ strings from DWARF/assert paths. Mitigations:
 
 - `UIContextLifetimeControl` forward decl fixed to `class` (matches implementation).
 - JSON under `artifacts/gates/` is gitignored; this doc is the durable tip record.
-- Formal ABI/version policy remains [ADR 0024](adr/0024-sdk-abi-compatibility.md) (Proposed).
+- Formal ABI/version policy remains [ADR 0024](../adr/0024-sdk-abi-compatibility.md) (Proposed).

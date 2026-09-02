@@ -29,7 +29,7 @@ CTest 测试。测试进程任一返回非0即失败。
 14. `compile-only` 与 test gate 严格分离：前者最多 configure/build 一次最小 target，且
     `testRuns=0`、`sampleRuns=0`；不得运行 GoogleTest、sample、smoke 或 visual/platform gate。相同
     source/toolchain/target 指纹已有成功结果时不重复编译。
-15. Linux compile-only、Docker/WSL、临时 worktree 和 gate 专用 build tree 默认是 ephemeral。取得退出码与首错
+15. Linux compile-only、Docker、临时 worktree 和 gate 专用 build tree 默认是 ephemeral。取得退出码与首错
     记录后，无论成功失败都回收，不能为了未来可能运行的测试保留数十 GiB 产物。收尾必须报告 tree 已不存在，
     且 compiler/helper/container/volume/agent 均归零；核心集成常驻 tree 和外部共享 `VCPKG_ROOT` 不在清理范围。
 
@@ -258,7 +258,12 @@ executable。`tina_ui_tests` 为 667/667，`tina_runtime_ui_tests` 为 130/130�
 | `tina_tests` | Core、Platform contract、Task、Runtime、NullRender、Input/Action、header isolation | 基础图 |
 | `tina_math_tests` | `Vec`/`Quaternion`/`Mat4`/`Aabb`/`Rect`/`Sphere`/`Plane`/`Ray`/`Frustum`、退化输入 fail-closed、列主序与 clip 深度约定、header isolation，以及与被删实现逐元素比对的四个数值等价性回归 | 基础图 |
 | `tina_save_tests` | `SaveStore` 槽位读写/备份晋升/revision 递增、损坏回退与 repair、gameId 隔离、owner-thread 与单事务闭锁、async 句柄一次性语义；`SaveMigrationPipeline` 确定性单边图、缺失路径与越界步骤、payload 上限、抛异常步骤收敛 | 基础图 |
-| `tina_editor_tests` | Editor authoring document/tab/undo、Marquee、Transform gizmo、Viewport grid/navigation，以及 3D 单击拾取的 ray 构造、最近命中决胜、偏移包围球与退化输入 fail-closed（`EditorViewportPickTest`） | 基础图 |
+| `tina_editor_tests` | Editor authoring document/tab/undo、Marquee、Transform gizmo、Viewport grid/navigation，以及 3D 单击拾取的 ray 构造、最近命中决胜、偏移包围球与退化输入 fail-closed（`EditorViewportPickTest`） | `TINA_BUILD_EDITOR=ON`（顶层默认 ON）|
+| `tina_editor_app_tests` | Editor 桌面 app 层：composite image resolver、source-import ingress/selection/service/launch options、Linux file dialog | `TINA_BUILD_EDITOR=ON` + `TINA_BUILD_PLATFORM_GLFW=ON` + `TINA_BUILD_RENDER_BGFX=ON` |
+| `tina_gameplay_tests` | Gameplay 模块：Action authoring/runner、Easing、Scheduler、Signal，以及每个公开头一个 TU 的 header isolation | 基础图 |
+| `tina_animation3d_tests` | Skeleton3D、ClipSampler3D、PoseBlend3D、AnimationGraph3D、IkSolver3D | 基础图 |
+| `tina_platform_android_tests` | Android backend 纯契约断言（无窗口/GPU/JNI）：输入桥、IME preedit 状态机、touch/key 计数；可交叉编译后 push 到设备直接运行 | `ANDROID`（交叉编译；宿主无 preset）|
+| `tina_bench_tests` | `tina_bench` UI benchmark workload 的契约测试 | `TINA_BUILD_BENCHMARKS=ON` 或 `TINA_BUILD_EXAMPLES=ON` |
 | `tina_ui_tests` | UI tree/layout/hit/route/paint/semantics、Widget、文本/Glyph | 基础图 |
 | `tina_runtime_ui_tests` | Runtime UI owner/capability/route/layout/display handoff | 基础图 |
 | `tina_ui_render_integration_tests` | committed UI paint → Render DisplayList | 基础图 |
@@ -397,8 +402,12 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
 `cmake/TinaGameSdkPackage.cmake` 在每处 `install(TARGETS ...)` 旁边收集目标名后聚合而成（INTERFACE
 库无产物，已滤除），所以「装什么」与「先编什么」同源。**不要在门禁脚本里手写目标清单**：那等于把同一份
 清单存两处，新模块只要进了 install 规则却没进脚本，install 就会因为某个从未被编译的库而失败——Save
-与 Gameplay 就是这样让 DesktopBootstrap 门禁挂在缺失的 `tina_save.lib` 上的，而 `tina_editor` 只是碰巧
-被别的构建留在树里才没暴露。
+与 Gameplay 就是这样让 DesktopBootstrap 门禁挂在缺失的 `tina_save.lib` 上的。
+
+反向的边界同样重要：**编辑器根本不是安装候选**。`cmake/TinaGameSdkPackage.cmake` 已不含 `tina_editor`、
+`Editor` component 与 `include/tina/editor`（ADR 0041），所以它既不进 `Tina_GAME_SDK_TARGETS`、也不进
+`tina_sdk_install_artifacts`。判断一个 target 是否该出现在 install 清单，看它有没有 `install(TARGETS ...)`
+规则，不要看它是否恰好存在于当前 build tree —— 后者只反映别的构建留下了什么。
 
 成功条件是：版本化 package 和声明的 `Tina_GAME_SDK_TARGETS` 全部可发现；实际安装头通过第三方
 include/type token 扫描；所有 Tina imported target 的 include 都来自安装 prefix 而非源码树；外部
@@ -442,8 +451,8 @@ consumer configure 同时拒绝 imported target 使用 producer include 路径�
 consumer exit 0 证据；正式 ABI 另由 [ADR 0024](adr/0024-sdk-abi-compatibility.md) 决策。
 
 Windows tip moved-prefix 再证（GameSDK / PlatformGlfw / DesktopBootstrap / AudioMiniaudio）见
-[sdk-001-windows-consumer-evidence.md](sdk-001-windows-consumer-evidence.md)。
-Linux tip Docker + 跨发行版 tip 见 [docker-tip-evidence-20260803.md](docker-tip-evidence-20260803.md)。
+[sdk-001-windows-consumer-evidence.md](evidence/sdk-001-windows-consumer-evidence.md)。
+Linux tip Docker + 跨发行版 tip 见 [docker-tip-evidence-20260803.md](evidence/docker-tip-evidence-20260803.md)。
 
 ## UI performance quick run
 
@@ -634,7 +643,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\windows\RunUi002UiaG
 
 该 gate 不替代 Narrator/Inspect 人工金标，也不证明 Linux AT-SPI。已有 build 可使用
 `-SkipConfigure -SkipBuild`，并通过 `-OutJson` 固化结构化证据。tip 自动结果见
-[ui-002-uia-evidence-windows.md](ui-002-uia-evidence-windows.md)；人工步骤见
+[ui-002-uia-evidence-windows.md](evidence/ui-002-uia-evidence-windows.md)；人工步骤见
 [ui-002-narrator-inspect-checklist.md](ui-002-narrator-inspect-checklist.md)。
 
 Focus 产品证据以 TextEdit 的 `HasKeyboardFocus`（`SetFocus` 之后）为准；全局
@@ -1550,14 +1559,14 @@ source/toolchain/target tuple 执行一次 configure 和一次最小 target buil
 workspace smoke、visual/platform gate；即使构建生成了测试 executable，`testRuns` 和 `sampleRuns` 也必须为0。
 已有匹配指纹的成功编译结论时直接复用，不重复编译，更不能为了“确认”而重跑测试。
 
-compile-only 取得退出码和首个错误后立即进入资源收尾，成功与失败执行同一规则。Docker/WSL/临时 worktree
+compile-only 取得退出码和首个错误后立即进入资源收尾，成功与失败执行同一规则。Docker/临时 worktree
 产生的 build、staging、install、consumer tree，以及本轮容器、volume、一次性镜像/缓存、编译/helper/watchdog
 进程和 agent 都必须定向回收。失败产物只允许保留到错误完成记录，不得跨任务保留。完整生命周期与保留例外
 见 [building.md](building.md#linux-compile-only-与临时资源生命周期)。
 
 ### Docker Desktop（Windows 宿主）— GCC13 Null 子图
 
-见 [m12-evidence-linux.md](m12-evidence-linux.md)。快捷：
+见 [m12-evidence-linux.md](evidence/m12-evidence-linux.md)。快捷：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tools\windows\RunLinuxDockerGate.ps1 `
@@ -1567,7 +1576,7 @@ powershell -ExecutionPolicy Bypass -File .\tools\windows\RunLinuxDockerGate.ps1 
 2026-07-23 tip `e0d94faa`：GCC13 Null exit 0。  
 2026-07-24 tip `d883d787`：GCC13 Platform/GLFW + Xvfb exit 0（34/34）。  
 2026-07-24 tip `66374135`：Clang22 Null + Clang22 sanitizer Null 全 executable exit 0。  
-详见 [m12-evidence-linux.md](m12-evidence-linux.md)；TEST-001 主验收已关。
+详见 [m12-evidence-linux.md](evidence/m12-evidence-linux.md)；TEST-001 主验收已关。
 
 ### 本机 Linux / Clang sanitizer
 

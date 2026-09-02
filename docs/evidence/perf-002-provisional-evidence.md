@@ -45,7 +45,7 @@ py -3 tools\bench\run_benchmark_gate.py --processes 5 `
 
 ### Still open for PERF-002 Done
 
-- Select fixed gate machine (dev host draft facts: [perf-002-machine-profile-draft.md](perf-002-machine-profile-draft.md))
+- Select fixed gate machine (dev host draft facts: [perf-002-machine-profile-draft.md](../perf-002-machine-profile-draft.md))
 - Fill `tools/bench/profiles/dev-host-candidate.machine-profile.template.json` from **Release** formal samples
 - Commit `status=approved` machine profile + baseline (schema v1)
 - Release build, ≥600 warmup / ≥2000 measure, ≥5–10 processes, `--hard-gate`

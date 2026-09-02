@@ -234,7 +234,7 @@ blankLike 仍由 `CaptureSampleWindow` 排除。2026-07-29 的独立 compare 报
 均 verified，`WM_CLOSE` 正常退出）。
 
 **Narrator/Inspect 人工金标仍未关闭**（JSON `narratorGold=false`）。操作清单见
-[ui-002-narrator-inspect-checklist.md](ui-002-narrator-inspect-checklist.md)。
+[ui-002-narrator-inspect-checklist.md](../ui-002-narrator-inspect-checklist.md)。
 
 ## ASSET-SEC-001 glTF 输入门禁（2026-07-31）
 

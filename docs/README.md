@@ -94,11 +94,26 @@ Tina 文档按用途分为四类，避免把设计目标、当前事实和一次
 
 ## 退役与证据
 
-- [M12 产品退役说明](m12-legacy-ui-retirement.md)：Legacy 产品图删除后的准确边界。
-- [M12 门禁清单](m12-gate-checklist.md)：产品删除已完成，剩余复验与扫尾状态。
-- [M12 Windows 证据](m12-evidence-windows.md)：带日期的本机运行摘录，不代替当前测试。
-- [M12 Linux 证据](m12-evidence-linux.md)：Linux tip 复验摘录。
-- [UI 状态反馈 Windows 证据](ui-state-feedback-evidence-windows.md)：Dark/Light 交互状态产品差分门禁。
+- [M12 产品退役说明](evidence/m12-legacy-ui-retirement.md)：Legacy 产品图删除后的准确边界。
+- [M12 门禁清单](evidence/m12-gate-checklist.md)：产品删除已完成，剩余复验与扫尾状态。
+- [M12 Windows 证据](evidence/m12-evidence-windows.md)：带日期的本机运行摘录，不代替当前测试。
+- [M12 Linux 证据](evidence/m12-evidence-linux.md)：Linux tip 复验摘录。
+- [UI 状态反馈 Windows 证据](evidence/ui-state-feedback-evidence-windows.md)：Dark/Light 交互状态产品差分门禁。
+
+### 带日期的一次性运行快照
+
+以下文档都是**某一次运行的历史快照**，不是当前契约。文件名或标题里的日期即取证日期；其中的
+路径、目标名、计数与门禁结论都可能已被后续提交推翻。引用前先按 `docs/README.md` 顶部的优先级
+回到当前源码/CMake 复核。
+
+- [Agent 视觉巡检（2026-08-03）](evidence/agent-visual-inspect-20260803.md)：sample 截图逐项人工检查。
+- [Docker tip 证据（2026-08-03）](evidence/docker-tip-evidence-20260803.md)：Linux 容器门禁详表。
+- [SDK-001 Windows consumer 证据](evidence/sdk-001-windows-consumer-evidence.md)：moved-prefix install/consumer 门禁。
+- [UI-002 Windows UIA 证据](evidence/ui-002-uia-evidence-windows.md)：外部 HWND UIA 客户端门禁。
+- [UI-002 Narrator/Inspect 清单](ui-002-narrator-inspect-checklist.md)：人工金标步骤，自动门禁不覆盖。
+- [UI-003 tip 证据](evidence/ui-003-tip-evidence.md)：UI-003 视觉/尺寸矩阵取证。
+- [PERF-002 机器画像草稿](perf-002-machine-profile-draft.md)：benchmark 机器画像草稿。
+- [PERF-002 临时证据](evidence/perf-002-provisional-evidence.md)：未固化的 benchmark 取证。
 
 当前产品 UI 是 `include/tina/ui` + `src/ui`。旧 UI 产品图已删除，但不能据此删除或称退役当前
 `src/ui`。产品入口是 `Tina::Desktop` 与 `tina_sample_*`，不再存在 Legacy `Tina.exe`。
