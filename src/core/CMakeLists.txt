@@ -67,11 +67,17 @@ target_include_directories(tina_core
         ${PROJECT_SOURCE_DIR}/include
     PRIVATE
         ${PROJECT_SOURCE_DIR}/src
+        ${PROJECT_SOURCE_DIR}/thirdparty/xxhash
 )
+# XXH_INLINE_ALL makes xxhash.h self-contained, so ContentHash needs no library to link
+# against. That matters beyond convenience: a PRIVATE link to an imported target still
+# reaches the installed export as $<LINK_ONLY:xxHash::xxhash>, which forced every SDK
+# consumer to supply an xxHash package for a symbol it never names. Digests are
+# byte-identical to the linked 0.8.3 build, so cooked ContentHash values are unaffected.
+target_compile_definitions(tina_core PRIVATE XXH_INLINE_ALL)
 target_link_libraries(tina_core
     PRIVATE
         "$<BUILD_INTERFACE:Tina::ProjectOptions>"
-        xxHash::xxhash
 )
 if (WIN32)
     # CrashHandler resolves backtrace symbols through DbgHelp.

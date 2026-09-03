@@ -99,12 +99,13 @@ if(NOT DEFINED CONFIG OR CONFIG STREQUAL "")
     set(CONFIG "Debug")
 endif()
 
-# Tina's own private dependencies. xxHash and mikktspace link into the static libraries as
-# LINK_ONLY, so a consumer must supply them, and their config files are not part of this
-# package -- find_package(Tina) fails on the find_dependency() line with a message naming
-# xxHash, which reads as a broken Tina install rather than a missing prefix path. Left as a
-# placeholder when not given, because guessing a path here would produce presets that fail
-# later and less clearly than presets that are visibly incomplete.
+# The window/text backend packages behind the DesktopBootstrap component. glfw3 and Freetype are
+# vcpkg (or system) packages that Tina links PRIVATE into its adapters, so a consumer of that
+# component still resolves them at link time even though its own code never names them.
+#
+# This is per-component, not unconditional: a project using only Tina::GameSDK needs no prefix
+# here at all. Left as a placeholder when not given, because guessing a path would produce
+# presets that fail later and less clearly than presets that are visibly incomplete.
 set(tina_dependency_prefix "")
 if(DEFINED DEPS AND NOT DEPS STREQUAL "")
     file(TO_CMAKE_PATH "${DEPS}" tina_dependency_prefix)
@@ -167,7 +168,7 @@ endif()
 if(NOT DEFINED DEPS OR DEPS STREQUAL "")
     message(STATUS
         "  CMakePresets.json needs the dependency prefix filled in. Pass -DDEPS=<vcpkg "
-        "installed dir>/<triplet> to have it written, or edit CMAKE_PREFIX_PATH: Tina's "
-        "xxHash and mikktspace dependencies are not part of the package.")
+        "installed dir>/<triplet> to have it written, or edit CMAKE_PREFIX_PATH: the "
+        "DesktopBootstrap component links glfw3 and Freetype, which are not part of the package.")
 endif()
 message(STATUS "  cmake --preset default && cmake --build --preset default")

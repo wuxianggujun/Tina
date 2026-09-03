@@ -2,9 +2,12 @@ include_guard(GLOBAL)
 
 # All package names and imported targets in this file come from the pinned vcpkg registry in
 # vcpkg.json. A vNext-only Null configure deliberately discovers none of the Legacy packages.
-# xxHash and MikkTSpace are root dependencies for Core hashing and the Asset Cooker.
-find_package(xxHash CONFIG REQUIRED)
-find_package(mikktspace CONFIG REQUIRED)
+#
+# There are no unconditional root dependencies. xxHash (Core hashing) and MikkTSpace (the glTF
+# Cook's tangent generator) used to be two, and both were invisible to consumer code yet reached
+# the installed export as $<LINK_ONLY:...> -- so a find_package(Tina) failed naming *those*
+# packages, which reads as a broken Tina install. Both are vendored under thirdparty/ now; see
+# src/core/CMakeLists.txt and src/asset/CMakeLists.txt.
 
 if (TINA_BUILD_PHYSICS2D)
     find_package(box2d CONFIG REQUIRED)

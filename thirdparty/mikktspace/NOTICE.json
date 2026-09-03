@@ -1,0 +1,9 @@
+{
+  "name": "MikkTSpace",
+  "version": "1.0",
+  "url": "https://github.com/mmikk/MikkTSpace",
+  "commit_or_tag": "3e895b49d05ea07e4c2133156cfa94369e19e409",
+  "license": "zlib-like (see header of mikktspace.h)",
+  "files": ["mikktspace.c", "mikktspace.h", "README.md"],
+  "usage": "tina_asset PRIVATE only; genTangSpaceDefault in src/asset/GltfCook.cpp. Sources are unmodified; the CMake wiring lives in thirdparty/CMakeLists.txt."
+}

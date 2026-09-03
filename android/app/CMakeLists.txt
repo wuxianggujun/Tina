@@ -6,15 +6,15 @@
 # here instead of changing it.
 cmake_minimum_required(VERSION 3.25)
 
-# vcpkg supplies xxHash and mikktspace, so its toolchain must run and chainload the NDK's rather than
-# the other way round. AGP hands us CMAKE_TOOLCHAIN_FILE pointing straight at the NDK, so that value
-# is moved aside into VCPKG_CHAINLOAD_TOOLCHAIN_FILE and vcpkg is put in front.
+# vcpkg supplies FreeType (see VCPKG_MANIFEST_FEATURES below), so its toolchain must run and chainload
+# the NDK's rather than the other way round. AGP hands us CMAKE_TOOLCHAIN_FILE pointing straight at the
+# NDK, so that value is moved aside into VCPKG_CHAINLOAD_TOOLCHAIN_FILE and vcpkg is put in front.
 #
 # This happens before project(), because the toolchain file is only read at that point.
 if(NOT DEFINED VCPKG_CHAINLOAD_TOOLCHAIN_FILE)
     if(NOT DEFINED ENV{VCPKG_ROOT})
         message(FATAL_ERROR
-            "VCPKG_ROOT must be set for the Android build: vcpkg provides xxHash and mikktspace. "
+            "VCPKG_ROOT must be set for the Android build: vcpkg provides FreeType for the UI text adapter. "
             "Export it, or add vcpkg.dir to android/local.properties (see docs/building.md).")
     endif()
     set(VCPKG_CHAINLOAD_TOOLCHAIN_FILE "${CMAKE_TOOLCHAIN_FILE}" CACHE FILEPATH "" FORCE)

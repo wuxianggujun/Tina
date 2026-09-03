@@ -115,8 +115,24 @@ endif ()
 add_library(tina_asset STATIC
     ${TINA_ASSET_PUBLIC_HEADERS}
     ${TINA_ASSET_SOURCES}
+    # MikkTSpace is compiled in rather than linked as a package, for the same reason cgltf and
+    # stb_image are: a PRIVATE link to an imported target still lands in the installed export as
+    # $<LINK_ONLY:mikktspace::mikktspace>, so every SDK consumer had to supply a package for a
+    # tangent generator it never calls. Sources are unmodified upstream.
+    ${PROJECT_SOURCE_DIR}/thirdparty/mikktspace/mikktspace.c
 )
 add_library(Tina::Asset ALIAS tina_asset)
+
+# Upstream C compiled under Tina's own warning set. Scoped to the one source file so the
+# suppressions cannot hide anything in Tina's code, matching thirdparty/CMakeLists.txt's
+# handling of l-smash.
+if(MSVC)
+    set_source_files_properties(${PROJECT_SOURCE_DIR}/thirdparty/mikktspace/mikktspace.c
+        PROPERTIES COMPILE_OPTIONS "/wd4100;/wd4127;/wd4244;/wd4245;/wd4267;/wd4456;/wd4701")
+else()
+    set_source_files_properties(${PROJECT_SOURCE_DIR}/thirdparty/mikktspace/mikktspace.c
+        PROPERTIES COMPILE_OPTIONS "-Wno-unused-parameter;-Wno-sign-compare;-Wno-shadow;-Wno-misleading-indentation")
+endif()
 
 target_compile_features(tina_asset PUBLIC cxx_std_23)
 target_include_directories(tina_asset PUBLIC ${PROJECT_SOURCE_DIR}/include)
@@ -126,12 +142,13 @@ target_include_directories(tina_asset PRIVATE
     ${PROJECT_SOURCE_DIR}/src
     ${PROJECT_SOURCE_DIR}/thirdparty/cgltf
     ${PROJECT_SOURCE_DIR}/thirdparty/stb
+    ${PROJECT_SOURCE_DIR}/thirdparty/mikktspace
 )
 # Math is named explicitly rather than inherited through Tina::Physics2D, so the
 # dependency does not silently disappear when that feature gate is off.
 target_link_libraries(tina_asset
     PUBLIC Tina::Core Tina::Math Tina::AssetTypes Tina::AssetFormat Tina::Task Tina::Render Tina::Navigation2D
-    PRIVATE "$<BUILD_INTERFACE:Tina::ProjectOptions>" mikktspace::mikktspace
+    PRIVATE "$<BUILD_INTERFACE:Tina::ProjectOptions>"
 )
 if (TINA_BUILD_PHYSICS2D)
     target_link_libraries(tina_asset PUBLIC Tina::Physics2D)

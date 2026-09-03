@@ -5,10 +5,6 @@
   "default-features": [
     "tests"
   ],
-  "dependencies": [
-    "mikktspace",
-    "xxhash"
-  ],
   "features": {
     "profile-tracy": {
       "description": "Build the optional Tina Tracy profiling adapter.",

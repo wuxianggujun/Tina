@@ -29,8 +29,8 @@
 | mbedTLS 3.6+ | 唯一 TLS backend | vcpkg feature `network-tls` | `tina_network_tls` PRIVATE；`TINA_BUILD_NETWORK_TLS` |
 | platform sockets | UDP/TCP/readiness/DNS，无第三方 | OS SDK（Winsock2 `ws2_32`、POSIX BSD sockets） | `tina_network` PRIVATE；无 feature，无条件构建 |
 | CryptoAPI (system) | Windows 平台信任库读取（`CertOpenSystemStoreW`） | OS SDK（`crypt32`） | `tina_network_tls` PRIVATE |
-| xxHash | ContentHash/确定性校验 | vcpkg root dependency（无条件） | `tina_core` PRIVATE adapter；非安全签名 |
-| mikktspace | glTF Cook 的切线空间生成 | vcpkg root dependency（无条件） | `tina_asset` PRIVATE（`src/asset/GltfCook.cpp`）；`TinaConfig.cmake.in` 以 `find_dependency` 传递给 SDK consumer |
+| xxHash v0.8.3 | ContentHash/确定性校验 | vendored `thirdparty/xxhash` | `tina_core` PRIVATE，`XXH_INLINE_ALL` header-only；非安全签名 |
+| MikkTSpace | glTF Cook 的切线空间生成 | vendored `thirdparty/mikktspace` | `tina_asset` PRIVATE（`src/asset/GltfCook.cpp`），`mikktspace.c` 直接编入 |
 | Tracy | 可选开发定位 profiler | vcpkg feature `profile-tracy`，要求 `tracy >= 0.13.1` | `tina_trace_tracy` PRIVATE；`TINA_TRACE_BACKEND=tracy` |
 | GoogleTest | 单元/集成契约测试 | 默认 vcpkg feature `tests` | tests only；直接运行，不注册 CTest |
 | cgltf v1.15 | glTF/GLB parse/validate | vendored `thirdparty/cgltf` | `src/asset/GltfCook.cpp` PRIVATE |
@@ -39,8 +39,16 @@
 `CGLTF_IMPLEMENTATION` 与 `STB_IMAGE_IMPLEMENTATION` 只在 `src/asset/GltfCook.cpp` 定义。公开
 `GltfCook.hpp` 只出现 Tina-owned 类型；cgltf/stb_image token 不能进入 `include/tina`。
 
-bgfx.cmake、bx、bimg 的源码 revision 由 submodule commit 锁定。cgltf/stb_image 不是 submodule，版本、
-来源和许可证分别由 `thirdparty/cgltf/NOTICE.json`、`LICENSE` 与 `thirdparty/stb/NOTICE.txt` 记录。
+bgfx.cmake、bx、bimg 的源码 revision 由 submodule commit 锁定。cgltf/stb_image/xxHash/MikkTSpace 不是
+submodule，版本、来源和许可证分别由 `thirdparty/cgltf/NOTICE.json`、`LICENSE`、`thirdparty/stb/NOTICE.txt`、
+`thirdparty/xxhash/NOTICE.json`、`LICENSE` 与 `thirdparty/mikktspace/NOTICE.json` 记录。
+
+xxHash 与 MikkTSpace 是 vendored 而非 vcpkg package，理由和 cgltf/stb_image 相同，但代价更直接：它们以
+`PRIVATE` 链接到静态库上，即使 consumer 代码从不提及，也会作为 `$<LINK_ONLY:xxHash::xxhash>` /
+`$<LINK_ONLY:mikktspace::mikktspace>` 出现在安装后的 `TinaTargets.cmake` 里。于是 `find_package(Tina)` 会在
+`find_dependency` 那一行失败，报的是 **xxHash 找不到**——看起来是 Tina 装坏了，其实是 Tina 的私有依赖没被打包。
+vendored 之后安装后的 SDK 加载核心模块集不需要 consumer 提供任何 package。xxHash 走 `XXH_INLINE_ALL`
+header-only，摘要已实测与链接 0.8.3 库逐字节一致，所以已 cook 的 ContentHash 不受影响。
 
 **vendored 与 submodule 源码一律位于 `thirdparty/`。** 仓库根还有一个 `dependencies/` 目录，但它当前
 **为空且不被 Git 跟踪**（`git ls-files dependencies/` 无输出），不承载任何依赖；它只作为搜索排除项出现在
@@ -48,8 +56,8 @@ bgfx.cmake、bx、bimg 的源码 revision 由 submodule commit 锁定。cgltf/st
 
 ## Manifest 与 CMake
 
-`vcpkg.json` 的 `default-features` 只有 `tests`；`dependencies`（无条件 root dependency）有**两项**：
-`mikktspace` 与 `xxhash`。除默认 `tests` 外的可选 feature 共 9 个：
+`vcpkg.json` 的 `default-features` 只有 `tests`；**没有** `dependencies`（无条件 root dependency）——
+原先的 `mikktspace` 与 `xxhash` 已 vendored 到 `thirdparty/`。除默认 `tests` 外的可选 feature 共 9 个：
 
 ```text
 profile-tracy

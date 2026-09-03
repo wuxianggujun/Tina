@@ -32,12 +32,12 @@ class ConsumerState final : public Tina::IGameState {
         {
             return Tina::Core::failure(std::move(builder.error()));
         }
-        auto styleClass = builder->style().registerStyleClass();
+        auto styleClass = builder->registerStyleClass();
         if (!styleClass)
         {
             return Tina::Core::failure(std::move(styleClass.error()));
         }
-        auto colorToken = builder->style().registerStyleColorToken(Tina::UI::rgb(0x2463A5));
+        auto colorToken = builder->registerStyleColorToken(Tina::UI::rgb(0x2463A5));
         if (!colorToken)
         {
             return Tina::Core::failure(std::move(colorToken.error()));
@@ -50,7 +50,7 @@ class ConsumerState final : public Tina::IGameState {
                 .colorToken = *colorToken,
             },
         };
-        if (Tina::Core::Status status = builder->style().installStyleSheet(rules); !status)
+        if (Tina::Core::Status status = builder->installStyleSheet(rules); !status)
         {
             return status;
         }
@@ -64,13 +64,13 @@ class ConsumerState final : public Tina::IGameState {
         {
             return Tina::Core::failure(std::move(tree.error()));
         }
-        auto activeColor = tree->style().styleColorToken(*colorToken);
+        auto activeColor = tree->styleColorToken(*colorToken);
         if (!activeColor)
         {
             return Tina::Core::failure(std::move(activeColor.error()));
         }
         if (Tina::Core::Status status =
-                tree->style().setStyleColorToken(*colorToken, Tina::UI::rgb(0x3978C5));
+                tree->setStyleColorToken(*colorToken, Tina::UI::rgb(0x3978C5));
             !status)
         {
             return status;
@@ -80,11 +80,11 @@ class ConsumerState final : public Tina::IGameState {
             .duration = Tina::Core::Duration{0.100},
             .easing = Tina::UI::UIEasing::EaseOut,
         };
-        if (Tina::Core::Status status = tree->motion().setStyleBackgroundColorTransition(styleTransition); !status)
+        if (Tina::Core::Status status = tree->setStyleBackgroundColorTransition(styleTransition); !status)
         {
             return status;
         }
-        auto configuredTransition = tree->motion().styleBackgroundColorTransition();
+        auto configuredTransition = tree->styleBackgroundColorTransition();
         if (!configuredTransition)
         {
             return Tina::Core::failure(std::move(configuredTransition.error()));

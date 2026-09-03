@@ -41,9 +41,11 @@ cmake --build --preset content  # 只建内容库
 
 只写 `-DTina_DIR=<sdk前缀>/lib/cmake/Tina` 会在三个地方分别失败，而三处报错都指向错误的方向。生成的 presets 就是为了把这三条一次配好。三条都是当前 SDK 的真实状态，不是模板的取舍：
 
-**1. 还要给出 vcpkg 树。** `TinaConfig.cmake` 走 `find_dependency(xxHash)` 和 `find_dependency(mikktspace)`，而这两个包的 config **不随 SDK 安装**——它们是 `Tina::Core` / `Tina::Scene` 上的 `LINK_ONLY` 私有依赖，静态库链接时消费者必须自备。缺了就在 `find_package(Tina)` 那一行报 "Could not find a package configuration file provided by xxHash"，看起来像 Tina 装坏了，其实是它的依赖没被打包。SDK 只装了 `xxhash.dll`，没装 `xxHashConfig.cmake`。
+**1. 用 `DesktopBootstrap` 时还要给出 vcpkg 树。** 这个组件把 `glfw3` 和 `Freetype` 以 `LINK_ONLY` 私有依赖挂在 adapter 上——你的代码从不提它们，但静态库链接时消费者必须自备，而它们的 config 不随 SDK 安装。缺了就在 `find_package(Tina)` 那一行报 "Could not find a package configuration file provided by glfw3"。
 
-用 `CMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake` 也行，但不必要——vcpkg 树进 `CMAKE_PREFIX_PATH` 就够。同一个 vcpkg 树里的 Freetype 也是这么找到的。
+这是**按组件**的，不是无条件的：只用 `Tina::GameSDK` 的工程完全不需要这个前缀。Tina 自己的哈希与切线生成依赖（xxHash、MikkTSpace）已经 vendored 进静态库，不再要求消费者提供。
+
+用 `CMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake` 也行，但不必要——vcpkg 树进 `CMAKE_PREFIX_PATH` 就够。
 
 **2. 多配置生成器要限住配置类型。** SDK 通常只 `--install --config Debug`，装出来的 imported target 只有 Debug 的 `IMPORTED_LOCATION`。Visual Studio 生成器默认要 Debug/Release/RelWithDebInfo/MinSizeRel 四个，于是 generate 阶段对每个缺失配置各报一条 `IMPORTED_LOCATION not set for imported target "Tina::Runtime"`。`-DCMAKE_CONFIGURATION_TYPES=Debug` 让它只要装过的那个。要四配置就四配置都装。
 

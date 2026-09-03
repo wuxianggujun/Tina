@@ -5,8 +5,10 @@ include(CMakeFindDependencyMacro)
 set(Tina_VERSION "@PROJECT_VERSION@")
 set_and_check(Tina_INCLUDE_DIR "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@")
 
-find_dependency(xxHash CONFIG)
-find_dependency(mikktspace CONFIG)
+# No unconditional find_dependency() here on purpose. Tina's hashing and tangent-generation
+# dependencies are vendored into the static libraries, so this package needs nothing from the
+# consumer to load the core module set. Every dependency below is gated on the feature or
+# component that actually needs it.
 if(@TINA_PACKAGE_WITH_TRACE_TRACY@)
     find_dependency(Tracy CONFIG)
 endif()

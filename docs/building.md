@@ -13,8 +13,9 @@
 | Linux Clang | Clang 22.x + GCC/libstdc++ 15.x | chainload toolchain；sanitizer 使用独立 preset |
 
 项目不使用 C++ Modules；CMake 显式关闭 Modules dependency scan。依赖由 vcpkg manifest/baseline
-管理；`xxHash` 与 `mikktspace` 是 backend-neutral SDK 的必需 package，bgfx 源码由
-`thirdparty/bgfx.cmake` 锁定。`TINA_BUILD_LEGACY=ON` 会立即失败。
+管理，且**没有无条件 root dependency**：`xxHash` 与 `mikktspace` 已 vendored 到 `thirdparty/`，bgfx 源码由
+`thirdparty/bgfx.cmake` 锁定。因此一个 Null preset（不开任何 feature）不需要 vcpkg 提供任何 package。
+`TINA_BUILD_LEGACY=ON` 会立即失败。
 
 ## 编译、运行与测试是独立请求
 
@@ -319,8 +320,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
 ```
 
 这些门禁证明 Windows/Linux headless/Null SDK、独立 PlatformGlfw、AudioMiniaudio 和
-DesktopBootstrap/RenderBgfx 闭包，并在 Windows 覆盖可选 UIFreetype/Vorbis/Opus 图。`xxHash`、
-`mikktspace`、`glfw3`、`Freetype`、`Threads` 与可选 codec package 继续由 consumer toolchain 解析；
+DesktopBootstrap/RenderBgfx 闭包，并在 Windows 覆盖可选 UIFreetype/Vorbis/Opus 图。`glfw3`、`Freetype`、
+`Threads` 与可选 codec package 继续由 consumer toolchain 解析——它们都绑定在具体 component 上，一个只用
+GameSDK 的 consumer 一个都不需要；
 RenderBgfx 在 Tina prefix 中安装最小 `bgfx`/`bx`/`bimg` runtime package，不包含 shaderc、图片 codec 或
 离线工具。每个 consumer gate 都先安装到 staging prefix，再物理移动到不同名的
 relocated prefix；原 prefix 消失后，package 路径扫描、`find_package`、链接和运行只允许使用新位置。
@@ -693,7 +695,7 @@ Vulkan）。**因此模拟器验证不覆盖 Vulkan 路径。**
   `CMakeSettings.json`（Visual Studio 的文件，带 UTF-8 BOM），并按自己的 JSON schema 解析，报
   `Expected BEGIN_OBJECT but was STRING`。那个文件是合法且共享的，所以改的是这边。
 - **vcpkg 必须反过来 chainload NDK toolchain。** AGP 传的 `CMAKE_TOOLCHAIN_FILE` 直指 NDK；wrapper 把它移到
-  `VCPKG_CHAINLOAD_TOOLCHAIN_FILE` 并把 vcpkg 放前面，否则 `find_package(xxHash)` 失败。
+  `VCPKG_CHAINLOAD_TOOLCHAIN_FILE` 并把 vcpkg 放前面，否则 `find_package(Freetype)` 失败。
 - **`VCPKG_MANIFEST_DIR` 必须显式给。** vcpkg 只在 `CMAKE_SOURCE_DIR` 找 `vcpkg.json`，而 wrapper 让那里变成
   `android/app`；不指定它会**静默跳过 manifest 模式**，然后在第一个 `find_package` 处报一个完全不提 vcpkg 的
   缺失配置错误。triplet 按 `ANDROID_ABI` 选（AGP 每个 ABI 单独 configure，写死一个会让另一个 ABI 拿到错误

@@ -41,9 +41,8 @@ for managed_directory in "${EXTRACT_DIRECTORY}" "${CONSUMER_BUILD_DIRECTORY}" "$
       ;;
   esac
 done
-if [[ ! -f "${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" || \
-      ! -f "${VCPKG_ROOT}/installed/x64-linux/share/xxhash/xxHashConfig.cmake" ]]; then
-  echo "The consumer image does not contain its independent vcpkg xxHash installation" >&2
+if [[ ! -f "${VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" ]]; then
+  echo "The consumer image does not contain its independent vcpkg installation" >&2
   exit 1
 fi
 if [[ ! -f "${CONSUMER_SOURCE_DIRECTORY}/CMakeLists.txt" || \

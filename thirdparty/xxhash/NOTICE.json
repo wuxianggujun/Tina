@@ -1,0 +1,9 @@
+{
+  "name": "xxHash",
+  "version": "0.8.3",
+  "url": "https://github.com/Cyan4973/xxHash",
+  "commit_or_tag": "v0.8.3",
+  "license": "BSD-2-Clause (LICENSE)",
+  "files": ["xxhash.h", "LICENSE"],
+  "usage": "tina_core PRIVATE only, header-only via XXH_INLINE_ALL; XXH3_128bits in src/core/hash/ContentHashDigest.cpp. Digests verified byte-identical to the linked 0.8.3 library."
+}
