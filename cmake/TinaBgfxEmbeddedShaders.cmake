@@ -8,7 +8,7 @@ include_guard(GLOBAL)
 # The suffixes are not ours to choose. bgfx's own bgfxToolUtils.cmake maps profiles to
 # exactly these names in _bgfx_get_profile_ext(), commented "extensions consistent with
 # embedded_shader.h": 120 -> glsl, 100_es/300_es -> essl, spirv -> spv, s_5_0 -> dxbc,
-# metal -> mtl. Keep them aligned, and use mtl when Metal is added.
+# metal -> mtl. Keep them aligned.
 #
 # `spv` is cooked with platform=linux on purpose, matching what bgfx does at
 # bgfxToolUtils.cmake:650, where spirv forces PLATFORM_I=LINUX regardless of the target.
@@ -45,6 +45,18 @@ function(tina_bgfx_shader_profiles OUT_VAR)
         # OpenGL ES 3.0: the floor for ANativeWindow-era Android and for iOS GLES.
         # bgfx reports both as RendererType::OpenGLES, so one binary covers them.
         list(APPEND PROFILES "essl|android|300_es")
+        # Metal, the only renderer bgfx will select on modern iOS: Apple deprecated
+        # OpenGL ES, and bgfx's iOS Metal path is what the Ios native binding feeds.
+        #
+        # Cooked on Windows, which is the whole reason this is not gated on APPLE.
+        # shaderc goes GLSL -> SPIR-V -> MSL through SPIRV-Cross (shaderc_metal.cpp,
+        # spirv_msl.hpp) and emits a bgfx binary containing Metal *source*, so no Apple
+        # `metal` compiler is involved -- the MSL is compiled by the Metal runtime on the
+        # device. Verified 2026-09-03: all 11 embedded shaders cook here.
+        #
+        # `metal` with no version suffix is shaderc's own default alias for 1210
+        # (shaderc.cpp:138), matching what bgfxToolUtils.cmake passes.
+        list(APPEND PROFILES "mtl|ios|metal")
     endif()
     set("${OUT_VAR}" "${PROFILES}" PARENT_SCOPE)
 endfunction()

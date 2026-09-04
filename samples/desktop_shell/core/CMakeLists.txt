@@ -1,0 +1,12 @@
+tina_add_sample_core(tina_sample_desktop_shell_core
+    SOURCES
+        DesktopShellIconAtlas.hpp
+        DesktopShellUI.cpp
+        DesktopShellUI.hpp
+    LINK
+        Tina::Runtime
+        Tina::UI
+        Tina::Render
+    INCLUDE
+        ${PROJECT_SOURCE_DIR}/samples/common
+)

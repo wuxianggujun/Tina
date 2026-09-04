@@ -31,6 +31,21 @@ include("${CMAKE_CURRENT_LIST_DIR}/TinaProductInstall.cmake")
 set(Tina_WITH_AssetC @TINA_PACKAGE_WITH_ASSETC@)
 set(Tina_ASSETC_HINT_DIR "@PACKAGE_CMAKE_INSTALL_BINDIR@")
 
+# Shader authoring inputs a custom fragment shader cook reads: Tina_SHADER_INCLUDE_DIR holds the
+# contract .sh files and the varying defs, Tina_BGFX_SHADER_INCLUDE_DIR holds bgfx's own bgfx_shader.sh
+# that a contract includes. Both go on the cook command line as --shader-include roots, which is why
+# they are two variables rather than one merged directory: an installed consumer's arguments then have
+# the same shape as an in-tree build's.
+#
+# Empty unless the package shipped the bgfx renderer, since these are bgfx shader sources and a
+# package without it has nothing to compile them against.
+set(Tina_SHADER_INCLUDE_DIR "")
+set(Tina_BGFX_SHADER_INCLUDE_DIR "")
+if(@TINA_PACKAGE_WITH_RENDER_BGFX@)
+    set_and_check(Tina_SHADER_INCLUDE_DIR "@PACKAGE_CMAKE_INSTALL_DATAROOTDIR@/Tina/shaders")
+    set_and_check(Tina_BGFX_SHADER_INCLUDE_DIR "@PACKAGE_CMAKE_INSTALL_DATAROOTDIR@/Tina/shaders/bgfx")
+endif()
+
 set(Tina_GameSDK_FOUND TRUE)
 set(Tina_PlatformGlfw_FOUND FALSE)
 set(Tina_RenderBgfx_FOUND FALSE)

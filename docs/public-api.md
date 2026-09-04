@@ -846,8 +846,8 @@ hierarchy global pose 与 `globalPose * inverseBind` skinning matrices。Once/Lo
 finite playback speed 均为显式状态；`setClip()` 事务替换同 skeleton joint count 的 clip，失败保留旧 clip/pose。
 
 `captureWorld2DSnapshotBytes()` 将 owner-thread World 的节点名称、LocalTransform 与五类2D组件（含 SpriteAnimation
-绑定）写入唯一现行 schema-v4 snapshot（448-byte named entity record）；调用方 callback 提供稳定 entity ID，并把 Sprite/normal Texture weak handle 映射为
-稳定 `AssetId`。capture 按 hierarchy depth、stable ID 确定性排序，拒绝重复/零 ID、损坏层级和任何3D组件，
+绑定）写入唯一现行 schema-v5 snapshot（464-byte named entity record）；调用方 callback 提供稳定 entity ID，并把 Sprite/normal Texture/custom Shader weak handle 映射为
+稳定 `AssetId`。shader uniform 值由 `Asset::ShaderBindingRegistry` 的 binding 拥有，不进入字节流。capture 按 hierarchy depth、stable ID 确定性排序，拒绝重复/零 ID、损坏层级和任何3D组件，
 不会静默丢字段。`instantiateWorld2DSnapshot()` 在修改目标 World 前预检容量、全部组件与 AssetId→weak handle
 解析；失败销毁本次创建的完整集合并保留既有实体。Runtime `EntityId`/generation、AssetHandle、Lease、Render
 ref/key 都不持久化。gameplay blob 由 game-owned schema/version/bytes 携带，Runtime 不解释。旧 snapshot

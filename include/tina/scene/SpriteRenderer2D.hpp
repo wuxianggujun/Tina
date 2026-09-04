@@ -54,6 +54,11 @@ struct SpriteRenderer2D final {
     // Optional weak Texture2D asset. Extraction resolves it independently from
     // the Sprite asset and never retains a lease or backend binding here.
     Asset::AssetHandle normalTexture{};
+    // Optional weak Shader asset selecting an author fragment program. Extraction
+    // resolves it into both a Shader and a ShaderUniforms frame resource; an empty
+    // handle keeps the engine Sprite2D fragment. Uniform values live on the shader
+    // asset's registry binding, not here, so this stays a plain weak handle.
+    Asset::AssetHandle shader{};
     SpriteOverrideFlags overrides = SpriteOverrideFlags::None;
     Math::Vec2 sizeOverrideMeters{1.0F, 1.0F};
     // Pivot in [0,1] relative to sprite extents; geometric center is adjusted

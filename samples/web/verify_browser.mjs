@@ -32,7 +32,8 @@ const WHEEL_PIXELS_PER_NOTCH = 100;
 // encodes to these bytes. Nothing in the sample should still be showing it, since the sprite
 // covers the whole camera -- so it is kept as the value a blank frame would land on.
 const EXPECTED_CLEAR = [16, 42, 67];
-// The 2x2 texture from SpriteTexels in samples/web/main.cpp, in screen quadrants. The sprite
+// The 2x2 texture from SpriteTexels in samples/web/platforms/web/WebMain.cpp, in screen
+// quadrants. The sprite
 // spans the whole camera and the sampler is Point, so each quadrant is one flat texel: row 0
 // of the upload is the top of the sprite (writeSprite gives the +Y vertices v0, mtxOrtho maps
 // world +Y to NDC +Y, GL samples v=0 from the first uploaded row).

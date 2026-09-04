@@ -1,0 +1,11 @@
+tina_add_sample_core(tina_sample_asset_core
+    SOURCES
+        main.cpp
+        Sample.hpp
+    LINK
+        Tina::Asset
+        Tina::Task
+        Tina::Render
+    INCLUDE
+        ${PROJECT_SOURCE_DIR}/samples/common
+)

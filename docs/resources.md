@@ -438,9 +438,24 @@ capacity/lifetime/width/stable-key/UV/颜色/排序；parser 校验 finite range
 对账。`Fx2DAuthoringDocument` 保存 canonical payload并提供 bounded replace/Undo/Redo；Scene factory 将解析结果
 创建为固定容量 ParticleSystem、initial burst 与 Trail，不取得 Sprite Lease。
 
-`AssetKind` 还包含 Shader 与 Font 枚举值，但当前没有对应的公开 typed payload header、完整 Cooker 与
-产品消费闭环，不能把它们列为已完成资源类型。FreeType 字体仍通过显式 `TINA_UI_FONT_PATH`/fixture
-接入，详见 [UI](ui.md)。
+`AssetKind::Shader` 已有公开 typed payload（`include/tina/asset_format/ShaderPayload.hpp` schema v1）、
+`tina_assetc --shader-source` cooker，以及 Sprite2D 产品消费闭环：`Asset::uploadShaderFromCooked` 把
+cooked 词汇映射到 `IRenderDevice::createShader`，`Scene::SpriteRenderer2D::shader` 经成对的
+shader/uniform resolver 被 extraction intern 成 `FrameResourceKind::Shader` / `ShaderUniforms`
+（World2D snapshot schema v5 持久化该 `AssetId`，uniform 值属 registry binding 不落盘），bgfx 在 submit 前 fail closed（缺 program / 缺 uniform binding / 未声明的 author
+uniform 一律 `InvalidFrameResource` 或 `ShaderNotFound`，不再静默回落到引擎 fragment）。作者
+uniform 上限 16；反射表仍是 64，因为引擎 `tina_mesh3d.sh` 自己声明了 32 个。可交付消费者是
+`samples/2d_custom_shader`（两相 `u_pulse` 像素差 + 引擎对照精灵的 2×2 象限采样）与
+`samples/2d_shader_materials`（同一 program、三套独立 uniform binding）。`ShaderKind::Mesh3D`
+同样是完整通路：共享 `validateShaderUploadDesc` 接受它，`MeshRenderer3D::shader` 与
+`SkinnedMeshRenderer3D::shader` 经**同一对** shader/uniform resolver intern 成 packet-local ref，
+`RenderMesh3DItem`/`RenderMesh3DBatch`/`RenderSkinnedMesh3DItem` 都携带该 ref 对（蒙皮 item 不
+batch，故 ref 挂在 item 上）。一份 cooked Mesh3D fragment binary 同时链接刚性与蒙皮 vertex
+stage，因此没有独立的 SkinnedMesh3D kind，作者也只 cook 一次。绘制契约见 [Render](rendering.md)
+的「Mesh3D 自定义 fragment」。Font 仍无对应的
+公开 typed payload header、完整 Cooker 与产品消费闭环；FreeType 字体仍通过显式
+`TINA_UI_FONT_PATH`/fixture 接入，详见 [UI](ui.md)。绘制契约见 [Render](rendering.md) 的
+「Sprite2D 自定义 fragment」。
 
 StaticMesh v1 固定为 P3N3T4UV2 + UInt16 index，不携带运行时 layout 分支；SkinnedMesh v2 复用该顶点/索引
 布局并额外携带最多256 joints、inverse bind、每顶点固定4个 U16 influences，以及 v2 新增的每 joint 64B

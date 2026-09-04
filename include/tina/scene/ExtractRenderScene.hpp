@@ -39,6 +39,19 @@ struct ExtractRenderSceneParams final {
     Render::Camera2DSurfaceViewport surfaceViewport{};
     Asset::AssetFrameResourceResolver spriteBindingResolver{};
     Asset::AssetFrameResourceResolver normalTextureBindingResolver{};
+    // Both are required when SpriteRenderer2D, MeshRenderer3D, or SkinnedMeshRenderer3D
+    // carries a shader handle: the packet names a program and a value table separately,
+    // and a program published without its uniform slot fails closed at submit. One
+    // Mesh3D fragment binary covers rigid and skinned draws, so the same resolver pair
+    // serves both 3D components.
+    Asset::AssetFrameResourceResolver shaderBindingResolver{};
+    Asset::AssetFrameResourceResolver shaderUniformBindingResolver{};
+    // Keyed on the *mesh* handle, not a shader handle: a cooked StaticMesh/SkinnedMesh may name
+    // its own default Mesh3D fragment stage, and only the mesh's cooked dependencies know which
+    // Shader that is. Both are optional; leaving them unset means cooked defaults are ignored and
+    // only the per-component handle above can replace the engine fragment.
+    Asset::AssetFrameResourceResolver mesh3DDefaultShaderBindingResolver{};
+    Asset::AssetFrameResourceResolver mesh3DDefaultShaderUniformBindingResolver{};
     Asset::AssetFrameResourceResolver mesh3DBindingResolver{};
     Asset::AssetFrameResourceResolver material3DBindingResolver{};
     Asset::AssetFrameResourceResolver skinnedMesh3DBindingResolver{};
@@ -62,8 +75,12 @@ struct ExtractRenderSceneParams final {
 //   spriteBindingResolver into frameResources. When normalTexture has a value,
 //   it must independently resolve through normalTextureBindingResolver to a
 //   non-empty Texture2D ref before addSprite2D receives either binding.
+// - When shader has a value, both shaderBindingResolver and
+//   shaderUniformBindingResolver must resolve to non-empty refs of their own kind
+//   before addSprite2D runs. An empty shader handle leaves both refs empty and
+//   keeps the engine fragment.
 // - A missing resolver, invalid/stale/wrong-kind/unbound handle, or resolver
-//   empty result returns UnresolvedSprite. Hidden sprites resolve neither handle.
+//   empty result returns UnresolvedSprite. Hidden sprites resolve no handle.
 // - Each visible MeshRenderer3D first validates and transforms its authored
 //   local bounding sphere. With one resolved PerspectiveCamera3D on a non-zero
 //   surface, sphere-vs-frustum culling occurs before resolving frame resources.
@@ -71,9 +88,19 @@ struct ExtractRenderSceneParams final {
 //   kind-specific mesh3DBindingResolver/material3DBindingResolver, then become
 //   addMesh3D from WorldTransform pose/scale. Without a resolved camera all
 //   visible meshes preserve the existing fixed-capacity extraction behavior.
+// - When MeshRenderer3D::shader has a value, the same shader/uniform resolver
+//   pair as Sprite2D must resolve to non-empty refs before addMesh3D. Failures
+//   return UnresolvedMesh, not UnresolvedSprite. An empty shader handle falls
+//   back to the cooked mesh default below, and only then to the engine fragment.
+// - With an empty component shader handle and both mesh3DDefaultShader*
+//   resolvers set, the *mesh* handle resolves the fragment stage the cooked mesh
+//   names for itself. Two empty refs mean the mesh names none and the engine
+//   fragment stands. One empty and one not returns UnresolvedMesh, because a
+//   program without its uniform slot fails closed at submit. Unset resolvers are
+//   not a failure: callers that never cook a default keep the old behavior.
 // - A missing resolver, invalid/stale/wrong-kind/unbound handle, or either
-//   resolver empty result returns UnresolvedMesh. Hidden and frustum-culled
-//   meshes are not resolved.
+//   mesh/material resolver empty result returns UnresolvedMesh. Hidden and
+//   frustum-culled meshes are not resolved, including their shader handle.
 // - Each visible SkinnedMeshRenderer3D uses the same authored conservative
 //   sphere and culling order, then resolves mesh/material through the
 //   kind-specific skinnedMesh3DBindingResolver/material3DBindingResolver and its
@@ -82,6 +109,11 @@ struct ExtractRenderSceneParams final {
 //   failures return UnresolvedMesh. Hidden and frustum-culled skinned meshes
 //   resolve neither handles nor pose; extraction does not expand bounds for pose
 //   deformation.
+// - When SkinnedMeshRenderer3D::shader has a value, the same shader/uniform
+//   resolver pair must resolve before addSkinnedMesh3D. One cooked Mesh3D
+//   fragment binary links against both the rigid and skinned engine vertex
+//   stages, so the component names the same Shader asset as MeshRenderer3D, and
+//   the cooked-default fallback behaves identically for both components.
 // - Active DirectionalLight3D components are sorted by stable entity identity,
 //   transformed to world direction, and published as one bounded lighting snapshot.
 //   At most one active component may own CascadedDirectionalShadow3D; extraction

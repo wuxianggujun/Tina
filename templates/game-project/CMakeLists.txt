@@ -37,16 +37,16 @@ add_subdirectory(core)
 # build has no Emscripten toolchain, so neither can be unconditional.
 #
 # A web frontend goes here as platforms/web/ using tina_add_web_frontend(); this template
-# ships no web entry point yet, because the browser composition root is still 134 hand-rolled
-# lines in samples/web/main.cpp with no Tina::Web::CreateEngine to call. Copying those into a
-# template would fork them. See README.md.
+# ships no web entry point yet, because the browser composition root is still hand-rolled in
+# samples/web/platforms/web/WebMain.cpp with no Tina::Web::CreateEngine to call. Copying those
+# into a template would fork them. See README.md.
 if(EMSCRIPTEN)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/platforms/web/CMakeLists.txt")
         add_subdirectory(platforms/web)
     else()
         message(FATAL_ERROR
             "No platforms/web/ in this project. Create it with tina_add_web_frontend() and "
-            "base its entry point on samples/web/main.cpp -- see README.md.")
+            "base its entry point on samples/web/platforms/web/WebMain.cpp -- see README.md.")
     endif()
 elseif(TARGET Tina::DesktopBootstrap)
     add_subdirectory(platforms/desktop)

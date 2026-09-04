@@ -21,13 +21,13 @@ using Core::u8;
 using Core::usize;
 
 constexpr usize SpriteOffset = 56;
-constexpr usize CameraOffset = 136;
-constexpr usize PointLightOffset = 168;
-constexpr usize OccluderOffset = 200;
-constexpr usize SpriteAnimationOffset = 224;
-constexpr usize ResourceOffset = 256;
-constexpr usize PhysicsBodyOffset = 280;
-constexpr usize PhysicsShapeOffset = 328;
+constexpr usize CameraOffset = 152;
+constexpr usize PointLightOffset = 184;
+constexpr usize OccluderOffset = 216;
+constexpr usize SpriteAnimationOffset = 240;
+constexpr usize ResourceOffset = 272;
+constexpr usize PhysicsBodyOffset = 296;
+constexpr usize PhysicsShapeOffset = 344;
 
 [[nodiscard]] u8 readU8(std::span<const std::byte> bytes, usize offset) noexcept
 {
@@ -578,6 +578,8 @@ void writeSprite(std::vector<std::byte>& bytes, usize base, const World2DSpriteD
     writeU8(bytes, base + SpriteOffset + 73U, sprite.colorGreen);
     writeU8(bytes, base + SpriteOffset + 74U, sprite.colorBlue);
     writeU8(bytes, base + SpriteOffset + 75U, sprite.colorAlpha);
+    // +76..+79 stay reserved zeros so the AssetId keeps its 16-byte alignment.
+    writeAssetId(bytes, base + SpriteOffset + 80U, sprite.shaderId);
 }
 
 void writeCamera(std::vector<std::byte>& bytes, usize base, const World2DCameraDesc& camera)
@@ -908,6 +910,7 @@ Core::Result<World2DSnapshotView> parseWorld2DSnapshot(std::span<const std::byte
                 sprite.colorGreen = readU8(payload, base + SpriteOffset + 73U);
                 sprite.colorBlue = readU8(payload, base + SpriteOffset + 74U);
                 sprite.colorAlpha = readU8(payload, base + SpriteOffset + 75U);
+                sprite.shaderId = readAssetId(payload, base + SpriteOffset + 80U);
                 entity.sprite = sprite;
             } else if (!bytesAreZero(payload, base + SpriteOffset, CameraOffset - SpriteOffset))
             {

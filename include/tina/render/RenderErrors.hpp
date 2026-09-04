@@ -80,5 +80,6 @@ inline constexpr Core::ErrorCode VideoCodecUnsupported{Core::ErrorDomain::Render
 inline constexpr Core::ErrorCode InvalidVideoDecodeSubmission{Core::ErrorDomain::Render, 72};
 inline constexpr Core::ErrorCode VideoDecodeTextureNotFound{Core::ErrorDomain::Render, 73};
 inline constexpr Core::ErrorCode InvalidSceneClearColor{Core::ErrorDomain::Render, 74};
+inline constexpr Core::ErrorCode ShaderUniformBindingKeyExhausted{Core::ErrorDomain::Render, 75};
 
 } // namespace Tina::Render::RenderErrorCode

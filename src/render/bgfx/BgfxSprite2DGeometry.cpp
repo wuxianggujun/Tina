@@ -93,17 +93,24 @@ static_assert(sizeof(BgfxSprite2DVertex) == sizeof(float) * 4U + sizeof(u32));
                              "Sprite2D frame exceeds backend geometry count limits");
     }
 
+    // Must break on exactly what the submit loop breaks on, including the shader: the device
+    // terminates when the counted batch total disagrees with the submitted one.
     u32 batchCount = 0;
     FrameResourceRef previousTexture{};
     FrameResourceRef previousNormalTexture{};
+    FrameResourceRef previousShader{};
+    FrameResourceRef previousShaderUniforms{};
     for (const RenderSprite2DItem& sprite : sprites)
     {
         if (batchCount == 0 || sprite.texture != previousTexture ||
-            sprite.normalTexture != previousNormalTexture)
+            sprite.normalTexture != previousNormalTexture || sprite.shader != previousShader ||
+            sprite.shaderUniforms != previousShaderUniforms)
         {
             ++batchCount;
             previousTexture = sprite.texture;
             previousNormalTexture = sprite.normalTexture;
+            previousShader = sprite.shader;
+            previousShaderUniforms = sprite.shaderUniforms;
         }
     }
 
@@ -196,6 +203,39 @@ Core::Status validateSprite2DFrameResources(
                 return Core::failure(
                     RenderErrorCode::InvalidFrameResource,
                     "Sprite2D normal texture ref is stale, cross-packet, wrong-kind, or out of binding range");
+            }
+        }
+        // Validated here rather than at submit for the same reason the textures are: the submit loop
+        // has no way to report a failure and terminates instead.
+        if (sprite.shader)
+        {
+            const FrameResourceDescriptor* shaderDescriptor =
+                resources.resolve(sprite.shader, FrameResourceKind::Shader);
+            if (shaderDescriptor == nullptr ||
+                shaderDescriptor->deviceBindingKey > static_cast<u64>((std::numeric_limits<u32>::max)()))
+            {
+                return Core::failure(
+                    RenderErrorCode::InvalidFrameResource,
+                    "Sprite2D shader ref is stale, cross-packet, wrong-kind, or out of binding range");
+            }
+        }
+        if (sprite.shaderUniforms)
+        {
+            // Rejected without a shader because the values would have nothing to publish to, and a
+            // silently ignored material is the kind of defect that only shows up as wrong pixels.
+            if (!sprite.shader)
+            {
+                return Core::failure(RenderErrorCode::InvalidFrameResource,
+                                     "Sprite2D shader uniform values require a custom shader ref");
+            }
+            const FrameResourceDescriptor* uniformDescriptor =
+                resources.resolve(sprite.shaderUniforms, FrameResourceKind::ShaderUniforms);
+            if (uniformDescriptor == nullptr ||
+                uniformDescriptor->deviceBindingKey > static_cast<u64>((std::numeric_limits<u32>::max)()))
+            {
+                return Core::failure(RenderErrorCode::InvalidFrameResource,
+                                     "Sprite2D shader uniform ref is stale, cross-packet, wrong-kind, "
+                                     "or out of binding range");
             }
         }
     }

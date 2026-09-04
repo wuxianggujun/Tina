@@ -13,6 +13,7 @@
 #include <tina/asset_format/StaticMeshPayload.hpp>
 #include <tina/asset_format/SkinnedMeshPayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
+#include <tina/asset_format/ShaderPayload.hpp>
 #include <tina/asset_format/TileMapPayload.hpp>
 #include <tina/asset_format/TilesetPayload.hpp>
 #include <tina/core/error/Result.hpp>
@@ -27,6 +28,9 @@ namespace Tina::Asset {
 
 [[nodiscard]] Core::Result<AssetFormat::Texture2DPayloadView>
 parseTexture2DFromCooked(const CookedAssetFile& file);
+
+[[nodiscard]] Core::Result<AssetFormat::ShaderPayloadView>
+parseShaderFromCooked(const CookedAssetFile& file);
 
 [[nodiscard]] Core::Result<AssetFormat::EnvironmentMapPayloadView>
 parseEnvironmentMapFromCooked(const CookedAssetFile& file);

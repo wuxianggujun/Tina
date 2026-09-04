@@ -1,6 +1,11 @@
 #include "TinaAndroidGame.hpp"
 
+#include <tina/asset/AssetSystem.hpp>
+#include <tina/asset/AssetTypedViews.hpp>
+#include <tina/asset_format/AssetFormat.hpp>
+#include <tina/core/io/ContentRoot.hpp>
 #include <tina/core/text/Utf8.hpp>
+#include <tina/runtime/EngineConfig.hpp>
 #include <tina/runtime/GameState.hpp>
 #include <tina/runtime/PhaseContexts.hpp>
 #include <tina/runtime/PrimaryWindowUI.hpp>
@@ -10,14 +15,108 @@
 #include <tina/ui/UIHitTest.hpp>
 #include <tina/ui/UIPaint.hpp>
 
+#include <android/log.h>
+
 #include <array>
 #include <optional>
 
 #include <memory>
+#include <memory_resource>
 #include <utility>
 
 namespace Tina::Platform::Android {
 namespace {
+
+// Binds the catalog the APK shipped and reads one asset out of it.
+//
+// Bound, not cooked. The desktop template cooks at startup because that always works with nothing but
+// a recipe beside the executable; here the catalog arrives already cooked, by a host tina_assetc during
+// the Gradle build. That is the one decision in this file worth defending: cooking on a phone would put
+// image processing on the device's CPU at every first launch, for output that is identical on every
+// device -- the cook is deterministic, so the only thing a device can add is latency and heat.
+//
+// The path comes from the root rather than from anything here, which is what makes this the same code
+// desktop and the browser run. On Android the root is the extraction directory the activity copied
+// assets/ into, so "content" below is assets/content/ inside the APK.
+//
+// A failure is reported and swallowed: content that will not load is not a reason to refuse to start,
+// and the counters this writes are how the failure is observed from outside the process.
+//
+// Returns nullopt rather than an error, and by value rather than through an out-parameter: AssetSystem
+// is move-constructible but not move-assignable, so an out-parameter could only be filled by emplace.
+[[nodiscard]] std::optional<Asset::AssetSystem> openShippedContent(const Core::ContentRoot& root,
+                                                                   AndroidGameTelemetry& telemetry)
+{
+    if (root.empty())
+    {
+        // Legal, and the honest reading is "this build shipped no content" -- which is what a build
+        // without -Ptina.assetc produces. Not logged as an error, or every such build would report a
+        // fault it does not have.
+        __android_log_print(ANDROID_LOG_INFO, "Tina", "no content root; this build ships no catalog");
+        return std::nullopt;
+    }
+
+    auto catalogRoot = root.resolve("content");
+    if (!catalogRoot)
+    {
+        __android_log_print(ANDROID_LOG_ERROR, "Tina", "resolving the catalog root failed: %s",
+                            catalogRoot.error().message.c_str());
+        return std::nullopt;
+    }
+
+    auto system = Asset::AssetSystem::Create(Asset::AssetSystemConfig{
+        .storeCapacity = 32,
+        .memoryResource = std::pmr::get_default_resource(),
+    });
+    if (!system)
+    {
+        __android_log_print(ANDROID_LOG_ERROR, "Tina", "creating the asset system failed: %s",
+                            system.error().message.c_str());
+        return std::nullopt;
+    }
+    // Validated on open by default, which is what makes this a real test of the packaging chain: every
+    // object's size is checked against the manifest's cookedFileBytes, so an asset the APK packager or
+    // the extraction step altered by even one byte fails right here instead of surfacing as corrupt
+    // pixels much later.
+    if (auto bound = system->openAndBindCatalog(*catalogRoot); !bound)
+    {
+        __android_log_print(ANDROID_LOG_ERROR, "Tina", "opening the catalog at %s failed: %s",
+                            catalogRoot->c_str(), bound.error().message.c_str());
+        return std::nullopt;
+    }
+
+    const auto* catalog = system->catalog();
+    telemetry.contentCatalogEntries.store(catalog == nullptr ? 0U : catalog->entryCount(),
+                                          std::memory_order_release);
+
+    // One texture, loaded and parsed. Binding alone only proves the manifest was readable; nothing had
+    // opened an object file underneath it, so a catalog whose objects were all unreadable would still
+    // have looked like a working content chain.
+    if (const auto textureId = system->catalogFirstIdOfKind(AssetFormat::AssetKind::Texture2D))
+    {
+        auto handle = system->loadOne(*textureId);
+        if (!handle)
+        {
+            __android_log_print(ANDROID_LOG_ERROR, "Tina", "loading the shipped texture failed: %s",
+                                handle.error().message.c_str());
+        } else if (const auto* file = system->tryGet(*handle); file != nullptr)
+        {
+            telemetry.contentAssetsLoaded.fetch_add(1, std::memory_order_relaxed);
+            if (auto texture = Asset::parseTexture2DFromCooked(*file))
+            {
+                telemetry.contentTextureExtent.store(
+                    (static_cast<u32>(texture->width) << 16U) | static_cast<u32>(texture->height),
+                    std::memory_order_release);
+            } else
+            {
+                __android_log_print(ANDROID_LOG_ERROR, "Tina", "parsing the shipped texture failed: %s",
+                                    texture.error().message.c_str());
+            }
+        }
+    }
+
+    return std::optional<Asset::AssetSystem>{std::move(*system)};
+}
 
 // Panel colours. Chosen to be unmistakable in a screenshot histogram: neither matches the
 // RenderDevice clear colour or any Android system background, so a pixel sample can tell "the engine
@@ -27,7 +126,10 @@ constexpr UI::UIStraightSrgba8Color PulseFill{.red = 60, .green = 190, .blue = 1
 
 class AndroidGameState final : public IGameState {
   public:
-    explicit AndroidGameState(AndroidGameTelemetry& telemetry) noexcept : telemetry_(&telemetry) {}
+    AndroidGameState(AndroidGameTelemetry& telemetry, std::optional<Asset::AssetSystem> content) noexcept
+        : telemetry_(&telemetry), content_(std::move(content))
+    {
+    }
 
     Core::Status onEnter(GameStateEnterContext& context) override
     {
@@ -345,6 +447,10 @@ class AndroidGameState final : public IGameState {
     }
 
     AndroidGameTelemetry* telemetry_;
+    // Held for the state's lifetime because the loaded payload is borrowed, not copied: a
+    // Texture2DPayloadView's level spans point into the CookedAssetFile this system owns. Optional
+    // because a build with no shipped content is legitimate.
+    std::optional<Asset::AssetSystem> content_;
     UI::UIRootOwner root_{};
     UI::UINodeId panel_{};
     UI::UINodeId pulse_{};
@@ -367,9 +473,13 @@ class AndroidGameApplication final : public IGameApplication {
   public:
     explicit AndroidGameApplication(AndroidGameTelemetry& telemetry) noexcept : telemetry_(&telemetry) {}
 
-    Core::Result<std::unique_ptr<IGameState>> createInitialState(GameStartupContext&) override
+    Core::Result<std::unique_ptr<IGameState>> createInitialState(GameStartupContext& context) override
     {
-        return std::unique_ptr<IGameState>{std::make_unique<AndroidGameState>(*telemetry_)};
+        // Here rather than in the constructor, because this is the first point where the engine hands
+        // back the config holding the content root -- and the first hook allowed to fail at all.
+        auto content = openShippedContent(context.engineConfig().contentRoot, *telemetry_);
+        return std::unique_ptr<IGameState>{
+            std::make_unique<AndroidGameState>(*telemetry_, std::move(content))};
     }
 
     void onShutdown(GameShutdownContext&) noexcept override

@@ -19,10 +19,10 @@ namespace Tina::AssetFormat {
 // never serialized; stableEntityId and AssetId are the persistence boundary.
 namespace World2DSnapshotWire {
 
-inline constexpr Core::u16 SchemaVersion = 4;
+inline constexpr Core::u16 SchemaVersion = 5;
 inline constexpr Core::u16 HeaderBytes = 32;
-inline constexpr Core::u32 EntityBytes = 448;
-inline constexpr Core::u32 NameOffset = 384;
+inline constexpr Core::u32 EntityBytes = 464;
+inline constexpr Core::u32 NameOffset = 400;
 inline constexpr Core::u32 NameBytes = 64;
 inline constexpr Core::u32 MaximumNameBytes = NameBytes - 1U;
 inline constexpr Core::u32 MaximumEntities = 4096;
@@ -94,6 +94,9 @@ enum class World2DPixelSnapPolicy : Core::u8 {
 struct World2DSpriteDesc final {
     Core::AssetId spriteId{};
     Core::AssetId normalTextureId{};
+    // Optional Shader asset selecting an author fragment program. Uniform values are
+    // owned by the shader asset's runtime binding, so nothing about them is persisted.
+    Core::AssetId shaderId{};
     World2DSpriteOverrideFlags overrides = World2DSpriteOverrideFlags::None;
     float sizeX = 1.0F;
     float sizeY = 1.0F;
@@ -306,7 +309,7 @@ template <typename Aggregate, Core::usize Count = 0>
 //
 // After adding a member: update all five sites, extend World2DSnapshotWire offsets and
 // EntityBytes, bump SchemaVersion, then raise the count here.
-static_assert(Detail::aggregateFieldCount<World2DSpriteDesc>() == 20);
+static_assert(Detail::aggregateFieldCount<World2DSpriteDesc>() == 21);
 static_assert(Detail::aggregateFieldCount<World2DCameraDesc>() == 10);
 static_assert(Detail::aggregateFieldCount<World2DPointLightDesc>() == 8);
 static_assert(Detail::aggregateFieldCount<World2DShadowOccluderDesc>() == 5);

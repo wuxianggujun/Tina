@@ -16,7 +16,9 @@
 
 #if defined(TINA_RENDER_BGFX_MOBILE_SHADERS)
 #include "fs_tina_ui_image_quad_essl.bin.h"
+#include "fs_tina_ui_image_quad_mtl.bin.h"
 #include "vs_tina_ui_image_quad_essl.bin.h"
+#include "vs_tina_ui_image_quad_mtl.bin.h"
 #endif
 
 namespace Tina::Render::Bgfx::ShaderDetail {
@@ -35,6 +37,11 @@ constexpr bgfx::EmbeddedShader EmbeddedShaders[] = {
 #if defined(TINA_RENDER_BGFX_MOBILE_SHADERS)
             {bgfx::RendererType::OpenGLES, vs_tina_ui_image_quad_essl,
              sizeof(vs_tina_ui_image_quad_essl)},
+            // The only renderer bgfx selects on modern iOS: Apple deprecated OpenGL ES, so
+            // without this entry an iOS device finds no shader and every program fails to
+            // create -- with the GLES entry above present and useless.
+            {bgfx::RendererType::Metal, vs_tina_ui_image_quad_mtl,
+             sizeof(vs_tina_ui_image_quad_mtl)},
 #endif
             {bgfx::RendererType::Vulkan, vs_tina_ui_image_quad_spv,
              sizeof(vs_tina_ui_image_quad_spv)},
@@ -53,6 +60,8 @@ constexpr bgfx::EmbeddedShader EmbeddedShaders[] = {
 #if defined(TINA_RENDER_BGFX_MOBILE_SHADERS)
             {bgfx::RendererType::OpenGLES, fs_tina_ui_image_quad_essl,
              sizeof(fs_tina_ui_image_quad_essl)},
+            {bgfx::RendererType::Metal, fs_tina_ui_image_quad_mtl,
+             sizeof(fs_tina_ui_image_quad_mtl)},
 #endif
             {bgfx::RendererType::Vulkan, fs_tina_ui_image_quad_spv,
              sizeof(fs_tina_ui_image_quad_spv)},

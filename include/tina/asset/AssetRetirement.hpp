@@ -25,6 +25,7 @@ enum class AssetRetirementKind : Core::u8 {
     UploadStaging = 2,
     GpuTexture2D = 3,
     GpuMesh = 4,
+    GpuShader = 5,
 };
 
 struct AssetRetirementRecord final {
@@ -33,6 +34,7 @@ struct AssetRetirementRecord final {
     Render::UploadTicketId ticket{};
     Render::GpuTextureId texture{};
     Render::GpuMeshId mesh{};
+    Render::GpuShaderId shader{};
     AssetRetirementKind kind = AssetRetirementKind::Logical;
     AssetRetirementState state = AssetRetirementState::DestroyQueued;
 };
@@ -63,6 +65,9 @@ class AssetRetirementLedger final {
 
     [[nodiscard]] Core::Status enqueueGpuMesh(AssetHandle handle, Core::AssetId assetId,
                                               Render::GpuMeshId mesh) noexcept;
+
+    [[nodiscard]] Core::Status enqueueGpuShader(AssetHandle handle, Core::AssetId assetId,
+                                                Render::GpuShaderId shader) noexcept;
 
     // Mark ticket drain in progress (optional; Null may skip straight to Released).
     void markRetiring(AssetHandle handle) noexcept;

@@ -1,5 +1,6 @@
 add_executable(tina_assetc
     main.cpp
+    ShaderCompile.cpp
 )
 target_compile_features(tina_assetc PRIVATE cxx_std_23)
 # Reaches src/core/io/PathUtil.hpp; see the note in src/asset/CMakeLists.txt.

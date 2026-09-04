@@ -16,7 +16,7 @@
 - standalone allocation-free `CameraFollow2D` controller；
 - standalone fixed-capacity `ParticleSystem2D` 与 `Trail2D`；
 - World 到 phase-local `RenderSceneWriter` 的 2D/3D extraction；
-- 2D World 节点名称、组件与 game-owned gameplay blob 的 current-only schema-v4 快照；
+- 2D World 节点名称、组件与 game-owned gameplay blob 的 current-only schema-v5 快照；
 - Cooked Prefab node 到 World entity hierarchy 的事务式实例化。
 
 它不负责：
@@ -98,7 +98,7 @@ name；tag/layer/group 不进入 snapshot。
 | `PhysicsShape2D` | Box/Circle/Capsule 尺寸、local center/angle、capsule 端点、材质与事件标志 | 同为纯数据组件；按 kind 校验尺寸（Box 需正 half extent，Circle/Capsule 需正 radius）。body 归属由节点父子关系决定，不存 handle。`ConvexPolygon`/`Chain` 无 wire 表示，故不在此 |
 | `ResourceBinding2D` | 资源 `AssetId`、binding kind（TileMap/FxEmitter/NavigationRegion/AudioPlayer）与 active | World **不解释** AssetId 用途，只保证 restore→capture 字节往返；实例化属游戏或 Asset 层。kind 同样因 wire 编码在 `nodeKind` 而显式携带 |
 | `PerspectiveCamera3D` | perspective 参数与 active 标志 | 每帧最多一个 active 3D camera |
-| `MeshRenderer3D` | weak mesh/material `AssetHandle`、local sphere bounds、base color、可见性 | World 只校验结构；有效 PerspectiveCamera3D + 非0 surface 时先按 world transformed sphere 做 frustum culling，再通过两个 kind-specific resolver 解析 packet-local ref；无相机/0x0 surface 保留全量提取 |
+| `MeshRenderer3D` | weak mesh/material `AssetHandle`、optional weak custom Shader `AssetHandle`、local sphere bounds、base color、可见性 | World 只校验结构（`isValid` 刻意不看 shader）；有效 PerspectiveCamera3D + 非0 surface 时先按 world transformed sphere 做 frustum culling，再通过两个 kind-specific resolver 解析 packet-local ref；shader 非空时还要求成对的 shader/uniform resolver；无相机/0x0 surface 保留全量提取 |
 | `DirectionalLight3D` | linear RGB color、非负 intensity、active 标志 | Entity world local `+Z` 指向光源；每帧最多4个 active light，按稳定 Entity identity 发布 |
 | `PointLight3D` | linear RGB color、非负 intensity、正 influence radius、optional `PointLightShadow3D`、active 标志 | Entity world position 是灯光中心；每帧最多8个 camera-affecting active light，按稳定 Entity identity 发布；有有效 PerspectiveCamera3D 时 influence sphere 在容量检查前做 frustum culling；最多一个 camera-affecting shadow config |
 | `SpotLight3D` | linear RGB color、非负 intensity、正 influence radius、合法 inner/outer cone half-angle、optional `SpotLightShadow3D`、active 标志 | Entity world position 是灯光中心，world local `-Z` 是出光方向；每帧最多8个 camera-affecting active light；与 point light 一样先做 influence sphere culling，再按稳定 Entity identity 发布；最多一个 camera-affecting shadow config |
@@ -208,7 +208,9 @@ PerspectiveCamera3D + 非0 surface 时复用 point/spot light 的精确 sphere-f
 `mesh3DBindingResolver`/`material3DBindingResolver`，按预期 AssetKind intern 非空 packet-local ref；任一
 handle/resolver/binding 失效返回 `UnresolvedMesh`，mesh 失败不会继续调用 material resolver，hidden/culled mesh
 不解析。`SkinnedMeshRenderer3D` 使用 authored conservative sphere 的同一顺序，culled item 不调用 pose provider；
-bounds 不随 pose 自动扩张，authoring 必须覆盖完整动画形变。`DirectionalLight3D` 使用已发布 world rotation 把 local `+Z` 转为朝向光源的 world direction，
+bounds 不随 pose 自动扩张，authoring 必须覆盖完整动画形变。两个 3D draw 组件的 optional
+`shader` 都走与 Sprite2D 相同的成对 `shaderBindingResolver`/`shaderUniformBindingResolver`，
+失败码是 `UnresolvedMesh`；hidden/culled item 连 shader 也不解析。`DirectionalLight3D` 使用已发布 world rotation 把 local `+Z` 转为朝向光源的 world direction，
 将 color×intensity 与 `ExtractRenderSceneParams::ambientLightScale` 写入固定4槽的 self-contained
 RenderScene snapshot。`PointLight3D` 使用已发布 world position、influence radius 与 color×intensity；
 `SpotLight3D` 额外把 world local `-Z` 转成出光方向，并把 inner/outer half-angle 转成 cosine。optional
@@ -260,13 +262,13 @@ writer、committed view 与其中 span 只在对应 Runtime phase/submit 调用�
 
 ## World2D 快照
 
-`AssetFormat::writeWorld2DSnapshotBytes()` / `parseWorld2DSnapshot()` 定义唯一现行 schema v4（固定容量 UTF-8 节点名）；
+`AssetFormat::writeWorld2DSnapshotBytes()` / `parseWorld2DSnapshot()` 定义唯一现行 schema v5（固定容量 UTF-8 节点名）；
 `captureWorld2DSnapshotBytes()` / `instantiateWorld2DSnapshot()` 在该 wire 与 `World` 间转换。持久化边界只包含：
 
 - 调用方提供的非零稳定 entity ID 与 parent stable ID；
 - LocalTransform；
 - SpriteRenderer2D、Camera2D、PointLight2D、ShadowOccluder2D、SpriteAnimation2D binding；
-- Sprite/normal Texture 的稳定 `AssetId`；
+- Sprite/normal Texture/custom Shader 的稳定 `AssetId`（shader uniform 值属于 registry binding，不落盘）；
 - Runtime 不解释的 gameplay schema/version/bytes。
 
 Runtime `EntityId` 的 owner/index/generation、weak `AssetHandle`、AssetLease、Render key 和 GPU handle 均不进入

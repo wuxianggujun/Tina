@@ -78,6 +78,18 @@ Core::Status AssetRetirementLedger::enqueueGpuMesh(AssetHandle handle, Core::Ass
     });
 }
 
+Core::Status AssetRetirementLedger::enqueueGpuShader(AssetHandle handle, Core::AssetId assetId,
+                                                      Render::GpuShaderId shader) noexcept
+{
+    return enqueue(AssetRetirementRecord{
+        .assetId = assetId,
+        .handle = handle,
+        .shader = shader,
+        .kind = AssetRetirementKind::GpuShader,
+        .state = AssetRetirementState::DestroyQueued,
+    });
+}
+
 Core::Status AssetRetirementLedger::enqueue(AssetRetirementRecord record) noexcept
 {
     if (auto* existing = find(record.handle))
@@ -116,6 +128,7 @@ void AssetRetirementLedger::markReleased(AssetHandle handle) noexcept
         existing->ticket = {};
         existing->texture = {};
         existing->mesh = {};
+        existing->shader = {};
     }
 }
 

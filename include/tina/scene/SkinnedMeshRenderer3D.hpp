@@ -14,6 +14,7 @@ namespace Tina::Scene {
 struct SkinnedMeshRenderer3D final {
     Asset::AssetHandle mesh{};
     Asset::AssetHandle material{};
+    Asset::AssetHandle shader{};  // weak Shader handle, optional custom fragment program
     u32 submeshIndex = 0;
     Render::RenderBoundingSphereInput localBounds{.radius = 0.5F};
     Render::RenderLinearColor baseColorFactor{};

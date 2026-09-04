@@ -19,6 +19,12 @@ enum class FrameResourceKind : Core::u8 {
     // distinct kind: a skinned item resolving a static binding (or vice versa)
     // fails closed at resolve time instead of drawing with the wrong pipeline.
     SkinnedMesh3DGeometry = 4,
+    // A custom fragment shader replacing the engine's for one draw. The kind a shader was cooked
+    // for is checked at upload, not here: this descriptor only names a device binding key.
+    Shader = 5,
+    // Values for a custom shader's author-declared uniforms. A separate kind from Shader so a draw
+    // that swaps the two fails closed at resolve rather than binding a program as a material.
+    ShaderUniforms = 6,
 };
 
 struct FrameResourceDescriptor final {

@@ -2,7 +2,7 @@
 
 ## 产品场景
 
-Editor 的当前闭环同时覆盖 schema-v4 World2D snapshot (448-byte named entity records)、schema-v4 Prefab (208-byte named node records)、TileMap schema-v3 root +
+Editor 的当前闭环同时覆盖 schema-v5 World2D snapshot (464-byte named entity records)、schema-v4 Prefab (208-byte named node records)、TileMap schema-v3 root +
 TileMapChunk schema-v1 payload family，以及 SpriteAnimationClip schema-v2（含 per-frame notify events 和
 Timeline event marker authoring）。Hierarchy/Inspector/Timeline 把一次
 用户意图提交为一个 authoring revision，Undo/Redo 切换已经验证的 revision，Preview 直接把当前 canonical bytes

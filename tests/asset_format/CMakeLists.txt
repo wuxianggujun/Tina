@@ -7,6 +7,7 @@ set(TINA_ASSET_FORMAT_TEST_SOURCES
     MaterialPayloadTests.cpp
     NavigationGrid2DPayloadTests.cpp
     PrefabPayloadTests.cpp
+    ShaderPayloadTests.cpp
     SpriteAnimationClipPayloadTests.cpp
     SourceImportMetadataFormatTests.cpp
     SkinnedMeshPayloadTests.cpp
@@ -25,6 +26,7 @@ set(TINA_ASSET_FORMAT_TEST_SOURCES
     header_isolation/MaterialPayloadHeader.cpp
     header_isolation/NavigationGrid2DPayloadHeader.cpp
     header_isolation/PrefabPayloadHeader.cpp
+    header_isolation/ShaderPayloadHeader.cpp
     header_isolation/SpriteAnimationClipPayloadHeader.cpp
     header_isolation/SpritePayloadHeader.cpp
     header_isolation/SourceImportMetadataFormatHeader.cpp

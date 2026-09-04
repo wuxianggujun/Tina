@@ -253,6 +253,28 @@ function(tina_configure_game_sdk_package)
             "${BIMG_DIR}/3rdparty/tinyexr/deps/miniz/LICENSE"
             DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/licenses/Tina/miniz"
         )
+
+        # Shader authoring inputs. tina_assetc ships (below), but a custom fragment shader also needs
+        # sources the cook reads rather than links: the contract .sh its source must #include, the
+        # varying def that fixes the stage interface, and bgfx's own bgfx_shader.sh that the contract
+        # includes in turn. Without these an installed SDK has the cooker and no way to feed it --
+        # every path in a working cook command pointed into this source tree, so the sample's recipe
+        # was unreproducible outside it.
+        #
+        # Two directories rather than one because they are two include roots on the cook command line
+        # (--shader-include each), and shipping them merged would make an installed consumer's
+        # arguments differ from an in-tree one's for no reason.
+        install(FILES
+            "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_sprite2d.sh"
+            "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_mesh3d.sh"
+            "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_sprite2d_fixture.def.sc"
+            DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/Tina/shaders"
+        )
+        install(FILES
+            "${BGFX_DIR}/src/bgfx_shader.sh"
+            "${BGFX_DIR}/src/bgfx_compute.sh"
+            DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/Tina/shaders/bgfx"
+        )
     endif()
     if(TARGET tina_ui_freetype)
         list(APPEND tina_sdk_installed_targets tina_ui_freetype)
@@ -403,7 +425,7 @@ function(tina_configure_game_sdk_package)
         "${PROJECT_SOURCE_DIR}/cmake/TinaConfig.cmake.in"
         "${PROJECT_BINARY_DIR}/TinaConfig.cmake"
         INSTALL_DESTINATION "${tina_package_directory}"
-        PATH_VARS CMAKE_INSTALL_INCLUDEDIR CMAKE_INSTALL_BINDIR
+        PATH_VARS CMAKE_INSTALL_INCLUDEDIR CMAKE_INSTALL_BINDIR CMAKE_INSTALL_DATAROOTDIR
     )
     # ADR 0024 requires stricter semantics than CMake's built-in ExactVersion
     # template: that template ignores a tweak component and accepts the lower

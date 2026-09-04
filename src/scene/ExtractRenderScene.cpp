@@ -19,6 +19,7 @@
 #include <cmath>
 #include <numbers>
 #include <optional>
+#include <string_view>
 
 namespace Tina::Scene {
 namespace {
@@ -26,6 +27,70 @@ namespace {
 [[nodiscard]] u64 stableEntityKey(EntityId entity) noexcept
 {
     return (static_cast<u64>(entity.index()) << 32U) | static_cast<u64>(entity.generation());
+}
+
+struct Mesh3DShaderRefs final {
+    Render::FrameResourceRef shader{};
+    Render::FrameResourceRef shaderUniforms{};
+};
+
+// Resolves the fragment stage for one Mesh3D draw: the component handle when it names a Shader,
+// otherwise whatever fragment stage the cooked mesh names for itself, otherwise the engine's.
+// Shared by the rigid and skinned loops so the two cannot drift on precedence, and because one
+// cooked Mesh3D fragment binary links against both engine vertex stages.
+[[nodiscard]] Core::Result<Mesh3DShaderRefs> resolveMesh3DShaderRefs(
+    const ExtractRenderSceneParams& params,
+    Render::FrameResourceSink& frameResources,
+    Asset::AssetHandle componentShader,
+    Asset::AssetHandle mesh) noexcept
+{
+    const auto fail = [](std::string_view detail) {
+        return Core::failure(SceneErrorCode::UnresolvedMesh, detail);
+    };
+    const auto resolvePair =
+        [&](const Asset::AssetFrameResourceResolver& shaderResolver,
+            const Asset::AssetFrameResourceResolver& uniformResolver,
+            Asset::AssetHandle key) -> Core::Result<Mesh3DShaderRefs> {
+        auto resolvedShader = shaderResolver(key, frameResources);
+        if (!resolvedShader) {
+            return Core::failure(std::move(resolvedShader.error()));
+        }
+        auto resolvedUniforms = uniformResolver(key, frameResources);
+        if (!resolvedUniforms) {
+            return Core::failure(std::move(resolvedUniforms.error()));
+        }
+        // A program published without its uniform slot fails closed at submit, so a half
+        // resolution is a defect here rather than a silently engine-shaded draw.
+        if (resolvedShader->hasValue() != resolvedUniforms->hasValue()) {
+            return fail("Mesh3D shader resolved without its matching uniform binding");
+        }
+        return Mesh3DShaderRefs{.shader = *resolvedShader, .shaderUniforms = *resolvedUniforms};
+    };
+
+    if (componentShader) {
+        if (!params.shaderBindingResolver || !params.shaderUniformBindingResolver) {
+            return fail("Mesh3D component shader has no shader and uniform resolver pair");
+        }
+        auto resolved =
+            resolvePair(params.shaderBindingResolver, params.shaderUniformBindingResolver,
+                        componentShader);
+        if (!resolved) {
+            return Core::failure(std::move(resolved.error()));
+        }
+        if (!resolved->shader.hasValue()) {
+            return fail("Mesh3D component shader has no render binding");
+        }
+        return *resolved;
+    }
+
+    // Unset resolvers are not a failure: a caller that never cooks a mesh default must keep
+    // extracting, so only a resolver that answers with half a pair is treated as broken.
+    if (!params.mesh3DDefaultShaderBindingResolver ||
+        !params.mesh3DDefaultShaderUniformBindingResolver) {
+        return Mesh3DShaderRefs{};
+    }
+    return resolvePair(params.mesh3DDefaultShaderBindingResolver,
+                       params.mesh3DDefaultShaderUniformBindingResolver, mesh);
 }
 
 // WorldTransform stores a unit quaternion. For 2D XY content the authored spin
@@ -775,6 +840,36 @@ Core::Status extractRenderSceneFromWorld(
             }
             normalTexture = *resolvedNormal;
         }
+        Render::FrameResourceRef shader{};
+        Render::FrameResourceRef shaderUniforms{};
+        if (sprite->shader) {
+            if (!params.shaderBindingResolver || !params.shaderUniformBindingResolver) {
+                return Core::failure(
+                    SceneErrorCode::UnresolvedSprite,
+                    "Scene SpriteRenderer2D has no shader and uniform resolver pair");
+            }
+            auto resolvedShader = params.shaderBindingResolver(sprite->shader, frameResources);
+            if (!resolvedShader) {
+                return Core::failure(std::move(resolvedShader.error()));
+            }
+            if (!resolvedShader->hasValue()) {
+                return Core::failure(
+                    SceneErrorCode::UnresolvedSprite,
+                    "Scene SpriteRenderer2D shader has no render binding");
+            }
+            auto resolvedUniforms =
+                params.shaderUniformBindingResolver(sprite->shader, frameResources);
+            if (!resolvedUniforms) {
+                return Core::failure(std::move(resolvedUniforms.error()));
+            }
+            if (!resolvedUniforms->hasValue()) {
+                return Core::failure(
+                    SceneErrorCode::UnresolvedSprite,
+                    "Scene SpriteRenderer2D shader has no uniform binding");
+            }
+            shader = *resolvedShader;
+            shaderUniforms = *resolvedUniforms;
+        }
         const WorldTransform* transform = world.worldTransform(entity);
         if (transform == nullptr || !isValid(*transform)) {
             return Core::failure(
@@ -823,6 +918,8 @@ Core::Status extractRenderSceneFromWorld(
         const Render::RenderSprite2DInput input{
             .texture = *texture,
             .normalTexture = normalTexture,
+            .shader = shader,
+            .shaderUniforms = shaderUniforms,
             .stableEntityKey = stableEntityKey(entity),
             .centerX = centerX,
             .centerY = centerY,
@@ -1010,9 +1107,16 @@ Core::Status extractRenderSceneFromWorld(
                 SceneErrorCode::UnresolvedMesh,
                 "Scene MeshRenderer3D material asset has no render binding");
         }
+        auto shaderRefs =
+            resolveMesh3DShaderRefs(params, frameResources, mesh->shader, mesh->mesh);
+        if (!shaderRefs) {
+            return Core::failure(std::move(shaderRefs.error()));
+        }
         const Render::RenderMesh3DInput input{
             .mesh = *meshResource,
             .material = *materialResource,
+            .shader = shaderRefs->shader,
+            .shaderUniforms = shaderRefs->shaderUniforms,
             .submeshIndex = mesh->submeshIndex,
             .stableEntityKey = stableEntityKey(entity),
             .worldTransform =
@@ -1102,6 +1206,11 @@ Core::Status extractRenderSceneFromWorld(
                 SceneErrorCode::UnresolvedMesh,
                 "Scene SkinnedMeshRenderer3D material asset has no render binding");
         }
+        auto shaderRefs =
+            resolveMesh3DShaderRefs(params, frameResources, mesh->shader, mesh->mesh);
+        if (!shaderRefs) {
+            return Core::failure(std::move(shaderRefs.error()));
+        }
         const std::span<const float> palette = params.skinnedPose3DProvider(entity);
         if (palette.empty()
             || (palette.size() % Render::SkinnedMesh3DPaletteFloatsPerJoint) != 0
@@ -1117,6 +1226,8 @@ Core::Status extractRenderSceneFromWorld(
         const Render::RenderSkinnedMesh3DInput input{
             .mesh = *meshResource,
             .material = *materialResource,
+            .shader = shaderRefs->shader,
+            .shaderUniforms = shaderRefs->shaderUniforms,
             .submeshIndex = mesh->submeshIndex,
             .stableEntityKey = stableEntityKey(entity),
             .worldTransform =

@@ -1,6 +1,7 @@
 #include "BgfxRenderDevice.hpp"
 #include "BgfxCascadedDirectionalShadowMath.hpp"
 #include "BgfxClearColor.hpp"
+#include "BgfxCustomShader.hpp"
 #include "BgfxCascadedDirectionalShadowResources.hpp"
 #include "BgfxSpotLightShadowMath.hpp"
 #include "BgfxSpotLightShadowResources.hpp"
@@ -525,6 +526,7 @@ toBgfxPlatformData(const Integration::Detail::NativeWindowBinding& binding)
     case Integration::Detail::NativeWindowBindingKind::Wayland:
     case Integration::Detail::NativeWindowBindingKind::Android:
     case Integration::Detail::NativeWindowBindingKind::Html5:
+    case Integration::Detail::NativeWindowBindingKind::Ios:
         break;
     default:
         return Core::failure(RenderErrorCode::InvalidNativeWindowBinding,
@@ -577,6 +579,18 @@ toBgfxPlatformData(const Integration::Detail::NativeWindowBinding& binding)
         {
             return Core::failure(RenderErrorCode::InvalidNativeWindowBinding,
                                  "The HTML5 native window binding must not carry a display pointer");
+        }
+        platformData.type = bgfx::NativeWindowHandleType::Default;
+        break;
+    case Integration::Detail::NativeWindowBindingKind::Ios:
+        // CAMetalLayer* goes straight to nwh: bgfx's SwapChainMtl::init casts it and verifies the
+        // class with isKindOfClass:, so the handle type stays Default (Wayland is the only other
+        // value the enum has, and it is a Linux windowing concept). There is no display to carry,
+        // so a non-zero one would be silently ignored.
+        if (binding.nativeDisplay != 0)
+        {
+            return Core::failure(RenderErrorCode::InvalidNativeWindowBinding,
+                                 "The iOS native window binding must not carry a display pointer");
         }
         platformData.type = bgfx::NativeWindowHandleType::Default;
         break;
@@ -1209,6 +1223,14 @@ class BgfxRenderDevice final : public IRenderDevice {
         sprite2DProgram_ = *sprite2DProgram;
         ++statistics_.liveResources;
 
+        auto sprite2DVertexShader = ShaderDetail::createSprite2DVertexShader();
+        if (!sprite2DVertexShader)
+        {
+            return Core::failure(std::move(sprite2DVertexShader.error()));
+        }
+        sprite2DVertexShader_ = *sprite2DVertexShader;
+        ++statistics_.liveResources;
+
         sprite2DSampler_ = bgfx::createUniform("s_tex", bgfx::UniformType::Sampler);
         if (!bgfx::isValid(sprite2DSampler_))
         {
@@ -1592,6 +1614,22 @@ class BgfxRenderDevice final : public IRenderDevice {
         opaque3DSkinnedProgram_ = *opaque3DSkinnedProgram;
         ++statistics_.liveResources;
 
+        auto opaque3DMrVertexShader = ShaderDetail::createOpaque3DMrVertexShader();
+        if (!opaque3DMrVertexShader)
+        {
+            return Core::failure(std::move(opaque3DMrVertexShader.error()));
+        }
+        opaque3DMrVertexShader_ = *opaque3DMrVertexShader;
+        ++statistics_.liveResources;
+
+        auto opaque3DSkinnedVertexShader = ShaderDetail::createOpaque3DSkinnedVertexShader();
+        if (!opaque3DSkinnedVertexShader)
+        {
+            return Core::failure(std::move(opaque3DSkinnedVertexShader.error()));
+        }
+        opaque3DSkinnedVertexShader_ = *opaque3DSkinnedVertexShader;
+        ++statistics_.liveResources;
+
         opaque3DSkinPaletteUniform_ = bgfx::createUniform(
             "u_tinaSkinPalette", bgfx::UniformType::Mat4,
             kOpaque3DSkinPaletteArrayJointCount);
@@ -1749,6 +1787,11 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             return Core::failure(std::move(status.error()));
         }
+        if (auto status = validateSprite2DShaderBindings(frame.primaryWorldScene, frame.resources);
+            !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
         if (frame.primaryWorldScene.sprite2DLighting().has_value())
         {
             if (auto status = validateSprite2DLightingDesc(
@@ -1764,6 +1807,11 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         if (auto status = validateMesh3DMaterialAlphaBindings(
                 frame.primaryWorldScene, frame.resources);
+            !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        if (auto status = validateMesh3DShaderBindings(frame.primaryWorldScene, frame.resources);
             !status)
         {
             return Core::failure(std::move(status.error()));
@@ -2357,6 +2405,24 @@ class BgfxRenderDevice final : public IRenderDevice {
                 sprite2DProgram_ = BGFX_INVALID_HANDLE;
                 --statistics_.liveResources;
             }
+            if (bgfx::isValid(sprite2DVertexShader_))
+            {
+                bgfx::destroy(sprite2DVertexShader_);
+                sprite2DVertexShader_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(opaque3DMrVertexShader_))
+            {
+                bgfx::destroy(opaque3DMrVertexShader_);
+                opaque3DMrVertexShader_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            if (bgfx::isValid(opaque3DSkinnedVertexShader_))
+            {
+                bgfx::destroy(opaque3DSkinnedVertexShader_);
+                opaque3DSkinnedVertexShader_ = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
             if (bgfx::isValid(sprite2DDefaultTexture_))
             {
                 bgfx::destroy(sprite2DDefaultTexture_);
@@ -2427,6 +2493,30 @@ class BgfxRenderDevice final : public IRenderDevice {
                 }
             }
             texture2DBindings_.clear();
+            for (ShaderSlot& slot : shaders_)
+            {
+                const bool occupied = slot.live || slot.retirementPhase != RetirementPhase::None;
+                if (occupied && bgfx::isValid(slot.skinnedProgram))
+                {
+                    // Not counted separately in liveResources: one upload is one resource, and the
+                    // skinned program is a second link of the same fragment binary.
+                    bgfx::destroy(slot.skinnedProgram);
+                    slot.skinnedProgram = BGFX_INVALID_HANDLE;
+                }
+                if (occupied && bgfx::isValid(slot.program))
+                {
+                    bgfx::destroy(slot.program);
+                    slot.program = BGFX_INVALID_HANDLE;
+                    --statistics_.liveResources;
+                }
+                if (slot.live)
+                {
+                    slot.live = false;
+                    slot.identity.advanceAfterRelease();
+                }
+            }
+            shaderBindings_.clear();
+            shaderUniformBindings_.clear();
             if (bgfx::isValid(uiCoverageProgram_))
             {
                 bgfx::destroy(uiCoverageProgram_);
@@ -2531,6 +2621,15 @@ class BgfxRenderDevice final : public IRenderDevice {
                     ++shutdownCompleted;
                 }
             }
+            for (ShaderSlot& slot : shaders_)
+            {
+                if (slot.retirementPhase != RetirementPhase::None)
+                {
+                    slot.completionPin.release();
+                    slot.retirementPhase = RetirementPhase::None;
+                    ++shutdownCompleted;
+                }
+            }
             for (EnvironmentMapSlot& slot : environmentMaps_)
             {
                 if (slot.retirementPhase != RetirementPhase::None)
@@ -2549,6 +2648,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             retirementTimeline_.reset();
             retirementMarkerSupported_ = false;
             textures_.clear();
+            shaders_.clear();
             meshes_.clear();
             environmentMaps_.clear();
         }
@@ -2650,6 +2750,14 @@ class BgfxRenderDevice final : public IRenderDevice {
                 ++waitingCount;
             }
         }
+        for (ShaderSlot& slot : shaders_)
+        {
+            if (slot.retirementPhase == RetirementPhase::Queued)
+            {
+                slot.retirementPhase = RetirementPhase::Waiting;
+                ++waitingCount;
+            }
+        }
         for (EnvironmentMapSlot& slot : environmentMaps_)
         {
             if (slot.retirementPhase == RetirementPhase::Queued)
@@ -2719,6 +2827,29 @@ class BgfxRenderDevice final : public IRenderDevice {
             slot.indexCount = 0;
             slot.jointCount = 0;
             slot.skinned = false;
+            slot.retirementPhase = RetirementPhase::None;
+            slot.completionPin.release();
+            ++completed;
+        }
+        for (ShaderSlot& slot : shaders_)
+        {
+            if (slot.retirementPhase != RetirementPhase::Waiting)
+            {
+                continue;
+            }
+            if (bgfx::isValid(slot.skinnedProgram))
+            {
+                bgfx::destroy(slot.skinnedProgram);
+                slot.skinnedProgram = BGFX_INVALID_HANDLE;
+            }
+            if (bgfx::isValid(slot.program))
+            {
+                bgfx::destroy(slot.program);
+                slot.program = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            slot.shaderKind = GpuShaderKind::Invalid;
+            slot.authorUniforms.clear();
             slot.retirementPhase = RetirementPhase::None;
             slot.completionPin.release();
             ++completed;
@@ -3116,6 +3247,208 @@ class BgfxRenderDevice final : public IRenderDevice {
             .indexBuffer = slot.indexBuffer,
             .jointCount = slot.jointCount,
         };
+    }
+
+    // Declared here only so the accessor below can name it in a return type; the definition stays
+    // with the other resource slots. A member function *body* sees the whole class, but a return
+    // type is looked up in declaration order.
+    struct ShaderSlot;
+
+    // A live Sprite2D program for a batch's shader descriptor, or nullptr when the batch named no
+    // shader at all. Never a fallback: a sprite that named a shader and cannot get it is a frame
+    // error, not a reason to draw with the engine program.
+    [[nodiscard]] const ShaderSlot* resolveSprite2DShaderSlot(u32 shaderKey) const noexcept
+    {
+        const auto binding = shaderBindings_.find(shaderKey);
+        if (binding == shaderBindings_.end())
+        {
+            return nullptr;
+        }
+        const GpuShaderId id = binding->second;
+        if (id.index >= shaders_.size())
+        {
+            return nullptr;
+        }
+        const ShaderSlot& slot = shaders_[id.index];
+        if (!slot.live || slot.identity.value() != id.generation ||
+            slot.shaderKind != GpuShaderKind::Sprite2D || !bgfx::isValid(slot.program))
+        {
+            return nullptr;
+        }
+        return &slot;
+    }
+
+    [[nodiscard]] const ShaderSlot* resolveMesh3DShaderSlot(u32 shaderKey) const noexcept
+    {
+        const auto binding = shaderBindings_.find(shaderKey);
+        if (binding == shaderBindings_.end())
+        {
+            return nullptr;
+        }
+        const GpuShaderId id = binding->second;
+        if (id.index >= shaders_.size())
+        {
+            return nullptr;
+        }
+        const ShaderSlot& slot = shaders_[id.index];
+        if (!slot.live || slot.identity.value() != id.generation ||
+            slot.shaderKind != GpuShaderKind::Mesh3D || !bgfx::isValid(slot.program))
+        {
+            return nullptr;
+        }
+        return &slot;
+    }
+
+    // Picks the program for one Mesh3D draw and publishes its author uniforms, leaving the caller to
+    // submit. Returns engineProgram when the draw named no shader.
+    //
+    // A named shader that does not resolve terminates rather than falling back to the engine program:
+    // submitFrame validated every one against this same immutable packet view before any surface
+    // state advanced, so reaching here means the binding table changed underneath a validated frame.
+    // Falling back would report success and draw the wrong pixels.
+    [[nodiscard]] bgfx::ProgramHandle
+    resolveMesh3DDrawProgram(FrameResourceTableView resources, FrameResourceRef shaderRef,
+                             FrameResourceRef uniformRef, bgfx::ProgramHandle engineProgram,
+                             bool skinned) const noexcept
+    {
+        if (!shaderRef)
+        {
+            return engineProgram;
+        }
+        const FrameResourceDescriptor* shaderDescriptor =
+            resources.resolve(shaderRef, FrameResourceKind::Shader);
+        if (shaderDescriptor == nullptr)
+        {
+            std::terminate();
+        }
+        const ShaderSlot* slot =
+            resolveMesh3DShaderSlot(static_cast<u32>(shaderDescriptor->deviceBindingKey));
+        if (slot == nullptr)
+        {
+            std::terminate();
+        }
+        // Same fragment binary, different vertex stage. Both are linked at upload, so a valid slot
+        // always carries both -- an invalid one here would mean the slot was built without a skinned
+        // stage, which createShader does not allow for Mesh3D.
+        const bgfx::ProgramHandle program = skinned ? slot->skinnedProgram : slot->program;
+        if (!bgfx::isValid(program))
+        {
+            std::terminate();
+        }
+
+        // Every author uniform is published, not only the ones the binding names: bgfx keeps uniform
+        // values across submits, so an unset one would silently inherit whatever the previous draw
+        // wrote. A value the caller did not supply is zero.
+        const std::vector<GpuShaderUniformValue>* values = nullptr;
+        if (uniformRef)
+        {
+            const FrameResourceDescriptor* uniformDescriptor =
+                resources.resolve(uniformRef, FrameResourceKind::ShaderUniforms);
+            if (uniformDescriptor == nullptr)
+            {
+                std::terminate();
+            }
+            if (const auto binding =
+                    shaderUniformBindings_.find(static_cast<u32>(uniformDescriptor->deviceBindingKey));
+                binding != shaderUniformBindings_.end())
+            {
+                values = &binding->second;
+            }
+        }
+        for (const ShaderDetail::CustomShaderUniform& uniform : slot->authorUniforms)
+        {
+            std::array<float, 4> value{};
+            if (values != nullptr)
+            {
+                const std::string_view wanted{uniform.name.data()};
+                for (const GpuShaderUniformValue& candidate : *values)
+                {
+                    if (std::string_view{candidate.name.data()} == wanted)
+                    {
+                        value = candidate.value;
+                        break;
+                    }
+                }
+            }
+            bgfx::setUniform(uniform.handle, value.data());
+        }
+        return program;
+    }
+
+    // Sprite2D geometry validation already rejects a stale, cross-packet or wrong-kind frame
+    // resource ref, but the device binding table it names is private to this device and therefore
+    // outside that check. A ref that resolves to a key with no live Sprite2D program would
+    // otherwise reach the submit loop, which has no way to report a failure -- and the earlier
+    // behaviour there was to quietly draw the engine's own fragment stage instead. That returns
+    // success with wrong pixels, so it is rejected here, before any surface state advances.
+    [[nodiscard]] Core::Status validateSprite2DShaderBindings(
+        RenderSceneView scene, FrameResourceTableView resources) const noexcept
+    {
+        for (const RenderSprite2DItem& sprite : scene.sprites2D())
+        {
+            if (!sprite.shader)
+            {
+                continue;
+            }
+            const FrameResourceDescriptor* descriptor =
+                resources.resolve(sprite.shader, FrameResourceKind::Shader);
+            if (descriptor == nullptr ||
+                descriptor->deviceBindingKey > static_cast<u64>((std::numeric_limits<u32>::max)()))
+            {
+                return Core::failure(RenderErrorCode::InvalidFrameResource,
+                                     "A Sprite2D shader ref is stale, cross-packet, wrong-kind, or "
+                                     "out of binding range");
+            }
+            if (resolveSprite2DShaderSlot(static_cast<u32>(descriptor->deviceBindingKey)) == nullptr)
+            {
+                return Core::failure(
+                    RenderErrorCode::ShaderNotFound,
+                    "A Sprite2D shader ref resolves to a device binding key with no live Sprite2D "
+                    "program: the binding is unset, retired, or was uploaded for another shader kind");
+            }
+        }
+        return Core::success();
+    }
+
+    // Mesh3D uses the same shader binding pair for rigid batches and unbatched skinned items. Frame
+    // resource shape is checked by the scene's 3D resource validator; this validates the device-local
+    // binding table before a submit loop where returning an error is no longer possible.
+    [[nodiscard]] Core::Status validateMesh3DShaderBindings(
+        RenderSceneView scene, FrameResourceTableView resources) const noexcept
+    {
+        const auto validateItems = [this, resources](const auto items) noexcept -> Core::Status {
+            for (const auto& item : items)
+            {
+                if (!item.shader)
+                {
+                    continue;
+                }
+                const FrameResourceDescriptor* descriptor =
+                    resources.resolve(item.shader, FrameResourceKind::Shader);
+                if (descriptor == nullptr ||
+                    descriptor->deviceBindingKey > static_cast<u64>((std::numeric_limits<u32>::max)()))
+                {
+                    return Core::failure(RenderErrorCode::InvalidFrameResource,
+                                         "A Mesh3D shader ref is stale, cross-packet, wrong-kind, or "
+                                         "out of binding range");
+                }
+                const ShaderSlot* slot =
+                    resolveMesh3DShaderSlot(static_cast<u32>(descriptor->deviceBindingKey));
+                if (slot == nullptr || !bgfx::isValid(slot->skinnedProgram))
+                {
+                    return Core::failure(
+                        RenderErrorCode::ShaderNotFound,
+                        "A Mesh3D shader ref resolves to a device binding key with no live Mesh3D "
+                        "program for both rigid and skinned geometry");
+                }
+            }
+            return Core::success();
+        };
+        if (auto status = validateItems(scene.meshes3D()); !status)
+        {
+            return status;
+        }
+        return validateItems(scene.skinnedMeshes3D());
     }
 
     [[nodiscard]] Core::Status validateMesh3DMaterialAlphaBindings(
@@ -3626,7 +3959,14 @@ class BgfxRenderDevice final : public IRenderDevice {
                 bgfx::setIndexBuffer(geometry->indexBuffer);
                 bgfx::setInstanceDataBuffer(&instanceBuffer, batch.firstItem, batch.itemCount);
                 bindMaterialAndFrameUniforms(materialKey);
-                bgfx::submit(kOpaque3DView, opaque3DProgram_);
+
+                // The engine program unless this batch named a custom shader. Uniform and sampler
+                // handles stay the engine's own: bgfx dedupes uniforms by name across programs, and
+                // the contract .sh the custom fragment stage must include declares exactly the same
+                // set.
+                const bgfx::ProgramHandle batchProgram = resolveMesh3DDrawProgram(
+                    resources, batch.shader, batch.shaderUniforms, opaque3DProgram_, false);
+                bgfx::submit(kOpaque3DView, batchProgram);
             }
         }
 
@@ -3690,7 +4030,12 @@ class BgfxRenderDevice final : public IRenderDevice {
             };
             bgfx::setUniform(opaque3DSkinColorUniform_, skinColor.data());
             bindMaterialAndFrameUniforms(static_cast<u32>(materialResource->deviceBindingKey));
-            bgfx::submit(viewId, opaque3DSkinnedProgram_);
+            // Per-item because skinned draws are never batched. The skinned link of the same cooked
+            // fragment binary, so one authored Mesh3D shader covers rigid and skinned geometry.
+            const bgfx::ProgramHandle itemProgram =
+                resolveMesh3DDrawProgram(resources, item.shader, item.shaderUniforms,
+                                         opaque3DSkinnedProgram_, true);
+            bgfx::submit(viewId, itemProgram);
         };
 
         if (!transparentPass)
@@ -3743,7 +4088,11 @@ class BgfxRenderDevice final : public IRenderDevice {
                 bgfx::setInstanceDataBuffer(&instanceBuffer, draw.itemIndex, 1);
                 bindMaterialAndFrameUniforms(
                     static_cast<u32>(materialResource->deviceBindingKey));
-                bgfx::submit(kTransparent3DView, opaque3DProgram_);
+                // Per-item, not per-batch: the transparent pass submits each item alone so that the
+                // back-to-front order across static and skinned draws is preserved.
+                const bgfx::ProgramHandle itemProgram = resolveMesh3DDrawProgram(
+                    resources, item.shader, item.shaderUniforms, opaque3DProgram_, false);
+                bgfx::submit(kTransparent3DView, itemProgram);
                 break;
             }
             case RenderTransparent3DDrawKind::SkinnedMesh:
@@ -3805,6 +4154,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         {
             const FrameResourceRef batchTexture = sprites[batchBegin].texture;
             const FrameResourceRef batchNormalTexture = sprites[batchBegin].normalTexture;
+            const FrameResourceRef batchShader = sprites[batchBegin].shader;
             const FrameResourceDescriptor* descriptor =
                 resources.resolve(batchTexture, FrameResourceKind::Texture2D);
             if (descriptor == nullptr)
@@ -3821,10 +4171,32 @@ class BgfxRenderDevice final : public IRenderDevice {
                     std::terminate();
                 }
             }
+            const FrameResourceDescriptor* shaderDescriptor = nullptr;
+            if (batchShader)
+            {
+                shaderDescriptor = resources.resolve(batchShader, FrameResourceKind::Shader);
+                if (shaderDescriptor == nullptr)
+                {
+                    std::terminate();
+                }
+            }
+            const FrameResourceRef batchShaderUniforms = sprites[batchBegin].shaderUniforms;
+            const FrameResourceDescriptor* shaderUniformDescriptor = nullptr;
+            if (batchShaderUniforms)
+            {
+                shaderUniformDescriptor =
+                    resources.resolve(batchShaderUniforms, FrameResourceKind::ShaderUniforms);
+                if (shaderUniformDescriptor == nullptr)
+                {
+                    std::terminate();
+                }
+            }
             u32 batchEnd = batchBegin + 1U;
             while (batchEnd < prepared.requirements.spriteCount &&
                    sprites[batchEnd].texture == batchTexture &&
-                   sprites[batchEnd].normalTexture == batchNormalTexture)
+                   sprites[batchEnd].normalTexture == batchNormalTexture &&
+                   sprites[batchEnd].shader == batchShader &&
+                   sprites[batchEnd].shaderUniforms == batchShaderUniforms)
             {
                 ++batchEnd;
             }
@@ -3863,6 +4235,26 @@ class BgfxRenderDevice final : public IRenderDevice {
                     }
                 }
             }
+            // The engine program unless this batch named a custom shader. Uniform and sampler
+            // handles stay the engine's own: bgfx dedupes uniforms by name across programs, and the
+            // contract .sh the custom fragment stage must include declares exactly the same set.
+            //
+            // A named shader that does not resolve terminates rather than falling back to the engine
+            // program: submitFrame validated every one of these before committing surface state, so
+            // reaching here means the binding table changed underneath a validated frame.
+            bgfx::ProgramHandle batchProgram = sprite2DProgram_;
+            const ShaderSlot* batchShaderSlot = nullptr;
+            if (shaderDescriptor != nullptr)
+            {
+                batchShaderSlot =
+                    resolveSprite2DShaderSlot(static_cast<u32>(shaderDescriptor->deviceBindingKey));
+                if (batchShaderSlot == nullptr)
+                {
+                    std::terminate();
+                }
+                batchProgram = batchShaderSlot->program;
+            }
+
             const std::array<float, 4> normalParams{normalMapBound, 0.0F, 0.0F, 0.0F};
             bgfx::setScissor();
             bgfx::setState(kSprite2DPremultipliedAlphaState);
@@ -3877,13 +4269,317 @@ class BgfxRenderDevice final : public IRenderDevice {
             bgfx::setUniform(sprite2DNormalParamsUniform_, normalParams.data());
             bgfx::setUniform(sprite2DShadowSegmentsUniform_, shadowSegments.data(),
                              static_cast<u16>(Sprite2DLightingDesc::MaximumShadowSegmentCount));
+            if (batchShaderSlot != nullptr)
+            {
+                // Every author uniform is published, not only the ones the binding names: bgfx keeps
+                // uniform values across submits, so an unset one would silently inherit whatever the
+                // previous batch wrote. A value the caller did not supply is explicitly zero.
+                const std::vector<GpuShaderUniformValue>* values = nullptr;
+                if (shaderUniformDescriptor != nullptr)
+                {
+                    const u32 uniformBatchKey = static_cast<u32>(shaderUniformDescriptor->deviceBindingKey);
+                    if (const auto binding = shaderUniformBindings_.find(uniformBatchKey);
+                        binding != shaderUniformBindings_.end())
+                    {
+                        values = &binding->second;
+                    }
+                }
+                for (const ShaderDetail::CustomShaderUniform& uniform : batchShaderSlot->authorUniforms)
+                {
+                    std::array<float, 4> value{};
+                    if (values != nullptr)
+                    {
+                        const std::string_view wanted{uniform.name.data()};
+                        for (const GpuShaderUniformValue& candidate : *values)
+                        {
+                            if (std::string_view{candidate.name.data()} == wanted)
+                            {
+                                value = candidate.value;
+                                break;
+                            }
+                        }
+                    }
+                    bgfx::setUniform(uniform.handle, value.data());
+                }
+            }
             const u32 firstIndex = batchBegin * 6U;
             const u32 indexCount = (batchEnd - batchBegin) * 6U;
             bgfx::setIndexBuffer(&transientIndices, firstIndex, indexCount);
-            bgfx::submit(kSprite2DView, sprite2DProgram_);
+            bgfx::submit(kSprite2DView, batchProgram);
             ++statistics_.sprite2DDrawsSubmitted;
             batchBegin = batchEnd;
         }
+    }
+
+    [[nodiscard]] Core::Result<GpuShaderId> createShader(const GpuShaderUploadDesc& desc) override
+    {
+        if (auto status = validateApiThread("BgfxRenderDevice::createShader"); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        if (stopped_ || !bgfxInitialized_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        if (auto status = validateShaderUploadDesc(desc); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+
+        const std::span<const std::byte> binary = ShaderDetail::selectCustomShaderBinary(desc);
+        if (binary.empty())
+        {
+            return Core::failure(RenderErrorCode::InvalidShaderUpload,
+                                 "The shader upload contains no binary for the active bgfx renderer");
+        }
+
+        bgfx::ShaderHandle vertexShader = BGFX_INVALID_HANDLE;
+        // Valid only for kinds that have a skinned vertex stage. When it stays invalid the upload
+        // produces a single program, which is what a Sprite2D draw needs.
+        bgfx::ShaderHandle skinnedVertexShader = BGFX_INVALID_HANDLE;
+        // The contract .sh set for the kind. Subtracted from reflection so what remains is exactly
+        // what the author added; these handles are the device's own, and bgfx dedupes uniforms by
+        // name globally, so a re-declaration in the custom source resolves to the same handle.
+        std::array<bgfx::UniformHandle, 32> engineUniformStorage{};
+        usize engineUniformCount = 0;
+        switch (desc.shaderKind)
+        {
+        case GpuShaderKind::Sprite2D:
+            vertexShader = sprite2DVertexShader_;
+            engineUniformStorage = {sprite2DSampler_,             sprite2DNormalSampler_,
+                                    sprite2DLightPositionsUniform_, sprite2DLightColorsUniform_,
+                                    sprite2DLightParamsUniform_,  sprite2DNormalParamsUniform_,
+                                    sprite2DShadowSegmentsUniform_};
+            engineUniformCount = 7;
+            break;
+        case GpuShaderKind::Mesh3D:
+            vertexShader = opaque3DMrVertexShader_;
+            // Both Mesh3D vertex stages declare the same varyings, so one fragment binary links
+            // against either. Building both here is what lets an author cook a single Mesh3D shader
+            // and use it on rigid and skinned geometry alike.
+            skinnedVertexShader = opaque3DSkinnedVertexShader_;
+            engineUniformStorage = {
+                opaque3DSampler_, opaque3DMrSampler_, opaque3DNormalSampler_, opaque3DCsmAtlasSampler_,
+                opaque3DIblDiffuseSampler_, opaque3DIblSpecularSampler_, opaque3DIblBrdfSampler_,
+                opaque3DSpotShadowMapSampler_, opaque3DPointShadowMapSamplers_[0],
+                opaque3DPointShadowMapSamplers_[1], opaque3DPointShadowMapSamplers_[2],
+                opaque3DPointShadowMapSamplers_[3], opaque3DPointShadowMapSamplers_[4],
+                opaque3DPointShadowMapSamplers_[5], opaque3DLightDirectionsUniform_,
+                opaque3DLightColorsUniform_, opaque3DPointLightPositionsUniform_,
+                opaque3DPointLightColorsUniform_, opaque3DSpotLightPositionsUniform_,
+                opaque3DSpotLightDirectionsUniform_, opaque3DSpotLightColorsUniform_,
+                opaque3DMrParamsUniform_, opaque3DNormalParamsUniform_, opaque3DEmissiveFactorUniform_,
+                opaque3DCsmMatricesUniform_, opaque3DCsmSplitDepthsUniform_, opaque3DCsmParamsUniform_,
+                opaque3DSpotShadowMatrixUniform_, opaque3DSpotShadowParamsUniform_,
+                opaque3DPointShadowMatricesUniform_, opaque3DPointShadowParamsUniform_,
+                opaque3DIblParamsUniform_};
+            engineUniformCount = 32;
+            break;
+        // Invalid is already refused by the shared validateShaderUploadDesc above, so this is
+        // unreachable rather than a second policy: keeping a named failure here would put the
+        // decision of which kinds exist in two places that can disagree.
+        default:
+            return Core::failure(RenderErrorCode::InvalidShaderUpload, "Invalid shader kind");
+        }
+
+        auto program = ShaderDetail::createCustomFragmentProgram(
+            vertexShader, skinnedVertexShader, binary,
+            std::span{engineUniformStorage.data(), engineUniformCount});
+        if (!program)
+        {
+            return Core::failure(std::move(program.error()));
+        }
+
+        u32 slotIndex = 0;
+        bool reused = false;
+        for (u32 index = 0; index < static_cast<u32>(shaders_.size()); ++index)
+        {
+            if (shaders_[index].identity.canReuse(shaders_[index].live,
+                                                  shaders_[index].retirementPhase != RetirementPhase::None))
+            {
+                slotIndex = index;
+                reused = true;
+                break;
+            }
+        }
+        if (!reused)
+        {
+            if (shaders_.size() >= (std::numeric_limits<u32>::max)())
+            {
+                if (bgfx::isValid(program->skinnedProgram))
+                {
+                    bgfx::destroy(program->skinnedProgram);
+                }
+                bgfx::destroy(program->program);
+                return Core::failure(RenderErrorCode::InvalidShaderUpload,
+                                     "Shader slot table is at maximum capacity");
+            }
+            slotIndex = static_cast<u32>(shaders_.size());
+            shaders_.push_back(ShaderSlot{});
+        }
+
+        ShaderSlot& slot = shaders_[slotIndex];
+        slot.program = program->program;
+        slot.skinnedProgram = program->skinnedProgram;
+        slot.shaderKind = desc.shaderKind;
+        slot.authorUniforms = std::move(program->authorUniforms);
+        slot.live = true;
+        slot.retirementPhase = RetirementPhase::None;
+        ++statistics_.liveResources;
+        return GpuShaderId{resourceOwnerId(), slotIndex, slot.identity.value()};
+    }
+
+    [[nodiscard]] Core::Status validateShader(GpuShaderId shader) const noexcept override
+    {
+        if (auto status = validateApiThread("BgfxRenderDevice::validateShader"); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        if (stopped_ || !bgfxInitialized_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        if (!shader || shader.owner != resourceOwnerId() || shader.index >= shaders_.size())
+        {
+            return Core::failure(RenderErrorCode::ShaderNotFound,
+                                 "Shader handle is invalid, stale, or belongs to another device");
+        }
+        const ShaderSlot& slot = shaders_[shader.index];
+        if (!slot.live || slot.identity.value() != shader.generation)
+        {
+            return Core::failure(RenderErrorCode::ShaderNotFound, "Shader handle is stale or destroyed");
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status destroyShader(GpuShaderId shader) noexcept override
+    {
+        FramePin completionPin;
+        return retireShader(shader, completionPin);
+    }
+
+    [[nodiscard]] Core::Status retireShader(GpuShaderId shader, FramePin& completionPin) noexcept override
+    {
+        if (auto status = validateApiThread("BgfxRenderDevice::retireShader"); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        if (stopped_ || !bgfxInitialized_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        const auto disposition = RetirementDetail::selectRetirementDisposition(
+            retirementMarkerSupported_, completionPin.hasValue());
+        if (disposition == RetirementDetail::RetirementDisposition::RejectExternalPin)
+        {
+            return Core::failure(RenderErrorCode::GpuRetirementUnsupported,
+                                 "This bgfx backend cannot retain an external retirement pin");
+        }
+        if (!shader || shader.owner != resourceOwnerId() || shader.index >= shaders_.size())
+        {
+            return Core::failure(RenderErrorCode::ShaderNotFound, "Shader handle is invalid");
+        }
+        ShaderSlot& slot = shaders_[shader.index];
+        if (!slot.live || slot.identity.value() != shader.generation)
+        {
+            return Core::failure(RenderErrorCode::ShaderNotFound, "Shader handle is stale or destroyed");
+        }
+        slot.live = false;
+        slot.identity.advanceAfterRelease();
+        for (auto it = shaderBindings_.begin(); it != shaderBindings_.end();)
+        {
+            if (it->second == shader)
+            {
+                it = shaderBindings_.erase(it);
+            } else
+            {
+                ++it;
+            }
+        }
+        if (disposition == RetirementDetail::RetirementDisposition::DestroyImmediately)
+        {
+            if (bgfx::isValid(slot.skinnedProgram))
+            {
+                bgfx::destroy(slot.skinnedProgram);
+                slot.skinnedProgram = BGFX_INVALID_HANDLE;
+            }
+            if (bgfx::isValid(slot.program))
+            {
+                bgfx::destroy(slot.program);
+                slot.program = BGFX_INVALID_HANDLE;
+                --statistics_.liveResources;
+            }
+            slot.shaderKind = GpuShaderKind::Invalid;
+            slot.authorUniforms.clear();
+            slot.retirementPhase = RetirementPhase::None;
+            ++statistics_.completedGpuRetirements;
+            return Core::success();
+        }
+
+        slot.retirementPhase = RetirementPhase::Queued;
+        slot.completionPin = std::move(completionPin);
+        retirementTimeline_.queue();
+        ++statistics_.pendingGpuRetirements;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status setShaderBinding(u32 deviceBindingKey, GpuShaderId shader) noexcept override
+    {
+        if (std::this_thread::get_id() != ownerThread_)
+        {
+            std::terminate();
+        }
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        if (deviceBindingKey == 0)
+        {
+            return Core::failure(RenderErrorCode::InvalidShaderUpload, "deviceBindingKey must be non-zero");
+        }
+        if (!shader)
+        {
+            shaderBindings_.erase(deviceBindingKey);
+            return Core::success();
+        }
+        if (shader.owner != resourceOwnerId() || shader.index >= shaders_.size() ||
+            !shaders_[shader.index].live ||
+            shaders_[shader.index].identity.value() != shader.generation)
+        {
+            return Core::failure(RenderErrorCode::ShaderNotFound, "Shader handle is invalid");
+        }
+        shaderBindings_[deviceBindingKey] = shader;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status
+    setShaderUniformBinding(u32 deviceBindingKey, const GpuShaderUniformBindingDesc& desc) noexcept override
+    {
+        if (std::this_thread::get_id() != ownerThread_)
+        {
+            std::terminate();
+        }
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The bgfx render device is stopped");
+        }
+        if (deviceBindingKey == 0)
+        {
+            return Core::failure(RenderErrorCode::InvalidShaderUpload, "deviceBindingKey must be non-zero");
+        }
+        if (desc.values.empty())
+        {
+            shaderUniformBindings_.erase(deviceBindingKey);
+            return Core::success();
+        }
+        if (auto status = validateShaderUniformBindingDesc(desc); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        // Copied rather than referenced: the values are re-published every frame the binding is drawn,
+        // long after the caller's span has gone.
+        shaderUniformBindings_[deviceBindingKey].assign(desc.values.begin(), desc.values.end());
+        return Core::success();
     }
 
     [[nodiscard]] Core::Result<GpuTextureId> createTexture2D(const Texture2DUploadDesc& desc) override
@@ -5390,7 +6086,16 @@ class BgfxRenderDevice final : public IRenderDevice {
     bgfx::TextureHandle opaque3DDefaultIblBrdfLut_ = BGFX_INVALID_HANDLE;
     bgfx::VertexBufferHandle opaque3DVertexBuffer_ = BGFX_INVALID_HANDLE;
     bgfx::IndexBufferHandle opaque3DIndexBuffer_ = BGFX_INVALID_HANDLE;
+    // Kept alive for the device's whole lifetime because every custom Mesh3D program links against
+    // it, and bgfx frees a shader when the last program referencing it goes away.
+    bgfx::ShaderHandle opaque3DMrVertexShader_ = BGFX_INVALID_HANDLE;
+    // The skinned sibling of the above. One cooked Mesh3D fragment binary is linked against both, so
+    // a custom shader covers rigid and skinned geometry without the author cooking two variants.
+    bgfx::ShaderHandle opaque3DSkinnedVertexShader_ = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle sprite2DProgram_ = BGFX_INVALID_HANDLE;
+    // Kept alive for the device's whole lifetime because every custom Sprite2D program links against
+    // it, and bgfx frees a shader when the last program referencing it goes away.
+    bgfx::ShaderHandle sprite2DVertexShader_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle sprite2DSampler_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle sprite2DNormalSampler_ = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle sprite2DLightPositionsUniform_ = BGFX_INVALID_HANDLE;
@@ -5430,6 +6135,29 @@ class BgfxRenderDevice final : public IRenderDevice {
     };
     std::vector<TextureSlot> textures_{};
     std::unordered_map<u32, GpuTextureId> texture2DBindings_{};
+
+    struct ShaderSlot final {
+        bgfx::ProgramHandle program = BGFX_INVALID_HANDLE;
+        // The same fragment binary linked against the skinned vertex stage. Only ever valid for
+        // Mesh3D, because Sprite2D has no skinned stage. Built at upload rather than on first skinned
+        // draw: reflection needs the fragment handle alive, and a draw cannot report a link failure.
+        bgfx::ProgramHandle skinnedProgram = BGFX_INVALID_HANDLE;
+        BgfxShaderResourceSlotGeneration identity{};
+        // Kept so a Sprite2D binding cannot resolve a Mesh3D program. bgfx would already refuse to
+        // link mismatched varyings at upload, but the kind is also what selects the engine vertex
+        // stage, so the slot must remember which one it was linked against.
+        GpuShaderKind shaderKind = GpuShaderKind::Invalid;
+        // Reflected at upload while the fragment shader was still alive. Every batch publishes these
+        // by name from the batch's value binding, and any the caller left unset gets zero, so a draw
+        // never inherits whatever the previous batch happened to leave in the uniform.
+        std::vector<ShaderDetail::CustomShaderUniform> authorUniforms{};
+        bool live = false;
+        RetirementPhase retirementPhase = RetirementPhase::None;
+        FramePin completionPin{};
+    };
+    std::vector<ShaderSlot> shaders_{};
+    std::unordered_map<u32, GpuShaderId> shaderBindings_{};
+    std::unordered_map<u32, std::vector<GpuShaderUniformValue>> shaderUniformBindings_{};
 
     struct EnvironmentMapSlot final {
         BgfxEnvironmentMapResources resources{};

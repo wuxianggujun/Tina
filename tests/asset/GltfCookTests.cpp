@@ -2806,11 +2806,13 @@ TEST(GltfCookTests, CooksRepoCompletePbrFixture)
 TEST(GltfCookTests, RejectsKhronosMetalRoughSpheresWithoutRequiredTexcoordsWhenPresent)
 {
     // This optional Khronos fixture intentionally omits TEXCOORD_0 because it has no textures.
-#if !defined(TINA_COMPLETE_PBR_GLTF_FIXTURE)
-    GTEST_SKIP() << "TINA_COMPLETE_PBR_GLTF_FIXTURE not defined; cannot locate fixtures tree";
+    // Its path is independent of the complete_pbr product assets: those now live under
+    // samples/3d_product/assets/, so deriving a sibling under tests/fixtures/gltf/ from
+    // TINA_COMPLETE_PBR_GLTF_FIXTURE would miss.
+#if !defined(TINA_METAL_ROUGH_SPHERES_GLB)
+    GTEST_SKIP() << "TINA_METAL_ROUGH_SPHERES_GLB not defined; MetalRoughSpheresNoTextures.glb not vendored";
 #else
-    const auto path = std::filesystem::path{TINA_COMPLETE_PBR_GLTF_FIXTURE}.parent_path().parent_path() /
-                      "metal_rough_spheres" / "MetalRoughSpheresNoTextures.glb";
+    const std::filesystem::path path{TINA_METAL_ROUGH_SPHERES_GLB};
     if (!std::filesystem::exists(path))
     {
         GTEST_SKIP() << "MetalRoughSpheresNoTextures.glb not vendored";

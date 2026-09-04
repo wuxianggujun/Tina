@@ -85,6 +85,7 @@ set(TINA_RUNTIME_TEST_SOURCES
     render/UploadTicketTests.cpp
     render/FramePinPacketTests.cpp
     render/GpuTextureUploadTests.cpp
+    render/GpuShaderUploadTests.cpp
     render/EnvironmentMapUploadTests.cpp
     render/GpuMeshUploadTests.cpp
     render/RenderPassSchedulerTests.cpp
@@ -134,7 +135,7 @@ set_source_files_properties(
 target_compile_features(tina_tests PRIVATE cxx_std_23)
 target_include_directories(tina_tests PRIVATE
     ${PROJECT_SOURCE_DIR}/tests
-    ${PROJECT_SOURCE_DIR}/samples/2d_tilemap_bgfx
+    ${PROJECT_SOURCE_DIR}/samples/2d_tilemap_bgfx/core
     # Reaches core/io/PathUtil.hpp, which cannot live in include/tina/ because it names
     # std::filesystem::path. Keep this after ${PROJECT_SOURCE_DIR}/tests so tests/support wins.
     ${PROJECT_SOURCE_DIR}/src

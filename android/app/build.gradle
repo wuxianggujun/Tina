@@ -1,10 +1,76 @@
 apply plugin: 'com.android.application'
 
+// Where the cooked catalog is staged before AGP packages it.
+//
+// A generated directory under build/, registered as an extra assets source, rather than writing
+// into src/main/assets: the catalog is a build output, and a tool that writes into the source tree
+// leaves a stale copy behind whenever the recipe changes name or is removed.
+//
+// The catalog goes into a `content/` subdirectory of that source root, so the APK carries
+// assets/content/. That is what makes the device layout identical to desktop: the activity extracts
+// the whole assets tree to one directory and calls it the content root, so content asking the root
+// for "content" finds the catalog exactly as it does beside a desktop executable.
+def tinaAssetsRoot = layout.buildDirectory.dir('generated/tina/assets').get().asFile
+def tinaCatalogRoot = new File(tinaAssetsRoot, 'content')
+def tinaRecipe = file('content/android.recipe')
+
+// Cooking is opt-in via -Ptina.assetc=<path to a host tina_assetc>, for the same reason the
+// renderer is opt-in via -Ptina.shaderc: the cooker is a build-HOST tool that this cross build
+// cannot produce -- built here it would target Android and refuse to run on the machine doing the
+// build. Without it the APK still installs and runs, it just ships no content, and the engine's
+// content root stays empty rather than pointing at a directory that cannot exist.
+//
+// Cooking on the host rather than on first launch is the whole performance point: a device then
+// pays one extraction of already-cooked bytes instead of running the cooker on a phone CPU.
+if (project.hasProperty('tina.assetc')) {
+    def assetc = project.property('tina.assetc').toString()
+
+    def cookTinaContent = tasks.register('cookTinaContent', Exec) {
+        description = 'Cooks the APK\'s asset catalog with a host tina_assetc.'
+        // Declared so an unchanged recipe does not re-cook, and a changed one does. Without the
+        // output declaration Gradle would call this up to date while the directory was missing.
+        inputs.file(tinaRecipe)
+        inputs.file(assetc)
+        outputs.dir(tinaCatalogRoot)
+
+        // tina_assetc refuses a --out that already exists ("staging root already exists"), because a
+        // pre-existing directory is how a stale catalog gets silently merged into a fresh one. So the
+        // destination is removed first rather than reused.
+        doFirst {
+            delete(tinaCatalogRoot)
+            tinaCatalogRoot.parentFile.mkdirs()
+        }
+        commandLine assetc, '--out', tinaCatalogRoot.absolutePath, '--recipe', tinaRecipe.absolutePath
+    }
+
+    // Ordering is declared, not hoped for. A CMake POST_BUILD inside externalNativeBuild has no
+    // relationship to asset merging, so the cook could legitimately run after the assets were
+    // already packaged -- which presents as an APK that ships the *previous* build's catalog.
+    //
+    // Matched by name rather than by AGP task type so this does not depend on an internal class:
+    // mergeDebugAssets / mergeReleaseAssets are the tasks that consume every assets source set.
+    // Verified with AGP 8.13.2: `:app:mergeDebugAssets` runs `:app:cookTinaContent` first, and the
+    // three files it leaves in intermediates/assets/debug/mergeDebugAssets/content/ are byte-identical
+    // to a standalone host cook of the same recipe.
+    tasks.matching { it.name.startsWith('merge') && it.name.endsWith('Assets') }.configureEach {
+        dependsOn(cookTinaContent)
+    }
+}
+
 android {
     namespace 'dev.tina'
     compileSdk 36
     ndkVersion '28.2.13676358'
 
+    sourceSets {
+        main {
+            // Registered unconditionally, even when no cook task exists. AGP tolerates a missing
+            // assets directory, and making the source set itself conditional would mean a build
+            // without -Ptina.assetc configured a different project shape -- the kind of difference
+            // that makes "works for me" builds.
+            assets.srcDir tinaAssetsRoot
+        }
+    }
 
     defaultConfig {
         applicationId 'dev.tina'

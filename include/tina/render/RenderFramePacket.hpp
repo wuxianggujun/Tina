@@ -157,7 +157,9 @@ public:
         if ((descriptor.kind != FrameResourceKind::Texture2D
              && descriptor.kind != FrameResourceKind::Mesh3DGeometry
              && descriptor.kind != FrameResourceKind::Mesh3DMaterial
-             && descriptor.kind != FrameResourceKind::SkinnedMesh3DGeometry)
+             && descriptor.kind != FrameResourceKind::SkinnedMesh3DGeometry
+             && descriptor.kind != FrameResourceKind::Shader
+             && descriptor.kind != FrameResourceKind::ShaderUniforms)
             || descriptor.deviceBindingKey == 0)
         {
             return Core::failure(

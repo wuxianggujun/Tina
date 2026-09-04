@@ -1,0 +1,9 @@
+tina_add_sample_core(tina_sample_network_core
+    SOURCES
+        main.cpp
+        Sample.hpp
+    LINK
+        Tina::Network
+        Tina::Task
+        Tina::Core
+)

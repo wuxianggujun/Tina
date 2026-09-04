@@ -170,6 +170,16 @@ struct PreparedEntity final {
                                  "World2D normal texture handle did not resolve to a stable AssetId");
         }
     }
+    Core::AssetId shaderId{};
+    if (sprite.shader)
+    {
+        shaderId = config.assetIdForHandle(sprite.shader);
+        if (!shaderId)
+        {
+            return Core::failure(SceneErrorCode::UnresolvedSprite,
+                                 "World2D sprite shader handle did not resolve to a stable AssetId");
+        }
+    }
 
     AssetFormat::World2DSpriteOverrideFlags overrides = AssetFormat::World2DSpriteOverrideFlags::None;
     if (Scene::hasFlag(sprite.overrides, SpriteOverrideFlags::Size))
@@ -187,6 +197,7 @@ struct PreparedEntity final {
     return AssetFormat::World2DSpriteDesc{
         .spriteId = spriteId,
         .normalTextureId = normalTextureId,
+        .shaderId = shaderId,
         .overrides = overrides,
         .sizeX = sprite.sizeOverrideMeters.x,
         .sizeY = sprite.sizeOverrideMeters.y,
@@ -359,6 +370,21 @@ prepareSpriteAnimation(const AssetFormat::World2DSpriteAnimationDesc& source,
                                  "World2D normal texture AssetId did not resolve to a weak handle");
         }
     }
+    Asset::AssetHandle shader{};
+    if (source.shaderId)
+    {
+        if (!assets.resolveShader)
+        {
+            return Core::failure(SceneErrorCode::UnresolvedSprite,
+                                 "World2D restore requires a shader AssetId resolver");
+        }
+        shader = assets.resolveShader(source.shaderId);
+        if (!shader)
+        {
+            return Core::failure(SceneErrorCode::UnresolvedSprite,
+                                 "World2D sprite shader AssetId did not resolve to a weak handle");
+        }
+    }
 
     SpriteOverrideFlags overrides = SpriteOverrideFlags::None;
     if (AssetFormat::hasFlag(source.overrides, AssetFormat::World2DSpriteOverrideFlags::Size))
@@ -376,6 +402,7 @@ prepareSpriteAnimation(const AssetFormat::World2DSpriteAnimationDesc& source,
     SpriteRenderer2D result{
         .sprite = spriteHandle,
         .normalTexture = normalTexture,
+        .shader = shader,
         .overrides = overrides,
         .sizeOverrideMeters = {source.sizeX, source.sizeY},
         .pivotOverride = {source.pivotX, source.pivotY},

@@ -29,7 +29,8 @@
 UTF-8 字节转路径同样是抄的：`src/` 与 `tools/` 下有 7 份等价的解码 helper 定义（包含两个各自
 名为 `Utf8Path.hpp` 的头），另有 45 处直接调用已 deprecated 的
 `std::filesystem::u8path`；路径转 UTF-8 则有三种写法混用：`u8string()`、
-`generic_u8string()`，以及 `samples/3d_product/main.cpp` 的 `path::string()`——后者在 Windows
+`generic_u8string()`，以及 `samples/3d_product/platforms/desktop/DesktopMain.cpp`（撰写本 ADR 时为
+`samples/3d_product/main.cpp`）的 `path::string()`——后者在 Windows
 上是活动窄代码页而不是 UTF-8，对非 ASCII 有损，而它的返回值直接喂给期待 UTF-8 的资源 API。
 
 ## 决定

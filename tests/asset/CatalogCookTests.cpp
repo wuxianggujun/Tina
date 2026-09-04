@@ -7,6 +7,7 @@
 #include <tina/asset/CookedAssetFile.hpp>
 #include <tina/asset_format/AssetFormatErrors.hpp>
 #include <tina/asset_format/EnvironmentMapPayload.hpp>
+#include <tina/asset_format/ShaderPayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
 #include <tina/core/hash/ContentHashDigest.hpp>
 #include <tina/core/id/AssetId.hpp>
@@ -1430,6 +1431,84 @@ TEST(CatalogCookTests, GenericEnvironmentMapRecipeUsesCurrentPayloadVersion)
     std::filesystem::remove_all(dir, ec);
 }
 
+// Shader has no inline recipe verb: assetc compiles the payload with shaderc and the generic line
+// carries the opaque bytes. The version it stamps is what this pins -- the kind used to fall to the
+// switch default and cook as version 1, which reads as correct only while SchemaVersion is 1 and
+// silently produces unloadable assets the moment it is bumped.
+TEST(CatalogCookTests, GenericShaderRecipeUsesCurrentPayloadVersion)
+{
+    std::pmr::unsynchronized_pool_resource memory;
+    const auto shaderId = *Core::AssetId::fromBytes(idBytes(29U));
+    const auto shaderHex = shaderId.canonicalText();
+    const std::array<std::byte, 8> binary{std::byte{'F'}, std::byte{'S'}, std::byte{'H'},
+                                          std::byte{0x01}, std::byte{0x02}, std::byte{0x03},
+                                          std::byte{0x04}, std::byte{0x05}};
+    const std::array<AssetFormat::ShaderBlobDesc, 1> blobs{
+        AssetFormat::ShaderBlobDesc{.profile = AssetFormat::ShaderBinaryProfile::SpirV,
+                                    .bytes = binary},
+    };
+    auto payload = AssetFormat::writeShaderPayloadBytes(AssetFormat::ShaderPayloadDesc{
+        .shaderKind = AssetFormat::ShaderKind::Sprite2D,
+        .stage = AssetFormat::ShaderStage::Fragment,
+        .blobs = blobs,
+    });
+    ASSERT_TRUE(payload.has_value()) << payload.error().message;
+
+    const auto dir = std::filesystem::temp_directory_path() / "tina_shader_recipe";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    ASSERT_TRUE(Core::writeFile(toUtf8(dir / "sprite_fs.shaderpayload"), *payload).has_value());
+
+    std::string recipe = "platform WindowsX64\nasset Shader ";
+    recipe.append(shaderHex.data(), shaderHex.size());
+    recipe += " sprite_fs.shaderpayload\n";
+    auto request = parseCatalogCookRecipe(recipe, toUtf8(dir));
+    ASSERT_TRUE(request.has_value()) << request.error().message;
+    ASSERT_EQ(request->assets.size(), 1U);
+    EXPECT_EQ(request->assets[0].assetKind, AssetFormat::AssetKind::Shader);
+    EXPECT_EQ(request->assets[0].assetTypeVersion, AssetFormat::ShaderWire::SchemaVersion);
+
+    const auto outRoot = dir / "out";
+    ASSERT_TRUE(cookAndPublishCatalogPackage(toUtf8(outRoot), *request).has_value());
+    auto catalog = openCatalogPackage(
+        toUtf8(outRoot),
+        CatalogPackageOpenConfig{
+            .manifest =
+                CatalogFileLoadConfig{
+                    .catalog =
+                        CatalogConfig{
+                            .maxEntries = 4,
+                            .maxDependencies = 4,
+                            .maxDependenciesPerAsset = 4,
+                            .memoryResource = &memory,
+                        },
+                },
+            .validateOnOpen = true,
+            .validation =
+                CatalogPackageValidationConfig{
+                    .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
+                    .verifyContent = true,
+                },
+        });
+    ASSERT_TRUE(catalog.has_value()) << catalog.error().message;
+    auto asset = loadCookedAssetFromCatalog(toUtf8(outRoot), *catalog, shaderId,
+                                            CookedAssetFileLoadConfig{.memoryResource = &memory});
+    ASSERT_TRUE(asset.has_value()) << asset.error().message;
+    EXPECT_EQ(asset->header().assetKind, AssetFormat::AssetKind::Shader);
+    EXPECT_EQ(asset->header().assetTypeVersion, AssetFormat::ShaderWire::SchemaVersion);
+
+    auto parsed = AssetFormat::parseShaderPayload(asset->payload());
+    ASSERT_TRUE(parsed.has_value()) << parsed.error().message;
+    EXPECT_EQ(parsed->shaderKind, AssetFormat::ShaderKind::Sprite2D);
+    EXPECT_EQ(parsed->stage, AssetFormat::ShaderStage::Fragment);
+    ASSERT_EQ(parsed->blobCount, 1U);
+    EXPECT_TRUE(std::ranges::equal(parsed->blobForProfile(AssetFormat::ShaderBinaryProfile::SpirV),
+                                   std::span<const std::byte>(binary)));
+
+    std::filesystem::remove_all(dir, ec);
+}
+
 TEST(CatalogCookTests, InlineAudioClipSineRecipe)
 {
     std::pmr::unsynchronized_pool_resource memory;
@@ -1610,6 +1689,121 @@ TEST(CatalogCookTests, StaticMeshCubeRecipe)
     EXPECT_EQ(mesh->submeshCount, 1U);
 
     std::filesystem::remove_all(root, ec);
+}
+
+// The optional `shader` token names the mesh's own default Mesh3D fragment stage. It has to
+// cook as a real required Shader dependency, because the manifest validator resolves every
+// dependency target: a payload flag alone would publish a mesh asking for a stage nothing pins.
+TEST(CatalogCookTests, StaticMeshCubeRecipeCooksShaderOverrideDependency)
+{
+    std::pmr::unsynchronized_pool_resource memory;
+    const auto meshId = *Core::AssetId::fromBytes(idBytes(30U));
+    const auto shaderId = *Core::AssetId::fromBytes(idBytes(31U));
+    const auto meshHex = meshId.canonicalText();
+    const auto shaderHex = shaderId.canonicalText();
+
+    const std::array<std::byte, 8> binary{std::byte{'F'},  std::byte{'S'},  std::byte{'H'},
+                                          std::byte{0x01}, std::byte{0x02}, std::byte{0x03},
+                                          std::byte{0x04}, std::byte{0x05}};
+    const std::array<AssetFormat::ShaderBlobDesc, 1> blobs{
+        AssetFormat::ShaderBlobDesc{.profile = AssetFormat::ShaderBinaryProfile::SpirV,
+                                    .bytes = binary},
+    };
+    auto shaderPayload = AssetFormat::writeShaderPayloadBytes(AssetFormat::ShaderPayloadDesc{
+        .shaderKind = AssetFormat::ShaderKind::Mesh3D,
+        .stage = AssetFormat::ShaderStage::Fragment,
+        .blobs = blobs,
+    });
+    ASSERT_TRUE(shaderPayload.has_value()) << shaderPayload.error().message;
+
+    const auto dir = std::filesystem::temp_directory_path() / "tina_staticmesh_shader_override";
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+    std::filesystem::create_directories(dir, ec);
+    ASSERT_TRUE(Core::writeFile(toUtf8(dir / "mesh_fs.shaderpayload"), *shaderPayload).has_value());
+
+    std::string recipe = "platform WindowsX64\nasset Shader ";
+    recipe.append(shaderHex.data(), shaderHex.size());
+    recipe += " mesh_fs.shaderpayload\nstaticmesh ";
+    recipe.append(meshHex.data(), meshHex.size());
+    recipe += " cube shader ";
+    recipe.append(shaderHex.data(), shaderHex.size());
+    recipe += "\n";
+
+    auto request = parseCatalogCookRecipe(recipe, toUtf8(dir));
+    ASSERT_TRUE(request.has_value()) << request.error().message;
+    ASSERT_EQ(request->assets.size(), 2U);
+
+    const auto outRoot = dir / "out";
+    ASSERT_TRUE(cookAndPublishCatalogPackage(toUtf8(outRoot), *request).has_value());
+    auto catalog = openCatalogPackage(
+        toUtf8(outRoot),
+        CatalogPackageOpenConfig{
+            .manifest =
+                CatalogFileLoadConfig{
+                    .catalog =
+                        CatalogConfig{
+                            .maxEntries = 4,
+                            .maxDependencies = 4,
+                            .maxDependenciesPerAsset = 4,
+                            .memoryResource = &memory,
+                        },
+                },
+            .validateOnOpen = true,
+            .validation =
+                CatalogPackageValidationConfig{
+                    .file = CookedAssetFileLoadConfig{.memoryResource = &memory},
+                    .verifyContent = true,
+                    .verifyTypedPayload = true,
+                },
+        });
+    ASSERT_TRUE(catalog.has_value()) << catalog.error().message;
+
+    auto asset = loadCookedAssetFromCatalog(toUtf8(outRoot), *catalog, meshId,
+                                            CookedAssetFileLoadConfig{.memoryResource = &memory});
+    ASSERT_TRUE(asset.has_value()) << asset.error().message;
+    auto mesh = parseStaticMeshFromCooked(*asset);
+    ASSERT_TRUE(mesh.has_value()) << mesh.error().message;
+    EXPECT_TRUE(mesh->hasShaderOverride);
+
+    ASSERT_EQ(asset->header().dependencyCount, 1U);
+    const auto dependency = asset->dependency(0);
+    ASSERT_TRUE(dependency.has_value());
+    EXPECT_EQ(dependency->assetId, shaderId);
+    EXPECT_EQ(dependency->expectedKind, AssetFormat::AssetKind::Shader);
+    EXPECT_EQ(dependency->flags, AssetFormat::DependencyFlags::Required);
+
+    std::filesystem::remove_all(dir, ec);
+}
+
+TEST(CatalogCookTests, StaticMeshRecipeRejectsMalformedShaderOverrideToken)
+{
+    const auto meshId = *Core::AssetId::fromBytes(idBytes(32U));
+    const auto meshHex = meshId.canonicalText();
+
+    const auto parse = [&](std::string_view suffix) {
+        std::string recipe = "platform WindowsX64\nstaticmesh ";
+        recipe.append(meshHex.data(), meshHex.size());
+        recipe += " cube";
+        recipe.append(suffix.data(), suffix.size());
+        recipe += "\n";
+        return parseCatalogCookRecipe(recipe, ".");
+    };
+
+    // A bare keyword leaves the recipe at four tokens, which is neither accepted form.
+    auto missingId = parse(" shader");
+    ASSERT_FALSE(missingId.has_value());
+    EXPECT_EQ(missingId.error().code, AssetErrorCode::InvalidCatalogConfig);
+
+    auto wrongKeyword = parse(" program 000102030405060708090a0b0c0d0e0f");
+    ASSERT_FALSE(wrongKeyword.has_value());
+    EXPECT_EQ(wrongKeyword.error().code, AssetErrorCode::InvalidCatalogConfig);
+    EXPECT_EQ(wrongKeyword.error().message, "staticmesh optional token must be: shader <shaderId>");
+
+    auto badHex = parse(" shader notahexassetid");
+    ASSERT_FALSE(badHex.has_value());
+    EXPECT_EQ(badHex.error().code, AssetErrorCode::InvalidCatalogConfig);
+    EXPECT_EQ(badHex.error().message, "invalid staticmesh shader override asset id");
 }
 
 TEST(CatalogCookTests, MaterialRecipeRequiresExplicitAlphaMode)

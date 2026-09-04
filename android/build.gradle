@@ -1,7 +1,14 @@
 // Pinned rather than a range: AGP and the NDK toolchain interact closely, and a floating version
 // would change the native build under us without any source change.
+//
+// Mirrors precede the official repositories for the same reason as in settings.gradle, and this list
+// has to be kept in step with that one: buildscript resolution does not consult
+// pluginManagement.repositories, so a mirror added only there would leave AGP itself downloading
+// from dl.google.com.
 buildscript {
     repositories {
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/public' }
         google()
         mavenCentral()
     }

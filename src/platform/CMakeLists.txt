@@ -31,3 +31,11 @@ endif()
 if(EMSCRIPTEN)
     add_subdirectory(html5)
 endif()
+
+# Unlike Android and HTML5, this adapter carries no Apple SDK dependency: the host hands a
+# CAMetalLayer across as an opaque integer. Building it on every host is what lets the contract
+# tests actually run, rather than only compiling under a toolchain nobody here has. Gating it on
+# IOS would advertise a choice that does not exist for the C++ layer -- the ObjC host is a
+# separate, later slice.
+add_subdirectory(ios)
+

@@ -149,7 +149,8 @@ void hashUnsigned(u64& hash, Value value) noexcept
 {
     return left.mesh == right.mesh && left.material == right.material &&
            left.submeshIndex == right.submeshIndex && left.alphaMode == right.alphaMode &&
-           left.doubleSided == right.doubleSided;
+           left.doubleSided == right.doubleSided && left.shader == right.shader &&
+           left.shaderUniforms == right.shaderUniforms;
 }
 
 } // namespace
@@ -604,6 +605,8 @@ Core::Status RenderSceneBuilder::addSprite2D(const RenderSprite2DInput& sprite)
     std::construct_at(&m_sprites[m_spriteCount], RenderSprite2DItem{
         .texture = sprite.texture,
         .normalTexture = sprite.normalTexture,
+        .shader = sprite.shader,
+        .shaderUniforms = sprite.shaderUniforms,
         .stableEntityKey = sprite.stableEntityKey,
         .insertionOrder = m_spriteCount,
         .centerX = sprite.centerX,
@@ -740,6 +743,8 @@ Core::Status RenderSceneBuilder::addMesh3D(const RenderMesh3DInput& mesh)
     std::construct_at(&m_meshes3D[m_mesh3DCount], RenderMesh3DItem{
         .mesh = mesh.mesh,
         .material = mesh.material,
+        .shader = mesh.shader,
+        .shaderUniforms = mesh.shaderUniforms,
         .submeshIndex = mesh.submeshIndex,
         .stableEntityKey = mesh.stableEntityKey,
         .insertionOrder = m_mesh3DCount,
@@ -867,6 +872,8 @@ Core::Status RenderSceneBuilder::addSkinnedMesh3D(const RenderSkinnedMesh3DInput
     std::construct_at(&m_skinnedMeshes3D[m_skinnedMesh3DCount], RenderSkinnedMesh3DItem{
         .mesh = mesh.mesh,
         .material = mesh.material,
+        .shader = mesh.shader,
+        .shaderUniforms = mesh.shaderUniforms,
         .submeshIndex = mesh.submeshIndex,
         .stableEntityKey = mesh.stableEntityKey,
         .insertionOrder = m_skinnedMesh3DCount,
@@ -1100,6 +1107,8 @@ Core::Status RenderSceneBuilder::finalizeMesh3DBatches()
             .itemCount = nextItem - firstItem,
             .mesh = item.mesh,
             .material = item.material,
+            .shader = item.shader,
+            .shaderUniforms = item.shaderUniforms,
             .submeshIndex = item.submeshIndex,
             .doubleSided = item.doubleSided,
         });

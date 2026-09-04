@@ -14,7 +14,7 @@
 不画、不响、不阻挡寻路。ADR 0030 修好了「payload 被静默丢弃」，但没有修「payload 没有意义」。
 
 同一次核验暴露了更根本的问题：**引擎没有「让一个 authored 场景跑起来」的所有者**。
-`samples/2d_tilemap_bgfx/main.cpp` 有 **6660 行**，其中相当篇幅是手写编排，而这些编排对每个游戏都一样：
+`samples/2d_tilemap_bgfx/platforms/desktop/DesktopMain.cpp`（撰写本 ADR 时为 `samples/2d_tilemap_bgfx/main.cpp`）有 **6660 行**，其中相当篇幅是手写编排，而这些编排对每个游戏都一样：
 
 - TileMap 必须按 `updateDemand -> AssetSystem::pump -> commitReady -> extraction` 的**固定顺序**每帧调用
   （`include/tina/asset/TileMapStream.hpp:48-49`）。顺序错了不会编译失败，只会少画或画到过期 chunk；

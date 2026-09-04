@@ -15,6 +15,7 @@
 #include <tina/asset_format/MaterialPayload.hpp>
 #include <tina/asset_format/NavigationGrid2DPayload.hpp>
 #include <tina/asset_format/PrefabPayload.hpp>
+#include <tina/asset_format/ShaderPayload.hpp>
 #include <tina/asset_format/SpriteAnimationClipPayload.hpp>
 #include <tina/asset_format/SpritePayload.hpp>
 #include <tina/asset_format/StaticMeshPayload.hpp>
@@ -279,6 +280,8 @@ struct RecipeSourceCaptureContext final {
     {
     case AssetFormat::AssetKind::Texture2D:
         return AssetFormat::Texture2DWire::SchemaVersion;
+    case AssetFormat::AssetKind::Shader:
+        return AssetFormat::ShaderWire::SchemaVersion;
     case AssetFormat::AssetKind::Sprite:
         return AssetFormat::SpriteWire::SchemaVersion;
     case AssetFormat::AssetKind::SpriteAnimationClip:
@@ -2626,8 +2629,16 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
         }
         if (tokens[0] == "staticmesh")
         {
-            // staticmesh <id> cube  — canonical unit cube (product-3D before glTF).
-            if (tokens.size() != 3 || tokens[2] != "cube")
+            // staticmesh <id> cube [shader <shader32hex>]  — canonical unit cube
+            // (product-3D before glTF). The optional shader names the mesh's own default
+            // Mesh3D fragment stage; MeshRenderer3D::shader still overrides it per instance.
+            if (tokens.size() != 3 && tokens.size() != 5)
+            {
+                return Core::failure(
+                    AssetErrorCode::InvalidCatalogConfig,
+                    "staticmesh currently supports: staticmesh <id> cube [shader <shaderId>]");
+            }
+            if (tokens[2] != "cube")
             {
                 return Core::failure(AssetErrorCode::InvalidCatalogConfig,
                                      "staticmesh currently supports: staticmesh <id> cube");
@@ -2637,26 +2648,55 @@ parseCatalogCookRecipeInternal(std::string_view recipeText,
             {
                 return Core::failure(AssetErrorCode::InvalidCatalogConfig, "invalid staticmesh asset id");
             }
+            Core::AssetId shaderOverrideId{};
+            if (tokens.size() == 5)
+            {
+                if (tokens[3] != "shader")
+                {
+                    return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                         "staticmesh optional token must be: shader <shaderId>");
+                }
+                auto shaderId = Core::AssetId::parseCanonical(tokens[4]);
+                if (!shaderId)
+                {
+                    return Core::failure(AssetErrorCode::InvalidCatalogConfig,
+                                         "invalid staticmesh shader override asset id");
+                }
+                shaderOverrideId = *shaderId;
+            }
             std::array<AssetFormat::StaticMeshSubmeshDesc, 1> submeshes{};
             std::array<float, 24 * AssetFormat::StaticMeshWire::FloatsPerVertex> vertices{};
             std::array<Core::u16, 36> indices{};
-            const AssetFormat::StaticMeshPayloadDesc desc =
+            AssetFormat::StaticMeshPayloadDesc desc =
                 AssetFormat::makeCanonicalUnitCubeMeshDesc(submeshes, vertices, indices);
             if (desc.vertices.empty() || desc.indices.empty())
             {
                 return Core::failure(AssetErrorCode::InvalidCatalogConfig, "failed to build canonical cube mesh");
             }
+            desc.shaderOverrideId = shaderOverrideId;
             auto payload = AssetFormat::writeStaticMeshPayloadBytes(desc);
             if (!payload)
             {
                 return Core::failure(std::move(payload.error()));
             }
-            request.assets.push_back(CatalogCookAssetSpec{
+            CatalogCookAssetSpec asset{
                 .assetKind = AssetFormat::AssetKind::StaticMesh,
                 .assetId = *meshId,
                 .assetTypeVersion = AssetFormat::StaticMeshWire::SchemaVersion,
                 .payload = std::move(*payload),
-            });
+            };
+            if (shaderOverrideId)
+            {
+                // A cooked StaticMesh has no other dependency, so this is already the sorted
+                // stream parseCookedAssetView demands. Adding a second kind here would need an
+                // AssetId sort, the way the prefab recipe below does it.
+                asset.dependencies.push_back(AssetFormat::CookedAssetWriteDependency{
+                    .assetId = shaderOverrideId,
+                    .expectedKind = AssetFormat::AssetKind::Shader,
+                    .flags = AssetFormat::DependencyFlags::Required,
+                });
+            }
+            request.assets.push_back(std::move(asset));
             continue;
         }
         if (tokens[0] == "material")

@@ -255,6 +255,14 @@ Core::Result<std::vector<std::byte>> writeStaticMeshPayloadBytes(const StaticMes
         writeF32(bytes, 24U, desc.boundsCenterZ);
         writeF32(bytes, 28U, desc.boundsRadius);
 
+        u16 flags = 0;
+        if (desc.shaderOverrideId)
+        {
+            flags |= StaticMeshWire::FlagHasShaderOverride;
+        }
+        writeU16(bytes, 32U, flags);
+        writeU16(bytes, 34U, 0);  // reserved
+
         usize offset = StaticMeshWire::HeaderBytes;
         for (const StaticMeshSubmeshDesc& submesh : desc.submeshes)
         {
@@ -294,6 +302,18 @@ Core::Result<StaticMeshPayloadView> parseStaticMeshPayload(std::span<const std::
     view.boundsCenterY = readF32(payload, 20U);
     view.boundsCenterZ = readF32(payload, 24U);
     view.boundsRadius = readF32(payload, 28U);
+
+    const u16 flags = readU16(payload, 32U);
+    const u16 reserved = readU16(payload, 34U);
+    if ((flags & ~StaticMeshWire::KnownFlags) != 0U)
+    {
+        return Core::failure(AssetFormatErrorCode::UnsupportedValue, "static mesh unknown flags set");
+    }
+    if (reserved != 0U)
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout, "static mesh reserved must be zero");
+    }
+    view.hasShaderOverride = (flags & StaticMeshWire::FlagHasShaderOverride) != 0U;
 
     if (view.schemaVersion != StaticMeshWire::SchemaVersion)
     {
@@ -404,11 +424,21 @@ Core::Result<std::vector<std::byte>> writeCookedStaticMeshAsset(Core::AssetId as
     {
         return Core::failure(payload.error());
     }
+    std::vector<CookedAssetWriteDependency> deps;
+    if (desc.shaderOverrideId)
+    {
+        deps.push_back(CookedAssetWriteDependency{
+            .assetId = desc.shaderOverrideId,
+            .expectedKind = AssetKind::Shader,
+            .flags = DependencyFlags::Required,
+        });
+    }
     return writeCookedAssetBytes(CookedAssetWriteDesc{
         .assetKind = AssetKind::StaticMesh,
         .assetTypeVersion = StaticMeshWire::SchemaVersion,
         .targetPlatform = platform,
         .assetId = assetId,
+        .dependencies = deps,
         .payload = *payload,
         .payloadAlignment = 16,
         .computeContentHash = true,

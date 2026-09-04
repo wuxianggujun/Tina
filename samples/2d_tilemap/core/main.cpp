@@ -1,0 +1,719 @@
+#include <tina/asset/AssetStore.hpp>
+#include <tina/asset/CharacterController2D.hpp>
+#include <tina/asset/GridCollision.hpp>
+#include <tina/asset/TileChunkRender.hpp>
+#include <tina/asset/TileMapInstance.hpp>
+#include <tina/asset_format/TileMapChunkPayload.hpp>
+#include <tina/asset_format/TileMapPayload.hpp>
+#include <tina/asset_format/TilesetPayload.hpp>
+#include <tina/core/error/Error.hpp>
+#include <tina/core/id/AssetId.hpp>
+#include <tina/core/text/JsonWriter.hpp>
+#include <tina/core/time/MonotonicClock.hpp>
+#include <tina/platform/headless/HeadlessPlatformFactory.hpp>
+#include <tina/render/RenderDevice.hpp>
+#include <tina/render/RenderErrors.hpp>
+#include <tina/render/RenderScene.hpp>
+#include <tina/runtime/EngineConfig.hpp>
+#include <tina/runtime/EngineHost.hpp>
+#include <tina/runtime/GameApplication.hpp>
+#include <tina/runtime/GameState.hpp>
+#include <tina/runtime/RunExitReason.hpp>
+#include <tina/runtime/spi/EngineCompositionFactories.hpp>
+#include <tina/task/disabled/DisabledTaskSystemFactory.hpp>
+
+#include <array>
+#include <charconv>
+#include <cstdint>
+#include <iostream>
+#include <memory>
+#include <memory_resource>
+#include <optional>
+#include <span>
+#include <string_view>
+#include <system_error>
+#include <utility>
+
+#include "SampleSpriteFrameResource.hpp"
+#include <vector>
+
+namespace {
+
+using Tina::Core::u16;
+using Tina::Core::u32;
+using Tina::Core::u64;
+using Tina::Core::u8;
+
+inline constexpr u32 ProductSpriteBindingKey = 1;
+inline constexpr u32 CharacterSpriteBindingKey = 2;
+inline constexpr Tina::AssetFormat::TileMapLayerId VisualLayerId = 1;
+inline constexpr Tina::AssetFormat::TileMapLayerId CollisionLayerId = 2;
+inline constexpr u64 ExpectedNonEmptyTiles = 11; // 8 floor + 3 wall
+
+struct SampleCapture final {
+    u64 submittedFrames = 0;
+    u64 presentedFrames = 0;
+    u64 totalSpriteItems = 0;
+    u64 lastVisibleSpriteCount = 0;
+    u64 lastTileSpriteCount = 0;
+    u64 lastHadCharacterSprite = 0;
+    u64 minVisibleSpriteCount = ~u64{0};
+    u64 maxVisibleSpriteCount = 0;
+    u64 controllerGroundedFrames = 0;
+    u64 fixedSteps = 0;
+    u64 renderShutdowns = 0;
+    u64 stateExits = 0;
+    u64 applicationShutdowns = 0;
+    bool lastFrameHadCamera = false;
+    bool tileMapReady = false;
+};
+
+class RecordingNullRenderDevice final : public Tina::Render::IRenderDevice {
+  public:
+    explicit RecordingNullRenderDevice(SampleCapture& capture) noexcept : capture_(&capture) {}
+
+    [[nodiscard]] Tina::Core::Result<Tina::Render::RenderFrameSubmission>
+    submitFrame(const Tina::Render::RenderFrame& frame) override
+    {
+        if (stopped_)
+        {
+            return Tina::Core::failure(Tina::Render::RenderErrorCode::DeviceStopped,
+                                       "The 2D tilemap render device is stopped");
+        }
+        if (frameOpen_)
+        {
+            return Tina::Core::failure(Tina::Render::RenderErrorCode::FrameAlreadyOpen,
+                                       "The 2D tilemap render device requires present between submits");
+        }
+        if (frame.frameIndex != nextFrameIndex_)
+        {
+            return Tina::Core::failure(Tina::Render::RenderErrorCode::UnexpectedFrameIndex,
+                                       "2D tilemap frame indices must be contiguous");
+        }
+
+        const Tina::Render::RenderSceneView scene = frame.primaryWorldScene;
+        capture_->lastFrameHadCamera = scene.camera2D().has_value();
+        capture_->lastVisibleSpriteCount = scene.sprites2D().size();
+        capture_->totalSpriteItems += scene.sprites2D().size();
+        if (scene.sprites2D().size() < capture_->minVisibleSpriteCount)
+        {
+            capture_->minVisibleSpriteCount = scene.sprites2D().size();
+        }
+        if (scene.sprites2D().size() > capture_->maxVisibleSpriteCount)
+        {
+            capture_->maxVisibleSpriteCount = scene.sprites2D().size();
+        }
+        ++capture_->submittedFrames;
+        ++nextFrameIndex_;
+        frameOpen_ = true;
+        return Tina::Render::RenderFrameSubmission::Submitted(capture_->submittedFrames - 1U);
+    }
+
+    [[nodiscard]] Tina::Core::Status present() override
+    {
+        if (stopped_ || !frameOpen_)
+        {
+            return Tina::Core::failure(Tina::Render::RenderErrorCode::NoFrameSubmitted,
+                                       "The 2D tilemap render device has no open frame");
+        }
+        frameOpen_ = false;
+        ++capture_->presentedFrames;
+        return Tina::Core::success();
+    }
+
+    [[nodiscard]] Tina::Render::RenderStatistics statistics() const noexcept override
+    {
+        return Tina::Render::RenderStatistics{
+            .submitted = capture_->submittedFrames,
+            .presented = capture_->presentedFrames,
+            .liveResources = 0,
+        };
+    }
+
+    void shutdown() noexcept override
+    {
+        if (stopped_)
+        {
+            return;
+        }
+        stopped_ = true;
+        frameOpen_ = false;
+        ++capture_->renderShutdowns;
+    }
+
+  private:
+    SampleCapture* capture_ = nullptr;
+    u64 nextFrameIndex_ = 0;
+    bool frameOpen_ = false;
+    bool stopped_ = false;
+};
+
+[[nodiscard]] Tina::Core::Result<u64> parseFrameCount(int argumentCount, char** arguments)
+{
+    constexpr std::string_view prefix = "--frames=";
+    if (argumentCount != 2 || !std::string_view{arguments[1]}.starts_with(prefix))
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                   "Expected exactly one --frames=N argument");
+    }
+
+    const std::string_view text = std::string_view{arguments[1]}.substr(prefix.size());
+    u64 value = 0;
+    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+    if (error != std::errc{} || end != text.data() + text.size() || value == 0)
+    {
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                   "--frames must be an unsigned integer greater than zero");
+    }
+    return value;
+}
+
+[[nodiscard]] Tina::Core::AssetId::Bytes idBytes(u8 seed)
+{
+    Tina::Core::AssetId::Bytes bytes{};
+    bytes[0] = static_cast<std::byte>(seed);
+    bytes[15] = static_cast<std::byte>(seed ^ 0x5AU);
+    return bytes;
+}
+
+// 8x4: solid floor y=0; solid wall x=6 for y=1..3 (11 non-empty tiles).
+[[nodiscard]] Tina::Core::Result<Tina::Asset::TileMapInstance>
+makePlatformMap(std::pmr::memory_resource& memory)
+{
+    constexpr u16 ChunkSizeCells = 4U;
+    const auto tilesetId = *Tina::Core::AssetId::fromBytes(idBytes(31U));
+    const auto mapId = *Tina::Core::AssetId::fromBytes(idBytes(32U));
+    const std::array tiles{
+        Tina::AssetFormat::TilesetTileDesc{
+            .localId = 1,
+            .materialFlags = Tina::AssetFormat::TilesetWire::MaterialSolid,
+            .u0 = 0.0f,
+            .v0 = 0.0f,
+            .u1 = 0.5f,
+            .v1 = 0.5f,
+        },
+        Tina::AssetFormat::TilesetTileDesc{
+            .localId = 2,
+            .materialFlags = Tina::AssetFormat::TilesetWire::MaterialSolid,
+            .u0 = 0.5f,
+            .v0 = 0.0f,
+            .u1 = 1.0f,
+            .v1 = 0.5f,
+        },
+    };
+    auto tilesetBytes = Tina::AssetFormat::writeTilesetPayloadBytes(
+        Tina::AssetFormat::TilesetPayloadDesc{.tilePixelWidth = 16, .tilePixelHeight = 16, .tiles = tiles});
+    if (!tilesetBytes)
+    {
+        return Tina::Core::failure(std::move(tilesetBytes.error()));
+    }
+    auto tileset = Tina::AssetFormat::parseTilesetPayload(*tilesetBytes);
+    if (!tileset)
+    {
+        return Tina::Core::failure(std::move(tileset.error()));
+    }
+
+    std::array<u16, 32> cells{};
+    for (u32 x = 0; x < 8; ++x)
+    {
+        cells[x] = 1;
+    }
+    for (u32 y = 1; y < 4; ++y)
+    {
+        cells[y * 8 + 6] = 2;
+    }
+
+    std::array<u16, ChunkSizeCells * ChunkSizeCells> leftChunkCells{};
+    std::array<u16, ChunkSizeCells * ChunkSizeCells> rightChunkCells{};
+    for (u32 y = 0; y < ChunkSizeCells; ++y)
+    {
+        for (u32 x = 0; x < ChunkSizeCells; ++x)
+        {
+            leftChunkCells[y * ChunkSizeCells + x] = cells[y * 8U + x];
+            rightChunkCells[y * ChunkSizeCells + x] = cells[y * 8U + ChunkSizeCells + x];
+        }
+    }
+
+    const auto visualLeftChunkId = *Tina::Core::AssetId::fromBytes(idBytes(33U));
+    const auto visualRightChunkId = *Tina::Core::AssetId::fromBytes(idBytes(34U));
+    const auto collisionLeftChunkId = *Tina::Core::AssetId::fromBytes(idBytes(35U));
+    const auto collisionRightChunkId = *Tina::Core::AssetId::fromBytes(idBytes(36U));
+    const auto writeChunk = [&](Tina::AssetFormat::TileMapLayerId layerId, u32 chunkX,
+                                std::span<const u16> chunkCells) {
+        return Tina::AssetFormat::writeTileMapChunkPayloadBytes(Tina::AssetFormat::TileMapChunkPayloadDesc{
+            .parentTileMapId = mapId,
+            .layerId = layerId,
+            .chunkX = chunkX,
+            .chunkY = 0U,
+            .widthCells = ChunkSizeCells,
+            .heightCells = ChunkSizeCells,
+            .cells = chunkCells,
+        });
+    };
+    auto visualLeftChunk = writeChunk(VisualLayerId, 0U, leftChunkCells);
+    auto visualRightChunk = writeChunk(VisualLayerId, 1U, rightChunkCells);
+    auto collisionLeftChunk = writeChunk(CollisionLayerId, 0U, leftChunkCells);
+    auto collisionRightChunk = writeChunk(CollisionLayerId, 1U, rightChunkCells);
+    if (!visualLeftChunk || !visualRightChunk || !collisionLeftChunk || !collisionRightChunk)
+    {
+        if (!visualLeftChunk)
+        {
+            return Tina::Core::failure(std::move(visualLeftChunk.error()));
+        }
+        if (!visualRightChunk)
+        {
+            return Tina::Core::failure(std::move(visualRightChunk.error()));
+        }
+        if (!collisionLeftChunk)
+        {
+            return Tina::Core::failure(std::move(collisionLeftChunk.error()));
+        }
+        return Tina::Core::failure(std::move(collisionRightChunk.error()));
+    }
+
+    const std::array visualChunkRefs{
+        Tina::AssetFormat::TileMapChunkRefDesc{
+            .chunkX = 0U,
+            .chunkY = 0U,
+            .widthCells = ChunkSizeCells,
+            .heightCells = ChunkSizeCells,
+            .nonEmptyCount = 4U,
+            .chunkAssetId = visualLeftChunkId,
+        },
+        Tina::AssetFormat::TileMapChunkRefDesc{
+            .chunkX = 1U,
+            .chunkY = 0U,
+            .widthCells = ChunkSizeCells,
+            .heightCells = ChunkSizeCells,
+            .nonEmptyCount = 7U,
+            .chunkAssetId = visualRightChunkId,
+        },
+    };
+    const std::array collisionChunkRefs{
+        Tina::AssetFormat::TileMapChunkRefDesc{
+            .chunkX = 0U,
+            .chunkY = 0U,
+            .widthCells = ChunkSizeCells,
+            .heightCells = ChunkSizeCells,
+            .nonEmptyCount = 4U,
+            .chunkAssetId = collisionLeftChunkId,
+        },
+        Tina::AssetFormat::TileMapChunkRefDesc{
+            .chunkX = 1U,
+            .chunkY = 0U,
+            .widthCells = ChunkSizeCells,
+            .heightCells = ChunkSizeCells,
+            .nonEmptyCount = 7U,
+            .chunkAssetId = collisionRightChunkId,
+        },
+    };
+    const std::array layers{
+        Tina::AssetFormat::TileMapLayerDesc{
+            .stableLayerId = VisualLayerId,
+            .kind = Tina::AssetFormat::TileMapLayerKind::Tile,
+            .visible = true,
+            .name = "visual",
+            .chunkRefs = visualChunkRefs,
+        },
+        Tina::AssetFormat::TileMapLayerDesc{
+            .stableLayerId = CollisionLayerId,
+            .kind = Tina::AssetFormat::TileMapLayerKind::Tile,
+            .visible = false,
+            .name = "collision",
+            .chunkRefs = collisionChunkRefs,
+        },
+    };
+    auto mapBytes = Tina::AssetFormat::writeTileMapPayloadBytes(Tina::AssetFormat::TileMapPayloadDesc{
+        .widthCells = 8,
+        .heightCells = 4,
+        .cellSizeMeters = 1.0f,
+        .chunkSizeCells = ChunkSizeCells,
+        .layers = layers,
+        .tilesetId = tilesetId,
+    });
+    if (!mapBytes)
+    {
+        return Tina::Core::failure(std::move(mapBytes.error()));
+    }
+    auto map = Tina::AssetFormat::parseTileMapPayload(*mapBytes);
+    if (!map)
+    {
+        return Tina::Core::failure(std::move(map.error()));
+    }
+
+    auto instance = Tina::Asset::TileMapInstance::Create(
+        *map, *tileset, mapId, tilesetId,
+        Tina::Asset::TileMapInstanceConfig{.residentChunkCapacity = 4U, .memoryResource = &memory});
+    if (!instance)
+    {
+        return Tina::Core::failure(std::move(instance.error()));
+    }
+
+    const auto attachChunk = [&](Tina::Core::AssetId chunkId, const std::vector<std::byte>& payload,
+                                 u64 generation) -> Tina::Core::Status {
+        auto chunk = Tina::AssetFormat::parseTileMapChunkPayload(payload);
+        if (!chunk)
+        {
+            return Tina::Core::failure(std::move(chunk.error()));
+        }
+        return instance->attachChunk(chunkId, *chunk, generation);
+    };
+    if (auto status = attachChunk(visualLeftChunkId, *visualLeftChunk, 1U); !status)
+    {
+        return Tina::Core::failure(std::move(status.error()));
+    }
+    if (auto status = attachChunk(visualRightChunkId, *visualRightChunk, 2U); !status)
+    {
+        return Tina::Core::failure(std::move(status.error()));
+    }
+    if (auto status = attachChunk(collisionLeftChunkId, *collisionLeftChunk, 3U); !status)
+    {
+        return Tina::Core::failure(std::move(status.error()));
+    }
+    if (auto status = attachChunk(collisionRightChunkId, *collisionRightChunk, 4U); !status)
+    {
+        return Tina::Core::failure(std::move(status.error()));
+    }
+    return std::move(*instance);
+}
+
+class TileMap2DState final : public Tina::IGameState {
+  public:
+    TileMap2DState(u64 targetFrames, SampleCapture& capture) noexcept
+        : targetFrames_(targetFrames), capture_(&capture)
+    {
+    }
+
+    Tina::Core::Status onEnter(Tina::GameStateEnterContext&) override
+    {
+        auto map = makePlatformMap(memory_);
+        if (!map)
+        {
+            return Tina::Core::failure(std::move(map.error()));
+        }
+        map_.emplace(std::move(*map));
+        auto fixtureStore = Tina::Asset::AssetStore::Create(
+            Tina::Asset::AssetStoreConfig{.capacity = 1U, .memoryResource = &memory_});
+        if (!fixtureStore)
+        {
+            return Tina::Core::failure(std::move(fixtureStore.error()));
+        }
+        fixtureStore_.emplace(std::move(*fixtureStore));
+        auto tileset = fixtureStore_->beginQueued(
+            map_->tilesetAssetId(), Tina::AssetFormat::AssetKind::Tileset);
+        if (!tileset)
+        {
+            return Tina::Core::failure(std::move(tileset.error()));
+        }
+        tilesetHandle_ = *tileset;
+        tilesetBinding_ = FixtureTilesetBinding{
+            .tileset = tilesetHandle_,
+            .frameResource = &spriteFrameResource_,
+        };
+        grid_.emplace(*map_, CollisionLayerId);
+        controller_.emplace(Tina::Asset::CharacterController2DConfig{
+            .halfWidth = 0.3f,
+            .halfHeight = 0.5f,
+            .gravity = 40.0f,
+            .maxFallSpeed = 50.0f,
+            .skin = 0.01f,
+        });
+        // Drop onto floor from above open space (x≈1).
+        controller_->teleport(1.0f, 3.0f, true);
+        capture_->tileMapReady = true;
+        return Tina::Core::success();
+    }
+
+    void onExit(Tina::GameStateExitContext&) noexcept override
+    {
+        ++capture_->stateExits;
+        controller_.reset();
+        grid_.reset();
+        map_.reset();
+        tilesetBinding_ = {};
+        tilesetHandle_ = {};
+        fixtureStore_.reset();
+    }
+
+    [[nodiscard]] Tina::GameStatePolicy initialPolicy() const noexcept override
+    {
+        return {};
+    }
+
+    // Headless Null smoke advances little wall-clock time, so fixedUpdate may run 0–1 times.
+    // Step the grid controller once per frame with a synthetic fixed dt for deterministic landing.
+    Tina::Core::Status updateFrame(Tina::FrameUpdateContext& context) override
+    {
+        if (!controller_ || !grid_)
+        {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal, "tilemap controller not ready");
+        }
+        if (auto status = controller_->move(*grid_, 1.0f / 60.0f,
+                                            Tina::Asset::CharacterController2DMoveInput{.wishVelocityX = 0.0f},
+                                            solidScratch_);
+            !status)
+        {
+            return status;
+        }
+        ++capture_->fixedSteps;
+        if (controller_->state().grounded)
+        {
+            ++capture_->controllerGroundedFrames;
+        }
+        if (context.frameTiming().frameIndex + 1U == targetFrames_)
+        {
+            context.requestExitAfterFrame();
+        }
+        return Tina::Core::success();
+    }
+
+    Tina::Core::Status extractRenderScene(Tina::RenderSceneExtractionContext& context) const override
+    {
+        if (!map_ || !controller_)
+        {
+            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal, "tilemap state not ready");
+        }
+
+        auto& writer = context.renderSceneWriter();
+        const Tina::Render::RenderCamera2DInput camera{
+            .stableCameraKey = 1,
+            .centerX = 4.0f,
+            .centerY = 2.0f,
+            .worldWidth = 10.0f,
+            .worldHeight = 6.0f,
+            .actualPixelsPerMeter = 32.0f,
+            .pixelSnap = Tina::Render::RenderPixelSnapPolicy::CameraTranslation,
+        };
+        if (auto status = writer.setCamera2D(camera); !status)
+        {
+            return status;
+        }
+
+        std::pmr::vector<Tina::Render::RenderSprite2DInput> tileSprites{&memory_};
+        const Tina::Asset::TileChunkCameraQuery query{
+            .centerX = camera.centerX,
+            .centerY = camera.centerY,
+            .halfWidth = camera.worldWidth * 0.5f,
+            .halfHeight = camera.worldHeight * 0.5f,
+        };
+        auto emitted = Tina::Asset::emitVisibleTileMapSprites(
+            *map_, VisualLayerId, query,
+            Tina::Asset::TileChunkSpriteEmitParams{
+                .tileset = tilesetHandle_,
+                .bindingResolver = Tina::Asset::AssetFrameResourceResolver{
+                    .userData = &tilesetBinding_,
+                    .resolve = &FixtureTilesetBinding::resolve,
+                },
+            },
+            context.frameResourceSink(),
+            tileSprites);
+        if (!emitted)
+        {
+            return Tina::Core::failure(std::move(emitted.error()));
+        }
+        capture_->lastTileSpriteCount = *emitted;
+        for (const auto& sprite : tileSprites)
+        {
+            if (auto status = writer.addSprite2D(sprite); !status)
+            {
+                return status;
+            }
+        }
+
+        // Character uses a second texture binding (not a tile cell).
+        const auto& st = controller_->state();
+        auto characterTexture = spriteFrameResource_.intern(context.frameResourceSink(), CharacterSpriteBindingKey);
+        if (!characterTexture)
+        {
+            return Tina::Core::failure(std::move(characterTexture.error()));
+        }
+        const Tina::Render::RenderSprite2DInput character{
+            .texture = *characterTexture,
+            .stableEntityKey = 900001,
+            .centerX = st.positionX,
+            .centerY = st.positionY,
+            .widthMeters = controller_->config().halfWidth * 2.0f,
+            .heightMeters = controller_->config().halfHeight * 2.0f,
+            .sortingLayer = 1,
+            .orderInLayer = 0,
+            .red = 255,
+            .green = 200,
+            .blue = 64,
+            .alpha = 255,
+        };
+        if (auto status = writer.addSprite2D(character); !status)
+        {
+            return status;
+        }
+        capture_->lastHadCharacterSprite = 1;
+        return Tina::Core::success();
+    }
+
+  private:
+    struct FixtureTilesetBinding final {
+        [[nodiscard]] static Tina::Core::Result<Tina::Render::FrameResourceRef> resolve(
+            void* userData,
+            Tina::Asset::AssetHandle tileset,
+            Tina::Render::FrameResourceSink& frameResources) noexcept
+        {
+            const auto* binding = static_cast<const FixtureTilesetBinding*>(userData);
+            if (binding == nullptr || binding->frameResource == nullptr || binding->tileset != tileset)
+            {
+                return Tina::Render::FrameResourceRef{};
+            }
+            return binding->frameResource->intern(frameResources, ProductSpriteBindingKey);
+        }
+
+        Tina::Asset::AssetHandle tileset{};
+        const Tina::Samples::SampleSpriteFrameResource* frameResource = nullptr;
+    };
+
+    u64 targetFrames_ = 0;
+    SampleCapture* capture_ = nullptr;
+    mutable std::pmr::unsynchronized_pool_resource memory_{};
+    std::optional<Tina::Asset::AssetStore> fixtureStore_{};
+    Tina::Asset::AssetHandle tilesetHandle_{};
+    mutable Tina::Samples::SampleSpriteFrameResource spriteFrameResource_{};
+    mutable FixtureTilesetBinding tilesetBinding_{};
+    std::optional<Tina::Asset::TileMapInstance> map_;
+    std::optional<Tina::Asset::TileMapGridCollision> grid_;
+    std::optional<Tina::Asset::CharacterController2D> controller_;
+    std::pmr::vector<Tina::Asset::TileMapSolidHit> solidScratch_{&memory_};
+};
+
+class TileMap2DApplication final : public Tina::IGameApplication {
+  public:
+    TileMap2DApplication(u64 targetFrames, SampleCapture& capture) noexcept
+        : targetFrames_(targetFrames), capture_(&capture)
+    {
+    }
+
+    Tina::Core::Result<std::unique_ptr<Tina::IGameState>>
+    createInitialState(Tina::GameStartupContext&) override
+    {
+        return std::unique_ptr<Tina::IGameState>{std::make_unique<TileMap2DState>(targetFrames_, *capture_)};
+    }
+
+    void onShutdown(Tina::GameShutdownContext&) noexcept override
+    {
+        ++capture_->applicationShutdowns;
+    }
+
+  private:
+    u64 targetFrames_ = 0;
+    SampleCapture* capture_ = nullptr;
+};
+
+[[nodiscard]] Tina::EngineCompositionFactories makeFactories(SampleCapture& capture)
+{
+    return Tina::EngineCompositionFactories{
+        .createMonotonicClock = []() -> Tina::Core::Result<std::unique_ptr<Tina::Core::IMonotonicClock>> {
+            return std::unique_ptr<Tina::Core::IMonotonicClock>{
+                std::make_unique<Tina::Core::SteadyMonotonicClock>()};
+        },
+        .createTaskSystem = Tina::Task::createDisabledTaskSystem,
+        .platformRender =
+            Tina::IndependentPlatformRenderFactories{
+                .createPlatformBackend = Tina::Platform::createHeadlessPlatformBackend,
+                .createRenderDevice =
+                    [&capture](const Tina::Render::RenderDeviceCreateParams&)
+                        -> Tina::Core::Result<std::unique_ptr<Tina::Render::IRenderDevice>> {
+                        return std::unique_ptr<Tina::Render::IRenderDevice>{
+                            std::make_unique<RecordingNullRenderDevice>(capture)};
+                    },
+            },
+    };
+}
+
+void printError(const Tina::Core::Error& error)
+{
+    Tina::Core::JsonWriter writer(std::cerr);
+    writer.beginObject();
+    writer.member("status", "error");
+    writer.member("sample", "tina_sample_2d_tilemap");
+    writer.member("code", error.code.value);
+    writer.member("message", error.message);
+    writer.endObject();
+    std::cerr << '\n';
+}
+
+} // namespace
+
+int runTilemapSample(int argumentCount, char** arguments)
+{
+    auto frameCountResult = parseFrameCount(argumentCount, arguments);
+    if (!frameCountResult)
+    {
+        printError(frameCountResult.error());
+        return 2;
+    }
+    const u64 frameCount = *frameCountResult;
+
+    SampleCapture capture;
+    Tina::EngineConfig config = Tina::EngineConfig::Defaults();
+    // Tiles (11) + character (1); leave headroom for culling edge cases.
+    config.renderSceneCapacities.spriteCapacity = 64;
+    auto hostResult = Tina::EngineHost::Create(config, makeFactories(capture));
+    if (!hostResult)
+    {
+        printError(hostResult.error());
+        return 1;
+    }
+
+    TileMap2DApplication application{frameCount, capture};
+    auto runResult = (*hostResult)->run(application);
+    hostResult->reset();
+
+    const bool ok = runResult && *runResult == Tina::RunExitReason::GameRequestedExitAfterCurrentFrame &&
+                    capture.tileMapReady && capture.submittedFrames == frameCount &&
+                    capture.presentedFrames == frameCount && capture.lastFrameHadCamera &&
+                    capture.lastTileSpriteCount == ExpectedNonEmptyTiles && capture.lastHadCharacterSprite == 1 &&
+                    capture.lastVisibleSpriteCount == ExpectedNonEmptyTiles + 1 &&
+                    capture.minVisibleSpriteCount == ExpectedNonEmptyTiles + 1 &&
+                    capture.maxVisibleSpriteCount == ExpectedNonEmptyTiles + 1 &&
+                    capture.controllerGroundedFrames > 0 && capture.fixedSteps > 0 &&
+                    capture.renderShutdowns == 1 && capture.stateExits == 1 && capture.applicationShutdowns == 1;
+
+    if (!ok)
+    {
+        if (!runResult)
+        {
+            printError(runResult.error());
+        }
+        else
+        {
+            Tina::Core::JsonWriter writer(std::cerr);
+            writer.beginObject();
+            writer.member("status", "error");
+            writer.member("sample", "tina_sample_2d_tilemap");
+            writer.member("message", "2D tilemap verification failed");
+            writer.member("submitted", capture.submittedFrames);
+            writer.member("presented", capture.presentedFrames);
+            writer.member("lastSprites", capture.lastVisibleSpriteCount);
+            writer.member("lastTiles", capture.lastTileSpriteCount);
+            writer.member("groundedFrames", capture.controllerGroundedFrames);
+            writer.member("fixedSteps", capture.fixedSteps);
+            writer.endObject();
+            std::cerr << '\n';
+        }
+        return 1;
+    }
+
+    {
+        Tina::Core::JsonWriter writer(std::cout);
+        writer.beginObject();
+        writer.member("status", "ok");
+        writer.member("sample", "tina_sample_2d_tilemap");
+        writer.member("frames", frameCount);
+        writer.member("tileSpritesPerFrame", ExpectedNonEmptyTiles);
+        writer.member("spritesPerFrame", ExpectedNonEmptyTiles + 1);
+        writer.member("controllerGroundedFrames", capture.controllerGroundedFrames);
+        writer.member("fixedSteps", capture.fixedSteps);
+        writer.member("stateExits", capture.stateExits);
+        writer.member("applicationShutdowns", capture.applicationShutdowns);
+        writer.member("renderShutdowns", capture.renderShutdowns);
+        writer.endObject();
+    }
+    std::cout << '\n';
+    return 0;
+}

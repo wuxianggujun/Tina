@@ -17,6 +17,11 @@ enum class NativeWindowBindingKind : u8 {
     // A NUL-terminated CSS selector naming the canvas, not a window handle. The pointed-to
     // string must outlive the lease; nativeDisplay stays 0 as there is no display to carry.
     Html5,
+    // CAMetalLayer*, which bgfx's Metal swapchain casts nwh straight to on iOS. Like Android there
+    // is no display to carry, so nativeDisplay must stay 0. It is the layer and not the UIView: a
+    // view passed here is the wrong Objective-C class and fails at draw time rather than at bind
+    // time.
+    Ios,
 };
 
 struct NativeWindowBinding final {

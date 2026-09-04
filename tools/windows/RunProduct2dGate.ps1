@@ -50,6 +50,9 @@ $expectedGate = 'bgfx-physics-freetype-audio'
 $targets = @(
     'tina_sample_2d',
     'tina_sample_2d_authored_scene',
+    'tina_sample_2d_custom_shader',
+    'tina_sample_2d_shader_materials',
+    'tina_sample_2d_shader_lighting',
     'tina_navigation2d_tests',
     'tina_scene_tests',
     'tina_render_scene_tests',
@@ -387,6 +390,176 @@ if ($crateStartY -ne 6.0 -or $crateEndY -ge $crateStartY -or
 }
 Add-Step -Name 'tina_sample_2d_authored_scene' -ExitCode 0 `
     -Detail "evidenceSchema=1 frames=$SampleFrames crateEndY=$crateEndY"
+
+# First consumer of the Sprite2D custom fragment path. Pixel evidence is two-sided: the
+# custom-shader sprites must move between the two pinned u_pulse phases, and the engine
+# control sprite must not -- plus its four quadrant colours must match the 2x2 checker,
+# which is what proves sampling/UV rather than "the fragment ran and tinted white".
+$customShaderPath = Join-Path $BinDir 'tina_sample_2d_custom_shader.exe'
+if (-not (Test-Path -LiteralPath $customShaderPath)) {
+    Add-Step -Name 'tina_sample_2d_custom_shader' -ExitCode 1 `
+        -Detail "missing executable: $customShaderPath"
+}
+$customShaderOut = & $customShaderPath "--frames=$SampleFrames" 2>&1 | Out-String
+$customShaderExit = $LASTEXITCODE
+if ($customShaderExit -ne 0) {
+    Add-Step -Name 'tina_sample_2d_custom_shader' -ExitCode $customShaderExit `
+        -Detail $customShaderOut.Trim()
+}
+$customShaderLine = $customShaderOut -split "`n" |
+    Where-Object { $_ -match '^\{"status":"ok","sample":"tina_sample_2d_custom_shader"' } |
+    Select-Object -Last 1
+if (-not $customShaderLine) {
+    Add-Step -Name 'tina_sample_2d_custom_shader' -ExitCode 1 `
+        -Detail "no ok evidence line; output=$($customShaderOut.Trim())"
+}
+$customShader = $customShaderLine | ConvertFrom-Json
+$customShaderExpected = [ordered]@{
+    frames                  = [int64]$SampleFrames
+    spritesPerFrame         = 4
+    customShaderSprites     = 3
+    shaderRetired           = $true
+    textureRetired          = $true
+    evidenceCollected       = $true
+    engineSpriteDelta       = 0
+    checkerSamplingMatched  = $true
+}
+foreach ($field in $customShaderExpected.Keys) {
+    $actual = $customShader.$field
+    $expected = $customShaderExpected[$field]
+    if ($null -eq $actual) {
+        Add-Step -Name "customShader:$field" -ExitCode 1 -Detail 'field missing from evidence'
+    }
+    if ($actual -ne $expected) {
+        Add-Step -Name "customShader:$field" -ExitCode 1 `
+            -Detail "expected $expected; actual $actual"
+    }
+}
+if ([int64]$customShader.customSpriteDelta -lt 8) {
+    Add-Step -Name 'customShader:customSpriteDelta' -ExitCode 1 `
+        -Detail "expected customSpriteDelta >= 8; actual $($customShader.customSpriteDelta)"
+}
+if ([int64]$customShader.shaderBlobCount -lt 1) {
+    Add-Step -Name 'customShader:shaderBlobCount' -ExitCode 1 `
+        -Detail "expected shaderBlobCount >= 1; actual $($customShader.shaderBlobCount)"
+}
+Add-Step -Name 'tina_sample_2d_custom_shader' -ExitCode 0 `
+    -Detail "frames=$SampleFrames customSpriteDelta=$($customShader.customSpriteDelta) checkerSamplingMatched=true"
+
+# One program, three uniform bindings. The two zero-valued fields are the ones that make this
+# a material proof rather than a brightness proof: two sprites sharing a binding must be
+# byte-identical, and the same-uniform control must not spread. Thresholds mirror the sample's
+# own constants (separation >= 12, sameMaterialDelta <= 6, flatSpread <= 24), which were each
+# argued against a negative control; the gate asserts the stricter observed invariants only
+# where the sample itself proves them exactly.
+$materialsPath = Join-Path $BinDir 'tina_sample_2d_shader_materials.exe'
+if (-not (Test-Path -LiteralPath $materialsPath)) {
+    Add-Step -Name 'tina_sample_2d_shader_materials' -ExitCode 1 `
+        -Detail "missing executable: $materialsPath"
+}
+$materialsOut = & $materialsPath "--frames=$SampleFrames" 2>&1 | Out-String
+$materialsExit = $LASTEXITCODE
+if ($materialsExit -ne 0) {
+    Add-Step -Name 'tina_sample_2d_shader_materials' -ExitCode $materialsExit `
+        -Detail $materialsOut.Trim()
+}
+$materialsLine = $materialsOut -split "`n" |
+    Where-Object { $_ -match '^\{"status":"ok","sample":"tina_sample_2d_shader_materials"' } |
+    Select-Object -Last 1
+if (-not $materialsLine) {
+    Add-Step -Name 'tina_sample_2d_shader_materials' -ExitCode 1 `
+        -Detail "no ok evidence line; output=$($materialsOut.Trim())"
+}
+$materials = $materialsLine | ConvertFrom-Json
+$materialsExpected = [ordered]@{
+    frames                  = [int64]$SampleFrames
+    materials               = 3
+    spritesPerFrame         = 6
+    shaderRetired           = $true
+    textureRetired          = $true
+    evidenceCollected       = $true
+    maximumSameMaterialDelta = 0
+    flatMaterialSpread      = 0
+    evidenceError           = ''
+}
+foreach ($field in $materialsExpected.Keys) {
+    $actual = $materials.$field
+    $expected = $materialsExpected[$field]
+    if ($null -eq $actual) {
+        Add-Step -Name "shaderMaterials:$field" -ExitCode 1 -Detail 'field missing from evidence'
+    }
+    if ($actual -ne $expected) {
+        Add-Step -Name "shaderMaterials:$field" -ExitCode 1 `
+            -Detail "expected $expected; actual $actual"
+    }
+}
+if ([int64]$materials.minimumMaterialSeparation -lt 12) {
+    Add-Step -Name 'shaderMaterials:minimumMaterialSeparation' -ExitCode 1 `
+        -Detail "expected >= 12; actual $($materials.minimumMaterialSeparation)"
+}
+Add-Step -Name 'tina_sample_2d_shader_materials' -ExitCode 0 `
+    -Detail ("frames=$SampleFrames minimumMaterialSeparation=$($materials.minimumMaterialSeparation) " +
+             "sameMaterialDelta=0 flatSpread=0")
+
+# A custom fragment that consumes the engine lighting/normal contract instead of replacing it.
+# normalVsFlatSeparation is deliberately NOT asserted: the sample documents that killing the
+# normal map still measures 3 there, so any threshold at that scale would pass with the feature
+# dead. normalLeftVsRight is the criterion that survives the negative control (0 vs 10).
+$lightingPath = Join-Path $BinDir 'tina_sample_2d_shader_lighting.exe'
+if (-not (Test-Path -LiteralPath $lightingPath)) {
+    Add-Step -Name 'tina_sample_2d_shader_lighting' -ExitCode 1 `
+        -Detail "missing executable: $lightingPath"
+}
+$lightingOut = & $lightingPath "--frames=$SampleFrames" 2>&1 | Out-String
+$lightingExit = $LASTEXITCODE
+if ($lightingExit -ne 0) {
+    Add-Step -Name 'tina_sample_2d_shader_lighting' -ExitCode $lightingExit `
+        -Detail $lightingOut.Trim()
+}
+$lightingLine = $lightingOut -split "`n" |
+    Where-Object { $_ -match '^\{"status":"ok","sample":"tina_sample_2d_shader_lighting"' } |
+    Select-Object -Last 1
+if (-not $lightingLine) {
+    Add-Step -Name 'tina_sample_2d_shader_lighting' -ExitCode 1 `
+        -Detail "no ok evidence line; output=$($lightingOut.Trim())"
+}
+$lighting = $lightingLine | ConvertFrom-Json
+$lightingExpected = [ordered]@{
+    frames            = [int64]$SampleFrames
+    spritesPerFrame   = 6
+    shaderRetired     = $true
+    albedoRetired     = $true
+    normalRetired     = $true
+    evidenceCollected = $true
+    evidenceError     = ''
+}
+foreach ($field in $lightingExpected.Keys) {
+    $actual = $lighting.$field
+    $expected = $lightingExpected[$field]
+    if ($null -eq $actual) {
+        Add-Step -Name "shaderLighting:$field" -ExitCode 1 -Detail 'field missing from evidence'
+    }
+    if ($actual -ne $expected) {
+        Add-Step -Name "shaderLighting:$field" -ExitCode 1 `
+            -Detail "expected $expected; actual $actual"
+    }
+}
+$lightingMinimums = [ordered]@{
+    normalLeftVsRight   = 6
+    shadowedVsLit       = 40
+    engineControlSpread = 40
+}
+foreach ($field in $lightingMinimums.Keys) {
+    $actual = [int64]$lighting.$field
+    $minimum = $lightingMinimums[$field]
+    if ($actual -lt $minimum) {
+        Add-Step -Name "shaderLighting:$field" -ExitCode 1 `
+            -Detail "expected >= $minimum; actual $actual"
+    }
+}
+Add-Step -Name 'tina_sample_2d_shader_lighting' -ExitCode 0 `
+    -Detail ("frames=$SampleFrames normalLeftVsRight=$($lighting.normalLeftVsRight) " +
+             "shadowedVsLit=$($lighting.shadowedVsLit) engineControlSpread=$($lighting.engineControlSpread)")
 
 $shadowVisualScript = Join-Path $SourceRoot 'tools\windows\RunProduct2dShadowVisualGate.ps1'
 if (-not (Test-Path -LiteralPath $shadowVisualScript -PathType Leaf)) {

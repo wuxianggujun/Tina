@@ -2,8 +2,10 @@
 #include <tina/asset/AssetSystem.hpp>
 #include <tina/asset/CatalogPackage.hpp>
 #include <tina/asset/Mesh3DBindingRegistry.hpp>
+#include <tina/asset/ShaderBindingRegistry.hpp>
 #include <tina/asset/Sprite2DBindingRegistry.hpp>
 #include <tina/asset_format/MaterialPayload.hpp>
+#include <tina/asset_format/ShaderPayload.hpp>
 #include <tina/asset_format/SpritePayload.hpp>
 #include <tina/asset_format/StaticMeshPayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
@@ -133,6 +135,30 @@ using TestSupport::writeTextureMaterialPackage;
     };
 }
 
+[[nodiscard]] TestSupport::CookedPackageAsset makeShaderPackageAsset(Core::u8 seed, Core::u8 blobSeed)
+{
+    const std::array bytes{
+        static_cast<std::byte>(blobSeed),
+        static_cast<std::byte>(blobSeed + 1U),
+    };
+    const std::array blobs{
+        AssetFormat::ShaderBlobDesc{
+            .profile = AssetFormat::ShaderBinaryProfile::Glsl120,
+            .bytes = bytes,
+        },
+    };
+    return TestSupport::CookedPackageAsset{
+        .assetId = TestSupport::assetId(seed),
+        .assetKind = AssetFormat::AssetKind::Shader,
+        .cookedBytes = takeBytes(AssetFormat::writeCookedShaderAsset(
+            TestSupport::assetId(seed),
+            AssetFormat::ShaderPayloadDesc{
+                .shaderKind = AssetFormat::ShaderKind::Sprite2D,
+                .blobs = blobs,
+            })),
+    };
+}
+
 class CatalogReloadRenderDevice final : public Render::IRenderDevice {
   public:
     [[nodiscard]] Core::Result<Render::RenderFrameSubmission> submitFrame(
@@ -214,6 +240,79 @@ class CatalogReloadRenderDevice final : public Render::IRenderDevice {
         return Core::success();
     }
 
+    [[nodiscard]] Core::Result<Render::GpuShaderId> createShader(
+        const Render::GpuShaderUploadDesc&) override
+    {
+        ++m_shaderUploadAttempts;
+        if (m_rejectShaderUploadAttempt == m_shaderUploadAttempts)
+        {
+            m_rejectShaderUploadAttempt = 0;
+            return Core::failure(Render::RenderErrorCode::ShaderUploadUnsupported,
+                                 "catalog reload test rejected Shader upload");
+        }
+        return Render::GpuShaderId{m_nextShaderIndex++, 1U};
+    }
+
+    [[nodiscard]] Core::Status validateShader(Render::GpuShaderId shader) const noexcept override
+    {
+        return shader
+                   ? Core::success()
+                   : Core::failure(Render::RenderErrorCode::ShaderNotFound,
+                                   "catalog reload test received an invalid Shader owner");
+    }
+
+    [[nodiscard]] Core::Status setShaderBinding(Core::u32 bindingKey,
+                                                Render::GpuShaderId shader) noexcept override
+    {
+        ++m_shaderBindingAttempts;
+        if (m_rejectShaderBindingAttempt == m_shaderBindingAttempts)
+        {
+            m_rejectShaderBindingAttempt = 0;
+            return Core::failure(Render::RenderErrorCode::ShaderUploadUnsupported,
+                                 "catalog reload test rejected Shader binding");
+        }
+        m_lastShaderBindingKey = bindingKey;
+        m_lastBoundShader = shader;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status setShaderUniformBinding(
+        Core::u32 bindingKey,
+        const Render::GpuShaderUniformBindingDesc& desc) noexcept override
+    {
+        ++m_shaderUniformBindingAttempts;
+        if (m_rejectShaderUniformBindingAttempt == m_shaderUniformBindingAttempts)
+        {
+            m_rejectShaderUniformBindingAttempt = 0;
+            return Core::failure(Render::RenderErrorCode::ShaderUploadUnsupported,
+                                 "catalog reload test rejected Shader uniform binding");
+        }
+        m_lastShaderUniformBindingKey = bindingKey;
+        if (desc.values.empty())
+        {
+            ++m_shaderUniformClearCount;
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status retireShader(
+        Render::GpuShaderId shader, Render::FramePin& completionPin) noexcept override
+    {
+        ++m_shaderRetirementAttempts;
+        if (m_rejectShaderRetirementAttempt == m_shaderRetirementAttempts)
+        {
+            m_rejectShaderRetirementAttempt = 0;
+            return Core::failure(Render::RenderErrorCode::GpuRetirementUnsupported,
+                                 "catalog reload test rejected Shader retirement");
+        }
+        if (m_retiredShaderCount < m_retiredShaders.size())
+        {
+            m_retiredShaders[m_retiredShaderCount++] = shader;
+        }
+        completionPin.release();
+        return Core::success();
+    }
+
     [[nodiscard]] Core::Status retireGpuMesh(
         Render::GpuMeshId mesh, Render::FramePin& completionPin) noexcept override
     {
@@ -272,12 +371,36 @@ class CatalogReloadRenderDevice final : public Render::IRenderDevice {
         m_rejectMaterialBindingAttempt = m_materialBindingAttempts + 1U;
     }
 
+    void rejectNextShaderUpload() noexcept
+    {
+        m_rejectShaderUploadAttempt = m_shaderUploadAttempts + 1U;
+    }
+
+    void rejectNextShaderBinding() noexcept
+    {
+        m_rejectShaderBindingAttempt = m_shaderBindingAttempts + 1U;
+    }
+
+    void rejectNextShaderRetirement() noexcept
+    {
+        m_rejectShaderRetirementAttempt = m_shaderRetirementAttempts + 1U;
+    }
+
+    void rejectNextShaderUniformBinding() noexcept
+    {
+        m_rejectShaderUniformBindingAttempt = m_shaderUniformBindingAttempts + 1U;
+    }
+
     void allowAll() noexcept
     {
         m_rejectTextureUploadAttempt = 0;
         m_rejectTextureBindingAttempt = 0;
         m_rejectTextureRetirementAttempt = 0;
         m_rejectMaterialBindingAttempt = 0;
+        m_rejectShaderUploadAttempt = 0;
+        m_rejectShaderBindingAttempt = 0;
+        m_rejectShaderRetirementAttempt = 0;
+        m_rejectShaderUniformBindingAttempt = 0;
     }
 
     [[nodiscard]] Core::usize textureBindingAttempts() const noexcept
@@ -306,13 +429,36 @@ class CatalogReloadRenderDevice final : public Render::IRenderDevice {
     {
         return m_lastMaterialBinding;
     }
+    [[nodiscard]] Core::usize shaderRetirementAttempts() const noexcept
+    {
+        return m_shaderRetirementAttempts;
+    }
+    [[nodiscard]] Core::usize shaderUniformBindingAttempts() const noexcept
+    {
+        return m_shaderUniformBindingAttempts;
+    }
+    [[nodiscard]] Core::usize shaderUniformClearCount() const noexcept
+    {
+        return m_shaderUniformClearCount;
+    }
+    [[nodiscard]] Core::u32 lastShaderUniformBindingKey() const noexcept
+    {
+        return m_lastShaderUniformBindingKey;
+    }
+    [[nodiscard]] Core::usize retiredShaderCount() const noexcept { return m_retiredShaderCount; }
+    [[nodiscard]] Render::GpuShaderId retiredShader(Core::usize index) const noexcept
+    {
+        return m_retiredShaders[index];
+    }
 
   private:
     std::array<Render::GpuTextureId, 32> m_retiredTextures{};
     std::array<Render::GpuMeshId, 32> m_retiredMeshes{};
+    std::array<Render::GpuShaderId, 32> m_retiredShaders{};
     Render::Mesh3DMaterialBindingDesc m_lastMaterialBinding{};
     Render::GpuTextureId m_lastBoundTexture{};
     Render::GpuMeshId m_lastBoundMesh{};
+    Render::GpuShaderId m_lastBoundShader{};
     Core::usize m_textureUploadAttempts = 0;
     Core::usize m_textureBindingAttempts = 0;
     Core::usize m_textureRetirementAttempts = 0;
@@ -321,21 +467,35 @@ class CatalogReloadRenderDevice final : public Render::IRenderDevice {
     Core::usize m_retiredMeshCount = 0;
     Core::usize m_materialBindingAttempts = 0;
     Core::usize m_materialClearCount = 0;
+    Core::usize m_shaderUploadAttempts = 0;
+    Core::usize m_shaderBindingAttempts = 0;
+    Core::usize m_shaderUniformBindingAttempts = 0;
+    Core::usize m_shaderUniformClearCount = 0;
+    Core::usize m_shaderRetirementAttempts = 0;
+    Core::usize m_retiredShaderCount = 0;
     Core::usize m_rejectTextureUploadAttempt = 0;
     Core::usize m_rejectTextureBindingAttempt = 0;
     Core::usize m_rejectTextureRetirementAttempt = 0;
     Core::usize m_rejectMaterialBindingAttempt = 0;
+    Core::usize m_rejectShaderUploadAttempt = 0;
+    Core::usize m_rejectShaderBindingAttempt = 0;
+    Core::usize m_rejectShaderUniformBindingAttempt = 0;
+    Core::usize m_rejectShaderRetirementAttempt = 0;
     Core::u32 m_nextTextureIndex = 100U;
     Core::u32 m_nextMeshIndex = 100U;
+    Core::u32 m_nextShaderIndex = 100U;
     Core::u32 m_lastTextureBindingKey = 0;
     Core::u32 m_lastMeshBindingKey = 0;
     Core::u32 m_lastMaterialBindingKey = 0;
+    Core::u32 m_lastShaderBindingKey = 0;
+    Core::u32 m_lastShaderUniformBindingKey = 0;
 };
 
 struct RegistryCleanup final {
     CatalogReloadRenderDevice* device = nullptr;
     Sprite2DBindingRegistry* sprite = nullptr;
     Mesh3DBindingRegistry* mesh = nullptr;
+    ShaderBindingRegistry* shader = nullptr;
 
     ~RegistryCleanup() noexcept
     {
@@ -353,6 +513,13 @@ struct RegistryCleanup final {
         if (mesh != nullptr)
         {
             if (!mesh->drainPendingRetirements() || !mesh->retireAllBindings())
+            {
+                std::terminate();
+            }
+        }
+        if (shader != nullptr)
+        {
+            if (!shader->drainPendingRetirements() || !shader->retireAllShaderBindings())
             {
                 std::terminate();
             }
@@ -1005,6 +1172,152 @@ TEST(AssetSystemCatalogReloadTests, MaterialReloadCanAddNewResidentTextureDepend
     ASSERT_TRUE(materialResource.has_value());
     EXPECT_TRUE(static_cast<bool>(*materialResource));
     ASSERT_TRUE(packet.abandon().has_value());
+
+    removePackage(package);
+    removePackage(replacementPackage);
+}
+
+TEST(AssetSystemCatalogReloadTests, ShaderParticipantCommitsReplacementAndRetriesRejectedRetirement)
+{
+    TrackingMemoryResource resource;
+    const auto package = writeCookedPackage(
+        "tina_asset_reload_shader_gpu_owner",
+        {makeShaderPackageAsset(0x71U, 0x10U)});
+    const auto replacementPackage = writeCookedPackage(
+        "tina_asset_reload_shader_gpu_owner_new",
+        {makeShaderPackageAsset(0x71U, 0x70U)});
+    auto system = makeSystem(resource, 8U);
+    ASSERT_TRUE(system.has_value()) << system.error().message;
+    ASSERT_TRUE(system->openAndBindCatalog(toUtf8(package.root)).has_value());
+    const auto oldShader = system->loadOne(TestSupport::assetId(0x71U));
+    ASSERT_TRUE(oldShader.has_value()) << oldShader.error().message;
+
+    CatalogReloadRenderDevice device;
+    auto registry = ShaderBindingRegistry::Create(*system, device);
+    ASSERT_TRUE(registry.has_value()) << registry.error().message;
+    RegistryCleanup cleanup{.device = &device, .shader = &*registry};
+    Render::GpuShaderId initialGpu{1U, 1U};
+    const auto oldBinding = registry->registerShaderBinding(*oldShader, initialGpu);
+    ASSERT_TRUE(oldBinding.has_value()) << oldBinding.error().message;
+    EXPECT_FALSE(initialGpu);
+
+    device.rejectNextShaderRetirement();
+    std::array participants{&*registry};
+    CatalogReloadConfig config{};
+    config.bindings.shader = participants;
+    auto reload = system->reloadCatalog(toUtf8(replacementPackage.root), config);
+    ASSERT_TRUE(reload.has_value()) << reload.error().message;
+    const auto currentShader = system->find(TestSupport::assetId(0x71U));
+    ASSERT_TRUE(currentShader.has_value());
+    EXPECT_NE(*currentShader, *oldShader);
+    const Core::u32 currentBinding = registry->bindingKey(*currentShader);
+    EXPECT_NE(currentBinding, 0U);
+    EXPECT_NE(currentBinding, *oldBinding);
+    EXPECT_EQ(registry->bindingKey(*oldShader), 0U);
+    EXPECT_EQ(registry->bindingCount(), 1U);
+    EXPECT_EQ(registry->pendingRetirementCount(), 1U);
+    EXPECT_EQ(device.retiredShaderCount(), 0U);
+
+    ASSERT_TRUE(registry->drainPendingRetirements().has_value());
+    EXPECT_EQ(registry->pendingRetirementCount(), 0U);
+    ASSERT_EQ(device.retiredShaderCount(), 1U);
+    EXPECT_EQ(device.retiredShader(0U), Render::GpuShaderId(1U, 1U));
+
+    removePackage(package);
+    removePackage(replacementPackage);
+}
+
+TEST(AssetSystemCatalogReloadTests, ShaderPrepareFailuresPreserveCatalogAndActiveOwner)
+{
+    TrackingMemoryResource resource;
+    const auto package = writeCookedPackage(
+        "tina_asset_reload_shader_prepare_failure",
+        {makeShaderPackageAsset(0x72U, 0x10U)});
+    const auto replacementPackage = writeCookedPackage(
+        "tina_asset_reload_shader_prepare_failure_new",
+        {makeShaderPackageAsset(0x72U, 0x60U)});
+    auto system = makeSystem(resource, 8U);
+    ASSERT_TRUE(system.has_value()) << system.error().message;
+    ASSERT_TRUE(system->openAndBindCatalog(toUtf8(package.root)).has_value());
+    const auto oldShader = system->loadOne(TestSupport::assetId(0x72U));
+    ASSERT_TRUE(oldShader.has_value());
+
+    CatalogReloadRenderDevice device;
+    auto registry = ShaderBindingRegistry::Create(*system, device);
+    ASSERT_TRUE(registry.has_value());
+    RegistryCleanup cleanup{.device = &device, .shader = &*registry};
+    Render::GpuShaderId initialGpu{2U, 1U};
+    const auto oldBinding = registry->registerShaderBinding(*oldShader, initialGpu);
+    ASSERT_TRUE(oldBinding.has_value());
+    std::array participants{&*registry};
+    CatalogReloadConfig config{};
+    config.bindings.shader = participants;
+
+    device.rejectNextShaderUpload();
+    auto uploadFailure = system->reloadCatalog(toUtf8(replacementPackage.root), config);
+    ASSERT_FALSE(uploadFailure.has_value());
+    EXPECT_EQ(system->catalogRoot(), toUtf8(package.root));
+    EXPECT_EQ(system->find(TestSupport::assetId(0x72U)), *oldShader);
+    EXPECT_EQ(registry->bindingKey(*oldShader), *oldBinding);
+    EXPECT_EQ(registry->pendingRetirementCount(), 0U);
+    EXPECT_EQ(device.retiredShaderCount(), 0U);
+
+    device.rejectNextShaderBinding();
+    auto bindingFailure = system->reloadCatalog(toUtf8(replacementPackage.root), config);
+    ASSERT_FALSE(bindingFailure.has_value());
+    EXPECT_EQ(system->catalogRoot(), toUtf8(package.root));
+    EXPECT_EQ(system->find(TestSupport::assetId(0x72U)), *oldShader);
+    EXPECT_EQ(registry->bindingKey(*oldShader), *oldBinding);
+    EXPECT_EQ(registry->pendingRetirementCount(), 0U);
+    EXPECT_EQ(device.retiredShaderCount(), 1U);
+
+    removePackage(package);
+    removePackage(replacementPackage);
+}
+
+TEST(AssetSystemCatalogReloadTests, ActiveShaderFrameBorrowRejectsGpuOwnerTransactionBeforePublish)
+{
+    TrackingMemoryResource resource;
+    const Core::AssetId shaderId = TestSupport::assetId(0x73U);
+    const auto package = writeCookedPackage(
+        "tina_asset_reload_shader_active_frame",
+        {makeShaderPackageAsset(0x73U, 0x10U)});
+    const auto replacementPackage = writeCookedPackage(
+        "tina_asset_reload_shader_active_frame_new",
+        {makeShaderPackageAsset(0x73U, 0x50U)});
+    auto system = makeSystem(resource, 8U);
+    ASSERT_TRUE(system.has_value());
+    ASSERT_TRUE(system->openAndBindCatalog(toUtf8(package.root)).has_value());
+    const auto oldShader = system->loadOne(shaderId);
+    ASSERT_TRUE(oldShader.has_value());
+
+    CatalogReloadRenderDevice device;
+    auto registry = ShaderBindingRegistry::Create(*system, device);
+    ASSERT_TRUE(registry.has_value());
+    RegistryCleanup cleanup{.device = &device, .shader = &*registry};
+    Render::GpuShaderId initialGpu{3U, 1U};
+    ASSERT_TRUE(registry->registerShaderBinding(*oldShader, initialGpu).has_value());
+
+    Render::RenderFramePacket packet;
+    ASSERT_TRUE(packet.beginFrame(1U).has_value());
+    const auto frameShader = registry->internShaderFrameResource(*oldShader, packet.resourceSink());
+    ASSERT_TRUE(frameShader.has_value());
+    ASSERT_TRUE(static_cast<bool>(*frameShader));
+    std::array participants{&*registry};
+    CatalogReloadConfig config{};
+    config.bindings.shader = participants;
+
+    auto blocked = system->reloadCatalog(toUtf8(replacementPackage.root), config);
+    ASSERT_FALSE(blocked.has_value());
+    EXPECT_EQ(blocked.error().code, AssetErrorCode::AssetNotReady);
+    EXPECT_EQ(system->catalogRoot(), toUtf8(package.root));
+    EXPECT_EQ(system->find(shaderId), *oldShader);
+    EXPECT_EQ(device.retiredShaderCount(), 0U);
+
+    ASSERT_TRUE(packet.abandon().has_value());
+    auto committed = system->reloadCatalog(toUtf8(replacementPackage.root), config);
+    ASSERT_TRUE(committed.has_value()) << committed.error().message;
+    EXPECT_EQ(system->catalogRoot(), toUtf8(replacementPackage.root));
 
     removePackage(package);
     removePackage(replacementPackage);

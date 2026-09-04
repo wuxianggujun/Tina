@@ -1,0 +1,16 @@
+tina_add_sample_core(tina_sample_2d_authored_scene_core
+    SOURCES
+        main.cpp
+        Sample.hpp
+    LINK
+        Tina::Runtime
+        Tina::Gameplay2D
+        Tina::Asset
+        Tina::Audio
+        Tina::Scene
+        Tina::Platform
+        Tina::Task
+        Tina::Render
+    INCLUDE
+        ${PROJECT_SOURCE_DIR}/samples/common
+)

@@ -79,7 +79,14 @@ fabric.properties
 
 .vs/
 /.idea
-*.bin
+# Binary cooked assets in samples/*/assets/*.bin should remain tracked
+*.exe
+*.dll
+*.pdb
+*.ilk
+*.obj
+*.lib
+*.exp
 /build
 /vcpkg_installed/
 /.cache/

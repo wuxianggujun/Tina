@@ -1,0 +1,410 @@
+#include <tina/asset/AssetSpriteRender.hpp>
+#include <tina/asset/AssetSystem.hpp>
+#include <tina/asset/AssetTypedViews.hpp>
+#include <tina/asset/CatalogCook.hpp>
+#include <tina/asset_format/AssetFormat.hpp>
+#include <tina/asset_format/SpritePayload.hpp>
+#include <tina/asset_format/Texture2DPayload.hpp>
+#include <tina/core/id/AssetId.hpp>
+#include <tina/core/text/JsonWriter.hpp>
+#include <tina/render/RenderFramePacket.hpp>
+#include <tina/render/RenderScene.hpp>
+#include <tina/render/UploadTicket.hpp>
+#include <tina/task/bounded/BoundedTaskSystemFactory.hpp>
+
+#include "SampleContentDirectory.hpp"
+
+#include <array>
+#include <charconv>
+#include <chrono>
+#include <cstdint>
+#include <filesystem>
+#include <iostream>
+#include <memory_resource>
+#include <string>
+#include <string_view>
+#include <system_error>
+#include <thread>
+#include <utility>
+#include <vector>
+
+namespace {
+
+using Tina::Core::u32;
+using Tina::Core::u8;
+
+struct Options final {
+    u32 maxFrames = 60;
+    std::string catalogRoot;
+};
+
+[[nodiscard]] Tina::Core::AssetId::Bytes idBytes(u8 seed)
+{
+    Tina::Core::AssetId::Bytes bytes{};
+    bytes[0] = static_cast<std::byte>(seed);
+    bytes[15] = static_cast<std::byte>(seed ^ 0x5AU);
+    return bytes;
+}
+
+[[nodiscard]] std::string toUtf8(const std::filesystem::path& path)
+{
+    const auto u8 = path.u8string();
+    return std::string(u8.begin(), u8.end());
+}
+
+void writeError(const Tina::Core::Error& error)
+{
+    Tina::Core::JsonWriter writer(std::cerr);
+    writer.beginObject();
+    writer.member("status", "error");
+    writer.member("domain", static_cast<unsigned>(error.code.domain));
+    writer.member("code", error.code.value);
+    writer.member("message", error.message);
+    writer.endObject();
+    std::cerr << '\n';
+}
+
+[[nodiscard]] Tina::Core::Result<Options> parseOptions(int argc, char** argv)
+{
+    Options options{};
+    for (int index = 1; index < argc; ++index)
+    {
+        const std::string_view argument{argv[index]};
+        if (argument.starts_with("--frames="))
+        {
+            const auto valueText = argument.substr(std::string_view{"--frames="}.size());
+            u32 value = 0;
+            const auto [end, err] = std::from_chars(valueText.data(), valueText.data() + valueText.size(), value);
+            if (err != std::errc{} || end != valueText.data() + valueText.size() || value == 0)
+            {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument, "--frames must be > 0");
+            }
+            options.maxFrames = value;
+            continue;
+        }
+        if (argument.starts_with("--catalog="))
+        {
+            options.catalogRoot.assign(argument.substr(std::string_view{"--catalog="}.size()));
+            continue;
+        }
+        return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
+                                   "usage: tina_sample_asset [--frames=N] [--catalog=path]");
+    }
+    return options;
+}
+
+[[nodiscard]] Tina::Core::Status synthesizeCatalog(const std::filesystem::path& root, Tina::Core::AssetId textureId,
+                                                   Tina::Core::AssetId spriteId)
+{
+    std::vector<std::byte> pixels{
+        std::byte{255}, std::byte{0},   std::byte{0},   std::byte{255},
+        std::byte{0},   std::byte{255}, std::byte{0},   std::byte{255},
+        std::byte{0},   std::byte{0},   std::byte{255}, std::byte{255},
+        std::byte{255}, std::byte{255}, std::byte{0},   std::byte{255},
+    };
+    auto texPayload = Tina::AssetFormat::writeTexture2DPayloadBytesRgba8(2, 2, pixels);
+    auto spritePayload = Tina::AssetFormat::writeSpritePayloadBytes(Tina::AssetFormat::SpritePayloadDesc{
+        .u0 = 0.0f,
+        .v0 = 0.0f,
+        .u1 = 1.0f,
+        .v1 = 1.0f,
+        .pivotX = 0.5f,
+        .pivotY = 0.5f,
+        .pixelsPerUnit = 32.0f,
+        .textureId = textureId,
+    });
+    if (!texPayload || !spritePayload)
+    {
+        return Tina::Core::failure(texPayload ? spritePayload.error() : texPayload.error());
+    }
+
+    Tina::Asset::CatalogCookRequest request{.targetPlatform = Tina::AssetFormat::TargetPlatform::WindowsX64};
+    request.assets.push_back(Tina::Asset::CatalogCookAssetSpec{
+        .assetKind = Tina::AssetFormat::AssetKind::Texture2D,
+        .assetId = textureId,
+        .assetTypeVersion = Tina::AssetFormat::Texture2DWire::SchemaVersion,
+        .payload = std::move(*texPayload),
+    });
+    request.assets.push_back(Tina::Asset::CatalogCookAssetSpec{
+        .assetKind = Tina::AssetFormat::AssetKind::Sprite,
+        .assetId = spriteId,
+        .assetTypeVersion = Tina::AssetFormat::SpriteWire::SchemaVersion,
+        .payload = std::move(*spritePayload),
+        .dependencies =
+            {
+                Tina::AssetFormat::CookedAssetWriteDependency{
+                    .assetId = textureId,
+                    .expectedKind = Tina::AssetFormat::AssetKind::Texture2D,
+                    .flags = Tina::AssetFormat::DependencyFlags::Required,
+                },
+            },
+    });
+    return Tina::Asset::cookAndPublishCatalogPackage(toUtf8(root), request);
+}
+
+} // namespace
+
+int runAssetSample(int argc, char** argv)
+{
+    auto optionsResult = parseOptions(argc, argv);
+    if (!optionsResult)
+    {
+        writeError(optionsResult.error());
+        return 2;
+    }
+    const Options options = *optionsResult;
+
+    std::pmr::unsynchronized_pool_resource memory;
+    const auto textureId = *Tina::Core::AssetId::fromBytes(idBytes(1U));
+    const auto spriteId = *Tina::Core::AssetId::fromBytes(idBytes(3U));
+
+    std::filesystem::path root;
+    std::string catalogRootUtf8;
+    if (options.catalogRoot.empty())
+    {
+        auto prepared = Tina::Sample::prepareApplicationContentDirectory("content");
+        if (!prepared)
+        {
+            writeError(prepared.error());
+            return 1;
+        }
+        root = std::move(*prepared);
+        catalogRootUtf8 = toUtf8(root);
+        if (const auto status = synthesizeCatalog(root, textureId, spriteId); !status)
+        {
+            writeError(status.error());
+            return 1;
+        }
+    } else
+    {
+        catalogRootUtf8 = options.catalogRoot;
+    }
+
+    auto taskSystem = Tina::Task::createBoundedTaskSystem(Tina::Task::TaskSystemCreateParams{
+        .ioWorkerCount = 1,
+        .ioQueueCapacity = 32,
+        .mainQueueCapacity = 32,
+    });
+    if (!taskSystem)
+    {
+        writeError(taskSystem.error());
+        return 1;
+    }
+
+    auto ledger =
+        Tina::Render::NullUploadLedger::Create(Tina::Render::UploadLedgerConfig{.capacity = 8, .memoryResource = &memory});
+    if (!ledger)
+    {
+        writeError(ledger.error());
+        return 1;
+    }
+
+    auto system = Tina::Asset::AssetSystem::Create(Tina::Asset::AssetSystemConfig{
+        .storeCapacity = 16,
+        .memoryResource = &memory,
+        .batch =
+            Tina::Asset::CookedAssetBatchLoadConfig{
+                .file = Tina::Asset::CookedAssetFileLoadConfig{.memoryResource = &memory},
+                .memoryResource = &memory,
+            },
+        .queueCapacity = 16,
+        .defaultPumpBudget = 4,
+        .taskSystem = taskSystem->get(),
+        .uploadLedger = &(*ledger),
+        .autoGpuUpload = true,
+        .requireTyped2dPayloads = true,
+    });
+    if (!system)
+    {
+        writeError(system.error());
+        return 1;
+    }
+
+    if (const auto status = system->openAndBindCatalog(catalogRootUtf8); !status)
+    {
+        writeError(status.error());
+        return 1;
+    }
+
+    // Prefer Sprite seed 3; else first Sprite; else first Texture2D; else first catalog entry id.
+    Tina::Core::AssetId requestId = spriteId;
+    if (!system->catalog() || !system->catalog()->find(requestId))
+    {
+        if (auto sprite = system->catalogFirstIdOfKind(Tina::AssetFormat::AssetKind::Sprite))
+        {
+            requestId = *sprite;
+        } else if (auto tex = system->catalogFirstIdOfKind(Tina::AssetFormat::AssetKind::Texture2D))
+        {
+            requestId = *tex;
+        } else if (system->catalog() && system->catalog()->entryCount() > 0)
+        {
+            requestId = system->catalog()->entry(0)->assetId;
+        } else
+        {
+            requestId = {};
+        }
+    }
+    if (!requestId)
+    {
+        Tina::Core::JsonWriter writer(std::cerr);
+        writer.beginObject();
+        writer.member("status", "error");
+        writer.member("message", "catalog has no entries");
+        writer.endObject();
+        std::cerr << '\n';
+        return 1;
+    }
+
+    auto requested = system->request(std::array{requestId});
+    if (!requested)
+    {
+        writeError(requested.error());
+        return 1;
+    }
+
+    u32 frames = 0;
+    u32 pumps = 0;
+    bool gpuReady = false;
+    for (; frames < options.maxFrames; ++frames)
+    {
+        auto stats = system->pump(4);
+        if (!stats)
+        {
+            writeError(stats.error());
+            return 1;
+        }
+        ++pumps;
+        if (system->isGpuReady((*requested)[0]))
+        {
+            gpuReady = true;
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+
+    if (!gpuReady)
+    {
+        Tina::Core::JsonWriter writer(std::cerr);
+        writer.beginObject();
+        writer.member("status", "error");
+        writer.member("message", "asset did not reach ReadyGpu within frame budget");
+        writer.member("frames", frames);
+        writer.endObject();
+        std::cerr << '\n';
+        (*taskSystem)->shutdownAndJoin();
+        return 1;
+    }
+
+    auto lease = system->acquire((*requested)[0]);
+    if (!lease)
+    {
+        writeError(lease.error());
+        (*taskSystem)->shutdownAndJoin();
+        return 1;
+    }
+
+    Tina::Core::u16 texW = 0;
+    Tina::Core::u16 texH = 0;
+    float ppu = 0.0f;
+    float renderW = 0.0f;
+    float renderH = 0.0f;
+    float renderU0 = 0.0f;
+    float renderU1 = 0.0f;
+    bool parsedTyped = false;
+    bool renderInputOk = false;
+    if (const auto* file = lease->get())
+    {
+        if (file->header().assetKind == Tina::AssetFormat::AssetKind::Sprite)
+        {
+            if (auto sprite = Tina::Asset::parseSpriteFromCooked(*file))
+            {
+                ppu = sprite->pixelsPerUnit;
+                parsedTyped = true;
+            }
+            const Tina::Asset::CookedAssetFile* texFile = nullptr;
+            if (auto texHandle = system->findFirstLoadedOfKind(Tina::AssetFormat::AssetKind::Texture2D))
+            {
+                texFile = system->tryGet(*texHandle);
+                if (texFile != nullptr)
+                {
+                    if (auto tex = Tina::Asset::parseTexture2DFromCooked(*texFile))
+                    {
+                        texW = tex->width;
+                        texH = tex->height;
+                        parsedTyped = true;
+                    }
+                }
+            }
+            Tina::Render::RenderFramePacket renderPacket;
+            if (const auto status = renderPacket.beginFrame(frames); status)
+            {
+                auto textureResource = renderPacket.intern(
+                    Tina::Render::FrameResourceDescriptor{
+                        .kind = Tina::Render::FrameResourceKind::Texture2D,
+                        .deviceBindingKey = 1,
+                    },
+                    Tina::Render::FramePin{Tina::Render::FramePinKind::Custom, 1, nullptr, nullptr});
+                if (textureResource)
+                {
+                    if (auto render = Tina::Asset::makeSpriteRenderInput(*file, texFile, *textureResource,
+                                                                         Tina::Asset::SpriteRenderParams{
+                                                                             .stableEntityKey = 1,
+                                                                             .centerX = 0.0f,
+                                                                             .centerY = 0.0f,
+                                                                         }))
+                    {
+                        renderInputOk = true;
+                        renderW = render->widthMeters;
+                        renderH = render->heightMeters;
+                        renderU0 = render->u0;
+                        renderU1 = render->u1;
+                    }
+                }
+                (void)renderPacket.completeSkipped();
+            }
+        } else if (file->header().assetKind == Tina::AssetFormat::AssetKind::Texture2D)
+        {
+            if (auto tex = Tina::Asset::parseTexture2DFromCooked(*file))
+            {
+                texW = tex->width;
+                texH = tex->height;
+                parsedTyped = true;
+            }
+        }
+    }
+
+    lease = Tina::Asset::AssetLease{};
+    const auto unloaded = system->unload((*requested)[0]);
+    const auto retirement = system->retirementStats();
+
+    (*taskSystem)->shutdownAndJoin();
+
+    {
+        Tina::Core::JsonWriter writer(std::cout);
+        writer.beginObject();
+        writer.member("status", "ok");
+        writer.member("sample", "tina_sample_asset");
+        writer.member("frames", frames);
+        writer.member("pumps", pumps);
+        writer.member("requestGpuReady", true);
+        writer.member("storeActive", system->store().activeCount());
+        writer.member("unloadOk", unloaded.has_value());
+        writer.member("retirementReleased", retirement.released);
+        writer.member("retirementLive", retirement.live);
+        writer.member("typedPayload", parsedTyped);
+        writer.member("textureWidth", texW);
+        writer.member("textureHeight", texH);
+        writer.member("spritePpu", ppu);
+        writer.member("renderInputOk", renderInputOk);
+        writer.member("renderWidth", renderW);
+        writer.member("renderHeight", renderH);
+        writer.member("renderU0", renderU0);
+        writer.member("renderU1", renderU1);
+        writer.member("task", "bounded_io");
+        writer.member("upload", "null_ledger");
+        writer.member("catalog", options.catalogRoot.empty() ? "synthetic" : "external");
+        writer.endObject();
+    }
+    std::cout << '\n';
+    return 0;
+}

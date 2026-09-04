@@ -588,6 +588,138 @@ class NullRenderDevice final : public IRenderDevice {
         return Core::success();
     }
 
+    [[nodiscard]] Core::Result<GpuShaderId> createShader(const GpuShaderUploadDesc& desc) override
+    {
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The null render device is stopped");
+        }
+        // Shared with bgfx so the two backends cannot drift on what they accept.
+        if (auto status = validateShaderUploadDesc(desc); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        if (shaders_.size() >= (std::numeric_limits<u32>::max)())
+        {
+            return Core::failure(Core::CoreErrorCode::CapacityExceeded,
+                                 "Shader logical slot index space is exhausted");
+        }
+        const u32 index = static_cast<u32>(shaders_.size());
+        try
+        {
+            shaders_.push_back(ShaderSlot{
+                .generation = 1,
+                .shaderKind = desc.shaderKind,
+                .binaryCount = static_cast<u8>(desc.binaries.size()),
+                .live = true,
+            });
+        }
+        catch (const std::bad_alloc&)
+        {
+            return Core::failure(Core::CoreErrorCode::OutOfMemory);
+        }
+        catch (const std::length_error&)
+        {
+            return Core::failure(Core::CoreErrorCode::CapacityExceeded);
+        }
+        ++statistics_.liveResources;
+        return GpuShaderId{resourceOwnerId(), index, 1};
+    }
+
+    [[nodiscard]] Core::Status validateShader(GpuShaderId shader) const noexcept override
+    {
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The null render device is stopped");
+        }
+        if (!isLiveShader(shader))
+        {
+            return Core::failure(RenderErrorCode::ShaderNotFound,
+                                 "Shader handle is invalid, stale, or belongs to another device");
+        }
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status destroyShader(GpuShaderId shader) noexcept override
+    {
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The null render device is stopped");
+        }
+        if (!isLiveShader(shader))
+        {
+            return Core::failure(RenderErrorCode::ShaderNotFound,
+                                 "Shader handle is invalid or already destroyed");
+        }
+        // Bindings drop before the slot retires so a stale key cannot resolve in a later frame.
+        for (auto binding = shaderBindings_.begin(); binding != shaderBindings_.end();)
+        {
+            binding = binding->second == shader ? shaderBindings_.erase(binding)
+                                                : std::next(binding);
+        }
+        ShaderSlot& slot = shaders_[shader.index];
+        slot.live = false;
+        slot.shaderKind = GpuShaderKind::Invalid;
+        slot.binaryCount = 0;
+        ++slot.generation;
+        if (statistics_.liveResources > 0)
+        {
+            --statistics_.liveResources;
+        }
+        ++statistics_.completedGpuRetirements;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status setShaderBinding(u32 deviceBindingKey,
+                                                GpuShaderId shader) noexcept override
+    {
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The null render device is stopped");
+        }
+        if (deviceBindingKey == 0)
+        {
+            return Core::failure(RenderErrorCode::InvalidShaderUpload,
+                                 "Shader device binding key must be non-zero");
+        }
+        if (!shader)
+        {
+            shaderBindings_.erase(deviceBindingKey);
+            return Core::success();
+        }
+        if (!isLiveShader(shader))
+        {
+            return Core::failure(RenderErrorCode::ShaderNotFound, "Shader handle is invalid");
+        }
+        shaderBindings_[deviceBindingKey] = shader;
+        return Core::success();
+    }
+
+    [[nodiscard]] Core::Status
+    setShaderUniformBinding(u32 deviceBindingKey, const GpuShaderUniformBindingDesc& desc) noexcept override
+    {
+        if (stopped_)
+        {
+            return Core::failure(RenderErrorCode::DeviceStopped, "The null render device is stopped");
+        }
+        if (deviceBindingKey == 0)
+        {
+            return Core::failure(RenderErrorCode::InvalidShaderUpload,
+                                 "Shader uniform device binding key must be non-zero");
+        }
+        if (desc.values.empty())
+        {
+            shaderUniformBindings_.erase(deviceBindingKey);
+            return Core::success();
+        }
+        if (auto status = validateShaderUniformBindingDesc(desc); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        shaderUniformBindings_[deviceBindingKey].assign(desc.values.begin(), desc.values.end());
+        return Core::success();
+    }
+
     [[nodiscard]] Core::Result<GpuRenderTextureId> createRenderTexture(
         const RenderTextureDesc& desc) override
     {
@@ -1098,6 +1230,9 @@ class NullRenderDevice final : public IRenderDevice {
         textures_.clear();
         renderTextureBindings_.clear();
         renderTextures_.clear();
+        shaderBindings_.clear();
+        shaderUniformBindings_.clear();
+        shaders_.clear();
         mesh3DImageBasedLighting_.reset();
         environmentMaps_.clear();
         meshBindings_.clear();
@@ -1129,6 +1264,15 @@ class NullRenderDevice final : public IRenderDevice {
     struct RenderTextureSlot final {
         u32 generation = 1;
         RenderTextureDesc desc{};
+        bool live = false;
+    };
+    // The binaries themselves are not retained: Null has no renderer type, so it cannot pick one,
+    // and copying them would only prove that a std::vector works. What a headless test can check is
+    // the identity, the kind, and how many profiles the cook actually delivered.
+    struct ShaderSlot final {
+        u32 generation = 1;
+        GpuShaderKind shaderKind = GpuShaderKind::Invalid;
+        u8 binaryCount = 0;
         bool live = false;
     };
 
@@ -1357,6 +1501,16 @@ class NullRenderDevice final : public IRenderDevice {
         return target && target.owner == resourceOwnerId() &&
                target.index < renderTextures_.size() && renderTextures_[target.index].live &&
                renderTextures_[target.index].generation == target.generation;
+    }
+
+    // Like isLiveRenderTexture and unlike isLiveTexture, an empty handle is NOT live: every shader
+    // binding key must name a real program, and accepting a default-constructed id would let an
+    // unbound key resolve and draw with whatever the previous batch left set.
+    [[nodiscard]] bool isLiveShader(GpuShaderId shader) const noexcept
+    {
+        return shader && shader.owner == resourceOwnerId() && shader.index < shaders_.size() &&
+               shaders_[shader.index].live &&
+               shaders_[shader.index].generation == shader.generation;
     }
 
     enum class RenderTextureBindingRole : u8 {
@@ -1702,6 +1856,9 @@ class NullRenderDevice final : public IRenderDevice {
     std::vector<EnvironmentMapSlot> environmentMaps_{};
     std::vector<RenderTextureSlot> renderTextures_{};
     std::unordered_map<u32, GpuRenderTextureId> renderTextureBindings_{};
+    std::vector<ShaderSlot> shaders_{};
+    std::unordered_map<u32, GpuShaderId> shaderBindings_{};
+    std::unordered_map<u32, std::vector<GpuShaderUniformValue>> shaderUniformBindings_{};
     // Result of the last executed chain's probe pixel. Kept so a headless test can
     // assert the operators actually changed the color.
     LinearRgba lastPostProcessProbe_{};

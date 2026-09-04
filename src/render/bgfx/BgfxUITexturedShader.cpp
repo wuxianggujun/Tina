@@ -16,7 +16,9 @@
 
 #if defined(TINA_RENDER_BGFX_MOBILE_SHADERS)
 #include "fs_tina_ui_textured_quad_essl.bin.h"
+#include "fs_tina_ui_textured_quad_mtl.bin.h"
 #include "vs_tina_ui_textured_quad_essl.bin.h"
+#include "vs_tina_ui_textured_quad_mtl.bin.h"
 #endif
 
 namespace Tina::Render::Bgfx::ShaderDetail {
@@ -37,6 +39,11 @@ constexpr bgfx::EmbeddedShader EmbeddedShaders[] = {
             // createEmbeddedShader misses and program creation fails at startup.
             {bgfx::RendererType::OpenGLES, vs_tina_ui_textured_quad_essl,
              sizeof(vs_tina_ui_textured_quad_essl)},
+            // Metal is what bgfx actually selects on modern iOS -- Apple deprecated OpenGL ES,
+            // so the entry above never matches there and only this one keeps the program
+            // creatable.
+            {bgfx::RendererType::Metal, vs_tina_ui_textured_quad_mtl,
+             sizeof(vs_tina_ui_textured_quad_mtl)},
 #endif
             {bgfx::RendererType::Vulkan, vs_tina_ui_textured_quad_spv,
              sizeof(vs_tina_ui_textured_quad_spv)},
@@ -55,6 +62,8 @@ constexpr bgfx::EmbeddedShader EmbeddedShaders[] = {
 #if defined(TINA_RENDER_BGFX_MOBILE_SHADERS)
             {bgfx::RendererType::OpenGLES, fs_tina_ui_textured_quad_essl,
              sizeof(fs_tina_ui_textured_quad_essl)},
+            {bgfx::RendererType::Metal, fs_tina_ui_textured_quad_mtl,
+             sizeof(fs_tina_ui_textured_quad_mtl)},
 #endif
             {bgfx::RendererType::Vulkan, fs_tina_ui_textured_quad_spv,
              sizeof(fs_tina_ui_textured_quad_spv)},

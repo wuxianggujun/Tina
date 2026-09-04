@@ -14,15 +14,15 @@
 
 namespace Tina::AssetFormat {
 
-// SkinnedMesh cooked payload schema v2 (little-endian, after CookedAsset header/deps).
-// Bytes 0..31 of the header are byte-identical in layout and meaning to the whole
-// StaticMesh v1 header, and the vertex/submesh/index blocks reuse the StaticMesh
+// SkinnedMesh cooked payload schema v3 (little-endian, after CookedAsset header/deps).
+// Bytes 0..35 of the header are byte-identical in layout and meaning to the whole
+// StaticMesh v2 header, and the vertex/submesh/index blocks reuse the StaticMesh
 // P3N3T4UV2 record, the 16-byte submesh record and the u16 index array unchanged.
 // Skin data lives in separate parallel arrays so the single product vertex layout
 // (StaticMeshWire::VertexLayout) keeps exactly 12 floats per vertex.
 //
 // Layout:
-//   u16 schemaVersion       (=2)
+//   u16 schemaVersion       (=3)
 //   u16 vertexLayout        (=2, P3N3T4UV2)
 //   u16 indexType           (1 = U16)
 //   u16 submeshCount        (1..MaxSubmeshes)
@@ -30,17 +30,21 @@ namespace Tina::AssetFormat {
 //   u32 indexCount          (positive multiple of 3, <= MaxIndexCount)
 //   f32 boundsCenterX/Y/Z
 //   f32 boundsRadius
+//   u16 flags
+//     bit0 = hasShaderOverride dependency (optional Shader AssetId)
+//   u16 reserved0
 //   u16 jointCount          (1..MaxJointCount)
 //   u16 influencesPerVertex (=4)
-//   u32 reserved0/1/2       (=0)
+//   u32 reserved1/2         (=0)
 //   f32 inverseBindMatrices[jointCount * 16]  // column-major, 64B per joint
 //   SkinnedMeshJointWire[jointCount]          (44B each)
-//   u8  jointNames[jointCount * 64]           // v2; UTF-8, NUL-terminated, zero padded
+//   u8  jointNames[jointCount * 64]           // UTF-8, NUL-terminated, zero padded
 //   StaticMeshSubmeshWire[submeshCount]       (16B each)
 //   f32 vertices[vertexCount * 12]            // interleaved P3N3T4UV2
 //   u16 jointIndices[vertexCount * 4]
 //   u16 jointWeights[vertexCount * 4]         // fixed-point, sums to WeightScale
 //   u16 indices[indexCount]
+// Shader dependency comes AFTER texture deps (if any) in CookedAsset dependency list.
 //
 // The inverse bind block is placed first so it starts at HeaderBytes (48), which is a
 // multiple of 16 and pairs with the cooked payloadAlignment of 16 for SIMD loads.
@@ -61,10 +65,13 @@ namespace Tina::AssetFormat {
 // invent an identity that the source does not have. Duplicate non-empty names are rejected
 // at encode -- a lookup that could return either of two joints is not a lookup.
 //
+// v3 aligns the header's first 36 bytes with StaticMesh v2, adding flags/reserved0 and
+// shifting jointCount by 4 bytes. shader override support mirrors StaticMesh.
+//
 // Scene Animator3D pose evaluation and Render GPU palette upload consume this
 // immutable cooked payload without changing its wire contract.
 namespace SkinnedMeshWire {
-inline constexpr Core::u16 SchemaVersion = 2;
+inline constexpr Core::u16 SchemaVersion = 3;
 inline constexpr Core::u32 HeaderBytes = 48;
 inline constexpr Core::u32 JointBytes = 44;
 // Matches PrefabWire::NameBytes so a joint name and a prefab node name have the same
@@ -86,9 +93,11 @@ inline constexpr Core::u16 MaxJointCount = 256;
 inline constexpr Core::u16 JointIndexNone = 0xFFFF;
 inline constexpr Core::u16 WeightScale = 0xFFFF;
 inline constexpr Core::u32 FloatsPerInverseBindMatrix = 16;
+inline constexpr Core::u16 FlagHasShaderOverride = 1U << 0U;
+inline constexpr Core::u16 KnownFlags = FlagHasShaderOverride;
 
-// Bytes 0..31 mirror the StaticMesh v1 header exactly; skin fields are appended.
-static_assert(HeaderBytes == StaticMeshWire::HeaderBytes + 16U);
+// Bytes 0..35 mirror the StaticMesh v2 header exactly; skin fields are appended.
+static_assert(HeaderBytes == StaticMeshWire::HeaderBytes + 12U);
 // Every block starts on a 4-byte boundary, so no padding is encoded between them.
 static_assert(HeaderBytes % 4 == 0);
 static_assert(JointBytes % 4 == 0);
@@ -147,6 +156,7 @@ struct SkinnedMeshPayloadDesc final {
     std::span<const Core::u16> jointIndices{};
     std::span<const Core::u16> jointWeights{};
     std::span<const Core::u16> indices{};
+    Core::AssetId shaderOverrideId{};  // optional Shader dependency
 };
 
 struct SkinnedMeshPayloadView final {
@@ -159,6 +169,7 @@ struct SkinnedMeshPayloadView final {
     float boundsCenterY = 0.0F;
     float boundsCenterZ = 0.0F;
     float boundsRadius = 0.0F;
+    bool hasShaderOverride = false;  // resolve via CookedAsset deps
     Core::u16 jointCount = 0;
     Core::u16 influencesPerVertex = 0;
     std::span<const float> inverseBindMatrices{};

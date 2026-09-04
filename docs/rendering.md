@@ -343,7 +343,105 @@ shader mode/program，并在采样后 premultiply。DisplayList/frame resource �
 | `setMesh3DMaterialMetallicRoughnessTextureBinding` | 校验/记录 binding | material key → optional MR texture；未 bind 用默认 metallic=0/roughness=1 |
 | `setMesh3DLighting` | 同步校验/复制低层 fallback | 未提供 frame-scoped Scene lighting 时使用；0..4 directional + 0..8 point + 0..8 spot lights + ambient |
 | `set/createMesh3DMaterialBinding` 的 `emissiveFactorR/G/B` | 校验 finite 且非负，无上限 | 逐材质自发光 radiance，`u_emissiveFactor`；在 direct + ambient/IBL **之后相加**，不乘 `NdotL`、衰减、阴影或 ambient |
+| `create/destroyShader` | 校验 kind/profile 表；逻辑 generation storage；同步 retire。Sprite2D 与 Mesh3D 均接受 | 一份 Mesh3D fragment binary 同时链接刚性与蒙皮 vertex stage；作者 uniform 上限 16；反射表 64 |
+| `validateShader` | 非消费式 owner/live/generation 校验 | owner-thread 非消费式 owner/live/generation 校验 |
+| `retireShader(shader, pin)` | 成功同步释放 pin，并清掉引用该 program 的 shader binding | 成功消费 pin；清掉引用该 program 的 shader binding，不碰独立的 uniform binding namespace |
+| `createShaderBinding` / `setShaderBinding` | device-instance allocator；bind 成功才消费非0 key | device binding key → program；key 0 拒绝 |
+| `setShaderUniformBinding` | 按名校验 finite vec4、去重、上限 16 | 独立 namespace；draw-local，每 batch 重发；未声明的名字 fail closed |
 | `capturePrimaryFrameRgba8` | Unsupported | present 后异步截图路径；owner thread 有界推进最多120个 bgfx frame，并在轮询间给 render callback 1ms 调度窗口，超限返回 `FrameCaptureFailed` |
+
+## Sprite2D 自定义 fragment
+
+Sprite2D item 可携带 optional packet-local `shader` 与 `shaderUniforms` ref。空 shader ref 走引擎
+`fs_tina_sprite2d_fixture`；非空 ref 必须在 submit 前解析到一个 live Sprite2D program，否则
+`submitFrame` 以 `ShaderNotFound` / `InvalidFrameResource` 失败，**不会**回落到引擎 fragment。
+这是刻意的不兼容：静默回落会让错误的 binding 画出“看起来正常”的精灵。
+
+作者 fragment 必须 `#include <tina_sprite2d.sh>`。该头声明引擎拥有的 sampler/uniform 集；bgfx 按名
+去重 uniform，用不同的类型再声明其中任何一个会破坏所有读它的引擎 draw。`shaderc` 在有该头时把
+重定义报成编译错误，而不是运行期错乱。varying 行必须是源文件第一行：`shaderc` 在预处理器之前从
+原文扫描 `$input`。
+
+作者 uniform 只有 `vec4`，按**名字**匹配，因为 cooked 二进制里的 uniform 顺序是 shaderc 细节。
+每 draw 由 backend 重发当前 binding 的值；调用方停更就会冻在上次发布的数。引擎 lighting
+（`u_spriteLightParams` 等）仍由 Sprite2D pass 提交，但自定义 fragment 不必消费它们——
+`samples/2d_custom_shader` 的 `fs_pulse.sc` 就不乘 ambient。
+
+Cook 走 `tina_assetc --shader-source`，产出带 profile 表的 Shader payload，而不是单个 `.bin`。
+SDK 包把 `tina_sprite2d.sh` / `tina_mesh3d.sh` / varying def 装到 `Tina_SHADER_INCLUDE_DIR`，把
+`bgfx_shader.sh` 装到 `Tina_BGFX_SHADER_INCLUDE_DIR`；两者都作为 `--shader-include` 根，与 in-tree
+配方同形。Mesh3D 自定义 fragment 见下一节。后处理 `CustomShader` 步骤仍等 offscreen GPU 切片，
+不是这条 Sprite2D 路径的一部分。
+
+产品证据：`tina_sample_2d_custom_shader` 在两相 pinned `u_pulse.x` 上要求 custom 区域 RGB 均值差
+`>= 8`、引擎对照区域差 `== 0`，并在对照精灵的四象限上断言 2×2 棋盘（红/绿/蓝/白）。对照精灵使用
+`ambientScale=1` 的引擎 fragment，因为默认 `0.2` 会把 255 缩到 ~51，采样判据会在正确 UV 下失败。
+`tina_sample_2d_shader_materials` 用同一 program、三套独立 uniform binding 证明 material 不是
+“换一张图”。
+
+Scene 侧的入口是 `SpriteRenderer2D::shader`（一个 weak Shader `AssetHandle`）。extraction 要求
+`shaderBindingResolver` 与 `shaderUniformBindingResolver` **成对**提供，并把同一个 handle 解析成
+`FrameResourceKind::Shader` 和 `FrameResourceKind::ShaderUniforms` 两个 ref；任一缺失、解析为空或
+asset 已 unload 都以 `SceneErrorCode::UnresolvedSprite` 失败，不回落引擎 fragment。uniform 值不放在组件里：
+`Asset::ShaderBindingRegistry` 在注册 program 时就分配一个空 uniform slot（键来自与 shader binding
+独立的 namespace），值经 `setShaderUniformValues()` 逐 shader asset 发布，所以一个 program 可带多套
+material 而组件只需记住 handle。
+
+## Mesh3D 自定义 fragment
+
+Mesh3D 与 Sprite2D 共用同一套 Shader payload / registry / extraction 接线，差别只在 vertex
+stage 与引擎 uniform 集。`RenderMesh3DItem` 与 `RenderSkinnedMesh3DItem` 都携带 optional
+packet-local `shader` / `shaderUniforms`。空 shader ref 走引擎 `fs_tina_opaque3d_mr`；非空
+ref 必须在 `submitFrame` 前解析到 live Mesh3D program，否则以 `ShaderNotFound` /
+`InvalidFrameResource` 失败，**不会**回落到引擎 fragment。蒙皮 item 不 batch，shader 挂在
+item 上而不是 batch key 上。
+
+作者 fragment 必须 `#include <tina_mesh3d.sh>`，`$input` 必须是源文件第一行，且必须与
+`tina_opaque3d_mr.def.sc` / `tina_opaque3d_skinned.def.sc` 的 varying 集一致：
+`v_color0, v_texcoord0, v_normal, v_worldPos, v_tangent`。两份 `.def.sc` 的 varying 相同，
+bgfx 按 varying 名表的 murmur 链接，所以**一份** cooked Mesh3D fragment binary 同时链接刚性
+与蒙皮 vertex stage，不需要 `GpuShaderKind::SkinnedMesh3D`。蒙皮 palette
+（`u_tinaSkinPalette` 等）在 vertex stage，不进 fragment 契约头，也不从作者 uniform 表里扣。
+CSM depth pass 仍用引擎 depth program，自定义 fragment 改不了 receiver 采样到的深度。
+
+上传时一次反射、两次 `createProgram`；刚性成功而蒙皮失败则整次 upload 拒绝，避免蒙皮 draw
+静默跑引擎 fragment。`liveResources` 按一次 upload 计一份，第二个 program 销毁时不另减。
+作者 uniform 同样每 draw 按名重发，未提供的名字显式写零，避免继承上一批的值。引擎 Mesh3D
+lighting（最多 4 个 directional、8 个 point、8 个 spot）仍由 pass 提交；Sprite2D lighting
+是另一套上限（8 个 point、32 条阴影线段），不要混用。
+
+Scene 入口是 `MeshRenderer3D::shader` / `SkinnedMeshRenderer3D::shader`。extraction 用与
+Sprite2D **同一对** `shaderBindingResolver` / `shaderUniformBindingResolver`；失败码是
+`UnresolvedMesh`。World2D snapshot 不序列化 3D 组件。后处理 `CustomShader` 与替换 vertex
+stage 都不在本路径。
+
+### cooked mesh 自带默认 fragment
+
+cooked StaticMesh / SkinnedMesh 可以自己指定默认 Mesh3D fragment stage，这样一份网格不必靠每个
+组件重复填 handle。wire 侧是 payload flag 加一条 cooked dependency 两者**必须同时存在**：
+
+- `StaticMeshWire::SchemaVersion = 2` / `SkinnedMeshWire::SchemaVersion = 3`，
+  `flags` 的 `FlagHasShaderOverride` 位在 payload offset 32。
+- 同一个 cooked 文件必须带一条 `{AssetKind::Shader, DependencyFlags::Required}` dependency。
+- 位置**不是**契约的一部分：`parseCookedAssetView` 要求整条 dependency 流按 AssetId 严格升序，
+  所以 override 的下标由它的 id 决定，任何读取方都不能按顺序取"最后一条"。
+  `Asset::readMesh3DShaderOverride`（`include/tina/asset/Mesh3DShaderOverride.hpp`）按
+  `AssetKind::Shader` 选取，并双向校验：只有 flag 没有 dependency，或只有 dependency 没有 flag，
+  一律 `InvalidCatalogConfig`。前者会让网格索要一个没人能解析的 fragment stage，后者会让 override
+  对所有 payload reader 隐形却仍然 pin 住那个 Shader。它只做解析，不持有任何 lease——
+  shader 的 lease / `GpuShaderId` / binding key 仍全部归 `ShaderBindingRegistry`，
+  `Mesh3DBindingRegistry` 仍只拥有 mesh/material/texture。
+
+cook 侧入口是 `staticmesh <id> cube [shader <shader32hex>]`；三 token 的旧形式语义不变。
+
+extraction 侧是另一对**以 mesh handle 为 key** 的 resolver：
+`mesh3DDefaultShaderBindingResolver` / `mesh3DDefaultShaderUniformBindingResolver`。key 是网格而
+不是 shader，因为只有网格的 cooked dependency 知道它指了哪个 Shader。优先级是
+**组件覆盖 cooked**：`MeshRenderer3D::shader` 非空就用它，此时这两个 resolver 完全不被调用；
+为空才回落到 cooked 默认；两者都为空才走引擎 fragment。resolver 未设置不算失败（没有 cook 默认的
+调用方保持原行为），但一对 ref 只解析出一半就是缺陷，返回 `UnresolvedMesh`——program 缺 uniform
+槽会在 submit 期 fail closed，那里已经没法返回错误了。刚性与蒙皮走同一个解析函数，因为一份 cooked
+fragment binary 同时链接两个引擎 vertex stage。
 
 Texture2D cooked wire 当前为 schema v2。格式集合固定为 `Rgba8Unorm`、BC1/BC3/BC7 与 ASTC 4x4；
 色彩空间是 Linear 或 sRGB；sampler 支持 Repeat/Mirror/Clamp/Border、Point/Linear，以及必须同时用于

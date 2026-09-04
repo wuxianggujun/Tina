@@ -604,11 +604,19 @@ Core::Result<std::vector<std::byte>> writeSkinnedMeshPayloadBytes(const SkinnedM
         writeF32(bytes, 20U, desc.boundsCenterY);
         writeF32(bytes, 24U, desc.boundsCenterZ);
         writeF32(bytes, 28U, desc.boundsRadius);
-        writeU16(bytes, 32U, counts.jointCount);
-        writeU16(bytes, 34U, SkinnedMeshWire::InfluencesPerVertex);
-        writeU32(bytes, 36U, 0U);
-        writeU32(bytes, 40U, 0U);
-        writeU32(bytes, 44U, 0U);
+
+        u16 flags = 0;
+        if (desc.shaderOverrideId)
+        {
+            flags |= SkinnedMeshWire::FlagHasShaderOverride;
+        }
+        writeU16(bytes, 32U, flags);
+        writeU16(bytes, 34U, 0U);  // reserved0
+
+        writeU16(bytes, 36U, counts.jointCount);
+        writeU16(bytes, 38U, SkinnedMeshWire::InfluencesPerVertex);
+        writeU32(bytes, 40U, 0U);  // reserved1
+        writeU32(bytes, 44U, 0U);  // reserved2
 
         usize offset = static_cast<usize>(offsets->inverseBindOffset);
         for (const float value : desc.inverseBindMatrices)
@@ -711,9 +719,25 @@ Core::Result<SkinnedMeshPayloadView> parseSkinnedMeshPayload(std::span<const std
         .boundsCenterY = readF32(payload, 20U),
         .boundsCenterZ = readF32(payload, 24U),
         .boundsRadius = readF32(payload, 28U),
-        .jointCount = readU16(payload, 32U),
-        .influencesPerVertex = readU16(payload, 34U),
     };
+
+    const u16 flags = readU16(payload, 32U);
+    const u16 reserved0 = readU16(payload, 34U);
+    view.jointCount = readU16(payload, 36U);
+    view.influencesPerVertex = readU16(payload, 38U);
+    const u32 reserved1 = readU32(payload, 40U);
+    const u32 reserved2 = readU32(payload, 44U);
+
+    if ((flags & ~SkinnedMeshWire::KnownFlags) != 0U)
+    {
+        return Core::failure(AssetFormatErrorCode::UnsupportedValue, "skinned mesh unknown flags set");
+    }
+    if (reserved0 != 0U || reserved1 != 0U || reserved2 != 0U)
+    {
+        return Core::failure(AssetFormatErrorCode::InvalidLayout,
+                             "skinned mesh reserved fields must be zero");
+    }
+    view.hasShaderOverride = (flags & SkinnedMeshWire::FlagHasShaderOverride) != 0U;
     if (view.schemaVersion != SkinnedMeshWire::SchemaVersion)
     {
         return Core::failure(AssetFormatErrorCode::UnsupportedSchema,
@@ -733,12 +757,6 @@ Core::Result<SkinnedMeshPayloadView> parseSkinnedMeshPayload(std::span<const std
     {
         return Core::failure(AssetFormatErrorCode::UnsupportedValue,
                              "unsupported skinned mesh influence count");
-    }
-    if (readU32(payload, 36U) != 0U || readU32(payload, 40U) != 0U ||
-        readU32(payload, 44U) != 0U)
-    {
-        return Core::failure(AssetFormatErrorCode::InvalidLayout,
-                             "skinned mesh reserved fields must be zero");
     }
     if (Core::Status status =
             validateBounds(view.boundsCenterX, view.boundsCenterY, view.boundsCenterZ, view.boundsRadius);
@@ -911,11 +929,21 @@ Core::Result<std::vector<std::byte>> writeCookedSkinnedMeshAsset(Core::AssetId a
     {
         return Core::failure(payload.error());
     }
+    std::vector<CookedAssetWriteDependency> deps;
+    if (desc.shaderOverrideId)
+    {
+        deps.push_back(CookedAssetWriteDependency{
+            .assetId = desc.shaderOverrideId,
+            .expectedKind = AssetKind::Shader,
+            .flags = DependencyFlags::Required,
+        });
+    }
     return writeCookedAssetBytes(CookedAssetWriteDesc{
         .assetKind = AssetKind::SkinnedMesh,
         .assetTypeVersion = SkinnedMeshWire::SchemaVersion,
         .targetPlatform = platform,
         .assetId = assetId,
+        .dependencies = deps,
         .payload = *payload,
         .payloadAlignment = 16,
         .computeContentHash = true,

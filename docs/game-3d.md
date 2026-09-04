@@ -8,7 +8,7 @@ StaticMesh/SkinnedMesh GPU upload、Prefab 实例化、Scene extraction 后由 b
 
 也可通过 CLI 加载**磁盘上的外部** `.gltf`/`.glb`（用户模型）：同样只走 cooker，Runtime 不解析源
 glTF。默认产品门禁使用仓库 **complete PBR fixture**
-（`tests/fixtures/gltf/complete_pbr/complete_pbr.gltf`：双 mesh、NORMAL/UV、MikkTSpace 生成 tangent、
+（`samples/3d_product/assets/complete_pbr/complete_pbr.gltf`：双 mesh、NORMAL/UV、MikkTSpace 生成 tangent、
 baseColor+MR+normal 贴图、不同 metallic/roughness）；未编译进 fixture 路径时回退到最小内建 glTF。
 外部 `--gltf=` 仍为 opt-in。
 
@@ -57,7 +57,7 @@ tina_sample_3d [--frames=N] [--frame-delay-ms=N] [--gltf=<path>|--gltf <path>]
 
 ## Retained UI 与换肤
 
-`samples/3d_product/Product3DUI.*` 独立拥有产品 UI root。1280×720 是 reference layout；窗口变宽/变高时
+`samples/3d_product/core/Product3DUI.*` 独立拥有产品 UI root。1280×720 是 reference layout；窗口变宽/变高时
 右侧 inspector/collection rail 保持右边距，collection/list/tree 纵向扩展，底部状态栏保持底边距并横向扩展。
 字体和控件继续使用 logical pixel，不随窗口 client 尺寸做全局 zoom。页面提供：标题与 PBR 元信息、
 Theme Button、Auto Rotate Checkbox、Rotation Speed Slider、逐帧
@@ -146,7 +146,7 @@ source glTF/GLB
 
 产品 3D sample 经 `Tina::Desktop::CreateEngine(config, options)` 启动（与 2D 一致），不再手写
 `EngineCompositionFactories`。mesh/texture bind 证据通过
-`CreateEngineOptions::wrapWindowSurfaceRenderDevice` + `samples/3d_product/DeviceCapture.hpp`。
+`CreateEngineOptions::wrapWindowSurfaceRenderDevice` + `samples/3d_product/core/DeviceCapture.hpp`。
 EngineHost 仍是唯一组合根。
 
 ## 已实现能力

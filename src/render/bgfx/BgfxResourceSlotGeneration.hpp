@@ -6,6 +6,7 @@ namespace Tina::Render::Bgfx {
 
 struct BgfxTextureResourceSlotTag final {};
 struct BgfxMeshResourceSlotTag final {};
+struct BgfxShaderResourceSlotTag final {};
 
 template <typename ResourceTag>
 class BgfxResourceSlotGeneration final {
@@ -54,5 +55,7 @@ using BgfxTextureResourceSlotGeneration =
     BgfxResourceSlotGeneration<BgfxTextureResourceSlotTag>;
 using BgfxMeshResourceSlotGeneration =
     BgfxResourceSlotGeneration<BgfxMeshResourceSlotTag>;
+using BgfxShaderResourceSlotGeneration =
+    BgfxResourceSlotGeneration<BgfxShaderResourceSlotTag>;
 
 } // namespace Tina::Render::Bgfx

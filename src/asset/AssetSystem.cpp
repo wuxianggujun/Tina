@@ -6,6 +6,7 @@
 #include <tina/asset/CatalogLoadPlan.hpp>
 #include <tina/asset/CookedAssetFile.hpp>
 #include <tina/asset/Mesh3DBindingRegistry.hpp>
+#include <tina/asset/ShaderBindingRegistry.hpp>
 #include <tina/asset/Sprite2DBindingRegistry.hpp>
 #include <tina/asset_format/AssetFormat.hpp>
 #include <tina/core/io/ReadFile.hpp>
@@ -92,7 +93,8 @@ void releaseAssetLeaseRetirementPin(void* userData) noexcept
     for (const auto& record : ledger.records())
     {
         const bool gpuResource = record.kind == AssetRetirementKind::GpuTexture2D ||
-                                 record.kind == AssetRetirementKind::GpuMesh;
+                                 record.kind == AssetRetirementKind::GpuMesh ||
+                                 record.kind == AssetRetirementKind::GpuShader;
         if (gpuResource && record.state != AssetRetirementState::Released)
         {
             return true;
@@ -409,6 +411,13 @@ AssetSystem::reloadCatalog(std::string_view catalogRootUtf8, CatalogReloadConfig
     {
         return Core::failure(std::move(status.error()));
     }
+    if (auto status = validateParticipants(
+            config.bindings.shader,
+            "catalog reload Shader participants contain a null or duplicate registry");
+        !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
 
     std::pmr::unsynchronized_pool_resource validationMemory{};
     prepareCatalogOpenConfig(config.package, true, validationMemory);
@@ -476,6 +485,13 @@ AssetSystem::reloadPreparedCatalog(std::string_view catalogRootUtf8,
     if (auto status = validateParticipants(
             config.bindings.mesh3D,
             "catalog reload Mesh3D participants contain a null or duplicate registry");
+        !status)
+    {
+        return Core::failure(std::move(status.error()));
+    }
+    if (auto status = validateParticipants(
+            config.bindings.shader,
+            "catalog reload Shader participants contain a null or duplicate registry");
         !status)
     {
         return Core::failure(std::move(status.error()));
@@ -708,7 +724,12 @@ AssetSystem::reloadPreparedCatalog(std::string_view catalogRootUtf8,
 
     Core::usize preparedSpriteCount = 0;
     Core::usize preparedMeshCount = 0;
+    Core::usize preparedShaderCount = 0;
     const auto abortPreparedBindings = [&]() noexcept {
+        while (preparedShaderCount != 0)
+        {
+            config.bindings.shader[--preparedShaderCount]->abortPreparedCatalogReload();
+        }
         while (preparedMeshCount != 0)
         {
             config.bindings.mesh3D[--preparedMeshCount]->abortPreparedCatalogReload();
@@ -742,6 +763,18 @@ AssetSystem::reloadPreparedCatalog(std::string_view catalogRootUtf8,
                 "AssetSystem::reloadCatalog", "prepareMesh3D"));
         }
     }
+    for (; preparedShaderCount < config.bindings.shader.size(); ++preparedShaderCount)
+    {
+        if (auto status = config.bindings.shader[preparedShaderCount]->prepareCatalogReload(
+                *this, migrations);
+            !status)
+        {
+            abortPreparedBindings();
+            rollbackStaged();
+            return Core::failure(std::move(status.error()).withContext(
+                "AssetSystem::reloadCatalog", "prepareShader"));
+        }
+    }
 
     // Every operation below is non-allocating after complete candidate/index/result staging.
     for (const auto& migration : migrations)
@@ -770,11 +803,19 @@ AssetSystem::reloadPreparedCatalog(std::string_view catalogRootUtf8,
     {
         registry->commitPreparedCatalogReload();
     }
+    for (ShaderBindingRegistry* registry : config.bindings.shader)
+    {
+        registry->commitPreparedCatalogReload();
+    }
     for (Sprite2DBindingRegistry* registry : config.bindings.sprite2D)
     {
         (void)registry->drainPendingRetirements();
     }
     for (Mesh3DBindingRegistry* registry : config.bindings.mesh3D)
+    {
+        (void)registry->drainPendingRetirements();
+    }
+    for (ShaderBindingRegistry* registry : config.bindings.shader)
     {
         (void)registry->drainPendingRetirements();
     }
@@ -1866,6 +1907,128 @@ Core::Status AssetSystem::retireGpuMesh(Render::IRenderDevice& device, AssetLeas
     }
 
     mesh = {};
+    m_gpuRetirementDevice = &device;
+    if (m_gpuUpload != nullptr)
+    {
+        (void)m_gpuUpload->cancelUpload(handle);
+    }
+    if (m_store.tryGet(handle) != nullptr)
+    {
+        if (auto status = m_store.unload(handle); !status)
+        {
+            std::terminate();
+        }
+    }
+    forgetHandle(handle);
+    return Core::success();
+}
+
+Core::Status AssetSystem::retireGpuShader(Render::IRenderDevice& device, AssetHandle handle,
+                                          Render::GpuShaderId shader)
+{
+    if (std::this_thread::get_id() != m_ownerThread)
+    {
+        return Core::failure(Render::RenderErrorCode::WrongOwnerThread,
+                             "GPU shader retirement must run on the AssetSystem owner thread");
+    }
+    if (!handle || !shader)
+    {
+        return Core::failure(AssetErrorCode::InvalidHandle,
+                             "GPU shader retirement requires valid asset and shader handles");
+    }
+
+    auto lease = m_store.acquire(handle);
+    if (!lease)
+    {
+        return Core::failure(std::move(lease.error()).withContext("AssetSystem::retireGpuShader", "acquire"));
+    }
+    auto status = retireGpuShader(device, *lease, shader);
+    if (!status)
+    {
+        return Core::failure(std::move(status.error()).withContext("AssetSystem::retireGpuShader", "lease"));
+    }
+    return Core::success();
+}
+
+Core::Status AssetSystem::retireGpuShader(Render::IRenderDevice& device, AssetLease& lease,
+                                          Render::GpuShaderId& shader)
+{
+    if (std::this_thread::get_id() != m_ownerThread)
+    {
+        return Core::failure(Render::RenderErrorCode::WrongOwnerThread,
+                             "GPU shader retirement must run on the AssetSystem owner thread");
+    }
+    if (!lease || !shader)
+    {
+        return Core::failure(AssetErrorCode::InvalidHandle,
+                             "GPU shader retirement requires a valid lease and shader handle");
+    }
+
+    const AssetHandle handle = lease.handle();
+    const Core::AssetId storeAssetId = m_store.assetId(handle);
+    if (!storeAssetId || storeAssetId != lease.assetId())
+    {
+        return Core::failure(AssetErrorCode::InvalidHandle,
+                             "GPU shader retirement lease does not belong to this AssetSystem");
+    }
+    if (m_store.assetKind(handle) != AssetFormat::AssetKind::Shader ||
+        lease.assetKind() != AssetFormat::AssetKind::Shader)
+    {
+        return Core::failure(AssetErrorCode::InvalidHandle,
+                             "GPU shader retirement requires a Shader lease");
+    }
+    if (!isGpuRetirementState(m_store.state(handle)))
+    {
+        return Core::failure(AssetErrorCode::AssetNotReady,
+                             "GPU shader retirement requires a resident Shader lease");
+    }
+    const bool hasLiveRetirement = std::ranges::any_of(
+        m_retirement.records(),
+        [handle](const AssetRetirementRecord& record) noexcept {
+            return record.handle == handle && record.state != AssetRetirementState::Released;
+        });
+    if (hasLiveRetirement)
+    {
+        return Core::failure(AssetErrorCode::AssetNotReady,
+                             "GPU shader retirement is already tracked for this lease");
+    }
+    if (m_gpuRetirementDevice != nullptr && m_gpuRetirementDevice != &device)
+    {
+        if (auto status = drainGpuRetirements(); !status)
+        {
+            return Core::failure(std::move(status.error()).withContext("AssetSystem::retireGpuShader",
+                                                                       "previousDeviceDrain"));
+        }
+    }
+
+    if (auto status = m_retirement.enqueueGpuShader(handle, storeAssetId, shader); !status)
+    {
+        return status;
+    }
+    auto* payload = allocateAssetLeaseRetirementPinPayload(*m_memoryResource);
+    if (payload == nullptr)
+    {
+        m_retirement.cancel(handle);
+        return Core::failure(AssetErrorCode::AllocationFailed,
+                             "GPU shader retirement pin allocation failed");
+    }
+    payload->lease = std::move(lease);
+    payload->ledger = &m_retirement;
+    payload->handle = handle;
+    Render::FramePin completionPin{Render::FramePinKind::AssetLease, handle.id.index(), payload,
+                                   &releaseAssetLeaseRetirementPin};
+    m_retirement.markRetiring(handle);
+
+    if (auto status = device.retireShader(shader, completionPin); !status)
+    {
+        lease = std::move(payload->lease);
+        payload->ledger = nullptr;
+        m_retirement.cancel(handle);
+        completionPin.release();
+        return Core::failure(std::move(status.error()).withContext("AssetSystem::retireGpuShader", "render"));
+    }
+
+    shader = {};
     m_gpuRetirementDevice = &device;
     if (m_gpuUpload != nullptr)
     {

@@ -270,8 +270,25 @@ public final class TinaActivity extends Activity {
                             + " preeditDrawn=" + TinaNative.nativeUiPreeditActive(session)
                             + " editCodepoints=" + TinaNative.nativeTextEditCodepointCount(session)
                             + " droppedTouches=" + TinaNative.nativeDroppedTouchEventCount(session)
-                            + " droppedKeys=" + TinaNative.nativeDroppedKeyEventCount(session));
+                            + " droppedKeys=" + TinaNative.nativeDroppedKeyEventCount(session)
+                            + " content=" + describeContentCounts());
         }
+    }
+
+    /**
+     * The content chain's outcome, unpacked.
+     *
+     * <p>Logged as three fields rather than one verdict because each combination names a different
+     * defect: all zero means nothing was packaged, entries without a load means the manifest was readable
+     * but its objects were not, and a load with {@code extentOk=false} means an asset parsed but is not
+     * the one the recipe cooked.
+     */
+    private String describeContentCounts() {
+        final long packed = TinaNative.nativeContentCounts(session);
+        return ((packed >>> 32) & 0xFFFF)
+                + "/" + ((packed >>> 16) & 0xFFFF)
+                + "/" + ((packed & 1) != 0)
+                + "(entries/loaded/extentOk)";
     }
 
     /**

@@ -25,7 +25,8 @@
    五个样例加上两个 editor_app 文件与 bench；缺 `\r` `\t` 的是 `2d_bgfx`、`3d_bgfx`、
    `3d_product`；只转义两个字符的是 `2d_catalog`、`2d_tilemap_bgfx`。后两个版本产出的 JSON
    合法但静默丢数据，而复制本身掩盖了这个分歧：读任何单独一份都看不出还有另两种行为。
-2. 对象结构由裸字符串字面量拼接而成。`samples/2d_tilemap_bgfx/main.cpp` 的成功报告是一条
+2. 对象结构由裸字符串字面量拼接而成。`samples/2d_tilemap_bgfx/main.cpp`（现
+   `samples/2d_tilemap_bgfx/platforms/desktop/DesktopMain.cpp`）的成功报告是一条
    跨 355 行、包含 339 个 `<<` 的单语句；全仓库此类 `<<` 片段约 1809 处、分布在 29 个文件。
 
 代价不在字符数，而在失效模式：漏一个逗号、漏一个引号、把 `,` 写在 `{` 之后，都能通过编译，
@@ -72,10 +73,10 @@ jsmn 承担，已由 ADR 0009 认可；`tools/windows/baselines/*.json` 与
 （`samples/2d`、`2d_authored_scene`、`2d_tilemap`、`3d`、`asset`、`gallery`、`network`、
 `physics2d_bench`、`virtual_stick`，以及 `tools/assetc`、`tools/catalog_validate`、
 `tools/bench/main.cpp`）；另一类更隐蔽——`samples/3d_product/main.cpp` 与
-`samples/2d_tilemap_bgfx/main.cpp` 的**验证失败报告**是与成功报告并列的另一条独立 `<<` 链
-（183 行 / 272 行），迁移成功报告时不会碰到它。
+`samples/2d_tilemap_bgfx/main.cpp`（两者现均为 `platforms/desktop/DesktopMain.cpp`）的**验证失败
+报告**是与成功报告并列的另一条独立 `<<` 链（183 行 / 272 行），迁移成功报告时不会碰到它。
 
-`samples/network/main.cpp` 原本不是 `<<` 链而是单条 `std::fprintf`，18 个可变参数与格式串
+`samples/network/main.cpp`（现 `samples/network/core/main.cpp`）原本不是 `<<` 链而是单条 `std::fprintf`，18 个可变参数与格式串
 分离手工对齐——参数错位是未定义行为且编译期无警告，这是本轮收益最大的一处。其
 `writeEvidence(std::FILE*, ...)` 相应改为 `writeEvidence(std::ostream&, ...)`。
 

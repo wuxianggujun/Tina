@@ -3,7 +3,9 @@
 > **一次性运行快照，不是当前契约。** 下文的 `ok=true` 只对各自取证日的 tip 成立。
 >
 > **该门禁脚本当前是坏的（2026-09-01 复核）。** `tools/windows/RunUi002UiaGate.ps1:517` 仍硬断言窗口
-> 标题等于 `Tina UI Showcase - Complete Retained Controls`，而 `samples/ui_showcase/main.cpp:573` 已把
+> 标题等于 `Tina UI Showcase - Complete Retained Controls`，而
+> `samples/ui_showcase/platforms/desktop/DesktopMain.cpp:567`（复核当日路径为
+> `samples/ui_showcase/main.cpp:573`，示例目录此后已按脚手架重组）已把
 > `config.primaryWindow.title` 改成 `Tina Modern Desktop Workbench`。该断言是 `$probeOk` 那条 `-and`
 > 链的第一项，所以无论其余检查是否通过，`$probeOk` 现在恒为 false，门禁必然 `ok=false`。
 > 也就是说下文的 `ok=true` **在当前 tip 上无法复现**，直到脚本里的标题期望被更新。

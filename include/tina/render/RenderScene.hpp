@@ -90,6 +90,12 @@ struct RenderCamera2DInput final {
 struct RenderSprite2DInput final {
     FrameResourceRef texture{};
     FrameResourceRef normalTexture{};
+    // Empty means the engine's own fragment shader. A custom shader joins the batch key, so sprites
+    // sharing textures but not shaders draw in separate batches.
+    FrameResourceRef shader{};
+    // Values for the custom shader's author-declared uniforms. Also part of the batch key: uniforms
+    // are published once per draw, so two sprites with different values cannot share one.
+    FrameResourceRef shaderUniforms{};
     u64 stableEntityKey = 0;
     float centerX = 0.0F;
     float centerY = 0.0F;
@@ -426,6 +432,8 @@ struct RenderPerspectiveCameraInput final {
 struct RenderMesh3DInput final {
     FrameResourceRef mesh{};
     FrameResourceRef material{};
+    FrameResourceRef shader{};          // optional custom fragment program
+    FrameResourceRef shaderUniforms{};  // optional uniform values
     u32 submeshIndex = 0;
     u64 stableEntityKey = 0;
     RenderTransform3DInput worldTransform{};
@@ -446,6 +454,8 @@ struct RenderMesh3DInput final {
 struct RenderSkinnedMesh3DInput final {
     FrameResourceRef mesh{};
     FrameResourceRef material{};
+    FrameResourceRef shader{};          // optional custom fragment program
+    FrameResourceRef shaderUniforms{};  // optional uniform values
     u32 submeshIndex = 0;
     u64 stableEntityKey = 0;
     RenderTransform3DInput worldTransform{};
@@ -472,6 +482,8 @@ struct RenderCamera2D final {
 struct RenderSprite2DItem final {
     FrameResourceRef texture{};
     FrameResourceRef normalTexture{};
+    FrameResourceRef shader{};
+    FrameResourceRef shaderUniforms{};
     u64 stableEntityKey = 0;
     u32 insertionOrder = 0;
     float centerX = 0.0F;
@@ -516,6 +528,8 @@ struct RenderPerspectiveCamera final {
 struct RenderMesh3DItem final {
     FrameResourceRef mesh{};
     FrameResourceRef material{};
+    FrameResourceRef shader{};
+    FrameResourceRef shaderUniforms{};
     u32 submeshIndex = 0;
     u64 stableEntityKey = 0;
     u32 insertionOrder = 0;
@@ -536,6 +550,8 @@ struct RenderMesh3DBatch final {
     u32 itemCount = 0;
     FrameResourceRef mesh{};
     FrameResourceRef material{};
+    FrameResourceRef shader{};
+    FrameResourceRef shaderUniforms{};
     u32 submeshIndex = 0;
     bool doubleSided = false;
 };
@@ -546,6 +562,10 @@ struct RenderMesh3DBatch final {
 struct RenderSkinnedMesh3DItem final {
     FrameResourceRef mesh{};
     FrameResourceRef material{};
+    // Per-item rather than per-batch because skinned draws are never batched: each item submits
+    // alone, so there is no batch key to carry the program on.
+    FrameResourceRef shader{};
+    FrameResourceRef shaderUniforms{};
     u32 submeshIndex = 0;
     u64 stableEntityKey = 0;
     u32 insertionOrder = 0;

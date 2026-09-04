@@ -238,6 +238,34 @@ struct GpuEnvironmentMapId final {
                                                    const GpuEnvironmentMapId&) = default;
 };
 
+// Backend-owned handle for a custom fragment shader linked against an engine-owned vertex stage.
+// Owner rejects cross-device use, generation rejects stale slot reuse.
+struct GpuShaderId final {
+    inline static constexpr u32 InvalidIndex = (std::numeric_limits<u32>::max)();
+    inline static constexpr u32 UnscopedOwner = (std::numeric_limits<u32>::max)();
+
+    u32 owner = 0;
+    u32 index = InvalidIndex;
+    u32 generation = 0;
+
+    constexpr GpuShaderId() noexcept = default;
+    constexpr GpuShaderId(u32 indexValue, u32 generationValue) noexcept
+        : owner(UnscopedOwner), index(indexValue), generation(generationValue)
+    {
+    }
+    constexpr GpuShaderId(u32 ownerValue, u32 indexValue, u32 generationValue) noexcept
+        : owner(ownerValue), index(indexValue), generation(generationValue)
+    {
+    }
+
+    [[nodiscard]] constexpr bool hasValue() const noexcept
+    {
+        return owner != 0 && index != InvalidIndex && generation != 0;
+    }
+    [[nodiscard]] constexpr explicit operator bool() const noexcept { return hasValue(); }
+    [[nodiscard]] friend constexpr bool operator==(const GpuShaderId&, const GpuShaderId&) = default;
+};
+
 // Backend-owned GPU mesh handle. Owner rejects cross-device use,
 // generation rejects stale slot reuse. Product-3D path (M11-E2).
 struct GpuMeshId final {
@@ -493,6 +521,87 @@ struct EnvironmentMapUploadDesc final {
 [[nodiscard]] Core::Status
 validateEnvironmentMapUploadDesc(const EnvironmentMapUploadDesc& desc) noexcept;
 
+// Which engine program a custom shader plugs into. It selects the varying contract and the
+// engine-owned vertex stage the fragment binary is linked against, so a Sprite2D binary bound to a
+// Mesh3D draw fails closed instead of linking against varyings its source never declared.
+//
+// Declared here rather than reused from AssetFormat::ShaderKind for the reason the texture and video
+// vocabularies are: a device must be describable without an asset pipeline. Cooked shader payloads
+// map onto these at the upload boundary.
+enum class GpuShaderKind : u8 {
+    Invalid = 0,
+    Sprite2D = 1,
+    Mesh3D = 2,
+};
+
+// Renderer binary flavour. A cooked shader carries one blob per flavour and the backend picks the
+// one matching its live renderer type, because only the backend knows what that is.
+enum class GpuShaderBinaryProfile : u8 {
+    Invalid = 0,
+    Glsl120 = 1,
+    SpirV = 2,
+    Dxbc50 = 3,
+    Essl300 = 4,
+};
+
+struct GpuShaderBinary final {
+    GpuShaderBinaryProfile profile = GpuShaderBinaryProfile::Invalid;
+    std::span<const std::byte> bytes{};
+};
+
+// One custom fragment shader, in every profile the cook produced. Every blob is handed to the
+// device and the backend selects among them; a caller cannot pre-select, since the renderer type is
+// only known once a device exists.
+//
+// Fragment is the only replaceable stage, so there is no stage field: the vertex stage produces the
+// varying contract, the vertex layout, and the batching assumptions, and stays engine-owned.
+struct GpuShaderUploadDesc final {
+    static constexpr u8 MaximumBinaryCount = 8;
+
+    GpuShaderKind shaderKind = GpuShaderKind::Invalid;
+    // Strictly ascending by profile, which rules out duplicates and gives the backend a table it can
+    // search without first sorting a caller-supplied order.
+    std::span<const GpuShaderBinary> binaries{};
+};
+
+// Shared upload validation so Null and bgfx cannot drift on what they accept. Checks the kind and
+// profile vocabulary, the binary count, strict profile ordering, and that no binary is empty.
+[[nodiscard]] Core::Status validateShaderUploadDesc(const GpuShaderUploadDesc& desc) noexcept;
+
+// One value for a uniform the author declared beyond the engine set. Names are carried rather than
+// indices because the cooked binary's uniform order is a compiler detail: a shaderc upgrade can
+// reorder it while the source is unchanged, and an index-keyed value would then land on the wrong
+// uniform without any error.
+//
+// vec4 is the only shape: it is what a scalar, a colour and a pair all fit into, and it keeps the
+// per-batch publish a fixed-size copy. Matrices and arrays are engine-owned and stay out.
+struct GpuShaderUniformValue final {
+    static constexpr u8 MaximumNameBytes = 63;
+
+    // Not a std::string_view: values are stored in the device and re-published every batch, so the
+    // name must outlive the caller's buffer.
+    std::array<char, MaximumNameBytes + 1> name{};
+    std::array<float, 4> value{};
+
+    [[nodiscard]] friend constexpr bool operator==(const GpuShaderUniformValue&,
+                                                   const GpuShaderUniformValue&) = default;
+};
+
+// Values published under a caller-chosen non-zero key, exactly like a texture or mesh binding. A
+// draw names the key, not the values, so a value change is one setShaderUniformBinding call rather
+// than a scene rebuild.
+struct GpuShaderUniformBindingDesc final {
+    static constexpr u8 MaximumValueCount = 16;
+
+    std::span<const GpuShaderUniformValue> values{};
+};
+
+// Rejects an empty or unterminated name, a non-finite component, and a duplicate name. Duplicates
+// are rejected rather than last-wins because two entries for one uniform means the caller believes
+// something the device cannot honour.
+[[nodiscard]] Core::Status
+validateShaderUniformBindingDesc(const GpuShaderUniformBindingDesc& desc) noexcept;
+
 // Interleaved P3_N3_T4_UV2 floats (12 per vertex) + U16 triangle indices.
 // tangent.xyz is non-zero and tangent.w is exactly -1 or +1.
 struct StaticMeshUploadDesc final {
@@ -722,6 +831,110 @@ class IRenderDevice {
         static_cast<void>(texture);
         return Core::failure(RenderErrorCode::TextureUploadUnsupported,
                              "This render device does not support Texture2D binding");
+    }
+    // Optional custom fragment shader path. Default implementations return Unsupported, so a
+    // backend that cannot link a user fragment stage fails closed rather than accepting the upload
+    // and silently drawing with the engine shader.
+    [[nodiscard]] virtual Core::Result<GpuShaderId> createShader(const GpuShaderUploadDesc& desc)
+    {
+        static_cast<void>(desc);
+        return Core::failure(RenderErrorCode::ShaderUploadUnsupported,
+                             "This render device does not support custom shader upload");
+    }
+    [[nodiscard]] virtual Core::Status validateShader(GpuShaderId shader) const noexcept
+    {
+        static_cast<void>(shader);
+        return Core::failure(RenderErrorCode::ShaderUploadUnsupported,
+                             "This render device does not support custom shader validation");
+    }
+    [[nodiscard]] virtual Core::Status destroyShader(GpuShaderId shader) noexcept
+    {
+        static_cast<void>(shader);
+        return Core::failure(RenderErrorCode::ShaderUploadUnsupported,
+                             "This render device does not support custom shader destroy");
+    }
+    // On success, logically invalidates shader and clears every device binding that references it
+    // before returning. completionPin is released only once the backend can safely hand the native
+    // program to its destroy path, which matters more here than for a texture: a program in flight
+    // is still referenced by submitted draws.
+    [[nodiscard]] virtual Core::Status retireShader(GpuShaderId shader,
+                                                    FramePin& completionPin) noexcept
+    {
+        auto status = destroyShader(shader);
+        if (status)
+        {
+            completionPin.release();
+        }
+        return status;
+    }
+    // Publishes shader under a caller-chosen non-zero key, which is what a Shader frame-resource
+    // descriptor references. An invalid GpuShaderId clears the binding.
+    [[nodiscard]] virtual Core::Status setShaderBinding(u32 deviceBindingKey,
+                                                        GpuShaderId shader) noexcept
+    {
+        static_cast<void>(deviceBindingKey);
+        static_cast<void>(shader);
+        return Core::failure(RenderErrorCode::ShaderUploadUnsupported,
+                             "This render device does not support custom shader bindings");
+    }
+    // Publishes values for a custom shader's author-declared uniforms under a caller-chosen non-zero
+    // key. An empty value table clears the binding.
+    //
+    // The key is independent of the shader binding key so one shader can be drawn with many value
+    // sets in a single frame, which is the whole point of a material.
+    [[nodiscard]] virtual Core::Status
+    setShaderUniformBinding(u32 deviceBindingKey, const GpuShaderUniformBindingDesc& desc) noexcept
+    {
+        static_cast<void>(deviceBindingKey);
+        static_cast<void>(desc);
+        return Core::failure(RenderErrorCode::ShaderUploadUnsupported,
+                             "This render device does not support custom shader uniform bindings");
+    }
+    [[nodiscard]] Core::Result<u32> createShaderBinding(GpuShaderId shader) noexcept
+    {
+        if (!shader)
+        {
+            return Core::failure(RenderErrorCode::InvalidShaderUpload,
+                                 "Shader binding requires a live GPU shader");
+        }
+        if (m_nextShaderBindingKey == 0)
+        {
+            return Core::failure(RenderErrorCode::ShaderBindingKeyExhausted,
+                                 "Render device exhausted non-zero Shader binding keys");
+        }
+
+        const u32 candidateKey = m_nextShaderBindingKey;
+        if (auto status = setShaderBinding(candidateKey, shader); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        m_nextShaderBindingKey =
+            candidateKey == (std::numeric_limits<u32>::max)() ? 0U : candidateKey + 1U;
+        return candidateKey;
+    }
+    // Allocates a non-zero key in the ShaderUniforms namespace and publishes desc.
+    // An empty value table still consumes a key: the draw names the slot, and a later
+    // setShaderUniformBinding fills it. Caller-selected keys passed to
+    // setShaderUniformBinding share this namespace and must not be mixed with
+    // allocator-managed bindings. Independent of createShaderBinding so one program
+    // can have many materials.
+    [[nodiscard]] Core::Result<u32>
+    createShaderUniformBinding(const GpuShaderUniformBindingDesc& desc = {}) noexcept
+    {
+        if (m_nextShaderUniformBindingKey == 0)
+        {
+            return Core::failure(RenderErrorCode::ShaderUniformBindingKeyExhausted,
+                                 "Render device exhausted non-zero ShaderUniforms binding keys");
+        }
+
+        const u32 candidateKey = m_nextShaderUniformBindingKey;
+        if (auto status = setShaderUniformBinding(candidateKey, desc); !status)
+        {
+            return Core::failure(std::move(status.error()));
+        }
+        m_nextShaderUniformBindingKey =
+            candidateKey == (std::numeric_limits<u32>::max)() ? 0U : candidateKey + 1U;
+        return candidateKey;
     }
     // What this device can hardware decode. Always answerable: a device with no
     // decoder reports an all-false capability set rather than failing, so a caller
@@ -1040,6 +1253,8 @@ class IRenderDevice {
 
     u32 m_resourceOwnerId = allocateResourceOwnerId();
     u32 m_nextTexture2DBindingKey = 1;
+    u32 m_nextShaderBindingKey = 1;
+    u32 m_nextShaderUniformBindingKey = 1;
     u32 m_nextMesh3DBindingKey = 2;
     // Key 1 is reserved for the built-in opaque 3D fixture material.
     u32 m_nextMesh3DMaterialBindingKey = 2;

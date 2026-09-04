@@ -607,6 +607,11 @@ adb logcat -s Tina
 - **`keys=` 与聚焦状态相关，不是纯粹的桥接证据。** 聚焦的 TextEdit 会消费**除 Tab / Enter / Escape 以外的
   每一个键**（正确行为），所以用方向键当证据时，一旦有文本框获得焦点计数就会归零并停在那里 —— 与「按键桥
   坏了」现场一致。demo 因此把 Enter 也绑进同一个 action。
+- **`content=entries/loaded/extentOk` 区分内容链的三种失败。** 全零且日志无错 = 这个构建没打内容（不带
+  `-Ptina.assetc` 时的正常结果）；全零且有一行带路径的错误 = catalog 打进去了但打不开；`entries` 非零而
+  `loaded` 为零 = manifest 读到了但底下的 object 读不到。`extentOk=true` 是三者里最强的一条：catalog 打开时
+  会拿每个 object 的实际大小校验 `cookedFileBytes`，随后纹理尺寸再对 recipe 的 2x2，所以这一位为真意味着
+  宿主 cook、APK 打包、首启解压三者对字节的理解完全一致。
 
 `android/local.properties` **不提交**（含机器路径），需要自己创建两行：
 
@@ -615,10 +620,47 @@ sdk.dir=D:\\Programs\\Android\\Sdk
 cmake.dir=D:\\Programs\\CMake
 ```
 
-**`android/` 下没有 `gradlew`/`gradlew.bat`。** 上面写 `./gradlew` 是习惯写法，但 wrapper 需要一个
-`gradle-wrapper.jar`，而本仓库不提交任何二进制。仓库里只有 `gradle/wrapper/gradle-wrapper.properties`
-（钉住 Gradle 8.13）。两条可用路径：装一个 Gradle 8.13+ 直接用，或用它生成 wrapper
-（`gradle wrapper` 会产出被 gitignore 的脚本与 jar）。
+**`android/gradlew` 可以直接用，不需要预装 Gradle。** wrapper 三件套都在仓库里：`gradlew`、
+`gradlew.bat`、`gradle/wrapper/gradle-wrapper.jar`（43705 字节，从官方 8.13 发行包的
+`lib/plugins/gradle-wrapper-main-8.13.jar` 里取出，不是下载来的）。**这是本仓库唯一提交的二进制**，别处
+`git ls-files` 依然一个 jar/dll/exe/so 都没有；破例的理由是没有它 `./gradlew` 这行命令就是假的，而生成它
+又要先装一个 Gradle。
+
+首次 `./gradlew` 会下载 ~130 MB 的发行包。`distributionUrl` 写的是腾讯镜像
+`https://mirrors.cloud.tencent.com/gradle/gradle-8.13-all.zip`（实测可用），官方地址在同一个文件里注释
+保留。**这个字段只接受一个 URL，没有兜底**，镜像挂了就改成注释里那行。阿里云不镜像 Gradle 发行包（404）。
+
+**依赖仓库是"镜像优先 + 官方兜底"。** `settings.gradle` 与 `build.gradle` 都把阿里云列在 `google()` /
+`mavenCentral()` **之前**，声明顺序就是全部机制，官方源留着是因为直接替换会让境外的贡献者构建不了。三点非
+显然处：
+
+- `repository/google` 和 `repository/public` 是两个不同的代理（前者代理 dl.google.com，后者代理 Maven
+  Central），AGP 8.13.2 只在 `google` 里有，`public` 是 404，所以两个都得列。
+- `buildscript` **不读** `pluginManagement.repositories`，所以 `android/build.gradle` 里那份镜像列表必须
+  单独维护一遍，否则 AGP 本体仍然从 dl.google.com 下。
+- 只有 `android/local.properties` 不提交，wrapper 与镜像配置都提交。
+
+**部分 Windows 主机上 daemon 起不来，解法是把 `TMP`/`TEMP` 挪出 `AppData`。** 现象是
+`java.io.IOException: Unable to establish loopback connection`，或（只设了 `GRADLE_OPTS` 时）
+`Could not receive a message from the daemon`。
+
+根因不在 Gradle 也不在 JDK 版本。daemon 连接本身是普通 TCP，但读它要过 `Selector.open()`，Windows 上那是
+`WEPollSelectorImpl`，它内部用一对 **AF_UNIX** socket 造 `java.nio.channels.Pipe`。socket 文件建在
+`jdk.net.unixdomain.tmpdir`（默认取 `java.io.tmpdir`，也就是 `%LOCALAPPDATA%\Temp`）下，那里建不出 AF_UNIX
+socket 时 `sun.nio.ch.UnixDomainSockets.connect0` 抛 `SocketException: Invalid argument: connect`。
+
+本机实测：`AppData` 下（`Local` 和 `Roaming` 都算）一律失败，`C:\Temp`、`C:\Users\<user>\` 下的其他目录、
+`D:\` 全部成功。所以是**位置**，不是路径长度（73 字符的深目录能过），不是 8.3 短名，也不是 JDK 版本
+（17.0.13 与 21.0.8 表现一致）。大概是 AppData 被重定向或被实时扫描。
+
+```bash
+export TMP='C:\Temp\gradle' TEMP='C:\Temp\gradle'
+```
+
+**只有环境变量有效。** `org.gradle.jvmargs` 里写 `-Djdk.net.unixdomain.tmpdir` 到不了 daemon（daemon 日志里
+搜不到这个字符串），`GRADLE_OPTS` 只到 launcher。daemon 继承环境变量，所以改 `TMP`/`TEMP` 是唯一可行的入口。
+
+`JAVA_HOME` 用 21 —— `compileOptions` 里的 `VERSION_17` 是字节码目标，与跑 Gradle 的 JDK 无关。
 
 **`ANDROID_NDK_HOME` 在 gradle 构建里同样必须导出。** AGP 会把 NDK 路径传给 CMake，所以看起来不需要 ——
 但 vcpkg 用它**自己的** `scripts/toolchains/android.cmake` 做 compiler-hash 探测，那个文件只认这个环境
@@ -628,8 +670,10 @@ gradle 输出里**；把同一条 cmake 命令单独跑一遍才能看到。这�
 然后：
 
 ```bash
-export JAVA_HOME=/path/to/jdk-17
+export JAVA_HOME=/path/to/jdk-21
 export VCPKG_ROOT=/path/to/vcpkg
+# 见上：daemon 起不来时才需要这两行。
+export TMP='C:\Temp\gradle' TEMP='C:\Temp\gradle'
 cd android
 
 # 不带渲染器：APK 可装可跑，画面空白，只验证平台桥。
@@ -639,6 +683,12 @@ cd android
 # 任一桌面 bgfx 构建树里都有现成的。
 ./gradlew :app:assembleDebug \
   -Ptina.shaderc=/abs/path/out/build/windows-msvc-vnext-bgfx-product-2d/bin/Debug/shaderc.exe
+
+# 带内容：同理需要一个**宿主** tina_assetc。cook 在构建机上跑，产物进 APK 的 assets/content/，
+# 首次启动解压到 getFilesDir()/content。不给这个属性时 APK 照样装照样跑，只是不带内容。
+./gradlew :app:assembleDebug \
+  -Ptina.shaderc=/abs/path/out/build/windows-msvc-vnext-bgfx-product-2d/bin/Debug/shaderc.exe \
+  -Ptina.assetc=/abs/path/out/build/windows-msvc-vnext/bin/Debug/tina_assetc.exe
 
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb shell am start -n dev.tina/dev.tina.TinaActivity

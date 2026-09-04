@@ -41,5 +41,13 @@ inline constexpr Core::ErrorCode TileMapPhysicsCapacityExceeded{Core::ErrorDomai
 inline constexpr Core::ErrorCode PhysicsNavigationCapacityExceeded{Core::ErrorDomain::Asset, 45};
 inline constexpr Core::ErrorCode PhysicsNavigationContractMismatch{Core::ErrorDomain::Asset, 46};
 inline constexpr Core::ErrorCode PhysicsNavigationRegistrationNotFound{Core::ErrorDomain::Asset, 47};
+// The shader compiler rejected a custom shader. nativeCode carries its exit code and the message
+// its verbatim diagnostics, since an author needs the reported line rather than a summary.
+inline constexpr Core::ErrorCode ShaderCompileFailed{Core::ErrorDomain::Asset, 48};
+inline constexpr Core::ErrorCode ShaderBindingCapacityExceeded{Core::ErrorDomain::Asset, 49};
+inline constexpr Core::ErrorCode ShaderBindingKeyExhausted{Core::ErrorDomain::Asset, 50};
+inline constexpr Core::ErrorCode ShaderBindingConflict{Core::ErrorDomain::Asset, 51};
+inline constexpr Core::ErrorCode ShaderBindingNotFound{Core::ErrorDomain::Asset, 52};
+inline constexpr Core::ErrorCode ShaderUniformBindingKeyExhausted{Core::ErrorDomain::Asset, 53};
 
 } // namespace Tina::Asset::AssetErrorCode

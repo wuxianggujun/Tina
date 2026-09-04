@@ -247,6 +247,56 @@ struct TestNormalTextureBindings final {
     u32 resolveCalls = 0;
 };
 
+// Interns the shader handle under whichever kind the resolver stands for, so the
+// Shader and ShaderUniforms halves of one handle stay separately observable.
+struct TestShaderBindings final {
+    struct Binding final {
+        Asset::AssetHandle shader{};
+        u32 key = 0;
+    };
+
+    explicit TestShaderBindings(Render::FrameResourceKind kind) noexcept : kind(kind) {}
+
+    [[nodiscard]] Asset::AssetFrameResourceResolver resolver() noexcept
+    {
+        return Asset::AssetFrameResourceResolver{.userData = this, .resolve = &resolve};
+    }
+
+    void bind(Asset::AssetHandle shader, u32 key) noexcept
+    {
+        bindings[bindingCount++] = Binding{.shader = shader, .key = key};
+    }
+
+    [[nodiscard]] static Core::Result<Render::FrameResourceRef> resolve(
+        void* userData,
+        Asset::AssetHandle shader,
+        Render::FrameResourceSink& frameResources) noexcept
+    {
+        auto& self = *static_cast<TestShaderBindings*>(userData);
+        ++self.resolveCalls;
+        if (self.store == nullptr || !shader ||
+            self.store->assetKind(shader) != AssetFormat::AssetKind::Shader ||
+            self.store->state(shader) == Asset::AssetLogicalState::Unloaded)
+        {
+            return Render::FrameResourceRef{};
+        }
+        for (usize index = 0; index < self.bindingCount; ++index)
+        {
+            if (self.bindings[index].shader == shader)
+            {
+                return internTestResource(frameResources, self.kind, self.bindings[index].key);
+            }
+        }
+        return Render::FrameResourceRef{};
+    }
+
+    Render::FrameResourceKind kind;
+    Asset::AssetStore* store = nullptr;
+    std::array<Binding, 4> bindings{};
+    usize bindingCount = 0;
+    u32 resolveCalls = 0;
+};
+
 class SceneSpriteAssetTest : public testing::Test {
   protected:
     void SetUp() override
@@ -259,15 +309,18 @@ class SceneSpriteAssetTest : public testing::Test {
         auto second = store_->beginQueued(fixtureAssetId(2), AssetFormat::AssetKind::Sprite);
         auto third = store_->beginQueued(fixtureAssetId(3), AssetFormat::AssetKind::Sprite);
         auto wrongKind = store_->beginQueued(fixtureAssetId(4), AssetFormat::AssetKind::Texture2D);
+        auto shader = store_->beginQueued(fixtureAssetId(5), AssetFormat::AssetKind::Shader);
         ASSERT_TRUE(first.has_value());
         ASSERT_TRUE(second.has_value());
         ASSERT_TRUE(third.has_value());
         ASSERT_TRUE(wrongKind.has_value());
+        ASSERT_TRUE(shader.has_value());
         firstSprite_ = *first;
         secondSprite_ = *second;
         thirdSprite_ = *third;
         wrongKind_ = *wrongKind;
         normalTexture_ = *wrongKind;
+        shader_ = *shader;
     }
 
     [[nodiscard]] Asset::AssetStore& store() noexcept
@@ -282,6 +335,7 @@ class SceneSpriteAssetTest : public testing::Test {
     Asset::AssetHandle thirdSprite_{};
     Asset::AssetHandle wrongKind_{};
     Asset::AssetHandle normalTexture_{};
+    Asset::AssetHandle shader_{};
 };
 
 [[nodiscard]] Core::Status extractSingleSprite(
@@ -709,6 +763,230 @@ TEST_F(SceneSpriteAssetTest, HiddenSpriteSkipsNormalTextureResolution)
     EXPECT_EQ(normalBindings.resolveCalls, 0U);
 }
 
+TEST_F(SceneSpriteAssetTest, ResolvesOptionalShaderAndUniformsIntoCommittedSprite)
+{
+    World world = makeWorld();
+    const EntityId cameraEntity = world.createEntity().value();
+    ASSERT_TRUE(world.setCamera2D(cameraEntity, fixedCamera()));
+    const EntityId entity = world.createEntity().value();
+    SpriteRenderer2D sprite = fixtureSprite(firstSprite_);
+    sprite.shader = shader_;
+    ASSERT_TRUE(world.setSpriteRenderer2D(entity, sprite));
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    TestSpriteBindings spriteBindings{.store = &store()};
+    spriteBindings.bind(firstSprite_, 7);
+    TestShaderBindings programBindings{Render::FrameResourceKind::Shader};
+    programBindings.store = &store();
+    programBindings.bind(shader_, 41);
+    TestShaderBindings uniformBindings{Render::FrameResourceKind::ShaderUniforms};
+    uniformBindings.store = &store();
+    uniformBindings.bind(shader_, 42);
+    ASSERT_TRUE(extractRenderSceneFromWorld(
+        world,
+        writer,
+        ExtractRenderSceneParams{
+            .surfaceViewport = {.pixelWidth = 800, .pixelHeight = 600},
+            .spriteBindingResolver = spriteBindings.resolver(),
+            .shaderBindingResolver = programBindings.resolver(),
+            .shaderUniformBindingResolver = uniformBindings.resolver(),
+        }));
+
+    auto view = builder->commit();
+    ASSERT_TRUE(view.has_value());
+    ASSERT_EQ(view->sprites2D().size(), 1U);
+    EXPECT_EQ(
+        frameResourceBindingKey(view->sprites2D()[0].shader, Render::FrameResourceKind::Shader),
+        41U);
+    EXPECT_EQ(
+        frameResourceBindingKey(view->sprites2D()[0].shaderUniforms,
+                                Render::FrameResourceKind::ShaderUniforms),
+        42U);
+    EXPECT_EQ(programBindings.resolveCalls, 1U);
+    EXPECT_EQ(uniformBindings.resolveCalls, 1U);
+}
+
+TEST_F(SceneSpriteAssetTest, SpriteWithoutShaderLeavesBothRefsEmpty)
+{
+    World world = makeWorld();
+    const EntityId cameraEntity = world.createEntity().value();
+    ASSERT_TRUE(world.setCamera2D(cameraEntity, fixedCamera()));
+    const EntityId entity = world.createEntity().value();
+    ASSERT_TRUE(world.setSpriteRenderer2D(entity, fixtureSprite(firstSprite_)));
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    TestSpriteBindings spriteBindings{.store = &store()};
+    spriteBindings.bind(firstSprite_, 7);
+    TestShaderBindings programBindings{Render::FrameResourceKind::Shader};
+    programBindings.store = &store();
+    ASSERT_TRUE(extractRenderSceneFromWorld(
+        world,
+        writer,
+        ExtractRenderSceneParams{
+            .surfaceViewport = {.pixelWidth = 800, .pixelHeight = 600},
+            .spriteBindingResolver = spriteBindings.resolver(),
+            .shaderBindingResolver = programBindings.resolver(),
+        }));
+
+    auto view = builder->commit();
+    ASSERT_TRUE(view.has_value()) << view.error().message;
+    ASSERT_EQ(view->sprites2D().size(), 1U);
+    EXPECT_FALSE(view->sprites2D()[0].shader.hasValue());
+    EXPECT_FALSE(view->sprites2D()[0].shaderUniforms.hasValue());
+    EXPECT_EQ(programBindings.resolveCalls, 0U);
+}
+
+TEST_F(SceneSpriteAssetTest, ShaderWithoutUniformResolverRejectsBeforeSubmittingSprite)
+{
+    World world = makeWorld();
+    const EntityId entity = world.createEntity().value();
+    SpriteRenderer2D sprite = fixtureSprite(firstSprite_);
+    sprite.shader = shader_;
+    ASSERT_TRUE(world.setSpriteRenderer2D(entity, sprite));
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    TestSpriteBindings spriteBindings{.store = &store()};
+    spriteBindings.bind(firstSprite_, 7);
+    TestShaderBindings programBindings{Render::FrameResourceKind::Shader};
+    programBindings.store = &store();
+    programBindings.bind(shader_, 41);
+    const Core::Status status = extractRenderSceneFromWorld(
+        world,
+        writer,
+        ExtractRenderSceneParams{
+            .spriteBindingResolver = spriteBindings.resolver(),
+            .shaderBindingResolver = programBindings.resolver(),
+        });
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, SceneErrorCode::UnresolvedSprite);
+    // The pair is checked before either resolver runs: half a binding must never
+    // reach the packet.
+    EXPECT_EQ(programBindings.resolveCalls, 0U);
+
+    auto view = builder->commit();
+    ASSERT_TRUE(view.has_value());
+    EXPECT_TRUE(view->sprites2D().empty());
+}
+
+TEST_F(SceneSpriteAssetTest, StaleOrWrongKindShaderIsUnresolved)
+{
+    const auto extractWithShader = [this](Asset::AssetHandle shaderHandle, u32& programCalls) {
+        World world = makeWorld();
+        const EntityId entity = world.createEntity().value();
+        SpriteRenderer2D sprite = fixtureSprite(firstSprite_);
+        sprite.shader = shaderHandle;
+        EXPECT_TRUE(world.setSpriteRenderer2D(entity, sprite));
+
+        auto builder = Render::RenderSceneBuilder::Create();
+        EXPECT_TRUE(builder.has_value());
+        EXPECT_TRUE(builder->beginFrame());
+        Render::RenderSceneWriter writer = builder->writer();
+        TestSpriteBindings spriteBindings{.store = &store()};
+        spriteBindings.bind(firstSprite_, 7);
+        TestShaderBindings programBindings{Render::FrameResourceKind::Shader};
+        programBindings.store = &store();
+        programBindings.bind(shaderHandle, 41);
+        TestShaderBindings uniformBindings{Render::FrameResourceKind::ShaderUniforms};
+        uniformBindings.store = &store();
+        uniformBindings.bind(shaderHandle, 42);
+        const Core::Status status = extractRenderSceneFromWorld(
+            world,
+            writer,
+            ExtractRenderSceneParams{
+                .spriteBindingResolver = spriteBindings.resolver(),
+                .shaderBindingResolver = programBindings.resolver(),
+                .shaderUniformBindingResolver = uniformBindings.resolver(),
+            });
+        programCalls = programBindings.resolveCalls;
+        return status;
+    };
+
+    u32 wrongKindCalls = 0;
+    const Core::Status wrongKind = extractWithShader(secondSprite_, wrongKindCalls);
+    ASSERT_FALSE(wrongKind);
+    EXPECT_EQ(wrongKind.error().code, SceneErrorCode::UnresolvedSprite);
+    EXPECT_EQ(wrongKindCalls, 1U);
+
+    ASSERT_TRUE(store().unload(shader_));
+    u32 staleCalls = 0;
+    const Core::Status stale = extractWithShader(shader_, staleCalls);
+    ASSERT_FALSE(stale);
+    EXPECT_EQ(stale.error().code, SceneErrorCode::UnresolvedSprite);
+    EXPECT_EQ(staleCalls, 1U);
+}
+
+TEST_F(SceneSpriteAssetTest, EmptyShaderUniformBindingIsUnresolved)
+{
+    World world = makeWorld();
+    const EntityId entity = world.createEntity().value();
+    SpriteRenderer2D sprite = fixtureSprite(firstSprite_);
+    sprite.shader = shader_;
+    ASSERT_TRUE(world.setSpriteRenderer2D(entity, sprite));
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    TestSpriteBindings spriteBindings{.store = &store()};
+    spriteBindings.bind(firstSprite_, 7);
+    TestShaderBindings programBindings{Render::FrameResourceKind::Shader};
+    programBindings.store = &store();
+    programBindings.bind(shader_, 41);
+    const Core::Status status = extractRenderSceneFromWorld(
+        world,
+        writer,
+        ExtractRenderSceneParams{
+            .spriteBindingResolver = spriteBindings.resolver(),
+            .shaderBindingResolver = programBindings.resolver(),
+            .shaderUniformBindingResolver = Asset::AssetFrameResourceResolver{
+                .resolve = &resolveToEmpty,
+            },
+        });
+    ASSERT_FALSE(status);
+    EXPECT_EQ(status.error().code, SceneErrorCode::UnresolvedSprite);
+    EXPECT_EQ(programBindings.resolveCalls, 1U);
+}
+
+TEST_F(SceneSpriteAssetTest, HiddenSpriteSkipsShaderResolution)
+{
+    World world = makeWorld();
+    const EntityId entity = world.createEntity().value();
+    SpriteRenderer2D sprite = fixtureSprite(firstSprite_);
+    sprite.shader = shader_;
+    sprite.visible = false;
+    ASSERT_TRUE(world.setSpriteRenderer2D(entity, sprite));
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame());
+    Render::RenderSceneWriter writer = builder->writer();
+    TestSpriteBindings spriteBindings{.store = &store()};
+    TestShaderBindings programBindings{Render::FrameResourceKind::Shader};
+    programBindings.store = &store();
+    TestShaderBindings uniformBindings{Render::FrameResourceKind::ShaderUniforms};
+    uniformBindings.store = &store();
+    ASSERT_TRUE(extractRenderSceneFromWorld(
+        world,
+        writer,
+        ExtractRenderSceneParams{
+            .spriteBindingResolver = spriteBindings.resolver(),
+            .shaderBindingResolver = programBindings.resolver(),
+            .shaderUniformBindingResolver = uniformBindings.resolver(),
+        }));
+    EXPECT_EQ(spriteBindings.resolveCalls, 0U);
+    EXPECT_EQ(programBindings.resolveCalls, 0U);
+    EXPECT_EQ(uniformBindings.resolveCalls, 0U);
+}
+
 TEST_F(SceneSpriteAssetTest, WriterFailureIsReturnedAfterSuccessfulResolution)
 {
     World world = makeWorld();
@@ -936,11 +1214,13 @@ TEST(SceneExtractTest, InactiveCameraIsIgnored)
 
 [[nodiscard]] MeshRenderer3D fixtureMesh(
     Asset::AssetHandle mesh,
-    Asset::AssetHandle material)
+    Asset::AssetHandle material,
+    Asset::AssetHandle shader = {})
 {
     return MeshRenderer3D{
         .mesh = mesh,
         .material = material,
+        .shader = shader,
         .localBounds = Render::RenderBoundingSphereInput{.radius = 0.5F},
         .visible = true,
     };
@@ -948,11 +1228,13 @@ TEST(SceneExtractTest, InactiveCameraIsIgnored)
 
 [[nodiscard]] SkinnedMeshRenderer3D fixtureSkinnedMesh(
     Asset::AssetHandle mesh,
-    Asset::AssetHandle material)
+    Asset::AssetHandle material,
+    Asset::AssetHandle shader = {})
 {
     return SkinnedMeshRenderer3D{
         .mesh = mesh,
         .material = material,
+        .shader = shader,
         .localBounds = Render::RenderBoundingSphereInput{.radius = 0.5F},
         .visible = true,
     };
@@ -1047,6 +1329,49 @@ struct TestMeshBindings final {
     u32 materialResolveCalls = 0;
 };
 
+// Stands for the fragment stage a cooked mesh names for itself, so it is keyed on the *mesh*
+// handle rather than a Shader handle. Kind is not checked against the store: the argument is a
+// StaticMesh or SkinnedMesh, and the Shader it names is known only to the cooked payload behind
+// this seam. An unbound mesh answers with an empty ref, meaning it names no default.
+struct TestMeshShaderDefaults final {
+    struct Binding final {
+        Asset::AssetHandle mesh{};
+        u32 key = 0;
+    };
+
+    explicit TestMeshShaderDefaults(Render::FrameResourceKind kind) noexcept : kind(kind) {}
+
+    [[nodiscard]] Asset::AssetFrameResourceResolver resolver() noexcept
+    {
+        return Asset::AssetFrameResourceResolver{.userData = this, .resolve = &resolve};
+    }
+
+    void bind(Asset::AssetHandle mesh, u32 key) noexcept
+    {
+        bindings[bindingCount++] = Binding{.mesh = mesh, .key = key};
+    }
+
+    [[nodiscard]] static Core::Result<Render::FrameResourceRef> resolve(
+        void* userData,
+        Asset::AssetHandle mesh,
+        Render::FrameResourceSink& sink) noexcept
+    {
+        auto& self = *static_cast<TestMeshShaderDefaults*>(userData);
+        ++self.resolveCalls;
+        for (usize index = 0; index < self.bindingCount; ++index) {
+            if (self.bindings[index].mesh == mesh) {
+                return internTestResource(sink, self.kind, self.bindings[index].key);
+            }
+        }
+        return Render::FrameResourceRef{};
+    }
+
+    Render::FrameResourceKind kind;
+    std::array<Binding, 4> bindings{};
+    usize bindingCount = 0;
+    u32 resolveCalls = 0;
+};
+
 struct TestSkinnedPoseProvider final {
     [[nodiscard]] SkinnedPose3DProvider provider() noexcept
     {
@@ -1070,7 +1395,7 @@ class SceneMeshAssetTest : public testing::Test {
   protected:
     void SetUp() override
     {
-        auto store = Asset::AssetStore::Create({.capacity = 7, .memoryResource = &memory_});
+        auto store = Asset::AssetStore::Create({.capacity = 8, .memoryResource = &memory_});
         ASSERT_TRUE(store.has_value()) << (store ? "" : store.error().message);
         store_.emplace(std::move(*store));
 
@@ -1080,18 +1405,21 @@ class SceneMeshAssetTest : public testing::Test {
         auto materialB = store_->beginQueued(fixtureAssetId(4), AssetFormat::AssetKind::Material);
         auto wrongKind = store_->beginQueued(fixtureAssetId(5), AssetFormat::AssetKind::Texture2D);
         auto skinnedMesh = store_->beginQueued(fixtureAssetId(6), AssetFormat::AssetKind::SkinnedMesh);
+        auto shader = store_->beginQueued(fixtureAssetId(7), AssetFormat::AssetKind::Shader);
         ASSERT_TRUE(meshA.has_value());
         ASSERT_TRUE(meshB.has_value());
         ASSERT_TRUE(materialA.has_value());
         ASSERT_TRUE(materialB.has_value());
         ASSERT_TRUE(wrongKind.has_value());
         ASSERT_TRUE(skinnedMesh.has_value());
+        ASSERT_TRUE(shader.has_value());
         meshA_ = *meshA;
         meshB_ = *meshB;
         materialA_ = *materialA;
         materialB_ = *materialB;
         wrongKind_ = *wrongKind;
         skinnedMesh_ = *skinnedMesh;
+        shader_ = *shader;
     }
 
     [[nodiscard]] Asset::AssetStore& store() noexcept { return *store_; }
@@ -1104,6 +1432,7 @@ class SceneMeshAssetTest : public testing::Test {
     Asset::AssetHandle materialB_{};
     Asset::AssetHandle wrongKind_{};
     Asset::AssetHandle skinnedMesh_{};
+    Asset::AssetHandle shader_{};
 };
 
 TEST_F(SceneMeshAssetTest, SetsClearsAndQueriesPerspectiveCameraAndMesh)
@@ -3020,6 +3349,339 @@ TEST_F(SceneMeshAssetTest, ExtractsSkinnedMeshAndCopiesTheProvidedPose)
     EXPECT_EQ(poses.resolveCalls, 1U);
     EXPECT_EQ(bindings.skinnedMeshResolveCalls, 1U);
     EXPECT_EQ(bindings.materialResolveCalls, 1U);
+}
+
+// One cooked Mesh3D fragment covers both draw kinds, so rigid and skinned components name the same
+// Shader asset and go through the same resolver pair. Asserting both in one frame is the point: a
+// per-item skinned ref that silently stayed empty would still submit, just with the engine program.
+TEST_F(SceneMeshAssetTest, ResolvesCustomShaderForRigidAndSkinnedMeshes)
+{
+    World world = makeWorld();
+    const EntityId camera = world.createEntity(translated(0.0F, 0.0F, 6.0F)).value();
+    ASSERT_TRUE(world.setPerspectiveCamera3D(camera, fixturePerspectiveCamera()));
+    const EntityId rigid = world.createEntity().value();
+    ASSERT_TRUE(world.setMeshRenderer3D(rigid, fixtureMesh(meshA_, materialA_, shader_)));
+    const EntityId skinned = world.createEntity().value();
+    ASSERT_TRUE(world.setSkinnedMeshRenderer3D(
+        skinned, fixtureSkinnedMesh(skinnedMesh_, materialA_, shader_)));
+
+    constexpr std::array<float, Render::SkinnedMesh3DPaletteFloatsPerJoint> Identity{
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1,
+    };
+    TestSkinnedPoseProvider poses{.palette = Identity};
+    TestMeshBindings bindings{.store = &store()};
+    bindings.bind(meshA_, 7);
+    bindings.bind(skinnedMesh_, 8);
+    bindings.bind(materialA_, 11);
+    TestShaderBindings programBindings{Render::FrameResourceKind::Shader};
+    programBindings.store = &store();
+    programBindings.bind(shader_, 41);
+    TestShaderBindings uniformBindings{Render::FrameResourceKind::ShaderUniforms};
+    uniformBindings.store = &store();
+    uniformBindings.bind(shader_, 42);
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame(Render::RenderSceneFrameParameters{
+        .primarySurfaceAspectRatio = 16.0F / 9.0F,
+    }));
+    Render::RenderSceneWriter writer = builder->writer();
+    ASSERT_TRUE(extractRenderSceneFromWorld(
+        world,
+        writer,
+        ExtractRenderSceneParams{
+            .surfaceViewport = {.pixelWidth = 1280, .pixelHeight = 720},
+            .shaderBindingResolver = programBindings.resolver(),
+            .shaderUniformBindingResolver = uniformBindings.resolver(),
+            .mesh3DBindingResolver = bindings.meshResolver(),
+            .material3DBindingResolver = bindings.materialResolver(),
+            .skinnedMesh3DBindingResolver = bindings.skinnedMeshResolver(),
+            .skinnedPose3DProvider = poses.provider(),
+        }));
+
+    auto view = builder->commit();
+    ASSERT_TRUE(view.has_value()) << (view ? "" : view.error().message);
+    ASSERT_EQ(view->meshes3D().size(), 1U);
+    ASSERT_EQ(view->skinnedMeshes3D().size(), 1U);
+    EXPECT_EQ(
+        frameResourceBindingKey(view->meshes3D()[0].shader, Render::FrameResourceKind::Shader),
+        41U);
+    EXPECT_EQ(frameResourceBindingKey(view->meshes3D()[0].shaderUniforms,
+                                      Render::FrameResourceKind::ShaderUniforms),
+              42U);
+    EXPECT_EQ(frameResourceBindingKey(view->skinnedMeshes3D()[0].shader,
+                                      Render::FrameResourceKind::Shader),
+              41U);
+    EXPECT_EQ(frameResourceBindingKey(view->skinnedMeshes3D()[0].shaderUniforms,
+                                      Render::FrameResourceKind::ShaderUniforms),
+              42U);
+    EXPECT_EQ(programBindings.resolveCalls, 2U);
+    EXPECT_EQ(uniformBindings.resolveCalls, 2U);
+}
+
+// Half a binding must never reach the packet: a program without its uniform slot fails closed at
+// submit, where returning an error is no longer possible. Mesh3D reports UnresolvedMesh, not
+// UnresolvedSprite, so the caller can tell which component tree is misconfigured.
+TEST_F(SceneMeshAssetTest, Mesh3DShaderWithoutUniformResolverIsUnresolvedMesh)
+{
+    const auto extract = [this](bool skinnedComponent) {
+        World world = makeWorld();
+        const EntityId camera = world.createEntity(translated(0.0F, 0.0F, 6.0F)).value();
+        EXPECT_TRUE(world.setPerspectiveCamera3D(camera, fixturePerspectiveCamera()));
+        const EntityId entity = world.createEntity().value();
+        if (skinnedComponent) {
+            EXPECT_TRUE(world.setSkinnedMeshRenderer3D(
+                entity, fixtureSkinnedMesh(skinnedMesh_, materialA_, shader_)));
+        } else {
+            EXPECT_TRUE(world.setMeshRenderer3D(
+                entity, fixtureMesh(meshA_, materialA_, shader_)));
+        }
+
+        constexpr std::array<float, Render::SkinnedMesh3DPaletteFloatsPerJoint> Identity{
+            1, 0, 0, 0,
+            0, 1, 0, 0,
+            0, 0, 1, 0,
+            0, 0, 0, 1,
+        };
+        TestSkinnedPoseProvider poses{.palette = Identity};
+        TestMeshBindings bindings{.store = &store()};
+        bindings.bind(meshA_, 7);
+        bindings.bind(skinnedMesh_, 8);
+        bindings.bind(materialA_, 11);
+        TestShaderBindings programBindings{Render::FrameResourceKind::Shader};
+        programBindings.store = &store();
+        programBindings.bind(shader_, 41);
+
+        auto builder = Render::RenderSceneBuilder::Create();
+        EXPECT_TRUE(builder.has_value());
+        EXPECT_TRUE(builder->beginFrame(Render::RenderSceneFrameParameters{
+            .primarySurfaceAspectRatio = 16.0F / 9.0F,
+        }));
+        Render::RenderSceneWriter writer = builder->writer();
+        const Core::Status status = extractRenderSceneFromWorld(
+            world,
+            writer,
+            ExtractRenderSceneParams{
+                .surfaceViewport = {.pixelWidth = 1280, .pixelHeight = 720},
+                .shaderBindingResolver = programBindings.resolver(),
+                .mesh3DBindingResolver = bindings.meshResolver(),
+                .material3DBindingResolver = bindings.materialResolver(),
+                .skinnedMesh3DBindingResolver = bindings.skinnedMeshResolver(),
+                .skinnedPose3DProvider = poses.provider(),
+            });
+        // The pair is checked before either resolver runs.
+        EXPECT_EQ(programBindings.resolveCalls, 0U);
+        builder->rollback();
+        return status;
+    };
+
+    const Core::Status rigid = extract(false);
+    ASSERT_FALSE(rigid);
+    EXPECT_EQ(rigid.error().code, SceneErrorCode::UnresolvedMesh);
+
+    const Core::Status skinned = extract(true);
+    ASSERT_FALSE(skinned);
+    EXPECT_EQ(skinned.error().code, SceneErrorCode::UnresolvedMesh);
+}
+
+// A cooked mesh may name its own default fragment stage. That resolver is keyed on the *mesh*
+// handle, not a shader handle, because only the mesh's cooked dependencies know which Shader it
+// named. Both draw kinds go through it, since one fragment binary links against both engine
+// vertex stages.
+TEST_F(SceneMeshAssetTest, CookedMeshDefaultShaderAppliesWhenComponentNamesNone)
+{
+    World world = makeWorld();
+    const EntityId camera = world.createEntity(translated(0.0F, 0.0F, 6.0F)).value();
+    ASSERT_TRUE(world.setPerspectiveCamera3D(camera, fixturePerspectiveCamera()));
+    const EntityId rigid = world.createEntity().value();
+    ASSERT_TRUE(world.setMeshRenderer3D(rigid, fixtureMesh(meshA_, materialA_)));
+    const EntityId skinned = world.createEntity().value();
+    ASSERT_TRUE(world.setSkinnedMeshRenderer3D(
+        skinned, fixtureSkinnedMesh(skinnedMesh_, materialA_)));
+
+    constexpr std::array<float, Render::SkinnedMesh3DPaletteFloatsPerJoint> Identity{
+        1, 0, 0, 0,
+        0, 1, 0, 0,
+        0, 0, 1, 0,
+        0, 0, 0, 1,
+    };
+    TestSkinnedPoseProvider poses{.palette = Identity};
+    TestMeshBindings bindings{.store = &store()};
+    bindings.bind(meshA_, 7);
+    bindings.bind(skinnedMesh_, 8);
+    bindings.bind(materialA_, 11);
+    // Keyed on the mesh handles, and deliberately different keys per mesh so a resolver that
+    // ignored its argument would be visible.
+    TestMeshShaderDefaults defaultPrograms{Render::FrameResourceKind::Shader};
+    defaultPrograms.bind(meshA_, 51);
+    defaultPrograms.bind(skinnedMesh_, 53);
+    TestMeshShaderDefaults defaultUniforms{Render::FrameResourceKind::ShaderUniforms};
+    defaultUniforms.bind(meshA_, 52);
+    defaultUniforms.bind(skinnedMesh_, 54);
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame(Render::RenderSceneFrameParameters{
+        .primarySurfaceAspectRatio = 16.0F / 9.0F,
+    }));
+    Render::RenderSceneWriter writer = builder->writer();
+    ASSERT_TRUE(extractRenderSceneFromWorld(
+        world,
+        writer,
+        ExtractRenderSceneParams{
+            .surfaceViewport = {.pixelWidth = 1280, .pixelHeight = 720},
+            .mesh3DDefaultShaderBindingResolver = defaultPrograms.resolver(),
+            .mesh3DDefaultShaderUniformBindingResolver = defaultUniforms.resolver(),
+            .mesh3DBindingResolver = bindings.meshResolver(),
+            .material3DBindingResolver = bindings.materialResolver(),
+            .skinnedMesh3DBindingResolver = bindings.skinnedMeshResolver(),
+            .skinnedPose3DProvider = poses.provider(),
+        }));
+
+    auto view = builder->commit();
+    ASSERT_TRUE(view.has_value()) << (view ? "" : view.error().message);
+    ASSERT_EQ(view->meshes3D().size(), 1U);
+    ASSERT_EQ(view->skinnedMeshes3D().size(), 1U);
+    EXPECT_EQ(
+        frameResourceBindingKey(view->meshes3D()[0].shader, Render::FrameResourceKind::Shader),
+        51U);
+    EXPECT_EQ(frameResourceBindingKey(view->meshes3D()[0].shaderUniforms,
+                                      Render::FrameResourceKind::ShaderUniforms),
+              52U);
+    EXPECT_EQ(frameResourceBindingKey(view->skinnedMeshes3D()[0].shader,
+                                      Render::FrameResourceKind::Shader),
+              53U);
+    EXPECT_EQ(frameResourceBindingKey(view->skinnedMeshes3D()[0].shaderUniforms,
+                                      Render::FrameResourceKind::ShaderUniforms),
+              54U);
+}
+
+// The component handle wins. Otherwise an author could not override a fragment stage the cooked
+// mesh had baked in, which is the whole point of keeping the component field.
+TEST_F(SceneMeshAssetTest, ComponentShaderOverridesTheCookedMeshDefault)
+{
+    World world = makeWorld();
+    const EntityId camera = world.createEntity(translated(0.0F, 0.0F, 6.0F)).value();
+    ASSERT_TRUE(world.setPerspectiveCamera3D(camera, fixturePerspectiveCamera()));
+    const EntityId rigid = world.createEntity().value();
+    ASSERT_TRUE(world.setMeshRenderer3D(rigid, fixtureMesh(meshA_, materialA_, shader_)));
+
+    TestMeshBindings bindings{.store = &store()};
+    bindings.bind(meshA_, 7);
+    bindings.bind(materialA_, 11);
+    TestShaderBindings programBindings{Render::FrameResourceKind::Shader};
+    programBindings.store = &store();
+    programBindings.bind(shader_, 41);
+    TestShaderBindings uniformBindings{Render::FrameResourceKind::ShaderUniforms};
+    uniformBindings.store = &store();
+    uniformBindings.bind(shader_, 42);
+    TestMeshShaderDefaults defaultPrograms{Render::FrameResourceKind::Shader};
+    defaultPrograms.bind(meshA_, 51);
+    TestMeshShaderDefaults defaultUniforms{Render::FrameResourceKind::ShaderUniforms};
+    defaultUniforms.bind(meshA_, 52);
+
+    auto builder = Render::RenderSceneBuilder::Create();
+    ASSERT_TRUE(builder.has_value());
+    ASSERT_TRUE(builder->beginFrame(Render::RenderSceneFrameParameters{
+        .primarySurfaceAspectRatio = 16.0F / 9.0F,
+    }));
+    Render::RenderSceneWriter writer = builder->writer();
+    ASSERT_TRUE(extractRenderSceneFromWorld(
+        world,
+        writer,
+        ExtractRenderSceneParams{
+            .surfaceViewport = {.pixelWidth = 1280, .pixelHeight = 720},
+            .shaderBindingResolver = programBindings.resolver(),
+            .shaderUniformBindingResolver = uniformBindings.resolver(),
+            .mesh3DDefaultShaderBindingResolver = defaultPrograms.resolver(),
+            .mesh3DDefaultShaderUniformBindingResolver = defaultUniforms.resolver(),
+            .mesh3DBindingResolver = bindings.meshResolver(),
+            .material3DBindingResolver = bindings.materialResolver(),
+        }));
+
+    auto view = builder->commit();
+    ASSERT_TRUE(view.has_value()) << (view ? "" : view.error().message);
+    ASSERT_EQ(view->meshes3D().size(), 1U);
+    EXPECT_EQ(
+        frameResourceBindingKey(view->meshes3D()[0].shader, Render::FrameResourceKind::Shader),
+        41U);
+    EXPECT_EQ(frameResourceBindingKey(view->meshes3D()[0].shaderUniforms,
+                                      Render::FrameResourceKind::ShaderUniforms),
+              42U);
+    // The cooked default must not even be consulted, or a mesh whose baked stage failed to load
+    // could fail a draw the author had already redirected somewhere valid.
+    EXPECT_EQ(defaultPrograms.resolveCalls, 0U);
+    EXPECT_EQ(defaultUniforms.resolveCalls, 0U);
+}
+
+// A mesh that names no default is the common case and must keep the engine fragment, and a mesh
+// whose default resolves only half a pair is a defect: the program would fail closed at submit.
+TEST_F(SceneMeshAssetTest, CookedMeshDefaultIsOptionalButNeverHalfResolved)
+{
+    const auto extract = [this](bool bindProgram, bool bindUniforms,
+                                Render::FrameResourceRef& outShader) {
+        World world = makeWorld();
+        const EntityId camera = world.createEntity(translated(0.0F, 0.0F, 6.0F)).value();
+        EXPECT_TRUE(world.setPerspectiveCamera3D(camera, fixturePerspectiveCamera()));
+        const EntityId rigid = world.createEntity().value();
+        EXPECT_TRUE(world.setMeshRenderer3D(rigid, fixtureMesh(meshA_, materialA_)));
+
+        TestMeshBindings bindings{.store = &store()};
+        bindings.bind(meshA_, 7);
+        bindings.bind(materialA_, 11);
+        TestMeshShaderDefaults defaultPrograms{Render::FrameResourceKind::Shader};
+        TestMeshShaderDefaults defaultUniforms{Render::FrameResourceKind::ShaderUniforms};
+        if (bindProgram) {
+            defaultPrograms.bind(meshA_, 51);
+        }
+        if (bindUniforms) {
+            defaultUniforms.bind(meshA_, 52);
+        }
+
+        auto builder = Render::RenderSceneBuilder::Create();
+        EXPECT_TRUE(builder.has_value());
+        EXPECT_TRUE(builder->beginFrame(Render::RenderSceneFrameParameters{
+            .primarySurfaceAspectRatio = 16.0F / 9.0F,
+        }));
+        Render::RenderSceneWriter writer = builder->writer();
+        const Core::Status status = extractRenderSceneFromWorld(
+            world,
+            writer,
+            ExtractRenderSceneParams{
+                .surfaceViewport = {.pixelWidth = 1280, .pixelHeight = 720},
+                .mesh3DDefaultShaderBindingResolver = defaultPrograms.resolver(),
+                .mesh3DDefaultShaderUniformBindingResolver = defaultUniforms.resolver(),
+                .mesh3DBindingResolver = bindings.meshResolver(),
+                .material3DBindingResolver = bindings.materialResolver(),
+            });
+        if (status) {
+            auto view = builder->commit();
+            EXPECT_TRUE(view.has_value());
+            if (view && view->meshes3D().size() == 1U) {
+                outShader = view->meshes3D()[0].shader;
+            }
+            return status;
+        }
+        builder->rollback();
+        return status;
+    };
+
+    Render::FrameResourceRef noDefault{};
+    const Core::Status names = extract(false, false, noDefault);
+    ASSERT_TRUE(names) << names.error().message;
+    EXPECT_FALSE(noDefault.hasValue());
+
+    Render::FrameResourceRef unused{};
+    const Core::Status programOnly = extract(true, false, unused);
+    ASSERT_FALSE(programOnly);
+    EXPECT_EQ(programOnly.error().code, SceneErrorCode::UnresolvedMesh);
+
+    const Core::Status uniformsOnly = extract(false, true, unused);
+    ASSERT_FALSE(uniformsOnly);
+    EXPECT_EQ(uniformsOnly.error().code, SceneErrorCode::UnresolvedMesh);
 }
 
 TEST_F(SceneMeshAssetTest, SkinnedMeshExtractionFailsClosedForMissingOrMalformedPose)

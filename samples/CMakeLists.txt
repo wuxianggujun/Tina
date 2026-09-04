@@ -2,9 +2,13 @@
 # because the Android APK links its scene library while building with examples off -- and adding it in
 # both places would define the same targets twice.
 #
-# Every sample below is a gate program: fixed frame count, printed evidence, exit code. Eight cannot
-# build for Android at all, since their content and their GLFW composition root share one translation
-# unit. The gallery exists so an interactive scene is written once and both hosts run it.
+# Every sample below follows the template layout: portable content in core/, the composition root in
+# platforms/<frontend>/, source assets in assets/. Each sample's own CMakeLists.txt adds those
+# subdirectories, so this file only decides which samples the current feature set can build.
+#
+# A sample with no core/ is not an exception to the split -- it is a claim that the program is
+# nothing but a composition root, which is what tina_verify_game_content_portable() would have no
+# content library to check.
 
 add_subdirectory(null)
 add_subdirectory(asset)
@@ -43,6 +47,25 @@ if(TINA_BUILD_PLATFORM_GLFW AND TINA_BUILD_RENDER_BGFX)
     add_subdirectory(3d_bgfx)
     add_subdirectory(3d_product)
     add_subdirectory(2d_bgfx)
+    # First consumer of the custom Sprite2D fragment shader path. Cooks its own shader payload
+    # with tina_assetc at build time, so it needs both that tool and a host shaderc.
+    add_subdirectory(2d_custom_shader)
+    # One cooked program drawn with three independent uniform value sets, sampling a real uploaded
+    # texture. Covers what 2d_custom_shader left unproven: per-material uniform isolation, batch
+    # splitting on the uniform key, and the sampler path.
+    add_subdirectory(2d_shader_materials)
+    # Custom fragment that consumes the engine lighting/normal contract (point lights, shadow
+    # segments, s_normalTex) rather than replacing it. Cooks its own payload at build time.
+    add_subdirectory(2d_shader_lighting)
+    # Two-bone IK driving a skinned mesh. The first sample to link Tina::Animation3D, which
+    # until now was reachable only from tests: it pairs the solver's numeric result with a
+    # frame capture, because a correct pose can still be lost in the palette upload, the
+    # extraction copy or the skinned vertex program.
+    add_subdirectory(3d_ik_chain)
+    # The other half of Tina::Animation3D: ClipSampler3D, BlendTree3D and AnimationGraph3D, which
+    # 3d_ik_chain leaves untouched because it links the module for solveTwoBoneIk alone. Desktop
+    # rather than headless because the pixel half of its evidence needs a real device to capture.
+    add_subdirectory(3d_animation_graph)
     add_subdirectory(2d_catalog)
     add_subdirectory(2d_tilemap_bgfx)
     # Procedurally generated destructible tile world; interactive, not a gate program.

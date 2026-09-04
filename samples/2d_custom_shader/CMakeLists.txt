@@ -1,0 +1,3 @@
+add_subdirectory(core)
+add_subdirectory(platforms/desktop)
+tina_verify_game_content_portable(tina_sample_2d_custom_shader_core)

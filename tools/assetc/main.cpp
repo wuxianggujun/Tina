@@ -9,6 +9,8 @@
 #include <tina/asset_format/SourceImportMetadataFormat.hpp>
 #include <tina/asset_format/SpritePayload.hpp>
 #include <tina/asset_format/Texture2DPayload.hpp>
+#include "ShaderCompile.hpp"
+
 #include "core/io/PathUtil.hpp"
 
 #include <tina/core/id/AssetId.hpp>
@@ -49,6 +51,15 @@ struct Options final {
     std::string importStatePath;
     std::string stageOutRoot;
     std::string stageImportStatePath;
+    // Shader compile mode. Produces a Shader payload file for a recipe to cook; it does not touch a
+    // catalog, so it is mutually exclusive with every option above.
+    std::string shaderSource;
+    std::string shaderOutput;
+    std::string shaderKindName;
+    std::string shadercPath;
+    std::string shaderVaryingDef;
+    std::vector<std::string> shaderIncludeDirs{};
+    std::vector<Tina::AssetFormat::ShaderBinaryProfile> shaderProfiles{};
 };
 
 struct PreCookProbe final {
@@ -172,6 +183,18 @@ void printUsage()
         << "  --stage-import-state <path> state file bound to --stage-out\n"
         << "  --help\n"
         << "\n"
+        << "tina_assetc --shader-source <fs.sc> --shader-out <payload> --shader-kind <Sprite2D|Mesh3D>\n"
+        << "            --shaderc <path> --shader-varying-def <def.sc> --shader-include <dir> ...\n"
+        << "            [--shader-profile <glsl120|spv|dxbc|essl300>] ...\n"
+        << "  Compiles one custom fragment shader into a Shader payload, then cook it with\n"
+        << "  `asset Shader <32hex> <payload>` in a recipe.\n"
+        << "  The source must #include the contract header for its kind and declare its own $input\n"
+        << "  line; --shader-include must name the directory holding that header and bgfx_shader.sh.\n"
+        << "  --shader-profile may repeat and defaults to the host set (glsl120, spv, and dxbc on\n"
+        << "  Windows). Pass essl300 when cooking for the GLES renderer that\n"
+        << "  TINA_RENDER_BGFX_MOBILE_SHADERS builds the engine's own shaders for.\n"
+        << "  This mode writes no catalog, so it cannot be combined with --out.\n"
+        << "\n"
         << "Default fixture (no --recipe): Texture2D 2x2 RGBA mipped + Sprite full-UV.\n"
         << "Recipe lines:\n"
         << "  platform WindowsX64\n"
@@ -183,7 +206,10 @@ void printUsage()
         << "  tileset <32hex> <texture32hex> <tilePxW> <tilePxH>\n"
         << "  tile <localId> <flags> <u0> <v0> <u1> <v1>\n"
         << "  tilemap <32hex> <tileset32hex> <w> <h> <cellSize>\n"
-        << "  row <localId>...\n";
+        << "  row <localId>...\n"
+        << "  staticmesh <32hex> cube [shader <shader32hex>]\n"
+        << "      The optional shader is the mesh's own default Mesh3D fragment stage;\n"
+        << "      MeshRenderer3D::shader still overrides it per instance.\n";
 }
 
 [[nodiscard]] int parseArgs(int argc, char** argv, Options& options)
@@ -233,6 +259,47 @@ void printUsage()
             options.stageImportStatePath.assign(*value);
             continue;
         }
+        if (const auto value = scanner.value("--shaderc"))
+        {
+            options.shadercPath.assign(*value);
+            continue;
+        }
+        if (const auto value = scanner.value("--shader-source"))
+        {
+            options.shaderSource.assign(*value);
+            continue;
+        }
+        if (const auto value = scanner.value("--shader-out"))
+        {
+            options.shaderOutput.assign(*value);
+            continue;
+        }
+        if (const auto value = scanner.value("--shader-kind"))
+        {
+            options.shaderKindName.assign(*value);
+            continue;
+        }
+        if (const auto value = scanner.value("--shader-varying-def"))
+        {
+            options.shaderVaryingDef.assign(*value);
+            continue;
+        }
+        if (const auto value = scanner.value("--shader-include"))
+        {
+            options.shaderIncludeDirs.emplace_back(*value);
+            continue;
+        }
+        if (const auto value = scanner.value("--shader-profile"))
+        {
+            const auto profile = Tina::AssetFormat::parseShaderBinaryProfileName(*value);
+            if (!profile.has_value())
+            {
+                std::cerr << "unknown --shader-profile: " << *value << '\n';
+                return 2;
+            }
+            options.shaderProfiles.push_back(*profile);
+            continue;
+        }
         if (scanner.failed())
         {
             std::cerr << "missing value for " << scanner.failedOption() << '\n';
@@ -241,6 +308,56 @@ void printUsage()
         std::cerr << "unknown argument: " << scanner.token() << '\n';
         printUsage();
         return 2;
+    }
+    const bool anyShaderOption =
+        !options.shaderSource.empty() || !options.shaderOutput.empty() ||
+        !options.shaderKindName.empty() || !options.shadercPath.empty() ||
+        !options.shaderVaryingDef.empty() || !options.shaderIncludeDirs.empty() ||
+        !options.shaderProfiles.empty();
+    if (anyShaderOption)
+    {
+        // Rejected rather than ignored: a shader compile that also published a catalog would give
+        // two very different meanings to one exit code.
+        if (!options.outRoot.empty() || !options.imports.empty() || !options.sourceRoot.empty() ||
+            !options.importStatePath.empty() || !options.stageOutRoot.empty() ||
+            !options.stageImportStatePath.empty())
+        {
+            std::cerr << "shader compile options cannot be combined with catalog cook options\n";
+            return 2;
+        }
+        if (options.shaderSource.empty() || options.shaderOutput.empty() ||
+            options.shaderKindName.empty() || options.shadercPath.empty() ||
+            options.shaderVaryingDef.empty() || options.shaderIncludeDirs.empty())
+        {
+            std::cerr << "shader compile requires --shader-source, --shader-out, --shader-kind, "
+                         "--shaderc, --shader-varying-def and at least one --shader-include\n";
+            return 2;
+        }
+        if (Tina::AssetC::parseShaderKindName(options.shaderKindName) ==
+            Tina::AssetFormat::ShaderKind::Invalid)
+        {
+            std::cerr << "--shader-kind must be Sprite2D or Mesh3D\n";
+            return 2;
+        }
+        // Sorted ascending and duplicate-free is the payload's own encoding rule, so a recipe may
+        // list --shader-profile in any order and still cook one canonical payload.
+        std::sort(options.shaderProfiles.begin(), options.shaderProfiles.end());
+        if (std::adjacent_find(options.shaderProfiles.begin(), options.shaderProfiles.end()) !=
+            options.shaderProfiles.end())
+        {
+            std::cerr << "--shader-profile was repeated\n";
+            return 2;
+        }
+        for (const auto profile : options.shaderProfiles)
+        {
+            if (!Tina::AssetC::isShaderProfileSupportedOnHost(profile))
+            {
+                std::cerr << "--shader-profile is not supported on this host: "
+                          << Tina::AssetFormat::shaderBinaryProfileName(profile) << '\n';
+                return 2;
+            }
+        }
+        return 0;
     }
     if (options.outRoot.empty())
     {
@@ -626,6 +743,43 @@ stageConfig(std::pmr::memory_resource& memory, bool verifyTypedPayload)
     };
 }
 
+[[nodiscard]] int runShaderCompile(const Options& options)
+{
+    auto compiled = Tina::AssetC::compileShaderPayload(Tina::AssetC::ShaderCompileRequest{
+        .shadercPath = options.shadercPath,
+        .sourcePath = options.shaderSource,
+        .varyingDefPath = options.shaderVaryingDef,
+        .outputPath = options.shaderOutput,
+        .shaderKind = Tina::AssetC::parseShaderKindName(options.shaderKindName),
+        .includeDirs = options.shaderIncludeDirs,
+        .profiles = options.shaderProfiles,
+    });
+    if (!compiled)
+    {
+        printError(compiled.error());
+        return 1;
+    }
+    Tina::Core::JsonWriter writer(std::cout);
+    writer.beginObject();
+    writer.member("status", "ok");
+    writer.member("mode", "shader");
+    writer.member("shaderKind", options.shaderKindName);
+    writer.member("payloadPath", options.shaderOutput);
+    writer.member("payloadBytes", compiled->payloadByteCount);
+    writer.beginArrayMember("profiles");
+    for (const auto& profile : compiled->profiles)
+    {
+        writer.beginObjectElement();
+        writer.member("profile", Tina::AssetFormat::shaderBinaryProfileName(profile.profile));
+        writer.member("bytes", profile.byteCount);
+        writer.endObject();
+    }
+    writer.endArray();
+    writer.endObject();
+    std::cout << '\n';
+    return 0;
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -634,6 +788,11 @@ int main(int argc, char** argv)
     if (const int parseResult = parseArgs(argc, argv, options); parseResult != 0)
     {
         return parseResult == 2 ? 2 : 1;
+    }
+
+    if (!options.shaderSource.empty())
+    {
+        return runShaderCompile(options);
     }
 
     const std::string_view mode = modeName(options);

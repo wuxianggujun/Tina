@@ -29,6 +29,7 @@ namespace Tina::Asset {
 
 class Sprite2DBindingRegistry;
 class Mesh3DBindingRegistry;
+class ShaderBindingRegistry;
 
 struct AssetSystemConfig final {
     Core::usize storeCapacity = 0;
@@ -71,6 +72,7 @@ struct AssetPumpStats final {
 struct CatalogReloadBindings final {
     std::span<Sprite2DBindingRegistry*> sprite2D{};
     std::span<Mesh3DBindingRegistry*> mesh3D{};
+    std::span<ShaderBindingRegistry*> shader{};
 };
 
 struct CatalogReloadConfig final {
@@ -197,6 +199,10 @@ class AssetSystem final {
     // Backend rejection and every pre-commit failure preserve both owners.
     [[nodiscard]] Core::Status retireGpuMesh(Render::IRenderDevice& device, AssetLease& lease,
                                              Render::GpuMeshId& mesh);
+    [[nodiscard]] Core::Status retireGpuShader(Render::IRenderDevice& device, AssetHandle handle,
+                                                Render::GpuShaderId shader);
+    [[nodiscard]] Core::Status retireGpuShader(Render::IRenderDevice& device, AssetLease& lease,
+                                                Render::GpuShaderId& shader);
     [[nodiscard]] Core::Status drainGpuRetirements() noexcept;
 
   private:

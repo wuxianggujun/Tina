@@ -19,7 +19,7 @@
 | `src/scene/ExtractRenderScene.cpp:94,120` | 局部 `WorldBoundingSphere` 与球-视锥剔除 |
 | `src/scene/Animator3D.cpp:95,113` | 手写 4x4 乘法与 `shortestPathSlerp` |
 | `src/asset/PhysicsNavigationSync2D.cpp:160` | 手写旋转保守 AABB |
-| `samples/3d_product/Product3DUI.cpp:37` | 局部 `struct Rect` |
+| `samples/3d_product/core/Product3DUI.cpp:37`（撰写本 ADR 时为 `samples/3d_product/Product3DUI.cpp`） | 局部 `struct Rect`（已迁至 `Math::Rect` 别名） |
 
 三份独立的 `Quaternion` 定义是本 ADR 的直接动因：它们不能互相传递，每个边界都要逐字段重装，
 而 `rotate` 的两种实现（sandwich 乘积 vs twice-cross）已经产生了约 1 ULP 的差异。

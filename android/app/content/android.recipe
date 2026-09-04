@@ -1,0 +1,20 @@
+# The catalog the APK ships, cooked on the build host and extracted on first launch.
+#
+# `Any` rather than WindowsX64: this catalog is consumed on a device, and a cooked
+# object records its target platform in the header. Nothing in the cooker branches on
+# the value and no loader validates it beyond "is it a known enum", so naming a desktop
+# platform here would be a lie that happens to work. `Any` is the honest description of
+# a catalog whose objects are byte-identical everywhere -- which these are, because the
+# only formats used are uncompressed RGBA8 and a UV rect.
+platform Any
+
+# A 2x2 inline texture, RRGGBBAA left to right then top to bottom. Inline so this file
+# needs no image on disk, which is what lets the Android cook run from a clean checkout.
+#
+# The four corners are deliberately different colours: a device screenshot can then tell
+# "the catalog loaded and the sampler is right" from "something drew a flat quad".
+texture2d 0100000000000000000000000000001a 2 2 FFFFFFFF FF4C4CFF 4CFF4CFF 4C4CFFFF
+
+# A sprite covering the whole texture. Present so the catalog carries a dependency edge:
+# a single standalone asset would load even if dependency resolution were broken.
+sprite 0200000000000000000000000000002a 0100000000000000000000000000001a 0 0 1 1 0.5 0.5 32

@@ -22,8 +22,8 @@ Tina 文档按用途分为四类，避免把设计目标、当前事实和一次
 | 2 | [架构总览](architecture.md) | 模块依赖、所有权、启动事务、每帧顺序 |
 | 3 | [Public API](public-api.md) | `Desktop::CreateEngine`、Application/State、借用寿命 |
 | 4 | [Runtime](runtime.md) | 帧 pipeline、State 栈、policy 两套语义、输入四段式 |
-| 5 | 跑 sample | `tina_sample_ui_showcase` / `tina_sample_2d` / `tina_sample_3d`（命令见 [构建](building.md)） |
-| 6 | 读 sample 源码 | UI 工作台：`samples/ui_showcase`；2D 产品接线：`samples/2d_tilemap_bgfx`（含 PauseOverlay policy）；3D：`samples/3d*` |
+| 5 | 跑 sample | `tina_sample_ui_showcase` / `tina_sample_2d` / `tina_sample_2d_custom_shader` / `tina_sample_3d`（命令见 [构建](building.md)） |
+| 6 | 读 sample 源码 | UI 工作台：`samples/ui_showcase`；2D 产品接线：`samples/2d_tilemap_bgfx`（含 PauseOverlay policy）；Sprite2D 自定义 fragment：`samples/2d_custom_shader`（cook/upload/bind + uniform）→ `samples/2d_shader_materials`（一 program 三 material）→ `samples/2d_shader_lighting`（自定义 fragment 消费引擎 lighting/normal 契约）；3D：`samples/3d*` |
 
 改契约或公开头前：对照 [design-freeze](design-freeze.md) 与对应 ADR；验证按 [testing](testing.md) 直接跑 GoogleTest executable。
 
@@ -60,11 +60,14 @@ Tina 文档按用途分为四类，避免把设计目标、当前事实和一次
 | 改 2D/3D Editor、Project Browser/document tabs、World/TileMap/SpriteAnimation authoring、undo、保存、Timeline 或 viewport | [Editor 2D / 3D](editor-2d.md) · [World2D 序列化](world2d-serialization.md) · [资源](resources.md) · [3D](game-3d.md) |
 | 改 Catalog / Cook / Handle | [资源](resources.md) |
 | 改 submit / bgfx 边界 | [Render](rendering.md) |
+| 写 Sprite2D 自定义 fragment | [Render](rendering.md) 的「Sprite2D 自定义 fragment」· [资源](resources.md) · `samples/2d_custom_shader` · `samples/2d_shader_materials`（per-material uniform 隔离）· `samples/2d_shader_lighting`（读 `s_normalTex` / `u_spriteLight*` / `u_spriteShadowSegments`）|
+| 写 Mesh3D 自定义 fragment（刚性或蒙皮） | [Render](rendering.md) 的「Mesh3D 自定义 fragment」· [Scene](scene-ecs.md) · `src/render/bgfx/shaders/tina_mesh3d.sh`（契约头，无 sample）|
 | 用向量/四元数/矩阵/包围盒/视锥，或加新几何类型 | [Math](math.md) · [ADR 0035](adr/0035-math-module-boundaries.md) |
 | 用 timer/tween/sequence，或让两个 gameplay owner 解耦通信 | [Gameplay 工具层](gameplay-tooling.md) · [ADR 0036](adr/0036-gameplay-tooling-boundaries.md) |
 | 做 3D 角色动画：crossfade / 状态机 / blend tree / layer+mask / root motion / IK | [3D 动画图](animation-3d.md) · [ADR 0037](adr/0037-animation3d-graph-boundaries.md) |
 | 查 `std::terminate`、崩溃或 Editor 致命退出 | [Core](core.md) · [Editor 2D / 3D](editor-2d.md) · [测试](testing.md) |
 | 选 preset / 跑门禁 | [构建](building.md) · [测试](testing.md) |
+| 想让玩法不重编 C++ 就能改（脚本） | [ADR 0045](adr/0045-script-module-boundaries.md)（Proposed，零实现）· [Gameplay 工具层](gameplay-tooling.md) |
 | 查“允许做什么” | [design-freeze](design-freeze.md) · [ADR](adr/README.md) |
 | 查“下一步做什么” | [Roadmap](roadmap.md) · [Backlog](backlog.md) |
 

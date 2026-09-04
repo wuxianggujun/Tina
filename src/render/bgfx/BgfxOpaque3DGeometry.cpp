@@ -181,6 +181,36 @@ Core::Status validateOpaque3DFrameResources(
             return Core::failure(Core::CoreErrorCode::Unsupported,
                                  "Mesh3D received an unsupported submesh index");
         }
+        if (item.shader)
+        {
+            const FrameResourceDescriptor* shader =
+                resources.resolve(item.shader, FrameResourceKind::Shader);
+            if (shader == nullptr ||
+                shader->deviceBindingKey > static_cast<u64>((std::numeric_limits<u32>::max)()))
+            {
+                return Core::failure(
+                    RenderErrorCode::InvalidFrameResource,
+                    "Mesh3D shader ref is stale, cross-packet, wrong-kind, or out of binding range");
+            }
+        }
+        if (item.shaderUniforms)
+        {
+            if (!item.shader)
+            {
+                return Core::failure(RenderErrorCode::InvalidFrameResource,
+                                     "Mesh3D shader uniform values require a custom shader ref");
+            }
+            const FrameResourceDescriptor* uniforms =
+                resources.resolve(item.shaderUniforms, FrameResourceKind::ShaderUniforms);
+            if (uniforms == nullptr ||
+                uniforms->deviceBindingKey > static_cast<u64>((std::numeric_limits<u32>::max)()))
+            {
+                return Core::failure(
+                    RenderErrorCode::InvalidFrameResource,
+                    "Mesh3D shader uniform ref is stale, cross-packet, wrong-kind, or out of "
+                    "binding range");
+            }
+        }
     }
 
     for (usize itemIndex = 0; itemIndex < skinnedItems.size(); ++itemIndex)
@@ -204,6 +234,38 @@ Core::Status validateOpaque3DFrameResources(
         if (item.alphaMode != expectedAlphaMode)
         {
             return invalidScene("Skinned Mesh3D alpha partition is invalid");
+        }
+        if (item.shader)
+        {
+            const FrameResourceDescriptor* shader =
+                resources.resolve(item.shader, FrameResourceKind::Shader);
+            if (shader == nullptr ||
+                shader->deviceBindingKey > static_cast<u64>((std::numeric_limits<u32>::max)()))
+            {
+                return Core::failure(
+                    RenderErrorCode::InvalidFrameResource,
+                    "Skinned Mesh3D shader ref is stale, cross-packet, wrong-kind, or out of "
+                    "binding range");
+            }
+        }
+        if (item.shaderUniforms)
+        {
+            if (!item.shader)
+            {
+                return Core::failure(
+                    RenderErrorCode::InvalidFrameResource,
+                    "Skinned Mesh3D shader uniform values require a custom shader ref");
+            }
+            const FrameResourceDescriptor* uniforms =
+                resources.resolve(item.shaderUniforms, FrameResourceKind::ShaderUniforms);
+            if (uniforms == nullptr ||
+                uniforms->deviceBindingKey > static_cast<u64>((std::numeric_limits<u32>::max)()))
+            {
+                return Core::failure(
+                    RenderErrorCode::InvalidFrameResource,
+                    "Skinned Mesh3D shader uniform ref is stale, cross-packet, wrong-kind, or out "
+                    "of binding range");
+            }
         }
     }
 

@@ -143,7 +143,7 @@ requires passing -msimd128 (or -mrelaxed-simd)!
 
 ## 浏览器验证（2026-09-02，Chrome headless）
 
-新增 `samples/web/`（`main.cpp` + `shell.html` + `verify_browser.mjs`），用 `emscripten_set_main_loop` 驱动 `EngineHost::tick()`。
+新增 `samples/web/`（`platforms/web/WebMain.cpp` + `platforms/web/shell.html` + `verify_browser.mjs`），用 `emscripten_set_main_loop` 驱动 `EngineHost::tick()`。
 
 **2026-09-02 更新：已从 Null 渲染设备换成 bgfx/WebGL2。** 原先刻意用 Null 是因为画面空白会在"没跑帧"和"跑了帧但没画"之间无法二义；现在 gate 直接读回 canvas 像素，这个二义性由像素判据消掉了，不再需要靠 Null 来规避。
 
@@ -213,9 +213,9 @@ bgfx 通路落地、且 sample 开始画贴图 sprite 之后（同日）的实�
 
 **bgfx 渲染路径会撑爆 emscripten 的默认栈。** emscripten 默认 `STACK_SIZE = 64 KiB`（`upstream/emscripten/src/settings.js:113`），而 bgfx 渲染路径第一帧就溢出：`preflightOpaque3D` 按值持有四级 shadow cascade 的矩阵，它的被调者又嵌套若干同样形状的栈帧。桌面目标默认有 1 MB 以上所以从来不会碰到。
 
-表现极具误导性：**和"引擎没启动"完全一样**——`state` 停在 `loading`、帧数 0、HTTP 全 200、页面无 JS 报错。只有 console 里有一行 `Stack overflow detected. You can try increasing -sSTACK_SIZE`，以及一个 `Uncaught` exception，栈顶是 `preflightOpaque3D`。`samples/web/CMakeLists.txt` 现在显式给 `-sSTACK_SIZE=1048576`。
+表现极具误导性：**和"引擎没启动"完全一样**——`state` 停在 `loading`、帧数 0、HTTP 全 200、页面无 JS 报错。只有 console 里有一行 `Stack overflow detected. You can try increasing -sSTACK_SIZE`，以及一个 `Uncaught` exception，栈顶是 `preflightOpaque3D`。以及 `tina_add_web_frontend()` 的共享 link options 现在显式给 `-sSTACK_SIZE=1048576`。
 
-**注意这不是 `samples/web` 独有的。** 任何用 bgfx 的 web frontend 都需要，`tina_add_web_frontend()` 目前不加这个选项。
+**注意这不是 `samples/web` 独有的。** 任何用 bgfx 的 web frontend 都需要；`tina_add_web_frontend()` 统一添加这个选项，避免新 frontend 重复遗漏。
 
 ### 顺带修掉的一个真实缺陷
 

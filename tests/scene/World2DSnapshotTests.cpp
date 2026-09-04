@@ -55,19 +55,22 @@ class World2DSnapshotSceneTests : public testing::Test {
   protected:
     void SetUp() override
     {
-        auto store = Asset::AssetStore::Create({.capacity = 4, .memoryResource = &memory_});
+        auto store = Asset::AssetStore::Create({.capacity = 8, .memoryResource = &memory_});
         ASSERT_TRUE(store) << (store ? "" : store.error().message);
         store_.emplace(std::move(*store));
 
         auto sprite = store_->beginQueued(spriteId_, AssetFormat::AssetKind::Sprite);
         auto texture = store_->beginQueued(textureId_, AssetFormat::AssetKind::Texture2D);
         auto clip = store_->beginQueued(clipId_, AssetFormat::AssetKind::SpriteAnimationClip);
+        auto shader = store_->beginQueued(shaderId_, AssetFormat::AssetKind::Shader);
         ASSERT_TRUE(sprite);
         ASSERT_TRUE(texture);
         ASSERT_TRUE(clip);
+        ASSERT_TRUE(shader);
         sprite_ = *sprite;
         texture_ = *texture;
         clip_ = *clip;
+        shader_ = *shader;
     }
 
     [[nodiscard]] World2DSnapshotCaptureConfig captureConfig(std::function<Core::u32(EntityId)> stableEntityId,
@@ -87,6 +90,7 @@ class World2DSnapshotSceneTests : public testing::Test {
         return World2DSnapshotAssetResolver{
             .resolveSprite = [this](Core::AssetId id) { return id == spriteId_ ? sprite_ : Asset::AssetHandle{}; },
             .resolveTexture = [this](Core::AssetId id) { return id == textureId_ ? texture_ : Asset::AssetHandle{}; },
+            .resolveShader = [this](Core::AssetId id) { return id == shaderId_ ? shader_ : Asset::AssetHandle{}; },
             .resolveAnimationClip =
                 [this](Core::AssetId id) { return id == clipId_ ? clip_ : Asset::AssetHandle{}; },
         };
@@ -97,9 +101,11 @@ class World2DSnapshotSceneTests : public testing::Test {
     Core::AssetId spriteId_ = assetId(1);
     Core::AssetId textureId_ = assetId(2);
     Core::AssetId clipId_ = assetId(3);
+    Core::AssetId shaderId_ = assetId(4);
     Asset::AssetHandle sprite_{};
     Asset::AssetHandle texture_{};
     Asset::AssetHandle clip_{};
+    Asset::AssetHandle shader_{};
 };
 
 // Capture derives exactly one authoring node kind per entity, so every typed 2D
@@ -148,6 +154,7 @@ TEST_F(World2DSnapshotSceneTests, CapturesRestoresAndRecapturesIdenticalBytes)
         child, SpriteRenderer2D{
                    .sprite = sprite_,
                    .normalTexture = texture_,
+                   .shader = shader_,
                    .overrides = SpriteOverrideFlags::Size | SpriteOverrideFlags::Pivot | SpriteOverrideFlags::UvRect,
                    .sizeOverrideMeters = {2.0F, 3.0F},
                    .pivotOverride = {0.25F, 0.75F},
@@ -203,6 +210,7 @@ TEST_F(World2DSnapshotSceneTests, CapturesRestoresAndRecapturesIdenticalBytes)
     ASSERT_NE(restored.spriteRenderer2D((*bindings)[1].entity), nullptr);
     EXPECT_EQ(restored.spriteRenderer2D((*bindings)[1].entity)->sprite, sprite_);
     EXPECT_EQ(restored.spriteRenderer2D((*bindings)[1].entity)->normalTexture, texture_);
+    EXPECT_EQ(restored.spriteRenderer2D((*bindings)[1].entity)->shader, shader_);
     const SpriteAnimationBinding2D* restoredAnimation =
         restored.spriteAnimationBinding2D((*bindings)[1].entity);
     ASSERT_NE(restoredAnimation, nullptr);
@@ -270,6 +278,54 @@ TEST_F(World2DSnapshotSceneTests, UnresolvedAnimationClipFailsClosedBeforeMutati
     ASSERT_TRUE(plainSnapshot);
     auto restored = instantiateWorld2DSnapshot(world, *plainSnapshot, noClipResolver);
     ASSERT_TRUE(restored) << (restored ? "" : restored.error().message);
+}
+
+TEST_F(World2DSnapshotSceneTests, SpriteShaderRequiresItsResolverAndFailsClosedBeforeMutation)
+{
+    const std::array entities{
+        AssetFormat::World2DEntityDesc{
+            .stableEntityId = 1,
+            .nodeKind = AssetFormat::World2DNodeKind::Sprite2D,
+            .sprite = AssetFormat::World2DSpriteDesc{.spriteId = spriteId_, .shaderId = shaderId_},
+        },
+    };
+    auto bytes = AssetFormat::writeWorld2DSnapshotBytes(AssetFormat::World2DSnapshotDesc{.entities = entities});
+    ASSERT_TRUE(bytes) << (bytes ? "" : bytes.error().message);
+    std::vector<AssetFormat::World2DEntityDesc> storage;
+    auto snapshot = AssetFormat::parseWorld2DSnapshot(*bytes, storage);
+    ASSERT_TRUE(snapshot);
+
+    World world = makeWorld();
+    World2DSnapshotAssetResolver noShaderResolver = resolver();
+    noShaderResolver.resolveShader = {};
+    auto missingResolver = instantiateWorld2DSnapshot(world, *snapshot, noShaderResolver);
+    ASSERT_FALSE(missingResolver);
+    EXPECT_EQ(missingResolver.error().code, SceneErrorCode::UnresolvedSprite);
+    EXPECT_EQ(world.entityCount(), 0U);
+
+    const std::array unknownShader{
+        AssetFormat::World2DEntityDesc{
+            .stableEntityId = 1,
+            .nodeKind = AssetFormat::World2DNodeKind::Sprite2D,
+            .sprite = AssetFormat::World2DSpriteDesc{.spriteId = spriteId_, .shaderId = assetId(98)},
+        },
+    };
+    auto unknownBytes =
+        AssetFormat::writeWorld2DSnapshotBytes(AssetFormat::World2DSnapshotDesc{.entities = unknownShader});
+    ASSERT_TRUE(unknownBytes);
+    std::vector<AssetFormat::World2DEntityDesc> unknownStorage;
+    auto unknownSnapshot = AssetFormat::parseWorld2DSnapshot(*unknownBytes, unknownStorage);
+    ASSERT_TRUE(unknownSnapshot);
+    auto unresolved = instantiateWorld2DSnapshot(world, *unknownSnapshot, resolver());
+    ASSERT_FALSE(unresolved);
+    EXPECT_EQ(unresolved.error().code, SceneErrorCode::UnresolvedSprite);
+    EXPECT_EQ(world.entityCount(), 0U);
+
+    auto accepted = instantiateWorld2DSnapshot(world, *snapshot, resolver());
+    ASSERT_TRUE(accepted) << (accepted ? "" : accepted.error().message);
+    ASSERT_EQ(accepted->size(), 1U);
+    ASSERT_NE(world.spriteRenderer2D((*accepted)[0].entity), nullptr);
+    EXPECT_EQ(world.spriteRenderer2D((*accepted)[0].entity)->shader, shader_);
 }
 
 TEST_F(World2DSnapshotSceneTests, OrdersParentsFirstThenStableId)

@@ -662,6 +662,7 @@ Focus 产品证据以 TextEdit 的 `HasKeyboardFocus`（`SetFocus` 之后）为�
 | RenderScene/Scene/2D-FX | `tina_render_scene_tests`、`tina_scene_tests` | extraction samples、2D/3D products |
 | bgfx backend | `tina_render_bgfx_tests` | Desktop/2D/3D GPU samples + Visual |
 | Asset format/Cooker | `tina_asset_format_tests`、`tina_asset_tests` | `assetc`→validate→sample、3D product |
+| Shader payload / `ShaderBindingRegistry` / Sprite2D 自定义 fragment | `tina_asset_format_tests`、`tina_asset_tests`（`ShaderBindingRegistryTests.*`、`AssetGpuShaderTests.*`）、`tina_scene_tests`（`SceneSpriteAssetTest.*`）、`tina_render_bgfx_tests` | 三个 shader sample 全跑（见下方「Sprite2D 自定义 fragment」）|
 | TileMap payload/runtime | `tina_asset_format_tests`、`tina_asset_tests`、`tina_physics2d_tests` | `tina_sample_2d`；验证显式 visual/collision/object layer |
 | Audio | `tina_audio_tests` | miniaudio tests、product-2d |
 | Physics2D | `tina_physics2d_tests`（body、Box/Circle/Capsule/ConvexPolygon、Distance/Revolute/Prismatic、sensor、query、grid bridge） | Release bench、product-2d |
@@ -796,6 +797,10 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_asset_format_tests.e
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_scene_tests.exe `
   --gtest_filter=World2DSnapshotSceneTests.*
 ```
+
+当前 wire 是 schema v5（464-byte entity record）。改 sprite 区偏移时必须同时跑
+`tests/asset_format/header_isolation/World2DSnapshotHeader.cpp` 的 `SchemaVersion` static_assert 与
+`TypedPayloadMalformedCorpusTests`，因为后者按 `HeaderBytes + EntityBytes` 定位第二条记录。
 
 AssetFormat 用例覆盖全组件/gameplay round-trip、确定性 bytes、旧 schema 拒绝、stable ID/parent 约束、
 non-canonical absent component 与 parse failure 保留旧 storage。Scene 用例覆盖 hierarchy+stable-ID 排序、
@@ -1013,6 +1018,9 @@ Null/bgfx resource/batch 定向 filter，闭环后再跑产品视觉差分与完
 | `tina_sample_2d_infrastructure` | CPU/Null Camera2D/Sprite extraction | Catalog/产品 UI/GPU |
 | `tina_sample_2d_infrastructure_bgfx` | fixture Sprite2D + UI overlay | 正式 Catalog TileMap 产品 |
 | `tina_sample_2d` | Catalog TileMap v3 root + deferred TileMapChunk、NavigationGrid2D v1 与 Fx2D v1；每帧 visual=10/collision=20 demand→pump→commit；Navigation live derive 与 Cooked data bit-exact，并验证 weighted A*、dynamic blocker、分步取消与 revision；PhysicsNavigationSync2D 将显式注册 crate body 的 transform/AABB 同步为 dynamic blocker；SpriteAnimation notify 被产品消费；Fx2D factory 驱动 fixed-capacity Particle/Trail；Physics 含 Box/Circle/Capsule/ConvexPolygon/Chain、sensor enter/exit 与 Distance/Revolute/Prismatic joint；Sprite2D 使用 packet-local `FrameResourceRef`；schema 29 保留既有证据并新增 navigation physics sync counters | Registry transaction/PMR/owner-thread 压力、跨 GPU lighting golden、可见 FX effect graph/GPU simulation、更多高级约束、Linux |
+| `tina_sample_2d_custom_shader` | Sprite2D 自定义 fragment 端到端：`tina_assetc --shader-source` cook 出带 profile 表的 payload、`uploadShaderFromCooked`、packet-local Shader/ShaderUniforms ref；两相 pinned `u_pulse.x` 上 custom 区域 RGB 均值差 `>= 8` 而引擎对照区域差 `== 0`，并在对照精灵四象限上断言 2×2 棋盘（红/绿/蓝/白）证明 UV/采样正确 | 自定义 fragment 消费引擎 lighting（见 `tina_sample_2d_shader_lighting`）；Mesh3D 自定义 draw 路径 |
+| `tina_sample_2d_shader_materials` | 同一 program 三套独立 uniform binding：`minimumMaterialSeparation` 断言三种 material 之间的像素差有下界，`maximumSameMaterialDelta == 0` 断言同 material 的两个精灵逐字节相同，`flatMaterialSpread == 0` 排除「整帧变亮」这类伪证据 | 逐 material 纹理切换；author 侧 material authoring UI |
+| `tina_sample_2d_shader_lighting` | 自定义 fragment **读**引擎契约而非替换它：`s_normalTex`、`u_spriteLightParams`、`u_spriteLightPosRadius`、`u_spriteLightColors`、`u_spriteShadowSegments`。六个精灵交错排布使相邻 draw 不共享 (shader, normal) 组合，证据是帧内差分——`normalVsFlatSeparation`、`normalLeftVsRight`、`shadowedVsLit`、`engineControlSpread`，整帧亮度变化无法满足 | 跨 GPU lighting exact golden；多光源/多遮挡的组合爆炸 |
 | `tina_sample_3d_extraction` | CPU/Null Perspective/Mesh extraction | 可见 GPU 3D |
 | `tina_sample_3d_infrastructure` | procedural fixture Cube/depth/instance | Cooked product mesh |
 | `tina_sample_3d` | 双静态 mesh glTF→MikkTSpace tangent→Cooked P3N3T4UV2，以及独立 SkinnedMesh/AnimationClip3D witness→`Animator3D` CPU pose→packet palette→bgfx GPU skinning；AssetSystem→Prefab/Scene weak Handle→engine-provided、State-owned Mesh3D registry→packet-local geometry/material ref；evidence schema 16 固定 total/static/skinned mesh=`3/2/1`、Material=`4`、joints=`2`、skinned Prefab instances=`3`、`tangentMeshesUploaded=2`，并以独立 Blend Material、双 static transparent witness、统一 back-to-front sort checksum 与 transparency on/off RGB 差分证明 Transparent3D；同时继承 skin-animation、IBL、CSM/Spot/Point shadow、实时 framebuffer aspect、响应式 UI、资源 retirement、逐帧 lighting snapshot、Dark→Light→Dark 与 final-present capture | Registry transaction/PMR/owner-thread 压力（由 `tina_asset_tests` 证明）、跨 GPU golden |
@@ -1190,6 +1198,56 @@ dirty 为假；Source Import reload 后 authoring overlay 仍独立保留。
 base/dynamic/strict/corner-cut path cells/cost 均为 `5/40`，独立 weighted path=`7/60` 且未经过高代价
 `(3,2)` cell；incremental expanded nodes=`1`、revision/mutations=`10/2` 与 `navigationCancelled=true`。
 sample exit 0 是结构化产品接线证据；当前导航没有独立视觉结论。
+
+## Sprite2D 自定义 fragment
+
+`ASSET-SHADER-001` 的三个 sample 递进覆盖，改 shader payload、`ShaderBindingRegistry`、extraction 的
+shader/uniform resolver 或 bgfx Sprite2D 提交路径时应全跑，因为它们各自断言的是不同的失效模式：
+
+```powershell
+cmake --build --preset windows-vnext-bgfx-product-2d-debug `
+  --target tina_asset_tests tina_scene_tests tina_render_bgfx_tests `
+           tina_sample_2d_custom_shader tina_sample_2d_shader_materials `
+           tina_sample_2d_shader_lighting -- /nr:false
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_asset_tests.exe `
+  --gtest_filter="ShaderBindingRegistryTests.*:AssetGpuShaderTests.*"
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_scene_tests.exe `
+  --gtest_filter="SceneSpriteAssetTest.*"
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d_custom_shader.exe --frames=32
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d_shader_materials.exe --frames=120
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d_shader_lighting.exe --frames=120
+```
+
+`--frames=32` 对 `2d_custom_shader` 已足够（它的证据只需要两相 pinned uniform），另外两个需要 120 帧。
+三者的判据都是**帧内**差分而非跨帧亮度变化：`customSpriteDelta` vs `engineSpriteDelta == 0`、
+`maximumSameMaterialDelta == 0` 与 `flatMaterialSpread == 0`、以及 `normalVsFlatSeparation` /
+`shadowedVsLit` 配 `engineControlSpread`。任何一个 sample 的 `evidenceError` 非空即视为失败，
+即使 exit code 为 0——`status=ok` 与 `evidenceCollected=true` 必须同时成立。
+
+Scene 侧的 `SceneSpriteAssetTest.*` 覆盖 shader/uniform resolver 必须成对提供、两个 ref 各自 kind 正确、
+wrong-kind 与 stale handle 均 `UnresolvedSprite`、以及隐藏 sprite 不触发任何 resolver。
+
+## Mesh3D 自定义 fragment
+
+与 Sprite2D 共用 payload/registry/extraction，故改动那三处要连带跑 3D 侧。当前**没有** Mesh3D
+shader sample，证据只到单测层：
+
+```powershell
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_scene_tests.exe `
+  --gtest_filter="SceneMeshAssetTest.*"
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_render_scene_tests.exe `
+  --gtest_filter="ShaderUploadDescTest.*"
+out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_render_bgfx_tests.exe `
+  --gtest_filter="BgfxOpaque3DGeometryTest.*"
+```
+
+`SceneMeshAssetTest.ResolvesCustomShaderForRigidAndSkinnedMeshes` 要求刚性与蒙皮 item 在同一帧
+各自拿到同一对 ref（蒙皮 ref 悄悄留空仍会提交，只是跑引擎 program，所以必须逐 item 断言）；
+`Mesh3DShaderWithoutUniformResolverIsUnresolvedMesh` 要求半套 binding 在任一 resolver 运行前
+就以 `UnresolvedMesh` 失败。`ShaderUploadDescTest.AcceptsMesh3DBecauseBothDrawPathsCanBindIt`
+钉住共享校验器接受 Mesh3D —— 这里拒绝而 backend 能链接就是不可达能力，这里接受而 backend
+不链接就是 headless 绿、真后端红。**未覆盖：** GPU 上真的用自定义 Mesh3D fragment 画过一帧，
+没有像素证据。
 
 ## CameraFollow2D
 

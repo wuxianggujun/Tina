@@ -16,7 +16,9 @@
 
 #if defined(TINA_RENDER_BGFX_MOBILE_SHADERS)
 #include "fs_tina_sprite2d_fixture_essl.bin.h"
+#include "fs_tina_sprite2d_fixture_mtl.bin.h"
 #include "vs_tina_sprite2d_fixture_essl.bin.h"
+#include "vs_tina_sprite2d_fixture_mtl.bin.h"
 #endif
 
 namespace Tina::Render::Bgfx::ShaderDetail {
@@ -32,6 +34,9 @@ constexpr bgfx::EmbeddedShader EmbeddedShaders[] = {
             {bgfx::RendererType::OpenGL, vs_tina_sprite2d_fixture_glsl, sizeof(vs_tina_sprite2d_fixture_glsl)},
 #if defined(TINA_RENDER_BGFX_MOBILE_SHADERS)
             {bgfx::RendererType::OpenGLES, vs_tina_sprite2d_fixture_essl, sizeof(vs_tina_sprite2d_fixture_essl)},
+            // Metal, not the GLES entry above: Apple deprecated OpenGL ES, so bgfx selects
+            // Metal on every modern iOS device.
+            {bgfx::RendererType::Metal, vs_tina_sprite2d_fixture_mtl, sizeof(vs_tina_sprite2d_fixture_mtl)},
 #endif
             {bgfx::RendererType::Vulkan, vs_tina_sprite2d_fixture_spv, sizeof(vs_tina_sprite2d_fixture_spv)},
             {bgfx::RendererType::Count, nullptr, 0},
@@ -46,6 +51,7 @@ constexpr bgfx::EmbeddedShader EmbeddedShaders[] = {
             {bgfx::RendererType::OpenGL, fs_tina_sprite2d_fixture_glsl, sizeof(fs_tina_sprite2d_fixture_glsl)},
 #if defined(TINA_RENDER_BGFX_MOBILE_SHADERS)
             {bgfx::RendererType::OpenGLES, fs_tina_sprite2d_fixture_essl, sizeof(fs_tina_sprite2d_fixture_essl)},
+            {bgfx::RendererType::Metal, fs_tina_sprite2d_fixture_mtl, sizeof(fs_tina_sprite2d_fixture_mtl)},
 #endif
             {bgfx::RendererType::Vulkan, fs_tina_sprite2d_fixture_spv, sizeof(fs_tina_sprite2d_fixture_spv)},
             {bgfx::RendererType::Count, nullptr, 0},
@@ -63,6 +69,17 @@ constexpr bgfx::EmbeddedShader EmbeddedShaders[] = {
 }
 
 } // namespace
+
+Core::Result<bgfx::ShaderHandle> createSprite2DVertexShader()
+{
+    const bgfx::ShaderHandle vertexShader = bgfx::createEmbeddedShader(
+        EmbeddedShaders, bgfx::getRendererType(), "vs_tina_sprite2d_fixture");
+    if (!bgfx::isValid(vertexShader))
+    {
+        return Core::failure(unsupportedShaderError());
+    }
+    return vertexShader;
+}
 
 Core::Result<bgfx::ProgramHandle> createSprite2DFixtureProgram()
 {

@@ -12,7 +12,9 @@ assets/               源资源与 cook recipe。
 
 ## 这条约定是被强制的，不是靠文档提醒
 
-`tina_add_game_content()` 在 configure 阶段就拒绝内容库链接平台目标。原因是这类错误在尝试移植之前完全看不见：一个引用了 `Tina::Desktop::CreateEngine` 的翻译单元必须链接 `Tina::DesktopBootstrap` → GLFW，于是整个文件变成桌面专用。引擎自己的 `samples/` 里有 12 个示例正是这样，把玩法和组装根写在同一个 `main.cpp`，没有任何东西警告过它们。
+`tina_add_game_content()` 在 configure 阶段就拒绝内容库链接平台目标。原因是这类错误在尝试移植之前完全看不见：一个引用了 `Tina::Desktop::CreateEngine` 的翻译单元必须链接 `Tina::DesktopBootstrap` → GLFW，于是整个文件变成桌面专用。引擎自己的 `samples/` 曾经全是这个样子——玩法和组装根写在同一个 `main.cpp`，没有任何东西警告过它们。现在那 28 个示例都按这套目录重排过了，所以模板和引擎示例是同一套约定，可以直接照着抄。
+
+有 8 个示例没有 `core/`，那不是例外而是一句声明：这些程序除了组装根什么都没有（`platform` 是 GLFW + Null renderer，`desktop` 只演示 `CreateEngine` 返回什么），硬造一个空内容库只会让强制性看起来存在于它并不存在的地方。
 
 `tina_verify_game_content_portable()` 在根 `CMakeLists.txt` 末尾再走一遍完整链接图，抓间接可达的情况——内容库链接了一个自己链接 GLFW 的辅助库，同样不可移植，但逐调用检查看不到。
 
@@ -112,12 +114,12 @@ tina_cook_catalog(mygame
 
 两个前提：cooker 必须存在（`TINA_BUILD_EXAMPLES=OFF` 构建出来的 SDK 不带它，`tina_find_assetc()` 会返回 `TINA_ASSETC-NOTFOUND-NOT-PACKAGED`），以及交叉编译时得用 `TINA_ASSETC_EXECUTABLE` 指向一个宿主机构建——cooker 跑在构建机上，目标架构的版本执行不了。拿不准就先查 `tina_find_assetc()`，不满足就保留启动时 cook。
 
-**recipe 必须写一个桌面平台，但这不影响别处加载。** `TargetPlatform` 只有 `Invalid` / `Any` / `WindowsX64` / `LinuxX64`，所以 `assets/game.recipe` 写不了 `AndroidArm64`。不过**加载器从不校验这个字段**——它只出现在 cook 侧代码里，`CatalogFile.cpp` / `CookedAssetFile.cpp` / `AssetSystem.cpp` 一次都不读。同理，今天没有任何 cooker 设置过 `pixelFormat`，所有纹理都是未压缩 `Rgba8Unorm`，移动端 GPU 也能用。所以按 `WindowsX64` cook 的 catalog 在任何平台都能加载，平台标签不是移植障碍。
+**recipe 里的平台标签不是移植障碍。** `TargetPlatform` 只有 `Invalid` / `Any` / `WindowsX64` / `LinuxX64`，写不了 `AndroidArm64`。但**加载器从不校验这个字段**——它只出现在 cook 侧代码里，`CatalogFile.cpp` / `CookedAssetFile.cpp` / `AssetSystem.cpp` 一次都不读，只有 `isKnownTargetPlatform` 这个"是不是已知枚举"的检查。要跨平台就写 `platform Any`（`android/app/content/android.recipe` 就是这么做的）；写 `WindowsX64` 也一样能在别处加载。同理，今天没有任何 cooker 设置过压缩 `pixelFormat`，所有纹理都是未压缩 `Rgba8Unorm`，移动端 GPU 也能用。
 
-真正的障碍只有一个：**拿不到文件**。见下。
+**浏览器和 Android 现在都能拿到文件。** web 侧走 `--preload-file`，cooked catalog 落进 MEMFS；Android 侧走 APK `assets/` + 首启解压：`android/app/build.gradle` 用宿主 `tina_assetc`（`-Ptina.assetc=<路径>`）把 catalog cook 进一个生成的 assets source set，`TinaActivity.extractContent()` 在第一次启动时把整棵 assets 树复制到 `getFilesDir()/content` 并交给 `EngineConfig::contentRoot`。两边内容代码都不用改一个字。
 
-**浏览器和 Android 上今天一个文件都读不到。** `EngineConfig::contentRoot` 解决的是"内容代码怎么问路径"，不是"平台上有没有那个文件"。web 侧还没有 `--preload-file` / `--embed-file`，MEMFS 是空的；Android 侧全仓库没有一处 `AAssetManager`，而 NDK 的 `ifstream` 读不了 APK 内部。两边都是"没有文件"，不是"格式不对"——`resolve()` 会正常返回一个路径，随后 `readFile` 报 `NotFound`。这也是模板暂时只有桌面前端的原因。
+Android 那条链上有两个非显然的点。一是 cook 在**构建机**上跑而不是设备上：cook 是确定性的，设备能贡献的只有延迟和发热，所以设备只付一次"复制已 cook 好的字节"的代价。二是全仓库依然没有一处 `AAssetManager`，这是刻意的——解压一次换来 `Core::readFile` 在所有平台是唯一读路径，内容 bug 因此不可能是平台专属的。字节精确性打包时不会被破坏：cooked object 未压缩，zip 存储是无损的，而 catalog 打开时会拿每个 object 的实际大小对 `cookedFileBytes` 校验，所以任何被改动过的文件会在 `openAndBindCatalog` 当场失败。
 
-**没有 `tina_add_android_frontend()`。** Java 用一个固定名字解析 `System.loadLibrary`，所以 Android 没有"每个游戏一个共享库"可产出：游戏是靠引擎的 JNI 桥链接它的内容库上设备的。在那个桥改成从游戏定义的工厂取 application 之前，这样一个函数只会包装一次对引擎源码的改动。
+**没有 `tina_add_android_frontend()`。** Java 用一个固定名字解析 `System.loadLibrary`，所以 Android 没有"每个游戏一个共享库"可产出：游戏是靠引擎的 JNI 桥链接它的内容库上设备的。在那个桥改成从游戏定义的工厂取 application 之前，这样一个函数只会包装一次对引擎源码的改动。这也是 Android 的 cook 接在 `android/app/build.gradle` 而不是 `tina_cook_catalog()` 上的原因——后者输出到 `$<TARGET_FILE_DIR:target>`，那在 Android 上是 NDK 的 `.so` 目录，AGP 只从那里收 `.so`。
 
-**模板不带 web 入口。** `tina_add_web_frontend()` 已经可用，但 SDK 头里没有 `Tina::Web::CreateEngine`，浏览器组装根目前是 `samples/web/main.cpp` 里 134 行手写的 `EngineCompositionFactories`。把它抄进模板等于分叉那份代码。要做 web 端：建 `platforms/web/`，调 `tina_add_web_frontend()`，入口以 `samples/web/main.cpp` 为基础——它用 `emscripten_set_main_loop` 驱动 `EngineHost::start/tick`，而不是 `run()`。
+**模板不带 web 入口。** `tina_add_web_frontend()` 已经可用，但 SDK 头里没有 `Tina::Web::CreateEngine`，浏览器组装根目前是 `samples/web/platforms/web/WebMain.cpp` 里手写的 `EngineCompositionFactories`（`createEngineFactories()`，第 465 行起）。把它抄进模板等于分叉那份代码。要做 web 端：建 `platforms/web/`，调 `tina_add_web_frontend()`，入口以 `samples/web/platforms/web/WebMain.cpp` 为基础——它用 `emscripten_set_main_loop` 驱动 `EngineHost::start/tick`，而不是 `run()`。

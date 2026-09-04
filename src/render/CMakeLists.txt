@@ -29,6 +29,7 @@ add_library(tina_render STATIC
     RenderScene.cpp
     Sprite2DLighting.cpp
     Sprite2DShadowMath.hpp
+    ShaderUpload.cpp
     ShadowMapExtentConfig.cpp
     Texture2DUpload.cpp
     UIDisplayList.cpp
@@ -56,6 +57,8 @@ if(TINA_BUILD_RENDER_BGFX)
         bgfx/BgfxRenderDevice.hpp
         bgfx/BgfxClearColor.cpp
         bgfx/BgfxClearColor.hpp
+        bgfx/BgfxCustomShader.cpp
+        bgfx/BgfxCustomShader.hpp
         bgfx/BgfxEnvironmentMapResources.cpp
         bgfx/BgfxEnvironmentMapResources.hpp
         bgfx/BgfxOpaque3DGeometry.cpp

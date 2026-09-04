@@ -138,7 +138,7 @@ view 继续校验 Cooked kind/version、依赖数量、required Sprite kind，�
 `Loop` 变成 Scene `PingPong`，两者都是合法 Scene 取值，因此 `SpriteAnimator2D` 的
 `isValidPlaybackMode()`（`src/scene/SpriteAnimator2D.cpp:19-28`）不会报错，动画只是播错模式；只有
 cooked `PingPong` 会越界成非法值并被 `setClip()` 以 `SceneErrorCode::InvalidAnimation` 拒绝。范例转换
-函数见 `samples/2d_tilemap_bgfx/main.cpp:1476-1490` 的 `toScenePlaybackMode()`：逐枚举值 switch 映射，
+函数见 `samples/2d_tilemap_bgfx/platforms/desktop/DesktopMain.cpp:1477` 的 `toScenePlaybackMode()`：逐枚举值 switch 映射，
 并对未知值返回 failure 而非落到默认分支。
 
 Catalog recipe 支持：
@@ -419,7 +419,7 @@ Escape/Gamepad East 的 Back 路由给该 active Screen；Enter/Keypad Enter/Gam
 产品 sample 不再手写 `EngineCompositionFactories`（GLFW/bgfx/Task/Audio/FreeType）。`tina_sample_2d`
 经 `Tina::Desktop::CreateEngine(config, options)` 启动；仅在需要帧捕获证据时通过
 `CreateEngineOptions::wrapWindowSurfaceRenderDevice` 包装 `IRenderDevice`（见
-`samples/2d_tilemap_bgfx/DeviceCapture.hpp`）。业务仍在 `TileMapBgfxState`；EngineHost 仍是唯一组合根。
+`samples/2d_tilemap_bgfx/core/DeviceCapture.hpp`）。业务仍在 `TileMapBgfxState`；EngineHost 仍是唯一组合根。
 
 ## 当前限制
 

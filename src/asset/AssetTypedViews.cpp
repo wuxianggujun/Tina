@@ -24,6 +24,22 @@ parseTexture2DFromCooked(const CookedAssetFile& file)
     return AssetFormat::parseTexture2DPayload(file.payload());
 }
 
+Core::Result<AssetFormat::ShaderPayloadView>
+parseShaderFromCooked(const CookedAssetFile& file)
+{
+    if (!file)
+    {
+        return Core::failure(AssetErrorCode::InvalidCatalogConfig, "cooked asset is empty");
+    }
+    if (file.header().assetKind != AssetFormat::AssetKind::Shader ||
+        file.header().assetTypeVersion != AssetFormat::ShaderWire::SchemaVersion)
+    {
+        return Core::failure(AssetErrorCode::CatalogEntryMismatch,
+                             "cooked asset is not a supported Shader");
+    }
+    return AssetFormat::parseShaderPayload(file.payload());
+}
+
 Core::Result<AssetFormat::EnvironmentMapPayloadView>
 parseEnvironmentMapFromCooked(const CookedAssetFile& file)
 {

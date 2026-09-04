@@ -1490,6 +1490,35 @@ JNIEXPORT jlong JNICALL Java_dev_tina_TinaNative_nativeDroppedTouchEventCount(JN
     return static_cast<jlong>(session->touchEvents->droppedEventCount());
 }
 
+// The content chain's three observable numbers, packed as
+// entries<<32 | assetsLoaded<<16 | textureExtentIsCorrect. Packed rather than three calls because they
+// describe one outcome and reading them separately could straddle the frame that publishes them.
+//
+// The extent is reduced to a flag here rather than passed through: Java has nothing to compare a raw
+// width/height against, while the recipe fixes them at 2x2, so the comparison belongs on the side that
+// knows the recipe. A wrong extent means the payload parsed but is not the asset that was cooked.
+JNIEXPORT jlong JNICALL Java_dev_tina_TinaNative_nativeContentCounts(JNIEnv*, jclass, jlong handle)
+{
+    auto* session = asSession(handle);
+    if (session == nullptr)
+    {
+        return 0;
+    }
+#if defined(TINA_ANDROID_WITH_BGFX)
+    const auto entries = session->telemetry.contentCatalogEntries.load(std::memory_order_acquire);
+    const auto loaded = session->telemetry.contentAssetsLoaded.load(std::memory_order_relaxed);
+    const auto extent = session->telemetry.contentTextureExtent.load(std::memory_order_acquire);
+    constexpr Tina::u32 ExpectedTextureExtent = (2U << 16U) | 2U;
+    const auto saturate = [](Tina::u64 value) noexcept -> Tina::u64 {
+        return value > 0xFFFFU ? 0xFFFFU : value;
+    };
+    return static_cast<jlong>((saturate(entries) << 32U) | (saturate(loaded) << 16U) |
+                              (extent == ExpectedTextureExtent ? 1U : 0U));
+#else
+    return 0;
+#endif
+}
+
 } // extern "C"
 
 namespace {
@@ -1557,6 +1586,8 @@ const JNINativeMethod TinaNativeMethods[]{
      reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeDroppedKeyEventCount)},
     {"nativeDroppedTouchEventCount", "(J)J",
      reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeDroppedTouchEventCount)},
+    {"nativeContentCounts", "(J)J",
+     reinterpret_cast<void*>(&Java_dev_tina_TinaNative_nativeContentCounts)},
 };
 
 } // namespace

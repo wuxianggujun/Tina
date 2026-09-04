@@ -71,6 +71,53 @@ TEST(StaticMeshPayloadTests, CookedStaticMeshRoundTrip)
     ASSERT_TRUE(verifyCookedAssetContentHash(*asset).has_value());
 }
 
+TEST(StaticMeshPayloadTests, ShaderOverrideBecomesRequiredShaderDependency)
+{
+    const auto meshId = *Core::AssetId::fromBytes(idBytes(0x41));
+    const auto shaderId = *Core::AssetId::fromBytes(idBytes(0x42));
+    std::array<StaticMeshSubmeshDesc, 1> submeshes{};
+    std::array<float, 24 * StaticMeshWire::FloatsPerVertex> vertices{};
+    std::array<Core::u16, 36> indices{};
+    StaticMeshPayloadDesc desc = makeCanonicalUnitCubeMeshDesc(submeshes, vertices, indices);
+    desc.shaderOverrideId = shaderId;
+
+    auto cooked = writeCookedStaticMeshAsset(meshId, desc);
+    ASSERT_TRUE(cooked.has_value()) << (cooked ? "" : cooked.error().message);
+    auto asset = parseCookedAssetView(*cooked);
+    ASSERT_TRUE(asset.has_value()) << (asset ? "" : asset.error().message);
+
+    ASSERT_EQ(asset->header().dependencyCount, 1U);
+    const auto dependency = asset->dependency(0);
+    ASSERT_TRUE(dependency.has_value());
+    EXPECT_EQ(dependency->assetId, shaderId);
+    EXPECT_EQ(dependency->expectedKind, AssetKind::Shader);
+    EXPECT_EQ(dependency->flags, DependencyFlags::Required);
+
+    auto view = parseStaticMeshPayload(asset->payload());
+    ASSERT_TRUE(view.has_value()) << (view ? "" : view.error().message);
+    EXPECT_TRUE(view->hasShaderOverride);
+}
+
+TEST(StaticMeshPayloadTests, NoShaderOverrideLeavesFlagClearAndNoDependency)
+{
+    const auto meshId = *Core::AssetId::fromBytes(idBytes(0x43));
+    std::array<StaticMeshSubmeshDesc, 1> submeshes{};
+    std::array<float, 24 * StaticMeshWire::FloatsPerVertex> vertices{};
+    std::array<Core::u16, 36> indices{};
+    const StaticMeshPayloadDesc desc =
+        makeCanonicalUnitCubeMeshDesc(submeshes, vertices, indices);
+
+    auto cooked = writeCookedStaticMeshAsset(meshId, desc);
+    ASSERT_TRUE(cooked.has_value()) << (cooked ? "" : cooked.error().message);
+    auto asset = parseCookedAssetView(*cooked);
+    ASSERT_TRUE(asset.has_value()) << (asset ? "" : asset.error().message);
+    EXPECT_EQ(asset->header().dependencyCount, 0U);
+
+    auto view = parseStaticMeshPayload(asset->payload());
+    ASSERT_TRUE(view.has_value()) << (view ? "" : view.error().message);
+    EXPECT_FALSE(view->hasShaderOverride);
+}
+
 TEST(StaticMeshPayloadTests, RequiredVertexLayoutRoundTripKeepsSchemaV1)
 {
     const std::array<StaticMeshSubmeshDesc, 1> submeshes{

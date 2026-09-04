@@ -193,6 +193,42 @@ TEST(SkinnedMeshPayloadTests, CookedAssetRoundTripUsesNewKind)
     EXPECT_EQ(asset->header().assetTypeVersion, SkinnedMeshWire::SchemaVersion);
 }
 
+// One cooked Mesh3D fragment binary links against both the rigid and skinned engine vertex
+// stage, so a skinned mesh names its default shader exactly the way a static mesh does.
+TEST(SkinnedMeshPayloadTests, ShaderOverrideBecomesRequiredShaderDependency)
+{
+    const std::array<SkinnedMeshJointDesc, 1> joints{};
+    const std::array<float, 16> inverseBind{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+    const std::array<StaticMeshSubmeshDesc, 1> submeshes{StaticMeshSubmeshDesc{.indexCount = 3}};
+    const std::array<float, 3 * SkinnedMeshWire::FloatsPerVertex> vertices{
+        0, 0, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 1, 1, 0, 0, 1, 1, 0,
+        0, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 1};
+    const std::array<Core::u16, 12> jointIndices{};
+    const std::array<Core::u16, 12> jointWeights{65535, 0, 0, 0, 65535, 0, 0, 0, 65535, 0, 0, 0};
+    const std::array<Core::u16, 3> indices{0, 1, 2};
+    const auto id = *Core::AssetId::fromBytes(Core::AssetId::Bytes{std::byte{0x51}});
+    const auto shaderId = *Core::AssetId::fromBytes(Core::AssetId::Bytes{std::byte{0x52}});
+
+    auto cooked = writeCookedSkinnedMeshAsset(id, SkinnedMeshPayloadDesc{
+        .boundsRadius = 1.0F, .joints = joints, .inverseBindMatrices = inverseBind,
+        .submeshes = submeshes, .vertices = vertices, .jointIndices = jointIndices,
+        .jointWeights = jointWeights, .indices = indices, .shaderOverrideId = shaderId});
+    ASSERT_TRUE(cooked.has_value()) << cooked.error().message;
+    auto asset = parseCookedAssetView(*cooked);
+    ASSERT_TRUE(asset.has_value()) << asset.error().message;
+
+    ASSERT_EQ(asset->header().dependencyCount, 1U);
+    const auto dependency = asset->dependency(0);
+    ASSERT_TRUE(dependency.has_value());
+    EXPECT_EQ(dependency->assetId, shaderId);
+    EXPECT_EQ(dependency->expectedKind, AssetKind::Shader);
+    EXPECT_EQ(dependency->flags, DependencyFlags::Required);
+
+    auto view = parseSkinnedMeshPayload(asset->payload());
+    ASSERT_TRUE(view.has_value()) << view.error().message;
+    EXPECT_TRUE(view->hasShaderOverride);
+}
+
 TEST(SkinnedMeshPayloadTests, RejectsMalformedInfluenceAndTruncation)
 {
     const std::array<SkinnedMeshJointDesc, 1> joints{};

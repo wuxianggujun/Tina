@@ -25,10 +25,15 @@
 
 #if defined(TINA_RENDER_BGFX_MOBILE_SHADERS)
 #include "fs_tina_opaque3d_mr_essl.bin.h"
+#include "fs_tina_opaque3d_mr_mtl.bin.h"
 #include "fs_tina_opaque3d_csm_depth_essl.bin.h"
+#include "fs_tina_opaque3d_csm_depth_mtl.bin.h"
 #include "vs_tina_opaque3d_mr_essl.bin.h"
+#include "vs_tina_opaque3d_mr_mtl.bin.h"
 #include "vs_tina_opaque3d_csm_depth_essl.bin.h"
+#include "vs_tina_opaque3d_csm_depth_mtl.bin.h"
 #include "vs_tina_opaque3d_skinned_essl.bin.h"
+#include "vs_tina_opaque3d_skinned_mtl.bin.h"
 #endif
 
 namespace Tina::Render::Bgfx::ShaderDetail {
@@ -47,6 +52,10 @@ constexpr bgfx::EmbeddedShader EmbeddedShaders[] = {
 #if defined(TINA_RENDER_BGFX_MOBILE_SHADERS)
             {bgfx::RendererType::OpenGLES, vs_tina_opaque3d_mr_essl,
              sizeof(vs_tina_opaque3d_mr_essl)},
+            // Metal, not the GLES entry above: Apple deprecated OpenGL ES, so bgfx selects
+            // Metal on every modern iOS device and a missing entry fails program creation.
+            {bgfx::RendererType::Metal, vs_tina_opaque3d_mr_mtl,
+             sizeof(vs_tina_opaque3d_mr_mtl)},
 #endif
             {bgfx::RendererType::Vulkan, vs_tina_opaque3d_mr_spv, sizeof(vs_tina_opaque3d_mr_spv)},
             {bgfx::RendererType::Count, nullptr, 0},
@@ -64,6 +73,8 @@ constexpr bgfx::EmbeddedShader EmbeddedShaders[] = {
 #if defined(TINA_RENDER_BGFX_MOBILE_SHADERS)
             {bgfx::RendererType::OpenGLES, fs_tina_opaque3d_mr_essl,
              sizeof(fs_tina_opaque3d_mr_essl)},
+            {bgfx::RendererType::Metal, fs_tina_opaque3d_mr_mtl,
+             sizeof(fs_tina_opaque3d_mr_mtl)},
 #endif
             {bgfx::RendererType::Vulkan, fs_tina_opaque3d_mr_spv, sizeof(fs_tina_opaque3d_mr_spv)},
             {bgfx::RendererType::Count, nullptr, 0},
@@ -81,6 +92,8 @@ constexpr bgfx::EmbeddedShader EmbeddedShaders[] = {
 #if defined(TINA_RENDER_BGFX_MOBILE_SHADERS)
             {bgfx::RendererType::OpenGLES, vs_tina_opaque3d_skinned_essl,
              sizeof(vs_tina_opaque3d_skinned_essl)},
+            {bgfx::RendererType::Metal, vs_tina_opaque3d_skinned_mtl,
+             sizeof(vs_tina_opaque3d_skinned_mtl)},
 #endif
             {bgfx::RendererType::Vulkan, vs_tina_opaque3d_skinned_spv,
              sizeof(vs_tina_opaque3d_skinned_spv)},
@@ -99,6 +112,8 @@ constexpr bgfx::EmbeddedShader EmbeddedShaders[] = {
 #if defined(TINA_RENDER_BGFX_MOBILE_SHADERS)
             {bgfx::RendererType::OpenGLES, vs_tina_opaque3d_csm_depth_essl,
              sizeof(vs_tina_opaque3d_csm_depth_essl)},
+            {bgfx::RendererType::Metal, vs_tina_opaque3d_csm_depth_mtl,
+             sizeof(vs_tina_opaque3d_csm_depth_mtl)},
 #endif
             {bgfx::RendererType::Vulkan, vs_tina_opaque3d_csm_depth_spv,
              sizeof(vs_tina_opaque3d_csm_depth_spv)},
@@ -117,6 +132,8 @@ constexpr bgfx::EmbeddedShader EmbeddedShaders[] = {
 #if defined(TINA_RENDER_BGFX_MOBILE_SHADERS)
             {bgfx::RendererType::OpenGLES, fs_tina_opaque3d_csm_depth_essl,
              sizeof(fs_tina_opaque3d_csm_depth_essl)},
+            {bgfx::RendererType::Metal, fs_tina_opaque3d_csm_depth_mtl,
+             sizeof(fs_tina_opaque3d_csm_depth_mtl)},
 #endif
             {bgfx::RendererType::Vulkan, fs_tina_opaque3d_csm_depth_spv,
              sizeof(fs_tina_opaque3d_csm_depth_spv)},
@@ -165,7 +182,31 @@ constexpr bgfx::EmbeddedShader EmbeddedShaders[] = {
     return program;
 }
 
+[[nodiscard]] Core::Result<bgfx::ShaderHandle> createEmbeddedVertexShader(const char* vertexName,
+                                                                          const char* context)
+{
+    const bgfx::RendererType::Enum renderer = bgfx::getRendererType();
+    const bgfx::ShaderHandle vertexShader =
+        bgfx::createEmbeddedShader(EmbeddedShaders, renderer, vertexName);
+    if (!bgfx::isValid(vertexShader))
+    {
+        return Core::failure(unsupportedShaderError(context));
+    }
+    return vertexShader;
+}
+
 } // namespace
+
+Core::Result<bgfx::ShaderHandle> createOpaque3DMrVertexShader()
+{
+    return createEmbeddedVertexShader("vs_tina_opaque3d_mr", "createOpaque3DMrVertexShader");
+}
+
+Core::Result<bgfx::ShaderHandle> createOpaque3DSkinnedVertexShader()
+{
+    return createEmbeddedVertexShader("vs_tina_opaque3d_skinned",
+                                      "createOpaque3DSkinnedVertexShader");
+}
 
 Core::Result<bgfx::ProgramHandle> createOpaque3DMrProgram()
 {

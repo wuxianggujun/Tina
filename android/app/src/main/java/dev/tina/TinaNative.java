@@ -356,4 +356,23 @@ public final class TinaNative {
 
     /** Total touch events the bridge queue had no room for, over the session's lifetime. */
     public static native long nativeDroppedTouchEventCount(long session);
+
+    /**
+     * What the shipped content chain produced, packed as
+     * {@code catalogEntries<<32 | assetsLoaded<<16 | textureExtentCorrect}.
+     *
+     * <p>This is the only signal that separates the three ways Android content can fail, all of which
+     * otherwise look identical from outside: no catalog packaged (every field zero, and no error
+     * logged -- a build without {@code -Ptina.assetc} legitimately ships none), a catalog packaged but
+     * unopenable (zero with an error line naming the path), and a catalog that opened but whose objects
+     * are unreadable or altered (entries non-zero, assets loaded zero).
+     *
+     * <p>The last bit is the strongest of the three: the catalog is validated against each object's
+     * recorded byte size on open, and the extent is then checked against the recipe's 2x2, so a set bit
+     * means the host cook, the APK packaging and the first-launch extraction all agreed on the bytes.
+     *
+     * <p>Packed because the three values describe one outcome, and separate reads could straddle the
+     * frame that publishes them. Counts saturate at 65535.
+     */
+    public static native long nativeContentCounts(long session);
 }

@@ -1,12 +1,30 @@
+// Mirrors first, official repositories second.
+//
+// Order is the whole mechanism: Gradle tries each repository in declaration order and moves on when
+// an artifact is absent, so a mirror that is missing or stale costs one failed lookup rather than a
+// failed build. Replacing google()/mavenCentral() outright would be faster from mainland China and
+// would break every contributor outside it -- and would leave nothing to fall back to when the
+// mirror lags a fresh AGP release, which the Aliyun mirrors do by hours to days.
+//
+// The `google` and `public` Aliyun paths are separate repositories, not one: `google` proxies
+// dl.google.com (AGP, androidx) and `public` proxies Maven Central plus jcenter. A single URL would
+// resolve half the dependencies and fail the rest with a message that names the artifact, not the
+// mirror.
 pluginManagement {
     repositories {
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/public' }
+        maven { url 'https://maven.aliyun.com/repository/gradle-plugin' }
         google()
         mavenCentral()
+        gradlePluginPortal()
     }
 }
 
 dependencyResolutionManagement {
     repositories {
+        maven { url 'https://maven.aliyun.com/repository/google' }
+        maven { url 'https://maven.aliyun.com/repository/public' }
         google()
         mavenCentral()
     }

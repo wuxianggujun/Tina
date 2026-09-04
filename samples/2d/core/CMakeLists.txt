@@ -1,0 +1,13 @@
+tina_add_sample_core(tina_sample_2d_infrastructure_core
+    SOURCES
+        main.cpp
+        Sample.hpp
+    LINK
+        Tina::Runtime
+        Tina::Scene
+        Tina::Platform
+        Tina::Task
+        Tina::Render
+    INCLUDE
+        ${PROJECT_SOURCE_DIR}/samples/common
+)

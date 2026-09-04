@@ -29,6 +29,8 @@ struct World2DSnapshotCaptureConfig final {
 struct World2DSnapshotAssetResolver final {
     std::function<Asset::AssetHandle(Core::AssetId)> resolveSprite{};
     std::function<Asset::AssetHandle(Core::AssetId)> resolveTexture{};
+    // Required when a serialized SpriteRenderer2D carries a custom shader AssetId.
+    std::function<Asset::AssetHandle(Core::AssetId)> resolveShader{};
     // Required when any entity carries a SpriteAnimation2D clip binding.
     std::function<Asset::AssetHandle(Core::AssetId)> resolveAnimationClip{};
 };
@@ -64,7 +66,7 @@ struct World2DSceneLoadResult final {
 // adds no new wire format and no new schema tolerance. Failure leaves `world`
 // exactly as it was, so a bad or missing scene file cannot half-populate it.
 //
-// Every sprite/texture/animation AssetId still resolves through `assets`; an
+// Every sprite/texture/shader/animation AssetId still resolves through `assets`; an
 // unresolved handle fails closed rather than instantiating an invisible entity.
 [[nodiscard]] Core::Result<World2DSceneLoadResult>
 loadWorld2DSceneFromFile(World& world, std::string_view utf8Path,

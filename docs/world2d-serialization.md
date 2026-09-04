@@ -5,16 +5,20 @@ snapshot，不是新的 Catalog `AssetKind`，也不替产品决定文件路径�
 
 ## 当前格式
 
-只存在 schema v4：32-byte header，随后是每 entity 固定448-byte named record，最后是可选 game-owned blob。
+只存在 schema v5：32-byte header，随后是每 entity 固定464-byte named record，最后是可选 game-owned blob。
 名称槽固定为64 bytes（UTF-8，最多63 bytes，包含NUL终止和零填充）。格式上限为4096个 entity 与4 MiB gameplay bytes。所有保留位、未声明 component 区域和未启用 Sprite
-override 区域必须为零；payload 长度必须与 header 精确一致。旧 schema v1（224-byte entity）按
-current-only 纪律直接拒绝，不保留兼容或迁移分支。
+override 区域必须为零；payload 长度必须与 header 精确一致。旧 schema（v1 的224-byte entity、v4 的448-byte
+entity）按 current-only 纪律直接拒绝，不保留兼容或迁移分支。
+
+v5 相对 v4 只在 sprite 区追加一个16-byte `AssetId`（自定义 fragment shader），落在 sprite 区偏移 `+80`，
+`+76..+79` 保留零以维持 `AssetId` 的16字节对齐；其后所有组件区偏移整体后移16字节。uniform 值属于 shader
+asset 自己的 runtime binding（由 `Asset::ShaderBindingRegistry` 拥有），不进入快照。
 
 entity record 保存稳定 entity ID、先出现的 parent stable ID、LocalTransform 和以下可选组件。
 **每个 wire payload 都必须被 Scene 消费或显式拒绝，不允许静默丢弃**（[ADR 0030](adr/0030-gameplay-2d-binding-and-physics-bridge.md)）：
 
 - `name`：节点 UTF-8 名称，空字符串表示未命名；
-- `SpriteRenderer2D`：Sprite/normal Texture `AssetId`、override、颜色、排序、flip/visible；
+- `SpriteRenderer2D`：Sprite/normal Texture/custom Shader `AssetId`、override、颜色、排序、flip/visible；
 - `Camera2D`：FixedWorldHeight/PixelPerfect、viewport、pixel snap、active；
 - `PointLight2D`：linear color、intensity、influence/source radius、active；
 - `ShadowOccluder2D`：local segment 与 active；
@@ -43,9 +47,9 @@ Runtime `EntityId` owner/index/generation、weak `AssetHandle`、AssetLease、Re
 ```text
 World owner-thread view
   -> stableEntityId(EntityId)
-  -> assetIdForHandle(Sprite/Texture weak handle)
+  -> assetIdForHandle(Sprite/Texture/Shader weak handle)
   -> hierarchy depth + stable ID ordering
-  -> validate canonical schema-v4 descriptors
+  -> validate canonical schema-v5 descriptors
   -> owning byte vector
 ```
 
@@ -60,14 +64,17 @@ span 借用原始 payload；任一 backing storage 修改或析构后 view 失�
 后才替换 caller storage，所以失败不会抹掉上一次成功结果。
 
 ```text
-schema-v4 view
+schema-v5 view
   -> validate all records and parent order
   -> check remaining World capacity
-  -> resolve every Sprite/Texture AssetId to weak AssetHandle
+  -> resolve every Sprite/Texture/Shader AssetId to weak AssetHandle
   -> prepare every component
   -> create + KeepLocal parent + set components
   -> publish world transforms
 ```
+
+`World2DSnapshotAssetResolver::resolveShader` 只在某个 sprite 记录带非零 shader `AssetId` 时才被要求；缺失
+或解析不出 handle 都返回 `UnresolvedSprite`，不会退回引擎 fragment。
 
 restore 的 schema/容量/资源/组件失败发生在 World mutation 前。后续任一步失败会逆序销毁本次创建的全部
 entity，再恢复 transform publication；调用前已存在的 entity 保留。返回 binding 只把 stable ID 映射到本次

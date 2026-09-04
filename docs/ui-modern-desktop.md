@@ -693,11 +693,11 @@ src/ui/detail/
 ### 产品接入
 
 ```text
-samples/ui_showcase/          # 第一视觉消费者；同时展示 Compact/Comfortable、Dark/Light
-samples/desktop_shell/        # Desktop Shell reference；嵌套 SplitView 工作流与第一个 SplitView 产品消费者
-editor/app/                   # 体系稳定后的 Compact 迁移；遵守 Editor 大功能统一验证节奏
-samples/2d_tilemap_bgfx/      # 只迁移产品 Theme/role，不改 gameplay
-samples/3d_product/           # 只迁移产品 Theme/role，不改 Render/Asset owner
+samples/ui_showcase/core/               # 第一视觉消费者；同时展示 Compact/Comfortable、Dark/Light
+samples/desktop_shell/core/             # Desktop Shell reference；嵌套 SplitView 工作流与第一个 SplitView 产品消费者
+editor/app/                             # 体系稳定后的 Compact 迁移；遵守 Editor 大功能统一验证节奏
+samples/2d_tilemap_bgfx/platforms/      # 只迁移产品 Theme/role，不改 gameplay
+samples/3d_product/core/                # 只迁移产品 Theme/role，不改 Render/Asset owner
 ```
 
 ## 破坏式迁移规则
@@ -749,7 +749,7 @@ tracks）均为 `status=ok`，counter/checksum/allocation/clean-rebuild invarian
 | TMD-05 | 导航、集合和浮层 chrome 迁移 | Dropdown/Menu/Tooltip/List/Tree/Tab/Splitter/Popup/Modal | transient barrier、virtual row reuse、focus restore 不回归 |
 | TMD-06 | 缺失的桌面 authoring profile | `UIIconButton`、`UIFormField`、`UIDialog` | bounded component transaction；复用现有行为与 semantics |
 | TMD-07 | Showcase 重构 | 真实 Desktop workbench、density/theme selector、全部组件状态 | 无嵌套卡片/重叠；首屏可操作；结构化与视觉证据 |
-| TMD-08 | Desktop Shell reference（`samples/desktop_shell/`） | 嵌套 SplitView、Command Bar、Tabs、Viewport、Inspector、Timeline、Status | resize/DPI/focus/menu/dialog/tooltip/splitter 工作流 |
+| TMD-08 | Desktop Shell reference（`samples/desktop_shell/core/`） | 嵌套 SplitView、Command Bar、Tabs、Viewport、Inspector、Timeline、Status | resize/DPI/focus/menu/dialog/tooltip/splitter 工作流 |
 | TMD-09 | 产品迁移 | 2D/3D Theme；最后迁移 EditorApp Compact | 不改 gameplay/asset/render owner；Editor 单次大功能 gate |
 | TMD-10 | OS scheme 后置接线 | 私有 platform observer + Runtime owner-thread coordinator | public header 无平台类型；无 adapter 时 deterministic |
 | TMD-11 | 完整门禁与文档收口 | Unit/Runtime/UIA/Render/Visual/Perf/Consumer/docs | Definition of Done 全部满足后父任务 Done |

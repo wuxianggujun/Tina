@@ -25,9 +25,12 @@ set(TINA_ASSET_TEST_SOURCES
     AssetSpriteRenderTests.cpp
     SpriteAnimationClipTypedViewTests.cpp
     AssetGpuTextureTests.cpp
+    AssetGpuShaderTests.cpp
     AssetGpuEnvironmentMapTests.cpp
     Mesh3DBindingRegistryTests.cpp
+    Mesh3DShaderOverrideTests.cpp
     NavigationFxTypedViewTests.cpp
+    ShaderBindingRegistryTests.cpp
     Sprite2DBindingRegistryTests.cpp
     AssetGpuMeshTests.cpp
     AudioClipCookedPlaybackTests.cpp
@@ -61,9 +64,11 @@ set(TINA_ASSET_TEST_SOURCES
     header_isolation/AssetTypedViewsHeader.cpp
     header_isolation/AssetSpriteRenderHeader.cpp
     header_isolation/AssetGpuTextureHeader.cpp
+    header_isolation/AssetGpuShaderHeader.cpp
     header_isolation/AssetGpuEnvironmentMapHeader.cpp
     header_isolation/Mesh3DBindingRegistryHeader.cpp
     header_isolation/PhysicsNavigationSync2DHeader.cpp
+    header_isolation/ShaderBindingRegistryHeader.cpp
     header_isolation/Sprite2DBindingRegistryHeader.cpp
     header_isolation/AssetGpuMeshHeader.cpp
     header_isolation/TileMapInstanceHeader.cpp
@@ -108,8 +113,14 @@ target_link_libraries(tina_asset_tests PRIVATE
 set_target_properties(tina_asset_tests PROPERTIES CXX_EXTENSIONS OFF)
 
 set(_tina_complete_pbr_gltf
-    "${PROJECT_SOURCE_DIR}/tests/fixtures/gltf/complete_pbr/complete_pbr.gltf")
+    "${PROJECT_SOURCE_DIR}/samples/3d_product/assets/complete_pbr/complete_pbr.gltf")
 if(EXISTS "${_tina_complete_pbr_gltf}")
     target_compile_definitions(tina_asset_tests PRIVATE
         "TINA_COMPLETE_PBR_GLTF_FIXTURE=\"${_tina_complete_pbr_gltf}\"")
+endif()
+set(_tina_metal_rough_spheres_glb
+    "${PROJECT_SOURCE_DIR}/tests/fixtures/gltf/metal_rough_spheres/MetalRoughSpheresNoTextures.glb")
+if(EXISTS "${_tina_metal_rough_spheres_glb}")
+    target_compile_definitions(tina_asset_tests PRIVATE
+        "TINA_METAL_ROUGH_SPHERES_GLB=\"${_tina_metal_rough_spheres_glb}\"")
 endif()
