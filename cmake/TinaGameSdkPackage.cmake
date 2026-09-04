@@ -268,6 +268,7 @@ function(tina_configure_game_sdk_package)
             "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_sprite2d.sh"
             "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_mesh3d.sh"
             "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_sprite2d_fixture.def.sc"
+            "${PROJECT_SOURCE_DIR}/src/render/bgfx/shaders/tina_opaque3d_mr.def.sc"
             DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/Tina/shaders"
         )
         install(FILES
