@@ -95,7 +95,6 @@ set(TINA_ASSET_TEST_SOURCES
     header_isolation/CatalogPackageValidationHeader.cpp
     header_isolation/CatalogSnapshotHeader.cpp
     header_isolation/SourceImportCaptureHeader.cpp
-    header_isolation/SourceImportExecutorHeader.cpp
     header_isolation/CookedAssetBatchHeader.cpp
     header_isolation/CookedAssetFileHeader.cpp
 )

@@ -18,7 +18,6 @@
 #include <tina/core/id/GenerationId.hpp>
 #include <tina/core/id/GenerationPool.hpp>
 #include <tina/core/memory/CountingMemoryResource.hpp>
-#include <tina/core/memory/FrameArena.hpp>
 #include <tina/core/memory/MemoryStatistics.hpp>
 #include <tina/core/memory/MemoryTag.hpp>
 #include <tina/core/memory/MemoryTracker.hpp>

@@ -280,11 +280,12 @@ TEST(ShaderPayloadTests, RejectsBlobOffsetsThatAreNotTightlyPacked)
 
 TEST(ShaderPayloadTests, ProfileNamesRoundTripThroughTheRecipeSpelling)
 {
-    constexpr std::array<ShaderBinaryProfile, 4> profiles{
+    constexpr std::array<ShaderBinaryProfile, 5> profiles{
         ShaderBinaryProfile::Glsl120,
         ShaderBinaryProfile::SpirV,
         ShaderBinaryProfile::Dxbc50,
         ShaderBinaryProfile::Essl300,
+        ShaderBinaryProfile::Metal,
     };
     for (const ShaderBinaryProfile profile : profiles)
     {

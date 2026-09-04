@@ -543,6 +543,10 @@ enum class GpuShaderBinaryProfile : u8 {
     SpirV = 2,
     Dxbc50 = 3,
     Essl300 = 4,
+    // Metal Shading Language. The cooked blob carries MSL *source*, not a compiled library: shaderc
+    // routes GLSL through SPIR-V-Cross and the Metal runtime compiles it on the device, which is why
+    // a Metal blob can be cooked on a non-Apple host.
+    Metal = 5,
 };
 
 struct GpuShaderBinary final {

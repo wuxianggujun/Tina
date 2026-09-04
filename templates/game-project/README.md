@@ -122,4 +122,6 @@ Android 那条链上有两个非显然的点。一是 cook 在**构建机**上�
 
 **没有 `tina_add_android_frontend()`。** Java 用一个固定名字解析 `System.loadLibrary`，所以 Android 没有"每个游戏一个共享库"可产出：游戏是靠引擎的 JNI 桥链接它的内容库上设备的。在那个桥改成从游戏定义的工厂取 application 之前，这样一个函数只会包装一次对引擎源码的改动。这也是 Android 的 cook 接在 `android/app/build.gradle` 而不是 `tina_cook_catalog()` 上的原因——后者输出到 `$<TARGET_FILE_DIR:target>`，那在 Android 上是 NDK 的 `.so` 目录，AGP 只从那里收 `.so`。
 
-**模板不带 web 入口。** `tina_add_web_frontend()` 已经可用，但 SDK 头里没有 `Tina::Web::CreateEngine`，浏览器组装根目前是 `samples/web/platforms/web/WebMain.cpp` 里手写的 `EngineCompositionFactories`（`createEngineFactories()`，第 465 行起）。把它抄进模板等于分叉那份代码。要做 web 端：建 `platforms/web/`，调 `tina_add_web_frontend()`，入口以 `samples/web/platforms/web/WebMain.cpp` 为基础——它用 `emscripten_set_main_loop` 驱动 `EngineHost::start/tick`，而不是 `run()`。
+**模板不带 web 入口，装出来的包目前也做不出来一个。** `tina_add_web_frontend()` 本身随 SDK 安装，它链接的 `Tina::PlatformHtml5` 也随 Emscripten 工具链构建的包导出，但**浏览器组装根还缺一块公开面**：SDK 头里既没有 `Tina::Web::CreateEngine`，也没有任何 bgfx device factory —— `samples/web/platforms/web/WebMain.cpp` 是靠 `#include "render/bgfx/BgfxRenderDevice.hpp"` 这个私有头拿到 device 的，而私有头不进安装包。所以 web 端在 in-tree 可用，在 `find_package(Tina)` 之后不可用。
+
+这不是抄一份代码能解决的：把 `WebMain.cpp` 复制进模板会分叉那份组装根，而且复制过去的 include 在装出来的包里根本找不到文件。缺的是一个公开的 web 组装入口（`Tina::Web::CreateEngine`，或者一个公开的 bgfx device factory）。in-tree 要做 web 端：建 `platforms/web/`，调 `tina_add_web_frontend()`，入口以 `samples/web/platforms/web/WebMain.cpp` 为基础——它用 `emscripten_set_main_loop` 驱动 `EngineHost::start/tick`，而不是 `run()`。

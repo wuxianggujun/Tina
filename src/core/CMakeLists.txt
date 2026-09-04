@@ -29,7 +29,6 @@ add_library(tina_core STATIC
     ${PROJECT_SOURCE_DIR}/include/tina/core/id/GenerationId.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/id/GenerationPool.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/memory/CountingMemoryResource.hpp
-    ${PROJECT_SOURCE_DIR}/include/tina/core/memory/FrameArena.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/memory/MemoryStatistics.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/memory/MemoryTag.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/core/memory/MemoryTracker.hpp

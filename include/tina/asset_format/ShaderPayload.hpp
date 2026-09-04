@@ -67,9 +67,14 @@ enum class ShaderBinaryProfile : Core::u16 {
     SpirV = 2,
     Dxbc50 = 3,
     Essl300 = 4,
+    // Metal Shading Language, the only renderer bgfx selects on modern iOS. Appended rather than
+    // ordered beside the other mobile profile because the numeric value is the payload's sort key:
+    // blobs are stored strictly ascending, so inserting in the middle would renumber Essl300 and
+    // make every already-cooked payload parse as a different profile set.
+    Metal = 5,
 };
 
-// Recipe-facing spelling: "glsl120", "spv", "dxbc", "essl300". Empty for Invalid.
+// Recipe-facing spelling: "glsl120", "spv", "dxbc", "essl300", "mtl". Empty for Invalid.
 [[nodiscard]] std::string_view shaderBinaryProfileName(ShaderBinaryProfile profile) noexcept;
 
 [[nodiscard]] std::optional<ShaderBinaryProfile>

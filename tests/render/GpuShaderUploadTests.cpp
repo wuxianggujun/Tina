@@ -576,6 +576,76 @@ TEST(ShaderSamplerParseTest, RejectsARegisterThatIsNotADecimalLiteral)
     EXPECT_EQ(beyondHardware.error().code, Render::RenderErrorCode::InvalidShaderUpload);
 }
 
+TEST(ShaderSamplerParseTest, SkipsDeclarationsInsideALiteralFalseConditional)
+{
+    // A switched-off block declares nothing. Without this the sampler would be collected and then
+    // rejected for never being sampled, failing a shader every compiler accepts.
+    constexpr std::string_view source = R"(#if 0
+SAMPLER2D(s_dead, 9);
+#endif
+SAMPLER2D(s_mask, 2);
+void main() { gl_FragColor = texture2D(s_mask, uv); }
+)";
+    auto table = Render::parseShaderSamplerDeclarations(source);
+    ASSERT_TRUE(table.has_value());
+    ASSERT_EQ(table->count, 1U);
+    EXPECT_EQ(declaredName(*table, 0), "s_mask");
+    EXPECT_EQ(table->declarations[0].stage, 2U);
+    EXPECT_TRUE(table->declarations[0].referenced);
+}
+
+TEST(ShaderSamplerParseTest, KeepsDeclarationsInConditionalsItCannotEvaluate)
+{
+    // Only the literal `#if 0` is treated as dead. Any other condition depends on macro state this
+    // scan does not model, and keeping the declaration is the safe direction: a wrongly-kept one is
+    // checked against a rule the author can read, while a wrongly-dropped one puts a stage mismatch
+    // back on the GPU where nothing reports it.
+    constexpr std::string_view live = R"(#if 1
+SAMPLER2D(s_mask, 2);
+#endif
+void main() { gl_FragColor = texture2D(s_mask, uv); }
+)";
+    auto liveTable = Render::parseShaderSamplerDeclarations(live);
+    ASSERT_TRUE(liveTable.has_value());
+    ASSERT_EQ(liveTable->count, 1U);
+    EXPECT_EQ(declaredName(*liveTable, 0), "s_mask");
+
+    // `#if 0x0` and `#if 00` are not the recognised shape, so they stay live rather than being
+    // guessed at.
+    constexpr std::string_view unevaluated = R"(#ifdef SOMETHING
+SAMPLER2D(s_a, 2);
+#endif
+#if 00
+SAMPLER2D(s_b, 3);
+#endif
+void main() { gl_FragColor = texture2D(s_a, uv) * texture2D(s_b, uv); }
+)";
+    auto unevaluatedTable = Render::parseShaderSamplerDeclarations(unevaluated);
+    ASSERT_TRUE(unevaluatedTable.has_value());
+    EXPECT_EQ(unevaluatedTable->count, 2U);
+}
+
+TEST(ShaderSamplerParseTest, TracksNestingAndElseInsideADeadConditional)
+{
+    // A conditional inside a dead block is dead whatever it says, and the `#else` of a dead branch is
+    // live. Getting either wrong silently changes which declarations the register rule sees.
+    constexpr std::string_view source = R"(#if 0
+SAMPLER2D(s_dead, 9);
+#ifdef NESTED
+SAMPLER2D(s_alsoDead, 8);
+#endif
+#else
+SAMPLER2D(s_mask, 2);
+#endif
+void main() { gl_FragColor = texture2D(s_mask, uv); }
+)";
+    auto table = Render::parseShaderSamplerDeclarations(source);
+    ASSERT_TRUE(table.has_value());
+    ASSERT_EQ(table->count, 1U);
+    EXPECT_EQ(declaredName(*table, 0), "s_mask");
+    EXPECT_TRUE(table->declarations[0].referenced);
+}
+
 TEST(ShaderSamplerRegisterTest, AcceptsEngineSamplersFollowedByConsecutiveAuthorStages)
 {
     auto table = Render::parseShaderSamplerDeclarations(

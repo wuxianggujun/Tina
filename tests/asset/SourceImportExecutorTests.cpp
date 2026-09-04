@@ -1,5 +1,5 @@
 #include <tina/asset/AssetErrors.hpp>
-#include <tina/asset/SourceImportExecutor.hpp>
+#include "../../src/asset/SourceImportExecutor.hpp"
 
 #include <gtest/gtest.h>
 

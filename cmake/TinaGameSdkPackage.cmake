@@ -114,6 +114,39 @@ function(tina_configure_game_sdk_package)
         set(TINA_PACKAGE_WITH_UI_UIA ON)
     endif()
 
+    # The mobile and browser Platform adapters go in the main export set rather than getting their
+    # own component the way PlatformGlfw does: they link no third party at all -- the host hands the
+    # native window across as an opaque integer -- so there is no find_dependency() for a component
+    # to gate. They are exported at all because their factory headers install unconditionally, and
+    # because tina_add_web_frontend(), itself part of the installed scaffolding, links
+    # Tina::PlatformHtml5. Without this the function failed at generate time inside a
+    # find_package(Tina) consumer while the header it needs sat in the same prefix.
+    #
+    # Which of the three exists is decided by the toolchain, not an option: src/platform adds
+    # android/ under ANDROID and html5/ under EMSCRIPTEN, and ios/ on every host. A TARGET guard is
+    # therefore the only correct condition. tina_platform_android_jni stays unexported on purpose --
+    # it is the APK's own entry point, links libandroid/JNI, and is not something a consumer links.
+    set(TINA_PACKAGE_WITH_PLATFORM_ANDROID OFF)
+    if(TARGET tina_platform_android)
+        list(APPEND tina_sdk_export_targets tina_platform_android)
+        tina_configure_game_sdk_target(tina_platform_android PlatformAndroid)
+        set(TINA_PACKAGE_WITH_PLATFORM_ANDROID ON)
+    endif()
+
+    set(TINA_PACKAGE_WITH_PLATFORM_HTML5 OFF)
+    if(TARGET tina_platform_html5)
+        list(APPEND tina_sdk_export_targets tina_platform_html5)
+        tina_configure_game_sdk_target(tina_platform_html5 PlatformHtml5)
+        set(TINA_PACKAGE_WITH_PLATFORM_HTML5 ON)
+    endif()
+
+    set(TINA_PACKAGE_WITH_PLATFORM_IOS OFF)
+    if(TARGET tina_platform_ios)
+        list(APPEND tina_sdk_export_targets tina_platform_ios)
+        tina_configure_game_sdk_target(tina_platform_ios PlatformIos)
+        set(TINA_PACKAGE_WITH_PLATFORM_IOS ON)
+    endif()
+
     set(TINA_PACKAGE_WITH_TRACE_TRACY OFF)
     if(TARGET tina_trace_tracy)
         list(APPEND tina_sdk_export_targets tina_trace_tracy)
@@ -350,6 +383,13 @@ function(tina_configure_game_sdk_package)
         PATTERN "FreeTypeTextRasterizerFactory.hpp" EXCLUDE
         PATTERN "WindowsUiaAccessibilityProviderFactory.hpp" EXCLUDE
         PATTERN "TileMapPhysicsSync.hpp" EXCLUDE
+        # Same rule as glfw and tls: each mobile/browser Platform adapter's factory header ships
+        # only when its target was built, so a package never advertises a backend a consumer
+        # cannot link. Before this, a Windows package carried android/ and html5/ factory headers
+        # with no corresponding target anywhere in TinaTargets.cmake.
+        PATTERN "android" EXCLUDE
+        PATTERN "html5" EXCLUDE
+        PATTERN "ios" EXCLUDE
         # Reinstalled below only when the TLS adapter was built, so a package
         # without it does not advertise a header its consumer cannot link.
         PATTERN "tls" EXCLUDE
@@ -371,6 +411,24 @@ function(tina_configure_game_sdk_package)
     if(TARGET tina_platform_glfw)
         install(FILES "${PROJECT_SOURCE_DIR}/include/tina/platform/glfw/GlfwPlatformFactory.hpp"
             DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/platform/glfw"
+        )
+    endif()
+    if(TARGET tina_platform_android)
+        install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/tina/platform/android"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/platform"
+            FILES_MATCHING PATTERN "*.hpp"
+        )
+    endif()
+    if(TARGET tina_platform_html5)
+        install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/tina/platform/html5"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/platform"
+            FILES_MATCHING PATTERN "*.hpp"
+        )
+    endif()
+    if(TARGET tina_platform_ios)
+        install(DIRECTORY "${PROJECT_SOURCE_DIR}/include/tina/platform/ios"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/tina/platform"
+            FILES_MATCHING PATTERN "*.hpp"
         )
     endif()
     if(TARGET tina_ui_freetype)

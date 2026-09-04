@@ -38,6 +38,8 @@ toGpuShaderProfile(AssetFormat::ShaderBinaryProfile profile) noexcept
         return Render::GpuShaderBinaryProfile::Dxbc50;
     case AssetFormat::ShaderBinaryProfile::Essl300:
         return Render::GpuShaderBinaryProfile::Essl300;
+    case AssetFormat::ShaderBinaryProfile::Metal:
+        return Render::GpuShaderBinaryProfile::Metal;
     case AssetFormat::ShaderBinaryProfile::Invalid:
         break;
     }

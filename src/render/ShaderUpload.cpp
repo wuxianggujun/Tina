@@ -33,6 +33,7 @@ namespace {
     case GpuShaderBinaryProfile::SpirV:
     case GpuShaderBinaryProfile::Dxbc50:
     case GpuShaderBinaryProfile::Essl300:
+    case GpuShaderBinaryProfile::Metal:
         return true;
     case GpuShaderBinaryProfile::Invalid:
         break;
@@ -85,6 +86,54 @@ constexpr std::array<std::string_view, 14> kSamplerMacros{
         ++index;
     }
     return index;
+}
+
+// Advances past spaces and tabs only, stopping at a newline. Used inside a preprocessor directive,
+// where the line end terminates the directive and must not be stepped over.
+[[nodiscard]] constexpr usize skipBlanks(std::string_view source, usize index) noexcept
+{
+    while (index < source.size() && (source[index] == ' ' || source[index] == '\t'))
+    {
+        ++index;
+    }
+    return index;
+}
+
+// The identifier immediately after a `#`, so a conditional can be told from any other directive.
+// Whitespace between the hash and the name is legal, and shaderc's preprocessor accepts it.
+[[nodiscard]] constexpr std::string_view directiveName(std::string_view source, usize hashIndex) noexcept
+{
+    usize cursor = skipBlanks(source, hashIndex + 1);
+    const usize begin = cursor;
+    while (cursor < source.size() && isIdentifierChar(source[cursor]))
+    {
+        ++cursor;
+    }
+    return source.substr(begin, cursor - begin);
+}
+
+// Whether an `#if` condition is the literal 0, i.e. a block the author has switched off. Only the
+// literal is recognised: anything else depends on macro state this scan does not model, so it is
+// treated as live rather than guessed at.
+[[nodiscard]] constexpr bool isLiteralFalseCondition(std::string_view source, usize hashIndex) noexcept
+{
+    usize cursor = skipBlanks(source, hashIndex + 1);
+    while (cursor < source.size() && isIdentifierChar(source[cursor]))
+    {
+        ++cursor;
+    }
+    cursor = skipBlanks(source, cursor);
+    if (cursor >= source.size() || source[cursor] != '0')
+    {
+        return false;
+    }
+    ++cursor;
+    // A single 0 and nothing else. `#if 0x1` and `#if 00` are not this shape, and treating them as
+    // false would switch off a block the compiler keeps.
+    cursor = skipBlanks(source, cursor);
+    return cursor >= source.size() || source[cursor] == '\n' || source[cursor] == '\r' ||
+           (source[cursor] == '/' && cursor + 1 < source.size() &&
+            (source[cursor + 1] == '/' || source[cursor + 1] == '*'));
 }
 
 } // namespace
@@ -213,6 +262,16 @@ parseShaderSamplerDeclarations(std::string_view source) noexcept
     // whole: `#define MASK SAMPLER2D(s_mask, 2)` declares nothing by itself, and the expansion (if
     // any) appears where the macro is used.
     bool atLineStart = true;
+    // Nesting depth of conditionals whose body the compiler drops, so `#if 0` blocks contribute no
+    // declarations. Without this a switched-off sampler is collected and then rejected for never
+    // being sampled, which fails a shader the compiler would accept.
+    //
+    // Only `#if 0` is recognised. Every other condition is treated as live, which is the safe
+    // direction: a declaration wrongly kept is checked against a register rule the author can read
+    // and satisfy, while one wrongly dropped puts a stage mismatch back on the GPU where nothing
+    // reports it. Deeper nesting is counted rather than tracked per-branch because a conditional
+    // inside a dead block is dead whatever it says.
+    u32 deadConditionalDepth = 0;
     while (index < source.size())
     {
         const char current = source[index];
@@ -256,6 +315,30 @@ parseShaderSamplerDeclarations(std::string_view source) noexcept
         }
         if (atLineStart && current == '#')
         {
+            const std::string_view directive = directiveName(source, index);
+            if (deadConditionalDepth > 0)
+            {
+                // Inside a dropped block. Only the directives that change nesting matter; an `#else`
+                // at the outermost dead level revives the scan, because the dead branch was the one
+                // before it.
+                if (directive == "if" || directive == "ifdef" || directive == "ifndef")
+                {
+                    ++deadConditionalDepth;
+                }
+                else if (directive == "endif")
+                {
+                    --deadConditionalDepth;
+                }
+                else if (deadConditionalDepth == 1 && (directive == "else" || directive == "elif"))
+                {
+                    deadConditionalDepth = 0;
+                }
+            }
+            else if (directive == "if" && isLiteralFalseCondition(source, index))
+            {
+                deadConditionalDepth = 1;
+            }
+
             // Line continuations included: a macro definition spanning lines is still one directive.
             while (index < source.size())
             {
@@ -267,6 +350,16 @@ parseShaderSamplerDeclarations(std::string_view source) noexcept
                         break;
                     }
                 }
+                ++index;
+            }
+            continue;
+        }
+        if (deadConditionalDepth > 0)
+        {
+            // Body of a dropped conditional: neither a declaration nor a reference in here reaches
+            // the compiler, so skip to the next line without touching the table.
+            while (index < source.size() && source[index] != '\n')
+            {
                 ++index;
             }
             continue;

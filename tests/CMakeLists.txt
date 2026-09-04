@@ -35,7 +35,6 @@ set(TINA_CORE_TEST_SOURCES
     core/header_isolation/ErrorHeader.cpp
     core/header_isolation/CountingMemoryResourceHeader.cpp
     core/header_isolation/FixedStepAccumulatorHeader.cpp
-    core/header_isolation/FrameArenaHeader.cpp
     core/header_isolation/GenerationIdHeader.cpp
     core/header_isolation/GenerationPoolHeader.cpp
     core/header_isolation/MemoryTrackerHeader.cpp

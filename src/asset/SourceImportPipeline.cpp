@@ -6,7 +6,7 @@
 #include <tina/asset/CatalogPackage.hpp>
 #include <tina/asset/CatalogPackageChangeDetector.hpp>
 #include <tina/asset/MediaCook.hpp>
-#include <tina/asset/SourceImportExecutor.hpp>
+#include "SourceImportExecutor.hpp"
 #include <tina/asset/SourceImportPlan.hpp>
 #include <tina/asset_format/AssetFormatErrors.hpp>
 #include <tina/core/io/ReadFile.hpp>

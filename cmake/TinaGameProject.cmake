@@ -31,6 +31,45 @@ function(tina_game_project_apply_options target)
     endif()
 endfunction()
 
+# Puts a frontend's runnable output at bin/<Config>/<subdirectory> below the build root, so a
+# game's executable has one predictable path instead of one per source directory.
+#
+# A subdirectory per frontend rather than one shared bin/<Config>, because two frontends of the
+# same game can emit the same file name and a shared directory resolves that by letting the
+# later build overwrite the earlier one with no diagnostic. That is not hypothetical here:
+# tina_assetc.exe went missing from this tree's own bin/Debug/ while its .pdb stayed behind,
+# after a parallel build wrote shaderc.exe into the same directory, and the only symptom was an
+# install error that claimed the file was both absent and present.
+#
+# Nothing happens when the enclosing project already set CMAKE_RUNTIME_OUTPUT_DIRECTORY. The
+# engine sets it at its top level, so the samples in this tree keep landing where the gate
+# scripts and docs look for them, and a consumer who set it deliberately is not overridden. A
+# game project created from templates/game-project sets nothing, which is the case this exists
+# for -- its products otherwise scatter across platforms/<name>/<Config>/, and there is then no
+# stable path to write into a debugger configuration or a .gitignore.
+function(tina_game_project_set_frontend_output_dir target subdirectory)
+    if(CMAKE_RUNTIME_OUTPUT_DIRECTORY)
+        return()
+    endif()
+
+    # Both forms get set, and they are not alternatives. A multi-config generator appends
+    # $(Configuration) to the unsuffixed property, which would land the executable in
+    # bin/<frontend>/<Config>/ -- so every config also gets an explicit path with the
+    # component already in the right place. A single-config generator reads only the
+    # unsuffixed one and has no config to place, which is the same shape the engine's own
+    # bin/ takes under Ninja.
+    set_target_properties(${target} PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin/${subdirectory}"
+    )
+    foreach(config IN LISTS CMAKE_CONFIGURATION_TYPES)
+        string(TOUPPER "${config}" config_upper)
+        set_target_properties(${target} PROPERTIES
+            "RUNTIME_OUTPUT_DIRECTORY_${config_upper}"
+                "${CMAKE_BINARY_DIR}/bin/${config}/${subdirectory}"
+        )
+    endforeach()
+endfunction()
+
 # The portable half of a game: states, scenes, UI, gameplay. Links Tina::Runtime and
 # nothing platform-shaped, which is what lets every frontend link the same library.
 #
@@ -159,6 +198,9 @@ function(tina_add_cli_frontend target)
     endif()
     tina_game_project_apply_options(${target})
     set_target_properties(${target} PROPERTIES CXX_EXTENSIONS OFF)
+    # Before the DLL copy below, so the staging destination and the executable are read from
+    # one output directory rather than two that have to be kept equal.
+    tina_game_project_set_frontend_output_dir(${target} "cli")
 
     if(ARG_COPY_RUNTIME_DLLS AND WIN32)
         # Guarded on a non-empty list: with no DLL dependencies the genex expands to nothing
@@ -208,6 +250,12 @@ function(tina_add_desktop_frontend target)
     endif()
     tina_game_project_apply_options(${target})
     set_target_properties(${target} PROPERTIES CXX_EXTENSIONS OFF)
+    # Set before tina_install_product() and before the DLL copy, because both read
+    # $<TARGET_FILE_DIR:target>. That genex resolves at generate time, so the order here does
+    # not actually matter -- it is kept anyway so the reading order matches the dependency,
+    # and so a future edit that switches to a non-genex path does not silently stage into the
+    # previous directory.
+    tina_game_project_set_frontend_output_dir(${target} "desktop")
 
     if(ARG_INSTALL)
         # Emits the install rules and the same DLL copy, keyed to the product directory that
@@ -281,6 +329,10 @@ function(tina_add_web_frontend target)
         CXX_EXTENSIONS OFF
         SUFFIX ".html"
     )
+    # emcc emits four files from one link -- .html, .js, .wasm, .data -- and all four follow the
+    # runtime output directory, so the deliverable stays a single directory a web server can be
+    # pointed at.
+    tina_game_project_set_frontend_output_dir(${target} "web")
     target_link_options(${target} PRIVATE
         # The engine allocates well past the default heap, and the frame loop has to
         # survive main() returning -- a browser drives frames from its own callback.

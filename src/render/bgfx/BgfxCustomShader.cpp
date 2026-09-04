@@ -23,6 +23,8 @@ namespace {
         return GpuShaderBinaryProfile::Essl300;
     case bgfx::RendererType::Vulkan:
         return GpuShaderBinaryProfile::SpirV;
+    case bgfx::RendererType::Metal:
+        return GpuShaderBinaryProfile::Metal;
     default:
         break;
     }

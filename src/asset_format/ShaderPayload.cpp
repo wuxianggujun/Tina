@@ -67,6 +67,7 @@ void writeU32(std::vector<std::byte>& bytes, usize offset, u32 value) noexcept
     case ShaderBinaryProfile::SpirV:
     case ShaderBinaryProfile::Dxbc50:
     case ShaderBinaryProfile::Essl300:
+    case ShaderBinaryProfile::Metal:
         return true;
     case ShaderBinaryProfile::Invalid:
         break;
@@ -148,6 +149,10 @@ std::string_view shaderBinaryProfileName(ShaderBinaryProfile profile) noexcept
         return "dxbc";
     case ShaderBinaryProfile::Essl300:
         return "essl300";
+    case ShaderBinaryProfile::Metal:
+        // "mtl", matching the suffix bgfx's own _bgfx_get_profile_ext() gives this profile and the
+        // one cmake/TinaBgfxEmbeddedShaders.cmake already uses for the engine's shaders.
+        return "mtl";
     case ShaderBinaryProfile::Invalid:
         break;
     }
@@ -171,6 +176,10 @@ std::optional<ShaderBinaryProfile> parseShaderBinaryProfileName(std::string_view
     if (name == "essl300")
     {
         return ShaderBinaryProfile::Essl300;
+    }
+    if (name == "mtl")
+    {
+        return ShaderBinaryProfile::Metal;
     }
     return std::nullopt;
 }

@@ -62,7 +62,11 @@ Vorbis/Opus 的安装图还分别解析 `Vorbis`、`Opus`、`OpusFile`。未请�
 | `Tina::Math` | `Vec2/3/4`、`Quaternion`、列主序右手系 `Mat4`、`Aabb2/3`、`Rect`、`Sphere`、`Plane`、`Ray`、`Frustum` 与几何查询；header-only，见 [Math](math.md) |
 | `Tina::Platform` | Window/Input/PlatformFrame/backend SPI |
 | `Tina::PlatformGlfw` | optional installed GLFW Platform adapter；需 `COMPONENTS PlatformGlfw` |
+| `Tina::PlatformAndroid` | Android Platform adapter（ANativeWindow 以 opaque integer 交接，不链接 libandroid/JNI）；只在 Android 工具链构建的包里存在 |
+| `Tina::PlatformHtml5` | 浏览器 canvas Platform adapter；只在 Emscripten 工具链构建的包里存在，`tina_add_web_frontend()` 链接它 |
+| `Tina::PlatformIos` | iOS Platform adapter（CAMetalLayer 以 opaque integer 交接，无 Apple SDK 依赖，因此每个 host 都构建）；ObjC host 在 `ios/`，不随 SDK 发布 |
 | `Tina::Task` | bounded IO/CPU/Main TaskSystem |
+| `Tina::Save` | 版本化存档槽 `SaveStore`（同步 + 三种 async operation）、product-owned `SaveMigrationPipeline` |
 | `Tina::Gameplay` | `Scheduler`/timer、`Action`/`ActionRunner` tween 与 sequence/parallel/repeat、28 条 `Easing`、scoped `Signal<T>`；只依赖 Core+Math，见 [Gameplay 工具层](gameplay-tooling.md) |
 | `Tina::Gameplay2D` | authored 2D 场景运行时所有者 `Scene2DRuntime`；物理桥仅在启用 Physics2D 时进入公开面 |
 | `Tina::Animation3D` | `Skeleton3D`/`Pose3D`/`JointMask`、pose 混合、`ClipSampler3D`、`BlendTree3D`、`AnimationGraph3D`（crossfade/状态机/layer/root motion）、两骨 IK；见 [3D 动画图](animation-3d.md) |
@@ -77,8 +81,12 @@ Vorbis/Opus 的安装图还分别解析 `Vorbis`、`Opus`、`OpusFile`。未请�
 | `Tina::AssetFormat` | versioned Cooked payload/manifest types |
 | `Tina::Editor` | 工具侧 validated World2D/World3D/TileMap/SpriteAnimationClip/Navigation2D/Fx2D authoring document、Project Asset index、project workspace/空目录创建、document-tab navigation、bounded revision history、文件加载/原子保存与 runtime/cook preview；**不随 SDK 包发布**，也不由 `Tina::GameSDK` 聚合链接（ADR 0041） |
 | `Tina::Asset` | Catalog、AssetSystem、Handle/Lease、Cooker helpers、typed parse/upload、Sprite2D/Mesh3D binding registry |
+| `Tina::AssetTypes` | header-only 子集：只发布 `AssetHandle.hpp` 与 `AssetFrameResourceResolver.hpp`，供只需要弱 handle/resolver 而不想链接整个 `Tina::Asset` 的模块使用 |
 | `Tina::UI` | retained Element tree、layout/input/paint、text、semantics 与固定容量 layout diagnostics |
 | `Tina::UIFreetype` | optional installed FreeType text rasterizer adapter；需 `COMPONENTS UIFreetype` |
+| `Tina::UIUia` | optional 条件导出的 Windows UIA accessibility provider（`TINA_BUILD_UI_UIA`）；不进入 `Tina::GameSDK` 聚合，需显式链接 |
+| `Tina::WindowSurfaceIntegration` | Platform↔Render 的 window surface 交接契约：`NativeWindowSurfaceLease`、`WindowSurfaceId`、surface snapshot 与 `IWindowSurfacePlatformBackend`（ADR 0020/0034） |
+| `Tina::UIRenderIntegration` | UI↔Render 的单向转换 `buildUIDisplayList()`：把 committed UI paint 快照转成 Render UI DisplayList（ADR 0011） |
 | `Tina::Audio` | backend-neutral AudioEngine/PCM、voice gain/pitch/pan/fade |
 | `Tina::AudioMiniaudio` | optional installed miniaudio device/decode adapter；需 `COMPONENTS AudioMiniaudio` |
 | `Tina::Physics2D` | optional Box2D-backed Box/Circle/Capsule/ConvexPolygon/Chain 与 Distance/Revolute/Prismatic API |
@@ -87,6 +95,13 @@ Adapter targets `Tina::PlatformGlfw`、`Tina::RenderBgfx`、`Tina::UIFreetype`�
 `Tina::AudioMiniaudio` 主要用于 bootstrap/高级组合，不把第三方 header 传播给调用方；安装 package 按构建图
 条件导出四个 adapter 和 `Tina::DesktopBootstrap`。`Tina::TraceTracy` 只作为 Tracy Profile package 内
 `Tina::Core` 的静态链接闭包存在，不是可请求 component，也不进入 `Tina_ADAPTER_TARGETS`。
+
+`Tina::PlatformAndroid`、`Tina::PlatformHtml5`、`Tina::PlatformIos` 与上面四个 adapter 不同：它们**不是
+可请求 component**，随 `TinaTargets.cmake` 无条件到达。原因是它们一个第三方库都不链接（native window 以
+opaque integer 交接），所以没有需要 component 去 gate 的 `find_dependency()`。哪个存在由构建该 package 的
+工具链决定：Emscripten 包带 `PlatformHtml5`，Android 包带 `PlatformAndroid`，`PlatformIos` 每个 host 都有。
+对应的 factory 头也按同一条件安装 —— 包里不会出现一个没有 target 可链接的 backend 头。`Tina::PlatformAndroidJni`
+是 APK 自己的入口（唯一链接 libandroid/JNI 的地方），不导出，消费者也不该链接它。
 
 ## Core 约定
 
@@ -413,6 +428,37 @@ stop，timeout 返回 `TaskErrorCode::WaitTimeout` 并保留 stopping 对象/Wor
 `TaskSystemCreateParams::cpuWorkerCount=0` 在直接工厂中表示 CPU domain disabled；
 `Desktop::CreateEngine` 经 `resolveDesktopTaskSystemParams` 将 0 解析为 `max(1, hardware_concurrency-1)`。
 `TaskGroup` 提供结构化 pending/wait，不允许 detach/强杀。
+
+## Save
+
+`Tina::Save`（`include/tina/save/`）是版本化存档槽的所有者，随 `Tina::GameSDK` 一起链接。它不定义存档
+内容：payload 是产品自己的字节，Save 只负责槽位、envelope、双副本与迁移编排。
+
+`SaveStore::Create(SaveStoreConfig)` 需要 `rootDirectoryUtf8` 与稳定的 `gameId`（不是显示名）。
+`defaultSaveRootPath(applicationName)` 纯路径组合出 `<per-user state>/<applicationName>/saves`，不碰文件
+系统。槽位文件名由 SaveStore 自己生成（`slot-NNNN.tsave` 与 `.tsave.bak`），所以调用方文本永远不会成为
+路径分量。`slotCapacity` 默认 16、上限 `MaxSaveSlotCapacity`；`maxPayloadBytes` 默认 16 MiB、上限 128 MiB。
+`taskSystem` 是可选的，只有三个 `begin*` 需要它。
+
+同步命令 `saveSlot`/`loadSlot`/`listSlots`/`deleteSlot`/`repairPrimaryFromBackup` 与异步
+`beginSave`/`beginLoad`/`beginList` 共享同一条约束：**每个 store 同时最多一个文件系统 transaction**，
+且命令必须在 owner thread 上发起，违反分别返回 `SaveErrorCode::Busy` 与 `WrongOwnerThread`。
+`pathsFor()` 是纯路径组合，可从任意线程查询。异步 operation handle 是一次性的：`take()` 在未 `ready()` 时
+返回 `OperationNotReady`，重复取返回 `OperationAlreadyTaken`；handle 在 `SaveStore` 析构后仍然有效，但
+配置的 TaskSystem 必须活过每一次调度调用。
+
+每个槽位有 primary 与 backup 两份。`saveSlot` 先把仍然有效且不比 backup 旧的 primary 复制成 backup，
+再写新 primary，因此 `SaveWriteResult::backupUpdated` 为真表示上一代存档已被保全。`revision` 取两份副本
+的较大值 +1，溢出返回 `RevisionOverflow`。Corrupt 的 primary 可以被覆盖（`replacedCorruptPrimary` 记录
+这件事），但 `Incompatible`（另一个 `gameId` 或更新的 envelope schema）会让写入直接失败 —— 决定是否丢弃
+它不属于这个 API。`loadSlot` 只在 primary 无效且 `SaveLoadOptions::allowBackupFallback` 为真时回落到
+backup，`SaveLoadResult::source`/`health` 报告实际来源。`repairPrimaryFromBackup` 从不隐式发生在 load
+路径上，且有效的 primary 会被原样保留。`deleteSlot` 幂等，先删 backup，这样 primary 删除失败时留下的是
+一份可加载的副本。
+
+`SaveMigrationPipeline` 是产品拥有的迁移图：每个 source version 只允许一条严格递增的边，因此迁移确定且
+不可降级，重复边返回 `DuplicateMigrationStep`，找不到通路返回 `MigrationPathMissing`。它独立于
+`SaveStore`，由产品决定何时对 `SaveLoadResult::payload` 施加。
 
 ## Render
 
@@ -816,13 +862,43 @@ structure commit/destroy、layout、hit 与 paint publication；Popup membership
 可选 FreeType、R8 Glyph atlas、semantics snapshot 与 `UIAccessibilityTree`/probe provider 均为 Tina API。
 平台中立 `UIAccessibilityAction`/`UIAccessibilityActionKind` 提供同步 owner-thread Focus、Invoke、
 Toggle、SetRangeValue 与 SetTextValue seam；adapter 通过它保留正常控件 callback，stale、disabled、
-类型不匹配或非法 action 返回明确错误。可选 Windows UIA 私有 adapter（`TINA_BUILD_UI_UIA`）映射 UIA 属性，
+类型不匹配或非法 action 返回明确错误。可选 Windows UIA adapter（`TINA_BUILD_UI_UIA`，导出为
+`Tina::UIUia`，只发布窄 factory 头 `ui/WindowsUiaAccessibilityProviderFactory.hpp`，不进入
+`Tina::GameSDK` 聚合）映射 UIA 属性，
 公开头无 COM；产品路径经 EngineHost 自动附着 HWND HostBridge，并实现 Invoke/Toggle/RangeValue/Value
 patterns 的 owner-thread dispatch；Menu/MenuItem 映射对应 ControlType，只有发布 Toggle 的 Check/Radio MenuItem
 暴露 TogglePattern，发布 Activate 的 Button/MenuItem 暴露 InvokePattern。`RunUi002UiaGate.ps1` 可由外部 client
 进程连接真实 showcase HWND。
 Narrator/Inspect 人工金标仍由 UI-002 跟踪，Linux AT-SPI adapter/真机验收由 UI-002-LINUX 跟踪；自动 gate
 不等于真实 screen reader 合规金标。
+
+## Integration
+
+`include/tina/integration/` 是**模块之间**的两条窄契约，不是给普通游戏用的 API：它们存在的理由是让
+Platform 与 Render、UI 与 Render 之间不必互相 include。两个 target 都随 SDK 导出，普通游戏不需要显式
+链接它们（`Tina::GameSDK` 已聚合）。
+
+`Tina::WindowSurfaceIntegration`（`integration/WindowSurface.hpp`，ADR 0020/0034）发布 window surface
+交接契约。`NativeWindowSurfaceLease` 是 move-only、不可复制、析构 `noexcept` 的 lease，**没有 native
+handle / `void*` getter** —— 它把 primary surface 的生命周期钉住整个 RenderDevice 生命周期，当前 native
+binding 只由私有 platform/render 桥解码。`WindowSurfaceSnapshot` 里两个 revision 是正交的：
+`surfaceRevision` 也会因普通 resize 前进，而 `nativeBindingRevision` 只在平台交出了**另一个** native window
+时前进（Android 在前后台切换时会），桌面 backend 永远保持 1。`IPrimaryWindowSurfaceProvider` 的
+`primaryWindowSurfaceSnapshot()` 只返回最近一次从 committed Platform metrics 推导出的值，实现不得在这个
+方法里查询 native window。`IWindowSurfacePlatformBackend` 同时实现普通 `IPlatformBackend` 与该 provider，
+并且必须在 surface-aware RenderDevice 完全初始化之后才 `publishPrimaryWindow()`；hidden-window 配置照常
+commit 但不显示。
+
+`Tina::UIRenderIntegration`（`integration/UIRenderDisplayList.hpp`，ADR 0011）只有一个入口
+`buildUIDisplayList()`，拥有一次完整的 builder transaction：`beginFrame()` 失败时调用方已开启的
+transaction 保持不变，一旦 `beginFrame()` 成功，任何校验、转换或容量失败都会把这次 build 整体回滚。
+`UIRenderViewportMapping` 故意不携带 content-scale 状态 —— logical 与 framebuffer 两个 extent 本身就是
+权威的缩放对。图片解析走调用方拥有并复用的固定 scratch `UIRenderImageResolutionCacheEntry`，
+`UIRenderDisplayListBuildStatistics` 把 missing resolver、unavailable、extent mismatch 三种跳过分别计数，
+所以贴图没出来时能区分是哪一种。layout debug overlay 只追加 Render command，绝不向 retained 结构、
+hit testing 或 semantics 插入节点。返回的 `displayList` view 借用 builder 的固定存储并遵守它的单缓冲失效
+契约：下一次 `beginFrame()` 立即使它失效（包括那次替换后来被回滚的情况），builder 被 move 或销毁同样使
+它失效。
 
 ## Scene
 
@@ -1227,6 +1303,11 @@ count。两者都创建父目录，不写 manifest，不维护 editor-only 或�
 
 ## Asset 与 Cooked
 
+`Tina::AssetTypes` 是 header-only 的最小子集，只发布 `asset/AssetHandle.hpp` 与
+`asset/AssetFrameResourceResolver.hpp`。它的存在理由是依赖方向：`Tina::Scene` 的组件只复制弱
+`AssetHandle` 并在 extraction 时借用 resolver，不需要 Catalog/AssetSystem，因此链接 `Tina::AssetTypes`
+而不是整个 `Tina::Asset`。需要加载、cook 或持有 `AssetLease` 的代码链接 `Tina::Asset`。
+
 `AssetFormat` 定义 versioned manifest/cooked wire format、World2D snapshot 和 Texture2D/StaticMesh/SkinnedMesh/
 AnimationClip3D/Material/Prefab/EnvironmentMap/TileMap/TileMapChunk/AudioClip 等 typed payload。Runtime 不解析源
 glTF/WAV/image；cgltf/stb_image 与源文件解析只在 Cooker/tool。SkinnedMesh v1 冻结为 P3N3T4UV2 + U16 index、固定
@@ -1576,6 +1657,8 @@ Jolt/Physics3D 尚未接入。
 | Phase context/writer | Runtime callback | callback 返回 |
 | committed UI view | `UIPublicationPipeline` / `UIContext` | 下一次对应成功 publication 或 Context destroy |
 | RenderFrame view | Runtime builder | `submitFrame()` 返回 |
+| `SaveWriteOperation/SaveLoadOperation/SaveListOperation` | 共享异步结果 owner，独立于 `SaveStore` | `take()` 一次即耗尽；配置的 TaskSystem 必须活过调度调用 |
+| `NativeWindowSurfaceLease` | move-only surface 生命周期 pin | 移动/析构；释放前必须停止新提交并完成在途 submission |
 | `AudioPcmClipView` | non-owning | 调用方 payload 释放；必须晚于 voice completion |
 | `AudioPcmStreamChunkView` | 调用期 non-owning | `submitPcmStreamFrames()` 返回；成功数据已复制到 Tina-owned ring，失败零发布 |
 | `TileMapLayerPayloadView` / object/property view | `TileMapPayloadView` 或 `TileMapInstance` 借用 | backing payload 释放；instance view 还会在 instance move/destroy 时失效 |

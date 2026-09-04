@@ -89,6 +89,22 @@ if(@TINA_PACKAGE_WITH_UI_UIA@)
     list(APPEND Tina_PACKAGE_TARGETS Tina::UIUia)
 endif()
 
+# Mobile/browser Platform adapters. Not components: they link no third party, so they come with
+# TinaTargets.cmake unconditionally and there is nothing to find_dependency(). Whether a given
+# package has them depends on the toolchain it was built with -- an Emscripten package ships
+# PlatformHtml5, an Android package ships PlatformAndroid, and PlatformIos builds on every host.
+# tina_add_web_frontend() links Tina::PlatformHtml5, which is why a web-capable package must carry
+# it rather than only its factory header.
+if(@TINA_PACKAGE_WITH_PLATFORM_ANDROID@)
+    list(APPEND Tina_PACKAGE_TARGETS Tina::PlatformAndroid)
+endif()
+if(@TINA_PACKAGE_WITH_PLATFORM_HTML5@)
+    list(APPEND Tina_PACKAGE_TARGETS Tina::PlatformHtml5)
+endif()
+if(@TINA_PACKAGE_WITH_PLATFORM_IOS@)
+    list(APPEND Tina_PACKAGE_TARGETS Tina::PlatformIos)
+endif()
+
 set(Tina_ADAPTER_TARGETS)
 set(Tina_DESKTOP_BOOTSTRAP_TARGETS)
 

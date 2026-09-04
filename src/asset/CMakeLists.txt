@@ -40,7 +40,6 @@ set(TINA_ASSET_PUBLIC_HEADERS
     ${PROJECT_SOURCE_DIR}/include/tina/asset/CatalogSnapshot.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/MediaCook.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/SourceImportCapture.hpp
-    ${PROJECT_SOURCE_DIR}/include/tina/asset/SourceImportExecutor.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/SourceImportPlan.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/SourceImportPipeline.hpp
     ${PROJECT_SOURCE_DIR}/include/tina/asset/SourceImportProbe.hpp
