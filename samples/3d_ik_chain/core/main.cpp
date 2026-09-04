@@ -327,15 +327,6 @@ void writeCounters(Tina::Core::JsonWriter& writer, const LifecycleCounters& coun
     return counters.pixelDeltaNearToFar >= EvidenceMinimumPixelDelta;
 }
 
-class DeviceCapture final {
-  public:
-    void set(Tina::Render::IRenderDevice* device) noexcept { device_ = device; }
-    [[nodiscard]] Tina::Render::IRenderDevice* get() const noexcept { return device_; }
-
-  private:
-    Tina::Render::IRenderDevice* device_ = nullptr;
-};
-
 class KindedFrameResource final {
   public:
     KindedFrameResource() noexcept = default;
@@ -538,20 +529,14 @@ constexpr float CameraHeightMeters = 0.6F;
 
 class IkChainState final : public Tina::IGameState {
   public:
-    IkChainState(SampleOptions options, LifecycleCounters& counters,
-                 const DeviceCapture& capture) noexcept
-        : options_(options), counters_(&counters), capture_(&capture)
+    IkChainState(SampleOptions options, LifecycleCounters& counters) noexcept
+        : options_(options), counters_(&counters)
     {
     }
 
-    Tina::Core::Status onEnter(Tina::GameStateEnterContext&) override
+    Tina::Core::Status onEnter(Tina::GameStateEnterContext& context) override
     {
-        Tina::Render::IRenderDevice* device = capture_->get();
-        if (device == nullptr)
-        {
-            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                       "sample did not capture a render device");
-        }
+        Tina::Render::IRenderDevice& device = context.renderDevice();
 
         auto chain = IkChain::Create();
         if (!chain)
@@ -564,14 +549,14 @@ class IkChainState final : public Tina::IGameState {
             return status;
         }
 
-        auto mesh = Tina::Asset::uploadSkinnedMeshFromCooked(*device, *chain_->cookedMesh());
+        auto mesh = Tina::Asset::uploadSkinnedMeshFromCooked(device, *chain_->cookedMesh());
         if (!mesh)
         {
             return Tina::Core::failure(
                 std::move(mesh.error()).withContext("onEnter", "uploadSkinnedMeshFromCooked"));
         }
         skinnedMesh_ = *mesh;
-        if (auto status = device->setMesh3DBinding(SkinnedMeshBindingKey, skinnedMesh_); !status)
+        if (auto status = device.setMesh3DBinding(SkinnedMeshBindingKey, skinnedMesh_); !status)
         {
             return status;
         }
@@ -579,7 +564,7 @@ class IkChainState final : public Tina::IGameState {
 
         // An untextured material: the chain's colour comes from baseColorFactor on the draw. A
         // texture would add a second thing that could explain a moving picture.
-        if (auto status = device->setMesh3DMaterialBinding(
+        if (auto status = device.setMesh3DMaterialBinding(
                 MaterialBindingKey, Tina::Render::Mesh3DMaterialBindingDesc{
                                         .metallicFactor = 0.0F,
                                         .roughnessFactor = 0.6F,
@@ -592,16 +577,12 @@ class IkChainState final : public Tina::IGameState {
         return solveForSeconds(0.0F);
     }
 
-    void onExit(Tina::GameStateExitContext&) noexcept override
+    void onExit(Tina::GameStateExitContext& context) noexcept override
     {
-        Tina::Render::IRenderDevice* device = capture_->get();
-        if (device == nullptr)
-        {
-            return;
-        }
+        Tina::Render::IRenderDevice& device = context.renderDevice();
         if (materialBound_)
         {
-            if (device->clearMesh3DMaterialBinding(MaterialBindingKey))
+            if (device.clearMesh3DMaterialBinding(MaterialBindingKey))
             {
                 counters_->materialRetired = true;
             }
@@ -609,14 +590,14 @@ class IkChainState final : public Tina::IGameState {
         }
         if (meshBound_)
         {
-            static_cast<void>(device->setMesh3DBinding(SkinnedMeshBindingKey,
+            static_cast<void>(device.setMesh3DBinding(SkinnedMeshBindingKey,
                                                       Tina::Render::GpuMeshId{}));
             meshBound_ = false;
         }
         if (skinnedMesh_)
         {
             Tina::Render::FramePin completion{};
-            if (device->retireGpuMesh(skinnedMesh_, completion))
+            if (device.retireGpuMesh(skinnedMesh_, completion))
             {
                 counters_->skinnedMeshRetired = true;
             }
@@ -627,7 +608,7 @@ class IkChainState final : public Tina::IGameState {
     Tina::Core::Status updateFrame(Tina::FrameUpdateContext& context) override
     {
         ++counters_->frameUpdates;
-        Tina::Render::IRenderDevice* device = capture_->get();
+        Tina::Render::IRenderDevice* device = context.renderDevice();
         if (device == nullptr)
         {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
@@ -877,7 +858,6 @@ class IkChainState final : public Tina::IGameState {
 
     SampleOptions options_{};
     LifecycleCounters* counters_ = nullptr;
-    const DeviceCapture* capture_ = nullptr;
     std::optional<IkChain> chain_{};
     Tina::Render::GpuMeshId skinnedMesh_{};
     bool meshBound_ = false;
@@ -893,9 +873,8 @@ class IkChainState final : public Tina::IGameState {
 
 class IkChainApplication final : public Tina::IGameApplication {
   public:
-    IkChainApplication(SampleOptions options, LifecycleCounters& counters,
-                       const DeviceCapture& capture) noexcept
-        : options_(options), counters_(&counters), capture_(&capture)
+    IkChainApplication(SampleOptions options, LifecycleCounters& counters) noexcept
+        : options_(options), counters_(&counters)
     {
     }
 
@@ -903,7 +882,7 @@ class IkChainApplication final : public Tina::IGameApplication {
     createInitialState(Tina::GameStartupContext&) override
     {
         return std::unique_ptr<Tina::IGameState>(
-            std::make_unique<IkChainState>(options_, *counters_, *capture_));
+            std::make_unique<IkChainState>(options_, *counters_));
     }
 
     void onShutdown(Tina::GameShutdownContext&) noexcept override
@@ -914,7 +893,6 @@ class IkChainApplication final : public Tina::IGameApplication {
   private:
     SampleOptions options_{};
     LifecycleCounters* counters_ = nullptr;
-    const DeviceCapture* capture_ = nullptr;
 };
 
 [[nodiscard]] Tina::EngineConfig createEngineConfig()
@@ -948,21 +926,7 @@ void writeError(const Tina::Core::Error& error)
     }
     const SampleOptions options = *optionsResult;
 
-    DeviceCapture capture;
-    Tina::Desktop::CreateEngineOptions desktopOptions{};
-    desktopOptions.wrapWindowSurfaceRenderDevice =
-        [&capture](std::unique_ptr<Tina::Render::IRenderDevice> device)
-            -> Tina::Core::Result<std::unique_ptr<Tina::Render::IRenderDevice>> {
-        if (!device)
-        {
-            return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
-                                       "Desktop bootstrap produced no render device");
-        }
-        capture.set(device.get());
-        return device;
-    };
-
-    auto hostResult = Tina::Desktop::CreateEngine(createEngineConfig(), std::move(desktopOptions));
+    auto hostResult = Tina::Desktop::CreateEngine(createEngineConfig());
     if (!hostResult)
     {
         writeError(hostResult.error());
@@ -970,7 +934,7 @@ void writeError(const Tina::Core::Error& error)
     }
 
     LifecycleCounters counters;
-    IkChainApplication application{options, counters, capture};
+    IkChainApplication application{options, counters};
     auto runResult = (*hostResult)->run(application);
     hostResult->reset();
     counters.engineHostDestroyed = true;

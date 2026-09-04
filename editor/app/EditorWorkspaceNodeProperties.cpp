@@ -342,7 +342,8 @@ auto EditorWorkspaceState::runNodePropertyCommand(
         return error.code == Tina::Editor::EditorErrorCode::InvalidAuthoringOperation ||
                error.code == Tina::Editor::EditorErrorCode::EntityNotFound ||
                error.code == Tina::Editor::EditorErrorCode::NodePropertyUnavailable ||
-               error.code.domain == Tina::Core::ErrorDomain::Asset;
+               error.code.domain == Tina::Core::ErrorDomain::Asset ||
+               error.code.domain == Tina::Core::ErrorDomain::AssetFormat;
     };
 
     const bool meshCommand = command == EditorCommand::NodeToggleMeshVisible;

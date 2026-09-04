@@ -14,10 +14,8 @@ namespace Tina::EditorApp::WorkspaceInternal {
 class EditorApplication final : public Tina::IGameApplication {
   public:
     EditorApplication(EditorLaunchOptions options, LifecycleCounters& counters,
-                      EditorAssetResources& assetResources,
-                      EditorRenderDeviceAccess& renderDeviceAccess) noexcept
-        : options_(options), counters_(counters), assetResources_(assetResources),
-          renderDeviceAccess_(renderDeviceAccess)
+                      EditorAssetResources& assetResources) noexcept
+        : options_(options), counters_(counters), assetResources_(assetResources)
     {
     }
 
@@ -44,8 +42,7 @@ class EditorApplication final : public Tina::IGameApplication {
                     std::move(initialDocuments->spriteAnimation),
                     std::move(initialDocuments->world2DSession),
                     std::move(initialDocuments->world3DSession),
-                    std::move(*projectAssets), std::move(*documentTabs), assetResources_,
-                    renderDeviceAccess_);
+                    std::move(*projectAssets), std::move(*documentTabs), assetResources_);
             return state;
         } catch (const std::bad_alloc&) {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::OutOfMemory,
@@ -62,7 +59,6 @@ class EditorApplication final : public Tina::IGameApplication {
     EditorLaunchOptions options_;
     LifecycleCounters& counters_;
     EditorAssetResources& assetResources_;
-    EditorRenderDeviceAccess& renderDeviceAccess_;
 };
 
 [[nodiscard]] Tina::InputActionBinding editorShortcutBinding(
@@ -695,7 +691,6 @@ void writeFrameTimingStatistics(
         counters.processAfterCatalog = queryEditorProcessMemory();
         recordEditorProcessMemory(counters, counters.processAfterCatalog);
     }
-    EditorRenderDeviceAccess renderDeviceAccess{};
     Tina::Desktop::CreateEngineOptions desktopOptions{};
     desktopOptions.acceptFileDropEvents = true;
     // The Editor is a shipped product, so its font travels beside TinaEditor.exe rather
@@ -707,12 +702,6 @@ void writeFrameTimingStatistics(
         return 1;
     }
     desktopOptions.uiFontBytes = std::move(uiFont->bytes);
-    desktopOptions.wrapWindowSurfaceRenderDevice =
-        [&renderDeviceAccess](std::unique_ptr<Tina::Render::IRenderDevice> device)
-            -> Tina::Core::Result<std::unique_ptr<Tina::Render::IRenderDevice>> {
-            renderDeviceAccess.set(device.get());
-            return device;
-        };
     const Tina::EngineConfig engineConfig = createEngineConfig();
     auto hostResult = Tina::Desktop::CreateEngine(engineConfig, std::move(desktopOptions));
     if (!hostResult) {
@@ -724,7 +713,7 @@ void writeFrameTimingStatistics(
         recordEditorProcessMemory(counters, counters.processAfterEngineCreate);
     }
 
-    EditorApplication application{options, counters, assetResources, renderDeviceAccess};
+    EditorApplication application{options, counters, assetResources};
     auto runResult = (*hostResult)->run(application);
     if (options.profileUi) {
         counters.processAfterRun = queryEditorProcessMemory();
@@ -1104,6 +1093,7 @@ void writeFrameTimingStatistics(
     writer.member("catalogSpriteBindings", counters.catalogSpriteBindings);
     writer.member("catalogMeshBindings", counters.catalogMeshBindings);
     writer.member("catalogMaterialBindings", counters.catalogMaterialBindings);
+    writer.member("catalogShaderBindings", counters.catalogShaderBindings);
     writer.member("catalogUnresolvedReferences", counters.catalogUnresolvedReferences);
     writer.member("catalogResolved2DSprites", counters.catalogResolved2DSprites);
     writer.member("catalogResolved3DMeshes", counters.catalogResolved3DMeshes);

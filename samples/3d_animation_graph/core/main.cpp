@@ -488,15 +488,6 @@ void writeCounters(Tina::Core::JsonWriter& writer, const LifecycleCounters& coun
            counters.graphAdvances == counters.frameUpdates;
 }
 
-class DeviceCapture final {
-  public:
-    void set(Tina::Render::IRenderDevice* device) noexcept { device_ = device; }
-    [[nodiscard]] Tina::Render::IRenderDevice* get() const noexcept { return device_; }
-
-  private:
-    Tina::Render::IRenderDevice* device_ = nullptr;
-};
-
 class KindedFrameResource final {
   public:
     KindedFrameResource() noexcept = default;
@@ -956,20 +947,14 @@ class LocomotionRig final {
 
 class AnimationGraphState final : public Tina::IGameState {
   public:
-    AnimationGraphState(SampleOptions options, LifecycleCounters& counters,
-                        const DeviceCapture& capture) noexcept
-        : options_(options), counters_(&counters), capture_(&capture)
+    AnimationGraphState(SampleOptions options, LifecycleCounters& counters) noexcept
+        : options_(options), counters_(&counters)
     {
     }
 
-    Tina::Core::Status onEnter(Tina::GameStateEnterContext&) override
+    Tina::Core::Status onEnter(Tina::GameStateEnterContext& context) override
     {
-        Tina::Render::IRenderDevice* device = capture_->get();
-        if (device == nullptr)
-        {
-            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                       "sample did not capture a render device");
-        }
+        Tina::Render::IRenderDevice& device = context.renderDevice();
 
         auto rig = LocomotionRig::Create();
         if (!rig)
@@ -978,20 +963,20 @@ class AnimationGraphState final : public Tina::IGameState {
         }
         rig_ = std::move(*rig);
 
-        auto mesh = Tina::Asset::uploadSkinnedMeshFromCooked(*device, *rig_->cookedMesh());
+        auto mesh = Tina::Asset::uploadSkinnedMeshFromCooked(device, *rig_->cookedMesh());
         if (!mesh)
         {
             return Tina::Core::failure(
                 std::move(mesh.error()).withContext("onEnter", "uploadSkinnedMeshFromCooked"));
         }
         skinnedMesh_ = *mesh;
-        if (auto status = device->setMesh3DBinding(SkinnedMeshBindingKey, skinnedMesh_); !status)
+        if (auto status = device.setMesh3DBinding(SkinnedMeshBindingKey, skinnedMesh_); !status)
         {
             return status;
         }
         meshBound_ = true;
 
-        if (auto status = device->setMesh3DMaterialBinding(
+        if (auto status = device.setMesh3DMaterialBinding(
                 MaterialBindingKey, Tina::Render::Mesh3DMaterialBindingDesc{
                                         .metallicFactor = 0.0F,
                                         .roughnessFactor = 0.62F,
@@ -1004,16 +989,12 @@ class AnimationGraphState final : public Tina::IGameState {
         return Tina::Core::success();
     }
 
-    void onExit(Tina::GameStateExitContext&) noexcept override
+    void onExit(Tina::GameStateExitContext& context) noexcept override
     {
-        Tina::Render::IRenderDevice* device = capture_->get();
-        if (device == nullptr)
-        {
-            return;
-        }
+        Tina::Render::IRenderDevice& device = context.renderDevice();
         if (materialBound_)
         {
-            if (device->clearMesh3DMaterialBinding(MaterialBindingKey))
+            if (device.clearMesh3DMaterialBinding(MaterialBindingKey))
             {
                 counters_->materialRetired = true;
             }
@@ -1021,14 +1002,14 @@ class AnimationGraphState final : public Tina::IGameState {
         }
         if (meshBound_)
         {
-            static_cast<void>(device->setMesh3DBinding(SkinnedMeshBindingKey,
+            static_cast<void>(device.setMesh3DBinding(SkinnedMeshBindingKey,
                                                         Tina::Render::GpuMeshId{}));
             meshBound_ = false;
         }
         if (skinnedMesh_)
         {
             Tina::Render::FramePin completion{};
-            if (device->retireGpuMesh(skinnedMesh_, completion))
+            if (device.retireGpuMesh(skinnedMesh_, completion))
             {
                 counters_->skinnedMeshRetired = true;
             }
@@ -1039,7 +1020,8 @@ class AnimationGraphState final : public Tina::IGameState {
     Tina::Core::Status updateFrame(Tina::FrameUpdateContext& context) override
     {
         ++counters_->frameUpdates;
-        if (capture_->get() == nullptr)
+        Tina::Render::IRenderDevice* device = context.renderDevice();
+        if (device == nullptr)
         {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
                                        "render device disappeared mid-run");
@@ -1071,7 +1053,7 @@ class AnimationGraphState final : public Tina::IGameState {
             counters_->observedTransitionInFlight || stats.transitionInFlight;
         counters_->statesVisited = rig_->statesVisited();
 
-        advanceEvidence(*capture_->get());
+        advanceEvidence(*device);
         if (counters_->frameUpdates >= options_.targetFrameCount)
         {
             context.requestExitAfterFrame();
@@ -1312,7 +1294,6 @@ class AnimationGraphState final : public Tina::IGameState {
 
     SampleOptions options_{};
     LifecycleCounters* counters_ = nullptr;
-    const DeviceCapture* capture_ = nullptr;
     // A unique_ptr rather than an optional: the graph and the blend tree hold pointers into the
     // rig's own members, so it must never be moved after construction.
     std::unique_ptr<LocomotionRig> rig_{};
@@ -1333,9 +1314,8 @@ class AnimationGraphState final : public Tina::IGameState {
 
 class AnimationGraphApplication final : public Tina::IGameApplication {
   public:
-    AnimationGraphApplication(SampleOptions options, LifecycleCounters& counters,
-                              const DeviceCapture& capture) noexcept
-        : options_(options), counters_(&counters), capture_(&capture)
+    AnimationGraphApplication(SampleOptions options, LifecycleCounters& counters) noexcept
+        : options_(options), counters_(&counters)
     {
     }
 
@@ -1343,7 +1323,7 @@ class AnimationGraphApplication final : public Tina::IGameApplication {
     createInitialState(Tina::GameStartupContext&) override
     {
         return std::unique_ptr<Tina::IGameState>(
-            std::make_unique<AnimationGraphState>(options_, *counters_, *capture_));
+            std::make_unique<AnimationGraphState>(options_, *counters_));
     }
 
     void onShutdown(Tina::GameShutdownContext&) noexcept override
@@ -1354,7 +1334,6 @@ class AnimationGraphApplication final : public Tina::IGameApplication {
   private:
     SampleOptions options_{};
     LifecycleCounters* counters_ = nullptr;
-    const DeviceCapture* capture_ = nullptr;
 };
 
 [[nodiscard]] Tina::EngineConfig createEngineConfig()
@@ -1388,21 +1367,7 @@ void writeError(const Tina::Core::Error& error)
     }
     const SampleOptions options = *optionsResult;
 
-    DeviceCapture capture;
-    Tina::Desktop::CreateEngineOptions desktopOptions{};
-    desktopOptions.wrapWindowSurfaceRenderDevice =
-        [&capture](std::unique_ptr<Tina::Render::IRenderDevice> device)
-            -> Tina::Core::Result<std::unique_ptr<Tina::Render::IRenderDevice>> {
-        if (!device)
-        {
-            return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
-                                       "Desktop bootstrap produced no render device");
-        }
-        capture.set(device.get());
-        return device;
-    };
-
-    auto hostResult = Tina::Desktop::CreateEngine(createEngineConfig(), std::move(desktopOptions));
+    auto hostResult = Tina::Desktop::CreateEngine(createEngineConfig());
     if (!hostResult)
     {
         writeError(hostResult.error());
@@ -1410,7 +1375,7 @@ void writeError(const Tina::Core::Error& error)
     }
 
     LifecycleCounters counters;
-    AnimationGraphApplication application{options, counters, capture};
+    AnimationGraphApplication application{options, counters};
     auto runResult = (*hostResult)->run(application);
     hostResult->reset();
     counters.engineHostDestroyed = true;

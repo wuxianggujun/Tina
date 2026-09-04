@@ -889,6 +889,26 @@ auto EditorWorkspaceState::extractWorld3DViewport(Tina::RenderSceneExtractionCon
                     .pixelWidth = surfacePixelWidth_,
                     .pixelHeight = surfacePixelHeight_,
                 },
+                // A Prefab authors no shader field yet, so the component pair only fires for
+                // programmatically set components; the cooked-mesh pair is the 3D Editor's
+                // actual custom fragment path.
+                .shaderBindingResolver = {
+                    .userData = const_cast<EditorWorkspaceState*>(this),
+                    .resolve = &EditorWorkspaceState::resolvePreviewShader,
+                },
+                .shaderUniformBindingResolver = {
+                    .userData = const_cast<EditorWorkspaceState*>(this),
+                    .resolve = &EditorWorkspaceState::resolvePreviewShaderUniforms,
+                },
+                .mesh3DDefaultShaderBindingResolver = {
+                    .userData = const_cast<EditorWorkspaceState*>(this),
+                    .resolve = &EditorWorkspaceState::resolvePreviewMeshDefaultShader,
+                },
+                .mesh3DDefaultShaderUniformBindingResolver = {
+                    .userData = const_cast<EditorWorkspaceState*>(this),
+                    .resolve =
+                        &EditorWorkspaceState::resolvePreviewMeshDefaultShaderUniforms,
+                },
                 .mesh3DBindingResolver = {
                     .userData = const_cast<EditorWorkspaceState*>(this),
                     .resolve = &EditorWorkspaceState::resolvePreviewMesh,

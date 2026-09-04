@@ -19,10 +19,11 @@ add_subdirectory(2d)
 add_subdirectory(2d_tilemap)
 add_subdirectory(3d)
 
+# Tina::Gameplay2D is always built; this sample is its first consumer outside
+# the tests. It still needs Physics2D because it exercises the authored-body
+# bridge, not because the module itself is gated on physics.
 if (TINA_BUILD_PHYSICS2D)
     add_subdirectory(physics2d_bench)
-    # Tina::Gameplay2D only exists with Physics2D, and this sample is its first
-    # consumer outside the tests. Headless, so it needs no GPU or window.
     add_subdirectory(2d_authored_scene)
 endif ()
 
@@ -66,6 +67,10 @@ if(TINA_BUILD_PLATFORM_GLFW AND TINA_BUILD_RENDER_BGFX)
     # 3d_ik_chain leaves untouched because it links the module for solveTwoBoneIk alone. Desktop
     # rather than headless because the pixel half of its evidence needs a real device to capture.
     add_subdirectory(3d_animation_graph)
+    # First consumer of the custom Mesh3D fragment shader path. One cooked fragment is linked
+    # against both the rigid and skinned engine vertex stages; the pixel evidence is what the
+    # unit tests never produced.
+    add_subdirectory(3d_custom_shader)
     add_subdirectory(2d_catalog)
     add_subdirectory(2d_tilemap_bgfx)
     # Procedurally generated destructible tile world; interactive, not a gate program.

@@ -6022,6 +6022,10 @@ auto EditorWorkspaceState::registerUiCallbacks(
 
 auto EditorWorkspaceState::onEnter(Tina::GameStateEnterContext& context) -> Tina::Core::Status{
     ++counters_.stateEnters;
+    // Host-lifetime borrow, recorded before anything that uploads: the preview
+    // registries, the icon atlas, the RGBA capture in updateUI and the drain in
+    // onExit all run outside a phase that hands out a device.
+    device_ = &context.renderDevice();
     editorSettings_ = loadEditorSettings();
     leftDockVisibleFraction_ = editorSettings_.leftDockFraction;
     inspectorVisibleFraction_ = editorSettings_.inspectorFraction;
@@ -6113,13 +6117,7 @@ auto EditorWorkspaceState::onEnter(Tina::GameStateEnterContext& context) -> Tina
         return Tina::Core::failure(std::move(rootBuilder.error()));
     }
 
-    Tina::Render::IRenderDevice* renderDevice = renderDeviceAccess_.get();
-    if (renderDevice == nullptr) {
-        return Tina::Core::failure(
-            Tina::Core::CoreErrorCode::Internal,
-            "Editor icon atlas requires the active render device");
-    }
-    if (auto status = iconResources_.initialize(*renderDevice); !status) {
+    if (auto status = iconResources_.initialize(context.renderDevice()); !status) {
         return status;
     }
     imageResolver_.setIconResolver(iconResources_.resolver());

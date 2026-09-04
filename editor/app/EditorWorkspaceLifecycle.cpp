@@ -208,7 +208,7 @@ auto EditorWorkspaceState::refreshFileDropFeedbackUi(
     return Tina::Core::success();
 }
 
-auto EditorWorkspaceState::onExit(Tina::GameStateExitContext&) noexcept -> void{
+auto EditorWorkspaceState::onExit(Tina::GameStateExitContext& context) noexcept -> void{
     editorSettings_.leftDockFraction = leftDockVisibleFraction_;
     editorSettings_.inspectorFraction = inspectorVisibleFraction_;
     editorSettings_.bottomPanelFraction = bottomPanelVisibleFraction_;
@@ -266,10 +266,7 @@ auto EditorWorkspaceState::onExit(Tina::GameStateExitContext&) noexcept -> void{
     auto previewRelease = releasePreviewAssetBindings();
     if (!previewRelease) {
         Tina::Core::Error firstFailure = std::move(previewRelease.error());
-        if (Tina::Render::IRenderDevice* device = renderDeviceAccess_.get();
-            device != nullptr) {
-            (void)device->drainGpuRetirements();
-        }
+        (void)context.renderDevice().drainGpuRetirements();
         if (assetResources_.system.has_value()) {
             (void)assetResources_.system->drainGpuRetirements();
         }
@@ -972,6 +969,16 @@ auto EditorWorkspaceState::extractRenderScene(Tina::RenderSceneExtractionContext
                 .normalTextureBindingResolver = {
                     .userData = const_cast<EditorWorkspaceState*>(this),
                     .resolve = &EditorWorkspaceState::resolvePreviewTexture,
+                },
+                // Sprite2D reaches a custom fragment stage only through the authored
+                // component handle; there is no cooked-sprite default to fall back to.
+                .shaderBindingResolver = {
+                    .userData = const_cast<EditorWorkspaceState*>(this),
+                    .resolve = &EditorWorkspaceState::resolvePreviewShader,
+                },
+                .shaderUniformBindingResolver = {
+                    .userData = const_cast<EditorWorkspaceState*>(this),
+                    .resolve = &EditorWorkspaceState::resolvePreviewShaderUniforms,
                 },
             });
         !status) {
@@ -1856,7 +1863,7 @@ auto EditorWorkspaceState::captureRequestedRgbaFrame(
         return Tina::Core::success();
     }
     counters_.rgbaCaptureAttempted = true;
-    Tina::Render::IRenderDevice* device = renderDeviceAccess_.get();
+    Tina::Render::IRenderDevice* device = device_;
     if (device == nullptr) {
         return Tina::Core::failure(
             Tina::Core::CoreErrorCode::Internal,

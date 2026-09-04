@@ -16,6 +16,7 @@
 
 #include <tina/animation3d/Skeleton3D.hpp>
 #include <tina/asset/AssetGpuMesh.hpp>
+#include <tina/asset/AssetGpuShader.hpp>
 #include <tina/asset/AssetGpuTexture.hpp>
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/asset/AssetSystem.hpp>
@@ -24,7 +25,9 @@
 #include <tina/asset/CatalogPackageChangeDetector.hpp>
 #include <tina/asset/CatalogPackagePublish.hpp>
 #include <tina/asset/Mesh3DBindingRegistry.hpp>
+#include <tina/asset/Mesh3DShaderOverride.hpp>
 #include <tina/asset/MediaCook.hpp>
+#include <tina/asset/ShaderBindingRegistry.hpp>
 #include <tina/asset/SourceImportCapture.hpp>
 #include <tina/asset/SourceImportPipeline.hpp>
 #include <tina/asset/SourceImportPlan.hpp>
@@ -757,14 +760,6 @@ struct EditorOutputHistoryEntry final {
 };
 
 inline constexpr Tina::Core::usize EditorOutputHistoryCapacity = 64U;
-class EditorRenderDeviceAccess final {
-  public:
-    void set(Tina::Render::IRenderDevice* device) noexcept { device_ = device; }
-    [[nodiscard]] Tina::Render::IRenderDevice* get() const noexcept { return device_; }
-
-  private:
-    Tina::Render::IRenderDevice* device_ = nullptr;
-};
 [[nodiscard]] constexpr Tina::AssetFormat::TargetPlatform editorTargetPlatform() noexcept;
 [[nodiscard]] inline Tina::Core::Status validatePhysicalProjectDirectory(
     const std::filesystem::path& path, std::string_view label)
@@ -1900,6 +1895,7 @@ struct LifecycleCounters final {
     u64 catalogSpriteBindings = 0;
     u64 catalogMeshBindings = 0;
     u64 catalogMaterialBindings = 0;
+    u64 catalogShaderBindings = 0;
     u64 catalogUnresolvedReferences = 0;
     u64 catalogResolved2DSprites = 0;
     u64 catalogResolved3DMeshes = 0;
@@ -3742,8 +3738,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
                          WorkspaceSessionState world3DSession,
                          Tina::Editor::ProjectAssetBrowserModel projectAssets,
                          Tina::Editor::EditorDocumentTabs documentTabs,
-                         EditorAssetResources& assetResources,
-                         EditorRenderDeviceAccess& renderDeviceAccess)
+                         EditorAssetResources& assetResources)
         : options_(std::move(options)), counters_(counters), document_(std::move(world2D)),
           document3D_(std::move(world3D)), tileMapDocument_(std::move(tileMap)),
           spriteAnimationDocument_(std::move(spriteAnimation)),
@@ -3751,7 +3746,6 @@ class EditorWorkspaceState final : public Tina::IGameState {
           documentSessions_(std::move(world2DSession), std::move(world3DSession)),
           projectAssets_(std::move(projectAssets)),
           documentTabs_(std::move(documentTabs)), assetResources_(assetResources),
-          renderDeviceAccess_(renderDeviceAccess),
           sourceImportService_(
               Tina::EditorApp::Detail::makeEditorSourceImportPipelineWorker())
     {
@@ -3884,7 +3878,7 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] Tina::Core::Status registerUiCallbacks(
         UiBuildContext& ui, UI::UINodeId rootNode);
 
-    void onExit(Tina::GameStateExitContext&) noexcept override;
+    void onExit(Tina::GameStateExitContext& context) noexcept override;
     [[nodiscard]] Tina::GameStatePolicy initialPolicy() const noexcept override;
     Tina::Core::Status updateFrame(Tina::FrameUpdateContext& context) override;
     Tina::Core::Status extractRenderScene(Tina::RenderSceneExtractionContext& context) const override;
@@ -4081,6 +4075,27 @@ class EditorWorkspaceState final : public Tina::IGameState {
     [[nodiscard]] static Tina::Core::Result<Tina::Render::FrameResourceRef>
     resolvePreviewMaterial(void* userData, Tina::Asset::AssetHandle asset,
                            Tina::Render::FrameResourceSink& sink) noexcept;
+    // Keyed on the Shader handle a component names. Both must be published together:
+    // a program without its uniform slot fails closed at submit.
+    [[nodiscard]] static Tina::Core::Result<Tina::Render::FrameResourceRef>
+    resolvePreviewShader(void* userData, Tina::Asset::AssetHandle asset,
+                         Tina::Render::FrameResourceSink& sink) noexcept;
+    [[nodiscard]] static Tina::Core::Result<Tina::Render::FrameResourceRef>
+    resolvePreviewShaderUniforms(void* userData, Tina::Asset::AssetHandle asset,
+                                 Tina::Render::FrameResourceSink& sink) noexcept;
+    // Keyed on the *mesh* handle: only the mesh's cooked dependencies name the fragment
+    // stage it defaults to. A mesh naming none resolves empty; a mesh naming one that is
+    // not bound fails, because two empties would silently mean "engine fragment".
+    [[nodiscard]] static Tina::Core::Result<Tina::Render::FrameResourceRef>
+    resolvePreviewMeshDefaultShader(void* userData, Tina::Asset::AssetHandle asset,
+                                    Tina::Render::FrameResourceSink& sink) noexcept;
+    [[nodiscard]] static Tina::Core::Result<Tina::Render::FrameResourceRef>
+    resolvePreviewMeshDefaultShaderUniforms(void* userData, Tina::Asset::AssetHandle asset,
+                                            Tina::Render::FrameResourceSink& sink) noexcept;
+    // Shared by both mesh-default resolvers so the pair cannot disagree on which Shader
+    // a cooked mesh names. Returns an empty handle when the mesh names none.
+    [[nodiscard]] Tina::Core::Result<Tina::Asset::AssetHandle>
+    previewMeshDefaultShaderAsset(Tina::Asset::AssetHandle mesh) const noexcept;
     [[nodiscard]] static std::span<const float> resolvePreviewSkinnedPose(
         void* userData, Tina::Scene::EntityId entity) noexcept;
     [[nodiscard]] ViewportProjectedPoint projectViewportWorldPoint(
@@ -4613,7 +4628,10 @@ class EditorWorkspaceState final : public Tina::IGameState {
     std::string temporaryProjectSaveTargetRootUtf8_{};
     std::string pendingTemporaryProjectCleanupRootUtf8_{};
     EditorAssetResources& assetResources_;
-    EditorRenderDeviceAccess& renderDeviceAccess_;
+    // Host-lifetime borrow recorded in onEnter. The Editor is always the top state,
+    // and EngineHost destroys the device only after onExit, so every non-phase
+    // helper below (preview bindings, icon atlas, RGBA capture) may use it.
+    Tina::Render::IRenderDevice* device_ = nullptr;
     Tina::EditorApp::Detail::EditorSourceImportService sourceImportService_;
     std::optional<Tina::PlatformEventSubscription> platformEventSubscription_{};
     std::vector<PendingFileDrop> pendingFileDrops_{};
@@ -5227,11 +5245,16 @@ class EditorWorkspaceState final : public Tina::IGameState {
     Tina::Scene::EntityId previewCamera3D_{};
     std::optional<Tina::Asset::Sprite2DBindingRegistry> spriteBindings_{};
     std::optional<Tina::Asset::Mesh3DBindingRegistry> mesh3DBindings_{};
+    // Owns the GpuShaderId and AssetLease of every cooked Shader the previewed
+    // documents reach: a Sprite2D/Mesh3D component naming one, or a cooked mesh
+    // naming its own default fragment stage.
+    std::optional<Tina::Asset::ShaderBindingRegistry> shaderBindings_{};
     std::vector<Tina::Asset::AssetHandle> loadedPreviewHandles_{};
     std::vector<Tina::Asset::AssetHandle> boundSpriteAssets_{};
     std::vector<Tina::Asset::AssetHandle> boundTilesetAssets_{};
     std::vector<Tina::Asset::AssetHandle> boundMeshAssets_{};
     std::vector<Tina::Asset::AssetHandle> boundMaterialAssets_{};
+    std::vector<Tina::Asset::AssetHandle> boundShaderAssets_{};
     u64 previewResolvedSpriteCount_ = 0;
     u64 previewResolvedMeshCount_ = 0;
     u64 previewRevision_ = 0;

@@ -159,6 +159,86 @@ auto EditorWorkspaceState::resolvePreviewMaterial(void* userData, Tina::Asset::A
     return self.mesh3DBindings_->internMaterialFrameResource(asset, sink);
 }
 
+auto EditorWorkspaceState::resolvePreviewShader(void* userData, Tina::Asset::AssetHandle asset,
+                     Tina::Render::FrameResourceSink& sink) noexcept -> Tina::Core::Result<Tina::Render::FrameResourceRef>{
+    auto& self = *static_cast<EditorWorkspaceState*>(userData);
+    if (!self.shaderBindings_.has_value()) {
+        return Tina::Render::FrameResourceRef{};
+    }
+    return self.shaderBindings_->internShaderFrameResource(asset, sink);
+}
+
+auto EditorWorkspaceState::resolvePreviewShaderUniforms(
+    void* userData, Tina::Asset::AssetHandle asset,
+    Tina::Render::FrameResourceSink& sink) noexcept
+    -> Tina::Core::Result<Tina::Render::FrameResourceRef>{
+    auto& self = *static_cast<EditorWorkspaceState*>(userData);
+    if (!self.shaderBindings_.has_value()) {
+        return Tina::Render::FrameResourceRef{};
+    }
+    return self.shaderBindings_->internShaderUniformFrameResource(asset, sink);
+}
+
+auto EditorWorkspaceState::previewMeshDefaultShaderAsset(
+    Tina::Asset::AssetHandle mesh) const noexcept
+    -> Tina::Core::Result<Tina::Asset::AssetHandle>{
+    if (!mesh || !assetResources_.system.has_value()) {
+        return Tina::Asset::AssetHandle{};
+    }
+    const Tina::Asset::CookedAssetFile* meshFile = assetResources_.system->tryGet(mesh);
+    if (meshFile == nullptr) {
+        return Tina::Asset::AssetHandle{};
+    }
+    auto overrideId = Tina::Asset::readMesh3DShaderOverride(*meshFile);
+    if (!overrideId) {
+        return Tina::Core::failure(std::move(overrideId.error()));
+    }
+    if (!overrideId->has_value()) {
+        return Tina::Asset::AssetHandle{};
+    }
+    const Tina::Asset::AssetHandle shader =
+        loadedAsset(**overrideId, Tina::AssetFormat::AssetKind::Shader);
+    if (!shader) {
+        // The cook pinned this Shader as a Required dependency, so a miss here is not
+        // "the mesh names none": returning an empty handle would silently fall back to
+        // the engine fragment for a mesh that asked for its own.
+        return Tina::Core::failure(
+            Tina::Asset::AssetErrorCode::CatalogEntryMismatch,
+            "cooked mesh names a default Shader that is not a loaded Shader asset");
+    }
+    return shader;
+}
+
+auto EditorWorkspaceState::resolvePreviewMeshDefaultShader(
+    void* userData, Tina::Asset::AssetHandle asset,
+    Tina::Render::FrameResourceSink& sink) noexcept
+    -> Tina::Core::Result<Tina::Render::FrameResourceRef>{
+    auto& self = *static_cast<EditorWorkspaceState*>(userData);
+    auto shader = self.previewMeshDefaultShaderAsset(asset);
+    if (!shader) {
+        return Tina::Core::failure(std::move(shader.error()));
+    }
+    if (!*shader || !self.shaderBindings_.has_value()) {
+        return Tina::Render::FrameResourceRef{};
+    }
+    return self.shaderBindings_->internShaderFrameResource(*shader, sink);
+}
+
+auto EditorWorkspaceState::resolvePreviewMeshDefaultShaderUniforms(
+    void* userData, Tina::Asset::AssetHandle asset,
+    Tina::Render::FrameResourceSink& sink) noexcept
+    -> Tina::Core::Result<Tina::Render::FrameResourceRef>{
+    auto& self = *static_cast<EditorWorkspaceState*>(userData);
+    auto shader = self.previewMeshDefaultShaderAsset(asset);
+    if (!shader) {
+        return Tina::Core::failure(std::move(shader.error()));
+    }
+    if (!*shader || !self.shaderBindings_.has_value()) {
+        return Tina::Render::FrameResourceRef{};
+    }
+    return self.shaderBindings_->internShaderUniformFrameResource(*shader, sink);
+}
+
 auto EditorWorkspaceState::resolvePreviewSkinnedPose(
     void* userData, Tina::Scene::EntityId entity) noexcept -> std::span<const float>{
     const auto& self = *static_cast<const EditorWorkspaceState*>(userData);
@@ -197,7 +277,7 @@ auto EditorWorkspaceState::containsHandle(std::span<const Tina::Asset::AssetHand
 }
 
 auto EditorWorkspaceState::preparePreviewAssetBindings() -> Tina::Core::Status{
-    auto* device = renderDeviceAccess_.get();
+    auto* device = device_;
     if (device == nullptr || !assetResources_.system.has_value() ||
         assetResources_.system->catalog() == nullptr) {
         return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
@@ -207,7 +287,8 @@ auto EditorWorkspaceState::preparePreviewAssetBindings() -> Tina::Core::Status{
     // live, so emplacing over a surviving registry would abort the process
     // instead of surfacing an error. A prior release that failed to retire
     // leaves the optional engaged; fail closed here and let the caller retry.
-    if (spriteBindings_.has_value() || mesh3DBindings_.has_value()) {
+    if (spriteBindings_.has_value() || mesh3DBindings_.has_value() ||
+        shaderBindings_.has_value()) {
         return Tina::Core::failure(
             Tina::Asset::AssetErrorCode::CatalogReloadBusy,
             "Preview binding rebuild requires the previous registries to be retired");
@@ -220,6 +301,7 @@ auto EditorWorkspaceState::preparePreviewAssetBindings() -> Tina::Core::Status{
     counters_.catalogSpriteBindings = 0;
     counters_.catalogMeshBindings = 0;
     counters_.catalogMaterialBindings = 0;
+    counters_.catalogShaderBindings = 0;
     counters_.catalogUnresolvedReferences = 0;
     counters_.catalogResolved2DSprites = 0;
     counters_.catalogResolved3DMeshes = 0;
@@ -269,6 +351,7 @@ auto EditorWorkspaceState::preparePreviewAssetBindings() -> Tina::Core::Status{
         appendSpriteReference(entity.sprite->spriteId);
         appendReference(entity.sprite->normalTextureId,
                         Tina::AssetFormat::AssetKind::Texture2D);
+        appendReference(entity.sprite->shaderId, Tina::AssetFormat::AssetKind::Shader);
     }
     for (const auto& node : world3DStorage) {
         if (!node.hasMesh) {
@@ -641,6 +724,74 @@ auto EditorWorkspaceState::preparePreviewAssetBindings() -> Tina::Core::Status{
         }
     }
 
+    // Two independent ways a previewed document reaches a cooked Shader: a component names
+    // one, or a cooked mesh names its own default fragment stage. Both intern through the
+    // same registry, keyed on the Shader handle, so a mesh default shared with a component
+    // override is registered once.
+    std::vector<Tina::Asset::AssetHandle> shaderAssets;
+    for (const PreviewAssetReference& reference : references) {
+        if (reference.kind != Tina::AssetFormat::AssetKind::Shader) {
+            continue;
+        }
+        const Tina::Asset::AssetHandle shader =
+            loadedAsset(reference.assetId, Tina::AssetFormat::AssetKind::Shader);
+        if (!shader) {
+            // A component naming a Shader the Catalog cannot provide is an authoring
+            // error, not a preview failure: extraction reports the unresolved draw.
+            ++counters_.catalogUnresolvedReferences;
+            continue;
+        }
+        if (!containsHandle(shaderAssets, shader)) {
+            shaderAssets.push_back(shader);
+        }
+    }
+    for (const Tina::Asset::AssetHandle meshAsset : boundMeshAssets_) {
+        auto defaultShader = previewMeshDefaultShaderAsset(meshAsset);
+        if (!defaultShader) {
+            return Tina::Core::failure(std::move(defaultShader.error()));
+        }
+        if (*defaultShader && !containsHandle(shaderAssets, *defaultShader)) {
+            shaderAssets.push_back(*defaultShader);
+        }
+    }
+    if (!shaderAssets.empty()) {
+        auto registry = Tina::Asset::ShaderBindingRegistry::Create(
+            *assetResources_.system, *device,
+            Tina::Asset::ShaderBindingRegistryConfig{
+                .shaderCapacity = shaderAssets.size(),
+                .memoryResource = &assetResources_.memory,
+            });
+        if (!registry) {
+            return Tina::Core::failure(std::move(registry.error()));
+        }
+        shaderBindings_.emplace(std::move(*registry));
+        for (const Tina::Asset::AssetHandle shaderAsset : shaderAssets) {
+            const Tina::Asset::CookedAssetFile* shaderFile =
+                assetResources_.system->tryGet(shaderAsset);
+            if (shaderFile == nullptr) {
+                return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
+                                           "Catalog Shader payload is unavailable");
+            }
+            auto shader = Tina::Asset::uploadShaderFromCooked(*device, *shaderFile);
+            if (!shader) {
+                return Tina::Core::failure(std::move(shader.error()));
+            }
+            Tina::Render::GpuShaderId gpuShader = *shader;
+            auto shaderCleanup = Tina::Core::makeScopeExit([device, &gpuShader]() noexcept {
+                if (gpuShader) {
+                    (void)device->destroyShader(gpuShader);
+                }
+            });
+            auto binding = shaderBindings_->registerShaderBinding(shaderAsset, gpuShader);
+            if (!binding) {
+                return Tina::Core::failure(std::move(binding.error()));
+            }
+            shaderCleanup.release();
+            boundShaderAssets_.push_back(shaderAsset);
+            ++counters_.catalogShaderBindings;
+        }
+    }
+
     counters_.catalogReady = true;
     counters_.projectCatalogConfigured = assetResources_.projectCatalogConfigured;
     counters_.testFixtureCatalog = assetResources_.testFixtureCatalog;
@@ -652,7 +803,9 @@ auto EditorWorkspaceState::previewAssetBindingsHaveActiveFrameBorrows() const no
     return (mesh3DBindings_.has_value() &&
             mesh3DBindings_->hasActiveFrameBorrows()) ||
            (spriteBindings_.has_value() &&
-            spriteBindings_->hasActiveFrameBorrows());
+            spriteBindings_->hasActiveFrameBorrows()) ||
+           (shaderBindings_.has_value() &&
+            shaderBindings_->hasActiveFrameBorrows());
 }
 
 auto EditorWorkspaceState::releasePreviewAssetBindings() noexcept -> Tina::Core::Status{
@@ -662,9 +815,18 @@ auto EditorWorkspaceState::releasePreviewAssetBindings() noexcept -> Tina::Core:
     previewTilesetAsset_ = {};
 
     std::optional<Tina::Core::Error> firstFailure;
+    if (shaderBindings_.has_value()) {
+        if (auto status = shaderBindings_->retireAllShaderBindings(); !status) {
+            firstFailure.emplace(std::move(status.error()));
+        } else {
+            shaderBindings_.reset();
+        }
+    }
     if (mesh3DBindings_.has_value()) {
         if (auto status = mesh3DBindings_->retireAllBindings(); !status) {
-            firstFailure.emplace(std::move(status.error()));
+            if (!firstFailure.has_value()) {
+                firstFailure.emplace(std::move(status.error()));
+            }
         } else {
             mesh3DBindings_.reset();
         }
@@ -687,6 +849,7 @@ auto EditorWorkspaceState::releasePreviewAssetBindings() noexcept -> Tina::Core:
     boundTilesetAssets_.clear();
     boundMeshAssets_.clear();
     boundMaterialAssets_.clear();
+    boundShaderAssets_.clear();
     if (firstFailure.has_value()) {
         return Tina::Core::failure(std::move(*firstFailure));
     }
@@ -700,9 +863,8 @@ auto EditorWorkspaceState::releasePreviewAssetBindingsDraining() noexcept
         return Tina::Core::success();
     }
     Tina::Core::Error firstFailure = std::move(released.error());
-    if (Tina::Render::IRenderDevice* device = renderDeviceAccess_.get();
-        device != nullptr) {
-        (void)device->drainGpuRetirements();
+    if (device_ != nullptr) {
+        (void)device_->drainGpuRetirements();
     }
     if (assetResources_.system.has_value()) {
         (void)assetResources_.system->drainGpuRetirements();
@@ -772,11 +934,18 @@ auto EditorWorkspaceState::validateRuntimePreview() -> Tina::Core::Status{
             entity.sprite->spriteId, Tina::AssetFormat::AssetKind::Sprite);
         const Tina::Asset::AssetHandle normalTexture = loadedAsset(
             entity.sprite->normalTextureId, Tina::AssetFormat::AssetKind::Texture2D);
+        const Tina::Asset::AssetHandle shader = loadedAsset(
+            entity.sprite->shaderId, Tina::AssetFormat::AssetKind::Shader);
         const bool spriteResolved = sprite && containsHandle(boundSpriteAssets_, sprite);
         const bool normalResolved = !entity.sprite->normalTextureId.hasValue() ||
                                     (normalTexture && spriteBindings_.has_value() &&
                                      spriteBindings_->bindingKey(normalTexture) != 0);
-        if (!spriteResolved || !normalResolved) {
+        // An authored Shader the Catalog cannot bind must filter the sprite the same way an
+        // unbindable normal map does. Keeping it would fail the whole extraction closed, and
+        // the Editor would show nothing instead of the one broken node.
+        const bool shaderResolved = !entity.sprite->shaderId.hasValue() ||
+                                    (shader && containsHandle(boundShaderAssets_, shader));
+        if (!spriteResolved || !normalResolved || !shaderResolved) {
             entity.sprite.reset();
             // The animation binding targets the sprite; filtering the sprite
             // from the preview must also filter its binding.
@@ -811,6 +980,9 @@ auto EditorWorkspaceState::validateRuntimePreview() -> Tina::Core::Status{
             },
             .resolveTexture = [this](Tina::Core::AssetId assetId) {
                 return loadedAsset(assetId, Tina::AssetFormat::AssetKind::Texture2D);
+            },
+            .resolveShader = [this](Tina::Core::AssetId assetId) {
+                return loadedAsset(assetId, Tina::AssetFormat::AssetKind::Shader);
             },
             .resolveAnimationClip = [this](Tina::Core::AssetId assetId) {
                 return loadedAsset(assetId,

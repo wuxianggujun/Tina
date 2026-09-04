@@ -698,6 +698,8 @@ auto EditorWorkspaceState::commitSourceImportCatalog(
         spriteBindings_.has_value() ? &*spriteBindings_ : nullptr;
     Tina::Asset::Mesh3DBindingRegistry* meshParticipant =
         mesh3DBindings_.has_value() ? &*mesh3DBindings_ : nullptr;
+    Tina::Asset::ShaderBindingRegistry* shaderParticipant =
+        shaderBindings_.has_value() ? &*shaderBindings_ : nullptr;
     Tina::Asset::CatalogReloadConfig reloadConfig{};
     if (spriteParticipant != nullptr) {
         reloadConfig.bindings.sprite2D =
@@ -706,6 +708,10 @@ auto EditorWorkspaceState::commitSourceImportCatalog(
     if (meshParticipant != nullptr) {
         reloadConfig.bindings.mesh3D =
             std::span<Tina::Asset::Mesh3DBindingRegistry*>{&meshParticipant, 1U};
+    }
+    if (shaderParticipant != nullptr) {
+        reloadConfig.bindings.shader =
+            std::span<Tina::Asset::ShaderBindingRegistry*>{&shaderParticipant, 1U};
     }
     auto reload = assetResources_.system->reloadPreparedCatalog(
         ready.stageRootUtf8, std::move(ready.catalog), reloadConfig);

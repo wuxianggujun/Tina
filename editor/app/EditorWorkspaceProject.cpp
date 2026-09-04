@@ -878,6 +878,8 @@ auto EditorWorkspaceState::switchLiveProjectCatalog(
         spriteBindings_.has_value() ? &*spriteBindings_ : nullptr;
     Tina::Asset::Mesh3DBindingRegistry* meshParticipant =
         mesh3DBindings_.has_value() ? &*mesh3DBindings_ : nullptr;
+    Tina::Asset::ShaderBindingRegistry* shaderParticipant =
+        shaderBindings_.has_value() ? &*shaderBindings_ : nullptr;
     Tina::Asset::CatalogReloadConfig reloadConfig{};
     reloadConfig.package.manifest.catalog.maxEntries = 1024;
     reloadConfig.package.manifest.catalog.maxDependencies = 4096;
@@ -890,6 +892,10 @@ auto EditorWorkspaceState::switchLiveProjectCatalog(
     if (meshParticipant != nullptr) {
         reloadConfig.bindings.mesh3D =
             std::span<Tina::Asset::Mesh3DBindingRegistry*>{&meshParticipant, 1U};
+    }
+    if (shaderParticipant != nullptr) {
+        reloadConfig.bindings.shader =
+            std::span<Tina::Asset::ShaderBindingRegistry*>{&shaderParticipant, 1U};
     }
     auto reload = assetResources_.system->reloadCatalog(
         resolvedCatalog->catalogRootUtf8, reloadConfig);
@@ -1344,6 +1350,8 @@ auto EditorWorkspaceState::refreshProjectCatalog() -> Tina::Core::Status{
         spriteBindings_.has_value() ? &*spriteBindings_ : nullptr;
     Tina::Asset::Mesh3DBindingRegistry* meshParticipant =
         mesh3DBindings_.has_value() ? &*mesh3DBindings_ : nullptr;
+    Tina::Asset::ShaderBindingRegistry* shaderParticipant =
+        shaderBindings_.has_value() ? &*shaderBindings_ : nullptr;
     Tina::Asset::CatalogReloadConfig reloadConfig{};
     reloadConfig.package.manifest.catalog.maxEntries = 1024;
     reloadConfig.package.manifest.catalog.maxDependencies = 4096;
@@ -1356,6 +1364,10 @@ auto EditorWorkspaceState::refreshProjectCatalog() -> Tina::Core::Status{
     if (meshParticipant != nullptr) {
         reloadConfig.bindings.mesh3D =
             std::span<Tina::Asset::Mesh3DBindingRegistry*>{&meshParticipant, 1U};
+    }
+    if (shaderParticipant != nullptr) {
+        reloadConfig.bindings.shader =
+            std::span<Tina::Asset::ShaderBindingRegistry*>{&shaderParticipant, 1U};
     }
     auto reload = assetResources_.system->reloadCatalog(
         assetResources_.catalogRootUtf8, reloadConfig);

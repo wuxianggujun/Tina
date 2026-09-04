@@ -237,19 +237,6 @@ struct LifecycleCounters final {
     std::optional<Tina::Core::Error> evidenceError{};
 };
 
-// Reaching the live device: CreateEngineOptions::wrapWindowSurfaceRenderDevice is the only hook
-// that sees it. Identity capture rather than a forwarding wrapper, because every optional
-// IRenderDevice entry point has a fail-closed base implementation, so a wrapper that forgot to
-// forward one would turn into a runtime upload failure instead of a compile error.
-class DeviceCapture final {
-  public:
-    void set(Tina::Render::IRenderDevice* device) noexcept { device_ = device; }
-    [[nodiscard]] Tina::Render::IRenderDevice* get() const noexcept { return device_; }
-
-  private:
-    Tina::Render::IRenderDevice* device_ = nullptr;
-};
-
 struct ScreenBox final {
     u32 minimumX = 0;
     u32 minimumY = 0;
@@ -539,61 +526,51 @@ class KindedFrameResource final {
 
 class ShaderMaterialsState final : public Tina::IGameState {
   public:
-    ShaderMaterialsState(SampleOptions options, LifecycleCounters& counters,
-                         const DeviceCapture& capture) noexcept
-        : options_(options), counters_(&counters), capture_(&capture)
+    ShaderMaterialsState(SampleOptions options, LifecycleCounters& counters) noexcept
+        : options_(options), counters_(&counters)
     {
     }
 
-    Tina::Core::Status onEnter(Tina::GameStateEnterContext&) override
+    Tina::Core::Status onEnter(Tina::GameStateEnterContext& context) override
     {
         ++counters_->stateEnters;
 
-        Tina::Render::IRenderDevice* device = capture_->get();
-        if (device == nullptr)
-        {
-            return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
-                                       "sample did not capture a render device");
-        }
+        Tina::Render::IRenderDevice& device = context.renderDevice();
 
-        if (auto status = uploadTexture(*device); !status)
+        if (auto status = uploadTexture(device); !status)
         {
             return status;
         }
-        if (auto status = uploadShader(*device); !status)
+        if (auto status = uploadShader(device); !status)
         {
             return status;
         }
         // Published here as well as per frame so the first extraction names bindings that already
         // carry values: a draw resolving an empty uniform binding fails closed.
-        return publishMaterials(*device);
+        return publishMaterials(device);
     }
 
-    void onExit(Tina::GameStateExitContext&) noexcept override
+    void onExit(Tina::GameStateExitContext& context) noexcept override
     {
         ++counters_->stateExits;
-        Tina::Render::IRenderDevice* device = capture_->get();
-        if (device == nullptr)
-        {
-            return;
-        }
+        Tina::Render::IRenderDevice& device = context.renderDevice();
 
         // Uniform bindings first: retireShader clears bindings that reference the program, but a
         // uniform binding is keyed in an independent namespace and is not one of them.
         for (const MaterialSpec& material : Materials)
         {
-            static_cast<void>(device->setShaderUniformBinding(
+            static_cast<void>(device.setShaderUniformBinding(
                 material.uniformBindingKey, Tina::Render::GpuShaderUniformBindingDesc{}));
         }
         if (shaderBound_)
         {
-            static_cast<void>(device->setShaderBinding(ShaderBindingKey, Tina::Render::GpuShaderId{}));
+            static_cast<void>(device.setShaderBinding(ShaderBindingKey, Tina::Render::GpuShaderId{}));
             shaderBound_ = false;
         }
         if (shader_)
         {
             Tina::Render::FramePin completion{};
-            if (device->retireShader(shader_, completion))
+            if (device.retireShader(shader_, completion))
             {
                 counters_->shaderRetired = true;
             }
@@ -602,7 +579,7 @@ class ShaderMaterialsState final : public Tina::IGameState {
         if (texture_)
         {
             Tina::Render::FramePin completion{};
-            if (device->retireTexture2D(texture_, completion))
+            if (device.retireTexture2D(texture_, completion))
             {
                 counters_->textureRetired = true;
             }
@@ -614,7 +591,7 @@ class ShaderMaterialsState final : public Tina::IGameState {
     {
         ++counters_->frameUpdates;
 
-        Tina::Render::IRenderDevice* device = capture_->get();
+        Tina::Render::IRenderDevice* device = context.renderDevice();
         if (device == nullptr)
         {
             return Tina::Core::failure(Tina::Core::CoreErrorCode::Internal,
@@ -945,7 +922,6 @@ class ShaderMaterialsState final : public Tina::IGameState {
 
     SampleOptions options_{};
     LifecycleCounters* counters_ = nullptr;
-    const DeviceCapture* capture_ = nullptr;
     Tina::Render::GpuShaderId shader_{};
     Tina::Render::GpuTextureId texture_{};
     u64 textureBindingKey_ = TextureBindingKeyUnused;
@@ -957,9 +933,8 @@ class ShaderMaterialsState final : public Tina::IGameState {
 
 class ShaderMaterialsApplication final : public Tina::IGameApplication {
   public:
-    ShaderMaterialsApplication(SampleOptions options, LifecycleCounters& counters,
-                               const DeviceCapture& capture) noexcept
-        : options_(options), counters_(&counters), capture_(&capture)
+    ShaderMaterialsApplication(SampleOptions options, LifecycleCounters& counters) noexcept
+        : options_(options), counters_(&counters)
     {
     }
 
@@ -967,7 +942,7 @@ class ShaderMaterialsApplication final : public Tina::IGameApplication {
     createInitialState(Tina::GameStartupContext&) override
     {
         return std::unique_ptr<Tina::IGameState>{
-            std::make_unique<ShaderMaterialsState>(options_, *counters_, *capture_)};
+            std::make_unique<ShaderMaterialsState>(options_, *counters_)};
     }
 
     void onShutdown(Tina::GameShutdownContext&) noexcept override
@@ -978,7 +953,6 @@ class ShaderMaterialsApplication final : public Tina::IGameApplication {
   private:
     SampleOptions options_{};
     LifecycleCounters* counters_ = nullptr;
-    const DeviceCapture* capture_ = nullptr;
 };
 
 [[nodiscard]] Tina::EngineConfig createEngineConfig()
@@ -1041,21 +1015,7 @@ void writeCounters(Tina::Core::JsonWriter& writer, const LifecycleCounters& coun
     }
     const SampleOptions options = *optionsResult;
 
-    DeviceCapture capture;
-    Tina::Desktop::CreateEngineOptions desktopOptions{};
-    desktopOptions.wrapWindowSurfaceRenderDevice =
-        [&capture](std::unique_ptr<Tina::Render::IRenderDevice> device)
-            -> Tina::Core::Result<std::unique_ptr<Tina::Render::IRenderDevice>> {
-        if (!device)
-        {
-            return Tina::Core::failure(Tina::Core::CoreErrorCode::InvalidArgument,
-                                       "Desktop bootstrap produced no render device");
-        }
-        capture.set(device.get());
-        return device;
-    };
-
-    auto hostResult = Tina::Desktop::CreateEngine(createEngineConfig(), std::move(desktopOptions));
+    auto hostResult = Tina::Desktop::CreateEngine(createEngineConfig());
     if (!hostResult)
     {
         writeError(hostResult.error());
@@ -1063,7 +1023,7 @@ void writeCounters(Tina::Core::JsonWriter& writer, const LifecycleCounters& coun
     }
 
     LifecycleCounters counters;
-    ShaderMaterialsApplication application{options, counters, capture};
+    ShaderMaterialsApplication application{options, counters};
     auto runResult = (*hostResult)->run(application);
     hostResult->reset();
     if (!runResult)
