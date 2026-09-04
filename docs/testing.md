@@ -1019,7 +1019,7 @@ Null/bgfx resource/batch 定向 filter，闭环后再跑产品视觉差分与完
 | `tina_sample_2d_infrastructure_bgfx` | fixture Sprite2D + UI overlay | 正式 Catalog TileMap 产品 |
 | `tina_sample_2d` | Catalog TileMap v3 root + deferred TileMapChunk、NavigationGrid2D v1 与 Fx2D v1；每帧 visual=10/collision=20 demand→pump→commit；Navigation live derive 与 Cooked data bit-exact，并验证 weighted A*、dynamic blocker、分步取消与 revision；PhysicsNavigationSync2D 将显式注册 crate body 的 transform/AABB 同步为 dynamic blocker；SpriteAnimation notify 被产品消费；Fx2D factory 驱动 fixed-capacity Particle/Trail；Physics 含 Box/Circle/Capsule/ConvexPolygon/Chain、sensor enter/exit 与 Distance/Revolute/Prismatic joint；Sprite2D 使用 packet-local `FrameResourceRef`；schema 29 保留既有证据并新增 navigation physics sync counters | Registry transaction/PMR/owner-thread 压力、跨 GPU lighting golden、可见 FX effect graph/GPU simulation、更多高级约束、Linux |
 | `tina_sample_2d_custom_shader` | Sprite2D 自定义 fragment 端到端：`tina_assetc --shader-source` cook 出带 profile 表的 payload、`uploadShaderFromCooked`、packet-local Shader/ShaderUniforms ref；两相 pinned `u_pulse.x` 上 custom 区域 RGB 均值差 `>= 8` 而引擎对照区域差 `== 0`，并在对照精灵四象限上断言 2×2 棋盘（红/绿/蓝/白）证明 UV/采样正确 | 自定义 fragment 消费引擎 lighting（见 `tina_sample_2d_shader_lighting`）；Mesh3D 自定义 draw 路径 |
-| `tina_sample_2d_shader_materials` | 同一 program 三套独立 uniform binding：`minimumMaterialSeparation` 断言三种 material 之间的像素差有下界，`maximumSameMaterialDelta == 0` 断言同 material 的两个精灵逐字节相同，`flatMaterialSpread == 0` 排除「整帧变亮」这类伪证据 | 逐 material 纹理切换；author 侧 material authoring UI |
+| `tina_sample_2d_shader_materials` | 同一 program 三套独立 uniform binding：`minimumMaterialSeparation` 断言三种 material 之间的像素差有下界，`maximumSameMaterialDelta == 0` 断言同 material 的两个精灵逐字节相同，`flatMaterialSpread == 0` 排除「整帧变亮」这类伪证据。**value 表按名匹配**：第三个 material 故意把两个 value 倒序发布，`flatMaterialTexelDistance == 0` 断言它落在自己 UV 指向的那个纹素上（左上象限色）——按位取值会让 UV 出界钳到别的边缘色，**同样平坦**，所以 `flatMaterialSpread` 对这类缺陷失明。负对照实测：强制设备按位取值 → spread 仍 0、distance 110、exit 1 | 逐 material 纹理切换；author 侧 material authoring UI |
 | `tina_sample_2d_shader_lighting` | 自定义 fragment **读**引擎契约而非替换它：`s_normalTex`、`u_spriteLightParams`、`u_spriteLightPosRadius`、`u_spriteLightColors`、`u_spriteShadowSegments`。六个精灵交错排布使相邻 draw 不共享 (shader, normal) 组合，证据是帧内差分——`normalVsFlatSeparation`、`normalLeftVsRight`、`shadowedVsLit`、`engineControlSpread`，整帧亮度变化无法满足 | 跨 GPU lighting exact golden；多光源/多遮挡的组合爆炸 |
 | `tina_sample_3d_extraction` | CPU/Null Perspective/Mesh extraction | 可见 GPU 3D |
 | `tina_sample_3d_infrastructure` | procedural fixture Cube/depth/instance | Cooked product mesh |
@@ -1220,7 +1220,7 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d_shader_lig
 
 `--frames=32` 对 `2d_custom_shader` 已足够（它的证据只需要两相 pinned uniform），另外两个需要 120 帧。
 三者的判据都是**帧内**差分而非跨帧亮度变化：`customSpriteDelta` vs `engineSpriteDelta == 0`、
-`maximumSameMaterialDelta == 0` 与 `flatMaterialSpread == 0`、以及 `normalVsFlatSeparation` /
+`maximumSameMaterialDelta == 0` 与 `flatMaterialSpread == 0` / `flatMaterialTexelDistance == 0`、以及 `normalVsFlatSeparation` /
 `shadowedVsLit` 配 `engineControlSpread`。任何一个 sample 的 `evidenceError` 非空即视为失败，
 即使 exit code 为 0——`status=ok` 与 `evidenceCollected=true` 必须同时成立。
 

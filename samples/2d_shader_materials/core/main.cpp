@@ -16,6 +16,11 @@
 //   - Batch splitting: sprites are emitted interleaved by material, and each material forms its own
 //     batch because shaderUniforms is part of the batch key.
 //
+//   - Name-based matching of a value table to the program's uniforms. One material publishes its two
+//     values in reverse order, so a device that took them positionally would draw it wrong. With
+//     every table in the same order that defect is invisible: it is the one this sample could not
+//     see before, since separation and flatness both survive it.
+//
 // Pixel evidence compares the three material regions against each other in a single frame, which is
 // a stronger criterion than the two-phase comparison the first sample used: it cannot be satisfied
 // by anything that changes the whole frame uniformly.
@@ -149,6 +154,9 @@ struct MaterialSpec final {
     float uvOffsetX = 0.0F;
     float uvOffsetY = 0.0F;
     float uvScale = 1.0F;
+    // Publishes u_uvAdjust before u_tint instead of after. Nothing about the material changes; it
+    // exists so the pixel criterion covers name matching rather than only value separation.
+    bool reverseUniformOrder = false;
 };
 
 // Chosen so no two materials can produce the same pixels from the same texels:
@@ -162,8 +170,12 @@ constexpr std::array<MaterialSpec, MaterialCount> Materials{{
      .uvScale = 1.0F},
     {.uniformBindingKey = 2, .tintRed = 0.55F, .tintGreen = 0.55F, .tintBlue = 0.55F,
      .swizzle = 1.0F, .uvScale = 1.0F},
+    // Reversed on purpose, and on this material rather than another: it is the one whose evidence is a
+    // *shape* (a flat quad) rather than a colour offset. Take its two values positionally instead of
+    // by name and u_uvAdjust.z becomes the 1.0 tint red, so the zoom vanishes and the quad comes back
+    // as a four-quadrant sample -- which flatMaterialSpread catches outright.
     {.uniformBindingKey = 3, .tintRed = 1.0F, .tintGreen = 1.0F, .tintBlue = 1.0F, .swizzle = 0.0F,
-     .uvOffsetX = -0.25F, .uvOffsetY = -0.25F, .uvScale = 0.08F},
+     .uvOffsetX = -0.25F, .uvOffsetY = -0.25F, .uvScale = 0.08F, .reverseUniformOrder = true},
 }};
 
 struct SpriteSpec final {
@@ -208,6 +220,12 @@ constexpr u32 EvidenceMaximumSameMaterialDelta = 6;
 // Material 2 zooms onto one texel, so its region must be nearly flat. A four-quadrant sample has a
 // spread in the hundreds, so this separates the two cases by a wide margin.
 constexpr u32 EvidenceMaximumFlatSpread = 24;
+// Zero, unlike every other threshold here, because this one is exact by construction rather than
+// approximate: the material zooms far inside a single texel, so every pixel in the region samples
+// that one texel, tint is identity and the blend is against an opaque quad. Measured 0. The failures
+// it excludes are the other three quadrant colours and the clamped edges an off-texture UV produces,
+// each a whole saturated channel away, so there is no near-miss case a tolerance would need to admit.
+constexpr u32 EvidenceMaximumFlatTexelDistance = 0;
 
 struct SampleOptions final {
     u64 targetFrameCount = DefaultFrameCount;
@@ -233,6 +251,10 @@ struct LifecycleCounters final {
     // Spread inside the single-texel-zoom material's region. Near zero proves the fragment stage's
     // UV transform reached the sampler, which no tint alone could do.
     u32 flatMaterialSpread = 0;
+    // Distance from that flat region's colour to the texel the material's UV actually names. Flatness
+    // alone is too weak: a wrong u_uvAdjust drives the UV off the texture and clamps to a single edge
+    // colour, which is just as flat while sampling a different texel. Only this pins down *which*.
+    u32 flatMaterialTexelDistance = 0;
     bool evidenceCollected = false;
     std::optional<Tina::Core::Error> evidenceError{};
 };
@@ -766,12 +788,18 @@ class ShaderMaterialsState final : public Tina::IGameState {
     {
         for (const MaterialSpec& material : Materials)
         {
-            const std::array values{
-                makeUniformValue(TintUniformName, material.tintRed, material.tintGreen,
-                                 material.tintBlue, material.swizzle),
-                makeUniformValue(UvAdjustUniformName, material.uvOffsetX, material.uvOffsetY,
-                                 material.uvScale, 0.0F),
-            };
+            const auto tint = makeUniformValue(TintUniformName, material.tintRed, material.tintGreen,
+                                               material.tintBlue, material.swizzle);
+            const auto uvAdjust = makeUniformValue(UvAdjustUniformName, material.uvOffsetX,
+                                                   material.uvOffsetY, material.uvScale, 0.0F);
+            // A value table is matched to the program's uniforms by name, so the order a material
+            // publishes them in must not matter. One material declares them reversed to hold the
+            // device to that: with every table in the same order, name matching and "take the values
+            // positionally" produce identical pixels, so the criterion below could not tell a correct
+            // device from one that ignored the names entirely.
+            const std::array values = material.reverseUniformOrder
+                                          ? std::array{uvAdjust, tint}
+                                          : std::array{tint, uvAdjust};
             if (auto status = device.setShaderUniformBinding(
                     material.uniformBindingKey,
                     Tina::Render::GpuShaderUniformBindingDesc{.values = values});
@@ -907,6 +935,16 @@ class ShaderMaterialsState final : public Tina::IGameState {
         counters_->maximumSameMaterialDelta = maximumSameDelta;
         // Material 2 is the single-texel zoom; its region must be nearly flat.
         counters_->flatMaterialSpread = regionSpread(capture, firstBoxes[MaterialCount - 1U]);
+        // ...and flat at the colour its own UV names. Its offset lands at (0.25, 0.25), the texture's
+        // top-left quadrant, whose colour is QuadrantColors[0]. Comparing against that rather than
+        // just measuring flatness is what makes the reversed publish order load-bearing: swap that
+        // material's two values and the zoom is replaced by an off-texture UV that clamps to some
+        // other edge texel -- equally flat, different colour.
+        const TextureQuadrantColor& expected = QuadrantColors[0];
+        counters_->flatMaterialTexelDistance =
+            meanSeparation(firstMeans[MaterialCount - 1U],
+                           RegionMean{.red = expected.red, .green = expected.green,
+                                      .blue = expected.blue});
         counters_->evidenceCollected = true;
     }
 
@@ -975,7 +1013,8 @@ class ShaderMaterialsApplication final : public Tina::IGameApplication {
     {
         return counters.minimumMaterialSeparation >= EvidenceMinimumMaterialSeparation &&
                counters.maximumSameMaterialDelta <= EvidenceMaximumSameMaterialDelta &&
-               counters.flatMaterialSpread <= EvidenceMaximumFlatSpread;
+               counters.flatMaterialSpread <= EvidenceMaximumFlatSpread &&
+               counters.flatMaterialTexelDistance <= EvidenceMaximumFlatTexelDistance;
     }
     if (counters.evidenceError.has_value())
     {
@@ -1000,6 +1039,7 @@ void writeCounters(Tina::Core::JsonWriter& writer, const LifecycleCounters& coun
     writer.member("minimumMaterialSeparation", counters.minimumMaterialSeparation);
     writer.member("maximumSameMaterialDelta", counters.maximumSameMaterialDelta);
     writer.member("flatMaterialSpread", counters.flatMaterialSpread);
+    writer.member("flatMaterialTexelDistance", counters.flatMaterialTexelDistance);
     writer.member("evidenceError", counters.evidenceError.has_value()
                                        ? errorCodeName(counters.evidenceError->code)
                                        : std::string{});

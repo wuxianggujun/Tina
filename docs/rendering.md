@@ -385,7 +385,14 @@ SDK 包把 `tina_sprite2d.sh` / `tina_mesh3d.sh` / varying def 装到 `Tina_SHAD
 `>= 8`、引擎对照区域差 `== 0`，并在对照精灵的四象限上断言 2×2 棋盘（红/绿/蓝/白）。对照精灵使用
 `ambientScale=1` 的引擎 fragment，因为默认 `0.2` 会把 255 缩到 ~51，采样判据会在正确 UV 下失败。
 `tina_sample_2d_shader_materials` 用同一 program、三套独立 uniform binding 证明 material 不是
-“换一张图”。
+“换一张图”，并额外把其中一个 material 的两个 value **倒序**发布来锁定“按名匹配”：`flatMaterialTexelDistance == 0`
+要求它落在自己 UV 指向的纹素上，而按位取值会让 UV 出界钳到别的边缘色——同样平坦，所以
+`flatMaterialSpread` 单独看对这类缺陷是失明的。
+
+一个 value binding 表带着“我的哪个值喂它那个 author uniform”的解析结果（`ShaderUniformBindingTable`
+的 `valueIndices`），按 `ShaderSlot::authorUniformsRevision` 作废。缓存放在 binding 表侧而不是 program
+侧，因为多对一的方向是 material→program：同一个 program 一帧内被多个 binding key 轮流绘制，缓存挂在
+slot 上会在交错序列里每 draw 都 miss，比不缓存更慢；而一个 key 发布一次、之后被每个引用它的 draw 读取。
 
 Scene 侧的入口是 `SpriteRenderer2D::shader`（一个 weak Shader `AssetHandle`）。extraction 要求
 `shaderBindingResolver` 与 `shaderUniformBindingResolver` **成对**提供，并把同一个 handle 解析成

@@ -2850,6 +2850,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             }
             slot.shaderKind = GpuShaderKind::Invalid;
             slot.authorUniforms.clear();
+            slot.authorUniformsRevision = 0;
             slot.retirementPhase = RetirementPhase::None;
             slot.completionPin.release();
             ++completed;
@@ -3253,6 +3254,7 @@ class BgfxRenderDevice final : public IRenderDevice {
     // with the other resource slots. A member function *body* sees the whole class, but a return
     // type is looked up in declaration order.
     struct ShaderSlot;
+    struct ShaderUniformBindingTable;
 
     // A live Sprite2D program for a batch's shader descriptor, or nullptr when the batch named no
     // shader at all. Never a fallback: a sprite that named a shader and cannot get it is a frame
@@ -3339,7 +3341,7 @@ class BgfxRenderDevice final : public IRenderDevice {
         // Every author uniform is published, not only the ones the binding names: bgfx keeps uniform
         // values across submits, so an unset one would silently inherit whatever the previous draw
         // wrote. A value the caller did not supply is zero.
-        const std::vector<GpuShaderUniformValue>* values = nullptr;
+        const ShaderUniformBindingTable* values = nullptr;
         if (uniformRef)
         {
             const FrameResourceDescriptor* uniformDescriptor =
@@ -3355,24 +3357,63 @@ class BgfxRenderDevice final : public IRenderDevice {
                 values = &binding->second;
             }
         }
-        for (const ShaderDetail::CustomShaderUniform& uniform : slot->authorUniforms)
+        publishAuthorUniforms(*slot, values);
+        return program;
+    }
+
+    // Publishes every author uniform of a program, taking values from the batch's binding table and
+    // zero for anything the caller left unset. Unset must publish zero rather than skip: bgfx keeps
+    // uniform values across submits, so a skipped uniform would silently inherit the previous draw's.
+    //
+    // The name-to-index resolution is memoized on the slot, keyed by the binding table's key and
+    // revision, because both are stable for the life of a batch while this runs per draw.
+    // const because every draw path that reaches here resolves both the slot and the table through
+    // const accessors; the memo is derived from data they already own, so filling it changes no
+    // observable device state. It needs no lock: the device rejects any call off ownerThread_.
+    void publishAuthorUniforms(const ShaderSlot& slot,
+                               const ShaderUniformBindingTable* values) const noexcept
+    {
+        static constexpr std::array<float, 4> Zero{};
+        if (values == nullptr)
         {
-            std::array<float, 4> value{};
-            if (values != nullptr)
+            // No binding at all: every uniform is unset, so there is nothing to resolve and no memo
+            // to keep. Publishing zero is still mandatory for the same reason as below.
+            for (const ShaderDetail::CustomShaderUniform& uniform : slot.authorUniforms)
             {
-                const std::string_view wanted{uniform.name.data()};
-                for (const GpuShaderUniformValue& candidate : *values)
+                bgfx::setUniform(uniform.handle, Zero.data());
+            }
+            return;
+        }
+
+        if (values->cachedAuthorUniformsRevision != slot.authorUniformsRevision)
+        {
+            values->valueIndices.assign(slot.authorUniforms.size(),
+                                        ShaderUniformBindingTable::NoValueIndex);
+            for (usize index = 0; index < slot.authorUniforms.size(); ++index)
+            {
+                const std::string_view wanted{slot.authorUniforms[index].name.data()};
+                for (usize candidate = 0; candidate < values->values.size(); ++candidate)
                 {
-                    if (std::string_view{candidate.name.data()} == wanted)
+                    if (std::string_view{values->values[candidate].name.data()} == wanted)
                     {
-                        value = candidate.value;
+                        values->valueIndices[index] = static_cast<u8>(candidate);
                         break;
                     }
                 }
             }
-            bgfx::setUniform(uniform.handle, value.data());
+            values->cachedAuthorUniformsRevision = slot.authorUniformsRevision;
         }
-        return program;
+
+        for (usize index = 0; index < slot.authorUniforms.size(); ++index)
+        {
+            const u8 valueIndex = values->valueIndices[index];
+            // Unset must publish zero rather than skip: bgfx keeps uniform values across submits, so a
+            // skipped uniform would silently inherit whatever the previous draw wrote.
+            const std::array<float, 4>& value = valueIndex == ShaderUniformBindingTable::NoValueIndex
+                                                    ? Zero
+                                                    : values->values[valueIndex].value;
+            bgfx::setUniform(slot.authorUniforms[index].handle, value.data());
+        }
     }
 
     // Sprite2D geometry validation already rejects a stale, cross-packet or wrong-kind frame
@@ -4271,10 +4312,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                              static_cast<u16>(Sprite2DLightingDesc::MaximumShadowSegmentCount));
             if (batchShaderSlot != nullptr)
             {
-                // Every author uniform is published, not only the ones the binding names: bgfx keeps
-                // uniform values across submits, so an unset one would silently inherit whatever the
-                // previous batch wrote. A value the caller did not supply is explicitly zero.
-                const std::vector<GpuShaderUniformValue>* values = nullptr;
+                const ShaderUniformBindingTable* values = nullptr;
                 if (shaderUniformDescriptor != nullptr)
                 {
                     const u32 uniformBatchKey = static_cast<u32>(shaderUniformDescriptor->deviceBindingKey);
@@ -4284,23 +4322,7 @@ class BgfxRenderDevice final : public IRenderDevice {
                         values = &binding->second;
                     }
                 }
-                for (const ShaderDetail::CustomShaderUniform& uniform : batchShaderSlot->authorUniforms)
-                {
-                    std::array<float, 4> value{};
-                    if (values != nullptr)
-                    {
-                        const std::string_view wanted{uniform.name.data()};
-                        for (const GpuShaderUniformValue& candidate : *values)
-                        {
-                            if (std::string_view{candidate.name.data()} == wanted)
-                            {
-                                value = candidate.value;
-                                break;
-                            }
-                        }
-                    }
-                    bgfx::setUniform(uniform.handle, value.data());
-                }
+                publishAuthorUniforms(*batchShaderSlot, values);
             }
             const u32 firstIndex = batchBegin * 6U;
             const u32 indexCount = (batchEnd - batchBegin) * 6U;
@@ -4423,6 +4445,10 @@ class BgfxRenderDevice final : public IRenderDevice {
         slot.skinnedProgram = program->skinnedProgram;
         slot.shaderKind = desc.shaderKind;
         slot.authorUniforms = std::move(program->authorUniforms);
+        // Fresh revision so no binding table can reuse a memo built against whatever program occupied
+        // this slot before: the uniform names differ even when the two tables happen to be the same
+        // size, and the slot index alone cannot distinguish them.
+        slot.authorUniformsRevision = nextShaderUniformRevision_++;
         slot.live = true;
         slot.retirementPhase = RetirementPhase::None;
         ++statistics_.liveResources;
@@ -4511,6 +4537,7 @@ class BgfxRenderDevice final : public IRenderDevice {
             }
             slot.shaderKind = GpuShaderKind::Invalid;
             slot.authorUniforms.clear();
+            slot.authorUniformsRevision = 0;
             slot.retirementPhase = RetirementPhase::None;
             ++statistics_.completedGpuRetirements;
             return Core::success();
@@ -4578,7 +4605,12 @@ class BgfxRenderDevice final : public IRenderDevice {
         }
         // Copied rather than referenced: the values are re-published every frame the binding is drawn,
         // long after the caller's span has gone.
-        shaderUniformBindings_[deviceBindingKey].assign(desc.values.begin(), desc.values.end());
+        ShaderUniformBindingTable& table = shaderUniformBindings_[deviceBindingKey];
+        table.values.assign(desc.values.begin(), desc.values.end());
+        // Dropped on every write, including a rewrite of the same key with a same-sized table: the
+        // names may have moved even when the count did not, and revision 0 never matches a slot.
+        table.valueIndices.clear();
+        table.cachedAuthorUniformsRevision = 0;
         return Core::success();
     }
 
@@ -6151,13 +6183,41 @@ class BgfxRenderDevice final : public IRenderDevice {
         // by name from the batch's value binding, and any the caller left unset gets zero, so a draw
         // never inherits whatever the previous batch happened to leave in the uniform.
         std::vector<ShaderDetail::CustomShaderUniform> authorUniforms{};
+        // Identifies this exact upload for the name-resolution memo a binding table keeps. Device-wide
+        // monotonic, so a reused slot never inherits the previous program's resolution even though the
+        // slot index is the same, and a stale memo can never accidentally match.
+        u64 authorUniformsRevision = 0;
         bool live = false;
         RetirementPhase retirementPhase = RetirementPhase::None;
         FramePin completionPin{};
     };
     std::vector<ShaderSlot> shaders_{};
     std::unordered_map<u32, GpuShaderId> shaderBindings_{};
-    std::unordered_map<u32, std::vector<GpuShaderUniformValue>> shaderUniformBindings_{};
+
+    // Carries the memo of "which of my values feeds each of that program's author uniforms", so a
+    // draw publishes by index instead of searching by name. Without it a draw ran a linear name scan
+    // per uniform -- 16 uniforms against 16 values is 256 string compares on every single draw.
+    //
+    // The memo lives here rather than on ShaderSlot because the many-to-one direction is
+    // material-to-program: one uploaded program is drawn under several binding keys in the same frame
+    // (that is what a material is), so a per-slot memo would miss on every draw of an interleaved
+    // batch sequence and be slower than no memo at all. A key, by contrast, is published once and
+    // then read by every draw that names it.
+    struct ShaderUniformBindingTable final {
+        std::vector<GpuShaderUniformValue> values{};
+        // NoValueIndex where this table supplies no value for that uniform, which publishes zero.
+        // mutable because every draw path resolves the table through a const accessor; this is a memo
+        // of data the table and the slot already own, not observable device state.
+        static constexpr u8 NoValueIndex = 0xFFU;
+        mutable std::vector<u8> valueIndices{};
+        // The ShaderSlot::authorUniformsRevision the memo above was built against. 0 means nothing is
+        // cached: no upload ever gets revision 0.
+        mutable u64 cachedAuthorUniformsRevision = 0;
+    };
+    std::unordered_map<u32, ShaderUniformBindingTable> shaderUniformBindings_{};
+    // Shared by uploads and binding writes so neither can produce a revision the other already used.
+    // Monotonic and never reset, so a reused slot or a rewritten key always invalidates a memo.
+    u64 nextShaderUniformRevision_ = 1;
 
     struct EnvironmentMapSlot final {
         BgfxEnvironmentMapResources resources{};

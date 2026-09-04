@@ -480,6 +480,10 @@ $materialsExpected = [ordered]@{
     evidenceCollected       = $true
     maximumSameMaterialDelta = 0
     flatMaterialSpread      = 0
+    # Exact rather than a threshold, and the one field here that survives a negative control:
+    # forcing the device to take uniform values positionally instead of by name leaves
+    # flatMaterialSpread at 0 and moves this to 110.
+    flatMaterialTexelDistance = 0
     evidenceError           = ''
 }
 foreach ($field in $materialsExpected.Keys) {
@@ -499,7 +503,7 @@ if ([int64]$materials.minimumMaterialSeparation -lt 12) {
 }
 Add-Step -Name 'tina_sample_2d_shader_materials' -ExitCode 0 `
     -Detail ("frames=$SampleFrames minimumMaterialSeparation=$($materials.minimumMaterialSeparation) " +
-             "sameMaterialDelta=0 flatSpread=0")
+             "sameMaterialDelta=0 flatSpread=0 flatTexelDistance=0")
 
 # A custom fragment that consumes the engine lighting/normal contract instead of replacing it.
 # normalVsFlatSeparation is deliberately NOT asserted: the sample documents that killing the
