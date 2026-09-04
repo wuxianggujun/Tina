@@ -25,9 +25,10 @@ include("${CMAKE_CURRENT_LIST_DIR}/TinaGameProject.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/TinaProductInstall.cmake")
 
 # Whether this package shipped the asset cooker. A package configured with
-# TINA_BUILD_EXAMPLES=OFF has no tools/ directory and therefore no tina_assetc, so
-# tina_find_assetc() reports that as a package-content problem instead of leaving a caller to
-# discover a missing file. Set before use, since these are plain variables rather than targets.
+# TINA_BUILD_TOOLS=OFF (the default when cross-compiling) has no tools/ directory and therefore
+# no tina_assetc, so tina_find_assetc() reports that as a package-content problem instead of
+# leaving a caller to discover a missing file. Set before use, since these are plain variables
+# rather than targets.
 set(Tina_WITH_AssetC @TINA_PACKAGE_WITH_ASSETC@)
 set(Tina_ASSETC_HINT_DIR "@PACKAGE_CMAKE_INSTALL_BINDIR@")
 
@@ -126,10 +127,39 @@ endif()
 
 if(@TINA_PACKAGE_WITH_UI_FREETYPE@ AND
    ("UIFreetype" IN_LIST Tina_FIND_COMPONENTS OR tina_load_desktop_bootstrap))
-    if(Tina_FIND_REQUIRED_UIFreetype OR Tina_FIND_REQUIRED_DesktopBootstrap)
-        find_dependency(Freetype)
+    # CONFIG first, MODULE second, because the two disagree about vcpkg and only CONFIG is right
+    # there. vcpkg installs the debug library under debug/lib, and CMake's FindFreetype searches
+    # PATH_SUFFIXES lib only -- so MODULE mode finds release freetype.lib, reports
+    # FREETYPE_LIBRARY_DEBUG-NOTFOUND, and hands a Debug consumer a release import library to link
+    # against a debug CRT. vcpkg's own freetype-targets-debug.cmake carries both configurations.
+    #
+    # In this tree that never showed, because the vcpkg toolchain installs a wrapper that rewrites
+    # find_package(Freetype) into a CONFIG lookup and backfills the module variables. A consumer
+    # configured with CMAKE_PREFIX_PATH alone -- which is what TinaNewProject.cmake generates -- has
+    # no wrapper, so it got the MODULE answer while this tree got the CONFIG one.
+    #
+    # The second effect is the app-local DLL. MODULE mode creates Freetype::Freetype as an
+    # UNKNOWN_LIBRARY whose IMPORTED_LOCATION is the .lib, so $<TARGET_RUNTIME_DLLS> yields nothing
+    # for it and tina_install_product() ships a product missing freetype.dll. The CONFIG target is
+    # SHARED with IMPORTED_LOCATION_<CONFIG> pointing at the DLL, which is what that genex reads.
+    #
+    # MODULE is kept as the fallback rather than dropped: a system-installed FreeType has no
+    # package config file, and its single-configuration layout is the one FindFreetype does handle.
+    #
+    # Both spellings define Freetype::Freetype, so no call site changes. Under CONFIG it is an
+    # INTERFACE target forwarding to the lowercase `freetype` target that holds the locations.
+    #
+    # The CONFIG search uses the lowercase package name on purpose. find_dependency() no-ops
+    # when <Name>_FOUND is already defined, even as FALSE, so a failed `find_package(Freetype
+    # CONFIG)` would make the MODULE fallback never run. `freetype_FOUND` and `Freetype_FOUND`
+    # are different variables; a miss on the first does not poison the second.
+    find_package(freetype CONFIG QUIET)
+    if(freetype_FOUND)
+        set(Freetype_FOUND TRUE)
+    elseif(Tina_FIND_REQUIRED_UIFreetype OR Tina_FIND_REQUIRED_DesktopBootstrap)
+        find_dependency(Freetype MODULE)
     else()
-        find_package(Freetype QUIET)
+        find_package(Freetype MODULE QUIET)
     endif()
     if(Freetype_FOUND)
         include("${CMAKE_CURRENT_LIST_DIR}/TinaUIFreetypeTargets.cmake")

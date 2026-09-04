@@ -1,7 +1,9 @@
 #include <tina/render/RenderDevice.hpp>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <string_view>
 
 namespace Tina::Render {
@@ -51,6 +53,38 @@ nameByteLength(const std::array<char, GpuShaderUniformValue::MaximumNameBytes + 
         }
     }
     return 0;
+}
+
+// Every sampler macro bgfx_shader.sh defines. Matched as whole identifiers, so no prefix ordering is
+// needed: SAMPLER2D cannot swallow the head of SAMPLER2DARRAY. Matching the macro rather than the
+// expanded declaration is deliberate -- the expansion differs per backend and the register only
+// survives in some of them.
+constexpr std::array<std::string_view, 14> kSamplerMacros{
+    "SAMPLER2D",       "SAMPLER3D",        "SAMPLER2DMS",      "SAMPLERCUBE",
+    "SAMPLER2DARRAY",  "SAMPLER2DMSARRAY", "SAMPLERCUBEARRAY", "SAMPLER2DSHADOW",
+    "SAMPLER2DARRAYSHADOW", "SAMPLERCUBESHADOW", "ISAMPLER2D", "USAMPLER2D",
+    "ISAMPLER3D",      "USAMPLER3D"};
+
+[[nodiscard]] constexpr bool isIdentifierChar(char value) noexcept
+{
+    return (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z') ||
+           (value >= '0' && value <= '9') || value == '_';
+}
+
+[[nodiscard]] constexpr bool isSpace(char value) noexcept
+{
+    return value == ' ' || value == '\t' || value == '\r' || value == '\n';
+}
+
+// Advances past whitespace. Newlines count: a declaration may be wrapped, and shaderc's own
+// preprocessor does not care where the line breaks fall.
+[[nodiscard]] constexpr usize skipSpace(std::string_view source, usize index) noexcept
+{
+    while (index < source.size() && isSpace(source[index]))
+    {
+        ++index;
+    }
+    return index;
 }
 
 } // namespace
@@ -166,6 +200,297 @@ Core::Status validateShaderTextureBindingDesc(const GpuShaderTextureBindingDesc&
             }
         }
     }
+    return Core::success();
+}
+
+Core::Result<GpuShaderSamplerDeclarationTable>
+parseShaderSamplerDeclarations(std::string_view source) noexcept
+{
+    GpuShaderSamplerDeclarationTable table{};
+
+    usize index = 0;
+    // Tracks whether the scan is at the start of a line, because a preprocessor line is skipped
+    // whole: `#define MASK SAMPLER2D(s_mask, 2)` declares nothing by itself, and the expansion (if
+    // any) appears where the macro is used.
+    bool atLineStart = true;
+    while (index < source.size())
+    {
+        const char current = source[index];
+        if (current == '\n')
+        {
+            atLineStart = true;
+            ++index;
+            continue;
+        }
+        if (isSpace(current))
+        {
+            ++index;
+            continue;
+        }
+        if (current == '/' && index + 1 < source.size())
+        {
+            if (source[index + 1] == '/')
+            {
+                while (index < source.size() && source[index] != '\n')
+                {
+                    ++index;
+                }
+                continue;
+            }
+            if (source[index + 1] == '*')
+            {
+                index += 2;
+                while (index + 1 < source.size() && !(source[index] == '*' && source[index + 1] == '/'))
+                {
+                    if (source[index] == '\n')
+                    {
+                        atLineStart = true;
+                    }
+                    ++index;
+                }
+                // An unterminated block comment swallows the rest of the source, which is what the
+                // compiler would do too.
+                index = index + 1 < source.size() ? index + 2 : source.size();
+                continue;
+            }
+        }
+        if (atLineStart && current == '#')
+        {
+            // Line continuations included: a macro definition spanning lines is still one directive.
+            while (index < source.size())
+            {
+                if (source[index] == '\n')
+                {
+                    const bool continued = index > 0 && source[index - 1] == '\\';
+                    if (!continued)
+                    {
+                        break;
+                    }
+                }
+                ++index;
+            }
+            continue;
+        }
+        atLineStart = false;
+
+        // Only try to match a macro at an identifier boundary, so `MY_SAMPLER2D` is not read as a
+        // sampler declaration.
+        const bool atIdentifierBoundary = index == 0 || !isIdentifierChar(source[index - 1]);
+        if (!atIdentifierBoundary || !isIdentifierChar(current))
+        {
+            ++index;
+            continue;
+        }
+
+        // Take the whole identifier first and compare it entire, rather than testing prefixes: a
+        // prefix test would need the macro list sorted longest-first and would read SAMPLER2DSHADOW as
+        // SAMPLER2D followed by junk.
+        usize identifierEnd = index;
+        while (identifierEnd < source.size() && isIdentifierChar(source[identifierEnd]))
+        {
+            ++identifierEnd;
+        }
+        const std::string_view token = source.substr(index, identifierEnd - index);
+
+        std::string_view matched{};
+        for (const std::string_view macro : kSamplerMacros)
+        {
+            if (token == macro)
+            {
+                matched = macro;
+                break;
+            }
+        }
+        if (matched.empty())
+        {
+            // Not a sampler macro, so see whether it names one of the samplers declared so far.
+            for (u8 entry = 0; entry < table.count; ++entry)
+            {
+                GpuShaderSamplerDeclaration& declaration = table.declarations[entry];
+                if (std::string_view{declaration.name.data(), nameByteLength(declaration.name)} == token)
+                {
+                    declaration.referenced = true;
+                    break;
+                }
+            }
+            index = identifierEnd;
+            continue;
+        }
+
+        usize cursor = skipSpace(source, identifierEnd);
+        if (cursor >= source.size() || source[cursor] != '(')
+        {
+            // The macro's own `#define` line is already skipped above, so reaching here means the
+            // token is used as something other than a call. Not an error, just not a declaration.
+            index = identifierEnd;
+            continue;
+        }
+        cursor = skipSpace(source, cursor + 1);
+
+        const usize nameBegin = cursor;
+        if (cursor < source.size() && (source[cursor] == '_' || !((source[cursor] >= '0') && (source[cursor] <= '9'))))
+        {
+            while (cursor < source.size() && isIdentifierChar(source[cursor]))
+            {
+                ++cursor;
+            }
+        }
+        const std::string_view name = source.substr(nameBegin, cursor - nameBegin);
+        if (name.empty())
+        {
+            return Core::failure(RenderErrorCode::InvalidShaderUpload,
+                                 "A sampler declaration has no name");
+        }
+        if (name.size() > GpuShaderTextureValue::MaximumNameBytes)
+        {
+            return Core::failure(RenderErrorCode::InvalidShaderUpload,
+                                 "A sampler name is longer than a texture binding can carry");
+        }
+
+        cursor = skipSpace(source, cursor);
+        if (cursor >= source.size() || source[cursor] != ',')
+        {
+            return Core::failure(RenderErrorCode::InvalidShaderUpload,
+                                 "A sampler declaration is missing its register argument");
+        }
+        cursor = skipSpace(source, cursor + 1);
+
+        const usize registerBegin = cursor;
+        u32 registerValue = 0;
+        while (cursor < source.size() && source[cursor] >= '0' && source[cursor] <= '9')
+        {
+            registerValue = registerValue * 10U + static_cast<u32>(source[cursor] - '0');
+            if (registerValue > GpuShaderTextureStages::MaximumCount)
+            {
+                return Core::failure(RenderErrorCode::InvalidShaderUpload,
+                                     "A sampler declares a register beyond what any renderer can bind");
+            }
+            ++cursor;
+        }
+        if (cursor == registerBegin)
+        {
+            // Fails closed rather than skipping: a macro register is exactly the case where the
+            // cooker cannot prove the stage matches, and silently accepting it would put the
+            // mismatch back on the GPU where nothing reports it.
+            return Core::failure(RenderErrorCode::InvalidShaderUpload,
+                                 "A sampler register must be a decimal literal so the cooker can "
+                                 "check it against the stage the engine will bind");
+        }
+
+        if (table.count >= GpuShaderSamplerDeclarationTable::MaximumCount)
+        {
+            return Core::failure(RenderErrorCode::InvalidShaderUpload,
+                                 "A shader declares more samplers than any renderer can bind");
+        }
+        GpuShaderSamplerDeclaration& entry = table.declarations[table.count];
+        std::copy_n(name.begin(), name.size(), entry.name.begin());
+        entry.stage = static_cast<u8>(registerValue);
+        ++table.count;
+
+        index = cursor;
+    }
+
+    return table;
+}
+
+Core::Status validateAuthorSamplerRegisters(GpuShaderKind kind,
+                                            const GpuShaderSamplerDeclarationTable& declarations) noexcept
+{
+    if (!isSupportedShaderKind(kind))
+    {
+        return Core::failure(RenderErrorCode::InvalidShaderUpload,
+                             "Sampler registers cannot be checked without a supported shader kind");
+    }
+
+    const std::span<const std::string_view> engineNames = GpuShaderTextureStages::engineSamplerNames(kind);
+    const u8 firstAuthorStage = GpuShaderTextureStages::firstAuthorStage(kind);
+    const u8 maximumAuthorCount = GpuShaderTextureStages::maximumAuthorCount(kind);
+
+    u8 authorIndex = 0;
+    std::array<char, 256> message{};
+    for (u8 index = 0; index < declarations.count; ++index)
+    {
+        const GpuShaderSamplerDeclaration& entry = declarations.declarations[index];
+        const usize nameLength = nameByteLength(entry.name);
+        if (nameLength == 0)
+        {
+            return Core::failure(RenderErrorCode::InvalidShaderUpload,
+                                 "A sampler declaration carries an empty name");
+        }
+        const std::string_view name{entry.name.data(), nameLength};
+
+        for (u8 other = 0; other < index; ++other)
+        {
+            const GpuShaderSamplerDeclaration& previous = declarations.declarations[other];
+            if (std::string_view{previous.name.data(), nameByteLength(previous.name)} == name)
+            {
+                return Core::failure(RenderErrorCode::InvalidShaderUpload,
+                                     "A shader declares the same sampler name twice");
+            }
+        }
+
+        const auto engineSlot = std::find(engineNames.begin(), engineNames.end(), name);
+        if (engineSlot != engineNames.end())
+        {
+            // Re-declaring an engine sampler is allowed (the contract header does exactly that), but
+            // only at its own stage: any other register would make the engine's setTexture and the
+            // shader's sample disagree for a texture the author does not even own.
+            const auto expected = static_cast<u8>(engineSlot - engineNames.begin());
+            if (entry.stage != expected)
+            {
+                std::snprintf(message.data(), message.size(),
+                              "Engine sampler '%s' must be declared with register %u, not %u",
+                              name.data(), static_cast<unsigned>(expected),
+                              static_cast<unsigned>(entry.stage));
+                return Core::failure(RenderErrorCode::InvalidShaderUpload, message.data());
+            }
+            continue;
+        }
+
+        if (authorIndex >= maximumAuthorCount)
+        {
+            std::snprintf(message.data(), message.size(),
+                          "A %s shader can declare at most %u samplers of its own, so '%s' could only "
+                          "ever sample an engine texture",
+                          kind == GpuShaderKind::Mesh3D ? "Mesh3D" : "Sprite2D",
+                          static_cast<unsigned>(maximumAuthorCount), name.data());
+            return Core::failure(RenderErrorCode::InvalidShaderUpload, message.data());
+        }
+
+        if (!entry.referenced)
+        {
+            // Not style advice. Every shader compiler drops a sampler that is never sampled, so it is
+            // absent from the reflected list the backend numbers stages from: the sampler after it
+            // moves down one stage and reads the wrong texture, while the source still shows a
+            // perfectly consecutive run of registers. Rejecting it is the only way the author hears
+            // about it before the pixels are wrong.
+            std::snprintf(message.data(), message.size(),
+                          "Sampler '%s' is declared but never sampled, so the compiler drops it and "
+                          "every later sampler shifts down one stage; sample it or remove it",
+                          name.data());
+            return Core::failure(RenderErrorCode::InvalidShaderUpload, message.data());
+        }
+
+        // Positional, and it has to be: the backend assigns stages by walking the reflected sampler
+        // list in order, so the Nth author sampler always lands on firstAuthorStage + N. Requiring
+        // the source to say the same number is what makes the two agree on every backend -- the
+        // cooked binary cannot arbitrate, since GLSL writes register 0 for every sampler and SPIR-V
+        // writes a shifted binding.
+        const auto expected = static_cast<u8>(firstAuthorStage + authorIndex);
+        if (entry.stage != expected)
+        {
+            std::snprintf(message.data(), message.size(),
+                          "Sampler '%s' is declared with register %u but the engine binds a %s "
+                          "shader's sampler number %u at stage %u; declare it as %u",
+                          name.data(), static_cast<unsigned>(entry.stage),
+                          kind == GpuShaderKind::Mesh3D ? "Mesh3D" : "Sprite2D",
+                          static_cast<unsigned>(authorIndex), static_cast<unsigned>(expected),
+                          static_cast<unsigned>(expected));
+            return Core::failure(RenderErrorCode::InvalidShaderUpload, message.data());
+        }
+        ++authorIndex;
+    }
+
     return Core::success();
 }
 

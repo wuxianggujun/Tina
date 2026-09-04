@@ -4448,10 +4448,6 @@ class BgfxRenderDevice final : public IRenderDevice {
         // name globally, so a re-declaration in the custom source resolves to the same handle.
         std::array<bgfx::UniformHandle, 32> engineUniformStorage{};
         usize engineUniformCount = 0;
-        // Per kind, because the engine set that occupies the low stages differs: see the constants in
-        // BgfxCustomShader.hpp.
-        u8 firstAuthorTextureStage = 0;
-        u8 maximumAuthorTextures = 0;
         switch (desc.shaderKind)
         {
         case GpuShaderKind::Sprite2D:
@@ -4461,8 +4457,6 @@ class BgfxRenderDevice final : public IRenderDevice {
                                     sprite2DLightParamsUniform_,  sprite2DNormalParamsUniform_,
                                     sprite2DShadowSegmentsUniform_};
             engineUniformCount = 7;
-            firstAuthorTextureStage = ShaderDetail::Sprite2DEngineTextureStageCount;
-            maximumAuthorTextures = ShaderDetail::Sprite2DMaximumAuthorTextureCount;
             break;
         case GpuShaderKind::Mesh3D:
             vertexShader = opaque3DMrVertexShader_;
@@ -4486,8 +4480,6 @@ class BgfxRenderDevice final : public IRenderDevice {
                 opaque3DPointShadowMatricesUniform_, opaque3DPointShadowParamsUniform_,
                 opaque3DIblParamsUniform_};
             engineUniformCount = 32;
-            firstAuthorTextureStage = ShaderDetail::Mesh3DEngineTextureStageCount;
-            maximumAuthorTextures = ShaderDetail::Mesh3DMaximumAuthorTextureCount;
             break;
         // Invalid is already refused by the shared validateShaderUploadDesc above, so this is
         // unreachable rather than a second policy: keeping a named failure here would put the
@@ -4498,8 +4490,7 @@ class BgfxRenderDevice final : public IRenderDevice {
 
         auto program = ShaderDetail::createCustomFragmentProgram(
             vertexShader, skinnedVertexShader, binary,
-            std::span{engineUniformStorage.data(), engineUniformCount}, firstAuthorTextureStage,
-            maximumAuthorTextures);
+            std::span{engineUniformStorage.data(), engineUniformCount}, desc.shaderKind);
         if (!program)
         {
             return Core::failure(std::move(program.error()));

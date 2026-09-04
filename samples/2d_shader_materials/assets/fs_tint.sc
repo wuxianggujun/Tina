@@ -18,6 +18,13 @@ $input v_texcoord0, v_color0, v_worldPos
 uniform vec4 u_tint;
 uniform vec4 u_uvAdjust;
 
+// The author's own sampler, on top of the engine's s_tex. Register 2 is not a free choice: the
+// Sprite2D engine set occupies stages 0 and 1, so 2 is the first stage an author may use and the
+// cooker rejects any other number. A material that publishes no texture for this sampler gets the
+// engine's 1x1 white fallback, which multiplies to a no-op -- that is what keeps the two materials
+// that do not use a mask looking exactly as they did before this sampler existed.
+SAMPLER2D(s_mask, 2);
+
 void main()
 {
     // UV transform about the centre rather than the origin, so a scale keeps the sprite's own
@@ -26,7 +33,12 @@ void main()
     vec2 uv = centred * u_uvAdjust.z + vec2(0.5, 0.5) + u_uvAdjust.xy;
 
     vec4 base = texture2D(s_tex, uv) * v_color0;
-    vec3 tinted = base.rgb * u_tint.rgb;
+
+    // Sampled at the untransformed UV so the mask is independent of the material's zoom: the mask
+    // used here is a single flat colour, and reading it through the zoomed UV would make a wrong
+    // stage binding indistinguishable from a wrong UV.
+    vec3 mask = texture2D(s_mask, v_texcoord0).rgb;
+    vec3 tinted = base.rgb * u_tint.rgb * mask;
 
     // Swizzle proves the material read the alpha channel of its own value set: two sprites sharing
     // this program but not this number come out with different hues from identical texels.

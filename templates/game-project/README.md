@@ -112,7 +112,7 @@ tina_cook_catalog(mygame
 
 `DESTINATION` 就是内容侧 `contentRoot.resolve("content")` 里的那个字符串，所以 C++ 不用改，`openContent` 里的 cook 段可以直接删掉，只留 bind。
 
-两个前提：cooker 必须存在（`TINA_BUILD_EXAMPLES=OFF` 构建出来的 SDK 不带它，`tina_find_assetc()` 会返回 `TINA_ASSETC-NOTFOUND-NOT-PACKAGED`），以及交叉编译时得用 `TINA_ASSETC_EXECUTABLE` 指向一个宿主机构建——cooker 跑在构建机上，目标架构的版本执行不了。拿不准就先查 `tina_find_assetc()`，不满足就保留启动时 cook。
+两个前提：cooker 必须存在（`TINA_BUILD_TOOLS=OFF` 构建出来的 SDK 不带它，`tina_find_assetc()` 会返回 `TINA_ASSETC-NOTFOUND-NOT-PACKAGED`），以及交叉编译时得用 `TINA_ASSETC_EXECUTABLE` 指向一个宿主机构建——cooker 跑在构建机上，目标架构的版本执行不了。拿不准就先查 `tina_find_assetc()`，不满足就保留启动时 cook。
 
 **recipe 里的平台标签不是移植障碍。** `TargetPlatform` 只有 `Invalid` / `Any` / `WindowsX64` / `LinuxX64`，写不了 `AndroidArm64`。但**加载器从不校验这个字段**——它只出现在 cook 侧代码里，`CatalogFile.cpp` / `CookedAssetFile.cpp` / `AssetSystem.cpp` 一次都不读，只有 `isKnownTargetPlatform` 这个"是不是已知枚举"的检查。要跨平台就写 `platform Any`（`android/app/content/android.recipe` 就是这么做的）；写 `WindowsX64` 也一样能在别处加载。同理，今天没有任何 cooker 设置过压缩 `pixelFormat`，所有纹理都是未压缩 `Rgba8Unorm`，移动端 GPU 也能用。
 

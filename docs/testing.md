@@ -1218,6 +1218,11 @@ out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d_shader_mat
 out\build\windows-msvc-vnext-bgfx-product-2d\bin\Debug\tina_sample_2d_shader_lighting.exe --frames=120
 ```
 
+`flatMaterialTexelDistance == 0` 现在同时是自定义 sampler 的判据：那个 material 在同一 binding key 上发布
+一张 1×1 青色 mask，期望色是 `(0,40,40)` 而非纹素原色。所以这个 0 不只要求 UV 正确，也要求 `s_mask` 绑在
+stage 2；错一格会让 mask 采到全黑，`minimumMaterialSeparation` 掉到 0、这一项变成 26。sampler register 与
+stage 的一致性另有 cook 时检查（`tina_tests --gtest_filter="ShaderSampler*"`，11 个用例），那层不需要 GPU。
+
 `--frames=32` 对 `2d_custom_shader` 已足够（它的证据只需要两相 pinned uniform），另外两个需要 120 帧。
 三者的判据都是**帧内**差分而非跨帧亮度变化：`customSpriteDelta` vs `engineSpriteDelta == 0`、
 `maximumSameMaterialDelta == 0` 与 `flatMaterialSpread == 0` / `flatMaterialTexelDistance == 0`、以及 `normalVsFlatSeparation` /

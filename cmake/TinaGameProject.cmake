@@ -391,7 +391,7 @@ function(tina_find_assetc out_var)
     endif()
     if(DEFINED Tina_WITH_AssetC AND NOT Tina_WITH_AssetC)
         # The package is intact; it was simply built without tools/. Distinguished from a
-        # plain not-found so this reads as "rebuild the SDK with TINA_BUILD_EXAMPLES=ON"
+        # plain not-found so this reads as "rebuild the SDK with TINA_BUILD_TOOLS=ON"
         # rather than "the install is broken".
         set(${out_var} "TINA_ASSETC-NOTFOUND-NOT-PACKAGED" PARENT_SCOPE)
         return()

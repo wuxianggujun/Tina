@@ -77,6 +77,26 @@ option(TINA_BUILD_NETWORK_TLS "Build the private Tina TLS transport adapter (mbe
 option(TINA_BUILD_AUDIO_MINIAUDIO "Build the private vNext miniaudio audio adapter" OFF)
 option(TINA_AUDIO_ENABLE_LIBVORBIS "Enable Ogg Vorbis decoding via libvorbis (optional)" OFF)
 option(TINA_AUDIO_ENABLE_LIBOPUS "Enable Opus decoding via libopus (optional)" OFF)
+# The asset cooker and catalog validator, which the SDK package installs. Separate from
+# TINA_BUILD_EXAMPLES because tina_assetc is part of the SDK, not part of the samples: tying the two
+# together meant the only way to get a cooker into an installed package was to also build twenty
+# sample executables, and a package built without them shipped no cooker at all.
+#
+# Defaulted off when cross-compiling, since these are build-HOST executables: built for Android or
+# wasm they are binaries the build machine cannot run. That is why the Android and wasm
+# configurations turn examples off, and it is the same reason TINA_BGFX_SHADERC_EXECUTABLE exists --
+# a cross build that needs a cooker points TINA_ASSETC_EXECUTABLE at a host build instead.
+#
+# Computed rather than written as a literal, because the default has to follow the toolchain: a
+# hard ON would make every Android and wasm configure build two executables for the wrong
+# architecture, and a hard OFF would take the cooker away from every desktop build that never asks.
+if(CMAKE_CROSSCOMPILING)
+    set(TINA_BUILD_TOOLS_DEFAULT OFF)
+else()
+    set(TINA_BUILD_TOOLS_DEFAULT ON)
+endif()
+option(TINA_BUILD_TOOLS "Build Tina host tools (tina_assetc, tina_catalog_validate)"
+    ${TINA_BUILD_TOOLS_DEFAULT})
 option(TINA_BUILD_BENCHMARKS "Build Tina benchmark executables" OFF)
 option(TINA_ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 option(TINA_AUTOUPDATE_SUBMODULE "Auto Update Github Submodules" OFF)
@@ -330,7 +350,13 @@ endif()
 # it so a game built against an installed SDK can cook at build time instead of at startup.
 # tina_configure_game_sdk_package() only sees targets that already exist, so adding this after it
 # silently produces a package with no cooker in it.
-if (TINA_BUILD_EXAMPLES)
+#
+# Gated on TINA_BUILD_TOOLS alone. Native configures default that option ON, so a desktop
+# examples build still gets the cooker the samples call tina_find_assetc() for. Cross
+# configures default it OFF, so Android and wasm do not compile two host executables for the
+# wrong ABI -- even if someone turns examples on. A cross build that needs a cooker points
+# TINA_ASSETC_EXECUTABLE at a host binary instead.
+if (TINA_BUILD_TOOLS)
     add_subdirectory(tools)
 endif ()
 
@@ -340,8 +366,9 @@ tina_configure_game_sdk_package()
 # The sample gallery's scene library, added outside TINA_BUILD_EXAMPLES on purpose.
 #
 # The Android APK links it while building with TINA_BUILD_EXAMPLES=OFF, and turning that option on for
-# Android is not an option: it would also pull in the twenty gate samples and the host tools, and most of
-# those cannot cross-compile at all -- eight link GLFW, the tools are build-host executables. So the one
+# Android is not an option: it would also pull in the twenty gate samples, and most of those cannot
+# cross-compile at all -- eight link GLFW. Host tools are a separate option (TINA_BUILD_TOOLS),
+# defaulted off when cross-compiling, so they are no longer the reason examples stay off. So the one
 # library that has to be reachable from two very different hosts is added directly, while
 # samples/gallery/platforms/desktop/CMakeLists.txt keeps its desktop executable behind the usual
 # GLFW guard.

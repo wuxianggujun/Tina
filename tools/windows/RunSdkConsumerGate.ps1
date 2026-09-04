@@ -115,7 +115,10 @@ $sdkBuildArguments = @(
 & cmake @sdkBuildArguments
 if($LASTEXITCODE -ne 0) { throw "Tina Game SDK build failed with exit code $LASTEXITCODE" }
 
-& cmake --install $resolvedBuildDirectory --config $Configuration --prefix $installStagingPrefix
+# COMPONENT sdk is the engine package. Without it, cmake --install also copies every
+# sample/editor that this tree happened to build (COMPONENT products), which is not what
+# a consumer prefix is for.
+& cmake --install $resolvedBuildDirectory --config $Configuration --prefix $installStagingPrefix --component sdk
 if($LASTEXITCODE -ne 0) { throw "Tina Game SDK install failed with exit code $LASTEXITCODE" }
 
 $audioMiniaudioEnabled = (Get-CMakeCacheValue "TINA_BUILD_AUDIO_MINIAUDIO") -eq "ON"
@@ -206,6 +209,9 @@ $componentIsolationConfigureArguments = @(
     "-DCMAKE_DISABLE_FIND_PACKAGE_glfw3=TRUE",
     "-DCMAKE_DISABLE_FIND_PACKAGE_bgfx=TRUE",
     "-DCMAKE_DISABLE_FIND_PACKAGE_Freetype=TRUE",
+    # Lowercase too: TinaConfig prefers vcpkg's `freetype` config package over the uppercase
+    # MODULE spelling, and this variable is matched by exact name.
+    "-DCMAKE_DISABLE_FIND_PACKAGE_freetype=TRUE",
     "-DCMAKE_DISABLE_FIND_PACKAGE_miniaudio=TRUE",
     "-DCMAKE_DISABLE_FIND_PACKAGE_Vorbis=TRUE",
     "-DCMAKE_DISABLE_FIND_PACKAGE_Opus=TRUE",

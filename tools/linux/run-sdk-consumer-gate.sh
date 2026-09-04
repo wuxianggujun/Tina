@@ -119,7 +119,7 @@ rm -rf -- "${INSTALL_STAGING_PREFIX}" "${INSTALL_PREFIX}" "${CONSUMER_BUILD_DIRE
 # rules without ever being built, which is how Save and Gameplay broke this gate.
 cmake --build "${BUILD_DIRECTORY}" --config "${CONFIGURATION}" \
   --target tina_sdk_install_artifacts --parallel "${BUILD_JOBS}"
-cmake --install "${BUILD_DIRECTORY}" --config "${CONFIGURATION}" --prefix "${INSTALL_STAGING_PREFIX}"
+cmake --install "${BUILD_DIRECTORY}" --config "${CONFIGURATION}" --prefix "${INSTALL_STAGING_PREFIX}" --component sdk
 AUDIO_MINIAUDIO_ENABLED=OFF
 if [[ "$(cache_value TINA_BUILD_AUDIO_MINIAUDIO)" == "ON" ]]; then
   AUDIO_MINIAUDIO_ENABLED=ON
@@ -204,6 +204,7 @@ cmake \
   -DCMAKE_DISABLE_FIND_PACKAGE_glfw3=TRUE \
   -DCMAKE_DISABLE_FIND_PACKAGE_bgfx=TRUE \
   -DCMAKE_DISABLE_FIND_PACKAGE_Freetype=TRUE \
+  -DCMAKE_DISABLE_FIND_PACKAGE_freetype=TRUE \
   -DCMAKE_DISABLE_FIND_PACKAGE_miniaudio=TRUE \
   -DCMAKE_DISABLE_FIND_PACKAGE_Vorbis=TRUE \
   -DCMAKE_DISABLE_FIND_PACKAGE_Opus=TRUE \

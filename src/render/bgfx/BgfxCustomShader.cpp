@@ -52,20 +52,32 @@ Core::Result<CustomShaderProgram>
 createCustomFragmentProgram(bgfx::ShaderHandle vertexShader, bgfx::ShaderHandle skinnedVertexShader,
                             std::span<const std::byte> fragmentBinary,
                             std::span<const bgfx::UniformHandle> engineUniforms,
-                            u8 firstAuthorTextureStage, u8 maximumAuthorTextures)
+                            GpuShaderKind shaderKind)
 {
     if (!bgfx::isValid(vertexShader) || fragmentBinary.empty())
     {
         return Core::failure(RenderErrorCode::InvalidShaderUpload,
                              "A custom shader program needs a valid engine vertex stage and a binary");
     }
-    // A caller that passes a window running past the hardware limit would assign stages no draw can
-    // bind, which bgfx ignores silently. The two kinds' constants are consistent by construction, so
-    // this only fires on a new kind added without its stage budget.
-    if (static_cast<u16>(firstAuthorTextureStage) + maximumAuthorTextures > MaximumTextureStageCount)
+    if (shaderKind != GpuShaderKind::Sprite2D && shaderKind != GpuShaderKind::Mesh3D)
     {
         return Core::failure(RenderErrorCode::InvalidShaderUpload,
-                             "The author texture stage window runs past what bgfx can bind per draw");
+                             "A custom shader program needs a shader kind to pick its stage window");
+    }
+    const u8 firstAuthorTextureStage = GpuShaderTextureStages::firstAuthorStage(shaderKind);
+    const u8 maximumAuthorTextures = GpuShaderTextureStages::maximumAuthorCount(shaderKind);
+    // The stage numbers above are compile-time constants encoding BGFX_CONFIG_MAX_TEXTURE_SAMPLERS,
+    // which lives in bgfx's private config.h. Checked against the live limit instead of asserted: a
+    // backend reporting fewer samplers than the constants assume would otherwise have the surplus
+    // stages silently ignored at bind time.
+    const bgfx::Caps* caps = bgfx::getCaps();
+    if (caps == nullptr ||
+        static_cast<u16>(firstAuthorTextureStage) + maximumAuthorTextures >
+            caps->limits.maxTextureSamplers)
+    {
+        return Core::failure(RenderErrorCode::InvalidShaderUpload,
+                             "The author texture stage window runs past what this renderer can bind "
+                             "per draw, so the surplus samplers could never be bound");
     }
     if (fragmentBinary.size() > static_cast<usize>((std::numeric_limits<u32>::max)()))
     {

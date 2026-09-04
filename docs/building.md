@@ -71,7 +71,8 @@ powershell -ExecutionPolicy Bypass -File .\tools\docs\CheckDocs.ps1
 | `windows-msvc-vnext-bgfx-ui-freetype` | bgfx + FreeType UI | `tests;platform-glfw;ui-freetype` |
 | `windows-msvc-vnext-audio-miniaudio` | Null + miniaudio adapter | `tests;audio-miniaudio` |
 | `windows-msvc-vnext-audio-miniaudio-codecs` | miniaudio + Vorbis/Opus | 对应 codec features |
-| `windows-msvc-vnext-bgfx-product-2d` | bgfx + Physics2D + FreeType + miniaudio | `tests;platform-glfw;physics2d;ui-freetype;audio-miniaudio` |
+| `windows-msvc-vnext-bgfx-product-2d` | bgfx + Physics2D + FreeType + miniaudio（含 3D 模块；`-2d` 指 Physics2D，不是“只有 2D 渲染”） | `tests;platform-glfw;physics2d;ui-freetype;audio-miniaudio` |
+| `windows-msvc-vnext-sdk` | 同上功能图，但不编示例、编辑器、测试；编 cooker 并装 SDK | `platform-glfw;physics2d;ui-freetype;audio-miniaudio` |
 | `windows-msvc-vnext-network-tls` | Null + mbedTLS TLS transport | `tests;network-tls` |
 | `linux-gcc13-vnext` | Linux Null | `tests` |
 | `linux-gcc13-vnext-physics2d` | Linux Null + Box2D | `tests;physics2d` |
@@ -243,10 +244,22 @@ powershell -NoProfile -ExecutionPolicy Bypass -File `
   -BuildDirectory out\build\windows-msvc-vnext -Configuration Debug
 ```
 
-脚本以 `--parallel 1` 和 `/nr:false` 增量构建 backend-neutral SDK 闭包，将当前配置安装到 build tree
-内的独立 prefix，扫描实际安装头的第三方 include/type token，然后从 `tests/sdk_consumer` 建立独立
-build tree。consumer 的 CMake 入口只有 `find_package(Tina CONFIG REQUIRED)` 和 `Tina::GameSDK`，并拒绝
+脚本以 `--parallel 1` 和 `/nr:false` 增量构建 backend-neutral SDK 闭包，将当前配置以
+`--component sdk` 安装到 build tree 内的独立 prefix（示例和编辑器走 `products` component，
+不会进这个 prefix），扫描实际安装头的第三方 include/type token，然后从 `tests/sdk_consumer`
+建立独立 build tree。consumer 的 CMake 入口只有 `find_package(Tina CONFIG REQUIRED)` 和
+`Tina::GameSDK`，并拒绝
 源码树 `include` 路径或安装 prefix 外的 Tina include。Debug/Release package 必须与 consumer 配置一致。
+
+给游戏项目装一份 SDK（不编示例、编辑器、测试；带 cooker）：
+
+```powershell
+cmake --preset windows-msvc-vnext-sdk
+cmake --build --preset windows-vnext-sdk-debug --target tina_sdk_install_artifacts --parallel 2 -- /nr:false
+cmake --install out\build\windows-msvc-vnext-sdk --config Debug --prefix D:\ProgramData\Tina --component sdk
+```
+
+`--component sdk` 是显式名字，等价于以前的隐式 `Unspecified`。产品可执行文件（示例、编辑器）走 `products` component，这条命令不会装它们。Debug/Release 必须与游戏的配置一致，混装会让 imported target 缺 `IMPORTED_LOCATION`。
 
 PlatformGlfw 安装 consumer 使用独立 prefix/build tree，不污染 Null gate：
 
@@ -784,7 +797,8 @@ x86_64 上均**零 error**；编进去的是真实实现而非空壳 —— `ren
 
 | 选项 | 默认 | 作用 |
 | --- | --- | --- |
-| `TINA_BUILD_EXAMPLES` | 顶层工程 ON | samples 与 `tina_assetc`/`tina_catalog_validate` |
+| `TINA_BUILD_EXAMPLES` | 顶层工程 ON | samples |
+| `TINA_BUILD_TOOLS` | 本机 ON，交叉编译 OFF | `tina_assetc` / `tina_catalog_validate`。SDK 组成部分，不绑 examples。交叉编译默认关，因为这两个是 host 可执行文件 |
 | `TINA_BUILD_TESTING` | ON | GoogleTest targets |
 | `TINA_BUILD_EDITOR` | 顶层工程 ON | gate 整棵 `editor/` 树。**OFF 时 `tina_editor`、`tina_editor_desktop`、`tina_editor_tests`、`tina_editor_app_tests` 完全不存在**；`--target` 写了不存在的名字 CMake 不报错、只是什么都不编译 |
 | `TINA_BUILD_SHADERS` | ON | build-tree shaderc/cooked shader；Null 图可 OFF |

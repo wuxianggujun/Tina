@@ -18,6 +18,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <utility>
 
 namespace Tina::Render {
@@ -626,7 +627,7 @@ struct GpuShaderTextureValue final {
 // can: bgfx allows 16 texture stages per draw, of which the Sprite2D engine set occupies 2 and the
 // Mesh3D set occupies 14. A single limit would either waste Sprite2D's headroom or promise Mesh3D
 // something the hardware cannot do, so the per-kind ceiling is enforced at upload where the kind is
-// known -- see MaximumAuthorTextureCount in the bgfx backend.
+// known -- see GpuShaderTextureStages::maximumAuthorCount below.
 struct GpuShaderTextureBindingDesc final {
     static constexpr u8 MaximumValueCount = 8;
 
@@ -638,6 +639,126 @@ struct GpuShaderTextureBindingDesc final {
 // state, so it is the backend's own binding table that decides it.
 [[nodiscard]] Core::Status
 validateShaderTextureBindingDesc(const GpuShaderTextureBindingDesc& desc) noexcept;
+
+// Which hardware texture stage an author's sampler occupies.
+//
+// This is not a convention the engine is free to choose: on D3D11 and Vulkan the stage index *is* the
+// register the shader samples from, baked into the compiled binary by the sampler's declaration
+// (`SAMPLER2D(name, N)` expands to `register(tN)`). The engine binds with setTexture(stage, ...) and
+// the backend feeds that stage straight to PSSetShaderResources, so a stage that disagrees with the
+// declared register samples a different slot -- silently, and with no error anywhere.
+//
+// OpenGL is the reason this has to be pinned rather than read back: its SAMPLER2D macro discards the
+// register entirely and bgfx assigns units by stage instead, so a shader whose numbers are wrong
+// draws correctly there and wrongly on D3D11. Cooked binaries cannot arbitrate either -- the GLSL
+// backend writes regIndex 0 for every sampler, and SPIR-V writes a shifted binding.
+//
+// So the numbers below are the single source of truth, shared by the cooker (which rejects a source
+// whose declarations disagree) and the backend (which assigns these stages at upload). They live in
+// this public header rather than beside the backend because the cooker must agree with them without
+// depending on a renderer.
+namespace GpuShaderTextureStages {
+// bgfx binds at most this many textures per draw (BGFX_CONFIG_MAX_TEXTURE_SAMPLERS).
+inline constexpr u8 MaximumCount = 16;
+
+// Stages the engine's own programs bind on each path, and therefore the first stage an author's
+// sampler may occupy. Sprite2D binds s_tex and s_normalTex; Mesh3D binds base colour,
+// metallic-roughness, normal, the CSM atlas, three IBL maps, the spot shadow map and six
+// point-shadow faces.
+//
+// These are not derived from the setTexture call sites. A new engine sampler must be added here too,
+// and getting it wrong is not a compile error: the author's texture would overwrite the engine's
+// stage while the engine's sampler read the author's texture.
+inline constexpr u8 Sprite2DEngineCount = 2;
+inline constexpr u8 Mesh3DEngineCount = 14;
+
+// The first stage available to an author, per kind. An author's Nth declared sampler must be
+// declared with register N + firstAuthorStage(kind).
+[[nodiscard]] constexpr u8 firstAuthorStage(GpuShaderKind kind) noexcept
+{
+    return kind == GpuShaderKind::Mesh3D ? Mesh3DEngineCount : Sprite2DEngineCount;
+}
+
+// What each kind can offer an author. Sprite2D is capped by the binding table rather than by the
+// hardware: 14 stages are free but a desc carries 8, and advertising more than a caller can express
+// would make the surplus unbindable.
+[[nodiscard]] constexpr u8 maximumAuthorCount(GpuShaderKind kind) noexcept
+{
+    const u8 free = static_cast<u8>(MaximumCount - firstAuthorStage(kind));
+    return free < GpuShaderTextureBindingDesc::MaximumValueCount
+               ? free
+               : GpuShaderTextureBindingDesc::MaximumValueCount;
+}
+
+static_assert(Sprite2DEngineCount < MaximumCount);
+static_assert(Mesh3DEngineCount < MaximumCount);
+static_assert(maximumAuthorCount(GpuShaderKind::Sprite2D) == 8);
+static_assert(maximumAuthorCount(GpuShaderKind::Mesh3D) == 2);
+
+// The engine's own sampler names, in stage order: index i is the stage that name must be declared
+// with. Carried here so the cooker can tell an engine sampler from an author's one without parsing
+// the engine include, and so a source that redeclares an engine sampler at the wrong register is
+// rejected instead of silently stealing the stage.
+inline constexpr std::array<std::string_view, Sprite2DEngineCount> Sprite2DEngineNames{
+    "s_tex", "s_normalTex"};
+inline constexpr std::array<std::string_view, Mesh3DEngineCount> Mesh3DEngineNames{
+    "s_texColor",        "s_texMR",           "s_texNormal",       "s_csmAtlas",
+    "s_iblDiffuse",      "s_iblSpecular",     "s_iblBrdf",         "s_spotShadowMap",
+    "s_pointShadowPosX", "s_pointShadowNegX", "s_pointShadowPosY", "s_pointShadowNegY",
+    "s_pointShadowPosZ", "s_pointShadowNegZ"};
+
+[[nodiscard]] constexpr std::span<const std::string_view>
+engineSamplerNames(GpuShaderKind kind) noexcept
+{
+    return kind == GpuShaderKind::Mesh3D ? std::span<const std::string_view>{Mesh3DEngineNames}
+                                         : std::span<const std::string_view>{Sprite2DEngineNames};
+}
+} // namespace GpuShaderTextureStages
+
+// One sampler declaration recovered from a shader's *source*, in declaration order.
+//
+// Source and not the cooked binary: bgfx::UniformInfo carries no register, the GLSL backend writes
+// regIndex 0 for every sampler and the SPIR-V one writes a shifted binding, so the compiled artefact
+// cannot say which register the author asked for. The source can.
+struct GpuShaderSamplerDeclaration final {
+    std::array<char, GpuShaderTextureValue::MaximumNameBytes + 1> name{};
+    u8 stage = 0;
+    // Whether the name appears anywhere in the source besides its own declaration.
+    //
+    // Load-bearing, not diagnostic: every shader compiler drops a sampler that is never sampled, and
+    // the backend assigns stages by walking what reflection reports. A declared-but-unused sampler
+    // therefore shifts every sampler after it down one stage, so the shader samples the wrong slot
+    // while its declarations look perfectly consecutive.
+    bool referenced = false;
+
+    [[nodiscard]] friend constexpr bool operator==(const GpuShaderSamplerDeclaration&,
+                                                  const GpuShaderSamplerDeclaration&) = default;
+};
+
+struct GpuShaderSamplerDeclarationTable final {
+    static constexpr u8 MaximumCount = GpuShaderTextureStages::MaximumCount;
+
+    std::array<GpuShaderSamplerDeclaration, MaximumCount> declarations{};
+    u8 count = 0;
+};
+
+// Scans `SAMPLER*(name, register)` out of shader source, skipping line and block comments and any
+// preprocessor line. Includes are *not* expanded: the engine set is known from
+// GpuShaderTextureStages, so a source that only `#include`s the engine header yields an empty table
+// and passes, while one that declares its own samplers has them all in its own text.
+//
+// A sampler whose register is not a decimal literal (a macro, say) fails rather than being skipped:
+// an unreadable register is exactly the case where the engine cannot prove the stage agrees.
+[[nodiscard]] Core::Result<GpuShaderSamplerDeclarationTable>
+parseShaderSamplerDeclarations(std::string_view source) noexcept;
+
+// Rejects a declaration table whose registers disagree with the stages the backend will assign: an
+// engine sampler must sit at its own index, and the author's Nth sampler at
+// firstAuthorStage(kind) + N. Failure messages name the register the source should have used,
+// because the author's only other way to find it is to read the backend.
+[[nodiscard]] Core::Status
+validateAuthorSamplerRegisters(GpuShaderKind kind,
+                               const GpuShaderSamplerDeclarationTable& declarations) noexcept;
 
 // Interleaved P3_N3_T4_UV2 floats (12 per vertex) + U16 triangle indices.
 // tangent.xyz is non-zero and tangent.w is exactly -1 or +1.

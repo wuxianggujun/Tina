@@ -285,7 +285,7 @@ per-pointer 表解决了"读不到第 2..8 根手指"，但**绑定**侧还有�
 
 ## 怎么构建这个样例
 
-`TINA_BUILD_EXAMPLES=ON` 在交叉构建上不可用：根 CMakeLists 把 `add_subdirectory(samples)` 和 `add_subdirectory(tools)` 绑在同一个 `if` 里，而 tools 是 build-host 可执行文件——根 CMakeLists 自己关于 Android 的注释已经写明这个耦合。
+`tools/` 只看 `TINA_BUILD_TOOLS`，交叉编译默认 OFF，所以 wasm/Android 不会把 `tina_assetc` 编成目标架构的二进制。`wasm32-emscripten` preset 两项都是 OFF。下面这条命令开 examples 是为了编 `samples/web`；cooker 若需要，用 `TINA_ASSETC_EXECUTABLE` 指向宿主机构建。
 
 当前可用的构建方式（样例现在链接 bgfx，见上面的 bgfx 通路一节）：
 
@@ -295,7 +295,8 @@ cmake -S . -B out/build/wasm32-web-sample -G Ninja \
   -DVCPKG_TARGET_TRIPLET=wasm32-emscripten \
   -DVCPKG_CHAINLOAD_TOOLCHAIN_FILE=D:/Programs/emsdk/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake \
   -DCMAKE_CXX_FLAGS=-msimd128 -DCMAKE_C_FLAGS=-msimd128 \
-  -DTINA_BUILD_EXAMPLES=ON -DTINA_BUILD_RENDER_BGFX=ON -DTINA_BUILD_SHADERS=OFF \
+  -DTINA_BUILD_EXAMPLES=ON -DTINA_BUILD_TOOLS=OFF \
+  -DTINA_BUILD_RENDER_BGFX=ON -DTINA_BUILD_SHADERS=OFF \
   -DTINA_BGFX_SHADERC_EXECUTABLE=<host 构建树>/bin/Debug/shaderc.exe \
   -DTINA_RENDER_BGFX_MOBILE_SHADERS=ON
 cmake --build out/build/wasm32-web-sample

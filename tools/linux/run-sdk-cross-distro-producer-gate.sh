@@ -114,7 +114,7 @@ cmake --preset linux-gcc13-vnext \
 cmake --build "${BUILD_DIRECTORY}" \
   --target tina_sdk_install_artifacts \
   --parallel "${BUILD_JOBS}"
-cmake --install "${BUILD_DIRECTORY}" --prefix "${STAGING_PREFIX}"
+cmake --install "${BUILD_DIRECTORY}" --prefix "${STAGING_PREFIX}" --component sdk
 
 cmake \
   "-DTINA_SDK_INCLUDE_DIR=${STAGING_PREFIX}/include" \

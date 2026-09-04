@@ -367,6 +367,25 @@ Sprite2D item 可携带 optional packet-local `shader` 与 `shaderUniforms` ref�
 重定义报成编译错误，而不是运行期错乱。varying 行必须是源文件第一行：`shaderc` 在预处理器之前从
 原文扫描 `$input`。
 
+作者也可以声明自己的 sampler，但**register 不是自由选择**：`SAMPLER2D(name, N)` 的 N 就是硬件 stage，
+D3D11/Vulkan 把它烘进二进制，而 GL 的宏直接丢掉 N、改由引擎按 stage 绑定 texture unit。所以引擎与作者
+必须写同一个数：Sprite2D 引擎集占 0..1，作者第 N 个 sampler 必须落在 `2 + N`；Mesh3D 占 0..13，起点是 14
+（`GpuShaderTextureStages`，`include/tina/render/RenderDevice.hpp`，cooker 与 backend 共用这一份）。
+
+这条规则由 cook 时的源码检查把关（`parseShaderSamplerDeclarations` + `validateAuthorSamplerRegisters`，
+`tools/assetc` 在跑 shaderc **之前**调用），不能靠 cooked 二进制仲裁：三个 profile 的 `regIndex` 语义互不相同
+——GLSL 全写 0，SPIR-V 写 +2 偏移的 binding，只有 DXBC 是真 stage。检查覆盖三类“编译全绿但 GPU 采错槽”的
+缺陷，每一条都实测过：
+
+- register 与 stage 不一致（错一格就让 shader 采到引擎的贴图，或采到未绑定的槽——D3D11 上读回全黑）。
+- 声明顺序与 register 顺序不一致。**DXBC 的 uniform 表按 register 排序，SPIR-V 保持源码顺序**，所以乱序声明
+  在 D3D11 上正确、在 Vulkan 上两张贴图互换。位置式规则同时锁死了这一点。
+- 声明了但从未采样。编译器会把它整条丢掉，backend 按反射表顺序编号 stage，于是它后面每个 sampler 都下移
+  一格——而源码里 register 看起来完全连续。这是唯一一类“源码自洽却仍然错”的形状，所以 cook 直接拒绝。
+
+register 写成宏（非十进制字面量）同样拒绝：那正是 cooker 无法证明两边一致的情况，放过去等于把不一致丢回
+GPU。未 bind 的作者 sampler 拿到引擎的 1×1 白色兜底，而不是继承上一次 draw 的贴图。
+
 作者 uniform 只有 `vec4`，按**名字**匹配，因为 cooked 二进制里的 uniform 顺序是 shaderc 细节。
 每 draw 由 backend 重发当前 binding 的值；调用方停更就会冻在上次发布的数。引擎 lighting
 （`u_spriteLightParams` 等）仍由 Sprite2D pass 提交，但自定义 fragment 不必消费它们——
@@ -388,6 +407,13 @@ SDK 包把 `tina_sprite2d.sh` / `tina_mesh3d.sh` / varying def 装到 `Tina_SHAD
 “换一张图”，并额外把其中一个 material 的两个 value **倒序**发布来锁定“按名匹配”：`flatMaterialTexelDistance == 0`
 要求它落在自己 UV 指向的纹素上，而按位取值会让 UV 出界钳到别的边缘色——同样平坦，所以
 `flatMaterialSpread` 单独看对这类缺陷是失明的。
+
+同一个判据也是自定义 sampler 的像素证据：`fs_tint.sc` 声明 `SAMPLER2D(s_mask, 2)`，只有那个 material 在
+**同一个 binding key** 上发布一张 1×1 青色贴图（`setShaderTextureBinding`），于是它的期望色从 `(255,40,40)`
+变成 `(0,40,40)`，`flatMaterialTexelDistance == 0` 仍然成立。另外两个 material 不发布贴图，拿白色兜底，
+像素不变。已实测的反向对照：把 backend 的 stage 故意加一，stage 2 就没人绑，mask 采到全黑，整帧 material
+区域塌成同色，`minimumMaterialSeparation` 从 43 掉到 0、`flatMaterialTexelDistance` 从 0 变成 26。
+青色而非灰度：错绑时红色通道从 0 变回 255，是整条通道的差，而不是一个可能被容差吞掉的偏移。
 
 一个 value binding 表带着“我的哪个值喂它那个 author uniform”的解析结果（`ShaderUniformBindingTable`
 的 `valueIndices`），按 `ShaderSlot::authorUniformsRevision` 作废。缓存放在 binding 表侧而不是 program

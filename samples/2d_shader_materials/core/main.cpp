@@ -122,6 +122,22 @@ constexpr std::array<TextureQuadrantColor, 4> QuadrantColors{{
 
 using TexturePixels = std::array<std::byte, static_cast<usize>(TextureExtent) * TextureExtent * 4U>;
 
+// The author sampler's own texture: 1x1 cyan, so it zeroes red and passes green and blue through.
+// One texel and one flat colour on purpose -- the claim under test is which *stage* the sampler was
+// bound at, and a patterned mask would let a UV defect look like a stage defect.
+//
+// Cyan rather than a grey scale factor because the expected colour then differs from the unmasked one
+// in a whole channel: material 2's texel is (255, 40, 40) and the masked result is (0, 40, 40). A
+// sampler bound to the wrong stage reads the engine's albedo (or the white fallback) instead, and
+// either way red comes back non-zero.
+constexpr std::string_view MaskSamplerName = "s_mask";
+constexpr std::array<u8, 4> MaskPixel{0, 255, 255, 255};
+
+// The masked material is the single-texel zoom one, whose evidence is already exact rather than
+// approximate: its region is one flat colour, so multiplying by the mask moves that colour to another
+// exact value instead of widening a tolerance.
+constexpr u32 MaskedMaterialIndex = MaterialCount - 1U;
+
 [[nodiscard]] TexturePixels makeQuadrantTexture() noexcept
 {
     TexturePixels pixels{};
@@ -243,6 +259,11 @@ struct LifecycleCounters final {
     u32 shaderPayloadBytes = 0;
     bool shaderRetired = false;
     bool textureRetired = false;
+    // One texture publish per frame, on the masked material's key only, plus one at onEnter -- the
+    // same cadence as the uniform half, because bgfx keeps stage bindings across submits just as it
+    // keeps uniform values.
+    u64 maskTexturePublishes = 0;
+    bool maskTextureRetired = false;
     // Smallest separation between any two distinct materials, and largest delta between two sprites
     // that share one. A working per-material uniform binding makes the first large and the second
     // near zero; a device that leaked values across keys would collapse the first to zero.
@@ -584,6 +605,12 @@ class ShaderMaterialsState final : public Tina::IGameState {
             static_cast<void>(device.setShaderUniformBinding(
                 material.uniformBindingKey, Tina::Render::GpuShaderUniformBindingDesc{}));
         }
+        // The texture half of the key is cleared separately: the two halves clear independently by
+        // design, so clearing the values above leaves this one still naming a texture about to be
+        // retired.
+        static_cast<void>(device.setShaderTextureBinding(
+            Materials[MaskedMaterialIndex].uniformBindingKey,
+            Tina::Render::GpuShaderTextureBindingDesc{}));
         if (shaderBound_)
         {
             static_cast<void>(device.setShaderBinding(ShaderBindingKey, Tina::Render::GpuShaderId{}));
@@ -606,6 +633,15 @@ class ShaderMaterialsState final : public Tina::IGameState {
                 counters_->textureRetired = true;
             }
             texture_ = Tina::Render::GpuTextureId{};
+        }
+        if (maskTexture_)
+        {
+            Tina::Render::FramePin completion{};
+            if (device.retireTexture2D(maskTexture_, completion))
+            {
+                counters_->maskTextureRetired = true;
+            }
+            maskTexture_ = Tina::Render::GpuTextureId{};
         }
     }
 
@@ -747,6 +783,30 @@ class ShaderMaterialsState final : public Tina::IGameState {
             return Tina::Core::failure(std::move(bindingKey.error()));
         }
         textureBindingKey_ = *bindingKey;
+
+        // Same sampler state as the albedo above, for the same reason: with one texel it cannot blur,
+        // but Clamp/Point keeps the mask's sampled value exactly the authored bytes.
+        const std::array<Tina::Render::Texture2DUploadLevel, 1> maskLevels{{
+            {.width = 1, .height = 1, .bytes = std::as_bytes(std::span{MaskPixel})},
+        }};
+        auto maskUploaded = device.createTexture2D(Tina::Render::Texture2DUploadDesc{
+            .format = Tina::Render::GpuTextureFormat::Rgba8Unorm,
+            .colorSpace = Tina::Render::GpuTextureColorSpace::Linear,
+            .sampler =
+                {
+                    .wrapU = Tina::Render::GpuTextureWrapMode::Clamp,
+                    .wrapV = Tina::Render::GpuTextureWrapMode::Clamp,
+                    .minFilter = Tina::Render::GpuTextureFilterMode::Point,
+                    .magFilter = Tina::Render::GpuTextureFilterMode::Point,
+                    .mipFilter = Tina::Render::GpuTextureMipFilterMode::None,
+                },
+            .levels = std::span{maskLevels},
+        });
+        if (!maskUploaded)
+        {
+            return Tina::Core::failure(std::move(maskUploaded.error()));
+        }
+        maskTexture_ = *maskUploaded;
         return Tina::Core::success();
     }
 
@@ -809,6 +869,25 @@ class ShaderMaterialsState final : public Tina::IGameState {
             }
             ++counters_->uniformPublishes;
         }
+
+        // Only the masked material publishes a texture, and it publishes it under the same key as its
+        // numbers: the two halves of one binding key are what makes a material one thing. The other two
+        // materials leave the sampler unset and get the engine's white fallback, which is why their
+        // expected pixels are unchanged by the sampler's existence -- if an unset sampler inherited the
+        // previous draw's texture instead, the interleaved sprite order would make those two materials
+        // change colour depending on what was drawn before them.
+        Tina::Render::GpuShaderTextureValue mask{};
+        std::copy_n(MaskSamplerName.begin(), MaskSamplerName.size(), mask.name.begin());
+        mask.texture = maskTexture_;
+        const std::array textures{mask};
+        if (auto status = device.setShaderTextureBinding(
+                Materials[MaskedMaterialIndex].uniformBindingKey,
+                Tina::Render::GpuShaderTextureBindingDesc{.values = textures});
+            !status)
+        {
+            return status;
+        }
+        ++counters_->maskTexturePublishes;
         return Tina::Core::success();
     }
 
@@ -940,11 +1019,21 @@ class ShaderMaterialsState final : public Tina::IGameState {
         // just measuring flatness is what makes the reversed publish order load-bearing: swap that
         // material's two values and the zoom is replaced by an off-texture UV that clamps to some
         // other edge texel -- equally flat, different colour.
+        //
+        // The mask multiplies in here too: this material is the one that publishes a cyan texture for
+        // the author's own sampler, so the expected colour is its texel times that mask. That is what
+        // makes the sampler's *stage* load-bearing -- bound anywhere but stage 2 the shader reads the
+        // engine albedo or the white fallback, red stays 255 instead of 0, and this distance jumps to
+        // about 85.
         const TextureQuadrantColor& expected = QuadrantColors[0];
+        const auto maskChannel = [](u8 channel, usize component) noexcept {
+            return static_cast<u8>((static_cast<u32>(channel) * MaskPixel[component]) / 255U);
+        };
         counters_->flatMaterialTexelDistance =
-            meanSeparation(firstMeans[MaterialCount - 1U],
-                           RegionMean{.red = expected.red, .green = expected.green,
-                                      .blue = expected.blue});
+            meanSeparation(firstMeans[MaskedMaterialIndex],
+                           RegionMean{.red = maskChannel(expected.red, 0U),
+                                      .green = maskChannel(expected.green, 1U),
+                                      .blue = maskChannel(expected.blue, 2U)});
         counters_->evidenceCollected = true;
     }
 
@@ -962,6 +1051,9 @@ class ShaderMaterialsState final : public Tina::IGameState {
     LifecycleCounters* counters_ = nullptr;
     Tina::Render::GpuShaderId shader_{};
     Tina::Render::GpuTextureId texture_{};
+    // No frame-resource ref and no binding key of its own: an author sampler's texture travels in the
+    // shader's own binding table, so the draw never names it.
+    Tina::Render::GpuTextureId maskTexture_{};
     u64 textureBindingKey_ = TextureBindingKeyUnused;
     bool shaderBound_ = false;
     mutable Tina::Samples::SampleSpriteFrameResource textureResource_{};
@@ -1043,6 +1135,11 @@ void writeCounters(Tina::Core::JsonWriter& writer, const LifecycleCounters& coun
     writer.member("evidenceError", counters.evidenceError.has_value()
                                        ? errorCodeName(counters.evidenceError->code)
                                        : std::string{});
+    // Appended after the existing keys rather than beside the related ones: the gate reads this object
+    // by name, but its key order is a published shape, so inserting in the middle would change every
+    // recorded output for no gain.
+    writer.member("maskTexturePublishes", counters.maskTexturePublishes);
+    writer.member("maskTextureRetired", counters.maskTextureRetired);
 }
 
 [[nodiscard]] int runSample(int argumentCount, char** arguments)
@@ -1081,7 +1178,10 @@ void writeCounters(Tina::Core::JsonWriter& writer, const LifecycleCounters& coun
         counters.uniformPublishes != expectedPublishes || counters.stateEnters != 1 ||
         counters.stateExits != 1 || counters.applicationShutdowns != 1 ||
         counters.shaderBlobCount == 0 || !counters.shaderRetired || !counters.textureRetired ||
-        !evidenceAccepted(counters, options.targetFrameCount))
+        // One per frame plus one at onEnter, on one key rather than every material's: the texture half
+        // of a binding key is re-published on the same cadence as the value half.
+        counters.maskTexturePublishes != options.targetFrameCount + 1U ||
+        !counters.maskTextureRetired || !evidenceAccepted(counters, options.targetFrameCount))
     {
         {
             Tina::Core::JsonWriter writer(std::cerr);

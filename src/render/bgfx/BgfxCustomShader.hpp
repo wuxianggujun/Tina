@@ -70,33 +70,14 @@ inline constexpr u16 MaximumReflectedUniformCount = 64;
 static_assert(GpuShaderUniformBindingDesc::MaximumValueCount <= MaximumReflectedUniformCount);
 inline constexpr u16 MaximumAuthorUniformCount = GpuShaderUniformBindingDesc::MaximumValueCount;
 
-// bgfx binds at most this many textures per draw (BGFX_CONFIG_MAX_TEXTURE_SAMPLERS). Every stage an
-// author uses has to come out of what the engine set leaves free, which is why the author ceiling is
-// per-kind rather than one number.
-inline constexpr u8 MaximumTextureStageCount = 16;
-
-// Stages the engine itself binds on each path, and therefore the first stage an author's sampler can
-// occupy. Sprite2D binds s_tex and s_normalTex; Mesh3D binds base colour, metallic-roughness, normal,
-// the CSM atlas, three IBL maps, the spot shadow map and six point-shadow faces.
+// The stage budget lives in GpuShaderTextureStages (tina/render/RenderDevice.hpp), not here. It has
+// to be shared with the asset cooker, which rejects a source whose sampler registers disagree with
+// the stages this backend will bind them to -- and the cooker cannot depend on a renderer.
 //
-// These are not derived from the setTexture call sites, so a new engine sampler must be added here
-// too. Getting that wrong is not silent: an author texture would overwrite the engine's stage and the
-// engine sampler would read the author's texture, which the assertion below cannot catch but any
-// pixel criterion on the affected path will.
-inline constexpr u8 Sprite2DEngineTextureStageCount = 2;
-inline constexpr u8 Mesh3DEngineTextureStageCount = 14;
-
-// What each kind can physically offer an author. Sprite2D is capped by the desc rather than by the
-// hardware: 14 stages are free but a binding table carries 8, and advertising more than a caller can
-// express would make the surplus unbindable.
-static_assert(Sprite2DEngineTextureStageCount < MaximumTextureStageCount);
-static_assert(Mesh3DEngineTextureStageCount < MaximumTextureStageCount);
-inline constexpr u8 Sprite2DMaximumAuthorTextureCount =
-    (std::min)(static_cast<u8>(MaximumTextureStageCount - Sprite2DEngineTextureStageCount),
-               GpuShaderTextureBindingDesc::MaximumValueCount);
-inline constexpr u8 Mesh3DMaximumAuthorTextureCount =
-    (std::min)(static_cast<u8>(MaximumTextureStageCount - Mesh3DEngineTextureStageCount),
-               GpuShaderTextureBindingDesc::MaximumValueCount);
+// GpuShaderTextureStages::MaximumCount encodes BGFX_CONFIG_MAX_TEXTURE_SAMPLERS, which lives in
+// bgfx's private src/config.h and so cannot be asserted from here. createCustomFragmentProgram
+// checks it against bgfx::getCaps()->limits.maxTextureSamplers instead, where a config change or a
+// backend with a smaller limit fails the upload rather than binding past the end of the stage table.
 
 // Consumes no shader handle: vertexShader and skinnedVertexShader stay owned by the caller, and the
 // returned programs own only the fragment shader created internally. bgfx destroys a program's
@@ -112,15 +93,18 @@ inline constexpr u8 Mesh3DMaximumAuthorTextureCount =
 // handle identity rather than by name because bgfx dedupes uniforms by name hash globally, which
 // makes the handle the exact identity of a name.
 //
-// firstAuthorTextureStage and maximumAuthorTextures come from the caller because they are properties
-// of the engine program being linked against, not of the author's binary: pass the pair belonging to
-// desc.shaderKind. Author samplers are assigned consecutive stages from the first, in reflection
-// order, and the count is enforced here so a sampler that could never be bound is refused at upload
-// instead of silently reading whatever the engine left in that stage.
+// shaderKind decides the author stage window through GpuShaderTextureStages: author samplers get
+// consecutive stages from firstAuthorStage(kind), in reflection order, and more of them than
+// maximumAuthorCount(kind) is refused rather than left reading whatever the engine put in that stage.
+//
+// Reflection order is the same order the cooker validated the declared registers in, which is what
+// makes the assigned stage equal the register the binary samples. The cooker is the only thing
+// enforcing that equality -- reflection here cannot see a register, so a binary cooked by some other
+// tool could still disagree.
 [[nodiscard]] Core::Result<CustomShaderProgram>
 createCustomFragmentProgram(bgfx::ShaderHandle vertexShader, bgfx::ShaderHandle skinnedVertexShader,
                             std::span<const std::byte> fragmentBinary,
                             std::span<const bgfx::UniformHandle> engineUniforms,
-                            u8 firstAuthorTextureStage, u8 maximumAuthorTextures);
+                            GpuShaderKind shaderKind);
 
 } // namespace Tina::Render::Bgfx::ShaderDetail

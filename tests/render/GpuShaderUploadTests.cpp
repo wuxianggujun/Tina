@@ -515,4 +515,207 @@ TEST(NullRenderDeviceShaderTest, ValueAndTextureHalvesOfOneKeyClearIndependently
     EXPECT_EQ(zeroKey.error().code, Render::RenderErrorCode::InvalidShaderUpload);
 }
 
+// Name of the declaration at `index`, as a view over the fixed-size array.
+[[nodiscard]] std::string_view
+declaredName(const Render::GpuShaderSamplerDeclarationTable& table, Core::usize index)
+{
+    return std::string_view{table.declarations[index].name.data()};
+}
+
+TEST(ShaderSamplerParseTest, ReadsNameAndRegisterInDeclarationOrder)
+{
+    constexpr std::string_view source = R"(SAMPLER2D(s_tex, 0);
+SAMPLER2DSHADOW( s_shadow , 3 );
+SAMPLERCUBE(s_env,4);
+)";
+    auto table = Render::parseShaderSamplerDeclarations(source);
+    ASSERT_TRUE(table.has_value());
+    ASSERT_EQ(table->count, 3U);
+    EXPECT_EQ(declaredName(*table, 0), "s_tex");
+    EXPECT_EQ(table->declarations[0].stage, 0U);
+    // Whitespace around either argument is the author's business, not a different declaration.
+    EXPECT_EQ(declaredName(*table, 1), "s_shadow");
+    EXPECT_EQ(table->declarations[1].stage, 3U);
+    EXPECT_EQ(declaredName(*table, 2), "s_env");
+    EXPECT_EQ(table->declarations[2].stage, 4U);
+}
+
+TEST(ShaderSamplerParseTest, IgnoresCommentsPreprocessorLinesAndLongerIdentifiers)
+{
+    constexpr std::string_view source = R"(// SAMPLER2D(s_commented, 9);
+/* SAMPLER2D(s_blocked, 8);
+   still inside the block */
+#define MY_MASK SAMPLER2D(s_defined, 7)
+#include <tina_sprite2d.sh>
+int MY_SAMPLER2D = 0;
+SAMPLER2D(s_real, 2);
+)";
+    auto table = Render::parseShaderSamplerDeclarations(source);
+    ASSERT_TRUE(table.has_value());
+    // Only the one real declaration: an include is not expanded (the engine set is known from
+    // GpuShaderTextureStages) and a macro body declares nothing where it is defined.
+    ASSERT_EQ(table->count, 1U);
+    EXPECT_EQ(declaredName(*table, 0), "s_real");
+    EXPECT_EQ(table->declarations[0].stage, 2U);
+}
+
+TEST(ShaderSamplerParseTest, RejectsARegisterThatIsNotADecimalLiteral)
+{
+    // Fails closed rather than skipping: an unreadable register is exactly the case where the cooker
+    // cannot prove the declaration matches the stage the engine binds.
+    auto macroRegister = Render::parseShaderSamplerDeclarations("SAMPLER2D(s_mask, MASK_SLOT);");
+    ASSERT_FALSE(macroRegister.has_value());
+    EXPECT_EQ(macroRegister.error().code, Render::RenderErrorCode::InvalidShaderUpload);
+
+    auto missingRegister = Render::parseShaderSamplerDeclarations("SAMPLER2D(s_mask);");
+    ASSERT_FALSE(missingRegister.has_value());
+    EXPECT_EQ(missingRegister.error().code, Render::RenderErrorCode::InvalidShaderUpload);
+
+    auto beyondHardware = Render::parseShaderSamplerDeclarations("SAMPLER2D(s_mask, 64);");
+    ASSERT_FALSE(beyondHardware.has_value());
+    EXPECT_EQ(beyondHardware.error().code, Render::RenderErrorCode::InvalidShaderUpload);
+}
+
+TEST(ShaderSamplerRegisterTest, AcceptsEngineSamplersFollowedByConsecutiveAuthorStages)
+{
+    auto table = Render::parseShaderSamplerDeclarations(
+        "SAMPLER2D(s_tex, 0); SAMPLER2D(s_normalTex, 1); SAMPLER2D(s_mask, 2); SAMPLER2D(s_glow, 3);"
+        "void main() { gl_FragColor = texture2D(s_mask, uv) * texture2D(s_glow, uv); }");
+    ASSERT_TRUE(table.has_value());
+    EXPECT_TRUE(
+        Render::validateAuthorSamplerRegisters(Render::GpuShaderKind::Sprite2D, *table).has_value());
+
+    // An empty table is the common case: a shader that only includes the contract header declares no
+    // samplers of its own and must still cook.
+    EXPECT_TRUE(Render::validateAuthorSamplerRegisters(Render::GpuShaderKind::Sprite2D,
+                                                       Render::GpuShaderSamplerDeclarationTable{})
+                    .has_value());
+}
+
+TEST(ShaderSamplerRegisterTest, RejectsAnAuthorSamplerThatSkipsTheFirstFreeStage)
+{
+    // Stage 2 is the first stage a Sprite2D author may use, so a shader declaring 3 would be bound at
+    // 2 by the backend and sample whatever the engine left there. This is the defect the check exists
+    // for: it compiles on every profile and is only wrong on the GPU.
+    auto table =
+        Render::parseShaderSamplerDeclarations("SAMPLER2D(s_mask, 3); vec4 c = texture2D(s_mask, uv);");
+    ASSERT_TRUE(table.has_value());
+    auto status = Render::validateAuthorSamplerRegisters(Render::GpuShaderKind::Sprite2D, *table);
+    ASSERT_FALSE(status.has_value());
+    EXPECT_EQ(status.error().code, Render::RenderErrorCode::InvalidShaderUpload);
+    // The message has to name the register the author should have written: the only other way to find
+    // it is to read the backend.
+    EXPECT_NE(status.error().message.find("declare it as 2"), std::string::npos);
+}
+
+TEST(ShaderSamplerRegisterTest, RejectsAnEngineSamplerRedeclaredAtTheWrongRegister)
+{
+    auto table = Render::parseShaderSamplerDeclarations(
+        "SAMPLER2D(s_normalTex, 5); vec4 c = texture2D(s_normalTex, uv);");
+    ASSERT_TRUE(table.has_value());
+    auto status = Render::validateAuthorSamplerRegisters(Render::GpuShaderKind::Sprite2D, *table);
+    ASSERT_FALSE(status.has_value());
+    EXPECT_EQ(status.error().code, Render::RenderErrorCode::InvalidShaderUpload);
+    EXPECT_NE(status.error().message.find("register 1"), std::string::npos);
+}
+
+TEST(ShaderSamplerRegisterTest, CountsEngineSamplersOutOfTheAuthorSequence)
+{
+    // The engine sampler sits between the author's two, which must not consume an author slot: the
+    // backend subtracts engine uniforms by handle before assigning stages, so s_glow is still the
+    // author's second sampler and belongs at 3.
+    auto table = Render::parseShaderSamplerDeclarations(
+        "SAMPLER2D(s_mask, 2); SAMPLER2D(s_tex, 0); SAMPLER2D(s_glow, 3);"
+        "vec4 c = texture2D(s_mask, uv) + texture2D(s_glow, uv);");
+    ASSERT_TRUE(table.has_value());
+    EXPECT_TRUE(
+        Render::validateAuthorSamplerRegisters(Render::GpuShaderKind::Sprite2D, *table).has_value());
+}
+
+TEST(ShaderSamplerRegisterTest, RejectsADeclaredButNeverSampledSampler)
+{
+    // The compiler drops s_unused, so the backend numbers s_used at stage 2 while the source says 3:
+    // the shader samples whatever the engine last left at 2. Every register in this source is
+    // consecutive and correct-looking, which is why a register-only check would pass it.
+    auto table = Render::parseShaderSamplerDeclarations(
+        "SAMPLER2D(s_unused, 2); SAMPLER2D(s_used, 3); vec4 c = texture2D(s_used, uv);");
+    ASSERT_TRUE(table.has_value());
+    ASSERT_EQ(table->count, 2U);
+    EXPECT_FALSE(table->declarations[0].referenced);
+    EXPECT_TRUE(table->declarations[1].referenced);
+
+    auto status = Render::validateAuthorSamplerRegisters(Render::GpuShaderKind::Sprite2D, *table);
+    ASSERT_FALSE(status.has_value());
+    EXPECT_EQ(status.error().code, Render::RenderErrorCode::InvalidShaderUpload);
+    EXPECT_NE(status.error().message.find("never sampled"), std::string::npos);
+
+    // An unused *engine* sampler is fine: the engine set is subtracted by handle, so it never occupies
+    // an author slot whether the author samples it or not.
+    auto engineOnly = Render::parseShaderSamplerDeclarations(
+        "SAMPLER2D(s_tex, 0); SAMPLER2D(s_mask, 2); vec4 c = texture2D(s_mask, uv);");
+    ASSERT_TRUE(engineOnly.has_value());
+    EXPECT_TRUE(Render::validateAuthorSamplerRegisters(Render::GpuShaderKind::Sprite2D, *engineOnly)
+                    .has_value());
+}
+
+TEST(ShaderSamplerRegisterTest, RejectsAuthorSamplersDeclaredOutOfRegisterOrder)
+{
+    // Both registers are in the free window and neither is duplicated, but the order disagrees with
+    // the order the backend assigns stages in. Measured, not assumed: a DXBC uniform table is sorted
+    // by register while SPIR-V keeps source order, so this source binds correctly on D3D11 and
+    // swaps the two textures on Vulkan.
+    auto table = Render::parseShaderSamplerDeclarations(
+        "SAMPLER2D(s_high, 3); SAMPLER2D(s_low, 2);"
+        "vec4 c = texture2D(s_high, uv) + texture2D(s_low, uv);");
+    ASSERT_TRUE(table.has_value());
+    auto status = Render::validateAuthorSamplerRegisters(Render::GpuShaderKind::Sprite2D, *table);
+    ASSERT_FALSE(status.has_value());
+    EXPECT_EQ(status.error().code, Render::RenderErrorCode::InvalidShaderUpload);
+    EXPECT_NE(status.error().message.find("declare it as 2"), std::string::npos);
+}
+
+TEST(ShaderSamplerRegisterTest, AppliesTheMesh3DStageWindowAndCeiling)
+{
+    // Mesh3D's engine set occupies 0..13, so an author's first sampler is 14 -- the same source that
+    // is correct for Sprite2D is wrong here, which is why the check takes the kind.
+    auto sprite2DShaped =
+        Render::parseShaderSamplerDeclarations("SAMPLER2D(s_mask, 2); vec4 c = texture2D(s_mask, uv);");
+    ASSERT_TRUE(sprite2DShaped.has_value());
+    auto wrongKind =
+        Render::validateAuthorSamplerRegisters(Render::GpuShaderKind::Mesh3D, *sprite2DShaped);
+    ASSERT_FALSE(wrongKind.has_value());
+    EXPECT_NE(wrongKind.error().message.find("declare it as 14"), std::string::npos);
+
+    auto mesh3DShaped = Render::parseShaderSamplerDeclarations(
+        "SAMPLER2D(s_mask, 14); SAMPLER2D(s_glow, 15);"
+        "vec4 c = texture2D(s_mask, uv) + texture2D(s_glow, uv);");
+    ASSERT_TRUE(mesh3DShaped.has_value());
+    EXPECT_TRUE(
+        Render::validateAuthorSamplerRegisters(Render::GpuShaderKind::Mesh3D, *mesh3DShaped).has_value());
+
+    // Two is all Mesh3D has: bgfx binds 16 textures per draw and the engine set holds 14.
+    auto overCeiling = Render::parseShaderSamplerDeclarations(
+        "SAMPLER2D(s_mask, 14); SAMPLER2D(s_glow, 15); SAMPLER2D(s_extra, 16);"
+        "vec4 c = texture2D(s_mask, uv) + texture2D(s_glow, uv) + texture2D(s_extra, uv);");
+    ASSERT_TRUE(overCeiling.has_value());
+    auto status = Render::validateAuthorSamplerRegisters(Render::GpuShaderKind::Mesh3D, *overCeiling);
+    ASSERT_FALSE(status.has_value());
+    EXPECT_EQ(status.error().code, Render::RenderErrorCode::InvalidShaderUpload);
+}
+
+TEST(ShaderSamplerRegisterTest, RejectsADuplicateSamplerNameAndAnUnsupportedKind)
+{
+    auto table = Render::parseShaderSamplerDeclarations(
+        "SAMPLER2D(s_mask, 2); SAMPLER2D(s_mask, 3); vec4 c = texture2D(s_mask, uv);");
+    ASSERT_TRUE(table.has_value());
+    auto duplicate = Render::validateAuthorSamplerRegisters(Render::GpuShaderKind::Sprite2D, *table);
+    ASSERT_FALSE(duplicate.has_value());
+    EXPECT_EQ(duplicate.error().code, Render::RenderErrorCode::InvalidShaderUpload);
+
+    auto invalidKind = Render::validateAuthorSamplerRegisters(
+        Render::GpuShaderKind::Invalid, Render::GpuShaderSamplerDeclarationTable{});
+    ASSERT_FALSE(invalidKind.has_value());
+    EXPECT_EQ(invalidKind.error().code, Render::RenderErrorCode::InvalidShaderUpload);
+}
+
 } // namespace Tina::Tests

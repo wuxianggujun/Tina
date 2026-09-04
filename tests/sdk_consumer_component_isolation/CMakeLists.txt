@@ -13,7 +13,11 @@ else()
     project(TinaSdkComponentIsolation LANGUAGES NONE)
 endif()
 
-set(tina_disabled_dependencies glfw3 bgfx Freetype miniaudio Vorbis Opus OpusFile)
+# Both spellings of the FreeType package, because CMAKE_DISABLE_FIND_PACKAGE_<name> matches the
+# name exactly and TinaConfig tries lowercase `freetype` (vcpkg's config package) before the
+# uppercase MODULE fallback. Listing only one leaves the other reachable, which would let the
+# dependency this probe is meant to exclude resolve anyway.
+set(tina_disabled_dependencies glfw3 bgfx Freetype freetype miniaudio Vorbis Opus OpusFile)
 if(NOT TINA_EXPECT_TRACE_TRACY)
     list(APPEND tina_disabled_dependencies Threads)
 endif()

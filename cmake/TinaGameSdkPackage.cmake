@@ -12,6 +12,17 @@ function(tina_configure_game_sdk_target target export_name)
 endfunction()
 
 function(tina_configure_game_sdk_package)
+    # Names the component every install rule below lands in. The SDK and the products
+    # (tina_install_product() uses COMPONENT products) were already installable separately, but
+    # only because the SDK fell into CMake's implicit "Unspecified" default -- so the separation
+    # worked while being invisible in the source, and `cmake --install --component Unspecified` was
+    # the undocumented way to get an SDK without the samples.
+    #
+    # Set once here rather than repeated on ~39 install() calls: a per-rule COMPONENT that someone
+    # forgets to add on a new rule silently drops that file out of the component, which yields an
+    # incomplete package that installs without error.
+    set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "sdk")
+
     add_library(tina_game_sdk INTERFACE)
     add_library(Tina::GameSDK ALIAS tina_game_sdk)
     target_compile_features(tina_game_sdk INTERFACE cxx_std_23)
@@ -393,11 +404,11 @@ function(tina_configure_game_sdk_package)
     # that performs it lived only in this tree's build directory. That is what forces
     # templates/game-project to cook at startup instead.
     #
-    # Guarded on the target existing rather than on an option, because tools/ is only added
-    # under TINA_BUILD_EXAMPLES -- an unguarded rule would fail to configure in exactly the
-    # SDK-packaging case this exists for. A package built with examples off therefore ships no
-    # cooker, and TINA_PACKAGE_WITH_ASSETC records which kind of package this is so a consumer
-    # gets a named error rather than a missing file.
+    # Guarded on the target existing rather than on TINA_BUILD_TOOLS, because that option is not
+    # the only thing that decides: a cross build forces it off, since the cooker is a build-host
+    # executable. An unguarded rule would then fail to configure for Android and wasm.
+    # TINA_PACKAGE_WITH_ASSETC records which kind of package this is, so a consumer of one built
+    # without a cooker gets a named error rather than a missing file.
     #
     # Deliberately not an exported IMPORTED target: a consumer runs this by path, and an
     # exported executable in TinaTargets.cmake would make find_package(Tina) fail outright on

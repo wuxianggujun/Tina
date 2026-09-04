@@ -3,6 +3,7 @@
 #include <tina/asset/AssetErrors.hpp>
 #include <tina/core/io/ReadFile.hpp>
 #include <tina/core/io/WriteFile.hpp>
+#include <tina/render/RenderDevice.hpp>
 
 #include "core/io/PathUtil.hpp"
 
@@ -440,6 +441,36 @@ Core::Result<ShaderCompileResult> compileShaderPayload(const ShaderCompileReques
     {
         return Core::failure(Core::CoreErrorCode::InvalidArgument,
                              "shader compile requires a supported shader kind");
+    }
+
+    // Before shaderc, not after: a sampler whose declared register disagrees with the stage the
+    // engine binds compiles cleanly on every profile and is only wrong on the GPU. Cooking it and
+    // reporting nothing would ship a shader that samples an engine texture on D3D11 and Vulkan while
+    // looking correct on GL, which is the one failure no test on this host can see.
+    {
+        auto source = Core::readFile(
+            Core::Detail::pathToUtf8(request.sourcePath),
+            Core::ReadFileConfig{.maxBytes = AssetFormat::ShaderWire::MaxBlobBytes,
+                                 .memoryResource = std::pmr::new_delete_resource()});
+        if (!source)
+        {
+            return Core::failure(std::move(source.error()));
+        }
+        const std::string_view sourceText{reinterpret_cast<const char*>(source->data()), source->size()};
+        auto declarations = Render::parseShaderSamplerDeclarations(sourceText);
+        if (!declarations)
+        {
+            return Core::failure(
+                Core::Error{Asset::AssetErrorCode::ShaderCompileFailed, declarations.error().message});
+        }
+        const Render::GpuShaderKind renderKind =
+            request.shaderKind == AssetFormat::ShaderKind::Mesh3D ? Render::GpuShaderKind::Mesh3D
+                                                                  : Render::GpuShaderKind::Sprite2D;
+        if (auto checked = Render::validateAuthorSamplerRegisters(renderKind, *declarations); !checked)
+        {
+            return Core::failure(
+                Core::Error{Asset::AssetErrorCode::ShaderCompileFailed, checked.error().message});
+        }
     }
 
     std::vector<ProfileSpec> specs;

@@ -165,6 +165,19 @@
       }
     },
     {
+      "name": "windows-msvc-vnext-sdk",
+      "displayName": "Windows x64 vNext SDK only (no samples, editor or tests)",
+      "inherits": "windows-msvc-vnext-bgfx-product-2d",
+      "binaryDir": "${sourceDir}/out/build/windows-msvc-vnext-sdk",
+      "cacheVariables": {
+        "TINA_BUILD_EXAMPLES": "OFF",
+        "TINA_BUILD_TESTING": "OFF",
+        "TINA_BUILD_EDITOR": "OFF",
+        "TINA_BUILD_TOOLS": "ON",
+        "VCPKG_MANIFEST_FEATURES": "platform-glfw;physics2d;ui-freetype;audio-miniaudio"
+      }
+    },
+    {
       "name": "windows-msvc-vnext-ui-freetype",
       "displayName": "Windows x64 vNext UI FreeType adapter (MSVC 2026 + C++23)",
       "inherits": "windows-msvc-vnext",
@@ -339,6 +352,7 @@
         "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "D:/Programs/emsdk/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake",
         "TINA_BUILD_EXAMPLES": "OFF",
         "TINA_BUILD_TESTING": "OFF",
+        "TINA_BUILD_TOOLS": "OFF",
         "TINA_BUILD_LEGACY": "OFF",
         "TINA_BUILD_RENDER_BGFX": "OFF",
         "TINA_BUILD_SHADERS": "OFF",
@@ -472,6 +486,18 @@
       "name": "windows-vnext-ui-freetype-debug",
       "configurePreset": "windows-msvc-vnext-ui-freetype",
       "configuration": "Debug",
+      "jobs": 2
+    },
+    {
+      "name": "windows-vnext-sdk-debug",
+      "configurePreset": "windows-msvc-vnext-sdk",
+      "configuration": "Debug",
+      "jobs": 2
+    },
+    {
+      "name": "windows-vnext-sdk-release",
+      "configurePreset": "windows-msvc-vnext-sdk",
+      "configuration": "Release",
       "jobs": 2
     },
     {

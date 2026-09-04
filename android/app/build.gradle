@@ -92,6 +92,11 @@ android {
                 // wrong dependencies.
                 def cmakeArguments = ['-DTINA_BUILD_TESTING=OFF',
                                       '-DTINA_BUILD_EXAMPLES=OFF',
+                                      // Host tools (tina_assetc) cannot run when built for Android.
+                                      // TINA_BUILD_TOOLS already defaults off under CMAKE_CROSSCOMPILING;
+                                      // stated so a later change to that default cannot silently
+                                      // start compiling two host executables for the wrong ABI.
+                                      '-DTINA_BUILD_TOOLS=OFF',
                                       '-DTINA_BUILD_BENCHMARKS=OFF',
                                       '-DTINA_BUILD_DOCS=OFF',
                                       '-DTINA_BUILD_PLATFORM_GLFW=OFF',
